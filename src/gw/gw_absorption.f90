@@ -88,6 +88,7 @@ contains
     use gw_velocity_sub, only: calc_velocity_mtxel
     use gw_mtxel_sub,    only: calc_mtxel
     use gw_epsilon_sub,  only: build_gminus
+    use communication,   only: comm_summation
     implicit none
     type(s_dft_system),    intent(in)    :: system
     type(s_parallel_info), intent(in)    :: info
@@ -103,6 +104,9 @@ contains
     integer,    intent(in)  :: nomega
     real(8),    intent(in)  :: omega_grid(nomega), eta
     complex(8), intent(out) :: eps_macro(nomega)
+    ! local_only: distribute the BZ k-sum over info%icomm_k (every rank owns a
+    ! k-share, computed locally from the replicated orbitals), then reduce.
+    logical,    optional,  intent(in) :: local_only
 
     real(8),    parameter   :: occ_thr = 1.0d-6, denom_tiny = 1.0d-8
     complex(8), parameter   :: zi = (0.0d0, 1.0d0)
@@ -111,17 +115,25 @@ contains
     real(8),    allocatable :: dwp(:), delp(:)
     integer,    allocatable :: iGm(:)
     complex(8), allocatable :: Bw(:), Aw(:,:), Atw(:,:), chi0b(:,:,:)
+    complex(8), allocatable :: Bg(:), Ag(:,:), Atg(:,:), chi0bg(:,:,:)
     complex(8), allocatable :: epsb(:,:), zwork(:)
     integer,    allocatable :: ipiv(:), bidx(:)
     integer :: no, nk, ik, iv, ic, ig, jg, ipair, npair, nfill, iw, im
-    integer :: nb, a, b, lwork, linfo
+    integer :: nb, a, b, lwork, linfo, ik_lo, ik_hi
     real(8) :: omega, inv_omega, fv, fc, de
     complex(8) :: zw, pole, hv, wgt, zlfe
+    logical :: ll
 
     no = system%no;  nk = system%nk;  im = 1
+    ll = .false.;  if (present(local_only)) ll = local_only
     ! BZ k-sum factor 1/(N_k*Omega) (same as the Fock rnk in gw_sigma_x); the
     ! per-cell M and v_cv carry no 1/N_k, so the mesh factor is explicit here.
     omega = abs(system%det_a);  inv_omega = 1.0d0/(dble(nk)*omega)
+    if (ll) then
+      ik_lo = info%ik_s;  ik_hi = info%ik_e   ! this rank's k-share
+    else
+      ik_lo = 1;          ik_hi = nk          ! single rank: whole BZ
+    end if
 
     allocate(iGm(ng));  call build_gminus(ng, gvec, iGm)
     allocate(Bw(nomega), Aw(ng,nomega), Atw(ng,nomega), chi0b(ng,ng,nomega))
@@ -140,11 +152,12 @@ contains
 !$omp end parallel do
 
     ! ---- accumulate head/wing/body over the BZ at q=0 (ikq=ik) ----
-    do ik = 1, nk
+    do ik = ik_lo, ik_hi
       allocate(vmat(3,no,no))
       call calc_velocity_mtxel(system, info, mg, stencil, srg, spsi, ik, ispin, vmat)
       allocate(mtxel(ng,no,no))
-      call calc_mtxel(system, info, mg, lg, spsi, gvec, ng, ik, ik, ispin, no, no, mtxel)
+      call calc_mtxel(system, info, mg, lg, spsi, gvec, ng, ik, ik, ispin, no, no, mtxel, &
+                      local_only=ll)
 
       npair = 0
       do iv = 1, no
@@ -212,6 +225,17 @@ contains
       end if
       deallocate(vmat, mtxel)
     end do  ! ik
+
+    ! ---- reduce the per-rank k-shares over icomm_k (parallel mode) ----
+    if (ll) then
+      allocate(Bg(nomega), Ag(ng,nomega), Atg(ng,nomega), chi0bg(ng,ng,nomega))
+      call comm_summation(Bw,   Bg,   nomega,        info%icomm_k)
+      call comm_summation(Aw,   Ag,   ng*nomega,     info%icomm_k)
+      call comm_summation(Atw,  Atg,  ng*nomega,     info%icomm_k)
+      call comm_summation(chi0b,chi0bg,ng*ng*nomega, info%icomm_k)
+      Bw = Bg;  Aw = Ag;  Atw = Atg;  chi0b = chi0bg
+      deallocate(Bg, Ag, Atg, chi0bg)
+    end if
 
     ! ---- per-omega: eps00 - wing.body^-1.wing  (body = G,G' /= ig0) ----
     nb = ng - 1
