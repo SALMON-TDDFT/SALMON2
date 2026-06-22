@@ -35,7 +35,7 @@ contains
     type(s_rgrid),         intent(in)    :: mg
     type(s_stencil),       intent(in)    :: stencil
     type(s_sendrecv_grid), intent(inout) :: srg
-    type(s_orbital),       intent(in)    :: spsi
+    type(s_orbital),       intent(inout) :: spsi   ! inout: update_overlap fills the halo
     integer,               intent(in)    :: ik, ispin
     complex(8),            intent(out)   :: vmat(3, system%no, system%no)
 

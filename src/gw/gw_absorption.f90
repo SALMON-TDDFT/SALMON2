@@ -94,7 +94,7 @@ contains
     type(s_rgrid),         intent(in)    :: mg, lg
     type(s_stencil),       intent(in)    :: stencil
     type(s_sendrecv_grid), intent(inout) :: srg
-    type(s_orbital),       intent(in)    :: spsi
+    type(s_orbital),       intent(inout) :: spsi   ! inout: halo update in velocity mtxel
     real(8),    intent(in)  :: esp(system%no, system%nk, system%nspin)
     integer,    intent(in)  :: ng
     real(8),    intent(in)  :: gvec(3,ng), gg(ng)
