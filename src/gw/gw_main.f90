@@ -493,7 +493,8 @@ subroutine main_gw
   ! a standalone deliverable: it returns before the QP/self-energy path.
   ! StageA head = smallest-|q| proxy for q->0.
   ! ----------------------------------------------------------------
-  if (yn_gw_absorption == 'y') then
+  if (yn_gw_absorption == 'y' .or. &
+      (trim(theory) == 'dft_response' .and. yn_out_gw_eps == 'y')) then
     allocate(gvec_ab(3, ngmax_t2), gg_ab(ngmax_t2))
     call build_gvectors(system%primitive_b, epsilon_cutoff, ngmax_t2, &
                         ng_ab, gvec_ab, gg_ab)
