@@ -477,6 +477,8 @@ contains
       & out_rt_energy_step, &
       & yn_out_psi, &
       & yn_out_dos, &
+      & yn_out_gw_eps, &
+      & yn_out_gw_spectral, &
       & yn_out_dos_set_fe_origin, &
       & out_dos_start, &
       & out_dos_end, &
@@ -920,6 +922,8 @@ contains
     out_rt_energy_step  = 10
     yn_out_psi          = 'n'
     yn_out_dos          = 'n'
+    yn_out_gw_eps       = 'n'
+    yn_out_gw_spectral  = 'n'
     yn_out_dos_set_fe_origin = 'n'
     out_dos_start       = -1.d10 / au_energy_ev * uenergy_from_au
     out_dos_end         = +1.d10 / au_energy_ev * uenergy_from_au
@@ -1553,6 +1557,8 @@ contains
     call comm_bcast(out_rt_energy_step  ,nproc_group_global)
     call comm_bcast(yn_out_psi          ,nproc_group_global)
     call comm_bcast(yn_out_dos          ,nproc_group_global)
+    call comm_bcast(yn_out_gw_eps       ,nproc_group_global)
+    call comm_bcast(yn_out_gw_spectral  ,nproc_group_global)
     call comm_bcast(yn_out_dos_set_fe_origin ,nproc_group_global)
     call comm_bcast(out_dos_start       ,nproc_group_global)
     out_dos_start = out_dos_start * uenergy_to_au
@@ -2489,6 +2495,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rt_energy_step', out_rt_energy_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_psi', yn_out_psi
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dos', yn_out_dos
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gw_eps', yn_out_gw_eps
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gw_spectral', yn_out_gw_spectral
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dos_set_fe_origin', yn_out_dos_set_fe_origin
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dos_start', out_dos_start
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dos_end', out_dos_end
@@ -2738,6 +2746,8 @@ contains
     call yn_argument_check(yn_subspace_diagonalization)
     call yn_argument_check(yn_out_psi)
     call yn_argument_check(yn_out_dos)
+    call yn_argument_check(yn_out_gw_eps)
+    call yn_argument_check(yn_out_gw_spectral)
     call yn_argument_check(yn_out_dos_set_fe_origin)
     call yn_argument_check(yn_out_pdos)
     call yn_argument_check(yn_out_dns)

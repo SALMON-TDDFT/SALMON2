@@ -315,6 +315,8 @@ module salmon_global
   integer        :: out_rt_energy_step
   character(1)   :: yn_out_psi
   character(1)   :: yn_out_dos
+  character(1)   :: yn_out_gw_eps      ! &analysis: GW/RPA dielectric eps(w) -> Im eps, n, k, R
+  character(1)   :: yn_out_gw_spectral ! &analysis: spectral function A(k,w) and Im Sigma
   character(1)   :: yn_out_dos_set_fe_origin
   real(8)        :: out_dos_start
   real(8)        :: out_dos_end
