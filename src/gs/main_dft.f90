@@ -21,7 +21,7 @@ subroutine main_dft
 use math_constants, only: pi, zi
 use structures
 use inputoutput
-use salmon_global, only: yn_dc_lcfo_flux
+use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier
 #ifdef USE_EIGENEXA
 use eigenexa_module, only: finalize_eigenexa
 #endif
@@ -141,6 +141,14 @@ nopt_max = 1
 if(yn_opt=='y') call initialization_opt(Miopt,opt,system,flag_opt_conv,nopt_max,ofl)
 
 call timer_end(LOG_INIT_GS)
+
+if(yn_dc == 'y' .and. yn_dc_lcfo_wannier == 'y' .and. dc_lcfo_wannier_import_only_requested()) then
+  if(comm_is_root(nproc_id_global)) &
+    write(*,'(1x,a)') '[DC-LCFO-W90-IMPORT] import-only mode: skip SCF and reuse external Wannier90 outputs'
+  call dc_lcfo_wannier_import_only(dc)
+  call timer_end(LOG_TOTAL)
+  return
+end if
 
 !---------------------------------------- Opt Iteration
 

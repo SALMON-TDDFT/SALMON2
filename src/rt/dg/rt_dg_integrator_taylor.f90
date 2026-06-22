@@ -7,6 +7,7 @@
     use salmon_xc, only: s_xc_functional
     use rt_dg_fragment_types, only: s_dg_fragment_rt, matrix_block_info
     use rt_dg_fragment_ops, only: ensure_nonlocal_pp_matrix_A
+    use rt_dg_plane_wave, only: prepare_local_fragment_pw_blocks
     use misc_routines, only: get_wtime
     use communication, only: comm_get_min, comm_summation
     implicit none
@@ -72,6 +73,9 @@
     if (use_pw_taylor) then
       if (dg_frag%coef_state_block_mode) then
         stop "DG Taylor4-PC PW path does not yet support state-block coefficient ownership"
+      end if
+      if (.not. allocated(dg_frag%fp_local_pw_ids)) then
+        call prepare_local_fragment_pw_blocks(dg_frag)
       end if
       call build_owned_pw_rows_for_taylor()
       nrow_taylor = n + n_pw_owned

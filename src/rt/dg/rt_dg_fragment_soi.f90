@@ -49,7 +49,7 @@ module rt_dg_fragment_soi
   use rt_dg_fragment, only: get_dg_spin_occ_info, copy_periodic_global_scalar_to_rank_buffer, &
                             build_total_potential_grid_with_buffered_hartree
   use rt_dg_fragment_types, only: s_dg_fragment_rt, halo_info, invalidate_coef_exchange_cache
-  use rt_dg_plane_wave, only: init_plane_wave_basis
+  use rt_dg_plane_wave, only: init_plane_wave_basis, initialize_wpw_windows
   use rt_dg_hse_exchange, only: init_hse_ri_data, add_exact_exchange_hse, finalize_hse_ri_data
   use rt_dg_fragment_ops, only: ensure_nonlocal_pp_matrix_A, ensure_overlap_prop_available, &
                                 calculate_microscopic_current_dg, &
@@ -224,7 +224,7 @@ contains
     case('expdiag')
       dg_frag%time_integrator = 5
     case default
-      dg_frag%time_integrator = 3  ! default: RK4 
+      dg_frag%time_integrator = 5  ! default: expdiag
     end select
     
     ! Store fragment geometry information for halo exchange
@@ -365,6 +365,7 @@ contains
     
     ! Initialize plane wave basis if enabled
     call init_plane_wave_basis(dg_frag, system, lg, info)
+    call initialize_wpw_windows(dg_frag, info)
     if (allocated(dg_frag%coef_pw_owner)) deallocate(dg_frag%coef_pw_owner)
     dg_frag%owned_coef_pw_start = 0
     dg_frag%owned_coef_pw_end = -1
@@ -395,7 +396,9 @@ contains
       write(*,'(1x,a,i0)') "  Number of fragments: ", dg_frag%n_frag
       write(*,'(1x,a,i0)') "  States per fragment: ", dg_frag%nstate_frag
       write(*,'(1x,a,i0)') "  Total states: ", dg_frag%nstate_tot
-      write(*,'(1x,a,a)')  "  Time integrator: ", trim(time_integrator_dg_fragment)
+      if (trim(time_integrator_dg_fragment) == 'taylor4pc') then
+        write(*,'(1x,a)')  "  Time integrator: Taylor4 predictor-corrector explicitly selected."
+      end if
       if (dg_frag%use_plane_wave_basis) then
         write(*,'(1x,a,i0)') "  Plane waves added: ", dg_frag%n_plane_waves
         write(*,'(1x,a,f8.4,a)') "  PW cutoff: ", dg_frag%k_cutoff_pw, " a.u.^-1"
@@ -441,6 +444,9 @@ contains
   ! Time evolution using fourth-order Taylor predictor-corrector
   !=======================================================================
 #include "rt_dg_integrator_taylor.f90"
+
+  ! Dense mixed Wannier+BPW-perp helper routines used by expdiag.
+#include "rt_dg_mixed_fsum_diagnose.f90"
 
   ! Time evolution by direct diagonal exponential in local BPW blocks
 #include "rt_dg_integrator_expdiag.f90"
@@ -642,6 +648,28 @@ contains
     if (allocated(dg_frag%coef_pw)) deallocate(dg_frag%coef_pw)
     if (allocated(dg_frag%coef_pw_full_cache)) deallocate(dg_frag%coef_pw_full_cache)
     dg_frag%coef_pw_full_cache_nstate = 0
+    if (allocated(dg_frag%coef_mix)) deallocate(dg_frag%coef_mix)
+    if (allocated(dg_frag%mixed_basis_dim)) deallocate(dg_frag%mixed_basis_dim)
+    if (allocated(dg_frag%mixed_transform)) deallocate(dg_frag%mixed_transform)
+    dg_frag%mixed_basis_ready = .false.
+    dg_frag%mixed_basis_identity_raw = .false.
+    if (allocated(dg_frag%wpw_reduced_dim)) deallocate(dg_frag%wpw_reduced_dim)
+    if (allocated(dg_frag%wpw_reduced_nself)) deallocate(dg_frag%wpw_reduced_nself)
+    if (allocated(dg_frag%wpw_reduced_nkeep)) deallocate(dg_frag%wpw_reduced_nkeep)
+    if (allocated(dg_frag%wpw_reduced_ndrop)) deallocate(dg_frag%wpw_reduced_ndrop)
+    if (allocated(dg_frag%wpw_reduced_nraw)) deallocate(dg_frag%wpw_reduced_nraw)
+    if (allocated(dg_frag%wpw_reduced_H)) deallocate(dg_frag%wpw_reduced_H)
+    if (allocated(dg_frag%wpw_reduced_S)) deallocate(dg_frag%wpw_reduced_S)
+    if (allocated(dg_frag%wpw_reduced_transform)) deallocate(dg_frag%wpw_reduced_transform)
+    if (allocated(dg_frag%wpw_reduced_eval)) deallocate(dg_frag%wpw_reduced_eval)
+    if (allocated(dg_frag%wpw_reduced_evec)) deallocate(dg_frag%wpw_reduced_evec)
+    if (allocated(dg_frag%coef_wpw_self)) deallocate(dg_frag%coef_wpw_self)
+    if (allocated(dg_frag%coef_wpw_neighbor_reduced)) deallocate(dg_frag%coef_wpw_neighbor_reduced)
+    if (allocated(dg_frag%wpw_reproject_prev_coef)) deallocate(dg_frag%wpw_reproject_prev_coef)
+    dg_frag%wpw_reduced_ready = .false.
+    dg_frag%wpw_reduced_max_dim = 0
+    dg_frag%wpw_reduced_coef_initialized = .false.
+    dg_frag%wpw_reproject_prev_valid = .false.
     if (allocated(dg_frag%S_mat_frag_pw)) deallocate(dg_frag%S_mat_frag_pw)
     if (allocated(dg_frag%H_mat_frag_pw)) deallocate(dg_frag%H_mat_frag_pw)
     if (allocated(dg_frag%P_mat_frag_pw)) deallocate(dg_frag%P_mat_frag_pw)
@@ -652,6 +680,15 @@ contains
     if (allocated(dg_frag%P_mat_frag_pw_local)) deallocate(dg_frag%P_mat_frag_pw_local)
     if (allocated(dg_frag%H_mat_pw_diag)) deallocate(dg_frag%H_mat_pw_diag)
     if (allocated(dg_frag%H_mat_pw)) deallocate(dg_frag%H_mat_pw)
+    if (allocated(dg_frag%wpw_window_box_lo)) deallocate(dg_frag%wpw_window_box_lo)
+    if (allocated(dg_frag%wpw_window_box_hi)) deallocate(dg_frag%wpw_window_box_hi)
+    if (allocated(dg_frag%wpw_chi)) deallocate(dg_frag%wpw_chi)
+    if (allocated(dg_frag%wpw_grad_chi)) deallocate(dg_frag%wpw_grad_chi)
+    if (allocated(dg_frag%wpw_S_pp_blocks)) deallocate(dg_frag%wpw_S_pp_blocks)
+    if (allocated(dg_frag%wpw_T_pp_volume_blocks)) deallocate(dg_frag%wpw_T_pp_volume_blocks)
+    if (allocated(dg_frag%wpw_T_pp_interface_blocks)) deallocate(dg_frag%wpw_T_pp_interface_blocks)
+    dg_frag%has_wpw_window = .false.
+    dg_frag%wpw_pp_blocks_ready = .false.
     if (dg_frag%icomm_frag /= COMM_GROUP_NULL) then
       call comm_free_group(dg_frag%icomm_frag)
       dg_frag%icomm_frag = COMM_GROUP_NULL

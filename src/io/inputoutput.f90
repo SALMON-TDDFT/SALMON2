@@ -800,7 +800,7 @@ contains
     yn_predictor_corrector = 'n'
     yn_dg_fragment_rt = 'n'
     yn_dg_length_gauge = 'n'
-    time_integrator_dg_fragment = 'rk4'
+    time_integrator_dg_fragment = 'expdiag'
     yn_plane_wave_basis = 'n'
     n_plane_waves_dg = 50
     k_cutoff_plane_wave = 0.5d0

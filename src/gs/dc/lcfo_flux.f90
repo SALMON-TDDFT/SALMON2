@@ -24,7 +24,7 @@ module lcfo_flux
   implicit none
 
   private
-  public :: dc_lcfo_flux
+  public :: dc_lcfo_flux, dc_lcfo_wannier_import_only, dc_lcfo_wannier_import_only_requested
 
   character(48),parameter :: binfile_wf = "wavefunctions.bin", &
   &                          binfile_rg = "rgrid_index.bin", &
@@ -57,6 +57,433 @@ module lcfo_flux
   integer, parameter :: wannier_cluster_version = 1
 
 contains
+
+  logical function dc_lcfo_wannier_import_only_requested() result(import_only)
+    implicit none
+    character(1024) :: wannier_command, value
+    integer :: env_status
+
+    import_only = .false.
+    wannier_command = ''
+    call get_environment_variable('SALMON_WANNIER90_COMMAND', wannier_command, status=env_status)
+    if(env_status /= 0 .or. len_trim(wannier_command) == 0) return
+    value = adjustl(wannier_command)
+    import_only = trim(value) == 'import_only' .or. trim(value) == 'IMPORT_ONLY' .or. &
+      trim(value) == 'import-only' .or. trim(value) == 'IMPORT-ONLY'
+  end function dc_lcfo_wannier_import_only_requested
+
+  subroutine dc_lcfo_wannier_import_only(dc)
+    use communication, only: comm_sync_all
+    use filesystem, only: get_filehandle
+    use inputoutput, only: au_length_aa
+    use salmon_global, only: base_directory, sysname, wannier_num_wann
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer :: num_bands_chk, num_wann_chk, nstate_tot_file, nspin_file
+    integer :: iunit, iw, istate, nstate_seed, position_available
+    integer, allocatable :: owner_frag(:)
+    real(8), allocatable :: center_aa(:,:), center_bohr(:,:), spread_aa2(:), esp_file(:,:), eval_seed(:,:)
+    complex(8), allocatable :: v_matrix(:,:), aa_global(:,:,:), seed_wannier_to_eigen(:,:)
+    logical :: ok_position
+    character(256) :: filename
+
+    call read_dc_lcfo_esp_from_wavefunctions_import(dc, nstate_tot_file, nspin_file, esp_file)
+
+    if(dc%id_tot == 0) then
+      call read_wannier90_checkpoint_transform_import(dc, num_bands_chk, num_wann_chk, &
+        v_matrix, center_aa, spread_aa2)
+      if(num_wann_chk /= wannier_num_wann) then
+        write(*,'(1x,a,2(a,i0))') "[DC-LCFO-W90-IMPORT] checkpoint dimension mismatch:", &
+          " chk_wann=", num_wann_chk, " expected_wann=", wannier_num_wann
+        stop "DC-LCFO Wannier import-only: checkpoint dimension mismatch"
+      end if
+      if(num_bands_chk > nstate_tot_file) then
+        write(*,'(1x,a,2(a,i0))') "[DC-LCFO-W90-IMPORT] wavefunction seed has too few bands:", &
+          " chk_bands=", num_bands_chk, " seed_states=", nstate_tot_file
+        stop "DC-LCFO Wannier import-only: insufficient wavefunction seed"
+      end if
+
+      allocate(owner_frag(num_wann_chk), center_bohr(3,num_wann_chk))
+      center_bohr(1:3,1:num_wann_chk) = center_aa(1:3,1:num_wann_chk) / au_length_aa
+      do iw=1,num_wann_chk
+        owner_frag(iw) = find_owner_fragment_from_center_import(dc, center_bohr(1:3,iw))
+      end do
+      call rebalance_wannier_owner_fragments_import(dc, center_bohr, owner_frag, num_wann_chk)
+      call read_wannier90_global_rmn_gamma_block_import(dc, num_wann_chk, aa_global, ok_position)
+      if(.not. ok_position) then
+        allocate(aa_global(3,num_wann_chk,num_wann_chk))
+        aa_global = (0d0,0d0)
+      end if
+      position_available = merge(1, 0, ok_position)
+
+      filename = trim(import_run_root_dir())//'data_dcdft/total/'//binfile_w90g
+      iunit = get_filehandle()
+      open(iunit,file=filename,form='unformatted',access='stream',status='replace')
+      write(iunit) wannier90_global_magic, wannier90_global_version
+      write(iunit) num_bands_chk, num_wann_chk, dc%n_frag
+      write(iunit) owner_frag(1:num_wann_chk)
+      write(iunit) center_bohr(1:3,1:num_wann_chk)
+      write(iunit) spread_aa2(1:num_wann_chk)
+      write(iunit) v_matrix(1:num_bands_chk,1:num_wann_chk)
+      write(iunit) position_available
+      write(iunit) aa_global(1:3,1:num_wann_chk,1:num_wann_chk)
+      close(iunit)
+      write(*,'(1x,a,i0,a,a)') "[DC-LCFO-W90-IMPORT] wrote ", num_wann_chk, &
+        " Wannier functions to ", trim(filename)
+
+      if(num_bands_chk /= num_wann_chk) then
+        write(*,'(1x,a,2(a,i0))') "[DC-LCFO-W90-IMPORT] skip flux eigen seed for rectangular transform:", &
+          " bands=", num_bands_chk, " wann=", num_wann_chk
+      else
+        nstate_seed = min(nstate_tot_file, num_wann_chk)
+        allocate(seed_wannier_to_eigen(num_wann_chk,nstate_seed), eval_seed(nstate_seed,nspin_file))
+        do istate=1,nstate_seed
+          do iw=1,num_wann_chk
+            seed_wannier_to_eigen(iw,istate) = conjg(v_matrix(istate,iw))
+          end do
+        end do
+        eval_seed(1:nstate_seed,1:nspin_file) = esp_file(1:nstate_seed,1:nspin_file)
+        filename = trim(import_run_root_dir())//'data_dcdft/total/'//binfile_w90seed
+        iunit = get_filehandle()
+        open(iunit,file=filename,form='unformatted',access='stream',status='replace')
+        write(iunit) wannier_flux_eigen_seed_magic, wannier_flux_eigen_seed_version
+        write(iunit) num_bands_chk, num_wann_chk, nstate_seed, nspin_file, dc%n_frag
+        write(iunit) eval_seed(1:nstate_seed,1:nspin_file)
+        write(iunit) seed_wannier_to_eigen(1:num_wann_chk,1:nstate_seed)
+        close(iunit)
+        write(*,'(1x,a,i0,a,i0,a,a)') "[DC-LCFO-W90-IMPORT] wrote Flux-LCFO eigen seed: states=", &
+          nstate_seed, " wann=", num_wann_chk, " file=", trim(filename)
+        deallocate(seed_wannier_to_eigen, eval_seed)
+      end if
+
+      deallocate(owner_frag, center_bohr, center_aa, spread_aa2, v_matrix, aa_global)
+    end if
+
+    if(allocated(esp_file)) deallocate(esp_file)
+    call comm_sync_all(dc%icomm_tot)
+    if(dc%id_tot == 0) write(*,'(1x,a)') "[DC-LCFO-W90-IMPORT] import-only completed without SCF."
+  end subroutine dc_lcfo_wannier_import_only
+
+  subroutine read_dc_lcfo_esp_from_wavefunctions_import(dc, nstate_tot_file, nspin_file, esp_file)
+    use communication, only: comm_bcast
+    use filesystem, only: get_filehandle
+    use salmon_global, only: base_directory
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(out) :: nstate_tot_file, nspin_file
+    real(8), allocatable, intent(out) :: esp_file(:,:)
+    integer :: iunit, io, n_frag_file, nstate_frag_file
+    integer, allocatable :: n_mat_tmp(:), n_basis_tmp(:,:), index_basis_tmp(:,:,:)
+    real(8), allocatable :: coef_tmp(:,:,:)
+    character(256) :: filename
+
+    nstate_tot_file = 0
+    nspin_file = 0
+    if(dc%id_tot == 0) then
+      filename = trim(import_run_root_dir())//'data_dcdft/fragments/000001/'//binfile_wf
+      iunit = get_filehandle()
+      open(iunit,file=filename,form='unformatted',access='stream',status='old',iostat=io)
+      if(io /= 0) then
+        write(*,'(1x,2a)') "[DC-LCFO-W90-IMPORT] failed to open wavefunction seed: ", trim(filename)
+        stop "DC-LCFO Wannier import-only: missing wavefunctions.bin"
+      end if
+      read(iunit) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
+      allocate(n_mat_tmp(nspin_file), n_basis_tmp(n_frag_file,nspin_file), &
+        index_basis_tmp(nstate_frag_file,n_frag_file,nspin_file), &
+        coef_tmp(nstate_frag_file,nstate_tot_file,nspin_file), &
+        esp_file(nstate_tot_file,nspin_file))
+      read(iunit) n_mat_tmp(1:nspin_file)
+      read(iunit) n_basis_tmp(1:n_frag_file,1:nspin_file)
+      read(iunit) index_basis_tmp(1:nstate_frag_file,1:n_frag_file,1:nspin_file)
+      read(iunit) coef_tmp(1:nstate_frag_file,1:nstate_tot_file,1:nspin_file)
+      read(iunit) esp_file(1:nstate_tot_file,1:nspin_file)
+      close(iunit)
+      write(*,'(1x,a,i0,a,i0)') "[DC-LCFO-W90-IMPORT] read eigenvalue seed: states=", &
+        nstate_tot_file, " nspin=", nspin_file
+      deallocate(n_mat_tmp, n_basis_tmp, index_basis_tmp, coef_tmp)
+    end if
+    call comm_bcast(nstate_tot_file, dc%icomm_tot)
+    call comm_bcast(nspin_file, dc%icomm_tot)
+    if(dc%id_tot /= 0) allocate(esp_file(max(1,nstate_tot_file),max(1,nspin_file)))
+    if(nstate_tot_file > 0 .and. nspin_file > 0) &
+      call comm_bcast(esp_file, dc%icomm_tot)
+  end subroutine read_dc_lcfo_esp_from_wavefunctions_import
+
+  subroutine read_wannier90_checkpoint_transform_import(dc, num_bands_chk, num_wann_chk, &
+      v_matrix, center_aa, spread_aa2)
+    use filesystem, only: get_filehandle
+    use salmon_global, only: base_directory, sysname
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(out) :: num_bands_chk, num_wann_chk
+    complex(8), allocatable, intent(out) :: v_matrix(:,:)
+    real(8), allocatable, intent(out) :: center_aa(:,:), spread_aa2(:)
+    integer :: iunit, io, i, j, k, nkp
+    integer :: num_exclude_bands_chk, num_kpts_chk, nntot_chk
+    integer :: mp_grid_chk(3)
+    integer, allocatable :: exclude_bands_chk(:), ndimwin(:)
+    real(8) :: real_lattice_chk(3,3), recip_lattice_chk(3,3), omega_invariant_chk
+    real(8), allocatable :: kpt_latt_chk(:,:)
+    logical :: have_disentangled_chk
+    logical, allocatable :: lwindow(:,:)
+    complex(8), allocatable :: u_matrix(:,:,:), u_matrix_opt(:,:,:), m_matrix(:,:,:,:)
+    character(256) :: filename
+    character(33) :: header_chk
+    character(20) :: checkpoint_chk
+
+    filename = trim(import_run_root_dir())//'data_dcdft/total/'//trim(sysname)//".chk"
+    iunit = get_filehandle()
+    open(iunit,file=filename,status='old',form='unformatted',iostat=io)
+    if(io /= 0) then
+      write(*,'(1x,2a)') "[DC-LCFO-W90-IMPORT] failed to open checkpoint: ", trim(filename)
+      stop "DC-LCFO Wannier import-only: missing Wannier90 checkpoint"
+    end if
+    read(iunit) header_chk
+    read(iunit) num_bands_chk
+    read(iunit) num_exclude_bands_chk
+    allocate(exclude_bands_chk(max(0,num_exclude_bands_chk)))
+    if(num_exclude_bands_chk > 0) then
+      read(iunit) (exclude_bands_chk(i), i=1,num_exclude_bands_chk)
+    else
+      read(iunit)
+    end if
+    read(iunit) ((real_lattice_chk(i,j), i=1,3), j=1,3)
+    read(iunit) ((recip_lattice_chk(i,j), i=1,3), j=1,3)
+    read(iunit) num_kpts_chk
+    read(iunit) (mp_grid_chk(i), i=1,3)
+    allocate(kpt_latt_chk(3,num_kpts_chk))
+    read(iunit) ((kpt_latt_chk(i,nkp), i=1,3), nkp=1,num_kpts_chk)
+    read(iunit) nntot_chk
+    read(iunit) num_wann_chk
+    read(iunit) checkpoint_chk
+    read(iunit) have_disentangled_chk
+
+    if(num_kpts_chk /= 1) stop "DC-LCFO Wannier import-only: only Gamma checkpoint is supported."
+    if(have_disentangled_chk) then
+      read(iunit) omega_invariant_chk
+      allocate(lwindow(num_bands_chk,num_kpts_chk), ndimwin(num_kpts_chk))
+      read(iunit) ((lwindow(i,nkp), i=1,num_bands_chk), nkp=1,num_kpts_chk)
+      read(iunit) (ndimwin(nkp), nkp=1,num_kpts_chk)
+      allocate(u_matrix_opt(num_bands_chk,num_wann_chk,num_kpts_chk))
+      read(iunit) (((u_matrix_opt(i,j,nkp), i=1,num_bands_chk), j=1,num_wann_chk), nkp=1,num_kpts_chk)
+    end if
+
+    allocate(u_matrix(num_wann_chk,num_wann_chk,num_kpts_chk))
+    read(iunit) (((u_matrix(i,j,k), i=1,num_wann_chk), j=1,num_wann_chk), k=1,num_kpts_chk)
+    allocate(m_matrix(num_wann_chk,num_wann_chk,nntot_chk,num_kpts_chk))
+    read(iunit) ((((m_matrix(i,j,k,nkp), i=1,num_wann_chk), j=1,num_wann_chk), k=1,nntot_chk), nkp=1,num_kpts_chk)
+    allocate(center_aa(3,num_wann_chk), spread_aa2(num_wann_chk))
+    read(iunit) ((center_aa(i,j), i=1,3), j=1,num_wann_chk)
+    read(iunit) (spread_aa2(i), i=1,num_wann_chk)
+    close(iunit)
+
+    allocate(v_matrix(num_bands_chk,num_wann_chk))
+    v_matrix = (0d0,0d0)
+    if(have_disentangled_chk) then
+      v_matrix(1:num_bands_chk,1:num_wann_chk) = matmul(u_matrix_opt(:,:,1), u_matrix(:,:,1))
+    else
+      if(num_bands_chk < num_wann_chk) &
+        stop "DC-LCFO Wannier import-only: invalid checkpoint without disentanglement."
+      v_matrix(1:num_wann_chk,1:num_wann_chk) = u_matrix(:,:,1)
+    end if
+    write(*,'(1x,a,i0,a,i0,a,l1)') "[DC-LCFO-W90-IMPORT] read checkpoint: bands=", &
+      num_bands_chk, " wann=", num_wann_chk, " disentangled=", have_disentangled_chk
+
+    deallocate(exclude_bands_chk, kpt_latt_chk, u_matrix, m_matrix)
+    if(allocated(lwindow)) deallocate(lwindow)
+    if(allocated(ndimwin)) deallocate(ndimwin)
+    if(allocated(u_matrix_opt)) deallocate(u_matrix_opt)
+  end subroutine read_wannier90_checkpoint_transform_import
+
+  subroutine read_wannier90_global_rmn_gamma_block_import(dc, num_wann_expected, aa_global, ok)
+    use filesystem, only: get_filehandle
+    use inputoutput, only: au_length_aa
+    use salmon_global, only: base_directory, sysname
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: num_wann_expected
+    complex(8), allocatable, intent(out) :: aa_global(:,:,:)
+    logical, intent(out) :: ok
+    integer :: iunit, io, num_wann_file, nrpts_file, ir
+    integer :: rvec(3), n, m
+    real(8) :: rx_re, rx_im, ry_re, ry_im, rz_re, rz_im
+    character(256) :: filename, header
+    logical :: exists
+
+    ok = .false.
+    filename = trim(import_run_root_dir())//'data_dcdft/total/'//trim(sysname)//"_r.dat"
+    inquire(file=filename, exist=exists)
+    if(.not. exists) return
+    iunit = get_filehandle()
+    open(iunit,file=filename,status='old',action='read')
+    read(iunit,'(a)',iostat=io) header
+    if(io == 0) read(iunit,*,iostat=io) num_wann_file
+    if(io == 0) read(iunit,*,iostat=io) nrpts_file
+    if(io /= 0 .or. num_wann_file /= num_wann_expected) then
+      close(iunit)
+      return
+    end if
+    allocate(aa_global(3,num_wann_file,num_wann_file))
+    aa_global = (0d0,0d0)
+    do ir=1,nrpts_file*num_wann_file*num_wann_file
+      read(iunit,*,iostat=io) rvec(1:3), n, m, rx_re, rx_im, ry_re, ry_im, rz_re, rz_im
+      if(io /= 0) exit
+      if(any(rvec(1:3) /= 0)) cycle
+      if(n < 1 .or. n > num_wann_file .or. m < 1 .or. m > num_wann_file) cycle
+      aa_global(1,n,m) = cmplx(rx_re, rx_im, kind=8) / au_length_aa
+      aa_global(2,n,m) = cmplx(ry_re, ry_im, kind=8) / au_length_aa
+      aa_global(3,n,m) = cmplx(rz_re, rz_im, kind=8) / au_length_aa
+    end do
+    close(iunit)
+    ok = .true.
+  end subroutine read_wannier90_global_rmn_gamma_block_import
+
+  integer function find_owner_fragment_from_center_import(dc, center_bohr) result(owner)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    real(8), intent(in) :: center_bohr(3)
+    integer :: ifrag_try, axis, idx0, idx1, nxyz_domain(3)
+    real(8) :: frag_center(3), dist2, best_dist2, delta_axis, length_axis
+
+    owner = 1
+    best_dist2 = huge(1d0)
+    do ifrag_try=1,dc%n_frag
+      call get_fragment_domain(dc, ifrag_try, nxyz_domain)
+      do axis=1,3
+        idx0 = dc%ixyz_frag(axis,ifrag_try)
+        idx1 = idx0 + nxyz_domain(axis) - 1
+        frag_center(axis) = 0.5d0 * (dc%lg_tot%coordinate(idx0,axis) + dc%lg_tot%coordinate(idx1,axis))
+      end do
+      dist2 = 0d0
+      do axis=1,3
+        length_axis = dc%lg_tot%coordinate(dc%lg_tot%num(axis),axis) &
+          + (dc%lg_tot%coordinate(2,axis) - dc%lg_tot%coordinate(1,axis))
+        delta_axis = periodic_delta_import(center_bohr(axis) - frag_center(axis), length_axis)
+        dist2 = dist2 + delta_axis * delta_axis
+      end do
+      if(dist2 < best_dist2) then
+        best_dist2 = dist2
+        owner = ifrag_try
+      end if
+    end do
+  end function find_owner_fragment_from_center_import
+
+  subroutine rebalance_wannier_owner_fragments_import(dc, center_bohr, owner_frag, num_wann)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: num_wann
+    real(8), intent(in) :: center_bohr(3,num_wann)
+    integer, intent(inout) :: owner_frag(num_wann)
+    integer :: target_base, target_rem, ifrag, iw, donor, receiver, moved, iw_best
+    integer, allocatable :: target(:), count_frag(:)
+    real(8) :: dist2, best_dist2
+
+    if(dc%n_frag <= 0) return
+    allocate(target(dc%n_frag), count_frag(dc%n_frag))
+    target_base = num_wann / dc%n_frag
+    target_rem = mod(num_wann, dc%n_frag)
+    do ifrag=1,dc%n_frag
+      target(ifrag) = target_base
+      if(ifrag <= target_rem) target(ifrag) = target(ifrag) + 1
+      count_frag(ifrag) = count(owner_frag(1:num_wann) == ifrag)
+    end do
+    moved = 0
+    do
+      receiver = 0
+      donor = 0
+      do ifrag=1,dc%n_frag
+        if(count_frag(ifrag) < target(ifrag)) then
+          receiver = ifrag
+          exit
+        end if
+      end do
+      if(receiver == 0) exit
+      do ifrag=1,dc%n_frag
+        if(count_frag(ifrag) > target(ifrag)) then
+          donor = ifrag
+          exit
+        end if
+      end do
+      if(donor == 0) exit
+      iw_best = 0
+      best_dist2 = huge(1d0)
+      do iw=1,num_wann
+        if(owner_frag(iw) /= donor) cycle
+        dist2 = distance_to_fragment_center_import(dc, center_bohr(1:3,iw), receiver)
+        if(dist2 < best_dist2) then
+          best_dist2 = dist2
+          iw_best = iw
+        end if
+      end do
+      if(iw_best == 0) exit
+      owner_frag(iw_best) = receiver
+      count_frag(donor) = count_frag(donor) - 1
+      count_frag(receiver) = count_frag(receiver) + 1
+      moved = moved + 1
+    end do
+    if(dc%id_tot == 0 .and. moved > 0) write(*,'(1x,a,i0,a,i0,a,i0)') &
+      "[DC-LCFO-W90-IMPORT] rebalanced Wannier owners: moved=", moved, &
+      " min_count=", minval(count_frag), " max_count=", maxval(count_frag)
+    deallocate(target, count_frag)
+  end subroutine rebalance_wannier_owner_fragments_import
+
+  real(8) function distance_to_fragment_center_import(dc, center_bohr, ifrag_target) result(dist2)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    real(8), intent(in) :: center_bohr(3)
+    integer, intent(in) :: ifrag_target
+    integer :: axis, idx0, idx1, nxyz_domain(3)
+    real(8) :: frag_center(3), delta_axis, length_axis
+
+    call get_fragment_domain(dc, ifrag_target, nxyz_domain)
+    do axis=1,3
+      idx0 = dc%ixyz_frag(axis,ifrag_target)
+      idx1 = idx0 + nxyz_domain(axis) - 1
+      frag_center(axis) = 0.5d0 * (dc%lg_tot%coordinate(idx0,axis) + dc%lg_tot%coordinate(idx1,axis))
+    end do
+    dist2 = 0d0
+    do axis=1,3
+      length_axis = dc%lg_tot%coordinate(dc%lg_tot%num(axis),axis) &
+        + (dc%lg_tot%coordinate(2,axis) - dc%lg_tot%coordinate(1,axis))
+      delta_axis = periodic_delta_import(center_bohr(axis) - frag_center(axis), length_axis)
+      dist2 = dist2 + delta_axis * delta_axis
+    end do
+  end function distance_to_fragment_center_import
+
+  real(8) function periodic_delta_import(delta, length) result(dout)
+    implicit none
+    real(8), intent(in) :: delta, length
+    dout = delta
+    if(length <= 0d0) return
+    dout = delta - dnint(delta / length) * length
+  end function periodic_delta_import
+
+  function import_run_root_dir() result(root)
+    use salmon_global, only: base_directory
+    implicit none
+    character(256) :: root
+    integer :: ipos
+
+    root = trim(base_directory)
+    ipos = index(root, 'data_dcdft/fragments/')
+    if(ipos <= 0) ipos = index(root, 'data_dcdft/total/')
+    if(ipos > 0) then
+      if(ipos == 1) then
+        root = './'
+      else
+        root = root(1:ipos-1)
+      end if
+    end if
+    if(len_trim(root) == 0) root = './'
+  end function import_run_root_dir
+
 
   subroutine dc_lcfo_flux(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
     use communication, only: comm_summation
@@ -2496,9 +2923,13 @@ contains
         if(len_trim(wannier_projection) > 0) then
           write(iunit,'(a)') ""
           write(iunit,'(a)') "begin projections"
-          if(is_c_sp3_projection(trim(wannier_projection)) .and. nproj_csp3 < wannier_num_wann) &
+          if(is_pseudo_channel_projection(trim(wannier_projection))) then
             write(iunit,'(a)') "random"
-          write(iunit,'(a)') trim(wannier_projection)
+          else
+            if(is_c_sp3_projection(trim(wannier_projection)) .and. nproj_csp3 < wannier_num_wann) &
+              write(iunit,'(a)') "random"
+            write(iunit,'(a)') trim(wannier_projection)
+          end if
           write(iunit,'(a)') "end projections"
         end if
         close(iunit)
@@ -3475,20 +3906,26 @@ contains
       use filesystem, only: get_filehandle
       implicit none
       integer, intent(in) :: nband_wann
-      integer :: nproj, nproj_csp3, chunk_size, p0, p1, nchunk, iunit
+      integer :: nproj, nproj_csp3, nproj_pseudo, chunk_size, p0, p1, nchunk, iunit
       integer :: iband, ip, ibasis, ix, iy, iz, ispin_local
       integer :: ip_global, ip_base, ip_shell
       integer :: ixg, iyg, izg
       integer :: nxyz_domain(3)
       integer, parameter :: amn_target_chunk_elems = 1000000
       integer, allocatable :: proj_atom(:), proj_hybrid(:)
+      integer, allocatable :: proj_atom_pseudo(:), proj_l_pseudo(:), proj_m_pseudo(:)
       real(8) :: x, y, z, gval, projection_width_eff
       real(8), allocatable :: bproj(:,:), a_local(:,:), a_sum(:,:)
       real(8), allocatable :: norm_local(:), norm_sum(:)
       character(256) :: amnfile
 
-      if(.not. is_c_sp3_projection(trim(wannier_projection))) &
-        stop "DC-LCFO Wannier export: only wannier_projection='C:sp3' is implemented."
+      if(.not. is_c_sp3_projection(trim(wannier_projection)) .and. &
+         .not. is_pseudo_channel_projection(trim(wannier_projection))) &
+        stop "DC-LCFO Wannier export: supported projections are C:sp3 and pseudo_channels."
+      if(is_pseudo_channel_projection(trim(wannier_projection))) then
+        call write_wannier_amn_file_pseudo_channels(nband_wann)
+        return
+      end if
 
       nproj_csp3 = count_c_sp3_projections()
       if(nproj_csp3 <= 0) stop "DC-LCFO Wannier export: no C atoms found for C:sp3 projections."
@@ -3579,6 +4016,268 @@ contains
       deallocate(bproj, a_local, a_sum, norm_local, norm_sum)
     end subroutine write_wannier_amn_file
 
+    subroutine write_wannier_amn_file_pseudo_channels(nband_wann)
+      use salmon_global, only: sysname, wannier_num_wann
+      use filesystem, only: get_filehandle
+      implicit none
+      integer, intent(in) :: nband_wann
+      integer :: nproj_raw, nproj, chunk_size, p0, p1, nchunk, iunit
+      integer :: ip, ip_raw, iband
+      integer, parameter :: amn_target_chunk_elems = 1000000
+      integer, allocatable :: proj_atom_raw(:), proj_l_raw(:), proj_m_raw(:)
+      integer, allocatable :: raw_index(:), selected_raw(:)
+      real(8), allocatable :: projectability(:), a_sum(:,:), norm_sum(:)
+      character(256) :: amnfile
+
+      if(wannier_num_wann > nband_wann) &
+        stop "DC-LCFO Wannier export: wannier_num_wann must not exceed exported band count."
+
+      nproj_raw = count_pseudo_channel_ao_candidates()
+      if(nproj_raw <= 0) stop "DC-LCFO Wannier export: no pseudo-channel AO candidates were generated."
+      if(nproj_raw < wannier_num_wann) &
+        stop "DC-LCFO Wannier export: pseudo-channel candidate count is smaller than wannier_num_wann."
+      nproj = wannier_num_wann
+
+      allocate(proj_atom_raw(nproj_raw), proj_l_raw(nproj_raw), proj_m_raw(nproj_raw))
+      allocate(projectability(nproj_raw), selected_raw(nproj))
+      call build_pseudo_channel_ao_candidate_map(proj_atom_raw, proj_l_raw, proj_m_raw)
+
+      if(dc%id_tot == 0) then
+        write(*,'(1x,a,i0,a,i0)') "[DC-LCFO-WANNIER] pseudo_channels candidates=", &
+          nproj_raw, " target_wann=", nproj
+        write(*,'(1x,a)') "[DC-LCFO-WANNIER] pseudo_channels selection: projectability top candidates"
+      end if
+
+      chunk_size = max(1, min(nproj_raw, max(1, amn_target_chunk_elems / max(1, nband_wann))))
+      allocate(raw_index(chunk_size), a_sum(nband_wann,chunk_size), norm_sum(chunk_size))
+      projectability(:) = 0d0
+
+      do p0=1,nproj_raw,chunk_size
+        p1 = min(nproj_raw, p0 + chunk_size - 1)
+        nchunk = p1 - p0 + 1
+        do ip=1,nchunk
+          raw_index(ip) = p0 + ip - 1
+        end do
+        call compute_pseudo_channel_projection_chunk(nband_wann, nchunk, raw_index, &
+          proj_atom_raw, proj_l_raw, proj_m_raw, a_sum, norm_sum)
+        do ip=1,nchunk
+          ip_raw = raw_index(ip)
+          if(norm_sum(ip) <= 1d-300) &
+            stop "DC-LCFO Wannier export: zero norm pseudo-channel projection."
+          a_sum(1:nband_wann,ip) = a_sum(1:nband_wann,ip) / sqrt(norm_sum(ip))
+          projectability(ip_raw) = sum(a_sum(1:nband_wann,ip)**2)
+        end do
+      end do
+
+      call select_top_projectors(projectability, nproj_raw, nproj, selected_raw)
+      call write_pseudo_channel_projection_diagnostics(nproj_raw, nproj, proj_l_raw, proj_m_raw, &
+        projectability, selected_raw)
+
+      if(dc%id_tot == 0) then
+        do ip=1,nproj
+          ip_raw = selected_raw(ip)
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,es14.6)') &
+            "[DC-LCFO-WANNIER] pseudo selected ip=", ip, &
+            " raw=", ip_raw, " atom=", proj_atom_raw(ip_raw), &
+            " l=", proj_l_raw(ip_raw), " m=", proj_m_raw(ip_raw), &
+            " projectability=", projectability(ip_raw)
+        end do
+      end if
+
+      amnfile = trim(dc%base_directory)//trim(sysname)//".amn"
+      if(dc%id_tot == 0) then
+        iunit = get_filehandle()
+        open(iunit,file=amnfile,status='replace')
+        write(iunit,'(a)') "SALMON DC-LCFO generated pseudo-channel projections"
+        write(iunit,'(3i10)') nband_wann, 1, nproj
+      end if
+
+      do p0=1,nproj,chunk_size
+        p1 = min(nproj, p0 + chunk_size - 1)
+        nchunk = p1 - p0 + 1
+        do ip=1,nchunk
+          raw_index(ip) = selected_raw(p0 + ip - 1)
+        end do
+        call compute_pseudo_channel_projection_chunk(nband_wann, nchunk, raw_index, &
+          proj_atom_raw, proj_l_raw, proj_m_raw, a_sum, norm_sum)
+        if(dc%id_tot == 0) then
+          do ip=1,nchunk
+            if(norm_sum(ip) <= 1d-300) &
+              stop "DC-LCFO Wannier export: zero norm selected pseudo-channel projection."
+            a_sum(1:nband_wann,ip) = a_sum(1:nband_wann,ip) / sqrt(norm_sum(ip))
+            do iband=1,nband_wann
+              write(iunit,'(3i8,2(1x,es23.15))') iband, p0 + ip - 1, 1, a_sum(iband,ip), 0d0
+            end do
+          end do
+        end if
+      end do
+
+      if(dc%id_tot == 0) close(iunit)
+      deallocate(proj_atom_raw, proj_l_raw, proj_m_raw)
+      deallocate(projectability, selected_raw, raw_index, a_sum, norm_sum)
+    end subroutine write_wannier_amn_file_pseudo_channels
+
+    subroutine compute_pseudo_channel_projection_chunk(nband_wann, nchunk, raw_index, &
+        proj_atom, proj_l, proj_m, a_sum, norm_sum)
+      use salmon_global, only: wannier_projection_width
+      implicit none
+      integer, intent(in) :: nband_wann, nchunk
+      integer, intent(in) :: raw_index(:), proj_atom(:), proj_l(:), proj_m(:)
+      real(8), intent(out) :: a_sum(:,:), norm_sum(:)
+      integer :: ip, ip_raw, ibasis, ix, iy, iz, ixg, iyg, izg, ispin_local
+      integer :: nxyz_domain(3)
+      real(8) :: x, y, z, gval
+      real(8), allocatable :: bproj(:,:), a_local(:,:), norm_local(:)
+
+      call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
+      allocate(bproj(dc%nstate_frag,nchunk))
+      allocate(a_local(nband_wann,nchunk))
+      allocate(norm_local(nchunk))
+      bproj(:,:) = 0d0
+      a_local(:,:) = 0d0
+      norm_local(:) = 0d0
+
+      ispin_local = 1
+      if(dc%id_frag == 0) then
+        do ip=1,nchunk
+          ip_raw = raw_index(ip)
+          do iz=1,nxyz_domain(3)
+            izg = dc%jxyz_tot(iz,3)
+            z = dc%lg_tot%coordinate(izg,3)
+            do iy=1,nxyz_domain(2)
+              iyg = dc%jxyz_tot(iy,2)
+              y = dc%lg_tot%coordinate(iyg,2)
+              do ix=1,nxyz_domain(1)
+                ixg = dc%jxyz_tot(ix,1)
+                x = dc%lg_tot%coordinate(ixg,1)
+                gval = pseudo_channel_projection_value(x, y, z, proj_atom(ip_raw), &
+                  proj_l(ip_raw), proj_m(ip_raw), wannier_projection_width)
+                if(abs(gval) <= 0d0) cycle
+                norm_local(ip) = norm_local(ip) + gval * gval * hvol
+                do ibasis=1,n_basis(dc%i_frag,ispin_local)
+                  bproj(ibasis,ip) = bproj(ibasis,ip) &
+                    + f_basis(ix,iy,iz,ispin_local,ibasis) * gval * hvol
+                end do
+              end do
+            end do
+          end do
+        end do
+        a_local(1:nband_wann,1:nchunk) = &
+          matmul(transpose(coef_wf(1:dc%nstate_frag,1:nband_wann,1)), &
+          bproj(1:dc%nstate_frag,1:nchunk))
+      end if
+
+      call comm_summation(a_local,a_sum,nband_wann*nchunk,dc%icomm_tot)
+      call comm_summation(norm_local,norm_sum,nchunk,dc%icomm_tot)
+
+      deallocate(bproj, a_local, norm_local)
+    end subroutine compute_pseudo_channel_projection_chunk
+
+    subroutine select_top_projectors(projectability, nraw, nselect, selected)
+      implicit none
+      integer, intent(in) :: nraw, nselect
+      real(8), intent(in) :: projectability(nraw)
+      integer, intent(out) :: selected(nselect)
+      logical, allocatable :: used(:)
+      integer :: isel, ip, best_ip
+      real(8) :: best_val
+
+      allocate(used(nraw))
+      used(:) = .false.
+      selected(:) = 0
+      do isel=1,nselect
+        best_ip = 0
+        best_val = -1d0
+        do ip=1,nraw
+          if(used(ip)) cycle
+          if(projectability(ip) > best_val) then
+            best_val = projectability(ip)
+            best_ip = ip
+          end if
+        end do
+        if(best_ip <= 0) stop "DC-LCFO Wannier export: failed to select pseudo-channel projector."
+        selected(isel) = best_ip
+        used(best_ip) = .true.
+      end do
+      deallocate(used)
+    end subroutine select_top_projectors
+
+    subroutine write_pseudo_channel_projection_diagnostics(nraw, nselect, proj_l, proj_m, &
+        projectability, selected)
+      use filesystem, only: get_filehandle
+      implicit none
+      integer, intent(in) :: nraw, nselect
+      integer, intent(in) :: proj_l(nraw), proj_m(nraw), selected(nselect)
+      real(8), intent(in) :: projectability(nraw)
+      integer :: iunit, ip, l, ip_raw
+      integer :: selected_l(0:2), raw_l(0:2), count_l(0:2)
+      logical, allocatable :: is_selected(:)
+      real(8) :: sum_l(0:2), avg_l(0:2)
+      real(8) :: min_selected, max_rejected
+      character(256) :: diagfile
+
+      if(dc%id_tot /= 0) return
+
+      allocate(is_selected(nraw))
+      is_selected(:) = .false.
+      do ip=1,nselect
+        if(selected(ip) >= 1 .and. selected(ip) <= nraw) is_selected(selected(ip)) = .true.
+      end do
+
+      selected_l(:) = 0
+      raw_l(:) = 0
+      count_l(:) = 0
+      sum_l(:) = 0d0
+      avg_l(:) = 0d0
+      min_selected = huge(1d0)
+      max_rejected = -huge(1d0)
+
+      do ip=1,nraw
+        l = proj_l(ip)
+        if(l >= 0 .and. l <= 2) then
+          raw_l(l) = raw_l(l) + 1
+          count_l(l) = count_l(l) + 1
+          sum_l(l) = sum_l(l) + projectability(ip)
+        end if
+        if(is_selected(ip)) then
+          min_selected = min(min_selected, projectability(ip))
+          if(l >= 0 .and. l <= 2) selected_l(l) = selected_l(l) + 1
+        else
+          max_rejected = max(max_rejected, projectability(ip))
+        end if
+      end do
+
+      do l=0,2
+        if(count_l(l) > 0) avg_l(l) = sum_l(l) / dble(count_l(l))
+      end do
+      if(nselect <= 0) min_selected = 0d0
+      if(nraw <= nselect) max_rejected = 0d0
+
+      diagfile = trim(dc%base_directory)//"pseudo_channel_projection_diag.csv"
+      iunit = get_filehandle()
+      open(iunit,file=diagfile,status='replace')
+      write(iunit,'(a)') "nproj_raw,num_wann,raw_l0,raw_l1,raw_l2,selected_l0,selected_l1,selected_l2,"// &
+        "avg_projectability_l0,avg_projectability_l1,avg_projectability_l2,"// &
+        "min_selected_projectability,max_rejected_projectability"
+      write(iunit,'(8(i0,","),5(es23.15,:,","))') nraw, nselect, raw_l(0), raw_l(1), raw_l(2), &
+        selected_l(0), selected_l(1), selected_l(2), avg_l(0), avg_l(1), avg_l(2), &
+        min_selected, max_rejected
+      write(iunit,'(a)') "selected_index,raw_index,l,m,projectability"
+      do ip=1,nselect
+        ip_raw = selected(ip)
+        write(iunit,'(4(i0,","),es23.15)') ip, ip_raw, proj_l(ip_raw), &
+          proj_m(ip_raw), projectability(ip_raw)
+      end do
+      close(iunit)
+
+      write(*,'(1x,a,a)') "[DC-LCFO-WANNIER] pseudo projection diagnostics: ", trim(diagfile)
+      write(*,'(1x,a,3(i0,1x),a,3(i0,1x),a,es14.6,a,es14.6)') &
+        "[DC-LCFO-WANNIER] pseudo l-count raw=", raw_l(0), raw_l(1), raw_l(2), &
+        " selected=", selected_l(0), selected_l(1), selected_l(2), &
+        " min_selected=", min_selected, " max_rejected=", max_rejected
+      deallocate(is_selected)
+    end subroutine write_pseudo_channel_projection_diagnostics
+
     logical function is_c_sp3_projection(text) result(enabled)
       implicit none
       character(*), intent(in) :: text
@@ -3587,6 +4286,15 @@ contains
       work = adjustl(text)
       enabled = (trim(work) == 'C:sp3' .or. trim(work) == 'c:sp3')
     end function is_c_sp3_projection
+
+    logical function is_pseudo_channel_projection(text) result(enabled)
+      implicit none
+      character(*), intent(in) :: text
+      character(256) :: work
+
+      work = adjustl(text)
+      enabled = (trim(work) == 'pseudo_channels' .or. trim(work) == 'PSEUDO_CHANNELS')
+    end function is_pseudo_channel_projection
 
     integer function count_c_sp3_projections() result(nproj)
       use salmon_global, only: izatom
@@ -3598,6 +4306,79 @@ contains
         if(izatom(dc%system_tot%kion(ia)) == 6) nproj = nproj + 4
       end do
     end function count_c_sp3_projections
+
+    integer function count_pseudo_channel_ao_candidates() result(nproj)
+      use salmon_global, only: izatom
+      implicit none
+      integer :: ia, iz, lmax_ao
+
+      nproj = 0
+      do ia=1,dc%system_tot%nion
+        iz = izatom(dc%system_tot%kion(ia))
+        lmax_ao = pseudo_channel_ao_lmax_for_species(iz)
+        nproj = nproj + count_real_ao_for_lmax(lmax_ao)
+      end do
+    end function count_pseudo_channel_ao_candidates
+
+    integer function pseudo_channel_ao_lmax_for_species(iz) result(lmax_ao)
+      implicit none
+      integer, intent(in) :: iz
+      integer :: lmax_ps
+
+      ! Initial conservative heuristic until pseudopotential-channel metadata is wired in:
+      ! H gets s/p, while heavier elements get s/p/d polarization candidates.
+      if(iz == 1) then
+        lmax_ps = 0
+      else
+        lmax_ps = 1
+      end if
+      lmax_ao = min(lmax_ps + 1, 2)
+    end function pseudo_channel_ao_lmax_for_species
+
+    integer function count_real_ao_for_lmax(lmax_ao) result(norb)
+      implicit none
+      integer, intent(in) :: lmax_ao
+
+      norb = 0
+      if(lmax_ao >= 0) norb = norb + 1
+      if(lmax_ao >= 1) norb = norb + 3
+      if(lmax_ao >= 2) norb = norb + 5
+    end function count_real_ao_for_lmax
+
+    subroutine build_pseudo_channel_ao_candidate_map(proj_atom, proj_l, proj_m)
+      use salmon_global, only: izatom
+      implicit none
+      integer, intent(out) :: proj_atom(:), proj_l(:), proj_m(:)
+      integer :: ia, iz, lmax_ao, ip, im
+
+      ip = 0
+      do ia=1,dc%system_tot%nion
+        iz = izatom(dc%system_tot%kion(ia))
+        lmax_ao = pseudo_channel_ao_lmax_for_species(iz)
+        if(lmax_ao >= 0) then
+          ip = ip + 1
+          proj_atom(ip) = ia
+          proj_l(ip) = 0
+          proj_m(ip) = 1
+        end if
+        if(lmax_ao >= 1) then
+          do im=1,3
+            ip = ip + 1
+            proj_atom(ip) = ia
+            proj_l(ip) = 1
+            proj_m(ip) = im
+          end do
+        end if
+        if(lmax_ao >= 2) then
+          do im=1,5
+            ip = ip + 1
+            proj_atom(ip) = ia
+            proj_l(ip) = 2
+            proj_m(ip) = im
+          end do
+        end if
+      end do
+    end subroutine build_pseudo_channel_ao_candidate_map
 
     subroutine build_c_sp3_projection_map(proj_atom, proj_hybrid)
       use salmon_global, only: izatom
@@ -3615,6 +4396,60 @@ contains
         end do
       end do
     end subroutine build_c_sp3_projection_map
+
+    real(8) function pseudo_channel_projection_value(x, y, z, ia, l, m, sigma) result(val)
+      implicit none
+      real(8), intent(in) :: x, y, z, sigma
+      integer, intent(in) :: ia, l, m
+      real(8) :: dx, dy, dz, r2, gaussian, inv_sigma, inv_sigma2
+      real(8) :: a1(3), a2(3), a3(3)
+
+      call get_lattice_vectors(a1, a2, a3)
+      dx = periodic_delta(x - dc%system_tot%rion(1,ia), cell_length(a1))
+      dy = periodic_delta(y - dc%system_tot%rion(2,ia), cell_length(a2))
+      dz = periodic_delta(z - dc%system_tot%rion(3,ia), cell_length(a3))
+      r2 = dx*dx + dy*dy + dz*dz
+      if(r2 > (8d0*sigma)**2) then
+        val = 0d0
+        return
+      end if
+
+      gaussian = exp(-0.5d0 * r2 / (sigma*sigma))
+      inv_sigma = 1d0 / sigma
+      inv_sigma2 = inv_sigma * inv_sigma
+      select case(l)
+      case(0)
+        val = gaussian
+      case(1)
+        select case(m)
+        case(1)
+          val = dx * inv_sigma * gaussian
+        case(2)
+          val = dy * inv_sigma * gaussian
+        case(3)
+          val = dz * inv_sigma * gaussian
+        case default
+          val = 0d0
+        end select
+      case(2)
+        select case(m)
+        case(1)
+          val = dx * dy * inv_sigma2 * gaussian
+        case(2)
+          val = dy * dz * inv_sigma2 * gaussian
+        case(3)
+          val = dz * dx * inv_sigma2 * gaussian
+        case(4)
+          val = (dx*dx - dy*dy) * inv_sigma2 * gaussian
+        case(5)
+          val = (2d0*dz*dz - dx*dx - dy*dy) * inv_sigma2 * gaussian
+        case default
+          val = 0d0
+        end select
+      case default
+        val = 0d0
+      end select
+    end function pseudo_channel_projection_value
 
     real(8) function c_sp3_projection_value(x, y, z, ia, ih, sigma) result(val)
       implicit none

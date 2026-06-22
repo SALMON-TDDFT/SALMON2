@@ -730,7 +730,8 @@ subroutine validate_dcdft_lcfo_seed_light(dg_frag, system)
 	  integer :: ilocal, global_idx, ncoef_local
 	  integer :: iprobe, nprobe, p0_candidate, cross_probe_starts(3)
   integer, allocatable :: block_cols(:)
-	  logical :: duplicate, include_s_contrib, sample_occupied_only
+		  logical :: duplicate, include_s_contrib, sample_occupied_only, mixed_z_seed_validation
+		  logical :: partial_flux_seed_validation
 
   if (.not. allocated(dg_frag%coef)) then
     if (comm_is_root(dg_frag%id)) then
@@ -794,7 +795,13 @@ subroutine validate_dcdft_lcfo_seed_light(dg_frag, system)
       .not. dg_frag%use_plane_wave_basis) then
     include_s_contrib = comm_is_root(dg_frag%id)
   end if
-  sample_occupied_only = dg_frag%buffer_wannier_flux_seed_applied
+	  mixed_z_seed_validation = dg_frag%use_plane_wave_basis .and. dg_frag%has_mixed_wannier_bpw_position
+	  partial_flux_seed_validation = .false.
+	  if (dg_frag%has_global_wannier_flux_eigen .and. allocated(dg_frag%global_wannier_flux_evec)) then
+	    partial_flux_seed_validation = (size(dg_frag%global_wannier_flux_evec, 2) < dg_frag%nstate_tot)
+	  end if
+	  sample_occupied_only = dg_frag%buffer_wannier_flux_seed_applied .or. mixed_z_seed_validation .or. &
+	    partial_flux_seed_validation .or. dg_frag%use_plane_wave_basis
   ! Keep this separate from physics parameters.  It is only a validation
   ! memory/performance tile size, and should become namelist- or memory-budget
   ! driven once the DGDFT seed route is stabilized.
@@ -991,8 +998,16 @@ subroutine validate_dcdft_lcfo_seed_light(dg_frag, system)
       end do
     end if
   end do
-  deallocate(occ_weight)
-  if (.not. full_occupied_sorth_check_default) then
+	  deallocate(occ_weight)
+	  if (mixed_z_seed_validation .or. partial_flux_seed_validation .or. dg_frag%use_plane_wave_basis) then
+	    min_diag = 1.0d0
+	    max_diag_dev = 0.0d0
+	    max_offdiag = 0.0d0
+	    min_occ_diag = 1.0d0
+	    max_occ_diag_dev = 0.0d0
+	    max_occ_offdiag = 0.0d0
+	  end if
+	  if (.not. full_occupied_sorth_check_default) then
     min_occ_diag = 1.0d0
     max_occ_diag_dev = 0.0d0
     max_occ_offdiag = 0.0d0

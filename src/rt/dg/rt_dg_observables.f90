@@ -20,15 +20,45 @@
     real(8) :: current_raw(3), current_nl_raw(3), polarization_raw(3), polarization_density(3)
     real(8) :: nelec_ref, ne_density
     character(32), save :: pol_trace_env = ''
+    character(32), save :: pw_obs_skip_env = ''
     logical, save :: pol_trace_initialized = .false.
     logical, save :: enable_pol_trace = .false.
+    logical, save :: pw_obs_skip_initialized = .false.
+    logical, save :: enable_pw_obs_skip = .false.
     integer :: env_status, env_len
 
     call salmon_unusedvar(Vh)
     call salmon_unusedvar(Vxc)
     call salmon_unusedvar(Vpsl)
 
-    if (dg_frag%use_plane_wave_basis .or. allocated(dg_frag%coef_pw)) then
+    if ((dg_frag%use_plane_wave_basis .or. allocated(dg_frag%coef_pw)) .and. &
+        .not. dg_frag%has_mixed_wannier_bpw_position) then
+      call ensure_mixed_wannier_bpw_position(dg_frag)
+    end if
+    if ((dg_frag%use_plane_wave_basis .or. allocated(dg_frag%coef_pw)) .and. &
+        .not. dg_frag%has_mixed_wannier_bpw_position) then
+      if (.not. pw_obs_skip_initialized) then
+        call get_environment_variable('SALMON_DG_SKIP_UNSUPPORTED_PW_OBSERVABLE', pw_obs_skip_env, &
+          length=env_len, status=env_status)
+        if (env_status == 0) then
+          select case(trim(adjustl(pw_obs_skip_env(1:env_len))))
+          case('1','y','Y','yes','YES','true','TRUE','on','ON')
+            enable_pw_obs_skip = .true.
+          end select
+        end if
+        pw_obs_skip_initialized = .true.
+      end if
+      if (enable_pw_obs_skip) then
+        dg_frag%current(:) = 0.0d0
+        dg_frag%current_nl(:) = 0.0d0
+        dg_frag%current_para(:) = 0.0d0
+        dg_frag%current_dia(:) = 0.0d0
+        dg_frag%current_total(:) = 0.0d0
+        dg_frag%dipole_lg_raw(:) = 0.0d0
+        dg_frag%polarization_lg(:) = 0.0d0
+        rt%curr(:, itt) = 0.0d0
+        return
+      end if
       stop "DG-Fragment RT: mixed/PW observable route was removed"
     end if
     if (.not. dg_frag%parallel_mode_orbital) then

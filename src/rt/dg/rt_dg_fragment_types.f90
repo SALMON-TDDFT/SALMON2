@@ -273,6 +273,9 @@ module rt_dg_fragment_types
     complex(8), allocatable :: global_wannier_position(:,:,:) ! (3,num_wann,num_wann), bohr
     logical :: has_global_wannier_position = .false.
     complex(8), allocatable :: global_wannier_coef(:,:,:,:) ! (DG basis,W basis,nspin,local fragment)
+    complex(8), allocatable :: global_wannier_flux_evec(:,:) ! (W basis, Flux eigenstate)
+    real(8), allocatable :: global_wannier_flux_eval(:,:) ! (Flux eigenstate,nspin)
+    logical :: has_global_wannier_flux_eigen = .false.
     logical :: has_global_wannier_local_basis = .false.
     integer, allocatable :: global_wannier_local_nkeep(:) ! (local fragment)
     integer, allocatable :: global_wannier_local_ids(:,:) ! (local W, local fragment) -> global W id
@@ -280,6 +283,35 @@ module rt_dg_fragment_types
     real(8), allocatable :: global_wannier_local_center(:,:,:) ! (3, local W, local fragment)
     complex(8), allocatable :: global_wannier_local_coef(:,:,:,:) ! (DG basis, local W, nspin, local fragment)
     complex(8), allocatable :: global_wannier_local_position(:,:,:,:) ! (3, local W, local W, local fragment)
+    logical :: has_mixed_wannier_bpw_position = .false.
+    integer :: mixed_wannier_bpw_nw = 0
+    integer :: mixed_wannier_bpw_np = 0
+    integer :: mixed_wannier_bpw_nmix = 0
+    real(8) :: mixed_wannier_bpw_sperp_min = 0.0d0
+    real(8) :: mixed_wannier_bpw_sperp_max = 0.0d0
+    real(8), allocatable :: mixed_wannier_bpw_eval(:,:) ! (W+P state,nspin)
+    complex(8), allocatable :: mixed_wannier_bpw_z(:,:,:,:) ! (3,W+P,W+P,nspin)
+    complex(8), allocatable :: mixed_wannier_bpw_pcoef(:,:,:) ! (P state,propagated state,nspin)
+    ! Fragment-local WPW reduced-neighbor propagation candidate.
+    ! This is intentionally separate from the global Wannier+BPW-perp mixed-Z path.
+    logical :: wpw_reduced_ready = .false.
+    integer :: wpw_reduced_max_dim = 0
+    integer, allocatable :: wpw_reduced_dim(:)       ! (local fragment)
+    integer, allocatable :: wpw_reduced_nself(:)     ! (local fragment)
+    integer, allocatable :: wpw_reduced_nkeep(:)     ! kept S-orthogonal neighbor modes
+    integer, allocatable :: wpw_reduced_ndrop(:)     ! dropped near-null neighbor modes
+    complex(8), allocatable :: wpw_reduced_H(:,:,:,:) ! (max_dim,max_dim,nspin,local fragment)
+    complex(8), allocatable :: wpw_reduced_S(:,:,:,:) ! (max_dim,max_dim,nspin,local fragment)
+    complex(8), allocatable :: wpw_reduced_transform(:,:,:) ! raw extended basis <- reduced basis, (max_dim,max_dim,local fragment)
+    complex(8), allocatable :: wpw_reduced_Sraw_build(:,:,:) ! raw S used to build reduced transform, (max_dim,max_dim,local fragment)
+    integer, allocatable :: wpw_reduced_nraw(:)       ! raw extended basis size before S-orthogonal reduction
+    real(8), allocatable :: wpw_reduced_eval(:,:,:) ! (max_dim,nspin,local fragment)
+    complex(8), allocatable :: wpw_reduced_evec(:,:,:,:) ! (max_dim,max_dim,nspin,local fragment)
+    complex(8), allocatable :: coef_wpw_self(:,:,:,:) ! (self basis,state,nspin,local fragment)
+    complex(8), allocatable :: coef_wpw_neighbor_reduced(:,:,:,:) ! (reduced neighbor,state,nspin,local fragment)
+    complex(8), allocatable :: wpw_reproject_prev_coef(:,:,:,:) ! previous reprojected reduced coef for diagnostics
+    logical :: wpw_reproject_prev_valid = .false.
+    logical :: wpw_reduced_coef_initialized = .false.
     logical :: has_formal_dg_wannier_basis = .false.
     integer, allocatable :: dg_wannier_nkeep(:) ! (local fragment)
     integer, allocatable :: dg_wannier_global_ids(:,:) ! (local W, local fragment)
@@ -434,6 +466,10 @@ module rt_dg_fragment_types
     integer :: density_phase_block_size = 0
     integer :: density_phase_block_npw = 0
     logical :: density_phase_block_cache_valid = .false.
+    real(8), allocatable :: mixed_density_pp_cache(:,:,:,:) ! cached PP density (block_size,nblock_max,ifrag_local,nspin)
+    integer :: mixed_density_pp_cache_mode = 0
+    integer :: mixed_density_pp_cache_interval = 1
+    logical :: mixed_density_pp_cache_valid = .false.
     integer :: lgnum_total(3)                  ! Total grid size (lg_tot%num)
     real(8) :: hgs(3)                           ! Grid spacing (a.u.)
     integer :: icomm                           ! MPI communicator for fragment RT
@@ -542,8 +578,21 @@ module rt_dg_fragment_types
     complex(8), allocatable :: H_mat_pw_diag(:,:)   ! PW-PW diagonal Hamiltonian block
     complex(8), allocatable :: H_mat_pw(:,:,:)      ! PW-PW Hamiltonian block (non-diagonal)
                              ! (n_plane_waves, n_plane_waves, nspin)
+    logical :: has_wpw_window = .false.              ! Windowed-PW chi/grad(chi) are prepared
+    integer, allocatable :: wpw_window_box_lo(:,:)   ! (3, n_local_frag), unwrapped storage lower bounds
+    integer, allocatable :: wpw_window_box_hi(:,:)   ! (3, n_local_frag), unwrapped storage upper bounds
+    real(8), allocatable :: wpw_chi(:,:,:,:)         ! (nx, ny, nz, n_local_frag), normalized chi_A
+    real(8), allocatable :: wpw_grad_chi(:,:,:,:,:)  ! (3, nx, ny, nz, n_local_frag)
+    real(8) :: wpw_partition_sum_chi2_min = 0.0d0
+    real(8) :: wpw_partition_sum_chi2_max = 0.0d0
+    real(8) :: wpw_partition_sum_chi2_maxdev = 0.0d0
+    logical :: wpw_pp_blocks_ready = .false.          ! Fragment-local WPW PP block prototype is prepared
+    type(complex_matrix_block_info), allocatable :: wpw_S_pp_blocks(:)
+    type(complex_matrix_block_info), allocatable :: wpw_T_pp_volume_blocks(:)
+    type(complex_matrix_block_info), allocatable :: wpw_T_pp_interface_blocks(:)
     real(8), allocatable :: pw_orthogonalized(:,:,:) ! [UNUSED] Orthogonalized PWs in real space
     logical :: mixed_basis_ready = .false.          ! startup/basis-update mixed diagonalization prepared
+    logical :: mixed_basis_identity_raw = .false.   ! mixed_transform is raw FP+PW identity view
     integer, allocatable :: mixed_basis_dim(:)      ! retained mixed dimension per spin
     complex(8), allocatable :: mixed_transform(:,:,:) ! raw (F+P) basis <- orthonormal mixed basis
     complex(8), allocatable :: coef_mix(:,:,:)      ! canonical coefficients in orthonormal mixed basis

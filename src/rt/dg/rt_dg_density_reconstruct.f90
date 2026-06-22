@@ -2,8 +2,10 @@
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use structures
     use communication, only: comm_summation, comm_bcast, COMM_GROUP_NULL
+    use misc_routines, only: get_wtime
     use rt_dg_fragment_ops, only: refresh_pw_coef_cache, apply_overlap_operator_batch, fetch_remote_coef_rows
     use rt_dg_fragment_types, only: s_dg_fragment_rt, density_grid_point_info
+    use rt_dg_plane_wave, only: apply_wpw_reduced_density_to_production
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -19,7 +21,7 @@
     integer :: ig_i, nbf, nbf_max, ipw, n_pw, n_frag, n_tot, n_basis_mix, max_mixed_basis
     integer :: nxyz(3), ifrag_count, ngrid_max
     integer :: nkeep, nkeep_max_density, nw_owned
-    integer :: nocc_spin, nocc_cache
+    integer :: nocc_spin, nocc_cache, nstate_sync
     integer :: irank, slot, npts, idx_local, idx_remote, point_idx, local_coef_idx, local_state_col
     integer :: local_grid_count, remote_grid_count, valid_remote_grid_count
     integer :: igrid0, igrid, ngrid, npt_blk, io0, io1, nbatch, nstate, ipw0, npw_blk
@@ -42,6 +44,7 @@
     real(8) :: rho_trace_min, rho_trace_max
     real(8) :: boxL(3), inv_sqrt_vol, theta, inv_lgnum1
     logical :: use_mixed_density
+    logical :: use_mixed_z_density
     logical :: enable_wannier_density
     logical :: enable_global_wannier_density
     logical :: use_global_wannier_sparse_density
@@ -87,9 +90,15 @@
     integer :: phi_lb1, phi_lb2, phi_lb3, phi_ub1, phi_ub2, phi_ub3
     integer :: phi_lg1, phi_lg2, phi_lg3
     integer :: ibuf_x, ibuf_y, ibuf_z
+    integer :: pp_mode_kind, pp_update_interval
+    integer, parameter :: pp_mode_full = 0
+    integer, parameter :: pp_mode_diagonal = 1
+    integer, parameter :: pp_mode_frozen = 2
+    integer, parameter :: pp_mode_every_n = 3
     integer :: rho_x_lo, rho_x_hi, rho_y_lo, rho_y_hi, rho_z_lo, rho_z_hi
     integer :: rho_s_x_lo, rho_s_x_hi, rho_s_y_lo, rho_s_y_hi, rho_s_z_lo, rho_s_z_hi
     complex(8), allocatable :: phase_cache(:,:), coef_pw_blk(:,:), pw_tmp_z(:,:)
+    complex(8), allocatable :: psi_pw_blk_z(:,:)
     complex(8), allocatable :: density_mix(:,:,:), density_mix_partial(:,:), basis_mix_blk(:,:), density_mix_tmp(:,:)
     complex(8), allocatable :: basis_mix_blk_t(:,:), density_mix_tmp_t(:,:)
     complex(8), allocatable :: transform_frag_spin(:,:,:), transform_pw_spin(:,:,:)
@@ -100,20 +109,40 @@
     integer, allocatable :: ipiv_mix(:)
     integer, allocatable :: n_basis_mix_spin(:)
     real(8), allocatable :: kpw_hx(:), kpw_hy(:), kpw_hz(:)
+    real(8), allocatable :: rho_pp_blk(:)
+    real(8) :: pp_diag_accum
+    real(8) :: profile_t0, profile_t1, profile_total_start
+    real(8) :: profile_time_phi_cache, profile_time_phase_cache
+    real(8) :: profile_time_pw_cache
+    real(8) :: profile_time_phi_block, profile_time_phase_block
+    real(8) :: profile_time_local_proj, profile_time_psi_reduce
+    real(8) :: profile_time_pw_coef, profile_time_pw_zgemm
+    real(8) :: profile_time_rho_accum, profile_time_copy
+    integer :: profile_blocks, profile_batches, profile_pw_blocks
     character(32) :: env_phi_block_cache, env_phase_block_cache
     character(32) :: env_wannier_density
     character(32) :: env_global_wannier_density
     character(32) :: env_global_wannier_center_range
+    character(32) :: env_mixed_z_density
     character(32) :: env_rho_mix_mode
     character(32) :: env_trace_density_charge
+    character(32) :: env_density_profile, env_density_profile_interval, env_density_profile_verbose
+    character(32) :: env_pp_mode, env_pp_interval
     integer :: env_status
     integer :: rho_mix_mode_kind
     integer :: info_lapack
     integer :: itt_tag
     logical :: need_full_coef_mix_spin
+    logical :: split_pp_density
+    logical :: pp_cache_mode_active
+    logical :: pp_update_now
+    logical :: pp_cache_valid_at_entry
     logical :: density_on_frag_root
     logical :: density_exchange_active
     logical :: trace_density_charge
+    logical :: trace_density_profile
+    logical :: trace_density_profile_verbose
+    logical :: profile_this_call
     logical :: enable_fp_phase_fix
     character(32) :: env_fp_phase_fix
     logical, save :: density_env_initialized = .false.
@@ -131,9 +160,15 @@
     logical, save :: cfg_global_wannier_sparse_logged = .false.
     integer, save :: cfg_global_wannier_center_range = 1
     logical, save :: cfg_trace_density_charge = .false.
+    logical, save :: cfg_trace_density_profile = .false.
+    logical, save :: cfg_trace_density_profile_verbose = .false.
+    integer, save :: cfg_density_profile_interval = 1
     character(32), save :: cfg_env_rho_mix_mode = 'legacy'
     integer, save :: cfg_rho_mix_mode_kind = 0
     logical, save :: cfg_enable_fp_phase_fix = .false.
+    integer, save :: cfg_mixed_density_pp_mode = pp_mode_full
+    integer, save :: cfg_mixed_density_pp_update_interval = 1
+    logical, save :: cfg_mixed_density_pp_logged = .false.
 
     itt_tag = -1
     if (present(itt_debug)) itt_tag = itt_debug
@@ -156,11 +191,36 @@
     env_global_wannier_center_range = ''
     env_rho_mix_mode = 'legacy'
     env_trace_density_charge = ''
+    env_density_profile = ''
+    env_density_profile_interval = ''
+    env_density_profile_verbose = ''
     env_fp_phase_fix = ''
+    env_pp_mode = ''
+    env_pp_interval = ''
     rho_mix_mode_kind = 0
     need_full_coef_mix_spin = .false.
     enable_fp_phase_fix = .false.
     trace_density_charge = .false.
+    trace_density_profile = .false.
+    trace_density_profile_verbose = .false.
+    profile_this_call = .false.
+    profile_time_phi_cache = 0.0d0
+    profile_time_phase_cache = 0.0d0
+    profile_time_pw_cache = 0.0d0
+    profile_time_phi_block = 0.0d0
+    profile_time_phase_block = 0.0d0
+    profile_time_local_proj = 0.0d0
+    profile_time_psi_reduce = 0.0d0
+    profile_time_pw_coef = 0.0d0
+    profile_time_pw_zgemm = 0.0d0
+    profile_time_rho_accum = 0.0d0
+    profile_time_copy = 0.0d0
+    profile_blocks = 0
+    profile_batches = 0
+    profile_pw_blocks = 0
+    pp_mode_kind = cfg_mixed_density_pp_mode
+    pp_update_interval = cfg_mixed_density_pp_update_interval
+    pp_cache_valid_at_entry = .false.
     ! These switches are process-level controls.  Cache them once because this
     ! routine is called many times per RT step in self-consistent propagation.
     if (.not. density_env_initialized) then
@@ -227,6 +287,30 @@
           cfg_trace_density_charge = .false.
         end select
       end if
+      call get_environment_variable('SALMON_DG_DENSITY_PROFILE', env_density_profile, status=env_status)
+      if (env_status == 0) then
+        select case (adjustl(trim(env_density_profile)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cfg_trace_density_profile = .true.
+        case('0','n','N','no','NO','false','FALSE','off','OFF')
+          cfg_trace_density_profile = .false.
+        end select
+      end if
+      call get_environment_variable('SALMON_DG_DENSITY_PROFILE_VERBOSE', env_density_profile_verbose, status=env_status)
+      if (env_status == 0) then
+        select case (adjustl(trim(env_density_profile_verbose)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cfg_trace_density_profile_verbose = .true.
+        case('0','n','N','no','NO','false','FALSE','off','OFF')
+          cfg_trace_density_profile_verbose = .false.
+        end select
+      end if
+      call get_environment_variable('SALMON_DG_DENSITY_PROFILE_INTERVAL', env_density_profile_interval, status=env_status)
+      if (env_status == 0) then
+        read(env_density_profile_interval, *, iostat=env_status) cfg_density_profile_interval
+        if (env_status /= 0) cfg_density_profile_interval = 1
+      end if
+      cfg_density_profile_interval = max(1, cfg_density_profile_interval)
       call get_environment_variable('SALMON_DG_RHO_MIX_MODE', env_rho_mix_mode, status=env_status)
       if (env_status == 0) then
         select case (adjustl(trim(env_rho_mix_mode)))
@@ -252,6 +336,27 @@
           cfg_enable_fp_phase_fix = .false.
         end select
       end if
+      call get_environment_variable('SALMON_DG_MIXED_DENSITY_PP_MODE', env_pp_mode, status=env_status)
+      if (env_status == 0) then
+        select case (adjustl(trim(env_pp_mode)))
+        case('full','FULL')
+          cfg_mixed_density_pp_mode = pp_mode_full
+        case('diagonal','diag','DIAGONAL','DIAG')
+          cfg_mixed_density_pp_mode = pp_mode_diagonal
+        case('frozen','freeze','FROZEN','FREEZE')
+          cfg_mixed_density_pp_mode = pp_mode_frozen
+        case('every_n','every-n','EVERY_N','EVERY-N','interval','INTERVAL')
+          cfg_mixed_density_pp_mode = pp_mode_every_n
+        case default
+          cfg_mixed_density_pp_mode = pp_mode_full
+        end select
+      end if
+      call get_environment_variable('SALMON_DG_MIXED_DENSITY_PP_UPDATE_INTERVAL', env_pp_interval, status=env_status)
+      if (env_status == 0) then
+        read(env_pp_interval, *, iostat=env_status) cfg_mixed_density_pp_update_interval
+        if (env_status /= 0) cfg_mixed_density_pp_update_interval = 1
+      end if
+      cfg_mixed_density_pp_update_interval = max(1, cfg_mixed_density_pp_update_interval)
       density_env_initialized = .true.
     end if
     env_phi_block_cache_seen = cfg_env_phi_block_cache_seen
@@ -261,6 +366,10 @@
     enable_wannier_density = cfg_enable_wannier_density
     enable_global_wannier_density = cfg_enable_global_wannier_density
     trace_density_charge = cfg_trace_density_charge
+    trace_density_profile = cfg_trace_density_profile
+    trace_density_profile_verbose = cfg_trace_density_profile_verbose
+    profile_this_call = trace_density_profile .and. (itt_tag < 0 .or. mod(itt_tag, cfg_density_profile_interval) == 0)
+    if (profile_this_call) profile_total_start = get_wtime()
     use_buffer_wannier_density = enable_wannier_density .and. &
       dg_frag%buffer_wannier_flux_seed_applied .and. dg_frag%has_buffer_periodic_wannier_basis .and. &
       allocated(dg_frag%buffer_wannier_coef)
@@ -275,6 +384,8 @@
     env_rho_mix_mode = cfg_env_rho_mix_mode
     rho_mix_mode_kind = cfg_rho_mix_mode_kind
     enable_fp_phase_fix = cfg_enable_fp_phase_fix
+    pp_mode_kind = cfg_mixed_density_pp_mode
+    pp_update_interval = cfg_mixed_density_pp_update_interval
     need_full_coef_mix_spin = .false.
     density_payload_count = merge(system%nspin + 1, 1, system%nspin > 1)
     need_pw_cache_alloc = .false.
@@ -291,6 +402,16 @@
 
     if (.not. allocated(dg_frag%phi_frag)) return
     n_pw = max(0, dg_frag%n_plane_waves)
+    env_mixed_z_density = ''
+    use_mixed_z_density = .false.
+    call get_environment_variable('SALMON_DG_MIXED_Z', env_mixed_z_density, status=env_status)
+    if (env_status == 0) then
+      select case (adjustl(trim(env_mixed_z_density)))
+      case ('1','y','Y','yes','YES','true','TRUE','on','ON')
+        use_mixed_z_density = .true.
+      end select
+    end if
+    if (use_mixed_z_density) n_pw = 0
     if (enable_global_wannier_density) then
       if (n_pw > 0) &
         stop "DG global Wannier density path is only implemented for pure fragment basis"
@@ -320,6 +441,7 @@
     end if
     nbf_max = max(1, maxval(dg_frag%n_basis(:, 1:system%nspin)))
     n_pw = max(0, dg_frag%n_plane_waves)
+    if (use_mixed_z_density) n_pw = 0
     if (enable_wannier_density) then
       if (n_pw > 0) &
         stop "DG density Wannier path is only implemented for pure fragment basis"
@@ -333,9 +455,6 @@
         end if
         cfg_wannier_density_logged = .true.
       end if
-    end if
-    if (n_pw > 0) then
-      stop "DG density PW path requires row-local PW reconstruction; full PW coefficient cache is disabled"
     end if
     nbf_frag_cap = nbf_max
     if (dg_frag%parallel_mode_orbital .and. dg_frag%isize_frag > 1) then
@@ -470,26 +589,27 @@
     rho_bf(:, :, :) = 0.0d0
     if (system%nspin > 1) rho_s_bf(:, :, :, :) = 0.0d0
     rho_blk_reduced(:) = 0.0d0
-    if (n_pw > 0 .and. .not. env_phase_block_cache_seen) enable_density_phase_block_cache = .true.
-    if (n_pw <= 0) enable_density_phase_block_cache = .false.
     n_frag = dg_frag%n_mat_max
     max_mixed_basis = 0
     if (n_pw > 0 .and. allocated(dg_frag%mixed_basis_dim)) then
       max_mixed_basis = maxval(dg_frag%mixed_basis_dim(1:system%nspin))
-    end if
-    n_tot = n_frag + n_pw
-    if (n_pw > 0) then
-      allocate(phase_cache(grid_block_size, n_pw))
-      allocate(kpw_hx(n_pw), kpw_hy(n_pw), kpw_hz(n_pw))
-      kpw_hx(1:n_pw) = dg_frag%k_pw(1, 1:n_pw) * dg_frag%hgs(1)
-      kpw_hy(1:n_pw) = dg_frag%k_pw(2, 1:n_pw) * dg_frag%hgs(2)
-      kpw_hz(1:n_pw) = dg_frag%k_pw(3, 1:n_pw) * dg_frag%hgs(3)
     end if
 
     ! Mixed-basis density reconstruction is only valid when PW channels exist.
     ! For n_pw==0, stay on the pure fragment-basis path.
     use_mixed_density = (n_pw > 0 .and. dg_frag%mixed_basis_ready .and. allocated(dg_frag%mixed_transform) .and. &
       allocated(dg_frag%coef_mix) .and. allocated(dg_frag%mixed_basis_dim))
+    split_pp_density = use_mixed_density .and. n_pw > 0 .and. pp_mode_kind /= pp_mode_full
+    pp_cache_mode_active = split_pp_density .and. &
+      (pp_mode_kind == pp_mode_frozen .or. pp_mode_kind == pp_mode_every_n)
+    if (split_pp_density .and. (.not. dg_frag%parallel_mode_orbital)) then
+      if (dg_frag%id == 0) then
+        write(*,'(1x,a)') &
+          "[FATAL] SALMON_DG_MIXED_DENSITY_PP_MODE other than full currently requires orbital fragment mode."
+        flush(6)
+      end if
+      stop "DG mixed density PP reduced mode requires orbital fragment mode"
+    end if
     ! Density reconstruction uses subgroup-distributed projection and collective reductions on icomm_frag.
     subgroup_root_rank = dg_frag%id - dg_frag%id_frag
     total_send_pts = 0
@@ -509,6 +629,40 @@
     if (use_mixed_density) then
       use_mixed_density = (max_mixed_basis > 0)
     end if
+    if (.not. use_mixed_density .and. n_pw > 0) then
+      ! This density call can happen before the mixed basis is ready
+      ! (for example while constructing the projected LCFO seed density).
+      ! In that case the PW coefficients are not consumed by the density
+      ! evaluator.  Keep dg_frag%n_plane_waves intact for Hamiltonian/RT
+      ! setup, but use the pure fragment path locally.
+      n_pw = 0
+      n_tot = n_frag
+      enable_density_phase_block_cache = .false.
+      split_pp_density = .false.
+      pp_cache_mode_active = .false.
+    else
+      split_pp_density = use_mixed_density .and. n_pw > 0 .and. pp_mode_kind /= pp_mode_full
+      pp_cache_mode_active = split_pp_density .and. &
+        (pp_mode_kind == pp_mode_frozen .or. pp_mode_kind == pp_mode_every_n)
+    end if
+    if (n_pw > 0 .and. .not. env_phase_block_cache_seen) enable_density_phase_block_cache = .true.
+    if (n_pw <= 0) enable_density_phase_block_cache = .false.
+    n_tot = n_frag + n_pw
+    if (n_pw > 0) then
+      allocate(phase_cache(grid_block_size, n_pw))
+      allocate(kpw_hx(n_pw), kpw_hy(n_pw), kpw_hz(n_pw))
+      kpw_hx(1:n_pw) = dg_frag%k_pw(1, 1:n_pw) * dg_frag%hgs(1)
+      kpw_hy(1:n_pw) = dg_frag%k_pw(2, 1:n_pw) * dg_frag%hgs(2)
+      kpw_hz(1:n_pw) = dg_frag%k_pw(3, 1:n_pw) * dg_frag%hgs(3)
+    end if
+    if (profile_this_call .and. (trace_density_profile_verbose .or. dg_frag%id == 0)) then
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,l1,a,l1,a,l1)') &
+        '[DG-DENSITY-PROFILE-BEGIN] rank=', dg_frag%id, ' itt=', itt_tag, &
+        ' n_pw=', n_pw, ' max_mixed=', max_mixed_basis, &
+        ' mixed=', use_mixed_density, ' phi_cache=', enable_density_phi_block_cache, &
+        ' phase_cache=', enable_density_phase_block_cache
+      flush(6)
+    end if
     if (use_mixed_density) then
       ! The mixed-density projector now forms rho from occupied-state
       ! amplitudes after reducing the fragment-basis contribution across
@@ -526,6 +680,10 @@
       allocate(density_mix_tmp(grid_block_size, max_mixed_basis))
       allocate(basis_mix_blk_t(max_mixed_basis, grid_block_size))
       allocate(density_mix_tmp_t(max_mixed_basis, grid_block_size))
+      if (split_pp_density) then
+        allocate(psi_pw_blk_z(grid_block_size, state_block_size))
+        allocate(rho_pp_blk(grid_block_size))
+      end if
       allocate(transform_frag_spin(dg_frag%nstate_frag, max_mixed_basis, system%nspin))
       allocate(n_basis_mix_spin(system%nspin))
       n_basis_mix_spin(:) = 0
@@ -656,14 +814,83 @@
         block_idx_global = block_idx_global + nblocks_ifrag
       end do
     end if
+    if (use_mixed_density .and. .not. cfg_mixed_density_pp_logged .and. dg_frag%id == 0) then
+      select case (pp_mode_kind)
+      case (pp_mode_full)
+        write(*,'(1x,a)') "[DG-DENSITY-MIXED] PP feedback mode=full"
+      case (pp_mode_diagonal)
+        write(*,'(1x,a)') "[DG-DENSITY-MIXED] PP feedback mode=diagonal-only; WW/WP updated every step"
+      case (pp_mode_frozen)
+        write(*,'(1x,a)') "[DG-DENSITY-MIXED] PP feedback mode=frozen; WW/WP updated every step"
+      case (pp_mode_every_n)
+        write(*,'(1x,a,i0)') "[DG-DENSITY-MIXED] PP feedback mode=update-every-N; N=", pp_update_interval
+      end select
+      cfg_mixed_density_pp_logged = .true.
+    end if
+    if (pp_cache_mode_active) then
+      nblocks_max = max(1, maxval(dg_frag%density_block_nblocks))
+      if ((.not. allocated(dg_frag%mixed_density_pp_cache)) .or. &
+          size(dg_frag%mixed_density_pp_cache, 1) /= grid_block_size .or. &
+          size(dg_frag%mixed_density_pp_cache, 2) /= nblocks_max .or. &
+          size(dg_frag%mixed_density_pp_cache, 3) /= ifrag_count .or. &
+          size(dg_frag%mixed_density_pp_cache, 4) /= system%nspin .or. &
+          dg_frag%mixed_density_pp_cache_mode /= pp_mode_kind .or. &
+          dg_frag%mixed_density_pp_cache_interval /= pp_update_interval) then
+        if (allocated(dg_frag%mixed_density_pp_cache)) deallocate(dg_frag%mixed_density_pp_cache)
+        allocate(dg_frag%mixed_density_pp_cache(grid_block_size, nblocks_max, ifrag_count, system%nspin))
+        dg_frag%mixed_density_pp_cache(:, :, :, :) = 0.0d0
+        dg_frag%mixed_density_pp_cache_mode = pp_mode_kind
+        dg_frag%mixed_density_pp_cache_interval = pp_update_interval
+        dg_frag%mixed_density_pp_cache_valid = .false.
+      end if
+      pp_cache_valid_at_entry = dg_frag%mixed_density_pp_cache_valid
+    else if (allocated(dg_frag%mixed_density_pp_cache)) then
+      deallocate(dg_frag%mixed_density_pp_cache)
+      dg_frag%mixed_density_pp_cache_valid = .false.
+    end if
 
-    if (n_pw > 0) then
+    if (n_pw > 0 .and. use_mixed_density) then
       need_pw_cache_alloc = (.not. allocated(dg_frag%coef_pw_full_cache))
       need_pw_cache_expand = (.not. need_pw_cache_alloc) .and. dg_frag%coef_pw_full_cache_nstate < nocc_cache
       if (need_pw_cache_alloc .or. need_pw_cache_expand) then
+        if (profile_this_call .and. (trace_density_profile_verbose .or. dg_frag%id == 0)) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,l1,a,l1)') &
+            '[DG-DENSITY-PROFILE-PW-CACHE-BEGIN] rank=', dg_frag%id, ' itt=', itt_tag, &
+            ' n_pw=', n_pw, ' nstate=', nocc_cache, &
+            ' alloc=', need_pw_cache_alloc, ' expand=', need_pw_cache_expand
+          flush(6)
+        end if
+        if (profile_this_call) profile_t0 = get_wtime()
         call refresh_pw_coef_cache(dg_frag, nocc_cache)
+        if (profile_this_call) then
+          profile_t1 = get_wtime()
+          profile_time_pw_cache = profile_time_pw_cache + (profile_t1 - profile_t0)
+          if (trace_density_profile_verbose .or. dg_frag%id == 0) then
+            write(*,'(1x,a,i0,a,i0,a,es12.4)') &
+              '[DG-DENSITY-PROFILE-PW-CACHE-END] rank=', dg_frag%id, ' itt=', itt_tag, &
+              ' pw_cache_time=', profile_time_pw_cache
+            flush(6)
+          end if
+        end if
         rebuilt_pw_cache = .true.
       end if
+      if (dg_frag%mixed_basis_identity_raw) then
+        nstate_sync = min(nocc_cache, size(dg_frag%coef_mix, 2))
+        dg_frag%coef_mix(:, 1:nstate_sync, :) = (0.0d0, 0.0d0)
+        do ispin = 1, system%nspin
+          if (allocated(dg_frag%coef)) then
+            dg_frag%coef_mix(1:min(n_frag, size(dg_frag%coef, 1)), 1:nstate_sync, ispin) = &
+              dg_frag%coef(1:min(n_frag, size(dg_frag%coef, 1)), 1:nstate_sync, ispin)
+          end if
+          if (allocated(dg_frag%coef_pw_full_cache)) then
+            dg_frag%coef_mix(n_frag+1:n_frag+n_pw, 1:nstate_sync, ispin) = &
+              dg_frag%coef_pw_full_cache(1:n_pw, 1:nstate_sync, ispin)
+          end if
+        end do
+      end if
+    else if (n_pw > 0 .and. allocated(dg_frag%coef_pw_full_cache)) then
+      deallocate(dg_frag%coef_pw_full_cache)
+      dg_frag%coef_pw_full_cache_nstate = 0
     end if
     if (n_pw == 0) then
       allocate(D_partial_re(nbf_max, nbf_max))
@@ -711,6 +938,7 @@
           size(dg_frag%density_phi_block_cache, 2) /= nbf_frag_cap
       end if
       if (need_phi_cache_alloc .or. need_phi_count_alloc .or. need_phi_cache_invalid .or. need_phi_cache_resize) then
+        if (profile_this_call) profile_t0 = get_wtime()
         if (allocated(dg_frag%density_phi_block_cache)) deallocate(dg_frag%density_phi_block_cache)
         if (allocated(dg_frag%density_phi_block_count)) deallocate(dg_frag%density_phi_block_count)
         nblocks_max = max(1, maxval(dg_frag%density_block_nblocks))
@@ -738,14 +966,18 @@
           do block_cache_idx = 1, dg_frag%density_phi_block_count(i_local)
             igrid0 = 1 + (block_cache_idx - 1) * grid_block_size
             npt_cache = min(grid_block_size, local_grid_count - igrid0 + 1)
+            if (profile_this_call .and. (trace_density_profile_verbose .or. dg_frag%id == 0)) then
+              write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+                '[DG-DENSITY-PROFILE-PHI-CACHE-BLOCK] rank=', dg_frag%id, ' itt=', itt_tag, &
+                ' ifrag=', ifrag, ' block=', block_cache_idx, ' npt=', npt_cache, &
+                ' nbf_local=', nbf_frag_count
+              flush(6)
+            end if
 !$omp parallel do private(igrid, ixg, iyg, izg, bx, by, bz, ib_loc, ib_global) schedule(static)
             do igrid = 1, npt_cache
-              ixg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%ixg
-              iyg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%iyg
-              izg = dg_frag%density_grid_points(igrid0 + igrid - 1, i_local)%izg
-              bx = map_global_to_phi_box_coord_ham(ixg, phi_lb1, phi_ub1, phi_lg1)
-              by = map_global_to_phi_box_coord_ham(iyg, phi_lb2, phi_ub2, phi_lg2)
-              bz = map_global_to_phi_box_coord_ham(izg, phi_lb3, phi_ub3, phi_lg3)
+              bx = dg_frag%density_grid_bx(igrid0 + igrid - 1, i_local)
+              by = dg_frag%density_grid_by(igrid0 + igrid - 1, i_local)
+              bz = dg_frag%density_grid_bz(igrid0 + igrid - 1, i_local)
               if (bx == 0 .or. by == 0 .or. bz == 0) cycle
               do ib_loc = nbf_frag_is, nbf_frag_ie
                 ib_global = ib_s_frag + ib_loc - nbf_frag_is
@@ -759,6 +991,16 @@
         dg_frag%density_phi_block_size = grid_block_size
         dg_frag%density_phi_block_cache_valid = .true.
         rebuilt_phi_block_cache = .true.
+        if (profile_this_call) then
+          profile_t1 = get_wtime()
+          profile_time_phi_cache = profile_time_phi_cache + (profile_t1 - profile_t0)
+          if (trace_density_profile_verbose .or. dg_frag%id == 0) then
+            write(*,'(1x,a,i0,a,i0,a,es12.4)') &
+              '[DG-DENSITY-PROFILE-CACHE] rank=', dg_frag%id, ' itt=', itt_tag, &
+              ' phi_cache_time=', profile_time_phi_cache
+            flush(6)
+          end if
+        end if
       end if
     else
       if (allocated(dg_frag%density_phi_block_cache)) deallocate(dg_frag%density_phi_block_cache)
@@ -775,6 +1017,7 @@
       need_phase_cache_resize = dg_frag%density_phase_block_size /= grid_block_size
       need_phase_cache_npw = dg_frag%density_phase_block_npw /= n_pw
       if (need_phase_cache_alloc .or. need_phase_cache_invalid .or. need_phase_cache_resize .or. need_phase_cache_npw) then
+        if (profile_this_call) profile_t0 = get_wtime()
         if (allocated(dg_frag%density_phase_block_cache)) deallocate(dg_frag%density_phase_block_cache)
         nblocks_max = max(1, maxval(dg_frag%density_block_nblocks))
         allocate(dg_frag%density_phase_block_cache(grid_block_size, n_pw, nblocks_max, ifrag_count))
@@ -804,6 +1047,16 @@
         dg_frag%density_phase_block_npw = n_pw
         dg_frag%density_phase_block_cache_valid = .true.
         rebuilt_phase_block_cache = .true.
+        if (profile_this_call) then
+          profile_t1 = get_wtime()
+          profile_time_phase_cache = profile_time_phase_cache + (profile_t1 - profile_t0)
+          if (trace_density_profile_verbose .or. dg_frag%id == 0) then
+            write(*,'(1x,a,i0,a,i0,a,es12.4)') &
+              '[DG-DENSITY-PROFILE-CACHE] rank=', dg_frag%id, ' itt=', itt_tag, &
+              ' phase_cache_time=', profile_time_phase_cache
+            flush(6)
+          end if
+        end if
       end if
     else
       if (allocated(dg_frag%density_phase_block_cache)) deallocate(dg_frag%density_phase_block_cache)
@@ -821,6 +1074,12 @@
         nxyz(1:3) = dg_frag%nxyz_domain(1:3, ifrag)
         ngrid = dg_frag%density_grid_point_count(i_local)
         nblocks_ifrag = dg_frag%density_block_nblocks(i_local)
+        if (profile_this_call .and. (trace_density_profile_verbose .or. dg_frag%id == 0)) then
+          write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+            '[DG-DENSITY-PROFILE-FRAG-BEGIN] rank=', dg_frag%id, ' itt=', itt_tag, &
+            ' ifrag=', ifrag, ' ngrid=', ngrid, ' nblocks=', nblocks_ifrag
+          flush(6)
+        end if
         first_block_offset = dg_frag%density_block_first_offset(i_local)
         block_step_blocks = dg_frag%density_block_step(i_local)
         valid_basis_count_spin(:) = 0
@@ -1076,6 +1335,13 @@
             flush(6)
             stop "DG-Fragment RT: density block size invalid"
           end if
+          if (profile_this_call) profile_blocks = profile_blocks + 1
+          if (profile_this_call .and. (trace_density_profile_verbose .or. dg_frag%id == 0)) then
+            write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+              '[DG-DENSITY-PROFILE-BLOCK-BEGIN] rank=', dg_frag%id, ' itt=', itt_tag, &
+              ' ifrag=', ifrag, ' block=', block_offset + 1, ' npt=', npt_blk
+            flush(6)
+          end if
           density_on_frag_root = dg_frag%parallel_mode_orbital .and. dg_frag%isize_frag > 1 .and. &
             dg_frag%icomm_frag /= COMM_GROUP_NULL
           local_grid_count = 0
@@ -1118,6 +1384,7 @@
           end do
 
           if (n_pw > 0) then
+            if (profile_this_call) profile_t0 = get_wtime()
             if (enable_density_phase_block_cache) then
               phase_cache(1:npt_blk, 1:n_pw) = &
                 dg_frag%density_phase_block_cache(1:npt_blk, 1:n_pw, block_offset + 1, i_local)
@@ -1134,6 +1401,10 @@
                 end do
               end do
 !$omp end parallel do
+            end if
+            if (profile_this_call) then
+              profile_t1 = get_wtime()
+              profile_time_phase_block = profile_time_phase_block + (profile_t1 - profile_t0)
             end if
           end if
 
@@ -1154,11 +1425,17 @@
             nbf_frag_is = 1
             nbf_frag_ie = nbf_frag_count
           if (enable_density_phi_block_cache) then
+            if (profile_this_call) profile_t0 = get_wtime()
             if (nbf_frag_count > 0) then
               phi_blk(1:npt_blk, nbf_frag_is:nbf_frag_ie) = &
                 dg_frag%density_phi_block_cache(1:npt_blk, nbf_frag_is:nbf_frag_ie, block_offset + 1, i_local)
             end if
+            if (profile_this_call) then
+              profile_t1 = get_wtime()
+              profile_time_phi_block = profile_time_phi_block + (profile_t1 - profile_t0)
+            end if
           else
+            if (profile_this_call) profile_t0 = get_wtime()
             if (nbf_frag_count > 0) phi_blk(1:npt_blk, nbf_frag_is:nbf_frag_ie) = 0.0d0
 !$omp parallel do private(igrid, ixg, iyg, izg, bx, by, bz, ib_loc, ib_global) schedule(static)
             do igrid = 1, npt_blk
@@ -1175,6 +1452,10 @@
               end do
             end do
 !$omp end parallel do
+            if (profile_this_call) then
+              profile_t1 = get_wtime()
+              profile_time_phi_block = profile_time_phi_block + (profile_t1 - profile_t0)
+            end if
           end if
           if (nbf_frag_count > 0) then
             call assert_real_matrix_finite_density('phi_blk', phi_blk, &
@@ -1200,10 +1481,12 @@
                   end do
                 end if
                 do io0 = 1, nocc_spin, state_block_size
+                  if (profile_this_call) profile_batches = profile_batches + 1
                   nbatch = min(state_block_size, nocc_spin - io0 + 1)
                   psi_blk_re(1:npt_blk, 1:nbatch) = 0.0d0
                   psi_blk_im(1:npt_blk, 1:nbatch) = 0.0d0
                   if (nbf_frag_count > 0) then
+                    if (profile_this_call) profile_t0 = get_wtime()
                     coef_c_frag(1:nbf_frag_count, 1:nbatch) = matmul( &
                       transform_frag_spin(ib_s_frag:ib_e_frag, 1:n_basis_mix, ispin), &
                       coef_mix_spin(1:n_basis_mix, io0:io0+nbatch-1, ispin))
@@ -1213,45 +1496,172 @@
                                coef_blk_ri, nbf_max, 0.0d0, psi_blk_ri, grid_block_size)
                     psi_blk_re(1:npt_blk, 1:nbatch) = psi_blk_ri(1:npt_blk, 1:nbatch)
                     psi_blk_im(1:npt_blk, 1:nbatch) = psi_blk_ri(1:npt_blk, nbatch+1:2*nbatch)
+                    if (profile_this_call) then
+                      profile_t1 = get_wtime()
+                      profile_time_local_proj = profile_time_local_proj + (profile_t1 - profile_t0)
+                    end if
                   end if
                   density_mix_tmp(1:npt_blk, 1:nbatch) = cmplx( &
                     psi_blk_re(1:npt_blk, 1:nbatch), psi_blk_im(1:npt_blk, 1:nbatch), kind=8)
+                  if (profile_this_call) profile_t0 = get_wtime()
                   call comm_summation(density_mix_tmp(1:npt_blk, 1:nbatch), &
                     basis_mix_blk(1:npt_blk, 1:nbatch), npt_blk * nbatch, dg_frag%icomm_frag, 0)
+                  if (profile_this_call) then
+                    profile_t1 = get_wtime()
+                    profile_time_psi_reduce = profile_time_psi_reduce + (profile_t1 - profile_t0)
+                  end if
                   if (dg_frag%is_frag_root) then
                     density_mix_tmp(1:npt_blk, 1:nbatch) = basis_mix_blk(1:npt_blk, 1:nbatch)
-                    if (n_pw > 0) then
-                      do ipw0 = 1, n_pw, pw_block_size
-                        npw_blk = min(pw_block_size, n_pw - ipw0 + 1)
-                        coef_pw_blk(1:npw_blk, 1:nbatch) = matmul( &
-                          transform_pw_spin(ipw0:ipw0+npw_blk-1, 1:n_basis_mix, ispin), &
-                          coef_mix_spin(1:n_basis_mix, io0:io0+nbatch-1, ispin))
-                        call zgemm('N', 'N', npt_blk, nbatch, npw_blk, zone, phase_cache(1, ipw0), grid_block_size, &
-                                   coef_pw_blk, pw_block_size, zone, density_mix_tmp, grid_block_size)
-                      end do
-                    end if
                     occ_blk(1:nbatch) = occ_cache(io0:io0+nbatch-1)
-                    do io = 1, nbatch
-                      occ_factor = occ_blk(io)
-                      if (occ_factor <= 0.0d0) cycle
+                    if (split_pp_density) then
+                      psi_pw_blk_z(1:npt_blk, 1:nbatch) = (0.0d0, 0.0d0)
+                      pp_diag_accum = 0.0d0
+                      if (n_pw > 0) then
+                        do ipw0 = 1, n_pw, pw_block_size
+                          if (profile_this_call) profile_pw_blocks = profile_pw_blocks + 1
+                          npw_blk = min(pw_block_size, n_pw - ipw0 + 1)
+                          if (profile_this_call) profile_t0 = get_wtime()
+                          coef_pw_blk(1:npw_blk, 1:nbatch) = matmul( &
+                            transform_pw_spin(ipw0:ipw0+npw_blk-1, 1:n_basis_mix, ispin), &
+                            coef_mix_spin(1:n_basis_mix, io0:io0+nbatch-1, ispin))
+                          if (profile_this_call) then
+                            profile_t1 = get_wtime()
+                            profile_time_pw_coef = profile_time_pw_coef + (profile_t1 - profile_t0)
+                            profile_t0 = get_wtime()
+                          end if
+                          call zgemm('N', 'N', npt_blk, nbatch, npw_blk, zone, phase_cache(1, ipw0), grid_block_size, &
+                                     coef_pw_blk, pw_block_size, zone, psi_pw_blk_z, grid_block_size)
+                          if (profile_this_call) then
+                            profile_t1 = get_wtime()
+                            profile_time_pw_zgemm = profile_time_pw_zgemm + (profile_t1 - profile_t0)
+                          end if
+                          if (pp_mode_kind == pp_mode_diagonal) then
+                            do io = 1, nbatch
+                              occ_factor = occ_blk(io)
+                              if (occ_factor <= 0.0d0) cycle
+                              do ipw = 1, npw_blk
+                                pp_diag_accum = pp_diag_accum + occ_factor * &
+                                  (real(coef_pw_blk(ipw, io), kind=8)**2 + aimag(coef_pw_blk(ipw, io))**2) * &
+                                  inv_sqrt_vol * inv_sqrt_vol
+                              end do
+                            end do
+                          end if
+                        end do
+                      end if
+                      if (io0 == 1) rho_pp_blk(1:npt_blk) = 0.0d0
+                      pp_update_now = .true.
+                      if (pp_mode_kind == pp_mode_frozen) then
+                        pp_update_now = .not. pp_cache_valid_at_entry
+                      else if (pp_mode_kind == pp_mode_every_n) then
+                        pp_update_now = (.not. pp_cache_valid_at_entry) .or. &
+                          (itt_tag >= 0 .and. mod(itt_tag, pp_update_interval) == 0)
+                      end if
+                      if (profile_this_call) profile_t0 = get_wtime()
+                      do io = 1, nbatch
+                        occ_factor = occ_blk(io)
+                        if (occ_factor <= 0.0d0) cycle
 !$omp parallel do private(igrid) schedule(static)
-                      do igrid = 1, npt_blk
-                        rho_blk(igrid) = rho_blk(igrid) + occ_factor * &
-                          (real(density_mix_tmp(igrid, io), kind=8)**2 + aimag(density_mix_tmp(igrid, io))**2)
+                        do igrid = 1, npt_blk
+                          rho_blk(igrid) = rho_blk(igrid) + occ_factor * &
+                            (real(density_mix_tmp(igrid, io), kind=8)**2 + &
+                             aimag(density_mix_tmp(igrid, io))**2 + &
+                             2.0d0 * real(conjg(density_mix_tmp(igrid, io)) * psi_pw_blk_z(igrid, io), kind=8))
+                          if (pp_update_now .and. pp_mode_kind /= pp_mode_diagonal) then
+                            rho_pp_blk(igrid) = rho_pp_blk(igrid) + occ_factor * &
+                              (real(psi_pw_blk_z(igrid, io), kind=8)**2 + aimag(psi_pw_blk_z(igrid, io))**2)
+                          end if
+                        end do
+!$omp end parallel do
+                      end do
+                      if (profile_this_call) then
+                        profile_t1 = get_wtime()
+                        profile_time_rho_accum = profile_time_rho_accum + (profile_t1 - profile_t0)
+                      end if
+                      if (pp_mode_kind == pp_mode_diagonal .and. pp_update_now) then
+!$omp parallel do private(igrid) schedule(static)
+                        do igrid = 1, npt_blk
+                          rho_pp_blk(igrid) = rho_pp_blk(igrid) + pp_diag_accum
+                        end do
+!$omp end parallel do
+                      end if
+                      if (io0 + nbatch - 1 >= nocc_spin) then
+                        if (pp_cache_mode_active) then
+                          if (pp_update_now) then
+                            dg_frag%mixed_density_pp_cache(1:npt_blk, block_offset + 1, i_local, ispin) = &
+                              rho_pp_blk(1:npt_blk)
+                          else
+                            rho_pp_blk(1:npt_blk) = &
+                              dg_frag%mixed_density_pp_cache(1:npt_blk, block_offset + 1, i_local, ispin)
+                          end if
+                        end if
+!$omp parallel do private(igrid) schedule(static)
+                        do igrid = 1, npt_blk
+                          rho_blk(igrid) = rho_blk(igrid) + rho_pp_blk(igrid)
+                        end do
+!$omp end parallel do
+                      end if
+                    else
+                      if (n_pw > 0) then
+                        do ipw0 = 1, n_pw, pw_block_size
+                          if (profile_this_call) profile_pw_blocks = profile_pw_blocks + 1
+                          npw_blk = min(pw_block_size, n_pw - ipw0 + 1)
+                          if (profile_this_call) profile_t0 = get_wtime()
+                          coef_pw_blk(1:npw_blk, 1:nbatch) = matmul( &
+                            transform_pw_spin(ipw0:ipw0+npw_blk-1, 1:n_basis_mix, ispin), &
+                            coef_mix_spin(1:n_basis_mix, io0:io0+nbatch-1, ispin))
+                          if (profile_this_call) then
+                            profile_t1 = get_wtime()
+                            profile_time_pw_coef = profile_time_pw_coef + (profile_t1 - profile_t0)
+                            profile_t0 = get_wtime()
+                          end if
+                          call zgemm('N', 'N', npt_blk, nbatch, npw_blk, zone, phase_cache(1, ipw0), grid_block_size, &
+                                     coef_pw_blk, pw_block_size, zone, density_mix_tmp, grid_block_size)
+                          if (profile_this_call) then
+                            profile_t1 = get_wtime()
+                            profile_time_pw_zgemm = profile_time_pw_zgemm + (profile_t1 - profile_t0)
+                          end if
+                        end do
+                      end if
+                      if (profile_this_call) profile_t0 = get_wtime()
+                      do io = 1, nbatch
+                        occ_factor = occ_blk(io)
+                        if (occ_factor <= 0.0d0) cycle
+!$omp parallel do private(igrid) schedule(static)
+                        do igrid = 1, npt_blk
+                          rho_blk(igrid) = rho_blk(igrid) + occ_factor * &
+                            (real(density_mix_tmp(igrid, io), kind=8)**2 + aimag(density_mix_tmp(igrid, io))**2)
                       end do
 !$omp end parallel do
-                    end do
+                      end do
+                      if (profile_this_call) then
+                        profile_t1 = get_wtime()
+                        profile_time_rho_accum = profile_time_rho_accum + (profile_t1 - profile_t0)
+                      end if
+                    end if
                   end if
                 end do
               else
+                if (profile_this_call) profile_t0 = get_wtime()
                 basis_mix_blk(1:npt_blk, 1:n_basis_mix) = (0.0d0, 0.0d0)
                 if (nbf_frag_count > 0) then
                   basis_mix_blk(1:npt_blk, 1:n_basis_mix) = matmul(phi_blk(1:npt_blk, nbf_frag_is:nbf_frag_ie), &
                     transform_frag_spin(ib_s_frag:ib_e_frag, 1:n_basis_mix, ispin))
                 end if
+                if (profile_this_call) then
+                  profile_t1 = get_wtime()
+                  profile_time_local_proj = profile_time_local_proj + (profile_t1 - profile_t0)
+                end if
                 if (n_pw > 0) then
+                  if (profile_this_call) then
+                    profile_pw_blocks = profile_pw_blocks + 1
+                    profile_t0 = get_wtime()
+                  end if
                   call zgemm('N', 'N', npt_blk, n_basis_mix, n_pw, zone, phase_cache, grid_block_size, &
                     transform_pw_spin(1, 1, ispin), n_pw, zone, basis_mix_blk, grid_block_size)
+                  if (profile_this_call) then
+                    profile_t1 = get_wtime()
+                    profile_time_pw_zgemm = profile_time_pw_zgemm + (profile_t1 - profile_t0)
+                  end if
                 end if
                   occ_cache(1:nocc_cache) = 0.0d0
                   occ_cache(1:nocc_spin) = 1.0d0
@@ -1263,9 +1673,16 @@
                     end do
                   end if
                   do io0 = 1, nocc_spin, state_block_size
+                    if (profile_this_call) profile_batches = profile_batches + 1
                     nbatch = min(state_block_size, nocc_spin - io0 + 1)
+                    if (profile_this_call) profile_t0 = get_wtime()
                     call zgemm('N', 'N', npt_blk, nbatch, n_basis_mix, zone, basis_mix_blk, grid_block_size, &
                       coef_mix_spin(1, io0, ispin), max_mixed_basis, zzero, pw_tmp_z, grid_block_size)
+                    if (profile_this_call) then
+                      profile_t1 = get_wtime()
+                      profile_time_local_proj = profile_time_local_proj + (profile_t1 - profile_t0)
+                      profile_t0 = get_wtime()
+                    end if
                     occ_blk(1:nbatch) = occ_cache(io0:io0+nbatch-1)
                     do io = 1, nbatch
                       occ_factor = occ_blk(io)
@@ -1277,6 +1694,10 @@
                       end do
 !$omp end parallel do
                     end do
+                    if (profile_this_call) then
+                      profile_t1 = get_wtime()
+                      profile_time_rho_accum = profile_time_rho_accum + (profile_t1 - profile_t0)
+                    end if
                   end do
               end if
               if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL .and. &
@@ -1784,6 +2205,19 @@
                     ifrag, ispin, block_offset, npt_blk)
                 end if
             end if
+            if (profile_this_call .and. (trace_density_profile_verbose .or. dg_frag%id == 0)) then
+              write(*,'(1x,a,i0,a,i0,a,i0,a,i0,7(a,es12.4))') &
+                '[DG-DENSITY-PROFILE-BLOCK-END] rank=', dg_frag%id, ' itt=', itt_tag, &
+                ' ifrag=', ifrag, ' block=', block_offset + 1, &
+                ' phi=', profile_time_phi_block, &
+                ' phase=', profile_time_phase_block, &
+                ' local=', profile_time_local_proj, &
+                ' reduce=', profile_time_psi_reduce, &
+                ' pwcoef=', profile_time_pw_coef, &
+                ' pwzgemm=', profile_time_pw_zgemm, &
+                ' rho=', profile_time_rho_accum
+              flush(6)
+            end if
           end do
         end do
         density_on_frag_root = dg_frag%parallel_mode_orbital .and. dg_frag%isize_frag > 1 .and. &
@@ -1791,6 +2225,19 @@
         if ((.not. density_on_frag_root) .or. dg_frag%is_frag_root) then
           call assert_rho_bf_with_sources('rho_bf-after-fragment-loop', &
             ifrag, 0, block_idx_global, max(1, min(grid_block_size, ngrid)))
+        end if
+        if (profile_this_call .and. (trace_density_profile_verbose .or. dg_frag%id == 0)) then
+          write(*,'(1x,a,i0,a,i0,a,i0,7(a,es12.4))') &
+            '[DG-DENSITY-PROFILE-FRAG-END] rank=', dg_frag%id, ' itt=', itt_tag, &
+            ' ifrag=', ifrag, &
+            ' phi=', profile_time_phi_block, &
+            ' phase=', profile_time_phase_block, &
+            ' local=', profile_time_local_proj, &
+            ' reduce=', profile_time_psi_reduce, &
+            ' pwcoef=', profile_time_pw_coef, &
+            ' pwzgemm=', profile_time_pw_zgemm, &
+            ' rho=', profile_time_rho_accum
+          flush(6)
         end if
         block_idx_global = block_idx_global + nblocks_ifrag
       end do
@@ -1970,6 +2417,7 @@
 
     ! rho_bf -> rho_s boundary: only the authoritative mg-local density is
     ! materialized below for downstream Hartree/XC/reconstruct consumers.
+    if (profile_this_call) profile_t0 = get_wtime()
     if (lbound(rho%f, 1) /= rho_x_lo .or. ubound(rho%f, 1) /= rho_x_hi .or. &
         lbound(rho%f, 2) /= rho_y_lo .or. ubound(rho%f, 2) /= rho_y_hi .or. &
         lbound(rho%f, 3) /= rho_z_lo .or. ubound(rho%f, 3) /= rho_z_hi) then
@@ -2012,6 +2460,20 @@
         lbound(rho_s(ispin)%f, 1), lbound(rho_s(ispin)%f, 2), lbound(rho_s(ispin)%f, 3), &
         rho_x_lo, rho_x_hi, rho_y_lo, rho_y_hi, rho_z_lo, rho_z_hi, ispin)
     end do
+    call apply_wpw_reduced_density_to_production(dg_frag, system, rho, rho_s, itt_tag)
+    call assert_real_array3_finite_density('rho-after-wpw-reduced-density', rho%f, &
+      lbound(rho%f, 1), lbound(rho%f, 2), lbound(rho%f, 3), &
+      rho_x_lo, rho_x_hi, rho_y_lo, rho_y_hi, rho_z_lo, rho_z_hi, 0)
+    do ispin = 1, system%nspin
+      call assert_real_array3_finite_density('rho_s-after-wpw-reduced-density', rho_s(ispin)%f, &
+        lbound(rho_s(ispin)%f, 1), lbound(rho_s(ispin)%f, 2), lbound(rho_s(ispin)%f, 3), &
+        rho_x_lo, rho_x_hi, rho_y_lo, rho_y_hi, rho_z_lo, rho_z_hi, ispin)
+    end do
+    if (profile_this_call) then
+      profile_t1 = get_wtime()
+      profile_time_copy = profile_time_copy + (profile_t1 - profile_t0)
+    end if
+    if (pp_cache_mode_active) dg_frag%mixed_density_pp_cache_valid = .true.
     total_charge_local = 0.0d0
     do iz = rho_z_lo, rho_z_hi
       do iy = rho_y_lo, rho_y_hi
@@ -2029,6 +2491,26 @@
         '[DG-DENSITY-TRACE] rank=', dg_frag%id, ' itt=', itt_tag, ' frag_group=', dg_frag%ifrag_group, &
         ' sparse_exchange=', density_exchange_active, ' wannier=', enable_wannier_density, &
         ' charge=', total_charge_local, ' rho_min=', rho_trace_min, ' rho_max=', rho_trace_max
+      flush(6)
+    end if
+    if (profile_this_call .and. (trace_density_profile_verbose .or. dg_frag%id == 0)) then
+      profile_t1 = get_wtime()
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,12(a,es12.4))') &
+        '[DG-DENSITY-PROFILE] rank=', dg_frag%id, ' itt=', itt_tag, &
+        ' blocks=', profile_blocks, ' batches=', profile_batches, ' pw_blocks=', profile_pw_blocks, &
+        ' n_pw=', n_pw, &
+        ' total=', profile_t1 - profile_total_start, &
+        ' pw_cache=', profile_time_pw_cache, &
+        ' phi_cache=', profile_time_phi_cache, &
+        ' phase_cache=', profile_time_phase_cache, &
+        ' phi_block=', profile_time_phi_block, &
+        ' phase_block=', profile_time_phase_block, &
+        ' local_proj=', profile_time_local_proj, &
+        ' psi_reduce=', profile_time_psi_reduce, &
+        ' pw_coef=', profile_time_pw_coef, &
+        ' pw_zgemm=', profile_time_pw_zgemm, &
+        ' rho_accum=', profile_time_rho_accum, &
+        ' copy=', profile_time_copy
       flush(6)
     end if
     ! Keep the raw local electron count.  Avoid a mandatory world-level
@@ -2077,6 +2559,8 @@
     if (allocated(coef_blk_ri)) deallocate(coef_blk_ri)
     if (allocated(psi_blk_ri)) deallocate(psi_blk_ri)
     if (allocated(pw_tmp_z)) deallocate(pw_tmp_z)
+    if (allocated(psi_pw_blk_z)) deallocate(psi_pw_blk_z)
+    if (allocated(rho_pp_blk)) deallocate(rho_pp_blk)
     if (allocated(coef_pw_blk)) deallocate(coef_pw_blk)
     if (allocated(phase_cache)) deallocate(phase_cache)
     if (allocated(kpw_hx)) deallocate(kpw_hx, kpw_hy, kpw_hz)

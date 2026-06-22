@@ -1523,6 +1523,16 @@ contains
         n_frag_file, " rt=", dg_frag%n_frag
     end if
 
+    if (allocated(dg_frag%global_wannier_flux_evec)) deallocate(dg_frag%global_wannier_flux_evec)
+    if (allocated(dg_frag%global_wannier_flux_eval)) deallocate(dg_frag%global_wannier_flux_eval)
+    allocate(dg_frag%global_wannier_flux_evec(num_wann_file,nstate_seed))
+    allocate(dg_frag%global_wannier_flux_eval(nstate_seed,nspin_file))
+    dg_frag%global_wannier_flux_evec(1:num_wann_file,1:nstate_seed) = &
+      seed_wannier_to_eigen(1:num_wann_file,1:nstate_seed)
+    dg_frag%global_wannier_flux_eval(1:nstate_seed,1:nspin_file) = &
+      eval_seed(1:nstate_seed,1:nspin_file)
+    dg_frag%has_global_wannier_flux_eigen = .true.
+
     dg_frag%coef = (0.0d0, 0.0d0)
     if (allocated(dg_frag%coef_work)) dg_frag%coef_work = (0.0d0, 0.0d0)
     if (allocated(dg_frag%coef_new)) dg_frag%coef_new = (0.0d0, 0.0d0)
@@ -1602,6 +1612,8 @@ contains
     if (allocated(dg_frag%global_wannier_transform)) deallocate(dg_frag%global_wannier_transform)
     if (allocated(dg_frag%global_wannier_position)) deallocate(dg_frag%global_wannier_position)
     if (allocated(dg_frag%global_wannier_coef)) deallocate(dg_frag%global_wannier_coef)
+    if (allocated(dg_frag%global_wannier_flux_evec)) deallocate(dg_frag%global_wannier_flux_evec)
+    if (allocated(dg_frag%global_wannier_flux_eval)) deallocate(dg_frag%global_wannier_flux_eval)
     if (allocated(dg_frag%global_wannier_local_nkeep)) deallocate(dg_frag%global_wannier_local_nkeep)
     if (allocated(dg_frag%global_wannier_local_ids)) deallocate(dg_frag%global_wannier_local_ids)
     if (allocated(dg_frag%global_wannier_local_owner_frag)) deallocate(dg_frag%global_wannier_local_owner_frag)
@@ -1610,6 +1622,7 @@ contains
     if (allocated(dg_frag%global_wannier_local_position)) deallocate(dg_frag%global_wannier_local_position)
     dg_frag%has_global_wannier_local_basis = .false.
     dg_frag%has_global_wannier_position = .false.
+    dg_frag%has_global_wannier_flux_eigen = .false.
 
     if (ifrag_count <= 0) return
     filename = './data_dcdft/total/'//binfile_w90g

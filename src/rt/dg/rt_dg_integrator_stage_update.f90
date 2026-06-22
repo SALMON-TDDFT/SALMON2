@@ -11,7 +11,7 @@
     use salmon_global, only: yn_spinorbit, ae_shape1, ae_shape2, theory
     use misc_routines, only: get_wtime
     use rt_dg_plane_wave, only: compute_fragment_pw_overlap, &
-      compute_fragment_pw_hamiltonian, prepare_local_fragment_pw_blocks
+      compute_fragment_pw_hamiltonian, prepare_local_fragment_pw_blocks, prepare_mixed_basis_startup
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(inout) :: system
@@ -41,8 +41,9 @@
     logical :: use_rank_buffered_potential, use_fragment_xc
     logical :: need_energy_update
     logical :: need_stage_buffer_alloc
-    real(8) :: t0, t1
+    real(8) :: t0, t1, t_pw0
     real(8) :: time_density, time_hartree, time_xc, time_reconstruct, time_pw_mix
+    real(8) :: time_pw_prepare, time_pw_hamiltonian, time_pw_blocks
     integer :: trace_call_id
     integer, save :: trace_stage_call_count = 0
     logical :: trace_stage
@@ -70,6 +71,9 @@
     time_xc = 0.0d0
     time_reconstruct = 0.0d0
     time_pw_mix = 0.0d0
+    time_pw_prepare = 0.0d0
+    time_pw_hamiltonian = 0.0d0
+    time_pw_blocks = 0.0d0
     trace_call_id = 0
     trace_stage = .false.
     if (enable_stage_timing .and. itt == 1 .and. dg_frag%id == 0 .and. trace_stage_call_count < 5) then
@@ -78,6 +82,22 @@
       trace_stage = .true.
       write(*,'(1x,a,i0,a,i0)') '[DG-STAGE] enter itt=', itt, ' call=', trace_call_id
       flush(6)
+    end if
+
+    if (dg_frag%use_plane_wave_basis .and. n_pw > 0 .and. &
+        (.not. dg_frag%mixed_basis_ready .or. .not. dg_frag%mixed_basis_identity_raw)) then
+      if (trace_stage) then
+        write(*,'(1x,a)') '[DG-STAGE] prepare raw mixed basis before density'
+        flush(6)
+      end if
+      t0 = get_wtime()
+      call prepare_mixed_basis_startup(dg_frag, system, Vh, Vxc, Vpsl, Ac_tot, mg, stencil)
+      t1 = get_wtime()
+      time_pw_mix = time_pw_mix + (t1 - t0)
+      if (trace_stage) then
+        write(*,'(1x,a,1pe12.4)') '[DG-STAGE] pre-density mixed prepare done time=', t1 - t0
+        flush(6)
+      end if
     end if
 
     if (trace_stage) then
@@ -278,18 +298,26 @@
         write(*,'(1x,a)') '[DG-STAGE] PW mixed update start'
         flush(6)
       end if
-      t0 = get_wtime()
+      t_pw0 = get_wtime()
       n_frag = size(dg_frag%coef, 1)
       n_pw = dg_frag%n_plane_waves
 
-      if (.not. allocated(dg_frag%S_mat_frag_pw)) then
+      if (.not. dg_frag%mixed_basis_ready .or. .not. dg_frag%mixed_basis_identity_raw) then
+        t0 = get_wtime()
+        call prepare_mixed_basis_startup(dg_frag, system, Vh, Vxc, Vpsl, Ac_tot, mg, stencil)
+        time_pw_prepare = time_pw_prepare + (get_wtime() - t0)
+      else if (.not. allocated(dg_frag%S_mat_frag_pw)) then
         allocate(dg_frag%S_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
+        t0 = get_wtime()
         call compute_fragment_pw_overlap(dg_frag, dg_frag%S_mat_frag_pw)
+        time_pw_prepare = time_pw_prepare + (get_wtime() - t0)
       else if (size(dg_frag%S_mat_frag_pw,1) /= n_frag .or. size(dg_frag%S_mat_frag_pw,2) /= n_pw .or. &
                size(dg_frag%S_mat_frag_pw,3) /= dg_frag%nspin) then
         deallocate(dg_frag%S_mat_frag_pw)
         allocate(dg_frag%S_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
+        t0 = get_wtime()
         call compute_fragment_pw_overlap(dg_frag, dg_frag%S_mat_frag_pw)
+        time_pw_prepare = time_pw_prepare + (get_wtime() - t0)
       end if
 
       if (.not. allocated(dg_frag%H_mat_frag_pw)) then
@@ -300,10 +328,14 @@
         allocate(dg_frag%H_mat_frag_pw(n_frag, n_pw, dg_frag%nspin))
       end if
 
+      t0 = get_wtime()
       call compute_fragment_pw_hamiltonian(dg_frag, Vh, Vxc, Vpsl, dg_frag%H_mat_frag_pw)
+      time_pw_hamiltonian = time_pw_hamiltonian + (get_wtime() - t0)
+      t0 = get_wtime()
       call prepare_local_fragment_pw_blocks(dg_frag)
+      time_pw_blocks = time_pw_blocks + (get_wtime() - t0)
       t1 = get_wtime()
-      time_pw_mix = time_pw_mix + (t1 - t0)
+      time_pw_mix = time_pw_mix + (t1 - t_pw0)
       if (trace_stage) then
         write(*,'(1x,a,1pe12.4)') '[DG-STAGE] PW mixed update done time=', t1 - t0
         flush(6)
@@ -314,6 +346,10 @@
       write(*,'(1x,a,i0,5(a,1pe12.4))') '        stage timing: itt=', itt, &
         ' density=', time_density, ' hartree=', time_hartree, ' xc=', time_xc, &
         ' reconstruct=', time_reconstruct, ' pw_mix=', time_pw_mix
+      if (time_pw_mix > 0.0d0) then
+        write(*,'(1x,a,3(a,1pe12.4))') '        stage pw timing:', &
+          ' prepare=', time_pw_prepare, ' h_fp=', time_pw_hamiltonian, ' local_blocks=', time_pw_blocks
+      end if
       flush(6)
     end if
 

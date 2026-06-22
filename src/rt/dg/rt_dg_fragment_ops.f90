@@ -11,6 +11,7 @@ module rt_dg_fragment_ops
   public :: calculate_macroscopic_current_dg
   public :: calculate_nonlocal_current_dg
   public :: calculate_local_wannier_polarization_dg
+  public :: ensure_gradient_basis_cache
   public :: apply_gradient_to_basis
   public :: apply_momentum_blocks
   public :: ensure_nonlocal_projector_overlap_cache
@@ -2930,7 +2931,12 @@ contains
     integer, intent(in), optional :: nstate_use
 
     integer :: i, n_pw, nstate_cache
+    integer :: env_status, env_len
     integer, allocatable :: pw_row_ids(:)
+    real(8) :: cache_diff, cache_norm
+    logical :: use_sum_cache, compare_cache, trace_cache
+    character(32) :: env_cache_mode, env_cache_trace
+    complex(8), allocatable :: coef_pw_reduce(:,:,:)
 
     if (.not. dg_frag%use_plane_wave_basis) then
       if (allocated(dg_frag%coef_pw_full_cache)) deallocate(dg_frag%coef_pw_full_cache)
@@ -2966,14 +2972,85 @@ contains
       allocate(dg_frag%coef_pw_full_cache(n_pw, nstate_cache, dg_frag%nspin))
     end if
 
-    allocate(pw_row_ids(n_pw))
-    do i = 1, n_pw
-      pw_row_ids(i) = i
-    end do
+    env_cache_mode = ''
+    call get_environment_variable('SALMON_DG_PW_CACHE_MODE', env_cache_mode, length=env_len, status=env_status)
+    use_sum_cache = .true.
+    compare_cache = .false.
+    if (env_status == 0 .and. env_len > 0) then
+      select case (adjustl(trim(env_cache_mode(1:env_len))))
+      case ('bcast','BCAST','broadcast','BROADCAST')
+        use_sum_cache = .false.
+      case ('sum','SUM','allreduce','ALLREDUCE','reduce','REDUCE')
+        use_sum_cache = .true.
+      case ('compare','COMPARE','check','CHECK')
+        compare_cache = .true.
+      end select
+    end if
+    env_cache_trace = ''
+    call get_environment_variable('SALMON_DG_PW_CACHE_TRACE', env_cache_trace, length=env_len, status=env_status)
+    trace_cache = .false.
+    if (env_status == 0 .and. env_len > 0) then
+      select case (adjustl(trim(env_cache_trace(1:env_len))))
+      case ('1','y','Y','yes','YES','true','TRUE','on','ON')
+        trace_cache = .true.
+      end select
+    end if
+
     dg_frag%coef_pw_full_cache(:, :, :) = (0.0d0, 0.0d0)
-    call fetch_remote_coef_pw_rows(dg_frag, pw_row_ids, dg_frag%coef_pw_full_cache)
+    if (use_sum_cache .or. compare_cache) then
+      allocate(coef_pw_reduce(n_pw, nstate_cache, dg_frag%nspin))
+      coef_pw_reduce(:, :, :) = (0.0d0, 0.0d0)
+      do i = 1, n_pw
+        if (i > size(dg_frag%coef_pw, 1)) cycle
+        if (dg_frag%coef_pw_owner(i) /= dg_frag%id) cycle
+        coef_pw_reduce(i, 1:nstate_cache, 1:dg_frag%nspin) = &
+          dg_frag%coef_pw(i, 1:nstate_cache, 1:dg_frag%nspin)
+      end do
+      if (dg_frag%isize > 1 .and. dg_frag%icomm /= COMM_GROUP_NULL) then
+        call comm_summation(coef_pw_reduce, dg_frag%coef_pw_full_cache, &
+                            n_pw * nstate_cache * dg_frag%nspin, dg_frag%icomm)
+      else
+        dg_frag%coef_pw_full_cache(:, :, :) = coef_pw_reduce(:, :, :)
+      end if
+      if (compare_cache) then
+        allocate(pw_row_ids(n_pw))
+        do i = 1, n_pw
+          pw_row_ids(i) = i
+        end do
+        coef_pw_reduce(:, :, :) = dg_frag%coef_pw_full_cache(:, :, :)
+        dg_frag%coef_pw_full_cache(:, :, :) = (0.0d0, 0.0d0)
+        call fetch_remote_coef_pw_rows(dg_frag, pw_row_ids, dg_frag%coef_pw_full_cache)
+        cache_diff = maxval(abs(dg_frag%coef_pw_full_cache - coef_pw_reduce))
+        cache_norm = max(1.0d-300, maxval(abs(dg_frag%coef_pw_full_cache)))
+        if (dg_frag%id == 0 .or. trace_cache) then
+          write(*,'(1x,a,i0,3(a,1pe12.4))') &
+            '[DG-PW-CACHE-COMPARE] rank=', dg_frag%id, &
+            ' max_abs_diff=', cache_diff, ' ref_norm=', cache_norm, &
+            ' rel_diff=', cache_diff / cache_norm
+          flush(6)
+        end if
+        deallocate(pw_row_ids)
+      end if
+      deallocate(coef_pw_reduce)
+    else
+      allocate(pw_row_ids(n_pw))
+      do i = 1, n_pw
+        pw_row_ids(i) = i
+      end do
+      call fetch_remote_coef_pw_rows(dg_frag, pw_row_ids, dg_frag%coef_pw_full_cache)
+      deallocate(pw_row_ids)
+    end if
+
+    if (trace_cache) then
+      cache_norm = maxval(abs(dg_frag%coef_pw_full_cache))
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a,l1,a,l1,a,1pe12.4)') &
+        '[DG-PW-CACHE] rank=', dg_frag%id, ' n_pw=', n_pw, &
+        ' nstate=', nstate_cache, ' nspin=', dg_frag%nspin, &
+        ' sum_mode=', use_sum_cache, ' compare=', compare_cache, &
+        ' max_abs=', cache_norm
+      flush(6)
+    end if
     dg_frag%coef_pw_full_cache_nstate = nstate_cache
-    deallocate(pw_row_ids)
   end subroutine refresh_pw_coef_cache
 
   subroutine gather_fragment_coef_view(dg_frag, ispin, n_frag_rows, nstate_use, coef_frag, state_start, state_end)
@@ -4419,13 +4496,41 @@ contains
     real(8) :: pol_local(3), pol_sum(3), occ, weight
     complex(8) :: pos_expect
     integer(8) :: target_bytes, bytes_per_state
-    logical :: accumulate_on_rank
+    integer :: env_status, env_len
+    logical :: accumulate_on_rank, force_full_position, use_mixed_z
+    character(32) :: env_full_position, env_mixed_z
 
     polarization_raw(:) = 0.0d0
     pol_local(:) = 0.0d0
     pol_sum(:) = 0.0d0
+    force_full_position = dg_frag%has_global_wannier_position .and. allocated(dg_frag%global_wannier_position)
+    env_full_position = ''
+    call get_environment_variable('SALMON_DG_POL_GLOBAL_WANNIER_FULL', env_full_position, &
+      length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      select case (adjustl(trim(env_full_position(1:env_len))))
+      case ('1','y','Y','yes','YES','true','TRUE','on','ON')
+        force_full_position = dg_frag%has_global_wannier_position .and. allocated(dg_frag%global_wannier_position)
+      case ('0','n','N','no','NO','false','FALSE','off','OFF')
+        force_full_position = .false.
+      end select
+    end if
+    env_mixed_z = ''
+    call get_environment_variable('SALMON_DG_MIXED_Z', env_mixed_z, length=env_len, status=env_status)
+    use_mixed_z = .false.
+    if (env_status == 0 .and. env_len > 0) then
+      select case (adjustl(trim(env_mixed_z(1:env_len))))
+      case ('1','y','Y','yes','YES','true','TRUE','on','ON')
+        use_mixed_z = dg_frag%has_mixed_wannier_bpw_position .and. allocated(dg_frag%mixed_wannier_bpw_z) .and. &
+          allocated(dg_frag%mixed_wannier_bpw_pcoef)
+      end select
+    end if
+    if (use_mixed_z) then
+      call calculate_global_mixed_wannier_bpw_polarization_dg(dg_frag, system, polarization_raw)
+      return
+    end if
 
-    if (dg_frag%has_formal_dg_wannier_basis .and. allocated(dg_frag%dg_wannier_basis_coef) .and. &
+    if (.not. force_full_position .and. dg_frag%has_formal_dg_wannier_basis .and. allocated(dg_frag%dg_wannier_basis_coef) .and. &
         allocated(dg_frag%dg_wannier_xi_local) .and. allocated(dg_frag%dg_wannier_ref_center) .and. &
         allocated(dg_frag%dg_wannier_nkeep)) then
       call calculate_formal_dg_wannier_polarization_dg(dg_frag, system, polarization_raw)
@@ -4435,7 +4540,7 @@ contains
     if (.not. dg_frag%has_global_wannier_basis) return
     if (.not. allocated(dg_frag%global_wannier_coef)) return
     if (.not. allocated(dg_frag%global_wannier_center)) return
-    if (dg_frag%has_global_wannier_local_basis .and. allocated(dg_frag%global_wannier_local_coef) .and. &
+    if (.not. force_full_position .and. dg_frag%has_global_wannier_local_basis .and. allocated(dg_frag%global_wannier_local_coef) .and. &
         allocated(dg_frag%global_wannier_local_center) .and. allocated(dg_frag%global_wannier_local_nkeep)) then
       call calculate_global_wannier_local_center_polarization_dg(dg_frag, system, polarization_raw)
       return
@@ -4554,13 +4659,26 @@ contains
           do istate = 1, nbatch
             occ = max(0.0d0, system%rocc(occ0 + istate - 1, 1, ispin))
             if (occ <= 0.0d0) cycle
-            do iw = 1, n_wann
-              weight = occ * real(conjg(cw_sum(iw, istate)) * cw_sum(iw, istate), 8)
-              if (weight <= 0.0d0) cycle
+            if (force_full_position) then
               do idir = 1, 3
-                pol_local(idir) = pol_local(idir) - weight * dg_frag%global_wannier_center(idir, iw)
+                pos_expect = (0.0d0, 0.0d0)
+                do iw = 1, n_wann
+                  do jw = 1, n_wann
+                    pos_expect = pos_expect + conjg(cw_sum(iw, istate)) * &
+                      dg_frag%global_wannier_position(idir, iw, jw) * cw_sum(jw, istate)
+                  end do
+                end do
+                pol_local(idir) = pol_local(idir) - occ * real(pos_expect, kind=8)
               end do
-            end do
+            else
+              do iw = 1, n_wann
+                weight = occ * real(conjg(cw_sum(iw, istate)) * cw_sum(iw, istate), 8)
+                if (weight <= 0.0d0) cycle
+                do idir = 1, 3
+                  pol_local(idir) = pol_local(idir) - weight * dg_frag%global_wannier_center(idir, iw)
+                end do
+              end do
+            end if
           end do
         end if
       end do
@@ -4572,6 +4690,132 @@ contains
     end if
     polarization_raw(:) = pol_sum(:)
   end subroutine calculate_global_wannier_center_polarization_dg
+
+  subroutine calculate_global_mixed_wannier_bpw_polarization_dg(dg_frag, system, polarization_raw)
+    use structures, only: s_dft_system
+    use communication, only: comm_summation
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    type(s_dft_system),     intent(in)    :: system
+    real(8),                intent(out)   :: polarization_raw(3)
+
+    integer :: ispin, ifrag, i_local, ib, iw, jw, idir
+    integer :: istate, nocc_spin, n_w, n_p, n_mix, nbasis
+    integer :: global_row, local_row
+    real(8) :: pol_local(3), pol_sum(3), occ
+    real(8) :: pol_ww_local(3), pol_wp_local(3), pol_ww_sum(3), pol_wp_sum(3)
+    complex(8), allocatable :: cw_local(:,:), cw_sum(:,:), cmix(:,:)
+    complex(8) :: pos_expect, pos_ww, pos_wp
+    character(32) :: env_trace
+    integer :: env_status, env_len
+    logical :: trace_mixed_pol
+
+    polarization_raw(:) = 0.0d0
+    pol_local(:) = 0.0d0
+    pol_sum(:) = 0.0d0
+    pol_ww_local(:) = 0.0d0
+    pol_wp_local(:) = 0.0d0
+    pol_ww_sum(:) = 0.0d0
+    pol_wp_sum(:) = 0.0d0
+    env_trace = ''
+    trace_mixed_pol = .false.
+    call get_environment_variable('SALMON_DG_MIXED_Z_TRACE', env_trace, length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) then
+      select case (adjustl(trim(env_trace(1:env_len))))
+      case ('1','y','Y','yes','YES','true','TRUE','on','ON')
+        trace_mixed_pol = .true.
+      end select
+    end if
+    if (.not. dg_frag%has_mixed_wannier_bpw_position) return
+    if (.not. allocated(dg_frag%mixed_wannier_bpw_z) .or. .not. allocated(dg_frag%mixed_wannier_bpw_pcoef)) return
+    if (.not. allocated(dg_frag%global_wannier_coef) .or. .not. allocated(dg_frag%coef_global_to_local)) return
+
+    n_w = dg_frag%mixed_wannier_bpw_nw
+    n_p = dg_frag%mixed_wannier_bpw_np
+    n_mix = dg_frag%mixed_wannier_bpw_nmix
+    if (n_w <= 0 .or. n_p < 0 .or. n_mix /= n_w + n_p) return
+
+    allocate(cw_local(n_w,max(1,dg_frag%nstate_tot)), cw_sum(n_w,max(1,dg_frag%nstate_tot)))
+    allocate(cmix(n_mix,max(1,dg_frag%nstate_tot)))
+
+    do ispin = 1, min(dg_frag%nspin, system%nspin, size(dg_frag%mixed_wannier_bpw_z, 4))
+      nocc_spin = 0
+      if (allocated(dg_frag%nocc_spin)) nocc_spin = dg_frag%nocc_spin(ispin)
+      nocc_spin = min(nocc_spin, dg_frag%nstate_tot, size(dg_frag%coef, 2), size(system%rocc, 1))
+      if (nocc_spin <= 0) cycle
+
+      cw_local(:, :) = (0.0d0, 0.0d0)
+      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        i_local = ifrag - dg_frag%ifrag_start + 1
+        if (i_local < 1 .or. i_local > size(dg_frag%global_wannier_coef, 4)) cycle
+        nbasis = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%global_wannier_coef, 1))
+        do ib = 1, nbasis
+          global_row = dg_frag%index_basis(ib, ifrag, ispin)
+          if (global_row < 1 .or. global_row > dg_frag%n_mat_max) cycle
+          local_row = dg_frag%coef_global_to_local(global_row, ispin)
+          if (local_row < 1 .or. local_row > size(dg_frag%coef, 1)) cycle
+          do iw = 1, n_w
+            do istate = 1, nocc_spin
+              cw_local(iw,istate) = cw_local(iw,istate) + &
+                conjg(dg_frag%global_wannier_coef(ib, iw, ispin, i_local)) * &
+                dg_frag%coef(local_row,istate,ispin)
+            end do
+          end do
+        end do
+      end do
+      call comm_summation(cw_local, cw_sum, n_w * max(1,dg_frag%nstate_tot), dg_frag%icomm)
+
+      if (dg_frag%id == 0) then
+        cmix(:, :) = (0.0d0, 0.0d0)
+        cmix(1:n_w,1:nocc_spin) = cw_sum(1:n_w,1:nocc_spin)
+        if (n_p > 0) cmix(n_w+1:n_w+n_p,1:nocc_spin) = dg_frag%mixed_wannier_bpw_pcoef(1:n_p,1:nocc_spin,ispin)
+        do istate = 1, nocc_spin
+          occ = max(0.0d0, system%rocc(istate, 1, ispin))
+          if (occ <= 0.0d0) cycle
+          do idir = 1, 3
+            pos_expect = (0.0d0, 0.0d0)
+            pos_ww = (0.0d0, 0.0d0)
+            pos_wp = (0.0d0, 0.0d0)
+            do iw = 1, n_w
+              do jw = 1, n_w
+                pos_ww = pos_ww + conjg(cmix(iw,istate)) * &
+                  dg_frag%mixed_wannier_bpw_z(idir,iw,jw,ispin) * cmix(jw,istate)
+              end do
+            end do
+            do iw = 1, n_w
+              do jw = n_w + 1, n_mix
+                pos_wp = pos_wp + conjg(cmix(iw,istate)) * &
+                  dg_frag%mixed_wannier_bpw_z(idir,iw,jw,ispin) * cmix(jw,istate) + &
+                  conjg(cmix(jw,istate)) * dg_frag%mixed_wannier_bpw_z(idir,jw,iw,ispin) * cmix(iw,istate)
+              end do
+            end do
+            do iw = 1, n_mix
+              do jw = 1, n_mix
+                pos_expect = pos_expect + conjg(cmix(iw,istate)) * &
+                  dg_frag%mixed_wannier_bpw_z(idir,iw,jw,ispin) * cmix(jw,istate)
+              end do
+            end do
+            pol_local(idir) = pol_local(idir) - occ * real(pos_expect, kind=8)
+            pol_ww_local(idir) = pol_ww_local(idir) - occ * real(pos_ww, kind=8)
+            pol_wp_local(idir) = pol_wp_local(idir) - occ * real(pos_wp, kind=8)
+          end do
+        end do
+      end if
+    end do
+
+    call comm_summation(pol_local, pol_sum, 3, dg_frag%icomm)
+    call comm_summation(pol_ww_local, pol_ww_sum, 3, dg_frag%icomm)
+    call comm_summation(pol_wp_local, pol_wp_sum, 3, dg_frag%icomm)
+    if (pol_sum(1) /= pol_sum(1) .or. pol_sum(2) /= pol_sum(2) .or. pol_sum(3) /= pol_sum(3)) then
+      stop "DG-Fragment RT: NaN in mixed Wannier+BPW polarization reduction"
+    end if
+    if (trace_mixed_pol .and. dg_frag%id == 0) then
+      write(*,'(1x,a,3(1x,1pe13.5),a,3(1x,1pe13.5),a,3(1x,1pe13.5))') &
+        "[DG-MIXED-POL] total=", pol_sum(:), " WW=", pol_ww_sum(:), " WP+PW=", pol_wp_sum(:)
+    end if
+    polarization_raw(:) = pol_sum(:)
+    deallocate(cw_local, cw_sum, cmix)
+  end subroutine calculate_global_mixed_wannier_bpw_polarization_dg
 
   subroutine calculate_formal_dg_wannier_polarization_dg(dg_frag, system, polarization_raw)
     use structures, only: s_dft_system
