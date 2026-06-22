@@ -41,6 +41,7 @@ subroutine main_gw
   use gw_sigma_x_sub,     only: calc_sigma_x
   use gw_sigma_cohsex_sub,only: calc_sigma_cohsex
   use gw_sigma_gpp_sub,   only: calc_sigma_gpp, calc_sigma_gpp_qcache, calc_sigma_gpp_sym
+  use gw_sigma_c_real_sub,only: calc_sigma_c_real
   use gw_qp_sub,          only: calc_vxc_expect, solve_qp
   use gw_symmetry_sub,    only: gw_sym_selftest, gw_grid_perm_selftest, gw_symmetrize_orbitals
   use sendrecv_grid
@@ -152,6 +153,10 @@ subroutine main_gw
   real(8),  allocatable :: sigc_w7(:,:), zfac_w7(:,:)
   real(8),  allocatable :: vxc_w7(:,:), eqp_w7(:,:), sigx_w7(:,:)
   integer               :: is_t7, ik_t7, ivtop7, icbot7
+  ! b1-4 real-axis Sigma_c (sigma_type=='gpp_real'): own omega' grid
+  real(8),  allocatable :: omega_grid_t7(:)
+  real(8)               :: eta_t7
+  integer               :: iw_t7
   real(8)               :: gap_ks7, gap_g0w0_7, skipfrac7
 
   ! ----------------------------------------------------------------
@@ -821,7 +826,7 @@ subroutine main_gw
   !   QP solve  eps^QP = eps^KS + Z (Sigma_x + Re Sigma_c - Vxc).  This is
   !   the PoC goal: the gap must fall BELOW the static COHSEX value.
   ! ----------------------------------------------------------------
-  else if (trim(sigma_type) == 'gpp') then
+  else if (trim(sigma_type) == 'gpp' .or. trim(sigma_type) == 'gpp_real') then
 
     ! G-vector list (eps G-set; rebuilt on every rank, deterministic).
     allocate(gvec_t7(3, ngmax_t2))
@@ -860,7 +865,22 @@ subroutine main_gw
       ! dynamic correlation Re Sigma_c(eps^KS) and the renormalization Z.
       ! yn_gw_qcache='y' selects the q-cached BZ sum (O(nk^2), identical result);
       ! both take the replicated orbitals built above.
-      if (yn_gw_sym == 'y') then
+      if (trim(sigma_type) == 'gpp_real') then
+        ! b1-4: full-frequency real-axis Sigma_c from the chi0(w)->W(w) engine
+        ! (no plasmon-pole, no pole-skip).  Build the omega' grid (0..omega_max_gw)
+        ! that calc_chi0_freq integrates over, the same grid the absorption uses.
+        if (.not. allocated(omega_grid_t7)) allocate(omega_grid_t7(nomega_gw))
+        do iw_t7 = 1, nomega_gw
+          omega_grid_t7(iw_t7) = (dble(iw_t7-1)/dble(max(nomega_gw-1,1))) &
+                                 * omega_max_gw / 27.211386d0
+        end do
+        eta_t7 = eta_gw / 27.211386d0
+        call calc_sigma_c_real(system, info, mg, lg, spsi_full, energy%esp, &
+                            gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
+                            nomega_gw, omega_grid_t7, eta_t7, &
+                            sigc_w7, zfac_w7, local_only=.true.)
+        skipfrac7 = 0.0d0   ! real-axis has no unphysical-pole skip
+      else if (yn_gw_sym == 'y') then
         ! point-group symmetry-reduced sum (needs the symmetrised orbitals above).
         call calc_sigma_gpp_sym(system, info, mg, lg, spsi_full, energy%esp, rho, &
                             gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
