@@ -569,6 +569,14 @@ subroutine main_gw
     return
   end if
 
+  ! theory='dft_response' is a KS-level analysis (no self-energy): never enter the
+  ! QP / Sigma path below regardless of which yn_out_* toggles fired above.
+  if (trim(theory) == 'dft_response') then
+    if (comm_is_root(nproc_id_global)) &
+      write(*,*) "  [gw] dft_response: no GW analysis requested (set yn_out_gw_eps='y')"
+    return
+  end if
+
   ! ----------------------------------------------------------------
   ! Step 5: QP energies — full (no,nk,nspin) arrays for the output file.
   ! Defaults are the KS passthrough; the sigma_type=='sigx' branch below
