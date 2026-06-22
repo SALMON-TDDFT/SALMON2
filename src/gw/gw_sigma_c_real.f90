@@ -327,7 +327,7 @@ contains
   ! --------------------------------------------------------------------------
   subroutine calc_sigma_c_real_qcache(system, info, mg, lg, spsi, esp, gvec, gg, ng, &
                                       ispin, nb_lo, nb_hi, nomega, omega_grid, eta_au, &
-                                      sigc_re, zfac)
+                                      sigc_re, zfac, nw_scan, w_scan, k_scan, sigc_scan)
     use structures,     only: s_dft_system, s_parallel_info, s_rgrid, s_orbital
     use gw_mtxel_sub,   only: calc_mtxel
     use gw_epsilon_sub, only: find_kpq, calc_chi0_freq, calc_w_freq
@@ -344,17 +344,27 @@ contains
     real(8),               intent(in)    :: omega_grid(nomega), eta_au
     real(8),               intent(out)   :: sigc_re(nb_lo:nb_hi, system%nk)
     real(8),               intent(out)   :: zfac   (nb_lo:nb_hi, system%nk)
+    ! Optional spectral scan (yn_out_gw_spectral): complex Sigma_c(in, w) at output
+    ! k = k_scan over the probe grid w_scan (Im Sigma_c = scattering rate, the
+    ! basis of A(k,w) -- spec-b2 / sp3).  All four present together.
+    integer,    optional,  intent(in)    :: nw_scan, k_scan
+    real(8),    optional,  intent(in)    :: w_scan(:)
+    complex(8), optional,  intent(out)   :: sigc_scan(nb_lo:nb_hi, *)
 
     complex(8), allocatable :: mblk(:,:,:), msig(:,:), chi0_w(:,:,:), epsinv_w(:,:,:), swt(:,:)
     real(8),    allocatable :: bspec(:,:,:), vcoul(:)
     integer,    allocatable :: imap(:), qid(:,:)
     real(8),    allocatable :: qrep(:,:), eband(:), focc(:), e0(:,:)
     complex(8), allocatable :: sc_all(:,:), scp_all(:,:), scm_all(:,:), scg(:,:)
+    complex(8), allocatable :: scan_all(:,:), scan_g(:,:)
 
     integer :: no, nk, ik, iq, iqd, ikm, inp, in, ig, jg, iw, nqd, nper, qd_lo, qd_hi
+    integer :: iws, nws
     real(8) :: qvec(3), mqvec(3), g0vec(3), gtarget(3)
     real(8) :: omega, rnk, pi, domg, de_au, e0nk, dsig
     real(8), parameter :: qtol = 1.0d-6
+    logical :: do_scan
+    complex(8) :: ssc
     complex(8) :: wc, s0, sp, sm
     logical    :: q_ok
 
@@ -376,6 +386,13 @@ contains
     allocate(eband(no), focc(no), e0(nb_lo:nb_hi,nk))
     allocate(sc_all(nb_lo:nb_hi,nk), scp_all(nb_lo:nb_hi,nk), scm_all(nb_lo:nb_hi,nk))
     sc_all = (0d0,0d0); scp_all = (0d0,0d0); scm_all = (0d0,0d0)
+
+    do_scan = present(sigc_scan) .and. present(w_scan) .and. present(k_scan) .and. present(nw_scan)
+    nws = 0
+    if (do_scan) then
+      nws = nw_scan
+      allocate(scan_all(nb_lo:nb_hi, nws)); scan_all = (0d0,0d0)
+    end if
 
     do ik = 1, nk
       do in = nb_lo, nb_hi
@@ -463,6 +480,14 @@ contains
             sc_all (in,ik) = sc_all (in,ik) + s0
             scp_all(in,ik) = scp_all(in,ik) + sp
             scm_all(in,ik) = scm_all(in,ik) + sm
+            ! spectral scan: complex Sigma_c(in, k_scan; w_scan) -- reuses swt.
+            if (do_scan .and. ik == k_scan) then
+              do iws = 1, nws
+                call sigma_c_probe(no, nomega, omega_grid, domg, swt, eband, focc, &
+                                   w_scan(iws), eta_au, ssc)
+                scan_all(in,iws) = scan_all(in,iws) + ssc
+              end do
+            end if
           end do
         end do
       end do
@@ -474,6 +499,17 @@ contains
     call comm_summation(scp_all, scg, size(scp_all), info%icomm_k); scp_all = scg
     call comm_summation(scm_all, scg, size(scm_all), info%icomm_k); scm_all = scg
     deallocate(scg)
+    if (do_scan) then
+      allocate(scan_g(nb_lo:nb_hi,nws))
+      call comm_summation(scan_all, scan_g, size(scan_all), info%icomm_k)
+      scan_all = scan_g; deallocate(scan_g)
+      do iws = 1, nws
+        do in = nb_lo, nb_hi
+          sigc_scan(in,iws) = rnk * scan_all(in,iws)   ! complex Sigma_c(in,k_scan;w_scan)
+        end do
+      end do
+      deallocate(scan_all)
+    end if
 
     ! (5) Re Sigma_c and Z for every output k
     do ik = 1, nk

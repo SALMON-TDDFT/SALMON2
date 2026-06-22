@@ -157,6 +157,11 @@ subroutine main_gw
   real(8),  allocatable :: omega_grid_t7(:)
   real(8)               :: eta_t7
   integer               :: iw_t7
+  ! sp3 spectral function A(k,w) / Im Sigma (yn_out_gw_spectral)
+  real(8),    allocatable :: w_scan_t7(:)
+  complex(8), allocatable :: sigc_scan_t7(:,:)
+  integer                 :: nw_scan_t7, iws_t7, io_spec, fh_spec
+  real(8)                 :: resc7, imsc7, ek7, sx7, vx7, aval7
   real(8)               :: gap_ks7, gap_g0w0_7, skipfrac7
 
   ! ----------------------------------------------------------------
@@ -887,9 +892,27 @@ subroutine main_gw
         ! yn_gw_qcache='y' caches W per distinct q + distributes over icomm_k
         ! (node-scalable, identical result); else the base path (all (ik,iq), -n1).
         if (yn_gw_qcache == 'y') then
-          call calc_sigma_c_real_qcache(system, info, mg, lg, spsi_full, energy%esp, &
+          if (yn_out_gw_spectral == 'y') then
+            ! sp3: scan Sigma_c(in, k=1; w) over a wide window ( band edges +- ~25 eV,
+            ! to reach the plasmon satellites) accumulated in the SAME q-cache pass.
+            nw_scan_t7 = 400
+            if (.not. allocated(w_scan_t7)) allocate(w_scan_t7(nw_scan_t7))
+            if (.not. allocated(sigc_scan_t7)) allocate(sigc_scan_t7(ib_min:ib_max, nw_scan_t7))
+            do iws_t7 = 1, nw_scan_t7
+              w_scan_t7(iws_t7) = ( energy%esp(ib_min,1,is_t7) - 25.0d0/27.211386d0 ) &
+                + dble(iws_t7-1)/dble(nw_scan_t7-1) &
+                * ( (energy%esp(ib_max,1,is_t7) + 25.0d0/27.211386d0) &
+                  - (energy%esp(ib_min,1,is_t7) - 25.0d0/27.211386d0) )
+            end do
+            call calc_sigma_c_real_qcache(system, info, mg, lg, spsi_full, energy%esp, &
+                            gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
+                            nomega_gw, omega_grid_t7, eta_t7, sigc_w7, zfac_w7, &
+                            nw_scan=nw_scan_t7, w_scan=w_scan_t7, k_scan=1, sigc_scan=sigc_scan_t7)
+          else
+            call calc_sigma_c_real_qcache(system, info, mg, lg, spsi_full, energy%esp, &
                             gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
                             nomega_gw, omega_grid_t7, eta_t7, sigc_w7, zfac_w7)
+          end if
         else
           call calc_sigma_c_real(system, info, mg, lg, spsi_full, energy%esp, &
                             gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
@@ -982,10 +1005,38 @@ subroutine main_gw
             " eV  (G0W0 gap needs both gap states inside the band window)"
         end if
       end if
+      ! sp3: write Sigma_c(n,k=1;w) + spectral function A(n,k;w) for the band edges.
+      ! Im Sigma_c(w) is the scattering rate; A peaks at the QP energy and shows
+      ! the plasmon satellites -- the research-goal output of the real-axis engine.
+      if (yn_out_gw_spectral == 'y' .and. allocated(sigc_scan_t7)) then
+        open(newunit=fh_spec, file='Si_sigma_c_spectrum.data', status='replace')
+        write(fh_spec,'(A)') '# real-axis Sigma_c(n,k=1;w) and spectral function A(n,k;w)'
+        write(fh_spec,'(A)') '# 1:w[eV]  then per edge (VBM,CBM): ReSigc[eV] ImSigc[eV] A[1/eV]'
+        do iws_t7 = 1, nw_scan_t7
+          write(fh_spec,'(F12.5)',advance='no') w_scan_t7(iws_t7)*hartree2ev
+          do io_spec = ivtop7, icbot7, max(icbot7-ivtop7,1)
+            ek7   = energy%esp(io_spec, ik_t7, is_t7)
+            sx7   = sigx   (io_spec, ik_t7, is_t7)
+            vx7   = vxc_arr(io_spec, ik_t7, is_t7)
+            resc7 = dble (sigc_scan_t7(io_spec, iws_t7))
+            imsc7 = aimag(sigc_scan_t7(io_spec, iws_t7))
+            aval7 = (abs(imsc7)/acos(-1.0d0)) &
+                  / ( (w_scan_t7(iws_t7) - ek7 - sx7 - resc7 + vx7)**2 + imsc7**2 )
+            write(fh_spec,'(3ES15.6)',advance='no') &
+              resc7*hartree2ev, imsc7*hartree2ev, aval7/hartree2ev
+          end do
+          write(fh_spec,*)
+        end do
+        close(fh_spec)
+        write(*,'(A,I4,A,I4)') "  [gw][spectral] wrote Si_sigma_c_spectrum.data: VBM n=", &
+          ivtop7, "  CBM n=", icbot7
+      end if
       write(*,*)
     end if
 
     deallocate(sigc_w7, zfac_w7, vxc_w7, eqp_w7, sigx_w7)
+    if (allocated(w_scan_t7))    deallocate(w_scan_t7)
+    if (allocated(sigc_scan_t7)) deallocate(sigc_scan_t7)
     deallocate(gvec_t7, gg_t7)
     if (allocated(spsi_full%zwf)) deallocate(spsi_full%zwf)
     if (allocated(spsi_full%rwf)) deallocate(spsi_full%rwf)
