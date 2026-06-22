@@ -514,7 +514,7 @@ subroutine main_gw
       ! replicate orbitals so every rank owns all k, then distribute the BZ
       ! k-sum over icomm_k (local_only) and reduce (gpp-8b node-parallel pattern).
       call replicate_orbitals_k(system, info, spsi, spsi_full)
-      call calc_absorption_velocity(system, info, mg, lg, stencil, srg, spsi_full, &
+      call calc_absorption_velocity(system, info, mg, lg, stencil, srg, ppg, spsi_full, &
            energy%esp, gvec_ab, gg_ab, ng_ab, ig0_ab, 1, nomega_gw, &
            omega_grid_ab, eta_ab, eps_macro_ab, local_only=.true.)
       if (comm_is_root(nproc_id_global)) then

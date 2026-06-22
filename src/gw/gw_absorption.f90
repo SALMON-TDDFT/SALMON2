@@ -80,11 +80,11 @@ contains
   ! Then eps00 = 1 - 4pi B ; eps_body = I - v(G) chi0b ; invert ->
   !   eps_M(w) = eps00 - (4pi)^2 sum_{GG'} A_G (eps_body^-1)_GG' At_G' / |G'|^2
   ! --------------------------------------------------------------------
-  subroutine calc_absorption_velocity(system, info, mg, lg, stencil, srg, spsi, &
+  subroutine calc_absorption_velocity(system, info, mg, lg, stencil, srg, ppg, spsi, &
                                       esp, gvec, gg, ng, ig0, ispin, &
                                       nomega, omega_grid, eta, eps_macro, local_only)
     use structures,      only: s_dft_system, s_parallel_info, s_rgrid, s_stencil, &
-                               s_sendrecv_grid, s_orbital
+                               s_sendrecv_grid, s_pp_grid, s_orbital
     use gw_velocity_sub, only: calc_velocity_mtxel
     use gw_mtxel_sub,    only: calc_mtxel
     use gw_epsilon_sub,  only: build_gminus
@@ -95,6 +95,7 @@ contains
     type(s_rgrid),         intent(in)    :: mg, lg
     type(s_stencil),       intent(in)    :: stencil
     type(s_sendrecv_grid), intent(inout) :: srg
+    type(s_pp_grid),       intent(in)    :: ppg
     type(s_orbital),       intent(inout) :: spsi   ! inout: halo update in velocity mtxel
     real(8),    intent(in)  :: esp(system%no, system%nk, system%nspin)
     integer,    intent(in)  :: ng
@@ -154,7 +155,7 @@ contains
     ! ---- accumulate head/wing/body over the BZ at q=0 (ikq=ik) ----
     do ik = ik_lo, ik_hi
       allocate(vmat(3,no,no))
-      call calc_velocity_mtxel(system, info, mg, stencil, srg, spsi, ik, ispin, vmat)
+      call calc_velocity_mtxel(system, info, mg, stencil, srg, ppg, spsi, ik, ispin, vmat)
       allocate(mtxel(ng,no,no))
       call calc_mtxel(system, info, mg, lg, spsi, gvec, ng, ik, ik, ispin, no, no, mtxel, &
                       local_only=ll)

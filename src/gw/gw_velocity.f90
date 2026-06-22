@@ -23,9 +23,9 @@ module gw_velocity_sub
 
 contains
 
-  subroutine calc_velocity_mtxel(system, info, mg, stencil, srg, spsi, ik, ispin, vmat)
+  subroutine calc_velocity_mtxel(system, info, mg, stencil, srg, ppg, spsi, ik, ispin, vmat)
     use structures,    only: s_dft_system, s_parallel_info, s_rgrid, s_stencil, &
-                             s_sendrecv_grid, s_orbital
+                             s_sendrecv_grid, s_pp_grid, s_orbital
     use communication, only: comm_summation
     use sendrecv_grid, only: update_overlap_complex8
     use stencil_sub,   only: calc_gradient_psi
@@ -35,15 +35,19 @@ contains
     type(s_rgrid),         intent(in)    :: mg
     type(s_stencil),       intent(in)    :: stencil
     type(s_sendrecv_grid), intent(inout) :: srg
+    type(s_pp_grid),       intent(in)    :: ppg
     type(s_orbital),       intent(inout) :: spsi   ! inout: update_overlap fills the halo
     integer,               intent(in)    :: ik, ispin
     complex(8),            intent(out)   :: vmat(3, system%no, system%no)
 
     complex(8), allocatable :: gtpsi_l(:,:,:,:), gtpsi(:,:,:,:)
     complex(8), allocatable :: vmat_l(:,:,:)
+    complex(8), allocatable :: uVpsi(:), uVpsi_l(:), uVrpsi(:,:), uVrpsi_l(:,:)
     complex(8), parameter   :: zI = (0.0d0, 1.0d0)
-    complex(8) :: wrk(3)
-    integer    :: no, m, n, i, narray, im
+    complex(8) :: wrk(3), veik
+    real(8)    :: xr, yr, zr
+    integer    :: no, m, n, i, narray, im, ilma, ia, j, ix, iy, iz
+
     integer    :: is(3), ie(3)
 
     no = system%no
@@ -86,6 +90,39 @@ contains
       end do
 !$omp end parallel do
     end do
+
+    ! ---- nonlocal pseudopotential commutator -i<n|[r,V_nl]|m> (b1-5b) ----
+    ! v = -i nabla + [V_nl, r]; in the separable projector form (mirrors the
+    ! transition-matrix nonlocal term in io/write.f90).  nproc_rgrid=1 in the GW
+    ! run => the projector sums uVpsi/uVrpsi are full on this rank (no rspace
+    ! split), so the band-pair product is exact and the icomm_ro reduce is trivial.
+    allocate(uVpsi(no), uVpsi_l(no), uVrpsi(3,no), uVrpsi_l(3,no))
+    do ilma = 1, ppg%nlma
+      ia = ppg%ia_tbl(ilma)
+      uVpsi_l(:)    = (0.0d0, 0.0d0)
+      uVrpsi_l(:,:) = (0.0d0, 0.0d0)
+      do j = 1, ppg%mps(ia)
+        xr = ppg%rxyz(1,j,ia);  yr = ppg%rxyz(2,j,ia);  zr = ppg%rxyz(3,j,ia)
+        ix = ppg%jxyz(1,j,ia);  iy = ppg%jxyz(2,j,ia);  iz = ppg%jxyz(3,j,ia)
+        veik = conjg(ppg%zekr_uV(j,ilma,ik))
+        do m = 1, no
+          uVpsi_l(m)     = uVpsi_l(m)     + veik       * spsi%zwf(ix,iy,iz,ispin,m,ik,im)
+          uVrpsi_l(1,m)  = uVrpsi_l(1,m)  + veik * xr  * spsi%zwf(ix,iy,iz,ispin,m,ik,im)
+          uVrpsi_l(2,m)  = uVrpsi_l(2,m)  + veik * yr  * spsi%zwf(ix,iy,iz,ispin,m,ik,im)
+          uVrpsi_l(3,m)  = uVrpsi_l(3,m)  + veik * zr  * spsi%zwf(ix,iy,iz,ispin,m,ik,im)
+        end do
+      end do
+      uVpsi_l(:) = uVpsi_l(:) * ppg%rinv_uvu(ilma)
+      call comm_summation(uVpsi_l,  uVpsi,    no, info%icomm_ro)
+      call comm_summation(uVrpsi_l, uVrpsi, 3*no, info%icomm_ro)
+      do m = 1, no
+        do n = 1, no
+          vmat_l(:,n,m) = vmat_l(:,n,m) - zI * ( conjg(uVrpsi(:,n))*uVpsi(m) &
+                                               - conjg(uVpsi(n))*uVrpsi(:,m) ) * system%Hvol
+        end do
+      end do
+    end do
+    deallocate(uVpsi, uVpsi_l, uVrpsi, uVrpsi_l)
 
     call comm_summation(vmat_l, vmat, 3*no*no, info%icomm_r)
 
