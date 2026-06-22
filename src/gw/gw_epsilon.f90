@@ -320,7 +320,10 @@ contains
     no    = system%no
     nk    = system%nk
     omega = abs(system%det_a)
-    inv_omega = 1.0d0 / omega
+    ! BZ k-sum factor 1/(N_k*Omega): chi0(q)=(1/(N_k Omega)) sum_k ... (the M and
+    ! v carry no 1/N_k).  Was 1/Omega -> the dielectric was over-screened by N_k
+    ! (eps_M grew with mesh at fixed |q|); matches gw_sigma_x / gpp rnk.
+    inv_omega = 1.0d0 / (dble(nk) * omega)
     nsub_head = 10            ! mini-BZ sub-sampling density for the v head
 
     allocate(chi0(ng,ng), eps(ng,ng))
@@ -561,7 +564,7 @@ contains
     ll   = .false.;  if (present(local_only)) ll = local_only
     dosan= .false.;  if (present(run_sanity)) dosan = run_sanity
     no   = system%no;  nk = system%nk
-    omega= abs(system%det_a);  inv_omega = 1.0d0/omega
+    omega= abs(system%det_a);  inv_omega = 1.0d0/(dble(nk)*omega)  ! 1/(N_k Omega) BZ k-sum
 
     allocate(iGm(ng), imap(ng))
     chi0_w(:,:,:) = (0.0d0, 0.0d0)
