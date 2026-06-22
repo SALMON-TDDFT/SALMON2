@@ -125,7 +125,19 @@ contains
 
     allocate(iGm(ng));  call build_gminus(ng, gvec, iGm)
     allocate(Bw(nomega), Aw(ng,nomega), Atw(ng,nomega), chi0b(ng,ng,nomega))
-    Bw = (0d0,0d0); Aw = (0d0,0d0); Atw = (0d0,0d0); chi0b = (0d0,0d0)
+    Bw = (0d0,0d0); Aw = (0d0,0d0); Atw = (0d0,0d0)
+    ! NUMA first-touch: zero chi0b (the 0.2GB array) with the SAME OMP-over-iw
+    ! static schedule the accumulation uses, so each omega slice's pages land on
+    ! the CMG of the thread that writes it (A64FX = 4 CMG x 12 cores).
+!$omp parallel do default(shared) private(iw, ig, jg) schedule(static)
+    do iw = 1, nomega
+      do jg = 1, ng
+        do ig = 1, ng
+          chi0b(ig,jg,iw) = (0.0d0, 0.0d0)
+        end do
+      end do
+    end do
+!$omp end parallel do
 
     ! ---- accumulate head/wing/body over the BZ at q=0 (ikq=ik) ----
     do ik = 1, nk
@@ -169,7 +181,7 @@ contains
         end do
         nfill = ipair
 
-!$omp parallel do default(shared) schedule(dynamic) &
+!$omp parallel do default(shared) schedule(static) &
 !$omp   private(iw, zw, ipair, pole, hv, wgt, ig, jg)
         do iw = 1, nomega
           zw = cmplx(omega_grid(iw), 0.0d0, 8)

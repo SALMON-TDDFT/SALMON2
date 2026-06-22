@@ -75,6 +75,8 @@ contains
            stencil%coef_nab, system%rmatrix_B)
       call comm_summation(gtpsi_l, gtpsi, narray, info%icomm_o)
 
+      ! inner products over the bra band n are independent -> OMP over n
+!$omp parallel do default(shared) private(n, i, wrk) schedule(dynamic)
       do n = 1, no
         do i = 1, 3
           wrk(i) = sum( conjg(spsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,n,ik,im)) &
@@ -82,6 +84,7 @@ contains
         end do
         vmat_l(:,n,m) = - zI * wrk * system%Hvol
       end do
+!$omp end parallel do
     end do
 
     call comm_summation(vmat_l, vmat, 3*no*no, info%icomm_r)
