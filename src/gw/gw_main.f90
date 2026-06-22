@@ -37,6 +37,7 @@ subroutine main_gw
   use gw_coulomb_sub,     only: build_gvectors, build_vcoul
   use gw_mtxel_sub,       only: calc_mtxel, replicate_orbitals_k
   use gw_epsilon_sub,     only: calc_epsinv, calc_chi0_freq, calc_w_freq
+  use gw_absorption_sub,  only: calc_absorption
   use gw_sigma_x_sub,     only: calc_sigma_x
   use gw_sigma_cohsex_sub,only: calc_sigma_cohsex
   use gw_sigma_gpp_sub,   only: calc_sigma_gpp, calc_sigma_gpp_qcache, calc_sigma_gpp_sym
@@ -96,6 +97,12 @@ subroutine main_gw
   real(8),  allocatable :: vcoul_cw(:)
   real(8)               :: wmax_cw
   integer               :: igw_cw, jgw_cw
+  ! --- absorption mode (b1-3): full-frequency eps_M(w) at q->0 proxy ---
+  integer               :: ng_ab, ig0_ab, ismall_ab, iq_ab, iw_ab
+  real(8),  allocatable :: gvec_ab(:,:), gg_ab(:), omega_grid_ab(:), vcoul_ab(:)
+  real(8)               :: qvec_ab(3), qabs_ab, qabsmin_ab, eta_ab
+  complex(8),allocatable:: chi0_ab(:,:,:), epsinv_ab(:,:,:), eps_macro_ab(:)
+  logical               :: ok_ab
 
   ! --- variables for the task-2 sanity block ---
   integer,  parameter   :: ngmax_t2 = 100000
@@ -471,6 +478,63 @@ subroutine main_gw
     write(*,'(A,ES12.4)') "  [gw][wfreq] max|epsinv_w(0)-epsinv_static| = ", wmax_cw
     deallocate(epsinv_w_cw, epsinv_ref_cw, vcoul_cw)
     deallocate(gvec_cw, gg_cw, chi0_cw)
+  end if
+
+  ! ----------------------------------------------------------------
+  ! Absorption mode (spec-b1, b1-3): full-frequency macroscopic dielectric
+  ! eps_M(q->0,w) = 1/epsinv_w(0,0,w) over the real-frequency grid, written to
+  ! <sysname>_absorption.data for comparison with the RT-TDDFT Im eps.  This is
+  ! a standalone deliverable: it returns before the QP/self-energy path.
+  ! StageA head = smallest-|q| proxy for q->0.
+  ! ----------------------------------------------------------------
+  if (yn_gw_absorption == 'y') then
+    if (comm_is_root(nproc_id_global)) &
+      write(*,*) "  [gw] absorption mode: full-frequency eps_M(w) (q->0 proxy)"
+    allocate(gvec_ab(3, ngmax_t2), gg_ab(ngmax_t2))
+    call build_gvectors(system%primitive_b, epsilon_cutoff, ngmax_t2, &
+                        ng_ab, gvec_ab, gg_ab)
+    ! G=0 index (build_gvectors sorts by |G|^2 -> normally first; locate robustly)
+    ig0_ab = 1
+    do iq_ab = 1, ng_ab
+      if (gg_ab(iq_ab) < 1.0d-10) then
+        ig0_ab = iq_ab; exit
+      end if
+    end do
+    ! smallest non-zero q on the mesh = q->0 proxy
+    qabsmin_ab = huge(1.0d0); ismall_ab = 0
+    do iq_ab = 1, system%nk
+      qvec_ab(1:3) = system%vec_k(1:3,iq_ab) - system%vec_k(1:3,1)
+      qabs_ab = sqrt(sum(qvec_ab(1:3)**2))
+      if (qabs_ab > 1.0d-8 .and. qabs_ab < qabsmin_ab) then
+        qabsmin_ab = qabs_ab; ismall_ab = iq_ab
+      end if
+    end do
+    if (ismall_ab == 0) ismall_ab = 1
+    qvec_ab(1:3) = system%vec_k(1:3,ismall_ab) - system%vec_k(1:3,1)
+    ! real-frequency grid (a.u.); first point omega=0 -> Re eps_M(0)=eps_inf
+    allocate(omega_grid_ab(nomega_gw))
+    do iw_ab = 1, nomega_gw
+      omega_grid_ab(iw_ab) = (dble(iw_ab-1)/dble(max(nomega_gw-1,1))) &
+                             * omega_max_gw / 27.211386d0
+    end do
+    eta_ab = eta_gw / 27.211386d0
+    allocate(chi0_ab(ng_ab,ng_ab,nomega_gw), epsinv_ab(ng_ab,ng_ab,nomega_gw))
+    allocate(eps_macro_ab(nomega_gw), vcoul_ab(ng_ab))
+    call calc_chi0_freq(system, info, mg, lg, spsi, energy%esp, gvec_ab, ng_ab, &
+                        ismall_ab, qvec_ab, 1, nomega_gw, omega_grid_ab, eta_ab, &
+                        chi0_ab, ok=ok_ab)
+    call calc_w_freq(system, gvec_ab, gg_ab, ng_ab, qvec_ab, nomega_gw, chi0_ab, &
+                     epsinv_ab, vcoul_ab)
+    call calc_absorption(ng_ab, ig0_ab, nomega_gw, omega_grid_ab, epsinv_ab, &
+                         eps_macro_ab, comm_is_root(nproc_id_global), sysname)
+    if (comm_is_root(nproc_id_global)) then
+      write(*,'(A,I5,A,F7.2,A,F7.4,A,I4)') "  [gw][abs] nomega=", nomega_gw, &
+        "  omega_max[eV]=", omega_max_gw, "  eta[eV]=", eta_gw, "  q-index=", ismall_ab
+      write(*,'(A,2ES14.5)') "  [gw][abs] eps_M(w=0) (Re=eps_inf, Im~0) = ", &
+        dble(eps_macro_ab(1)), aimag(eps_macro_ab(1))
+    end if
+    deallocate(gvec_ab, gg_ab, omega_grid_ab, chi0_ab, epsinv_ab, eps_macro_ab, vcoul_ab)
+    return
   end if
 
   ! ----------------------------------------------------------------

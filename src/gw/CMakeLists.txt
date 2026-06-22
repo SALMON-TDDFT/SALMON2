@@ -2,6 +2,7 @@ set(SOURCES
     gw_coulomb.f90
     gw_mtxel.f90
     gw_epsilon.f90
+    gw_absorption.f90
     gw_symmetry.f90
     gw_sigma_x.f90
     gw_sigma_cohsex.f90
