@@ -4,11 +4,13 @@
 !
 !   vmat(1:3, n, m) = < n,k | -i nabla | m,k >    (Cartesian, a.u.)
 !
-! This is the kinetic part of the velocity operator v = -i nabla (+ k + [V_nl,r]).
-! The +k term vanishes for the off-diagonal (n /= m) pairs the absorption head
-! needs (<n,k|k|m,k> = k <u_nk|u_mk> = k delta_nm), so only the gradient is taken.
-! The nonlocal pseudopotential commutator [V_nl, r] is a separate refinement
-! (b1-5b); it is NOT included here.
+! Full velocity operator v = -i nabla + k - i[r, V_nl] (a.u.):
+!   * kinetic  -i nabla  (the gradient block below);
+!   * the +k term vanishes for the off-diagonal (n /= m) pairs the absorption
+!     head needs (<n,k|k|m,k> = k <u_nk|u_mk> = k delta_nm), so it is dropped;
+!   * the nonlocal pseudopotential commutator -i[r, V_nl] (b1-5b) IS included
+!     below in separable projector form (mirrors io/write.f90); r is the
+!     atom-relative position so the constant R_a drops out of the commutator.
 !
 ! Mirrors the transition-matrix assembly in io/write.f90 (halo exchange ->
 ! calc_gradient_psi -> grid inner product * Hvol), kept independent (no ported
