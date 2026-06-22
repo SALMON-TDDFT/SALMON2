@@ -37,7 +37,7 @@ subroutine main_gw
   use gw_coulomb_sub,     only: build_gvectors, build_vcoul
   use gw_mtxel_sub,       only: calc_mtxel, replicate_orbitals_k
   use gw_epsilon_sub,     only: calc_epsinv, calc_chi0_freq, calc_w_freq
-  use gw_absorption_sub,  only: calc_absorption
+  use gw_absorption_sub,  only: calc_absorption, calc_absorption_velocity
   use gw_sigma_x_sub,     only: calc_sigma_x
   use gw_sigma_cohsex_sub,only: calc_sigma_cohsex
   use gw_sigma_gpp_sub,   only: calc_sigma_gpp, calc_sigma_gpp_qcache, calc_sigma_gpp_sym
@@ -103,6 +103,7 @@ subroutine main_gw
   real(8)               :: qvec_ab(3), qabs_ab, qabsmin_ab, eta_ab
   complex(8),allocatable:: chi0_ab(:,:,:), epsinv_ab(:,:,:), eps_macro_ab(:)
   logical               :: ok_ab
+  integer               :: fh_ab
 
   ! --- variables for the task-2 sanity block ---
   integer,  parameter   :: ngmax_t2 = 100000
@@ -488,8 +489,6 @@ subroutine main_gw
   ! StageA head = smallest-|q| proxy for q->0.
   ! ----------------------------------------------------------------
   if (yn_gw_absorption == 'y') then
-    if (comm_is_root(nproc_id_global)) &
-      write(*,*) "  [gw] absorption mode: full-frequency eps_M(w) (q->0 proxy)"
     allocate(gvec_ab(3, ngmax_t2), gg_ab(ngmax_t2))
     call build_gvectors(system%primitive_b, epsilon_cutoff, ngmax_t2, &
                         ng_ab, gvec_ab, gg_ab)
@@ -500,40 +499,64 @@ subroutine main_gw
         ig0_ab = iq_ab; exit
       end if
     end do
-    ! smallest non-zero q on the mesh = q->0 proxy
-    qabsmin_ab = huge(1.0d0); ismall_ab = 0
-    do iq_ab = 1, system%nk
-      qvec_ab(1:3) = system%vec_k(1:3,iq_ab) - system%vec_k(1:3,1)
-      qabs_ab = sqrt(sum(qvec_ab(1:3)**2))
-      if (qabs_ab > 1.0d-8 .and. qabs_ab < qabsmin_ab) then
-        qabsmin_ab = qabs_ab; ismall_ab = iq_ab
-      end if
-    end do
-    if (ismall_ab == 0) ismall_ab = 1
-    qvec_ab(1:3) = system%vec_k(1:3,ismall_ab) - system%vec_k(1:3,1)
     ! real-frequency grid (a.u.); first point omega=0 -> Re eps_M(0)=eps_inf
-    allocate(omega_grid_ab(nomega_gw))
+    allocate(omega_grid_ab(nomega_gw), eps_macro_ab(nomega_gw))
     do iw_ab = 1, nomega_gw
       omega_grid_ab(iw_ab) = (dble(iw_ab-1)/dble(max(nomega_gw-1,1))) &
                              * omega_max_gw / 27.211386d0
     end do
     eta_ab = eta_gw / 27.211386d0
-    allocate(chi0_ab(ng_ab,ng_ab,nomega_gw), epsinv_ab(ng_ab,ng_ab,nomega_gw))
-    allocate(eps_macro_ab(nomega_gw), vcoul_ab(ng_ab))
-    call calc_chi0_freq(system, info, mg, lg, spsi, energy%esp, gvec_ab, ng_ab, &
-                        ismall_ab, qvec_ab, 1, nomega_gw, omega_grid_ab, eta_ab, &
-                        chi0_ab, ok=ok_ab)
-    call calc_w_freq(system, gvec_ab, gg_ab, ng_ab, qvec_ab, nomega_gw, chi0_ab, &
-                     epsinv_ab, vcoul_ab)
-    call calc_absorption(ng_ab, ig0_ab, nomega_gw, omega_grid_ab, epsinv_ab, &
-                         eps_macro_ab, comm_is_root(nproc_id_global), sysname)
+
+    if (gw_head_mode == 'velocity') then
+      ! StageB: q=0 analytic head/wing/body with the momentum matrix element.
+      if (comm_is_root(nproc_id_global)) &
+        write(*,*) "  [gw] absorption mode: velocity head, full LFE (q=0)"
+      call calc_absorption_velocity(system, info, mg, lg, stencil, srg, spsi, &
+           energy%esp, gvec_ab, gg_ab, ng_ab, ig0_ab, 1, nomega_gw, &
+           omega_grid_ab, eta_ab, eps_macro_ab)
+      if (comm_is_root(nproc_id_global)) then
+        open(newunit=fh_ab, file=trim(sysname)//'_absorption.data', status='replace')
+        write(fh_ab,'(A)') "# velocity-head full-LFE macroscopic dielectric (RPA@KS)"
+        write(fh_ab,'(A)') "# omega[eV]            Re eps_M             Im eps_M"
+        do iw_ab = 1, nomega_gw
+          write(fh_ab,'(3ES22.12)') omega_grid_ab(iw_ab)*27.211386d0, &
+            dble(eps_macro_ab(iw_ab)), aimag(eps_macro_ab(iw_ab))
+        end do
+        close(fh_ab)
+      end if
+    else
+      ! StageA: smallest-|q| proxy (mesh-unstable at small q; kept for reference).
+      if (comm_is_root(nproc_id_global)) &
+        write(*,*) "  [gw] absorption mode: full-frequency eps_M(w) (q->0 proxy)"
+      qabsmin_ab = huge(1.0d0); ismall_ab = 0
+      do iq_ab = 1, system%nk
+        qvec_ab(1:3) = system%vec_k(1:3,iq_ab) - system%vec_k(1:3,1)
+        qabs_ab = sqrt(sum(qvec_ab(1:3)**2))
+        if (qabs_ab > 1.0d-8 .and. qabs_ab < qabsmin_ab) then
+          qabsmin_ab = qabs_ab; ismall_ab = iq_ab
+        end if
+      end do
+      if (ismall_ab == 0) ismall_ab = 1
+      qvec_ab(1:3) = system%vec_k(1:3,ismall_ab) - system%vec_k(1:3,1)
+      allocate(chi0_ab(ng_ab,ng_ab,nomega_gw), epsinv_ab(ng_ab,ng_ab,nomega_gw))
+      allocate(vcoul_ab(ng_ab))
+      call calc_chi0_freq(system, info, mg, lg, spsi, energy%esp, gvec_ab, ng_ab, &
+                          ismall_ab, qvec_ab, 1, nomega_gw, omega_grid_ab, eta_ab, &
+                          chi0_ab, ok=ok_ab)
+      call calc_w_freq(system, gvec_ab, gg_ab, ng_ab, qvec_ab, nomega_gw, chi0_ab, &
+                       epsinv_ab, vcoul_ab)
+      call calc_absorption(ng_ab, ig0_ab, nomega_gw, omega_grid_ab, epsinv_ab, &
+                           eps_macro_ab, comm_is_root(nproc_id_global), sysname)
+      deallocate(chi0_ab, epsinv_ab, vcoul_ab)
+    end if
+
     if (comm_is_root(nproc_id_global)) then
-      write(*,'(A,I5,A,F7.2,A,F7.4,A,I4)') "  [gw][abs] nomega=", nomega_gw, &
-        "  omega_max[eV]=", omega_max_gw, "  eta[eV]=", eta_gw, "  q-index=", ismall_ab
+      write(*,'(A,I5,A,F7.2,A,F7.4)') "  [gw][abs] nomega=", nomega_gw, &
+        "  omega_max[eV]=", omega_max_gw, "  eta[eV]=", eta_gw
       write(*,'(A,2ES14.5)') "  [gw][abs] eps_M(w=0) (Re=eps_inf, Im~0) = ", &
         dble(eps_macro_ab(1)), aimag(eps_macro_ab(1))
     end if
-    deallocate(gvec_ab, gg_ab, omega_grid_ab, chi0_ab, epsinv_ab, eps_macro_ab, vcoul_ab)
+    deallocate(gvec_ab, gg_ab, omega_grid_ab, eps_macro_ab)
     return
   end if
 
