@@ -45,6 +45,7 @@ module gw_sigma_c_real_sub
   private
 
   public :: calc_sigma_c_real
+  public :: calc_sigma_c_real_qcache
 
   real(8), parameter :: ha2ev   = 27.21138505d0  ! eV per Hartree
   real(8), parameter :: dE_ev   = 0.1d0          ! finite-diff step dE for Z (eV)
@@ -312,6 +313,181 @@ contains
     deallocate(mblk, msig, imap, chi0_w, epsinv_w, vcoul, bspec, swt, eband, focc, e0)
 
   end subroutine calc_sigma_c_real
+
+  ! --------------------------------------------------------------------------
+  ! calc_sigma_c_real_qcache
+  !
+  ! Production variant: the screened interaction W(q,w) depends ONLY on q, so
+  ! group the (ik,iq) pairs by distinct q, block-distribute the distinct q over
+  ! info%icomm_k, and build chi0(w) -> W(w) -> spectral B ONCE per distinct q
+  ! instead of once per (ik,iq).  This removes the O(nk*nq) redundant full-
+  ! frequency dielectric inversions (the dominant cost) and is node-scalable.
+  ! Mirrors calc_sigma_gpp_qcache; the per-pair body is the same build_spectral_
+  ! weight + sigma_c_probe as the base path, so the result is identical.
+  ! --------------------------------------------------------------------------
+  subroutine calc_sigma_c_real_qcache(system, info, mg, lg, spsi, esp, gvec, gg, ng, &
+                                      ispin, nb_lo, nb_hi, nomega, omega_grid, eta_au, &
+                                      sigc_re, zfac)
+    use structures,     only: s_dft_system, s_parallel_info, s_rgrid, s_orbital
+    use gw_mtxel_sub,   only: calc_mtxel
+    use gw_epsilon_sub, only: find_kpq, calc_chi0_freq, calc_w_freq
+    use communication,  only: comm_summation
+    implicit none
+    type(s_dft_system),    intent(in)    :: system
+    type(s_parallel_info), intent(in)    :: info
+    type(s_rgrid),         intent(in)    :: mg, lg
+    type(s_orbital),       intent(in)    :: spsi
+    real(8),               intent(in)    :: esp(system%no, system%nk, system%nspin)
+    integer,               intent(in)    :: ng
+    real(8),               intent(in)    :: gvec(3,ng), gg(ng)
+    integer,               intent(in)    :: ispin, nb_lo, nb_hi, nomega
+    real(8),               intent(in)    :: omega_grid(nomega), eta_au
+    real(8),               intent(out)   :: sigc_re(nb_lo:nb_hi, system%nk)
+    real(8),               intent(out)   :: zfac   (nb_lo:nb_hi, system%nk)
+
+    complex(8), allocatable :: mblk(:,:,:), msig(:,:), chi0_w(:,:,:), epsinv_w(:,:,:), swt(:,:)
+    real(8),    allocatable :: bspec(:,:,:), vcoul(:)
+    integer,    allocatable :: imap(:), qid(:,:)
+    real(8),    allocatable :: qrep(:,:), eband(:), focc(:), e0(:,:)
+    complex(8), allocatable :: sc_all(:,:), scp_all(:,:), scm_all(:,:), scg(:,:)
+
+    integer :: no, nk, ik, iq, iqd, ikm, inp, in, ig, jg, iw, nqd, nper, qd_lo, qd_hi
+    real(8) :: qvec(3), mqvec(3), g0vec(3), gtarget(3)
+    real(8) :: omega, rnk, pi, domg, de_au, e0nk, dsig
+    real(8), parameter :: qtol = 1.0d-6
+    complex(8) :: wc, s0, sp, sm
+    logical    :: q_ok
+
+    no    = system%no
+    nk    = system%nk
+    omega = abs(system%det_a)
+    rnk   = 1.0d0 / (dble(nk) * omega)
+    pi    = acos(-1.0d0)
+    de_au = dE_ev / ha2ev
+    if (nomega > 1) then
+      domg = omega_grid(2) - omega_grid(1)
+    else
+      domg = 1.0d0
+    end if
+
+    allocate(mblk(ng,no,no), msig(ng,no), imap(ng))
+    allocate(chi0_w(ng,ng,nomega), epsinv_w(ng,ng,nomega), vcoul(ng))
+    allocate(bspec(ng,ng,nomega), swt(no,nomega))
+    allocate(eband(no), focc(no), e0(nb_lo:nb_hi,nk))
+    allocate(sc_all(nb_lo:nb_hi,nk), scp_all(nb_lo:nb_hi,nk), scm_all(nb_lo:nb_hi,nk))
+    sc_all = (0d0,0d0); scp_all = (0d0,0d0); scm_all = (0d0,0d0)
+
+    do ik = 1, nk
+      do in = nb_lo, nb_hi
+        e0(in,ik) = esp(in,ik,ispin)
+      end do
+    end do
+
+    ! (1) group (ik,iq) by distinct q = vec_k(iq) - vec_k(ik)
+    allocate(qid(nk,nk), qrep(3, nk*nk))
+    nqd = 0
+    do ik = 1, nk
+      do iq = 1, nk
+        qvec(1:3) = system%vec_k(1:3,iq) - system%vec_k(1:3,ik)
+        qid(ik,iq) = 0
+        do iqd = 1, nqd
+          if ( abs(qvec(1)-qrep(1,iqd)) + abs(qvec(2)-qrep(2,iqd)) &
+             + abs(qvec(3)-qrep(3,iqd)) < qtol ) then
+            qid(ik,iq) = iqd; exit
+          end if
+        end do
+        if (qid(ik,iq) == 0) then
+          nqd = nqd + 1; qid(ik,iq) = nqd; qrep(1:3,nqd) = qvec(1:3)
+        end if
+      end do
+    end do
+
+    ! (2) block-distribute the distinct q over icomm_k
+    nper  = (nqd + info%isize_k - 1) / info%isize_k
+    qd_lo = info%id_k * nper + 1
+    qd_hi = min((info%id_k + 1) * nper, nqd)
+
+    ! (3) per distinct q: chi0(w) -> W(w) -> spectral B ONCE, then its (ik,iq) pairs
+    do iqd = qd_lo, qd_hi
+      qvec(1:3)  =  qrep(1:3,iqd)
+      mqvec(1:3) = -qvec(1:3)
+      call calc_chi0_freq(system, info, mg, lg, spsi, esp, gvec, ng, iqd, qvec, &
+                          ispin, nomega, omega_grid, eta_au, chi0_w, q_ok, local_only=.true.)
+      if (.not. q_ok) cycle
+      call calc_w_freq(system, gvec, gg, ng, qvec, nomega, chi0_w, epsinv_w, vcoul, q_ok)
+      if (.not. q_ok) cycle
+      do iw = 1, nomega
+        do jg = 1, ng
+          do ig = 1, ng
+            wc = epsinv_w(ig,jg,iw) * vcoul(jg)
+            if (ig == jg) wc = wc - vcoul(jg)
+            bspec(ig,jg,iw) = -aimag(wc) / pi
+          end do
+        end do
+      end do
+
+      do ik = 1, nk
+        do iq = 1, nk
+          if (qid(ik,iq) /= iqd) cycle
+          call find_kpq(system, ik, mqvec, ikm, g0vec)
+          if (ikm == 0) cycle
+          do ig = 1, ng
+            gtarget(1) = gvec(1,ig) - g0vec(1)
+            gtarget(2) = gvec(2,ig) - g0vec(2)
+            gtarget(3) = gvec(3,ig) - g0vec(3)
+            imap(ig) = gindex_local(ng, gvec, gtarget)
+          end do
+          call calc_mtxel(system, info, mg, lg, spsi, gvec, ng, ik, ikm, ispin, &
+                          no, no, mblk, local_only=.true.)
+          do inp = 1, no
+            eband(inp) = esp(inp,ikm,ispin)
+            focc(inp)  = system%rocc(inp,ikm,ispin)
+          end do
+          call normalize_occ(no, focc)
+          do in = nb_lo, nb_hi
+            do inp = 1, no
+              do ig = 1, ng
+                jg = imap(ig)
+                if (jg == 0) then
+                  msig(ig,inp) = (0.0d0, 0.0d0)
+                else
+                  msig(ig,inp) = mblk(jg, inp, in)
+                end if
+              end do
+            end do
+            call build_spectral_weight(ng, no, nomega, bspec, msig, swt)
+            e0nk = e0(in,ik)
+            call sigma_c_probe(no, nomega, omega_grid, domg, swt, eband, focc, e0nk,         eta_au, s0)
+            call sigma_c_probe(no, nomega, omega_grid, domg, swt, eband, focc, e0nk + de_au, eta_au, sp)
+            call sigma_c_probe(no, nomega, omega_grid, domg, swt, eband, focc, e0nk - de_au, eta_au, sm)
+            sc_all (in,ik) = sc_all (in,ik) + s0
+            scp_all(in,ik) = scp_all(in,ik) + sp
+            scm_all(in,ik) = scm_all(in,ik) + sm
+          end do
+        end do
+      end do
+    end do
+
+    ! (4) assemble the per-(band,k) sums across the q distribution
+    allocate(scg(nb_lo:nb_hi,nk))
+    call comm_summation(sc_all,  scg, size(sc_all),  info%icomm_k); sc_all  = scg
+    call comm_summation(scp_all, scg, size(scp_all), info%icomm_k); scp_all = scg
+    call comm_summation(scm_all, scg, size(scm_all), info%icomm_k); scm_all = scg
+    deallocate(scg)
+
+    ! (5) Re Sigma_c and Z for every output k
+    do ik = 1, nk
+      do in = nb_lo, nb_hi
+        sigc_re(in,ik) = rnk * dble(sc_all(in,ik))
+        dsig = rnk * ( dble(scp_all(in,ik)) - dble(scm_all(in,ik)) ) / (2.0d0 * de_au)
+        zfac(in,ik) = 1.0d0 / (1.0d0 - dsig)
+      end do
+    end do
+
+    deallocate(mblk, msig, imap, chi0_w, epsinv_w, vcoul, bspec, swt, eband, focc, e0)
+    deallocate(qid, qrep, sc_all, scp_all, scm_all)
+
+  end subroutine calc_sigma_c_real_qcache
 
   ! --------------------------------------------------------------------------
   ! gindex_local : list index jg with gvec(:,jg) == gtarget (tolerance), 0 if

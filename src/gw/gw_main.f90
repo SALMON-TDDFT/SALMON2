@@ -41,7 +41,7 @@ subroutine main_gw
   use gw_sigma_x_sub,     only: calc_sigma_x
   use gw_sigma_cohsex_sub,only: calc_sigma_cohsex
   use gw_sigma_gpp_sub,   only: calc_sigma_gpp, calc_sigma_gpp_qcache, calc_sigma_gpp_sym
-  use gw_sigma_c_real_sub,only: calc_sigma_c_real
+  use gw_sigma_c_real_sub,only: calc_sigma_c_real, calc_sigma_c_real_qcache
   use gw_qp_sub,          only: calc_vxc_expect, solve_qp
   use gw_symmetry_sub,    only: gw_sym_selftest, gw_grid_perm_selftest, gw_symmetrize_orbitals
   use sendrecv_grid
@@ -884,10 +884,18 @@ subroutine main_gw
                                  * omega_max_gw / 27.211386d0
         end do
         eta_t7 = eta_gw / 27.211386d0
-        call calc_sigma_c_real(system, info, mg, lg, spsi_full, energy%esp, &
+        ! yn_gw_qcache='y' caches W per distinct q + distributes over icomm_k
+        ! (node-scalable, identical result); else the base path (all (ik,iq), -n1).
+        if (yn_gw_qcache == 'y') then
+          call calc_sigma_c_real_qcache(system, info, mg, lg, spsi_full, energy%esp, &
+                            gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
+                            nomega_gw, omega_grid_t7, eta_t7, sigc_w7, zfac_w7)
+        else
+          call calc_sigma_c_real(system, info, mg, lg, spsi_full, energy%esp, &
                             gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
                             nomega_gw, omega_grid_t7, eta_t7, &
                             sigc_w7, zfac_w7, local_only=.true.)
+        end if
         skipfrac7 = 0.0d0   ! real-axis has no unphysical-pole skip
       else if (yn_gw_sym == 'y') then
         ! point-group symmetry-reduced sum (needs the symmetrised orbitals above).
