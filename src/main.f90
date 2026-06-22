@@ -40,7 +40,7 @@
  !case('maxwell_sbe')                 ; call main_maxwell_sbe
  !case('ttm')                         ; call main_ttm
  !case('maxwell_ttm')                 ; call main_maxwell_ttm
-  case('gw')                          ; call main_gw
+  case('gw','dft_response','gw_response') ; call main_gw
   case default ; stop 'invalid theory @ main'
   end select
 
@@ -65,7 +65,7 @@ contains
        calc_mode='GS'
     case('dft_band')
        calc_mode='DFT_BAND'
-    case('gw')
+    case('gw','dft_response','gw_response')
        calc_mode='GS'   ! load a converged GS via restart; sets if_real_orbital
                         ! deterministically (DFT_BAND leaves it uninitialised)
     case('tddft_response','tddft_pulse')
