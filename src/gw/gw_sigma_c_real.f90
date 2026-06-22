@@ -52,64 +52,78 @@ module gw_sigma_c_real_sub
 contains
 
   ! --------------------------------------------------------------------------
-  ! sigma_c_real_at_energy
+  ! build_spectral_weight
   !
-  ! Spectral-integral Sigma_c at one probe energy E for one output band n.
-  ! bspec(ig,jg,iw) = -(1/pi) Im W^c_{G(ig) G(jg)}(q, omg(iw)) is the precomputed
-  ! spectral function for this q (band-independent); domg is the (uniform) grid
-  ! spacing.  Mirrors sigma_c_at_energy of gw_sigma_gpp with the single-pole
-  ! bracket replaced by the omega'-grid integral.
+  ! M-contracted spectral weight  swt(n',iw) = sum_{G,G'} M_{nn',G} bspec_{GG'}(iw)
+  ! M*_{nn',G'}  for a fixed output band n (msig).  This is the O(ng^2) cost of
+  ! the correlation self-energy; doing it ONCE here (then reusing it for the three
+  ! probe energies, and stripping the omega'-grid complex divides out of the G,G'
+  ! double loop) is the key optimisation over evaluating the full integral per
+  ! (probe,G,G').  OMP over the (disjoint) omega' slices.
   ! --------------------------------------------------------------------------
-  subroutine sigma_c_real_at_energy(ng, no, nomega, omg, domg, bspec, &
-                                    msig, eband, focc, eprobe, eta, ssig)
+  subroutine build_spectral_weight(ng, no, nomega, bspec, msig, swt)
     implicit none
     integer,    intent(in)  :: ng, no, nomega
-    real(8),    intent(in)  :: omg(nomega)        ! omega' grid (a.u., >= 0)
-    real(8),    intent(in)  :: domg               ! grid spacing (a.u.)
     real(8),    intent(in)  :: bspec(ng, ng, nomega)
-    complex(8), intent(in)  :: msig(ng, no)       ! M_{nn',G(ig)} for fixed n
-    real(8),    intent(in)  :: eband(no)          ! eps_{n',k-q}
-    real(8),    intent(in)  :: focc(no)           ! occupation in [0,1]
-    real(8),    intent(in)  :: eprobe             ! probe energy E
-    real(8),    intent(in)  :: eta                ! broadening (a.u.)
-    complex(8), intent(out) :: ssig
-
+    complex(8), intent(in)  :: msig(ng, no)
+    complex(8), intent(out) :: swt(no, nomega)
     integer    :: ig, jg, inp, iw
-    complex(8) :: zeta, mji, racc, brk
-    real(8)    :: en, f1, fo, de, b
+    complex(8) :: mji, acc, bm
+!$omp parallel do default(shared) private(iw, inp, jg, ig, mji, acc, bm) schedule(dynamic)
+    do iw = 1, nomega
+      do inp = 1, no
+        acc = (0.0d0, 0.0d0)
+        do jg = 1, ng
+          mji = conjg(msig(jg,inp))
+          if (mji == (0.0d0,0.0d0)) cycle
+          bm = (0.0d0, 0.0d0)
+          do ig = 1, ng
+            bm = bm + msig(ig,inp) * bspec(ig,jg,iw)
+          end do
+          acc = acc + bm * mji
+        end do
+        swt(inp,iw) = acc
+      end do
+    end do
+!$omp end parallel do
+  end subroutine build_spectral_weight
 
+  ! --------------------------------------------------------------------------
+  ! sigma_c_probe
+  !
+  ! Sigma_c at one probe energy E from the precomputed swt:
+  !   Sigma_c(E) = sum_{n'} sum_{iw} domg * swt(n',iw)
+  !                [ (1-f)/(E-eps_n'-w'+i eta) + f/(E-eps_n'+w'-i eta) ].
+  ! The complex divides (the dominant cost) appear only here -- once per (n',iw),
+  ! NOT per (G,G') -- so this is cheap (no ng^2 factor).
+  ! --------------------------------------------------------------------------
+  subroutine sigma_c_probe(no, nomega, omg, domg, swt, eband, focc, eprobe, eta, ssig)
+    implicit none
+    integer,    intent(in)  :: no, nomega
+    real(8),    intent(in)  :: omg(nomega), domg
+    complex(8), intent(in)  :: swt(no, nomega)
+    real(8),    intent(in)  :: eband(no), focc(no)
+    real(8),    intent(in)  :: eprobe, eta
+    complex(8), intent(out) :: ssig
+    integer    :: inp, iw
+    complex(8) :: zeta, acc
+    real(8)    :: f1, fo, de
     zeta = cmplx(0.0d0, eta, 8)
     ssig = (0.0d0, 0.0d0)
-
     do inp = 1, no
-      en = eband(inp)
       fo = focc(inp)
       if (fo < 0.0d0) fo = 0.0d0
       if (fo > 1.0d0) fo = 1.0d0
       f1 = 1.0d0 - fo
-      de = eprobe - en
-      racc = (0.0d0, 0.0d0)
-      do jg = 1, ng
-        mji = conjg(msig(jg,inp))               ! M_{nn',G'(jg)}
-        if (mji == (0.0d0,0.0d0)) cycle
-        do ig = 1, ng
-          if (msig(ig,inp) == (0.0d0,0.0d0)) cycle
-          ! spectral integral of the (ig,jg) channel:
-          !   INT dw' B(w') [ (1-f)/(de - w' + i eta) + f/(de + w' - i eta) ]
-          brk = (0.0d0, 0.0d0)
-          do iw = 1, nomega
-            b = bspec(ig,jg,iw)
-            if (b == 0.0d0) cycle
-            brk = brk + b * ( f1 / ( cmplx(de - omg(iw), 0.0d0, 8) + zeta ) &
-                            + fo / ( cmplx(de + omg(iw), 0.0d0, 8) - zeta ) )
-          end do
-          racc = racc + msig(ig,inp) * (brk * domg) * mji
-        end do
+      de = eprobe - eband(inp)
+      acc = (0.0d0, 0.0d0)
+      do iw = 1, nomega
+        acc = acc + swt(inp,iw) * ( f1 / ( cmplx(de - omg(iw), 0.0d0, 8) + zeta ) &
+                                  + fo / ( cmplx(de + omg(iw), 0.0d0, 8) - zeta ) )
       end do
-      ssig = ssig + racc
+      ssig = ssig + acc * domg
     end do
-
-  end subroutine sigma_c_real_at_energy
+  end subroutine sigma_c_probe
 
   ! --------------------------------------------------------------------------
   ! calc_sigma_c_real
@@ -150,6 +164,7 @@ contains
     complex(8), allocatable :: chi0_w(:,:,:)          ! chi0_{GG'}(q,w)
     complex(8), allocatable :: epsinv_w(:,:,:)        ! eps^{-1}_{GG'}(q,w)
     real(8),    allocatable :: bspec(:,:,:)           ! -Im W^c / pi
+    complex(8), allocatable :: swt(:,:)               ! M-contracted spectral weight (no,nomega)
     real(8),    allocatable :: vcoul(:)
     integer,    allocatable :: imap(:)
     real(8),    allocatable :: eband(:), focc(:)
@@ -186,7 +201,7 @@ contains
 
     allocate(mblk(ng, no, no), msig(ng, no), imap(ng))
     allocate(chi0_w(ng,ng,nomega), epsinv_w(ng,ng,nomega), vcoul(ng))
-    allocate(bspec(ng,ng,nomega))
+    allocate(bspec(ng,ng,nomega), swt(no,nomega))
     allocate(eband(no), focc(no))
     allocate(e0(nb_lo:nb_hi, nk))
 
@@ -264,12 +279,14 @@ contains
             end do
           end do
           e0nk = e0(in,ik)
-          call sigma_c_real_at_energy(ng, no, nomega, omega_grid, domg, bspec, &
-                                      msig, eband, focc, e0nk,         eta_au, s0)
-          call sigma_c_real_at_energy(ng, no, nomega, omega_grid, domg, bspec, &
-                                      msig, eband, focc, e0nk + de_au, eta_au, sp)
-          call sigma_c_real_at_energy(ng, no, nomega, omega_grid, domg, bspec, &
-                                      msig, eband, focc, e0nk - de_au, eta_au, sm)
+          ! O(ng^2) M-contraction ONCE (OMP), then the three probes are cheap.
+          call build_spectral_weight(ng, no, nomega, bspec, msig, swt)
+          call sigma_c_probe(no, nomega, omega_grid, domg, swt, eband, focc, &
+                             e0nk,         eta_au, s0)
+          call sigma_c_probe(no, nomega, omega_grid, domg, swt, eband, focc, &
+                             e0nk + de_au, eta_au, sp)
+          call sigma_c_probe(no, nomega, omega_grid, domg, swt, eband, focc, &
+                             e0nk - de_au, eta_au, sm)
           sigc_re(in,ik) = sigc_re(in,ik) + rnk * dble(s0)
           ! d ReSigma_c/dE accumulates the q-sum derivative; Z formed after the loop
           zfac(in,ik) = zfac(in,ik) + rnk * dble(sp - sm) / (2.0d0 * de_au)
@@ -292,7 +309,7 @@ contains
       end do
     end do
 
-    deallocate(mblk, msig, imap, chi0_w, epsinv_w, vcoul, bspec, eband, focc, e0)
+    deallocate(mblk, msig, imap, chi0_w, epsinv_w, vcoul, bspec, swt, eband, focc, e0)
 
   end subroutine calc_sigma_c_real
 
