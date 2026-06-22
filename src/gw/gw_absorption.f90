@@ -82,7 +82,7 @@ contains
   ! --------------------------------------------------------------------
   subroutine calc_absorption_velocity(system, info, mg, lg, stencil, srg, spsi, &
                                       esp, gvec, gg, ng, ig0, ispin, &
-                                      nomega, omega_grid, eta, eps_macro)
+                                      nomega, omega_grid, eta, eps_macro, local_only)
     use structures,      only: s_dft_system, s_parallel_info, s_rgrid, s_stencil, &
                                s_sendrecv_grid, s_orbital
     use gw_velocity_sub, only: calc_velocity_mtxel
