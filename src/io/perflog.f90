@@ -151,7 +151,7 @@ contains
     end if
 
     select case(theory)
-    case('dft','dft_band','dft_md')
+    case('dft','dft_band','dft_md','gw','dft_response','gw_response')
       call set(0, 0, 'scf calculation')
       call set(1, LOG_INIT_GS            , 'gs initialization')
       call set(2, LOG_INIT_GS_RESTART    , 'reading data')
