@@ -470,6 +470,10 @@ character(256),allocatable :: atom_name(:)
                                         ! remainder (completeness correction for the
                                         ! finite band sum); accelerates Sigma_c band
                                         ! convergence (gpp q-cache path)
+  character(1)   :: yn_gw_qp_inject     ! 'y' (theory='gw_response'): inject the
+                                        ! per-state QP energies read from
+                                        ! <sysname>_qp_energies.data into chi0
+                                        ! (true G0W0+RPA) instead of a rigid scissors
   ! --- full-frequency (real-axis) dielectric / absorption (spec-b1) ---
   integer        :: nomega_gw           ! number of real-frequency grid points
   real(8)        :: omega_max_gw        ! eV, upper end of the real-frequency grid

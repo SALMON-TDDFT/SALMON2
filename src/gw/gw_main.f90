@@ -33,7 +33,7 @@ subroutine main_gw
   use salmon_xc
   use initialization_sub
   use initialization_dft
-  use gw_qp_output_sub,   only: write_qp_energies
+  use gw_qp_output_sub,   only: write_qp_energies, write_qp_dos, read_qp_energies
   use gw_coulomb_sub,     only: build_gvectors, build_vcoul
   use gw_mtxel_sub,       only: calc_mtxel, replicate_orbitals_k
   use gw_epsilon_sub,     only: calc_epsinv, calc_chi0_freq, calc_w_freq
@@ -102,6 +102,8 @@ subroutine main_gw
   integer               :: ng_ab, ig0_ab, ismall_ab, iq_ab, iw_ab
   integer               :: n_occ_ab, io_ab, is_ab          ! gw_response scissors
   real(8),  allocatable :: esp_ab(:,:,:)                   ! KS or QP-scissored energies
+  real(8),  allocatable :: eqp_read_ab(:,:,:)              ! per-state QP (b1-3b inject)
+  logical               :: ok_qp_ab
   real(8),  allocatable :: gvec_ab(:,:), gg_ab(:), omega_grid_ab(:), vcoul_ab(:)
   real(8)               :: qvec_ab(3), qabs_ab, qabsmin_ab, eta_ab
   complex(8),allocatable:: chi0_ab(:,:,:), epsinv_ab(:,:,:), eps_macro_ab(:)
@@ -529,7 +531,20 @@ subroutine main_gw
     ! (dft_response / yn_gw_absorption) leaves esp_ab = the bare KS energies.
     allocate(esp_ab(system%no, system%nk, system%nspin))
     esp_ab(:,:,:) = energy%esp(:,:,:)
-    if (trim(theory) == 'gw_response' .and. abs(gw_scissors) > 1.0d-12) then
+    if (trim(theory) == 'gw_response' .and. yn_gw_qp_inject == 'y') then
+      ! b1-3b true G0W0+RPA: inject the per-state QP spectrum (read from a prior
+      ! theory='gw' run's _qp_energies.data) into chi0 -- not a rigid scissors.
+      allocate(eqp_read_ab(system%no, system%nk, system%nspin))
+      call read_qp_energies(system, eqp_read_ab, ok_qp_ab)
+      if (ok_qp_ab) then
+        esp_ab(:,:,:) = eqp_read_ab(:,:,:)
+        if (comm_is_root(nproc_id_global)) &
+          write(*,*) "  [gw] gw_response: per-state QP injection from _qp_energies.data (true G0W0+RPA)"
+      else if (comm_is_root(nproc_id_global)) then
+        write(*,*) "  [gw] gw_response: yn_gw_qp_inject='y' but _qp_energies.data missing -> KS chi0"
+      end if
+      deallocate(eqp_read_ab)
+    else if (trim(theory) == 'gw_response' .and. abs(gw_scissors) > 1.0d-12) then
       n_occ_ab = 0
       do io_ab = 1, system%no
         if (system%rocc(io_ab,1,1) > 1.0d-6) n_occ_ab = io_ab
@@ -1099,9 +1114,10 @@ subroutine main_gw
   ! Step 6: write output
   ! ----------------------------------------------------------------
   call write_qp_energies(system, energy%esp, eqp, zfac, sigx, sigc, vxc_arr)
+  call write_qp_dos(system, energy%esp, eqp)
 
   if (comm_is_root(nproc_id_global)) then
-    write(*,*) "  [gw] wrote QP energies"
+    write(*,*) "  [gw] wrote QP energies + QP/KS DOS"
     write(*,*) "  [gw] band window: ", ib_min, " to ", ib_max
   end if
 

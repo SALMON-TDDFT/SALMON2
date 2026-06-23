@@ -618,6 +618,7 @@ contains
       & yn_gw_qcache, &
       & yn_gw_sym, &
       & yn_gw_static_remainder, &
+      & yn_gw_qp_inject, &
       & nomega_gw, &
       & omega_max_gw, &
       & eta_gw, &
@@ -1062,6 +1063,7 @@ contains
     yn_gw_qcache   = 'n'
     yn_gw_sym      = 'n'
     yn_gw_static_remainder = 'n'
+    yn_gw_qp_inject = 'n'
     nomega_gw        = 200
     omega_max_gw     = 25.0d0
     eta_gw           = 0.068d0      ! hbar/T_mask, T_mask=400 a.u. (prod RT-TDDFT mask)
@@ -1713,6 +1715,7 @@ contains
     call comm_bcast(yn_gw_qcache  , nproc_group_global)
     call comm_bcast(yn_gw_sym     , nproc_group_global)
     call comm_bcast(yn_gw_static_remainder, nproc_group_global)
+    call comm_bcast(yn_gw_qp_inject, nproc_group_global)
     call comm_bcast(nomega_gw       , nproc_group_global)
     call comm_bcast(omega_max_gw    , nproc_group_global)
     call comm_bcast(eta_gw          , nproc_group_global)
@@ -2694,6 +2697,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_qcache',    trim(yn_gw_qcache)
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_sym',       trim(yn_gw_sym)
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_static_remainder', trim(yn_gw_static_remainder)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_qp_inject', trim(yn_gw_qp_inject)
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_qp_min',   nband_qp_min
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_qp_max',   nband_qp_max
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nomega_gw',      nomega_gw
