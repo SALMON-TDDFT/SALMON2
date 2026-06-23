@@ -863,14 +863,30 @@ end subroutine hpsi
 
 !===================================================================================================================================
 
-! The variational generalized-KS tau operator is -1/2 (nabla+ik).(vtau (nabla+ik) psi)
-! for tau = 1/2 sum_occ |(nabla+ik)psi|^2 with vtau = dE/dtau (bare, as stored in the
-! payload). The accumulated corr below builds the bare -(nabla+ik).(vtau (nabla+ik) psi),
-! so the 1/2 is applied at the htpsi accumulation in every branch.
+! The generalized-KS meta-GGA tau operator
+!   H_tau psi = -1/2 sum_c L_c ( vtau * L_c psi ),
+! with the Cartesian covariant derivative L_c psi = (B^T nabla psi)_c + i*kvec_c*psi
+! and vtau = dE_xc/dtau (bare, as stored in the payload). This is the EXACT variational
+! derivative of the tracked tau energy E_tau = 1/2 sum_occ vtau*|L_c psi|^2: because the
+! discrete divergence is the negative adjoint of the discrete gradient, the operator is
+! BOTH Hermitian and the exact gradient of the tau built by calc_tau_from_orbitals.
+!
+! Implementation reuses the SAME gradient routine as calc_tau_from_orbitals
+! (calc_gradient_psi / calc_gradient_field, coef_nab + rmatrix_B), so the operator is
+! bit-consistent with the tracked tau (this is the crux of energy conservation in RT:
+! the previous coef_lap / face-averaged-vtau form was Hermitian but NOT the gradient of
+! the coef_nab-based tau, which pumped energy in real-time propagation).
+!
+! NOTE: real-space domain decomposition (info%if_divide_rspace) is unsupported here: the
+! intermediate field vtau*L_c psi would need a scalar halo exchange that is not wired in
+! this routine. meta-GGA runs use k/orbital parallelism (nproc_rgrid=1); the guard below
+! prevents silent wrong answers (the previous nonorthogonal path was also incorrect under
+! rspace division).
 subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payload)
   use structures
   use salmon_global, only: yn_periodic
   use math_constants, only: zi
+  use stencil_sub, only: calc_gradient_psi, calc_gradient_field
   implicit none
   type(s_orbital),            intent(inout) :: htpsi
   type(s_orbital),            intent(in)    :: tpsi
@@ -881,11 +897,15 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
   type(s_sendrecv_grid),      intent(inout) :: srg
   type(s_pp_grid),            intent(in)    :: ppg
   type(s_xc_operator_payload), optional, intent(in) :: xc_payload
-  integer :: im, ik, io, ispin, ix, iy, iz, n
-  integer :: ixp, ixm, iyp, iym, izp, izm
-  real(8) :: a0, aplus, aminus, kvec(3), corr_r
-  complex(8) :: psi0, corr, lap_axis, dprod_axis, dpsi_axis
-  complex(8), allocatable :: wk_dpsi(:,:,:,:), wk_apsi(:,:,:), wk_dapsi(:,:,:,:), wk_adpsi(:,:,:,:)
+  integer :: im, ik, io, ispin, ix, iy, iz, c
+  real(8) :: kvec(3)
+  complex(8) :: psi0
+  complex(8), allocatable :: gpsi(:,:,:,:)   ! (3, grid)  : L_c psi (Cartesian covariant gradient)
+  complex(8), allocatable :: wvec(:,:,:,:)   ! (grid, 3)  : vtau * L_c psi (component last = contiguous)
+  complex(8), allocatable :: gw(:,:,:,:)     ! (3, grid)  : Cartesian gradient of one wvec component
+  real(8),    allocatable :: rgpsi(:,:,:,:)  ! (3, interior)
+  real(8),    allocatable :: rgw(:,:,:,:)    ! (3, interior)
+  real(8),    allocatable :: rwvec(:,:,:,:)  ! (grid, 3)
 
 #ifdef USE_OPENACC
   call fail_tau_operator("support is unavailable for OpenACC builds")
@@ -904,6 +924,9 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
   if (allocated(system%Ac_micro%v)) then
     call fail_tau_operator("support is unavailable for single-scale Maxwell-TDDFT")
   end if
+  if (info%if_divide_rspace) then
+    call fail_tau_operator("real-space domain decomposition is unsupported; use k/orbital parallelism")
+  end if
   if (lbound(xc_payload%vtau%f,1) > mg%is_array(1) .or. ubound(xc_payload%vtau%f,1) < mg%ie_array(1) .or. &
       lbound(xc_payload%vtau%f,2) > mg%is_array(2) .or. ubound(xc_payload%vtau%f,2) < mg%ie_array(2) .or. &
       lbound(xc_payload%vtau%f,3) > mg%is_array(3) .or. ubound(xc_payload%vtau%f,3) < mg%ie_array(3)) then
@@ -911,444 +934,101 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg,ppg,xc_payl
   end if
 
   if (allocated(tpsi%rwf)) then
-    if (.not. stencil%if_orthogonal) then
-      call fail_tau_operator("nonorthogonal tau operator with real orbitals is unsupported")
-    end if
-!$omp parallel do collapse(4) default(none) &
-!$omp          private(im,ik,io,ispin,iz,iy,ix,n,ixp,ixm,iyp,iym,izp,izm,a0,aplus,aminus,corr_r) &
-!$omp          shared(info,mg,system,stencil,tpsi,htpsi,xc_payload)
+    ! real orbitals: Gamma-only (k=0); the covariant derivative is the real Cartesian gradient.
+    allocate(rgpsi(3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(rgw  (3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(rwvec(  mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3),3))
+    rwvec = 0d0
     do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
     do ispin=1,system%nspin
+      call calc_gradient_field(mg,stencil%coef_nab,system%rmatrix_B, &
+                               tpsi%rwf(:,:,:,ispin,io,ik,im),rgpsi)
+!$omp parallel do collapse(2) private(ix,iy,iz,c)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        a0 = xc_payload%vtau%f(mg%idx(ix), mg%idy(iy), mg%idz(iz))
-        corr_r = 0d0
-
-        do n=1,4
-          ixp = mg%idx(ix+n)
-          ixm = mg%idx(ix-n)
-          aplus = 0.5d0 * (a0 + xc_payload%vtau%f(ixp, mg%idy(iy), mg%idz(iz)))
-          aminus = 0.5d0 * (a0 + xc_payload%vtau%f(ixm, mg%idy(iy), mg%idz(iz)))
-          corr_r = corr_r - stencil%coef_lap(n,1) * ( &
-                 aplus  * (tpsi%rwf(ixp,iy,iz,ispin,io,ik,im) - tpsi%rwf(ix,iy,iz,ispin,io,ik,im)) + &
-                 aminus * (tpsi%rwf(ixm,iy,iz,ispin,io,ik,im) - tpsi%rwf(ix,iy,iz,ispin,io,ik,im)) )
+        do c=1,3
+          rwvec(ix,iy,iz,c) = xc_payload%vtau%f(mg%idx(ix),mg%idy(iy),mg%idz(iz)) * rgpsi(c,ix,iy,iz)
         end do
-
-        do n=1,4
-          iyp = mg%idy(iy+n)
-          iym = mg%idy(iy-n)
-          aplus = 0.5d0 * (a0 + xc_payload%vtau%f(mg%idx(ix), iyp, mg%idz(iz)))
-          aminus = 0.5d0 * (a0 + xc_payload%vtau%f(mg%idx(ix), iym, mg%idz(iz)))
-          corr_r = corr_r - stencil%coef_lap(n,2) * ( &
-                 aplus  * (tpsi%rwf(ix,iyp,iz,ispin,io,ik,im) - tpsi%rwf(ix,iy,iz,ispin,io,ik,im)) + &
-                 aminus * (tpsi%rwf(ix,iym,iz,ispin,io,ik,im) - tpsi%rwf(ix,iy,iz,ispin,io,ik,im)) )
-        end do
-
-        do n=1,4
-          izp = mg%idz(iz+n)
-          izm = mg%idz(iz-n)
-          aplus = 0.5d0 * (a0 + xc_payload%vtau%f(mg%idx(ix), mg%idy(iy), izp))
-          aminus = 0.5d0 * (a0 + xc_payload%vtau%f(mg%idx(ix), mg%idy(iy), izm))
-          corr_r = corr_r - stencil%coef_lap(n,3) * ( &
-                 aplus  * (tpsi%rwf(ix,iy,izp,ispin,io,ik,im) - tpsi%rwf(ix,iy,iz,ispin,io,ik,im)) + &
-                 aminus * (tpsi%rwf(ix,iy,izm,ispin,io,ik,im) - tpsi%rwf(ix,iy,iz,ispin,io,ik,im)) )
-        end do
-
-        htpsi%rwf(ix,iy,iz,ispin,io,ik,im) = htpsi%rwf(ix,iy,iz,ispin,io,ik,im) + 0.5d0 * corr_r
       end do
       end do
       end do
-    end do
-    end do
-    end do
-    end do
 !$omp end parallel do
+      do c=1,3
+        call calc_gradient_field(mg,stencil%coef_nab,system%rmatrix_B,rwvec(:,:,:,c),rgw)
+!$omp parallel do collapse(2) private(ix,iy,iz)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          ! accumulate -1/2 * d/dx_c ( vtau * d psi / d x_c )
+          htpsi%rwf(ix,iy,iz,ispin,io,ik,im) = htpsi%rwf(ix,iy,iz,ispin,io,ik,im) - 0.5d0 * rgw(c,ix,iy,iz)
+        end do
+        end do
+        end do
+!$omp end parallel do
+      end do
+    end do
+    end do
+    end do
+    end do
+    deallocate(rgpsi,rgw,rwvec)
     return
   end if
 
-  if (.not. stencil%if_orthogonal) then
-    ! single work-array set reused across the (serial) orbital/k loop. The heavy
-    ! grid loops inside add_xc_tau_operator_nonorth_complex are OMP-parallelized
-    ! over the grid (mirrors calc_laplacian_field), so the orbital/k loop must NOT
-    ! be collapsed for OMP here: doing so starves the threads when few orbitals/
-    ! k-points are local per rank (e.g. SiO2 with ob/k decomposition, where
-    ! ob/proc * k/proc < nthreads). Grid parallelism is unaffected by that.
-    allocate(wk_dpsi (3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3)))
-    allocate(wk_apsi (  mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3)))
-    allocate(wk_dapsi(3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3)))
-    allocate(wk_adpsi(3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3)))
-    do im=info%im_s,info%im_e
-    do ik=info%ik_s,info%ik_e
-    do io=info%io_s,info%io_e
-    do ispin=1,system%nspin
-      kvec = 0d0
-      if (yn_periodic == 'y') kvec(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
-      call add_xc_tau_operator_nonorth_complex( &
-           htpsi%zwf(:,:,:,ispin,io,ik,im), tpsi%zwf(:,:,:,ispin,io,ik,im), &
-           mg, stencil, system, xc_payload%vtau%f, kvec, &
-           wk_dpsi, wk_apsi, wk_dapsi, wk_adpsi)
-    end do
-    end do
-    end do
-    end do
-    deallocate(wk_dpsi,wk_apsi,wk_dapsi,wk_adpsi)
-    return
-  end if
-
-!$omp parallel do collapse(4) default(none) &
-!$omp          private(im,ik,io,ispin,iz,iy,ix,n,ixp,ixm,iyp,iym,izp,izm,a0,aplus,aminus,kvec,psi0,corr,lap_axis,dprod_axis,dpsi_axis) &
-!$omp          shared(info,mg,system,stencil,tpsi,htpsi,xc_payload,yn_periodic)
+  ! complex orbitals (periodic / nonzero k or Ac). calc_gradient_psi handles both
+  ! orthogonal and non-orthogonal lattices via rmatrix_B.
+  allocate(gpsi(3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3)))
+  allocate(gw  (3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3)))
+  allocate(wvec(  mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3),3))
+  wvec = (0d0,0d0)
   do im=info%im_s,info%im_e
   do ik=info%ik_s,info%ik_e
   do io=info%io_s,info%io_e
   do ispin=1,system%nspin
     kvec = 0d0
     if (yn_periodic == 'y') kvec(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+    ! L_c psi = (B^T nabla psi)_c + i kvec_c psi
+    call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im),gpsi, &
+         mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz, &
+         stencil%coef_nab,system%rmatrix_B)
+!$omp parallel do collapse(2) private(ix,iy,iz,c,psi0)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      a0 = xc_payload%vtau%f(mg%idx(ix), mg%idy(iy), mg%idz(iz))
       psi0 = tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-      corr = 0d0
-
-      lap_axis = 0d0
-      dprod_axis = 0d0
-      dpsi_axis = 0d0
-      do n=1,4
-        ixp = mg%idx(ix+n)
-        ixm = mg%idx(ix-n)
-        aplus = 0.5d0 * (a0 + xc_payload%vtau%f(ixp, mg%idy(iy), mg%idz(iz)))
-        aminus = 0.5d0 * (a0 + xc_payload%vtau%f(ixm, mg%idy(iy), mg%idz(iz)))
-        lap_axis = lap_axis + stencil%coef_lap(n,1) * ( &
-                 aplus  * (tpsi%zwf(ixp,iy,iz,ispin,io,ik,im) - psi0) + &
-                 aminus * (tpsi%zwf(ixm,iy,iz,ispin,io,ik,im) - psi0) )
-        dprod_axis = dprod_axis + stencil%coef_nab(n,1) * ( &
-                   xc_payload%vtau%f(ixp, mg%idy(iy), mg%idz(iz)) * tpsi%zwf(ixp,iy,iz,ispin,io,ik,im) - &
-                   xc_payload%vtau%f(ixm, mg%idy(iy), mg%idz(iz)) * tpsi%zwf(ixm,iy,iz,ispin,io,ik,im) )
-        dpsi_axis = dpsi_axis + stencil%coef_nab(n,1) * ( &
-                  tpsi%zwf(ixp,iy,iz,ispin,io,ik,im) - tpsi%zwf(ixm,iy,iz,ispin,io,ik,im) )
+      do c=1,3
+        wvec(ix,iy,iz,c) = xc_payload%vtau%f(mg%idx(ix),mg%idy(iy),mg%idz(iz)) * &
+                           (gpsi(c,ix,iy,iz) + zi*kvec(c)*psi0)
       end do
-      corr = corr - lap_axis - zi * kvec(1) * (dprod_axis + a0 * dpsi_axis) + a0 * kvec(1)**2 * psi0
-
-      lap_axis = 0d0
-      dprod_axis = 0d0
-      dpsi_axis = 0d0
-      do n=1,4
-        iyp = mg%idy(iy+n)
-        iym = mg%idy(iy-n)
-        aplus = 0.5d0 * (a0 + xc_payload%vtau%f(mg%idx(ix), iyp, mg%idz(iz)))
-        aminus = 0.5d0 * (a0 + xc_payload%vtau%f(mg%idx(ix), iym, mg%idz(iz)))
-        lap_axis = lap_axis + stencil%coef_lap(n,2) * ( &
-                 aplus  * (tpsi%zwf(ix,iyp,iz,ispin,io,ik,im) - psi0) + &
-                 aminus * (tpsi%zwf(ix,iym,iz,ispin,io,ik,im) - psi0) )
-        dprod_axis = dprod_axis + stencil%coef_nab(n,2) * ( &
-                   xc_payload%vtau%f(mg%idx(ix), iyp, mg%idz(iz)) * tpsi%zwf(ix,iyp,iz,ispin,io,ik,im) - &
-                   xc_payload%vtau%f(mg%idx(ix), iym, mg%idz(iz)) * tpsi%zwf(ix,iym,iz,ispin,io,ik,im) )
-        dpsi_axis = dpsi_axis + stencil%coef_nab(n,2) * ( &
-                  tpsi%zwf(ix,iyp,iz,ispin,io,ik,im) - tpsi%zwf(ix,iym,iz,ispin,io,ik,im) )
-      end do
-      corr = corr - lap_axis - zi * kvec(2) * (dprod_axis + a0 * dpsi_axis) + a0 * kvec(2)**2 * psi0
-
-      lap_axis = 0d0
-      dprod_axis = 0d0
-      dpsi_axis = 0d0
-      do n=1,4
-        izp = mg%idz(iz+n)
-        izm = mg%idz(iz-n)
-        aplus = 0.5d0 * (a0 + xc_payload%vtau%f(mg%idx(ix), mg%idy(iy), izp))
-        aminus = 0.5d0 * (a0 + xc_payload%vtau%f(mg%idx(ix), mg%idy(iy), izm))
-        lap_axis = lap_axis + stencil%coef_lap(n,3) * ( &
-                 aplus  * (tpsi%zwf(ix,iy,izp,ispin,io,ik,im) - psi0) + &
-                 aminus * (tpsi%zwf(ix,iy,izm,ispin,io,ik,im) - psi0) )
-        dprod_axis = dprod_axis + stencil%coef_nab(n,3) * ( &
-                   xc_payload%vtau%f(mg%idx(ix), mg%idy(iy), izp) * tpsi%zwf(ix,iy,izp,ispin,io,ik,im) - &
-                   xc_payload%vtau%f(mg%idx(ix), mg%idy(iy), izm) * tpsi%zwf(ix,iy,izm,ispin,io,ik,im) )
-        dpsi_axis = dpsi_axis + stencil%coef_nab(n,3) * ( &
-                  tpsi%zwf(ix,iy,izp,ispin,io,ik,im) - tpsi%zwf(ix,iy,izm,ispin,io,ik,im) )
-      end do
-      corr = corr - lap_axis - zi * kvec(3) * (dprod_axis + a0 * dpsi_axis) + a0 * kvec(3)**2 * psi0
-
-      htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + 0.5d0 * corr
     end do
     end do
     end do
-  end do
-  end do
-  end do
-  end do
 !$omp end parallel do
+    ! H_tau psi += -1/2 sum_c L_c ( wvec_c ) = -1/2 sum_c [ (nabla_cart wvec_c)_c + i kvec_c wvec_c ]
+    do c=1,3
+      call calc_gradient_psi(wvec(:,:,:,c),gw, &
+           mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz, &
+           stencil%coef_nab,system%rmatrix_B)
+!$omp parallel do collapse(2) private(ix,iy,iz)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) &
+             - 0.5d0 * ( gw(c,ix,iy,iz) + zi*kvec(c)*wvec(ix,iy,iz,c) )
+      end do
+      end do
+      end do
+!$omp end parallel do
+    end do
+  end do
+  end do
+  end do
+  end do
+  deallocate(gpsi,gw,wvec)
+
 end subroutine add_xc_tau_operator
-
-!===================================================================================================================================
-
-subroutine add_xc_tau_operator_nonorth_complex(htpsi, tpsi, mg, stencil, system, vtau, kvec_cart, dpsi, apsi, dapsi, adpsi)
-  use structures
-  use math_constants, only: zi
-  implicit none
-  type(s_rgrid),      intent(in)    :: mg
-  type(s_stencil),    intent(in)    :: stencil
-  type(s_dft_system), intent(in)    :: system
-  complex(8),         intent(inout) :: htpsi(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
-                                             mg%is_array(3):mg%ie_array(3))
-  complex(8),         intent(in)    :: tpsi(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
-                                             mg%is_array(3):mg%ie_array(3))
-  real(8),            intent(in)    :: vtau(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
-                                            mg%is_array(3):mg%ie_array(3))
-  real(8),            intent(in)    :: kvec_cart(3)
-  complex(8),         intent(inout) :: dpsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3))
-  complex(8),         intent(inout) :: apsi(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3))
-  complex(8),         intent(inout) :: dapsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3))
-  complex(8),         intent(inout) :: adpsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), mg%is_array(3):mg%ie_array(3))
-  integer :: ix, iy, iz, n, ixc, iyc, izc, jp, jm
-  real(8) :: a0, k2, kvec_grid(3), ap, am, cf(6), lap(4,3), nab(4,3)
-  complex(8) :: psi0, corr, d1, d2, d3, c21, c31, c12, c32, c13, c23
-  integer :: idx(mg%is(1)-4:mg%ie(1)+4), idy(mg%is(2)-4:mg%ie(2)+4), idz(mg%is(3)-4:mg%ie(3)+4)
-
-  ! local copies (idx as plain 1D arrays + stencil coefs) so the hot loop below
-  ! vectorizes instead of repeatedly dereferencing derived-type components
-  idx = mg%idx(mg%is(1)-4:mg%ie(1)+4)
-  idy = mg%idy(mg%is(2)-4:mg%ie(2)+4)
-  idz = mg%idz(mg%is(3)-4:mg%ie(3)+4)
-  cf = stencil%coef_F; lap = stencil%coef_lap; nab = stencil%coef_nab
-
-  call calc_tau_operator_axis_derivatives_complex(tpsi, mg, stencil%coef_nab, dpsi)
-
-  apsi = 0d0
-  adpsi = 0d0
-!$omp parallel do collapse(2) default(none) private(ix,iy,iz,a0) shared(mg,vtau,tpsi,dpsi,apsi,adpsi)
-  do iz = mg%is(3), mg%ie(3)
-  do iy = mg%is(2), mg%ie(2)
-  do ix = mg%is(1), mg%ie(1)
-    a0 = vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz))
-    apsi(ix,iy,iz) = a0 * tpsi(ix,iy,iz)
-    adpsi(1,ix,iy,iz) = a0 * dpsi(1,ix,iy,iz)
-    adpsi(2,ix,iy,iz) = a0 * dpsi(2,ix,iy,iz)
-    adpsi(3,ix,iy,iz) = a0 * dpsi(3,ix,iy,iz)
-  end do
-  end do
-  end do
-!$omp end parallel do
-
-  call calc_tau_operator_axis_derivatives_complex(apsi, mg, stencil%coef_nab, dapsi)
-
-  kvec_grid = matmul(system%rmatrix_B, kvec_cart)
-  k2 = sum(kvec_cart(1:3)**2)
-
-  ! inlined direct(idir) + cross(iaxis,idir): the face-averaged vtau (ap/am) is
-  ! computed once per face and reused for the diagonal (psi) and both off-diagonal
-  ! (dpsi) terms. Same arithmetic/order as calc_tau_operator_{direct_axis,cross_component}.
-!$omp parallel do collapse(2) default(none) &
-!$omp   private(ix,iy,iz,ixc,iyc,izc,n,jp,jm,a0,psi0,ap,am,d1,d2,d3,c21,c31,c12,c32,c13,c23,corr) &
-!$omp   shared(mg,vtau,tpsi,dpsi,dapsi,adpsi,htpsi,idx,idy,idz,cf,lap,nab,kvec_grid,k2)
-  do iz = mg%is(3), mg%ie(3)
-  do iy = mg%is(2), mg%ie(2)
-    iyc = idy(iy); izc = idz(iz)
-    do ix = mg%is(1), mg%ie(1)
-      ixc = idx(ix)
-      a0 = vtau(ixc, iyc, izc)
-      psi0 = tpsi(ix,iy,iz)
-      d1 = 0d0; d2 = 0d0; d3 = 0d0
-      c21 = 0d0; c31 = 0d0; c12 = 0d0; c32 = 0d0; c13 = 0d0; c23 = 0d0
-      do n = 1, 4
-        jp = idx(ix+n); jm = idx(ix-n)
-        ap = 0.5d0 * (a0 + vtau(jp, iyc, izc))
-        am = 0.5d0 * (a0 + vtau(jm, iyc, izc))
-        d1  = d1  + lap(n,1) * (ap * (tpsi(jp,iy,iz) - psi0) + am * (tpsi(jm,iy,iz) - psi0))
-        c21 = c21 + nab(n,1) * (ap * dpsi(2,jp,iy,iz) - am * dpsi(2,jm,iy,iz))
-        c31 = c31 + nab(n,1) * (ap * dpsi(3,jp,iy,iz) - am * dpsi(3,jm,iy,iz))
-      end do
-      do n = 1, 4
-        jp = idy(iy+n); jm = idy(iy-n)
-        ap = 0.5d0 * (a0 + vtau(ixc, jp, izc))
-        am = 0.5d0 * (a0 + vtau(ixc, jm, izc))
-        d2  = d2  + lap(n,2) * (ap * (tpsi(ix,jp,iz) - psi0) + am * (tpsi(ix,jm,iz) - psi0))
-        c12 = c12 + nab(n,2) * (ap * dpsi(1,ix,jp,iz) - am * dpsi(1,ix,jm,iz))
-        c32 = c32 + nab(n,2) * (ap * dpsi(3,ix,jp,iz) - am * dpsi(3,ix,jm,iz))
-      end do
-      do n = 1, 4
-        jp = idz(iz+n); jm = idz(iz-n)
-        ap = 0.5d0 * (a0 + vtau(ixc, iyc, jp))
-        am = 0.5d0 * (a0 + vtau(ixc, iyc, jm))
-        d3  = d3  + lap(n,3) * (ap * (tpsi(ix,iy,jp) - psi0) + am * (tpsi(ix,iy,jm) - psi0))
-        c13 = c13 + nab(n,3) * (ap * dpsi(1,ix,iy,jp) - am * dpsi(1,ix,iy,jm))
-        c23 = c23 + nab(n,3) * (ap * dpsi(2,ix,iy,jp) - am * dpsi(2,ix,iy,jm))
-      end do
-      corr = 0d0
-      corr = corr - cf(1) * d1
-      corr = corr - cf(2) * d2
-      corr = corr - cf(3) * d3
-      corr = corr - 0.5d0 * cf(4) * (c23 + c32)
-      corr = corr - 0.5d0 * cf(5) * (c13 + c31)
-      corr = corr - 0.5d0 * cf(6) * (c12 + c21)
-      corr = corr - zi * ( kvec_grid(1) * (dapsi(1,ix,iy,iz) + adpsi(1,ix,iy,iz)) &
-                         + kvec_grid(2) * (dapsi(2,ix,iy,iz) + adpsi(2,ix,iy,iz)) &
-                         + kvec_grid(3) * (dapsi(3,ix,iy,iz) + adpsi(3,ix,iy,iz)) )
-      corr = corr + a0 * k2 * psi0
-      ! variational 1/2 of the generalized-KS tau operator (see add_xc_tau_operator)
-      htpsi(ix,iy,iz) = htpsi(ix,iy,iz) + 0.5d0 * corr
-    end do
-  end do
-  end do
-!$omp end parallel do
-
-end subroutine add_xc_tau_operator_nonorth_complex
-
-subroutine calc_tau_operator_axis_derivatives_complex(box, mg, nabt, deriv)
-  use structures
-  implicit none
-  type(s_rgrid), intent(in) :: mg
-  real(8),       intent(in) :: nabt(4,3)
-  complex(8),    intent(in) :: box(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
-                                   mg%is_array(3):mg%ie_array(3))
-  complex(8), intent(out) :: deriv(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
-                                   mg%is_array(3):mg%ie_array(3))
-  integer :: ix, iy, iz
-  complex(8) :: w(3)
-
-  deriv = 0d0
-!$omp parallel do collapse(2) default(none) private(ix,iy,iz,w) shared(mg,nabt,box,deriv)
-  do iz = mg%is(3), mg%ie(3)
-  do iy = mg%is(2), mg%ie(2)
-  do ix = mg%is(1), mg%ie(1)
-    w(1) = nabt(1,1) * (box(mg%idx(ix+1), iy, iz) - box(mg%idx(ix-1), iy, iz)) &
-         + nabt(2,1) * (box(mg%idx(ix+2), iy, iz) - box(mg%idx(ix-2), iy, iz)) &
-         + nabt(3,1) * (box(mg%idx(ix+3), iy, iz) - box(mg%idx(ix-3), iy, iz)) &
-         + nabt(4,1) * (box(mg%idx(ix+4), iy, iz) - box(mg%idx(ix-4), iy, iz))
-    w(2) = nabt(1,2) * (box(ix, mg%idy(iy+1), iz) - box(ix, mg%idy(iy-1), iz)) &
-         + nabt(2,2) * (box(ix, mg%idy(iy+2), iz) - box(ix, mg%idy(iy-2), iz)) &
-         + nabt(3,2) * (box(ix, mg%idy(iy+3), iz) - box(ix, mg%idy(iy-3), iz)) &
-         + nabt(4,2) * (box(ix, mg%idy(iy+4), iz) - box(ix, mg%idy(iy-4), iz))
-    w(3) = nabt(1,3) * (box(ix, iy, mg%idz(iz+1)) - box(ix, iy, mg%idz(iz-1))) &
-         + nabt(2,3) * (box(ix, iy, mg%idz(iz+2)) - box(ix, iy, mg%idz(iz-2))) &
-         + nabt(3,3) * (box(ix, iy, mg%idz(iz+3)) - box(ix, iy, mg%idz(iz-3))) &
-         + nabt(4,3) * (box(ix, iy, mg%idz(iz+4)) - box(ix, iy, mg%idz(iz-4)))
-    deriv(:,ix,iy,iz) = w(:)
-  end do
-  end do
-  end do
-!$omp end parallel do
-end subroutine calc_tau_operator_axis_derivatives_complex
-
-pure function calc_tau_operator_direct_axis_complex(vtau, tpsi, mg, lapt, idir, ix, iy, iz) result(val)
-  use structures
-  implicit none
-  type(s_rgrid), intent(in) :: mg
-  real(8),       intent(in) :: vtau(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
-                                    mg%is_array(3):mg%ie_array(3))
-  complex(8),    intent(in) :: tpsi(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
-                                    mg%is_array(3):mg%ie_array(3))
-  real(8),       intent(in) :: lapt(4,3)
-  integer,       intent(in) :: idir, ix, iy, iz
-  complex(8) :: val
-  complex(8) :: psi0
-  real(8) :: a0, aplus, aminus
-
-  val = 0d0
-  psi0 = tpsi(ix,iy,iz)
-  a0 = vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz))
-
-  select case(idir)
-  case(1)
-    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix+1), mg%idy(iy), mg%idz(iz)))
-    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix-1), mg%idy(iy), mg%idz(iz)))
-    val = val + lapt(1,1) * (aplus * (tpsi(mg%idx(ix+1),iy,iz) - psi0) + aminus * (tpsi(mg%idx(ix-1),iy,iz) - psi0))
-    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix+2), mg%idy(iy), mg%idz(iz)))
-    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix-2), mg%idy(iy), mg%idz(iz)))
-    val = val + lapt(2,1) * (aplus * (tpsi(mg%idx(ix+2),iy,iz) - psi0) + aminus * (tpsi(mg%idx(ix-2),iy,iz) - psi0))
-    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix+3), mg%idy(iy), mg%idz(iz)))
-    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix-3), mg%idy(iy), mg%idz(iz)))
-    val = val + lapt(3,1) * (aplus * (tpsi(mg%idx(ix+3),iy,iz) - psi0) + aminus * (tpsi(mg%idx(ix-3),iy,iz) - psi0))
-    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix+4), mg%idy(iy), mg%idz(iz)))
-    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix-4), mg%idy(iy), mg%idz(iz)))
-    val = val + lapt(4,1) * (aplus * (tpsi(mg%idx(ix+4),iy,iz) - psi0) + aminus * (tpsi(mg%idx(ix-4),iy,iz) - psi0))
-  case(2)
-    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy+1), mg%idz(iz)))
-    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy-1), mg%idz(iz)))
-    val = val + lapt(1,2) * (aplus * (tpsi(ix,mg%idy(iy+1),iz) - psi0) + aminus * (tpsi(ix,mg%idy(iy-1),iz) - psi0))
-    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy+2), mg%idz(iz)))
-    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy-2), mg%idz(iz)))
-    val = val + lapt(2,2) * (aplus * (tpsi(ix,mg%idy(iy+2),iz) - psi0) + aminus * (tpsi(ix,mg%idy(iy-2),iz) - psi0))
-    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy+3), mg%idz(iz)))
-    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy-3), mg%idz(iz)))
-    val = val + lapt(3,2) * (aplus * (tpsi(ix,mg%idy(iy+3),iz) - psi0) + aminus * (tpsi(ix,mg%idy(iy-3),iz) - psi0))
-    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy+4), mg%idz(iz)))
-    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy-4), mg%idz(iz)))
-    val = val + lapt(4,2) * (aplus * (tpsi(ix,mg%idy(iy+4),iz) - psi0) + aminus * (tpsi(ix,mg%idy(iy-4),iz) - psi0))
-  case(3)
-    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz+1)))
-    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz-1)))
-    val = val + lapt(1,3) * (aplus * (tpsi(ix,iy,mg%idz(iz+1)) - psi0) + aminus * (tpsi(ix,iy,mg%idz(iz-1)) - psi0))
-    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz+2)))
-    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz-2)))
-    val = val + lapt(2,3) * (aplus * (tpsi(ix,iy,mg%idz(iz+2)) - psi0) + aminus * (tpsi(ix,iy,mg%idz(iz-2)) - psi0))
-    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz+3)))
-    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz-3)))
-    val = val + lapt(3,3) * (aplus * (tpsi(ix,iy,mg%idz(iz+3)) - psi0) + aminus * (tpsi(ix,iy,mg%idz(iz-3)) - psi0))
-    aplus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz+4)))
-    aminus = 0.5d0 * (a0 + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz-4)))
-    val = val + lapt(4,3) * (aplus * (tpsi(ix,iy,mg%idz(iz+4)) - psi0) + aminus * (tpsi(ix,iy,mg%idz(iz-4)) - psi0))
-  end select
-end function calc_tau_operator_direct_axis_complex
-
-pure function calc_tau_operator_cross_component_complex(vtau, dpsi, iaxis, mg, nabt, idir, ix, iy, iz) result(val)
-  use structures
-  implicit none
-  type(s_rgrid), intent(in) :: mg
-  real(8),       intent(in) :: vtau(mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
-                                    mg%is_array(3):mg%ie_array(3))
-  complex(8),    intent(in) :: dpsi(3, mg%is_array(1):mg%ie_array(1), mg%is_array(2):mg%ie_array(2), &
-                                    mg%is_array(3):mg%ie_array(3))
-  real(8),       intent(in) :: nabt(4,3)
-  integer,       intent(in) :: iaxis, idir, ix, iy, iz
-  complex(8) :: val
-  complex(8) :: flux_p, flux_m
-
-  val = 0d0
-  select case(idir)
-  case(1)
-    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix+1), mg%idy(iy), mg%idz(iz))) * dpsi(iaxis, mg%idx(ix+1), iy, iz)
-    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix-1), mg%idy(iy), mg%idz(iz))) * dpsi(iaxis, mg%idx(ix-1), iy, iz)
-    val = val + nabt(1,1) * (flux_p - flux_m)
-    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix+2), mg%idy(iy), mg%idz(iz))) * dpsi(iaxis, mg%idx(ix+2), iy, iz)
-    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix-2), mg%idy(iy), mg%idz(iz))) * dpsi(iaxis, mg%idx(ix-2), iy, iz)
-    val = val + nabt(2,1) * (flux_p - flux_m)
-    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix+3), mg%idy(iy), mg%idz(iz))) * dpsi(iaxis, mg%idx(ix+3), iy, iz)
-    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix-3), mg%idy(iy), mg%idz(iz))) * dpsi(iaxis, mg%idx(ix-3), iy, iz)
-    val = val + nabt(3,1) * (flux_p - flux_m)
-    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix+4), mg%idy(iy), mg%idz(iz))) * dpsi(iaxis, mg%idx(ix+4), iy, iz)
-    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix-4), mg%idy(iy), mg%idz(iz))) * dpsi(iaxis, mg%idx(ix-4), iy, iz)
-    val = val + nabt(4,1) * (flux_p - flux_m)
-  case(2)
-    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy+1), mg%idz(iz))) * dpsi(iaxis, ix, mg%idy(iy+1), iz)
-    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy-1), mg%idz(iz))) * dpsi(iaxis, ix, mg%idy(iy-1), iz)
-    val = val + nabt(1,2) * (flux_p - flux_m)
-    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy+2), mg%idz(iz))) * dpsi(iaxis, ix, mg%idy(iy+2), iz)
-    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy-2), mg%idz(iz))) * dpsi(iaxis, ix, mg%idy(iy-2), iz)
-    val = val + nabt(2,2) * (flux_p - flux_m)
-    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy+3), mg%idz(iz))) * dpsi(iaxis, ix, mg%idy(iy+3), iz)
-    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy-3), mg%idz(iz))) * dpsi(iaxis, ix, mg%idy(iy-3), iz)
-    val = val + nabt(3,2) * (flux_p - flux_m)
-    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy+4), mg%idz(iz))) * dpsi(iaxis, ix, mg%idy(iy+4), iz)
-    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy-4), mg%idz(iz))) * dpsi(iaxis, ix, mg%idy(iy-4), iz)
-    val = val + nabt(4,2) * (flux_p - flux_m)
-  case(3)
-    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz+1))) * dpsi(iaxis, ix, iy, mg%idz(iz+1))
-    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz-1))) * dpsi(iaxis, ix, iy, mg%idz(iz-1))
-    val = val + nabt(1,3) * (flux_p - flux_m)
-    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz+2))) * dpsi(iaxis, ix, iy, mg%idz(iz+2))
-    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz-2))) * dpsi(iaxis, ix, iy, mg%idz(iz-2))
-    val = val + nabt(2,3) * (flux_p - flux_m)
-    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz+3))) * dpsi(iaxis, ix, iy, mg%idz(iz+3))
-    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz-3))) * dpsi(iaxis, ix, iy, mg%idz(iz-3))
-    val = val + nabt(3,3) * (flux_p - flux_m)
-    flux_p = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz+4))) * dpsi(iaxis, ix, iy, mg%idz(iz+4))
-    flux_m = 0.5d0 * (vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz)) + vtau(mg%idx(ix), mg%idy(iy), mg%idz(iz-4))) * dpsi(iaxis, ix, iy, mg%idz(iz-4))
-    val = val + nabt(4,3) * (flux_p - flux_m)
-  end select
-end function calc_tau_operator_cross_component_complex
 
 subroutine update_vlocal(mg,nspin,Vh,Vpsl,Vxc,Vlocal)
   use structures
