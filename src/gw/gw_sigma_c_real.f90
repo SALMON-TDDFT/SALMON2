@@ -50,6 +50,8 @@ module gw_sigma_c_real_sub
 
   real(8), parameter :: ha2ev   = 27.21138505d0  ! eV per Hartree
   real(8), parameter :: dE_ev   = 0.1d0          ! finite-diff step dE for Z (eV)
+  integer, parameter :: ngmax_l     = 200000     ! capacity of the larger G-set (remainder)
+  real(8), parameter :: gset_factor = 4.0d0      ! larger cutoff = 4 * eps cutoff
 
 contains
 
@@ -328,10 +330,13 @@ contains
   ! --------------------------------------------------------------------------
   subroutine calc_sigma_c_real_qcache(system, info, mg, lg, spsi, esp, gvec, gg, ng, &
                                       ispin, nb_lo, nb_hi, nomega, omega_grid, eta_au, &
-                                      sigc_re, zfac, nw_scan, w_scan, k_scan, sigc_scan)
+                                      sigc_re, zfac, nw_scan, w_scan, k_scan, sigc_scan, &
+                                      nb_sigma, nb_eps, do_remainder)
     use structures,     only: s_dft_system, s_parallel_info, s_rgrid, s_orbital
     use gw_mtxel_sub,   only: calc_mtxel
     use gw_epsilon_sub, only: find_kpq, calc_chi0_freq, calc_w_freq
+    use gw_coulomb_sub, only: build_gvectors
+    use gw_sigma_gpp_sub, only: build_state_density_ft
     use communication,  only: comm_summation
     implicit none
     type(s_dft_system),    intent(in)    :: system
@@ -351,6 +356,9 @@ contains
     integer,    optional,  intent(in)    :: nw_scan, k_scan
     real(8),    optional,  intent(in)    :: w_scan(:)
     complex(8), optional,  intent(out)   :: sigc_scan(nb_lo:nb_hi, *)
+    ! band caps + static remainder (CH band-truncation correction)
+    integer,    optional,  intent(in)    :: nb_sigma, nb_eps
+    logical,    optional,  intent(in)    :: do_remainder
 
     complex(8), allocatable :: mblk(:,:,:), msig(:,:), chi0_w(:,:,:), epsinv_w(:,:,:), swt(:,:)
     real(8),    allocatable :: bspec(:,:,:), vcoul(:)
@@ -358,9 +366,17 @@ contains
     real(8),    allocatable :: qrep(:,:), eband(:), focc(:), e0(:,:)
     complex(8), allocatable :: sc_all(:,:), scp_all(:,:), scm_all(:,:), scg(:,:)
     complex(8), allocatable :: scan_all(:,:), scan_g(:,:)
+    ! static remainder
+    real(8),    allocatable :: gvecl(:,:), ggl(:)
+    integer,    allocatable :: idiff(:,:)
+    complex(8), allocatable :: rho_nft(:,:,:), wc0(:,:), rem_all(:,:), rem_g(:,:)
+    complex(8) :: pgg, rterm, zt
+    real(8)    :: rem_re, rem_im, ecut_l, gmax2
+    integer    :: ngl, kk, iw0
+    logical    :: lrem
 
     integer :: no, nk, ik, iq, iqd, ikm, inp, in, ig, jg, iw, nqd, nper, qd_lo, qd_hi
-    integer :: iws, nws
+    integer :: iws, nws, nsig, neps
     real(8) :: qvec(3), mqvec(3), g0vec(3), gtarget(3)
     real(8) :: omega, rnk, pi, domg, de_au, e0nk, dsig
     real(8), parameter :: qtol = 1.0d-6
@@ -370,6 +386,9 @@ contains
     logical    :: q_ok
 
     no    = system%no
+    nsig  = no;  if (present(nb_sigma)) nsig = nb_sigma
+    neps  = no;  if (present(nb_eps))   neps = nb_eps
+    lrem  = .false.;  if (present(do_remainder)) lrem = do_remainder
     nk    = system%nk
     omega = abs(system%det_a)
     rnk   = 1.0d0 / (dble(nk) * omega)
@@ -380,11 +399,14 @@ contains
     else
       domg = 1.0d0
     end if
+    ! omega'=0 index (calc_chi0_freq builds a uniform 0..omega_max grid -> iw0=1)
+    iw0 = 1
 
-    allocate(mblk(ng,no,no), msig(ng,no), imap(ng))
+    ! intermediate (bra) dim capped at nsig; output (ket) dim stays no (QP window)
+    allocate(mblk(ng,nsig,no), msig(ng,nsig), imap(ng))
     allocate(chi0_w(ng,ng,nomega), epsinv_w(ng,ng,nomega), vcoul(ng))
-    allocate(bspec(ng,ng,nomega), swt(no,nomega))
-    allocate(eband(no), focc(no), e0(nb_lo:nb_hi,nk))
+    allocate(bspec(ng,ng,nomega), swt(nsig,nomega))
+    allocate(eband(nsig), focc(nsig), e0(nb_lo:nb_hi,nk))
     allocate(sc_all(nb_lo:nb_hi,nk), scp_all(nb_lo:nb_hi,nk), scm_all(nb_lo:nb_hi,nk))
     sc_all = (0d0,0d0); scp_all = (0d0,0d0); scm_all = (0d0,0d0)
 
@@ -400,6 +422,34 @@ contains
         e0(in,ik) = esp(in,ik,ispin)
       end do
     end do
+
+    ! ---- static remainder setup: larger G-set, idiff(G-G'), per-state rho_nk ----
+    if (lrem) then
+      gmax2 = 0.0d0
+      do ig = 1, ng
+        if (gg(ig) > gmax2) gmax2 = gg(ig)
+      end do
+      ecut_l = gset_factor * gmax2
+      allocate(gvecl(3, ngmax_l), ggl(ngmax_l))
+      call build_gvectors(system%primitive_b, ecut_l, ngmax_l, ngl, gvecl, ggl)
+      allocate(idiff(ng,ng), wc0(ng,ng))
+      do jg = 1, ng
+        do ig = 1, ng
+          gtarget(1) = gvec(1,ig) - gvec(1,jg)
+          gtarget(2) = gvec(2,ig) - gvec(2,jg)
+          gtarget(3) = gvec(3,ig) - gvec(3,jg)
+          idiff(ig,jg) = gindex_local(ngl, gvecl, gtarget)
+        end do
+      end do
+      allocate(rho_nft(ngl, nb_lo:nb_hi, nk), rem_all(nb_lo:nb_hi, nk))
+      rem_all(:,:) = (0.0d0, 0.0d0)
+      do ik = 1, nk
+        do in = nb_lo, nb_hi
+          call build_state_density_ft(system, info, mg, lg, spsi, ispin, in, ik, &
+                                       gvecl, ngl, rho_nft(:,in,ik), local_only=.true.)
+        end do
+      end do
+    end if
 
     ! (1) group (ik,iq) by distinct q = vec_k(iq) - vec_k(ik)
     allocate(qid(nk,nk), qrep(3, nk*nk))
@@ -430,7 +480,8 @@ contains
       qvec(1:3)  =  qrep(1:3,iqd)
       mqvec(1:3) = -qvec(1:3)
       call calc_chi0_freq(system, info, mg, lg, spsi, esp, gvec, ng, iqd, qvec, &
-                          ispin, nomega, omega_grid, eta_au, chi0_w, q_ok, local_only=.true.)
+                          ispin, nomega, omega_grid, eta_au, chi0_w, q_ok, &
+                          local_only=.true., nb_eps=neps)
       if (.not. q_ok) cycle
       call calc_w_freq(system, gvec, gg, ng, qvec, nomega, chi0_w, epsinv_w, vcoul, q_ok)
       if (.not. q_ok) cycle
@@ -440,6 +491,8 @@ contains
             wc = epsinv_w(ig,jg,iw) * vcoul(jg)
             if (ig == jg) wc = wc - vcoul(jg)
             bspec(ig,jg,iw) = -aimag(wc) / pi
+            ! static W^c(q,0) = (epsinv_w(0)-I) v  (same convention as GPP)
+            if (lrem .and. iw == iw0) wc0(ig,jg) = wc
           end do
         end do
       end do
@@ -455,15 +508,16 @@ contains
             gtarget(3) = gvec(3,ig) - g0vec(3)
             imap(ig) = gindex_local(ng, gvec, gtarget)
           end do
+          ! bra (intermediate) count = nsig; ket (output) count = no (QP window)
           call calc_mtxel(system, info, mg, lg, spsi, gvec, ng, ik, ikm, ispin, &
-                          no, no, mblk, local_only=.true.)
-          do inp = 1, no
+                          nsig, no, mblk, local_only=.true.)
+          do inp = 1, nsig
             eband(inp) = esp(inp,ikm,ispin)
             focc(inp)  = system%rocc(inp,ikm,ispin)
           end do
-          call normalize_occ(no, focc)
+          call normalize_occ(nsig, focc)
           do in = nb_lo, nb_hi
-            do inp = 1, no
+            do inp = 1, nsig
               do ig = 1, ng
                 jg = imap(ig)
                 if (jg == 0) then
@@ -473,18 +527,45 @@ contains
                 end if
               end do
             end do
-            call build_spectral_weight(ng, no, nomega, bspec, msig, swt)
+            call build_spectral_weight(ng, nsig, nomega, bspec, msig, swt)
             e0nk = e0(in,ik)
-            call sigma_c_probe(no, nomega, omega_grid, domg, swt, eband, focc, e0nk,         eta_au, s0)
-            call sigma_c_probe(no, nomega, omega_grid, domg, swt, eband, focc, e0nk + de_au, eta_au, sp)
-            call sigma_c_probe(no, nomega, omega_grid, domg, swt, eband, focc, e0nk - de_au, eta_au, sm)
+            call sigma_c_probe(nsig, nomega, omega_grid, domg, swt, eband, focc, e0nk,         eta_au, s0)
+            call sigma_c_probe(nsig, nomega, omega_grid, domg, swt, eband, focc, e0nk + de_au, eta_au, sp)
+            call sigma_c_probe(nsig, nomega, omega_grid, domg, swt, eband, focc, e0nk - de_au, eta_au, sm)
             sc_all (in,ik) = sc_all (in,ik) + s0
             scp_all(in,ik) = scp_all(in,ik) + sp
             scm_all(in,ik) = scm_all(in,ik) + sm
+            ! static remainder: Sum_GG' W^c(q,0)[ rho_nk(G_jg-G_ig) - Sum_n'^nsig M M* ]
+            ! (energy-independent -> does not enter Z); contraction order as bspec.
+            if (lrem) then
+              rem_re = 0.0d0; rem_im = 0.0d0
+!$omp parallel do collapse(2) default(shared) &
+!$omp   private(jg,ig,kk,rterm,pgg,inp,zt) reduction(+:rem_re,rem_im)
+              do jg = 1, ng
+                do ig = 1, ng
+                  if (wc0(ig,jg) == (0.0d0,0.0d0)) cycle
+                  kk = idiff(jg,ig)
+                  if (kk == 0) then
+                    rterm = (0.0d0, 0.0d0)
+                  else
+                    rterm = rho_nft(kk,in,ik)
+                  end if
+                  pgg = (0.0d0, 0.0d0)
+                  do inp = 1, nsig
+                    pgg = pgg + msig(ig,inp) * conjg(msig(jg,inp))
+                  end do
+                  zt = wc0(ig,jg) * (rterm - pgg)
+                  rem_re = rem_re + dble(zt)
+                  rem_im = rem_im + aimag(zt)
+                end do
+              end do
+!$omp end parallel do
+              rem_all(in,ik) = rem_all(in,ik) + cmplx(rem_re, rem_im, 8)
+            end if
             ! spectral scan: complex Sigma_c(in, k_scan; w_scan) -- reuses swt.
             if (do_scan .and. ik == k_scan) then
               do iws = 1, nws
-                call sigma_c_probe(no, nomega, omega_grid, domg, swt, eband, focc, &
+                call sigma_c_probe(nsig, nomega, omega_grid, domg, swt, eband, focc, &
                                    w_scan(iws), eta_au, ssc)
                 scan_all(in,iws) = scan_all(in,iws) + ssc
               end do
@@ -499,6 +580,11 @@ contains
     call comm_summation(sc_all,  scg, size(sc_all),  info%icomm_k); sc_all  = scg
     call comm_summation(scp_all, scg, size(scp_all), info%icomm_k); scp_all = scg
     call comm_summation(scm_all, scg, size(scm_all), info%icomm_k); scm_all = scg
+    if (lrem) then
+      allocate(rem_g(nb_lo:nb_hi,nk))
+      call comm_summation(rem_all, rem_g, size(rem_all), info%icomm_k); rem_all = rem_g
+      deallocate(rem_g)
+    end if
     deallocate(scg)
     if (do_scan) then
       allocate(scan_g(nb_lo:nb_hi,nws))
@@ -516,6 +602,8 @@ contains
     do ik = 1, nk
       do in = nb_lo, nb_hi
         sigc_re(in,ik) = rnk * dble(sc_all(in,ik))
+        ! static remainder (energy-independent -> does not enter Z): + 1/4 rnk Re(rem)
+        if (lrem) sigc_re(in,ik) = sigc_re(in,ik) + 0.25d0 * rnk * dble(rem_all(in,ik))
         dsig = rnk * ( dble(scp_all(in,ik)) - dble(scm_all(in,ik)) ) / (2.0d0 * de_au)
         zfac(in,ik) = 1.0d0 / (1.0d0 - dsig)
       end do
@@ -523,6 +611,7 @@ contains
 
     deallocate(mblk, msig, imap, chi0_w, epsinv_w, vcoul, bspec, swt, eband, focc, e0)
     deallocate(qid, qrep, sc_all, scp_all, scm_all)
+    if (lrem) deallocate(gvecl, ggl, idiff, wc0, rho_nft, rem_all)
 
   end subroutine calc_sigma_c_real_qcache
 

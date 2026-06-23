@@ -980,7 +980,9 @@ subroutine main_gw
           call calc_sigma_c_real_qcache(system, info, mg, lg, spsi_full, energy%esp, &
                           gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
                           nomega_gw, omega_grid_t7, eta_t7, sigc_w7, zfac_w7, &
-                          nw_scan=nw_scan_t7, w_scan=w_scan_t7, k_scan=1, sigc_scan=sigc_scan_t7)
+                          nw_scan=nw_scan_t7, w_scan=w_scan_t7, k_scan=1, sigc_scan=sigc_scan_t7, &
+                          nb_sigma=nsig_t7, nb_eps=neps_t7, &
+                          do_remainder=(yn_gw_static_remainder=='y'))
         else if (yn_gw_sym == 'y') then
           ! point-group symmetry-reduced (q-IBZ + output-k IBZ); needs the
           ! symmetrised orbitals built above + sym.dat in the run dir.
@@ -990,7 +992,9 @@ subroutine main_gw
         else if (yn_gw_qcache == 'y') then
           call calc_sigma_c_real_qcache(system, info, mg, lg, spsi_full, energy%esp, &
                           gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
-                          nomega_gw, omega_grid_t7, eta_t7, sigc_w7, zfac_w7)
+                          nomega_gw, omega_grid_t7, eta_t7, sigc_w7, zfac_w7, &
+                          nb_sigma=nsig_t7, nb_eps=neps_t7, &
+                          do_remainder=(yn_gw_static_remainder=='y'))
         else
           call calc_sigma_c_real(system, info, mg, lg, spsi_full, energy%esp, &
                             gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
