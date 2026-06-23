@@ -41,6 +41,7 @@ subroutine main_gw
   use gw_sigma_x_sub,     only: calc_sigma_x
   use gw_sigma_cohsex_sub,only: calc_sigma_cohsex
   use gw_sigma_gpp_sub,   only: calc_sigma_gpp, calc_sigma_gpp_qcache, calc_sigma_gpp_sym
+  use gw_band_caps_sub,   only: resolve_band_caps
   use gw_sigma_c_real_sub,only: calc_sigma_c_real, calc_sigma_c_real_qcache, calc_sigma_c_real_sym
   use gw_qp_sub,          only: calc_vxc_expect, solve_qp
   use gw_symmetry_sub,    only: gw_sym_selftest, gw_grid_perm_selftest, gw_symmetrize_orbitals
@@ -157,6 +158,7 @@ subroutine main_gw
   real(8),  allocatable :: sigc_w7(:,:), zfac_w7(:,:)
   real(8),  allocatable :: vxc_w7(:,:), eqp_w7(:,:), sigx_w7(:,:)
   integer               :: is_t7, ik_t7, ivtop7, icbot7
+  integer               :: nocc_t7, io_t7, neps_t7, nsig_t7   ! eps/sigma band caps
   ! b1-4 real-axis Sigma_c (sigma_type=='gpp_real'): own omega' grid
   real(8),  allocatable :: omega_grid_t7(:)
   real(8)               :: eta_t7
@@ -653,6 +655,11 @@ subroutine main_gw
   vxc_arr = 0.0d0
 
   ! Determine band output window; nband_qp_max=0 means all bands
+  if (nband_qp_max > system%no) then
+    if (comm_is_root(nproc_id_global)) &
+      write(*,*) "  [gw] FATAL: nband_qp_max exceeds the available bands (system%no)"
+    stop 'gw: nband_qp_max exceeds system%no'
+  end if
   ib_min = max(1, nband_qp_min)
   if (nband_qp_max < 1) then
     ib_max = system%no
@@ -925,6 +932,20 @@ subroutine main_gw
       call gw_symmetrize_orbitals(system, info, lg, spsi_full, energy)
     end if
 
+    ! Resolve the eps/sigma band caps (0=all, >=nocc enforced inside) once.
+    nocc_t7 = 0
+    do io_t7 = 1, system%no
+      if (system%rocc(io_t7,1,1) > 1.0d-6) nocc_t7 = io_t7
+    end do
+    call resolve_band_caps(system%no, nocc_t7, nband_eps, nband_sigma, neps_t7, nsig_t7)
+    ! Band separation is only wired on the qcache path (gpp / gpp_real, no sym).
+    if ((nband_eps > 0 .or. nband_sigma > 0) .and. &
+        (yn_gw_sym == 'y' .or. yn_gw_qcache /= 'y')) then
+      if (comm_is_root(nproc_id_global)) &
+        write(*,*) "  [gw] FATAL: band separation needs yn_gw_qcache='y', yn_gw_sym='n'"
+      stop 'gw: band separation unsupported on this path'
+    end if
+
     do is_t7 = 1, system%nspin
       ! bare exchange Sigma_x (the exchange part of Sigma = Sigma_x + Sigma_c).
       call calc_sigma_x(system, info, mg, lg, spsi_full, gvec_t7, gg_t7, ng_t7, &
@@ -986,7 +1007,8 @@ subroutine main_gw
         call calc_sigma_gpp_qcache(system, info, mg, lg, spsi_full, energy%esp, rho, &
                             gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
                             sigc_w7, zfac_w7, skip_frac=skipfrac7, &
-                            do_remainder=(yn_gw_static_remainder=='y'))
+                            do_remainder=(yn_gw_static_remainder=='y'), &
+                            nb_sigma=nsig_t7, nb_eps=neps_t7)
       else
         call calc_sigma_gpp(system, info, mg, lg, spsi_full, energy%esp, rho, &
                             gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &

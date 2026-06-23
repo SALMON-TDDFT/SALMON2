@@ -619,6 +619,8 @@ contains
       & yn_gw_sym, &
       & yn_gw_static_remainder, &
       & yn_gw_qp_inject, &
+      & nband_eps, &
+      & nband_sigma, &
       & nomega_gw, &
       & omega_max_gw, &
       & eta_gw, &
@@ -1064,6 +1066,8 @@ contains
     yn_gw_sym      = 'n'
     yn_gw_static_remainder = 'n'
     yn_gw_qp_inject = 'n'
+    nband_eps      = 0
+    nband_sigma    = 0
     nomega_gw        = 200
     omega_max_gw     = 25.0d0
     eta_gw           = 0.068d0      ! hbar/T_mask, T_mask=400 a.u. (prod RT-TDDFT mask)
@@ -1716,6 +1720,8 @@ contains
     call comm_bcast(yn_gw_sym     , nproc_group_global)
     call comm_bcast(yn_gw_static_remainder, nproc_group_global)
     call comm_bcast(yn_gw_qp_inject, nproc_group_global)
+    call comm_bcast(nband_eps     , nproc_group_global)
+    call comm_bcast(nband_sigma   , nproc_group_global)
     call comm_bcast(nomega_gw       , nproc_group_global)
     call comm_bcast(omega_max_gw    , nproc_group_global)
     call comm_bcast(eta_gw          , nproc_group_global)
@@ -2691,13 +2697,15 @@ contains
       if(inml_gw >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'gw', inml_gw
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epsilon_cutoff', epsilon_cutoff
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'n_empty_gw',     n_empty_gw
+      write(fh_variables_log, '("#",4X,A,"=",I6,A)')   'n_empty_gw',     n_empty_gw, '  (deprecated, ignored)'
       write(fh_variables_log, '("#",4X,A,"=",3I4)')    'qgrid_gw',       qgrid_gw(1:3)
       write(fh_variables_log, '("#",4X,A,"=",A)')      'sigma_type',     trim(sigma_type)
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_qcache',    trim(yn_gw_qcache)
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_sym',       trim(yn_gw_sym)
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_static_remainder', trim(yn_gw_static_remainder)
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_qp_inject', trim(yn_gw_qp_inject)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_eps',      nband_eps
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_sigma',    nband_sigma
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_qp_min',   nband_qp_min
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_qp_max',   nband_qp_max
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nomega_gw',      nomega_gw

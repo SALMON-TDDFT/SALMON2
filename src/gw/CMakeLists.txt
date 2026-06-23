@@ -1,4 +1,5 @@
 set(SOURCES
+    gw_band_caps.f90
     gw_coulomb.f90
     gw_mtxel.f90
     gw_epsilon.f90

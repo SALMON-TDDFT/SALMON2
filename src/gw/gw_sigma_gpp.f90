@@ -119,6 +119,7 @@ module gw_sigma_gpp_sub
   public :: calc_sigma_gpp
   public :: calc_sigma_gpp_qcache
   public :: calc_sigma_gpp_sym
+  public :: build_state_density_ft   ! shared with the real-axis remainder port
 
   real(8), parameter :: occ_thr     = 1.0d-6   ! occupied if rocc > occ_thr
   real(8), parameter :: g_match_tol = 1.0d-6   ! |G|-match tolerance (bohr^-1)^2
@@ -736,7 +737,7 @@ contains
   ! --------------------------------------------------------------------------
   subroutine calc_sigma_gpp_qcache(system, info, mg, lg, spsi, esp, rho, gvec, gg, &
                                    ng, ispin, nb_lo, nb_hi, sigc_re, zfac, skip_frac, &
-                                   do_remainder)
+                                   do_remainder, nb_sigma, nb_eps)
     use structures,     only: s_dft_system, s_parallel_info, s_rgrid, s_orbital, s_scalar
     use gw_mtxel_sub,   only: calc_mtxel
     use gw_coulomb_sub, only: build_vcoul, build_gvectors
@@ -759,6 +760,8 @@ contains
     real(8),               intent(out) :: zfac   (nb_lo:nb_hi, system%nk)
     real(8),    optional,  intent(out) :: skip_frac
     logical,    optional,  intent(in)  :: do_remainder
+    ! band caps: nb_sigma = Sigma_c intermediate sum, nb_eps = chi0/eps unocc sum.
+    integer,    optional,  intent(in)  :: nb_sigma, nb_eps
 
     complex(8), allocatable :: epsinv(:,:), mblk(:,:,:), msig(:,:), wgpp(:,:), rhoft(:)
     real(8),    allocatable :: vcoul(:), wt(:,:), gvecl(:,:), ggl(:), eband(:), focc(:)
@@ -774,7 +777,7 @@ contains
     integer    :: kk
     logical    :: lrem
 
-    integer :: no, nk, ik, iq, ikm, inp, in, ig, jg, kg
+    integer :: no, nk, ik, iq, ikm, inp, in, ig, jg, kg, nsig, neps
     integer :: ngl, nchan_phys_tot, nchan_unphys_tot, ncnt(2), ncnt_g(2)
     integer :: nqd, iqd, qd_lo, qd_hi, nper
     real(8) :: qvec(3), mqvec(3), g0vec(3), gtarget(3)
@@ -785,6 +788,8 @@ contains
     logical   :: q_ok
 
     no    = system%no
+    nsig  = no;  if (present(nb_sigma)) nsig = nb_sigma
+    neps  = no;  if (present(nb_eps))   neps = nb_eps
     nk    = system%nk
     omega = abs(system%det_a)
     rnk   = 1.0d0 / (dble(nk) * omega)
@@ -815,8 +820,9 @@ contains
 
     allocate(epsinv(ng,ng), vcoul(ng), imap(ng))
     allocate(wgpp(ng,ng), wt(ng,ng), phys(ng,ng), idiff(ng,ng))
-    allocate(mblk(ng, no, no), msig(ng, no))
-    allocate(eband(no), focc(no), e0(nb_lo:nb_hi, nk))
+    ! intermediate (bra) dim capped at nsig; output (ket) dim stays no (QP window)
+    allocate(mblk(ng, nsig, no), msig(ng, nsig))
+    allocate(eband(nsig), focc(nsig), e0(nb_lo:nb_hi, nk))
     if (lrem) allocate(wc0(ng,ng))
 
     do jg = 1, ng
@@ -890,7 +896,7 @@ contains
       mqvec(1:3) = -qvec(1:3)
 
       call calc_epsinv(system, info, mg, lg, spsi, esp, gvec, gg, ng, iqd, &
-                       qvec, ispin, epsinv, ok=q_ok, local_only=.true.)
+                       qvec, ispin, epsinv, ok=q_ok, local_only=.true., nb_eps=neps)
       if (.not. q_ok) cycle
       call build_vcoul(ng, gvec, gg, qvec, omega, nk, nsub_head, vcoul)
 
@@ -958,17 +964,18 @@ contains
             imap(ig) = gindex_of(ng, gvec, gtarget)
           end do
 
+          ! bra (intermediate) count = nsig; ket (output) count = no (QP window)
           call calc_mtxel(system, info, mg, lg, spsi, gvec, ng, ik, ikm, ispin, &
-                          no, no, mblk, local_only=.true.)
+                          nsig, no, mblk, local_only=.true.)
 
-          do inp = 1, no
+          do inp = 1, nsig
             eband(inp) = esp(inp,ikm,ispin)
             focc(inp)  = system%rocc(inp,ikm,ispin)
           end do
-          call normalize_occ(no, focc)
+          call normalize_occ(nsig, focc)
 
           do in = nb_lo, nb_hi
-            do inp = 1, no
+            do inp = 1, nsig
               do ig = 1, ng
                 jg = imap(ig)
                 if (jg == 0) then
@@ -979,11 +986,11 @@ contains
               end do
             end do
             e0nk = e0(in,ik)
-            call sigma_c_at_energy(ng, no, wgpp, wt, phys, msig, eband, focc, &
+            call sigma_c_at_energy(ng, nsig, wgpp, wt, phys, msig, eband, focc, &
                                    e0nk,         eta_au, s0)
-            call sigma_c_at_energy(ng, no, wgpp, wt, phys, msig, eband, focc, &
+            call sigma_c_at_energy(ng, nsig, wgpp, wt, phys, msig, eband, focc, &
                                    e0nk + de_au, eta_au, sp)
-            call sigma_c_at_energy(ng, no, wgpp, wt, phys, msig, eband, focc, &
+            call sigma_c_at_energy(ng, nsig, wgpp, wt, phys, msig, eband, focc, &
                                    e0nk - de_au, eta_au, sm)
             sc_all (in,ik) = sc_all (in,ik) + s0
             scp_all(in,ik) = scp_all(in,ik) + sp
@@ -1006,7 +1013,7 @@ contains
                     rterm = rho_nft(kk,in,ik)
                   end if
                   pgg = (0.0d0, 0.0d0)
-                  do inp = 1, no
+                  do inp = 1, nsig
                     pgg = pgg + msig(ig,inp) * conjg(msig(jg,inp))
                   end do
                   zt = wc0(ig,jg) * (rterm - pgg)

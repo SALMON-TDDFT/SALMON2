@@ -474,6 +474,8 @@ character(256),allocatable :: atom_name(:)
                                         ! per-state QP energies read from
                                         ! <sysname>_qp_energies.data into chi0
                                         ! (true G0W0+RPA) instead of a rigid scissors
+  integer        :: nband_eps           ! 0=all: cap of the chi0/eps unoccupied sum
+  integer        :: nband_sigma         ! 0=all: cap of the Sigma_c intermediate sum
   ! --- full-frequency (real-axis) dielectric / absorption (spec-b1) ---
   integer        :: nomega_gw           ! number of real-frequency grid points
   real(8)        :: omega_max_gw        ! eV, upper end of the real-frequency grid

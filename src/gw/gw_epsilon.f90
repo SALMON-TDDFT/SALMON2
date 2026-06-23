@@ -272,7 +272,7 @@ contains
   !   ok       [out,opt]     -- .true. if q was representable and inverted.
   ! --------------------------------------------------------------------------
   subroutine calc_epsinv(system, info, mg, lg, spsi, esp, gvec, gg, ng, iq, qvec, &
-                         ispin, epsinv, eps_diag, residual, ok, local_only)
+                         ispin, epsinv, eps_diag, residual, ok, local_only, nb_eps)
     use structures,    only: s_dft_system, s_parallel_info, s_rgrid, s_orbital
     use gw_mtxel_sub,  only: calc_mtxel
     use gw_coulomb_sub,only: build_vcoul
@@ -296,6 +296,8 @@ contains
     ! Forwarded to calc_mtxel: when set, the orbitals are replicated and this
     ! rank builds the whole chi0/eps locally (no inner collective).
     logical,    optional,  intent(in)  :: local_only
+    ! Upper band index of the UNOCCUPIED (c) sum (chi0 band cap); default all.
+    integer,    optional,  intent(in)  :: nb_eps
 
     complex(8), allocatable :: chi0(:,:), eps(:,:), mtxel(:,:,:)
     complex(8), allocatable :: mcv(:,:)        ! M_{cv,G}(ig, ipair), remapped
@@ -305,7 +307,7 @@ contains
     integer,    allocatable :: ipiv(:)
     complex(8), allocatable :: zwork(:)
 
-    integer :: no, nk, ik, ikq, iv, ic, ig, jg, ipair, npair, nfill
+    integer :: no, nk, ik, ikq, iv, ic, ig, jg, ipair, npair, nfill, neps
     integer :: lwork, linfo
     integer :: nsub_head
     real(8) :: g0vec(3), gtarget(3), omega, inv_omega
@@ -318,6 +320,8 @@ contains
     if (present(local_only)) ll = local_only
 
     no    = system%no
+    neps  = no
+    if (present(nb_eps)) neps = nb_eps
     nk    = system%nk
     omega = abs(system%det_a)
     ! chi0 prefactor 2/(N_k*Omega).  Two factors of 2 enter the static RPA chi0
@@ -378,7 +382,7 @@ contains
       npair = 0
       do iv = 1, no
         if (system%rocc(iv,ik,ispin) <= occ_thr) cycle
-        do ic = 1, no
+        do ic = 1, neps
           if (system%rocc(ic,ikq,ispin) > occ_thr) cycle
           npair = npair + 1
         end do
@@ -393,7 +397,7 @@ contains
         do iv = 1, no
           fv = system%rocc(iv,ik,ispin)
           if (fv <= occ_thr) cycle
-          do ic = 1, no
+          do ic = 1, neps
             fc = system%rocc(ic,ikq,ispin)
             if (fc > occ_thr) cycle
             de = esp(iv,ik,ispin) - esp(ic,ikq,ispin)
@@ -531,7 +535,8 @@ contains
   ! dielectric inversion eps = 1 - v chi0 -> eps^{-1}, W is calc_w_freq.
   ! ----------------------------------------------------------------------
   subroutine calc_chi0_freq(system, info, mg, lg, spsi, esp, gvec, ng, iq, qvec, &
-                            ispin, nomega, omega_grid, eta, chi0_w, ok, local_only, run_sanity)
+                            ispin, nomega, omega_grid, eta, chi0_w, ok, local_only, &
+                            run_sanity, nb_eps)
     use structures,    only: s_dft_system, s_parallel_info, s_rgrid, s_orbital
     use gw_mtxel_sub,  only: calc_mtxel
     implicit none
@@ -553,12 +558,14 @@ contains
     logical,    optional,  intent(out) :: ok
     logical,    optional,  intent(in)  :: local_only
     logical,    optional,  intent(in)  :: run_sanity
+    ! Upper band index of the UNOCCUPIED (c) sum (chi0 band cap); default all.
+    integer,    optional,  intent(in)  :: nb_eps
 
     complex(8), allocatable :: mtxel(:,:,:)
     complex(8), allocatable :: mcv(:,:)
     real(8),    allocatable :: dwp(:), delp(:)        ! per-pair (f_v-f_c) and Delta
     integer,    allocatable :: iGm(:), imap(:)
-    integer :: no, nk, ik, ikq, iv, ic, ig, jg, ipair, npair, nfill, iw, iw0
+    integer :: no, nk, ik, ikq, iv, ic, ig, jg, ipair, npair, nfill, iw, iw0, neps
     real(8) :: g0vec(3), gtarget(3), omega, inv_omega
     real(8) :: fv, fc, de, smax
     complex(8) :: zi, zw, zden, wgt_w, zfac
@@ -568,6 +575,7 @@ contains
     ll   = .false.;  if (present(local_only)) ll = local_only
     dosan= .false.;  if (present(run_sanity)) dosan = run_sanity
     no   = system%no;  nk = system%nk
+    neps = no;  if (present(nb_eps)) neps = nb_eps
     omega= abs(system%det_a);  inv_omega = 2.0d0/(dble(nk)*omega)  ! 2/(N_k Omega): spin(in dw)+static-response 2
 
     allocate(iGm(ng), imap(ng))
@@ -601,7 +609,7 @@ contains
       npair = 0
       do iv = 1, no
         if (system%rocc(iv,ik,ispin) <= occ_thr) cycle
-        do ic = 1, no
+        do ic = 1, neps
           if (system%rocc(ic,ikq,ispin) > occ_thr) cycle
           npair = npair + 1
         end do
@@ -614,7 +622,7 @@ contains
         do iv = 1, no
           fv = system%rocc(iv,ik,ispin)
           if (fv <= occ_thr) cycle
-          do ic = 1, no
+          do ic = 1, neps
             fc = system%rocc(ic,ikq,ispin)
             if (fc > occ_thr) cycle
             de = esp(iv,ik,ispin) - esp(ic,ikq,ispin)
