@@ -386,8 +386,8 @@ contains
     logical    :: q_ok
 
     no    = system%no
-    nsig  = no;  if (present(nb_sigma)) nsig = nb_sigma
-    neps  = no;  if (present(nb_eps))   neps = nb_eps
+    nsig  = no;  if (present(nb_sigma)) nsig = min(nb_sigma, no)
+    neps  = no;  if (present(nb_eps))   neps = min(nb_eps, no)
     lrem  = .false.;  if (present(do_remainder)) lrem = do_remainder
     nk    = system%nk
     omega = abs(system%det_a)
@@ -399,8 +399,12 @@ contains
     else
       domg = 1.0d0
     end if
-    ! omega'=0 index (calc_chi0_freq builds a uniform 0..omega_max grid -> iw0=1)
+    ! omega'=0 index for the static remainder W^c(q,0): find the grid point
+    ! closest to 0 (don't assume the grid starts at 0).
     iw0 = 1
+    do iw = 1, nomega
+      if (abs(omega_grid(iw)) < abs(omega_grid(iw0))) iw0 = iw
+    end do
 
     ! intermediate (bra) dim capped at nsig; output (ket) dim stays no (QP window)
     allocate(mblk(ng,nsig,no), msig(ng,nsig), imap(ng))

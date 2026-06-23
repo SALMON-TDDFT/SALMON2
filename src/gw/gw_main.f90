@@ -933,9 +933,14 @@ subroutine main_gw
     end if
 
     ! Resolve the eps/sigma band caps (0=all, >=nocc enforced inside) once.
+    ! nocc = highest occupied band over ALL k and spin (safe for metals/magnetic).
     nocc_t7 = 0
-    do io_t7 = 1, system%no
-      if (system%rocc(io_t7,1,1) > 1.0d-6) nocc_t7 = io_t7
+    do is_t7 = 1, system%nspin
+      do ik_t7 = 1, system%nk
+        do io_t7 = 1, system%no
+          if (system%rocc(io_t7,ik_t7,is_t7) > 1.0d-6) nocc_t7 = max(nocc_t7, io_t7)
+        end do
+      end do
     end do
     call resolve_band_caps(system%no, nocc_t7, nband_eps, nband_sigma, neps_t7, nsig_t7)
     ! Band separation is only wired on the qcache path (gpp / gpp_real, no sym).

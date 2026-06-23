@@ -321,7 +321,7 @@ contains
 
     no    = system%no
     neps  = no
-    if (present(nb_eps)) neps = nb_eps
+    if (present(nb_eps)) neps = min(nb_eps, no)
     nk    = system%nk
     omega = abs(system%det_a)
     ! chi0 prefactor 2/(N_k*Omega).  Two factors of 2 enter the static RPA chi0
@@ -575,7 +575,7 @@ contains
     ll   = .false.;  if (present(local_only)) ll = local_only
     dosan= .false.;  if (present(run_sanity)) dosan = run_sanity
     no   = system%no;  nk = system%nk
-    neps = no;  if (present(nb_eps)) neps = nb_eps
+    neps = no;  if (present(nb_eps)) neps = min(nb_eps, no)
     omega= abs(system%det_a);  inv_omega = 2.0d0/(dble(nk)*omega)  ! 2/(N_k Omega): spin(in dw)+static-response 2
 
     allocate(iGm(ng), imap(ng))

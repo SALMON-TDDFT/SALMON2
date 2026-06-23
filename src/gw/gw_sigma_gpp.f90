@@ -788,8 +788,8 @@ contains
     logical   :: q_ok
 
     no    = system%no
-    nsig  = no;  if (present(nb_sigma)) nsig = nb_sigma
-    neps  = no;  if (present(nb_eps))   neps = nb_eps
+    nsig  = no;  if (present(nb_sigma)) nsig = min(nb_sigma, no)
+    neps  = no;  if (present(nb_eps))   neps = min(nb_eps, no)
     nk    = system%nk
     omega = abs(system%det_a)
     rnk   = 1.0d0 / (dble(nk) * omega)
