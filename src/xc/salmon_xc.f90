@@ -752,7 +752,10 @@ contains
            mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
 
       occ = system%rocc(io,ik,ispin)*system%wtk(ik)
-      k(1:3) = system%vec_k(1:3,ik)
+      ! gauge-invariant kinetic-energy density: covariant momentum is (k + Ac) in the
+      ! velocity gauge, matching add_xc_tau_operator's L_c = (B^T nabla)_c + i*(vec_k+vec_Ac)_c.
+      ! (vec_Ac = 0 in the ground state and in the length gauge, so GS is unchanged.)
+      k(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
