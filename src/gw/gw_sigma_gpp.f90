@@ -769,7 +769,8 @@ contains
     complex(8), allocatable :: sc_all(:,:), scp_all(:,:), scm_all(:,:), scg(:,:)
     ! static-remainder (Coulomb-hole band-truncation correction)
     complex(8), allocatable :: rem_all(:,:), rho_nft(:,:,:), wc0(:,:)
-    complex(8) :: remc, pgg, rterm
+    complex(8) :: pgg, rterm, zt
+    real(8)    :: rem_re, rem_im
     integer    :: kk
     logical    :: lrem
 
@@ -992,7 +993,9 @@ contains
             ! with P(ig,jg) = Sum_n' M_nn'(G_ig) conjg(M_nn'(G_jg)).  Same contraction
             ! order as wgpp; rho term indexed by idiff(jg,ig) (umklapp cancels).
             if (lrem) then
-              remc = (0.0d0, 0.0d0)
+              rem_re = 0.0d0; rem_im = 0.0d0
+!$omp parallel do collapse(2) default(shared) &
+!$omp   private(jg,ig,kk,rterm,pgg,inp,zt) reduction(+:rem_re,rem_im)
               do jg = 1, ng
                 do ig = 1, ng
                   if (wc0(ig,jg) == (0.0d0,0.0d0)) cycle
@@ -1006,10 +1009,13 @@ contains
                   do inp = 1, no
                     pgg = pgg + msig(ig,inp) * conjg(msig(jg,inp))
                   end do
-                  remc = remc + wc0(ig,jg) * (rterm - pgg)
+                  zt = wc0(ig,jg) * (rterm - pgg)
+                  rem_re = rem_re + dble(zt)
+                  rem_im = rem_im + aimag(zt)
                 end do
               end do
-              rem_all(in,ik) = rem_all(in,ik) + remc
+!$omp end parallel do
+              rem_all(in,ik) = rem_all(in,ik) + cmplx(rem_re, rem_im, 8)
             end if
           end do
 
