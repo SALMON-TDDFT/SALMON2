@@ -41,7 +41,7 @@ subroutine main_gw
   use gw_sigma_x_sub,     only: calc_sigma_x
   use gw_sigma_cohsex_sub,only: calc_sigma_cohsex
   use gw_sigma_gpp_sub,   only: calc_sigma_gpp, calc_sigma_gpp_qcache, calc_sigma_gpp_sym
-  use gw_sigma_c_real_sub,only: calc_sigma_c_real, calc_sigma_c_real_qcache
+  use gw_sigma_c_real_sub,only: calc_sigma_c_real, calc_sigma_c_real_qcache, calc_sigma_c_real_sym
   use gw_qp_sub,          only: calc_vxc_expect, solve_qp
   use gw_symmetry_sub,    only: gw_sym_selftest, gw_grid_perm_selftest, gw_symmetrize_orbitals
   use sendrecv_grid
@@ -891,28 +891,32 @@ subroutine main_gw
         eta_t7 = eta_gw / 27.211386d0
         ! yn_gw_qcache='y' caches W per distinct q + distributes over icomm_k
         ! (node-scalable, identical result); else the base path (all (ik,iq), -n1).
-        if (yn_gw_qcache == 'y') then
-          if (yn_out_gw_spectral == 'y') then
-            ! sp3: scan Sigma_c(in, k=1; w) over a wide window ( band edges +- ~25 eV,
-            ! to reach the plasmon satellites) accumulated in the SAME q-cache pass.
-            nw_scan_t7 = 400
-            if (.not. allocated(w_scan_t7)) allocate(w_scan_t7(nw_scan_t7))
-            if (.not. allocated(sigc_scan_t7)) allocate(sigc_scan_t7(ib_min:ib_max, nw_scan_t7))
-            do iws_t7 = 1, nw_scan_t7
-              w_scan_t7(iws_t7) = ( energy%esp(ib_min,1,is_t7) - 25.0d0/27.211386d0 ) &
-                + dble(iws_t7-1)/dble(nw_scan_t7-1) &
-                * ( (energy%esp(ib_max,1,is_t7) + 25.0d0/27.211386d0) &
-                  - (energy%esp(ib_min,1,is_t7) - 25.0d0/27.211386d0) )
-            end do
-            call calc_sigma_c_real_qcache(system, info, mg, lg, spsi_full, energy%esp, &
-                            gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
-                            nomega_gw, omega_grid_t7, eta_t7, sigc_w7, zfac_w7, &
-                            nw_scan=nw_scan_t7, w_scan=w_scan_t7, k_scan=1, sigc_scan=sigc_scan_t7)
-          else
-            call calc_sigma_c_real_qcache(system, info, mg, lg, spsi_full, energy%esp, &
-                            gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
-                            nomega_gw, omega_grid_t7, eta_t7, sigc_w7, zfac_w7)
-          end if
+        if (yn_out_gw_spectral == 'y') then
+          ! sp3: scan Sigma_c(in, k=1; w) over a wide window ( band edges +- ~25 eV,
+          ! to reach the plasmon satellites) accumulated in the SAME q-cache pass.
+          nw_scan_t7 = 400
+          if (.not. allocated(w_scan_t7)) allocate(w_scan_t7(nw_scan_t7))
+          if (.not. allocated(sigc_scan_t7)) allocate(sigc_scan_t7(ib_min:ib_max, nw_scan_t7))
+          do iws_t7 = 1, nw_scan_t7
+            w_scan_t7(iws_t7) = ( energy%esp(ib_min,1,is_t7) - 25.0d0/27.211386d0 ) &
+              + dble(iws_t7-1)/dble(nw_scan_t7-1) &
+              * ( (energy%esp(ib_max,1,is_t7) + 25.0d0/27.211386d0) &
+                - (energy%esp(ib_min,1,is_t7) - 25.0d0/27.211386d0) )
+          end do
+          call calc_sigma_c_real_qcache(system, info, mg, lg, spsi_full, energy%esp, &
+                          gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
+                          nomega_gw, omega_grid_t7, eta_t7, sigc_w7, zfac_w7, &
+                          nw_scan=nw_scan_t7, w_scan=w_scan_t7, k_scan=1, sigc_scan=sigc_scan_t7)
+        else if (yn_gw_sym == 'y') then
+          ! point-group symmetry-reduced (q-IBZ + output-k IBZ); needs the
+          ! symmetrised orbitals built above + sym.dat in the run dir.
+          call calc_sigma_c_real_sym(system, info, mg, lg, spsi_full, energy%esp, &
+                          gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
+                          nomega_gw, omega_grid_t7, eta_t7, sigc_w7, zfac_w7)
+        else if (yn_gw_qcache == 'y') then
+          call calc_sigma_c_real_qcache(system, info, mg, lg, spsi_full, energy%esp, &
+                          gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
+                          nomega_gw, omega_grid_t7, eta_t7, sigc_w7, zfac_w7)
         else
           call calc_sigma_c_real(system, info, mg, lg, spsi_full, energy%esp, &
                             gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
