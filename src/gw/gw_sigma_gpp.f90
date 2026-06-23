@@ -820,8 +820,9 @@ contains
 
     allocate(epsinv(ng,ng), vcoul(ng), imap(ng))
     allocate(wgpp(ng,ng), wt(ng,ng), phys(ng,ng), idiff(ng,ng))
-    ! intermediate (bra) dim capped at nsig; output (ket) dim stays no (QP window)
-    allocate(mblk(ng, nsig, no), msig(ng, nsig))
+    ! intermediate (bra) dim capped at nsig; output (ket) dim capped at the QP
+    ! window upper bound nb_hi (output bands used are only [nb_lo,nb_hi]).
+    allocate(mblk(ng, nsig, nb_hi), msig(ng, nsig))
     allocate(eband(nsig), focc(nsig), e0(nb_lo:nb_hi, nk))
     if (lrem) allocate(wc0(ng,ng))
 
@@ -964,9 +965,9 @@ contains
             imap(ig) = gindex_of(ng, gvec, gtarget)
           end do
 
-          ! bra (intermediate) count = nsig; ket (output) count = no (QP window)
+          ! bra (intermediate) = nsig; ket (output) = nb_hi (QP window upper bound)
           call calc_mtxel(system, info, mg, lg, spsi, gvec, ng, ik, ikm, ispin, &
-                          nsig, no, mblk, local_only=.true.)
+                          nsig, nb_hi, mblk, local_only=.true.)
 
           do inp = 1, nsig
             eband(inp) = esp(inp,ikm,ispin)

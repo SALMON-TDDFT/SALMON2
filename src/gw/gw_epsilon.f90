@@ -308,7 +308,7 @@ contains
     complex(8), allocatable :: zwork(:)
 
     integer :: no, nk, ik, ikq, iv, ic, ig, jg, ipair, npair, nfill, neps
-    integer :: lwork, linfo
+    integer :: lwork, linfo, nbk, ikk
     integer :: nsub_head
     real(8) :: g0vec(3), gtarget(3), omega, inv_omega
     real(8) :: fv, fc, dw, de, wgt
@@ -323,6 +323,18 @@ contains
     neps  = no
     if (present(nb_eps)) neps = min(nb_eps, no)
     nk    = system%nk
+    ! mtxel ket = valence count (only v<=nocc enter chi0).  Cap the M-block to
+    ! (neps c-bands)x(nocc v-bands) ONLY when nb_eps is set (band-separation,
+    ! always local_only) -> default callers keep (no,no) for byte-identity.
+    nbk   = no
+    if (present(nb_eps)) then
+      nbk = 0
+      do ikk = 1, nk
+        do ic = 1, no
+          if (system%rocc(ic,ikk,ispin) > occ_thr) nbk = max(nbk, ic)
+        end do
+      end do
+    end if
     omega = abs(system%det_a)
     ! chi0 prefactor 2/(N_k*Omega).  Two factors of 2 enter the static RPA chi0
     ! summed once over occ->unocc: the spin 2 (here in dw = f_v-f_c = 2) and the
@@ -371,16 +383,16 @@ contains
         imap(ig) = jg                          ! 0 if -(G+G0) is outside cutoff
       end do
 
-      ! Fetch the full M block for this (ik,ikq): mtxel(ig, c, v).
+      ! Fetch the M block for this (ik,ikq): mtxel(ig, c, v), c<=neps, v<=nbk.
       ! calc_mtxel is collective -> entered on all ranks unconditionally.
-      allocate(mtxel(ng, no, no))
+      allocate(mtxel(ng, neps, nbk))
       call calc_mtxel(system, info, mg, lg, spsi, gvec, ng, ik, ikq, ispin, &
-                      no, no, mtxel, local_only=ll)
+                      neps, nbk, mtxel, local_only=ll)
 
       ! Remapped, umklapp-shifted M for every occ->unocc pair at this k.
       ! Count pairs first.
       npair = 0
-      do iv = 1, no
+      do iv = 1, nbk
         if (system%rocc(iv,ik,ispin) <= occ_thr) cycle
         do ic = 1, neps
           if (system%rocc(ic,ikq,ispin) > occ_thr) cycle
@@ -394,7 +406,7 @@ contains
         ! nfill columns of mcv/prod are valid.
         allocate(mcv(ng, npair), prod(ng, npair))
         ipair = 0
-        do iv = 1, no
+        do iv = 1, nbk
           fv = system%rocc(iv,ik,ispin)
           if (fv <= occ_thr) cycle
           do ic = 1, neps
@@ -566,6 +578,7 @@ contains
     real(8),    allocatable :: dwp(:), delp(:)        ! per-pair (f_v-f_c) and Delta
     integer,    allocatable :: iGm(:), imap(:)
     integer :: no, nk, ik, ikq, iv, ic, ig, jg, ipair, npair, nfill, iw, iw0, neps
+    integer :: nbk, ikk
     real(8) :: g0vec(3), gtarget(3), omega, inv_omega
     real(8) :: fv, fc, de, smax
     complex(8) :: zi, zw, zden, wgt_w, zfac
@@ -576,6 +589,16 @@ contains
     dosan= .false.;  if (present(run_sanity)) dosan = run_sanity
     no   = system%no;  nk = system%nk
     neps = no;  if (present(nb_eps)) neps = min(nb_eps, no)
+    ! mtxel ket = valence count; cap to nocc only when band-separated (local_only)
+    nbk  = no
+    if (present(nb_eps)) then
+      nbk = 0
+      do ikk = 1, nk
+        do ic = 1, no
+          if (system%rocc(ic,ikk,ispin) > occ_thr) nbk = max(nbk, ic)
+        end do
+      end do
+    end if
     omega= abs(system%det_a);  inv_omega = 2.0d0/(dble(nk)*omega)  ! 2/(N_k Omega): spin(in dw)+static-response 2
 
     allocate(iGm(ng), imap(ng))
@@ -602,12 +625,12 @@ contains
         imap(ig) = gindex_of(ng, gvec, gtarget)
       end do
 
-      allocate(mtxel(ng, no, no))
+      allocate(mtxel(ng, neps, nbk))
       call calc_mtxel(system, info, mg, lg, spsi, gvec, ng, ik, ikq, ispin, &
-                      no, no, mtxel, local_only=ll)
+                      neps, nbk, mtxel, local_only=ll)
 
       npair = 0
-      do iv = 1, no
+      do iv = 1, nbk
         if (system%rocc(iv,ik,ispin) <= occ_thr) cycle
         do ic = 1, neps
           if (system%rocc(ic,ikq,ispin) > occ_thr) cycle
@@ -619,7 +642,7 @@ contains
         allocate(mcv(ng,npair), dwp(npair), delp(npair))
         ! Pass 1: build remapped M and the (omega-independent) per-pair data.
         ipair = 0
-        do iv = 1, no
+        do iv = 1, nbk
           fv = system%rocc(iv,ik,ispin)
           if (fv <= occ_thr) cycle
           do ic = 1, neps

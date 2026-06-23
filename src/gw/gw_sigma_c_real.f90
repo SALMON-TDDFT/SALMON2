@@ -406,8 +406,8 @@ contains
       if (abs(omega_grid(iw)) < abs(omega_grid(iw0))) iw0 = iw
     end do
 
-    ! intermediate (bra) dim capped at nsig; output (ket) dim stays no (QP window)
-    allocate(mblk(ng,nsig,no), msig(ng,nsig), imap(ng))
+    ! intermediate (bra) dim capped at nsig; output (ket) dim capped at nb_hi
+    allocate(mblk(ng,nsig,nb_hi), msig(ng,nsig), imap(ng))
     allocate(chi0_w(ng,ng,nomega), epsinv_w(ng,ng,nomega), vcoul(ng))
     allocate(bspec(ng,ng,nomega), swt(nsig,nomega))
     allocate(eband(nsig), focc(nsig), e0(nb_lo:nb_hi,nk))
@@ -512,9 +512,9 @@ contains
             gtarget(3) = gvec(3,ig) - g0vec(3)
             imap(ig) = gindex_local(ng, gvec, gtarget)
           end do
-          ! bra (intermediate) count = nsig; ket (output) count = no (QP window)
+          ! bra (intermediate) = nsig; ket (output) = nb_hi (QP window upper bound)
           call calc_mtxel(system, info, mg, lg, spsi, gvec, ng, ik, ikm, ispin, &
-                          nsig, no, mblk, local_only=.true.)
+                          nsig, nb_hi, mblk, local_only=.true.)
           do inp = 1, nsig
             eband(inp) = esp(inp,ikm,ispin)
             focc(inp)  = system%rocc(inp,ikm,ispin)
