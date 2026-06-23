@@ -29,6 +29,7 @@ module ttm3
   public :: ttm3_get_max
   public :: ttm3_get_front
   public :: ttm3_front_ijk
+  public :: ttm3_set_xcomm
   public :: ttm3_write_profile
   public :: ttm3_permittivity
   public :: ttm3_linear_gen
@@ -87,6 +88,8 @@ module ttm3
   integer :: is_array(3), ie_array(3)
   integer :: is_inner(3), ie_inner(3)   ! inner (no-halo) bounds, for the space-charge prefix sum
   integer :: comm
+  integer :: nprocs_g = 1                            ! # MPI ranks (diagnostic global reductions)
+  integer :: xc_icomm = 0, xc_id = 0, xc_isize = 1   ! x-axis sub-comm (space-charge x-decomposition)
   real(8) :: hgs(3)
   real(8) :: dt
 
@@ -123,7 +126,7 @@ module ttm3
   ! carrier population can reach the reference's near-transparent regime; this is
   ! safe only because the carrier temperatures use the exponential integrator
   ! (the old RK4 step blew up at such low Ne -- see ttm3_step_cell).
-  real(8),parameter :: N_floor = 5.4d-15   ! [1/bohr^3] (~3.4e10 cm^-3, reference seed)
+  real(8),parameter :: N_floor = 3.657d-14  ! [1/bohr^3] (=2.468e11 cm^-3, standalone 3D3TM intrinsic seed Ns)
   real(8),parameter :: T_clamp = 31.67d0   ! [a.u.] (~1e7 K) numerical temperature cap
   real(8),parameter :: pi_ = 3.14159265358979323846d0
   real(8),parameter :: hk_kelvin = 3.1577502480407d5   ! a.u. temperature -> Kelvin
@@ -137,6 +140,10 @@ contains
   !---------------------------------------------------------------------------
   subroutine init_ttm3_parameters( dt_em )
     use communication, only: comm_get_globalinfo, comm_is_root, comm_bcast
+    use salmon_global, only: theory, yn_use_ttm3, ttm_egap, ttm_mu_e, ttm_mu_h, ttm_auger_e, ttm_auger_h, &
+                             ttm_tau, ttm_cl, ttm_tini, ttm_eps_bg, ttm_n0, ttm_beta2, &
+                             ttm_ddiff, ttm_kappa_e, ttm_kappa_l, ttm_dgap, &
+                             ttm_mob_e, ttm_mob_h, ttm_sig_cold, ttm_coupling
     implicit none
     real(8), intent(in) :: dt_em
     integer, parameter :: unit=1112
@@ -150,92 +157,39 @@ contains
     real(8), parameter :: hartree_ev = 27.211386245988d0 ! [eV]
 
     call comm_get_globalinfo( comm, npid, nprocs )
+    nprocs_g = nprocs
     DISPLAY = comm_is_root(npid)
 
     if ( DISPLAY ) write(*,'(a60)') repeat("-",30)//" init_ttm3_parameters(start)"
 
-    inquire( FILE=ttm3_file, EXIST=flag )
-    if( .not.flag )then
+    use_ttm3 = yn_use_ttm3
+    if( .not.use_ttm3 )then
        if( DISPLAY )then
-          write(*,*) "No three-temperature file ("//ttm3_file//")."
-          write(*,*) "Three-temperature + carrier model is not used."
+          write(*,*) "theory /= 'maxwell-3tm': three-temperature + carrier model is not used."
           write(*,'(a60)') repeat("-",30)//" init_ttm3_parameters(end  )"
        end if
        return
-    else
-       if( DISPLAY )then
-          write(*,*) "Three-temperature file ("//ttm3_file//") is found."
-          write(*,*) "Calculation uses the three-temperature + carrier model."
-       end if
-       use_ttm3 = .true.
     end if
+    if( DISPLAY ) write(*,*) "theory = 'maxwell-3tm': three-temperature + carrier model (&ttm)."
 
     dt = dt_em
 
-! Input parameters (one value per line):
-!   Egap [eV], mu_e [-], mu_h [-], A_e [cm^6/s], A_h [cm^6/s],
-!   tau [fs], Cl [J/(m^3 K)], Tini [K]
-    if( comm_is_root(npid) )then
-       open(unit, file=ttm3_file, status='old')
-       read(unit,*) tp3%Egap
-       read(unit,*) tp3%mu_e
-       read(unit,*) tp3%mu_h
-       read(unit,*) tp3%A_e
-       read(unit,*) tp3%A_h
-       read(unit,*) tp3%tau
-       read(unit,*) tp3%Cl
-       read(unit,*) tp3%Tini
-       read(unit,*) tp3%eps_bg
-       read(unit,*) tp3%N0
-       read(unit,*) tp3%beta2
-       read(unit,*) tp3%Ddiff
-       read(unit,*) tp3%kappa_e
-       read(unit,*) tp3%kappa_l
-       read(unit,*) tp3%dgap_c
-       tp3%mob_e0 = 0.0d0; tp3%mob_h0 = 0.0d0     ! optional (Set A Fermi transport)
-       read(unit,*,iostat=ios) tp3%mob_e0
-       read(unit,*,iostat=ios) tp3%mob_h0
-       tp3%sig_cold = 0.0d0                        ! optional (Layer C-a bound/Drude split); <=0 disables
-       read(unit,*,iostat=ios) tp3%sig_cold
-       tp3%coupling_mode = 0                       ! optional: 0=J-update (default), 1=eps-update
-       read(unit,*,iostat=ios) tp3%coupling_mode
-       close(unit)
+    ! &ttm namelist parameters (read + broadcast by inputoutput; physical units, converted below)
+    tp3%Egap   = ttm_egap    ; tp3%mu_e   = ttm_mu_e   ; tp3%mu_h   = ttm_mu_h
+    tp3%A_e    = ttm_auger_e ; tp3%A_h    = ttm_auger_h
+    tp3%tau    = ttm_tau     ; tp3%Cl     = ttm_cl     ; tp3%Tini   = ttm_tini
+    tp3%eps_bg = ttm_eps_bg  ; tp3%N0     = ttm_n0     ; tp3%beta2  = ttm_beta2
+    tp3%Ddiff  = ttm_ddiff   ; tp3%kappa_e= ttm_kappa_e; tp3%kappa_l= ttm_kappa_l
+    tp3%dgap_c = ttm_dgap    ; tp3%mob_e0 = ttm_mob_e  ; tp3%mob_h0 = ttm_mob_h
+    tp3%sig_cold = ttm_sig_cold ; tp3%coupling_mode = ttm_coupling
+    if( DISPLAY )then
        write(*,*) "Egap[eV]    =",tp3%Egap
-       write(*,*) "mu_e        =",tp3%mu_e
-       write(*,*) "mu_h        =",tp3%mu_h
-       write(*,*) "A_e[cm6/s]  =",tp3%A_e
-       write(*,*) "A_h[cm6/s]  =",tp3%A_h
+       write(*,*) "mu_e/mu_h   =",tp3%mu_e, tp3%mu_h
        write(*,*) "tau[fs]     =",tp3%tau
-       write(*,*) "Cl[J/m3K]   =",tp3%Cl
-       write(*,*) "Tini[K]     =",tp3%Tini
-       write(*,*) "eps_bg      =",tp3%eps_bg
-       write(*,*) "N0[cm-3]    =",tp3%N0
-       write(*,*) "beta2[a.u.] =",tp3%beta2
-       write(*,*) "Ddiff[cm2/s]=",tp3%Ddiff
-       write(*,*) "kappa_e[W/mK]=",tp3%kappa_e
-       write(*,*) "kappa_l[W/mK]=",tp3%kappa_l
-       write(*,*) "dgap_c[a.u.]=",tp3%dgap_c
+       write(*,*) "eps_bg / N0 =",tp3%eps_bg, tp3%N0
+       write(*,*) "mob_e/mob_h =",tp3%mob_e0, tp3%mob_h0
+       write(*,*) "sig_cold/cm =",tp3%sig_cold, tp3%coupling_mode
     end if
-
-    call comm_bcast(tp3%Egap,comm,0)
-    call comm_bcast(tp3%mu_e,comm,0)
-    call comm_bcast(tp3%mu_h,comm,0)
-    call comm_bcast(tp3%A_e ,comm,0)
-    call comm_bcast(tp3%A_h ,comm,0)
-    call comm_bcast(tp3%tau ,comm,0)
-    call comm_bcast(tp3%Cl  ,comm,0)
-    call comm_bcast(tp3%Tini,comm,0)
-    call comm_bcast(tp3%eps_bg ,comm,0)
-    call comm_bcast(tp3%N0     ,comm,0)
-    call comm_bcast(tp3%beta2  ,comm,0)
-    call comm_bcast(tp3%Ddiff  ,comm,0)
-    call comm_bcast(tp3%kappa_e,comm,0)
-    call comm_bcast(tp3%kappa_l,comm,0)
-    call comm_bcast(tp3%dgap_c ,comm,0)
-    call comm_bcast(tp3%mob_e0 ,comm,0)
-    call comm_bcast(tp3%mob_h0 ,comm,0)
-    call comm_bcast(tp3%sig_cold,comm,0)
-    call comm_bcast(tp3%coupling_mode,comm,0)
 
 ! Convert to atomic units
     tp3%Egap = tp3%Egap / hartree_ev
@@ -355,6 +309,16 @@ contains
     end do
     end do
   end subroutine init_ttm3_grid
+
+  !---------------------------------------------------------------------------
+  ! Register the x-axis sub-communicator (icomm_x) for the space-charge prefix
+  ! sum under x-direction domain decomposition (nproc_rgrid(1)>1).  Called once
+  ! at init from the FDTD driver.  isz<=1 (default) keeps the single-domain path.
+  subroutine ttm3_set_xcomm( ic, idx, isz )
+    implicit none
+    integer,intent(in) :: ic, idx, isz
+    xc_icomm = ic; xc_id = idx; xc_isize = isz
+  end subroutine ttm3_set_xcomm
 
   !---------------------------------------------------------------------------
   subroutine init_ttm3_alloc( srg, rg )
@@ -591,7 +555,7 @@ contains
     geff = gen_ * max( 0.0d0, 1.0d0 - Ne_/tp3%N0 )
     Cef_e = tp3%A_e*Ne_*Nh_ ; Re = Ne_*Cef_e/( 1.0d0 + T_au*Cef_e )   ! saturated Auger (e)
     Cef_h = tp3%A_h*Ne_*Nh_ ; Rh = Nh_*Cef_h/( 1.0d0 + T_au*Cef_h )   ! saturated Auger (h)
-    R    = Re + Rh
+    R    = ( Re + Rh ) * max( 0.0d0, 1.0d0 - Ne_/tp3%N0 )   ! band-filling (matches standalone Reh*Rate_eh)
     red_e = tp3%mu_h/(tp3%mu_e+tp3%mu_h)
     red_h = tp3%mu_e/(tp3%mu_e+tp3%mu_h)
     gap = ttm3_gap( Ne_, Tl_ )                                   ! carrier + thermal (Varshni) gap
@@ -809,28 +773,65 @@ contains
   ! rho=(Nh-Ne) (charge density; zero in non-medium cells, Ne=Nh=floor).  Per (iy,iz)
   ! line, a prefix sum over the local inner x-range (single-domain; nproc_rgrid=1).
   subroutine ttm3_space_charge()
+    use communication, only: comm_summation
     implicit none
-    integer :: ix,iy,iz
+    integer :: ix,iy,iz,p
     real(8) :: dV,c2,total,pre,rho
+    real(8),allocatable :: ain(:,:,:), aout(:,:,:)
     dV = hgs(1)*hgs(2)*hgs(3)
     c2 = 2.0d0*pi_/tp3%eps_bg
+    if( xc_isize <= 1 )then
+       ! single x-domain (nproc_rgrid(1)=1): local exclusive prefix sum per (iy,iz) line
 !$omp parallel do collapse(2) private(ix,iy,iz,total,pre,rho)
-    do iz=is_inner(3),ie_inner(3)
-    do iy=is_inner(2),ie_inner(2)
-       total=0.0d0
-       do ix=is_inner(1),ie_inner(1)
-          total=total+(Nh(ix,iy,iz)-Ne(ix,iy,iz))
+       do iz=is_inner(3),ie_inner(3)
+       do iy=is_inner(2),ie_inner(2)
+          total=0.0d0
+          do ix=is_inner(1),ie_inner(1)
+             total=total+(Nh(ix,iy,iz)-Ne(ix,iy,iz))
+          end do
+          pre=0.0d0                                  ! exclusive prefix sum (i<ix)
+          do ix=is_inner(1),ie_inner(1)
+             rho=Nh(ix,iy,iz)-Ne(ix,iy,iz)
+             ! Ef = (left - right)*dV*c2 ;  right = total - pre - rho
+             Efld(ix,iy,iz)=c2*dV*( 2.0d0*pre + rho - total )
+             pre=pre+rho
+          end do
        end do
-       pre=0.0d0                                  ! exclusive prefix sum (i<ix)
-       do ix=is_inner(1),ie_inner(1)
-          rho=Nh(ix,iy,iz)-Ne(ix,iy,iz)
-          ! Ef = (left - right)*dV*c2 ;  right = total - pre - rho
-          Efld(ix,iy,iz)=c2*dV*( 2.0d0*pre + rho - total )
-          pre=pre+rho
        end do
-    end do
-    end do
 !$omp end parallel do
+    else
+       ! x-decomposed (nproc_rgrid(1)>1): each x-rank deposits its per-(iy,iz)-line
+       ! charge total into its own slot; an allreduce over icomm_x gathers all x-ranks
+       ! (= allgather), giving the left-offset and global total per line for the prefix.
+       allocate( ain (0:xc_isize-1, is_inner(2):ie_inner(2), is_inner(3):ie_inner(3)) )
+       allocate( aout(0:xc_isize-1, is_inner(2):ie_inner(2), is_inner(3):ie_inner(3)) )
+       ain = 0.0d0
+       do iz=is_inner(3),ie_inner(3)
+       do iy=is_inner(2),ie_inner(2)
+          rho=0.0d0
+          do ix=is_inner(1),ie_inner(1)
+             rho=rho+(Nh(ix,iy,iz)-Ne(ix,iy,iz))
+          end do
+          ain(xc_id,iy,iz)=rho
+       end do
+       end do
+       call comm_summation( ain, aout, size(ain), xc_icomm )
+       do iz=is_inner(3),ie_inner(3)
+       do iy=is_inner(2),ie_inner(2)
+          total=0.0d0; pre=0.0d0
+          do p=0,xc_isize-1
+             total=total+aout(p,iy,iz)
+             if( p<xc_id ) pre=pre+aout(p,iy,iz)   ! charge in x-domains left of this one
+          end do
+          do ix=is_inner(1),ie_inner(1)
+             rho=Nh(ix,iy,iz)-Ne(ix,iy,iz)
+             Efld(ix,iy,iz)=c2*dV*( 2.0d0*pre + rho - total )
+             pre=pre+rho
+          end do
+       end do
+       end do
+       deallocate( ain, aout )
+    end if
   end subroutine ttm3_space_charge
 
   !---------------------------------------------------------------------------
@@ -854,11 +855,12 @@ contains
   !---------------------------------------------------------------------------
   ! Peak values over this rank's medium cells (output units), for diagnostics.
   subroutine ttm3_get_max( Te_o, Th_o, Tl_o, Ne_o, Nh_o )
+    use communication, only: comm_get_max
     implicit none
     real(8),intent(out) :: Te_o, Th_o, Tl_o, Ne_o, Nh_o   ! [K],[K],[K],[1/cm^3],[1/cm^3]
     real(8), parameter :: hartree_kelvin_relationship = 3.1577502480407d5
     real(8), parameter :: atomic_unit_of_length = 5.29177210903d-11
-    real(8) :: cm3_per_bohr3
+    real(8) :: cm3_per_bohr3, vin(5), vout(5)
     integer :: m,ix,iy,iz
     Te_o=0d0; Th_o=0d0; Tl_o=0d0; Ne_o=0d0; Nh_o=0d0
     cm3_per_bohr3 = (atomic_unit_of_length*1.0d2)**3
@@ -870,6 +872,11 @@ contains
     Te_o=Te_o*hartree_kelvin_relationship; Th_o=Th_o*hartree_kelvin_relationship
     Tl_o=Tl_o*hartree_kelvin_relationship
     Ne_o=Ne_o/cm3_per_bohr3; Nh_o=Nh_o/cm3_per_bohr3
+    if( nprocs_g>1 )then            ! global max across the spatial (r-space) decomposition
+       vin(1)=Te_o; vin(2)=Th_o; vin(3)=Tl_o; vin(4)=Ne_o; vin(5)=Nh_o
+       call comm_get_max( vin, vout, 5, comm )
+       Te_o=vout(1); Th_o=vout(2); Tl_o=vout(3); Ne_o=vout(4); Nh_o=vout(5)
+    end if
   end subroutine ttm3_get_max
 
   !---------------------------------------------------------------------------
@@ -878,41 +885,56 @@ contains
   ! and, unlike ttm3_get_max, is not biased by the Fabry-Perot field antinodes that
   ! form inside a finite slab (which sit deeper than the front face and read high).
   subroutine ttm3_get_front( Te_o, Th_o, Tl_o, Ne_o, Nh_o )
+    use communication, only: comm_get_min, comm_get_max
     implicit none
     real(8),intent(out) :: Te_o, Th_o, Tl_o, Ne_o, Nh_o   ! [K],[K],[K],[1/cm^3],[1/cm^3]
     real(8), parameter :: hartree_kelvin_relationship = 3.1577502480407d5
     real(8), parameter :: atomic_unit_of_length = 5.29177210903d-11
-    real(8) :: cm3_per_bohr3, cy, cz
-    integer :: m,ix,iy,iz,ixmin,nmin,a(3),dbest,d
+    real(8) :: cm3_per_bohr3, cy, cz, gfix, vin(5), vout(5)
+    integer :: m,ix,iy,iz,ixmin,nmin,a(3),dbest,d,lfix
     Te_o=tp3%Tini*hartree_kelvin_relationship; Th_o=Te_o; Tl_o=Te_o; Ne_o=0d0; Nh_o=0d0
-    if( nmedia_myrnk<=0 ) return
-    cm3_per_bohr3 = (atomic_unit_of_length*1.0d2)**3
-    ! minimum ix among medium cells = the illuminated face
-    ixmin = ijk_media_myrnk(1,1)
-    do m=2,nmedia_myrnk
-       if( ijk_media_myrnk(1,m) < ixmin ) ixmin = ijk_media_myrnk(1,m)
-    end do
-    ! transverse centroid of that face
-    cy=0d0; cz=0d0; nmin=0
-    do m=1,nmedia_myrnk
-       if( ijk_media_myrnk(1,m)==ixmin )then
-          cy=cy+ijk_media_myrnk(2,m); cz=cz+ijk_media_myrnk(3,m); nmin=nmin+1
+    lfix = huge(0)
+    if( nmedia_myrnk>0 )then
+       cm3_per_bohr3 = (atomic_unit_of_length*1.0d2)**3
+       ! minimum ix among medium cells = the illuminated face
+       ixmin = ijk_media_myrnk(1,1)
+       do m=2,nmedia_myrnk
+          if( ijk_media_myrnk(1,m) < ixmin ) ixmin = ijk_media_myrnk(1,m)
+       end do
+       ! transverse centroid of that face
+       cy=0d0; cz=0d0; nmin=0
+       do m=1,nmedia_myrnk
+          if( ijk_media_myrnk(1,m)==ixmin )then
+             cy=cy+ijk_media_myrnk(2,m); cz=cz+ijk_media_myrnk(3,m); nmin=nmin+1
+          end if
+       end do
+       cy=cy/max(nmin,1); cz=cz/max(nmin,1)
+       ! face cell nearest the centroid
+       a = ijk_media_myrnk(1:3,1); dbest=huge(0)
+       do m=1,nmedia_myrnk
+          if( ijk_media_myrnk(1,m)==ixmin )then
+             iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
+             d = (iy-nint(cy))**2 + (iz-nint(cz))**2
+             if( d<dbest )then; dbest=d; a=ijk_media_myrnk(1:3,m); end if
+          end if
+       end do
+       Te_o=Te(a(1),a(2),a(3))*hartree_kelvin_relationship
+       Th_o=Th(a(1),a(2),a(3))*hartree_kelvin_relationship
+       Tl_o=Tl(a(1),a(2),a(3))*hartree_kelvin_relationship
+       Ne_o=Ne(a(1),a(2),a(3))/cm3_per_bohr3; Nh_o=Nh(a(1),a(2),a(3))/cm3_per_bohr3
+       lfix = ixmin
+    end if
+    if( nprocs_g>1 )then     ! select values from the rank holding the global illuminated face (min ix)
+       gfix = dble(lfix)
+       call comm_get_min( gfix, comm )
+       if( lfix == nint(gfix) )then
+          vin(1)=Te_o; vin(2)=Th_o; vin(3)=Tl_o; vin(4)=Ne_o; vin(5)=Nh_o
+       else
+          vin(:) = -huge(1.0d0)
        end if
-    end do
-    cy=cy/max(nmin,1); cz=cz/max(nmin,1)
-    ! face cell nearest the centroid
-    a = ijk_media_myrnk(1:3,1); dbest=huge(0)
-    do m=1,nmedia_myrnk
-       if( ijk_media_myrnk(1,m)==ixmin )then
-          iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
-          d = (iy-nint(cy))**2 + (iz-nint(cz))**2
-          if( d<dbest )then; dbest=d; a=ijk_media_myrnk(1:3,m); end if
-       end if
-    end do
-    Te_o=Te(a(1),a(2),a(3))*hartree_kelvin_relationship
-    Th_o=Th(a(1),a(2),a(3))*hartree_kelvin_relationship
-    Tl_o=Tl(a(1),a(2),a(3))*hartree_kelvin_relationship
-    Ne_o=Ne(a(1),a(2),a(3))/cm3_per_bohr3; Nh_o=Nh(a(1),a(2),a(3))/cm3_per_bohr3
+       call comm_get_max( vin, vout, 5, comm )
+       Te_o=vout(1); Th_o=vout(2); Tl_o=vout(3); Ne_o=vout(4); Nh_o=vout(5)
+    end if
   end subroutine ttm3_get_front
 
   ! Index of the illuminated front-face medium cell (same selection as ttm3_get_front).

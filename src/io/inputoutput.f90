@@ -51,6 +51,7 @@ module inputoutput
   integer :: inml_singlescale
   integer :: inml_multiscale
   integer :: inml_maxwell
+  integer :: inml_ttm
   integer :: inml_analysis
   integer :: inml_poisson
   integer :: inml_ewald
@@ -467,6 +468,12 @@ contains
       & ori_s,                    &
       & rot_s
 
+    namelist/ttm/ &
+      & ttm_egap, ttm_mu_e, ttm_mu_h, ttm_auger_e, ttm_auger_h, &
+      & ttm_tau, ttm_cl, ttm_tini, ttm_eps_bg, ttm_n0, ttm_beta2, &
+      & ttm_ddiff, ttm_kappa_e, ttm_kappa_l, ttm_dgap, &
+      & ttm_mob_e, ttm_mob_h, ttm_sig_cold, ttm_coupling
+
     namelist/analysis/ &
       & projection_option, &
       & out_projection_step, &
@@ -642,6 +649,26 @@ contains
 
 !! == default for &calculation
     theory              = 'tddft'
+    ttm_egap     = 1.16d0
+    ttm_mu_e     = 0.36d0
+    ttm_mu_h     = 0.81d0
+    ttm_auger_e  = 2.3d-31
+    ttm_auger_h  = 7.8d-32
+    ttm_tau      = 240.0d0
+    ttm_cl       = 1.66d6
+    ttm_tini     = 300.0d0
+    ttm_eps_bg   = 13.55d0
+    ttm_n0       = 2.0d23
+    ttm_beta2    = 0.0d0
+    ttm_ddiff    = 0.0d0
+    ttm_kappa_e  = 0.0d0
+    ttm_kappa_l  = 0.0d0
+    ttm_dgap     = 0.055d0
+    ttm_mob_e    = 0.0d0
+    ttm_mob_h    = 0.0d0
+    ttm_sig_cold = 0.0d0
+    ttm_coupling = 1
+    yn_use_ttm3  = .false.
     yn_md               = 'n'
     yn_opt              = 'n'
     yn_dc               = 'n'
@@ -1079,6 +1106,9 @@ contains
       read(fh_namelist, nml=maxwell, iostat=inml_maxwell)
       rewind(fh_namelist)
 
+      read(fh_namelist, nml=ttm, iostat=inml_ttm)
+      rewind(fh_namelist)
+
       read(fh_namelist, nml=analysis, iostat=inml_analysis)
       rewind(fh_namelist)
 
@@ -1433,6 +1463,25 @@ contains
     call comm_bcast(gamma_ld                 ,nproc_group_global)
     gamma_ld = gamma_ld * uenergy_to_au
     call comm_bcast(omega_ld                 ,nproc_group_global)
+    call comm_bcast(ttm_egap                 ,nproc_group_global)
+    call comm_bcast(ttm_mu_e                 ,nproc_group_global)
+    call comm_bcast(ttm_mu_h                 ,nproc_group_global)
+    call comm_bcast(ttm_auger_e              ,nproc_group_global)
+    call comm_bcast(ttm_auger_h              ,nproc_group_global)
+    call comm_bcast(ttm_tau                  ,nproc_group_global)
+    call comm_bcast(ttm_cl                   ,nproc_group_global)
+    call comm_bcast(ttm_tini                 ,nproc_group_global)
+    call comm_bcast(ttm_eps_bg               ,nproc_group_global)
+    call comm_bcast(ttm_n0                   ,nproc_group_global)
+    call comm_bcast(ttm_beta2                ,nproc_group_global)
+    call comm_bcast(ttm_ddiff                ,nproc_group_global)
+    call comm_bcast(ttm_kappa_e              ,nproc_group_global)
+    call comm_bcast(ttm_kappa_l              ,nproc_group_global)
+    call comm_bcast(ttm_dgap                 ,nproc_group_global)
+    call comm_bcast(ttm_mob_e                ,nproc_group_global)
+    call comm_bcast(ttm_mob_h                ,nproc_group_global)
+    call comm_bcast(ttm_sig_cold             ,nproc_group_global)
+    call comm_bcast(ttm_coupling             ,nproc_group_global)
     omega_ld = omega_ld * uenergy_to_au
     call comm_bcast(wave_input,nproc_group_global)
     call comm_bcast(ek_dir1                  ,nproc_group_global)

@@ -234,6 +234,28 @@ module salmon_global
   integer        :: nmacro_chunk
   real(8)        :: rmat_ms(3, 3)
 
+!! &ttm  (temperature model; theory = maxwell-3tm)
+  real(8)        :: ttm_egap
+  real(8)        :: ttm_mu_e
+  real(8)        :: ttm_mu_h
+  real(8)        :: ttm_auger_e
+  real(8)        :: ttm_auger_h
+  real(8)        :: ttm_tau
+  real(8)        :: ttm_cl
+  real(8)        :: ttm_tini
+  real(8)        :: ttm_eps_bg
+  real(8)        :: ttm_n0
+  real(8)        :: ttm_beta2
+  real(8)        :: ttm_ddiff
+  real(8)        :: ttm_kappa_e
+  real(8)        :: ttm_kappa_l
+  real(8)        :: ttm_dgap
+  real(8)        :: ttm_mob_e
+  real(8)        :: ttm_mob_h
+  real(8)        :: ttm_sig_cold
+  integer        :: ttm_coupling
+  logical        :: yn_use_ttm3
+
 !! &maxwell
   real(8)        :: al_em(3)
   real(8)        :: dl_em(3)

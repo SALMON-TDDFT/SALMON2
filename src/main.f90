@@ -17,6 +17,10 @@
   endif
 
   call read_input
+  if( theory == 'maxwell-3tm' )then
+    yn_use_ttm3 = .true.
+    theory      = 'maxwell'
+  end if
   call set_basic_flag(theory)
 
   call read_Hubbard_parameters  !should move into read_input subroutine!
@@ -35,7 +39,7 @@
   case('dft_k_expand')                ; call main_dft_k_expand !convert DFT/k-points data to supercell/gammma DFT
   case('single_scale_maxwell_tddft'  ); call main_tddft
   case('multi_scale_maxwell_tddft'   ); call main_ms
-  case('maxwell')                     ; call main_maxwell
+  case('maxwell','maxwell-3tm')       ; call main_maxwell
   case('sbe', 'maxwell_sbe')          ; call main_ssbe(nproc_group_global)
  !case('maxwell_sbe')                 ; call main_maxwell_sbe
  !case('ttm')                         ; call main_ttm

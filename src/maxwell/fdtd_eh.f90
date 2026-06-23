@@ -252,7 +252,7 @@ contains
                                input_i3d_em,output_i3d_em,stop_em,input_r_txt_em,output_r_txt_em,input_r_bin_em, &
                                txtfile_copy_em
     use ttm,             only: use_ttm, init_ttm_parameters, init_ttm_grid, init_ttm_alloc
-    use ttm3,            only: use_ttm3, init_ttm3_parameters, ttm3_set_dt, init_ttm3_grid, init_ttm3_alloc
+    use ttm3,            only: use_ttm3, init_ttm3_parameters, ttm3_set_dt, init_ttm3_grid, init_ttm3_alloc, ttm3_set_xcomm
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
@@ -877,6 +877,7 @@ contains
        call ttm3_set_dt( dt_em )   ! dt_em is finalised (CFL) by here; the early init captured 0
        call init_ttm3_grid( fs%hgs, fs%mg%is_array, fs%mg%is, fs%mg%ie, fs%imedia )
        call init_ttm3_alloc( fs%srg_ng, fs%mg )
+       call ttm3_set_xcomm( fs%icomm_x, fs%id_x, fs%isize_x )
        ! bound the time-series file: emit at most n_3tm_out_max rows, never finer than obs_samp_em
        i_3tm_out = max( obs_samp_em, (nt_em + n_3tm_out_max - 1)/n_3tm_out_max )
        if( comm_is_root(nproc_id_global) )then
@@ -6378,6 +6379,7 @@ contains
       write(*,*) "**************************"
     end if
     call init_communicator_dft(nproc_group_global,info)
+    fs%icomm_x = info%icomm_x; fs%id_x = info%id_x; fs%isize_x = info%isize_x
     
     !initialize r-grid
     call init_grid_whole(fs%rlsize,fs%hgs,fs%lg)
