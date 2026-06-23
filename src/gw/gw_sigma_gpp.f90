@@ -119,7 +119,6 @@ module gw_sigma_gpp_sub
   public :: calc_sigma_gpp
   public :: calc_sigma_gpp_qcache
   public :: calc_sigma_gpp_sym
-  public :: build_state_density_ft   ! shared with the real-axis remainder port
 
   real(8), parameter :: occ_thr     = 1.0d-6   ! occupied if rocc > occ_thr
   real(8), parameter :: g_match_tol = 1.0d-6   ! |G|-match tolerance (bohr^-1)^2
@@ -239,69 +238,6 @@ contains
     deallocate(rloc)
 
   end subroutine build_density_ft
-
-  ! --------------------------------------------------------------------------
-  ! build_state_density_ft
-  !
-  ! Per-state density matrix rho_n(G) = <n,k|e^{+iG.r}|n,k> = hvol sum_r |psi_nk|^2
-  ! e^{+iG.r}, normalised so rho_n(G=0)=1 (the M-element convention, NOT the
-  ! avg-density 1/Omega of build_density_ft).  This is the COMPLETENESS sum
-  ! sum_{n'}^all M*_nn'(0,G) M_nn'(0,G') = rho_n(G-G') used by the static
-  ! remainder to capture the Coulomb-hole's high-band tail without the band sum.
-  ! --------------------------------------------------------------------------
-  subroutine build_state_density_ft(system, info, mg, lg, spsi, ispin, n, ik, &
-                                    gvl, ngl, rho_n_ft, local_only)
-    use structures,    only: s_dft_system, s_parallel_info, s_rgrid, s_orbital
-    use communication, only: comm_summation
-    implicit none
-    type(s_dft_system),    intent(in)  :: system
-    type(s_parallel_info), intent(in)  :: info
-    type(s_rgrid),         intent(in)  :: mg, lg
-    type(s_orbital),       intent(in)  :: spsi
-    integer,               intent(in)  :: ispin, n, ik, ngl
-    real(8),               intent(in)  :: gvl(3,ngl)
-    complex(8),            intent(out) :: rho_n_ft(ngl)
-    logical, optional,     intent(in)  :: local_only
-
-    complex(8), allocatable :: rloc(:)
-    complex(8) :: zacc
-    real(8) :: hvol, rx, ry, rz, phase, nr
-    integer :: ig, ix, iy, iz, im
-    logical :: ll
-
-    ll = .false.
-    if (present(local_only)) ll = local_only
-    hvol = system%hvol
-    im = 1
-
-    allocate(rloc(ngl)); rloc(:) = (0.0d0, 0.0d0)
-!$omp parallel do private(ig,iz,iy,ix,zacc,rx,ry,rz,nr,phase)
-    do ig = 1, ngl
-      zacc = (0.0d0, 0.0d0)
-      do iz = mg%is(3), mg%ie(3)
-        rz = lg%coordinate(iz,3)
-      do iy = mg%is(2), mg%ie(2)
-        ry = lg%coordinate(iy,2)
-      do ix = mg%is(1), mg%ie(1)
-        rx = lg%coordinate(ix,1)
-        nr = dble( conjg(spsi%zwf(ix,iy,iz,ispin,n,ik,im)) &
-                       * spsi%zwf(ix,iy,iz,ispin,n,ik,im) )
-        phase = gvl(1,ig)*rx + gvl(2,ig)*ry + gvl(3,ig)*rz       ! e^{+iG.r}
-        zacc = zacc + nr * cmplx(cos(phase), sin(phase), 8)
-      end do
-      end do
-      end do
-      rloc(ig) = zacc * hvol        ! rho_n(G=0) = hvol*sum|psi|^2 = 1
-    end do
-!$omp end parallel do
-
-    if (ll) then
-      rho_n_ft(:) = rloc(:)
-    else
-      call comm_summation(rloc, rho_n_ft, ngl, info%icomm_rko)
-    end if
-    deallocate(rloc)
-  end subroutine build_state_density_ft
 
   ! --------------------------------------------------------------------------
   ! sigma_c_at_energy
@@ -739,7 +675,7 @@ contains
                                    ng, ispin, nb_lo, nb_hi, sigc_re, zfac, skip_frac, &
                                    do_remainder, nb_sigma, nb_eps)
     use structures,     only: s_dft_system, s_parallel_info, s_rgrid, s_orbital, s_scalar
-    use gw_mtxel_sub,   only: calc_mtxel
+    use gw_mtxel_sub,   only: calc_mtxel, build_state_density_ft
     use gw_coulomb_sub, only: build_vcoul, build_gvectors
     use gw_epsilon_sub, only: find_kpq, calc_epsinv
     use communication,  only: comm_summation

@@ -621,6 +621,9 @@ contains
       & yn_gw_qp_inject, &
       & nband_eps, &
       & nband_sigma, &
+      & yn_gw_extrapolar, &
+      & gw_extrapolar_mode, &
+      & gw_extrapolar_de, &
       & nomega_gw, &
       & omega_max_gw, &
       & eta_gw, &
@@ -1068,6 +1071,9 @@ contains
     yn_gw_qp_inject = 'n'
     nband_eps      = 0
     nband_sigma    = 0
+    yn_gw_extrapolar   = 'n'
+    gw_extrapolar_mode = 'offset'
+    gw_extrapolar_de   = 2.0d0
     nomega_gw        = 200
     omega_max_gw     = 25.0d0
     eta_gw           = 0.068d0      ! hbar/T_mask, T_mask=400 a.u. (prod RT-TDDFT mask)
@@ -1722,6 +1728,9 @@ contains
     call comm_bcast(yn_gw_qp_inject, nproc_group_global)
     call comm_bcast(nband_eps     , nproc_group_global)
     call comm_bcast(nband_sigma   , nproc_group_global)
+    call comm_bcast(yn_gw_extrapolar  , nproc_group_global)
+    call comm_bcast(gw_extrapolar_mode, nproc_group_global)
+    call comm_bcast(gw_extrapolar_de  , nproc_group_global)
     call comm_bcast(nomega_gw       , nproc_group_global)
     call comm_bcast(omega_max_gw    , nproc_group_global)
     call comm_bcast(eta_gw          , nproc_group_global)
@@ -2706,6 +2715,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_qp_inject', trim(yn_gw_qp_inject)
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_eps',      nband_eps
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_sigma',    nband_sigma
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_extrapolar', trim(yn_gw_extrapolar)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'gw_extrapolar_mode', trim(gw_extrapolar_mode)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gw_extrapolar_de', gw_extrapolar_de
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_qp_min',   nband_qp_min
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_qp_max',   nband_qp_max
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nomega_gw',      nomega_gw

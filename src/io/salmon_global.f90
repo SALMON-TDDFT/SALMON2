@@ -476,6 +476,9 @@ character(256),allocatable :: atom_name(:)
                                         ! (true G0W0+RPA) instead of a rigid scissors
   integer        :: nband_eps           ! 0=all: cap of the chi0/eps unoccupied sum
   integer        :: nband_sigma         ! 0=all: cap of the Sigma_c intermediate sum
+  character(1)   :: yn_gw_extrapolar     ! 'y': chi0 extrapolar (effective-energy) tail
+  character(8)   :: gw_extrapolar_mode   ! 'offset' (BG) | 'sumrule' (EET, phase 2)
+  real(8)        :: gw_extrapolar_de     ! Ha: offset DeltaE for Ebar = esp(N_b')+DeltaE
   ! --- full-frequency (real-axis) dielectric / absorption (spec-b1) ---
   integer        :: nomega_gw           ! number of real-frequency grid points
   real(8)        :: omega_max_gw        ! eV, upper end of the real-frequency grid

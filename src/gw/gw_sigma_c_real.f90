@@ -336,7 +336,7 @@ contains
     use gw_mtxel_sub,   only: calc_mtxel
     use gw_epsilon_sub, only: find_kpq, calc_chi0_freq, calc_w_freq
     use gw_coulomb_sub, only: build_gvectors
-    use gw_sigma_gpp_sub, only: build_state_density_ft
+    use gw_mtxel_sub,     only: build_state_density_ft
     use communication,  only: comm_summation
     implicit none
     type(s_dft_system),    intent(in)    :: system

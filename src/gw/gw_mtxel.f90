@@ -112,6 +112,7 @@ module gw_mtxel_sub
 
   public :: calc_mtxel
   public :: replicate_orbitals_k
+  public :: build_state_density_ft   ! shared by epsilon (extrapolar) + sigma (remainder)
 
 contains
 
@@ -531,5 +532,68 @@ contains
     call dfftw_destroy_plan(plan)
   end subroutine destroy_plan_dft_3d
 #endif
+
+  ! --------------------------------------------------------------------------
+  ! build_state_density_ft
+  !
+  ! Per-state density matrix rho_n(G) = <n,k|e^{+iG.r}|n,k> = hvol sum_r |psi_nk|^2
+  ! e^{+iG.r}, normalised so rho_n(G=0)=1 (the M-element convention, NOT an
+  ! avg-density 1/Omega).  This is the COMPLETENESS sum sum_{n'}^all
+  ! M*_nn'(0,G) M_nn'(0,G') = rho_n(G-G'), used by the static remainder (Sigma_c)
+  ! and the chi0 extrapolar tail (epsilon) to close the high-band sum.
+  ! --------------------------------------------------------------------------
+  subroutine build_state_density_ft(system, info, mg, lg, spsi, ispin, n, ik, &
+                                    gvl, ngl, rho_n_ft, local_only)
+    use structures,    only: s_dft_system, s_parallel_info, s_rgrid, s_orbital
+    use communication, only: comm_summation
+    implicit none
+    type(s_dft_system),    intent(in)  :: system
+    type(s_parallel_info), intent(in)  :: info
+    type(s_rgrid),         intent(in)  :: mg, lg
+    type(s_orbital),       intent(in)  :: spsi
+    integer,               intent(in)  :: ispin, n, ik, ngl
+    real(8),               intent(in)  :: gvl(3,ngl)
+    complex(8),            intent(out) :: rho_n_ft(ngl)
+    logical, optional,     intent(in)  :: local_only
+
+    complex(8), allocatable :: rloc(:)
+    complex(8) :: zacc
+    real(8) :: hvol, rx, ry, rz, phase, nr
+    integer :: ig, ix, iy, iz, im
+    logical :: ll
+
+    ll = .false.
+    if (present(local_only)) ll = local_only
+    hvol = system%hvol
+    im = 1
+
+    allocate(rloc(ngl)); rloc(:) = (0.0d0, 0.0d0)
+!$omp parallel do private(ig,iz,iy,ix,zacc,rx,ry,rz,nr,phase)
+    do ig = 1, ngl
+      zacc = (0.0d0, 0.0d0)
+      do iz = mg%is(3), mg%ie(3)
+        rz = lg%coordinate(iz,3)
+      do iy = mg%is(2), mg%ie(2)
+        ry = lg%coordinate(iy,2)
+      do ix = mg%is(1), mg%ie(1)
+        rx = lg%coordinate(ix,1)
+        nr = dble( conjg(spsi%zwf(ix,iy,iz,ispin,n,ik,im)) &
+                       * spsi%zwf(ix,iy,iz,ispin,n,ik,im) )
+        phase = gvl(1,ig)*rx + gvl(2,ig)*ry + gvl(3,ig)*rz       ! e^{+iG.r}
+        zacc = zacc + nr * cmplx(cos(phase), sin(phase), 8)
+      end do
+      end do
+      end do
+      rloc(ig) = zacc * hvol        ! rho_n(G=0) = hvol*sum|psi|^2 = 1
+    end do
+!$omp end parallel do
+
+    if (ll) then
+      rho_n_ft(:) = rloc(:)
+    else
+      call comm_summation(rloc, rho_n_ft, ngl, info%icomm_rko)
+    end if
+    deallocate(rloc)
+  end subroutine build_state_density_ft
 
 end module gw_mtxel_sub

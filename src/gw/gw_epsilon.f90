@@ -83,6 +83,8 @@ module gw_epsilon_sub
 
   real(8), parameter :: g_match_tol = 1.0d-6   ! |G|-match tolerance (bohr^-1)^2
   real(8), parameter :: occ_thr     = 1.0d-6   ! occupied if rocc > occ_thr
+  integer, parameter :: ngmax_l_ex  = 200000   ! capacity of the larger G-set (extrapolar)
+  real(8), parameter :: gset_fac_ex = 4.0d0    ! larger cutoff = 4 * eps cutoff
   real(8), parameter :: denom_tiny  = 1.0d-8   ! skip near-degenerate transitions
 
 contains
@@ -274,8 +276,9 @@ contains
   subroutine calc_epsinv(system, info, mg, lg, spsi, esp, gvec, gg, ng, iq, qvec, &
                          ispin, epsinv, eps_diag, residual, ok, local_only, nb_eps)
     use structures,    only: s_dft_system, s_parallel_info, s_rgrid, s_orbital
-    use gw_mtxel_sub,  only: calc_mtxel
-    use gw_coulomb_sub,only: build_vcoul
+    use gw_mtxel_sub,  only: calc_mtxel, build_state_density_ft
+    use gw_coulomb_sub,only: build_vcoul, build_gvectors
+    use salmon_global, only: yn_gw_extrapolar, gw_extrapolar_de
     implicit none
     type(s_dft_system),    intent(in)  :: system
     type(s_parallel_info), intent(in)  :: info
@@ -306,6 +309,14 @@ contains
     integer,    allocatable :: iGm(:), imap(:)
     integer,    allocatable :: ipiv(:)
     complex(8), allocatable :: zwork(:)
+    ! extrapolar workspace
+    real(8),    allocatable :: gvecl(:,:), ggl(:)
+    integer,    allocatable :: idiff(:,:)
+    complex(8), allocatable :: rho_vft(:,:)
+    real(8) :: gmax2, ecut_l, ebar, wex, deltae
+    complex(8) :: rterm, pgg
+    integer :: ngl, kk, ja, jb
+    logical :: lexp
 
     integer :: no, nk, ik, ikq, iv, ic, ig, jg, ipair, npair, nfill, neps
     integer :: lwork, linfo, nbk, ikk
@@ -346,9 +357,33 @@ contains
     inv_omega = 2.0d0 / (dble(nk) * omega)
     nsub_head = 10            ! mini-BZ sub-sampling density for the v head
 
+    ! extrapolar active only with an actual band cap (neps<no; else Pmiss=0 no-op)
+    lexp   = (yn_gw_extrapolar == 'y') .and. (neps < no)
+    deltae = gw_extrapolar_de
+
     allocate(chi0(ng,ng), eps(ng,ng))
     allocate(iGm(ng), imap(ng), vcoul(ng))
     chi0(:,:) = (0.0d0, 0.0d0)
+
+    ! ---- extrapolar: larger G-set, idiff(G-G'), per-(ik) occupied densities ----
+    if (lexp) then
+      gmax2 = 0.0d0
+      do ig = 1, ng
+        if (gg(ig) > gmax2) gmax2 = gg(ig)
+      end do
+      ecut_l = gset_fac_ex * gmax2
+      allocate(gvecl(3, ngmax_l_ex), ggl(ngmax_l_ex))
+      call build_gvectors(system%primitive_b, ecut_l, ngmax_l_ex, ngl, gvecl, ggl)
+      allocate(idiff(ng,ng), rho_vft(ngl, nbk))
+      do jg = 1, ng
+        do ig = 1, ng
+          gtarget(1) = gvec(1,ig) - gvec(1,jg)
+          gtarget(2) = gvec(2,ig) - gvec(2,jg)
+          gtarget(3) = gvec(3,ig) - gvec(3,jg)
+          idiff(ig,jg) = gindex_e(ngl, gvecl, gtarget)
+        end do
+      end do
+    end if
 
     ! G -> -G permutation (closed list; asserted in build_gminus).  Used directly
     ! for the unfolded (G0=0) case and as the closure assertion: if any partner is
@@ -454,6 +489,42 @@ contains
         deallocate(mcv, prod)
       end if
 
+      ! --- extrapolar tail: add Delta-chi for the missing empties (c>neps) -----
+      ! Delta-chi(ig,jg) += Sum_{v occ} inv_omega f_v/(eps_v-Ebar) ·
+      !   [ rho_v(G_jg-G_ig) - Sum_{n<=neps} conjg(M_vn(G_ig)) M_vn(G_jg) ].
+      ! Ebar(ikq)=esp(neps,ikq)+DeltaE; M_vn uses the SAME imap/boundary as mcv;
+      ! rho via idiff(jg,ig) (G0 umklapp cancels, as in the remainder).
+      if (lexp) then
+        do iv = 1, nbk
+          if (system%rocc(iv,ik,ispin) <= occ_thr) cycle
+          call build_state_density_ft(system, info, mg, lg, spsi, ispin, iv, ik, &
+                                       gvecl, ngl, rho_vft(:,iv), local_only=ll)
+        end do
+        ebar = esp(neps, ikq, ispin) + deltae
+        do iv = 1, nbk
+          fv = system%rocc(iv,ik,ispin)
+          if (fv <= occ_thr) cycle
+          wex = inv_omega * fv / (esp(iv,ik,ispin) - ebar)
+          do jg = 1, ng
+            jb = imap(jg);  if (jb == 0) cycle
+            do ig = 1, ng
+              ja = imap(ig);  if (ja == 0) cycle
+              kk = idiff(jg,ig)
+              if (kk == 0) then
+                rterm = (0.0d0, 0.0d0)
+              else
+                rterm = rho_vft(kk,iv)
+              end if
+              pgg = (0.0d0, 0.0d0)
+              do ic = 1, neps
+                pgg = pgg + conjg(mtxel(ja,ic,iv)) * mtxel(jb,ic,iv)
+              end do
+              chi0(ig,jg) = chi0(ig,jg) + wex * (rterm - pgg)
+            end do
+          end do
+        end do
+      end if
+
       deallocate(mtxel)
 
     end do  ! ik
@@ -468,6 +539,7 @@ contains
       if (present(residual)) residual = 0.0d0
       if (present(ok))       ok = .false.
       deallocate(chi0, eps, iGm, imap, vcoul)
+      if (lexp) deallocate(gvecl, ggl, idiff, rho_vft)
       return
     end if
 
@@ -520,6 +592,7 @@ contains
     if (present(ok)) ok = .true.
 
     deallocate(chi0, eps, iGm, imap, vcoul)
+    if (lexp) deallocate(gvecl, ggl, idiff, rho_vft)
 
   end subroutine calc_epsinv
 
@@ -760,5 +833,22 @@ contains
     deallocate(epsm, ipiv, zwork)
     if (present(ok)) ok = .true.
   end subroutine calc_w_freq
+
+  ! index of a target G in the larger gvecl set (0 if not present); for the
+  ! extrapolar G-G' lookup.  Same role as gindex_of/gindex_local elsewhere.
+  integer function gindex_e(ngl, gvl, gtarget) result(jg)
+    implicit none
+    integer, intent(in) :: ngl
+    real(8), intent(in) :: gvl(3,ngl), gtarget(3)
+    real(8), parameter  :: tol = 1.0d-6
+    integer :: ig
+    jg = 0
+    do ig = 1, ngl
+      if ( abs(gvl(1,ig)-gtarget(1)) + abs(gvl(2,ig)-gtarget(2)) &
+         + abs(gvl(3,ig)-gtarget(3)) < tol ) then
+        jg = ig; return
+      end if
+    end do
+  end function gindex_e
 
 end module gw_epsilon_sub
