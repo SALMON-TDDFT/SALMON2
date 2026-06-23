@@ -970,7 +970,8 @@ subroutine main_gw
       else if (yn_gw_qcache == 'y') then
         call calc_sigma_gpp_qcache(system, info, mg, lg, spsi_full, energy%esp, rho, &
                             gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
-                            sigc_w7, zfac_w7, skip_frac=skipfrac7)
+                            sigc_w7, zfac_w7, skip_frac=skipfrac7, &
+                            do_remainder=(yn_gw_static_remainder=='y'))
       else
         call calc_sigma_gpp(system, info, mg, lg, spsi_full, energy%esp, rho, &
                             gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &

@@ -466,6 +466,10 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_gw_sym           ! 'y': symmetrise the full-mesh orbitals by
                                         ! grid rotation (needs sym.dat) -> exact
                                         ! point-group symmetry for the BZ-sum reduction
+  character(1)   :: yn_gw_static_remainder  ! 'y': add the static Coulomb-hole
+                                        ! remainder (completeness correction for the
+                                        ! finite band sum); accelerates Sigma_c band
+                                        ! convergence (gpp q-cache path)
   ! --- full-frequency (real-axis) dielectric / absorption (spec-b1) ---
   integer        :: nomega_gw           ! number of real-frequency grid points
   real(8)        :: omega_max_gw        ! eV, upper end of the real-frequency grid

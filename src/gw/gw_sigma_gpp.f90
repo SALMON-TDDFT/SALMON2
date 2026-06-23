@@ -240,6 +240,69 @@ contains
   end subroutine build_density_ft
 
   ! --------------------------------------------------------------------------
+  ! build_state_density_ft
+  !
+  ! Per-state density matrix rho_n(G) = <n,k|e^{+iG.r}|n,k> = hvol sum_r |psi_nk|^2
+  ! e^{+iG.r}, normalised so rho_n(G=0)=1 (the M-element convention, NOT the
+  ! avg-density 1/Omega of build_density_ft).  This is the COMPLETENESS sum
+  ! sum_{n'}^all M*_nn'(0,G) M_nn'(0,G') = rho_n(G-G') used by the static
+  ! remainder to capture the Coulomb-hole's high-band tail without the band sum.
+  ! --------------------------------------------------------------------------
+  subroutine build_state_density_ft(system, info, mg, lg, spsi, ispin, n, ik, &
+                                    gvl, ngl, rho_n_ft, local_only)
+    use structures,    only: s_dft_system, s_parallel_info, s_rgrid, s_orbital
+    use communication, only: comm_summation
+    implicit none
+    type(s_dft_system),    intent(in)  :: system
+    type(s_parallel_info), intent(in)  :: info
+    type(s_rgrid),         intent(in)  :: mg, lg
+    type(s_orbital),       intent(in)  :: spsi
+    integer,               intent(in)  :: ispin, n, ik, ngl
+    real(8),               intent(in)  :: gvl(3,ngl)
+    complex(8),            intent(out) :: rho_n_ft(ngl)
+    logical, optional,     intent(in)  :: local_only
+
+    complex(8), allocatable :: rloc(:)
+    complex(8) :: zacc
+    real(8) :: hvol, rx, ry, rz, phase, nr
+    integer :: ig, ix, iy, iz, im
+    logical :: ll
+
+    ll = .false.
+    if (present(local_only)) ll = local_only
+    hvol = system%hvol
+    im = 1
+
+    allocate(rloc(ngl)); rloc(:) = (0.0d0, 0.0d0)
+!$omp parallel do private(ig,iz,iy,ix,zacc,rx,ry,rz,nr,phase)
+    do ig = 1, ngl
+      zacc = (0.0d0, 0.0d0)
+      do iz = mg%is(3), mg%ie(3)
+        rz = lg%coordinate(iz,3)
+      do iy = mg%is(2), mg%ie(2)
+        ry = lg%coordinate(iy,2)
+      do ix = mg%is(1), mg%ie(1)
+        rx = lg%coordinate(ix,1)
+        nr = dble( conjg(spsi%zwf(ix,iy,iz,ispin,n,ik,im)) &
+                       * spsi%zwf(ix,iy,iz,ispin,n,ik,im) )
+        phase = gvl(1,ig)*rx + gvl(2,ig)*ry + gvl(3,ig)*rz       ! e^{+iG.r}
+        zacc = zacc + nr * cmplx(cos(phase), sin(phase), 8)
+      end do
+      end do
+      end do
+      rloc(ig) = zacc * hvol        ! rho_n(G=0) = hvol*sum|psi|^2 = 1
+    end do
+!$omp end parallel do
+
+    if (ll) then
+      rho_n_ft(:) = rloc(:)
+    else
+      call comm_summation(rloc, rho_n_ft, ngl, info%icomm_rko)
+    end if
+    deallocate(rloc)
+  end subroutine build_state_density_ft
+
+  ! --------------------------------------------------------------------------
   ! sigma_c_at_energy
   !
   ! Inner kernel: given the precomputed, q-resolved GPP weight wgpp(ig,jg) =
@@ -672,7 +735,8 @@ contains
   ! kernels run in local mode.  Cost O(nk^2) vs the default O(nk^3).
   ! --------------------------------------------------------------------------
   subroutine calc_sigma_gpp_qcache(system, info, mg, lg, spsi, esp, rho, gvec, gg, &
-                                   ng, ispin, nb_lo, nb_hi, sigc_re, zfac, skip_frac)
+                                   ng, ispin, nb_lo, nb_hi, sigc_re, zfac, skip_frac, &
+                                   do_remainder)
     use structures,     only: s_dft_system, s_parallel_info, s_rgrid, s_orbital, s_scalar
     use gw_mtxel_sub,   only: calc_mtxel
     use gw_coulomb_sub, only: build_vcoul, build_gvectors
@@ -694,6 +758,7 @@ contains
     real(8),               intent(out) :: sigc_re(nb_lo:nb_hi, system%nk)
     real(8),               intent(out) :: zfac   (nb_lo:nb_hi, system%nk)
     real(8),    optional,  intent(out) :: skip_frac
+    logical,    optional,  intent(in)  :: do_remainder
 
     complex(8), allocatable :: epsinv(:,:), mblk(:,:,:), msig(:,:), wgpp(:,:), rhoft(:)
     real(8),    allocatable :: vcoul(:), wt(:,:), gvecl(:,:), ggl(:), eband(:), focc(:)
@@ -702,6 +767,11 @@ contains
     integer,    allocatable :: imap(:), idiff(:,:), qid(:,:)
     real(8),    allocatable :: qrep(:,:)
     complex(8), allocatable :: sc_all(:,:), scp_all(:,:), scm_all(:,:), scg(:,:)
+    ! static-remainder (Coulomb-hole band-truncation correction)
+    complex(8), allocatable :: rem_all(:,:), rho_nft(:,:,:), wc0(:,:)
+    complex(8) :: remc, pgg, rterm
+    integer    :: kk
+    logical    :: lrem
 
     integer :: no, nk, ik, iq, ikm, inp, in, ig, jg, kg
     integer :: ngl, nchan_phys_tot, nchan_unphys_tot, ncnt(2), ncnt_g(2)
@@ -726,6 +796,9 @@ contains
     sigc_re(:,:) = 0.0d0
     zfac(:,:)    = 1.0d0
 
+    lrem = .false.
+    if (present(do_remainder)) lrem = do_remainder
+
     ! ---- larger G-set + rho(G'') (q-independent) -- same as calc_sigma_gpp --
     gmax2 = 0.0d0
     do ig = 1, ng
@@ -743,6 +816,7 @@ contains
     allocate(wgpp(ng,ng), wt(ng,ng), phys(ng,ng), idiff(ng,ng))
     allocate(mblk(ng, no, no), msig(ng, no))
     allocate(eband(no), focc(no), e0(nb_lo:nb_hi, nk))
+    if (lrem) allocate(wc0(ng,ng))
 
     do jg = 1, ng
       do ig = 1, ng
@@ -758,6 +832,20 @@ contains
         e0(in,ik) = esp(in,ik,ispin)
       end do
     end do
+
+    ! ---- static remainder: per-state density rho_nk(G) on the larger G-set ---
+    ! Completeness limit of Sum_n' M*_nn'(G) M_nn'(G') (all bands) = rho_nk(G-G').
+    ! Replicated orbitals -> every rank holds all (in,ik); cheap, no comm.
+    if (lrem) then
+      allocate(rho_nft(ngl, nb_lo:nb_hi, nk), rem_all(nb_lo:nb_hi, nk))
+      rem_all(:,:) = (0.0d0, 0.0d0)
+      do ik = 1, nk
+        do in = nb_lo, nb_hi
+          call build_state_density_ft(system, info, mg, lg, spsi, ispin, in, ik, &
+                                       gvecl, ngl, rho_nft(:,in,ik), local_only=.true.)
+        end do
+      end do
+    end if
 
     ! ---- (1) group all (ik,iq) pairs by distinct q = vec_k(iq)-vec_k(ik) ----
     ! Exact for a uniform mesh: equal q's give identical qvec to machine
@@ -804,6 +892,17 @@ contains
                        qvec, ispin, epsinv, ok=q_ok, local_only=.true.)
       if (.not. q_ok) cycle
       call build_vcoul(ng, gvec, gg, qvec, omega, nk, nsub_head, vcoul)
+
+      ! full static screened-Coulomb correlation W^c_GG'(q,0) = (eps^{-1}-I) v,
+      ! for the static remainder (no GPP pole mask; head finite via nsub_head).
+      if (lrem) then
+        do jg = 1, ng
+          do ig = 1, ng
+            wc0(ig,jg) = epsinv(ig,jg) * cmplx(vcoul(jg), 0.0d0, 8)
+            if (ig == jg) wc0(ig,jg) = wc0(ig,jg) - cmplx(vcoul(jg), 0.0d0, 8)
+          end do
+        end do
+      end if
 
       do ig = 1, ng
         qgi(1) = qvec(1) + gvec(1,ig)
@@ -888,6 +987,30 @@ contains
             sc_all (in,ik) = sc_all (in,ik) + s0
             scp_all(in,ik) = scp_all(in,ik) + sp
             scm_all(in,ik) = scm_all(in,ik) + sm
+
+            ! static remainder: Sum_GG' W^c_GG'(q,0) [ rho_nk(G_jg-G_ig) - P(ig,jg) ]
+            ! with P(ig,jg) = Sum_n' M_nn'(G_ig) conjg(M_nn'(G_jg)).  Same contraction
+            ! order as wgpp; rho term indexed by idiff(jg,ig) (umklapp cancels).
+            if (lrem) then
+              remc = (0.0d0, 0.0d0)
+              do jg = 1, ng
+                do ig = 1, ng
+                  if (wc0(ig,jg) == (0.0d0,0.0d0)) cycle
+                  kk = idiff(jg,ig)
+                  if (kk == 0) then
+                    rterm = (0.0d0, 0.0d0)
+                  else
+                    rterm = rho_nft(kk,in,ik)
+                  end if
+                  pgg = (0.0d0, 0.0d0)
+                  do inp = 1, no
+                    pgg = pgg + msig(ig,inp) * conjg(msig(jg,inp))
+                  end do
+                  remc = remc + wc0(ig,jg) * (rterm - pgg)
+                end do
+              end do
+              rem_all(in,ik) = rem_all(in,ik) + remc
+            end if
           end do
 
         end do
@@ -899,6 +1022,9 @@ contains
     call comm_summation(sc_all,  scg, size(sc_all),  info%icomm_k);  sc_all  = scg
     call comm_summation(scp_all, scg, size(scp_all), info%icomm_k);  scp_all = scg
     call comm_summation(scm_all, scg, size(scm_all), info%icomm_k);  scm_all = scg
+    if (lrem) then
+      call comm_summation(rem_all, scg, size(rem_all), info%icomm_k);  rem_all = scg
+    end if
     deallocate(scg)
     ncnt(1) = nchan_phys_tot
     ncnt(2) = nchan_unphys_tot
@@ -910,6 +1036,8 @@ contains
     do ik = 1, nk
       do in = nb_lo, nb_hi
         sigc_re(in,ik) = rnk * dble(sc_all(in,ik))
+        ! static remainder (energy-independent -> does not enter Z): + 1/4 rnk Re(rem)
+        if (lrem) sigc_re(in,ik) = sigc_re(in,ik) + 0.25d0 * rnk * dble(rem_all(in,ik))
         dsig = rnk * ( dble(scp_all(in,ik)) - dble(scm_all(in,ik)) ) / (2.0d0 * de_au)
         zfac(in,ik) = 1.0d0 / (1.0d0 - dsig)
       end do
@@ -926,6 +1054,7 @@ contains
     deallocate(epsinv, vcoul, imap, wgpp, wt, phys, idiff)
     deallocate(mblk, msig, rhoft, gvecl, ggl, eband, focc, e0)
     deallocate(qid, qrep, sc_all, scp_all, scm_all)
+    if (lrem) deallocate(wc0, rho_nft, rem_all)
 
   end subroutine calc_sigma_gpp_qcache
 
