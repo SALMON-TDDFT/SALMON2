@@ -472,5 +472,7 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: eta_gw              ! eV, Lorentzian broadening (= hbar/T_mask)
   character(1)   :: yn_gw_absorption    ! 'y': run full-frequency W(w) + Im eps path
   character(8)   :: gw_head_mode        ! 'proxy' | 'velocity' : q->0 head treatment
+  real(8)        :: gw_scissors         ! eV, conduction-band shift for theory='gw_response'
+                                        ! (RPA@QP = scissors-corrected RPA; QP gap - KS gap)
 
 end module salmon_global

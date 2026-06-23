@@ -100,6 +100,8 @@ subroutine main_gw
   integer               :: igw_cw, jgw_cw
   ! --- absorption mode (b1-3): full-frequency eps_M(w) at q->0 proxy ---
   integer               :: ng_ab, ig0_ab, ismall_ab, iq_ab, iw_ab
+  integer               :: n_occ_ab, io_ab, is_ab          ! gw_response scissors
+  real(8),  allocatable :: esp_ab(:,:,:)                   ! KS or QP-scissored energies
   real(8),  allocatable :: gvec_ab(:,:), gg_ab(:), omega_grid_ab(:), vcoul_ab(:)
   real(8)               :: qvec_ab(3), qabs_ab, qabsmin_ab, eta_ab
   complex(8),allocatable:: chi0_ab(:,:,:), epsinv_ab(:,:,:), eps_macro_ab(:)
@@ -162,6 +164,8 @@ subroutine main_gw
   complex(8), allocatable :: sigc_scan_t7(:,:)
   integer                 :: nw_scan_t7, iws_t7, io_spec, fh_spec
   real(8)                 :: resc7, imsc7, ek7, sx7, vx7, aval7
+  ! sp2 optical constants n, k, R, alpha derived from eps_M(w)
+  real(8)                 :: ree_ab, ime_ab, mag_ab, nopt_ab, kopt_ab, refl_ab, alph_ab
   real(8)               :: gap_ks7, gap_g0w0_7, skipfrac7
 
   ! ----------------------------------------------------------------
@@ -499,7 +503,8 @@ subroutine main_gw
   ! StageA head = smallest-|q| proxy for q->0.
   ! ----------------------------------------------------------------
   if (yn_gw_absorption == 'y' .or. &
-      (trim(theory) == 'dft_response' .and. yn_out_gw_eps == 'y')) then
+      (trim(theory) == 'dft_response' .and. yn_out_gw_eps == 'y') .or. &
+      (trim(theory) == 'gw_response'  .and. yn_out_gw_eps == 'y')) then
     allocate(gvec_ab(3, ngmax_t2), gg_ab(ngmax_t2))
     call build_gvectors(system%primitive_b, epsilon_cutoff, ngmax_t2, &
                         ng_ab, gvec_ab, gg_ab)
@@ -518,6 +523,29 @@ subroutine main_gw
     end do
     eta_ab = eta_gw / 27.211386d0
 
+    ! theory='gw_response': RPA@QP = scissors-corrected RPA.  Shift the conduction
+    ! bands (io > n_occ) by gw_scissors so chi0(w) / the velocity head see the QP
+    ! gap (the absorption edge blue-shifts from the KS gap to the QP gap).  KS path
+    ! (dft_response / yn_gw_absorption) leaves esp_ab = the bare KS energies.
+    allocate(esp_ab(system%no, system%nk, system%nspin))
+    esp_ab(:,:,:) = energy%esp(:,:,:)
+    if (trim(theory) == 'gw_response' .and. abs(gw_scissors) > 1.0d-12) then
+      n_occ_ab = 0
+      do io_ab = 1, system%no
+        if (system%rocc(io_ab,1,1) > 1.0d-6) n_occ_ab = io_ab
+      end do
+      do is_ab = 1, system%nspin
+        do iq_ab = 1, system%nk
+          do io_ab = n_occ_ab+1, system%no
+            esp_ab(io_ab,iq_ab,is_ab) = esp_ab(io_ab,iq_ab,is_ab) + gw_scissors/27.211386d0
+          end do
+        end do
+      end do
+      if (comm_is_root(nproc_id_global)) &
+        write(*,'(A,F8.4,A,I4)') "  [gw] gw_response: scissors =", gw_scissors, &
+          " eV on conduction bands io>", n_occ_ab
+    end if
+
     if (gw_head_mode == 'velocity') then
       ! StageB: q=0 analytic head/wing/body with the momentum matrix element.
       if (comm_is_root(nproc_id_global)) &
@@ -526,15 +554,25 @@ subroutine main_gw
       ! k-sum over icomm_k (local_only) and reduce (gpp-8b node-parallel pattern).
       call replicate_orbitals_k(system, info, spsi, spsi_full)
       call calc_absorption_velocity(system, info, mg, lg, stencil, srg, ppg, spsi_full, &
-           energy%esp, gvec_ab, gg_ab, ng_ab, ig0_ab, 1, nomega_gw, &
+           esp_ab, gvec_ab, gg_ab, ng_ab, ig0_ab, 1, nomega_gw, &
            omega_grid_ab, eta_ab, eps_macro_ab, local_only=.true.)
       if (comm_is_root(nproc_id_global)) then
         open(newunit=fh_ab, file=trim(sysname)//'_absorption.data', status='replace')
         write(fh_ab,'(A)') "# velocity-head full-LFE macroscopic dielectric (RPA@KS)"
-        write(fh_ab,'(A)') "# omega[eV]            Re eps_M             Im eps_M"
+        write(fh_ab,'(A)') "# optical constants from eps_M=n^2: (n+ik)=sqrt(eps), &
+          &R=((n-1)^2+k^2)/((n+1)^2+k^2), alpha=2 w k / c [1/bohr]"
+        write(fh_ab,'(A)') "# 1:omega[eV] 2:Re eps_M 3:Im eps_M 4:n 5:k 6:R 7:alpha[1/bohr]"
         do iw_ab = 1, nomega_gw
-          write(fh_ab,'(3ES22.12)') omega_grid_ab(iw_ab)*27.211386d0, &
-            dble(eps_macro_ab(iw_ab)), aimag(eps_macro_ab(iw_ab))
+          ree_ab = dble (eps_macro_ab(iw_ab))
+          ime_ab = aimag(eps_macro_ab(iw_ab))
+          mag_ab = sqrt(ree_ab*ree_ab + ime_ab*ime_ab)
+          nopt_ab = sqrt(max(0.5d0*(mag_ab + ree_ab), 0.0d0))   ! refractive index
+          kopt_ab = sqrt(max(0.5d0*(mag_ab - ree_ab), 0.0d0))   ! extinction coeff
+          refl_ab = ( (nopt_ab-1.0d0)**2 + kopt_ab**2 ) &
+                  / ( (nopt_ab+1.0d0)**2 + kopt_ab**2 )          ! normal-incidence R
+          alph_ab = 2.0d0 * omega_grid_ab(iw_ab) * kopt_ab / 137.035999d0  ! 1/bohr
+          write(fh_ab,'(7ES22.12)') omega_grid_ab(iw_ab)*27.211386d0, &
+            ree_ab, ime_ab, nopt_ab, kopt_ab, refl_ab, alph_ab
         end do
         close(fh_ab)
       end if
@@ -554,7 +592,7 @@ subroutine main_gw
       qvec_ab(1:3) = system%vec_k(1:3,ismall_ab) - system%vec_k(1:3,1)
       allocate(chi0_ab(ng_ab,ng_ab,nomega_gw), epsinv_ab(ng_ab,ng_ab,nomega_gw))
       allocate(vcoul_ab(ng_ab))
-      call calc_chi0_freq(system, info, mg, lg, spsi, energy%esp, gvec_ab, ng_ab, &
+      call calc_chi0_freq(system, info, mg, lg, spsi, esp_ab, gvec_ab, ng_ab, &
                           ismall_ab, qvec_ab, 1, nomega_gw, omega_grid_ab, eta_ab, &
                           chi0_ab, ok=ok_ab)
       call calc_w_freq(system, gvec_ab, gg_ab, ng_ab, qvec_ab, nomega_gw, chi0_ab, &
@@ -570,15 +608,15 @@ subroutine main_gw
       write(*,'(A,2ES14.5)') "  [gw][abs] eps_M(w=0) (Re=eps_inf, Im~0) = ", &
         dble(eps_macro_ab(1)), aimag(eps_macro_ab(1))
     end if
-    deallocate(gvec_ab, gg_ab, omega_grid_ab, eps_macro_ab)
+    deallocate(gvec_ab, gg_ab, omega_grid_ab, eps_macro_ab, esp_ab)
     return
   end if
 
-  ! theory='dft_response' is a KS-level analysis (no self-energy): never enter the
-  ! QP / Sigma path below regardless of which yn_out_* toggles fired above.
-  if (trim(theory) == 'dft_response') then
+  ! theory='dft_response' (KS-level) and 'gw_response' (RPA@QP via the gw_scissors
+  ! input) are analysis modes that never enter the QP / Sigma path below.
+  if (trim(theory) == 'dft_response' .or. trim(theory) == 'gw_response') then
     if (comm_is_root(nproc_id_global)) &
-      write(*,*) "  [gw] dft_response: no GW analysis requested (set yn_out_gw_eps='y')"
+      write(*,*) "  [gw] response mode: no analysis requested (set yn_out_gw_eps='y')"
     return
   end if
 

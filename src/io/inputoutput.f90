@@ -621,7 +621,8 @@ contains
       & omega_max_gw, &
       & eta_gw, &
       & yn_gw_absorption, &
-      & gw_head_mode
+      & gw_head_mode, &
+      & gw_scissors
 
 !! == default for &unit ==
     unit_system='au'
@@ -1064,6 +1065,7 @@ contains
     eta_gw           = 0.068d0      ! hbar/T_mask, T_mask=400 a.u. (prod RT-TDDFT mask)
     yn_gw_absorption = 'n'
     gw_head_mode     = 'proxy'
+    gw_scissors      = 0.0d0
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1713,6 +1715,7 @@ contains
     call comm_bcast(eta_gw          , nproc_group_global)
     call comm_bcast(yn_gw_absorption, nproc_group_global)
     call comm_bcast(gw_head_mode    , nproc_group_global)
+    call comm_bcast(gw_scissors     , nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -2694,6 +2697,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'eta_gw',         eta_gw
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_absorption',trim(yn_gw_absorption)
       write(fh_variables_log, '("#",4X,A,"=",A)')      'gw_head_mode',   trim(gw_head_mode)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gw_scissors',    gw_scissors
 
       close(fh_variables_log)
     end if
