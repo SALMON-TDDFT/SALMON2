@@ -618,9 +618,6 @@ subroutine apply_nstate_active(system, info, srg, nact_out)
   ! Scope (initial version): tddft_pulse only. LR / multiscale are future work (spec section 10).
   if (theory /= 'tddft_pulse') return
 
-  ! Backward-compatibility fast path: nothing requested -> leave everything untouched.
-  if (nstate_active <= 0 .and. occ_threshold_rt <= 0d0) return
-
   ! full GS orbital count (projection basis size, and the # of orbitals stored in the GS restart)
   nstate_full = nstate
   no_old = system%no
@@ -632,6 +629,11 @@ subroutine apply_nstate_active(system, info, srg, nact_out)
   ! restart header as system%no (= nact); read it back and make it authoritative. We deliberately skip
   ! the occupation-based re-derivation on restart: it is both unnecessary (the meta is authoritative)
   ! and fragile on self-checkpoint chains (occupation.bin then lives in the per-rank dir, not gdir).
+  !
+  ! IMPORTANT: this restart-meta check MUST run BEFORE the default backward-compatibility fast-return
+  ! below. A restart of an active (reduced-nact) RT checkpoint with DEFAULT inputs (nstate_active=0,
+  ! occ_threshold_rt=0) would otherwise hit the fast-return with system%no=full while the checkpoint
+  ! stored mo=nact orbitals -> read_bin would copy rocc(1:full) from a nact-only file (mismatch).
   if (yn_restart == 'y') then
     call read_restart_orbital_count(nact_stored)
     if (nact_stored >= 1) then
@@ -654,6 +656,16 @@ subroutine apply_nstate_active(system, info, srg, nact_out)
           '[nstate_active] restart: propagate ', nact, ' of nstate=', nstate_full, &
           ' (from RT restart meta)'
       end if
+      ! ---- guard: nact < nproc_ob leaves some ranks with numo=0 (unsafe MPI-IO subarray) ----
+      if (nact < info%nporbital) then
+        if (comm_is_root(nproc_id_global)) then
+          write(*,*) 'ERROR [nstate_active]: nstate_active (=nact)=', nact, &
+                     ' < nproc_ob=', info%nporbital, &
+                     '; reduce nproc_ob or raise nstate_active.'
+        end if
+        call end_parallel
+        stop
+      end if
       if (nact == no_old) return
       call resize_propagation_system(system, info, srg, nact)
       return
@@ -661,6 +673,12 @@ subroutine apply_nstate_active(system, info, srg, nact_out)
     ! nact_stored < 1: header unreadable; fall through to derive from input below (e.g. first RT
     ! continuation from a GS-only restart that predates this feature). Robust default.
   end if
+
+  ! Backward-compatibility fast path: nothing requested -> leave everything untouched.
+  ! (Runs AFTER the restart-meta check so an active checkpoint restarted with defaults is still
+  !  reduced to its stored nact above. Fresh RT / non-stored-nact restart with defaults returns here,
+  !  byte-identical to the previous behavior.)
+  if (nstate_active <= 0 .and. occ_threshold_rt <= 0d0) return
 
   ! ---- read the GS (full nstate) occupations from the global restart files ----
   ! Directory selection mirrors restart_rt (info.bin / occupation.bin are global, root-written files).
@@ -735,6 +753,17 @@ subroutine apply_nstate_active(system, info, srg, nact_out)
   ! Nothing to change if the propagation set already equals the active count
   ! (e.g. semiconductor without smearing already has system%no = nelec/2).
   if (nact == no_old) return
+
+  ! ---- guard: nact < nproc_ob leaves some ranks with numo=0 (unsafe MPI-IO subarray) ----
+  if (nact < info%nporbital) then
+    if (comm_is_root(nproc_id_global)) then
+      write(*,*) 'ERROR [nstate_active]: nstate_active (=nact)=', nact, &
+                 ' < nproc_ob=', info%nporbital, &
+                 '; reduce nproc_ob or raise nstate_active.'
+    end if
+    call end_parallel
+    stop
+  end if
 
   ! ---- shrink/resize the propagation system to nact orbitals ----
   call resize_propagation_system(system, info, srg, nact)

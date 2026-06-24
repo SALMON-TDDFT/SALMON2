@@ -3132,7 +3132,8 @@ contains
 
     deallocate(energy%esp)
     allocate(energy%esp(rt%system_proj%no,system%nk,system%nspin))
-    
+    energy%esp = 0d0  ! define the nact+1..nstate tail (hardens against future readers; see nstate_active)
+
   ! wavefunctions @ GS
     call generate_restart_directory_name(dir_gs,gdir,wdir)
     iself = yn_restart =='y' .and. yn_self_checkpoint == 'y'

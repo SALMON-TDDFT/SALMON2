@@ -120,6 +120,7 @@ F90_SRCS = \
 ./io/main_dft_k_expand_slice.f90 \
 ./gs/main_dft.f90 \
 ./gs/main_dft_md.f90 \
+./rt/nstate_active_util.f90 \
 ./rt/initialization_rt.f90 \
 ./rt/main_tddft.f90 \
 ./rt/taylor.f90 \
