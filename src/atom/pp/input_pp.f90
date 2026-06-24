@@ -607,10 +607,18 @@ subroutine read_ps_abinitpsp8(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
 ! The psp8 file stores the valence density as 4*pi*rho (same convention as its
 ! NLCC data). Store it as 4*pi*r^2*rho in rho_pp_tbl (the convention used by
 ! calc_density_pp / method_init_density='pp'), i.e. r^2 * (4*pi*rho) = r^2*rho_tmp.
+  ! The radial grid must fit rho_pp_tbl; otherwise the valence density would be
+  ! silently truncated (and left inconsistent with sum_rho_pp below), corrupting
+  ! the method_init_density='pp' initial density. Fail explicitly instead.
+  if (pp%mr(ik)+1 > pp%nrmax) then
+    write(*,*) "Error: psp8 radial grid size",pp%mr(ik)+1,"exceeds pp%nrmax",pp%nrmax, &
+               "in read_ps_abinitpsp8 (element",ik,")"
+    stop "read_ps_abinitpsp8: radial grid larger than pp%nrmax"
+  end if
   sum_rho_pp=0.0d0
   do i=1,pp%mr(ik)+1
     read(4,*) dummy_text, r_tmp, rho_tmp
-    if (i <= pp%nrmax) pp%rho_pp_tbl(i,ik) = pp%rad(i,ik)**2 * rho_tmp
+    pp%rho_pp_tbl(i,ik) = pp%rad(i,ik)**2 * rho_tmp
     sum_rho_pp=sum_rho_pp+rho_tmp*r_tmp**2
   end do
   write(*,*) "sum(rho_pp)=",sum_rho_pp*dr
