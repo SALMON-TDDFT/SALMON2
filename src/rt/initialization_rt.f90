@@ -611,7 +611,7 @@ subroutine apply_nstate_active(system, info, srg, nact_out)
   integer :: mk, mo, itt, nprocs, iu
   logical :: if_real_orbital_dummy
   integer :: ik, is, io
-  integer,dimension(2,3) :: neig
+  integer :: nact_stored, nact_input
 
   nact_out = system%no
 
@@ -624,6 +624,43 @@ subroutine apply_nstate_active(system, info, srg, nact_out)
   ! full GS orbital count (projection basis size, and the # of orbitals stored in the GS restart)
   nstate_full = nstate
   no_old = system%no
+
+  ! ---- restart-meta authority (Task 4) ----
+  ! On an RT restart (yn_restart=='y') the propagated orbital count MUST equal the value fixed at the
+  ! FIRST RT init, so RT->RT (self-)checkpoint chains stay consistent even if the user edits
+  ! nstate_active / occ_threshold_rt in the restart input. The first-init value was written into the RT
+  ! restart header as system%no (= nact); read it back and make it authoritative. We deliberately skip
+  ! the occupation-based re-derivation on restart: it is both unnecessary (the meta is authoritative)
+  ! and fragile on self-checkpoint chains (occupation.bin then lives in the per-rank dir, not gdir).
+  if (yn_restart == 'y') then
+    call read_restart_orbital_count(nact_stored)
+    if (nact_stored >= 1) then
+      ! input-derived value for the warn comparison (only the nstate_active branch needs no file read;
+      ! the occ_threshold_rt branch can't be evaluated here without the occupations, so we skip the
+      ! comparison in that case and just adopt the meta value).
+      if (nstate_active > 0) then
+        nact_input = min(nstate_active, nstate_full)
+        if (nact_stored /= nact_input .and. comm_is_root(nproc_id_global)) then
+          write(*,'(1x,a,i0,a,i0,a)') &
+            '[nstate_active] WARN: restart input nstate_active=', nact_input, &
+            ' differs from RT restart meta nact=', nact_stored, &
+            '; using restart meta to keep the checkpoint chain consistent.'
+        end if
+      end if
+      nact = nact_stored
+      nact_out = nact
+      if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
+        write(*,'(1x,a,i0,a,i0,a)') &
+          '[nstate_active] restart: propagate ', nact, ' of nstate=', nstate_full, &
+          ' (from RT restart meta)'
+      end if
+      if (nact == no_old) return
+      call resize_propagation_system(system, info, srg, nact)
+      return
+    end if
+    ! nact_stored < 1: header unreadable; fall through to derive from input below (e.g. first RT
+    ! continuation from a GS-only restart that predates this feature). Robust default.
+  end if
 
   ! ---- read the GS (full nstate) occupations from the global restart files ----
   ! Directory selection mirrors restart_rt (info.bin / occupation.bin are global, root-written files).
@@ -658,7 +695,7 @@ subroutine apply_nstate_active(system, info, srg, nact_out)
   end if
   call comm_bcast(rocc_full, nproc_group_global)
 
-  ! ---- derive the active orbital count ----
+  ! ---- derive the active orbital count from the (current) input + occupations (fresh RT) ----
   call calc_nstate_active(rocc_full, nstate_full, system%nk, system%nspin, system%wtk, &
                           nstate_active, occ_threshold_rt, nact, dropped)
 
@@ -700,6 +737,31 @@ subroutine apply_nstate_active(system, info, srg, nact_out)
   if (nact == no_old) return
 
   ! ---- shrink/resize the propagation system to nact orbitals ----
+  call resize_propagation_system(system, info, srg, nact)
+
+  ! Task 4 (DONE): nact persistence across RT->RT checkpoint chains is handled via the existing RT
+  !   restart header. write_bin already stores system%no (= nact) in info.bin; on restart the stored
+  !   value is read back early (read_restart_orbital_count) above and made authoritative over the
+  !   input-derived value (warn on mismatch). No separate meta record is needed.
+
+end subroutine apply_nstate_active
+
+!---------------------------------------------------------------------------------------------------
+! resize_propagation_system
+!   Shrink the RT propagation system to nact orbitals: set system%no, reallocate system%rocc, and
+!   re-build the orbital parallel distribution (init_parallel_dft) and the wavefunction sendrecv
+!   buffers (init_sendrecv_grid). Shared by the fresh-RT and the restart paths of apply_nstate_active.
+!   References the host's mg (same as apply_nstate_active did inline).
+!---------------------------------------------------------------------------------------------------
+subroutine resize_propagation_system(system, info, srg, nact)
+  use structures, only: s_dft_system, s_parallel_info, s_sendrecv_grid
+  implicit none
+  type(s_dft_system)    :: system
+  type(s_parallel_info) :: info
+  type(s_sendrecv_grid) :: srg
+  integer, intent(in)   :: nact
+  integer,dimension(2,3) :: neig
+
   system%no = nact
 
   if (allocated(system%rocc)) deallocate(system%rocc)
@@ -718,11 +780,7 @@ subroutine apply_nstate_active(system, info, srg, nact_out)
   call create_sendrecv_neig(neig, info)
   call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_rko, neig)
 
-  ! TODO(Task 4): persist the resolved nstate_active (nact) into the RT restart meta so that
-  !   RT->RT auto-checkpoint chains reuse the same value (meta takes precedence over occ_threshold_rt
-  !   with a warning). Not implemented here.
-
-end subroutine apply_nstate_active
+end subroutine resize_propagation_system
 
 end subroutine initialization_rt
 

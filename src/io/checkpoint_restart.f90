@@ -305,9 +305,52 @@ subroutine restart_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2)
   if(yn_restart =='y') then
     call read_rtdata(wdir,iter,lg,mg,system,info,iself,rt)
   end if
-  
+
   call nvtxEndRange
 end subroutine restart_rt
+
+!===================================================================================================================================
+
+! Read only the stored orbital count "no" (= the propagated # of orbitals, which equals nact when the
+! nstate_active feature is active) from the restart header (info.bin) of the directory pointed to by
+! directory_read_data. Used by the RT init to make the previously-fixed nstate_active authoritative
+! across RT->RT self-checkpoint chains. Cheap: root opens info.bin, reads nk then no, closes, and
+! broadcasts no. Directory resolution (self-checkpoint vs plain) mirrors restart_rt exactly.
+subroutine read_restart_orbital_count(no_stored)
+  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
+  use parallelization, only: nproc_id_global,nproc_group_global
+  use communication, only: comm_is_root, comm_bcast
+  implicit none
+  integer,intent(out) :: no_stored
+
+  character(256) :: gdir,wdir,dir_file_in
+  logical :: iself
+  integer :: iu,mk,mo,ios
+
+  no_stored = -1
+
+  call generate_restart_directory_name(directory_read_data,gdir,wdir)
+  iself = (yn_restart =='y' .and. yn_self_checkpoint == 'y')
+  if (.not. iself) then
+    wdir = gdir
+  end if
+
+  if (comm_is_root(nproc_id_global)) then
+    ! info.bin header record order (see write_bin): nk, no, iter, nproc, if_real_orbital.
+    ! Read only the first two records (nk then no). Guard with iostat so a missing/short header
+    ! leaves no_stored=-1 (caller falls back to deriving from input) instead of aborting the run.
+    dir_file_in = trim(wdir)//"info.bin"
+    iu = 95
+    open(iu,file=dir_file_in,form='unformatted',status='old',iostat=ios)
+    if (ios == 0) then
+      read(iu,iostat=ios) mk
+      if (ios == 0) read(iu,iostat=ios) mo
+      close(iu)
+      if (ios == 0) no_stored = mo
+    end if
+  end if
+  call comm_bcast(no_stored,nproc_group_global)
+end subroutine read_restart_orbital_count
 
 !===================================================================================================================================
 
