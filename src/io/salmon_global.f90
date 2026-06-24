@@ -465,13 +465,15 @@ character(256),allocatable :: atom_name(:)
   real(8) :: kpt(3,max_num_of_segments+1)
   character(1) :: kpt_label(max_num_of_segments+1)
   
-  !! &sbe 
+  !! &sbe
   character(1)   :: yn_vnl_correction
   integer        :: num_sbe
   character(256) :: sysname_sbe(1:200)
   integer        :: nk_sbe(1:200)
   integer        :: nstate_sbe(1:200)
   integer        :: nelec_sbe(1:200)
+  integer        :: nstate_active       ! RT: # orbitals actually propagated (0 = all = nstate)
+  real(8)        :: occ_threshold_rt    ! RT: occ threshold to auto-derive nstate_active (0d0 = off)
   real(8)        :: al_sbe(3,200)
   real(8)        :: al_vec1_sbe(3,200),al_vec2_sbe(3,200),al_vec3_sbe(3,200)
   integer        :: norder_correction

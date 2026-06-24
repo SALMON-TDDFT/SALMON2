@@ -253,6 +253,8 @@ contains
       & al, &
       & al_vec1,al_vec2,al_vec3, &
       & nstate, &
+      & nstate_active, &
+      & occ_threshold_rt, &
       & nelec, &
       & nelec_spin, &
       & temperature, &
@@ -723,6 +725,8 @@ contains
     al_vec2            = 0d0
     al_vec3            = 0d0
     nstate             = 0
+    nstate_active      = 0
+    occ_threshold_rt   = 0d0
     nelec              = 0
     nelec_spin (:)     = 0
     temperature        = -1d0
@@ -1296,6 +1300,8 @@ contains
     al_vec2 = al_vec2 * ulength_to_au
     al_vec3 = al_vec3 * ulength_to_au
     call comm_bcast(nstate             ,nproc_group_global)
+    call comm_bcast(nstate_active      ,nproc_group_global)
+    call comm_bcast(occ_threshold_rt   ,nproc_group_global)
     call comm_bcast(nelec              ,nproc_group_global)
     call comm_bcast(nelec_spin         ,nproc_group_global)
     call comm_bcast(temperature        ,nproc_group_global)
