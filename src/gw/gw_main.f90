@@ -162,6 +162,7 @@ subroutine main_gw
   ! b1-4 real-axis Sigma_c (sigma_type=='gpp_real'): own omega' grid
   real(8),  allocatable :: omega_grid_t7(:)
   real(8)               :: eta_t7
+  real(8)               :: ebar_max_t7, ev_min_t7, om_need_t7   ! extrapolar grid-cover
   integer               :: iw_t7
   ! sp3 spectral function A(k,w) / Im Sigma (yn_out_gw_spectral)
   real(8),    allocatable :: w_scan_t7(:)
@@ -943,6 +944,51 @@ subroutine main_gw
       end do
     end do
     call resolve_band_caps(system%no, nocc_t7, nband_eps, nband_sigma, neps_t7, nsig_t7)
+    ! chi0 extrapolar: Phase 1 implements 'offset' (constant DeltaE) only; the
+    ! 'sumrule' (EET) effective energy is Phase 2 and not wired yet.  The tail is
+    ! also a no-op unless nband_eps actually caps the conduction sum (neps<no).
+    if (yn_gw_extrapolar == 'y') then
+      if (trim(gw_extrapolar_mode) /= 'offset') then
+        if (comm_is_root(nproc_id_global)) &
+          write(*,*) "  [gw] FATAL: gw_extrapolar_mode='", trim(gw_extrapolar_mode), &
+                     "' not implemented (offset only)"
+        stop 'gw: extrapolar mode unsupported'
+      end if
+      if (neps_t7 >= system%no .and. comm_is_root(nproc_id_global)) &
+        write(*,*) "  [gw] WARN: yn_gw_extrapolar='y' but nband_eps caps no bands -> tail is a no-op"
+      ! Real-axis Sigma_c (gpp_real) integrates the spectral function -Im[W^c]/pi
+      ! over [0, omega_max_gw].  The extrapolar lumps the missing empties into one
+      ! oscillator at Ebar-eps_v = esp(neps)+DeltaE - eps_v; if that pole sits above
+      ! the grid its Im weight is lost while its Re screening still suppresses the
+      ! on-grid plasmon -> anti-screening (gap opens).  Auto-extend the grid (keeping
+      ! the spacing) so the lumped pole is represented.  The static 'gpp' path uses a
+      ! sum-rule plasmon (no grid) and needs no adjustment.
+      if (neps_t7 < system%no .and. trim(sigma_type) == 'gpp_real') then
+        ebar_max_t7 = -1.0d30;  ev_min_t7 = 1.0d30
+        do is_t7 = 1, system%nspin
+          do ik_t7 = 1, system%nk
+            ebar_max_t7 = max(ebar_max_t7, energy%esp(neps_t7, ik_t7, is_t7))
+            do io_t7 = 1, nocc_t7
+              if (system%rocc(io_t7,ik_t7,is_t7) > 1.0d-6) &
+                ev_min_t7 = min(ev_min_t7, energy%esp(io_t7,ik_t7,is_t7))
+            end do
+          end do
+        end do
+        ! needed window (eV): deepest lumped pole + a few broadening widths of margin
+        om_need_t7 = (ebar_max_t7 + gw_extrapolar_de - ev_min_t7)*27.211386d0 &
+                     + max(10.0d0, 8.0d0*eta_gw)
+        if (omega_max_gw > 1.0d-6 .and. omega_max_gw < om_need_t7) then
+          ! grid spacing is omega_max_gw/(nomega_gw-1); scale intervals to keep it
+          nomega_gw    = ceiling((nomega_gw-1) * om_need_t7 / omega_max_gw) + 1
+          if (comm_is_root(nproc_id_global)) &
+            write(*,'(A,F7.2,A,F7.2,A,I0,A)') &
+              "   [gw] extrapolar: omega_max_gw ", omega_max_gw, &
+              " eV too small for the lumped pole; auto-extended to ", om_need_t7, &
+              " eV (nomega_gw=", nomega_gw, ")"
+          omega_max_gw = om_need_t7
+        end if
+      end if
+    end if
     ! Band separation is only wired on the qcache path (gpp / gpp_real, no sym).
     if ((nband_eps > 0 .or. nband_sigma > 0) .and. &
         (yn_gw_sym == 'y' .or. yn_gw_qcache /= 'y')) then

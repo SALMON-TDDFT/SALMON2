@@ -623,7 +623,9 @@ contains
                             ispin, nomega, omega_grid, eta, chi0_w, ok, local_only, &
                             run_sanity, nb_eps)
     use structures,    only: s_dft_system, s_parallel_info, s_rgrid, s_orbital
-    use gw_mtxel_sub,  only: calc_mtxel
+    use gw_mtxel_sub,  only: calc_mtxel, build_state_density_ft
+    use gw_coulomb_sub,only: build_gvectors
+    use salmon_global, only: yn_gw_extrapolar, gw_extrapolar_de
     implicit none
     type(s_dft_system),    intent(in)  :: system
     type(s_parallel_info), intent(in)  :: info
@@ -650,6 +652,14 @@ contains
     complex(8), allocatable :: mcv(:,:)
     real(8),    allocatable :: dwp(:), delp(:)        ! per-pair (f_v-f_c) and Delta
     integer,    allocatable :: iGm(:), imap(:)
+    ! extrapolar workspace (dual of calc_epsinv's)
+    real(8),    allocatable :: gvecl(:,:), ggl(:)
+    integer,    allocatable :: idiff(:,:)
+    complex(8), allocatable :: rho_vft(:,:), pmat(:,:)
+    real(8) :: gmax2, ecut_l, ebar, delx, deltae
+    complex(8) :: rterm, pgg
+    integer :: ngl, kk, ja, jb
+    logical :: lexp
     integer :: no, nk, ik, ikq, iv, ic, ig, jg, ipair, npair, nfill, iw, iw0, neps
     integer :: nbk, ikk
     real(8) :: g0vec(3), gtarget(3), omega, inv_omega
@@ -674,11 +684,35 @@ contains
     end if
     omega= abs(system%det_a);  inv_omega = 2.0d0/(dble(nk)*omega)  ! 2/(N_k Omega): spin(in dw)+static-response 2
 
+    ! extrapolar active only with an actual band cap (neps<no; else Pmiss=0 no-op)
+    lexp   = (yn_gw_extrapolar == 'y') .and. (neps < no)
+    deltae = gw_extrapolar_de
+
     allocate(iGm(ng), imap(ng))
     chi0_w(:,:,:) = (0.0d0, 0.0d0)
     call build_gminus(ng, gvec, iGm)
     if (any(iGm(:)==0)) write(*,*) "[gw][chi0w] FATAL: gvec not closed under -G (iq=", iq, ")"
     q_ok = .true.
+
+    if (lexp) then
+      gmax2 = 0.0d0
+      do ig = 1, ng
+        gtarget(1) = sum(gvec(:,ig)*gvec(:,ig))
+        if (gtarget(1) > gmax2) gmax2 = gtarget(1)
+      end do
+      ecut_l = gset_fac_ex * gmax2
+      allocate(gvecl(3, ngmax_l_ex), ggl(ngmax_l_ex))
+      call build_gvectors(system%primitive_b, ecut_l, ngmax_l_ex, ngl, gvecl, ggl)
+      allocate(idiff(ng,ng), rho_vft(ngl, nbk), pmat(ng,ng))
+      do jg = 1, ng
+        do ig = 1, ng
+          gtarget(1) = gvec(1,ig) - gvec(1,jg)
+          gtarget(2) = gvec(2,ig) - gvec(2,jg)
+          gtarget(3) = gvec(3,ig) - gvec(3,jg)
+          idiff(ig,jg) = gindex_e(ngl, gvecl, gtarget)
+        end do
+      end do
+    end if
 
     iw0 = 0
     do iw = 1, nomega
@@ -765,6 +799,56 @@ contains
         deallocate(mcv, dwp, delp)
       end if
 
+      ! --- extrapolar tail: dynamic Delta-chi for the missing empties (c>neps) --
+      ! Per occupied v: Pmiss(ig,jg) = rho_v(G_jg-G_ig) - Sum_{n<=neps} M*M,
+      ! weighted per omega by inv_omega f_v zden(omega; Delta=Ebar-eps_v).  Same
+      ! zden form (-> 1/(eps_v-Ebar) at omega=0) as the chi0_w body.
+      if (lexp) then
+        do iv = 1, nbk
+          if (system%rocc(iv,ik,ispin) <= occ_thr) cycle
+          call build_state_density_ft(system, info, mg, lg, spsi, ispin, iv, ik, &
+                                       gvecl, ngl, rho_vft(:,iv), local_only=ll)
+        end do
+        ebar = esp(neps, ikq, ispin) + deltae
+        do iv = 1, nbk
+          fv = system%rocc(iv,ik,ispin)
+          if (fv <= occ_thr) cycle
+          delx = ebar - esp(iv,ik,ispin)                  ! Delta = Ebar - eps_v > 0
+          do jg = 1, ng
+            jb = imap(jg)
+            do ig = 1, ng
+              ja = imap(ig)
+              if (ja == 0 .or. jb == 0) then
+                pmat(ig,jg) = (0.0d0, 0.0d0)
+              else
+                kk = idiff(jg,ig)
+                if (kk == 0) then
+                  rterm = (0.0d0, 0.0d0)
+                else
+                  rterm = rho_vft(kk,iv)
+                end if
+                pgg = (0.0d0, 0.0d0)
+                do ic = 1, neps
+                  pgg = pgg + conjg(mtxel(ja,ic,iv)) * mtxel(jb,ic,iv)
+                end do
+                pmat(ig,jg) = rterm - pgg
+              end if
+            end do
+          end do
+!$omp parallel do default(shared) private(iw, zw, zden, jg, ig) schedule(dynamic)
+          do iw = 1, nomega
+            zw   = cmplx(omega_grid(iw), 0.0d0, 8)
+            zden = 0.5d0*( 1.0d0/(zw - delx + zi*eta) - 1.0d0/(zw + delx - zi*eta) )
+            do jg = 1, ng
+              do ig = 1, ng
+                chi0_w(ig,jg,iw) = chi0_w(ig,jg,iw) + inv_omega*fv*zden * pmat(ig,jg)
+              end do
+            end do
+          end do
+!$omp end parallel do
+        end do
+      end if
+
       deallocate(mtxel)
     end do  ! ik
 
@@ -775,6 +859,7 @@ contains
     if (dosan .and. iw0 == 0) &
       write(*,*) "  [gw][chi0w] WARN: omega_grid has no 0 point; static gate skipped"
     deallocate(iGm, imap)
+    if (lexp) deallocate(gvecl, ggl, idiff, rho_vft, pmat)
   end subroutine calc_chi0_freq
 
 
