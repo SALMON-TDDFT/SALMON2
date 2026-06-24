@@ -33,7 +33,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use inputoutput
   use math_constants, only: pi, zi
   use structures
-  use parallelization, only: nproc_id_global, nproc_group_global
+  use parallelization, only: nproc_id_global, nproc_group_global, end_parallel
   use communication, only: comm_is_root, comm_summation, comm_bcast, comm_sync_all
   use salmon_xc
   use timer
@@ -62,6 +62,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use filesystem, only: open_filehandle
   use lcfo, only: init_conventional_from_dcdft
   use stress_sub, only: calc_stress, refresh_stress_output_state, s_stress_field_state
+  use nstate_active_util, only: calc_nstate_active
   implicit none
   integer,parameter :: Nd = 4
 
@@ -103,6 +104,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   integer :: Mit_restart_loaded, stress_label_iter, stress_state_iter
   logical :: rion_update
   type(s_stress_field_state) :: field_state
+  integer :: nact
 
   call nvtxStartRange('initialization_rt', __LINE__)
 
@@ -222,7 +224,12 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
     call allocate_scalar(mg,rho_jm)
     call make_rho_jm(lg,mg,info,system,rho_jm)
   end if
-  
+
+  ! --- nstate_active: reduce the RT propagation orbital set to the active (occupied / above-threshold)
+  !     orbitals before the wavefunction arrays, parallel orbital-distribution and srg are finalized.
+  !     The full nstate is retained for projection (init_projection, below, is unaffected).
+  call apply_nstate_active(system, info, srg, nact)
+
   call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
   call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
   call allocate_orbital_complex(system%nspin,mg,info,tpsi)
@@ -571,6 +578,151 @@ subroutine init_code_optimization
   end if
   call nvtxEndRange
 end subroutine init_code_optimization
+
+!---------------------------------------------------------------------------------------------------
+! apply_nstate_active
+!   Reduce the RT propagation orbital set (system%no) to the "active" orbitals (occupied or above
+!   occ_threshold_rt) before the wavefunction arrays / orbital parallel-distribution / srg are
+!   finalized. The full nstate is kept for projection (handled separately by init_projection).
+!
+!   Backward compatibility (HARD requirement): when both nstate_active<=0 and occ_threshold_rt<=0
+!   (defaults) this routine returns immediately, leaving system%no, info and srg exactly as set by
+!   init_dft -> the downstream code path is byte-identical to the previous behavior.
+!
+!   The "active" count is derived from the GS (full nstate) occupations, which are read here from the
+!   global restart files (info.bin / occupation.bin). The GS file is eigenvalue-ordered, so the first
+!   nact orbitals (index 1..nact) are the lowest-energy = occupied / above-threshold set, and the
+!   existing read_bin path (called later in restart_rt) reads exactly those first nact orbitals.
+!---------------------------------------------------------------------------------------------------
+subroutine apply_nstate_active(system, info, srg, nact_out)
+  use structures, only: s_dft_system, s_parallel_info, s_sendrecv_grid
+  use communication, only: comm_is_root, comm_bcast
+  implicit none
+  type(s_dft_system)    :: system
+  type(s_parallel_info) :: info
+  type(s_sendrecv_grid) :: srg
+  integer, intent(out)  :: nact_out
+
+  integer :: nstate_full
+  integer :: nact, no_old, ncopy
+  real(8) :: dropped, ne_active
+  real(8),allocatable :: rocc_full(:,:,:), roccbox(:,:,:)
+  character(256) :: gdir, wdir, dir_file_in
+  integer :: mk, mo, itt, nprocs, iu
+  logical :: if_real_orbital_dummy
+  integer :: ik, is, io
+  integer,dimension(2,3) :: neig
+
+  nact_out = system%no
+
+  ! Scope (initial version): tddft_pulse only. LR / multiscale are future work (spec section 10).
+  if (theory /= 'tddft_pulse') return
+
+  ! Backward-compatibility fast path: nothing requested -> leave everything untouched.
+  if (nstate_active <= 0 .and. occ_threshold_rt <= 0d0) return
+
+  ! full GS orbital count (projection basis size, and the # of orbitals stored in the GS restart)
+  nstate_full = nstate
+  no_old = system%no
+
+  ! ---- read the GS (full nstate) occupations from the global restart files ----
+  ! Directory selection mirrors restart_rt (info.bin / occupation.bin are global, root-written files).
+  call generate_restart_directory_name(directory_read_data, gdir, wdir)
+
+  allocate(rocc_full(nstate_full, system%nk, system%nspin))
+  rocc_full = 0d0
+
+  if (comm_is_root(nproc_id_global)) then
+    ! info.bin : nk, no (= # orbitals stored in the GS restart), iter, nprocs, if_real_orbital
+    dir_file_in = trim(gdir)//"info.bin"
+    iu = 95
+    open(iu, file=dir_file_in, form='unformatted', status='old')
+    read(iu) mk
+    read(iu) mo
+    read(iu) itt
+    read(iu) nprocs
+    read(iu) if_real_orbital_dummy
+    close(iu)
+    ! occupation.bin holds a single record: rocc(1:mo, 1:mk, 1:nspin).
+    ! Read it into a (mo,mk,nspin) buffer to preserve the (band,k,spin) layout, then copy the
+    ! first ncopy=min(mo,nstate_full) bands into rocc_full (matches the GS energy ordering).
+    allocate(roccbox(mo, mk, system%nspin))
+    dir_file_in = trim(gdir)//"occupation.bin"
+    open(iu, file=dir_file_in, form='unformatted', status='old')
+    read(iu) roccbox(1:mo, 1:mk, 1:system%nspin)
+    close(iu)
+    ncopy = min(mo, nstate_full)
+    rocc_full(1:ncopy, 1:min(mk,system%nk), 1:system%nspin) = &
+         roccbox(1:ncopy, 1:min(mk,system%nk), 1:system%nspin)
+    deallocate(roccbox)
+  end if
+  call comm_bcast(rocc_full, nproc_group_global)
+
+  ! ---- derive the active orbital count ----
+  call calc_nstate_active(rocc_full, nstate_full, system%nk, system%nspin, system%wtk, &
+                          nstate_active, occ_threshold_rt, nact, dropped)
+
+  ! ---- safety valve: too few active orbitals (significant occupied weight discarded) -> abort ----
+  if (dropped > 1d-3 * dble(nelec)) then
+    if (comm_is_root(nproc_id_global)) then
+      write(*,*) 'ERROR [nstate_active]: too few active orbitals; discarded occupation =', dropped
+      write(*,*) '       (tolerance =', 1d-3*dble(nelec), ' = 1d-3 * nelec). ', &
+                 'Increase nstate_active or lower occ_threshold_rt.'
+    end if
+    deallocate(rocc_full)
+    call end_parallel
+    stop
+  end if
+
+  ! ---- Ne sanity: sum of active occupation should reproduce nelec ----
+  ne_active = 0d0
+  do is = 1, system%nspin
+    do ik = 1, system%nk
+      do io = 1, nact
+        ne_active = ne_active + rocc_full(io,ik,is) * system%wtk(ik)
+      end do
+    end do
+  end do
+
+  if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
+    write(*,'(1x,a,i0,a,i0)')   '[nstate_active] propagate ', nact, ' of nstate=', nstate_full
+    write(*,'(1x,a,es12.4)')    '[nstate_active] discarded occupation (dropped) =', dropped
+    write(*,'(1x,a,f12.6,a,i0)')'[nstate_active] active electron number Ne =', ne_active, &
+                                ' (nelec=', nelec
+  end if
+
+  deallocate(rocc_full)
+
+  nact_out = nact
+
+  ! Nothing to change if the propagation set already equals the active count
+  ! (e.g. semiconductor without smearing already has system%no = nelec/2).
+  if (nact == no_old) return
+
+  ! ---- shrink/resize the propagation system to nact orbitals ----
+  system%no = nact
+
+  if (allocated(system%rocc)) deallocate(system%rocc)
+  allocate(system%rocc(system%no, system%nk, system%nspin))
+  system%rocc = 0d0
+  ! rocc is reloaded from the restart file later (read_bin), but keep it consistent here too.
+
+  ! ---- re-distribute orbitals over the ob-communicator for the new system%no ----
+  if (allocated(info%io_s_all)) deallocate(info%io_s_all)
+  if (allocated(info%io_e_all)) deallocate(info%io_e_all)
+  if (allocated(info%numo_all)) deallocate(info%numo_all)
+  ! irank_io is self-guarded (deallocated inside init_parallel_dft)
+  call init_parallel_dft(system, info)
+
+  ! ---- re-create the wavefunction sendrecv buffers for the new orbital count ----
+  call create_sendrecv_neig(neig, info)
+  call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_rko, neig)
+
+  ! TODO(Task 4): persist the resolved nstate_active (nact) into the RT restart meta so that
+  !   RT->RT auto-checkpoint chains reuse the same value (meta takes precedence over occ_threshold_rt
+  !   with a warning). Not implemented here.
+
+end subroutine apply_nstate_active
 
 end subroutine initialization_rt
 
