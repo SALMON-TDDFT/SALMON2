@@ -686,7 +686,7 @@ contains
     use salmon_global, only: nblock_wf_distribute
     implicit none
     integer :: nblock_orbital
-    integer :: ik,io,io_blk_s,io_blk_e
+    integer :: ik,io,io_blk_s,io_blk_e,is
 
     nblock_orbital = min(info%io_e-info%io_s+1, nblock_wf_distribute)
     if (nblock_orbital < 1) nblock_orbital = 1
@@ -2316,15 +2316,60 @@ contains
     ! orbital ranks, so blocks never cross a process boundary and the flat file
     ! name k_<ik>_ob_<io_block_head>.dat is unique (no per-block directory).
     use filesystem
+    use communication, only: comm_is_root, comm_bcast
+    use parallelization, only: nproc_id_global, nproc_group_global
     implicit none
     integer :: nblock_orbital
     integer :: ik,io_blk_s,io_blk_e,nbl
     integer :: local_type_d
+    integer :: iu_lay, lay(3), ibad
+    logical :: lay_exists
+    character(256) :: layfile
     type(s_parallel_info) :: dummy_info
 
     icomm = info%icomm_r
     nblock_orbital = min(mo,nblock_wf_distribute)
     if (nblock_orbital < 1) nblock_orbital = 1
+
+    ! Layout-compatibility guard: the 'block' file names k_<ik>_ob_<io_blk_s>.dat
+    ! and the block boundaries depend on the ORBITAL decomposition only - the total
+    ! orbital count (mo), the number of orbital ranks (info%nporbital, which sets
+    ! info%io_s), and nblock_wf_distribute. (The k index in the name is global, so
+    ! k-parallelization may differ on restart.) Record the layout on write and
+    ! reject an incompatible restart on read, which would otherwise read the wrong
+    ! files (or silently wrong data).
+    iu_lay = 90
+    layfile = trim(iodir)//"wf_block_layout.dat"
+    ibad = 0
+    if (rw_mode == write_mode) then
+      if (comm_is_root(nproc_id_global)) then
+        open(iu_lay,file=layfile,form='unformatted',access='stream')
+        write(iu_lay) mo, info%nporbital, nblock_wf_distribute
+        close(iu_lay)
+      end if
+    else
+      if (comm_is_root(nproc_id_global)) then
+        inquire(file=layfile,exist=lay_exists)
+        if (lay_exists) then
+          open(iu_lay,file=layfile,form='unformatted',access='stream')
+          read(iu_lay) lay(1),lay(2),lay(3)
+          close(iu_lay)
+          if ( lay(1)/=mo .or. lay(2)/=info%nporbital .or. lay(3)/=nblock_wf_distribute ) then
+            ibad = 1
+            write(*,*) "error: method_wf_distributor='block' restart layout mismatch."
+            write(*,*) "  checkpoint no,nproc_ob,nblock =",lay(1),lay(2),lay(3)
+            write(*,*) "  current    no,nproc_ob,nblock =",mo,info%nporbital,nblock_wf_distribute
+            write(*,*) "  restart with the same orbital decomposition, or rewrite the &
+                       &checkpoint with method_wf_distributor='single' or 'slice'."
+          end if
+        else
+          write(*,*) "warning: wf_block_layout.dat not found; cannot verify the 'block' &
+                     &restart orbital layout matches the checkpoint."
+        end if
+      end if
+      call comm_bcast(ibad, nproc_group_global)
+      if (ibad /= 0) stop "checkpoint_restart: 'block' restart orbital-layout mismatch"
+    end if
 
     ! buffer for real-orbital -> complex conversion on read (one full block)
     if (rw_mode == read_mode .and. if_real_orbital) then
