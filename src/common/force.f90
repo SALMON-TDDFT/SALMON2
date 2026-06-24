@@ -440,10 +440,15 @@ contains
       else
         nl_irmin=-2 ; nl_irmax=2
       end if
+      ! cuboid only if all six off-diagonal lattice-vector components vanish
+      ! (match calc_nlcc); a lower-triangular skew must also go through rmatrix_a.
       nl_cuboid = .true.
       if( abs(system%primitive_a(1,2)).ge.1d-10 .or. &
           abs(system%primitive_a(1,3)).ge.1d-10 .or. &
-          abs(system%primitive_a(2,3)).ge.1d-10 ) nl_cuboid=.false.
+          abs(system%primitive_a(2,3)).ge.1d-10 .or. &
+          abs(system%primitive_a(2,1)).ge.1d-10 .or. &
+          abs(system%primitive_a(3,1)).ge.1d-10 .or. &
+          abs(system%primitive_a(3,2)).ge.1d-10 ) nl_cuboid=.false.
 !$omp parallel do private(ia,nl_ik,nl_rc,nl_i,nl_i1,nl_i2,nl_i3,nl_j1,nl_j2,nl_j3, &
 !$omp                     nl_u,nl_v,nl_w,nl_s1,nl_s2,nl_s3,nl_rr,nl_ir,nl_intr,     &
 !$omp                     nl_drhodr,nl_vxceff,nl_Rrep)
