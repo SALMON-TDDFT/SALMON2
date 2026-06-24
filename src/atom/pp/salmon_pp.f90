@@ -421,10 +421,16 @@ module salmon_pp
       return ! Do nothing
     end if
 
+    ! cuboid only if all six off-diagonal lattice-vector components vanish;
+    ! checking the upper triangle alone would treat a lower-triangular skew
+    ! (primitive_a(2,1)/(3,1)/(3,2) /= 0) as cuboid and skip rmatrix_a below.
     flag_cuboid = .true.
     if( abs(sys%primitive_a(1,2)).ge.1d-10 .or.  &
         abs(sys%primitive_a(1,3)).ge.1d-10 .or.  &
-        abs(sys%primitive_a(2,3)).ge.1d-10 )  flag_cuboid=.false.
+        abs(sys%primitive_a(2,3)).ge.1d-10 .or.  &
+        abs(sys%primitive_a(2,1)).ge.1d-10 .or.  &
+        abs(sys%primitive_a(3,1)).ge.1d-10 .or.  &
+        abs(sys%primitive_a(3,2)).ge.1d-10 )  flag_cuboid=.false.
 
 
 !$omp parallel do &
