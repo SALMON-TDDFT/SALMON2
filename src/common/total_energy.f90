@@ -588,10 +588,10 @@ CONTAINS
       call timer_begin(LOG_EIGEN_ENERGY_COMM_COLL)
       call comm_summation(wrk1,wrk2,nspin*no*nk,info%icomm_rko)
       do ispin=1,nspin
-        energy%esp(:,:,ispin) = wrk2(ispin,:,:)
+        energy%esp(1:no,:,ispin) = wrk2(ispin,:,:) ! esp may be sized > no (nstate) for projection; write valid slice only
       end do
       call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
-      
+
       call timer_begin(LOG_EIGEN_ENERGY_CALC)
 
     ! kinetic energy (E_kin)
@@ -686,11 +686,11 @@ CONTAINS
       call timer_begin(LOG_EIGEN_ENERGY_COMM_COLL)
       call comm_summation(wrk1,wrk2,nspin*no*nk,info%icomm_rko)
       do ispin=1,nspin
-        energy%esp(:,:,ispin) = wrk2(ispin,:,:)
+        energy%esp(1:no,:,ispin) = wrk2(ispin,:,:) ! esp may be sized > no (nstate) for projection; write valid slice only
       end do
       if ( yn_spinorbit=='y' ) then
-        energy%esp(:,:,1) = energy%esp(:,:,1) + energy%esp(:,:,2)
-        energy%esp(:,:,2) = energy%esp(:,:,1)
+        energy%esp(1:no,:,1) = energy%esp(1:no,:,1) + energy%esp(1:no,:,2)
+        energy%esp(1:no,:,2) = energy%esp(1:no,:,1)
       end if
       call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
 
