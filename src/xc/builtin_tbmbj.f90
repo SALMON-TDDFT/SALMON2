@@ -38,7 +38,7 @@ contains
     real(8),parameter :: rho_thr=1d-10 ! skip MBJ where the density is negligible
     real(8) :: c,tau_s_jrho,D_s_jrho,Q_s,rhs,x_s,b_s,Vx_BR,Vx_MBJ
     real(8) :: trho,rs,rhos,ec,dec_drhoa,dec_drhob
-    integer :: i,ncnt
+    integer :: i
     
     ! call rho_j_tau(GS_RT,rho_s,tau_s,j_s,grho_s,lrho_s)
 
@@ -48,18 +48,19 @@ contains
          c=cval ! use c-value given by input file
        else
          !c=sum(sqrt(grho_s(:,1)**2+grho_s(:,2)**2+grho_s(:,3)**2)/rho_s(:))*Hxyz/aLxyz
-         ! Average |grad rho|/rho only over points with non-negligible density.
-         ! rho_s -> 0 (e.g. vacuum-like regions of a localized initial guess)
-         ! would otherwise make this sum diverge.
+         ! Skip the divergent rho->0 summands (vacuum-like regions of a localized
+         ! initial guess), but keep the full-cell average denominator (nl): the
+         ! c-value is the average of |grad rho|/rho over the WHOLE cell (measure
+         ! Hvol/V = 1/nl), so the near-zero-density points (true contribution ~0)
+         ! must remain in the denominator. Dividing by the surviving-point count
+         ! would inflate c by ~sqrt(nl/ncnt) in cells with appreciable vacuum.
          c=0d0
-         ncnt=0
          do i=1,nl
            if(rho_s(i) > rho_thr) then
              c=c+sqrt(grho_s(i,1)**2+grho_s(i,2)**2+grho_s(i,3)**2)/rho_s(i)
-             ncnt=ncnt+1
            end if
          end do
-         if(ncnt > 0) c=c/dble(ncnt)
+         c=c/dble(nl)
          c=alpha+beta*sqrt(c)
        endif
     ! case('BJ_PW')
@@ -105,20 +106,32 @@ contains
     real(8),intent(OUT) :: x_s
     integer iter
     real(8) :: xmin,xmax,x,fx,dfx
+    logical :: bracketed
 
   ! find xmax (for any finite rhs>0 this terminates within a few doublings; the
   ! iteration cap is a safeguard so a degenerate rhs cannot loop forever)
     xmin=0d0
     x=1d0
     xmax=x
+    bracketed=.false.
     do iter=1,100
       fx=x*exp(-2d0/3d0*x)/rhs-(x-2)
       if(fx < 0) then
         xmax=x
+        bracketed=.true.
         exit
       endif
       x=x*2
     enddo
+    if(.not.bracketed)then
+    ! No sign change found in 100 doublings: the bisection below would run on an
+    ! interval that does not bracket a root and silently return a wrong value.
+    ! Bail out explicitly. (The rho<=rho_thr skip in exc_cor_tbmbj should keep
+    ! this from being reached; this is a safeguard.)
+      write(*,*) "warning: BR_Newton could not bracket the root, rhs=",rhs
+      x_s=xmax
+      return
+    end if
   ! bi-section
     do
       x=0.5d0*(xmin+xmax)
