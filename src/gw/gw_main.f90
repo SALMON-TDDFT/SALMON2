@@ -1177,7 +1177,8 @@ subroutine main_gw
           .and. allocated(sigc_im_w7)) then
         open(newunit=fh_spec, file='Si_imsigma.data', status='replace')
         write(fh_spec,'(A)') '# on-shell Im Sigma_c (inelastic scattering rate) per (n,k)'
-        write(fh_spec,'(A)') '# 1:n 2:k 3:Eks[eV] 4:Eqp[eV] 5:ReSigc[eV] 6:ImSigc[eV] 7:Gamma[1/s] 8:occ'
+        write(fh_spec,'(A)') '# unit_system = '//trim(unit_system)
+        write(fh_spec,'(A)') '# 1:n 2:k 3:Eks 4:Eqp 5:ReSigc 6:ImSigc 7:Gamma[1/time] 8:occ'
         do ik_rt = 1, system%nk
           do in_rt = ib_min, ib_max
             ek7   = energy%esp(in_rt, ik_rt, is_t7)
@@ -1186,10 +1187,10 @@ subroutine main_gw
             resc7 = sigc_w7   (in_rt, ik_rt)
             imsc7 = sigc_im_w7(in_rt, ik_rt)
             write(fh_spec,'(2I5,4ES15.6,ES13.4,F6.1)') in_rt, ik_rt, &
-              ek7*hartree2ev, &
-              (ek7 + zfac_w7(in_rt,ik_rt)*(sx7 + resc7 - vx7))*hartree2ev, &
-              resc7*hartree2ev, imsc7*hartree2ev, &
-              2.0d0*abs(imsc7*hartree2ev)/6.582119d-16, &
+              ek7*uenergy_from_au, &
+              (ek7 + zfac_w7(in_rt,ik_rt)*(sx7 + resc7 - vx7))*uenergy_from_au, &
+              resc7*uenergy_from_au, imsc7*uenergy_from_au, &
+              2.0d0*abs(imsc7)*utime_to_au, &
               system%rocc(in_rt, ik_rt, is_t7)
           end do
         end do
