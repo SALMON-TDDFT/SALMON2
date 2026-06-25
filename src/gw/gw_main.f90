@@ -156,8 +156,10 @@ subroutine main_gw
   integer               :: ng_t7
   real(8),  allocatable :: gvec_t7(:,:), gg_t7(:)
   real(8),  allocatable :: sigc_w7(:,:), zfac_w7(:,:)
+  real(8),  allocatable :: sigc_im_w7(:,:)   ! on-shell Im Sigma_c = scattering rate (research dir b)
   real(8),  allocatable :: vxc_w7(:,:), eqp_w7(:,:), sigx_w7(:,:)
   integer               :: is_t7, ik_t7, ivtop7, icbot7
+  integer               :: in_rt, ik_rt   ! Si_imsigma.data (rate table) loops
   integer               :: nocc_t7, io_t7, neps_t7, nsig_t7   ! eps/sigma band caps
   ! b1-4 real-axis Sigma_c (sigma_type=='gpp_real'): own omega' grid
   real(8),  allocatable :: omega_grid_t7(:)
@@ -911,6 +913,7 @@ subroutine main_gw
 
     allocate(sigc_w7(ib_min:ib_max, system%nk))
     allocate(zfac_w7(ib_min:ib_max, system%nk))
+    allocate(sigc_im_w7(ib_min:ib_max, system%nk));  sigc_im_w7 = 0.0d0
     allocate(vxc_w7 (ib_min:ib_max, system%nk))
     allocate(eqp_w7 (ib_min:ib_max, system%nk))
     allocate(sigx_w7(ib_min:ib_max, system%nk))
@@ -1033,7 +1036,7 @@ subroutine main_gw
                           nomega_gw, omega_grid_t7, eta_t7, sigc_w7, zfac_w7, &
                           nw_scan=nw_scan_t7, w_scan=w_scan_t7, k_scan=1, sigc_scan=sigc_scan_t7, &
                           nb_sigma=nsig_t7, nb_eps=neps_t7, &
-                          do_remainder=(yn_gw_static_remainder=='y'))
+                          do_remainder=(yn_gw_static_remainder=='y'), sigc_im=sigc_im_w7)
         else if (yn_gw_sym == 'y') then
           ! point-group symmetry-reduced (q-IBZ + output-k IBZ); needs the
           ! symmetrised orbitals built above + sym.dat in the run dir.
@@ -1045,7 +1048,7 @@ subroutine main_gw
                           gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
                           nomega_gw, omega_grid_t7, eta_t7, sigc_w7, zfac_w7, &
                           nb_sigma=nsig_t7, nb_eps=neps_t7, &
-                          do_remainder=(yn_gw_static_remainder=='y'))
+                          do_remainder=(yn_gw_static_remainder=='y'), sigc_im=sigc_im_w7)
         else
           call calc_sigma_c_real(system, info, mg, lg, spsi_full, energy%esp, &
                             gvec_t7, gg_t7, ng_t7, is_t7, ib_min, ib_max, &
@@ -1165,6 +1168,34 @@ subroutine main_gw
         close(fh_spec)
         write(*,'(A,I4,A,I4)') "  [gw][spectral] wrote Si_sigma_c_spectrum.data: VBM n=", &
           ivtop7, "  CBM n=", icbot7
+      end if
+      ! research dir (b): on-shell Im Sigma_c per (n,k) = inelastic scattering rate
+      ! Gamma = 2|Im Sigma_c|/hbar.  Energy-binned Gamma(E) (impact ionization +
+      ! plasmon emission) feeds the SBE/Vlasov collision term; k-resolved for anisotropy.
+      ! only the real-axis path fills sigc_im (plain gpp Sigma_c is real -> no rate)
+      if (yn_out_gw_spectral == 'y' .and. trim(sigma_type) == 'gpp_real' &
+          .and. allocated(sigc_im_w7)) then
+        open(newunit=fh_spec, file='Si_imsigma.data', status='replace')
+        write(fh_spec,'(A)') '# on-shell Im Sigma_c (inelastic scattering rate) per (n,k)'
+        write(fh_spec,'(A)') '# 1:n 2:k 3:Eks[eV] 4:Eqp[eV] 5:ReSigc[eV] 6:ImSigc[eV] 7:Gamma[1/s] 8:occ'
+        do ik_rt = 1, system%nk
+          do in_rt = ib_min, ib_max
+            ek7   = energy%esp(in_rt, ik_rt, is_t7)
+            sx7   = sigx      (in_rt, ik_rt, is_t7)
+            vx7   = vxc_arr   (in_rt, ik_rt, is_t7)
+            resc7 = sigc_w7   (in_rt, ik_rt)
+            imsc7 = sigc_im_w7(in_rt, ik_rt)
+            write(fh_spec,'(2I5,4ES15.6,ES13.4,F6.1)') in_rt, ik_rt, &
+              ek7*hartree2ev, &
+              (ek7 + zfac_w7(in_rt,ik_rt)*(sx7 + resc7 - vx7))*hartree2ev, &
+              resc7*hartree2ev, imsc7*hartree2ev, &
+              2.0d0*abs(imsc7*hartree2ev)/6.582119d-16, &
+              system%rocc(in_rt, ik_rt, is_t7)
+          end do
+        end do
+        close(fh_spec)
+        write(*,'(A,I0,A,I0,A)') "  [gw][rate] wrote Si_imsigma.data: bands ", &
+          ib_min, "..", ib_max, " x all k (on-shell Im Sigma_c -> Gamma)"
       end if
       write(*,*)
     end if

@@ -331,7 +331,7 @@ contains
   subroutine calc_sigma_c_real_qcache(system, info, mg, lg, spsi, esp, gvec, gg, ng, &
                                       ispin, nb_lo, nb_hi, nomega, omega_grid, eta_au, &
                                       sigc_re, zfac, nw_scan, w_scan, k_scan, sigc_scan, &
-                                      nb_sigma, nb_eps, do_remainder)
+                                      nb_sigma, nb_eps, do_remainder, sigc_im)
     use structures,     only: s_dft_system, s_parallel_info, s_rgrid, s_orbital
     use gw_mtxel_sub,   only: calc_mtxel
     use gw_epsilon_sub, only: find_kpq, calc_chi0_freq, calc_w_freq
@@ -359,6 +359,9 @@ contains
     ! band caps + static remainder (CH band-truncation correction)
     integer,    optional,  intent(in)    :: nb_sigma, nb_eps
     logical,    optional,  intent(in)    :: do_remainder
+    ! on-shell Im Sigma_c per (n,k): the inelastic scattering rate (research dir b);
+    ! Gamma = 2|Im Sigma_c|/hbar.  Filled only when present.
+    real(8),    optional,  intent(out)   :: sigc_im(nb_lo:nb_hi, system%nk)
 
     complex(8), allocatable :: mblk(:,:,:), msig(:,:), chi0_w(:,:,:), epsinv_w(:,:,:), swt(:,:)
     real(8),    allocatable :: bspec(:,:,:), vcoul(:)
@@ -612,6 +615,8 @@ contains
         sigc_re(in,ik) = rnk * dble(sc_all(in,ik))
         ! static remainder (energy-independent -> does not enter Z): + 1/4 rnk Re(rem)
         if (lrem) sigc_re(in,ik) = sigc_re(in,ik) + 0.25d0 * rnk * dble(rem_all(in,ik))
+        ! on-shell Im Sigma_c = inelastic scattering rate (remainder is real -> Im unaffected)
+        if (present(sigc_im)) sigc_im(in,ik) = rnk * aimag(sc_all(in,ik))
         dsig = rnk * ( dble(scp_all(in,ik)) - dble(scm_all(in,ik)) ) / (2.0d0 * de_au)
         zfac(in,ik) = 1.0d0 / (1.0d0 - dsig)
       end do
