@@ -335,7 +335,7 @@ contains
     use structures,     only: s_dft_system, s_parallel_info, s_rgrid, s_orbital
     use gw_mtxel_sub,   only: calc_mtxel
     use gw_epsilon_sub, only: find_kpq, calc_chi0_freq, calc_w_freq
-    use gw_coulomb_sub, only: build_gvectors
+    use gw_coulomb_sub, only: build_gvectors, gw_loop_progress
     use gw_mtxel_sub,     only: build_state_density_ft
     use communication,  only: comm_summation
     implicit none
@@ -381,6 +381,7 @@ contains
     real(8) :: omega, rnk, pi, domg, de_au, e0nk, dsig
     real(8), parameter :: qtol = 1.0d-6
     logical :: do_scan
+    real(8) :: tpg_s, tpg_l
     complex(8) :: ssc
     complex(8) :: wc, s0, sp, sm
     logical    :: q_ok
@@ -480,6 +481,8 @@ contains
     qd_hi = min((info%id_k + 1) * nper, nqd)
 
     ! (3) per distinct q: chi0(w) -> W(w) -> spectral B ONCE, then its (ik,iq) pairs
+    tpg_s = -1.0d0;  tpg_l = -1.0d0
+    call gw_loop_progress('Sigma_c(w) q-loop ', 0, qd_hi-qd_lo+1, tpg_s, tpg_l)
     do iqd = qd_lo, qd_hi
       qvec(1:3)  =  qrep(1:3,iqd)
       mqvec(1:3) = -qvec(1:3)
@@ -577,6 +580,7 @@ contains
           end do
         end do
       end do
+      call gw_loop_progress('Sigma_c(w) q-loop ', iqd-qd_lo+1, qd_hi-qd_lo+1, tpg_s, tpg_l)
     end do
 
     ! (4) assemble the per-(band,k) sums across the q distribution

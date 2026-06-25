@@ -676,7 +676,7 @@ contains
                                    do_remainder, nb_sigma, nb_eps)
     use structures,     only: s_dft_system, s_parallel_info, s_rgrid, s_orbital, s_scalar
     use gw_mtxel_sub,   only: calc_mtxel, build_state_density_ft
-    use gw_coulomb_sub, only: build_vcoul, build_gvectors
+    use gw_coulomb_sub, only: build_vcoul, build_gvectors, gw_loop_progress
     use gw_epsilon_sub, only: find_kpq, calc_epsinv
     use communication,  only: comm_summation
     implicit none
@@ -710,6 +710,7 @@ contains
     complex(8), allocatable :: rem_all(:,:), rho_nft(:,:,:), wc0(:,:)
     complex(8) :: pgg, rterm, zt
     real(8)    :: rem_re, rem_im
+    real(8)    :: tpg_s, tpg_l
     integer    :: kk
     logical    :: lrem
 
@@ -828,6 +829,8 @@ contains
     scm_all = (0.0d0,0.0d0)
 
     ! ---- (3) per distinct q: eps^{-1}/v/W once, then its (ik,iq) pairs ------
+    tpg_s = -1.0d0;  tpg_l = -1.0d0
+    call gw_loop_progress('Sigma_c(GPP) q-loop ', 0, qd_hi-qd_lo+1, tpg_s, tpg_l)
     do iqd = qd_lo, qd_hi
       qvec(1:3)  =  qrep(1:3,iqd)
       mqvec(1:3) = -qvec(1:3)
@@ -965,6 +968,7 @@ contains
 
         end do
       end do
+      call gw_loop_progress('Sigma_c(GPP) q-loop ', iqd-qd_lo+1, qd_hi-qd_lo+1, tpg_s, tpg_l)
     end do
 
     ! ---- (4) assemble the per-(band,k) sums across the q distribution -------
@@ -1027,7 +1031,7 @@ contains
                                 ng, ispin, nb_lo, nb_hi, sigc_re, zfac, skip_frac)
     use structures,      only: s_dft_system, s_parallel_info, s_rgrid, s_orbital, s_scalar
     use gw_mtxel_sub,    only: calc_mtxel
-    use gw_coulomb_sub,  only: build_vcoul, build_gvectors
+    use gw_coulomb_sub,  only: build_vcoul, build_gvectors, gw_loop_progress
     use gw_epsilon_sub,  only: find_kpq, calc_epsinv
     use communication,   only: comm_summation
     use gw_symmetry_sub, only: gw_sym_init_ops, build_g_perm, build_ibz_map
@@ -1055,6 +1059,7 @@ contains
     integer :: no, nk, ik, iq, ikm, inp, in, ig, jg, kg, a, b
     integer :: ngl, nchan_phys_tot, nchan_unphys_tot, ncnt(2), ncnt_g(2)
     integer :: nqd, iqd, nsym, isym, nqirr, nkirr, irep, irlo, irhi, nper
+    real(8) :: tpg_s, tpg_l
     real(8) :: qvec(3), mqvec(3), g0vec(3), gtarget(3)
     real(8) :: omega, rnk, ecut_l, gmax2, fourpi, pi
     real(8) :: rho0, wp2, qgi(3), qg2i, qgj(3), proj, om2, denom, wt2
@@ -1155,6 +1160,8 @@ contains
     sc_all = (0d0,0d0); scp_all = (0d0,0d0); scm_all = (0d0,0d0)
 
     ! ---- per irreducible q: eps^{-1} ONCE, rotate for the star ---------------
+    tpg_s = -1.0d0;  tpg_l = -1.0d0
+    call gw_loop_progress('Sigma_c(sym) q-IBZ ', 0, irhi-irlo+1, tpg_s, tpg_l)
     do irep = irlo, irhi
       ! eps^{-1} at the representative q
       call calc_epsinv(system, info, mg, lg, spsi, esp, gvec, gg, ng, ibzq(irep), &
@@ -1258,6 +1265,7 @@ contains
           end do
         end do
       end do
+      call gw_loop_progress('Sigma_c(sym) q-IBZ ', irep-irlo+1, irhi-irlo+1, tpg_s, tpg_l)
     end do
 
     ! ---- assemble over the q distribution -----------------------------------

@@ -38,8 +38,41 @@ module gw_coulomb_sub
 
   public :: build_gvectors
   public :: build_vcoul
+  public :: gw_loop_progress
 
 contains
+
+  ! --------------------------------------------------------------------------
+  ! Throttled progress for the (otherwise silent) q-loops: root rank only,
+  ! prints at the first iteration, every ~10% of the loop, and at least every
+  ! 300 s, with a wall-time ETA.  A handful of lines total -- not stdout spam.
+  ! Usage: set t_start=-1; call once with idone=0 before the loop to latch the
+  ! start time, then call with idone=1..itot at the bottom of each iteration.
+  subroutine gw_loop_progress(label, idone, itot, t_start, t_last)
+    use parallelization, only: nproc_id_global
+    use communication,   only: comm_is_root
+    implicit none
+    character(*), intent(in)    :: label
+    integer,      intent(in)    :: idone, itot
+    real(8),      intent(inout) :: t_start, t_last
+    integer(8) :: c, cr
+    real(8)    :: now, eta
+    if (.not. comm_is_root(nproc_id_global)) return
+    call system_clock(c, cr)
+    now = dble(c) / dble(cr)
+    if (t_start < 0.0d0) then        ! latch loop start (idone=0 pre-loop call)
+      t_start = now;  t_last = now;  return
+    end if
+    if ( idone == 1 .or. idone == itot .or. now - t_last >= 300.0d0 .or. &
+         (itot >= 10 .and. mod(idone, max(1, itot/10)) == 0) ) then
+      eta = (now - t_start) / dble(max(idone,1)) * dble(max(itot - idone, 0))
+      write(*,'(A,A,I5,A,I5,A,F7.1,A,F7.1,A)') &
+        '   [gw] ', trim(label), idone, ' /', itot, &
+        '   elapsed ', (now - t_start)/60.0d0, ' min   ETA ~', eta/60.0d0, ' min'
+      flush(6)
+      t_last = now
+    end if
+  end subroutine gw_loop_progress
 
   ! --------------------------------------------------------------------------
   ! build_gvectors
