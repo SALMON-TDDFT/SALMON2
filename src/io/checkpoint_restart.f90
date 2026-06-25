@@ -2425,10 +2425,12 @@ contains
               gsize  = [mg%ie_array(1:3) - mg%is_array(1:3) + 1, system%nspin, nblock_orbital, 1, 1]
               lsize  = [mg%ie(1:3)       - mg%is(1:3)       + 1, system%nspin, nbl,            1, 1]
               lstart = [mg%is(1:3) - mg%is_array(1:3), 0, 0, 0, 0]
-              MPI_CHECK(MPI_Type_create_subarray(7, gsize, lsize, lstart, MPI_ORDER_FORTRAN, &
+              MPI_CHECK(MPI_Type_create_subarray( &
+              & 7, gsize, lsize, lstart, MPI_ORDER_FORTRAN, &
               & source_type, local_type_d, ierr))
               MPI_CHECK(MPI_Type_commit(local_type_d, ierr))
-              MPI_CHECK(MPI_File_set_view(mfile, 0_MPI_OFFSET_KIND, local_type_d, global_type, &
+              MPI_CHECK(MPI_File_set_view( &
+              & mfile, 0_MPI_OFFSET_KIND, local_type_d, global_type, &
               & 'native', MPI_INFO_NULL, ierr))
               MPI_CHECK(MPI_File_read_all(mfile, dummy%rwf, 1, local_type_d, MPI_STATUS_IGNORE, ierr))
               spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,io_blk_s:io_blk_e,ik,1) &
