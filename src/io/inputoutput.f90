@@ -2920,6 +2920,7 @@ contains
     if(yn_dc=='y') then
       if(theory/='dft') stop "DC method (yn_dc=y): theory must be dft"
       if(yn_conventional_from_dcdft=='y') stop "contradiction: yn_dc=y & yn_conventional_from_dcdft=y"
+      if(iflag_atom_coor/=ntype_atom_coor_cartesian) stop "DC method (yn_dc=y): use cartesian coordinate."
       !if(temperature < 0d0) stop "DC method (yn_dc=y): temperature must be specified."
       if(num_fragment(1)*num_fragment(2)*num_fragment(3) == 0) &
       & stop "DC method (yn_dc=y): num_fragment must be specified."
