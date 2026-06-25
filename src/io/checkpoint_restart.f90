@@ -1347,7 +1347,7 @@ contains
     integer :: nblock_orbital
     integer :: ik,io,io_blk_s,io_blk_e,is
 
-    nblock_orbital = min(mo,nblock_wf_distribute)
+    nblock_orbital = min(info%io_e-info%io_s+1,nblock_wf_distribute)
     if (nblock_orbital < 1) nblock_orbital = 1
 
     if (if_real_orbital) then
@@ -2328,7 +2328,7 @@ contains
     type(s_parallel_info) :: dummy_info
 
     icomm = info%icomm_r
-    nblock_orbital = min(mo,nblock_wf_distribute)
+    nblock_orbital = min(info%io_e-info%io_s+1,nblock_wf_distribute)
     if (nblock_orbital < 1) nblock_orbital = 1
 
     ! Layout-compatibility guard: the 'block' file names k_<ik>_ob_<io_blk_s>.dat
