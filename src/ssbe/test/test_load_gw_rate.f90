@@ -35,6 +35,44 @@ program test_load_gw_rate
   call check(gamma_nk(1,1), g_au_expect, tol, "evfs-band1", nfail)
   call check(gamma_nk(2,1), 0.0d0,       tol, "evfs-missing-band2-zero", nfail)
 
+  ! fixture C: unit_system = a.u. (alternate canonical tag)
+  open(33, file='/tmp/rate_au_dot.data', status='replace')
+  write(33,'(a)') '# on-shell Im Sigma_c per (n,k)'
+  write(33,'(a)') '# unit_system = a.u.'
+  write(33,'(a)') '# 1:n 2:k 3:Eks 4:Eqp 5:ReSigc 6:ImSigc 7:Gamma 8:occ'
+  write(33,'(2i5,4es15.6,es13.4,f6.1)') 1,1, 0d0,0d0,0d0,0d0, 0.3000d0, 2.0d0
+  write(33,'(2i5,4es15.6,es13.4,f6.1)') 2,1, 0d0,0d0,0d0,0d0, 0.7000d0, 0.0d0
+  close(33)
+  gamma_nk = -1d0
+  call load_gw_rate('/tmp/rate_au_dot.data', nb, nk, gamma_nk, -1)
+  call check(gamma_nk(1,1), 0.3d0, tol, "a.u.-band1", nfail)
+  call check(gamma_nk(2,1), 0.7d0, tol, "a.u.-band2", nfail)
+
+  ! fixture D: no unit_system line (tagless) -> a.u. fallback, no warning
+  open(34, file='/tmp/rate_tagless.data', status='replace')
+  write(34,'(a)') '# on-shell Im Sigma_c per (n,k)'
+  write(34,'(a)') '# 1:n 2:k 3:Eks 4:Eqp 5:ReSigc 6:ImSigc 7:Gamma 8:occ'
+  write(34,'(2i5,4es15.6,es13.4,f6.1)') 1,1, 0d0,0d0,0d0,0d0, 0.4000d0, 2.0d0
+  write(34,'(2i5,4es15.6,es13.4,f6.1)') 2,1, 0d0,0d0,0d0,0d0, 0.6000d0, 0.0d0
+  close(34)
+  gamma_nk = -1d0
+  call load_gw_rate('/tmp/rate_tagless.data', nb, nk, gamma_nk, -1)
+  call check(gamma_nk(1,1), 0.4d0, tol, "tagless-band1", nfail)
+  call check(gamma_nk(2,1), 0.6d0, tol, "tagless-band2", nfail)
+
+  ! fixture E: unknown tag -> a.u. fallback + warning printed (not checked as error)
+  open(35, file='/tmp/rate_unknown.data', status='replace')
+  write(35,'(a)') '# on-shell Im Sigma_c per (n,k)'
+  write(35,'(a)') '# unit_system = bohr_Ry'
+  write(35,'(a)') '# 1:n 2:k 3:Eks 4:Eqp 5:ReSigc 6:ImSigc 7:Gamma 8:occ'
+  write(35,'(2i5,4es15.6,es13.4,f6.1)') 1,1, 0d0,0d0,0d0,0d0, 0.1000d0, 2.0d0
+  write(35,'(2i5,4es15.6,es13.4,f6.1)') 2,1, 0d0,0d0,0d0,0d0, 0.9000d0, 0.0d0
+  close(35)
+  gamma_nk = -1d0
+  call load_gw_rate('/tmp/rate_unknown.data', nb, nk, gamma_nk, -1)
+  call check(gamma_nk(1,1), 0.1d0, tol, "unknown-tag-fallback-band1", nfail)
+  call check(gamma_nk(2,1), 0.9d0, tol, "unknown-tag-fallback-band2", nfail)
+
   if (nfail == 0) then
     write(*,*) "ALL LOADER TESTS PASSED"
   else

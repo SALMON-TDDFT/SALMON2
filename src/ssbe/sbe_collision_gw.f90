@@ -49,11 +49,25 @@ contains
         if (len_trim(line) == 0) cycle
         if (line(1:1) == '#') then
           if (index(line, 'unit_system') > 0) then
-            if      (index(line, 'A_eV_fs') > 0) then
-              rate_fac = au_time_fs
-            else if (index(line, 'au')      > 0) then
-              rate_fac = 1.0d0
-            end if
+            block
+              integer :: eq_pos
+              character(64) :: tok
+              eq_pos = index(line, '=')
+              if (eq_pos > 0) then
+                tok = adjustl(trim(line(eq_pos+1:)))
+              else
+                tok = ''
+              end if
+              if      (trim(tok) == 'au' .or. trim(tok) == 'a.u.') then
+                rate_fac = 1.0d0
+              else if (trim(tok) == 'A_eV_fs') then
+                rate_fac = au_time_fs
+              else
+                rate_fac = 1.0d0
+                write(*,'(a)') "# load_gw_rate: WARNING unrecognized unit_system tag '"// &
+                  trim(tok)//"', assuming a.u."
+              end if
+            end block
           end if
           cycle
         end if
