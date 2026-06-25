@@ -18,7 +18,7 @@ program test_load_gw_rate
   write(31,'(2i5,4es15.6,es13.4,f6.1)') 2,1, 0d0,0d0,0d0,0d0, 0.5000d0, 0.0d0
   close(31)
   gamma_nk = -1d0
-  call load_gw_rate('/tmp/rate_au.data', nb, nk, gamma_nk, -1)
+  call load_gw_rate('/tmp/rate_au.data', nb, nk, gamma_nk)
   call check(gamma_nk(1,1), 0.2d0, tol, "au-band1", nfail)
   call check(gamma_nk(2,1), 0.5d0, tol, "au-band2", nfail)
 
@@ -30,7 +30,7 @@ program test_load_gw_rate
   write(32,'(2i5,4es15.6,es13.4,f6.1)') 1,1, 0d0,0d0,0d0,0d0, 10.0000d0, 2.0d0
   close(32)
   gamma_nk = -1d0
-  call load_gw_rate('/tmp/rate_ev.data', nb, nk, gamma_nk, -1)
+  call load_gw_rate('/tmp/rate_ev.data', nb, nk, gamma_nk)
   g_au_expect = 10.0d0 * au_time_fs
   call check(gamma_nk(1,1), g_au_expect, tol, "evfs-band1", nfail)
   call check(gamma_nk(2,1), 0.0d0,       tol, "evfs-missing-band2-zero", nfail)
@@ -44,7 +44,7 @@ program test_load_gw_rate
   write(33,'(2i5,4es15.6,es13.4,f6.1)') 2,1, 0d0,0d0,0d0,0d0, 0.7000d0, 0.0d0
   close(33)
   gamma_nk = -1d0
-  call load_gw_rate('/tmp/rate_au_dot.data', nb, nk, gamma_nk, -1)
+  call load_gw_rate('/tmp/rate_au_dot.data', nb, nk, gamma_nk)
   call check(gamma_nk(1,1), 0.3d0, tol, "a.u.-band1", nfail)
   call check(gamma_nk(2,1), 0.7d0, tol, "a.u.-band2", nfail)
 
@@ -56,7 +56,7 @@ program test_load_gw_rate
   write(34,'(2i5,4es15.6,es13.4,f6.1)') 2,1, 0d0,0d0,0d0,0d0, 0.6000d0, 0.0d0
   close(34)
   gamma_nk = -1d0
-  call load_gw_rate('/tmp/rate_tagless.data', nb, nk, gamma_nk, -1)
+  call load_gw_rate('/tmp/rate_tagless.data', nb, nk, gamma_nk)
   call check(gamma_nk(1,1), 0.4d0, tol, "tagless-band1", nfail)
   call check(gamma_nk(2,1), 0.6d0, tol, "tagless-band2", nfail)
 
@@ -69,7 +69,7 @@ program test_load_gw_rate
   write(35,'(2i5,4es15.6,es13.4,f6.1)') 2,1, 0d0,0d0,0d0,0d0, 0.9000d0, 0.0d0
   close(35)
   gamma_nk = -1d0
-  call load_gw_rate('/tmp/rate_unknown.data', nb, nk, gamma_nk, -1)
+  call load_gw_rate('/tmp/rate_unknown.data', nb, nk, gamma_nk)
   call check(gamma_nk(1,1), 0.1d0, tol, "unknown-tag-fallback-band1", nfail)
   call check(gamma_nk(2,1), 0.9d0, tol, "unknown-tag-fallback-band2", nfail)
 
