@@ -565,7 +565,9 @@ subroutine prepare_qnm(sbe, gs, icomm)
 end subroutine prepare_qnm
 
 subroutine dt_evolve_bloch_lg(sbe, gs, E, bj_am, dt, icomm)
-  use salmon_global, only: am_s, num_kgrid, t_2, epdir_re1
+  use salmon_global, only: am_s, num_kgrid, t_2, epdir_re1, &
+    & yn_sbe_gw_collision, sbe_deph_mode
+  use sbe_collision_gw, only: add_collision_diag, add_collision_offdiag
   use common_ssbe, only: grad_k_array_nb2d_dcomplex
   implicit none
   type(s_sbe_bloch_solver), intent(inout) :: sbe
@@ -653,7 +655,11 @@ subroutine dt_evolve_bloch_lg(sbe, gs, E, bj_am, dt, icomm)
       end if
     else
     ! qnm (off-diagonal part)
-      sbe%dqnm_stock(ib, jb, ik, am_s) = - sbe%qnm(ib, jb, ik)/t_2
+      if (yn_sbe_gw_collision == 'y' .and. trim(sbe_deph_mode) == 'gw') then
+        sbe%dqnm_stock(ib, jb, ik, am_s) = 0.d0      ! t_2 replaced by GW (added below)
+      else
+        sbe%dqnm_stock(ib, jb, ik, am_s) = - sbe%qnm(ib, jb, ik)/t_2
+      end if
       if(abs_E >= 1.d-13) then
         sbe%dqnm_stock(ib, jb, ik, am_s) = &
           & sbe%dqnm_stock(ib, jb, ik, am_s) + &
@@ -691,6 +697,15 @@ subroutine dt_evolve_bloch_lg(sbe, gs, E, bj_am, dt, icomm)
   end do
   end do
   end do
+
+  ! GW collision term (Phase 2): diagonal QP-lifetime loss + off-diagonal
+  ! dephasing into the same Adams-Moulton RHS slot.  OFF path untouched.
+  if (yn_sbe_gw_collision == 'y') then
+    call add_collision_diag(sbe%dqnm_stock(:, :, :, am_s), sbe%qnm, &
+      & gs%gamma_gw, gs%f0_ref, sbe%nb, sbe%nk, sbe%ik_min, sbe%ik_max)
+    call add_collision_offdiag(sbe%dqnm_stock(:, :, :, am_s), sbe%qnm, &
+      & gs%gamma_gw, sbe%nb, sbe%nk, sbe%ik_min, sbe%ik_max, sbe_deph_mode)
+  end if
 
   !$omp parallel do default(shared) private(ik, ib, jb) collapse(3)
   do ik = sbe%ik_min, sbe%ik_max
