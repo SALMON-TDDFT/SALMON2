@@ -322,6 +322,8 @@ end subroutine calc_current_bloch
 
 
 subroutine dt_evolve_bloch(sbe, gs, Ac, dt)
+    use salmon_global, only: yn_sbe_gw_collision, sbe_deph_mode
+    use sbe_collision_gw, only: add_collision_vg
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info), intent(inout) :: gs
@@ -357,6 +359,12 @@ subroutine dt_evolve_bloch(sbe, gs, Ac, dt)
         sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho3_k * (- zi * dt) ** 3 * (1d0 / 6d0)
         sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho4_k * (- zi * dt) ** 4 * (1d0 / 24d0)
     end do
+    ! GW collision term (Phase 2), velocity gauge: explicit forward-Euler step
+    ! applied to rho after the Taylor propagation.  OFF path untouched.
+    if (yn_sbe_gw_collision == 'y') then
+        call add_collision_vg(sbe%rho, gs%gamma_gw, gs%f0_ref, dt, &
+          & sbe%nb, sbe%nk, sbe%ik_min, sbe%ik_max, sbe_deph_mode)
+    end if
     return
 
 contains
