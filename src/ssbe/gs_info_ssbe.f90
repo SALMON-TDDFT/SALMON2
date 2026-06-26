@@ -173,21 +173,31 @@ contains
 
     ! Read eigenvalue data from SALMON's output file
     subroutine read_eigen_data()
+        use inputoutput, only: au_energy_ev
         implicit none
         character(256) :: dummy
         integer :: fh, i, ik, iik, iib, ib
         real(8) :: tmp(2)
+        real(8) :: efac
 
         fh = open_filehandle(trim(gs_directory) // trim(sysname) // '_eigen.data', 'old')
         read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
         read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
         read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
+        ! Third header line states the energy unit: "esp[a.u.]" or "esp[eV]".
+        ! Convert eV files to a.u.; default to a.u. for tagless/unknown headers.
+        if (index(dummy, '[eV]') > 0 .or. index(dummy, '[ev]') > 0) then
+            efac = 1.0d0 / au_energy_ev
+            write(*, "('#>',4x,a)") "read_eigen_data: detected eV units -> converting to a.u."
+        else
+            efac = 1.0d0
+        end if
         do ik = 1, nk
             read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
             do ib = 1, nb
                 read(fh, *) iib, tmp(1:2)
                 if (ib .ne. iib) stop "ib mismatch"
-                gs%eigen(ib, ik) = tmp(1)
+                gs%eigen(ib, ik) = tmp(1) * efac
                 ! gs%occup(ib, ik) = ctmp(2)
             end do
         end do
