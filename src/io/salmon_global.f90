@@ -442,6 +442,9 @@ character(256),allocatable :: atom_name(:)
   character(16)  :: gauge_sbe
   real(8)        :: t_2
   integer        :: am_s
+  character(1)   :: yn_sbe_gw_collision
+  character(256) :: file_sbe_gw_rate
+  character(16)  :: sbe_deph_mode
 
   !! &dc
   integer        :: num_fragment(3)

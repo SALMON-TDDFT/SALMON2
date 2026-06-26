@@ -7,6 +7,7 @@ subroutine main_realtime_ssbe(icomm)
     use communication
     use gs_info_ssbe
     use bloch_solver_ssbe
+    use sbe_collision_gw, only: load_gw_rate
     use em_field
     use datafile_ssbe
     use input_checker_sbe
@@ -44,6 +45,16 @@ subroutine main_realtime_ssbe(icomm)
         ! Prepare qnm
         call prepare_qnm(sbe, gs, icomm)
         call adams_moulton_coefs(bj_am)
+    end if
+
+    ! GW collision-term setup (Phase 2): load Gamma(n,k) and the cold reference.
+    if (yn_sbe_gw_collision == 'y') then
+        allocate(gs%gamma_gw(1:nstate_sbe(1), 1:nk))
+        allocate(gs%f0_ref  (1:nstate_sbe(1), 1:nk))
+        gs%gamma_gw(:, :) = 0d0
+        gs%f0_ref(1:nstate_sbe(1), 1:nk) = gs%occup(1:nstate_sbe(1), 1:nk)
+        call load_gw_rate(trim(file_sbe_gw_rate), nstate_sbe(1), nk, gs%gamma_gw)
+        if (irank == 0) write(*,'(a,a)') "# SBE GW collision ON, mode = ", trim(sbe_deph_mode)
     end if
 
     ! Prepare external pulse

@@ -24,6 +24,10 @@ module gs_info_ssbe
         complex(8), allocatable :: d_matrix(:, :, :, :)
         real(8), allocatable :: grad_k_eigen(:, :, :)
 
+        ! GW collision-term inputs (Phase 2)
+        real(8), allocatable :: gamma_gw(:, :)   ! (nb,nk) inelastic linewidth, a.u.
+        real(8), allocatable :: f0_ref(:, :)     ! (nb,nk) cold occupation reference
+
         !k-space grid and geometry information
         !NOTE: prepred for uniformally distributed k-grid....
         !integer :: num_kgrid(1:3)

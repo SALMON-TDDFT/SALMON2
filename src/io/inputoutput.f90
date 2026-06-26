@@ -594,8 +594,11 @@ contains
       & norder_correction, &
       & gauge_sbe, &
       & t_2, &
-      & am_s
-      
+      & am_s, &
+      & yn_sbe_gw_collision, &
+      & file_sbe_gw_rate, &
+      & sbe_deph_mode
+
     namelist/dc/ &
       & num_fragment, &
       & num_rgrid_buffer, &
@@ -1046,6 +1049,9 @@ contains
     gauge_sbe = 'velocity_gauge'
     t_2 = -1.d0
     am_s = 4
+    yn_sbe_gw_collision = 'n'
+    file_sbe_gw_rate    = 'Si_imsigma.data'
+    sbe_deph_mode       = 'gw'
 !! == default for &dc
     num_fragment = 0
     num_rgrid_buffer = 0
@@ -1703,6 +1709,9 @@ contains
     call comm_bcast(t_2              ,nproc_group_global)
     t_2 = t_2 * utime_to_au
     call comm_bcast(am_s             ,nproc_group_global)
+    call comm_bcast(yn_sbe_gw_collision, nproc_group_global)
+    call comm_bcast(file_sbe_gw_rate,    nproc_group_global)
+    call comm_bcast(sbe_deph_mode,       nproc_group_global)
 !! == bcast for dc
     call comm_bcast(num_fragment ,nproc_group_global)
     call comm_bcast(num_rgrid_buffer, nproc_group_global)
