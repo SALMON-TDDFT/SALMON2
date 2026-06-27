@@ -593,6 +593,7 @@ contains
       & al_vec1_sbe,al_vec2_sbe,al_vec3_sbe, &
       & norder_correction, &
       & gauge_sbe, &
+      & sbe_lg_diag, &
       & t_2, &
       & am_s, &
       & yn_sbe_gw_collision, &
@@ -1047,6 +1048,7 @@ contains
     al_vec3_sbe(:,:) = 0.d0
     norder_correction = 0
     gauge_sbe = 'velocity_gauge'
+    sbe_lg_diag = 0
     t_2 = -1.d0
     am_s = 4
     yn_sbe_gw_collision = 'n'
@@ -1706,6 +1708,7 @@ contains
     al_vec3_sbe = al_vec3_sbe * ulength_to_au
     call comm_bcast(norder_correction,nproc_group_global)
     call comm_bcast(gauge_sbe        ,nproc_group_global)
+    call comm_bcast(sbe_lg_diag      ,nproc_group_global)
     call comm_bcast(t_2              ,nproc_group_global)
     t_2 = t_2 * utime_to_au
     call comm_bcast(am_s             ,nproc_group_global)
