@@ -477,7 +477,7 @@ function calc_energy(sbe, gs, Ac, icomm) result(energy)
 end function calc_energy
 
 subroutine prepare_qnm(sbe, gs, icomm)
-  use salmon_global, only: epdir_re1, am_s
+  use salmon_global, only: epdir_re1, am_s, sbe_lg_diag
   implicit none
   type(s_sbe_bloch_solver), intent(inout) :: sbe
   type(s_sbe_gs_info), intent(in) :: gs
@@ -553,6 +553,14 @@ subroutine prepare_qnm(sbe, gs, icomm)
     end do
   end do
 
+  ! LG-SBE diagnostic knockout (2): suppress near-degenerate dipole couplings.
+  ! gs%delta_omega is (nb,nb,1:nk) on every rank; sbe%abs_dnm is the local
+  ! k-slice (nb,nb,ik_min:ik_max), so slice delta_omega to make the WHERE
+  ! conform (identical to the full array when nproc==1).
+  if (sbe_lg_diag == 2 .or. sbe_lg_diag == 3) then
+    where (abs(gs%delta_omega(:, :, sbe%ik_min:sbe%ik_max)) < 1.d-3) sbe%abs_dnm = 0.d0
+  end if
+
   !$omp parallel do default(shared) private(ik, ib, jb) collapse(3)
   do ik = sbe%ik_min, sbe%ik_max
     do ib=1,nb
@@ -574,7 +582,7 @@ end subroutine prepare_qnm
 
 subroutine dt_evolve_bloch_lg(sbe, gs, E, bj_am, dt, icomm)
   use salmon_global, only: am_s, num_kgrid, t_2, epdir_re1, &
-    & yn_sbe_gw_collision, sbe_deph_mode
+    & yn_sbe_gw_collision, sbe_deph_mode, sbe_lg_diag
   use sbe_collision_gw, only: add_collision_diag, add_collision_offdiag
   use common_ssbe, only: grad_k_array_nb2d_dcomplex
   implicit none
@@ -638,6 +646,9 @@ subroutine dt_evolve_bloch_lg(sbe, gs, E, bj_am, dt, icomm)
 
   call comm_summation(qnm_tmp1, qnm_tmp, nb*nb*nk, icomm)
   call grad_k_array_nb2d_dcomplex(nb,nk,gs%b_matrix,qnm_tmp,sbe%grad_qnm)
+
+  ! LG-SBE diagnostic knockout (1): suppress the intraband k-gradient term
+  if (sbe_lg_diag == 1 .or. sbe_lg_diag == 3) sbe%grad_qnm = 0.d0
 
   abs_E = sqrt(E(1)**2+E(2)**2+E(3)**2)
   proj_E = E(1)*epdir_re1(1) + E(2)*epdir_re1(2) + E(3)*epdir_re1(3) 
