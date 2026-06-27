@@ -23,6 +23,9 @@ subroutine main_realtime_ssbe(icomm)
     real(8) :: energy, tr_all, tr_vb
     integer :: nproc, irank, ierr
     integer :: fh_sbe_rt, fh_sbe_rt_energy, fh_sbe_nex
+    integer :: fh_sbe_diag
+    integer :: ib, jb, ik
+    real(8) :: herm_norm(1), herm_norm_l(1), trace_re, trace_re_l
     integer :: nk
     real(8) :: bj_am(8,8)
 
@@ -77,6 +80,13 @@ subroutine main_realtime_ssbe(icomm)
         fh_sbe_nex = get_filehandle()
         open(unit=fh_sbe_nex, file=trim(base_directory)//trim(sysname)//"_sbe_nex.data", action="write")
         call write_sbe_nex_header(fh_sbe_nex)
+        ! SYSNAME_sbe_diag.data (LG-SBE mechanism diagnostics; length_gauge only)
+        if (trim(gauge_sbe) == "length_gauge") then
+            fh_sbe_diag = get_filehandle()
+            open(unit=fh_sbe_diag, file=trim(base_directory)//trim(sysname)//"_sbe_diag.data", action="write")
+            write(fh_sbe_diag, '(a)') "# LG-SBE mechanism diagnostics"
+            write(fh_sbe_diag, '(a)') "# 1:time[a.u.]  2:herm_norm  3:trace_re"
+        end if
         ! Stdout logs:
         write(*, "(a)") "  time-step  time[fs] Current(xyz)[a.u.]                     electrons   Total energy[au]"
         write(*, "(a)") "-----------------------------------------------------------------------------------------"
@@ -108,6 +118,25 @@ subroutine main_realtime_ssbe(icomm)
                 call write_sbe_rt_energy_line(fh_sbe_rt_energy, t, energy, energy)
                 write(*, "(i8,f12.3,3es12.3,2f12.3)") it, t, Jmat(1:3), tr_all, energy
             end if
+            ! LG-SBE mechanism diagnostics: Hermiticity norm & trace of qnm
+            if (trim(gauge_sbe) == "length_gauge") then
+                herm_norm_l(1) = 0.0d0
+                trace_re_l = 0.0d0
+                do ik = sbe%ik_min, sbe%ik_max
+                    do ib = 1, sbe%nb
+                        trace_re_l = trace_re_l + gs%kweight(ik) * real(sbe%qnm(ib, ib, ik))
+                        do jb = 1, sbe%nb
+                            herm_norm_l(1) = max(herm_norm_l(1), &
+                                & abs(sbe%qnm(ib, jb, ik) - conjg(sbe%qnm(jb, ib, ik))))
+                        end do
+                    end do
+                end do
+                call comm_get_max(herm_norm_l, herm_norm, 1, icomm)
+                call comm_summation(trace_re_l, trace_re, icomm)
+                if (irank == 0) then
+                    write(fh_sbe_diag, '(3es24.15e3)') t, herm_norm(1), trace_re
+                end if
+            end if
         end if
         
         if (mod(it, out_projection_step) == 0) then
@@ -123,6 +152,7 @@ subroutine main_realtime_ssbe(icomm)
                 flush(fh_sbe_rt)
                 flush(fh_sbe_rt_energy)
                 flush(fh_sbe_nex)
+                if (trim(gauge_sbe) == "length_gauge") flush(fh_sbe_diag)
             end if
         end if
     end do
@@ -133,6 +163,7 @@ subroutine main_realtime_ssbe(icomm)
         close(fh_sbe_rt)
         close(fh_sbe_rt_energy)
         close(fh_sbe_nex)
+        if (trim(gauge_sbe) == "length_gauge") close(fh_sbe_diag)
     end if
 
     return
