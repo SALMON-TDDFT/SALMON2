@@ -82,6 +82,7 @@ subroutine weyl_calc(fs, fw)
     use phys_constants,    only: cspeed_au
     use math_constants,    only: pi
     use pack_unpack, only: copy_data
+    use salmon_global,    only: epsilon_substrate_m
     implicit none
     type(s_fdtd_system), intent(inout) :: fs
     type(ls_fdtd_weyl), intent(inout) :: fw
@@ -118,6 +119,7 @@ contains
         integer :: i1, i2, i3
         real(8) :: rot2_Ac(3) ! rot rot Ac
         real(8) :: r_inv_h(3)
+        real(8) :: c_right
         real(8) :: Ac_tmp( &
             & 1:3, &
             & is(1)-nd:ie(1)+nd, &
@@ -138,9 +140,15 @@ contains
             & -2d0 * fw%vec_Ac%v(2:3, i1,   i2, i3) &
             &      + fw%vec_Ac%v(2:3, i1-1, i2, i3) &
             & ) * r_inv_h(1) ** 2
+            if (epsilon_substrate_m == 1d0) then
             Ac_tmp(:, i1, i2, i3) = (2 * fw%vec_Ac%v(:,i1, i2, i3) - fw%vec_Ac_old%v(:,i1, i2, i3) &
                 & + fw%vec_j_em%v(:,i1, i2, i3) * 4.0 * pi * (fw%dt**2)  / fw%epsilon%f(i1, i2, i3) &
                 & - rot2_Ac(:) * (cspeed_au * fw%dt)**2)  / fw%epsilon%f(i1, i2, i3)
+            else
+                Ac_tmp(:, i1, i2, i3) = 2 * fw%vec_Ac%v(:,i1, i2, i3) - fw%vec_Ac_old%v(:,i1, i2, i3) &
+                    & + fw%vec_j_em%v(:,i1, i2, i3) * 4.0 * pi * (fw%dt**2)  / fw%epsilon%f(i1, i2, i3) &
+                    & - rot2_Ac(:) * (cspeed_au * fw%dt)**2 / fw%epsilon%f(i1, i2, i3)
+            end if
         end do
         !$omp end parallel do
 
@@ -168,9 +176,16 @@ contains
             Ac_tmp(:, (ie(1)+1):(ie(1)+nd), i2, i3) = &
                 & fw%vec_Ac%v(:, (ie(1)+1):(ie(1)+nd), i2, i3)
         case('abc')
+            if (epsilon_substrate_m == 1d0) then
             Ac_tmp(:, ie(1)+1, i2, i3) = fw%vec_Ac%v(:, ie(1), i2, i3) &
                 & + (cspeed_au*fw%dt-fs%hgs(1))/(cspeed_au*fw%dt+fs%hgs(1)) * Ac_tmp(:, ie(1), i2, i3) &
                 & - (cspeed_au*fw%dt-fs%hgs(1))/(cspeed_au*fw%dt+fs%hgs(1)) * fw%vec_Ac%v(:, ie(1)+1, i2, i3)
+            else
+                c_right = cspeed_au / sqrt(epsilon_substrate_m)
+                Ac_tmp(:, ie(1)+1, i2, i3) = fw%vec_Ac%v(:, ie(1), i2, i3) &
+                    & + (c_right*fw%dt-fs%hgs(1))/(c_right*fw%dt+fs%hgs(1)) * Ac_tmp(:, ie(1), i2, i3) &
+                    & - (c_right*fw%dt-fs%hgs(1))/(c_right*fw%dt+fs%hgs(1)) * fw%vec_Ac%v(:, ie(1)+1, i2, i3)
+            end if
         end select
         call copy_data(Ac_tmp, fw%vec_Ac_new%v)
         return
