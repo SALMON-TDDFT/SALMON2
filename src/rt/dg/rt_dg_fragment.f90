@@ -79,10 +79,132 @@ module rt_dg_fragment
   public :: copy_periodic_global_scalar_to_rank_buffer
   public :: build_total_potential_grid_with_buffered_hartree
   public :: s_dg_fragment_rt, halo_info
+  public :: project_restart_orbitals_to_dg_coefficients
   
   ! Types and data structures are defined in rt_dg_fragment_types
   
 contains
+
+  subroutine project_restart_orbitals_to_dg_coefficients(dg_frag, system, info, mg, spsi)
+    use structures, only: s_dft_system, s_parallel_info, s_rgrid, s_orbital
+    use communication, only: comm_summation, comm_is_root
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    type(s_dft_system),     intent(in)    :: system
+    type(s_parallel_info),  intent(in)    :: info
+    type(s_rgrid),          intent(in)    :: mg
+    type(s_orbital),        intent(in)    :: spsi
+
+    complex(8), allocatable :: rhs_local(:,:), rhs_global(:,:), sol(:,:)
+    integer :: ifrag, i_local, ispin, ibasis, ig, istate
+    integer :: ix, iy, iz, ixg, iyg, izg
+    integer :: nx, ny, nz, nstate_rhs
+    integer :: sx_lb, sx_ub, sy_lb, sy_ub, sz_lb, sz_ub, so_lb, so_ub
+    real(8) :: hvol, norm_local, norm_global
+    logical :: use_complex_restart, use_real_restart, has_overlap
+
+    if (.not. allocated(dg_frag%coef)) return
+    if (.not. allocated(dg_frag%phi_frag)) then
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a)') '[FATAL] DG restart projection requires real-space fragment basis data.'
+      end if
+      stop 'DG restart projection requires phi_frag'
+    end if
+
+    use_complex_restart = allocated(spsi%zwf)
+    use_real_restart = allocated(spsi%rwf)
+    if (.not. use_complex_restart .and. .not. use_real_restart) then
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a)') '[FATAL] DG restart projection requires restart wavefunctions.'
+      end if
+      stop 'DG restart projection requires restart wavefunctions'
+    end if
+
+    nstate_rhs = min(dg_frag%nstate_tot, size(dg_frag%coef, 2))
+    if (nstate_rhs <= 0 .or. dg_frag%n_mat_max <= 0) return
+    allocate(rhs_local(dg_frag%n_mat_max, nstate_rhs))
+    allocate(rhs_global(dg_frag%n_mat_max, nstate_rhs))
+    allocate(sol(dg_frag%n_mat_max, nstate_rhs))
+    rhs_local(:, :) = (0.0d0, 0.0d0)
+    rhs_global(:, :) = (0.0d0, 0.0d0)
+    sol(:, :) = (0.0d0, 0.0d0)
+
+    if (use_complex_restart) then
+      sx_lb = lbound(spsi%zwf, 1); sx_ub = ubound(spsi%zwf, 1)
+      sy_lb = lbound(spsi%zwf, 2); sy_ub = ubound(spsi%zwf, 2)
+      sz_lb = lbound(spsi%zwf, 3); sz_ub = ubound(spsi%zwf, 3)
+      so_lb = lbound(spsi%zwf, 5); so_ub = ubound(spsi%zwf, 5)
+    else
+      sx_lb = lbound(spsi%rwf, 1); sx_ub = ubound(spsi%rwf, 1)
+      sy_lb = lbound(spsi%rwf, 2); sy_ub = ubound(spsi%rwf, 2)
+      sz_lb = lbound(spsi%rwf, 3); sz_ub = ubound(spsi%rwf, 3)
+      so_lb = lbound(spsi%rwf, 5); so_ub = ubound(spsi%rwf, 5)
+    end if
+
+    hvol = system%Hvol
+    do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+      i_local = ifrag - dg_frag%ifrag_start + 1
+      nx = dg_frag%nxyz_domain(1, ifrag)
+      ny = dg_frag%nxyz_domain(2, ifrag)
+      nz = dg_frag%nxyz_domain(3, ifrag)
+      do ispin = 1, dg_frag%nspin
+        do ibasis = 1, min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%phi_frag, 4))
+          ig = dg_frag%index_basis(ibasis, ifrag, ispin)
+          if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
+          do istate = max(1, so_lb), min(nstate_rhs, so_ub)
+            do iz = 1, nz
+              izg = modulo(dg_frag%ixyz_frag(3, ifrag) + iz - 2, dg_frag%lgnum_total(3)) + 1
+              if (izg < sz_lb .or. izg > sz_ub) cycle
+              do iy = 1, ny
+                iyg = modulo(dg_frag%ixyz_frag(2, ifrag) + iy - 2, dg_frag%lgnum_total(2)) + 1
+                if (iyg < sy_lb .or. iyg > sy_ub) cycle
+                do ix = 1, nx
+                  ixg = modulo(dg_frag%ixyz_frag(1, ifrag) + ix - 2, dg_frag%lgnum_total(1)) + 1
+                  if (ixg < sx_lb .or. ixg > sx_ub) cycle
+                  if (use_complex_restart) then
+                    rhs_local(ig, istate) = rhs_local(ig, istate) + &
+                      cmplx(dg_frag%phi_frag(ix, iy, iz, ibasis, i_local), 0.0d0, kind=8) * &
+                      spsi%zwf(ixg, iyg, izg, ispin, istate, 1, 1) * hvol
+                  else
+                    rhs_local(ig, istate) = rhs_local(ig, istate) + &
+                      cmplx(dg_frag%phi_frag(ix, iy, iz, ibasis, i_local) * &
+                      spsi%rwf(ixg, iyg, izg, ispin, istate, 1, 1) * hvol, 0.0d0, kind=8)
+                  end if
+                end do
+              end do
+            end do
+          end do
+        end do
+      end do
+    end do
+
+    call comm_summation(rhs_local, rhs_global, size(rhs_global), dg_frag%icomm)
+    dg_frag%coef(:, :, :) = (0.0d0, 0.0d0)
+    has_overlap = allocated(dg_frag%S_mat_blocks) .or. allocated(dg_frag%S_mat_prop_blocks) .or. &
+                  allocated(dg_frag%S_mat) .or. allocated(dg_frag%S_mat_prop)
+    do ispin = 1, dg_frag%nspin
+      if (has_overlap) then
+        call solve_overlap_operator_batch(dg_frag, ispin, rhs_global, sol, .true.)
+      else
+        sol(:, :) = rhs_global(:, :)
+      end if
+      dg_frag%coef(1:min(size(dg_frag%coef, 1), dg_frag%n_mat_max), 1:nstate_rhs, ispin) = &
+        sol(1:min(size(dg_frag%coef, 1), dg_frag%n_mat_max), 1:nstate_rhs)
+    end do
+    if (allocated(dg_frag%coef_pw)) dg_frag%coef_pw(:, :, :) = (0.0d0, 0.0d0)
+    if (allocated(dg_frag%coef_pw_full_cache)) dg_frag%coef_pw_full_cache(:, :, :) = (0.0d0, 0.0d0)
+    dg_frag%coef_pw_full_cache_nstate = 0
+
+    norm_local = real(sum(conjg(dg_frag%coef) * dg_frag%coef), kind=8)
+    call comm_summation(norm_local, norm_global, dg_frag%icomm)
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,1pe13.5,a,l1)') '[DG-RESTART-PROJECT] coefficient norm2=', norm_global, &
+        ' overlap_solve=', has_overlap
+    end if
+
+    deallocate(rhs_local, rhs_global, sol)
+  end subroutine project_restart_orbitals_to_dg_coefficients
+
 
   subroutine get_dg_spin_occ_info(dg_frag, system, ispin, occ_weight, nocc, state_cap)
     use structures
@@ -529,6 +651,113 @@ contains
     dg_frag%polarization_lg_ref(:) = 0.0d0
     dg_frag%polarization_lg_ref_ready = .false.
     dg_frag%dipole_lg_raw(:) = 0.0d0
+    dg_frag%mixed_z_local_pz_wcenter_raw_z = 0.0d0
+    dg_frag%mixed_z_local_pz_wcenter_ref_raw_z = 0.0d0
+    dg_frag%mixed_z_local_pz_wcenter_diff = 0.0d0
+    dg_frag%mixed_z_local_pz_wcenter_rel_diff = huge(1.0d0)
+    dg_frag%mixed_z_local_pz_wcenter_weight = 0.0d0
+    dg_frag%mixed_z_local_pz_wcenter_ref_weight = 0.0d0
+    dg_frag%mixed_z_local_pz_wcenter_slot_count = 0.0d0
+    dg_frag%mixed_z_local_pz_wcenter_block_count = 0.0d0
+    dg_frag%mixed_z_local_pz_wcenter_owner_unique_raw_z = 0.0d0
+    dg_frag%mixed_z_local_pz_wcenter_owner_unique_ref_raw_z = 0.0d0
+    dg_frag%mixed_z_local_pz_wcenter_owner_unique_weight = 0.0d0
+    dg_frag%mixed_z_local_pz_wcenter_owner_unique_ref_weight = 0.0d0
+    dg_frag%mixed_z_local_pz_wcenter_owner_unique_count = 0.0d0
+    dg_frag%mixed_z_local_pz_wcenter_missing_owner_count = 0.0d0
+    dg_frag%mixed_z_local_pz_wcenter_duplicate_owner_count = 0.0d0
+    dg_frag%mixed_z_local_pz_owner_unique_global_center_raw_z = 0.0d0
+    dg_frag%mixed_z_local_pz_owner_unique_global_zww_diag_raw_z = 0.0d0
+    dg_frag%mixed_z_local_pz_owner_unique_weighted_diff_global_center = 0.0d0
+    dg_frag%mixed_z_local_pz_owner_unique_weighted_diff_global_zww_diag = 0.0d0
+    dg_frag%mixed_z_local_pz_owner_unique_center_source_match_count = 0.0d0
+    dg_frag%mixed_z_local_pz_owner_unique_wrap_match_count = 0.0d0
+    dg_frag%mixed_z_local_pz_owner_unique_cell_shift_count = 0.0d0
+    dg_frag%mixed_z_local_pz_zww_weight_sum_z_prod = 0.0d0
+    dg_frag%mixed_z_local_pz_zww_weight_sum_z_lsp = 0.0d0
+    dg_frag%mixed_z_local_pz_zww_weight_sum_weight_prod = 0.0d0
+    dg_frag%mixed_z_local_pz_zww_weight_sum_weight_lsp = 0.0d0
+    dg_frag%mixed_z_local_pz_zww_weight_sum_contrib_prod = 0.0d0
+    dg_frag%mixed_z_local_pz_zww_weight_sum_contrib_lsp = 0.0d0
+    dg_frag%mixed_z_local_pz_zww_weight_max_abs_diff_z = 0.0d0
+    dg_frag%mixed_z_local_pz_zww_weight_max_abs_diff_weight = 0.0d0
+    dg_frag%mixed_z_local_pz_zww_weight_max_abs_diff_contrib = 0.0d0
+    dg_frag%mixed_z_local_pz_zww_weight_rms_diff_contrib = 0.0d0
+    dg_frag%mixed_z_local_pz_zww_weight_owner_gid_mismatch_count = 0.0d0
+    dg_frag%mixed_z_local_pz_weight_source_sum_occ_prod = 0.0d0
+    dg_frag%mixed_z_local_pz_weight_source_sum_occ_lsp = 0.0d0
+    dg_frag%mixed_z_local_pz_weight_source_sum_rho_prod = 0.0d0
+    dg_frag%mixed_z_local_pz_weight_source_sum_rho_lsp = 0.0d0
+    dg_frag%mixed_z_local_pz_weight_source_max_abs_diff_occ = 0.0d0
+    dg_frag%mixed_z_local_pz_weight_source_max_abs_diff_rho = 0.0d0
+    dg_frag%mixed_z_local_pz_weight_source_max_abs_diff_factor = 0.0d0
+    dg_frag%mixed_z_local_pz_weight_source_max_abs_diff_weight = 0.0d0
+    dg_frag%mixed_z_local_pz_weight_source_weighted_zww_prod = 0.0d0
+    dg_frag%mixed_z_local_pz_weight_source_weighted_zww_lsp = 0.0d0
+    dg_frag%mixed_z_local_pz_rhodiag_prod_observable_abs2 = 0.0d0
+    dg_frag%mixed_z_local_pz_rhodiag_prod_expdiag_abs2 = 0.0d0
+    dg_frag%mixed_z_local_pz_rhodiag_source_abs2 = 0.0d0
+    dg_frag%mixed_z_local_pz_rhodiag_source_smetric = 0.0d0
+    dg_frag%mixed_z_local_pz_rhodiag_ref_after_abs2 = 0.0d0
+    dg_frag%mixed_z_local_pz_rhodiag_ref_after_smetric = 0.0d0
+    dg_frag%mixed_z_local_pz_rhodiag_lsp_after_abs2 = 0.0d0
+    dg_frag%mixed_z_local_pz_rhodiag_lsp_after_smetric = 0.0d0
+    dg_frag%mixed_z_local_pz_rhodiag_repacked_global_abs2 = 0.0d0
+    dg_frag%mixed_z_local_pz_rhodiag_repacked_global_smetric = 0.0d0
+    dg_frag%mixed_z_local_pz_rhodiag_max_abs_diff_abs2 = 0.0d0
+    dg_frag%mixed_z_local_pz_rhodiag_max_abs_diff_smetric = 0.0d0
+    dg_frag%mixed_z_local_pz_rhodiag_repacked_global_available = .false.
+    dg_frag%mixed_z_local_pz_repacked_bridge_prod = 0.0d0
+    dg_frag%mixed_z_local_pz_repacked_bridge_local_cref = 0.0d0
+    dg_frag%mixed_z_local_pz_repacked_bridge_repacked_global = 0.0d0
+    dg_frag%mixed_z_local_pz_repacked_bridge_rho_local_cref = 0.0d0
+    dg_frag%mixed_z_local_pz_repacked_bridge_rho_repacked_global = 0.0d0
+    dg_frag%mixed_z_local_pz_repacked_bridge_weight_repacked_global = 0.0d0
+    dg_frag%mixed_z_local_pz_repacked_bridge_diff_prod_local = 0.0d0
+    dg_frag%mixed_z_local_pz_repacked_bridge_diff_prod_repacked = 0.0d0
+    dg_frag%mixed_z_local_pz_repacked_bridge_available = .false.
+    dg_frag%mixed_z_local_pz_wcenter_ready = .false.
+    dg_frag%mixed_z_local_pz_wcenter_bad = .true.
+    dg_frag%mixed_z_prod_pz_ww_raw = 0.0d0
+    dg_frag%mixed_z_prod_pz_ww_diag_raw = 0.0d0
+    dg_frag%mixed_z_prod_pz_ww_offdiag_raw = 0.0d0
+    dg_frag%mixed_z_prod_pz_ww_same_owner_raw = 0.0d0
+    dg_frag%mixed_z_prod_pz_ww_cross_owner_raw = 0.0d0
+    dg_frag%mixed_z_prod_pz_ww_pair_count_total = 0.0d0
+    dg_frag%mixed_z_prod_pz_ww_pair_count_diag = 0.0d0
+    dg_frag%mixed_z_prod_pz_ww_pair_count_offdiag = 0.0d0
+    dg_frag%mixed_z_prod_pz_ww_pair_count_cross_owner = 0.0d0
+    dg_frag%mixed_z_prod_zww_diag_sum = 0.0d0
+    dg_frag%mixed_z_prod_center_diag_sum = 0.0d0
+    dg_frag%mixed_z_prod_center_diag_local_sum = 0.0d0
+    dg_frag%mixed_z_prod_zww_diag_min = 0.0d0
+    dg_frag%mixed_z_prod_zww_diag_max = 0.0d0
+    dg_frag%mixed_z_prod_zww_diag_mean = 0.0d0
+    dg_frag%mixed_z_prod_center_z_min = 0.0d0
+    dg_frag%mixed_z_prod_center_z_max = 0.0d0
+    dg_frag%mixed_z_prod_center_z_mean = 0.0d0
+    dg_frag%mixed_z_prod_diag_minus_center_min = 0.0d0
+    dg_frag%mixed_z_prod_diag_minus_center_max = 0.0d0
+    dg_frag%mixed_z_prod_diag_minus_center_rms = 0.0d0
+    dg_frag%mixed_z_prod_weighted_zww_diag_sum = 0.0d0
+    dg_frag%mixed_z_prod_weighted_center_sum = 0.0d0
+    dg_frag%mixed_z_prod_weighted_diff_sum = 0.0d0
+    dg_frag%mixed_z_prod_wrap_shift_count = 0.0d0
+    dg_frag%mixed_z_prod_cell_shift_min = 0.0d0
+    dg_frag%mixed_z_prod_cell_shift_max = 0.0d0
+    dg_frag%mixed_z_prod_owner_gid_mismatch_count = 0.0d0
+    dg_frag%mixed_z_prod_center_source_mismatch_count = 0.0d0
+    dg_frag%mixed_z_prod_pz_wp_raw = 0.0d0
+    dg_frag%mixed_z_prod_pz_pp_raw = 0.0d0
+    dg_frag%mixed_z_prod_pz_occ_sum = 0.0d0
+    dg_frag%mixed_z_prod_pz_w_occ_weight = 0.0d0
+    dg_frag%mixed_z_prod_pz_w_dim = 0.0d0
+    dg_frag%mixed_z_prod_pz_decomp_ready = .false.
+    dg_frag%total_energy = 0.0d0
+    dg_frag%energy_kinetic = 0.0d0
+    dg_frag%energy_nonlocal = 0.0d0
+    dg_frag%energy_Ap = 0.0d0
+    dg_frag%energy_A2 = 0.0d0
     dg_frag%elec_num_raw_t0 = 0.0d0
     dg_frag%elec_num_scaled_t0 = 0.0d0
     dg_frag%elec_num_baseline_ready = .false.
@@ -545,6 +774,19 @@ contains
     dg_frag%coef_occ_norm0 = 0.0d0
     dg_frag%coef_occ_norm = 0.0d0
     dg_frag%coef_occ_norm_drift = 0.0d0
+    dg_frag%mixed_z_frag_local_stability_baseline_ready = .false.
+    dg_frag%mixed_z_frag_local_field_block_kind = 'all'
+    dg_frag%mixed_z_frag_local_field_abs_max = 0.0d0
+    dg_frag%mixed_z_frag_local_rho_baseline = 0.0d0
+    dg_frag%mixed_z_frag_local_pz_baseline = 0.0d0
+    dg_frag%mixed_z_frag_local_current_baseline = 0.0d0
+    dg_frag%mixed_z_frag_local_norm_baseline = 0.0d0
+    dg_frag%mixed_z_frag_local_energy_baseline = 0.0d0
+    dg_frag%mixed_z_frag_local_rho_drift_max = 0.0d0
+    dg_frag%mixed_z_frag_local_pz_drift_max = 0.0d0
+    dg_frag%mixed_z_frag_local_current_drift_max = 0.0d0
+    dg_frag%mixed_z_frag_local_norm_drift_max = 0.0d0
+    dg_frag%mixed_z_frag_local_energy_drift_max = 0.0d0
     dg_frag%csc_occ_identity_norm = 0.0d0
     dg_frag%csc_occ_identity_max = 0.0d0
     dg_frag%occvirt_leakage = 0.0d0
@@ -1324,6 +1566,18 @@ contains
     if (allocated(dg_frag%coef_wpw_self)) deallocate(dg_frag%coef_wpw_self)
     if (allocated(dg_frag%coef_wpw_neighbor_reduced)) deallocate(dg_frag%coef_wpw_neighbor_reduced)
     if (allocated(dg_frag%wpw_reproject_prev_coef)) deallocate(dg_frag%wpw_reproject_prev_coef)
+    if (allocated(dg_frag%mixed_z_frag_local_wcoef)) deallocate(dg_frag%mixed_z_frag_local_wcoef)
+    if (allocated(dg_frag%mixed_z_frag_local_pself_coef)) deallocate(dg_frag%mixed_z_frag_local_pself_coef)
+    if (allocated(dg_frag%mixed_z_frag_local_pneighbor_coef)) deallocate(dg_frag%mixed_z_frag_local_pneighbor_coef)
+    if (allocated(dg_frag%mixed_z_frag_local_w_gid)) deallocate(dg_frag%mixed_z_frag_local_w_gid)
+    if (allocated(dg_frag%mixed_z_frag_local_pself_gid)) deallocate(dg_frag%mixed_z_frag_local_pself_gid)
+    if (allocated(dg_frag%mixed_z_frag_local_pneighbor_gid)) deallocate(dg_frag%mixed_z_frag_local_pneighbor_gid)
+    dg_frag%mixed_z_frag_local_w_slots = 0
+    dg_frag%mixed_z_frag_local_pself_slots = 0
+    dg_frag%mixed_z_frag_local_pneighbor_slots = 0
+    dg_frag%mixed_z_frag_local_nstate = 0
+    dg_frag%mixed_z_frag_local_nspin = 0
+    dg_frag%mixed_z_frag_local_storage_ready = .false.
     dg_frag%wpw_reduced_ready = .false.
     dg_frag%wpw_reduced_max_dim = 0
     dg_frag%wpw_reduced_coef_initialized = .false.

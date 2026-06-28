@@ -118,7 +118,7 @@ if (yn_dg_fragment_rt == 'y') then
   ! === DG-Fragment RT time evolution ===
   call time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc_func, &
                                    srg, srg_scalar, fg, poisson, pp, ppg, ppn, rho, rho_s, Vh, Vxc, Vpsl, energy, &
-                                   ofl, md, singlescale)
+                                   ofl, md, singlescale, spsi_in)
 else
   ! === Standard real-space RT time evolution ===
   TE : do itt=Mit+1,nt
@@ -240,7 +240,7 @@ contains
 
 subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc_func, &
                                        srg, srg_scalar, fg, poisson, pp, ppg, ppn, rho, rho_s, &
-                                       Vh, Vxc, Vpsl, energy, ofl, md, singlescale)
+                                       Vh, Vxc, Vpsl, energy, ofl, md, singlescale, spsi_restart)
   use structures
   use rt_dg_fragment_types, only: s_dg_fragment_rt
   use rt_dg_fragment, only: init_dg_fragment_rt_std => init_dg_fragment_rt, &
@@ -252,7 +252,8 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
                             diagnose_dcdft_lcfo_seed_stationarity_std => diagnose_dcdft_lcfo_seed_stationarity, &
                             calibrate_dcdft_lcfo_static_hamiltonian_std => calibrate_dcdft_lcfo_static_hamiltonian, &
                             refresh_buffer_wannier_flux_seed_from_current_hamiltonian_std => &
-                              refresh_buffer_wannier_flux_seed_from_current_hamiltonian
+                              refresh_buffer_wannier_flux_seed_from_current_hamiltonian, &
+                            project_restart_orbitals_to_dg_coefficients
   use rt_dg_fragment_soi, only: init_dg_fragment_rt_soi => init_dg_fragment_rt, &
                                 tddft_dg_fragment_iteration_soi => tddft_dg_fragment_iteration, &
                                 finalize_dg_fragment_rt_soi => finalize_dg_fragment_rt, &
@@ -263,7 +264,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   use sendrecv_grid, only: s_sendrecv_grid
   use salmon_xc, only: s_xc_functional
   use write_sub
-  use salmon_global, only: theory, method_singlescale, yn_ffte, yn_jm, yn_spinorbit, &
+  use salmon_global, only: theory, method_singlescale, yn_ffte, yn_jm, yn_spinorbit, yn_restart, &
                            out_rt_energy_step, nt, dt, iperiodic, yn_dg_length_gauge
   use inputoutput, only: t_unit_time
   use fdtd_coulomb_gauge, only: fdtd_singlescale, fourier_singlescale
@@ -288,6 +289,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   type(s_ofile),          intent(inout) :: ofl
   type(s_md),             intent(inout) :: md
   type(s_singlescale),    intent(inout) :: singlescale
+  type(s_orbital),        intent(in)    :: spsi_restart
 
   logical, parameter :: dense_lcfo_density_diag_default = .false.
   logical, parameter :: trace_dcdft_seed_diagnostics = .false.
@@ -320,6 +322,19 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     call init_dg_fragment_rt_soi(dg_frag, system, rt, info, lg, mg, ppg)
   else
     call init_dg_fragment_rt_std(dg_frag, system, rt, info, lg, mg, ppg)
+  end if
+
+  if (yn_restart == 'y') then
+    if (yn_spinorbit == 'y') then
+      if (comm_is_root(nproc_id_global)) then
+        write(*,'(1x,a)') '[DG-RESTART-PROJECT] SOI restart projection is not implemented; keeping DC seed.'
+      end if
+    else
+      call project_restart_orbitals_to_dg_coefficients(dg_frag, system, info, mg, spsi_restart)
+      if (comm_is_root(nproc_id_global)) then
+        write(*,'(1x,a)') '[DG-RESTART-PROJECT] polished restart projected onto DG fragment basis'
+      end if
+    end if
   end if
 
   if (dg_frag%identity_seed_coefficients) then
@@ -588,6 +603,15 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
         env_value(1:1) == 't' .or. env_value(1:1) == 'T') then
       call write_initial_density_probe(system, info, mg, rho, rho_s, Vh, Vxc, Vpsl, 'dg-initial-density')
     end if
+  end if
+
+  dg_frag%mixed_z_perf_final_itt = nt
+  dg_frag%mixed_z_perf_count_enabled = .false.
+  env_value = ''
+  call get_environment_variable("SALMON_DG_MIXED_Z_PERF_COUNT", env_value, length=env_len, status=env_status)
+  if (env_status == 0 .and. env_len > 0) then
+    if (env_value(1:1) == '1' .or. env_value(1:1) == 'y' .or. env_value(1:1) == 'Y' .or. &
+        env_value(1:1) == 't' .or. env_value(1:1) == 'T') dg_frag%mixed_z_perf_count_enabled = .true.
   end if
 
   ! Time evolution loop

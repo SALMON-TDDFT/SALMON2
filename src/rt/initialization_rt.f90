@@ -66,6 +66,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use lcfo_soi_init, only: init_conventional_from_dcdft_soi
   implicit none
   integer,parameter :: Nd = 4
+  character(256) :: restart_gdir, restart_wdir
 
   real(8)       :: debye2au   ! [D]  -> [a.u.]
 
@@ -287,9 +288,18 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   call timer_begin(LOG_RESTART_SYNC)
   call timer_begin(LOG_RESTART_SELF)
   if (yn_dg_fragment_rt == 'y' .and. yn_dg_fragment_from_dcdft == 'y') then
-    if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
-      write(*,'(1x,a)') "DG-Fragment RT: skip conventional DC-LCFO real-space wavefunction reconstruction"
-      write(*,'(1x,a)') "DG-Fragment RT: density and potentials will be reconstructed from fragment coefficients"
+    if (yn_restart == 'y') then
+      if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
+        write(*,'(1x,a)') 'DG-Fragment RT: read polished conventional restart for DG projection'
+      end if
+      call generate_restart_directory_name(directory_read_data, restart_gdir, restart_wdir)
+      restart_wdir = restart_gdir
+      call read_bin(restart_wdir,lg,mg,system,info,spsi_in,Mit,is_self_checkpoint=.false.)
+    else
+      if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
+        write(*,'(1x,a)') "DG-Fragment RT: skip conventional DC-LCFO real-space wavefunction reconstruction"
+        write(*,'(1x,a)') "DG-Fragment RT: density and potentials will be reconstructed from fragment coefficients"
+      end if
     end if
   else if(yn_conventional_from_dcdft=='n') then
     call restart_rt(lg,mg,system,info,spsi_in,Mit,rt,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2)

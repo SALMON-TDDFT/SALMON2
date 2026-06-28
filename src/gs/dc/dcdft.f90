@@ -173,17 +173,23 @@ contains
       & yn_dc_fragment_optimization
       implicit none
       integer :: i_frag,n,i,j,k,ii,jj,kk
-      integer :: iatom,iatom_frag
-      integer :: kion_frag(natom,dc%n_frag),natom_frag(dc%n_frag)
+      integer :: iatom,iatom_frag,max_natom_frag
+      integer, allocatable :: kion_frag(:,:),natom_frag(:)
       integer :: nxyz_domain(3), nxyz_domain_frag(3)
       real(8) :: dr
       real(8) :: r1(3),r2(3),r(3)
       real(8) :: ldomain(3),lbuffer(3),ldomain_frag(3)
-      real(8) :: rion_frag(3,natom,dc%n_frag)
+      real(8), allocatable :: rion_frag(:,:,:)
     
     ! length of domain
       ldomain(1:3) = al(1:3) / dble(num_fragment(1:3))
       dc%optimized_fragment_geometry = .false.
+      max_natom_frag = 27*natom
+      allocate(kion_frag(max_natom_frag,dc%n_frag),natom_frag(dc%n_frag))
+      allocate(rion_frag(3,max_natom_frag,dc%n_frag))
+      kion_frag = 0
+      natom_frag = 0
+      rion_frag = 0d0
       
       do n=1,3 ! x,y,z
       ! rion --> rion = [0:al] (total system)
@@ -233,6 +239,7 @@ contains
             &   r1(2) <= r(2) .and. r(2) < r2(2)  .and. &
             &   r1(3) <= r(3) .and. r(3) < r2(3)  ) then
               iatom_frag = iatom_frag + 1
+              if(iatom_frag > max_natom_frag) stop "DC method (yn_dc=y): fragment atom count exceeds periodic image buffer"
               rion_frag(1:3,iatom_frag,i_frag) = r(1:3) - dc%rxyz_frag(1:3,i_frag)
               kion_frag(iatom_frag,i_frag) = kion(iatom)
             end if

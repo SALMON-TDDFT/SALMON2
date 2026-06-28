@@ -1486,8 +1486,8 @@ contains
         if(dc%id_tot==0) write(*,*) "h_div: done"
 
         h_ref_div = h_div
-        call eigen_sx(n, n, h_div, nx, esp_tot(1:n,ispin), v_div, nx)
-        if(dc%id_tot==0) write(*,*) "eigen_sx: done"
+        call eigen_s(n, n, h_div, nx, esp_tot(1:n,ispin), v_div, nx)
+        if(dc%id_tot==0) write(*,*) "eigen_s: done"
         nocc_nelec = occupied_index_from_input(ispin)
         if(dc%id_tot==0) call print_flux_gap_diagnostic("full", ispin, nocc_nelec, n)
 

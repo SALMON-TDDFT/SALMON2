@@ -37,7 +37,7 @@ contains
 
   subroutine dc_lcfo(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
     use communication, only: comm_summation
-    use salmon_global, only: yn_dc_lcfo_diag
+    use salmon_global, only: yn_dc_lcfo_diag, yn_eigenexa
     use structures
     implicit none
     type(s_rgrid),        intent(in) :: lg,mg
@@ -83,7 +83,11 @@ contains
       allocate(esp_tot(maxval(n_mat),nspin))
       if(dc%id_frag==0) allocate(coef_wf(dc%nstate_frag,dc%nstate_tot,nspin))
 #ifdef USE_EIGENEXA
-      call diag_eigenexa
+      if(yn_eigenexa=='y') then
+        call diag_eigenexa
+      else
+        call diag_lapack
+      end if
 #else
       call diag_lapack
 #endif
