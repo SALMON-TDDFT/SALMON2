@@ -398,6 +398,7 @@ contains
       & hx_m, &
       & hy_m, &
       & hz_m, &
+      & epsilon_substrate_m, &
       & nksplit, & 
       & nxysplit, & 
       & nxvacl_m, & 
@@ -863,6 +864,7 @@ contains
     hx_m       = 0d0
     hy_m       = 0d0
     hz_m       = 0d0
+    epsilon_substrate_m = 1d0
     nksplit    = 0
     nxysplit   = 0
     nxvacl_m     = 0
@@ -1498,6 +1500,7 @@ contains
     hy_m = hy_m * ulength_to_au
     call comm_bcast(hz_m      ,nproc_group_global)
     hz_m = hz_m * ulength_to_au
+    call comm_bcast(epsilon_substrate_m,nproc_group_global)
     call comm_bcast(nksplit   ,nproc_group_global) ! this parameter will be depricated in a future release
     call comm_bcast(nxysplit  ,nproc_group_global) ! this parameter will be depricated in a future release
     call comm_bcast(nxvacl_m  ,nproc_group_global) ! this parameter will be depricated in a future release
@@ -2415,6 +2418,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'hx_m', hx_m
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'hy_m', hy_m
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'hz_m', hz_m
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epsilon_substrate_m', epsilon_substrate_m
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'nksplit', nksplit
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'nxysplit', nxysplit
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nxvacl_m', nxvacl_m

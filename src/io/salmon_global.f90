@@ -232,6 +232,7 @@ module salmon_global
   real(8)        :: hx_m
   real(8)        :: hy_m
   real(8)        :: hz_m
+  real(8)        :: epsilon_substrate_m
   integer        :: nksplit ! this parameter will be deprecated in a future release
   integer        :: nxysplit ! this parameter will be deprecated in a future release
   integer        :: nxvacl_m ! this parameter will be deprecated in a future release

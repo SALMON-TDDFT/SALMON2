@@ -53,6 +53,9 @@ function check_input_variables_ms() result(flag)
         
     if (hz_m < 1d-6 .and. dl_em(3) < 1d-6) &
         call raise("ERROR! 'hz_m' or 'dl_em(3)' must be specified!")
+
+    if (epsilon_substrate_m <= 0d0) &
+        call raise("ERROR! 'epsilon_substrate_m' must be larger than 0!")
         
     if (dt < 1d-6) &
         call raise("ERROR! 'dt' must be specified!")
@@ -76,6 +79,12 @@ function check_input_variables_ms() result(flag)
         & .and. trim(boundary_em(1,2)) .ne. 'pec' &
         & .and. trim(boundary_em(1,2)) .ne. 'abc') &
             call raise("ERROR! 'boundary_em(1,2)' unknown boundary condition!")
+
+    if (epsilon_substrate_m /= 1d0 .and. trim(boundary_em(1,2)) .ne. 'abc') then
+        if (comm_is_root(nproc_id_global)) then
+            write(*, '(a)') "WARNING! 'epsilon_substrate_m' is set but 'boundary_em(1,2)' is not 'abc'."
+        end if
+    end if
 
     if (nmacro_chunk < 1) &
         call raise("ERROR! 'nmacro_chunk' must not larger than 1!")
@@ -111,5 +120,4 @@ function check_input_variables_ms() result(flag)
 
 end function check_input_variables_ms
 end module input_checker_ms
-
 
