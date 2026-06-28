@@ -271,6 +271,18 @@ subroutine initialization_ms()
 
     ! incident field
     call Weyl_init(fs, fw)
+    ! set back-vacuum cells to substrate permittivity (semi-infinite substrate)
+    ! range: ix = nx_m+1 .. fs%mg%ie(1)  (= nx_m+nxvac_m(2))
+    ! matter macro points are 1..nx_m only, so nx_m+1.. excludes them.
+    ! fw%epsilon is allocate_scalar = no halo -> do NOT touch ie(1)+1.
+    if (epsilon_substrate_m /= 1d0) then
+      block
+        integer :: ix
+        do ix = nx_m+1, fs%mg%ie(1)
+          fw%epsilon%f(ix,:,:) = epsilon_substrate_m
+        end do
+      end block
+    end if
 
     allocate(rNe(1:ms%nmacro))
     allocate(fs%imedia(fs%mg%is_array(1):fs%mg%ie_array(1), &
