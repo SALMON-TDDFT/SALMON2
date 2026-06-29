@@ -1280,6 +1280,10 @@ contains
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
     n_tot = n_frag + n_pw
+    if (size(x, 1) < n_tot .or. size(y, 1) < n_tot) then
+      n_pw = 0
+      n_tot = n_frag
+    end if
     y(:) = (0.0d0, 0.0d0)
 
     if (dg_frag%dc_lcfo_seed_basis_cleaned .and. .not. dg_frag%identity_seed_coefficients .and. n_pw == 0) then
@@ -1335,6 +1339,10 @@ contains
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
     n_tot = n_frag + n_pw
+    if (size(x, 1) < n_tot .or. size(y, 1) < n_tot) then
+      n_pw = 0
+      n_tot = n_frag
+    end if
     y(:, :) = (0.0d0, 0.0d0)
 
     if (dg_frag%dc_lcfo_seed_basis_cleaned .and. .not. dg_frag%identity_seed_coefficients .and. n_pw == 0) then
@@ -1392,6 +1400,10 @@ contains
     n_pw = 0
     if (dg_frag%use_plane_wave_basis .and. allocated(dg_frag%coef_pw)) n_pw = dg_frag%n_plane_waves
     n_tot = n_frag + n_pw
+    if (size(diag) < n_tot) then
+      n_pw = 0
+      n_tot = n_frag
+    end if
     if (size(diag) < n_tot) return
 
     if (use_prop .and. allocated(dg_frag%S_mat_prop_blocks)) then

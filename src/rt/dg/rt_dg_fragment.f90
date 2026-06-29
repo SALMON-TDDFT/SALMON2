@@ -99,7 +99,8 @@ contains
     integer :: ifrag, i_local, ispin, ibasis, ig, istate
     integer :: ix, iy, iz, ixg, iyg, izg
     integer :: nx, ny, nz, nstate_rhs
-    integer :: sx_lb, sx_ub, sy_lb, sy_ub, sz_lb, sz_ub, so_lb, so_ub
+    integer :: sx_lb, sx_ub, sy_lb, sy_ub, sz_lb, sz_ub, ss_lb, ss_ub, so_lb, so_ub
+    integer :: sk_lb, sk_ub, sb_lb, sb_ub
     real(8) :: hvol, norm_local, norm_global
     logical :: use_complex_restart, use_real_restart, has_overlap
 
@@ -133,42 +134,52 @@ contains
       sx_lb = lbound(spsi%zwf, 1); sx_ub = ubound(spsi%zwf, 1)
       sy_lb = lbound(spsi%zwf, 2); sy_ub = ubound(spsi%zwf, 2)
       sz_lb = lbound(spsi%zwf, 3); sz_ub = ubound(spsi%zwf, 3)
+      ss_lb = lbound(spsi%zwf, 4); ss_ub = ubound(spsi%zwf, 4)
       so_lb = lbound(spsi%zwf, 5); so_ub = ubound(spsi%zwf, 5)
+      sk_lb = lbound(spsi%zwf, 6); sk_ub = ubound(spsi%zwf, 6)
+      sb_lb = lbound(spsi%zwf, 7); sb_ub = ubound(spsi%zwf, 7)
     else
       sx_lb = lbound(spsi%rwf, 1); sx_ub = ubound(spsi%rwf, 1)
       sy_lb = lbound(spsi%rwf, 2); sy_ub = ubound(spsi%rwf, 2)
       sz_lb = lbound(spsi%rwf, 3); sz_ub = ubound(spsi%rwf, 3)
+      ss_lb = lbound(spsi%rwf, 4); ss_ub = ubound(spsi%rwf, 4)
       so_lb = lbound(spsi%rwf, 5); so_ub = ubound(spsi%rwf, 5)
+      sk_lb = lbound(spsi%rwf, 6); sk_ub = ubound(spsi%rwf, 6)
+      sb_lb = lbound(spsi%rwf, 7); sb_ub = ubound(spsi%rwf, 7)
     end if
-
     hvol = system%Hvol
     do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
       i_local = ifrag - dg_frag%ifrag_start + 1
       nx = dg_frag%nxyz_domain(1, ifrag)
       ny = dg_frag%nxyz_domain(2, ifrag)
       nz = dg_frag%nxyz_domain(3, ifrag)
+      if (i_local < 1 .or. i_local > size(dg_frag%phi_frag, 5)) cycle
       do ispin = 1, dg_frag%nspin
+        if (ispin < ss_lb .or. ispin > ss_ub) cycle
         do ibasis = 1, min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%phi_frag, 4))
           ig = dg_frag%index_basis(ibasis, ifrag, ispin)
           if (ig < 1 .or. ig > dg_frag%n_mat_max) cycle
           do istate = max(1, so_lb), min(nstate_rhs, so_ub)
-            do iz = 1, nz
-              izg = modulo(dg_frag%ixyz_frag(3, ifrag) + iz - 2, dg_frag%lgnum_total(3)) + 1
+            do iz = dg_frag%ixyz_frag(3, ifrag), dg_frag%ixyz_frag(3, ifrag) + nz - 1
+              if (iz < lbound(dg_frag%phi_frag, 3) .or. iz > ubound(dg_frag%phi_frag, 3)) cycle
+              izg = modulo(iz - 1, dg_frag%lgnum_total(3)) + 1
               if (izg < sz_lb .or. izg > sz_ub) cycle
-              do iy = 1, ny
-                iyg = modulo(dg_frag%ixyz_frag(2, ifrag) + iy - 2, dg_frag%lgnum_total(2)) + 1
+              do iy = dg_frag%ixyz_frag(2, ifrag), dg_frag%ixyz_frag(2, ifrag) + ny - 1
+                if (iy < lbound(dg_frag%phi_frag, 2) .or. iy > ubound(dg_frag%phi_frag, 2)) cycle
+                iyg = modulo(iy - 1, dg_frag%lgnum_total(2)) + 1
                 if (iyg < sy_lb .or. iyg > sy_ub) cycle
-                do ix = 1, nx
-                  ixg = modulo(dg_frag%ixyz_frag(1, ifrag) + ix - 2, dg_frag%lgnum_total(1)) + 1
+                do ix = dg_frag%ixyz_frag(1, ifrag), dg_frag%ixyz_frag(1, ifrag) + nx - 1
+                  if (ix < lbound(dg_frag%phi_frag, 1) .or. ix > ubound(dg_frag%phi_frag, 1)) cycle
+                  ixg = modulo(ix - 1, dg_frag%lgnum_total(1)) + 1
                   if (ixg < sx_lb .or. ixg > sx_ub) cycle
                   if (use_complex_restart) then
                     rhs_local(ig, istate) = rhs_local(ig, istate) + &
                       cmplx(dg_frag%phi_frag(ix, iy, iz, ibasis, i_local), 0.0d0, kind=8) * &
-                      spsi%zwf(ixg, iyg, izg, ispin, istate, 1, 1) * hvol
+                      spsi%zwf(ixg, iyg, izg, ispin, istate, sk_lb, sb_lb) * hvol
                   else
                     rhs_local(ig, istate) = rhs_local(ig, istate) + &
                       cmplx(dg_frag%phi_frag(ix, iy, iz, ibasis, i_local) * &
-                      spsi%rwf(ixg, iyg, izg, ispin, istate, 1, 1) * hvol, 0.0d0, kind=8)
+                      spsi%rwf(ixg, iyg, izg, ispin, istate, sk_lb, sb_lb) * hvol, 0.0d0, kind=8)
                   end if
                 end do
               end do

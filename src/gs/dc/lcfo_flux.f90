@@ -3115,16 +3115,16 @@ contains
       use salmon_global, only: base_directory, lambda_cut
       implicit none
       integer :: iunit, nbasis, num_bands_file, num_wann_file, nfrag_file
-      integer :: iw, jw, iband, axis, nkeep, io, jo, i_full, j_full, nsel
+      integer :: iw, jw, iband, axis, nkeep, io, jo, i_full, j_full, nsel, imode
       integer :: nxyz_domain(3), nxyz_buffer_seed(3), nxyz_box(3)
       integer :: magic_file, version_file, io_stat
-      integer, allocatable :: owner_frag(:), proj_atom(:), proj_hybrid(:), keep_index(:), selected_wann(:)
+      integer, allocatable :: owner_frag(:), proj_atom(:), proj_hybrid(:), keep_index(:)
       real(8), allocatable :: center_bohr(:,:), spread_aa2(:), lambda_w(:), spread_est(:), tail_est(:)
       real(8), allocatable :: wcoef(:,:), r_wann(:,:,:), wcenter(:,:), h_wann(:,:), v_wann(:,:,:), aa_wann(:,:,:)
-      real(8), allocatable :: p_frag(:,:), p_eval(:), p_evec(:,:), tmp_r(:,:), tmat(:,:)
+      real(8), allocatable :: p_frag(:,:), p_eval(:), p_evec(:,:), tmat(:,:)
       complex(8), allocatable :: v_matrix(:,:), aa_global(:,:,:)
       complex(8), allocatable :: psi_wann_c(:,:)
-      real(8) :: h_imag_max, w_imag_max
+      real(8) :: h_imag_max, w_imag_max, bpw_lambda_cut
       logical :: ok_position
       character(256) :: filename
 
@@ -3164,13 +3164,13 @@ contains
       nxyz_buffer_seed(1:3) = dc%nxyz_buffer(1:3)
       nxyz_box(1:3) = nxyz_domain(1:3) + 2 * nxyz_buffer_seed(1:3)
 
-      allocate(proj_atom(nkeep), proj_hybrid(nkeep), keep_index(nkeep), selected_wann(nkeep))
+      allocate(proj_atom(nkeep), proj_hybrid(nkeep), keep_index(nkeep))
       allocate(lambda_w(nkeep), spread_est(nkeep), tail_est(nkeep))
       allocate(wcoef(nbasis,nkeep), psi_wann_c(nbasis,num_wann_file))
       allocate(r_wann(3,nkeep,nkeep), wcenter(3,nkeep), h_wann(nkeep,nkeep), &
         v_wann(3,nkeep,nkeep), aa_wann(3,nkeep,nkeep))
       allocate(p_frag(nbasis,nbasis), p_eval(nbasis), p_evec(nbasis,nbasis), &
-        tmp_r(nkeep,nkeep), tmat(nkeep,num_wann_file))
+        tmat(nkeep,num_wann_file))
 
       proj_atom = 0
       proj_hybrid = 0
@@ -3186,50 +3186,75 @@ contains
       end do
       w_imag_max = maxval(abs(aimag(psi_wann_c(1:nbasis,1:num_wann_file))))
 
-      nsel = 0
+      p_frag = 0d0
       do iw=1,num_wann_file
-        if(owner_frag(iw) /= dc%i_frag) cycle
-        nsel = nsel + 1
-        if(nsel <= nkeep) selected_wann(nsel) = iw
-      end do
-      if(nsel /= nkeep) then
-        if(dc%id_tot == 0) write(*,'(1x,a,i0,a,i0,a,i0)') &
-          "[FATAL] global Wannier owner count mismatch: fragment=", dc%i_frag, &
-          " owner_count=", nsel, " expected=", nkeep
-        stop "DC-LCFO global Wannier BPW seed: nonuniform owner count"
-      end if
-
-      tmp_r = 0d0
-      do iw=1,nkeep
-        do jw=1,nkeep
-          do io=1,nbasis
-            tmp_r(iw,jw) = tmp_r(iw,jw) + real(psi_wann_c(io,selected_wann(iw)),kind=8) * &
-              real(psi_wann_c(io,selected_wann(jw)),kind=8)
+        do io=1,nbasis
+          do jo=1,nbasis
+            p_frag(io,jo) = p_frag(io,jo) + &
+              real(psi_wann_c(io,iw),kind=8) * real(psi_wann_c(jo,iw),kind=8) + &
+              aimag(psi_wann_c(io,iw)) * aimag(psi_wann_c(jo,iw))
           end do
         end do
       end do
-      call eigen_dsyev(tmp_r, p_eval(1:nkeep), tmp_r)
+      call eigen_dsyev(p_frag, p_eval, p_evec)
+      bpw_lambda_cut = max(1d-14, min(lambda_cut, maxval(p_eval(1:nbasis)) * 1d-12))
       wcoef = 0d0
+      nsel = 0
+      do imode=nbasis,1,-1
+        if(p_eval(imode) <= bpw_lambda_cut) cycle
+        nsel = nsel + 1
+        if(nsel > nkeep) exit
+        do io=1,nbasis
+          wcoef(io,nsel) = p_evec(io,imode)
+        end do
+        lambda_w(nsel) = p_eval(imode)
+        keep_index(nsel) = imode
+      end do
+      if(nsel < nkeep) then
+        write(*,'(1x,a,i0,a,i0,a,i0,3(a,1pe12.4))') &
+          "[WARN] local Wannier projection rank is small; completing with local LCFO vectors: fragment=", dc%i_frag, &
+          " keep=", nsel, " expected=", nkeep, " bpw_cut=", bpw_lambda_cut, &
+          " lambda_cut=", lambda_cut, " max_eval=", maxval(p_eval(1:nbasis))
+      end if
+      do imode=1,nbasis
+        if(nsel >= nkeep) exit
+        p_evec(1:nbasis,1) = 0d0
+        p_evec(imode,1) = 1d0
+        do iw=1,nsel
+          p_evec(1:nbasis,1) = p_evec(1:nbasis,1) - &
+            sum(p_evec(1:nbasis,1) * wcoef(1:nbasis,iw)) * wcoef(1:nbasis,iw)
+        end do
+        if(sum(p_evec(1:nbasis,1) * p_evec(1:nbasis,1)) <= 1d-20) cycle
+        nsel = nsel + 1
+        wcoef(1:nbasis,nsel) = p_evec(1:nbasis,1) / &
+          sqrt(sum(p_evec(1:nbasis,1) * p_evec(1:nbasis,1)))
+        lambda_w(nsel) = 0d0
+        keep_index(nsel) = -imode
+      end do
+      if(nsel < nkeep) then
+        write(*,'(1x,a,i0,a,i0,a,i0)') &
+          "[FATAL] failed to complete BPW local basis: fragment=", dc%i_frag, &
+          " keep=", nsel, " expected=", nkeep
+        stop "DC-LCFO global Wannier BPW seed: insufficient local completion rank"
+      end if
       do iw=1,nkeep
-        if(p_eval(iw) <= lambda_cut) then
+        if(keep_index(iw) > 0 .and. lambda_w(iw) <= bpw_lambda_cut) then
           if(dc%id_tot == 0) write(*,'(1x,a,i0,a,i0,a,1pe12.4)') &
             "[FATAL] owned Wannier projection is singular: fragment=", dc%i_frag, &
-            " mode=", iw, " lambda=", p_eval(iw)
+            " mode=", iw, " lambda=", lambda_w(iw)
           stop "DC-LCFO global Wannier BPW seed: singular owned Wannier projection"
         end if
-        do jw=1,nkeep
-          do io=1,nbasis
-            wcoef(io,iw) = wcoef(io,iw) + real(psi_wann_c(io,selected_wann(jw)),kind=8) * &
-              tmp_r(jw,iw) / sqrt(p_eval(iw))
-          end do
-        end do
-        lambda_w(iw) = p_eval(iw)
-        keep_index(iw) = selected_wann(iw)
-        spread_est(iw) = spread_aa2(selected_wann(iw))
       end do
       tail_est(1:nkeep) = 0d0
       tmat(1:nkeep,1:num_wann_file) = matmul(transpose(wcoef(1:nbasis,1:nkeep)), &
         real(psi_wann_c(1:nbasis,1:num_wann_file), kind=8))
+      spread_est(1:nkeep) = 0d0
+      do iw=1,nkeep
+        do j_full=1,num_wann_file
+          spread_est(iw) = spread_est(iw) + tmat(iw,j_full) * tmat(iw,j_full) * &
+            spread_aa2(j_full)
+        end do
+      end do
 
       h_imag_max = 0d0
       h_wann = 0d0
@@ -3312,9 +3337,9 @@ contains
         " max_coef_imag=", w_imag_max, " max_h_imag_term=", h_imag_max
 
       deallocate(owner_frag, center_bohr, spread_aa2, v_matrix, aa_global)
-      deallocate(proj_atom, proj_hybrid, keep_index, selected_wann, lambda_w, spread_est, tail_est)
+      deallocate(proj_atom, proj_hybrid, keep_index, lambda_w, spread_est, tail_est)
       deallocate(wcoef, psi_wann_c, r_wann, wcenter, h_wann, v_wann, aa_wann)
-      deallocate(p_frag, p_eval, p_evec, tmp_r, tmat)
+      deallocate(p_frag, p_eval, p_evec, tmat)
       call comm_sync_all(dc%icomm_tot)
     end subroutine write_wannier90_global_bpw_seed
 
