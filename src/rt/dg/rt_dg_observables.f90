@@ -123,5 +123,5 @@
         flush(6)
       end if
     end if
-    rt%curr(:, itt) = dg_frag%current_total(:)
+    rt%curr(:, itt) = -dg_frag%current_total(:)
   end subroutine calculate_observables

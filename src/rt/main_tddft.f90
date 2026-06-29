@@ -591,7 +591,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     call write_rt_data_0d(Mit, ofl, dt, system, rt)
   case(3)
     curr_e_out(:, :) = 0.0d0
-    curr_e_out(:, 1) = dg_frag%current_total(:)
+    curr_e_out(:, 1) = -dg_frag%current_total(:)
     curr_i_zero(:) = 0.0d0
     call write_rt_data_3d(Mit, ofl, dt, system, curr_e_out, curr_i_zero)
   end select
@@ -665,7 +665,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
       ! Periodic system: output current density
       ! DG-Fragment current from calculate_observables
       curr_e_out(:, :) = 0.0d0
-      curr_e_out(:, 1) = dg_frag%current_total(:)
+      curr_e_out(:, 1) = -dg_frag%current_total(:)
       curr_i_zero(:) = 0.0d0
       call write_rt_data_3d(itt, ofl, dt, system, curr_e_out, curr_i_zero)
     end select
