@@ -2307,10 +2307,11 @@ contains
         lambda_cut, base_directory, yn_dc_lcfo_wannier, yn_dc_lcfo_wannier_pw, &
         yn_dc_lcfo_wannier_cluster, wannier_cluster_size
       implicit none
-      integer :: nproj, nproj_sp3, nkeep, nkeep_legacy, nbasis, iunit, ip, jp, iw, io, jo, axis
+      integer :: nproj, nproj_seed, nkeep, nkeep_legacy, nbasis, iunit, ip, jp, iw, io, jo, axis
       integer :: aa_wann_source
       integer :: ix, iy, iz, ixg, iyg, izg, ispin_local
       integer :: ibx, iby, ibz, sx, sy, sz, ispin_read, ibasis_read
+      integer :: proj_l, proj_m
       integer :: nxyz_domain(3), nxyz_buffer_seed(3), nxyz_box(3)
       integer :: nxyz_domain_file(3), nxyz_buffer_file(3), nspin_file, nstate_frag_file
       integer :: magic_file, version_file
@@ -2325,10 +2326,12 @@ contains
       real(8), allocatable :: phi_box(:,:,:,:), phi_tmp(:,:,:)
       real(8) :: x, y, z, gval, box_length(3), box_origin(3)
       character(256) :: filename
+      logical :: use_pseudo_projection
 
       if(nspin /= 1) stop "DC-LCFO local Wannier export: spin-polarized mode is not implemented."
-      if(.not. is_sp3_projection(trim(wannier_projection))) &
-        stop "DC-LCFO local Wannier export: only wannier_projection='C:sp3' or 'Si:sp3' is implemented."
+      use_pseudo_projection = is_pseudo_channel_projection(trim(wannier_projection))
+      if(.not. is_sp3_projection(trim(wannier_projection)) .and. .not. use_pseudo_projection) &
+        stop "DC-LCFO local Wannier export: supported projections are C:sp3, Si:sp3, and pseudo_channels."
       if(yn_dc_lcfo_wannier_pw == 'y') &
         stop "DC-LCFO local Wannier PW augmentation is not connected yet."
       if(yn_dc_lcfo_wannier_cluster == 'y' .and. any(wannier_cluster_size(1:3) /= 1)) then
@@ -2351,20 +2354,29 @@ contains
         box_origin(axis) = dc%lg_tot%coordinate(dc%jxyz_tot(1,axis),axis) &
           - dble(nxyz_buffer_seed(axis)) * system%hgs(axis)
       end do
-      nproj_sp3 = count_local_c_sp3_projections(nxyz_domain)
-      if(nproj_sp3 <= 0) stop "DC-LCFO local Wannier export: no local sp3 projections in fragment core."
-      nproj = nproj_sp3 + nbasis
+      if(use_pseudo_projection) then
+        nproj_seed = count_local_pseudo_channel_ao_candidates(nxyz_domain)
+        if(nproj_seed <= 0) stop "DC-LCFO local Wannier export: no local pseudo-channel projections in fragment core."
+      else
+        nproj_seed = count_local_c_sp3_projections(nxyz_domain)
+        if(nproj_seed <= 0) stop "DC-LCFO local Wannier export: no local sp3 projections in fragment core."
+      end if
+      nproj = nproj_seed + nbasis
 
       allocate(proj_atom(nproj), proj_hybrid(nproj))
       proj_atom = 0
       proj_hybrid = 0
-      call build_local_c_sp3_projection_map(nxyz_domain, proj_atom, proj_hybrid)
+      if(use_pseudo_projection) then
+        call build_local_pseudo_channel_ao_candidate_map(nxyz_domain, proj_atom, proj_hybrid)
+      else
+        call build_local_c_sp3_projection_map(nxyz_domain, proj_atom, proj_hybrid)
+      end if
       allocate(bproj(nbasis,nproj), sw(nproj,nproj), uw(nproj,nproj), lambda_w(nproj))
       allocate(wcoef(nbasis,nproj), keep_index(nproj))
       allocate(r_basis(3,nbasis,nbasis), r_wann(3,nproj,nproj), tmp(nbasis,nproj), wcenter(3,nproj))
-      allocate(sw_legacy(nproj_sp3,nproj_sp3), uw_legacy(nproj_sp3,nproj_sp3), lambda_legacy(nproj_sp3))
-      allocate(wcoef_legacy(nbasis,nproj_sp3), keep_index_legacy(nproj_sp3))
-      allocate(r_wann_legacy(3,nproj_sp3,nproj_sp3), tmp_legacy(nbasis,nproj_sp3), wcenter_legacy(3,nproj_sp3))
+      allocate(sw_legacy(nproj_seed,nproj_seed), uw_legacy(nproj_seed,nproj_seed), lambda_legacy(nproj_seed))
+      allocate(wcoef_legacy(nbasis,nproj_seed), keep_index_legacy(nproj_seed))
+      allocate(r_wann_legacy(3,nproj_seed,nproj_seed), tmp_legacy(nbasis,nproj_seed), wcenter_legacy(3,nproj_seed))
       allocate(h_seed(nbasis,nbasis), v_seed(3,nbasis,nbasis))
       allocate(h_wann(nproj,nproj), v_wann(3,nproj,nproj), aa_wann(3,nproj,nproj), spread_est(nproj), tail_est(nproj))
       bproj = 0d0
@@ -2409,8 +2421,8 @@ contains
       end do
       close(iunit)
 
-!$omp parallel do collapse(2) private(ip,io,ibz,iby,ibx,z,y,x,gval) schedule(static)
-      do ip=1,nproj_sp3
+!$omp parallel do collapse(2) private(ip,io,ibz,iby,ibx,z,y,x,gval,proj_l,proj_m) schedule(static)
+      do ip=1,nproj_seed
         do io=1,nbasis
           do ibz=1,nxyz_box(3)
             z = box_origin(3) + dble(ibz - 1) * system%hgs(3)
@@ -2418,8 +2430,15 @@ contains
               y = box_origin(2) + dble(iby - 1) * system%hgs(2)
               do ibx=1,nxyz_box(1)
                 x = box_origin(1) + dble(ibx - 1) * system%hgs(1)
-                gval = c_sp3_projection_value_local_periodic(x, y, z, proj_atom(ip), &
-                  proj_hybrid(ip), wannier_projection_width, box_length)
+                if(use_pseudo_projection) then
+                  proj_l = proj_hybrid(ip) / 10
+                  proj_m = mod(proj_hybrid(ip), 10)
+                  gval = pseudo_channel_projection_value_local_periodic(x, y, z, proj_atom(ip), &
+                    proj_l, proj_m, wannier_projection_width, box_length)
+                else
+                  gval = c_sp3_projection_value_local_periodic(x, y, z, proj_atom(ip), &
+                    proj_hybrid(ip), wannier_projection_width, box_length)
+                end if
                 if(abs(gval) <= 0d0) cycle
                 bproj(io,ip) = bproj(io,ip) &
                   + phi_box(ibx,iby,ibz,io) * gval * hvol
@@ -2430,26 +2449,26 @@ contains
       end do
 !$omp end parallel do
 
-      sw_legacy(1:nproj_sp3,1:nproj_sp3) = &
-        matmul(transpose(bproj(1:nbasis,1:nproj_sp3)), bproj(1:nbasis,1:nproj_sp3))
+      sw_legacy(1:nproj_seed,1:nproj_seed) = &
+        matmul(transpose(bproj(1:nbasis,1:nproj_seed)), bproj(1:nbasis,1:nproj_seed))
       call eigen_dsyev(sw_legacy, lambda_legacy, uw_legacy)
       wcoef_legacy = 0d0
       nkeep_legacy = 0
-      do ip=nproj_sp3,1,-1
+      do ip=nproj_seed,1,-1
         if(lambda_legacy(ip) <= lambda_cut) cycle
         nkeep_legacy = nkeep_legacy + 1
         keep_index_legacy(nkeep_legacy) = ip
         do io=1,nbasis
-          do jp=1,nproj_sp3
+          do jp=1,nproj_seed
             wcoef_legacy(io,nkeep_legacy) = wcoef_legacy(io,nkeep_legacy) &
               + bproj(io,jp) * uw_legacy(jp,ip) / sqrt(lambda_legacy(ip))
           end do
         end do
       end do
-      if(nkeep_legacy <= 0) stop "DC-LCFO local Wannier export: all local sp3 directions were removed."
+      if(nkeep_legacy <= 0) stop "DC-LCFO local Wannier export: all local projection directions were removed."
 
       do io=1,nbasis
-        bproj(io,nproj_sp3+io) = 1d0
+        bproj(io,nproj_seed+io) = 1d0
       end do
 
       sw(1:nproj,1:nproj) = matmul(transpose(bproj(1:nbasis,1:nproj)), bproj(1:nbasis,1:nproj))
@@ -2556,15 +2575,20 @@ contains
       iunit = get_filehandle()
       open(iunit,file=filename,form='unformatted',access='stream')
       write(iunit) local_wannier_magic, local_wannier_version
-      write(iunit) nxyz_domain(1:3), nspin, nbasis, nproj_sp3, nkeep_legacy
-      write(iunit) proj_atom(1:nproj_sp3), proj_hybrid(1:nproj_sp3)
-      write(iunit) lambda_legacy(1:nproj_sp3), keep_index_legacy(1:nkeep_legacy)
+      write(iunit) nxyz_domain(1:3), nspin, nbasis, nproj_seed, nkeep_legacy
+      write(iunit) proj_atom(1:nproj_seed), proj_hybrid(1:nproj_seed)
+      write(iunit) lambda_legacy(1:nproj_seed), keep_index_legacy(1:nkeep_legacy)
       write(iunit) wcoef_legacy(1:nbasis,1:nkeep_legacy)
       write(iunit) r_wann_legacy(1:3,1:nkeep_legacy,1:nkeep_legacy)
       write(iunit) wcenter_legacy(1:3,1:nkeep_legacy)
       close(iunit)
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[DC-LCFO-LOCAL-WANNIER] fragment=", &
-        dc%i_frag, " sp3=", nproj_sp3, " candidates=", nproj_sp3, " keep=", nkeep_legacy
+      if(use_pseudo_projection) then
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[DC-LCFO-LOCAL-WANNIER] fragment=", &
+          dc%i_frag, " pseudo_channels=", nproj_seed, " candidates=", nproj_seed, " keep=", nkeep_legacy
+      else
+        write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[DC-LCFO-LOCAL-WANNIER] fragment=", &
+          dc%i_frag, " sp3=", nproj_seed, " candidates=", nproj_seed, " keep=", nkeep_legacy
+      end if
 
       filename = trim(base_directory)//binfile_bpw
       iunit = get_filehandle()
@@ -2837,6 +2861,57 @@ contains
         end do
       end do
     end subroutine build_local_c_sp3_projection_map
+
+    integer function count_local_pseudo_channel_ao_candidates(nxyz_domain) result(nproj)
+      use salmon_global, only: izatom
+      implicit none
+      integer, intent(in) :: nxyz_domain(3)
+      integer :: ia, iz, ix_local(3), lmax_ao
+
+      nproj = 0
+      do ia=1,dc%system_tot%nion
+        call find_atom_core_grid(nxyz_domain, ia, ix_local)
+        if(any(ix_local(1:3) <= 0)) cycle
+        iz = izatom(dc%system_tot%kion(ia))
+        lmax_ao = pseudo_channel_ao_lmax_for_species(iz)
+        nproj = nproj + count_real_ao_for_lmax(lmax_ao)
+      end do
+    end function count_local_pseudo_channel_ao_candidates
+
+    subroutine build_local_pseudo_channel_ao_candidate_map(nxyz_domain, proj_atom, proj_code)
+      use salmon_global, only: izatom
+      implicit none
+      integer, intent(in) :: nxyz_domain(3)
+      integer, intent(out) :: proj_atom(:), proj_code(:)
+      integer :: ia, iz, lmax_ao, ip, im, ix_local(3)
+
+      ip = 0
+      do ia=1,dc%system_tot%nion
+        call find_atom_core_grid(nxyz_domain, ia, ix_local)
+        if(any(ix_local(1:3) <= 0)) cycle
+        iz = izatom(dc%system_tot%kion(ia))
+        lmax_ao = pseudo_channel_ao_lmax_for_species(iz)
+        if(lmax_ao >= 0) then
+          ip = ip + 1
+          proj_atom(ip) = ia
+          proj_code(ip) = 1
+        end if
+        if(lmax_ao >= 1) then
+          do im=1,3
+            ip = ip + 1
+            proj_atom(ip) = ia
+            proj_code(ip) = 10 + im
+          end do
+        end if
+        if(lmax_ao >= 2) then
+          do im=1,5
+            ip = ip + 1
+            proj_atom(ip) = ia
+            proj_code(ip) = 20 + im
+          end do
+        end if
+      end do
+    end subroutine build_local_pseudo_channel_ao_candidate_map
 
     subroutine find_atom_core_grid(nxyz_domain, ia, ix_local)
       implicit none
@@ -4493,6 +4568,58 @@ contains
         val = 0d0
       end select
     end function pseudo_channel_projection_value
+
+    real(8) function pseudo_channel_projection_value_local_periodic(x, y, z, ia, l, m, sigma, box_length) result(val)
+      implicit none
+      real(8), intent(in) :: x, y, z, sigma, box_length(3)
+      integer, intent(in) :: ia, l, m
+      real(8) :: dx, dy, dz, r2, gaussian, inv_sigma, inv_sigma2
+
+      dx = periodic_delta(x - dc%system_tot%rion(1,ia), box_length(1))
+      dy = periodic_delta(y - dc%system_tot%rion(2,ia), box_length(2))
+      dz = periodic_delta(z - dc%system_tot%rion(3,ia), box_length(3))
+      r2 = dx*dx + dy*dy + dz*dz
+      if(r2 > (8d0*sigma)**2) then
+        val = 0d0
+        return
+      end if
+
+      gaussian = exp(-0.5d0 * r2 / (sigma*sigma))
+      inv_sigma = 1d0 / sigma
+      inv_sigma2 = inv_sigma * inv_sigma
+      select case(l)
+      case(0)
+        val = gaussian
+      case(1)
+        select case(m)
+        case(1)
+          val = dx * inv_sigma * gaussian
+        case(2)
+          val = dy * inv_sigma * gaussian
+        case(3)
+          val = dz * inv_sigma * gaussian
+        case default
+          val = 0d0
+        end select
+      case(2)
+        select case(m)
+        case(1)
+          val = dx * dy * inv_sigma2 * gaussian
+        case(2)
+          val = dy * dz * inv_sigma2 * gaussian
+        case(3)
+          val = dz * dx * inv_sigma2 * gaussian
+        case(4)
+          val = (dx*dx - dy*dy) * inv_sigma2 * gaussian
+        case(5)
+          val = (2d0*dz*dz - dx*dx - dy*dy) * inv_sigma2 * gaussian
+        case default
+          val = 0d0
+        end select
+      case default
+        val = 0d0
+      end select
+    end function pseudo_channel_projection_value_local_periodic
 
     real(8) function c_sp3_projection_value(x, y, z, ia, ih, sigma) result(val)
       implicit none

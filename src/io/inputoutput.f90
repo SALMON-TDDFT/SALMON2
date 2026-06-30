@@ -3297,8 +3297,10 @@ contains
       & stop "DC-LCFO local Wannier export (yn_dc_lcfo_local_wannier=y): yn_dc_lcfo_diag=y is required."
       if(trim(wannier_projection) /= 'C:sp3' .and. trim(wannier_projection) /= 'c:sp3' .and. &
       &  trim(wannier_projection) /= 'Si:sp3' .and. trim(wannier_projection) /= 'si:sp3' .and. &
-      &  trim(wannier_projection) /= 'SI:sp3') &
-      & stop "DC-LCFO local Wannier export: currently only wannier_projection='C:sp3' or 'Si:sp3' is implemented."
+      &  trim(wannier_projection) /= 'SI:sp3' .and. &
+      &  trim(wannier_projection) /= 'pseudo_channels' .and. &
+      &  trim(wannier_projection) /= 'PSEUDO_CHANNELS') &
+      & stop "DC-LCFO local Wannier export: supported wannier_projection values are C:sp3, Si:sp3, and pseudo_channels."
       if(wannier_projection_width <= 0d0) &
       & stop "DC-LCFO local Wannier export: wannier_projection_width must be positive."
       if(lambda_cut <= 0d0) &
