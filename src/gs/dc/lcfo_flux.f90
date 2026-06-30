@@ -2327,8 +2327,8 @@ contains
       character(256) :: filename
 
       if(nspin /= 1) stop "DC-LCFO local Wannier export: spin-polarized mode is not implemented."
-      if(.not. is_c_sp3_projection(trim(wannier_projection))) &
-        stop "DC-LCFO local Wannier export: only wannier_projection='C:sp3' is implemented."
+      if(.not. is_sp3_projection(trim(wannier_projection))) &
+        stop "DC-LCFO local Wannier export: only wannier_projection='C:sp3' or 'Si:sp3' is implemented."
       if(yn_dc_lcfo_wannier_pw == 'y') &
         stop "DC-LCFO local Wannier PW augmentation is not connected yet."
       if(yn_dc_lcfo_wannier_cluster == 'y' .and. any(wannier_cluster_size(1:3) /= 1)) then
@@ -2352,7 +2352,7 @@ contains
           - dble(nxyz_buffer_seed(axis)) * system%hgs(axis)
       end do
       nproj_sp3 = count_local_c_sp3_projections(nxyz_domain)
-      if(nproj_sp3 <= 0) stop "DC-LCFO local Wannier export: no local C:sp3 projections in fragment core."
+      if(nproj_sp3 <= 0) stop "DC-LCFO local Wannier export: no local sp3 projections in fragment core."
       nproj = nproj_sp3 + nbasis
 
       allocate(proj_atom(nproj), proj_hybrid(nproj))
@@ -2446,7 +2446,7 @@ contains
           end do
         end do
       end do
-      if(nkeep_legacy <= 0) stop "DC-LCFO local Wannier export: all local C:sp3 directions were removed."
+      if(nkeep_legacy <= 0) stop "DC-LCFO local Wannier export: all local sp3 directions were removed."
 
       do io=1,nbasis
         bproj(io,nproj_sp3+io) = 1d0
@@ -2803,29 +2803,31 @@ contains
     end subroutine read_wannier90_global_rmn_gamma_block
 
     integer function count_local_c_sp3_projections(nxyz_domain) result(nproj)
-      use salmon_global, only: izatom
+      use salmon_global, only: izatom, wannier_projection
       implicit none
       integer, intent(in) :: nxyz_domain(3)
-      integer :: ia, ix_local(3)
+      integer :: ia, ix_local(3), target_iz
 
       nproj = 0
+      target_iz = sp3_projection_iz(trim(wannier_projection))
       do ia=1,dc%system_tot%nion
-        if(izatom(dc%system_tot%kion(ia)) /= 6) cycle
+        if(izatom(dc%system_tot%kion(ia)) /= target_iz) cycle
         call find_atom_core_grid(nxyz_domain, ia, ix_local)
         if(all(ix_local(1:3) > 0)) nproj = nproj + 4
       end do
     end function count_local_c_sp3_projections
 
     subroutine build_local_c_sp3_projection_map(nxyz_domain, proj_atom, proj_hybrid)
-      use salmon_global, only: izatom
+      use salmon_global, only: izatom, wannier_projection
       implicit none
       integer, intent(in) :: nxyz_domain(3)
       integer, intent(out) :: proj_atom(:), proj_hybrid(:)
-      integer :: ia, ih, ip, ix_local(3)
+      integer :: ia, ih, ip, ix_local(3), target_iz
 
       ip = 0
+      target_iz = sp3_projection_iz(trim(wannier_projection))
       do ia=1,dc%system_tot%nion
-        if(izatom(dc%system_tot%kion(ia)) /= 6) cycle
+        if(izatom(dc%system_tot%kion(ia)) /= target_iz) cycle
         call find_atom_core_grid(nxyz_domain, ia, ix_local)
         if(any(ix_local(1:3) <= 0)) cycle
         do ih=1,4
@@ -2926,7 +2928,7 @@ contains
           if(is_pseudo_channel_projection(trim(wannier_projection))) then
             write(iunit,'(a)') "random"
           else
-            if(is_c_sp3_projection(trim(wannier_projection)) .and. nproj_csp3 < wannier_num_wann) &
+            if(is_sp3_projection(trim(wannier_projection)) .and. nproj_csp3 < wannier_num_wann) &
               write(iunit,'(a)') "random"
             write(iunit,'(a)') trim(wannier_projection)
           end if
@@ -3944,18 +3946,18 @@ contains
       real(8), allocatable :: norm_local(:), norm_sum(:)
       character(256) :: amnfile
 
-      if(.not. is_c_sp3_projection(trim(wannier_projection)) .and. &
+      if(.not. is_sp3_projection(trim(wannier_projection)) .and. &
          .not. is_pseudo_channel_projection(trim(wannier_projection))) &
-        stop "DC-LCFO Wannier export: supported projections are C:sp3 and pseudo_channels."
+        stop "DC-LCFO Wannier export: supported projections are C:sp3, Si:sp3, and pseudo_channels."
       if(is_pseudo_channel_projection(trim(wannier_projection))) then
         call write_wannier_amn_file_pseudo_channels(nband_wann)
         return
       end if
 
       nproj_csp3 = count_c_sp3_projections()
-      if(nproj_csp3 <= 0) stop "DC-LCFO Wannier export: no C atoms found for C:sp3 projections."
+      if(nproj_csp3 <= 0) stop "DC-LCFO Wannier export: no atoms found for sp3 projections."
       if(nproj_csp3 > wannier_num_wann) &
-        stop "DC-LCFO Wannier export: C:sp3 projection count exceeds wannier_num_wann."
+        stop "DC-LCFO Wannier export: sp3 projection count exceeds wannier_num_wann."
       if(wannier_num_wann > nband_wann) &
         stop "DC-LCFO Wannier export: wannier_num_wann must not exceed exported band count."
       nproj = wannier_num_wann
@@ -4303,14 +4305,28 @@ contains
       deallocate(is_selected)
     end subroutine write_pseudo_channel_projection_diagnostics
 
-    logical function is_c_sp3_projection(text) result(enabled)
+    logical function is_sp3_projection(text) result(enabled)
+      implicit none
+      character(*), intent(in) :: text
+
+      enabled = sp3_projection_iz(text) > 0
+    end function is_sp3_projection
+
+    integer function sp3_projection_iz(text) result(target_iz)
       implicit none
       character(*), intent(in) :: text
       character(256) :: work
 
       work = adjustl(text)
-      enabled = (trim(work) == 'C:sp3' .or. trim(work) == 'c:sp3')
-    end function is_c_sp3_projection
+      select case(trim(work))
+      case('C:sp3', 'c:sp3')
+        target_iz = 6
+      case('Si:sp3', 'si:sp3', 'SI:sp3')
+        target_iz = 14
+      case default
+        target_iz = 0
+      end select
+    end function sp3_projection_iz
 
     logical function is_pseudo_channel_projection(text) result(enabled)
       implicit none
@@ -4322,13 +4338,14 @@ contains
     end function is_pseudo_channel_projection
 
     integer function count_c_sp3_projections() result(nproj)
-      use salmon_global, only: izatom
+      use salmon_global, only: izatom, wannier_projection
       implicit none
-      integer :: ia
+      integer :: ia, target_iz
 
       nproj = 0
+      target_iz = sp3_projection_iz(trim(wannier_projection))
       do ia=1,dc%system_tot%nion
-        if(izatom(dc%system_tot%kion(ia)) == 6) nproj = nproj + 4
+        if(izatom(dc%system_tot%kion(ia)) == target_iz) nproj = nproj + 4
       end do
     end function count_c_sp3_projections
 
@@ -4406,14 +4423,15 @@ contains
     end subroutine build_pseudo_channel_ao_candidate_map
 
     subroutine build_c_sp3_projection_map(proj_atom, proj_hybrid)
-      use salmon_global, only: izatom
+      use salmon_global, only: izatom, wannier_projection
       implicit none
       integer, intent(out) :: proj_atom(:), proj_hybrid(:)
-      integer :: ia, ih, ip
+      integer :: ia, ih, ip, target_iz
 
       ip = 0
+      target_iz = sp3_projection_iz(trim(wannier_projection))
       do ia=1,dc%system_tot%nion
-        if(izatom(dc%system_tot%kion(ia)) /= 6) cycle
+        if(izatom(dc%system_tot%kion(ia)) /= target_iz) cycle
         do ih=1,4
           ip = ip + 1
           proj_atom(ip) = ia
