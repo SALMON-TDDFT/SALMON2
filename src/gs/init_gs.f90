@@ -190,9 +190,10 @@ CONTAINS
   subroutine init_wf_rand
     use salmon_global, only: iseed_number_change
     implicit none
-    integer :: n
-    integer(8) :: llen, seed64, seed_max
+    integer :: n, j
+    integer(8) :: llen, seed64, seed64_mixed, seed_max, seed_value
     integer,allocatable :: iseed(:)
+    logical :: duplicated
 
     call random_seed(size = n)
     allocate(iseed(n))
@@ -202,10 +203,90 @@ CONTAINS
            + int(mg%is(3) - lg%is(3) + 1,8) * int(lg%num(2),8) * int(lg%num(1),8) &
            + int(mg%is(2) - lg%is(2) + 1,8) * int(lg%num(1),8) &
            + int(mg%is(1) - lg%is(1) + 1,8) + int(iseed_number_change,8)
-    iseed(:) = int(modulo(seed64, seed_max) + 1_8)
+    do j = 1, n
+      seed64_mixed = splitmix64_next(seed64)
+      seed_value = modulo(seed64_mixed, seed_max) + 1_8
+      do
+        duplicated = .false.
+        if (j > 1) duplicated = any(iseed(1:j-1) == int(seed_value))
+        if (.not. duplicated) exit
+        seed_value = modulo(seed_value, seed_max) + 1_8
+      end do
+      iseed(j) = int(seed_value)
+    end do
     call random_seed(put = iseed)
     deallocate(iseed)
   end subroutine
+
+  integer(8) function splitmix64_next(state) result(mixed)
+    implicit none
+    integer(8), intent(inout) :: state
+    integer(8), parameter :: splitmix_gamma(4) = [31765_8, 32586_8, 31161_8, 40503_8]
+    integer(8), parameter :: splitmix_mul1(4) = [58809_8,  7396_8, 18285_8, 48984_8]
+    integer(8), parameter :: splitmix_mul2(4) = [ 4587_8,  4913_8, 18875_8, 38096_8]
+
+    ! SplitMix64 constants above are low-to-high 16-bit limbs of
+    ! z'9E3779B97F4A7C15', z'BF58476D1CE4E5B9', z'94D049BB133111EB'.
+    state = add_mod_2_64(state, splitmix_gamma)
+    mixed = ieor(state, ishft(state, -30))
+    mixed = mul_mod_2_64(mixed, splitmix_mul1)
+    mixed = ieor(mixed, ishft(mixed, -27))
+    mixed = mul_mod_2_64(mixed, splitmix_mul2)
+    mixed = ieor(mixed, ishft(mixed, -31))
+  end function
+
+  integer(8) function add_mod_2_64(a, b_limb) result(res)
+    implicit none
+    integer(8), intent(in) :: a, b_limb(4)
+    integer(8) :: carry, limb_sum, r_limb(4)
+    integer :: k
+
+    carry = 0_8
+    do k = 1, 4
+      limb_sum = limb16(a, k) + b_limb(k) + carry
+      r_limb(k) = iand(limb_sum, 65535_8)
+      carry = ishft(limb_sum, -16)
+    end do
+    res = pack_limbs(r_limb)
+  end function
+
+  integer(8) function mul_mod_2_64(a, b_limb) result(res)
+    implicit none
+    integer(8), intent(in) :: a, b_limb(4)
+    integer(8) :: a_limb(4), r_limb(4), accum, carry
+    integer :: i, j
+
+    do i = 1, 4
+      a_limb(i) = limb16(a, i)
+    end do
+
+    r_limb = 0_8
+    do i = 1, 4
+      carry = 0_8
+      do j = 1, 5 - i
+        accum = r_limb(i+j-1) + a_limb(i) * b_limb(j) + carry
+        r_limb(i+j-1) = iand(accum, 65535_8)
+        carry = ishft(accum, -16)
+      end do
+    end do
+    res = pack_limbs(r_limb)
+  end function
+
+  integer(8) function limb16(value, index) result(limb)
+    implicit none
+    integer(8), intent(in) :: value
+    integer, intent(in) :: index
+
+    limb = iand(ishft(value, -16*(index - 1)), 65535_8)
+  end function
+
+  integer(8) function pack_limbs(limb) result(value)
+    implicit none
+    integer(8), intent(in) :: limb(4)
+
+    value = ior(ior(limb(1), ishft(limb(2), 16)), &
+              & ior(ishft(limb(3), 32), ishft(limb(4), 48)))
+  end function
 
   subroutine gen_random_rwf
     implicit none

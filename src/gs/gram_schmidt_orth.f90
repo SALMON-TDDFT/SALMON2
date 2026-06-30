@@ -414,6 +414,11 @@ contains
                     else
                       norm2 = norm2_tmp
                     endif
+                    if (.not. (norm2 > 0d0 .and. norm2 <= huge(norm2))) then
+                      write(*,*) 'error: gram_schmidt_col_cblas: invalid norm2 for orbital', &
+                        & wfi%io_s + jo1 - 1, 'norm2=', norm2
+                      stop 'gram_schmidt_col_cblas: invalid orbital norm'
+                    endif
 #if defined(USE_OPENACC) && defined(USE_CUDA_CUBLASV2)
 
 !$acc data copy(wf_block(:,:,:,jo1))
