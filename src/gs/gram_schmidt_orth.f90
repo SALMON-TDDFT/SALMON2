@@ -316,6 +316,11 @@ contains
               else
                 norm2 = norm2_tmp
               endif
+              if (.not. (norm2 > 0d0 .and. norm2 <= huge(norm2))) then
+                write(*,*) 'error: gram_schmidt_col_cblas: invalid norm2 for orbital', &
+                  & wfi%io_s + jo1 - 1, 'norm2=', norm2
+                stop 'gram_schmidt_col_cblas: invalid orbital norm'
+              endif
               call ZDSCAL(nsize_rg, one/sqrt(norm2), wf_block(:,:,:,jo1), n_one)
 
               ! Calculate overlap coefficients:
@@ -870,6 +875,11 @@ contains
                 call comm_summation(norm2_tmp, norm2, wfi%icomm_r)
               else
                 norm2 = norm2_tmp
+              endif
+              if (.not. (norm2 > 0d0 .and. norm2 <= huge(norm2))) then
+                write(*,*) 'error: gram_schmidt_col_rblas: invalid norm2 for orbital', &
+                  & wfi%io_s + jo1 - 1, 'norm2=', norm2
+                stop 'gram_schmidt_col_rblas: invalid orbital norm'
               endif
               call DSCAL(nsize_rg, one/sqrt(norm2), wf_block(:,:,:,jo1), n_one)
 

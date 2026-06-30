@@ -190,16 +190,19 @@ CONTAINS
   subroutine init_wf_rand
     use salmon_global, only: iseed_number_change
     implicit none
-    integer :: s,k,n,i,llen
+    integer :: n
+    integer(8) :: llen, seed64, seed_max
     integer,allocatable :: iseed(:)
 
     call random_seed(size = n)
     allocate(iseed(n))
-    llen = product(lg%num)
-    iseed(:) = (info%ik_s * system%no + info%io_s - 1) * llen &
-             + (mg%is(3) - lg%is(3) + 1) * lg%num(2) * lg%num(1) &
-             + (mg%is(2) - lg%is(2) + 1) * lg%num(1) &
-             + (mg%is(1) - lg%is(1) + 1) + iseed_number_change
+    llen = int(lg%num(1),8) * int(lg%num(2),8) * int(lg%num(3),8)
+    seed_max = int(huge(iseed(1)),8)
+    seed64 = (int(info%ik_s,8) * int(system%no,8) + int(info%io_s,8) - 1_8) * llen &
+           + int(mg%is(3) - lg%is(3) + 1,8) * int(lg%num(2),8) * int(lg%num(1),8) &
+           + int(mg%is(2) - lg%is(2) + 1,8) * int(lg%num(1),8) &
+           + int(mg%is(1) - lg%is(1) + 1,8) + int(iseed_number_change,8)
+    iseed(:) = int(modulo(seed64, seed_max) + 1_8)
     call random_seed(put = iseed)
     deallocate(iseed)
   end subroutine
