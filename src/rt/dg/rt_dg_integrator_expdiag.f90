@@ -2872,7 +2872,7 @@
       logical :: field_off, local_kernel_available, bad_local, sstep_diag_enabled
       real(8) :: phase_c, phase_s
       real(8) :: s_eval_min, s_eval_max, s_eval_kept_min, s_trace, s_offdiag_norm
-      real(8) :: s_tol, s_factor, s_norm_before, s_norm_after
+      real(8) :: s_tol, s_lambda_reg, s_factor, s_norm_before, s_norm_after
       real(8) :: sdiag_local_sum(8), sdiag_global_sum(8)
       real(8) :: sdiag_local_max(8), sdiag_global_max(8)
       complex(8) :: c_owner, c_input, cand_val
@@ -3175,7 +3175,8 @@
             call eigen_zheev(s_vec, s_eval, s_mat)
             s_eval_min = minval(s_eval(1:nstate_blk))
             s_eval_max = maxval(s_eval(1:nstate_blk))
-            s_tol = max(1.0d-6 * s_eval_max, 1.0d-6)
+            s_lambda_reg = 1.0d-3
+            s_tol = s_lambda_reg
             s_nkeep = count(s_eval(1:nstate_blk) > s_tol)
             if (s_nkeep > 0) then
               s_eval_kept_min = minval(s_eval(1:nstate_blk), &
@@ -3186,8 +3187,8 @@
             s_norm_before = sum(abs(block_coef(:, :))**2)
             s_corr(:, :) = (0.0d0, 0.0d0)
             do jblk = 1, nstate_blk
-              if (s_eval(jblk) <= s_tol) cycle
-              s_factor = 1.0d0 / sqrt(s_eval(jblk))
+              s_factor = (1.0d0 + s_lambda_reg) * sqrt(max(s_eval(jblk), 0.0d0)) / &
+                (max(s_eval(jblk), 0.0d0) + s_lambda_reg)
               do state_col = 1, nstate_blk
                 do iblk = 1, nstate_blk
                   s_corr(iblk,state_col) = s_corr(iblk,state_col) + &
@@ -3195,11 +3196,7 @@
                 end do
               end do
             end do
-            if (s_nkeep > 0) then
-              block_coef(:, :) = matmul(block_coef(:, :), s_corr(:, :))
-            else
-              bad_local = .true.
-            end if
+            block_coef(:, :) = matmul(block_coef(:, :), s_corr(:, :))
             s_norm_after = sum(abs(block_coef(:, :))**2)
             sdiag_local_sum(1) = sdiag_local_sum(1) + 1.0d0
             sdiag_local_sum(2) = sdiag_local_sum(2) + dble(nblock)
@@ -3327,7 +3324,7 @@
         call comm_get_max(sdiag_local_max, sdiag_global_max, size(sdiag_local_max), dg_frag%icomm)
         if (dg_frag%id == 0 .and. .not. dg_frag%mixed_z_perf_count_enabled) then
           if (sdiag_global_sum(1) > 0.5d0) then
-            write(*,'(1x,a,1(a,i0),13(a,1pe12.4),3(a,l1),1(a,a))') &
+            write(*,'(1x,a,1(a,i0),15(a,1pe12.4),3(a,l1),1(a,a))') &
               '[DG-MIXEDZ-HALO-SSTEP-GRAM-DIAG]', &
               ' step=', itt, &
               ' block_count=', sdiag_global_sum(1), &
@@ -3341,6 +3338,8 @@
               ' gram_eval_max=', sdiag_global_max(3), &
               ' gram_cond_max=', sdiag_global_max(4), &
               ' gram_kept_cond_max=', sdiag_global_max(5), &
+              ' lambda_reg=', 1.0d-3, &
+              ' gram_reg_cond=', (sdiag_global_max(3) + 1.0d-3) / 1.0d-3, &
               ' sstep_norm_delta_avg=', sdiag_global_sum(7) / max(sdiag_global_sum(1), 1.0d0), &
               ' sstep_norm_after_avg=', sdiag_global_sum(8) / max(sdiag_global_sum(1), 1.0d0), &
               ' per_step_rebuild=', .true., &
