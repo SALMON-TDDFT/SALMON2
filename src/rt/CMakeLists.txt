@@ -7,6 +7,9 @@ set(SOURCES
     dg/rt_dg_fragment_parallel.f90
     dg/rt_dg_fragment_types.f90
     dg/rt_dg_basis_projection.f90
+    dg/rt_dg_wpw_linalg.f90
+    dg/rt_dg_wpw_window.f90
+    dg/rt_dg_wpw_reduced_mixedz_diag.f90
     dg/rt_dg_plane_wave.f90
     rt_angular_momentum.f90
     rt_local_chern_marker.f90

@@ -666,6 +666,18 @@ contains
     if (allocated(dg_frag%coef_wpw_self)) deallocate(dg_frag%coef_wpw_self)
     if (allocated(dg_frag%coef_wpw_neighbor_reduced)) deallocate(dg_frag%coef_wpw_neighbor_reduced)
     if (allocated(dg_frag%wpw_reproject_prev_coef)) deallocate(dg_frag%wpw_reproject_prev_coef)
+    if (allocated(dg_frag%mixed_z_frag_local_wcoef)) deallocate(dg_frag%mixed_z_frag_local_wcoef)
+    if (allocated(dg_frag%mixed_z_frag_local_pself_coef)) deallocate(dg_frag%mixed_z_frag_local_pself_coef)
+    if (allocated(dg_frag%mixed_z_frag_local_pneighbor_coef)) deallocate(dg_frag%mixed_z_frag_local_pneighbor_coef)
+    if (allocated(dg_frag%mixed_z_frag_local_w_gid)) deallocate(dg_frag%mixed_z_frag_local_w_gid)
+    if (allocated(dg_frag%mixed_z_frag_local_pself_gid)) deallocate(dg_frag%mixed_z_frag_local_pself_gid)
+    if (allocated(dg_frag%mixed_z_frag_local_pneighbor_gid)) deallocate(dg_frag%mixed_z_frag_local_pneighbor_gid)
+    dg_frag%mixed_z_frag_local_w_slots = 0
+    dg_frag%mixed_z_frag_local_pself_slots = 0
+    dg_frag%mixed_z_frag_local_pneighbor_slots = 0
+    dg_frag%mixed_z_frag_local_nstate = 0
+    dg_frag%mixed_z_frag_local_nspin = 0
+    dg_frag%mixed_z_frag_local_storage_ready = .false.
     dg_frag%wpw_reduced_ready = .false.
     dg_frag%wpw_reduced_max_dim = 0
     dg_frag%wpw_reduced_coef_initialized = .false.

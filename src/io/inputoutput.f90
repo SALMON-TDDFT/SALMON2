@@ -316,6 +316,13 @@ contains
       & yn_dg_fragment_rt, &
       & yn_dg_length_gauge, &
       & time_integrator_dg_fragment, &
+      & yn_dg_mixed_z, &
+      & yn_dg_mixed_z_local_prop_writeback, &
+      & dg_mixed_z_local_prop_backend, &
+      & dg_mixed_z_frag_local_field_block, &
+      & yn_dg_mixed_z_local_rho_writeback_wwonly, &
+      & yn_dg_mixed_z_local_pz_writeback_total, &
+      & yn_dg_mixed_z_local_current_writeback_total, &
       & yn_plane_wave_basis, &
       & n_plane_waves_dg, &
       & k_cutoff_plane_wave, &
@@ -654,7 +661,8 @@ contains
       & yn_adaptive_basis, &
       & basis_update_threshold, &
       & yn_dg_fragment_from_dcdft, &
-      & yn_dg_lcfo_seed_exhaustive_check
+      & yn_dg_lcfo_seed_exhaustive_check, &
+      & yn_dg_full_h_eigen_seed
 
     namelist/dg_fragment/ &
       & yn_dg_fragment_rt, &
@@ -665,7 +673,8 @@ contains
       & yn_adaptive_basis, &
       & basis_update_threshold, &
       & yn_dg_fragment_from_dcdft, &
-      & yn_dg_lcfo_seed_exhaustive_check
+      & yn_dg_lcfo_seed_exhaustive_check, &
+      & yn_dg_full_h_eigen_seed
 
 !! == default for &unit ==
     unit_system='au'
@@ -801,6 +810,13 @@ contains
     yn_dg_fragment_rt = 'n'
     yn_dg_length_gauge = 'n'
     time_integrator_dg_fragment = 'expdiag'
+    yn_dg_mixed_z = 'n'
+    yn_dg_mixed_z_local_prop_writeback = 'n'
+    dg_mixed_z_local_prop_backend = 'global_mixed_split_backend'
+    dg_mixed_z_frag_local_field_block = 'all'
+    yn_dg_mixed_z_local_rho_writeback_wwonly = 'n'
+    yn_dg_mixed_z_local_pz_writeback_total = 'n'
+    yn_dg_mixed_z_local_current_writeback_total = 'n'
     yn_plane_wave_basis = 'n'
     n_plane_waves_dg = 50
     k_cutoff_plane_wave = 0.5d0
@@ -1146,6 +1162,7 @@ contains
     basis_update_threshold = 0.1d0  ! 0.1 a.u. (~2.7 eV)
     yn_dg_fragment_from_dcdft = 'n'
     yn_dg_lcfo_seed_exhaustive_check = 'n'
+    yn_dg_full_h_eigen_seed = 'n'
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1245,6 +1262,8 @@ contains
 #endif
     call string_lowercase(process_allocation)
     call string_lowercase(time_integrator_dg_fragment)
+    call string_lowercase(dg_mixed_z_local_prop_backend)
+    call string_lowercase(dg_mixed_z_frag_local_field_block)
     call string_lowercase(propagator)
     call string_lowercase(method_init_wf)
     call string_lowercase(method_min)
@@ -1401,6 +1420,13 @@ contains
     call comm_bcast(yn_predictor_corrector,nproc_group_global)
     call comm_bcast(yn_dg_fragment_rt,nproc_group_global)
     call comm_bcast(yn_dg_length_gauge,nproc_group_global)
+    call comm_bcast(yn_dg_mixed_z,nproc_group_global)
+    call comm_bcast(yn_dg_mixed_z_local_prop_writeback,nproc_group_global)
+    call comm_bcast(dg_mixed_z_local_prop_backend,nproc_group_global)
+    call comm_bcast(dg_mixed_z_frag_local_field_block,nproc_group_global)
+    call comm_bcast(yn_dg_mixed_z_local_rho_writeback_wwonly,nproc_group_global)
+    call comm_bcast(yn_dg_mixed_z_local_pz_writeback_total,nproc_group_global)
+    call comm_bcast(yn_dg_mixed_z_local_current_writeback_total,nproc_group_global)
     call comm_bcast(yn_plane_wave_basis,nproc_group_global)
     call comm_bcast(n_plane_waves_dg,nproc_group_global)
     call comm_bcast(k_cutoff_plane_wave,nproc_group_global)
@@ -1843,6 +1869,7 @@ contains
     basis_update_threshold = basis_update_threshold * uenergy_to_au
     call comm_bcast(yn_dg_fragment_from_dcdft, nproc_group_global)
     call comm_bcast(yn_dg_lcfo_seed_exhaustive_check, nproc_group_global)
+    call comm_bcast(yn_dg_full_h_eigen_seed, nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -2355,6 +2382,19 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_fragment_rt', yn_dg_fragment_rt
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_length_gauge', yn_dg_length_gauge
       write(fh_variables_log, '("#",4X,A,"=",A)') 'time_integrator_dg_fragment', trim(time_integrator_dg_fragment)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z', yn_dg_mixed_z
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z_local_prop_writeback', &
+        yn_dg_mixed_z_local_prop_writeback
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_local_prop_backend', &
+        trim(dg_mixed_z_local_prop_backend)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_frag_local_field_block', &
+        trim(dg_mixed_z_frag_local_field_block)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z_local_rho_writeback_wwonly', &
+        yn_dg_mixed_z_local_rho_writeback_wwonly
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z_local_pz_writeback_total', &
+        yn_dg_mixed_z_local_pz_writeback_total
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z_local_current_writeback_total', &
+        yn_dg_mixed_z_local_current_writeback_total
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_plane_wave_basis', yn_plane_wave_basis
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'n_plane_waves_dg', n_plane_waves_dg
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'k_cutoff_plane_wave', k_cutoff_plane_wave
@@ -2849,6 +2889,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_fragment_from_dcdft', yn_dg_fragment_from_dcdft
       write(fh_variables_log, '("#",4X,A,"=",A)') &
         'yn_dg_lcfo_seed_exhaustive_check', yn_dg_lcfo_seed_exhaustive_check
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_full_h_eigen_seed', yn_dg_full_h_eigen_seed
       
       close(fh_variables_log)
     end if
@@ -2951,6 +2992,7 @@ contains
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_flux)
     call yn_argument_check(yn_dg_lcfo_seed_exhaustive_check)
+    call yn_argument_check(yn_dg_full_h_eigen_seed)
     call yn_argument_check(yn_dc_lcfo_diag)
     call yn_argument_check(yn_dc_fragment_optimization)
     call yn_argument_check(yn_dc_lcfo_wannier)
@@ -2958,6 +3000,11 @@ contains
     call yn_argument_check(yn_dc_lcfo_wannier_pw)
     call yn_argument_check(yn_dc_lcfo_wannier_cluster)
     call yn_argument_check(yn_dg_length_gauge)
+    call yn_argument_check(yn_dg_mixed_z)
+    call yn_argument_check(yn_dg_mixed_z_local_prop_writeback)
+    call yn_argument_check(yn_dg_mixed_z_local_rho_writeback_wwonly)
+    call yn_argument_check(yn_dg_mixed_z_local_pz_writeback_total)
+    call yn_argument_check(yn_dg_mixed_z_local_current_writeback_total)
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
       stop "Nk must be 1 when yn_periodic=='n'"

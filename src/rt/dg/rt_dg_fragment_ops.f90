@@ -3936,6 +3936,7 @@ contains
     integer, allocatable, save :: block_col_lid(:,:), block_col_pos(:,:)
     logical, allocatable, save :: row_needed(:), row_output(:)
     complex(8), allocatable, save :: coef_work(:,:), pc_work(:,:,:)
+    complex(8), allocatable, save :: coef_col_work(:,:), pc_block_work(:,:), mom_block_work(:,:)
     complex(8), allocatable, save :: pc_self_work(:,:,:), pc_cross_work(:,:,:)
     real(8) :: curr_local(3), curr_sum(3), pair_x, pair_y, pair_z, occ_factor
     real(8) :: pair_self_x, pair_self_y, pair_self_z, pair_cross_x, pair_cross_y, pair_cross_z
@@ -3945,7 +3946,7 @@ contains
     logical :: have_owned_rows
     logical, save :: trace_decomp_initialized = .false.
     logical, save :: trace_decomp = .false.
-    character(16) :: env_trace_decomp
+    character(64) :: env_trace_decomp
     integer :: env_status
     integer, parameter :: current_coef_cache_target_mb = 64
     integer(8) :: target_bytes, bytes_per_state
@@ -3955,9 +3956,29 @@ contains
     curr_sum(:) = 0.0d0
     curr_self_local(:) = 0.0d0
     curr_cross_local(:) = 0.0d0
+    dg_frag%current_momentum_self_raw(:) = 0.0d0
+    dg_frag%current_momentum_cross_raw(:) = 0.0d0
+    dg_frag%current_momentum_decomp_ready = .false.
     if (.not. trace_decomp_initialized) then
       env_trace_decomp = ''
-      call get_environment_variable('SALMON_DG_TRACE_CURRENT_BLOCKS', env_trace_decomp, status=env_status)
+      call get_environment_variable('SALMON_DG_MIXED_Z_LOCAL_PROP_OBS_SERIES_CURRENT_DETAIL', &
+        env_trace_decomp, status=env_status)
+      if (env_status == 0) then
+        select case(trim(adjustl(env_trace_decomp)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          trace_decomp = .true.
+        end select
+      end if
+      env_trace_decomp = ''
+      call get_environment_variable('SALMON_DG_MIXED_Z_LOCAL_CURRENT_OP_DIAG', env_trace_decomp, status=env_status)
+      if (env_status == 0) then
+        select case(trim(adjustl(env_trace_decomp)))
+        case('1','y','Y','yes','YES','true','TRUE','on','ON')
+          trace_decomp = .true.
+        end select
+      end if
+      env_trace_decomp = ''
+      call get_environment_variable('SALMON_DG_MIXED_Z_LOCAL_CURRENT_OP_ALL', env_trace_decomp, status=env_status)
       if (env_status == 0) then
         select case(trim(adjustl(env_trace_decomp)))
         case('1','y','Y','yes','YES','true','TRUE','on','ON')
@@ -4150,6 +4171,14 @@ contains
         deallocate(coef_work, pc_work)
         allocate(coef_work(n_needed, state_work), pc_work(n_needed, state_work, 3))
       end if
+      if (.not. allocated(coef_col_work)) then
+        allocate(coef_col_work(max_basis, state_work), pc_block_work(max_basis, state_work), &
+                 mom_block_work(max_basis, max_basis))
+      else if (size(coef_col_work, 1) /= max_basis .or. size(coef_col_work, 2) /= state_work) then
+        deallocate(coef_col_work, pc_block_work, mom_block_work)
+        allocate(coef_col_work(max_basis, state_work), pc_block_work(max_basis, state_work), &
+                 mom_block_work(max_basis, max_basis))
+      end if
       if (trace_decomp) then
         if (.not. allocated(pc_self_work)) then
           allocate(pc_self_work(n_needed, state_work, 3), pc_cross_work(n_needed, state_work, 3))
@@ -4170,24 +4199,26 @@ contains
         call fetch_remote_coef_rows(dg_frag, ispin, needed_ids, coef_work(1:n_needed, 1:nbatch), &
                                     occ0, occ0 + nbatch - 1)
 
-        do iactive = 1, n_active_blocks
-          iblk = block_ids(iactive)
-          nrow = block_nrow(iblk)
-          ncol = block_ncol(iblk)
-          do io = 1, nrow
-            io_block = block_row_lid(io, iblk)
-            pos_i = block_row_pos(io, iblk)
-            do jo = 1, ncol
-              jo_block = block_col_lid(jo, iblk)
-              pos_j = block_col_pos(jo, iblk)
-              do idir = 1, 3
-                block_val = dg_frag%momentum_blocks(iblk)%val(idir, io_block, jo_block, ispin)
-                if (block_val == 0.0d0) cycle
+        if (trace_decomp) then
+          do iactive = 1, n_active_blocks
+            iblk = block_ids(iactive)
+            ifrag_row = dg_frag%momentum_blocks(iblk)%ifrag_row
+            ifrag_col = dg_frag%momentum_blocks(iblk)%ifrag_col
+            nrow = block_nrow(iblk)
+            ncol = block_ncol(iblk)
+            do io = 1, nrow
+              io_block = block_row_lid(io, iblk)
+              pos_i = block_row_pos(io, iblk)
+              do jo = 1, ncol
+                jo_block = block_col_lid(jo, iblk)
+                pos_j = block_col_pos(jo, iblk)
+                do idir = 1, 3
+                  block_val = dg_frag%momentum_blocks(iblk)%val(idir, io_block, jo_block, ispin)
+                  if (block_val == 0.0d0) cycle
 !$omp simd
-                do idx_row = 1, nbatch
-                  pc_work(pos_i, idx_row, idir) = pc_work(pos_i, idx_row, idir) + &
-                    block_val * coef_work(pos_j, idx_row)
-                  if (trace_decomp) then
+                  do idx_row = 1, nbatch
+                    pc_work(pos_i, idx_row, idir) = pc_work(pos_i, idx_row, idir) + &
+                      block_val * coef_work(pos_j, idx_row)
                     if (ifrag_row == ifrag_col) then
                       pc_self_work(pos_i, idx_row, idir) = pc_self_work(pos_i, idx_row, idir) + &
                         block_val * coef_work(pos_j, idx_row)
@@ -4195,12 +4226,43 @@ contains
                       pc_cross_work(pos_i, idx_row, idir) = pc_cross_work(pos_i, idx_row, idir) + &
                         block_val * coef_work(pos_j, idx_row)
                     end if
-                  end if
+                  end do
                 end do
               end do
             end do
           end do
-        end do
+        else
+          do iactive = 1, n_active_blocks
+            iblk = block_ids(iactive)
+            nrow = block_nrow(iblk)
+            ncol = block_ncol(iblk)
+            coef_col_work(1:ncol,1:nbatch) = (0.0d0, 0.0d0)
+            do jo = 1, ncol
+              pos_j = block_col_pos(jo, iblk)
+              coef_col_work(jo,1:nbatch) = coef_work(pos_j,1:nbatch)
+            end do
+            do idir = 1, 3
+              do jo = 1, ncol
+                jo_block = block_col_lid(jo, iblk)
+                do io = 1, nrow
+                  io_block = block_row_lid(io, iblk)
+                  mom_block_work(io, jo) = cmplx(dg_frag%momentum_blocks(iblk)%val(idir, io_block, jo_block, ispin), &
+                    0.0d0, kind=8)
+                end do
+              end do
+              call zgemm('N', 'N', nrow, nbatch, ncol, (1.0d0, 0.0d0), &
+                mom_block_work, max(1,max_basis), coef_col_work, max(1,max_basis), &
+                (0.0d0, 0.0d0), pc_block_work, max(1,max_basis))
+              if (dg_frag%mixed_z_perf_count_enabled) then
+                dg_frag%mixed_z_perf_zgemm_calls = dg_frag%mixed_z_perf_zgemm_calls + 1_8
+              end if
+              do io = 1, nrow
+                pos_i = block_row_pos(io, iblk)
+                pc_work(pos_i,1:nbatch,idir) = pc_work(pos_i,1:nbatch,idir) + pc_block_work(io,1:nbatch)
+              end do
+            end do
+          end do
+        end if
 
         curr_x = 0.0d0
         curr_y = 0.0d0
@@ -4269,11 +4331,9 @@ contains
     if (trace_decomp) then
       call comm_summation(curr_self_local, curr_self_sum, 3, dg_frag%icomm)
       call comm_summation(curr_cross_local, curr_cross_sum, 3, dg_frag%icomm)
-      if (dg_frag%id == 0) then
-        write(*,'(1x,a,3es13.5,a,3es13.5)') '[DG-CURRENT-BLOCKS] raw self=', curr_self_sum(:), &
-          ' cross=', curr_cross_sum(:)
-        flush(6)
-      end if
+      dg_frag%current_momentum_self_raw(:) = curr_self_sum(:)
+      dg_frag%current_momentum_cross_raw(:) = curr_cross_sum(:)
+      dg_frag%current_momentum_decomp_ready = .true.
     end if
     if (curr_sum(1) /= curr_sum(1) .or. curr_sum(2) /= curr_sum(2) .or. curr_sum(3) /= curr_sum(3)) then
       stop "DG-Fragment RT: NaN in block macroscopic current reduction"
@@ -4285,6 +4345,7 @@ contains
   subroutine calculate_local_wannier_polarization_dg(dg_frag, system, polarization_raw)
     use structures, only: s_dft_system
     use communication, only: comm_summation
+    use salmon_global, only: yn_dg_mixed_z
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -4309,6 +4370,11 @@ contains
     use_buffer_wannier = dg_frag%buffer_wannier_flux_seed_applied .and. &
       dg_frag%has_buffer_periodic_wannier_basis .and. &
       allocated(dg_frag%buffer_wannier_coef) .and. allocated(dg_frag%buffer_wannier_v)
+    if (yn_dg_mixed_z == 'y' .and. dg_frag%has_mixed_wannier_bpw_position .and. &
+        allocated(dg_frag%mixed_wannier_bpw_z) .and. allocated(dg_frag%mixed_wannier_bpw_pcoef)) then
+      call calculate_global_mixed_wannier_bpw_polarization_dg(dg_frag, system, polarization_raw)
+      return
+    end if
     if (.not. use_buffer_wannier) then
       if (dg_frag%has_global_wannier_basis .and. allocated(dg_frag%global_wannier_coef) .and. &
           allocated(dg_frag%global_wannier_center)) then
@@ -4491,6 +4557,7 @@ contains
   subroutine calculate_global_wannier_center_polarization_dg(dg_frag, system, polarization_raw)
     use structures, only: s_dft_system
     use communication, only: comm_summation
+    use salmon_global, only: yn_dg_mixed_z
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -4529,14 +4596,18 @@ contains
     end if
     env_mixed_z = ''
     call get_environment_variable('SALMON_DG_MIXED_Z', env_mixed_z, length=env_len, status=env_status)
-    use_mixed_z = .false.
+    use_mixed_z = (yn_dg_mixed_z == 'y')
     if (env_status == 0 .and. env_len > 0) then
       select case (adjustl(trim(env_mixed_z(1:env_len))))
       case ('1','y','Y','yes','YES','true','TRUE','on','ON')
         use_mixed_z = dg_frag%has_mixed_wannier_bpw_position .and. allocated(dg_frag%mixed_wannier_bpw_z) .and. &
           allocated(dg_frag%mixed_wannier_bpw_pcoef)
+      case ('0','n','N','no','NO','false','FALSE','off','OFF')
+        use_mixed_z = .false.
       end select
     end if
+    if (use_mixed_z) use_mixed_z = dg_frag%has_mixed_wannier_bpw_position .and. &
+      allocated(dg_frag%mixed_wannier_bpw_z) .and. allocated(dg_frag%mixed_wannier_bpw_pcoef)
     if (use_mixed_z) then
       call calculate_global_mixed_wannier_bpw_polarization_dg(dg_frag, system, polarization_raw)
       return
@@ -4706,6 +4777,7 @@ contains
   subroutine calculate_global_mixed_wannier_bpw_polarization_dg(dg_frag, system, polarization_raw)
     use structures, only: s_dft_system
     use communication, only: comm_summation
+    use misc_routines, only: get_wtime
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -4716,11 +4788,27 @@ contains
     integer :: global_row, local_row
     real(8) :: pol_local(3), pol_sum(3), occ
     real(8) :: pol_ww_local(3), pol_wp_local(3), pol_ww_sum(3), pol_wp_sum(3)
-    complex(8), allocatable :: cw_local(:,:), cw_sum(:,:), cmix(:,:)
-    complex(8) :: pos_expect, pos_ww, pos_wp
+    real(8) :: pol_ww_diag_local(3), pol_ww_offdiag_local(3)
+    real(8) :: pol_ww_same_owner_local(3), pol_ww_cross_owner_local(3)
+    real(8) :: pol_ww_diag_sum(3), pol_ww_offdiag_sum(3)
+    real(8) :: pol_ww_same_owner_sum(3), pol_ww_cross_owner_sum(3)
+    real(8) :: ww_pair_count_total, ww_pair_count_diag, ww_pair_count_offdiag, ww_pair_count_cross_owner
+    real(8) :: occ_local, occ_sum, w_occ_local, w_occ_sum
+    real(8) :: zww_diag_sum, center_diag_sum, center_local_sum, zww_diag_val, center_val
+    real(8) :: zww_diag_min, zww_diag_max, center_min, center_max, diff_val
+    real(8) :: diff_min, diff_max, diff_rms, rho_diag, weight_diag, weighted_zww, weighted_center
+    real(8) :: weighted_diff, weighted_zww_sum, weighted_center_sum, weighted_diff_sum
+    real(8) :: local_center_count, local_center_mismatch, cell_shift_min, cell_shift_max
+    real(8), allocatable :: prod_weight_local(:), prod_weight_sum(:)
+    real(8), allocatable :: prod_contrib_local(:), prod_contrib_sum(:)
+    real(8), allocatable :: prod_rho_local(:), prod_rho_sum(:), prod_occ_local(:), prod_occ_sum_by_w(:)
+    complex(8), allocatable :: cw_local(:,:), cw_sum(:,:), cmix(:,:), cmix_occ(:,:), rho_mix(:,:)
+    complex(8), allocatable :: coef_block(:,:)
+    complex(8) :: pos_expect, pos_ww, pos_wp, zterm
     character(32) :: env_trace
     integer :: env_status, env_len
-    logical :: trace_mixed_pol
+    logical :: trace_mixed_pol, perf_count
+    real(8) :: perf_t0
 
     polarization_raw(:) = 0.0d0
     pol_local(:) = 0.0d0
@@ -4729,8 +4817,85 @@ contains
     pol_wp_local(:) = 0.0d0
     pol_ww_sum(:) = 0.0d0
     pol_wp_sum(:) = 0.0d0
+    pol_ww_diag_local(:) = 0.0d0
+    pol_ww_offdiag_local(:) = 0.0d0
+    pol_ww_same_owner_local(:) = 0.0d0
+    pol_ww_cross_owner_local(:) = 0.0d0
+    pol_ww_diag_sum(:) = 0.0d0
+    pol_ww_offdiag_sum(:) = 0.0d0
+    pol_ww_same_owner_sum(:) = 0.0d0
+    pol_ww_cross_owner_sum(:) = 0.0d0
+    ww_pair_count_total = 0.0d0
+    ww_pair_count_diag = 0.0d0
+    ww_pair_count_offdiag = 0.0d0
+    ww_pair_count_cross_owner = 0.0d0
+    occ_local = 0.0d0
+    occ_sum = 0.0d0
+    w_occ_local = 0.0d0
+    w_occ_sum = 0.0d0
+    zww_diag_sum = 0.0d0
+    center_diag_sum = 0.0d0
+    center_local_sum = 0.0d0
+    zww_diag_min = huge(1.0d0)
+    zww_diag_max = -huge(1.0d0)
+    center_min = huge(1.0d0)
+    center_max = -huge(1.0d0)
+    diff_min = huge(1.0d0)
+    diff_max = -huge(1.0d0)
+    diff_rms = 0.0d0
+    weighted_zww = 0.0d0
+    weighted_center = 0.0d0
+    weighted_diff = 0.0d0
+    weighted_zww_sum = 0.0d0
+    weighted_center_sum = 0.0d0
+    weighted_diff_sum = 0.0d0
+    local_center_count = 0.0d0
+    local_center_mismatch = 0.0d0
+    cell_shift_min = huge(1.0d0)
+    cell_shift_max = -huge(1.0d0)
+    dg_frag%mixed_z_prod_pz_ww_raw = 0.0d0
+    dg_frag%mixed_z_prod_pz_ww_diag_raw = 0.0d0
+    dg_frag%mixed_z_prod_pz_ww_offdiag_raw = 0.0d0
+    dg_frag%mixed_z_prod_pz_ww_same_owner_raw = 0.0d0
+    dg_frag%mixed_z_prod_pz_ww_cross_owner_raw = 0.0d0
+    dg_frag%mixed_z_prod_pz_ww_pair_count_total = 0.0d0
+    dg_frag%mixed_z_prod_pz_ww_pair_count_diag = 0.0d0
+    dg_frag%mixed_z_prod_pz_ww_pair_count_offdiag = 0.0d0
+    dg_frag%mixed_z_prod_pz_ww_pair_count_cross_owner = 0.0d0
+    dg_frag%mixed_z_prod_zww_diag_sum = 0.0d0
+    dg_frag%mixed_z_prod_center_diag_sum = 0.0d0
+    dg_frag%mixed_z_prod_center_diag_local_sum = 0.0d0
+    dg_frag%mixed_z_prod_zww_diag_min = 0.0d0
+    dg_frag%mixed_z_prod_zww_diag_max = 0.0d0
+    dg_frag%mixed_z_prod_zww_diag_mean = 0.0d0
+    dg_frag%mixed_z_prod_center_z_min = 0.0d0
+    dg_frag%mixed_z_prod_center_z_max = 0.0d0
+    dg_frag%mixed_z_prod_center_z_mean = 0.0d0
+    dg_frag%mixed_z_prod_diag_minus_center_min = 0.0d0
+    dg_frag%mixed_z_prod_diag_minus_center_max = 0.0d0
+    dg_frag%mixed_z_prod_diag_minus_center_rms = 0.0d0
+    dg_frag%mixed_z_prod_weighted_zww_diag_sum = 0.0d0
+    dg_frag%mixed_z_prod_weighted_center_sum = 0.0d0
+    dg_frag%mixed_z_prod_weighted_diff_sum = 0.0d0
+    dg_frag%mixed_z_prod_wrap_shift_count = 0.0d0
+    dg_frag%mixed_z_prod_cell_shift_min = 0.0d0
+    dg_frag%mixed_z_prod_cell_shift_max = 0.0d0
+    dg_frag%mixed_z_prod_owner_gid_mismatch_count = 0.0d0
+    dg_frag%mixed_z_prod_center_source_mismatch_count = 0.0d0
+    dg_frag%mixed_z_prod_pz_wp_raw = 0.0d0
+    dg_frag%mixed_z_prod_pz_pp_raw = 0.0d0
+    dg_frag%mixed_z_prod_pz_occ_sum = 0.0d0
+    dg_frag%mixed_z_prod_pz_w_occ_weight = 0.0d0
+    dg_frag%mixed_z_prod_pz_w_dim = 0.0d0
+    dg_frag%mixed_z_prod_pz_decomp_ready = .false.
+    if (allocated(dg_frag%mixed_z_prod_zww_diag_by_w)) deallocate(dg_frag%mixed_z_prod_zww_diag_by_w)
+    if (allocated(dg_frag%mixed_z_prod_ww_diag_weight_by_w)) deallocate(dg_frag%mixed_z_prod_ww_diag_weight_by_w)
+    if (allocated(dg_frag%mixed_z_prod_ww_diag_contrib_by_w)) deallocate(dg_frag%mixed_z_prod_ww_diag_contrib_by_w)
+    if (allocated(dg_frag%mixed_z_prod_ww_diag_rho_by_w)) deallocate(dg_frag%mixed_z_prod_ww_diag_rho_by_w)
+    if (allocated(dg_frag%mixed_z_prod_ww_diag_occ_by_w)) deallocate(dg_frag%mixed_z_prod_ww_diag_occ_by_w)
     env_trace = ''
     trace_mixed_pol = .false.
+    perf_count = dg_frag%mixed_z_perf_count_enabled
     call get_environment_variable('SALMON_DG_MIXED_Z_TRACE', env_trace, length=env_len, status=env_status)
     if (env_status == 0 .and. env_len > 0) then
       select case (adjustl(trim(env_trace(1:env_len))))
@@ -4746,9 +4911,87 @@ contains
     n_p = dg_frag%mixed_wannier_bpw_np
     n_mix = dg_frag%mixed_wannier_bpw_nmix
     if (n_w <= 0 .or. n_p < 0 .or. n_mix /= n_w + n_p) return
+    ww_pair_count_total = dble(n_w) * dble(n_w)
+    ww_pair_count_diag = dble(n_w)
+    ww_pair_count_offdiag = max(0.0d0, ww_pair_count_total - ww_pair_count_diag)
+    if (allocated(dg_frag%global_wannier_owner_frag)) then
+      do iw = 1, min(n_w, size(dg_frag%global_wannier_owner_frag))
+        do jw = 1, min(n_w, size(dg_frag%global_wannier_owner_frag))
+          if (dg_frag%global_wannier_owner_frag(iw) /= dg_frag%global_wannier_owner_frag(jw)) then
+            ww_pair_count_cross_owner = ww_pair_count_cross_owner + 1.0d0
+          end if
+        end do
+      end do
+    end if
+    do iw = 1, n_w
+      zww_diag_val = real(dg_frag%mixed_wannier_bpw_z(3, iw, iw, 1), kind=8)
+      zww_diag_sum = zww_diag_sum + zww_diag_val
+      zww_diag_min = min(zww_diag_min, zww_diag_val)
+      zww_diag_max = max(zww_diag_max, zww_diag_val)
+      if (allocated(dg_frag%global_wannier_center) .and. iw <= size(dg_frag%global_wannier_center, 2)) then
+        center_val = dg_frag%global_wannier_center(3, iw)
+        center_diag_sum = center_diag_sum + center_val
+        center_min = min(center_min, center_val)
+        center_max = max(center_max, center_val)
+        diff_val = zww_diag_val - center_val
+        diff_min = min(diff_min, diff_val)
+        diff_max = max(diff_max, diff_val)
+        diff_rms = diff_rms + diff_val * diff_val
+        cell_shift_min = min(cell_shift_min, diff_val)
+        cell_shift_max = max(cell_shift_max, diff_val)
+        if (abs(diff_val) > 1.0d-8) local_center_mismatch = local_center_mismatch + 1.0d0
+      end if
+    end do
+    if (allocated(dg_frag%global_wannier_local_ids) .and. allocated(dg_frag%global_wannier_local_center)) then
+      do i_local = 1, min(size(dg_frag%global_wannier_local_ids, 2), size(dg_frag%global_wannier_local_center, 3))
+        do iw = 1, min(size(dg_frag%global_wannier_local_ids, 1), size(dg_frag%global_wannier_local_center, 2))
+          if (dg_frag%global_wannier_local_ids(iw, i_local) < 1 .or. &
+              dg_frag%global_wannier_local_ids(iw, i_local) > n_w) cycle
+          center_local_sum = center_local_sum + dg_frag%global_wannier_local_center(3, iw, i_local)
+          local_center_count = local_center_count + 1.0d0
+        end do
+      end do
+    end if
+    if (n_w > 0) then
+      diff_rms = sqrt(max(diff_rms / dble(n_w), 0.0d0))
+    end if
+    if (zww_diag_min == huge(1.0d0)) zww_diag_min = 0.0d0
+    if (zww_diag_max == -huge(1.0d0)) zww_diag_max = 0.0d0
+    if (center_min == huge(1.0d0)) center_min = 0.0d0
+    if (center_max == -huge(1.0d0)) center_max = 0.0d0
+    if (diff_min == huge(1.0d0)) diff_min = 0.0d0
+    if (diff_max == -huge(1.0d0)) diff_max = 0.0d0
+    if (cell_shift_min == huge(1.0d0)) cell_shift_min = 0.0d0
+    if (cell_shift_max == -huge(1.0d0)) cell_shift_max = 0.0d0
+
+    allocate(dg_frag%mixed_z_prod_zww_diag_by_w(n_w), &
+             dg_frag%mixed_z_prod_ww_diag_weight_by_w(n_w), &
+             dg_frag%mixed_z_prod_ww_diag_contrib_by_w(n_w), &
+             dg_frag%mixed_z_prod_ww_diag_rho_by_w(n_w), &
+             dg_frag%mixed_z_prod_ww_diag_occ_by_w(n_w))
+    allocate(prod_weight_local(n_w), prod_weight_sum(n_w), prod_contrib_local(n_w), prod_contrib_sum(n_w))
+    allocate(prod_rho_local(n_w), prod_rho_sum(n_w), prod_occ_local(n_w), prod_occ_sum_by_w(n_w))
+    dg_frag%mixed_z_prod_zww_diag_by_w(:) = 0.0d0
+    dg_frag%mixed_z_prod_ww_diag_weight_by_w(:) = 0.0d0
+    dg_frag%mixed_z_prod_ww_diag_contrib_by_w(:) = 0.0d0
+    dg_frag%mixed_z_prod_ww_diag_rho_by_w(:) = 0.0d0
+    dg_frag%mixed_z_prod_ww_diag_occ_by_w(:) = 0.0d0
+    prod_weight_local(:) = 0.0d0
+    prod_weight_sum(:) = 0.0d0
+    prod_contrib_local(:) = 0.0d0
+    prod_contrib_sum(:) = 0.0d0
+    prod_rho_local(:) = 0.0d0
+    prod_rho_sum(:) = 0.0d0
+    prod_occ_local(:) = 0.0d0
+    prod_occ_sum_by_w(:) = 0.0d0
+    do iw = 1, n_w
+      dg_frag%mixed_z_prod_zww_diag_by_w(iw) = real(dg_frag%mixed_wannier_bpw_z(3, iw, iw, 1), kind=8)
+    end do
 
     allocate(cw_local(n_w,max(1,dg_frag%nstate_tot)), cw_sum(n_w,max(1,dg_frag%nstate_tot)))
     allocate(cmix(n_mix,max(1,dg_frag%nstate_tot)))
+    allocate(cmix_occ(n_mix,max(1,dg_frag%nstate_tot)), rho_mix(n_mix,n_mix))
+    allocate(coef_block(max(1,size(dg_frag%global_wannier_coef,1)), max(1,dg_frag%nstate_tot)))
 
     do ispin = 1, min(dg_frag%nspin, system%nspin, size(dg_frag%mixed_wannier_bpw_z, 4))
       nocc_spin = 0
@@ -4757,67 +5000,125 @@ contains
       if (nocc_spin <= 0) cycle
 
       cw_local(:, :) = (0.0d0, 0.0d0)
+      if (perf_count) perf_t0 = get_wtime()
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local = ifrag - dg_frag%ifrag_start + 1
         if (i_local < 1 .or. i_local > size(dg_frag%global_wannier_coef, 4)) cycle
         nbasis = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%global_wannier_coef, 1))
+        if (nbasis <= 0) cycle
+        coef_block(1:nbasis,1:nocc_spin) = (0.0d0, 0.0d0)
         do ib = 1, nbasis
           global_row = dg_frag%index_basis(ib, ifrag, ispin)
           if (global_row < 1 .or. global_row > dg_frag%n_mat_max) cycle
           local_row = dg_frag%coef_global_to_local(global_row, ispin)
           if (local_row < 1 .or. local_row > size(dg_frag%coef, 1)) cycle
-          do iw = 1, n_w
-            do istate = 1, nocc_spin
-              cw_local(iw,istate) = cw_local(iw,istate) + &
-                conjg(dg_frag%global_wannier_coef(ib, iw, ispin, i_local)) * &
-                dg_frag%coef(local_row,istate,ispin)
-            end do
-          end do
+          coef_block(ib,1:nocc_spin) = dg_frag%coef(local_row,1:nocc_spin,ispin)
         end do
+        call zgemm('C', 'N', n_w, nocc_spin, nbasis, (1.0d0, 0.0d0), &
+          dg_frag%global_wannier_coef(1:nbasis,1:n_w,ispin,i_local), max(1,nbasis), &
+          coef_block, max(1,size(coef_block,1)), (1.0d0, 0.0d0), cw_local, max(1,n_w))
+        if (perf_count) dg_frag%mixed_z_perf_zgemm_calls = dg_frag%mixed_z_perf_zgemm_calls + 1_8
       end do
+      if (perf_count) dg_frag%mixed_z_perf_wall_pz_build_cw = &
+        dg_frag%mixed_z_perf_wall_pz_build_cw + (get_wtime() - perf_t0)
+      if (perf_count) perf_t0 = get_wtime()
       call comm_summation(cw_local, cw_sum, n_w * max(1,dg_frag%nstate_tot), dg_frag%icomm)
+      if (perf_count) dg_frag%mixed_z_perf_wall_pz_reduce = &
+        dg_frag%mixed_z_perf_wall_pz_reduce + (get_wtime() - perf_t0)
 
       if (dg_frag%id == 0) then
+        if (perf_count) perf_t0 = get_wtime()
         cmix(:, :) = (0.0d0, 0.0d0)
+        cmix_occ(:, :) = (0.0d0, 0.0d0)
+        rho_mix(:, :) = (0.0d0, 0.0d0)
         cmix(1:n_w,1:nocc_spin) = cw_sum(1:n_w,1:nocc_spin)
         if (n_p > 0) cmix(n_w+1:n_w+n_p,1:nocc_spin) = dg_frag%mixed_wannier_bpw_pcoef(1:n_p,1:nocc_spin,ispin)
         do istate = 1, nocc_spin
           occ = max(0.0d0, system%rocc(istate, 1, ispin))
           if (occ <= 0.0d0) cycle
-          do idir = 1, 3
-            pos_expect = (0.0d0, 0.0d0)
-            pos_ww = (0.0d0, 0.0d0)
-            pos_wp = (0.0d0, 0.0d0)
-            do iw = 1, n_w
-              do jw = 1, n_w
-                pos_ww = pos_ww + conjg(cmix(iw,istate)) * &
-                  dg_frag%mixed_wannier_bpw_z(idir,iw,jw,ispin) * cmix(jw,istate)
-              end do
-            end do
-            do iw = 1, n_w
-              do jw = n_w + 1, n_mix
-                pos_wp = pos_wp + conjg(cmix(iw,istate)) * &
-                  dg_frag%mixed_wannier_bpw_z(idir,iw,jw,ispin) * cmix(jw,istate) + &
-                  conjg(cmix(jw,istate)) * dg_frag%mixed_wannier_bpw_z(idir,jw,iw,ispin) * cmix(iw,istate)
-              end do
-            end do
-            do iw = 1, n_mix
-              do jw = 1, n_mix
-                pos_expect = pos_expect + conjg(cmix(iw,istate)) * &
-                  dg_frag%mixed_wannier_bpw_z(idir,iw,jw,ispin) * cmix(jw,istate)
-              end do
-            end do
-            pol_local(idir) = pol_local(idir) - occ * real(pos_expect, kind=8)
-            pol_ww_local(idir) = pol_ww_local(idir) - occ * real(pos_ww, kind=8)
-            pol_wp_local(idir) = pol_wp_local(idir) - occ * real(pos_wp, kind=8)
+          occ_local = occ_local + occ
+          cmix_occ(1:n_mix,istate) = cmix(1:n_mix,istate) * cmplx(occ, 0.0d0, kind=8)
+          do iw = 1, n_w
+            rho_diag = real(conjg(cmix(iw,istate)) * cmix(iw,istate), kind=8)
+            prod_rho_local(iw) = prod_rho_local(iw) + rho_diag
+            prod_occ_local(iw) = prod_occ_local(iw) + occ
           end do
         end do
+        call zgemm('N', 'C', n_mix, n_mix, nocc_spin, (1.0d0, 0.0d0), cmix_occ, max(1,n_mix), &
+          cmix, max(1,n_mix), (0.0d0, 0.0d0), rho_mix, max(1,n_mix))
+        if (perf_count) dg_frag%mixed_z_perf_zgemm_calls = dg_frag%mixed_z_perf_zgemm_calls + 1_8
+        do iw = 1, n_w
+          weight_diag = real(rho_mix(iw,iw), kind=8)
+          w_occ_local = w_occ_local + weight_diag
+          weighted_zww = weighted_zww + weight_diag * real(dg_frag%mixed_wannier_bpw_z(3, iw, iw, ispin), kind=8)
+            prod_weight_local(iw) = prod_weight_local(iw) + weight_diag
+            prod_contrib_local(iw) = prod_contrib_local(iw) - weight_diag * &
+              real(dg_frag%mixed_wannier_bpw_z(3, iw, iw, ispin), kind=8)
+            if (allocated(dg_frag%global_wannier_center) .and. iw <= size(dg_frag%global_wannier_center, 2)) then
+              weighted_center = weighted_center + weight_diag * dg_frag%global_wannier_center(3, iw)
+              weighted_diff = weighted_diff + weight_diag * &
+                (real(dg_frag%mixed_wannier_bpw_z(3, iw, iw, ispin), kind=8) - &
+                 dg_frag%global_wannier_center(3, iw))
+            end if
+        end do
+        do idir = 1, 3
+          pos_expect = (0.0d0, 0.0d0)
+          pos_ww = (0.0d0, 0.0d0)
+          pos_wp = (0.0d0, 0.0d0)
+          do iw = 1, n_mix
+            do jw = 1, n_mix
+              zterm = dg_frag%mixed_wannier_bpw_z(idir,iw,jw,ispin) * rho_mix(jw,iw)
+              pos_expect = pos_expect + zterm
+              if (iw <= n_w .and. jw <= n_w) then
+                pos_ww = pos_ww + zterm
+                if (iw == jw) then
+                  pol_ww_diag_local(idir) = pol_ww_diag_local(idir) - real(zterm, kind=8)
+                else
+                  pol_ww_offdiag_local(idir) = pol_ww_offdiag_local(idir) - real(zterm, kind=8)
+                end if
+                if (allocated(dg_frag%global_wannier_owner_frag)) then
+                  if (iw <= size(dg_frag%global_wannier_owner_frag) .and. &
+                      jw <= size(dg_frag%global_wannier_owner_frag)) then
+                    if (dg_frag%global_wannier_owner_frag(iw) == dg_frag%global_wannier_owner_frag(jw)) then
+                      pol_ww_same_owner_local(idir) = pol_ww_same_owner_local(idir) - real(zterm, kind=8)
+                    else
+                      pol_ww_cross_owner_local(idir) = pol_ww_cross_owner_local(idir) - real(zterm, kind=8)
+                    end if
+                  end if
+                end if
+              else if ((iw <= n_w .and. jw > n_w) .or. (iw > n_w .and. jw <= n_w)) then
+                pos_wp = pos_wp + zterm
+              end if
+            end do
+          end do
+          pol_local(idir) = pol_local(idir) - real(pos_expect, kind=8)
+          pol_ww_local(idir) = pol_ww_local(idir) - real(pos_ww, kind=8)
+          pol_wp_local(idir) = pol_wp_local(idir) - real(pos_wp, kind=8)
+        end do
+        if (perf_count) dg_frag%mixed_z_perf_wall_pz_contract_z = &
+          dg_frag%mixed_z_perf_wall_pz_contract_z + (get_wtime() - perf_t0)
       end if
     end do
 
+    if (perf_count) perf_t0 = get_wtime()
     call comm_summation(pol_local, pol_sum, 3, dg_frag%icomm)
     call comm_summation(pol_ww_local, pol_ww_sum, 3, dg_frag%icomm)
     call comm_summation(pol_wp_local, pol_wp_sum, 3, dg_frag%icomm)
+    call comm_summation(pol_ww_diag_local, pol_ww_diag_sum, 3, dg_frag%icomm)
+    call comm_summation(pol_ww_offdiag_local, pol_ww_offdiag_sum, 3, dg_frag%icomm)
+    call comm_summation(pol_ww_same_owner_local, pol_ww_same_owner_sum, 3, dg_frag%icomm)
+    call comm_summation(pol_ww_cross_owner_local, pol_ww_cross_owner_sum, 3, dg_frag%icomm)
+    call comm_summation(occ_local, occ_sum, dg_frag%icomm)
+    call comm_summation(w_occ_local, w_occ_sum, dg_frag%icomm)
+    call comm_summation(weighted_zww, weighted_zww_sum, dg_frag%icomm)
+    call comm_summation(weighted_center, weighted_center_sum, dg_frag%icomm)
+    call comm_summation(weighted_diff, weighted_diff_sum, dg_frag%icomm)
+    call comm_summation(prod_weight_local, prod_weight_sum, n_w, dg_frag%icomm)
+    call comm_summation(prod_contrib_local, prod_contrib_sum, n_w, dg_frag%icomm)
+    call comm_summation(prod_rho_local, prod_rho_sum, n_w, dg_frag%icomm)
+    call comm_summation(prod_occ_local, prod_occ_sum_by_w, n_w, dg_frag%icomm)
+    if (perf_count) dg_frag%mixed_z_perf_wall_pz_reduce = &
+      dg_frag%mixed_z_perf_wall_pz_reduce + (get_wtime() - perf_t0)
     if (pol_sum(1) /= pol_sum(1) .or. pol_sum(2) /= pol_sum(2) .or. pol_sum(3) /= pol_sum(3)) then
       stop "DG-Fragment RT: NaN in mixed Wannier+BPW polarization reduction"
     end if
@@ -4825,8 +5126,48 @@ contains
       write(*,'(1x,a,3(1x,1pe13.5),a,3(1x,1pe13.5),a,3(1x,1pe13.5))') &
         "[DG-MIXED-POL] total=", pol_sum(:), " WW=", pol_ww_sum(:), " WP+PW=", pol_wp_sum(:)
     end if
+    dg_frag%mixed_z_prod_pz_ww_raw = pol_ww_sum(3)
+    dg_frag%mixed_z_prod_pz_ww_diag_raw = pol_ww_diag_sum(3)
+    dg_frag%mixed_z_prod_pz_ww_offdiag_raw = pol_ww_offdiag_sum(3)
+    dg_frag%mixed_z_prod_pz_ww_same_owner_raw = pol_ww_same_owner_sum(3)
+    dg_frag%mixed_z_prod_pz_ww_cross_owner_raw = pol_ww_cross_owner_sum(3)
+    dg_frag%mixed_z_prod_pz_ww_pair_count_total = ww_pair_count_total
+    dg_frag%mixed_z_prod_pz_ww_pair_count_diag = ww_pair_count_diag
+    dg_frag%mixed_z_prod_pz_ww_pair_count_offdiag = ww_pair_count_offdiag
+    dg_frag%mixed_z_prod_pz_ww_pair_count_cross_owner = ww_pair_count_cross_owner
+    dg_frag%mixed_z_prod_zww_diag_sum = zww_diag_sum
+    dg_frag%mixed_z_prod_center_diag_sum = center_diag_sum
+    dg_frag%mixed_z_prod_center_diag_local_sum = center_local_sum
+    dg_frag%mixed_z_prod_zww_diag_min = zww_diag_min
+    dg_frag%mixed_z_prod_zww_diag_max = zww_diag_max
+    dg_frag%mixed_z_prod_zww_diag_mean = zww_diag_sum / max(dble(n_w), 1.0d0)
+    dg_frag%mixed_z_prod_center_z_min = center_min
+    dg_frag%mixed_z_prod_center_z_max = center_max
+    dg_frag%mixed_z_prod_center_z_mean = center_diag_sum / max(dble(n_w), 1.0d0)
+    dg_frag%mixed_z_prod_diag_minus_center_min = diff_min
+    dg_frag%mixed_z_prod_diag_minus_center_max = diff_max
+    dg_frag%mixed_z_prod_diag_minus_center_rms = diff_rms
+    dg_frag%mixed_z_prod_weighted_zww_diag_sum = weighted_zww_sum
+    dg_frag%mixed_z_prod_ww_diag_weight_by_w(:) = prod_weight_sum(:)
+    dg_frag%mixed_z_prod_ww_diag_contrib_by_w(:) = prod_contrib_sum(:)
+    dg_frag%mixed_z_prod_ww_diag_rho_by_w(:) = prod_rho_sum(:)
+    dg_frag%mixed_z_prod_ww_diag_occ_by_w(:) = prod_occ_sum_by_w(:)
+    dg_frag%mixed_z_prod_weighted_center_sum = weighted_center_sum
+    dg_frag%mixed_z_prod_weighted_diff_sum = weighted_diff_sum
+    dg_frag%mixed_z_prod_wrap_shift_count = local_center_mismatch
+    dg_frag%mixed_z_prod_cell_shift_min = cell_shift_min
+    dg_frag%mixed_z_prod_cell_shift_max = cell_shift_max
+    dg_frag%mixed_z_prod_owner_gid_mismatch_count = 0.0d0
+    dg_frag%mixed_z_prod_center_source_mismatch_count = local_center_mismatch
+    dg_frag%mixed_z_prod_pz_wp_raw = pol_wp_sum(3)
+    dg_frag%mixed_z_prod_pz_pp_raw = pol_sum(3) - pol_ww_sum(3) - pol_wp_sum(3)
+    dg_frag%mixed_z_prod_pz_occ_sum = occ_sum
+    dg_frag%mixed_z_prod_pz_w_occ_weight = w_occ_sum
+    dg_frag%mixed_z_prod_pz_w_dim = dble(n_w)
+    dg_frag%mixed_z_prod_pz_decomp_ready = .true.
     polarization_raw(:) = pol_sum(:)
-    deallocate(cw_local, cw_sum, cmix)
+    deallocate(cw_local, cw_sum, cmix, cmix_occ, rho_mix, coef_block, prod_weight_local, prod_weight_sum, prod_contrib_local, prod_contrib_sum, &
+               prod_rho_local, prod_rho_sum, prod_occ_local, prod_occ_sum_by_w)
   end subroutine calculate_global_mixed_wannier_bpw_polarization_dg
 
   subroutine calculate_formal_dg_wannier_polarization_dg(dg_frag, system, polarization_raw)
@@ -5155,6 +5496,7 @@ contains
   subroutine calculate_nonlocal_current_dg(dg_frag, system, mg, ppg, Ac_tot, current_raw)
     use structures
     use communication, only: comm_summation
+    use misc_routines, only: get_wtime
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -5164,15 +5506,16 @@ contains
     real(8),                intent(out)   :: current_raw(3)
 
     integer :: ispin, ifrag, i_local, ib, ilma, idir, istate, occ0, nbatch
-    integer :: nocc_spin, nbf, gid, n_global, n_needed, pos, state_work
+    integer :: nocc_spin, nbf, gid, n_global, n_needed, pos, state_work, max_nbf_work
     integer :: occ_first, occ_last, local_idx, local_col
     integer, allocatable :: needed_ids(:), needed_pos(:)
     logical, allocatable :: row_needed(:), row_output(:)
-    complex(8), allocatable :: coef_work(:,:), uV_state(:,:)
-    complex(8) :: amp, ramp
+    complex(8), allocatable :: coef_work(:,:), uV_state(:,:), coef_block(:,:), r_weight(:,:), rV_state(:,:)
     real(8) :: curr_local(3), curr_sum(3), occ
+    real(8) :: perf_t0
     integer(8) :: target_bytes, bytes_per_state
     integer, parameter :: current_coef_cache_target_mb = 64
+    logical :: perf_count
 
     current_raw(:) = 0.0d0
     curr_local(:) = 0.0d0
@@ -5184,12 +5527,23 @@ contains
     if (.not. allocated(dg_frag%index_basis)) return
     if (.not. allocated(dg_frag%n_basis)) return
 
+    perf_count = dg_frag%mixed_z_perf_count_enabled
+    if (perf_count) perf_t0 = get_wtime()
     call ensure_nonlocal_projector_overlap_cache(dg_frag, mg, ppg, system%nspin, system%hvol, Ac_tot)
+    if (perf_count) then
+      dg_frag%mixed_z_perf_wall_current_nl_cache = &
+        dg_frag%mixed_z_perf_wall_current_nl_cache + (get_wtime() - perf_t0)
+    end if
     if (.not. allocated(dg_frag%nl_projector_overlap)) return
     if (.not. allocated(dg_frag%nl_projector_r_overlap)) return
 
+    if (perf_count) perf_t0 = get_wtime()
     n_global = size(dg_frag%coef_owner, 1)
     allocate(row_needed(n_global), row_output(n_global), needed_pos(n_global))
+    if (perf_count) then
+      dg_frag%mixed_z_perf_wall_current_nl_setup = &
+        dg_frag%mixed_z_perf_wall_current_nl_setup + (get_wtime() - perf_t0)
+    end if
 
     do ispin = 1, min(dg_frag%nspin, system%nspin)
       nocc_spin = 0
@@ -5208,6 +5562,7 @@ contains
         if (occ_first > occ_last) cycle
       end if
 
+      if (perf_count) perf_t0 = get_wtime()
       row_needed(:) = .false.
       row_output(:) = .false.
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
@@ -5240,15 +5595,28 @@ contains
       target_bytes = int(current_coef_cache_target_mb, kind=8) * 1024_8 * 1024_8
       bytes_per_state = 16_8 * int(max(1, n_needed + 4 * ppg%Nlma), kind=8)
       state_work = max(1, min(occ_last - occ_first + 1, int(max(1_8, target_bytes / max(1_8, bytes_per_state)))))
-      if (allocated(coef_work)) deallocate(coef_work, uV_state)
+      max_nbf_work = 1
+      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        max_nbf_work = max(max_nbf_work, &
+          min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1), size(dg_frag%nl_projector_overlap, 1)))
+      end do
+      if (allocated(coef_work)) deallocate(coef_work, uV_state, coef_block, r_weight, rV_state)
       allocate(coef_work(n_needed, state_work))
       allocate(uV_state(ppg%Nlma, state_work))
+      allocate(coef_block(max_nbf_work, state_work))
+      allocate(r_weight(max_nbf_work, ppg%Nlma))
+      allocate(rV_state(max_nbf_work, state_work))
+      if (perf_count) then
+        dg_frag%mixed_z_perf_wall_current_nl_setup = &
+          dg_frag%mixed_z_perf_wall_current_nl_setup + (get_wtime() - perf_t0)
+      end if
 
       do occ0 = occ_first, occ_last, state_work
         nbatch = min(state_work, occ_last - occ0 + 1)
         coef_work(:, :) = (0.0d0, 0.0d0)
         uV_state(:, :) = (0.0d0, 0.0d0)
         if (dg_frag%coef_state_block_mode) then
+          if (perf_count) perf_t0 = get_wtime()
           do pos = 1, n_needed
             local_idx = dg_frag%coef_global_to_local(needed_ids(pos), ispin)
             if (local_idx < 1 .or. local_idx > size(dg_frag%coef, 1)) cycle
@@ -5258,62 +5626,100 @@ contains
               coef_work(pos, istate) = dg_frag%coef(local_idx, local_col, ispin)
             end do
           end do
+          if (perf_count) then
+            dg_frag%mixed_z_perf_wall_current_nl_fetch = &
+              dg_frag%mixed_z_perf_wall_current_nl_fetch + (get_wtime() - perf_t0)
+          end if
         else
+          if (perf_count) perf_t0 = get_wtime()
           call fetch_remote_coef_rows(dg_frag, ispin, needed_ids, coef_work(1:n_needed, 1:nbatch), &
                                       occ0, occ0 + nbatch - 1)
+          if (perf_count) then
+            dg_frag%mixed_z_perf_wall_current_nl_fetch = &
+              dg_frag%mixed_z_perf_wall_current_nl_fetch + (get_wtime() - perf_t0)
+          end if
         end if
 
+        if (perf_count) perf_t0 = get_wtime()
         do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
           i_local = ifrag - dg_frag%ifrag_start + 1
           if (i_local < 1 .or. i_local > size(dg_frag%nl_projector_overlap, 4)) cycle
           nbf = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1), size(dg_frag%nl_projector_overlap, 1))
+          if (nbf <= 0) cycle
+          coef_block(1:nbf,1:nbatch) = (0.0d0, 0.0d0)
           do ib = 1, nbf
             gid = dg_frag%index_basis(ib, ifrag, ispin)
             if (gid < 1 .or. gid > n_global) cycle
             pos = needed_pos(gid)
             if (pos <= 0) cycle
-            do istate = 1, nbatch
-              do ilma = 1, ppg%Nlma
-                amp = dg_frag%nl_projector_overlap(ib, ilma, ispin, i_local) * coef_work(pos, istate)
-                uV_state(ilma, istate) = uV_state(ilma, istate) + amp
-              end do
+            coef_block(ib,1:nbatch) = coef_work(pos,1:nbatch)
+          end do
+          do ilma = 1, ppg%Nlma
+            do ib = 1, nbf
+              r_weight(ib, ilma) = dg_frag%nl_projector_overlap(ib, ilma, ispin, i_local)
             end do
           end do
+          call zgemm('T', 'N', ppg%Nlma, nbatch, nbf, (1.0d0, 0.0d0), &
+            r_weight, max(1,max_nbf_work), &
+            coef_block, max(1,max_nbf_work), (1.0d0, 0.0d0), &
+            uV_state, max(1,ppg%Nlma))
+          if (perf_count) dg_frag%mixed_z_perf_zgemm_calls = dg_frag%mixed_z_perf_zgemm_calls + 1_8
         end do
+        if (perf_count) then
+          dg_frag%mixed_z_perf_wall_current_nl_project = &
+            dg_frag%mixed_z_perf_wall_current_nl_project + (get_wtime() - perf_t0)
+        end if
 
+        if (perf_count) perf_t0 = get_wtime()
         do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
           i_local = ifrag - dg_frag%ifrag_start + 1
           if (i_local < 1 .or. i_local > size(dg_frag%nl_projector_overlap, 4)) cycle
           nbf = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%index_basis, 1), size(dg_frag%nl_projector_overlap, 1))
-          do ib = 1, nbf
-            gid = dg_frag%index_basis(ib, ifrag, ispin)
-            if (gid < 1 .or. gid > n_global) cycle
-            if (.not. row_output(gid)) cycle
-            pos = needed_pos(gid)
-            if (pos <= 0) cycle
-            do istate = 1, nbatch
-              occ = system%rocc(occ0 + istate - 1, 1, ispin)
-              if (occ <= 0.0d0) cycle
-              do ilma = 1, ppg%Nlma
-                amp = ppg%rinv_uvu(ilma) * uV_state(ilma, istate)
-                do idir = 1, 3
-                  ramp = dg_frag%nl_projector_r_overlap(idir, ib, ilma, ispin, i_local)
-                  curr_local(idir) = curr_local(idir) + occ * 2.0d0 * &
-                    aimag(conjg(coef_work(pos, istate)) * conjg(ramp) * amp)
-                end do
+          if (nbf <= 0) cycle
+          do idir = 1, 3
+            do ilma = 1, ppg%Nlma
+              do ib = 1, nbf
+                r_weight(ib, ilma) = conjg(dg_frag%nl_projector_r_overlap(idir, ib, ilma, ispin, i_local)) * &
+                  cmplx(ppg%rinv_uvu(ilma), 0.0d0, kind=8)
+              end do
+            end do
+            call zgemm('N', 'N', nbf, nbatch, ppg%Nlma, (1.0d0, 0.0d0), &
+              r_weight, max(1,max_nbf_work), uV_state, max(1,ppg%Nlma), &
+              (0.0d0, 0.0d0), rV_state, max(1,max_nbf_work))
+            if (perf_count) dg_frag%mixed_z_perf_zgemm_calls = dg_frag%mixed_z_perf_zgemm_calls + 1_8
+            do ib = 1, nbf
+              gid = dg_frag%index_basis(ib, ifrag, ispin)
+              if (gid < 1 .or. gid > n_global) cycle
+              if (.not. row_output(gid)) cycle
+              pos = needed_pos(gid)
+              if (pos <= 0) cycle
+              do istate = 1, nbatch
+                occ = system%rocc(occ0 + istate - 1, 1, ispin)
+                if (occ <= 0.0d0) cycle
+                curr_local(idir) = curr_local(idir) + occ * 2.0d0 * &
+                  aimag(conjg(coef_work(pos, istate)) * rV_state(ib, istate))
               end do
             end do
           end do
         end do
+        if (perf_count) then
+          dg_frag%mixed_z_perf_wall_current_nl_contract = &
+            dg_frag%mixed_z_perf_wall_current_nl_contract + (get_wtime() - perf_t0)
+        end if
       end do
     end do
 
+    if (perf_count) perf_t0 = get_wtime()
     call comm_summation(curr_local, curr_sum, 3, dg_frag%icomm)
+    if (perf_count) then
+      dg_frag%mixed_z_perf_wall_current_nl_reduce = &
+        dg_frag%mixed_z_perf_wall_current_nl_reduce + (get_wtime() - perf_t0)
+    end if
     if (curr_sum(1) /= curr_sum(1) .or. curr_sum(2) /= curr_sum(2) .or. curr_sum(3) /= curr_sum(3)) then
       stop "DG-Fragment RT: NaN in nonlocal macroscopic current reduction"
     end if
     current_raw(:) = curr_sum(:)
-    if (allocated(coef_work)) deallocate(coef_work, uV_state)
+    if (allocated(coef_work)) deallocate(coef_work, uV_state, coef_block, r_weight, rV_state)
     if (allocated(needed_ids)) deallocate(needed_ids)
     deallocate(row_needed, row_output, needed_pos)
   end subroutine calculate_nonlocal_current_dg

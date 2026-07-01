@@ -36,16 +36,28 @@ P_owned -> global P coefficients
 
 No neighbor P coefficient is written by a non-owner fragment.  No propagated coefficient is dropped.
 
-## Matrix Construction Policy
+## Owner-Local Result and Halo-Owner Route
 
-The first implementation should be conservative:
+The first conservative implementation, `owner_local = W_owner + P_owned`, is a closed writeback space but is too small for the observed linear response.  The short C64 laser check showed that it removes almost all field response, consistent with the diagnostic result that most of the mixed-Z matrix norm is outside the owner-only block.
 
-1. Build the field block only on owner-local dynamic IDs: `W_owner + P_owned`.
-2. Use the existing global mixed-Z position matrix `mixed_wannier_bpw_z` restricted to those IDs.
-3. Do not include neighbor P as dynamic states.
-4. Keep the old `all` route available only as a diagnostic candidate, not as the recommended route.
+The production route should follow the original DG Hamiltonian structure:
 
-If owner-local response is too small, add a second-stage embedding correction.  That correction should modify the effective owner block matrix before propagation, but it must not introduce neighbor P coefficients into the propagated state unless an owner-consistent writeback rule exists.
+```text
+updated coefficients = owner W + owner P
+neighbor coefficients = communicated/read-only halo data
+local action = extended Hamiltonian block over W_owner + P_self + P_neighbor
+writeback = owner W + owner P only
+```
+
+In this definition, neighbor P is not a local owned degree of freedom and is not averaged back.  It is used only as input data when evaluating the owner rows of the local Hamiltonian action.
+
+The explicit input selector for the production route is:
+
+```fortran
+dg_mixed_z_frag_local_field_block = 'halo_owner'
+```
+
+The older `all` name remains a compatibility alias for the same neighbor-read/owner-write behavior.
 
 ## Verification
 

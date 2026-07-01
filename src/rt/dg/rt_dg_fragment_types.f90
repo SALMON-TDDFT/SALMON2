@@ -292,6 +292,42 @@ module rt_dg_fragment_types
     real(8), allocatable :: mixed_wannier_bpw_eval(:,:) ! (W+P state,nspin)
     complex(8), allocatable :: mixed_wannier_bpw_z(:,:,:,:) ! (3,W+P,W+P,nspin)
     complex(8), allocatable :: mixed_wannier_bpw_pcoef(:,:,:) ! (P state,propagated state,nspin)
+    real(8), allocatable :: mixed_z_prod_zww_diag_by_w(:)
+    real(8), allocatable :: mixed_z_prod_ww_diag_weight_by_w(:)
+    real(8), allocatable :: mixed_z_prod_ww_diag_contrib_by_w(:)
+    real(8), allocatable :: mixed_z_prod_ww_diag_rho_by_w(:)
+    real(8), allocatable :: mixed_z_prod_ww_diag_occ_by_w(:)
+    complex(8), allocatable :: mixed_wannier_bpw_p_transform(:,:,:) ! (raw PW,P state,nspin)
+    complex(8), allocatable :: mixed_wannier_bpw_p_metric(:,:,:) ! (P state,P state,nspin)
+    integer :: mixed_wannier_bpw_praw_dim = 0
+    logical :: has_mixed_wannier_bpw_p_basis = .false.
+    real(8) :: mixed_wannier_bpw_sraw_herm_diff = 0.0d0
+    real(8) :: mixed_wannier_bpw_sperp_herm_diff = 0.0d0
+    real(8) :: mixed_wannier_bpw_qmat_metric_herm_diff = 0.0d0
+    real(8) :: mixed_wannier_bpw_qmat_metric_min_eval = 0.0d0
+    real(8) :: mixed_wannier_bpw_qmat_metric_max_eval = 0.0d0
+    real(8) :: mixed_wannier_bpw_qmat_metric_cond = 0.0d0
+    real(8) :: mixed_wannier_bpw_qmat_metric_diff_from_i = 0.0d0
+    real(8) :: mixed_wannier_bpw_qleft_metric_diff_from_i = 0.0d0
+    real(8) :: mixed_wannier_bpw_final_metric_herm_diff = 0.0d0
+    real(8) :: mixed_wannier_bpw_final_metric_min_eval = 0.0d0
+    real(8) :: mixed_wannier_bpw_final_metric_max_eval = 0.0d0
+    real(8) :: mixed_wannier_bpw_final_metric_cond = 0.0d0
+    real(8) :: mixed_wannier_bpw_final_metric_diff_from_i = 0.0d0
+    real(8) :: mixed_wannier_bpw_transform_metric_herm_diff = 0.0d0
+    real(8) :: mixed_wannier_bpw_transform_metric_min_eval = 0.0d0
+    real(8) :: mixed_wannier_bpw_transform_metric_max_eval = 0.0d0
+    real(8) :: mixed_wannier_bpw_transform_metric_cond = 0.0d0
+    real(8) :: mixed_wannier_bpw_transform_metric_diff_from_i = 0.0d0
+    real(8) :: mixed_wannier_bpw_transform_metric_diff_saved = 0.0d0
+    real(8) :: mixed_wannier_bpw_h_input_herm_diff = 0.0d0
+    real(8) :: mixed_wannier_bpw_h_evec_unitarity_diff = 0.0d0
+    real(8) :: mixed_wannier_bpw_h_input_evec_diff = 0.0d0
+    logical :: mixed_wannier_bpw_final_uses_h_evec = .false.
+    real(8) :: mixed_wannier_bpw_qmat_col_norm_min = 0.0d0
+    real(8) :: mixed_wannier_bpw_qmat_col_norm_max = 0.0d0
+    real(8) :: mixed_wannier_bpw_qmat_row_norm_min = 0.0d0
+    real(8) :: mixed_wannier_bpw_qmat_row_norm_max = 0.0d0
     ! Fragment-local WPW reduced-neighbor propagation candidate.
     ! This is intentionally separate from the global Wannier+BPW-perp mixed-Z path.
     logical :: wpw_reduced_ready = .false.
@@ -303,6 +339,7 @@ module rt_dg_fragment_types
     complex(8), allocatable :: wpw_reduced_H(:,:,:,:) ! (max_dim,max_dim,nspin,local fragment)
     complex(8), allocatable :: wpw_reduced_S(:,:,:,:) ! (max_dim,max_dim,nspin,local fragment)
     complex(8), allocatable :: wpw_reduced_transform(:,:,:) ! raw extended basis <- reduced basis, (max_dim,max_dim,local fragment)
+    complex(8), allocatable :: wpw_reduced_Hraw_build(:,:,:) ! raw H used to build reduced transform, (max_dim,max_dim,local fragment)
     complex(8), allocatable :: wpw_reduced_Sraw_build(:,:,:) ! raw S used to build reduced transform, (max_dim,max_dim,local fragment)
     integer, allocatable :: wpw_reduced_nraw(:)       ! raw extended basis size before S-orthogonal reduction
     real(8), allocatable :: wpw_reduced_eval(:,:,:) ! (max_dim,nspin,local fragment)
@@ -350,10 +387,218 @@ module rt_dg_fragment_types
     real(8) :: current_nl(3)                   ! nonlocal pseudopotential current density
     real(8) :: current_dia(3)                  ! diamagnetic current density proxy
     real(8) :: current_total(3)                ! total current density = para + nonlocal + dia
+    real(8) :: current_momentum_self_raw(3) = 0.0d0  ! production momentum-block self contribution before /Ngrid
+    real(8) :: current_momentum_cross_raw(3) = 0.0d0 ! production momentum-block cross contribution before /Ngrid
+    logical :: current_momentum_decomp_ready = .false.
     real(8) :: polarization_lg(3)              ! length-gauge electronic polarization density
     real(8) :: polarization_lg_ref(3)          ! initial length-gauge polarization reference
     logical :: polarization_lg_ref_ready       ! true after initial reference is captured
     real(8) :: dipole_lg_raw(3)                ! unnormalized length-gauge electronic dipole
+    logical :: mixed_z_local_prop_rho_ready = .false.
+    logical :: mixed_z_local_prop_rho_bad = .true.
+    integer :: mixed_z_local_prop_rho_step = -1
+    real(8) :: mixed_z_local_prop_rho_prod_int = 0.0d0
+    real(8) :: mixed_z_local_prop_rho_candidate_int = 0.0d0
+    real(8) :: mixed_z_local_prop_rho_diff_int = 0.0d0
+    real(8) :: mixed_z_local_prop_rho_max_abs_diff = 0.0d0
+    real(8) :: mixed_z_local_prop_rho_rms_diff = 0.0d0
+    logical :: mixed_z_local_prop_payload_ready = .false.
+    logical :: mixed_z_local_prop_payload_bad = .true.
+    integer :: mixed_z_local_prop_payload_step = -1
+    real(8) :: mixed_z_local_prop_payload_coef_norm = 0.0d0
+    real(8) :: mixed_z_local_prop_payload_prod_coef_norm = 0.0d0
+    real(8) :: mixed_z_local_prop_payload_coef_diff_snorm = 0.0d0
+    real(8) :: mixed_z_local_prop_payload_rel_coef_diff_snorm = 0.0d0
+    real(8) :: mixed_z_local_prop_payload_dim = 0.0d0
+    real(8) :: mixed_z_local_prop_payload_occ_trace = 0.0d0
+    complex(8), allocatable :: mixed_z_local_prop_payload_wcoef(:,:,:) ! (global W,state,spin)
+    complex(8), allocatable :: mixed_z_frag_local_wcoef(:,:,:) ! (owner-local W slot,state,spin)
+    complex(8), allocatable :: mixed_z_frag_local_pself_coef(:,:,:) ! (owner-local P_self slot,state,spin)
+    complex(8), allocatable :: mixed_z_frag_local_pneighbor_coef(:,:,:) ! (owner-local P_neighbor slot,state,spin)
+    integer, allocatable :: mixed_z_frag_local_w_gid(:)
+    integer, allocatable :: mixed_z_frag_local_pself_gid(:)
+    integer, allocatable :: mixed_z_frag_local_pneighbor_gid(:)
+    integer, allocatable :: mixed_z_frag_local_w_mix_gid(:)
+    integer, allocatable :: mixed_z_frag_local_pself_mix_gid(:)
+    integer, allocatable :: mixed_z_frag_local_pneighbor_mix_gid(:)
+    integer :: mixed_z_frag_local_w_slots = 0
+    integer :: mixed_z_frag_local_pself_slots = 0
+    integer :: mixed_z_frag_local_pneighbor_slots = 0
+    integer :: mixed_z_frag_local_nstate = 0
+    integer :: mixed_z_frag_local_nspin = 0
+    logical :: mixed_z_frag_local_storage_ready = .false.
+    character(len=32) :: mixed_z_local_prop_payload_source = 'missing_payload'
+    character(len=32) :: mixed_z_local_prop_payload_basis_kind = 'none'
+    character(len=32) :: mixed_z_local_prop_payload_build_route = 'not_requested'
+    character(len=32) :: mixed_z_local_prop_payload_block_reason = 'not_requested'
+    integer(8) :: mixed_z_perf_nstep = 0_8
+    integer(8) :: mixed_z_perf_prop_writeback_calls = 0_8
+    integer(8) :: mixed_z_perf_rho_writeback_calls = 0_8
+    integer(8) :: mixed_z_perf_pz_writeback_calls = 0_8
+    integer(8) :: mixed_z_perf_current_writeback_calls = 0_8
+    integer(8) :: mixed_z_perf_series_validation_calls = 0_8
+    integer(8) :: mixed_z_perf_payload_current_calls = 0_8
+    integer(8) :: mixed_z_perf_zgemm_calls = 0_8
+    integer(8) :: mixed_z_perf_eigensolve_calls = 0_8
+    integer(8) :: mixed_z_perf_expdiag_calls = 0_8
+    integer(8) :: mixed_z_perf_mpi_reduce_calls = 0_8
+    integer(8) :: mixed_z_perf_obs_mpi_reduce_calls = 0_8
+    integer(8) :: mixed_z_perf_prop_pack_calls = 0_8
+    integer(8) :: mixed_z_perf_prop_unpack_calls = 0_8
+    integer(8) :: mixed_z_perf_prop_pack_allocs = 0_8
+    integer(8) :: mixed_z_perf_prop_unpack_allocs = 0_8
+    integer(8) :: mixed_z_perf_prop_pack_zero_bytes = 0_8
+    integer(8) :: mixed_z_perf_prop_unpack_zero_bytes = 0_8
+    integer(8) :: mixed_z_perf_prop_pack_w_copy_bytes = 0_8
+    integer(8) :: mixed_z_perf_prop_pack_p_copy_bytes = 0_8
+    integer(8) :: mixed_z_perf_prop_unpack_w_copy_bytes = 0_8
+    integer(8) :: mixed_z_perf_prop_unpack_p_copy_bytes = 0_8
+    integer :: mixed_z_perf_final_itt = -1
+    logical :: mixed_z_perf_count_enabled = .false.
+    logical :: mixed_z_frag_local_stability_baseline_ready = .false.
+    character(len=16) :: mixed_z_frag_local_field_block_kind = 'all'
+    real(8) :: mixed_z_frag_local_field_abs_max = 0.0d0
+    real(8) :: mixed_z_frag_local_rho_baseline = 0.0d0
+    real(8) :: mixed_z_frag_local_pz_baseline = 0.0d0
+    real(8) :: mixed_z_frag_local_current_baseline = 0.0d0
+    real(8) :: mixed_z_frag_local_norm_baseline = 0.0d0
+    real(8) :: mixed_z_frag_local_energy_baseline = 0.0d0
+    real(8) :: mixed_z_frag_local_rho_drift_max = 0.0d0
+    real(8) :: mixed_z_frag_local_pz_drift_max = 0.0d0
+    real(8) :: mixed_z_frag_local_current_drift_max = 0.0d0
+    real(8) :: mixed_z_frag_local_norm_drift_max = 0.0d0
+    real(8) :: mixed_z_frag_local_energy_drift_max = 0.0d0
+    real(8) :: mixed_z_perf_wall_prop = 0.0d0
+    real(8) :: mixed_z_perf_wall_prop_pack = 0.0d0
+    real(8) :: mixed_z_perf_wall_prop_comm = 0.0d0
+    real(8) :: mixed_z_perf_wall_prop_field_exp = 0.0d0
+    real(8) :: mixed_z_perf_wall_prop_phase = 0.0d0
+    real(8) :: mixed_z_perf_wall_prop_unpack = 0.0d0
+    real(8) :: mixed_z_perf_wall_obs = 0.0d0
+    real(8) :: mixed_z_perf_wall_series = 0.0d0
+    real(8) :: mixed_z_perf_wall_obs_prepare = 0.0d0
+    real(8) :: mixed_z_perf_wall_rho_writeback = 0.0d0
+    real(8) :: mixed_z_perf_wall_pz_writeback = 0.0d0
+    real(8) :: mixed_z_perf_wall_pz_prod = 0.0d0
+    real(8) :: mixed_z_perf_wall_pz_reduced = 0.0d0
+    real(8) :: mixed_z_perf_wall_pz_candidate = 0.0d0
+    real(8) :: mixed_z_perf_wall_pz_build_cw = 0.0d0
+    real(8) :: mixed_z_perf_wall_pz_contract_z = 0.0d0
+    real(8) :: mixed_z_perf_wall_pz_reduce = 0.0d0
+    real(8) :: mixed_z_perf_wall_current_writeback = 0.0d0
+    real(8) :: mixed_z_perf_wall_payload_current = 0.0d0
+    real(8) :: mixed_z_perf_wall_current_para = 0.0d0
+    real(8) :: mixed_z_perf_wall_current_nl = 0.0d0
+    real(8) :: mixed_z_perf_wall_current_nl_cache = 0.0d0
+    real(8) :: mixed_z_perf_wall_current_nl_setup = 0.0d0
+    real(8) :: mixed_z_perf_wall_current_nl_fetch = 0.0d0
+    real(8) :: mixed_z_perf_wall_current_nl_project = 0.0d0
+    real(8) :: mixed_z_perf_wall_current_nl_contract = 0.0d0
+    real(8) :: mixed_z_perf_wall_current_nl_reduce = 0.0d0
+    real(8) :: mixed_z_perf_wall_current_dia = 0.0d0
+    real(8) :: mixed_z_perf_wall_obs_mpi_reduce = 0.0d0
+    real(8) :: mixed_z_local_pz_wcenter_raw_z = 0.0d0
+    real(8) :: mixed_z_local_pz_wcenter_ref_raw_z = 0.0d0
+    real(8) :: mixed_z_local_pz_wcenter_diff = 0.0d0
+    real(8) :: mixed_z_local_pz_wcenter_rel_diff = huge(1.0d0)
+    real(8) :: mixed_z_local_pz_wcenter_weight = 0.0d0
+    real(8) :: mixed_z_local_pz_wcenter_ref_weight = 0.0d0
+    real(8) :: mixed_z_local_pz_wcenter_slot_count = 0.0d0
+    real(8) :: mixed_z_local_pz_wcenter_block_count = 0.0d0
+    real(8) :: mixed_z_local_pz_wcenter_owner_unique_raw_z = 0.0d0
+    real(8) :: mixed_z_local_pz_wcenter_owner_unique_ref_raw_z = 0.0d0
+    real(8) :: mixed_z_local_pz_wcenter_owner_unique_weight = 0.0d0
+    real(8) :: mixed_z_local_pz_wcenter_owner_unique_ref_weight = 0.0d0
+    real(8) :: mixed_z_local_pz_wcenter_owner_unique_count = 0.0d0
+    real(8) :: mixed_z_local_pz_wcenter_missing_owner_count = 0.0d0
+    real(8) :: mixed_z_local_pz_wcenter_duplicate_owner_count = 0.0d0
+    real(8) :: mixed_z_local_pz_owner_unique_global_center_raw_z = 0.0d0
+    real(8) :: mixed_z_local_pz_owner_unique_global_zww_diag_raw_z = 0.0d0
+    real(8) :: mixed_z_local_pz_owner_unique_weighted_diff_global_center = 0.0d0
+    real(8) :: mixed_z_local_pz_owner_unique_weighted_diff_global_zww_diag = 0.0d0
+    real(8) :: mixed_z_local_pz_owner_unique_center_source_match_count = 0.0d0
+    real(8) :: mixed_z_local_pz_owner_unique_wrap_match_count = 0.0d0
+    real(8) :: mixed_z_local_pz_owner_unique_cell_shift_count = 0.0d0
+    real(8) :: mixed_z_local_pz_zww_weight_sum_z_prod = 0.0d0
+    real(8) :: mixed_z_local_pz_zww_weight_sum_z_lsp = 0.0d0
+    real(8) :: mixed_z_local_pz_zww_weight_sum_weight_prod = 0.0d0
+    real(8) :: mixed_z_local_pz_zww_weight_sum_weight_lsp = 0.0d0
+    real(8) :: mixed_z_local_pz_zww_weight_sum_contrib_prod = 0.0d0
+    real(8) :: mixed_z_local_pz_zww_weight_sum_contrib_lsp = 0.0d0
+    real(8) :: mixed_z_local_pz_zww_weight_max_abs_diff_z = 0.0d0
+    real(8) :: mixed_z_local_pz_zww_weight_max_abs_diff_weight = 0.0d0
+    real(8) :: mixed_z_local_pz_zww_weight_max_abs_diff_contrib = 0.0d0
+    real(8) :: mixed_z_local_pz_zww_weight_rms_diff_contrib = 0.0d0
+    real(8) :: mixed_z_local_pz_zww_weight_owner_gid_mismatch_count = 0.0d0
+    real(8) :: mixed_z_local_pz_weight_source_sum_occ_prod = 0.0d0
+    real(8) :: mixed_z_local_pz_weight_source_sum_occ_lsp = 0.0d0
+    real(8) :: mixed_z_local_pz_weight_source_sum_rho_prod = 0.0d0
+    real(8) :: mixed_z_local_pz_weight_source_sum_rho_lsp = 0.0d0
+    real(8) :: mixed_z_local_pz_weight_source_max_abs_diff_occ = 0.0d0
+    real(8) :: mixed_z_local_pz_weight_source_max_abs_diff_rho = 0.0d0
+    real(8) :: mixed_z_local_pz_weight_source_max_abs_diff_factor = 0.0d0
+    real(8) :: mixed_z_local_pz_weight_source_max_abs_diff_weight = 0.0d0
+    real(8) :: mixed_z_local_pz_weight_source_weighted_zww_prod = 0.0d0
+    real(8) :: mixed_z_local_pz_weight_source_weighted_zww_lsp = 0.0d0
+    real(8) :: mixed_z_local_pz_rhodiag_prod_observable_abs2 = 0.0d0
+    real(8) :: mixed_z_local_pz_rhodiag_prod_expdiag_abs2 = 0.0d0
+    real(8) :: mixed_z_local_pz_rhodiag_source_abs2 = 0.0d0
+    real(8) :: mixed_z_local_pz_rhodiag_source_smetric = 0.0d0
+    real(8) :: mixed_z_local_pz_rhodiag_ref_after_abs2 = 0.0d0
+    real(8) :: mixed_z_local_pz_rhodiag_ref_after_smetric = 0.0d0
+    real(8) :: mixed_z_local_pz_rhodiag_lsp_after_abs2 = 0.0d0
+    real(8) :: mixed_z_local_pz_rhodiag_lsp_after_smetric = 0.0d0
+    real(8) :: mixed_z_local_pz_rhodiag_repacked_global_abs2 = 0.0d0
+    real(8) :: mixed_z_local_pz_rhodiag_repacked_global_smetric = 0.0d0
+    real(8) :: mixed_z_local_pz_rhodiag_max_abs_diff_abs2 = 0.0d0
+    real(8) :: mixed_z_local_pz_rhodiag_max_abs_diff_smetric = 0.0d0
+    logical :: mixed_z_local_pz_rhodiag_repacked_global_available = .false.
+    real(8) :: mixed_z_local_pz_repacked_bridge_prod = 0.0d0
+    real(8) :: mixed_z_local_pz_repacked_bridge_local_cref = 0.0d0
+    real(8) :: mixed_z_local_pz_repacked_bridge_repacked_global = 0.0d0
+    real(8) :: mixed_z_local_pz_repacked_bridge_rho_local_cref = 0.0d0
+    real(8) :: mixed_z_local_pz_repacked_bridge_rho_repacked_global = 0.0d0
+    real(8) :: mixed_z_local_pz_repacked_bridge_weight_repacked_global = 0.0d0
+    real(8) :: mixed_z_local_pz_repacked_bridge_diff_prod_local = 0.0d0
+    real(8) :: mixed_z_local_pz_repacked_bridge_diff_prod_repacked = 0.0d0
+    logical :: mixed_z_local_pz_repacked_bridge_available = .false.
+    logical :: mixed_z_local_pz_wcenter_ready = .false.
+    logical :: mixed_z_local_pz_wcenter_bad = .true.
+    real(8) :: mixed_z_prod_pz_ww_raw = 0.0d0
+    real(8) :: mixed_z_prod_pz_ww_diag_raw = 0.0d0
+    real(8) :: mixed_z_prod_pz_ww_offdiag_raw = 0.0d0
+    real(8) :: mixed_z_prod_pz_ww_same_owner_raw = 0.0d0
+    real(8) :: mixed_z_prod_pz_ww_cross_owner_raw = 0.0d0
+    real(8) :: mixed_z_prod_pz_ww_pair_count_total = 0.0d0
+    real(8) :: mixed_z_prod_pz_ww_pair_count_diag = 0.0d0
+    real(8) :: mixed_z_prod_pz_ww_pair_count_offdiag = 0.0d0
+    real(8) :: mixed_z_prod_pz_ww_pair_count_cross_owner = 0.0d0
+    real(8) :: mixed_z_prod_zww_diag_sum = 0.0d0
+    real(8) :: mixed_z_prod_center_diag_sum = 0.0d0
+    real(8) :: mixed_z_prod_center_diag_local_sum = 0.0d0
+    real(8) :: mixed_z_prod_zww_diag_min = 0.0d0
+    real(8) :: mixed_z_prod_zww_diag_max = 0.0d0
+    real(8) :: mixed_z_prod_zww_diag_mean = 0.0d0
+    real(8) :: mixed_z_prod_center_z_min = 0.0d0
+    real(8) :: mixed_z_prod_center_z_max = 0.0d0
+    real(8) :: mixed_z_prod_center_z_mean = 0.0d0
+    real(8) :: mixed_z_prod_diag_minus_center_min = 0.0d0
+    real(8) :: mixed_z_prod_diag_minus_center_max = 0.0d0
+    real(8) :: mixed_z_prod_diag_minus_center_rms = 0.0d0
+    real(8) :: mixed_z_prod_weighted_zww_diag_sum = 0.0d0
+    real(8) :: mixed_z_prod_weighted_center_sum = 0.0d0
+    real(8) :: mixed_z_prod_weighted_diff_sum = 0.0d0
+    real(8) :: mixed_z_prod_wrap_shift_count = 0.0d0
+    real(8) :: mixed_z_prod_cell_shift_min = 0.0d0
+    real(8) :: mixed_z_prod_cell_shift_max = 0.0d0
+    real(8) :: mixed_z_prod_owner_gid_mismatch_count = 0.0d0
+    real(8) :: mixed_z_prod_center_source_mismatch_count = 0.0d0
+    real(8) :: mixed_z_prod_pz_wp_raw = 0.0d0
+    real(8) :: mixed_z_prod_pz_pp_raw = 0.0d0
+    real(8) :: mixed_z_prod_pz_occ_sum = 0.0d0
+    real(8) :: mixed_z_prod_pz_w_occ_weight = 0.0d0
+    real(8) :: mixed_z_prod_pz_w_dim = 0.0d0
+    logical :: mixed_z_prod_pz_decomp_ready = .false.
     real(8) :: total_energy                    ! total energy
     real(8) :: energy_kinetic                  ! occupied expectation of kinetic block
     real(8) :: energy_nonlocal                 ! occupied expectation of nonlocal PP block

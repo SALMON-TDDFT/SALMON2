@@ -19,6 +19,20 @@
 
 module rt_dg_plane_wave
   use rt_dg_fragment_types, only: s_dg_fragment_rt, complex_matrix_block_info
+  use rt_dg_wpw_reduced_mixedz_diag, only: wpw_reduced_mixedz_operator_stats, &
+    wpw_reduced_canon_mixedz_current_coeff_stats, wpw_reduced_canon_mixedz_bridge_stats, &
+    wpw_reduced_canon_pz_block_operator_stats, wpw_reduced_canon_p_projection_stats, &
+    wpw_reduced_prod_p_basis_save_stats
+  use rt_dg_wpw_window, only: wpw_window_buffer_axis, wpw_window_transition_width_axis, &
+    wpw_fragment_box_size, wpw_fragment_box_bounds, wpw_raw_window_at_grid, &
+    wpw_normalized_window_at_grid, wpw_face_neighbor_fragment, wpw_local_is_neighbor_pair, &
+    map_global_to_phi_box_coord_pw
+  use rt_dg_wpw_linalg, only: build_wpw_sorth_reduced_neighbor_block, &
+    apply_s_orthogonal_transform, build_symmetric_orthogonal_hamiltonian, &
+    build_hermitian_pseudoinverse, build_hermitian_inverse_sqrt, build_hermitian_inverse, &
+    build_wpw_reduced_c_can_reference, build_wpw_reduced_raw_back_hybrid_from_inverse, &
+    build_wpw_reduced_raw_back_hybrid_matrix, zheev_with_query, zhegv_with_query, &
+    rectangular_singular_minmax, wpw_local_herm_max
   use structures, only: s_dft_system, s_scalar
   implicit none
 
@@ -36,12 +50,22 @@ module rt_dg_plane_wave
   public :: assemble_mixed_hamiltonian_dense
   public :: prepare_mixed_basis_startup
   public :: initialize_wpw_windows
+  public :: ensure_wpw_local_pp_blocks
   public :: build_wpw_sorth_reduced_neighbor_block
   public :: initialize_wpw_reduced_self_projection
   public :: diagnose_wpw_reduced_embed_local
   public :: diagnose_wpw_reduced_embed_prodcoef
   public :: diagnose_wpw_reduced_density
+  public :: diagnose_wpw_mixed_neighbor_hamiltonian
   public :: apply_wpw_reduced_density_to_production
+  public :: apply_wpw_reduced_pz_to_production
+  public :: wpw_normalized_window_at_grid
+  public :: wpw_face_neighbor_fragment
+  public :: map_global_to_phi_box_coord_pw
+  public :: reconstruct_psi_from_C_can
+  public :: build_wpw_reduced_c_can_reference
+  public :: build_wpw_reduced_raw_back_hybrid_from_inverse
+  public :: build_wpw_reduced_raw_back_hybrid_matrix
 
 contains
 
@@ -384,59 +408,7 @@ contains
     factor = cached_factor
   end function wpw_interface_penalty_factor
 
-  integer function wpw_window_buffer_axis(dg_frag, axis) result(buf)
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    integer, intent(in) :: axis
-    character(len=64) :: env_value
-    integer :: env_len, env_stat, ios
-    integer, save :: cached_buf = -1
-    logical, save :: initialized = .false.
 
-    if (.not. initialized) then
-      env_value = ''
-      call get_environment_variable('SALMON_DG_WPW_WINDOW_BUFFER', env_value, length=env_len, status=env_stat)
-      if (env_stat == 0 .and. env_len > 0) then
-        read(env_value(1:env_len), *, iostat=ios) cached_buf
-        if (ios /= 0) cached_buf = -1
-      end if
-      initialized = .true.
-    end if
-
-    if (cached_buf >= 0) then
-      buf = cached_buf
-    else
-      buf = 3
-    end if
-    buf = max(0, buf)
-  end function wpw_window_buffer_axis
-
-  integer function wpw_window_transition_width_axis(dg_frag, axis) result(width)
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    integer, intent(in) :: axis
-    character(len=64) :: env_value
-    integer :: env_len, env_stat, ios
-    integer, save :: cached_width = -1
-    logical, save :: initialized = .false.
-
-    if (.not. initialized) then
-      env_value = ''
-      call get_environment_variable('SALMON_DG_WPW_WINDOW_WIDTH', env_value, length=env_len, status=env_stat)
-      if (env_stat == 0 .and. env_len > 0) then
-        read(env_value(1:env_len), *, iostat=ios) cached_width
-        if (ios /= 0) cached_width = -1
-      end if
-      initialized = .true.
-    end if
-
-    if (cached_width > 0) then
-      width = cached_width
-    else
-      width = 2
-    end if
-    width = max(0, min(width, max(0, wpw_window_buffer_axis(dg_frag, axis))))
-  end function wpw_window_transition_width_axis
 
   integer function wpw_neighbor_filter_drop_g2_override() result(drop_g2)
     implicit none
@@ -849,106 +821,9 @@ contains
 
   end subroutine initialize_wpw_windows
 
-  subroutine wpw_fragment_box_size(dg_frag, ifrag, nx, ny, nz)
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    integer, intent(in) :: ifrag
-    integer, intent(out) :: nx, ny, nz
-    integer :: lo(3), hi(3)
 
-    call wpw_fragment_box_bounds(dg_frag, ifrag, lo, hi)
-    nx = hi(1) - lo(1) + 1
-    ny = hi(2) - lo(2) + 1
-    nz = hi(3) - lo(3) + 1
-  end subroutine wpw_fragment_box_size
 
-  subroutine wpw_fragment_box_bounds(dg_frag, ifrag, lo, hi)
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    integer, intent(in) :: ifrag
-    integer, intent(out) :: lo(3), hi(3)
 
-    if (allocated(dg_frag%frag_buf_lo) .and. allocated(dg_frag%frag_buf_hi)) then
-      lo(1:3) = dg_frag%frag_buf_lo(1:3, ifrag)
-      hi(1:3) = dg_frag%frag_buf_hi(1:3, ifrag)
-    else
-      lo(1) = dg_frag%ixyz_frag(1, ifrag) - wpw_window_buffer_axis(dg_frag, 1)
-      lo(2) = dg_frag%ixyz_frag(2, ifrag) - wpw_window_buffer_axis(dg_frag, 2)
-      lo(3) = dg_frag%ixyz_frag(3, ifrag) - wpw_window_buffer_axis(dg_frag, 3)
-      hi(1) = dg_frag%ixyz_frag(1, ifrag) + dg_frag%nxyz_domain(1, ifrag) - 1 + wpw_window_buffer_axis(dg_frag, 1)
-      hi(2) = dg_frag%ixyz_frag(2, ifrag) + dg_frag%nxyz_domain(2, ifrag) - 1 + wpw_window_buffer_axis(dg_frag, 2)
-      hi(3) = dg_frag%ixyz_frag(3, ifrag) + dg_frag%nxyz_domain(3, ifrag) - 1 + wpw_window_buffer_axis(dg_frag, 3)
-    end if
-  end subroutine wpw_fragment_box_bounds
-
-  subroutine wpw_raw_window_at_grid(dg_frag, ifrag, gx, gy, gz, q, grad_q)
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    integer, intent(in) :: ifrag, gx, gy, gz
-    real(8), intent(out) :: q, grad_q(3)
-    real(8) :: wx(3), dwx(3)
-
-    call wpw_axis_window(dg_frag, 1, ifrag, gx, wx(1), dwx(1))
-    call wpw_axis_window(dg_frag, 2, ifrag, gy, wx(2), dwx(2))
-    call wpw_axis_window(dg_frag, 3, ifrag, gz, wx(3), dwx(3))
-
-    q = wx(1) * wx(2) * wx(3)
-    grad_q(1) = dwx(1) * wx(2) * wx(3)
-    grad_q(2) = wx(1) * dwx(2) * wx(3)
-    grad_q(3) = wx(1) * wx(2) * dwx(3)
-  end subroutine wpw_raw_window_at_grid
-
-  subroutine wpw_axis_window(dg_frag, axis, ifrag, g, w, dw)
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    integer, intent(in) :: axis, ifrag, g
-    real(8), intent(out) :: w, dw
-    integer :: lo0, hi0, lo, hi, buf, width, ltot, shift0, shift
-    real(8) :: t, arg, h
-    real(8), parameter :: pi = 4.0d0 * atan(1.0d0)
-
-    w = 0.0d0
-    dw = 0.0d0
-    if (allocated(dg_frag%frag_core_lo) .and. allocated(dg_frag%frag_core_hi)) then
-      lo0 = dg_frag%frag_core_lo(axis, ifrag)
-      hi0 = dg_frag%frag_core_hi(axis, ifrag)
-    else
-      lo0 = dg_frag%ixyz_frag(axis, ifrag)
-      hi0 = dg_frag%ixyz_frag(axis, ifrag) + dg_frag%nxyz_domain(axis, ifrag) - 1
-    end if
-    buf = wpw_window_buffer_axis(dg_frag, axis)
-    width = wpw_window_transition_width_axis(dg_frag, axis)
-    ltot = max(1, dg_frag%lgnum_total(axis))
-    h = max(dg_frag%hgs(axis), 1.0d-30)
-    shift0 = nint(dble(g - lo0) / dble(ltot))
-
-    do shift = shift0 - 1, shift0 + 1
-      lo = lo0 + shift * ltot
-      hi = hi0 + shift * ltot
-      if (g >= lo .and. g <= hi) then
-        w = 1.0d0
-        dw = 0.0d0
-        return
-      end if
-      if (buf <= 0 .or. width <= 0) cycle
-      if (g >= lo - width .and. g < lo) then
-        t = dble(g - (lo - width)) / dble(width)
-        t = max(0.0d0, min(1.0d0, t))
-        arg = 0.5d0 * pi * t
-        w = sin(arg)
-        dw = 0.5d0 * pi * cos(arg) / (dble(width) * h)
-        return
-      end if
-      if (g > hi .and. g <= hi + width) then
-        t = dble(g - hi) / dble(width)
-        t = max(0.0d0, min(1.0d0, t))
-        arg = 0.5d0 * pi * t
-        w = cos(arg)
-        dw = -0.5d0 * pi * sin(arg) / (dble(width) * h)
-        return
-      end if
-    end do
-  end subroutine wpw_axis_window
 
   !=======================================================================
   ! Prepare mixed-basis operator blocks at startup without dense EVP.
@@ -2090,10 +1965,11 @@ contains
     end if
   end subroutine diagnose_wpw_kinetic
 
-  subroutine diagnose_wpw_local_ag_volume(dg_frag)
+  subroutine diagnose_wpw_local_ag_volume(dg_frag, force_store_blocks, quiet)
     use communication, only: comm_summation
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    logical, intent(in), optional :: force_store_blocks, quiet
 
     integer :: n_frag, n_pw, n_tot
     integer :: ifrag, jfrag, ipw, jpw, idx, jdx
@@ -2115,7 +1991,13 @@ contains
     complex(8) :: phase
     complex(8), parameter :: zi = (0.0d0, 1.0d0)
     real(8), parameter :: tiny_q = 1.0d-28
+    logical :: force_store_mode, quiet_mode
     external :: zheev, zhegv
+
+    force_store_mode = .false.
+    if (present(force_store_blocks)) force_store_mode = force_store_blocks
+    quiet_mode = .false.
+    if (present(quiet)) quiet_mode = quiet
 
     n_frag = dg_frag%n_frag
     n_pw = dg_frag%n_plane_waves
@@ -2199,8 +2081,8 @@ contains
     call wpw_local_block_magnitudes(dg_frag, T_ag, t_self_max, t_neigh_max, t_non_max)
 
     T_if(:, :) = (0.0d0, 0.0d0)
-    if (wpw_interface_diag_enabled() .or. wpw_pp_blocks_enabled() .or. wpw_pp_prop_diag_enabled() .or. &
-        wpw_mixed_block_diag_enabled()) then
+    if (force_store_mode .or. wpw_interface_diag_enabled() .or. wpw_pp_blocks_enabled() .or. &
+        wpw_pp_prop_diag_enabled() .or. wpw_mixed_block_diag_enabled()) then
       if_penalty = wpw_interface_penalty_factor()
       call compute_wpw_local_pp_interface(dg_frag, T_if)
       call hermitize_matrix(T_if, n_tot)
@@ -2293,13 +2175,13 @@ contains
       if_shift_max = 0.0d0
     end if
 
-    if (wpw_pp_blocks_enabled() .or. wpw_pp_prop_diag_enabled() .or. wpw_mixed_block_diag_enabled() .or. &
-        wpw_mixed_h_diag_enabled() .or. wpw_mixed_neighbor_h_diag_enabled()) &
-      call store_wpw_local_pp_blocks(dg_frag, S_ag, T_ag, T_if)
+    if (force_store_mode .or. wpw_pp_blocks_enabled() .or. wpw_pp_prop_diag_enabled() .or. &
+        wpw_mixed_block_diag_enabled() .or. wpw_mixed_h_diag_enabled() .or. wpw_mixed_neighbor_h_diag_enabled()) &
+      call store_wpw_local_pp_blocks(dg_frag, S_ag, T_ag, T_if, quiet_mode)
     if (wpw_pp_prop_diag_enabled()) call diagnose_wpw_pp_only_propagation(dg_frag)
     if (wpw_mixed_block_diag_enabled()) call diagnose_wpw_mixed_self_overlap(dg_frag)
 
-    if (dg_frag%id == 0) then
+    if (dg_frag%id == 0 .and. .not. quiet_mode) then
       write(*,'(1x,a,i0,a,i0,a,i0,13(a,1pe12.4),a,i0)') &
         '[DG-WPW-LOCAL] dim=', n_tot, ' nfrag=', n_frag, ' npw=', n_pw, &
         ' S_herm=', s_herm, ' T_herm=', t_herm, &
@@ -2327,14 +2209,32 @@ contains
     deallocate(work_mat, work_s, eval, eval_s, rwork, work_c)
   end subroutine diagnose_wpw_local_ag_volume
 
-  subroutine store_wpw_local_pp_blocks(dg_frag, S_ag, T_ag, T_if)
+  subroutine ensure_wpw_local_pp_blocks(dg_frag, quiet)
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    logical, intent(in), optional :: quiet
+    logical :: quiet_mode
+
+    quiet_mode = .false.
+    if (present(quiet)) quiet_mode = quiet
+    if (dg_frag%wpw_pp_blocks_ready .and. allocated(dg_frag%wpw_S_pp_blocks) .and. &
+        allocated(dg_frag%wpw_T_pp_volume_blocks) .and. &
+        allocated(dg_frag%wpw_T_pp_interface_blocks)) return
+    call diagnose_wpw_local_ag_volume(dg_frag, .true., quiet_mode)
+  end subroutine ensure_wpw_local_pp_blocks
+
+  subroutine store_wpw_local_pp_blocks(dg_frag, S_ag, T_ag, T_if, quiet)
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     complex(8), intent(in) :: S_ag(:,:), T_ag(:,:), T_if(:,:)
+    logical, intent(in), optional :: quiet
 
     integer :: n_pw, nfrag, nblocks
     integer :: ifrag, jfrag, ipw, jpw, ispin, iblk, idx, jdx
+    logical :: quiet_mode
 
+    quiet_mode = .false.
+    if (present(quiet)) quiet_mode = quiet
     n_pw = dg_frag%n_plane_waves
     nfrag = dg_frag%n_frag
     dg_frag%wpw_pp_blocks_ready = .false.
@@ -2381,7 +2281,7 @@ contains
     end do
     dg_frag%wpw_pp_blocks_ready = .true.
 
-    if (dg_frag%id == 0) then
+    if (dg_frag%id == 0 .and. .not. quiet_mode) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,1pe12.4)') &
         '[DG-WPW-BLOCKS] PP fragment-local blocks stored: nblocks=', nblocks, &
         ' nfrag=', nfrag, ' npw_per_frag=', n_pw, &
@@ -2896,11 +2796,12 @@ contains
     end if
   end subroutine diagnose_wpw_mixed_self_hamiltonian
 
-  subroutine diagnose_wpw_mixed_neighbor_hamiltonian(dg_frag, Vh, Vxc, Vpsl)
+  subroutine diagnose_wpw_mixed_neighbor_hamiltonian(dg_frag, Vh, Vxc, Vpsl, force_sorth, quiet)
     use structures
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_scalar), intent(in) :: Vh, Vxc(:), Vpsl
+    logical, intent(in), optional :: force_sorth, quiet
 
     integer :: i_local, ifrag, jfrag, axis, side, n_pfrag, pidx, qidx, iblk
     integer :: iw, jw, ib, ipw, ix, iy, iz, gx, gy, gz, idir, n_w, n_pw, n_mix, n_self
@@ -2926,7 +2827,7 @@ contains
     real(8) :: red_s_min, red_s_max, red_h_herm
     real(8) :: red_lambda_min_all, red_lambda_max_all, red_s_sn_max, red_snn_i_max, red_h_herm_max
     real(8) :: red_s_min_all, red_s_max_all
-    logical :: have_grad_cache, found
+    logical :: have_grad_cache, found, do_sorth, quiet_mode
     complex(8), parameter :: zi = (0.0d0, 1.0d0)
     complex(8) :: phase, grad_p(3), grad_sym_w(3)
     complex(8), allocatable :: S_mix(:,:), H_mix(:,:), S_filt(:,:), H_filt(:,:)
@@ -2942,6 +2843,11 @@ contains
     complex(8), allocatable :: wval(:), grad_wval(:,:), work(:)
     real(8), allocatable :: eval(:), eval_raw(:), eval_filt(:), eval_self(:), eval_red(:), rwork(:)
     external :: zhegv, zheev
+
+    do_sorth = wpw_neighbor_sorth_candidate_enabled()
+    if (present(force_sorth)) do_sorth = do_sorth .or. force_sorth
+    quiet_mode = .false.
+    if (present(quiet)) quiet_mode = quiet
 
     if (.not. dg_frag%has_global_wannier_local_basis) return
     if (.not. allocated(dg_frag%global_wannier_local_coef)) return
@@ -2987,7 +2893,7 @@ contains
         wpw_red_max_dim = max(wpw_red_max_dim, dg_frag%global_wannier_local_nkeep(i_local) + 7 * n_pw)
       end if
     end do
-    if (wpw_neighbor_sorth_candidate_enabled() .and. n_local_frag > 0 .and. wpw_red_max_dim > 0) then
+    if (do_sorth .and. n_local_frag > 0 .and. wpw_red_max_dim > 0) then
       if (allocated(dg_frag%wpw_reduced_dim)) deallocate(dg_frag%wpw_reduced_dim)
       if (allocated(dg_frag%wpw_reduced_nself)) deallocate(dg_frag%wpw_reduced_nself)
       if (allocated(dg_frag%wpw_reduced_nkeep)) deallocate(dg_frag%wpw_reduced_nkeep)
@@ -2995,6 +2901,7 @@ contains
       if (allocated(dg_frag%wpw_reduced_H)) deallocate(dg_frag%wpw_reduced_H)
       if (allocated(dg_frag%wpw_reduced_S)) deallocate(dg_frag%wpw_reduced_S)
       if (allocated(dg_frag%wpw_reduced_transform)) deallocate(dg_frag%wpw_reduced_transform)
+      if (allocated(dg_frag%wpw_reduced_Hraw_build)) deallocate(dg_frag%wpw_reduced_Hraw_build)
       if (allocated(dg_frag%wpw_reduced_Sraw_build)) deallocate(dg_frag%wpw_reduced_Sraw_build)
       if (allocated(dg_frag%wpw_reduced_nraw)) deallocate(dg_frag%wpw_reduced_nraw)
       if (allocated(dg_frag%wpw_reproject_prev_coef)) deallocate(dg_frag%wpw_reproject_prev_coef)
@@ -3004,6 +2911,7 @@ contains
       allocate(dg_frag%wpw_reduced_H(wpw_red_max_dim, wpw_red_max_dim, dg_frag%nspin, n_local_frag))
       allocate(dg_frag%wpw_reduced_S(wpw_red_max_dim, wpw_red_max_dim, dg_frag%nspin, n_local_frag))
       allocate(dg_frag%wpw_reduced_transform(wpw_red_max_dim, wpw_red_max_dim, n_local_frag))
+      allocate(dg_frag%wpw_reduced_Hraw_build(wpw_red_max_dim, wpw_red_max_dim, n_local_frag))
       allocate(dg_frag%wpw_reduced_Sraw_build(wpw_red_max_dim, wpw_red_max_dim, n_local_frag))
       dg_frag%wpw_reduced_dim(:) = 0
       dg_frag%wpw_reduced_nself(:) = 0
@@ -3013,6 +2921,7 @@ contains
       dg_frag%wpw_reduced_H(:, :, :, :) = (0.0d0, 0.0d0)
       dg_frag%wpw_reduced_S(:, :, :, :) = (0.0d0, 0.0d0)
       dg_frag%wpw_reduced_transform(:, :, :) = (0.0d0, 0.0d0)
+      dg_frag%wpw_reduced_Hraw_build(:, :, :) = (0.0d0, 0.0d0)
       dg_frag%wpw_reduced_Sraw_build(:, :, :) = (0.0d0, 0.0d0)
       dg_frag%wpw_reduced_ready = .false.
       dg_frag%wpw_reduced_max_dim = wpw_red_max_dim
@@ -3298,11 +3207,11 @@ contains
       call hermitize_matrix(S_filt, n_mix)
       call hermitize_matrix(H_filt, n_mix)
 
-      if (dg_frag%id == 0) then
+      if (dg_frag%id == 0 .and. .not. quiet_mode) then
         call diagnose_self_like_eigen_tracking('raw', ifrag, H_self_ref, S_self_ref, H_mix, S_mix, n_self, n_mix)
         call diagnose_self_like_eigen_tracking('filtered', ifrag, H_self_ref, S_self_ref, H_filt, S_filt, n_self, n_mix)
         call diagnose_overlap_schur_effects('raw', ifrag, H_self_ref, S_self_ref, H_mix, S_mix, n_self, n_mix)
-        if (wpw_neighbor_sorth_candidate_enabled()) then
+        if (do_sorth) then
           call build_s_orthogonal_neighbor_variant('sorth_neighbor', ifrag, H_mix, S_mix, n_self, n_mix, H_work, S_work)
           call diagnose_self_like_eigen_tracking('sorth_neighbor', ifrag, H_self_ref, S_self_ref, H_work, S_work, n_self, n_mix)
           call diagnose_overlap_schur_effects('sorth_neighbor', ifrag, H_self_ref, S_self_ref, H_work, S_work, n_self, n_mix)
@@ -3337,7 +3246,7 @@ contains
         call diagnose_self_like_eigen_tracking('h_coupling_only', ifrag, H_self_ref, S_self_ref, H_work, S_work, n_self, n_mix)
       end if
 
-      if (wpw_neighbor_sorth_candidate_enabled() .and. allocated(dg_frag%wpw_reduced_H)) then
+      if (do_sorth .and. allocated(dg_frag%wpw_reduced_H)) then
         call build_wpw_sorth_reduced_neighbor_block(H_mix, S_mix, n_self, n_mix, tol_red, H_red, S_red, &
           n_red, n_keep, n_drop, lambda_min, lambda_max, s_sn_after, snn_i_err, sss_min, sss_max, info_red, T_red)
         if (info_red == 0 .and. n_red <= dg_frag%wpw_reduced_max_dim) then
@@ -3346,6 +3255,8 @@ contains
           dg_frag%wpw_reduced_nkeep(i_local) = n_keep
           dg_frag%wpw_reduced_ndrop(i_local) = n_drop
           dg_frag%wpw_reduced_nraw(i_local) = n_mix
+          if (allocated(dg_frag%wpw_reduced_Hraw_build)) &
+            dg_frag%wpw_reduced_Hraw_build(1:n_mix, 1:n_mix, i_local) = H_mix(1:n_mix, 1:n_mix)
           if (allocated(dg_frag%wpw_reduced_Sraw_build)) &
             dg_frag%wpw_reduced_Sraw_build(1:n_mix, 1:n_mix, i_local) = S_mix(1:n_mix, 1:n_mix)
           dg_frag%wpw_reduced_H(1:n_red, 1:n_red, 1:dg_frag%nspin, i_local) = &
@@ -3381,7 +3292,7 @@ contains
           if (red_s_min <= 0.0d0 .or. s_sn_after > 1.0d-8 .or. snn_i_err > 1.0d-8) then
             dg_frag%wpw_reduced_dim(i_local) = 0
           end if
-          if (dg_frag%id == 0) then
+          if (dg_frag%id == 0 .and. .not. quiet_mode) then
             write(*,'(1x,a,a,i0,5(a,i0),8(a,1pe12.4),a,i0)') &
               '[DG-WPW-RED-INIT] fragment reduced H/S:', &
               ' ifrag=', ifrag, ' dim=', n_red, ' nself=', n_self, &
@@ -3392,7 +3303,7 @@ contains
               ' S_eval_max=', red_s_max, ' SSS_min=', sss_min
           end if
         else
-          if (dg_frag%id == 0) then
+          if (dg_frag%id == 0 .and. .not. quiet_mode) then
             write(*,'(1x,a,a,i0,4(a,i0),a,1pe12.4)') &
               '[DG-WPW-RED-INIT][WARN] reduced builder failed:', &
               ' ifrag=', ifrag, ' nself=', n_self, ' next=', n_mix, &
@@ -3487,7 +3398,7 @@ contains
         rank_def = n_mix
       end if
 
-      if (dg_frag%id == 0) then
+      if (dg_frag%id == 0 .and. .not. quiet_mode) then
         write(*,'(1x,a,a,i0,a,i0,a,i0,a,i0,a,i0,36(a,1pe12.4),a,i0)') &
           '[DG-WPW-MIXED-NEIGHBOR-H] face-neighbor WP block:', &
           ' ifrag=', ifrag, ' nw=', n_w, ' npw=', n_pw, ' npfrag=', n_pfrag, ' filtered_drop_G2=', drop_g2, &
@@ -3539,13 +3450,13 @@ contains
       deallocate(wval, grad_wval, eval, eval_raw, eval_filt, eval_self, rwork, work)
     end do
 
-    if (wpw_neighbor_sorth_candidate_enabled() .and. allocated(dg_frag%wpw_reduced_dim)) then
+    if (do_sorth .and. allocated(dg_frag%wpw_reduced_dim)) then
       dg_frag%wpw_reduced_ready = any(dg_frag%wpw_reduced_dim(:) > 0)
       if (.not. dg_frag%wpw_reduced_ready) then
         red_lambda_min_all = 0.0d0
         red_s_min_all = 0.0d0
       end if
-      if (dg_frag%id == 0) then
+      if (dg_frag%id == 0 .and. .not. quiet_mode) then
         write(*,'(1x,a,4(a,i0),7(a,1pe12.4),a,l1)') &
           '[DG-WPW-RED-INIT] summary:', &
           ' local_fragments=', n_local_frag, &
@@ -3563,7 +3474,7 @@ contains
       end if
     end if
 
-    if (dg_frag%id == 0) then
+    if (dg_frag%id == 0 .and. .not. quiet_mode) then
       write(*,'(1x,a,2(a,1pe12.4),a,l1)') &
         '[DG-WPW-MIXED-NEIGHBOR-H] max over local fragments:', &
         ' ||H_WP_AB||=', neigh_norm_max, ' eval_shift_vs_self=', shift_max, &
@@ -4172,6 +4083,150 @@ contains
     end if
     enabled = cached_enabled
   end function wpw_reduced_canon_pack_diag_enabled
+
+  logical function wpw_reduced_canon_recon_diag_enabled() result(enabled)
+    implicit none
+    character(len=32) :: env
+    integer :: env_len, env_stat
+    logical, save :: initialized = .false.
+    logical, save :: cached_enabled = .false.
+
+    if (.not. initialized) then
+      env = ''
+      call get_environment_variable('SALMON_DG_WPW_REDUCED_CANON_RECON_DIAG', env, &
+        length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        select case (adjustl(trim(env(1:env_len))))
+        case ('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cached_enabled = .true.
+        case default
+          cached_enabled = .false.
+        end select
+      end if
+      initialized = .true.
+    end if
+    enabled = cached_enabled
+  end function wpw_reduced_canon_recon_diag_enabled
+
+  logical function wpw_reduced_canon_obs_diag_enabled() result(enabled)
+    implicit none
+    character(len=32) :: env
+    integer :: env_len, env_stat
+    logical, save :: initialized = .false.
+    logical, save :: cached_enabled = .false.
+
+    if (.not. initialized) then
+      env = ''
+      call get_environment_variable('SALMON_DG_WPW_REDUCED_CANON_OBS_DIAG', env, &
+        length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        select case (adjustl(trim(env(1:env_len))))
+        case ('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cached_enabled = .true.
+        case default
+          cached_enabled = .false.
+        end select
+      end if
+      initialized = .true.
+    end if
+    enabled = cached_enabled
+  end function wpw_reduced_canon_obs_diag_enabled
+
+  logical function wpw_reduced_canon_hook_dryrun_enabled() result(enabled)
+    implicit none
+    character(len=32) :: env
+    integer :: env_len, env_stat
+    logical, save :: initialized = .false.
+    logical, save :: cached_enabled = .false.
+
+    if (.not. initialized) then
+      env = ''
+      call get_environment_variable('SALMON_DG_WPW_REDUCED_CANON_HOOK_DRYRUN', env, &
+        length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        select case (adjustl(trim(env(1:env_len))))
+        case ('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cached_enabled = .true.
+        case default
+          cached_enabled = .false.
+        end select
+      end if
+      initialized = .true.
+    end if
+    enabled = cached_enabled
+  end function wpw_reduced_canon_hook_dryrun_enabled
+
+  logical function wpw_reduced_canon_use_density_enabled() result(enabled)
+    implicit none
+    character(len=32) :: env
+    integer :: env_len, env_stat
+    logical, save :: initialized = .false.
+    logical, save :: cached_enabled = .false.
+
+    if (.not. initialized) then
+      env = ''
+      call get_environment_variable('SALMON_DG_WPW_REDUCED_CANON_USE_DENSITY', env, &
+        length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        select case (adjustl(trim(env(1:env_len))))
+        case ('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cached_enabled = .true.
+        case default
+          cached_enabled = .false.
+        end select
+      end if
+      initialized = .true.
+    end if
+    enabled = cached_enabled
+  end function wpw_reduced_canon_use_density_enabled
+
+  logical function wpw_reduced_canon_use_pz_enabled() result(enabled)
+    implicit none
+    character(len=32) :: env
+    integer :: env_len, env_stat
+    logical, save :: initialized = .false.
+    logical, save :: cached_enabled = .false.
+
+    if (.not. initialized) then
+      env = ''
+      call get_environment_variable('SALMON_DG_WPW_REDUCED_CANON_USE_PZ', env, &
+        length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        select case (adjustl(trim(env(1:env_len))))
+        case ('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cached_enabled = .true.
+        case default
+          cached_enabled = .false.
+        end select
+      end if
+      initialized = .true.
+    end if
+    enabled = cached_enabled
+  end function wpw_reduced_canon_use_pz_enabled
+
+  logical function wpw_reduced_canon_mixedz_pz_diag_enabled() result(enabled)
+    implicit none
+    character(len=32) :: env
+    integer :: env_len, env_stat
+    logical, save :: initialized = .false.
+    logical, save :: cached_enabled = .false.
+
+    if (.not. initialized) then
+      env = ''
+      call get_environment_variable('SALMON_DG_WPW_REDUCED_CANON_MIXEDZ_PZ_DIAG', env, &
+        length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        select case (adjustl(trim(env(1:env_len))))
+        case ('1','y','Y','yes','YES','true','TRUE','on','ON')
+          cached_enabled = .true.
+        case default
+          cached_enabled = .false.
+        end select
+      end if
+      initialized = .true.
+    end if
+    enabled = cached_enabled
+  end function wpw_reduced_canon_mixedz_pz_diag_enabled
 
   logical function wpw_reduced_drift_diag_enabled() result(enabled)
     implicit none
@@ -4845,6 +4900,36 @@ contains
       psi_grid = psi_grid + cW(iw) * wval
     end do
   end subroutine reconstruct_canonical_W_from_coef
+
+  subroutine reconstruct_psi_from_C_can(dg_frag, ispin, i_local, nbf, n_w, n_pw, n_pfrag, pfrag_ids, &
+      c_can, gx, gy, gz, bx, by, bz, psi_grid)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ispin, i_local, nbf, n_w, n_pw, n_pfrag
+    integer, intent(in) :: pfrag_ids(n_pfrag)
+    integer, intent(in) :: gx, gy, gz, bx, by, bz
+    complex(8), intent(in) :: c_can(n_w + n_pw * n_pfrag)
+    complex(8), intent(out) :: psi_grid
+
+    integer :: ipw, pidx, row0
+    real(8) :: phase_arg, chi, grad_chi(3)
+    complex(8) :: phase, psi_w
+
+    call reconstruct_canonical_W_from_coef(dg_frag, ispin, i_local, nbf, n_w, c_can(1:n_w), &
+      bx, by, bz, psi_w)
+    psi_grid = psi_w
+    do pidx = 1, n_pfrag
+      row0 = n_w + (pidx - 1) * n_pw
+      call wpw_normalized_window_at_grid(dg_frag, pfrag_ids(pidx), gx, gy, gz, chi, grad_chi)
+      do ipw = 1, n_pw
+        phase_arg = dg_frag%k_pw(1, ipw) * dble(gx) * dg_frag%hgs(1) + &
+                    dg_frag%k_pw(2, ipw) * dble(gy) * dg_frag%hgs(2) + &
+                    dg_frag%k_pw(3, ipw) * dble(gz) * dg_frag%hgs(3)
+        phase = chi * exp(cmplx(0.0d0, phase_arg, kind=8))
+        psi_grid = psi_grid + c_can(row0 + ipw) * phase
+      end do
+    end do
+  end subroutine reconstruct_psi_from_C_can
 
   subroutine diagnose_wpw_reduced_embed_prodcoef(dg_frag, istep)
     implicit none
@@ -6083,7 +6168,8 @@ contains
   subroutine diagnose_wpw_reduced_density(dg_frag, system, rho_prod, istep, nstep, coef_bad, dt, &
       rho_s_prod, replace_density, density_replaced, propagated_density_source, reproject_stage, &
       prodop_route, prodop_field_included, prodop_mixed_z_included, prodop_global_flux_included, &
-      prodop_kick_applied, prodop_predictor_corrector_included)
+      prodop_kick_applied, prodop_predictor_corrector_included, canonical_density_source, &
+      canonical_pz_source, pz_can_raw, pz_prod_raw, pz_bad)
     use communication, only: comm_summation, comm_get_max
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -6100,6 +6186,10 @@ contains
     character(*), intent(in), optional :: prodop_route
     logical, intent(in), optional :: prodop_field_included, prodop_mixed_z_included, prodop_global_flux_included
     logical, intent(in), optional :: prodop_kick_applied, prodop_predictor_corrector_included
+    logical, intent(in), optional :: canonical_density_source
+    logical, intent(in), optional :: canonical_pz_source
+    real(8), intent(out), optional :: pz_can_raw, pz_prod_raw
+    logical, intent(out), optional :: pz_bad
 
     integer :: i_local, ifrag, ispin, n_pw, n_w, nself, nred, nraw, nneigh, n_pfrag
     integer :: keep_n_env, keep_neighbor, nred_eff
@@ -6109,20 +6199,22 @@ contains
     integer :: nstate_store, nstate_metric, state_idx, i_state, top_iter, top_idx
     integer :: info_raw, info_build, raw_keep_count, nkeep_raw, nkeep_build, top_raw_state
     integer :: diag_step, diag_nstep, drift_interval
-    integer :: canon_pack_count, canon_pack_bad
+    integer :: canon_pack_count, canon_pack_bad, canon_recon_count, canon_recon_bad
     real(8) :: vol_weight, phase_arg, occ, chi, grad_chi(3), z_coord
     real(8) :: diag_time, dt_use
     real(8) :: q_self, q_neigh, q_cross, q_total
     real(8) :: q_reproject, rho_reproject_grid
     real(8) :: q_w, q_p, q_wp_cross
     real(8) :: rho_self_grid, rho_reduced_grid, delta_rho_grid
-    real(8) :: rho_prod_grid, delta_prod_grid
+    real(8) :: rho_prod_grid, delta_prod_grid, rho_can_grid, canon_density_grid_diff
+    real(8) :: rho_can_replace_grid
     real(8) :: local_max_delta, local_max_rho_self
     real(8) :: local_max_prod_delta, local_max_rho_prod
     real(8) :: local_max_coef_diff, local_max_hred_herm, local_max_sred_herm
     real(8) :: local_max_sred_eval, local_min_sred_eval, local_max_sred_cond
     real(8) :: local_max_sample_cond, local_max_sample_rank, local_min_sample_rank
-    real(8) :: max_in(16), max_out(16), rms_delta, delta_over_self, rms_prod_delta, prod_delta_over_prod
+    real(8) :: local_max_canon_density_diff
+    real(8) :: max_in(20), max_out(20), rms_delta, delta_over_self, rms_prod_delta, prod_delta_over_prod
     real(8) :: hvol_weight, phys_scale
     real(8) :: occ_state, self_state_hvol, red_state_hvol, norm_state, loss_state
     real(8) :: sum_loss_self, sum_loss_red, max_loss_self, max_loss_red, avg_loss_self, avg_loss_red
@@ -6143,12 +6235,16 @@ contains
     real(8) :: canon_norm, canon_roundtrip, canon_w_diff, canon_pself_diff, canon_pneighbor_diff
     real(8) :: canon_norm_sum, canon_roundtrip_max, canon_w_diff_max, canon_pself_diff_max
     real(8) :: canon_pneighbor_diff_max
+    real(8) :: canon_recon_max_abs_diff, canon_recon_norm_diff_grid, canon_recon_prod_norm_grid
+    real(8) :: canon_recon_can_norm_grid, canon_recon_density_int_diff, canon_recon_rms_accum
+    real(8) :: phase2e_can_w_norm, phase2e_can_pself_norm, phase2e_can_pneighbor_norm
+    real(8) :: phase2e_can_total_norm
     complex(8) :: sample_overlap
     complex(8) :: overlap_sred
     complex(8) :: phase_static
     integer :: top_w_state, top_self_state, top_red_state
     logical :: prod_grid_ok
-    complex(8) :: phase, psi_w, psi_p, psi_self, psi_neigh, psi_total, psi_prod
+    complex(8) :: phase, psi_w, psi_p, psi_self, psi_neigh, psi_total, psi_prod, psi_can, psi_diff
     complex(8), allocatable :: c_red(:), raw_coef(:,:), raw_coef_reproj(:,:), basis_raw(:), wval(:)
     complex(8), allocatable :: phi_val(:), S_prod(:,:), coef_prod(:), rhs_prod(:), rhs_canonical(:)
     complex(8), allocatable :: S_raw(:,:), rhs_raw(:,:), S_raw_inv(:,:), S_red_inv(:,:)
@@ -6156,6 +6252,7 @@ contains
     complex(8), allocatable :: bsb_build(:,:), bsb_density(:,:), bsb_hybrid(:,:)
     complex(8), allocatable :: c_raw(:), tmp_raw(:), tmp_raw_build(:)
     complex(8), allocatable :: c_can(:), c_can_back(:), c_can_diff(:), tmp_can(:), c_red_can(:), tmp_red_can(:)
+    complex(8), allocatable :: c_can_store(:,:)
     complex(8), allocatable :: c_red_proj(:), c_red_build(:), c_red_hybrid(:), tmp_red(:), tmp_red_build(:), tmp_red_hybrid(:)
     complex(8), allocatable :: raw_back(:), raw_back_build(:), raw_back_hybrid(:), raw_resid(:), raw_resid_build(:), raw_resid_hybrid(:)
     complex(8), allocatable :: c_prev(:), c_pred(:), c_pred_resid(:), tmp_prev(:), tmp_pred(:), eig_amp(:)
@@ -6164,20 +6261,39 @@ contains
     real(8), allocatable :: state_local(:,:), state_global(:,:), state_loss_work(:)
     logical :: found, bad_density, bad_reproject
     logical :: do_heavy_diag, do_drift_log, do_reproject, do_projection_diag, drift_enabled, density_enabled
-    logical :: use_canonical_reproject, canon_pack_diag
+    logical :: use_canonical_reproject, canon_pack_diag, canon_recon_diag, canon_obs_diag, canon_hook_dryrun
+    logical :: canon_use_density, canon_use_pz
+    logical :: canon_grid_diag
     logical :: propagated_debug, state_prop_diag, sample_u_diag, sample_u_requested
     logical :: do_pz_series, replace_density_active, replace_density_zeroed
+    logical :: canon_replace_density_active, canon_replace_density_zeroed
     logical :: replace_density_from_propagated
     logical :: state_prop_before, state_prop_after, state_prop_can_static, prev_realloc
     logical :: prodop_field_flag, prodop_mixed_z_flag, prodop_global_flux_flag
     logical :: prodop_kick_flag, prodop_predictor_corrector_flag
+    logical :: phase2e_source_from_prodcoef, phase2e_source_from_reproject_coef
+    logical :: phase2e_source_from_density_reconstruction
     character(len=32) :: prodop_route_label
     logical, save :: heavy_diag_done = .false.
 
     if (present(density_replaced)) density_replaced = .false.
+    if (present(pz_can_raw)) pz_can_raw = 0.0d0
+    if (present(pz_prod_raw)) pz_prod_raw = 0.0d0
+    if (present(pz_bad)) pz_bad = .true.
     density_enabled = wpw_reduced_density_diag_enabled()
     use_canonical_reproject = wpw_reduced_canonical_reproject_enabled()
     canon_pack_diag = wpw_reduced_canon_pack_diag_enabled()
+    canon_recon_diag = wpw_reduced_canon_recon_diag_enabled()
+    canon_obs_diag = wpw_reduced_canon_obs_diag_enabled()
+    canon_hook_dryrun = wpw_reduced_canon_hook_dryrun_enabled()
+    canon_use_density = .false.
+    if (present(canonical_density_source)) canon_use_density = canonical_density_source
+    canon_use_pz = .false.
+    if (present(canonical_pz_source)) canon_use_pz = canonical_pz_source
+    canon_replace_density_active = canon_use_density .and. present(rho_prod) .and. present(rho_s_prod)
+    canon_replace_density_zeroed = .false.
+    canon_grid_diag = canon_recon_diag .or. canon_obs_diag .or. canon_hook_dryrun .or. canon_use_pz .or. &
+      canon_replace_density_active
     drift_enabled = wpw_reduced_drift_diag_enabled()
     propagated_debug = wpw_reduced_propagated_debug_enabled()
     state_prop_diag = wpw_reduced_state_prop_diag_enabled()
@@ -6193,7 +6309,8 @@ contains
     replace_density_from_propagated = .false.
     if (present(propagated_density_source)) replace_density_from_propagated = propagated_density_source
     if (.not. density_enabled .and. .not. drift_enabled .and. .not. replace_density_active .and. &
-        .not. canon_pack_diag .and. &
+        .not. canon_replace_density_active .and. .not. canon_use_pz .and. &
+        .not. canon_pack_diag .and. .not. canon_grid_diag .and. &
         .not. state_prop_diag .and. .not. sample_u_requested) return
     if (.not. dg_frag%wpw_reduced_ready) return
     if (.not. dg_frag%wpw_reduced_coef_initialized) return
@@ -6243,10 +6360,11 @@ contains
     sample_u_diag = sample_u_requested .and. state_prop_after
     do_reproject = do_drift_log .or. do_heavy_diag .or. do_pz_series .or. &
       (replace_density_active .and. .not. replace_density_from_propagated) .or. state_prop_diag .or. sample_u_diag
-    do_projection_diag = do_heavy_diag .or. do_reproject .or. canon_pack_diag
+    do_projection_diag = do_heavy_diag .or. do_reproject .or. canon_pack_diag .or. canon_grid_diag
     if (.not. do_heavy_diag .and. .not. do_drift_log .and. .not. do_pz_series .and. &
-        .not. replace_density_active .and. .not. state_prop_diag .and. .not. sample_u_diag .and. &
-        .not. canon_pack_diag) return
+        .not. replace_density_active .and. .not. canon_replace_density_active .and. .not. canon_use_pz .and. &
+        .not. state_prop_diag .and. .not. sample_u_diag .and. &
+        .not. canon_pack_diag .and. .not. canon_grid_diag) return
 
     n_pw = dg_frag%n_plane_waves
     if (n_pw <= 0) return
@@ -6301,6 +6419,7 @@ contains
     local_max_sample_cond = 0.0d0
     local_max_sample_rank = 0.0d0
     local_min_sample_rank = huge(1.0d0)
+    local_max_canon_density_diff = 0.0d0
     local_max_sdiff = 0.0d0
     local_max_sref = 0.0d0
     raw_keep_count = 0
@@ -6350,7 +6469,7 @@ contains
       allocate(c_red(nred), raw_coef(nraw, max(1, size(dg_frag%coef_wpw_self, 2))))
       if (do_reproject) allocate(raw_coef_reproj(nraw, max(1, size(dg_frag%coef_wpw_self, 2))))
       allocate(basis_raw(nraw), wval(n_w))
-      if (do_projection_diag .and. (use_canonical_reproject .or. canon_pack_diag)) then
+      if (do_projection_diag .and. (use_canonical_reproject .or. canon_pack_diag .or. canon_grid_diag)) then
         allocate(phi_val(nbf), S_prod(nbf,nbf), coef_prod(nbf), rhs_prod(nbf), rhs_canonical(nraw))
         S_prod(:, :) = (0.0d0, 0.0d0)
       end if
@@ -6370,8 +6489,9 @@ contains
           allocate(S_build(nraw,nraw), S_hybrid(nraw,nraw), S_build_inv(nraw,nraw))
           allocate(bsb_build(nred,nred), bsb_density(nred,nred), bsb_hybrid(nred,nred))
           allocate(c_raw(nraw), tmp_raw(nraw), tmp_raw_build(nraw))
-          if (canon_pack_diag) allocate(c_can(nraw), c_can_back(nraw), c_can_diff(nraw), tmp_can(nraw), &
+          if (canon_pack_diag .or. canon_grid_diag) allocate(c_can(nraw), c_can_back(nraw), c_can_diff(nraw), tmp_can(nraw), &
             c_red_can(nred), tmp_red_can(nred))
+          if (canon_grid_diag) allocate(c_can_store(nraw,nocc_spin))
           allocate(c_red_proj(nred), c_red_build(nred), c_red_hybrid(nred))
           allocate(tmp_red(nred), tmp_red_build(nred), tmp_red_hybrid(nred))
           allocate(raw_back(nraw), raw_back_build(nraw), raw_back_hybrid(nraw))
@@ -6389,8 +6509,9 @@ contains
           S_raw(:, :) = (0.0d0, 0.0d0)
           S_build(:, :) = (0.0d0, 0.0d0)
           S_hybrid(:, :) = (0.0d0, 0.0d0)
-          if ((use_canonical_reproject .or. canon_pack_diag) .and. allocated(S_prod)) &
+          if ((use_canonical_reproject .or. canon_pack_diag .or. canon_grid_diag) .and. allocated(S_prod)) &
             S_prod(:, :) = (0.0d0, 0.0d0)
+          if (allocated(c_can_store)) c_can_store(:, :) = (0.0d0, 0.0d0)
           if (allocated(dg_frag%wpw_reduced_Sraw_build)) then
             S_build(:, :) = dg_frag%wpw_reduced_Sraw_build(1:nraw, 1:nraw, i_local)
           end if
@@ -6449,7 +6570,7 @@ contains
                     S_raw(iw, ipw) = S_raw(iw, ipw) + conjg(basis_raw(iw)) * basis_raw(ipw) * vol_weight
                   end do
                 end do
-                if (use_canonical_reproject .or. canon_pack_diag) then
+                if (use_canonical_reproject .or. canon_pack_diag .or. canon_grid_diag) then
                   phi_val(:) = (0.0d0, 0.0d0)
                   do ib = 1, nbf
                     if (allocated(dg_frag%phi_frag_c)) then
@@ -6585,7 +6706,7 @@ contains
         end do
         if (do_projection_diag) then
           call hermitize_matrix(S_raw, nraw)
-          if (use_canonical_reproject .or. canon_pack_diag) call hermitize_matrix(S_prod, nbf)
+          if (use_canonical_reproject .or. canon_pack_diag .or. canon_grid_diag) call hermitize_matrix(S_prod, nbf)
           if (allocated(dg_frag%wpw_reduced_Sraw_build)) then
           call hermitize_matrix(S_build, nraw)
           S_hybrid(:, :) = S_build(:, :)
@@ -6688,12 +6809,27 @@ contains
             canon_pneighbor_diff_max = 0.0d0
             canon_pack_bad = 0
             canon_pack_count = 0
+            canon_recon_max_abs_diff = 0.0d0
+            canon_recon_norm_diff_grid = 0.0d0
+            canon_recon_prod_norm_grid = 0.0d0
+            canon_recon_can_norm_grid = 0.0d0
+            canon_recon_density_int_diff = 0.0d0
+            canon_recon_rms_accum = 0.0d0
+            canon_recon_count = 0
+            canon_recon_bad = 0
+            phase2e_can_w_norm = 0.0d0
+            phase2e_can_pself_norm = 0.0d0
+            phase2e_can_pneighbor_norm = 0.0d0
+            phase2e_can_total_norm = 0.0d0
+            phase2e_source_from_prodcoef = .false.
+            phase2e_source_from_reproject_coef = .false.
+            phase2e_source_from_density_reconstruction = .false.
             do ist = 1, nocc_spin
               occ = 1.0d0
               if (allocated(system%rocc)) occ = max(0.0d0, system%rocc(ist, 1, ispin))
               if (occ <= 0.0d0) cycle
               state_idx = (ispin - 1) * nstate_store + ist
-              if ((use_canonical_reproject .or. canon_pack_diag) .and. &
+              if ((use_canonical_reproject .or. canon_pack_diag .or. canon_grid_diag) .and. &
                   info_build == 0 .and. allocated(rhs_canonical)) then
                 coef_prod(:) = (0.0d0, 0.0d0)
                 do ib = 1, nbf
@@ -6802,9 +6938,17 @@ contains
                     matmul(S_build, raw_resid_build(:))), kind=8)
                 end if
                 c_red_hybrid(:) = (0.0d0, 0.0d0)
-                c_red_hybrid(1:nred_eff) = matmul(S_red_inv(1:nred_eff,1:nred_eff), matmul( &
-                  conjg(transpose(dg_frag%wpw_reduced_transform(1:nraw, 1:nred_eff, i_local))), &
-                  matmul(S_hybrid, c_raw)))
+                raw_back_hybrid(:) = (0.0d0, 0.0d0)
+                if (use_canonical_reproject) then
+                  call build_wpw_reduced_c_can_reference(S_hybrid, S_red_inv(1:nred_eff,1:nred_eff), &
+                    dg_frag%wpw_reduced_transform(1:nraw, 1:nred_eff, i_local), &
+                    c_raw, nraw, nred_eff, raw_back_hybrid, c_red_hybrid, info_build)
+                else
+                  call build_wpw_reduced_raw_back_hybrid_from_inverse(S_raw_inv, rhs_raw(1:nraw, ist), &
+                    S_hybrid, S_red_inv(1:nred_eff,1:nred_eff), &
+                    dg_frag%wpw_reduced_transform(1:nraw, 1:nred_eff, i_local), &
+                    nraw, nred_eff, raw_back_hybrid, c_red_hybrid, c_raw, info_build)
+                end if
                 tmp_red_hybrid(:) = (0.0d0, 0.0d0)
                 tmp_red_hybrid(1:nred_eff) = matmul(dg_frag%wpw_reduced_S(1:nred_eff, 1:nred_eff, ispin, i_local), &
                   c_red_hybrid(1:nred_eff))
@@ -6855,8 +6999,12 @@ contains
                     local_sum(70) = local_sum(70) + occ
                   end if
                 end if
-                raw_back_hybrid(:) = matmul(dg_frag%wpw_reduced_transform(1:nraw, 1:nred_eff, i_local), &
-                  c_red_hybrid(1:nred_eff))
+                if (canon_grid_diag .and. allocated(c_can_store)) c_can_store(1:nraw, ist) = raw_back_hybrid(1:nraw)
+                if (canon_grid_diag .and. allocated(c_can_store)) then
+                  phase2e_source_from_reproject_coef = .true.
+                  phase2e_source_from_density_reconstruction = .true.
+                  phase2e_source_from_prodcoef = use_canonical_reproject .or. canon_pack_diag .or. canon_grid_diag
+                end if
                 raw_resid_hybrid(:) = c_raw(:) - raw_back_hybrid(:)
                 if (state_prop_diag .and. state_prop_after .and. dg_frag%wpw_reproject_prev_valid .and. &
                     nred_eff == nred) then
@@ -6889,6 +7037,157 @@ contains
                 ' metric_min=', sbuild_min, &
                 ' neighbor_mapping_false=', 0, ' bad_count=', canon_pack_bad, &
                 ' bad=', canon_pack_bad /= 0, ' metric_tag=S_build'
+            end if
+            if (canon_grid_diag .and. allocated(c_can_store)) then
+              do ist = 1, nocc_spin
+                occ = 1.0d0
+                if (allocated(system%rocc)) occ = max(0.0d0, system%rocc(ist, 1, ispin))
+                if (occ <= 0.0d0) cycle
+                tmp_can(:) = matmul(S_build, c_can_store(1:nraw, ist))
+                phase2e_can_total_norm = phase2e_can_total_norm + occ * &
+                  real(sum(conjg(c_can_store(1:nraw, ist)) * tmp_can(:)), kind=8)
+                if (n_w > 0) then
+                  tmp_can(1:n_w) = matmul(S_build(1:n_w, 1:n_w), c_can_store(1:n_w, ist))
+                  phase2e_can_w_norm = phase2e_can_w_norm + occ * &
+                    real(sum(conjg(c_can_store(1:n_w, ist)) * tmp_can(1:n_w)), kind=8)
+                end if
+                if (nself > n_w) then
+                  tmp_can(n_w+1:nself) = matmul(S_build(n_w+1:nself, n_w+1:nself), &
+                    c_can_store(n_w+1:nself, ist))
+                  phase2e_can_pself_norm = phase2e_can_pself_norm + occ * &
+                    real(sum(conjg(c_can_store(n_w+1:nself, ist)) * tmp_can(n_w+1:nself)), kind=8)
+                end if
+                if (nraw > nself) then
+                  tmp_can(nself+1:nraw) = matmul(S_build(nself+1:nraw, nself+1:nraw), &
+                    c_can_store(nself+1:nraw, ist))
+                  phase2e_can_pneighbor_norm = phase2e_can_pneighbor_norm + occ * &
+                    real(sum(conjg(c_can_store(nself+1:nraw, ist)) * tmp_can(nself+1:nraw)), kind=8)
+                end if
+              end do
+              if (dg_frag%id == dg_frag%id_array(ifrag)) then
+                write(*,'(1x,a,4(a,i0),4(a,1pe16.8),7(a,l1),4a)') &
+                  '[DG-MIXEDZ-PHASE2E-CAN-SOURCE-DIAG]', &
+                  ' step=', diag_step, &
+                  ' frag=', ifrag, &
+                  ' spin=', ispin, &
+                  ' n_state=', nocc_spin, &
+                  ' C_can_W_norm=', phase2e_can_w_norm, &
+                  ' C_can_Pself_norm=', phase2e_can_pself_norm, &
+                  ' C_can_Pneighbor_norm=', phase2e_can_pneighbor_norm, &
+                  ' C_can_total_norm=', phase2e_can_total_norm, &
+                  ' source_from_prodcoef=', phase2e_source_from_prodcoef, &
+                  ' source_from_reproject_coef=', phase2e_source_from_reproject_coef, &
+                  ' source_from_density_reconstruction=', phase2e_source_from_density_reconstruction, &
+                  ' canon_grid_diag=', canon_grid_diag, &
+                  ' canon_pack_diag=', canon_pack_diag, &
+                  ' bad=', phase2e_can_total_norm /= phase2e_can_total_norm, &
+                  ' production_replacement=', canon_replace_density_active, &
+                  ' source_array_name=', 'c_can_store/raw_back_hybrid', &
+                  ' code_path=', 'Phase2e-S_hybrid-reproject-C_can'
+              end if
+            end if
+            if (canon_grid_diag .and. allocated(c_can_store)) then
+              if (canon_replace_density_active .and. .not. canon_replace_density_zeroed) then
+                rho_prod%f(:, :, :) = 0.0d0
+                do iw = 1, system%nspin
+                  rho_s_prod(iw)%f(:, :, :) = 0.0d0
+                end do
+                canon_replace_density_zeroed = .true.
+              end if
+              do iz = 1, dg_frag%nxyz_domain(3, ifrag)
+                gz = dg_frag%ixyz_frag(3, ifrag) + iz - 1
+                bz = map_global_to_phi_box_coord_pw(gz, p_lb3, p_ub3, dg_frag%lgnum_total(3))
+                if (bz < p_lb3 .or. bz > p_ub3) cycle
+                do iy = 1, dg_frag%nxyz_domain(2, ifrag)
+                  gy = dg_frag%ixyz_frag(2, ifrag) + iy - 1
+                  by = map_global_to_phi_box_coord_pw(gy, p_lb2, p_ub2, dg_frag%lgnum_total(2))
+                  if (by < p_lb2 .or. by > p_ub2) cycle
+                  do ix = 1, dg_frag%nxyz_domain(1, ifrag)
+                    gx = dg_frag%ixyz_frag(1, ifrag) + ix - 1
+                    bx = map_global_to_phi_box_coord_pw(gx, p_lb1, p_ub1, dg_frag%lgnum_total(1))
+                    if (bx < p_lb1 .or. bx > p_ub1) cycle
+                    rho_can_replace_grid = 0.0d0
+                    do ist = 1, nocc_spin
+                      occ = 1.0d0
+                      if (allocated(system%rocc)) occ = max(0.0d0, system%rocc(ist, 1, ispin))
+                      if (occ <= 0.0d0) cycle
+                      psi_prod = (0.0d0, 0.0d0)
+                      do ib = 1, nbf
+                        if (dg_frag%index_basis(ib, ifrag, ispin) <= 0) cycle
+                        if (dg_frag%index_basis(ib, ifrag, ispin) > dg_frag%n_mat_max) cycle
+                        if (dg_frag%coef_global_to_local(dg_frag%index_basis(ib, ifrag, ispin), ispin) <= 0) cycle
+                        if (dg_frag%coef_global_to_local(dg_frag%index_basis(ib, ifrag, ispin), ispin) > &
+                            size(dg_frag%coef, 1)) cycle
+                        if (allocated(dg_frag%phi_frag_c)) then
+                          psi_prod = psi_prod + dg_frag%coef(dg_frag%coef_global_to_local( &
+                            dg_frag%index_basis(ib, ifrag, ispin), ispin), ist, ispin) * &
+                            dg_frag%phi_frag_c(bx, by, bz, ib, i_local)
+                        else
+                          psi_prod = psi_prod + dg_frag%coef(dg_frag%coef_global_to_local( &
+                            dg_frag%index_basis(ib, ifrag, ispin), ispin), ist, ispin) * &
+                            cmplx(dg_frag%phi_frag(bx, by, bz, ib, i_local), 0.0d0, kind=8)
+                        end if
+                      end do
+                      call reconstruct_psi_from_C_can(dg_frag, ispin, i_local, nbf, n_w, n_pw, n_pfrag, &
+                        pfrag_ids(1:n_pfrag), c_can_store(1:nraw, ist), gx, gy, gz, bx, by, bz, psi_can)
+                      psi_diff = psi_can - psi_prod
+                      rho_can_grid = occ * abs(psi_can)**2
+                      rho_prod_grid = occ * abs(psi_prod)**2
+                      canon_density_grid_diff = rho_can_grid - rho_prod_grid
+                      rho_can_replace_grid = rho_can_replace_grid + rho_can_grid
+                      canon_recon_max_abs_diff = max(canon_recon_max_abs_diff, abs(psi_diff))
+                      canon_recon_norm_diff_grid = canon_recon_norm_diff_grid + occ * abs(psi_diff)**2 * vol_weight
+                      canon_recon_prod_norm_grid = canon_recon_prod_norm_grid + occ * abs(psi_prod)**2 * vol_weight
+                      canon_recon_can_norm_grid = canon_recon_can_norm_grid + occ * abs(psi_can)**2 * vol_weight
+                      canon_recon_density_int_diff = canon_recon_density_int_diff + canon_density_grid_diff * vol_weight
+                      canon_recon_rms_accum = canon_recon_rms_accum + abs(psi_diff)**2
+                      canon_recon_count = canon_recon_count + 1
+                      if (canon_obs_diag .or. canon_hook_dryrun .or. canon_replace_density_active .or. canon_use_pz) then
+                        if (mod(dg_frag%lgnum_total(3), 2) == 0) then
+                          z_coord = dble(gz) - 0.5d0
+                        else
+                          z_coord = dble(gz)
+                        end if
+                        local_sum(80) = local_sum(80) + rho_prod_grid * vol_weight
+                        local_sum(81) = local_sum(81) + rho_can_grid * vol_weight
+                        local_sum(82) = local_sum(82) + canon_density_grid_diff * vol_weight
+                        local_sum(83) = local_sum(83) + canon_density_grid_diff**2 * vol_weight
+                        local_sum(84) = local_sum(84) + occ * abs(psi_diff)**2 * vol_weight
+                        local_sum(85) = local_sum(85) + rho_prod_grid * z_coord * vol_weight
+                        local_sum(86) = local_sum(86) + rho_can_grid * z_coord * vol_weight
+                        local_sum(87) = local_sum(87) + vol_weight
+                        local_max_canon_density_diff = max(local_max_canon_density_diff, abs(canon_density_grid_diff))
+                      end if
+                      if (abs(psi_diff) /= abs(psi_diff) .or. abs(psi_can) /= abs(psi_can) .or. &
+                          abs(psi_prod) /= abs(psi_prod) .or. &
+                          canon_density_grid_diff /= canon_density_grid_diff) canon_recon_bad = canon_recon_bad + 1
+                    end do
+                    if (canon_replace_density_active) then
+                      rho_s_prod(ispin)%f(gx, gy, gz) = rho_s_prod(ispin)%f(gx, gy, gz) + rho_can_replace_grid
+                      rho_prod%f(gx, gy, gz) = rho_prod%f(gx, gy, gz) + rho_can_replace_grid
+                    end if
+                  end do
+                end do
+              end do
+              if (canon_obs_diag .or. canon_hook_dryrun .or. canon_replace_density_active .or. canon_use_pz) &
+                local_sum(88) = local_sum(88) + dble(canon_recon_bad)
+              if (dg_frag%id == dg_frag%id_array(ifrag)) then
+                write(*,'(1x,a,6(a,i0),8(a,1pe12.4),a,i0,a,l1,a,a)') &
+                  '[DG-WPW-RED-CANON-RECON-DIAG]', &
+                  ' step=', diag_step, ' frag=', ifrag, ' spin=', ispin, &
+                  ' n_state=', nocc_spin, ' n_W=', n_w, ' n_P_total=', nraw - n_w, &
+                  ' max_abs_diff=', canon_recon_max_abs_diff, &
+                  ' rms_diff=', sqrt(canon_recon_rms_accum / dble(max(1, canon_recon_count))), &
+                  ' norm_diff_grid=', sqrt(max(0.0d0, canon_recon_norm_diff_grid)), &
+                  ' rel_norm_diff_grid=', sqrt(max(0.0d0, canon_recon_norm_diff_grid)) / &
+                    max(sqrt(max(0.0d0, canon_recon_prod_norm_grid)), 1.0d-300), &
+                  ' density_integral_diff=', canon_recon_density_int_diff, &
+                  ' prod_norm_grid=', canon_recon_prod_norm_grid, &
+                  ' can_norm_grid=', canon_recon_can_norm_grid, &
+                  ' count=', dble(canon_recon_count), &
+                  ' bad_count=', canon_recon_bad, ' bad=', canon_recon_bad /= 0, &
+                  ' route=C_can_to_grid metric_tag=S_build'
+              end if
             end if
             if (sample_u_diag .and. dg_frag%wpw_reproject_prev_valid .and. nred_eff == nred) then
               gram_sample(:, :) = (0.0d0, 0.0d0)
@@ -7020,6 +7319,7 @@ contains
           deallocate(S_build, S_hybrid, S_build_inv, bsb_build, bsb_density, bsb_hybrid)
           deallocate(c_raw, tmp_raw, tmp_raw_build)
           if (allocated(c_can)) deallocate(c_can, c_can_back, c_can_diff, tmp_can, c_red_can, tmp_red_can)
+          if (allocated(c_can_store)) deallocate(c_can_store)
           deallocate(c_red_proj, c_red_build, c_red_hybrid, tmp_red, tmp_red_build, tmp_red_hybrid)
           deallocate(raw_back, raw_back_build, raw_back_hybrid, raw_resid, raw_resid_build, raw_resid_hybrid)
           if (allocated(c_prev)) deallocate(c_prev, c_pred, c_pred_resid, tmp_prev, tmp_pred, eig_amp)
@@ -7046,6 +7346,7 @@ contains
     if (bad_reproject) local_sum(55) = 1.0d0
     call comm_summation(local_sum, global_sum, size(local_sum), dg_frag%icomm)
     call comm_summation(state_local, state_global, size(state_local), dg_frag%icomm)
+    max_in(:) = 0.0d0
     max_in(1) = local_max_delta
     max_in(2) = local_max_rho_self
     max_in(3) = local_max_prod_delta
@@ -7070,7 +7371,8 @@ contains
     else
       max_in(16) = 0.0d0
     end if
-    call comm_get_max(max_in, max_out, 16, dg_frag%icomm)
+    max_in(17) = local_max_canon_density_diff
+    call comm_get_max(max_in, max_out, 20, dg_frag%icomm)
     if (dg_frag%id == 0) then
       rms_delta = sqrt(max(0.0d0, global_sum(8)))
       if (max_out(2) > 0.0d0) then
@@ -7208,11 +7510,83 @@ contains
             ' full_reduced_basis_action=', .false.
         end if
       end if
+      if (canon_obs_diag) then
+        write(*,'(1x,a,2(a,i0),13(a,1pe12.4),2(a,l1))') &
+          '[DG-WPW-RED-CANON-OBS-DIAG]', &
+          ' step=', diag_step, ' nstep=', diag_nstep, &
+          ' density_integral_prod=', global_sum(80) * phys_scale, &
+          ' density_integral_can=', global_sum(81) * phys_scale, &
+          ' density_integral_diff=', global_sum(82) * phys_scale, &
+          ' density_max_abs_diff=', max_out(17), &
+          ' density_rms_diff=', sqrt(max(0.0d0, global_sum(83))), &
+          ' psi_norm_diff_grid=', sqrt(max(0.0d0, global_sum(84))), &
+          ' Pz_prod=', global_sum(85) * phys_scale, &
+          ' Pz_can=', global_sum(86) * phys_scale, &
+          ' Pz_diff=', (global_sum(86) - global_sum(85)) * phys_scale, &
+          ' rel_Pz_diff=', (global_sum(86) - global_sum(85)) / max(abs(global_sum(85)), 1.0d-300), &
+          ' current_prod=', 0.0d0, &
+          ' current_can=', 0.0d0, &
+          ' current_diff=', 0.0d0, &
+          ' current_available=', .false., &
+          ' bad=', (global_sum(88) > 0.5d0)
+      end if
+      if (canon_hook_dryrun) then
+        write(*,'(1x,a,2(a,i0),13(a,1pe12.4),3(a,l1))') &
+          '[DG-WPW-RED-CANON-HOOK-DRYRUN]', &
+          ' step=', diag_step, ' nstep=', diag_nstep, &
+          ' density_integral_prod=', global_sum(80) * phys_scale, &
+          ' density_integral_can=', global_sum(81) * phys_scale, &
+          ' density_integral_diff=', global_sum(82) * phys_scale, &
+          ' density_max_abs_diff=', max_out(17), &
+          ' density_rms_diff=', sqrt(max(0.0d0, global_sum(83))), &
+          ' psi_norm_diff_grid=', sqrt(max(0.0d0, global_sum(84))), &
+          ' Pz_prod=', global_sum(85) * phys_scale, &
+          ' Pz_can=', global_sum(86) * phys_scale, &
+          ' Pz_diff=', (global_sum(86) - global_sum(85)) * phys_scale, &
+          ' rel_Pz_diff=', (global_sum(86) - global_sum(85)) / max(abs(global_sum(85)), 1.0d-300), &
+          ' current_prod=', 0.0d0, &
+          ' current_can=', 0.0d0, &
+          ' current_diff=', 0.0d0, &
+          ' current_available=', .false., &
+          ' density_replaced=', .false., &
+          ' bad=', (global_sum(88) > 0.5d0)
+      end if
+      if (canon_replace_density_active) then
+        write(*,'(1x,a,2(a,i0),6(a,1pe12.4),2(a,l1))') &
+          '[DG-WPW-RED-CANON-DENSITY-PRODUCTION]', &
+          ' step=', diag_step, ' nstep=', diag_nstep, &
+          ' density_integral_prod_before=', global_sum(80) * phys_scale, &
+          ' density_integral_can=', global_sum(81) * phys_scale, &
+          ' density_integral_diff=', global_sum(82) * phys_scale, &
+          ' density_max_abs_diff=', max_out(17), &
+          ' density_rms_diff=', sqrt(max(0.0d0, global_sum(83))), &
+          ' psi_norm_diff_grid=', sqrt(max(0.0d0, global_sum(84))), &
+          ' density_replaced=', (global_sum(88) <= 0.5d0), &
+          ' bad=', (global_sum(88) > 0.5d0)
+      end if
+      if (canon_use_pz) then
+        write(*,'(1x,a,2(a,i0),5(a,1pe12.4),2(a,l1))') &
+          '[DG-WPW-RED-CANON-PZ-PRODUCTION]', &
+          ' step=', diag_step, ' nstep=', diag_nstep, &
+          ' Pz_prod_before=', global_sum(85) * phys_scale, &
+          ' Pz_can=', global_sum(86) * phys_scale, &
+          ' Pz_diff=', (global_sum(86) - global_sum(85)) * phys_scale, &
+          ' rel_Pz_diff=', (global_sum(86) - global_sum(85)) / max(abs(global_sum(85)), 1.0d-300), &
+          ' psi_norm_diff_grid=', sqrt(max(0.0d0, global_sum(84))), &
+          ' Pz_candidate_available=', (global_sum(88) <= 0.5d0), &
+          ' bad=', (global_sum(88) > 0.5d0)
+      end if
+      if (present(pz_prod_raw)) pz_prod_raw = global_sum(85) * phys_scale
+      if (present(pz_can_raw)) pz_can_raw = global_sum(86) * phys_scale
+      if (present(pz_bad)) pz_bad = global_sum(88) > 0.5d0
       if (do_pz_series .or. do_drift_log) then
         call append_wpw_reduced_pz_cmp(diag_step, diag_time, keep_n_env, &
           global_sum(60) * phys_scale, global_sum(61) * phys_scale)
       end if
     end if
+    if (present(pz_prod_raw)) pz_prod_raw = global_sum(85) * phys_scale
+    if (present(pz_can_raw)) pz_can_raw = global_sum(86) * phys_scale
+    if (present(pz_bad)) pz_bad = global_sum(88) > 0.5d0
     if (.not. do_heavy_diag) then
       deallocate(state_local, state_global, state_loss_work)
       return
@@ -7590,8 +7964,10 @@ contains
       end if
     end if
     if (do_heavy_diag) heavy_diag_done = .true.
-    if (present(density_replaced)) density_replaced = replace_density_active .and. replace_density_zeroed .and. &
-      .not. bad_density .and. .not. bad_reproject
+    if (present(density_replaced)) density_replaced = &
+      (replace_density_active .and. replace_density_zeroed .and. .not. bad_density .and. .not. bad_reproject) .or. &
+      (canon_replace_density_active .and. canon_replace_density_zeroed .and. &
+       global_sum(88) <= 0.5d0 .and. .not. bad_density)
     deallocate(state_local, state_global, state_loss_work)
   end subroutine diagnose_wpw_reduced_density
 
@@ -7602,12 +7978,13 @@ contains
     type(s_scalar), intent(inout) :: rho
     type(s_scalar), intent(inout) :: rho_s(system%nspin)
     integer, intent(in), optional :: istep
-    character(len=32) :: env_density, env_current, env_source, env_reprojected, env_propagated
+    character(len=32) :: env_density, env_current, env_source, env_reprojected, env_propagated, env_canon_density
     integer :: env_len, env_stat, step_use
-    logical :: use_density, replaced, use_propagated_source
+    logical :: use_density, replaced, use_propagated_source, use_canon_density
     logical, save :: checked = .false.
     logical, save :: enabled = .false.
     logical, save :: source_propagated = .false.
+    logical, save :: canonical_density_enabled = .false.
     logical, save :: warned_current = .false.
     logical, save :: warned_failed = .false.
     logical, save :: warned_propagated_invalid = .false.
@@ -7658,13 +8035,27 @@ contains
             source_propagated = .false.
         end select
       end if
+      env_canon_density = ''
+      call get_environment_variable('SALMON_DG_WPW_REDUCED_CANON_USE_DENSITY', &
+        env_canon_density, length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        select case (adjustl(trim(env_canon_density(1:env_len))))
+        case ('1','y','Y','yes','YES','true','TRUE','on','ON')
+          enabled = .true.
+          canonical_density_enabled = .true.
+          source_propagated = .false.
+        end select
+      end if
       checked = .true.
     end if
     use_density = enabled
+    use_canon_density = canonical_density_enabled
     use_propagated_source = source_propagated
     if (.not. use_density) return
     if (.not. logged_enabled .and. dg_frag%id == 0) then
-      if (use_propagated_source) then
+      if (use_canon_density) then
+        write(*,'(1x,a)') '[DG-WPW-RED-CANON-DENSITY-USE] enabled density-only current=off source=canonical'
+      else if (use_propagated_source) then
         write(*,'(1x,a)') '[DG-WPW-RED-DIAG-DENSITY-USE] enabled source=propagated current=off'
       else
         write(*,'(1x,a)') '[DG-WPW-RED-DIAG-DENSITY-USE] enabled source=reprojected current=off'
@@ -7678,7 +8069,7 @@ contains
         '[DG-WPW-RED-DIAG-DENSITY-USE] Use source=reprojected for the validated raw-state -> reduced density path.'
       warned_propagated_invalid = .true.
     end if
-    if (use_propagated_source) return
+    if (use_propagated_source .and. .not. use_canon_density) return
 
     env_current = ''
     call get_environment_variable('SALMON_DG_WPW_REDUCED_USE_COEF_FOR_CURRENT', &
@@ -7697,11 +8088,20 @@ contains
     step_use = -1
     if (present(istep)) step_use = istep
     replaced = .false.
-    call diagnose_wpw_reduced_density(dg_frag, system, rho, step_use, -1, .false., 0.0d0, &
-      rho_s, .true., replaced, use_propagated_source)
+    if (use_canon_density) then
+      call diagnose_wpw_reduced_density(dg_frag, system, rho, step_use, -1, .false., 0.0d0, &
+        rho_s, replace_density=.false., density_replaced=replaced, propagated_density_source=.false., &
+        canonical_density_source=.true.)
+    else
+      call diagnose_wpw_reduced_density(dg_frag, system, rho, step_use, -1, .false., 0.0d0, &
+        rho_s, .true., replaced, use_propagated_source)
+    end if
     if (.not. replaced) then
       if (.not. warned_failed .and. dg_frag%id == 0) then
-        if (use_propagated_source) then
+        if (use_canon_density) then
+          write(*,'(1x,a)') &
+            '[DG-WPW-RED-CANON-DENSITY-USE] requested canonical density replacement was unavailable or failed validation at this call.'
+        else if (use_propagated_source) then
           write(*,'(1x,a)') &
             '[DG-WPW-RED-DIAG-DENSITY-USE] requested propagated density replacement was unavailable or failed validation at this call.'
         else
@@ -7713,129 +8113,339 @@ contains
     end if
   end subroutine apply_wpw_reduced_density_to_production
 
-  subroutine build_wpw_sorth_reduced_neighbor_block(H_in, S_in, n_self, n_ext, tol, H_red, S_red, &
-      n_red, n_keep, n_drop, lambda_keep_min, lambda_keep_max, s_sn_after, s_nn_identity_err, &
-      sss_min, sss_max, info, T_ext_red)
+  subroutine apply_wpw_reduced_pz_to_production(dg_frag, system, istep)
     implicit none
-    integer, intent(in) :: n_self, n_ext
-    complex(8), intent(in) :: H_in(n_ext,n_ext), S_in(n_ext,n_ext)
-    real(8), intent(in) :: tol
-    complex(8), allocatable, intent(out) :: H_red(:,:), S_red(:,:)
-    complex(8), allocatable, intent(out), optional :: T_ext_red(:,:)
-    integer, intent(out) :: n_red, n_keep, n_drop, info
-    real(8), intent(out) :: lambda_keep_min, lambda_keep_max, s_sn_after, s_nn_identity_err, sss_min, sss_max
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    type(s_dft_system), intent(in) :: system
+    integer, intent(in), optional :: istep
+    integer :: step_use
+    real(8) :: pz_can_raw, pz_prod_raw, pz_can_density, pz_prod_density, pz_before
+    real(8) :: pz_candidate, pz_output_delta, pz_replace_tol
+    real(8) :: z_herm_diff, z_trace
+    real(8) :: bridge_roundtrip_diff, bridge_t_norm, bridge_zcan_herm, bridge_pz_can
+    real(8) :: bridge_pz_diff, bridge_rel_pz_diff
+    real(8) :: block_zww_norm, block_zwp_norm, block_zpp_norm, block_zherm
+    real(8) :: block_pz_can, block_pz_diff, block_rel_pz_diff
+    real(8) :: canon_mixedz_pz_can, canon_mixedz_pz_diff, canon_mixedz_rel_pz_diff
+    real(8) :: canon_mixedz_zherm
+    real(8) :: pproj_norm_pself, pproj_norm_pneighbor, pproj_norm_pcan
+    real(8) :: pproj_proj_pself, pproj_proj_pneighbor, pproj_proj_pcan
+    real(8) :: pproj_leakage, pproj_rel_leakage, pproj_overlap_self_neighbor
+    real(8) :: pproj_pz_can, pproj_pz_diff, pproj_rel_pz_diff
+    real(8) :: pbasis_herm, pbasis_smin, pbasis_smax, pbasis_cond
+    integer :: z_basis_dim, bridge_dim_can, bridge_dim_mixed, bridge_rank_est
+    integer :: block_dim_w, block_dim_pself, block_dim_pneighbor
+    integer :: pproj_dim_prod, pproj_dim_self, pproj_dim_neighbor, pproj_rank
+    integer :: pbasis_dim_prod, pbasis_raw_before, pbasis_after_perp, pbasis_after_qmat
+    logical :: replace_ok
+    logical :: use_pz, pz_bad, mixedz_diag
+    logical :: z_neighbor_terms, bridge_built, bridge_match, bridge_bad, block_bad
+    logical :: canon_mixedz_built, canon_mixedz_match, canon_mixedz_bad
+    logical :: pproj_built, pproj_bad
+    logical :: pbasis_saved, ptransform_saved, pmetric_saved, pbasis_bad
+    logical, save :: logged_enabled = .false.
+    logical, save :: warned_unavailable = .false.
+    logical, save :: interval_checked = .false.
+    integer, save :: mixedz_diag_interval = 1
+    integer :: env_len, env_stat
+    character(len=32) :: env_interval
+    character(len=32) :: mixed_z_h_route
 
-    integer :: i, j, n_neigh
-    complex(8), allocatable :: H_sorth(:,:), S_sorth(:,:), sss_inv(:,:), xmat(:,:)
-    complex(8), allocatable :: snn_vec(:,:), ymat(:,:), tmp(:,:)
-    real(8), allocatable :: lambda(:)
-    integer, allocatable :: keep_idx(:)
-
-    n_red = n_self
-    n_keep = 0
-    n_drop = 0
-    lambda_keep_min = 0.0d0
-    lambda_keep_max = 0.0d0
-    s_sn_after = 0.0d0
-    s_nn_identity_err = 0.0d0
-    sss_min = 0.0d0
-    sss_max = 0.0d0
-    info = 0
-    if (allocated(H_red)) deallocate(H_red)
-    if (allocated(S_red)) deallocate(S_red)
-    if (present(T_ext_red)) then
-      if (allocated(T_ext_red)) deallocate(T_ext_red)
-    end if
-    if (n_ext <= n_self .or. n_self <= 0) then
-      info = -1
-      return
-    end if
-    n_neigh = n_ext - n_self
-    allocate(H_sorth(n_ext,n_ext), S_sorth(n_ext,n_ext), sss_inv(n_self,n_self), xmat(n_self,n_neigh))
-    allocate(snn_vec(n_neigh,n_neigh), lambda(n_neigh), keep_idx(n_neigh))
-
-    call build_hermitian_inverse(S_in(1:n_self, 1:n_self), n_self, sss_inv, info, sss_min, sss_max)
-    if (info /= 0) then
-      deallocate(H_sorth, S_sorth, sss_inv, xmat, snn_vec, lambda, keep_idx)
-      return
-    end if
-
-    xmat(:, :) = matmul(sss_inv, S_in(1:n_self, n_self+1:n_ext))
-    call apply_s_orthogonal_transform(H_in, xmat, n_self, n_ext, H_sorth)
-    call apply_s_orthogonal_transform(S_in, xmat, n_self, n_ext, S_sorth)
-    call hermitize_matrix(H_sorth, n_ext)
-    call hermitize_matrix(S_sorth, n_ext)
-
-    snn_vec(:, :) = S_sorth(n_self+1:n_ext, n_self+1:n_ext)
-    call zheev_with_query(snn_vec, n_neigh, lambda, info)
-    if (info /= 0) then
-      deallocate(H_sorth, S_sorth, sss_inv, xmat, snn_vec, lambda, keep_idx)
-      return
-    end if
-
-    n_keep = 0
-    do i = 1, n_neigh
-      if (lambda(i) > tol) then
-        n_keep = n_keep + 1
-        keep_idx(n_keep) = i
+    use_pz = wpw_reduced_canon_use_pz_enabled()
+    mixedz_diag = wpw_reduced_canon_mixedz_pz_diag_enabled()
+    if (.not. use_pz .and. .not. mixedz_diag) return
+    if (.not. logged_enabled .and. dg_frag%id == 0) then
+      if (use_pz) then
+        write(*,'(1x,a)') '[DG-WPW-RED-CANON-PZ-USE] enabled z-only current=off source=canonical'
+      else
+        write(*,'(1x,a)') '[DG-WPW-RED-CANON-PZ-MIXEDZ-DIAG] enabled diagnostic-only'
       end if
-    end do
-    n_drop = n_neigh - n_keep
-    if (n_keep <= 0) then
-      info = -2
-      deallocate(H_sorth, S_sorth, sss_inv, xmat, snn_vec, lambda, keep_idx)
+      logged_enabled = .true.
+    end if
+
+    step_use = -1
+    if (present(istep)) step_use = istep
+    if (.not. interval_checked) then
+      env_interval = ''
+      call get_environment_variable('SALMON_DG_WPW_REDUCED_MIXEDZ_DIAG_INTERVAL', &
+        env_interval, length=env_len, status=env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+        read(env_interval(1:env_len), *, iostat=env_stat) mixedz_diag_interval
+        if (env_stat /= 0 .or. mixedz_diag_interval < 1) mixedz_diag_interval = 1
+      end if
+      interval_checked = .true.
+    end if
+    if (mixedz_diag .and. .not. use_pz) then
+      if (step_use > 1 .and. mod(step_use, mixedz_diag_interval) /= 0) return
+    end if
+    pz_can_raw = 0.0d0
+    pz_prod_raw = 0.0d0
+    pz_bad = .true.
+    call diagnose_wpw_reduced_density(dg_frag, system, istep=step_use, nstep=-1, coef_bad=.false., dt=0.0d0, &
+      canonical_pz_source=.true., pz_can_raw=pz_can_raw, pz_prod_raw=pz_prod_raw, pz_bad=pz_bad)
+    if (pz_bad) then
+      if (.not. warned_unavailable .and. dg_frag%id == 0) then
+        write(*,'(1x,a)') &
+          '[DG-WPW-RED-CANON-PZ-USE] requested canonical Pz replacement was unavailable or failed validation at this call.'
+        warned_unavailable = .true.
+      end if
       return
     end if
 
-    n_red = n_self + n_keep
-    allocate(ymat(n_neigh,n_keep), tmp(n_neigh,n_keep), H_red(n_red,n_red), S_red(n_red,n_red))
-    if (present(T_ext_red)) allocate(T_ext_red(n_ext, n_red))
-    ymat(:, :) = (0.0d0, 0.0d0)
-    do j = 1, n_keep
-      i = keep_idx(j)
-      ymat(:, j) = snn_vec(:, i) / sqrt(lambda(i))
-    end do
-
-    H_red(:, :) = (0.0d0, 0.0d0)
-    S_red(:, :) = (0.0d0, 0.0d0)
-    if (present(T_ext_red)) then
-      T_ext_red(:, :) = (0.0d0, 0.0d0)
-      do i = 1, n_self
-        T_ext_red(i, i) = (1.0d0, 0.0d0)
-      end do
-      T_ext_red(1:n_self, n_self+1:n_red) = -matmul(xmat, ymat)
-      T_ext_red(n_self+1:n_ext, n_self+1:n_red) = ymat(1:n_neigh, 1:n_keep)
+    if (system%ngrid > 0 .and. system%hvol > 0.0d0) then
+      pz_can_density = pz_can_raw / (dble(system%ngrid) * system%hvol)
+      pz_prod_density = pz_prod_raw / (dble(system%ngrid) * system%hvol)
+    else
+      pz_can_density = 0.0d0
+      pz_prod_density = 0.0d0
     end if
-    H_red(1:n_self, 1:n_self) = H_sorth(1:n_self, 1:n_self)
-    S_red(1:n_self, 1:n_self) = S_sorth(1:n_self, 1:n_self)
-    H_red(1:n_self, n_self+1:n_red) = matmul(H_sorth(1:n_self, n_self+1:n_ext), ymat)
-    S_red(1:n_self, n_self+1:n_red) = matmul(S_sorth(1:n_self, n_self+1:n_ext), ymat)
-    H_red(n_self+1:n_red, 1:n_self) = conjg(transpose(H_red(1:n_self, n_self+1:n_red)))
-    S_red(n_self+1:n_red, 1:n_self) = conjg(transpose(S_red(1:n_self, n_self+1:n_red)))
-    tmp(:, :) = matmul(H_sorth(n_self+1:n_ext, n_self+1:n_ext), ymat)
-    H_red(n_self+1:n_red, n_self+1:n_red) = matmul(conjg(transpose(ymat)), tmp)
-    tmp(:, :) = matmul(S_sorth(n_self+1:n_ext, n_self+1:n_ext), ymat)
-    S_red(n_self+1:n_red, n_self+1:n_red) = matmul(conjg(transpose(ymat)), tmp)
-    call hermitize_matrix(H_red, n_red)
-    call hermitize_matrix(S_red, n_red)
+    pz_before = dg_frag%polarization_lg(3)
+    pz_candidate = pz_can_density - dg_frag%polarization_lg_ref(3)
+    pz_output_delta = pz_candidate - pz_before
+    pz_replace_tol = 1.0d-8 * max(1.0d0, abs(pz_before))
+    replace_ok = abs(pz_output_delta) <= pz_replace_tol
+    canon_mixedz_pz_can = 0.0d0
+    canon_mixedz_pz_diff = -dg_frag%dipole_lg_raw(3)
+    canon_mixedz_rel_pz_diff = -1.0d0
+    canon_mixedz_zherm = huge(1.0d0)
+    canon_mixedz_built = .false.
+    canon_mixedz_match = .false.
+    canon_mixedz_bad = .true.
+    if (dg_frag%mixed_wannier_bpw_final_uses_h_evec) then
+      mixed_z_h_route = 'h_p_default'
+    else
+      mixed_z_h_route = 'legacy_h_vec'
+    end if
+    if (mixedz_diag) then
+      call wpw_reduced_canon_mixedz_current_coeff_stats(dg_frag, system, dg_frag%dipole_lg_raw(3), &
+        canon_mixedz_pz_can, canon_mixedz_pz_diff, canon_mixedz_rel_pz_diff, canon_mixedz_zherm, &
+        canon_mixedz_built, canon_mixedz_match, canon_mixedz_bad)
+    end if
+    if (dg_frag%id == 0 .and. mixedz_diag) then
+      call wpw_reduced_mixedz_operator_stats(dg_frag, z_herm_diff, z_trace, z_basis_dim, z_neighbor_terms)
+      call wpw_reduced_canon_mixedz_bridge_stats(dg_frag, dg_frag%dipole_lg_raw(3), bridge_dim_can, &
+        bridge_dim_mixed, bridge_t_norm, bridge_rank_est, bridge_roundtrip_diff, bridge_zcan_herm, &
+        bridge_pz_can, bridge_pz_diff, bridge_rel_pz_diff, bridge_built, bridge_match, bridge_bad)
+      call wpw_reduced_canon_pz_block_operator_stats(dg_frag, dg_frag%dipole_lg_raw(3), &
+        block_dim_w, block_dim_pself, block_dim_pneighbor, block_zww_norm, block_zwp_norm, block_zpp_norm, &
+        block_zherm, block_pz_can, block_pz_diff, block_rel_pz_diff, block_bad)
+      call wpw_reduced_canon_p_projection_stats(dg_frag, dg_frag%dipole_lg_raw(3), &
+        pproj_dim_prod, pproj_dim_self, pproj_dim_neighbor, pproj_rank, pproj_norm_pself, &
+        pproj_norm_pneighbor, pproj_norm_pcan, pproj_proj_pself, pproj_proj_pneighbor, &
+        pproj_proj_pcan, pproj_leakage, pproj_rel_leakage, pproj_overlap_self_neighbor, &
+        pproj_pz_can, pproj_pz_diff, pproj_rel_pz_diff, pproj_built, pproj_bad)
+      call wpw_reduced_prod_p_basis_save_stats(dg_frag, pbasis_dim_prod, pbasis_raw_before, &
+        pbasis_after_perp, pbasis_after_qmat, pbasis_herm, pbasis_smin, pbasis_smax, pbasis_cond, &
+        pbasis_saved, ptransform_saved, pmetric_saved, pbasis_bad)
+      write(*,'(1x,a,4(a,i0),23(a,1pe12.4),a,l1)') &
+        '[DG-WPW-RED-PROD-P-QMAT-METRIC-DIAG]', &
+        ' step=', step_use, &
+        ' dim_P_raw=', dg_frag%mixed_wannier_bpw_praw_dim, &
+        ' dim_P_perp=', dg_frag%mixed_wannier_bpw_np, &
+        ' dim_P_prod=', dg_frag%mixed_wannier_bpw_np, &
+        ' S_raw_herm_diff=', dg_frag%mixed_wannier_bpw_sraw_herm_diff, &
+        ' S_perp_herm_diff=', dg_frag%mixed_wannier_bpw_sperp_herm_diff, &
+        ' qmat_metric_herm_diff=', dg_frag%mixed_wannier_bpw_qmat_metric_herm_diff, &
+        ' qmat_metric_min_eval=', dg_frag%mixed_wannier_bpw_qmat_metric_min_eval, &
+        ' qmat_metric_max_eval=', dg_frag%mixed_wannier_bpw_qmat_metric_max_eval, &
+        ' qmat_metric_cond=', dg_frag%mixed_wannier_bpw_qmat_metric_cond, &
+        ' qmat_metric_diff_from_I=', dg_frag%mixed_wannier_bpw_qmat_metric_diff_from_i, &
+        ' qmat_left_metric_diff_from_I=', dg_frag%mixed_wannier_bpw_qleft_metric_diff_from_i, &
+        ' final_metric_herm_diff=', dg_frag%mixed_wannier_bpw_final_metric_herm_diff, &
+        ' final_metric_min_eval=', dg_frag%mixed_wannier_bpw_final_metric_min_eval, &
+        ' final_metric_max_eval=', dg_frag%mixed_wannier_bpw_final_metric_max_eval, &
+        ' final_metric_cond=', dg_frag%mixed_wannier_bpw_final_metric_cond, &
+        ' final_metric_diff_from_I=', dg_frag%mixed_wannier_bpw_final_metric_diff_from_i, &
+        ' transform_metric_herm_diff=', dg_frag%mixed_wannier_bpw_transform_metric_herm_diff, &
+        ' transform_metric_min_eval=', dg_frag%mixed_wannier_bpw_transform_metric_min_eval, &
+        ' transform_metric_max_eval=', dg_frag%mixed_wannier_bpw_transform_metric_max_eval, &
+        ' transform_metric_cond=', dg_frag%mixed_wannier_bpw_transform_metric_cond, &
+        ' transform_metric_diff_from_I=', dg_frag%mixed_wannier_bpw_transform_metric_diff_from_i, &
+        ' transform_metric_diff_from_saved_metric=', dg_frag%mixed_wannier_bpw_transform_metric_diff_saved, &
+        ' qmat_column_norm_min=', dg_frag%mixed_wannier_bpw_qmat_col_norm_min, &
+        ' qmat_column_norm_max=', dg_frag%mixed_wannier_bpw_qmat_col_norm_max, &
+        ' qmat_row_norm_min=', dg_frag%mixed_wannier_bpw_qmat_row_norm_min, &
+        ' qmat_row_norm_max=', dg_frag%mixed_wannier_bpw_qmat_row_norm_max, &
+        ' bad=', pbasis_bad
+      write(*,'(1x,a,4(a,i0),8(a,1pe12.4),4(a,l1))') &
+        '[DG-WPW-RED-CORRECTED-MIXEDZ-PZ-DIAG]', &
+        ' step=', step_use, &
+        ' dim_P_raw=', dg_frag%mixed_wannier_bpw_praw_dim, &
+        ' dim_P_prod=', dg_frag%mixed_wannier_bpw_np, &
+        ' basis_dim=', z_basis_dim, &
+        ' Pz_prod_mixedZ=', dg_frag%dipole_lg_raw(3), &
+        ' Pz_can_mixedZ=', canon_mixedz_pz_can, &
+        ' Pz_diff=', canon_mixedz_pz_diff, &
+        ' rel_Pz_diff=', canon_mixedz_rel_pz_diff, &
+        ' qmat_metric_diff_from_I=', dg_frag%mixed_wannier_bpw_qmat_metric_diff_from_i, &
+        ' S_Pprod_cond=', pbasis_cond, &
+        ' Zop_herm_diff=', z_herm_diff, &
+        ' transform_metric_diff_from_I=', dg_frag%mixed_wannier_bpw_transform_metric_diff_from_i, &
+        ' Pprod_basis_saved=', pbasis_saved, &
+        ' canonical_operator_built=', canon_mixedz_built, &
+        ' convention_match=', canon_mixedz_match, &
+        ' bad=', pbasis_bad .or. canon_mixedz_bad
+      write(*,'(1x,a,1(a,i0),15(a,1pe12.4),2(a,l1),a,a,2(a,l1))') &
+        '[DG-WPW-RED-PROD-P-FINAL-METRIC-DIAG]', &
+        ' step=', step_use, &
+        ' h_input_herm_diff=', dg_frag%mixed_wannier_bpw_h_input_herm_diff, &
+        ' h_evec_unitarity_diff=', dg_frag%mixed_wannier_bpw_h_evec_unitarity_diff, &
+        ' h_input_evec_diff=', dg_frag%mixed_wannier_bpw_h_input_evec_diff, &
+        ' qmat_metric_diff_from_I=', dg_frag%mixed_wannier_bpw_qmat_metric_diff_from_i, &
+        ' final_metric_herm_diff=', dg_frag%mixed_wannier_bpw_final_metric_herm_diff, &
+        ' final_metric_min_eval=', dg_frag%mixed_wannier_bpw_final_metric_min_eval, &
+        ' final_metric_max_eval=', dg_frag%mixed_wannier_bpw_final_metric_max_eval, &
+        ' final_metric_cond=', dg_frag%mixed_wannier_bpw_final_metric_cond, &
+        ' final_metric_diff_from_I=', dg_frag%mixed_wannier_bpw_final_metric_diff_from_i, &
+        ' h_evec_metric_herm_diff=', dg_frag%mixed_wannier_bpw_transform_metric_herm_diff, &
+        ' h_evec_metric_min_eval=', dg_frag%mixed_wannier_bpw_transform_metric_min_eval, &
+        ' h_evec_metric_max_eval=', dg_frag%mixed_wannier_bpw_transform_metric_max_eval, &
+        ' h_evec_metric_cond=', dg_frag%mixed_wannier_bpw_transform_metric_cond, &
+        ' h_evec_metric_diff_from_I=', dg_frag%mixed_wannier_bpw_transform_metric_diff_from_i, &
+        ' h_evec_metric_diff_from_saved=', dg_frag%mixed_wannier_bpw_transform_metric_diff_saved, &
+        ' eigen_zheev_input_preserved=', .true., &
+        ' eigen_zheev_evec_in_third_arg=', .true., &
+        ' mixed_z_h_route=', trim(mixed_z_h_route), &
+        ' legacy_route=', .not. dg_frag%mixed_wannier_bpw_final_uses_h_evec, &
+        ' bad=', pbasis_bad
+      write(*,'(1x,a,5(a,i0),4(a,1pe12.4),4(a,l1))') &
+        '[DG-WPW-RED-PROD-P-BASIS-SAVE-DIAG]', &
+        ' step=', step_use, &
+        ' dim_P_prod=', pbasis_dim_prod, &
+        ' dim_P_raw_before_perp=', pbasis_raw_before, &
+        ' dim_P_after_perp=', pbasis_after_perp, &
+        ' dim_P_after_qmat=', pbasis_after_qmat, &
+        ' S_Pprod_herm_diff=', pbasis_herm, &
+        ' S_Pprod_min_eval=', pbasis_smin, &
+        ' S_Pprod_max_eval=', pbasis_smax, &
+        ' S_Pprod_cond=', pbasis_cond, &
+        ' Pprod_basis_saved=', pbasis_saved, &
+        ' transform_saved=', ptransform_saved, &
+        ' metric_saved=', pmetric_saved, &
+        ' bad=', pbasis_bad
+      write(*,'(1x,a,4(a,i0),7(a,1pe12.4),4(a,l1))') &
+        '[DG-WPW-RED-CANON-MIXEDZ-BRIDGE-DIAG]', &
+        ' step=', step_use, &
+        ' T_dim_can=', bridge_dim_can, &
+        ' T_dim_mixed=', bridge_dim_mixed, &
+        ' T_rank_est=', bridge_rank_est, &
+        ' T_norm=', bridge_t_norm, &
+        ' bridge_roundtrip_diff=', bridge_roundtrip_diff, &
+        ' Zcan_herm_diff=', bridge_zcan_herm, &
+        ' Pz_prod_mixedZ=', dg_frag%dipole_lg_raw(3), &
+        ' Pz_can_mixedZ=', bridge_pz_can, &
+        ' Pz_diff=', bridge_pz_diff, &
+        ' rel_Pz_diff=', bridge_rel_pz_diff, &
+        ' canonical_operator_built=', bridge_built, &
+        ' convention_match=', bridge_match, &
+        ' Pz_replaced=', .false., &
+        ' bad=', bridge_bad
+      write(*,'(1x,a,4(a,i0),8(a,1pe12.4),4(a,l1))') &
+        '[DG-WPW-RED-CANON-PZ-BLOCK-OP-DIAG]', &
+        ' step=', step_use, &
+        ' dim_W=', block_dim_w, &
+        ' dim_P_self=', block_dim_pself, &
+        ' dim_P_neighbor=', block_dim_pneighbor, &
+        ' Z_WW_norm=', block_zww_norm, &
+        ' Z_WP_norm=', block_zwp_norm, &
+        ' Z_PP_norm=', block_zpp_norm, &
+        ' Z_herm_diff=', block_zherm, &
+        ' Pz_prod_mixedZ=', dg_frag%dipole_lg_raw(3), &
+        ' Pz_can_block=', block_pz_can, &
+        ' Pz_diff=', block_pz_diff, &
+        ' rel_Pz_diff=', block_rel_pz_diff, &
+        ' canonical_operator_built=', .false., &
+        ' convention_match=', .false., &
+        ' Pz_replaced=', .false., &
+        ' bad=', block_bad
+      write(*,'(1x,a,5(a,i0),13(a,1pe12.4),3(a,l1))') &
+        '[DG-WPW-RED-CANON-P-PROJ-DIAG]', &
+        ' step=', step_use, &
+        ' dim_P_prod=', pproj_dim_prod, &
+        ' dim_P_self=', pproj_dim_self, &
+        ' dim_P_neighbor=', pproj_dim_neighbor, &
+        ' rank_Pprod_Pcan=', pproj_rank, &
+        ' norm_Pself=', pproj_norm_pself, &
+        ' norm_Pneighbor=', pproj_norm_pneighbor, &
+        ' norm_Pcan=', pproj_norm_pcan, &
+        ' proj_norm_Pself_to_Pprod=', pproj_proj_pself, &
+        ' proj_norm_Pneighbor_to_Pprod=', pproj_proj_pneighbor, &
+        ' proj_norm_Pcan_to_Pprod=', pproj_proj_pcan, &
+        ' leakage_norm_Pcan_from_Pprod=', pproj_leakage, &
+        ' rel_leakage_Pcan_from_Pprod=', pproj_rel_leakage, &
+        ' overlap_Pself_Pneighbor_norm=', pproj_overlap_self_neighbor, &
+        ' Pz_prod_mixedZ=', dg_frag%dipole_lg_raw(3), &
+        ' Pz_can_projectedP=', pproj_pz_can, &
+        ' Pz_diff_projectedP=', pproj_pz_diff, &
+        ' rel_Pz_diff_projectedP=', pproj_rel_pz_diff, &
+        ' projector_built=', pproj_built, &
+        ' Pz_replaced=', .false., &
+        ' bad=', pproj_bad
+      write(*,'(1x,a,1(a,i0),6(a,1pe12.4),1(a,i0),5(a,l1))') &
+        '[DG-WPW-RED-CANON-MIXEDZ-OP-DIAG]', &
+        ' step=', step_use, &
+        ' Pz_prod_mixedZ=', dg_frag%dipole_lg_raw(3), &
+        ' Pz_can_mixedZ=', canon_mixedz_pz_can, &
+        ' Pz_diff=', canon_mixedz_pz_diff, &
+        ' rel_Pz_diff=', canon_mixedz_rel_pz_diff, &
+        ' Zop_herm_diff=', max(z_herm_diff, canon_mixedz_zherm), &
+        ' Zop_trace=', z_trace, &
+        ' basis_dim=', z_basis_dim, &
+        ' neighbor_terms_included=', z_neighbor_terms, &
+        ' canonical_operator_built=', canon_mixedz_built, &
+        ' convention_match=', canon_mixedz_match, &
+        ' Pz_replaced=', .false., &
+        ' bad=', canon_mixedz_bad
+      write(*,'(1x,a,1(a,i0),8(a,1pe12.4),4(a,l1),a)') &
+        '[DG-WPW-RED-CANON-PZ-MIXEDZ-DIAG]', &
+        ' step=', step_use, &
+        ' Pz_mixedZ_raw=', dg_frag%dipole_lg_raw(3), &
+        ' Pz_mixedZ_output=', pz_before, &
+        ' Pz_grid_raw=', pz_can_raw, &
+        ' Pz_grid_density=', pz_can_density, &
+        ' Pz_grid_candidate=', pz_candidate, &
+        ' mixedZ_minus_grid_raw=', dg_frag%dipole_lg_raw(3) - pz_can_raw, &
+        ' output_delta_if_grid_used=', pz_output_delta, &
+        ' rel_grid_raw_diff=', (pz_can_raw - pz_prod_raw) / max(abs(pz_prod_raw), 1.0d-300), &
+        ' mixedz_operator_available=', .true., &
+        ' canonical_mixedz_operator_available=', canon_mixedz_built, &
+        ' convention_match=', canon_mixedz_match, &
+        ' replacement_allowed=', replace_ok, &
+        ' reason=canonical_mixedZ_available_grid_Pz_not_used_for_replacement'
+    end if
+    if (replace_ok) then
+      dg_frag%dipole_lg_raw(3) = pz_can_raw
+      dg_frag%polarization_lg(3) = pz_candidate
+    end if
+    if (dg_frag%id == 0) then
+      if (.not. replace_ok) then
+        write(*,'(1x,a)') &
+          '[DG-WPW-RED-CANON-PZ-USE] canonical grid Pz is not in the production polarization convention; replacement skipped.'
+      end if
+      write(*,'(1x,a,1(a,i0),9(a,1pe12.4),3(a,l1))') &
+        '[DG-WPW-RED-CANON-PZ-REPLACE]', &
+        ' step=', step_use, &
+        ' Pz_prod_before_raw=', pz_prod_raw, &
+        ' Pz_can_raw=', pz_can_raw, &
+        ' Pz_raw_diff=', pz_can_raw - pz_prod_raw, &
+        ' rel_Pz_raw_diff=', (pz_can_raw - pz_prod_raw) / max(abs(pz_prod_raw), 1.0d-300), &
+        ' Pz_prod_density=', pz_prod_density, &
+        ' Pz_can_density=', pz_can_density, &
+        ' Pz_output_before=', pz_before, &
+        ' Pz_candidate=', pz_candidate, &
+        ' dPz_output_delta=', pz_output_delta, &
+        ' Pz_replaced=', replace_ok, &
+        ' convention_match=', replace_ok, &
+        ' current_replaced=', .false.
+    end if
+  end subroutine apply_wpw_reduced_pz_to_production
 
-    s_sn_after = sqrt(sum(abs(S_red(1:n_self, n_self+1:n_red))**2))
-    s_nn_identity_err = 0.0d0
-    do i = 1, n_keep
-      do j = 1, n_keep
-        if (i == j) then
-          s_nn_identity_err = max(s_nn_identity_err, abs(S_red(n_self+i, n_self+j) - (1.0d0, 0.0d0)))
-        else
-          s_nn_identity_err = max(s_nn_identity_err, abs(S_red(n_self+i, n_self+j)))
-        end if
-      end do
-    end do
-    s_sn_after = sqrt(sum(abs(S_red(1:n_self, n_self+1:n_red))**2))
-    lambda_keep_min = lambda(keep_idx(1))
-    lambda_keep_max = lambda(keep_idx(n_keep))
 
-    deallocate(H_sorth, S_sorth, sss_inv, xmat, snn_vec, lambda, keep_idx, ymat, tmp)
-  end subroutine build_wpw_sorth_reduced_neighbor_block
+
+
+
+
+
 
   subroutine diagnose_s_orthogonal_reduced_neighbor_variant(label, ifrag, H_self_ref, S_self_ref, H_in, S_in, n_self, n_ext)
     implicit none
@@ -7872,283 +8482,16 @@ contains
     deallocate(H_red, S_red)
   end subroutine diagnose_s_orthogonal_reduced_neighbor_variant
 
-  subroutine apply_s_orthogonal_transform(M_in, xmat, n_self, n_ext, M_out)
-    implicit none
-    integer, intent(in) :: n_self, n_ext
-    complex(8), intent(in) :: M_in(n_ext,n_ext), xmat(n_self,n_ext-n_self)
-    complex(8), intent(out) :: M_out(n_ext,n_ext)
 
-    integer :: n_neigh
-    complex(8), allocatable :: mss(:,:), msn(:,:), mns(:,:), mnn(:,:)
 
-    n_neigh = n_ext - n_self
-    allocate(mss(n_self,n_self), msn(n_self,n_neigh), mns(n_neigh,n_self), mnn(n_neigh,n_neigh))
-    mss(:, :) = M_in(1:n_self, 1:n_self)
-    msn(:, :) = M_in(1:n_self, n_self+1:n_ext)
-    mns(:, :) = M_in(n_self+1:n_ext, 1:n_self)
-    mnn(:, :) = M_in(n_self+1:n_ext, n_self+1:n_ext)
 
-    M_out(:, :) = (0.0d0, 0.0d0)
-    M_out(1:n_self, 1:n_self) = mss(:, :)
-    M_out(1:n_self, n_self+1:n_ext) = msn(:, :) - matmul(mss, xmat)
-    M_out(n_self+1:n_ext, 1:n_self) = mns(:, :) - matmul(conjg(transpose(xmat)), mss)
-    M_out(n_self+1:n_ext, n_self+1:n_ext) = mnn(:, :) - matmul(mns, xmat) - &
-      matmul(conjg(transpose(xmat)), msn) + matmul(matmul(conjg(transpose(xmat)), mss), xmat)
-    deallocate(mss, msn, mns, mnn)
-  end subroutine apply_s_orthogonal_transform
 
-  subroutine build_symmetric_orthogonal_hamiltonian(H_in, S_in, n, H_orth, info, s_min, s_max)
-    implicit none
-    integer, intent(in) :: n
-    complex(8), intent(in) :: H_in(n,n), S_in(n,n)
-    complex(8), intent(out) :: H_orth(n,n)
-    integer, intent(out) :: info
-    real(8), intent(out) :: s_min, s_max
 
-    integer :: i
-    complex(8), allocatable :: svec(:,:), xmat(:,:), tmp(:,:)
-    real(8), allocatable :: eval(:)
 
-    allocate(svec(n,n), xmat(n,n), tmp(n,n), eval(n))
-    svec(:, :) = S_in(:, :)
-    call zheev_with_query(svec, n, eval, info)
-    if (info /= 0) then
-      H_orth(:, :) = (0.0d0, 0.0d0)
-      s_min = 0.0d0
-      s_max = 0.0d0
-      deallocate(svec, xmat, tmp, eval)
-      return
-    end if
-    s_min = eval(1)
-    s_max = eval(n)
-    if (s_min <= 1.0d-14) then
-      info = -100
-      H_orth(:, :) = (0.0d0, 0.0d0)
-      deallocate(svec, xmat, tmp, eval)
-      return
-    end if
-    xmat(:, :) = svec(:, :)
-    do i = 1, n
-      xmat(:, i) = xmat(:, i) / sqrt(eval(i))
-    end do
-    xmat(:, :) = matmul(xmat, conjg(transpose(svec)))
-    tmp(:, :) = matmul(H_in, xmat)
-    H_orth(:, :) = matmul(conjg(transpose(xmat)), tmp)
-    call hermitize_matrix(H_orth, n)
-    deallocate(svec, xmat, tmp, eval)
-  end subroutine build_symmetric_orthogonal_hamiltonian
 
-  subroutine build_hermitian_pseudoinverse(A_in, n, tol, A_inv, info, eval_min, eval_max, nkeep)
-    implicit none
-    integer, intent(in) :: n
-    real(8), intent(in) :: tol
-    complex(8), intent(in) :: A_in(n,n)
-    complex(8), intent(out) :: A_inv(n,n)
-    integer, intent(out) :: info, nkeep
-    real(8), intent(out) :: eval_min, eval_max
 
-    integer :: i
-    complex(8), allocatable :: avec(:,:)
-    real(8), allocatable :: eval(:)
-    real(8) :: cutoff
 
-    allocate(avec(n,n), eval(n))
-    avec(:, :) = A_in(:, :)
-    call zheev_with_query(avec, n, eval, info)
-    if (info /= 0) then
-      A_inv(:, :) = (0.0d0, 0.0d0)
-      eval_min = 0.0d0
-      eval_max = 0.0d0
-      nkeep = 0
-      deallocate(avec, eval)
-      return
-    end if
-    eval_min = eval(1)
-    eval_max = eval(n)
-    cutoff = max(tol * max(eval_max, 0.0d0), 1.0d-14)
-    A_inv(:, :) = (0.0d0, 0.0d0)
-    nkeep = 0
-    do i = 1, n
-      if (eval(i) <= cutoff) cycle
-      A_inv(:, :) = A_inv(:, :) + matmul(reshape(avec(:, i), [n,1]), reshape(conjg(avec(:, i)), [1,n])) / eval(i)
-      nkeep = nkeep + 1
-    end do
-    if (nkeep <= 0) then
-      info = -100
-      A_inv(:, :) = (0.0d0, 0.0d0)
-    else
-      call hermitize_matrix(A_inv, n)
-    end if
-    deallocate(avec, eval)
-  end subroutine build_hermitian_pseudoinverse
 
-  subroutine build_hermitian_inverse_sqrt(A_in, n, tol, A_invsqrt, info, eval_min, eval_max, nkeep)
-    implicit none
-    integer, intent(in) :: n
-    real(8), intent(in) :: tol
-    complex(8), intent(in) :: A_in(n,n)
-    complex(8), intent(out) :: A_invsqrt(n,n)
-    integer, intent(out) :: info, nkeep
-    real(8), intent(out) :: eval_min, eval_max
-
-    integer :: i
-    complex(8), allocatable :: avec(:,:)
-    real(8), allocatable :: eval(:)
-    real(8) :: cutoff
-
-    allocate(avec(n,n), eval(n))
-    avec(:, :) = A_in(:, :)
-    call zheev_with_query(avec, n, eval, info)
-    if (info /= 0) then
-      A_invsqrt(:, :) = (0.0d0, 0.0d0)
-      eval_min = 0.0d0
-      eval_max = 0.0d0
-      nkeep = 0
-      deallocate(avec, eval)
-      return
-    end if
-    eval_min = eval(1)
-    eval_max = eval(n)
-    cutoff = max(tol * max(eval_max, 0.0d0), 1.0d-14)
-    A_invsqrt(:, :) = (0.0d0, 0.0d0)
-    nkeep = 0
-    do i = 1, n
-      if (eval(i) <= cutoff) cycle
-      A_invsqrt(:, :) = A_invsqrt(:, :) + &
-        matmul(reshape(avec(:, i), [n,1]), reshape(conjg(avec(:, i)), [1,n])) / sqrt(eval(i))
-      nkeep = nkeep + 1
-    end do
-    if (nkeep <= 0) then
-      info = -100
-      A_invsqrt(:, :) = (0.0d0, 0.0d0)
-    else
-      call hermitize_matrix(A_invsqrt, n)
-    end if
-    deallocate(avec, eval)
-  end subroutine build_hermitian_inverse_sqrt
-
-  subroutine build_hermitian_inverse(A_in, n, A_inv, info, eval_min, eval_max)
-    implicit none
-    integer, intent(in) :: n
-    complex(8), intent(in) :: A_in(n,n)
-    complex(8), intent(out) :: A_inv(n,n)
-    integer, intent(out) :: info
-    real(8), intent(out) :: eval_min, eval_max
-
-    integer :: i
-    complex(8), allocatable :: avec(:,:)
-    real(8), allocatable :: eval(:)
-
-    allocate(avec(n,n), eval(n))
-    avec(:, :) = A_in(:, :)
-    call zheev_with_query(avec, n, eval, info)
-    if (info /= 0) then
-      A_inv(:, :) = (0.0d0, 0.0d0)
-      eval_min = 0.0d0
-      eval_max = 0.0d0
-      deallocate(avec, eval)
-      return
-    end if
-    eval_min = eval(1)
-    eval_max = eval(n)
-    if (eval_min <= 1.0d-14) then
-      info = -100
-      A_inv(:, :) = (0.0d0, 0.0d0)
-      deallocate(avec, eval)
-      return
-    end if
-    A_inv(:, :) = (0.0d0, 0.0d0)
-    do i = 1, n
-      A_inv(:, :) = A_inv(:, :) + matmul(reshape(avec(:, i), [n,1]), reshape(conjg(avec(:, i)), [1,n])) / eval(i)
-    end do
-    call hermitize_matrix(A_inv, n)
-    deallocate(avec, eval)
-  end subroutine build_hermitian_inverse
-
-  subroutine zheev_with_query(A, n, eval, info)
-    implicit none
-    integer, intent(in) :: n
-    complex(8), intent(inout) :: A(n,n)
-    real(8), intent(out) :: eval(n)
-    integer, intent(out) :: info
-
-    integer :: lwork
-    complex(8), allocatable :: work(:)
-    real(8), allocatable :: rwork(:)
-    external :: zheev
-
-    allocate(work(1), rwork(max(1, 3*n - 2)))
-    lwork = -1
-    call ZHEEV('V', 'U', n, A, n, eval, work, lwork, rwork, info)
-    lwork = max(1, int(real(work(1), kind=8)))
-    deallocate(work)
-    allocate(work(lwork))
-    call ZHEEV('V', 'U', n, A, n, eval, work, lwork, rwork, info)
-    deallocate(work, rwork)
-  end subroutine zheev_with_query
-
-  subroutine zhegv_with_query(H, S, n, eval, info)
-    implicit none
-    integer, intent(in) :: n
-    complex(8), intent(inout) :: H(n,n), S(n,n)
-    real(8), intent(out) :: eval(n)
-    integer, intent(out) :: info
-
-    integer :: lwork
-    complex(8), allocatable :: work(:)
-    real(8), allocatable :: rwork(:)
-    external :: zhegv
-
-    allocate(work(1), rwork(max(1, 3*n - 2)))
-    lwork = -1
-    call ZHEGV(1, 'V', 'U', n, H, n, S, n, eval, work, lwork, rwork, info)
-    lwork = max(1, int(real(work(1), kind=8)))
-    deallocate(work)
-    allocate(work(lwork))
-    call ZHEGV(1, 'V', 'U', n, H, n, S, n, eval, work, lwork, rwork, info)
-    deallocate(work, rwork)
-  end subroutine zhegv_with_query
-
-  subroutine rectangular_singular_minmax(mat, nrow, ncol, sigma_min, sigma_max)
-    implicit none
-    integer, intent(in) :: nrow, ncol
-    complex(8), intent(in) :: mat(nrow, ncol)
-    real(8), intent(out) :: sigma_min, sigma_max
-
-    integer :: ngram, info, lwork
-    complex(8), allocatable :: gram(:,:), work(:)
-    real(8), allocatable :: eval(:), rwork(:)
-    external :: zheev
-
-    sigma_min = 0.0d0
-    sigma_max = 0.0d0
-    if (nrow <= 0 .or. ncol <= 0) return
-    ngram = min(nrow, ncol)
-    allocate(gram(ngram, ngram), eval(ngram), rwork(max(1, 3*ngram - 2)), work(1))
-    if (ncol <= nrow) then
-      gram(:, :) = matmul(conjg(transpose(mat(1:nrow, 1:ncol))), mat(1:nrow, 1:ncol))
-    else
-      gram(:, :) = matmul(mat(1:nrow, 1:ncol), conjg(transpose(mat(1:nrow, 1:ncol))))
-    end if
-    call hermitize_matrix(gram, ngram)
-    lwork = -1
-    call ZHEEV('N', 'U', ngram, gram, ngram, eval, work, lwork, rwork, info)
-    lwork = max(1, int(real(work(1), kind=8)))
-    deallocate(work)
-    allocate(work(lwork))
-    if (ncol <= nrow) then
-      gram(:, :) = matmul(conjg(transpose(mat(1:nrow, 1:ncol))), mat(1:nrow, 1:ncol))
-    else
-      gram(:, :) = matmul(mat(1:nrow, 1:ncol), conjg(transpose(mat(1:nrow, 1:ncol))))
-    end if
-    call hermitize_matrix(gram, ngram)
-    call ZHEEV('N', 'U', ngram, gram, ngram, eval, work, lwork, rwork, info)
-    if (info == 0) then
-      sigma_min = sqrt(max(0.0d0, eval(1)))
-      sigma_max = sqrt(max(0.0d0, eval(ngram)))
-    end if
-    deallocate(gram, eval, rwork, work)
-  end subroutine rectangular_singular_minmax
 
 
   integer function find_wpw_pp_block(blocks, ifrag, jfrag) result(iblk)
@@ -8276,62 +8619,7 @@ contains
     dn = dble(side) * grad_phi(axis)
   end subroutine wpw_basis_trace_value
 
-  subroutine wpw_normalized_window_at_grid(dg_frag, ifrag, gx, gy, gz, chi, grad_chi)
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    integer, intent(in) :: ifrag, gx, gy, gz
-    real(8), intent(out) :: chi, grad_chi(3)
-    integer :: jfrag, nfrag
-    real(8), allocatable :: q(:), gq(:,:)
-    real(8) :: qsum, sqrt_qsum, qg_sum(3)
-    real(8), parameter :: tiny_q = 1.0d-28
 
-    nfrag = dg_frag%n_frag
-    chi = 0.0d0
-    grad_chi(:) = 0.0d0
-    allocate(q(nfrag), gq(3, nfrag))
-    q = 0.0d0
-    gq = 0.0d0
-    do jfrag = 1, nfrag
-      call wpw_raw_window_at_grid(dg_frag, jfrag, gx, gy, gz, q(jfrag), gq(:, jfrag))
-    end do
-    qsum = sum(q(1:nfrag)**2)
-    if (qsum > tiny_q) then
-      sqrt_qsum = sqrt(qsum)
-      qg_sum(1:3) = 0.0d0
-      do jfrag = 1, nfrag
-        qg_sum(1:3) = qg_sum(1:3) + q(jfrag) * gq(1:3, jfrag)
-      end do
-      chi = q(ifrag) / sqrt_qsum
-      grad_chi(1:3) = gq(1:3, ifrag) / sqrt_qsum - q(ifrag) * qg_sum(1:3) / (qsum * sqrt_qsum)
-    end if
-    deallocate(q, gq)
-  end subroutine wpw_normalized_window_at_grid
-
-  integer function wpw_face_neighbor_fragment(dg_frag, ifrag, axis, side) result(jfrag)
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    integer, intent(in) :: ifrag, axis, side
-    integer :: cand, lo(3), hi(3), target, cand_face
-
-    jfrag = 0
-    target = modulo(dg_frag%ixyz_frag(axis, ifrag) + merge(dg_frag%nxyz_domain(axis, ifrag), -1, side > 0) - 1, &
-      max(1, dg_frag%lgnum_total(axis))) + 1
-    do cand = 1, dg_frag%n_frag
-      if (cand == ifrag) cycle
-      lo(:) = dg_frag%ixyz_frag(:, cand)
-      hi(:) = dg_frag%ixyz_frag(:, cand) + dg_frag%nxyz_domain(:, cand) - 1
-      if (side > 0) then
-        cand_face = modulo(lo(axis) - 1, max(1, dg_frag%lgnum_total(axis))) + 1
-      else
-        cand_face = modulo(hi(axis) - 1, max(1, dg_frag%lgnum_total(axis))) + 1
-      end if
-      if (cand_face /= target) cycle
-      if (.not. wpw_local_is_neighbor_pair(dg_frag, ifrag, cand)) cycle
-      jfrag = cand
-      return
-    end do
-  end function wpw_face_neighbor_fragment
 
   subroutine hermitize_matrix(mat, n)
     implicit none
@@ -8348,20 +8636,6 @@ contains
     end do
   end subroutine hermitize_matrix
 
-  subroutine wpw_local_herm_max(mat, n, herm_max)
-    implicit none
-    integer, intent(in) :: n
-    complex(8), intent(in) :: mat(n, n)
-    real(8), intent(out) :: herm_max
-    integer :: i, j
-
-    herm_max = 0.0d0
-    do j = 1, n
-      do i = 1, n
-        herm_max = max(herm_max, abs(mat(i, j) - conjg(mat(j, i))))
-      end do
-    end do
-  end subroutine wpw_local_herm_max
 
   subroutine wpw_local_block_magnitudes(dg_frag, mat, self_max, neighbor_max, nonneighbor_max)
     implicit none
@@ -8398,38 +8672,7 @@ contains
     end do
   end subroutine wpw_local_block_magnitudes
 
-  logical function wpw_local_is_neighbor_pair(dg_frag, ifrag, jfrag) result(is_neighbor)
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    integer, intent(in) :: ifrag, jfrag
 
-    is_neighbor = .false.
-    if (ifrag == jfrag) then
-      is_neighbor = .true.
-      return
-    end if
-    is_neighbor = wpw_local_axis_neighbor(dg_frag, 1, ifrag, jfrag) .and. &
-      wpw_local_axis_neighbor(dg_frag, 2, ifrag, jfrag) .and. &
-      wpw_local_axis_neighbor(dg_frag, 3, ifrag, jfrag)
-  end function wpw_local_is_neighbor_pair
-
-  logical function wpw_local_axis_neighbor(dg_frag, axis, ifrag, jfrag) result(ok)
-    implicit none
-    type(s_dg_fragment_rt), intent(in) :: dg_frag
-    integer, intent(in) :: axis, ifrag, jfrag
-    integer :: s1, s2, n1, n2, e1, e2, next1, next2, lg
-
-    s1 = dg_frag%ixyz_frag(axis, ifrag)
-    s2 = dg_frag%ixyz_frag(axis, jfrag)
-    n1 = dg_frag%nxyz_domain(axis, ifrag)
-    n2 = dg_frag%nxyz_domain(axis, jfrag)
-    lg = max(1, dg_frag%lgnum_total(axis))
-    e1 = s1 + n1 - 1
-    e2 = s2 + n2 - 1
-    next1 = modulo(e1, lg) + 1
-    next2 = modulo(e2, lg) + 1
-    ok = ((s1 == s2) .and. (n1 == n2)) .or. (s1 == next2) .or. (s2 == next1)
-  end function wpw_local_axis_neighbor
 
   !=======================================================================
   ! Compute mean potential energy for plane wave basis
@@ -10136,14 +10379,6 @@ contains
   ! Map global periodic grid index to this rank's phi-box coordinate.
   ! If the point is not represented in the local box, caller must skip it.
   !=======================================================================
-  pure integer function map_global_to_phi_box_coord_pw(ig, phi_lo, phi_hi, lgnum) result(local_idx)
-    implicit none
-    integer, intent(in) :: ig, phi_lo, phi_hi, lgnum
-
-    local_idx = modulo(ig - 1, lgnum) + 1
-    if (local_idx < phi_lo) local_idx = local_idx + lgnum
-    if (local_idx > phi_hi) local_idx = local_idx - lgnum
-  end function map_global_to_phi_box_coord_pw
 
   pure integer function map_global_to_fft_slot_pw(ig, lgnum) result(slot_idx)
     implicit none

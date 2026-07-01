@@ -156,6 +156,13 @@ module salmon_global
   character(1)   :: yn_dg_fragment_rt
   character(1)   :: yn_dg_length_gauge
   character(16)  :: time_integrator_dg_fragment
+  character(1)   :: yn_dg_mixed_z
+  character(1)   :: yn_dg_mixed_z_local_prop_writeback
+  character(48)  :: dg_mixed_z_local_prop_backend
+  character(32)  :: dg_mixed_z_frag_local_field_block
+  character(1)   :: yn_dg_mixed_z_local_rho_writeback_wwonly
+  character(1)   :: yn_dg_mixed_z_local_pz_writeback_total
+  character(1)   :: yn_dg_mixed_z_local_current_writeback_total
   
   ! Plane wave basis mixing for DG-Fragment RT
   character(1)   :: yn_plane_wave_basis         ! Enable plane wave mixing (default: 'n')
@@ -511,5 +518,6 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: basis_update_threshold
   character(1)   :: yn_dg_fragment_from_dcdft  ! Initialize DG-Fragment RT from DC-LCFO data
   character(1)   :: yn_dg_lcfo_seed_exhaustive_check
+  character(1)   :: yn_dg_full_h_eigen_seed
 
 end module salmon_global

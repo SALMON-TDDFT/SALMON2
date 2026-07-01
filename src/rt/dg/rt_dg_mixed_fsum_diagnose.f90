@@ -11,8 +11,8 @@
     real(8) :: sperp_tol
     integer :: nmat, npw, nwann, neig, nspin_file, nocc_ref
     integer :: ispin, idir, i_local, ifrag, ibasis, iw, jw, ipw, alpha, beta, eig
-    integer :: imix, jmix, jdir, virt
-    integer :: nbf, global_row, local_row, nkeep, pslot
+    integer :: imix, jmix, jdir, virt, total_dim
+    integer :: nbf, global_row, local_row, nkeep, pslot, info_diag
     real(8) :: min_s_local, max_s_local, pw_energy_ref, gap, herm_max
     real(8) :: comm_rel_tol, comm_abs_tol, comm_min_fwp_floor
     real(8) :: bpw_ecut, shell_energy, selected_max_energy
@@ -24,16 +24,21 @@
     real(8) :: zwp_norm(3), zww_norm(3)
     real(8) :: zcov_ww(3,3), zcov_wp(3,3), zcov_tot(3,3)
     real(8) :: zcomm_ww(3,3), zcomm_wp(3,3), zcomm_tot(3,3)
+    real(8) :: metric_sww_max, metric_sww_rms, metric_swz_max, metric_swz_rms
+    real(8) :: metric_szz_max, metric_szz_rms, metric_stotal_max, metric_stotal_rms
+    real(8) :: h_total_herm_max, h_total_herm_rms
     real(8) :: frag_center(3)
     real(8) :: sv_min_selected, sv_max_selected, sv_condition
     real(8) :: proj_min_selected, proj_max_rejected, proj_gap
     real(8) :: fsum_proxy_wp_avg, fsum_proxy_total_avg
     complex(8) :: coeff, amp, grad_corr
-    character(len=32) :: env_sperp, env_direct_origin
+    character(len=32) :: env_sperp, env_direct_origin, env_h_evec
+    character(len=32) :: env_legacy_h_vec
     character(len=32) :: env_select_mode, env_comm
     character(len=32) :: bpw_select_mode
     logical :: use_fragment_center_direct, use_comm_min_select
     logical :: use_shell_ecut_select, use_shell_nraw_select
+    logical :: use_h_eigenvectors_for_final, use_legacy_h_vec_for_final
     logical :: bpw_ecut_is_set, comm_diag_enabled, fsum_diag_enabled
     integer :: env_len, env_stat
     integer :: target_nraw, max_shells, nshell, ishell, shell_id, shell_limit
@@ -48,8 +53,11 @@
     complex(8), allocatable :: z_w(:,:), z_eig(:,:), o_eig(:,:)
     complex(8), allocatable :: s_perp(:,:), s_vec(:,:), s_work(:,:), qmat(:,:)
     complex(8), allocatable :: h_p(:,:), h_vec(:,:)
+    complex(8), allocatable :: q_metric(:,:), q_left_metric(:,:), final_metric(:,:), transform_metric(:,:)
+    complex(8), allocatable :: t_final(:,:), t_saved(:,:), metric_vec(:,:)
+    complex(8), allocatable :: total_metric(:,:), h_total(:,:)
     complex(8), allocatable :: r_tilde(:,:), r_orth(:,:), r_final(:,:), z_wp_direct(:,:)
-    real(8), allocatable :: s_eval(:), h_eval(:), pw_ekin(:), shell_ekin(:)
+    real(8), allocatable :: s_eval(:), h_eval(:), pw_ekin(:), shell_ekin(:), diag_eval(:)
     logical, allocatable :: active_pw(:), trial_active_pw(:), best_active_pw(:)
     integer, allocatable :: shell_key(:), shell_values(:)
 
@@ -88,6 +96,26 @@
         use_fragment_center_direct = .false.
       end select
     end if
+    use_h_eigenvectors_for_final = .true.
+    use_legacy_h_vec_for_final = .false.
+    env_legacy_h_vec = ''
+    call get_environment_variable('SALMON_DG_MIXED_Z_LEGACY_H_VEC', &
+      env_legacy_h_vec, length=env_len, status=env_stat)
+    if (env_stat == 0 .and. env_len > 0) then
+      select case (adjustl(trim(env_legacy_h_vec(1:env_len))))
+      case ('1','y','Y','yes','YES','true','TRUE','on','ON')
+        use_legacy_h_vec_for_final = .true.
+      end select
+    end if
+    env_h_evec = ''
+    call get_environment_variable('SALMON_DG_MIXED_Z_USE_H_EIGENVEC', env_h_evec, length=env_len, status=env_stat)
+    if (env_stat == 0 .and. env_len > 0) then
+      select case (adjustl(trim(env_h_evec(1:env_len))))
+      case ('1','y','Y','yes','YES','true','TRUE','on','ON')
+        use_h_eigenvectors_for_final = .true.
+      end select
+    end if
+    if (use_legacy_h_vec_for_final) use_h_eigenvectors_for_final = .false.
 
     bpw_select_mode = 'shell_ecut'
     use_comm_min_select = .false.
@@ -202,6 +230,9 @@
     allocate(z_w(nwann,nwann), z_eig(neig,neig), o_eig(neig,neig))
     allocate(s_perp(npw,npw), s_vec(npw,npw), s_work(npw,npw), s_eval(npw), pw_ekin(npw), shell_ekin(npw))
     allocate(qmat(npw,npw), h_p(npw,npw), h_vec(npw,npw), h_eval(npw))
+    allocate(q_metric(npw,npw), q_left_metric(npw,npw), final_metric(npw,npw), transform_metric(npw,npw))
+    allocate(t_final(npw,npw), t_saved(npw,npw), metric_vec(npw,npw), diag_eval(npw))
+    allocate(total_metric(neig+npw,neig+npw), h_total(neig+npw,neig+npw))
     allocate(r_tilde(neig,npw), r_orth(neig,npw), r_final(neig,npw))
     allocate(z_wp_direct(neig,npw))
     allocate(active_pw(npw), trial_active_pw(npw), best_active_pw(npw), shell_key(npw), shell_values(npw))
@@ -442,15 +473,50 @@
       if (allocated(dg_frag%mixed_wannier_bpw_eval)) deallocate(dg_frag%mixed_wannier_bpw_eval)
       if (allocated(dg_frag%mixed_wannier_bpw_z)) deallocate(dg_frag%mixed_wannier_bpw_z)
       if (allocated(dg_frag%mixed_wannier_bpw_pcoef)) deallocate(dg_frag%mixed_wannier_bpw_pcoef)
+      if (allocated(dg_frag%mixed_wannier_bpw_p_transform)) deallocate(dg_frag%mixed_wannier_bpw_p_transform)
+      if (allocated(dg_frag%mixed_wannier_bpw_p_metric)) deallocate(dg_frag%mixed_wannier_bpw_p_metric)
       allocate(dg_frag%mixed_wannier_bpw_eval(neig+nkeep,nspin_file))
       allocate(dg_frag%mixed_wannier_bpw_z(3,neig+nkeep,neig+nkeep,nspin_file))
       allocate(dg_frag%mixed_wannier_bpw_pcoef(nkeep,max(1,dg_frag%nstate_tot),nspin_file))
+      allocate(dg_frag%mixed_wannier_bpw_p_transform(npw,nkeep,nspin_file))
+      allocate(dg_frag%mixed_wannier_bpw_p_metric(nkeep,nkeep,nspin_file))
       dg_frag%mixed_wannier_bpw_eval(:, :) = 0.0d0
       dg_frag%mixed_wannier_bpw_z(:, :, :, :) = zzero
       dg_frag%mixed_wannier_bpw_pcoef(:, :, :) = zzero
+      dg_frag%mixed_wannier_bpw_p_transform(:, :, :) = zzero
+      dg_frag%mixed_wannier_bpw_p_metric(:, :, :) = zzero
       dg_frag%mixed_wannier_bpw_nw = neig
       dg_frag%mixed_wannier_bpw_np = nkeep
       dg_frag%mixed_wannier_bpw_nmix = neig + nkeep
+      dg_frag%mixed_wannier_bpw_praw_dim = npw
+      dg_frag%has_mixed_wannier_bpw_p_basis = .false.
+      dg_frag%mixed_wannier_bpw_sraw_herm_diff = 0.0d0
+      dg_frag%mixed_wannier_bpw_sperp_herm_diff = 0.0d0
+      dg_frag%mixed_wannier_bpw_qmat_metric_herm_diff = 0.0d0
+      dg_frag%mixed_wannier_bpw_qmat_metric_min_eval = huge(1.0d0)
+      dg_frag%mixed_wannier_bpw_qmat_metric_max_eval = 0.0d0
+      dg_frag%mixed_wannier_bpw_qmat_metric_cond = 0.0d0
+      dg_frag%mixed_wannier_bpw_qmat_metric_diff_from_i = 0.0d0
+      dg_frag%mixed_wannier_bpw_qleft_metric_diff_from_i = 0.0d0
+      dg_frag%mixed_wannier_bpw_final_metric_herm_diff = 0.0d0
+      dg_frag%mixed_wannier_bpw_final_metric_min_eval = huge(1.0d0)
+      dg_frag%mixed_wannier_bpw_final_metric_max_eval = 0.0d0
+      dg_frag%mixed_wannier_bpw_final_metric_cond = 0.0d0
+      dg_frag%mixed_wannier_bpw_final_metric_diff_from_i = 0.0d0
+      dg_frag%mixed_wannier_bpw_transform_metric_herm_diff = 0.0d0
+      dg_frag%mixed_wannier_bpw_transform_metric_min_eval = huge(1.0d0)
+      dg_frag%mixed_wannier_bpw_transform_metric_max_eval = 0.0d0
+      dg_frag%mixed_wannier_bpw_transform_metric_cond = 0.0d0
+      dg_frag%mixed_wannier_bpw_transform_metric_diff_from_i = 0.0d0
+      dg_frag%mixed_wannier_bpw_transform_metric_diff_saved = 0.0d0
+      dg_frag%mixed_wannier_bpw_h_input_herm_diff = 0.0d0
+      dg_frag%mixed_wannier_bpw_h_evec_unitarity_diff = 0.0d0
+      dg_frag%mixed_wannier_bpw_h_input_evec_diff = 0.0d0
+      dg_frag%mixed_wannier_bpw_final_uses_h_evec = use_h_eigenvectors_for_final
+      dg_frag%mixed_wannier_bpw_qmat_col_norm_min = huge(1.0d0)
+      dg_frag%mixed_wannier_bpw_qmat_col_norm_max = 0.0d0
+      dg_frag%mixed_wannier_bpw_qmat_row_norm_min = huge(1.0d0)
+      dg_frag%mixed_wannier_bpw_qmat_row_norm_max = 0.0d0
       exit
     end do
 
@@ -459,6 +525,8 @@
       deallocate(c_local, c_global, c_w_local, c_w_global, c_eig)
       deallocate(z_w, z_eig, o_eig)
       deallocate(s_perp, s_vec, s_work, s_eval, pw_ekin, shell_ekin, qmat, h_p, h_vec, h_eval)
+      deallocate(q_metric, q_left_metric, final_metric, transform_metric, t_final, t_saved, metric_vec, diag_eval)
+      deallocate(total_metric, h_total)
       deallocate(r_tilde, r_orth, r_final, z_wp_direct)
       return
     end if
@@ -515,7 +583,7 @@
         if (s_eval(alpha) <= sperp_tol) cycle
         pslot = pslot + 1
         if (pslot > dg_frag%mixed_wannier_bpw_np) exit
-        qmat(1:npw,pslot) = s_vec(1:npw,alpha) / sqrt(s_eval(alpha))
+        qmat(1:npw,pslot) = s_work(1:npw,alpha) / sqrt(s_eval(alpha))
       end do
       min_s_local = min(min_s_local, minval(s_eval))
       max_s_local = max(max_s_local, maxval(s_eval))
@@ -530,8 +598,176 @@
       end do
       h_vec(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np) = &
         h_p(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np)
+      dg_frag%mixed_wannier_bpw_h_input_herm_diff = max(dg_frag%mixed_wannier_bpw_h_input_herm_diff, &
+        maxval(abs(h_vec(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np) - &
+        conjg(transpose(h_vec(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))))))
       call eigen_zheev(h_vec(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np), &
         h_eval(1:dg_frag%mixed_wannier_bpw_np), h_p(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))
+      dg_frag%mixed_wannier_bpw_h_input_evec_diff = max(dg_frag%mixed_wannier_bpw_h_input_evec_diff, &
+        sqrt(sum(abs(h_vec(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np) - &
+        h_p(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))**2)))
+      q_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np) = matmul( &
+        conjg(transpose(h_p(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))), &
+        h_p(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))
+      do alpha = 1, dg_frag%mixed_wannier_bpw_np
+        q_metric(alpha,alpha) = q_metric(alpha,alpha) - (1.0d0,0.0d0)
+      end do
+      dg_frag%mixed_wannier_bpw_h_evec_unitarity_diff = max(dg_frag%mixed_wannier_bpw_h_evec_unitarity_diff, &
+        sqrt(sum(abs(q_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))**2)))
+      if (allocated(dg_frag%mixed_wannier_bpw_p_transform) .and. allocated(dg_frag%mixed_wannier_bpw_p_metric)) then
+        dg_frag%mixed_wannier_bpw_p_transform(1:npw,1:dg_frag%mixed_wannier_bpw_np,ispin) = &
+          matmul(qmat(1:npw,1:dg_frag%mixed_wannier_bpw_np), &
+                 h_p(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))
+        dg_frag%mixed_wannier_bpw_p_metric(1:dg_frag%mixed_wannier_bpw_np, &
+          1:dg_frag%mixed_wannier_bpw_np,ispin) = matmul( &
+          conjg(transpose(dg_frag%mixed_wannier_bpw_p_transform(1:npw,1:dg_frag%mixed_wannier_bpw_np,ispin))), &
+          matmul(s_perp(1:npw,1:npw), &
+            dg_frag%mixed_wannier_bpw_p_transform(1:npw,1:dg_frag%mixed_wannier_bpw_np,ispin)))
+        dg_frag%has_mixed_wannier_bpw_p_basis = .true.
+      end if
+      dg_frag%mixed_wannier_bpw_sraw_herm_diff = max(dg_frag%mixed_wannier_bpw_sraw_herm_diff, &
+        maxval(abs(s_vec(1:npw,1:npw) - conjg(transpose(s_vec(1:npw,1:npw))))))
+      dg_frag%mixed_wannier_bpw_sperp_herm_diff = max(dg_frag%mixed_wannier_bpw_sperp_herm_diff, &
+        maxval(abs(s_perp(1:npw,1:npw) - conjg(transpose(s_perp(1:npw,1:npw))))))
+      q_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np) = matmul( &
+        conjg(transpose(qmat(1:npw,1:dg_frag%mixed_wannier_bpw_np))), &
+        matmul(s_perp(1:npw,1:npw), qmat(1:npw,1:dg_frag%mixed_wannier_bpw_np)))
+      q_left_metric(1:npw,1:npw) = matmul(qmat(1:npw,1:dg_frag%mixed_wannier_bpw_np), &
+        matmul(s_perp(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np), &
+        conjg(transpose(qmat(1:npw,1:dg_frag%mixed_wannier_bpw_np)))))
+      if (use_h_eigenvectors_for_final) then
+        t_final(1:npw,1:dg_frag%mixed_wannier_bpw_np) = matmul( &
+          qmat(1:npw,1:dg_frag%mixed_wannier_bpw_np), &
+          h_p(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))
+      else
+        t_final(1:npw,1:dg_frag%mixed_wannier_bpw_np) = matmul( &
+          qmat(1:npw,1:dg_frag%mixed_wannier_bpw_np), &
+          h_vec(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))
+      end if
+      t_saved(1:npw,1:dg_frag%mixed_wannier_bpw_np) = matmul( &
+        qmat(1:npw,1:dg_frag%mixed_wannier_bpw_np), &
+        h_p(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))
+      final_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np) = matmul( &
+        conjg(transpose(t_final(1:npw,1:dg_frag%mixed_wannier_bpw_np))), &
+        matmul(s_perp(1:npw,1:npw), t_final(1:npw,1:dg_frag%mixed_wannier_bpw_np)))
+      transform_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np) = matmul( &
+        conjg(transpose(t_saved(1:npw,1:dg_frag%mixed_wannier_bpw_np))), &
+        matmul(s_perp(1:npw,1:npw), t_saved(1:npw,1:dg_frag%mixed_wannier_bpw_np)))
+      total_dim = neig + dg_frag%mixed_wannier_bpw_np
+      total_metric(1:total_dim,1:total_dim) = zzero
+      total_metric(1:neig,1:neig) = matmul( &
+        conjg(transpose(dg_frag%global_wannier_flux_evec(1:nwann,1:neig))), &
+        dg_frag%global_wannier_flux_evec(1:nwann,1:neig))
+      do alpha = 1, neig
+        total_metric(alpha,alpha) = total_metric(alpha,alpha) - (1.0d0,0.0d0)
+      end do
+      total_metric(1:neig,neig+1:total_dim) = matmul( &
+        b_eig(1:neig,1:npw), t_final(1:npw,1:dg_frag%mixed_wannier_bpw_np))
+      total_metric(neig+1:total_dim,1:neig) = conjg(transpose( &
+        total_metric(1:neig,neig+1:total_dim)))
+      total_metric(neig+1:total_dim,neig+1:total_dim) = &
+        final_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np)
+      do alpha = 1, dg_frag%mixed_wannier_bpw_np
+        total_metric(neig+alpha,neig+alpha) = total_metric(neig+alpha,neig+alpha) - (1.0d0,0.0d0)
+      end do
+      metric_sww_max = max(metric_sww_max, maxval(abs(total_metric(1:neig,1:neig))))
+      metric_sww_rms = max(metric_sww_rms, sqrt(sum(abs(total_metric(1:neig,1:neig))**2) / &
+        max(1.0d0, dble(neig*neig))))
+      metric_swz_max = max(metric_swz_max, maxval(abs(total_metric(1:neig,neig+1:total_dim))))
+      metric_swz_rms = max(metric_swz_rms, sqrt(sum(abs(total_metric(1:neig,neig+1:total_dim))**2) / &
+        max(1.0d0, dble(neig*dg_frag%mixed_wannier_bpw_np))))
+      metric_szz_max = max(metric_szz_max, maxval(abs(total_metric(neig+1:total_dim,neig+1:total_dim))))
+      metric_szz_rms = max(metric_szz_rms, sqrt(sum(abs(total_metric(neig+1:total_dim,neig+1:total_dim))**2) / &
+        max(1.0d0, dble(dg_frag%mixed_wannier_bpw_np*dg_frag%mixed_wannier_bpw_np))))
+      metric_stotal_max = max(metric_stotal_max, maxval(abs(total_metric(1:total_dim,1:total_dim))))
+      metric_stotal_rms = max(metric_stotal_rms, sqrt(sum(abs(total_metric(1:total_dim,1:total_dim))**2) / &
+        max(1.0d0, dble(total_dim*total_dim))))
+      h_total(1:total_dim,1:total_dim) = zzero
+      do alpha = 1, neig
+        h_total(alpha,alpha) = cmplx(dg_frag%global_wannier_flux_eval(alpha,ispin), 0.0d0, kind=8)
+      end do
+      do alpha = 1, dg_frag%mixed_wannier_bpw_np
+        h_total(neig+alpha,neig+alpha) = cmplx(h_eval(alpha), 0.0d0, kind=8)
+      end do
+      h_total_herm_max = max(h_total_herm_max, maxval(abs(h_total(1:total_dim,1:total_dim) - &
+        conjg(transpose(h_total(1:total_dim,1:total_dim))))))
+      h_total_herm_rms = max(h_total_herm_rms, sqrt(sum(abs(h_total(1:total_dim,1:total_dim) - &
+        conjg(transpose(h_total(1:total_dim,1:total_dim))))**2) / max(1.0d0, dble(total_dim*total_dim))))
+      call eigen_zheev(q_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np), &
+        diag_eval(1:dg_frag%mixed_wannier_bpw_np), metric_vec(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))
+      dg_frag%mixed_wannier_bpw_qmat_metric_herm_diff = max(dg_frag%mixed_wannier_bpw_qmat_metric_herm_diff, &
+        maxval(abs(q_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np) - &
+        conjg(transpose(q_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))))))
+      dg_frag%mixed_wannier_bpw_qmat_metric_min_eval = min(dg_frag%mixed_wannier_bpw_qmat_metric_min_eval, &
+        minval(diag_eval(1:dg_frag%mixed_wannier_bpw_np)))
+      dg_frag%mixed_wannier_bpw_qmat_metric_max_eval = max(dg_frag%mixed_wannier_bpw_qmat_metric_max_eval, &
+        maxval(diag_eval(1:dg_frag%mixed_wannier_bpw_np)))
+      dg_frag%mixed_wannier_bpw_qmat_metric_cond = max(dg_frag%mixed_wannier_bpw_qmat_metric_cond, &
+        maxval(diag_eval(1:dg_frag%mixed_wannier_bpw_np)) / &
+        max(minval(diag_eval(1:dg_frag%mixed_wannier_bpw_np)), 1.0d-300))
+      do alpha = 1, dg_frag%mixed_wannier_bpw_np
+        q_metric(alpha,alpha) = q_metric(alpha,alpha) - (1.0d0,0.0d0)
+      end do
+      dg_frag%mixed_wannier_bpw_qmat_metric_diff_from_i = max(dg_frag%mixed_wannier_bpw_qmat_metric_diff_from_i, &
+        sqrt(sum(abs(q_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))**2)))
+      if (npw == dg_frag%mixed_wannier_bpw_np) then
+        do alpha = 1, npw
+          q_left_metric(alpha,alpha) = q_left_metric(alpha,alpha) - (1.0d0,0.0d0)
+        end do
+        dg_frag%mixed_wannier_bpw_qleft_metric_diff_from_i = max( &
+          dg_frag%mixed_wannier_bpw_qleft_metric_diff_from_i, sqrt(sum(abs(q_left_metric(1:npw,1:npw))**2)))
+      end if
+      call eigen_zheev(final_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np), &
+        diag_eval(1:dg_frag%mixed_wannier_bpw_np), metric_vec(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))
+      dg_frag%mixed_wannier_bpw_final_metric_herm_diff = max(dg_frag%mixed_wannier_bpw_final_metric_herm_diff, &
+        maxval(abs(final_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np) - &
+        conjg(transpose(final_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))))))
+      dg_frag%mixed_wannier_bpw_final_metric_min_eval = min(dg_frag%mixed_wannier_bpw_final_metric_min_eval, &
+        minval(diag_eval(1:dg_frag%mixed_wannier_bpw_np)))
+      dg_frag%mixed_wannier_bpw_final_metric_max_eval = max(dg_frag%mixed_wannier_bpw_final_metric_max_eval, &
+        maxval(diag_eval(1:dg_frag%mixed_wannier_bpw_np)))
+      dg_frag%mixed_wannier_bpw_final_metric_cond = max(dg_frag%mixed_wannier_bpw_final_metric_cond, &
+        maxval(diag_eval(1:dg_frag%mixed_wannier_bpw_np)) / &
+        max(minval(diag_eval(1:dg_frag%mixed_wannier_bpw_np)), 1.0d-300))
+      do alpha = 1, dg_frag%mixed_wannier_bpw_np
+        final_metric(alpha,alpha) = final_metric(alpha,alpha) - (1.0d0,0.0d0)
+      end do
+      dg_frag%mixed_wannier_bpw_final_metric_diff_from_i = max(dg_frag%mixed_wannier_bpw_final_metric_diff_from_i, &
+        sqrt(sum(abs(final_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))**2)))
+      call eigen_zheev(transform_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np), &
+        diag_eval(1:dg_frag%mixed_wannier_bpw_np), metric_vec(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))
+      dg_frag%mixed_wannier_bpw_transform_metric_herm_diff = max( &
+        dg_frag%mixed_wannier_bpw_transform_metric_herm_diff, &
+        maxval(abs(transform_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np) - &
+        conjg(transpose(transform_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))))))
+      dg_frag%mixed_wannier_bpw_transform_metric_min_eval = min(dg_frag%mixed_wannier_bpw_transform_metric_min_eval, &
+        minval(diag_eval(1:dg_frag%mixed_wannier_bpw_np)))
+      dg_frag%mixed_wannier_bpw_transform_metric_max_eval = max(dg_frag%mixed_wannier_bpw_transform_metric_max_eval, &
+        maxval(diag_eval(1:dg_frag%mixed_wannier_bpw_np)))
+      dg_frag%mixed_wannier_bpw_transform_metric_cond = max(dg_frag%mixed_wannier_bpw_transform_metric_cond, &
+        maxval(diag_eval(1:dg_frag%mixed_wannier_bpw_np)) / &
+        max(minval(diag_eval(1:dg_frag%mixed_wannier_bpw_np)), 1.0d-300))
+      if (allocated(dg_frag%mixed_wannier_bpw_p_metric)) then
+        dg_frag%mixed_wannier_bpw_transform_metric_diff_saved = max( &
+          dg_frag%mixed_wannier_bpw_transform_metric_diff_saved, sqrt(sum(abs( &
+          transform_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np) - &
+          dg_frag%mixed_wannier_bpw_p_metric(1:dg_frag%mixed_wannier_bpw_np, &
+          1:dg_frag%mixed_wannier_bpw_np,ispin))**2)))
+      end if
+      do alpha = 1, dg_frag%mixed_wannier_bpw_np
+        transform_metric(alpha,alpha) = transform_metric(alpha,alpha) - (1.0d0,0.0d0)
+      end do
+      dg_frag%mixed_wannier_bpw_transform_metric_diff_from_i = max( &
+        dg_frag%mixed_wannier_bpw_transform_metric_diff_from_i, &
+        sqrt(sum(abs(transform_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))**2)))
+      dg_frag%mixed_wannier_bpw_qmat_col_norm_min = min(dg_frag%mixed_wannier_bpw_qmat_col_norm_min, &
+        minval(sum(abs(qmat(1:npw,1:dg_frag%mixed_wannier_bpw_np))**2, dim=1)))
+      dg_frag%mixed_wannier_bpw_qmat_col_norm_max = max(dg_frag%mixed_wannier_bpw_qmat_col_norm_max, &
+        maxval(sum(abs(qmat(1:npw,1:dg_frag%mixed_wannier_bpw_np))**2, dim=1)))
+      dg_frag%mixed_wannier_bpw_qmat_row_norm_min = min(dg_frag%mixed_wannier_bpw_qmat_row_norm_min, &
+        minval(sum(abs(qmat(1:npw,1:dg_frag%mixed_wannier_bpw_np))**2, dim=2)))
+      dg_frag%mixed_wannier_bpw_qmat_row_norm_max = max(dg_frag%mixed_wannier_bpw_qmat_row_norm_max, &
+        maxval(sum(abs(qmat(1:npw,1:dg_frag%mixed_wannier_bpw_np))**2, dim=2)))
       pw_energy_ref = dg_frag%global_wannier_flux_eval(nocc_ref+1,ispin)
       h_eval(1:dg_frag%mixed_wannier_bpw_np) = h_eval(1:dg_frag%mixed_wannier_bpw_np) + pw_energy_ref
 
@@ -610,9 +846,15 @@
         end do
         r_orth(1:neig,1:dg_frag%mixed_wannier_bpw_np) = &
           matmul(r_tilde(1:neig,1:npw), qmat(1:npw,1:dg_frag%mixed_wannier_bpw_np))
-        r_final(1:neig,1:dg_frag%mixed_wannier_bpw_np) = &
-          matmul(r_orth(1:neig,1:dg_frag%mixed_wannier_bpw_np), &
-                 h_vec(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))
+        if (use_h_eigenvectors_for_final) then
+          r_final(1:neig,1:dg_frag%mixed_wannier_bpw_np) = &
+            matmul(r_orth(1:neig,1:dg_frag%mixed_wannier_bpw_np), &
+                   h_p(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))
+        else
+          r_final(1:neig,1:dg_frag%mixed_wannier_bpw_np) = &
+            matmul(r_orth(1:neig,1:dg_frag%mixed_wannier_bpw_np), &
+                   h_vec(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))
+        end if
         z_wp_direct(:, :) = zzero
         do eig = 1, neig
           do alpha = 1, dg_frag%mixed_wannier_bpw_np
@@ -635,6 +877,16 @@
     zcomm_ww(:, :) = 0.0d0
     zcomm_wp(:, :) = 0.0d0
     zcomm_tot(:, :) = 0.0d0
+    metric_sww_max = 0.0d0
+    metric_sww_rms = 0.0d0
+    metric_swz_max = 0.0d0
+    metric_swz_rms = 0.0d0
+    metric_szz_max = 0.0d0
+    metric_szz_rms = 0.0d0
+    metric_stotal_max = 0.0d0
+    metric_stotal_rms = 0.0d0
+    h_total_herm_max = 0.0d0
+    h_total_herm_rms = 0.0d0
     do ispin = 1, nspin_file
       nocc_ref = min(dg_frag%mixed_wannier_bpw_nw, max(0, dg_frag%nstate_tot))
       if (allocated(dg_frag%nocc_spin)) then
@@ -708,6 +960,30 @@
       end if
       write(*,'(1x,a,3(1x,1pe13.5))') "[DG-MIXED-Z] ||Z_WP_direct||_F xyz=", zwp_direct_norm(1:3)
       write(*,'(1x,a,1pe13.5)') "[DG-MIXED-Z] Lowdin S_perp cutoff=", sperp_tol
+      write(*,'(1x,a,2(1x,1pe13.5),2(a,1pe13.5))') &
+        "[DG-MIXED-Z] fsum_proxy avg WP,total=", fsum_proxy_wp_avg, fsum_proxy_total_avg, &
+        " C_comm_sum_WP=", sqrt(sum(zcomm_wp(:, :)**2)), &
+        " C_comm_sum_total=", sqrt(sum(zcomm_tot(:, :)**2))
+      write(*,'(1x,a,3(a,i0),8(a,1pe13.5))') &
+        "[DG-MIXED-Z-METRIC]", &
+        " dim_W=", dg_frag%mixed_wannier_bpw_nw, &
+        " dim_Z=", dg_frag%mixed_wannier_bpw_np, &
+        " dim_total=", dg_frag%mixed_wannier_bpw_nmix, &
+        " S_WW_minus_I_max=", metric_sww_max, &
+        " S_WW_minus_I_rms=", metric_sww_rms, &
+        " S_WZ_max=", metric_swz_max, &
+        " S_WZ_rms=", metric_swz_rms, &
+        " S_ZZ_minus_I_max=", metric_szz_max, &
+        " S_ZZ_minus_I_rms=", metric_szz_rms, &
+        " S_total_minus_I_max=", metric_stotal_max, &
+        " S_total_minus_I_rms=", metric_stotal_rms
+      write(*,'(1x,a,3(a,i0),2(a,1pe13.5))') &
+        "[DG-MIXED-Z-HMETRIC]", &
+        " dim_W=", dg_frag%mixed_wannier_bpw_nw, &
+        " dim_Z=", dg_frag%mixed_wannier_bpw_np, &
+        " dim_total=", dg_frag%mixed_wannier_bpw_nmix, &
+        " H_total_herm_max=", h_total_herm_max, &
+        " H_total_herm_rms=", h_total_herm_rms
       do idir = 1, 3
         write(*,'(1x,a,i0,a,3(1x,1pe13.5))') "[DG-MIXED-Z] occ-virt metric WW row ", idir, " =", zcov_ww(idir,1:3)
       end do
@@ -738,6 +1014,8 @@
     deallocate(c_local, c_global, c_w_local, c_w_global, c_eig)
     deallocate(z_w, z_eig, o_eig)
     deallocate(s_perp, s_vec, s_work, s_eval, pw_ekin, shell_ekin, qmat, h_p, h_vec, h_eval)
+    deallocate(q_metric, q_left_metric, final_metric, transform_metric, t_final, t_saved, metric_vec, diag_eval)
+    deallocate(total_metric, h_total)
     deallocate(r_tilde, r_orth, r_final, z_wp_direct)
     deallocate(active_pw, trial_active_pw, best_active_pw, shell_key, shell_values)
 
@@ -1011,7 +1289,7 @@
         if (s_eval(alpha) <= sperp_tol) cycle
         pslot = pslot + 1
         if (pslot > np_eval) exit
-        qmat(1:npw,pslot) = s_vec(1:npw,alpha) / sqrt(s_eval(alpha))
+        qmat(1:npw,pslot) = s_work(1:npw,alpha) / sqrt(s_eval(alpha))
       end do
 
       h_p(:, :) = zzero
@@ -1109,7 +1387,11 @@
           end do
         end do
         r_orth(1:neig,1:np_eval) = matmul(r_tilde(1:neig,1:npw), qmat(1:npw,1:np_eval))
-        r_final(1:neig,1:np_eval) = matmul(r_orth(1:neig,1:np_eval), h_vec(1:np_eval,1:np_eval))
+        if (use_h_eigenvectors_for_final) then
+          r_final(1:neig,1:np_eval) = matmul(r_orth(1:neig,1:np_eval), h_p(1:np_eval,1:np_eval))
+        else
+          r_final(1:neig,1:np_eval) = matmul(r_orth(1:neig,1:np_eval), h_vec(1:np_eval,1:np_eval))
+        end if
         zwp_eval(idir,1:neig,1:np_eval) = r_final(1:neig,1:np_eval)
       end do
 
@@ -1178,9 +1460,12 @@
     logical :: enabled
     integer :: nocc
     integer :: ispin, idir, occ, virt, alpha
+    integer :: iwin, pairs_ww, pairs_wp, best_ww_occ, best_ww_virt, best_wp_occ, best_wp_virt
     real(8) :: gap, fsum_ww, fsum_wp, r2sum_ww, r2sum_wp
     real(8) :: max_ww, max_wp, max_ww_gap, max_wp_gap
     real(8) :: mean_gap_ww, mean_gap_wp, gap_weight_ww, gap_weight_wp
+    real(8) :: win_lo(4), win_hi(4), win_r2_ww, win_r2_wp, win_f_ww, win_f_wp
+    real(8) :: win_max_ww, win_max_wp, win_max_ww_gap, win_max_wp_gap
     complex(8) :: amp
 
     env_diag = ''
@@ -1193,6 +1478,9 @@
       end select
     end if
     if (.not. enabled) return
+
+    win_lo = (/0.0d0, 3.0d0, 3.6d0, 0.0d0/)
+    win_hi = (/1.0d0, 3.6d0, 5.0d0, 20.0d0/)
 
     if (.not. dg_frag%use_plane_wave_basis .or. dg_frag%n_plane_waves <= 0) then
       if (comm_is_root(dg_frag%id)) &
@@ -1280,6 +1568,77 @@
               " min_Sperp=", dg_frag%mixed_wannier_bpw_sperp_min, &
               " max_Sperp=", dg_frag%mixed_wannier_bpw_sperp_max
           end if
+          do iwin = 1, size(win_lo)
+            win_r2_ww = 0.0d0
+            win_r2_wp = 0.0d0
+            win_f_ww = 0.0d0
+            win_f_wp = 0.0d0
+            win_max_ww = 0.0d0
+            win_max_wp = 0.0d0
+            win_max_ww_gap = 0.0d0
+            win_max_wp_gap = 0.0d0
+            pairs_ww = 0
+            pairs_wp = 0
+            best_ww_occ = 0
+            best_ww_virt = 0
+            best_wp_occ = 0
+            best_wp_virt = 0
+            do virt = nocc + 1, dg_frag%mixed_wannier_bpw_nw
+              do occ = 1, nocc
+                gap = dg_frag%mixed_wannier_bpw_eval(virt,ispin) - dg_frag%mixed_wannier_bpw_eval(occ,ispin)
+                if (gap <= 1.0d-12) cycle
+                if (au_to_ev * gap < win_lo(iwin) .or. au_to_ev * gap > win_hi(iwin)) cycle
+                amp = dg_frag%mixed_wannier_bpw_z(idir,occ,virt,ispin)
+                pairs_ww = pairs_ww + 1
+                win_r2_ww = win_r2_ww + abs(amp)**2
+                win_f_ww = win_f_ww + 2.0d0 * gap * abs(amp)**2
+                if (abs(amp)**2 > win_max_ww) then
+                  win_max_ww = abs(amp)**2
+                  win_max_ww_gap = gap
+                  best_ww_occ = occ
+                  best_ww_virt = virt
+                end if
+              end do
+            end do
+            do alpha = 1, dg_frag%mixed_wannier_bpw_np
+              virt = dg_frag%mixed_wannier_bpw_nw + alpha
+              do occ = 1, nocc
+                gap = dg_frag%mixed_wannier_bpw_eval(virt,ispin) - dg_frag%mixed_wannier_bpw_eval(occ,ispin)
+                if (gap <= 1.0d-12) cycle
+                if (au_to_ev * gap < win_lo(iwin) .or. au_to_ev * gap > win_hi(iwin)) cycle
+                amp = dg_frag%mixed_wannier_bpw_z(idir,occ,virt,ispin)
+                pairs_wp = pairs_wp + 1
+                win_r2_wp = win_r2_wp + abs(amp)**2
+                win_f_wp = win_f_wp + 2.0d0 * gap * abs(amp)**2
+                if (abs(amp)**2 > win_max_wp) then
+                  win_max_wp = abs(amp)**2
+                  win_max_wp_gap = gap
+                  best_wp_occ = occ
+                  best_wp_virt = alpha
+                end if
+              end do
+            end do
+            if (comm_is_root(dg_frag%id)) then
+              write(*,*) '[DG-MIXED-FSUM-WINDOW]', &
+                ' ispin=', ispin, &
+                ' axis=', idir, &
+                ' window_eV=[', win_lo(iwin), ',', win_hi(iwin), &
+                '] pairs_WW=', pairs_ww, &
+                ' pairs_WP=', pairs_wp, &
+                ' r2_WW=', win_r2_ww, &
+                ' r2_WP=', win_r2_wp, &
+                ' f_WW=', win_f_ww, &
+                ' f_WP=', win_f_wp, &
+                ' max_WW_abs_r=', sqrt(win_max_ww), &
+                ' max_WW_gap_eV=', au_to_ev * win_max_ww_gap, &
+                ' WW_occ=', best_ww_occ, &
+                ' WW_virt=', best_ww_virt, &
+                ' max_WP_abs_r=', sqrt(win_max_wp), &
+                ' max_WP_gap_eV=', au_to_ev * win_max_wp_gap, &
+                ' WP_occ=', best_wp_occ, &
+                ' WP_alpha=', best_wp_virt
+            end if
+          end do
         end do
         if (comm_is_root(dg_frag%id)) then
           write(*,'(1x,a,1pe13.5,a,1pe13.5,a,i0)') "[DG-MIXED-FSUM-ORTH] min_Sperp=", &

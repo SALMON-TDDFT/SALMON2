@@ -27,7 +27,7 @@ use communication, only: comm_is_root, comm_sync_all, comm_bcast, comm_summation
 use salmon_xc, only: finalize_xc
 use timer
 use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d, &
-  write_dg_polarization_data
+  write_dg_polarization_data, write_dg_polarization_response_3d
 use initialization_rt_sub
 use checkpoint_restart_sub
 use jellium, only: check_condition_jm
@@ -218,6 +218,7 @@ case(0)
 case(3)
   if(theory=="tddft_response")then
     call write_response_3d(ofl,rt)
+    if (yn_dg_length_gauge == 'y') call write_dg_polarization_response_3d(ofl)
   else
     call write_pulse_3d(ofl,rt)
   end if
@@ -250,9 +251,17 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
                             update_density_and_hamiltonian_std => update_density_and_hamiltonian, &
                             calculate_observables_std => calculate_observables, &
                             diagnose_dcdft_lcfo_seed_stationarity_std => diagnose_dcdft_lcfo_seed_stationarity, &
+                            diagonalize_current_dg_subspace_std => diagonalize_current_dg_subspace, &
+                            diagonalize_current_dg_full_h_seed_std => diagonalize_current_dg_full_h_seed, &
+                            seed_current_global_wannier_flux_eigenstates_std => &
+                              seed_current_global_wannier_flux_eigenstates, &
+                            seed_current_mixed_wannier_bpw_eigenstates_std => &
+                              seed_current_mixed_wannier_bpw_eigenstates, &
                             calibrate_dcdft_lcfo_static_hamiltonian_std => calibrate_dcdft_lcfo_static_hamiltonian, &
                             refresh_buffer_wannier_flux_seed_from_current_hamiltonian_std => &
                               refresh_buffer_wannier_flux_seed_from_current_hamiltonian, &
+                            refresh_global_wannier_flux_eigen_from_current_hamiltonian_std => &
+                              refresh_global_wannier_flux_eigen_from_current_hamiltonian, &
                             project_restart_orbitals_to_dg_coefficients
   use rt_dg_fragment_soi, only: init_dg_fragment_rt_soi => init_dg_fragment_rt, &
                                 tddft_dg_fragment_iteration_soi => tddft_dg_fragment_iteration, &
@@ -265,7 +274,8 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   use salmon_xc, only: s_xc_functional
   use write_sub
   use salmon_global, only: theory, method_singlescale, yn_ffte, yn_jm, yn_spinorbit, yn_restart, &
-                           out_rt_energy_step, nt, dt, iperiodic, yn_dg_length_gauge
+                           out_rt_energy_step, nt, dt, iperiodic, yn_dg_length_gauge, &
+                          niter_dg_frag_rt_max, yn_dg_full_h_eigen_seed
   use inputoutput, only: t_unit_time
   use fdtd_coulomb_gauge, only: fdtd_singlescale, fourier_singlescale
   use hamiltonian, only: update_kvector_nonlocalpt_microAc
@@ -292,13 +302,14 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   type(s_orbital),        intent(in)    :: spsi_restart
 
   logical, parameter :: dense_lcfo_density_diag_default = .false.
-  logical, parameter :: trace_dcdft_seed_diagnostics = .false.
+  logical, parameter :: trace_dcdft_seed_diagnostics = .true.
 
   type(s_dg_fragment_rt) :: dg_frag
   integer :: itt
   integer :: itt_initial_obs
   integer :: env_len, env_status
   integer :: jspin
+  integer :: ipolish
   logical :: dense_seed_basis_uncapped
   logical :: trace_dg_current
   logical :: did_validate_seed
@@ -460,10 +471,62 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
       call calibrate_dcdft_lcfo_static_hamiltonian_std(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_zero)
       if (yn_fix_func == 'n' .and. yn_dg_length_gauge == 'y' .and. &
           trim(time_integrator_dg_fragment) == 'expdiag') then
-        call refresh_buffer_wannier_flux_seed_from_current_hamiltonian_std(dg_frag, &
-          '[DG-BPW-SCF-SEED] refreshed from initial self-consistent DG Hamiltonian;')
-        refreshed_bpw_scf_seed = .true.
-      end if
+        if (yn_dg_full_h_eigen_seed == 'y') then
+          if (dg_frag%use_plane_wave_basis) then
+            call seed_current_mixed_wannier_bpw_eigenstates_std(dg_frag, &
+              '[DG-MIXED-H-SEED] seeded W+BPW propagation Hamiltonian eigenstates;')
+          else
+            call diagonalize_current_dg_full_h_seed_std(dg_frag, &
+              '[DG-FULL-H-SEED] diagonalized full DG Hamiltonian for initial seed;')
+          end if
+          if (trace_dcdft_seed_diagnostics .and. .not. dg_frag%use_plane_wave_basis) then
+            call diagnose_dcdft_lcfo_seed_stationarity_std(dg_frag, system, mg, ppg, Ac_zero, &
+                                                           '[DG-FULL-H-SEED-HRES]')
+          end if
+        end if
+        if (yn_dg_full_h_eigen_seed /= 'y') then
+          call refresh_buffer_wannier_flux_seed_from_current_hamiltonian_std(dg_frag, &
+            '[DG-BPW-SCF-SEED] refreshed from initial self-consistent DG Hamiltonian;')
+          call refresh_global_wannier_flux_eigen_from_current_hamiltonian_std(dg_frag, &
+            '[DG-GLOBAL-W-SEED] refreshed global Wannier Flux eigenbasis from initial self-consistent DG Hamiltonian;')
+          refreshed_bpw_scf_seed = .true.
+          if (dg_frag%use_plane_wave_basis) then
+            call seed_current_mixed_wannier_bpw_eigenstates_std(dg_frag, &
+              '[DG-MIXED-H-SEED] seeded refreshed W+BPW propagation Hamiltonian eigenstates;')
+          else if (dg_frag%has_global_wannier_flux_eigen) then
+            call seed_current_global_wannier_flux_eigenstates_std(dg_frag, &
+              '[DG-GLOBAL-W-SEED] seeded coefficients from refreshed global Wannier Flux eigenbasis;')
+          else
+            call diagonalize_current_dg_subspace_std(dg_frag, &
+              '[DG-SUBSPACE-SEED] diagonalized current DG coefficient subspace;')
+          end if
+          if (trace_dcdft_seed_diagnostics) then
+            call diagnose_dcdft_lcfo_seed_stationarity_std(dg_frag, system, mg, ppg, Ac_zero, &
+                                                           '[DG-DCDFT-SEED-HRES-BPW-SCF]')
+          end if
+          do ipolish = 1, max(0, niter_dg_frag_rt_max)
+            if (comm_is_root(dg_frag%id)) then
+              write(*,'(1x,a,i0)') '[DG-POLISH] DG Hamiltonian polish iteration=', ipolish
+              flush(6)
+            end if
+            call update_density_and_hamiltonian_std(dg_frag, system, info, rt, ipolish, Ac_zero, &
+                 lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
+                 rho, rho_s, Vh, Vxc, Vpsl, energy, &
+                 skip_orbital_dependent=.true.)
+            if (allocated(dg_frag%flux_face_trace_cache)) deallocate(dg_frag%flux_face_trace_cache)
+            dg_frag%flux_face_trace_mix_enabled = .false.
+            call calculate_hamiltonian_matrix_std(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
+            dg_frag%flux_face_trace_mix_enabled = .true.
+            call calibrate_dcdft_lcfo_static_hamiltonian_std(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_zero)
+            call diagonalize_current_dg_subspace_std(dg_frag, &
+              '[DG-POLISH] diagonalized current DG coefficient subspace;')
+            if (trace_dcdft_seed_diagnostics) then
+              call diagnose_dcdft_lcfo_seed_stationarity_std(dg_frag, system, mg, ppg, Ac_zero, &
+                                                             '[DG-POLISH-HRES]')
+            end if
+          end do
+          end if
+        end if
       did_validate_seed = .true.
       if (comm_is_root(dg_frag%id)) then
         write(*,'(1x,a)') '[DG-DCDFT-SEED] DGDFT/LCFO coefficients are kept rank-distributed on fragment-core rows'

@@ -62,6 +62,7 @@ module rt_dg_fragment
                                 apply_gradient_to_basis_ops => apply_gradient_to_basis, &
                                 rebuild_local_h_block_ids, &
                                 apply_matrix_blocks_batch, apply_complex_matrix_blocks_batch, &
+                                apply_momentum_blocks, &
                                 apply_overlap_operator_batch, fetch_remote_coef_rows, &
                                 solve_overlap_operator_batch
   implicit none
@@ -73,8 +74,13 @@ module rt_dg_fragment
   public :: update_density_and_hamiltonian
   public :: diagnose_density_from_fragments
   public :: diagnose_dcdft_lcfo_seed_stationarity
+  public :: diagonalize_current_dg_subspace
+  public :: diagonalize_current_dg_full_h_seed
+  public :: seed_current_global_wannier_flux_eigenstates
+  public :: seed_current_mixed_wannier_bpw_eigenstates
   public :: calibrate_dcdft_lcfo_static_hamiltonian
   public :: refresh_buffer_wannier_flux_seed_from_current_hamiltonian
+  public :: refresh_global_wannier_flux_eigen_from_current_hamiltonian
   public :: get_dg_spin_occ_info
   public :: copy_periodic_global_scalar_to_rank_buffer
   public :: build_total_potential_grid_with_buffered_hartree
@@ -1082,6 +1088,296 @@ contains
     call initialize_coefficients_from_buffer_wannier_flux(dg_frag)
   end subroutine refresh_buffer_wannier_flux_seed_from_current_hamiltonian
 
+  subroutine refresh_global_wannier_flux_eigen_from_current_hamiltonian(dg_frag, label)
+    use communication, only: comm_summation, comm_is_root
+    use eigen_subdiag_sub, only: eigen_zheev
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    character(*), intent(in), optional :: label
+
+    integer :: ispin, ifrag, i_local, ibasis, iw, jw
+    integer :: nw, nstate_seed, nbf, global_row, irow, nrow
+    integer :: idir, occ, virt, nocc, pairs, best_occ, best_virt
+    integer :: iwin
+    complex(8), allocatable :: wcoef(:,:), hcoef(:,:), hw_local(:,:), hw(:,:), evec(:,:)
+    complex(8), allocatable :: r_w(:,:), r_eig(:,:)
+    complex(8), allocatable :: pcoef(:,:), p_w_local(:,:,:), p_w(:,:,:), p_eig(:,:)
+    real(8), allocatable :: eval(:)
+    real(8) :: herm_diff, offdiag_abs, gap, r2sum, fsum_proxy, best_amp2, best_gap
+    real(8) :: p2sum, fsum_p_proxy, pcomm2sum, pdiff2sum
+    real(8) :: win_lo(4), win_hi(4), scale_vec(3)
+    complex(8) :: pcomm_amp
+    character(len=128) :: out_label
+    character(len=1) :: axis_label(3)
+
+    if (.not. dg_frag%has_global_wannier_basis) return
+    if (.not. allocated(dg_frag%global_wannier_coef)) return
+    if (.not. allocated(dg_frag%H_mat_blocks)) return
+    if (.not. allocated(dg_frag%coef_global_to_local)) return
+    if (dg_frag%coef_state_block_mode) return
+
+    nw = min(dg_frag%global_wannier_num_wann, size(dg_frag%global_wannier_coef, 2))
+    nstate_seed = min(dg_frag%nstate_tot, nw)
+    if (nw <= 0 .or. nstate_seed <= 0) return
+
+    nrow = dg_frag%n_mat_max
+    if (nrow <= 0) return
+
+    out_label = '[DG-GLOBAL-W-SEED]'
+    if (present(label)) then
+      if (len_trim(label) > 0) out_label = trim(label)
+    end if
+
+    if (allocated(dg_frag%global_wannier_flux_evec)) deallocate(dg_frag%global_wannier_flux_evec)
+    if (allocated(dg_frag%global_wannier_flux_eval)) deallocate(dg_frag%global_wannier_flux_eval)
+    allocate(dg_frag%global_wannier_flux_evec(nw,nstate_seed))
+    allocate(dg_frag%global_wannier_flux_eval(nstate_seed,dg_frag%nspin))
+    dg_frag%global_wannier_flux_evec(:, :) = (0.0d0, 0.0d0)
+    dg_frag%global_wannier_flux_eval(:, :) = 0.0d0
+
+    call rebuild_local_h_block_ids(dg_frag)
+    if (.not. allocated(dg_frag%H_local_block_ids)) return
+
+    axis_label = (/'x','y','z'/)
+    win_lo = (/0.0d0, 3.0d0, 3.6d0, 0.0d0/)
+    win_hi = (/1.0d0, 3.6d0, 5.0d0, 20.0d0/)
+
+    allocate(wcoef(nrow,nw), hcoef(nrow,nw), hw_local(nw,nw), hw(nw,nw), evec(nw,nw), eval(nw))
+    if (dg_frag%has_global_wannier_position .and. allocated(dg_frag%global_wannier_position)) then
+      allocate(r_w(nw,nw), r_eig(nstate_seed,nstate_seed))
+    end if
+    if (allocated(dg_frag%momentum_blocks)) then
+      allocate(pcoef(nrow,nw), p_w_local(3,nw,nw), p_w(3,nw,nw), p_eig(nstate_seed,nstate_seed))
+    end if
+    do ispin = 1, dg_frag%nspin
+      wcoef(:, :) = (0.0d0, 0.0d0)
+      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        i_local = ifrag - dg_frag%ifrag_start + 1
+        if (i_local < 1 .or. i_local > size(dg_frag%global_wannier_coef, 4)) cycle
+        nbf = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%global_wannier_coef, 1), &
+                  size(dg_frag%index_basis, 1))
+        do ibasis = 1, nbf
+          global_row = dg_frag%index_basis(ibasis, ifrag, ispin)
+          if (global_row < 1 .or. global_row > nrow) cycle
+          wcoef(global_row,1:nw) = dg_frag%global_wannier_coef(ibasis,1:nw,ispin,i_local)
+        end do
+      end do
+
+      hcoef(:, :) = (0.0d0, 0.0d0)
+      call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, &
+                                     wcoef, hcoef, dg_frag%H_local_block_ids)
+
+      hw_local(:, :) = (0.0d0, 0.0d0)
+      do irow = 1, nrow
+        if (allocated(dg_frag%coef_owner)) then
+          if (irow > size(dg_frag%coef_owner, 1)) cycle
+          if (dg_frag%coef_owner(irow, ispin) /= dg_frag%id) cycle
+        end if
+        do jw = 1, nw
+          do iw = 1, nw
+            hw_local(iw,jw) = hw_local(iw,jw) + conjg(wcoef(irow,iw)) * hcoef(irow,jw)
+          end do
+        end do
+      end do
+      call comm_summation(hw_local, hw, nw*nw, dg_frag%icomm)
+
+      herm_diff = 0.0d0
+      offdiag_abs = 0.0d0
+      do jw = 1, nw
+        hw(jw,jw) = cmplx(real(hw(jw,jw),8), 0.0d0, kind=8)
+        do iw = 1, nw
+          if (iw /= jw) offdiag_abs = max(offdiag_abs, abs(hw(iw,jw)))
+        end do
+        do iw = jw + 1, nw
+          herm_diff = max(herm_diff, abs(hw(iw,jw) - conjg(hw(jw,iw))))
+          hw(iw,jw) = 0.5d0 * (hw(iw,jw) + conjg(hw(jw,iw)))
+          hw(jw,iw) = conjg(hw(iw,jw))
+        end do
+      end do
+
+      call eigen_zheev(hw, eval, evec)
+      dg_frag%global_wannier_flux_evec(1:nw,1:nstate_seed) = evec(1:nw,1:nstate_seed)
+      dg_frag%global_wannier_flux_eval(1:nstate_seed,ispin) = eval(1:nstate_seed)
+
+      if (allocated(p_w_local) .and. allocated(p_w) .and. allocated(p_eig)) then
+        p_w_local(:, :, :) = (0.0d0, 0.0d0)
+        do idir = 1, 3
+          pcoef(:, :) = (0.0d0, 0.0d0)
+          scale_vec(:) = 0.0d0
+          scale_vec(idir) = 1.0d0
+          call apply_momentum_blocks(dg_frag, ispin, scale_vec, wcoef, pcoef)
+          do irow = 1, nrow
+            if (allocated(dg_frag%coef_owner)) then
+              if (irow > size(dg_frag%coef_owner, 1)) cycle
+              if (dg_frag%coef_owner(irow, ispin) /= dg_frag%id) cycle
+            end if
+            do jw = 1, nw
+              do iw = 1, nw
+                p_w_local(idir,iw,jw) = p_w_local(idir,iw,jw) + conjg(wcoef(irow,iw)) * pcoef(irow,jw)
+              end do
+            end do
+          end do
+        end do
+        call comm_summation(p_w_local, p_w, 3*nw*nw, dg_frag%icomm)
+      end if
+
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,2(a,i0),4(a,1pe13.5))') trim(out_label), &
+          ' spin=', ispin, ' dim_W=', nw, &
+          ' herm_diff=', herm_diff, &
+          ' offdiag_abs_before=', offdiag_abs, &
+          ' eval_min=', eval(1), &
+          ' eval_seed_max=', eval(nstate_seed)
+        flush(6)
+      end if
+      if (allocated(r_w) .and. allocated(r_eig)) then
+        nocc = min(nstate_seed - 1, max(1, nstate_seed / 2))
+        if (allocated(dg_frag%nocc_spin)) then
+          if (ispin <= size(dg_frag%nocc_spin)) nocc = min(nstate_seed - 1, max(1, dg_frag%nocc_spin(ispin)))
+        end if
+        do idir = 1, 3
+          r_w(1:nw,1:nw) = dg_frag%global_wannier_position(idir,1:nw,1:nw)
+          r_eig(1:nstate_seed,1:nstate_seed) = matmul(conjg(transpose(evec(1:nw,1:nstate_seed))), &
+            matmul(r_w(1:nw,1:nw), evec(1:nw,1:nstate_seed)))
+          do iwin = 1, size(win_lo)
+            pairs = 0
+            r2sum = 0.0d0
+            fsum_proxy = 0.0d0
+            best_amp2 = 0.0d0
+            best_gap = 0.0d0
+            best_occ = 0
+            best_virt = 0
+            do virt = nocc + 1, nstate_seed
+              do occ = 1, nocc
+                gap = eval(virt) - eval(occ)
+                if (gap <= 1.0d-12) cycle
+                if (gap * 27.211386245988d0 < win_lo(iwin)) cycle
+                if (gap * 27.211386245988d0 > win_hi(iwin)) cycle
+                pairs = pairs + 1
+                r2sum = r2sum + abs(r_eig(occ,virt))**2
+                fsum_proxy = fsum_proxy + 2.0d0 * gap * abs(r_eig(occ,virt))**2
+                if (abs(r_eig(occ,virt))**2 > best_amp2) then
+                  best_amp2 = abs(r_eig(occ,virt))**2
+                  best_gap = gap
+                  best_occ = occ
+                  best_virt = virt
+                end if
+              end do
+            end do
+            if (comm_is_root(dg_frag%id)) then
+              write(*,*) '[DG-GLOBAL-W-TRANS]', &
+                ' spin=', ispin, &
+                ' axis=', axis_label(idir), &
+                ' window_eV=[', win_lo(iwin), ',', win_hi(iwin), &
+                '] pairs=', pairs, &
+                ' r2sum=', r2sum, &
+                ' fsum_proxy=', fsum_proxy, &
+                ' max_abs_r=', sqrt(best_amp2), &
+                ' max_gap_eV=', best_gap * 27.211386245988d0, &
+                ' occ=', best_occ, &
+                ' virt=', best_virt
+              flush(6)
+            end if
+          end do
+        end do
+      end if
+      if (allocated(p_w) .and. allocated(p_eig)) then
+        nocc = min(nstate_seed - 1, max(1, nstate_seed / 2))
+        if (allocated(dg_frag%nocc_spin)) then
+          if (ispin <= size(dg_frag%nocc_spin)) nocc = min(nstate_seed - 1, max(1, dg_frag%nocc_spin(ispin)))
+        end if
+        do idir = 1, 3
+          if (allocated(r_w) .and. allocated(r_eig)) then
+            r_w(1:nw,1:nw) = dg_frag%global_wannier_position(idir,1:nw,1:nw)
+            r_eig(1:nstate_seed,1:nstate_seed) = matmul(conjg(transpose(evec(1:nw,1:nstate_seed))), &
+              matmul(r_w(1:nw,1:nw), evec(1:nw,1:nstate_seed)))
+          end if
+          p_eig(1:nstate_seed,1:nstate_seed) = matmul(conjg(transpose(evec(1:nw,1:nstate_seed))), &
+            matmul(p_w(idir,1:nw,1:nw), evec(1:nw,1:nstate_seed)))
+          do iwin = 1, size(win_lo)
+            pairs = 0
+            p2sum = 0.0d0
+            fsum_p_proxy = 0.0d0
+            pcomm2sum = 0.0d0
+            pdiff2sum = 0.0d0
+            best_amp2 = 0.0d0
+            best_gap = 0.0d0
+            best_occ = 0
+            best_virt = 0
+            do virt = nocc + 1, nstate_seed
+              do occ = 1, nocc
+                gap = eval(virt) - eval(occ)
+                if (gap <= 1.0d-12) cycle
+                if (gap * 27.211386245988d0 < win_lo(iwin)) cycle
+                if (gap * 27.211386245988d0 > win_hi(iwin)) cycle
+                pairs = pairs + 1
+                p2sum = p2sum + abs(p_eig(occ,virt))**2
+                fsum_p_proxy = fsum_p_proxy + 2.0d0 * abs(p_eig(occ,virt))**2 / gap
+                if (allocated(r_eig)) then
+                  pcomm_amp = cmplx(0.0d0, 1.0d0, kind=8) * gap * r_eig(occ,virt)
+                  pcomm2sum = pcomm2sum + abs(pcomm_amp)**2
+                  pdiff2sum = pdiff2sum + abs(p_eig(occ,virt) - pcomm_amp)**2
+                end if
+                if (abs(p_eig(occ,virt))**2 > best_amp2) then
+                  best_amp2 = abs(p_eig(occ,virt))**2
+                  best_gap = gap
+                  best_occ = occ
+                  best_virt = virt
+                end if
+              end do
+            end do
+            if (comm_is_root(dg_frag%id)) then
+              write(*,*) '[DG-GLOBAL-W-PTRANS]', &
+                ' spin=', ispin, &
+                ' axis=', axis_label(idir), &
+                ' window_eV=[', win_lo(iwin), ',', win_hi(iwin), &
+                '] pairs=', pairs, &
+                ' p2sum=', p2sum, &
+                ' f_p_proxy=', fsum_p_proxy, &
+                ' max_abs_p=', sqrt(best_amp2), &
+                ' max_gap_eV=', best_gap * 27.211386245988d0, &
+                ' occ=', best_occ, &
+                ' virt=', best_virt
+              flush(6)
+            end if
+            if (comm_is_root(dg_frag%id) .and. allocated(r_eig)) then
+              write(*,*) '[DG-GLOBAL-W-PCOMM]', &
+                ' spin=', ispin, &
+                ' axis=', axis_label(idir), &
+                ' window_eV=[', win_lo(iwin), ',', win_hi(iwin), &
+                '] pairs=', pairs, &
+                ' pmom2sum=', p2sum, &
+                ' pcomm2sum=', pcomm2sum, &
+                ' pdiff2sum=', pdiff2sum, &
+                ' ratio_mom_comm=', sqrt(p2sum / max(pcomm2sum, 1.0d-300)), &
+                ' rel_diff=', sqrt(pdiff2sum / max(pcomm2sum, 1.0d-300))
+              flush(6)
+            end if
+          end do
+        end do
+      end if
+    end do
+    dg_frag%has_global_wannier_flux_eigen = .true.
+    dg_frag%has_mixed_wannier_bpw_position = .false.
+    dg_frag%has_mixed_wannier_bpw_p_basis = .false.
+    dg_frag%mixed_wannier_bpw_nw = 0
+    dg_frag%mixed_wannier_bpw_np = 0
+    dg_frag%mixed_wannier_bpw_nmix = 0
+    dg_frag%mixed_wannier_bpw_praw_dim = 0
+    if (allocated(dg_frag%mixed_wannier_bpw_eval)) deallocate(dg_frag%mixed_wannier_bpw_eval)
+    if (allocated(dg_frag%mixed_wannier_bpw_z)) deallocate(dg_frag%mixed_wannier_bpw_z)
+    if (allocated(dg_frag%mixed_wannier_bpw_pcoef)) deallocate(dg_frag%mixed_wannier_bpw_pcoef)
+    if (allocated(dg_frag%mixed_wannier_bpw_p_transform)) deallocate(dg_frag%mixed_wannier_bpw_p_transform)
+    if (allocated(dg_frag%mixed_wannier_bpw_p_metric)) deallocate(dg_frag%mixed_wannier_bpw_p_metric)
+    if (allocated(r_w)) deallocate(r_w)
+    if (allocated(r_eig)) deallocate(r_eig)
+    if (allocated(pcoef)) deallocate(pcoef)
+    if (allocated(p_w_local)) deallocate(p_w_local)
+    if (allocated(p_w)) deallocate(p_w)
+    if (allocated(p_eig)) deallocate(p_eig)
+    deallocate(wcoef, hcoef, hw_local, hw, evec, eval)
+  end subroutine refresh_global_wannier_flux_eigen_from_current_hamiltonian
+
   subroutine diagnose_dcdft_lcfo_seed_stationarity(dg_frag, system, mg, ppg, Ac_tot, label)
     use structures
     use communication, only: comm_summation, comm_is_root
@@ -1313,6 +1609,403 @@ contains
     end subroutine append_probe_state
 
   end subroutine diagnose_dcdft_lcfo_seed_stationarity
+
+  subroutine diagonalize_current_dg_subspace(dg_frag, label)
+    use communication, only: comm_summation, comm_is_root
+    use eigen_subdiag_sub, only: eigen_zheev
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    character(*), intent(in), optional :: label
+
+    integer :: ispin, nrow, nstate, irow, ist, jst
+    integer :: n_local_state
+    integer, allocatable :: row_ids(:)
+    complex(8), allocatable :: coef_all(:,:), coef_needed(:,:), hcoef(:,:), scoef(:,:)
+    complex(8), allocatable :: hsub_local(:,:), hsub(:,:), ssub_local(:,:), ssub(:,:)
+    complex(8), allocatable :: evec(:,:), coef_old(:,:), svec(:,:), sinvhalf(:,:), horth(:,:), zorth(:,:)
+    real(8), allocatable :: eval(:), seval(:)
+    real(8) :: offdiag_abs, diag_abs, s_diag_dev, s_offdiag_abs, s_min, s_max, s_floor
+    character(len=96) :: out_label
+
+    if (.not. allocated(dg_frag%coef)) return
+    if (.not. allocated(dg_frag%H_mat_blocks)) return
+    if (dg_frag%coef_state_block_mode) return
+    if (dg_frag%n_mat_max <= 0) return
+
+    nrow = dg_frag%n_mat_max
+    nstate = size(dg_frag%coef, 2)
+    if (nstate <= 0) return
+
+    call rebuild_local_h_block_ids(dg_frag)
+    if (.not. allocated(dg_frag%H_local_block_ids)) return
+
+    allocate(row_ids(nrow))
+    do irow = 1, nrow
+      row_ids(irow) = irow
+    end do
+    allocate(coef_all(nrow,nstate), coef_needed(nrow,nstate), hcoef(nrow,nstate), scoef(nrow,nstate))
+    allocate(hsub_local(nstate,nstate), hsub(nstate,nstate), ssub_local(nstate,nstate), ssub(nstate,nstate))
+    allocate(evec(nstate,nstate), svec(nstate,nstate), sinvhalf(nstate,nstate), horth(nstate,nstate), &
+             zorth(nstate,nstate), eval(nstate), seval(nstate))
+
+    out_label = '[DG-SUBSPACE-SEED]'
+    if (present(label)) then
+      if (len_trim(label) > 0) out_label = trim(label)
+    end if
+
+    do ispin = 1, dg_frag%nspin
+      coef_all(:, :) = (0.0d0, 0.0d0)
+      coef_needed(:, :) = (0.0d0, 0.0d0)
+      call fetch_remote_coef_rows(dg_frag, ispin, row_ids, coef_needed, 1, nstate)
+      coef_all(1:nrow,1:nstate) = coef_needed(1:nrow,1:nstate)
+
+      hcoef(:, :) = (0.0d0, 0.0d0)
+      call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, &
+                                     coef_all, hcoef, dg_frag%H_local_block_ids)
+      scoef(:, :) = (0.0d0, 0.0d0)
+      call apply_overlap_operator_batch(dg_frag, ispin, coef_all, scoef, .false.)
+
+      hsub_local(:, :) = (0.0d0, 0.0d0)
+      ssub_local(:, :) = (0.0d0, 0.0d0)
+      do irow = 1, nrow
+        if (allocated(dg_frag%coef_owner)) then
+          if (irow > size(dg_frag%coef_owner, 1)) cycle
+          if (dg_frag%coef_owner(irow, ispin) /= dg_frag%id) cycle
+        end if
+        do jst = 1, nstate
+          do ist = 1, nstate
+            hsub_local(ist,jst) = hsub_local(ist,jst) + conjg(coef_all(irow,ist)) * hcoef(irow,jst)
+            ssub_local(ist,jst) = ssub_local(ist,jst) + conjg(coef_all(irow,ist)) * scoef(irow,jst)
+          end do
+        end do
+      end do
+
+      call comm_summation(hsub_local, hsub, nstate*nstate, dg_frag%icomm)
+      call comm_summation(ssub_local, ssub, nstate*nstate, dg_frag%icomm)
+      do jst = 1, nstate
+        hsub(jst,jst) = cmplx(real(hsub(jst,jst),8), 0.0d0, kind=8)
+        ssub(jst,jst) = cmplx(real(ssub(jst,jst),8), 0.0d0, kind=8)
+        do ist = jst + 1, nstate
+          hsub(ist,jst) = 0.5d0 * (hsub(ist,jst) + conjg(hsub(jst,ist)))
+          hsub(jst,ist) = conjg(hsub(ist,jst))
+          ssub(ist,jst) = 0.5d0 * (ssub(ist,jst) + conjg(ssub(jst,ist)))
+          ssub(jst,ist) = conjg(ssub(ist,jst))
+        end do
+      end do
+
+      diag_abs = 0.0d0
+      offdiag_abs = 0.0d0
+      s_diag_dev = 0.0d0
+      s_offdiag_abs = 0.0d0
+      do jst = 1, nstate
+        diag_abs = max(diag_abs, abs(hsub(jst,jst)))
+        s_diag_dev = max(s_diag_dev, abs(ssub(jst,jst) - (1.0d0, 0.0d0)))
+        do ist = 1, nstate
+          if (ist /= jst) offdiag_abs = max(offdiag_abs, abs(hsub(ist,jst)))
+          if (ist /= jst) s_offdiag_abs = max(s_offdiag_abs, abs(ssub(ist,jst)))
+        end do
+      end do
+
+      call eigen_zheev(ssub, seval, svec)
+      s_min = minval(seval)
+      s_max = maxval(seval)
+      s_floor = max(1.0d-12, 1.0d-10 * max(1.0d0, s_max))
+      sinvhalf(:, :) = (0.0d0, 0.0d0)
+      do ist = 1, nstate
+        if (seval(ist) <= s_floor) cycle
+        sinvhalf(:, ist) = svec(:, ist) / sqrt(seval(ist))
+      end do
+      horth(:, :) = matmul(conjg(transpose(sinvhalf)), matmul(hsub, sinvhalf))
+      do jst = 1, nstate
+        horth(jst,jst) = cmplx(real(horth(jst,jst),8), 0.0d0, kind=8)
+        do ist = jst + 1, nstate
+          horth(ist,jst) = 0.5d0 * (horth(ist,jst) + conjg(horth(jst,ist)))
+          horth(jst,ist) = conjg(horth(ist,jst))
+        end do
+      end do
+      call eigen_zheev(horth, eval, zorth)
+      evec(:, :) = matmul(sinvhalf, zorth)
+
+      n_local_state = size(dg_frag%coef, 2)
+      allocate(coef_old(size(dg_frag%coef,1),n_local_state))
+      coef_old(:, :) = dg_frag%coef(:,:,ispin)
+      dg_frag%coef(:,:,ispin) = matmul(coef_old, evec(1:n_local_state,1:n_local_state))
+      deallocate(coef_old)
+
+      if (allocated(dg_frag%esp)) then
+        if (ispin <= size(dg_frag%esp, 2)) &
+          dg_frag%esp(1:min(nstate,size(dg_frag%esp,1)),ispin) = eval(1:min(nstate,size(dg_frag%esp,1)))
+      end if
+
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,2(a,i0),7(a,1pe13.5))') trim(out_label), &
+          ' spin=', ispin, ' nstate=', nstate, &
+          ' hsub_diag_absmax_before=', diag_abs, &
+          ' hsub_offdiag_absmax_before=', offdiag_abs, &
+          ' ssub_diag_dev_before=', s_diag_dev, &
+          ' ssub_offdiag_absmax_before=', s_offdiag_abs, &
+          ' ssub_eval_min=', s_min, &
+          ' ssub_eval_max=', s_max, &
+          ' eval_min=', minval(eval)
+        flush(6)
+      end if
+    end do
+
+    call invalidate_coef_exchange_cache(dg_frag)
+    deallocate(row_ids, coef_all, coef_needed, hcoef, scoef, hsub_local, hsub, ssub_local, ssub, &
+               evec, svec, sinvhalf, horth, zorth, eval, seval)
+  end subroutine diagonalize_current_dg_subspace
+
+  subroutine diagonalize_current_dg_full_h_seed(dg_frag, label)
+    use communication, only: comm_summation, comm_is_root
+    use eigen_subdiag_sub, only: eigen_zheev
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    character(*), intent(in), optional :: label
+
+    integer :: ispin, nrow, nstate, iblk, i, j, ifrag_row, ifrag_col
+    integer :: gid_i, gid_j, nbi, nbj, local_idx, state_col
+    complex(8), allocatable :: h_local(:,:), h_dense(:,:), evec(:,:)
+    real(8), allocatable :: eval(:)
+    real(8) :: herm_diff
+    real(8) :: herm_diff_local(1), herm_diff_global(1)
+    character(len=96) :: out_label
+
+    if (.not. allocated(dg_frag%coef)) return
+    if (.not. allocated(dg_frag%H_mat_blocks)) return
+    if (dg_frag%coef_state_block_mode) return
+    if (dg_frag%n_mat_max <= 0) return
+
+    nrow = dg_frag%n_mat_max
+    nstate = min(size(dg_frag%coef, 2), nrow)
+    if (nstate <= 0) return
+
+    out_label = '[DG-FULL-H-SEED]'
+    if (present(label)) then
+      if (len_trim(label) > 0) out_label = trim(label)
+    end if
+
+    allocate(h_local(nrow,nrow), h_dense(nrow,nrow), evec(nrow,nrow), eval(nrow))
+    do ispin = 1, dg_frag%nspin
+      h_local(:, :) = (0.0d0, 0.0d0)
+      do iblk = 1, size(dg_frag%H_mat_blocks)
+        if (.not. allocated(dg_frag%H_mat_blocks(iblk)%val)) cycle
+        ifrag_row = dg_frag%H_mat_blocks(iblk)%ifrag_row
+        ifrag_col = dg_frag%H_mat_blocks(iblk)%ifrag_col
+        if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
+        if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
+        nbi = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%H_mat_blocks(iblk)%val, 1), &
+                  size(dg_frag%index_basis, 1))
+        nbj = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%H_mat_blocks(iblk)%val, 2), &
+                  size(dg_frag%index_basis, 1))
+        do j = 1, nbj
+          gid_j = dg_frag%index_basis(j, ifrag_col, ispin)
+          if (gid_j < 1 .or. gid_j > nrow) cycle
+          do i = 1, nbi
+            gid_i = dg_frag%index_basis(i, ifrag_row, ispin)
+            if (gid_i < 1 .or. gid_i > nrow) cycle
+            h_local(gid_i,gid_j) = h_local(gid_i,gid_j) + &
+              cmplx(dg_frag%H_mat_blocks(iblk)%val(i,j,ispin), 0.0d0, kind=8)
+          end do
+        end do
+      end do
+
+      call comm_summation(h_local, h_dense, nrow*nrow, dg_frag%icomm)
+
+      herm_diff = 0.0d0
+      do j = 1, nrow
+        h_dense(j,j) = cmplx(real(h_dense(j,j),8), 0.0d0, kind=8)
+        do i = j + 1, nrow
+          herm_diff = max(herm_diff, abs(h_dense(i,j) - conjg(h_dense(j,i))))
+          h_dense(i,j) = 0.5d0 * (h_dense(i,j) + conjg(h_dense(j,i)))
+          h_dense(j,i) = conjg(h_dense(i,j))
+        end do
+      end do
+      herm_diff_local(1) = herm_diff
+      call comm_summation(herm_diff_local, herm_diff_global, 1, dg_frag%icomm)
+
+      call eigen_zheev(h_dense, eval, evec)
+
+      dg_frag%coef(:, :, ispin) = (0.0d0, 0.0d0)
+      do state_col = 1, nstate
+        do gid_i = 1, nrow
+          local_idx = gid_i
+          if (allocated(dg_frag%coef_global_to_local)) local_idx = dg_frag%coef_global_to_local(gid_i, ispin)
+          if (local_idx < 1 .or. local_idx > size(dg_frag%coef, 1)) cycle
+          dg_frag%coef(local_idx, state_col, ispin) = evec(gid_i, state_col)
+        end do
+      end do
+      if (allocated(dg_frag%esp)) then
+        if (ispin <= size(dg_frag%esp, 2)) &
+          dg_frag%esp(1:min(nstate,size(dg_frag%esp,1)),ispin) = eval(1:min(nstate,size(dg_frag%esp,1)))
+      end if
+
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,3(a,i0),3(a,1pe13.5))') trim(out_label), &
+          ' spin=', ispin, ' full_dim=', nrow, ' seeded_states=', nstate, &
+          ' herm_diff_sum=', herm_diff_global(1), ' eval_min=', minval(eval), &
+          ' eval_nstate=', eval(nstate)
+        flush(6)
+      end if
+    end do
+
+    call invalidate_coef_exchange_cache(dg_frag)
+    deallocate(h_local, h_dense, evec, eval)
+  end subroutine diagonalize_current_dg_full_h_seed
+
+  subroutine seed_current_global_wannier_flux_eigenstates(dg_frag, label)
+    use communication, only: comm_is_root
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    character(*), intent(in), optional :: label
+
+    integer :: ispin, istate, iw, ibasis, ifrag, i_local
+    integer :: nstate_seed, nw, nbf, global_idx, local_idx, nwann
+    complex(8) :: coeff
+    character(len=128) :: out_label
+
+    if (.not. allocated(dg_frag%coef)) return
+    if (.not. allocated(dg_frag%global_wannier_coef)) return
+    if (.not. allocated(dg_frag%global_wannier_flux_evec)) return
+    if (.not. allocated(dg_frag%global_wannier_flux_eval)) return
+    if (.not. allocated(dg_frag%coef_global_to_local)) return
+    if (dg_frag%coef_state_block_mode) return
+
+    nw = min(size(dg_frag%global_wannier_coef, 2), size(dg_frag%global_wannier_flux_evec, 1))
+    nwann = nw
+    nstate_seed = min(dg_frag%nstate_tot, size(dg_frag%coef, 2), size(dg_frag%global_wannier_flux_evec, 2), &
+                      size(dg_frag%global_wannier_flux_eval, 1))
+    if (nw <= 0 .or. nstate_seed <= 0) return
+
+    out_label = '[DG-GLOBAL-W-SEED]'
+    if (present(label)) then
+      if (len_trim(label) > 0) out_label = trim(label)
+    end if
+
+    dg_frag%coef(:, :, :) = (0.0d0, 0.0d0)
+    do ispin = 1, dg_frag%nspin
+      if (ispin > size(dg_frag%global_wannier_flux_eval, 2)) cycle
+      do istate = 1, nstate_seed
+        do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+          i_local = ifrag - dg_frag%ifrag_start + 1
+          if (i_local < 1 .or. i_local > size(dg_frag%global_wannier_coef, 4)) cycle
+          nbf = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%global_wannier_coef, 1), &
+                    size(dg_frag%index_basis, 1))
+          do ibasis = 1, nbf
+            global_idx = dg_frag%index_basis(ibasis, ifrag, ispin)
+            if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
+            local_idx = dg_frag%coef_global_to_local(global_idx, ispin)
+            if (local_idx < 1 .or. local_idx > size(dg_frag%coef, 1)) cycle
+            coeff = (0.0d0, 0.0d0)
+            do iw = 1, nwann
+              coeff = coeff + dg_frag%global_wannier_coef(ibasis, iw, ispin, i_local) * &
+                dg_frag%global_wannier_flux_evec(iw, istate)
+            end do
+            dg_frag%coef(local_idx, istate, ispin) = coeff
+          end do
+        end do
+        if (allocated(dg_frag%esp)) then
+          if (istate <= size(dg_frag%esp, 1) .and. ispin <= size(dg_frag%esp, 2)) &
+            dg_frag%esp(istate, ispin) = dg_frag%global_wannier_flux_eval(istate, ispin)
+        end if
+      end do
+    end do
+
+    call invalidate_coef_exchange_cache(dg_frag)
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,3(a,i0))') trim(out_label), &
+        ' dim_W=', nw, ' seeded_states=', nstate_seed, ' nspin=', dg_frag%nspin
+      flush(6)
+    end if
+  end subroutine seed_current_global_wannier_flux_eigenstates
+
+  subroutine seed_current_mixed_wannier_bpw_eigenstates(dg_frag, label)
+    use communication, only: comm_is_root
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    character(*), intent(in), optional :: label
+
+    integer :: ispin, istate, chosen, iw, ibasis, ifrag, i_local
+    integer :: nstate_seed, nw, np, nmix, nbf, global_idx, local_idx, nwann
+    complex(8) :: coeff
+    character(len=128) :: out_label
+
+    if (.not. dg_frag%use_plane_wave_basis) return
+    call ensure_mixed_wannier_bpw_position(dg_frag)
+    if (.not. dg_frag%has_mixed_wannier_bpw_position) return
+    if (.not. allocated(dg_frag%coef)) return
+    if (.not. allocated(dg_frag%global_wannier_coef)) return
+    if (.not. allocated(dg_frag%global_wannier_flux_evec)) return
+    if (.not. allocated(dg_frag%mixed_wannier_bpw_eval)) return
+
+    nw = dg_frag%mixed_wannier_bpw_nw
+    np = dg_frag%mixed_wannier_bpw_np
+    nmix = dg_frag%mixed_wannier_bpw_nmix
+    if (nw <= 0 .or. nmix <= 0) return
+    if (np > 0 .and. .not. allocated(dg_frag%mixed_wannier_bpw_pcoef)) return
+
+    out_label = '[DG-MIXED-H-SEED]'
+    if (present(label)) then
+      if (len_trim(label) > 0) out_label = trim(label)
+    end if
+
+    nstate_seed = min(dg_frag%nstate_tot, size(dg_frag%coef, 2), nmix)
+    if (nstate_seed <= 0) return
+    if (nstate_seed > nw .and. comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,2(a,i0))') '[DG-MIXED-H-SEED] WARNING: requested states exceed W dimension; ', &
+        ' nstate_seed=', nstate_seed, ' dim_W=', nw
+    end if
+    nwann = min(size(dg_frag%global_wannier_coef, 2), size(dg_frag%global_wannier_flux_evec, 1))
+    if (nwann <= 0) return
+
+    dg_frag%coef(:, :, :) = (0.0d0, 0.0d0)
+    if (allocated(dg_frag%mixed_wannier_bpw_pcoef)) dg_frag%mixed_wannier_bpw_pcoef(:, :, :) = (0.0d0, 0.0d0)
+
+    do ispin = 1, dg_frag%nspin
+      if (ispin > size(dg_frag%mixed_wannier_bpw_eval, 2)) cycle
+      do istate = 1, nstate_seed
+        chosen = istate
+
+        if (chosen <= nw) then
+          do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+            i_local = ifrag - dg_frag%ifrag_start + 1
+            if (i_local < 1 .or. i_local > size(dg_frag%global_wannier_coef, 4)) cycle
+            nbf = min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%global_wannier_coef, 1), &
+                      size(dg_frag%index_basis, 1))
+            do ibasis = 1, nbf
+              global_idx = dg_frag%index_basis(ibasis, ifrag, ispin)
+              if (global_idx < 1 .or. global_idx > dg_frag%n_mat_max) cycle
+              local_idx = dg_frag%coef_global_to_local(global_idx, ispin)
+              if (local_idx < 1 .or. local_idx > size(dg_frag%coef, 1)) cycle
+              coeff = (0.0d0, 0.0d0)
+              do iw = 1, nwann
+                coeff = coeff + dg_frag%global_wannier_coef(ibasis, iw, ispin, i_local) * &
+                  dg_frag%global_wannier_flux_evec(iw, chosen)
+              end do
+              dg_frag%coef(local_idx, istate, ispin) = coeff
+            end do
+          end do
+        else if (chosen - nw <= np .and. allocated(dg_frag%mixed_wannier_bpw_pcoef)) then
+          dg_frag%mixed_wannier_bpw_pcoef(chosen - nw, istate, ispin) = (1.0d0, 0.0d0)
+        end if
+
+        if (allocated(dg_frag%esp)) then
+          if (istate <= size(dg_frag%esp, 1) .and. ispin <= size(dg_frag%esp, 2)) &
+            dg_frag%esp(istate, ispin) = dg_frag%mixed_wannier_bpw_eval(chosen, ispin)
+        end if
+      end do
+    end do
+
+    call invalidate_coef_exchange_cache(dg_frag)
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,6(a,i0))') trim(out_label), &
+        ' dim_W=', nw, ' dim_P=', np, ' dim_total=', nmix, &
+        ' seeded_states=', nstate_seed, &
+        ' W_states=', min(nstate_seed, nw), &
+        ' P_states=', max(0, nstate_seed - nw)
+      flush(6)
+    end if
+  end subroutine seed_current_mixed_wannier_bpw_eigenstates
 
   !=======================================================================
   ! Time evolution using AETRS (Enforced Time-Reversal Symmetry)
@@ -1583,6 +2276,9 @@ contains
     if (allocated(dg_frag%mixed_z_frag_local_w_gid)) deallocate(dg_frag%mixed_z_frag_local_w_gid)
     if (allocated(dg_frag%mixed_z_frag_local_pself_gid)) deallocate(dg_frag%mixed_z_frag_local_pself_gid)
     if (allocated(dg_frag%mixed_z_frag_local_pneighbor_gid)) deallocate(dg_frag%mixed_z_frag_local_pneighbor_gid)
+    if (allocated(dg_frag%mixed_z_frag_local_w_mix_gid)) deallocate(dg_frag%mixed_z_frag_local_w_mix_gid)
+    if (allocated(dg_frag%mixed_z_frag_local_pself_mix_gid)) deallocate(dg_frag%mixed_z_frag_local_pself_mix_gid)
+    if (allocated(dg_frag%mixed_z_frag_local_pneighbor_mix_gid)) deallocate(dg_frag%mixed_z_frag_local_pneighbor_mix_gid)
     dg_frag%mixed_z_frag_local_w_slots = 0
     dg_frag%mixed_z_frag_local_pself_slots = 0
     dg_frag%mixed_z_frag_local_pneighbor_slots = 0

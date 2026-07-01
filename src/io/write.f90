@@ -17,6 +17,7 @@
 module write_sub
   use math_constants,only : zi,pi
   implicit none
+  real(8), allocatable, save :: dg_polarization_history(:,:)
 
 contains
 
@@ -800,7 +801,7 @@ contains
     use communication, only: comm_is_root
     use filesystem, only: open_filehandle
     use inputoutput, only: t_unit_time
-    use salmon_global, only: base_directory, sysname
+    use salmon_global, only: base_directory, sysname, nt
     implicit none
     integer, intent(in) :: it
     real(8), intent(in) :: dt
@@ -811,6 +812,9 @@ contains
 
     if (comm_is_root(nproc_id_global)) then
       if (it < 0) then
+        if (allocated(dg_polarization_history)) deallocate(dg_polarization_history)
+        allocate(dg_polarization_history(3, max(1, nt)))
+        dg_polarization_history(:, :) = 0.0d0
         write(file_dg_polarization,"(2A,'_dg_polarization.data')") trim(base_directory),trim(sysname)
         fh_dg_polarization = open_filehandle(file_dg_polarization, status="replace")
         uid = fh_dg_polarization
@@ -832,6 +836,10 @@ contains
           fh_dg_polarization = open_filehandle(file_dg_polarization)
         end if
         uid = fh_dg_polarization
+        if (allocated(dg_polarization_history)) then
+          if (it >= 1 .and. it <= size(dg_polarization_history, 2)) &
+            dg_polarization_history(:, it) = polarization(:)
+        end if
         write(uid, "(F16.8,99(1X,E23.15E3))") &
           & it * dt * t_unit_time%conv, &
           & polarization(1:3), &
@@ -1096,6 +1104,77 @@ contains
     end if
 
   end subroutine
+
+!===================================================================================================================================
+
+  subroutine write_dg_polarization_response_3d(ofl)
+    use salmon_global, only: e_impulse, nt, dt, nenergy, de, base_directory, sysname
+    use inputoutput, only: t_unit_energy, t_unit_conductivity
+    use parallelization, only: nproc_id_global
+    use communication, only: comm_is_root
+    use structures, only: s_ofile
+    use filesystem, only: open_filehandle
+    implicit none
+    type(s_ofile), intent(in) :: ofl
+    integer :: uid
+    integer :: ihw, n, ixyz
+    real(8) :: hw, tt, t2, smoothing
+    complex(8) :: zchi(3), zsigma(3), zeps(3)
+    character(256) :: file_response_p
+
+    call unused_s_ofile(ofl)
+    if (.not. allocated(dg_polarization_history)) return
+    if (size(dg_polarization_history, 2) < nt) return
+    if (.not. comm_is_root(nproc_id_global)) return
+
+    write(file_response_p,"(2A,'_dg_response_from_p.data')") trim(base_directory), trim(sysname)
+    uid = open_filehandle(file_response_p, status="replace")
+
+10  format("#",1X,A,":",1X,A)
+    write(uid,10) "Fourier-transform spectra from DG length-gauge polarization",""
+    write(uid,10) "chi", "Electric susceptibility from P/E_impulse"
+    write(uid,10) "eps", "Dielectric constant"
+    write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+      & 1,  "Energy", trim(t_unit_energy%name), &
+      & 2,  "Re(sigma_x)", trim(t_unit_conductivity%name), &
+      & 3,  "Re(sigma_y)", trim(t_unit_conductivity%name), &
+      & 4,  "Re(sigma_z)", trim(t_unit_conductivity%name), &
+      & 5,  "Im(sigma_x)", trim(t_unit_conductivity%name), &
+      & 6,  "Im(sigma_y)", trim(t_unit_conductivity%name), &
+      & 7,  "Im(sigma_z)", trim(t_unit_conductivity%name), &
+      & 8,  "Re(eps_x)", "none", &
+      & 9,  "Re(eps_y)", "none", &
+      & 10, "Re(eps_z)", "none", &
+      & 11, "Im(eps_x)", "none", &
+      & 12, "Im(eps_y)", "none", &
+      & 13, "Im(eps_z)", "none"
+
+    tt = dt*dble(nt)
+    do ihw=1,nenergy
+      hw=dble(ihw)*de
+      zchi(:)=(0.d0,0.d0)
+      do n=1,nt
+        t2=dble(n)*dt
+        smoothing = 1d0 - 3d0*(t2/tt)**2 + 2d0*(t2/tt)**3
+        zchi(:)=zchi(:) + exp(zi*hw*t2) * dg_polarization_history(:,n) * smoothing
+      end do
+
+      zchi(:) = (zchi(:)/e_impulse)*dt
+      zeps(:)=1.d0+4.d0*pi*zchi(:)
+      zsigma(:)=(zeps(:)-1.d0)/(4.d0*pi*zi/hw)
+
+      write(uid,'(F16.8,99(1X,E23.15E3))') hw * t_unit_energy%conv &
+           &,(real(zsigma(ixyz))*t_unit_conductivity%conv,ixyz=1,3)&
+           &,(aimag(zsigma(ixyz))*t_unit_conductivity%conv,ixyz=1,3)&
+           &,(real(zeps(ixyz)),ixyz=1,3)&
+           &,(aimag(zeps(ixyz)),ixyz=1,3)
+    end do
+    close(uid)
+  contains
+    subroutine unused_s_ofile(dummy)
+      type(s_ofile), intent(in) :: dummy
+    end subroutine unused_s_ofile
+  end subroutine write_dg_polarization_response_3d
 
 !===================================================================================================================================
   subroutine write_response_3d(ofl,rt)
