@@ -38,9 +38,25 @@ module degenerate_block_ssbe
   public :: build_blocks
   public :: same_block
   public :: match_link_blocks
+  ! Pb3 (non-Abelian xi + smooth blend):
+  public :: blend                 ! cos^2 hysteresis ramp 1 -> 0
+  public :: build_ik_neighbor     ! k -> k+b index table on the full uniform grid
+  public :: xi_block_from_overlap ! polar + matrix-log kernel (LAPACK zheev/zgeev)
+  public :: build_xi              ! orchestrator: blocks -> links -> xi(nb,nb,3,nk)
+  public :: xi_sign               ! sign s in xi = s*i*logm(U)/dk (pinned by test)
 
   real(8), parameter :: theta_on  = 5d-4   ! tight core-degeneracy bound  [au]
   real(8), parameter :: theta_off = 2d-3   ! block-membership bound       [au]
+
+  ! Pb3 numerical conventions (see xi_block_from_overlap / build_xi):
+  !   xi = s * i * logm(U) / dk_alpha, and the finite-gap limit must reproduce
+  !   SALMON's dipole d = i * p_mod / delta_omega. The 2-band smooth-rotation
+  !   model in test/test_xi_construction.f90 shows i*logm(U)/dk = i<u_n|d_k u_m>
+  !   whereas d = -i<u_n|d_k u_m>, hence s = -1 (verified numerically there).
+  real(8), parameter :: xi_sign       = -1d0   ! sign s (pinned by the unit test)
+  real(8), parameter :: xi_sing_tol   = 1d-6   ! reject link if min singular value(M_blk) < this
+  real(8), parameter :: xi_phi_reject = 0.9d0  ! reject link if any |phi_i| > xi_phi_reject*pi
+  real(8), parameter :: pi_local = 3.14159265358979323846d0
 
   ! Block assignment cached by the most recent build_blocks() call so that the
   ! 3-argument same_block(ib,jb,ik) query can be answered without threading
@@ -258,5 +274,334 @@ contains
       end do
     end do
   end subroutine match_link_blocks
+
+  !===================================================================
+  ! Pb3 : non-Abelian Berry connection xi + smooth blend
+  !===================================================================
+
+  !-------------------------------------------------------------------
+  ! cos^2 hysteresis ramp, w(x): 1 for x<=xon, 0 for x>=xoff, C^1-smooth
+  ! in between (zero slope at both ends, no discontinuity at the thetas).
+  !-------------------------------------------------------------------
+  real(8) function blend(x, xon, xoff) result(w)
+    implicit none
+    real(8), intent(in) :: x, xon, xoff
+    real(8) :: t, c
+    if (xoff <= xon) then                 ! degenerate window -> hard step
+      if (x <= xon) then; w = 1d0; else; w = 0d0; end if
+      return
+    end if
+    if (x <= xon) then
+      w = 1d0
+    else if (x >= xoff) then
+      w = 0d0
+    else
+      t = (x - xon) / (xoff - xon)        ! 0 -> 1
+      c = cos(0.5d0 * pi_local * t)       ! 1 -> 0
+      w = c * c                           ! cos^2 : w(xon)=1, w(xoff)=0, C^1
+    end if
+  end function blend
+
+  !-------------------------------------------------------------------
+  ! k -> k+b index table for the FULL uniform grid nk = product(num_kgrid).
+  ! Ordering matches common_ssbe / write_prod_dk:
+  !     ik = i3*N2*N1 + i2*N1 + i1 + 1   (i1 fastest, 0-based i1,i2,i3).
+  ! Neighbours are periodic (modulo), so every link exists on the full grid.
+  !-------------------------------------------------------------------
+  subroutine build_ik_neighbor(num_kgrid, bvec, nbvec, nk, ik_neighbor)
+    implicit none
+    integer, intent(in)  :: num_kgrid(3), nbvec, nk
+    integer, intent(in)  :: bvec(3, nbvec)
+    integer, intent(out) :: ik_neighbor(nbvec, nk)
+    integer :: ik, iv, i1, i2, i3, j1, j2, j3, n1, n2, n3
+    n1 = num_kgrid(1); n2 = num_kgrid(2); n3 = num_kgrid(3)
+    do ik = 1, nk
+      i1 = mod(ik - 1, n1)
+      i2 = mod((ik - 1) / n1, n2)
+      i3 = (ik - 1) / (n1 * n2)
+      do iv = 1, nbvec
+        j1 = modulo(i1 + bvec(1, iv), n1)
+        j2 = modulo(i2 + bvec(2, iv), n2)
+        j3 = modulo(i3 + bvec(3, iv), n3)
+        ik_neighbor(iv, ik) = j3 * n1 * n2 + j2 * n1 + j1 + 1
+      end do
+    end do
+  end subroutine build_ik_neighbor
+
+  !-------------------------------------------------------------------
+  ! Locate the bvec column equal to the integer shift (j1,j2,j3); 0 if absent.
+  !-------------------------------------------------------------------
+  integer function find_bvec(bvec, nbvec, j1, j2, j3) result(iv)
+    implicit none
+    integer, intent(in) :: nbvec, bvec(3, nbvec), j1, j2, j3
+    integer :: k
+    iv = 0
+    do k = 1, nbvec
+      if (bvec(1, k) == j1 .and. bvec(2, k) == j2 .and. bvec(3, k) == j3) then
+        iv = k; return
+      end if
+    end do
+  end function find_bvec
+
+  !-------------------------------------------------------------------
+  ! Non-Abelian Berry connection block from a k -> k+b overlap submatrix.
+  !
+  !   M_blk(a,b) = <u_{srcs(a),k} | u_{tgts(b),k+b}>   (d x d, both ascending)
+  !   G  = M_blk^H M_blk                    (Hermitian, PD for a good link)
+  !   U  = M_blk G^{-1/2}                    (polar factor: closest unitary)
+  !   L  = logm(U) = V diag(i*phi) V^H       (phi in (-pi,pi], V unitary)
+  !   xi_blk = s_sign * i * L / dk_alpha     (Hermitian)
+  !
+  ! info = 0 ok
+  !      = 1 min singular value(M_blk) < xi_sing_tol           -> reject
+  !      = 2 an eigenphase within xi_phi_reject*pi of +-pi     -> branch risk
+  !      = 3 LAPACK failure
+  ! resid_unitary (opt) = max|U^H U - I|, health check on the polar step.
+  !
+  ! LAPACK: zheev (Hermitian eig of G), zgeev (eig of the unitary U). No SALMON
+  ! deps; the standalone test links with -llapack -lblas.
+  !-------------------------------------------------------------------
+  subroutine xi_block_from_overlap(M_blk, dk_alpha, s_sign, xi_blk, info, resid_unitary)
+    implicit none
+    complex(8), intent(in)  :: M_blk(:, :)
+    real(8),    intent(in)  :: dk_alpha
+    real(8),    intent(in)  :: s_sign
+    complex(8), intent(out) :: xi_blk(:, :)
+    integer,    intent(out) :: info
+    real(8),    intent(out), optional :: resid_unitary
+    integer :: d, i, j, k, ierr, lwork
+    real(8) :: gmin, nrm
+    complex(8) :: proj
+    complex(8), allocatable :: A(:,:), Adg(:,:), Ginvsqrt(:,:), U(:,:), Uc(:,:)
+    complex(8), allocatable :: VR(:,:), V(:,:), Vdg(:,:), Lmat(:,:), Idn(:,:)
+    complex(8), allocatable :: lam(:), cwork(:), vldum(:,:)
+    real(8),    allocatable :: w_eig(:), rwork(:), phi(:)
+    complex(8), parameter :: zi = (0d0, 1d0)
+
+    d    = size(M_blk, 1)
+    info = 0
+    xi_blk = (0d0, 0d0)
+
+    allocate(A(d,d), Adg(d,d), Ginvsqrt(d,d), U(d,d), Uc(d,d))
+    allocate(VR(d,d), V(d,d), Vdg(d,d), Lmat(d,d), Idn(d,d))
+    allocate(lam(d), w_eig(d), phi(d))
+
+    ! --- G = M^H M ; Hermitian eigendecomposition (zheev): A->vecs, w_eig ascending
+    A = matmul(conjg(transpose(M_blk)), M_blk)
+    lwork = max(1, 2*d - 1)
+    allocate(cwork(lwork), rwork(max(1, 3*d - 2)))
+    call zheev('V', 'U', d, A, d, w_eig, cwork, lwork, rwork, ierr)
+    deallocate(cwork, rwork)
+    if (ierr /= 0) then
+      info = 3; call cleanup(); return
+    end if
+
+    ! --- near-singular reject: sigma_min(M) = sqrt(min eig of G) ---
+    gmin = w_eig(1)
+    if (gmin < xi_sing_tol * xi_sing_tol) then
+      info = 1; call cleanup(); return
+    end if
+
+    ! --- G^{-1/2} = A diag(1/sqrt(w)) A^H ;  U = M G^{-1/2} ---
+    do k = 1, d
+      Adg(:, k) = A(:, k) / sqrt(w_eig(k))
+    end do
+    Ginvsqrt = matmul(Adg, conjg(transpose(A)))
+    U = matmul(M_blk, Ginvsqrt)
+
+    if (present(resid_unitary)) then
+      Idn = (0d0, 0d0)
+      do i = 1, d
+        Idn(i, i) = (1d0, 0d0)
+      end do
+      resid_unitary = maxval(abs(matmul(conjg(transpose(U)), U) - Idn))
+    end if
+
+    ! --- eig of the unitary U (zgeev): lam(i) = e^{i phi_i}, VR = right vectors ---
+    Uc = U
+    lwork = max(1, 4*d)
+    allocate(cwork(lwork), rwork(max(1, 2*d)), vldum(1,1))
+    call zgeev('N', 'V', d, Uc, d, lam, vldum, 1, VR, d, cwork, lwork, rwork, ierr)
+    deallocate(cwork, rwork, vldum)
+    if (ierr /= 0) then
+      info = 3; call cleanup(); return
+    end if
+
+    ! --- principal phases phi in (-pi,pi]; reject near +-pi (branch cut) ---
+    do i = 1, d
+      phi(i) = atan2(aimag(lam(i)), dble(lam(i)))
+    end do
+    if (maxval(abs(phi)) > xi_phi_reject * pi_local) then
+      info = 2; call cleanup(); return
+    end if
+
+    ! --- U is normal (unitary): re-orthonormalise VR (modified Gram-Schmidt) so V
+    !     is unitary and L = V diag(i phi) V^H is exact. Within a degenerate phase
+    !     the basis choice inside the eigenspace does not change L.
+    V = VR
+    do i = 1, d
+      do j = 1, i - 1
+        proj = dot_product(V(:, j), V(:, i))   ! <V_j|V_i> (dot_product conjugates arg1)
+        V(:, i) = V(:, i) - proj * V(:, j)
+      end do
+      nrm = sqrt(dble(dot_product(V(:, i), V(:, i))))
+      V(:, i) = V(:, i) / nrm
+    end do
+
+    ! --- L = logm(U) = V diag(i phi) V^H (anti-Hermitian) ---
+    do k = 1, d
+      Vdg(:, k) = V(:, k) * (zi * phi(k))
+    end do
+    Lmat = matmul(Vdg, conjg(transpose(V)))
+
+    ! --- xi = s * i * logm(U) / dk_alpha  (Hermitian) ---
+    xi_blk = (s_sign * zi / dk_alpha) * Lmat
+
+    call cleanup()
+
+  contains
+    subroutine cleanup()
+      if (allocated(A)) deallocate(A, Adg, Ginvsqrt, U, Uc, VR, V, Vdg, Lmat, Idn, &
+                                   lam, w_eig, phi)
+    end subroutine cleanup
+  end subroutine xi_block_from_overlap
+
+  !-------------------------------------------------------------------
+  ! Build xi(nb,nb,3,nk): for each k, each degenerate block (d>=2) and each
+  ! Cartesian axis, take the +unit-shift overlap submatrix, polar-decompose and
+  ! matrix-log it (xi_block_from_overlap). xi_ok(ib,jb,ik) flags pairs where the
+  ! non-Abelian connection is trustworthy (all 3 axes succeeded); elsewhere xi=0
+  ! and the caller falls back to i*p/delta_omega.
+  !
+  ! Axis alpha uses the reciprocal spacing dk_alpha = b_matrix(alpha,alpha)/N_alpha
+  ! and the +e_alpha shift, matching the diagonal-reciprocal-lattice convention
+  ! already used by the length-gauge k-gradient in common_ssbe.
+  !
+  ! Also calls build_blocks (so same_block() is cached for the caller's blend).
+  !-------------------------------------------------------------------
+  subroutine build_xi(nb, nk, nbvec, bvec, prod_dk, eigen, b_matrix, num_kgrid, &
+                      xi, xi_ok, n_reject, resid_max)
+    implicit none
+    integer,    intent(in)  :: nb, nk, nbvec
+    integer,    intent(in)  :: bvec(3, nbvec)
+    complex(8), intent(in)  :: prod_dk(nb, nb, nbvec, nk)
+    real(8),    intent(in)  :: eigen(nb, nk)
+    real(8),    intent(in)  :: b_matrix(3, 3)
+    integer,    intent(in)  :: num_kgrid(3)
+    complex(8), intent(out) :: xi(nb, nb, 3, nk)
+    logical,    intent(out) :: xi_ok(nb, nb, nk)
+    integer,    intent(out) :: n_reject
+    real(8),    intent(out), optional :: resid_max
+    integer, allocatable :: block_id(:, :), ik_neighbor(:, :), link_member(:, :, :)
+    logical, allocatable :: link_ok_arr(:, :)
+    complex(8), allocatable :: M_blk(:, :), xi_blk(:, :)
+    integer :: iv_axis(3), srcs(nb), tgts(nb)
+    integer :: ik, iv, axis, bk, nblk_k, d, dt, a, bcol, n, n0, tgt0, tgt_block
+    integer :: ikpb, info_x, n_fail
+    logical :: blk_ok
+    real(8) :: dk_alpha, ru, ru_max
+
+    xi       = (0d0, 0d0)
+    xi_ok    = .false.
+    n_reject = 0
+    ru_max   = 0d0
+
+    allocate(block_id(nb, nk), ik_neighbor(nbvec, nk))
+    allocate(link_member(nb, nbvec, nk), link_ok_arr(nbvec, nk))
+
+    call build_blocks(nb, nk, eigen, block_id)
+    call build_ik_neighbor(num_kgrid, bvec, nbvec, nk, ik_neighbor)
+    call match_link_blocks(nb, nk, nbvec, bvec, prod_dk, block_id, ik_neighbor, &
+                           link_member, link_ok_arr, n_fail)
+
+    iv_axis(1) = find_bvec(bvec, nbvec, 1, 0, 0)
+    iv_axis(2) = find_bvec(bvec, nbvec, 0, 1, 0)
+    iv_axis(3) = find_bvec(bvec, nbvec, 0, 0, 1)
+
+    do ik = 1, nk
+      nblk_k = maxval(block_id(:, ik))
+      do bk = 1, nblk_k
+        ! ascending source-block bands
+        d = 0
+        do n = 1, nb
+          if (block_id(n, ik) == bk) then
+            d = d + 1
+            srcs(d) = n
+          end if
+        end do
+        if (d < 2) cycle    ! singleton block: no off-diagonal dipole to regularise
+
+        allocate(M_blk(d, d), xi_blk(d, d))
+        blk_ok = .true.
+
+        do axis = 1, 3
+          iv = iv_axis(axis)
+          if (iv == 0) then
+            blk_ok = .false.; exit          ! +axis shift absent in prod_dk
+          end if
+          ikpb = ik_neighbor(iv, ik)
+          if (ikpb < 1 .or. ikpb > nk) then
+            blk_ok = .false.; exit
+          end if
+          ! per-block link validity (match_link_blocks zeros members of bad blocks)
+          n0   = srcs(1)
+          tgt0 = link_member(n0, iv, ik)
+          if (tgt0 == 0) then
+            blk_ok = .false.; exit
+          end if
+          tgt_block = block_id(tgt0, ikpb)
+          ! ascending image-block bands, verify dimension conserved
+          dt = 0
+          do n = 1, nb
+            if (block_id(n, ikpb) == tgt_block) then
+              dt = dt + 1
+              if (dt <= d) tgts(dt) = n
+            end if
+          end do
+          if (dt /= d) then
+            blk_ok = .false.; exit
+          end if
+          ! overlap submatrix, ascending <-> ascending (standard finite difference)
+          do bcol = 1, d
+            do a = 1, d
+              M_blk(a, bcol) = prod_dk(srcs(a), tgts(bcol), iv, ik)
+            end do
+          end do
+          dk_alpha = b_matrix(axis, axis) / dble(num_kgrid(axis))
+          call xi_block_from_overlap(M_blk, dk_alpha, xi_sign, xi_blk, info_x, ru)
+          if (info_x /= 0) then
+            n_reject = n_reject + 1
+            blk_ok = .false.; exit
+          end if
+          if (ru > ru_max) ru_max = ru
+          do bcol = 1, d
+            do a = 1, d
+              xi(srcs(a), srcs(bcol), axis, ik) = xi_blk(a, bcol)
+            end do
+          end do
+        end do
+
+        if (blk_ok) then
+          do bcol = 1, d
+            do a = 1, d
+              xi_ok(srcs(a), srcs(bcol), ik) = .true.
+            end do
+          end do
+        else
+          ! rejected / partial: drop this block's xi, blend falls back to i*p/dw
+          do bcol = 1, d
+            do a = 1, d
+              xi(srcs(a), srcs(bcol), :, ik) = (0d0, 0d0)
+            end do
+          end do
+        end if
+
+        deallocate(M_blk, xi_blk)
+      end do
+    end do
+
+    deallocate(block_id, ik_neighbor, link_member, link_ok_arr)
+    if (present(resid_max)) resid_max = ru_max
+  end subroutine build_xi
 
 end module degenerate_block_ssbe

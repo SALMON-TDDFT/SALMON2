@@ -33,6 +33,11 @@ module gs_info_ssbe
         integer, allocatable :: bvec(:, :)              ! (3,nbvec) integer dk shifts (jdk1,jdk2,jdk3)
         complex(8), allocatable :: prod_dk(:, :, :, :)  ! (nb,nb,nbvec,nk)
 
+        ! LG-SBE Tier2 Pb3: non-Abelian Berry connection replacing the divergent
+        ! interband dipole inside degenerate blocks (allocated only when 'gi').
+        complex(8), allocatable :: xi(:, :, :, :)       ! (nb,nb,3,nk)  xi = s*i*logm(U)/dk
+        logical,    allocatable :: xi_ok(:, :, :)       ! (nb,nb,nk)  .true. where xi is trustworthy
+
         !k-space grid and geometry information
         !NOTE: prepred for uniformally distributed k-grid....
         !integer :: num_kgrid(1:3)
@@ -46,7 +51,8 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     use communication
     use filesystem, only: open_filehandle, get_filehandle
     use common_ssbe, only: grad_k_array_nb1d_double
-    use salmon_global, only: gauge_sbe, file_sbe_prod_dk, sbe_lg_degen
+    use salmon_global, only: gauge_sbe, file_sbe_prod_dk, sbe_lg_degen, num_kgrid
+    use degenerate_block_ssbe, only: build_xi, same_block, blend, theta_on, theta_off
     implicit none
     type(s_sbe_gs_info), intent(inout) :: gs
     character(*), intent(in) :: sysname
@@ -456,29 +462,89 @@ contains
         implicit none
         integer :: ik, ib, jb
         real(8), parameter :: omega_eps = 1d-9
+        real(8) :: x, w, resu, resp, resp_max
+        integer :: nrej
+        complex(8) :: dpdw(1:3)
 
         gs%p_mod_matrix = gs%p_tm_matrix + gs%rvnl_tm_matrix
 
-        do ik=1, nk
-            do ib=1, nb
-                do jb=1, nb
-                    gs%delta_omega(ib, jb, ik) = gs%eigen(ib, ik) - gs%eigen(jb, ik)
-                    if (omega_eps < abs(gs%delta_omega(ib, jb, ik))) then
-                        ! gs%d_matrix(ib, jb, 1:3, ik) = &
-                        !     & (zi * gs%p_mod_matrix(ib, jb, 1:3, ik) - gs%rvnl_tm_matrix(ib, jb, 1:3, ik)) &
-                        !     & / gs%delta_omega(ib, jb, ik)
-                        ! gs%d_matrix(ib, jb, 1:3, ik) = &
-                        !     & zi * (gs%p_mod_matrix(ib, jb, 1:3, ik) +  gs%rvnl_tm_matrix(ib, jb, 1:3, ik)) &
-                        !     & / gs%delta_omega(ib, jb, ik)
-                        gs%d_matrix(ib, jb, 1:3, ik) = &
-                            & zi * (gs%p_mod_matrix(ib, jb, 1:3, ik)) &
-                            & / gs%delta_omega(ib, jb, ik)
-                    else
-                        gs%d_matrix(ib, jb, 1:3, ik) = 0d0
-                    end if
+        if (trim(sbe_lg_degen) == 'gi') then
+            ! ===== Pb3: non-Abelian xi inside degenerate blocks + smooth blend =====
+            ! delta_omega first (needed by the blend), then build xi from prod_dk.
+            do ik=1, nk
+                do ib=1, nb
+                    do jb=1, nb
+                        gs%delta_omega(ib, jb, ik) = gs%eigen(ib, ik) - gs%eigen(jb, ik)
+                    end do
                 end do
             end do
-        end do
+
+            if (.not. allocated(gs%xi))    allocate(gs%xi(1:nb, 1:nb, 1:3, 1:nk))
+            if (.not. allocated(gs%xi_ok)) allocate(gs%xi_ok(1:nb, 1:nb, 1:nk))
+            call build_xi(nb, nk, gs%nbvec, gs%bvec, gs%prod_dk, gs%eigen, &
+                        & gs%b_matrix, num_kgrid, gs%xi, gs%xi_ok, nrej, resu)
+
+            resp_max = 0d0
+            do ik=1, nk
+                do ib=1, nb
+                    do jb=1, nb
+                        x = abs(gs%delta_omega(ib, jb, ik))
+                        if (same_block(ib, jb, ik) .and. ib /= jb .and. gs%xi_ok(ib, jb, ik)) then
+                            ! degenerate-block pair: blend xi (x<=theta_on) into the
+                            ! ordinary dipole i*p/delta_omega (x>=theta_off).
+                            w = blend(x, theta_on, theta_off)
+                            if (x > omega_eps) then
+                                dpdw(1:3) = zi * gs%p_mod_matrix(ib, jb, 1:3, ik) &
+                                          & / gs%delta_omega(ib, jb, ik)
+                            else
+                                dpdw(1:3) = (0d0, 0d0)   ! exact degeneracy: dipole undefined
+                            end if
+                            gs%d_matrix(ib, jb, 1:3, ik) = &
+                                & w * gs%xi(ib, jb, 1:3, ik) + (1d0 - w) * dpdw(1:3)
+                            ! diagnostic: xi vs i*p/dw where both are valid
+                            if (x >= theta_on) then
+                                resp = maxval(abs(gs%xi(ib, jb, 1:3, ik) - dpdw(1:3)))
+                                if (resp > resp_max) resp_max = resp
+                            end if
+                        else if (omega_eps < x) then
+                            gs%d_matrix(ib, jb, 1:3, ik) = &
+                                & zi * (gs%p_mod_matrix(ib, jb, 1:3, ik)) &
+                                & / gs%delta_omega(ib, jb, ik)
+                        else
+                            gs%d_matrix(ib, jb, 1:3, ik) = 0d0
+                        end if
+                    end do
+                end do
+            end do
+
+            if (irank == 0) then
+                write(*, '(a,i0)')     "# build_xi: rejected block-links          = ", nrej
+                write(*, '(a,es12.4)') "# build_xi: max |U^H U - I| (polar health) = ", resu
+                write(*, '(a,es12.4)') "# build_xi: max |xi - i p/dw| (both-valid) = ", resp_max
+            end if
+        else
+            ! ===== default 'off': bit-identical to the pre-Pb3 dipole construction =====
+            do ik=1, nk
+                do ib=1, nb
+                    do jb=1, nb
+                        gs%delta_omega(ib, jb, ik) = gs%eigen(ib, ik) - gs%eigen(jb, ik)
+                        if (omega_eps < abs(gs%delta_omega(ib, jb, ik))) then
+                            ! gs%d_matrix(ib, jb, 1:3, ik) = &
+                            !     & (zi * gs%p_mod_matrix(ib, jb, 1:3, ik) - gs%rvnl_tm_matrix(ib, jb, 1:3, ik)) &
+                            !     & / gs%delta_omega(ib, jb, ik)
+                            ! gs%d_matrix(ib, jb, 1:3, ik) = &
+                            !     & zi * (gs%p_mod_matrix(ib, jb, 1:3, ik) +  gs%rvnl_tm_matrix(ib, jb, 1:3, ik)) &
+                            !     & / gs%delta_omega(ib, jb, ik)
+                            gs%d_matrix(ib, jb, 1:3, ik) = &
+                                & zi * (gs%p_mod_matrix(ib, jb, 1:3, ik)) &
+                                & / gs%delta_omega(ib, jb, ik)
+                        else
+                            gs%d_matrix(ib, jb, 1:3, ik) = 0d0
+                        end if
+                    end do
+                end do
+            end do
+        end if
     end subroutine prepare_matrix
 
 
