@@ -59,14 +59,17 @@ module lcfo_flux
 contains
 
   logical function dc_lcfo_wannier_import_only_requested() result(import_only)
+    use salmon_global, only: wannier90_command
     implicit none
     character(1024) :: wannier_command, value
     integer :: env_status
 
     import_only = .false.
-    wannier_command = ''
-    call get_environment_variable('SALMON_WANNIER90_COMMAND', wannier_command, status=env_status)
-    if(env_status /= 0 .or. len_trim(wannier_command) == 0) return
+    wannier_command = trim(wannier90_command)
+    if(len_trim(wannier_command) == 0) then
+      call get_environment_variable('SALMON_WANNIER90_COMMAND', wannier_command, status=env_status)
+      if(env_status /= 0 .or. len_trim(wannier_command) == 0) return
+    end if
     value = adjustl(wannier_command)
     import_only = trim(value) == 'import_only' .or. trim(value) == 'IMPORT_ONLY' .or. &
       trim(value) == 'import-only' .or. trim(value) == 'IMPORT-ONLY'
@@ -3792,16 +3795,18 @@ contains
 
     subroutine run_wannier90_seed_files()
       use communication, only: comm_sync_all
-      use salmon_global, only: sysname
+      use salmon_global, only: sysname, wannier90_command
       implicit none
       character(1024) :: wannier_command, seedname
       character(4096) :: command_line, change_dir_command
       integer :: env_status, exit_status, cmd_status
 
       seedname = trim(sysname)
-      wannier_command = ''
-      call get_environment_variable('SALMON_WANNIER90_COMMAND', wannier_command, status=env_status)
-      if(env_status /= 0 .or. len_trim(wannier_command) == 0) then
+      wannier_command = trim(wannier90_command)
+      if(len_trim(wannier_command) == 0) then
+        call get_environment_variable('SALMON_WANNIER90_COMMAND', wannier_command, status=env_status)
+      end if
+      if(len_trim(wannier_command) == 0) then
 #ifdef WANNIER90_EXECUTABLE_PATH
         wannier_command = WANNIER90_EXECUTABLE_PATH
 #else
@@ -3844,14 +3849,17 @@ contains
     end function is_wannier90_skip_command
 
     logical function is_wannier90_export_only_requested() result(export_only)
+      use salmon_global, only: wannier90_command
       implicit none
       character(1024) :: wannier_command, value
       integer :: env_status
 
       export_only = .false.
-      wannier_command = ''
-      call get_environment_variable('SALMON_WANNIER90_COMMAND', wannier_command, status=env_status)
-      if(env_status /= 0 .or. len_trim(wannier_command) == 0) return
+      wannier_command = trim(wannier90_command)
+      if(len_trim(wannier_command) == 0) then
+        call get_environment_variable('SALMON_WANNIER90_COMMAND', wannier_command, status=env_status)
+        if(env_status /= 0 .or. len_trim(wannier_command) == 0) return
+      end if
       value = adjustl(wannier_command)
       export_only = trim(value) == 'export_only' .or. trim(value) == 'EXPORT_ONLY' .or. &
         trim(value) == 'export-only' .or. trim(value) == 'EXPORT-ONLY' .or. &

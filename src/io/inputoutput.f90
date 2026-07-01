@@ -643,6 +643,7 @@ contains
       & yn_dc_lcfo_local_wannier, &
       & yn_dc_lcfo_wannier_pw, &
       & yn_dc_lcfo_wannier_cluster, &
+      & wannier90_command, &
       & wannier_projection, &
       & nstate_frag, &
       & lcfo_frag_cache_size, &
@@ -1138,6 +1139,7 @@ contains
     yn_dc_lcfo_local_wannier = 'n'
     yn_dc_lcfo_wannier_pw = 'n'
     yn_dc_lcfo_wannier_cluster = 'n'
+    wannier90_command = ''
     wannier_projection = ''
     nstate_frag = 0
     lcfo_frag_cache_size = 1
@@ -1839,6 +1841,7 @@ contains
     call comm_bcast(yn_dc_lcfo_local_wannier, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_wannier_pw, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_wannier_cluster, nproc_group_global)
+    call comm_bcast(wannier90_command, nproc_group_global)
     call comm_bcast(wannier_projection, nproc_group_global)
     call comm_bcast(nstate_frag, nproc_group_global)
     call comm_bcast(lcfo_frag_cache_size, nproc_group_global)
@@ -2871,6 +2874,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_local_wannier",yn_dc_lcfo_local_wannier
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier_pw",yn_dc_lcfo_wannier_pw
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier_cluster",yn_dc_lcfo_wannier_cluster
+      write(fh_variables_log, '("#",4X,A,"=",A)') "wannier90_command",trim(wannier90_command)
       write(fh_variables_log, '("#",4X,A,"=",A)') "wannier_projection",trim(wannier_projection)
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
       write(fh_variables_log, '("#",4X,A,"=",I6)') "lcfo_frag_cache_size",lcfo_frag_cache_size

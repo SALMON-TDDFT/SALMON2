@@ -492,6 +492,7 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_dc_lcfo_local_wannier
   character(1)   :: yn_dc_lcfo_wannier_pw
   character(1)   :: yn_dc_lcfo_wannier_cluster
+  character(256) :: wannier90_command
   character(256) :: wannier_projection
   integer        :: nstate_frag
   integer        :: lcfo_frag_cache_size
