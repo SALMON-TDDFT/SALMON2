@@ -2872,14 +2872,13 @@
       logical :: field_off, local_kernel_available, bad_local, sstep_diag_enabled
       real(8) :: phase_c, phase_s
       real(8) :: s_eval_min, s_eval_max, s_eval_kept_min, s_trace, s_offdiag_norm
-      real(8) :: s_tol, s_factor, s_norm_before, s_norm_after
       real(8) :: sdiag_local_sum(8), sdiag_global_sum(8)
       real(8) :: sdiag_local_max(8), sdiag_global_max(8)
       complex(8) :: c_owner, c_input, cand_val
       complex(8), allocatable :: cw_source(:,:,:)
       integer, allocatable :: block_gid(:), block_pidx(:), block_gp(:)
       complex(8), allocatable :: block_coef(:,:), field_h(:,:), field_vec(:,:), tmp(:,:)
-      complex(8), allocatable :: s_mat(:,:), s_vec(:,:), s_corr(:,:)
+      complex(8), allocatable :: s_mat(:,:), s_vec(:,:)
       real(8), allocatable :: field_eval(:), s_eval(:)
 
       kernel_ready = .false.
@@ -3108,8 +3107,7 @@
         if (nblock <= 0) cycle
         allocate(block_gid(nblock), block_pidx(nblock), block_gp(nblock), block_coef(nblock,nstate_blk))
         if (sstep_diag_enabled) then
-          allocate(s_mat(nstate_blk,nstate_blk), s_vec(nstate_blk,nstate_blk), &
-            s_corr(nstate_blk,nstate_blk), s_eval(nstate_blk))
+          allocate(s_mat(nstate_blk,nstate_blk), s_vec(nstate_blk,nstate_blk), s_eval(nstate_blk))
         end if
         if (.not. field_off) then
           allocate(field_h(nblock,nblock), field_vec(nblock,nblock), tmp(nblock,nstate_blk), field_eval(nblock))
@@ -3175,40 +3173,19 @@
             call eigen_zheev(s_vec, s_eval, s_mat)
             s_eval_min = minval(s_eval(1:nstate_blk))
             s_eval_max = maxval(s_eval(1:nstate_blk))
-            s_tol = max(1.0d-6 * s_eval_max, 1.0d-6)
-            s_nkeep = count(s_eval(1:nstate_blk) > s_tol)
+            s_nkeep = count(s_eval(1:nstate_blk) > max(1.0d-10 * s_eval_max, 1.0d-12))
             if (s_nkeep > 0) then
               s_eval_kept_min = minval(s_eval(1:nstate_blk), &
-                mask=s_eval(1:nstate_blk) > s_tol)
+                mask=s_eval(1:nstate_blk) > max(1.0d-10 * s_eval_max, 1.0d-12))
             else
               s_eval_kept_min = 0.0d0
             end if
-            s_norm_before = sum(abs(block_coef(:, :))**2)
-            s_corr(:, :) = (0.0d0, 0.0d0)
-            do jblk = 1, nstate_blk
-              if (s_eval(jblk) <= s_tol) cycle
-              s_factor = 1.0d0 / sqrt(s_eval(jblk))
-              do state_col = 1, nstate_blk
-                do iblk = 1, nstate_blk
-                  s_corr(iblk,state_col) = s_corr(iblk,state_col) + &
-                    s_factor * s_mat(iblk,jblk) * conjg(s_mat(state_col,jblk))
-                end do
-              end do
-            end do
-            if (s_nkeep > 0) then
-              block_coef(:, :) = matmul(block_coef(:, :), s_corr(:, :))
-            else
-              bad_local = .true.
-            end if
-            s_norm_after = sum(abs(block_coef(:, :))**2)
             sdiag_local_sum(1) = sdiag_local_sum(1) + 1.0d0
             sdiag_local_sum(2) = sdiag_local_sum(2) + dble(nblock)
             sdiag_local_sum(3) = sdiag_local_sum(3) + dble(nblock - w_owner_count)
             sdiag_local_sum(4) = sdiag_local_sum(4) + s_trace
             sdiag_local_sum(5) = sdiag_local_sum(5) + sqrt(max(0.0d0, s_offdiag_norm))
             sdiag_local_sum(6) = sdiag_local_sum(6) + dble(s_nkeep)
-            sdiag_local_sum(7) = sdiag_local_sum(7) + abs(s_norm_after - s_norm_before)
-            sdiag_local_sum(8) = sdiag_local_sum(8) + s_norm_after
             sdiag_local_max(1) = max(sdiag_local_max(1), dble(nblock))
             sdiag_local_max(2) = max(sdiag_local_max(2), -s_eval_min)
             sdiag_local_max(3) = max(sdiag_local_max(3), s_eval_max)
@@ -3316,7 +3293,7 @@
           end if
         end do
         if (allocated(field_h)) deallocate(field_h, field_vec, tmp, field_eval)
-        if (allocated(s_mat)) deallocate(s_mat, s_vec, s_corr, s_eval)
+        if (allocated(s_mat)) deallocate(s_mat, s_vec, s_eval)
         deallocate(block_gid, block_pidx, block_gp, block_coef)
       end do
 
@@ -3327,7 +3304,7 @@
         call comm_get_max(sdiag_local_max, sdiag_global_max, size(sdiag_local_max), dg_frag%icomm)
         if (dg_frag%id == 0 .and. .not. dg_frag%mixed_z_perf_count_enabled) then
           if (sdiag_global_sum(1) > 0.5d0) then
-            write(*,'(1x,a,1(a,i0),13(a,1pe12.4),3(a,l1),1(a,a))') &
+            write(*,'(1x,a,1(a,i0),11(a,1pe12.4),2(a,l1),1(a,a))') &
               '[DG-MIXEDZ-HALO-SSTEP-GRAM-DIAG]', &
               ' step=', itt, &
               ' block_count=', sdiag_global_sum(1), &
@@ -3341,10 +3318,7 @@
               ' gram_eval_max=', sdiag_global_max(3), &
               ' gram_cond_max=', sdiag_global_max(4), &
               ' gram_kept_cond_max=', sdiag_global_max(5), &
-              ' sstep_norm_delta_avg=', sdiag_global_sum(7) / max(sdiag_global_sum(1), 1.0d0), &
-              ' sstep_norm_after_avg=', sdiag_global_sum(8) / max(sdiag_global_sum(1), 1.0d0), &
               ' per_step_rebuild=', .true., &
-              ' sstep_applied=', sdiag_global_sum(1) > 0.5d0, &
               ' bad=', bad_local, &
               ' route=', 'owner_neighbor_current_coef_gram'
           else
