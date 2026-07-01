@@ -750,6 +750,7 @@ subroutine dt_evolve_bloch_lg(sbe, gs, E, bj_am, dt, icomm)
 end subroutine dt_evolve_bloch_lg
 
 subroutine calc_current_bloch_lg(sbe, gs, jmat, icomm)
+    use salmon_global, only: sbe_lg_degen
     implicit none
     type(s_sbe_bloch_solver), intent(in) :: sbe
     type(s_sbe_gs_info), intent(in) :: gs
@@ -758,11 +759,46 @@ subroutine calc_current_bloch_lg(sbe, gs, jmat, icomm)
     integer :: ik, ib, jb, jj
     integer :: nk, nb
     complex(8) :: tmp1(3),tmp(3)
+    complex(8) :: rho_ji
 
     nk = sbe%nk
     nb = sbe%nb
 
     tmp1(:) = 0.d0
+
+    ! Pb4 (GI current): when sbe_lg_degen=='gi' the Pb3 xi substitution makes the
+    ! dnm_i / exp_iphi phase machinery inconsistent inside degenerate blocks, so the
+    ! delta_omega*|dnm|*aimag(qnm) current below is unreliable there.  Instead reconstruct
+    ! the physical density matrix rho from the propagated qnm (rho = exp_iphi*qnm off the
+    ! diagonal, rho = qnm on the diagonal; inverse of prepare_qnm's qnm=conjg(exp_iphi)*rho)
+    ! and contract it with the velocity v = p_tm_matrix (+ rvnl_tm_matrix when
+    ! flag_vnl_correction), using the exact index/sign convention of the VG current
+    ! calc_current_bloch (paramagnetic part; the length gauge carries no Ac*N term).
+    if (trim(sbe_lg_degen) == 'gi') then
+        !$omp parallel do default(shared) private(ik,jj,ib,jb,rho_ji) reduction(+:tmp1)
+        do ik = sbe%ik_min, sbe%ik_max
+        do jj = 1,3
+        do ib = 1,nb
+        do jb = 1,nb
+            if (ib == jb) then
+                rho_ji = sbe%qnm_new(ib, ib, ik)
+            else
+                rho_ji = sbe%exp_iphi(jb, ib, ik) * sbe%qnm_new(jb, ib, ik)
+            end if
+            tmp1(jj) = tmp1(jj) + gs%kweight(ik) * rho_ji * gs%p_tm_matrix(ib, jb, jj, ik)
+            if (sbe%flag_vnl_correction) then
+                tmp1(jj) = tmp1(jj) + gs%kweight(ik) * rho_ji * gs%rvnl_tm_matrix(ib, jb, jj, ik)
+            end if
+        end do
+        end do
+        end do
+        end do
+        !$omp end parallel do
+
+        call comm_summation(tmp1, tmp, 3, icomm)
+        jmat(:) = dble(tmp(:)) / sum(gs%kweight(:)) / gs%volume
+        return
+    end if
 
     !$omp parallel do default(shared) private(ik,ib,jb,jj) reduction(+:tmp1)
     do ik = sbe%ik_min, sbe%ik_max
