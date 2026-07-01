@@ -497,8 +497,11 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
             call seed_current_global_wannier_flux_eigenstates_std(dg_frag, &
               '[DG-GLOBAL-W-SEED] seeded coefficients from refreshed global Wannier Flux eigenbasis;')
           else
-            call diagonalize_current_dg_subspace_std(dg_frag, &
-              '[DG-SUBSPACE-SEED] diagonalized current DG coefficient subspace;')
+            if (comm_is_root(dg_frag%id)) then
+              write(*,'(1x,a)') &
+                '[DG-BPW-SCF-SEED] keeping refreshed local BPW eigenstates for local-BPW expdiag propagation'
+              flush(6)
+            end if
           end if
           if (trace_dcdft_seed_diagnostics) then
             call diagnose_dcdft_lcfo_seed_stationarity_std(dg_frag, system, mg, ppg, Ac_zero, &
@@ -518,8 +521,21 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
             call calculate_hamiltonian_matrix_std(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
             dg_frag%flux_face_trace_mix_enabled = .true.
             call calibrate_dcdft_lcfo_static_hamiltonian_std(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_zero)
-            call diagonalize_current_dg_subspace_std(dg_frag, &
-              '[DG-POLISH] diagonalized current DG coefficient subspace;')
+            call refresh_buffer_wannier_flux_seed_from_current_hamiltonian_std(dg_frag, &
+              '[DG-POLISH] refreshed local BPW eigenstates from polished DG Hamiltonian;')
+            call refresh_global_wannier_flux_eigen_from_current_hamiltonian_std(dg_frag, &
+              '[DG-POLISH] refreshed global Wannier Flux eigenbasis from polished DG Hamiltonian;')
+            if (dg_frag%use_plane_wave_basis) then
+              call seed_current_mixed_wannier_bpw_eigenstates_std(dg_frag, &
+                '[DG-POLISH] seeded polished W+BPW propagation Hamiltonian eigenstates;')
+            else if (dg_frag%has_global_wannier_flux_eigen) then
+              call seed_current_global_wannier_flux_eigenstates_std(dg_frag, &
+                '[DG-POLISH] seeded coefficients from polished global Wannier Flux eigenbasis;')
+            else if (comm_is_root(dg_frag%id)) then
+              write(*,'(1x,a)') &
+                '[DG-POLISH] keeping polished local BPW eigenstates for local-BPW expdiag propagation'
+              flush(6)
+            end if
             if (trace_dcdft_seed_diagnostics) then
               call diagnose_dcdft_lcfo_seed_stationarity_std(dg_frag, system, mg, ppg, Ac_zero, &
                                                              '[DG-POLISH-HRES]')
