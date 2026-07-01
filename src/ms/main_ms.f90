@@ -568,7 +568,9 @@ subroutine write_RT_Ac_file()
     
     if (comm_is_root(ms%id_ms_world)) then
         fh_ac_data = get_filehandle()
-        write(file_ac_data, '(a,a,"_Ac_",i6.6,".data")') trim(ms%base_directory_RT_Ac), trim(sysname), itt
+        ! i0.6: keep 6-digit zero-padding but widen automatically for itt >= 1e6
+        ! (old i6.6 overflowed to "******", colliding/overwriting frames for step >= 1,000,000)
+        write(file_ac_data, '(a,a,"_Ac_",i0.6,".data")') trim(ms%base_directory_RT_Ac), trim(sysname), itt
         open(fh_ac_data, file=trim(file_ac_data))
         write(fh_ac_data, '(a)') "# Multiscale TDDFT calculation"
         write(fh_ac_data, '(a)') "# IX, IY, IZ: FDTD Grid index"
