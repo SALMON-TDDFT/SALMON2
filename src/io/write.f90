@@ -1386,6 +1386,9 @@ contains
       
       if(comm_is_root(nproc_id_global)) then
         fh = open_filehandle(trim(file_prod_dk_data))
+        ! metadata (reader record-count / ordering check): no nk num_kgrid(1:3) ndk
+        write(fh, '("#",6(1x,i0))') &
+          & system%no, system%nk, num_kgrid(1), num_kgrid(2), num_kgrid(3), ndk
         write(fh, '(a)') "# 1:ik 2:ik1 3:ik2 4:ik3 5:jk1-ik1 6:jk2-ik2 7:jk3-ik3 8:io 9:jo 10:re 11:im"
         do ik = 1, system%nk
           ik1 = ik3d_tbl(1, ik)

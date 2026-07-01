@@ -593,6 +593,7 @@ contains
       & al_vec1_sbe,al_vec2_sbe,al_vec3_sbe, &
       & norder_correction, &
       & gauge_sbe, &
+      & yn_sbe_export_overlap, &
       & sbe_lg_diag, &
       & t_2, &
       & am_s, &
@@ -1048,6 +1049,7 @@ contains
     al_vec3_sbe(:,:) = 0.d0
     norder_correction = 0
     gauge_sbe = 'velocity_gauge'
+    yn_sbe_export_overlap = 'n'
     sbe_lg_diag = 0
     t_2 = -1.d0
     am_s = 4
@@ -1708,6 +1710,7 @@ contains
     al_vec3_sbe = al_vec3_sbe * ulength_to_au
     call comm_bcast(norder_correction,nproc_group_global)
     call comm_bcast(gauge_sbe        ,nproc_group_global)
+    call comm_bcast(yn_sbe_export_overlap, nproc_group_global)
     call comm_bcast(sbe_lg_diag      ,nproc_group_global)
     call comm_bcast(t_2              ,nproc_group_global)
     t_2 = t_2 * utime_to_au
@@ -2699,6 +2702,7 @@ contains
       end do
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'norder_correction', norder_correction
       write(fh_variables_log, '("#",4X,A,"=",A)') 'gauge_sbe', gauge_sbe
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_export_overlap', yn_sbe_export_overlap
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't_2', t_2
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'am_s', am_s
       

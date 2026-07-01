@@ -210,6 +210,17 @@ if(write_gs_wfn_k == 'y') then !this input keyword is going to be removed....
    end select
 end if
 
+! LG-SBE Tier2: export GS inter-k overlap table (independent of write_gs_wfn_k)
+if(yn_sbe_export_overlap == 'y') then
+   if(iperiodic /= 3 .or. minval(num_kgrid) < 1) then
+      if(comm_is_root(nproc_id_global)) write(*,*) &
+         "ERROR: yn_sbe_export_overlap='y' needs iperiodic=3 and uniform num_kgrid"
+      call comm_sync_all
+      stop
+   end if
+   call write_prod_dk_data(lg, mg, system, info, spsi)
+end if
+
 ! output transition moment : --> want to put out of the optmization loop in future
 if(yn_out_tm  == 'y'.or.yn_out_gs_sgm_eps=='y') then
    select case(iperiodic)
