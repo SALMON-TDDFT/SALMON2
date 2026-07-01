@@ -516,8 +516,6 @@
         mixed_z_frag_local_field_block_kind = 'owner_local'
       case ('halo_owner','owner_halo','neighbor_read','all_owner')
         mixed_z_frag_local_field_block_kind = 'halo_owner'
-      case ('halo_sstep','neighbor_sstep','sstep')
-        mixed_z_frag_local_field_block_kind = 'halo_sstep'
       case ('all')
         mixed_z_frag_local_field_block_kind = 'all'
       case default
@@ -537,8 +535,6 @@
       case ('halo_owner','HALO_OWNER','owner_halo','OWNER_HALO','neighbor_read','NEIGHBOR_READ', &
             'all_owner','ALL_OWNER')
         mixed_z_frag_local_field_block_kind = 'halo_owner'
-      case ('halo_sstep','HALO_SSTEP','neighbor_sstep','NEIGHBOR_SSTEP','sstep','SSTEP')
-        mixed_z_frag_local_field_block_kind = 'halo_sstep'
       case ('all','ALL')
         mixed_z_frag_local_field_block_kind = 'all'
       case default
@@ -2868,18 +2864,13 @@
       integer :: n_pfrag, pfrag_ids(7), axis, side, jfrag
       integer :: nblock, iblk, jblk, w_owner_count, p_valid_count
       integer :: p_field_max
-      integer :: s_nkeep
-      logical :: field_off, local_kernel_available, bad_local, sstep_diag_enabled
+      logical :: field_off, local_kernel_available, bad_local
       real(8) :: phase_c, phase_s
-      real(8) :: s_eval_min, s_eval_max, s_eval_kept_min, s_trace, s_offdiag_norm
-      real(8) :: sdiag_local_sum(8), sdiag_global_sum(8)
-      real(8) :: sdiag_local_max(8), sdiag_global_max(8)
       complex(8) :: c_owner, c_input, cand_val
       complex(8), allocatable :: cw_source(:,:,:)
       integer, allocatable :: block_gid(:), block_pidx(:), block_gp(:)
       complex(8), allocatable :: block_coef(:,:), field_h(:,:), field_vec(:,:), tmp(:,:)
-      complex(8), allocatable :: s_mat(:,:), s_vec(:,:)
-      real(8), allocatable :: field_eval(:), s_eval(:)
+      real(8), allocatable :: field_eval(:)
 
       kernel_ready = .false.
       nstate_blk = max(0, state_e - state_s + 1)
@@ -2888,10 +2879,6 @@
       n_pw = max(0, dg_frag%n_plane_waves)
       nspin_use = dg_frag%nspin
       field_off = sum(abs(E_use(1:3))) <= 1.0d-30
-      sstep_diag_enabled = trim(mixed_z_frag_local_field_block_kind) == 'halo_sstep'
-      sdiag_local_sum(:) = 0.0d0
-      sdiag_local_max(:) = 0.0d0
-      sdiag_local_max(2) = -huge(1.0d0)
       select case (trim(mixed_z_frag_local_field_block_kind))
       case ('w_only')
         p_field_max = 0
@@ -3106,9 +3093,6 @@
         nblock = w_owner_count + p_valid_count
         if (nblock <= 0) cycle
         allocate(block_gid(nblock), block_pidx(nblock), block_gp(nblock), block_coef(nblock,nstate_blk))
-        if (sstep_diag_enabled) then
-          allocate(s_mat(nstate_blk,nstate_blk), s_vec(nstate_blk,nstate_blk), s_eval(nstate_blk))
-        end if
         if (.not. field_off) then
           allocate(field_h(nblock,nblock), field_vec(nblock,nblock), tmp(nblock,nstate_blk), field_eval(nblock))
         end if
@@ -3156,42 +3140,6 @@
           if (iblk /= nblock) then
             bad_local = .true.
             cycle
-          end if
-          if (sstep_diag_enabled) then
-            s_mat(:, :) = matmul(conjg(transpose(block_coef(:, :))), block_coef(:, :))
-            s_trace = 0.0d0
-            do iblk = 1, nstate_blk
-              s_trace = s_trace + real(s_mat(iblk,iblk), kind=8)
-            end do
-            s_offdiag_norm = 0.0d0
-            do jblk = 1, nstate_blk
-              do iblk = 1, nstate_blk
-                if (iblk /= jblk) s_offdiag_norm = s_offdiag_norm + abs(s_mat(iblk,jblk))**2
-              end do
-            end do
-            s_vec(:, :) = s_mat(:, :)
-            call eigen_zheev(s_vec, s_eval, s_mat)
-            s_eval_min = minval(s_eval(1:nstate_blk))
-            s_eval_max = maxval(s_eval(1:nstate_blk))
-            s_nkeep = count(s_eval(1:nstate_blk) > max(1.0d-10 * s_eval_max, 1.0d-12))
-            if (s_nkeep > 0) then
-              s_eval_kept_min = minval(s_eval(1:nstate_blk), &
-                mask=s_eval(1:nstate_blk) > max(1.0d-10 * s_eval_max, 1.0d-12))
-            else
-              s_eval_kept_min = 0.0d0
-            end if
-            sdiag_local_sum(1) = sdiag_local_sum(1) + 1.0d0
-            sdiag_local_sum(2) = sdiag_local_sum(2) + dble(nblock)
-            sdiag_local_sum(3) = sdiag_local_sum(3) + dble(nblock - w_owner_count)
-            sdiag_local_sum(4) = sdiag_local_sum(4) + s_trace
-            sdiag_local_sum(5) = sdiag_local_sum(5) + sqrt(max(0.0d0, s_offdiag_norm))
-            sdiag_local_sum(6) = sdiag_local_sum(6) + dble(s_nkeep)
-            sdiag_local_max(1) = max(sdiag_local_max(1), dble(nblock))
-            sdiag_local_max(2) = max(sdiag_local_max(2), -s_eval_min)
-            sdiag_local_max(3) = max(sdiag_local_max(3), s_eval_max)
-            sdiag_local_max(4) = max(sdiag_local_max(4), s_eval_max / max(abs(s_eval_min), 1.0d-300))
-            sdiag_local_max(5) = max(sdiag_local_max(5), &
-              s_eval_max / max(s_eval_kept_min, 1.0d-300))
           end if
           if (.not. field_off) then
             do jblk = 1, nblock
@@ -3293,44 +3241,11 @@
           end if
         end do
         if (allocated(field_h)) deallocate(field_h, field_vec, tmp, field_eval)
-        if (allocated(s_mat)) deallocate(s_mat, s_vec, s_eval)
         deallocate(block_gid, block_pidx, block_gp, block_coef)
       end do
 
       bad = bad .or. bad_local
       kernel_ready = dg_frag%mixed_z_frag_local_storage_ready .and. .not. bad_local
-      if (sstep_diag_enabled) then
-        call comm_summation(sdiag_local_sum, sdiag_global_sum, size(sdiag_local_sum), dg_frag%icomm)
-        call comm_get_max(sdiag_local_max, sdiag_global_max, size(sdiag_local_max), dg_frag%icomm)
-        if (dg_frag%id == 0 .and. .not. dg_frag%mixed_z_perf_count_enabled) then
-          if (sdiag_global_sum(1) > 0.5d0) then
-            write(*,'(1x,a,1(a,i0),11(a,1pe12.4),2(a,l1),1(a,a))') &
-              '[DG-MIXEDZ-HALO-SSTEP-GRAM-DIAG]', &
-              ' step=', itt, &
-              ' block_count=', sdiag_global_sum(1), &
-              ' block_dim_avg=', sdiag_global_sum(2) / max(sdiag_global_sum(1), 1.0d0), &
-              ' block_dim_max=', sdiag_global_max(1), &
-              ' neighbor_dim_avg=', sdiag_global_sum(3) / max(sdiag_global_sum(1), 1.0d0), &
-              ' gram_trace_avg=', sdiag_global_sum(4) / max(sdiag_global_sum(1), 1.0d0), &
-              ' gram_offdiag_norm_avg=', sdiag_global_sum(5) / max(sdiag_global_sum(1), 1.0d0), &
-              ' gram_rank_avg=', sdiag_global_sum(6) / max(sdiag_global_sum(1), 1.0d0), &
-              ' gram_eval_min=', -sdiag_global_max(2), &
-              ' gram_eval_max=', sdiag_global_max(3), &
-              ' gram_cond_max=', sdiag_global_max(4), &
-              ' gram_kept_cond_max=', sdiag_global_max(5), &
-              ' per_step_rebuild=', .true., &
-              ' bad=', bad_local, &
-              ' route=', 'owner_neighbor_current_coef_gram'
-          else
-            write(*,'(1x,a,1(a,i0),2(a,l1),1(a,a))') &
-              '[DG-MIXEDZ-HALO-SSTEP-GRAM-DIAG]', &
-              ' step=', itt, &
-              ' per_step_rebuild=', .true., &
-              ' bad=', .true., &
-              ' route=', 'no_blocks'
-          end if
-        end if
-      end if
       deallocate(cw_source)
     end subroutine build_fragment_local_storage_direct
 
