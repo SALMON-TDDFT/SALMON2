@@ -4,6 +4,7 @@ set(SOURCES
     input_checker_sbe.f90
     gs_info_ssbe.f90
     common_ssbe.f90
+    degenerate_block_ssbe.f90
     sbe_collision_gw_core.f90
     sbe_collision_gw.f90
     bloch_solver_ssbe.f90
