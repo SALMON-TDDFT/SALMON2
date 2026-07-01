@@ -342,8 +342,9 @@ subroutine get_print_rank_numbers(kex,info)
     character(256),intent(out) :: pdir(kex%nk)
     integer :: ik, nproc_id_kex
 
-    ! global directory
-    write(gdir,'(A,I6.6,A)')   trim(basedir)
+    ! global directory (gdir = basedir; the old '(A,I6.6,A)' had no integer arg for I6.6,
+    !  a format/output-list mismatch that aborts under the Fujitsu runtime, same as generate_restart_directory_name)
+    write(gdir,'(A)')          trim(basedir)
 
     ! process private directory for k-expand
     do ik=1,kex%nk

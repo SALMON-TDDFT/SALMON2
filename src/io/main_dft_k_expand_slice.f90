@@ -317,7 +317,8 @@ subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
     character(256),intent(out) :: pdir(:)
     integer :: ik,io,nblock, i
 
-    write(gdir,'(A,I6.6,A)')   trim(directory_read_data)
+    ! gdir = directory_read_data; '(A,I6.6,A)' had no integer arg for I6.6 (format/output-list mismatch, aborts on Fujitsu runtime)
+    write(gdir,'(A)')          trim(directory_read_data)
 
     i=0
     do ik=1,system%nk 
@@ -337,7 +338,8 @@ subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
     character(256),intent(out) :: pdir(:)
     integer :: icnt, i,ik_new,io_new, nblock
 
-    write(gdir,'(A,I6.6,A)')   trim(odir)
+    ! gdir = odir; '(A,I6.6,A)' had no integer arg for I6.6 (format/output-list mismatch, aborts on Fujitsu runtime)
+    write(gdir,'(A)')          trim(odir)
 
     ik_new=1
     i=0

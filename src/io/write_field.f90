@@ -53,7 +53,7 @@ subroutine write_dns(lg,mg,system,info,rho_s,rho0_s,itt)
     suffix_u = trim(base_directory)//trim(sysname)//"_dns_u"
     suffix_d = trim(base_directory)//trim(sysname)//"_dns_d"
   case('dft_md','tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
-    write(filenum, '(i6.6)') itt
+    write(filenum, '(i0.6)') itt
     suffix =   trim(base_directory)//trim(sysname)//"_dns_"//adjustl(filenum)
     suffix_u = trim(base_directory)//trim(sysname)//"_dns_u_"//adjustl(filenum)
     suffix_d = trim(base_directory)//trim(sysname)//"_dns_d_"//adjustl(filenum)
@@ -87,7 +87,7 @@ subroutine write_dns(lg,mg,system,info,rho_s,rho0_s,itt)
     dns = dns - wrk2
     !$omp end workshare
 
-    write(filenum, '(i6.6)') itt
+    write(filenum, '(i0.6)') itt
     suffix   = trim(base_directory)//trim(sysname)//"_dnsdiff_"//adjustl(filenum)
     suffix_u = trim(base_directory)//trim(sysname)//"_dnsdiff_u_"//adjustl(filenum)
     suffix_d = trim(base_directory)//trim(sysname)//"_dnsdiff_d_"//adjustl(filenum)
@@ -204,7 +204,7 @@ subroutine write_dns_ac_je(info,mg,system,rho,fw,itt,action)
      if(comm_is_root(nproc_id_global)) then
 
         fp = 299
-        write(filenum1,'(i6.6)') itt
+        write(filenum1,'(i0.6)') itt
         filenum1=adjustl(filenum1)
         ofile =trim(wdir1)//"it"//trim(filenum1)//"_ion.bin"
         open(fp,file=trim(ofile),form='unformatted',access='stream')
@@ -218,7 +218,7 @@ subroutine write_dns_ac_je(info,mg,system,rho,fw,itt,action)
      if(comm_is_root(info%id_ko)) then
 
         fp = 300 + info%id_r
-        write(filenum1,'(i6.6)') itt
+        write(filenum1,'(i0.6)') itt
         write(filenum2,'(i6.6)') info%id_r
         filenum1=adjustl(filenum1)
         filenum2=adjustl(filenum2)
@@ -606,7 +606,7 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,rho,srg,srg_scalar,tpsi)
   case('dft','dft_band','dft_md') 
     suffix = trim(base_directory)//trim(sysname)//"_elf"
   case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
-    write(filenum, '(i6.6)') itt
+    write(filenum, '(i0.6)') itt
     suffix = trim(base_directory)//trim(sysname)//"_elf_"//adjustl(filenum)
   case default
     stop 'invalid theory'
@@ -680,7 +680,7 @@ subroutine write_estatic(lg,mg,system,stencil,info,Vh,srg_scalar,itt)
  
     call comm_summation(rmat,rmat2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
   
-    write(filenum, '(i6.6)') itt
+    write(filenum, '(i0.6)') itt
     if(jj==1)then
       suffix = trim(base_directory)//trim(sysname)//"_Exsta_"//adjustl(filenum)
       phys_quantity = "exsta"
