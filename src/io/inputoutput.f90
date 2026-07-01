@@ -599,7 +599,9 @@ contains
       & am_s, &
       & yn_sbe_gw_collision, &
       & file_sbe_gw_rate, &
-      & sbe_deph_mode
+      & sbe_deph_mode, &
+      & file_sbe_prod_dk, &
+      & sbe_lg_degen
 
     namelist/dc/ &
       & num_fragment, &
@@ -1056,6 +1058,8 @@ contains
     yn_sbe_gw_collision = 'n'
     file_sbe_gw_rate    = 'Si_imsigma.data'
     sbe_deph_mode       = 'gw'
+    file_sbe_prod_dk    = ''
+    sbe_lg_degen        = 'off'
 !! == default for &dc
     num_fragment = 0
     num_rgrid_buffer = 0
@@ -1718,6 +1722,8 @@ contains
     call comm_bcast(yn_sbe_gw_collision, nproc_group_global)
     call comm_bcast(file_sbe_gw_rate,    nproc_group_global)
     call comm_bcast(sbe_deph_mode,       nproc_group_global)
+    call comm_bcast(file_sbe_prod_dk,    nproc_group_global)
+    call comm_bcast(sbe_lg_degen,        nproc_group_global)
 !! == bcast for dc
     call comm_bcast(num_fragment ,nproc_group_global)
     call comm_bcast(num_rgrid_buffer, nproc_group_global)
@@ -2705,7 +2711,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_export_overlap', yn_sbe_export_overlap
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't_2', t_2
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'am_s', am_s
-      
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'file_sbe_prod_dk', file_sbe_prod_dk
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'sbe_lg_degen', sbe_lg_degen
+
       if(inml_dc >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', inml_dc
       write(fh_variables_log, '("#",4X,A,"=",3I4)') 'num_fragment',num_fragment(1:3)

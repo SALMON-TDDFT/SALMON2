@@ -28,6 +28,11 @@ module gs_info_ssbe
         real(8), allocatable :: gamma_gw(:, :)   ! (nb,nk) inelastic linewidth, a.u.
         real(8), allocatable :: f0_ref(:, :)     ! (nb,nk) cold occupation reference
 
+        ! LG-SBE degeneracy inputs (prod_dk overlaps <u_{n,k}|u_{m,k+dk}>)
+        integer :: nbvec                                ! number of dk-shift vectors = (2*ndk+1)**3
+        integer, allocatable :: bvec(:, :)              ! (3,nbvec) integer dk shifts (jdk1,jdk2,jdk3)
+        complex(8), allocatable :: prod_dk(:, :, :, :)  ! (nb,nb,nbvec,nk)
+
         !k-space grid and geometry information
         !NOTE: prepred for uniformally distributed k-grid....
         !integer :: num_kgrid(1:3)
@@ -41,7 +46,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     use communication
     use filesystem, only: open_filehandle, get_filehandle
     use common_ssbe, only: grad_k_array_nb1d_double
-    use salmon_global, only: gauge_sbe
+    use salmon_global, only: gauge_sbe, file_sbe_prod_dk, sbe_lg_degen
     implicit none
     type(s_sbe_gs_info), intent(inout) :: gs
     character(*), intent(in) :: sysname
@@ -102,6 +107,9 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     call comm_bcast(gs%occup, icomm, 0)
     call comm_bcast(gs%p_tm_matrix, icomm, 0)
     call comm_bcast(gs%rvnl_tm_matrix, icomm, 0)
+
+    !Retrieve k-space overlap products from 'file_sbe_prod_dk' (LG-SBE degeneracy):
+    if (trim(sbe_lg_degen) == 'gi') call read_prod_dk_data()
 
     !Calculate omega and d_matrix (neglecting diagonal part):
     if (irank == 0) write(*,"(a)") "# prepare_matrix"
@@ -288,6 +296,160 @@ contains
     end subroutine save_sbe_gs_bin
 
 
+    ! Read the k-space overlap products <u_{io,ik}|u_{jo,ik+dk}> from the
+    ! text file written by write_prod_dk_data (SALMON's '<sysname>_prod_dk.data').
+    ! Root reads/validates, all ranks allocate, then the data are broadcast.
+    subroutine read_prod_dk_data()
+        implicit none
+        integer :: fh, ios, ip, ierr
+        logical :: file_exists
+        character(256) :: cline
+        integer :: file_no, file_nk, file_nk1, file_nk2, file_nk3, file_ndk
+        integer :: ndk_loc, mdk, nrec, irec, ik_exp, ivec
+        integer :: jdk1, jdk2, jdk3
+        integer :: ik_r, ik1_r, ik2_r, ik3_r, jdk1_r, jdk2_r, jdk3_r, io_r, jo_r
+        real(8) :: re_r, im_r
+
+        ierr    = 0
+        gs%nbvec = 0
+        ndk_loc = 0
+        file_no = 0
+
+        ! --- root: open the file and parse the metadata header ---
+        if (irank == 0) then
+            write(*, '(a)') "# read_prod_dk_data"
+            if (len_trim(file_sbe_prod_dk) == 0) then
+                write(*, '(a)') "ERROR(read_prod_dk_data): 'file_sbe_prod_dk' is empty while 'sbe_lg_degen'='gi'."
+                ierr = 1
+            else
+                inquire(file=trim(file_sbe_prod_dk), exist=file_exists)
+                if (.not. file_exists) then
+                    write(*, '(a)') "ERROR(read_prod_dk_data): file not found: " // trim(file_sbe_prod_dk)
+                    ierr = 1
+                end if
+            end if
+
+            if (ierr == 0) then
+                fh = open_filehandle(trim(file_sbe_prod_dk), 'old')
+                ! metadata line 1: "# no nk num_kgrid(1) num_kgrid(2) num_kgrid(3) ndk"
+                read(fh, '(a)', iostat=ios) cline
+                if (ios /= 0) then
+                    write(*, '(a)') "ERROR(read_prod_dk_data): cannot read metadata header."
+                    ierr = 1
+                else
+                    ip = index(cline, '#')
+                    read(cline(ip+1:), *, iostat=ios) &
+                        & file_no, file_nk, file_nk1, file_nk2, file_nk3, file_ndk
+                    if (ios /= 0) then
+                        write(*, '(a)') "ERROR(read_prod_dk_data): malformed metadata header."
+                        ierr = 1
+                    end if
+                end if
+            end if
+
+            if (ierr == 0) then
+                if (file_nk /= nk) then
+                    write(*, '(a)') "ERROR(read_prod_dk_data): nk in file differs from SBE nk."
+                    ierr = 1
+                end if
+                if (file_nk1 * file_nk2 * file_nk3 /= file_nk) then
+                    write(*, '(a)') "ERROR(read_prod_dk_data): num_kgrid product differs from nk in file."
+                    ierr = 1
+                end if
+                if (file_no < nb) then
+                    write(*, '(a)') "ERROR(read_prod_dk_data): band window in file is smaller than SBE nb."
+                    ierr = 1
+                end if
+                if (file_ndk < 0) then
+                    write(*, '(a)') "ERROR(read_prod_dk_data): ndk in file is negative."
+                    ierr = 1
+                end if
+            end if
+
+            if (ierr == 0) then
+                ndk_loc  = file_ndk
+                gs%nbvec = (2 * ndk_loc + 1) ** 3
+                ! metadata line 2: column legend (skip)
+                read(fh, '(a)', iostat=ios) cline
+            end if
+        end if
+
+        ! --- propagate metadata-stage error, then broadcast nbvec ---
+        call comm_bcast(ierr, icomm, 0)
+        if (ierr /= 0) stop 1
+        call comm_bcast(gs%nbvec, icomm, 0)
+
+        ! --- allocate on ALL ranks ---
+        allocate(gs%bvec(1:3, 1:gs%nbvec))
+        allocate(gs%prod_dk(1:nb, 1:nb, 1:gs%nbvec, 1:nk))
+        gs%bvec(:, :)          = 0
+        gs%prod_dk(:, :, :, :) = dcmplx(0d0, 0d0)
+
+        ! --- root: build the dk-shift table and read all 11-column records ---
+        if (irank == 0) then
+            mdk  = 2 * ndk_loc + 1
+            ivec = 0
+            do jdk3 = -ndk_loc, ndk_loc
+                do jdk2 = -ndk_loc, ndk_loc
+                    do jdk1 = -ndk_loc, ndk_loc
+                        ivec = ivec + 1
+                        gs%bvec(1, ivec) = jdk1
+                        gs%bvec(2, ivec) = jdk2
+                        gs%bvec(3, ivec) = jdk3
+                    end do
+                end do
+            end do
+
+            ! writer emits nk * (2*ndk+1)**3 * no**2 records, ik outermost/slowest.
+            nrec = nk * gs%nbvec * file_no * file_no
+            do irec = 1, nrec
+                read(fh, *, iostat=ios) &
+                    & ik_r, ik1_r, ik2_r, ik3_r, jdk1_r, jdk2_r, jdk3_r, io_r, jo_r, re_r, im_r
+                if (ios /= 0) then
+                    write(*, '(a)') "ERROR(read_prod_dk_data): fewer records than expected."
+                    ierr = 1
+                    exit
+                end if
+                ! ik must run 1..nk in contiguous blocks (matches SBE k ordering)
+                ik_exp = (irec - 1) / (gs%nbvec * file_no * file_no) + 1
+                if (ik_r /= ik_exp) then
+                    write(*, '(a)') "ERROR(read_prod_dk_data): ik ordering does not match SBE k-grid."
+                    ierr = 1
+                    exit
+                end if
+                if (abs(jdk1_r) > ndk_loc .or. abs(jdk2_r) > ndk_loc .or. abs(jdk3_r) > ndk_loc) then
+                    write(*, '(a)') "ERROR(read_prod_dk_data): dk-shift index out of range."
+                    ierr = 1
+                    exit
+                end if
+                ! keep only the SBE band window (writer emits the full band window)
+                if (io_r <= nb .and. jo_r <= nb) then
+                    ivec = (jdk3_r + ndk_loc) * mdk * mdk &
+                        & + (jdk2_r + ndk_loc) * mdk &
+                        & + (jdk1_r + ndk_loc) + 1
+                    gs%prod_dk(io_r, jo_r, ivec, ik_r) = dcmplx(re_r, im_r)
+                end if
+            end do
+
+            ! record-count check: no surplus data lines beyond the expected block
+            if (ierr == 0) then
+                read(fh, '(a)', iostat=ios) cline
+                if (ios == 0) then
+                    if (len_trim(cline) > 0) then
+                        write(*, '(a)') "ERROR(read_prod_dk_data): more records than expected."
+                        ierr = 1
+                    end if
+                end if
+            end if
+            close(fh)
+        end if
+
+        ! --- propagate record-stage error, then broadcast the data ---
+        call comm_bcast(ierr, icomm, 0)
+        if (ierr /= 0) stop 1
+        call comm_bcast(gs%bvec, icomm, 0)
+        call comm_bcast(gs%prod_dk, icomm, 0)
+    end subroutine read_prod_dk_data
 
 
     subroutine prepare_matrix()

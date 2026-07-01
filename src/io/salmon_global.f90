@@ -447,6 +447,8 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_sbe_gw_collision
   character(256) :: file_sbe_gw_rate
   character(16)  :: sbe_deph_mode
+  character(256) :: file_sbe_prod_dk
+  character(16)  :: sbe_lg_degen
 
   !! &dc
   integer        :: num_fragment(3)

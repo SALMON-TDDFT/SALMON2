@@ -101,6 +101,16 @@ function check_input_variables_sbe() result(flag)
         end if
     end if
 
+    select case(trim(sbe_lg_degen))
+    case("off")
+    case("gi")
+        if (sbe_lg_diag == 2 .or. sbe_lg_diag == 3) then
+            call raise("ERROR! 'sbe_lg_degen'='gi' is incompatible with 'sbe_lg_diag'=2 or 3.")
+        end if
+    case default
+        call raise("ERROR! 'sbe_lg_degen' must be 'off' or 'gi'.")
+    end select
+
     if (trim(theory) /= "maxwell_sbe") return
 
     if (nx_m < 1) &
