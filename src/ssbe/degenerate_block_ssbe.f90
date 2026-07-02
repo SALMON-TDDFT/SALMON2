@@ -53,7 +53,7 @@ module degenerate_block_ssbe
   public :: build_block_transport ! orchestrator: fixed blocks -> block-diagonal U_full(nb,nb,3,nk)
   ! Phase 2 (gicov): pure gauge-covariant intraband k-derivative operator that
   ! consumes build_block_transport's U_full (Wilson-line transport, no logm).
-  public :: covariant_grad_block  ! D_cov rho = d_k rho - i[xi,rho] (4-shell transported stencil)
+  public :: covariant_grad_block  ! D_cov rho = d_k rho - i[xi,rho] (<=4-shell transported stencil, per-axis alias-capped)
 
   real(8), parameter :: theta_on  = 5d-4   ! tight core-degeneracy bound  [au]
   real(8), parameter :: theta_off = 2d-3   ! block-membership bound       [au]
@@ -1018,13 +1018,36 @@ contains
   ! transport U_full (build_block_transport: unitary on each fixed composite
   ! block, identity elsewhere; U_full(k) = <u(k)|u(k+e)> ~ I - i xi dk, polar,
   ! no logm) to parallel-transport the neighbour densities into the k-frame
-  ! before a 4-shell (+-1..+-4) CENTRAL difference.  Weights
+  ! before an UP-TO-4-shell (+-1..+-m_max) CENTRAL difference, per-axis capped
+  ! (see m_max below).  Weights
   !     c = (4/5, -1/5, 4/105, -1/280)  =  bNmat(:,4)
   ! are the SAME shells/weights as the production length-gauge k-gradient
   ! grad_k_array_nb2d_dcomplex (common_ssbe.f90:104-194; weights set by set_bN,
-  ! src/common/initialization.f90:1343).  No SALMON deps, no MPI (full-k arrays).
+  ! src/common/initialization.f90:1343); a capped axis simply omits the
+  ! highest shell(s) (truncated finite-difference order, weights NOT
+  ! renormalised) rather than dropping the operator. No SALMON deps, no MPI
+  ! (full-k arrays).
   !
-  ! For each Cartesian axis alpha, k-point k, shell m = 1..4:
+  ! Per-axis adaptive shell cap (aliasing guard): shell m couples k to k+-m e,
+  ! and on a periodic grid of size n = num_kgrid(alpha), k+m e and k-m e are
+  ! the SAME index once 2m >= n. For the BARE stencil (U_full == I) the two
+  ! terms are then literally the same rho value subtracted from itself and
+  ! cancel exactly; but for the COVARIANT stencil the two composed Wilson
+  ! lines Um(k) (forward, via k+e,k+2e,...) and Um(k-m e) (backward, via
+  ! k-e,k-2e,...) reach that SAME point by two DIFFERENT paths around the
+  ! periodic ring and are generally different unitaries, so the forward and
+  ! backward transported terms do NOT cancel -- leaving a spurious O(1)
+  ! contribution (this bit the production 8^3 mesh, where shell 4 aliases:
+  ! k+4 == k-4 mod 8). To make this structurally impossible at ANY mesh size,
+  ! each axis independently caps its shell count to
+  !     m_max(alpha) = min(4, (num_kgrid(alpha) - 1) / 2)     (integer division)
+  ! so that 2*m_max(alpha) < num_kgrid(alpha) always holds and no shell can
+  ! alias. m_max=4 for num_kgrid(alpha)>=9 (unchanged full 4-shell, matches
+  ! the legacy bare gradient's effective behaviour there); m_max=3 at the
+  ! production nk_axis=8 (drops the aliasing shell 4 only); m_max=0 for a
+  ! singleton axis (num_kgrid(alpha)=1), i.e. Dq(:,:,alpha,:) = 0.
+  !
+  ! For each Cartesian axis alpha, k-point k, shell m = 1..m_max(alpha):
   !   forward neighbour  k + m e  reached by composing the +e_alpha link m times;
   !   composed Wilson link (product of single FORWARD links)
   !     Um(k)     = U_full(k) U_full(k+e) ... U_full(k+(m-1)e)   [k -> k+m e]
@@ -1034,19 +1057,21 @@ contains
   !   (forward neighbour transported by Um(k): U rho U^H; backward neighbour by
   !    Um(k-m e)^H: U^H rho U).  Dq(:,:,alpha,k) = sum_m of those.
   !
-  ! With U_full == I this reduces EXACTLY to the bare 4-shell central difference
-  ! of rho (Test A).  It is gauge COVARIANT: under rho -> W(k)^H rho W(k) and
-  ! U_full(k) -> W(k)^H U_full(k) W(k+e) the output transforms as a rank-2
-  ! tensor Dq(k) -> W(k)^H Dq(k) W(k) (Test B, telescoping W W^H = I).  For
-  ! constant xi with U_full = exp(-i xi dk) it equals d_k rho - i[xi,rho] to
-  ! O(dk^8) (Test C, the R-5 SIGN gate: the "U" orientation -- U_full fed
-  ! as-is, NOT its conjugate transpose -- is the physical one).
+  ! With U_full == I this reduces EXACTLY to the (per-axis capped) bare central
+  ! difference of rho (Test A, m_max=4 at its nk=12). It is gauge COVARIANT:
+  ! under rho -> W(k)^H rho W(k) and U_full(k) -> W(k)^H U_full(k) W(k+e) the
+  ! output transforms as a rank-2 tensor Dq(k) -> W(k)^H Dq(k) W(k) (Test B,
+  ! telescoping W W^H = I). For constant xi with U_full = exp(-i xi dk) it
+  ! equals d_k rho - i[xi,rho] (via the same capped stencil) to high order
+  ! (Test C at nk=32/m_max=4, 1e-8 R-5 SIGN gate; Test D at the production
+  ! nk=8/m_max=3, alias-free check).
   !
   ! Triple products use ZGEMM (zmm3).  ik_neighbor is built internally with
   ! build_ik_neighbor; the +axis columns are resolved with find_bvec; the
   ! backward neighbour map is the inverse permutation of the +axis forward map
   ! (well-defined on the full periodic grid).  An axis whose +unit-shift column
-  ! is absent from bvec leaves Dq(:,:,axis,:) = 0.
+  ! is absent from bvec, OR whose m_max(axis)=0 (singleton axis), leaves
+  ! Dq(:,:,axis,:) = 0.
   !-------------------------------------------------------------------
   subroutine covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq)
     implicit none
@@ -1060,6 +1085,7 @@ contains
     complex(8), allocatable :: Umf(:,:), Umb(:,:), Utmp(:,:), tmp(:,:), &
                                fterm(:,:), bterm(:,:), Id(:,:)
     integer :: iv_axis(3), axis, iv, ik, m, kfwd, krp, kbwd, n
+    integer :: m_max(3)
 
     allocate(ik_neighbor(nbvec, nk), bwd(nk))
     allocate(Umf(nb,nb), Umb(nb,nb), Utmp(nb,nb), tmp(nb,nb), &
@@ -1070,6 +1096,13 @@ contains
     iv_axis(2) = find_bvec(bvec, nbvec, 0, 1, 0)
     iv_axis(3) = find_bvec(bvec, nbvec, 0, 0, 1)
 
+    ! Per-axis adaptive shell cap: 2*m_max(axis) < num_kgrid(axis) always, so
+    ! shell m_max(axis) can never alias (k+m == k-m mod num_kgrid(axis)). See
+    ! the subroutine header for the full rationale.
+    do axis = 1, 3
+      m_max(axis) = min(4, (num_kgrid(axis) - 1) / 2)
+    end do
+
     Id = (0d0, 0d0)
     do n = 1, nb
       Id(n, n) = (1d0, 0d0)
@@ -1079,7 +1112,8 @@ contains
 
     do axis = 1, 3
       iv = iv_axis(axis)
-      if (iv == 0) cycle    ! +axis link absent in bvec: Dq(:,:,axis,:) stays 0
+      if (iv == 0) cycle              ! +axis link absent in bvec: Dq(:,:,axis,:) stays 0
+      if (m_max(axis) == 0) cycle     ! singleton axis (num_kgrid(axis)=1): Dq(:,:,axis,:) stays 0
 
       ! backward neighbour map = inverse of the +axis forward permutation
       ! (bijection on the full periodic grid, so every k has a unique preimage)
@@ -1092,7 +1126,7 @@ contains
         Umb  = Id
         kfwd = ik      ! position of the next forward link to append = k+(m-1)e
         kbwd = ik      ! stepped to k-m e inside the loop
-        do m = 1, 4
+        do m = 1, m_max(axis)
           ! ---- forward: Um(k) <- Um(k) * U_full(k+(m-1)e); neighbour = k+m e ----
           call zmm3('N', 'N', nb, Umf, U_full(:, :, axis, kfwd), Utmp)
           Umf = Utmp
