@@ -38,6 +38,10 @@ module gs_info_ssbe
         complex(8), allocatable :: xi(:, :, :, :)       ! (nb,nb,3,nk)  xi = s*i*logm(U)/dk
         logical,    allocatable :: xi_ok(:, :, :)       ! (nb,nb,nk)  .true. where xi is trustworthy
 
+        ! LG-SBE Phase 1 (gicov): block-diagonal Wilson-line transport + fixed partition
+        complex(8), allocatable :: u_transport(:, :, :, :)  ! (nb,nb,3,nk) block-diagonal Wilson-line transport, gicov
+        integer,    allocatable :: block_id(:, :)           ! (nb,nk) fixed-block partition, per-gs (NOT the module cache)
+
         !k-space grid and geometry information
         !NOTE: prepred for uniformally distributed k-grid....
         !integer :: num_kgrid(1:3)
@@ -52,7 +56,8 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     use filesystem, only: open_filehandle, get_filehandle
     use common_ssbe, only: grad_k_array_nb1d_double
     use salmon_global, only: gauge_sbe, file_sbe_prod_dk, sbe_lg_degen, num_kgrid, sbe_lg_degen_floor
-    use degenerate_block_ssbe, only: build_xi, same_block, blend, theta_on, theta_off
+    use degenerate_block_ssbe, only: build_xi, same_block, blend, theta_on, theta_off, &
+                                   & build_blocks_fixed, build_block_transport
     implicit none
     type(s_sbe_gs_info), intent(inout) :: gs
     character(*), intent(in) :: sysname
@@ -115,7 +120,8 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     call comm_bcast(gs%rvnl_tm_matrix, icomm, 0)
 
     !Retrieve k-space overlap products from 'file_sbe_prod_dk' (LG-SBE degeneracy):
-    if (trim(sbe_lg_degen) == 'gi' .or. trim(sbe_lg_degen) == 'gifix') call read_prod_dk_data()
+    if (trim(sbe_lg_degen) == 'gi' .or. trim(sbe_lg_degen) == 'gifix' &
+        & .or. trim(sbe_lg_degen) == 'gicov') call read_prod_dk_data()
 
     !Calculate omega and d_matrix (neglecting diagonal part):
     if (irank == 0) write(*,"(a)") "# prepare_matrix"
@@ -135,7 +141,47 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     gs%occup(:,:) = 0d0 !!Experimental!!
     gs%occup(1:(ne/2),:) = 2d0 !!Experimental!!
 
+    ! gicov covariance guard (after the final gs%occup reset): every fixed
+    ! degenerate block must be uniformly occupied (equal within-block
+    ! occupations, each ~empty or ~full) so the block-covariant transport is
+    ! physically meaningful. Fails closed on metals / partial degenerate-block
+    ! filling. (Si VBM triplet is full & equal -> passes.)
+    if (trim(sbe_lg_degen) == 'gicov') call check_gicov_occupation()
+
 contains
+
+    ! gicov: enforce equal, non-fractional occupation within each fixed block.
+    subroutine check_gicov_occupation()
+        implicit none
+        integer :: ik, ib, jb, bid
+        real(8), parameter :: occ_full = 2d0   ! doubly-occupied value set by the reset above
+        real(8), parameter :: occ_tol  = 1d-6
+        do ik = 1, nk
+            do ib = 1, nb
+                ! fractional check: each band must be ~empty or ~full
+                if (abs(gs%occup(ib, ik)) > occ_tol .and. &
+                    & abs(gs%occup(ib, ik) - occ_full) > occ_tol) then
+                    write(*, '(a,2i6,es14.5)') &
+                        & 'ERROR sbe_lg_degen=gicov: fractional occupation ib,ik,occ=', &
+                        & ib, ik, gs%occup(ib, ik)
+                    error stop 'gicov requires equal, non-fractional occupation within a degenerate block'
+                end if
+                ! equal-within-block check (fixed partition gs%block_id)
+                bid = gs%block_id(ib, ik)
+                do jb = ib + 1, nb
+                    if (gs%block_id(jb, ik) == bid) then
+                        if (abs(gs%occup(ib, ik) - gs%occup(jb, ik)) > occ_tol) then
+                            write(*, '(a,3i6,2es14.5)') &
+                                & 'ERROR sbe_lg_degen=gicov: unequal occupation in block ik,ib,jb=', &
+                                & ik, ib, jb, gs%occup(ib, ik), gs%occup(jb, ik)
+                            error stop 'gicov requires equal, non-fractional occupation within a degenerate block'
+                        end if
+                    end if
+                end do
+            end do
+        end do
+    end subroutine check_gicov_occupation
+
 
     ! Calculate lattice and reciprocal vectors
     subroutine calc_lattice_info()
@@ -524,6 +570,53 @@ contains
                 write(*, '(a,i0)')     "# build_xi: rejected block-links          = ", nrej
                 write(*, '(a,es12.4)') "# build_xi: max |U^H U - I| (polar health) = ", resu
                 write(*, '(a,es12.4)') "# build_xi: max |xi - i p/dw| (both-valid) = ", resp_max
+            end if
+        else if (trim(sbe_lg_degen) == 'gicov') then
+            ! ===== Phase 1 (gicov): block-diagonal Wilson-line transport =====
+            ! Fixed composite blocks + polar-only transport (no logm). The
+            ! gauge-covariant k-derivative (Task 5) consumes gs%u_transport for
+            ! the SAME-BLOCK degenerate pairs; d_matrix therefore carries the
+            ! OUT-OF-BLOCK interband dipole ONLY (same-block pairs -> 0, no xi,
+            ! no blend). u_transport already carries the block-diagonal
+            ! structure (identity outside blocks) from build_block_transport, so
+            ! it is stored AS-IS -- never embed-padded.
+            do ik=1, nk
+                do ib=1, nb
+                    do jb=1, nb
+                        gs%delta_omega(ib, jb, ik) = gs%eigen(ib, ik) - gs%eigen(jb, ik)
+                    end do
+                end do
+            end do
+
+            ! fixed k-independent block partition, stored IN the gs object
+            if (.not. allocated(gs%block_id)) allocate(gs%block_id(1:nb, 1:nk))
+            call build_blocks_fixed(nb, nk, gs%eigen, gs%block_id)
+
+            ! block-diagonal Wilson-line transport (polar, fail-closed on near-singular)
+            if (.not. allocated(gs%u_transport)) allocate(gs%u_transport(1:nb, 1:nb, 1:3, 1:nk))
+            call build_block_transport(nb, nk, gs%nbvec, gs%bvec, gs%prod_dk, &
+                                     & gs%eigen, num_kgrid, gs%u_transport, nrej)
+
+            ! out-of-block dipole only; same-block pairs handled by transport (Task 5)
+            do ik=1, nk
+                do ib=1, nb
+                    do jb=1, nb
+                        x = abs(gs%delta_omega(ib, jb, ik))
+                        if (same_block(ib, jb, ik)) then
+                            gs%d_matrix(ib, jb, 1:3, ik) = 0d0
+                        else if (omega_eps < x) then
+                            gs%d_matrix(ib, jb, 1:3, ik) = &
+                                & zi * (gs%p_mod_matrix(ib, jb, 1:3, ik)) &
+                                & / gs%delta_omega(ib, jb, ik)
+                        else
+                            gs%d_matrix(ib, jb, 1:3, ik) = 0d0
+                        end if
+                    end do
+                end do
+            end do
+
+            if (irank == 0) then
+                write(*, '(a,i0)') "# build_block_transport: rejected blocks = ", nrej
             end if
         else
             ! ===== default 'off': bit-identical to the pre-Pb3 dipole construction =====
