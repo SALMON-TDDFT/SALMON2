@@ -499,7 +499,8 @@ contains
     integer :: ik, iv, axis, bk, nblk_k, d, dt, a, bcol, n, n0, tgt0, tgt_block
     integer :: ikpb, info_x, n_fail
     logical :: blk_ok
-    real(8) :: dk_alpha, ru, ru_max
+    integer :: reject_reason
+    real(8) :: dk_alpha, ru, ru_max, dwmin
 
     xi       = (0d0, 0d0)
     xi_ok    = .false.
@@ -533,20 +534,24 @@ contains
 
         allocate(M_blk(d, d), xi_blk(d, d))
         blk_ok = .true.
+        reject_reason = 0
 
         do axis = 1, 3
           iv = iv_axis(axis)
           if (iv == 0) then
-            blk_ok = .false.; exit          ! +axis shift absent in prod_dk
+            reject_reason = 1               ! +axis shift absent in prod_dk
+            blk_ok = .false.; exit
           end if
           ikpb = ik_neighbor(iv, ik)
           if (ikpb < 1 .or. ikpb > nk) then
+            reject_reason = 2               ! neighbor k index invalid
             blk_ok = .false.; exit
           end if
           ! per-block link validity (match_link_blocks zeros members of bad blocks)
           n0   = srcs(1)
           tgt0 = link_member(n0, iv, ik)
           if (tgt0 == 0) then
+            reject_reason = 3               ! link zeroed by match_link_blocks
             blk_ok = .false.; exit
           end if
           tgt_block = block_id(tgt0, ikpb)
@@ -559,6 +564,7 @@ contains
             end if
           end do
           if (dt /= d) then
+            reject_reason = 4               ! image-block dimension mismatch
             blk_ok = .false.; exit
           end if
           ! overlap submatrix, ascending <-> ascending (standard finite difference)
@@ -570,6 +576,7 @@ contains
           dk_alpha = b_matrix(axis, axis) / dble(num_kgrid(axis))
           call xi_block_from_overlap(M_blk, dk_alpha, xi_sign, xi_blk, info_x, ru)
           if (info_x /= 0) then
+            reject_reason = 5               ! xi_block_from_overlap LAPACK failure
             n_reject = n_reject + 1
             blk_ok = .false.; exit
           end if
@@ -589,6 +596,10 @@ contains
           end do
         else
           ! rejected / partial: drop this block's xi, blend falls back to i*p/dw
+          dwmin = minval(abs(eigen(srcs(2:d), ik) - eigen(srcs(1:d-1), ik)))
+          write(*, '(a,i6,a,i2,a,es10.3,a,32i4)') &
+            'build_xi REJECT: ik=', ik, ' reason=', reject_reason, &
+            ' dwmin_au=', dwmin, ' bands=', srcs(1:d)
           do bcol = 1, d
             do a = 1, d
               xi(srcs(a), srcs(bcol), :, ik) = (0d0, 0d0)
