@@ -449,6 +449,7 @@ character(256),allocatable :: atom_name(:)
   character(16)  :: sbe_deph_mode
   character(256) :: file_sbe_prod_dk
   character(16)  :: sbe_lg_degen
+  real(8)        :: sbe_lg_degen_floor
 
   !! &dc
   integer        :: num_fragment(3)

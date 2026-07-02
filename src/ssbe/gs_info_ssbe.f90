@@ -51,7 +51,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     use communication
     use filesystem, only: open_filehandle, get_filehandle
     use common_ssbe, only: grad_k_array_nb1d_double
-    use salmon_global, only: gauge_sbe, file_sbe_prod_dk, sbe_lg_degen, num_kgrid
+    use salmon_global, only: gauge_sbe, file_sbe_prod_dk, sbe_lg_degen, num_kgrid, sbe_lg_degen_floor
     use degenerate_block_ssbe, only: build_xi, same_block, blend, theta_on, theta_off
     implicit none
     type(s_sbe_gs_info), intent(inout) :: gs
@@ -461,10 +461,12 @@ contains
     subroutine prepare_matrix()
         implicit none
         integer :: ik, ib, jb
-        real(8), parameter :: omega_eps = 1d-9
+        real(8) :: omega_eps
         real(8) :: x, w, resu, resp, resp_max
         integer :: nrej
         complex(8) :: dpdw(1:3)
+
+        omega_eps = sbe_lg_degen_floor
 
         gs%p_mod_matrix = gs%p_tm_matrix + gs%rvnl_tm_matrix
 

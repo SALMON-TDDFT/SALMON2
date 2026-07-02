@@ -111,6 +111,8 @@ function check_input_variables_sbe() result(flag)
         call raise("ERROR! 'sbe_lg_degen' must be 'off' or 'gi'.")
     end select
 
+    if (sbe_lg_degen_floor <= 0d0) call raise("ERROR! 'sbe_lg_degen_floor' must be positive.")
+
     if (trim(theory) /= "maxwell_sbe") return
 
     if (nx_m < 1) &
