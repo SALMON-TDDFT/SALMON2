@@ -310,9 +310,10 @@ contains
     integer, intent(inout) :: nfail
     type(s_sbe_gs_info) :: gs, gsg
     type(s_sbe_bloch_solver) :: sbe, sbeg
-    real(8) :: E(3), dk(3), tr, hn, gerr, cov_mag, dip_mag, rt_err
+    real(8) :: E(3), dk(3), tr, hn, gerr, cov_mag, dip_mag, rt_err, eqerr
+    logical :: deph_by_gw
     complex(8) :: rho(nb, nb, nk), rhog(nb, nb, nk)
-    complex(8) :: drho(nb, nb, nk), drhog(nb, nb, nk)
+    complex(8) :: drho(nb, nb, nk), drhog(nb, nb, nk), drho_expected(nb, nb, nk)
     complex(8) :: Dq(nb, nb, 3, nk), dE(nb, nb), cc, W(nb, nb), Wh(nb, nb), tgt(nb, nb)
     integer :: icomm, ik, ib, jb, lb, axis, kk
 
@@ -398,6 +399,48 @@ contains
     call check_true(dip_mag > 1d-6, &
       "N: out-of-block dipole contribution is nonzero (not vacuous)", nfail)
 
+    ! ---- E: direct-assembly equality (drho == independently assembled RHS) ----
+    ! P/H/G/N above each pass even if a WHOLE TERM were dropped from gicov_rhs
+    ! (every term is separately traceless/Hermitian/gauge-covariant, and N only
+    ! recomputes magnitudes from the fixture, not from gicov_rhs's own output).
+    ! Here drho_expected is independently re-assembled from the SAME ingredients
+    ! gicov_rhs uses -- the SAME covariant_grad_block output Dq (already built
+    ! above for the N check), the SAME -i*sum_a E_a[d_matrix_a,rho] commutator,
+    ! and the SAME -i*delta_omega*rho / -rho/t_2 off-diagonal terms -- and
+    ! compared elementwise against gicov_rhs's actual OUTPUT drho.  Dropping
+    ! EITHER the covariant transport term OR the dipole commutator term from
+    ! gicov_rhs would change drho but leave drho_expected (computed here, not
+    ! from gicov_rhs) unchanged, so this check would then fail.
+    deph_by_gw = (yn_sbe_gw_collision == 'y' .and. trim(sbe_deph_mode) == 'gw')
+    eqerr = 0d0
+    do ik = 1, nk
+      do ib = 1, nb
+        do jb = 1, nb
+          dE(ib, jb) = E(1)*gs%d_matrix(ib,jb,1,ik) + E(2)*gs%d_matrix(ib,jb,2,ik) + E(3)*gs%d_matrix(ib,jb,3,ik)
+        end do
+      end do
+      do ib = 1, nb
+        do jb = 1, nb
+          cc = (0d0, 0d0)
+          do lb = 1, nb
+            cc = cc + dE(ib, lb) * rho(lb, jb, ik) - rho(ib, lb, ik) * dE(lb, jb)
+          end do
+          drho_expected(ib, jb, ik) = &
+            (E(1)*Dq(ib,jb,1,ik) + E(2)*Dq(ib,jb,2,ik) + E(3)*Dq(ib,jb,3,ik)) - zi_ * cc
+          if (ib /= jb) then
+            drho_expected(ib, jb, ik) = drho_expected(ib, jb, ik) &
+              - zi_ * gs%delta_omega(ib, jb, ik) * rho(ib, jb, ik)
+            if (.not. deph_by_gw) then
+              drho_expected(ib, jb, ik) = drho_expected(ib, jb, ik) - rho(ib, jb, ik) / t_2
+            end if
+          end if
+          eqerr = max(eqerr, abs(drho(ib, jb, ik) - drho_expected(ib, jb, ik)))
+        end do
+      end do
+    end do
+    call check_true(is_finite(eqerr) .and. eqerr < 1d-12, &
+      "E: drho == direct-assembly gterm - i*cterm + energy + dephasing (non-vacuous equality)", nfail)
+
     ! ---- G: gauge covariance under a random per-k block gauge W(k) ------------
     ! gauged rho, u_transport (Wilson line), p (-> d_matrix); eigen/block_id kept.
     call build_gs(gsg)
@@ -439,8 +482,8 @@ contains
     call check_true(is_finite(gerr) .and. gerr < 1d-9, &
       "G: drho_gauged(k) = W(k)^H drho_ungauged(k) W(k) to 1e-9 (gauge covariant)", nfail)
 
-    write(*, '(a,es10.2,a,es10.2,a,es10.2,a,es10.2)') &
-      "      residuals  P=", abs(tr), "  H=", hn, "  G=", gerr, "  round-trip=", rt_err
+    write(*, '(a,es10.2,a,es10.2,a,es10.2,a,es10.2,a,es10.2)') &
+      "      residuals  P=", abs(tr), "  H=", hn, "  G=", gerr, "  E=", eqerr, "  round-trip=", rt_err
     write(*, '(a,es10.2,a,es10.2)') &
       "      nonzero    cov=", cov_mag, "  dip=", dip_mag
   end subroutine test_rhs

@@ -688,13 +688,19 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   integer :: nb, nk, ik, ib, jb, lb, axis
   real(8) :: dk(1:3)
   logical :: deph_by_gw
-  complex(8), allocatable :: rho_loc(:,:,:), rho_full(:,:,:), Dq(:,:,:,:), dE(:,:)
+  complex(8), allocatable :: rho_loc(:,:,:), rho_full(:,:,:), Dq(:,:,:,:)
+  ! dE is sized off the DUMMY-argument component sbe%nb (not the local nb,
+  ! which is only assigned by an executable statement below) so it is a
+  ! legal automatic array and can be listed directly in an OMP private()
+  ! clause -- each thread then gets its own nb x nb scratch, unlike an
+  ! ALLOCATABLE array which would need explicit per-thread (re)allocation.
+  complex(8) :: dE(sbe%nb, sbe%nb)
   complex(8) :: gterm, cterm
 
   nb = sbe%nb
   nk = sbe%nk
 
-  allocate(rho_loc(nb,nb,nk), rho_full(nb,nb,nk), Dq(nb,nb,3,nk), dE(nb,nb))
+  allocate(rho_loc(nb,nb,nk), rho_full(nb,nb,nk), Dq(nb,nb,3,nk))
 
   ! ---- (0) physical rho on the local k-slice (zero elsewhere), gather to full k
   rho_loc = (0.d0, 0.d0)
@@ -718,6 +724,7 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   deph_by_gw = (yn_sbe_gw_collision == 'y' .and. trim(sbe_deph_mode) == 'gw')
 
   drho = (0.d0, 0.d0)
+  !$omp parallel do default(shared) private(ik, ib, jb, lb, dE, gterm, cterm)
   do ik = 1, nk
     ! E-projected OUT-OF-BLOCK dipole at this k: dE = sum_a E_a d_matrix_a
     do ib = 1, nb
@@ -751,8 +758,9 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
       end do
     end do
   end do
+  !$omp end parallel do
 
-  deallocate(rho_loc, rho_full, Dq, dE)
+  deallocate(rho_loc, rho_full, Dq)
 end subroutine gicov_rhs
 
 subroutine dt_evolve_bloch_lg(sbe, gs, E, bj_am, dt, icomm)
