@@ -175,6 +175,7 @@ module salmon_global
   integer        :: dg_bpw_auto_max_n            ! Optional report warning threshold for selected BPW count
   integer        :: dg_bpw_auto_min_n            ! Optional report warning threshold for selected BPW count
   character(1)   :: dg_bpw_auto_report           ! Write dg_bpw_auto_report.dat when dg_bpw_auto='y'
+  character(32)  :: dg_bpw_position_mode         ! BPW length-gauge position source: auto, rwann, berry, v_over_gap
   character(1)   :: yn_dg_subspace_diag          ! Use DG subspace diagonalization for basis updates
   integer        :: dg_subspace_extra_states     ! Extra fragment states kept in the trial subspace
   integer        :: dg_subspace_pw_vectors       ! Number of PW helper vectors appended to the trial subspace

@@ -1081,6 +1081,7 @@ contains
     use eigen_subdiag_sub, only: eigen_dsyev
     use filesystem, only: get_filehandle
     use communication, only: comm_is_root, comm_summation
+    use salmon_global, only: dg_bpw_position_mode
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     character(*), intent(in) :: bdir_frag
@@ -1106,6 +1107,7 @@ contains
     real(8) :: r_offdiag_abs_local(3), r_offdiag_abs_global(3)
     real(8) :: position_scale
     character(32) :: env_position_mode
+    character(32) :: env_position_mode_override
     character(32) :: env_position_scale
     logical :: use_direct_r_wann
     logical :: use_berry_position
@@ -1116,14 +1118,22 @@ contains
 
     ifrag_count = dg_frag%ifrag_end - dg_frag%ifrag_start + 1
     if (ifrag_count <= 0) return
-    env_position_mode = ''
-    call get_environment_variable('SALMON_DG_BPW_POSITION_MODE', env_position_mode, length=env_len, status=env_status)
+    env_position_mode = adjustl(dg_bpw_position_mode)
+    env_len = len_trim(env_position_mode)
+    env_position_mode_override = ''
+    call get_environment_variable('SALMON_DG_BPW_POSITION_MODE', env_position_mode_override, &
+      length=env_len, status=env_status)
+    if (env_status == 0 .and. env_len > 0) env_position_mode = env_position_mode_override
     use_direct_r_wann = .false.
     use_berry_position = .false.
     force_v_over_gap = .false.
     berry_position_used = .false.
-    if (env_status == 0 .and. env_len > 0) then
+    env_len = len_trim(env_position_mode)
+    if (env_len > 0) then
       select case(trim(adjustl(env_position_mode(1:env_len))))
+      case('auto','AUTO','default','DEFAULT')
+        use_direct_r_wann = .false.
+        use_berry_position = .false.
       case('rwann','RWANN','r_wann','R_WANN','direct','DIRECT','file','FILE')
         use_direct_r_wann = .true.
         use_berry_position = .false.
@@ -1303,7 +1313,7 @@ contains
           r_eff(1:nkeep_file,1:nkeep_file) = r_wann(ispin_store,1:nkeep_file,1:nkeep_file)
         else if (use_berry_position .and. .not. aa_available_axis) then
           write(*,'(1x,a,i0,a,i0)') &
-            "[FATAL] SALMON_DG_BPW_POSITION_MODE=AA_R was requested, but no Wannier90 AA_R block is available for ifrag=", &
+            "[FATAL] dg_bpw_position_mode=AA_R was requested, but no Wannier90 AA_R block is available for ifrag=", &
             ifrag, " axis=", ispin_store
           stop "DG length gauge: requested BPW AA_R position matrix is unavailable"
         else if (use_berry_position .or. &

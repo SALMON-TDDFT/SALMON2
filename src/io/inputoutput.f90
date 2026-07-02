@@ -333,6 +333,7 @@ contains
       & dg_bpw_auto_max_n, &
       & dg_bpw_auto_min_n, &
       & dg_bpw_auto_report, &
+      & dg_bpw_position_mode, &
       & yn_dg_subspace_diag, &
       & dg_subspace_extra_states, &
       & dg_subspace_pw_vectors
@@ -830,6 +831,7 @@ contains
     dg_bpw_auto_max_n = -1
     dg_bpw_auto_min_n = -1
     dg_bpw_auto_report = 'y'
+    dg_bpw_position_mode = 'auto'
     yn_dg_subspace_diag = 'n'
     dg_subspace_extra_states = 8
     dg_subspace_pw_vectors = 4
@@ -1443,6 +1445,7 @@ contains
     call comm_bcast(dg_bpw_auto_max_n,nproc_group_global)
     call comm_bcast(dg_bpw_auto_min_n,nproc_group_global)
     call comm_bcast(dg_bpw_auto_report,nproc_group_global)
+    call comm_bcast(dg_bpw_position_mode,nproc_group_global)
     call comm_bcast(yn_dg_subspace_diag,nproc_group_global)
     call comm_bcast(dg_subspace_extra_states,nproc_group_global)
     call comm_bcast(dg_subspace_pw_vectors,nproc_group_global)
@@ -2415,6 +2418,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_bpw_auto_max_n', dg_bpw_auto_max_n
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_bpw_auto_min_n', dg_bpw_auto_min_n
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_bpw_auto_report', dg_bpw_auto_report
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_bpw_position_mode', trim(dg_bpw_position_mode)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_subspace_diag', yn_dg_subspace_diag
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_subspace_extra_states', dg_subspace_extra_states
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_subspace_pw_vectors', dg_subspace_pw_vectors

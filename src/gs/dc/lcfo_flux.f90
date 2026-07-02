@@ -2310,7 +2310,7 @@ contains
         lambda_cut, base_directory, yn_dc_lcfo_wannier, yn_dc_lcfo_wannier_pw, &
         yn_dc_lcfo_wannier_cluster, wannier_cluster_size
       implicit none
-      integer :: nproj, nproj_seed, nkeep, nkeep_legacy, nbasis, iunit, ip, jp, iw, io, jo, axis
+      integer :: nproj, nproj_seed, nkeep, nkeep_legacy, nbasis, iunit, ip, jp, iw, jw, io, jo, axis
       integer :: aa_wann_source
       integer :: ix, iy, iz, ixg, iyg, izg, ispin_local
       integer :: ibx, iby, ibz, sx, sy, sz, ispin_read, ibasis_read
@@ -2327,7 +2327,9 @@ contains
       real(8), allocatable :: h_seed(:,:), v_seed(:,:,:)
       real(8), allocatable :: h_wann(:,:), v_wann(:,:,:), aa_wann(:,:,:), spread_est(:), tail_est(:)
       real(8), allocatable :: phi_box(:,:,:,:), phi_tmp(:,:,:)
-      real(8) :: x, y, z, gval, box_length(3), box_origin(3)
+      real(8), allocatable :: psi_w(:,:,:,:), rho_w_sum(:), cos_sum(:,:), sin_sum(:,:)
+      real(8) :: x, y, z, gval, box_length(3), box_origin(3), cell_length(3)
+      real(8) :: theta, pair_center, frag_center_axis, rel_coord, norm_w, pi_twice
       character(256) :: filename
       logical :: use_pseudo_projection
 
@@ -2354,9 +2356,12 @@ contains
       nxyz_box(1:3) = nxyz_domain(1:3) + 2 * nxyz_buffer_seed(1:3)
       box_length(1:3) = system%hgs(1:3) * dble(nxyz_box(1:3))
       do axis=1,3
+        cell_length(axis) = dc%lg_tot%coordinate(dc%lg_tot%num(axis),axis) &
+          + (dc%lg_tot%coordinate(2,axis) - dc%lg_tot%coordinate(1,axis))
         box_origin(axis) = dc%lg_tot%coordinate(dc%jxyz_tot(1,axis),axis) &
           - dble(nxyz_buffer_seed(axis)) * system%hgs(axis)
       end do
+      pi_twice = 8d0 * atan(1d0)
       if(use_pseudo_projection) then
         nproj_seed = count_local_pseudo_channel_ao_candidates(nxyz_domain)
         if(nproj_seed <= 0) stop "DC-LCFO local Wannier export: no local pseudo-channel projections in fragment core."
@@ -2516,19 +2521,99 @@ contains
       end do
 !$omp end parallel do
 
+      allocate(psi_w(nxyz_box(1),nxyz_box(2),nxyz_box(3),nkeep))
+      allocate(rho_w_sum(nkeep), cos_sum(3,nkeep), sin_sum(3,nkeep))
+      psi_w = 0d0
+      rho_w_sum = 0d0
+      cos_sum = 0d0
+      sin_sum = 0d0
+!$omp parallel do collapse(4) private(iw,io,ibz,iby,ibx) schedule(static)
+      do iw=1,nkeep
+        do ibz=1,nxyz_box(3)
+          do iby=1,nxyz_box(2)
+            do ibx=1,nxyz_box(1)
+              do io=1,nbasis
+                psi_w(ibx,iby,ibz,iw) = psi_w(ibx,iby,ibz,iw) &
+                  + phi_box(ibx,iby,ibz,io) * wcoef(io,iw)
+              end do
+            end do
+          end do
+        end do
+      end do
+!$omp end parallel do
+
+      do iw=1,nkeep
+        do ibz=1,nxyz_box(3)
+          z = box_origin(3) + dble(ibz - 1) * system%hgs(3)
+          do iby=1,nxyz_box(2)
+            y = box_origin(2) + dble(iby - 1) * system%hgs(2)
+            do ibx=1,nxyz_box(1)
+              x = box_origin(1) + dble(ibx - 1) * system%hgs(1)
+              gval = psi_w(ibx,iby,ibz,iw) * psi_w(ibx,iby,ibz,iw) * hvol
+              rho_w_sum(iw) = rho_w_sum(iw) + gval
+              theta = pi_twice * modulo(x, cell_length(1)) / cell_length(1)
+              cos_sum(1,iw) = cos_sum(1,iw) + cos(theta) * gval
+              sin_sum(1,iw) = sin_sum(1,iw) + sin(theta) * gval
+              theta = pi_twice * modulo(y, cell_length(2)) / cell_length(2)
+              cos_sum(2,iw) = cos_sum(2,iw) + cos(theta) * gval
+              sin_sum(2,iw) = sin_sum(2,iw) + sin(theta) * gval
+              theta = pi_twice * modulo(z, cell_length(3)) / cell_length(3)
+              cos_sum(3,iw) = cos_sum(3,iw) + cos(theta) * gval
+              sin_sum(3,iw) = sin_sum(3,iw) + sin(theta) * gval
+            end do
+          end do
+        end do
+        do axis=1,3
+          if (rho_w_sum(iw) > 0d0) then
+            wcenter(axis,iw) = modulo(atan2(sin_sum(axis,iw), cos_sum(axis,iw)) / pi_twice, 1d0) &
+              * cell_length(axis)
+          else
+            wcenter(axis,iw) = 0d0
+          end if
+        end do
+      end do
+
+      r_wann = 0d0
       do axis=1,3
-        tmp(1:nbasis,1:nkeep) = matmul(r_basis(axis,1:nbasis,1:nbasis), wcoef(1:nbasis,1:nkeep))
-        r_wann(axis,1:nkeep,1:nkeep) = &
-          matmul(transpose(wcoef(1:nbasis,1:nkeep)), tmp(1:nbasis,1:nkeep))
+        frag_center_axis = 0.5d0 * (dc%lg_tot%coordinate(dc%jxyz_tot(1,axis),axis) + &
+          dc%lg_tot%coordinate(dc%jxyz_tot(1,axis) + nxyz_domain(axis) - 1,axis))
+        do jw=1,nkeep
+          do iw=1,nkeep
+            pair_center = 0.5d0 * (wcenter(axis,iw) + wcenter(axis,jw))
+            if (abs(wcenter(axis,iw) - wcenter(axis,jw)) > 0.5d0 * cell_length(axis)) &
+              pair_center = modulo(pair_center + 0.5d0 * cell_length(axis), cell_length(axis))
+            do ibz=1,nxyz_box(3)
+              z = box_origin(3) + dble(ibz - 1) * system%hgs(3)
+              do iby=1,nxyz_box(2)
+                y = box_origin(2) + dble(iby - 1) * system%hgs(2)
+                do ibx=1,nxyz_box(1)
+                  x = box_origin(1) + dble(ibx - 1) * system%hgs(1)
+                  select case(axis)
+                  case(1)
+                    rel_coord = periodic_delta_import(x - pair_center, cell_length(axis))
+                  case(2)
+                    rel_coord = periodic_delta_import(y - pair_center, cell_length(axis))
+                  case default
+                    rel_coord = periodic_delta_import(z - pair_center, cell_length(axis))
+                  end select
+                  r_wann(axis,iw,jw) = r_wann(axis,iw,jw) + &
+                    psi_w(ibx,iby,ibz,iw) * rel_coord * psi_w(ibx,iby,ibz,jw) * hvol
+                end do
+              end do
+            end do
+            norm_w = sqrt(max(rho_w_sum(iw) * rho_w_sum(jw), 1d-60))
+            r_wann(axis,iw,jw) = r_wann(axis,iw,jw) / norm_w
+            if (iw == jw) then
+              r_wann(axis,iw,iw) = r_wann(axis,iw,iw) + &
+                periodic_delta_import(wcenter(axis,iw) - frag_center_axis, cell_length(axis))
+            end if
+          end do
+        end do
       end do
 
       if(yn_dc_lcfo_wannier == 'y') then
         call project_wannier90_aa_to_bpw(nbasis, nkeep, wcoef, aa_wann, aa_wann_source)
       end if
-      wcenter(1:3,1:nkeep) = 0d0
-      do iw=1,nkeep
-        wcenter(1:3,iw) = r_wann(1:3,iw,iw)
-      end do
 
       do axis=1,3
         tmp_legacy(1:nbasis,1:nkeep_legacy) = &
@@ -2619,7 +2704,7 @@ contains
       deallocate(h_seed, v_seed, h_wann, v_wann, aa_wann, spread_est, tail_est)
       deallocate(sw_legacy, uw_legacy, lambda_legacy, wcoef_legacy, keep_index_legacy)
       deallocate(r_wann_legacy, tmp_legacy, wcenter_legacy)
-      deallocate(phi_box, phi_tmp, n_basis_file)
+      deallocate(phi_box, phi_tmp, psi_w, rho_w_sum, cos_sum, sin_sum, n_basis_file)
     end subroutine write_local_wannier_seed
 
     subroutine project_wannier90_aa_to_bpw(nbasis, nkeep, wcoef, aa_wann, aa_wann_source)
