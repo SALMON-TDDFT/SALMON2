@@ -3,7 +3,7 @@
                                     rho, rho_s, Vh, Vxc, Vpsl, energy)
     use structures
     use salmon_global, only: yn_fix_func, yn_dg_length_gauge, ae_shape1, e_impulse, epdir_re1, yn_restart, nt, &
-      yn_dg_mixed_z, yn_dg_mixed_z_local_prop_writeback, dg_mixed_z_local_prop_backend, &
+      yn_dg_expdiag_xi_split, yn_dg_mixed_z, yn_dg_mixed_z_local_prop_writeback, dg_mixed_z_local_prop_backend, &
       dg_mixed_z_frag_local_field_block, yn_dg_mixed_z_local_rho_writeback_wwonly
     use sendrecv_grid, only: s_sendrecv_grid
     use salmon_xc, only: s_xc_functional
@@ -376,16 +376,18 @@
       global_field_env_checked = .true.
     end if
     if (.not. xi_split_env_checked) then
+      xi_split_enabled = (yn_dg_expdiag_xi_split == 'y')
       xi_split_env = ' '
-      call get_environment_variable('SALMON_DG_EXPDIAG_XI_SPLIT', xi_split_env)
-      select case (trim(adjustl(xi_split_env)))
+      call get_environment_variable('SALMON_DG_EXPDIAG_XI_SPLIT', xi_split_env, &
+        length=route_env_len, status=route_env_stat)
+      if (route_env_stat == 0 .and. route_env_len > 0) then
+      select case (trim(adjustl(xi_split_env(1:route_env_len))))
       case ('1','y','Y','yes','YES','true','TRUE','on','ON')
         xi_split_enabled = .true.
       case ('0','n','N','no','NO','false','FALSE','off','OFF')
         xi_split_enabled = .false.
-      case default
-        xi_split_enabled = .true.
       end select
+      end if
       xi_split_env_checked = .true.
     end if
     if (.not. project_h_env_checked) then
