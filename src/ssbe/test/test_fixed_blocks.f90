@@ -85,9 +85,14 @@ contains
     call check_true(isolated_ok, "all blocks gap-isolated here", nfail)
   end subroutine test_build_fixed_blocks_basic
 
-  ! band 3 sits at 5d-3 from block {1,2}: OUTSIDE theta_off=2d-3 (so it never
-  ! grouped in) but WITHIN gap_margin=1d-2 (so the block is not cleanly
+  ! band 3 sits at 2.1d-3 from block {1,2}: OUTSIDE theta_off=2d-3 (so it never
+  ! grouped in) but WITHIN gap_margin=2.2d-3 (so the block is not cleanly
   ! isolated) -- the ambiguous / metal-like case that must fail-closed.
+  ! (gap_margin was recalibrated 1d-2 -> 2.2d-3 against the real Si 4^3
+  ! spectrum's global min cross-block gap 2.654e-3 au; see build_fixed_blocks
+  ! header in degenerate_block_ssbe.f90. 5d-3 used to sit inside the old
+  ! margin but is now OUTSIDE 2.2d-3, so the outside band must be moved into
+  ! the new (theta_off, gap_margin) = (2d-3, 2.2d-3) window.)
   subroutine test_fixed_blocks_metal_flag(nfail)
     integer, intent(inout) :: nfail
     integer, parameter :: nb = 3, nk = 2
@@ -95,23 +100,26 @@ contains
     integer :: fid(nb)
     logical :: ok
 
-    eigen(:, 1) = [0.0d0, 0.0d0,  5.0d-3]   ! 1,2 degenerate (block); 3 outside but close
-    eigen(:, 2) = [0.0d0, 1.0d-3, 6.0d-3]   ! 1,2 still within theta_off -> stay grouped
+    eigen(:, 1) = [0.0d0, 0.0d0,  2.1d-3]   ! 1,2 degenerate (block); 3 outside but close
+    eigen(:, 2) = [0.0d0, 1.0d-3, 3.1d-3]   ! 1,2 still within theta_off -> stay grouped
 
     call build_fixed_blocks(nb, nk, eigen, fid, ok)
 
     call check_true(fid(3) /= fid(1), &
-                     "band 3 (5d-3 > theta_off) must NOT join {1,2}", nfail)
+                     "band 3 (2.1d-3 > theta_off) must NOT join {1,2}", nfail)
     call check_true(.not. ok, &
                      "must flag non-isolated block (3 within gap_margin of {1,2})", nfail)
   end subroutine test_fixed_blocks_metal_flag
 
-  ! bsize>1 gate coverage: bands 1,2 sit within gap_margin (1d-2) of each other
-  ! at every k, but always > theta_off (2d-3) apart, so they stay SEPARATE
-  ! singletons. Because neither is a multi-band block the isolation loop must
-  ! NOT trip -- two merely-close-but-distinct non-degenerate bands are not the
-  ! ambiguity this routine flags. Band 3 is far away. Proves the gate protects
-  ! the named singleton-vs-singleton false-abort failure mode.
+  ! bsize>1 gate coverage: bands 1,2 sit close (3.0/3.5d-3) at every k, always
+  ! > theta_off (2d-3) apart, so they stay SEPARATE singletons. With
+  ! gap_margin now 2.2d-3 (recalibrated, see test_fixed_blocks_metal_flag)
+  ! 3.0d-3/3.5d-3 also sit > gap_margin, so this case would not even reach the
+  ! bsize>1 gate on distance alone -- it still proves the intended point:
+  ! because neither band is a multi-band block, the isolation loop must NOT
+  ! trip regardless of proximity. Two merely-close-but-distinct non-degenerate
+  ! bands are not the ambiguity this routine flags. Band 3 is far away. Proves
+  ! the gate protects the named singleton-vs-singleton false-abort failure mode.
   subroutine test_close_singletons_not_flagged(nfail)
     integer, intent(inout) :: nfail
     integer, parameter :: nb = 3, nk = 2
@@ -119,7 +127,7 @@ contains
     integer :: fid(nb)
     logical :: ok
 
-    eigen(:, 1) = [0.0d0, 3.0d-3, 1.0d0]   ! 1,2 close (3d-3 < gap_margin) but > theta_off
+    eigen(:, 1) = [0.0d0, 3.0d-3, 1.0d0]   ! 1,2 close but > theta_off (and > gap_margin)
     eigen(:, 2) = [0.0d0, 3.5d-3, 1.0d0]   ! still separate singletons at k=2
 
     call build_fixed_blocks(nb, nk, eigen, fid, ok)

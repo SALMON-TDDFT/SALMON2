@@ -766,7 +766,7 @@ subroutine calc_current_bloch_lg(sbe, gs, jmat, icomm)
 
     tmp1(:) = 0.d0
 
-    ! Pb4 (GI current): when sbe_lg_degen=='gi' the Pb3 xi substitution makes the
+    ! Pb4 (GI current): when sbe_lg_degen=='gi' or 'gifix' the Pb3 xi substitution makes the
     ! dnm_i / exp_iphi phase machinery inconsistent inside degenerate blocks, so the
     ! delta_omega*|dnm|*aimag(qnm) current below is unreliable there.  Instead reconstruct
     ! the physical density matrix rho from the propagated qnm (rho = exp_iphi*qnm off the
