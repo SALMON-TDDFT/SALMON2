@@ -317,6 +317,7 @@ contains
       & yn_dg_length_gauge, &
       & time_integrator_dg_fragment, &
       & yn_dg_expdiag_xi_split, &
+      & yn_dg_expdiag_refresh_fixed_func, &
       & yn_dg_mixed_z, &
       & yn_dg_mixed_z_local_prop_writeback, &
       & dg_mixed_z_local_prop_backend, &
@@ -813,6 +814,7 @@ contains
     yn_dg_length_gauge = 'n'
     time_integrator_dg_fragment = 'expdiag'
     yn_dg_expdiag_xi_split = 'n'
+    yn_dg_expdiag_refresh_fixed_func = 'n'
     yn_dg_mixed_z = 'n'
     yn_dg_mixed_z_local_prop_writeback = 'n'
     dg_mixed_z_local_prop_backend = 'global_mixed_split_backend'
@@ -1425,6 +1427,7 @@ contains
     call comm_bcast(yn_dg_fragment_rt,nproc_group_global)
     call comm_bcast(yn_dg_length_gauge,nproc_group_global)
     call comm_bcast(yn_dg_expdiag_xi_split,nproc_group_global)
+    call comm_bcast(yn_dg_expdiag_refresh_fixed_func,nproc_group_global)
     call comm_bcast(yn_dg_mixed_z,nproc_group_global)
     call comm_bcast(yn_dg_mixed_z_local_prop_writeback,nproc_group_global)
     call comm_bcast(dg_mixed_z_local_prop_backend,nproc_group_global)
@@ -2389,6 +2392,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_length_gauge', yn_dg_length_gauge
       write(fh_variables_log, '("#",4X,A,"=",A)') 'time_integrator_dg_fragment', trim(time_integrator_dg_fragment)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_expdiag_xi_split', yn_dg_expdiag_xi_split
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_expdiag_refresh_fixed_func', &
+        yn_dg_expdiag_refresh_fixed_func
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z', yn_dg_mixed_z
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z_local_prop_writeback', &
         yn_dg_mixed_z_local_prop_writeback
@@ -3009,6 +3014,7 @@ contains
     call yn_argument_check(yn_dc_lcfo_wannier_cluster)
     call yn_argument_check(yn_dg_length_gauge)
     call yn_argument_check(yn_dg_expdiag_xi_split)
+    call yn_argument_check(yn_dg_expdiag_refresh_fixed_func)
     call yn_argument_check(yn_dg_mixed_z)
     call yn_argument_check(yn_dg_mixed_z_local_prop_writeback)
     call yn_argument_check(yn_dg_mixed_z_local_rho_writeback_wwonly)

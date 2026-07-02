@@ -275,7 +275,8 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   use write_sub
   use salmon_global, only: theory, method_singlescale, yn_ffte, yn_jm, yn_spinorbit, yn_restart, &
                            out_rt_energy_step, nt, dt, iperiodic, yn_dg_length_gauge, &
-                          niter_dg_frag_rt_max, yn_dg_full_h_eigen_seed
+                          niter_dg_frag_rt_max, yn_dg_full_h_eigen_seed, &
+                          yn_dg_expdiag_refresh_fixed_func
   use inputoutput, only: t_unit_time
   use fdtd_coulomb_gauge, only: fdtd_singlescale, fourier_singlescale
   use hamiltonian, only: update_kvector_nonlocalpt_microAc
@@ -469,7 +470,8 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
       call calculate_hamiltonian_matrix_std(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
       dg_frag%flux_face_trace_mix_enabled = .true.
       call calibrate_dcdft_lcfo_static_hamiltonian_std(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_zero)
-      if (yn_fix_func == 'n' .and. yn_dg_length_gauge == 'y' .and. &
+      if ((yn_fix_func == 'n' .or. yn_dg_expdiag_refresh_fixed_func == 'y') .and. &
+          yn_dg_length_gauge == 'y' .and. &
           trim(time_integrator_dg_fragment) == 'expdiag') then
         if (yn_dg_full_h_eigen_seed == 'y') then
           if (dg_frag%use_plane_wave_basis) then
