@@ -36,6 +36,7 @@ module degenerate_block_ssbe
   private
   public :: theta_on, theta_off
   public :: build_blocks
+  public :: build_fixed_blocks
   public :: same_block
   public :: match_link_blocks
   ! Pb3 (non-Abelian xi + smooth blend):
@@ -116,6 +117,89 @@ contains
     block_id_store(:, :) = block_id(:, :)
     blocks_built = .true.
   end subroutine build_blocks
+
+  !-------------------------------------------------------------------
+  ! k-INDEPENDENT composite-block partition, determined once from the full
+  ! eigen(nb,nk) spectrum: connected components of the graph whose edges are
+  ! band pairs near-degenerate (< theta_off) at ANY k (transitive union-find,
+  ! same threshold as build_blocks' per-k grouping, but unioned across all k
+  ! so a pair that is close only at one k still fixes the two bands into one
+  ! block for every k). This is the algorithmic core of the Tier2 gifix mode:
+  ! blocks so defined are dimensionally stable across k by construction, so
+  ! Pb3's per-link dimension-mismatch failure mode cannot occur.
+  !
+  ! isolated_ok verifies the partition is physically meaningful: at every k, a
+  ! MULTI-band block's members must stay farther than gap_margin from every
+  ! band outside the block. gap_margin (1d-2 au) is deliberately LARGER than
+  ! theta_off (2d-3 au, the grouping bound) -- otherwise a band that sits just
+  ! outside theta_off (so it never joins the block) could still be arbitrarily
+  ! close to it without ever tripping the isolation check, making the check
+  ! tautological. isolated_ok=.false. signals the ambiguous / metal-like case
+  ! (a would-be outside band drifting within gap_margin of a multi-band block
+  ! at some k) and the caller fails closed rather than silently mis-treating
+  ! it as an isolated insulating block. Singleton-vs-singleton proximity does
+  ! NOT trip isolation (two merely-close-but-distinct non-degenerate bands are
+  ! not an ambiguity this routine needs to flag).
+  !-------------------------------------------------------------------
+  subroutine build_fixed_blocks(nb, nk, eigen, fixed_block_id, isolated_ok)
+    implicit none
+    integer, intent(in)  :: nb, nk
+    real(8), intent(in)  :: eigen(nb, nk)
+    integer, intent(out) :: fixed_block_id(nb)
+    logical, intent(out) :: isolated_ok
+    real(8), parameter :: gap_margin = 1d-2   ! au; MUST be > theta_off so a band can be
+                                               ! outside a block (>theta_off) yet fail isolation (<gap_margin)
+    integer :: parent(nb), ia, ib, ik, root, nlab, lab(nb), ra, rb, bsize(nb)
+
+    do ia = 1, nb
+      parent(ia) = ia
+    end do
+
+    ! edge if bands ia,ib are within theta_off at ANY k (k-independent grouping)
+    do ik = 1, nk
+      do ia = 1, nb - 1
+        do ib = ia + 1, nb
+          if (abs(eigen(ia, ik) - eigen(ib, ik)) < theta_off) then
+            ra = uf_find(parent, ia)
+            rb = uf_find(parent, ib)
+            if (ra /= rb) parent(rb) = ra
+          end if
+        end do
+      end do
+    end do
+
+    ! contiguous ascending labels
+    lab = 0; nlab = 0
+    do ia = 1, nb
+      root = uf_find(parent, ia)
+      if (lab(root) == 0) then
+        nlab = nlab + 1
+        lab(root) = nlab
+      end if
+      fixed_block_id(ia) = lab(root)
+    end do
+
+    ! gap-isolation: only for MULTI-band blocks (two close singleton bands must
+    ! not false-abort). At every k, a MULTI-band block's bands must be strictly
+    ! farther than gap_margin from any band outside the block.
+    bsize = 0
+    do ia = 1, nb
+      bsize(fixed_block_id(ia)) = bsize(fixed_block_id(ia)) + 1
+    end do
+
+    isolated_ok = .true.
+    do ik = 1, nk
+      do ia = 1, nb
+        do ib = 1, nb
+          if (fixed_block_id(ia) /= fixed_block_id(ib)) then
+            if (bsize(fixed_block_id(ia)) > 1 .or. bsize(fixed_block_id(ib)) > 1) then
+              if (abs(eigen(ia, ik) - eigen(ib, ik)) < gap_margin) isolated_ok = .false.
+            end if
+          end if
+        end do
+      end do
+    end do
+  end subroutine build_fixed_blocks
 
   !-------------------------------------------------------------------
   ! Union-find "find" with iterative path compression (no recursion).
