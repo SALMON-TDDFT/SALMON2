@@ -774,7 +774,7 @@ subroutine calc_current_bloch_lg(sbe, gs, jmat, icomm)
     ! and contract it with the velocity v = p_tm_matrix (+ rvnl_tm_matrix when
     ! flag_vnl_correction), using the exact index/sign convention of the VG current
     ! calc_current_bloch (paramagnetic part; the length gauge carries no Ac*N term).
-    if (trim(sbe_lg_degen) == 'gi') then
+    if (trim(sbe_lg_degen) == 'gi' .or. trim(sbe_lg_degen) == 'gifix') then
         !$omp parallel do default(shared) private(ik,jj,ib,jb,rho_ji) reduction(+:tmp1)
         do ik = sbe%ik_min, sbe%ik_max
         do jj = 1,3

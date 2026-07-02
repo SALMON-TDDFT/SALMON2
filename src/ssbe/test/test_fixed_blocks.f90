@@ -12,7 +12,7 @@
 ! (build_fixed_blocks itself needs no LAPACK, but the module links it in.)
 
 program test_fixed_blocks
-  use degenerate_block_ssbe, only: build_fixed_blocks
+  use degenerate_block_ssbe, only: build_fixed_blocks, build_blocks_fixed
   implicit none
   integer :: nfail
   nfail = 0
@@ -20,6 +20,7 @@ program test_fixed_blocks
   call test_build_fixed_blocks_basic(nfail)
   call test_fixed_blocks_metal_flag(nfail)
   call test_close_singletons_not_flagged(nfail)
+  call test_block_id_k_independent(nfail)
 
   if (nfail > 0) then
     write(*, '(a,i0,a)') "FAILED: ", nfail, " check(s)"
@@ -128,5 +129,33 @@ contains
     call check_true(ok, &
                      "close SINGLETON bands must NOT flag isolation (bsize>1 gate)", nfail)
   end subroutine test_close_singletons_not_flagged
+
+  ! Task 3: build_blocks_fixed must broadcast the single k-independent
+  ! fixed_block_id partition into EVERY k-slice of block_id(nb,nk) unchanged
+  ! -- this is what makes it a drop-in replacement for build_blocks' per-k
+  ! union-find inside build_xi's gifix path (so block_id(:,ik) is identical
+  ! for all ik, unlike build_blocks which can re-partition per k).
+  subroutine test_block_id_k_independent(nfail)
+    integer, intent(inout) :: nfail
+    integer, parameter :: nb = 4, nk = 3
+    real(8) :: eigen(nb, nk)
+    integer :: block_id(nb, nk)
+    integer :: ik
+    logical :: k_indep
+
+    eigen(:, 1) = [0.0d0, 0.0d0,         1.0d0, 1.5d0]
+    eigen(:, 2) = [0.0d0, 1.0d-3 + 1d-4, 1.0d0, 1.5d0]
+    eigen(:, 3) = [0.0d0, 5.0d-4,        1.0d0, 1.5d0]
+
+    call build_blocks_fixed(nb, nk, eigen, block_id)
+
+    k_indep = .true.
+    do ik = 2, nk
+      if (any(block_id(:, ik) /= block_id(:, 1))) k_indep = .false.
+    end do
+    call check_true(k_indep, "build_blocks_fixed: block_id is k-independent", nfail)
+    call check_true(block_id(1, 1) == block_id(2, 1), &
+                     "build_blocks_fixed: 1,2 share block", nfail)
+  end subroutine test_block_id_k_independent
 
 end program test_fixed_blocks

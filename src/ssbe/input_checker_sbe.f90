@@ -103,12 +103,12 @@ function check_input_variables_sbe() result(flag)
 
     select case(trim(sbe_lg_degen))
     case("off")
-    case("gi")
+    case("gi", "gifix")
         if (sbe_lg_diag == 2 .or. sbe_lg_diag == 3) then
-            call raise("ERROR! 'sbe_lg_degen'='gi' is incompatible with 'sbe_lg_diag'=2 or 3.")
+            call raise("ERROR! 'sbe_lg_degen'='"//trim(sbe_lg_degen)//"' is incompatible with 'sbe_lg_diag'=2 or 3.")
         end if
     case default
-        call raise("ERROR! 'sbe_lg_degen' must be 'off' or 'gi'.")
+        call raise("ERROR! 'sbe_lg_degen' must be 'off', 'gi', or 'gifix'.")
     end select
 
     if (sbe_lg_degen_floor <= 0d0) call raise("ERROR! 'sbe_lg_degen_floor' must be positive.")

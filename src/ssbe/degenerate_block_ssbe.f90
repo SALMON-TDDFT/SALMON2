@@ -37,6 +37,7 @@ module degenerate_block_ssbe
   public :: theta_on, theta_off
   public :: build_blocks
   public :: build_fixed_blocks
+  public :: build_blocks_fixed
   public :: same_block
   public :: match_link_blocks
   ! Pb3 (non-Abelian xi + smooth blend):
@@ -200,6 +201,41 @@ contains
       end do
     end do
   end subroutine build_fixed_blocks
+
+  !-------------------------------------------------------------------
+  ! sbe_lg_degen='gifix' entry point: derive the k-independent composite
+  ! partition (build_fixed_blocks) and broadcast it into the per-k
+  ! block_id(nb,nk) shape build_xi/same_block expect, so the fixed-block
+  ! mode is a drop-in replacement for build_blocks' per-k union-find.
+  ! Fails closed (error stop) if the partition is not gap-isolated
+  ! (metal-like disentanglement is out of scope for gifix -- use
+  ! velocity_gauge instead).
+  !-------------------------------------------------------------------
+  subroutine build_blocks_fixed(nb, nk, eigen, block_id)
+    implicit none
+    integer, intent(in)  :: nb, nk
+    real(8), intent(in)  :: eigen(nb, nk)
+    integer, intent(out) :: block_id(nb, nk)
+    integer :: fixed_block_id(nb), ik
+    logical :: isolated_ok
+
+    call build_fixed_blocks(nb, nk, eigen, fixed_block_id, isolated_ok)
+    if (.not. isolated_ok) then
+      write(*,*) 'ERROR sbe_lg_degen=gifix: a composite block is not gap-isolated ', &
+                 '(metal-like disentanglement) - out of scope, use velocity_gauge'
+      error stop 1
+    end if
+
+    do ik = 1, nk
+      block_id(:, ik) = fixed_block_id(:)
+    end do
+
+    ! cache for same_block (mirror build_blocks:113-118, deallocate-first)
+    if (allocated(block_id_store)) deallocate(block_id_store)
+    allocate(block_id_store(nb, nk))
+    block_id_store(:, :) = block_id(:, :)
+    blocks_built = .true.
+  end subroutine build_blocks_fixed
 
   !-------------------------------------------------------------------
   ! Union-find "find" with iterative path compression (no recursion).
@@ -564,7 +600,7 @@ contains
   ! Also calls build_blocks (so same_block() is cached for the caller's blend).
   !-------------------------------------------------------------------
   subroutine build_xi(nb, nk, nbvec, bvec, prod_dk, eigen, b_matrix, num_kgrid, &
-                      xi, xi_ok, n_reject, resid_max)
+                      xi, xi_ok, n_reject, resid_max, fixed_blocks)
     implicit none
     integer,    intent(in)  :: nb, nk, nbvec
     integer,    intent(in)  :: bvec(3, nbvec)
@@ -576,13 +612,14 @@ contains
     logical,    intent(out) :: xi_ok(nb, nb, nk)
     integer,    intent(out) :: n_reject
     real(8),    intent(out), optional :: resid_max
+    logical,    intent(in),  optional :: fixed_blocks
     integer, allocatable :: block_id(:, :), ik_neighbor(:, :), link_member(:, :, :)
     logical, allocatable :: link_ok_arr(:, :)
     complex(8), allocatable :: M_blk(:, :), xi_blk(:, :)
     integer :: iv_axis(3), srcs(nb), tgts(nb)
     integer :: ik, iv, axis, bk, nblk_k, d, dt, a, bcol, n, n0, tgt0, tgt_block
     integer :: ikpb, info_x, n_fail
-    logical :: blk_ok
+    logical :: blk_ok, use_fixed
     integer :: reject_reason
     real(8) :: dk_alpha, ru, ru_max, dwmin
 
@@ -591,13 +628,41 @@ contains
     n_reject = 0
     ru_max   = 0d0
 
+    use_fixed = .false.
+    if (present(fixed_blocks)) use_fixed = fixed_blocks
+
     allocate(block_id(nb, nk), ik_neighbor(nbvec, nk))
     allocate(link_member(nb, nbvec, nk), link_ok_arr(nbvec, nk))
 
-    call build_blocks(nb, nk, eigen, block_id)
+    if (use_fixed) then
+      call build_blocks_fixed(nb, nk, eigen, block_id)
+    else
+      call build_blocks(nb, nk, eigen, block_id)
+    end if
     call build_ik_neighbor(num_kgrid, bvec, nbvec, nk, ik_neighbor)
-    call match_link_blocks(nb, nk, nbvec, bvec, prod_dk, block_id, ik_neighbor, &
-                           link_member, link_ok_arr, n_fail)
+
+    if (use_fixed) then
+      ! Identity match: band n at k maps to band n at k+b for every in-block
+      ! band, by construction (the composite block is k-independent, so its
+      ! member SET is identical at k and k+b -- only the individual band
+      ! LABEL inside the block is gauge-ambiguous, same caveat as
+      ! match_link_blocks' greedy map). This eliminates reason-3 (tgt0==0)
+      ! and reason-4 (image-block dimension mismatch) by construction; only
+      ! xi_block_from_overlap's own reason-5 rejection can still occur.
+      link_member = 0; link_ok_arr = .true.; n_fail = 0
+      do ik = 1, nk
+        do iv = 1, nbvec
+          ikpb = ik_neighbor(iv, ik)
+          if (ikpb < 1 .or. ikpb > nk) cycle
+          do n = 1, nb
+            link_member(n, iv, ik) = n
+          end do
+        end do
+      end do
+    else
+      call match_link_blocks(nb, nk, nbvec, bvec, prod_dk, block_id, ik_neighbor, &
+                             link_member, link_ok_arr, n_fail)
+    end if
 
     iv_axis(1) = find_bvec(bvec, nbvec, 1, 0, 0)
     iv_axis(2) = find_bvec(bvec, nbvec, 0, 1, 0)
@@ -671,6 +736,13 @@ contains
             end do
           end do
         end do
+
+        if (.not. blk_ok .and. use_fixed) then
+          write(*, '(a,i6,a,i2,a,32i4)') &
+            'ERROR build_xi(gifix): rejected fixed block ik=', ik, &
+            ' reason=', reject_reason, ' bands=', srcs(1:d)
+          error stop 1
+        end if
 
         if (blk_ok) then
           do bcol = 1, d

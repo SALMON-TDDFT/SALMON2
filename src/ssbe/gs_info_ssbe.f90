@@ -115,7 +115,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     call comm_bcast(gs%rvnl_tm_matrix, icomm, 0)
 
     !Retrieve k-space overlap products from 'file_sbe_prod_dk' (LG-SBE degeneracy):
-    if (trim(sbe_lg_degen) == 'gi') call read_prod_dk_data()
+    if (trim(sbe_lg_degen) == 'gi' .or. trim(sbe_lg_degen) == 'gifix') call read_prod_dk_data()
 
     !Calculate omega and d_matrix (neglecting diagonal part):
     if (irank == 0) write(*,"(a)") "# prepare_matrix"
@@ -325,7 +325,7 @@ contains
         if (irank == 0) then
             write(*, '(a)') "# read_prod_dk_data"
             if (len_trim(file_sbe_prod_dk) == 0) then
-                write(*, '(a)') "ERROR(read_prod_dk_data): 'file_sbe_prod_dk' is empty while 'sbe_lg_degen'='gi'."
+                write(*, '(a)') "ERROR(read_prod_dk_data): 'file_sbe_prod_dk' is empty while 'sbe_lg_degen'='gi/gifix'."
                 ierr = 1
             else
                 inquire(file=trim(file_sbe_prod_dk), exist=file_exists)
@@ -470,7 +470,7 @@ contains
 
         gs%p_mod_matrix = gs%p_tm_matrix + gs%rvnl_tm_matrix
 
-        if (trim(sbe_lg_degen) == 'gi') then
+        if (trim(sbe_lg_degen) == 'gi' .or. trim(sbe_lg_degen) == 'gifix') then
             ! ===== Pb3: non-Abelian xi inside degenerate blocks + smooth blend =====
             ! delta_omega first (needed by the blend), then build xi from prod_dk.
             do ik=1, nk
@@ -484,7 +484,8 @@ contains
             if (.not. allocated(gs%xi))    allocate(gs%xi(1:nb, 1:nb, 1:3, 1:nk))
             if (.not. allocated(gs%xi_ok)) allocate(gs%xi_ok(1:nb, 1:nb, 1:nk))
             call build_xi(nb, nk, gs%nbvec, gs%bvec, gs%prod_dk, gs%eigen, &
-                        & gs%b_matrix, num_kgrid, gs%xi, gs%xi_ok, nrej, resu)
+                        & gs%b_matrix, num_kgrid, gs%xi, gs%xi_ok, nrej, resu, &
+                        & fixed_blocks=(trim(sbe_lg_degen) == 'gifix'))
 
             resp_max = 0d0
             do ik=1, nk
