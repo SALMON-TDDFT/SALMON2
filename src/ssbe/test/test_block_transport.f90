@@ -192,6 +192,7 @@ contains
     do ik=1,nk; uni=max(uni, mdiff(matmul(hc(U(:,:,1,ik)),U(:,:,1,ik)), eye(nb))); end do
     call check_close_r(uni,0d0,1d-12,"transport: U^H U = I on +x link",nfail)
     do ik=1,nk; Wb=u2_gauge(0.3d0*ik,0.2d0,0.7d0,-0.1d0*ik); Wk(:,:,ik)=embed(nb,2,Wb); end do
+    prod_t = (0d0, 0d0)
     do ik=1,nk; ikx=mod(ik,nk)+1
       prod_t(:,:,1,ik)=matmul(matmul(hc(Wk(:,:,ik)),prod_dk(:,:,1,ik)),Wk(:,:,ikx))
       do a=1,nb; prod_t(a,a,2,ik)=(1d0,0d0); prod_t(a,a,3,ik)=(1d0,0d0); end do
