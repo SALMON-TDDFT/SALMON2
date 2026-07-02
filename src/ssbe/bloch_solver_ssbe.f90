@@ -765,7 +765,7 @@ end subroutine gicov_rhs
 
 subroutine dt_evolve_bloch_lg(sbe, gs, E, bj_am, dt, icomm)
   use salmon_global, only: am_s, num_kgrid, t_2, epdir_re1, &
-    & yn_sbe_gw_collision, sbe_deph_mode, sbe_lg_diag
+    & yn_sbe_gw_collision, sbe_deph_mode, sbe_lg_diag, sbe_lg_degen
   use sbe_collision_gw, only: add_collision_diag, add_collision_offdiag
   use common_ssbe, only: grad_k_array_nb2d_dcomplex
   implicit none
@@ -783,8 +783,17 @@ subroutine dt_evolve_bloch_lg(sbe, gs, E, bj_am, dt, icomm)
   complex(8) :: qnm_tmp1(sbe%nb, sbe%nb, sbe%nk)
   complex(8) :: qnm_tmp(sbe%nb, sbe%nb, sbe%nk)
 
-  nb = sbe%nb 
+  nb = sbe%nb
   nk = sbe%nk
+
+  ! gicov (R-3, Task 5b): self-starting RK4 on the PHYSICAL density via gicov_rhs
+  ! (imaginary-axis stability 2*sqrt(2)~2.83), NO dqnm_stock / Adams-Moulton history,
+  ! NO bare Euler; the GW collision is a separate VG-style substep.  gi/gifix/off/VG
+  ! fall through to the AB4 path below (byte-unchanged).
+  if (trim(sbe_lg_degen) == 'gicov') then
+    call dt_evolve_bloch_lg_gicov(sbe, gs, E, dt, icomm)
+    return
+  end if
 
   shift_vector(:) = 0.d0 ! shift_vector is set to be 0
 
@@ -932,6 +941,133 @@ subroutine dt_evolve_bloch_lg(sbe, gs, E, bj_am, dt, icomm)
 
 end subroutine dt_evolve_bloch_lg
 
+!===================================================================
+! gicov integrator (Phase 3, Task 5b).  Steps the PHYSICAL density rho one dt with
+! a self-starting classical RK4 built on the (Task 5a machine-exact) gicov_rhs:
+!
+!   rho0 = rho_ij_from_q(qnm)                        (physical rho at step start)
+!   k1 = f(rho0);  k2 = f(rho0 + dt/2 k1)
+!   k3 = f(rho0 + dt/2 k2);  k4 = f(rho0 + dt k3)     f == gicov_rhs
+!   rho_new = rho0 + dt/6 (k1 + 2 k2 + 2 k3 + k4)
+!
+! RK4's imaginary-axis stability limit 2*sqrt(2)~2.83 (vs the legacy AB4's 0.43) is
+! the R-3 choice; RK4 is SELF-STARTING so there is NO dqnm_stock / Adams-Moulton
+! history and NO bare Euler.  gicov_rhs reads sbe%qnm, reconstructs physical rho
+! via rho_ij_from_q, and gathers neighbouring-k slices internally (comm_summation),
+! so each stage writes its intermediate physical rho back into sbe%qnm through the
+! R-1 bridge q_ij_from_rho before its gicov_rhs call.  Because prepare_qnm made
+! exp_iphi a time-constant UNIT phase (same-block exp_iphi=1), the qnm<->rho bridge
+! is lossless, so stepping rho through qnm is exact.
+!
+! The GW collision is applied as a SEPARATE substep on the physical rho AFTER the
+! coherent RK4 (mirrors dt_evolve_bloch's post-Taylor add_collision_vg); it is a
+! no-op when yn_sbe_gw_collision/='y' (e.g. the U3 gate: t_2=1e30, GW off).
+!===================================================================
+subroutine dt_evolve_bloch_lg_gicov(sbe, gs, E, dt, icomm)
+  use salmon_global, only: yn_sbe_gw_collision, sbe_deph_mode
+  use sbe_collision_gw, only: add_collision_vg
+  implicit none
+  type(s_sbe_bloch_solver), intent(inout) :: sbe
+  type(s_sbe_gs_info), intent(inout) :: gs
+  real(8), intent(in) :: E(1:3)
+  real(8), intent(in) :: dt
+  integer, intent(in) :: icomm
+  integer :: nb, nk, ik, ib, jb
+  complex(8), allocatable :: rho0(:,:,:), rho_new(:,:,:)
+  complex(8), allocatable :: k1(:,:,:), k2(:,:,:), k3(:,:,:), k4(:,:,:)
+
+  nb = sbe%nb
+  nk = sbe%nk
+
+  allocate(rho0   (nb, nb, sbe%ik_min:sbe%ik_max))
+  allocate(rho_new(nb, nb, sbe%ik_min:sbe%ik_max))
+  allocate(k1(nb, nb, nk), k2(nb, nb, nk), k3(nb, nb, nk), k4(nb, nb, nk))
+
+  ! (0) advance the propagated state (previous step's qnm_new) into qnm; then
+  !     reconstruct the physical rho0 at step start on the local k-slice.
+  !$omp parallel do default(shared) private(ik, ib, jb) collapse(3)
+  do ik = sbe%ik_min, sbe%ik_max
+  do ib = 1, nb
+  do jb = 1, nb
+    sbe%qnm(ib, jb, ik) = sbe%qnm_new(ib, jb, ik)
+  end do
+  end do
+  end do
+  !$omp parallel do default(shared) private(ik, ib, jb) collapse(3)
+  do ik = sbe%ik_min, sbe%ik_max
+  do ib = 1, nb
+  do jb = 1, nb
+    rho0(ib, jb, ik) = rho_ij_from_q(sbe, ib, jb, ik)
+  end do
+  end do
+  end do
+
+  ! (1) RK4 stage 1 (sbe%qnm already holds rho0's representation)
+  call gicov_rhs(sbe, gs, E, k1, icomm)
+  ! (2) stage 2 at rho0 + (dt/2) k1
+  call load_stage_qnm(sbe, rho0, k1, 0.5d0 * dt)
+  call gicov_rhs(sbe, gs, E, k2, icomm)
+  ! (3) stage 3 at rho0 + (dt/2) k2
+  call load_stage_qnm(sbe, rho0, k2, 0.5d0 * dt)
+  call gicov_rhs(sbe, gs, E, k3, icomm)
+  ! (4) stage 4 at rho0 + dt k3
+  call load_stage_qnm(sbe, rho0, k3, dt)
+  call gicov_rhs(sbe, gs, E, k4, icomm)
+
+  ! (5) combine on the local slice
+  !$omp parallel do default(shared) private(ik, ib, jb) collapse(3)
+  do ik = sbe%ik_min, sbe%ik_max
+  do ib = 1, nb
+  do jb = 1, nb
+    rho_new(ib, jb, ik) = rho0(ib, jb, ik) + (dt / 6.d0) * &
+      & (k1(ib, jb, ik) + 2.d0 * k2(ib, jb, ik) + 2.d0 * k3(ib, jb, ik) + k4(ib, jb, ik))
+  end do
+  end do
+  end do
+
+  ! (6) GW collision as a SEPARATE substep on the physical rho (VG-style).
+  if (yn_sbe_gw_collision == 'y') then
+    call add_collision_vg(rho_new, gs%gamma_gw, gs%f0_ref, dt, &
+      & nb, nk, sbe%ik_min, sbe%ik_max, sbe_deph_mode)
+  end if
+
+  ! (7) write stepped physical rho into qnm_new; restore qnm to the step-start
+  !     representation (AB4 leaves qnm holding the step-start state).
+  !$omp parallel do default(shared) private(ik, ib, jb) collapse(3)
+  do ik = sbe%ik_min, sbe%ik_max
+  do ib = 1, nb
+  do jb = 1, nb
+    sbe%qnm_new(ib, jb, ik) = q_ij_from_rho(sbe, rho_new(ib, jb, ik), ib, jb, ik)
+    sbe%qnm(ib, jb, ik)     = q_ij_from_rho(sbe, rho0(ib, jb, ik),    ib, jb, ik)
+  end do
+  end do
+  end do
+
+  deallocate(rho0, rho_new, k1, k2, k3, k4)
+
+contains
+
+  ! Write the RK stage density rho0 + a*kX into sbe%qnm (local slice) through the
+  ! R-1 bridge so the next gicov_rhs sees the intermediate physical rho.
+  subroutine load_stage_qnm(sbe, rho0, kX, a)
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    complex(8), intent(in) :: rho0(nb, nb, sbe%ik_min:sbe%ik_max)
+    complex(8), intent(in) :: kX(nb, nb, nk)
+    real(8), intent(in) :: a
+    integer :: ik, ib, jb
+    !$omp parallel do default(shared) private(ik, ib, jb) collapse(3)
+    do ik = sbe%ik_min, sbe%ik_max
+    do ib = 1, nb
+    do jb = 1, nb
+      sbe%qnm(ib, jb, ik) = q_ij_from_rho(sbe, rho0(ib, jb, ik) + a * kX(ib, jb, ik), ib, jb, ik)
+    end do
+    end do
+    end do
+  end subroutine load_stage_qnm
+
+end subroutine dt_evolve_bloch_lg_gicov
+
 subroutine calc_current_bloch_lg(sbe, gs, jmat, icomm)
     use salmon_global, only: sbe_lg_degen
     implicit none
@@ -949,15 +1085,19 @@ subroutine calc_current_bloch_lg(sbe, gs, jmat, icomm)
 
     tmp1(:) = 0.d0
 
-    ! Pb4 (GI current): when sbe_lg_degen=='gi' or 'gifix' the Pb3 xi substitution makes the
-    ! dnm_i / exp_iphi phase machinery inconsistent inside degenerate blocks, so the
-    ! delta_omega*|dnm|*aimag(qnm) current below is unreliable there.  Instead reconstruct
+    ! Pb4 (GI current): when sbe_lg_degen=='gi'/'gifix'/'gicov' the Pb3 xi substitution
+    ! (gi/gifix) or the same-block exp_iphi=1 / covariant-transport representation (gicov)
+    ! makes the dnm_i / exp_iphi phase machinery inconsistent inside degenerate blocks, so
+    ! the delta_omega*|dnm|*aimag(qnm) current below is unreliable there.  Instead reconstruct
     ! the physical density matrix rho from the propagated qnm (rho = exp_iphi*qnm off the
-    ! diagonal, rho = qnm on the diagonal; inverse of prepare_qnm's qnm=conjg(exp_iphi)*rho)
-    ! and contract it with the velocity v = p_tm_matrix (+ rvnl_tm_matrix when
-    ! flag_vnl_correction), using the exact index/sign convention of the VG current
-    ! calc_current_bloch (paramagnetic part; the length gauge carries no Ac*N term).
-    if (trim(sbe_lg_degen) == 'gi' .or. trim(sbe_lg_degen) == 'gifix') then
+    ! diagonal, rho = qnm on the diagonal; inverse of prepare_qnm's qnm=conjg(exp_iphi)*rho,
+    ! == rho_ij_from_q) and contract it with the velocity v = p_tm_matrix (+ rvnl_tm_matrix
+    ! when flag_vnl_correction), using the exact index/sign convention of the VG current
+    ! calc_current_bloch (paramagnetic part; the length gauge carries no Ac*N term).  This
+    ! reconstruction is Tr(v rho), gauge-invariant under a consistent GS gauge, so it is the
+    ! minimal correct gicov current (subsumes Task 6's in-block current reconstruction).
+    if (trim(sbe_lg_degen) == 'gi' .or. trim(sbe_lg_degen) == 'gifix' &
+        & .or. trim(sbe_lg_degen) == 'gicov') then
         !$omp parallel do default(shared) private(ik,jj,ib,jb,rho_ji) reduction(+:tmp1)
         do ik = sbe%ik_min, sbe%ik_max
         do jj = 1,3
