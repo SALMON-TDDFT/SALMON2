@@ -477,7 +477,7 @@ function calc_energy(sbe, gs, Ac, icomm) result(energy)
 end function calc_energy
 
 subroutine prepare_qnm(sbe, gs, icomm)
-  use salmon_global, only: epdir_re1, am_s, sbe_lg_diag
+  use salmon_global, only: epdir_re1, am_s, sbe_lg_diag, sbe_lg_degen
   implicit none
   type(s_sbe_bloch_solver), intent(inout) :: sbe
   type(s_sbe_gs_info), intent(in) :: gs
@@ -561,6 +561,29 @@ subroutine prepare_qnm(sbe, gs, icomm)
     where (abs(gs%delta_omega(:, :, sbe%ik_min:sbe%ik_max)) < 1.d-3) sbe%abs_dnm = 0.d0
   end if
 
+  ! gicov (R-1 representation): same-block off-diagonal coherences are carried in
+  ! the PHYSICAL basis (qnm == rho).  Force exp_iphi=1 and abs_dnm=0 on every
+  ! same-block pair (gs%block_id) BEFORE the phase-fill below, so (i) the
+  ! phase-fill's abs_dnm>=1.d-13 gate skips them and leaves exp_iphi=1, giving
+  ! qnm_new == rho for same-block pairs, and (ii) the same-block dipole source
+  ! terms (which multiply abs_dnm) vanish -- the in-block interband coupling is
+  ! supplied instead by the gauge-covariant gradient (gicov_rhs).  Out-of-block
+  ! pairs keep the dipole-derived exp_iphi/abs_dnm computed above.  gi/gifix/off
+  ! are untouched (this whole block is guarded by sbe_lg_degen=='gicov').
+  if (trim(sbe_lg_degen) == 'gicov' .and. allocated(gs%block_id)) then
+    !$omp parallel do default(shared) private(ik, ib, jb) collapse(3)
+    do ik = sbe%ik_min, sbe%ik_max
+      do ib=1,nb
+        do jb=1,nb
+          if (gs%block_id(ib, ik) == gs%block_id(jb, ik)) then
+            sbe%abs_dnm(ib, jb, ik) = 0.d0
+            sbe%exp_iphi(ib, jb, ik) = (1.d0, 0.d0)
+          end if
+        end do
+      end do
+    end do
+  end if
+
   !$omp parallel do default(shared) private(ik, ib, jb) collapse(3)
   do ik = sbe%ik_min, sbe%ik_max
     do ib=1,nb
@@ -579,6 +602,158 @@ subroutine prepare_qnm(sbe, gs, icomm)
   end do
 
 end subroutine prepare_qnm
+
+!===================================================================
+! R-1 representation bridge (orientation-explicit).  qnm is the propagated
+! variable; the covariant gradient needs PHYSICAL rho.
+!   rho(i,j) =              qnm(i,j)                (i==j)
+!            = exp_iphi(i,j) * qnm(i,j)             (i/=j)
+!   qnm(i,j) =              rho(i,j)                (i==j)
+!            = conjg(exp_iphi(i,j)) * rho(i,j)      (i/=j)
+! In gicov, prepare_qnm sets exp_iphi=1 on same-block pairs, so same-block
+! qnm == rho; out-of-block pairs keep the dipole-derived unit phase.
+!===================================================================
+pure function rho_ij_from_q(sbe, ib, jb, ik) result(r)
+  implicit none
+  type(s_sbe_bloch_solver), intent(in) :: sbe
+  integer, intent(in) :: ib, jb, ik
+  complex(8) :: r
+  if (ib == jb) then
+    r = sbe%qnm(ib, jb, ik)
+  else
+    r = sbe%exp_iphi(ib, jb, ik) * sbe%qnm(ib, jb, ik)
+  end if
+end function rho_ij_from_q
+
+pure function q_ij_from_rho(sbe, rho_ij, ib, jb, ik) result(q)
+  implicit none
+  type(s_sbe_bloch_solver), intent(in) :: sbe
+  complex(8), intent(in) :: rho_ij
+  integer, intent(in) :: ib, jb, ik
+  complex(8) :: q
+  if (ib == jb) then
+    q = rho_ij
+  else
+    q = conjg(sbe%exp_iphi(ib, jb, ik)) * rho_ij
+  end if
+end function q_ij_from_rho
+
+!===================================================================
+! gicov RHS operator (Phase 3): instantaneous COHERENT drho/dt of the
+! gauge-covariant length-gauge propagator, as a callable routine.  NO
+! integrator / AB4 / dqnm_stock here (that is Task 5b) -- this returns the
+! instantaneous physical drho only, so a RHS bug can be told apart from an
+! integrator-stability issue.
+!
+!   drho = + sum_a E_a * D_cov[rho]_a         covariant intraband transport (1)
+!          - i sum_a E_a [d_matrix_a, rho]    out-of-block interband dipole   (2)
+!          - i * delta_omega .* rho           band-energy coherent term       (3a; off-diag)
+!          - rho / t_2                         legacy interband dephasing      (3b; off-diag)
+!
+! (1) covariant_grad_block returns D_cov rho = d_k rho - i[xi,rho] on the FULL
+!     nb x nb density; it REPLACES the legacy grad_qnm term.  gs%u_transport is
+!     fed AS-IS (orientation U, Task 2 -- NOT conjugate-transposed).  The
+!     Cartesian k-spacing dk_a = b_matrix(a,a)/num_kgrid(a) reproduces the
+!     legacy grad_k_array_nb2d_dcomplex spacing (nabt = bNmat(:,4)/(b(a,a)/N_a)),
+!     so with U==I this reduces EXACTLY to the legacy gradient; the "+E*grad"
+!     field prefactor/sign matches dt_evolve_bloch_lg (:663,:685).
+! (2) gs%d_matrix in gicov already holds ONLY the out-of-block dipole i*p/dw
+!     (same-block == 0), so -i E[d,rho] is exactly the block<->far-band coupling
+!     -- the same physics the legacy off-diagonal dipole source builds (verified
+!     term-by-term), kept as a commutator.  NO same-block dipole is added.
+! (3) energy -i*delta_omega*rho (= -i[H0,rho]) and the 1/t_2 dephasing are kept
+!     exactly as the legacy LG RHS (:680,:690); when GW dephasing is active the
+!     t_2 term is suppressed (5b applies the GW collision as a separate substep).
+!
+! rho is reconstructed from sbe%qnm via rho_ij_from_q and gathered across ranks
+! (comm_summation) because the covariant stencil is non-local in k.  Returns
+! PHYSICAL drho (full nb x nb x nk).  5b maps drho -> dqnm elementwise via
+! q_ij_from_rho if it steps qnm (diag: dqnm=drho; off-diag: dqnm=conjg(exp_iphi)*drho).
+!
+! NOTE (deviation from the brief signature): icomm is added as a trailing
+! argument.  The covariant gradient must see neighbouring-k densities that may
+! live on other ranks, so a gather is mandatory -- exactly as the legacy
+! dt_evolve_bloch_lg gathers qnm via comm_summation before grad_k.  drho is
+! returned for the full k range (nb,nb,nk); a caller slices its local k-range.
+!===================================================================
+subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
+  use salmon_global, only: num_kgrid, t_2, yn_sbe_gw_collision, sbe_deph_mode
+  use degenerate_block_ssbe, only: covariant_grad_block
+  implicit none
+  type(s_sbe_bloch_solver), intent(in) :: sbe
+  type(s_sbe_gs_info), intent(in) :: gs
+  real(8), intent(in) :: Efield(1:3)
+  complex(8), intent(out) :: drho(sbe%nb, sbe%nb, sbe%nk)
+  integer, intent(in) :: icomm
+  integer :: nb, nk, ik, ib, jb, lb, axis
+  real(8) :: dk(1:3)
+  logical :: deph_by_gw
+  complex(8), allocatable :: rho_loc(:,:,:), rho_full(:,:,:), Dq(:,:,:,:), dE(:,:)
+  complex(8) :: gterm, cterm
+
+  nb = sbe%nb
+  nk = sbe%nk
+
+  allocate(rho_loc(nb,nb,nk), rho_full(nb,nb,nk), Dq(nb,nb,3,nk), dE(nb,nb))
+
+  ! ---- (0) physical rho on the local k-slice (zero elsewhere), gather to full k
+  rho_loc = (0.d0, 0.d0)
+  !$omp parallel do default(shared) private(ik, ib, jb) collapse(3)
+  do ik = sbe%ik_min, sbe%ik_max
+    do ib = 1, nb
+      do jb = 1, nb
+        rho_loc(ib, jb, ik) = rho_ij_from_q(sbe, ib, jb, ik)
+      end do
+    end do
+  end do
+  call comm_summation(rho_loc, rho_full, nb*nb*nk, icomm)
+
+  ! ---- (1) covariant intraband transport (physical): + sum_a E_a D_cov[rho]_a
+  do axis = 1, 3
+    dk(axis) = gs%b_matrix(axis, axis) / dble(num_kgrid(axis))
+  end do
+  call covariant_grad_block(nb, nk, gs%nbvec, gs%bvec, num_kgrid, &
+                            gs%u_transport, rho_full, dk, Dq)
+
+  deph_by_gw = (yn_sbe_gw_collision == 'y' .and. trim(sbe_deph_mode) == 'gw')
+
+  drho = (0.d0, 0.d0)
+  do ik = 1, nk
+    ! E-projected OUT-OF-BLOCK dipole at this k: dE = sum_a E_a d_matrix_a
+    do ib = 1, nb
+      do jb = 1, nb
+        dE(ib, jb) = Efield(1) * gs%d_matrix(ib, jb, 1, ik) + &
+                     Efield(2) * gs%d_matrix(ib, jb, 2, ik) + &
+                     Efield(3) * gs%d_matrix(ib, jb, 3, ik)
+      end do
+    end do
+    do ib = 1, nb
+      do jb = 1, nb
+        ! (1) covariant intraband
+        gterm = Efield(1) * Dq(ib, jb, 1, ik) + &
+                Efield(2) * Dq(ib, jb, 2, ik) + &
+                Efield(3) * Dq(ib, jb, 3, ik)
+        ! (2) out-of-block interband dipole commutator: -i [dE, rho]
+        cterm = (0.d0, 0.d0)
+        do lb = 1, nb
+          cterm = cterm + dE(ib, lb) * rho_full(lb, jb, ik) &
+                        - rho_full(ib, lb, ik) * dE(lb, jb)
+        end do
+        drho(ib, jb, ik) = gterm - zi * cterm
+        ! (3) coherent band energy + legacy dephasing (off-diagonal only)
+        if (ib /= jb) then
+          drho(ib, jb, ik) = drho(ib, jb, ik) &
+            & - zi * gs%delta_omega(ib, jb, ik) * rho_full(ib, jb, ik)
+          if (.not. deph_by_gw) then
+            drho(ib, jb, ik) = drho(ib, jb, ik) - rho_full(ib, jb, ik) / t_2
+          end if
+        end if
+      end do
+    end do
+  end do
+
+  deallocate(rho_loc, rho_full, Dq, dE)
+end subroutine gicov_rhs
 
 subroutine dt_evolve_bloch_lg(sbe, gs, E, bj_am, dt, icomm)
   use salmon_global, only: am_s, num_kgrid, t_2, epdir_re1, &
