@@ -51,6 +51,9 @@ module degenerate_block_ssbe
   ! mode by construction). Standalone kernel; consumed by later phases.
   public :: polar_unitary         ! U = M(M^H M)^{-1/2} polar factor (LAPACK zheev only)
   public :: build_block_transport ! orchestrator: fixed blocks -> block-diagonal U_full(nb,nb,3,nk)
+  ! Phase 2 (gicov): pure gauge-covariant intraband k-derivative operator that
+  ! consumes build_block_transport's U_full (Wilson-line transport, no logm).
+  public :: covariant_grad_block  ! D_cov rho = d_k rho - i[xi,rho] (4-shell transported stencil)
 
   real(8), parameter :: theta_on  = 5d-4   ! tight core-degeneracy bound  [au]
   real(8), parameter :: theta_off = 2d-3   ! block-membership bound       [au]
@@ -1000,5 +1003,131 @@ contains
     deallocate(block_id)
     n_reject = 0
   end subroutine build_block_transport
+
+  !===================================================================
+  ! Phase 2 (gicov / Approach-B'): pure gauge-covariant intraband
+  ! k-derivative operator.
+  !===================================================================
+
+  !-------------------------------------------------------------------
+  ! Gauge-covariant intraband k-derivative
+  !
+  !     D_cov rho = d_k rho - i[xi, rho]
+  !
+  ! evaluated on the FULL nb x nb density using the block-diagonal Wilson-line
+  ! transport U_full (build_block_transport: unitary on each fixed composite
+  ! block, identity elsewhere; U_full(k) = <u(k)|u(k+e)> ~ I - i xi dk, polar,
+  ! no logm) to parallel-transport the neighbour densities into the k-frame
+  ! before a 4-shell (+-1..+-4) CENTRAL difference.  Weights
+  !     c = (4/5, -1/5, 4/105, -1/280)  =  bNmat(:,4)
+  ! are the SAME shells/weights as the production length-gauge k-gradient
+  ! grad_k_array_nb2d_dcomplex (common_ssbe.f90:104-194; weights set by set_bN,
+  ! src/common/initialization.f90:1343).  No SALMON deps, no MPI (full-k arrays).
+  !
+  ! For each Cartesian axis alpha, k-point k, shell m = 1..4:
+  !   forward neighbour  k + m e  reached by composing the +e_alpha link m times;
+  !   composed Wilson link (product of single FORWARD links)
+  !     Um(k)     = U_full(k) U_full(k+e) ... U_full(k+(m-1)e)   [k -> k+m e]
+  !     Um(k-m e) = U_full(k-m e) ... U_full(k-e)                [k-m e -> k]
+  !   contribution
+  !     c_m * [ Um(k) rho(k+m e) Um(k)^H  -  Um(k-m e)^H rho(k-m e) Um(k-m e) ] / dk(alpha)
+  !   (forward neighbour transported by Um(k): U rho U^H; backward neighbour by
+  !    Um(k-m e)^H: U^H rho U).  Dq(:,:,alpha,k) = sum_m of those.
+  !
+  ! With U_full == I this reduces EXACTLY to the bare 4-shell central difference
+  ! of rho (Test A).  It is gauge COVARIANT: under rho -> W(k)^H rho W(k) and
+  ! U_full(k) -> W(k)^H U_full(k) W(k+e) the output transforms as a rank-2
+  ! tensor Dq(k) -> W(k)^H Dq(k) W(k) (Test B, telescoping W W^H = I).  For
+  ! constant xi with U_full = exp(-i xi dk) it equals d_k rho - i[xi,rho] to
+  ! O(dk^8) (Test C, the R-5 SIGN gate: the "U" orientation -- U_full fed
+  ! as-is, NOT its conjugate transpose -- is the physical one).
+  !
+  ! Triple products use ZGEMM (zmm3).  ik_neighbor is built internally with
+  ! build_ik_neighbor; the +axis columns are resolved with find_bvec; the
+  ! backward neighbour map is the inverse permutation of the +axis forward map
+  ! (well-defined on the full periodic grid).  An axis whose +unit-shift column
+  ! is absent from bvec leaves Dq(:,:,axis,:) = 0.
+  !-------------------------------------------------------------------
+  subroutine covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq)
+    implicit none
+    integer,    intent(in)  :: nb, nk, nbvec, bvec(3, nbvec), num_kgrid(3)
+    complex(8), intent(in)  :: U_full(nb, nb, 3, nk)
+    complex(8), intent(in)  :: rho(nb, nb, nk)
+    real(8),    intent(in)  :: dk(3)
+    complex(8), intent(out) :: Dq(nb, nb, 3, nk)
+    real(8), parameter :: cw(4) = (/ 4d0/5d0, -1d0/5d0, 4d0/105d0, -1d0/280d0 /)
+    integer, allocatable :: ik_neighbor(:, :), bwd(:)
+    complex(8), allocatable :: Umf(:,:), Umb(:,:), Utmp(:,:), tmp(:,:), &
+                               fterm(:,:), bterm(:,:), Id(:,:)
+    integer :: iv_axis(3), axis, iv, ik, m, kfwd, krp, kbwd, n
+
+    allocate(ik_neighbor(nbvec, nk), bwd(nk))
+    allocate(Umf(nb,nb), Umb(nb,nb), Utmp(nb,nb), tmp(nb,nb), &
+             fterm(nb,nb), bterm(nb,nb), Id(nb,nb))
+
+    call build_ik_neighbor(num_kgrid, bvec, nbvec, nk, ik_neighbor)
+    iv_axis(1) = find_bvec(bvec, nbvec, 1, 0, 0)
+    iv_axis(2) = find_bvec(bvec, nbvec, 0, 1, 0)
+    iv_axis(3) = find_bvec(bvec, nbvec, 0, 0, 1)
+
+    Id = (0d0, 0d0)
+    do n = 1, nb
+      Id(n, n) = (1d0, 0d0)
+    end do
+
+    Dq = (0d0, 0d0)
+
+    do axis = 1, 3
+      iv = iv_axis(axis)
+      if (iv == 0) cycle    ! +axis link absent in bvec: Dq(:,:,axis,:) stays 0
+
+      ! backward neighbour map = inverse of the +axis forward permutation
+      ! (bijection on the full periodic grid, so every k has a unique preimage)
+      do ik = 1, nk
+        bwd(ik_neighbor(iv, ik)) = ik
+      end do
+
+      do ik = 1, nk
+        Umf  = Id
+        Umb  = Id
+        kfwd = ik      ! position of the next forward link to append = k+(m-1)e
+        kbwd = ik      ! stepped to k-m e inside the loop
+        do m = 1, 4
+          ! ---- forward: Um(k) <- Um(k) * U_full(k+(m-1)e); neighbour = k+m e ----
+          call zmm3('N', 'N', nb, Umf, U_full(:, :, axis, kfwd), Utmp)
+          Umf = Utmp
+          krp = ik_neighbor(iv, kfwd)                     ! k+m e
+          call zmm3('N', 'N', nb, Umf, rho(:, :, krp), tmp)   ! Umf * rho(k+m e)
+          call zmm3('N', 'C', nb, tmp, Umf, fterm)            ! ... * Umf^H
+
+          ! ---- backward: base = k-m e; Um(k-m e) <- U_full(k-m e) * Um(k-(m-1)e) ----
+          kbwd = bwd(kbwd)                                 ! k-m e
+          call zmm3('N', 'N', nb, U_full(:, :, axis, kbwd), Umb, Utmp)
+          Umb = Utmp
+          call zmm3('C', 'N', nb, Umb, rho(:, :, kbwd), tmp) ! Umb^H * rho(k-m e)
+          call zmm3('N', 'N', nb, tmp, Umb, bterm)           ! ... * Umb
+
+          Dq(:, :, axis, ik) = Dq(:, :, axis, ik) &
+            + cw(m) * (fterm - bterm) / dk(axis)
+
+          kfwd = krp                                       ! next forward link at k+m e
+        end do
+      end do
+    end do
+
+    deallocate(ik_neighbor, bwd, Umf, Umb, Utmp, tmp, fterm, bterm, Id)
+  end subroutine covariant_grad_block
+
+  !-------------------------------------------------------------------
+  ! C = op(A) op(B), all n x n complex, via ZGEMM (BLAS).  ta/tb in {'N','C'}.
+  !-------------------------------------------------------------------
+  subroutine zmm3(ta, tb, n, A, B, C)
+    implicit none
+    character(1), intent(in)  :: ta, tb
+    integer,      intent(in)  :: n
+    complex(8),   intent(in)  :: A(n, n), B(n, n)
+    complex(8),   intent(out) :: C(n, n)
+    call zgemm(ta, tb, n, n, n, (1d0, 0d0), A, n, B, n, (0d0, 0d0), C, n)
+  end subroutine zmm3
 
 end module degenerate_block_ssbe
