@@ -46,6 +46,11 @@ module degenerate_block_ssbe
   public :: xi_block_from_overlap ! polar + matrix-log kernel (LAPACK zheev/zgeev)
   public :: build_xi              ! orchestrator: blocks -> links -> xi(nb,nb,3,nk)
   public :: xi_sign               ! sign s in xi = s*i*logm(U)/dk (pinned by test)
+  ! Phase 1 (gicov / Approach-B'): polar-only Wilson-line transport, no logm,
+  ! so no eigenphase branch cut can occur (removes build_xi's info=2 reject
+  ! mode by construction). Standalone kernel; consumed by later phases.
+  public :: polar_unitary         ! U = M(M^H M)^{-1/2} polar factor (LAPACK zheev only)
+  public :: build_block_transport ! orchestrator: fixed blocks -> block-diagonal U_full(nb,nb,3,nk)
 
   real(8), parameter :: theta_on  = 5d-4   ! tight core-degeneracy bound  [au]
   real(8), parameter :: theta_off = 2d-3   ! block-membership bound       [au]
@@ -814,5 +819,186 @@ contains
     deallocate(block_id, ik_neighbor, link_member, link_ok_arr)
     if (present(resid_max)) resid_max = ru_max
   end subroutine build_xi
+
+  !===================================================================
+  ! Phase 1 (gicov / Approach-B'): polar-only Wilson-line transport.
+  !===================================================================
+
+  !-------------------------------------------------------------------
+  ! Polar factor of a d x d overlap block: U = M (M^H M)^{-1/2}, the
+  ! unique unitary closest to M in Frobenius norm -- NO logm, so no
+  ! eigenphase branch cut can occur here by construction (this routine
+  ! never calls zgeev). sigma_min = sqrt(min eig(M^H M)) is the smallest
+  ! singular value of M.
+  !
+  ! This is the polar half of xi_block_from_overlap (the G=M^H M / zheev
+  ! / G^{-1/2} / U=M.G^{-1/2} steps), lifted into a standalone reusable
+  ! kernel for build_block_transport; xi_block_from_overlap itself is
+  ! left untouched (duplicated, not refactored, to avoid any risk of
+  ! regressing its existing covariance test suite).
+  !
+  ! ierr = 0 ok
+  !      = 1 near-singular: sigma_min < xi_sing_tol (garbage U NOT
+  !          returned as trustworthy -- caller must reject, not use it)
+  !      = 3 LAPACK (zheev) failure
+  !-------------------------------------------------------------------
+  subroutine polar_unitary(M, d, U, sigma_min, ierr)
+    implicit none
+    integer,    intent(in)  :: d
+    complex(8), intent(in)  :: M(d, d)
+    complex(8), intent(out) :: U(d, d)
+    real(8),    intent(out) :: sigma_min
+    integer,    intent(out) :: ierr
+    integer :: k, lapack_info, lwork
+    complex(8), allocatable :: A(:,:), Adg(:,:), Ginvsqrt(:,:)
+    complex(8), allocatable :: cwork(:)
+    real(8),    allocatable :: w_eig(:), rwork(:)
+
+    ierr      = 0
+    sigma_min = 0d0
+    U         = (0d0, 0d0)
+
+    allocate(A(d,d), Adg(d,d), Ginvsqrt(d,d), w_eig(d))
+
+    ! --- G = M^H M ; Hermitian eigendecomposition (zheev): A->vecs, w_eig ascending
+    A = matmul(conjg(transpose(M)), M)
+    lwork = max(1, 2*d - 1)
+    allocate(cwork(lwork), rwork(max(1, 3*d - 2)))
+    call zheev('V', 'U', d, A, d, w_eig, cwork, lwork, rwork, lapack_info)
+    deallocate(cwork, rwork)
+    if (lapack_info /= 0) then
+      ierr = 3
+      deallocate(A, Adg, Ginvsqrt, w_eig)
+      return
+    end if
+
+    ! --- near-singular reject: sigma_min(M) = sqrt(min eig of G) ---
+    sigma_min = sqrt(max(0d0, w_eig(1)))
+    if (sigma_min < xi_sing_tol) then
+      ierr = 1
+      deallocate(A, Adg, Ginvsqrt, w_eig)
+      return
+    end if
+
+    ! --- G^{-1/2} = A diag(1/sqrt(w)) A^H ;  U = M G^{-1/2} ---
+    do k = 1, d
+      Adg(:, k) = A(:, k) / sqrt(w_eig(k))
+    end do
+    Ginvsqrt = matmul(Adg, conjg(transpose(A)))
+    U = matmul(M, Ginvsqrt)
+
+    deallocate(A, Adg, Ginvsqrt, w_eig)
+  end subroutine polar_unitary
+
+  !-------------------------------------------------------------------
+  ! Block-diagonal parallel-transport (Wilson-line) operator built ONLY
+  ! from the polar factor of each k -> k+e_alpha overlap block (see
+  ! polar_unitary) -- never logm. Umat(nb,nb,3,nk): identity on
+  ! singleton bands / bands outside any >=2 block and on any axis whose
+  ! +unit-shift column is absent from bvec; the polar-unitary factor of
+  ! the overlap submatrix on each FIXED composite block (build_blocks_
+  ! fixed: k-independent, gap-isolated partition; errors on metal-like
+  ! spectra before this routine's own fail-closed check runs).
+  !
+  ! Restricted to fixed blocks only (gicov's usage): source and target
+  ! band sets at k and k+e are the SAME block by construction, so
+  ! M_blk(a,b) = prod_dk(srcs(a), srcs(b), iv, ik) with no separate tgts
+  ! map (contrast build_xi's general per-k block correspondence via
+  ! match_link_blocks, which fixed blocks do not need).
+  !
+  ! Fail-closed: a near-singular block (polar_unitary ierr/=0) aborts
+  ! the WHOLE build via error stop rather than returning a garbage U for
+  ! that block -- there is no "untrusted-but-returned" state (no U_ok
+  ! output), matching the fixed-block gifix contract used by build_xi's
+  ! use_fixed branch.
+  !
+  ! n_reject is always 0 on return: it exists only so callers can log
+  ! this interface uniformly alongside build_xi's n_reject; a rejected
+  ! block error-stops before this subroutine could ever return a
+  ! nonzero count.
+  !-------------------------------------------------------------------
+  subroutine build_block_transport(nb, nk, nbvec, bvec, prod_dk, eigen, num_kgrid, Umat, n_reject)
+    implicit none
+    integer,    intent(in)  :: nb, nk, nbvec
+    integer,    intent(in)  :: bvec(3, nbvec), num_kgrid(3)
+    complex(8), intent(in)  :: prod_dk(nb, nb, nbvec, nk)
+    real(8),    intent(in)  :: eigen(nb, nk)
+    complex(8), intent(out) :: Umat(nb, nb, 3, nk)
+    integer,    intent(out) :: n_reject
+    integer, allocatable :: block_id(:, :)
+    complex(8), allocatable :: M_blk(:, :), Ublk(:, :)
+    integer :: iv_axis(3), srcs(nb)
+    integer :: ik, iv, axis, bk, nblk_k, d, a, bcol, n
+    real(8) :: sigma_min
+    integer :: ierr
+
+    ! num_kgrid is accepted only for interface symmetry with build_xi (and any
+    ! future non-fixed-block extension). It is NOT needed here: fixed blocks
+    ! have tgts==srcs at every k (brief-pinned), and the full periodic grid
+    ! guarantees every k+e link exists, so the target k-index never has to be
+    ! looked up (contrast build_xi's use of build_ik_neighbor for general
+    ! per-k block correspondence).
+    allocate(block_id(nb, nk))
+    call build_blocks_fixed(nb, nk, eigen, block_id)   ! error-stops if not gap-isolated (metal-like)
+
+    iv_axis(1) = find_bvec(bvec, nbvec, 1, 0, 0)
+    iv_axis(2) = find_bvec(bvec, nbvec, 0, 1, 0)
+    iv_axis(3) = find_bvec(bvec, nbvec, 0, 0, 1)
+
+    ! default: identity everywhere (singletons / out-of-block bands / axes
+    ! whose +unit-shift column is absent from bvec)
+    Umat = (0d0, 0d0)
+    do ik = 1, nk
+      do axis = 1, 3
+        do n = 1, nb
+          Umat(n, n, axis, ik) = (1d0, 0d0)
+        end do
+      end do
+    end do
+
+    do ik = 1, nk
+      nblk_k = maxval(block_id(:, ik))
+      do bk = 1, nblk_k
+        d = 0
+        do n = 1, nb
+          if (block_id(n, ik) == bk) then
+            d = d + 1
+            srcs(d) = n
+          end if
+        end do
+        if (d < 2) cycle    ! singleton block: transport is trivially identity
+
+        do axis = 1, 3
+          iv = iv_axis(axis)
+          if (iv == 0) cycle   ! +axis shift absent in prod_dk: leave identity
+
+          allocate(M_blk(d, d), Ublk(d, d))
+          do bcol = 1, d
+            do a = 1, d
+              M_blk(a, bcol) = prod_dk(srcs(a), srcs(bcol), iv, ik)
+            end do
+          end do
+
+          call polar_unitary(M_blk, d, Ublk, sigma_min, ierr)
+          if (ierr /= 0) then
+            write(*, '(a,i6,a,32i4)') &
+              'ERROR build_block_transport: near-singular overlap block ik=', ik, &
+              ' bands=', srcs(1:d)
+            error stop 1
+          end if
+
+          do bcol = 1, d
+            do a = 1, d
+              Umat(srcs(a), srcs(bcol), axis, ik) = Ublk(a, bcol)
+            end do
+          end do
+          deallocate(M_blk, Ublk)
+        end do
+      end do
+    end do
+
+    deallocate(block_id)
+    n_reject = 0
+  end subroutine build_block_transport
 
 end module degenerate_block_ssbe
