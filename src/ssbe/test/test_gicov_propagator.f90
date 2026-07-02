@@ -43,7 +43,18 @@
 !                          ungauged run to < 1e-8 at every step.
 !     5. Non-vacuous       the gicov run actually MOVES (max|J| well above 0), so
 !                          boundedness is not the boundedness of a frozen state.
-!     6. TEETH (negative control): the OLD uncapped in-block dipole path (a
+!     6. Direct |rho| ceiling: max_t maxval(abs(rho(t))) < 10 (hardening, Task
+!        5b review I-1). Checks 1/2/4 only trip at hard overflow (~1e308) or via
+!        roundoff-coupled 1e-8 thresholds -- a regression that grew |rho| to
+!        O(1e4-1e6) over 200 steps would silently PASS them all. This is a direct
+!        ceiling, comfortably above the observed O(1) but far below that blind spot.
+!     7. Direct |J| ceiling: max_t |J(t)| < 100 (same hardening motivation, I-1).
+!     8. In-block coherence driven: max_{t,k} |rho23(t) - rho23(0)| > 1e-6
+!        (hardening, Task 5b review I-2). Check 5 only lower-bounds the GLOBAL
+!        max|J|, which is carried mostly by the out-of-block dipole -- it does not
+!        by itself prove the covariant intraband term INSIDE the degenerate block
+!        {2,3} is doing anything. This asserts the in-block coherence itself moves.
+!     9. TEETH (negative control): the OLD uncapped in-block dipole path (a
 !        near-degenerate pair with the naive dipole i*p/delta_omega, |d|~1.5e8,
 !        driven through the AB4 path, sbe_lg_degen/='gicov') MUST diverge within
 !        the same window -- proving the conservation checks above have teeth.
@@ -154,6 +165,36 @@ contains
       end do
     end do
   end function herm_norm_of
+
+  !======================= physical rho probe (from qnm_new) ===================
+  ! Task 5b review I-1/I-2 hardening: reconstructs the physical density rho AFTER
+  ! a completed step directly from sbe%qnm_new, mirroring calc_current_bloch_lg's
+  ! own gicov reconstruction (bloch_solver_ssbe.f90 ~1099-1119): rho(i,j) ==
+  ! qnm_new(i,j) on the diagonal, == exp_iphi(i,j)*qnm_new(i,j) off it. exp_iphi is
+  ! a TIME-CONSTANT unit phase set once by prepare_qnm (same-block exp_iphi==1 in
+  ! gicov), so this is exact at every step. NOTE: this deliberately does NOT reuse
+  ! rho_ij_from_q(sbe,...) -- that helper reads sbe%qnm, which after
+  ! dt_evolve_bloch_lg (gicov) still holds the PREVIOUS step's state (step (0) of
+  ! dt_evolve_bloch_lg_gicov only advances qnm_new -> qnm at the START of the NEXT
+  ! call), so rho_ij_from_q would silently read one step stale.
+  subroutine rho_from_qnm_new(sbe, rho_out)
+    implicit none
+    type(s_sbe_bloch_solver), intent(in) :: sbe
+    complex(8), intent(out) :: rho_out(nb, nb, nk)
+    integer :: ik, ib, jb
+    rho_out = (0d0, 0d0)
+    do ik = sbe%ik_min, sbe%ik_max
+      do jb = 1, nb
+        do ib = 1, nb
+          if (ib == jb) then
+            rho_out(ib, jb, ik) = sbe%qnm_new(ib, ib, ik)
+          else
+            rho_out(ib, jb, ik) = sbe%exp_iphi(ib, jb, ik) * sbe%qnm_new(ib, jb, ik)
+          end if
+        end do
+      end do
+    end do
+  end subroutine rho_from_qnm_new
 
   !======================= 2x2 U(2) gauge on the {2,3} block ==================
   ! Block-diagonal wrt blk() by construction: exactly-unitary U(2) on {2,3}, plus
@@ -382,16 +423,18 @@ contains
   ! init -> prepare_qnm -> inject rho -> nsteps of dt_evolve_bloch_lg (gicov RK4).
   ! Records trace(0:nsteps) and current(1:3, 0:nsteps); tracks max herm_norm,
   ! whether everything stayed finite, and the largest |current| seen.
-  subroutine run_gicov(gs, rho_init, E, dt, tr, Jout, hn_max, all_ok, Jmax)
+  subroutine run_gicov(gs, rho_init, E, dt, tr, Jout, hn_max, all_ok, Jmax, rho_max, rho23_drift)
     implicit none
     type(s_sbe_gs_info), intent(inout) :: gs
     complex(8), intent(in) :: rho_init(nb, nb, nk)
     real(8), intent(in) :: E(3), dt
     real(8), intent(out) :: tr(0:nsteps), Jout(3, 0:nsteps), hn_max, Jmax
+    real(8), intent(out) :: rho_max, rho23_drift    ! Task 5b review I-1/I-2 hardening
     logical, intent(out) :: all_ok
     type(s_sbe_bloch_solver) :: sbe
     real(8) :: bj_am(8, 8), hn, jm(3)
-    integer :: it, icomm
+    complex(8) :: rho_now(nb, nb, nk), rho23_0(nk)
+    integer :: it, icomm, ik
 
     icomm = 0
     call init_sbe_bloch_solver(sbe, gs, nb, icomm)
@@ -399,11 +442,17 @@ contains
     call adams_moulton_coefs(bj_am)          ! gicov branch ignores bj_am; passed for the interface
     call set_state_from_rho(sbe, rho_init)
 
-    hn_max = 0d0; Jmax = 0d0; all_ok = .true.
+    hn_max = 0d0; Jmax = 0d0; all_ok = .true.; rho_max = 0d0; rho23_drift = 0d0
     tr(0) = trace_re_of(sbe)
     call calc_current_bloch_lg(sbe, gs, jm, icomm); Jout(:, 0) = jm(:)
     if (.not. (is_finite(tr(0)) .and. is_finite(jm(1)) .and. is_finite(jm(2)) .and. is_finite(jm(3)))) &
       all_ok = .false.
+
+    call rho_from_qnm_new(sbe, rho_now)                ! t=0 physical rho (== rho_init, round-tripped)
+    rho_max = max(rho_max, maxval(abs(rho_now)))
+    do ik = 1, nk
+      rho23_0(ik) = rho_now(2, 3, ik)                  ! in-block coherence baseline, all k
+    end do
 
     do it = 1, nsteps
       call dt_evolve_bloch_lg(sbe, gs, E, bj_am, dt, icomm)
@@ -411,6 +460,11 @@ contains
       hn = herm_norm_of(sbe); hn_max = max(hn_max, hn)
       call calc_current_bloch_lg(sbe, gs, jm, icomm); Jout(:, it) = jm(:)
       Jmax = max(Jmax, maxval(abs(jm)))
+      call rho_from_qnm_new(sbe, rho_now)
+      rho_max = max(rho_max, maxval(abs(rho_now)))
+      do ik = 1, nk
+        rho23_drift = max(rho23_drift, abs(rho_now(2, 3, ik) - rho23_0(ik)))
+      end do
       if (.not. (is_finite(tr(it)) .and. is_finite(hn) .and. &
                  is_finite(jm(1)) .and. is_finite(jm(2)) .and. is_finite(jm(3)))) all_ok = .false.
     end do
@@ -425,7 +479,8 @@ contains
     real(8) :: E(3), dt, Nocc
     real(8) :: tr_u(0:nsteps), tr_g(0:nsteps), Ju(3, 0:nsteps), Jg(3, 0:nsteps)
     real(8) :: hn_u, hn_g, Jmax_u, Jmax_g
-    real(8) :: tr_drift, gauge_tr, gauge_J
+    real(8) :: rho_max_u, rho_max_g, rho23_drift_u, rho23_drift_g   ! I-1/I-2 hardening
+    real(8) :: tr_drift, gauge_tr, gauge_J, rho_max_all, jmax_all
     logical :: ok_u, ok_g
     integer :: it, ik
 
@@ -435,7 +490,7 @@ contains
     ! ---- ungauged run ----
     call build_gs(gs)
     call build_rho_init(rho)
-    call run_gicov(gs, rho, E, dt, tr_u, Ju, hn_u, ok_u, Jmax_u)
+    call run_gicov(gs, rho, E, dt, tr_u, Ju, hn_u, ok_u, Jmax_u, rho_max_u, rho23_drift_u)
     Nocc = tr_u(0)
 
     ! ---- gauged run: same physics under an arbitrary per-k block gauge W(k) ----
@@ -446,7 +501,7 @@ contains
       Wh = hconj(W)
       rhog(:, :, ik) = matmul(matmul(Wh, rho(:, :, ik)), W)     ! rho -> W^H rho W
     end do
-    call run_gicov(gsg, rhog, E, dt, tr_g, Jg, hn_g, ok_g, Jmax_g)
+    call run_gicov(gsg, rhog, E, dt, tr_g, Jg, hn_g, ok_g, Jmax_g, rho_max_g, rho23_drift_g)
 
     ! ---- assertion 1: trace conserved to 1e-8 every step (ungauged & gauged) ---
     tr_drift = 0d0
@@ -481,10 +536,37 @@ contains
     call check_true(Jmax_u > 1d-6, &
       "U3.5: max|J(t)| >> 0 (dynamics are non-trivial, boundedness not vacuous)", nfail)
 
+    ! ---- assertion 6: DIRECT |rho| upper bound (hardening, Task 5b review I-1) -
+    ! Checks 1/2/4 only trip at hard overflow (~1e308) or via roundoff-coupled
+    ! 1e-8 thresholds -- a regression that grew |rho| to O(1e4-1e6) over the
+    ! 200-step window would silently satisfy ALL of them. Ceiling 10 is chosen
+    ! comfortably above the observed O(1) magnitude but far below that blind spot.
+    rho_max_all = max(rho_max_u, rho_max_g)
+    call check_true(is_finite(rho_max_all) .and. rho_max_all < 10d0, &
+      "U3.6: |rho| bounded (max_t maxval(abs(rho(t))) < 10, no mild/moderate blow-up)", nfail)
+
+    ! ---- assertion 7: DIRECT |J| upper bound (hardening, Task 5b review I-1) ---
+    jmax_all = max(Jmax_u, Jmax_g)
+    call check_true(is_finite(jmax_all) .and. jmax_all < 100d0, &
+      "U3.7: |J| bounded above (max_t |J(t)| < 100, direct ceiling not just Tr/herm-coupled)", nfail)
+
+    ! ---- assertion 8: in-block coherence rho(2,3,:) genuinely DRIVEN -----------
+    ! (hardening, Task 5b review I-2). Assertion 5 only lower-bounds the GLOBAL
+    ! max|J|, which is carried mostly by the out-of-block dipole (band1/4 <->
+    ! block{2,3}) -- it does not by itself prove the covariant intraband term
+    ! INSIDE the degenerate block is doing anything. This asserts the in-block
+    ! coherence rho(2,3,ik) itself moves (max over k of |rho23(t)-rho23(0)|,
+    ! well above roundoff), i.e. the covariant transport term is genuinely
+    ! engaged, not vacuous.
+    call check_true(is_finite(rho23_drift_u) .and. rho23_drift_u > 1d-6, &
+      "U3.8: max_t,k |rho23(t) - rho23(0)| > 1e-6 (in-block coherence genuinely driven)", nfail)
+
     write(*, '(a,es10.2,a,es10.2,a,es10.2)') &
       "      trace-drift=", tr_drift, "  herm(u/g)=", max(hn_u, hn_g), "  |J|max=", Jmax_u
     write(*, '(a,es10.2,a,es10.2)') &
       "      gauge-resid  Tr=", gauge_tr, "  J=", gauge_J
+    write(*, '(a,es10.2,a,es10.2)') &
+      "      rho_max(u/g)=", rho_max_all, "  rho23-drift(u)=", rho23_drift_u
   end subroutine test_gicov_bounded_and_gauge_invariant
 
   !======================= near-degenerate gs for the teeth ===================
