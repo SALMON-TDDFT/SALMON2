@@ -57,7 +57,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     use common_ssbe, only: grad_k_array_nb1d_double
     use salmon_global, only: gauge_sbe, file_sbe_prod_dk, sbe_lg_degen, num_kgrid, sbe_lg_degen_floor
     use degenerate_block_ssbe, only: build_xi, same_block, blend, theta_on, theta_off, &
-                                   & build_blocks_fixed_closed, build_block_transport
+                                   & build_block_transport
     implicit none
     type(s_sbe_gs_info), intent(inout) :: gs
     character(*), intent(in) :: sysname
@@ -141,47 +141,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     gs%occup(:,:) = 0d0 !!Experimental!!
     gs%occup(1:(ne/2),:) = 2d0 !!Experimental!!
 
-    ! gicov covariance guard (after the final gs%occup reset): every fixed
-    ! degenerate block must be uniformly occupied (equal within-block
-    ! occupations, each ~empty or ~full) so the block-covariant transport is
-    ! physically meaningful. Fails closed on metals / partial degenerate-block
-    ! filling. (Si VBM triplet is full & equal -> passes.)
-    if (trim(sbe_lg_degen) == 'gicov') call check_gicov_occupation()
-
 contains
-
-    ! gicov: enforce equal, non-fractional occupation within each fixed block.
-    subroutine check_gicov_occupation()
-        implicit none
-        integer :: ik, ib, jb, bid
-        real(8), parameter :: occ_full = 2d0   ! doubly-occupied value set by the reset above
-        real(8), parameter :: occ_tol  = 1d-6
-        do ik = 1, nk
-            do ib = 1, nb
-                ! fractional check: each band must be ~empty or ~full
-                if (abs(gs%occup(ib, ik)) > occ_tol .and. &
-                    & abs(gs%occup(ib, ik) - occ_full) > occ_tol) then
-                    write(*, '(a,2i6,es14.5)') &
-                        & 'ERROR sbe_lg_degen=gicov: fractional occupation ib,ik,occ=', &
-                        & ib, ik, gs%occup(ib, ik)
-                    error stop 'gicov requires equal, non-fractional occupation within a degenerate block'
-                end if
-                ! equal-within-block check (fixed partition gs%block_id)
-                bid = gs%block_id(ib, ik)
-                do jb = ib + 1, nb
-                    if (gs%block_id(jb, ik) == bid) then
-                        if (abs(gs%occup(ib, ik) - gs%occup(jb, ik)) > occ_tol) then
-                            write(*, '(a,3i6,2es14.5)') &
-                                & 'ERROR sbe_lg_degen=gicov: unequal occupation in block ik,ib,jb=', &
-                                & ik, ib, jb, gs%occup(ib, ik), gs%occup(jb, ik)
-                            error stop 'gicov requires equal, non-fractional occupation within a degenerate block'
-                        end if
-                    end if
-                end do
-            end do
-        end do
-    end subroutine check_gicov_occupation
-
 
     ! Calculate lattice and reciprocal vectors
     subroutine calc_lattice_info()
@@ -572,14 +532,14 @@ contains
                 write(*, '(a,es12.4)') "# build_xi: max |xi - i p/dw| (both-valid) = ", resp_max
             end if
         else if (trim(sbe_lg_degen) == 'gicov') then
-            ! ===== Phase 1 (gicov): block-diagonal Wilson-line transport =====
-            ! Fixed composite blocks + polar-only transport (no logm). The
-            ! gauge-covariant k-derivative (Task 5) consumes gs%u_transport for
-            ! the SAME-BLOCK degenerate pairs; d_matrix therefore carries the
-            ! OUT-OF-BLOCK interband dipole ONLY (same-block pairs -> 0, no xi,
-            ! no blend). u_transport already carries the block-diagonal
-            ! structure (identity outside blocks) from build_block_transport, so
-            ! it is stored AS-IS -- never embed-padded.
+            ! ===== X-full: single full-band block -> full-M Wilson transport =====
+            ! block_id≡1 (one block spanning all nb bands) makes
+            ! build_block_transport polar-factor the WHOLE nb×nb overlap M =
+            ! the full-band Wilson-line transport. The full-band
+            ! covariant_grad_block then supplies the WHOLE field term
+            ! E·(∂_k ρ − i[ξ,ρ]) including the interband dipole, so d_matrix
+            ! is unused by gicov_rhs (dropped there). No fixed blocks, no
+            ! closure, no occupation guard.
             do ik=1, nk
                 do ib=1, nb
                     do jb=1, nb
@@ -588,54 +548,22 @@ contains
                 end do
             end do
 
-            ! overlap-closed fixed partition (single source of truth: also
-            ! caches same_block, used by the out-of-block dipole loop below)
+            ! X-full: ONE full-band block (block_id≡1) -> build_block_transport
+            ! polar-factors the whole nb×nb overlap M = the full-band Wilson
+            ! transport. No fixed blocks, no closure.
             if (.not. allocated(gs%block_id)) allocate(gs%block_id(1:nb, 1:nk))
-            call build_blocks_fixed_closed(nb, nk, gs%nbvec, gs%bvec, gs%prod_dk, &
-                                         & gs%eigen, num_kgrid, gs%block_id)
-
-            ! block-diagonal Wilson-line transport on the CLOSED partition
-            ! (well-conditioned across umklapp wrap links; fail-closed on
-            ! any residual near-singular block)
+            gs%block_id(:, :) = 1                                   ! single full-band block
             if (.not. allocated(gs%u_transport)) allocate(gs%u_transport(1:nb, 1:nb, 1:3, 1:nk))
             call build_block_transport(nb, nk, gs%nbvec, gs%bvec, gs%prod_dk, &
                                      & gs%block_id, num_kgrid, gs%u_transport, nrej)
 
-            ! out-of-block dipole only; same-block pairs handled by transport (Task 5)
-            do ik=1, nk
-                do ib=1, nb
-                    do jb=1, nb
-                        x = abs(gs%delta_omega(ib, jb, ik))
-                        if (same_block(ib, jb, ik)) then
-                            gs%d_matrix(ib, jb, 1:3, ik) = 0d0
-                        else if (omega_eps < x) then
-                            gs%d_matrix(ib, jb, 1:3, ik) = &
-                                & zi * (gs%p_mod_matrix(ib, jb, 1:3, ik)) &
-                                & / gs%delta_omega(ib, jb, ik)
-                        else
-                            gs%d_matrix(ib, jb, 1:3, ik) = 0d0
-                        end if
-                    end do
-                end do
-            end do
+            ! X-full: the full-band covariant transport supplies the WHOLE field
+            ! term incl. the interband dipole (ξ_inter = dipole), so d_matrix is
+            ! unused by gicov_rhs. Zero it (keeps allocation/bcast contracts).
+            gs%d_matrix(:, :, :, :) = (0d0, 0d0)
 
             if (irank == 0) then
                 write(*, '(a,i0)') "# build_block_transport: rejected blocks = ", nrej
-                ! G0 closure-size diagnostic (cascade guard): print block count
-                ! and the largest overlap-closed block. A largest_block near nb
-                ! signals a runaway closure -> re-tune wclose / reconsider X-full.
-                block
-                    integer :: ib0, nblk0, mx0, bsz0(nb)
-                    nblk0 = maxval(gs%block_id(:, 1))
-                    bsz0 = 0
-                    do ib0 = 1, nb
-                        bsz0(gs%block_id(ib0, 1)) = bsz0(gs%block_id(ib0, 1)) + 1
-                    end do
-                    mx0 = maxval(bsz0(1:nblk0))
-                    write(*, '(a,i0,a,i0,a,i0)') &
-                        & "# gicov overlap-closed partition: nblk=", nblk0, &
-                        & " largest_block=", mx0, " nb=", nb
-                end block
             end if
         else
             ! ===== default 'off': bit-identical to the pre-Pb3 dipole construction =====
