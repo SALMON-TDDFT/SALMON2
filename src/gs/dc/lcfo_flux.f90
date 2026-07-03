@@ -3280,16 +3280,17 @@ contains
       use salmon_global, only: base_directory, lambda_cut
       implicit none
       integer :: iunit, nbasis, num_bands_file, num_wann_file, nfrag_file
-      integer :: iw, jw, iband, axis, nkeep, io, jo, i_full, j_full, nsel, imode
+      integer :: iw, jw, iband, axis, nkeep, io, jo, i_full, j_full, nsel, imode, i_halo
       integer :: nxyz_domain(3), nxyz_buffer_seed(3), nxyz_box(3)
       integer :: magic_file, version_file, io_stat
       integer, allocatable :: owner_frag(:), proj_atom(:), proj_hybrid(:), keep_index(:)
       real(8), allocatable :: center_bohr(:,:), spread_aa2(:), lambda_w(:), spread_est(:), tail_est(:)
       real(8), allocatable :: wcoef(:,:), r_wann(:,:,:), wcenter(:,:), h_wann(:,:), v_wann(:,:,:), aa_wann(:,:,:)
+      real(8), allocatable :: h_seed(:,:), v_seed(:,:,:), tmp(:,:)
       real(8), allocatable :: p_frag(:,:), p_eval(:), p_evec(:,:), tmat(:,:)
       complex(8), allocatable :: v_matrix(:,:), aa_global(:,:,:)
       complex(8), allocatable :: psi_wann_c(:,:)
-      real(8) :: h_imag_max, w_imag_max, bpw_lambda_cut
+      real(8) :: h_imag_max, w_imag_max, bpw_lambda_cut, x
       logical :: ok_position
       character(256) :: filename
 
@@ -3334,6 +3335,7 @@ contains
       allocate(wcoef(nbasis,nkeep), psi_wann_c(nbasis,num_wann_file))
       allocate(r_wann(3,nkeep,nkeep), wcenter(3,nkeep), h_wann(nkeep,nkeep), &
         v_wann(3,nkeep,nkeep), aa_wann(3,nkeep,nkeep))
+      allocate(h_seed(nbasis,nbasis), v_seed(3,nbasis,nbasis), tmp(nbasis,nkeep))
       allocate(p_frag(nbasis,nbasis), p_eval(nbasis), p_evec(nbasis,nbasis), &
         tmat(nkeep,num_wann_file))
 
@@ -3422,30 +3424,37 @@ contains
       end do
 
       h_imag_max = 0d0
-      h_wann = 0d0
-      do iw=1,nkeep
-        do jw=1,nkeep
-          do io=1,nbasis
-            do jo=1,nbasis
-              h_wann(iw,jw) = h_wann(iw,jw) + &
-                wcoef(io,iw) * mat_H_local(io,jo,1) * wcoef(jo,jw)
-            end do
+      h_seed = 0d0
+      v_seed = 0d0
+      do io=1,nbasis
+        do jo=1,nbasis
+          h_seed(io,jo) = 0.5d0 * (mat_H_local(io,jo,1) + mat_H_local(jo,io,1))
+          v_seed(1:3,io,jo) = mat_V_local(1:3,io,jo,1)
+          do i_halo=1,n_halo
+            h_seed(io,jo) = h_seed(io,jo) + 0.25d0 * &
+              (halo(i_halo)%mat_H_local(jo,io,1) + halo(i_halo)%mat_H_local(io,jo,1))
+            v_seed(1:3,io,jo) = v_seed(1:3,io,jo) + 0.5d0 * &
+              (halo(i_halo)%mat_V_local(1:3,jo,io,1) + &
+               halo(i_halo)%mat_V_local(1:3,io,jo,1))
+          end do
+        end do
+      end do
+      do axis=1,3
+        do io=1,nbasis
+          v_seed(axis,io,io) = 0d0
+          do jo=io+1,nbasis
+            x = 0.5d0 * (v_seed(axis,io,jo) - v_seed(axis,jo,io))
+            v_seed(axis,io,jo) = x
+            v_seed(axis,jo,io) = -x
           end do
         end do
       end do
 
-      v_wann = 0d0
+      tmp(1:nbasis,1:nkeep) = matmul(h_seed(1:nbasis,1:nbasis), wcoef(1:nbasis,1:nkeep))
+      h_wann(1:nkeep,1:nkeep) = matmul(transpose(wcoef(1:nbasis,1:nkeep)), tmp(1:nbasis,1:nkeep))
       do axis=1,3
-        do iw=1,nkeep
-          do jw=1,nkeep
-            do io=1,nbasis
-              do jo=1,nbasis
-                v_wann(axis,iw,jw) = v_wann(axis,iw,jw) + &
-                  wcoef(io,iw) * mat_V_local(axis,io,jo,1) * wcoef(jo,jw)
-              end do
-            end do
-          end do
-        end do
+        tmp(1:nbasis,1:nkeep) = matmul(v_seed(axis,1:nbasis,1:nbasis), wcoef(1:nbasis,1:nkeep))
+        v_wann(axis,1:nkeep,1:nkeep) = matmul(transpose(wcoef(1:nbasis,1:nkeep)), tmp(1:nbasis,1:nkeep))
       end do
 
       r_wann = 0d0
@@ -3504,6 +3513,7 @@ contains
       deallocate(owner_frag, center_bohr, spread_aa2, v_matrix, aa_global)
       deallocate(proj_atom, proj_hybrid, keep_index, lambda_w, spread_est, tail_est)
       deallocate(wcoef, psi_wann_c, r_wann, wcenter, h_wann, v_wann, aa_wann)
+      deallocate(h_seed, v_seed, tmp)
       deallocate(p_frag, p_eval, p_evec, tmat)
       call comm_sync_all(dc%icomm_tot)
     end subroutine write_wannier90_global_bpw_seed
