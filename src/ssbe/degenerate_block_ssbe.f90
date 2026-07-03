@@ -51,6 +51,12 @@ module degenerate_block_ssbe
   ! mode by construction). Standalone kernel; consumed by later phases.
   public :: polar_unitary         ! U = M(M^H M)^{-1/2} polar factor (LAPACK zheev only)
   public :: build_block_transport ! orchestrator: fixed blocks -> block-diagonal U_full(nb,nb,3,nk)
+  public :: build_fixed_blocks_closed
+  ! NOTE: build_blocks_fixed_closed is declared public in Task 2, alongside
+  ! its implementation -- gfortran (implicit none) rejects `public ::` on a
+  ! symbol with no matching declaration/subroutine in the module ("Symbol
+  ! ... has no IMPLICIT type"), so it cannot be forward-declared here in
+  ! Task 1 without breaking compilation.
   ! Phase 2 (gicov): pure gauge-covariant intraband k-derivative operator that
   ! consumes build_block_transport's U_full (Wilson-line transport, no logm).
   public :: covariant_grad_block  ! D_cov rho = d_k rho - i[xi,rho] (<=4-shell transported stencil, per-axis alias-capped)
@@ -67,6 +73,7 @@ module degenerate_block_ssbe
   real(8), parameter :: xi_sing_tol   = 1d-6   ! reject link if min singular value(M_blk) < this
   real(8), parameter :: xi_phi_reject = 0.9d0  ! reject link if any |phi_i| > xi_phi_reject*pi
   real(8), parameter :: pi_local = 3.14159265358979323846d0
+  real(8), parameter :: wclose_default = 1d-1  ! overlap-closure edge threshold |<u|u'>|^2 (gicov X-closed)
 
   ! Block assignment cached by the most recent build_blocks() call so that the
   ! 3-argument same_block(ib,jb,ik) query can be answered without threading
@@ -270,6 +277,132 @@ contains
     block_id_store(:, :) = block_id(:, :)
     blocks_built = .true.
   end subroutine build_blocks_fixed
+
+  !-------------------------------------------------------------------
+  ! gicov (Option X-closed): k-independent composite partition that is
+  ! closed under BOTH near-degeneracy (theta_off, as build_fixed_blocks)
+  ! AND cross-link overlap. A degenerate block that is not closed across a
+  ! BZ-boundary (umklapp) wrap link -- band identity scrambles, so its
+  ! overlap sub-block is rank-deficient and polar_unitary would reject --
+  ! is grown to include the bands its overlap image leaks onto, until the
+  ! partition is closed. Then build_block_transport's polar factor is
+  ! taken on a well-conditioned (closed) block.
+  !
+  ! Step 1: energy union-find (identical edges to build_fixed_blocks).
+  ! Step 2: overlap closure, iterated to a fixed point over the +axis
+  !   links. At each sweep, snapshot the current block labels; for every
+  !   block B and every +axis link at every k, the image column weight
+  !   w(m) = sum_{n in B} |prod_dk(n,m,iv,ik)|^2 identifies bands m that B
+  !   maps onto; if a significant one (w(m) > wclose) is in a different
+  !   block, union the two. Bounded: <= nb-1 unions total.
+  ! Step 3: relabel + the same gap-isolation pre-filter as build_fixed_
+  !   blocks (informational; the real fail-closed guard remains
+  !   polar_unitary's near-singular check at transport-build time).
+  !-------------------------------------------------------------------
+  subroutine build_fixed_blocks_closed(nb, nk, nbvec, bvec, prod_dk, eigen, num_kgrid, &
+                                       fixed_block_id, isolated_ok, wclose_in)
+    implicit none
+    integer,    intent(in)  :: nb, nk, nbvec
+    integer,    intent(in)  :: bvec(3, nbvec), num_kgrid(3)
+    complex(8), intent(in)  :: prod_dk(nb, nb, nbvec, nk)
+    real(8),    intent(in)  :: eigen(nb, nk)
+    integer,    intent(out) :: fixed_block_id(nb)
+    logical,    intent(out) :: isolated_ok
+    real(8),    intent(in), optional :: wclose_in
+    real(8), parameter :: gap_margin = 2.2d-3
+    integer :: parent(nb), label(nb), lab(nb), bsize(nb)
+    integer :: iv_axis(3), ia, ib, ik, axis, iv, n, m, ra, rb, root, nlab
+    real(8) :: wcl, w(nb)
+    logical :: changed
+
+    wcl = wclose_default
+    if (present(wclose_in)) wcl = wclose_in
+
+    ! ---- Step 1: energy union-find (edge if within theta_off at ANY k) ----
+    do ia = 1, nb
+      parent(ia) = ia
+    end do
+    do ik = 1, nk
+      do ia = 1, nb - 1
+        do ib = ia + 1, nb
+          if (abs(eigen(ia, ik) - eigen(ib, ik)) < theta_off) then
+            ra = uf_find(parent, ia); rb = uf_find(parent, ib)
+            if (ra /= rb) parent(rb) = ra
+          end if
+        end do
+      end do
+    end do
+
+    ! ---- Step 2: overlap closure over +axis links, iterate to fixed point ----
+    iv_axis(1) = find_bvec(bvec, nbvec, 1, 0, 0)
+    iv_axis(2) = find_bvec(bvec, nbvec, 0, 1, 0)
+    iv_axis(3) = find_bvec(bvec, nbvec, 0, 0, 1)
+
+    changed = .true.
+    do while (changed)
+      changed = .false.
+      ! snapshot current block label (root band) for every band
+      do ia = 1, nb
+        label(ia) = uf_find(parent, ia)
+      end do
+      do ik = 1, nk
+        do axis = 1, 3
+          iv = iv_axis(axis)
+          if (iv == 0) cycle
+          ! process each block once, keyed by its snapshot root band
+          do root = 1, nb
+            if (label(root) /= root) cycle
+            w(:) = 0d0
+            do n = 1, nb
+              if (label(n) == root) then
+                do m = 1, nb
+                  w(m) = w(m) + abs(prod_dk(n, m, iv, ik))**2
+                end do
+              end if
+            end do
+            do m = 1, nb
+              if (w(m) > wcl .and. label(m) /= root) then
+                ra = uf_find(parent, root); rb = uf_find(parent, m)
+                if (ra /= rb) then
+                  parent(rb) = ra
+                  changed = .true.
+                end if
+              end if
+            end do
+          end do
+        end do
+      end do
+    end do
+
+    ! ---- Step 3: contiguous ascending labels ----
+    lab = 0; nlab = 0
+    do ia = 1, nb
+      root = uf_find(parent, ia)
+      if (lab(root) == 0) then
+        nlab = nlab + 1
+        lab(root) = nlab
+      end if
+      fixed_block_id(ia) = lab(root)
+    end do
+
+    ! ---- gap-isolation pre-filter on the FINAL blocks (multi-band only) ----
+    bsize = 0
+    do ia = 1, nb
+      bsize(fixed_block_id(ia)) = bsize(fixed_block_id(ia)) + 1
+    end do
+    isolated_ok = .true.
+    do ik = 1, nk
+      do ia = 1, nb
+        do ib = 1, nb
+          if (fixed_block_id(ia) /= fixed_block_id(ib)) then
+            if (bsize(fixed_block_id(ia)) > 1 .or. bsize(fixed_block_id(ib)) > 1) then
+              if (abs(eigen(ia, ik) - eigen(ib, ik)) < gap_margin) isolated_ok = .false.
+            end if
+          end if
+        end do
+      end do
+    end do
+  end subroutine build_fixed_blocks_closed
 
   !-------------------------------------------------------------------
   ! Union-find "find" with iterative path compression (no recursion).
