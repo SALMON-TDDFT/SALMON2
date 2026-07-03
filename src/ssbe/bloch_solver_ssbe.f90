@@ -688,7 +688,7 @@ end function q_ij_from_rho
 !===================================================================
 subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   use salmon_global, only: num_kgrid, t_2, yn_sbe_gw_collision, sbe_deph_mode
-  use degenerate_block_ssbe, only: covariant_grad_block
+  use degenerate_block_ssbe, only: covariant_grad_block, theta_off
   implicit none
   type(s_sbe_bloch_solver), intent(in) :: sbe
   type(s_sbe_gs_info), intent(in) :: gs
@@ -737,11 +737,19 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
                 Efield(2) * Dq(ib, jb, 2, ik) + &
                 Efield(3) * Dq(ib, jb, 3, ik)
         drho(ib, jb, ik) = gterm
-        ! (2) coherent band energy + legacy dephasing (off-diagonal only)
+        ! (2) coherent band energy + phenomenological dephasing (off-diagonal only)
         if (ib /= jb) then
           drho(ib, jb, ik) = drho(ib, jb, ik) &
             & - zi * gs%delta_omega(ib, jb, ik) * rho_full(ib, jb, ik)
-          if (.not. deph_by_gw) then
+          ! Covariant T2: dephase only ENERGY-DISTINCT pairs. Inside a
+          ! (near-)degenerate manifold (|delta_omega| <= theta_off, the same
+          ! degeneracy scale the Wilson-line transport groups blocks by) the
+          ! scalar -rho/t_2 relaxation is NOT U(N)-gauge-covariant -- it splits
+          ! diagonal/off-diagonal, a partition U(N) rotations mix -- so it is
+          ! skipped; intra-manifold relaxation belongs to the covariant (GW
+          ! collision) channel, not to a phenomenological scalar T2.
+          if (.not. deph_by_gw .and. &
+            & abs(gs%delta_omega(ib, jb, ik)) > theta_off) then
             drho(ib, jb, ik) = drho(ib, jb, ik) - rho_full(ib, jb, ik) / t_2
           end if
         end if

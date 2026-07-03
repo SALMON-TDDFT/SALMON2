@@ -35,8 +35,16 @@
 !         W(k)^H drho_ungauged(k) W(k).  This is THE gicov property
 !         (Approach-B'): the representation bridge and every sign must be
 !         right or it fails.  Exact-degenerate block => the energy term is
-!         block-constant hence covariant; t_2 -> huge => the (strictly legacy,
-!         not block-covariant) dephasing is negligible at the 1e-9 gate.
+!         block-constant hence covariant.  Dephasing now runs at a FINITE,
+!         physical-scale t_2 (was 1e30 purely to hide it): the Delta-omega gate
+!         skips the non-covariant scalar T2 INSIDE the degenerate block {2,3}
+!         while keeping it on energy-distinct pairs, so G holds to 1e-9 WITH
+!         dephasing active (ungated, the {2,3} coherence breaks G at ~1/t_2).
+!     T2G (Delta-omega dephasing gate): at zero field each off-diagonal drho is
+!         (coherent energy) + (gated T2) only.  Inside the exactly degenerate
+!         block {2,3} both vanish => drho(2,3) = 0 to machine precision (ungated:
+!         -rho(2,3)/t_2 ~ 1/t_2); across the energy-distinct pair (1,2) the T2 is
+!         ACTIVE and drho(1,2) = (-i*delta_omega - 1/t_2) rho(1,2) exactly.
 !     N (nonzero): the covariant contribution is nonzero -- guards against a
 !         vacuous all-zero RHS that would satisfy P/H/G trivially.
 !
@@ -68,7 +76,7 @@ program test_gicov_rhs
   use gs_info_ssbe,          only: s_sbe_gs_info
   use bloch_solver_ssbe,     only: s_sbe_bloch_solver, init_sbe_bloch_solver, &
                                     prepare_qnm, gicov_rhs, rho_ij_from_q, q_ij_from_rho
-  use degenerate_block_ssbe, only: covariant_grad_block
+  use degenerate_block_ssbe, only: covariant_grad_block, theta_off
   use salmon_global,         only: epdir_re1, am_s, num_kgrid, t_2, sbe_lg_degen, &
                                     sbe_lg_diag, yn_sbe_gw_collision, sbe_deph_mode
   implicit none
@@ -99,7 +107,8 @@ contains
     epdir_re1(1) = 1d0; epdir_re1(2) = 0d0; epdir_re1(3) = 0d0
     am_s = 4
     num_kgrid(1) = nk; num_kgrid(2) = 1; num_kgrid(3) = 1
-    t_2 = 1d30                 ! dephasing negligible at the 1e-9 gauge gate
+    t_2 = 10d0                 ! FINITE dephasing (was 1d30 to hide it): the
+                               ! Delta-omega gate must keep G covariant with T2 active
     sbe_lg_diag = 0            ! no diagnostic knockouts
     sbe_lg_degen = 'gicov'
     yn_sbe_gw_collision = 'n'
@@ -310,9 +319,11 @@ contains
     type(s_sbe_gs_info) :: gs, gsg
     type(s_sbe_bloch_solver) :: sbe, sbeg
     real(8) :: E(3), dk(3), tr, hn, gerr, cov_mag, rt_err, eqerr
+    real(8) :: E0(3), gate_in, gate_out_err
     logical :: deph_by_gw
     complex(8) :: rho(nb, nb, nk), rhog(nb, nb, nk)
     complex(8) :: drho(nb, nb, nk), drhog(nb, nb, nk), drho_expected(nb, nb, nk)
+    complex(8) :: drho0(nb, nb, nk), tgt12
     complex(8) :: Dq(nb, nb, 3, nk), W(nb, nb), Wh(nb, nb), tgt(nb, nb)
     integer :: icomm, ik, ib, jb, axis, kk
 
@@ -403,7 +414,8 @@ contains
           if (ib /= jb) then
             drho_expected(ib, jb, ik) = drho_expected(ib, jb, ik) &
               - zi_ * gs%delta_omega(ib, jb, ik) * rho(ib, jb, ik)
-            if (.not. deph_by_gw) then
+            ! mirror production: Delta-omega gate on the scalar T2 dephasing
+            if (.not. deph_by_gw .and. abs(gs%delta_omega(ib, jb, ik)) > theta_off) then
               drho_expected(ib, jb, ik) = drho_expected(ib, jb, ik) - rho(ib, jb, ik) / t_2
             end if
           end if
@@ -413,6 +425,25 @@ contains
     end do
     call check_true(is_finite(eqerr) .and. eqerr < 1d-12, &
       "E: drho == direct-assembly gterm + energy + dephasing (X-full, non-vacuous equality)", nfail)
+
+    ! ---- T2G: Delta-omega gate on the phenomenological dephasing --------------
+    ! Zero field => covariant transport vanishes, so each off-diagonal drho is
+    ! (coherent energy) + (gated T2) only.  Degenerate block {2,3}: delta_omega=0
+    ! AND T2 gated off => drho(2,3) = 0 to machine precision (ungated the code
+    ! would leave -rho(2,3)/t_2 ~ 1/t_2 here).  Energy-distinct pair (1,2),
+    ! |delta_omega| = 0.60 > theta_off: T2 ACTIVE, drho(1,2) = (-i*dw - 1/t_2)*rho.
+    E0 = 0d0
+    call gicov_rhs(sbe, gs, E0, drho0, icomm)
+    gate_in = 0d0; gate_out_err = 0d0
+    do ik = 1, nk
+      gate_in = max(gate_in, abs(drho0(2, 3, ik)), abs(drho0(3, 2, ik)))
+      tgt12 = (- zi_ * gs%delta_omega(1, 2, ik) - 1d0 / t_2) * rho(1, 2, ik)
+      gate_out_err = max(gate_out_err, abs(drho0(1, 2, ik) - tgt12))
+    end do
+    call check_true(is_finite(gate_in) .and. gate_in < 1d-12, &
+      "T2G-in: degenerate {2,3} coherence has NO scalar T2 (gated off) at E=0", nfail)
+    call check_true(is_finite(gate_out_err) .and. gate_out_err < 1d-12, &
+      "T2G-out: energy-distinct (1,2) keeps T2: drho = (-i*dw - 1/t_2)*rho", nfail)
 
     ! ---- G: gauge covariance under a random per-k block gauge W(k) ------------
     ! gauged rho, u_transport (Wilson line), p (-> d_matrix); eigen/block_id kept.
@@ -459,6 +490,8 @@ contains
       "      residuals  P=", abs(tr), "  H=", hn, "  G=", gerr, "  E=", eqerr, "  round-trip=", rt_err
     write(*, '(a,es10.2)') &
       "      nonzero    cov=", cov_mag
+    write(*, '(a,es10.2,a,es10.2)') &
+      "      T2 gate    in(deg {2,3})=", gate_in, "  out(distinct 1,2)=", gate_out_err
   end subroutine test_rhs
 
 end program test_gicov_rhs
