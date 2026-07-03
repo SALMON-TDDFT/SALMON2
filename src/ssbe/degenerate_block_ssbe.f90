@@ -52,11 +52,7 @@ module degenerate_block_ssbe
   public :: polar_unitary         ! U = M(M^H M)^{-1/2} polar factor (LAPACK zheev only)
   public :: build_block_transport ! orchestrator: fixed blocks -> block-diagonal U_full(nb,nb,3,nk)
   public :: build_fixed_blocks_closed
-  ! NOTE: build_blocks_fixed_closed is declared public in Task 2, alongside
-  ! its implementation -- gfortran (implicit none) rejects `public ::` on a
-  ! symbol with no matching declaration/subroutine in the module ("Symbol
-  ! ... has no IMPLICIT type"), so it cannot be forward-declared here in
-  ! Task 1 without breaking compilation.
+  public :: build_blocks_fixed_closed
   ! Phase 2 (gicov): pure gauge-covariant intraband k-derivative operator that
   ! consumes build_block_transport's U_full (Wilson-line transport, no logm).
   public :: covariant_grad_block  ! D_cov rho = d_k rho - i[xi,rho] (<=4-shell transported stencil, per-axis alias-capped)
@@ -403,6 +399,50 @@ contains
       end do
     end do
   end subroutine build_fixed_blocks_closed
+
+  !-------------------------------------------------------------------
+  ! gicov single source of truth for the block partition: overlap-closed
+  ! fixed blocks broadcast into per-k block_id AND cached for same_block
+  ! (mirrors build_blocks_fixed, but with the overlap-closure builder).
+  !
+  ! The gap-isolation result is INFORMATIONAL for gicov X-closed (warn,
+  ! do NOT error-stop): the overlap-closed block is closed by construction,
+  ! and the REAL fail-closed guards are polar_unitary's near-singular check
+  ! (in build_block_transport) + check_gicov_occupation (fractional/unequal
+  ! occupation = metal). A hard abort here would false-abort a legitimately
+  ! closed block that merely sits within gap_margin of a non-leaking outside
+  ! band. The closure-size diagnostic (gate G0) is emitted by the CALLER
+  ! (gs_info, under irank==0), since this pure module has no MPI rank info.
+  !-------------------------------------------------------------------
+  subroutine build_blocks_fixed_closed(nb, nk, nbvec, bvec, prod_dk, eigen, num_kgrid, block_id)
+    implicit none
+    integer,    intent(in)  :: nb, nk, nbvec
+    integer,    intent(in)  :: bvec(3, nbvec), num_kgrid(3)
+    complex(8), intent(in)  :: prod_dk(nb, nb, nbvec, nk)
+    real(8),    intent(in)  :: eigen(nb, nk)
+    integer,    intent(out) :: block_id(nb, nk)
+    integer :: fixed_block_id(nb), ik
+    logical :: isolated_ok
+
+    call build_fixed_blocks_closed(nb, nk, nbvec, bvec, prod_dk, eigen, num_kgrid, &
+                                   fixed_block_id, isolated_ok)
+    if (.not. isolated_ok) then
+      ! informational only (see header): the real guards run downstream.
+      write(*,*) 'WARNING sbe_lg_degen=gicov: an overlap-closed block sits within ', &
+                 'gap_margin of an outside band (informational; polar_unitary + ', &
+                 'occupation guard are the real fail-closed checks)'
+    end if
+
+    do ik = 1, nk
+      block_id(:, ik) = fixed_block_id(:)
+    end do
+
+    ! cache for same_block (mirror build_blocks_fixed: deallocate-first)
+    if (allocated(block_id_store)) deallocate(block_id_store)
+    allocate(block_id_store(nb, nk))
+    block_id_store(:, :) = block_id(:, :)
+    blocks_built = .true.
+  end subroutine build_blocks_fixed_closed
 
   !-------------------------------------------------------------------
   ! Union-find "find" with iterative path compression (no recursion).
