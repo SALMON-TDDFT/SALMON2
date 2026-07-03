@@ -3,7 +3,8 @@
                                     rho, rho_s, Vh, Vxc, Vpsl, energy)
     use structures
     use salmon_global, only: yn_fix_func, yn_dg_length_gauge, ae_shape1, e_impulse, epdir_re1, yn_restart, nt, &
-      yn_dg_expdiag_xi_split, yn_dg_mixed_z, yn_dg_mixed_z_local_prop_writeback, dg_mixed_z_local_prop_backend, &
+      yn_dg_expdiag_xi_split, yn_dg_expdiag_global_flux, yn_dg_expdiag_global_field, &
+      yn_dg_mixed_z, yn_dg_mixed_z_local_prop_writeback, dg_mixed_z_local_prop_backend, &
       dg_mixed_z_frag_local_field_block, yn_dg_mixed_z_local_rho_writeback_wwonly
     use sendrecv_grid, only: s_sendrecv_grid
     use salmon_xc, only: s_xc_functional
@@ -358,21 +359,33 @@
     if (.not. use_bpw_wannier_h .and. .not. use_formal_wannier_h) &
       stop "DG expdiag integrator requires formal DG-Wannier or buffer-periodic Wannier data"
     if (.not. global_flux_env_checked) then
+      global_flux_exp_enabled = (yn_dg_expdiag_global_flux == 'y')
       global_flux_env = ' '
-      call get_environment_variable('SALMON_DG_EXPDIAG_GLOBAL_FLUX', global_flux_env)
-      global_flux_exp_enabled = trim(global_flux_env) == '1' .or. &
-        trim(global_flux_env) == 'y' .or. trim(global_flux_env) == 'Y'
+      call get_environment_variable('SALMON_DG_EXPDIAG_GLOBAL_FLUX', global_flux_env, &
+        length=route_env_len, status=route_env_stat)
+      if (route_env_stat == 0 .and. route_env_len > 0) then
+      select case (trim(adjustl(global_flux_env(1:route_env_len))))
+      case ('1','y','Y','yes','YES','true','TRUE','on','ON')
+        global_flux_exp_enabled = .true.
+      case ('0','n','N','no','NO','false','FALSE','off','OFF')
+        global_flux_exp_enabled = .false.
+      end select
+      end if
       global_flux_env_checked = .true.
     end if
     if (.not. global_field_env_checked) then
+      global_field_exp_enabled = (yn_dg_expdiag_global_field == 'y')
       global_field_env = ' '
-      call get_environment_variable('SALMON_DG_EXPDIAG_GLOBAL_FIELD', global_field_env)
-      select case (trim(adjustl(global_field_env)))
+      call get_environment_variable('SALMON_DG_EXPDIAG_GLOBAL_FIELD', global_field_env, &
+        length=route_env_len, status=route_env_stat)
+      if (route_env_stat == 0 .and. route_env_len > 0) then
+      select case (trim(adjustl(global_field_env(1:route_env_len))))
+      case ('1','y','Y','yes','YES','true','TRUE','on','ON')
+        global_field_exp_enabled = .true.
       case ('0','n','N','no','NO','false','FALSE','off','OFF')
         global_field_exp_enabled = .false.
-      case default
-        global_field_exp_enabled = .true.
       end select
+      end if
       global_field_env_checked = .true.
     end if
     if (.not. xi_split_env_checked) then
