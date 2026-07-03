@@ -128,9 +128,70 @@ program test_overlap_closed_blocks
     end if
   end block
 
+  ! === T-closed-2: closed block is well-conditioned; un-closed is singular ===
+  block
+    complex(8) :: Msub2(2,2), Msub3(3,3), Uout(3,3)
+    real(8) :: smin
+    integer :: ierr
+    ! un-closed energy sub-block {2,3} at the scrambled link -> singular
+    Msub2(1,1)=prod_dk(2,2,ivp1,2); Msub2(1,2)=prod_dk(2,3,ivp1,2)
+    Msub2(2,1)=prod_dk(3,2,ivp1,2); Msub2(2,2)=prod_dk(3,3,ivp1,2)
+    call polar_unitary(Msub2, 2, Uout(1:2,1:2), smin, ierr)
+    if (ierr /= 1) then
+      write(*,*) 'FAIL T2: un-closed {2,3} sub-block not flagged near-singular, ierr=', ierr
+      nfail = nfail + 1
+    end if
+    ! closed sub-block {1,2,3} at the scrambled link -> well-conditioned unitary
+    Msub3(1:3,1:3) = prod_dk(1:3, 1:3, ivp1, 2)
+    call polar_unitary(Msub3, 3, Uout, smin, ierr)
+    if (ierr /= 0) then
+      write(*,*) 'FAIL T2: closed {1,2,3} sub-block rejected, ierr=', ierr
+      nfail = nfail + 1
+    end if
+  end block
+
+  ! === T-transport-smoke: build_block_transport on the CLOSED fixture (new
+  !     block_id signature) builds WITHOUT error-stop and is unitary. This
+  !     proves the closed path works end-to-end; the BIT-FOR-BIT regression
+  !     that guards behavioural neutrality of the signature change is Step 5
+  !     (the existing test_block_transport.f90 with its reference values). ===
+  block
+    integer :: block_id_e(nb, nk)
+    complex(8) :: Umat(nb, nb, 3, nk)
+    integer :: nrej
+    logical :: ok
+    ! use the CLOSED partition so the scrambled block is well-conditioned
+    call build_blocks_fixed_closed(nb, nk, nbvec, bvec, prod_dk, eigen, num_kgrid, block_id_e)
+    call build_block_transport(nb, nk, nbvec, bvec, prod_dk, block_id_e, num_kgrid, Umat, nrej)
+    if (nrej /= 0) then
+      write(*,*) 'FAIL smoke: n_reject/=0 (closed block should build clean)'; nfail = nfail + 1
+    end if
+    ! transport must be unitary on the scrambled +i1 link at ik=2 (leading 3x3)
+    ok = .true.
+    call check_unitary_3(Umat(1:3,1:3,1,2), ok)
+    if (.not. ok) then
+      write(*,*) 'FAIL smoke: transport not unitary on closed block'; nfail = nfail + 1
+    end if
+  end block
+
   if (nfail == 0) then
     write(*,*) 'PASS test_overlap_closed_blocks (T-closed-1)'
   else
     write(*,*) 'FAILURES:', nfail; error stop 1
   end if
+contains
+  subroutine check_unitary_3(U, ok)
+    complex(8), intent(in) :: U(3,3)
+    logical, intent(inout) :: ok
+    complex(8) :: P(3,3)
+    integer :: i, j
+    real(8) :: r
+    P = matmul(conjg(transpose(U)), U)
+    do i = 1, 3
+      do j = 1, 3
+        r = abs(P(i,j) - merge((1d0,0d0),(0d0,0d0), i==j))
+        if (r > 1d-8) ok = .false.
+      end do
+    end do
+  end subroutine
 end program

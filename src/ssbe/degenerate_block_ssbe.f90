@@ -1072,9 +1072,20 @@ contains
   ! polar_unitary) -- never logm. Umat(nb,nb,3,nk): identity on
   ! singleton bands / bands outside any >=2 block and on any axis whose
   ! +unit-shift column is absent from bvec; the polar-unitary factor of
-  ! the overlap submatrix on each FIXED composite block (build_blocks_
-  ! fixed: k-independent, gap-isolated partition; errors on metal-like
-  ! spectra before this routine's own fail-closed check runs).
+  ! the overlap submatrix on each block of the CALLER-SUPPLIED fixed
+  ! composite partition `block_id` (this routine no longer computes the
+  ! partition itself -- it is built upstream by either build_blocks_fixed
+  ! (energy-only) or build_blocks_fixed_closed (overlap-closed, gicov
+  ! X-closed) and passed in).
+  !
+  ! PRECONDITION on block_id (caller's responsibility): it MUST be a
+  ! k-INDEPENDENT fixed partition, i.e. the source band set at k and the
+  ! target band set at k+e_alpha are IDENTICAL for every block (srcs ==
+  ! tgts). The body below relies on this: M_blk(a,b) =
+  ! prod_dk(srcs(a), srcs(b), iv, ik) uses a single srcs list with no
+  ! separate tgts map. Both supported builders satisfy this by
+  ! construction; a per-k-varying partition would violate the
+  ! precondition and produce a nonsensical overlap block.
   !
   ! Restricted to fixed blocks only (gicov's usage): source and target
   ! band sets at k and k+e are the SAME block by construction, so
@@ -1093,15 +1104,14 @@ contains
   ! block error-stops before this subroutine could ever return a
   ! nonzero count.
   !-------------------------------------------------------------------
-  subroutine build_block_transport(nb, nk, nbvec, bvec, prod_dk, eigen, num_kgrid, Umat, n_reject)
+  subroutine build_block_transport(nb, nk, nbvec, bvec, prod_dk, block_id, num_kgrid, Umat, n_reject)
     implicit none
     integer,    intent(in)  :: nb, nk, nbvec
     integer,    intent(in)  :: bvec(3, nbvec), num_kgrid(3)
     complex(8), intent(in)  :: prod_dk(nb, nb, nbvec, nk)
-    real(8),    intent(in)  :: eigen(nb, nk)
+    integer,    intent(in)  :: block_id(nb, nk)
     complex(8), intent(out) :: Umat(nb, nb, 3, nk)
     integer,    intent(out) :: n_reject
-    integer, allocatable :: block_id(:, :)
     complex(8), allocatable :: M_blk(:, :), Ublk(:, :)
     integer :: iv_axis(3), srcs(nb)
     integer :: ik, iv, axis, bk, nblk_k, d, a, bcol, n
@@ -1114,8 +1124,6 @@ contains
     ! guarantees every k+e link exists, so the target k-index never has to be
     ! looked up (contrast build_xi's use of build_ik_neighbor for general
     ! per-k block correspondence).
-    allocate(block_id(nb, nk))
-    call build_blocks_fixed(nb, nk, eigen, block_id)   ! error-stops if not gap-isolated (metal-like)
 
     iv_axis(1) = find_bvec(bvec, nbvec, 1, 0, 0)
     iv_axis(2) = find_bvec(bvec, nbvec, 0, 1, 0)
@@ -1173,7 +1181,6 @@ contains
       end do
     end do
 
-    deallocate(block_id)
     n_reject = 0
   end subroutine build_block_transport
 

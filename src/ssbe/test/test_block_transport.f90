@@ -25,7 +25,7 @@
 !              -o t -framework Accelerate && ./t
 
 program test_block_transport
-  use degenerate_block_ssbe, only: build_block_transport, polar_unitary
+  use degenerate_block_ssbe, only: build_block_transport, polar_unitary, build_blocks_fixed
   implicit none
   complex(8), parameter :: zi = (0d0, 1d0)
   integer :: nfail
@@ -178,15 +178,17 @@ contains
     complex(8) :: U(nb,nb,3,nk), Ut(nb,nb,3,nk), Wk(nb,nb,nk)
     real(8)    :: eigen(nb,nk), worst, uni
     complex(8), allocatable :: Wb(:,:)
+    integer :: block_id_ref(nb,nk)
     num_kgrid=(/nk,1,1/); bvec(:,1)=(/1,0,0/); bvec(:,2)=(/0,1,0/); bvec(:,3)=(/0,0,1/)
     eigen(1,:)=0.36d0; eigen(2,:)=0.30d0; eigen(3,:)=0.30d0; eigen(4,:)=0.54d0
+    call build_blocks_fixed(nb, nk, eigen, block_id_ref)
     prod_dk=(0d0,0d0)
     do ik=1,nk
       ! near-pi (0.95*pi) real rotation on the {2,3} block along +x -> would trip build_xi's 0.9pi reject
       prod_dk(:,:,1,ik) = matmul(hc(frame4(nb,0d0)), frame4(nb,0.95d0*acos(-1d0)))
       do a=1,nb; prod_dk(a,a,2,ik)=(1d0,0d0); prod_dk(a,a,3,ik)=(1d0,0d0); end do
     end do
-    call build_block_transport(nb,nk,nbvec,bvec,prod_dk,eigen,num_kgrid,U,nrej)
+    call build_block_transport(nb,nk,nbvec,bvec,prod_dk,block_id_ref,num_kgrid,U,nrej)
     call check_int(nrej,0,"transport: near-pi block builds with zero rejects (no branch-cut)",nfail)
     uni=0d0
     do ik=1,nk; uni=max(uni, mdiff(matmul(hc(U(:,:,1,ik)),U(:,:,1,ik)), eye(nb))); end do
@@ -197,7 +199,7 @@ contains
       prod_t(:,:,1,ik)=matmul(matmul(hc(Wk(:,:,ik)),prod_dk(:,:,1,ik)),Wk(:,:,ikx))
       do a=1,nb; prod_t(a,a,2,ik)=(1d0,0d0); prod_t(a,a,3,ik)=(1d0,0d0); end do
     end do
-    call build_block_transport(nb,nk,nbvec,bvec,prod_t,eigen,num_kgrid,Ut,nrej_t)
+    call build_block_transport(nb,nk,nbvec,bvec,prod_t,block_id_ref,num_kgrid,Ut,nrej_t)
     call check_int(nrej_t,0,"transport(gauged): zero rejects",nfail)
     worst=0d0
     do ik=1,nk; ikx=mod(ik,nk)+1
