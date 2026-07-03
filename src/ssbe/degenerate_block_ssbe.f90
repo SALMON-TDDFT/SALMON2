@@ -69,7 +69,8 @@ module degenerate_block_ssbe
   real(8), parameter :: xi_sing_tol   = 1d-6   ! reject link if min singular value(M_blk) < this
   real(8), parameter :: xi_phi_reject = 0.9d0  ! reject link if any |phi_i| > xi_phi_reject*pi
   real(8), parameter :: pi_local = 3.14159265358979323846d0
-  real(8), parameter :: wclose_default = 1d-1  ! overlap-closure edge threshold |<u|u'>|^2 (gicov X-closed)
+  real(8), parameter :: wleak_default = 1d-1   ! leaked-weight union threshold |<u|u'>|^2, gated behind
+                                                ! polar_unitary ierr==1 rank-deficiency (gicov X-closed)
 
   ! Block assignment cached by the most recent build_blocks() call so that the
   ! 3-argument same_block(ib,jb,ik) query can be answered without threading
@@ -285,18 +286,31 @@ contains
   ! taken on a well-conditioned (closed) block.
   !
   ! Step 1: energy union-find (identical edges to build_fixed_blocks).
-  ! Step 2: overlap closure, iterated to a fixed point over the +axis
-  !   links. At each sweep, snapshot the current block labels; for every
-  !   block B and every +axis link at every k, the image column weight
-  !   w(m) = sum_{n in B} |prod_dk(n,m,iv,ik)|^2 identifies bands m that B
-  !   maps onto; if a significant one (w(m) > wclose) is in a different
-  !   block, union the two. Bounded: <= nb-1 unions total.
+  ! Step 2: RANK-DEFICIENCY-GATED overlap closure, iterated to a fixed
+  !   point over the +axis links. At each sweep, snapshot the current
+  !   block labels; for every block B and every +axis link at every k,
+  !   extract the |B|x|B| overlap sub-block M_B(a,b) = prod_dk(mem(a),
+  !   mem(b),iv,ik) and test it with the EXISTING polar_unitary(M_B,d,U,
+  !   sigma_min,ierr) -- the SAME sigma_min < xi_sing_tol gate
+  !   build_block_transport itself fails a block on. Ordinary band
+  !   rotation on a coarse k-mesh leaves a block's self-overlap healthy
+  !   (sigma_min ~0.6-0.9: ierr==0) even though individual cross terms can
+  !   be sizeable (~0.1-0.3) -- a scalar cross-overlap threshold cannot
+  !   tell that apart from genuine umklapp scramble, which collapses
+  !   sigma_min by ~9 orders of magnitude (~1e-9). So closure is triggered
+  !   ONLY when polar_unitary reports ierr==1 (rank-deficient); ierr==3
+  !   (LAPACK failure) fail-closes the whole build via error stop, exactly
+  !   matching build_block_transport's ierr/=0 rejection. Only once a
+  !   block IS singular do we union it with the outside bands its weight
+  !   leaked onto (wl(m) = sum_{a in B} |prod_dk(mem(a),m,iv,ik)|^2 >
+  !   wleak) -- wleak can never cascade a healthy block because it is
+  !   gated behind the singularity test. Bounded: <= nb-1 unions total.
   ! Step 3: relabel + the same gap-isolation pre-filter as build_fixed_
   !   blocks (informational; the real fail-closed guard remains
   !   polar_unitary's near-singular check at transport-build time).
   !-------------------------------------------------------------------
   subroutine build_fixed_blocks_closed(nb, nk, nbvec, bvec, prod_dk, eigen, num_kgrid, &
-                                       fixed_block_id, isolated_ok, wclose_in)
+                                       fixed_block_id, isolated_ok, wleak_in)
     implicit none
     integer,    intent(in)  :: nb, nk, nbvec
     integer,    intent(in)  :: bvec(3, nbvec), num_kgrid(3)
@@ -304,15 +318,17 @@ contains
     real(8),    intent(in)  :: eigen(nb, nk)
     integer,    intent(out) :: fixed_block_id(nb)
     logical,    intent(out) :: isolated_ok
-    real(8),    intent(in), optional :: wclose_in
+    real(8),    intent(in), optional :: wleak_in
     real(8), parameter :: gap_margin = 2.2d-3
     integer :: parent(nb), label(nb), lab(nb), bsize(nb)
     integer :: iv_axis(3), ia, ib, ik, axis, iv, n, m, ra, rb, root, nlab
-    real(8) :: wcl, w(nb)
+    integer :: d, a, bcol, mem(nb), ierr
+    real(8) :: wleak, sig, wl
+    complex(8), allocatable :: M_B(:,:), Udum(:,:)
     logical :: changed
 
-    wcl = wclose_default
-    if (present(wclose_in)) wcl = wclose_in
+    wleak = wleak_default
+    if (present(wleak_in)) wleak = wleak_in
 
     ! ---- Step 1: energy union-find (edge if within theta_off at ANY k) ----
     do ia = 1, nb
@@ -329,7 +345,7 @@ contains
       end do
     end do
 
-    ! ---- Step 2: overlap closure over +axis links, iterate to fixed point ----
+    ! ---- Step 2: rank-deficiency-gated overlap closure, iterate to fixed point ----
     iv_axis(1) = find_bvec(bvec, nbvec, 1, 0, 0)
     iv_axis(2) = find_bvec(bvec, nbvec, 0, 1, 0)
     iv_axis(3) = find_bvec(bvec, nbvec, 0, 0, 1)
@@ -348,21 +364,37 @@ contains
           ! process each block once, keyed by its snapshot root band
           do root = 1, nb
             if (label(root) /= root) cycle
-            w(:) = 0d0
+            ! snapshot block members
+            d = 0
             do n = 1, nb
-              if (label(n) == root) then
-                do m = 1, nb
-                  w(m) = w(m) + abs(prod_dk(n, m, iv, ik))**2
-                end do
-              end if
+              if (label(n) == root) then; d = d + 1; mem(d) = n; end if
             end do
+            ! overlap sub-block M_B and its smallest singular value (via polar_unitary)
+            if (allocated(M_B)) deallocate(M_B, Udum)
+            allocate(M_B(d, d), Udum(d, d))
+            do bcol = 1, d
+              do a = 1, d
+                M_B(a, bcol) = prod_dk(mem(a), mem(bcol), iv, ik)
+              end do
+            end do
+            call polar_unitary(M_B, d, Udum, sig, ierr)
+            deallocate(M_B, Udum)
+            if (ierr == 3) then            ! LAPACK failure -> fail-closed (build_block_transport rejects ierr/=0)
+              write(*,'(a,i0,a,i0)') 'ERROR build_fixed_blocks_closed: polar_unitary LAPACK failure ik=', ik, ' axis=', axis
+              error stop 1
+            end if
+            if (ierr /= 1) cycle           ! ierr==1 <=> sigma_min < xi_sing_tol: the ONLY close trigger
+            ! block is genuinely rank-deficient on this link -> union with the
+            ! outside bands its weight leaked onto
             do m = 1, nb
-              if (w(m) > wcl .and. label(m) /= root) then
+              if (label(m) == root) cycle
+              wl = 0d0
+              do a = 1, d
+                wl = wl + abs(prod_dk(mem(a), m, iv, ik))**2
+              end do
+              if (wl > wleak) then
                 ra = uf_find(parent, root); rb = uf_find(parent, m)
-                if (ra /= rb) then
-                  parent(rb) = ra
-                  changed = .true.
-                end if
+                if (ra /= rb) then; parent(rb) = ra; changed = .true.; end if
               end if
             end do
           end do

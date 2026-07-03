@@ -44,31 +44,25 @@ program test_overlap_closed_blocks
   prod_dk(2, 2, ivp1, 2) = (0d0, 0d0)
   ! band 3 untouched (self-overlap already 1); bands 4,5 identity
 
-  ! === T-closed-1a: default wclose merges {1,2,3} into one block ===
+  ! === R1: genuine scramble closes {1,2,3} (rank-deficiency gate) ===
+  ! The pi/2 (1,2) rotation above zeroes prod_dk(2,2,ivp1,2), so the energy
+  ! sub-block {2,3} at this link is [[0,0],[0,1]] -- sigma_min=0 < xi_sing_tol,
+  ! polar_unitary flags it ierr==1 (rank-deficient) -> the NEW criterion unions
+  ! it with band 1 (the band its leaked weight [prod_dk(1,2,ivp1,2)=1] lands
+  ! on). Assert {1,2,3} become one block; 4 and 5 stay separate.
   call build_fixed_blocks_closed(nb, nk, nbvec, bvec, prod_dk, eigen, num_kgrid, &
                                  fixed_block_id, isolated_ok)
   if (fixed_block_id(1) /= fixed_block_id(2)) then
-    write(*,*) 'FAIL T1a: band 1 not merged with block'; nfail = nfail + 1
+    write(*,*) 'FAIL R1: band 1 not merged with block'; nfail = nfail + 1
   end if
   if (fixed_block_id(2) /= fixed_block_id(3)) then
-    write(*,*) 'FAIL T1a: energy block {2,3} broken'; nfail = nfail + 1
+    write(*,*) 'FAIL R1: energy block {2,3} broken'; nfail = nfail + 1
   end if
   if (fixed_block_id(4) == fixed_block_id(3)) then
-    write(*,*) 'FAIL T1a: band 4 wrongly merged'; nfail = nfail + 1
+    write(*,*) 'FAIL R1: band 4 wrongly merged'; nfail = nfail + 1
   end if
   if (fixed_block_id(5) == fixed_block_id(4)) then
-    write(*,*) 'FAIL T1a: band 5 wrongly merged'; nfail = nfail + 1
-  end if
-
-  ! === T-closed-1b (negative control): wclose above the injected mixing (=1)
-  !     -> no overlap union; block stays the energy partition {2,3} ===
-  call build_fixed_blocks_closed(nb, nk, nbvec, bvec, prod_dk, eigen, num_kgrid, &
-                                 fixed_block_id, isolated_ok, wclose_in=1.5d0)
-  if (fixed_block_id(1) == fixed_block_id(2)) then
-    write(*,*) 'FAIL T1b: band 1 merged despite high wclose (vacuous closure)'; nfail = nfail + 1
-  end if
-  if (fixed_block_id(2) /= fixed_block_id(3)) then
-    write(*,*) 'FAIL T1b: energy block {2,3} broken'; nfail = nfail + 1
+    write(*,*) 'FAIL R1: band 5 wrongly merged'; nfail = nfail + 1
   end if
 
   ! === T-closed-3: build_blocks_fixed_closed caches same_block == block_id ===
@@ -91,41 +85,63 @@ program test_overlap_closed_blocks
     end if
   end block
 
-  ! === T-closed-1c: multi-hop closure REQUIRES >=2 fixed-point sweeps ===
-  ! Band 1 -> band 2 strong (|.|^2=0.25) merges {1,2,3} in sweep 1. Band 4 gets
-  ! only sub-threshold leaks from bands 1 and 2 individually (0.0625 each < 0.1),
-  ! but the COMBINED {1,2,3} column weight w(4)=0.125>0.1 fires ONLY in sweep 2.
-  ! A single-pass (non-iterating) closure would leave band 4 separate -> FAIL.
+  ! === R2 (cascade-avoidance -- THE regression test for the G0 bug): an
+  ! energy-seed block {1,2} (degenerate) with HEALTHY self-overlap (0.9) and
+  ! MODERATE cross-overlap (0.3), whose COMBINED leak onto band 3 (wl(3)=0.18)
+  ! EXCEEDS the OLD wclose=0.1 -- so the OLD criterion would cascade {1,2}->3,
+  ! but the {1,2} sub-block [[0.9,0.3],[0.3,0.9]] has sigma_min=0.6 >> tol so
+  ! the NEW gate does NOT close it. This is exactly the coarse-mesh-rotation
+  ! cascade that failed on the cluster (JID49423471): {1,2} stays a healthy
+  ! block by ENERGY only, with no overlap-driven union onto 3/4/5. ===
   block
-    complex(8) :: pd(nb, nb, nbvec, nk)
-    real(8) :: eg(nb, nk)
-    integer :: bid(nb), nn, kk, vv
+    complex(8) :: pd(nb,nb,nbvec,nk); real(8) :: eg(nb,nk); integer :: bid(nb),nn,kk,vv
     logical :: iso
-    do kk = 1, nk
-      eg(1, kk) = -0.02d0; eg(2, kk) = 0.00d0; eg(3, kk) = 0.00d0
-      eg(4, kk) =  0.05d0; eg(5, kk) = 0.50d0
+    ! {1,2} energy-degenerate (seed block); 3,4,5 separated
+    do kk=1,nk
+      eg(1,kk)=-0.2d0; eg(2,kk)=-0.2d0; eg(3,kk)=0.0d0; eg(4,kk)=0.2d0; eg(5,kk)=0.4d0
     end do
-    pd = (0d0, 0d0)
-    do kk = 1, nk
-      do vv = 1, nbvec
-        do nn = 1, nb
-          pd(nn, nn, vv, kk) = (1d0, 0d0)
-        end do
-      end do
+    pd=(0d0,0d0)
+    do kk=1,nk; do vv=1,nbvec; do nn=1,nb
+      pd(nn,nn,vv,kk)=(0.9d0,0d0)               ! healthy self-overlap: 1x1 sigma_min 0.9, 2x2 {1,2} sigma_min 0.6 >> tol
+    end do; end do; end do
+    ! {1,2} cross-coupling + combined leak to band 3 on +i1 at every k
+    do kk=1,nk
+      pd(1,2,ivp1,kk)=(0.3d0,0d0); pd(2,1,ivp1,kk)=(0.3d0,0d0)
+      pd(1,3,ivp1,kk)=(0.3d0,0d0); pd(2,3,ivp1,kk)=(0.3d0,0d0)   ! wl(3)=0.09+0.09=0.18 > old wclose 0.1
     end do
-    pd(1, 2, ivp1, 2) = (0.5d0,  0d0)   ! |.|^2 = 0.25   -> sweep-1 merge {1,2,3}
-    pd(1, 4, ivp1, 2) = (0.25d0, 0d0)   ! |.|^2 = 0.0625 (< wclose alone)
-    pd(2, 4, ivp1, 2) = (0.25d0, 0d0)   ! |.|^2 = 0.0625 (< wclose alone); sum 0.125 > wclose
-    call build_fixed_blocks_closed(nb, nk, nbvec, bvec, pd, eg, num_kgrid, bid, iso)
-    if (bid(1) /= bid(2) .or. bid(2) /= bid(3)) then
-      write(*,*) 'FAIL T1c: sweep-1 merge {1,2,3} did not happen'; nfail = nfail + 1
+    call build_fixed_blocks_closed(nb,nk,nbvec,bvec,pd,eg,num_kgrid,bid,iso)
+    if (bid(1) /= bid(2)) then                  ! {1,2} stay together by ENERGY
+      write(*,*) 'FAIL R2: energy block {1,2} broken'; nfail=nfail+1
     end if
-    if (bid(4) /= bid(1)) then
-      write(*,*) 'FAIL T1c: band 4 not merged (single-pass bug? needs 2nd sweep)'; nfail = nfail + 1
+    if (bid(3)==bid(1) .or. bid(4)==bid(1) .or. bid(5)==bid(1)) then  ! no OVERLAP cascade
+      write(*,*) 'FAIL R2: cascade — healthy block wrongly closed onto 3/4/5 (the G0 bug)'; nfail=nfail+1
     end if
-    if (bid(5) == bid(1)) then
-      write(*,*) 'FAIL T1c: band 5 wrongly merged'; nfail = nfail + 1
-    end if
+  end block
+
+  ! === R3 (2-sweep iteration under the new criterion): band 1 scrambles into
+  ! band 2 on the +i1 link (sweep-1 -> {1,2}); on the +i2 link the {1,2} 2x2
+  ! sub-block is rank-1 ([[.5,.5],[.5,.5]], sigma_min=0) with leak to band 3,
+  ! while bands 1 and 2 individually on +i2 are NOT singular (self-overlap
+  ! 0.5>tol) -- so the {1,2}->3 union can only fire in sweep 2, after {1,2}
+  ! exists. Guards do while(changed). NOTE: prod_dk need not be globally
+  ! unitary here -- this is a closure-LOGIC test of the sigma_min gate + union
+  ! + fixed-point iteration, not a physical-overlap fixture. ===
+  block
+    complex(8) :: pd(nb,nb,nbvec,nk); real(8) :: eg(nb,nk); integer :: bid(nb),nn,kk,vv,ivp2
+    logical :: iso
+    ivp2 = 4   ! the +i2 bvec column (0,1,0)
+    do kk=1,nk; eg(1,kk)=-0.30d0; eg(2,kk)=-0.10d0; eg(3,kk)=0.10d0; eg(4,kk)=0.30d0; eg(5,kk)=0.60d0; end do
+    pd=(0d0,0d0)
+    do kk=1,nk; do vv=1,nbvec; do nn=1,nb; pd(nn,nn,vv,kk)=(1d0,0d0); end do; end do; end do
+    ! +i1 @ik=2: band 1 -> band 2 full rotation (sweep-1 close {1,2})
+    pd(1,1,ivp1,2)=(0d0,0d0); pd(1,2,ivp1,2)=(1d0,0d0); pd(2,1,ivp1,2)=(-1d0,0d0); pd(2,2,ivp1,2)=(0d0,0d0)
+    ! +i2 @ik=2: {1,2} sub-block rank-1 (sigma_min=0) but singleton self-overlaps 0.5>tol; leak to band 3
+    pd(1,1,ivp2,2)=(0.5d0,0d0); pd(1,2,ivp2,2)=(0.5d0,0d0); pd(2,1,ivp2,2)=(0.5d0,0d0); pd(2,2,ivp2,2)=(0.5d0,0d0)
+    pd(1,3,ivp2,2)=(0.5d0,0d0)   ! leak of the {1,2} block onto band 3 (wl(3)=0.25 > wleak)
+    call build_fixed_blocks_closed(nb,nk,nbvec,bvec,pd,eg,num_kgrid,bid,iso)
+    if (bid(1)/=bid(2)) then; write(*,*) 'FAIL R3: sweep-1 {1,2} close missing'; nfail=nfail+1; end if
+    if (bid(3)/=bid(1)) then; write(*,*) 'FAIL R3: sweep-2 {1,2}->3 close missing (do-while not iterating?)'; nfail=nfail+1; end if
+    if (bid(4)==bid(1).or.bid(5)==bid(1)) then; write(*,*) 'FAIL R3: over-closure'; nfail=nfail+1; end if
   end block
 
   ! === T-closed-2: closed block is well-conditioned; un-closed is singular ===
@@ -175,7 +191,7 @@ program test_overlap_closed_blocks
   end block
 
   if (nfail == 0) then
-    write(*,*) 'PASS test_overlap_closed_blocks (T-closed-1)'
+    write(*,*) 'PASS test_overlap_closed_blocks (R1/R2/R3 + T-closed-2/3 + smoke)'
   else
     write(*,*) 'FAILURES:', nfail; error stop 1
   end if
