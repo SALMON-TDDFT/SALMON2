@@ -321,6 +321,7 @@ contains
       & yn_dg_expdiag_global_flux, &
       & yn_dg_expdiag_global_field, &
       & yn_dg_expdiag_project_h, &
+      & yn_dg_expdiag_delta_h, &
       & yn_dg_mixed_z, &
       & yn_dg_mixed_z_local_prop_writeback, &
       & dg_mixed_z_local_prop_backend, &
@@ -822,6 +823,7 @@ contains
     yn_dg_expdiag_global_flux = 'n'
     yn_dg_expdiag_global_field = 'y'
     yn_dg_expdiag_project_h = 'n'
+    yn_dg_expdiag_delta_h = 'n'
     yn_dg_mixed_z = 'n'
     yn_dg_mixed_z_local_prop_writeback = 'n'
     dg_mixed_z_local_prop_backend = 'global_mixed_split_backend'
@@ -1439,6 +1441,7 @@ contains
     call comm_bcast(yn_dg_expdiag_global_flux,nproc_group_global)
     call comm_bcast(yn_dg_expdiag_global_field,nproc_group_global)
     call comm_bcast(yn_dg_expdiag_project_h,nproc_group_global)
+    call comm_bcast(yn_dg_expdiag_delta_h,nproc_group_global)
     call comm_bcast(yn_dg_mixed_z,nproc_group_global)
     call comm_bcast(yn_dg_mixed_z_local_prop_writeback,nproc_group_global)
     call comm_bcast(dg_mixed_z_local_prop_backend,nproc_group_global)
@@ -2412,6 +2415,8 @@ contains
         yn_dg_expdiag_global_field
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_expdiag_project_h', &
         yn_dg_expdiag_project_h
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_expdiag_delta_h', &
+        yn_dg_expdiag_delta_h
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z', yn_dg_mixed_z
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z_local_prop_writeback', &
         yn_dg_mixed_z_local_prop_writeback
@@ -3037,6 +3042,7 @@ contains
     call yn_argument_check(yn_dg_expdiag_global_flux)
     call yn_argument_check(yn_dg_expdiag_global_field)
     call yn_argument_check(yn_dg_expdiag_project_h)
+    call yn_argument_check(yn_dg_expdiag_delta_h)
     call yn_argument_check(yn_dg_mixed_z)
     call yn_argument_check(yn_dg_mixed_z_local_prop_writeback)
     call yn_argument_check(yn_dg_mixed_z_local_rho_writeback_wwonly)

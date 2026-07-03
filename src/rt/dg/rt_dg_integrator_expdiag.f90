@@ -4,12 +4,12 @@
     use structures
     use salmon_global, only: yn_fix_func, yn_dg_length_gauge, ae_shape1, e_impulse, epdir_re1, yn_restart, nt, &
       yn_dg_expdiag_xi_split, yn_dg_expdiag_global_flux, yn_dg_expdiag_global_field, &
-      yn_dg_expdiag_project_h, &
+      yn_dg_expdiag_project_h, yn_dg_expdiag_delta_h, &
       yn_dg_mixed_z, yn_dg_mixed_z_local_prop_writeback, dg_mixed_z_local_prop_backend, &
       dg_mixed_z_frag_local_field_block, yn_dg_mixed_z_local_rho_writeback_wwonly
     use sendrecv_grid, only: s_sendrecv_grid
     use salmon_xc, only: s_xc_functional
-    use rt_dg_fragment_types, only: s_dg_fragment_rt
+    use rt_dg_fragment_types, only: s_dg_fragment_rt, matrix_block_info
     use rt_dg_fragment_ops, only: ensure_nonlocal_pp_matrix_A, calculate_microscopic_current_dg, &
       ensure_gradient_basis_cache, calculate_local_wannier_polarization_dg
     use rt_dg_plane_wave, only: diagnose_wpw_reduced_density, diagnose_wpw_reduced_embed_local, &
@@ -68,6 +68,13 @@
     logical, save :: xi_split_enabled = .true.
     logical, save :: project_h_env_checked = .false.
     logical, save :: project_h_for_fixed_func = .false.
+    logical, save :: delta_h_env_checked = .false.
+    logical, save :: delta_h_enabled = .false.
+    logical, save :: delta_h_ref_valid = .false.
+    type(matrix_block_info), allocatable, save :: delta_h_ref_blocks(:)
+    integer, save :: delta_h_ref_nblocks = 0
+    logical, save :: delta_h_warned = .false.
+    character(len=32) :: delta_h_env
     logical, save :: mixed_z_env_checked = .false.
     logical, save :: mixed_z_enabled = .false.
     logical, save :: mixed_z_exp_step_diag_env_checked = .false.
@@ -418,6 +425,21 @@
       end select
       end if
       project_h_env_checked = .true.
+    end if
+    if (.not. delta_h_env_checked) then
+      delta_h_enabled = (yn_dg_expdiag_delta_h == 'y')
+      delta_h_env = ' '
+      call get_environment_variable('SALMON_DG_EXPDIAG_DELTA_H', delta_h_env, &
+        length=route_env_len, status=route_env_stat)
+      if (route_env_stat == 0 .and. route_env_len > 0) then
+      select case (trim(adjustl(delta_h_env(1:route_env_len))))
+      case ('1','y','Y','yes','YES','true','TRUE','on','ON')
+        delta_h_enabled = .true.
+      case ('0','n','N','no','NO','false','FALSE','off','OFF')
+        delta_h_enabled = .false.
+      end select
+      end if
+      delta_h_env_checked = .true.
     end if
     if (.not. mixed_z_env_checked) then
       mixed_z_enabled = (yn_dg_mixed_z == 'y')
@@ -884,6 +906,10 @@
       end if
     end if
 
+    if (delta_h_enabled .and. .not. project_h_for_fixed_func) then
+      call ensure_delta_h_reference()
+    end if
+
     if (yn_fix_func == 'n') then
       if (trace_wpw_order .and. dg_frag%id == 0) then
         write(*,'(1x,a,a,i0,a)') '[DG-WPW-RED-DIAG-ORDER]', ' step=', itt, &
@@ -1342,7 +1368,35 @@
         end if
         iblk = 0
         if (allocated(dg_frag%H_block_map)) iblk = find_matrix_block(dg_frag%H_block_map, ifrag, ifrag)
-        if ((yn_fix_func == 'n' .or. project_h_for_fixed_func) .and. iblk > 0 .and. allocated(dg_frag%H_mat_blocks)) then
+        if (project_h_for_fixed_func .and. iblk > 0 .and. allocated(dg_frag%H_mat_blocks)) then
+          if (iblk <= size(dg_frag%H_mat_blocks)) then
+            h_eff(1:nw,1:nw) = (0.0d0, 0.0d0)
+            do jw = 1, nw
+              do iw = 1, nw
+                do jb = 1, min(nbf, size(dg_frag%H_mat_blocks(iblk)%val, 2))
+                  do ib = 1, min(nbf, size(dg_frag%H_mat_blocks(iblk)%val, 1))
+                    if (use_formal_wannier_h) then
+                      h_eff(iw,jw) = h_eff(iw,jw) + &
+                        conjg(dg_frag%dg_wannier_basis_coef(ib,iw,ispin,i_local)) * &
+                        cmplx(dg_frag%H_mat_blocks(iblk)%val(ib,jb,ispin), 0.0d0, kind=8) * &
+                        dg_frag%dg_wannier_basis_coef(jb,jw,ispin,i_local)
+                    else
+                      h_eff(iw,jw) = h_eff(iw,jw) + &
+                        cmplx(dg_frag%buffer_wannier_coef(ib,iw,ispin,i_local), 0.0d0, kind=8) * &
+                        cmplx(dg_frag%H_mat_blocks(iblk)%val(ib,jb,ispin), 0.0d0, kind=8) * &
+                        cmplx(dg_frag%buffer_wannier_coef(jb,jw,ispin,i_local), 0.0d0, kind=8)
+                    end if
+                  end do
+                end do
+              end do
+            end do
+          end if
+        else if (delta_h_enabled .and. iblk > 0 .and. &
+                 allocated(dg_frag%H_mat_blocks)) then
+          if (iblk <= size(dg_frag%H_mat_blocks)) then
+            call add_projected_delta_h_to_eff(iblk, i_local, ispin, nbf, nw, use_formal_wannier_h, h_eff)
+          end if
+        else if (yn_fix_func == 'n' .and. iblk > 0 .and. allocated(dg_frag%H_mat_blocks)) then
           if (iblk <= size(dg_frag%H_mat_blocks)) then
             h_eff(1:nw,1:nw) = (0.0d0, 0.0d0)
             do jw = 1, nw
@@ -1366,6 +1420,7 @@
             end do
           end if
         end if
+        call symmetrize_expdiag_h_eff(h_eff, nw)
         do iw = 1, nw
           do jw = 1, nw
             if (use_formal_wannier_h) then
@@ -1468,7 +1523,9 @@
         write(*,'(1x,a)') &
           "[DG-EXPDIAG] dynamic neighbor xi_flux split disabled; set SALMON_DG_EXPDIAG_XI_SPLIT=1 to test."
       end if
-      if (yn_fix_func == 'y' .and. .not. project_h_for_fixed_func) then
+      if (delta_h_enabled .and. .not. project_h_for_fixed_func) then
+        write(*,'(1x,a)') "[DG-EXPDIAG] propagation uses the seed flux Hamiltonian plus projected DG delta-H."
+      else if (yn_fix_func == 'y' .and. .not. project_h_for_fixed_func) then
         write(*,'(1x,a)') "[DG-EXPDIAG] fixed-function propagation uses the seed flux Hamiltonian."
       else
         write(*,'(1x,a)') "[DG-EXPDIAG] propagation projects the current DG Hamiltonian into the active Wannier basis."
@@ -1479,6 +1536,106 @@
     call print_expdiag_timing('local-block')
 
   contains
+
+    subroutine ensure_delta_h_reference()
+      integer :: iblk_ref
+
+      if (delta_h_ref_valid) then
+        if (allocated(delta_h_ref_blocks) .and. allocated(dg_frag%H_mat_blocks)) then
+          if (size(delta_h_ref_blocks) == size(dg_frag%H_mat_blocks)) return
+        end if
+      end if
+      if (.not. allocated(dg_frag%H_mat_blocks)) &
+        stop "DG expdiag delta-H requires H_mat_blocks"
+      if (allocated(delta_h_ref_blocks)) then
+        do iblk_ref = 1, size(delta_h_ref_blocks)
+          if (allocated(delta_h_ref_blocks(iblk_ref)%val)) deallocate(delta_h_ref_blocks(iblk_ref)%val)
+        end do
+        deallocate(delta_h_ref_blocks)
+      end if
+      allocate(delta_h_ref_blocks(size(dg_frag%H_mat_blocks)))
+      do iblk_ref = 1, size(dg_frag%H_mat_blocks)
+        delta_h_ref_blocks(iblk_ref)%ifrag_row = dg_frag%H_mat_blocks(iblk_ref)%ifrag_row
+        delta_h_ref_blocks(iblk_ref)%ifrag_col = dg_frag%H_mat_blocks(iblk_ref)%ifrag_col
+        delta_h_ref_blocks(iblk_ref)%nrow_max = dg_frag%H_mat_blocks(iblk_ref)%nrow_max
+        delta_h_ref_blocks(iblk_ref)%ncol_max = dg_frag%H_mat_blocks(iblk_ref)%ncol_max
+        if (allocated(dg_frag%H_mat_blocks(iblk_ref)%val)) then
+          allocate(delta_h_ref_blocks(iblk_ref)%val(size(dg_frag%H_mat_blocks(iblk_ref)%val, 1), &
+                                                   size(dg_frag%H_mat_blocks(iblk_ref)%val, 2), &
+                                                   size(dg_frag%H_mat_blocks(iblk_ref)%val, 3)))
+          delta_h_ref_blocks(iblk_ref)%val(:, :, :) = dg_frag%H_mat_blocks(iblk_ref)%val(:, :, :)
+        end if
+      end do
+      delta_h_ref_nblocks = size(dg_frag%H_mat_blocks)
+      delta_h_ref_valid = .true.
+      if (.not. delta_h_warned .and. dg_frag%id == 0) then
+        write(*,'(1x,a,i0)') &
+          "[DG-EXPDIAG] propagation adds projected delta-H from reference blocks; nblocks=", &
+          delta_h_ref_nblocks
+        flush(6)
+        delta_h_warned = .true.
+      end if
+    end subroutine ensure_delta_h_reference
+
+    subroutine add_projected_delta_h_to_eff(iblk_use, i_local_use, ispin_use, nbf_use, nw_use, &
+                                           use_formal, h_eff_use)
+      integer, intent(in) :: iblk_use, i_local_use, ispin_use, nbf_use, nw_use
+      logical, intent(in) :: use_formal
+      complex(8), intent(inout) :: h_eff_use(:,:)
+      integer :: ib_use, jb_use, iw_use, jw_use
+      integer :: nrow_use, ncol_use
+      real(8) :: dh_val
+
+      if (.not. delta_h_ref_valid) stop "DG expdiag delta-H reference is not initialized"
+      if (.not. allocated(delta_h_ref_blocks)) stop "DG expdiag delta-H reference blocks are missing"
+      if (iblk_use < 1 .or. iblk_use > size(delta_h_ref_blocks)) return
+      if (iblk_use < 1 .or. iblk_use > size(dg_frag%H_mat_blocks)) return
+      if (.not. allocated(delta_h_ref_blocks(iblk_use)%val)) return
+      if (.not. allocated(dg_frag%H_mat_blocks(iblk_use)%val)) return
+      nrow_use = min(nbf_use, size(dg_frag%H_mat_blocks(iblk_use)%val, 1), &
+                     size(delta_h_ref_blocks(iblk_use)%val, 1))
+      ncol_use = min(nbf_use, size(dg_frag%H_mat_blocks(iblk_use)%val, 2), &
+                     size(delta_h_ref_blocks(iblk_use)%val, 2))
+      if (nrow_use <= 0 .or. ncol_use <= 0) return
+      do jw_use = 1, nw_use
+        do iw_use = 1, nw_use
+          do jb_use = 1, ncol_use
+            do ib_use = 1, nrow_use
+              dh_val = dg_frag%H_mat_blocks(iblk_use)%val(ib_use,jb_use,ispin_use) - &
+                       delta_h_ref_blocks(iblk_use)%val(ib_use,jb_use,ispin_use)
+              if (dh_val == 0.0d0) cycle
+              if (use_formal) then
+                h_eff_use(iw_use,jw_use) = h_eff_use(iw_use,jw_use) + &
+                  conjg(dg_frag%dg_wannier_basis_coef(ib_use,iw_use,ispin_use,i_local_use)) * &
+                  cmplx(dh_val, 0.0d0, kind=8) * &
+                  dg_frag%dg_wannier_basis_coef(jb_use,jw_use,ispin_use,i_local_use)
+              else
+                h_eff_use(iw_use,jw_use) = h_eff_use(iw_use,jw_use) + &
+                  cmplx(dg_frag%buffer_wannier_coef(ib_use,iw_use,ispin_use,i_local_use), 0.0d0, kind=8) * &
+                  cmplx(dh_val, 0.0d0, kind=8) * &
+                  cmplx(dg_frag%buffer_wannier_coef(jb_use,jw_use,ispin_use,i_local_use), 0.0d0, kind=8)
+              end if
+            end do
+          end do
+        end do
+      end do
+    end subroutine add_projected_delta_h_to_eff
+
+    subroutine symmetrize_expdiag_h_eff(h_eff_use, n_use)
+      complex(8), intent(inout) :: h_eff_use(:,:)
+      integer, intent(in) :: n_use
+      integer :: i_use, j_use
+      complex(8) :: hij
+
+      do i_use = 1, n_use
+        h_eff_use(i_use,i_use) = cmplx(real(h_eff_use(i_use,i_use), kind=8), 0.0d0, kind=8)
+        do j_use = i_use + 1, n_use
+          hij = 0.5d0 * (h_eff_use(i_use,j_use) + conjg(h_eff_use(j_use,i_use)))
+          h_eff_use(i_use,j_use) = hij
+          h_eff_use(j_use,i_use) = conjg(hij)
+        end do
+      end do
+    end subroutine symmetrize_expdiag_h_eff
 
     subroutine prepare_wpw_local_payload_ingredients(build_route)
       character(len=*), intent(in) :: build_route
