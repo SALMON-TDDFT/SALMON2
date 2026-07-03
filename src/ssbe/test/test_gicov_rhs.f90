@@ -2,42 +2,52 @@
 ! LG-SBE gicov Phase 3, Task 5a: single-evaluation property test of the gicov
 ! RHS operator gicov_rhs (the physics core drho/dt) + the R-1 qnm<->rho bridge.
 !
+! UPDATED for X-full (Task 1, plans/2026-07-03-gicov-xfull.md): gicov_rhs no
+! longer reads gs%d_matrix at all -- the full-band covariant transport already
+! supplies the WHOLE field term (intraband + interband), so the separate
+! analytic dipole commutator this test used to exercise is GONE (double-
+! counting if it were still added; proven equivalent by test_gicov_xfull.f90's
+! Test D). The fixture below now sets d_matrix=0 (matching production: Task 2
+! zeroes it in gs_info_ssbe.f90's gicov branch); the former "N: dipole nonzero"
+! check is dropped (there is no dipole term left to be non-vacuous) and the
+! former "E: direct-assembly" equality no longer includes the dropped -i*cterm
+! commutator. P/H/G are unchanged and still pass.
+!
 ! WHY THIS FILE EXISTS
 !   Task 5a builds the gicov right-hand side as a callable routine (gicov_rhs)
 !   and the rho_ij_from_q / q_ij_from_rho representation bridge, plus the
-!   prepare_qnm gicov change (same-block exp_iphi=1 / abs_dnm=0).  It does NOT
-!   build the integrator (Strang/Taylor4 + AB4 conservation gate = Task 5b).
-!   Isolating the RHS lets a RHS/representation/sign bug be told apart from an
-!   integrator-stability issue, so this test asserts on ONE evaluation of drho
-!   (no time stepping) against the four properties a coherent, gauge-covariant
-!   generator must satisfy:
+!   prepare_qnm gicov change (X-full: exp_iphi=1/abs_dnm=0 for ALL off-diagonal
+!   pairs).  It does NOT build the integrator (Strang/Taylor4 + AB4
+!   conservation gate = Task 5b).  Isolating the RHS lets a RHS/representation/
+!   sign bug be told apart from an integrator-stability issue, so this test
+!   asserts on ONE evaluation of drho (no time stepping) against the
+!   properties a coherent, gauge-covariant generator must satisfy:
 !
 !     P (trace-preserving): sum_ik sum_n Re(drho(n,n,ik)) = 0.  Protects total
-!         population conservation -- the covariant intraband gradient telescopes
-!         to zero total-trace over the periodic grid, and both the dipole
-!         commutator and the energy/dephasing terms are traceless per k.
+!         population conservation -- the covariant transport telescopes to
+!         zero total-trace over the periodic grid, and the energy/dephasing
+!         terms are traceless per k.
 !     H (Hermitian): drho(:,:,k) Hermitian for every k.  Protects "drho/dt of a
 !         Hermitian rho under a Hermitian generator is Hermitian" -- guards a
-!         wrong sign / a non-Hermitian d_matrix / a broken commutator.
+!         wrong sign or a broken commutator.
 !     G (gauge-covariant): under a random per-k BLOCK gauge W(k) applied to
-!         u_transport (Wilson-line), p_mod_matrix (-> d_matrix) and rho,
-!         drho_gauged(k) = W(k)^H drho_ungauged(k) W(k).  This is THE gicov
-!         property (Approach-B'): the representation bridge and every sign must
-!         be right or it fails.  Exact-degenerate block => the energy term is
+!         u_transport (Wilson-line) and rho, drho_gauged(k) =
+!         W(k)^H drho_ungauged(k) W(k).  This is THE gicov property
+!         (Approach-B'): the representation bridge and every sign must be
+!         right or it fails.  Exact-degenerate block => the energy term is
 !         block-constant hence covariant; t_2 -> huge => the (strictly legacy,
 !         not block-covariant) dephasing is negligible at the 1e-9 gate.
-!     N (nonzero): the covariant contribution AND the dipole contribution are
-!         each individually nonzero -- guards against a vacuous all-zero RHS
-!         that would satisfy P/H/G trivially.
+!     N (nonzero): the covariant contribution is nonzero -- guards against a
+!         vacuous all-zero RHS that would satisfy P/H/G trivially.
 !
 !   Fixture: nb=4, nk=8 (num_kgrid=(8,1,1)); a fixed EXACTLY-degenerate composite
 !   block {2,3} at eigen 0.90 isolated by a 0.60 gap from singletons band 1
-!   (0.30) and band 4 (1.50) -- the nonzero out-of-block gap keeps the dipole
-!   active; the k-dependent smooth Hermitian test density + a nontrivial 2x2
-!   block Wilson transport keep the covariant term active.  sbe_lg_degen='gicov'
-!   and the REAL prepare_qnm is run (exercises the same-block exp_iphi=1 change);
-!   the test density is injected into sbe%qnm via q_ij_from_rho so gicov_rhs
-!   reconstructs it exactly via rho_ij_from_q.
+!   (0.30) and band 4 (1.50) -- the k-dependent smooth Hermitian test density +
+!   a nontrivial 2x2 block Wilson transport keep the covariant term active.
+!   d_matrix = 0 (X-full). sbe_lg_degen='gicov' and the REAL prepare_qnm is
+!   run (exercises the all-off-diagonal exp_iphi=1 change); the test density is
+!   injected into sbe%qnm via q_ij_from_rho so gicov_rhs reconstructs it
+!   exactly via rho_ij_from_q.
 !
 ! BUILD (already-built ninja tree at build_local/; single-process communication
 ! dummy).  Links the SAME objects the salmon executable built, minus main.f90.o
@@ -160,35 +170,24 @@ contains
     end if
   end function knext
 
-  !======================= build d_matrix from p (gicov rule) =================
-  ! Mirrors prepare_matrix's gicov branch: same-block -> 0; out-of-block with
-  ! |delta_omega|>eps -> i*p/delta_omega; else 0.  d is Hermitian iff p is.
+  !======================= d_matrix (X-full: always zero) =====================
+  ! X-full: gicov_rhs no longer reads gs%d_matrix (the full-band covariant
+  ! transport supplies the whole field term, incl. the interband dipole) --
+  ! zero it, matching the Task 2 gs_info_ssbe.f90 gicov branch's own
+  ! d_matrix=0 wiring. Kept as a named subroutine (still called from build_gs
+  ! and the G-test's gauged gsg rebuild) so the fixture's shape/call sites are
+  ! unchanged; p_mod_matrix is still built (harmless, just unused for d now).
   subroutine build_d_from_p(gs)
     implicit none
     type(s_sbe_gs_info), intent(inout) :: gs
-    real(8), parameter :: eps = 1d-12
-    integer :: ik, ib, jb
     gs%d_matrix = (0d0, 0d0)
-    do ik = 1, nk
-      do ib = 1, nb
-        do jb = 1, nb
-          if (blk(ib) == blk(jb)) then
-            gs%d_matrix(ib, jb, 1:3, ik) = (0d0, 0d0)
-          else if (abs(gs%delta_omega(ib, jb, ik)) > eps) then
-            gs%d_matrix(ib, jb, 1:3, ik) = zi_ * gs%p_mod_matrix(ib, jb, 1:3, ik) &
-                                         & / gs%delta_omega(ib, jb, ik)
-          else
-            gs%d_matrix(ib, jb, 1:3, ik) = (0d0, 0d0)
-          end if
-        end do
-      end do
-    end do
   end subroutine build_d_from_p
 
   !======================= synthetic gicov gs fixture =========================
-  ! Exactly-degenerate composite block {2,3}; singletons {1},{4}; nonzero
-  ! out-of-block gap (0.60) => dipole active.  Hermitian p on axis 1 only
-  ! (epdir=(1,0,0)); nontrivial 2x2 block Wilson transport on axis 1.
+  ! Exactly-degenerate composite block {2,3}; singletons {1},{4}; 0.60
+  ! out-of-block gap (kept for delta_omega/energy-term realism; d_matrix=0
+  ! regardless, X-full).  Hermitian p on axis 1 only (epdir=(1,0,0));
+  ! nontrivial 2x2 block Wilson transport on axis 1.
   subroutine build_gs(gs)
     implicit none
     type(s_sbe_gs_info), intent(out) :: gs
@@ -310,12 +309,12 @@ contains
     integer, intent(inout) :: nfail
     type(s_sbe_gs_info) :: gs, gsg
     type(s_sbe_bloch_solver) :: sbe, sbeg
-    real(8) :: E(3), dk(3), tr, hn, gerr, cov_mag, dip_mag, rt_err, eqerr
+    real(8) :: E(3), dk(3), tr, hn, gerr, cov_mag, rt_err, eqerr
     logical :: deph_by_gw
     complex(8) :: rho(nb, nb, nk), rhog(nb, nb, nk)
     complex(8) :: drho(nb, nb, nk), drhog(nb, nb, nk), drho_expected(nb, nb, nk)
-    complex(8) :: Dq(nb, nb, 3, nk), dE(nb, nb), cc, W(nb, nb), Wh(nb, nb), tgt(nb, nb)
-    integer :: icomm, ik, ib, jb, lb, axis, kk
+    complex(8) :: Dq(nb, nb, 3, nk), W(nb, nb), Wh(nb, nb), tgt(nb, nb)
+    integer :: icomm, ik, ib, jb, axis, kk
 
     icomm = 0
     E(1) = 0.1d0; E(2) = 0d0; E(3) = 0d0
@@ -363,7 +362,7 @@ contains
     call check_true(is_finite(hn) .and. hn < 1d-10, &
       "H: drho(:,:,k) Hermitian for every k to 1e-10", nfail)
 
-    ! ---- N: covariant AND dipole contributions each individually nonzero ------
+    ! ---- N: covariant contribution nonzero (X-full: no separate dipole term) --
     do axis = 1, 3
       dk(axis) = gs%b_matrix(axis, axis) / dble(num_kgrid(axis))
     end do
@@ -377,56 +376,30 @@ contains
         end do
       end do
     end do
-    dip_mag = 0d0
-    do ik = 1, nk
-      do ib = 1, nb
-        do jb = 1, nb
-          dE(ib, jb) = E(1)*gs%d_matrix(ib,jb,1,ik) + E(2)*gs%d_matrix(ib,jb,2,ik) + E(3)*gs%d_matrix(ib,jb,3,ik)
-        end do
-      end do
-      do ib = 1, nb
-        do jb = 1, nb
-          cc = (0d0, 0d0)
-          do lb = 1, nb
-            cc = cc + dE(ib, lb) * rho(lb, jb, ik) - rho(ib, lb, ik) * dE(lb, jb)
-          end do
-          dip_mag = max(dip_mag, abs(cc))
-        end do
-      end do
-    end do
     call check_true(cov_mag > 1d-6, &
-      "N: covariant intraband contribution is nonzero (not vacuous)", nfail)
-    call check_true(dip_mag > 1d-6, &
-      "N: out-of-block dipole contribution is nonzero (not vacuous)", nfail)
+      "N: covariant transport contribution is nonzero (not vacuous)", nfail)
+    call check_true(maxval(abs(gs%d_matrix)) < 1d-300, &
+      "N: d_matrix is exactly 0 (X-full: gicov_rhs no longer reads it)", nfail)
 
     ! ---- E: direct-assembly equality (drho == independently assembled RHS) ----
-    ! P/H/G/N above each pass even if a WHOLE TERM were dropped from gicov_rhs
-    ! (every term is separately traceless/Hermitian/gauge-covariant, and N only
-    ! recomputes magnitudes from the fixture, not from gicov_rhs's own output).
-    ! Here drho_expected is independently re-assembled from the SAME ingredients
-    ! gicov_rhs uses -- the SAME covariant_grad_block output Dq (already built
-    ! above for the N check), the SAME -i*sum_a E_a[d_matrix_a,rho] commutator,
-    ! and the SAME -i*delta_omega*rho / -rho/t_2 off-diagonal terms -- and
-    ! compared elementwise against gicov_rhs's actual OUTPUT drho.  Dropping
-    ! EITHER the covariant transport term OR the dipole commutator term from
-    ! gicov_rhs would change drho but leave drho_expected (computed here, not
-    ! from gicov_rhs) unchanged, so this check would then fail.
+    ! P/H/G/N above each pass even if the covariant term were dropped from
+    ! gicov_rhs (every term is separately traceless/Hermitian/gauge-covariant,
+    ! and N only recomputes magnitudes from the fixture, not from gicov_rhs's
+    ! own output).  Here drho_expected is independently re-assembled from the
+    ! SAME ingredients gicov_rhs uses -- the SAME covariant_grad_block output Dq
+    ! (already built above for the N check) and the SAME -i*delta_omega*rho /
+    ! -rho/t_2 off-diagonal terms -- and compared elementwise against
+    ! gicov_rhs's actual OUTPUT drho.  X-full: NO dipole commutator term (it
+    ! was dropped from gicov_rhs -- see file header); dropping the covariant
+    ! transport term would change drho but leave drho_expected (computed here,
+    ! not from gicov_rhs) unchanged, so this check would then fail.
     deph_by_gw = (yn_sbe_gw_collision == 'y' .and. trim(sbe_deph_mode) == 'gw')
     eqerr = 0d0
     do ik = 1, nk
       do ib = 1, nb
         do jb = 1, nb
-          dE(ib, jb) = E(1)*gs%d_matrix(ib,jb,1,ik) + E(2)*gs%d_matrix(ib,jb,2,ik) + E(3)*gs%d_matrix(ib,jb,3,ik)
-        end do
-      end do
-      do ib = 1, nb
-        do jb = 1, nb
-          cc = (0d0, 0d0)
-          do lb = 1, nb
-            cc = cc + dE(ib, lb) * rho(lb, jb, ik) - rho(ib, lb, ik) * dE(lb, jb)
-          end do
           drho_expected(ib, jb, ik) = &
-            (E(1)*Dq(ib,jb,1,ik) + E(2)*Dq(ib,jb,2,ik) + E(3)*Dq(ib,jb,3,ik)) - zi_ * cc
+            (E(1)*Dq(ib,jb,1,ik) + E(2)*Dq(ib,jb,2,ik) + E(3)*Dq(ib,jb,3,ik))
           if (ib /= jb) then
             drho_expected(ib, jb, ik) = drho_expected(ib, jb, ik) &
               - zi_ * gs%delta_omega(ib, jb, ik) * rho(ib, jb, ik)
@@ -439,7 +412,7 @@ contains
       end do
     end do
     call check_true(is_finite(eqerr) .and. eqerr < 1d-12, &
-      "E: drho == direct-assembly gterm - i*cterm + energy + dephasing (non-vacuous equality)", nfail)
+      "E: drho == direct-assembly gterm + energy + dephasing (X-full, non-vacuous equality)", nfail)
 
     ! ---- G: gauge covariance under a random per-k block gauge W(k) ------------
     ! gauged rho, u_transport (Wilson line), p (-> d_matrix); eigen/block_id kept.
@@ -484,8 +457,8 @@ contains
 
     write(*, '(a,es10.2,a,es10.2,a,es10.2,a,es10.2,a,es10.2)') &
       "      residuals  P=", abs(tr), "  H=", hn, "  G=", gerr, "  E=", eqerr, "  round-trip=", rt_err
-    write(*, '(a,es10.2,a,es10.2)') &
-      "      nonzero    cov=", cov_mag, "  dip=", dip_mag
+    write(*, '(a,es10.2)') &
+      "      nonzero    cov=", cov_mag
   end subroutine test_rhs
 
 end program test_gicov_rhs

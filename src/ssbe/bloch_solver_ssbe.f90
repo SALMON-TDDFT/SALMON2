@@ -561,21 +561,23 @@ subroutine prepare_qnm(sbe, gs, icomm)
     where (abs(gs%delta_omega(:, :, sbe%ik_min:sbe%ik_max)) < 1.d-3) sbe%abs_dnm = 0.d0
   end if
 
-  ! gicov (R-1 representation): same-block off-diagonal coherences are carried in
-  ! the PHYSICAL basis (qnm == rho).  Force exp_iphi=1 and abs_dnm=0 on every
-  ! same-block pair (gs%block_id) BEFORE the phase-fill below, so (i) the
+  ! gicov X-full (R-1 representation): ALL off-diagonal coherences are carried
+  ! in the PHYSICAL basis (qnm == rho).  Force exp_iphi=1 and abs_dnm=0 on
+  ! every off-diagonal pair BEFORE the phase-fill below, so (i) the
   ! phase-fill's abs_dnm>=1.d-13 gate skips them and leaves exp_iphi=1, giving
-  ! qnm_new == rho for same-block pairs, and (ii) the same-block dipole source
-  ! terms (which multiply abs_dnm) vanish -- the in-block interband coupling is
-  ! supplied instead by the gauge-covariant gradient (gicov_rhs).  Out-of-block
-  ! pairs keep the dipole-derived exp_iphi/abs_dnm computed above.  gi/gifix/off
-  ! are untouched (this whole block is guarded by sbe_lg_degen=='gicov').
-  if (trim(sbe_lg_degen) == 'gicov' .and. allocated(gs%block_id)) then
+  ! qnm_new == rho for every off-diagonal pair, and (ii) the dipole source
+  ! terms (which multiply abs_dnm) vanish everywhere -- the interband coupling
+  ! is supplied instead by the full-band gauge-covariant gradient (gicov_rhs),
+  ! not a dipole source.  X-full has a SINGLE full-band block (block_id === 1),
+  ! so "same-block" and "ib/=jb" now coincide; the loop body no longer
+  ! references block_id.  gi/gifix/off are untouched (this whole block is
+  ! guarded by sbe_lg_degen=='gicov').
+  if (trim(sbe_lg_degen) == 'gicov') then
     !$omp parallel do default(shared) private(ik, ib, jb) collapse(3)
     do ik = sbe%ik_min, sbe%ik_max
       do ib=1,nb
         do jb=1,nb
-          if (gs%block_id(ib, ik) == gs%block_id(jb, ik)) then
+          if (ib /= jb) then
             sbe%abs_dnm(ib, jb, ik) = 0.d0
             sbe%exp_iphi(ib, jb, ik) = (1.d0, 0.d0)
           end if
@@ -639,16 +641,15 @@ pure function q_ij_from_rho(sbe, rho_ij, ib, jb, ik) result(q)
 end function q_ij_from_rho
 
 !===================================================================
-! gicov RHS operator (Phase 3): instantaneous COHERENT drho/dt of the
+! gicov RHS operator (Phase 3, X-full): instantaneous COHERENT drho/dt of the
 ! gauge-covariant length-gauge propagator, as a callable routine.  NO
 ! integrator / AB4 / dqnm_stock here (that is Task 5b) -- this returns the
 ! instantaneous physical drho only, so a RHS bug can be told apart from an
 ! integrator-stability issue.
 !
-!   drho = + sum_a E_a * D_cov[rho]_a         covariant intraband transport (1)
-!          - i sum_a E_a [d_matrix_a, rho]    out-of-block interband dipole   (2)
-!          - i * delta_omega .* rho           band-energy coherent term       (3a; off-diag)
-!          - rho / t_2                         legacy interband dephasing      (3b; off-diag)
+!   drho = + sum_a E_a * D_cov[rho]_a         covariant transport (WHOLE field term) (1)
+!          - i * delta_omega .* rho           band-energy coherent term       (2a; off-diag)
+!          - rho / t_2                         legacy interband dephasing      (2b; off-diag)
 !
 ! (1) covariant_grad_block returns D_cov rho = d_k rho - i[xi,rho] on the FULL
 !     nb x nb density; it REPLACES the legacy grad_qnm term.  gs%u_transport is
@@ -657,11 +658,17 @@ end function q_ij_from_rho
 !     legacy grad_k_array_nb2d_dcomplex spacing (nabt = bNmat(:,4)/(b(a,a)/N_a)),
 !     so with U==I this reduces EXACTLY to the legacy gradient; the "+E*grad"
 !     field prefactor/sign matches dt_evolve_bloch_lg (:663,:685).
-! (2) gs%d_matrix in gicov already holds ONLY the out-of-block dipole i*p/dw
-!     (same-block == 0), so -i E[d,rho] is exactly the block<->far-band coupling
-!     -- the same physics the legacy off-diagonal dipole source builds (verified
-!     term-by-term), kept as a commutator.  NO same-block dipole is added.
-! (3) energy -i*delta_omega*rho (= -i[H0,rho]) and the 1/t_2 dephasing are kept
+!     X-full (block_id === 1, the full nb x nb overlap polar-factored as ONE
+!     block): xi is now the FULL-BAND gauge-covariant connection, so its
+!     off-diagonal entries (xi_inter) already ARE the physical interband
+!     dipole -- the separate analytic dipole commutator that Phase-3-fixed-block
+!     gicov used to add here would double-count it, so it is DELETED (proven
+!     equivalent, not merely "unneeded", by src/ssbe/test/test_gicov_xfull.f90's
+!     Test D: a REAL sigma_y rotation gives zero diagonal Berry connection, so
+!     xi_full = xi_inter, and covariant_grad_block(full) is shown to equal
+!     covariant_grad_block(bare) - i[xi_inter,rho] to stencil-matched tol).
+!     gs%d_matrix is NO LONGER READ by this routine.
+! (2) energy -i*delta_omega*rho (= -i[H0,rho]) and the 1/t_2 dephasing are kept
 !     exactly as the legacy LG RHS (:680,:690); when GW dephasing is active the
 !     t_2 term is suppressed (5b applies the GW collision as a separate substep).
 !
@@ -685,17 +692,11 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   real(8), intent(in) :: Efield(1:3)
   complex(8), intent(out) :: drho(sbe%nb, sbe%nb, sbe%nk)
   integer, intent(in) :: icomm
-  integer :: nb, nk, ik, ib, jb, lb, axis
+  integer :: nb, nk, ik, ib, jb, axis
   real(8) :: dk(1:3)
   logical :: deph_by_gw
   complex(8), allocatable :: rho_loc(:,:,:), rho_full(:,:,:), Dq(:,:,:,:)
-  ! dE is sized off the DUMMY-argument component sbe%nb (not the local nb,
-  ! which is only assigned by an executable statement below) so it is a
-  ! legal automatic array and can be listed directly in an OMP private()
-  ! clause -- each thread then gets its own nb x nb scratch, unlike an
-  ! ALLOCATABLE array which would need explicit per-thread (re)allocation.
-  complex(8) :: dE(sbe%nb, sbe%nb)
-  complex(8) :: gterm, cterm
+  complex(8) :: gterm
 
   nb = sbe%nb
   nk = sbe%nk
@@ -714,7 +715,7 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   end do
   call comm_summation(rho_loc, rho_full, nb*nb*nk, icomm)
 
-  ! ---- (1) covariant intraband transport (physical): + sum_a E_a D_cov[rho]_a
+  ! ---- (1) covariant transport (physical), WHOLE field term: + sum_a E_a D_cov[rho]_a
   do axis = 1, 3
     dk(axis) = gs%b_matrix(axis, axis) / dble(num_kgrid(axis))
   end do
@@ -724,30 +725,16 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   deph_by_gw = (yn_sbe_gw_collision == 'y' .and. trim(sbe_deph_mode) == 'gw')
 
   drho = (0.d0, 0.d0)
-  !$omp parallel do default(shared) private(ik, ib, jb, lb, dE, gterm, cterm)
+  !$omp parallel do default(shared) private(ik, ib, jb, gterm)
   do ik = 1, nk
-    ! E-projected OUT-OF-BLOCK dipole at this k: dE = sum_a E_a d_matrix_a
     do ib = 1, nb
       do jb = 1, nb
-        dE(ib, jb) = Efield(1) * gs%d_matrix(ib, jb, 1, ik) + &
-                     Efield(2) * gs%d_matrix(ib, jb, 2, ik) + &
-                     Efield(3) * gs%d_matrix(ib, jb, 3, ik)
-      end do
-    end do
-    do ib = 1, nb
-      do jb = 1, nb
-        ! (1) covariant intraband
+        ! (1) covariant transport (intraband + interband, full-band)
         gterm = Efield(1) * Dq(ib, jb, 1, ik) + &
                 Efield(2) * Dq(ib, jb, 2, ik) + &
                 Efield(3) * Dq(ib, jb, 3, ik)
-        ! (2) out-of-block interband dipole commutator: -i [dE, rho]
-        cterm = (0.d0, 0.d0)
-        do lb = 1, nb
-          cterm = cterm + dE(ib, lb) * rho_full(lb, jb, ik) &
-                        - rho_full(ib, lb, ik) * dE(lb, jb)
-        end do
-        drho(ib, jb, ik) = gterm - zi * cterm
-        ! (3) coherent band energy + legacy dephasing (off-diagonal only)
+        drho(ib, jb, ik) = gterm
+        ! (2) coherent band energy + legacy dephasing (off-diagonal only)
         if (ib /= jb) then
           drho(ib, jb, ik) = drho(ib, jb, ik) &
             & - zi * gs%delta_omega(ib, jb, ik) * rho_full(ib, jb, ik)
