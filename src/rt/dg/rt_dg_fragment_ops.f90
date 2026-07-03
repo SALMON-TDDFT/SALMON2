@@ -4353,6 +4353,8 @@ contains
 
     integer, parameter :: pol_coef_cache_target_mb = 64
     integer :: ispin, ifrag, i_local, ib, iw, jw, idir
+    integer :: iblk_idx, iblk, ifrag_row, ifrag_col, io, jo, nrow, ncol
+    integer :: row_gid, col_gid, row_pos, col_pos
     integer :: istate, occ0, nbatch, state_work
     integer :: nocc_spin, occ_first, occ_last
     integer :: n_global, n_needed, gid, pos, nkeep, nkeep_max, nbasis
@@ -4438,6 +4440,33 @@ contains
           if (gid >= 1 .and. gid <= n_global) row_needed(gid) = .true.
         end do
       end do
+      if (use_buffer_wannier .and. dg_frag%buffer_wannier_xi_flux_available .and. &
+          allocated(dg_frag%buffer_wannier_xi_flux_blocks) .and. &
+          allocated(dg_frag%buffer_wannier_xi_flux_local_block_ids)) then
+        do iblk_idx = 1, size(dg_frag%buffer_wannier_xi_flux_local_block_ids)
+          iblk = dg_frag%buffer_wannier_xi_flux_local_block_ids(iblk_idx)
+          if (iblk < 1 .or. iblk > size(dg_frag%buffer_wannier_xi_flux_blocks)) cycle
+          ifrag_row = dg_frag%buffer_wannier_xi_flux_blocks(iblk)%ifrag_row
+          ifrag_col = dg_frag%buffer_wannier_xi_flux_blocks(iblk)%ifrag_col
+          if (ifrag_row < dg_frag%ifrag_start .or. ifrag_row > dg_frag%ifrag_end) cycle
+          if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
+          if (.not. allocated(dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val)) cycle
+          nrow = min(dg_frag%n_basis(ifrag_row, ispin), &
+                     size(dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val, 2), &
+                     size(dg_frag%index_basis, 1))
+          ncol = min(dg_frag%n_basis(ifrag_col, ispin), &
+                     size(dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val, 3), &
+                     size(dg_frag%index_basis, 1))
+          do io = 1, nrow
+            row_gid = dg_frag%index_basis(io, ifrag_row, ispin)
+            if (row_gid >= 1 .and. row_gid <= n_global) row_needed(row_gid) = .true.
+          end do
+          do jo = 1, ncol
+            col_gid = dg_frag%index_basis(jo, ifrag_col, ispin)
+            if (col_gid >= 1 .and. col_gid <= n_global) row_needed(col_gid) = .true.
+          end do
+        end do
+      end if
       n_needed = count(row_needed)
       if (n_needed <= 0) cycle
       if (allocated(needed_ids)) deallocate(needed_ids)
@@ -4544,6 +4573,48 @@ contains
             pol_local(idir) = pol_local(idir) + contrib
           end do
         end do
+        if (use_buffer_wannier .and. dg_frag%buffer_wannier_xi_flux_available .and. &
+            allocated(dg_frag%buffer_wannier_xi_flux_blocks) .and. &
+            allocated(dg_frag%buffer_wannier_xi_flux_local_block_ids)) then
+          do iblk_idx = 1, size(dg_frag%buffer_wannier_xi_flux_local_block_ids)
+            iblk = dg_frag%buffer_wannier_xi_flux_local_block_ids(iblk_idx)
+            if (iblk < 1 .or. iblk > size(dg_frag%buffer_wannier_xi_flux_blocks)) cycle
+            ifrag_row = dg_frag%buffer_wannier_xi_flux_blocks(iblk)%ifrag_row
+            ifrag_col = dg_frag%buffer_wannier_xi_flux_blocks(iblk)%ifrag_col
+            if (ifrag_row < dg_frag%ifrag_start .or. ifrag_row > dg_frag%ifrag_end) cycle
+            if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
+            if (.not. allocated(dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val)) cycle
+            nrow = min(dg_frag%n_basis(ifrag_row, ispin), &
+                       size(dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val, 2), &
+                       size(dg_frag%index_basis, 1))
+            ncol = min(dg_frag%n_basis(ifrag_col, ispin), &
+                       size(dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val, 3), &
+                       size(dg_frag%index_basis, 1))
+            do io = 1, nrow
+              row_gid = dg_frag%index_basis(io, ifrag_row, ispin)
+              if (row_gid < 1 .or. row_gid > n_global) cycle
+              row_pos = needed_pos(row_gid)
+              if (row_pos <= 0) cycle
+              do jo = 1, ncol
+                col_gid = dg_frag%index_basis(jo, ifrag_col, ispin)
+                if (col_gid < 1 .or. col_gid > n_global) cycle
+                col_pos = needed_pos(col_gid)
+                if (col_pos <= 0) cycle
+                do idir = 1, 3
+                  contrib = 0.0d0
+                  do istate = 1, nbatch
+                    occ = max(0.0d0, system%rocc(occ0 + istate - 1, 1, ispin))
+                    if (occ <= 0.0d0) cycle
+                    contrib = contrib - occ * real(conjg(coef_work(row_pos, istate)) * &
+                      dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val(idir, io, jo, ispin) * &
+                      coef_work(col_pos, istate), 8)
+                  end do
+                  pol_local(idir) = pol_local(idir) + contrib
+                end do
+              end do
+            end do
+          end do
+        end if
       end do
     end do
 
