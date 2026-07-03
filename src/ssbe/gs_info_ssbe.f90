@@ -57,7 +57,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     use common_ssbe, only: grad_k_array_nb1d_double
     use salmon_global, only: gauge_sbe, file_sbe_prod_dk, sbe_lg_degen, num_kgrid, sbe_lg_degen_floor
     use degenerate_block_ssbe, only: build_xi, same_block, blend, theta_on, theta_off, &
-                                   & build_blocks_fixed, build_block_transport
+                                   & build_blocks_fixed_closed, build_block_transport
     implicit none
     type(s_sbe_gs_info), intent(inout) :: gs
     character(*), intent(in) :: sysname
@@ -588,14 +588,18 @@ contains
                 end do
             end do
 
-            ! fixed k-independent block partition, stored IN the gs object
+            ! overlap-closed fixed partition (single source of truth: also
+            ! caches same_block, used by the out-of-block dipole loop below)
             if (.not. allocated(gs%block_id)) allocate(gs%block_id(1:nb, 1:nk))
-            call build_blocks_fixed(nb, nk, gs%eigen, gs%block_id)
+            call build_blocks_fixed_closed(nb, nk, gs%nbvec, gs%bvec, gs%prod_dk, &
+                                         & gs%eigen, num_kgrid, gs%block_id)
 
-            ! block-diagonal Wilson-line transport (polar, fail-closed on near-singular)
+            ! block-diagonal Wilson-line transport on the CLOSED partition
+            ! (well-conditioned across umklapp wrap links; fail-closed on
+            ! any residual near-singular block)
             if (.not. allocated(gs%u_transport)) allocate(gs%u_transport(1:nb, 1:nb, 1:3, 1:nk))
             call build_block_transport(nb, nk, gs%nbvec, gs%bvec, gs%prod_dk, &
-                                     & gs%eigen, num_kgrid, gs%u_transport, nrej)
+                                     & gs%block_id, num_kgrid, gs%u_transport, nrej)
 
             ! out-of-block dipole only; same-block pairs handled by transport (Task 5)
             do ik=1, nk
@@ -617,6 +621,21 @@ contains
 
             if (irank == 0) then
                 write(*, '(a,i0)') "# build_block_transport: rejected blocks = ", nrej
+                ! G0 closure-size diagnostic (cascade guard): print block count
+                ! and the largest overlap-closed block. A largest_block near nb
+                ! signals a runaway closure -> re-tune wclose / reconsider X-full.
+                block
+                    integer :: ib0, nblk0, mx0, bsz0(nb)
+                    nblk0 = maxval(gs%block_id(:, 1))
+                    bsz0 = 0
+                    do ib0 = 1, nb
+                        bsz0(gs%block_id(ib0, 1)) = bsz0(gs%block_id(ib0, 1)) + 1
+                    end do
+                    mx0 = maxval(bsz0(1:nblk0))
+                    write(*, '(a,i0,a,i0,a,i0)') &
+                        & "# gicov overlap-closed partition: nblk=", nblk0, &
+                        & " largest_block=", mx0, " nb=", nb
+                end block
             end if
         else
             ! ===== default 'off': bit-identical to the pre-Pb3 dipole construction =====
