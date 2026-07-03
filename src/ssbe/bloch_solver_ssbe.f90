@@ -612,8 +612,11 @@ end subroutine prepare_qnm
 !            = exp_iphi(i,j) * qnm(i,j)             (i/=j)
 !   qnm(i,j) =              rho(i,j)                (i==j)
 !            = conjg(exp_iphi(i,j)) * rho(i,j)      (i/=j)
-! In gicov, prepare_qnm sets exp_iphi=1 on same-block pairs, so same-block
-! qnm == rho; out-of-block pairs keep the dipole-derived unit phase.
+! In gicov (X-full), prepare_qnm sets exp_iphi=1 on EVERY off-diagonal pair
+! (ib/=jb), not just same-block ones, so qnm == rho for all off-diagonal
+! coherences -- there is no out-of-block dipole-derived phase left; the
+! interband coupling is carried entirely by the full-band gauge-covariant
+! gradient (gicov_rhs), not by a dipole-phase-carrying qnm/rho distinction.
 !===================================================================
 pure function rho_ij_from_q(sbe, ib, jb, ik) result(r)
   implicit none

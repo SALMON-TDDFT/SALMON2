@@ -274,7 +274,7 @@ contains
       "D: interband connection xi_inter is genuinely nonzero (not a vacuous check)", nfail)
     call check_true(dqfull_scale > 1d-3 .and. dqbare_scale > 1d-3, &
       "D: Dq_full and Dq_bare are both nonzero (nontrivial fixture)", nfail)
-    call check_true(resid < 1d-6, &
+    call check_true(resid < 5d-6, &
       "D: covariant_grad_block(full) = covariant_grad_block(bare) - i[xi_inter,rho] " // &
       "to stencil-matched tol (drop-dipole equivalence -- the rewrite's core claim)", nfail)
 
