@@ -1453,6 +1453,7 @@
           end if
           h_eff(iw,iw) = h_eff(iw,iw) - rdot_diag
         end do
+        call symmetrize_expdiag_h_eff(h_eff, nw)
         evec(1:nw,1:nw) = h_eff(1:nw,1:nw)
         t1 = get_wtime()
         call eigen_zheev(evec, eval, h_eff)
