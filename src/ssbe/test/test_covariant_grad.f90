@@ -245,7 +245,7 @@ contains
       end do
     end do
 
-    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq)
+    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq, 1, nk)
 
     ! hand-coded bare central difference (periodic), all axes
     ref = (0d0, 0d0)
@@ -301,7 +301,7 @@ contains
       end do
     end do
 
-    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq)
+    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq, 1, nk)
 
     ! genuinely k-dependent U(2) gauge on block {2,3}
     do ik = 1, nk
@@ -324,7 +324,7 @@ contains
       end do
     end do
 
-    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, Ug, rhog, dk, Dqg)
+    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, Ug, rhog, dk, Dqg, 1, nk)
 
     worst = 0d0
     do ik = 1, nk
@@ -383,7 +383,7 @@ contains
     end do
 
     ! ---- "U" orientation (production) ----
-    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq)
+    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq, 1, nk)
 
     ! analytic target: d_k rho (same stencil) - i[xi,rho] on axis 1; axes 2,3 = 0.
     ! xi is an ADDITIVE connection -> ZERO outside the block (NOT embed, which
@@ -418,7 +418,7 @@ contains
         U_H(:, :, axis, ik) = hc(U_full(:, :, axis, ik))
       end do
     end do
-    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_H, rho, dk, DqH)
+    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_H, rho, dk, DqH, 1, nk)
     call check_true(maxabs4(DqH - tgt) > 1d-4, &
       "C: U^H orientation gives WRONG commutator sign (>1e-4) -> gate real", nfail)
   end subroutine test_C_sign_gate
@@ -471,7 +471,7 @@ contains
       call smooth_herm(nb, dble(ik - 1) / dble(nk), rho(:, :, ik))
     end do
 
-    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq)
+    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq, 1, nk)
 
     ! (i) analytic target built from the SAME CAPPED (m=1..3) stencil, i.e.
     ! what m_max=3 at nk=8 is supposed to produce: d_k rho (3-shell, no shell
@@ -591,8 +591,8 @@ contains
     Wpert = u2_gauge(-0.6d0, 1.3d0, 0.2d0, 0.8d0)     ! deliberately DIFFERENT rotation
     U_B(:, :, 1, idx4) = embed(nb, 2, Wpert)
 
-    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_A, rho, dk, Dq_A)
-    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_B, rho, dk, Dq_B)
+    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_A, rho, dk, Dq_A, 1, nk)
+    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_B, rho, dk, Dq_B, 1, nk)
 
     diff_k1   = maxval(abs(Dq_A(:, :, 1, 1)    - Dq_B(:, :, 1, 1)))
     diff_idx3 = maxval(abs(Dq_A(:, :, 1, idx3) - Dq_B(:, :, 1, idx3)))

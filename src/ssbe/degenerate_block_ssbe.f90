@@ -1285,23 +1285,22 @@ contains
   ! is absent from bvec, OR whose m_max(axis)=0 (singleton axis), leaves
   ! Dq(:,:,axis,:) = 0.
   !-------------------------------------------------------------------
-  subroutine covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq)
+  subroutine covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq, ik_lo, ik_hi)
     implicit none
     integer,    intent(in)  :: nb, nk, nbvec, bvec(3, nbvec), num_kgrid(3)
     complex(8), intent(in)  :: U_full(nb, nb, 3, nk)
     complex(8), intent(in)  :: rho(nb, nb, nk)
     real(8),    intent(in)  :: dk(3)
     complex(8), intent(out) :: Dq(nb, nb, 3, nk)
+    integer,    intent(in)  :: ik_lo, ik_hi   ! local k-range (MPI): only Dq(:,:,:,ik_lo:ik_hi) is computed, OMP-parallel over it. Serial/single-rank callers pass 1, nk. (Required, not optional: an interface mismatch then fails at compile time, not as a silent runtime present()-garbage SEGV.)
     real(8), parameter :: cw(4) = (/ 4d0/5d0, -1d0/5d0, 4d0/105d0, -1d0/280d0 /)
     integer, allocatable :: ik_neighbor(:, :), bwd(:)
-    complex(8), allocatable :: Umf(:,:), Umb(:,:), Utmp(:,:), tmp(:,:), &
-                               fterm(:,:), bterm(:,:), Id(:,:)
-    integer :: iv_axis(3), axis, iv, ik, m, kfwd, krp, kbwd, n
-    integer :: m_max(3)
+    complex(8), allocatable :: Id(:,:)
+    integer :: iv_axis(3), axis, iv, ik, n
+    integer :: m_max(3), klo, khi
 
-    allocate(ik_neighbor(nbvec, nk), bwd(nk))
-    allocate(Umf(nb,nb), Umb(nb,nb), Utmp(nb,nb), tmp(nb,nb), &
-             fterm(nb,nb), bterm(nb,nb), Id(nb,nb))
+    allocate(ik_neighbor(nbvec, nk), bwd(nk), Id(nb,nb))
+    klo = ik_lo;  khi = ik_hi
 
     call build_ik_neighbor(num_kgrid, bvec, nbvec, nk, ik_neighbor)
     iv_axis(1) = find_bvec(bvec, nbvec, 1, 0, 0)
@@ -1333,36 +1332,65 @@ contains
         bwd(ik_neighbor(iv, ik)) = ik
       end do
 
-      do ik = 1, nk
-        Umf  = Id
-        Umb  = Id
-        kfwd = ik      ! position of the next forward link to append = k+(m-1)e
-        kbwd = ik      ! stepped to k-m e inside the loop
-        do m = 1, m_max(axis)
-          ! ---- forward: Um(k) <- Um(k) * U_full(k+(m-1)e); neighbour = k+m e ----
-          call zmm3('N', 'N', nb, Umf, U_full(:, :, axis, kfwd), Utmp)
-          Umf = Utmp
-          krp = ik_neighbor(iv, kfwd)                     ! k+m e
-          call zmm3('N', 'N', nb, Umf, rho(:, :, krp), tmp)   ! Umf * rho(k+m e)
-          call zmm3('N', 'C', nb, tmp, Umf, fterm)            ! ... * Umf^H
-
-          ! ---- backward: base = k-m e; Um(k-m e) <- U_full(k-m e) * Um(k-(m-1)e) ----
-          kbwd = bwd(kbwd)                                 ! k-m e
-          call zmm3('N', 'N', nb, U_full(:, :, axis, kbwd), Umb, Utmp)
-          Umb = Utmp
-          call zmm3('C', 'N', nb, Umb, rho(:, :, kbwd), tmp) ! Umb^H * rho(k-m e)
-          call zmm3('N', 'N', nb, tmp, Umb, bterm)           ! ... * Umb
-
-          Dq(:, :, axis, ik) = Dq(:, :, axis, ik) &
-            + cw(m) * (fterm - bterm) / dk(axis)
-
-          kfwd = krp                                       ! next forward link at k+m e
-        end do
+      ! OMP over the local k-slice. The per-k body runs in cov_grad_one_k, whose
+      ! nb x nb work matrices are automatic (stack) arrays = thread-local by
+      ! construction (robust on gfortran and Fujitsu frt; avoids the flaky
+      ! OMP-private-allocatable path). Dq(:,:,axis,ik) is a disjoint slice per
+      ! ik, so the writes never race. Numerically identical to the old inline loop.
+      !$omp parallel do default(shared) private(ik) schedule(static)
+      do ik = klo, khi
+        call cov_grad_one_k(nb, nbvec, nk, ik, iv, axis, m_max(axis), cw, dk(axis), &
+                            ik_neighbor, bwd, U_full, rho, Id, Dq(:, :, axis, ik))
       end do
+      !$omp end parallel do
     end do
 
-    deallocate(ik_neighbor, bwd, Umf, Umb, Utmp, tmp, fterm, bterm, Id)
+    deallocate(ik_neighbor, bwd, Id)
   end subroutine covariant_grad_block
+
+  !-------------------------------------------------------------------
+  ! Per-k covariant-gradient contribution for one axis (called under OMP).
+  !   Dqk = sum_m cw(m) [ Um(k) rho(k+m e) Um(k)^H
+  !                       - Um(k-m e)^H rho(k-m e) Um(k-m e) ] / dkax
+  ! All nb x nb work matrices are automatic (per-call = thread-local), so this
+  ! is safe to invoke from a parallel do over ik. Bit-for-bit identical to the
+  ! original inlined loop body.
+  !-------------------------------------------------------------------
+  subroutine cov_grad_one_k(nb, nbvec, nk, ik, iv, axis, mmax, cw, dkax, &
+                            ik_neighbor, bwd, U_full, rho, Id, Dqk)
+    implicit none
+    integer,    intent(in)  :: nb, nbvec, nk, ik, iv, axis, mmax
+    real(8),    intent(in)  :: cw(4), dkax
+    integer,    intent(in)  :: ik_neighbor(nbvec, nk), bwd(nk)
+    complex(8), intent(in)  :: U_full(nb, nb, 3, nk), rho(nb, nb, nk), Id(nb, nb)
+    complex(8), intent(out) :: Dqk(nb, nb)
+    complex(8) :: Umf(nb,nb), Umb(nb,nb), Utmp(nb,nb), tmp(nb,nb), fterm(nb,nb), bterm(nb,nb)
+    integer :: m, kfwd, kbwd, krp
+
+    Umf  = Id
+    Umb  = Id
+    kfwd = ik      ! position of the next forward link to append = k+(m-1)e
+    kbwd = ik      ! stepped to k-m e inside the loop
+    Dqk  = (0d0, 0d0)
+    do m = 1, mmax
+      ! ---- forward: Um(k) <- Um(k) * U_full(k+(m-1)e); neighbour = k+m e ----
+      call zmm3('N', 'N', nb, Umf, U_full(:, :, axis, kfwd), Utmp)
+      Umf = Utmp
+      krp = ik_neighbor(iv, kfwd)                     ! k+m e
+      call zmm3('N', 'N', nb, Umf, rho(:, :, krp), tmp)   ! Umf * rho(k+m e)
+      call zmm3('N', 'C', nb, tmp, Umf, fterm)            ! ... * Umf^H
+
+      ! ---- backward: base = k-m e; Um(k-m e) <- U_full(k-m e) * Um(k-(m-1)e) ----
+      kbwd = bwd(kbwd)                                 ! k-m e
+      call zmm3('N', 'N', nb, U_full(:, :, axis, kbwd), Umb, Utmp)
+      Umb = Utmp
+      call zmm3('C', 'N', nb, Umb, rho(:, :, kbwd), tmp) ! Umb^H * rho(k-m e)
+      call zmm3('N', 'N', nb, tmp, Umb, bterm)           ! ... * Umb
+
+      Dqk = Dqk + cw(m) * (fterm - bterm) / dkax
+      kfwd = krp                                       ! next forward link at k+m e
+    end do
+  end subroutine cov_grad_one_k
 
   !-------------------------------------------------------------------
   ! C = op(A) op(B), all n x n complex, via ZGEMM (BLAS).  ta/tb in {'N','C'}.

@@ -378,7 +378,7 @@ contains
       dk(axis) = gs%b_matrix(axis, axis) / dble(num_kgrid(axis))
     end do
     call covariant_grad_block(nb, nk, gs%nbvec, gs%bvec, num_kgrid, &
-                              gs%u_transport, rho, dk, Dq)
+                              gs%u_transport, rho, dk, Dq, 1, nk)
     cov_mag = 0d0
     do ik = 1, nk
       do ib = 1, nb

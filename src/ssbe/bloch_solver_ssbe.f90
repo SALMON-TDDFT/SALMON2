@@ -723,13 +723,15 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
     dk(axis) = gs%b_matrix(axis, axis) / dble(num_kgrid(axis))
   end do
   call covariant_grad_block(nb, nk, gs%nbvec, gs%bvec, num_kgrid, &
-                            gs%u_transport, rho_full, dk, Dq)
+                            gs%u_transport, rho_full, dk, Dq, sbe%ik_min, sbe%ik_max)
 
   deph_by_gw = (yn_sbe_gw_collision == 'y' .and. trim(sbe_deph_mode) == 'gw')
 
   drho = (0.d0, 0.d0)
+  ! only the local k-slice of drho is produced (the caller uses only ik_min:ik_max);
+  ! Dq was likewise computed only on [ik_min:ik_max] by covariant_grad_block.
   !$omp parallel do default(shared) private(ik, ib, jb, gterm)
-  do ik = 1, nk
+  do ik = sbe%ik_min, sbe%ik_max
     do ib = 1, nb
       do jb = 1, nb
         ! (1) covariant transport (intraband + interband, full-band)
