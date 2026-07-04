@@ -489,8 +489,16 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
         if (yn_dg_full_h_eigen_seed /= 'y') then
           call refresh_buffer_wannier_flux_seed_from_current_hamiltonian_std(dg_frag, &
             '[DG-BPW-SCF-SEED] refreshed from initial self-consistent DG Hamiltonian;')
-          call refresh_global_wannier_flux_eigen_from_current_hamiltonian_std(dg_frag, &
-            '[DG-GLOBAL-W-SEED] refreshed global Wannier Flux eigenbasis from initial self-consistent DG Hamiltonian;')
+          if (dg_frag%has_global_wannier_flux_eigen) then
+            if (comm_is_root(dg_frag%id)) then
+              write(*,'(1x,a)') &
+                '[DG-GLOBAL-W-SEED] keeping prepared Wannier Flux eigen seed; skip RT Hamiltonian refresh'
+              flush(6)
+            end if
+          else
+            call refresh_global_wannier_flux_eigen_from_current_hamiltonian_std(dg_frag, &
+              '[DG-GLOBAL-W-SEED] refreshed global Wannier Flux eigenbasis from initial self-consistent DG Hamiltonian;')
+          end if
           refreshed_bpw_scf_seed = .true.
           if (dg_frag%use_plane_wave_basis) then
             call seed_current_mixed_wannier_bpw_eigenstates_std(dg_frag, &
@@ -525,8 +533,16 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
             call calibrate_dcdft_lcfo_static_hamiltonian_std(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_zero)
             call refresh_buffer_wannier_flux_seed_from_current_hamiltonian_std(dg_frag, &
               '[DG-POLISH] refreshed local BPW eigenstates from polished DG Hamiltonian;')
-            call refresh_global_wannier_flux_eigen_from_current_hamiltonian_std(dg_frag, &
-              '[DG-POLISH] refreshed global Wannier Flux eigenbasis from polished DG Hamiltonian;')
+            if (dg_frag%has_global_wannier_flux_eigen) then
+              if (comm_is_root(dg_frag%id)) then
+                write(*,'(1x,a)') &
+                  '[DG-POLISH] keeping prepared Wannier Flux eigen seed; skip polished RT Hamiltonian refresh'
+                flush(6)
+              end if
+            else
+              call refresh_global_wannier_flux_eigen_from_current_hamiltonian_std(dg_frag, &
+                '[DG-POLISH] refreshed global Wannier Flux eigenbasis from polished DG Hamiltonian;')
+            end if
             if (dg_frag%use_plane_wave_basis) then
               call seed_current_mixed_wannier_bpw_eigenstates_std(dg_frag, &
                 '[DG-POLISH] seeded polished W+BPW propagation Hamiltonian eigenstates;')
