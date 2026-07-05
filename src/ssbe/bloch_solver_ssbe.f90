@@ -28,6 +28,13 @@ module bloch_solver_ssbe
     real(8),    save :: sbe_tmr_comm = 0d0    ! rho halo-exchange (was: full allreduce) wall [s]
     integer(8), save :: sbe_tmr_nrhs = 0      ! number of gicov_rhs calls
 
+    ! --- TEST hook (test_gicov_hex.f90 orthogonal-equivalence check): force the
+    ! GENERAL (non-orthogonal, reduced-axis c_i = (E.a_i)/2pi) field-term path
+    ! in gicov_rhs even when b_matrix is strictly diagonal, so the two paths can
+    ! be compared on the same fixture.  NEVER set in production: the default
+    ! .false. keeps every diagonal-b campaign on the legacy branch bit-for-bit.
+    logical, save :: gicov_force_general_field = .false.
+
     ! --- gicov halo-exchange plan (built once on first gicov_rhs call) ---
     ! Replaces the full-nk rho allreduce: each rank ships only the +-m_max-shell
     ! neighbour-k densities the covariant stencil actually reads (plan derived
@@ -770,17 +777,22 @@ end function q_ij_from_rho
 ! instantaneous physical drho only, so a RHS bug can be told apart from an
 ! integrator-stability issue.
 !
-!   drho = + sum_a E_a * D_cov[rho]_a         covariant transport (WHOLE field term) (1)
+!   drho = + sum_i c_i * D_cov[rho]_i          covariant transport (WHOLE field term) (1)
 !          - i * delta_omega .* rho           band-energy coherent term       (2a; off-diag)
 !          - rho / t_2                         legacy interband dephasing      (2b; off-diag)
 !
 ! (1) covariant_grad_block returns D_cov rho = d_k rho - i[xi,rho] on the FULL
 !     nb x nb density; it REPLACES the legacy grad_qnm term.  gs%u_transport is
-!     fed AS-IS (orientation U, Task 2 -- NOT conjugate-transposed).  The
-!     Cartesian k-spacing dk_a = b_matrix(a,a)/num_kgrid(a) reproduces the
-!     legacy grad_k_array_nb2d_dcomplex spacing (nabt = bNmat(:,4)/(b(a,a)/N_a)),
-!     so with U==I this reduces EXACTLY to the legacy gradient; the "+E*grad"
-!     field prefactor/sign matches dt_evolve_bloch_lg (:663,:685).
+!     fed AS-IS (orientation U, Task 2 -- NOT conjugate-transposed).  The field
+!     weights c_i and axis spacings dk are lattice-dependent (DUAL PATH, see
+!     the inline comment at the field-term block below): on a strictly
+!     diagonal b_matrix, c_i = Efield(i) and the Cartesian k-spacing
+!     dk_a = b_matrix(a,a)/num_kgrid(a) reproduce the legacy
+!     grad_k_array_nb2d_dcomplex spacing (nabt = bNmat(:,4)/(b(a,a)/N_a))
+!     bit-for-bit, so with U==I this reduces EXACTLY to the legacy gradient;
+!     on a non-diagonal (hexagonal, ...) b_matrix, c_i = (E . a_i)/(2 pi) and
+!     dk_i = 1/num_kgrid(i) project E . grad_k onto the reduced axes.  The
+!     "+E*grad" field prefactor/sign matches dt_evolve_bloch_lg (:663,:685).
 !     X-full (block_id === 1, the full nb x nb overlap polar-factored as ONE
 !     block): xi is now the FULL-BAND gauge-covariant connection, so its
 !     off-diagonal entries (xi_inter) already ARE the physical interband
@@ -816,8 +828,8 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   complex(8), intent(out) :: drho(sbe%nb, sbe%nb, sbe%nk)
   integer, intent(in) :: icomm
   integer :: nb, nk, ik, ib, jb, axis
-  real(8) :: dk(1:3)
-  logical :: deph_by_gw
+  real(8) :: dk(1:3), cvec(1:3)
+  logical :: deph_by_gw, use_general
   logical :: axis_active(3)
   complex(8) :: gterm
   integer :: p, jj
@@ -868,14 +880,57 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   if (gh_ndst > 0) call comm_wait_all(gh_reqs(1:gh_ndst))
   call system_clock(tc2);  sbe_tmr_comm = sbe_tmr_comm + dble(tc2 - tc1) / dble(trate)
 
-  ! ---- (1) covariant transport (physical), WHOLE field term: + sum_a E_a D_cov[rho]_a
-  ! Skip field-inactive axes (E(axis)==0 exactly): E*D_cov for them is 0, so their
-  ! covariant gradient is not computed (linear pol => 1 of 3 axes, circular in-plane
-  ! => 2). Bit-for-bit identical to computing all axes.
-  do axis = 1, 3
-    dk(axis) = gs%b_matrix(axis, axis) / dble(num_kgrid(axis))
-    axis_active(axis) = (Efield(axis) /= 0.d0)
-  end do
+  ! ---- (1) covariant transport (physical), WHOLE field term: + sum_i c_i D_cov[rho]_i
+  ! Field-term projection, DUAL PATH (non-orthogonal lattice support; design:
+  ! gw/gw_design/specs/2026-07-05-gicov-nonorthogonal-bmatrix.md):
+  !
+  !  (legacy) b_matrix STRICTLY diagonal -- all six off-diagonal entries
+  !    exactly 0.d0 (every current orthorhombic campaign): the ORIGINAL
+  !    formula verbatim,
+  !      dk(axis)   = b_matrix(axis,axis)/num_kgrid(axis)   (Cartesian spacing)
+  !      cvec(axis) = Efield(axis)
+  !    cvec(axis)*Dq below is then the SAME multiplication Efield(axis)*Dq
+  !    used to be => bit-for-bit identical to the pre-dual-path code.
+  !
+  !  (general) b_matrix non-diagonal (hexagonal, ...): reduced-axis
+  !    projection.  k = sum_i s_i b_i (s_i = reduced coordinate) and
+  !    a_i . b_j = 2 pi delta_ij give grad_k s_i = a_i/(2 pi), hence
+  !      E . grad_k rho = sum_i c_i drho/ds_i,   c_i = (E . a_i)/(2 pi),
+  !    with the stencil differentiating in the REDUCED coordinate:
+  !      dk(i) = 1/num_kgrid(i)   (= Delta s_i).
+  !    a_i = gs%a_matrix(:, i) (columns; set unconditionally by
+  !    calc_lattice_info at gs init).  axis_active is judged on c_i, NOT on
+  !    Efield: for a hexagonal cell, E || x already activates BOTH in-plane
+  !    reduced axes.  In the orthogonal limit this path is ALGEBRAICALLY
+  !    identical to the legacy one (c_i Dq_red = (E_i/b_ii)(b_ii Dq_cart))
+  !    but differs in ULPs (1/b vs a/2pi) -- hence the strict dual path.
+  !    Orthogonal equivalence (~1e-12) + a 60-degree hexagonal analytic
+  !    directional-derivative check: src/ssbe/test/test_gicov_hex.f90.
+  !
+  ! Skipping field-inactive axes (cvec(axis)==0 exactly): c*D_cov for them is 0,
+  ! so their covariant gradient is not computed (linear pol on a diagonal
+  ! lattice => 1 of 3 axes, circular in-plane => 2). Bit-for-bit identical to
+  ! computing all axes.  covariant_grad_block itself is lattice-agnostic (a
+  ! reduced-grid stencil scaled by dk); halo/needed are index-based (unchanged).
+  use_general = gicov_force_general_field .or. &
+    & (gs%b_matrix(1, 2) /= 0.d0) .or. (gs%b_matrix(1, 3) /= 0.d0) .or. &
+    & (gs%b_matrix(2, 1) /= 0.d0) .or. (gs%b_matrix(2, 3) /= 0.d0) .or. &
+    & (gs%b_matrix(3, 1) /= 0.d0) .or. (gs%b_matrix(3, 2) /= 0.d0)
+  if (.not. use_general) then
+    do axis = 1, 3
+      dk(axis) = gs%b_matrix(axis, axis) / dble(num_kgrid(axis))
+      cvec(axis) = Efield(axis)
+      axis_active(axis) = (Efield(axis) /= 0.d0)
+    end do
+  else
+    do axis = 1, 3
+      dk(axis) = 1.d0 / dble(num_kgrid(axis))
+      cvec(axis) = (Efield(1) * gs%a_matrix(1, axis) &
+        &         + Efield(2) * gs%a_matrix(2, axis) &
+        &         + Efield(3) * gs%a_matrix(3, axis)) / (2.d0 * pi)
+      axis_active(axis) = (cvec(axis) /= 0.d0)
+    end do
+  end if
   call system_clock(tc1)
   call covariant_grad_block(nb, nk, gs%nbvec, gs%bvec, num_kgrid, &
                             gs%u_transport, gh_rho, dk, gh_Dq, sbe%ik_min, sbe%ik_max, axis_active)
@@ -893,10 +948,13 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   do ik = sbe%ik_min, sbe%ik_max
     do ib = 1, nb
       do jb = 1, nb
-        ! (1) covariant transport (intraband + interband, full-band)
-        gterm = Efield(1) * gh_Dq(ib, jb, 1, ik) + &
-                Efield(2) * gh_Dq(ib, jb, 2, ik) + &
-                Efield(3) * gh_Dq(ib, jb, 3, ik)
+        ! (1) covariant transport (intraband + interband, full-band).
+        ! cvec == Efield verbatim on the legacy (diagonal-b) path, so this sum
+        ! is bit-for-bit the old Efield(1..3)*Dq expression there; on the
+        ! general path cvec(i) = (E . a_i)/(2 pi) are the reduced-axis weights.
+        gterm = cvec(1) * gh_Dq(ib, jb, 1, ik) + &
+                cvec(2) * gh_Dq(ib, jb, 2, ik) + &
+                cvec(3) * gh_Dq(ib, jb, 3, ik)
         drho(ib, jb, ik) = gterm
         ! (2) coherent band energy + phenomenological dephasing (off-diagonal only)
         if (ib /= jb) then
