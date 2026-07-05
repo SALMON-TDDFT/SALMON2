@@ -56,7 +56,55 @@ module lcfo_flux
   integer, parameter :: wannier_cluster_magic = -22022217
   integer, parameter :: wannier_cluster_version = 1
 
+  type :: t_wannier_symop
+    integer :: owner_frag = 0
+    integer :: rot(3,3) = 0
+    real(8) :: origin_bohr(3) = 0.0d0
+    real(8) :: tau_local(3) = 0.0d0
+    real(8) :: atom_residual = 0.0d0
+    character(32) :: label = ''
+  end type t_wannier_symop
+
 contains
+
+  pure real(8) function wrap_periodic_delta(delta, cell_length) result(delta_wrapped)
+    implicit none
+    real(8), intent(in) :: delta, cell_length
+
+    if(cell_length > 0.0d0) then
+      delta_wrapped = delta - dnint(delta / cell_length) * cell_length
+    else
+      delta_wrapped = delta
+    end if
+  end function wrap_periodic_delta
+
+  pure real(8) function local_distance2(delta) result(distance2)
+    implicit none
+    real(8), intent(in) :: delta(3)
+
+    distance2 = delta(1) * delta(1) + delta(2) * delta(2) + delta(3) * delta(3)
+  end function local_distance2
+
+  pure integer function integer_det3(rot) result(det)
+    implicit none
+    integer, intent(in) :: rot(3,3)
+
+    det = rot(1,1) * (rot(2,2) * rot(3,3) - rot(2,3) * rot(3,2)) &
+      - rot(1,2) * (rot(2,1) * rot(3,3) - rot(2,3) * rot(3,1)) &
+      + rot(1,3) * (rot(2,1) * rot(3,2) - rot(2,2) * rot(3,1))
+  end function integer_det3
+
+  pure function matmul_int_real(rot, vec) result(out)
+    implicit none
+    integer, intent(in) :: rot(3,3)
+    real(8), intent(in) :: vec(3)
+    real(8) :: out(3)
+    integer :: i
+
+    do i=1,3
+      out(i) = dble(rot(i,1)) * vec(1) + dble(rot(i,2)) * vec(2) + dble(rot(i,3)) * vec(3)
+    end do
+  end function matmul_int_real
 
   logical function dc_lcfo_wannier_import_only_requested() result(import_only)
     use salmon_global, only: wannier90_command
