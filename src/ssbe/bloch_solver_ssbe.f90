@@ -698,6 +698,7 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   integer :: nb, nk, ik, ib, jb, axis
   real(8) :: dk(1:3)
   logical :: deph_by_gw
+  logical :: axis_active(3)
   complex(8), allocatable :: rho_loc(:,:,:), rho_full(:,:,:), Dq(:,:,:,:)
   complex(8) :: gterm
 
@@ -719,11 +720,15 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   call comm_summation(rho_loc, rho_full, nb*nb*nk, icomm)
 
   ! ---- (1) covariant transport (physical), WHOLE field term: + sum_a E_a D_cov[rho]_a
+  ! Skip field-inactive axes (E(axis)==0 exactly): E*D_cov for them is 0, so their
+  ! covariant gradient is not computed (linear pol => 1 of 3 axes, circular in-plane
+  ! => 2). Bit-for-bit identical to computing all axes.
   do axis = 1, 3
     dk(axis) = gs%b_matrix(axis, axis) / dble(num_kgrid(axis))
+    axis_active(axis) = (Efield(axis) /= 0.d0)
   end do
   call covariant_grad_block(nb, nk, gs%nbvec, gs%bvec, num_kgrid, &
-                            gs%u_transport, rho_full, dk, Dq, sbe%ik_min, sbe%ik_max)
+                            gs%u_transport, rho_full, dk, Dq, sbe%ik_min, sbe%ik_max, axis_active)
 
   deph_by_gw = (yn_sbe_gw_collision == 'y' .and. trim(sbe_deph_mode) == 'gw')
 

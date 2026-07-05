@@ -1285,7 +1285,7 @@ contains
   ! is absent from bvec, OR whose m_max(axis)=0 (singleton axis), leaves
   ! Dq(:,:,axis,:) = 0.
   !-------------------------------------------------------------------
-  subroutine covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq, ik_lo, ik_hi)
+  subroutine covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq, ik_lo, ik_hi, axis_active)
     implicit none
     integer,    intent(in)  :: nb, nk, nbvec, bvec(3, nbvec), num_kgrid(3)
     complex(8), intent(in)  :: U_full(nb, nb, 3, nk)
@@ -1293,6 +1293,7 @@ contains
     real(8),    intent(in)  :: dk(3)
     complex(8), intent(out) :: Dq(nb, nb, 3, nk)
     integer,    intent(in)  :: ik_lo, ik_hi   ! local k-range (MPI): only Dq(:,:,:,ik_lo:ik_hi) is computed, OMP-parallel over it. Serial/single-rank callers pass 1, nk. (Required, not optional: an interface mismatch then fails at compile time, not as a silent runtime present()-garbage SEGV.)
+    logical,    intent(in)  :: axis_active(3)  ! skip axes with E(axis)==0: their E*Dq contribution is exactly 0, so their Dq is left 0 (bit-for-bit). Linear pol => 1 axis, circular in-plane => 2. Callers with no field mask pass (/.true.,.true.,.true./).
     real(8), parameter :: cw(4) = (/ 4d0/5d0, -1d0/5d0, 4d0/105d0, -1d0/280d0 /)
     integer, allocatable :: ik_neighbor(:, :), bwd(:)
     complex(8), allocatable :: Id(:,:)
@@ -1322,6 +1323,7 @@ contains
     Dq = (0d0, 0d0)
 
     do axis = 1, 3
+      if (.not. axis_active(axis)) cycle  ! field-inactive axis (E(axis)==0): Dq(:,:,axis,:) stays 0; E*Dq is exactly 0 => bit-for-bit skip (linear pol skips 2 axes, circular in-plane skips 1)
       iv = iv_axis(axis)
       if (iv == 0) cycle              ! +axis link absent in bvec: Dq(:,:,axis,:) stays 0
       if (m_max(axis) == 0) cycle     ! singleton axis (num_kgrid(axis)=1): Dq(:,:,axis,:) stays 0

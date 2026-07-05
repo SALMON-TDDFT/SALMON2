@@ -226,8 +226,8 @@ contains
       rho(2, 1, ik) = conjg(rho(1, 2, ik))
     end do
 
-    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq_full, 1, nk)
-    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_bare, rho, dk, Dq_bare, 1, nk)
+    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq_full, 1, nk, (/.true.,.true.,.true./))
+    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_bare, rho, dk, Dq_bare, 1, nk, (/.true.,.true.,.true./))
 
     ! xi_inter(k) = i <u1(k)| stencil-D_k u2(k)>, using the SAME cw/m_max shells
     ! covariant_grad_block itself uses (not an analytic-continuum derivative) --
