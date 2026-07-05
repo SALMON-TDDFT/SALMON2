@@ -614,7 +614,12 @@ contains
         call test_fragment_inversion_nonperiodic_import(dc, atom_index_buffer, atom_pos_buffer, natom_buffer, &
           buffer_origin, accepted, residual)
         write(*,'(1x,a,i0,a,es12.5,a,l1,a,i0,a,3(1x,es12.5))') &
-          "[DC-LCFO-W90-SYM] fragment=", ifrag, " buffer closure from_core label=inversion", &
+          "[DC-LCFO-W90-SYM] fragment=", ifrag, " buffer finite_box from_core label=inversion", &
+          residual, " closed=", accepted, " natom_buffer=", natom_buffer, " origin=", buffer_origin(1:3)
+        call test_fragment_inversion_global_pbc_import(dc, ifrag, atom_pos_buffer, natom_buffer, &
+          buffer_origin, accepted, residual)
+        write(*,'(1x,a,i0,a,es12.5,a,l1,a,i0,a,3(1x,es12.5))') &
+          "[DC-LCFO-W90-SYM] fragment=", ifrag, " buffer global_pbc from_core label=inversion", &
           residual, " closed=", accepted, " natom_buffer=", natom_buffer, " origin=", buffer_origin(1:3)
       end if
       found_inversion = .false.
@@ -634,13 +639,13 @@ contains
       end do
       if(found_inversion) then
         write(*,'(1x,a,i0,a,es12.5,a,i0,a,3(1x,es12.5),a,3(1x,es12.5))') &
-          "[DC-LCFO-W90-SYM] fragment=", ifrag, " buffer detected label=inversion", &
+          "[DC-LCFO-W90-SYM] fragment=", ifrag, " buffer finite_box detected label=inversion", &
           best_residual, " natom_buffer=", natom_buffer, " origin=", best_origin(1:3), &
           " box=", buffer_length(1:3)
       else
         write(*,'(1x,a,i0,a,i0,a,3(1x,es12.5))') &
           "[DC-LCFO-W90-SYM] fragment=", ifrag, &
-          " buffer detected label=none natom_buffer=", natom_buffer, " box=", buffer_length(1:3)
+          " buffer finite_box detected label=none natom_buffer=", natom_buffer, " box=", buffer_length(1:3)
       end if
 
       if(allocated(atom_index)) deallocate(atom_index)
@@ -818,6 +823,53 @@ contains
 
     accepted = .true.
   end subroutine test_fragment_inversion_nonperiodic_import
+
+  subroutine test_fragment_inversion_global_pbc_import(dc, ifrag, atom_pos_local, natom_frag, origin, &
+      accepted, max_residual)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: ifrag, natom_frag
+    real(8), intent(in) :: atom_pos_local(3,*), origin(3)
+    logical, intent(out) :: accepted
+    real(8), intent(out) :: max_residual
+    integer :: ia, ja, axis
+    real(8) :: total_length(3), fragment_origin(3), buffer_shift(3)
+    real(8) :: target_global(3), delta(3), dist2, best_dist2
+    real(8), parameter :: atom_match_tol2 = 1.0d-6
+
+    accepted = .false.
+    max_residual = huge(1d0)
+    if(natom_frag <= 0) return
+
+    call total_cell_lengths_import(dc, total_length)
+    call fragment_buffer_shift_import(dc, buffer_shift)
+    do axis=1,3
+      fragment_origin(axis) = dc%lg_tot%coordinate(dc%ixyz_frag(axis,ifrag),axis) - buffer_shift(axis)
+    end do
+
+    max_residual = 0.0d0
+    do ia=1,natom_frag
+      target_global(1:3) = fragment_origin(1:3) + 2.0d0 * origin(1:3) - atom_pos_local(1:3,ia)
+      do axis=1,3
+        if(total_length(axis) > 0.0d0) then
+          target_global(axis) = target_global(axis) - floor(target_global(axis) / total_length(axis)) * total_length(axis)
+        end if
+      end do
+      best_dist2 = huge(1d0)
+      do ja=1,dc%system_tot%nion
+        do axis=1,3
+          delta(axis) = periodic_delta_import(dc%system_tot%rion(axis,ja) - target_global(axis), total_length(axis))
+        end do
+        dist2 = local_distance2(delta)
+        best_dist2 = min(best_dist2, dist2)
+      end do
+      max_residual = max(max_residual, sqrt(best_dist2))
+      if(best_dist2 > atom_match_tol2) return
+    end do
+
+    accepted = .true.
+  end subroutine test_fragment_inversion_global_pbc_import
 
   subroutine fragment_cell_lengths_import(dc, ifrag, cell_length)
     use structures, only: s_dcdft
