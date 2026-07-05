@@ -22,9 +22,39 @@ module bloch_solver_ssbe
         complex(8), allocatable :: exp_iphi(:, :, :)
     end type
 
-
+    ! --- lightweight gicov perf timers (accumulate in gicov_rhs; print via sbe_print_timers) ---
+    real(8),    save :: sbe_tmr_cov  = 0d0    ! covariant_grad_block wall [s], summed over RHS calls
+    real(8),    save :: sbe_tmr_comm = 0d0    ! comm_summation (rho gather) wall [s]
+    integer(8), save :: sbe_tmr_nrhs = 0      ! number of gicov_rhs calls
 
 contains
+
+  !-------------------------------------------------------------------
+  ! Print the accumulated gicov RHS timers (covariant kernel vs rho-gather
+  ! comm), reduced max/avg over icomm, once on rank 0. system_clock only,
+  ! no barriers were added in the hot path. Used for the scaling study.
+  !-------------------------------------------------------------------
+  subroutine sbe_print_timers(icomm)
+    use communication, only: comm_get_max
+    implicit none
+    integer, intent(in) :: icomm
+    integer :: irank, nproc
+    real(8) :: cin(1), cout(1), din(1), dout(1), cov_sum, comm_sum, rn
+    call comm_get_groupinfo(icomm, irank, nproc)
+    if (sbe_tmr_nrhs == 0) return
+    rn = 1d0 / dble(sbe_tmr_nrhs)
+    cin(1) = sbe_tmr_cov;  din(1) = sbe_tmr_comm
+    call comm_get_max(cin, cout, 1, icomm)
+    call comm_get_max(din, dout, 1, icomm)
+    call comm_summation(sbe_tmr_cov,  cov_sum,  icomm)
+    call comm_summation(sbe_tmr_comm, comm_sum, icomm)
+    if (irank == 0) then
+      write(*, '(a)') "=== gicov RHS timers (covariant_grad_block vs rho comm_summation) ==="
+      write(*, '(a,i0,a,i0)') "  n_rhs=", sbe_tmr_nrhs, "  nproc=", nproc
+      write(*, '(a,es12.4,a,es12.4)') "  covariant [s/call]: max_rank ", cout(1)*rn, "  avg_rank ", cov_sum/dble(nproc)*rn
+      write(*, '(a,es12.4,a,es12.4)') "  comm      [s/call]: max_rank ", dout(1)*rn, "  avg_rank ", comm_sum/dble(nproc)*rn
+    end if
+  end subroutine sbe_print_timers
 
 
 
@@ -701,6 +731,7 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   logical :: axis_active(3)
   complex(8), allocatable :: rho_loc(:,:,:), rho_full(:,:,:), Dq(:,:,:,:)
   complex(8) :: gterm
+  integer(8) :: tc1, tc2, trate
 
   nb = sbe%nb
   nk = sbe%nk
@@ -717,7 +748,10 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
       end do
     end do
   end do
+  sbe_tmr_nrhs = sbe_tmr_nrhs + 1
+  call system_clock(tc1, trate)
   call comm_summation(rho_loc, rho_full, nb*nb*nk, icomm)
+  call system_clock(tc2);  sbe_tmr_comm = sbe_tmr_comm + dble(tc2 - tc1) / dble(trate)
 
   ! ---- (1) covariant transport (physical), WHOLE field term: + sum_a E_a D_cov[rho]_a
   ! Skip field-inactive axes (E(axis)==0 exactly): E*D_cov for them is 0, so their
@@ -727,8 +761,10 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
     dk(axis) = gs%b_matrix(axis, axis) / dble(num_kgrid(axis))
     axis_active(axis) = (Efield(axis) /= 0.d0)
   end do
+  call system_clock(tc1)
   call covariant_grad_block(nb, nk, gs%nbvec, gs%bvec, num_kgrid, &
                             gs%u_transport, rho_full, dk, Dq, sbe%ik_min, sbe%ik_max, axis_active)
+  call system_clock(tc2);  sbe_tmr_cov = sbe_tmr_cov + dble(tc2 - tc1) / dble(trate)
 
   deph_by_gw = (yn_sbe_gw_collision == 'y' .and. trim(sbe_deph_mode) == 'gw')
 

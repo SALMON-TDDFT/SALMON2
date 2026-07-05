@@ -159,6 +159,8 @@ subroutine main_realtime_ssbe(icomm)
     
     call comm_sync_all(icomm)
 
+    if (trim(gauge_sbe) == "length_gauge") call sbe_print_timers(icomm)
+
     if (irank == 0) then
         close(fh_sbe_rt)
         close(fh_sbe_rt_energy)
