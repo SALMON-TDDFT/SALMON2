@@ -119,6 +119,7 @@ module band
         integer :: jk1, jk2, jk3
         integer :: jdk1, jdk2, jdk3
         integer :: nslot
+        integer :: ikbl_s, ikbl_e
         ! Gathered wavefunction slices (only the k-points this block needs):
         complex(8), allocatable :: zwf_blk(:, :, :, :, :, :)
         ! Periodic k-index tables (as in the old full-nk version):
@@ -157,11 +158,21 @@ module band
 
         ! Calculate production <k,io|k+dk,jo> for the locally-owned part of
         ! the block (the k-distribution ranges are contiguous, so the
-        ! intersection with the block is a contiguous ik range):
+        ! intersection with the block is a contiguous ik range).
+        ! The intersection is EMPTY (ikbl_s > ikbl_e) on ranks that own no
+        ! bra point of this block; the collapse(4) construct must not be
+        ! entered in that case: the Fujitsu (A64FX trad-mode) OpenMP
+        ! runtime mis-schedules collapsed loop nests whose outer range has
+        ! a negative raw trip count and executes the body with out-of-range
+        ! ik (SIGSEGV/SIGBUS in calc_prod on exactly the no-bra ranks;
+        ! Fugaku JID 49450154, 8^3 Si, nblk=192, ranks 12..31 empty):
+        ikbl_s = max(ikb_s, par%ik_s)
+        ikbl_e = min(ikb_e, par%ik_e)
+        if (ikbl_s <= ikbl_e) then
 !$omp parallel do collapse(4) default(none) &
 !$omp private(ik,jdk1,jdk2,jdk3,ik1,ik2,ik3,jk1,jk2,jk3) &
-!$omp shared(par,ndk,ikb_s,ikb_e,ik3d_tbl,prod_dk_tmp)
-        do ik = max(ikb_s, par%ik_s), min(ikb_e, par%ik_e)
+!$omp shared(ndk,ikbl_s,ikbl_e,ik3d_tbl,prod_dk_tmp)
+        do ik = ikbl_s, ikbl_e
             do jdk3 = -ndk, ndk
                 do jdk2 = -ndk, ndk
                     do jdk1 = -ndk, ndk
@@ -183,6 +194,7 @@ module band
             end do
         end do
 !$omp end parallel do
+        end if
 
         ! Summarize results of prod_dk_blk:
         call comm_summation( &
