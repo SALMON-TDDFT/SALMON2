@@ -27,21 +27,33 @@ subroutine main_realtime_ssbe(icomm)
     integer :: ib, jb, ik
     real(8) :: herm_norm(1), herm_norm_l(1), trace_re, trace_re_l
     integer :: nk
+    integer :: nb_sbe_eff, nelec_eff
+    real(8), allocatable :: gamma_abs(:, :)
     real(8) :: bj_am(8,8)
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
     if (.not. check_input_variables_sbe()) return
 
-    ! Read ground state electronic system:
+    ! Band-window lower-cut (nband_sbe_min, default 1 = full window):
+    ! the SBE propagates the contiguous window [nband_sbe_min, nstate_sbe(1)]
+    ! (window index w <-> absolute band w + nband_sbe_min - 1); the frozen
+    ! bands 1..nband_sbe_min-1 are inert fully-occupied and enter the
+    ! trace / n_ex bookkeeping only through nelec_eff.
+    nb_sbe_eff = nstate_sbe(1) - (nband_sbe_min - 1)
+    nelec_eff  = nelec - 2 * (nband_sbe_min - 1)
+
+    ! Read ground state electronic system: the exports carry nstate bands
+    ! (all consumed by the readers); gs%* stores the window
+    ! [nband_sbe_min : nstate_sbe(1)], so gs%nb == nb_sbe_eff == sbe%nb.
     nk = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
     call init_sbe_gs_info(gs, sysname, base_directory, &
-        & nk, nstate, nelec, &
+        & nk, nstate, nband_sbe_min, nstate_sbe(1), nelec, &
         & al_vec1, al_vec2, al_vec3, &
-        & .false., icomm)        
-    
+        & .false., icomm)
+
     ! Initialization of SBE solver and density matrix:
-    call init_sbe_bloch_solver(sbe, gs, nstate_sbe(1), icomm)
+    call init_sbe_bloch_solver(sbe, gs, nb_sbe_eff, icomm)
     sbe%flag_vnl_correction = (yn_vnl_correction == 'y')
 
     if (trim(gauge_sbe) == "length_gauge") then
@@ -51,12 +63,18 @@ subroutine main_realtime_ssbe(icomm)
     end if
 
     ! GW collision-term setup (Phase 2): load Gamma(n,k) and the cold reference.
+    ! The rate file is indexed by ABSOLUTE band, so load the full band range
+    ! 1..nstate_sbe(1) and keep the window slice [nband_sbe_min : nstate_sbe(1)]
+    ! (reader-side windowing, same as the gs exports).
     if (yn_sbe_gw_collision == 'y') then
-        allocate(gs%gamma_gw(1:nstate_sbe(1), 1:nk))
-        allocate(gs%f0_ref  (1:nstate_sbe(1), 1:nk))
+        allocate(gs%gamma_gw(1:nb_sbe_eff, 1:nk))
+        allocate(gs%f0_ref  (1:nb_sbe_eff, 1:nk))
         gs%gamma_gw(:, :) = 0d0
-        gs%f0_ref(1:nstate_sbe(1), 1:nk) = gs%occup(1:nstate_sbe(1), 1:nk)
-        call load_gw_rate(trim(file_sbe_gw_rate), nstate_sbe(1), nk, gs%gamma_gw)
+        gs%f0_ref(1:nb_sbe_eff, 1:nk) = gs%occup(1:nb_sbe_eff, 1:nk)
+        allocate(gamma_abs(1:nstate_sbe(1), 1:nk))
+        call load_gw_rate(trim(file_sbe_gw_rate), nstate_sbe(1), nk, gamma_abs)
+        gs%gamma_gw(1:nb_sbe_eff, 1:nk) = gamma_abs(nband_sbe_min:nstate_sbe(1), 1:nk)
+        deallocate(gamma_abs)
         if (irank == 0) write(*,'(a,a)') "# SBE GW collision ON, mode = ", trim(sbe_deph_mode)
     end if
 
@@ -113,7 +131,7 @@ subroutine main_realtime_ssbe(icomm)
         end if
 
         if (mod(it, 10) == 0) then
-            tr_all = calc_trace(sbe, gs, nstate_sbe(1), icomm)
+            tr_all = calc_trace(sbe, gs, nb_sbe_eff, icomm)
             if (irank == 0) then
                 call write_sbe_rt_energy_line(fh_sbe_rt_energy, t, energy, energy)
                 write(*, "(i8,f12.3,3es12.3,2f12.3)") it, t, Jmat(1:3), tr_all, energy
@@ -140,10 +158,13 @@ subroutine main_realtime_ssbe(icomm)
         end if
         
         if (mod(it, out_projection_step) == 0) then
-            tr_all = calc_trace(sbe, gs, nstate_sbe(1), icomm)
-            tr_vb = calc_trace(sbe, gs, nelec / 2, icomm)    
+            ! window bookkeeping: the occupied bands inside the window are
+            ! 1..nelec_eff/2 (window indices); the frozen bands are inert, so
+            ! n_ex and n_hole are exact against nelec_eff (not nelec).
+            tr_all = calc_trace(sbe, gs, nb_sbe_eff, icomm)
+            tr_vb = calc_trace(sbe, gs, nelec_eff / 2, icomm)
             if (irank == 0) then
-                call write_sbe_nex_line(fh_sbe_nex, t, tr_all - tr_vb, nelec - tr_vb)
+                call write_sbe_nex_line(fh_sbe_nex, t, tr_all - tr_vb, nelec_eff - tr_vb)
             end if
         end if
 

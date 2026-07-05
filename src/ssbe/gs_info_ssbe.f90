@@ -51,7 +51,19 @@ module gs_info_ssbe
 contains
 
 
-subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, read_bin, icomm)
+! Band-window selection (READER-side windowing).  Three distinct band counts:
+!   nb     = the EXPORT band count (rows per k in SYSNAME_eigen/tm.data, as
+!            written by the GS run) -- the read loops always consume ALL nb
+!            records to keep the file alignment;
+!   [nb_min, nb_hi] = the contiguous window actually stored into gs%*
+!            (nb_hi = nstate_sbe upper cut, nb_min = nband_sbe_min lower cut);
+!   nb_eff = nb_hi - nb_min + 1 = gs%nb (the propagated band count).
+! Window index w <-> absolute band w + nb_min - 1.
+! Bands 1..nb_min-1 are frozen as inert fully-occupied: they carry no dynamics
+! and no current (symmetric filled bands), so they only enter the electron
+! bookkeeping via gs%ne = ne - 2*(nb_min-1) (spinless: 2 electrons per band).
+! nb_min = 1, nb_hi = nb reproduces the unwindowed behavior exactly.
+subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne, a1, a2, a3, read_bin, icomm)
     use communication
     use filesystem, only: open_filehandle, get_filehandle
     use common_ssbe, only: grad_k_array_nb1d_double
@@ -64,32 +76,49 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     character(*), intent(in) :: gs_directory
     integer, intent(in) :: nk
     integer, intent(in) :: nb
+    integer, intent(in) :: nb_min
+    integer, intent(in) :: nb_hi
     integer, intent(in) :: ne
     real(8), intent(in) :: a1(1:3), a2(1:3), a3(1:3)
     logical, intent(in) :: read_bin
     integer, intent(in) :: icomm
     integer :: irank, nproc
+    integer :: nb_eff
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
+    if (nb_min < 1 .or. nb_min > nb_hi .or. nb_hi > nb) then
+        if (irank == 0) write(*, '(a,i0,a,i0,a,i0)') &
+            & "ERROR(init_sbe_gs_info): band window out of range: [", nb_min, &
+            & ", ", nb_hi, "] of export nb = ", nb
+        stop 1
+    end if
+    nb_eff = nb_hi - (nb_min - 1)
+
     gs%nk = nk
-    gs%nb = nb
-    gs%ne = ne
+    gs%nb = nb_eff
+    gs%ne = ne - 2 * (nb_min - 1)
     !gs%num_kgrid(1:3) = num_kgrid(1:3)
+
+    if (irank == 0 .and. (nb_min > 1 .or. nb_hi < nb)) then
+        write(*, '(a,i0,a,i0,a,i0,a,i0,a,i0)') "# band window: bands ", &
+            & nb_min, "..", nb_hi, " of the ", nb, "-band export -> nb_eff = ", &
+            & nb_eff, ", nelec_eff = ", gs%ne
+    end if
 
     !Calculate b_matrix, volume_cell and volume_bz from a1..a3 vector.
     call calc_lattice_info()
 
     allocate(gs%kpoint(1:3, 1:nk))
     allocate(gs%kweight(1:nk))
-    allocate(gs%eigen(1:nb, 1:nk))
-    allocate(gs%occup(1:nb, 1:nk))
-    allocate(gs%delta_omega(1:nb, 1:nb, 1:nk))
-    allocate(gs%p_mod_matrix(1:nb, 1:nb, 1:3, 1:nk))
-    allocate(gs%d_matrix(1:nb, 1:nb, 1:3, 1:nk))
-    allocate(gs%p_tm_matrix(1:nb, 1:nb, 1:3, 1:nk))
-    allocate(gs%rvnl_tm_matrix(1:nb, 1:nb, 1:3, 1:nk))
-    allocate(gs%grad_k_eigen(1:nb, 1:3, 1:nk))
+    allocate(gs%eigen(1:nb_eff, 1:nk))
+    allocate(gs%occup(1:nb_eff, 1:nk))
+    allocate(gs%delta_omega(1:nb_eff, 1:nb_eff, 1:nk))
+    allocate(gs%p_mod_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
+    allocate(gs%d_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
+    allocate(gs%p_tm_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
+    allocate(gs%rvnl_tm_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
+    allocate(gs%grad_k_eigen(1:nb_eff, 1:3, 1:nk))
 
     if (irank == 0) then
         if (read_bin) then
@@ -138,8 +167,11 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, ne, a1, a2, a3, r
     end select
 
     !Initial Occupation Number
+    !Window bands 1..gs%ne/2 (= absolute nb_min..ne/2) are the occupied bands
+    !inside the window; the frozen bands 1..nb_min-1 are NOT stored (inert,
+    !fully occupied) and enter only through gs%ne = ne - 2*(nb_min-1).
     gs%occup(:,:) = 0d0 !!Experimental!!
-    gs%occup(1:(ne/2),:) = 2d0 !!Experimental!!
+    if (gs%ne > 0) gs%occup(1:(gs%ne/2),:) = 2d0 !!Experimental!!
 
 contains
 
@@ -218,10 +250,12 @@ contains
         end if
         do ik = 1, nk
             read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
+            ! consume ALL nb export rows (keeps the per-k header alignment);
+            ! store only the band window [nb_min : nb_hi] at window index ib-nb_min+1
             do ib = 1, nb
                 read(fh, *) iib, tmp(1:2)
                 if (ib .ne. iib) stop "ib mismatch"
-                gs%eigen(ib, ik) = tmp(1) * efac
+                if (ib >= nb_min .and. ib <= nb_hi) gs%eigen(ib - nb_min + 1, ik) = tmp(1) * efac
                 ! gs%occup(ib, ik) = ctmp(2)
             end do
         end do
@@ -243,6 +277,8 @@ contains
         read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
         read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
         read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
+        ! consume ALL nb*nb export records per k (keeps the record alignment);
+        ! store only pairs with both bands inside the window [nb_min : nb_hi]
         do ik = 1, nk
             do ib = 1, nb
                 do jb = 1, nb
@@ -250,9 +286,12 @@ contains
                     if (ik .ne. iik) stop "ik mismatch"
                     if (ib .ne. iib) stop "ib mismatch"
                     if (jb .ne. jjb) stop "jb mismatch"
-                    gs%p_tm_matrix(ib, jb, 1, ik) = dcmplx(tmp(1), tmp(2))
-                    gs%p_tm_matrix(ib, jb, 2, ik) = dcmplx(tmp(3), tmp(4))
-                    gs%p_tm_matrix(ib, jb, 3, ik) = dcmplx(tmp(5), tmp(6))
+                    if (ib >= nb_min .and. ib <= nb_hi .and. &
+                        & jb >= nb_min .and. jb <= nb_hi) then
+                        gs%p_tm_matrix(ib - nb_min + 1, jb - nb_min + 1, 1, ik) = dcmplx(tmp(1), tmp(2))
+                        gs%p_tm_matrix(ib - nb_min + 1, jb - nb_min + 1, 2, ik) = dcmplx(tmp(3), tmp(4))
+                        gs%p_tm_matrix(ib - nb_min + 1, jb - nb_min + 1, 3, ik) = dcmplx(tmp(5), tmp(6))
+                    end if
                 end do
             end do
         end do
@@ -264,9 +303,12 @@ contains
                     if (ik .ne. iik) stop "ik mismatch"
                     if (ib .ne. iib) stop "ib mismatch"
                     if (jb .ne. jjb) stop "jb mismatch"
-                    gs%rvnl_tm_matrix(ib, jb, 1, ik) = dcmplx(tmp(1), tmp(2))
-                    gs%rvnl_tm_matrix(ib, jb, 2, ik) = dcmplx(tmp(3), tmp(4))
-                    gs%rvnl_tm_matrix(ib, jb, 3, ik) = dcmplx(tmp(5), tmp(6))
+                    if (ib >= nb_min .and. ib <= nb_hi .and. &
+                        & jb >= nb_min .and. jb <= nb_hi) then
+                        gs%rvnl_tm_matrix(ib - nb_min + 1, jb - nb_min + 1, 1, ik) = dcmplx(tmp(1), tmp(2))
+                        gs%rvnl_tm_matrix(ib - nb_min + 1, jb - nb_min + 1, 2, ik) = dcmplx(tmp(3), tmp(4))
+                        gs%rvnl_tm_matrix(ib - nb_min + 1, jb - nb_min + 1, 3, ik) = dcmplx(tmp(5), tmp(6))
+                    end if
                 end do
             end do
         end do
@@ -368,8 +410,8 @@ contains
                     write(*, '(a)') "ERROR(read_prod_dk_data): num_kgrid product differs from nk in file."
                     ierr = 1
                 end if
-                if (file_no < nb) then
-                    write(*, '(a)') "ERROR(read_prod_dk_data): band window in file is smaller than SBE nb."
+                if (file_no < nb_hi) then
+                    write(*, '(a)') "ERROR(read_prod_dk_data): band window in file is smaller than the SBE window top."
                     ierr = 1
                 end if
                 if (file_ndk < 0) then
@@ -393,7 +435,7 @@ contains
 
         ! --- allocate on ALL ranks ---
         allocate(gs%bvec(1:3, 1:gs%nbvec))
-        allocate(gs%prod_dk(1:nb, 1:nb, 1:gs%nbvec, 1:nk))
+        allocate(gs%prod_dk(1:nb_eff, 1:nb_eff, 1:gs%nbvec, 1:nk))
         gs%bvec(:, :)          = 0
         gs%prod_dk(:, :, :, :) = dcmplx(0d0, 0d0)
 
@@ -434,12 +476,14 @@ contains
                     ierr = 1
                     exit
                 end if
-                ! keep only the SBE band window (writer emits the full band window)
-                if (io_r <= nb .and. jo_r <= nb) then
+                ! keep only the SBE band window [nb_min : nb_hi] (writer emits
+                ! the full band window); store at window indices io/jo - nb_min + 1
+                if (io_r >= nb_min .and. io_r <= nb_hi .and. &
+                    & jo_r >= nb_min .and. jo_r <= nb_hi) then
                     ivec = (jdk3_r + ndk_loc) * mdk * mdk &
                         & + (jdk2_r + ndk_loc) * mdk &
                         & + (jdk1_r + ndk_loc) + 1
-                    gs%prod_dk(io_r, jo_r, ivec, ik_r) = dcmplx(re_r, im_r)
+                    gs%prod_dk(io_r - nb_min + 1, jo_r - nb_min + 1, ivec, ik_r) = dcmplx(re_r, im_r)
                 end if
             end do
 
@@ -480,23 +524,23 @@ contains
             ! ===== Pb3: non-Abelian xi inside degenerate blocks + smooth blend =====
             ! delta_omega first (needed by the blend), then build xi from prod_dk.
             do ik=1, nk
-                do ib=1, nb
-                    do jb=1, nb
+                do ib=1, nb_eff
+                    do jb=1, nb_eff
                         gs%delta_omega(ib, jb, ik) = gs%eigen(ib, ik) - gs%eigen(jb, ik)
                     end do
                 end do
             end do
 
-            if (.not. allocated(gs%xi))    allocate(gs%xi(1:nb, 1:nb, 1:3, 1:nk))
-            if (.not. allocated(gs%xi_ok)) allocate(gs%xi_ok(1:nb, 1:nb, 1:nk))
-            call build_xi(nb, nk, gs%nbvec, gs%bvec, gs%prod_dk, gs%eigen, &
+            if (.not. allocated(gs%xi))    allocate(gs%xi(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
+            if (.not. allocated(gs%xi_ok)) allocate(gs%xi_ok(1:nb_eff, 1:nb_eff, 1:nk))
+            call build_xi(nb_eff, nk, gs%nbvec, gs%bvec, gs%prod_dk, gs%eigen, &
                         & gs%b_matrix, num_kgrid, gs%xi, gs%xi_ok, nrej, resu, &
                         & fixed_blocks=(trim(sbe_lg_degen) == 'gifix'))
 
             resp_max = 0d0
             do ik=1, nk
-                do ib=1, nb
-                    do jb=1, nb
+                do ib=1, nb_eff
+                    do jb=1, nb_eff
                         x = abs(gs%delta_omega(ib, jb, ik))
                         if (same_block(ib, jb, ik) .and. ib /= jb .and. gs%xi_ok(ib, jb, ik)) then
                             ! degenerate-block pair: blend xi (x<=theta_on) into the
@@ -541,8 +585,8 @@ contains
             ! is unused by gicov_rhs (dropped there). No fixed blocks, no
             ! closure, no occupation guard.
             do ik=1, nk
-                do ib=1, nb
-                    do jb=1, nb
+                do ib=1, nb_eff
+                    do jb=1, nb_eff
                         gs%delta_omega(ib, jb, ik) = gs%eigen(ib, ik) - gs%eigen(jb, ik)
                     end do
                 end do
@@ -551,10 +595,10 @@ contains
             ! X-full: ONE full-band block (block_id≡1) -> build_block_transport
             ! polar-factors the whole nb×nb overlap M = the full-band Wilson
             ! transport. No fixed blocks, no closure.
-            if (.not. allocated(gs%block_id)) allocate(gs%block_id(1:nb, 1:nk))
+            if (.not. allocated(gs%block_id)) allocate(gs%block_id(1:nb_eff, 1:nk))
             gs%block_id(:, :) = 1                                   ! single full-band block
-            if (.not. allocated(gs%u_transport)) allocate(gs%u_transport(1:nb, 1:nb, 1:3, 1:nk))
-            call build_block_transport(nb, nk, gs%nbvec, gs%bvec, gs%prod_dk, &
+            if (.not. allocated(gs%u_transport)) allocate(gs%u_transport(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
+            call build_block_transport(nb_eff, nk, gs%nbvec, gs%bvec, gs%prod_dk, &
                                      & gs%block_id, num_kgrid, gs%u_transport, nrej)
 
             ! X-full: the full-band covariant transport supplies the WHOLE field
@@ -568,8 +612,8 @@ contains
         else
             ! ===== default 'off': bit-identical to the pre-Pb3 dipole construction =====
             do ik=1, nk
-                do ib=1, nb
-                    do jb=1, nb
+                do ib=1, nb_eff
+                    do jb=1, nb_eff
                         gs%delta_omega(ib, jb, ik) = gs%eigen(ib, ik) - gs%eigen(jb, ik)
                         if (omega_eps < abs(gs%delta_omega(ib, jb, ik))) then
                             ! gs%d_matrix(ib, jb, 1:3, ik) = &

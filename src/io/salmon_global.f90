@@ -450,6 +450,11 @@ character(256),allocatable :: atom_name(:)
   character(256) :: file_sbe_prod_dk
   character(16)  :: sbe_lg_degen
   real(8)        :: sbe_lg_degen_floor
+  integer        :: nband_sbe_min       ! band-window lower edge (lower-cut): SBE
+                                        ! propagates the contiguous window
+                                        ! [nband_sbe_min, nstate_sbe]; bands
+                                        ! 1..nband_sbe_min-1 are frozen as inert
+                                        ! fully-occupied (default 1 = full window)
 
   !! &dc
   integer        :: num_fragment(3)

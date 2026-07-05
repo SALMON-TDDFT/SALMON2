@@ -94,6 +94,41 @@ function check_input_variables_sbe() result(flag)
     if (nk_sbe(1) <= 0) nk_sbe(1) = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
     if (nelec_sbe(1) <= 0) nelec_sbe(1) = nelec
 
+    ! Band-window lower-cut: SBE propagates the contiguous window
+    ! [nband_sbe_min, nstate_sbe(1)]; bands 1..nband_sbe_min-1 are frozen as
+    ! inert fully-occupied (spinless: 2 electrons each), so every frozen band
+    ! must lie inside the occupied manifold 1..nelec/2.
+    if (trim(theory) /= "maxwell_sbe" .and. nstate_sbe(1) < nelec / 2) then
+        call raise("ERROR! 'nstate_sbe' must be >= nelec/2 " // &
+            & "(the SBE band window must contain the occupied manifold)!")
+    end if
+    if (nband_sbe_min < 1) then
+        call raise("ERROR! 'nband_sbe_min' must be >= 1!")
+    end if
+    if (nband_sbe_min > nstate_sbe(1)) then
+        call raise("ERROR! 'nband_sbe_min' must not exceed 'nstate_sbe' (empty band window)!")
+    end if
+    if (nband_sbe_min - 1 > nelec / 2) then
+        call raise("ERROR! 'nband_sbe_min'-1 must be <= nelec/2 " // &
+            & "(frozen bands must be fully occupied)!")
+    end if
+    if (nband_sbe_min > 1) then
+        if (trim(theory) == "maxwell_sbe") then
+            call raise("ERROR! 'nband_sbe_min' > 1 is not supported for theory='maxwell_sbe'!")
+        end if
+        if (comm_is_root(nproc_id_global)) then
+            write(*, '(a,i0,a)') "WARNING: 'nband_sbe_min' freezes bands 1..", &
+                & nband_sbe_min - 1, " as inert fully-occupied (no dynamics, zero current)."
+            write(*, '(a,i0,a,i0)') "  This is a frozen-core approximation: valid only if the " // &
+                & "frozen bands lie far below the band gap. nelec_eff = ", &
+                & nelec - 2 * (nband_sbe_min - 1), " of nelec = ", nelec
+            if (nband_sbe_min - 1 == nelec / 2) then
+                write(*, '(a)') "  WARNING: the band window contains NO occupied bands " // &
+                    & "(the entire valence manifold is frozen)."
+            end if
+        end if
+    end if
+
     if (trim(gauge_sbe) == "length_gauge") then
         if(t_2 <= 0.d0) call raise("ERROR! 't_2' must be positive.")
         if(am_s /= 4 .and. am_s /= 8) then

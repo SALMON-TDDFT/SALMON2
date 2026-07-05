@@ -98,9 +98,13 @@ subroutine main_multiscale_ssbe(icomm)
     if (nmacro > 0) then
 
         ! Read ground state electronic system:
+        ! (full window [1 : nstate_sbe(i)] = the pre-window behavior;
+        !  'nband_sbe_min'>1 is rejected for theory='maxwell_sbe' by
+        !  check_input_variables_sbe -- the multiscale trace bookkeeping has
+        !  not been audited for frozen bands)
         do i = 1, num_sbe
           call init_sbe_gs_info(gs(i), sysname_sbe(i), base_directory, &
-              & nk_sbe(i), nstate_sbe(i), nelec_sbe(i), &
+              & nk_sbe(i), nstate_sbe(i), 1, nstate_sbe(i), nelec_sbe(i), &
               & al_vec1_sbe(:,i), al_vec2_sbe(:,i), al_vec3_sbe(:,i), &
               & .false., icomm)
         end do
