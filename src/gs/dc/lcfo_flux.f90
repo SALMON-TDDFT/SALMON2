@@ -164,6 +164,8 @@ contains
       call rebalance_wannier_owner_fragments_import(dc, center_bohr, owner_frag, num_wann_chk)
       call detect_wannier_fragment_symops(dc, nsym, symops)
       call diagnose_fragment_wannier_center_symmetry(dc, center_bohr, owner_frag, num_wann_chk, nsym, symops)
+      call diagnose_fragment_wannier_symmetry_representation(dc, owner_frag, num_wann_chk, &
+        num_bands_chk, v_matrix, nsym, symops)
       if(allocated(symops)) deallocate(symops)
       call read_wannier90_global_rmn_gamma_block_import(dc, num_wann_chk, aa_global, ok_position)
       if(.not. ok_position) then
@@ -858,6 +860,261 @@ contains
       point(axis) = point(axis) - floor(point(axis) / cell_length(axis)) * cell_length(axis)
     end do
   end subroutine wrap_fragment_local_point
+
+  subroutine diagnose_fragment_wannier_symmetry_representation(dc, owner_frag, num_wann, &
+      num_bands, v_matrix, nsym, symops)
+    use eigen_subdiag_sub, only: eigen_zheev
+    use filesystem, only: get_filehandle
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: num_wann, owner_frag(num_wann), num_bands, nsym
+    complex(8), intent(in) :: v_matrix(num_bands,num_wann)
+    type(t_wannier_symop), intent(in) :: symops(:)
+    integer :: ifrag, isym, nowned, iw, ib, npts, nspin_file, nstate_frag_file, nstate_tot_file
+    integer :: nxyz_domain(3), n_basis_frag, p, ix, iy, iz
+    integer, allocatable :: wann_index(:), pmap(:)
+    real(8), allocatable :: phi_basis(:,:), coef_wf(:,:), psi_state(:,:)
+    complex(8), allocatable :: wannier_frag(:,:), srep(:,:), gram(:,:), eigvec(:,:), polar(:,:), invsqrt(:,:)
+    real(8), allocatable :: eval(:)
+    real(8) :: hvol, min_eval, max_eval, gram_residual, polar_residual, map_residual
+    logical :: map_ok, seed_ok
+
+    if(nsym <= 0) return
+    hvol = dc%system_tot%hvol
+    do ifrag=1,dc%n_frag
+      nowned = count(owner_frag(1:num_wann) == ifrag)
+      if(nowned <= 0) cycle
+      allocate(wann_index(nowned))
+      ib = 0
+      do iw=1,num_wann
+        if(owner_frag(iw) /= ifrag) cycle
+        ib = ib + 1
+        wann_index(ib) = iw
+      end do
+
+      call read_fragment_lcfo_seed_for_wannier_import(dc, ifrag, num_bands, &
+        nxyz_domain, nspin_file, nstate_frag_file, nstate_tot_file, n_basis_frag, &
+        phi_basis, coef_wf, seed_ok)
+      if(.not. seed_ok) then
+        write(*,'(1x,a,i0,a)') "[DC-LCFO-W90-SYM] fragment=", ifrag, &
+          " representation skipped: missing LCFO seed"
+        deallocate(wann_index)
+        cycle
+      end if
+
+      npts = product(nxyz_domain)
+      allocate(psi_state(npts,num_bands), wannier_frag(npts,nowned))
+      psi_state = matmul(phi_basis(1:npts,1:n_basis_frag), coef_wf(1:n_basis_frag,1:num_bands))
+      wannier_frag = matmul(cmplx(psi_state(1:npts,1:num_bands), 0.0d0, kind=8), &
+        v_matrix(1:num_bands,wann_index(1:nowned)))
+
+      do isym=1,nsym
+        if(symops(isym)%owner_frag /= ifrag) cycle
+        allocate(pmap(npts))
+        call build_fragment_symmetry_grid_map(dc, ifrag, nxyz_domain, symops(isym), &
+          pmap, map_ok, map_residual)
+        if(.not. map_ok) then
+          write(*,'(1x,a,i0,2a,a,es12.5)') &
+            "[DC-LCFO-W90-SYM] fragment=", ifrag, " representation label=", &
+            trim(symops(isym)%label), " skipped: grid map residual=", map_residual
+          deallocate(pmap)
+          cycle
+        end if
+
+        allocate(srep(nowned,nowned), gram(nowned,nowned), eigvec(nowned,nowned), &
+          polar(nowned,nowned), invsqrt(nowned,nowned), eval(nowned))
+        srep = (0.0d0,0.0d0)
+        do iw=1,nowned
+          do ib=1,nowned
+            do p=1,npts
+              srep(iw,ib) = srep(iw,ib) + conjg(wannier_frag(p,iw)) * wannier_frag(pmap(p),ib) * hvol
+            end do
+          end do
+        end do
+
+        gram = matmul(conjg(transpose(srep)), srep)
+        call eigen_zheev(gram, eval, eigvec)
+        min_eval = minval(eval)
+        max_eval = maxval(eval)
+        gram_residual = hermitian_identity_residual(gram)
+        polar_residual = -1.0d0
+        if(min_eval > 1.0d-12) then
+          invsqrt = (0.0d0,0.0d0)
+          do iw=1,nowned
+            do ib=1,nowned
+              invsqrt(iw,ib) = sum(eigvec(iw,1:nowned) * (1.0d0 / sqrt(eval(1:nowned))) * &
+                conjg(eigvec(ib,1:nowned)))
+            end do
+          end do
+          polar = matmul(srep, invsqrt)
+          polar_residual = hermitian_identity_residual(matmul(conjg(transpose(polar)), polar))
+        end if
+        write(*,'(1x,a,i0,2a,5(a,es12.5),a,i0)') &
+          "[DC-LCFO-W90-SYM] fragment=", ifrag, " representation label=", &
+          trim(symops(isym)%label), " min_s2=", min_eval, " max_s2=", max_eval, &
+          " s_unit_res=", gram_residual, " polar_unit_res=", polar_residual, &
+          " map_res=", map_residual, " ncenter=", nowned
+
+        deallocate(srep, gram, eigvec, polar, invsqrt, eval, pmap)
+      end do
+
+      deallocate(wann_index, phi_basis, coef_wf, psi_state, wannier_frag)
+    end do
+  end subroutine diagnose_fragment_wannier_symmetry_representation
+
+  subroutine read_fragment_lcfo_seed_for_wannier_import(dc, ifrag, num_bands, &
+      nxyz_domain, nspin_file, nstate_frag_file, nstate_tot_file, n_basis_frag, &
+      phi_basis, coef_wf, ok)
+    use filesystem, only: get_filehandle
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: ifrag, num_bands
+    integer, intent(out) :: nxyz_domain(3), nspin_file, nstate_frag_file, nstate_tot_file, n_basis_frag
+    real(8), allocatable, intent(out) :: phi_basis(:,:), coef_wf(:,:)
+    logical, intent(out) :: ok
+    integer :: iunit, io, n_frag_file, ispin, ibasis, ix, iy, iz, p
+    integer, allocatable :: n_mat_tmp(:), n_basis_tmp(:,:), index_basis_tmp(:,:,:), n_basis_core(:)
+    real(8), allocatable :: coef_all(:,:,:), f_basis(:,:,:,:,:), esp_tmp(:,:)
+    character(256) :: filename
+
+    ok = .false.
+    nxyz_domain = 0
+    nspin_file = 0
+    nstate_frag_file = 0
+    nstate_tot_file = 0
+    n_basis_frag = 0
+
+    write(filename, '(a,a,i6.6,a,a)') trim(import_run_root_dir()), 'data_dcdft/fragments/', ifrag, '/', binfile_wf
+    iunit = get_filehandle()
+    open(iunit,file=filename,form='unformatted',access='stream',status='old',iostat=io)
+    if(io /= 0) return
+    read(iunit) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
+    if(nspin_file < 1 .or. nstate_tot_file < num_bands) then
+      close(iunit)
+      return
+    end if
+    allocate(n_mat_tmp(nspin_file), n_basis_tmp(n_frag_file,nspin_file), &
+      index_basis_tmp(nstate_frag_file,n_frag_file,nspin_file), &
+      coef_all(nstate_frag_file,nstate_tot_file,nspin_file), esp_tmp(nstate_tot_file,nspin_file))
+    read(iunit) n_mat_tmp(1:nspin_file)
+    read(iunit) n_basis_tmp(1:n_frag_file,1:nspin_file)
+    read(iunit) index_basis_tmp(1:nstate_frag_file,1:n_frag_file,1:nspin_file)
+    read(iunit) coef_all(1:nstate_frag_file,1:nstate_tot_file,1:nspin_file)
+    read(iunit, iostat=io) esp_tmp(1:nstate_tot_file,1:nspin_file)
+    close(iunit)
+    if(io /= 0) then
+      deallocate(n_mat_tmp, n_basis_tmp, index_basis_tmp, coef_all, esp_tmp)
+      return
+    end if
+    n_basis_frag = n_basis_tmp(ifrag,1)
+    if(n_basis_frag < 1) then
+      deallocate(n_mat_tmp, n_basis_tmp, index_basis_tmp, coef_all, esp_tmp)
+      return
+    end if
+    allocate(coef_wf(nstate_frag_file,num_bands))
+    coef_wf(1:nstate_frag_file,1:num_bands) = coef_all(1:nstate_frag_file,1:num_bands,1)
+    deallocate(n_mat_tmp, n_basis_tmp, index_basis_tmp, coef_all, esp_tmp)
+
+    write(filename, '(a,a,i6.6,a,a)') trim(import_run_root_dir()), 'data_dcdft/fragments/', ifrag, '/', binfile_bf
+    iunit = get_filehandle()
+    open(iunit,file=filename,form='unformatted',access='stream',status='old',iostat=io)
+    if(io /= 0) then
+      deallocate(coef_wf)
+      return
+    end if
+    read(iunit) nxyz_domain(1:3), ispin, ibasis
+    if(ispin /= nspin_file .or. ibasis /= nstate_frag_file) then
+      close(iunit)
+      deallocate(coef_wf)
+      return
+    end if
+    allocate(n_basis_core(nspin_file))
+    read(iunit) n_basis_core(1:nspin_file)
+    allocate(f_basis(nxyz_domain(1),nxyz_domain(2),nxyz_domain(3),nspin_file,nstate_frag_file))
+    read(iunit) f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),1:nspin_file,1:nstate_frag_file)
+    close(iunit)
+    if(n_basis_core(1) /= n_basis_frag) then
+      deallocate(n_basis_core, f_basis, coef_wf)
+      return
+    end if
+
+    allocate(phi_basis(product(nxyz_domain),nstate_frag_file))
+    p = 0
+    do iz=1,nxyz_domain(3)
+      do iy=1,nxyz_domain(2)
+        do ix=1,nxyz_domain(1)
+          p = p + 1
+          phi_basis(p,1:nstate_frag_file) = f_basis(ix,iy,iz,1,1:nstate_frag_file)
+        end do
+      end do
+    end do
+    deallocate(n_basis_core, f_basis)
+    ok = .true.
+  end subroutine read_fragment_lcfo_seed_for_wannier_import
+
+  subroutine build_fragment_symmetry_grid_map(dc, ifrag, nxyz_domain, symop, pmap, ok, max_residual)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: ifrag, nxyz_domain(3)
+    type(t_wannier_symop), intent(in) :: symop
+    integer, intent(out) :: pmap(product(nxyz_domain))
+    logical, intent(out) :: ok
+    real(8), intent(out) :: max_residual
+    integer :: ix, iy, iz, axis, p, nearest(3), mapped_index(3), rot_inv(3,3)
+    real(8) :: cell_length(3), hgrid(3), pos(3), mapped(3), relative(3), scaled, residual
+    real(8), parameter :: grid_map_tol = 1.0d-7
+
+    ok = .true.
+    max_residual = 0.0d0
+    call fragment_cell_lengths_import(dc, ifrag, cell_length)
+    hgrid(1:3) = cell_length(1:3) / dble(nxyz_domain(1:3))
+    rot_inv = transpose(symop%rot)
+    p = 0
+    do iz=1,nxyz_domain(3)
+      pos(3) = dble(iz - 1) * hgrid(3)
+      do iy=1,nxyz_domain(2)
+        pos(2) = dble(iy - 1) * hgrid(2)
+        do ix=1,nxyz_domain(1)
+          pos(1) = dble(ix - 1) * hgrid(1)
+          p = p + 1
+          relative(1:3) = pos(1:3) - symop%origin_bohr(1:3) - symop%tau_local(1:3)
+          mapped(1:3) = symop%origin_bohr(1:3) + matmul_int_real(rot_inv, relative)
+          call wrap_fragment_local_point(mapped, cell_length)
+          do axis=1,3
+            scaled = mapped(axis) / hgrid(axis)
+            nearest(axis) = nint(scaled)
+            residual = abs(scaled - dble(nearest(axis))) * hgrid(axis)
+            max_residual = max(max_residual, residual)
+            if(residual > grid_map_tol) ok = .false.
+            mapped_index(axis) = modulo(nearest(axis), nxyz_domain(axis)) + 1
+          end do
+          pmap(p) = mapped_index(1) + (mapped_index(2) - 1) * nxyz_domain(1) &
+            + (mapped_index(3) - 1) * nxyz_domain(1) * nxyz_domain(2)
+        end do
+      end do
+    end do
+  end subroutine build_fragment_symmetry_grid_map
+
+  real(8) function hermitian_identity_residual(mat) result(residual)
+    implicit none
+    complex(8), intent(in) :: mat(:,:)
+    integer :: i, j, n
+    complex(8) :: target
+
+    n = size(mat,1)
+    residual = 0.0d0
+    do j=1,n
+      do i=1,n
+        target = (0.0d0,0.0d0)
+        if(i == j) target = (1.0d0,0.0d0)
+        residual = residual + abs(mat(i,j) - target)**2
+      end do
+    end do
+    residual = sqrt(residual / dble(max(1,n*n)))
+  end function hermitian_identity_residual
 
   function import_run_root_dir() result(root)
     use salmon_global, only: base_directory
