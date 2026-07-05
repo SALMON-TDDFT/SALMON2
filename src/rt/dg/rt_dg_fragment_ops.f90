@@ -4849,6 +4849,7 @@ contains
     use structures, only: s_dft_system
     use communication, only: comm_summation
     use misc_routines, only: get_wtime
+    use salmon_global, only: dg_mixed_z_polarization_branch
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -5237,6 +5238,15 @@ contains
     dg_frag%mixed_z_prod_pz_w_dim = dble(n_w)
     dg_frag%mixed_z_prod_pz_decomp_ready = .true.
     polarization_raw(:) = pol_sum(:)
+    if (trim(dg_mixed_z_polarization_branch) == 'center_diag') then
+      if (.not. allocated(dg_frag%global_wannier_center) .or. &
+          size(dg_frag%global_wannier_center, 1) < 3 .or. &
+          size(dg_frag%global_wannier_center, 2) < n_w) then
+        stop "DG-Fragment RT: center_diag polarization branch requires global Wannier centers"
+      end if
+      polarization_raw(3) = -weighted_center_sum + pol_ww_offdiag_sum(3) + pol_wp_sum(3) + &
+        (pol_sum(3) - pol_ww_sum(3) - pol_wp_sum(3))
+    end if
     deallocate(cw_local, cw_sum, cmix, cmix_occ, rho_mix, coef_block, prod_weight_local, prod_weight_sum, prod_contrib_local, prod_contrib_sum, &
                prod_rho_local, prod_rho_sum, prod_occ_local, prod_occ_sum_by_w)
   end subroutine calculate_global_mixed_wannier_bpw_polarization_dg

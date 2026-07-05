@@ -168,6 +168,7 @@ module salmon_global
   character(48)  :: dg_mixed_z_local_prop_backend
   character(32)  :: dg_mixed_z_frag_local_field_block
   character(32)  :: dg_mixed_z_direct_origin
+  character(32)  :: dg_mixed_z_polarization_branch
   character(1)   :: yn_dg_mixed_z_local_rho_writeback_wwonly
   character(1)   :: yn_dg_mixed_z_local_pz_writeback_total
   character(1)   :: yn_dg_mixed_z_local_current_writeback_total
