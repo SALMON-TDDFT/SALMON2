@@ -3,7 +3,7 @@
     use eigen_subdiag_sub, only: eigen_zheev
     use rt_dg_plane_wave, only: compute_fragment_pw_overlap, compute_fragment_pw_position_overlap
     use salmon_global, only: dg_bpw_auto, dg_bpw_auto_accuracy, dg_bpw_auto_max_n, &
-      dg_bpw_auto_min_n, dg_bpw_auto_report, n_plane_waves_dg
+      dg_bpw_auto_min_n, dg_bpw_auto_report, n_plane_waves_dg, yn_dg_mixed_z_include_ww
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
 
@@ -780,6 +780,8 @@
         z_eig(1:neig,1:neig) = matmul(conjg(transpose(dg_frag%global_wannier_flux_evec(1:nwann,1:neig))), &
           matmul(z_w, dg_frag%global_wannier_flux_evec(1:nwann,1:neig)))
         dg_frag%mixed_wannier_bpw_z(idir,1:neig,1:neig,ispin) = z_eig(1:neig,1:neig)
+        if (yn_dg_mixed_z_include_ww /= 'y') &
+          dg_frag%mixed_wannier_bpw_z(idir,1:neig,1:neig,ispin) = zzero
 
         r_local(:, :) = zzero
         c_local(:, :) = zzero
@@ -950,6 +952,7 @@
         "[DG-MIXED-Z] built dense Wannier+BPW-perp position: nw=", neig, " np=", &
         dg_frag%mixed_wannier_bpw_np, " min_Sperp=", min_s_local, " max_Sperp=", max_s_local
       write(*,'(1x,a,1pe13.5)') "[DG-MIXED-Z] hermiticity max|Z-Z^H|=", herm_max
+      write(*,'(1x,a,a)') "[DG-MIXED-Z] include WW position block=", yn_dg_mixed_z_include_ww
       write(*,'(1x,a,3(1x,1pe13.5))') "[DG-MIXED-Z] ||Z_WW||_F xyz=", zww_norm(1:3)
       write(*,'(1x,a,3(1x,1pe13.5))') "[DG-MIXED-Z] ||Z_WP||_F xyz=", zwp_norm(1:3)
       write(*,'(1x,a)') "[DG-MIXED-Z] Z_WP construction = direct <W|r|BPW_perp>"
