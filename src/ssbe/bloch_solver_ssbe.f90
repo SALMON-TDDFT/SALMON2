@@ -1,6 +1,7 @@
 module bloch_solver_ssbe
     use math_constants, only: pi, zi
-    use communication, only: comm_get_groupinfo, comm_summation
+    use communication, only: comm_get_groupinfo, comm_summation, &
+                             comm_isend, comm_irecv, comm_wait_all
     use gs_info_ssbe
     use util_ssbe, only: split_range
     implicit none
@@ -24,8 +25,28 @@ module bloch_solver_ssbe
 
     ! --- lightweight gicov perf timers (accumulate in gicov_rhs; print via sbe_print_timers) ---
     real(8),    save :: sbe_tmr_cov  = 0d0    ! covariant_grad_block wall [s], summed over RHS calls
-    real(8),    save :: sbe_tmr_comm = 0d0    ! comm_summation (rho gather) wall [s]
+    real(8),    save :: sbe_tmr_comm = 0d0    ! rho halo-exchange (was: full allreduce) wall [s]
     integer(8), save :: sbe_tmr_nrhs = 0      ! number of gicov_rhs calls
+
+    ! --- gicov halo-exchange plan (built once on first gicov_rhs call) ---
+    ! Replaces the full-nk rho allreduce: each rank ships only the +-m_max-shell
+    ! neighbour-k densities the covariant stencil actually reads (plan derived
+    ! from the stencil's own chain-walk => coverage by construction; superset
+    ! over all 3 axes => static under any axis_active/field direction).
+    ! Deterministic ascending-k packing on both sides (see build_halo_lists).
+    ! Single-solver module state (same assumption as the timers above).
+    type t_gh_buf
+      complex(8), allocatable :: b(:,:,:)     ! (nb, nb, cnt) per-partner message
+    end type
+    logical,    save :: gh_built = .false.
+    integer,    save :: gh_nb = 0, gh_nk = 0
+    integer,    save :: gh_nsrc = 0, gh_ndst = 0
+    integer,    allocatable, save :: gh_src_rank(:), gh_src_cnt(:), gh_src_ofs(:), gh_src_k(:)
+    integer,    allocatable, save :: gh_dst_rank(:), gh_dst_cnt(:), gh_dst_ofs(:), gh_dst_k(:)
+    type(t_gh_buf), allocatable, save :: gh_sb(:), gh_rb(:)
+    integer,    allocatable, save :: gh_reqs(:), gh_reqr(:)
+    complex(8), allocatable, save :: gh_rho(:,:,:)    ! persistent rho_full (nb,nb,nk); non-needed entries stay 0 from build
+    complex(8), allocatable, save :: gh_Dq(:,:,:,:)   ! persistent Dq (nb,nb,3,nk); only local slice defined per call
 
 contains
 
@@ -49,12 +70,81 @@ contains
     call comm_summation(sbe_tmr_cov,  cov_sum,  icomm)
     call comm_summation(sbe_tmr_comm, comm_sum, icomm)
     if (irank == 0) then
-      write(*, '(a)') "=== gicov RHS timers (covariant_grad_block vs rho comm_summation) ==="
+      write(*, '(a)') "=== gicov RHS timers (covariant_grad_block vs rho halo exchange) ==="
       write(*, '(a,i0,a,i0)') "  n_rhs=", sbe_tmr_nrhs, "  nproc=", nproc
       write(*, '(a,es12.4,a,es12.4)') "  covariant [s/call]: max_rank ", cout(1)*rn, "  avg_rank ", cov_sum/dble(nproc)*rn
       write(*, '(a,es12.4,a,es12.4)') "  comm      [s/call]: max_rank ", dout(1)*rn, "  avg_rank ", comm_sum/dble(nproc)*rn
     end if
   end subroutine sbe_print_timers
+
+  !-------------------------------------------------------------------
+  ! One-time construction of the gicov rho halo-exchange plan.
+  ! Every rank derives every rank's needed-set from replicated tables
+  ! (split_range + the stencil chain-walk), so send/recv lists agree with
+  ! no metadata exchange. Fail-closed: coverage of my own needed-set by
+  ! (local + recv) is verified here; a gap is a hard error, not silent.
+  ! At nproc=1 all lists are empty => the exchange issues NO point-to-point
+  ! calls (required: the no-MPI dummy build aborts on isend/irecv to a real
+  ! rank, and the standalone tests run exactly that build).
+  !-------------------------------------------------------------------
+  subroutine build_gicov_halo(sbe, gs, icomm)
+    use salmon_global, only: num_kgrid
+    use degenerate_block_ssbe, only: covariant_halo_needed, build_halo_lists
+    implicit none
+    type(s_sbe_bloch_solver), intent(in) :: sbe
+    type(s_sbe_gs_info), intent(in) :: gs
+    integer, intent(in) :: icomm
+    integer :: irank, nproc, o, p, ik, nk, nb
+    integer, allocatable :: itbl_min(:), itbl_max(:)
+    logical, allocatable :: needed_all(:,:), covered(:)
+
+    nk = sbe%nk;  nb = sbe%nb
+    call comm_get_groupinfo(icomm, irank, nproc)
+    allocate(itbl_min(0:nproc-1), itbl_max(0:nproc-1))
+    call split_range(1, nk, nproc, itbl_min, itbl_max)
+    if (itbl_min(irank) /= sbe%ik_min .or. itbl_max(irank) /= sbe%ik_max) then
+      write(*,*) "ERROR build_gicov_halo: split_range mismatch with solver ik range"
+      error stop
+    end if
+
+    allocate(needed_all(nk, 0:nproc-1))
+    do o = 0, nproc - 1
+      call covariant_halo_needed(nk, gs%nbvec, gs%bvec, num_kgrid, &
+                                 itbl_min(o), itbl_max(o), needed_all(:, o))
+    end do
+    call build_halo_lists(nk, nproc, irank, itbl_min, itbl_max, needed_all, &
+                          gh_nsrc, gh_src_rank, gh_src_cnt, gh_src_ofs, gh_src_k, &
+                          gh_ndst, gh_dst_rank, gh_dst_cnt, gh_dst_ofs, gh_dst_k)
+
+    ! fail-closed coverage check: every k I need is local or in a recv list
+    allocate(covered(nk));  covered = .false.
+    covered(sbe%ik_min:sbe%ik_max) = .true.
+    do p = 1, gh_nsrc
+      do ik = gh_src_ofs(p) + 1, gh_src_ofs(p) + gh_src_cnt(p)
+        covered(gh_src_k(ik)) = .true.
+      end do
+    end do
+    do ik = 1, nk
+      if (needed_all(ik, irank) .and. .not. covered(ik)) then
+        write(*,*) "ERROR build_gicov_halo: uncovered needed k =", ik
+        error stop
+      end if
+    end do
+    deallocate(covered)
+
+    allocate(gh_rb(gh_nsrc), gh_sb(gh_ndst))
+    do p = 1, gh_nsrc
+      allocate(gh_rb(p)%b(nb, nb, gh_src_cnt(p)))
+    end do
+    do p = 1, gh_ndst
+      allocate(gh_sb(p)%b(nb, nb, gh_dst_cnt(p)))
+    end do
+    allocate(gh_reqr(max(1, gh_nsrc)), gh_reqs(max(1, gh_ndst)))
+    allocate(gh_rho(nb, nb, nk), gh_Dq(nb, nb, 3, nk))
+    gh_rho = (0d0, 0d0)   ! one-time zero: never-needed entries stay 0 forever
+    gh_nb = nb;  gh_nk = nk
+    gh_built = .true.
+  end subroutine build_gicov_halo
 
 
 
@@ -729,28 +819,53 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   real(8) :: dk(1:3)
   logical :: deph_by_gw
   logical :: axis_active(3)
-  complex(8), allocatable :: rho_loc(:,:,:), rho_full(:,:,:), Dq(:,:,:,:)
   complex(8) :: gterm
+  integer :: p, jj
   integer(8) :: tc1, tc2, trate
 
   nb = sbe%nb
   nk = sbe%nk
 
-  allocate(rho_loc(nb,nb,nk), rho_full(nb,nb,nk), Dq(nb,nb,3,nk))
+  ! ---- (0) physical rho on the local k-slice + halo exchange.
+  ! Replaces the full-nk allreduce: only the +-m_max-shell neighbour-k rho the
+  ! covariant stencil reads is shipped (point-to-point, plan built once).
+  ! gh_rho persists across calls; entries neither local nor halo stay 0 from
+  ! the build and are never read.
+  if (.not. gh_built) call build_gicov_halo(sbe, gs, icomm)
+  if (gh_nb /= sbe%nb .or. gh_nk /= sbe%nk) then
+    write(*,*) "ERROR gicov_rhs: halo plan built for a different solver size"
+    error stop
+  end if
 
-  ! ---- (0) physical rho on the local k-slice (zero elsewhere), gather to full k
-  rho_loc = (0.d0, 0.d0)
   !$omp parallel do default(shared) private(ik, ib, jb) collapse(3)
   do ik = sbe%ik_min, sbe%ik_max
     do ib = 1, nb
       do jb = 1, nb
-        rho_loc(ib, jb, ik) = rho_ij_from_q(sbe, ib, jb, ik)
+        gh_rho(ib, jb, ik) = rho_ij_from_q(sbe, ib, jb, ik)
       end do
     end do
   end do
+
   sbe_tmr_nrhs = sbe_tmr_nrhs + 1
   call system_clock(tc1, trate)
-  call comm_summation(rho_loc, rho_full, nb*nb*nk, icomm)
+  do p = 1, gh_nsrc
+    gh_reqr(p) = comm_irecv(gh_rb(p)%b, gh_src_rank(p), 0, icomm)
+  end do
+  do p = 1, gh_ndst
+    do jj = 1, gh_dst_cnt(p)
+      gh_sb(p)%b(:, :, jj) = gh_rho(:, :, gh_dst_k(gh_dst_ofs(p) + jj))
+    end do
+    gh_reqs(p) = comm_isend(gh_sb(p)%b, gh_dst_rank(p), 0, icomm)
+  end do
+  if (gh_nsrc > 0) then
+    call comm_wait_all(gh_reqr(1:gh_nsrc))
+    do p = 1, gh_nsrc
+      do jj = 1, gh_src_cnt(p)
+        gh_rho(:, :, gh_src_k(gh_src_ofs(p) + jj)) = gh_rb(p)%b(:, :, jj)
+      end do
+    end do
+  end if
+  if (gh_ndst > 0) call comm_wait_all(gh_reqs(1:gh_ndst))
   call system_clock(tc2);  sbe_tmr_comm = sbe_tmr_comm + dble(tc2 - tc1) / dble(trate)
 
   ! ---- (1) covariant transport (physical), WHOLE field term: + sum_a E_a D_cov[rho]_a
@@ -763,7 +878,7 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   end do
   call system_clock(tc1)
   call covariant_grad_block(nb, nk, gs%nbvec, gs%bvec, num_kgrid, &
-                            gs%u_transport, rho_full, dk, Dq, sbe%ik_min, sbe%ik_max, axis_active)
+                            gs%u_transport, gh_rho, dk, gh_Dq, sbe%ik_min, sbe%ik_max, axis_active)
   call system_clock(tc2);  sbe_tmr_cov = sbe_tmr_cov + dble(tc2 - tc1) / dble(trate)
 
   deph_by_gw = (yn_sbe_gw_collision == 'y' .and. trim(sbe_deph_mode) == 'gw')
@@ -779,14 +894,14 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
     do ib = 1, nb
       do jb = 1, nb
         ! (1) covariant transport (intraband + interband, full-band)
-        gterm = Efield(1) * Dq(ib, jb, 1, ik) + &
-                Efield(2) * Dq(ib, jb, 2, ik) + &
-                Efield(3) * Dq(ib, jb, 3, ik)
+        gterm = Efield(1) * gh_Dq(ib, jb, 1, ik) + &
+                Efield(2) * gh_Dq(ib, jb, 2, ik) + &
+                Efield(3) * gh_Dq(ib, jb, 3, ik)
         drho(ib, jb, ik) = gterm
         ! (2) coherent band energy + phenomenological dephasing (off-diagonal only)
         if (ib /= jb) then
           drho(ib, jb, ik) = drho(ib, jb, ik) &
-            & - zi * gs%delta_omega(ib, jb, ik) * rho_full(ib, jb, ik)
+            & - zi * gs%delta_omega(ib, jb, ik) * gh_rho(ib, jb, ik)
           ! Covariant T2: dephase only ENERGY-DISTINCT pairs. Inside a
           ! (near-)degenerate manifold (|delta_omega| <= theta_off, the same
           ! degeneracy scale the Wilson-line transport groups blocks by) the
@@ -796,15 +911,13 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
           ! collision) channel, not to a phenomenological scalar T2.
           if (.not. deph_by_gw .and. &
             & abs(gs%delta_omega(ib, jb, ik)) > theta_off) then
-            drho(ib, jb, ik) = drho(ib, jb, ik) - rho_full(ib, jb, ik) / t_2
+            drho(ib, jb, ik) = drho(ib, jb, ik) - gh_rho(ib, jb, ik) / t_2
           end if
         end if
       end do
     end do
   end do
   !$omp end parallel do
-
-  deallocate(rho_loc, rho_full, Dq)
 end subroutine gicov_rhs
 
 subroutine dt_evolve_bloch_lg(sbe, gs, E, bj_am, dt, icomm)

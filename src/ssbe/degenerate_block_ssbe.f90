@@ -56,6 +56,9 @@ module degenerate_block_ssbe
   ! Phase 2 (gicov): pure gauge-covariant intraband k-derivative operator that
   ! consumes build_block_transport's U_full (Wilson-line transport, no logm).
   public :: covariant_grad_block  ! D_cov rho = d_k rho - i[xi,rho] (<=4-shell transported stencil, per-axis alias-capped)
+  ! Halo support (pure, no MPI; consumed by bloch_solver's gicov halo exchange):
+  public :: covariant_halo_needed ! mark every k whose rho the stencil READS for a local slice
+  public :: build_halo_lists      ! derive deterministic per-rank send/recv k-lists from needed-sets
 
   real(8), parameter :: theta_on  = 5d-4   ! tight core-degeneracy bound  [au]
   real(8), parameter :: theta_off = 2d-3   ! block-membership bound       [au]
@@ -1399,6 +1402,142 @@ contains
       kfwd = krp                                       ! next forward link at k+m e
     end do
   end subroutine cov_grad_one_k
+
+  !-------------------------------------------------------------------
+  ! Halo support (pure, no MPI): mark every k whose rho is READ when
+  ! covariant_grad_block runs on the local slice [ik_lo, ik_hi]. Mirrors the
+  ! chain-walk of cov_grad_one_k exactly (forward k+m e via ik_neighbor,
+  ! backward k-m e via the inverse map), over ALL three axes = a superset of
+  ! any axis_active mask, so the resulting halo plan is static even though
+  ! the field direction varies in time. U_full is full-nk on every rank, so
+  ! only rho needs this. needed(ik_lo:ik_hi) is also set (local k included).
+  ! An empty slice (ik_lo > ik_hi, possible when nproc > nk) yields all-false.
+  !-------------------------------------------------------------------
+  subroutine covariant_halo_needed(nk, nbvec, bvec, num_kgrid, ik_lo, ik_hi, needed)
+    implicit none
+    integer, intent(in)  :: nk, nbvec, bvec(3, nbvec), num_kgrid(3)
+    integer, intent(in)  :: ik_lo, ik_hi
+    logical, intent(out) :: needed(nk)
+    integer, allocatable :: ik_neighbor(:,:), bwd(:)
+    integer :: iv_axis(3), m_max(3), axis, iv, ik, m, kfwd, kbwd
+
+    needed = .false.
+    if (ik_lo > ik_hi) return
+    needed(ik_lo:ik_hi) = .true.
+
+    allocate(ik_neighbor(nbvec, nk), bwd(nk))
+    call build_ik_neighbor(num_kgrid, bvec, nbvec, nk, ik_neighbor)
+    iv_axis(1) = find_bvec(bvec, nbvec, 1, 0, 0)
+    iv_axis(2) = find_bvec(bvec, nbvec, 0, 1, 0)
+    iv_axis(3) = find_bvec(bvec, nbvec, 0, 0, 1)
+    do axis = 1, 3
+      m_max(axis) = min(4, (num_kgrid(axis) - 1) / 2)
+    end do
+
+    do axis = 1, 3
+      iv = iv_axis(axis)
+      if (iv == 0) cycle
+      if (m_max(axis) == 0) cycle
+      do ik = 1, nk
+        bwd(ik_neighbor(iv, ik)) = ik
+      end do
+      do ik = ik_lo, ik_hi
+        kfwd = ik
+        kbwd = ik
+        do m = 1, m_max(axis)
+          kfwd = ik_neighbor(iv, kfwd)   ! k+m e : rho(kfwd) is read
+          needed(kfwd) = .true.
+          kbwd = bwd(kbwd)               ! k-m e : rho(kbwd) is read
+          needed(kbwd) = .true.
+        end do
+      end do
+    end do
+    deallocate(ik_neighbor, bwd)
+  end subroutine covariant_halo_needed
+
+  !-------------------------------------------------------------------
+  ! Halo support (pure, no MPI): derive per-rank send/recv k-lists from the
+  ! needed-sets of ALL ranks (needed_all(:,o) = covariant_halo_needed of rank
+  ! o's slice). Deterministic ascending-k ordering on both sides, so sender
+  ! and receiver agree on packing order with no metadata exchange:
+  !   recv: from each owner o /= myrank, the k in o's range that I need
+  !   send: to each requester r /= myrank, the k in MY range that r needs
+  ! Flattened lists: partner p occupies k( ofs(p)+1 : ofs(p)+cnt(p) ).
+  !-------------------------------------------------------------------
+  subroutine build_halo_lists(nk, nproc, myrank, itbl_min, itbl_max, needed_all, &
+                              nsrc, src_rank, src_cnt, src_ofs, src_k, &
+                              ndst, dst_rank, dst_cnt, dst_ofs, dst_k)
+    implicit none
+    integer, intent(in)  :: nk, nproc, myrank
+    integer, intent(in)  :: itbl_min(0:nproc-1), itbl_max(0:nproc-1)
+    logical, intent(in)  :: needed_all(nk, 0:nproc-1)
+    integer, intent(out) :: nsrc, ndst
+    integer, allocatable, intent(out) :: src_rank(:), src_cnt(:), src_ofs(:), src_k(:)
+    integer, allocatable, intent(out) :: dst_rank(:), dst_cnt(:), dst_ofs(:), dst_k(:)
+    integer :: o, r, ik, c, tot, p
+
+    ! ---- recv side: owners I need k from ----
+    nsrc = 0;  tot = 0
+    do o = 0, nproc - 1
+      if (o == myrank) cycle
+      c = 0
+      do ik = itbl_min(o), itbl_max(o)
+        if (needed_all(ik, myrank)) c = c + 1
+      end do
+      if (c > 0) then
+        nsrc = nsrc + 1;  tot = tot + c
+      end if
+    end do
+    allocate(src_rank(nsrc), src_cnt(nsrc), src_ofs(nsrc), src_k(tot))
+    p = 0;  tot = 0
+    do o = 0, nproc - 1
+      if (o == myrank) cycle
+      c = 0
+      do ik = itbl_min(o), itbl_max(o)
+        if (needed_all(ik, myrank)) c = c + 1
+      end do
+      if (c > 0) then
+        p = p + 1
+        src_rank(p) = o;  src_cnt(p) = c;  src_ofs(p) = tot
+        do ik = itbl_min(o), itbl_max(o)                 ! ascending k
+          if (needed_all(ik, myrank)) then
+            tot = tot + 1;  src_k(tot) = ik
+          end if
+        end do
+      end if
+    end do
+
+    ! ---- send side: requesters that need MY k ----
+    ndst = 0;  tot = 0
+    do r = 0, nproc - 1
+      if (r == myrank) cycle
+      c = 0
+      do ik = itbl_min(myrank), itbl_max(myrank)
+        if (needed_all(ik, r)) c = c + 1
+      end do
+      if (c > 0) then
+        ndst = ndst + 1;  tot = tot + c
+      end if
+    end do
+    allocate(dst_rank(ndst), dst_cnt(ndst), dst_ofs(ndst), dst_k(tot))
+    p = 0;  tot = 0
+    do r = 0, nproc - 1
+      if (r == myrank) cycle
+      c = 0
+      do ik = itbl_min(myrank), itbl_max(myrank)
+        if (needed_all(ik, r)) c = c + 1
+      end do
+      if (c > 0) then
+        p = p + 1
+        dst_rank(p) = r;  dst_cnt(p) = c;  dst_ofs(p) = tot
+        do ik = itbl_min(myrank), itbl_max(myrank)       ! ascending k
+          if (needed_all(ik, r)) then
+            tot = tot + 1;  dst_k(tot) = ik
+          end if
+        end do
+      end if
+    end do
+  end subroutine build_halo_lists
 
   !-------------------------------------------------------------------
   ! C = op(A) op(B), all n x n complex, via ZGEMM (BLAS).  ta/tb in {'N','C'}.
