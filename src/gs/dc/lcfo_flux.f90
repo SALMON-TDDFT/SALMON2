@@ -164,13 +164,13 @@ contains
       call rebalance_wannier_owner_fragments_import(dc, center_bohr, owner_frag, num_wann_chk)
       call detect_wannier_fragment_symops(dc, nsym, symops)
       call diagnose_fragment_wannier_center_symmetry(dc, center_bohr, owner_frag, num_wann_chk, nsym, symops)
-      call diagnose_fragment_wannier_symmetry_representation(dc, center_bohr, owner_frag, num_wann_chk, &
-        num_bands_chk, v_matrix, nsym, symops)
       call read_wannier90_global_rmn_gamma_block_import(dc, num_wann_chk, aa_global, ok_position)
       if(.not. ok_position) then
         allocate(aa_global(3,num_wann_chk,num_wann_chk))
         aa_global = (0d0,0d0)
       else
+        call diagnose_fragment_wannier_symmetry_representation(dc, center_bohr, owner_frag, num_wann_chk, &
+          num_bands_chk, v_matrix, esp_file, nsym, symops, aa_global, ok_position)
         if(trim(dg_wannier_symmetry_gauge) == 'local_inversion_position') then
           call symmetrize_fragment_wannier_position_import(dc, center_bohr, owner_frag, num_wann_chk, &
             num_bands_chk, v_matrix, nsym, symops, aa_global)
@@ -1109,28 +1109,33 @@ contains
   end subroutine wrap_fragment_local_point
 
   subroutine diagnose_fragment_wannier_symmetry_representation(dc, center_bohr, owner_frag, num_wann, &
-      num_bands, v_matrix, nsym, symops)
+      num_bands, v_matrix, esp_file, nsym, symops, aa_global, position_available)
     use eigen_subdiag_sub, only: eigen_zheev
     use filesystem, only: get_filehandle
     use structures, only: s_dcdft
     implicit none
     type(s_dcdft), intent(in) :: dc
     integer, intent(in) :: num_wann, owner_frag(num_wann), num_bands, nsym
-    real(8), intent(in) :: center_bohr(3,num_wann)
+    real(8), intent(in) :: center_bohr(3,num_wann), esp_file(:,:)
     complex(8), intent(in) :: v_matrix(num_bands,num_wann)
+    complex(8), intent(in) :: aa_global(3,num_wann,num_wann)
+    logical, intent(in) :: position_available
     type(t_wannier_symop), intent(in) :: symops(:)
     integer :: ifrag, isym, nowned, iw, ib, npts, nspin_file, nstate_frag_file, nstate_tot_file
-    integer :: nxyz_domain(3), n_basis_frag, p, ix, iy, iz
+    integer :: nxyz_domain(3), n_basis_frag, p, ix, iy, iz, jb, jw, axis, nocc
     integer, allocatable :: wann_index(:), pmap(:), center_perm(:)
     real(8), allocatable :: phi_basis(:,:), coef_wf(:,:), psi_state(:,:)
     complex(8), allocatable :: wannier_frag(:,:), srep(:,:), gram(:,:), eigvec(:,:), polar(:,:), invsqrt(:,:)
+    complex(8), allocatable :: zloc(:,:), hloc(:,:), rholoc(:,:), work(:,:)
     real(8), allocatable :: eval(:)
-    real(8) :: hvol, min_eval, max_eval, gram_residual, polar_residual, map_residual
+    real(8) :: hvol, min_eval, max_eval, gram_residual, polar_residual, map_residual, eval_floor
     real(8) :: center_perm_max, center_perm_rms, target_residual
+    real(8) :: origin_global(3), z_odd_res2, z_norm2, h_even_res, rho_even_res
     logical :: map_ok, seed_ok, center_perm_ok
 
     if(nsym <= 0) return
     hvol = dc%system_tot%hvol
+    eval_floor = 1.0d-10
     do ifrag=1,dc%n_frag
       nowned = count(owner_frag(1:num_wann) == ifrag)
       if(nowned <= 0) cycle
@@ -1193,18 +1198,19 @@ contains
         gram_residual = hermitian_identity_residual(gram)
         polar_residual = -1.0d0
         target_residual = -1.0d0
-        if(min_eval > 1.0d-12) then
-          invsqrt = (0.0d0,0.0d0)
-          do iw=1,nowned
-            do ib=1,nowned
-              invsqrt(iw,ib) = sum(eigvec(iw,1:nowned) * (1.0d0 / sqrt(eval(1:nowned))) * &
-                conjg(eigvec(ib,1:nowned)))
-            end do
+        invsqrt = (0.0d0,0.0d0)
+        polar = (0.0d0,0.0d0)
+        do iw=1,nowned
+          do ib=1,nowned
+            invsqrt(iw,ib) = sum(eigvec(iw,1:nowned) * merge(1.0d0 / sqrt(eval(1:nowned)), 0.0d0, &
+              eval(1:nowned) > eval_floor) * conjg(eigvec(ib,1:nowned)))
+            polar(iw,ib) = sum(eigvec(iw,1:nowned) * merge(0.0d0, 1.0d0, &
+              eval(1:nowned) > eval_floor) * conjg(eigvec(ib,1:nowned)))
           end do
-          polar = matmul(srep, invsqrt)
-          polar_residual = hermitian_identity_residual(matmul(conjg(transpose(polar)), polar))
-          if(center_perm_ok) target_residual = permutation_target_residual(polar, center_perm)
-        end if
+        end do
+        polar = matmul(srep, invsqrt) + polar
+        polar_residual = hermitian_identity_residual(matmul(conjg(transpose(polar)), polar))
+        if(center_perm_ok) target_residual = permutation_target_residual(polar, center_perm)
         write(*,'(1x,a,i0,2a,8(a,es12.5),a,l1,a,i0)') &
           "[DC-LCFO-W90-SYM] fragment=", ifrag, " representation label=", &
           trim(symops(isym)%label), " min_s2=", min_eval, " max_s2=", max_eval, &
@@ -1212,6 +1218,51 @@ contains
           " map_res=", map_residual, " center_perm_max=", center_perm_max, &
           " center_perm_rms=", center_perm_rms, " target_res=", target_residual, &
           " center_perm_ok=", center_perm_ok, " ncenter=", nowned
+
+        if(trim(symops(isym)%label) == 'inversion') then
+          call fragment_symmetry_origin_global_import(dc, ifrag, symops(isym), origin_global)
+          allocate(zloc(nowned,nowned), hloc(nowned,nowned), rholoc(nowned,nowned), &
+            work(nowned,nowned))
+          hloc = (0.0d0,0.0d0)
+          rholoc = (0.0d0,0.0d0)
+          nocc = min(num_bands, max(1, num_wann / 2))
+          do jb=1,nowned
+            jw = wann_index(jb)
+            do ib=1,nowned
+              iw = wann_index(ib)
+              hloc(ib,jb) = sum(conjg(v_matrix(1:num_bands,iw)) * &
+                cmplx(esp_file(1:num_bands,1), 0.0d0, kind=8) * v_matrix(1:num_bands,jw))
+              rholoc(ib,jb) = sum(conjg(v_matrix(1:nocc,iw)) * v_matrix(1:nocc,jw))
+            end do
+          end do
+          work = matmul(conjg(transpose(polar)), matmul(hloc, polar)) - hloc
+          h_even_res = sqrt(sum(abs(work)**2) / max(sum(abs(hloc)**2), 1.0d-300))
+          work = matmul(conjg(transpose(polar)), matmul(rholoc, polar)) - rholoc
+          rho_even_res = sqrt(sum(abs(work)**2) / max(sum(abs(rholoc)**2), 1.0d-300))
+          z_odd_res2 = 0.0d0
+          z_norm2 = 0.0d0
+          if(position_available) then
+            do axis=1,3
+              do jb=1,nowned
+                jw = wann_index(jb)
+                do ib=1,nowned
+                  iw = wann_index(ib)
+                  zloc(ib,jb) = aa_global(axis,iw,jw)
+                end do
+                zloc(jb,jb) = zloc(jb,jb) - cmplx(origin_global(axis), 0.0d0, kind=8)
+              end do
+              work = matmul(conjg(transpose(polar)), matmul(zloc, polar)) + zloc
+              z_odd_res2 = z_odd_res2 + sum(abs(work)**2)
+              z_norm2 = z_norm2 + sum(abs(zloc)**2)
+            end do
+          end if
+          write(*,'(1x,a,i0,a,5(a,es12.5),a,i0)') &
+            "[DC-LCFO-W90-SYM-OP] fragment=", ifrag, " label=inversion", &
+            " z_odd_res=", sqrt(z_odd_res2 / max(z_norm2, 1.0d-300)), &
+            " h_even_res=", h_even_res, " rho_even_res=", rho_even_res, &
+            " polar_unit_res=", polar_residual, " map_res=", map_residual, " nocc=", nocc
+          deallocate(zloc, hloc, rholoc, work)
+        end if
 
         deallocate(srep, gram, eigvec, polar, invsqrt, eval, pmap, center_perm)
       end do
