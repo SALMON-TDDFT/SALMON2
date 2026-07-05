@@ -1125,6 +1125,7 @@ contains
     type(t_wannier_symop), intent(in) :: symops(:)
     integer :: ifrag, isym, nowned, iw, ib, npts, nspin_file, nstate_frag_file, nstate_tot_file
     integer :: nxyz_domain(3), n_basis_frag, p, ix, iy, iz, jb, jw, axis, nocc
+    integer :: n_s2_gt_09, n_s2_gt_05
     integer, allocatable :: wann_index(:), pmap(:), center_perm(:)
     real(8), allocatable :: phi_basis(:,:), coef_wf(:,:), psi_state(:,:)
     complex(8), allocatable :: wannier_frag(:,:), srep(:,:), gram(:,:), eigvec(:,:), polar(:,:), invsqrt(:,:)
@@ -1197,6 +1198,8 @@ contains
         call eigen_zheev(gram, eval, eigvec)
         min_eval = minval(eval)
         max_eval = maxval(eval)
+        n_s2_gt_09 = count(eval(1:nowned) > 0.9d0)
+        n_s2_gt_05 = count(eval(1:nowned) > 0.5d0)
         gram_residual = hermitian_identity_residual(gram)
         polar_residual = -1.0d0
         target_residual = -1.0d0
@@ -1213,13 +1216,14 @@ contains
         polar = matmul(srep, invsqrt) + polar
         polar_residual = hermitian_identity_residual(matmul(conjg(transpose(polar)), polar))
         if(center_perm_ok) target_residual = permutation_target_residual(polar, center_perm)
-        write(*,'(1x,a,i0,2a,8(a,es12.5),a,l1,a,i0)') &
+        write(*,'(1x,a,i0,2a,8(a,es12.5),a,l1,3(a,i0))') &
           "[DC-LCFO-W90-SYM] fragment=", ifrag, " representation label=", &
           trim(symops(isym)%label), " min_s2=", min_eval, " max_s2=", max_eval, &
           " s_unit_res=", gram_residual, " polar_unit_res=", polar_residual, &
           " map_res=", map_residual, " center_perm_max=", center_perm_max, &
           " center_perm_rms=", center_perm_rms, " target_res=", target_residual, &
-          " center_perm_ok=", center_perm_ok, " ncenter=", nowned
+          " center_perm_ok=", center_perm_ok, " n_s2_gt_09=", n_s2_gt_09, &
+          " n_s2_gt_05=", n_s2_gt_05, " ncenter=", nowned
 
         if(trim(symops(isym)%label) == 'inversion') then
           call fragment_symmetry_origin_global_import(dc, ifrag, symops(isym), origin_global)
@@ -1432,7 +1436,7 @@ contains
     type(t_wannier_symop), intent(in) :: symops(:)
     complex(8), intent(inout) :: aa_global(3,num_wann,num_wann)
     integer :: ifrag, isym, nowned, iw, jw, ib, jb, npts, nspin_file, nstate_frag_file, nstate_tot_file
-    integer :: nxyz_domain(3), n_basis_frag, axis, p
+    integer :: nxyz_domain(3), n_basis_frag, axis, p, n_s2_gt_09, n_s2_gt_05
     integer, allocatable :: wann_index(:), pmap(:)
     real(8), allocatable :: phi_basis(:,:), coef_wf(:,:), psi_state(:,:), eval(:)
     complex(8), allocatable :: wannier_frag(:,:), srep(:,:), gram(:,:), eigvec(:,:), drep(:,:), invsqrt(:,:)
@@ -1500,6 +1504,8 @@ contains
         call eigen_zheev(gram, eval, eigvec)
         min_eval = minval(eval)
         max_eval = maxval(eval)
+        n_s2_gt_09 = count(eval(1:nowned) > 0.9d0)
+        n_s2_gt_05 = count(eval(1:nowned) > 0.5d0)
         invsqrt = (0.0d0,0.0d0)
         drep = (0.0d0,0.0d0)
         do iw=1,nowned
@@ -1553,12 +1559,13 @@ contains
           iw = wann_index(ib)
           center_bohr(1:3,iw) = real(aa_global(1:3,iw,iw), kind=8)
         end do
-        write(*,'(1x,a,i0,a,7(a,es12.5),a,i0)') &
+        write(*,'(1x,a,i0,a,7(a,es12.5),3(a,i0))') &
           "[DC-LCFO-W90-SYM] fragment=", ifrag, " position sym label=inversion", &
           " min_s2=", min_eval, " max_s2=", max_eval, " polar_unit_res=", polar_residual, &
           " rel_change=", sqrt(change_norm2 / max(base_norm2, 1.0d-300)), &
           " sym_res=", sqrt(sym_residual2 / max(sym_norm2, 1.0d-300)), &
-          " herm_res=", herm_residual, " map_res=", map_residual, " ncenter=", nowned
+          " herm_res=", herm_residual, " map_res=", map_residual, &
+          " n_s2_gt_09=", n_s2_gt_09, " n_s2_gt_05=", n_s2_gt_05, " ncenter=", nowned
 
         deallocate(ac, work, asym, srep, gram, eigvec, drep, invsqrt, eval, pmap)
       end do
