@@ -1353,7 +1353,7 @@ contains
     use communication, only: comm_is_root
     use filesystem,          only: open_filehandle
     use inputoutput,          only: sysname, base_directory, num_kgrid
-    use band,                 only: calc_kgrid_prod
+    use band,                 only: calc_kgrid_prod_block, kgrid_prod_block_size
     implicit none
     type(s_rgrid),        intent(in) :: rgrid_lg, rgrid_mg
     type(s_dft_system),       intent(in) :: system
@@ -1361,55 +1361,81 @@ contains
     type(s_orbital), intent(in) :: wavefunction
 
     ! Specify the neighboring k-grid region to consider:
-    integer, parameter :: ndk = 1 
+    integer, parameter :: ndk = 1
     ! (ndk=1 corresponds to first nearlest neighbors)
 
-    integer :: ik, ik1, ik2, ik3 
+    integer :: ik, ik1, ik2, ik3
     integer :: jdk1, jdk2, jdk3, io, jo
     integer :: fh
+    integer :: nblk, ikb_s, ikb_e
     character(256) :: file_prod_dk_data
     integer :: ik3d_tbl(1:3, 1:system%nk)
-    complex(8) :: prod_dk( &
-      & 1:system%no, 1:system%no, -ndk:ndk, -ndk:ndk, -ndk:ndk, &
-      & 1:system%nk)
+    ! Streaming export: the product table is computed and written in k-blocks
+    ! so that no O(nk) replicated wavefunction/product buffer is ever
+    ! allocated (the old full-nk export ran out of memory at large nk).
+    complex(8), allocatable :: prod_dk_blk(:, :, :, :, :, :)
 
     ! Export filename: project_directory/sysname_kprod_dk.data
     file_prod_dk_data = trim(base_directory) // trim(sysname) // "_prod_dk.data"
 
     ! If k-point is distributed as uniform rectangular grid:
     if (0 < minval(num_kgrid)) then
-      ! Calculate inner-product table: prod_dk
-      call calc_kgrid_prod( &
-        & system, rgrid_lg, rgrid_mg, wf_info, wavefunction, &
-        & num_kgrid(1), num_kgrid(2), num_kgrid(3), ndk, &
-        & ik3d_tbl, prod_dk)
-      
+      ! Number of bra k-points computed per streaming block:
+      nblk = kgrid_prod_block_size( &
+        & system, num_kgrid(1), num_kgrid(2), num_kgrid(3), ndk)
+
       if(comm_is_root(nproc_id_global)) then
         fh = open_filehandle(trim(file_prod_dk_data))
         ! metadata (reader record-count / ordering check): no nk num_kgrid(1:3) ndk
         write(fh, '("#",6(1x,i0))') &
           & system%no, system%nk, num_kgrid(1), num_kgrid(2), num_kgrid(3), ndk
         write(fh, '(a)') "# 1:ik 2:ik1 3:ik2 4:ik3 5:jk1-ik1 6:jk2-ik2 7:jk3-ik3 8:io 9:jo 10:re 11:im"
-        do ik = 1, system%nk
-          ik1 = ik3d_tbl(1, ik)
-          ik2 = ik3d_tbl(2, ik)
-          ik3 = ik3d_tbl(3, ik)
-          do jdk3 = -ndk, ndk
-            do jdk2 = -ndk, ndk
-              do jdk1 = -ndk, ndk
-                do jo = 1, system%no
-                  do io = 1, system%no
-                    write(fh, '(9(i10),2(e25.16e3))') &
-                      & ik, ik1, ik2, ik3, &
-                      & jdk1, jdk2, jdk3, io, jo, &
-                      & real(prod_dk(io, jo, jdk1, jdk2, jdk3, ik)), &
-                      & aimag(prod_dk(io, jo, jdk1, jdk2, jdk3, ik))
+      end if
+
+      ! All ranks iterate the same deterministic block schedule (collective
+      ! communication inside calc_kgrid_prod_block); the root rank appends
+      ! each block's records to the file in the same global ik order and
+      ! with the same formats as the old full-nk export.
+      do ikb_s = 1, system%nk, nblk
+        ikb_e = min(ikb_s + nblk - 1, system%nk)
+
+        allocate(prod_dk_blk( &
+          & 1:system%no, 1:system%no, -ndk:ndk, -ndk:ndk, -ndk:ndk, &
+          & ikb_s:ikb_e))
+
+        ! Calculate inner-product table for this block: prod_dk_blk
+        call calc_kgrid_prod_block( &
+          & system, rgrid_lg, rgrid_mg, wf_info, wavefunction, &
+          & num_kgrid(1), num_kgrid(2), num_kgrid(3), ndk, &
+          & ikb_s, ikb_e, ik3d_tbl, prod_dk_blk)
+
+        if(comm_is_root(nproc_id_global)) then
+          do ik = ikb_s, ikb_e
+            ik1 = ik3d_tbl(1, ik)
+            ik2 = ik3d_tbl(2, ik)
+            ik3 = ik3d_tbl(3, ik)
+            do jdk3 = -ndk, ndk
+              do jdk2 = -ndk, ndk
+                do jdk1 = -ndk, ndk
+                  do jo = 1, system%no
+                    do io = 1, system%no
+                      write(fh, '(9(i10),2(e25.16e3))') &
+                        & ik, ik1, ik2, ik3, &
+                        & jdk1, jdk2, jdk3, io, jo, &
+                        & real(prod_dk_blk(io, jo, jdk1, jdk2, jdk3, ik)), &
+                        & aimag(prod_dk_blk(io, jo, jdk1, jdk2, jdk3, ik))
+                    end do
                   end do
                 end do
               end do
             end do
           end do
-        end do
+        end if
+
+        deallocate(prod_dk_blk)
+      end do
+
+      if(comm_is_root(nproc_id_global)) then
         close(fh)
       end if
     end if
