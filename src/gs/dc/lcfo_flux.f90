@@ -166,12 +166,16 @@ contains
       call diagnose_fragment_wannier_center_symmetry(dc, center_bohr, owner_frag, num_wann_chk, nsym, symops)
       call diagnose_fragment_wannier_symmetry_representation(dc, center_bohr, owner_frag, num_wann_chk, &
         num_bands_chk, v_matrix, nsym, symops)
-      if(allocated(symops)) deallocate(symops)
       call read_wannier90_global_rmn_gamma_block_import(dc, num_wann_chk, aa_global, ok_position)
       if(.not. ok_position) then
         allocate(aa_global(3,num_wann_chk,num_wann_chk))
         aa_global = (0d0,0d0)
+      else
+        call symmetrize_fragment_wannier_position_import(dc, center_bohr, owner_frag, num_wann_chk, &
+          num_bands_chk, v_matrix, nsym, symops, aa_global)
+        call diagnose_fragment_wannier_center_symmetry(dc, center_bohr, owner_frag, num_wann_chk, nsym, symops)
       end if
+      if(allocated(symops)) deallocate(symops)
       position_available = merge(1, 0, ok_position)
 
       filename = trim(import_run_root_dir())//'data_dcdft/total/'//binfile_w90g
@@ -849,6 +853,27 @@ contains
     end do
   end subroutine point_fragment_local_position_import
 
+  subroutine fragment_symmetry_origin_global_import(dc, ifrag, symop, origin_global)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: ifrag
+    type(t_wannier_symop), intent(in) :: symop
+    real(8), intent(out) :: origin_global(3)
+    integer :: axis, idx0
+    real(8) :: total_length, fragment_origin
+
+    do axis=1,3
+      idx0 = dc%ixyz_frag(axis,ifrag)
+      fragment_origin = dc%lg_tot%coordinate(idx0,axis)
+      total_length = dc%lg_tot%coordinate(dc%lg_tot%num(axis),axis) &
+        + (dc%lg_tot%coordinate(2,axis) - dc%lg_tot%coordinate(1,axis))
+      origin_global(axis) = fragment_origin + symop%origin_bohr(axis)
+      if(total_length > 0.0d0) origin_global(axis) = origin_global(axis) &
+        - floor(origin_global(axis) / total_length) * total_length
+    end do
+  end subroutine fragment_symmetry_origin_global_import
+
   subroutine wrap_fragment_local_point(point, cell_length)
     implicit none
     real(8), intent(inout) :: point(3)
@@ -972,6 +997,153 @@ contains
       deallocate(wann_index, phi_basis, coef_wf, psi_state, wannier_frag)
     end do
   end subroutine diagnose_fragment_wannier_symmetry_representation
+
+  subroutine symmetrize_fragment_wannier_position_import(dc, center_bohr, owner_frag, num_wann, &
+      num_bands, v_matrix, nsym, symops, aa_global)
+    use eigen_subdiag_sub, only: eigen_zheev
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: num_wann, owner_frag(num_wann), num_bands, nsym
+    real(8), intent(inout) :: center_bohr(3,num_wann)
+    complex(8), intent(in) :: v_matrix(num_bands,num_wann)
+    type(t_wannier_symop), intent(in) :: symops(:)
+    complex(8), intent(inout) :: aa_global(3,num_wann,num_wann)
+    integer :: ifrag, isym, nowned, iw, jw, ib, jb, npts, nspin_file, nstate_frag_file, nstate_tot_file
+    integer :: nxyz_domain(3), n_basis_frag, axis, p
+    integer, allocatable :: wann_index(:), pmap(:)
+    real(8), allocatable :: phi_basis(:,:), coef_wf(:,:), psi_state(:,:), eval(:)
+    complex(8), allocatable :: wannier_frag(:,:), srep(:,:), gram(:,:), eigvec(:,:), drep(:,:), invsqrt(:,:)
+    complex(8), allocatable :: ac(:,:), work(:,:), asym(:,:)
+    real(8) :: hvol, min_eval, max_eval, map_residual, polar_residual
+    real(8) :: origin_global(3), change_norm2, base_norm2, herm_residual, eval_floor
+    real(8) :: sym_residual2, sym_norm2
+    logical :: seed_ok, map_ok
+
+    if(nsym <= 0) return
+    hvol = dc%system_tot%hvol
+    eval_floor = 1.0d-10
+    do ifrag=1,dc%n_frag
+      nowned = count(owner_frag(1:num_wann) == ifrag)
+      if(nowned <= 0) cycle
+      allocate(wann_index(nowned))
+      ib = 0
+      do iw=1,num_wann
+        if(owner_frag(iw) /= ifrag) cycle
+        ib = ib + 1
+        wann_index(ib) = iw
+      end do
+
+      call read_fragment_lcfo_seed_for_wannier_import(dc, ifrag, num_bands, &
+        nxyz_domain, nspin_file, nstate_frag_file, nstate_tot_file, n_basis_frag, &
+        phi_basis, coef_wf, seed_ok)
+      if(.not. seed_ok) then
+        write(*,'(1x,a,i0,a)') "[DC-LCFO-W90-SYM] fragment=", ifrag, &
+          " position sym skipped: missing LCFO seed"
+        deallocate(wann_index)
+        cycle
+      end if
+
+      npts = product(nxyz_domain)
+      allocate(psi_state(npts,num_bands), wannier_frag(npts,nowned))
+      psi_state = matmul(phi_basis(1:npts,1:n_basis_frag), coef_wf(1:n_basis_frag,1:num_bands))
+      wannier_frag = matmul(cmplx(psi_state(1:npts,1:num_bands), 0.0d0, kind=8), &
+        v_matrix(1:num_bands,wann_index(1:nowned)))
+
+      do isym=1,nsym
+        if(symops(isym)%owner_frag /= ifrag) cycle
+        if(trim(symops(isym)%label) /= 'inversion') cycle
+        call fragment_symmetry_origin_global_import(dc, ifrag, symops(isym), origin_global)
+        allocate(pmap(npts))
+        call build_fragment_symmetry_grid_map(dc, ifrag, nxyz_domain, symops(isym), &
+          pmap, map_ok, map_residual)
+        if(.not. map_ok) then
+          write(*,'(1x,a,i0,a,es12.5)') &
+            "[DC-LCFO-W90-SYM] fragment=", ifrag, " position sym skipped: grid map residual=", map_residual
+          deallocate(pmap)
+          cycle
+        end if
+
+        allocate(srep(nowned,nowned), gram(nowned,nowned), eigvec(nowned,nowned), &
+          drep(nowned,nowned), invsqrt(nowned,nowned), eval(nowned))
+        srep = (0.0d0,0.0d0)
+        do iw=1,nowned
+          do ib=1,nowned
+            do p=1,npts
+              srep(iw,ib) = srep(iw,ib) + conjg(wannier_frag(p,iw)) * wannier_frag(pmap(p),ib) * hvol
+            end do
+          end do
+        end do
+        gram = matmul(conjg(transpose(srep)), srep)
+        call eigen_zheev(gram, eval, eigvec)
+        min_eval = minval(eval)
+        max_eval = maxval(eval)
+        invsqrt = (0.0d0,0.0d0)
+        drep = (0.0d0,0.0d0)
+        do iw=1,nowned
+          do ib=1,nowned
+            invsqrt(iw,ib) = sum(eigvec(iw,1:nowned) * merge(1.0d0 / sqrt(eval(1:nowned)), 0.0d0, &
+              eval(1:nowned) > eval_floor) * conjg(eigvec(ib,1:nowned)))
+            drep(iw,ib) = sum(eigvec(iw,1:nowned) * merge(0.0d0, 1.0d0, &
+              eval(1:nowned) > eval_floor) * conjg(eigvec(ib,1:nowned)))
+          end do
+        end do
+        drep = matmul(srep, invsqrt) + drep
+        polar_residual = hermitian_identity_residual(matmul(conjg(transpose(drep)), drep))
+
+        allocate(ac(nowned,nowned), work(nowned,nowned), asym(nowned,nowned))
+        change_norm2 = 0.0d0
+        base_norm2 = 0.0d0
+        herm_residual = 0.0d0
+        sym_residual2 = 0.0d0
+        sym_norm2 = 0.0d0
+        do axis=1,3
+          ac = (0.0d0,0.0d0)
+          do jb=1,nowned
+            jw = wann_index(jb)
+            do ib=1,nowned
+              iw = wann_index(ib)
+              ac(ib,jb) = aa_global(axis,iw,jw)
+            end do
+            ac(jb,jb) = ac(jb,jb) - cmplx(origin_global(axis), 0.0d0, kind=8)
+          end do
+          work = matmul(conjg(transpose(drep)), matmul(ac, drep))
+          asym = 0.5d0 * (ac - work)
+          asym = 0.5d0 * (asym + conjg(transpose(asym)))
+          work = asym + matmul(conjg(transpose(drep)), matmul(asym, drep))
+          sym_residual2 = sym_residual2 + sum(abs(work)**2)
+          sym_norm2 = sym_norm2 + sum(abs(asym)**2)
+          do jb=1,nowned
+            asym(jb,jb) = asym(jb,jb) + cmplx(origin_global(axis), 0.0d0, kind=8)
+          end do
+          change_norm2 = change_norm2 + sum(abs(asym - aa_global(axis,wann_index(1:nowned),wann_index(1:nowned)))**2)
+          base_norm2 = base_norm2 + sum(abs(aa_global(axis,wann_index(1:nowned),wann_index(1:nowned)))**2)
+          herm_residual = max(herm_residual, maxval(abs(asym - conjg(transpose(asym)))))
+          do jb=1,nowned
+            jw = wann_index(jb)
+            do ib=1,nowned
+              iw = wann_index(ib)
+              aa_global(axis,iw,jw) = asym(ib,jb)
+            end do
+          end do
+        end do
+        do ib=1,nowned
+          iw = wann_index(ib)
+          center_bohr(1:3,iw) = real(aa_global(1:3,iw,iw), kind=8)
+        end do
+        write(*,'(1x,a,i0,a,7(a,es12.5),a,i0)') &
+          "[DC-LCFO-W90-SYM] fragment=", ifrag, " position sym label=inversion", &
+          " min_s2=", min_eval, " max_s2=", max_eval, " polar_unit_res=", polar_residual, &
+          " rel_change=", sqrt(change_norm2 / max(base_norm2, 1.0d-300)), &
+          " sym_res=", sqrt(sym_residual2 / max(sym_norm2, 1.0d-300)), &
+          " herm_res=", herm_residual, " map_res=", map_residual, " ncenter=", nowned
+
+        deallocate(ac, work, asym, srep, gram, eigvec, drep, invsqrt, eval, pmap)
+      end do
+
+      deallocate(wann_index, phi_basis, coef_wf, psi_state, wannier_frag)
+    end do
+  end subroutine symmetrize_fragment_wannier_position_import
 
   subroutine read_fragment_lcfo_seed_for_wannier_import(dc, ifrag, num_bands, &
       nxyz_domain, nspin_file, nstate_frag_file, nstate_tot_file, n_basis_frag, &
