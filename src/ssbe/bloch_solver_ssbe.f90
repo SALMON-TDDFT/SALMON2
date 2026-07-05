@@ -768,9 +768,12 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
 
   deph_by_gw = (yn_sbe_gw_collision == 'y' .and. trim(sbe_deph_mode) == 'gw')
 
-  drho = (0.d0, 0.d0)
   ! only the local k-slice of drho is produced (the caller uses only ik_min:ik_max);
   ! Dq was likewise computed only on [ik_min:ik_max] by covariant_grad_block.
+  ! Zero only that slice -- drho outside it is undefined and never read
+  ! (dt_evolve_bloch_lg_gicov's k1..k4 consumers are local-only), and the
+  ! full-nk memset was a measurable per-call fixed cost.
+  drho(:, :, sbe%ik_min:sbe%ik_max) = (0.d0, 0.d0)
   !$omp parallel do default(shared) private(ik, ib, jb, gterm)
   do ik = sbe%ik_min, sbe%ik_max
     do ib = 1, nb

@@ -1320,7 +1320,13 @@ contains
       Id(n, n) = (1d0, 0d0)
     end do
 
-    Dq = (0d0, 0d0)
+    ! Zero only the local k-slice (all 3 axes). The caller contract is that
+    ! Dq outside [ik_lo,ik_hi] is UNDEFINED (gicov_rhs's drho loop reads Dq
+    ! at local ik only) -- zeroing the full nk array was a ~nb^2*3*nk memset
+    ! per call (4x per RK4 step), the dominant fixed per-call floor observed
+    ! in the strong-scaling scan. Skipped/absent axes at local ik stay 0 here,
+    ! which the E*Dq sum in gicov_rhs relies on.
+    Dq(:, :, :, klo:khi) = (0d0, 0d0)
 
     do axis = 1, 3
       if (.not. axis_active(axis)) cycle  ! field-inactive axis (E(axis)==0): Dq(:,:,axis,:) stays 0; E*Dq is exactly 0 => bit-for-bit skip (linear pol skips 2 axes, circular in-plane skips 1)
