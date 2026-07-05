@@ -4394,7 +4394,7 @@ contains
         write(iunit,'(a)') "num_wann = "//trim(adjustl(int_to_string(wannier_num_wann)))
         write(iunit,'(a)') "num_iter = "//trim(adjustl(int_to_string(wannier_num_iter)))
         write(iunit,'(a)') "mp_grid = 1 1 1"
-        write(iunit,'(a)') "gamma_only = false"
+        write(iunit,'(a)') "gamma_only = true"
         write(iunit,'(a)') "write_hr = true"
         write(iunit,'(a)') "write_rmn = true"
         if(wannier_dis_froz_max > 0d0) &
@@ -5332,7 +5332,7 @@ contains
       use filesystem, only: get_filehandle
       implicit none
       integer, intent(in) :: nband_wann
-      integer, parameter :: nntot_gamma = 6
+      integer, parameter :: nntot_gamma = 3
       integer, parameter :: mmn_target_chunk_elems = 1000000
       integer :: gvec(3,nntot_gamma)
       integer :: nxyz_domain(3), iunit, inn, ibasis, jbasis
@@ -5348,9 +5348,6 @@ contains
       gvec(:,1) = (/ 1, 0, 0 /)
       gvec(:,2) = (/ 0, 1, 0 /)
       gvec(:,3) = (/ 0, 0, 1 /)
-      gvec(:,4) = (/ 0, 0,-1 /)
-      gvec(:,5) = (/ 0,-1, 0 /)
-      gvec(:,6) = (/-1, 0, 0 /)
       call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
       call get_lattice_vectors(a1, a2, a3)
 
