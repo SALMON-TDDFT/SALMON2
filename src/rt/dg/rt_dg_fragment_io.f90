@@ -1688,6 +1688,8 @@ contains
       dg_frag%has_global_wannier_position = (io == 0 .and. position_available /= 0)
     end if
     close(iunit)
+    if (dg_frag%has_global_wannier_position) &
+      call hermitize_wannier_position_matrix(num_wann_file, dg_frag%global_wannier_position)
     if (io == 0 .and. .not. dg_frag%has_global_wannier_position) then
       call read_wannier90_global_position_rdat(num_wann_file, dg_frag%global_wannier_position, ok_position)
       dg_frag%has_global_wannier_position = ok_position
@@ -1772,8 +1774,32 @@ contains
       position_aa_r(3,n,m) = cmplx(rz_re, rz_im, kind=8) / au_length_aa
     end do
     close(iunit)
+    call hermitize_wannier_position_matrix(num_wann_file, position_aa_r)
     ok = (io == 0)
   end subroutine read_wannier90_global_position_rdat
+
+  subroutine hermitize_wannier_position_matrix(num_wann, position_aa_r)
+    implicit none
+    integer, intent(in) :: num_wann
+    complex(8), intent(inout) :: position_aa_r(:,:,:)
+    integer :: iaxis, iw, jw
+    complex(8) :: zij, zji
+
+    if (num_wann <= 0) return
+    if (size(position_aa_r, 1) < 3 .or. size(position_aa_r, 2) < num_wann .or. &
+        size(position_aa_r, 3) < num_wann) return
+    do iaxis = 1, 3
+      do iw = 1, num_wann
+        position_aa_r(iaxis, iw, iw) = cmplx(real(position_aa_r(iaxis, iw, iw), kind=8), 0.0d0, kind=8)
+        do jw = iw + 1, num_wann
+          zij = position_aa_r(iaxis, iw, jw)
+          zji = position_aa_r(iaxis, jw, iw)
+          position_aa_r(iaxis, iw, jw) = 0.5d0 * (zij + conjg(zji))
+          position_aa_r(iaxis, jw, iw) = conjg(position_aa_r(iaxis, iw, jw))
+        end do
+      end do
+    end do
+  end subroutine hermitize_wannier_position_matrix
 
   subroutine clear_formal_dg_wannier_data(dg_frag)
     implicit none

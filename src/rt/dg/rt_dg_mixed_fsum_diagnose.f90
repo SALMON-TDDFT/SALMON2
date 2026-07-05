@@ -3,7 +3,8 @@
     use eigen_subdiag_sub, only: eigen_zheev
     use rt_dg_plane_wave, only: compute_fragment_pw_overlap, compute_fragment_pw_position_overlap
     use salmon_global, only: dg_bpw_auto, dg_bpw_auto_accuracy, dg_bpw_auto_max_n, &
-      dg_bpw_auto_min_n, dg_bpw_auto_report, n_plane_waves_dg, yn_dg_mixed_z_include_ww
+      dg_bpw_auto_min_n, dg_bpw_auto_report, n_plane_waves_dg, yn_dg_mixed_z_include_ww, &
+      dg_mixed_z_direct_origin
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
 
@@ -85,7 +86,7 @@
       if (env_stat /= 0 .or. sperp_tol < 0.0d0) sperp_tol = 1.0d-8
     end if
 
-    use_fragment_center_direct = .false.
+    use_fragment_center_direct = (trim(adjustl(dg_mixed_z_direct_origin)) == 'fragment')
     env_direct_origin = ''
     call get_environment_variable('SALMON_DG_MIXED_Z_DIRECT_ORIGIN', env_direct_origin, length=env_len, status=env_stat)
     if (env_stat == 0 .and. env_len > 0) then
@@ -779,9 +780,6 @@
         z_w(1:nwann,1:nwann) = dg_frag%global_wannier_position(idir,1:nwann,1:nwann)
         z_eig(1:neig,1:neig) = matmul(conjg(transpose(dg_frag%global_wannier_flux_evec(1:nwann,1:neig))), &
           matmul(z_w, dg_frag%global_wannier_flux_evec(1:nwann,1:neig)))
-        dg_frag%mixed_wannier_bpw_z(idir,1:neig,1:neig,ispin) = z_eig(1:neig,1:neig)
-        if (yn_dg_mixed_z_include_ww /= 'y') &
-          dg_frag%mixed_wannier_bpw_z(idir,1:neig,1:neig,ispin) = zzero
 
         r_local(:, :) = zzero
         c_local(:, :) = zzero
@@ -827,6 +825,9 @@
         else
           o_eig(1:neig,1:neig) = z_eig(1:neig,1:neig)
         end if
+        dg_frag%mixed_wannier_bpw_z(idir,1:neig,1:neig,ispin) = o_eig(1:neig,1:neig)
+        if (yn_dg_mixed_z_include_ww /= 'y') &
+          dg_frag%mixed_wannier_bpw_z(idir,1:neig,1:neig,ispin) = zzero
         r_tilde(:, :) = zzero
         do eig = 1, neig
           do ipw = 1, npw

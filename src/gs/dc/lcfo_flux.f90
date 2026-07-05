@@ -365,6 +365,29 @@ contains
     if(allocated(u_matrix_opt)) deallocate(u_matrix_opt)
   end subroutine read_wannier90_checkpoint_transform_import
 
+  subroutine hermitize_wannier_position_matrix(num_wann, aa_global)
+    implicit none
+    integer, intent(in) :: num_wann
+    complex(8), intent(inout) :: aa_global(:,:,:)
+    integer :: axis, iw, jw
+    complex(8) :: zij, zji
+
+    if(num_wann <= 0) return
+    if(size(aa_global, 1) < 3 .or. size(aa_global, 2) < num_wann .or. &
+       size(aa_global, 3) < num_wann) return
+    do axis = 1, 3
+      do iw = 1, num_wann
+        aa_global(axis, iw, iw) = cmplx(real(aa_global(axis, iw, iw), kind=8), 0d0, kind=8)
+        do jw = iw + 1, num_wann
+          zij = aa_global(axis, iw, jw)
+          zji = aa_global(axis, jw, iw)
+          aa_global(axis, iw, jw) = 0.5d0 * (zij + conjg(zji))
+          aa_global(axis, jw, iw) = conjg(aa_global(axis, iw, jw))
+        end do
+      end do
+    end do
+  end subroutine hermitize_wannier_position_matrix
+
   subroutine read_wannier90_global_rmn_gamma_block_import(dc, num_wann_expected, aa_global, ok)
     use filesystem, only: get_filehandle
     use inputoutput, only: au_length_aa
@@ -406,6 +429,7 @@ contains
       aa_global(3,n,m) = cmplx(rz_re, rz_im, kind=8) / au_length_aa
     end do
     close(iunit)
+    call hermitize_wannier_position_matrix(num_wann_file, aa_global)
     ok = .true.
   end subroutine read_wannier90_global_rmn_gamma_block_import
 
@@ -4253,6 +4277,7 @@ contains
         aa_global(3,n,m) = cmplx(rz_re, rz_im, kind=8) / au_length_aa
       end do
       close(iunit)
+      call hermitize_wannier_position_matrix(num_wann_file, aa_global)
       ok = .true.
     end subroutine read_wannier90_global_rmn_gamma_block
 

@@ -327,6 +327,7 @@ contains
       & yn_dg_mixed_z_local_prop_writeback, &
       & dg_mixed_z_local_prop_backend, &
       & dg_mixed_z_frag_local_field_block, &
+      & dg_mixed_z_direct_origin, &
       & yn_dg_mixed_z_local_rho_writeback_wwonly, &
       & yn_dg_mixed_z_local_pz_writeback_total, &
       & yn_dg_mixed_z_local_current_writeback_total, &
@@ -832,6 +833,7 @@ contains
     yn_dg_mixed_z_local_prop_writeback = 'n'
     dg_mixed_z_local_prop_backend = 'global_mixed_split_backend'
     dg_mixed_z_frag_local_field_block = 'all'
+    dg_mixed_z_direct_origin = 'global'
     yn_dg_mixed_z_local_rho_writeback_wwonly = 'n'
     yn_dg_mixed_z_local_pz_writeback_total = 'n'
     yn_dg_mixed_z_local_current_writeback_total = 'n'
@@ -1285,6 +1287,7 @@ contains
     call string_lowercase(time_integrator_dg_fragment)
     call string_lowercase(dg_mixed_z_local_prop_backend)
     call string_lowercase(dg_mixed_z_frag_local_field_block)
+    call string_lowercase(dg_mixed_z_direct_origin)
     call string_lowercase(propagator)
     call string_lowercase(method_init_wf)
     call string_lowercase(method_min)
@@ -1452,6 +1455,7 @@ contains
     call comm_bcast(yn_dg_mixed_z_local_prop_writeback,nproc_group_global)
     call comm_bcast(dg_mixed_z_local_prop_backend,nproc_group_global)
     call comm_bcast(dg_mixed_z_frag_local_field_block,nproc_group_global)
+    call comm_bcast(dg_mixed_z_direct_origin,nproc_group_global)
     call comm_bcast(yn_dg_mixed_z_local_rho_writeback_wwonly,nproc_group_global)
     call comm_bcast(yn_dg_mixed_z_local_pz_writeback_total,nproc_group_global)
     call comm_bcast(yn_dg_mixed_z_local_current_writeback_total,nproc_group_global)
@@ -2433,6 +2437,8 @@ contains
         trim(dg_mixed_z_local_prop_backend)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_frag_local_field_block', &
         trim(dg_mixed_z_frag_local_field_block)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_direct_origin', &
+        trim(dg_mixed_z_direct_origin)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z_local_rho_writeback_wwonly', &
         yn_dg_mixed_z_local_rho_writeback_wwonly
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z_local_pz_writeback_total', &
@@ -3062,6 +3068,11 @@ contains
     call yn_argument_check(yn_dg_mixed_z_local_rho_writeback_wwonly)
     call yn_argument_check(yn_dg_mixed_z_local_pz_writeback_total)
     call yn_argument_check(yn_dg_mixed_z_local_current_writeback_total)
+    select case(trim(dg_mixed_z_direct_origin))
+    case('global', 'fragment')
+    case default
+      stop "dg_mixed_z_direct_origin must be global or fragment"
+    end select
     select case(trim(dg_wannier_symmetry_gauge))
     case('none', 'diagnose', 'local_inversion_position')
     case default
