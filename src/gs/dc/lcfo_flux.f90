@@ -164,7 +164,7 @@ contains
       call rebalance_wannier_owner_fragments_import(dc, center_bohr, owner_frag, num_wann_chk)
       call detect_wannier_fragment_symops(dc, nsym, symops)
       call diagnose_fragment_wannier_center_symmetry(dc, center_bohr, owner_frag, num_wann_chk, nsym, symops)
-      call diagnose_fragment_wannier_symmetry_representation(dc, owner_frag, num_wann_chk, &
+      call diagnose_fragment_wannier_symmetry_representation(dc, center_bohr, owner_frag, num_wann_chk, &
         num_bands_chk, v_matrix, nsym, symops)
       if(allocated(symops)) deallocate(symops)
       call read_wannier90_global_rmn_gamma_block_import(dc, num_wann_chk, aa_global, ok_position)
@@ -861,7 +861,7 @@ contains
     end do
   end subroutine wrap_fragment_local_point
 
-  subroutine diagnose_fragment_wannier_symmetry_representation(dc, owner_frag, num_wann, &
+  subroutine diagnose_fragment_wannier_symmetry_representation(dc, center_bohr, owner_frag, num_wann, &
       num_bands, v_matrix, nsym, symops)
     use eigen_subdiag_sub, only: eigen_zheev
     use filesystem, only: get_filehandle
@@ -869,16 +869,18 @@ contains
     implicit none
     type(s_dcdft), intent(in) :: dc
     integer, intent(in) :: num_wann, owner_frag(num_wann), num_bands, nsym
+    real(8), intent(in) :: center_bohr(3,num_wann)
     complex(8), intent(in) :: v_matrix(num_bands,num_wann)
     type(t_wannier_symop), intent(in) :: symops(:)
     integer :: ifrag, isym, nowned, iw, ib, npts, nspin_file, nstate_frag_file, nstate_tot_file
     integer :: nxyz_domain(3), n_basis_frag, p, ix, iy, iz
-    integer, allocatable :: wann_index(:), pmap(:)
+    integer, allocatable :: wann_index(:), pmap(:), center_perm(:)
     real(8), allocatable :: phi_basis(:,:), coef_wf(:,:), psi_state(:,:)
     complex(8), allocatable :: wannier_frag(:,:), srep(:,:), gram(:,:), eigvec(:,:), polar(:,:), invsqrt(:,:)
     real(8), allocatable :: eval(:)
     real(8) :: hvol, min_eval, max_eval, gram_residual, polar_residual, map_residual
-    logical :: map_ok, seed_ok
+    real(8) :: center_perm_max, center_perm_rms, target_residual
+    logical :: map_ok, seed_ok, center_perm_ok
 
     if(nsym <= 0) return
     hvol = dc%system_tot%hvol
@@ -922,6 +924,10 @@ contains
           cycle
         end if
 
+        allocate(center_perm(nowned))
+        call build_fragment_center_permutation_import(dc, ifrag, center_bohr, owner_frag, num_wann, &
+          symops(isym), wann_index, nowned, center_perm, center_perm_ok, center_perm_max, center_perm_rms)
+
         allocate(srep(nowned,nowned), gram(nowned,nowned), eigvec(nowned,nowned), &
           polar(nowned,nowned), invsqrt(nowned,nowned), eval(nowned))
         srep = (0.0d0,0.0d0)
@@ -939,6 +945,7 @@ contains
         max_eval = maxval(eval)
         gram_residual = hermitian_identity_residual(gram)
         polar_residual = -1.0d0
+        target_residual = -1.0d0
         if(min_eval > 1.0d-12) then
           invsqrt = (0.0d0,0.0d0)
           do iw=1,nowned
@@ -949,14 +956,17 @@ contains
           end do
           polar = matmul(srep, invsqrt)
           polar_residual = hermitian_identity_residual(matmul(conjg(transpose(polar)), polar))
+          if(center_perm_ok) target_residual = permutation_target_residual(polar, center_perm)
         end if
-        write(*,'(1x,a,i0,2a,5(a,es12.5),a,i0)') &
+        write(*,'(1x,a,i0,2a,8(a,es12.5),a,l1,a,i0)') &
           "[DC-LCFO-W90-SYM] fragment=", ifrag, " representation label=", &
           trim(symops(isym)%label), " min_s2=", min_eval, " max_s2=", max_eval, &
           " s_unit_res=", gram_residual, " polar_unit_res=", polar_residual, &
-          " map_res=", map_residual, " ncenter=", nowned
+          " map_res=", map_residual, " center_perm_max=", center_perm_max, &
+          " center_perm_rms=", center_perm_rms, " target_res=", target_residual, &
+          " center_perm_ok=", center_perm_ok, " ncenter=", nowned
 
-        deallocate(srep, gram, eigvec, polar, invsqrt, eval, pmap)
+        deallocate(srep, gram, eigvec, polar, invsqrt, eval, pmap, center_perm)
       end do
 
       deallocate(wann_index, phi_basis, coef_wf, psi_state, wannier_frag)
@@ -1097,6 +1107,89 @@ contains
       end do
     end do
   end subroutine build_fragment_symmetry_grid_map
+
+  subroutine build_fragment_center_permutation_import(dc, ifrag, center_bohr, owner_frag, num_wann, &
+      symop, wann_index, nowned, center_perm, ok, max_residual, rms_residual)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: ifrag, num_wann, owner_frag(num_wann), nowned, wann_index(nowned)
+    real(8), intent(in) :: center_bohr(3,num_wann)
+    type(t_wannier_symop), intent(in) :: symop
+    integer, intent(out) :: center_perm(nowned)
+    logical, intent(out) :: ok
+    real(8), intent(out) :: max_residual, rms_residual
+    integer :: i, j, iw, jw, axis, jbest
+    integer, allocatable :: seen(:)
+    real(8) :: cell_length(3), center_i(3), center_j(3), relative(3), mapped(3), delta(3)
+    real(8) :: dist2, best_dist2
+    real(8), parameter :: center_match_tol = 1.0d-3
+
+    center_perm = 0
+    ok = .true.
+    max_residual = 0.0d0
+    rms_residual = 0.0d0
+    if(nowned <= 0) return
+    allocate(seen(nowned))
+    seen = 0
+    call fragment_cell_lengths_import(dc, ifrag, cell_length)
+
+    do i=1,nowned
+      iw = wann_index(i)
+      if(owner_frag(iw) /= ifrag) cycle
+      call point_fragment_local_position_import(dc, ifrag, center_bohr(1:3,iw), center_i)
+      relative(1:3) = center_i(1:3) - symop%origin_bohr(1:3)
+      mapped(1:3) = symop%origin_bohr(1:3) + matmul_int_real(symop%rot, relative) &
+        + symop%tau_local(1:3)
+      call wrap_fragment_local_point(mapped, cell_length)
+
+      best_dist2 = huge(1d0)
+      jbest = 0
+      do j=1,nowned
+        jw = wann_index(j)
+        call point_fragment_local_position_import(dc, ifrag, center_bohr(1:3,jw), center_j)
+        do axis=1,3
+          delta(axis) = periodic_delta_import(center_j(axis) - mapped(axis), cell_length(axis))
+        end do
+        dist2 = local_distance2(delta)
+        if(dist2 < best_dist2) then
+          best_dist2 = dist2
+          jbest = j
+        end if
+      end do
+      center_perm(i) = jbest
+      if(jbest < 1) then
+        ok = .false.
+      else
+        seen(jbest) = seen(jbest) + 1
+        max_residual = max(max_residual, sqrt(best_dist2))
+        rms_residual = rms_residual + best_dist2
+        if(sqrt(best_dist2) > center_match_tol) ok = .false.
+      end if
+    end do
+    if(any(seen(1:nowned) /= 1)) ok = .false.
+    rms_residual = sqrt(rms_residual / dble(max(1,nowned)))
+    deallocate(seen)
+  end subroutine build_fragment_center_permutation_import
+
+  real(8) function permutation_target_residual(mat, perm) result(residual)
+    implicit none
+    complex(8), intent(in) :: mat(:,:)
+    integer, intent(in) :: perm(:)
+    integer :: i, j, n
+    complex(8) :: target
+
+    n = size(mat,1)
+    residual = 0.0d0
+    do j=1,n
+      do i=1,n
+        target = (0.0d0,0.0d0)
+        if(perm(j) == i) target = (1.0d0,0.0d0)
+        residual = residual + abs(mat(i,j) - target)**2
+      end do
+    end do
+    residual = sqrt(residual / dble(max(1,n*n)))
+  end function permutation_target_residual
 
   real(8) function hermitian_identity_residual(mat) result(residual)
     implicit none
