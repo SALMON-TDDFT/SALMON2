@@ -2022,10 +2022,10 @@ contains
     if (comm_is_root(dg_frag%id)) then
       nkeep_min = minval(dg_frag%global_wannier_local_nkeep)
       nkeep_total = sum(dg_frag%global_wannier_local_nkeep)
-      write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') &
+      write(*,'(1x,a,i0,a,i0,a,i0,a,i0,a)') &
         "[DG-W90-GLOBAL-LOCAL] built local-selected global Wannier basis: h_center_range=", &
         center_range, " keep_min=", nkeep_min, " keep_max=", maxval(dg_frag%global_wannier_local_nkeep), &
-        " keep_local_total=", nkeep_total
+        " keep_local_total=", nkeep_total, " metric=chebyshev"
     end if
   end subroutine build_global_wannier_local_basis
 
@@ -2038,11 +2038,11 @@ contains
     else if (center_range < 0) then
       in_range = .true.
     else
-      in_range = (fragment_periodic_manhattan_distance(owner_frag, center_frag, num_fragment) <= center_range)
+      in_range = (fragment_periodic_chebyshev_distance_io(owner_frag, center_frag, num_fragment) <= center_range)
     end if
   end function global_wannier_owner_in_h_range
 
-  integer function fragment_periodic_manhattan_distance(ifrag_a, ifrag_b, num_fragment) result(dist)
+  integer function fragment_periodic_chebyshev_distance_io(ifrag_a, ifrag_b, num_fragment) result(dist)
     implicit none
     integer, intent(in) :: ifrag_a, ifrag_b, num_fragment(3)
     integer :: axis, da, ca(3), cb(3)
@@ -2055,9 +2055,9 @@ contains
     do axis = 1, 3
       da = abs(ca(axis) - cb(axis))
       da = min(da, max(0, num_fragment(axis) - da))
-      dist = dist + da
+      dist = max(dist, da)
     end do
-  end function fragment_periodic_manhattan_distance
+  end function fragment_periodic_chebyshev_distance_io
 
   subroutine fragment_coord3_from_id_io(ifrag, num_fragment, coord)
     implicit none
