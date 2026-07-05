@@ -12,7 +12,7 @@
 !
 !   O  (orthogonal equivalence): on a strictly diagonal-b fixture (cubic,
 !      b = 2 pi I, a = I) the general path FORCED via the module test hook
-!      gicov_force_general_field agrees with the legacy path to 1e-12
+!      set_gicov_force_general_field agrees with the legacy path to 1e-12
 !      (algebraically identical, ULP-level float difference only).
 !   OT (teeth for O): the forced general path really executes and really reads
 !      gs%a_matrix: rescaling a_matrix -> 3*a_matrix must scale the FIELD term
@@ -54,7 +54,7 @@ program test_gicov_hex
   use gs_info_ssbe,      only: s_sbe_gs_info
   use bloch_solver_ssbe, only: s_sbe_bloch_solver, init_sbe_bloch_solver, &
                                 prepare_qnm, gicov_rhs, q_ij_from_rho, &
-                                gicov_force_general_field
+                                set_gicov_force_general_field
   use salmon_global,     only: epdir_re1, am_s, num_kgrid, t_2, sbe_lg_degen, &
                                 sbe_lg_diag, yn_sbe_gw_collision, sbe_deph_mode
   implicit none
@@ -175,7 +175,7 @@ contains
   !===========================================================================
   ! Part O/OT: orthogonal (cubic b = 2 pi I) fixture with a nontrivial block
   ! Wilson transport on BOTH in-plane axes and a degenerate block {2,3} --
-  ! the general path is FORCED via gicov_force_general_field and must agree
+  ! the general path is FORCED via set_gicov_force_general_field and must agree
   ! with the legacy path to 1e-12.
   !===========================================================================
   subroutine build_gs_diag(gs)
@@ -278,9 +278,9 @@ contains
     call set_qnm_from_rho(sbe, rho)
 
     ! ---- O: legacy vs FORCED general path on the same diagonal-b fixture ----
-    gicov_force_general_field = .false.
+    call set_gicov_force_general_field(.false.)
     call gicov_rhs(sbe, gs, E, drho_leg, icomm)
-    gicov_force_general_field = .true.
+    call set_gicov_force_general_field(.true.)
     call gicov_rhs(sbe, gs, E, drho_gen, icomm)
 
     eqerr = 0d0;  mag = 0d0
@@ -300,13 +300,13 @@ contains
     ! ---- OT (teeth): the forced general path really reads gs%a_matrix -------
     ! field term = drho(E) - drho(0); scaling a_matrix by 3 scales every c_i
     ! by 3, so the general-path field term must scale by exactly 3.
-    gicov_force_general_field = .false.
+    call set_gicov_force_general_field(.false.)
     call gicov_rhs(sbe, gs, E0, drho0, icomm)         ! energy+dephasing only
-    gicov_force_general_field = .true.
+    call set_gicov_force_general_field(.true.)
     gs%a_matrix = 3d0 * gs%a_matrix
     call gicov_rhs(sbe, gs, E, drho3, icomm)
     gs%a_matrix = gs%a_matrix / 3d0
-    gicov_force_general_field = .false.
+    call set_gicov_force_general_field(.false.)
 
     scerr = 0d0;  fmag = 0d0
     do ik = 1, nk
@@ -468,7 +468,7 @@ contains
     call init_sbe_bloch_solver(sbe, gs, nb, icomm)
     call prepare_qnm(sbe, gs, icomm)
     call set_qnm_from_rho(sbe, rho)
-    gicov_force_general_field = .false.   ! auto-selection, not forcing
+    call set_gicov_force_general_field(.false.)   ! auto-selection, not forcing
 
     do ic = 1, 3
       E = Ecase(:, ic)

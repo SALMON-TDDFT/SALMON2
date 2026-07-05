@@ -33,7 +33,12 @@ module bloch_solver_ssbe
     ! in gicov_rhs even when b_matrix is strictly diagonal, so the two paths can
     ! be compared on the same fixture.  NEVER set in production: the default
     ! .false. keeps every diagonal-b campaign on the legacy branch bit-for-bit.
-    logical, save :: gicov_force_general_field = .false.
+    ! PRIVATE (codex review, cd9ddc49): mutable module state that gicov_rhs
+    ! honors unconditionally -- if it were a public variable, production code
+    ! could accidentally force the non-bit-for-bit general branch even on
+    ! diagonal cells.  Flip it only via the public set_gicov_force_general_field
+    ! setter below (used by test_gicov_hex.f90); there is no other writer.
+    logical, save, private :: gicov_force_general_field = .false.
 
     ! --- gicov halo-exchange plan (built once on first gicov_rhs call) ---
     ! Replaces the full-nk rho allreduce: each rank ships only the +-m_max-shell
@@ -56,6 +61,17 @@ module bloch_solver_ssbe
     complex(8), allocatable, save :: gh_Dq(:,:,:,:)   ! persistent Dq (nb,nb,3,nk); only local slice defined per call
 
 contains
+
+  !-------------------------------------------------------------------
+  ! Public setter for the gicov_force_general_field TEST hook (declared
+  ! private above): production code has no way to write the flag directly,
+  ! only test_gicov_hex.f90 flips it, and only through this setter.
+  !-------------------------------------------------------------------
+  subroutine set_gicov_force_general_field(flag)
+    implicit none
+    logical, intent(in) :: flag
+    gicov_force_general_field = flag
+  end subroutine set_gicov_force_general_field
 
   !-------------------------------------------------------------------
   ! Print the accumulated gicov RHS timers (covariant kernel vs rho-gather
@@ -912,6 +928,19 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   ! lattice => 1 of 3 axes, circular in-plane => 2). Bit-for-bit identical to
   ! computing all axes.  covariant_grad_block itself is lattice-agnostic (a
   ! reduced-grid stencil scaled by dk); halo/needed are index-based (unchanged).
+  ! Exact `/= 0.d0` comparison, INTENTIONAL (not an "epsilon would be safer"
+  ! bug): for every orthorhombic cell, calc_lattice_info (gs_info_ssbe.f90)
+  ! writes the six off-diagonal b_matrix entries as literal 0.d0, so this is
+  ! an exact-vs-exact test that reliably selects the legacy branch -- and
+  ! test_gicov_hex.f90's Part O pins that selection to be bit-for-bit with
+  ! the pre-dual-path code (1e-12 gate) for exactly that reason: a tolerance
+  ! here would let the legacy branch silently start taking the (algebraically
+  ! equivalent, ULP-different) general path and break that guarantee.  A
+  ! nominally-orthorhombic input whose off-diagonal b_matrix entries are only
+  ! FP-noise-close to zero (not exactly 0.d0) will therefore take the GENERAL
+  ! branch instead; that is by design (see the DUAL PATH comment above: both
+  ! branches are mathematically equivalent in the diagonal limit, differing
+  ! only in ULPs), not a defect to special-case with an epsilon.
   use_general = gicov_force_general_field .or. &
     & (gs%b_matrix(1, 2) /= 0.d0) .or. (gs%b_matrix(1, 3) /= 0.d0) .or. &
     & (gs%b_matrix(2, 1) /= 0.d0) .or. (gs%b_matrix(2, 3) /= 0.d0) .or. &
