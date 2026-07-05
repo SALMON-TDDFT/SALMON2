@@ -127,7 +127,7 @@ contains
     use communication, only: comm_sync_all
     use filesystem, only: get_filehandle
     use inputoutput, only: au_length_aa
-    use salmon_global, only: base_directory, sysname, wannier_num_wann
+    use salmon_global, only: base_directory, sysname, wannier_num_wann, dg_wannier_symmetry_gauge
     use structures, only: s_dcdft
     implicit none
     type(s_dcdft), intent(in) :: dc
@@ -171,9 +171,13 @@ contains
         allocate(aa_global(3,num_wann_chk,num_wann_chk))
         aa_global = (0d0,0d0)
       else
-        call symmetrize_fragment_wannier_position_import(dc, center_bohr, owner_frag, num_wann_chk, &
-          num_bands_chk, v_matrix, nsym, symops, aa_global)
-        call diagnose_fragment_wannier_center_symmetry(dc, center_bohr, owner_frag, num_wann_chk, nsym, symops)
+        if(trim(dg_wannier_symmetry_gauge) == 'local_inversion_position') then
+          call symmetrize_fragment_wannier_position_import(dc, center_bohr, owner_frag, num_wann_chk, &
+            num_bands_chk, v_matrix, nsym, symops, aa_global)
+          call diagnose_fragment_wannier_center_symmetry(dc, center_bohr, owner_frag, num_wann_chk, nsym, symops)
+        else
+          write(*,'(1x,a,a)') "[DC-LCFO-W90-SYM] position sym mode=", trim(dg_wannier_symmetry_gauge)
+        end if
       end if
       if(allocated(symops)) deallocate(symops)
       position_available = merge(1, 0, ok_position)

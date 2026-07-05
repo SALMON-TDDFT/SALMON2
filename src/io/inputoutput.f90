@@ -330,6 +330,7 @@ contains
       & yn_dg_mixed_z_local_rho_writeback_wwonly, &
       & yn_dg_mixed_z_local_pz_writeback_total, &
       & yn_dg_mixed_z_local_current_writeback_total, &
+      & dg_wannier_symmetry_gauge, &
       & yn_plane_wave_basis, &
       & n_plane_waves_dg, &
       & k_cutoff_plane_wave, &
@@ -665,6 +666,7 @@ contains
       & wannier_dis_win_max, &
       & wannier_pw_cutoff, &
       & wannier_pw_max, &
+      & dg_wannier_symmetry_gauge, &
       & energy_cut, &
       & lambda_cut, &
       & yn_adaptive_basis, &
@@ -833,6 +835,7 @@ contains
     yn_dg_mixed_z_local_rho_writeback_wwonly = 'n'
     yn_dg_mixed_z_local_pz_writeback_total = 'n'
     yn_dg_mixed_z_local_current_writeback_total = 'n'
+    dg_wannier_symmetry_gauge = 'diagnose'
     yn_plane_wave_basis = 'n'
     n_plane_waves_dg = 50
     k_cutoff_plane_wave = 0.5d0
@@ -1452,6 +1455,7 @@ contains
     call comm_bcast(yn_dg_mixed_z_local_rho_writeback_wwonly,nproc_group_global)
     call comm_bcast(yn_dg_mixed_z_local_pz_writeback_total,nproc_group_global)
     call comm_bcast(yn_dg_mixed_z_local_current_writeback_total,nproc_group_global)
+    call comm_bcast(dg_wannier_symmetry_gauge,nproc_group_global)
     call comm_bcast(yn_plane_wave_basis,nproc_group_global)
     call comm_bcast(n_plane_waves_dg,nproc_group_global)
     call comm_bcast(k_cutoff_plane_wave,nproc_group_global)
@@ -2435,6 +2439,8 @@ contains
         yn_dg_mixed_z_local_pz_writeback_total
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z_local_current_writeback_total', &
         yn_dg_mixed_z_local_current_writeback_total
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_wannier_symmetry_gauge', &
+        trim(dg_wannier_symmetry_gauge)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_plane_wave_basis', yn_plane_wave_basis
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'n_plane_waves_dg', n_plane_waves_dg
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'k_cutoff_plane_wave', k_cutoff_plane_wave
@@ -2926,6 +2932,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_dis_win_max', wannier_dis_win_max
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_pw_cutoff', wannier_pw_cutoff
       write(fh_variables_log, '("#",4X,A,"=",I6)') "wannier_pw_max",wannier_pw_max
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_wannier_symmetry_gauge', &
+        trim(dg_wannier_symmetry_gauge)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_fragment_from_dcdft', yn_dg_fragment_from_dcdft
@@ -3054,6 +3062,11 @@ contains
     call yn_argument_check(yn_dg_mixed_z_local_rho_writeback_wwonly)
     call yn_argument_check(yn_dg_mixed_z_local_pz_writeback_total)
     call yn_argument_check(yn_dg_mixed_z_local_current_writeback_total)
+    select case(trim(dg_wannier_symmetry_gauge))
+    case('none', 'diagnose', 'local_inversion_position')
+    case default
+      stop "dg_wannier_symmetry_gauge must be none, diagnose, or local_inversion_position"
+    end select
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
       stop "Nk must be 1 when yn_periodic=='n'"
