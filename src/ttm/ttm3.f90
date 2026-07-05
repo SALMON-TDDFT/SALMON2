@@ -67,7 +67,7 @@ module ttm3
      ! When >0 the diffusion/conductivity are computed from the Fermi-Dirac integrals
      ! (mu=mob0*F0/F12, D=mob0*Te*F0/Fm, K=(6 F2/F0-4(F1/F0)^2) N Te mu), superseding
      ! the constant Ddiff/kappa_e.  Input m^2/Vs, converted to a.u. at read.
-     real(8) :: mob_e0   ! electron mobility                 [a.u. = m^2/Vs*2.353e-5]
+     real(8) :: mob_e0   ! electron mobility                 [a.u. = m^2/Vs * 2.3505e+5]
      real(8) :: mob_h0   ! hole mobility                     [a.u.]
      ! Layer C-a (ablation): cold bound (interband) conductivity (optional 18th input line).
      ! When >0, carrier generation is restricted to the BOUND absorption fraction
@@ -75,9 +75,12 @@ module ttm3
      ! free-carrier (Drude) absorption heats rather than ionises -> generation self-limits in
      ! the metallisation regime.  <=0 disables the split (generation = full absorbed power).
      real(8) :: sig_cold ! cold interband conductivity       [a.u.]         (Layer C-a)
-     integer :: coupling_mode ! 0=J-update (current-source ADE, default), 1=eps-update
-                              ! (carrier eps/sigma folded into the FDTD media coefficients).
-                              ! For isolating the Maxwell-coupling METHOD on an identical run.
+     integer :: coupling_mode ! Maxwell-coupling method (&ttm ttm_coupling):
+                              ! 0=J-update (current-source ADE, bilinear), 1=eps-update (carrier
+                              ! eps/sigma folded into the FDTD media coefficients; diverges when
+                              ! eps_re -> 0/negative = deep metallization), 2=J-update with ETD
+                              ! integrator, 3=exact 2x2 matrix-exponential JE (unconditionally
+                              ! stable, energy-conserving -- the DEFAULT).
   end type ttm3_param
 
   integer,allocatable :: ijk_media_whole(:,:)
@@ -90,6 +93,16 @@ module ttm3
   integer :: comm
   integer :: nprocs_g = 1                            ! # MPI ranks (diagnostic global reductions)
   integer :: xc_icomm = 0, xc_id = 0, xc_isize = 1   ! x-axis sub-comm (space-charge x-decomposition)
+  integer :: gx0 = 0, gx1 = -1                       ! global inner x-range (depth-profile gather)
+  ! medium surface faces (medium cell whose neighbour across face dir is not medium):
+  ! ttm3_transport mirrors state across these faces = reflecting (zero-flux) boundary,
+  ! matching the standalone 3D3TM (a fixed vacuum neighbour would act as a Dirichlet sink).
+  integer,allocatable :: ijk_surf(:,:)               ! (4,nsurf): ix,iy,iz, face dir (+-1,+-2,+-3)
+  integer :: nsurf = 0
+  ! medium mask over the full (halo) box: the space-charge sum must skip vacuum cells,
+  ! whose Ne/Nh now hold mirrored (nonzero) values from the reflecting boundary.
+  logical,allocatable :: med_mask(:,:,:)
+  real(8) :: dcap_worst = 1.0d0                      ! worst D/Dmax seen (CFL-cap diagnostic)
   real(8) :: hgs(3)
   real(8) :: dt
 
@@ -118,16 +131,25 @@ module ttm3
   integer,parameter   :: f_neta = 2400
   real(8),parameter   :: f_eta0 = -60.0d0, f_deta = 0.05d0
   integer,parameter   :: f_nj   = 5
+  ! j values and Gamma(j+1) for indices 1..5 = j = -1/2, 1/2, 3/2, 1, 2 (shared by the
+  ! table builder and the degenerate (eta > +60) Sommerfeld tail of ttm3_fermi).
+  real(8),parameter   :: f_jval(f_nj) = (/ -0.5d0, 0.5d0, 1.5d0, 1.0d0, 2.0d0 /)
+  real(8),parameter   :: f_gam1(f_nj) = (/ 1.7724538509055160d0, 0.8862269254527580d0, &
+                                           1.3293403881791370d0, 1.0d0, 2.0d0 /)
   real(8)             :: f_tab(0:f_neta,f_nj)
   logical             :: f_built = .false.
 
   ! density floor to keep the carrier heat capacity well defined.  Set to the
-  ! reference's intrinsic seed density Ns ~ 5.4e-15 bohr^-3 (~3.4e10 cm^-3) so the
-  ! carrier population can reach the reference's near-transparent regime; this is
+  ! standalone 3D3TM's thermal intrinsic seed density Ns(300 K) so the carrier
+  ! population can reach the reference's near-transparent regime; this is
   ! safe only because the carrier temperatures use the exponential integrator
   ! (the old RK4 step blew up at such low Ne -- see ttm3_step_cell).
   real(8),parameter :: N_floor = 3.657d-14  ! [1/bohr^3] (=2.468e11 cm^-3, standalone 3D3TM intrinsic seed Ns)
   real(8),parameter :: T_clamp = 31.67d0   ! [a.u.] (~1e7 K) numerical temperature cap
+  ! positivity floor for the temperatures (~1 K).  The explicit transport step can
+  ! undershoot at steep (metallization) fronts; a negative temperature would flip the
+  ! heat equation backward and turn exp(-1.5*gap/T) into an overflow -> NaN cascade.
+  real(8),parameter :: T_floor = 3.17d-6   ! [a.u.] (~1 K)
   real(8),parameter :: pi_ = 3.14159265358979323846d0
   real(8),parameter :: hk_kelvin = 3.1577502480407d5   ! a.u. temperature -> Kelvin
   real(8),parameter :: T_au = 2.48036d5                ! [a.u.time] Auger saturation timescale
@@ -191,12 +213,21 @@ contains
        write(*,*) "sig_cold/cm =",tp3%sig_cold, tp3%coupling_mode
     end if
 
+    if( tp3%coupling_mode < 0 .or. tp3%coupling_mode > 3 )then
+       if( DISPLAY ) write(*,'(A,I6)') " ERROR: ttm_coupling must be 0..3, got ", tp3%coupling_mode
+       error stop 'invalid ttm_coupling'
+    end if
+
 ! Convert to atomic units
     tp3%Egap = tp3%Egap / hartree_ev
-    ! mobility [m^2/Vs] -> a.u.  (mob_au = mob_SI * E_h * a_t * 1e-5 / a_B^2, the reference's
-    ! conversion: 8.5e-3 -> 2.0e-7).  Kept in SI-derived form via the atomic-unit constants.
-    tp3%mob_e0 = tp3%mob_e0 * hartree_ev*(atomic_unit_of_time*1.0d15)*1.0d-5/(atomic_unit_of_length*1.0d10)**2
-    tp3%mob_h0 = tp3%mob_h0 * hartree_ev*(atomic_unit_of_time*1.0d15)*1.0d-5/(atomic_unit_of_length*1.0d10)**2
+    ! mobility [m^2/Vs] -> a.u.: 1 m^2/Vs = 1e20 A^2/(V s) = 1e5 A^2/(V fs), then x E_h*a_t/a_B^2
+    ! => mob_au = mob_SI * 2.3505e5 (8.5e-3 m^2/Vs = 85 cm^2/Vs -> 1998 a.u.).  Cross-check via the
+    ! Einstein relation with this file's own Ddiff conversion: mu*kT(300 K) = 1998*9.5e-4 = 1.90
+    ! bohr^2/aut = 2.2 cm^2/s, the textbook ambipolar D of Si.  (The standalone reference's init
+    ! conversion, 8.5e-3 -> 2.0e-7, is 1e10 too small = its Fermi transport is effectively inert;
+    ! the port used to reproduce that number verbatim.)
+    tp3%mob_e0 = tp3%mob_e0 * hartree_ev*(atomic_unit_of_time*1.0d15)*1.0d+5/(atomic_unit_of_length*1.0d10)**2
+    tp3%mob_h0 = tp3%mob_h0 * hartree_ev*(atomic_unit_of_time*1.0d15)*1.0d+5/(atomic_unit_of_length*1.0d10)**2
     ! Auger coefficient [cm^6/s] -> [bohr^6 / a.u.time]
     tp3%A_e  = tp3%A_e * (1.0d-2/atomic_unit_of_length)**6 * atomic_unit_of_time
     tp3%A_h  = tp3%A_h * (1.0d-2/atomic_unit_of_length)**6 * atomic_unit_of_time
@@ -234,12 +265,16 @@ contains
 
   !---------------------------------------------------------------------------
   subroutine init_ttm3_grid( hgs_in, is_a, is, ie, imedia )
+    use communication, only: comm_get_min, comm_get_max
     implicit none
     real(8),intent(in) :: hgs_in(3)
     integer,intent(in) :: is_a(3), is(3), ie(3)
     integer,intent(in) :: imedia(is_a(1):,is_a(2):,is_a(3):)
-    integer :: ix,iy,iz,m
+    integer :: ix,iy,iz,m,id,jx,jy,jz,ndup
+    integer :: dirs(3,6)
     logical :: allmed
+    logical,allocatable :: seen(:,:,:)
+    real(8) :: g1(1),g2(1)
 
     ! Ablation mode (sig_cold>0): the surface metallizes, so the carrier-dependent optics
     ! back-action must reach the illuminated face cell too -> include ALL medium cells, not
@@ -308,6 +343,67 @@ contains
     end do
     end do
     end do
+
+    ! medium surface faces: medium cell whose face-d neighbour is not medium.  ttm3_transport
+    ! mirrors state across these faces (reflecting, zero-flux) so the never-evolved vacuum
+    ! neighbours do not act as a Dirichlet heat/carrier sink.  imedia halos are already
+    ! exchanged here, so faces at rank boundaries are classified correctly.
+    dirs = reshape( (/ 1,0,0, -1,0,0, 0,1,0, 0,-1,0, 0,0,1, 0,0,-1 /), (/3,6/) )
+    m = 0
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+    do ix=is(1),ie(1)
+       if( imedia(ix,iy,iz) /= 0 )then
+          do id=1,6
+             if( imedia(ix+dirs(1,id),iy+dirs(2,id),iz+dirs(3,id)) == 0 ) m = m + 1
+          end do
+       end if
+    end do
+    end do
+    end do
+    nsurf = m
+    if( allocated(ijk_surf) ) deallocate(ijk_surf)
+    allocate( ijk_surf(4,max(m,1)) )
+    allocate( seen(is_a(1):ubound(imedia,1), is_a(2):ubound(imedia,2), is_a(3):ubound(imedia,3)) )
+    seen = .false. ; ndup = 0 ; m = 0
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+    do ix=is(1),ie(1)
+       if( imedia(ix,iy,iz) /= 0 )then
+          do id=1,6
+             jx=ix+dirs(1,id); jy=iy+dirs(2,id); jz=iz+dirs(3,id)
+             if( imedia(jx,jy,jz) == 0 )then
+                m = m + 1
+                ijk_surf(1,m)=ix ; ijk_surf(2,m)=iy ; ijk_surf(3,m)=iz
+                ijk_surf(4,m) = merge( (id+1)/2, -((id+1)/2), mod(id,2)==1 )   ! +-1,+-2,+-3
+                if( seen(jx,jy,jz) ) ndup = ndup + 1
+                seen(jx,jy,jz) = .true.
+             end if
+          end do
+       end if
+    end do
+    end do
+    end do
+    deallocate( seen )
+    if( nprocs_g > 1 )then                       ! duplicates can sit on any rank
+       g1(1) = dble(ndup) ; call comm_get_max( g1, g2, 1, comm ) ; ndup = nint(g2(1))
+    end if
+    if( ndup > 0 .and. DISPLAY ) write(*,'(A,I8,A)') &
+       " ttm3 WARNING: non-slab geometry --", ndup, " vacuum cells border multiple medium faces;" &
+       // " the reflecting boundary is approximate at those corners."
+
+    ! medium mask (full halo box) for the space-charge sum
+    if( allocated(med_mask) ) deallocate(med_mask)
+    allocate( med_mask(is_a(1):ubound(imedia,1), is_a(2):ubound(imedia,2), is_a(3):ubound(imedia,3)) )
+    med_mask(:,:,:) = ( imedia(:,:,:) /= 0 )
+
+    ! global inner x-range (for the depth-profile gather under x-decomposition)
+    if( nprocs_g > 1 )then
+       g1(1) = dble(is(1)) ; call comm_get_min( g1(1), comm ) ; gx0 = nint(g1(1))
+       g1(1) = dble(ie(1)) ; call comm_get_max( g1, g2, 1, comm ) ; gx1 = nint(g2(1))
+    else
+       gx0 = is(1) ; gx1 = ie(1)
+    end if
   end subroutine init_ttm3_grid
 
   !---------------------------------------------------------------------------
@@ -365,11 +461,8 @@ contains
     implicit none
     integer,parameter :: nq=4000
     integer :: k,q,jj
-    real(8) :: eta,umax,du,u,integ,s,gam(f_nj),jval(f_nj)
-    ! indices 1..5 = j = -1/2, 1/2, 3/2, 1, 2  (gam = Gamma(j+1))
-    jval = (/ -0.5d0, 0.5d0, 1.5d0, 1.0d0, 2.0d0 /)
-    gam  = (/ 1.7724538509055160d0, 0.8862269254527580d0, 1.3293403881791370d0, &
-              1.0d0, 2.0d0 /)                                            ! Gamma(2)=1, Gamma(3)=2
+    real(8) :: eta,umax,du,u,integ,s
+    ! indices 1..5 = j = -1/2, 1/2, 3/2, 1, 2  (f_jval/f_gam1 = module constants)
     do k=0,f_neta
        eta = f_eta0 + dble(k)*f_deta
        umax = sqrt( max(eta,0.0d0) + 50.0d0 )
@@ -378,13 +471,13 @@ contains
           integ = 0.0d0
           do q=0,nq
              u = dble(q)*du
-             s = u**(2.0d0*jval(jj)+1.0d0)/( exp(u*u-eta) + 1.0d0 )
+             s = u**(2.0d0*f_jval(jj)+1.0d0)/( exp(u*u-eta) + 1.0d0 )
              if(q==0 .or. q==nq)then       ; integ=integ+s
              elseif(mod(q,2)==1)then        ; integ=integ+4.0d0*s
              else                           ; integ=integ+2.0d0*s
              end if
           end do
-          f_tab(k,jj) = 2.0d0*integ*du/3.0d0/gam(jj)
+          f_tab(k,jj) = 2.0d0*integ*du/3.0d0/f_gam1(jj)
        end do
     end do
     f_built = .true.
@@ -402,15 +495,26 @@ contains
   end subroutine ttm3_build_fermi_table
 
   ! F_j(eta) by linear interpolation of the table (jidx: 1=-1/2, 2=1/2, 3=3/2, 4=1, 5=2).
+  ! Above the table (eta > +60, deep degeneracy -- reached after metallization) a two-term
+  ! Sommerfeld expansion replaces the old hard clamp (which froze all F-ratios and
+  ! overestimated the carrier heat capacity by up to ~20x at Ne ~ 1e22 cm^-3):
+  !   F_j(eta) = eta^{j+1}/Gamma(j+2) * [ 1 + pi^2/6 j(j+1)/eta^2
+  !                                        + 7pi^4/360 (j+1)j(j-1)(j-2)/eta^4 ]
+  ! (this table's normalization; at eta=60 it matches the quadrature to <1e-3).
   pure function ttm3_fermi( jidx, eta ) result( F )
     implicit none
     integer,intent(in) :: jidx
     real(8),intent(in) :: eta
-    real(8) :: F,x,w
+    real(8) :: F,x,w,jv
     integer :: k
     x = (eta - f_eta0)/f_deta
     if(x <= 0.0d0)then            ; k=0       ; w=0.0d0
-    elseif(x >= dble(f_neta))then ; k=f_neta-1; w=1.0d0
+    elseif(x >= dble(f_neta))then
+       jv = f_jval(jidx)
+       F  = eta**(jv+1.0d0)/( (jv+1.0d0)*f_gam1(jidx) ) * &
+            ( 1.0d0 + (pi_*pi_/6.0d0)*jv*(jv+1.0d0)/(eta*eta) &
+                    + (7.0d0*pi_**4/360.0d0)*(jv+1.0d0)*jv*(jv-1.0d0)*(jv-2.0d0)/(eta**4) )
+       return
     else                          ; k=int(x)  ; w=x-dble(k)
     end if
     F = (1.0d0-w)*f_tab(k,jidx) + w*f_tab(k+1,jidx)
@@ -435,14 +539,23 @@ contains
   pure function ttm3_chem_pot( T, mc, N ) result( eta )
     implicit none
     real(8),intent(in) :: T,mc,N
-    real(8) :: eta,Neff,y,w
-    integer :: lo,hi,mid
+    real(8) :: eta,Neff,y,w,g52
+    integer :: lo,hi,mid,it
     Neff = 2.0d0*( mc*max(T,1.0d-12)/(2.0d0*pi_) )**1.5d0
     y = N/Neff                                       ! target value of F_{1/2}(eta)
     if( y <= f_tab(0,2) )then
        eta = f_eta0; return
     elseif( y >= f_tab(f_neta,2) )then
-       eta = f_eta0 + dble(f_neta)*f_deta; return
+       ! deep degeneracy (eta > +60): invert the two-term Sommerfeld F_{1/2}(eta)
+       !   F_{1/2} = ( eta^{3/2} + (pi^2/8) eta^{-1/2} ) / Gamma(5/2)
+       ! leading order eta = (Gamma(5/2) y)^{2/3}, then two Newton corrections.
+       g52 = f_gam1(3)                                ! Gamma(5/2) = 1.32934...
+       eta = ( g52*y )**(2.0d0/3.0d0)
+       do it=1,2
+          eta = eta - ( (eta**1.5d0 + 0.125d0*pi_*pi_/sqrt(eta))/g52 - y ) &
+                     /( (1.5d0*sqrt(eta) - 0.0625d0*pi_*pi_*eta**(-1.5d0))/g52 )
+       end do
+       return
     end if
     lo = 0; hi = f_neta
     do while( hi-lo > 1 )                            ! binary search: f_tab(lo,2) <= y < f_tab(hi,2)
@@ -496,8 +609,14 @@ contains
     Ch = ttm3_heat_capacity( Th_, tp3%mu_h, Nh_+N_floor )
     inv_tau = 1.0d0/tp3%tau
 
-    ! generation, saturated at the reference/atomic density N0 (cannot exceed it)
-    geff = gen_ * max( 0.0d0, 1.0d0 - Ne_/tp3%N0 )
+    ! generation, saturated at the reference/atomic density N0 (cannot exceed it).
+    ! Single bleach: when sig_cold>0 the band-filling factor is already applied once
+    ! inside ttm3_linear_gen (same convention as ttm3_step_cell).
+    if( tp3%sig_cold > 0.0d0 )then
+       geff = gen_
+    else
+       geff = gen_ * max( 0.0d0, 1.0d0 - Ne_/tp3%N0 )
+    end if
 
     ! standard Auger recombination (removes electron-hole pairs).  This is the
     ! unsaturated limit of the reference R = N*A*N*Ne*Nh/(1+T_au*A*Ne*Nh): at the
@@ -552,7 +671,13 @@ contains
     Ce = ttm3_heat_capacity( Te_, tp3%mu_e, Ne_+N_floor )
     Ch = ttm3_heat_capacity( Th_, tp3%mu_h, Nh_+N_floor )
     inv_tau = (1.0d0/tp3%tau)/( 1.0d0 + (Ne_*8443.9d0)**2 )      ! density-dependent e-ph relaxation
-    geff = gen_ * max( 0.0d0, 1.0d0 - Ne_/tp3%N0 )
+    if( tp3%sig_cold > 0.0d0 )then
+       ! band filling is already applied once inside ttm3_linear_gen (sig_b = sig_cold*bf),
+       ! matching the reference's single bleach; a second factor here would give bf^2.
+       geff = gen_
+    else
+       geff = gen_ * max( 0.0d0, 1.0d0 - Ne_/tp3%N0 )
+    end if
     Cef_e = tp3%A_e*Ne_*Nh_ ; Re = Ne_*Cef_e/( 1.0d0 + T_au*Cef_e )   ! saturated Auger (e)
     Cef_h = tp3%A_h*Ne_*Nh_ ; Rh = Nh_*Cef_h/( 1.0d0 + T_au*Cef_h )   ! saturated Auger (h)
     R    = ( Re + Rh ) * max( 0.0d0, 1.0d0 - Ne_/tp3%N0 )   ! band-filling (matches standalone Reh*Rate_eh)
@@ -565,9 +690,11 @@ contains
           * max( 0.0d0, 1.0d0 - Ne_/tp3%N0 )
 
     ! lattice: relaxation heating from the carriers (non-stiff, Cl large), with the
-    ! temperature-dependent lattice heat capacity Cl(Tl) (= input value at 300 K)
-    TlK    = Tl_*hk_kelvin
-    Cl_eff = tp3%Cl*( 1.978d0 + 3.54d-4*TlK - 3.68d0/(TlK*TlK) )/2.084d0
+    ! temperature-dependent lattice heat capacity Cl(Tl) (= input value at 300 K).
+    ! Floored: the polynomial goes negative below ~1.4 K (and -inf at 0), which would
+    ! flip the carrier->lattice coupling sign.
+    TlK    = max(Tl_,T_floor)*hk_kelvin
+    Cl_eff = tp3%Cl*max( 1.978d0 + 3.54d-4*TlK - 3.68d0/(TlK*TlK), 0.2d0 )/2.084d0
     dTl = ( Ce*(Te_-Tl_) + Ch*(Th_-Tl_) )*inv_tau / Cl_eff
 
     ! carrier temperatures: exponential integrator (stiff relaxation + dilution).
@@ -591,10 +718,10 @@ contains
     ! carrier densities and lattice: explicit Euler (non-stiff); +Col thermal generation
     Ne_ = min( max( Ne_ + dt_in*(geff - R + Col), 0.0d0 ), tp3%N0 )   ! cap at valence density
     Nh_ = min( max( Nh_ + dt_in*(geff - R + Col), 0.0d0 ), tp3%N0 )
-    Tl_ = max( Tl_ + dt_in*dTl, 0.0d0 )
+    Tl_ = max( Tl_ + dt_in*dTl, T_floor )
 
     ! numerical guard (should not trigger now that the stiff modes are integrated exactly)
-    Te_ = min(max(Te_,0.0d0),T_clamp); Th_ = min(max(Th_,0.0d0),T_clamp)
+    Te_ = min(max(Te_,T_floor),T_clamp); Th_ = min(max(Th_,T_floor),T_clamp)
   end subroutine ttm3_step_cell
 
   !---------------------------------------------------------------------------
@@ -636,6 +763,7 @@ contains
     real(8) :: gx,gy,gz,gKe,gKh
     real(8) :: eta,F0,Fm,F12,F1,F2,kT,cjE,cjT,fp4i
     real(8) :: dJe,dJh,gDJe,gDJh,gMxe,gMxh,gNxe,gNxh,dEf,nabNe,nabNh,gCJe,gCJh
+    real(8) :: TlK_t,Cl_t,dcap
     logical :: use_fermi
 
     use_fermi = ( tp3%mob_e0>0.0d0 .or. tp3%mob_h0>0.0d0 )
@@ -663,6 +791,10 @@ contains
     call update_overlap_real8(srg, rg, Ne); call update_overlap_real8(srg, rg, Nh)
     call update_overlap_real8(srg, rg, Te); call update_overlap_real8(srg, rg, Th)
     call update_overlap_real8(srg, rg, Tl)
+    ! reflecting (zero-flux) slab boundary: mirror the state into the vacuum face
+    ! neighbours (after the halo exchange, so the exchange cannot overwrite it).
+    ! Without this the never-evolved vacuum cells act as an infinite Dirichlet sink.
+    call ttm3_mirror_state( use_fermi )
 
     if( use_fermi )then
        ! pass 1: Fermi coefficients (mobility Mc, diffusion Dc, conductivity Kc) and the
@@ -671,7 +803,7 @@ contains
        do m=1,nmedia_myrnk
           ix=ijk_media_myrnk(1,m); iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
           ! electrons
-          kT=Te(ix,iy,iz); eta=ttm3_chem_pot(kT,tp3%mu_e,Ne(ix,iy,iz)+N_floor)
+          kT=max(Te(ix,iy,iz),T_floor); eta=ttm3_chem_pot(kT,tp3%mu_e,Ne(ix,iy,iz)+N_floor)
           F0=ttm3_F0(eta); Fm=ttm3_fermi(1,eta); F12=ttm3_fermi(2,eta)
           F1=ttm3_fermi(4,eta); F2=ttm3_fermi(5,eta)
           Mc_e(ix,iy,iz)=tp3%mob_e0*F0/F12
@@ -684,7 +816,7 @@ contains
           Jc_e(ix,iy,iz,3)=(Ne(ix,iy,iz+1)-Ne(ix,iy,iz-1))*gz + cjE*(rgap(ix,iy,iz+1)-rgap(ix,iy,iz-1))*gz + cjT*(Te(ix,iy,iz+1)-Te(ix,iy,iz-1))*gz
           Cj_e(ix,iy,iz)=2.0d0*kT*F1/F0 + (tp3%mu_h/(tp3%mu_e+tp3%mu_h))*rgap(ix,iy,iz)   ! heat per carrier
           ! holes
-          kT=Th(ix,iy,iz); eta=ttm3_chem_pot(kT,tp3%mu_h,Nh(ix,iy,iz)+N_floor)
+          kT=max(Th(ix,iy,iz),T_floor); eta=ttm3_chem_pot(kT,tp3%mu_h,Nh(ix,iy,iz)+N_floor)
           F0=ttm3_F0(eta); Fm=ttm3_fermi(1,eta); F12=ttm3_fermi(2,eta)
           F1=ttm3_fermi(4,eta); F2=ttm3_fermi(5,eta)
           Mc_h(ix,iy,iz)=tp3%mob_h0*F0/F12
@@ -704,11 +836,14 @@ contains
        call update_overlap_real8(srg, rg, Cj_e); call update_overlap_real8(srg, rg, Cj_h)
        call update_overlap_real8(srg, rg, Jc_e(:,:,:,1)); call update_overlap_real8(srg, rg, Jc_e(:,:,:,2)); call update_overlap_real8(srg, rg, Jc_e(:,:,:,3))
        call update_overlap_real8(srg, rg, Jc_h(:,:,:,1)); call update_overlap_real8(srg, rg, Jc_h(:,:,:,2)); call update_overlap_real8(srg, rg, Jc_h(:,:,:,3))
+       call ttm3_mirror_coefs()                 ! reflecting BC for the derived fields (J.n=0)
        call ttm3_space_charge()                 ! Efld = space-charge field (prefix sum along x)
     end if
 
+    dcap = 0.0d0
 !$omp parallel do private(m,ix,iy,iz,Ce,Ch,lNe,lNh,lTe,lTh,lTl,gKe,gKh, &
-!$omp&                    dJe,dJh,gDJe,gDJh,gMxe,gMxh,gNxe,gNxh,dEf,nabNe,nabNh,gCJe,gCJh)
+!$omp&                    dJe,dJh,gDJe,gDJh,gMxe,gMxh,gNxe,gNxh,dEf,nabNe,nabNh,gCJe,gCJh, &
+!$omp&                    TlK_t,Cl_t) reduction(max:dcap)
     do m=1,nmedia_myrnk
        ix=ijk_media_myrnk(1,m); iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
        lTe=(Te(ix+1,iy,iz)-2*Te(ix,iy,iz)+Te(ix-1,iy,iz))*cx+(Te(ix,iy+1,iz)-2*Te(ix,iy,iz)+Te(ix,iy-1,iz))*cy+(Te(ix,iy,iz+1)-2*Te(ix,iy,iz)+Te(ix,iy,iz-1))*cz
@@ -724,6 +859,10 @@ contains
           gKh=(Kc_h(ix+1,iy,iz)-Kc_h(ix-1,iy,iz))*gx*(Th(ix+1,iy,iz)-Th(ix-1,iy,iz))*gx &
              +(Kc_h(ix,iy+1,iz)-Kc_h(ix,iy-1,iz))*gy*(Th(ix,iy+1,iz)-Th(ix,iy-1,iz))*gy &
              +(Kc_h(ix,iy,iz+1)-Kc_h(ix,iy,iz-1))*gz*(Th(ix,iy,iz+1)-Th(ix,iy,iz-1))*gz
+          ! CFL-cap diagnostic: when a diffusivity exceeds Dmax the min() silently reduces
+          ! the physics -- track the worst ratio so ttm3_transport can warn (see loop end).
+          dcap = max( dcap, Kc_e(ix,iy,iz)/Ce/Dmax, Kc_h(ix,iy,iz)/Ch/Dmax, &
+                            Dc_e(ix,iy,iz)/Dmax,    Dc_h(ix,iy,iz)/Dmax )
           rhs_te(ix,iy,iz)=dt*( min(Kc_e(ix,iy,iz)/Ce,Dmax)*lTe + gKe/Ce )
           rhs_th(ix,iy,iz)=dt*( min(Kc_h(ix,iy,iz)/Ch,Dmax)*lTh + gKh/Ch )
           ! carrier transport: nab.(Dc Jc) - drift(space charge).  reference Evolve_N_T.
@@ -739,9 +878,16 @@ contains
           rhs_th(ix,iy,iz)=rhs_th(ix,iy,iz)+dt*( Cj_h(ix,iy,iz)*(Dc_h(ix,iy,iz)*dJh+gDJh) + Dc_h(ix,iy,iz)*gCJh )/Ch
           gMxe=(Mc_e(ix+1,iy,iz)-Mc_e(ix-1,iy,iz))*gx; gNxe=(Ne(ix+1,iy,iz)-Ne(ix-1,iy,iz))*gx
           gMxh=(Mc_h(ix+1,iy,iz)-Mc_h(ix-1,iy,iz))*gx; gNxh=(Nh(ix+1,iy,iz)-Nh(ix-1,iy,iz))*gx
-          dEf=fp4i*(Ne(ix,iy,iz)-Nh(ix,iy,iz))               ! 4*pi*inveps*(Ne-Nh)
-          nabNe=min(Dc_e(ix,iy,iz),Dmax)*dJe + gDJe - (gMxe*Ne(ix,iy,iz)+Mc_e(ix,iy,iz)*gNxe)*Efld(ix,iy,iz) - Mc_e(ix,iy,iz)*Ne(ix,iy,iz)*dEf
-          nabNh=min(Dc_h(ix,iy,iz),Dmax)*dJh + gDJh + (gMxh*Nh(ix,iy,iz)+Mc_h(ix,iy,iz)*gNxh)*Efld(ix,iy,iz) + Mc_h(ix,iy,iz)*Nh(ix,iy,iz)*dEf
+          dEf=fp4i*(Ne(ix,iy,iz)-Nh(ix,iy,iz))               ! 4*pi*inveps*(Ne-Nh) = -dE/dx
+          ! drift (Efld = physical E from the sheet prefix sum, pointing away from net + charge):
+          !   electrons (v=-mu*E):  dNe/dt|drift = +div(mu_e Ne E) = +grad(mu_e Ne).E + mu_e Ne divE
+          !   holes     (v=+mu*E):  dNh/dt|drift = -div(mu_h Nh E) = -grad(mu_h Nh).E - mu_h Nh divE
+          ! with divE = -dEf; the gradient and divergence terms must carry CONSISTENT signs or
+          ! the drift is not a conservative flux (the old code had the gradient terms flipped).
+          nabNe=min(Dc_e(ix,iy,iz),Dmax)*dJe + gDJe &
+                + (gMxe*Ne(ix,iy,iz)+Mc_e(ix,iy,iz)*gNxe)*Efld(ix,iy,iz) - Mc_e(ix,iy,iz)*Ne(ix,iy,iz)*dEf
+          nabNh=min(Dc_h(ix,iy,iz),Dmax)*dJh + gDJh &
+                - (gMxh*Nh(ix,iy,iz)+Mc_h(ix,iy,iz)*gNxh)*Efld(ix,iy,iz) + Mc_h(ix,iy,iz)*Nh(ix,iy,iz)*dEf
           rhs_ne(ix,iy,iz)=dt*nabNe
           rhs_nh(ix,iy,iz)=dt*nabNh
        else
@@ -752,33 +898,97 @@ contains
           rhs_te(ix,iy,iz)=dt*min(tp3%kappa_e/Ce,Dmax)*lTe
           rhs_th(ix,iy,iz)=dt*min(tp3%kappa_e/Ch,Dmax)*lTh
        end if
-       rhs_tl(ix,iy,iz)=dt*min( tp3%kappa_l*(Tl(ix,iy,iz)*hk_kelvin/300.0d0)**(-1.23d0)/tp3%Cl, Dmax )*lTl  ! Kl(Tl)
+       ! lattice conduction Kl(Tl)/Cl(Tl): both temperature-dependent, Tl floored before
+       ! the power/polynomial (a zero/negative Tl would give inf/NaN before any commit floor)
+       TlK_t = max(Tl(ix,iy,iz),T_floor)*hk_kelvin
+       Cl_t  = tp3%Cl*max( 1.978d0 + 3.54d-4*TlK_t - 3.68d0/(TlK_t*TlK_t), 0.2d0 )/2.084d0
+       dcap  = max( dcap, tp3%kappa_l*(TlK_t/300.0d0)**(-1.23d0)/Cl_t/Dmax )
+       rhs_tl(ix,iy,iz)=dt*min( tp3%kappa_l*(TlK_t/300.0d0)**(-1.23d0)/Cl_t, Dmax )*lTl  ! Kl(Tl)
     end do
 !$omp end parallel do
+
+    ! warn (rank-local, log-cadence) when the CFL cap is actually rewriting the physics
+    if( dcap > 1.0d0 .and. dcap > 1.999d0*dcap_worst )then
+       write(*,'(A,ES10.2,A)') " ttm3 WARNING: transport diffusivity CFL-capped (worst D/Dmax =", dcap, &
+                               " ) -- conduction/diffusion locally reduced; consider sub-stepping."
+    end if
+    dcap_worst = max( dcap_worst, dcap )
 
 !$omp parallel do private(m,ix,iy,iz)
     do m=1,nmedia_myrnk
        ix=ijk_media_myrnk(1,m); iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
        Ne(ix,iy,iz)=max(Ne(ix,iy,iz)+rhs_ne(ix,iy,iz),0.0d0)
        Nh(ix,iy,iz)=max(Nh(ix,iy,iz)+rhs_nh(ix,iy,iz),0.0d0)
-       Te(ix,iy,iz)=Te(ix,iy,iz)+rhs_te(ix,iy,iz)
-       Th(ix,iy,iz)=Th(ix,iy,iz)+rhs_th(ix,iy,iz)
-       Tl(ix,iy,iz)=Tl(ix,iy,iz)+rhs_tl(ix,iy,iz)
+       ! positivity floors: an explicit-step undershoot to T<=0 would flip the heat
+       ! equation backward and blow up exp(-1.5*gap/T) in the next local step
+       Te(ix,iy,iz)=max(Te(ix,iy,iz)+rhs_te(ix,iy,iz),T_floor)
+       Th(ix,iy,iz)=max(Th(ix,iy,iz)+rhs_th(ix,iy,iz),T_floor)
+       Tl(ix,iy,iz)=max(Tl(ix,iy,iz)+rhs_tl(ix,iy,iz),T_floor)
     end do
 !$omp end parallel do
   end subroutine ttm3_transport
 
   !---------------------------------------------------------------------------
-  ! Space-charge field Efld along x: Ef(ix)=2*pi*inveps*[sum_{i<ix} - sum_{i>ix}] rho dV,
-  ! rho=(Nh-Ne) (charge density; zero in non-medium cells, Ne=Nh=floor).  Per (iy,iz)
-  ! line, a prefix sum over the local inner x-range (single-domain; nproc_rgrid=1).
+  ! Reflecting (zero-flux) closure at the medium surface: copy each surface cell's
+  ! state into its vacuum face neighbour, so the central differences see a zero
+  ! normal gradient.  Serial loops (nsurf is small; deterministic on duplicate
+  ! targets, which only occur for non-slab corner geometries -- warned at init).
+  subroutine ttm3_mirror_state( use_fermi_ )
+    implicit none
+    logical,intent(in) :: use_fermi_
+    integer :: m,ix,iy,iz,id,jx,jy,jz
+    do m=1,nsurf
+       ix=ijk_surf(1,m); iy=ijk_surf(2,m); iz=ijk_surf(3,m); id=ijk_surf(4,m)
+       jx=ix; jy=iy; jz=iz
+       select case( abs(id) )
+       case(1); jx = ix + sign(1,id)
+       case(2); jy = iy + sign(1,id)
+       case(3); jz = iz + sign(1,id)
+       end select
+       Ne(jx,jy,jz)=Ne(ix,iy,iz); Nh(jx,jy,jz)=Nh(ix,iy,iz)
+       Te(jx,jy,jz)=Te(ix,iy,iz); Th(jx,jy,jz)=Th(ix,iy,iz); Tl(jx,jy,jz)=Tl(ix,iy,iz)
+       if( use_fermi_ ) rgap(jx,jy,jz)=rgap(ix,iy,iz)
+    end do
+  end subroutine ttm3_mirror_state
+
+  ! Same closure for the pass-1 derived fields: transport coefficients mirror
+  ! symmetrically; the carrier-current NORMAL component mirrors antisymmetrically
+  ! (J.n = 0 at the surface).  Only the normal component of the neighbour's Jc is
+  ! ever read by the divergence stencil.
+  subroutine ttm3_mirror_coefs()
+    implicit none
+    integer :: m,ix,iy,iz,id,jx,jy,jz,d
+    do m=1,nsurf
+       ix=ijk_surf(1,m); iy=ijk_surf(2,m); iz=ijk_surf(3,m); id=ijk_surf(4,m)
+       jx=ix; jy=iy; jz=iz; d=abs(id)
+       select case( d )
+       case(1); jx = ix + sign(1,id)
+       case(2); jy = iy + sign(1,id)
+       case(3); jz = iz + sign(1,id)
+       end select
+       Dc_e(jx,jy,jz)=Dc_e(ix,iy,iz); Dc_h(jx,jy,jz)=Dc_h(ix,iy,iz)
+       Mc_e(jx,jy,jz)=Mc_e(ix,iy,iz); Mc_h(jx,jy,jz)=Mc_h(ix,iy,iz)
+       Kc_e(jx,jy,jz)=Kc_e(ix,iy,iz); Kc_h(jx,jy,jz)=Kc_h(ix,iy,iz)
+       Cj_e(jx,jy,jz)=Cj_e(ix,iy,iz); Cj_h(jx,jy,jz)=Cj_h(ix,iy,iz)
+       Jc_e(jx,jy,jz,d)=-Jc_e(ix,iy,iz,d)
+       Jc_h(jx,jy,jz,d)=-Jc_h(ix,iy,iz,d)
+    end do
+  end subroutine ttm3_mirror_coefs
+
+  !---------------------------------------------------------------------------
+  ! Space-charge field Efld along x: Ef(ix)=2*pi*inveps*[sum_{i<ix} - sum_{i>ix}] rho*dx.
+  ! A sheet at x' with areal charge sigma = rho*dx contributes E = +-2*pi*sigma/eps, so the
+  ! prefix weight is the x cell size hgs(1) ONLY (the old dV=hx*hy*hz overscaled Efld by the
+  ! transverse cell area and made it dimensionally inconsistent with the local Gauss term).
+  ! rho=(Nh-Ne) on MEDIUM cells only (vacuum cells hold mirrored values from the reflecting
+  ! boundary and must not contribute).  Per (iy,iz) line, prefix sum over the inner x-range.
   subroutine ttm3_space_charge()
     use communication, only: comm_summation
     implicit none
     integer :: ix,iy,iz,p
-    real(8) :: dV,c2,total,pre,rho
+    real(8) :: dx,c2,total,pre,rho
     real(8),allocatable :: ain(:,:,:), aout(:,:,:)
-    dV = hgs(1)*hgs(2)*hgs(3)
+    dx = hgs(1)
     c2 = 2.0d0*pi_/tp3%eps_bg
     if( xc_isize <= 1 )then
        ! single x-domain (nproc_rgrid(1)=1): local exclusive prefix sum per (iy,iz) line
@@ -787,13 +997,13 @@ contains
        do iy=is_inner(2),ie_inner(2)
           total=0.0d0
           do ix=is_inner(1),ie_inner(1)
-             total=total+(Nh(ix,iy,iz)-Ne(ix,iy,iz))
+             if( med_mask(ix,iy,iz) ) total=total+(Nh(ix,iy,iz)-Ne(ix,iy,iz))
           end do
           pre=0.0d0                                  ! exclusive prefix sum (i<ix)
           do ix=is_inner(1),ie_inner(1)
-             rho=Nh(ix,iy,iz)-Ne(ix,iy,iz)
-             ! Ef = (left - right)*dV*c2 ;  right = total - pre - rho
-             Efld(ix,iy,iz)=c2*dV*( 2.0d0*pre + rho - total )
+             rho=merge( Nh(ix,iy,iz)-Ne(ix,iy,iz), 0.0d0, med_mask(ix,iy,iz) )
+             ! Ef = (left - right)*dx*c2 ;  right = total - pre - rho
+             Efld(ix,iy,iz)=c2*dx*( 2.0d0*pre + rho - total )
              pre=pre+rho
           end do
        end do
@@ -810,7 +1020,7 @@ contains
        do iy=is_inner(2),ie_inner(2)
           rho=0.0d0
           do ix=is_inner(1),ie_inner(1)
-             rho=rho+(Nh(ix,iy,iz)-Ne(ix,iy,iz))
+             if( med_mask(ix,iy,iz) ) rho=rho+(Nh(ix,iy,iz)-Ne(ix,iy,iz))
           end do
           ain(xc_id,iy,iz)=rho
        end do
@@ -824,8 +1034,8 @@ contains
              if( p<xc_id ) pre=pre+aout(p,iy,iz)   ! charge in x-domains left of this one
           end do
           do ix=is_inner(1),ie_inner(1)
-             rho=Nh(ix,iy,iz)-Ne(ix,iy,iz)
-             Efld(ix,iy,iz)=c2*dV*( 2.0d0*pre + rho - total )
+             rho=merge( Nh(ix,iy,iz)-Ne(ix,iy,iz), 0.0d0, med_mask(ix,iy,iz) )
+             Efld(ix,iy,iz)=c2*dx*( 2.0d0*pre + rho - total )
              pre=pre+rho
           end do
        end do
@@ -880,61 +1090,110 @@ contains
   end subroutine ttm3_get_max
 
   !---------------------------------------------------------------------------
-  ! State at the illuminated front face: the minimum-ix medium cell nearest the
-  ! transverse centroid.  This is the analogue of the reference's x=0 surface cell
-  ! and, unlike ttm3_get_max, is not biased by the Fabry-Perot field antinodes that
-  ! form inside a finite slab (which sit deeper than the front face and read high).
-  subroutine ttm3_get_front( Te_o, Th_o, Tl_o, Ne_o, Nh_o )
-    use communication, only: comm_get_min, comm_get_max
+  ! State at the illuminated front face: the medium cell on the GLOBAL minimum-ix
+  ! plane nearest the GLOBAL transverse centroid -- the analogue of the reference's
+  ! x=0 surface cell and, unlike ttm3_get_max, not biased by internal Fabry-Perot
+  ! antinodes.  COLLECTIVE: must be called by every rank.  The winner cell is chosen
+  ! by a decomposition-independent key that is unique per cell (centroid distance,
+  ! then iy,iz), so ALL outputs -- state, env/power/gen, indices -- come from the
+  ! same single cell for any MPI layout (the old per-rank centroid + elementwise max
+  ! could mix fields from different cells and report a vacuum cell on rank 0).
+  subroutine ttm3_get_front( env, pw, gn, Te_o, Th_o, Tl_o, Ne_o, Nh_o, &
+                             env_o, pow_o, gen_o, gjx, gjy, gjz )
+    use communication, only: comm_get_min, comm_get_max, comm_summation
     implicit none
+    real(8),intent(in)  :: env(is_array(1):,is_array(2):,is_array(3):)  ! field envelope
+    real(8),intent(in)  :: pw (is_inner(1):,is_inner(2):,is_inner(3):)  ! heating source
+    real(8),intent(in)  :: gn (is_inner(1):,is_inner(2):,is_inner(3):)  ! generation rate
     real(8),intent(out) :: Te_o, Th_o, Tl_o, Ne_o, Nh_o   ! [K],[K],[K],[1/cm^3],[1/cm^3]
+    real(8),intent(out) :: env_o, pow_o, gen_o            ! [a.u.] at the front cell
+    integer,intent(out) :: gjx, gjy, gjz                  ! front cell (global grid indices)
     real(8), parameter :: hartree_kelvin_relationship = 3.1577502480407d5
     real(8), parameter :: atomic_unit_of_length = 5.29177210903d-11
-    real(8) :: cm3_per_bohr3, cy, cz, gfix, vin(5), vout(5)
-    integer :: m,ix,iy,iz,ixmin,nmin,a(3),dbest,d,lfix
-    Te_o=tp3%Tini*hartree_kelvin_relationship; Th_o=Te_o; Tl_o=Te_o; Ne_o=0d0; Nh_o=0d0
-    lfix = huge(0)
-    if( nmedia_myrnk>0 )then
-       cm3_per_bohr3 = (atomic_unit_of_length*1.0d2)**3
-       ! minimum ix among medium cells = the illuminated face
-       ixmin = ijk_media_myrnk(1,1)
-       do m=2,nmedia_myrnk
-          if( ijk_media_myrnk(1,m) < ixmin ) ixmin = ijk_media_myrnk(1,m)
-       end do
-       ! transverse centroid of that face
-       cy=0d0; cz=0d0; nmin=0
-       do m=1,nmedia_myrnk
-          if( ijk_media_myrnk(1,m)==ixmin )then
-             cy=cy+ijk_media_myrnk(2,m); cz=cz+ijk_media_myrnk(3,m); nmin=nmin+1
-          end if
-       end do
-       cy=cy/max(nmin,1); cz=cz/max(nmin,1)
-       ! face cell nearest the centroid
-       a = ijk_media_myrnk(1:3,1); dbest=huge(0)
-       do m=1,nmedia_myrnk
-          if( ijk_media_myrnk(1,m)==ixmin )then
-             iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
-             d = (iy-nint(cy))**2 + (iz-nint(cz))**2
-             if( d<dbest )then; dbest=d; a=ijk_media_myrnk(1:3,m); end if
-          end if
-       end do
-       Te_o=Te(a(1),a(2),a(3))*hartree_kelvin_relationship
-       Th_o=Th(a(1),a(2),a(3))*hartree_kelvin_relationship
-       Tl_o=Tl(a(1),a(2),a(3))*hartree_kelvin_relationship
-       Ne_o=Ne(a(1),a(2),a(3))/cm3_per_bohr3; Nh_o=Nh(a(1),a(2),a(3))/cm3_per_bohr3
-       lfix = ixmin
-    end if
-    if( nprocs_g>1 )then     ! select values from the rank holding the global illuminated face (min ix)
-       gfix = dble(lfix)
-       call comm_get_min( gfix, comm )
-       if( lfix == nint(gfix) )then
-          vin(1)=Te_o; vin(2)=Th_o; vin(3)=Tl_o; vin(4)=Ne_o; vin(5)=Nh_o
-       else
-          vin(:) = -huge(1.0d0)
+    real(8) :: cm3_per_bohr3, cy, cz, gfix, dkey, dkeyg, cyz(3), cyzg(3), vin(11), vout(11)
+    integer :: m,ix,iy,iz,ixmin,a(3),dbest,d
+    logical :: have
+
+    Te_o=tp3%Tini*hartree_kelvin_relationship; Th_o=Te_o; Tl_o=Te_o
+    Ne_o=0d0; Nh_o=0d0; env_o=0d0; pow_o=0d0; gen_o=0d0
+    gjx=is_inner(1); gjy=is_inner(2); gjz=is_inner(3)
+    cm3_per_bohr3 = (atomic_unit_of_length*1.0d2)**3
+
+    ! (1) global front plane = min ix over all medium cells
+    gfix = dble(huge(1))
+    do m=1,nmedia_myrnk
+       gfix = min( gfix, dble(ijk_media_myrnk(1,m)) )
+    end do
+    if( nprocs_g>1 ) call comm_get_min( gfix, comm )
+    if( gfix >= dble(huge(1)) ) return                  ! no medium cell anywhere
+    ixmin = nint(gfix)
+
+    ! (2) global transverse centroid of the front plane
+    cyz = 0.0d0
+    do m=1,nmedia_myrnk
+       if( ijk_media_myrnk(1,m)==ixmin )then
+          cyz(1)=cyz(1)+dble(ijk_media_myrnk(2,m)); cyz(2)=cyz(2)+dble(ijk_media_myrnk(3,m))
+          cyz(3)=cyz(3)+1.0d0
        end if
-       call comm_get_max( vin, vout, 5, comm )
-       Te_o=vout(1); Th_o=vout(2); Tl_o=vout(3); Ne_o=vout(4); Nh_o=vout(5)
+    end do
+    if( nprocs_g>1 )then
+       call comm_summation( cyz, cyzg, 3, comm )
+    else
+       cyzg = cyz
     end if
+    cy = cyzg(1)/max(cyzg(3),1.0d0); cz = cyzg(2)/max(cyzg(3),1.0d0)
+
+    ! (3) local candidate on the plane: nearest the centroid, ties broken by (iy,iz)
+    have=.false.; dbest=huge(0); a=(/ixmin,0,0/)
+    do m=1,nmedia_myrnk
+       if( ijk_media_myrnk(1,m)==ixmin )then
+          iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
+          d = (iy-nint(cy))**2 + (iz-nint(cz))**2
+          if( .not.have .or. d<dbest .or. ( d==dbest .and. ( iy<a(2) .or. &
+              ( iy==a(2) .and. iz<a(3) ) ) ) )then
+             dbest=d; a(2)=iy; a(3)=iz; have=.true.
+          end if
+       end if
+    end do
+
+    ! (4) global winner by staged exact min-reductions on (distance, iy, iz):
+    !     integer values carried in doubles are exact, so the winner cell is unique
+    !     (one owner rank) for any grid size -- no packed-key collisions.
+    dkey = merge( dble(dbest), huge(1.0d0), have )
+    dkeyg = dkey
+    if( nprocs_g>1 ) call comm_get_min( dkeyg, comm )
+    if( dkeyg >= huge(1.0d0) ) return                   ! no candidate anywhere (paranoia)
+    have = have .and. ( dkey == dkeyg )
+    dkey = merge( dble(a(2)), huge(1.0d0), have )
+    dkeyg = dkey
+    if( nprocs_g>1 ) call comm_get_min( dkeyg, comm )
+    have = have .and. ( dkey == dkeyg )
+    dkey = merge( dble(a(3)), huge(1.0d0), have )
+    dkeyg = dkey
+    if( nprocs_g>1 ) call comm_get_min( dkeyg, comm )
+    have = have .and. ( dkey == dkeyg )
+
+    ! (5) the winner packs every output from its candidate cell; elementwise max
+    !     is then a pure broadcast (all non-winners contribute -huge)
+    if( have )then
+       ix=a(1); iy=a(2); iz=a(3)
+       vin(1)=Te(ix,iy,iz); vin(2)=Th(ix,iy,iz); vin(3)=Tl(ix,iy,iz)
+       vin(4)=Ne(ix,iy,iz); vin(5)=Nh(ix,iy,iz)
+       vin(6)=env(ix,iy,iz); vin(7)=pw(ix,iy,iz); vin(8)=gn(ix,iy,iz)
+       vin(9)=dble(ix); vin(10)=dble(iy); vin(11)=dble(iz)
+    else
+       vin(:) = -huge(1.0d0)
+    end if
+    if( nprocs_g>1 )then
+       call comm_get_max( vin, vout, 11, comm )
+    else
+       vout = vin
+    end if
+    Te_o=vout(1)*hartree_kelvin_relationship; Th_o=vout(2)*hartree_kelvin_relationship
+    Tl_o=vout(3)*hartree_kelvin_relationship
+    Ne_o=vout(4)/cm3_per_bohr3; Nh_o=vout(5)/cm3_per_bohr3
+    env_o=vout(6); pow_o=vout(7); gen_o=vout(8)
+    gjx=nint(vout(9)); gjy=nint(vout(10)); gjz=nint(vout(11))
   end subroutine ttm3_get_front
 
   ! Index of the illuminated front-face medium cell (same selection as ttm3_get_front).
@@ -969,32 +1228,50 @@ contains
     jx=a(1); jy=a(2); jz=a(3)
   end subroutine ttm3_front_ijk
 
-  ! Depth profile along x at the transverse centre line (front cell's iy,iz): writes
-  ! one block per call (time, ix, Te[K], Ne[cm^-3], Tl[K]) for spatial-distribution diagnostics.
-  subroutine ttm3_write_profile( fname, t_fs, u, field )
+  ! Depth profile along x at the GLOBAL front-cell transverse line (gjy,gjz from
+  ! ttm3_get_front): each rank fills its slice of the global x-line, a sum-gather
+  ! assembles it, and root writes one block per call (time, ix, Te[K], Ne[cm^-3],
+  ! Tl[K], |E|^2).  COLLECTIVE: must be called by every rank (the old version wrote
+  ! only root's own x-slice = truncated profile under x-decomposition).
+  subroutine ttm3_write_profile( fname, t_fs, u, field, gjy, gjz )
+    use communication, only: comm_summation
     implicit none
     character(*),intent(in) :: fname
     real(8),     intent(in) :: t_fs
-    integer,     intent(in) :: u
+    integer,     intent(in) :: u, gjy, gjz
     real(8),     intent(in) :: field(is_array(1):,is_array(2):,is_array(3):)  ! |E|^2 envelope [a.u.]
     real(8),parameter :: hk = 3.1577502480407d5, aul = 5.29177210903d-11
     real(8) :: cm3
-    integer :: m,ix,iy,iz,fx,fy,fz
-    if( nmedia_myrnk<=0 ) return
-    call ttm3_front_ijk( fx, fy, fz )                 ! transverse centre = front cell line
+    integer :: m,ix,iy,iz
+    real(8),allocatable :: buf(:,:), bufg(:,:)
+    if( gx1 < gx0 ) return
+    allocate( buf(gx0:gx1,0:4), bufg(gx0:gx1,0:4) ); buf=0.0d0
     cm3 = (aul*1.0d2)**3
-    open(u, file=fname, status='unknown', position='append')
-    do ix=is_inner(1),ie_inner(1)                     ! sorted by depth
-       do m=1,nmedia_myrnk
-          if( ijk_media_myrnk(1,m)==ix .and. ijk_media_myrnk(2,m)==fy .and. ijk_media_myrnk(3,m)==fz )then
-             iy=fy; iz=fz
-             write(u,'(F12.4,1X,I6,4(1X,E16.8))') t_fs, ix, &
-                  Te(ix,iy,iz)*hk, Ne(ix,iy,iz)/cm3, Tl(ix,iy,iz)*hk, field(ix,iy,iz)
-          end if
-       end do
+    do m=1,nmedia_myrnk
+       ix=ijk_media_myrnk(1,m); iy=ijk_media_myrnk(2,m); iz=ijk_media_myrnk(3,m)
+       if( iy==gjy .and. iz==gjz )then                ! my cells on the global centre line
+          buf(ix,0)=1.0d0                             ! occupancy (skips vacuum rows on write)
+          buf(ix,1)=Te(ix,iy,iz)*hk
+          buf(ix,2)=Ne(ix,iy,iz)/cm3
+          buf(ix,3)=Tl(ix,iy,iz)*hk
+          buf(ix,4)=field(ix,iy,iz)
+       end if
     end do
-    write(u,*) ' '                                    ! blank line separates time blocks
-    close(u)
+    if( nprocs_g>1 )then
+       call comm_summation( buf, bufg, size(buf), comm )
+    else
+       bufg = buf
+    end if
+    if( DISPLAY )then
+       open(u, file=fname, status='unknown', position='append')
+       do ix=gx0,gx1                                  ! sorted by depth
+          if( bufg(ix,0) > 0.5d0 ) &
+             write(u,'(F12.4,1X,I6,4(1X,E16.8))') t_fs, ix, bufg(ix,1), bufg(ix,2), bufg(ix,3), bufg(ix,4)
+       end do
+       write(u,*) ' '                                 ! blank line separates time blocks
+       close(u)
+    end if
+    deallocate( buf, bufg )
   end subroutine ttm3_write_profile
 
   !---------------------------------------------------------------------------
@@ -1078,7 +1355,11 @@ contains
     call ttm3_gamma_wp2( Ne_, Te_, Tl_, ge, wp2 )
     if( tp3%coupling_mode == 2 )then              ! ETD (exponential) Drude current integrator
        c1  = exp( -ge*dt )
-       c2  = ( 1.0d0 - c1 )/ge * wp2/( 4.0d0*pi_ )
+       if( ge*dt > 1.0d-6 )then
+          c2 = ( 1.0d0 - c1 )/ge * wp2/( 4.0d0*pi_ )
+       else                                       ! series form: (1-exp(-x))/x -> catastrophic
+          c2 = dt*( 1.0d0 - 0.5d0*ge*dt ) * wp2/( 4.0d0*pi_ )   ! cancellation for x <~ 1e-8
+       end if
     else                                          ! bilinear (Crank-Nicolson), mode 0
        c0  = 1.0d0 + ge*dt/2.0d0
        c1  = ( 1.0d0 - ge*dt/2.0d0 )/c0
@@ -1114,7 +1395,9 @@ contains
        ! Layer C-a/b: band-filled bound interband part + strong carrier-T Drude.
        call ttm3_drude( Ne_, Te_, Th_, Tl_, omega, eps_d, sig_d )
        bf     = max( 1.0d0 - Ne_/tp3%N0, 0.0d0 )
-       eps_re = tp3%eps_bg*bf + eps_d
+       ! band filling depletes only the interband SUSCEPTIBILITY (eps_bg-1), not the
+       ! vacuum contribution: full depletion must leave eps -> 1 + eps_Drude, not eps_Drude.
+       eps_re = 1.0d0 + (tp3%eps_bg-1.0d0)*bf + eps_d
        sig    = tp3%sig_cold*bf + sig_d
     else
        wp2    = 4.0d0*pi_*( Ne_/tp3%mu_e + Nh_/tp3%mu_h )          ! legacy simple Drude

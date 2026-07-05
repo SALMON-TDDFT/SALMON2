@@ -327,6 +327,19 @@ contains
     ! fields can be folded into flag_save below)
     call init_ttm3_parameters( dt_em )
 
+    !ttm3 state (Te/Th/Tl/Ne/Nh + carrier Drude currents) is NOT in the checkpoint set:
+    !a restart would silently resume with a cold, carrier-free slab mid-pulse -> refuse
+    !up front (before any restart data is touched).  Checkpoints may still be written,
+    !but they cannot seed a maxwell-3tm restart -- warn.
+    if( use_ttm3 )then
+      if(yn_restart=='y') &
+        call stop_em('theory=maxwell-3tm does not support yn_restart=y (ttm3 state is not checkpointed).')
+      if(checkpoint_interval>0 .and. comm_is_root(nproc_id_global)) then
+        write(*,'(A)') " WARNING: checkpoint data will NOT include the ttm3 state;"
+        write(*,'(A)') "          it cannot be used to restart a maxwell-3tm run."
+      end if
+    end if
+
     !save option: calculate variables used for save(typically, ex-z_s and hx-z_s)
     if(fe%flag_obs .or. fe%flag_ase .or. fe%flag_art .or. use_ttm3) then
       fe%flag_save = .true.
@@ -885,7 +898,8 @@ contains
           write(unit2,'("#",99(1X,I0,":",A))') &
                1, "Time[fs]", &
                2, "Te_front[K]", 3, "Th_front[K]", 4, "Tl_front[K]", 5, "Ne_front[cm-3]", 6, "Nh_front[cm-3]", &
-               7, "Te_max[K]",   8, "Th_max[K]",   9, "Tl_max[K]",  10, "Ne_max[cm-3]",  11, "Nh_max[cm-3]"
+               7, "Te_max[K]",   8, "Th_max[K]",   9, "Tl_max[K]",  10, "Ne_max[cm-3]",  11, "Nh_max[cm-3]", &
+              12, "env_front[au]", 13, "power_front[au]", 14, "gen_front[au]"
           close(unit2)
        end if
     end if !use_ttm3
@@ -3311,7 +3325,7 @@ contains
     use common_maxwell,  only: output_r_txt_em,output_r_bin_em,txtfile_copy_em
     use ttm,             only: use_ttm,ttm_penetration,ttm_main,ttm_get_temperatures
     use ttm3,            only: use_ttm3,ttm3_main,ttm3_generation,ttm3_get_max,ttm3_get_front,ttm3_eps_sig,&
-                               ttm3_ninterior,ttm3_interior_cell,ttm3_linear_gen,ttm3_front_ijk,ttm3_write_profile,&
+                               ttm3_ninterior,ttm3_interior_cell,ttm3_linear_gen,ttm3_write_profile,&
                                ttm3_drude_coef_cell,ttm3_coupling_mode,ttm3_drude_osc_cell
     use phys_constants,  only: cspeed_au
     use math_constants,  only: pi
@@ -3334,6 +3348,8 @@ contains
     real(8),allocatable :: t3_rjfx_g(:,:,:),t3_rjfy_g(:,:,:),t3_rjfz_g(:,:,:) ! ghost J injected via eh_add_curr_g
     real(8) :: t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh
     real(8) :: t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf
+    real(8) :: t3_envf,t3_powf,t3_genf
+    integer :: t3_gjx,t3_gjy,t3_gjz
     real(8) :: t3_eps,t3_sig,t3_de,t3_c1,t3_cx,t3_cy,t3_cz,t3_cj,t3_gtpa
     real(8) :: t3_ge,t3_wp2,t3_a,t3_b,t3_d2,t3_p,t3_dd,t3_cc,t3_ss,t3_m11,t3_m12,t3_m21,t3_m22,t3_estar,t3_enew,t3_dfld
     integer :: t3_im
@@ -3554,16 +3570,23 @@ contains
           allocate( t3_env(fs%mg%is_array(1):fs%mg%ie_array(1), &
                            fs%mg%is_array(2):fs%mg%ie_array(2), &
                            fs%mg%is_array(3):fs%mg%ie_array(3)) ); t3_env=0.0d0
-          call allocate_poynting(fs, u=t3_jx  ); call allocate_poynting(fs, u=t3_jy  ); call allocate_poynting(fs, u=t3_jz  )
-          call allocate_poynting(fs, u=t3_rjfx); call allocate_poynting(fs, u=t3_rjfy); call allocate_poynting(fs, u=t3_rjfz)
+          !carrier-current arrays: eh_add_curr/_g declare their dummies explicit-shape with
+          !HALO bounds (is_array:ie_array), so these must be allocated with the same bounds
+          !(allocate_poynting's u= is halo-less is:ie and would sequence-associate with an
+          !index skew = scrambled injection + out-of-bounds reads; found 2026-07-05 review).
+          ix=fs%mg%is_array(1); jx=fs%mg%ie_array(1)
+          iy=fs%mg%is_array(2); jy=fs%mg%ie_array(2)
+          iz=fs%mg%is_array(3); jz=fs%mg%ie_array(3)
+          allocate( t3_jx  (ix:jx,iy:jy,iz:jz), t3_jy  (ix:jx,iy:jy,iz:jz), t3_jz  (ix:jx,iy:jy,iz:jz), &
+                    t3_rjfx(ix:jx,iy:jy,iz:jz), t3_rjfy(ix:jx,iy:jy,iz:jz), t3_rjfz(ix:jx,iy:jy,iz:jz) )
           t3_jx=0d0; t3_jy=0d0; t3_jz=0d0; t3_rjfx=0d0; t3_rjfy=0d0; t3_rjfz=0d0
           if(yn_em_envelope=='y')then
             call allocate_poynting(fs, t3_S_g, t3_divS_g)
             !ghost (quadrature) carrier current: the envelope generation/heating use
             !env = |E|^2 + |E_g|^2 and -0.5*(divS+divS_g), so the ghost field must be damped
             !by the same carrier Drude as the real field, else |E_g|^2 stays undamped -> runaway.
-            call allocate_poynting(fs, u=t3_jx_g  ); call allocate_poynting(fs, u=t3_jy_g  ); call allocate_poynting(fs, u=t3_jz_g  )
-            call allocate_poynting(fs, u=t3_rjfx_g); call allocate_poynting(fs, u=t3_rjfy_g); call allocate_poynting(fs, u=t3_rjfz_g)
+            allocate( t3_jx_g  (ix:jx,iy:jy,iz:jz), t3_jy_g  (ix:jx,iy:jy,iz:jz), t3_jz_g  (ix:jx,iy:jy,iz:jz), &
+                      t3_rjfx_g(ix:jx,iy:jy,iz:jz), t3_rjfy_g(ix:jx,iy:jy,iz:jz), t3_rjfz_g(ix:jx,iy:jy,iz:jz) )
             t3_jx_g=0d0; t3_jy_g=0d0; t3_jz_g=0d0; t3_rjfx_g=0d0; t3_rjfy_g=0d0; t3_rjfz_g=0d0
           end if
         end if
@@ -3705,30 +3728,33 @@ contains
         end if
 
         if( mod(iter,i_3tm_out)==0 )then
-          !report the peak over medium cells (the absorbing front, not the screened core).
-          !single-domain diagnostic: local peak equals the global peak for nproc_rgrid=1.
+          !report the front cell (illuminated face, the reference's x=0 surface analogue) and
+          !the global peak over medium cells (sits at internal Fabry-Perot antinodes, reads
+          !high in a finite slab).  Both written so the two can be compared.
           !i_3tm_out (>= obs_samp_em) bounds 3tm_rt.data to <= n_3tm_out_max rows.
-          ! front = illuminated face cell (matches the reference's x=0 surface cell);
-          ! max = global peak over medium cells (sits at internal Fabry-Perot antinodes,
-          ! reads high in a finite slab).  Both written so the two can be compared.
-          call ttm3_get_front( t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf )
+          !ttm3_get_front/ttm3_write_profile are COLLECTIVE (called by every rank): the front
+          !cell is selected globally, so cols 2-6 and 12-14 all come from the same cell for
+          !any MPI decomposition (rank 0 no longer reads its possibly-vacuum local cell).
+          call ttm3_get_front( t3_env, t3_power, t3_gen, &
+                               t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf, &
+                               t3_envf,t3_powf,t3_genf, t3_gjx,t3_gjy,t3_gjz )
           call ttm3_get_max  ( t3_Te ,t3_Th ,t3_Tl ,t3_Ne ,t3_Nh  )
-          call ttm3_front_ijk( ix, iy, iz )                  ! front cell, for the field-envelope diagnostic (col 12)
           if( comm_is_root(nproc_id_global) )then
             open(unit2,file='3tm_rt.data',status='old',position='append')
-            ! col 12 = front-cell field-intensity envelope |E|^2+|E_g|^2 [a.u.]; compare to the
-            ! reference surface intensity out_all(6)=3.509e16*|E|^2*n to localize the ~2x field factor.
+            ! col 12 = front-cell field-intensity envelope |E|^2+|E_g|^2 [a.u.];
             ! col 13 = front-cell heating source -divS [a.u. power/vol]; col 14 = front-cell
             ! generation rate [a.u.].  With Te/Ne/Tl these reconstruct the full dTe balance
             ! externally (Ce, e-phonon, dilution, Col, gap cost) -> localize what sets Te.
             write(unit2,"(F16.8,99(1X,E23.15E3))") &
                  dble(iter)*dt_em*utime_from_au, &
-                 t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf, t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh, t3_env(ix,iy,iz), &
-                 t3_power(ix,iy,iz), t3_gen(ix,iy,iz)
+                 t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf, t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh, &
+                 t3_envf, t3_powf, t3_genf
             close(unit2)
-            ! depth profile (time, ix, Te[K], Ne[cm-3], Tl[K], |E|^2[a.u.]) for spatial diagnostics
-            call ttm3_write_profile( '3tm_prof.data', dble(iter)*dt_em*utime_from_au, unit2, t3_env )
           end if
+          ! depth profile (time, ix, Te[K], Ne[cm-3], Tl[K], |E|^2[a.u.]) along the global
+          ! front-cell line; collective (gathers x-slices), root does the writing inside
+          call ttm3_write_profile( '3tm_prof.data', dble(iter)*dt_em*utime_from_au, unit2, t3_env, &
+                                   t3_gjy, t3_gjz )
         end if
       end if !use_ttm3
 

@@ -663,11 +663,11 @@ contains
     ttm_ddiff    = 0.0d0
     ttm_kappa_e  = 0.0d0
     ttm_kappa_l  = 0.0d0
-    ttm_dgap     = 0.055d0
+    ttm_dgap     = 0.10417d0  ! BGN 1.5 eV*A*Ne^(1/3) in a.u.: 1.5/(0.529177*27.2114)
     ttm_mob_e    = 0.0d0
     ttm_mob_h    = 0.0d0
     ttm_sig_cold = 0.0d0
-    ttm_coupling = 1
+    ttm_coupling = 3          ! exact-exponential JE: unconditionally stable incl. metallization
     yn_use_ttm3  = .false.
     yn_md               = 'n'
     yn_opt              = 'n'
@@ -2672,7 +2672,29 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
-      
+
+      if(inml_ttm >0)ierr_nml = ierr_nml +1
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'ttm', inml_ttm
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_egap', ttm_egap
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_mu_e', ttm_mu_e
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_mu_h', ttm_mu_h
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_auger_e', ttm_auger_e
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_auger_h', ttm_auger_h
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_tau', ttm_tau
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_cl', ttm_cl
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_tini', ttm_tini
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_eps_bg', ttm_eps_bg
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_n0', ttm_n0
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_beta2', ttm_beta2
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_ddiff', ttm_ddiff
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_kappa_e', ttm_kappa_e
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_kappa_l', ttm_kappa_l
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_dgap', ttm_dgap
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_mob_e', ttm_mob_e
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_mob_h', ttm_mob_h
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_sig_cold', ttm_sig_cold
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'ttm_coupling', ttm_coupling
+
       close(fh_variables_log)
     end if
 
