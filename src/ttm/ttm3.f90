@@ -1051,14 +1051,27 @@ contains
           rhs_ne(ix,iy,iz) = rne
           rhs_nh(ix,iy,iz) = rnh
           rmax = max( rmax, rr )
-          tsc = max( Te(ix,iy,iz), 0.05d0*tp3%Tini )
-          relmax = max( relmax, abs(rhs_te(ix,iy,iz))/tsc )
-          tsc = max( Th(ix,iy,iz), 0.05d0*tp3%Tini )
-          relmax = max( relmax, abs(rhs_th(ix,iy,iz))/tsc )
-          tsc = max( Tl(ix,iy,iz), 0.05d0*tp3%Tini )
-          relmax = max( relmax, abs(rhs_tl(ix,iy,iz))/tsc )
-          relmax = max( relmax, abs(rhs_ne(ix,iy,iz))/(Ne(ix,iy,iz)+N_floor) )
-          relmax = max( relmax, abs(rhs_nh(ix,iy,iz))/(Nh(ix,iy,iz)+N_floor) )
+          ! relative-change guard.  Channels that sit AT their floor and keep draining
+          ! must not throttle dt_s: the commit clamp makes the downward dynamics inert
+          ! there, and holding dt_s hostage to an unresolvable decay deadlocks the
+          ! sub-stepper at nit_max (s8b: front-face Th collapse, 2026-07-06).  Carrier
+          ! scales are floored at a ppb of the saturation density for the same reason.
+          if( .not.( Te(ix,iy,iz) <= 1.01d0*T_floor .and. rhs_te(ix,iy,iz) < 0.0d0 ) )then
+             tsc = max( Te(ix,iy,iz), 0.05d0*tp3%Tini )
+             relmax = max( relmax, abs(rhs_te(ix,iy,iz))/tsc )
+          end if
+          if( .not.( Th(ix,iy,iz) <= 1.01d0*T_floor .and. rhs_th(ix,iy,iz) < 0.0d0 ) )then
+             tsc = max( Th(ix,iy,iz), 0.05d0*tp3%Tini )
+             relmax = max( relmax, abs(rhs_th(ix,iy,iz))/tsc )
+          end if
+          if( .not.( Tl(ix,iy,iz) <= 1.01d0*T_floor .and. rhs_tl(ix,iy,iz) < 0.0d0 ) )then
+             tsc = max( Tl(ix,iy,iz), 0.05d0*tp3%Tini )
+             relmax = max( relmax, abs(rhs_tl(ix,iy,iz))/tsc )
+          end if
+          if( .not.( Ne(ix,iy,iz) <= 0.0d0 .and. rhs_ne(ix,iy,iz) < 0.0d0 ) ) &
+             relmax = max( relmax, abs(rhs_ne(ix,iy,iz))/max(Ne(ix,iy,iz),N_floor,1.0d-9*tp3%N0) )
+          if( .not.( Nh(ix,iy,iz) <= 0.0d0 .and. rhs_nh(ix,iy,iz) < 0.0d0 ) ) &
+             relmax = max( relmax, abs(rhs_nh(ix,iy,iz))/max(Nh(ix,iy,iz),N_floor,1.0d-9*tp3%N0) )
        end do
 !$omp end parallel do
 
