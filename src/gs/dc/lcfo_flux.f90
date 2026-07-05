@@ -171,6 +171,8 @@ contains
       else
         call diagnose_fragment_wannier_symmetry_representation(dc, center_bohr, owner_frag, num_wann_chk, &
           num_bands_chk, v_matrix, esp_file, nsym, symops, aa_global, ok_position)
+        call diagnose_global_wannier_pbc_operator_symmetry(dc, center_bohr, num_wann_chk, &
+          num_bands_chk, v_matrix, esp_file, nsym, symops, aa_global, ok_position)
         if(trim(dg_wannier_symmetry_gauge) == 'local_inversion_position') then
           call symmetrize_fragment_wannier_position_import(dc, center_bohr, owner_frag, num_wann_chk, &
             num_bands_chk, v_matrix, nsym, symops, aa_global)
@@ -1270,6 +1272,153 @@ contains
       deallocate(wann_index, phi_basis, coef_wf, psi_state, wannier_frag)
     end do
   end subroutine diagnose_fragment_wannier_symmetry_representation
+
+  subroutine diagnose_global_wannier_pbc_operator_symmetry(dc, center_bohr, num_wann, &
+      num_bands, v_matrix, esp_file, nsym, symops, aa_global, position_available)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: num_wann, num_bands, nsym
+    real(8), intent(in) :: center_bohr(3,num_wann), esp_file(:,:)
+    complex(8), intent(in) :: v_matrix(num_bands,num_wann)
+    complex(8), intent(in) :: aa_global(3,num_wann,num_wann)
+    logical, intent(in) :: position_available
+    type(t_wannier_symop), intent(in) :: symops(:)
+    integer :: isym, iw, jw, ib, axis, nocc
+    integer, allocatable :: perm(:)
+    real(8) :: origin_global(3), total_length(3), perm_max, perm_rms
+    real(8) :: h_norm2, h_res2, rho_norm2, rho_res2, z_norm2, z_res2
+    complex(8), allocatable :: hmat(:,:), rhomat(:,:), zmat(:,:)
+    complex(8) :: diff
+    logical :: perm_ok
+
+    if(nsym <= 0) return
+    call total_cell_lengths_import(dc, total_length)
+    allocate(perm(num_wann))
+    allocate(hmat(num_wann,num_wann), rhomat(num_wann,num_wann), zmat(num_wann,num_wann))
+
+    hmat = (0.0d0,0.0d0)
+    rhomat = (0.0d0,0.0d0)
+    nocc = min(num_bands, max(1, num_wann / 2))
+    do jw=1,num_wann
+      do iw=1,num_wann
+        hmat(iw,jw) = sum(conjg(v_matrix(1:num_bands,iw)) * &
+          cmplx(esp_file(1:num_bands,1), 0.0d0, kind=8) * v_matrix(1:num_bands,jw))
+        rhomat(iw,jw) = sum(conjg(v_matrix(1:nocc,iw)) * v_matrix(1:nocc,jw))
+      end do
+    end do
+
+    do isym=1,nsym
+      if(trim(symops(isym)%label) /= 'inversion') cycle
+      call fragment_symmetry_origin_global_import(dc, symops(isym)%owner_frag, symops(isym), origin_global)
+      call build_global_center_pbc_permutation_import(center_bohr, num_wann, total_length, &
+        origin_global, perm, perm_ok, perm_max, perm_rms)
+      write(*,'(1x,a,i0,2a,2(a,es12.5),a,l1,a,i0)') &
+        "[DC-LCFO-W90-SYM-GLOBAL] origin_frag=", symops(isym)%owner_frag, &
+        " label=", trim(symops(isym)%label), " perm_max=", perm_max, &
+        " perm_rms=", perm_rms, " perm_ok=", perm_ok, " ncenter=", num_wann
+      if(.not. perm_ok) cycle
+
+      h_norm2 = 0.0d0
+      h_res2 = 0.0d0
+      rho_norm2 = 0.0d0
+      rho_res2 = 0.0d0
+      do jw=1,num_wann
+        do iw=1,num_wann
+          diff = hmat(perm(iw),perm(jw)) - hmat(iw,jw)
+          h_res2 = h_res2 + abs(diff)**2
+          h_norm2 = h_norm2 + abs(hmat(iw,jw))**2
+          diff = rhomat(perm(iw),perm(jw)) - rhomat(iw,jw)
+          rho_res2 = rho_res2 + abs(diff)**2
+          rho_norm2 = rho_norm2 + abs(rhomat(iw,jw))**2
+        end do
+      end do
+
+      z_norm2 = 0.0d0
+      z_res2 = 0.0d0
+      if(position_available) then
+        do axis=1,3
+          zmat(1:num_wann,1:num_wann) = aa_global(axis,1:num_wann,1:num_wann)
+          do ib=1,num_wann
+            zmat(ib,ib) = zmat(ib,ib) - cmplx(origin_global(axis), 0.0d0, kind=8)
+          end do
+          do jw=1,num_wann
+            do iw=1,num_wann
+              diff = zmat(perm(iw),perm(jw)) + zmat(iw,jw)
+              z_res2 = z_res2 + abs(diff)**2
+              z_norm2 = z_norm2 + abs(zmat(iw,jw))**2
+            end do
+          end do
+        end do
+      end if
+
+      write(*,'(1x,a,i0,a,3(a,es12.5),a,i0)') &
+        "[DC-LCFO-W90-SYM-GLOBAL-OP] origin_frag=", symops(isym)%owner_frag, &
+        " label=inversion", " z_odd_res=", sqrt(z_res2 / max(z_norm2, 1.0d-300)), &
+        " h_even_res=", sqrt(h_res2 / max(h_norm2, 1.0d-300)), &
+        " rho_even_res=", sqrt(rho_res2 / max(rho_norm2, 1.0d-300)), " nocc=", nocc
+    end do
+
+    deallocate(perm, hmat, rhomat, zmat)
+  end subroutine diagnose_global_wannier_pbc_operator_symmetry
+
+  subroutine build_global_center_pbc_permutation_import(center_bohr, num_wann, total_length, &
+      origin_global, perm, ok, max_residual, rms_residual)
+    implicit none
+    integer, intent(in) :: num_wann
+    real(8), intent(in) :: center_bohr(3,num_wann), total_length(3), origin_global(3)
+    integer, intent(out) :: perm(num_wann)
+    logical, intent(out) :: ok
+    real(8), intent(out) :: max_residual, rms_residual
+    integer :: iw, jw, jbest, axis
+    integer, allocatable :: used(:)
+    real(8) :: mapped(3), delta(3), dist2, best_dist2
+    real(8), parameter :: center_match_tol = 1.0d-3
+
+    allocate(used(num_wann))
+    used = 0
+    perm = 0
+    ok = .true.
+    max_residual = 0.0d0
+    rms_residual = 0.0d0
+
+    do iw=1,num_wann
+      do axis=1,3
+        mapped(axis) = origin_global(axis) - periodic_delta_import(center_bohr(axis,iw) - origin_global(axis), &
+          total_length(axis))
+        if(total_length(axis) > 0.0d0) mapped(axis) = mapped(axis) - floor(mapped(axis) / total_length(axis)) &
+          * total_length(axis)
+      end do
+
+      best_dist2 = huge(1.0d0)
+      jbest = 0
+      do jw=1,num_wann
+        if(used(jw) /= 0) cycle
+        do axis=1,3
+          delta(axis) = periodic_delta_import(center_bohr(axis,jw) - mapped(axis), total_length(axis))
+        end do
+        dist2 = local_distance2(delta)
+        if(dist2 < best_dist2) then
+          best_dist2 = dist2
+          jbest = jw
+        end if
+      end do
+
+      if(jbest <= 0) then
+        ok = .false.
+      else
+        perm(iw) = jbest
+        used(jbest) = 1
+        max_residual = max(max_residual, sqrt(best_dist2))
+        rms_residual = rms_residual + best_dist2
+        if(sqrt(best_dist2) > center_match_tol) ok = .false.
+      end if
+    end do
+
+    rms_residual = sqrt(rms_residual / dble(max(1,num_wann)))
+    if(any(perm(1:num_wann) <= 0)) ok = .false.
+    deallocate(used)
+  end subroutine build_global_center_pbc_permutation_import
 
   subroutine symmetrize_fragment_wannier_position_import(dc, center_bohr, owner_frag, num_wann, &
       num_bands, v_matrix, nsym, symops, aa_global)
