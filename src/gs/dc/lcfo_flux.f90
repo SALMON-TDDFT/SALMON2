@@ -163,6 +163,7 @@ contains
       end do
       call rebalance_wannier_owner_fragments_import(dc, center_bohr, owner_frag, num_wann_chk)
       call detect_wannier_fragment_symops(dc, nsym, symops)
+      call diagnose_fragment_wannier_center_symmetry(dc, center_bohr, owner_frag, num_wann_chk, nsym, symops)
       if(allocated(symops)) deallocate(symops)
       call read_wannier90_global_rmn_gamma_block_import(dc, num_wann_chk, aa_global, ok_position)
       if(.not. ok_position) then
@@ -753,6 +754,110 @@ contains
       if(cell_length(axis) > 0.0d0) midpoint(axis) = midpoint(axis) - floor(midpoint(axis) / cell_length(axis)) * cell_length(axis)
     end do
   end subroutine periodic_pair_midpoint_import
+
+  subroutine diagnose_fragment_wannier_center_symmetry(dc, center_bohr, owner_frag, num_wann, nsym, symops)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: num_wann, owner_frag(num_wann), nsym
+    real(8), intent(in) :: center_bohr(3,num_wann)
+    type(t_wannier_symop), intent(in) :: symops(:)
+    integer :: isym, iw, jw, axis, ifrag, nowned, jbest
+    real(8), allocatable :: center_local(:,:)
+    real(8) :: cell_length(3), relative(3), mapped(3), delta(3)
+    real(8) :: dist2, best_dist2, max_residual, rms_residual
+    logical :: closed
+    real(8), parameter :: center_match_tol = 1.0d-3
+
+    if(nsym <= 0) return
+    allocate(center_local(3,num_wann))
+
+    do isym=1,nsym
+      ifrag = symops(isym)%owner_frag
+      if(ifrag <= 0) cycle
+      call fragment_cell_lengths_import(dc, ifrag, cell_length)
+      nowned = count(owner_frag(1:num_wann) == ifrag)
+      if(nowned <= 0) cycle
+
+      do iw=1,num_wann
+        if(owner_frag(iw) /= ifrag) cycle
+        call point_fragment_local_position_import(dc, ifrag, center_bohr(1:3,iw), center_local(1:3,iw))
+      end do
+
+      max_residual = 0.0d0
+      rms_residual = 0.0d0
+      closed = .true.
+      do iw=1,num_wann
+        if(owner_frag(iw) /= ifrag) cycle
+        relative(1:3) = center_local(1:3,iw) - symops(isym)%origin_bohr(1:3)
+        mapped(1:3) = symops(isym)%origin_bohr(1:3) + matmul_int_real(symops(isym)%rot, relative) &
+          + symops(isym)%tau_local(1:3)
+        call wrap_fragment_local_point(mapped, cell_length)
+
+        best_dist2 = huge(1d0)
+        jbest = 0
+        do jw=1,num_wann
+          if(owner_frag(jw) /= ifrag) cycle
+          do axis=1,3
+            delta(axis) = periodic_delta_import(center_local(axis,jw) - mapped(axis), cell_length(axis))
+          end do
+          dist2 = local_distance2(delta)
+          if(dist2 < best_dist2) then
+            best_dist2 = dist2
+            jbest = jw
+          end if
+        end do
+        if(jbest <= 0) then
+          closed = .false.
+        else
+          max_residual = max(max_residual, sqrt(best_dist2))
+          rms_residual = rms_residual + best_dist2
+          if(sqrt(best_dist2) > center_match_tol) closed = .false.
+        end if
+      end do
+      rms_residual = sqrt(rms_residual / dble(max(1,nowned)))
+      write(*,'(1x,a,i0,2a,2(a,es12.5),a,l1,a,i0)') &
+        "[DC-LCFO-W90-SYM] fragment=", ifrag, " center closure label=", &
+        trim(symops(isym)%label), " max=", max_residual, " rms=", rms_residual, &
+        " closed=", closed, " ncenter=", nowned
+    end do
+
+    deallocate(center_local)
+  end subroutine diagnose_fragment_wannier_center_symmetry
+
+  subroutine point_fragment_local_position_import(dc, ifrag, point_bohr, local_pos)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: ifrag
+    real(8), intent(in) :: point_bohr(3)
+    real(8), intent(out) :: local_pos(3)
+    integer :: axis, idx0
+    real(8) :: total_length, fragment_origin, cell_length(3)
+
+    call fragment_cell_lengths_import(dc, ifrag, cell_length)
+    do axis=1,3
+      idx0 = dc%ixyz_frag(axis,ifrag)
+      fragment_origin = dc%lg_tot%coordinate(idx0,axis)
+      total_length = dc%lg_tot%coordinate(dc%lg_tot%num(axis),axis) &
+        + (dc%lg_tot%coordinate(2,axis) - dc%lg_tot%coordinate(1,axis))
+      local_pos(axis) = periodic_delta_import(point_bohr(axis) - fragment_origin, total_length)
+      if(local_pos(axis) < 0.0d0) local_pos(axis) = local_pos(axis) + total_length
+      if(cell_length(axis) > 0.0d0) local_pos(axis) = local_pos(axis) - floor(local_pos(axis) / cell_length(axis)) * cell_length(axis)
+    end do
+  end subroutine point_fragment_local_position_import
+
+  subroutine wrap_fragment_local_point(point, cell_length)
+    implicit none
+    real(8), intent(inout) :: point(3)
+    real(8), intent(in) :: cell_length(3)
+    integer :: axis
+
+    do axis=1,3
+      if(cell_length(axis) <= 0.0d0) cycle
+      point(axis) = point(axis) - floor(point(axis) / cell_length(axis)) * cell_length(axis)
+    end do
+  end subroutine wrap_fragment_local_point
 
   function import_run_root_dir() result(root)
     use salmon_global, only: base_directory
