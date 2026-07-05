@@ -132,8 +132,9 @@ contains
     implicit none
     type(s_dcdft), intent(in) :: dc
     integer :: num_bands_chk, num_wann_chk, nstate_tot_file, nspin_file
-    integer :: iunit, iw, istate, nstate_seed, position_available
+    integer :: iunit, iw, istate, nstate_seed, position_available, nsym
     integer, allocatable :: owner_frag(:)
+    type(t_wannier_symop), allocatable :: symops(:)
     real(8), allocatable :: center_aa(:,:), center_bohr(:,:), spread_aa2(:), esp_file(:,:), eval_seed(:,:)
     complex(8), allocatable :: v_matrix(:,:), aa_global(:,:,:), seed_wannier_to_eigen(:,:)
     logical :: ok_position
@@ -161,6 +162,8 @@ contains
         owner_frag(iw) = find_owner_fragment_from_center_import(dc, center_bohr(1:3,iw))
       end do
       call rebalance_wannier_owner_fragments_import(dc, center_bohr, owner_frag, num_wann_chk)
+      call detect_wannier_fragment_symops(dc, nsym, symops)
+      if(allocated(symops)) deallocate(symops)
       call read_wannier90_global_rmn_gamma_block_import(dc, num_wann_chk, aa_global, ok_position)
       if(.not. ok_position) then
         allocate(aa_global(3,num_wann_chk,num_wann_chk))
@@ -515,6 +518,241 @@ contains
     if(length <= 0d0) return
     dout = delta - dnint(delta / length) * length
   end function periodic_delta_import
+
+  subroutine detect_wannier_fragment_symops(dc, nsym, symops)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(out) :: nsym
+    type(t_wannier_symop), allocatable, intent(out) :: symops(:)
+    integer :: ifrag, ia, ja, natom_frag
+    integer, allocatable :: atom_index(:)
+    real(8), allocatable :: atom_pos_local(:,:)
+    real(8) :: cell_length(3), origin(3), residual, best_residual, best_origin(3)
+    logical :: accepted, found_inversion
+
+    nsym = 0
+    if(dc%n_frag <= 0) then
+      allocate(symops(0))
+      return
+    end if
+
+    allocate(symops(2 * dc%n_frag))
+
+    do ifrag=1,dc%n_frag
+      call collect_fragment_core_atoms_import(dc, ifrag, atom_index, natom_frag)
+      call fragment_cell_lengths_import(dc, ifrag, cell_length)
+      allocate(atom_pos_local(3,max(1,natom_frag)))
+      do ia=1,natom_frag
+        call atom_fragment_local_position_import(dc, ifrag, atom_index(ia), atom_pos_local(1:3,ia))
+      end do
+
+      nsym = nsym + 1
+      symops(nsym)%owner_frag = ifrag
+      symops(nsym)%rot = 0
+      symops(nsym)%rot(1,1) = 1
+      symops(nsym)%rot(2,2) = 1
+      symops(nsym)%rot(3,3) = 1
+      call fragment_center_bohr_import(dc, ifrag, symops(nsym)%origin_bohr)
+      symops(nsym)%tau_local = 0.0d0
+      symops(nsym)%atom_residual = 0.0d0
+      symops(nsym)%label = 'identity'
+      write(*,'(1x,a,i0,2a,es12.5,a,i0)') &
+        "[DC-LCFO-W90-SYM] fragment=", ifrag, " detected symop label=", &
+        trim(symops(nsym)%label), symops(nsym)%atom_residual, " natom=", natom_frag
+
+      found_inversion = .false.
+      best_residual = huge(1d0)
+      best_origin = 0.0d0
+      do ia=1,natom_frag
+        do ja=ia,natom_frag
+          call periodic_pair_midpoint_import(atom_pos_local(1:3,ia), atom_pos_local(1:3,ja), &
+            cell_length, origin)
+          call test_fragment_inversion_import(dc, atom_index, atom_pos_local, natom_frag, &
+            cell_length, origin, accepted, residual)
+          if(accepted .and. residual < best_residual) then
+            found_inversion = .true.
+            best_residual = residual
+            best_origin = origin
+          end if
+        end do
+      end do
+
+      if(found_inversion) then
+        nsym = nsym + 1
+        symops(nsym)%owner_frag = ifrag
+        symops(nsym)%rot = 0
+        symops(nsym)%rot(1,1) = -1
+        symops(nsym)%rot(2,2) = -1
+        symops(nsym)%rot(3,3) = -1
+        symops(nsym)%origin_bohr = best_origin
+        symops(nsym)%tau_local = 0.0d0
+        symops(nsym)%atom_residual = best_residual
+        symops(nsym)%label = 'inversion'
+        write(*,'(1x,a,i0,2a,es12.5,a,3(1x,es12.5))') &
+          "[DC-LCFO-W90-SYM] fragment=", ifrag, " detected symop label=", &
+          trim(symops(nsym)%label), symops(nsym)%atom_residual, " origin=", best_origin(1:3)
+      end if
+
+      if(allocated(atom_index)) deallocate(atom_index)
+      if(allocated(atom_pos_local)) deallocate(atom_pos_local)
+    end do
+  end subroutine detect_wannier_fragment_symops
+
+  subroutine collect_fragment_core_atoms_import(dc, ifrag, atom_index, natom_frag)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: ifrag
+    integer, allocatable, intent(out) :: atom_index(:)
+    integer, intent(out) :: natom_frag
+    integer :: ia
+
+    natom_frag = 0
+    allocate(atom_index(max(1,dc%system_tot%nion)))
+    do ia=1,dc%system_tot%nion
+      if(atom_in_fragment_core_import(dc, ifrag, ia)) then
+        natom_frag = natom_frag + 1
+        atom_index(natom_frag) = ia
+      end if
+    end do
+  end subroutine collect_fragment_core_atoms_import
+
+  logical function atom_in_fragment_core_import(dc, ifrag, ia) result(in_core)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: ifrag, ia
+    integer :: axis, i, ig, idx0, nxyz_domain(3), ibest
+    real(8) :: r_atom, r_grid, dist, best_dist, length_axis, spacing_axis
+
+    in_core = .true.
+    call get_fragment_domain(dc, ifrag, nxyz_domain)
+    do axis=1,3
+      r_atom = dc%system_tot%rion(axis,ia)
+      length_axis = dc%lg_tot%coordinate(dc%lg_tot%num(axis),axis) &
+        + (dc%lg_tot%coordinate(2,axis) - dc%lg_tot%coordinate(1,axis))
+      spacing_axis = length_axis / dble(dc%lg_tot%num(axis))
+      idx0 = dc%ixyz_frag(axis,ifrag)
+      best_dist = huge(1d0)
+      ibest = 0
+      do i=1,nxyz_domain(axis)
+        ig = idx0 + i - 1
+        r_grid = dc%lg_tot%coordinate(ig,axis)
+        dist = abs(periodic_delta_import(r_grid - r_atom, length_axis))
+        if(dist < best_dist) then
+          best_dist = dist
+          ibest = i
+        end if
+      end do
+      if(ibest <= 0 .or. best_dist > 0.75d0 * spacing_axis) in_core = .false.
+    end do
+  end function atom_in_fragment_core_import
+
+  subroutine test_fragment_inversion_import(dc, atom_index, atom_pos_local, natom_frag, cell_length, origin, &
+      accepted, max_residual)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: natom_frag, atom_index(:)
+    real(8), intent(in) :: atom_pos_local(3,*)
+    real(8), intent(in) :: cell_length(3), origin(3)
+    logical, intent(out) :: accepted
+    real(8), intent(out) :: max_residual
+    integer :: ia, ja, axis, iatom, jatom
+    real(8) :: target(3), delta(3), dist2, best_dist2
+    real(8), parameter :: atom_match_tol2 = 1.0d-6
+
+    accepted = .false.
+    max_residual = huge(1d0)
+    if(natom_frag <= 0) return
+
+    max_residual = 0.0d0
+    do ia=1,natom_frag
+      iatom = atom_index(ia)
+      do axis=1,3
+        target(axis) = origin(axis) - periodic_delta_import(atom_pos_local(axis,ia) - origin(axis), cell_length(axis))
+      end do
+      best_dist2 = huge(1d0)
+      do ja=1,natom_frag
+        jatom = atom_index(ja)
+        if(dc%system_tot%kion(jatom) /= dc%system_tot%kion(iatom)) cycle
+        do axis=1,3
+          delta(axis) = periodic_delta_import(atom_pos_local(axis,ja) - target(axis), cell_length(axis))
+        end do
+        dist2 = local_distance2(delta)
+        best_dist2 = min(best_dist2, dist2)
+      end do
+      if(best_dist2 > atom_match_tol2) return
+      max_residual = max(max_residual, sqrt(best_dist2))
+    end do
+
+    accepted = .true.
+  end subroutine test_fragment_inversion_import
+
+  subroutine fragment_cell_lengths_import(dc, ifrag, cell_length)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: ifrag
+    real(8), intent(out) :: cell_length(3)
+    integer :: axis, nxyz_domain(3)
+    real(8) :: total_length
+
+    call get_fragment_domain(dc, ifrag, nxyz_domain)
+    do axis=1,3
+      total_length = dc%lg_tot%coordinate(dc%lg_tot%num(axis),axis) &
+        + (dc%lg_tot%coordinate(2,axis) - dc%lg_tot%coordinate(1,axis))
+      cell_length(axis) = total_length * dble(nxyz_domain(axis)) / dble(dc%lg_tot%num(axis))
+    end do
+  end subroutine fragment_cell_lengths_import
+
+  subroutine atom_fragment_local_position_import(dc, ifrag, ia, local_pos)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: ifrag, ia
+    real(8), intent(out) :: local_pos(3)
+    integer :: axis, idx0
+    real(8) :: total_length, fragment_origin
+
+    do axis=1,3
+      idx0 = dc%ixyz_frag(axis,ifrag)
+      fragment_origin = dc%lg_tot%coordinate(idx0,axis)
+      total_length = dc%lg_tot%coordinate(dc%lg_tot%num(axis),axis) &
+        + (dc%lg_tot%coordinate(2,axis) - dc%lg_tot%coordinate(1,axis))
+      local_pos(axis) = periodic_delta_import(dc%system_tot%rion(axis,ia) - fragment_origin, total_length)
+      if(local_pos(axis) < 0.0d0) local_pos(axis) = local_pos(axis) + total_length
+    end do
+  end subroutine atom_fragment_local_position_import
+
+  subroutine fragment_center_bohr_import(dc, ifrag, center_bohr)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: ifrag
+    real(8), intent(out) :: center_bohr(3)
+    integer :: axis, idx0, idx1, nxyz_domain(3)
+
+    call get_fragment_domain(dc, ifrag, nxyz_domain)
+    do axis=1,3
+      idx0 = dc%ixyz_frag(axis,ifrag)
+      idx1 = idx0 + nxyz_domain(axis) - 1
+      center_bohr(axis) = 0.5d0 * (dc%lg_tot%coordinate(idx0,axis) + dc%lg_tot%coordinate(idx1,axis))
+    end do
+  end subroutine fragment_center_bohr_import
+
+  subroutine periodic_pair_midpoint_import(ri, rj, cell_length, midpoint)
+    implicit none
+    real(8), intent(in) :: ri(3), rj(3), cell_length(3)
+    real(8), intent(out) :: midpoint(3)
+    integer :: axis
+
+    do axis=1,3
+      midpoint(axis) = ri(axis) + 0.5d0 * periodic_delta_import(rj(axis) - ri(axis), cell_length(axis))
+      if(cell_length(axis) > 0.0d0) midpoint(axis) = midpoint(axis) - floor(midpoint(axis) / cell_length(axis)) * cell_length(axis)
+    end do
+  end subroutine periodic_pair_midpoint_import
 
   function import_run_root_dir() result(root)
     use salmon_global, only: base_directory
