@@ -1195,7 +1195,7 @@ contains
     basis_update_threshold = 0.1d0  ! 0.1 a.u. (~2.7 eV)
     yn_dg_fragment_from_dcdft = 'n'
     yn_dg_lcfo_seed_exhaustive_check = 'n'
-    yn_dg_full_h_eigen_seed = 'n'
+    yn_dg_full_h_eigen_seed = 'y'
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()

@@ -315,6 +315,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   logical :: trace_dg_current
   logical :: did_validate_seed
   logical :: refreshed_bpw_scf_seed
+  logical :: used_full_h_eigen_seed
   logical :: print_rt_step
   logical :: write_energy_step
   character(len=16) :: env_value
@@ -325,6 +326,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   real(8) :: current_abs
   real(8) :: current_time
   real(8) :: rho_rebuild_diff, vh_rebuild_diff, vxc_rebuild_diff
+  real(8) :: full_h_seed_hres
   real(8), allocatable :: rho_before_rebuild(:,:,:)
   real(8), allocatable :: vh_before_rebuild(:,:,:)
   real(8), allocatable :: vxc_before_rebuild(:,:,:)
@@ -397,6 +399,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   Ac_zero(:) = 0.0d0
   did_validate_seed = .false.
   refreshed_bpw_scf_seed = .false.
+  used_full_h_eigen_seed = .false.
   if (yn_spinorbit /= 'y') then
     call update_density_and_hamiltonian_std(dg_frag, system, info, rt, 0, Ac_zero, &
          lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
@@ -481,9 +484,22 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
             call diagonalize_current_dg_full_h_seed_std(dg_frag, &
               '[DG-FULL-H-SEED] diagonalized full DG Hamiltonian for initial seed;')
           end if
+          used_full_h_eigen_seed = .true.
           if (trace_dcdft_seed_diagnostics .and. .not. dg_frag%use_plane_wave_basis) then
+            full_h_seed_hres = -1.0d0
             call diagnose_dcdft_lcfo_seed_stationarity_std(dg_frag, system, mg, ppg, Ac_zero, &
-                                                           '[DG-FULL-H-SEED-HRES]')
+                                                           '[DG-FULL-H-SEED-HRES]', full_h_seed_hres)
+            if (full_h_seed_hres > 1.0d-8) then
+              if (comm_is_root(dg_frag%id)) then
+                write(*,'(1x,a,1pe13.5)') &
+                  '[FATAL] Full DG Hamiltonian eigen seed failed the stationarity gate: HRES=', &
+                  full_h_seed_hres
+                write(*,'(1x,a)') &
+                  '[FATAL] Stop before RT because a non-eigen initial state can create nonphysical dynamics.'
+                flush(6)
+              end if
+              stop 'DG-Fragment RT: full DG Hamiltonian eigen seed is not stationary'
+            end if
           end if
         end if
         if (yn_dg_full_h_eigen_seed /= 'y') then
@@ -564,7 +580,11 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
       did_validate_seed = .true.
       if (comm_is_root(dg_frag%id)) then
         write(*,'(1x,a)') '[DG-DCDFT-SEED] DGDFT/LCFO coefficients are kept rank-distributed on fragment-core rows'
-        write(*,'(1x,a)') '[DG-DCDFT-SEED] full-state dense C^H H C / C^H S C diagonalization is skipped'
+        if (used_full_h_eigen_seed) then
+          write(*,'(1x,a)') '[DG-DCDFT-SEED] full DG Hamiltonian dense diagonalization was used for RT seed'
+        else
+          write(*,'(1x,a)') '[DG-DCDFT-SEED] full-state dense C^H H C / C^H S C diagonalization is skipped'
+        end if
         write(*,'(1x,a)') &
           '[DG-DCDFT-SEED] DC-exported core-S-cleaned fragment basis is kept unchanged for RT'
         write(*,'(1x,a)') &
@@ -580,6 +600,9 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
         if (refreshed_bpw_scf_seed) then
           write(*,'(1x,a)') &
             '[DG-DCDFT-SEED] RT starts from BPW states diagonalized with the initial self-consistent DG Hamiltonian'
+        else if (used_full_h_eigen_seed) then
+          write(*,'(1x,a)') &
+            '[DG-DCDFT-SEED] RT starts from full DG Hamiltonian eigenstates'
         else
           write(*,'(1x,a)') '[DG-DCDFT-SEED] RT starts directly from the DGDFT/LCFO coefficient seed'
         end if

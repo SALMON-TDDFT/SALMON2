@@ -1378,7 +1378,7 @@ contains
     deallocate(wcoef, hcoef, hw_local, hw, evec, eval)
   end subroutine refresh_global_wannier_flux_eigen_from_current_hamiltonian
 
-  subroutine diagnose_dcdft_lcfo_seed_stationarity(dg_frag, system, mg, ppg, Ac_tot, label)
+  subroutine diagnose_dcdft_lcfo_seed_stationarity(dg_frag, system, mg, ppg, Ac_tot, label, max_rel_res_out)
     use structures
     use communication, only: comm_summation, comm_is_root
     implicit none
@@ -1388,6 +1388,7 @@ contains
     type(s_pp_grid), intent(in) :: ppg
     real(8), intent(in) :: Ac_tot(3)
     character(*), intent(in), optional :: label
+    real(8), intent(out), optional :: max_rel_res_out
 
     integer, parameter :: max_probe = 512
     integer :: ispin, nocc, nprobe, iprobe, istate, irow, local_idx
@@ -1523,6 +1524,7 @@ contains
         ' Ac=', Ac_tot
       flush(6)
     end if
+    if (present(max_rel_res_out)) max_rel_res_out = max_rel_res
 
     if (allocated(coef_probe)) deallocate(coef_probe)
     if (allocated(coef_needed)) deallocate(coef_needed)
