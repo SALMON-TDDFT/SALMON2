@@ -1543,10 +1543,6 @@ contains
       integer(c_size_t) :: np
 #endif
 
-      if(pp%flag_nlcc)then
-        stop "libxc for spin-polarised systems with nlcc is currently not implemented."
-      end if
-
       do iz=1,nz
       do iy=1,ny
       do ix=1,nx
@@ -1555,6 +1551,16 @@ contains
          gvxc_tmp_1d=0.d0
          rho_1d(1) = rho_s(ix,iy,iz,1)
          rho_1d(2) = rho_s(ix,iy,iz,2)
+         ! Non-linear core correction: add half of the (spin-independent) core
+         ! charge to each spin channel, mirroring the unpolarized path
+         ! (exec_libxc), where rho_nlcc is added to the density at the libxc
+         ! call point. NOTE: as in the unpolarized path, sigma is built from
+         ! the valence-density gradient only; the core-charge gradient is not
+         ! included (pre-existing convention/limitation of exec_libxc).
+         if (present(rho_nlcc)) then
+            rho_1d(1) = rho_1d(1) + 0.5d0*rho_nlcc(ix,iy,iz)
+            rho_1d(2) = rho_1d(2) + 0.5d0*rho_nlcc(ix,iy,iz)
+         end if
          if (xc%use_gradient) then
            sigma_1d(1) = grho_s(ix,iy,iz,1,1)**2+grho_s(ix,iy,iz,1,2)**2+grho_s(ix,iy,iz,1,3)**2
            sigma_1d(2) = grho_s(ix,iy,iz,1,1)*grho_s(ix,iy,iz,2,1) &
@@ -1593,14 +1599,16 @@ contains
 #endif
 
          case(XC_FAMILY_LDA)
+           ! np (integer(c_size_t) for libxc >= 5) instead of a literal 1:
+           ! an integer(4) literal mismatches the libxc >= 5 interface
            call xc_f90_lda_exc_vxc( &
-             & xc%func(ii), 1, rho_1d(1), &
+             & xc%func(ii), np, rho_1d(1), &
              & exc_tmp_1d(1), vxc_tmp_1d(1) &
              & )
 
          case(XC_FAMILY_GGA)
            call xc_f90_gga_exc_vxc( &
-             & xc%func(ii), 1, rho_1d(1), sigma_1d(1), &
+             & xc%func(ii), np, rho_1d(1), sigma_1d(1), &
              & exc_tmp_1d(1), vxc_tmp_1d(1), gvxc_tmp_1d(1) &
              & )
 
@@ -1613,7 +1621,9 @@ contains
          end select
 
          if (present(eexc)) then
-           eexc(ix,iy,iz)=eexc(ix,iy,iz)+exc_tmp_1d(1)*(rho_1d(1)+rho_1d(2))
+           ! energy density weighted by the VALENCE density (rho_s, without
+           ! rho_nlcc), mirroring the unpolarized path: eexc = exc * rho
+           eexc(ix,iy,iz)=eexc(ix,iy,iz)+exc_tmp_1d(1)*(rho_s(ix,iy,iz,1)+rho_s(ix,iy,iz,2))
          endif
          if (present(vxc_s)) then
            vxc_s(ix,iy,iz,1)=vxc_s(ix,iy,iz,1)+vxc_tmp_1d(1)
