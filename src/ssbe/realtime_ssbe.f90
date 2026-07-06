@@ -56,6 +56,17 @@ subroutine main_realtime_ssbe(icomm)
     call init_sbe_bloch_solver(sbe, gs, nb_sbe_eff, icomm)
     sbe%flag_vnl_correction = (yn_vnl_correction == 'y')
 
+    ! One-time diagnostic (flag-on only: the flag-off stdout is byte-unchanged):
+    ! the window f-sum deficiency tensor D applied as J(t) -= D*A(t).
+    if (yn_sbe_gs_current_subtract == 'y' .and. irank == 0) then
+        write(*, '(a)') "# yn_sbe_gs_current_subtract: window f-sum deficiency tensor D [a.u.]"
+        do i = 1, 3
+            write(*, '(a,3es24.15e3)') "#   D(i,1:3) = ", sbe%fsum_D(i, 1:3)
+        end do
+        write(*, '(a,es14.6,a)') "#   (frozen-window limit Ne/V = ", &
+            & dble(nelec_eff) / gs%volume, ")"
+    end if
+
     if (trim(gauge_sbe) == "length_gauge") then
         ! Prepare qnm
         call prepare_qnm(sbe, gs, icomm)

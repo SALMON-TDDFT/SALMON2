@@ -154,7 +154,7 @@ function check_input_variables_sbe() result(flag)
         call raise("ERROR! 'yn_sbe_gs_current_subtract' must be 'y' or 'n'!")
     end select
     if (yn_sbe_gs_current_subtract == 'y' .and. trim(gauge_sbe) == "length_gauge") then
-        ! WARN, not error: the frozen-GS subtraction acts only on the
+        ! WARN, not error: the f-sum-deficiency subtraction acts only on the
         ! velocity-gauge current readout (calc_current_bloch); the length-gauge
         ! current has no A(t)-proportional truncation artifact to subtract, so
         ! the flag is a silent no-op there.  Follow the nband_sbe_min style:
@@ -162,6 +162,20 @@ function check_input_variables_sbe() result(flag)
         if (comm_is_root(nproc_id_global)) then
             write(*, '(a)') "WARNING: 'yn_sbe_gs_current_subtract'='y' has no effect for " // &
                 & "gauge_sbe='length_gauge' (velocity-gauge current readout only)."
+        end if
+    end if
+    if (yn_sbe_gs_current_subtract == 'y' .and. norder_correction >= 1) then
+        ! WARN, not error: the deficiency tensor D is derived against the
+        ! norder_correction=0 readout (the production default).  At norder>=1
+        ! the core's own A-linear velocity-operator correction supplies (at
+        ! rho ~ rho0) a bare-p, 1d-3-floored variant of the captured-window
+        ! paramagnetic term that D is built against, so combining both changes
+        ! the A-linear readout beyond the derived correction.  Tell the user;
+        ! do not fail.
+        if (comm_is_root(nproc_id_global)) then
+            write(*, '(a)') "WARNING: 'yn_sbe_gs_current_subtract'='y' is derived for " // &
+                & "'norder_correction'=0; with norder_correction>=1 the readout's own " // &
+                & "A-linear correction overlaps the subtracted D*A(t) term."
         end if
     end if
 

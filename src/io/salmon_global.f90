@@ -456,12 +456,18 @@ character(256),allocatable :: atom_name(:)
                                         ! 1..nband_sbe_min-1 are frozen as inert
                                         ! fully-occupied (default 1 = full window)
   character(1)   :: yn_sbe_gs_current_subtract  ! 'y': velocity-gauge current readout
-                                        ! J(t) = Tr[rho(t) v(k+A)] - Tr[rho0 v(k+A)]
-                                        ! (rho0 = frozen ground-state occupations);
-                                        ! removes the basis-truncation pseudo-linear
-                                        ! current ~A(t) (broken f-sum rule at finite
-                                        ! nstate_sbe).  Exactly zero for A=0, so
+                                        ! J(t) -= D * A(t), where D is the window
+                                        ! f-sum-rule DEFICIENCY tensor of the
+                                        ! truncated basis (built once at solver init
+                                        ! from the GS p matrix elements and
+                                        ! eigenvalues; build_fsum_deficiency_tensor).
+                                        ! Removes only the linear response the
+                                        ! finite-nstate_sbe window cannot supply:
+                                        ! complete basis => D -> 0; A=0 => no-op, so
                                         ! post-pulse observables are unchanged.
+                                        ! (v2; the v1 frozen-GS subtraction removed
+                                        ! the full diamagnetic A*Ne/V current and
+                                        ! overcorrected -- see calc_current_bloch.)
                                         ! Default 'n' = legacy readout.
 
   !! &dc

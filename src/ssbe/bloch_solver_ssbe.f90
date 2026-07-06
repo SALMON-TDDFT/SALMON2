@@ -14,6 +14,13 @@ module bloch_solver_ssbe
         integer :: ik_max, ik_min
         complex(8), allocatable :: rho(:, :, :)
         logical :: flag_vnl_correction
+        ! Window f-sum-rule deficiency tensor D_ij of the truncated band basis
+        ! (yn_sbe_gs_current_subtract='y'; see build_fsum_deficiency_tensor and
+        ! the calc_current_bloch header for the derivation).  Built ONCE per
+        ! solver at init; the velocity-gauge readout then applies
+        ! J(t) -= matmul(fsum_D, A(t)) -- per-step cost is one 3x3 matvec.
+        real(8) :: fsum_D(1:3, 1:3) = 0d0
+        logical :: fsum_D_built = .false.
         complex(8), allocatable :: qnm(:, :, :)
         complex(8), allocatable :: grad_qnm(:, :, :, :)
         complex(8), allocatable :: qnm_new(:, :, :)
@@ -180,6 +187,7 @@ contains
 subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     use util_ssbe
     use communication
+    use salmon_global, only: yn_sbe_gs_current_subtract, yn_vnl_correction
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info), intent(in) :: gs
@@ -209,34 +217,57 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     end do
 
     sbe%flag_vnl_correction = .false.
+
+    ! Window f-sum-rule deficiency tensor (yn_sbe_gs_current_subtract='y'):
+    ! built once here, applied per step by calc_current_bloch.  Reset FIRST
+    ! unconditionally (codex review): a REUSED solver object must not carry a
+    ! stale flag-on tensor from an earlier init into a flag-off -> flag-on
+    ! toggle, where it would pass the fail-closed readout check.  The vnl choice
+    ! is taken from the SAME global every production caller assigns to
+    ! flag_vnl_correction right after this init (realtime_ssbe / multiscale_ssbe
+    ! both set it to yn_vnl_correction=='y'); a caller that diverges from that
+    ! convention must rebuild via build_fsum_deficiency_tensor explicitly.
+    sbe%fsum_D(:, :) = 0d0
+    sbe%fsum_D_built = .false.
+    if (yn_sbe_gs_current_subtract == 'y') then
+        call build_fsum_deficiency_tensor(sbe, gs, yn_vnl_correction == 'y')
+    end if
 end subroutine
 
 
 !===================================================================
 ! Velocity-gauge current readout.  Default (yn_sbe_gs_current_subtract='n'):
 ! the legacy evaluation J = Tr[rho(t) v(k+A)] (calc_current_bloch_core,
-! byte-identical code path).  With 'y', the frozen-ground-state current is
-! subtracted:
+! byte-identical code path).  With 'y', the WINDOW F-SUM-RULE DEFICIENCY
+! current is subtracted:
 !
-!   J(t) = Tr[rho(t) v(k+A(t))] - Tr[rho0 v(k+A(t))]
+!   J(t) -= D * A(t)          (3x3 tensor D = sbe%fsum_D, built once at init)
 !
-! rho0 = diag(gs%occup) is the initial (frozen) density matrix, exactly as set
-! by init_sbe_bloch_solver.  Truncating the basis at nstate_sbe breaks the
-! f-sum rule, so the propagated rho cannot build the full paramagnetic
-! counter-term to the diamagnetic A(t)*Ne readout term: a spurious current
-! proportional to A(t) survives (a filled-band insulator in a COMPLETE basis
-! carries none).  Evaluating the SAME velocity operator on the frozen rho0
-! reproduces exactly that truncation-induced pseudo-linear current (standard
-! practice in the upstream SSBE literature), so the difference keeps the
-! nonlinear response intact; for A=0 (post-pulse) the subtrahend vanishes on a
-! time-reversal-symmetric k-grid and the observables are unchanged.
+! WHY (v2; replaces the v1 frozen-GS subtraction of commit cda60ee4):
+! Truncating the basis at nstate_sbe breaks the f-sum rule: the propagated rho
+! can only build the paramagnetic counter-term to the diamagnetic A(t)*Ne
+! readout term from occupied->WINDOW transitions, so a pseudo-linear current
+! D*A(t) survives, where D is exactly the part of the f-sum rule the window
+! CANNOT capture (a filled-band insulator in a complete basis carries no
+! A-linear current).  The v1 remedy subtracted the whole frozen-GS current
+! Tr[rho0 v(k+A)] = A*Ne/V (at norder=0 on a TR-symmetric grid the
+! paramagnetic trace Tr[rho0 p] vanishes identically), i.e. it removed the
+! FULL diamagnetic term -- including the part that the retained window
+! response legitimately cancels dynamically.  Measured on Si@nb=32 VG
+! (JID49460686): J_v1 - J_legacy = -(Ne/V)*A = -0.0296284*A to 6 digits,
+! and peak |Jz| moved AWAY from the LG oracle (2.0517e-4 -> 9.4142e-4).
+! v2 subtracts only the response the window is MISSING (see
+! build_fsum_deficiency_tensor for the derivation and normalization):
+! complete window => D -> 0 (nothing subtracted); empty conduction window =>
+! D -> (Ne/V)*delta_ij (the v1 limit, then correct).  D*A vanishes for A=0,
+! so post-pulse observables are unchanged, and D is A-independent, so the
+! nonlinear response is untouched.
 !
-! The subtrahend is computed BY THE SAME ROUTINE (core) on rho0, so every
-! definition of v is shared automatically: the bare p_tm term, the A*trace
-! diamagnetic term, yn_vnl_correction (flag copied from the live solver), and
-! all norder_correction>=1 A-dependent corrections.  rho0 depends on A only
-! through v(k+A), hence it is rebuilt and evaluated at every call -- one
-! extra current evaluation per step (cheap next to the propagation ZGEMMs).
+! Scope: derived for the norder_correction=0 readout (the production default).
+! At norder_correction>=1 the core's own A-linear velocity-operator correction
+! (which at rho ~ rho0 supplies a bare-p, 1d-3-floored variant of the
+! captured-window response -S*A) overlaps with the response D is built
+! against; the checker WARNs on that combination.
 !===================================================================
 subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
     use salmon_global, only: yn_sbe_gs_current_subtract
@@ -246,34 +277,118 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
     real(8), intent(in) :: Ac(1:3)
     real(8), intent(out) :: jmat(1:3)
     integer, intent(in) :: icomm
-    type(s_sbe_bloch_solver) :: sbe0
-    real(8) :: jmat0(1:3)
-    integer :: ik, ib
 
     call calc_current_bloch_core(sbe, gs, Ac, jmat, icomm)
 
     if (yn_sbe_gs_current_subtract == 'y') then
-        ! frozen ground-state solver view: same shape / k-slice / vnl flag as
-        ! the live solver, rho0 = diag(occup) exactly as init_sbe_bloch_solver.
-        ! Local variable => the allocatable rho is auto-deallocated on return.
-        sbe0%nk = sbe%nk
-        sbe0%nb = sbe%nb
-        sbe0%ik_min = sbe%ik_min
-        sbe0%ik_max = sbe%ik_max
-        sbe0%flag_vnl_correction = sbe%flag_vnl_correction
-        allocate(sbe0%rho(1:sbe%nb, 1:sbe%nb, sbe%ik_min:sbe%ik_max))
-        sbe0%rho(:, :, :) = 0d0
-        do ik = sbe%ik_min, sbe%ik_max
-            do ib = 1, sbe%nb
-                sbe0%rho(ib, ib, ik) = gs%occup(ib, ik)
-            end do
-        end do
-        call calc_current_bloch_core(sbe0, gs, Ac, jmat0, icomm)
-        jmat(:) = jmat(:) - jmat0(:)
+        ! Fail-closed: the deficiency tensor is built by init_sbe_bloch_solver
+        ! (or explicitly by build_fsum_deficiency_tensor); a solver that
+        ! reaches the readout without it is a wiring bug, not a soft default.
+        if (.not. sbe%fsum_D_built) then
+            write(*, '(a)') "ERROR(calc_current_bloch): yn_sbe_gs_current_subtract='y' " // &
+                & "but the f-sum deficiency tensor has not been built for this solver " // &
+                & "(init_sbe_bloch_solver / build_fsum_deficiency_tensor)."
+            error stop
+        end if
+        jmat(1:3) = jmat(1:3) - matmul(sbe%fsum_D(1:3, 1:3), Ac(1:3))
     end if
 
     return
 end subroutine calc_current_bloch
+
+
+!===================================================================
+! Build the window f-sum-rule deficiency tensor D (sbe%fsum_D) from the GS
+! data -- called once per solver (setup time), zero per-step cost.
+!
+! MODEL: the VG-SBE propagates  i drho/dt = [H, rho],  H_k(t) = diag(eps_k)
+! + A(t).pi_k  with pi = p_tm (+ rvnl_tm iff flag_vnl), and reads out
+!   J(t) = ( <Tr[rho pi]>_k + A(t) <Tr[rho]>_k ) / V,
+! where <X>_k = sum_k w_k X_k / sum_k w_k (calc_current_bloch_core, norder=0).
+!
+! DERIVATION: first-order response of rho to dH = A.pi (adiabatic limit of
+! the VG Kubo kernel; equal to static perturbation theory of the shifted
+! Fermi sea):  rho1_ab = (f_b - f_a) (A.pi)_ab / (eps_b - eps_a),  a /= b,
+! with f = gs%occup.  The A-linear part of the readout is then
+!
+!   J_lin,i = D_ij A_j,
+!   D_ij = ( Ne delta_ij
+!            - < sum_{v: f_v>0} f_v sum_{m: f_m=0}
+!                2 Re[ pi^i_vm pi^j_mv ] / (eps_m - eps_v) >_k ) / V
+!
+! NORMALIZATION / SPIN CONVENTION: f = gs%occup is the ssbe spinless
+! convention (occup = 2 per filled band, set by init_sbe_gs_info), and
+! Ne = <sum_b f_b>_k = Tr[rho0] -- the same trace the diamagnetic readout
+! term A*calc_trace() carries (the SBE propagation conserves the trace).
+! With the occupation factor f_v kept EXPLICIT under the sum, the
+! Thomas-Reiche-Kuhn sum rule per band,
+!   sum_{m/=v} 2 Re[ p^i_vm p^j_mv ] / (eps_m - eps_v) = delta_ij
+! (one electron; spin enters only through f_v), gives in a COMPLETE basis
+!   < sum_v f_v delta_ij >_k = Ne delta_ij   =>   D -> 0 identically.
+! Occupied<->occupied pairs are excluded: they carry (f_v - f_m) = 0 in the
+! response (ssbe occupations are exactly 0 or 2 by construction), and in the
+! TRK rearrangement they cancel pairwise (numerator symmetric, denominator
+! antisymmetric under v<->m) -- restricting m to the unoccupied window also
+! keeps degenerate occupied pairs (eps_m - eps_v -> 0) out of the sum by
+! construction.  Occupied x unoccupied near-degeneracies (Fermi-crossing,
+! metals) are guarded by the theta_off floor: the adiabatic response of such
+! a pair is not perturbative, so it is dropped rather than amplified.
+!
+! On a time-reversal-symmetric k-grid D is a symmetric real tensor
+! (pi(-k) = -conjg(pi(k)) makes each pair's contribution real and i<->j
+! symmetric after the k-sum); the full 3x3 is computed without assuming it.
+!
+! The gs%* arrays are replicated on every rank (comm_bcast in
+! init_sbe_gs_info), so the FULL k-sum is evaluated redundantly on each rank:
+! bit-identical D everywhere, no communication.
+!===================================================================
+subroutine build_fsum_deficiency_tensor(sbe, gs, flag_vnl)
+    use degenerate_block_ssbe, only: theta_off
+    implicit none
+    type(s_sbe_bloch_solver), intent(inout) :: sbe
+    type(s_sbe_gs_info), intent(in) :: gs
+    logical, intent(in) :: flag_vnl
+    integer :: ik, iv, im, i, j
+    real(8) :: s(1:3, 1:3), fv, de, w, wsum, ne_w
+    complex(8) :: pvm(1:3), pmv(1:3)
+    real(8), parameter :: occ_eps = 1d-12
+
+    s(:, :) = 0d0
+    ne_w = 0d0
+    do ik = 1, gs%nk
+        w = gs%kweight(ik)
+        do iv = 1, sbe%nb
+            fv = gs%occup(iv, ik)
+            ne_w = ne_w + w * fv
+            if (fv <= occ_eps) cycle
+            do im = 1, sbe%nb
+                if (gs%occup(im, ik) > occ_eps) cycle   ! occupied<->occupied: no net response
+                de = gs%eigen(im, ik) - gs%eigen(iv, ik)
+                if (abs(de) < theta_off) cycle          ! Fermi-crossing near-degeneracy guard
+                pvm(1:3) = gs%p_tm_matrix(iv, im, 1:3, ik)
+                pmv(1:3) = gs%p_tm_matrix(im, iv, 1:3, ik)
+                if (flag_vnl) then
+                    ! same velocity operator as the propagation + readout
+                    pvm(1:3) = pvm(1:3) + gs%rvnl_tm_matrix(iv, im, 1:3, ik)
+                    pmv(1:3) = pmv(1:3) + gs%rvnl_tm_matrix(im, iv, 1:3, ik)
+                end if
+                do j = 1, 3
+                    do i = 1, 3
+                        s(i, j) = s(i, j) + w * fv * 2d0 * dble(pvm(i) * pmv(j)) / de
+                    end do
+                end do
+            end do
+        end do
+    end do
+
+    wsum = sum(gs%kweight(:))
+    sbe%fsum_D(:, :) = -s(:, :) / wsum
+    do i = 1, 3
+        sbe%fsum_D(i, i) = sbe%fsum_D(i, i) + ne_w / wsum
+    end do
+    sbe%fsum_D(:, :) = sbe%fsum_D(:, :) / gs%volume
+    sbe%fsum_D_built = .true.
+end subroutine build_fsum_deficiency_tensor
 
 
 ! Single-density current evaluation (the pre-subtraction legacy body, moved
