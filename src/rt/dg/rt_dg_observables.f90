@@ -540,7 +540,7 @@
             if (enable_pz_total_hook) then
               dg_frag%mixed_z_perf_pz_writeback_calls = dg_frag%mixed_z_perf_pz_writeback_calls + 1_8
               if (.not. enable_perf_count) then
-                write(*,'(1x,a,1(a,i0),18(a,1pe12.4),6(a,l1),2(a,a))') &
+                write(*,'(1x,a,1(a,i0),18(a,1pe23.15),6(a,l1),2(a,a))') &
                   '[DG-MIXEDZ-LOCAL-PZ-TOTAL-PATH-CMP]', &
                   ' step=', itt, &
                   ' Pz_before=', pz_prod_raw_before, &

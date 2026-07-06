@@ -328,6 +328,9 @@ contains
       & dg_mixed_z_local_prop_backend, &
       & dg_mixed_z_frag_local_field_block, &
       & dg_mixed_z_direct_origin, &
+      & dg_mixed_z_ww_position_branch, &
+      & dg_mixed_z_wp_position_branch, &
+      & dg_mixed_z_pp_position_branch, &
       & dg_mixed_z_polarization_branch, &
       & yn_dg_mixed_z_local_rho_writeback_wwonly, &
       & yn_dg_mixed_z_local_pz_writeback_total, &
@@ -834,7 +837,10 @@ contains
     yn_dg_mixed_z_local_prop_writeback = 'n'
     dg_mixed_z_local_prop_backend = 'global_mixed_split_backend'
     dg_mixed_z_frag_local_field_block = 'all'
-    dg_mixed_z_direct_origin = 'global'
+    dg_mixed_z_direct_origin = 'fragment'
+    dg_mixed_z_ww_position_branch = 'center_eig'
+    dg_mixed_z_wp_position_branch = 'zero'
+    dg_mixed_z_pp_position_branch = 'zero'
     dg_mixed_z_polarization_branch = 'aa_r'
     yn_dg_mixed_z_local_rho_writeback_wwonly = 'n'
     yn_dg_mixed_z_local_pz_writeback_total = 'n'
@@ -1290,6 +1296,9 @@ contains
     call string_lowercase(dg_mixed_z_local_prop_backend)
     call string_lowercase(dg_mixed_z_frag_local_field_block)
     call string_lowercase(dg_mixed_z_direct_origin)
+    call string_lowercase(dg_mixed_z_ww_position_branch)
+    call string_lowercase(dg_mixed_z_wp_position_branch)
+    call string_lowercase(dg_mixed_z_pp_position_branch)
     call string_lowercase(dg_mixed_z_polarization_branch)
     call string_lowercase(propagator)
     call string_lowercase(method_init_wf)
@@ -1459,6 +1468,9 @@ contains
     call comm_bcast(dg_mixed_z_local_prop_backend,nproc_group_global)
     call comm_bcast(dg_mixed_z_frag_local_field_block,nproc_group_global)
     call comm_bcast(dg_mixed_z_direct_origin,nproc_group_global)
+    call comm_bcast(dg_mixed_z_ww_position_branch,nproc_group_global)
+    call comm_bcast(dg_mixed_z_wp_position_branch,nproc_group_global)
+    call comm_bcast(dg_mixed_z_pp_position_branch,nproc_group_global)
     call comm_bcast(dg_mixed_z_polarization_branch,nproc_group_global)
     call comm_bcast(yn_dg_mixed_z_local_rho_writeback_wwonly,nproc_group_global)
     call comm_bcast(yn_dg_mixed_z_local_pz_writeback_total,nproc_group_global)
@@ -2443,6 +2455,12 @@ contains
         trim(dg_mixed_z_frag_local_field_block)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_direct_origin', &
         trim(dg_mixed_z_direct_origin)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_ww_position_branch', &
+        trim(dg_mixed_z_ww_position_branch)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_wp_position_branch', &
+        trim(dg_mixed_z_wp_position_branch)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_pp_position_branch', &
+        trim(dg_mixed_z_pp_position_branch)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_polarization_branch', &
         trim(dg_mixed_z_polarization_branch)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z_local_rho_writeback_wwonly', &
@@ -3079,10 +3097,25 @@ contains
     case default
       stop "dg_mixed_z_direct_origin must be global or fragment"
     end select
-    select case(trim(dg_mixed_z_polarization_branch))
-    case('aa_r', 'center_diag')
+    select case(trim(dg_mixed_z_ww_position_branch))
+    case('aa_r', 'center_eig')
     case default
-      stop "dg_mixed_z_polarization_branch must be aa_r or center_diag"
+      stop "dg_mixed_z_ww_position_branch must be aa_r or center_eig"
+    end select
+    select case(trim(dg_mixed_z_wp_position_branch))
+    case('aa_r', 'zero')
+    case default
+      stop "dg_mixed_z_wp_position_branch must be aa_r or zero"
+    end select
+    select case(trim(dg_mixed_z_pp_position_branch))
+    case('zero', 'cell_sawtooth')
+    case default
+      stop "dg_mixed_z_pp_position_branch must be zero or cell_sawtooth"
+    end select
+    select case(trim(dg_mixed_z_polarization_branch))
+    case('aa_r', 'center_diag', 'center_eig')
+    case default
+      stop "dg_mixed_z_polarization_branch must be aa_r, center_diag, or center_eig"
     end select
     select case(trim(dg_wannier_symmetry_gauge))
     case('none', 'diagnose', 'local_inversion_position')

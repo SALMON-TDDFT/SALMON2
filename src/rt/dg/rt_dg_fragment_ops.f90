@@ -4867,15 +4867,18 @@ contains
     real(8) :: ww_pair_count_total, ww_pair_count_diag, ww_pair_count_offdiag, ww_pair_count_cross_owner
     real(8) :: occ_local, occ_sum, w_occ_local, w_occ_sum
     real(8) :: zww_diag_sum, center_diag_sum, center_local_sum, zww_diag_val, center_val
+    real(8) :: center_eig_weighted_sum
     real(8) :: zww_diag_min, zww_diag_max, center_min, center_max, diff_val
     real(8) :: diff_min, diff_max, diff_rms, rho_diag, weight_diag, weighted_zww, weighted_center
     real(8) :: weighted_diff, weighted_zww_sum, weighted_center_sum, weighted_diff_sum
+    real(8) :: center_eig_weighted_local, center_eig_weighted_sum_global
     real(8) :: local_center_count, local_center_mismatch, cell_shift_min, cell_shift_max
     real(8), allocatable :: prod_weight_local(:), prod_weight_sum(:)
     real(8), allocatable :: prod_contrib_local(:), prod_contrib_sum(:)
     real(8), allocatable :: prod_rho_local(:), prod_rho_sum(:), prod_occ_local(:), prod_occ_sum_by_w(:)
     complex(8), allocatable :: cw_local(:,:), cw_sum(:,:), cmix(:,:), cmix_occ(:,:), rho_mix(:,:)
     complex(8), allocatable :: coef_block(:,:)
+    complex(8), allocatable :: center_w_global(:,:), center_eig(:,:)
     complex(8) :: pos_expect, pos_ww, pos_wp, zterm
     character(32) :: env_trace
     integer :: env_status, env_len
@@ -4918,6 +4921,9 @@ contains
     weighted_zww = 0.0d0
     weighted_center = 0.0d0
     weighted_diff = 0.0d0
+    center_eig_weighted_sum = 0.0d0
+    center_eig_weighted_local = 0.0d0
+    center_eig_weighted_sum_global = 0.0d0
     weighted_zww_sum = 0.0d0
     weighted_center_sum = 0.0d0
     weighted_diff_sum = 0.0d0
@@ -5064,6 +5070,23 @@ contains
     allocate(cmix(n_mix,max(1,dg_frag%nstate_tot)))
     allocate(cmix_occ(n_mix,max(1,dg_frag%nstate_tot)), rho_mix(n_mix,n_mix))
     allocate(coef_block(max(1,size(dg_frag%global_wannier_coef,1)), max(1,dg_frag%nstate_tot)))
+    if (trim(dg_mixed_z_polarization_branch) == 'center_eig') then
+      if (.not. allocated(dg_frag%global_wannier_center) .or. &
+          .not. allocated(dg_frag%global_wannier_flux_evec) .or. &
+          size(dg_frag%global_wannier_center, 1) < 3 .or. &
+          size(dg_frag%global_wannier_center, 2) < n_w .or. &
+          size(dg_frag%global_wannier_flux_evec, 1) < n_w .or. &
+          size(dg_frag%global_wannier_flux_evec, 2) < n_w) then
+        stop "DG-Fragment RT: center_eig polarization branch requires Wannier centers and Flux eigenvectors"
+      end if
+      allocate(center_w_global(n_w,n_w), center_eig(n_w,n_w))
+      center_w_global(:, :) = (0.0d0, 0.0d0)
+      do iw = 1, n_w
+        center_w_global(iw,iw) = cmplx(dg_frag%global_wannier_center(3,iw), 0.0d0, kind=8)
+      end do
+      center_eig(1:n_w,1:n_w) = matmul(conjg(transpose(dg_frag%global_wannier_flux_evec(1:n_w,1:n_w))), &
+        matmul(center_w_global(1:n_w,1:n_w), dg_frag%global_wannier_flux_evec(1:n_w,1:n_w)))
+    end if
 
     do ispin = 1, min(dg_frag%nspin, system%nspin, size(dg_frag%mixed_wannier_bpw_z, 4))
       nocc_spin = 0
@@ -5167,6 +5190,15 @@ contains
           pol_ww_local(idir) = pol_ww_local(idir) - real(pos_ww, kind=8)
           pol_wp_local(idir) = pol_wp_local(idir) - real(pos_wp, kind=8)
         end do
+        if (allocated(center_eig)) then
+          pos_ww = (0.0d0, 0.0d0)
+          do iw = 1, n_w
+            do jw = 1, n_w
+              pos_ww = pos_ww + center_eig(iw,jw) * rho_mix(jw,iw)
+            end do
+          end do
+          center_eig_weighted_local = center_eig_weighted_local + real(pos_ww, kind=8)
+        end if
         if (perf_count) dg_frag%mixed_z_perf_wall_pz_contract_z = &
           dg_frag%mixed_z_perf_wall_pz_contract_z + (get_wtime() - perf_t0)
       end if
@@ -5185,6 +5217,7 @@ contains
     call comm_summation(weighted_zww, weighted_zww_sum, dg_frag%icomm)
     call comm_summation(weighted_center, weighted_center_sum, dg_frag%icomm)
     call comm_summation(weighted_diff, weighted_diff_sum, dg_frag%icomm)
+    call comm_summation(center_eig_weighted_local, center_eig_weighted_sum_global, dg_frag%icomm)
     call comm_summation(prod_weight_local, prod_weight_sum, n_w, dg_frag%icomm)
     call comm_summation(prod_contrib_local, prod_contrib_sum, n_w, dg_frag%icomm)
     call comm_summation(prod_rho_local, prod_rho_sum, n_w, dg_frag%icomm)
@@ -5246,7 +5279,11 @@ contains
       end if
       polarization_raw(3) = -weighted_center_sum + pol_ww_offdiag_sum(3) + pol_wp_sum(3) + &
         (pol_sum(3) - pol_ww_sum(3) - pol_wp_sum(3))
+    else if (trim(dg_mixed_z_polarization_branch) == 'center_eig') then
+      polarization_raw(3) = -center_eig_weighted_sum_global + pol_wp_sum(3) + &
+        (pol_sum(3) - pol_ww_sum(3) - pol_wp_sum(3))
     end if
+    if (allocated(center_w_global)) deallocate(center_w_global, center_eig)
     deallocate(cw_local, cw_sum, cmix, cmix_occ, rho_mix, coef_block, prod_weight_local, prod_weight_sum, prod_contrib_local, prod_contrib_sum, &
                prod_rho_local, prod_rho_sum, prod_occ_local, prod_occ_sum_by_w)
   end subroutine calculate_global_mixed_wannier_bpw_polarization_dg

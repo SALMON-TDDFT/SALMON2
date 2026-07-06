@@ -4,7 +4,8 @@
     use rt_dg_plane_wave, only: compute_fragment_pw_overlap, compute_fragment_pw_position_overlap
     use salmon_global, only: dg_bpw_auto, dg_bpw_auto_accuracy, dg_bpw_auto_max_n, &
       dg_bpw_auto_min_n, dg_bpw_auto_report, n_plane_waves_dg, yn_dg_mixed_z_include_ww, &
-      dg_mixed_z_direct_origin
+      dg_mixed_z_direct_origin, dg_mixed_z_ww_position_branch, dg_mixed_z_wp_position_branch, &
+      dg_mixed_z_pp_position_branch
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
 
@@ -21,7 +22,8 @@
     real(8) :: best_comm, best_fwp
     real(8) :: fwp_axis_old(3), fwp_axis_new(3), fwp_axis_final(3)
     real(8) :: comm_pair_old(3), comm_pair_new(3), comm_pair_final(3)
-    real(8) :: zwp_direct_norm(3)
+    real(8) :: zwp_direct_norm(3), zpp_direct_norm(3)
+    real(8) :: wp_amp_norm(3), wp_grad_norm(3), wp_tilde_norm(3), wp_orth_norm(3), wp_final_norm(3)
     real(8) :: zwp_norm(3), zww_norm(3)
     real(8) :: zcov_ww(3,3), zcov_wp(3,3), zcov_tot(3,3)
     real(8) :: zcomm_ww(3,3), zcomm_wp(3,3), zcomm_tot(3,3)
@@ -51,13 +53,14 @@
     complex(8), allocatable :: b_local(:,:), b_global(:,:)
     complex(8), allocatable :: r_local(:,:), r_global(:,:), b_eig(:,:)
     complex(8), allocatable :: c_local(:,:), c_global(:,:), c_w_local(:,:), c_w_global(:,:), c_eig(:,:)
-    complex(8), allocatable :: z_w(:,:), z_eig(:,:), o_eig(:,:)
+    complex(8), allocatable :: z_w(:,:), center_w_global(:,:), z_eig(:,:), o_eig(:,:)
     complex(8), allocatable :: s_perp(:,:), s_vec(:,:), s_work(:,:), qmat(:,:)
     complex(8), allocatable :: h_p(:,:), h_vec(:,:)
     complex(8), allocatable :: q_metric(:,:), q_left_metric(:,:), final_metric(:,:), transform_metric(:,:)
     complex(8), allocatable :: t_final(:,:), t_saved(:,:), metric_vec(:,:)
     complex(8), allocatable :: total_metric(:,:), h_total(:,:)
     complex(8), allocatable :: r_tilde(:,:), r_orth(:,:), r_final(:,:), z_wp_direct(:,:)
+    complex(8), allocatable :: z_pp_raw(:,:), z_pp_direct(:,:)
     real(8), allocatable :: s_eval(:), h_eval(:), pw_ekin(:), shell_ekin(:), diag_eval(:)
     logical, allocatable :: active_pw(:), trial_active_pw(:), best_active_pw(:)
     integer, allocatable :: shell_key(:), shell_values(:)
@@ -228,14 +231,14 @@
     allocate(b_local(nwann,npw), b_global(nwann,npw))
     allocate(r_local(nwann,npw), r_global(nwann,npw), b_eig(neig,npw))
     allocate(c_local(nwann,npw), c_global(nwann,npw), c_w_local(nwann,nwann), c_w_global(nwann,nwann), c_eig(neig,neig))
-    allocate(z_w(nwann,nwann), z_eig(neig,neig), o_eig(neig,neig))
+    allocate(z_w(nwann,nwann), center_w_global(nwann,nwann), z_eig(neig,neig), o_eig(neig,neig))
     allocate(s_perp(npw,npw), s_vec(npw,npw), s_work(npw,npw), s_eval(npw), pw_ekin(npw), shell_ekin(npw))
     allocate(qmat(npw,npw), h_p(npw,npw), h_vec(npw,npw), h_eval(npw))
     allocate(q_metric(npw,npw), q_left_metric(npw,npw), final_metric(npw,npw), transform_metric(npw,npw))
     allocate(t_final(npw,npw), t_saved(npw,npw), metric_vec(npw,npw), diag_eval(npw))
     allocate(total_metric(neig+npw,neig+npw), h_total(neig+npw,neig+npw))
     allocate(r_tilde(neig,npw), r_orth(neig,npw), r_final(neig,npw))
-    allocate(z_wp_direct(neig,npw))
+    allocate(z_wp_direct(neig,npw), z_pp_raw(npw,npw), z_pp_direct(npw,npw))
     allocate(active_pw(npw), trial_active_pw(npw), best_active_pw(npw), shell_key(npw), shell_values(npw))
 
     pw_ekin(:) = 0.0d0
@@ -528,13 +531,19 @@
       deallocate(s_perp, s_vec, s_work, s_eval, pw_ekin, shell_ekin, qmat, h_p, h_vec, h_eval)
       deallocate(q_metric, q_left_metric, final_metric, transform_metric, t_final, t_saved, metric_vec, diag_eval)
       deallocate(total_metric, h_total)
-      deallocate(r_tilde, r_orth, r_final, z_wp_direct)
+      deallocate(r_tilde, r_orth, r_final, z_wp_direct, z_pp_raw, z_pp_direct)
       return
     end if
 
     min_s_local = huge(1.0d0)
     max_s_local = -huge(1.0d0)
     zwp_direct_norm(:) = 0.0d0
+    zpp_direct_norm(:) = 0.0d0
+    wp_amp_norm(:) = 0.0d0
+    wp_grad_norm(:) = 0.0d0
+    wp_tilde_norm(:) = 0.0d0
+    wp_orth_norm(:) = 0.0d0
+    wp_final_norm(:) = 0.0d0
     do ispin = 1, nspin_file
       nocc_ref = min(neig - 1, max(1, dg_frag%nstate_tot))
       if (allocated(dg_frag%nocc_spin)) then
@@ -648,6 +657,8 @@
       t_saved(1:npw,1:dg_frag%mixed_wannier_bpw_np) = matmul( &
         qmat(1:npw,1:dg_frag%mixed_wannier_bpw_np), &
         h_p(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))
+      if (ispin == 1) call diagnose_bpw_inversion_closure( &
+        s_perp(1:npw,1:npw), t_final(1:npw,1:dg_frag%mixed_wannier_bpw_np), active_pw)
       final_metric(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np) = matmul( &
         conjg(transpose(t_final(1:npw,1:dg_frag%mixed_wannier_bpw_np))), &
         matmul(s_perp(1:npw,1:npw), t_final(1:npw,1:dg_frag%mixed_wannier_bpw_np)))
@@ -778,6 +789,18 @@
 
       do idir = 1, 3
         z_w(1:nwann,1:nwann) = dg_frag%global_wannier_position(idir,1:nwann,1:nwann)
+        if (trim(dg_mixed_z_ww_position_branch) == 'center_eig') then
+          if (.not. allocated(dg_frag%global_wannier_center) .or. &
+              size(dg_frag%global_wannier_center, 1) < idir .or. &
+              size(dg_frag%global_wannier_center, 2) < nwann) then
+            stop "DG-Fragment RT: center_eig WW position branch requires global Wannier centers"
+          end if
+          center_w_global(:, :) = zzero
+          do iw = 1, nwann
+            center_w_global(iw,iw) = cmplx(dg_frag%global_wannier_center(idir,iw), 0.0d0, kind=8)
+          end do
+          z_w(1:nwann,1:nwann) = center_w_global(1:nwann,1:nwann)
+        end if
         z_eig(1:neig,1:neig) = matmul(conjg(transpose(dg_frag%global_wannier_flux_evec(1:nwann,1:neig))), &
           matmul(z_w, dg_frag%global_wannier_flux_evec(1:nwann,1:neig)))
 
@@ -844,11 +867,16 @@
             do jw = 1, neig
               grad_corr = grad_corr + o_eig(eig,jw) * b_eig(jw,ipw)
             end do
+            wp_amp_norm(idir) = wp_amp_norm(idir) + abs(amp)**2
+            wp_grad_norm(idir) = wp_grad_norm(idir) + abs(grad_corr)**2
             r_tilde(eig,ipw) = amp - grad_corr
           end do
         end do
+        wp_tilde_norm(idir) = wp_tilde_norm(idir) + sum(abs(r_tilde(1:neig,1:npw))**2)
         r_orth(1:neig,1:dg_frag%mixed_wannier_bpw_np) = &
           matmul(r_tilde(1:neig,1:npw), qmat(1:npw,1:dg_frag%mixed_wannier_bpw_np))
+        wp_orth_norm(idir) = wp_orth_norm(idir) + &
+          sum(abs(r_orth(1:neig,1:dg_frag%mixed_wannier_bpw_np))**2)
         if (use_h_eigenvectors_for_final) then
           r_final(1:neig,1:dg_frag%mixed_wannier_bpw_np) = &
             matmul(r_orth(1:neig,1:dg_frag%mixed_wannier_bpw_np), &
@@ -858,16 +886,35 @@
             matmul(r_orth(1:neig,1:dg_frag%mixed_wannier_bpw_np), &
                    h_vec(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))
         end if
+        wp_final_norm(idir) = wp_final_norm(idir) + &
+          sum(abs(r_final(1:neig,1:dg_frag%mixed_wannier_bpw_np))**2)
         z_wp_direct(:, :) = zzero
         do eig = 1, neig
           do alpha = 1, dg_frag%mixed_wannier_bpw_np
-            z_wp_direct(eig,alpha) = r_final(eig,alpha)
+            if (trim(dg_mixed_z_wp_position_branch) == 'zero') then
+              z_wp_direct(eig,alpha) = zzero
+            else
+              z_wp_direct(eig,alpha) = r_final(eig,alpha)
+            end if
             dg_frag%mixed_wannier_bpw_z(idir,eig,neig+alpha,ispin) = z_wp_direct(eig,alpha)
             dg_frag%mixed_wannier_bpw_z(idir,neig+alpha,eig,ispin) = &
               conjg(dg_frag%mixed_wannier_bpw_z(idir,eig,neig+alpha,ispin))
           end do
         end do
         zwp_direct_norm(idir) = zwp_direct_norm(idir) + sqrt(sum(abs(z_wp_direct(1:neig,1:dg_frag%mixed_wannier_bpw_np))**2))
+        z_pp_raw(:, :) = zzero
+        z_pp_direct(:, :) = zzero
+        if (trim(dg_mixed_z_pp_position_branch) == 'cell_sawtooth') then
+          call build_pw_sawtooth_position(idir, z_pp_raw)
+          z_pp_direct(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np) = &
+            matmul(conjg(transpose(t_final(1:npw,1:dg_frag%mixed_wannier_bpw_np))), &
+              matmul(z_pp_raw(1:npw,1:npw), t_final(1:npw,1:dg_frag%mixed_wannier_bpw_np)))
+          dg_frag%mixed_wannier_bpw_z(idir,neig+1:neig+dg_frag%mixed_wannier_bpw_np, &
+            neig+1:neig+dg_frag%mixed_wannier_bpw_np,ispin) = &
+            z_pp_direct(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np)
+        end if
+        zpp_direct_norm(idir) = zpp_direct_norm(idir) + &
+          sqrt(sum(abs(z_pp_direct(1:dg_frag%mixed_wannier_bpw_np,1:dg_frag%mixed_wannier_bpw_np))**2))
       end do
     end do
 
@@ -938,6 +985,11 @@
     end do
     zcov_tot(:, :) = zcov_ww(:, :) + zcov_wp(:, :)
     zcomm_tot(:, :) = zcomm_ww(:, :) + zcomm_wp(:, :)
+    wp_amp_norm(:) = sqrt(max(wp_amp_norm(:), 0.0d0))
+    wp_grad_norm(:) = sqrt(max(wp_grad_norm(:), 0.0d0))
+    wp_tilde_norm(:) = sqrt(max(wp_tilde_norm(:), 0.0d0))
+    wp_orth_norm(:) = sqrt(max(wp_orth_norm(:), 0.0d0))
+    wp_final_norm(:) = sqrt(max(wp_final_norm(:), 0.0d0))
     fsum_proxy_wp_avg = (zcov_wp(1,1) + zcov_wp(2,2) + zcov_wp(3,3)) / &
       max(1.0d0, 3.0d0 * dble(max(1, nocc_ref)))
     fsum_proxy_total_avg = (zcov_tot(1,1) + zcov_tot(2,2) + zcov_tot(3,3)) / &
@@ -957,12 +1009,17 @@
       write(*,'(1x,a,3(1x,1pe13.5))') "[DG-MIXED-Z] ||Z_WW||_F xyz=", zww_norm(1:3)
       write(*,'(1x,a,3(1x,1pe13.5))') "[DG-MIXED-Z] ||Z_WP||_F xyz=", zwp_norm(1:3)
       write(*,'(1x,a)') "[DG-MIXED-Z] Z_WP construction = direct <W|r|BPW_perp>"
+      write(*,'(1x,a,5(3(1x,1pe13.5),1x))') "[DG-MIXED-Z] WP split norm amp/grad/tilde/orth/final xyz=", &
+        wp_amp_norm(1:3), wp_grad_norm(1:3), wp_tilde_norm(1:3), wp_orth_norm(1:3), wp_final_norm(1:3)
       if (use_fragment_center_direct) then
         write(*,'(1x,a)') "[DG-MIXED-Z] direct Z_WP origin = fragment center"
       else
         write(*,'(1x,a)') "[DG-MIXED-Z] direct Z_WP origin = global coordinate"
       end if
+      write(*,'(1x,a,a)') "[DG-MIXED-Z] WP position branch = ", trim(dg_mixed_z_wp_position_branch)
       write(*,'(1x,a,3(1x,1pe13.5))') "[DG-MIXED-Z] ||Z_WP_direct||_F xyz=", zwp_direct_norm(1:3)
+      write(*,'(1x,a,a)') "[DG-MIXED-Z] PP position branch = ", trim(dg_mixed_z_pp_position_branch)
+      write(*,'(1x,a,3(1x,1pe13.5))') "[DG-MIXED-Z] ||Z_PP_direct||_F xyz=", zpp_direct_norm(1:3)
       write(*,'(1x,a,1pe13.5)') "[DG-MIXED-Z] Lowdin S_perp cutoff=", sperp_tol
       write(*,'(1x,a,2(1x,1pe13.5),2(a,1pe13.5))') &
         "[DG-MIXED-Z] fsum_proxy avg WP,total=", fsum_proxy_wp_avg, fsum_proxy_total_avg, &
@@ -1016,11 +1073,11 @@
 
     deallocate(s_fp, r_fp, b_local, b_global, r_local, r_global, b_eig)
     deallocate(c_local, c_global, c_w_local, c_w_global, c_eig)
-    deallocate(z_w, z_eig, o_eig)
+    deallocate(z_w, center_w_global, z_eig, o_eig)
     deallocate(s_perp, s_vec, s_work, s_eval, pw_ekin, shell_ekin, qmat, h_p, h_vec, h_eval)
     deallocate(q_metric, q_left_metric, final_metric, transform_metric, t_final, t_saved, metric_vec, diag_eval)
     deallocate(total_metric, h_total)
-    deallocate(r_tilde, r_orth, r_final, z_wp_direct)
+    deallocate(r_tilde, r_orth, r_final, z_wp_direct, z_pp_raw, z_pp_direct)
     deallocate(active_pw, trial_active_pw, best_active_pw, shell_key, shell_values)
 
   contains
@@ -1052,6 +1109,114 @@
       sval = dg_bpw_auto_accuracy
       if (sval <= 0.0d0) sval = 1.0d-3
     end subroutine summarize_sperp_spectrum
+
+    subroutine diagnose_bpw_inversion_closure(smat, tmat, active)
+      complex(8), intent(in) :: smat(:,:), tmat(:,:)
+      logical, intent(in) :: active(:)
+
+      integer :: i, j, best_j, missing_active, pair_count
+      integer, allocatable :: neg_idx(:)
+      real(8) :: best_dist, dist, ktol
+      real(8) :: sperp_max, sperp_rms, sperp_rms_conjg
+      real(8) :: proj_max, proj_rms, proj_rms_conjg
+      complex(8), allocatable :: pmat(:,:)
+
+      allocate(neg_idx(npw))
+      neg_idx(:) = 0
+      ktol = 1.0d-8 * max(1.0d0, maxval(abs(dg_frag%k_pw(1:3,1:npw))))
+      do i = 1, npw
+        best_dist = huge(1.0d0)
+        best_j = 0
+        do j = 1, npw
+          dist = sqrt(sum((dg_frag%k_pw(1:3,i) + dg_frag%k_pw(1:3,j))**2))
+          if (dist < best_dist) then
+            best_dist = dist
+            best_j = j
+          end if
+        end do
+        if (best_dist <= ktol) neg_idx(i) = best_j
+      end do
+
+      missing_active = 0
+      pair_count = 0
+      do i = 1, npw
+        if (.not. active(i)) cycle
+        pair_count = pair_count + 1
+        if (neg_idx(i) < 1 .or. .not. active(neg_idx(i))) missing_active = missing_active + 1
+      end do
+
+      sperp_max = 0.0d0
+      sperp_rms = 0.0d0
+      sperp_rms_conjg = 0.0d0
+      do j = 1, npw
+        if (neg_idx(j) < 1) cycle
+        do i = 1, npw
+          if (neg_idx(i) < 1) cycle
+          sperp_max = max(sperp_max, abs(smat(i,j) - smat(neg_idx(i),neg_idx(j))))
+          sperp_rms = sperp_rms + abs(smat(i,j) - smat(neg_idx(i),neg_idx(j)))**2
+          sperp_rms_conjg = sperp_rms_conjg + abs(smat(i,j) - conjg(smat(neg_idx(i),neg_idx(j))))**2
+        end do
+      end do
+      sperp_rms = sqrt(sperp_rms / max(1.0d0, dble(npw*npw)))
+      sperp_rms_conjg = sqrt(sperp_rms_conjg / max(1.0d0, dble(npw*npw)))
+
+      allocate(pmat(npw,npw))
+      pmat = matmul(tmat, conjg(transpose(tmat)))
+      proj_max = 0.0d0
+      proj_rms = 0.0d0
+      proj_rms_conjg = 0.0d0
+      do j = 1, npw
+        if (neg_idx(j) < 1) cycle
+        do i = 1, npw
+          if (neg_idx(i) < 1) cycle
+          proj_max = max(proj_max, abs(pmat(i,j) - pmat(neg_idx(i),neg_idx(j))))
+          proj_rms = proj_rms + abs(pmat(i,j) - pmat(neg_idx(i),neg_idx(j)))**2
+          proj_rms_conjg = proj_rms_conjg + abs(pmat(i,j) - conjg(pmat(neg_idx(i),neg_idx(j))))**2
+        end do
+      end do
+      proj_rms = sqrt(proj_rms / max(1.0d0, dble(npw*npw)))
+      proj_rms_conjg = sqrt(proj_rms_conjg / max(1.0d0, dble(npw*npw)))
+
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,i0,a,i0)') "[DG-MIXED-Z] BPW inversion active missing pairs=", &
+          missing_active, " / ", pair_count
+        write(*,'(1x,a,3(1x,1pe13.5))') "[DG-MIXED-Z] BPW inversion S_perp max/rms/rms_conjg=", &
+          sperp_max, sperp_rms, sperp_rms_conjg
+        write(*,'(1x,a,3(1x,1pe13.5))') "[DG-MIXED-Z] BPW inversion projector max/rms/rms_conjg=", &
+          proj_max, proj_rms, proj_rms_conjg
+      end if
+
+      deallocate(pmat, neg_idx)
+    end subroutine diagnose_bpw_inversion_closure
+
+    subroutine build_pw_sawtooth_position(idir, rpp)
+      integer, intent(in) :: idir
+      complex(8), intent(out) :: rpp(:,:)
+
+      integer :: i, j, jdir
+      real(8) :: dq, ktol
+      logical :: same_other_axes
+      complex(8), parameter :: zi = (0.0d0, 1.0d0)
+
+      rpp(:, :) = zzero
+      ktol = 1.0d-8 * max(1.0d0, maxval(abs(dg_frag%k_pw(1:3,1:npw))))
+      do j = 1, npw
+        do i = 1, npw
+          same_other_axes = .true.
+          do jdir = 1, 3
+            if (jdir == idir) cycle
+            if (abs(dg_frag%k_pw(jdir,j) - dg_frag%k_pw(jdir,i)) > ktol) then
+              same_other_axes = .false.
+              exit
+            end if
+          end do
+          if (.not. same_other_axes) cycle
+          dq = dg_frag%k_pw(idir,j) - dg_frag%k_pw(idir,i)
+          if (abs(dq) <= ktol) cycle
+          rpp(i,j) = -zi / dq
+        end do
+      end do
+    end subroutine build_pw_sawtooth_position
 
     subroutine write_bpw_auto_report()
       character(len=256) :: warning_line
