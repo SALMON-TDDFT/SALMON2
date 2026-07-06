@@ -262,6 +262,7 @@ module rt_dg_fragment_types
     real(8), allocatable :: buffer_wannier_tail(:,:) ! (W basis, local fragment index)
     real(8), allocatable :: buffer_wannier_h_flux(:,:,:) ! (W basis, W basis, local fragment index)
     real(8), allocatable :: buffer_wannier_v(:,:,:,:) ! xi: (3, W basis, W basis, local fragment index)
+    real(8), allocatable :: buffer_wannier_center(:,:,:) ! (3, W basis, local fragment index)
     real(8), allocatable :: buffer_wannier_frag_center(:,:) ! R_I: (3, local fragment index)
     type(vector_block_info), allocatable :: buffer_wannier_xi_flux_blocks(:) ! neighbor xi_flux blocks
     integer, allocatable :: buffer_wannier_xi_flux_local_block_ids(:)

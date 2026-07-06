@@ -1936,7 +1936,7 @@ contains
       if (dg_frag%has_buffer_periodic_wannier_basis .and. &
           allocated(dg_frag%buffer_wannier_coef) .and. &
           allocated(dg_frag%buffer_wannier_v) .and. &
-          allocated(dg_frag%buffer_wannier_frag_center)) then
+          allocated(dg_frag%buffer_wannier_center)) then
         call build_full_h_seed_wannier_position_operator()
         return
       end if
@@ -2044,7 +2044,7 @@ contains
       if (.not. allocated(dg_frag%full_h_seed_evec)) return
       if (.not. allocated(dg_frag%buffer_wannier_coef)) return
       if (.not. allocated(dg_frag%buffer_wannier_v)) return
-      if (.not. allocated(dg_frag%buffer_wannier_frag_center)) return
+      if (.not. allocated(dg_frag%buffer_wannier_center)) return
       if (dg_frag%full_h_seed_nstate <= 0) return
 
       allocate(xi_local(3,nstate,nstate,dg_frag%nspin))
@@ -2059,6 +2059,7 @@ contains
         if (i_local < 1 .or. i_local > size(dg_frag%buffer_wannier_nkeep)) cycle
         nw = min(dg_frag%buffer_wannier_nkeep(i_local), size(dg_frag%buffer_wannier_coef, 2), &
                  size(dg_frag%buffer_wannier_v, 2), size(dg_frag%buffer_wannier_v, 3))
+        nw = min(nw, size(dg_frag%buffer_wannier_center, 2))
         if (nw <= 0) cycle
         allocate(eig_w(nw,nstate))
         do ispin_loc = 1, dg_frag%nspin
@@ -2079,7 +2080,8 @@ contains
           do ibasis = 1, 3
             r_w(1:nw,1:nw) = cmplx(dg_frag%buffer_wannier_v(ibasis,1:nw,1:nw,i_local), 0.0d0, kind=8)
             do iw = 1, nw
-              r_w(iw,iw) = r_w(iw,iw) + cmplx(dg_frag%buffer_wannier_frag_center(ibasis,i_local), 0.0d0, kind=8)
+              r_w(iw,iw) = r_w(iw,iw) + &
+                cmplx(dg_frag%buffer_wannier_center(ibasis,iw,i_local), 0.0d0, kind=8)
             end do
             local_abs = max(local_abs, maxval(abs(r_w)))
             work_w(1:nw,1:nstate) = matmul(r_w(1:nw,1:nw), eig_w(1:nw,1:nstate))
@@ -2169,7 +2171,7 @@ contains
           ' max_abs=', maxval(abs(xi_global)), &
           ' local_center_xi_abs_sum=', local_abs_sum(1), &
           ' neighbor_xi_flux_abs_sum=', flux_abs_sum(1)
-        write(*,'(1x,a)') '[DG-FULL-H-SEED-XI] source=wannier_center_xi'
+        write(*,'(1x,a)') '[DG-FULL-H-SEED-XI] source=wannier_center_xi center=per-wannier'
         flush(6)
       end if
       deallocate(xi_local, xi_global)
@@ -2489,6 +2491,7 @@ contains
     if (allocated(dg_frag%buffer_wannier_tail)) deallocate(dg_frag%buffer_wannier_tail)
     if (allocated(dg_frag%buffer_wannier_h_flux)) deallocate(dg_frag%buffer_wannier_h_flux)
     if (allocated(dg_frag%buffer_wannier_v)) deallocate(dg_frag%buffer_wannier_v)
+    if (allocated(dg_frag%buffer_wannier_center)) deallocate(dg_frag%buffer_wannier_center)
     if (allocated(dg_frag%buffer_wannier_frag_center)) deallocate(dg_frag%buffer_wannier_frag_center)
     dg_frag%has_buffer_periodic_wannier_basis = .false.
     dg_frag%buffer_wannier_flux_seed_applied = .false.
