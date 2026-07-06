@@ -1326,9 +1326,25 @@
       return
     end if
     if (yn_dg_full_h_eigen_seed == 'y') then
+      if (.not. use_impulse_kinetic_shift .and. dg_frag%has_full_h_seed_eigen .and. &
+          dg_frag%has_full_h_seed_xi) then
+        t_route0 = get_wtime()
+        call apply_full_h_seed_eigen_exp(state_first, state_last)
+        time_global_flux = time_global_flux + (get_wtime() - t_route0)
+        if (.not. expdiag_warned .and. dg_frag%id == 0) then
+          write(*,'(1x,a)') "[DG-EXPDIAG] full-DG Hamiltonian eigenbasis integrator enabled."
+          write(*,'(1x,a)') "[DG-EXPDIAG] nonzero length-gauge field is propagated as H_eff = eps - E.R in the Full-DG basis."
+          write(*,'(1x,a)') "[DG-EXPDIAG] this diagnostic path is dense/allreduce and is not weak-scaling."
+          flush(6)
+          expdiag_warned = .true.
+        end if
+        call print_expdiag_timing('full-dg-seed-eigen')
+        return
+      end if
       if (dg_frag%id == 0) then
         write(*,'(1x,a)') "[FATAL] full-DG Hamiltonian eigen seed requires a matching full-DG propagator."
-        write(*,'(1x,a)') "[FATAL] Nonzero length-gauge fields or impulse kicks must not fall back to local BPW expdiag."
+        write(*,'(1x,a)') "[FATAL] Nonzero length-gauge fields require the Full-DG position matrix; impulse kicks require momentum projection."
+        write(*,'(1x,a)') "[FATAL] These cases must not fall back to local BPW expdiag."
         flush(6)
       end if
       stop "DG expdiag: full-DG eigen seed field propagator is not implemented"
@@ -6259,6 +6275,106 @@
       end do
       deallocate(amp_local, amp_global, phi_row)
     end subroutine apply_global_flux_eigen_exp
+
+    subroutine apply_full_h_seed_eigen_exp(state_s, state_e)
+      integer, intent(in) :: state_s, state_e
+      integer :: ispin_current, nstate_blk, neig, nrow_full
+      integer :: istate_blk, eig, global_row, local_row, state_col
+      real(8) :: phase_c, phase_s
+      real(8) :: tloc
+      complex(8), allocatable :: amp_local(:,:), amp_global(:,:), next_local(:,:)
+      complex(8), allocatable :: h_step(:,:), h_vec(:,:), tmp(:)
+      real(8), allocatable :: eval_step(:)
+
+      nstate_blk = max(0, state_e - state_s + 1)
+      if (nstate_blk <= 0) return
+      if (.not. allocated(dg_frag%full_h_seed_evec)) return
+      if (.not. allocated(dg_frag%full_h_seed_eval)) return
+      if (.not. allocated(dg_frag%full_h_seed_xi)) return
+      if (.not. allocated(dg_frag%coef_global_to_local)) return
+
+      neig = min(dg_frag%full_h_seed_nstate, size(dg_frag%full_h_seed_evec, 2), &
+                 size(dg_frag%full_h_seed_eval, 1), size(dg_frag%full_h_seed_xi, 2), &
+                 size(dg_frag%full_h_seed_xi, 3))
+      nrow_full = size(dg_frag%full_h_seed_evec, 1)
+      if (neig <= 0 .or. nrow_full <= 0) return
+
+      allocate(amp_local(neig,nstate_blk), amp_global(neig,nstate_blk))
+      allocate(h_step(neig,neig), h_vec(neig,neig), eval_step(neig), tmp(neig))
+      do ispin_current = 1, dg_frag%nspin
+        if (ispin_current > size(dg_frag%full_h_seed_evec, 3)) cycle
+        if (ispin_current > size(dg_frag%full_h_seed_eval, 2)) cycle
+        if (ispin_current > size(dg_frag%full_h_seed_xi, 4)) cycle
+
+        amp_local(:, :) = (0.0d0, 0.0d0)
+        tloc = get_wtime()
+        do global_row = 1, min(nrow_full, dg_frag%n_mat_max)
+          local_row = dg_frag%coef_global_to_local(global_row, ispin_current)
+          if (local_row < 1 .or. local_row > size(dg_frag%coef, 1)) cycle
+          do istate_blk = 1, nstate_blk
+            state_col = state_s + istate_blk - 1
+            if (state_col < 1 .or. state_col > size(dg_frag%coef, 2)) cycle
+            do eig = 1, neig
+              amp_local(eig,istate_blk) = amp_local(eig,istate_blk) + &
+                conjg(dg_frag%full_h_seed_evec(global_row,eig,ispin_current)) * &
+                dg_frag%coef(local_row,state_col,ispin_current)
+            end do
+          end do
+        end do
+        time_flux_project = time_flux_project + (get_wtime() - tloc)
+
+        tloc = get_wtime()
+        call comm_summation(amp_local, amp_global, neig*nstate_blk, dg_frag%icomm)
+        time_flux_comm = time_flux_comm + (get_wtime() - tloc)
+
+        h_step(:, :) = (0.0d0, 0.0d0)
+        do eig = 1, neig
+          h_step(eig,eig) = cmplx(dg_frag%full_h_seed_eval(eig,ispin_current), 0.0d0, kind=8)
+        end do
+        h_step(1:neig,1:neig) = h_step(1:neig,1:neig) &
+          - E_mid(1) * dg_frag%full_h_seed_xi(1,1:neig,1:neig,ispin_current) &
+          - E_mid(2) * dg_frag%full_h_seed_xi(2,1:neig,1:neig,ispin_current) &
+          - E_mid(3) * dg_frag%full_h_seed_xi(3,1:neig,1:neig,ispin_current)
+        call symmetrize_expdiag_h_eff(h_step, neig)
+        tloc = get_wtime()
+        call eigen_zheev(h_step, eval_step, h_vec)
+        time_local_diag = time_local_diag + (get_wtime() - tloc)
+
+        do istate_blk = 1, nstate_blk
+          tmp(:) = matmul(conjg(transpose(h_vec(1:neig,1:neig))), amp_global(:,istate_blk))
+          do eig = 1, neig
+            phase_c = cos(eval_step(eig) * dt)
+            phase_s = sin(eval_step(eig) * dt)
+            tmp(eig) = cmplx(phase_c, -phase_s, kind=8) * tmp(eig)
+          end do
+          amp_global(:,istate_blk) = matmul(h_vec(1:neig,1:neig), tmp(:))
+        end do
+
+        allocate(next_local(size(dg_frag%coef,1),nstate_blk))
+        next_local(:, :) = (0.0d0, 0.0d0)
+        tloc = get_wtime()
+        do global_row = 1, min(nrow_full, dg_frag%n_mat_max)
+          local_row = dg_frag%coef_global_to_local(global_row, ispin_current)
+          if (local_row < 1 .or. local_row > size(dg_frag%coef, 1)) cycle
+          do istate_blk = 1, nstate_blk
+            do eig = 1, neig
+              next_local(local_row,istate_blk) = next_local(local_row,istate_blk) + &
+                dg_frag%full_h_seed_evec(global_row,eig,ispin_current) * amp_global(eig,istate_blk)
+            end do
+          end do
+        end do
+        time_flux_scatter = time_flux_scatter + (get_wtime() - tloc)
+
+        do istate_blk = 1, nstate_blk
+          state_col = state_s + istate_blk - 1
+          if (state_col < 1 .or. state_col > size(dg_frag%coef, 2)) cycle
+          dg_frag%coef(1:size(dg_frag%coef,1),state_col,ispin_current) = &
+            next_local(1:size(dg_frag%coef,1),istate_blk)
+        end do
+        deallocate(next_local)
+      end do
+      deallocate(amp_local, amp_global, h_step, h_vec, eval_step, tmp)
+    end subroutine apply_full_h_seed_eigen_exp
 
     subroutine apply_xi_flux_split_half(E_use, dt_half, state_s, state_e)
       real(8), intent(in) :: E_use(3), dt_half

@@ -482,7 +482,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
               '[DG-MIXED-H-SEED] seeded W+BPW propagation Hamiltonian eigenstates;')
           else
             call diagonalize_current_dg_full_h_seed_std(dg_frag, &
-              '[DG-FULL-H-SEED] diagonalized full DG Hamiltonian for initial seed;')
+              '[DG-FULL-H-SEED] diagonalized full DG Hamiltonian for initial seed;', system)
           end if
           used_full_h_eigen_seed = .true.
           if (trace_dcdft_seed_diagnostics .and. .not. dg_frag%use_plane_wave_basis) then

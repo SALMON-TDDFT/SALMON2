@@ -1758,12 +1758,14 @@ contains
                evec, svec, sinvhalf, horth, zorth, eval, seval)
   end subroutine diagonalize_current_dg_subspace
 
-  subroutine diagonalize_current_dg_full_h_seed(dg_frag, label)
+  subroutine diagonalize_current_dg_full_h_seed(dg_frag, label, system)
     use communication, only: comm_summation, comm_is_root
     use eigen_subdiag_sub, only: eigen_zheev
+    use structures, only: s_dft_system
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     character(*), intent(in), optional :: label
+    type(s_dft_system), intent(in), optional :: system
 
     integer :: ispin, nrow, nstate, iblk, i, j, ifrag_row, ifrag_col
     integer :: gid_i, gid_j, nbi, nbj, local_idx, state_col
@@ -1786,6 +1788,17 @@ contains
     if (present(label)) then
       if (len_trim(label) > 0) out_label = trim(label)
     end if
+
+    if (allocated(dg_frag%full_h_seed_evec)) deallocate(dg_frag%full_h_seed_evec)
+    if (allocated(dg_frag%full_h_seed_eval)) deallocate(dg_frag%full_h_seed_eval)
+    if (allocated(dg_frag%full_h_seed_xi)) deallocate(dg_frag%full_h_seed_xi)
+    dg_frag%has_full_h_seed_eigen = .false.
+    dg_frag%has_full_h_seed_xi = .false.
+    dg_frag%full_h_seed_nstate = nstate
+    allocate(dg_frag%full_h_seed_evec(nrow,nstate,dg_frag%nspin))
+    allocate(dg_frag%full_h_seed_eval(nstate,dg_frag%nspin))
+    dg_frag%full_h_seed_evec(:, :, :) = (0.0d0, 0.0d0)
+    dg_frag%full_h_seed_eval(:, :) = 0.0d0
 
     allocate(h_local(nrow,nrow), h_dense(nrow,nrow), evec(nrow,nrow), eval(nrow))
     do ispin = 1, dg_frag%nspin
@@ -1827,6 +1840,8 @@ contains
       call comm_summation(herm_diff_local, herm_diff_global, 1, dg_frag%icomm)
 
       call eigen_zheev(h_dense, eval, evec)
+      dg_frag%full_h_seed_evec(1:nrow,1:nstate,ispin) = evec(1:nrow,1:nstate)
+      dg_frag%full_h_seed_eval(1:nstate,ispin) = eval(1:nstate)
 
       dg_frag%coef(:, :, ispin) = (0.0d0, 0.0d0)
       do state_col = 1, nstate
@@ -1851,8 +1866,112 @@ contains
       end if
     end do
 
+    dg_frag%has_full_h_seed_eigen = .true.
+    if (present(system)) call build_full_h_seed_position_operator(system)
     call invalidate_coef_exchange_cache(dg_frag)
     deallocate(h_local, h_dense, evec, eval)
+
+  contains
+
+    subroutine build_full_h_seed_position_operator(system_in)
+      use communication, only: comm_summation, comm_is_root
+      type(s_dft_system), intent(in) :: system_in
+
+      complex(8), allocatable :: xi_local(:,:,:,:), xi_global(:,:,:,:)
+      complex(8), allocatable :: phi_eig(:)
+      integer :: ifrag, i_local, ibasis, ist, jst
+      integer :: ix, iy, iz, ixg, iyg, izg
+      integer :: nx, ny, nz, gid
+      real(8) :: coord(3), box_l(3), hvol
+      real(8) :: herm_diff, herm_diff_local(1), herm_diff_global(1)
+
+      if (.not. allocated(dg_frag%phi_frag)) return
+      if (.not. allocated(dg_frag%full_h_seed_evec)) return
+      if (dg_frag%full_h_seed_nstate <= 0) return
+      if (any(dg_frag%lgnum_total(1:3) <= 0)) return
+      if (any(dg_frag%hgs(1:3) <= 0.0d0)) return
+
+      allocate(xi_local(3,nstate,nstate,dg_frag%nspin))
+      allocate(xi_global(3,nstate,nstate,dg_frag%nspin))
+      allocate(phi_eig(nstate))
+      xi_local(:, :, :, :) = (0.0d0, 0.0d0)
+      box_l(1:3) = dg_frag%hgs(1:3) * dble(dg_frag%lgnum_total(1:3))
+      hvol = system_in%Hvol
+
+      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        i_local = ifrag - dg_frag%ifrag_start + 1
+        if (i_local < 1 .or. i_local > size(dg_frag%phi_frag, 5)) cycle
+        nx = dg_frag%nxyz_domain(1, ifrag)
+        ny = dg_frag%nxyz_domain(2, ifrag)
+        nz = dg_frag%nxyz_domain(3, ifrag)
+        do ispin = 1, dg_frag%nspin
+          do iz = dg_frag%ixyz_frag(3, ifrag), dg_frag%ixyz_frag(3, ifrag) + nz - 1
+            if (iz < lbound(dg_frag%phi_frag, 3) .or. iz > ubound(dg_frag%phi_frag, 3)) cycle
+            izg = modulo(iz - 1, dg_frag%lgnum_total(3)) + 1
+            coord(3) = (dble(izg) - 0.5d0) * dg_frag%hgs(3) - 0.5d0 * box_l(3)
+            do iy = dg_frag%ixyz_frag(2, ifrag), dg_frag%ixyz_frag(2, ifrag) + ny - 1
+              if (iy < lbound(dg_frag%phi_frag, 2) .or. iy > ubound(dg_frag%phi_frag, 2)) cycle
+              iyg = modulo(iy - 1, dg_frag%lgnum_total(2)) + 1
+              coord(2) = (dble(iyg) - 0.5d0) * dg_frag%hgs(2) - 0.5d0 * box_l(2)
+              do ix = dg_frag%ixyz_frag(1, ifrag), dg_frag%ixyz_frag(1, ifrag) + nx - 1
+                if (ix < lbound(dg_frag%phi_frag, 1) .or. ix > ubound(dg_frag%phi_frag, 1)) cycle
+                ixg = modulo(ix - 1, dg_frag%lgnum_total(1)) + 1
+                coord(1) = (dble(ixg) - 0.5d0) * dg_frag%hgs(1) - 0.5d0 * box_l(1)
+                phi_eig(:) = (0.0d0, 0.0d0)
+                do ibasis = 1, min(dg_frag%n_basis(ifrag, ispin), size(dg_frag%phi_frag, 4))
+                  gid = dg_frag%index_basis(ibasis, ifrag, ispin)
+                  if (gid < 1 .or. gid > nrow) cycle
+                  do ist = 1, nstate
+                    phi_eig(ist) = phi_eig(ist) + &
+                      cmplx(dg_frag%phi_frag(ix,iy,iz,ibasis,i_local), 0.0d0, kind=8) * &
+                      dg_frag%full_h_seed_evec(gid,ist,ispin)
+                  end do
+                end do
+                do jst = 1, nstate
+                  do ist = 1, nstate
+                    xi_local(1,ist,jst,ispin) = xi_local(1,ist,jst,ispin) + &
+                      conjg(phi_eig(ist)) * coord(1) * phi_eig(jst) * hvol
+                    xi_local(2,ist,jst,ispin) = xi_local(2,ist,jst,ispin) + &
+                      conjg(phi_eig(ist)) * coord(2) * phi_eig(jst) * hvol
+                    xi_local(3,ist,jst,ispin) = xi_local(3,ist,jst,ispin) + &
+                      conjg(phi_eig(ist)) * coord(3) * phi_eig(jst) * hvol
+                  end do
+                end do
+              end do
+            end do
+          end do
+        end do
+      end do
+
+      call comm_summation(xi_local, xi_global, size(xi_global), dg_frag%icomm)
+      herm_diff = 0.0d0
+      do ispin = 1, dg_frag%nspin
+        do jst = 1, nstate
+          do ist = 1, jst - 1
+            herm_diff = max(herm_diff, maxval(abs(xi_global(1:3,ist,jst,ispin) - &
+                                                  conjg(xi_global(1:3,jst,ist,ispin)))))
+            xi_global(1:3,ist,jst,ispin) = 0.5d0 * (xi_global(1:3,ist,jst,ispin) + &
+                                                    conjg(xi_global(1:3,jst,ist,ispin)))
+            xi_global(1:3,jst,ist,ispin) = conjg(xi_global(1:3,ist,jst,ispin))
+          end do
+          xi_global(1:3,jst,jst,ispin) = cmplx(real(xi_global(1:3,jst,jst,ispin), kind=8), &
+                                               0.0d0, kind=8)
+        end do
+      end do
+      herm_diff_local(1) = herm_diff
+      call comm_summation(herm_diff_local, herm_diff_global, 1, dg_frag%icomm)
+
+      allocate(dg_frag%full_h_seed_xi(3,nstate,nstate,dg_frag%nspin))
+      dg_frag%full_h_seed_xi(:, :, :, :) = xi_global(:, :, :, :)
+      dg_frag%has_full_h_seed_xi = .true.
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,i0,2(a,1pe13.5))') '[DG-FULL-H-SEED-XI] projected centered-cell position in Full-H basis;', &
+          nstate, ' herm_diff_sum=', herm_diff_global(1), &
+          ' max_abs=', maxval(abs(xi_global))
+        flush(6)
+      end if
+      deallocate(xi_local, xi_global, phi_eig)
+    end subroutine build_full_h_seed_position_operator
   end subroutine diagonalize_current_dg_full_h_seed
 
   subroutine seed_current_global_wannier_flux_eigenstates(dg_frag, label)
@@ -2137,6 +2256,12 @@ contains
       dg_frag%n_dipole_blocks = 0
     end if
     if (allocated(dg_frag%dipole_block_map)) deallocate(dg_frag%dipole_block_map)
+    if (allocated(dg_frag%full_h_seed_evec)) deallocate(dg_frag%full_h_seed_evec)
+    if (allocated(dg_frag%full_h_seed_eval)) deallocate(dg_frag%full_h_seed_eval)
+    if (allocated(dg_frag%full_h_seed_xi)) deallocate(dg_frag%full_h_seed_xi)
+    dg_frag%full_h_seed_nstate = 0
+    dg_frag%has_full_h_seed_eigen = .false.
+    dg_frag%has_full_h_seed_xi = .false.
     if (allocated(dg_frag%buffer_wannier_xi_flux_blocks)) then
       do i = 1, size(dg_frag%buffer_wannier_xi_flux_blocks)
         if (allocated(dg_frag%buffer_wannier_xi_flux_blocks(i)%val)) &

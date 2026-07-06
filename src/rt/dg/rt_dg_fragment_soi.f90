@@ -576,6 +576,12 @@ contains
       dg_frag%n_dipole_blocks = 0
     end if
     if (allocated(dg_frag%dipole_block_map)) deallocate(dg_frag%dipole_block_map)
+    if (allocated(dg_frag%full_h_seed_evec)) deallocate(dg_frag%full_h_seed_evec)
+    if (allocated(dg_frag%full_h_seed_eval)) deallocate(dg_frag%full_h_seed_eval)
+    if (allocated(dg_frag%full_h_seed_xi)) deallocate(dg_frag%full_h_seed_xi)
+    dg_frag%full_h_seed_nstate = 0
+    dg_frag%has_full_h_seed_eigen = .false.
+    dg_frag%has_full_h_seed_xi = .false.
     if (allocated(dg_frag%esp)) deallocate(dg_frag%esp)
     if (allocated(dg_frag%nxyz_domain)) deallocate(dg_frag%nxyz_domain)
     if (allocated(dg_frag%density_owner_map)) deallocate(dg_frag%density_owner_map)

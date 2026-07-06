@@ -239,6 +239,12 @@ module rt_dg_fragment_types
     type(vector_block_info), allocatable :: dipole_blocks(:)
     integer, allocatable :: dipole_block_map(:,:)
     integer :: n_dipole_blocks = 0
+    complex(8), allocatable :: full_h_seed_evec(:,:,:) ! (DG basis, Full-H eigenstate, spin)
+    real(8), allocatable :: full_h_seed_eval(:,:)       ! (Full-H eigenstate, spin)
+    complex(8), allocatable :: full_h_seed_xi(:,:,:,:)  ! (x/y/z, Full-H eigenstate, Full-H eigenstate, spin)
+    integer :: full_h_seed_nstate = 0
+    logical :: has_full_h_seed_eigen = .false.
+    logical :: has_full_h_seed_xi = .false.
     logical :: has_local_wannier_basis = .false.
     integer, allocatable :: local_wannier_nbasis(:) ! (local fragment index)
     integer, allocatable :: local_wannier_nproj(:)  ! (local fragment index)
