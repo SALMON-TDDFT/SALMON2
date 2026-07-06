@@ -44,15 +44,18 @@
     integer :: it0, it1, ispin, ifrag, i_local, iblk
     integer :: nw, nbf, nstate_prop, state_first, state_last
     integer :: io, jo, iw, jw, istate, global_idx, local_idx, local_col
-    integer :: ib, jb, ib_global, jb_global
+    integer :: ib, jb, ib_global, jb_global, iblk_mom
     real(8) :: Ac_ham(3), E_mid(3), rdot_diag
+    real(8) :: impulse_k(3), impulse_k2
     real(8) :: cphase, sphase
     complex(8), parameter :: zi = (0.0d0, 1.0d0)
     complex(8), allocatable :: c_w(:), tmp_w(:), next_w(:)
     complex(8), allocatable :: h_eff(:,:), evec(:,:)
+    complex(8), allocatable :: mom_work(:,:), mom_eff(:,:)
     real(8), allocatable :: eval(:)
     logical :: use_bpw_wannier_h, use_formal_wannier_h
     logical :: use_formal_seed_phase
+    logical :: use_impulse_kinetic_shift
     logical :: use_global_flux_exp
     logical, save :: global_flux_env_checked = .false.
     logical, save :: global_flux_exp_enabled = .false.
@@ -839,11 +842,17 @@
     it1 = min(ubound(rt%Ac_tot, 2), itt)
     Ac_ham(:) = 0.0d0
     E_mid(:) = 0.5d0 * (rt%E_tot(:, it0) + rt%E_tot(:, it1))
-    if (trim(ae_shape1) == 'impulse' .and. yn_restart == 'n' .and. itt == 1) then
-      E_mid(:) = e_impulse * epdir_re1(:) / max(abs(dt), 1.0d-300)
-      if (dg_frag%id == 0 .and. .not. dg_frag%mixed_z_perf_count_enabled) then
+    use_impulse_kinetic_shift = trim(ae_shape1) == 'impulse' .and. yn_restart == 'n'
+    impulse_k(:) = 0.0d0
+    impulse_k2 = 0.0d0
+    if (use_impulse_kinetic_shift) then
+      impulse_k(:) = e_impulse * epdir_re1(:)
+      impulse_k2 = sum(impulse_k(1:3)**2)
+      E_mid(:) = 0.0d0
+      if (itt == 1 .and. dg_frag%id == 0 .and. .not. dg_frag%mixed_z_perf_count_enabled) then
         write(*,'(1x,a,3(1x,1pe13.5),a,1pe13.5)') &
-          '[DG-LG-IMPULSE] using first-step rectangular E field=', E_mid(:), ' dt=', dt
+          '[DG-LG-IMPULSE] using kinetic shift T(k)=T0-i*k.grad+k^2/2; k=', impulse_k(:), &
+          ' k2=', impulse_k2
         flush(6)
       end if
     end if
@@ -852,7 +861,7 @@
         '[DG-WPW-RED-DIAG-ORDER]', ' step=', itt, ' dt=', dt, &
         ' E_x=', E_mid(1), ' E_y=', E_mid(2), ' E_z=', E_mid(3), &
         ' Ac_x=', Ac_ham(1), ' Ac_y=', Ac_ham(2), ' Ac_z=', Ac_ham(3), &
-        ' production_impulse_rect=', trim(ae_shape1) == 'impulse' .and. yn_restart == 'n' .and. itt == 1, &
+        ' production_kinetic_shift=', use_impulse_kinetic_shift, &
         ' density_hxc_update_next=', yn_fix_func == 'n', &
         ' aux_reduced_next=', wpw_red_expdiag_enabled, &
         ' production_mixed_z=', mixed_z_enabled
@@ -1359,7 +1368,8 @@
       end if
       if (nw <= 0 .or. nbf <= 0) cycle
 
-      allocate(h_eff(nw,nw), eval(nw), evec(nw,nw), c_w(nw), tmp_w(nw), next_w(nw))
+      allocate(h_eff(nw,nw), eval(nw), evec(nw,nw), c_w(nw), tmp_w(nw), next_w(nw), &
+        mom_work(nbf,nw), mom_eff(nw,nw))
       do ispin = 1, dg_frag%nspin
         if (use_formal_wannier_h) then
           h_eff(1:nw,1:nw) = dg_frag%dg_wannier_h0_local(1:nw,1:nw,ispin,i_local)
@@ -1421,6 +1431,57 @@
           end if
         end if
         call symmetrize_expdiag_h_eff(h_eff, nw)
+        if (use_impulse_kinetic_shift) then
+          iblk_mom = 0
+          if (allocated(dg_frag%momentum_block_map)) iblk_mom = find_matrix_block(dg_frag%momentum_block_map, ifrag, ifrag)
+          if (iblk_mom <= 0 .or. .not. allocated(dg_frag%momentum_blocks)) then
+            stop "DG length-gauge impulse kinetic shift requires DG velocity/momentum blocks"
+          end if
+          if (iblk_mom > size(dg_frag%momentum_blocks)) then
+            stop "DG length-gauge impulse kinetic shift found invalid momentum block index"
+          end if
+          if (.not. allocated(dg_frag%momentum_blocks(iblk_mom)%val)) then
+            stop "DG length-gauge impulse kinetic shift found unallocated momentum block"
+          end if
+          mom_work(:,:) = (0.0d0, 0.0d0)
+          mom_eff(:,:) = (0.0d0, 0.0d0)
+          do jw = 1, nw
+            do jb = 1, min(nbf, size(dg_frag%momentum_blocks(iblk_mom)%val, 3))
+              do ib = 1, min(nbf, size(dg_frag%momentum_blocks(iblk_mom)%val, 2))
+                if (use_formal_wannier_h) then
+                  mom_work(ib,jw) = mom_work(ib,jw) &
+                    + (impulse_k(1) * dg_frag%momentum_blocks(iblk_mom)%val(1,ib,jb,ispin) &
+                     + impulse_k(2) * dg_frag%momentum_blocks(iblk_mom)%val(2,ib,jb,ispin) &
+                     + impulse_k(3) * dg_frag%momentum_blocks(iblk_mom)%val(3,ib,jb,ispin)) &
+                    * dg_frag%dg_wannier_basis_coef(jb,jw,ispin,i_local)
+                else
+                  mom_work(ib,jw) = mom_work(ib,jw) &
+                    + (impulse_k(1) * dg_frag%momentum_blocks(iblk_mom)%val(1,ib,jb,ispin) &
+                     + impulse_k(2) * dg_frag%momentum_blocks(iblk_mom)%val(2,ib,jb,ispin) &
+                     + impulse_k(3) * dg_frag%momentum_blocks(iblk_mom)%val(3,ib,jb,ispin)) &
+                    * cmplx(dg_frag%buffer_wannier_coef(jb,jw,ispin,i_local), 0.0d0, kind=8)
+                end if
+                end do
+              end do
+            end do
+          do jw = 1, nw
+            do iw = 1, nw
+              do ib = 1, min(nbf, size(dg_frag%momentum_blocks(iblk_mom)%val, 2))
+                if (use_formal_wannier_h) then
+                  mom_eff(iw,jw) = mom_eff(iw,jw) &
+                    + conjg(dg_frag%dg_wannier_basis_coef(ib,iw,ispin,i_local)) * mom_work(ib,jw)
+                else
+                  mom_eff(iw,jw) = mom_eff(iw,jw) &
+                    + cmplx(dg_frag%buffer_wannier_coef(ib,iw,ispin,i_local), 0.0d0, kind=8) * mom_work(ib,jw)
+                end if
+              end do
+              h_eff(iw,jw) = h_eff(iw,jw) - zi * mom_eff(iw,jw)
+            end do
+          end do
+          do iw = 1, nw
+            h_eff(iw,iw) = h_eff(iw,iw) + 0.5d0 * impulse_k2
+          end do
+        end if
         do iw = 1, nw
           do jw = 1, nw
             if (use_formal_wannier_h) then
@@ -1505,7 +1566,7 @@
           end do
         end do
       end do
-      deallocate(h_eff, eval, evec, c_w, tmp_w, next_w)
+      deallocate(h_eff, eval, evec, c_w, tmp_w, next_w, mom_work, mom_eff)
     end do
     if (xi_split_enabled .and. use_bpw_wannier_h) call apply_xi_flux_split_half(E_mid, 0.5d0 * dt, state_first, state_last)
     time_local_loop = time_local_loop + (get_wtime() - t_route0)
