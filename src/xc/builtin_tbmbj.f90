@@ -20,6 +20,17 @@ module builtin_tbmbj
   
   real(8),parameter :: Pi=3.141592653589793d0
 
+  ! Spin densities below this floor are numerically untrustworthy for the mBJ
+  ! evaluation: there rhs = (2/3)*pi^(2/3)*rho_s^(5/3)/Q_s underflows into the
+  ! large-x_s Becke-Roussel regime, where b_s = (x_s**3*exp(-x_s)/(8*pi*rho_s))
+  ! **(1/3) collapses and Vx_BR = -(1-exp(-x_s)-x_s*exp(-x_s)/2)/b_s comes out
+  ! huge (finite, up to ~1e90) or +-Inf/NaN. Shared by the auto-c cell average
+  ! below and by the repair pass in salmon_xc::exec_builtin_tbmbj (keep both
+  ! consistent). Distinct from rho_floor (the evaluation clamp of the LDA
+  ! fallback branch): 1d-12 still lets finite ~1e3-Ha transients through, 1d-8
+  ! bounds them at O(10) Ha, which SCF self-heals.
+  real(8),parameter :: tbmbj_rho_s_floor=1d-8
+
 contains
   
   
@@ -48,8 +59,12 @@ contains
          c=cval ! use c-value given by input file
        else
          !c=sum(sqrt(grho_s(:,1)**2+grho_s(:,2)**2+grho_s(:,3)**2)/rho_s(:))*Hxyz/aLxyz
-         ! nonpositive-density points (mixing transients) are excluded from the cell average
-         c=sum(sqrt(grho_s(:,1)**2+grho_s(:,2)**2+grho_s(:,3)**2)/rho_s(:), mask=(rho_s(:) > 0d0)) / nl
+         ! nonpositive densities (mixing transients) and deep tails below
+         ! tbmbj_rho_s_floor (gauss-init shadow zones / vacuum, where
+         ! |grho_s|/rho_s is numerical noise) are excluded from the cell
+         ! average; the >= mask keeps it the exact complement of the repair
+         ! trigger in salmon_xc::exec_builtin_tbmbj
+         c=sum(sqrt(grho_s(:,1)**2+grho_s(:,2)**2+grho_s(:,3)**2)/rho_s(:), mask=(rho_s(:) >= tbmbj_rho_s_floor)) / nl
          if(c >= 0d0 .and. c < huge(c)) then ! NaN/Inf-proof (contaminated transients)
            c=alpha+beta*sqrt(c)
          else

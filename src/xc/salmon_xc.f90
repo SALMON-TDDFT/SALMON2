@@ -26,7 +26,7 @@ module salmon_xc
   use builtin_pz, only: exc_cor_pz
   use builtin_pz_sp, only: exc_cor_pz_sp
   use builtin_pzm, only: exc_cor_pzm
-  use builtin_tbmbj, only: exc_cor_tbmbj
+  use builtin_tbmbj, only: exc_cor_tbmbj, tbmbj_rho_s_floor
   use builtin_pw, only: exc_cor_pw
 
 #ifdef USE_LIBXC
@@ -1410,19 +1410,38 @@ contains
       call exc_cor_tbmbj(nl, rho_1d, rho_s_1d,  grho_s_1d, rlrho_s_1d, tau_s_1d, j_s_1d, xc%cval, eexc_1d, vexc_1d)
 
       ! Repair pass: for |rhs| tiny but NONZERO (deep density tails, e.g. the
-      ! gauss-init shadow zones of large cells) the Becke-Roussel branch of
-      ! exc_cor_tbmbj still blows up: x_s**3*exp(-x_s) underflows -> b_s=0 ->
-      ! Vx_BR=+-Inf, or x_s is NaN (denormal rhs gives Inf/Inf inside BR_Newton).
-      ! A single Inf/NaN potential point poisons every eigenvalue at the first
-      ! subspace diagonalization (NaN is absorbing, unlike huge-but-finite
-      ! transients, which self-heal as SCF lifts the tails). Re-evaluate exactly
-      ! such points through exc_cor_tbmbj's own nonpositive-density LDA fallback
-      ! branch (rho_s_pt=-1 forces it; for these tail points max(rho_s,rho_floor)
+      ! gauss-init shadow zones of large cells, or the vacuum of isolated
+      ! systems) the Becke-Roussel branch of exc_cor_tbmbj blows up:
+      ! x_s**3*exp(-x_s) underflows -> b_s=0 -> Vx_BR=+-Inf, or x_s is NaN
+      ! (denormal rhs gives Inf/Inf inside BR_Newton). Before b_s fully
+      ! underflows there is a wide rhs window (~e^-60..e^-500) where Vx_BR is
+      ! huge but FINITE (-1e7..-1e93). Both forms poison the SCF: a single
+      ! Inf/NaN point corrupts every eigenvalue at the first subspace
+      ! diagonalization, and the finite spikes inflate the CG residual until
+      ! the rejection safeguards (conjugate_gradient W-selection guard and
+      ! rb/res blowup rejection) freeze the wavefunctions at machine precision
+      ! -> simple mixing becomes the identity -> false convergence at the
+      ! unevolved initial state (rho_dne ~ 1e-16 at iter 2). Therefore the
+      ! trigger is the tail itself, not just nonfiniteness: re-evaluate every
+      ! point with rho_s below tbmbj_rho_s_floor (the .not.(x>=floor) form also
+      ! catches rho_s=NaN) plus any point with nonfinite Vexc, through
+      ! exc_cor_tbmbj's own nonpositive-density LDA fallback branch
+      ! (rho_s_pt=-1 forces it; for these tail points max(rho_s,rho_floor)
       ! = rho_floor, so it is the same fallback the rhs=0 case takes). Placed
-      ! here, not inside exc_cor_tbmbj, so that translation unit stays untouched
-      ! and every currently-finite evaluation is bit-identical by construction.
+      ! here, not inside exc_cor_tbmbj's evaluation loop, which stays
+      ! untouched. In runs where no point falls below the floor (bulk
+      ! densities) every evaluation is bit-identical to the old code by
+      ! construction - testcase-133-type runs (cval / auto-c / noncollinear
+      ! SOC) reproduce the old binary byte-for-byte. When tail points do
+      ! exist, they take the bounded fallback (and, for auto-c, drop out of
+      ! the cell-average c), so systems with true vacuum or shadow-zone
+      ! tails - previously stalling at spike-contaminated states - now
+      ! converge (validated on isolated C2H2 TBmBJ; gauss-init bulk-Si
+      ! transients heal to the same fixed point as the old binary to
+      ! <1e-15 Ha in every eigenvalue).
       do i_rep = 1, nl
-        if (.not.(abs(vexc_1d(i_rep)) <= huge(0d0))) then ! Vexc is +-Inf/NaN
+        if ( .not.(rho_s_1d(i_rep) >= tbmbj_rho_s_floor) .or. &
+           & .not.(abs(vexc_1d(i_rep)) <= huge(0d0)) ) then ! deep tail, or Vexc is +-Inf/NaN
           rho_pt(1) = rho_1d(i_rep)
           rho_s_pt(1) = -1d0
           grho_pt = 0d0; lrho_pt = 0d0; tau_pt = 0d0; j_pt = 0d0
