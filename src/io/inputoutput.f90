@@ -335,6 +335,7 @@ contains
       & yn_dg_mixed_z_local_rho_writeback_wwonly, &
       & yn_dg_mixed_z_local_pz_writeback_total, &
       & yn_dg_mixed_z_local_current_writeback_total, &
+      & yn_dg_mixed_z_decomp_output, &
       & dg_wannier_symmetry_gauge, &
       & yn_plane_wave_basis, &
       & n_plane_waves_dg, &
@@ -845,6 +846,7 @@ contains
     yn_dg_mixed_z_local_rho_writeback_wwonly = 'n'
     yn_dg_mixed_z_local_pz_writeback_total = 'n'
     yn_dg_mixed_z_local_current_writeback_total = 'n'
+    yn_dg_mixed_z_decomp_output = 'n'
     dg_wannier_symmetry_gauge = 'diagnose'
     yn_plane_wave_basis = 'n'
     n_plane_waves_dg = 50
@@ -1475,6 +1477,7 @@ contains
     call comm_bcast(yn_dg_mixed_z_local_rho_writeback_wwonly,nproc_group_global)
     call comm_bcast(yn_dg_mixed_z_local_pz_writeback_total,nproc_group_global)
     call comm_bcast(yn_dg_mixed_z_local_current_writeback_total,nproc_group_global)
+    call comm_bcast(yn_dg_mixed_z_decomp_output,nproc_group_global)
     call comm_bcast(dg_wannier_symmetry_gauge,nproc_group_global)
     call comm_bcast(yn_plane_wave_basis,nproc_group_global)
     call comm_bcast(n_plane_waves_dg,nproc_group_global)
@@ -2469,6 +2472,8 @@ contains
         yn_dg_mixed_z_local_pz_writeback_total
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z_local_current_writeback_total', &
         yn_dg_mixed_z_local_current_writeback_total
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z_decomp_output', &
+        yn_dg_mixed_z_decomp_output
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_wannier_symmetry_gauge', &
         trim(dg_wannier_symmetry_gauge)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_plane_wave_basis', yn_plane_wave_basis
@@ -3092,15 +3097,16 @@ contains
     call yn_argument_check(yn_dg_mixed_z_local_rho_writeback_wwonly)
     call yn_argument_check(yn_dg_mixed_z_local_pz_writeback_total)
     call yn_argument_check(yn_dg_mixed_z_local_current_writeback_total)
+    call yn_argument_check(yn_dg_mixed_z_decomp_output)
     select case(trim(dg_mixed_z_direct_origin))
     case('global', 'fragment')
     case default
       stop "dg_mixed_z_direct_origin must be global or fragment"
     end select
     select case(trim(dg_mixed_z_ww_position_branch))
-    case('aa_r', 'center_eig')
+    case('aa_r', 'center_eig', 'center_eig_local', 'center_eig_local_sym')
     case default
-      stop "dg_mixed_z_ww_position_branch must be aa_r or center_eig"
+      stop "dg_mixed_z_ww_position_branch must be aa_r, center_eig, center_eig_local, or center_eig_local_sym"
     end select
     select case(trim(dg_mixed_z_wp_position_branch))
     case('aa_r', 'zero')
@@ -3463,8 +3469,10 @@ contains
       &  trim(wannier_projection) /= 'Si:sp3' .and. trim(wannier_projection) /= 'si:sp3' .and. &
       &  trim(wannier_projection) /= 'SI:sp3' .and. &
       &  trim(wannier_projection) /= 'pseudo_channels' .and. &
-      &  trim(wannier_projection) /= 'PSEUDO_CHANNELS') &
-      & stop "DC-LCFO local Wannier export: supported wannier_projection values are C:sp3, Si:sp3, and pseudo_channels."
+      &  trim(wannier_projection) /= 'PSEUDO_CHANNELS' .and. &
+      &  trim(wannier_projection) /= 'bond_centers' .and. &
+      &  trim(wannier_projection) /= 'BOND_CENTERS') &
+      & stop "DC-LCFO local Wannier export: supported wannier_projection values are C:sp3, Si:sp3, pseudo_channels, and bond_centers."
       if(wannier_projection_width <= 0d0) &
       & stop "DC-LCFO local Wannier export: wannier_projection_width must be positive."
       if(lambda_cut <= 0d0) &

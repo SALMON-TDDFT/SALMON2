@@ -896,7 +896,7 @@
             ' observables_series_enabled=', mixed_z_local_prop_obs_series_enabled, &
             ' writeback_flag_enabled=', mixed_z_local_prop_writeback_enabled, &
             ' bad=', mixed_z_backend_bad, &
-            ' target_kind=', 'production_equivalent_split', &
+            ' target_kind=', 'production_equivalent_full_h_exp', &
             ' candidate_kind=', trim(mixed_z_local_prop_backend_kind), &
             ' payload_route=', 'normal_series_after_propagation', &
             ' replacement_block_reason=', trim(mixed_z_backend_block_reason), &
@@ -4279,9 +4279,8 @@
     subroutine apply_global_mixed_split_exp(E_use, state_s, state_e)
       real(8), intent(in) :: E_use(3)
       integer, intent(in) :: state_s, state_e
-      integer :: ispin_current, nstate_blk, nmix, imix, istate
-      integer :: field_axis
-      real(8) :: phase_c, phase_s, prop_t0, field_absmax, field_other
+      integer :: ispin_current, nstate_blk, nmix, imix
+      real(8) :: phase_c, phase_s, prop_t0
       complex(8), allocatable :: cmix_before_field(:,:)
 
       if (.not. dg_frag%has_mixed_wannier_bpw_position) return
@@ -4319,60 +4318,35 @@
         if (ispin_current > size(dg_frag%mixed_wannier_bpw_eval, 2) .or. &
             ispin_current > size(dg_frag%mixed_wannier_bpw_z, 4)) cycle
         call gather_global_mixed_coefficients(ispin_current, state_s, state_e, prop_cmix_work)
+        if (dg_frag%mixed_z_perf_count_enabled) prop_t0 = get_wtime()
+        prop_field_h_work(:, :) = (0.0d0, 0.0d0)
+        do imix = 1, nmix
+          prop_field_h_work(imix,imix) = cmplx(dg_frag%mixed_wannier_bpw_eval(imix,ispin_current), 0.0d0, kind=8)
+        end do
         if (sum(abs(E_use(1:3))) > 1.0d-30) then
           if (mixed_z_field_kick_diag_enabled) cmix_before_field(:,:) = prop_cmix_work(:,:)
-          if (dg_frag%mixed_z_perf_count_enabled) prop_t0 = get_wtime()
-          field_axis = maxloc(abs(E_use(1:3)), dim=1)
-          field_absmax = abs(E_use(field_axis))
-          field_other = sum(abs(E_use(1:3))) - field_absmax
-          if (field_absmax > 1.0d-30 .and. field_other <= 1.0d-12 * field_absmax) then
-            if (.not. prop_field_axis_cache_valid(ispin_current) .or. &
-                prop_field_axis_cache_axis(ispin_current) /= field_axis) then
-              prop_field_vec_work(:,:) = -dg_frag%mixed_wannier_bpw_z(field_axis,1:nmix,1:nmix,ispin_current)
-              dg_frag%mixed_z_perf_eigensolve_calls = dg_frag%mixed_z_perf_eigensolve_calls + 1_8
-              call eigen_zheev(prop_field_vec_work, prop_field_axis_eval_cache(1:nmix,ispin_current), &
-                               prop_field_axis_evec_cache(1:nmix,1:nmix,ispin_current))
-              prop_field_axis_cache_axis(ispin_current) = field_axis
-              prop_field_axis_cache_valid(ispin_current) = .true.
-            end if
-            prop_field_h_work(:,:) = prop_field_axis_evec_cache(1:nmix,1:nmix,ispin_current)
-            prop_field_eval_work(1:nmix) = E_use(field_axis) * &
-              prop_field_axis_eval_cache(1:nmix,ispin_current)
-          else
-            prop_field_h_work(:,:) = -E_use(1) * dg_frag%mixed_wannier_bpw_z(1,1:nmix,1:nmix,ispin_current) &
-                          -E_use(2) * dg_frag%mixed_wannier_bpw_z(2,1:nmix,1:nmix,ispin_current) &
-                          -E_use(3) * dg_frag%mixed_wannier_bpw_z(3,1:nmix,1:nmix,ispin_current)
-            prop_field_vec_work(:,:) = prop_field_h_work(:,:)
-            dg_frag%mixed_z_perf_eigensolve_calls = dg_frag%mixed_z_perf_eigensolve_calls + 1_8
-            call eigen_zheev(prop_field_vec_work, prop_field_eval_work, prop_field_h_work)
-          end if
-          dg_frag%mixed_z_perf_zgemm_calls = dg_frag%mixed_z_perf_zgemm_calls + 2_8
-          prop_tmp_work(:,:) = matmul(conjg(transpose(prop_field_h_work(:,:))), prop_cmix_work(:,:))
-          do imix = 1, nmix
-            phase_c = cos(prop_field_eval_work(imix) * dt)
-            phase_s = sin(prop_field_eval_work(imix) * dt)
-            prop_tmp_work(imix,1:nstate_blk) = cmplx(phase_c, -phase_s, kind=8) * &
-              prop_tmp_work(imix,1:nstate_blk)
-          end do
-          prop_cmix_work(:,:) = matmul(prop_field_h_work(:,:), prop_tmp_work(:,:))
-          if (mixed_z_field_kick_diag_enabled) call log_mixed_field_kick_diag( &
-            'split_field_exp', itt, ispin_current, E_use, cmix_before_field, prop_cmix_work, state_s, state_e)
-          if (dg_frag%mixed_z_perf_count_enabled) then
-            dg_frag%mixed_z_perf_wall_prop_field_exp = &
-              dg_frag%mixed_z_perf_wall_prop_field_exp + (get_wtime() - prop_t0)
-          end if
+          prop_field_h_work(:,:) = prop_field_h_work(:,:) &
+            - E_use(1) * dg_frag%mixed_wannier_bpw_z(1,1:nmix,1:nmix,ispin_current) &
+            - E_use(2) * dg_frag%mixed_wannier_bpw_z(2,1:nmix,1:nmix,ispin_current) &
+            - E_use(3) * dg_frag%mixed_wannier_bpw_z(3,1:nmix,1:nmix,ispin_current)
         end if
-        if (dg_frag%mixed_z_perf_count_enabled) prop_t0 = get_wtime()
-        do istate = 1, nstate_blk
-          do imix = 1, nmix
-            phase_c = cos(dg_frag%mixed_wannier_bpw_eval(imix,ispin_current) * dt)
-            phase_s = sin(dg_frag%mixed_wannier_bpw_eval(imix,ispin_current) * dt)
-            prop_cmix_work(imix,istate) = cmplx(phase_c, -phase_s, kind=8) * prop_cmix_work(imix,istate)
-          end do
+        prop_field_vec_work(:,:) = prop_field_h_work(:,:)
+        dg_frag%mixed_z_perf_eigensolve_calls = dg_frag%mixed_z_perf_eigensolve_calls + 1_8
+        call eigen_zheev(prop_field_vec_work, prop_field_eval_work, prop_field_h_work)
+        dg_frag%mixed_z_perf_zgemm_calls = dg_frag%mixed_z_perf_zgemm_calls + 2_8
+        prop_tmp_work(:,:) = matmul(conjg(transpose(prop_field_h_work(:,:))), prop_cmix_work(:,:))
+        do imix = 1, nmix
+          phase_c = cos(prop_field_eval_work(imix) * dt)
+          phase_s = sin(prop_field_eval_work(imix) * dt)
+          prop_tmp_work(imix,1:nstate_blk) = cmplx(phase_c, -phase_s, kind=8) * &
+            prop_tmp_work(imix,1:nstate_blk)
         end do
+        prop_cmix_work(:,:) = matmul(prop_field_h_work(:,:), prop_tmp_work(:,:))
+        if (mixed_z_field_kick_diag_enabled .and. sum(abs(E_use(1:3))) > 1.0d-30) call log_mixed_field_kick_diag( &
+          'midpoint_full_h_exp', itt, ispin_current, E_use, cmix_before_field, prop_cmix_work, state_s, state_e)
         if (dg_frag%mixed_z_perf_count_enabled) then
-          dg_frag%mixed_z_perf_wall_prop_phase = &
-            dg_frag%mixed_z_perf_wall_prop_phase + (get_wtime() - prop_t0)
+          dg_frag%mixed_z_perf_wall_prop_field_exp = &
+            dg_frag%mixed_z_perf_wall_prop_field_exp + (get_wtime() - prop_t0)
         end if
         call scatter_global_mixed_coefficients(ispin_current, state_s, state_e, prop_cmix_work)
       end do

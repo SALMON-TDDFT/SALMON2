@@ -6,8 +6,9 @@
     use rt_dg_plane_wave, only: apply_wpw_reduced_pz_to_production, map_global_to_phi_box_coord_pw
     use communication, only: comm_summation
     use unusedvar_mod, only: salmon_unusedvar
-    use salmon_global, only: yn_dg_length_gauge, yn_dg_mixed_z_local_pz_writeback_total, &
-      yn_dg_mixed_z_local_current_writeback_total
+    use salmon_global, only: base_directory, sysname, yn_dg_length_gauge, &
+      yn_dg_mixed_z_local_pz_writeback_total, yn_dg_mixed_z_local_current_writeback_total, &
+      yn_dg_mixed_z_decomp_output
     use misc_routines, only: get_wtime
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
@@ -95,9 +96,13 @@
     logical, save :: perf_count_initialized = .false.
     logical, save :: enable_perf_count = .false.
     logical, save :: prop_obs_prev_pz_valid = .false.
+    logical, save :: decomp_output_ref_ready = .false.
+    logical, save :: decomp_output_opened = .false.
     character(24), save :: prop_obs_series_source_value = 'prod_reference'
     real(8), save :: prop_obs_prev_pz_value = 0.0d0
+    real(8), save :: decomp_output_ref(9) = 0.0d0
     integer, save :: prop_obs_prev_pz_step = -1
+    integer, save :: decomp_output_unit = -1
     integer :: env_status, env_len
     integer :: prop_obs_iw, prop_obs_jw, prop_obs_ist, prop_obs_ispin
     integer :: prop_obs_nw, prop_obs_nstate, prop_obs_nspin
@@ -491,7 +496,7 @@
       call apply_wpw_reduced_pz_to_production(dg_frag, system, itt)
       if (enable_perf_count) dg_frag%mixed_z_perf_wall_pz_reduced = &
         dg_frag%mixed_z_perf_wall_pz_reduced + (get_wtime() - perf_pz_section_t0)
-      if ((enable_pz_total_hook .or. prop_obs_series_enabled) .and. &
+      if ((enable_pz_total_hook .or. prop_obs_series_enabled .or. yn_dg_mixed_z_decomp_output == 'y') .and. &
           dg_frag%mixed_z_prod_pz_decomp_ready) then
         if (enable_perf_count) perf_pz_section_t0 = get_wtime()
         pz_prod_raw_before = dg_frag%dipole_lg_raw(3)
@@ -510,7 +515,7 @@
           pz_prod_density = 0.0d0
         end if
         if (dg_frag%id == 0) then
-          if (enable_pz_total_hook .or. prop_obs_series_enabled) then
+          if (enable_pz_total_hook .or. prop_obs_series_enabled .or. yn_dg_mixed_z_decomp_output == 'y') then
             pz_total_wp_combined = dg_frag%mixed_z_prod_pz_wp_raw
             pz_total_pp = dg_frag%mixed_z_prod_pz_pp_raw
             pz_total_candidate = wwfull_pz_total + pz_total_wp_combined + pz_total_pp
@@ -535,6 +540,13 @@
                 pz_total_candidate == pz_total_candidate .and. pz_prod_raw_before == pz_prod_raw_before) then
               dg_frag%dipole_lg_raw(3) = pz_total_candidate
               dg_frag%polarization_lg(3) = pz_total_output_after
+            end if
+            if (yn_dg_mixed_z_decomp_output == 'y') then
+              call write_mixed_z_decomp_output(itt, system, dg_frag, pz_prod_raw_before, &
+                pz_total_candidate, wwfull_pz_diag, wwfull_pz_offdiag, wwfull_pz_total, &
+                dg_frag%mixed_z_prod_pz_ww_same_owner_raw, dg_frag%mixed_z_prod_pz_ww_cross_owner_raw, &
+                pz_total_wp_combined, pz_total_pp, pz_prod_output_before, pz_total_output_after, &
+                dg_frag%polarization_lg(3))
             end if
             prop_obs_pz_available = .true.
             if (enable_pz_total_hook) then
@@ -913,6 +925,62 @@
     rt%curr(:, itt) = -dg_frag%current_total(:)
 
   contains
+
+    subroutine write_mixed_z_decomp_output(itt_in, system_in, dg_frag_in, raw_before, raw_total, &
+        raw_ww_diag, raw_ww_offdiag, raw_ww_total, raw_ww_same, raw_ww_cross, raw_wp, raw_pp, &
+        out_before, out_candidate_after, out_after)
+      type(s_dft_system),     intent(in) :: system_in
+      type(s_dg_fragment_rt), intent(in) :: dg_frag_in
+      integer,                intent(in) :: itt_in
+      real(8),                intent(in) :: raw_before, raw_total
+      real(8),                intent(in) :: raw_ww_diag, raw_ww_offdiag, raw_ww_total
+      real(8),                intent(in) :: raw_ww_same, raw_ww_cross, raw_wp, raw_pp
+      real(8),                intent(in) :: out_before, out_candidate_after, out_after
+
+      character(512) :: filename
+      real(8) :: raw(9), dens(9), delta(9), volume
+      integer :: io
+
+      if (dg_frag_in%id /= 0) return
+      raw(1) = raw_before
+      raw(2) = raw_total
+      raw(3) = raw_ww_total
+      raw(4) = raw_ww_diag
+      raw(5) = raw_ww_offdiag
+      raw(6) = raw_ww_same
+      raw(7) = raw_ww_cross
+      raw(8) = raw_wp
+      raw(9) = raw_pp
+      volume = 0.0d0
+      if (system_in%ngrid > 0 .and. system_in%hvol > 0.0d0) volume = dble(system_in%ngrid) * system_in%hvol
+      dens(:) = 0.0d0
+      if (volume > 0.0d0) dens(:) = raw(:) / volume
+      if (.not. decomp_output_ref_ready) then
+        decomp_output_ref(:) = dens(:)
+        decomp_output_ref_ready = .true.
+      end if
+      delta(:) = dens(:) - decomp_output_ref(:)
+      if (.not. decomp_output_opened) then
+        filename = trim(base_directory)//trim(sysname)//'_mixedz_decomp.data'
+        open(newunit=decomp_output_unit, file=trim(filename), status='replace', action='write', iostat=io)
+        if (io /= 0) then
+          write(*,'(1x,a,a)') '[DG-MIXEDZ-DECOMP] failed to open ', trim(filename)
+          return
+        end if
+        write(decomp_output_unit,'(a)') '# Mixed-Z Pz decomposition diagnostic'
+        write(decomp_output_unit,'(a)') '# raw columns are dipole-like raw Pz components before density normalization'
+        write(decomp_output_unit,'(a)') '# delta columns are density-normalized values minus their initial value'
+        write(decomp_output_unit,'(a)') '# 1:step 2:step_index 3:out_before 4:out_candidate_after 5:out_after'
+        write(decomp_output_unit,'(a)') '# 6:raw_before 7:raw_total 8:raw_WW 9:raw_WW_diag 10:raw_WW_offdiag 11:raw_WW_same 12:raw_WW_cross 13:raw_WP 14:raw_PP'
+        write(decomp_output_unit,'(a)') '# 15:d_before 16:d_total 17:d_WW 18:d_WW_diag 19:d_WW_offdiag 20:d_WW_same 21:d_WW_cross 22:d_WP 23:d_PP'
+        decomp_output_opened = .true.
+      end if
+      if (decomp_output_opened) then
+        write(decomp_output_unit,'(i8,1x,f18.8,21(1x,es23.15))') itt_in, dble(itt_in), &
+          out_before, out_candidate_after, out_after, raw(1:9), delta(1:9)
+        flush(decomp_output_unit)
+      end if
+    end subroutine write_mixed_z_decomp_output
 
     subroutine compute_payload_ww_para_current(current_ww, current_mom_ww, current_mom_self_ww, &
       current_mom_cross_ww, momentum_block_counts, available)

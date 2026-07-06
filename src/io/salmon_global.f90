@@ -175,6 +175,7 @@ module salmon_global
   character(1)   :: yn_dg_mixed_z_local_rho_writeback_wwonly
   character(1)   :: yn_dg_mixed_z_local_pz_writeback_total
   character(1)   :: yn_dg_mixed_z_local_current_writeback_total
+  character(1)   :: yn_dg_mixed_z_decomp_output
   character(32)  :: dg_wannier_symmetry_gauge
   
   ! Plane wave basis mixing for DG-Fragment RT

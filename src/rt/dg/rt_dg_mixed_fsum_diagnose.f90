@@ -40,6 +40,7 @@
     character(len=32) :: env_select_mode, env_comm
     character(len=32) :: bpw_select_mode
     logical :: use_fragment_center_direct, use_comm_min_select
+    logical :: ww_position_is_fragment_local
     logical :: use_shell_ecut_select, use_shell_nraw_select
     logical :: use_h_eigenvectors_for_final, use_legacy_h_vec_for_final
     logical :: bpw_ecut_is_set, comm_diag_enabled, fsum_diag_enabled
@@ -789,16 +790,27 @@
 
       do idir = 1, 3
         z_w(1:nwann,1:nwann) = dg_frag%global_wannier_position(idir,1:nwann,1:nwann)
-        if (trim(dg_mixed_z_ww_position_branch) == 'center_eig') then
+        ww_position_is_fragment_local = .false.
+        if (trim(dg_mixed_z_ww_position_branch) == 'center_eig' .or. &
+            trim(dg_mixed_z_ww_position_branch) == 'center_eig_local' .or. &
+            trim(dg_mixed_z_ww_position_branch) == 'center_eig_local_sym') then
           if (.not. allocated(dg_frag%global_wannier_center) .or. &
               size(dg_frag%global_wannier_center, 1) < idir .or. &
               size(dg_frag%global_wannier_center, 2) < nwann) then
             stop "DG-Fragment RT: center_eig WW position branch requires global Wannier centers"
           end if
           center_w_global(:, :) = zzero
-          do iw = 1, nwann
-            center_w_global(iw,iw) = cmplx(dg_frag%global_wannier_center(idir,iw), 0.0d0, kind=8)
-          end do
+          if (trim(dg_mixed_z_ww_position_branch) == 'center_eig_local') then
+            call fill_fragment_local_center(idir, center_w_global)
+            ww_position_is_fragment_local = .true.
+          else if (trim(dg_mixed_z_ww_position_branch) == 'center_eig_local_sym') then
+            call fill_fragment_local_inversion_center(idir, center_w_global)
+            ww_position_is_fragment_local = .true.
+          else
+            do iw = 1, nwann
+              center_w_global(iw,iw) = cmplx(dg_frag%global_wannier_center(idir,iw), 0.0d0, kind=8)
+            end do
+          end if
           z_w(1:nwann,1:nwann) = center_w_global(1:nwann,1:nwann)
         end if
         z_eig(1:neig,1:neig) = matmul(conjg(transpose(dg_frag%global_wannier_flux_evec(1:nwann,1:neig))), &
@@ -843,7 +855,7 @@
 
         c_eig(1:neig,1:neig) = matmul(conjg(transpose(dg_frag%global_wannier_flux_evec(1:nwann,1:neig))), &
           matmul(c_w_global(1:nwann,1:nwann), dg_frag%global_wannier_flux_evec(1:nwann,1:neig)))
-        if (use_fragment_center_direct) then
+        if (use_fragment_center_direct .and. .not. ww_position_is_fragment_local) then
           o_eig(1:neig,1:neig) = z_eig(1:neig,1:neig) - c_eig(1:neig,1:neig)
         else
           o_eig(1:neig,1:neig) = z_eig(1:neig,1:neig)
@@ -1081,6 +1093,144 @@
     deallocate(active_pw, trial_active_pw, best_active_pw, shell_key, shell_values)
 
   contains
+
+    subroutine fill_fragment_local_center(idir_in, zmat)
+      integer, intent(in) :: idir_in
+      complex(8), intent(out) :: zmat(:,:)
+
+      integer :: ii, kk, owner_i
+      real(8) :: box(3), rfrag(3), rloc(3)
+
+      if (.not. allocated(dg_frag%global_wannier_owner_frag)) then
+        stop "DG-Fragment RT: center_eig_local requires Wannier owner fragments"
+      end if
+      if (size(dg_frag%global_wannier_owner_frag) < nwann) then
+        stop "DG-Fragment RT: center_eig_local owner fragment table is too small"
+      end if
+
+      zmat(:, :) = zzero
+      box(1:3) = dg_frag%hgs(1:3) * dble(max(1, dg_frag%lgnum_total(1:3)))
+      do ii = 1, nwann
+        owner_i = dg_frag%global_wannier_owner_frag(ii)
+        call fragment_center_from_owner(owner_i, rfrag)
+        rloc(1:3) = dg_frag%global_wannier_center(1:3,ii) - rfrag(1:3)
+        do kk = 1, 3
+          if (box(kk) > 0.0d0) rloc(kk) = rloc(kk) - dnint(rloc(kk) / box(kk)) * box(kk)
+        end do
+        zmat(ii,ii) = cmplx(rloc(idir_in), 0.0d0, kind=8)
+      end do
+      if (comm_is_root(dg_frag%id) .and. ispin == 1) then
+        write(*,'(1x,a,i0,a)') "[DG-MIXED-Z-WW-LOCAL] axis=", idir_in, &
+          " using owner-fragment local Wannier centers"
+      end if
+    end subroutine fill_fragment_local_center
+
+    subroutine fill_fragment_local_inversion_center(idir_in, zmat)
+      integer, intent(in) :: idir_in
+      complex(8), intent(out) :: zmat(:,:)
+
+      integer :: ii, jj, kk, owner_i, owner_j, best_j, npair, nsingle
+      real(8) :: box(3), rfrag(3), pair_vec(3), best_dist, dist
+      real(8) :: pair_mismatch_max, pair_mismatch_rms, pair_tol
+      real(8), allocatable :: rloc(:,:), rsym(:,:)
+      logical, allocatable :: used(:)
+
+      if (.not. allocated(dg_frag%global_wannier_owner_frag)) then
+        stop "DG-Fragment RT: center_eig_local_sym requires Wannier owner fragments"
+      end if
+      if (size(dg_frag%global_wannier_owner_frag) < nwann) then
+        stop "DG-Fragment RT: center_eig_local_sym owner fragment table is too small"
+      end if
+
+      allocate(rloc(3,nwann), rsym(3,nwann), used(nwann))
+      zmat(:, :) = zzero
+      rloc(:, :) = 0.0d0
+      rsym(:, :) = 0.0d0
+      used(:) = .false.
+      box(1:3) = dg_frag%hgs(1:3) * dble(max(1, dg_frag%lgnum_total(1:3)))
+
+      do ii = 1, nwann
+        owner_i = dg_frag%global_wannier_owner_frag(ii)
+        call fragment_center_from_owner(owner_i, rfrag)
+        rloc(1:3,ii) = dg_frag%global_wannier_center(1:3,ii) - rfrag(1:3)
+        do kk = 1, 3
+          if (box(kk) > 0.0d0) rloc(kk,ii) = rloc(kk,ii) - dnint(rloc(kk,ii) / box(kk)) * box(kk)
+        end do
+      end do
+
+      pair_mismatch_max = 0.0d0
+      pair_mismatch_rms = 0.0d0
+      npair = 0
+      nsingle = 0
+      pair_tol = 1.0d-6 * max(1.0d0, maxval(box(1:3)))
+      do ii = 1, nwann
+        if (used(ii)) cycle
+        owner_i = dg_frag%global_wannier_owner_frag(ii)
+        best_j = 0
+        best_dist = huge(1.0d0)
+        do jj = 1, nwann
+          if (used(jj) .and. jj /= ii) cycle
+          owner_j = dg_frag%global_wannier_owner_frag(jj)
+          if (owner_j /= owner_i) cycle
+          pair_vec(1:3) = rloc(1:3,ii) + rloc(1:3,jj)
+          do kk = 1, 3
+            if (box(kk) > 0.0d0) pair_vec(kk) = pair_vec(kk) - dnint(pair_vec(kk) / box(kk)) * box(kk)
+          end do
+          dist = sqrt(sum(pair_vec(1:3)**2))
+          if (dist < best_dist) then
+            best_dist = dist
+            best_j = jj
+          end if
+        end do
+        if (best_j <= 0 .or. best_j == ii) then
+          rsym(1:3,ii) = 0.0d0
+          used(ii) = .true.
+          nsingle = nsingle + 1
+          pair_mismatch_max = max(pair_mismatch_max, sqrt(sum(rloc(1:3,ii)**2)))
+          pair_mismatch_rms = pair_mismatch_rms + sum(rloc(1:3,ii)**2)
+        else
+          rsym(1:3,ii) = 0.5d0 * (rloc(1:3,ii) - rloc(1:3,best_j))
+          rsym(1:3,best_j) = -rsym(1:3,ii)
+          used(ii) = .true.
+          used(best_j) = .true.
+          npair = npair + 1
+          pair_mismatch_max = max(pair_mismatch_max, best_dist)
+          pair_mismatch_rms = pair_mismatch_rms + best_dist**2
+        end if
+      end do
+      if (npair + nsingle > 0) pair_mismatch_rms = sqrt(pair_mismatch_rms / dble(npair + nsingle))
+      do ii = 1, nwann
+        zmat(ii,ii) = cmplx(rsym(idir_in,ii), 0.0d0, kind=8)
+      end do
+      if (comm_is_root(dg_frag%id) .and. ispin == 1) then
+        write(*,'(1x,a,i0,a,i0,a,i0,3(a,1pe13.5))') "[DG-MIXED-Z-WW-SYM] axis=", idir_in, &
+          " pairs=", npair, " singles=", nsingle, " max_pair_mismatch=", pair_mismatch_max, &
+          " rms_pair_mismatch=", pair_mismatch_rms, " pair_tol=", pair_tol
+      end if
+      deallocate(rloc, rsym, used)
+    end subroutine fill_fragment_local_inversion_center
+
+    subroutine fragment_center_from_owner(owner, rfrag)
+      integer, intent(in) :: owner
+      real(8), intent(out) :: rfrag(3)
+
+      integer :: kk, iloc
+
+      rfrag(1:3) = 0.0d0
+      iloc = owner - dg_frag%ifrag_start + 1
+      if (allocated(dg_frag%buffer_wannier_frag_center) .and. &
+          iloc >= 1 .and. iloc <= size(dg_frag%buffer_wannier_frag_center, 2)) then
+        rfrag(1:3) = dg_frag%buffer_wannier_frag_center(1:3,iloc)
+        return
+      end if
+      if (owner < 1 .or. owner > size(dg_frag%ixyz_frag, 2)) then
+        stop "DG-Fragment RT: invalid owner fragment in center_eig_local_sym"
+      end if
+      do kk = 1, 3
+        rfrag(kk) = dg_frag%hgs(kk) * (dble(dg_frag%ixyz_frag(kk,owner) - 1) + &
+          0.5d0 * dble(dg_frag%nxyz_domain(kk,owner) - 1))
+      end do
+    end subroutine fragment_center_from_owner
 
     subroutine summarize_sperp_spectrum()
       integer :: i

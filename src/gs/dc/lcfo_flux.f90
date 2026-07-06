@@ -127,7 +127,7 @@ contains
     use communication, only: comm_sync_all
     use filesystem, only: get_filehandle
     use inputoutput, only: au_length_aa
-    use salmon_global, only: base_directory, sysname, wannier_num_wann, dg_wannier_symmetry_gauge
+    use salmon_global, only: base_directory, sysname, wannier_num_wann, wannier_projection, dg_wannier_symmetry_gauge
     use structures, only: s_dcdft
     implicit none
     type(s_dcdft), intent(in) :: dc
@@ -135,9 +135,10 @@ contains
     integer :: iunit, iw, istate, nstate_seed, position_available, nsym
     integer, allocatable :: owner_frag(:)
     type(t_wannier_symop), allocatable :: symops(:)
-    real(8), allocatable :: center_aa(:,:), center_bohr(:,:), spread_aa2(:), esp_file(:,:), eval_seed(:,:)
-    complex(8), allocatable :: v_matrix(:,:), aa_global(:,:,:), seed_wannier_to_eigen(:,:)
-    logical :: ok_position
+    real(8), allocatable :: center_aa(:,:), center_bohr(:,:), owner_center_bohr(:,:), spread_aa2(:)
+    real(8), allocatable :: esp_file(:,:), eval_seed(:,:)
+    complex(8), allocatable :: v_matrix(:,:), v_direct(:,:), aa_global(:,:,:), seed_wannier_to_eigen(:,:)
+    logical :: ok_position, ok_direct
     character(256) :: filename
 
     call read_dc_lcfo_esp_from_wavefunctions_import(dc, nstate_tot_file, nspin_file, esp_file)
@@ -158,11 +159,26 @@ contains
 
       allocate(owner_frag(num_wann_chk), center_bohr(3,num_wann_chk))
       center_bohr(1:3,1:num_wann_chk) = center_aa(1:3,1:num_wann_chk) / au_length_aa
-      do iw=1,num_wann_chk
-        owner_frag(iw) = find_owner_fragment_from_center_import(dc, center_bohr(1:3,iw))
-      end do
-      call rebalance_wannier_owner_fragments_import(dc, center_bohr, owner_frag, num_wann_chk)
+      call wrap_wannier_centers_to_total_cell_import(dc, center_bohr, num_wann_chk)
+      if(is_bond_center_projection_import(trim(wannier_projection))) then
+        call build_bond_center_projection_map_import(dc, num_wann_chk, owner_center_bohr)
+        do iw=1,num_wann_chk
+          owner_frag(iw) = find_owner_fragment_from_center_import(dc, owner_center_bohr(1:3,iw))
+        end do
+        call rebalance_wannier_owner_fragments_import(dc, owner_center_bohr, owner_frag, num_wann_chk)
+        write(*,'(1x,a)') "[DC-LCFO-W90-IMPORT] owner source=bond_centers"
+      else
+        do iw=1,num_wann_chk
+          owner_frag(iw) = find_owner_fragment_from_center_import(dc, center_bohr(1:3,iw))
+        end do
+        call rebalance_wannier_owner_fragments_import(dc, center_bohr, owner_frag, num_wann_chk)
+        write(*,'(1x,a)') "[DC-LCFO-W90-IMPORT] owner source=wannier_centers"
+      end if
       call detect_wannier_fragment_symops(dc, nsym, symops)
+      if(allocated(owner_center_bohr)) then
+        write(*,'(1x,a)') "[DC-LCFO-W90-SYM] center diagnostic source=bond_center_seeds"
+        call diagnose_fragment_wannier_center_symmetry(dc, owner_center_bohr, owner_frag, num_wann_chk, nsym, symops)
+      end if
       call diagnose_fragment_wannier_center_symmetry(dc, center_bohr, owner_frag, num_wann_chk, nsym, symops)
       call read_wannier90_global_rmn_gamma_block_import(dc, num_wann_chk, aa_global, ok_position)
       if(.not. ok_position) then
@@ -173,6 +189,15 @@ contains
           num_bands_chk, v_matrix, esp_file, nsym, symops, aa_global, ok_position)
         call diagnose_global_wannier_pbc_operator_symmetry(dc, center_bohr, num_wann_chk, &
           num_bands_chk, v_matrix, esp_file, nsym, symops, aa_global, ok_position)
+        if(is_bond_center_projection_import(trim(wannier_projection))) then
+          call read_wannier90_amn_direct_transform_import(dc, num_bands_chk, num_wann_chk, owner_frag, v_direct, ok_direct)
+          if(ok_direct) then
+            write(*,'(1x,a)') "[DC-LCFO-W90-SYM] diagnostic basis=direct_amn_bond_centers"
+            call diagnose_fragment_wannier_symmetry_representation(dc, center_bohr, owner_frag, num_wann_chk, &
+              num_bands_chk, v_direct, esp_file, nsym, symops, aa_global, ok_position)
+            deallocate(v_direct)
+          end if
+        end if
         if(trim(dg_wannier_symmetry_gauge) == 'local_inversion_position') then
           call symmetrize_fragment_wannier_position_import(dc, center_bohr, owner_frag, num_wann_chk, &
             num_bands_chk, v_matrix, nsym, symops, aa_global)
@@ -224,6 +249,7 @@ contains
         deallocate(seed_wannier_to_eigen, eval_seed)
       end if
 
+      if(allocated(owner_center_bohr)) deallocate(owner_center_bohr)
       deallocate(owner_frag, center_bohr, center_aa, spread_aa2, v_matrix, aa_global)
     end if
 
@@ -365,6 +391,106 @@ contains
     if(allocated(u_matrix_opt)) deallocate(u_matrix_opt)
   end subroutine read_wannier90_checkpoint_transform_import
 
+  subroutine read_wannier90_amn_direct_transform_import(dc, num_bands_expected, num_wann_expected, owner_frag, &
+      v_direct, ok)
+    use eigen_subdiag_sub, only: eigen_zheev
+    use filesystem, only: get_filehandle
+    use salmon_global, only: sysname
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: num_bands_expected, num_wann_expected
+    integer, intent(in) :: owner_frag(num_wann_expected)
+    complex(8), allocatable, intent(out) :: v_direct(:,:)
+    logical, intent(out) :: ok
+    character(256) :: filename, header
+    integer :: iunit, io, num_bands_file, num_kpts_file, num_wann_file
+    integer :: irec, iband, iwann, ikpt, i, j, k, ifrag, nowned, iloc
+    real(8) :: re_val, im_val, min_eval, max_eval, min_eval_all, max_eval_all
+    integer, allocatable :: widx(:)
+    real(8), allocatable :: eval(:)
+    complex(8), allocatable :: amat(:,:), ablock(:,:), gram(:,:), eigvec(:,:), sinv(:,:)
+
+    ok = .false.
+    if(allocated(v_direct)) deallocate(v_direct)
+    if(num_bands_expected <= 0 .or. num_wann_expected <= 0) return
+
+    if(dc%id_tot == 0) then
+      filename = trim(import_run_root_dir())//'data_dcdft/total/'//trim(sysname)//".amn"
+      iunit = get_filehandle()
+      open(iunit,file=filename,status='old',action='read',iostat=io)
+      if(io /= 0) then
+        write(*,'(1x,2a)') "[DC-LCFO-W90-IMPORT] direct AMN diagnostic skipped; missing file: ", trim(filename)
+      else
+        read(iunit,'(a)',iostat=io) header
+        if(io == 0) read(iunit,*,iostat=io) num_bands_file, num_kpts_file, num_wann_file
+        if(io /= 0 .or. num_bands_file /= num_bands_expected .or. num_wann_file /= num_wann_expected .or. &
+            num_kpts_file /= 1) then
+          write(*,'(1x,a,6(a,i0))') "[DC-LCFO-W90-IMPORT] direct AMN diagnostic skipped; dimensions:", &
+            " bands=", num_bands_file, " expected_bands=", num_bands_expected, &
+            " wann=", num_wann_file, " expected_wann=", num_wann_expected, &
+            " kpts=", num_kpts_file, " expected_kpts=", 1
+        else
+          allocate(amat(num_bands_expected,num_wann_expected))
+          amat = (0.0d0,0.0d0)
+          do irec=1,num_bands_expected*num_wann_expected
+            read(iunit,*,iostat=io) iband, iwann, ikpt, re_val, im_val
+            if(io /= 0) exit
+            if(iband < 1 .or. iband > num_bands_expected) cycle
+            if(iwann < 1 .or. iwann > num_wann_expected) cycle
+            if(ikpt /= 1) cycle
+            amat(iband,iwann) = cmplx(re_val, im_val, kind=8)
+          end do
+          if(io == 0) then
+            allocate(v_direct(num_bands_expected,num_wann_expected))
+            v_direct = (0.0d0,0.0d0)
+            min_eval_all = huge(1.0d0)
+            max_eval_all = -huge(1.0d0)
+            do ifrag=1,dc%n_frag
+              nowned = count(owner_frag(1:num_wann_expected) == ifrag)
+              if(nowned <= 0) cycle
+              allocate(widx(nowned), ablock(num_bands_expected,nowned), gram(nowned,nowned), &
+                eigvec(nowned,nowned), sinv(nowned,nowned), eval(nowned))
+              iloc = 0
+              do iwann=1,num_wann_expected
+                if(owner_frag(iwann) /= ifrag) cycle
+                iloc = iloc + 1
+                widx(iloc) = iwann
+                ablock(1:num_bands_expected,iloc) = amat(1:num_bands_expected,iwann)
+              end do
+              gram = matmul(conjg(transpose(ablock)), ablock)
+              call eigen_zheev(gram, eval, eigvec)
+              min_eval = minval(eval)
+              max_eval = maxval(eval)
+              min_eval_all = min(min_eval_all, min_eval)
+              max_eval_all = max(max_eval_all, max_eval)
+              sinv = (0.0d0,0.0d0)
+              do i=1,nowned
+                do j=1,nowned
+                  do k=1,nowned
+                    if(eval(k) > 1.0d-12) then
+                      sinv(i,j) = sinv(i,j) + eigvec(i,k) * (1.0d0 / sqrt(eval(k))) * conjg(eigvec(j,k))
+                    end if
+                  end do
+                end do
+              end do
+              ablock = matmul(ablock, sinv)
+              do iloc=1,nowned
+                v_direct(1:num_bands_expected,widx(iloc)) = ablock(1:num_bands_expected,iloc)
+              end do
+              deallocate(widx, ablock, gram, eigvec, sinv, eval)
+            end do
+            ok = .true.
+            write(*,'(1x,a,2(a,es12.5))') "[DC-LCFO-W90-IMPORT] direct AMN block-orthonormalized:", &
+              " min_proj_s=", min_eval_all, " max_proj_s=", max_eval_all
+          end if
+          deallocate(amat)
+        end if
+        close(iunit)
+      end if
+    end if
+  end subroutine read_wannier90_amn_direct_transform_import
+
   subroutine hermitize_wannier_position_matrix(num_wann, aa_global)
     implicit none
     integer, intent(in) :: num_wann
@@ -387,6 +513,25 @@ contains
       end do
     end do
   end subroutine hermitize_wannier_position_matrix
+
+  subroutine wrap_wannier_centers_to_total_cell_import(dc, center_bohr, num_wann)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: num_wann
+    real(8), intent(inout) :: center_bohr(3,num_wann)
+    integer :: iw, axis
+    real(8) :: total_length(3)
+
+    call total_cell_lengths_import(dc, total_length)
+    do iw=1,num_wann
+      do axis=1,3
+        if(total_length(axis) <= 0.0d0) cycle
+        center_bohr(axis,iw) = center_bohr(axis,iw) - floor(center_bohr(axis,iw) / total_length(axis)) &
+          * total_length(axis)
+      end do
+    end do
+  end subroutine wrap_wannier_centers_to_total_cell_import
 
   subroutine read_wannier90_global_rmn_gamma_block_import(dc, num_wann_expected, aa_global, ok)
     use filesystem, only: get_filehandle
@@ -432,6 +577,110 @@ contains
     call hermitize_wannier_position_matrix(num_wann_file, aa_global)
     ok = .true.
   end subroutine read_wannier90_global_rmn_gamma_block_import
+
+  logical function is_bond_center_projection_import(text) result(enabled)
+    implicit none
+    character(*), intent(in) :: text
+    character(256) :: work
+
+    work = adjustl(text)
+    enabled = (trim(work) == 'bond_centers' .or. trim(work) == 'BOND_CENTERS')
+  end function is_bond_center_projection_import
+
+  subroutine build_bond_center_projection_map_import(dc, nproj, center_bohr)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: nproj
+    real(8), allocatable, intent(out) :: center_bohr(:,:)
+    integer :: ia, ja, axis, ip, ibond, nbond
+    real(8) :: cutoff, min_dist, dist2, delta(3), center(3), length_axis(3)
+
+    if(nproj <= 0) stop "DC-LCFO Wannier import: bond_centers requires positive num_wann."
+    call find_bond_center_cutoff_import(dc, min_dist, cutoff)
+    nbond = count_bond_centers_with_cutoff_import(dc, cutoff)
+    if(nbond <= 0) stop "DC-LCFO Wannier import: no bond-center projection candidates were generated."
+    call total_cell_lengths_import(dc, length_axis)
+
+    allocate(center_bohr(3,nproj))
+    ip = 0
+    ibond = 0
+    do ia=1,dc%system_tot%nion-1
+      do ja=ia+1,dc%system_tot%nion
+        dist2 = 0d0
+        do axis=1,3
+          delta(axis) = periodic_delta_import(dc%system_tot%rion(axis,ja) - dc%system_tot%rion(axis,ia), &
+            length_axis(axis))
+          dist2 = dist2 + delta(axis) * delta(axis)
+        end do
+        if(sqrt(dist2) > cutoff) cycle
+        ibond = ibond + 1
+        ip = ip + 1
+        do axis=1,3
+          center(axis) = dc%system_tot%rion(axis,ia) + 0.5d0 * delta(axis)
+          if(length_axis(axis) > 0d0) center(axis) = center(axis) - floor(center(axis) / length_axis(axis)) &
+            * length_axis(axis)
+          center_bohr(axis,ip) = center(axis)
+        end do
+        if(ip >= nproj) exit
+      end do
+      if(ip >= nproj) exit
+    end do
+    if(ip < nproj) stop "DC-LCFO Wannier import: failed to complete bond-center projection map."
+    if(dc%id_tot == 0) write(*,'(1x,a,i0,a,i0,a,es12.5,a,es12.5)') &
+      "[DC-LCFO-WANNIER] bond-center candidates=", nbond, " target_wann=", nproj, &
+      " nearest=", min_dist, " cutoff=", cutoff
+  end subroutine build_bond_center_projection_map_import
+
+  subroutine find_bond_center_cutoff_import(dc, min_dist, cutoff)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    real(8), intent(out) :: min_dist, cutoff
+    integer :: ia, ja, axis
+    real(8) :: dist2, dist, delta_axis, length_axis(3)
+
+    call total_cell_lengths_import(dc, length_axis)
+    min_dist = huge(1d0)
+    do ia=1,dc%system_tot%nion-1
+      do ja=ia+1,dc%system_tot%nion
+        dist2 = 0d0
+        do axis=1,3
+          delta_axis = periodic_delta_import(dc%system_tot%rion(axis,ja) - dc%system_tot%rion(axis,ia), &
+            length_axis(axis))
+          dist2 = dist2 + delta_axis * delta_axis
+        end do
+        dist = sqrt(dist2)
+        if(dist > 1d-8) min_dist = min(min_dist, dist)
+      end do
+    end do
+    if(min_dist >= huge(1d0) * 0.5d0) &
+      stop "DC-LCFO Wannier import: failed to find nearest-neighbor bond distance."
+    cutoff = 1.20d0 * min_dist
+  end subroutine find_bond_center_cutoff_import
+
+  integer function count_bond_centers_with_cutoff_import(dc, cutoff) result(nbond)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    real(8), intent(in) :: cutoff
+    integer :: ia, ja, axis
+    real(8) :: dist2, delta_axis, length_axis(3)
+
+    call total_cell_lengths_import(dc, length_axis)
+    nbond = 0
+    do ia=1,dc%system_tot%nion-1
+      do ja=ia+1,dc%system_tot%nion
+        dist2 = 0d0
+        do axis=1,3
+          delta_axis = periodic_delta_import(dc%system_tot%rion(axis,ja) - dc%system_tot%rion(axis,ia), &
+            length_axis(axis))
+          dist2 = dist2 + delta_axis * delta_axis
+        end do
+        if(sqrt(dist2) <= cutoff) nbond = nbond + 1
+      end do
+    end do
+  end function count_bond_centers_with_cutoff_import
 
   integer function find_owner_fragment_from_center_import(dc, center_bohr) result(owner)
     use structures, only: s_dcdft
@@ -1156,6 +1405,7 @@ contains
     complex(8), allocatable :: zloc(:,:), hloc(:,:), rholoc(:,:), work(:,:)
     real(8), allocatable :: eval(:)
     real(8) :: hvol, min_eval, max_eval, gram_residual, polar_residual, map_residual, eval_floor
+    real(8) :: subspace_leakage, closure_tol
     real(8) :: center_perm_max, center_perm_rms, target_residual
     real(8) :: origin_global(3), z_odd_res2, z_norm2, h_even_res, rho_even_res
     logical :: map_ok, seed_ok, center_perm_ok
@@ -1163,6 +1413,7 @@ contains
     if(nsym <= 0) return
     hvol = dc%system_tot%hvol
     eval_floor = 1.0d-10
+    closure_tol = 1.0d-3
     do ifrag=1,dc%n_frag
       nowned = count(owner_frag(1:num_wann) == ifrag)
       if(nowned <= 0) cycle
@@ -1222,6 +1473,7 @@ contains
         call eigen_zheev(gram, eval, eigvec)
         min_eval = minval(eval)
         max_eval = maxval(eval)
+        subspace_leakage = sqrt(max(0.0d0, 1.0d0 - min(1.0d0, min_eval)))
         n_s2_gt_09 = count(eval(1:nowned) > 0.9d0)
         n_s2_gt_05 = count(eval(1:nowned) > 0.5d0)
         gram_residual = hermitian_identity_residual(gram)
@@ -1240,12 +1492,14 @@ contains
         polar = matmul(srep, invsqrt) + polar
         polar_residual = hermitian_identity_residual(matmul(conjg(transpose(polar)), polar))
         if(center_perm_ok) target_residual = permutation_target_residual(polar, center_perm)
-        write(*,'(1x,a,i0,2a,8(a,es12.5),a,l1,3(a,i0))') &
+        write(*,'(1x,a,i0,2a,9(a,es12.5),2(a,l1),3(a,i0))') &
           "[DC-LCFO-W90-SYM] fragment=", ifrag, " representation label=", &
           trim(symops(isym)%label), " min_s2=", min_eval, " max_s2=", max_eval, &
+          " subspace_leakage=", subspace_leakage, &
           " s_unit_res=", gram_residual, " polar_unit_res=", polar_residual, &
           " map_res=", map_residual, " center_perm_max=", center_perm_max, &
           " center_perm_rms=", center_perm_rms, " target_res=", target_residual, &
+          " subspace_closed=", subspace_leakage <= closure_tol, &
           " center_perm_ok=", center_perm_ok, " n_s2_gt_09=", n_s2_gt_09, &
           " n_s2_gt_05=", n_s2_gt_05, " ncenter=", nowned
 
@@ -1467,12 +1721,14 @@ contains
     complex(8), allocatable :: ac(:,:), work(:,:), asym(:,:)
     real(8) :: hvol, min_eval, max_eval, map_residual, polar_residual
     real(8) :: origin_global(3), change_norm2, base_norm2, herm_residual, eval_floor
+    real(8) :: subspace_leakage, closure_tol
     real(8) :: sym_residual2, sym_norm2
     logical :: seed_ok, map_ok
 
     if(nsym <= 0) return
     hvol = dc%system_tot%hvol
     eval_floor = 1.0d-10
+    closure_tol = 1.0d-3
     do ifrag=1,dc%n_frag
       nowned = count(owner_frag(1:num_wann) == ifrag)
       if(nowned <= 0) cycle
@@ -1528,6 +1784,7 @@ contains
         call eigen_zheev(gram, eval, eigvec)
         min_eval = minval(eval)
         max_eval = maxval(eval)
+        subspace_leakage = sqrt(max(0.0d0, 1.0d0 - min(1.0d0, min_eval)))
         n_s2_gt_09 = count(eval(1:nowned) > 0.9d0)
         n_s2_gt_05 = count(eval(1:nowned) > 0.5d0)
         invsqrt = (0.0d0,0.0d0)
@@ -1542,6 +1799,15 @@ contains
         end do
         drep = matmul(srep, invsqrt) + drep
         polar_residual = hermitian_identity_residual(matmul(conjg(transpose(drep)), drep))
+        if(subspace_leakage > closure_tol) then
+          write(*,'(1x,a,i0,3(a,es12.5),2(a,i0))') &
+            "[DC-LCFO-W90-SYM] fragment=", ifrag, &
+            " position sym skipped: subspace_leakage=", subspace_leakage, &
+            " min_s2=", min_eval, " closure_tol=", closure_tol, &
+            " n_s2_gt_09=", n_s2_gt_09, " ncenter=", nowned
+          deallocate(srep, gram, eigvec, drep, invsqrt, eval, pmap)
+          cycle
+        end if
 
         allocate(ac(nowned,nowned), work(nowned,nowned), asym(nowned,nowned))
         change_norm2 = 0.0d0
@@ -3687,6 +3953,7 @@ contains
       integer, allocatable :: n_basis_file(:)
       integer, allocatable :: proj_atom(:), proj_hybrid(:), keep_index(:), keep_index_legacy(:)
       real(8), allocatable :: bproj(:,:), sw(:,:), uw(:,:), lambda_w(:)
+      real(8), allocatable :: bond_center_bohr(:,:)
       real(8), allocatable :: wcoef(:,:), r_basis(:,:,:), r_wann(:,:,:), tmp(:,:), wcenter(:,:)
       real(8), allocatable :: sw_legacy(:,:), uw_legacy(:,:), lambda_legacy(:)
       real(8), allocatable :: wcoef_legacy(:,:), r_wann_legacy(:,:,:), tmp_legacy(:,:), wcenter_legacy(:,:)
@@ -3697,12 +3964,14 @@ contains
       real(8) :: x, y, z, gval, box_length(3), box_origin(3), cell_length(3)
       real(8) :: theta, pair_center, frag_center_axis, rel_coord, norm_w, pi_twice
       character(256) :: filename
-      logical :: use_pseudo_projection
+      logical :: use_pseudo_projection, use_bond_projection
 
       if(nspin /= 1) stop "DC-LCFO local Wannier export: spin-polarized mode is not implemented."
       use_pseudo_projection = is_pseudo_channel_projection(trim(wannier_projection))
-      if(.not. is_sp3_projection(trim(wannier_projection)) .and. .not. use_pseudo_projection) &
-        stop "DC-LCFO local Wannier export: supported projections are C:sp3, Si:sp3, and pseudo_channels."
+      use_bond_projection = is_bond_center_projection(trim(wannier_projection))
+      if(.not. is_sp3_projection(trim(wannier_projection)) .and. .not. use_pseudo_projection .and. &
+         .not. use_bond_projection) &
+        stop "DC-LCFO local Wannier export: supported projections are C:sp3, Si:sp3, pseudo_channels, and bond_centers."
       if(yn_dc_lcfo_wannier_pw == 'y') &
         stop "DC-LCFO local Wannier PW augmentation is not connected yet."
       if(yn_dc_lcfo_wannier_cluster == 'y' .and. any(wannier_cluster_size(1:3) /= 1)) then
@@ -3728,7 +3997,10 @@ contains
           - dble(nxyz_buffer_seed(axis)) * system%hgs(axis)
       end do
       pi_twice = 8d0 * atan(1d0)
-      if(use_pseudo_projection) then
+      if(use_bond_projection) then
+        call build_local_bond_center_projection_map(nproj_seed, bond_center_bohr)
+        if(nproj_seed <= 0) stop "DC-LCFO local Wannier export: no local bond-center projections in fragment core."
+      else if(use_pseudo_projection) then
         nproj_seed = count_local_pseudo_channel_ao_candidates(nxyz_domain)
         if(nproj_seed <= 0) stop "DC-LCFO local Wannier export: no local pseudo-channel projections in fragment core."
       else
@@ -3740,7 +4012,10 @@ contains
       allocate(proj_atom(nproj), proj_hybrid(nproj))
       proj_atom = 0
       proj_hybrid = 0
-      if(use_pseudo_projection) then
+      if(use_bond_projection) then
+        proj_atom(1:nproj_seed) = 0
+        proj_hybrid(1:nproj_seed) = 100
+      else if(use_pseudo_projection) then
         call build_local_pseudo_channel_ao_candidate_map(nxyz_domain, proj_atom, proj_hybrid)
       else
         call build_local_c_sp3_projection_map(nxyz_domain, proj_atom, proj_hybrid)
@@ -3804,7 +4079,10 @@ contains
               y = box_origin(2) + dble(iby - 1) * system%hgs(2)
               do ibx=1,nxyz_box(1)
                 x = box_origin(1) + dble(ibx - 1) * system%hgs(1)
-                if(use_pseudo_projection) then
+                if(use_bond_projection) then
+                  gval = bond_center_projection_value_local_periodic(x, y, z, &
+                    bond_center_bohr(1:3,ip), wannier_projection_width, box_length)
+                else if(use_pseudo_projection) then
                   proj_l = proj_hybrid(ip) / 10
                   proj_m = mod(proj_hybrid(ip), 10)
                   gval = pseudo_channel_projection_value_local_periodic(x, y, z, proj_atom(ip), &
@@ -4036,7 +4314,10 @@ contains
       write(iunit) r_wann_legacy(1:3,1:nkeep_legacy,1:nkeep_legacy)
       write(iunit) wcenter_legacy(1:3,1:nkeep_legacy)
       close(iunit)
-      if(use_pseudo_projection) then
+      if(use_bond_projection) then
+        write(*,'(1x,a,i0,a,i0,a,i0)') "[DC-LCFO-LOCAL-WANNIER] fragment=", &
+          dc%i_frag, " bond_centers=", nproj_seed, " keep=", nkeep_legacy
+      else if(use_pseudo_projection) then
         write(*,'(1x,a,i0,a,i0,a,i0,a,i0)') "[DC-LCFO-LOCAL-WANNIER] fragment=", &
           dc%i_frag, " pseudo_channels=", nproj_seed, " candidates=", nproj_seed, " keep=", nkeep_legacy
       else
@@ -4071,6 +4352,7 @@ contains
       deallocate(sw_legacy, uw_legacy, lambda_legacy, wcoef_legacy, keep_index_legacy)
       deallocate(r_wann_legacy, tmp_legacy, wcenter_legacy)
       deallocate(phi_box, phi_tmp, psi_w, rho_w_sum, cos_sum, sin_sum, n_basis_file)
+      if(allocated(bond_center_bohr)) deallocate(bond_center_bohr)
     end subroutine write_local_wannier_seed
 
     subroutine project_wannier90_aa_to_bpw(nbasis, nkeep, wcoef, aa_wann, aa_wann_source)
@@ -4368,6 +4650,36 @@ contains
       end do
     end subroutine build_local_pseudo_channel_ao_candidate_map
 
+    subroutine build_local_bond_center_projection_map(nproj, center_bohr)
+      implicit none
+      integer, intent(out) :: nproj
+      real(8), allocatable, intent(out) :: center_bohr(:,:)
+      real(8), allocatable :: all_center_bohr(:,:)
+      integer :: iw, ip, nall
+
+      nall = max(1, count_bond_center_candidates())
+      call build_bond_center_projection_map(nall, all_center_bohr)
+      nproj = 0
+      do iw=1,nall
+        if(find_owner_fragment_from_center(all_center_bohr(1:3,iw)) == dc%i_frag) nproj = nproj + 1
+      end do
+      if(nproj <= 0) then
+        allocate(center_bohr(3,1))
+        center_bohr = 0.0d0
+      else
+        allocate(center_bohr(3,nproj))
+        ip = 0
+        do iw=1,nall
+          if(find_owner_fragment_from_center(all_center_bohr(1:3,iw)) /= dc%i_frag) cycle
+          ip = ip + 1
+          center_bohr(1:3,ip) = all_center_bohr(1:3,iw)
+        end do
+      end if
+      if(dc%id_tot == 0) write(*,'(1x,a,i0,a,i0)') &
+        "[DC-LCFO-LOCAL-WANNIER] fragment=", dc%i_frag, " local bond-center seeds=", nproj
+      deallocate(all_center_bohr)
+    end subroutine build_local_bond_center_projection_map
+
     subroutine find_atom_core_grid(nxyz_domain, ia, ix_local)
       implicit none
       integer, intent(in) :: nxyz_domain(3), ia
@@ -4404,9 +4716,10 @@ contains
       use filesystem, only: get_filehandle
       implicit none
       real(8), parameter :: hartree_to_ev = 27.211386245988d0
-      integer :: iunit, iband, ikpt, ia, nband_wann, nproj_csp3
+      integer :: iunit, iband, ikpt, ia, ip, nband_wann, nproj_csp3
       character(256) :: winfile, eigfile
       real(8) :: a1(3), a2(3), a3(3)
+      real(8), allocatable :: bond_center_bohr(:,:)
 
       if(nspin /= 1) stop "DC-LCFO Wannier export: spin-polarized Wannier seed files are not implemented."
 
@@ -4455,7 +4768,18 @@ contains
         if(len_trim(wannier_projection) > 0) then
           write(iunit,'(a)') ""
           write(iunit,'(a)') "begin projections"
-          if(is_pseudo_channel_projection(trim(wannier_projection))) then
+          if(is_bond_center_projection(trim(wannier_projection))) then
+            call build_bond_center_projection_map(wannier_num_wann, bond_center_bohr)
+            do ip=1,wannier_num_wann
+              write(iunit,'(a,f18.12,a,f18.12,a,f18.12,a)') "f=", &
+                bond_center_bohr(1,ip) / cell_length(a1), &
+                ",", &
+                bond_center_bohr(2,ip) / cell_length(a2), &
+                ",", &
+                bond_center_bohr(3,ip) / cell_length(a3), ":s"
+            end do
+            deallocate(bond_center_bohr)
+          else if(is_pseudo_channel_projection(trim(wannier_projection))) then
             write(iunit,'(a)') "random"
           else
             if(is_sp3_projection(trim(wannier_projection)) .and. nproj_csp3 < wannier_num_wann) &
@@ -4532,14 +4856,14 @@ contains
       use communication, only: comm_sync_all
       use filesystem, only: get_filehandle
       use inputoutput, only: au_length_aa
-      use salmon_global, only: sysname, wannier_num_wann
+      use salmon_global, only: sysname, wannier_num_wann, wannier_projection
       implicit none
       integer, intent(in) :: nband_wann
       integer :: iunit, iw
       integer :: num_bands_chk, num_wann_chk
       integer :: position_available
       integer, allocatable :: owner_frag(:)
-      real(8), allocatable :: center_aa(:,:), center_bohr(:,:), spread_aa2(:)
+      real(8), allocatable :: center_aa(:,:), center_bohr(:,:), owner_center_bohr(:,:), spread_aa2(:)
       complex(8), allocatable :: v_matrix(:,:), aa_global(:,:,:)
       logical :: ok_position
       character(256) :: filename
@@ -4554,10 +4878,22 @@ contains
         end if
         allocate(owner_frag(num_wann_chk), center_bohr(3,num_wann_chk))
         center_bohr(1:3,1:num_wann_chk) = center_aa(1:3,1:num_wann_chk) / au_length_aa
-        do iw=1,num_wann_chk
-          owner_frag(iw) = find_owner_fragment_from_center(center_bohr(1:3,iw))
-        end do
-        call rebalance_wannier_owner_fragments(center_bohr, owner_frag, num_wann_chk)
+        call wrap_wannier_centers_to_total_cell_import(dc, center_bohr, num_wann_chk)
+        if(is_bond_center_projection(trim(wannier_projection))) then
+          call build_bond_center_projection_map(num_wann_chk, owner_center_bohr)
+          do iw=1,num_wann_chk
+            owner_frag(iw) = find_owner_fragment_from_center(owner_center_bohr(1:3,iw))
+          end do
+          call rebalance_wannier_owner_fragments(owner_center_bohr, owner_frag, num_wann_chk)
+          write(*,'(1x,a)') "[DC-LCFO-W90-GLOBAL] owner source=bond_centers"
+          deallocate(owner_center_bohr)
+        else
+          do iw=1,num_wann_chk
+            owner_frag(iw) = find_owner_fragment_from_center(center_bohr(1:3,iw))
+          end do
+          call rebalance_wannier_owner_fragments(center_bohr, owner_frag, num_wann_chk)
+          write(*,'(1x,a)') "[DC-LCFO-W90-GLOBAL] owner source=wannier_centers"
+        end if
         call read_wannier90_global_rmn_gamma_block(num_wann_chk, aa_global, ok_position)
         if(.not. ok_position) then
           allocate(aa_global(3,num_wann_chk,num_wann_chk))
@@ -5489,10 +5825,15 @@ contains
       character(256) :: amnfile
 
       if(.not. is_sp3_projection(trim(wannier_projection)) .and. &
-         .not. is_pseudo_channel_projection(trim(wannier_projection))) &
-        stop "DC-LCFO Wannier export: supported projections are C:sp3, Si:sp3, and pseudo_channels."
+         .not. is_pseudo_channel_projection(trim(wannier_projection)) .and. &
+         .not. is_bond_center_projection(trim(wannier_projection))) &
+        stop "DC-LCFO Wannier export: supported projections are C:sp3, Si:sp3, pseudo_channels, and bond_centers."
       if(is_pseudo_channel_projection(trim(wannier_projection))) then
         call write_wannier_amn_file_pseudo_channels(nband_wann)
+        return
+      end if
+      if(is_bond_center_projection(trim(wannier_projection))) then
+        call write_wannier_amn_file_bond_centers(nband_wann)
         return
       end if
 
@@ -5685,6 +6026,101 @@ contains
       deallocate(proj_atom_raw, proj_l_raw, proj_m_raw)
       deallocate(projectability, selected_raw, raw_index, a_sum, norm_sum)
     end subroutine write_wannier_amn_file_pseudo_channels
+
+    subroutine write_wannier_amn_file_bond_centers(nband_wann)
+      use salmon_global, only: sysname, wannier_num_wann, wannier_projection_width
+      use filesystem, only: get_filehandle
+      implicit none
+      integer, intent(in) :: nband_wann
+      integer :: nproj, chunk_size, p0, p1, nchunk, iunit
+      integer :: iband, ip, ibasis, ix, iy, iz, ispin_local
+      integer :: ixg, iyg, izg, nxyz_domain(3)
+      integer, parameter :: amn_target_chunk_elems = 1000000
+      real(8) :: x, y, z, gval, projection_width_eff
+      real(8), allocatable :: bond_center_bohr(:,:), bproj(:,:), a_local(:,:), a_sum(:,:)
+      real(8), allocatable :: norm_local(:), norm_sum(:)
+      character(256) :: amnfile
+
+      if(wannier_num_wann > nband_wann) &
+        stop "DC-LCFO Wannier export: wannier_num_wann must not exceed exported band count."
+
+      nproj = wannier_num_wann
+      call build_bond_center_projection_map(nproj, bond_center_bohr)
+      call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
+
+      amnfile = trim(dc%base_directory)//trim(sysname)//".amn"
+      if(dc%id_tot == 0) then
+        write(*,'(1x,a,i0)') "[DC-LCFO-WANNIER] bond-center projections target_wann=", nproj
+        iunit = get_filehandle()
+        open(iunit,file=amnfile,status='replace')
+        write(iunit,'(a)') "SALMON DC-LCFO generated bond-center projections"
+        write(iunit,'(3i10)') nband_wann, 1, nproj
+      end if
+
+      chunk_size = max(1, min(nproj, max(1, amn_target_chunk_elems / max(1, nband_wann))))
+      allocate(bproj(dc%nstate_frag,chunk_size))
+      allocate(a_local(nband_wann,chunk_size))
+      allocate(a_sum(nband_wann,chunk_size))
+      allocate(norm_local(chunk_size), norm_sum(chunk_size))
+
+      do p0=1,nproj,chunk_size
+        p1 = min(nproj, p0 + chunk_size - 1)
+        nchunk = p1 - p0 + 1
+        bproj(:,:) = 0d0
+        norm_local(:) = 0d0
+
+        ispin_local = 1
+        if(dc%id_frag == 0) then
+          do ip=1,nchunk
+            projection_width_eff = wannier_projection_width / &
+              sqrt(1d0 + 0.75d0 * dble((p0 + ip - 2) / max(1, count_bond_center_candidates())))
+            do iz=1,nxyz_domain(3)
+              izg = dc%jxyz_tot(iz,3)
+              z = dc%lg_tot%coordinate(izg,3)
+              do iy=1,nxyz_domain(2)
+                iyg = dc%jxyz_tot(iy,2)
+                y = dc%lg_tot%coordinate(iyg,2)
+                do ix=1,nxyz_domain(1)
+                  ixg = dc%jxyz_tot(ix,1)
+                  x = dc%lg_tot%coordinate(ixg,1)
+                  gval = bond_center_projection_value(x, y, z, &
+                    bond_center_bohr(1:3,p0 + ip - 1), projection_width_eff)
+                  if(abs(gval) <= 0d0) cycle
+                  norm_local(ip) = norm_local(ip) + gval * gval * hvol
+                  do ibasis=1,n_basis(dc%i_frag,ispin_local)
+                    bproj(ibasis,ip) = bproj(ibasis,ip) &
+                      + f_basis(ix,iy,iz,ispin_local,ibasis) * gval * hvol
+                  end do
+                end do
+              end do
+            end do
+          end do
+        end if
+
+        a_local(:,:) = 0d0
+        if(dc%id_frag == 0) then
+          a_local(1:nband_wann,1:nchunk) = &
+            matmul(transpose(coef_wf(1:dc%nstate_frag,1:nband_wann,1)), &
+            bproj(1:dc%nstate_frag,1:nchunk))
+        end if
+        call comm_summation(a_local,a_sum,nband_wann*chunk_size,dc%icomm_tot)
+        call comm_summation(norm_local,norm_sum,chunk_size,dc%icomm_tot)
+
+        if(dc%id_tot == 0) then
+          do ip=1,nchunk
+            if(norm_sum(ip) <= 1d-300) &
+              stop "DC-LCFO Wannier export: zero norm bond-center projection."
+            a_sum(1:nband_wann,ip) = a_sum(1:nband_wann,ip) / sqrt(norm_sum(ip))
+            do iband=1,nband_wann
+              write(iunit,'(3i8,2(1x,es23.15))') iband, p0 + ip - 1, 1, a_sum(iband,ip), 0d0
+            end do
+          end do
+        end if
+      end do
+
+      if(dc%id_tot == 0) close(iunit)
+      deallocate(bond_center_bohr, bproj, a_local, a_sum, norm_local, norm_sum)
+    end subroutine write_wannier_amn_file_bond_centers
 
     subroutine compute_pseudo_channel_projection_chunk(nband_wann, nchunk, raw_index, &
         proj_atom, proj_l, proj_m, a_sum, norm_sum)
@@ -5891,6 +6327,129 @@ contains
       end do
     end function count_c_sp3_projections
 
+    logical function is_bond_center_projection(text) result(enabled)
+      implicit none
+      character(*), intent(in) :: text
+      character(256) :: work
+
+      work = adjustl(text)
+      enabled = (trim(work) == 'bond_centers' .or. trim(work) == 'BOND_CENTERS')
+    end function is_bond_center_projection
+
+    integer function count_bond_center_candidates() result(nbond)
+      implicit none
+      real(8) :: cutoff, min_dist
+
+      call find_bond_center_cutoff(min_dist, cutoff)
+      nbond = count_bond_centers_with_cutoff(cutoff)
+    end function count_bond_center_candidates
+
+    subroutine build_bond_center_projection_map(nproj, center_bohr)
+      implicit none
+      integer, intent(in) :: nproj
+      real(8), allocatable, intent(out) :: center_bohr(:,:)
+      integer :: ia, ja, axis, ip, ibond, nbond, shell
+      real(8) :: cutoff, min_dist, dist2, delta(3), center(3), length_axis(3)
+      real(8) :: a1(3), a2(3), a3(3)
+
+      if(nproj <= 0) stop "DC-LCFO Wannier export: bond_centers requires positive num_wann."
+      call get_lattice_vectors(a1, a2, a3)
+      length_axis(1) = cell_length(a1)
+      length_axis(2) = cell_length(a2)
+      length_axis(3) = cell_length(a3)
+      call find_bond_center_cutoff(min_dist, cutoff)
+      nbond = count_bond_centers_with_cutoff(cutoff)
+      if(nbond <= 0) stop "DC-LCFO Wannier export: no bond-center projection candidates were generated."
+
+      allocate(center_bohr(3,nproj))
+      ip = 0
+      shell = 0
+      do while(ip < nproj)
+        ibond = 0
+        do ia=1,dc%system_tot%nion-1
+          do ja=ia+1,dc%system_tot%nion
+            dist2 = 0d0
+            do axis=1,3
+              delta(axis) = periodic_delta(dc%system_tot%rion(axis,ja) - dc%system_tot%rion(axis,ia), &
+                length_axis(axis))
+              dist2 = dist2 + delta(axis) * delta(axis)
+            end do
+            if(sqrt(dist2) > cutoff) cycle
+            ibond = ibond + 1
+            ip = ip + 1
+            do axis=1,3
+              center(axis) = dc%system_tot%rion(axis,ia) + 0.5d0 * delta(axis)
+              if(length_axis(axis) > 0d0) center(axis) = center(axis) - floor(center(axis) / length_axis(axis)) &
+                * length_axis(axis)
+              center_bohr(axis,ip) = center(axis)
+            end do
+            if(ip >= nproj) exit
+          end do
+          if(ip >= nproj) exit
+        end do
+        shell = shell + 1
+        if(ibond <= 0) exit
+      end do
+      if(ip < nproj) stop "DC-LCFO Wannier export: failed to complete bond-center projection map."
+      if(dc%id_tot == 0) write(*,'(1x,a,i0,a,i0,a,es12.5,a,es12.5)') &
+        "[DC-LCFO-WANNIER] bond-center candidates=", nbond, " target_wann=", nproj, &
+        " nearest=", min_dist, " cutoff=", cutoff
+    end subroutine build_bond_center_projection_map
+
+    subroutine find_bond_center_cutoff(min_dist, cutoff)
+      implicit none
+      real(8), intent(out) :: min_dist, cutoff
+      integer :: ia, ja, axis
+      real(8) :: dist2, dist, delta_axis, length_axis(3)
+      real(8) :: a1(3), a2(3), a3(3)
+
+      call get_lattice_vectors(a1, a2, a3)
+      length_axis(1) = cell_length(a1)
+      length_axis(2) = cell_length(a2)
+      length_axis(3) = cell_length(a3)
+      min_dist = huge(1d0)
+      do ia=1,dc%system_tot%nion-1
+        do ja=ia+1,dc%system_tot%nion
+          dist2 = 0d0
+          do axis=1,3
+            delta_axis = periodic_delta(dc%system_tot%rion(axis,ja) - dc%system_tot%rion(axis,ia), &
+              length_axis(axis))
+            dist2 = dist2 + delta_axis * delta_axis
+          end do
+          dist = sqrt(dist2)
+          if(dist > 1d-8) min_dist = min(min_dist, dist)
+        end do
+      end do
+      if(min_dist >= huge(1d0) * 0.5d0) &
+        stop "DC-LCFO Wannier export: failed to find nearest-neighbor bond distance."
+      cutoff = 1.20d0 * min_dist
+    end subroutine find_bond_center_cutoff
+
+    integer function count_bond_centers_with_cutoff(cutoff) result(nbond)
+      implicit none
+      real(8), intent(in) :: cutoff
+      integer :: ia, ja, axis
+      real(8) :: dist2, delta_axis, length_axis(3)
+      real(8) :: a1(3), a2(3), a3(3)
+
+      call get_lattice_vectors(a1, a2, a3)
+      length_axis(1) = cell_length(a1)
+      length_axis(2) = cell_length(a2)
+      length_axis(3) = cell_length(a3)
+      nbond = 0
+      do ia=1,dc%system_tot%nion-1
+        do ja=ia+1,dc%system_tot%nion
+          dist2 = 0d0
+          do axis=1,3
+            delta_axis = periodic_delta(dc%system_tot%rion(axis,ja) - dc%system_tot%rion(axis,ia), &
+              length_axis(axis))
+            dist2 = dist2 + delta_axis * delta_axis
+          end do
+          if(sqrt(dist2) <= cutoff) nbond = nbond + 1
+        end do
+      end do
+    end function count_bond_centers_with_cutoff
+
     integer function count_pseudo_channel_ao_candidates() result(nproj)
       use salmon_global, only: izatom
       implicit none
@@ -6036,6 +6595,24 @@ contains
       end select
     end function pseudo_channel_projection_value
 
+    real(8) function bond_center_projection_value(x, y, z, center_bohr, sigma) result(val)
+      implicit none
+      real(8), intent(in) :: x, y, z, center_bohr(3), sigma
+      real(8) :: dx, dy, dz, r2
+      real(8) :: a1(3), a2(3), a3(3)
+
+      call get_lattice_vectors(a1, a2, a3)
+      dx = periodic_delta(x - center_bohr(1), cell_length(a1))
+      dy = periodic_delta(y - center_bohr(2), cell_length(a2))
+      dz = periodic_delta(z - center_bohr(3), cell_length(a3))
+      r2 = dx*dx + dy*dy + dz*dz
+      if(r2 > (8d0*sigma)**2) then
+        val = 0d0
+        return
+      end if
+      val = exp(-0.5d0 * r2 / (sigma*sigma))
+    end function bond_center_projection_value
+
     real(8) function pseudo_channel_projection_value_local_periodic(x, y, z, ia, l, m, sigma, box_length) result(val)
       implicit none
       real(8), intent(in) :: x, y, z, sigma, box_length(3)
@@ -6087,6 +6664,22 @@ contains
         val = 0d0
       end select
     end function pseudo_channel_projection_value_local_periodic
+
+    real(8) function bond_center_projection_value_local_periodic(x, y, z, center_bohr, sigma, box_length) result(val)
+      implicit none
+      real(8), intent(in) :: x, y, z, center_bohr(3), sigma, box_length(3)
+      real(8) :: dx, dy, dz, r2
+
+      dx = periodic_delta(x - center_bohr(1), box_length(1))
+      dy = periodic_delta(y - center_bohr(2), box_length(2))
+      dz = periodic_delta(z - center_bohr(3), box_length(3))
+      r2 = dx*dx + dy*dy + dz*dz
+      if(r2 > (8d0*sigma)**2) then
+        val = 0d0
+        return
+      end if
+      val = exp(-0.5d0 * r2 / (sigma*sigma))
+    end function bond_center_projection_value_local_periodic
 
     real(8) function c_sp3_projection_value(x, y, z, ia, ih, sigma) result(val)
       implicit none
