@@ -105,7 +105,8 @@ contains
     use sendrecv_grid
     use salmon_global, only: yn_out_tm,yn_out_gs_sgm_eps, &
                        out_gs_sgm_eps_mu_nu, out_gs_sgm_eps_width, &
-                       base_directory,sysname, de,nenergy,nelec,xc
+                       base_directory,sysname, de,nenergy,nelec,xc, &
+                       spin,yn_symmetry,yn_sym_kreduce
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_summation,comm_sync_all
     use filesystem, only: open_filehandle
@@ -120,9 +121,9 @@ contains
     type(s_orbital)       :: tpsi
     type(s_dft_energy) :: energy
     !
-    logical :: flag_print_tm, flag_print_eps
+    logical :: flag_print_tm, flag_print_eps, flag_spinor
     integer :: fh_tm, narray
-    integer :: i,j,ik,ib,ib1,ib2,ilma,nlma,ia,ix,iy,iz,NB,NK,im,ispin
+    integer :: i,j,ik,ib,ib1,ib2,ilma,nlma,ia,ix,iy,iz,NB,NK,im,ispin,jspin,nss
     integer :: ik_s,ik_e,io_s,io_e,is(3),ie(3)
     real(8) :: x,y,z
     complex(8),allocatable :: upu(:,:,:,:),upu_l(:,:,:,:)
@@ -163,8 +164,24 @@ contains
       write(*,*) "error @ write_tm_data: im/=1"
       return
     endif
-    if(system%Nspin/=1) then!??????
-      write(*,*) "error @ write_tm_data: nspin/=1"
+    ! SO-SBE wiring: spin='noncollinear' (spinor bands, always with
+    ! yn_spinorbit='y' -- enforced by the input checker) is supported: the
+    ! <u|p|u> and rVnl-Vnlr blocks are summed over the two spinor components
+    ! below.  Collinear spin-polarized (spin='polarized') stays rejected: its
+    ! two INDEPENDENT spin channels do not fit the single-band-index tm format.
+    flag_spinor = ( spin == 'noncollinear' )
+    if(system%Nspin/=1 .and. .not.flag_spinor) then!??????
+      write(*,*) "error @ write_tm_data: nspin/=1 (collinear spin-polarized is not supported)"
+      return
+    endif
+    ! The SBE reader (gs_info_ssbe) consumes the FULL uniform num_kgrid mesh in
+    ! its canonical ordering; a symmetry-reduced k-mesh (yn_sym_kreduce='y'
+    ! with yn_symmetry active) writes fewer/reweighted k-points that the SBE
+    ! side would misread.  Fail the export early and loudly (yn_sym_kreduce='n'
+    ! keeps the full mesh while still symmetrising the density).
+    if(flag_print_tm .and. index(yn_symmetry,'y')/=0 .and. yn_sym_kreduce=='y') then
+      write(*,*) "error @ write_tm_data: yn_sym_kreduce='y' reduces the k-mesh to the irreducible wedge;"
+      write(*,*) "  the tm export for SBE needs the FULL k-mesh. Set yn_sym_kreduce='n' (or yn_symmetry='n')."
       return
     endif
     !if(info%io_s/=1 .or. info%io_e/=system%no) then!??????
@@ -184,6 +201,7 @@ contains
 
     im = 1
     ispin = 1
+    nss = system%Nspin   ! spinor components summed per band (1 = spinless)
 
     NB = system%no
     NK = system%nk
@@ -197,7 +215,14 @@ contains
     is = mg%is
     ie = mg%ie
 
-    Nlma = ppg%Nlma
+    if(flag_spinor) then
+      ! noncollinear/SOC: the nonlocal PP is applied EXCLUSIVELY through the
+      ! j-dependent spinor projectors (uv_so via zekr_uV_so, see pseudo_so);
+      ! ia_tbl_so/rinv_uvu_so enumerate those channels.
+      Nlma = size(ppg%ia_tbl_so)
+    else
+      Nlma = ppg%Nlma
+    endif
 
     !calculate <u_nk|p_j|u_mk>  (j=x,y,z)
 
@@ -227,6 +252,13 @@ contains
       call update_overlap_complex8(srg, mg, tpsi%zwf)
     end if
 
+    ! <u|p|u>: the spinless branch below is the ORIGINAL loop nest verbatim
+    ! (kept in its own branch so its code generation -- including IEEE
+    ! signed-zero behavior of the exported text -- stays byte-identical);
+    ! the spinor branch sums the two spinor components (assign on jspin=1,
+    ! accumulate on jspin=2).
+    if(.not.flag_spinor) then
+
     do ik=ik_s,ik_e
     do ib2=1,NB
 
@@ -250,6 +282,40 @@ contains
       !$omp end parallel do
     end do
     end do
+
+    else ! flag_spinor
+
+    do ik=ik_s,ik_e
+    do ib2=1,NB
+    do jspin=1,nss
+
+      ! gtpsi = (nabla) psi (spinor component jspin)
+      !$omp workshare
+      gtpsi_l(:,:,:,:) = 0d0
+      !$omp end workshare
+      if(ib2.ge.io_s .and. ib2.le.io_e) &
+        call calc_gradient_psi(tpsi%zwf(:,:,:,jspin,ib2,ik,im),gtpsi_l,mg%is_array,mg%ie_array,mg%is,mg%ie &
+            ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
+      call comm_summation(gtpsi_l,gtpsi,narray,info%icomm_o)
+
+      !$omp parallel do private(ib1,i,wrk)
+      do ib1=io_s,io_e
+        do i=1,3
+          wrk(i) = sum(conjg(tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),jspin,ib1,ik,im)) &
+                            * gtpsi(i,is(1):ie(1),is(2):ie(2),is(3):ie(3)) )
+        end do
+        if(jspin==1) then
+          upu_l(:,ib1,ib2,ik) = - zI * wrk * system%Hvol
+        else
+          upu_l(:,ib1,ib2,ik) = upu_l(:,ib1,ib2,ik) - zI * wrk * system%Hvol
+        end if
+      end do
+      !$omp end parallel do
+    end do
+    end do
+    end do
+
+    end if ! flag_spinor
     deallocate(gtpsi_l,gtpsi)
 
 
@@ -294,9 +360,38 @@ contains
 
     do ik=ik_s,ik_e
     do ilma=1,Nlma
-       ia=ppg%ia_tbl(ilma)
+       if(flag_spinor) then
+          ia=ppg%ia_tbl_so(ilma)
+       else
+          ia=ppg%ia_tbl(ilma)
+       endif
        uVpsi_l  = 0d0
        uVrpsi_l = 0d0
+       if(flag_spinor) then
+          ! spinor projector channel ilma: <chi|e^ik f|u> = sum_s sum_j
+          ! conjg(zekr_uV_so(j,ilma,ik,s)) f(r_j) u_s(r_j)  (same structure as
+          ! pseudo_so / calc_current_nonlocal_so; rinv_uvu_so applied below)
+          do jspin=1,2
+             !$omp parallel do private(j,x,y,z,ix,iy,iz,veik,ib) reduction(+:uVpsi_l,uVrpsi_l)
+             do j=1,ppg%Mps(ia)
+                x = ppg%Rxyz(1,j,ia)
+                y = ppg%Rxyz(2,j,ia)
+                z = ppg%Rxyz(3,j,ia)
+                ix = ppg%Jxyz(1,j,ia)
+                iy = ppg%Jxyz(2,j,ia)
+                iz = ppg%Jxyz(3,j,ia)
+                veik = conjg(ppg%zekr_uV_so(j,ilma,ik,jspin,1))
+                do ib=io_s,io_e
+                   uVpsi_l(ib)    = uVpsi_l(ib)    + veik*    tpsi%zwf(ix,iy,iz,jspin,ib,ik,im) !=<v|e^ik|u>
+                   uVrpsi_l(1,ib) = uVrpsi_l(1,ib) + veik* x *tpsi%zwf(ix,iy,iz,jspin,ib,ik,im) !=<v|e^ik*x|u>
+                   uVrpsi_l(2,ib) = uVrpsi_l(2,ib) + veik* y *tpsi%zwf(ix,iy,iz,jspin,ib,ik,im) !=<v|e^ik*y|u>
+                   uVrpsi_l(3,ib) = uVrpsi_l(3,ib) + veik* z *tpsi%zwf(ix,iy,iz,jspin,ib,ik,im) !=<v|e^ik*z|u>
+                enddo
+             end do
+             !$omp end parallel do
+          end do
+          uVpsi_l  = uVpsi_l * ppg%rinv_uvu_so(ilma)
+       else
        !$omp parallel do private(j,x,y,z,ix,iy,iz,veik,ib) reduction(+:uVpsi_l,uVrpsi_l)
        do j=1,ppg%Mps(ia)
           x = ppg%Rxyz(1,j,ia)
@@ -316,6 +411,7 @@ contains
        end do
        !$omp end parallel do
        uVpsi_l  = uVpsi_l * ppg%rinv_uvu(ilma)
+       endif
        call comm_summation(uVpsi_l ,uVpsi ,  NB,info%icomm_ro)
        call comm_summation(uVrpsi_l,uVrpsi,3*NB,info%icomm_ro)
 !       call comm_summation(uVpsi_l ,uVpsi ,  NB,info%icomm_r)

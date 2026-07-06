@@ -210,6 +210,23 @@ if(write_gs_wfn_k == 'y') then !this input keyword is going to be removed....
    end select
 end if
 
+! SBE-facing exports (prod_dk / k / tm) need the FULL uniform num_kgrid mesh:
+! a symmetry-reduced grid (yn_sym_kreduce='y' with yn_symmetry active) writes
+! fewer/reweighted k-points that the SBE reader (gs_info_ssbe) would misread.
+! Fail HERE, before ANY export file is written, so no stale/partial mix of
+! reduced-mesh exports is left on disk (yn_sym_kreduce='n' keeps the full
+! mesh while still symmetrising the density).
+if((yn_sbe_export_overlap == 'y' .or. yn_out_tm == 'y') .and. &
+   & index(yn_symmetry,'y') /= 0 .and. yn_sym_kreduce == 'y') then
+   if(comm_is_root(nproc_id_global)) then
+      write(*,*) "ERROR: yn_out_tm='y'/yn_sbe_export_overlap='y' need the FULL k-mesh;"
+      write(*,*) "  yn_sym_kreduce='y' reduces it to the irreducible wedge."
+      write(*,*) "  Set yn_sym_kreduce='n' (or yn_symmetry='n')."
+   end if
+   call comm_sync_all
+   stop
+end if
+
 ! LG-SBE Tier2: export GS inter-k overlap table (independent of write_gs_wfn_k)
 if(yn_sbe_export_overlap == 'y') then
    if(iperiodic /= 3 .or. minval(num_kgrid) < 1) then
