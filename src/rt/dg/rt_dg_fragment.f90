@@ -1867,11 +1867,59 @@ contains
     end do
 
     dg_frag%has_full_h_seed_eigen = .true.
+    call diagnose_full_h_seed_overlap()
     if (present(system)) call build_full_h_seed_position_operator(system)
     call invalidate_coef_exchange_cache(dg_frag)
     deallocate(h_local, h_dense, evec, eval)
 
   contains
+
+    subroutine diagnose_full_h_seed_overlap()
+      use communication, only: comm_summation, comm_is_root
+      complex(8), allocatable :: vcoef(:,:), scoef(:,:), ssub_local(:,:), ssub(:,:)
+      integer :: irow, ist, jst, local_owner
+      real(8) :: diag_dev, offdiag_abs
+
+      if (.not. allocated(dg_frag%full_h_seed_evec)) return
+      if (dg_frag%full_h_seed_nstate <= 0) return
+      allocate(vcoef(nrow,nstate), scoef(nrow,nstate), ssub_local(nstate,nstate), ssub(nstate,nstate))
+      do ispin = 1, dg_frag%nspin
+        if (ispin > size(dg_frag%full_h_seed_evec, 3)) cycle
+        vcoef(:, :) = dg_frag%full_h_seed_evec(1:nrow,1:nstate,ispin)
+        scoef(:, :) = (0.0d0, 0.0d0)
+        call apply_overlap_operator_batch(dg_frag, ispin, vcoef, scoef, .false.)
+        ssub_local(:, :) = (0.0d0, 0.0d0)
+        do irow = 1, nrow
+          local_owner = dg_frag%id
+          if (allocated(dg_frag%coef_owner)) then
+            if (irow > size(dg_frag%coef_owner, 1)) cycle
+            local_owner = dg_frag%coef_owner(irow, ispin)
+          end if
+          if (local_owner /= dg_frag%id) cycle
+          do jst = 1, nstate
+            do ist = 1, nstate
+              ssub_local(ist,jst) = ssub_local(ist,jst) + conjg(vcoef(irow,ist)) * scoef(irow,jst)
+            end do
+          end do
+        end do
+        call comm_summation(ssub_local, ssub, nstate*nstate, dg_frag%icomm)
+        diag_dev = 0.0d0
+        offdiag_abs = 0.0d0
+        do jst = 1, nstate
+          diag_dev = max(diag_dev, abs(ssub(jst,jst) - (1.0d0, 0.0d0)))
+          do ist = 1, nstate
+            if (ist /= jst) offdiag_abs = max(offdiag_abs, abs(ssub(ist,jst)))
+          end do
+        end do
+        if (comm_is_root(dg_frag%id)) then
+          write(*,'(1x,a,i0,2(a,1pe13.5))') '[DG-FULL-H-SEED-SCHECK] spin=', ispin, &
+            ' max|V^dag S V-I|_diag=', diag_dev, &
+            ' max|V^dag S V|_offdiag=', offdiag_abs
+          flush(6)
+        end if
+      end do
+      deallocate(vcoef, scoef, ssub_local, ssub)
+    end subroutine diagnose_full_h_seed_overlap
 
     subroutine build_full_h_seed_position_operator(system_in)
       use communication, only: comm_summation, comm_is_root
