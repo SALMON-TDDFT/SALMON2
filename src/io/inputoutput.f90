@@ -603,7 +603,8 @@ contains
       & file_sbe_prod_dk, &
       & sbe_lg_degen, &
       & sbe_lg_degen_floor, &
-      & nband_sbe_min
+      & nband_sbe_min, &
+      & yn_sbe_gs_current_subtract
 
     namelist/dc/ &
       & num_fragment, &
@@ -1064,6 +1065,7 @@ contains
     sbe_lg_degen        = 'off'
     sbe_lg_degen_floor  = 1d-9
     nband_sbe_min       = 1
+    yn_sbe_gs_current_subtract = 'n'
 !! == default for &dc
     num_fragment = 0
     num_rgrid_buffer = 0
@@ -1730,6 +1732,7 @@ contains
     call comm_bcast(sbe_lg_degen,        nproc_group_global)
     call comm_bcast(sbe_lg_degen_floor,  nproc_group_global)
     call comm_bcast(nband_sbe_min,       nproc_group_global)
+    call comm_bcast(yn_sbe_gs_current_subtract, nproc_group_global)
 !! == bcast for dc
     call comm_bcast(num_fragment ,nproc_group_global)
     call comm_bcast(num_rgrid_buffer, nproc_group_global)
@@ -2721,6 +2724,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'sbe_lg_degen', sbe_lg_degen
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_lg_degen_floor', sbe_lg_degen_floor
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nband_sbe_min', nband_sbe_min
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_gs_current_subtract', yn_sbe_gs_current_subtract
 
       if(inml_dc >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', inml_dc

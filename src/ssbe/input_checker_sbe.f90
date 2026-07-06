@@ -148,6 +148,23 @@ function check_input_variables_sbe() result(flag)
 
     if (sbe_lg_degen_floor <= 0d0) call raise("ERROR! 'sbe_lg_degen_floor' must be positive.")
 
+    select case(yn_sbe_gs_current_subtract)
+    case('y', 'n')
+    case default
+        call raise("ERROR! 'yn_sbe_gs_current_subtract' must be 'y' or 'n'!")
+    end select
+    if (yn_sbe_gs_current_subtract == 'y' .and. trim(gauge_sbe) == "length_gauge") then
+        ! WARN, not error: the frozen-GS subtraction acts only on the
+        ! velocity-gauge current readout (calc_current_bloch); the length-gauge
+        ! current has no A(t)-proportional truncation artifact to subtract, so
+        ! the flag is a silent no-op there.  Follow the nband_sbe_min style:
+        ! tell the user rather than fail.
+        if (comm_is_root(nproc_id_global)) then
+            write(*, '(a)') "WARNING: 'yn_sbe_gs_current_subtract'='y' has no effect for " // &
+                & "gauge_sbe='length_gauge' (velocity-gauge current readout only)."
+        end if
+    end if
+
     if (trim(theory) /= "maxwell_sbe") return
 
     if (nx_m < 1) &

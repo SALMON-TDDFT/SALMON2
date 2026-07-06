@@ -40,6 +40,12 @@ module bloch_solver_ssbe
     ! setter below (used by test_gicov_hex.f90); there is no other writer.
     logical, save, private :: gicov_force_general_field = .false.
 
+    ! Single-density current evaluation (the legacy calc_current_bloch body):
+    ! PRIVATE (codex review): every caller must go through the public
+    ! calc_current_bloch wrapper so the yn_sbe_gs_current_subtract readout
+    ! cannot be silently bypassed by a future direct call to the core.
+    private :: calc_current_bloch_core
+
     ! --- gicov halo-exchange plan (built once on first gicov_rhs call) ---
     ! Replaces the full-nk rho allreduce: each rank ships only the +-m_max-shell
     ! neighbour-k densities the covariant stencil actually reads (plan derived
@@ -206,7 +212,73 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
 end subroutine
 
 
+!===================================================================
+! Velocity-gauge current readout.  Default (yn_sbe_gs_current_subtract='n'):
+! the legacy evaluation J = Tr[rho(t) v(k+A)] (calc_current_bloch_core,
+! byte-identical code path).  With 'y', the frozen-ground-state current is
+! subtracted:
+!
+!   J(t) = Tr[rho(t) v(k+A(t))] - Tr[rho0 v(k+A(t))]
+!
+! rho0 = diag(gs%occup) is the initial (frozen) density matrix, exactly as set
+! by init_sbe_bloch_solver.  Truncating the basis at nstate_sbe breaks the
+! f-sum rule, so the propagated rho cannot build the full paramagnetic
+! counter-term to the diamagnetic A(t)*Ne readout term: a spurious current
+! proportional to A(t) survives (a filled-band insulator in a COMPLETE basis
+! carries none).  Evaluating the SAME velocity operator on the frozen rho0
+! reproduces exactly that truncation-induced pseudo-linear current (standard
+! practice in the upstream SSBE literature), so the difference keeps the
+! nonlinear response intact; for A=0 (post-pulse) the subtrahend vanishes on a
+! time-reversal-symmetric k-grid and the observables are unchanged.
+!
+! The subtrahend is computed BY THE SAME ROUTINE (core) on rho0, so every
+! definition of v is shared automatically: the bare p_tm term, the A*trace
+! diamagnetic term, yn_vnl_correction (flag copied from the live solver), and
+! all norder_correction>=1 A-dependent corrections.  rho0 depends on A only
+! through v(k+A), hence it is rebuilt and evaluated at every call -- one
+! extra current evaluation per step (cheap next to the propagation ZGEMMs).
+!===================================================================
 subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
+    use salmon_global, only: yn_sbe_gs_current_subtract
+    implicit none
+    type(s_sbe_bloch_solver), intent(in) :: sbe
+    type(s_sbe_gs_info), intent(in) :: gs
+    real(8), intent(in) :: Ac(1:3)
+    real(8), intent(out) :: jmat(1:3)
+    integer, intent(in) :: icomm
+    type(s_sbe_bloch_solver) :: sbe0
+    real(8) :: jmat0(1:3)
+    integer :: ik, ib
+
+    call calc_current_bloch_core(sbe, gs, Ac, jmat, icomm)
+
+    if (yn_sbe_gs_current_subtract == 'y') then
+        ! frozen ground-state solver view: same shape / k-slice / vnl flag as
+        ! the live solver, rho0 = diag(occup) exactly as init_sbe_bloch_solver.
+        ! Local variable => the allocatable rho is auto-deallocated on return.
+        sbe0%nk = sbe%nk
+        sbe0%nb = sbe%nb
+        sbe0%ik_min = sbe%ik_min
+        sbe0%ik_max = sbe%ik_max
+        sbe0%flag_vnl_correction = sbe%flag_vnl_correction
+        allocate(sbe0%rho(1:sbe%nb, 1:sbe%nb, sbe%ik_min:sbe%ik_max))
+        sbe0%rho(:, :, :) = 0d0
+        do ik = sbe%ik_min, sbe%ik_max
+            do ib = 1, sbe%nb
+                sbe0%rho(ib, ib, ik) = gs%occup(ib, ik)
+            end do
+        end do
+        call calc_current_bloch_core(sbe0, gs, Ac, jmat0, icomm)
+        jmat(:) = jmat(:) - jmat0(:)
+    end if
+
+    return
+end subroutine calc_current_bloch
+
+
+! Single-density current evaluation (the pre-subtraction legacy body, moved
+! verbatim from calc_current_bloch; see the wrapper above).
+subroutine calc_current_bloch_core(sbe, gs, Ac, jmat, icomm)
     use salmon_global, only: norder_correction
     implicit none
     type(s_sbe_bloch_solver), intent(in) :: sbe
@@ -461,7 +533,7 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
         & + Ac * calc_trace(sbe, gs, sbe%nb, icomm)) / gs%volume
 
     return
-end subroutine calc_current_bloch
+end subroutine calc_current_bloch_core
 
 
 subroutine dt_evolve_bloch(sbe, gs, Ac, dt)
