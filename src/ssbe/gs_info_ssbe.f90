@@ -12,6 +12,14 @@ module gs_info_ssbe
 
         !Ground state (GS) electronic system information
         integer :: nk, nb, ne
+        ! SO-SBE spinor convention (spin='noncollinear', always with
+        ! yn_spinorbit='y'): the export bands are SPINOR states -- 1 electron
+        ! per occupied band instead of 2.  focc/nvb centralize the occupation
+        ! convention so every consumer (occup init, trace bookkeeping, the
+        ! norder_correction occupied-band loop) shares one source of truth.
+        logical :: spinor = .false.  ! .true. = noncollinear/SOC spinor bands
+        real(8) :: focc = 2d0        ! occupation per occupied band (2 / 1)
+        integer :: nvb = 0           ! occupied bands inside the window (= ne/focc)
         real(8), allocatable :: kpoint(:, :), kweight(:)
         real(8), allocatable :: eigen(:, :)
         real(8), allocatable :: occup(:, :)
@@ -61,13 +69,15 @@ contains
 ! Window index w <-> absolute band w + nb_min - 1.
 ! Bands 1..nb_min-1 are frozen as inert fully-occupied: they carry no dynamics
 ! and no current (symmetric filled bands), so they only enter the electron
-! bookkeeping via gs%ne = ne - 2*(nb_min-1) (spinless: 2 electrons per band).
-! nb_min = 1, nb_hi = nb reproduces the unwindowed behavior exactly.
+! bookkeeping via gs%ne = ne - focc*(nb_min-1) (spinless: 2 electrons per
+! band; spinor/noncollinear: 1 electron per band -- Kramers partners are
+! separate bands).  nb_min = 1, nb_hi = nb reproduces the unwindowed behavior
+! exactly.
 subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne, a1, a2, a3, read_bin, icomm)
     use communication
     use filesystem, only: open_filehandle, get_filehandle
     use common_ssbe, only: grad_k_array_nb1d_double
-    use salmon_global, only: gauge_sbe, file_sbe_prod_dk, sbe_lg_degen, num_kgrid, sbe_lg_degen_floor
+    use salmon_global, only: gauge_sbe, file_sbe_prod_dk, sbe_lg_degen, num_kgrid, sbe_lg_degen_floor, spin
     use degenerate_block_ssbe, only: build_xi, same_block, blend, theta_on, theta_off, &
                                    & build_block_transport
     implicit none
@@ -83,7 +93,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     logical, intent(in) :: read_bin
     integer, intent(in) :: icomm
     integer :: irank, nproc
-    integer :: nb_eff
+    integer :: nb_eff, ndeg
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
@@ -95,9 +105,18 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     end if
     nb_eff = nb_hi - (nb_min - 1)
 
+    ! Occupation convention: spinless bands hold 2 electrons, spinor
+    ! (noncollinear/SOC) bands hold 1 (the input checker enforces the
+    ! supported SOC combinations before we get here).
+    gs%spinor = (trim(spin) == 'noncollinear')
+    ndeg = 2
+    if (gs%spinor) ndeg = 1
+    gs%focc = dble(ndeg)
+
     gs%nk = nk
     gs%nb = nb_eff
-    gs%ne = ne - 2 * (nb_min - 1)
+    gs%ne = ne - ndeg * (nb_min - 1)
+    gs%nvb = gs%ne / ndeg
     !gs%num_kgrid(1:3) = num_kgrid(1:3)
 
     if (irank == 0 .and. (nb_min > 1 .or. nb_hi < nb)) then
@@ -167,11 +186,12 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     end select
 
     !Initial Occupation Number
-    !Window bands 1..gs%ne/2 (= absolute nb_min..ne/2) are the occupied bands
-    !inside the window; the frozen bands 1..nb_min-1 are NOT stored (inert,
-    !fully occupied) and enter only through gs%ne = ne - 2*(nb_min-1).
+    !Window bands 1..gs%nvb (= absolute nb_min..nb_min-1+nvb) are the occupied
+    !bands inside the window (nvb = ne/2 spinless, = ne spinor); the frozen
+    !bands 1..nb_min-1 are NOT stored (inert, fully occupied) and enter only
+    !through gs%ne = ne - focc*(nb_min-1).
     gs%occup(:,:) = 0d0 !!Experimental!!
-    if (gs%ne > 0) gs%occup(1:(gs%ne/2),:) = 2d0 !!Experimental!!
+    if (gs%ne > 0) gs%occup(1:gs%nvb,:) = gs%focc !!Experimental!!
 
 contains
 
@@ -248,6 +268,12 @@ contains
         else
             efac = 1.0d0
         end if
+        ! Noncollinear/SOC eigen exports (write_eigen) carry TWO spin blocks
+        ! (is=1,2) that are DUPLICATE copies of the same spinor spectrum (see
+        ! occupation.f90 mu2ne: jspin=2 duplicates jspin=1 in SO mode).  The
+        ! loop below reads exactly the first nk k-blocks = the spin-1 block,
+        ! then the file is closed -- the duplicate spin-2 block is skipped by
+        ! construction, so the SAME reader serves spinless and spinor exports.
         do ik = 1, nk
             read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
             ! consume ALL nb export rows (keeps the per-k header alignment);

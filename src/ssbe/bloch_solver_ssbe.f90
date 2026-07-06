@@ -316,17 +316,19 @@ end subroutine calc_current_bloch
 !            - < sum_{v: f_v>0} f_v sum_{m: f_m=0}
 !                2 Re[ pi^i_vm pi^j_mv ] / (eps_m - eps_v) >_k ) / V
 !
-! NORMALIZATION / SPIN CONVENTION: f = gs%occup is the ssbe spinless
-! convention (occup = 2 per filled band, set by init_sbe_gs_info), and
+! NORMALIZATION / SPIN CONVENTION: f = gs%occup as set by init_sbe_gs_info
+! (spinless: 2 per filled band; spinor/noncollinear SO-SBE: 1 per filled
+! band), and
 ! Ne = <sum_b f_b>_k = Tr[rho0] -- the same trace the diamagnetic readout
 ! term A*calc_trace() carries (the SBE propagation conserves the trace).
 ! With the occupation factor f_v kept EXPLICIT under the sum, the
 ! Thomas-Reiche-Kuhn sum rule per band,
 !   sum_{m/=v} 2 Re[ p^i_vm p^j_mv ] / (eps_m - eps_v) = delta_ij
 ! (one electron; spin enters only through f_v), gives in a COMPLETE basis
-!   < sum_v f_v delta_ij >_k = Ne delta_ij   =>   D -> 0 identically.
+!   < sum_v f_v delta_ij >_k = Ne delta_ij   =>   D -> 0 identically --
+! BOTH occupation conventions are served by the same expression.
 ! Occupied<->occupied pairs are excluded: they carry (f_v - f_m) = 0 in the
-! response (ssbe occupations are exactly 0 or 2 by construction), and in the
+! response (ssbe occupations are exactly 0 or focc by construction), and in the
 ! TRK rearrangement they cancel pairwise (numerator symmetric, denominator
 ! antisymmetric under v<->m) -- restricting m to the unoccupied window also
 ! keeps degenerate occupied pairs (eps_m - eps_v -> 0) out of the sum by
@@ -435,7 +437,10 @@ subroutine calc_current_bloch_core(sbe, gs, Ac, jmat, icomm)
     if(norder_correction>=1)then
         do ik = sbe%ik_min, sbe%ik_max
             do idir = 1, 3
-                do nb = 1, gs%ne/2
+                ! occupied bands 1..gs%nvb (= gs%ne/2 spinless, = gs%ne
+                ! spinor); the occupation itself is carried by rho(nb,nb) and
+                ! the 2.d0 below is the c.c.-pair factor, NOT spin degeneracy.
+                do nb = 1, gs%nvb
                     do ib = 1, sbe%nb
                         pin(idir) = gs%p_tm_matrix(ib, nb, idir, ik)
                         pni_Ac = gs%p_tm_matrix(nb, ib, 1, ik) * Ac(1) + &

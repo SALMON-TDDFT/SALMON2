@@ -28,8 +28,45 @@ function check_input_variables_sbe() result(flag)
     implicit none
     logical :: flag
     integer :: i
+    logical :: flag_spinor
+    integer :: nvb_abs   ! occupied bands of the ABSOLUTE (unwindowed) manifold
 
     flag = .true.
+
+    ! SO-SBE spinor mode: spin='noncollinear' (the global input checker
+    ! already enforces yn_spinorbit='y' with it).  nstate/nstate_sbe/nelec are
+    ! then SPINOR counts: 1 electron per occupied band, Kramers partners are
+    ! separate band indices, so the occupied manifold is bands 1..nelec
+    ! (spinless: 1..nelec/2).
+    flag_spinor = (trim(spin) == 'noncollinear')
+    if (flag_spinor) then
+        nvb_abs = nelec
+    else
+        nvb_abs = nelec / 2
+    end if
+
+    if (flag_spinor) then
+        if (trim(theory) == "maxwell_sbe") then
+            call raise("ERROR! spin='noncollinear' (SO-SBE) is not supported for theory='maxwell_sbe' yet!")
+        end if
+        ! Kramers theorem (SOC with time-reversal symmetry) makes EVERY band
+        ! doubly degenerate at EVERY k: the legacy length-gauge machinery
+        ! (un-gated scalar -q/t_2 dephasing + |dnm| dipole phases) is
+        ! basis-dependent / divergent inside those degenerate pairs.  Only the
+        ! gauge-covariant path ('gicov': Wilson-line transport + the
+        ! delta-omega-GATED T2, which correctly never dephases WITHIN a
+        ! Kramers pair) is well-defined there.  The velocity gauge carries no
+        ! scalar T2 and needs no gate.
+        if (trim(gauge_sbe) == "length_gauge" .and. trim(sbe_lg_degen) /= "gicov") then
+            call raise("ERROR! spin='noncollinear' (SO-SBE) with gauge_sbe='length_gauge' requires " // &
+                & "sbe_lg_degen='gicov' (Kramers degeneracy needs the gauge-covariant transport " // &
+                & "and the delta-omega-gated T2)!")
+        end if
+        if (comm_is_root(nproc_id_global)) then
+            write(*, '(a)') "# SO-SBE (spin='noncollinear'): spinor bands, occupation 1 per band; " // &
+                & "occupied manifold = bands 1..nelec."
+        end if
+    end if
 
     if(num_sbe>=2)then
         if (nstate_sbe(2) <= 0) call raise("ERROR! nstate_sbe must be specified when num_sbe>=2!")
@@ -94,12 +131,40 @@ function check_input_variables_sbe() result(flag)
     if (nk_sbe(1) <= 0) nk_sbe(1) = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
     if (nelec_sbe(1) <= 0) nelec_sbe(1) = nelec
 
+    ! Kramers-pair alignment (spinor SO-SBE): with time-reversal symmetry the
+    ! spinor export pairs adjacent bands (2m-1, 2m) into exactly degenerate
+    ! Kramers doublets.  A half-occupied doublet (odd nelec) or a frozen cut
+    ! through a doublet (even nband_sbe_min-1 violated) makes the basis
+    ! choice INSIDE an exactly degenerate pair observable -- the same
+    ! pathology the gicov guard exists for -- so both are rejected.  An odd
+    ! window TOP merely truncates the partner of the highest conduction
+    ! doublet (a basis-truncation artifact, not an occupied-manifold one):
+    ! warn, do not fail.
+    if (flag_spinor) then
+        if (mod(nelec, 2) /= 0) then
+            call raise("ERROR! spin='noncollinear' (SO-SBE) requires even 'nelec' " // &
+                & "(a half-occupied Kramers doublet is basis-dependent)!")
+        end if
+        if (mod(nband_sbe_min - 1, 2) /= 0) then
+            call raise("ERROR! spin='noncollinear' (SO-SBE): 'nband_sbe_min'-1 must be even " // &
+                & "(the frozen cut must not split a Kramers doublet)!")
+        end if
+        if (mod(nstate_sbe(1), 2) /= 0) then
+            if (comm_is_root(nproc_id_global)) then
+                write(*, '(a)') "WARNING: odd 'nstate_sbe' splits the highest Kramers doublet " // &
+                    & "across the window top (basis-truncation artifact risk)."
+            end if
+        end if
+    end if
+
     ! Band-window lower-cut: SBE propagates the contiguous window
     ! [nband_sbe_min, nstate_sbe(1)]; bands 1..nband_sbe_min-1 are frozen as
-    ! inert fully-occupied (spinless: 2 electrons each), so every frozen band
-    ! must lie inside the occupied manifold 1..nelec/2.
-    if (trim(theory) /= "maxwell_sbe" .and. nstate_sbe(1) < nelec / 2) then
-        call raise("ERROR! 'nstate_sbe' must be >= nelec/2 " // &
+    ! inert fully-occupied (spinless: 2 electrons each; spinor: 1 each), so
+    ! every frozen band must lie inside the occupied manifold 1..nvb_abs
+    ! (nvb_abs = nelec/2 spinless, = nelec spinor).
+    if (trim(theory) /= "maxwell_sbe" .and. nstate_sbe(1) < nvb_abs) then
+        call raise("ERROR! 'nstate_sbe' must be >= the occupied band count " // &
+            & "(nelec/2 spinless, nelec for spin='noncollinear') " // &
             & "(the SBE band window must contain the occupied manifold)!")
     end if
     if (nband_sbe_min < 1) then
@@ -108,8 +173,9 @@ function check_input_variables_sbe() result(flag)
     if (nband_sbe_min > nstate_sbe(1)) then
         call raise("ERROR! 'nband_sbe_min' must not exceed 'nstate_sbe' (empty band window)!")
     end if
-    if (nband_sbe_min - 1 > nelec / 2) then
-        call raise("ERROR! 'nband_sbe_min'-1 must be <= nelec/2 " // &
+    if (nband_sbe_min - 1 > nvb_abs) then
+        call raise("ERROR! 'nband_sbe_min'-1 must be <= the occupied band count " // &
+            & "(nelec/2 spinless, nelec for spin='noncollinear') " // &
             & "(frozen bands must be fully occupied)!")
     end if
     if (nband_sbe_min > 1) then
@@ -119,10 +185,16 @@ function check_input_variables_sbe() result(flag)
         if (comm_is_root(nproc_id_global)) then
             write(*, '(a,i0,a)') "WARNING: 'nband_sbe_min' freezes bands 1..", &
                 & nband_sbe_min - 1, " as inert fully-occupied (no dynamics, zero current)."
-            write(*, '(a,i0,a,i0)') "  This is a frozen-core approximation: valid only if the " // &
-                & "frozen bands lie far below the band gap. nelec_eff = ", &
-                & nelec - 2 * (nband_sbe_min - 1), " of nelec = ", nelec
-            if (nband_sbe_min - 1 == nelec / 2) then
+            if (flag_spinor) then
+                write(*, '(a,i0,a,i0)') "  This is a frozen-core approximation: valid only if the " // &
+                    & "frozen bands lie far below the band gap. nelec_eff = ", &
+                    & nelec - (nband_sbe_min - 1), " of nelec = ", nelec
+            else
+                write(*, '(a,i0,a,i0)') "  This is a frozen-core approximation: valid only if the " // &
+                    & "frozen bands lie far below the band gap. nelec_eff = ", &
+                    & nelec - 2 * (nband_sbe_min - 1), " of nelec = ", nelec
+            end if
+            if (nband_sbe_min - 1 == nvb_abs) then
                 write(*, '(a)') "  WARNING: the band window contains NO occupied bands " // &
                     & "(the entire valence manifold is frozen)."
             end if

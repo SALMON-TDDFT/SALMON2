@@ -41,7 +41,6 @@ subroutine main_realtime_ssbe(icomm)
     ! bands 1..nband_sbe_min-1 are inert fully-occupied and enter the
     ! trace / n_ex bookkeeping only through nelec_eff.
     nb_sbe_eff = nstate_sbe(1) - (nband_sbe_min - 1)
-    nelec_eff  = nelec - 2 * (nband_sbe_min - 1)
 
     ! Read ground state electronic system: the exports carry nstate bands
     ! (all consumed by the readers); gs%* stores the window
@@ -51,6 +50,11 @@ subroutine main_realtime_ssbe(icomm)
         & nk, nstate, nband_sbe_min, nstate_sbe(1), nelec, &
         & al_vec1, al_vec2, al_vec3, &
         & .false., icomm)
+
+    ! Electrons inside the window, per the occupation convention resolved by
+    ! init_sbe_gs_info: spinless nelec - 2*(nband_sbe_min-1); spinor
+    ! (noncollinear/SOC, 1 electron per band) nelec - (nband_sbe_min-1).
+    nelec_eff = gs%ne
 
     ! Initialization of SBE solver and density matrix:
     call init_sbe_bloch_solver(sbe, gs, nb_sbe_eff, icomm)
@@ -170,10 +174,11 @@ subroutine main_realtime_ssbe(icomm)
         
         if (mod(it, out_projection_step) == 0) then
             ! window bookkeeping: the occupied bands inside the window are
-            ! 1..nelec_eff/2 (window indices); the frozen bands are inert, so
-            ! n_ex and n_hole are exact against nelec_eff (not nelec).
+            ! 1..gs%nvb (window indices; nvb = nelec_eff/2 spinless, =
+            ! nelec_eff spinor); the frozen bands are inert, so n_ex and
+            ! n_hole are exact against nelec_eff (not nelec).
             tr_all = calc_trace(sbe, gs, nb_sbe_eff, icomm)
-            tr_vb = calc_trace(sbe, gs, nelec_eff / 2, icomm)
+            tr_vb = calc_trace(sbe, gs, gs%nvb, icomm)
             if (irank == 0) then
                 call write_sbe_nex_line(fh_sbe_nex, t, tr_all - tr_vb, nelec_eff - tr_vb)
             end if
