@@ -139,18 +139,24 @@ contains
         write(*,'(a)') "  if a finite magnetization is present."
         flag_info_mgga_noncol = .true.
       end if
-      ! warn if the system has a significant net magnetization (rate-limited:
+      ! warn if the system has a significant NET magnetization (rate-limited:
       ! re-arms after |m| decays below half the threshold, at most 3 messages;
       ! note |m|>threshold is normal for the random/gauss initial guess during
-      ! the first SCF iterations and should decay for nonmagnetic systems)
+      ! the first SCF iterations and should decay for nonmagnetic systems).
+      ! CAVEAT: this cheap check sees only the cell-integrated moment; local
+      ! spin textures with zero net moment (e.g. antiferromagnets) are NOT
+      ! detected, but this path is equally approximate for them (it is exact
+      ! only for zero LOCAL moment). calc_magnetization returns m=0 if the
+      ! density matrix is not yet available (e.g. method_init_density='pp').
       call calc_magnetization(system,mg,info,mag)
       mag_abs = sqrt(mag(1)**2+mag(2)**2+mag(3)**2)
       if( mag_abs > 1d-2 ) then
         if( (.not.flag_warn_mgga_mag) .and. n_warn_mgga_mag < 3 ) then
           if( comm_is_root(nproc_id_global) ) then
             write(*,'(a,3es12.4)') "  WARNING: TBmBJ noncollinear total-density path: net magnetization m =", mag
-            write(*,'(a)') "  The TBmBJ potential here assumes a nonmagnetic system (exact only for zero"
-            write(*,'(a)') "  local moment). If this persists at convergence, the result is approximate."
+            write(*,'(a)') "  The TBmBJ potential here is exact only for vanishing local spin polarization."
+            write(*,'(a)') "  If the magnetization persists at convergence, the result is approximate."
+            write(*,'(a)') "  (Local moments with zero net moment are not detected by this check.)"
           end if
           flag_warn_mgga_mag = .true.
           n_warn_mgga_mag = n_warn_mgga_mag + 1

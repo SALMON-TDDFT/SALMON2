@@ -187,16 +187,28 @@ contains
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
 
-       phi = rot_ang(ix,iy,iz,1)
-       theta = rot_ang(ix,iy,iz,2)
-
        vxc_0 = 0.5d0*( Vxc(1)%f(ix,iy,iz) + Vxc(2)%f(ix,iy,iz) )
        vxc_1 = 0.5d0*( Vxc(1)%f(ix,iy,iz) - Vxc(2)%f(ix,iy,iz) )
 
-       vxc_mat(ix,iy,iz,1,1) = vxc_0 + vxc_1*cos(theta)
-       vxc_mat(ix,iy,iz,2,1) = vxc_1*dcmplx( cos(phi), sin(phi) )*sin(theta)
-       vxc_mat(ix,iy,iz,1,2) = vxc_1*dcmplx( cos(phi),-sin(phi) )*sin(theta)
-       vxc_mat(ix,iy,iz,2,2) = vxc_0 - vxc_1*cos(theta)
+       if( vxc_1 == 0.0d0 ) then
+          ! spin-identity potential (e.g. the meta-GGA total-density path,
+          ! Vxc(1)==Vxc(2)): the rotation is exactly the identity. Skip the
+          ! rot_ang trig evaluation: where the local density matrix is spin-
+          ! proportional the rotation angles are ill-defined (0/0 -> NaN) and
+          ! 0*NaN would contaminate vxc_mat.
+          vxc_mat(ix,iy,iz,1,1) = vxc_0
+          vxc_mat(ix,iy,iz,2,1) = zero
+          vxc_mat(ix,iy,iz,1,2) = zero
+          vxc_mat(ix,iy,iz,2,2) = vxc_0
+       else
+          phi = rot_ang(ix,iy,iz,1)
+          theta = rot_ang(ix,iy,iz,2)
+
+          vxc_mat(ix,iy,iz,1,1) = vxc_0 + vxc_1*cos(theta)
+          vxc_mat(ix,iy,iz,2,1) = vxc_1*dcmplx( cos(phi), sin(phi) )*sin(theta)
+          vxc_mat(ix,iy,iz,1,2) = vxc_1*dcmplx( cos(phi),-sin(phi) )*sin(theta)
+          vxc_mat(ix,iy,iz,2,2) = vxc_0 - vxc_1*cos(theta)
+       end if
 
     end do !ix
     end do !iy
@@ -313,7 +325,16 @@ contains
     integer :: ix,iy,iz
     real(8)    :: m_tmp(3)
     complex(8) :: zmat(2,2)
-    
+
+    ! den_mat is built by calc_dm_noncollinear (via calc_density); some init
+    ! paths (e.g. method_init_density='pp') evaluate the xc potential before
+    ! any calc_density call, so fail soft here instead of dereferencing an
+    ! unallocated array.
+    if ( .not.allocated(den_mat) ) then
+      m = 0d0
+      return
+    end if
+
     zmat = zero
 #ifdef USE_OPENACC
 !$acc kernels
