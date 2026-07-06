@@ -1933,6 +1933,14 @@ contains
       real(8) :: coord(3), box_l(3), hvol
       real(8) :: herm_diff, herm_diff_local(1), herm_diff_global(1)
 
+      if (dg_frag%has_buffer_periodic_wannier_basis .and. &
+          allocated(dg_frag%buffer_wannier_coef) .and. &
+          allocated(dg_frag%buffer_wannier_v) .and. &
+          allocated(dg_frag%buffer_wannier_frag_center)) then
+        call build_full_h_seed_wannier_position_operator()
+        return
+      end if
+
       if (.not. allocated(dg_frag%phi_frag)) return
       if (.not. allocated(dg_frag%full_h_seed_evec)) return
       if (dg_frag%full_h_seed_nstate <= 0) return
@@ -2016,10 +2024,156 @@ contains
         write(*,'(1x,a,i0,2(a,1pe13.5))') '[DG-FULL-H-SEED-XI] projected centered-cell position in Full-H basis;', &
           nstate, ' herm_diff_sum=', herm_diff_global(1), &
           ' max_abs=', maxval(abs(xi_global))
+        write(*,'(1x,a)') '[DG-FULL-H-SEED-XI] source=centered-cell-sawtooth'
         flush(6)
       end if
       deallocate(xi_local, xi_global, phi_eig)
     end subroutine build_full_h_seed_position_operator
+
+    subroutine build_full_h_seed_wannier_position_operator()
+      use communication, only: comm_summation, comm_is_root
+      complex(8), allocatable :: xi_local(:,:,:,:), xi_global(:,:,:,:)
+      complex(8), allocatable :: eig_w(:,:), work_w(:,:), r_w(:,:)
+      integer :: ifrag, i_local, ispin_loc, ibasis, iw, jw, ist, jst
+      integer :: nw, nbf, gid, iblk, iblk_idx, ifrag_row, ifrag_col
+      integer :: io, jo, nrow_blk, ncol_blk, gid_i, gid_j
+      real(8) :: rval, herm_diff, herm_diff_local(1), herm_diff_global(1)
+      real(8) :: local_abs, flux_abs, local_abs_sum(1), flux_abs_sum(1)
+      logical, parameter :: include_neighbor_xi_flux = .false.
+
+      if (.not. allocated(dg_frag%full_h_seed_evec)) return
+      if (.not. allocated(dg_frag%buffer_wannier_coef)) return
+      if (.not. allocated(dg_frag%buffer_wannier_v)) return
+      if (.not. allocated(dg_frag%buffer_wannier_frag_center)) return
+      if (dg_frag%full_h_seed_nstate <= 0) return
+
+      allocate(xi_local(3,nstate,nstate,dg_frag%nspin))
+      allocate(xi_global(3,nstate,nstate,dg_frag%nspin))
+      xi_local(:, :, :, :) = (0.0d0, 0.0d0)
+      local_abs = 0.0d0
+      flux_abs = 0.0d0
+
+      do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
+        i_local = ifrag - dg_frag%ifrag_start + 1
+        if (i_local < 1 .or. i_local > size(dg_frag%buffer_wannier_coef, 4)) cycle
+        if (i_local < 1 .or. i_local > size(dg_frag%buffer_wannier_nkeep)) cycle
+        nw = min(dg_frag%buffer_wannier_nkeep(i_local), size(dg_frag%buffer_wannier_coef, 2), &
+                 size(dg_frag%buffer_wannier_v, 2), size(dg_frag%buffer_wannier_v, 3))
+        if (nw <= 0) cycle
+        allocate(eig_w(nw,nstate))
+        do ispin_loc = 1, dg_frag%nspin
+          nbf = min(dg_frag%n_basis(ifrag, ispin_loc), size(dg_frag%buffer_wannier_coef, 1), &
+                    size(dg_frag%index_basis, 1))
+          if (nbf <= 0) cycle
+          eig_w(:, :) = (0.0d0, 0.0d0)
+          do iw = 1, nw
+            do ibasis = 1, nbf
+              gid = dg_frag%index_basis(ibasis, ifrag, ispin_loc)
+              if (gid < 1 .or. gid > nrow) cycle
+              eig_w(iw,1:nstate) = eig_w(iw,1:nstate) + &
+                cmplx(dg_frag%buffer_wannier_coef(ibasis,iw,ispin_loc,i_local), 0.0d0, kind=8) * &
+                dg_frag%full_h_seed_evec(gid,1:nstate,ispin_loc)
+            end do
+          end do
+          allocate(work_w(nw,nstate), r_w(nw,nw))
+          do ibasis = 1, 3
+            r_w(1:nw,1:nw) = cmplx(dg_frag%buffer_wannier_v(ibasis,1:nw,1:nw,i_local), 0.0d0, kind=8)
+            do iw = 1, nw
+              r_w(iw,iw) = r_w(iw,iw) + cmplx(dg_frag%buffer_wannier_frag_center(ibasis,i_local), 0.0d0, kind=8)
+            end do
+            local_abs = max(local_abs, maxval(abs(r_w)))
+            work_w(1:nw,1:nstate) = matmul(r_w(1:nw,1:nw), eig_w(1:nw,1:nstate))
+            xi_local(ibasis,1:nstate,1:nstate,ispin_loc) = &
+              xi_local(ibasis,1:nstate,1:nstate,ispin_loc) + &
+              matmul(conjg(transpose(eig_w(1:nw,1:nstate))), work_w(1:nw,1:nstate))
+          end do
+          deallocate(work_w, r_w)
+        end do
+        deallocate(eig_w)
+      end do
+
+      ! The direct dense projection of neighbor xi_flux is intentionally disabled
+      ! here; it needs a BLAS-style projection before it is usable for diagnostics.
+      if (include_neighbor_xi_flux .and. dg_frag%buffer_wannier_xi_flux_available .and. &
+          allocated(dg_frag%buffer_wannier_xi_flux_blocks) .and. &
+          allocated(dg_frag%buffer_wannier_xi_flux_local_block_ids)) then
+        do iblk_idx = 1, size(dg_frag%buffer_wannier_xi_flux_local_block_ids)
+          iblk = dg_frag%buffer_wannier_xi_flux_local_block_ids(iblk_idx)
+          if (iblk < 1 .or. iblk > size(dg_frag%buffer_wannier_xi_flux_blocks)) cycle
+          if (.not. allocated(dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val)) cycle
+          ifrag_row = dg_frag%buffer_wannier_xi_flux_blocks(iblk)%ifrag_row
+          ifrag_col = dg_frag%buffer_wannier_xi_flux_blocks(iblk)%ifrag_col
+          if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
+          if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
+          do ispin_loc = 1, dg_frag%nspin
+            nrow_blk = min(dg_frag%n_basis(ifrag_row, ispin_loc), &
+                           size(dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val, 2), &
+                           size(dg_frag%index_basis, 1))
+            ncol_blk = min(dg_frag%n_basis(ifrag_col, ispin_loc), &
+                           size(dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val, 3), &
+                           size(dg_frag%index_basis, 1))
+            do jo = 1, ncol_blk
+              gid_j = dg_frag%index_basis(jo, ifrag_col, ispin_loc)
+              if (gid_j < 1 .or. gid_j > nrow) cycle
+              do io = 1, nrow_blk
+                gid_i = dg_frag%index_basis(io, ifrag_row, ispin_loc)
+                if (gid_i < 1 .or. gid_i > nrow) cycle
+                do ibasis = 1, 3
+                  rval = dg_frag%buffer_wannier_xi_flux_blocks(iblk)%val(ibasis,io,jo,ispin_loc)
+                  if (abs(rval) <= 0.0d0) cycle
+                  flux_abs = max(flux_abs, abs(rval))
+                  do jst = 1, nstate
+                    do ist = 1, nstate
+                      xi_local(ibasis,ist,jst,ispin_loc) = xi_local(ibasis,ist,jst,ispin_loc) + &
+                        conjg(dg_frag%full_h_seed_evec(gid_i,ist,ispin_loc)) * rval * &
+                        dg_frag%full_h_seed_evec(gid_j,jst,ispin_loc)
+                    end do
+                  end do
+                end do
+              end do
+            end do
+          end do
+        end do
+      end if
+
+      call comm_summation(xi_local, xi_global, size(xi_global), dg_frag%icomm)
+      herm_diff = 0.0d0
+      do ispin_loc = 1, dg_frag%nspin
+        do jst = 1, nstate
+          do ist = 1, jst - 1
+            herm_diff = max(herm_diff, maxval(abs(xi_global(1:3,ist,jst,ispin_loc) - &
+                                                  conjg(xi_global(1:3,jst,ist,ispin_loc)))))
+            xi_global(1:3,ist,jst,ispin_loc) = 0.5d0 * (xi_global(1:3,ist,jst,ispin_loc) + &
+                                                        conjg(xi_global(1:3,jst,ist,ispin_loc)))
+            xi_global(1:3,jst,ist,ispin_loc) = conjg(xi_global(1:3,ist,jst,ispin_loc))
+          end do
+          xi_global(1:3,jst,jst,ispin_loc) = cmplx(real(xi_global(1:3,jst,jst,ispin_loc), kind=8), &
+                                                   0.0d0, kind=8)
+        end do
+      end do
+      herm_diff_local(1) = herm_diff
+      call comm_summation(herm_diff_local, herm_diff_global, 1, dg_frag%icomm)
+      local_abs_sum(1) = local_abs
+      flux_abs_sum(1) = flux_abs
+      call comm_summation(local_abs_sum, local_abs_sum, 1, dg_frag%icomm)
+      call comm_summation(flux_abs_sum, flux_abs_sum, 1, dg_frag%icomm)
+
+      if (allocated(dg_frag%full_h_seed_xi)) deallocate(dg_frag%full_h_seed_xi)
+      allocate(dg_frag%full_h_seed_xi(3,nstate,nstate,dg_frag%nspin))
+      dg_frag%full_h_seed_xi(:, :, :, :) = xi_global(:, :, :, :)
+      dg_frag%has_full_h_seed_xi = .true.
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,i0,4(a,1pe13.5))') &
+          '[DG-FULL-H-SEED-XI] projected Wannier-center position in Full-H basis;', &
+          nstate, ' herm_diff_sum=', herm_diff_global(1), &
+          ' max_abs=', maxval(abs(xi_global)), &
+          ' local_center_xi_abs_sum=', local_abs_sum(1), &
+          ' neighbor_xi_flux_abs_sum=', flux_abs_sum(1)
+        write(*,'(1x,a)') '[DG-FULL-H-SEED-XI] source=wannier_center_xi'
+        flush(6)
+      end if
+      deallocate(xi_local, xi_global)
+    end subroutine build_full_h_seed_wannier_position_operator
   end subroutine diagonalize_current_dg_full_h_seed
 
   subroutine seed_current_global_wannier_flux_eigenstates(dg_frag, label)
