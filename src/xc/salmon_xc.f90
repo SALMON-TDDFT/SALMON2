@@ -1388,6 +1388,9 @@ contains
       real(8) :: j_s_1d(nl, 3)
       real(8) :: eexc_1d(nl)
       real(8) :: vexc_1d(nl)
+      integer :: i_rep
+      real(8) :: rho_pt(1), rho_s_pt(1), grho_pt(1,3), lrho_pt(1), tau_pt(1), j_pt(1,3)
+      real(8) :: eexc_pt(1), vexc_pt(1)
       call nvtxStartRange('exec_builtin_tbmbj', __LINE__)
 
       rho_1d = reshape(rho, (/nl/))
@@ -1405,6 +1408,30 @@ contains
 
       !call exc_cor_tbmbj(nl, rho_1d, rho_s_1d,  grho_s_1d, rlrho_s_1d, tau_s_1d, j_s_1d, xc%cval, eexc_1d, vexc_1d, Hxyz, aLxyz)
       call exc_cor_tbmbj(nl, rho_1d, rho_s_1d,  grho_s_1d, rlrho_s_1d, tau_s_1d, j_s_1d, xc%cval, eexc_1d, vexc_1d)
+
+      ! Repair pass: for |rhs| tiny but NONZERO (deep density tails, e.g. the
+      ! gauss-init shadow zones of large cells) the Becke-Roussel branch of
+      ! exc_cor_tbmbj still blows up: x_s**3*exp(-x_s) underflows -> b_s=0 ->
+      ! Vx_BR=+-Inf, or x_s is NaN (denormal rhs gives Inf/Inf inside BR_Newton).
+      ! A single Inf/NaN potential point poisons every eigenvalue at the first
+      ! subspace diagonalization (NaN is absorbing, unlike huge-but-finite
+      ! transients, which self-heal as SCF lifts the tails). Re-evaluate exactly
+      ! such points through exc_cor_tbmbj's own nonpositive-density LDA fallback
+      ! branch (rho_s_pt=-1 forces it; for these tail points max(rho_s,rho_floor)
+      ! = rho_floor, so it is the same fallback the rhs=0 case takes). Placed
+      ! here, not inside exc_cor_tbmbj, so that translation unit stays untouched
+      ! and every currently-finite evaluation is bit-identical by construction.
+      do i_rep = 1, nl
+        if (.not.(abs(vexc_1d(i_rep)) <= huge(0d0))) then ! Vexc is +-Inf/NaN
+          rho_pt(1) = rho_1d(i_rep)
+          rho_s_pt(1) = -1d0
+          grho_pt = 0d0; lrho_pt = 0d0; tau_pt = 0d0; j_pt = 0d0
+          call exc_cor_tbmbj(1, rho_pt, rho_s_pt, grho_pt, lrho_pt, tau_pt, j_pt, &
+            &                xc%cval, eexc_pt, vexc_pt)
+          vexc_1d(i_rep) = vexc_pt(1)
+          eexc_1d(i_rep) = eexc_pt(1)
+        endif
+      end do
 
       if (present(vxc)) then
         vxc = vxc + reshape(vexc_1d, (/nx, ny, nz/))
