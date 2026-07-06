@@ -35,6 +35,7 @@ contains
     !real(8), intent(in) :: Hxyz, aLxyz
     
     real(8),parameter :: alpha=-0.012d0,beta=1.023d0,gamma=0.80d0
+    real(8),parameter :: rho_floor=1d-12 ! below this the mBJ evaluation is numerically unsafe
     real(8) :: c,tau_s_jrho,D_s_jrho,Q_s,rhs,x_s,b_s,Vx_BR,Vx_MBJ
     real(8) :: trho,rs,rhos,ec,dec_drhoa,dec_drhob
     integer :: i
@@ -47,32 +48,56 @@ contains
          c=cval ! use c-value given by input file
        else
          !c=sum(sqrt(grho_s(:,1)**2+grho_s(:,2)**2+grho_s(:,3)**2)/rho_s(:))*Hxyz/aLxyz
-         c=sum(sqrt(grho_s(:,1)**2+grho_s(:,2)**2+grho_s(:,3)**2)/rho_s(:)) / nl
-         c=alpha+beta*sqrt(c)
+         ! nonpositive-density points (mixing transients) are excluded from the cell average
+         c=sum(sqrt(grho_s(:,1)**2+grho_s(:,2)**2+grho_s(:,3)**2)/rho_s(:), mask=(rho_s(:) > 0d0)) / nl
+         if(c >= 0d0 .and. c < huge(c)) then ! NaN/Inf-proof (contaminated transients)
+           c=alpha+beta*sqrt(c)
+         else
+           c=1d0 ! fall back to the Becke-Johnson value
+         endif
        endif
     ! case('BJ_PW')
     !    c=1d0
     ! end select
     
     do i=1,NL
-      tau_s_jrho=tau_s(i)-(j_s(i,1)**2+j_s(i,2)**2+j_s(i,3)**2)/rho_s(i)/2
-      D_s_jrho=2*tau_s_jrho-0.25d0*(grho_s(i,1)**2+grho_s(i,2)**2+grho_s(i,3)**2)/rho_s(i)
-      Q_s=(lrho_s(i)-2*gamma*D_s_jrho)/6d0
-      rhs=2d0/3d0*pi**(2d0/3d0)*rho_s(i)**(5d0/3d0)/Q_s
-      call BR_Newton(rhs,x_s)
-      b_s=(x_s**3*exp(-x_s)/(8*pi*rho_s(i)))**(1d0/3d0)
-      Vx_BR=-(1-exp(-x_s)-0.5d0*x_s*exp(-x_s))/b_s
-      Vx_MBJ=c*Vx_BR+(3*c-2)/pi*sqrt(5d0/12d0)*sqrt(2*tau_s_jrho/rho_s(i))
+      ! guard against nonpositive density (mixing transients); NaN also fails this test
+      if(rho_s(i) > 0d0) then
+        rhos=rho_s(i)
+        tau_s_jrho=tau_s(i)-(j_s(i,1)**2+j_s(i,2)**2+j_s(i,3)**2)/rhos/2
+        ! tau_s >= j_s^2/(2 rho_s) holds exactly (Cauchy-Schwarz); clamp negatives
+        ! from floating-point cancellation at low density (would give sqrt(NaN))
+        tau_s_jrho=max(tau_s_jrho,0d0)
+        D_s_jrho=2*tau_s_jrho-0.25d0*(grho_s(i,1)**2+grho_s(i,2)**2+grho_s(i,3)**2)/rhos
+        Q_s=(lrho_s(i)-2*gamma*D_s_jrho)/6d0
+        rhs=2d0/3d0*pi**(2d0/3d0)*rhos**(5d0/3d0)/Q_s
+        if(abs(rhs) > 0d0) then ! excludes rhs=0 and rhs=NaN (no bracket in BR_Newton)
+          call BR_Newton(rhs,x_s)
+          b_s=(x_s**3*exp(-x_s)/(8*pi*rhos))**(1d0/3d0)
+          Vx_BR=-(1-exp(-x_s)-0.5d0*x_s*exp(-x_s))/b_s
+          Vx_MBJ=c*Vx_BR+(3*c-2)/pi*sqrt(5d0/12d0)*sqrt(2*tau_s_jrho/rhos)
+        else
+          rhos=max(rhos,rho_floor) ! rhs=0 (underflow/huge Q_s) hung the old code; keep PWc in range
+          Vx_MBJ=-(6d0*rhos/pi)**(1d0/3d0) ! LDA (Slater) exchange fallback
+        endif
+      else
+        rhos=rho_floor
+        Vx_MBJ=-(6d0*rhos/pi)**(1d0/3d0) ! LDA (Slater) exchange fallback
+      endif
 
-      trho=rho(i)+1d-10
-      rs=(3d0/(4*Pi*trho))**(1d0/3d0)
+      ! total density guarded nonnegative (mixing transients); NaN also fails this test
+      if(rho(i) > 0d0) then
+        trho=rho(i)
+      else
+        trho=0d0
+      endif
+      rs=(3d0/(4*Pi*(trho+1d-10)))**(1d0/3d0)
       Eexc(i)=-.4582d0/rs
       Vexc(i)=Vx_MBJ
-      rhos=rho_s(i)
       call PWc(rhos,rhos,ec,dec_drhoa,dec_drhob)
-      Vexc(i)=Vexc(i)+ec+rho(i)*dec_drhoa
+      Vexc(i)=Vexc(i)+ec+trho*dec_drhoa
       Eexc(i)=Eexc(i)+ec
-      Eexc(i)=Eexc(i)*trho
+      Eexc(i)=Eexc(i)*(trho+1d-10)
     enddo
     return
   End Subroutine exc_cor_tbmbj
@@ -83,22 +108,21 @@ contains
     implicit none
     real(8),intent(IN) :: rhs
     real(8),intent(OUT) :: x_s
+    integer,parameter :: maxiter=200 ! keep the search loops bounded for pathological rhs
     integer iter
     real(8) :: xmin,xmax,x,fx,dfx
 
   ! find xmax
     xmin=0d0
     x=1d0
-    do
+    do iter=1,maxiter
       fx=x*exp(-2d0/3d0*x)/rhs-(x-2)
-      if(fx < 0) then
-        xmax=x
-        exit
-      endif
+      if(.not.(fx >= 0d0)) exit ! fx < 0 or fx is NaN
       x=x*2
     enddo
+    xmax=x
   ! bi-section
-    do
+    do iter=1,maxiter
       x=0.5d0*(xmin+xmax)
       fx=x*exp(-2d0/3d0*x)/rhs-(x-2)
       if(fx < 0) then
@@ -106,7 +130,7 @@ contains
       else
         xmin=x
       endif
-      if(xmax-xmin < 1d-4) exit
+      if(.not.(xmax-xmin >= 1d-4)) exit ! converged (NaN-proof comparison)
     enddo
   ! Newton-Raphson
     do iter=1,5
