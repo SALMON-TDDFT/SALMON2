@@ -1512,12 +1512,12 @@ contains
     end do
 
     if (comm_is_root(dg_frag%id)) then
-      out_label = '[DG-DCDFT-SEED-HRES]'
+      out_label = '[DG-DCDFT-SEED-HRES-FULLDG]'
       if (present(label)) then
         if (len_trim(label) > 0) out_label = trim(label)
       end if
       write(*,'(1x,a,1x,a,1pe13.5,a,i0,a,1pe13.5,a,1pe13.5,a,1pe13.5,a,1pe13.5,a,3(1x,1pe13.5))') &
-        trim(out_label), 'sampled ||(H-e)C||/||C||=', max_rel_res, &
+        trim(out_label), 'ham=full_dg_blocks sampled ||(H-e)C||/||C||=', max_rel_res, &
         ' state=', max_rel_state, ' eps_absmax=', eps_absmax, ' h_absmax=', max_h_norm, &
         ' rayleigh_absmax=', max_rayleigh_abs, ' rayleigh_minus_eps_absmax=', max_rayleigh_eps_abs, &
         ' Ac=', Ac_tot

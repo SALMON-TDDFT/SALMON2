@@ -2103,7 +2103,7 @@ contains
 
   subroutine initialize_coefficients_from_buffer_wannier_flux(dg_frag)
     use eigen_subdiag_sub, only: eigen_dsyev
-    use communication, only: comm_is_root, comm_summation
+    use communication, only: comm_is_root, comm_summation, comm_get_max
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
 
@@ -2113,8 +2113,10 @@ contains
     integer :: nvirt_eff, virt_base, virt_extra, frag_virt_s, frag_virt_e, nvirt_frag_seed
     integer :: nseed_frag
     integer :: nw, nbf, global_idx, local_idx, local_state_col
-    real(8), allocatable :: h_work(:,:), evec(:,:), eval(:), coef_vec(:), r_work(:,:), r_eig(:,:)
+    real(8), allocatable :: h_work(:,:), h_seed(:,:), evec(:,:), eval(:), coef_vec(:), r_work(:,:), r_eig(:,:)
+    real(8), allocatable :: res_w(:)
     real(8) :: diag_local(4), diag_global(4)
+    real(8) :: hres_local(3), hres_global(3), res2, vec2, rel_res
     real(8) :: trans_local(3,5), trans_global(3,5), amp, gap, strength_pair
     real(8) :: min_gap_local(3), max_pair_local(3), max_pair_gap_local(3)
     logical :: trace_bpw_transition
@@ -2131,6 +2133,8 @@ contains
     dg_frag%buffer_wannier_flux_seed_applied = .false.
     diag_local(:) = 0.0d0
     diag_global(:) = 0.0d0
+    hres_local(:) = 0.0d0
+    hres_global(:) = 0.0d0
     trans_local(:, :) = 0.0d0
     trans_global(:, :) = 0.0d0
     trace_bpw_transition = .false.
@@ -2176,9 +2180,20 @@ contains
           stop "DG-Fragment RT: insufficient buffer-periodic Wannier states"
         end if
 
-        allocate(h_work(nw,nw), evec(nw,nw), eval(nw), coef_vec(nbf))
-        h_work(1:nw,1:nw) = dg_frag%buffer_wannier_h_flux(1:nw,1:nw,i_local)
+        allocate(h_work(nw,nw), h_seed(nw,nw), evec(nw,nw), eval(nw), coef_vec(nbf), res_w(nw))
+        h_seed(1:nw,1:nw) = dg_frag%buffer_wannier_h_flux(1:nw,1:nw,i_local)
+        h_work(1:nw,1:nw) = h_seed(1:nw,1:nw)
         call eigen_dsyev(h_work, eval, evec)
+
+        do k = 1, nseed_frag
+          res_w(1:nw) = matmul(h_seed(1:nw,1:nw), evec(1:nw,k)) - eval(k) * evec(1:nw,k)
+          res2 = sum(res_w(1:nw) * res_w(1:nw))
+          vec2 = sum(evec(1:nw,k) * evec(1:nw,k))
+          rel_res = sqrt(max(0.0d0, res2) / max(1.0d-300, vec2))
+          hres_local(1) = max(hres_local(1), rel_res)
+          hres_local(2) = max(hres_local(2), sqrt(max(0.0d0, res2)))
+          hres_local(3) = max(hres_local(3), abs(eval(k)))
+        end do
 
         if (trace_bpw_transition .and. nocc_frag_seed > 0 .and. nvirt_frag_seed > 0) then
           min_gap_local(:) = 1.0d300
@@ -2260,11 +2275,12 @@ contains
 
         diag_local(2) = diag_local(2) + dble(nw)
         diag_local(3) = diag_local(3) + eval(1)
-        deallocate(h_work, evec, eval, coef_vec)
+        deallocate(h_work, h_seed, evec, eval, coef_vec, res_w)
       end do
     end do
 
     call comm_summation(diag_local, diag_global, 4, dg_frag%icomm)
+    call comm_get_max(hres_local, hres_global, 3, dg_frag%icomm)
     if (trace_bpw_transition) call comm_summation(trans_local, trans_global, 15, dg_frag%icomm)
     if (diag_global(1) > 0.0d0) dg_frag%buffer_wannier_flux_seed_applied = .true.
     if (comm_is_root(dg_frag%id)) then
@@ -2272,6 +2288,10 @@ contains
         " seeded_states=", diag_global(1), " virtual_states=", diag_global(4), &
         " total_local_wannier=", diag_global(2), &
         " eval1_sum=", diag_global(3)
+      write(*,'(1x,a,3(a,1pe13.5))') "[DG-BPW-SEED-HRES-LOCAL-W]", &
+        " max_rel=", hres_global(1), &
+        " max_abs=", hres_global(2), &
+        " eval_absmax=", hres_global(3)
       if (trace_bpw_transition) then
         do iaxis = 1, 3
           write(*,'(1x,a,i0,6(a,1pe13.5))') "[DG-BPW-TRANSITION] axis=", iaxis, &
