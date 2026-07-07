@@ -536,6 +536,10 @@
         mixed_z_local_prop_backend_kind = 'fragment_local_mixed_split_backend'
       case ('neighbor_env_expdiag','neighbor_env','neighbor')
         mixed_z_local_prop_backend_kind = 'neighbor_env_expdiag'
+      case ('neighbor_env_fieldonly','neighbor_fieldonly','fieldonly')
+        mixed_z_local_prop_backend_kind = 'neighbor_env_fieldonly'
+      case ('neighbor_env_interaction','neighbor_interaction','interaction')
+        mixed_z_local_prop_backend_kind = 'neighbor_env_interaction'
       case ('global_mixed_split_backend','global')
         mixed_z_local_prop_backend_kind = 'global_mixed_split_backend'
       case default
@@ -550,6 +554,10 @@
         mixed_z_local_prop_backend_kind = 'fragment_local_mixed_split_backend'
       case ('neighbor_env_expdiag','neighbor_env','neighbor')
         mixed_z_local_prop_backend_kind = 'neighbor_env_expdiag'
+      case ('neighbor_env_fieldonly','neighbor_fieldonly','fieldonly')
+        mixed_z_local_prop_backend_kind = 'neighbor_env_fieldonly'
+      case ('neighbor_env_interaction','neighbor_interaction','interaction')
+        mixed_z_local_prop_backend_kind = 'neighbor_env_interaction'
       case ('global_mixed_split_backend','global')
         mixed_z_local_prop_backend_kind = 'global_mixed_split_backend'
       case default
@@ -3063,7 +3071,13 @@
         call apply_fragment_local_mixed_split_exp_stub(E_use, state_s, state_e, &
           candidate_available, replacement_applied, bad, block_reason)
       case ('neighbor_env_expdiag')
-        call apply_neighbor_env_expdiag_stub(E_use, state_s, state_e, &
+        call apply_neighbor_env_expdiag_stub(E_use, state_s, state_e, .false., .false., &
+          candidate_available, replacement_applied, bad, block_reason)
+      case ('neighbor_env_fieldonly')
+        call apply_neighbor_env_expdiag_stub(E_use, state_s, state_e, .true., .false., &
+          candidate_available, replacement_applied, bad, block_reason)
+      case ('neighbor_env_interaction')
+        call apply_neighbor_env_expdiag_stub(E_use, state_s, state_e, .false., .true., &
           candidate_available, replacement_applied, bad, block_reason)
       case default
         bad = .true.
@@ -3071,10 +3085,11 @@
       end select
     end subroutine apply_mixed_split_exp_backend
 
-    subroutine apply_neighbor_env_expdiag_stub(E_use, state_s, state_e, &
+    subroutine apply_neighbor_env_expdiag_stub(E_use, state_s, state_e, fieldonly_mode, interaction_mode, &
                                                candidate_available, replacement_applied, bad, block_reason)
       real(8), intent(in) :: E_use(3)
       integer, intent(in) :: state_s, state_e
+      logical, intent(in) :: fieldonly_mode, interaction_mode
       logical, intent(out) :: candidate_available, replacement_applied, bad
       character(len=*), intent(out) :: block_reason
       logical :: owner_local_layout_ready
@@ -3166,6 +3181,11 @@
         end do
       end if
       if (field_off .and. candidate_available) then
+        if (fieldonly_mode .or. interaction_mode) then
+          replacement_applied = .true.
+          block_reason = 'none'
+          return
+        end if
         bad_coef = .false.
         call project_neighbor_env_current_to_reduced(E_use, state_s, state_e, .false., bad, kernel_ready)
         call ensure_wpw_reduced_eigensystem_only(.true., eig_cache_hit, eig_built, eig_skipped, eig_elapsed)
@@ -3185,9 +3205,13 @@
         end if
       else if (.not. field_off .and. candidate_available) then
         bad_coef = .false.
-        call project_neighbor_env_current_to_reduced(E_use, state_s, state_e, .true., bad, kernel_ready)
-        call ensure_wpw_reduced_eigensystem_only(.true., eig_cache_hit, eig_built, eig_skipped, eig_elapsed)
-        call dryrun_wpw_reduced_expdiag(state_s, state_e, dt, bad_coef, itt, E_use, Ac_ham, 'neighbor_env_fieldon')
+        call project_neighbor_env_current_to_reduced(E_use, state_s, state_e, .not. interaction_mode, bad, kernel_ready)
+        if (interaction_mode) then
+          call apply_neighbor_env_interaction_exp(E_use, state_s, state_e, bad_coef)
+        else if (.not. fieldonly_mode) then
+          call ensure_wpw_reduced_eigensystem_only(.true., eig_cache_hit, eig_built, eig_skipped, eig_elapsed)
+          call dryrun_wpw_reduced_expdiag(state_s, state_e, dt, bad_coef, itt, E_use, Ac_ham, 'neighbor_env_fieldon')
+        end if
         call build_neighbor_env_owner_storage_from_reduced(state_s, state_e, bad, kernel_ready)
         if (kernel_ready .and. .not. bad .and. .not. bad_coef) then
           call writeback_fragment_local_storage_fieldoff(state_s, state_e, writeback_bad)
@@ -3584,6 +3608,141 @@
       c_red(:, :) = matmul(evec_cache(1:nred,1:nred,axis,ispin_use,i_local), tmp(:, :))
       deallocate(tmp)
     end subroutine apply_neighbor_env_cached_axis_field
+
+    subroutine apply_neighbor_env_interaction_exp(E_use, state_s, state_e, bad_coef_any)
+      real(8), intent(in) :: E_use(3)
+      integer, intent(in) :: state_s, state_e
+      logical, intent(out) :: bad_coef_any
+      integer :: nstate_blk, nstate_store, n_pw, nspin_use
+      integer :: i_local, ifrag, nred, nraw, nself, nneigh, n_w, n_pfrag
+      integer :: axis, side, jfrag, pidx, row0, iw, ipw, gp, gid, ispin_use, ist, ired
+      integer :: info0, infoe
+      integer :: pfrag_ids(7)
+      integer, allocatable :: raw_gid(:)
+      real(8), allocatable :: eval0(:), evale(:)
+      real(8) :: phase_c, phase_s
+      logical :: found
+      complex(8), allocatable :: H0(:,:), He(:,:), Swork(:,:), Rraw(:,:), Rred(:,:)
+      complex(8), allocatable :: cvec(:), tmp(:), tmp2(:), work_vec(:)
+
+      bad_coef_any = .false.
+      nstate_blk = max(0, state_e - state_s + 1)
+      nstate_store = max(1, size(dg_frag%coef, 2))
+      n_pw = max(0, dg_frag%n_plane_waves)
+      nspin_use = dg_frag%nspin
+      if (nstate_blk <= 0 .or. n_pw <= 0) return
+      if (.not. dg_frag%wpw_reduced_ready) then
+        bad_coef_any = .true.
+        return
+      end if
+      if (.not. allocated(dg_frag%wpw_reduced_H) .or. .not. allocated(dg_frag%wpw_reduced_S) .or. &
+          .not. allocated(dg_frag%wpw_reduced_transform) .or. .not. allocated(dg_frag%wpw_reduced_Sraw_build) .or. &
+          .not. allocated(dg_frag%wpw_reduced_dim) .or. .not. allocated(dg_frag%wpw_reduced_nraw) .or. &
+          .not. allocated(dg_frag%wpw_reduced_nself) .or. .not. allocated(dg_frag%global_wannier_local_ids) .or. &
+          .not. allocated(dg_frag%global_wannier_local_nkeep) .or. .not. allocated(dg_frag%mixed_wannier_bpw_z)) then
+        bad_coef_any = .true.
+        return
+      end if
+
+      do i_local = 1, size(dg_frag%wpw_reduced_dim)
+        ifrag = dg_frag%ifrag_start + i_local - 1
+        nred = dg_frag%wpw_reduced_dim(i_local)
+        nraw = dg_frag%wpw_reduced_nraw(i_local)
+        nself = dg_frag%wpw_reduced_nself(i_local)
+        n_w = dg_frag%global_wannier_local_nkeep(i_local)
+        if (nred <= 0 .or. nraw <= 0 .or. nself <= 0 .or. n_w <= 0) cycle
+        if (nred > size(dg_frag%wpw_reduced_H,1) .or. nraw > size(dg_frag%wpw_reduced_transform,1)) cycle
+        nneigh = max(0, nred - nself)
+        n_pfrag = 1
+        pfrag_ids(:) = 0
+        pfrag_ids(1) = ifrag
+        do axis = 1, 3
+          do side = -1, 1, 2
+            jfrag = wpw_face_neighbor_fragment(dg_frag, ifrag, axis, side)
+            if (jfrag <= 0 .or. jfrag == ifrag) cycle
+            found = any(pfrag_ids(1:n_pfrag) == jfrag)
+            if (.not. found .and. n_pfrag < size(pfrag_ids)) then
+              n_pfrag = n_pfrag + 1
+              pfrag_ids(n_pfrag) = jfrag
+            end if
+          end do
+        end do
+        if (nraw /= n_w + n_pfrag * n_pw) cycle
+
+        allocate(raw_gid(nraw), Rraw(nraw,nraw), Rred(nred,nred))
+        raw_gid(:) = 0
+        do iw = 1, n_w
+          gid = dg_frag%global_wannier_local_ids(iw, i_local)
+          if (gid >= 1 .and. gid <= dg_frag%mixed_wannier_bpw_nw) raw_gid(iw) = gid
+        end do
+        do pidx = 1, n_pfrag
+          row0 = n_w + (pidx - 1) * n_pw
+          do ipw = 1, n_pw
+            gp = (pfrag_ids(pidx) - 1) * n_pw + ipw
+            if (gp >= 1 .and. gp <= dg_frag%mixed_wannier_bpw_np) raw_gid(row0+ipw) = dg_frag%mixed_wannier_bpw_nw + gp
+          end do
+        end do
+        allocate(H0(nred,nred), He(nred,nred), Swork(nred,nred), eval0(nred), evale(nred))
+        allocate(cvec(nred), tmp(nred), tmp2(nred), work_vec(nred))
+        do ispin_use = 1, nspin_use
+          if (ispin_use > size(dg_frag%wpw_reduced_H,3)) cycle
+          if (ispin_use > size(dg_frag%mixed_wannier_bpw_z,4)) cycle
+          Rraw(:, :) = (0.0d0, 0.0d0)
+          do iw = 1, nraw
+            if (raw_gid(iw) <= 0) cycle
+            do ipw = 1, nraw
+              if (raw_gid(ipw) <= 0) cycle
+              Rraw(iw,ipw) = E_use(1) * dg_frag%mixed_wannier_bpw_z(1,raw_gid(iw),raw_gid(ipw),ispin_use) &
+                           + E_use(2) * dg_frag%mixed_wannier_bpw_z(2,raw_gid(iw),raw_gid(ipw),ispin_use) &
+                           + E_use(3) * dg_frag%mixed_wannier_bpw_z(3,raw_gid(iw),raw_gid(ipw),ispin_use)
+            end do
+          end do
+          Rred(:, :) = matmul(conjg(transpose(dg_frag%wpw_reduced_transform(1:nraw,1:nred,i_local))), &
+            matmul(Rraw(:, :), dg_frag%wpw_reduced_transform(1:nraw,1:nred,i_local)))
+          H0(:, :) = dg_frag%wpw_reduced_H(1:nred,1:nred,ispin_use,i_local)
+          He(:, :) = H0(:, :) - Rred(:, :)
+          Swork(:, :) = dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local)
+          call zhegv_with_query(H0, Swork, nred, eval0, info0)
+          Swork(:, :) = dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local)
+          call zhegv_with_query(He, Swork, nred, evale, infoe)
+          if (info0 /= 0 .or. infoe /= 0) then
+            bad_coef_any = .true.
+            cycle
+          end if
+          do ist = state_s, min(state_e, nstate_store)
+            cvec(:) = (0.0d0, 0.0d0)
+            cvec(1:nself) = dg_frag%coef_wpw_self(1:nself, ist, ispin_use, i_local)
+            if (nneigh > 0) cvec(nself+1:nred) = &
+              dg_frag%coef_wpw_neighbor_reduced(1:nneigh, ist, ispin_use, i_local)
+
+            work_vec(:) = matmul(dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local), cvec(:))
+            tmp(:) = matmul(conjg(transpose(He(:, :))), work_vec(:))
+            do ired = 1, nred
+              phase_c = cos(evale(ired) * dt)
+              phase_s = sin(evale(ired) * dt)
+              tmp(ired) = cmplx(phase_c, -phase_s, kind=8) * tmp(ired)
+            end do
+            tmp2(:) = matmul(He(:, :), tmp(:))
+
+            work_vec(:) = matmul(dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local), tmp2(:))
+            tmp(:) = matmul(conjg(transpose(H0(:, :))), work_vec(:))
+            do ired = 1, nred
+              phase_c = cos(eval0(ired) * dt)
+              phase_s = sin(eval0(ired) * dt)
+              tmp(ired) = cmplx(phase_c, phase_s, kind=8) * tmp(ired)
+            end do
+            cvec(:) = matmul(H0(:, :), tmp(:))
+
+            dg_frag%coef_wpw_self(1:nself, ist, ispin_use, i_local) = cvec(1:nself)
+            if (nneigh > 0) dg_frag%coef_wpw_neighbor_reduced(1:nneigh, ist, ispin_use, i_local) = &
+              cvec(nself+1:nred)
+          end do
+        end do
+        deallocate(H0, He, Swork, eval0, evale, cvec, tmp, tmp2, work_vec)
+        deallocate(raw_gid, Rraw, Rred)
+      end do
+      dg_frag%wpw_reduced_coef_initialized = .true.
+    end subroutine apply_neighbor_env_interaction_exp
 
     function project_raw_coeff_to_reduced(Sraw, Tred, Sred, craw, nraw, nred, nstate) result(cred)
       integer, intent(in) :: nraw, nred, nstate
