@@ -4047,7 +4047,7 @@ contains
       use filesystem, only: get_filehandle
       use salmon_global, only: izatom, sysname, wannier_projection, wannier_projection_width, &
         lambda_cut, base_directory, yn_dc_lcfo_wannier, yn_dc_lcfo_wannier_pw, &
-        yn_dc_lcfo_wannier_cluster, wannier_cluster_size
+        yn_dc_lcfo_wannier_cluster, wannier_cluster_size, yn_dc_lcfo_wannier_symmetry_gauge
       implicit none
       integer :: nproj, nproj_seed, nkeep, nkeep_legacy, nbasis, iunit, ip, jp, iw, jw, io, jo, axis
       integer :: aa_wann_source
@@ -4226,6 +4226,10 @@ contains
         end do
       end do
       if(nkeep_legacy <= 0) stop "DC-LCFO local Wannier export: all local projection directions were removed."
+      if(use_bond_projection .and. yn_dc_lcfo_wannier_symmetry_gauge == 'y') then
+        call apply_local_bond_center_symmetry_gauge(nbasis, nproj_seed, lambda_legacy, uw_legacy, &
+          bproj(1:nbasis,1:nproj_seed), wcoef_legacy, keep_index_legacy, nkeep_legacy)
+      end if
 
       do io=1,nbasis
         bproj(io,nproj_seed+io) = 1d0
@@ -4464,6 +4468,61 @@ contains
       deallocate(phi_box, phi_tmp, psi_w, rho_w_sum, cos_sum, sin_sum, n_basis_file)
       if(allocated(bond_center_bohr)) deallocate(bond_center_bohr)
     end subroutine write_local_wannier_seed
+
+    subroutine apply_local_bond_center_symmetry_gauge(nbasis, nproj_seed, lambda_w, eigvec_w, &
+        bproj_seed, wcoef, keep_index, nkeep)
+      use salmon_global, only: lambda_cut
+      implicit none
+      integer, intent(in) :: nbasis, nproj_seed
+      integer, intent(inout) :: keep_index(:), nkeep
+      real(8), intent(in) :: lambda_w(:), eigvec_w(:,:), bproj_seed(:,:)
+      real(8), intent(inout) :: wcoef(:,:)
+      integer :: ip, jp, kp, io
+      real(8), allocatable :: sinv_half(:,:), work(:,:)
+      real(8) :: min_lambda_keep
+
+      if(nbasis <= 0 .or. nproj_seed <= 0) return
+      if(nkeep /= nproj_seed) then
+        write(*,'(1x,a,i0,a,i0)') &
+          "[DC-LCFO-LOCAL-WANNIER-SYM-GAUGE] skipped: keep=", nkeep, " nproj_seed=", nproj_seed
+        return
+      end if
+      min_lambda_keep = minval(lambda_w(1:nproj_seed))
+      if(min_lambda_keep <= lambda_cut) then
+        write(*,'(1x,a,2(a,1pe12.4))') &
+          "[DC-LCFO-LOCAL-WANNIER-SYM-GAUGE] skipped:", &
+          " min_lambda=", min_lambda_keep, " lambda_cut=", lambda_cut
+        return
+      end if
+
+      allocate(sinv_half(nproj_seed,nproj_seed), work(nbasis,nproj_seed))
+      sinv_half = 0.0d0
+      do ip=1,nproj_seed
+        do jp=1,nproj_seed
+          do kp=1,nproj_seed
+            sinv_half(ip,jp) = sinv_half(ip,jp) + eigvec_w(ip,kp) * &
+              (1.0d0 / sqrt(max(lambda_w(kp), 1.0d-300))) * eigvec_w(jp,kp)
+          end do
+        end do
+      end do
+
+      work(1:nbasis,1:nproj_seed) = 0.0d0
+      do io=1,nbasis
+        do jp=1,nproj_seed
+          do ip=1,nproj_seed
+            work(io,jp) = work(io,jp) + bproj_seed(io,ip) * sinv_half(ip,jp)
+          end do
+        end do
+      end do
+      wcoef(1:nbasis,1:nproj_seed) = work(1:nbasis,1:nproj_seed)
+      do ip=1,nproj_seed
+        keep_index(ip) = ip
+      end do
+      write(*,'(1x,a,i0,a,1pe12.4)') &
+        "[DC-LCFO-LOCAL-WANNIER-SYM-GAUGE] applied lowdin_bond_center keep=", &
+        nkeep, " min_lambda=", min_lambda_keep
+      deallocate(sinv_half, work)
+    end subroutine apply_local_bond_center_symmetry_gauge
 
     subroutine project_wannier90_aa_to_bpw(nbasis, nkeep, wcoef, aa_wann, aa_wann_source)
       use inputoutput, only: au_length_aa
