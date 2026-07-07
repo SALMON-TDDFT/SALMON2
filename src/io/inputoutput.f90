@@ -605,7 +605,13 @@ contains
       & sbe_lg_degen, &
       & sbe_lg_degen_floor, &
       & nband_sbe_min, &
-      & yn_sbe_gs_current_subtract
+      & yn_sbe_gs_current_subtract, &
+      & yn_sbe_export_vnl_kappa, &
+      & sbe_vnl_kappa_dir, &
+      & sbe_vnl_kappa_amax, &
+      & sbe_vnl_kappa_ns, &
+      & yn_sbe_vnl_exact, &
+      & file_sbe_vnl_kappa
 
     namelist/dc/ &
       & num_fragment, &
@@ -1068,6 +1074,12 @@ contains
     sbe_lg_degen_floor  = 1d-9
     nband_sbe_min       = 1
     yn_sbe_gs_current_subtract = 'n'
+    yn_sbe_export_vnl_kappa = 'n'
+    sbe_vnl_kappa_dir(:)  = 0d0
+    sbe_vnl_kappa_amax    = 0d0
+    sbe_vnl_kappa_ns      = 16
+    yn_sbe_vnl_exact      = 'n'
+    file_sbe_vnl_kappa    = ''
 !! == default for &dc
     num_fragment = 0
     num_rgrid_buffer = 0
@@ -1736,6 +1748,12 @@ contains
     call comm_bcast(sbe_lg_degen_floor,  nproc_group_global)
     call comm_bcast(nband_sbe_min,       nproc_group_global)
     call comm_bcast(yn_sbe_gs_current_subtract, nproc_group_global)
+    call comm_bcast(yn_sbe_export_vnl_kappa, nproc_group_global)
+    call comm_bcast(sbe_vnl_kappa_dir,   nproc_group_global)
+    call comm_bcast(sbe_vnl_kappa_amax,  nproc_group_global)
+    call comm_bcast(sbe_vnl_kappa_ns,    nproc_group_global)
+    call comm_bcast(yn_sbe_vnl_exact,    nproc_group_global)
+    call comm_bcast(file_sbe_vnl_kappa,  nproc_group_global)
 !! == bcast for dc
     call comm_bcast(num_fragment ,nproc_group_global)
     call comm_bcast(num_rgrid_buffer, nproc_group_global)
@@ -2729,6 +2747,12 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_lg_degen_floor', sbe_lg_degen_floor
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nband_sbe_min', nband_sbe_min
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_gs_current_subtract', yn_sbe_gs_current_subtract
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_export_vnl_kappa', yn_sbe_export_vnl_kappa
+      write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'sbe_vnl_kappa_dir(1:3)', sbe_vnl_kappa_dir(1:3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_vnl_kappa_amax', sbe_vnl_kappa_amax
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'sbe_vnl_kappa_ns', sbe_vnl_kappa_ns
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_vnl_exact', yn_sbe_vnl_exact
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'file_sbe_vnl_kappa', file_sbe_vnl_kappa
 
       if(inml_dc >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', inml_dc
@@ -2833,6 +2857,8 @@ contains
     call yn_argument_check(yn_out_estatic_rt)
     call yn_argument_check(yn_out_rvf_rt)
     call yn_argument_check(yn_out_tm)
+    call yn_argument_check(yn_sbe_export_vnl_kappa)
+    call yn_argument_check(yn_sbe_vnl_exact)
     call yn_argument_check(yn_out_intraband_current)
     call yn_argument_check(yn_out_current_decomposed)
     call yn_argument_check(yn_out_spin_current_decomposed)

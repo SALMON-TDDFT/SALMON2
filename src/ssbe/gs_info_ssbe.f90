@@ -50,6 +50,22 @@ module gs_info_ssbe
         complex(8), allocatable :: u_transport(:, :, :, :)  ! (nb,nb,3,nk) block-diagonal Wilson-line transport, gicov
         integer,    allocatable :: block_id(:, :)           ! (nb,nk) fixed-block partition, per-gs (NOT the module cache)
 
+        ! VG completion (yn_sbe_vnl_exact='y'): all-order nonlocal V_nl(k+A) on a
+        ! 1D kappa-stencil kappa_s = k + s*vnl_h*vnl_dir, read from
+        ! file_sbe_vnl_kappa (written by write_sbe_vnl_kappa_data).  Stored as a
+        ! per-rank k-SLICE [vnl_ik_min:vnl_ik_max] (split_range partition,
+        ! asserted equal to the solver's slice at init_sbe_bloch_solver).
+        ! On read, gs%rvnl_tm_matrix is OVERWRITTEN (full nk, all ranks) by the
+        ! s=0 velocity matrices W_{i,0}, so fsum_D / p_mod / diagnostics and the
+        ! exact readout share one binary-precision velocity convention.
+        logical :: vnl_exact = .false.
+        integer :: vnl_ns = 0
+        real(8) :: vnl_h = 0d0
+        real(8) :: vnl_dir(1:3) = 0d0
+        integer :: vnl_ik_min = 0, vnl_ik_max = -1
+        complex(8), allocatable :: vnl_V(:, :, :, :)    ! (nb,nb,-ns:ns, ik-slice)
+        complex(8), allocatable :: vnl_W(:, :, :, :, :) ! (nb,nb,3,-ns:ns, ik-slice)
+
         !k-space grid and geometry information
         !NOTE: prepred for uniformally distributed k-grid....
         !integer :: num_kgrid(1:3)
@@ -77,7 +93,8 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     use communication
     use filesystem, only: open_filehandle, get_filehandle
     use common_ssbe, only: grad_k_array_nb1d_double
-    use salmon_global, only: gauge_sbe, file_sbe_prod_dk, sbe_lg_degen, num_kgrid, sbe_lg_degen_floor, spin
+    use salmon_global, only: gauge_sbe, file_sbe_prod_dk, sbe_lg_degen, num_kgrid, sbe_lg_degen_floor, spin, &
+                           & yn_sbe_vnl_exact, file_sbe_vnl_kappa, nelec, natom
     use degenerate_block_ssbe, only: build_xi, same_block, blend, theta_on, theta_off, &
                                    & build_block_transport
     implicit none
@@ -170,6 +187,11 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     !Retrieve k-space overlap products from 'file_sbe_prod_dk' (LG-SBE degeneracy):
     if (trim(sbe_lg_degen) == 'gi' .or. trim(sbe_lg_degen) == 'gifix' &
         & .or. trim(sbe_lg_degen) == 'gicov') call read_prod_dk_data()
+
+    !VG completion: read the nonlocal kappa-stencil (V/W band matrices) and
+    !overwrite rvnl_tm_matrix with the binary-precision W_{i,0}.  MUST run
+    !before prepare_matrix() so p_mod_matrix inherits the overwrite.
+    if (yn_sbe_vnl_exact == 'y') call read_vnl_kappa_data()
 
     !Calculate omega and d_matrix (neglecting diagonal part):
     if (irank == 0) write(*,"(a)") "# prepare_matrix"
@@ -532,6 +554,231 @@ contains
         call comm_bcast(gs%bvec, icomm, 0)
         call comm_bcast(gs%prod_dk, icomm, 0)
     end subroutine read_prod_dk_data
+
+
+    ! VG completion reader: nonlocal kappa-stencil V/W band matrices from the
+    ! unformatted-stream file written by write_sbe_vnl_kappa_data (write.f90).
+    ! Fail-closed: header fingerprint (magic/ndim/nk/num_kgrid/nb/ns/h/dir/
+    ! nelec/natom/lattice), exact file-size match (catches truncation AND
+    ! surplus), and a data-level cross-check of W_{i,0} against the text-file
+    ! rvnl_tm_matrix (catches a stale stencil file from another GS at 1e-3
+    ! rel-to-max; the text export carries only 5 significant digits, so this is
+    ! a wiring/staleness check, not a precision check).  Root reads and
+    ! broadcasts per k; every rank keeps (i) the full-nk s=0 velocity W_{i,0}
+    ! by OVERWRITING gs%rvnl_tm_matrix (binary precision; feeds p_mod/fsum_D)
+    ! and (ii) the windowed V/W stencil for its own k-slice only.
+    subroutine read_vnl_kappa_data()
+        use util_ssbe, only: split_range
+        implicit none
+        integer :: fh, ios, ik, s, i, iw, jw
+        integer :: f_ndim, f_nk, f_nb, f_ns, f_kgrid(3), f_nelec, f_natom
+        real(8) :: f_h, f_dir(3), f_amax, f_avec(3,3)
+        character(8) :: magic
+        integer :: ierr, ik_lo, ik_hi
+        integer(8) :: fsize, expect
+        real(8) :: wmax, dmax, denom
+        logical :: file_exists_vnl
+        integer, allocatable :: itbl_min(:), itbl_max(:)
+        complex(8), allocatable :: tmp(:, :, :, :)   ! (f_nb, f_nb, 0:3, -ns:ns)
+
+        ierr = 0
+        f_nb = 0;  f_ns = 0
+
+        if (irank == 0) then
+            write(*, '(a)') "# read_vnl_kappa_data"
+            if (len_trim(file_sbe_vnl_kappa) == 0) then
+                write(*, '(a)') "ERROR(read_vnl_kappa_data): 'file_sbe_vnl_kappa' is empty while 'yn_sbe_vnl_exact'='y'."
+                ierr = 1
+            end if
+            if (ierr == 0) then
+                inquire(file=trim(file_sbe_vnl_kappa), exist=file_exists_vnl, size=fsize)
+                if (.not. file_exists_vnl) then
+                    write(*, '(a)') "ERROR(read_vnl_kappa_data): file not found: " // trim(file_sbe_vnl_kappa)
+                    ierr = 1
+                end if
+            end if
+            if (ierr == 0) then
+                fh = get_filehandle()
+                open(fh, file=trim(file_sbe_vnl_kappa), form='unformatted', access='stream', &
+                    & status='old', action='read')
+                read(fh, iostat=ios) magic
+                if (ios /= 0 .or. magic /= 'SBEVNLK1') then
+                    write(*, '(a)') "ERROR(read_vnl_kappa_data): bad magic (not a vnl_kappa export)."
+                    ierr = 1
+                end if
+            end if
+            if (ierr == 0) then
+                read(fh, iostat=ios) f_ndim, f_nk, f_nb, f_ns
+                if (ios == 0) read(fh, iostat=ios) f_kgrid(1:3)
+                if (ios == 0) read(fh, iostat=ios) f_nelec, f_natom
+                if (ios == 0) read(fh, iostat=ios) f_h, f_dir(1:3), f_amax
+                if (ios == 0) read(fh, iostat=ios) f_avec(1:3,1), f_avec(1:3,2), f_avec(1:3,3)
+                if (ios /= 0) then
+                    write(*, '(a)') "ERROR(read_vnl_kappa_data): truncated header."
+                    ierr = 1
+                end if
+            end if
+            if (ierr == 0) then
+                if (f_ndim /= 1) then
+                    write(*, '(a,i0)') "ERROR(read_vnl_kappa_data): unsupported stencil ndim = ", f_ndim
+                    ierr = 1
+                end if
+                if (f_nk /= nk) then
+                    write(*, '(a)') "ERROR(read_vnl_kappa_data): nk in file differs from SBE nk."
+                    ierr = 1
+                end if
+                if (any(f_kgrid(1:3) /= num_kgrid(1:3))) then
+                    write(*, '(a)') "ERROR(read_vnl_kappa_data): num_kgrid in file differs from input."
+                    ierr = 1
+                end if
+                if (f_nb < nb_hi) then
+                    write(*, '(a)') "ERROR(read_vnl_kappa_data): band count in file is smaller than the SBE window top."
+                    ierr = 1
+                end if
+                if (f_ns < 4) then
+                    write(*, '(a)') "ERROR(read_vnl_kappa_data): ns in file must be >= 4."
+                    ierr = 1
+                end if
+                if (f_h <= 0d0) then
+                    write(*, '(a)') "ERROR(read_vnl_kappa_data): stencil spacing h must be > 0."
+                    ierr = 1
+                end if
+                if (abs(norm2(f_dir(1:3)) - 1d0) > 1d-8) then
+                    write(*, '(a)') "ERROR(read_vnl_kappa_data): stencil direction in file is not a unit vector."
+                    ierr = 1
+                end if
+                if (f_nelec /= ne) then
+                    ! ne here is the ABSOLUTE electron count passed by the caller
+                    ! (window reduction happens after this argument), so it must
+                    ! match the GS export fingerprint exactly.
+                    write(*, '(a,i0,a,i0)') "ERROR(read_vnl_kappa_data): nelec fingerprint mismatch: file ", &
+                        & f_nelec, " vs input ", ne
+                    ierr = 1
+                end if
+                if (natom > 0 .and. f_natom /= natom) then
+                    write(*, '(a)') "ERROR(read_vnl_kappa_data): natom fingerprint mismatch."
+                    ierr = 1
+                end if
+                if (maxval(abs(f_avec(1:3,1) - gs%a_matrix(1:3,1))) > 1d-8 * maxval(abs(gs%a_matrix)) .or. &
+                  & maxval(abs(f_avec(1:3,2) - gs%a_matrix(1:3,2))) > 1d-8 * maxval(abs(gs%a_matrix)) .or. &
+                  & maxval(abs(f_avec(1:3,3) - gs%a_matrix(1:3,3))) > 1d-8 * maxval(abs(gs%a_matrix))) then
+                    write(*, '(a)') "ERROR(read_vnl_kappa_data): lattice-vector fingerprint mismatch."
+                    ierr = 1
+                end if
+            end if
+            if (ierr == 0) then
+                ! exact size: header (156 B) + nk*(2ns+1)*4*nb^2 complex(8)
+                expect = 156_8 + int(f_nk,8) * int(2*f_ns+1,8) * 4_8 * int(f_nb,8)**2 * 16_8
+                if (fsize /= expect) then
+                    write(*, '(a,i0,a,i0,a)') "ERROR(read_vnl_kappa_data): file size ", fsize, &
+                        & " differs from expected ", expect, " (truncated or surplus data)."
+                    ierr = 1
+                end if
+            end if
+        end if
+
+        call comm_bcast(ierr, icomm, 0)
+        if (ierr /= 0) stop 1
+        call comm_bcast(f_nb, icomm, 0)
+        call comm_bcast(f_ns, icomm, 0)
+
+        ! k-slice partition (deterministic, identical to the solver's split;
+        ! asserted against sbe%ik_min/ik_max in init_sbe_bloch_solver)
+        allocate(itbl_min(0:nproc-1), itbl_max(0:nproc-1))
+        call split_range(1, nk, nproc, itbl_min, itbl_max)
+        ik_lo = itbl_min(irank);  ik_hi = itbl_max(irank)
+        deallocate(itbl_min, itbl_max)
+
+        allocate(gs%vnl_V(1:nb_eff, 1:nb_eff, -f_ns:f_ns, ik_lo:ik_hi))
+        allocate(gs%vnl_W(1:nb_eff, 1:nb_eff, 1:3, -f_ns:f_ns, ik_lo:ik_hi))
+        allocate(tmp(1:f_nb, 1:f_nb, 0:3, -f_ns:f_ns))
+
+        do ik = 1, nk
+            ierr = 0
+            if (irank == 0) then
+                do s = -f_ns, f_ns
+                    read(fh, iostat=ios) tmp(1:f_nb, 1:f_nb, 0, s)
+                    if (ios == 0) read(fh, iostat=ios) tmp(1:f_nb, 1:f_nb, 1:3, s)
+                    if (ios /= 0) then
+                        ! unreachable given the exact-size check; keep fail-closed
+                        ! anyway -- and fail COLLECTIVELY (root must not stop
+                        ! alone before the bcast, or the other ranks hang)
+                        write(*, '(a)') "ERROR(read_vnl_kappa_data): unexpected read failure."
+                        ierr = 1
+                        exit
+                    end if
+                end do
+            end if
+            call comm_bcast(ierr, icomm, 0)
+            if (ierr /= 0) stop 1
+            call comm_bcast(tmp, icomm, 0)
+
+            ! (i) full-nk s=0 velocity: overwrite the 5-digit text rvnl with the
+            ! binary W_{i,0} -- AFTER the staleness cross-check below (first k
+            ! of this rank documents the residual; check every k).
+            dmax = 0d0
+            do i = 1, 3
+                do jw = nb_min, nb_hi
+                    do iw = nb_min, nb_hi
+                        dmax = max(dmax, abs(0.5d0*(tmp(iw, jw, i, 0) + conjg(tmp(jw, iw, i, 0))) &
+                            & - gs%rvnl_tm_matrix(iw - nb_min + 1, jw - nb_min + 1, i, ik)))
+                    end do
+                end do
+            end do
+            wmax = maxval(abs(gs%rvnl_tm_matrix(:, :, :, ik)))
+            denom = max(wmax, 1d-12)
+            if (dmax / denom > 1d-3) then
+                if (irank == 0) then
+                    write(*, '(a,i0,a,es12.4)') "ERROR(read_vnl_kappa_data): W(s=0) vs tm rvnl mismatch at ik=", &
+                        & ik, ", rel-to-max residual = ", dmax / denom
+                    write(*, '(a)') "  (stale/mismatched 'file_sbe_vnl_kappa' for this GS export?)"
+                end if
+                stop 1
+            end if
+            do i = 1, 3
+                do jw = nb_min, nb_hi
+                    do iw = nb_min, nb_hi
+                        gs%rvnl_tm_matrix(iw - nb_min + 1, jw - nb_min + 1, i, ik) = &
+                            & 0.5d0 * (tmp(iw, jw, i, 0) + conjg(tmp(jw, iw, i, 0)))
+                    end do
+                end do
+            end do
+
+            ! (ii) windowed, Hermitized V/W stencil for the local k-slice
+            if (ik >= ik_lo .and. ik <= ik_hi) then
+                do s = -f_ns, f_ns
+                    do jw = nb_min, nb_hi
+                        do iw = nb_min, nb_hi
+                            gs%vnl_V(iw - nb_min + 1, jw - nb_min + 1, s, ik) = &
+                                & 0.5d0 * (tmp(iw, jw, 0, s) + conjg(tmp(jw, iw, 0, s)))
+                            do i = 1, 3
+                                gs%vnl_W(iw - nb_min + 1, jw - nb_min + 1, i, s, ik) = &
+                                    & 0.5d0 * (tmp(iw, jw, i, s) + conjg(tmp(jw, iw, i, s)))
+                            end do
+                        end do
+                    end do
+                end do
+            end if
+        end do
+        deallocate(tmp)
+
+        if (irank == 0) close(fh)
+
+        ! header params -> gs (bcast the real-valued ones from root)
+        call comm_bcast(f_h, icomm, 0)
+        call comm_bcast(f_dir, icomm, 0)
+        gs%vnl_exact  = .true.
+        gs%vnl_ns     = f_ns
+        gs%vnl_h      = f_h
+        gs%vnl_dir(1:3) = f_dir(1:3)
+        gs%vnl_ik_min = ik_lo
+        gs%vnl_ik_max = ik_hi
+
+        if (irank == 0) then
+            write(*, '(a,i0,a,es12.4,a,3f10.6)') "#   vnl_kappa: ns = ", f_ns, &
+                & ", h = ", f_h, ", dir = ", f_dir(1:3)
+        end if
+    end subroutine read_vnl_kappa_data
 
 
     subroutine prepare_matrix()

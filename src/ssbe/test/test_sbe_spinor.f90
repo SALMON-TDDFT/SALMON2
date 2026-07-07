@@ -93,6 +93,10 @@ contains
     sbe_lg_degen_floor = 1d-9
     file_sbe_prod_dk = 'sofix_prod_dk.data'
     yn_spinorbit = 'y'
+    ! standalone tests never run the inputoutput default assignment, so every
+    ! key the input checker validates must be set here explicitly
+    yn_sbe_vnl_exact = 'n'
+    file_sbe_vnl_kappa = ''
   end subroutine set_globals_common
 
   !======================= assert helper (ssbe style) =========================

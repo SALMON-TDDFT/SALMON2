@@ -216,10 +216,12 @@ end if
 ! Fail HERE, before ANY export file is written, so no stale/partial mix of
 ! reduced-mesh exports is left on disk (yn_sym_kreduce='n' keeps the full
 ! mesh while still symmetrising the density).
-if((yn_sbe_export_overlap == 'y' .or. yn_out_tm == 'y') .and. &
+if((yn_sbe_export_overlap == 'y' .or. yn_out_tm == 'y' .or. &
+   & yn_sbe_export_vnl_kappa == 'y') .and. &
    & index(yn_symmetry,'y') /= 0 .and. yn_sym_kreduce == 'y') then
    if(comm_is_root(nproc_id_global)) then
-      write(*,*) "ERROR: yn_out_tm='y'/yn_sbe_export_overlap='y' need the FULL k-mesh;"
+      write(*,*) "ERROR: yn_out_tm='y'/yn_sbe_export_overlap='y'/yn_sbe_export_vnl_kappa='y'"
+      write(*,*) "  need the FULL k-mesh;"
       write(*,*) "  yn_sym_kreduce='y' reduces it to the irreducible wedge."
       write(*,*) "  Set yn_sym_kreduce='n' (or yn_symmetry='n')."
    end if
@@ -236,6 +238,18 @@ if(yn_sbe_export_overlap == 'y') then
       stop
    end if
    call write_prod_dk_data(lg, mg, system, info, spsi)
+end if
+
+! VG completion: export the nonlocal kappa-stencil (V/W band matrices) for the
+! all-order V_nl(k+A) velocity-gauge SBE (yn_sbe_vnl_exact reader side)
+if(yn_sbe_export_vnl_kappa == 'y') then
+   if(iperiodic /= 3 .or. minval(num_kgrid) < 1) then
+      if(comm_is_root(nproc_id_global)) write(*,*) &
+         "ERROR: yn_sbe_export_vnl_kappa='y' needs iperiodic=3 and uniform num_kgrid"
+      call comm_sync_all
+      stop
+   end if
+   call write_sbe_vnl_kappa_data(spsi, system, info, ppg)
 end if
 
 ! output transition moment : --> want to put out of the optmization loop in future

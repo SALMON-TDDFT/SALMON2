@@ -236,6 +236,44 @@ function check_input_variables_sbe() result(flag)
                 & "gauge_sbe='length_gauge' (velocity-gauge current readout only)."
         end if
     end if
+    ! --- VG completion (yn_sbe_vnl_exact): all-order nonlocal V_nl(k+A) ---
+    select case(yn_sbe_vnl_exact)
+    case('y', 'n')
+    case default
+        call raise("ERROR! 'yn_sbe_vnl_exact' must be 'y' or 'n'!")
+    end select
+    if (yn_sbe_vnl_exact == 'y') then
+        if (trim(gauge_sbe) /= "velocity_gauge") then
+            call raise("ERROR! 'yn_sbe_vnl_exact'='y' requires gauge_sbe='velocity_gauge' " // &
+                & "(the kappa-stencil completion is a velocity-gauge construction)!")
+        end if
+        if (yn_vnl_correction == 'y') then
+            ! HARD error, not a priority rule: the first-order A.rvnl term and
+            ! the all-order DeltaV(k,A) are the SAME physics -- combining them
+            ! double-counts the nonlocal coupling (a physics bug, not a
+            ! preference).  The exact mode supersedes yn_vnl_correction.
+            call raise("ERROR! 'yn_sbe_vnl_exact'='y' is mutually exclusive with " // &
+                & "'yn_vnl_correction'='y' (the all-order DeltaV supersedes the first-order " // &
+                & "A.rvnl term; combining them double-counts the nonlocal coupling)!")
+        end if
+        if (norder_correction /= 0) then
+            call raise("ERROR! 'yn_sbe_vnl_exact'='y' requires 'norder_correction'=0 " // &
+                & "(the norder readout corrections are a perturbative variant of the same " // &
+                & "H(k+A) completion)!")
+        end if
+        if (trim(theory) == "maxwell_sbe") then
+            call raise("ERROR! 'yn_sbe_vnl_exact'='y' is not supported for theory='maxwell_sbe' " // &
+                & "(macroscopic A(t) cannot be pre-validated against the 1D stencil)!")
+        end if
+        if (flag_spinor) then
+            call raise("ERROR! 'yn_sbe_vnl_exact'='y' does not support spin='noncollinear' yet " // &
+                & "(scalar first stage; the file contract is spinor-ready)!")
+        end if
+        if (len_trim(file_sbe_vnl_kappa) == 0) then
+            call raise("ERROR! 'file_sbe_vnl_kappa' must be specified when 'yn_sbe_vnl_exact'='y'!")
+        end if
+    end if
+
     if (yn_sbe_gs_current_subtract == 'y' .and. norder_correction >= 1) then
         ! WARN, not error: the deficiency tensor D is derived against the
         ! norder_correction=0 readout (the production default).  At norder>=1

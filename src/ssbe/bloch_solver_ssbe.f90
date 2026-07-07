@@ -14,6 +14,12 @@ module bloch_solver_ssbe
         integer :: ik_max, ik_min
         complex(8), allocatable :: rho(:, :, :)
         logical :: flag_vnl_correction
+        ! VG completion (yn_sbe_vnl_exact='y'): replace the first-order A.rvnl
+        ! nonlocal correction by the all-order DeltaV = V_nl(k+A)-V_nl(k)
+        ! (propagation commutator) and W_i(k+A) (current readout), interpolated
+        ! (centered 4-point Lagrange) from the gs%vnl_V/vnl_W kappa-stencil.
+        ! Mutually exclusive with flag_vnl_correction (checker-enforced).
+        logical :: flag_vnl_exact = .false.
         ! Window f-sum-rule deficiency tensor D_ij of the truncated band basis
         ! (yn_sbe_gs_current_subtract='y'; see build_fsum_deficiency_tensor and
         ! the calc_current_bloch header for the derivation).  Built ONCE per
@@ -187,7 +193,7 @@ contains
 subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     use util_ssbe
     use communication
-    use salmon_global, only: yn_sbe_gs_current_subtract, yn_vnl_correction
+    use salmon_global, only: yn_sbe_gs_current_subtract, yn_vnl_correction, yn_sbe_vnl_exact
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info), intent(in) :: gs
@@ -218,6 +224,25 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
 
     sbe%flag_vnl_correction = .false.
 
+    ! VG completion: wire the exact-nonlocal flag from the SAME global the
+    ! checker validated, and fail closed on the two structural preconditions:
+    ! the gs-side stencil must have been read (read_vnl_kappa_data), and its
+    ! k-slice must coincide with this solver's split (both use split_range on
+    ! the same icomm, so a mismatch is a wiring bug, not a configuration).
+    sbe%flag_vnl_exact = (yn_sbe_vnl_exact == 'y')
+    if (sbe%flag_vnl_exact) then
+        if (.not. gs%vnl_exact) then
+            write(*, '(a)') "ERROR(init_sbe_bloch_solver): yn_sbe_vnl_exact='y' but the " // &
+                & "kappa-stencil was not loaded into gs (read_vnl_kappa_data wiring bug)."
+            error stop
+        end if
+        if (gs%vnl_ik_min /= sbe%ik_min .or. gs%vnl_ik_max /= sbe%ik_max) then
+            write(*, '(a)') "ERROR(init_sbe_bloch_solver): vnl_kappa k-slice differs from " // &
+                & "the solver k-slice (split_range mismatch)."
+            error stop
+        end if
+    end if
+
     ! Window f-sum-rule deficiency tensor (yn_sbe_gs_current_subtract='y'):
     ! built once here, applied per step by calc_current_bloch.  Reset FIRST
     ! unconditionally (codex review): a REUSED solver object must not carry a
@@ -230,9 +255,106 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     sbe%fsum_D(:, :) = 0d0
     sbe%fsum_D_built = .false.
     if (yn_sbe_gs_current_subtract == 'y') then
-        call build_fsum_deficiency_tensor(sbe, gs, yn_vnl_correction == 'y')
+        ! pi convention: p + rvnl whenever the nonlocal-velocity physics is ON
+        ! (first-order rvnl OR the all-order exact mode -- at A=0, where the
+        ! linear-response tensor lives, both use the same velocity p + W_0;
+        ! in exact mode gs%rvnl_tm_matrix has been overwritten by the
+        ! binary-precision W_0, so the SAME array serves both).
+        call build_fsum_deficiency_tensor(sbe, gs, &
+            & yn_vnl_correction == 'y' .or. yn_sbe_vnl_exact == 'y')
     end if
 end subroutine
+
+
+!===================================================================
+! VG completion: locate A(t) on the 1D kappa-stencil and build the centered
+! 4-point Lagrange weights.
+!   a  = e_dir . A   (the trajectory is validated to be collinear with e_dir)
+!   x  = a/h, base interval [q0, q0+1), q0 = floor(x), nodes q0-1 .. q0+2,
+!   wl = cubic Lagrange weights at t = x - q0 in [0,1).
+! Exact at the nodes (t=0 => wl = (0,1,0,0)), so DeltaV(A=0) == 0 identically.
+! Fail-closed: a transverse A component or a stencil overrun is an error stop
+! (both are excluded up front by sbe_vnl_validate_trajectory; the checks here
+! are the last line of defense for future callers with dynamic A).
+!===================================================================
+subroutine sbe_vnl_interp_weights(gs, Ac, wl, q0)
+    implicit none
+    type(s_sbe_gs_info), intent(in) :: gs
+    real(8), intent(in)  :: Ac(1:3)
+    real(8), intent(out) :: wl(1:4)
+    integer, intent(out) :: q0
+    real(8) :: a, t, trans(1:3)
+
+    a = dot_product(gs%vnl_dir(1:3), Ac(1:3))
+    trans(1:3) = Ac(1:3) - a * gs%vnl_dir(1:3)
+    if (norm2(trans) > 1d-8 * max(1d0, abs(a))) then
+        write(*, '(a,es12.4)') "ERROR(sbe_vnl_interp_weights): A(t) has a transverse " // &
+            & "component w.r.t. the kappa-stencil axis: |A_perp| = ", norm2(trans)
+        error stop
+    end if
+    q0 = floor(a / gs%vnl_h)
+    if (q0 - 1 < -gs%vnl_ns .or. q0 + 2 > gs%vnl_ns) then
+        write(*, '(a,es12.4,a)') "ERROR(sbe_vnl_interp_weights): |e.A| = ", abs(a), &
+            & " exceeds the kappa-stencil range (increase sbe_vnl_kappa_amax and re-export)."
+        error stop
+    end if
+    t = a / gs%vnl_h - dble(q0)
+    wl(1) = -t * (t - 1d0) * (t - 2d0) / 6d0
+    wl(2) =  (t * t - 1d0) * (t - 2d0) / 2d0
+    wl(3) = -t * (t + 1d0) * (t - 2d0) / 2d0
+    wl(4) =  t * (t * t - 1d0) / 6d0
+end subroutine sbe_vnl_interp_weights
+
+
+!===================================================================
+! VG completion: pre-validate the WHOLE precomputed A(t) trajectory against
+! the kappa-stencil BEFORE propagation starts (realtime_ssbe builds
+! Ac_ext_t(-1..nt+1) up front), so an under-sized stencil or a mis-aligned
+! polarization axis fails at t=0 with a clear message instead of mid-run.
+!===================================================================
+subroutine sbe_vnl_validate_trajectory(gs, Ac_ext_t, n_lo, n_hi, irank)
+    implicit none
+    type(s_sbe_gs_info), intent(in) :: gs
+    integer, intent(in) :: n_lo, n_hi, irank
+    real(8), intent(in) :: Ac_ext_t(1:3, n_lo:n_hi)
+    integer :: it, q0
+    real(8) :: a, amax_traj, trans(1:3), tmax
+
+    if (.not. gs%vnl_exact) then
+        write(*, '(a)') "ERROR(sbe_vnl_validate_trajectory): kappa-stencil not loaded."
+        error stop
+    end if
+    amax_traj = 0d0
+    tmax = 0d0
+    do it = n_lo, n_hi
+        a = dot_product(gs%vnl_dir(1:3), Ac_ext_t(1:3, it))
+        trans(1:3) = Ac_ext_t(1:3, it) - a * gs%vnl_dir(1:3)
+        tmax = max(tmax, norm2(trans) / max(1d0, abs(a)))
+        if (norm2(trans) > 1d-8 * max(1d0, abs(a))) then
+            if (irank == 0) write(*, '(a,i0,a,es12.4)') &
+                & "ERROR(sbe_vnl_validate_trajectory): A(t) at step ", it, &
+                & " has a transverse component w.r.t. the stencil axis: |A_perp| = ", norm2(trans)
+            error stop
+        end if
+        q0 = floor(a / gs%vnl_h)
+        if (q0 - 1 < -gs%vnl_ns .or. q0 + 2 > gs%vnl_ns) then
+            if (irank == 0) then
+                write(*, '(a,i0,a,es12.4)') "ERROR(sbe_vnl_validate_trajectory): |e.A| at step ", &
+                    & it, " = ", abs(a)
+                write(*, '(a,es12.4,a)') "  exceeds the usable stencil range ", &
+                    & (gs%vnl_ns - 2) * gs%vnl_h, &
+                    & " (increase sbe_vnl_kappa_amax and re-export the stencil)."
+            end if
+            error stop
+        end if
+        amax_traj = max(amax_traj, abs(a))
+    end do
+    if (irank == 0) then
+        write(*, '(a,es12.4,a,es12.4,a,es10.2)') "# vnl_kappa trajectory: max|e.A| = ", &
+            & amax_traj, " of usable range ", (gs%vnl_ns - 2) * gs%vnl_h, &
+            & ", max transverse ratio = ", tmax
+    end if
+end subroutine sbe_vnl_validate_trajectory
 
 
 !===================================================================
@@ -412,6 +534,13 @@ subroutine calc_current_bloch_core(sbe, gs, Ac, jmat, icomm)
     complex(8) :: pnn_Ac,pni_Ac,pin_Ac
     complex(8) :: pnj_Ac,pjn_Ac,pnk_Ac,pkn_Ac
     complex(8) :: pij_Ac,pji_Ac,pik_Ac,pki_Ac,pjk_Ac,pkj_Ac
+    ! VG completion: interpolated all-order nonlocal velocity W_i(k+A)
+    logical :: do_exact
+    real(8) :: wl(1:4)
+    integer :: q0
+
+    do_exact = sbe%flag_vnl_exact
+    if (do_exact) call sbe_vnl_interp_weights(gs, Ac, wl, q0)
 
     tmp1(1:3) = 0d0
 
@@ -426,6 +555,17 @@ subroutine calc_current_bloch_core(sbe, gs, Ac, jmat, icomm)
                     if (sbe%flag_vnl_correction) then
                         tmp1(idir) = tmp1(idir) + gs%kweight(ik) * sbe%rho(jb, ib, ik) * ( &
                             & gs%rvnl_tm_matrix(ib, jb, idir, ik) &
+                        & )
+                    endif
+                    if (do_exact) then
+                        ! v^nl_i(k+A): all 3 Cartesian components are exact at
+                        ! every stencil node (W_i = dV/dkappa_i evaluated at
+                        ! kappa_s in the export), interpolated along the axis.
+                        tmp1(idir) = tmp1(idir) + gs%kweight(ik) * sbe%rho(jb, ib, ik) * ( &
+                            & wl(1) * gs%vnl_W(ib, jb, idir, q0-1, ik) &
+                            & + wl(2) * gs%vnl_W(ib, jb, idir, q0,   ik) &
+                            & + wl(3) * gs%vnl_W(ib, jb, idir, q0+1, ik) &
+                            & + wl(4) * gs%vnl_W(ib, jb, idir, q0+2, ik) &
                         & )
                     endif
                 end do
@@ -672,22 +812,41 @@ subroutine dt_evolve_bloch(sbe, gs, Ac, dt)
     complex(8) :: hrho3_k(1:sbe%nb, 1:sbe%nb)
     complex(8) :: hrho4_k(1:sbe%nb, 1:sbe%nb)
     complex(8) :: p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3)
+    ! VG completion: all-order nonlocal difference DeltaV = V(k+A) - V(k),
+    ! interpolated once per (ik, step) -- the SAME A serves all 4 Taylor
+    ! stages (existing convention: Ac is constant within the step).
+    complex(8) :: dv_k(1:sbe%nb, 1:sbe%nb)
+    logical :: do_exact
+    real(8) :: wl(1:4)
+    integer :: q0
 
-    nb = sbe%nb 
+    nb = sbe%nb
     nk = sbe%nk
 
-    !$omp parallel do default(shared) private(ik, p_rvnl_k, hrho1_k, hrho2_k, hrho3_k, hrho4_k)
+    do_exact = sbe%flag_vnl_exact
+    if (do_exact) call sbe_vnl_interp_weights(gs, Ac, wl, q0)
+
+    !$omp parallel do default(shared) private(ik, p_rvnl_k, dv_k, hrho1_k, hrho2_k, hrho3_k, hrho4_k)
     do ik = sbe%ik_min, sbe%ik_max
         p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3) = gs%p_tm_matrix(1:sbe%nb, 1:sbe%nb, 1:3, ik)
         if (sbe%flag_vnl_correction) then
             p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3) =  p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3) &
                 & + gs%rvnl_tm_matrix(1:sbe%nb, 1:sbe%nb, 1:3, ik)
         end if
+        if (do_exact) then
+            ! Hermitian by construction (real weights x Hermitized stencil);
+            ! exactly zero at A=0 (node-exact Lagrange weights).
+            dv_k(:, :) = wl(1) * gs%vnl_V(:, :, q0-1, ik) &
+                     & + wl(2) * gs%vnl_V(:, :, q0,   ik) &
+                     & + wl(3) * gs%vnl_V(:, :, q0+1, ik) &
+                     & + wl(4) * gs%vnl_V(:, :, q0+2, ik) &
+                     & - gs%vnl_V(:, :, 0, ik)
+        end if
 
-        call calc_hrho_bloch_k(ik, sbe%rho(:, :, ik), p_rvnl_k, hrho1_k)
-        call calc_hrho_bloch_k(ik, hrho1_k, p_rvnl_k, hrho2_k)
-        call calc_hrho_bloch_k(ik, hrho2_k, p_rvnl_k, hrho3_k)
-        call calc_hrho_bloch_k(ik, hrho3_k, p_rvnl_k, hrho4_k)
+        call calc_hrho_bloch_k(ik, sbe%rho(:, :, ik), p_rvnl_k, dv_k, hrho1_k)
+        call calc_hrho_bloch_k(ik, hrho1_k, p_rvnl_k, dv_k, hrho2_k)
+        call calc_hrho_bloch_k(ik, hrho2_k, p_rvnl_k, dv_k, hrho3_k)
+        call calc_hrho_bloch_k(ik, hrho3_k, p_rvnl_k, dv_k, hrho4_k)
 
         sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho1_k * (- zi * dt)
         sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho2_k * (- zi * dt) ** 2 * (1d0 / 2d0)
@@ -706,11 +865,16 @@ contains
 
 
     !Calculate [H, rho] commutation:
-    subroutine calc_hrho_bloch_k(ik, rho_k, p_k, hrho_k)
+    ! dv_k = the all-order nonlocal difference DeltaV(k,A) (VG completion);
+    ! passed as an ARGUMENT (not host-associated) because it is an OpenMP
+    ! PRIVATE copy of the enclosing loop -- host association would read the
+    ! shared original.  Only referenced when do_exact (shared read-only).
+    subroutine calc_hrho_bloch_k(ik, rho_k, p_k, dv_k, hrho_k)
         implicit none
         integer, intent(in) :: ik
         complex(8), intent(in) :: rho_k(nb, nb)
         complex(8), intent(in) :: p_k(nb, nb, 1:3)
+        complex(8), intent(in) :: dv_k(nb, nb)
         complex(8), intent(out) :: hrho_k(nb, nb)
         integer :: idir
         !hrho = hrho + Ac(t) * (p * rho - rho * p)
@@ -734,6 +898,21 @@ contains
                 dcmplx(1d0, 0d0), hrho_k(:, :), nb)
 
         end do !idir
+
+        ! VG completion: hrho += [DeltaV, rho] (trace-conserving commutator;
+        ! DeltaV is Hermitian, so the propagation stays unitary-consistent)
+        if (do_exact) then
+            call ZGEMM("N","N", nb, nb, nb, &
+                dcmplx(+1d0, 0d0), &
+                dv_k(:, :), nb, &
+                rho_k(:, :), nb, &
+                dcmplx(1d0, 0d0), hrho_k(:, :), nb)
+            call ZGEMM("N","N", nb, nb, nb, &
+                dcmplx(-1d0, 0d0), &
+                rho_k(:, :), nb, &
+                dv_k(:, :), nb, &
+                dcmplx(1d0, 0d0), hrho_k(:, :), nb)
+        end if
         return
     end subroutine calc_hrho_bloch_k
 end subroutine

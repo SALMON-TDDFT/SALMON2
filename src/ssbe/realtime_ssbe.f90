@@ -96,6 +96,12 @@ subroutine main_realtime_ssbe(icomm)
     ! Prepare external pulse
     allocate(Ac_ext_t(1:3, -1:nt+1))
     call calc_Ac_ext_t(0.0d0, dt, -1, nt+1, Ac_ext_t)
+    ! VG completion: validate the WHOLE trajectory against the kappa-stencil
+    ! up front (axis collinearity + range incl. the 4-point support), so an
+    ! under-sized stencil fails here and not mid-run.
+    if (yn_sbe_vnl_exact == 'y') then
+        call sbe_vnl_validate_trajectory(gs, Ac_ext_t, -1, nt+1, irank)
+    end if
     ! Initial energy
     energy = 0.0d0
     E(:) = 0.0d0; Jmat(:) = 0.0d0;

@@ -470,6 +470,28 @@ character(256),allocatable :: atom_name(:)
                                         ! the full diamagnetic A*Ne/V current and
                                         ! overcorrected -- see calc_current_bloch.)
                                         ! Default 'n' = legacy readout.
+  ! --- VG completion: all-order nonlocal V_nl(k+A) via kappa-stencil export +
+  !     runtime interpolation (spec 2026-07-07-vg-vnl-kappa-interpolation) ---
+  character(1)   :: yn_sbe_export_vnl_kappa  ! 'y' (GS, theory='dft'): export the
+                                        ! band-space nonlocal matrices V(k,kappa_s)
+                                        ! and velocity matrices W_i(k,kappa_s) on the
+                                        ! 1D kappa-stencil kappa_s = k + s*h*e_dir
+                                        ! (s = -ns..ns, h = amax/ns) to
+                                        ! <sysname>_vnl_kappa.bin.  Default 'n'.
+  real(8)        :: sbe_vnl_kappa_dir(1:3)   ! stencil axis (Cartesian a.u.; normalized
+                                        ! internally; = the intended polarization axis)
+  real(8)        :: sbe_vnl_kappa_amax       ! stencil half-range |A|max (a.u.; > 0)
+  integer        :: sbe_vnl_kappa_ns         ! points per side (>= 4); h = amax/ns
+  character(1)   :: yn_sbe_vnl_exact         ! 'y' (SBE runtime, velocity gauge):
+                                        ! replace the first-order A.rvnl nonlocal
+                                        ! correction by the all-order
+                                        ! DeltaV = V(k+A) - V(k) (propagation) and
+                                        ! W_i(k+A) (current readout), interpolated
+                                        ! from file_sbe_vnl_kappa.  Mutually
+                                        ! exclusive with yn_vnl_correction='y' and
+                                        ! norder_correction>=1.  Default 'n'.
+  character(256) :: file_sbe_vnl_kappa       ! stencil file path (required when
+                                        ! yn_sbe_vnl_exact='y')
 
   !! &dc
   integer        :: num_fragment(3)
