@@ -1328,6 +1328,113 @@ contains
     deallocate(center_local)
   end subroutine diagnose_fragment_wannier_center_symmetry
 
+  subroutine diagnose_local_bond_center_orbit_closure(dc, ncenter, center_bohr)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: ncenter
+    real(8), intent(in) :: center_bohr(3,*)
+
+    call diagnose_local_center_orbit_closure(dc, ncenter, center_bohr, 'seed_bond')
+  end subroutine diagnose_local_bond_center_orbit_closure
+
+  subroutine diagnose_local_wannier_center_orbit_closure(dc, ncenter, center_bohr, label)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: ncenter
+    real(8), intent(in) :: center_bohr(3,*)
+    character(*), intent(in) :: label
+
+    call diagnose_local_center_orbit_closure(dc, ncenter, center_bohr, label)
+  end subroutine diagnose_local_wannier_center_orbit_closure
+
+  subroutine diagnose_local_center_orbit_closure(dc, ncenter, center_bohr, label)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: ncenter
+    real(8), intent(in) :: center_bohr(3,*)
+    character(*), intent(in) :: label
+    integer :: ia, ja, ic, jc, axis, ifrag
+    integer :: natom_frag
+    integer, allocatable :: atom_index(:)
+    real(8), allocatable :: atom_pos_local(:,:), center_local(:,:)
+    real(8) :: cell_length(3), origin(3), best_origin(3)
+    real(8) :: residual, best_residual, target(3), delta(3)
+    real(8) :: dist2, best_dist2, max_residual, rms_residual
+    logical :: accepted, found_inversion, closed
+    real(8), parameter :: center_match_tol = 1.0d-3
+
+    ifrag = dc%i_frag
+    if(ncenter <= 0 .or. ifrag <= 0) return
+
+    call collect_fragment_core_atoms_import(dc, ifrag, atom_index, natom_frag)
+    call fragment_cell_lengths_import(dc, ifrag, cell_length)
+    allocate(atom_pos_local(3,max(1,natom_frag)))
+    do ia=1,natom_frag
+      call atom_fragment_local_position_import(dc, ifrag, atom_index(ia), atom_pos_local(1:3,ia))
+    end do
+
+    found_inversion = .false.
+    best_residual = huge(1.0d0)
+    best_origin = 0.0d0
+    do ia=1,natom_frag
+      do ja=ia,natom_frag
+        call periodic_pair_midpoint_import(atom_pos_local(1:3,ia), atom_pos_local(1:3,ja), &
+          cell_length, origin)
+        call test_fragment_inversion_import(dc, atom_index, atom_pos_local, natom_frag, &
+          cell_length, origin, accepted, residual)
+        if(accepted .and. residual < best_residual) then
+          found_inversion = .true.
+          best_residual = residual
+          best_origin = origin
+        end if
+      end do
+    end do
+
+    if(.not. found_inversion) then
+      write(*,'(1x,a,i0,3a,i0)') "[DC-LCFO-LOCAL-WANNIER-SYM] fragment=", ifrag, &
+        " label=", trim(label), " symop=none ncenter=", ncenter
+      deallocate(atom_index, atom_pos_local)
+      return
+    end if
+
+    allocate(center_local(3,ncenter))
+    do ic=1,ncenter
+      call point_fragment_local_position_import(dc, ifrag, center_bohr(1:3,ic), center_local(1:3,ic))
+    end do
+
+    max_residual = 0.0d0
+    rms_residual = 0.0d0
+    closed = .true.
+    do ic=1,ncenter
+      do axis=1,3
+        target(axis) = best_origin(axis) - periodic_delta_import(center_local(axis,ic) - best_origin(axis), &
+          cell_length(axis))
+      end do
+      best_dist2 = huge(1.0d0)
+      do jc=1,ncenter
+        do axis=1,3
+          delta(axis) = periodic_delta_import(center_local(axis,jc) - target(axis), cell_length(axis))
+        end do
+        dist2 = local_distance2(delta)
+        best_dist2 = min(best_dist2, dist2)
+      end do
+      max_residual = max(max_residual, sqrt(best_dist2))
+      rms_residual = rms_residual + best_dist2
+      if(sqrt(best_dist2) > center_match_tol) closed = .false.
+    end do
+    rms_residual = sqrt(rms_residual / dble(max(1,ncenter)))
+
+    write(*,'(1x,a,i0,3a,2(a,es12.5),a,l1,a,i0,a,3(1x,es12.5))') &
+      "[DC-LCFO-LOCAL-WANNIER-SYM] fragment=", ifrag, " label=", trim(label), &
+      " symop=inversion", " max=", max_residual, " rms=", rms_residual, &
+      " closed=", closed, " ncenter=", ncenter, " origin=", best_origin(1:3)
+
+    deallocate(atom_index, atom_pos_local, center_local)
+  end subroutine diagnose_local_center_orbit_closure
+
   subroutine point_fragment_local_position_import(dc, ifrag, point_bohr, local_pos)
     use structures, only: s_dcdft
     implicit none
