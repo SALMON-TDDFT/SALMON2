@@ -27,10 +27,15 @@
 !     5. Propagation accuracy: production interpolated propagation matches an
 !        INDEPENDENT dense Taylor-4 reference built from the analytic V(a);
 !        residual shrinks ~2^4 per ns doubling.
-!     6. Small-A legacy consistency: |J_exact - J_legacy| scales O(A^2)
-!        (the legacy A.rvnl term is the first-order expansion of DeltaV).
+!     6. Small-A legacy consistency, order-separated: propagated rho differs
+!        O(A^2) (the legacy A.rvnl term is the first-order expansion of
+!        DeltaV) while the READOUT differs O(A) (frozen p+W(0) vs p+W(A);
+!        the O(A) coefficient is the nonlocal sum-rule term T of check 7).
 !     7. fsum_D wiring: with yn_sbe_vnl_exact='y' the PUBLIC init path builds
-!        the deficiency tensor with pi = p + rvnl (rvnl := W_0 convention).
+!        the deficiency tensor with pi = p + rvnl (rvnl := W_0 convention)
+!        PLUS the nonlocal sum-rule term T_i = <sum_v f_v (dW_i/da)_vv>_k / V
+!        on the stencil-axis column (checked against an independent analytic
+!        off-node reference; legacy modes carry no T -- regression-guarded).
 !
 ! BUILD (already-built ninja tree at build_local/; single-process
 ! communication dummy).  Compile from a CLEAN dir; link the SAME objects the
@@ -637,14 +642,26 @@ contains
   end subroutine free_solver
 
   !======================= check 7: fsum_D exact-mode wiring ==================
+  ! (a) exact mode builds D through the public init with pi = p + W_0 AND the
+  !     nonlocal sum-rule term T (e_dir column): D_exact = D_legacy + (T/V) e^T,
+  !     T_i = < sum_v f_v Re (dW_i/da)_vv |_{a=0} >_k, checked against an
+  !     INDEPENDENT reference (central difference of the ANALYTIC model_W at
+  !     a = +-delta, delta << h -- not the production 5-point node stencil).
+  ! (b) legacy (non-exact) D is unchanged by the T machinery (regression).
   subroutine test_fsum_wiring(nfail)
     implicit none
     integer, intent(inout) :: nfail
     type(s_sbe_gs_info) :: gs
     type(s_sbe_bloch_solver) :: sbe_a, sbe_b
-    integer :: icomm
+    integer :: icomm, ik, iv, i, j
+    real(8) :: tref(3), dexp(3, 3), delta, wsum, derr
+    complex(8) :: wp(nb, nb), wm(nb, nb)
     icomm = 0
-    call build_gs(gs, 8)
+    ! ns=64 (h = amax/64): the production T uses the O(h^4) five-point node
+    ! stencil, so the gap to the off-node analytic reference is ~(B*h)^4/30
+    ! ~ 7e-8 here -- comfortably inside the 1e-6 assertion; at the coarse
+    ! ns=8 fixture it would be ~3e-4 and the tolerance would mask real bugs.
+    call build_gs(gs, 64)
     ! PUBLIC init path with exact mode + subtraction: D must be built with
     ! pi = p + rvnl (rvnl carries W_0 by the reader-overwrite convention)
     yn_sbe_vnl_exact = 'y'
@@ -653,11 +670,37 @@ contains
     call init_sbe_bloch_solver(sbe_a, gs, nb, icomm)
     yn_sbe_vnl_exact = 'n'
     yn_sbe_gs_current_subtract = 'n'
-    ! explicit reference: flag_vnl = .true.
+    ! explicit reference: flag_vnl = .true., non-exact solver (no T term)
     call init_sbe_bloch_solver(sbe_b, gs, nb, icomm)
-    call build_fsum_deficiency_tensor(sbe_b, gs, .true.)
-    call check_true(maxval(abs(sbe_a%fsum_D - sbe_b%fsum_D)) == 0d0 .and. sbe_a%fsum_D_built, &
-      & "fsum_D: exact mode builds the deficiency tensor with pi = p + W_0", nfail)
+    call build_fsum_deficiency_tensor(sbe_b, gs, .true., icomm)
+    ! independent T reference from the analytic model (off-node FD, O(delta^2))
+    delta = 1d-5
+    tref(:) = 0d0
+    wsum = sum(gs%kweight(1:nk))
+    do ik = 1, nk
+      do i = 1, 3
+        call model_W(ik, +delta, i, wp)
+        call model_W(ik, -delta, i, wm)
+        do iv = 1, gs%nvb
+          tref(i) = tref(i) + gs%kweight(ik) * gs%occup(iv, ik) &
+            & * dble(wp(iv, iv) - wm(iv, iv)) / (2d0 * delta)
+        end do
+      end do
+    end do
+    tref(:) = tref(:) / (wsum * gs%volume)
+    do j = 1, 3
+      do i = 1, 3
+        dexp(i, j) = sbe_b%fsum_D(i, j) + tref(i) * edir(j)
+      end do
+    end do
+    derr = maxval(abs(sbe_a%fsum_D - dexp)) / max(maxval(abs(dexp)), 1d-300)
+    write(*, '(a,3es12.4)') "  fsum_D exact-mode T column (analytic ref): ", tref
+    write(*, '(a,es12.4)')  "  fsum_D exact vs legacy+T rel residual:     ", derr
+    call check_true(sbe_a%fsum_D_built .and. derr < 1d-6, &
+      & "fsum_D: exact mode adds the nonlocal sum-rule term T to pi = p + W_0", nfail)
+    call check_true(maxval(abs(tref)) > 1d-12 .and. &
+      & maxval(abs(sbe_a%fsum_D - sbe_b%fsum_D)) > 1d-12, &
+      & "fsum_D: fixture T is nonzero (the check cannot pass vacuously)", nfail)
   end subroutine test_fsum_wiring
 
 end program test_vnl_kappa

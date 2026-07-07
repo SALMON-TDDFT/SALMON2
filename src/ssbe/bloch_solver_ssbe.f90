@@ -259,9 +259,11 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
         ! (first-order rvnl OR the all-order exact mode -- at A=0, where the
         ! linear-response tensor lives, both use the same velocity p + W_0;
         ! in exact mode gs%rvnl_tm_matrix has been overwritten by the
-        ! binary-precision W_0, so the SAME array serves both).
+        ! binary-precision W_0, so the SAME array serves both).  In exact mode
+        ! the builder additionally adds the nonlocal sum-rule term T (see its
+        ! header), reduced over icomm because gs%vnl_W is k-sliced.
         call build_fsum_deficiency_tensor(sbe, gs, &
-            & yn_vnl_correction == 'y' .or. yn_sbe_vnl_exact == 'y')
+            & yn_vnl_correction == 'y' .or. yn_sbe_vnl_exact == 'y', icomm)
     end if
 end subroutine
 
@@ -383,7 +385,10 @@ end subroutine sbe_vnl_validate_trajectory
 ! complete window => D -> 0 (nothing subtracted); empty conduction window =>
 ! D -> (Ne/V)*delta_ij (the v1 limit, then correct).  D*A vanishes for A=0,
 ! so post-pulse observables are unchanged, and D is A-independent, so the
-! nonlinear response is untouched.
+! nonlinear response is untouched.  In EXACT mode (yn_sbe_vnl_exact='y') D
+! additionally carries the nonlocal sum-rule term T of the A-dependent
+! readout velocity W(k+A) -- see build_fsum_deficiency_tensor; without it
+! the complete-window limit of D is -T/V instead of 0.
 !
 ! Scope: derived for the norder_correction=0 readout (the production default).
 ! At norder_correction>=1 the core's own A-linear velocity-operator correction
@@ -449,6 +454,28 @@ end subroutine calc_current_bloch
 ! (one electron; spin enters only through f_v), gives in a COMPLETE basis
 !   < sum_v f_v delta_ij >_k = Ne delta_ij   =>   D -> 0 identically --
 ! BOTH occupation conventions are served by the same expression.
+!
+! EXACT MODE (yn_sbe_vnl_exact='y') -- nonlocal sum-rule term T: with a
+! NONLOCAL potential the TRK sum rule generalizes to the effective-mass form
+!   sum_m 2 Re[ pi^i_vm pi^j_mv ] / (eps_m - eps_v)
+!     = delta_ij + <v| d2 V_nl(kappa)/dkappa_i dkappa_j |v> - d2 eps_v/dk_i dk_j
+! (kappa-derivatives at frozen |u_vk>; the band-mass term integrates to zero
+! over the BZ for filled bands), and the exact readout velocity p + W(k+A)
+! carries the matching A-linear GROUND-STATE term Tr[rho0 dW_i/dkappa_j] A_j
+! that the legacy frozen-velocity readout does not have.  The window
+! deficiency is therefore
+!   D_ij = ( Ne delta_ij + T_ij - S_ij ) / V,
+!   T_ij = < sum_v f_v Re <v| dW_i/dkappa_j |v> >_k,
+! and OMITTING T over-subtracts by -T/V even in a COMPLETE basis (measured
+! on Si 8^3 @ nb=32, z-stencil: T_zz/V = -1.82e-3 a.u. = 46% of peak |J|).
+! The 1D kappa-stencil provides the derivative along its axis only, i.e. the
+! e_dir COLUMN of T -- exactly the part ever contracted with A(t), because
+! exact mode pre-validates A(t) // vnl_dir (sbe_vnl_validate_trajectory).
+! dW/dkappa is evaluated by the O(h^4) five-point first-derivative stencil at
+! the s=0 node (the reader enforces ns >= 4, so s = +-1, +-2 always exist).
+! gs%vnl_W is stored k-sliced (unlike the replicated gs%p/rvnl), so the T
+! part is a sliced partial sum reduced over icomm; legacy modes are
+! communication-free and bit-identical to the pre-T behavior.
 ! Occupied<->occupied pairs are excluded: they carry (f_v - f_m) = 0 in the
 ! response (ssbe occupations are exactly 0 or focc by construction), and in the
 ! TRK rearrangement they cancel pairwise (numerator symmetric, denominator
@@ -463,17 +490,21 @@ end subroutine calc_current_bloch
 ! symmetric after the k-sum); the full 3x3 is computed without assuming it.
 !
 ! The gs%* arrays are replicated on every rank (comm_bcast in
-! init_sbe_gs_info), so the FULL k-sum is evaluated redundantly on each rank:
-! bit-identical D everywhere, no communication.
+! init_sbe_gs_info), so the FULL k-sum of the S/Ne part is evaluated
+! redundantly on each rank: bit-identical, no communication.  The exact-mode
+! T part is the one exception (k-sliced gs%vnl_W, comm_summation reduction --
+! see the EXACT MODE paragraph above); legacy modes never reach it.
 !===================================================================
-subroutine build_fsum_deficiency_tensor(sbe, gs, flag_vnl)
+subroutine build_fsum_deficiency_tensor(sbe, gs, flag_vnl, icomm)
     use degenerate_block_ssbe, only: theta_off
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info), intent(in) :: gs
     logical, intent(in) :: flag_vnl
+    integer, intent(in) :: icomm
     integer :: ik, iv, im, i, j
     real(8) :: s(1:3, 1:3), fv, de, w, wsum, ne_w
+    real(8) :: t_col(1:3), t_col_l(1:3)
     complex(8) :: pvm(1:3), pmv(1:3)
     real(8), parameter :: occ_eps = 1d-12
 
@@ -511,6 +542,34 @@ subroutine build_fsum_deficiency_tensor(sbe, gs, flag_vnl)
         sbe%fsum_D(i, i) = sbe%fsum_D(i, i) + ne_w / wsum
     end do
     sbe%fsum_D(:, :) = sbe%fsum_D(:, :) / gs%volume
+
+    ! Exact mode: add the nonlocal sum-rule term T (e_dir column; see the
+    ! header).  D(i, :) += (T_i / V) * e_j with
+    !   T_i = < sum_v f_v Re[ (dW_i/da)_vv at s=0 ] >_k,   a = e_dir.kappa,
+    ! from the O(h^4) five-point derivative of the exact-mode W stencil.
+    ! Sliced k-sum (gs%vnl_W holds this rank's slice only) + allreduce.
+    if (sbe%flag_vnl_exact) then
+        t_col_l(1:3) = 0d0
+        do ik = gs%vnl_ik_min, gs%vnl_ik_max
+            w = gs%kweight(ik)
+            do iv = 1, sbe%nb
+                fv = gs%occup(iv, ik)
+                if (fv <= occ_eps) cycle
+                do i = 1, 3
+                    t_col_l(i) = t_col_l(i) + w * fv * dble( &
+                        &  ( 8d0 * (gs%vnl_W(iv, iv, i,  1, ik) - gs%vnl_W(iv, iv, i, -1, ik))  &
+                        &        - (gs%vnl_W(iv, iv, i,  2, ik) - gs%vnl_W(iv, iv, i, -2, ik)) ) &
+                        & / (12d0 * gs%vnl_h) )
+                end do
+            end do
+        end do
+        call comm_summation(t_col_l, t_col, 3, icomm)
+        do i = 1, 3
+            sbe%fsum_D(i, 1:3) = sbe%fsum_D(i, 1:3) &
+                & + (t_col(i) / (wsum * gs%volume)) * gs%vnl_dir(1:3)
+        end do
+    end if
+
     sbe%fsum_D_built = .true.
 end subroutine build_fsum_deficiency_tensor
 

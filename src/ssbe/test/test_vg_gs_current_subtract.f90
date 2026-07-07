@@ -336,7 +336,7 @@ contains
 
     call build_gs_trk(gs, 1.0d0)              ! scale_z = 1: TRK fully saturated
     call make_solver_gs(sbe, gs, .false.)
-    call build_fsum_deficiency_tensor(sbe, gs, .false.)
+    call build_fsum_deficiency_tensor(sbe, gs, .false., 0)
     dmax = maxval(abs(sbe%fsum_D))
     deallocate(sbe%rho)
     call free_gs(gs)
@@ -463,7 +463,7 @@ contains
 
     call make_solver_gs(sbe, gs, .false.)
     do ivnl = 0, 1
-      call build_fsum_deficiency_tensor(sbe, gs, ivnl == 1)
+      call build_fsum_deficiency_tensor(sbe, gs, ivnl == 1, 0)
       ! hand formula: D_ij = (2 d_ij - f * 2 Re[pi^i_12 pi^j_21] / Delta)/V,
       ! f = 2 (both TR k carry the same real product, so the k-average drops).
       q12 = p12
@@ -522,7 +522,7 @@ contains
     end do
     call finish_gs(gs)
     call make_solver_gs(sbe, gs, .false.)
-    call build_fsum_deficiency_tensor(sbe, gs, .false.)
+    call build_fsum_deficiency_tensor(sbe, gs, .false., 0)
     d_without = sbe%fsum_D
     ! now add a HUGE matrix element between the degenerate occupied bands
     do i = 1, 3
@@ -530,7 +530,7 @@ contains
       gs%p_tm_matrix(2, 1, i, 1) = conjg(gs%p_tm_matrix(1, 2, i, 1))
     end do
     call finish_gs(gs)
-    call build_fsum_deficiency_tensor(sbe, gs, .false.)
+    call build_fsum_deficiency_tensor(sbe, gs, .false., 0)
     d_with = sbe%fsum_D
     call check_true(all(d_with == d_with) .and. &                 ! no NaN
                   & maxval(abs(d_with - d_without)) == 0d0, &
@@ -549,7 +549,7 @@ contains
     end do
     call finish_gs(gs)
     call make_solver_gs(sbe, gs, .false.)
-    call build_fsum_deficiency_tensor(sbe, gs, .false.)
+    call build_fsum_deficiency_tensor(sbe, gs, .false., 0)
     d_without = sbe%fsum_D
     ! huge element on the sub-floor occ x unocc pair: must be dropped, not
     ! amplified (1/de would be ~1e3 * 1e12 without the guard)
@@ -558,7 +558,7 @@ contains
       gs%p_tm_matrix(2, 1, i, 1) = conjg(gs%p_tm_matrix(1, 2, i, 1))
     end do
     call finish_gs(gs)
-    call build_fsum_deficiency_tensor(sbe, gs, .false.)
+    call build_fsum_deficiency_tensor(sbe, gs, .false., 0)
     d_with = sbe%fsum_D
     call check_true(maxval(abs(d_with - d_without)) == 0d0, &
                   & "occ x unocc pair below theta_off floor: dropped exactly", nfail)
