@@ -533,6 +533,8 @@
       select case (trim(adjustl(dg_mixed_z_local_prop_backend)))
       case ('fragment_local_mixed_split_backend','fragment_local','local')
         mixed_z_local_prop_backend_kind = 'fragment_local_mixed_split_backend'
+      case ('neighbor_env_expdiag','neighbor_env','neighbor')
+        mixed_z_local_prop_backend_kind = 'neighbor_env_expdiag'
       case ('global_mixed_split_backend','global')
         mixed_z_local_prop_backend_kind = 'global_mixed_split_backend'
       case default
@@ -545,6 +547,8 @@
       select case (trim(adjustl(mixed_z_local_prop_backend_env(1:route_env_len))))
       case ('fragment_local_mixed_split_backend','fragment_local','local')
         mixed_z_local_prop_backend_kind = 'fragment_local_mixed_split_backend'
+      case ('neighbor_env_expdiag','neighbor_env','neighbor')
+        mixed_z_local_prop_backend_kind = 'neighbor_env_expdiag'
       case ('global_mixed_split_backend','global')
         mixed_z_local_prop_backend_kind = 'global_mixed_split_backend'
       case default
@@ -3042,11 +3046,100 @@
       case ('fragment_local_mixed_split_backend')
         call apply_fragment_local_mixed_split_exp_stub(E_use, state_s, state_e, &
           candidate_available, replacement_applied, bad, block_reason)
+      case ('neighbor_env_expdiag')
+        call apply_neighbor_env_expdiag_stub(E_use, state_s, state_e, &
+          candidate_available, replacement_applied, bad, block_reason)
       case default
         bad = .true.
         block_reason = 'unknown_candidate_kind'
       end select
     end subroutine apply_mixed_split_exp_backend
+
+    subroutine apply_neighbor_env_expdiag_stub(E_use, state_s, state_e, &
+                                               candidate_available, replacement_applied, bad, block_reason)
+      real(8), intent(in) :: E_use(3)
+      integer, intent(in) :: state_s, state_e
+      logical, intent(out) :: candidate_available, replacement_applied, bad
+      character(len=*), intent(out) :: block_reason
+      logical :: owner_local_layout_ready
+      integer :: w_owner_slots, w_total_slots, p_self_slots, p_neighbor_slots
+      integer :: gid_mismatch_count, owner_frag_mismatch_count, owner_rank_mismatch_count
+      integer :: nstate_blk, i_local, ifrag, axis, side, jfrag
+      integer :: n_neighbor, neighbor_ids(6)
+      integer :: nmix, nw, np, ispin_diag
+      real(8) :: coeff_norm_w, coeff_norm_p, coeff_max_abs
+      complex(8), allocatable :: cmix_diag(:,:)
+
+      nstate_blk = max(0, state_e - state_s + 1)
+      if (.not. allocated(dg_frag%wpw_reduced_dim) .or. .not. allocated(dg_frag%wpw_reduced_nself) .or. &
+          .not. allocated(dg_frag%wpw_reduced_nraw)) then
+        call prepare_wpw_local_payload_ingredients('neighbor_env_layout')
+      end if
+      call enumerate_fragment_local_mixed_slots(owner_local_layout_ready, w_owner_slots, w_total_slots, &
+        p_self_slots, p_neighbor_slots, gid_mismatch_count, owner_frag_mismatch_count, &
+        owner_rank_mismatch_count)
+
+      candidate_available = owner_local_layout_ready .and. nstate_blk > 0
+      replacement_applied = .false.
+      bad = .true.
+      block_reason = 'neighbor_env_kernel_not_implemented'
+
+      nmix = dg_frag%mixed_wannier_bpw_nmix
+      nw = dg_frag%mixed_wannier_bpw_nw
+      np = dg_frag%mixed_wannier_bpw_np
+      coeff_norm_w = 0.0d0
+      coeff_norm_p = 0.0d0
+      coeff_max_abs = 0.0d0
+      if (candidate_available .and. nmix > 0 .and. nw >= 0 .and. np >= 0 .and. &
+          nmix == nw + np .and. dg_frag%nspin > 0) then
+        ispin_diag = 1
+        allocate(cmix_diag(nmix,nstate_blk))
+        call gather_global_mixed_coefficients(ispin_diag, state_s, state_e, cmix_diag)
+        if (nw > 0) coeff_norm_w = sum(abs(cmix_diag(1:nw,1:nstate_blk))**2)
+        if (np > 0) coeff_norm_p = sum(abs(cmix_diag(nw+1:nw+np,1:nstate_blk))**2)
+        coeff_max_abs = maxval(abs(cmix_diag(1:nmix,1:nstate_blk)))
+        deallocate(cmix_diag)
+      end if
+
+      if (dg_frag%id == 0) then
+        write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV] backend selected but propagation kernel is not implemented'
+        write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV] step=', itt, &
+          ' nstate_blk=', nstate_blk, &
+          ' available=', candidate_available, &
+          ' W_owner_slots=', w_owner_slots, &
+          ' W_total_layout_slots=', w_total_slots, &
+          ' P_self_slots=', p_self_slots, &
+          ' P_neighbor_slots=', p_neighbor_slots, &
+          ' field_abs_sum=', sum(abs(E_use(1:3))), &
+          ' coeff_norm_w=', coeff_norm_w, &
+          ' coeff_norm_p=', coeff_norm_p, &
+          ' coeff_max_abs=', coeff_max_abs
+        do i_local = 1, size(dg_frag%wpw_reduced_dim)
+          ifrag = dg_frag%ifrag_start + i_local - 1
+          n_neighbor = 0
+          neighbor_ids(:) = 0
+          do axis = 1, 3
+            do side = -1, 1, 2
+              jfrag = wpw_face_neighbor_fragment(dg_frag, ifrag, axis, side)
+              if (jfrag <= 0 .or. jfrag == ifrag) cycle
+              if (.not. any(neighbor_ids(1:max(1,n_neighbor)) == jfrag) .and. &
+                  n_neighbor < size(neighbor_ids)) then
+                n_neighbor = n_neighbor + 1
+                neighbor_ids(n_neighbor) = jfrag
+              end if
+            end do
+          end do
+          write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV-LAYOUT]', &
+            ' owner_frag=', ifrag, &
+            ' neighbor_count=', n_neighbor, &
+            ' neighbors=', neighbor_ids(:), &
+            ' nred=', dg_frag%wpw_reduced_dim(i_local), &
+            ' nself=', dg_frag%wpw_reduced_nself(i_local), &
+            ' nraw=', dg_frag%wpw_reduced_nraw(i_local)
+        end do
+      end if
+      stop "DG mixed-Z neighbor_env_expdiag: propagation kernel is not implemented"
+    end subroutine apply_neighbor_env_expdiag_stub
 
     subroutine apply_fragment_local_mixed_split_exp_stub(E_use, state_s, state_e, &
                                                         candidate_available, replacement_applied, bad, block_reason)
