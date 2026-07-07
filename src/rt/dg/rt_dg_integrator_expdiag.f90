@@ -3069,8 +3069,10 @@
       integer :: nmix, nw, np, ispin_diag
       real(8) :: coeff_norm_w, coeff_norm_p, coeff_max_abs
       complex(8), allocatable :: cmix_diag(:,:)
+      logical :: field_off, kernel_ready, writeback_bad, bad_coef
 
       nstate_blk = max(0, state_e - state_s + 1)
+      field_off = sum(abs(E_use(1:3))) <= 1.0d-30
       if (.not. allocated(dg_frag%wpw_reduced_dim) .or. .not. allocated(dg_frag%wpw_reduced_nself) .or. &
           .not. allocated(dg_frag%wpw_reduced_nraw)) then
         call prepare_wpw_local_payload_ingredients('neighbor_env_layout')
@@ -3081,8 +3083,8 @@
 
       candidate_available = owner_local_layout_ready .and. nstate_blk > 0
       replacement_applied = .false.
-      bad = .true.
-      block_reason = 'neighbor_env_kernel_not_implemented'
+      bad = .false.
+      block_reason = 'neighbor_env_field_on_kernel_not_implemented'
 
       nmix = dg_frag%mixed_wannier_bpw_nmix
       nw = dg_frag%mixed_wannier_bpw_nw
@@ -3102,7 +3104,7 @@
       end if
 
       if (dg_frag%id == 0) then
-        write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV] backend selected but propagation kernel is not implemented'
+        write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV] backend selected'
         write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV] step=', itt, &
           ' nstate_blk=', nstate_blk, &
           ' available=', candidate_available, &
@@ -3139,7 +3141,29 @@
             ' nraw=', dg_frag%wpw_reduced_nraw(i_local)
         end do
       end if
-      stop "DG mixed-Z neighbor_env_expdiag: propagation kernel is not implemented"
+      if (field_off .and. candidate_available) then
+        bad_coef = .false.
+        call dryrun_wpw_reduced_expdiag(state_s, state_e, dt, bad_coef, itt, E_use, Ac_ham, 'neighbor_env_fieldoff')
+        call build_neighbor_env_fieldoff_storage_from_reduced(state_s, state_e, bad, kernel_ready)
+        if (kernel_ready .and. .not. bad .and. .not. bad_coef) then
+          call writeback_fragment_local_storage_fieldoff(state_s, state_e, writeback_bad)
+          bad = bad .or. writeback_bad
+          if (.not. writeback_bad) then
+            replacement_applied = .true.
+            block_reason = 'none'
+          else
+            block_reason = 'neighbor_env_writeback_failed'
+          end if
+        else
+          block_reason = 'neighbor_env_fieldoff_storage_failed'
+        end if
+      else if (.not. field_off) then
+        bad = .true.
+        stop "DG mixed-Z neighbor_env_expdiag: field-on propagation kernel is not implemented"
+      else
+        bad = .true.
+        block_reason = 'neighbor_env_layout_not_ready'
+      end if
     end subroutine apply_neighbor_env_expdiag_stub
 
     subroutine diagnose_neighbor_env_raw_matrices()
@@ -3197,6 +3221,137 @@
           ' S_trace=', s_trace
       end do
     end subroutine diagnose_neighbor_env_raw_matrices
+
+    subroutine build_neighbor_env_fieldoff_storage_from_reduced(state_s, state_e, bad, kernel_ready)
+      integer, intent(in) :: state_s, state_e
+      logical, intent(inout) :: bad
+      logical, intent(out) :: kernel_ready
+      integer :: nstate_blk, nw, np, n_pw, nspin_use
+      integer :: i_local, ifrag, n_w, nself, iw, ipw, gid, gp
+      integer :: w_slot_count, pself_slot_count, w_slot, pself_slot
+      integer :: ispin_use, state_col
+
+      kernel_ready = .false.
+      nstate_blk = max(0, state_e - state_s + 1)
+      nw = dg_frag%mixed_wannier_bpw_nw
+      np = dg_frag%mixed_wannier_bpw_np
+      n_pw = max(0, dg_frag%n_plane_waves)
+      nspin_use = dg_frag%nspin
+      if (nstate_blk <= 0 .or. nw <= 0 .or. n_pw <= 0) then
+        bad = .true.
+        return
+      end if
+      if (.not. dg_frag%wpw_reduced_coef_initialized .or. &
+          .not. allocated(dg_frag%coef_wpw_self) .or. &
+          .not. allocated(dg_frag%wpw_reduced_nself) .or. &
+          .not. allocated(dg_frag%global_wannier_local_nkeep) .or. &
+          .not. allocated(dg_frag%global_wannier_local_ids) .or. &
+          .not. allocated(dg_frag%global_wannier_owner_frag)) then
+        bad = .true.
+        return
+      end if
+
+      w_slot_count = 0
+      pself_slot_count = 0
+      do i_local = 1, size(dg_frag%global_wannier_local_nkeep)
+        ifrag = dg_frag%ifrag_start + i_local - 1
+        n_w = dg_frag%global_wannier_local_nkeep(i_local)
+        if (i_local > size(dg_frag%wpw_reduced_nself)) cycle
+        nself = dg_frag%wpw_reduced_nself(i_local)
+        do iw = 1, n_w
+          gid = dg_frag%global_wannier_local_ids(iw, i_local)
+          if (gid < 1 .or. gid > nw) cycle
+          if (dg_frag%global_wannier_owner_frag(gid) < dg_frag%ifrag_start .or. &
+              dg_frag%global_wannier_owner_frag(gid) > dg_frag%ifrag_end) cycle
+          if (iw > nself) cycle
+          w_slot_count = w_slot_count + 1
+        end do
+        if (nself >= n_w + n_pw) pself_slot_count = pself_slot_count + n_pw
+      end do
+
+      if (allocated(dg_frag%mixed_z_frag_local_wcoef)) deallocate(dg_frag%mixed_z_frag_local_wcoef)
+      if (allocated(dg_frag%mixed_z_frag_local_w_gid)) deallocate(dg_frag%mixed_z_frag_local_w_gid)
+      if (allocated(dg_frag%mixed_z_frag_local_w_mix_gid)) deallocate(dg_frag%mixed_z_frag_local_w_mix_gid)
+      if (allocated(dg_frag%mixed_z_frag_local_pself_coef)) deallocate(dg_frag%mixed_z_frag_local_pself_coef)
+      if (allocated(dg_frag%mixed_z_frag_local_pself_gid)) deallocate(dg_frag%mixed_z_frag_local_pself_gid)
+      if (allocated(dg_frag%mixed_z_frag_local_pself_mix_gid)) deallocate(dg_frag%mixed_z_frag_local_pself_mix_gid)
+      if (allocated(dg_frag%mixed_z_frag_local_pneighbor_coef)) deallocate(dg_frag%mixed_z_frag_local_pneighbor_coef)
+      if (allocated(dg_frag%mixed_z_frag_local_pneighbor_gid)) deallocate(dg_frag%mixed_z_frag_local_pneighbor_gid)
+      if (allocated(dg_frag%mixed_z_frag_local_pneighbor_mix_gid)) deallocate(dg_frag%mixed_z_frag_local_pneighbor_mix_gid)
+
+      allocate(dg_frag%mixed_z_frag_local_wcoef(max(1,w_slot_count), nstate_blk, nspin_use))
+      allocate(dg_frag%mixed_z_frag_local_w_gid(max(1,w_slot_count)))
+      allocate(dg_frag%mixed_z_frag_local_w_mix_gid(max(1,w_slot_count)))
+      allocate(dg_frag%mixed_z_frag_local_pself_coef(max(1,pself_slot_count), nstate_blk, nspin_use))
+      allocate(dg_frag%mixed_z_frag_local_pself_gid(max(1,pself_slot_count)))
+      allocate(dg_frag%mixed_z_frag_local_pself_mix_gid(max(1,pself_slot_count)))
+      allocate(dg_frag%mixed_z_frag_local_pneighbor_coef(1, nstate_blk, nspin_use))
+      allocate(dg_frag%mixed_z_frag_local_pneighbor_gid(1))
+      allocate(dg_frag%mixed_z_frag_local_pneighbor_mix_gid(1))
+      dg_frag%mixed_z_frag_local_wcoef(:, :, :) = (0.0d0, 0.0d0)
+      dg_frag%mixed_z_frag_local_pself_coef(:, :, :) = (0.0d0, 0.0d0)
+      dg_frag%mixed_z_frag_local_pneighbor_coef(:, :, :) = (0.0d0, 0.0d0)
+      dg_frag%mixed_z_frag_local_w_gid(:) = 0
+      dg_frag%mixed_z_frag_local_w_mix_gid(:) = 0
+      dg_frag%mixed_z_frag_local_pself_gid(:) = 0
+      dg_frag%mixed_z_frag_local_pself_mix_gid(:) = 0
+      dg_frag%mixed_z_frag_local_pneighbor_gid(:) = 0
+      dg_frag%mixed_z_frag_local_pneighbor_mix_gid(:) = 0
+
+      w_slot = 0
+      pself_slot = 0
+      do i_local = 1, size(dg_frag%global_wannier_local_nkeep)
+        ifrag = dg_frag%ifrag_start + i_local - 1
+        n_w = dg_frag%global_wannier_local_nkeep(i_local)
+        if (i_local > size(dg_frag%wpw_reduced_nself)) cycle
+        nself = dg_frag%wpw_reduced_nself(i_local)
+        do iw = 1, n_w
+          gid = dg_frag%global_wannier_local_ids(iw, i_local)
+          if (gid < 1 .or. gid > nw) cycle
+          if (dg_frag%global_wannier_owner_frag(gid) < dg_frag%ifrag_start .or. &
+              dg_frag%global_wannier_owner_frag(gid) > dg_frag%ifrag_end) cycle
+          if (iw > nself) cycle
+          w_slot = w_slot + 1
+          dg_frag%mixed_z_frag_local_w_gid(w_slot) = gid
+          dg_frag%mixed_z_frag_local_w_mix_gid(w_slot) = gid
+          do ispin_use = 1, nspin_use
+            do state_col = 1, nstate_blk
+              dg_frag%mixed_z_frag_local_wcoef(w_slot,state_col,ispin_use) = &
+                dg_frag%coef_wpw_self(iw,state_s+state_col-1,ispin_use,i_local)
+            end do
+          end do
+        end do
+        if (nself >= n_w + n_pw) then
+          do ipw = 1, n_pw
+            gp = (ifrag - 1) * n_pw + ipw
+            if (gp < 1 .or. gp > np) cycle
+            pself_slot = pself_slot + 1
+            dg_frag%mixed_z_frag_local_pself_gid(pself_slot) = gp
+            dg_frag%mixed_z_frag_local_pself_mix_gid(pself_slot) = nw + gp
+            do ispin_use = 1, nspin_use
+              do state_col = 1, nstate_blk
+                dg_frag%mixed_z_frag_local_pself_coef(pself_slot,state_col,ispin_use) = &
+                  dg_frag%coef_wpw_self(n_w+ipw,state_s+state_col-1,ispin_use,i_local)
+              end do
+            end do
+          end do
+        end if
+      end do
+
+      dg_frag%mixed_z_frag_local_w_slots = w_slot_count
+      dg_frag%mixed_z_frag_local_pself_slots = pself_slot_count
+      dg_frag%mixed_z_frag_local_pneighbor_slots = 0
+      dg_frag%mixed_z_frag_local_nstate = nstate_blk
+      dg_frag%mixed_z_frag_local_nspin = nspin_use
+      dg_frag%mixed_z_frag_local_storage_ready = w_slot_count > 0
+      kernel_ready = dg_frag%mixed_z_frag_local_storage_ready
+      if (dg_frag%id == 0 .and. .not. dg_frag%mixed_z_perf_count_enabled) then
+        write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV-FIELDOFF]', &
+          ' W_owner_storage_slots=', w_slot_count, &
+          ' P_self_storage_slots=', pself_slot_count, &
+          ' replacement_storage_ready=', kernel_ready
+      end if
+    end subroutine build_neighbor_env_fieldoff_storage_from_reduced
 
     subroutine apply_fragment_local_mixed_split_exp_stub(E_use, state_s, state_e, &
                                                         candidate_available, replacement_applied, bad, block_reason)
