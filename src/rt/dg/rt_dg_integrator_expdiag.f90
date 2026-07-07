@@ -3070,10 +3070,12 @@
       integer :: nmix, nw, np, ispin_diag
       real(8) :: coeff_norm_w, coeff_norm_p, coeff_max_abs
       complex(8), allocatable :: cmix_diag(:,:)
-      logical :: field_off, kernel_ready, writeback_bad, bad_coef
+      logical :: field_off, kernel_ready, writeback_bad, bad_coef, diag_neighbor_env
 
       nstate_blk = max(0, state_e - state_s + 1)
       field_off = sum(abs(E_use(1:3))) <= 1.0d-30
+      diag_neighbor_env = dg_frag%id == 0 .and. .not. dg_frag%mixed_z_perf_count_enabled .and. &
+        (itt == 1 .or. mod(itt, 500) == 0)
       if (.not. allocated(dg_frag%wpw_reduced_dim) .or. .not. allocated(dg_frag%wpw_reduced_nself) .or. &
           .not. allocated(dg_frag%wpw_reduced_nraw)) then
         call prepare_wpw_local_payload_ingredients('neighbor_env_layout')
@@ -3093,7 +3095,7 @@
       coeff_norm_w = 0.0d0
       coeff_norm_p = 0.0d0
       coeff_max_abs = 0.0d0
-      if (candidate_available .and. nmix > 0 .and. nw >= 0 .and. np >= 0 .and. &
+      if (diag_neighbor_env .and. candidate_available .and. nmix > 0 .and. nw >= 0 .and. np >= 0 .and. &
           nmix == nw + np .and. dg_frag%nspin > 0) then
         ispin_diag = 1
         allocate(cmix_diag(nmix,nstate_blk))
@@ -3104,7 +3106,7 @@
         deallocate(cmix_diag)
       end if
 
-      if (dg_frag%id == 0) then
+      if (diag_neighbor_env) then
         write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV] backend selected'
         write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV] step=', itt, &
           ' nstate_blk=', nstate_blk, &
