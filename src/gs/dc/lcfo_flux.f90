@@ -4068,7 +4068,7 @@ contains
       real(8), allocatable :: h_wann(:,:), v_wann(:,:,:), aa_wann(:,:,:), spread_est(:), tail_est(:)
       real(8), allocatable :: phi_box(:,:,:,:), phi_tmp(:,:,:)
       real(8), allocatable :: psi_w(:,:,:,:), rho_w_sum(:), cos_sum(:,:), sin_sum(:,:)
-      real(8) :: x, y, z, gval, box_length(3), box_origin(3), cell_length(3)
+      real(8) :: x, y, z, gval, box_origin(3), cell_length(3)
       real(8) :: theta, pair_center, frag_center_axis, rel_coord, norm_w, pi_twice
       character(256) :: filename
       logical :: use_pseudo_projection, use_bond_projection
@@ -4096,7 +4096,6 @@ contains
       call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
       nxyz_buffer_seed(1:3) = dc%nxyz_buffer(1:3)
       nxyz_box(1:3) = nxyz_domain(1:3) + 2 * nxyz_buffer_seed(1:3)
-      box_length(1:3) = system%hgs(1:3) * dble(nxyz_box(1:3))
       do axis=1,3
         cell_length(axis) = dc%lg_tot%coordinate(dc%lg_tot%num(axis),axis) &
           + (dc%lg_tot%coordinate(2,axis) - dc%lg_tot%coordinate(1,axis))
@@ -4189,15 +4188,15 @@ contains
                 x = box_origin(1) + dble(ibx - 1) * system%hgs(1)
                 if(use_bond_projection) then
                   gval = bond_center_projection_value_local_periodic(x, y, z, &
-                    bond_center_bohr(1:3,ip), wannier_projection_width, box_length)
+                    bond_center_bohr(1:3,ip), wannier_projection_width, cell_length)
                 else if(use_pseudo_projection) then
                   proj_l = proj_hybrid(ip) / 10
                   proj_m = mod(proj_hybrid(ip), 10)
                   gval = pseudo_channel_projection_value_local_periodic(x, y, z, proj_atom(ip), &
-                    proj_l, proj_m, wannier_projection_width, box_length)
+                    proj_l, proj_m, wannier_projection_width, cell_length)
                 else
                   gval = c_sp3_projection_value_local_periodic(x, y, z, proj_atom(ip), &
-                    proj_hybrid(ip), wannier_projection_width, box_length)
+                    proj_hybrid(ip), wannier_projection_width, cell_length)
                 end if
                 if(abs(gval) <= 0d0) cycle
                 bproj(io,ip) = bproj(io,ip) &
@@ -4381,6 +4380,17 @@ contains
       do iw=1,nkeep_legacy
         wcenter_legacy(1:3,iw) = r_wann_legacy(1:3,iw,iw)
       end do
+      if(use_bond_projection .and. yn_dc_lcfo_wannier_symmetry_gauge == 'y' .and. &
+         allocated(bond_center_bohr)) then
+        do iw=1,nkeep_legacy
+          if(keep_index_legacy(iw) < 1 .or. keep_index_legacy(iw) > nproj_seed) cycle
+          wcenter_legacy(1:3,iw) = bond_center_bohr(1:3,keep_index_legacy(iw))
+          r_wann_legacy(1:3,iw,iw) = wcenter_legacy(1:3,iw)
+        end do
+        write(*,'(1x,a,i0,a,i0)') &
+          "[DC-LCFO-LOCAL-WANNIER-SYM-GAUGE] center override=bond_center fragment=", &
+          dc%i_frag, " keep=", nkeep_legacy
+      end if
       call diagnose_local_wannier_center_orbit_closure(dc, nkeep_legacy, wcenter_legacy, 'local_wcenter')
       call diagnose_local_wannier_center_orbit_closure(dc, nkeep, wcenter, 'bpw_wcenter')
 
@@ -4465,7 +4475,8 @@ contains
       deallocate(h_seed, v_seed, h_wann, v_wann, aa_wann, spread_est, tail_est)
       deallocate(sw_legacy, uw_legacy, lambda_legacy, wcoef_legacy, keep_index_legacy)
       deallocate(r_wann_legacy, tmp_legacy, wcenter_legacy)
-      deallocate(phi_box, phi_tmp, psi_w, rho_w_sum, cos_sum, sin_sum, n_basis_file)
+      deallocate(phi_box, phi_tmp, psi_w, rho_w_sum, cos_sum, sin_sum)
+      deallocate(n_basis_file)
       if(allocated(bond_center_bohr)) deallocate(bond_center_bohr)
     end subroutine write_local_wannier_seed
 
