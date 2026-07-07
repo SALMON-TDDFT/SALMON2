@@ -3091,7 +3091,7 @@
 
       nstate_blk = max(0, state_e - state_s + 1)
       field_off = sum(abs(E_use(1:3))) <= 1.0d-30
-      diag_neighbor_env = dg_frag%id == 0 .and. .not. dg_frag%mixed_z_perf_count_enabled .and. &
+      diag_neighbor_env = .not. dg_frag%mixed_z_perf_count_enabled .and. &
         (itt == 1 .or. mod(itt, 500) == 0)
       if (.not. allocated(dg_frag%wpw_reduced_dim) .or. .not. allocated(dg_frag%wpw_reduced_nself) .or. &
           .not. allocated(dg_frag%wpw_reduced_nraw)) then
@@ -3123,7 +3123,7 @@
         deallocate(cmix_diag)
       end if
 
-      if (diag_neighbor_env) then
+      if (diag_neighbor_env .and. dg_frag%id == 0) then
         write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV] backend selected'
         write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV] step=', itt, &
           ' nstate_blk=', nstate_blk, &
@@ -3136,7 +3136,11 @@
           ' coeff_norm_w=', coeff_norm_w, &
           ' coeff_norm_p=', coeff_norm_p, &
           ' coeff_max_abs=', coeff_max_abs
+      end if
+      if (diag_neighbor_env) then
         call diagnose_neighbor_env_raw_matrices()
+      end if
+      if (diag_neighbor_env .and. dg_frag%id == 0) then
         do i_local = 1, size(dg_frag%wpw_reduced_dim)
           ifrag = dg_frag%ifrag_start + i_local - 1
           n_neighbor = 0

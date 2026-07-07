@@ -843,7 +843,7 @@ contains
     dg_mixed_z_ww_position_branch = 'center_eig'
     dg_mixed_z_wp_position_branch = 'zero'
     dg_mixed_z_pp_position_branch = 'zero'
-    dg_mixed_z_polarization_branch = 'aa_r'
+    dg_mixed_z_polarization_branch = 'center_diag'
     yn_dg_mixed_z_local_rho_writeback_wwonly = 'n'
     yn_dg_mixed_z_local_pz_writeback_total = 'n'
     yn_dg_mixed_z_local_current_writeback_total = 'n'
