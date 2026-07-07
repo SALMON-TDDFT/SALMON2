@@ -118,6 +118,7 @@ module salmon_global
   real(8)        :: alpha_mask
   real(8)        :: gamma_mask
   real(8)        :: eta_mask
+  character(1)   :: yn_tau_nlcc
 
 !! &functional
   character(64)  :: xc !, xcname

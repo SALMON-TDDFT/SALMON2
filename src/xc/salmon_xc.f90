@@ -76,7 +76,7 @@ contains
     use structures
     use sendrecv_grid, only: update_overlap_real8
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
-    use salmon_global, only: yn_spinorbit
+    use salmon_global, only: yn_spinorbit, yn_tau_nlcc
     use noncollinear_module, only: rot_vxc_noncollinear, calc_magnetization
     use nvtx_wrapper
     implicit none
@@ -390,7 +390,31 @@ contains
       end do
 !$omp end parallel do
   
-    end if    
+    end if
+    end if
+
+    ! Optional NLCC core kinetic-energy density (yn_tau_nlcc='y'): the
+    ! meta-GGA then sees tau_total = tau_valence + tau_core, consistent
+    ! with the rho_nlcc handling inside calc_xc. The nspin==1 path and
+    ! the noncollinear total-density path (if_mgga_total) assemble into
+    ! the same total-tau array, so this one insertion covers both, for
+    ! the built-in tbmbj (whose tau_s = tau*0.5 spin split then matches
+    ! the rho_nlcc*0.5 convention) as well as a libxc mGGA (which takes
+    ! tau/rho_nlcc unsplit). The tbmbj deep-tail repair pass is
+    ! unaffected: its fallback re-evaluation ignores tau by design.
+    if ( xc_func%use_kinetic_energy .and. yn_tau_nlcc == 'y' .and. &
+       & (nspin==1 .or. if_mgga_total) ) then
+      if ( allocated(ppn%tau_nlcc) ) then
+!$omp parallel do collapse(2) private(iz,iy,ix)
+        do iz=1,mg%num(3)
+        do iy=1,mg%num(2)
+        do ix=1,mg%num(1)
+          tau(ix,iy,iz) = tau(ix,iy,iz) + ppn%tau_nlcc(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
+        end do
+        end do
+        end do
+!$omp end parallel do
+      end if
     end if
 
     if (xc_func%use_gradient) then
