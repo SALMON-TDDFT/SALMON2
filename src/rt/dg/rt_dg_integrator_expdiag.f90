@@ -19,6 +19,7 @@
       reconstruct_psi_from_C_can, build_wpw_reduced_c_can_reference, &
       build_wpw_reduced_raw_back_hybrid_matrix, diagnose_wpw_mixed_neighbor_hamiltonian, &
       ensure_wpw_local_pp_blocks
+    use rt_dg_wpw_linalg, only: build_hermitian_inverse, zhegv_with_query
     use eigen_subdiag_sub, only: eigen_zheev
     use communication, only: comm_summation, comm_get_max, comm_bcast
     use misc_routines, only: get_wtime
@@ -3143,8 +3144,9 @@
       end if
       if (field_off .and. candidate_available) then
         bad_coef = .false.
+        call project_neighbor_env_current_to_reduced(E_use, state_s, state_e, .false., bad, kernel_ready)
         call dryrun_wpw_reduced_expdiag(state_s, state_e, dt, bad_coef, itt, E_use, Ac_ham, 'neighbor_env_fieldoff')
-        call build_neighbor_env_fieldoff_storage_from_reduced(state_s, state_e, bad, kernel_ready)
+        call build_neighbor_env_owner_storage_from_reduced(state_s, state_e, bad, kernel_ready)
         if (kernel_ready .and. .not. bad .and. .not. bad_coef) then
           call writeback_fragment_local_storage_fieldoff(state_s, state_e, writeback_bad)
           bad = bad .or. writeback_bad
@@ -3157,9 +3159,23 @@
         else
           block_reason = 'neighbor_env_fieldoff_storage_failed'
         end if
-      else if (.not. field_off) then
-        bad = .true.
-        stop "DG mixed-Z neighbor_env_expdiag: field-on propagation kernel is not implemented"
+      else if (.not. field_off .and. candidate_available) then
+        bad_coef = .false.
+        call project_neighbor_env_current_to_reduced(E_use, state_s, state_e, .true., bad, kernel_ready)
+        call dryrun_wpw_reduced_expdiag(state_s, state_e, dt, bad_coef, itt, E_use, Ac_ham, 'neighbor_env_fieldon')
+        call build_neighbor_env_owner_storage_from_reduced(state_s, state_e, bad, kernel_ready)
+        if (kernel_ready .and. .not. bad .and. .not. bad_coef) then
+          call writeback_fragment_local_storage_fieldoff(state_s, state_e, writeback_bad)
+          bad = bad .or. writeback_bad
+          if (.not. writeback_bad) then
+            replacement_applied = .true.
+            block_reason = 'none'
+          else
+            block_reason = 'neighbor_env_writeback_failed'
+          end if
+        else
+          block_reason = 'neighbor_env_fieldon_storage_failed'
+        end if
       else
         bad = .true.
         block_reason = 'neighbor_env_layout_not_ready'
@@ -3222,7 +3238,214 @@
       end do
     end subroutine diagnose_neighbor_env_raw_matrices
 
-    subroutine build_neighbor_env_fieldoff_storage_from_reduced(state_s, state_e, bad, kernel_ready)
+    subroutine project_neighbor_env_current_to_reduced(E_use, state_s, state_e, apply_field, bad, kernel_ready)
+      real(8), intent(in) :: E_use(3)
+      integer, intent(in) :: state_s, state_e
+      logical, intent(in) :: apply_field
+      logical, intent(inout) :: bad
+      logical, intent(out) :: kernel_ready
+      integer :: nstate_blk, nmix, nw, np, n_pw, nspin_use
+      integer :: i_local, ifrag, nred, nraw, nself, n_w, n_pfrag
+      integer :: axis, side, jfrag, iw, ipw, pidx, row0, gid, gp
+      integer :: ispin_use, info_field, ired
+      integer :: pfrag_ids(7)
+      integer, allocatable :: raw_gid(:)
+      real(8) :: phase_c, phase_s, r_herm
+      complex(8), allocatable :: cmix(:,:), c_raw(:,:), c_red(:,:)
+      complex(8), allocatable :: field_raw(:,:), field_red(:,:), s_work(:,:), tmp(:,:)
+      real(8), allocatable :: eval(:)
+      logical :: found
+
+      kernel_ready = .false.
+      nstate_blk = max(0, state_e - state_s + 1)
+      nmix = dg_frag%mixed_wannier_bpw_nmix
+      nw = dg_frag%mixed_wannier_bpw_nw
+      np = dg_frag%mixed_wannier_bpw_np
+      n_pw = max(0, dg_frag%n_plane_waves)
+      nspin_use = dg_frag%nspin
+      if (nstate_blk <= 0 .or. nmix <= 0 .or. nw <= 0 .or. n_pw <= 0) then
+        bad = .true.
+        return
+      end if
+      if (.not. dg_frag%wpw_reduced_ready .or. &
+          .not. allocated(dg_frag%wpw_reduced_dim) .or. &
+          .not. allocated(dg_frag%wpw_reduced_nself) .or. &
+          .not. allocated(dg_frag%wpw_reduced_nraw) .or. &
+          .not. allocated(dg_frag%wpw_reduced_S) .or. &
+          .not. allocated(dg_frag%wpw_reduced_Sraw_build) .or. &
+          .not. allocated(dg_frag%wpw_reduced_transform) .or. &
+          .not. allocated(dg_frag%global_wannier_local_nkeep) .or. &
+          .not. allocated(dg_frag%global_wannier_local_ids) .or. &
+          .not. allocated(dg_frag%mixed_wannier_bpw_pcoef)) then
+        bad = .true.
+        return
+      end if
+      if (apply_field .and. .not. allocated(dg_frag%mixed_wannier_bpw_z)) then
+        bad = .true.
+        return
+      end if
+
+      call ensure_wpw_reduced_coefficient_storage(state_s, state_e)
+      allocate(cmix(nmix,nstate_blk))
+      do ispin_use = 1, nspin_use
+        if (ispin_use > size(dg_frag%wpw_reduced_S, 3)) cycle
+        if (apply_field .and. ispin_use > size(dg_frag%mixed_wannier_bpw_z, 4)) cycle
+        call gather_global_mixed_coefficients(ispin_use, state_s, state_e, cmix)
+        do i_local = 1, size(dg_frag%wpw_reduced_dim)
+          ifrag = dg_frag%ifrag_start + i_local - 1
+          nred = dg_frag%wpw_reduced_dim(i_local)
+          nraw = dg_frag%wpw_reduced_nraw(i_local)
+          nself = dg_frag%wpw_reduced_nself(i_local)
+          n_w = dg_frag%global_wannier_local_nkeep(i_local)
+          if (nred <= 0 .or. nraw <= 0 .or. nself <= 0 .or. n_w <= 0) cycle
+          if (nred > size(dg_frag%wpw_reduced_S,1) .or. nraw > size(dg_frag%wpw_reduced_Sraw_build,1)) cycle
+          n_pfrag = 1
+          pfrag_ids(:) = 0
+          pfrag_ids(1) = ifrag
+          do axis = 1, 3
+            do side = -1, 1, 2
+              jfrag = wpw_face_neighbor_fragment(dg_frag, ifrag, axis, side)
+              if (jfrag <= 0 .or. jfrag == ifrag) cycle
+              found = any(pfrag_ids(1:n_pfrag) == jfrag)
+              if (.not. found .and. n_pfrag < size(pfrag_ids)) then
+                n_pfrag = n_pfrag + 1
+                pfrag_ids(n_pfrag) = jfrag
+              end if
+            end do
+          end do
+          if (nraw /= n_w + n_pfrag * n_pw) cycle
+
+          allocate(c_raw(nraw,nstate_blk), c_red(nred,nstate_blk), raw_gid(nraw))
+          c_raw(:, :) = (0.0d0, 0.0d0)
+          raw_gid(:) = 0
+          do iw = 1, n_w
+            gid = dg_frag%global_wannier_local_ids(iw, i_local)
+            if (gid >= 1 .and. gid <= nw) then
+              raw_gid(iw) = gid
+              c_raw(iw,1:nstate_blk) = cmix(gid,1:nstate_blk)
+            end if
+          end do
+          do pidx = 1, n_pfrag
+            row0 = n_w + (pidx - 1) * n_pw
+            do ipw = 1, n_pw
+              gp = (pfrag_ids(pidx) - 1) * n_pw + ipw
+              if (gp >= 1 .and. gp <= np) then
+                raw_gid(row0+ipw) = nw + gp
+                c_raw(row0+ipw,1:nstate_blk) = cmix(nw+gp,1:nstate_blk)
+              end if
+            end do
+          end do
+
+          if (apply_field) then
+            allocate(field_raw(nraw,nraw), field_red(nred,nred), s_work(nred,nred), &
+                     tmp(nred,nstate_blk), eval(nred))
+            field_raw(:, :) = (0.0d0, 0.0d0)
+            do iw = 1, nraw
+              do ipw = 1, nraw
+                if (raw_gid(iw) <= 0 .or. raw_gid(ipw) <= 0) cycle
+                field_raw(iw,ipw) = -E_use(1) * dg_frag%mixed_wannier_bpw_z(1,raw_gid(iw),raw_gid(ipw),ispin_use) &
+                                   -E_use(2) * dg_frag%mixed_wannier_bpw_z(2,raw_gid(iw),raw_gid(ipw),ispin_use) &
+                                   -E_use(3) * dg_frag%mixed_wannier_bpw_z(3,raw_gid(iw),raw_gid(ipw),ispin_use)
+              end do
+            end do
+            r_herm = 0.0d0
+            do iw = 1, nraw
+              do ipw = 1, nraw
+                r_herm = max(r_herm, abs(field_raw(iw,ipw) - conjg(field_raw(ipw,iw))))
+              end do
+            end do
+            field_red(:, :) = matmul(conjg(transpose(dg_frag%wpw_reduced_transform(1:nraw,1:nred,i_local))), &
+              matmul(field_raw(:, :), dg_frag%wpw_reduced_transform(1:nraw,1:nred,i_local)))
+            s_work(:, :) = dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local)
+            call zhegv_with_query(field_red, s_work, nred, eval, info_field)
+            if (info_field /= 0) then
+              bad = .true.
+              deallocate(field_raw, field_red, s_work, tmp, eval)
+              deallocate(c_raw, c_red, raw_gid)
+              cycle
+            end if
+            tmp(:, :) = matmul(conjg(transpose(field_red(:, :))), &
+              matmul(dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local), &
+              project_raw_coeff_to_reduced(dg_frag%wpw_reduced_Sraw_build(1:nraw,1:nraw,i_local), &
+              dg_frag%wpw_reduced_transform(1:nraw,1:nred,i_local), &
+              dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local), c_raw, nraw, nred, nstate_blk)))
+            do ired = 1, nred
+              phase_c = cos(eval(ired) * dt)
+              phase_s = sin(eval(ired) * dt)
+              tmp(ired,1:nstate_blk) = cmplx(phase_c, -phase_s, kind=8) * tmp(ired,1:nstate_blk)
+            end do
+            c_red(:, :) = matmul(field_red(:, :), tmp(:, :))
+            if (dg_frag%id == 0 .and. .not. dg_frag%mixed_z_perf_count_enabled) then
+              write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV-R]', &
+                ' owner_frag=', ifrag, ' nred=', nred, ' nraw=', nraw, &
+                ' Rfield_herm_max=', r_herm, ' field_abs_sum=', sum(abs(E_use(1:3)))
+            end if
+            deallocate(field_raw, field_red, s_work, tmp, eval)
+          else
+            c_red(:, :) = project_raw_coeff_to_reduced(dg_frag%wpw_reduced_Sraw_build(1:nraw,1:nraw,i_local), &
+              dg_frag%wpw_reduced_transform(1:nraw,1:nred,i_local), &
+              dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local), c_raw, nraw, nred, nstate_blk)
+          end if
+
+          dg_frag%coef_wpw_self(1:nself,state_s:state_e,ispin_use,i_local) = c_red(1:nself,1:nstate_blk)
+          if (nred > nself) dg_frag%coef_wpw_neighbor_reduced(1:nred-nself,state_s:state_e,ispin_use,i_local) = &
+            c_red(nself+1:nred,1:nstate_blk)
+          deallocate(c_raw, c_red, raw_gid)
+        end do
+      end do
+      deallocate(cmix)
+      dg_frag%wpw_reduced_coef_initialized = .true.
+      kernel_ready = .true.
+    end subroutine project_neighbor_env_current_to_reduced
+
+    function project_raw_coeff_to_reduced(Sraw, Tred, Sred, craw, nraw, nred, nstate) result(cred)
+      integer, intent(in) :: nraw, nred, nstate
+      complex(8), intent(in) :: Sraw(nraw,nraw), Tred(nraw,nred), Sred(nred,nred), craw(nraw,nstate)
+      complex(8) :: cred(nred,nstate)
+      complex(8), allocatable :: Sinv(:,:), rhs(:,:)
+      real(8) :: smin, smax
+      integer :: info
+
+      allocate(Sinv(nred,nred), rhs(nred,nstate))
+      call build_hermitian_inverse(Sred, nred, Sinv, info, smin, smax)
+      if (info /= 0) then
+        cred(:, :) = (0.0d0, 0.0d0)
+      else
+        rhs(:, :) = matmul(conjg(transpose(Tred)), matmul(Sraw, craw))
+        cred(:, :) = matmul(Sinv, rhs)
+      end if
+      deallocate(Sinv, rhs)
+    end function project_raw_coeff_to_reduced
+
+    subroutine ensure_wpw_reduced_coefficient_storage(state_s, state_e)
+      integer, intent(in) :: state_s, state_e
+      integer :: nstate_store, nfrag_local
+
+      nstate_store = max(size(dg_frag%coef, 2), state_e)
+      nfrag_local = size(dg_frag%wpw_reduced_dim)
+      if (allocated(dg_frag%coef_wpw_self)) then
+        if (size(dg_frag%coef_wpw_self,1) /= dg_frag%wpw_reduced_max_dim .or. &
+            size(dg_frag%coef_wpw_self,2) < nstate_store .or. &
+            size(dg_frag%coef_wpw_self,3) /= dg_frag%nspin .or. &
+            size(dg_frag%coef_wpw_self,4) /= nfrag_local) deallocate(dg_frag%coef_wpw_self)
+      end if
+      if (.not. allocated(dg_frag%coef_wpw_self)) then
+        allocate(dg_frag%coef_wpw_self(dg_frag%wpw_reduced_max_dim, nstate_store, dg_frag%nspin, nfrag_local))
+        dg_frag%coef_wpw_self(:, :, :, :) = (0.0d0, 0.0d0)
+      end if
+      if (allocated(dg_frag%coef_wpw_neighbor_reduced)) then
+        if (size(dg_frag%coef_wpw_neighbor_reduced,1) /= dg_frag%wpw_reduced_max_dim .or. &
+            size(dg_frag%coef_wpw_neighbor_reduced,2) < nstate_store .or. &
+            size(dg_frag%coef_wpw_neighbor_reduced,3) /= dg_frag%nspin .or. &
+            size(dg_frag%coef_wpw_neighbor_reduced,4) /= nfrag_local) deallocate(dg_frag%coef_wpw_neighbor_reduced)
+      end if
+      if (.not. allocated(dg_frag%coef_wpw_neighbor_reduced)) then
+        allocate(dg_frag%coef_wpw_neighbor_reduced(dg_frag%wpw_reduced_max_dim, nstate_store, dg_frag%nspin, nfrag_local))
+        dg_frag%coef_wpw_neighbor_reduced(:, :, :, :) = (0.0d0, 0.0d0)
+      end if
+    end subroutine ensure_wpw_reduced_coefficient_storage
+
+    subroutine build_neighbor_env_owner_storage_from_reduced(state_s, state_e, bad, kernel_ready)
       integer, intent(in) :: state_s, state_e
       logical, intent(inout) :: bad
       logical, intent(out) :: kernel_ready
@@ -3346,12 +3569,12 @@
       dg_frag%mixed_z_frag_local_storage_ready = w_slot_count > 0
       kernel_ready = dg_frag%mixed_z_frag_local_storage_ready
       if (dg_frag%id == 0 .and. .not. dg_frag%mixed_z_perf_count_enabled) then
-        write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV-FIELDOFF]', &
+        write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV-STORAGE]', &
           ' W_owner_storage_slots=', w_slot_count, &
           ' P_self_storage_slots=', pself_slot_count, &
           ' replacement_storage_ready=', kernel_ready
       end if
-    end subroutine build_neighbor_env_fieldoff_storage_from_reduced
+    end subroutine build_neighbor_env_owner_storage_from_reduced
 
     subroutine apply_fragment_local_mixed_split_exp_stub(E_use, state_s, state_e, &
                                                         candidate_available, replacement_applied, bad, block_reason)
