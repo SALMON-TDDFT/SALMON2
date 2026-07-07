@@ -2344,6 +2344,7 @@
       real(8) :: cphase_red, sphase_red
       real(8) :: trace_E(3), trace_Ac(3)
       logical :: coef_reallocated, any_propagated, bad_coef, did_init_project, trace_expdiag, trace_step_enabled
+      logical :: use_cached_eig
       character(len=64) :: trace_stage
       complex(8), allocatable :: H_work_red(:,:), S_work_red(:,:), evec_red(:,:)
       complex(8), allocatable :: cvec(:), tmp_vec(:), avec(:), next_vec(:), work_red(:)
@@ -2425,8 +2426,11 @@
         allocate(dg_frag%coef_wpw_neighbor_reduced(dg_frag%wpw_reduced_max_dim, nstate_store, dg_frag%nspin, size(dg_frag%wpw_reduced_dim)))
         coef_reallocated = .true.
       end if
-      dg_frag%wpw_reduced_eval(:, :, :) = 0.0d0
-      dg_frag%wpw_reduced_evec(:, :, :, :) = (0.0d0, 0.0d0)
+      use_cached_eig = wpw_reduced_eig_cache_valid
+      if (.not. use_cached_eig) then
+        dg_frag%wpw_reduced_eval(:, :, :) = 0.0d0
+        dg_frag%wpw_reduced_evec(:, :, :, :) = (0.0d0, 0.0d0)
+      end if
       if (coef_reallocated .or. .not. dg_frag%wpw_reduced_coef_initialized) then
         dg_frag%coef_wpw_self(:, :, :, :) = (0.0d0, 0.0d0)
         dg_frag%coef_wpw_neighbor_reduced(:, :, :, :) = (0.0d0, 0.0d0)
@@ -2449,51 +2453,62 @@
         allocate(eval_red(nred), seval_red(nred), rwork_red(max(1, 3*nred - 2)), work_red(1))
 
         do ispin_use = 1, dg_frag%nspin
-          H_work_red(:, :) = dg_frag%wpw_reduced_H(1:nred, 1:nred, ispin_use, iloc_frag)
-          S_work_red(:, :) = dg_frag%wpw_reduced_S(1:nred, 1:nred, ispin_use, iloc_frag)
-          h_herm_red = 0.0d0
-          do jred = 1, nred
-            do ired = 1, nred
-              h_herm_red = max(h_herm_red, abs(H_work_red(ired,jred) - conjg(H_work_red(jred,ired))))
-            end do
-          end do
-
-          evec_red(:, :) = S_work_red(:, :)
-          lwork_red = -1
-          call ZHEEV('N', 'U', nred, evec_red, nred, seval_red, work_red, lwork_red, rwork_red, info_red)
-          lwork_red = max(1, int(real(work_red(1), kind=8)))
-          deallocate(work_red)
-          allocate(work_red(lwork_red))
-          evec_red(:, :) = S_work_red(:, :)
-          call ZHEEV('N', 'U', nred, evec_red, nred, seval_red, work_red, lwork_red, rwork_red, info_red)
-          if (info_red == 0) then
-            s_min_red = seval_red(1)
-            s_max_red = seval_red(nred)
-          else
-            s_min_red = 0.0d0
-            s_max_red = 0.0d0
-          end if
-          deallocate(work_red)
-          allocate(work_red(1))
-
-          evec_red(:, :) = H_work_red(:, :)
-          S_work_red(:, :) = dg_frag%wpw_reduced_S(1:nred, 1:nred, ispin_use, iloc_frag)
-          lwork_red = -1
-          call ZHEGV(1, 'V', 'U', nred, evec_red, nred, S_work_red, nred, eval_red, work_red, lwork_red, rwork_red, info_red)
-          lwork_red = max(1, int(real(work_red(1), kind=8)))
-          deallocate(work_red)
-          allocate(work_red(lwork_red))
-          evec_red(:, :) = H_work_red(:, :)
-          S_work_red(:, :) = dg_frag%wpw_reduced_S(1:nred, 1:nred, ispin_use, iloc_frag)
-          call ZHEGV(1, 'V', 'U', nred, evec_red, nred, S_work_red, nred, eval_red, work_red, lwork_red, rwork_red, info_red)
-          if (info_red == 0) then
+          if (use_cached_eig) then
+            info_red = 0
+            eval_red(1:nred) = dg_frag%wpw_reduced_eval(1:nred, ispin_use, iloc_frag)
+            evec_red(1:nred,1:nred) = dg_frag%wpw_reduced_evec(1:nred, 1:nred, ispin_use, iloc_frag)
             eig_min = eval_red(1)
             eig_max = eval_red(nred)
-            dg_frag%wpw_reduced_eval(1:nred, ispin_use, iloc_frag) = eval_red(1:nred)
-            dg_frag%wpw_reduced_evec(1:nred, 1:nred, ispin_use, iloc_frag) = evec_red(1:nred, 1:nred)
+            s_min_red = 0.0d0
+            s_max_red = 0.0d0
+            h_herm_red = 0.0d0
           else
-            eig_min = 0.0d0
-            eig_max = 0.0d0
+            H_work_red(:, :) = dg_frag%wpw_reduced_H(1:nred, 1:nred, ispin_use, iloc_frag)
+            S_work_red(:, :) = dg_frag%wpw_reduced_S(1:nred, 1:nred, ispin_use, iloc_frag)
+            h_herm_red = 0.0d0
+            do jred = 1, nred
+              do ired = 1, nred
+                h_herm_red = max(h_herm_red, abs(H_work_red(ired,jred) - conjg(H_work_red(jred,ired))))
+              end do
+            end do
+
+            evec_red(:, :) = S_work_red(:, :)
+            lwork_red = -1
+            call ZHEEV('N', 'U', nred, evec_red, nred, seval_red, work_red, lwork_red, rwork_red, info_red)
+            lwork_red = max(1, int(real(work_red(1), kind=8)))
+            deallocate(work_red)
+            allocate(work_red(lwork_red))
+            evec_red(:, :) = S_work_red(:, :)
+            call ZHEEV('N', 'U', nred, evec_red, nred, seval_red, work_red, lwork_red, rwork_red, info_red)
+            if (info_red == 0) then
+              s_min_red = seval_red(1)
+              s_max_red = seval_red(nred)
+            else
+              s_min_red = 0.0d0
+              s_max_red = 0.0d0
+            end if
+            deallocate(work_red)
+            allocate(work_red(1))
+
+            evec_red(:, :) = H_work_red(:, :)
+            S_work_red(:, :) = dg_frag%wpw_reduced_S(1:nred, 1:nred, ispin_use, iloc_frag)
+            lwork_red = -1
+            call ZHEGV(1, 'V', 'U', nred, evec_red, nred, S_work_red, nred, eval_red, work_red, lwork_red, rwork_red, info_red)
+            lwork_red = max(1, int(real(work_red(1), kind=8)))
+            deallocate(work_red)
+            allocate(work_red(lwork_red))
+            evec_red(:, :) = H_work_red(:, :)
+            S_work_red(:, :) = dg_frag%wpw_reduced_S(1:nred, 1:nred, ispin_use, iloc_frag)
+            call ZHEGV(1, 'V', 'U', nred, evec_red, nred, S_work_red, nred, eval_red, work_red, lwork_red, rwork_red, info_red)
+            if (info_red == 0) then
+              eig_min = eval_red(1)
+              eig_max = eval_red(nred)
+              dg_frag%wpw_reduced_eval(1:nred, ispin_use, iloc_frag) = eval_red(1:nred)
+              dg_frag%wpw_reduced_evec(1:nred, 1:nred, ispin_use, iloc_frag) = evec_red(1:nred, 1:nred)
+            else
+              eig_min = 0.0d0
+              eig_max = 0.0d0
+            end if
           end if
 
           norm_diff_max = 0.0d0
@@ -3071,6 +3086,8 @@
       real(8) :: coeff_norm_w, coeff_norm_p, coeff_max_abs
       complex(8), allocatable :: cmix_diag(:,:)
       logical :: field_off, kernel_ready, writeback_bad, bad_coef, diag_neighbor_env
+      logical :: eig_cache_hit, eig_built, eig_skipped
+      real(8) :: eig_elapsed
 
       nstate_blk = max(0, state_e - state_s + 1)
       field_off = sum(abs(E_use(1:3))) <= 1.0d-30
@@ -3147,6 +3164,7 @@
       if (field_off .and. candidate_available) then
         bad_coef = .false.
         call project_neighbor_env_current_to_reduced(E_use, state_s, state_e, .false., bad, kernel_ready)
+        call ensure_wpw_reduced_eigensystem_only(.true., eig_cache_hit, eig_built, eig_skipped, eig_elapsed)
         call dryrun_wpw_reduced_expdiag(state_s, state_e, dt, bad_coef, itt, E_use, Ac_ham, 'neighbor_env_fieldoff')
         call build_neighbor_env_owner_storage_from_reduced(state_s, state_e, bad, kernel_ready)
         if (kernel_ready .and. .not. bad .and. .not. bad_coef) then
@@ -3164,6 +3182,7 @@
       else if (.not. field_off .and. candidate_available) then
         bad_coef = .false.
         call project_neighbor_env_current_to_reduced(E_use, state_s, state_e, .true., bad, kernel_ready)
+        call ensure_wpw_reduced_eigensystem_only(.true., eig_cache_hit, eig_built, eig_skipped, eig_elapsed)
         call dryrun_wpw_reduced_expdiag(state_s, state_e, dt, bad_coef, itt, E_use, Ac_ham, 'neighbor_env_fieldon')
         call build_neighbor_env_owner_storage_from_reduced(state_s, state_e, bad, kernel_ready)
         if (kernel_ready .and. .not. bad .and. .not. bad_coef) then
@@ -3249,7 +3268,7 @@
       integer :: nstate_blk, nmix, nw, np, n_pw, nspin_use
       integer :: i_local, ifrag, nred, nraw, nself, n_w, n_pfrag
       integer :: axis, side, jfrag, iw, ipw, pidx, row0, gid, gp
-      integer :: ispin_use, info_field, ired
+      integer :: ispin_use, info_field, ired, field_axis
       integer :: pfrag_ids(7)
       integer, allocatable :: raw_gid(:)
       real(8) :: phase_c, phase_s, r_herm
@@ -3341,42 +3360,55 @@
           if (apply_field) then
             allocate(field_raw(nraw,nraw), field_red(nred,nred), s_work(nred,nred), &
                      tmp(nred,nstate_blk), eval(nred))
-            field_raw(:, :) = (0.0d0, 0.0d0)
-            do iw = 1, nraw
-              do ipw = 1, nraw
-                if (raw_gid(iw) <= 0 .or. raw_gid(ipw) <= 0) cycle
-                field_raw(iw,ipw) = -E_use(1) * dg_frag%mixed_wannier_bpw_z(1,raw_gid(iw),raw_gid(ipw),ispin_use) &
-                                   -E_use(2) * dg_frag%mixed_wannier_bpw_z(2,raw_gid(iw),raw_gid(ipw),ispin_use) &
-                                   -E_use(3) * dg_frag%mixed_wannier_bpw_z(3,raw_gid(iw),raw_gid(ipw),ispin_use)
+            c_red(:, :) = project_raw_coeff_to_reduced_cached(i_local, ispin_use, &
+              dg_frag%wpw_reduced_Sraw_build(1:nraw,1:nraw,i_local), &
+              dg_frag%wpw_reduced_transform(1:nraw,1:nred,i_local), &
+              dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local), c_raw, nraw, nred, nstate_blk)
+            field_axis = single_active_field_axis(E_use)
+            if (field_axis > 0) then
+              call apply_neighbor_env_cached_axis_field(c_red, raw_gid, nraw, nred, nstate_blk, &
+                i_local, ispin_use, field_axis, E_use(field_axis), r_herm, info_field)
+              if (info_field /= 0) bad = .true.
+            else
+              field_raw(:, :) = (0.0d0, 0.0d0)
+              do iw = 1, nraw
+                do ipw = 1, nraw
+                  if (raw_gid(iw) <= 0 .or. raw_gid(ipw) <= 0) cycle
+                  field_raw(iw,ipw) = -E_use(1) * dg_frag%mixed_wannier_bpw_z(1,raw_gid(iw),raw_gid(ipw),ispin_use) &
+                                     -E_use(2) * dg_frag%mixed_wannier_bpw_z(2,raw_gid(iw),raw_gid(ipw),ispin_use) &
+                                     -E_use(3) * dg_frag%mixed_wannier_bpw_z(3,raw_gid(iw),raw_gid(ipw),ispin_use)
+                end do
               end do
-            end do
-            r_herm = 0.0d0
-            do iw = 1, nraw
-              do ipw = 1, nraw
-                r_herm = max(r_herm, abs(field_raw(iw,ipw) - conjg(field_raw(ipw,iw))))
+              r_herm = 0.0d0
+              do iw = 1, nraw
+                do ipw = 1, nraw
+                  r_herm = max(r_herm, abs(field_raw(iw,ipw) - conjg(field_raw(ipw,iw))))
+                end do
               end do
-            end do
-            field_red(:, :) = matmul(conjg(transpose(dg_frag%wpw_reduced_transform(1:nraw,1:nred,i_local))), &
-              matmul(field_raw(:, :), dg_frag%wpw_reduced_transform(1:nraw,1:nred,i_local)))
-            s_work(:, :) = dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local)
-            call zhegv_with_query(field_red, s_work, nred, eval, info_field)
+              field_red(:, :) = matmul(conjg(transpose(dg_frag%wpw_reduced_transform(1:nraw,1:nred,i_local))), &
+                matmul(field_raw(:, :), dg_frag%wpw_reduced_transform(1:nraw,1:nred,i_local)))
+              s_work(:, :) = dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local)
+              call zhegv_with_query(field_red, s_work, nred, eval, info_field)
+              if (info_field /= 0) then
+                bad = .true.
+                deallocate(field_raw, field_red, s_work, tmp, eval)
+                deallocate(c_raw, c_red, raw_gid)
+                cycle
+              end if
+              tmp(:, :) = matmul(conjg(transpose(field_red(:, :))), &
+                matmul(dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local), c_red))
+              do ired = 1, nred
+                phase_c = cos(eval(ired) * dt)
+                phase_s = sin(eval(ired) * dt)
+                tmp(ired,1:nstate_blk) = cmplx(phase_c, -phase_s, kind=8) * tmp(ired,1:nstate_blk)
+              end do
+              c_red(:, :) = matmul(field_red(:, :), tmp(:, :))
+            end if
             if (info_field /= 0) then
-              bad = .true.
               deallocate(field_raw, field_red, s_work, tmp, eval)
               deallocate(c_raw, c_red, raw_gid)
               cycle
             end if
-            tmp(:, :) = matmul(conjg(transpose(field_red(:, :))), &
-              matmul(dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local), &
-              project_raw_coeff_to_reduced(dg_frag%wpw_reduced_Sraw_build(1:nraw,1:nraw,i_local), &
-              dg_frag%wpw_reduced_transform(1:nraw,1:nred,i_local), &
-              dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local), c_raw, nraw, nred, nstate_blk)))
-            do ired = 1, nred
-              phase_c = cos(eval(ired) * dt)
-              phase_s = sin(eval(ired) * dt)
-              tmp(ired,1:nstate_blk) = cmplx(phase_c, -phase_s, kind=8) * tmp(ired,1:nstate_blk)
-            end do
-            c_red(:, :) = matmul(field_red(:, :), tmp(:, :))
             if (dg_frag%id == 0 .and. .not. dg_frag%mixed_z_perf_count_enabled) then
               write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV-R]', &
                 ' owner_frag=', ifrag, ' nred=', nred, ' nraw=', nraw, &
@@ -3384,7 +3416,8 @@
             end if
             deallocate(field_raw, field_red, s_work, tmp, eval)
           else
-            c_red(:, :) = project_raw_coeff_to_reduced(dg_frag%wpw_reduced_Sraw_build(1:nraw,1:nraw,i_local), &
+            c_red(:, :) = project_raw_coeff_to_reduced_cached(i_local, ispin_use, &
+              dg_frag%wpw_reduced_Sraw_build(1:nraw,1:nraw,i_local), &
               dg_frag%wpw_reduced_transform(1:nraw,1:nred,i_local), &
               dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local), c_raw, nraw, nred, nstate_blk)
           end if
@@ -3399,6 +3432,154 @@
       dg_frag%wpw_reduced_coef_initialized = .true.
       kernel_ready = .true.
     end subroutine project_neighbor_env_current_to_reduced
+
+    integer function single_active_field_axis(E_use) result(axis)
+      real(8), intent(in) :: E_use(3)
+      real(8) :: tol
+
+      tol = max(1.0d-30, 1.0d-12 * maxval(abs(E_use(1:3))))
+      axis = 0
+      if (abs(E_use(1)) > tol .and. abs(E_use(2)) <= tol .and. abs(E_use(3)) <= tol) axis = 1
+      if (abs(E_use(2)) > tol .and. abs(E_use(1)) <= tol .and. abs(E_use(3)) <= tol) axis = 2
+      if (abs(E_use(3)) > tol .and. abs(E_use(1)) <= tol .and. abs(E_use(2)) <= tol) axis = 3
+    end function single_active_field_axis
+
+    function project_raw_coeff_to_reduced_cached(i_local, ispin_use, Sraw, Tred, Sred, craw, nraw, nred, nstate) &
+      result(cred)
+      integer, intent(in) :: i_local, ispin_use, nraw, nred, nstate
+      complex(8), intent(in) :: Sraw(nraw,nraw), Tred(nraw,nred), Sred(nred,nred), craw(nraw,nstate)
+      complex(8) :: cred(nred,nstate)
+      complex(8), allocatable, save :: Pcache(:,:,:,:)
+      logical, allocatable, save :: Pcache_ready(:,:)
+      complex(8), allocatable :: Sinv(:,:)
+      real(8) :: smin, smax
+      integer :: info, maxred, maxraw, nspin_cache, nfrag_cache
+
+      maxred = size(dg_frag%wpw_reduced_S, 1)
+      maxraw = size(dg_frag%wpw_reduced_Sraw_build, 1)
+      nspin_cache = size(dg_frag%wpw_reduced_S, 3)
+      nfrag_cache = size(dg_frag%wpw_reduced_dim)
+      if (allocated(Pcache)) then
+        if (size(Pcache,1) /= maxred .or. size(Pcache,2) /= maxraw .or. &
+            size(Pcache,3) /= nspin_cache .or. size(Pcache,4) /= nfrag_cache) then
+          deallocate(Pcache, Pcache_ready)
+        end if
+      end if
+      if (.not. allocated(Pcache)) then
+        allocate(Pcache(maxred,maxraw,nspin_cache,nfrag_cache))
+        allocate(Pcache_ready(nspin_cache,nfrag_cache))
+        Pcache(:, :, :, :) = (0.0d0, 0.0d0)
+        Pcache_ready(:, :) = .false.
+      end if
+      if (i_local < 1 .or. i_local > nfrag_cache .or. ispin_use < 1 .or. ispin_use > nspin_cache) then
+        cred(:, :) = (0.0d0, 0.0d0)
+        return
+      end if
+      if (.not. Pcache_ready(ispin_use,i_local)) then
+        allocate(Sinv(nred,nred))
+        call build_hermitian_inverse(Sred, nred, Sinv, info, smin, smax)
+        if (info /= 0) then
+          cred(:, :) = (0.0d0, 0.0d0)
+          deallocate(Sinv)
+          return
+        end if
+        Pcache(1:nred,1:nraw,ispin_use,i_local) = &
+          matmul(Sinv, matmul(conjg(transpose(Tred)), Sraw))
+        Pcache_ready(ispin_use,i_local) = .true.
+        deallocate(Sinv)
+      end if
+      cred(:, :) = matmul(Pcache(1:nred,1:nraw,ispin_use,i_local), craw)
+    end function project_raw_coeff_to_reduced_cached
+
+    subroutine apply_neighbor_env_cached_axis_field(c_red, raw_gid, nraw, nred, nstate, &
+                                                    i_local, ispin_use, axis, E_axis, r_herm, info)
+      integer, intent(in) :: nraw, nred, nstate, i_local, ispin_use, axis
+      integer, intent(in) :: raw_gid(nraw)
+      real(8), intent(in) :: E_axis
+      complex(8), intent(inout) :: c_red(nred,nstate)
+      real(8), intent(out) :: r_herm
+      integer, intent(out) :: info
+      complex(8), allocatable, save :: evec_cache(:,:,:,:,:)
+      real(8), allocatable, save :: eval_cache(:,:,:,:)
+      real(8), allocatable, save :: herm_cache(:,:,:)
+      logical, allocatable, save :: ready(:,:,:)
+      complex(8), allocatable :: Rraw(:,:), Rred(:,:), Swork(:,:), tmp(:,:)
+      real(8), allocatable :: eval(:)
+      real(8) :: phase_c, phase_s, scale
+      integer :: maxred, nspin_cache, nfrag_cache, iw, ipw, ired
+
+      info = 0
+      r_herm = 0.0d0
+      if (axis < 1 .or. axis > 3) then
+        info = -1
+        return
+      end if
+      maxred = size(dg_frag%wpw_reduced_S, 1)
+      nspin_cache = size(dg_frag%wpw_reduced_S, 3)
+      nfrag_cache = size(dg_frag%wpw_reduced_dim)
+      if (allocated(evec_cache)) then
+        if (size(evec_cache,1) /= maxred .or. size(evec_cache,2) /= maxred .or. &
+            size(evec_cache,3) /= 3 .or. size(evec_cache,4) /= nspin_cache .or. &
+            size(evec_cache,5) /= nfrag_cache) then
+          deallocate(evec_cache, eval_cache, herm_cache, ready)
+        end if
+      end if
+      if (.not. allocated(evec_cache)) then
+        allocate(evec_cache(maxred,maxred,3,nspin_cache,nfrag_cache))
+        allocate(eval_cache(maxred,3,nspin_cache,nfrag_cache))
+        allocate(herm_cache(3,nspin_cache,nfrag_cache))
+        allocate(ready(3,nspin_cache,nfrag_cache))
+        evec_cache(:, :, :, :, :) = (0.0d0, 0.0d0)
+        eval_cache(:, :, :, :) = 0.0d0
+        herm_cache(:, :, :) = 0.0d0
+        ready(:, :, :) = .false.
+      end if
+      if (i_local < 1 .or. i_local > nfrag_cache .or. ispin_use < 1 .or. ispin_use > nspin_cache) then
+        info = -2
+        return
+      end if
+      if (.not. ready(axis,ispin_use,i_local)) then
+        allocate(Rraw(nraw,nraw), Rred(nred,nred), Swork(nred,nred), eval(nred))
+        Rraw(:, :) = (0.0d0, 0.0d0)
+        do iw = 1, nraw
+          do ipw = 1, nraw
+            if (raw_gid(iw) <= 0 .or. raw_gid(ipw) <= 0) cycle
+            Rraw(iw,ipw) = dg_frag%mixed_wannier_bpw_z(axis,raw_gid(iw),raw_gid(ipw),ispin_use)
+          end do
+        end do
+        r_herm = 0.0d0
+        do iw = 1, nraw
+          do ipw = 1, nraw
+            r_herm = max(r_herm, abs(Rraw(iw,ipw) - conjg(Rraw(ipw,iw))))
+          end do
+        end do
+        Rred(:, :) = matmul(conjg(transpose(dg_frag%wpw_reduced_transform(1:nraw,1:nred,i_local))), &
+          matmul(Rraw(:, :), dg_frag%wpw_reduced_transform(1:nraw,1:nred,i_local)))
+        Swork(:, :) = dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local)
+        call zhegv_with_query(Rred, Swork, nred, eval, info)
+        if (info /= 0) then
+          deallocate(Rraw, Rred, Swork, eval)
+          return
+        end if
+        evec_cache(1:nred,1:nred,axis,ispin_use,i_local) = Rred(:, :)
+        eval_cache(1:nred,axis,ispin_use,i_local) = eval(:)
+        herm_cache(axis,ispin_use,i_local) = r_herm
+        ready(axis,ispin_use,i_local) = .true.
+        deallocate(Rraw, Rred, Swork, eval)
+      end if
+      r_herm = herm_cache(axis,ispin_use,i_local)
+      allocate(tmp(nred,nstate))
+      tmp(:, :) = matmul(conjg(transpose(evec_cache(1:nred,1:nred,axis,ispin_use,i_local))), &
+        matmul(dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local), c_red))
+      scale = -E_axis
+      do ired = 1, nred
+        phase_c = cos(scale * eval_cache(ired,axis,ispin_use,i_local) * dt)
+        phase_s = sin(scale * eval_cache(ired,axis,ispin_use,i_local) * dt)
+        tmp(ired,1:nstate) = cmplx(phase_c, -phase_s, kind=8) * tmp(ired,1:nstate)
+      end do
+      c_red(:, :) = matmul(evec_cache(1:nred,1:nred,axis,ispin_use,i_local), tmp(:, :))
+      deallocate(tmp)
+    end subroutine apply_neighbor_env_cached_axis_field
 
     function project_raw_coeff_to_reduced(Sraw, Tred, Sred, craw, nraw, nred, nstate) result(cred)
       integer, intent(in) :: nraw, nred, nstate
