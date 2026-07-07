@@ -505,6 +505,7 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_dc_fragment_optimization
   character(1)   :: yn_dc_lcfo_wannier
   character(1)   :: yn_dc_lcfo_local_wannier
+  character(1)   :: yn_dc_lcfo_wannier_symmetry_gauge
   character(1)   :: yn_dc_lcfo_wannier_pw
   character(1)   :: yn_dc_lcfo_wannier_cluster
   character(256) :: wannier90_command

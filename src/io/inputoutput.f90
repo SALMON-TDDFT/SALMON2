@@ -656,6 +656,7 @@ contains
       & yn_dc_fragment_optimization, &
       & yn_dc_lcfo_wannier, &
       & yn_dc_lcfo_local_wannier, &
+      & yn_dc_lcfo_wannier_symmetry_gauge, &
       & yn_dc_lcfo_wannier_pw, &
       & yn_dc_lcfo_wannier_cluster, &
       & wannier90_command, &
@@ -1168,6 +1169,7 @@ contains
     yn_dc_fragment_optimization = 'n'
     yn_dc_lcfo_wannier = 'n'
     yn_dc_lcfo_local_wannier = 'n'
+    yn_dc_lcfo_wannier_symmetry_gauge = 'n'
     yn_dc_lcfo_wannier_pw = 'n'
     yn_dc_lcfo_wannier_cluster = 'n'
     wannier90_command = ''
@@ -1890,6 +1892,7 @@ contains
     call comm_bcast(yn_dc_fragment_optimization, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_wannier, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_local_wannier, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo_wannier_symmetry_gauge, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_wannier_pw, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_wannier_cluster, nproc_group_global)
     call comm_bcast(wannier90_command, nproc_group_global)
@@ -2951,6 +2954,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_fragment_optimization",yn_dc_fragment_optimization
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier",yn_dc_lcfo_wannier
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_local_wannier",yn_dc_lcfo_local_wannier
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier_symmetry_gauge",yn_dc_lcfo_wannier_symmetry_gauge
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier_pw",yn_dc_lcfo_wannier_pw
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier_cluster",yn_dc_lcfo_wannier_cluster
       write(fh_variables_log, '("#",4X,A,"=",A)') "wannier90_command",trim(wannier90_command)
@@ -3082,6 +3086,7 @@ contains
     call yn_argument_check(yn_dc_fragment_optimization)
     call yn_argument_check(yn_dc_lcfo_wannier)
     call yn_argument_check(yn_dc_lcfo_local_wannier)
+    call yn_argument_check(yn_dc_lcfo_wannier_symmetry_gauge)
     call yn_argument_check(yn_dc_lcfo_wannier_pw)
     call yn_argument_check(yn_dc_lcfo_wannier_cluster)
     call yn_argument_check(yn_dg_length_gauge)
