@@ -580,6 +580,8 @@ contains
     if (allocated(dg_frag%full_h_seed_eval)) deallocate(dg_frag%full_h_seed_eval)
     if (allocated(dg_frag%full_h_seed_xi)) deallocate(dg_frag%full_h_seed_xi)
     if (allocated(dg_frag%buffer_wannier_center)) deallocate(dg_frag%buffer_wannier_center)
+    if (allocated(dg_frag%buffer_wannier_position_has_relative_center)) &
+      deallocate(dg_frag%buffer_wannier_position_has_relative_center)
     dg_frag%full_h_seed_nstate = 0
     dg_frag%has_full_h_seed_eigen = .false.
     dg_frag%has_full_h_seed_xi = .false.

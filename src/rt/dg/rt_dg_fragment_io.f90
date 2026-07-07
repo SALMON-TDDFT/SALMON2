@@ -1165,6 +1165,8 @@ contains
     if (allocated(dg_frag%buffer_wannier_h_flux)) deallocate(dg_frag%buffer_wannier_h_flux)
     if (allocated(dg_frag%buffer_wannier_v)) deallocate(dg_frag%buffer_wannier_v)
     if (allocated(dg_frag%buffer_wannier_center)) deallocate(dg_frag%buffer_wannier_center)
+    if (allocated(dg_frag%buffer_wannier_position_has_relative_center)) &
+      deallocate(dg_frag%buffer_wannier_position_has_relative_center)
     if (allocated(dg_frag%buffer_wannier_frag_center)) deallocate(dg_frag%buffer_wannier_frag_center)
     if (allocated(dg_frag%buffer_wannier_xi_flux_blocks)) then
       do irow = 1, size(dg_frag%buffer_wannier_xi_flux_blocks)
@@ -1233,6 +1235,7 @@ contains
     allocate(dg_frag%buffer_wannier_h_flux(nkeep_max, nkeep_max, ifrag_count))
     allocate(dg_frag%buffer_wannier_v(3, nkeep_max, nkeep_max, ifrag_count))
     allocate(dg_frag%buffer_wannier_center(3, nkeep_max, ifrag_count))
+    allocate(dg_frag%buffer_wannier_position_has_relative_center(ifrag_count))
     allocate(dg_frag%buffer_wannier_frag_center(3, ifrag_count))
     dg_frag%buffer_wannier_spread = 0.0d0
     dg_frag%buffer_wannier_coef = 0.0d0
@@ -1240,6 +1243,7 @@ contains
     dg_frag%buffer_wannier_h_flux = 0.0d0
     dg_frag%buffer_wannier_v = 0.0d0
     dg_frag%buffer_wannier_center = 0.0d0
+    dg_frag%buffer_wannier_position_has_relative_center = .false.
     dg_frag%buffer_wannier_frag_center = 0.0d0
     h_diag_abs_local = 0.0d0
     h_offdiag_abs_local = 0.0d0
@@ -1283,6 +1287,7 @@ contains
       dg_frag%buffer_wannier_tail(1:nkeep_file,i_local) = tail_est(1:nkeep_file)
       dg_frag%buffer_wannier_h_flux(1:nkeep_file,1:nkeep_file,i_local) = h_wann(1:nkeep_file,1:nkeep_file)
       dg_frag%buffer_wannier_center(1:3,1:nkeep_file,i_local) = wcenter(1:3,1:nkeep_file)
+      dg_frag%buffer_wannier_position_has_relative_center(i_local) = use_direct_r_wann
       do axis_center = 1, 3
         if (allocated(dg_frag%ixyz_frag) .and. ifrag >= 1 .and. ifrag <= size(dg_frag%ixyz_frag, 2)) then
           idx_lo = dg_frag%ixyz_frag(axis_center,ifrag)
