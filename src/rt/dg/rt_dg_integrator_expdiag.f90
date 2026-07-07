@@ -3114,6 +3114,7 @@
           ' coeff_norm_w=', coeff_norm_w, &
           ' coeff_norm_p=', coeff_norm_p, &
           ' coeff_max_abs=', coeff_max_abs
+        call diagnose_neighbor_env_raw_matrices()
         do i_local = 1, size(dg_frag%wpw_reduced_dim)
           ifrag = dg_frag%ifrag_start + i_local - 1
           n_neighbor = 0
@@ -3140,6 +3141,62 @@
       end if
       stop "DG mixed-Z neighbor_env_expdiag: propagation kernel is not implemented"
     end subroutine apply_neighbor_env_expdiag_stub
+
+    subroutine diagnose_neighbor_env_raw_matrices()
+      integer :: i_local, ifrag, nraw, nself, i, j
+      real(8) :: s_herm, h_herm, s_diag_min, s_diag_max, s_trace
+      complex(8) :: sd, diff
+      logical :: raw_available
+
+      raw_available = allocated(dg_frag%wpw_reduced_Sraw_build) .and. &
+        allocated(dg_frag%wpw_reduced_Hraw_build) .and. &
+        allocated(dg_frag%wpw_reduced_nraw) .and. allocated(dg_frag%wpw_reduced_nself)
+      if (.not. raw_available) then
+        write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV-MATRIX]', &
+          ' raw_available=', raw_available, &
+          ' block_reason=', trim(dg_frag%mixed_z_local_prop_payload_block_reason)
+        return
+      end if
+
+      do i_local = 1, size(dg_frag%wpw_reduced_nraw)
+        ifrag = dg_frag%ifrag_start + i_local - 1
+        nraw = dg_frag%wpw_reduced_nraw(i_local)
+        nself = 0
+        if (i_local <= size(dg_frag%wpw_reduced_nself)) nself = dg_frag%wpw_reduced_nself(i_local)
+        if (nraw <= 0) cycle
+        if (nraw > size(dg_frag%wpw_reduced_Sraw_build,1) .or. &
+            nraw > size(dg_frag%wpw_reduced_Hraw_build,1)) cycle
+        s_herm = 0.0d0
+        h_herm = 0.0d0
+        s_diag_min = huge(1.0d0)
+        s_diag_max = -huge(1.0d0)
+        s_trace = 0.0d0
+        do i = 1, nraw
+          sd = dg_frag%wpw_reduced_Sraw_build(i,i,i_local)
+          s_diag_min = min(s_diag_min, real(sd,8))
+          s_diag_max = max(s_diag_max, real(sd,8))
+          s_trace = s_trace + real(sd,8)
+          do j = 1, nraw
+            diff = dg_frag%wpw_reduced_Sraw_build(i,j,i_local) - &
+              conjg(dg_frag%wpw_reduced_Sraw_build(j,i,i_local))
+            s_herm = max(s_herm, abs(diff))
+            diff = dg_frag%wpw_reduced_Hraw_build(i,j,i_local) - &
+              conjg(dg_frag%wpw_reduced_Hraw_build(j,i,i_local))
+            h_herm = max(h_herm, abs(diff))
+          end do
+        end do
+        write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV-MATRIX]', &
+          ' owner_frag=', ifrag, &
+          ' raw_available=', raw_available, &
+          ' nself=', nself, &
+          ' nraw=', nraw, &
+          ' S_herm_max=', s_herm, &
+          ' H_herm_max=', h_herm, &
+          ' S_diag_min=', s_diag_min, &
+          ' S_diag_max=', s_diag_max, &
+          ' S_trace=', s_trace
+      end do
+    end subroutine diagnose_neighbor_env_raw_matrices
 
     subroutine apply_fragment_local_mixed_split_exp_stub(E_use, state_s, state_e, &
                                                         candidate_available, replacement_applied, bad, block_reason)
