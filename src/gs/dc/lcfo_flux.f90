@@ -4107,6 +4107,7 @@ contains
       if(use_bond_projection) then
         call build_local_bond_center_projection_map(nproj_seed, bond_center_bohr)
         if(nproj_seed <= 0) stop "DC-LCFO local Wannier export: no local bond-center projections in fragment core."
+        call diagnose_local_bond_center_orbit_closure(dc, nproj_seed, bond_center_bohr)
       else if(use_pseudo_projection) then
         nproj_seed = count_local_pseudo_channel_ao_candidates(nxyz_domain)
         if(nproj_seed <= 0) stop "DC-LCFO local Wannier export: no local pseudo-channel projections in fragment core."
@@ -4376,6 +4377,8 @@ contains
       do iw=1,nkeep_legacy
         wcenter_legacy(1:3,iw) = r_wann_legacy(1:3,iw,iw)
       end do
+      call diagnose_local_wannier_center_orbit_closure(dc, nkeep_legacy, wcenter_legacy, 'local_wcenter')
+      call diagnose_local_wannier_center_orbit_closure(dc, nkeep, wcenter, 'bpw_wcenter')
 
       h_seed(1:nbasis,1:nbasis) = 0d0
       v_seed(1:3,1:nbasis,1:nbasis) = 0d0
