@@ -1755,12 +1755,27 @@ contains
       call comm_summation(buf_l, buf, NB*NB*4*nkap*(ikb_e-ikb_s+1), info%icomm_ko)
 
       if (comm_is_root(nproc_id_global)) then
-        do ik = ikb_s, ikb_e
-          do s = -ns, ns
-            write(fh) buf(1:NB,1:NB,0,s,ik)        ! V_s
-            write(fh) buf(1:NB,1:NB,1:3,s,ik)      ! W_{1:3,s}
-          end do
-        end do
+        ! ---- single large write per k-block (I/O speedup; ON-DISK LAYOUT
+        !      UNCHANGED -- see the index-order argument below) ----
+        ! buf is allocated with EXACTLY the bounds (NB,NB,0:3,-ns:ns,
+        ! ikb_s:ikb_e): dim1=row (fastest), dim2=col, dim3=channel
+        ! (0=V, 1:3=W_x,y,z), dim4=s (stencil index), dim5=ik (slowest).  The
+        ! Fortran standard defines unformatted-stream array output in
+        ! "array element order" (dim1 fastest ... dim5 slowest) REGARDLESS of
+        ! how many write() statements are used to emit it, so writing the
+        ! whole block in one shot is byte-for-byte IDENTICAL to the old
+        ! per-(ik,s) pair
+        !   write(fh) buf(1:NB,1:NB,0,s,ik)     ! V_s       (dim3 = 0)
+        !   write(fh) buf(1:NB,1:NB,1:3,s,ik)   ! W_{1:3,s} (dim3 = 1:3)
+        ! looped ik = ikb_s..ikb_e outer, s = -ns..ns inner: that loop nesting
+        ! already visits (dim3=0, then dim3=1:3) for each s in ascending
+        ! order, for each ik in ascending order -- i.e. exactly dim3 -> dim4
+        ! -> dim5 in the array's own storage order, with dim1/dim2 varying
+        ! fastest inside each of the two old writes exactly as they do inside
+        ! this one.  read_vnl_kappa_data (gs_info_ssbe.f90) is UNCHANGED and
+        ! still reads per-(ik,s) V_s/W blocks; those reads remain
+        ! byte-identical against this single-write output.
+        write(fh) buf(1:NB,1:NB,0:3,-ns:ns,ikb_s:ikb_e)
       end if
       deallocate(buf_l, buf)
     end do ! ikb_s
