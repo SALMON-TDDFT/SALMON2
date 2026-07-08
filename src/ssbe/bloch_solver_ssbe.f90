@@ -1063,7 +1063,9 @@ subroutine prepare_qnm(sbe, gs, icomm)
   nb = sbe%nb
 
   allocate(sbe%qnm(sbe%nb, sbe%nb, sbe%ik_min:sbe%ik_max))
-  allocate(sbe%grad_qnm(sbe%nb, sbe%nb, 1:3, sbe%nk))
+  if (trim(sbe_lg_degen) /= 'gicov') then
+    allocate(sbe%grad_qnm(sbe%nb, sbe%nb, 1:3, sbe%nk))
+  end if
   allocate(sbe%qnm_new(sbe%nb, sbe%nb, sbe%ik_min:sbe%ik_max))
   allocate(sbe%dqnm_stock(sbe%nb, sbe%nb, sbe%ik_min:sbe%ik_max, am_s))
   allocate(sbe%dnm_i(sbe%nb, sbe%nb, 1:3, sbe%ik_min:sbe%ik_max))
@@ -1094,27 +1096,29 @@ subroutine prepare_qnm(sbe, gs, icomm)
   end do
   end do
 
-  !$omp parallel do default(shared) private(ik, ib, jb, jj) 
-  do ik = sbe%ik_min, sbe%ik_max
-    do jj=1,3
-      do ib=1,nb
-        do jb=1,nb
-          dnm(ib, jb, ik) = dnm(ib, jb, ik) + epdir_re1(jj) * gs%d_matrix(ib, jb, jj, ik)
+  if (trim(sbe_lg_degen) /= 'gicov') then
+    !$omp parallel do default(shared) private(ik, ib, jb, jj)
+    do ik = sbe%ik_min, sbe%ik_max
+      do jj=1,3
+        do ib=1,nb
+          do jb=1,nb
+            dnm(ib, jb, ik) = dnm(ib, jb, ik) + epdir_re1(jj) * gs%d_matrix(ib, jb, jj, ik)
+          end do
         end do
       end do
     end do
-  end do
 
-  !$omp parallel do default(shared) private(ik, ib, jb, jj) collapse(4)
-  do ik = sbe%ik_min, sbe%ik_max
-    do jj=1,3
-      do ib=1,nb
-        do jb=1,nb
-          sbe%dnm_i(ib, jb, jj, ik) = epdir_re1(jj) * gs%d_matrix(ib, jb, jj, ik)
+    !$omp parallel do default(shared) private(ik, ib, jb, jj) collapse(4)
+    do ik = sbe%ik_min, sbe%ik_max
+      do jj=1,3
+        do ib=1,nb
+          do jb=1,nb
+            sbe%dnm_i(ib, jb, jj, ik) = epdir_re1(jj) * gs%d_matrix(ib, jb, jj, ik)
+          end do
         end do
       end do
     end do
-  end do
+  end if
 
   sbe%abs_dnm=0.d0
   !$omp parallel do default(shared) private(ik, ib, jb) collapse(3)

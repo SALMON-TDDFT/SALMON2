@@ -152,7 +152,9 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     allocate(gs%occup(1:nb_eff, 1:nk))
     allocate(gs%delta_omega(1:nb_eff, 1:nb_eff, 1:nk))
     allocate(gs%p_mod_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
-    allocate(gs%d_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
+    if (trim(sbe_lg_degen) /= 'gicov') then
+        allocate(gs%d_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
+    end if
     allocate(gs%p_tm_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
     allocate(gs%rvnl_tm_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
     allocate(gs%grad_k_eigen(1:nb_eff, 1:3, 1:nk))
@@ -200,7 +202,9 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     call prepare_matrix()
     call comm_bcast(gs%p_mod_matrix, icomm, 0)
     call comm_bcast(gs%delta_omega, icomm, 0)
-    call comm_bcast(gs%d_matrix, icomm, 0) ! Experimental
+    if (trim(sbe_lg_degen) /= 'gicov') then
+        call comm_bcast(gs%d_matrix, icomm, 0) ! Experimental
+    end if
 
     select case(trim(gauge_sbe))
     case ("length_gauge")
@@ -932,9 +936,8 @@ contains
                                      & gs%block_id, num_kgrid, gs%u_transport, nrej)
 
             ! X-full: the full-band covariant transport supplies the WHOLE field
-            ! term incl. the interband dipole (ξ_inter = dipole), so d_matrix is
-            ! unused by gicov_rhs. Zero it (keeps allocation/bcast contracts).
-            gs%d_matrix(:, :, :, :) = (0d0, 0d0)
+            ! term incl. the interband dipole (xi_inter = dipole), so d_matrix is
+            ! unused by gicov_rhs and left unallocated.
 
             if (irank == 0) then
                 write(*, '(a,i0)') "# build_block_transport: rejected blocks = ", nrej
