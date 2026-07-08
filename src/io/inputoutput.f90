@@ -604,6 +604,9 @@ contains
       & file_sbe_prod_dk, &
       & sbe_lg_degen, &
       & sbe_lg_degen_floor, &
+      & sbe_t2_gate_shape, &
+      & sbe_t2_gate_theta, &
+      & sbe_t2_gate_width, &
       & nband_sbe_min, &
       & yn_sbe_gs_current_subtract, &
       & yn_sbe_export_vnl_kappa, &
@@ -1072,6 +1075,9 @@ contains
     file_sbe_prod_dk    = ''
     sbe_lg_degen        = 'off'
     sbe_lg_degen_floor  = 1d-9
+    sbe_t2_gate_shape   = 'step'
+    sbe_t2_gate_theta   = 2d-3
+    sbe_t2_gate_width   = 0d0
     nband_sbe_min       = 1
     yn_sbe_gs_current_subtract = 'n'
     yn_sbe_export_vnl_kappa = 'n'
@@ -1746,6 +1752,9 @@ contains
     call comm_bcast(file_sbe_prod_dk,    nproc_group_global)
     call comm_bcast(sbe_lg_degen,        nproc_group_global)
     call comm_bcast(sbe_lg_degen_floor,  nproc_group_global)
+    call comm_bcast(sbe_t2_gate_shape,   nproc_group_global)
+    call comm_bcast(sbe_t2_gate_theta,   nproc_group_global)
+    call comm_bcast(sbe_t2_gate_width,   nproc_group_global)
     call comm_bcast(nband_sbe_min,       nproc_group_global)
     call comm_bcast(yn_sbe_gs_current_subtract, nproc_group_global)
     call comm_bcast(yn_sbe_export_vnl_kappa, nproc_group_global)
@@ -2745,6 +2754,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_sbe_prod_dk', file_sbe_prod_dk
       write(fh_variables_log, '("#",4X,A,"=",A)') 'sbe_lg_degen', sbe_lg_degen
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_lg_degen_floor', sbe_lg_degen_floor
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'sbe_t2_gate_shape', sbe_t2_gate_shape
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_t2_gate_theta', sbe_t2_gate_theta
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_t2_gate_width', sbe_t2_gate_width
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nband_sbe_min', nband_sbe_min
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_gs_current_subtract', yn_sbe_gs_current_subtract
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_export_vnl_kappa', yn_sbe_export_vnl_kappa

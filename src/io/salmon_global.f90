@@ -451,6 +451,16 @@ character(256),allocatable :: atom_name(:)
   character(256) :: file_sbe_prod_dk
   character(16)  :: sbe_lg_degen
   real(8)        :: sbe_lg_degen_floor
+  ! T2 Delta-omega dephasing gate: runtime-configurable shape + its own
+  ! parameters, read ONLY by the gicov T2 term (bloch_solver_ssbe.f90's
+  ! gicov_rhs) -- theta_off/theta_on/gap_margin (block partition / gi-blend /
+  ! VG guard, degenerate_block_ssbe.f90) are untouched.  Default
+  ! shape='step', theta=2d-3 (== the old theta_off literal), width=0d0
+  ! reproduces the current hard-gate behaviour bit-for-bit (design:
+  ! gw/gw_design/plans/2026-07-08-t2-gate-shape.md).
+  character(16)  :: sbe_t2_gate_shape   ! 'step' (hard gate) or 'gauss' (Gaussian notch)
+  real(8)        :: sbe_t2_gate_theta   ! step-shape threshold [au]
+  real(8)        :: sbe_t2_gate_width   ! gauss-shape notch width w [au]
   integer        :: nband_sbe_min       ! band-window lower edge (lower-cut): SBE
                                         ! propagates the contiguous window
                                         ! [nband_sbe_min, nstate_sbe]; bands
