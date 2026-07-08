@@ -207,8 +207,10 @@ contains
     nbvec_after  = gicov_prod_dk_nbvec('gicov', 1, 27)  ! reduced path   -> 3
     bytes_before = 16_8 * nb_eff * nb_eff * int(nbvec_before, 8) * nk
     bytes_after  = 16_8 * nb_eff * nb_eff * int(nbvec_after, 8) * nk
-    call check_int8(bytes_before, 3110400000_8, "I: prod_dk bytes/rank BEFORE (nb_eff=30,nk=8000,nbvec=27) = 3,110,400,000 (~2.9 GiB)", nfail)
-    call check_int8(bytes_after, 345600000_8, "I: prod_dk bytes/rank AFTER  (nb_eff=30,nk=8000,nbvec=3)  =   345,600,000 (~0.32 GiB)", nfail)
+    call check_int8(bytes_before, 3110400000_8, &
+      "I: prod_dk bytes/rank BEFORE (nb_eff=30,nk=8000,nbvec=27) = 3,110,400,000 (~2.9 GiB)", nfail)
+    call check_int8(bytes_after, 345600000_8, &
+      "I: prod_dk bytes/rank AFTER  (nb_eff=30,nk=8000,nbvec=3)  =   345,600,000 (~0.32 GiB)", nfail)
     call check_int8(bytes_before / bytes_after, 9_8, "I: reduction factor is EXACTLY 9x (27/3), independent of nb_eff/nk", nfail)
   end subroutine test_memory_reduction_estimate
 
