@@ -538,7 +538,7 @@
         mixed_z_local_prop_backend_kind = 'neighbor_env_expdiag'
       case ('neighbor_env_fieldonly','neighbor_fieldonly','fieldonly')
         mixed_z_local_prop_backend_kind = 'neighbor_env_fieldonly'
-      case ('neighbor_env_interaction','neighbor_interaction','interaction')
+      case ('neighbor_env_interaction','neighbor_interaction','interaction','neighbor_env_delta','neighbor_delta','delta')
         mixed_z_local_prop_backend_kind = 'neighbor_env_interaction'
       case ('global_mixed_split_backend','global')
         mixed_z_local_prop_backend_kind = 'global_mixed_split_backend'
@@ -556,7 +556,7 @@
         mixed_z_local_prop_backend_kind = 'neighbor_env_expdiag'
       case ('neighbor_env_fieldonly','neighbor_fieldonly','fieldonly')
         mixed_z_local_prop_backend_kind = 'neighbor_env_fieldonly'
-      case ('neighbor_env_interaction','neighbor_interaction','interaction')
+      case ('neighbor_env_interaction','neighbor_interaction','interaction','neighbor_env_delta','neighbor_delta','delta')
         mixed_z_local_prop_backend_kind = 'neighbor_env_interaction'
       case ('global_mixed_split_backend','global')
         mixed_z_local_prop_backend_kind = 'global_mixed_split_backend'
@@ -3623,7 +3623,7 @@
       real(8) :: phase_c, phase_s
       logical :: found
       complex(8), allocatable :: H0(:,:), He(:,:), Swork(:,:), Rraw(:,:), Rred(:,:)
-      complex(8), allocatable :: cvec(:), tmp(:), tmp2(:), work_vec(:)
+      complex(8), allocatable :: cvec(:), c_start(:), c0(:), ce(:), tmp(:), work_vec(:)
 
       bad_coef_any = .false.
       nstate_blk = max(0, state_e - state_s + 1)
@@ -3683,7 +3683,7 @@
           end do
         end do
         allocate(H0(nred,nred), He(nred,nred), Swork(nred,nred), eval0(nred), evale(nred))
-        allocate(cvec(nred), tmp(nred), tmp2(nred), work_vec(nred))
+        allocate(cvec(nred), c_start(nred), c0(nred), ce(nred), tmp(nred), work_vec(nred))
         do ispin_use = 1, nspin_use
           if (ispin_use > size(dg_frag%wpw_reduced_H,3)) cycle
           if (ispin_use > size(dg_frag%mixed_wannier_bpw_z,4)) cycle
@@ -3714,31 +3714,33 @@
             cvec(1:nself) = dg_frag%coef_wpw_self(1:nself, ist, ispin_use, i_local)
             if (nneigh > 0) cvec(nself+1:nred) = &
               dg_frag%coef_wpw_neighbor_reduced(1:nneigh, ist, ispin_use, i_local)
+            c_start(:) = cvec(:)
 
-            work_vec(:) = matmul(dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local), cvec(:))
+            work_vec(:) = matmul(dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local), c_start(:))
             tmp(:) = matmul(conjg(transpose(He(:, :))), work_vec(:))
             do ired = 1, nred
               phase_c = cos(evale(ired) * dt)
               phase_s = sin(evale(ired) * dt)
               tmp(ired) = cmplx(phase_c, -phase_s, kind=8) * tmp(ired)
             end do
-            tmp2(:) = matmul(He(:, :), tmp(:))
+            ce(:) = matmul(He(:, :), tmp(:))
 
-            work_vec(:) = matmul(dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local), tmp2(:))
+            work_vec(:) = matmul(dg_frag%wpw_reduced_S(1:nred,1:nred,ispin_use,i_local), c_start(:))
             tmp(:) = matmul(conjg(transpose(H0(:, :))), work_vec(:))
             do ired = 1, nred
               phase_c = cos(eval0(ired) * dt)
               phase_s = sin(eval0(ired) * dt)
-              tmp(ired) = cmplx(phase_c, phase_s, kind=8) * tmp(ired)
+              tmp(ired) = cmplx(phase_c, -phase_s, kind=8) * tmp(ired)
             end do
-            cvec(:) = matmul(H0(:, :), tmp(:))
+            c0(:) = matmul(H0(:, :), tmp(:))
+            cvec(:) = c_start(:) + (ce(:) - c0(:))
 
             dg_frag%coef_wpw_self(1:nself, ist, ispin_use, i_local) = cvec(1:nself)
             if (nneigh > 0) dg_frag%coef_wpw_neighbor_reduced(1:nneigh, ist, ispin_use, i_local) = &
               cvec(nself+1:nred)
           end do
         end do
-        deallocate(H0, He, Swork, eval0, evale, cvec, tmp, tmp2, work_vec)
+        deallocate(H0, He, Swork, eval0, evale, cvec, c_start, c0, ce, tmp, work_vec)
         deallocate(raw_gid, Rraw, Rred)
       end do
       dg_frag%wpw_reduced_coef_initialized = .true.
@@ -3796,9 +3798,13 @@
       logical, intent(inout) :: bad
       logical, intent(out) :: kernel_ready
       integer :: nstate_blk, nw, np, n_pw, nspin_use
-      integer :: i_local, ifrag, n_w, nself, iw, ipw, gid, gp
-      integer :: w_slot_count, pself_slot_count, w_slot, pself_slot
+      integer :: i_local, ifrag, n_w, nself, nred, nraw, nneigh, iw, ipw, gid, gp
+      integer :: axis, side, jfrag, pidx, n_pfrag, row0, raw_slot
+      integer :: w_slot_count, pself_slot_count, pneighbor_slot_count, w_slot, pself_slot, pneighbor_slot
       integer :: ispin_use, state_col
+      integer :: pfrag_ids(7)
+      integer, allocatable :: w_slot_for_iw(:), pself_slot_for_ipw(:), pneighbor_slot_for_raw(:)
+      complex(8), allocatable :: c_red(:), raw_back(:)
 
       kernel_ready = .false.
       nstate_blk = max(0, state_e - state_s + 1)
@@ -3812,7 +3818,10 @@
       end if
       if (.not. dg_frag%wpw_reduced_coef_initialized .or. &
           .not. allocated(dg_frag%coef_wpw_self) .or. &
+          .not. allocated(dg_frag%wpw_reduced_dim) .or. &
           .not. allocated(dg_frag%wpw_reduced_nself) .or. &
+          .not. allocated(dg_frag%wpw_reduced_nraw) .or. &
+          .not. allocated(dg_frag%wpw_reduced_transform) .or. &
           .not. allocated(dg_frag%global_wannier_local_nkeep) .or. &
           .not. allocated(dg_frag%global_wannier_local_ids) .or. &
           .not. allocated(dg_frag%global_wannier_owner_frag)) then
@@ -3822,11 +3831,30 @@
 
       w_slot_count = 0
       pself_slot_count = 0
+      pneighbor_slot_count = 0
       do i_local = 1, size(dg_frag%global_wannier_local_nkeep)
         ifrag = dg_frag%ifrag_start + i_local - 1
         n_w = dg_frag%global_wannier_local_nkeep(i_local)
-        if (i_local > size(dg_frag%wpw_reduced_nself)) cycle
+        if (i_local > size(dg_frag%wpw_reduced_nself) .or. i_local > size(dg_frag%wpw_reduced_dim) .or. &
+            i_local > size(dg_frag%wpw_reduced_nraw)) cycle
         nself = dg_frag%wpw_reduced_nself(i_local)
+        nred = dg_frag%wpw_reduced_dim(i_local)
+        nraw = dg_frag%wpw_reduced_nraw(i_local)
+        if (nred <= 0 .or. nraw <= 0 .or. nself < n_w) cycle
+        n_pfrag = 1
+        pfrag_ids(:) = 0
+        pfrag_ids(1) = ifrag
+        do axis = 1, 3
+          do side = -1, 1, 2
+            jfrag = wpw_face_neighbor_fragment(dg_frag, ifrag, axis, side)
+            if (jfrag <= 0 .or. jfrag == ifrag) cycle
+            if (.not. any(pfrag_ids(1:n_pfrag) == jfrag) .and. n_pfrag < size(pfrag_ids)) then
+              n_pfrag = n_pfrag + 1
+              pfrag_ids(n_pfrag) = jfrag
+            end if
+          end do
+        end do
+        if (nraw /= n_w + n_pfrag * n_pw) cycle
         do iw = 1, n_w
           gid = dg_frag%global_wannier_local_ids(iw, i_local)
           if (gid < 1 .or. gid > nw) cycle
@@ -3835,7 +3863,17 @@
           if (iw > nself) cycle
           w_slot_count = w_slot_count + 1
         end do
-        if (nself >= n_w + n_pw) pself_slot_count = pself_slot_count + n_pw
+        do pidx = 1, n_pfrag
+          do ipw = 1, n_pw
+            gp = (pfrag_ids(pidx) - 1) * n_pw + ipw
+            if (gp < 1 .or. gp > np) cycle
+            if (pidx == 1) then
+              pself_slot_count = pself_slot_count + 1
+            else
+              pneighbor_slot_count = pneighbor_slot_count + 1
+            end if
+          end do
+        end do
       end do
 
       if (allocated(dg_frag%mixed_z_frag_local_wcoef)) deallocate(dg_frag%mixed_z_frag_local_wcoef)
@@ -3854,9 +3892,9 @@
       allocate(dg_frag%mixed_z_frag_local_pself_coef(max(1,pself_slot_count), nstate_blk, nspin_use))
       allocate(dg_frag%mixed_z_frag_local_pself_gid(max(1,pself_slot_count)))
       allocate(dg_frag%mixed_z_frag_local_pself_mix_gid(max(1,pself_slot_count)))
-      allocate(dg_frag%mixed_z_frag_local_pneighbor_coef(1, nstate_blk, nspin_use))
-      allocate(dg_frag%mixed_z_frag_local_pneighbor_gid(1))
-      allocate(dg_frag%mixed_z_frag_local_pneighbor_mix_gid(1))
+      allocate(dg_frag%mixed_z_frag_local_pneighbor_coef(max(1,pneighbor_slot_count), nstate_blk, nspin_use))
+      allocate(dg_frag%mixed_z_frag_local_pneighbor_gid(max(1,pneighbor_slot_count)))
+      allocate(dg_frag%mixed_z_frag_local_pneighbor_mix_gid(max(1,pneighbor_slot_count)))
       dg_frag%mixed_z_frag_local_wcoef(:, :, :) = (0.0d0, 0.0d0)
       dg_frag%mixed_z_frag_local_pself_coef(:, :, :) = (0.0d0, 0.0d0)
       dg_frag%mixed_z_frag_local_pneighbor_coef(:, :, :) = (0.0d0, 0.0d0)
@@ -3869,11 +3907,37 @@
 
       w_slot = 0
       pself_slot = 0
+      pneighbor_slot = 0
       do i_local = 1, size(dg_frag%global_wannier_local_nkeep)
         ifrag = dg_frag%ifrag_start + i_local - 1
         n_w = dg_frag%global_wannier_local_nkeep(i_local)
-        if (i_local > size(dg_frag%wpw_reduced_nself)) cycle
+        if (i_local > size(dg_frag%wpw_reduced_nself) .or. i_local > size(dg_frag%wpw_reduced_dim) .or. &
+            i_local > size(dg_frag%wpw_reduced_nraw)) cycle
         nself = dg_frag%wpw_reduced_nself(i_local)
+        nred = dg_frag%wpw_reduced_dim(i_local)
+        nraw = dg_frag%wpw_reduced_nraw(i_local)
+        if (nred <= 0 .or. nraw <= 0 .or. nself < n_w) cycle
+        if (nred > size(dg_frag%wpw_reduced_transform,2) .or. nraw > size(dg_frag%wpw_reduced_transform,1)) cycle
+        nneigh = max(0, nred - nself)
+        n_pfrag = 1
+        pfrag_ids(:) = 0
+        pfrag_ids(1) = ifrag
+        do axis = 1, 3
+          do side = -1, 1, 2
+            jfrag = wpw_face_neighbor_fragment(dg_frag, ifrag, axis, side)
+            if (jfrag <= 0 .or. jfrag == ifrag) cycle
+            if (.not. any(pfrag_ids(1:n_pfrag) == jfrag) .and. n_pfrag < size(pfrag_ids)) then
+              n_pfrag = n_pfrag + 1
+              pfrag_ids(n_pfrag) = jfrag
+            end if
+          end do
+        end do
+        if (nraw /= n_w + n_pfrag * n_pw) cycle
+        allocate(w_slot_for_iw(n_w), pself_slot_for_ipw(n_pw), pneighbor_slot_for_raw(nraw))
+        allocate(c_red(nred), raw_back(nraw))
+        w_slot_for_iw(:) = 0
+        pself_slot_for_ipw(:) = 0
+        pneighbor_slot_for_raw(:) = 0
         do iw = 1, n_w
           gid = dg_frag%global_wannier_local_ids(iw, i_local)
           if (gid < 1 .or. gid > nw) cycle
@@ -3881,35 +3945,58 @@
               dg_frag%global_wannier_owner_frag(gid) > dg_frag%ifrag_end) cycle
           if (iw > nself) cycle
           w_slot = w_slot + 1
+          w_slot_for_iw(iw) = w_slot
           dg_frag%mixed_z_frag_local_w_gid(w_slot) = gid
           dg_frag%mixed_z_frag_local_w_mix_gid(w_slot) = gid
-          do ispin_use = 1, nspin_use
-            do state_col = 1, nstate_blk
-              dg_frag%mixed_z_frag_local_wcoef(w_slot,state_col,ispin_use) = &
-                dg_frag%coef_wpw_self(iw,state_s+state_col-1,ispin_use,i_local)
+        end do
+        do pidx = 1, n_pfrag
+          row0 = n_w + (pidx - 1) * n_pw
+          do ipw = 1, n_pw
+            raw_slot = row0 + ipw
+            gp = (pfrag_ids(pidx) - 1) * n_pw + ipw
+            if (gp < 1 .or. gp > np) cycle
+            if (pidx == 1) then
+              pself_slot = pself_slot + 1
+              pself_slot_for_ipw(ipw) = pself_slot
+              dg_frag%mixed_z_frag_local_pself_gid(pself_slot) = gp
+              dg_frag%mixed_z_frag_local_pself_mix_gid(pself_slot) = nw + gp
+            else
+              pneighbor_slot = pneighbor_slot + 1
+              pneighbor_slot_for_raw(raw_slot) = pneighbor_slot
+              dg_frag%mixed_z_frag_local_pneighbor_gid(pneighbor_slot) = gp
+              dg_frag%mixed_z_frag_local_pneighbor_mix_gid(pneighbor_slot) = nw + gp
+            end if
+          end do
+        end do
+        do ispin_use = 1, nspin_use
+          do state_col = 1, nstate_blk
+            c_red(:) = (0.0d0, 0.0d0)
+            c_red(1:nself) = dg_frag%coef_wpw_self(1:nself,state_s+state_col-1,ispin_use,i_local)
+            if (nneigh > 0) c_red(nself+1:nred) = &
+              dg_frag%coef_wpw_neighbor_reduced(1:nneigh,state_s+state_col-1,ispin_use,i_local)
+            raw_back(:) = matmul(dg_frag%wpw_reduced_transform(1:nraw,1:nred,i_local), c_red(:))
+            do iw = 1, n_w
+              if (w_slot_for_iw(iw) > 0) &
+                dg_frag%mixed_z_frag_local_wcoef(w_slot_for_iw(iw),state_col,ispin_use) = raw_back(iw)
+            end do
+            do ipw = 1, n_pw
+              if (pself_slot_for_ipw(ipw) > 0) &
+                dg_frag%mixed_z_frag_local_pself_coef(pself_slot_for_ipw(ipw),state_col,ispin_use) = &
+                  raw_back(n_w+ipw)
+            end do
+            do raw_slot = n_w + n_pw + 1, nraw
+              if (pneighbor_slot_for_raw(raw_slot) > 0) &
+                dg_frag%mixed_z_frag_local_pneighbor_coef(pneighbor_slot_for_raw(raw_slot),state_col,ispin_use) = &
+                  raw_back(raw_slot)
             end do
           end do
         end do
-        if (nself >= n_w + n_pw) then
-          do ipw = 1, n_pw
-            gp = (ifrag - 1) * n_pw + ipw
-            if (gp < 1 .or. gp > np) cycle
-            pself_slot = pself_slot + 1
-            dg_frag%mixed_z_frag_local_pself_gid(pself_slot) = gp
-            dg_frag%mixed_z_frag_local_pself_mix_gid(pself_slot) = nw + gp
-            do ispin_use = 1, nspin_use
-              do state_col = 1, nstate_blk
-                dg_frag%mixed_z_frag_local_pself_coef(pself_slot,state_col,ispin_use) = &
-                  dg_frag%coef_wpw_self(n_w+ipw,state_s+state_col-1,ispin_use,i_local)
-              end do
-            end do
-          end do
-        end if
+        deallocate(w_slot_for_iw, pself_slot_for_ipw, pneighbor_slot_for_raw, c_red, raw_back)
       end do
 
       dg_frag%mixed_z_frag_local_w_slots = w_slot_count
       dg_frag%mixed_z_frag_local_pself_slots = pself_slot_count
-      dg_frag%mixed_z_frag_local_pneighbor_slots = 0
+      dg_frag%mixed_z_frag_local_pneighbor_slots = pneighbor_slot_count
       dg_frag%mixed_z_frag_local_nstate = nstate_blk
       dg_frag%mixed_z_frag_local_nspin = nspin_use
       dg_frag%mixed_z_frag_local_storage_ready = w_slot_count > 0
@@ -5018,6 +5105,7 @@
       integer :: nstate_blk, nw, np, nspin_use, ispin_use, state_col, state_idx
       integer :: slot, gid, ifrag_row, i_local_row, nbf, ibasis, nvalid, local_row, global_row
       real(8) :: prop_t0
+      real(8), allocatable :: p_count_local(:), p_count_global(:)
 
       bad = .false.
       nstate_blk = max(0, state_e - state_s + 1)
@@ -5043,6 +5131,12 @@
         bad = .true.
         return
       end if
+      if (np > 0 .and. dg_frag%mixed_z_frag_local_pneighbor_slots > 0 .and. &
+          (.not. allocated(dg_frag%mixed_z_frag_local_pneighbor_coef) .or. &
+           .not. allocated(dg_frag%mixed_z_frag_local_pneighbor_gid))) then
+        bad = .true.
+        return
+      end if
       if (.not. allocated(prop_cw_local_work) .or. size(prop_cw_local_work,1) /= nw .or. &
           size(prop_cw_local_work,2) /= nstate_blk) then
         if (allocated(prop_cw_local_work)) deallocate(prop_cw_local_work)
@@ -5056,6 +5150,7 @@
           if (allocated(prop_cp_global_work)) deallocate(prop_cp_global_work)
           allocate(prop_cp_local_work(np,nstate_blk), prop_cp_global_work(np,nstate_blk))
         end if
+        allocate(p_count_local(np), p_count_global(np))
       end if
 
       do ispin_use = 1, nspin_use
@@ -5138,19 +5233,40 @@
 
         if (np > 0) then
           prop_cp_local_work(1:np,1:nstate_blk) = (0.0d0, 0.0d0)
+          p_count_local(1:np) = 0.0d0
           do slot = 1, size(dg_frag%mixed_z_frag_local_pself_gid)
             gid = dg_frag%mixed_z_frag_local_pself_gid(slot)
             if (gid < 1 .or. gid > np) cycle
+            p_count_local(gid) = p_count_local(gid) + 1.0d0
             do state_col = 1, nstate_blk
               prop_cp_local_work(gid,state_col) = prop_cp_local_work(gid,state_col) + &
                 dg_frag%mixed_z_frag_local_pself_coef(slot,state_col,ispin_use)
             end do
           end do
+          if (dg_frag%mixed_z_frag_local_pneighbor_slots > 0) then
+            do slot = 1, dg_frag%mixed_z_frag_local_pneighbor_slots
+              gid = dg_frag%mixed_z_frag_local_pneighbor_gid(slot)
+              if (gid < 1 .or. gid > np) cycle
+              p_count_local(gid) = p_count_local(gid) + 1.0d0
+              do state_col = 1, nstate_blk
+                prop_cp_local_work(gid,state_col) = prop_cp_local_work(gid,state_col) + &
+                  dg_frag%mixed_z_frag_local_pneighbor_coef(slot,state_col,ispin_use)
+              end do
+            end do
+          end if
           call comm_summation(prop_cp_local_work, prop_cp_global_work, np*nstate_blk, dg_frag%icomm)
+          call comm_summation(p_count_local, p_count_global, np, dg_frag%icomm)
+          do gid = 1, np
+            if (p_count_global(gid) > 0.5d0) then
+              prop_cp_global_work(gid,1:nstate_blk) = prop_cp_global_work(gid,1:nstate_blk) / &
+                cmplx(p_count_global(gid), 0.0d0, kind=8)
+            end if
+          end do
           dg_frag%mixed_wannier_bpw_pcoef(1:np,state_s:state_e,ispin_use) = &
             prop_cp_global_work(1:np,1:nstate_blk)
         end if
       end do
+      if (allocated(p_count_local)) deallocate(p_count_local, p_count_global)
     end subroutine writeback_fragment_local_storage_fieldoff
 
     subroutine enumerate_fragment_local_mixed_slots(layout_ready, w_owner_slots, w_total_slots, &
