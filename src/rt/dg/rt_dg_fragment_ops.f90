@@ -4857,7 +4857,7 @@ contains
 
     integer :: ispin, ifrag, i_local, ib, iw, jw, idir
     integer :: istate, nocc_spin, n_w, n_p, n_mix, nbasis
-    integer :: global_row, local_row
+    integer :: global_row, local_row, n_wann_raw
     real(8) :: pol_local(3), pol_sum(3), occ
     real(8) :: pol_ww_local(3), pol_wp_local(3), pol_ww_sum(3), pol_wp_sum(3)
     real(8) :: pol_ww_diag_local(3), pol_ww_offdiag_local(3)
@@ -4877,7 +4877,7 @@ contains
     real(8), allocatable :: prod_weight_local(:), prod_weight_sum(:)
     real(8), allocatable :: prod_contrib_local(:), prod_contrib_sum(:)
     real(8), allocatable :: prod_rho_local(:), prod_rho_sum(:), prod_occ_local(:), prod_occ_sum_by_w(:)
-    complex(8), allocatable :: cw_local(:,:), cw_sum(:,:), cmix(:,:), cmix_occ(:,:), rho_mix(:,:)
+    complex(8), allocatable :: cw_local(:,:), cw_sum(:,:), cw_eig(:,:), cmix(:,:), cmix_occ(:,:), rho_mix(:,:)
     complex(8), allocatable :: coef_block(:,:)
     complex(8), allocatable :: center_w_global(:,:), center_eig(:,:)
     complex(8) :: pos_expect, pos_ww, pos_wp, zterm
@@ -4992,6 +4992,8 @@ contains
     n_p = dg_frag%mixed_wannier_bpw_np
     n_mix = dg_frag%mixed_wannier_bpw_nmix
     if (n_w <= 0 .or. n_p < 0 .or. n_mix /= n_w + n_p) return
+    n_wann_raw = n_w
+    if (allocated(dg_frag%global_wannier_flux_evec)) n_wann_raw = size(dg_frag%global_wannier_flux_evec, 1)
     ww_pair_count_total = dble(n_w) * dble(n_w)
     ww_pair_count_diag = dble(n_w)
     ww_pair_count_offdiag = max(0.0d0, ww_pair_count_total - ww_pair_count_diag)
@@ -5069,7 +5071,8 @@ contains
       dg_frag%mixed_z_prod_zww_diag_by_w(iw) = real(dg_frag%mixed_wannier_bpw_z(3, iw, iw, 1), kind=8)
     end do
 
-    allocate(cw_local(n_w,max(1,dg_frag%nstate_tot)), cw_sum(n_w,max(1,dg_frag%nstate_tot)))
+    allocate(cw_local(n_wann_raw,max(1,dg_frag%nstate_tot)), cw_sum(n_wann_raw,max(1,dg_frag%nstate_tot)))
+    allocate(cw_eig(n_w,max(1,dg_frag%nstate_tot)))
     allocate(cmix(n_mix,max(1,dg_frag%nstate_tot)))
     allocate(cmix_occ(n_mix,max(1,dg_frag%nstate_tot)), rho_mix(n_mix,n_mix))
     allocate(coef_block(max(1,size(dg_frag%global_wannier_coef,1)), max(1,dg_frag%nstate_tot)))
@@ -5092,6 +5095,7 @@ contains
       if (nocc_spin <= 0) cycle
 
       cw_local(:, :) = (0.0d0, 0.0d0)
+      cw_eig(:, :) = (0.0d0, 0.0d0)
       if (perf_count) perf_t0 = get_wtime()
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local = ifrag - dg_frag%ifrag_start + 1
@@ -5106,29 +5110,46 @@ contains
           if (local_row < 1 .or. local_row > size(dg_frag%coef, 1)) cycle
           coef_block(ib,1:nocc_spin) = dg_frag%coef(local_row,1:nocc_spin,ispin)
         end do
-        call zgemm('C', 'N', n_w, nocc_spin, nbasis, (1.0d0, 0.0d0), &
-          dg_frag%global_wannier_coef(1:nbasis,1:n_w,ispin,i_local), max(1,nbasis), &
-          coef_block, max(1,size(coef_block,1)), (1.0d0, 0.0d0), cw_local, max(1,n_w))
+        call zgemm('C', 'N', n_wann_raw, nocc_spin, nbasis, (1.0d0, 0.0d0), &
+          dg_frag%global_wannier_coef(1:nbasis,1:n_wann_raw,ispin,i_local), max(1,nbasis), &
+          coef_block, max(1,size(coef_block,1)), (1.0d0, 0.0d0), cw_local, max(1,n_wann_raw))
         if (perf_count) dg_frag%mixed_z_perf_zgemm_calls = dg_frag%mixed_z_perf_zgemm_calls + 1_8
       end do
       if (perf_count) dg_frag%mixed_z_perf_wall_pz_build_cw = &
         dg_frag%mixed_z_perf_wall_pz_build_cw + (get_wtime() - perf_t0)
       if (perf_count) perf_t0 = get_wtime()
-      call comm_summation(cw_local, cw_sum, n_w * max(1,dg_frag%nstate_tot), dg_frag%icomm)
+      call comm_summation(cw_local, cw_sum, n_wann_raw * max(1,dg_frag%nstate_tot), dg_frag%icomm)
       if (perf_count) dg_frag%mixed_z_perf_wall_pz_reduce = &
         dg_frag%mixed_z_perf_wall_pz_reduce + (get_wtime() - perf_t0)
 
       if (dg_frag%id == 0) then
         if (perf_count) perf_t0 = get_wtime()
+        if (allocated(dg_frag%global_wannier_flux_evec)) then
+          cw_eig(1:n_w,1:nocc_spin) = matmul( &
+            conjg(transpose(dg_frag%global_wannier_flux_evec(1:n_wann_raw,1:n_w))), &
+            cw_sum(1:n_wann_raw,1:nocc_spin))
+        else
+          cw_eig(1:n_w,1:nocc_spin) = cw_sum(1:n_w,1:nocc_spin)
+        end if
         cmix(:, :) = (0.0d0, 0.0d0)
         cmix_occ(:, :) = (0.0d0, 0.0d0)
         rho_mix(:, :) = (0.0d0, 0.0d0)
-        cmix(1:n_w,1:nocc_spin) = cw_sum(1:n_w,1:nocc_spin)
+        cmix(1:n_w,1:nocc_spin) = cw_eig(1:n_w,1:nocc_spin)
         if (n_p > 0) cmix(n_w+1:n_w+n_p,1:nocc_spin) = dg_frag%mixed_wannier_bpw_pcoef(1:n_p,1:nocc_spin,ispin)
         do istate = 1, nocc_spin
           occ = max(0.0d0, system%rocc(istate, 1, ispin))
           if (occ <= 0.0d0) cycle
           occ_local = occ_local + occ
+          if (allocated(dg_frag%global_wannier_center)) then
+            do iw = 1, min(n_wann_raw, size(dg_frag%global_wannier_center, 2))
+              weight_diag = occ * real(conjg(cw_sum(iw,istate)) * cw_sum(iw,istate), kind=8)
+              weighted_center = weighted_center + weight_diag * dg_frag%global_wannier_center(3, iw)
+              do idir = 1, 3
+                center_diag_weighted_local(idir) = center_diag_weighted_local(idir) + &
+                  weight_diag * dg_frag%global_wannier_center(idir, iw)
+              end do
+            end do
+          end if
           cmix_occ(1:n_mix,istate) = cmix(1:n_mix,istate) * cmplx(occ, 0.0d0, kind=8)
           do iw = 1, n_w
             rho_diag = real(conjg(cmix(iw,istate)) * cmix(iw,istate), kind=8)
@@ -5147,11 +5168,6 @@ contains
             prod_contrib_local(iw) = prod_contrib_local(iw) - weight_diag * &
               real(dg_frag%mixed_wannier_bpw_z(3, iw, iw, ispin), kind=8)
             if (allocated(dg_frag%global_wannier_center) .and. iw <= size(dg_frag%global_wannier_center, 2)) then
-              weighted_center = weighted_center + weight_diag * dg_frag%global_wannier_center(3, iw)
-              do idir = 1, 3
-                center_diag_weighted_local(idir) = center_diag_weighted_local(idir) + &
-                  weight_diag * dg_frag%global_wannier_center(idir, iw)
-              end do
               weighted_diff = weighted_diff + weight_diag * &
                 (real(dg_frag%mixed_wannier_bpw_z(3, iw, iw, ispin), kind=8) - &
                  dg_frag%global_wannier_center(3, iw))
@@ -5294,7 +5310,7 @@ contains
         (pol_sum(:) - pol_ww_sum(:) - pol_wp_sum(:))
     end if
     if (allocated(center_w_global)) deallocate(center_w_global, center_eig)
-    deallocate(cw_local, cw_sum, cmix, cmix_occ, rho_mix, coef_block, prod_weight_local, prod_weight_sum, prod_contrib_local, prod_contrib_sum, &
+    deallocate(cw_local, cw_sum, cw_eig, cmix, cmix_occ, rho_mix, coef_block, prod_weight_local, prod_weight_sum, prod_contrib_local, prod_contrib_sum, &
                prod_rho_local, prod_rho_sum, prod_occ_local, prod_occ_sum_by_w)
   end subroutine calculate_global_mixed_wannier_bpw_polarization_dg
 
