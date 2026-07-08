@@ -339,6 +339,7 @@ module rt_dg_fragment_types
     ! Fragment-local WPW reduced-neighbor propagation candidate.
     ! This is intentionally separate from the global Wannier+BPW-perp mixed-Z path.
     logical :: wpw_reduced_ready = .false.
+    integer :: wpw_reduced_shell = 0
     integer :: wpw_reduced_max_dim = 0
     integer, allocatable :: wpw_reduced_dim(:)       ! (local fragment)
     integer, allocatable :: wpw_reduced_nself(:)     ! (local fragment)

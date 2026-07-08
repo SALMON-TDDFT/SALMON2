@@ -326,6 +326,7 @@ contains
       & yn_dg_mixed_z_include_ww, &
       & yn_dg_mixed_z_local_prop_writeback, &
       & dg_mixed_z_local_prop_backend, &
+      & dg_mixed_z_neighbor_env_shell, &
       & dg_mixed_z_frag_local_field_block, &
       & dg_mixed_z_direct_origin, &
       & dg_mixed_z_ww_position_branch, &
@@ -838,6 +839,7 @@ contains
     yn_dg_mixed_z_include_ww = 'y'
     yn_dg_mixed_z_local_prop_writeback = 'n'
     dg_mixed_z_local_prop_backend = 'global_mixed_split_backend'
+    dg_mixed_z_neighbor_env_shell = 1
     dg_mixed_z_frag_local_field_block = 'all'
     dg_mixed_z_direct_origin = 'fragment'
     dg_mixed_z_ww_position_branch = 'center_eig'
@@ -1470,6 +1472,7 @@ contains
     call comm_bcast(yn_dg_mixed_z_include_ww,nproc_group_global)
     call comm_bcast(yn_dg_mixed_z_local_prop_writeback,nproc_group_global)
     call comm_bcast(dg_mixed_z_local_prop_backend,nproc_group_global)
+    call comm_bcast(dg_mixed_z_neighbor_env_shell,nproc_group_global)
     call comm_bcast(dg_mixed_z_frag_local_field_block,nproc_group_global)
     call comm_bcast(dg_mixed_z_direct_origin,nproc_group_global)
     call comm_bcast(dg_mixed_z_ww_position_branch,nproc_group_global)
@@ -2457,6 +2460,8 @@ contains
         yn_dg_mixed_z_local_prop_writeback
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_local_prop_backend', &
         trim(dg_mixed_z_local_prop_backend)
+      write(fh_variables_log, '("#",4X,A,"=",I0)') 'dg_mixed_z_neighbor_env_shell', &
+        dg_mixed_z_neighbor_env_shell
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_frag_local_field_block', &
         trim(dg_mixed_z_frag_local_field_block)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_direct_origin', &

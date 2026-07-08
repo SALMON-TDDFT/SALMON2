@@ -166,6 +166,7 @@ module salmon_global
   character(1)   :: yn_dg_mixed_z_include_ww
   character(1)   :: yn_dg_mixed_z_local_prop_writeback
   character(48)  :: dg_mixed_z_local_prop_backend
+  integer        :: dg_mixed_z_neighbor_env_shell
   character(32)  :: dg_mixed_z_frag_local_field_block
   character(32)  :: dg_mixed_z_direct_origin
   character(32)  :: dg_mixed_z_ww_position_branch

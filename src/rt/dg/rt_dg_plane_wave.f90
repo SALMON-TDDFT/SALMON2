@@ -18,6 +18,7 @@
 !=======================================================================
 
 module rt_dg_plane_wave
+  use salmon_global, only: dg_mixed_z_local_prop_backend, dg_mixed_z_neighbor_env_shell
   use rt_dg_fragment_types, only: s_dg_fragment_rt, complex_matrix_block_info
   use rt_dg_wpw_reduced_mixedz_diag, only: wpw_reduced_mixedz_operator_stats, &
     wpw_reduced_canon_mixedz_current_coeff_stats, wpw_reduced_canon_mixedz_bridge_stats, &
@@ -428,6 +429,124 @@ contains
     end if
     drop_g2 = cached_drop_g2
   end function wpw_neighbor_filter_drop_g2_override
+
+  integer function wpw_neighbor_env_shell_from_backend() result(shell)
+    shell = max(1, dg_mixed_z_neighbor_env_shell)
+    select case (trim(adjustl(dg_mixed_z_local_prop_backend)))
+    case ('neighbor_env_delta_shell2','neighbor_delta_shell2','delta_shell2')
+      shell = max(shell, 2)
+    end select
+  end function wpw_neighbor_env_shell_from_backend
+
+  subroutine collect_wpw_fragment_shell_local(dg_frag, ifrag_center, shell_max, pfrag_ids, pfrag_axis, pfrag_side, n_pfrag)
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag_center, shell_max
+    integer, allocatable, intent(out) :: pfrag_ids(:), pfrag_axis(:), pfrag_side(:)
+    integer, intent(out) :: n_pfrag
+    integer :: max_frag, axis, side, level, start_idx, end_idx, idx, jfrag, base_frag
+    integer :: radius, dx, dy, dz
+    integer, allocatable :: queue(:), queue_axis(:), queue_side(:)
+
+    max_frag = max(1, product(dg_frag%num_fragment(1:3)))
+    allocate(queue(max_frag), queue_axis(max_frag), queue_side(max_frag))
+    queue(:) = 0
+    queue_axis(:) = 0
+    queue_side(:) = 0
+    n_pfrag = 1
+    queue(1) = ifrag_center
+    if (shell_max >= 2) then
+      radius = max(1, shell_max - 1)
+      do dx = -radius, radius
+        do dy = -radius, radius
+          do dz = -radius, radius
+            jfrag = wpw_periodic_offset_fragment_id(dg_frag, ifrag_center, dx, dy, dz)
+            if (jfrag <= 0) cycle
+            if (.not. any(queue(1:n_pfrag) == jfrag) .and. n_pfrag < max_frag) then
+              n_pfrag = n_pfrag + 1
+              queue(n_pfrag) = jfrag
+            end if
+          end do
+        end do
+      end do
+      allocate(pfrag_ids(n_pfrag), pfrag_axis(n_pfrag), pfrag_side(n_pfrag))
+      pfrag_ids(1:n_pfrag) = queue(1:n_pfrag)
+      pfrag_axis(1:n_pfrag) = queue_axis(1:n_pfrag)
+      pfrag_side(1:n_pfrag) = queue_side(1:n_pfrag)
+      deallocate(queue, queue_axis, queue_side)
+      return
+    end if
+    start_idx = 1
+    end_idx = 1
+    do level = 1, max(0, shell_max)
+      idx = start_idx
+      start_idx = end_idx + 1
+      do while (idx <= end_idx)
+        base_frag = queue(idx)
+        do axis = 1, 3
+          do side = -1, 1, 2
+            jfrag = wpw_periodic_face_neighbor_id(dg_frag, base_frag, axis, side)
+            if (jfrag <= 0) cycle
+            if (.not. any(queue(1:n_pfrag) == jfrag) .and. n_pfrag < max_frag) then
+              n_pfrag = n_pfrag + 1
+              queue(n_pfrag) = jfrag
+              if (base_frag == ifrag_center) then
+                queue_axis(n_pfrag) = axis
+                queue_side(n_pfrag) = side
+              end if
+            end if
+          end do
+        end do
+        idx = idx + 1
+      end do
+      end_idx = n_pfrag
+    end do
+    allocate(pfrag_ids(n_pfrag), pfrag_axis(n_pfrag), pfrag_side(n_pfrag))
+    pfrag_ids(1:n_pfrag) = queue(1:n_pfrag)
+    pfrag_axis(1:n_pfrag) = queue_axis(1:n_pfrag)
+    pfrag_side(1:n_pfrag) = queue_side(1:n_pfrag)
+    deallocate(queue, queue_axis, queue_side)
+  end subroutine collect_wpw_fragment_shell_local
+
+  integer function wpw_periodic_face_neighbor_id(dg_frag, ifrag, axis, side) result(jfrag)
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, axis, side
+    integer :: coords(3), rem, nfrag_total
+
+    jfrag = 0
+    nfrag_total = max(1, product(dg_frag%num_fragment(1:3)))
+    if (ifrag < 1 .or. ifrag > nfrag_total) return
+    if (axis < 1 .or. axis > 3) return
+    coords(1) = (ifrag - 1) / max(1, dg_frag%num_fragment(2) * dg_frag%num_fragment(3)) + 1
+    rem = modulo(ifrag - 1, max(1, dg_frag%num_fragment(2) * dg_frag%num_fragment(3)))
+    coords(2) = rem / max(1, dg_frag%num_fragment(3)) + 1
+    coords(3) = modulo(rem, max(1, dg_frag%num_fragment(3))) + 1
+    coords(axis) = modulo(coords(axis) - 1 + side + max(1, dg_frag%num_fragment(axis)), &
+      max(1, dg_frag%num_fragment(axis))) + 1
+    jfrag = ((coords(1) - 1) * max(1, dg_frag%num_fragment(2)) + coords(2) - 1) * &
+      max(1, dg_frag%num_fragment(3)) + coords(3)
+  end function wpw_periodic_face_neighbor_id
+
+  integer function wpw_periodic_offset_fragment_id(dg_frag, ifrag, dx, dy, dz) result(jfrag)
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    integer, intent(in) :: ifrag, dx, dy, dz
+    integer :: coords(3), rem, nfrag_total
+
+    jfrag = 0
+    nfrag_total = max(1, product(dg_frag%num_fragment(1:3)))
+    if (ifrag < 1 .or. ifrag > nfrag_total) return
+    coords(1) = (ifrag - 1) / max(1, dg_frag%num_fragment(2) * dg_frag%num_fragment(3)) + 1
+    rem = modulo(ifrag - 1, max(1, dg_frag%num_fragment(2) * dg_frag%num_fragment(3)))
+    coords(2) = rem / max(1, dg_frag%num_fragment(3)) + 1
+    coords(3) = modulo(rem, max(1, dg_frag%num_fragment(3))) + 1
+    coords(1) = modulo(coords(1) - 1 + dx + max(1, dg_frag%num_fragment(1)), &
+      max(1, dg_frag%num_fragment(1))) + 1
+    coords(2) = modulo(coords(2) - 1 + dy + max(1, dg_frag%num_fragment(2)), &
+      max(1, dg_frag%num_fragment(2))) + 1
+    coords(3) = modulo(coords(3) - 1 + dz + max(1, dg_frag%num_fragment(3)), &
+      max(1, dg_frag%num_fragment(3))) + 1
+    jfrag = ((coords(1) - 1) * max(1, dg_frag%num_fragment(2)) + coords(2) - 1) * &
+      max(1, dg_frag%num_fragment(3)) + coords(3)
+  end function wpw_periodic_offset_fragment_id
 
   integer function fragment_local_row_index_pw(dg_frag, ig, ispin, nrow) result(iloc)
     implicit none
@@ -2803,11 +2922,12 @@ contains
     type(s_scalar), intent(in) :: Vh, Vxc(:), Vpsl
     logical, intent(in), optional :: force_sorth, quiet
 
-    integer :: i_local, ifrag, jfrag, axis, side, n_pfrag, pidx, qidx, iblk
+    integer :: i_local, ifrag, n_pfrag, pidx, qidx, iblk
     integer :: iw, jw, ib, ipw, ix, iy, iz, gx, gy, gz, idir, n_w, n_pw, n_mix, n_self
-    integer :: nbf, info, lwork, rank_def, pfrag_ids(7), pfrag_axis(7), pfrag_side(7)
+    integer :: nbf, info, lwork, rank_def
     integer :: n_ab, n_local_frag, wpw_red_max_dim
     integer :: n_red, n_keep, n_drop, info_red
+    integer :: neighbor_shell
     integer :: max_g2, drop_g2, ipw_g2, ik_mode(3)
     integer :: p_lb1, p_lb2, p_lb3, p_ub1, p_ub2, p_ub3
     integer :: v_lb1, v_lb2, v_lb3, v_ub1, v_ub2, v_ub3
@@ -2827,7 +2947,7 @@ contains
     real(8) :: red_s_min, red_s_max, red_h_herm
     real(8) :: red_lambda_min_all, red_lambda_max_all, red_s_sn_max, red_snn_i_max, red_h_herm_max
     real(8) :: red_s_min_all, red_s_max_all
-    logical :: have_grad_cache, found, do_sorth, quiet_mode
+    logical :: have_grad_cache, do_sorth, quiet_mode
     complex(8), parameter :: zi = (0.0d0, 1.0d0)
     complex(8) :: phase, grad_p(3), grad_sym_w(3)
     complex(8), allocatable :: S_mix(:,:), H_mix(:,:), S_filt(:,:), H_filt(:,:)
@@ -2839,6 +2959,7 @@ contains
     complex(8), allocatable :: T_wp_gradchi_face(:,:,:)
     complex(8), allocatable :: S_ab(:,:), H_ab(:,:), H_ab_perp(:,:), S_ab_perp(:,:)
     complex(8), allocatable :: T_grad_ab(:,:), T_ig_ab(:,:), T_sym_ab(:,:), H_local_ab(:,:)
+    integer, allocatable :: pfrag_ids(:), pfrag_axis(:), pfrag_side(:)
     real(8) :: chi_a, grad_chi_a(3)
     complex(8), allocatable :: wval(:), grad_wval(:,:), work(:)
     real(8), allocatable :: eval(:), eval_raw(:), eval_filt(:), eval_self(:), eval_red(:), rwork(:)
@@ -2887,10 +3008,12 @@ contains
     red_s_max_all = 0.0d0
     tol_red = wpw_neighbor_sorth_tol()
     n_local_frag = max(0, dg_frag%ifrag_end - dg_frag%ifrag_start + 1)
+    neighbor_shell = wpw_neighbor_env_shell_from_backend()
     wpw_red_max_dim = 0
     do i_local = 1, n_local_frag
       if (i_local >= 1 .and. i_local <= size(dg_frag%global_wannier_local_nkeep)) then
-        wpw_red_max_dim = max(wpw_red_max_dim, dg_frag%global_wannier_local_nkeep(i_local) + 7 * n_pw)
+        wpw_red_max_dim = max(wpw_red_max_dim, dg_frag%global_wannier_local_nkeep(i_local) + &
+          max(1, product(dg_frag%num_fragment(1:3))) * n_pw)
       end if
     end do
     if (do_sorth .and. n_local_frag > 0 .and. wpw_red_max_dim > 0) then
@@ -2924,6 +3047,7 @@ contains
       dg_frag%wpw_reduced_Hraw_build(:, :, :) = (0.0d0, 0.0d0)
       dg_frag%wpw_reduced_Sraw_build(:, :, :) = (0.0d0, 0.0d0)
       dg_frag%wpw_reduced_ready = .false.
+      dg_frag%wpw_reduced_shell = 0
       dg_frag%wpw_reduced_max_dim = wpw_red_max_dim
       dg_frag%wpw_reproject_prev_valid = .false.
     end if
@@ -2933,24 +3057,13 @@ contains
       n_w = dg_frag%global_wannier_local_nkeep(i_local)
       if (n_w <= 0) cycle
 
-      n_pfrag = 1
-      pfrag_ids(1) = ifrag
-      pfrag_axis(1) = 0
-      pfrag_side(1) = 0
-      do axis = 1, 3
-        do side = -1, 1, 2
-          jfrag = wpw_face_neighbor_fragment(dg_frag, ifrag, axis, side)
-          if (jfrag <= 0 .or. jfrag == ifrag) cycle
-          found = any(pfrag_ids(1:n_pfrag) == jfrag)
-          if (.not. found .and. n_pfrag < size(pfrag_ids)) then
-            n_pfrag = n_pfrag + 1
-            pfrag_ids(n_pfrag) = jfrag
-            pfrag_axis(n_pfrag) = axis
-            pfrag_side(n_pfrag) = side
-          end if
-        end do
-      end do
-      if (n_pfrag <= 1) cycle
+      call collect_wpw_fragment_shell_local(dg_frag, ifrag, neighbor_shell, pfrag_ids, pfrag_axis, pfrag_side, n_pfrag)
+      if (n_pfrag <= 1) then
+        if (allocated(pfrag_ids)) deallocate(pfrag_ids)
+        if (allocated(pfrag_axis)) deallocate(pfrag_axis)
+        if (allocated(pfrag_side)) deallocate(pfrag_side)
+        cycle
+      end if
 
       n_mix = n_w + n_pfrag * n_pw
       n_self = n_w + n_pw
@@ -3448,18 +3561,27 @@ contains
       deallocate(S_wp, H_wp, H_wp_local, T_wp)
       deallocate(T_wp_gradchi, T_wp_igchi, T_wp_sym, T_wp_gradchi_face, H_ww)
       deallocate(wval, grad_wval, eval, eval_raw, eval_filt, eval_self, rwork, work)
+      if (allocated(pfrag_ids)) deallocate(pfrag_ids)
+      if (allocated(pfrag_axis)) deallocate(pfrag_axis)
+      if (allocated(pfrag_side)) deallocate(pfrag_side)
     end do
 
     if (do_sorth .and. allocated(dg_frag%wpw_reduced_dim)) then
       dg_frag%wpw_reduced_ready = any(dg_frag%wpw_reduced_dim(:) > 0)
+      if (dg_frag%wpw_reduced_ready) then
+        dg_frag%wpw_reduced_shell = neighbor_shell
+      else
+        dg_frag%wpw_reduced_shell = 0
+      end if
       if (.not. dg_frag%wpw_reduced_ready) then
         red_lambda_min_all = 0.0d0
         red_s_min_all = 0.0d0
       end if
       if (dg_frag%id == 0 .and. .not. quiet_mode) then
-        write(*,'(1x,a,4(a,i0),7(a,1pe12.4),a,l1)') &
+        write(*,'(1x,a,5(a,i0),7(a,1pe12.4),a,l1,2(a,a))') &
           '[DG-WPW-RED-INIT] summary:', &
           ' local_fragments=', n_local_frag, &
+          ' neighbor_shell=', neighbor_shell, &
           ' dim_min=', minval(dg_frag%wpw_reduced_dim), &
           ' dim_max=', maxval(dg_frag%wpw_reduced_dim), &
           ' max_dim=', dg_frag%wpw_reduced_max_dim, &
@@ -3470,7 +3592,9 @@ contains
           ' max_H_herm=', red_h_herm_max, &
           ' S_eval_min_global=', red_s_min_all, &
           ' S_eval_max_global=', red_s_max_all, &
-          ' ready=', dg_frag%wpw_reduced_ready
+          ' ready=', dg_frag%wpw_reduced_ready, &
+          ' backend=', trim(dg_mixed_z_local_prop_backend), &
+          ' shell_source=', 'namelist_or_backend_alias'
       end if
     end if
 
