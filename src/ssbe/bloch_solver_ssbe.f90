@@ -34,6 +34,12 @@ module bloch_solver_ssbe
         complex(8), allocatable :: dnm_i(:, :, :, :)
         real(8), allocatable    :: abs_dnm(:, :, :)
         complex(8), allocatable :: exp_iphi(:, :, :)
+        ! T2 Delta-omega dephasing gate weight (design: gw/gw_design/plans/
+        ! 2026-07-08-t2-gate-shape.md), precomputed ONCE at init from the
+        ! STATIC gs%delta_omega (t2_gate_weight, gs_info_ssbe.f90) -- gicov_rhs
+        ! then just Hadamard-multiplies it into the phenomenological -rho/t_2
+        ! term every step.  Diagonal forced to 0 (no population dephasing).
+        real(8), allocatable    :: t2_gate_w(:, :, :)
     end type
 
     ! --- lightweight gicov perf timers (accumulate in gicov_rhs; print via sbe_print_timers) ---
@@ -193,13 +199,15 @@ contains
 subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     use util_ssbe
     use communication
-    use salmon_global, only: yn_sbe_gs_current_subtract, yn_vnl_correction, yn_sbe_vnl_exact
+    use salmon_global, only: yn_sbe_gs_current_subtract, yn_vnl_correction, yn_sbe_vnl_exact, &
+                              sbe_t2_gate_shape, sbe_t2_gate_theta, sbe_t2_gate_width, &
+                              sbe_lg_degen_floor
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info), intent(in) :: gs
     integer, intent(in) :: nb_sbe
     integer, intent(in) :: icomm
-    integer :: ik, ib, nk_proc, irank, nproc, ierr
+    integer :: ik, ib, jb, nk_proc, irank, nproc, ierr
     integer, allocatable :: itbl_min(:), itbl_max(:)
 
     call comm_get_groupinfo(icomm, irank, nproc)
@@ -219,6 +227,25 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     do ik = sbe%ik_min, sbe%ik_max
         do ib = 1, sbe%nb
             sbe%rho(ib, ib, ik) = gs%occup(ib, ik)
+        end do
+    end do
+
+    ! T2 Delta-omega dephasing gate weight: precompute ONCE from the STATIC
+    ! gs%delta_omega (design: gw/gw_design/plans/2026-07-08-t2-gate-shape.md).
+    ! gicov_rhs Hadamard-multiplies this into the -rho/t_2 dephasing term every
+    ! step instead of recomputing it. Diagonal forced to 0 (no population
+    ! dephasing) regardless of what t2_gate_weight would return for delta_omega=0.
+    allocate(sbe%t2_gate_w(1:sbe%nb, 1:sbe%nb, sbe%ik_min:sbe%ik_max))
+    do ik = sbe%ik_min, sbe%ik_max
+        do jb = 1, sbe%nb
+            do ib = 1, sbe%nb
+                if (ib == jb) then
+                    sbe%t2_gate_w(ib, jb, ik) = 0d0
+                else
+                    sbe%t2_gate_w(ib, jb, ik) = t2_gate_weight(gs%delta_omega(ib, jb, ik), &
+                        & sbe_t2_gate_shape, sbe_t2_gate_theta, sbe_t2_gate_width, sbe_lg_degen_floor)
+                end if
+            end do
         end do
     end do
 
@@ -1265,8 +1292,9 @@ end function q_ij_from_rho
 ! returned for the full k range (nb,nb,nk); a caller slices its local k-range.
 !===================================================================
 subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
-  use salmon_global, only: num_kgrid, t_2, yn_sbe_gw_collision, sbe_deph_mode
-  use degenerate_block_ssbe, only: covariant_grad_block, theta_off
+  use salmon_global, only: num_kgrid, t_2, yn_sbe_gw_collision, sbe_deph_mode, &
+                            sbe_t2_gate_shape, sbe_t2_gate_theta
+  use degenerate_block_ssbe, only: covariant_grad_block
   implicit none
   type(s_sbe_bloch_solver), intent(in) :: sbe
   type(s_sbe_gs_info), intent(in) :: gs
@@ -1420,15 +1448,29 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
           drho(ib, jb, ik) = drho(ib, jb, ik) &
             & - zi * gs%delta_omega(ib, jb, ik) * gh_rho(ib, jb, ik)
           ! Covariant T2: dephase only ENERGY-DISTINCT pairs. Inside a
-          ! (near-)degenerate manifold (|delta_omega| <= theta_off, the same
-          ! degeneracy scale the Wilson-line transport groups blocks by) the
-          ! scalar -rho/t_2 relaxation is NOT U(N)-gauge-covariant -- it splits
-          ! diagonal/off-diagonal, a partition U(N) rotations mix -- so it is
-          ! skipped; intra-manifold relaxation belongs to the covariant (GW
-          ! collision) channel, not to a phenomenological scalar T2.
-          if (.not. deph_by_gw .and. &
-            & abs(gs%delta_omega(ib, jb, ik)) > theta_off) then
-            drho(ib, jb, ik) = drho(ib, jb, ik) - gh_rho(ib, jb, ik) / t_2
+          ! (near-)degenerate manifold the scalar -rho/t_2 relaxation is NOT
+          ! U(N)-gauge-covariant -- it splits diagonal/off-diagonal, a
+          ! partition U(N) rotations mix -- so it is skipped there;
+          ! intra-manifold relaxation belongs to the covariant (GW collision)
+          ! channel, not to a phenomenological scalar T2.
+          !
+          ! Shape (design: gw/gw_design/plans/2026-07-08-t2-gate-shape.md):
+          ! 'step' reuses the ORIGINAL hard-skip arithmetic VERBATIM (same
+          ! gh_rho/t_2 division order => byte-identical with
+          ! sbe_t2_gate_theta defaulting to the old theta_off literal 2d-3;
+          ! do NOT route it through sbe%t2_gate_w, which would change the
+          ! rounding). 'gauss' Hadamard-multiplies the precomputed weight
+          ! (built once in init_sbe_bloch_solver from the STATIC
+          ! gs%delta_omega) into the same term.
+          if (.not. deph_by_gw) then
+            if (trim(sbe_t2_gate_shape) == 'step') then
+              if (abs(gs%delta_omega(ib, jb, ik)) > sbe_t2_gate_theta) then
+                drho(ib, jb, ik) = drho(ib, jb, ik) - gh_rho(ib, jb, ik) / t_2
+              end if
+            else   ! 'gauss'
+              drho(ib, jb, ik) = drho(ib, jb, ik) &
+                & - sbe%t2_gate_w(ib, jb, ik) * gh_rho(ib, jb, ik) / t_2
+            end if
           end if
         end if
       end do
