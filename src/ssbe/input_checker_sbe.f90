@@ -220,6 +220,12 @@ function check_input_variables_sbe() result(flag)
 
     if (sbe_lg_degen_floor <= 0d0) call raise("ERROR! 'sbe_lg_degen_floor' must be positive.")
 
+    if (.not. t2_gate_params_ok(sbe_t2_gate_shape, sbe_t2_gate_theta, sbe_t2_gate_width)) then
+        call raise("ERROR! 'sbe_t2_gate_shape' must be 'step' or 'gauss', " // &
+            & "'sbe_t2_gate_theta' and 'sbe_t2_gate_width' must be non-negative, " // &
+            & "and 'sbe_t2_gate_width' must be positive when 'sbe_t2_gate_shape'='gauss'.")
+    end if
+
     select case(yn_sbe_gs_current_subtract)
     case('y', 'n')
     case default
@@ -340,6 +346,24 @@ function check_input_variables_sbe() result(flag)
     end subroutine raise
 
 end function check_input_variables_sbe
+
+! T2 Delta-omega dephasing gate parameter validation (design: gw/gw_design/
+! plans/2026-07-08-t2-gate-shape.md).  MODULE-LEVEL (not nested in
+! check_input_variables_sbe) so it is directly unit-testable.  shape is
+! compared case-sensitively against 'step'/'gauss' -- production never
+! lowercases this family of &sbe string keys (sbe_deph_mode, sbe_lg_degen,
+! gauge_sbe are likewise absent from inputoutput.f90's "convert lowercase"
+! block), so a user typing 'Step'/'GAUSS' is rejected here rather than
+! silently accepted.
+pure logical function t2_gate_params_ok(shape, theta, width) result(ok)
+    implicit none
+    character(*), intent(in) :: shape
+    real(8),      intent(in) :: theta, width
+    ok = (trim(shape) == 'step' .or. trim(shape) == 'gauss') &
+         .and. theta >= 0d0 .and. width >= 0d0
+    if (trim(shape) == 'gauss') ok = ok .and. width > 0d0
+end function t2_gate_params_ok
+
 end module input_checker_sbe
 
 

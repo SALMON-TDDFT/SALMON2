@@ -40,6 +40,7 @@ program test_t2_gate
   use salmon_global, only: sbe_t2_gate_shape, sbe_t2_gate_theta, sbe_t2_gate_width
   use inputoutput,   only: read_input_common
   use gs_info_ssbe,  only: t2_gate_weight
+  use input_checker_sbe, only: t2_gate_params_ok
   implicit none
 
   integer :: nfail
@@ -47,6 +48,7 @@ program test_t2_gate
 
   call test_defaults(nfail)
   call test_gate_weight(nfail)
+  call test_gate_params_ok(nfail)
 
   if (nfail > 0) then
     write(*, '(a,i0,a)') "FAILED: ", nfail, " check(s)"
@@ -111,6 +113,23 @@ contains
     call check_close_r(t2_gate_weight( 5d-10, 'gauss', 0d0, 1d-3, 1d-9), 0d0, 1d-15, &
       'gauss floor clamp', nfail)
   end subroutine test_gate_weight
+
+  !======================= Task 3: checker predicate t2_gate_params_ok ========
+  ! shape must be 'step' or 'gauss' (case-sensitive: production never
+  ! lowercases sbe_deph_mode-style string keys either -- see
+  ! inputoutput.f90's "convert lowercase" block, which omits sbe_* strings);
+  ! theta/width must be non-negative; gauss additionally requires width>0
+  ! (width=0 would divide by zero in t2_gate_weight's gauss branch).
+  subroutine test_gate_params_ok(nfail)
+    implicit none
+    integer, intent(inout) :: nfail
+
+    call check_true(      t2_gate_params_ok('step' , 2d-3, 0d0 ), 'valid step ok', nfail)
+    call check_true(      t2_gate_params_ok('gauss', 0d0 , 1d-3), 'valid gauss ok', nfail)
+    call check_true(.not. t2_gate_params_ok('bogus', 2d-3, 0d0 ), 'bad shape rejected', nfail)
+    call check_true(.not. t2_gate_params_ok('gauss', 0d0 , 0d0 ), 'gauss width=0 rejected', nfail)
+    call check_true(.not. t2_gate_params_ok('step' ,-1d0 , 0d0 ), 'negative theta rejected', nfail)
+  end subroutine test_gate_params_ok
 
   !======================= assert helpers (ssbe style, copied verbatim
   !======================= from test/test_block_transport.f90) ================
