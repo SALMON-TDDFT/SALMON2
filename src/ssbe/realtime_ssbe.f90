@@ -24,12 +24,17 @@ subroutine main_realtime_ssbe(icomm)
     integer :: nproc, irank, ierr
     integer :: fh_sbe_rt, fh_sbe_rt_energy, fh_sbe_nex
     integer :: fh_sbe_diag
+    integer :: fh_sbe_occ, fh_sbe_edist
     integer :: ib, jb, ik
     real(8) :: herm_norm(1), herm_norm_l(1), trace_re, trace_re_l
     integer :: nk
     integer :: nb_sbe_eff, nelec_eff
     real(8), allocatable :: gamma_abs(:, :)
     real(8) :: bj_am(8,8)
+    ! Band-resolved population + energy-resolved distribution (yn_sbe_out_occ='y')
+    real(8), allocatable :: nex_b(:), edist(:)
+    real(8) :: ed_lo, ed_de, ed_sigma
+    integer :: ed_nbin
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
@@ -106,6 +111,17 @@ subroutine main_realtime_ssbe(icomm)
     energy = 0.0d0
     E(:) = 0.0d0; Jmat(:) = 0.0d0;
 
+    ! Population-output buffers + energy grid (yn_sbe_out_occ='y').  Allocated on
+    ! EVERY rank: calc_band_population / calc_energy_distribution are collective
+    ! (comm_summation), so every rank fills a local partial and reduces.  The
+    ! grid comes from gs%eigen (replicated) => identical on all ranks.
+    if (yn_sbe_out_occ == 'y') then
+        allocate(nex_b(1:nb_sbe_eff))
+        ed_nbin = 300
+        call sbe_edist_grid(gs, nb_sbe_eff, ed_nbin, ed_lo, ed_de, ed_sigma)
+        allocate(edist(1:ed_nbin))
+    end if
+
     if (irank == 0) then
         ! SYSNAME_sbe_rt.data
         fh_sbe_rt = get_filehandle()
@@ -119,6 +135,15 @@ subroutine main_realtime_ssbe(icomm)
         fh_sbe_nex = get_filehandle()
         open(unit=fh_sbe_nex, file=trim(base_directory)//trim(sysname)//"_sbe_nex.data", action="write")
         call write_sbe_nex_header(fh_sbe_nex)
+        ! SYSNAME_sbe_occ.data / _sbe_edist.data (band- and energy-resolved population)
+        if (yn_sbe_out_occ == 'y') then
+            fh_sbe_occ = get_filehandle()
+            open(unit=fh_sbe_occ, file=trim(base_directory)//trim(sysname)//"_sbe_occ.data", action="write")
+            call write_sbe_occ_header(fh_sbe_occ, nb_sbe_eff)
+            fh_sbe_edist = get_filehandle()
+            open(unit=fh_sbe_edist, file=trim(base_directory)//trim(sysname)//"_sbe_edist.data", action="write")
+            call write_sbe_edist_header(fh_sbe_edist)
+        end if
         ! SYSNAME_sbe_diag.data (LG-SBE mechanism diagnostics; length_gauge only)
         if (trim(gauge_sbe) == "length_gauge") then
             fh_sbe_diag = get_filehandle()
@@ -188,6 +213,15 @@ subroutine main_realtime_ssbe(icomm)
             if (irank == 0) then
                 call write_sbe_nex_line(fh_sbe_nex, t, tr_all - tr_vb, nelec_eff - tr_vb)
             end if
+            ! Band-resolved population + energy-resolved distribution.  Both
+            ! calc_* are collective (comm_summation) => every rank calls them;
+            ! only rank 0 writes.
+            if (yn_sbe_out_occ == 'y') then
+                call calc_band_population(sbe, gs, nex_b, icomm)
+                if (irank == 0) call write_sbe_occ_line(fh_sbe_occ, t, nb_sbe_eff, nex_b)
+                call calc_energy_distribution(sbe, gs, ed_lo, ed_de, ed_nbin, ed_sigma, edist, icomm)
+                if (irank == 0) call write_sbe_edist_block(fh_sbe_edist, t, ed_nbin, ed_lo, ed_de, edist)
+            end if
         end if
 
         if (mod(it, 500) == 0) then
@@ -195,6 +229,10 @@ subroutine main_realtime_ssbe(icomm)
                 flush(fh_sbe_rt)
                 flush(fh_sbe_rt_energy)
                 flush(fh_sbe_nex)
+                if (yn_sbe_out_occ == 'y') then
+                    flush(fh_sbe_occ)
+                    flush(fh_sbe_edist)
+                end if
                 if (trim(gauge_sbe) == "length_gauge") flush(fh_sbe_diag)
             end if
         end if
@@ -208,7 +246,15 @@ subroutine main_realtime_ssbe(icomm)
         close(fh_sbe_rt)
         close(fh_sbe_rt_energy)
         close(fh_sbe_nex)
+        if (yn_sbe_out_occ == 'y') then
+            close(fh_sbe_occ)
+            close(fh_sbe_edist)
+        end if
         if (trim(gauge_sbe) == "length_gauge") close(fh_sbe_diag)
+    end if
+
+    if (yn_sbe_out_occ == 'y') then
+        deallocate(nex_b, edist)
     end if
 
     return

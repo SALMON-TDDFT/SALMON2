@@ -1015,6 +1015,144 @@ function calc_trace(sbe, gs, nb_max, icomm) result(tr)
 end function calc_trace
 
 
+!===================================================================
+! Band-resolved excited population (yn_sbe_out_occ='y').
+!   nex_b(b) = sum_k w_k ( Re rho_bb(k,t) - f0_b(k) ) / sum_k w_k
+! with f0 = gs%occup (the ground-state occupation; equal to gs%f0_ref at init,
+! but gs%occup is always allocated whereas gs%f0_ref exists only under the GW
+! collision term).  Gauge-aware diagonal source MIRRORING calc_trace: rho for
+! velocity_gauge, qnm_new for length_gauge (in LG sbe%rho is frozen at its
+! init value -- only qnm/qnm_new are propagated -- but their diagonals coincide
+! by construction; see prepare_qnm).  MPI: each rank sums its own k-slice, then
+! comm_summation reduces the full nb-vector (collective; every rank must call).
+! Normalized by sum(kweight) exactly as calc_trace, so summing the conduction
+! columns reproduces the nelec column of the *_sbe_nex.data file.
+!===================================================================
+subroutine calc_band_population(sbe, gs, nex_b, icomm)
+    use communication, only: comm_summation
+    use salmon_global, only: gauge_sbe
+    implicit none
+    type(s_sbe_bloch_solver), intent(in) :: sbe
+    type(s_sbe_gs_info), intent(in) :: gs
+    real(8), intent(out) :: nex_b(1:sbe%nb)
+    integer, intent(in) :: icomm
+    integer :: ik, ib
+    real(8) :: wsum
+    real(8) :: tmp_l(1:sbe%nb)
+
+    tmp_l(:) = 0d0
+    select case(trim(gauge_sbe))
+    case ("length_gauge")
+        do ik = sbe%ik_min, sbe%ik_max
+            do ib = 1, sbe%nb
+                tmp_l(ib) = tmp_l(ib) + gs%kweight(ik) * &
+                    & (real(sbe%qnm_new(ib, ib, ik)) - gs%occup(ib, ik))
+            end do
+        end do
+    case default   ! velocity_gauge
+        do ik = sbe%ik_min, sbe%ik_max
+            do ib = 1, sbe%nb
+                tmp_l(ib) = tmp_l(ib) + gs%kweight(ik) * &
+                    & (real(sbe%rho(ib, ib, ik)) - gs%occup(ib, ik))
+            end do
+        end do
+    end select
+    call comm_summation(tmp_l, nex_b, sbe%nb, icomm)
+    wsum = sum(gs%kweight(:))
+    nex_b(:) = nex_b(:) / wsum
+
+    return
+end subroutine calc_band_population
+
+
+!===================================================================
+! Energy grid for the nonequilibrium distribution (yn_sbe_out_occ='y').
+! Built ONCE from gs%eigen (replicated on every rank, so the grid is identical
+! everywhere without communication).  nbin bin centers span the window band
+! energies padded by +-6*sigma; sigma = broadening (a few bin widths).
+!===================================================================
+subroutine sbe_edist_grid(gs, nb, nbin, e_lo, de, sigma)
+    implicit none
+    type(s_sbe_gs_info), intent(in) :: gs
+    integer, intent(in) :: nb, nbin
+    real(8), intent(out) :: e_lo, de, sigma
+    real(8) :: emin, emax, espan, e_hi
+
+    emin = minval(gs%eigen(1:nb, 1:gs%nk))
+    emax = maxval(gs%eigen(1:nb, 1:gs%nk))
+    espan = max(emax - emin, 1d-6)
+    ! Fixed relative padding, then tie the broadening to the ACTUAL bin width
+    ! (sigma = 2*de) so the Gaussian is always well-resolved on the grid,
+    ! independent of nbin -- avoids the sigma<<de undersampling that would
+    ! collapse the deposited weight for a small nbin.
+    e_lo = emin - 0.05d0 * espan
+    e_hi = emax + 0.05d0 * espan
+    de = (e_hi - e_lo) / dble(nbin - 1)
+    sigma = 2d0 * de
+
+    return
+end subroutine sbe_edist_grid
+
+
+!===================================================================
+! Energy-resolved nonequilibrium occupation distribution (yn_sbe_out_occ='y').
+!   dist(j) = sum_{b,k} w_k Re rho_bb(k,t) g(e_j - eps_b(k)) / sum_k w_k
+! e_j = e_lo + (j-1)*de, g = unit-normalized Gaussian of width sigma.  Each
+! (b,k) contribution is deposited only on the +-5*sigma bin window around its
+! eigenvalue (cost ~ nb*nk_slice*O(sigma/de), not nb*nk_slice*nbin).  Same
+! gauge-aware diagonal source as calc_band_population.  MPI: local k-slice
+! partial histogram, comm_summation over nbin (collective; all ranks call).
+! Normalized by sum(kweight) so the energy integral gives electrons/cell.
+!===================================================================
+subroutine calc_energy_distribution(sbe, gs, e_lo, de, nbin, sigma, dist, icomm)
+    use communication, only: comm_summation
+    use salmon_global, only: gauge_sbe
+    implicit none
+    type(s_sbe_bloch_solver), intent(in) :: sbe
+    type(s_sbe_gs_info), intent(in) :: gs
+    real(8), intent(in) :: e_lo, de, sigma
+    integer, intent(in) :: nbin
+    real(8), intent(out) :: dist(1:nbin)
+    integer, intent(in) :: icomm
+    integer :: ik, ib, j, jc, jlo, jhi, nsig
+    real(8) :: occ, eps, ec, arg, gnorm, inv2s2, wsum
+    logical :: is_lg
+    real(8), allocatable :: dist_l(:)
+
+    allocate(dist_l(1:nbin))
+    dist_l(:) = 0d0
+    is_lg = (trim(gauge_sbe) == "length_gauge")
+    inv2s2 = 1d0 / (2d0 * sigma * sigma)
+    gnorm = 1d0 / (sqrt(2d0 * pi) * sigma)
+    nsig = int(5d0 * sigma / de) + 1   ! +-5 sigma deposition window (bins)
+
+    do ik = sbe%ik_min, sbe%ik_max
+        do ib = 1, sbe%nb
+            if (is_lg) then
+                occ = real(sbe%qnm_new(ib, ib, ik))
+            else
+                occ = real(sbe%rho(ib, ib, ik))
+            end if
+            eps = gs%eigen(ib, ik)
+            jc = nint((eps - e_lo) / de) + 1
+            jlo = max(1, jc - nsig)
+            jhi = min(nbin, jc + nsig)
+            do j = jlo, jhi
+                ec = e_lo + dble(j - 1) * de
+                arg = ec - eps
+                dist_l(j) = dist_l(j) + gs%kweight(ik) * occ * gnorm * exp(-arg * arg * inv2s2)
+            end do
+        end do
+    end do
+    call comm_summation(dist_l, dist, nbin, icomm)
+    wsum = sum(gs%kweight(:))
+    dist(:) = dist(:) / wsum
+    deallocate(dist_l)
+
+    return
+end subroutine calc_energy_distribution
+
+
 function calc_energy(sbe, gs, Ac, icomm) result(energy)
     implicit none
     type(s_sbe_bloch_solver), intent(in) :: sbe
