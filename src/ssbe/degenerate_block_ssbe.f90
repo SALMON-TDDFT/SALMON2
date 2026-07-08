@@ -53,6 +53,12 @@ module degenerate_block_ssbe
   public :: build_block_transport ! orchestrator: fixed blocks -> block-diagonal U_full(nb,nb,3,nk)
   public :: build_fixed_blocks_closed
   public :: build_blocks_fixed_closed
+  ! gicov memory-scale fix (LG-SBE Phase 1): prod_dk column-reduction helpers,
+  ! consumed by gs_info_ssbe's read_prod_dk_data (see the header comment right
+  ! before prod_dk_axis_slot below for why they live in this pure module).
+  public :: prod_dk_axis_slot     ! which of the <=3 kept gicov columns a (jdk1,jdk2,jdk3) shift is, or 0
+  public :: gicov_prod_dk_nbvec   ! stored gs%prod_dk 4th-dim extent (3 for gicov/ndk>=1, else nbvec_full)
+  public :: expected_prod_dk_nrec ! int64-safe file_sbe_prod_dk record count nk*(2ndk+1)**3*no**2
   ! Phase 2 (gicov): pure gauge-covariant intraband k-derivative operator that
   ! consumes build_block_transport's U_full (Wilson-line transport, no logm).
   public :: covariant_grad_block  ! D_cov rho = d_k rho - i[xi,rho] (<=4-shell transported stencil, per-axis alias-capped)
@@ -1218,6 +1224,101 @@ contains
 
     n_reject = 0
   end subroutine build_block_transport
+
+  !===================================================================
+  ! gicov memory-scale fix helpers (LG-SBE Phase 1, X-full).
+  !
+  ! Root cause: gs_info_ssbe's read_prod_dk_data (the GS-file reader) stores
+  ! gs%prod_dk(nb_eff,nb_eff,nbvec,nk) with nbvec = (2*ndk+1)**3 on EVERY
+  ! rank regardless of nproc_k (no k-decomposition at read time) -- at ndk=1,
+  ! nbvec=27, so this single array dominates per-rank memory
+  ! (16*27*nb_eff**2*nk bytes) and SIGBUS'd at high nproc_k/large nk (k20^3,
+  ! k24^3). But build_block_transport just above -- the ONLY prod_dk consumer
+  ! on the 'gicov' (X-full) path -- only ever looks up the THREE +unit-shift
+  ! columns via find_bvec(bvec,nbvec,1,0,0)/(0,1,0)/(0,0,1) (iv_axis(1:3)
+  ! above); it never touches a negative or multi-shift direction, at any ndk.
+  ! So for 'gicov' the reader only needs to KEEP those <=3 columns, cutting
+  ! the dominant term by up to 9x at ndk=1 (more at larger ndk) with no
+  ! change to build_block_transport's result (bit-for-bit: it reads the same
+  ! 3 physical columns either way). gi/gifix are UNCHANGED (build_xi's
+  ! match_link_blocks, degenerate_block_ssbe.f90:542, scans every bvec
+  ! column, so they keep the full shell).
+  !
+  ! These helpers are pure (no gs_info_ssbe / SALMON dependency) and live
+  ! HERE rather than in gs_info_ssbe.f90 for the same reason this whole
+  ! module is pure (see the file header): gs_info_ssbe.f90 pulls in
+  ! communication/filesystem/salmon_global/inputoutput/util_ssbe/common_ssbe
+  ! at module scope (inside init_sbe_gs_info's local `use`s), so a standalone
+  ! test of anything living IN that file needs the full SALMON dependency
+  ! tree built; a pure function living in THIS module needs only this file
+  ! (gfortran degenerate_block_ssbe.f90 test/test_gicov_memfix.f90 -o t, same
+  ! convention as test_block_transport.f90 / test_gicov_xfull.f90).
+  ! gs_info_ssbe.f90's read_prod_dk_data calls these three directly.
+  !===================================================================
+
+  !-------------------------------------------------------------------
+  ! Which of the <=3 KEPT gicov columns a raw (jdk1,jdk2,jdk3) dk-shift
+  ! (as parsed from a file_sbe_prod_dk record) belongs to, if any:
+  !   1 = +x (1,0,0), 2 = +y (0,1,0), 3 = +z (0,0,1), 0 = dropped.
+  ! Fixed slot order (not file-dependent) so gs%bvec can be pre-populated
+  ! once (see gicov_prod_dk_nbvec) instead of built by enumerating the file's
+  ! own (2*ndk+1)**3 shift order.
+  !-------------------------------------------------------------------
+  pure integer function prod_dk_axis_slot(jdk1, jdk2, jdk3) result(islot)
+    implicit none
+    integer, intent(in) :: jdk1, jdk2, jdk3
+    if (jdk1 == 1 .and. jdk2 == 0 .and. jdk3 == 0) then
+      islot = 1
+    else if (jdk1 == 0 .and. jdk2 == 1 .and. jdk3 == 0) then
+      islot = 2
+    else if (jdk1 == 0 .and. jdk2 == 0 .and. jdk3 == 1) then
+      islot = 3
+    else
+      islot = 0
+    end if
+  end function prod_dk_axis_slot
+
+  !-------------------------------------------------------------------
+  ! STORED 4th-dim extent of gs%prod_dk (what read_prod_dk_data allocates
+  ! and gs%nbvec is set to) -- NOT the file's own (2*ndk+1)**3 = nbvec_full,
+  ! which the reader must still use unchanged to compute how many records
+  ! the file contains (see expected_prod_dk_nrec: the writer's record count
+  ! does not shrink just because the reader keeps fewer columns).
+  !
+  ! 'gicov' with ndk>=1 keeps only the 3 axis columns (the +unit-shift
+  ! records exist in the file whenever ndk>=1, since the per-axis range is
+  ! -ndk..ndk and 1 is inside it for any ndk>=1). Every other case --
+  ! gi/gifix/off, OR 'gicov' with ndk==0 (no neighbour-shift data at all,
+  ! nbvec_full is already 1) -- keeps the full shell UNCHANGED, so this
+  ! degrades to a no-op identity for every pre-existing mode/edge-case.
+  !-------------------------------------------------------------------
+  pure integer function gicov_prod_dk_nbvec(sbe_lg_degen, ndk, nbvec_full) result(nbvec_out)
+    implicit none
+    character(*), intent(in) :: sbe_lg_degen
+    integer, intent(in) :: ndk, nbvec_full
+    if (trim(sbe_lg_degen) == 'gicov' .and. ndk >= 1) then
+      nbvec_out = 3
+    else
+      nbvec_out = nbvec_full
+    end if
+  end function gicov_prod_dk_nbvec
+
+  !-------------------------------------------------------------------
+  ! Writer's total record count for 'file_sbe_prod_dk' = nk*(2*ndk+1)**3*no**2
+  ! (ik outermost/slowest; see read_prod_dk_data), computed in integer(8) so
+  ! it stays exact past 2**31-1 -- hit already at a k20^3=8000 k-point mesh
+  ! for a realistic export band count `no` (this was the previous default-
+  ! integer overflow: nk*nbvec*file_no**2 silently wrapped negative/aliased,
+  ! corrupting the "fewer/more records than expected" gate and the per-record
+  ! ik_exp ordering check). Independent of gs_info state (no gs%/file I/O),
+  ! so it is unit-testable without a real prod_dk.data file or MPI.
+  !-------------------------------------------------------------------
+  pure function expected_prod_dk_nrec(nk, nbvec_full, file_no) result(nrec)
+    implicit none
+    integer, intent(in) :: nk, nbvec_full, file_no
+    integer(8) :: nrec
+    nrec = int(nk, 8) * int(nbvec_full, 8) * int(file_no, 8) * int(file_no, 8)
+  end function expected_prod_dk_nrec
 
   !===================================================================
   ! Phase 2 (gicov / Approach-B'): pure gauge-covariant intraband
