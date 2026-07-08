@@ -537,10 +537,6 @@
       select case (trim(adjustl(dg_mixed_z_local_prop_backend)))
       case ('fragment_local_mixed_split_backend','fragment_local','local')
         mixed_z_local_prop_backend_kind = 'fragment_local_mixed_split_backend'
-      case ('neighbor_env_expdiag','neighbor_env','neighbor')
-        mixed_z_local_prop_backend_kind = 'neighbor_env_expdiag'
-      case ('neighbor_env_fieldonly','neighbor_fieldonly','fieldonly')
-        mixed_z_local_prop_backend_kind = 'neighbor_env_fieldonly'
       case ('neighbor_env_interaction','neighbor_interaction','interaction','neighbor_env_delta','neighbor_delta','delta')
         mixed_z_local_prop_backend_kind = 'neighbor_env_interaction'
       case ('neighbor_env_delta_shell2','neighbor_delta_shell2','delta_shell2')
@@ -559,10 +555,6 @@
       select case (trim(adjustl(mixed_z_local_prop_backend_env(1:route_env_len))))
       case ('fragment_local_mixed_split_backend','fragment_local','local')
         mixed_z_local_prop_backend_kind = 'fragment_local_mixed_split_backend'
-      case ('neighbor_env_expdiag','neighbor_env','neighbor')
-        mixed_z_local_prop_backend_kind = 'neighbor_env_expdiag'
-      case ('neighbor_env_fieldonly','neighbor_fieldonly','fieldonly')
-        mixed_z_local_prop_backend_kind = 'neighbor_env_fieldonly'
       case ('neighbor_env_interaction','neighbor_interaction','interaction','neighbor_env_delta','neighbor_delta','delta')
         mixed_z_local_prop_backend_kind = 'neighbor_env_interaction'
       case ('neighbor_env_delta_shell2','neighbor_delta_shell2','delta_shell2')
@@ -917,24 +909,6 @@
         if (mixed_z_backend_applied .and. mixed_z_local_prop_obs_series_enabled .and. &
             .not. mixed_z_local_debug_legacy_enabled) then
           call build_wpw_local_prop_payload_fast_smoke(0, 'normal_series_after_propagation')
-        end if
-        if (dg_frag%id == 0 .and. .not. dg_frag%mixed_z_perf_count_enabled) then
-          write(*,'(1x,a,1(a,i0),1(a,1pe12.4),7(a,l1),5(a,a))') &
-            '[DG-MIXEDZ-LOCAL-PROP-WRITEBACK-CMP]', &
-            ' step=', itt, &
-            ' elapsed=', t1, &
-            ' candidate_available=', mixed_z_backend_available, &
-            ' replacement_ready=', mixed_z_backend_applied .and. .not. mixed_z_backend_bad, &
-            ' replacement_applied=', mixed_z_backend_applied, &
-            ' production_value_modified=', mixed_z_backend_applied, &
-            ' observables_series_enabled=', mixed_z_local_prop_obs_series_enabled, &
-            ' writeback_flag_enabled=', mixed_z_local_prop_writeback_enabled, &
-            ' bad=', mixed_z_backend_bad, &
-            ' target_kind=', 'production_equivalent_full_h_exp', &
-            ' candidate_kind=', trim(mixed_z_local_prop_backend_kind), &
-            ' payload_route=', 'normal_series_after_propagation', &
-            ' replacement_block_reason=', trim(mixed_z_backend_block_reason), &
-            ' reference_scope=', 'propagation_backend'
         end if
         if (mixed_z_backend_applied .and. .not. mixed_z_backend_bad) return
       end if
@@ -3081,14 +3055,8 @@
       case ('fragment_local_mixed_split_backend')
         call apply_fragment_local_mixed_split_exp_stub(E_use, state_s, state_e, &
           candidate_available, replacement_applied, bad, block_reason)
-      case ('neighbor_env_expdiag')
-        call apply_neighbor_env_expdiag_stub(E_use, state_s, state_e, .false., .false., &
-          candidate_available, replacement_applied, bad, block_reason)
-      case ('neighbor_env_fieldonly')
-        call apply_neighbor_env_expdiag_stub(E_use, state_s, state_e, .true., .false., &
-          candidate_available, replacement_applied, bad, block_reason)
       case ('neighbor_env_interaction')
-        call apply_neighbor_env_expdiag_stub(E_use, state_s, state_e, .false., .true., &
+        call apply_neighbor_env_interaction_route(E_use, state_s, state_e, &
           candidate_available, replacement_applied, bad, block_reason)
       case default
         bad = .true.
@@ -3096,30 +3064,20 @@
       end select
     end subroutine apply_mixed_split_exp_backend
 
-    subroutine apply_neighbor_env_expdiag_stub(E_use, state_s, state_e, fieldonly_mode, interaction_mode, &
-                                               candidate_available, replacement_applied, bad, block_reason)
+    subroutine apply_neighbor_env_interaction_route(E_use, state_s, state_e, &
+                                                    candidate_available, replacement_applied, bad, block_reason)
       real(8), intent(in) :: E_use(3)
       integer, intent(in) :: state_s, state_e
-      logical, intent(in) :: fieldonly_mode, interaction_mode
       logical, intent(out) :: candidate_available, replacement_applied, bad
       character(len=*), intent(out) :: block_reason
       logical :: owner_local_layout_ready
       integer :: w_owner_slots, w_total_slots, p_self_slots, p_neighbor_slots
       integer :: gid_mismatch_count, owner_frag_mismatch_count, owner_rank_mismatch_count
-      integer :: nstate_blk, i_local, ifrag, axis, side, jfrag
-      integer :: n_neighbor, neighbor_ids(6)
-      integer :: reduced_neighbor_count, n_w_layout, n_pw_layout
-      integer :: nmix, nw, np, ispin_diag
-      real(8) :: coeff_norm_w, coeff_norm_p, coeff_max_abs
-      complex(8), allocatable :: cmix_diag(:,:)
-      logical :: field_off, kernel_ready, writeback_bad, bad_coef, diag_neighbor_env
-      logical :: eig_cache_hit, eig_built, eig_skipped
-      real(8) :: eig_elapsed
+      integer :: nstate_blk
+      logical :: field_off, kernel_ready, writeback_bad, bad_coef
 
       nstate_blk = max(0, state_e - state_s + 1)
       field_off = sum(abs(E_use(1:3))) <= 1.0d-30
-      diag_neighbor_env = .not. dg_frag%mixed_z_perf_count_enabled .and. &
-        (itt == 1 .or. mod(itt, 500) == 0)
       if (.not. allocated(dg_frag%wpw_reduced_dim) .or. .not. allocated(dg_frag%wpw_reduced_nself) .or. &
           .not. allocated(dg_frag%wpw_reduced_nraw)) then
         call prepare_wpw_local_payload_ingredients('neighbor_env_layout')
@@ -3133,107 +3091,14 @@
       bad = .false.
       block_reason = 'neighbor_env_field_on_kernel_not_implemented'
 
-      nmix = dg_frag%mixed_wannier_bpw_nmix
-      nw = dg_frag%mixed_wannier_bpw_nw
-      np = dg_frag%mixed_wannier_bpw_np
-      coeff_norm_w = 0.0d0
-      coeff_norm_p = 0.0d0
-      coeff_max_abs = 0.0d0
-      if (diag_neighbor_env .and. candidate_available .and. nmix > 0 .and. nw >= 0 .and. np >= 0 .and. &
-          nmix == nw + np .and. dg_frag%nspin > 0) then
-        ispin_diag = 1
-        allocate(cmix_diag(nmix,nstate_blk))
-        call gather_global_mixed_coefficients(ispin_diag, state_s, state_e, cmix_diag)
-        if (nw > 0) coeff_norm_w = sum(abs(cmix_diag(1:nw,1:nstate_blk))**2)
-        if (np > 0) coeff_norm_p = sum(abs(cmix_diag(nw+1:nw+np,1:nstate_blk))**2)
-        coeff_max_abs = maxval(abs(cmix_diag(1:nmix,1:nstate_blk)))
-        deallocate(cmix_diag)
-      end if
-
-      if (diag_neighbor_env .and. dg_frag%id == 0) then
-        write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV] backend selected', &
-          ' shell=', mixed_z_neighbor_env_shell, &
-          ' reduced_shell=', dg_frag%wpw_reduced_shell
-        write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV] step=', itt, &
-          ' nstate_blk=', nstate_blk, &
-          ' available=', candidate_available, &
-          ' W_owner_slots=', w_owner_slots, &
-          ' W_total_layout_slots=', w_total_slots, &
-          ' P_self_slots=', p_self_slots, &
-          ' P_neighbor_slots=', p_neighbor_slots, &
-          ' field_abs_sum=', sum(abs(E_use(1:3))), &
-          ' coeff_norm_w=', coeff_norm_w, &
-          ' coeff_norm_p=', coeff_norm_p, &
-          ' coeff_max_abs=', coeff_max_abs
-      end if
-      if (diag_neighbor_env) then
-        call diagnose_neighbor_env_raw_matrices()
-      end if
-      if (diag_neighbor_env .and. dg_frag%id == 0) then
-        do i_local = 1, size(dg_frag%wpw_reduced_dim)
-          ifrag = dg_frag%ifrag_start + i_local - 1
-          n_neighbor = 0
-          neighbor_ids(:) = 0
-          do axis = 1, 3
-            do side = -1, 1, 2
-              jfrag = wpw_face_neighbor_fragment(dg_frag, ifrag, axis, side)
-              if (jfrag <= 0 .or. jfrag == ifrag) cycle
-              if (.not. any(neighbor_ids(1:max(1,n_neighbor)) == jfrag) .and. &
-                  n_neighbor < size(neighbor_ids)) then
-                n_neighbor = n_neighbor + 1
-                neighbor_ids(n_neighbor) = jfrag
-              end if
-            end do
-          end do
-          n_w_layout = 0
-          if (allocated(dg_frag%global_wannier_local_nkeep)) then
-            if (i_local >= 1 .and. i_local <= size(dg_frag%global_wannier_local_nkeep)) &
-              n_w_layout = dg_frag%global_wannier_local_nkeep(i_local)
-          end if
-          n_pw_layout = max(1, dg_frag%n_plane_waves)
-          reduced_neighbor_count = max(0, (dg_frag%wpw_reduced_nraw(i_local) - n_w_layout) / n_pw_layout - 1)
-          write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV-LAYOUT]', &
-            ' owner_frag=', ifrag, &
-            ' reduced_neighbor_count=', reduced_neighbor_count, &
-            ' face_neighbor_count=', n_neighbor, &
-            ' face_neighbors=', neighbor_ids(:), &
-            ' nred=', dg_frag%wpw_reduced_dim(i_local), &
-            ' nself=', dg_frag%wpw_reduced_nself(i_local), &
-            ' nraw=', dg_frag%wpw_reduced_nraw(i_local)
-        end do
-      end if
       if (field_off .and. candidate_available) then
-        if (fieldonly_mode .or. interaction_mode) then
-          replacement_applied = .true.
-          block_reason = 'none'
-          return
-        end if
-        bad_coef = .false.
-        call project_neighbor_env_current_to_reduced(E_use, state_s, state_e, .false., bad, kernel_ready)
-        call ensure_wpw_reduced_eigensystem_only(.true., eig_cache_hit, eig_built, eig_skipped, eig_elapsed)
-        call dryrun_wpw_reduced_expdiag(state_s, state_e, dt, bad_coef, itt, E_use, Ac_ham, 'neighbor_env_fieldoff')
-        call build_neighbor_env_owner_storage_from_reduced(state_s, state_e, bad, kernel_ready)
-        if (kernel_ready .and. .not. bad .and. .not. bad_coef) then
-          call writeback_fragment_local_storage_fieldoff(state_s, state_e, writeback_bad)
-          bad = bad .or. writeback_bad
-          if (.not. writeback_bad) then
-            replacement_applied = .true.
-            block_reason = 'none'
-          else
-            block_reason = 'neighbor_env_writeback_failed'
-          end if
-        else
-          block_reason = 'neighbor_env_fieldoff_storage_failed'
-        end if
+        replacement_applied = .true.
+        block_reason = 'none'
+        return
       else if (.not. field_off .and. candidate_available) then
         bad_coef = .false.
-        call project_neighbor_env_current_to_reduced(E_use, state_s, state_e, .not. interaction_mode, bad, kernel_ready)
-        if (interaction_mode) then
-          call apply_neighbor_env_interaction_exp(E_use, state_s, state_e, bad_coef)
-        else if (.not. fieldonly_mode) then
-          call ensure_wpw_reduced_eigensystem_only(.true., eig_cache_hit, eig_built, eig_skipped, eig_elapsed)
-          call dryrun_wpw_reduced_expdiag(state_s, state_e, dt, bad_coef, itt, E_use, Ac_ham, 'neighbor_env_fieldon')
-        end if
+        call project_neighbor_env_current_to_reduced(E_use, state_s, state_e, .false., bad, kernel_ready)
+        call apply_neighbor_env_interaction_exp(E_use, state_s, state_e, bad_coef)
         call build_neighbor_env_owner_storage_from_reduced(state_s, state_e, bad, kernel_ready)
         if (kernel_ready .and. .not. bad .and. .not. bad_coef) then
           call writeback_fragment_local_storage_fieldoff(state_s, state_e, writeback_bad)
@@ -3251,63 +3116,7 @@
         bad = .true.
         block_reason = 'neighbor_env_layout_not_ready'
       end if
-    end subroutine apply_neighbor_env_expdiag_stub
-
-    subroutine diagnose_neighbor_env_raw_matrices()
-      integer :: i_local, ifrag, nraw, nself, i, j
-      real(8) :: s_herm, h_herm, s_diag_min, s_diag_max, s_trace
-      complex(8) :: sd, diff
-      logical :: raw_available
-
-      raw_available = allocated(dg_frag%wpw_reduced_Sraw_build) .and. &
-        allocated(dg_frag%wpw_reduced_Hraw_build) .and. &
-        allocated(dg_frag%wpw_reduced_nraw) .and. allocated(dg_frag%wpw_reduced_nself)
-      if (.not. raw_available) then
-        write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV-MATRIX]', &
-          ' raw_available=', raw_available, &
-          ' block_reason=', trim(dg_frag%mixed_z_local_prop_payload_block_reason)
-        return
-      end if
-
-      do i_local = 1, size(dg_frag%wpw_reduced_nraw)
-        ifrag = dg_frag%ifrag_start + i_local - 1
-        nraw = dg_frag%wpw_reduced_nraw(i_local)
-        nself = 0
-        if (i_local <= size(dg_frag%wpw_reduced_nself)) nself = dg_frag%wpw_reduced_nself(i_local)
-        if (nraw <= 0) cycle
-        if (nraw > size(dg_frag%wpw_reduced_Sraw_build,1) .or. &
-            nraw > size(dg_frag%wpw_reduced_Hraw_build,1)) cycle
-        s_herm = 0.0d0
-        h_herm = 0.0d0
-        s_diag_min = huge(1.0d0)
-        s_diag_max = -huge(1.0d0)
-        s_trace = 0.0d0
-        do i = 1, nraw
-          sd = dg_frag%wpw_reduced_Sraw_build(i,i,i_local)
-          s_diag_min = min(s_diag_min, real(sd,8))
-          s_diag_max = max(s_diag_max, real(sd,8))
-          s_trace = s_trace + real(sd,8)
-          do j = 1, nraw
-            diff = dg_frag%wpw_reduced_Sraw_build(i,j,i_local) - &
-              conjg(dg_frag%wpw_reduced_Sraw_build(j,i,i_local))
-            s_herm = max(s_herm, abs(diff))
-            diff = dg_frag%wpw_reduced_Hraw_build(i,j,i_local) - &
-              conjg(dg_frag%wpw_reduced_Hraw_build(j,i,i_local))
-            h_herm = max(h_herm, abs(diff))
-          end do
-        end do
-        write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV-MATRIX]', &
-          ' owner_frag=', ifrag, &
-          ' raw_available=', raw_available, &
-          ' nself=', nself, &
-          ' nraw=', nraw, &
-          ' S_herm_max=', s_herm, &
-          ' H_herm_max=', h_herm, &
-          ' S_diag_min=', s_diag_min, &
-          ' S_diag_max=', s_diag_max, &
-          ' S_trace=', s_trace
-      end do
-    end subroutine diagnose_neighbor_env_raw_matrices
+    end subroutine apply_neighbor_env_interaction_route
 
     subroutine project_neighbor_env_current_to_reduced(E_use, state_s, state_e, apply_field, bad, kernel_ready)
       real(8), intent(in) :: E_use(3)
@@ -3446,11 +3255,6 @@
               deallocate(field_raw, field_red, s_work, tmp, eval)
               deallocate(c_raw, c_red, raw_gid)
               cycle
-            end if
-            if (dg_frag%id == 0 .and. .not. dg_frag%mixed_z_perf_count_enabled) then
-              write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV-R]', &
-                ' owner_frag=', ifrag, ' nred=', nred, ' nraw=', nraw, &
-                ' Rfield_herm_max=', r_herm, ' field_abs_sum=', sum(abs(E_use(1:3)))
             end if
             deallocate(field_raw, field_red, s_work, tmp, eval)
           else
@@ -3985,12 +3789,6 @@
       dg_frag%mixed_z_frag_local_nspin = nspin_use
       dg_frag%mixed_z_frag_local_storage_ready = w_slot_count > 0
       kernel_ready = dg_frag%mixed_z_frag_local_storage_ready
-      if (dg_frag%id == 0 .and. .not. dg_frag%mixed_z_perf_count_enabled) then
-        write(*,*) '[DG-MIXED-Z-NEIGHBOR-ENV-STORAGE]', &
-          ' W_owner_storage_slots=', w_slot_count, &
-          ' P_self_storage_slots=', pself_slot_count, &
-          ' replacement_storage_ready=', kernel_ready
-      end if
     end subroutine build_neighbor_env_owner_storage_from_reduced
 
     subroutine apply_fragment_local_mixed_split_exp_stub(E_use, state_s, state_e, &
@@ -5395,28 +5193,6 @@
       layout_ready = has_w_layout .and. has_p_layout .and. w_owner_slots > 0 .and. &
         p_self_slots >= 0 .and. p_neighbor_slots >= 0 .and. gid_mismatch_count == 0 .and. &
         owner_frag_mismatch_count == 0 .and. owner_rank_mismatch_count == 0
-      if (dg_frag%id == 0 .and. .not. dg_frag%mixed_z_perf_count_enabled) then
-        write(*,'(1x,a,8(a,i0),7(a,l1),3(a,a))') &
-          '[DG-MIXEDZ-FRAG-LOCAL-LAYOUT-CMP]', &
-          ' local_fragment_count=', nlocal_frag, &
-          ' W_owner_slots=', w_owner_slots, &
-          ' W_total_slots=', w_total_slots, &
-          ' P_self_slots=', p_self_slots, &
-          ' P_neighbor_slots=', p_neighbor_slots, &
-          ' gid_mismatch_count=', gid_mismatch_count, &
-          ' owner_frag_mismatch_count=', owner_frag_mismatch_count, &
-          ' owner_rank_mismatch_count=', owner_rank_mismatch_count, &
-          ' has_W_layout=', has_w_layout, &
-          ' has_P_layout=', has_p_layout, &
-          ' owner_local_layout_ready=', layout_ready, &
-          ' global_cmix_allocation_required=', .false., &
-          ' global_cmix_writeback_required=', .false., &
-          ' propagation_applied=', .false., &
-          ' bad=', .not. layout_ready, &
-          ' candidate_kind=', 'fragment_local_mixed_split_backend', &
-          ' layout_scope=', 'owner_local_metadata', &
-          ' replacement_scope=', 'diagnostic_only'
-      end if
     end subroutine diagnose_fragment_local_layout
 
     subroutine apply_global_mixed_split_exp(E_use, state_s, state_e)

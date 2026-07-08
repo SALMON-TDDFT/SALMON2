@@ -551,60 +551,6 @@
             prop_obs_pz_available = .true.
             if (enable_pz_total_hook) then
               dg_frag%mixed_z_perf_pz_writeback_calls = dg_frag%mixed_z_perf_pz_writeback_calls + 1_8
-              if (.not. enable_perf_count) then
-                write(*,'(1x,a,1(a,i0),18(a,1pe23.15),6(a,l1),2(a,a))') &
-                  '[DG-MIXEDZ-LOCAL-PZ-TOTAL-PATH-CMP]', &
-                  ' step=', itt, &
-                  ' Pz_before=', pz_prod_raw_before, &
-                  ' Pz_candidate_total=', pz_total_candidate, &
-                  ' Pz_after=', dg_frag%dipole_lg_raw(3), &
-                  ' diff_candidate_minus_before=', pz_total_diff, &
-                  ' WW_full=', wwfull_pz_total, &
-                  ' WW_diag=', wwfull_pz_diag, &
-                  ' WW_offdiag=', wwfull_pz_offdiag, &
-                  ' WW_same_owner=', dg_frag%mixed_z_prod_pz_ww_same_owner_raw, &
-                  ' WW_cross_owner=', dg_frag%mixed_z_prod_pz_ww_cross_owner_raw, &
-                  ' WP_combined=', pz_total_wp_combined, &
-                  ' PP=', pz_total_pp, &
-                  ' replacement_tol=', pz_total_tol, &
-                  ' zww_diag_mean=', dg_frag%mixed_z_prod_zww_diag_mean, &
-                  ' center_z_mean=', dg_frag%mixed_z_prod_center_z_mean, &
-                  ' diag_minus_center_rms=', dg_frag%mixed_z_prod_diag_minus_center_rms, &
-                  ' weighted_zww=', dg_frag%mixed_z_prod_weighted_zww_diag_sum, &
-                  ' weighted_center=', dg_frag%mixed_z_prod_weighted_center_sum, &
-                  ' weighted_diff=', dg_frag%mixed_z_prod_weighted_diff_sum, &
-                  ' replacement_ready=', abs(pz_total_diff) <= pz_total_tol, &
-                  ' replacement_applied=', enable_pz_total_writeback .and. abs(pz_total_diff) <= pz_total_tol .and. &
-                    pz_total_candidate == pz_total_candidate .and. pz_prod_raw_before == pz_prod_raw_before, &
-                  ' production_value_modified=', enable_pz_total_writeback .and. abs(pz_total_diff) <= pz_total_tol .and. &
-                    pz_total_candidate == pz_total_candidate .and. pz_prod_raw_before == pz_prod_raw_before, &
-                  ' decomp_ready=', dg_frag%mixed_z_prod_pz_decomp_ready, &
-                  ' field_on=', (abs(rt%E_tot(3, itt)) + abs(rt%Ac_tot(3, itt))) > 1.0d-14, &
-                  ' bad=', pz_total_candidate /= pz_total_candidate .or. pz_prod_raw_before /= pz_prod_raw_before, &
-                  ' target_kind=', 'total', &
-                  ' replacement_block_reason=', trim(pz_total_block_reason)
-                write(*,'(1x,a,1(a,i0),6(a,1pe12.4),7(a,l1),2(a,a))') &
-                  '[DG-MIXEDZ-LOCAL-PZ-WRITEBACK-TOTAL-CMP]', &
-                  ' step=', itt, &
-                  ' Pz_before=', pz_prod_raw_before, &
-                  ' Pz_candidate_total=', pz_total_candidate, &
-                  ' Pz_after=', dg_frag%dipole_lg_raw(3), &
-                  ' diff_candidate_minus_before=', pz_total_diff, &
-                  ' after_minus_candidate=', dg_frag%dipole_lg_raw(3) - pz_total_candidate, &
-                  ' after_minus_before=', dg_frag%dipole_lg_raw(3) - pz_prod_raw_before, &
-                  ' candidate_available=', dg_frag%mixed_z_prod_pz_decomp_ready, &
-                  ' replacement_ready=', abs(pz_total_diff) <= pz_total_tol .and. &
-                    pz_total_candidate == pz_total_candidate .and. pz_prod_raw_before == pz_prod_raw_before, &
-                  ' replacement_applied=', enable_pz_total_writeback .and. abs(pz_total_diff) <= pz_total_tol .and. &
-                    pz_total_candidate == pz_total_candidate .and. pz_prod_raw_before == pz_prod_raw_before, &
-                  ' production_value_modified=', enable_pz_total_writeback .and. abs(pz_total_diff) <= pz_total_tol .and. &
-                    pz_total_candidate == pz_total_candidate .and. pz_prod_raw_before == pz_prod_raw_before, &
-                  ' current_replaced=', .false., &
-                  ' density_replaced=', .false., &
-                  ' bad=', pz_total_candidate /= pz_total_candidate .or. pz_prod_raw_before /= pz_prod_raw_before, &
-                  ' target_kind=', 'total', &
-                  ' replacement_block_reason=', trim(pz_total_block_reason)
-              end if
             end if
           end if
         end if
