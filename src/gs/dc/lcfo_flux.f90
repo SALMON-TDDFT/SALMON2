@@ -604,27 +604,30 @@ contains
 
     allocate(center_bohr(3,nproj))
     ip = 0
-    ibond = 0
-    do ia=1,dc%system_tot%nion-1
-      do ja=ia+1,dc%system_tot%nion
-        dist2 = 0d0
-        do axis=1,3
-          delta(axis) = periodic_delta_import(dc%system_tot%rion(axis,ja) - dc%system_tot%rion(axis,ia), &
-            length_axis(axis))
-          dist2 = dist2 + delta(axis) * delta(axis)
-        end do
-        if(sqrt(dist2) > cutoff) cycle
-        ibond = ibond + 1
-        ip = ip + 1
-        do axis=1,3
-          center(axis) = dc%system_tot%rion(axis,ia) + 0.5d0 * delta(axis)
-          if(length_axis(axis) > 0d0) center(axis) = center(axis) - floor(center(axis) / length_axis(axis)) &
-            * length_axis(axis)
-          center_bohr(axis,ip) = center(axis)
+    do while(ip < nproj)
+      ibond = 0
+      do ia=1,dc%system_tot%nion-1
+        do ja=ia+1,dc%system_tot%nion
+          dist2 = 0d0
+          do axis=1,3
+            delta(axis) = periodic_delta_import(dc%system_tot%rion(axis,ja) - dc%system_tot%rion(axis,ia), &
+              length_axis(axis))
+            dist2 = dist2 + delta(axis) * delta(axis)
+          end do
+          if(sqrt(dist2) > cutoff) cycle
+          ibond = ibond + 1
+          ip = ip + 1
+          do axis=1,3
+            center(axis) = dc%system_tot%rion(axis,ia) + 0.5d0 * delta(axis)
+            if(length_axis(axis) > 0d0) center(axis) = center(axis) - floor(center(axis) / length_axis(axis)) &
+              * length_axis(axis)
+            center_bohr(axis,ip) = center(axis)
+          end do
+          if(ip >= nproj) exit
         end do
         if(ip >= nproj) exit
       end do
-      if(ip >= nproj) exit
+      if(ibond <= 0) exit
     end do
     if(ip < nproj) stop "DC-LCFO Wannier import: failed to complete bond-center projection map."
     if(dc%id_tot == 0) write(*,'(1x,a,i0,a,i0,a,es12.5,a,es12.5)') &

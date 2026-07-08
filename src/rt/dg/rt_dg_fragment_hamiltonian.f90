@@ -1505,7 +1505,7 @@
                 do jo = 1, ncol
                   do io = 1, nrow
                     dg_frag%momentum_blocks(iblk)%val(1:3, io, jo, ispin) = &
-                      dg_frag%momentum_blocks(iblk)%val(1:3, io, jo, ispin) + 0.5d0 * v_halo(1:3, jo, io, ispin)
+                      dg_frag%momentum_blocks(iblk)%val(1:3, io, jo, ispin) - 0.5d0 * v_halo(1:3, jo, io, ispin)
                   end do
                 end do
               end do
@@ -1969,9 +1969,9 @@
                          dg_frag%nstate_frag)
               do jo = 1, ncol
                 do io = 1, nrow
-                  ! Match the DC-LCFO-Flux export/diagnostic assembly of halo velocity
-                  ! blocks: the reverse fragment contributes the transposed halo block
-                  ! with the same half weight used for Hamiltonian halo symmetrization.
+                  ! Velocity is a real skew-symmetric derivative operator.  The
+                  ! reverse face block is therefore the signed counterpart of
+                  ! the transposed forward block, unlike the Hamiltonian blocks.
                   dg_frag%momentum_blocks(iblk)%val(1:3, io, jo, ispin) = &
                     dg_frag%momentum_blocks(iblk)%val(1:3, io, jo, ispin) + 0.5d0 * v_halo(1:3, io, jo, ispin)
                 end do
@@ -2072,7 +2072,7 @@
                   do idir = 1, 3
                     ref = max(abs(dg_frag%momentum_blocks(iblk)%val(idir, io, jo, ispin)), &
                               abs(v_halo(idir, io, jo, ispin)))
-                    err = abs(dg_frag%momentum_blocks(iblk)%val(idir, io, jo, ispin) + &
+                    err = abs(dg_frag%momentum_blocks(iblk)%val(idir, io, jo, ispin) - &
                               v_halo(idir, io, jo, ispin))
                     ref_max = max(ref_max, ref)
                     err_max = max(err_max, err)
@@ -2095,7 +2095,7 @@
     tol = max(1.0d-10, 1.0d-8 * max(1.0d0, ref_max))
     if (err_max > tol) then
       write(*,'(1x,a,i0,a,i0,a,i0,a,i0,2(a,1pe12.5))') &
-        '[FATAL] DC velocity cross block is not anti-symmetric: ifrag=', ifrag, &
+        '[FATAL] DC velocity cross block does not match reverse face: ifrag=', ifrag, &
         ' jfrag=', jfrag, ' axis=', axis_ref, ' side=', side_ref, &
         ' err=', err_max, ' tol=', tol
       stop 'DG-Fragment RT: invalid DC velocity cross-block symmetry'
