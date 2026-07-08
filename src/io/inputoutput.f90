@@ -2934,6 +2934,12 @@ contains
       if(yn_jm=='y') stop "DC method (yn_dc=y): yn_jm=y is not supported."
       if(base_directory /= './') stop "DC method (yn_dc=y): base_directory must be default."
       if(nproc_k/=1) stop "DC method (yn_dc=y): nproc_k must be 1 for both the total system and fragments."
+      if(write_gs_restart_data /= 'no') then
+        if (comm_is_root(nproc_id_global)) then
+          write(*,*) "WARNING(yn_dc=y): write_gs_restart_data is internally set to 'no'"
+        end if
+        write_gs_restart_data = 'no'
+      end if
     end if
 
 #ifdef USE_FFTW
