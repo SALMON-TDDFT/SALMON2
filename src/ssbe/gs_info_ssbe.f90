@@ -910,5 +910,32 @@ contains
 
 end subroutine init_sbe_gs_info
 
+
+! T2 Delta-omega dephasing gate weight (design: gw/gw_design/plans/
+! 2026-07-08-t2-gate-shape.md).  MODULE-LEVEL (not nested in
+! init_sbe_gs_info/prepare_matrix above, even though it lives next to the
+! delta_omega construction those build) so bloch_solver_ssbe.f90's
+! init_sbe_bloch_solver can precompute sbe%t2_gate_w from it, and so it is
+! directly unit-testable.  Returns the real weight W in [0,1] multiplying the
+! phenomenological -rho/t_2 dephasing term; the caller (gicov_rhs) applies
+! 1/t_2 and the off-diagonal (n/=m) restriction itself.
+!   W = 0                                     if |delta_omega| <= floor (exact-degeneracy clamp)
+!   step : W = 1 if |delta_omega| >  theta  else 0     (strict >, matches the current hard gate)
+!   gauss: W = 1 - exp( -(delta_omega/width)^2 )        (Thuemmler Eq.28; W(0)=0, W'(0)=0)
+pure real(8) function t2_gate_weight(delta_omega, shape, theta, width, floor) result(w)
+    implicit none
+    real(8),      intent(in) :: delta_omega, theta, width, floor
+    character(*), intent(in) :: shape
+    real(8) :: adw
+    adw = abs(delta_omega)
+    if (adw <= floor) then
+        w = 0d0
+    else if (trim(shape) == 'gauss') then
+        w = 1d0 - exp( -(delta_omega / width)**2 )
+    else                                          ! 'step' (default)
+        w = merge(1d0, 0d0, adw > theta)
+    end if
+end function t2_gate_weight
+
 end module gs_info_ssbe
 

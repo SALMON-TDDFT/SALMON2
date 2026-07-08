@@ -39,12 +39,14 @@
 program test_t2_gate
   use salmon_global, only: sbe_t2_gate_shape, sbe_t2_gate_theta, sbe_t2_gate_width
   use inputoutput,   only: read_input_common
+  use gs_info_ssbe,  only: t2_gate_weight
   implicit none
 
   integer :: nfail
   nfail = 0
 
   call test_defaults(nfail)
+  call test_gate_weight(nfail)
 
   if (nfail > 0) then
     write(*, '(a,i0,a)') "FAILED: ", nfail, " check(s)"
@@ -73,6 +75,42 @@ contains
     call check_close_r(sbe_t2_gate_theta, 2d-3, 1d-15, 'default theta=2e-3', nfail)
     call check_close_r(sbe_t2_gate_width, 0d0,  1d-15, 'default width=0', nfail)
   end subroutine test_defaults
+
+  !======================= Task 2: t2_gate_weight helper =======================
+  ! Property tests for both shapes, per the "Gate weight definition" table
+  ! (plan Sec. "Gate weight definition (single source of truth)"): step is a
+  ! strict '>' hard gate; gauss is the Gaussian notch W=1-exp(-(dw/w)^2)
+  ! (Thuemmler Eq.28, W(0)=0, quadratic onset, saturates to 1). Both shapes
+  ! clamp to 0 for |delta_omega| <= floor (exact-degeneracy protection).
+  subroutine test_gate_weight(nfail)
+    implicit none
+    integer, intent(inout) :: nfail
+
+    ! step: strict > theta, exact-degeneracy 0
+    call check_close_r(t2_gate_weight( 3d-3, 'step', 2d-3, 0d0, 1d-9), 1d0, 1d-15, &
+      'step above', nfail)
+    call check_close_r(t2_gate_weight( 1d-3, 'step', 2d-3, 0d0, 1d-9), 0d0, 1d-15, &
+      'step below', nfail)
+    call check_close_r(t2_gate_weight( 2d-3, 'step', 2d-3, 0d0, 1d-9), 0d0, 1d-15, &
+      'step at-threshold=skip (strict >)', nfail)
+    call check_close_r(t2_gate_weight( 0d0 , 'step', 2d-3, 0d0, 1d-9), 0d0, 1d-15, &
+      'step at 0 = 0', nfail)
+
+    ! gauss: W(0)=0, symmetric, saturates
+    call check_close_r(t2_gate_weight( 0d0 , 'gauss', 0d0, 1d-3, 1d-9), 0d0, 1d-12, &
+      'gauss at 0 = 0', nfail)
+    call check_close_r(t2_gate_weight( 1d-3, 'gauss', 0d0, 1d-3, 1d-9), 1d0 - exp(-1d0), 1d-12, &
+      'gauss at w', nfail)
+    call check_close_r(t2_gate_weight( 1d-3, 'gauss', 0d0, 1d-3, 1d-9), &
+                        t2_gate_weight(-1d-3, 'gauss', 0d0, 1d-3, 1d-9), 1d-15, &
+      'gauss symmetric', nfail)
+    call check_true(t2_gate_weight( 5d-3, 'gauss', 0d0, 1d-3, 1d-9) > 0.99d0, &
+      'gauss saturates', nfail)
+
+    ! floor clamp (both shapes): |dw|<=floor -> 0
+    call check_close_r(t2_gate_weight( 5d-10, 'gauss', 0d0, 1d-3, 1d-9), 0d0, 1d-15, &
+      'gauss floor clamp', nfail)
+  end subroutine test_gate_weight
 
   !======================= assert helpers (ssbe style, copied verbatim
   !======================= from test/test_block_transport.f90) ================
