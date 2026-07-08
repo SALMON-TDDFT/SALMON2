@@ -133,7 +133,7 @@ contains
     type(s_dcdft), intent(in) :: dc
     integer :: num_bands_chk, num_wann_chk, nstate_tot_file, nspin_file
     integer :: iunit, iw, istate, nstate_seed, position_available, nsym
-    integer, allocatable :: owner_frag(:)
+    integer, allocatable :: owner_frag(:), bond_owner_frag(:)
     type(t_wannier_symop), allocatable :: symops(:)
     real(8), allocatable :: center_aa(:,:), center_bohr(:,:), owner_center_bohr(:,:), spread_aa2(:)
     real(8), allocatable :: esp_file(:,:), eval_seed(:,:)
@@ -160,24 +160,24 @@ contains
       allocate(owner_frag(num_wann_chk), center_bohr(3,num_wann_chk))
       center_bohr(1:3,1:num_wann_chk) = center_aa(1:3,1:num_wann_chk) / au_length_aa
       call wrap_wannier_centers_to_total_cell_import(dc, center_bohr, num_wann_chk)
+      do iw=1,num_wann_chk
+        owner_frag(iw) = find_owner_fragment_from_center_import(dc, center_bohr(1:3,iw))
+      end do
+      call rebalance_wannier_owner_fragments_import(dc, center_bohr, owner_frag, num_wann_chk)
+      write(*,'(1x,a)') "[DC-LCFO-W90-IMPORT] owner source=wannier_centers"
       if(is_bond_center_projection_import(trim(wannier_projection))) then
         call build_bond_center_projection_map_import(dc, num_wann_chk, owner_center_bohr)
+        allocate(bond_owner_frag(num_wann_chk))
         do iw=1,num_wann_chk
-          owner_frag(iw) = find_owner_fragment_from_center_import(dc, owner_center_bohr(1:3,iw))
+          bond_owner_frag(iw) = find_owner_fragment_from_center_import(dc, owner_center_bohr(1:3,iw))
         end do
-        call rebalance_wannier_owner_fragments_import(dc, owner_center_bohr, owner_frag, num_wann_chk)
-        write(*,'(1x,a)') "[DC-LCFO-W90-IMPORT] owner source=bond_centers"
-      else
-        do iw=1,num_wann_chk
-          owner_frag(iw) = find_owner_fragment_from_center_import(dc, center_bohr(1:3,iw))
-        end do
-        call rebalance_wannier_owner_fragments_import(dc, center_bohr, owner_frag, num_wann_chk)
-        write(*,'(1x,a)') "[DC-LCFO-W90-IMPORT] owner source=wannier_centers"
+        call rebalance_wannier_owner_fragments_import(dc, owner_center_bohr, bond_owner_frag, num_wann_chk)
+        write(*,'(1x,a)') "[DC-LCFO-W90-IMPORT] projection source=bond_centers"
       end if
       call detect_wannier_fragment_symops(dc, nsym, symops)
       if(allocated(owner_center_bohr)) then
         write(*,'(1x,a)') "[DC-LCFO-W90-SYM] center diagnostic source=bond_center_seeds"
-        call diagnose_fragment_wannier_center_symmetry(dc, owner_center_bohr, owner_frag, num_wann_chk, nsym, symops)
+        call diagnose_fragment_wannier_center_symmetry(dc, owner_center_bohr, bond_owner_frag, num_wann_chk, nsym, symops)
       end if
       call diagnose_fragment_wannier_center_symmetry(dc, center_bohr, owner_frag, num_wann_chk, nsym, symops)
       call read_wannier90_global_rmn_gamma_block_import(dc, num_wann_chk, aa_global, ok_position)
@@ -250,6 +250,7 @@ contains
       end if
 
       if(allocated(owner_center_bohr)) deallocate(owner_center_bohr)
+      if(allocated(bond_owner_frag)) deallocate(bond_owner_frag)
       deallocate(owner_frag, center_bohr, center_aa, spread_aa2, v_matrix, aa_global)
     end if
 
@@ -5046,7 +5047,7 @@ contains
       integer :: num_bands_chk, num_wann_chk
       integer :: position_available
       integer, allocatable :: owner_frag(:)
-      real(8), allocatable :: center_aa(:,:), center_bohr(:,:), owner_center_bohr(:,:), spread_aa2(:)
+      real(8), allocatable :: center_aa(:,:), center_bohr(:,:), spread_aa2(:)
       complex(8), allocatable :: v_matrix(:,:), aa_global(:,:,:)
       logical :: ok_position
       character(256) :: filename
@@ -5062,20 +5063,13 @@ contains
         allocate(owner_frag(num_wann_chk), center_bohr(3,num_wann_chk))
         center_bohr(1:3,1:num_wann_chk) = center_aa(1:3,1:num_wann_chk) / au_length_aa
         call wrap_wannier_centers_to_total_cell_import(dc, center_bohr, num_wann_chk)
+        do iw=1,num_wann_chk
+          owner_frag(iw) = find_owner_fragment_from_center(center_bohr(1:3,iw))
+        end do
+        call rebalance_wannier_owner_fragments(center_bohr, owner_frag, num_wann_chk)
+        write(*,'(1x,a)') "[DC-LCFO-W90-GLOBAL] owner source=wannier_centers"
         if(is_bond_center_projection(trim(wannier_projection))) then
-          call build_bond_center_projection_map(num_wann_chk, owner_center_bohr)
-          do iw=1,num_wann_chk
-            owner_frag(iw) = find_owner_fragment_from_center(owner_center_bohr(1:3,iw))
-          end do
-          call rebalance_wannier_owner_fragments(owner_center_bohr, owner_frag, num_wann_chk)
-          write(*,'(1x,a)') "[DC-LCFO-W90-GLOBAL] owner source=bond_centers"
-          deallocate(owner_center_bohr)
-        else
-          do iw=1,num_wann_chk
-            owner_frag(iw) = find_owner_fragment_from_center(center_bohr(1:3,iw))
-          end do
-          call rebalance_wannier_owner_fragments(center_bohr, owner_frag, num_wann_chk)
-          write(*,'(1x,a)') "[DC-LCFO-W90-GLOBAL] owner source=wannier_centers"
+          write(*,'(1x,a)') "[DC-LCFO-W90-GLOBAL] projection source=bond_centers"
         end if
         call read_wannier90_global_rmn_gamma_block(num_wann_chk, aa_global, ok_position)
         if(.not. ok_position) then
