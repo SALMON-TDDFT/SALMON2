@@ -201,7 +201,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     use communication
     use salmon_global, only: yn_sbe_gs_current_subtract, yn_vnl_correction, yn_sbe_vnl_exact, &
                               sbe_t2_gate_shape, sbe_t2_gate_theta, sbe_t2_gate_width, &
-                              sbe_lg_degen_floor
+                              sbe_lg_degen_floor, sbe_lg_degen
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     type(s_sbe_gs_info), intent(in) :: gs
@@ -235,19 +235,26 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     ! gicov_rhs Hadamard-multiplies this into the -rho/t_2 dephasing term every
     ! step instead of recomputing it. Diagonal forced to 0 (no population
     ! dephasing) regardless of what t2_gate_weight would return for delta_omega=0.
-    allocate(sbe%t2_gate_w(1:sbe%nb, 1:sbe%nb, sbe%ik_min:sbe%ik_max))
-    do ik = sbe%ik_min, sbe%ik_max
-        do jb = 1, sbe%nb
-            do ib = 1, sbe%nb
-                if (ib == jb) then
-                    sbe%t2_gate_w(ib, jb, ik) = 0d0
-                else
-                    sbe%t2_gate_w(ib, jb, ik) = t2_gate_weight(gs%delta_omega(ib, jb, ik), &
-                        & sbe_t2_gate_shape, sbe_t2_gate_theta, sbe_t2_gate_width, sbe_lg_degen_floor)
-                end if
+    ! GUARDED to sbe_lg_degen=='gicov': only gicov_rhs's 'gauss' branch reads
+    ! this array, and gauss is a gicov-only construction. The 'step' branch
+    ! (default, and every non-gicov length-gauge path) never touches
+    ! sbe%t2_gate_w, so allocating the nb^2 * nk_local array there would waste
+    ! memory for no consumer.
+    if (trim(sbe_lg_degen) == 'gicov') then
+        allocate(sbe%t2_gate_w(1:sbe%nb, 1:sbe%nb, sbe%ik_min:sbe%ik_max))
+        do ik = sbe%ik_min, sbe%ik_max
+            do jb = 1, sbe%nb
+                do ib = 1, sbe%nb
+                    if (ib == jb) then
+                        sbe%t2_gate_w(ib, jb, ik) = 0d0
+                    else
+                        sbe%t2_gate_w(ib, jb, ik) = t2_gate_weight(gs%delta_omega(ib, jb, ik), &
+                            & sbe_t2_gate_shape, sbe_t2_gate_theta, sbe_t2_gate_width, sbe_lg_degen_floor)
+                    end if
+                end do
             end do
         end do
-    end do
+    end if
 
     sbe%flag_vnl_correction = .false.
 
@@ -1293,7 +1300,7 @@ end function q_ij_from_rho
 !===================================================================
 subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   use salmon_global, only: num_kgrid, t_2, yn_sbe_gw_collision, sbe_deph_mode, &
-                            sbe_t2_gate_shape, sbe_t2_gate_theta
+                            sbe_t2_gate_shape, sbe_t2_gate_theta, sbe_lg_degen_floor
   use degenerate_block_ssbe, only: covariant_grad_block
   implicit none
   type(s_sbe_bloch_solver), intent(in) :: sbe
@@ -1462,9 +1469,20 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
           ! rounding). 'gauss' Hadamard-multiplies the precomputed weight
           ! (built once in init_sbe_bloch_solver from the STATIC
           ! gs%delta_omega) into the same term.
+          !
+          ! Exact-degeneracy floor clamp (|Delta-omega| <= sbe_lg_degen_floor
+          ! => weight 0) is spec-mandated for BOTH shapes. gauss gets it inside
+          ! t2_gate_weight (precomputed). step needs it EXPLICITLY here: the
+          ! bare `abs(dw) > theta` test alone does NOT protect exact-degeneracy
+          ! pairs when theta < floor (e.g. the checker-valid theta=0d0, where
+          ! 0 < |dw| <= floor would otherwise be dephased). The `.and.` keeps
+          ! the DEFAULT path bit-identical: with theta=2d-3 > floor=1d-9,
+          ! `|dw| > theta` already implies `|dw| > floor`, so the added clause
+          ! is always .true. there and never changes the arithmetic.
           if (.not. deph_by_gw) then
             if (trim(sbe_t2_gate_shape) == 'step') then
-              if (abs(gs%delta_omega(ib, jb, ik)) > sbe_t2_gate_theta) then
+              if (abs(gs%delta_omega(ib, jb, ik)) > sbe_t2_gate_theta .and. &
+                & abs(gs%delta_omega(ib, jb, ik)) > sbe_lg_degen_floor) then
                 drho(ib, jb, ik) = drho(ib, jb, ik) - gh_rho(ib, jb, ik) / t_2
               end if
             else   ! 'gauss'

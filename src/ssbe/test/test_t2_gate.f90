@@ -61,6 +61,7 @@ program test_t2_gate
   call test_gate_weight(nfail)
   call test_gate_params_ok(nfail)
   call test_gicov_integration(nfail)
+  call test_step_floor_clamp(nfail)
 
   if (nfail > 0) then
     write(*, '(a,i0,a)') "FAILED: ", nfail, " check(s)"
@@ -273,6 +274,75 @@ contains
     call check_true(gate_dist_err < 1d-12, &
       'gauss: energy-distinct pair (1,2) gets the smooth non-saturated weight 1-exp(-1)', nfail)
   end subroutine test_gicov_integration
+
+  !======================= step-shape exact-degeneracy floor clamp =============
+  ! Spec: |Delta-omega| <= sbe_lg_degen_floor => weight 0 for BOTH shapes. The
+  ! step branch's bare `abs(dw) > theta` test does NOT enforce this when
+  ! theta < floor -- and theta=0d0 is checker-valid. Override the (1,4)
+  ! singleton pair's delta_omega to a tiny 5d-10 (0 < |dw| <= floor=1d-9), set
+  ! shape='step', theta=0d0, and assert that at E=0 (transport term vanishes)
+  ! the pair carries ONLY the coherent energy term -i*dw*rho, with NO -rho/t_2
+  ! dephasing. Pre-fix the bare gate subtracts rho/t_2 (~0.025 here) => FAIL;
+  ! with the floor clamp it is skipped => PASS. gicov_rhs reads gs%delta_omega
+  ! directly for both terms, so this override is self-consistent (gs%eigen is
+  ! not read by the RHS).
+  subroutine test_step_floor_clamp(nfail)
+    use gs_info_ssbe,      only: s_sbe_gs_info
+    use bloch_solver_ssbe, only: s_sbe_bloch_solver, init_sbe_bloch_solver, &
+                                  prepare_qnm, gicov_rhs
+    use salmon_global,     only: epdir_re1, am_s, num_kgrid, t_2, sbe_lg_degen, &
+                                  sbe_lg_diag, yn_sbe_gw_collision, sbe_deph_mode, &
+                                  sbe_lg_degen_floor, sbe_t2_gate_shape, &
+                                  sbe_t2_gate_theta, sbe_t2_gate_width
+    implicit none
+    integer, intent(inout) :: nfail
+    type(s_sbe_gs_info) :: gs
+    type(s_sbe_bloch_solver) :: sbe
+    complex(8) :: rho(nb, nb, nk), drho0(nb, nb, nk), tgt14
+    real(8) :: E0(3), dw_small, clamp_err
+    integer :: icomm, ik
+
+    icomm = 0
+    E0 = 0d0
+    dw_small = 5d-10        ! 0 < dw_small <= floor (1d-9): must be clamped to 0
+
+    epdir_re1(1) = 1d0; epdir_re1(2) = 0d0; epdir_re1(3) = 0d0
+    am_s = 4
+    num_kgrid(1) = nk; num_kgrid(2) = 1; num_kgrid(3) = 1
+    t_2 = 10d0
+    sbe_lg_diag = 0
+    sbe_lg_degen = 'gicov'
+    yn_sbe_gw_collision = 'n'
+    sbe_deph_mode = ''
+    sbe_lg_degen_floor = 1d-9
+
+    call build_gicov_gs(gs)
+    call build_gicov_rho(rho)
+
+    ! override the (1,4)/(4,1) singleton pair to a within-floor splitting
+    do ik = 1, nk
+      gs%delta_omega(1, 4, ik) =  dw_small
+      gs%delta_omega(4, 1, ik) = -dw_small
+    end do
+
+    sbe_t2_gate_shape = 'step'
+    sbe_t2_gate_theta = 0d0          ! checker-valid; bare `>theta` would NOT clamp
+    sbe_t2_gate_width = 0d0
+
+    call init_sbe_bloch_solver(sbe, gs, nb, icomm)
+    call prepare_qnm(sbe, gs, icomm)
+    call set_qnm_from_rho(sbe, rho)
+    call gicov_rhs(sbe, gs, E0, drho0, icomm)
+
+    ! correctly-clamped (1,4) pair: drho = -i*dw*rho only (no -rho/t_2).
+    clamp_err = 0d0
+    do ik = 1, nk
+      tgt14 = - zi_ * gs%delta_omega(1, 4, ik) * rho(1, 4, ik)
+      clamp_err = max(clamp_err, abs(drho0(1, 4, ik) - tgt14))
+    end do
+    call check_true(clamp_err < 1d-14, &
+      'step: 0<|dw|<=floor pair clamped to weight 0 (not dephased)', nfail)
+  end subroutine test_step_floor_clamp
 
   !======================= synthetic gicov gs fixture (copied/adapted from
   !======================= test_gicov_rhs.f90's build_gs) ======================
