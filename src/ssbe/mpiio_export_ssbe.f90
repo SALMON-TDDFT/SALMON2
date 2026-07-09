@@ -14,6 +14,9 @@
 ! Format constants (magic strings, header sizes, element size) are the
 ! single source of truth for all SBE/gicov export readers/writers
 ! (Tasks 2-9 of the sbe-mpiio-export plan consume this module).
+
+#include "config.h"
+
 module mpiio_export_ssbe
 #ifdef USE_MPI
   use mpi
