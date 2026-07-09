@@ -7141,9 +7141,9 @@
           h_step(eig,eig) = cmplx(dg_frag%full_h_seed_eval(eig,ispin_current), 0.0d0, kind=8)
         end do
         h_step(1:neig,1:neig) = h_step(1:neig,1:neig) &
-          - E_mid(1) * dg_frag%full_h_seed_xi(1,1:neig,1:neig,ispin_current) &
-          - E_mid(2) * dg_frag%full_h_seed_xi(2,1:neig,1:neig,ispin_current) &
-          - E_mid(3) * dg_frag%full_h_seed_xi(3,1:neig,1:neig,ispin_current)
+          + E_mid(1) * dg_frag%full_h_seed_xi(1,1:neig,1:neig,ispin_current) &
+          + E_mid(2) * dg_frag%full_h_seed_xi(2,1:neig,1:neig,ispin_current) &
+          + E_mid(3) * dg_frag%full_h_seed_xi(3,1:neig,1:neig,ispin_current)
         call symmetrize_expdiag_h_eff(h_step, neig)
         tloc = get_wtime()
         call eigen_zheev(h_step, eval_step, h_vec)

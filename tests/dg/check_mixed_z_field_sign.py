@@ -20,4 +20,12 @@ if match:
         f"SALMON Vbox += E*r; found negative sign at line {line}"
     )
 
+match = re.search(r"-\s*E_mid\(\d\)\s*\*\s*dg_frag%full_h_seed_xi", src)
+if match:
+    line = src[: match.start()].count("\n") + 1
+    raise SystemExit(
+        "full-DG seed length-gauge field coupling must use +E*R to match "
+        f"SALMON Vbox += E*r; found negative sign at line {line}"
+    )
+
 print("DG length-gauge field coupling signs match +E*R")
