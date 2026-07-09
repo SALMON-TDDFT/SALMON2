@@ -1590,6 +1590,7 @@ contains
     use mpiio_export_ssbe, only: mpiio_open_write, mpiio_close, mpiio_write_at_all_z, &
                                  mpiio_wr_c8, mpiio_wr_i, mpiio_wr_d, mpiio_disp_k, &
                                  mpiio_csum_local_z, mpiio_csum_reduce, mpiio_abort, &
+                                 mpiio_sync_epoch, &
                                  MAGIC_VNL, MAGIC_CHK, HDR_VNL, SBE_FMT_VERSION
     implicit none
     type(s_dft_system),   intent(in) :: system
@@ -1713,9 +1714,11 @@ contains
       ! collective data region is written (avoids a truncated file + valid-looking sidecar)
       if (ierr_h /= 0) call mpiio_abort('write_sbe_vnl_kappa_data: header field write failed', info%icomm_rko)
     end if
-    ! header region [0,156) is disjoint from the data region [156,...); barrier so
-    ! the independent header writes precede the collective data writes.
-    call comm_sync_all
+    ! MPI-IO consistency boundary: the independent rank-0 header writes [0,156) and
+    ! the collective data writes [156,...) are separate access epochs on the same
+    ! file. A bare barrier is NOT enough -- without an MPI_File_sync the collective
+    ! two-phase aggregators clobber the (uncommitted) header stripe intermittently.
+    call mpiio_sync_epoch(fh, info%icomm_rko, ierr)
 
     nz_k     = int(NB,8)*int(NB,8)*4_8*int(nkap,8)   ! complex(8) elements per k-chunk
     csum_loc = 0_8

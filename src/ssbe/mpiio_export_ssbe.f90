@@ -26,7 +26,7 @@ module mpiio_export_ssbe
   implicit none
   private
 
-  public :: mpiio_open_write, mpiio_open_read, mpiio_close
+  public :: mpiio_open_write, mpiio_open_read, mpiio_close, mpiio_sync_epoch
   public :: mpiio_write_at_all_z, mpiio_read_at_all_z
   public :: mpiio_wr_c8, mpiio_wr_i, mpiio_wr_d, mpiio_wr_i8
   public :: mpiio_rd_c8, mpiio_rd_i, mpiio_rd_d, mpiio_rd_i8
@@ -108,6 +108,32 @@ contains
     close(fh, iostat=ierr)
 #endif
   end subroutine mpiio_close
+
+  ! Consistency boundary between the independent rank-0 header-write epoch and the
+  ! subsequent collective data-write epoch on the SAME file. MPI-IO default
+  ! (non-atomic) mode does NOT guarantee an independent write is visible to a later
+  ! collective access without an explicit sync-barrier-sync: on Fujitsu MPI + Lustre
+  ! the collective two-phase aggregators read-modify-write the first stripe (which
+  ! spans the 156-byte header) and, seeing the header bytes as not-yet-committed,
+  ! clobber them with zeros -- intermittently dropping 0..N leading header fields.
+  ! Collective: EVERY rank of comm must call this. Fail-closed on any MPI error.
+  subroutine mpiio_sync_epoch(fh, comm, ierr)
+    implicit none
+    integer, intent(in)  :: fh
+    integer, intent(in)  :: comm
+    integer, intent(out) :: ierr
+#ifdef USE_MPI
+    call MPI_File_sync(fh, ierr)
+    if (ierr /= MPI_SUCCESS) call mpiio_abort('mpiio_sync_epoch: MPI_File_sync (pre-barrier) failed', comm)
+    call MPI_Barrier(comm, ierr)
+    if (ierr /= MPI_SUCCESS) call mpiio_abort('mpiio_sync_epoch: MPI_Barrier failed', comm)
+    call MPI_File_sync(fh, ierr)
+    if (ierr /= MPI_SUCCESS) call mpiio_abort('mpiio_sync_epoch: MPI_File_sync (post-barrier) failed', comm)
+#else
+    flush(fh)
+    ierr = 0
+#endif
+  end subroutine mpiio_sync_epoch
 
 #ifdef USE_MPI
   ! Advisory MPI_Info hints for the write-open path. Kept minimal here
