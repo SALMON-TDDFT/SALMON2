@@ -1495,6 +1495,20 @@ contains
       csum_loc = 0_8
       is_krep = (wf_info%id_o == 0 .and. wf_info%id_r == 0)  ! k-slice representative
 
+      ! fail-closed: the collective MPI-IO write passes a default-integer element
+      ! count (int(nz)); guard the worst-case per-block count nz_k*nblk (an owned
+      ! k-range never exceeds the whole block) against 2^31-1 overflow.  nz_k, ndk
+      ! and nblk are rank-invariant (nblk = pure function of system/num_kgrid/ndk,
+      ! no communication inside kgrid_prod_block_size), so this is evaluated
+      ! IDENTICALLY on every rank and error-stops all ranks together BEFORE any
+      ! collective MPI-IO call -> collective-safe.  Byte-neutral (Si 8^3 is far
+      ! below the limit; only fires on genuinely huge no/nblk).
+      if (nz_k * int(nblk,8) > int(huge(0),8)) then
+        if (comm_is_root(nproc_id_global)) &
+          write(*,*) "ERROR(write_prod_dk_data): per-block element count exceeds MPI int count."
+        call comm_sync_all;  error stop
+      end if
+
       ! collective open of the single shared file (all ranks of the rko group).
       call mpiio_open_write(trim(file_prod_dk_data), wf_info%icomm_rko, fh, ierr)
 
