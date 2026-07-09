@@ -31,6 +31,7 @@ module mpiio_export_ssbe
   public :: mpiio_wr_c8, mpiio_wr_i, mpiio_wr_d, mpiio_wr_i8
   public :: mpiio_rd_c8, mpiio_rd_i, mpiio_rd_d, mpiio_rd_i8
   public :: mpiio_disp_k, mpiio_csum_local_z, mpiio_csum_reduce, mpiio_finite_z, mpiio_abort
+  public :: mpiio_validate_z, mpiio_assert_dim
   public :: MAGIC_VNL, MAGIC_PRODK, MAGIC_TM, MAGIC_CHK
   public :: HDR_VNL, HDR_PRODK, HDR_TM, SBE_FMT_VERSION, SZ_Z
 
@@ -357,6 +358,58 @@ contains
       end if
     end do
   end function mpiio_finite_z
+
+  ! =====================================================================
+  ! fail-closed validation layer (Task 2)
+  !
+  ! Combines the finiteness check and the order-independent splitmix64
+  ! checksum into one call for readers: layer (3) finiteness is checked
+  ! first (a NaN/Inf abort names itself distinctly from a checksum
+  ! mismatch), then layer (4) checksum. Layer (1) short-read is already
+  ! enforced inside mpiio_read_at_all_z (MPI_Get_count, Task 1); layer (2)
+  ! dimension mismatch is mpiio_assert_dim below. Both routines terminate
+  ! via mpiio_abort on failure (fail-closed: never returns past a failed
+  ! check) and are safe to call from any communicator (comm is forwarded
+  ! to mpiio_abort for MPI_Abort scope).
+  ! =====================================================================
+
+  subroutine mpiio_validate_z(buf, nz, g0, comm, expect_csum, tag, ierr)
+    implicit none
+    complex(8),   intent(in)  :: buf(*)
+    integer(8),   intent(in)  :: nz
+    integer(8),   intent(in)  :: g0
+    integer,      intent(in)  :: comm
+    integer(8),   intent(in)  :: expect_csum
+    character(*), intent(in)  :: tag
+    integer,      intent(out) :: ierr
+    integer(8) :: csum_local, csum_glob
+
+    ierr = 0
+
+    if (.not. mpiio_finite_z(buf, nz)) then
+      call mpiio_abort(trim(tag)//': non-finite element (NaN/Inf)', comm)
+    end if
+
+    csum_local = mpiio_csum_local_z(buf, nz, g0)
+    csum_glob  = mpiio_csum_reduce(csum_local, comm)
+    if (csum_glob /= expect_csum) then
+      call mpiio_abort(trim(tag)//': checksum mismatch', comm)
+    end if
+  end subroutine mpiio_validate_z
+
+  subroutine mpiio_assert_dim(got, want, name, comm)
+    implicit none
+    integer,      intent(in) :: got
+    integer,      intent(in) :: want
+    character(*), intent(in) :: name
+    integer,      intent(in) :: comm
+    character(len=200) :: msg
+
+    if (got /= want) then
+      write(msg, '(a,": file ",i0," vs expected ",i0)') trim(name), got, want
+      call mpiio_abort(trim(msg), comm)
+    end if
+  end subroutine mpiio_assert_dim
 
   ! =====================================================================
   ! fail-closed abort (never fail-open; no dynamic error-stop code)
