@@ -28,4 +28,7 @@ if match:
         f"SALMON Vbox += E*r; found negative sign at line {line}"
     )
 
+if "H_eff = eps - E.R" in src:
+    raise SystemExit("full-DG seed diagnostic message must not advertise eps - E.R")
+
 print("DG length-gauge field coupling signs match +E*R")

@@ -1300,28 +1300,6 @@
       return
     end if
 
-    use_full_h_seed_phase = yn_dg_full_h_eigen_seed == 'y' .and. allocated(dg_frag%esp) .and. &
-      sum(abs(E_mid(1:3))) <= 1.0d-30 .and. .not. use_impulse_kinetic_shift
-    if (use_full_h_seed_phase) then
-      do ispin = 1, dg_frag%nspin
-        if (ispin > size(dg_frag%esp, 2)) cycle
-        do istate = state_first, state_last
-          if (istate > size(dg_frag%esp, 1)) cycle
-          cphase = cos(dg_frag%esp(istate,ispin) * dt)
-          sphase = sin(dg_frag%esp(istate,ispin) * dt)
-          dg_frag%coef(1:size(dg_frag%coef,1),istate,ispin) = &
-            cmplx(cphase, -sphase, kind=8) * dg_frag%coef(1:size(dg_frag%coef,1),istate,ispin)
-        end do
-      end do
-      if (.not. expdiag_warned .and. dg_frag%id == 0) then
-        write(*,'(1x,a)') "[DG-EXPDIAG] full-DG Hamiltonian eigenphase integrator enabled for field-free steps."
-        write(*,'(1x,a)') "[DG-EXPDIAG] local BPW expdiag is bypassed to keep the Full-DG eigenstate stationary."
-        flush(6)
-        expdiag_warned = .true.
-      end if
-      call print_expdiag_timing('full-dg-seed-phase')
-      return
-    end if
     if (yn_dg_full_h_eigen_seed == 'y') then
       if (.not. use_impulse_kinetic_shift .and. dg_frag%has_full_h_seed_eigen .and. &
           dg_frag%has_full_h_seed_xi) then
@@ -1330,7 +1308,7 @@
         time_global_flux = time_global_flux + (get_wtime() - t_route0)
         if (.not. expdiag_warned .and. dg_frag%id == 0) then
           write(*,'(1x,a)') "[DG-EXPDIAG] full-DG Hamiltonian eigenbasis integrator enabled."
-          write(*,'(1x,a)') "[DG-EXPDIAG] nonzero length-gauge field is propagated as H_eff = eps - E.R in the Full-DG basis."
+          write(*,'(1x,a)') "[DG-EXPDIAG] nonzero length-gauge field is propagated as H_eff = eps + E.R in the Full-DG basis."
           write(*,'(1x,a)') "[DG-EXPDIAG] this diagnostic path is dense/allreduce and is not weak-scaling."
           flush(6)
           expdiag_warned = .true.
@@ -1345,6 +1323,29 @@
         flush(6)
       end if
       stop "DG expdiag: full-DG eigen seed field propagator is not implemented"
+    end if
+
+    use_full_h_seed_phase = allocated(dg_frag%esp) .and. &
+      sum(abs(E_mid(1:3))) <= 1.0d-30 .and. .not. use_impulse_kinetic_shift
+    if (use_full_h_seed_phase) then
+      do ispin = 1, dg_frag%nspin
+        if (ispin > size(dg_frag%esp, 2)) cycle
+        do istate = state_first, state_last
+          if (istate > size(dg_frag%esp, 1)) cycle
+          cphase = cos(dg_frag%esp(istate,ispin) * dt)
+          sphase = sin(dg_frag%esp(istate,ispin) * dt)
+          dg_frag%coef(1:size(dg_frag%coef,1),istate,ispin) = &
+            cmplx(cphase, -sphase, kind=8) * dg_frag%coef(1:size(dg_frag%coef,1),istate,ispin)
+        end do
+      end do
+      if (.not. expdiag_warned .and. dg_frag%id == 0) then
+        write(*,'(1x,a)') "[DG-EXPDIAG] Hamiltonian eigenphase integrator enabled for field-free steps."
+        write(*,'(1x,a)') "[DG-EXPDIAG] local BPW expdiag is bypassed to keep the eigenstate stationary."
+        flush(6)
+        expdiag_warned = .true.
+      end if
+      call print_expdiag_timing('eigenphase')
+      return
     end if
 
     use_formal_seed_phase = use_formal_wannier_h .and. allocated(dg_frag%esp) .and. &
