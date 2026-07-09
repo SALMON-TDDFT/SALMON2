@@ -1033,9 +1033,9 @@
                 cmplx(dg_frag%mixed_wannier_bpw_eval(imix_diag,ispin), 0.0d0, kind=8)
             end do
             h_step_diag(:,:) = h_step_diag(:,:) &
-              - E_mid(1) * dg_frag%mixed_wannier_bpw_z(1,1:nmix_diag,1:nmix_diag,ispin) &
-              - E_mid(2) * dg_frag%mixed_wannier_bpw_z(2,1:nmix_diag,1:nmix_diag,ispin) &
-              - E_mid(3) * dg_frag%mixed_wannier_bpw_z(3,1:nmix_diag,1:nmix_diag,ispin)
+              + E_mid(1) * dg_frag%mixed_wannier_bpw_z(1,1:nmix_diag,1:nmix_diag,ispin) &
+              + E_mid(2) * dg_frag%mixed_wannier_bpw_z(2,1:nmix_diag,1:nmix_diag,ispin) &
+              + E_mid(3) * dg_frag%mixed_wannier_bpw_z(3,1:nmix_diag,1:nmix_diag,ispin)
             h_evec_diag(:,:) = h_step_diag(:,:)
             call eigen_zheev(h_evec_diag, eval_step_diag, h_step_diag)
             do ist_diag = 1, nstate_diag
@@ -1048,9 +1048,9 @@
               cmix_exp_diag(:,ist_diag,ispin) = matmul(h_step_diag(:,:), work_vec_diag(:))
             end do
             if (sum(abs(E_mid(1:3))) > 1.0d-30) then
-              h_step_diag(:,:) = -E_mid(1) * dg_frag%mixed_wannier_bpw_z(1,1:nmix_diag,1:nmix_diag,ispin) &
-                                -E_mid(2) * dg_frag%mixed_wannier_bpw_z(2,1:nmix_diag,1:nmix_diag,ispin) &
-                                -E_mid(3) * dg_frag%mixed_wannier_bpw_z(3,1:nmix_diag,1:nmix_diag,ispin)
+              h_step_diag(:,:) = E_mid(1) * dg_frag%mixed_wannier_bpw_z(1,1:nmix_diag,1:nmix_diag,ispin) &
+                                + E_mid(2) * dg_frag%mixed_wannier_bpw_z(2,1:nmix_diag,1:nmix_diag,ispin) &
+                                + E_mid(3) * dg_frag%mixed_wannier_bpw_z(3,1:nmix_diag,1:nmix_diag,ispin)
               h_evec_diag(:,:) = h_step_diag(:,:)
               call eigen_zheev(h_evec_diag, eval_step_diag, h_step_diag)
               do ist_diag = 1, nstate_diag
@@ -2847,9 +2847,9 @@
         field_h = (0.0d0, 0.0d0)
         do iwann = 1, nwann
           do jwann = 1, nwann
-            field_h(iwann,jwann) = - E_use(1) * dg_frag%global_wannier_position(1,iwann,jwann) &
-                                  - E_use(2) * dg_frag%global_wannier_position(2,iwann,jwann) &
-                                  - E_use(3) * dg_frag%global_wannier_position(3,iwann,jwann)
+            field_h(iwann,jwann) = E_use(1) * dg_frag%global_wannier_position(1,iwann,jwann) &
+                                 + E_use(2) * dg_frag%global_wannier_position(2,iwann,jwann) &
+                                 + E_use(3) * dg_frag%global_wannier_position(3,iwann,jwann)
           end do
         end do
         field_vec = field_h
@@ -2976,9 +2976,9 @@
         time_gather = time_gather + (get_wtime() - tloc)
         if (mixed_z_field_kick_diag_enabled) cmix_before(:,:) = cmix(:,:)
         field_h(:, :) = (0.0d0, 0.0d0)
-        field_h(:, :) = -E_use(1) * dg_frag%mixed_wannier_bpw_z(1,1:nmix,1:nmix,ispin_current) &
-                       -E_use(2) * dg_frag%mixed_wannier_bpw_z(2,1:nmix,1:nmix,ispin_current) &
-                       -E_use(3) * dg_frag%mixed_wannier_bpw_z(3,1:nmix,1:nmix,ispin_current)
+        field_h(:, :) = E_use(1) * dg_frag%mixed_wannier_bpw_z(1,1:nmix,1:nmix,ispin_current) &
+                      + E_use(2) * dg_frag%mixed_wannier_bpw_z(2,1:nmix,1:nmix,ispin_current) &
+                      + E_use(3) * dg_frag%mixed_wannier_bpw_z(3,1:nmix,1:nmix,ispin_current)
         field_vec = field_h
         tloc = get_wtime()
         call eigen_zheev(field_vec, field_eval, field_h)
@@ -3221,9 +3221,9 @@
               do iw = 1, nraw
                 do ipw = 1, nraw
                   if (raw_gid(iw) <= 0 .or. raw_gid(ipw) <= 0) cycle
-                  field_raw(iw,ipw) = -E_use(1) * dg_frag%mixed_wannier_bpw_z(1,raw_gid(iw),raw_gid(ipw),ispin_use) &
-                                     -E_use(2) * dg_frag%mixed_wannier_bpw_z(2,raw_gid(iw),raw_gid(ipw),ispin_use) &
-                                     -E_use(3) * dg_frag%mixed_wannier_bpw_z(3,raw_gid(iw),raw_gid(ipw),ispin_use)
+                  field_raw(iw,ipw) = E_use(1) * dg_frag%mixed_wannier_bpw_z(1,raw_gid(iw),raw_gid(ipw),ispin_use) &
+                                    + E_use(2) * dg_frag%mixed_wannier_bpw_z(2,raw_gid(iw),raw_gid(ipw),ispin_use) &
+                                    + E_use(3) * dg_frag%mixed_wannier_bpw_z(3,raw_gid(iw),raw_gid(ipw),ispin_use)
                 end do
               end do
               r_herm = 0.0d0
@@ -4175,9 +4175,9 @@
           if (.not. field_off) then
             do jblk = 1, nblock
               do iblk = 1, nblock
-                field_h(iblk,jblk) = -E_use(1) * dg_frag%mixed_wannier_bpw_z(1,block_gid(iblk),block_gid(jblk),ispin_use) &
-                                   -E_use(2) * dg_frag%mixed_wannier_bpw_z(2,block_gid(iblk),block_gid(jblk),ispin_use) &
-                                   -E_use(3) * dg_frag%mixed_wannier_bpw_z(3,block_gid(iblk),block_gid(jblk),ispin_use)
+                field_h(iblk,jblk) = E_use(1) * dg_frag%mixed_wannier_bpw_z(1,block_gid(iblk),block_gid(jblk),ispin_use) &
+                                  + E_use(2) * dg_frag%mixed_wannier_bpw_z(2,block_gid(iblk),block_gid(jblk),ispin_use) &
+                                  + E_use(3) * dg_frag%mixed_wannier_bpw_z(3,block_gid(iblk),block_gid(jblk),ispin_use)
               end do
             end do
             field_vec(:, :) = field_h(:, :)
@@ -4404,9 +4404,9 @@
             end do
             do ispin_use = 1, nspin_use
               if (ispin_use > size(dg_frag%mixed_wannier_bpw_z, 4)) cycle
-              field_h(:, :) = -E_use(1) * dg_frag%mixed_wannier_bpw_z(1,1:nmix,1:nmix,ispin_use) &
-                            -E_use(2) * dg_frag%mixed_wannier_bpw_z(2,1:nmix,1:nmix,ispin_use) &
-                            -E_use(3) * dg_frag%mixed_wannier_bpw_z(3,1:nmix,1:nmix,ispin_use)
+              field_h(:, :) = E_use(1) * dg_frag%mixed_wannier_bpw_z(1,1:nmix,1:nmix,ispin_use) &
+                            + E_use(2) * dg_frag%mixed_wannier_bpw_z(2,1:nmix,1:nmix,ispin_use) &
+                            + E_use(3) * dg_frag%mixed_wannier_bpw_z(3,1:nmix,1:nmix,ispin_use)
               coverage_local(1) = coverage_local(1) + sum(abs(field_h(1:nmix,1:nmix))**2)
               do jcol = 1, nmix
                 do irow = 1, nmix
@@ -4460,9 +4460,9 @@
               local_sum(8) = 1.0d0
               cycle
             end if
-            field_h(:, :) = -E_use(1) * dg_frag%mixed_wannier_bpw_z(1,1:nmix,1:nmix,ispin_use) &
-                          -E_use(2) * dg_frag%mixed_wannier_bpw_z(2,1:nmix,1:nmix,ispin_use) &
-                          -E_use(3) * dg_frag%mixed_wannier_bpw_z(3,1:nmix,1:nmix,ispin_use)
+            field_h(:, :) = E_use(1) * dg_frag%mixed_wannier_bpw_z(1,1:nmix,1:nmix,ispin_use) &
+                          + E_use(2) * dg_frag%mixed_wannier_bpw_z(2,1:nmix,1:nmix,ispin_use) &
+                          + E_use(3) * dg_frag%mixed_wannier_bpw_z(3,1:nmix,1:nmix,ispin_use)
             local_sum(9) = local_sum(9) + sum(abs(field_h(1:nmix,1:nmix))**2)
             do jcol = 1, nmix
               do irow = 1, nmix
@@ -5245,9 +5245,9 @@
         if (sum(abs(E_use(1:3))) > 1.0d-30) then
           if (mixed_z_field_kick_diag_enabled) cmix_before_field(:,:) = prop_cmix_work(:,:)
           prop_field_h_work(:,:) = prop_field_h_work(:,:) &
-            - E_use(1) * dg_frag%mixed_wannier_bpw_z(1,1:nmix,1:nmix,ispin_current) &
-            - E_use(2) * dg_frag%mixed_wannier_bpw_z(2,1:nmix,1:nmix,ispin_current) &
-            - E_use(3) * dg_frag%mixed_wannier_bpw_z(3,1:nmix,1:nmix,ispin_current)
+            + E_use(1) * dg_frag%mixed_wannier_bpw_z(1,1:nmix,1:nmix,ispin_current) &
+            + E_use(2) * dg_frag%mixed_wannier_bpw_z(2,1:nmix,1:nmix,ispin_current) &
+            + E_use(3) * dg_frag%mixed_wannier_bpw_z(3,1:nmix,1:nmix,ispin_current)
         end if
         prop_field_vec_work(:,:) = prop_field_h_work(:,:)
         dg_frag%mixed_z_perf_eigensolve_calls = dg_frag%mixed_z_perf_eigensolve_calls + 1_8

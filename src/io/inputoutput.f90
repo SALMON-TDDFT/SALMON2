@@ -660,6 +660,7 @@ contains
       & yn_dc_lcfo_wannier_symmetry_gauge, &
       & yn_dc_lcfo_wannier_pw, &
       & yn_dc_lcfo_wannier_cluster, &
+      & yn_dc_lcfo_block_diag_h, &
       & wannier90_command, &
       & wannier_projection, &
       & nstate_frag, &
@@ -1174,6 +1175,7 @@ contains
     yn_dc_lcfo_wannier_symmetry_gauge = 'n'
     yn_dc_lcfo_wannier_pw = 'n'
     yn_dc_lcfo_wannier_cluster = 'n'
+    yn_dc_lcfo_block_diag_h = 'n'
     wannier90_command = ''
     wannier_projection = ''
     nstate_frag = 0
@@ -1898,6 +1900,7 @@ contains
     call comm_bcast(yn_dc_lcfo_wannier_symmetry_gauge, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_wannier_pw, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_wannier_cluster, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo_block_diag_h, nproc_group_global)
     call comm_bcast(wannier90_command, nproc_group_global)
     call comm_bcast(wannier_projection, nproc_group_global)
     call comm_bcast(nstate_frag, nproc_group_global)
@@ -2962,6 +2965,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier_symmetry_gauge",yn_dc_lcfo_wannier_symmetry_gauge
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier_pw",yn_dc_lcfo_wannier_pw
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier_cluster",yn_dc_lcfo_wannier_cluster
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_block_diag_h",yn_dc_lcfo_block_diag_h
       write(fh_variables_log, '("#",4X,A,"=",A)') "wannier90_command",trim(wannier90_command)
       write(fh_variables_log, '("#",4X,A,"=",A)') "wannier_projection",trim(wannier_projection)
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
@@ -3094,6 +3098,7 @@ contains
     call yn_argument_check(yn_dc_lcfo_wannier_symmetry_gauge)
     call yn_argument_check(yn_dc_lcfo_wannier_pw)
     call yn_argument_check(yn_dc_lcfo_wannier_cluster)
+    call yn_argument_check(yn_dc_lcfo_block_diag_h)
     call yn_argument_check(yn_dg_length_gauge)
     call yn_argument_check(yn_dg_expdiag_xi_split)
     call yn_argument_check(yn_dg_expdiag_refresh_fixed_func)

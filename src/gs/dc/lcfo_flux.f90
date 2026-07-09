@@ -137,7 +137,7 @@ contains
     type(t_wannier_symop), allocatable :: symops(:)
     real(8), allocatable :: center_aa(:,:), center_bohr(:,:), owner_center_bohr(:,:), spread_aa2(:)
     real(8), allocatable :: esp_file(:,:), eval_seed(:,:)
-    complex(8), allocatable :: v_matrix(:,:), v_direct(:,:), aa_global(:,:,:), seed_wannier_to_eigen(:,:)
+    complex(8), allocatable :: v_matrix(:,:), v_direct(:,:), v_direct_global(:,:), aa_global(:,:,:), seed_wannier_to_eigen(:,:)
     logical :: ok_position, ok_direct
     character(256) :: filename
 
@@ -190,12 +190,24 @@ contains
         call diagnose_global_wannier_pbc_operator_symmetry(dc, center_bohr, num_wann_chk, &
           num_bands_chk, v_matrix, esp_file, nsym, symops, aa_global, ok_position)
         if(is_bond_center_projection_import(trim(wannier_projection))) then
-          call read_wannier90_amn_direct_transform_import(dc, num_bands_chk, num_wann_chk, owner_frag, v_direct, ok_direct)
+          call read_wannier90_amn_direct_transform_import(dc, num_bands_chk, num_wann_chk, bond_owner_frag, v_direct, ok_direct)
           if(ok_direct) then
-            write(*,'(1x,a)') "[DC-LCFO-W90-SYM] diagnostic basis=direct_amn_bond_centers"
-            call diagnose_fragment_wannier_symmetry_representation(dc, center_bohr, owner_frag, num_wann_chk, &
-              num_bands_chk, v_direct, esp_file, nsym, symops, aa_global, ok_position)
+            write(*,'(1x,a)') "[DC-LCFO-W90-SYM] diagnostic basis=direct_amn_bond_projectors_block"
+            call diagnose_fragment_wannier_symmetry_representation(dc, owner_center_bohr, bond_owner_frag, num_wann_chk, &
+              num_bands_chk, v_direct, esp_file, nsym, symops, aa_global, .false.)
+            call diagnose_global_wannier_pbc_operator_symmetry(dc, owner_center_bohr, num_wann_chk, &
+              num_bands_chk, v_direct, esp_file, nsym, symops, aa_global, .false.)
             deallocate(v_direct)
+          end if
+          call read_wannier90_amn_direct_transform_import(dc, num_bands_chk, num_wann_chk, bond_owner_frag, &
+            v_direct_global, ok_direct, .false.)
+          if(ok_direct) then
+            write(*,'(1x,a)') "[DC-LCFO-W90-SYM] diagnostic basis=direct_amn_bond_projectors_global"
+            call diagnose_fragment_wannier_symmetry_representation(dc, owner_center_bohr, bond_owner_frag, num_wann_chk, &
+              num_bands_chk, v_direct_global, esp_file, nsym, symops, aa_global, .false.)
+            call diagnose_global_wannier_pbc_operator_symmetry(dc, owner_center_bohr, num_wann_chk, &
+              num_bands_chk, v_direct_global, esp_file, nsym, symops, aa_global, .false.)
+            deallocate(v_direct_global)
           end if
         end if
         if(trim(dg_wannier_symmetry_gauge) == 'local_inversion_position') then
@@ -393,7 +405,7 @@ contains
   end subroutine read_wannier90_checkpoint_transform_import
 
   subroutine read_wannier90_amn_direct_transform_import(dc, num_bands_expected, num_wann_expected, owner_frag, &
-      v_direct, ok)
+      v_direct, ok, block_by_owner)
     use eigen_subdiag_sub, only: eigen_zheev
     use filesystem, only: get_filehandle
     use salmon_global, only: sysname
@@ -404,6 +416,7 @@ contains
     integer, intent(in) :: owner_frag(num_wann_expected)
     complex(8), allocatable, intent(out) :: v_direct(:,:)
     logical, intent(out) :: ok
+    logical, intent(in), optional :: block_by_owner
     character(256) :: filename, header
     integer :: iunit, io, num_bands_file, num_kpts_file, num_wann_file
     integer :: irec, iband, iwann, ikpt, i, j, k, ifrag, nowned, iloc
@@ -411,8 +424,11 @@ contains
     integer, allocatable :: widx(:)
     real(8), allocatable :: eval(:)
     complex(8), allocatable :: amat(:,:), ablock(:,:), gram(:,:), eigvec(:,:), sinv(:,:)
+    logical :: use_block_by_owner
 
     ok = .false.
+    use_block_by_owner = .true.
+    if(present(block_by_owner)) use_block_by_owner = block_by_owner
     if(allocated(v_direct)) deallocate(v_direct)
     if(num_bands_expected <= 0 .or. num_wann_expected <= 0) return
 
@@ -447,18 +463,46 @@ contains
             v_direct = (0.0d0,0.0d0)
             min_eval_all = huge(1.0d0)
             max_eval_all = -huge(1.0d0)
-            do ifrag=1,dc%n_frag
-              nowned = count(owner_frag(1:num_wann_expected) == ifrag)
-              if(nowned <= 0) cycle
-              allocate(widx(nowned), ablock(num_bands_expected,nowned), gram(nowned,nowned), &
-                eigvec(nowned,nowned), sinv(nowned,nowned), eval(nowned))
-              iloc = 0
-              do iwann=1,num_wann_expected
-                if(owner_frag(iwann) /= ifrag) cycle
-                iloc = iloc + 1
-                widx(iloc) = iwann
-                ablock(1:num_bands_expected,iloc) = amat(1:num_bands_expected,iwann)
+            if(use_block_by_owner) then
+              do ifrag=1,dc%n_frag
+                nowned = count(owner_frag(1:num_wann_expected) == ifrag)
+                if(nowned <= 0) cycle
+                allocate(widx(nowned), ablock(num_bands_expected,nowned), gram(nowned,nowned), &
+                  eigvec(nowned,nowned), sinv(nowned,nowned), eval(nowned))
+                iloc = 0
+                do iwann=1,num_wann_expected
+                  if(owner_frag(iwann) /= ifrag) cycle
+                  iloc = iloc + 1
+                  widx(iloc) = iwann
+                  ablock(1:num_bands_expected,iloc) = amat(1:num_bands_expected,iwann)
+                end do
+                gram = matmul(conjg(transpose(ablock)), ablock)
+                call eigen_zheev(gram, eval, eigvec)
+                min_eval = minval(eval)
+                max_eval = maxval(eval)
+                min_eval_all = min(min_eval_all, min_eval)
+                max_eval_all = max(max_eval_all, max_eval)
+                sinv = (0.0d0,0.0d0)
+                do i=1,nowned
+                  do j=1,nowned
+                    do k=1,nowned
+                      if(eval(k) > 1.0d-12) then
+                        sinv(i,j) = sinv(i,j) + eigvec(i,k) * (1.0d0 / sqrt(eval(k))) * conjg(eigvec(j,k))
+                      end if
+                    end do
+                  end do
+                end do
+                ablock = matmul(ablock, sinv)
+                do iloc=1,nowned
+                  v_direct(1:num_bands_expected,widx(iloc)) = ablock(1:num_bands_expected,iloc)
+                end do
+                deallocate(widx, ablock, gram, eigvec, sinv, eval)
               end do
+            else
+              nowned = num_wann_expected
+              allocate(ablock(num_bands_expected,nowned), gram(nowned,nowned), &
+                eigvec(nowned,nowned), sinv(nowned,nowned), eval(nowned))
+              ablock(1:num_bands_expected,1:nowned) = amat(1:num_bands_expected,1:nowned)
               gram = matmul(conjg(transpose(ablock)), ablock)
               call eigen_zheev(gram, eval, eigvec)
               min_eval = minval(eval)
@@ -476,14 +520,17 @@ contains
                 end do
               end do
               ablock = matmul(ablock, sinv)
-              do iloc=1,nowned
-                v_direct(1:num_bands_expected,widx(iloc)) = ablock(1:num_bands_expected,iloc)
-              end do
-              deallocate(widx, ablock, gram, eigvec, sinv, eval)
-            end do
+              v_direct(1:num_bands_expected,1:nowned) = ablock(1:num_bands_expected,1:nowned)
+              deallocate(ablock, gram, eigvec, sinv, eval)
+            end if
             ok = .true.
-            write(*,'(1x,a,2(a,es12.5))') "[DC-LCFO-W90-IMPORT] direct AMN block-orthonormalized:", &
-              " min_proj_s=", min_eval_all, " max_proj_s=", max_eval_all
+            if(use_block_by_owner) then
+              write(*,'(1x,a,2(a,es12.5))') "[DC-LCFO-W90-IMPORT] direct AMN block-orthonormalized:", &
+                " min_proj_s=", min_eval_all, " max_proj_s=", max_eval_all
+            else
+              write(*,'(1x,a,2(a,es12.5))') "[DC-LCFO-W90-IMPORT] direct AMN global-orthonormalized:", &
+                " min_proj_s=", min_eval_all, " max_proj_s=", max_eval_all
+            end if
           end if
           deallocate(amat)
         end if
@@ -3689,11 +3736,12 @@ contains
 #endif
 
     logical function use_block_diag_hamiltonian_mode() result(enabled)
+      use salmon_global, only: yn_dc_lcfo_block_diag_h
       implicit none
       character(16) :: env_value
       integer :: env_status
 
-      enabled = .true.
+      enabled = (yn_dc_lcfo_block_diag_h == 'y')
       env_value = ''
       call get_environment_variable('SALMON_DG_BLOCK_DIAG_H', env_value, status=env_status)
       if(env_status == 0) then
@@ -5797,7 +5845,7 @@ contains
           return
         end if
         change_dir_command = 'cd '//trim(shell_quote(dc%base_directory))//' && '
-        command_line = trim(change_dir_command)//trim(wannier_command)//' '//trim(shell_quote(seedname))
+        command_line = trim(change_dir_command)//trim(mpi_clean_env_prefix())//' '//trim(wannier_command)//' '//trim(shell_quote(seedname))
         write(*,'(1x,a,1x,a)') "[DC-LCFO-WANNIER] run:", trim(command_line)
         call execute_command_line(trim(command_line), exitstat=exit_status, cmdstat=cmd_status)
         if(cmd_status /= 0) then
@@ -5841,6 +5889,26 @@ contains
         trim(value) == 'seed_only' .or. trim(value) == 'SEED_ONLY' .or. &
         trim(value) == 'seed-only' .or. trim(value) == 'SEED-ONLY'
     end function is_wannier90_export_only_requested
+
+    function mpi_clean_env_prefix() result(prefix)
+      implicit none
+      character(2048) :: prefix
+
+      prefix = 'env' &
+        //' -u OMPI_COMM_WORLD_SIZE' &
+        //' -u OMPI_COMM_WORLD_RANK' &
+        //' -u OMPI_COMM_WORLD_LOCAL_SIZE' &
+        //' -u OMPI_COMM_WORLD_LOCAL_RANK' &
+        //' -u OMPI_UNIVERSE_SIZE' &
+        //' -u PMIX_NAMESPACE' &
+        //' -u PMIX_RANK' &
+        //' -u PMIX_SERVER_URI' &
+        //' -u PMIX_SERVER_URI2' &
+        //' -u PMIX_SERVER_URI21' &
+        //' -u PMIX_SECURITY_MODE' &
+        //' -u PMIX_GDS_MODULE' &
+        //' '
+    end function mpi_clean_env_prefix
 
     function shell_quote(text) result(quoted)
       implicit none
