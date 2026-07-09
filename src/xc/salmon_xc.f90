@@ -26,7 +26,7 @@ module salmon_xc
   use builtin_pz, only: exc_cor_pz
   use builtin_pz_sp, only: exc_cor_pz_sp
   use builtin_pzm, only: exc_cor_pzm
-  use builtin_tbmbj, only: exc_cor_tbmbj
+  use builtin_tbmbj, only: exc_cor_tbmbj, tbmbj_rho_s_floor
   use builtin_pw, only: exc_cor_pw
 
 #ifdef USE_LIBXC
@@ -71,12 +71,13 @@ contains
 
 ! wrapper for calc_xc
   subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc, eexc)
-    use communication, only: comm_summation
+    use communication, only: comm_summation, comm_is_root
+    use parallelization, only: nproc_id_global
     use structures
     use sendrecv_grid, only: update_overlap_real8
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
-    use salmon_global, only: yn_spinorbit
-    use noncollinear_module, only: rot_vxc_noncollinear
+    use salmon_global, only: yn_spinorbit, yn_tau_nlcc
+    use noncollinear_module, only: rot_vxc_noncollinear, calc_magnetization
     use nvtx_wrapper
     implicit none
     type(s_dft_system)      ,intent(in) :: system
@@ -95,6 +96,11 @@ contains
     !
     integer :: ix,iy,iz,is,nspin,idir
     real(8) :: tot_exc
+    logical :: if_mgga_total  ! nspin==2 meta-GGA: total-density (noncollinear) path
+    logical,save :: flag_info_mgga_noncol = .false.
+    logical,save :: flag_warn_mgga_mag    = .false.
+    integer,save :: n_warn_mgga_mag       = 0
+    real(8) :: mag(3),mag_abs
     ! real(8) :: rho_tmp(mg%num(1), mg%num(2), mg%num(3))
     ! real(8) :: rho_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
     ! real(8) :: eexc_tmp(mg%num(1), mg%num(2), mg%num(3))
@@ -109,7 +115,58 @@ contains
     
     nspin = system%nspin
 
-    if (nspin==1) then
+    ! Kinetic-energy-density dependent (meta-GGA) functionals for nspin==2:
+    ! only the noncollinear case (spin='noncollinear', i.e. yn_spinorbit=='y') is
+    ! supported, via a total-density (spin-unpolarized) evaluation:
+    ! rho_tot = rho_s(1)+rho_s(2) = tr[2x2 density matrix], tau/j summed over both
+    ! spinor components, and Vxc(1)=Vxc(2)=vxc[rho_tot] (identity in spin space).
+    ! This is EXACT for nonmagnetic (time-reversal-symmetric) systems, where the
+    ! local spin polarization vanishes, and approximate if a finite (local)
+    ! magnetization exists (a runtime warning is issued in that case).
+    if_mgga_total = ( nspin==2 .and. xc_func%use_kinetic_energy )
+    if( if_mgga_total ) then
+      if( yn_spinorbit /= 'y' ) then
+        stop "error: meta-GGA (kinetic-energy dependent) functionals with spin='polarized' are not implemented. use spin='unpolarized' or spin='noncollinear'."
+      end if
+      if( xc_func%xctype(1) /= salmon_xctype_tbmbj .or. &
+        & xc_func%xctype(2) /= salmon_xctype_none  .or. &
+        & xc_func%xctype(3) /= salmon_xctype_none ) then
+        stop "error: meta-GGA with spin='noncollinear' is available only for the built-in xc='tbmbj' or 'bj_pw'."
+      end if
+      if( (.not.flag_info_mgga_noncol) .and. comm_is_root(nproc_id_global) ) then
+        write(*,'(a)') "  TBmBJ with spin='noncollinear': the xc potential is evaluated from the total density"
+        write(*,'(a)') "  (spin-unpolarized form). This is exact for nonmagnetic systems and approximate"
+        write(*,'(a)') "  if a finite magnetization is present."
+        flag_info_mgga_noncol = .true.
+      end if
+      ! warn if the system has a significant NET magnetization (rate-limited:
+      ! re-arms after |m| decays below half the threshold, at most 3 messages;
+      ! note |m|>threshold is normal for the random/gauss initial guess during
+      ! the first SCF iterations and should decay for nonmagnetic systems).
+      ! CAVEAT: this cheap check sees only the cell-integrated moment; local
+      ! spin textures with zero net moment (e.g. antiferromagnets) are NOT
+      ! detected, but this path is equally approximate for them (it is exact
+      ! only for zero LOCAL moment). calc_magnetization returns m=0 if the
+      ! density matrix is not yet available (e.g. method_init_density='pp').
+      call calc_magnetization(system,mg,info,mag)
+      mag_abs = sqrt(mag(1)**2+mag(2)**2+mag(3)**2)
+      if( mag_abs > 1d-2 ) then
+        if( (.not.flag_warn_mgga_mag) .and. n_warn_mgga_mag < 3 ) then
+          if( comm_is_root(nproc_id_global) ) then
+            write(*,'(a,3es12.4)') "  WARNING: TBmBJ noncollinear total-density path: net magnetization m =", mag
+            write(*,'(a)') "  The TBmBJ potential here is exact only for vanishing local spin polarization."
+            write(*,'(a)') "  If the magnetization persists at convergence, the result is approximate."
+            write(*,'(a)') "  (Local moments with zero net moment are not detected by this check.)"
+          end if
+          flag_warn_mgga_mag = .true.
+          n_warn_mgga_mag = n_warn_mgga_mag + 1
+        end if
+      else if( mag_abs < 5d-3 ) then
+        flag_warn_mgga_mag = .false.
+      end if
+    end if
+
+    if (nspin==1 .or. if_mgga_total) then
       if (.not.allocated(rho_tmp)) allocate(rho_tmp(mg%num(1), mg%num(2), mg%num(3)))
       if (.not.allocated(vxc_tmp)) allocate(vxc_tmp(mg%num(1), mg%num(2), mg%num(3)))
     else if(nspin==2)then
@@ -128,6 +185,26 @@ contains
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
         rho_tmp(ix,iy,iz)=rho_s(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
+      end do
+      end do
+      end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
+!$omp end parallel do
+#endif
+    else if(if_mgga_total)then
+      ! total density = tr[2x2 density matrix] = rho_s(1) + rho_s(2)
+#ifdef USE_OPENACC
+!$acc kernels loop collapse(3) private(iz,iy,ix)
+#else
+!$omp parallel do collapse(2) private(iz,iy,ix)
+#endif
+      do iz=1,mg%num(3)
+      do iy=1,mg%num(2)
+      do ix=1,mg%num(1)
+        rho_tmp(ix,iy,iz)=rho_s(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1) &
+                       & +rho_s(2)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
       end do
       end do
       end do
@@ -182,7 +259,7 @@ contains
        lrho = 0.d0
        rdedd     =0.d0
        drdedd_tmp=0.d0
-       if(nspin==1)then
+       if(nspin==1 .or. if_mgga_total)then
          allocate (delr(mg%num(1), mg%num(2), mg%num(3) ,3), &
                    j   (mg%num(1), mg%num(2), mg%num(3) ,3), &
                    tau (mg%num(1), mg%num(2), mg%num(3)) )
@@ -223,6 +300,35 @@ contains
       call calc_gradient_field(mg,stencil%coef_nab,system%rmatrix_B,rhd,grho)
       call calc_laplacian_field(mg,stencil,rhd,lrho(1:mg%num(1),1:mg%num(2),1:mg%num(3)))
       
+!$omp parallel do collapse(2) private(iz,iy,ix)
+      do iz=1,mg%num(3)
+      do iy=1,mg%num(2)
+      do ix=1,mg%num(1)
+        delr(ix,iy,iz,1:3) = grho(1:3,mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
+      end do
+      end do
+      end do
+!$omp end parallel do
+
+      call calc_tau
+
+    elseif(if_mgga_total)then
+    ! noncollinear meta-GGA: gradient/laplacian of the TOTAL density,
+    ! and tau/j summed over both spinor components (see calc_tau)
+!$omp parallel do collapse(2) private(ix,iy,iz)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        rhd(ix,iy,iz)=dble(rho_s(1)%f(ix,iy,iz))+dble(rho_s(2)%f(ix,iy,iz))
+      enddo
+      enddo
+      enddo
+!$omp end parallel do
+
+      if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rhd)
+      call calc_gradient_field(mg,stencil%coef_nab,system%rmatrix_B,rhd,grho)
+      call calc_laplacian_field(mg,stencil,rhd,lrho(1:mg%num(1),1:mg%num(2),1:mg%num(3)))
+
 !$omp parallel do collapse(2) private(iz,iy,ix)
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
@@ -284,20 +390,45 @@ contains
       end do
 !$omp end parallel do
   
-    end if    
+    end if
+    end if
+
+    ! Optional NLCC core kinetic-energy density (yn_tau_nlcc='y'): the
+    ! meta-GGA then sees tau_total = tau_valence + tau_core, consistent
+    ! with the rho_nlcc handling inside calc_xc. The nspin==1 path and
+    ! the noncollinear total-density path (if_mgga_total) assemble into
+    ! the same total-tau array, so this one insertion covers both, for
+    ! the built-in tbmbj (whose tau_s = tau*0.5 spin split then matches
+    ! the rho_nlcc*0.5 convention) as well as a libxc mGGA (which takes
+    ! tau/rho_nlcc unsplit). The tbmbj deep-tail repair pass is
+    ! unaffected: its fallback re-evaluation ignores tau by design.
+    if ( xc_func%use_kinetic_energy .and. yn_tau_nlcc == 'y' .and. &
+       & (nspin==1 .or. if_mgga_total) ) then
+      if ( allocated(ppn%tau_nlcc) ) then
+!$omp parallel do collapse(2) private(iz,iy,ix)
+        do iz=1,mg%num(3)
+        do iy=1,mg%num(2)
+        do ix=1,mg%num(1)
+          tau(ix,iy,iz) = tau(ix,iy,iz) + ppn%tau_nlcc(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
+        end do
+        end do
+        end do
+!$omp end parallel do
+      end if
     end if
 
     if (xc_func%use_gradient) then
-!      if(nspin==2) stop "error: GGA or metaGGA & spin/='unpolarized'"
-      if(nspin==1)then
-        call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rdedd=rdedd_tmp , grho=delr, & 
-               &     rlrho=lrho, tau=tau, rj=j, rho_nlcc=ppn%rho_nlcc) 
+      ! meta-GGA & nspin==2 is guarded above: only the noncollinear
+      ! total-density path (if_mgga_total, built-in tbmbj) may pass.
+      if(nspin==1 .or. if_mgga_total)then
+        call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rdedd=rdedd_tmp , grho=delr, &
+               &     rlrho=lrho, tau=tau, rj=j, rho_nlcc=ppn%rho_nlcc)
       elseif(nspin==2)then
 !!!!!   Currently, only gga is working  !!!!!!!!!!!!!!!!!
-        call calc_xc(xc_func, pp, rho_s=rho_s_tmp, grho_s=delr_s, & 
-         & eexc=eexc_tmp,vxc_s=vxc_s_tmp,rdedd_s=rdedd_tmp_s,rho_nlcc=ppn%rho_nlcc) 
+        call calc_xc(xc_func, pp, rho_s=rho_s_tmp, grho_s=delr_s, &
+         & eexc=eexc_tmp,vxc_s=vxc_s_tmp,rdedd_s=rdedd_tmp_s,rho_nlcc=ppn%rho_nlcc)
 !               &     rlrho_s=lrho_s, tau_s=tau_s, rj_s=j_s, rho_nlcc=ppn%rho_nlcc)
-      endif 
+      endif
     else
       if(nspin==1)then
         call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
@@ -308,7 +439,7 @@ contains
 
 !!!!To include the sigma contribution to GGA Vxc potential !!!!!!!
     if (xc_func%use_gradient) then
-    if(nspin==1)then
+    if(nspin==1 .or. if_mgga_total)then
       drdedd=0.d0
       drdedd_tmp=0.d0
       do idir=1,3 
@@ -375,6 +506,31 @@ contains
         else
           Vxc(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=vxc_tmp(ix,iy,iz)
         endif
+      end do
+      end do
+      end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
+!$omp end parallel do
+#endif
+    else if(if_mgga_total)then
+      ! noncollinear meta-GGA: the total-density vxc acts as the identity in
+      ! spin space, Vxc(1)=Vxc(2)=vxc[rho_tot]. rot_vxc_noncollinear below is
+      ! then trivially safe: vxc_1 = (Vxc(1)-Vxc(2))/2 = 0, so the off-diagonal
+      ! (rotation-angle dependent) terms vanish identically.
+#ifdef USE_OPENACC
+!$acc kernels loop collapse(3) private(iz,iy,ix)
+#else
+!$omp parallel do collapse(2) private(iz,iy,ix)
+#endif
+      do iz=1,mg%num(3)
+      do iy=1,mg%num(2)
+      do ix=1,mg%num(1)
+        Vxc(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=vxc_tmp(ix,iy,iz) &
+        &  +drdedd(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
+        Vxc(2)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=vxc_tmp(ix,iy,iz) &
+        &  +drdedd(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
       end do
       end do
       end do
@@ -499,8 +655,16 @@ contains
       ! gtpsi = (nabla) psi
         call calc_gradient_psi(spsi%zwf(:,:,:,ispin,io,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie &
             ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
-            
-        occ = system%rocc(io,ik,ispin)*system%wtk(ik)
+
+        if( yn_spinorbit=='y' )then
+        ! noncollinear: ispin indexes the two spinor components of one orbital,
+        ! whose single occupation is stored in spin slot 1 of rocc (slot 2 is a
+        ! duplicate copy, cf. occupation.f90 / calc_dm_noncollinear). The ispin
+        ! loop then accumulates both spinor components into the TOTAL tau and j.
+          occ = system%rocc(io,ik,1)*system%wtk(ik)
+        else
+          occ = system%rocc(io,ik,ispin)*system%wtk(ik)
+        end if
         k(1:3) = system%vec_k(1:3,ik)
 !$omp parallel do collapse(2) private(iz,iy,ix,zs,p)
         do iz=mg%is(3),mg%ie(3)
@@ -924,7 +1088,9 @@ contains
     call nvtxStartRange('calc_xc', __LINE__)
 
     ! Detect size of 3-dimensional grid
-    if (xc%ispin == 0) then
+    ! (branch on the actually-passed density: the noncollinear meta-GGA path
+    !  calls with the unpolarized argument set (rho=...) even though ispin==1)
+    if (present(rho)) then
       nx = ubound(rho, 1) - lbound(rho, 1) + 1;
       ny = ubound(rho, 2) - lbound(rho, 2) + 1;
       nz = ubound(rho, 3) - lbound(rho, 3) + 1;
@@ -1246,6 +1412,9 @@ contains
       real(8) :: j_s_1d(nl, 3)
       real(8) :: eexc_1d(nl)
       real(8) :: vexc_1d(nl)
+      integer :: i_rep
+      real(8) :: rho_pt(1), rho_s_pt(1), grho_pt(1,3), lrho_pt(1), tau_pt(1), j_pt(1,3)
+      real(8) :: eexc_pt(1), vexc_pt(1)
       call nvtxStartRange('exec_builtin_tbmbj', __LINE__)
 
       rho_1d = reshape(rho, (/nl/))
@@ -1263,6 +1432,49 @@ contains
 
       !call exc_cor_tbmbj(nl, rho_1d, rho_s_1d,  grho_s_1d, rlrho_s_1d, tau_s_1d, j_s_1d, xc%cval, eexc_1d, vexc_1d, Hxyz, aLxyz)
       call exc_cor_tbmbj(nl, rho_1d, rho_s_1d,  grho_s_1d, rlrho_s_1d, tau_s_1d, j_s_1d, xc%cval, eexc_1d, vexc_1d)
+
+      ! Repair pass: for |rhs| tiny but NONZERO (deep density tails, e.g. the
+      ! gauss-init shadow zones of large cells, or the vacuum of isolated
+      ! systems) the Becke-Roussel branch of exc_cor_tbmbj blows up:
+      ! x_s**3*exp(-x_s) underflows -> b_s=0 -> Vx_BR=+-Inf, or x_s is NaN
+      ! (denormal rhs gives Inf/Inf inside BR_Newton). Before b_s fully
+      ! underflows there is a wide rhs window (~e^-60..e^-500) where Vx_BR is
+      ! huge but FINITE (-1e7..-1e93). Both forms poison the SCF: a single
+      ! Inf/NaN point corrupts every eigenvalue at the first subspace
+      ! diagonalization, and the finite spikes inflate the CG residual until
+      ! the rejection safeguards (conjugate_gradient W-selection guard and
+      ! rb/res blowup rejection) freeze the wavefunctions at machine precision
+      ! -> simple mixing becomes the identity -> false convergence at the
+      ! unevolved initial state (rho_dne ~ 1e-16 at iter 2). Therefore the
+      ! trigger is the tail itself, not just nonfiniteness: re-evaluate every
+      ! point with rho_s below tbmbj_rho_s_floor (the .not.(x>=floor) form also
+      ! catches rho_s=NaN) plus any point with nonfinite Vexc, through
+      ! exc_cor_tbmbj's own nonpositive-density LDA fallback branch
+      ! (rho_s_pt=-1 forces it; for these tail points max(rho_s,rho_floor)
+      ! = rho_floor, so it is the same fallback the rhs=0 case takes). Placed
+      ! here, not inside exc_cor_tbmbj's evaluation loop, which stays
+      ! untouched. In runs where no point falls below the floor (bulk
+      ! densities) every evaluation is bit-identical to the old code by
+      ! construction - testcase-133-type runs (cval / auto-c / noncollinear
+      ! SOC) reproduce the old binary byte-for-byte. When tail points do
+      ! exist, they take the bounded fallback (and, for auto-c, drop out of
+      ! the cell-average c), so systems with true vacuum or shadow-zone
+      ! tails - previously stalling at spike-contaminated states - now
+      ! converge (validated on isolated C2H2 TBmBJ; gauss-init bulk-Si
+      ! transients heal to the same fixed point as the old binary to
+      ! <1e-15 Ha in every eigenvalue).
+      do i_rep = 1, nl
+        if ( .not.(rho_s_1d(i_rep) >= tbmbj_rho_s_floor) .or. &
+           & .not.(abs(vexc_1d(i_rep)) <= huge(0d0)) ) then ! deep tail, or Vexc is +-Inf/NaN
+          rho_pt(1) = rho_1d(i_rep)
+          rho_s_pt(1) = -1d0
+          grho_pt = 0d0; lrho_pt = 0d0; tau_pt = 0d0; j_pt = 0d0
+          call exc_cor_tbmbj(1, rho_pt, rho_s_pt, grho_pt, lrho_pt, tau_pt, j_pt, &
+            &                xc%cval, eexc_pt, vexc_pt)
+          vexc_1d(i_rep) = vexc_pt(1)
+          eexc_1d(i_rep) = eexc_pt(1)
+        endif
+      end do
 
       if (present(vxc)) then
         vxc = vxc + reshape(vexc_1d, (/nx, ny, nz/))
@@ -1407,10 +1619,6 @@ contains
       integer(c_size_t) :: np
 #endif
 
-      if(pp%flag_nlcc)then
-        stop "libxc for spin-polarised systems with nlcc is currently not implemented."
-      end if
-
       do iz=1,nz
       do iy=1,ny
       do ix=1,nx
@@ -1419,6 +1627,16 @@ contains
          gvxc_tmp_1d=0.d0
          rho_1d(1) = rho_s(ix,iy,iz,1)
          rho_1d(2) = rho_s(ix,iy,iz,2)
+         ! Non-linear core correction: add half of the (spin-independent) core
+         ! charge to each spin channel, mirroring the unpolarized path
+         ! (exec_libxc), where rho_nlcc is added to the density at the libxc
+         ! call point. NOTE: as in the unpolarized path, sigma is built from
+         ! the valence-density gradient only; the core-charge gradient is not
+         ! included (pre-existing convention/limitation of exec_libxc).
+         if (present(rho_nlcc)) then
+            rho_1d(1) = rho_1d(1) + 0.5d0*rho_nlcc(ix,iy,iz)
+            rho_1d(2) = rho_1d(2) + 0.5d0*rho_nlcc(ix,iy,iz)
+         end if
          if (xc%use_gradient) then
            sigma_1d(1) = grho_s(ix,iy,iz,1,1)**2+grho_s(ix,iy,iz,1,2)**2+grho_s(ix,iy,iz,1,3)**2
            sigma_1d(2) = grho_s(ix,iy,iz,1,1)*grho_s(ix,iy,iz,2,1) &
@@ -1457,14 +1675,16 @@ contains
 #endif
 
          case(XC_FAMILY_LDA)
+           ! np (integer(c_size_t) for libxc >= 5) instead of a literal 1:
+           ! an integer(4) literal mismatches the libxc >= 5 interface
            call xc_f90_lda_exc_vxc( &
-             & xc%func(ii), 1, rho_1d(1), &
+             & xc%func(ii), np, rho_1d(1), &
              & exc_tmp_1d(1), vxc_tmp_1d(1) &
              & )
 
          case(XC_FAMILY_GGA)
            call xc_f90_gga_exc_vxc( &
-             & xc%func(ii), 1, rho_1d(1), sigma_1d(1), &
+             & xc%func(ii), np, rho_1d(1), sigma_1d(1), &
              & exc_tmp_1d(1), vxc_tmp_1d(1), gvxc_tmp_1d(1) &
              & )
 
@@ -1477,7 +1697,9 @@ contains
          end select
 
          if (present(eexc)) then
-           eexc(ix,iy,iz)=eexc(ix,iy,iz)+exc_tmp_1d(1)*(rho_1d(1)+rho_1d(2))
+           ! energy density weighted by the VALENCE density (rho_s, without
+           ! rho_nlcc), mirroring the unpolarized path: eexc = exc * rho
+           eexc(ix,iy,iz)=eexc(ix,iy,iz)+exc_tmp_1d(1)*(rho_s(ix,iy,iz,1)+rho_s(ix,iy,iz,2))
          endif
          if (present(vxc_s)) then
            vxc_s(ix,iy,iz,1)=vxc_s(ix,iy,iz,1)+vxc_tmp_1d(1)

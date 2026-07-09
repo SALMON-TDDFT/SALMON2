@@ -61,6 +61,7 @@ module inputoutput
   integer :: inml_band
   integer :: inml_sbe
   integer :: inml_dc
+  integer :: inml_gw
 
 !Input/Output units
   integer :: iflag_unit_time
@@ -261,6 +262,7 @@ contains
       & file_atom_red_coor, &
       & yn_spinorbit, &
       & yn_symmetry, &
+      & yn_sym_kreduce, &
       & absorbing_boundary, &
       & imagnary_potential_w0, &
       & imagnary_potential_dr
@@ -273,7 +275,8 @@ contains
       & yn_psmask, &
       & alpha_mask, &
       & gamma_mask, &
-      & eta_mask
+      & eta_mask, &
+      & yn_tau_nlcc
 
     namelist/functional/ &
       & xc, &
@@ -475,6 +478,8 @@ contains
       & out_rt_energy_step, &
       & yn_out_psi, &
       & yn_out_dos, &
+      & yn_out_gw_eps, &
+      & yn_out_gw_spectral, &
       & yn_out_dos_set_fe_origin, &
       & out_dos_start, &
       & out_dos_end, &
@@ -589,9 +594,25 @@ contains
       & al_vec1_sbe,al_vec2_sbe,al_vec3_sbe, &
       & norder_correction, &
       & gauge_sbe, &
+      & yn_sbe_export_overlap, &
+      & sbe_lg_diag, &
       & t_2, &
-      & am_s
-      
+      & am_s, &
+      & yn_sbe_gw_collision, &
+      & file_sbe_gw_rate, &
+      & sbe_deph_mode, &
+      & file_sbe_prod_dk, &
+      & sbe_lg_degen, &
+      & sbe_lg_degen_floor, &
+      & nband_sbe_min, &
+      & yn_sbe_gs_current_subtract, &
+      & yn_sbe_export_vnl_kappa, &
+      & sbe_vnl_kappa_dir, &
+      & sbe_vnl_kappa_amax, &
+      & sbe_vnl_kappa_ns, &
+      & yn_sbe_vnl_exact, &
+      & file_sbe_vnl_kappa
+
     namelist/dc/ &
       & num_fragment, &
       & num_rgrid_buffer, &
@@ -603,6 +624,29 @@ contains
       & nstate_frag, &
       & energy_cut, &
       & lambda_cut
+
+    namelist/gw/ &
+      & epsilon_cutoff, &
+      & n_empty_gw, &
+      & qgrid_gw, &
+      & sigma_type, &
+      & nband_qp_min, &
+      & nband_qp_max, &
+      & yn_gw_qcache, &
+      & yn_gw_sym, &
+      & yn_gw_static_remainder, &
+      & yn_gw_qp_inject, &
+      & nband_eps, &
+      & nband_sigma, &
+      & yn_gw_extrapolar, &
+      & gw_extrapolar_mode, &
+      & gw_extrapolar_de, &
+      & nomega_gw, &
+      & omega_max_gw, &
+      & eta_gw, &
+      & yn_gw_absorption, &
+      & gw_head_mode, &
+      & gw_scissors
 
 !! == default for &unit ==
     unit_system='au'
@@ -690,6 +734,7 @@ contains
     file_atom_red_coor = 'none'
     yn_spinorbit       = 'n'
     yn_symmetry        = 'n'
+    yn_sym_kreduce     = 'y'
     absorbing_boundary = 'none'
     imagnary_potential_w0 = 0d0
     imagnary_potential_dr = 0d0
@@ -703,6 +748,7 @@ contains
     alpha_mask  = 0.8d0
     gamma_mask  = 1.8d0
     eta_mask    = 15d0
+    yn_tau_nlcc = 'n'
 !! == default for &functional
     xc    = 'none'
     ! xcname = 'PZ'
@@ -902,6 +948,8 @@ contains
     out_rt_energy_step  = 10
     yn_out_psi          = 'n'
     yn_out_dos          = 'n'
+    yn_out_gw_eps       = 'n'
+    yn_out_gw_spectral  = 'n'
     yn_out_dos_set_fe_origin = 'n'
     out_dos_start       = -1.d10 / au_energy_ev * uenergy_from_au
     out_dos_end         = +1.d10 / au_energy_ev * uenergy_from_au
@@ -1014,8 +1062,24 @@ contains
     al_vec3_sbe(:,:) = 0.d0
     norder_correction = 0
     gauge_sbe = 'velocity_gauge'
+    yn_sbe_export_overlap = 'n'
+    sbe_lg_diag = 0
     t_2 = -1.d0
     am_s = 4
+    yn_sbe_gw_collision = 'n'
+    file_sbe_gw_rate    = 'Si_imsigma.data'
+    sbe_deph_mode       = 'gw'
+    file_sbe_prod_dk    = ''
+    sbe_lg_degen        = 'off'
+    sbe_lg_degen_floor  = 1d-9
+    nband_sbe_min       = 1
+    yn_sbe_gs_current_subtract = 'n'
+    yn_sbe_export_vnl_kappa = 'n'
+    sbe_vnl_kappa_dir(:)  = 0d0
+    sbe_vnl_kappa_amax    = 0d0
+    sbe_vnl_kappa_ns      = 16
+    yn_sbe_vnl_exact      = 'n'
+    file_sbe_vnl_kappa    = ''
 !! == default for &dc
     num_fragment = 0
     num_rgrid_buffer = 0
@@ -1027,6 +1091,29 @@ contains
     nstate_frag = 0
     energy_cut = 0d0
     lambda_cut = 1d-3
+
+!! == default for &gw
+    epsilon_cutoff = 10.0d0
+    n_empty_gw     = 0
+    qgrid_gw       = (/0,0,0/)
+    sigma_type     = 'sigx'
+    nband_qp_min   = 1
+    nband_qp_max   = 0
+    yn_gw_qcache   = 'n'
+    yn_gw_sym      = 'n'
+    yn_gw_static_remainder = 'n'
+    yn_gw_qp_inject = 'n'
+    nband_eps      = 0
+    nband_sigma    = 0
+    yn_gw_extrapolar   = 'n'
+    gw_extrapolar_mode = 'offset'
+    gw_extrapolar_de   = 2.0d0
+    nomega_gw        = 200
+    omega_max_gw     = 25.0d0
+    eta_gw           = 0.068d0      ! hbar/T_mask, T_mask=400 a.u. (prod RT-TDDFT mask)
+    yn_gw_absorption = 'n'
+    gw_head_mode     = 'proxy'
+    gw_scissors      = 0.0d0
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1105,6 +1192,9 @@ contains
       rewind(fh_namelist)
       
       read(fh_namelist, nml=dc, iostat=inml_dc)
+      rewind(fh_namelist)
+
+      read(fh_namelist, nml=gw, iostat=inml_gw)
       rewind(fh_namelist)
 
       close(fh_namelist)
@@ -1220,6 +1310,7 @@ contains
     call comm_bcast(file_atom_red_coor ,nproc_group_global)
     call comm_bcast(yn_spinorbit       ,nproc_group_global)
     call comm_bcast(yn_symmetry        ,nproc_group_global)
+    call comm_bcast(yn_sym_kreduce     ,nproc_group_global)
     call comm_bcast(absorbing_boundary    ,nproc_group_global)
     call comm_bcast(imagnary_potential_w0 ,nproc_group_global)
     call comm_bcast(imagnary_potential_dr ,nproc_group_global)
@@ -1235,6 +1326,7 @@ contains
     call comm_bcast(alpha_mask   ,nproc_group_global)
     call comm_bcast(gamma_mask   ,nproc_group_global)
     call comm_bcast(eta_mask     ,nproc_group_global)
+    call comm_bcast(yn_tau_nlcc  ,nproc_group_global)
 !! == bcast for &functional
 
 #ifdef USE_LIBXC
@@ -1516,6 +1608,8 @@ contains
     call comm_bcast(out_rt_energy_step  ,nproc_group_global)
     call comm_bcast(yn_out_psi          ,nproc_group_global)
     call comm_bcast(yn_out_dos          ,nproc_group_global)
+    call comm_bcast(yn_out_gw_eps       ,nproc_group_global)
+    call comm_bcast(yn_out_gw_spectral  ,nproc_group_global)
     call comm_bcast(yn_out_dos_set_fe_origin ,nproc_group_global)
     call comm_bcast(out_dos_start       ,nproc_group_global)
     out_dos_start = out_dos_start * uenergy_to_au
@@ -1641,9 +1735,25 @@ contains
     al_vec3_sbe = al_vec3_sbe * ulength_to_au
     call comm_bcast(norder_correction,nproc_group_global)
     call comm_bcast(gauge_sbe        ,nproc_group_global)
+    call comm_bcast(yn_sbe_export_overlap, nproc_group_global)
+    call comm_bcast(sbe_lg_diag      ,nproc_group_global)
     call comm_bcast(t_2              ,nproc_group_global)
     t_2 = t_2 * utime_to_au
     call comm_bcast(am_s             ,nproc_group_global)
+    call comm_bcast(yn_sbe_gw_collision, nproc_group_global)
+    call comm_bcast(file_sbe_gw_rate,    nproc_group_global)
+    call comm_bcast(sbe_deph_mode,       nproc_group_global)
+    call comm_bcast(file_sbe_prod_dk,    nproc_group_global)
+    call comm_bcast(sbe_lg_degen,        nproc_group_global)
+    call comm_bcast(sbe_lg_degen_floor,  nproc_group_global)
+    call comm_bcast(nband_sbe_min,       nproc_group_global)
+    call comm_bcast(yn_sbe_gs_current_subtract, nproc_group_global)
+    call comm_bcast(yn_sbe_export_vnl_kappa, nproc_group_global)
+    call comm_bcast(sbe_vnl_kappa_dir,   nproc_group_global)
+    call comm_bcast(sbe_vnl_kappa_amax,  nproc_group_global)
+    call comm_bcast(sbe_vnl_kappa_ns,    nproc_group_global)
+    call comm_bcast(yn_sbe_vnl_exact,    nproc_group_global)
+    call comm_bcast(file_sbe_vnl_kappa,  nproc_group_global)
 !! == bcast for dc
     call comm_bcast(num_fragment ,nproc_group_global)
     call comm_bcast(num_rgrid_buffer, nproc_group_global)
@@ -1656,6 +1766,28 @@ contains
     call comm_bcast(energy_cut, nproc_group_global)
     energy_cut = energy_cut * uenergy_to_au
     call comm_bcast(lambda_cut, nproc_group_global)
+!! == bcast for &gw
+    call comm_bcast(epsilon_cutoff, nproc_group_global)
+    call comm_bcast(n_empty_gw    , nproc_group_global)
+    call comm_bcast(qgrid_gw      , nproc_group_global)
+    call comm_bcast(sigma_type    , nproc_group_global)
+    call comm_bcast(nband_qp_min  , nproc_group_global)
+    call comm_bcast(nband_qp_max  , nproc_group_global)
+    call comm_bcast(yn_gw_qcache  , nproc_group_global)
+    call comm_bcast(yn_gw_sym     , nproc_group_global)
+    call comm_bcast(yn_gw_static_remainder, nproc_group_global)
+    call comm_bcast(yn_gw_qp_inject, nproc_group_global)
+    call comm_bcast(nband_eps     , nproc_group_global)
+    call comm_bcast(nband_sigma   , nproc_group_global)
+    call comm_bcast(yn_gw_extrapolar  , nproc_group_global)
+    call comm_bcast(gw_extrapolar_mode, nproc_group_global)
+    call comm_bcast(gw_extrapolar_de  , nproc_group_global)
+    call comm_bcast(nomega_gw       , nproc_group_global)
+    call comm_bcast(omega_max_gw    , nproc_group_global)
+    call comm_bcast(eta_gw          , nproc_group_global)
+    call comm_bcast(yn_gw_absorption, nproc_group_global)
+    call comm_bcast(gw_head_mode    , nproc_group_global)
+    call comm_bcast(gw_scissors     , nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -2102,6 +2234,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_red_coor', trim(file_atom_red_coor)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_spinorbit', yn_spinorbit
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_symmetry', yn_symmetry
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sym_kreduce', yn_sym_kreduce
 
       write(fh_variables_log, '("#",4X,A,"=",A)') 'absorbing_boundary', trim(absorbing_boundary)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'imagnary_potential_w0', imagnary_potential_w0
@@ -2122,6 +2255,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_mask', alpha_mask
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gamma_mask', gamma_mask
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'eta_mask', eta_mask
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_tau_nlcc', yn_tau_nlcc
 
       if(inml_functional >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'functional', inml_functional
@@ -2437,6 +2571,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rt_energy_step', out_rt_energy_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_psi', yn_out_psi
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dos', yn_out_dos
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gw_eps', yn_out_gw_eps
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gw_spectral', yn_out_gw_spectral
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dos_set_fe_origin', yn_out_dos_set_fe_origin
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dos_start', out_dos_start
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dos_end', out_dos_end
@@ -2603,9 +2739,21 @@ contains
       end do
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'norder_correction', norder_correction
       write(fh_variables_log, '("#",4X,A,"=",A)') 'gauge_sbe', gauge_sbe
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_export_overlap', yn_sbe_export_overlap
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't_2', t_2
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'am_s', am_s
-      
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'file_sbe_prod_dk', file_sbe_prod_dk
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'sbe_lg_degen', sbe_lg_degen
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_lg_degen_floor', sbe_lg_degen_floor
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'nband_sbe_min', nband_sbe_min
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_gs_current_subtract', yn_sbe_gs_current_subtract
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_export_vnl_kappa', yn_sbe_export_vnl_kappa
+      write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'sbe_vnl_kappa_dir(1:3)', sbe_vnl_kappa_dir(1:3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'sbe_vnl_kappa_amax', sbe_vnl_kappa_amax
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'sbe_vnl_kappa_ns', sbe_vnl_kappa_ns
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_vnl_exact', yn_sbe_vnl_exact
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'file_sbe_vnl_kappa', file_sbe_vnl_kappa
+
       if(inml_dc >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', inml_dc
       write(fh_variables_log, '("#",4X,A,"=",3I4)') 'num_fragment',num_fragment(1:3)
@@ -2618,7 +2766,31 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
-      
+
+      if(inml_gw >0)ierr_nml = ierr_nml +1
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'gw', inml_gw
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epsilon_cutoff', epsilon_cutoff
+      write(fh_variables_log, '("#",4X,A,"=",I6,A)')   'n_empty_gw',     n_empty_gw, '  (deprecated, ignored)'
+      write(fh_variables_log, '("#",4X,A,"=",3I4)')    'qgrid_gw',       qgrid_gw(1:3)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'sigma_type',     trim(sigma_type)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_qcache',    trim(yn_gw_qcache)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_sym',       trim(yn_gw_sym)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_static_remainder', trim(yn_gw_static_remainder)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_qp_inject', trim(yn_gw_qp_inject)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_eps',      nband_eps
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_sigma',    nband_sigma
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_extrapolar', trim(yn_gw_extrapolar)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'gw_extrapolar_mode', trim(gw_extrapolar_mode)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gw_extrapolar_de', gw_extrapolar_de
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_qp_min',   nband_qp_min
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'nband_qp_max',   nband_qp_max
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'nomega_gw',      nomega_gw
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'omega_max_gw',   omega_max_gw
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'eta_gw',         eta_gw
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_gw_absorption',trim(yn_gw_absorption)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'gw_head_mode',   trim(gw_head_mode)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gw_scissors',    gw_scissors
+
       close(fh_variables_log)
     end if
 
@@ -2664,12 +2836,15 @@ contains
     call yn_argument_check(yn_diagonalization_red_mem)
     call yn_argument_check(yn_periodic)
     call yn_argument_check(yn_psmask)
+    call yn_argument_check(yn_tau_nlcc)
     call yn_argument_check(yn_fix_func)
     call yn_argument_check(yn_predictor_corrector)
     call yn_argument_check(yn_auto_mixing)
     call yn_argument_check(yn_subspace_diagonalization)
     call yn_argument_check(yn_out_psi)
     call yn_argument_check(yn_out_dos)
+    call yn_argument_check(yn_out_gw_eps)
+    call yn_argument_check(yn_out_gw_spectral)
     call yn_argument_check(yn_out_dos_set_fe_origin)
     call yn_argument_check(yn_out_pdos)
     call yn_argument_check(yn_out_dns)
@@ -2682,6 +2857,8 @@ contains
     call yn_argument_check(yn_out_estatic_rt)
     call yn_argument_check(yn_out_rvf_rt)
     call yn_argument_check(yn_out_tm)
+    call yn_argument_check(yn_sbe_export_vnl_kappa)
+    call yn_argument_check(yn_sbe_vnl_exact)
     call yn_argument_check(yn_out_intraband_current)
     call yn_argument_check(yn_out_current_decomposed)
     call yn_argument_check(yn_out_spin_current_decomposed)

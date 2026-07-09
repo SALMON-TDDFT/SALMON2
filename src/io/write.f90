@@ -105,7 +105,8 @@ contains
     use sendrecv_grid
     use salmon_global, only: yn_out_tm,yn_out_gs_sgm_eps, &
                        out_gs_sgm_eps_mu_nu, out_gs_sgm_eps_width, &
-                       base_directory,sysname, de,nenergy,nelec,xc
+                       base_directory,sysname, de,nenergy,nelec,xc, &
+                       spin,yn_symmetry,yn_sym_kreduce
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_summation,comm_sync_all
     use filesystem, only: open_filehandle
@@ -120,9 +121,9 @@ contains
     type(s_orbital)       :: tpsi
     type(s_dft_energy) :: energy
     !
-    logical :: flag_print_tm, flag_print_eps
+    logical :: flag_print_tm, flag_print_eps, flag_spinor
     integer :: fh_tm, narray
-    integer :: i,j,ik,ib,ib1,ib2,ilma,nlma,ia,ix,iy,iz,NB,NK,im,ispin
+    integer :: i,j,ik,ib,ib1,ib2,ilma,nlma,ia,ix,iy,iz,NB,NK,im,ispin,jspin,nss
     integer :: ik_s,ik_e,io_s,io_e,is(3),ie(3)
     real(8) :: x,y,z
     complex(8),allocatable :: upu(:,:,:,:),upu_l(:,:,:,:)
@@ -163,8 +164,24 @@ contains
       write(*,*) "error @ write_tm_data: im/=1"
       return
     endif
-    if(system%Nspin/=1) then!??????
-      write(*,*) "error @ write_tm_data: nspin/=1"
+    ! SO-SBE wiring: spin='noncollinear' (spinor bands, always with
+    ! yn_spinorbit='y' -- enforced by the input checker) is supported: the
+    ! <u|p|u> and rVnl-Vnlr blocks are summed over the two spinor components
+    ! below.  Collinear spin-polarized (spin='polarized') stays rejected: its
+    ! two INDEPENDENT spin channels do not fit the single-band-index tm format.
+    flag_spinor = ( spin == 'noncollinear' )
+    if(system%Nspin/=1 .and. .not.flag_spinor) then!??????
+      write(*,*) "error @ write_tm_data: nspin/=1 (collinear spin-polarized is not supported)"
+      return
+    endif
+    ! The SBE reader (gs_info_ssbe) consumes the FULL uniform num_kgrid mesh in
+    ! its canonical ordering; a symmetry-reduced k-mesh (yn_sym_kreduce='y'
+    ! with yn_symmetry active) writes fewer/reweighted k-points that the SBE
+    ! side would misread.  Fail the export early and loudly (yn_sym_kreduce='n'
+    ! keeps the full mesh while still symmetrising the density).
+    if(flag_print_tm .and. index(yn_symmetry,'y')/=0 .and. yn_sym_kreduce=='y') then
+      write(*,*) "error @ write_tm_data: yn_sym_kreduce='y' reduces the k-mesh to the irreducible wedge;"
+      write(*,*) "  the tm export for SBE needs the FULL k-mesh. Set yn_sym_kreduce='n' (or yn_symmetry='n')."
       return
     endif
     !if(info%io_s/=1 .or. info%io_e/=system%no) then!??????
@@ -184,6 +201,7 @@ contains
 
     im = 1
     ispin = 1
+    nss = system%Nspin   ! spinor components summed per band (1 = spinless)
 
     NB = system%no
     NK = system%nk
@@ -197,7 +215,14 @@ contains
     is = mg%is
     ie = mg%ie
 
-    Nlma = ppg%Nlma
+    if(flag_spinor) then
+      ! noncollinear/SOC: the nonlocal PP is applied EXCLUSIVELY through the
+      ! j-dependent spinor projectors (uv_so via zekr_uV_so, see pseudo_so);
+      ! ia_tbl_so/rinv_uvu_so enumerate those channels.
+      Nlma = size(ppg%ia_tbl_so)
+    else
+      Nlma = ppg%Nlma
+    endif
 
     !calculate <u_nk|p_j|u_mk>  (j=x,y,z)
 
@@ -227,6 +252,13 @@ contains
       call update_overlap_complex8(srg, mg, tpsi%zwf)
     end if
 
+    ! <u|p|u>: the spinless branch below is the ORIGINAL loop nest verbatim
+    ! (kept in its own branch so its code generation -- including IEEE
+    ! signed-zero behavior of the exported text -- stays byte-identical);
+    ! the spinor branch sums the two spinor components (assign on jspin=1,
+    ! accumulate on jspin=2).
+    if(.not.flag_spinor) then
+
     do ik=ik_s,ik_e
     do ib2=1,NB
 
@@ -250,6 +282,40 @@ contains
       !$omp end parallel do
     end do
     end do
+
+    else ! flag_spinor
+
+    do ik=ik_s,ik_e
+    do ib2=1,NB
+    do jspin=1,nss
+
+      ! gtpsi = (nabla) psi (spinor component jspin)
+      !$omp workshare
+      gtpsi_l(:,:,:,:) = 0d0
+      !$omp end workshare
+      if(ib2.ge.io_s .and. ib2.le.io_e) &
+        call calc_gradient_psi(tpsi%zwf(:,:,:,jspin,ib2,ik,im),gtpsi_l,mg%is_array,mg%ie_array,mg%is,mg%ie &
+            ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
+      call comm_summation(gtpsi_l,gtpsi,narray,info%icomm_o)
+
+      !$omp parallel do private(ib1,i,wrk)
+      do ib1=io_s,io_e
+        do i=1,3
+          wrk(i) = sum(conjg(tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),jspin,ib1,ik,im)) &
+                            * gtpsi(i,is(1):ie(1),is(2):ie(2),is(3):ie(3)) )
+        end do
+        if(jspin==1) then
+          upu_l(:,ib1,ib2,ik) = - zI * wrk * system%Hvol
+        else
+          upu_l(:,ib1,ib2,ik) = upu_l(:,ib1,ib2,ik) - zI * wrk * system%Hvol
+        end if
+      end do
+      !$omp end parallel do
+    end do
+    end do
+    end do
+
+    end if ! flag_spinor
     deallocate(gtpsi_l,gtpsi)
 
 
@@ -294,9 +360,38 @@ contains
 
     do ik=ik_s,ik_e
     do ilma=1,Nlma
-       ia=ppg%ia_tbl(ilma)
+       if(flag_spinor) then
+          ia=ppg%ia_tbl_so(ilma)
+       else
+          ia=ppg%ia_tbl(ilma)
+       endif
        uVpsi_l  = 0d0
        uVrpsi_l = 0d0
+       if(flag_spinor) then
+          ! spinor projector channel ilma: <chi|e^ik f|u> = sum_s sum_j
+          ! conjg(zekr_uV_so(j,ilma,ik,s)) f(r_j) u_s(r_j)  (same structure as
+          ! pseudo_so / calc_current_nonlocal_so; rinv_uvu_so applied below)
+          do jspin=1,2
+             !$omp parallel do private(j,x,y,z,ix,iy,iz,veik,ib) reduction(+:uVpsi_l,uVrpsi_l)
+             do j=1,ppg%Mps(ia)
+                x = ppg%Rxyz(1,j,ia)
+                y = ppg%Rxyz(2,j,ia)
+                z = ppg%Rxyz(3,j,ia)
+                ix = ppg%Jxyz(1,j,ia)
+                iy = ppg%Jxyz(2,j,ia)
+                iz = ppg%Jxyz(3,j,ia)
+                veik = conjg(ppg%zekr_uV_so(j,ilma,ik,jspin,1))
+                do ib=io_s,io_e
+                   uVpsi_l(ib)    = uVpsi_l(ib)    + veik*    tpsi%zwf(ix,iy,iz,jspin,ib,ik,im) !=<v|e^ik|u>
+                   uVrpsi_l(1,ib) = uVrpsi_l(1,ib) + veik* x *tpsi%zwf(ix,iy,iz,jspin,ib,ik,im) !=<v|e^ik*x|u>
+                   uVrpsi_l(2,ib) = uVrpsi_l(2,ib) + veik* y *tpsi%zwf(ix,iy,iz,jspin,ib,ik,im) !=<v|e^ik*y|u>
+                   uVrpsi_l(3,ib) = uVrpsi_l(3,ib) + veik* z *tpsi%zwf(ix,iy,iz,jspin,ib,ik,im) !=<v|e^ik*z|u>
+                enddo
+             end do
+             !$omp end parallel do
+          end do
+          uVpsi_l  = uVpsi_l * ppg%rinv_uvu_so(ilma)
+       else
        !$omp parallel do private(j,x,y,z,ix,iy,iz,veik,ib) reduction(+:uVpsi_l,uVrpsi_l)
        do j=1,ppg%Mps(ia)
           x = ppg%Rxyz(1,j,ia)
@@ -316,6 +411,7 @@ contains
        end do
        !$omp end parallel do
        uVpsi_l  = uVpsi_l * ppg%rinv_uvu(ilma)
+       endif
        call comm_summation(uVpsi_l ,uVpsi ,  NB,info%icomm_ro)
        call comm_summation(uVrpsi_l,uVrpsi,3*NB,info%icomm_ro)
 !       call comm_summation(uVpsi_l ,uVpsi ,  NB,info%icomm_r)
@@ -1353,7 +1449,7 @@ contains
     use communication, only: comm_is_root
     use filesystem,          only: open_filehandle
     use inputoutput,          only: sysname, base_directory, num_kgrid
-    use band,                 only: calc_kgrid_prod
+    use band,                 only: calc_kgrid_prod_block, kgrid_prod_block_size
     implicit none
     type(s_rgrid),        intent(in) :: rgrid_lg, rgrid_mg
     type(s_dft_system),       intent(in) :: system
@@ -1361,58 +1457,324 @@ contains
     type(s_orbital), intent(in) :: wavefunction
 
     ! Specify the neighboring k-grid region to consider:
-    integer, parameter :: ndk = 1 
+    integer, parameter :: ndk = 1
     ! (ndk=1 corresponds to first nearlest neighbors)
 
-    integer :: ik, ik1, ik2, ik3 
+    integer :: ik, ik1, ik2, ik3
     integer :: jdk1, jdk2, jdk3, io, jo
     integer :: fh
+    integer :: nblk, ikb_s, ikb_e
     character(256) :: file_prod_dk_data
     integer :: ik3d_tbl(1:3, 1:system%nk)
-    complex(8) :: prod_dk( &
-      & 1:system%no, 1:system%no, -ndk:ndk, -ndk:ndk, -ndk:ndk, &
-      & 1:system%nk)
+    ! Streaming export: the product table is computed and written in k-blocks
+    ! so that no O(nk) replicated wavefunction/product buffer is ever
+    ! allocated (the old full-nk export ran out of memory at large nk).
+    complex(8), allocatable :: prod_dk_blk(:, :, :, :, :, :)
 
     ! Export filename: project_directory/sysname_kprod_dk.data
     file_prod_dk_data = trim(base_directory) // trim(sysname) // "_prod_dk.data"
 
     ! If k-point is distributed as uniform rectangular grid:
     if (0 < minval(num_kgrid)) then
-      ! Calculate inner-product table: prod_dk
-      call calc_kgrid_prod( &
-        & system, rgrid_lg, rgrid_mg, wf_info, wavefunction, &
-        & num_kgrid(1), num_kgrid(2), num_kgrid(3), ndk, &
-        & ik3d_tbl, prod_dk)
-      
+      ! Number of bra k-points computed per streaming block:
+      nblk = kgrid_prod_block_size( &
+        & system, num_kgrid(1), num_kgrid(2), num_kgrid(3), ndk)
+
       if(comm_is_root(nproc_id_global)) then
         fh = open_filehandle(trim(file_prod_dk_data))
+        ! metadata (reader record-count / ordering check): no nk num_kgrid(1:3) ndk
+        write(fh, '("#",6(1x,i0))') &
+          & system%no, system%nk, num_kgrid(1), num_kgrid(2), num_kgrid(3), ndk
         write(fh, '(a)') "# 1:ik 2:ik1 3:ik2 4:ik3 5:jk1-ik1 6:jk2-ik2 7:jk3-ik3 8:io 9:jo 10:re 11:im"
-        do ik = 1, system%nk
-          ik1 = ik3d_tbl(1, ik)
-          ik2 = ik3d_tbl(2, ik)
-          ik3 = ik3d_tbl(3, ik)
-          do jdk3 = -ndk, ndk
-            do jdk2 = -ndk, ndk
-              do jdk1 = -ndk, ndk
-                do jo = 1, system%no
-                  do io = 1, system%no
-                    write(fh, '(9(i10),2(e25.16e3))') &
-                      & ik, ik1, ik2, ik3, &
-                      & jdk1, jdk2, jdk3, io, jo, &
-                      & real(prod_dk(io, jo, jdk1, jdk2, jdk3, ik)), &
-                      & aimag(prod_dk(io, jo, jdk1, jdk2, jdk3, ik))
+      end if
+
+      ! All ranks iterate the same deterministic block schedule (collective
+      ! communication inside calc_kgrid_prod_block); the root rank appends
+      ! each block's records to the file in the same global ik order and
+      ! with the same formats as the old full-nk export.
+      do ikb_s = 1, system%nk, nblk
+        ikb_e = min(ikb_s + nblk - 1, system%nk)
+
+        allocate(prod_dk_blk( &
+          & 1:system%no, 1:system%no, -ndk:ndk, -ndk:ndk, -ndk:ndk, &
+          & ikb_s:ikb_e))
+
+        ! Calculate inner-product table for this block: prod_dk_blk
+        call calc_kgrid_prod_block( &
+          & system, rgrid_lg, rgrid_mg, wf_info, wavefunction, &
+          & num_kgrid(1), num_kgrid(2), num_kgrid(3), ndk, &
+          & ikb_s, ikb_e, ik3d_tbl, prod_dk_blk)
+
+        if(comm_is_root(nproc_id_global)) then
+          do ik = ikb_s, ikb_e
+            ik1 = ik3d_tbl(1, ik)
+            ik2 = ik3d_tbl(2, ik)
+            ik3 = ik3d_tbl(3, ik)
+            do jdk3 = -ndk, ndk
+              do jdk2 = -ndk, ndk
+                do jdk1 = -ndk, ndk
+                  do jo = 1, system%no
+                    do io = 1, system%no
+                      write(fh, '(9(i10),2(e25.16e3))') &
+                        & ik, ik1, ik2, ik3, &
+                        & jdk1, jdk2, jdk3, io, jo, &
+                        & real(prod_dk_blk(io, jo, jdk1, jdk2, jdk3, ik)), &
+                        & aimag(prod_dk_blk(io, jo, jdk1, jdk2, jdk3, ik))
+                    end do
                   end do
                 end do
               end do
             end do
           end do
-        end do
+        end if
+
+        deallocate(prod_dk_blk)
+      end do
+
+      if(comm_is_root(nproc_id_global)) then
         close(fh)
       end if
     end if
     return
   end subroutine write_prod_dk_data
-  
+
+!===================================================================================================================================
+
+  !===================================================================
+  ! VG completion export (spec: gw_design/specs/2026-07-07-vg-vnl-kappa-
+  ! interpolation.md): band-space nonlocal matrices on a 1D kappa-stencil.
+  !
+  ! For each k-point and stencil offset Delta_kappa_s = s*h*e_dir
+  ! (s = -ns..ns, h = amax/ns), export
+  !
+  !   V_s(n,m)   = <u_nk| e^{-i kappa r} V_nl e^{i kappa r} |u_mk>,  kappa = k + s*h*e_dir
+  !   W_{i,s}(n,m) = d V_s(n,m) / d kappa_i                          (i = x,y,z)
+  !
+  ! assembled from the separable KB form V_nl = sum_alpha |uv> rinv_uvu <uv|:
+  !
+  !   fc_{alpha,m}(k,s) = sum_j conjg(zekr_uV(j,alpha,ik)) * e^{+i s h (e_dir.rxyz_j)} * u_mk(r_j)
+  !   gc^{(i)}          = sum_j i*rxyz_{i,j} * (same phase) * u_mk(r_j)   [= d fc / d kappa_i]
+  !   V_s   = Hvol * F^H R F        (F(alpha,m) = fc, R = diag(rinv_uvu))
+  !   W_i,s = Hvol * (G_i^H R F + F^H R G_i) = X + X^H,  X = Hvol * G_i^H R F
+  !
+  ! CONVENTIONS (verified against the production operators):
+  ! * ppg%rxyz is ALREADY the atom-image-relative coordinate (prep_pp), so
+  !   conjg(zekr_uV(k)) * e^{+i Delta_kappa . rxyz} is IDENTICAL to the operator
+  !   update_kvector_nonlocalpt builds at vec_Ac = Delta_kappa: the exported V_s
+  !   is exactly the nonlocal operator real-time TDDFT uses at A = s*h*e_dir,
+  !   projected on the GS bands.  No coordinate/image-phase ambiguity.
+  ! * Normalization matches write_tm_data / pseudo_pt: raw grid sums (no Hvol),
+  !   rinv_uvu = (+-1)*hvol, one factor system%Hvol at assembly.
+  ! * s=0 identities: V_0 = static nonlocal matrix; W_{i,0} == the
+  !   u_rVnl_Vnlr_u block of write_tm_data (mathematically identical,
+  !   independent implementation) -- the reader cross-checks this.
+  !
+  ! File: <base_directory><sysname>_vnl_kappa.bin, unformatted stream (binary;
+  ! the text equivalent would be GB-scale).  Header carries a lattice/electron
+  ! fingerprint so a stale file from another system fails closed in the reader.
+  !
+  ! Comm pattern mirrors write_tm_data (per-k icomm_ro reduction of the raw
+  ! sums) + write_prod_dk_data (k-block streaming gather to root, so no O(nk)
+  ! replicated buffer is ever allocated).
+  !===================================================================
+  subroutine write_sbe_vnl_kappa_data(tpsi,system,info,ppg)
+    use structures
+    use salmon_global, only: sbe_vnl_kappa_dir, sbe_vnl_kappa_amax, sbe_vnl_kappa_ns, &
+                             base_directory, sysname, spin, yn_spinorbit, nelec, natom, &
+                             num_kgrid
+    use parallelization, only: nproc_id_global
+    use communication, only: comm_is_root, comm_summation, comm_sync_all
+    use filesystem, only: get_filehandle
+    use math_constants, only: zI
+    use update_kvector_plusU_sub, only: PLUS_U_ON
+    implicit none
+    type(s_dft_system),   intent(in) :: system
+    type(s_parallel_info),intent(in) :: info
+    type(s_pp_grid),      intent(in) :: ppg
+    type(s_orbital),      intent(in) :: tpsi
+    !
+    integer :: NB, NK, ns, nkap, Nlma, im, ispin
+    integer :: ik_s, ik_e, io_s, io_e
+    integer :: ik, ib, ilma, ia, j, s, i, ikb_s, ikb_e, nblk
+    integer :: fh
+    real(8) :: h, edir(3), dnorm, x, y, z, arg
+    integer :: ix, iy, iz
+    complex(8) :: base, dph, ph, wf, phw
+    character(256) :: file_vnl_kappa
+    complex(8), allocatable :: fk_l(:,:,:), fk(:,:,:)      ! (Nlma, NB, -ns:ns)
+    complex(8), allocatable :: gk_l(:,:,:,:), gk(:,:,:,:)  ! (Nlma, NB, 3, -ns:ns)
+    complex(8), allocatable :: fscl(:,:), xmat(:,:)
+    complex(8), allocatable :: buf_l(:,:,:,:,:), buf(:,:,:,:,:) ! (NB,NB,0:3,-ns:ns, k-block)
+    ! k-points per streaming block of the root gather (memory: NB^2*4*nkap*nblk*16B)
+    integer, parameter :: nblk_max = 8
+
+    ! ---- fail-closed input guards (this writer runs under theory='dft',
+    !      where check_input_variables_sbe is never invoked) ----
+    if (sbe_vnl_kappa_amax <= 0d0) then
+      if (comm_is_root(nproc_id_global)) &
+        write(*,*) "ERROR(write_sbe_vnl_kappa_data): 'sbe_vnl_kappa_amax' must be > 0."
+      call comm_sync_all;  error stop
+    end if
+    if (sbe_vnl_kappa_ns < 4) then
+      if (comm_is_root(nproc_id_global)) &
+        write(*,*) "ERROR(write_sbe_vnl_kappa_data): 'sbe_vnl_kappa_ns' must be >= 4."
+      call comm_sync_all;  error stop
+    end if
+    dnorm = norm2(sbe_vnl_kappa_dir(1:3))
+    if (dnorm <= 1d-12) then
+      if (comm_is_root(nproc_id_global)) &
+        write(*,*) "ERROR(write_sbe_vnl_kappa_data): 'sbe_vnl_kappa_dir' must be a nonzero vector."
+      call comm_sync_all;  error stop
+    end if
+    ! scalar (spinless) first stage: the spinor extension (zekr_uV_so channels,
+    ! jspin sum) keeps the same file contract but is not wired yet.
+    if (system%Nspin /= 1 .or. trim(spin) == 'noncollinear' .or. yn_spinorbit == 'y') then
+      if (comm_is_root(nproc_id_global)) &
+        write(*,*) "ERROR(write_sbe_vnl_kappa_data): only spinless nspin=1 without spin-orbit is supported."
+      call comm_sync_all;  error stop
+    end if
+    ! DFT+U adds k-dependent +U projector terms (pseudo_plusU / zekr_uV_u) that
+    ! this exporter does NOT assemble -- the exported V/W would silently miss
+    ! the +U part of the nonlocal Hamiltonian.  Fail closed.
+    if (PLUS_U_ON) then
+      if (comm_is_root(nproc_id_global)) &
+        write(*,*) "ERROR(write_sbe_vnl_kappa_data): DFT+U is not supported (the +U " // &
+          & "nonlocal channel is not included in the kappa-stencil)."
+      call comm_sync_all;  error stop
+    end if
+    if (.not. allocated(tpsi%zwf)) then
+      if (comm_is_root(nproc_id_global)) &
+        write(*,*) "ERROR(write_sbe_vnl_kappa_data): complex wavefunctions required (iperiodic=3)."
+      call comm_sync_all;  error stop
+    end if
+    if (info%im_s /= 1 .or. info%im_e /= 1) then
+      if (comm_is_root(nproc_id_global)) &
+        write(*,*) "ERROR(write_sbe_vnl_kappa_data): im/=1 is not supported."
+      call comm_sync_all;  error stop
+    end if
+
+    if (comm_is_root(nproc_id_global)) &
+      write(*,*) "  calculating nonlocal kappa-stencil (vnl_kappa) ....."
+
+    im = 1;  ispin = 1
+    NB = system%no;  NK = system%nk
+    ns = sbe_vnl_kappa_ns;  nkap = 2*ns + 1
+    h  = sbe_vnl_kappa_amax / dble(ns)
+    edir(1:3) = sbe_vnl_kappa_dir(1:3) / dnorm
+    Nlma = ppg%Nlma
+    ik_s = info%ik_s;  ik_e = info%ik_e
+    io_s = info%io_s;  io_e = info%io_e
+
+    allocate(fk_l(Nlma,NB,-ns:ns), fk(Nlma,NB,-ns:ns))
+    allocate(gk_l(Nlma,NB,3,-ns:ns), gk(Nlma,NB,3,-ns:ns))
+    allocate(fscl(Nlma,NB), xmat(NB,NB))
+
+    file_vnl_kappa = trim(base_directory)//trim(sysname)//'_vnl_kappa.bin'
+    if (comm_is_root(nproc_id_global)) then
+      fh = get_filehandle()
+      open(fh, file=trim(file_vnl_kappa), form='unformatted', access='stream', status='replace')
+      ! header (fixed layout; reader = read_vnl_kappa_data in gs_info_ssbe)
+      write(fh) 'SBEVNLK1'                                   ! character(8) magic
+      write(fh) 1, NK, NB, ns                                ! ndim, nk, nb_file, ns
+      write(fh) num_kgrid(1), num_kgrid(2), num_kgrid(3)
+      write(fh) nelec, natom                                 ! fingerprint
+      write(fh) h, edir(1), edir(2), edir(3), sbe_vnl_kappa_amax
+      write(fh) system%primitive_a(1:3,1), system%primitive_a(1:3,2), system%primitive_a(1:3,3)
+    end if
+
+    nblk = nblk_max
+    do ikb_s = 1, NK, nblk
+      ikb_e = min(ikb_s + nblk - 1, NK)
+      allocate(buf_l(NB,NB,0:3,-ns:ns,ikb_s:ikb_e), buf(NB,NB,0:3,-ns:ns,ikb_s:ikb_e))
+      !$omp workshare
+      buf_l(:,:,:,:,:) = (0d0,0d0)
+      !$omp end workshare
+
+      do ik = max(ikb_s, ik_s), min(ikb_e, ik_e)
+
+        ! ---- raw projector sums fc/gc for all channels x bands x stencil ----
+        !$omp workshare
+        fk_l(:,:,:) = (0d0,0d0)
+        gk_l(:,:,:,:) = (0d0,0d0)
+        !$omp end workshare
+        do ilma = 1, Nlma
+          ia = ppg%ia_tbl(ilma)
+          !$omp parallel do private(j,x,y,z,ix,iy,iz,base,dph,ph,arg,s,ib,wf,phw) &
+          !$omp   reduction(+:fk_l,gk_l)
+          do j = 1, ppg%Mps(ia)
+            x  = ppg%Rxyz(1,j,ia)
+            y  = ppg%Rxyz(2,j,ia)
+            z  = ppg%Rxyz(3,j,ia)
+            ix = ppg%Jxyz(1,j,ia)
+            iy = ppg%Jxyz(2,j,ia)
+            iz = ppg%Jxyz(3,j,ia)
+            base = conjg(ppg%zekr_uV(j,ilma,ik))
+            arg  = h * ( edir(1)*x + edir(2)*y + edir(3)*z )
+            dph  = dcmplx(cos(arg), sin(arg))          ! e^{+i h (e_dir.rxyz)}
+            ph   = base * dcmplx(cos(-ns*arg), sin(-ns*arg))
+            do s = -ns, ns
+              do ib = io_s, io_e
+                wf  = tpsi%zwf(ix,iy,iz,ispin,ib,ik,im)
+                phw = ph * wf
+                fk_l(ilma,ib,s)   = fk_l(ilma,ib,s)   + phw
+                gk_l(ilma,ib,1,s) = gk_l(ilma,ib,1,s) + zI * x * phw
+                gk_l(ilma,ib,2,s) = gk_l(ilma,ib,2,s) + zI * y * phw
+                gk_l(ilma,ib,3,s) = gk_l(ilma,ib,3,s) + zI * z * phw
+              end do
+              ph = ph * dph
+            end do
+          end do
+          !$omp end parallel do
+        end do
+        ! complete all band rows within the k-group (same comm as write_tm_data)
+        call comm_summation(fk_l, fk, Nlma*NB*nkap,   info%icomm_ro)
+        call comm_summation(gk_l, gk, Nlma*NB*nkap*3, info%icomm_ro)
+
+        ! ---- assembly (one o-representative per k-group; fk/gk are identical
+        !      on every rank of the (r,o) group after the reduction above) ----
+        if (io_s == 1) then
+          do s = -ns, ns
+            do ib = 1, NB
+              fscl(1:Nlma,ib) = ppg%rinv_uvu(1:Nlma) * fk(1:Nlma,ib,s)
+            end do
+            ! V_s = Hvol * F^H (R F)
+            call zgemm('C','N', NB, NB, Nlma, dcmplx(system%Hvol,0d0), &
+              & fk(:,:,s), Nlma, fscl, Nlma, dcmplx(0d0,0d0), buf_l(:,:,0,s,ik), NB)
+            ! W_i,s = X + X^H,  X = Hvol * G_i^H (R F)
+            do i = 1, 3
+              call zgemm('C','N', NB, NB, Nlma, dcmplx(system%Hvol,0d0), &
+                & gk(:,:,i,s), Nlma, fscl, Nlma, dcmplx(0d0,0d0), xmat, NB)
+              buf_l(:,:,i,s,ik) = xmat(:,:) + conjg(transpose(xmat(:,:)))
+            end do
+          end do
+        end if
+      end do ! ik
+
+      ! gather this k-block to root (each r-slice sums its single
+      ! o-representative per owned k; root writes its own r-slice's copy)
+      call comm_summation(buf_l, buf, NB*NB*4*nkap*(ikb_e-ikb_s+1), info%icomm_ko)
+
+      if (comm_is_root(nproc_id_global)) then
+        do ik = ikb_s, ikb_e
+          do s = -ns, ns
+            write(fh) buf(1:NB,1:NB,0,s,ik)        ! V_s
+            write(fh) buf(1:NB,1:NB,1:3,s,ik)      ! W_{1:3,s}
+          end do
+        end do
+      end if
+      deallocate(buf_l, buf)
+    end do ! ikb_s
+
+    if (comm_is_root(nproc_id_global)) then
+      close(fh)
+      write(*,*) "  vnl_kappa export written: ", trim(file_vnl_kappa)
+    end if
+    deallocate(fk_l, fk, gk_l, gk, fscl, xmat)
+
+    call comm_sync_all
+    return
+  end subroutine write_sbe_vnl_kappa_data
+
 !===================================================================================================================================
 
   !! export SYSNAME_info.data file (GS info)

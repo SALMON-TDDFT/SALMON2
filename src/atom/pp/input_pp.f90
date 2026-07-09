@@ -30,7 +30,7 @@ subroutine input_pp(pp,hx,hy,hz)
   use salmon_global,only : file_pseudo, quiet, method_init_density
   use salmon_global,only : n_Yabana_Bertsch_psformat,n_ABINIT_psformat&
     &,n_ABINITFHI_psformat,n_FHI_psformat,ps_format,nelem,base_directory, &
-    & yn_psmask
+    & yn_psmask, yn_tau_nlcc
   use parallelization, only: nproc_group_global, nproc_id_global
   use communication, only: comm_bcast, comm_is_root
   use math_constants, only : pi
@@ -83,6 +83,25 @@ subroutine input_pp(pp,hx,hy,hz)
           close(4)
         else
           call read_ps_upf(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
+          ! UPF carries only the core charge itself (PP_NLCC), not its radial
+          ! derivative, so the vW core kinetic-energy-density table
+          ! (tau_nlcc_tbl = 0.25*rho_c'**2/rho_c in making_ps_*) would come out
+          ! identically zero. When yn_tau_nlcc='y', reconstruct the derivative
+          ! by numerical differentiation on the radial grid. Gated on the flag
+          ! because tau_nlcc_tbl also feeds the NLCC cutoff-radius scan of
+          ! calc_nlcc (rho_tbl+tau_tbl), so an unconditional fill would perturb
+          ! yn_tau_nlcc='n' results (which must stay bit-identical).
+          if( yn_tau_nlcc == 'y' .and. flag_nlcc_element(ik) ) then
+            ! rhor_nlcc is one shared buffer for the whole element loop and
+            ! read_ps_upf (ver 2.0.1) fills only column 0: clear the
+            ! derivative columns so a previous element's reconstruction is
+            ! not mistaken for reader-provided data of this element. If the
+            ! UPF reader is ever extended to parse a native derivative, fill
+            ! rhor_nlcc(:,1) inside read_ps_upf itself; the guard in
+            ! reconstruct_rhor_nlcc_deriv then keeps it as is.
+            rhor_nlcc(:,1:2) = 0d0
+            call reconstruct_rhor_nlcc_deriv(pp,ik,rhor_nlcc)
+          end if
         end if
         flag_beta_proj_is_given =.true.
 !      case('ATOM')      ; call read_ps_ATOM
@@ -838,6 +857,42 @@ subroutine read_ps_adpack(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
   close(4)
 
 end subroutine read_ps_adpack
+
+subroutine reconstruct_rhor_nlcc_deriv(pp,ik,rhor_nlcc)
+  use structures,only : s_pp_info
+  implicit none
+  type(s_pp_info),intent(in) :: pp
+  integer,intent(in) :: ik
+  real(8),intent(inout) :: rhor_nlcc(0:pp%nrmax0,0:2)
+  integer :: i,mr
+  real(8) :: r1,r2,r3,r4
+
+! Reconstruct the radial derivative rhor_nlcc(:,1) = d(rho_core)/dr from
+! rhor_nlcc(:,0) for readers that provide only the core charge (UPF).
+! If a (future) reader already filled the derivative, keep it:
+  if ( any(rhor_nlcc(:,1)/=0.0d0) ) return
+  if ( all(rhor_nlcc(:,0)==0.0d0) ) return
+
+! rhor_nlcc(i,:) lives on pp%rad(i+1,ik): use the same non-uniform 3-point
+! stencil as the dvpp/dupp tables in making_ps_* (valid on the log grids of
+! UPF meshes), with the same endpoint treatment (copy the neighbor). Beyond
+! the core-charge support the differences vanish, so the derivative stays 0;
+! the 0/0 tail of the vW ratio is avoided by the rho_c(i)/rho_c(0) >= 1d-7
+! cutoff of the table loops in making_ps_*.
+  mr = pp%mr(ik)
+  do i=1,mr-2
+    r1 = pp%rad(i+1,ik)-pp%rad(i,ik)
+    r2 = pp%rad(i+1,ik)-pp%rad(i+2,ik)
+    r3 = pp%rad(i+2,ik)-pp%rad(i,ik)
+    r4 = r1/r2
+    rhor_nlcc(i,1)=(r4+1.d0)*(rhor_nlcc(i,0)-rhor_nlcc(i-1,0))/r1 &
+                & -(rhor_nlcc(i+1,0)-rhor_nlcc(i-1,0))/r3*r4
+  end do
+  rhor_nlcc(0,1)=rhor_nlcc(1,1)
+  rhor_nlcc(mr-1,1)=rhor_nlcc(mr-2,1)
+
+  return
+end subroutine reconstruct_rhor_nlcc_deriv
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 !    subroutine read_ps_ATOM !.psf format created by ATOM for SIESTA

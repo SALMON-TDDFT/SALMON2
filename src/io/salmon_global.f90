@@ -102,6 +102,9 @@ module salmon_global
   character(256) :: file_atom_red_coor
   character(1)   :: yn_spinorbit
   character(3)   :: yn_symmetry
+  character(1)   :: yn_sym_kreduce   ! 'n': keep the FULL k-mesh while still
+                                     ! symmetrising the density (sym_rho) -- gives
+                                     ! symmetric orbitals on the full mesh (for GW)
   character(16)  :: absorbing_boundary
   real(8)        :: imagnary_potential_w0
   real(8)        :: imagnary_potential_dr
@@ -115,6 +118,7 @@ module salmon_global
   real(8)        :: alpha_mask
   real(8)        :: gamma_mask
   real(8)        :: eta_mask
+  character(1)   :: yn_tau_nlcc
 
 !! &functional
   character(64)  :: xc !, xcname
@@ -312,6 +316,8 @@ module salmon_global
   integer        :: out_rt_energy_step
   character(1)   :: yn_out_psi
   character(1)   :: yn_out_dos
+  character(1)   :: yn_out_gw_eps      ! &analysis: GW/RPA dielectric eps(w) -> Im eps, n, k, R
+  character(1)   :: yn_out_gw_spectral ! &analysis: spectral function A(k,w) and Im Sigma
   character(1)   :: yn_out_dos_set_fe_origin
   real(8)        :: out_dos_start
   real(8)        :: out_dos_end
@@ -435,8 +441,57 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: al_vec1_sbe(3,200),al_vec2_sbe(3,200),al_vec3_sbe(3,200)
   integer        :: norder_correction
   character(16)  :: gauge_sbe
+  character(1)   :: yn_sbe_export_overlap
+  integer        :: sbe_lg_diag
   real(8)        :: t_2
   integer        :: am_s
+  character(1)   :: yn_sbe_gw_collision
+  character(256) :: file_sbe_gw_rate
+  character(16)  :: sbe_deph_mode
+  character(256) :: file_sbe_prod_dk
+  character(16)  :: sbe_lg_degen
+  real(8)        :: sbe_lg_degen_floor
+  integer        :: nband_sbe_min       ! band-window lower edge (lower-cut): SBE
+                                        ! propagates the contiguous window
+                                        ! [nband_sbe_min, nstate_sbe]; bands
+                                        ! 1..nband_sbe_min-1 are frozen as inert
+                                        ! fully-occupied (default 1 = full window)
+  character(1)   :: yn_sbe_gs_current_subtract  ! 'y': velocity-gauge current readout
+                                        ! J(t) -= D * A(t), where D is the window
+                                        ! f-sum-rule DEFICIENCY tensor of the
+                                        ! truncated basis (built once at solver init
+                                        ! from the GS p matrix elements and
+                                        ! eigenvalues; build_fsum_deficiency_tensor).
+                                        ! Removes only the linear response the
+                                        ! finite-nstate_sbe window cannot supply:
+                                        ! complete basis => D -> 0; A=0 => no-op, so
+                                        ! post-pulse observables are unchanged.
+                                        ! (v2; the v1 frozen-GS subtraction removed
+                                        ! the full diamagnetic A*Ne/V current and
+                                        ! overcorrected -- see calc_current_bloch.)
+                                        ! Default 'n' = legacy readout.
+  ! --- VG completion: all-order nonlocal V_nl(k+A) via kappa-stencil export +
+  !     runtime interpolation (spec 2026-07-07-vg-vnl-kappa-interpolation) ---
+  character(1)   :: yn_sbe_export_vnl_kappa  ! 'y' (GS, theory='dft'): export the
+                                        ! band-space nonlocal matrices V(k,kappa_s)
+                                        ! and velocity matrices W_i(k,kappa_s) on the
+                                        ! 1D kappa-stencil kappa_s = k + s*h*e_dir
+                                        ! (s = -ns..ns, h = amax/ns) to
+                                        ! <sysname>_vnl_kappa.bin.  Default 'n'.
+  real(8)        :: sbe_vnl_kappa_dir(1:3)   ! stencil axis (Cartesian a.u.; normalized
+                                        ! internally; = the intended polarization axis)
+  real(8)        :: sbe_vnl_kappa_amax       ! stencil half-range |A|max (a.u.; > 0)
+  integer        :: sbe_vnl_kappa_ns         ! points per side (>= 4); h = amax/ns
+  character(1)   :: yn_sbe_vnl_exact         ! 'y' (SBE runtime, velocity gauge):
+                                        ! replace the first-order A.rvnl nonlocal
+                                        ! correction by the all-order
+                                        ! DeltaV = V(k+A) - V(k) (propagation) and
+                                        ! W_i(k+A) (current readout), interpolated
+                                        ! from file_sbe_vnl_kappa.  Mutually
+                                        ! exclusive with yn_vnl_correction='y' and
+                                        ! norder_correction>=1.  Default 'n'.
+  character(256) :: file_sbe_vnl_kappa       ! stencil file path (required when
+                                        ! yn_sbe_vnl_exact='y')
 
   !! &dc
   integer        :: num_fragment(3)
@@ -449,5 +504,38 @@ character(256),allocatable :: atom_name(:)
   integer        :: nstate_frag
   real(8)        :: energy_cut
   real(8)        :: lambda_cut
+
+  !! &gw
+  real(8)        :: epsilon_cutoff      ! Ry, dielectric-matrix G cutoff
+  integer        :: n_empty_gw          ! empty bands for chi0 / sigma_c sums
+  integer        :: qgrid_gw(3)         ! q-grid (= k-grid by default)
+  character(16)  :: sigma_type          ! 'sigx' | 'cohsex' | 'gpp'
+  integer        :: nband_qp_min, nband_qp_max  ! band window to correct/output
+  character(1)   :: yn_gw_qcache        ! 'y': cache eps^{-1}(q) once per distinct q
+                                        ! (gpp BZ-sum, O(nk^3)->O(nk^2)); 'n': default
+  character(1)   :: yn_gw_sym           ! 'y': symmetrise the full-mesh orbitals by
+                                        ! grid rotation (needs sym.dat) -> exact
+                                        ! point-group symmetry for the BZ-sum reduction
+  character(1)   :: yn_gw_static_remainder  ! 'y': add the static Coulomb-hole
+                                        ! remainder (completeness correction for the
+                                        ! finite band sum); accelerates Sigma_c band
+                                        ! convergence (gpp q-cache path)
+  character(1)   :: yn_gw_qp_inject     ! 'y' (theory='gw_response'): inject the
+                                        ! per-state QP energies read from
+                                        ! <sysname>_qp_energies.data into chi0
+                                        ! (true G0W0+RPA) instead of a rigid scissors
+  integer        :: nband_eps           ! 0=all: cap of the chi0/eps unoccupied sum
+  integer        :: nband_sigma         ! 0=all: cap of the Sigma_c intermediate sum
+  character(1)   :: yn_gw_extrapolar     ! 'y': chi0 extrapolar (effective-energy) tail
+  character(8)   :: gw_extrapolar_mode   ! 'offset' (BG) | 'sumrule' (EET, phase 2)
+  real(8)        :: gw_extrapolar_de     ! Ha: offset DeltaE for Ebar = esp(N_b')+DeltaE
+  ! --- full-frequency (real-axis) dielectric / absorption (spec-b1) ---
+  integer        :: nomega_gw           ! number of real-frequency grid points
+  real(8)        :: omega_max_gw        ! eV, upper end of the real-frequency grid
+  real(8)        :: eta_gw              ! eV, Lorentzian broadening (= hbar/T_mask)
+  character(1)   :: yn_gw_absorption    ! 'y': run full-frequency W(w) + Im eps path
+  character(8)   :: gw_head_mode        ! 'proxy' | 'velocity' : q->0 head treatment
+  real(8)        :: gw_scissors         ! eV, conduction-band shift for theory='gw_response'
+                                        ! (RPA@QP = scissors-corrected RPA; QP gap - KS gap)
 
 end module salmon_global
