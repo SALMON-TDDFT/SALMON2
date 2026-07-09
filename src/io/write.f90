@@ -1587,6 +1587,11 @@ contains
     use filesystem, only: get_filehandle
     use math_constants, only: zI
     use update_kvector_plusU_sub, only: PLUS_U_ON
+    use mpiio_export_ssbe, only: mpiio_open_write, mpiio_close, mpiio_write_at_all_z, &
+                                 mpiio_wr_c8, mpiio_wr_i, mpiio_wr_d, mpiio_disp_k, &
+                                 mpiio_csum_local_z, mpiio_csum_reduce, mpiio_abort, &
+                                 mpiio_sync_epoch, &
+                                 MAGIC_VNL, MAGIC_CHK, HDR_VNL, SBE_FMT_VERSION
     implicit none
     type(s_dft_system),   intent(in) :: system
     type(s_parallel_info),intent(in) :: info
@@ -1600,13 +1605,22 @@ contains
     real(8) :: h, edir(3), dnorm, x, y, z, arg
     integer :: ix, iy, iz
     complex(8) :: base, dph, ph, wf, phw
-    character(256) :: file_vnl_kappa
+    character(256) :: file_vnl_kappa, file_vnl_chk
     complex(8), allocatable :: fk_l(:,:,:), fk(:,:,:)      ! (Nlma, NB, -ns:ns)
     complex(8), allocatable :: gk_l(:,:,:,:), gk(:,:,:,:)  ! (Nlma, NB, 3, -ns:ns)
     complex(8), allocatable :: fscl(:,:), xmat(:,:)
-    complex(8), allocatable :: buf_l(:,:,:,:,:), buf(:,:,:,:,:) ! (NB,NB,0:3,-ns:ns, k-block)
-    ! k-points per streaming block of the root gather (memory: NB^2*4*nkap*nblk*16B)
+    complex(8), allocatable :: buf_l(:,:,:,:,:)            ! (NB,NB,0:3,-ns:ns, k-block)
+    ! k-points per streaming block (memory: NB^2*4*nkap*nblk*16B)
     integer, parameter :: nblk_max = 8
+    ! ---- collective MPI-IO export state (single shared file, k-slice owners) ----
+    ! OFF == MPI_OFFSET_KIND, taken from the public HDR_VNL parameter so we get
+    ! the right offset kind in BOTH the USE_MPI and serial-fallback builds
+    ! WITHOUT needing `use mpi` in this module.
+    integer, parameter :: OFF = kind(HDR_VNL)
+    integer(OFF) :: disp
+    integer(8)   :: nz_k, csum_loc, csum
+    integer      :: kk_lo, kk_hi, ierr, ierr_h, chkfh
+    logical      :: is_krep
 
     ! ---- fail-closed input guards (this writer runs under theory='dft',
     !      where check_input_variables_sbe is never invoked) ----
@@ -1659,6 +1673,15 @@ contains
     im = 1;  ispin = 1
     NB = system%no;  NK = system%nk
     ns = sbe_vnl_kappa_ns;  nkap = 2*ns + 1
+    ! fail-closed: the collective MPI-IO write passes a default-integer element
+    ! count (int(nz)); guard the per-k-block count NB^2*4*nkap*nblk_max against
+    ! 2^31-1 overflow.  Evaluated identically on every rank -> collective-safe
+    ! (all error-stop together).  Impossible for realistic band counts; hard stop.
+    if (int(NB,8)*int(NB,8)*4_8*int(nkap,8)*int(nblk_max,8) > int(huge(0),8)) then
+      if (comm_is_root(nproc_id_global)) &
+        write(*,*) "ERROR(write_sbe_vnl_kappa_data): per-block element count exceeds MPI int count."
+      call comm_sync_all;  error stop
+    end if
     h  = sbe_vnl_kappa_amax / dble(ns)
     edir(1:3) = sbe_vnl_kappa_dir(1:3) / dnorm
     Nlma = ppg%Nlma
@@ -1670,22 +1693,28 @@ contains
     allocate(fscl(Nlma,NB), xmat(NB,NB))
 
     file_vnl_kappa = trim(base_directory)//trim(sysname)//'_vnl_kappa.bin'
-    if (comm_is_root(nproc_id_global)) then
-      fh = get_filehandle()
-      open(fh, file=trim(file_vnl_kappa), form='unformatted', access='stream', status='replace')
-      ! header (fixed layout; reader = read_vnl_kappa_data in gs_info_ssbe)
-      write(fh) 'SBEVNLK1'                                   ! character(8) magic
-      write(fh) 1, NK, NB, ns                                ! ndim, nk, nb_file, ns
-      write(fh) num_kgrid(1), num_kgrid(2), num_kgrid(3)
-      write(fh) nelec, natom                                 ! fingerprint
-      write(fh) h, edir(1), edir(2), edir(3), sbe_vnl_kappa_amax
-      write(fh) system%primitive_a(1:3,1), system%primitive_a(1:3,2), system%primitive_a(1:3,3)
-    end if
+    file_vnl_chk   = trim(base_directory)//trim(sysname)//'_vnl_kappa.chk'
+
+    ! collective open of the single shared file (all ranks of the rko group).
+    call mpiio_open_write(trim(file_vnl_kappa), info%icomm_rko, fh, ierr)
+
+    ! HEADER IS WRITTEN LAST (after the collective data region) -- see the header
+    ! block after the k-block loop.  Writing it here (before the collective writes)
+    ! lets the collective two-phase aggregators' read-modify-write of the first
+    ! Lustre stripe (which spans the 156-byte header) clobber the not-yet-committed
+    ! header -- intermittently, even with a sync-barrier-sync (empirically ~3/12
+    ! runs still zeroed the leading fields).  The file is truncated to 0 at open, so
+    ! bytes [0,156) stay zero through the data epoch and are filled in exactly once,
+    ! last, when nothing collective follows to clobber them.
+
+    nz_k     = int(NB,8)*int(NB,8)*4_8*int(nkap,8)   ! complex(8) elements per k-chunk
+    csum_loc = 0_8
+    is_krep  = (info%id_o == 0 .and. info%id_r == 0) ! k-slice representative: o-root & r-root
 
     nblk = nblk_max
     do ikb_s = 1, NK, nblk
       ikb_e = min(ikb_s + nblk - 1, NK)
-      allocate(buf_l(NB,NB,0:3,-ns:ns,ikb_s:ikb_e), buf(NB,NB,0:3,-ns:ns,ikb_s:ikb_e))
+      allocate(buf_l(NB,NB,0:3,-ns:ns,ikb_s:ikb_e))
       !$omp workshare
       buf_l(:,:,:,:,:) = (0d0,0d0)
       !$omp end workshare
@@ -1750,25 +1779,74 @@ contains
         end if
       end do ! ik
 
-      ! gather this k-block to root (each r-slice sums its single
-      ! o-representative per owned k; root writes its own r-slice's copy)
-      call comm_summation(buf_l, buf, NB*NB*4*nkap*(ikb_e-ikb_s+1), info%icomm_ko)
-
-      if (comm_is_root(nproc_id_global)) then
-        do ik = ikb_s, ikb_e
-          do s = -ns, ns
-            write(fh) buf(1:NB,1:NB,0,s,ik)        ! V_s
-            write(fh) buf(1:NB,1:NB,1:3,s,ik)      ! W_{1:3,s}
-          end do
-        end do
+      ! ---- collective MPI-IO write of this k-block ----
+      ! Replaces the old icomm_ko I/O gather + root single-write.  ON-DISK
+      ! LAYOUT UNCHANGED: buf_l is allocated EXACTLY (NB,NB,0:3,-ns:ns,
+      ! ikb_s:ikb_e) -- dim1=row (fastest) ... dim5=ik (slowest) -- so its
+      ! Fortran array-element order IS the canonical byte order.  The k-slice
+      ! representative (o-root & r-root) writes its owned contiguous k-range
+      ! straight from buf_l at disp_k(kk_lo)=HDR_VNL+SZ_Z*nz_k*(kk_lo-1); this
+      ! reproduces the old `write(fh) buf(:,:,:,:,ik)` bytes exactly, and the
+      ! disjoint per-k-group ranges tile the whole [156,...) data region.  Every
+      ! rank issues exactly one collective write per block (count 0 when it owns
+      ! no k here), so the collective is well-formed on info%icomm_rko.
+      kk_lo = 0;  kk_hi = -1
+      if (is_krep) then
+        kk_lo = max(ikb_s, ik_s);  kk_hi = min(ikb_e, ik_e)
       end if
-      deallocate(buf_l, buf)
+      if (kk_hi >= kk_lo) then
+        disp = mpiio_disp_k(HDR_VNL, nz_k, kk_lo)
+        call mpiio_write_at_all_z(fh, disp, buf_l(1,1,0,-ns,kk_lo), &
+          & nz_k*int(kk_hi-kk_lo+1,8), ierr)
+        if (ierr /= 0) call mpiio_abort('write_sbe_vnl_kappa_data: collective data write failed', info%icomm_rko)
+        csum_loc = ieor(csum_loc, mpiio_csum_local_z(buf_l(1,1,0,-ns,kk_lo), &
+          & nz_k*int(kk_hi-kk_lo+1,8), nz_k*int(kk_lo-1,8)))
+      else
+        call mpiio_write_at_all_z(fh, HDR_VNL, buf_l, 0_8, ierr)  ! collective no-op
+        if (ierr /= 0) call mpiio_abort('write_sbe_vnl_kappa_data: collective no-op write failed', info%icomm_rko)
+      end if
+      deallocate(buf_l)
     end do ! ikb_s
 
+    ! ---- HEADER LAST: commit all collective data, then rank-0 writes the 156-byte
+    !      header, then commit it.  Nothing collective follows, so no first-stripe
+    !      RMW can clobber the header.  Byte layout unchanged (disjoint [0,156)). ----
+    call mpiio_sync_epoch(fh, info%icomm_rko, ierr)   ! commit all collective data writes
     if (comm_is_root(nproc_id_global)) then
-      close(fh)
-      write(*,*) "  vnl_kappa export written: ", trim(file_vnl_kappa)
+      ! 156-byte header, BYTE-IDENTICAL to the legacy sequential-stream layout:
+      !   magic8(0..7) | 4 int(8..23) | 3 int(24..35) | 2 int(36..43)
+      !   | 5 r8(44..83) | 9 r8(84..155).  reshape(primitive_a,[9]) reproduces the
+      !   old column-order primitive_a(1:3,1),(1:3,2),(1:3,3) writes exactly.
+      call mpiio_wr_c8(fh,  0_OFF, MAGIC_VNL, ierr);  ierr_h = ierr                 ! 'SBEVNLK1'
+      call mpiio_wr_i (fh,  8_OFF, [1, NK, NB, ns], 4, ierr);  ierr_h = ior(ierr_h, ierr)   ! ndim,nk,nb,ns
+      call mpiio_wr_i (fh, 24_OFF, num_kgrid(1:3), 3, ierr);  ierr_h = ior(ierr_h, ierr)
+      call mpiio_wr_i (fh, 36_OFF, [nelec, natom], 2, ierr);  ierr_h = ior(ierr_h, ierr)     ! fingerprint
+      call mpiio_wr_d (fh, 44_OFF, [h, edir(1), edir(2), edir(3), sbe_vnl_kappa_amax], 5, ierr);  ierr_h = ior(ierr_h, ierr)
+      call mpiio_wr_d (fh, 84_OFF, reshape(system%primitive_a, [9]), 9, ierr);  ierr_h = ior(ierr_h, ierr)
+      if (ierr_h /= 0) call mpiio_abort('write_sbe_vnl_kappa_data: header field write failed', info%icomm_rko)
     end if
+    call mpiio_sync_epoch(fh, info%icomm_rko, ierr)   ! commit the header before close
+
+    ! data-region XOR checksum (bytes >=156 only; NOT the header): representatives
+    ! contributed their k-chunks, non-representatives contributed 0 (csum_loc stayed
+    ! 0) -> reduce over the same rko communicator the file was opened with, then
+    ! write the sidecar. (Header integrity is guaranteed by header-last + validated
+    ! by the reader's magic/fingerprint check, not by this checksum.)
+    csum = mpiio_csum_reduce(csum_loc, info%icomm_rko)
+    if (comm_is_root(nproc_id_global)) then
+      chkfh = get_filehandle()
+      open(chkfh, file=trim(file_vnl_chk), status='replace', action='write', iostat=ierr)
+      if (ierr /= 0) call mpiio_abort('write_sbe_vnl_kappa_data: sidecar .chk open failed', info%icomm_rko)
+      write(chkfh,'(a)')        MAGIC_CHK
+      write(chkfh,'(4(1x,i0))') NK, NB, ns, SBE_FMT_VERSION
+      write(chkfh,'(i0)')       csum
+      close(chkfh)
+    end if
+
+    call mpiio_close(fh, ierr)   ! collective (MPI_File_close) -- all ranks call it
+    if (ierr /= 0) call mpiio_abort('write_sbe_vnl_kappa_data: MPI_File_close failed', info%icomm_rko)
+    if (comm_is_root(nproc_id_global)) &
+      write(*,*) "  vnl_kappa export written: ", trim(file_vnl_kappa)
     deallocate(fk_l, fk, gk_l, gk, fscl, xmat)
 
     call comm_sync_all

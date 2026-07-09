@@ -96,7 +96,8 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     use salmon_global, only: gauge_sbe, file_sbe_prod_dk, sbe_lg_degen, num_kgrid, sbe_lg_degen_floor, spin, &
                            & yn_sbe_vnl_exact, file_sbe_vnl_kappa, nelec, natom
     use degenerate_block_ssbe, only: build_xi, same_block, blend, theta_on, theta_off, &
-                                   & build_block_transport
+                                   & build_block_transport, &
+                                   & prod_dk_axis_slot, gicov_prod_dk_nbvec, expected_prod_dk_nrec
     implicit none
     type(s_sbe_gs_info), intent(inout) :: gs
     character(*), intent(in) :: sysname
@@ -151,7 +152,9 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     allocate(gs%occup(1:nb_eff, 1:nk))
     allocate(gs%delta_omega(1:nb_eff, 1:nb_eff, 1:nk))
     allocate(gs%p_mod_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
-    allocate(gs%d_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
+    if (trim(sbe_lg_degen) /= 'gicov') then
+        allocate(gs%d_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
+    end if
     allocate(gs%p_tm_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
     allocate(gs%rvnl_tm_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
     allocate(gs%grad_k_eigen(1:nb_eff, 1:3, 1:nk))
@@ -199,7 +202,9 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     call prepare_matrix()
     call comm_bcast(gs%p_mod_matrix, icomm, 0)
     call comm_bcast(gs%delta_omega, icomm, 0)
-    call comm_bcast(gs%d_matrix, icomm, 0) ! Experimental
+    if (trim(sbe_lg_degen) /= 'gicov') then
+        call comm_bcast(gs%d_matrix, icomm, 0) ! Experimental
+    end if
 
     select case(trim(gauge_sbe))
     case ("length_gauge")
@@ -407,7 +412,9 @@ contains
         logical :: file_exists
         character(256) :: cline
         integer :: file_no, file_nk, file_nk1, file_nk2, file_nk3, file_ndk
-        integer :: ndk_loc, mdk, nrec, irec, ik_exp, ivec
+        integer :: ndk_loc, mdk, ivec, nbvec_full, islot
+        integer(8) :: nrec, irec, ik_exp, per_k_records
+        logical :: reduced
         integer :: jdk1, jdk2, jdk3
         integer :: ik_r, ik1_r, ik2_r, ik3_r, jdk1_r, jdk2_r, jdk3_r, io_r, jo_r
         real(8) :: re_r, im_r
@@ -416,6 +423,8 @@ contains
         gs%nbvec = 0
         ndk_loc = 0
         file_no = 0
+        nbvec_full = 0
+        reduced = .false.
 
         ! --- root: open the file and parse the metadata header ---
         if (irank == 0) then
@@ -469,8 +478,15 @@ contains
             end if
 
             if (ierr == 0) then
-                ndk_loc  = file_ndk
-                gs%nbvec = (2 * ndk_loc + 1) ** 3
+                ndk_loc    = file_ndk
+                nbvec_full = (2 * ndk_loc + 1) ** 3
+                ! gicov memory-scale fix: keep only the +x/+y/+z unit-shift
+                ! columns for 'gicov' (ndk>=1) -- build_block_transport,
+                ! degenerate_block_ssbe.f90, is the only prod_dk consumer on
+                ! this path and never reads anything else. gi/gifix/off (and
+                ! gicov with ndk==0) are unchanged (see gicov_prod_dk_nbvec).
+                gs%nbvec = gicov_prod_dk_nbvec(sbe_lg_degen, ndk_loc, nbvec_full)
+                reduced  = (gs%nbvec /= nbvec_full)
                 ! metadata line 2: column legend (skip)
                 read(fh, '(a)', iostat=ios) cline
             end if
@@ -490,20 +506,37 @@ contains
         ! --- root: build the dk-shift table and read all 11-column records ---
         if (irank == 0) then
             mdk  = 2 * ndk_loc + 1
-            ivec = 0
-            do jdk3 = -ndk_loc, ndk_loc
-                do jdk2 = -ndk_loc, ndk_loc
-                    do jdk1 = -ndk_loc, ndk_loc
-                        ivec = ivec + 1
-                        gs%bvec(1, ivec) = jdk1
-                        gs%bvec(2, ivec) = jdk2
-                        gs%bvec(3, ivec) = jdk3
+            if (reduced) then
+                ! gicov: bvec holds only the 3 kept +unit-shift directions, in
+                ! the SAME fixed slot order prod_dk_axis_slot maps records to
+                ! (so gs%bvec(:,islot) always names the column gs%prod_dk(:,
+                ! :,islot,:) actually holds -- find_bvec's callers, e.g.
+                ! build_block_transport, don't care about slot order, only
+                ! about which shift a given column is).
+                gs%bvec(1:3, 1) = (/ 1, 0, 0 /)
+                gs%bvec(1:3, 2) = (/ 0, 1, 0 /)
+                gs%bvec(1:3, 3) = (/ 0, 0, 1 /)
+            else
+                ivec = 0
+                do jdk3 = -ndk_loc, ndk_loc
+                    do jdk2 = -ndk_loc, ndk_loc
+                        do jdk1 = -ndk_loc, ndk_loc
+                            ivec = ivec + 1
+                            gs%bvec(1, ivec) = jdk1
+                            gs%bvec(2, ivec) = jdk2
+                            gs%bvec(3, ivec) = jdk3
+                        end do
                     end do
                 end do
-            end do
+            end if
 
-            ! writer emits nk * (2*ndk+1)**3 * no**2 records, ik outermost/slowest.
-            nrec = nk * gs%nbvec * file_no * file_no
+            ! writer emits nk * (2*ndk+1)**3 * no**2 records, ik outermost/slowest
+            ! -- ALWAYS the full shell (nbvec_full), regardless of what 'reduced'
+            ! keeps: the file layout does not shrink just because the reader
+            ! keeps fewer columns. int64 so it stays exact past 2**31 (hit
+            ! already at a k20^3=8000 k-point mesh for a realistic file_no).
+            nrec          = expected_prod_dk_nrec(nk, nbvec_full, file_no)
+            per_k_records = nrec / max(int(nk, 8), 1_8)
             do irec = 1, nrec
                 read(fh, *, iostat=ios) &
                     & ik_r, ik1_r, ik2_r, ik3_r, jdk1_r, jdk2_r, jdk3_r, io_r, jo_r, re_r, im_r
@@ -513,8 +546,8 @@ contains
                     exit
                 end if
                 ! ik must run 1..nk in contiguous blocks (matches SBE k ordering)
-                ik_exp = (irec - 1) / (gs%nbvec * file_no * file_no) + 1
-                if (ik_r /= ik_exp) then
+                ik_exp = (irec - 1_8) / per_k_records + 1_8
+                if (int(ik_r, 8) /= ik_exp) then
                     write(*, '(a)') "ERROR(read_prod_dk_data): ik ordering does not match SBE k-grid."
                     ierr = 1
                     exit
@@ -528,10 +561,20 @@ contains
                 ! the full band window); store at window indices io/jo - nb_min + 1
                 if (io_r >= nb_min .and. io_r <= nb_hi .and. &
                     & jo_r >= nb_min .and. jo_r <= nb_hi) then
-                    ivec = (jdk3_r + ndk_loc) * mdk * mdk &
-                        & + (jdk2_r + ndk_loc) * mdk &
-                        & + (jdk1_r + ndk_loc) + 1
-                    gs%prod_dk(io_r - nb_min + 1, jo_r - nb_min + 1, ivec, ik_r) = dcmplx(re_r, im_r)
+                    if (reduced) then
+                        ! gicov: drop everything except the +x/+y/+z columns
+                        ! (see the header comment above prod_dk_axis_slot,
+                        ! degenerate_block_ssbe.f90, for why this is safe).
+                        islot = prod_dk_axis_slot(jdk1_r, jdk2_r, jdk3_r)
+                        if (islot > 0) then
+                            gs%prod_dk(io_r - nb_min + 1, jo_r - nb_min + 1, islot, ik_r) = dcmplx(re_r, im_r)
+                        end if
+                    else
+                        ivec = (jdk3_r + ndk_loc) * mdk * mdk &
+                            & + (jdk2_r + ndk_loc) * mdk &
+                            & + (jdk1_r + ndk_loc) + 1
+                        gs%prod_dk(io_r - nb_min + 1, jo_r - nb_min + 1, ivec, ik_r) = dcmplx(re_r, im_r)
+                    end if
                 end if
             end do
 
@@ -548,11 +591,29 @@ contains
             close(fh)
         end if
 
-        ! --- propagate record-stage error, then broadcast the data ---
+        ! --- propagate record-stage error, then broadcast the data (prod_dk
+        ! is bcast in k-CHUNKS so no single MPI_Bcast call's element COUNT
+        ! risks the same 32-bit 'size(val)' class of overflow the nrec fix
+        ! above targets -- comm_bcast_array4d_dcomplex, communication.f90,
+        ! passes a default-integer size(val) to MPI_Bcast with no kind guard;
+        ! reduced (gicov) storage already cuts this ~9x at ndk=1, this is
+        ! defense-in-depth for the remaining gi/gifix/large-nb_eff cases) ---
         call comm_bcast(ierr, icomm, 0)
         if (ierr /= 0) stop 1
         call comm_bcast(gs%bvec, icomm, 0)
-        call comm_bcast(gs%prod_dk, icomm, 0)
+        block
+            integer(8) :: elems_per_k, max_elems_per_chunk
+            integer :: chunk_nk, ik0, ik1
+            elems_per_k = int(nb_eff, 8) * int(nb_eff, 8) * int(gs%nbvec, 8)
+            max_elems_per_chunk = 200000000_8  ! << 2**31-1, generous headroom
+            chunk_nk = max(1, int(max_elems_per_chunk / max(elems_per_k, 1_8)))
+            ik0 = 1
+            do while (ik0 <= nk)
+                ik1 = min(nk, ik0 + chunk_nk - 1)
+                call comm_bcast(gs%prod_dk(:, :, :, ik0:ik1), icomm, 0)
+                ik0 = ik1 + 1
+            end do
+        end block
     end subroutine read_prod_dk_data
 
 
@@ -875,9 +936,8 @@ contains
                                      & gs%block_id, num_kgrid, gs%u_transport, nrej)
 
             ! X-full: the full-band covariant transport supplies the WHOLE field
-            ! term incl. the interband dipole (ξ_inter = dipole), so d_matrix is
-            ! unused by gicov_rhs. Zero it (keeps allocation/bcast contracts).
-            gs%d_matrix(:, :, :, :) = (0d0, 0d0)
+            ! term incl. the interband dipole (xi_inter = dipole), so d_matrix is
+            ! unused by gicov_rhs and left unallocated.
 
             if (irank == 0) then
                 write(*, '(a,i0)') "# build_block_transport: rejected blocks = ", nrej

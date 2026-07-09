@@ -33,6 +33,21 @@
 !   E (dual cut):    window [2, 5] (lower AND upper cut, hi < nb_file) slices
 !                    both edges correctly; bands above hi are excluded.
 !
+! UPDATED for the gicov memory-scale fix (read_prod_dk_data now keeps only the
+! +x/+y/+z unit-shift columns of gs%prod_dk for sbe_lg_degen='gicov' instead
+! of the full (2*ndk+1)**3=27 shell -- see degenerate_block_ssbe.f90's
+! prod_dk_axis_slot/gicov_prod_dk_nbvec header comments for why. This test's
+! fixture uses sbe_lg_degen='gicov', so gs%nbvec is now 3 (was 27), and the
+! stored gs%prod_dk(:,:,islot,:) columns are keyed by the FIXED slot order
+! (1=+x,2=+y,3=+z, matching prod_dk_axis_slot), not by the file's raw
+! (2*ndk+1)**3 enumeration order the FIXTURE still writes (the file format is
+! unchanged -- only what the reader keeps from it). Checks A/A2/E below were
+! updated accordingly: A/E compare gs_win/gs_dual against gs_full over the
+! REDUCED 3 slots (still bit-for-bit, since both sides go through the SAME
+! reduction), and A2 maps each kept slot back to the file's iv_full via
+! iv_full_of() before calling prod_val() (whose value formula is keyed by the
+! file's iv, not the reduced slot number).
+!
 ! The fixture files (winfix_*.data) are written to the CURRENT directory and
 ! deleted at the end.
 !
@@ -144,6 +159,34 @@ contains
              & 1d-3*(io - jo) + 1d-5*ik + 1d-6*iv)
   end function prod_val
 
+  ! gicov memory-scale fix support: the file's raw (2*ndk+1)**3 enumeration
+  ! index for a given (jdk1,jdk2,jdk3) shift -- SAME formula write_fixture
+  ! uses below to write the file (and read_prod_dk_data uses internally to
+  ! parse it), needed here because prod_val's value formula is keyed by this
+  ! raw iv, not by the REDUCED slot number gs%prod_dk now stores it at.
+  pure function iv_full_of(jdk1, jdk2, jdk3) result(iv)
+    implicit none
+    integer, intent(in) :: jdk1, jdk2, jdk3
+    integer :: iv
+    integer :: mdk
+    mdk = 2*ndk + 1
+    iv = (jdk3 + ndk)*mdk*mdk + (jdk2 + ndk)*mdk + (jdk1 + ndk) + 1
+  end function iv_full_of
+
+  ! The 3 kept gicov columns, in the SAME fixed slot order as
+  ! degenerate_block_ssbe.f90's prod_dk_axis_slot (1=+x, 2=+y, 3=+z).
+  subroutine kept_shift(islot, jdk1, jdk2, jdk3)
+    implicit none
+    integer, intent(in)  :: islot
+    integer, intent(out) :: jdk1, jdk2, jdk3
+    jdk1 = 0; jdk2 = 0; jdk3 = 0
+    select case (islot)
+    case (1); jdk1 = 1
+    case (2); jdk2 = 1
+    case (3); jdk3 = 1
+    end select
+  end subroutine kept_shift
+
   !======================= write the synthetic exports ========================
   subroutine write_fixture()
     implicit none
@@ -250,6 +293,7 @@ contains
     type(s_sbe_bloch_solver) :: sbe_full, sbe_win
     integer :: icomm, ik, ib, jb, iv, ix, w
     integer :: nb_eff, ne_eff, lo_edge
+    integer :: islot, jdk1, jdk2, jdk3, iv_full
     real(8) :: err, errf, occ_err
     real(8) :: tr_full, tr_win, tr_win_vb
 
@@ -298,11 +342,14 @@ contains
     end do
     call check_true(err == 0d0, "A tm: p_tm/rvnl_tm window == full[lo:hi, lo:hi] (exact)", nfail)
 
-    call check_true(gs_win%nbvec == nbvec .and. gs_full%nbvec == nbvec .and. &
-      & all(gs_win%bvec == gs_full%bvec), "A prod_dk: nbvec/bvec identical", nfail)
+    ! gicov keeps only the 3 +x/+y/+z columns (see the header comment above),
+    ! so gs%nbvec is 3 here, not the file's full nbvec=27 -- both gs_win and
+    ! gs_full go through the SAME reduction, so bvec still matches exactly.
+    call check_true(gs_win%nbvec == 3 .and. gs_full%nbvec == 3 .and. &
+      & all(gs_win%bvec == gs_full%bvec), "A prod_dk: nbvec/bvec identical (reduced to 3, gicov)", nfail)
     err = 0d0
     do ik = 1, nk
-      do iv = 1, nbvec
+      do iv = 1, gs_win%nbvec
         do jb = 1, nb_eff
           do ib = 1, nb_eff
             err = max(err, abs(gs_win%prod_dk(ib, jb, iv, ik) &
@@ -311,7 +358,7 @@ contains
         end do
       end do
     end do
-    call check_true(err == 0d0, "A prod_dk: window == full[lo:hi, lo:hi] (exact)", nfail)
+    call check_true(err == 0d0, "A prod_dk: window == full[lo:hi, lo:hi] (exact, over the 3 kept slots)", nfail)
 
     err = 0d0
     do ik = 1, nk
@@ -355,17 +402,19 @@ contains
           end do
         end do
       end do
-      do iv = 1, nbvec
+      do islot = 1, gs_win%nbvec
+        call kept_shift(islot, jdk1, jdk2, jdk3)
+        iv_full = iv_full_of(jdk1, jdk2, jdk3)
         do jb = 1, nb_eff
           do ib = 1, nb_eff
-            errf = max(errf, abs(gs_win%prod_dk(ib, jb, iv, ik) &
-              &                - prod_val(ib + lo - 1, jb + lo - 1, iv, ik)))
+            errf = max(errf, abs(gs_win%prod_dk(ib, jb, islot, ik) &
+              &                - prod_val(ib + lo - 1, jb + lo - 1, iv_full, ik)))
           end do
         end do
       end do
     end do
     call check_true(errf < 1d-13, "A2 absolute-index check: window[w] == fixture(w+lo-1) " // &
-      & "(catches a consistent full+window shift)", nfail)
+      & "(catches a consistent full+window shift; prod_dk mapped reduced-slot -> file iv_full)", nfail)
 
     ! ---- B: occupation / nelec_eff bookkeeping ------------------------------
     occ_err = 0d0
@@ -440,7 +489,7 @@ contains
           end do
         end do
       end do
-      do iv = 1, nbvec
+      do iv = 1, gs_dual%nbvec
         do jb = 1, 4
           do ib = 1, 4
             err = max(err, abs(gs_dual%prod_dk(ib, jb, iv, ik) &
