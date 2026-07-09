@@ -671,6 +671,8 @@ contains
       & num_wannier_cluster, &
       & wannier_cluster_size, &
       & wannier_projection_width, &
+      & wannier_amn_svd_tol, &
+      & wannier_amn_reject_tol, &
       & wannier_dis_froz_max, &
       & wannier_dis_win_max, &
       & wannier_pw_cutoff, &
@@ -1186,6 +1188,8 @@ contains
     num_wannier_cluster = 0
     wannier_cluster_size = 1
     wannier_projection_width = 1d0
+    wannier_amn_svd_tol = 1d-8
+    wannier_amn_reject_tol = 0d0
     wannier_dis_froz_max = 0d0
     wannier_dis_win_max = 0d0
     wannier_pw_cutoff = 0d0
@@ -1912,6 +1916,8 @@ contains
     call comm_bcast(wannier_cluster_size, nproc_group_global)
     call comm_bcast(wannier_projection_width, nproc_group_global)
     wannier_projection_width = wannier_projection_width * ulength_to_au
+    call comm_bcast(wannier_amn_svd_tol, nproc_group_global)
+    call comm_bcast(wannier_amn_reject_tol, nproc_group_global)
     call comm_bcast(wannier_dis_froz_max, nproc_group_global)
     wannier_dis_froz_max = wannier_dis_froz_max * uenergy_to_au
     call comm_bcast(wannier_dis_win_max, nproc_group_global)
@@ -2976,6 +2982,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",3I4)') "num_wannier_cluster",num_wannier_cluster(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3I4)') "wannier_cluster_size",wannier_cluster_size(1:3)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_projection_width', wannier_projection_width
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_amn_svd_tol', wannier_amn_svd_tol
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_amn_reject_tol', wannier_amn_reject_tol
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_dis_froz_max', wannier_dis_froz_max
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_dis_win_max', wannier_dis_win_max
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_pw_cutoff', wannier_pw_cutoff
@@ -3441,6 +3449,8 @@ contains
       & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): wannier_num_iter must be non-negative."
       if(wannier_projection_width <= 0d0) &
       & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): wannier_projection_width must be positive."
+      if(wannier_amn_svd_tol < 0d0 .or. wannier_amn_reject_tol < 0d0) &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): AMN SVD tolerances must be non-negative."
       if(wannier_dis_win_max < 0d0 .or. wannier_dis_froz_max < 0d0) &
       & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): Wannier energy windows must be non-negative."
       if(wannier_dis_win_max > 0d0 .and. wannier_dis_froz_max > wannier_dis_win_max) &

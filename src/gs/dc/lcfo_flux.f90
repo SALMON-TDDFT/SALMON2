@@ -5056,6 +5056,7 @@ contains
       end if
 
       call write_wannier_amn_file(nband_wann)
+      call diagnose_wannier_amn_conditioning(nband_wann, wannier_num_wann)
       call write_wannier_mmn_file(nband_wann)
 
       if(dc%id_tot == 0) &
@@ -5072,6 +5073,93 @@ contains
       call write_wannier90_global_basis_file(nband_wann)
       call write_wannier90_flux_eigen_seed_file(nband_wann)
     end subroutine write_wannier_seed_files
+
+    subroutine diagnose_wannier_amn_conditioning(nband_wann, num_wann)
+      use communication, only: comm_bcast
+      use eigen_subdiag_sub, only: eigen_zheev
+      use filesystem, only: get_filehandle
+      use salmon_global, only: sysname, wannier_amn_svd_tol, wannier_amn_reject_tol
+      implicit none
+      integer, intent(in) :: nband_wann, num_wann
+      integer :: iunit, io, iband, iwann, ikpt, irec
+      integer :: num_bands_file, num_kpts_file, num_wann_file
+      integer :: near_null, reject_flag
+      real(8) :: re_val, im_val, smax, smin, min_sv_rel, sv_tol, reject_tol
+      real(8), allocatable :: eval(:)
+      complex(8), allocatable :: amat(:,:), gram(:,:), eigvec(:,:)
+      character(256) :: amnfile, header
+
+      reject_flag = 0
+      if(dc%id_tot == 0) then
+        amnfile = trim(dc%base_directory)//trim(sysname)//".amn"
+        iunit = get_filehandle()
+        open(iunit,file=amnfile,status='old',action='read',iostat=io)
+        if(io /= 0) then
+          write(*,'(1x,2a)') "[DC-LCFO-WANNIER-AMN] failed to open AMN file: ", trim(amnfile)
+          reject_flag = 1
+        else
+          read(iunit,'(a)',iostat=io) header
+          if(io == 0) read(iunit,*,iostat=io) num_bands_file, num_kpts_file, num_wann_file
+          if(io /= 0 .or. num_bands_file /= nband_wann .or. num_wann_file /= num_wann .or. &
+              num_kpts_file /= 1) then
+            write(*,'(1x,a,6(a,i0))') "[DC-LCFO-WANNIER-AMN] dimension mismatch:", &
+              " bands=", num_bands_file, " expected_bands=", nband_wann, &
+              " wann=", num_wann_file, " expected_wann=", num_wann, &
+              " kpts=", num_kpts_file, " expected_kpts=", 1
+            reject_flag = 1
+          else
+            allocate(amat(nband_wann,num_wann), gram(num_wann,num_wann), eigvec(num_wann,num_wann), eval(num_wann))
+            amat = (0.0d0,0.0d0)
+            do irec=1,nband_wann*num_wann
+              read(iunit,*,iostat=io) iband, iwann, ikpt, re_val, im_val
+              if(io /= 0) exit
+              if(iband < 1 .or. iband > nband_wann) cycle
+              if(iwann < 1 .or. iwann > num_wann) cycle
+              if(ikpt /= 1) cycle
+              amat(iband,iwann) = cmplx(re_val, im_val, kind=8)
+            end do
+            if(io /= 0) then
+              write(*,'(1x,a)') "[DC-LCFO-WANNIER-AMN] failed to read complete AMN matrix."
+              reject_flag = 1
+            else
+              gram = matmul(conjg(transpose(amat)), amat)
+              call eigen_zheev(gram, eval, eigvec)
+              eval(1:num_wann) = max(eval(1:num_wann), 0.0d0)
+              smax = sqrt(maxval(eval(1:num_wann)))
+              smin = sqrt(minval(eval(1:num_wann)))
+              if(smax > 0.0d0) then
+                min_sv_rel = smin / smax
+              else
+                min_sv_rel = 0.0d0
+              end if
+              sv_tol = max(wannier_amn_svd_tol, 0.0d0)
+              reject_tol = max(wannier_amn_reject_tol, 0.0d0)
+              if(smax > 0.0d0 .and. sv_tol > 0.0d0) then
+                near_null = count(sqrt(eval(1:num_wann)) < sv_tol * smax)
+              else
+                near_null = 0
+              end if
+              write(*,'(1x,a,i0,a,i0,4(a,es12.5),a,i0)') &
+                "[DC-LCFO-WANNIER-AMN] bands=", nband_wann, " wann=", num_wann, &
+                " smax=", smax, " smin=", smin, " min_sv_rel=", min_sv_rel, &
+                " sv_tol=", sv_tol, " near_null=", near_null
+              if(reject_tol > 0.0d0 .and. min_sv_rel < reject_tol) then
+                write(*,'(1x,a,2(a,es12.5))') &
+                  "[DC-LCFO-WANNIER-AMN] reject: min_sv_rel below wannier_amn_reject_tol", &
+                  " min_sv_rel=", min_sv_rel, " wannier_amn_reject_tol=", reject_tol
+                reject_flag = 1
+              end if
+            end if
+            deallocate(amat, gram, eigvec, eval)
+          end if
+          close(iunit)
+        end if
+      end if
+
+      call comm_bcast(reject_flag, dc%icomm_tot, 0)
+      if(reject_flag /= 0) &
+        stop "DC-LCFO Wannier export: AMN projection matrix is rank deficient; adjust projections or wannier_amn_reject_tol."
+    end subroutine diagnose_wannier_amn_conditioning
 
     subroutine log_wannier_cluster_partition()
       use salmon_global, only: num_fragment, num_wannier_cluster, wannier_cluster_size

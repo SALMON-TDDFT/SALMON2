@@ -520,6 +520,8 @@ character(256),allocatable :: atom_name(:)
   integer        :: num_wannier_cluster(3)
   integer        :: wannier_cluster_size(3)
   real(8)        :: wannier_projection_width
+  real(8)        :: wannier_amn_svd_tol
+  real(8)        :: wannier_amn_reject_tol
   real(8)        :: wannier_dis_froz_max
   real(8)        :: wannier_dis_win_max
   real(8)        :: wannier_pw_cutoff
