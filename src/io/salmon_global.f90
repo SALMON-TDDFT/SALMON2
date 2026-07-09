@@ -492,6 +492,17 @@ character(256),allocatable :: atom_name(:)
                                         ! norder_correction>=1.  Default 'n'.
   character(256) :: file_sbe_vnl_kappa       ! stencil file path (required when
                                         ! yn_sbe_vnl_exact='y')
+  character(1)   :: yn_sbe_out_occ           ! 'y' (SBE runtime): write the band-
+                                        ! resolved excited population n_ex(b,t) to
+                                        ! <sysname>_sbe_occ.data and the energy-
+                                        ! resolved nonequilibrium occupation
+                                        ! distribution n(eps,t) to
+                                        ! <sysname>_sbe_edist.data, both at the
+                                        ! out_projection_step cadence (same place as
+                                        ! <sysname>_sbe_nex.data).  Gauge-aware
+                                        ! diagonal source (rho for velocity_gauge,
+                                        ! qnm_new for length_gauge), k-weighted and
+                                        ! MPI-reduced.  Default 'n'.
 
   !! &dc
   integer        :: num_fragment(3)

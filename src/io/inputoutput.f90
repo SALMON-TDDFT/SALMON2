@@ -611,7 +611,8 @@ contains
       & sbe_vnl_kappa_amax, &
       & sbe_vnl_kappa_ns, &
       & yn_sbe_vnl_exact, &
-      & file_sbe_vnl_kappa
+      & file_sbe_vnl_kappa, &
+      & yn_sbe_out_occ
 
     namelist/dc/ &
       & num_fragment, &
@@ -1080,6 +1081,7 @@ contains
     sbe_vnl_kappa_ns      = 16
     yn_sbe_vnl_exact      = 'n'
     file_sbe_vnl_kappa    = ''
+    yn_sbe_out_occ        = 'n'
 !! == default for &dc
     num_fragment = 0
     num_rgrid_buffer = 0
@@ -1754,6 +1756,7 @@ contains
     call comm_bcast(sbe_vnl_kappa_ns,    nproc_group_global)
     call comm_bcast(yn_sbe_vnl_exact,    nproc_group_global)
     call comm_bcast(file_sbe_vnl_kappa,  nproc_group_global)
+    call comm_bcast(yn_sbe_out_occ,      nproc_group_global)
 !! == bcast for dc
     call comm_bcast(num_fragment ,nproc_group_global)
     call comm_bcast(num_rgrid_buffer, nproc_group_global)
@@ -2753,6 +2756,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'sbe_vnl_kappa_ns', sbe_vnl_kappa_ns
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_vnl_exact', yn_sbe_vnl_exact
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_sbe_vnl_kappa', file_sbe_vnl_kappa
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_sbe_out_occ', yn_sbe_out_occ
 
       if(inml_dc >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', inml_dc
@@ -2859,6 +2863,7 @@ contains
     call yn_argument_check(yn_out_tm)
     call yn_argument_check(yn_sbe_export_vnl_kappa)
     call yn_argument_check(yn_sbe_vnl_exact)
+    call yn_argument_check(yn_sbe_out_occ)
     call yn_argument_check(yn_out_intraband_current)
     call yn_argument_check(yn_out_current_decomposed)
     call yn_argument_check(yn_out_spin_current_decomposed)

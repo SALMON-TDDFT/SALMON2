@@ -289,6 +289,12 @@ function check_input_variables_sbe() result(flag)
         end if
     end if
 
+    select case(yn_sbe_out_occ)
+    case('y', 'n')
+    case default
+        call raise("ERROR! 'yn_sbe_out_occ' must be 'y' or 'n'!")
+    end select
+
     if (trim(theory) /= "maxwell_sbe") return
 
     if (nx_m < 1) &
