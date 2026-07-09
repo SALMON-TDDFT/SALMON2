@@ -242,30 +242,19 @@ contains
       write(*,'(1x,a,i0,a,a)') "[DC-LCFO-W90-IMPORT] wrote ", num_wann_chk, &
         " Wannier functions to ", trim(filename)
 
-      if(num_bands_chk /= num_wann_chk) then
-        write(*,'(1x,a,2(a,i0))') "[DC-LCFO-W90-IMPORT] skip flux eigen seed for rectangular transform:", &
-          " bands=", num_bands_chk, " wann=", num_wann_chk
-      else
-        nstate_seed = min(nstate_tot_file, num_wann_chk)
-        allocate(seed_wannier_to_eigen(num_wann_chk,nstate_seed), eval_seed(nstate_seed,nspin_file))
-        do istate=1,nstate_seed
-          do iw=1,num_wann_chk
-            seed_wannier_to_eigen(iw,istate) = conjg(v_matrix(istate,iw))
-          end do
-        end do
-        eval_seed(1:nstate_seed,1:nspin_file) = esp_file(1:nstate_seed,1:nspin_file)
-        filename = trim(import_run_root_dir())//'data_dcdft/total/'//binfile_w90seed
-        iunit = get_filehandle()
-        open(iunit,file=filename,form='unformatted',access='stream',status='replace')
-        write(iunit) wannier_flux_eigen_seed_magic, wannier_flux_eigen_seed_version
-        write(iunit) num_bands_chk, num_wann_chk, nstate_seed, nspin_file, dc%n_frag
-        write(iunit) eval_seed(1:nstate_seed,1:nspin_file)
-        write(iunit) seed_wannier_to_eigen(1:num_wann_chk,1:nstate_seed)
-        close(iunit)
-        write(*,'(1x,a,i0,a,i0,a,a)') "[DC-LCFO-W90-IMPORT] wrote Flux-LCFO eigen seed: states=", &
-          nstate_seed, " wann=", num_wann_chk, " file=", trim(filename)
-        deallocate(seed_wannier_to_eigen, eval_seed)
-      end if
+      call build_wannier_flux_eigen_seed_from_transform(num_bands_chk, num_wann_chk, nstate_tot_file, &
+        nspin_file, v_matrix, esp_file, seed_wannier_to_eigen, eval_seed, nstate_seed)
+      filename = trim(import_run_root_dir())//'data_dcdft/total/'//binfile_w90seed
+      iunit = get_filehandle()
+      open(iunit,file=filename,form='unformatted',access='stream',status='replace')
+      write(iunit) wannier_flux_eigen_seed_magic, wannier_flux_eigen_seed_version
+      write(iunit) num_bands_chk, num_wann_chk, nstate_seed, nspin_file, dc%n_frag
+      write(iunit) eval_seed(1:nstate_seed,1:nspin_file)
+      write(iunit) seed_wannier_to_eigen(1:num_wann_chk,1:nstate_seed)
+      close(iunit)
+      write(*,'(1x,a,i0,a,i0,a,a)') "[DC-LCFO-W90-IMPORT] wrote Flux-LCFO eigen seed: states=", &
+        nstate_seed, " wann=", num_wann_chk, " file=", trim(filename)
+      deallocate(seed_wannier_to_eigen, eval_seed)
 
       if(allocated(owner_center_bohr)) deallocate(owner_center_bohr)
       if(allocated(bond_owner_frag)) deallocate(bond_owner_frag)
@@ -276,6 +265,60 @@ contains
     call comm_sync_all(dc%icomm_tot)
     if(dc%id_tot == 0) write(*,'(1x,a)') "[DC-LCFO-W90-IMPORT] import-only completed without SCF."
   end subroutine dc_lcfo_wannier_import_only
+
+  subroutine build_wannier_flux_eigen_seed_from_transform(num_bands, num_wann, nstate_available, &
+    nspin_in, v_matrix, esp_in, seed_wannier_to_eigen, eval_seed, nstate_seed)
+    use eigen_subdiag_sub, only: eigen_zheev
+    implicit none
+    integer, intent(in) :: num_bands, num_wann, nstate_available, nspin_in
+    complex(8), intent(in) :: v_matrix(num_bands,num_wann)
+    real(8), intent(in) :: esp_in(nstate_available,nspin_in)
+    complex(8), allocatable, intent(out) :: seed_wannier_to_eigen(:,:)
+    real(8), allocatable, intent(out) :: eval_seed(:,:)
+    integer, intent(out) :: nstate_seed
+    integer :: ib, ispin, istate, iw, jw
+    complex(8), allocatable :: h_wann(:,:), eigvec(:,:)
+    real(8), allocatable :: eval(:)
+
+    if(num_bands > nstate_available) then
+      write(*,'(1x,a,2(a,i0))') "[DC-LCFO-W90-SEED] wavefunction seed has too few bands:", &
+        " bands=", num_bands, " seed_states=", nstate_available
+      stop "DC-LCFO Wannier flux seed: insufficient wavefunction seed"
+    end if
+
+    nstate_seed = num_wann
+    allocate(seed_wannier_to_eigen(num_wann,nstate_seed))
+    allocate(eval_seed(nstate_seed,nspin_in))
+    seed_wannier_to_eigen = (0.0d0, 0.0d0)
+    eval_seed = 0.0d0
+
+    if(num_bands == num_wann) then
+      do istate=1,nstate_seed
+        do iw=1,num_wann
+          seed_wannier_to_eigen(iw,istate) = conjg(v_matrix(istate,iw))
+        end do
+      end do
+      eval_seed(1:nstate_seed,1:nspin_in) = esp_in(1:nstate_seed,1:nspin_in)
+    else
+      allocate(h_wann(num_wann,num_wann), eigvec(num_wann,num_wann), eval(num_wann))
+      do ispin=1,nspin_in
+        h_wann = (0.0d0, 0.0d0)
+        do jw=1,num_wann
+          do iw=1,num_wann
+            do ib=1,num_bands
+              h_wann(iw,jw) = h_wann(iw,jw) + conjg(v_matrix(ib,iw)) * esp_in(ib,ispin) * v_matrix(ib,jw)
+            end do
+          end do
+        end do
+        call eigen_zheev(h_wann, eval, eigvec)
+        if(ispin == 1) seed_wannier_to_eigen(1:num_wann,1:nstate_seed) = eigvec(1:num_wann,1:num_wann)
+        eval_seed(1:nstate_seed,ispin) = eval(1:nstate_seed)
+      end do
+      deallocate(h_wann, eigvec, eval)
+      write(*,'(1x,a,3(a,i0))') "[DC-LCFO-W90-SEED] rectangular transform projected and diagonalized:", &
+        " bands=", num_bands, " wann=", num_wann, " states=", nstate_seed
+    end if
+  end subroutine build_wannier_flux_eigen_seed_from_transform
 
   subroutine read_dc_lcfo_esp_from_wavefunctions_import(dc, nstate_tot_file, nspin_file, esp_file)
     use communication, only: comm_bcast
@@ -3302,8 +3345,8 @@ contains
         if(dc%id_tot==0) write(*,*) "h_div: done"
 
         h_ref_div = h_div
-        call eigen_s(n, n, h_div, nx, esp_tot(1:n,ispin), v_div, nx)
-        if(dc%id_tot==0) write(*,*) "eigen_s: done"
+        call eigen_sx(n, n, h_div, nx, esp_tot(1:n,ispin), v_div, nx)
+        if(dc%id_tot==0) write(*,*) "eigen_sx: done"
         nocc_nelec = occupied_index_from_input(ispin)
         if(dc%id_tot==0) call print_flux_gap_diagnostic("full", ispin, nocc_nelec, n)
 
@@ -5055,6 +5098,7 @@ contains
         close(iunit)
       end if
 
+      call diagnose_wannier_coef_rank(nband_wann)
       call write_wannier_amn_file(nband_wann)
       call diagnose_wannier_amn_conditioning(nband_wann, wannier_num_wann)
       call write_wannier_mmn_file(nband_wann)
@@ -5073,6 +5117,53 @@ contains
       call write_wannier90_global_basis_file(nband_wann)
       call write_wannier90_flux_eigen_seed_file(nband_wann)
     end subroutine write_wannier_seed_files
+
+    subroutine diagnose_wannier_coef_rank(nband_wann)
+      use communication, only: comm_summation
+      use eigen_subdiag_sub, only: eigen_dsyev
+      implicit none
+      integer, intent(in) :: nband_wann
+      integer :: i, near_null
+      real(8) :: diag_min, diag_max, offdiag_max, gram_min, gram_max
+      real(8), allocatable :: gram_local(:,:), gram_sum(:,:), eigvec(:,:), eval(:)
+
+      if(nband_wann <= 0) return
+      allocate(gram_local(nband_wann,nband_wann), gram_sum(nband_wann,nband_wann))
+      allocate(eigvec(nband_wann,nband_wann), eval(nband_wann))
+      gram_local = 0d0
+      if(dc%id_frag == 0) then
+        gram_local(1:nband_wann,1:nband_wann) = &
+          matmul(transpose(coef_wf(1:dc%nstate_frag,1:nband_wann,1)), &
+          coef_wf(1:dc%nstate_frag,1:nband_wann,1))
+      end if
+      call comm_summation(gram_local, gram_sum, nband_wann*nband_wann, dc%icomm_tot)
+
+      diag_min = huge(1d0)
+      diag_max = -huge(1d0)
+      offdiag_max = 0d0
+      do i=1,nband_wann
+        diag_min = min(diag_min, gram_sum(i,i))
+        diag_max = max(diag_max, gram_sum(i,i))
+        gram_sum(i,i) = gram_sum(i,i) - 1d0
+      end do
+      offdiag_max = maxval(abs(gram_sum(1:nband_wann,1:nband_wann)))
+      do i=1,nband_wann
+        gram_sum(i,i) = gram_sum(i,i) + 1d0
+      end do
+
+      call eigen_dsyev(gram_sum, eval, eigvec)
+      gram_min = minval(eval(1:nband_wann))
+      gram_max = maxval(eval(1:nband_wann))
+      near_null = count(eval(1:nband_wann) < 1d-8 * max(gram_max, 1d-300))
+      if(dc%id_tot == 0) then
+        write(*,'(1x,a,i0,5(a,es12.5),a,i0)') &
+          "[DC-LCFO-WANNIER-COEF] bands=", nband_wann, &
+          " diag_min=", diag_min, " diag_max=", diag_max, &
+          " offdiag_max=", offdiag_max, " gram_min=", gram_min, &
+          " gram_max=", gram_max, " near_null=", near_null
+      end if
+      deallocate(gram_local, gram_sum, eigvec, eval)
+    end subroutine diagnose_wannier_coef_rank
 
     subroutine diagnose_wannier_amn_conditioning(nband_wann, num_wann)
       use communication, only: comm_bcast
@@ -5288,21 +5379,8 @@ contains
             " chk_wann=", num_wann_chk, " expected_wann=", wannier_num_wann
           stop "DC-LCFO Wannier flux seed: checkpoint dimension mismatch"
         end if
-        if(num_bands_chk /= num_wann_chk) then
-          write(*,'(1x,a,2(a,i0))') "[DC-LCFO-W90-SEED] rectangular/disentangled transform is not supported yet:", &
-            " bands=", num_bands_chk, " wann=", num_wann_chk
-          write(*,'(1x,a)') "[DC-LCFO-W90-SEED] Use a full square Wannier subspace or add explicit H_W diagonalization."
-          stop "DC-LCFO Wannier flux seed: non-square transform"
-        end if
-        nstate_seed = min(dc%nstate_tot, num_wann_chk)
-        allocate(seed_wannier_to_eigen(num_wann_chk,nstate_seed))
-        allocate(eval_seed(nstate_seed,nspin))
-        do istate=1,nstate_seed
-          do iw=1,num_wann_chk
-            seed_wannier_to_eigen(iw,istate) = conjg(v_matrix(istate,iw))
-          end do
-        end do
-        eval_seed(1:nstate_seed,1:nspin) = esp_tot(1:nstate_seed,1:nspin)
+        call build_wannier_flux_eigen_seed_from_transform(num_bands_chk, num_wann_chk, dc%nstate_tot, &
+          nspin, v_matrix, esp_tot, seed_wannier_to_eigen, eval_seed, nstate_seed)
 
         filename = trim(dc%base_directory)//binfile_w90seed
         iunit = get_filehandle()
