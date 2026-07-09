@@ -663,6 +663,10 @@ contains
         integer :: chkfh, s_nk, s_nb, s_ns, s_ver
         character(256) :: file_vnl_chk
         character(8) :: cmagic
+        ! Task-4 numeric round-trip gate: flag-gated (env SBE_RVNL_DUMP=1) debug dump
+        character(8) :: dbgval
+        integer :: dbglen, dbgfh, npair, idir_d, jk_d, ip_d
+        integer :: idump_ik(3), ib_list(3), jb_list(3)
         integer, allocatable :: itbl_min(:), itbl_max(:)
         complex(8), allocatable :: tmp_slice(:, :, :, :, :)  ! (f_nb,f_nb,0:3,-ns:ns, ik_lo:ik_hi)
         complex(8), allocatable :: rvnl_full_l(:, :, :, :)   ! (nb_eff,nb_eff,3,nk) zero-fill reduce buffer
@@ -933,6 +937,41 @@ contains
         end if
         call comm_summation(rvnl_full_l, gs%rvnl_tm_matrix, 3*nb_eff*nb_eff*nk, icomm)
         deallocate(rvnl_full_l)
+
+        ! ---- Task-4 numeric round-trip gate: optional debug dump of the
+        !      reconstructed full-nk rvnl_tm_matrix at a FIXED small element set
+        !      (full precision es24.16).  OFF unless env SBE_RVNL_DUMP=1
+        !      (production-safe default); rank-0 only, deterministic indices.  This
+        !      is what the M4/M8/HEAD dumps are diffed on, so it exercises the
+        !      offset + Hermitization + comm_summation reconstruct -- which the
+        !      raw-tmp_slice sidecar checksum does NOT cover. ----
+        if (irank == 0) then
+            call get_environment_variable('SBE_RVNL_DUMP', dbgval, dbglen)
+            if (dbglen > 0 .and. trim(dbgval) == '1') then
+                idump_ik(1) = 1;  idump_ik(2) = (nk + 1) / 2;  idump_ik(3) = nk
+                npair = 1;  ib_list(1) = 1;  jb_list(1) = 1
+                if (nb_eff >= 2) then
+                    ib_list(2) = 2;  jb_list(2) = 1
+                    ib_list(3) = 1;  jb_list(3) = 2;  npair = 3
+                end if
+                dbgfh = get_filehandle()
+                open(dbgfh, file='rvnl_dump.txt', status='replace', action='write')
+                write(dbgfh, '(a)')         "# rvnl_tm_matrix reconstruct dump: ib jb idir ik  Re Im"
+                write(dbgfh, '(a,i0,a,i0)') "# nb_eff=", nb_eff, " nk=", nk
+                do idir_d = 1, 3
+                    do jk_d = 1, 3
+                        if (idump_ik(jk_d) < 1 .or. idump_ik(jk_d) > nk) cycle
+                        do ip_d = 1, npair
+                            write(dbgfh, '(4(i6,1x),2es24.16)') ib_list(ip_d), jb_list(ip_d), idir_d, idump_ik(jk_d), &
+                                & real (gs%rvnl_tm_matrix(ib_list(ip_d), jb_list(ip_d), idir_d, idump_ik(jk_d))), &
+                                & aimag(gs%rvnl_tm_matrix(ib_list(ip_d), jb_list(ip_d), idir_d, idump_ik(jk_d)))
+                        end do
+                    end do
+                end do
+                close(dbgfh)
+                write(*, '(a)') "#   vnl_kappa: SBE_RVNL_DUMP=1 -> wrote rvnl_dump.txt (Task-4 numeric gate)."
+            end if
+        end if
 
         ! ---- (ii) windowed, Hermitized V/W stencil for this rank's k-slice ----
         do ik = ik_lo, ik_hi
