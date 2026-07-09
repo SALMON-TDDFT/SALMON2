@@ -178,7 +178,17 @@ contains
     character(*),               intent(in)  :: str
     integer,                   intent(out) :: ierr
 #ifdef USE_MPI
-    call MPI_File_write_at(fh, disp, str, len(str), MPI_CHARACTER, MPI_STATUS_IGNORE, ierr)
+    ! Write the magic as raw bytes via an integer(1) buffer + MPI_BYTE, NOT a
+    ! character buffer + MPI_CHARACTER. On Fujitsu MPI an independent
+    ! MPI_File_write_at of a CHARACTER buffer with MPI_CHARACTER is silently
+    ! dropped/zeroed when the file was collectively opened by nproc>1 (the
+    ! integer/double sibling writers, which use non-character buffers, are
+    ! unaffected); serial (nproc=1) character writes are fine. transfer()
+    ! reproduces the identical on-disk bytes, so this remains byte-identical to
+    ! the legacy root-serial writer (SBEVNLK1 = 53 42 45 56 4e 4c 4b 31).
+    integer(1) :: bytes(len(str))
+    bytes = transfer(str, bytes, len(str))
+    call MPI_File_write_at(fh, disp, bytes, len(str), MPI_BYTE, MPI_STATUS_IGNORE, ierr)
 #else
     write(fh, pos=disp+1_MPI_OFFSET_KIND, iostat=ierr) str
 #endif
@@ -191,7 +201,12 @@ contains
     character(*),               intent(out) :: str
     integer,                   intent(out) :: ierr
 #ifdef USE_MPI
-    call MPI_File_read_at(fh, disp, str, len(str), MPI_CHARACTER, MPI_STATUS_IGNORE, ierr)
+    ! Symmetric to mpiio_wr_c8 (same Fujitsu-MPI collective-open caveat): read
+    ! raw bytes via an integer(1) buffer + MPI_BYTE, then reinterpret to
+    ! CHARACTER. Exercised by the vnl_kappa reader (Task 4).
+    integer(1) :: bytes(len(str))
+    call MPI_File_read_at(fh, disp, bytes, len(str), MPI_BYTE, MPI_STATUS_IGNORE, ierr)
+    str = transfer(bytes, str)
 #else
     read(fh, pos=disp+1_MPI_OFFSET_KIND, iostat=ierr) str
 #endif
