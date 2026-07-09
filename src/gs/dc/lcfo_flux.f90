@@ -185,6 +185,12 @@ contains
         allocate(aa_global(3,num_wann_chk,num_wann_chk))
         aa_global = (0d0,0d0)
       else
+        call set_wannier_centers_from_position_diagonal(num_wann_chk, center_bohr, aa_global)
+        do iw=1,num_wann_chk
+          owner_frag(iw) = find_owner_fragment_from_center_import(dc, center_bohr(1:3,iw))
+        end do
+        call rebalance_wannier_owner_fragments_import(dc, center_bohr, owner_frag, num_wann_chk)
+        write(*,'(1x,a)') "[DC-LCFO-W90-IMPORT] center source=AA_R diagonal"
         call diagnose_fragment_wannier_symmetry_representation(dc, center_bohr, owner_frag, num_wann_chk, &
           num_bands_chk, v_matrix, esp_file, nsym, symops, aa_global, ok_position)
         call diagnose_global_wannier_pbc_operator_symmetry(dc, center_bohr, num_wann_chk, &
@@ -561,6 +567,23 @@ contains
       end do
     end do
   end subroutine hermitize_wannier_position_matrix
+
+  subroutine set_wannier_centers_from_position_diagonal(num_wann, center_bohr, aa_global)
+    implicit none
+    integer, intent(in) :: num_wann
+    real(8), intent(inout) :: center_bohr(3,num_wann)
+    complex(8), intent(in) :: aa_global(:,:,:)
+    integer :: axis, iw
+
+    if(num_wann <= 0) return
+    if(size(aa_global, 1) < 3 .or. size(aa_global, 2) < num_wann .or. &
+       size(aa_global, 3) < num_wann) return
+    do iw=1,num_wann
+      do axis=1,3
+        center_bohr(axis,iw) = real(aa_global(axis,iw,iw), kind=8)
+      end do
+    end do
+  end subroutine set_wannier_centers_from_position_diagonal
 
   subroutine wrap_wannier_centers_to_total_cell_import(dc, center_bohr, num_wann)
     use structures, only: s_dcdft
@@ -5123,6 +5146,13 @@ contains
         if(.not. ok_position) then
           allocate(aa_global(3,num_wann_chk,num_wann_chk))
           aa_global = (0d0,0d0)
+        else
+          call set_wannier_centers_from_position_diagonal(num_wann_chk, center_bohr, aa_global)
+          do iw=1,num_wann_chk
+            owner_frag(iw) = find_owner_fragment_from_center(center_bohr(1:3,iw))
+          end do
+          call rebalance_wannier_owner_fragments(center_bohr, owner_frag, num_wann_chk)
+          write(*,'(1x,a)') "[DC-LCFO-W90-GLOBAL] center source=AA_R diagonal"
         end if
         position_available = merge(1, 0, ok_position)
 
