@@ -381,12 +381,31 @@ contains
     integer,      intent(in)  :: comm
     integer(8),   intent(in)  :: expect_csum
     character(*), intent(in)  :: tag
+    ! NOTE: ierr is observed as 0 only on success -- every failure path below
+    ! terminates via mpiio_abort (MPI_Abort + error stop) and never returns,
+    ! so callers never actually see a nonzero ierr out of this routine.
     integer,      intent(out) :: ierr
     integer(8) :: csum_local, csum_glob
+    logical :: local_ok, all_ok
 
     ierr = 0
 
-    if (.not. mpiio_finite_z(buf, nz)) then
+    ! Collective-safe finiteness check: each rank computes its own local
+    ! verdict but does NOT abort individually. All ranks then combine via a
+    ! collective MPI_Allreduce(MPI_LAND) and abort together only if any rank
+    ! found a non-finite element. This avoids a non-collective MPI_Abort
+    ! (called only by the ranks that saw NaN/Inf) racing against the
+    ! collective checksum reduce below (which the still-finite ranks would
+    ! otherwise enter and stall in, since MPI_Abort tearing down the whole
+    ! communicator promptly is not guaranteed by the MPI standard).
+    local_ok = mpiio_finite_z(buf, nz)
+#ifdef USE_MPI
+    call MPI_Allreduce(local_ok, all_ok, 1, MPI_LOGICAL, MPI_LAND, comm, ierr)
+    if (ierr /= MPI_SUCCESS) call mpiio_abort(trim(tag)//': MPI_Allreduce (finite) failed', comm)
+#else
+    all_ok = local_ok
+#endif
+    if (.not. all_ok) then
       call mpiio_abort(trim(tag)//': non-finite element (NaN/Inf)', comm)
     end if
 
