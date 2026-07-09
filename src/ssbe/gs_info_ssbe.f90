@@ -403,10 +403,30 @@ contains
     end subroutine save_sbe_gs_bin
 
 
-    ! Read the k-space overlap products <u_{io,ik}|u_{jo,ik+dk}> from the
-    ! text file written by write_prod_dk_data (SALMON's '<sysname>_prod_dk.data').
-    ! Root reads/validates, all ranks allocate, then the data are broadcast.
+    ! Read the k-space overlap products <u_{io,ik}|u_{jo,ik+dk}> from
+    ! 'file_sbe_prod_dk', auto-detecting the on-disk format:
+    !   binary (magic 'SBEPRDK1', Task-5 write_prod_dk_data collective
+    !     MPI-IO writer) -> collective MPI-IO reader below, mirroring
+    !     read_vnl_kappa_data's structure (Task 4): collective open ->
+    !     rank-0 header read + fail-closed validation + bcast ->
+    !     split_range k-slice -> collective read_at_all -> finite +
+    !     whole-file XOR-checksum validate (ALWAYS present in this header,
+    !     unlike vnl_kappa's optional sidecar) -> slot-map into a local
+    !     full-nk zero-fill buffer using the SAME reduced/gicov slot logic
+    !     as the ASCII path -> chunked comm_summation reconstruct (disjoint
+    !     per-rank k-slices tile 1..nk; N ranks wrote, any M ranks read the
+    !     same canonical bytes = nproc-portable).
+    !   ASCII (legacy list-directed, root-serial) -> the ORIGINAL parser,
+    !     kept fully intact below as the rare pre-conversion safety net.
+    ! Rank 0 decides the format from the first 8 bytes and broadcasts the
+    ! verdict so every rank takes the identical branch.
     subroutine read_prod_dk_data()
+        use util_ssbe, only: split_range
+        use mpiio_export_ssbe, only: mpiio_open_read, mpiio_close, mpiio_read_at_all_z, &
+                                   & mpiio_rd_c8, mpiio_rd_i, mpiio_rd_i8, mpiio_disp_k, &
+                                   & mpiio_finite_z, mpiio_csum_local_z, mpiio_csum_reduce, &
+                                   & mpiio_assert_dim, &
+                                   & HDR_PRODK, MAGIC_PRODK, SBE_FMT_VERSION
         implicit none
         integer :: fh, ios, ip, ierr
         logical :: file_exists
@@ -419,13 +439,325 @@ contains
         integer :: ik_r, ik1_r, ik2_r, ik3_r, jdk1_r, jdk2_r, jdk3_r, io_r, jo_r
         real(8) :: re_r, im_r
 
+        ! ---- auto-detect + binary-path locals (Task 6) ----
+        integer, parameter :: OFF = kind(HDR_PRODK)
+        integer(OFF) :: disp
+        integer :: fh_sniff, ierr_h
+        logical :: is_bin, has_slice
+        character(8) :: magic8
+        integer :: f_ver, f_nk, f_no, f_ndk, f_nbvec_full, ihdr_ver(1), ihdr4(4)
+        integer(8) :: fsize, expect, csum_expect, g0, nz, nz_k, csum_loc, csum_glob
+        integer :: ifin_loc, ifin_any
+        integer :: ik, jo, io, jd1, jd2, jd3, iv
+        integer :: ik_lo, ik_hi, max_tile
+        integer, allocatable :: itbl_min(:), itbl_max(:)
+        complex(8), allocatable :: blk(:, :, :, :, :, :)
+        complex(8), allocatable :: prod_dk_l(:, :, :, :)
+        complex(8) :: dummy_z(1)
+        ! Task-6 numeric round-trip gate: flag-gated (env SBE_PRODDK_DUMP=1) debug
+        ! dump of gs%prod_dk + gs%bvec, shared by BOTH branches (placed after the
+        ! is_bin block below) -- mirrors read_vnl_kappa_data's SBE_RVNL_DUMP gate.
+        character(8) :: dbgval
+        integer :: dbglen, dbgfh, npair, jk_d, ip_d
+        integer :: idump_ik(3), ib_list(3), jb_list(3)
+
         ierr    = 0
         gs%nbvec = 0
         ndk_loc = 0
         file_no = 0
         nbvec_full = 0
         reduced = .false.
+        is_bin  = .false.
+        fsize   = 0_8
 
+        ! --- rank-0: existence guard + 8-byte format sniff (plain sequential
+        ! stream I/O -- a peek that only decides the branch, not a data
+        ! read; a short/garbled peek falls through to the ASCII parser
+        ! rather than hard-failing here) ---
+        if (irank == 0) then
+            if (len_trim(file_sbe_prod_dk) == 0) then
+                write(*, '(a)') &
+                    & "ERROR(read_prod_dk_data): 'file_sbe_prod_dk' is empty while 'sbe_lg_degen'='gi/gifix/gicov'."
+                ierr = 1
+            else
+                inquire(file=trim(file_sbe_prod_dk), exist=file_exists, size=fsize)
+                if (.not. file_exists) then
+                    write(*, '(a)') "ERROR(read_prod_dk_data): file not found: " // trim(file_sbe_prod_dk)
+                    ierr = 1
+                end if
+            end if
+            if (ierr == 0) then
+                fh_sniff = get_filehandle()
+                open(fh_sniff, file=trim(file_sbe_prod_dk), form='unformatted', access='stream', &
+                    & status='old', action='read', iostat=ios)
+                if (ios /= 0) then
+                    write(*, '(a)') "ERROR(read_prod_dk_data): cannot open file for format sniff."
+                    ierr = 1
+                else
+                    magic8 = ' '
+                    read(fh_sniff, iostat=ios) magic8
+                    close(fh_sniff)
+                    is_bin = (ios == 0 .and. magic8 == MAGIC_PRODK)
+                end if
+            end if
+        end if
+        call comm_bcast(ierr, icomm, 0)
+        if (ierr /= 0) stop 1
+        call comm_bcast(is_bin, icomm, 0)
+
+        if (is_bin) then
+            !=================================================================
+            ! BINARY PATH: collective MPI-IO (SBEPRDK1 header, Task-5 writer)
+            !=================================================================
+            if (irank == 0) write(*, '(a)') "# read_prod_dk_data (binary, MPI-IO)"
+
+            ! ---- collective open of the single shared file (all ranks) ----
+            call mpiio_open_read(trim(file_sbe_prod_dk), icomm, fh, ierr)
+
+            ! ---- rank-0 header read + fail-closed validation (fields that
+            ! do not need host nk/nb_hi -- magic/version/ndk-sign/nbvec
+            ! consistency/exact-size) ----
+            if (irank == 0) then
+                ierr_h = 0
+                ! codex review (Task 6): default these to 0 BEFORE the reads so a
+                ! partial-header read failure (ierr_h/=0, already fail-closed via
+                ! the ierr==0 guards below) never unpacks undefined memory into
+                ! f_ver/f_nk/f_no/f_ndk/f_nbvec_full/csum_expect, even transiently.
+                magic8 = ' ';  ihdr_ver = 0;  ihdr4 = 0;  csum_expect = 0_8
+                call mpiio_rd_c8(fh,  0_OFF, magic8, ierr);      ierr_h = ior(ierr_h, ierr)
+                call mpiio_rd_i (fh,  8_OFF, ihdr_ver, 1, ierr); ierr_h = ior(ierr_h, ierr)
+                call mpiio_rd_i (fh, 12_OFF, ihdr4, 4, ierr);    ierr_h = ior(ierr_h, ierr)
+                call mpiio_rd_i8(fh, 28_OFF, csum_expect, ierr); ierr_h = ior(ierr_h, ierr)
+                f_ver = ihdr_ver(1)
+                f_nk = ihdr4(1);  f_no = ihdr4(2);  f_ndk = ihdr4(3);  f_nbvec_full = ihdr4(4)
+
+                ierr = 0
+                if (ierr_h /= 0) then
+                    write(*, '(a)') "ERROR(read_prod_dk_data): header field read failed (MPI_File_read_at)."
+                    ierr = 1
+                end if
+                if (ierr == 0 .and. magic8 /= MAGIC_PRODK) then
+                    write(*, '(a)') "ERROR(read_prod_dk_data): bad magic (not a binary prod_dk export)."
+                    ierr = 1
+                end if
+                if (ierr == 0 .and. f_ver /= SBE_FMT_VERSION) then
+                    write(*, '(a,i0)') "ERROR(read_prod_dk_data): unsupported prod_dk format version = ", f_ver
+                    ierr = 1
+                end if
+                if (ierr == 0 .and. f_ndk < 0) then
+                    write(*, '(a)') "ERROR(read_prod_dk_data): ndk in file is negative."
+                    ierr = 1
+                end if
+                if (ierr == 0 .and. f_ndk > 100) then
+                    write(*, '(a)') "ERROR(read_prod_dk_data): implausible ndk in file header (corrupt?)."
+                    ierr = 1
+                end if
+                if (ierr == 0 .and. f_nbvec_full /= (2*f_ndk+1)**3) then
+                    write(*, '(a)') &
+                        & "ERROR(read_prod_dk_data): nbvec_full in file is inconsistent with ndk (corrupt header)."
+                    ierr = 1
+                end if
+                if (ierr == 0) then
+                    ! exact size: header (36 B) + nk*nbvec_full*no^2 complex(8).
+                    ! Catches truncation/surplus that a short-read check alone
+                    ! would miss (mirrors read_vnl_kappa_data's expect gate).
+                    expect = HDR_PRODK + int(f_nk,8) * int(f_nbvec_full,8) * int(f_no,8) * int(f_no,8) * 16_8
+                    if (fsize /= expect) then
+                        write(*, '(a,i0,a,i0,a)') "ERROR(read_prod_dk_data): file size ", fsize, &
+                            & " differs from expected ", expect, " (truncated or surplus data)."
+                        ierr = 1
+                    end if
+                end if
+            end if
+            call comm_bcast(ierr, icomm, 0)
+            if (ierr /= 0) stop 1
+
+            ! ---- broadcast header fields, then the two checks that need
+            ! host nk/nb_hi, run identically (collective-safe) on every rank
+            ! ----
+            call comm_bcast(f_nk, icomm, 0)
+            call comm_bcast(f_no, icomm, 0)
+            call comm_bcast(f_ndk, icomm, 0)
+            call comm_bcast(f_nbvec_full, icomm, 0)
+
+            call mpiio_assert_dim(f_nk, nk, 'prod_dk nk', icomm)
+            if (f_no < nb_hi) then
+                if (irank == 0) write(*, '(a)') &
+                    & "ERROR(read_prod_dk_data): band window in file is smaller than the SBE window top."
+                stop 1
+            end if
+
+            ! ---- slot-map bookkeeping: SAME decision as the ASCII path
+            ! (gicov_prod_dk_nbvec), now a pure function of already-
+            ! broadcast header fields -> computed identically on every rank
+            ! ----
+            ndk_loc    = f_ndk
+            nbvec_full = f_nbvec_full
+            gs%nbvec   = gicov_prod_dk_nbvec(sbe_lg_degen, ndk_loc, nbvec_full)
+            reduced    = (gs%nbvec /= nbvec_full)
+
+            ! ---- allocate on ALL ranks (same shape as the ASCII path) ----
+            allocate(gs%bvec(1:3, 1:gs%nbvec))
+            allocate(gs%prod_dk(1:nb_eff, 1:nb_eff, 1:gs%nbvec, 1:nk))
+            gs%bvec(:, :)          = 0
+            gs%prod_dk(:, :, :, :) = dcmplx(0d0, 0d0)
+
+            ! ---- dk-shift table: identical construction to the ASCII path
+            ! ----
+            mdk = 2 * ndk_loc + 1
+            if (reduced) then
+                gs%bvec(1:3, 1) = (/ 1, 0, 0 /)
+                gs%bvec(1:3, 2) = (/ 0, 1, 0 /)
+                gs%bvec(1:3, 3) = (/ 0, 0, 1 /)
+            else
+                ivec = 0
+                do jdk3 = -ndk_loc, ndk_loc
+                    do jdk2 = -ndk_loc, ndk_loc
+                        do jdk1 = -ndk_loc, ndk_loc
+                            ivec = ivec + 1
+                            gs%bvec(1, ivec) = jdk1
+                            gs%bvec(2, ivec) = jdk2
+                            gs%bvec(3, ivec) = jdk3
+                        end do
+                    end do
+                end do
+            end if
+
+            ! ---- k-slice partition: identical split_range formula used by
+            ! the vnl_kappa reader and the solver (nproc-portable: N ranks
+            ! wrote, any M ranks read the same canonical bytes) ----
+            allocate(itbl_min(0:nproc-1), itbl_max(0:nproc-1))
+            call split_range(1, nk, nproc, itbl_min, itbl_max)
+            ik_lo = itbl_min(irank);  ik_hi = itbl_max(irank)
+            deallocate(itbl_min, itbl_max)
+            has_slice = (ik_hi >= ik_lo)   ! .false. only when nproc > nk
+
+            ! ---- collective read of this rank's contiguous k-slice (the
+            ! FULL shell nbvec_full -- the on-disk layout does not shrink
+            ! just because 'reduced' keeps fewer columns) ----
+            nz_k = int(f_no,8) * int(f_no,8) * int(nbvec_full,8)
+            max_tile = (nk + nproc - 1) / nproc
+            if (nz_k * int(max_tile,8) > int(huge(0),8)) then
+                if (irank == 0) write(*, '(a)') &
+                    & "ERROR(read_prod_dk_data): per-slice element count exceeds MPI int count (chunked read needed)."
+                stop 1
+            end if
+
+            if (has_slice) then
+                allocate(blk(1:f_no, 1:f_no, -ndk_loc:ndk_loc, -ndk_loc:ndk_loc, -ndk_loc:ndk_loc, ik_lo:ik_hi))
+                disp = mpiio_disp_k(HDR_PRODK, nz_k, ik_lo)
+                nz   = nz_k * int(ik_hi - ik_lo + 1, 8)
+                call mpiio_read_at_all_z(fh, disp, blk(1,1,-ndk_loc,-ndk_loc,-ndk_loc,ik_lo), nz, icomm, &
+                    & 'prod_dk', ierr)
+            else
+                allocate(blk(1:f_no, 1:f_no, -ndk_loc:ndk_loc, -ndk_loc:ndk_loc, -ndk_loc:ndk_loc, 1:1))  ! placeholder
+                nz = 0_8
+                call mpiio_read_at_all_z(fh, HDR_PRODK, dummy_z, 0_8, icomm, 'prod_dk', ierr)  ! collective no-op
+            end if
+
+            ! ---- fail-closed validation: (3) finiteness, collective-safe
+            ! (LAND via SUM of 0/1, matches read_vnl_kappa_data's idiom);
+            ! (4) whole-file XOR checksum -- ALWAYS present in this header
+            ! (unlike vnl_kappa's optional sidecar), so csum_expect stays
+            ! rank-0-only (no int64 bcast needed: only rank 0 compares) ----
+            ifin_loc = 0
+            if (has_slice) then
+                if (.not. mpiio_finite_z(blk(1,1,-ndk_loc,-ndk_loc,-ndk_loc,ik_lo), nz)) ifin_loc = 1
+            end if
+            call comm_summation(ifin_loc, ifin_any, icomm)
+            if (ifin_any > 0) then
+                if (irank == 0) write(*, '(a)') &
+                    & "ERROR(read_prod_dk_data): non-finite element (NaN/Inf) in prod_dk data."
+                stop 1
+            end if
+
+            csum_loc = 0_8
+            if (has_slice) then
+                g0 = nz_k * int(ik_lo - 1, 8)
+                csum_loc = mpiio_csum_local_z(blk(1,1,-ndk_loc,-ndk_loc,-ndk_loc,ik_lo), nz, g0)
+            end if
+            csum_glob = mpiio_csum_reduce(csum_loc, icomm)
+            if (irank == 0 .and. csum_glob /= csum_expect) then
+                write(*, '(a)') "ERROR(read_prod_dk_data): checksum mismatch (data corruption / truncated write)."
+                ierr = 1
+            end if
+            call comm_bcast(ierr, icomm, 0)
+            if (ierr /= 0) stop 1
+
+            ! ---- slot-map this rank's k-slice into a local full-nk
+            ! zero-fill buffer, using the SAME reduced/gicov slot logic as
+            ! the ASCII path (prod_dk_axis_slot / linear-pack), windowed to
+            ! [nb_min:nb_hi] exactly like the ASCII path's io_r/jo_r window
+            ! check ----
+            allocate(prod_dk_l(1:nb_eff, 1:nb_eff, 1:gs%nbvec, 1:nk))
+            prod_dk_l(:, :, :, :) = dcmplx(0d0, 0d0)
+            do ik = ik_lo, ik_hi
+                do jd3 = -ndk_loc, ndk_loc
+                    do jd2 = -ndk_loc, ndk_loc
+                        do jd1 = -ndk_loc, ndk_loc
+                            if (reduced) then
+                                iv = prod_dk_axis_slot(jd1, jd2, jd3)
+                            else
+                                iv = (jd3 + ndk_loc) * mdk * mdk + (jd2 + ndk_loc) * mdk + (jd1 + ndk_loc) + 1
+                            end if
+                            if (iv > 0) then
+                                do jo = nb_min, nb_hi
+                                    do io = nb_min, nb_hi
+                                        prod_dk_l(io - nb_min + 1, jo - nb_min + 1, iv, ik) = &
+                                            & blk(io, jo, jd1, jd2, jd3, ik)
+                                    end do
+                                end do
+                            end if
+                        end do
+                    end do
+                end do
+            end do
+
+            if (allocated(blk)) deallocate(blk)
+            call mpiio_close(fh, ierr)   ! collective (all ranks)
+
+            ! ---- chunked full-nk reconstruct: disjoint per-rank k-slices
+            ! tile 1..nk, so comm_summation (allreduce SUM over the
+            ! zero-fill buffers) IS the reconstruction -- reuses the ASCII
+            ! path's max_elems_per_chunk=200000000_8 bound (comm_summation's
+            ! count is default-integer, same 32-bit overflow risk as
+            ! comm_bcast) ----
+            block
+                integer(8) :: elems_per_k, max_elems_per_chunk
+                integer :: chunk_nk, ik0, ik1
+                elems_per_k = int(nb_eff, 8) * int(nb_eff, 8) * int(gs%nbvec, 8)
+                ! codex review (Task 6): chunk_nk=max(1,...) only bounds the chunk to
+                ! ONE k-plane -- if a single k-plane's element count itself exceeded
+                ! the default-integer count passed to comm_summation, the chunking
+                ! loop could not shrink further and the cast below would wrap.  Not
+                ! reachable at realistic nb_eff (needs nb_eff > ~46000 at nbvec=1, far
+                ! beyond any SBE band window), but guard it explicitly and fail closed
+                ! rather than silently wrap, matching this subroutine's own
+                ! nz_k*max_tile guard above.
+                if (elems_per_k > int(huge(0), 8)) then
+                    if (irank == 0) write(*, '(a)') &
+                        & "ERROR(read_prod_dk_data): per-k element count exceeds MPI int count (reconstruct needs finer chunking)."
+                    stop 1
+                end if
+                max_elems_per_chunk = 200000000_8
+                chunk_nk = max(1, int(max_elems_per_chunk / max(elems_per_k, 1_8)))
+                ik0 = 1
+                do while (ik0 <= nk)
+                    ik1 = min(nk, ik0 + chunk_nk - 1)
+                    call comm_summation(prod_dk_l(:,:,:,ik0:ik1), gs%prod_dk(:,:,:,ik0:ik1), &
+                        & int(elems_per_k * int(ik1-ik0+1,8)), icomm)
+                    ik0 = ik1 + 1
+                end do
+            end block
+            deallocate(prod_dk_l)
+
+            if (irank == 0) write(*, '(a)') "#   prod_dk: binary (MPI-IO) k-slice read, checksum verified."
+
+        else
+        !=====================================================================
+        ! ASCII PATH (legacy, root-serial list-directed parser) -- kept
+        ! UNCHANGED below as the rare pre-conversion safety net.
+        !=====================================================================
         ! --- root: open the file and parse the metadata header ---
         if (irank == 0) then
             write(*, '(a)') "# read_prod_dk_data"
@@ -614,6 +946,47 @@ contains
                 ik0 = ik1 + 1
             end do
         end block
+        end if
+
+        ! ---- Task-6 numeric round-trip gate: optional debug dump of the
+        !      final gs%prod_dk + gs%bvec at a FIXED small element set (full
+        !      precision es24.16).  OFF unless env SBE_PRODDK_DUMP=1
+        !      (production-safe default); rank-0 only, deterministic
+        !      indices.  Runs AFTER the is_bin branch above, so it exercises
+        !      whichever path (binary MPI-IO or legacy ASCII) actually ran
+        !      -- this is what the binary-vs-ASCII and M4-vs-M8 read-test
+        !      dumps are diffed on. ----
+        if (irank == 0) then
+            call get_environment_variable('SBE_PRODDK_DUMP', dbgval, dbglen)
+            if (dbglen > 0 .and. trim(dbgval) == '1') then
+                idump_ik(1) = 1;  idump_ik(2) = (nk + 1) / 2;  idump_ik(3) = nk
+                npair = 1;  ib_list(1) = 1;  jb_list(1) = 1
+                if (nb_eff >= 2) then
+                    ib_list(2) = 2;  jb_list(2) = 1
+                    ib_list(3) = 1;  jb_list(3) = 2;  npair = 3
+                end if
+                dbgfh = get_filehandle()
+                open(dbgfh, file='proddk_dump.txt', status='replace', action='write')
+                write(dbgfh, '(a)') "# prod_dk dump: io jo iv ik  Re Im"
+                write(dbgfh, '(a,i0,a,i0,a,i0)') "# nb_eff=", nb_eff, " nk=", nk, " nbvec=", gs%nbvec
+                do iv = 1, gs%nbvec
+                    do jk_d = 1, 3
+                        if (idump_ik(jk_d) < 1 .or. idump_ik(jk_d) > nk) cycle
+                        do ip_d = 1, npair
+                            write(dbgfh, '(4(i6,1x),2es24.16)') ib_list(ip_d), jb_list(ip_d), iv, idump_ik(jk_d), &
+                                & real (gs%prod_dk(ib_list(ip_d), jb_list(ip_d), iv, idump_ik(jk_d))), &
+                                & aimag(gs%prod_dk(ib_list(ip_d), jb_list(ip_d), iv, idump_ik(jk_d)))
+                        end do
+                    end do
+                end do
+                write(dbgfh, '(a)') "# bvec: iv  jdk1 jdk2 jdk3"
+                do iv = 1, gs%nbvec
+                    write(dbgfh, '(i6,1x,3(i4,1x))') iv, gs%bvec(1,iv), gs%bvec(2,iv), gs%bvec(3,iv)
+                end do
+                close(dbgfh)
+                write(*, '(a)') "#   prod_dk: SBE_PRODDK_DUMP=1 -> wrote proddk_dump.txt (Task-6 numeric gate)."
+            end if
+        end if
     end subroutine read_prod_dk_data
 
 
