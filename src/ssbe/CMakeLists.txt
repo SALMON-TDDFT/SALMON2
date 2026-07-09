@@ -1,5 +1,6 @@
 set(SOURCES
     util_ssbe.f90
+    mpiio_export_ssbe.f90
     datafile_ssbe.f90
     input_checker_sbe.f90
     gs_info_ssbe.f90
