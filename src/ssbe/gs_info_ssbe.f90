@@ -617,34 +617,62 @@ contains
     end subroutine read_prod_dk_data
 
 
-    ! VG completion reader: nonlocal kappa-stencil V/W band matrices from the
-    ! unformatted-stream file written by write_sbe_vnl_kappa_data (write.f90).
-    ! Fail-closed: header fingerprint (magic/ndim/nk/num_kgrid/nb/ns/h/dir/
-    ! nelec/natom/lattice), exact file-size match (catches truncation AND
-    ! surplus), and a data-level cross-check of W_{i,0} against the text-file
-    ! rvnl_tm_matrix (catches a stale stencil file from another GS at 1e-3
-    ! rel-to-max; the text export carries only 5 significant digits, so this is
-    ! a wiring/staleness check, not a precision check).  Root reads and
-    ! broadcasts per k; every rank keeps (i) the full-nk s=0 velocity W_{i,0}
-    ! by OVERWRITING gs%rvnl_tm_matrix (binary precision; feeds p_mod/fsum_D)
-    ! and (ii) the windowed V/W stencil for its own k-slice only.
+    ! VG completion reader (collective MPI-IO): nonlocal kappa-stencil V/W band
+    ! matrices from the single shared file written by write_sbe_vnl_kappa_data
+    ! (write.f90).  All ranks collectively MPI_File_open the file, rank 0 reads
+    ! and fail-closed validates the 156-byte header (magic/ndim/nk/num_kgrid/nb/
+    ! ns/h/dir/nelec/natom/lattice + exact file-size), then each rank
+    ! collectively reads its own split_range k-slice (MPI_Get_count short-read is
+    ! fail-closed).  Validation layers: finiteness always; the whole-file
+    ! splitmix64 XOR checksum vs the '_vnl_kappa.chk' sidecar when present, else
+    ! legacy count+finite only (byte-identical OLD root-serial files carry no
+    ! sidecar, so the reader stays backward-compatible).  Every rank keeps (i)
+    ! the full-nk s=0 velocity W_{i,0} by OVERWRITING gs%rvnl_tm_matrix
+    ! (zero-fill + comm_summation reconstruct; binary precision; feeds
+    ! p_mod/fsum_D) -- AFTER an all-reduced (LOR) staleness cross-check of
+    ! W_{i,0} against the PRE-overwrite text-file rvnl_tm_matrix (catches a stale
+    ! stencil file from another GS at 1e-3 rel-to-max; a wiring/staleness check,
+    ! not a precision check) -- and (ii) the windowed V/W stencil for its own
+    ! k-slice only.  nproc-portable: N ranks write, any M ranks read the same
+    ! bytes (canonical global-index layout).
     subroutine read_vnl_kappa_data()
         use util_ssbe, only: split_range
+        use mpiio_export_ssbe, only: mpiio_open_read, mpiio_close, mpiio_read_at_all_z, &
+                                   & mpiio_rd_c8, mpiio_rd_i, mpiio_rd_d, mpiio_disp_k, &
+                                   & mpiio_csum_local_z, mpiio_csum_reduce, mpiio_finite_z, &
+                                   & HDR_VNL, MAGIC_VNL, MAGIC_CHK
         implicit none
-        integer :: fh, ios, ik, s, i, iw, jw
+        ! OFF == MPI_OFFSET_KIND, taken from the public HDR_VNL parameter so the
+        ! header-offset literals get the right kind in BOTH the USE_MPI and the
+        ! serial-fallback builds WITHOUT this module needing `use mpi`.
+        integer, parameter :: OFF = kind(HDR_VNL)
+        integer(OFF) :: disp
+        integer :: fh, ios, ik, s, i, iw, jw, nlen
         integer :: f_ndim, f_nk, f_nb, f_ns, f_kgrid(3), f_nelec, f_natom
+        integer :: ihdr4(4), ihdr2(2)
+        real(8) :: dhdr5(5), avec9(9)
         real(8) :: f_h, f_dir(3), f_amax, f_avec(3,3)
         character(8) :: magic
-        integer :: ierr, ik_lo, ik_hi
+        integer :: ierr, ierr_h, ik_lo, ik_hi, max_tile
         integer(8) :: fsize, expect
-        real(8) :: wmax, dmax, denom
-        logical :: file_exists_vnl
+        integer(8) :: nz_k, nz, csum_loc, csum_glob, csum_expect
+        real(8) :: wmax, dmax, denom, smax_loc
+        complex(8) :: w0
+        logical :: file_exists_vnl, has_sidecar, has_slice
+        integer :: istale_loc, istale_any, ifin_loc, ifin_any, ik_worst
+        integer :: chkfh, s_nk, s_nb, s_ns, s_ver
+        character(256) :: file_vnl_chk
+        character(8) :: cmagic
         integer, allocatable :: itbl_min(:), itbl_max(:)
-        complex(8), allocatable :: tmp(:, :, :, :)   ! (f_nb, f_nb, 0:3, -ns:ns)
+        complex(8), allocatable :: tmp_slice(:, :, :, :, :)  ! (f_nb,f_nb,0:3,-ns:ns, ik_lo:ik_hi)
+        complex(8), allocatable :: rvnl_full_l(:, :, :, :)   ! (nb_eff,nb_eff,3,nk) zero-fill reduce buffer
+        complex(8) :: dummy_z(1)
 
         ierr = 0
-        f_nb = 0;  f_ns = 0
+        f_nb = 0;  f_ns = 0;  f_h = 0d0;  f_dir = 0d0
+        has_sidecar = .false.;  csum_expect = 0_8
 
+        ! ---- pre-open guards (rank 0): empty name / existence / size ----
         if (irank == 0) then
             write(*, '(a)') "# read_vnl_kappa_data"
             if (len_trim(file_sbe_vnl_kappa) == 0) then
@@ -658,77 +686,90 @@ contains
                     ierr = 1
                 end if
             end if
-            if (ierr == 0) then
-                fh = get_filehandle()
-                open(fh, file=trim(file_sbe_vnl_kappa), form='unformatted', access='stream', &
-                    & status='old', action='read')
-                read(fh, iostat=ios) magic
-                if (ios /= 0 .or. magic /= 'SBEVNLK1') then
-                    write(*, '(a)') "ERROR(read_vnl_kappa_data): bad magic (not a vnl_kappa export)."
-                    ierr = 1
-                end if
+        end if
+        ! collective consistency: all ranks decide together whether to open.
+        call comm_bcast(ierr, icomm, 0)
+        if (ierr /= 0) stop 1
+
+        ! ---- collective open of the single shared file (all ranks of icomm) ----
+        call mpiio_open_read(trim(file_sbe_vnl_kappa), icomm, fh, ierr)
+
+        ! ---- rank-0 header read + fail-closed validation (156B, byte-identical
+        !      to the legacy sequential-stream layout) ----
+        if (irank == 0) then
+            ierr_h = 0
+            call mpiio_rd_c8(fh,  0_OFF, magic,   ierr);    ierr_h = ior(ierr_h, ierr)  ! 'SBEVNLK1'
+            call mpiio_rd_i (fh,  8_OFF, ihdr4, 4, ierr);   ierr_h = ior(ierr_h, ierr)  ! ndim, nk, nb, ns
+            call mpiio_rd_i (fh, 24_OFF, f_kgrid, 3, ierr); ierr_h = ior(ierr_h, ierr)  ! num_kgrid(1:3)
+            call mpiio_rd_i (fh, 36_OFF, ihdr2, 2, ierr);   ierr_h = ior(ierr_h, ierr)  ! nelec, natom
+            call mpiio_rd_d (fh, 44_OFF, dhdr5, 5, ierr);   ierr_h = ior(ierr_h, ierr)  ! h, edir(1:3), amax
+            call mpiio_rd_d (fh, 84_OFF, avec9, 9, ierr);   ierr_h = ior(ierr_h, ierr)  ! primitive_a (col order)
+            f_ndim  = ihdr4(1);  f_nk = ihdr4(2);  f_nb = ihdr4(3);  f_ns = ihdr4(4)
+            f_nelec = ihdr2(1);  f_natom = ihdr2(2)
+            f_h = dhdr5(1);  f_dir(1:3) = dhdr5(2:4);  f_amax = dhdr5(5)
+            f_avec = reshape(avec9, [3, 3])
+
+            ierr = 0
+            ! fail-closed: an MPI_File_read_at error on any header field must not
+            ! be silently discarded before the field-value validation below.
+            if (ierr_h /= 0) then
+                write(*, '(a)') "ERROR(read_vnl_kappa_data): header field read failed (MPI_File_read_at)."
+                ierr = 1
+            end if
+            if (magic /= MAGIC_VNL) then
+                write(*, '(a)') "ERROR(read_vnl_kappa_data): bad magic (not a vnl_kappa export)."
+                ierr = 1
+            end if
+            if (f_ndim /= 1) then
+                write(*, '(a,i0)') "ERROR(read_vnl_kappa_data): unsupported stencil ndim = ", f_ndim
+                ierr = 1
+            end if
+            if (f_nk /= nk) then
+                write(*, '(a)') "ERROR(read_vnl_kappa_data): nk in file differs from SBE nk."
+                ierr = 1
+            end if
+            if (any(f_kgrid(1:3) /= num_kgrid(1:3))) then
+                write(*, '(a)') "ERROR(read_vnl_kappa_data): num_kgrid in file differs from input."
+                ierr = 1
+            end if
+            if (f_nb < nb_hi) then
+                write(*, '(a)') "ERROR(read_vnl_kappa_data): band count in file is smaller than the SBE window top."
+                ierr = 1
+            end if
+            if (f_ns < 4) then
+                write(*, '(a)') "ERROR(read_vnl_kappa_data): ns in file must be >= 4."
+                ierr = 1
+            end if
+            if (f_h <= 0d0) then
+                write(*, '(a)') "ERROR(read_vnl_kappa_data): stencil spacing h must be > 0."
+                ierr = 1
+            end if
+            if (abs(norm2(f_dir(1:3)) - 1d0) > 1d-8) then
+                write(*, '(a)') "ERROR(read_vnl_kappa_data): stencil direction in file is not a unit vector."
+                ierr = 1
+            end if
+            if (f_nelec /= ne) then
+                ! ne here is the ABSOLUTE electron count passed by the caller
+                ! (window reduction happens after this argument), so it must
+                ! match the GS export fingerprint exactly.
+                write(*, '(a,i0,a,i0)') "ERROR(read_vnl_kappa_data): nelec fingerprint mismatch: file ", &
+                    & f_nelec, " vs input ", ne
+                ierr = 1
+            end if
+            if (natom > 0 .and. f_natom /= natom) then
+                write(*, '(a)') "ERROR(read_vnl_kappa_data): natom fingerprint mismatch."
+                ierr = 1
+            end if
+            if (maxval(abs(f_avec(1:3,1) - gs%a_matrix(1:3,1))) > 1d-8 * maxval(abs(gs%a_matrix)) .or. &
+              & maxval(abs(f_avec(1:3,2) - gs%a_matrix(1:3,2))) > 1d-8 * maxval(abs(gs%a_matrix)) .or. &
+              & maxval(abs(f_avec(1:3,3) - gs%a_matrix(1:3,3))) > 1d-8 * maxval(abs(gs%a_matrix))) then
+                write(*, '(a)') "ERROR(read_vnl_kappa_data): lattice-vector fingerprint mismatch."
+                ierr = 1
             end if
             if (ierr == 0) then
-                read(fh, iostat=ios) f_ndim, f_nk, f_nb, f_ns
-                if (ios == 0) read(fh, iostat=ios) f_kgrid(1:3)
-                if (ios == 0) read(fh, iostat=ios) f_nelec, f_natom
-                if (ios == 0) read(fh, iostat=ios) f_h, f_dir(1:3), f_amax
-                if (ios == 0) read(fh, iostat=ios) f_avec(1:3,1), f_avec(1:3,2), f_avec(1:3,3)
-                if (ios /= 0) then
-                    write(*, '(a)') "ERROR(read_vnl_kappa_data): truncated header."
-                    ierr = 1
-                end if
-            end if
-            if (ierr == 0) then
-                if (f_ndim /= 1) then
-                    write(*, '(a,i0)') "ERROR(read_vnl_kappa_data): unsupported stencil ndim = ", f_ndim
-                    ierr = 1
-                end if
-                if (f_nk /= nk) then
-                    write(*, '(a)') "ERROR(read_vnl_kappa_data): nk in file differs from SBE nk."
-                    ierr = 1
-                end if
-                if (any(f_kgrid(1:3) /= num_kgrid(1:3))) then
-                    write(*, '(a)') "ERROR(read_vnl_kappa_data): num_kgrid in file differs from input."
-                    ierr = 1
-                end if
-                if (f_nb < nb_hi) then
-                    write(*, '(a)') "ERROR(read_vnl_kappa_data): band count in file is smaller than the SBE window top."
-                    ierr = 1
-                end if
-                if (f_ns < 4) then
-                    write(*, '(a)') "ERROR(read_vnl_kappa_data): ns in file must be >= 4."
-                    ierr = 1
-                end if
-                if (f_h <= 0d0) then
-                    write(*, '(a)') "ERROR(read_vnl_kappa_data): stencil spacing h must be > 0."
-                    ierr = 1
-                end if
-                if (abs(norm2(f_dir(1:3)) - 1d0) > 1d-8) then
-                    write(*, '(a)') "ERROR(read_vnl_kappa_data): stencil direction in file is not a unit vector."
-                    ierr = 1
-                end if
-                if (f_nelec /= ne) then
-                    ! ne here is the ABSOLUTE electron count passed by the caller
-                    ! (window reduction happens after this argument), so it must
-                    ! match the GS export fingerprint exactly.
-                    write(*, '(a,i0,a,i0)') "ERROR(read_vnl_kappa_data): nelec fingerprint mismatch: file ", &
-                        & f_nelec, " vs input ", ne
-                    ierr = 1
-                end if
-                if (natom > 0 .and. f_natom /= natom) then
-                    write(*, '(a)') "ERROR(read_vnl_kappa_data): natom fingerprint mismatch."
-                    ierr = 1
-                end if
-                if (maxval(abs(f_avec(1:3,1) - gs%a_matrix(1:3,1))) > 1d-8 * maxval(abs(gs%a_matrix)) .or. &
-                  & maxval(abs(f_avec(1:3,2) - gs%a_matrix(1:3,2))) > 1d-8 * maxval(abs(gs%a_matrix)) .or. &
-                  & maxval(abs(f_avec(1:3,3) - gs%a_matrix(1:3,3))) > 1d-8 * maxval(abs(gs%a_matrix))) then
-                    write(*, '(a)') "ERROR(read_vnl_kappa_data): lattice-vector fingerprint mismatch."
-                    ierr = 1
-                end if
-            end if
-            if (ierr == 0) then
-                ! exact size: header (156 B) + nk*(2ns+1)*4*nb^2 complex(8)
+                ! exact size: header (156 B) + nk*(2ns+1)*4*nb^2 complex(8).  The
+                ! MPI_Get_count short-read guards truncation of the data region;
+                ! this catches surplus data / gross corruption too.
                 expect = 156_8 + int(f_nk,8) * int(2*f_ns+1,8) * 4_8 * int(f_nb,8)**2 * 16_8
                 if (fsize /= expect) then
                     write(*, '(a,i0,a,i0,a)') "ERROR(read_vnl_kappa_data): file size ", fsize, &
@@ -742,92 +783,177 @@ contains
         if (ierr /= 0) stop 1
         call comm_bcast(f_nb, icomm, 0)
         call comm_bcast(f_ns, icomm, 0)
+        call comm_bcast(f_h,  icomm, 0)
+        call comm_bcast(f_dir, icomm, 0)
 
-        ! k-slice partition (deterministic, identical to the solver's split;
-        ! asserted against sbe%ik_min/ik_max in init_sbe_bloch_solver)
+        ! ---- optional sidecar checksum (rank 0; legacy byte-identical files
+        !      lack it -> fall back to count+finite legacy validation) ----
+        if (irank == 0) then
+            nlen = len_trim(file_sbe_vnl_kappa)
+            if (nlen >= 4 .and. file_sbe_vnl_kappa(nlen-3:nlen) == '.bin') then
+                file_vnl_chk = file_sbe_vnl_kappa(1:nlen-4) // '.chk'
+            else
+                file_vnl_chk = trim(file_sbe_vnl_kappa) // '.chk'
+            end if
+            inquire(file=trim(file_vnl_chk), exist=has_sidecar)
+            if (has_sidecar) then
+                chkfh = get_filehandle()
+                open(chkfh, file=trim(file_vnl_chk), status='old', action='read', iostat=ios)
+                if (ios /= 0) then
+                    ! present-but-unreadable sidecar is suspicious -> fail closed
+                    ! (only an ABSENT sidecar triggers the legacy fallback above).
+                    write(*, '(a)') "ERROR(read_vnl_kappa_data): sidecar .chk exists but could not be opened."
+                    ierr = 1
+                else
+                    read(chkfh, '(a)', iostat=ios) cmagic
+                    if (ios == 0) read(chkfh, *, iostat=ios) s_nk, s_nb, s_ns, s_ver
+                    ! csum is written as an integer(8) signed decimal by the writer
+                    ! (write.f90: write(chkfh,'(i0)') csum) -> parse as integer(8).
+                    if (ios == 0) read(chkfh, *, iostat=ios) csum_expect
+                    close(chkfh)
+                    if (ios /= 0 .or. cmagic /= MAGIC_CHK) then
+                        write(*, '(a)') "ERROR(read_vnl_kappa_data): sidecar .chk is corrupt (magic/format)."
+                        ierr = 1
+                    else if (s_nk /= f_nk .or. s_nb /= f_nb .or. s_ns /= f_ns) then
+                        write(*, '(a)') "ERROR(read_vnl_kappa_data): sidecar .chk dims disagree with the .bin header."
+                        ierr = 1
+                    end if
+                end if
+            end if
+        end if
+        call comm_bcast(ierr, icomm, 0)
+        if (ierr /= 0) stop 1
+        call comm_bcast(has_sidecar, icomm, 0)
+
+        ! ---- k-slice partition (deterministic, identical to the solver's split;
+        !      asserted against sbe%ik_min/ik_max in init_sbe_bloch_solver) ----
         allocate(itbl_min(0:nproc-1), itbl_max(0:nproc-1))
         call split_range(1, nk, nproc, itbl_min, itbl_max)
         ik_lo = itbl_min(irank);  ik_hi = itbl_max(irank)
         deallocate(itbl_min, itbl_max)
+        has_slice = (ik_hi >= ik_lo)   ! .false. only when nproc > nk (empty rank)
 
         allocate(gs%vnl_V(1:nb_eff, 1:nb_eff, -f_ns:f_ns, ik_lo:ik_hi))
         allocate(gs%vnl_W(1:nb_eff, 1:nb_eff, 1:3, -f_ns:f_ns, ik_lo:ik_hi))
-        allocate(tmp(1:f_nb, 1:f_nb, 0:3, -f_ns:f_ns))
 
-        do ik = 1, nk
-            ierr = 0
-            if (irank == 0) then
-                do s = -f_ns, f_ns
-                    read(fh, iostat=ios) tmp(1:f_nb, 1:f_nb, 0, s)
-                    if (ios == 0) read(fh, iostat=ios) tmp(1:f_nb, 1:f_nb, 1:3, s)
-                    if (ios /= 0) then
-                        ! unreachable given the exact-size check; keep fail-closed
-                        ! anyway -- and fail COLLECTIVELY (root must not stop
-                        ! alone before the bcast, or the other ranks hang)
-                        write(*, '(a)') "ERROR(read_vnl_kappa_data): unexpected read failure."
-                        ierr = 1
-                        exit
-                    end if
-                end do
+        ! ---- collective read of this rank's contiguous k-slice.  tmp_slice is
+        !      allocated EXACTLY (f_nb,f_nb,0:3,-ns:ns, ik_lo:ik_hi): dim1=row
+        !      (fastest) .. dim5=ik (slowest), so its Fortran array-element order
+        !      IS the canonical on-disk byte order.  Empty ranks issue a count-0
+        !      collective no-op so MPI_File_read_at_all stays well-formed. ----
+        nz_k = int(f_nb,8) * int(f_nb,8) * 4_8 * (2_8*int(f_ns,8) + 1_8)
+        ! fail-closed: mpiio_read_at_all_z passes a default-integer element count
+        ! (int(nz)); guard the largest k-slice (= ceil(nk/nproc)) against 2^31-1
+        ! wrap.  Deterministic on every rank -> collective-safe (all stop together,
+        ! not one rank alone).  Realistic band/k counts never hit this; hard stop.
+        max_tile = (nk + nproc - 1) / nproc
+        if (nz_k * int(max_tile,8) > int(huge(0),8)) then
+            if (irank == 0) write(*, '(a)') &
+                & "ERROR(read_vnl_kappa_data): per-slice element count exceeds MPI int count (chunked read needed)."
+            stop 1
+        end if
+        if (has_slice) then
+            allocate(tmp_slice(1:f_nb, 1:f_nb, 0:3, -f_ns:f_ns, ik_lo:ik_hi))
+            disp = mpiio_disp_k(HDR_VNL, nz_k, ik_lo)
+            nz   = nz_k * int(ik_hi - ik_lo + 1, 8)
+            call mpiio_read_at_all_z(fh, disp, tmp_slice(1,1,0,-f_ns,ik_lo), nz, icomm, 'vnl_kappa', ierr)
+        else
+            allocate(tmp_slice(1:f_nb, 1:f_nb, 0:3, -f_ns:f_ns, 1:1))  ! placeholder; never read as data
+            nz = 0_8
+            call mpiio_read_at_all_z(fh, HDR_VNL, dummy_z, 0_8, icomm, 'vnl_kappa', ierr)  ! collective no-op
+        end if
+
+        ! ---- validation layer (3): finiteness, always, collective (fail-closed) ----
+        ifin_loc = 0
+        if (has_slice) then
+            if (.not. mpiio_finite_z(tmp_slice(1,1,0,-f_ns,ik_lo), nz)) ifin_loc = 1
+        end if
+        call comm_summation(ifin_loc, ifin_any, icomm)   ! LOR via SUM of 0/1
+        if (ifin_any > 0) then
+            if (irank == 0) write(*, '(a)') &
+                & "ERROR(read_vnl_kappa_data): non-finite element (NaN/Inf) in vnl_kappa data."
+            stop 1   ! all ranks reach here (ifin_any is allreduced) -> abort together
+        end if
+
+        ! ---- validation layer (4): whole-file XOR checksum, ONLY when the
+        !      sidecar is present.  The writer checksummed the RAW on-disk complex
+        !      data (buf_l, canonical order), so we must checksum the RAW read
+        !      buffer tmp_slice with the same global-index offset (NOT the
+        !      Hermitized W reconstruction).  XOR-fold => the M-rank split of the
+        !      same nk gives the same global checksum as the N-rank writer. ----
+        if (has_sidecar) then
+            csum_loc = 0_8
+            if (has_slice) csum_loc = mpiio_csum_local_z(tmp_slice(1,1,0,-f_ns,ik_lo), nz, nz_k*int(ik_lo-1,8))
+            csum_glob = mpiio_csum_reduce(csum_loc, icomm)   ! collective (BXOR), value on all ranks
+            if (irank == 0 .and. csum_glob /= csum_expect) then
+                write(*, '(a)') "ERROR(read_vnl_kappa_data): sidecar checksum mismatch (data corruption / stale file)."
+                ierr = 1
             end if
             call comm_bcast(ierr, icomm, 0)
             if (ierr /= 0) stop 1
-            call comm_bcast(tmp, icomm, 0)
+        end if
 
-            ! (i) full-nk s=0 velocity: overwrite the 5-digit text rvnl with the
-            ! binary W_{i,0} -- AFTER the staleness cross-check below (first k
-            ! of this rank documents the residual; check every k).
+        ! ---- (i) full-nk W_{i,0} reconstruct via zero-fill + comm_summation.
+        !      Each rank fills ONLY its owned k-slice (disjoint slices tile
+        !      1..nk); the all-reduce sums them into the full-nk matrix on every
+        !      rank.  BEFORE the overwrite, cross-check this rank's slice against
+        !      the pre-overwrite text-file rvnl_tm_matrix and LOR-reduce the fail
+        !      flag so a mismatch on ANY rank aborts ALL. ----
+        allocate(rvnl_full_l(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
+        rvnl_full_l = (0d0, 0d0)
+        istale_loc = 0;  smax_loc = 0d0;  ik_worst = 0
+        do ik = ik_lo, ik_hi
             dmax = 0d0
             do i = 1, 3
                 do jw = nb_min, nb_hi
                     do iw = nb_min, nb_hi
-                        dmax = max(dmax, abs(0.5d0*(tmp(iw, jw, i, 0) + conjg(tmp(jw, iw, i, 0))) &
-                            & - gs%rvnl_tm_matrix(iw - nb_min + 1, jw - nb_min + 1, i, ik)))
+                        w0 = 0.5d0 * (tmp_slice(iw, jw, i, 0, ik) + conjg(tmp_slice(jw, iw, i, 0, ik)))
+                        rvnl_full_l(iw - nb_min + 1, jw - nb_min + 1, i, ik) = w0
+                        dmax = max(dmax, abs(w0 - gs%rvnl_tm_matrix(iw - nb_min + 1, jw - nb_min + 1, i, ik)))
                     end do
                 end do
             end do
-            wmax = maxval(abs(gs%rvnl_tm_matrix(:, :, :, ik)))
+            wmax  = maxval(abs(gs%rvnl_tm_matrix(:, :, :, ik)))
             denom = max(wmax, 1d-12)
             if (dmax / denom > 1d-3) then
-                if (irank == 0) then
-                    write(*, '(a,i0,a,es12.4)') "ERROR(read_vnl_kappa_data): W(s=0) vs tm rvnl mismatch at ik=", &
-                        & ik, ", rel-to-max residual = ", dmax / denom
-                    write(*, '(a)') "  (stale/mismatched 'file_sbe_vnl_kappa' for this GS export?)"
+                istale_loc = 1
+                if (dmax / denom > smax_loc) then
+                    smax_loc = dmax / denom;  ik_worst = ik
                 end if
-                stop 1
             end if
-            do i = 1, 3
+        end do
+        call comm_summation(istale_loc, istale_any, icomm)   ! LOR via SUM of 0/1
+        if (istale_any > 0) then
+            if (istale_loc == 1) then
+                write(*, '(a,i0,a,es12.4)') "ERROR(read_vnl_kappa_data): W(s=0) vs tm rvnl mismatch at ik=", &
+                    & ik_worst, ", rel-to-max residual = ", smax_loc
+                write(*, '(a)') "  (stale/mismatched 'file_sbe_vnl_kappa' for this GS export?)"
+            end if
+            stop 1   ! all ranks reach here (istale_any is allreduced) -> abort together
+        end if
+        call comm_summation(rvnl_full_l, gs%rvnl_tm_matrix, 3*nb_eff*nb_eff*nk, icomm)
+        deallocate(rvnl_full_l)
+
+        ! ---- (ii) windowed, Hermitized V/W stencil for this rank's k-slice ----
+        do ik = ik_lo, ik_hi
+            do s = -f_ns, f_ns
                 do jw = nb_min, nb_hi
                     do iw = nb_min, nb_hi
-                        gs%rvnl_tm_matrix(iw - nb_min + 1, jw - nb_min + 1, i, ik) = &
-                            & 0.5d0 * (tmp(iw, jw, i, 0) + conjg(tmp(jw, iw, i, 0)))
-                    end do
-                end do
-            end do
-
-            ! (ii) windowed, Hermitized V/W stencil for the local k-slice
-            if (ik >= ik_lo .and. ik <= ik_hi) then
-                do s = -f_ns, f_ns
-                    do jw = nb_min, nb_hi
-                        do iw = nb_min, nb_hi
-                            gs%vnl_V(iw - nb_min + 1, jw - nb_min + 1, s, ik) = &
-                                & 0.5d0 * (tmp(iw, jw, 0, s) + conjg(tmp(jw, iw, 0, s)))
-                            do i = 1, 3
-                                gs%vnl_W(iw - nb_min + 1, jw - nb_min + 1, i, s, ik) = &
-                                    & 0.5d0 * (tmp(iw, jw, i, s) + conjg(tmp(jw, iw, i, s)))
-                            end do
+                        gs%vnl_V(iw - nb_min + 1, jw - nb_min + 1, s, ik) = &
+                            & 0.5d0 * (tmp_slice(iw, jw, 0, s, ik) + conjg(tmp_slice(jw, iw, 0, s, ik)))
+                        do i = 1, 3
+                            gs%vnl_W(iw - nb_min + 1, jw - nb_min + 1, i, s, ik) = &
+                                & 0.5d0 * (tmp_slice(iw, jw, i, s, ik) + conjg(tmp_slice(jw, iw, i, s, ik)))
                         end do
                     end do
                 end do
-            end if
+            end do
         end do
-        deallocate(tmp)
 
-        if (irank == 0) close(fh)
+        if (allocated(tmp_slice)) deallocate(tmp_slice)
+        call mpiio_close(fh, ierr)   ! collective MPI_File_close (all ranks)
 
-        ! header params -> gs (bcast the real-valued ones from root)
-        call comm_bcast(f_h, icomm, 0)
-        call comm_bcast(f_dir, icomm, 0)
+        ! ---- header params -> gs (already bcast to all ranks above) ----
         gs%vnl_exact  = .true.
         gs%vnl_ns     = f_ns
         gs%vnl_h      = f_h
@@ -838,6 +964,11 @@ contains
         if (irank == 0) then
             write(*, '(a,i0,a,es12.4,a,3f10.6)') "#   vnl_kappa: ns = ", f_ns, &
                 & ", h = ", f_h, ", dir = ", f_dir(1:3)
+            if (has_sidecar) then
+                write(*, '(a)') "#   vnl_kappa: sidecar checksum verified."
+            else
+                write(*, '(a)') "#   vnl_kappa: no sidecar (.chk) -> legacy count+finite validation only."
+            end if
         end if
     end subroutine read_vnl_kappa_data
 
