@@ -103,7 +103,9 @@ def test_even_grid_does_not_require_center_on_grid_point():
     assert is_integer_grid_permutation(aligned_inversion, (32, 32, 32))
 ```
 
-Also test identity, non-integral grid shifts, mixed species, atom bijection, and invalid fragment divisibility.
+Also test identity, non-integral grid shifts, mixed species, atom bijection,
+invalid fragment divisibility, and an axis-swapping operation on unequal mesh
+counts that must be rejected when it is not a discrete-grid bijection.
 
 **Step 2: Run the test and verify it fails**
 
@@ -115,14 +117,19 @@ Expected: FAIL because the tool module does not exist.
 
 **Step 3: Implement the geometry core**
 
-Represent fractional coordinates with `fractions.Fraction` while parsing decimal input. For a symmetry operation `(W,tau)` and mesh `N`, derive the index map
+Represent fractional coordinates with `fractions.Fraction` while parsing decimal input. For a symmetry operation `(W,tau)` and mesh `N`, derive the index map through fractional coordinates:
 
 ```text
-j_alpha = sum_beta W(alpha,beta) i_beta + q_alpha  (mod N_alpha)
-q_alpha = N_alpha * tau_alpha
+j_alpha = sum_beta W(alpha,beta) i_beta N_alpha/N_beta
+          + N_alpha tau_alpha                         (mod N_alpha)
 ```
 
-after accounting for the repository's real-space grid origin convention. Accept only integer `q_alpha`. Do not calculate an inversion center as a grid-point index. For `W=-I`, report the physical center as `q/2`, which is half-integer when `q` is odd.
+after accounting for the repository's real-space grid origin convention.  The
+simple `j=W i+q` form is valid only when the operation mixes axes with equal
+mesh counts, as in cubic C64.  Accept an operation only when the exact rational
+expression is an integer and a bijection for every grid index.  Do not
+calculate an inversion center as a grid-point index. For `W=-I`, report the
+physical center as `q/2`, which is half-integer when `q` is odd.
 
 Enumerate every source-core grid index for the small preprocessing validation and collect target fragment IDs. Accept an operation only when each source set has cardinality one and its image contains exactly the target core's number of points.
 
