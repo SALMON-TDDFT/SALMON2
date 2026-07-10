@@ -236,6 +236,7 @@ Compile a small driver against `lcfo_wannier_sawf_band.f90`. It must check:
 ! identity: accepted
 ! W=-I, q=(15,15,15): accepted on 32^3 / 2x2x2
 ! W=-I, q=(4,4,4): rejected because every source core splits
+! W=-I, q=(31,31,31): accepted as a one-to-one fragment permutation
 ! q=(0.5,0,0): rejected because it is not an integer index shift
 ```
 
@@ -251,7 +252,7 @@ Expected: FAIL because the validator is absent.
 
 **Step 3: Implement the numerical helper**
 
-Add a LAPACK-free helper that converts the normalized fractional operation to an integer index map within tolerance, enumerates each regular fragment core, and returns:
+Add a LAPACK-free helper that converts the normalized fractional operation to an integer index map within tolerance, enumerates each regular fragment core, validates the actual fragment buffer widths, and returns:
 
 ```fortran
 logical :: grid_map_ok, fragment_map_ok
@@ -260,7 +261,11 @@ integer :: source_to_target(nfrag)
 real(8) :: max_grid_residual
 ```
 
-Keep it independent of C/Si and inversion. For non-inversion operations, do not manufacture a center.
+Keep it independent of C/Si and inversion. A whole-fragment permutation is
+valid even when source and target fragment numbers differ; reject splitting,
+duplicate target ownership, unequal source/target core sizes, and buffer widths
+that are incompatible with an exchanged axis. For non-inversion operations,
+do not manufacture a center.
 
 **Step 4: Call it before `D_band` construction**
 
