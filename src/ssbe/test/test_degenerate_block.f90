@@ -18,6 +18,10 @@ program test_degenerate_block
   call test_same_block_api(nfail)
   call test_match_ok(nfail)
   call test_match_split(nfail)
+  call test_check_gicov_occupation_insulator(nfail)
+  call test_check_gicov_occupation_metal_noncontig(nfail)
+  call test_check_gicov_occupation_metal_varying_count(nfail)
+  call test_check_gicov_occupation_fractional(nfail)
 
   if (nfail == 0) then
     write(*,*) "ALL DEGENERATE-BLOCK TESTS PASSED"
@@ -203,5 +207,65 @@ contains
     call check_true(.not. link_ok(1,1),  "match_split link fails", nfail)
     call check_true(n_fail_link >= 1,    "match_split n_fail>=1",  nfail)
   end subroutine test_match_split
+
+  ! check_gicov_occupation: insulator T=0 rigid fill -- same nvb=2 bands full,
+  ! contiguous, at every k -> is_metal = .false.
+  subroutine test_check_gicov_occupation_insulator(nfail)
+    integer, intent(inout) :: nfail
+    integer, parameter :: nb = 4, nk = 3
+    real(8), parameter :: focc = 2d0
+    real(8) :: occup(nb, nk)
+    logical :: is_metal
+    integer :: ik
+    do ik = 1, nk
+      occup(1:2, ik) = focc
+      occup(3:4, ik) = 0d0
+    end do
+    call check_gicov_occupation(nb, nk, occup, focc, is_metal)
+    call check_true(.not. is_metal, "gicov_occ insulator -> not metal", nfail)
+  end subroutine test_check_gicov_occupation_insulator
+
+  ! check_gicov_occupation: T=0 metal, band-crossing E_F away from k=Gamma --
+  ! at k=2 band 2 is empty while band 3 is filled (non-contiguous occupied
+  ! set) -> is_metal = .true. even though every occup value is sharp 0/focc.
+  subroutine test_check_gicov_occupation_metal_noncontig(nfail)
+    integer, intent(inout) :: nfail
+    integer, parameter :: nb = 3, nk = 2
+    real(8), parameter :: focc = 2d0
+    real(8) :: occup(nb, nk)
+    logical :: is_metal
+    occup(:, 1) = [focc, focc, 0d0]
+    occup(:, 2) = [focc, 0d0,  focc]   ! band 3 filled, band 2 empty: non-contiguous
+    call check_gicov_occupation(nb, nk, occup, focc, is_metal)
+    call check_true(is_metal, "gicov_occ T0 non-contiguous -> metal", nfail)
+  end subroutine test_check_gicov_occupation_metal_noncontig
+
+  ! check_gicov_occupation: T=0 metal, occupied-band COUNT varies across k
+  ! (Fermi surface) even though every occup value is sharp 0/focc and every
+  ! k's occupied set is individually contiguous.
+  subroutine test_check_gicov_occupation_metal_varying_count(nfail)
+    integer, intent(inout) :: nfail
+    integer, parameter :: nb = 3, nk = 2
+    real(8), parameter :: focc = 2d0
+    real(8) :: occup(nb, nk)
+    logical :: is_metal
+    occup(:, 1) = [focc, focc, 0d0]    ! 2 bands occupied
+    occup(:, 2) = [focc, focc, focc]   ! 3 bands occupied
+    call check_gicov_occupation(nb, nk, occup, focc, is_metal)
+    call check_true(is_metal, "gicov_occ T0 varying-count -> metal", nfail)
+  end subroutine test_check_gicov_occupation_metal_varying_count
+
+  ! check_gicov_occupation: T>0 finite-temperature smearing -- genuinely
+  ! fractional occupation (strictly between 0 and focc) -> is_metal = .true.
+  subroutine test_check_gicov_occupation_fractional(nfail)
+    integer, intent(inout) :: nfail
+    integer, parameter :: nb = 2, nk = 1
+    real(8), parameter :: focc = 2d0
+    real(8) :: occup(nb, nk)
+    logical :: is_metal
+    occup(:, 1) = [1.5d0, 0.5d0]       ! fractional, strictly inside (0, focc)
+    call check_gicov_occupation(nb, nk, occup, focc, is_metal)
+    call check_true(is_metal, "gicov_occ fractional -> metal", nfail)
+  end subroutine test_check_gicov_occupation_fractional
 
 end program test_degenerate_block

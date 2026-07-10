@@ -65,6 +65,7 @@ module degenerate_block_ssbe
   ! Halo support (pure, no MPI; consumed by bloch_solver's gicov halo exchange):
   public :: covariant_halo_needed ! mark every k whose rho the stencil READS for a local slice
   public :: build_halo_lists      ! derive deterministic per-rank send/recv k-lists from needed-sets
+  public :: check_gicov_occupation ! metal detector: fractional / k-varying occupation
 
   real(8), parameter :: theta_on  = 5d-4   ! tight core-degeneracy bound  [au]
   real(8), parameter :: theta_off = 2d-3   ! block-membership bound       [au]
@@ -1651,5 +1652,58 @@ contains
     complex(8),   intent(out) :: C(n, n)
     call zgemm(ta, tb, n, n, n, (1d0, 0d0), A, n, B, n, (0d0, 0d0), C, n)
   end subroutine zmm3
+
+  !-------------------------------------------------------------------
+  ! Metal detector for gs%occup(nb,nk).  is_metal=.true. means "the insulator
+  ! T=0 rigid nvb-fill (gs%occup(1:nvb,:)=focc, same nvb bands full at every k)
+  ! would be WRONG here -- keep the real per-(band,k) GS occupation instead."
+  !
+  ! Two independent signatures, either one sufficient:
+  !   (1) genuine fractional occupation (finite-temperature smearing): any
+  !       occup(ib,ik) strictly between (tol, focc-tol).
+  !   (2) a k-VARYING occupied-band pattern (Fermi surface), which happens even
+  !       at temperature==0 for a metal: either the per-k COUNT of occupied
+  !       bands (occup>tol) is not the same at every k, or -- at fixed count --
+  !       the occupied bands are not the CONTIGUOUS bottom block 1..n at some k
+  !       (an empty band sits below a filled one: band crossing E_F away from
+  !       k=Gamma). Both are impossible for an insulator by construction (the
+  !       gap keeps exactly nvb bands full, contiguously, at every k).
+  !
+  ! Pure, no SALMON deps -- unit-testable the same way as this module's other
+  ! standalone helpers (see the file header / test/test_degenerate_block.f90).
+  !-------------------------------------------------------------------
+  subroutine check_gicov_occupation(nb, nk, occup, focc, is_metal, frac_tol)
+    implicit none
+    integer,  intent(in)  :: nb, nk
+    real(8),  intent(in)  :: occup(nb, nk)
+    real(8),  intent(in)  :: focc
+    logical,  intent(out) :: is_metal
+    real(8),  intent(in), optional :: frac_tol
+    real(8) :: tol
+    integer :: ik, ib, ncount, ncount0
+
+    tol = 1d-6
+    if (present(frac_tol)) tol = frac_tol
+
+    is_metal = .false.
+    ncount0  = -1
+    do ik = 1, nk
+        ncount = 0
+        do ib = 1, nb
+            if (occup(ib, ik) > tol .and. occup(ib, ik) < focc - tol) is_metal = .true.  ! (1) fractional
+            if (occup(ib, ik) > tol) then
+                ncount = ncount + 1
+            end if
+            if (ib > 1) then
+                if (occup(ib, ik) > tol .and. occup(ib - 1, ik) <= tol) is_metal = .true. ! (2) non-contiguous
+            end if
+        end do
+        if (ncount0 < 0) then
+            ncount0 = ncount
+        else if (ncount /= ncount0) then
+            is_metal = .true.                                                            ! (2) k-varying count
+        end if
+    end do
+  end subroutine check_gicov_occupation
 
 end module degenerate_block_ssbe
