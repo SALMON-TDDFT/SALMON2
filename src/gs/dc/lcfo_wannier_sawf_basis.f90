@@ -3,10 +3,72 @@ module lcfo_wannier_sawf_basis
   implicit none
   private
 
+  type, public :: t_sawf_closed_basis
+    integer :: npoint_core=0,npoint_buffer=0,ncandidate=0,nbasis=0
+    real(8), allocatable :: core(:,:),buffer(:,:),candidate_transform(:,:),singular_values(:)
+  end type t_sawf_closed_basis
+
   public :: close_sawf_candidate_basis
   public :: append_sawf_mapped_basis
+  public :: build_sawf_closed_core_buffer_basis,clear_sawf_closed_basis
 
 contains
+
+  subroutine clear_sawf_closed_basis(closed)
+    type(t_sawf_closed_basis), intent(inout) :: closed
+    if(allocated(closed%core)) deallocate(closed%core)
+    if(allocated(closed%buffer)) deallocate(closed%buffer)
+    if(allocated(closed%candidate_transform)) deallocate(closed%candidate_transform)
+    if(allocated(closed%singular_values)) deallocate(closed%singular_values)
+    closed%npoint_core=0; closed%npoint_buffer=0; closed%ncandidate=0; closed%nbasis=0
+  end subroutine clear_sawf_closed_basis
+
+  subroutine build_sawf_closed_core_buffer_basis(core_candidate,buffer_candidate,hvol, &
+      rank_tolerance,max_basis,closed,ok,message)
+    real(8), intent(in) :: core_candidate(:,:),buffer_candidate(:,:),hvol,rank_tolerance
+    integer, intent(in) :: max_basis
+    type(t_sawf_closed_basis), intent(inout) :: closed
+    logical, intent(out) :: ok
+    character(*), intent(out) :: message
+    real(8), allocatable :: core_tmp(:,:),buffer_tmp(:,:),transform_tmp(:,:),singular_tmp(:)
+    integer :: nbasis_tmp,allocation_status
+
+    call clear_sawf_closed_basis(closed)
+    ok=.false.; message=''
+    if(size(core_candidate,1)<=0 .or. size(buffer_candidate,1)<=0 .or. &
+        size(core_candidate,2)<=0 .or. size(buffer_candidate,2)/=size(core_candidate,2)) then
+      message='SAWF core and buffer candidate dimensions are inconsistent'
+      return
+    end if
+    if(.not.all(ieee_is_finite(buffer_candidate))) then
+      message='SAWF buffer candidate basis contains a non-finite value'
+      return
+    end if
+    call close_sawf_candidate_basis(core_candidate,size(core_candidate,1),size(core_candidate,2), &
+      hvol,rank_tolerance,max_basis,core_tmp,nbasis_tmp,singular_tmp,ok,message,transform_tmp)
+    if(.not.ok) return
+    allocate(buffer_tmp(size(buffer_candidate,1),nbasis_tmp),stat=allocation_status)
+    if(allocation_status/=0) then
+      message='SAWF closed buffer-basis allocation failed'
+      deallocate(core_tmp,transform_tmp,singular_tmp)
+      ok=.false.; return
+    end if
+    buffer_tmp=matmul(buffer_candidate,transform_tmp)
+    if(.not.all(ieee_is_finite(buffer_tmp))) then
+      message='SAWF closed buffer basis contains a non-finite value'
+      deallocate(core_tmp,buffer_tmp,transform_tmp,singular_tmp)
+      ok=.false.; return
+    end if
+    closed%npoint_core=size(core_candidate,1)
+    closed%npoint_buffer=size(buffer_candidate,1)
+    closed%ncandidate=size(core_candidate,2)
+    closed%nbasis=nbasis_tmp
+    call move_alloc(core_tmp,closed%core)
+    call move_alloc(buffer_tmp,closed%buffer)
+    call move_alloc(transform_tmp,closed%candidate_transform)
+    call move_alloc(singular_tmp,closed%singular_values)
+    ok=.true.
+  end subroutine build_sawf_closed_core_buffer_basis
 
   subroutine append_sawf_mapped_basis(source_basis,point_map,candidate,first_column,ok,message)
     real(8), intent(in) :: source_basis(:,:)

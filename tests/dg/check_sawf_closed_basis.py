@@ -10,12 +10,15 @@ BUILD = ROOT / "build-mpi-eigenexa-wannier-lib"
 DRIVER = r"""
 program check_sawf_closed_basis
   use, intrinsic :: ieee_arithmetic, only: ieee_value, ieee_quiet_nan
-  use lcfo_wannier_sawf_basis, only: close_sawf_candidate_basis
+  use lcfo_wannier_sawf_basis, only: close_sawf_candidate_basis, &
+    t_sawf_closed_basis, build_sawf_closed_core_buffer_basis
   implicit none
   real(8), allocatable :: basis(:,:), singular_values(:),candidate_transform(:,:)
   real(8) :: candidate(4,4), duplicate(4,4), identity_candidate(4,2)
+  real(8) :: buffer_candidate(6,4)
   real(8) :: gram(4,4), mapped(4,4), overlap(4,4), nan_value
   integer :: nbasis, i
+  type(t_sawf_closed_basis) :: closed
   logical :: ok
   character(512) :: message
 
@@ -36,6 +39,19 @@ program check_sawf_closed_basis
   overlap=matmul(transpose(basis),mapped)
   call require(maxval(abs(matmul(transpose(overlap),overlap)-identity4()))<1d-12, &
     'closed basis inversion representation')
+  buffer_candidate=reshape([(dble(i),i=1,24)],[6,4])
+  call build_sawf_closed_core_buffer_basis(candidate,buffer_candidate,1d0,1d-12,4, &
+    closed,ok,message)
+  call require(ok .and. closed%nbasis==4,'closed core+buffer descriptor')
+  call require(maxval(abs(closed%core-matmul(candidate,closed%candidate_transform)))<1d-13, &
+    'descriptor core transform')
+  call require(maxval(abs(closed%buffer-matmul(buffer_candidate,closed%candidate_transform)))<1d-13, &
+    'descriptor buffer transform')
+  buffer_candidate(1,1)=ieee_value(0d0,ieee_quiet_nan)
+  call build_sawf_closed_core_buffer_basis(candidate,buffer_candidate,1d0,1d-12,4, &
+    closed,ok,message)
+  call require(.not.ok .and. closed%nbasis==0 .and. .not.allocated(closed%core), &
+    'non-finite buffer must not publish descriptor')
 
   duplicate=0d0
   duplicate(1,1)=1d0; duplicate(2,2)=1d0
