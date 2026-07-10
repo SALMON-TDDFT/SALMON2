@@ -4,6 +4,8 @@
 This module intentionally contains no file parsing or command-line interface.
 It models symmetry in fractional coordinates and validates whether that
 symmetry induces a permutation of a finite periodic real-space grid.
+Preservation of the lattice metric, W^T G W = G, is deferred until Task 3,
+where lattice vectors are available.
 """
 
 from dataclasses import dataclass
@@ -12,6 +14,8 @@ import itertools
 
 
 _DIMENSION = 3
+_MAX_POINT_OPERATION_ORDER = 12
+_IDENTITY = ((1, 0, 0), (0, 1, 0), (0, 0, 1))
 
 
 def _fraction(value):
@@ -36,6 +40,49 @@ def _validate_mesh(mesh):
     return mesh
 
 
+def _validate_integer_matrix(matrix, name):
+    rows = tuple(tuple(row) for row in matrix)
+    if len(rows) != _DIMENSION or any(len(row) != _DIMENSION for row in rows):
+        raise ValueError(f"{name} must be a 3x3 integer matrix")
+    if any(
+        not isinstance(value, int) or isinstance(value, bool)
+        for row in rows
+        for value in row
+    ):
+        raise ValueError(f"{name} must be a 3x3 integer matrix")
+    return rows
+
+
+def _determinant_3x3(matrix):
+    return (
+        matrix[0][0]
+        * (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1])
+        - matrix[0][1]
+        * (matrix[1][0] * matrix[2][2] - matrix[1][2] * matrix[2][0])
+        + matrix[0][2]
+        * (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0])
+    )
+
+
+def _matrix_product(left, right):
+    return tuple(
+        tuple(
+            sum(left[row][inner] * right[inner][column] for inner in range(_DIMENSION))
+            for column in range(_DIMENSION)
+        )
+        for row in range(_DIMENSION)
+    )
+
+
+def _has_bounded_finite_order(matrix):
+    power = _IDENTITY
+    for _ in range(_MAX_POINT_OPERATION_ORDER):
+        power = _matrix_product(power, matrix)
+        if power == _IDENTITY:
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class SymOp:
     """A crystal symmetry operation x' = W x + tau in fractional coordinates."""
@@ -44,15 +91,14 @@ class SymOp:
     translation: tuple
 
     def __post_init__(self):
-        rows = tuple(tuple(row) for row in self.rotation)
-        if len(rows) != _DIMENSION or any(len(row) != _DIMENSION for row in rows):
-            raise ValueError("rotation must be a 3x3 integer matrix")
-        if any(
-            not isinstance(value, int) or isinstance(value, bool)
-            for row in rows
-            for value in row
-        ):
-            raise ValueError("rotation must be a 3x3 integer matrix")
+        rows = _validate_integer_matrix(self.rotation, "rotation")
+        if abs(_determinant_3x3(rows)) != 1:
+            raise ValueError("rotation determinant must be +/-1")
+        if not _has_bounded_finite_order(rows):
+            raise ValueError(
+                "rotation must have finite order no greater than "
+                f"{_MAX_POINT_OPERATION_ORDER}"
+            )
         translation = tuple(
             _fraction(value) for value in _validate_vector(self.translation, "translation")
         )
@@ -84,6 +130,29 @@ class IntegerGridMap:
     mesh: tuple
     coefficients: tuple
     shift: tuple
+
+    def __post_init__(self):
+        mesh = _validate_mesh(self.mesh)
+        coefficients = _validate_integer_matrix(self.coefficients, "coefficients")
+        shift = _validate_vector(self.shift, "shift")
+        if any(
+            not isinstance(value, int) or isinstance(value, bool) for value in shift
+        ):
+            raise ValueError("shift must contain exactly 3 integers")
+        shift = tuple(shift[axis] % mesh[axis] for axis in range(_DIMENSION))
+        object.__setattr__(self, "mesh", mesh)
+        object.__setattr__(self, "coefficients", coefficients)
+        object.__setattr__(self, "shift", shift)
+
+        images = {
+            self.map_index(index)
+            for index in itertools.product(*(range(size) for size in mesh))
+        }
+        if len(images) != mesh[0] * mesh[1] * mesh[2]:
+            raise ValueError(
+                "grid coefficients and shift do not define a bijection of the "
+                "periodic discrete mesh"
+            )
 
     def map_index(self, index):
         index = _validate_vector(index, "grid index")
@@ -145,17 +214,7 @@ def integer_grid_map(operation, mesh):
             )
         shift.append(component.numerator % mesh[alpha])
 
-    grid_map = IntegerGridMap(mesh, tuple(coefficients), tuple(shift))
-    images = {
-        grid_map.map_index(index)
-        for index in itertools.product(*(range(size) for size in mesh))
-    }
-    point_count = mesh[0] * mesh[1] * mesh[2]
-    if len(images) != point_count:
-        raise ValueError(
-            "symmetry does not induce a bijection of the periodic discrete mesh"
-        )
-    return grid_map
+    return IntegerGridMap(mesh, tuple(coefficients), tuple(shift))
 
 
 def inversion_center_diagnostic(grid_map):

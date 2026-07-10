@@ -118,22 +118,68 @@ class FragmentAlignmentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "non-integral.*coefficient"):
             self.alignment.integer_grid_map(swap_xy, (4, 8, 6))
 
-    def test_unequal_mesh_integer_scaled_shear_is_a_bijection(self):
-        shear = self.alignment.SymOp(
-            rotation=((1, 0, 0), (1, 1, 0), (0, 0, 1)),
+    def test_unequal_mesh_compatible_finite_order_operation_is_a_bijection(self):
+        sign_change = self.alignment.SymOp(
+            rotation=((-1, 0, 0), (0, 1, 0), (0, 0, -1)),
             translation=(0, 0, 0),
         )
-        grid_map = self.alignment.integer_grid_map(shear, (4, 8, 6))
+        grid_map = self.alignment.integer_grid_map(sign_change, (4, 8, 6))
 
         self.assertEqual(
             grid_map.coefficients,
-            ((1, 0, 0), (2, 1, 0), (0, 0, 1)),
+            ((-1, 0, 0), (0, 1, 0), (0, 0, -1)),
         )
         images = {
             grid_map.map_index(index)
             for index in itertools.product(range(4), range(8), range(6))
         }
         self.assertEqual(len(images), 4 * 8 * 6)
+
+    def test_non_unimodular_point_operation_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, r"determinant.*\+/-1"):
+            self.alignment.SymOp(
+                rotation=((3, 0, 0), (0, 1, 0), (0, 0, 1)),
+                translation=(0, 0, 0),
+            )
+
+    def test_infinite_order_unipotent_shear_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "finite order"):
+            self.alignment.SymOp(
+                rotation=((1, 0, 0), (1, 1, 0), (0, 0, 1)),
+                translation=(0, 0, 0),
+            )
+
+    def test_integer_grid_map_direct_construction_normalizes_immutable_values(self):
+        grid_map = self.alignment.IntegerGridMap(
+            mesh=[4, 8, 6],
+            coefficients=[[-1, 0, 0], [0, 1, 0], [0, 0, -1]],
+            shift=[5, -1, 12],
+        )
+
+        self.assertEqual(grid_map.mesh, (4, 8, 6))
+        self.assertEqual(
+            grid_map.coefficients,
+            ((-1, 0, 0), (0, 1, 0), (0, 0, -1)),
+        )
+        self.assertEqual(grid_map.shift, (1, 7, 0))
+        with self.assertRaises(TypeError):
+            grid_map.shift[0] = 0
+
+    def test_integer_grid_map_direct_construction_rejects_malformed_values(self):
+        valid_coefficients = ((1, 0, 0), (0, 1, 0), (0, 0, 1))
+        invalid_cases = (
+            ((4, 0, 6), valid_coefficients, (0, 0, 0)),
+            ((4, 8, 6), ((1, 0), (0, 1), (0, 0)), (0, 0, 0)),
+            ((4, 8, 6), ((1, 0, 0), (0, 1.5, 0), (0, 0, 1)), (0, 0, 0)),
+            ((4, 8, 6), ((0, 0, 0), (0, 0, 0), (0, 0, 0)), (0, 0, 0)),
+            ((4, 8, 6), valid_coefficients, (0, 0)),
+            ((4, 8, 6), valid_coefficients, (0, "bad", 0)),
+        )
+
+        for mesh, coefficients, shift in invalid_cases:
+            with self.subTest(mesh=mesh, coefficients=coefficients, shift=shift):
+                with self.assertRaises(ValueError):
+                    self.alignment.IntegerGridMap(mesh, coefficients, shift)
 
     def test_periodic_same_species_atom_bijection(self):
         inversion = self.alignment.SymOp(
@@ -158,6 +204,20 @@ class FragmentAlignmentTests(unittest.TestCase):
         atoms = (
             self.alignment.PeriodicAtom("Si", (Fraction(1, 8), 0, 0)),
             self.alignment.PeriodicAtom("C", (Fraction(7, 8), 0, 0)),
+        )
+
+        with self.assertRaisesRegex(ValueError, "same-species.*bijection"):
+            self.alignment.periodic_same_species_atom_bijection(inversion, atoms)
+
+    def test_periodic_atom_bijection_respects_duplicate_multiplicity(self):
+        inversion = self.alignment.SymOp(
+            rotation=((-1, 0, 0), (0, -1, 0), (0, 0, -1)),
+            translation=(0, 0, 0),
+        )
+        atoms = (
+            self.alignment.PeriodicAtom("Si", (Fraction(1, 8), 0, 0)),
+            self.alignment.PeriodicAtom("Si", (Fraction(1, 8), 0, 0)),
+            self.alignment.PeriodicAtom("Si", (Fraction(7, 8), 0, 0)),
         )
 
         with self.assertRaisesRegex(ValueError, "same-species.*bijection"):
