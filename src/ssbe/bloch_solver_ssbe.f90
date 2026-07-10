@@ -542,6 +542,22 @@ subroutine build_fsum_deficiency_tensor(sbe, gs, flag_vnl, icomm)
     complex(8) :: pvm(1:3), pmv(1:3)
     real(8), parameter :: occ_eps = 1d-12
 
+    ! Fail-closed (metal): the occ_eps binary threshold below ("occupied<->
+    ! occupied: no net response") assumes occupations are exactly 0 or focc by
+    ! construction (see this routine's own header derivation).  For a metal
+    ! with genuinely fractional (finite-temperature) occupation this silently
+    ! DROPS any valence<->conduction pair where BOTH bands are fractional
+    ! (nonzero response weight f_v - f_m gets skipped rather than summed).
+    ! Not yet generalized to (f_v-f_m)-weighted summation (follow-up) -- fail
+    ! loud rather than silently under-count until then.
+    if (gs%is_metal) then
+        write(*, '(a)') "ERROR(build_fsum_deficiency_tensor): metal-like occupation detected; " // &
+            & "yn_sbe_gs_current_subtract='y' is not yet generalized to fractional/k-varying " // &
+            & "occupation (see this routine's occ_eps threshold) -- set " // &
+            & "yn_sbe_gs_current_subtract='n' for a metal."
+        error stop
+    end if
+
     s(:, :) = 0d0
     ne_w = 0d0
     do ik = 1, gs%nk
@@ -668,6 +684,20 @@ subroutine calc_current_bloch_core(sbe, gs, Ac, jmat, icomm)
     !$omp end parallel do
 
     if(norder_correction>=1)then
+        ! Fail-closed (metal): this term's occupied-band loop is a HARD
+        ! 1..gs%nvb cutoff and never reads gs%occup inside the loop (unlike
+        ! the norder=0 term above) -- for a metal the true occupied-band set
+        ! varies by k (Fermi surface), so the same nvb cutoff at every k
+        ! silently mixes in wrong bands. Not yet generalized to an
+        ! occupation-weighted sum over the full window (follow-up); the
+        ! production default is norder_correction=0, so this costs nothing
+        ! for the metal-safe path.
+        if (gs%is_metal) then
+            write(*, '(a)') "ERROR(calc_current_bloch_core): metal-like occupation detected; " // &
+                & "norder_correction>=1 is not yet generalized to a k-varying occupied-band " // &
+                & "window (hard 1..nvb cutoff below) -- set norder_correction=0 for a metal."
+            error stop
+        end if
         do ik = sbe%ik_min, sbe%ik_max
             do idir = 1, 3
                 ! occupied bands 1..gs%nvb (= gs%ne/2 spinless, = gs%ne
