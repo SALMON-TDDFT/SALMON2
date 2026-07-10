@@ -731,43 +731,92 @@ def find_fragment_compatible_translation(
     parameter_resolution = math.lcm(
         *(shift.denominator for data in operation_data for shift in data[2])
     )
-    if parameter_resolution == 1:
-        parameter_values = tuple(range(2 * size) for size in mesh)
-    else:
-        parameter_values = tuple(
-            tuple(
-                Fraction(index, parameter_resolution)
-                for index in range(2 * size * parameter_resolution)
-            )
-            for size in mesh
-        )
     best = None
-    for numerators in itertools.product(*parameter_values):
-        maps = []
-        for data in operation_data:
-            shifts = _candidate_grid_shifts(data, numerators, mesh)
-            if shifts is None:
-                break
-            fragment_map = _fast_complete_fragment_map(
-                data, shifts, mesh, fragment_counts
-            )
-            if fragment_map is None:
-                break
-            maps.append(fragment_map)
-        if len(maps) != len(operations):
-            continue
-        self_count = sum(
-            source == target for fragment_map in maps for source, target in fragment_map.items()
+
+    zero_numerators = (0, 0, 0)
+    zero_maps = []
+    for data in operation_data:
+        shifts = _candidate_grid_shifts(data, zero_numerators, mesh)
+        if shifts is None:
+            break
+        fragment_map = _fast_complete_fragment_map(
+            data, shifts, mesh, fragment_counts
         )
-        translation = tuple(
-            Fraction(numerators[axis], denominators[axis])
-            for axis in range(_DIMENSION)
+        if fragment_map is None:
+            break
+        zero_maps.append(fragment_map)
+    if len(zero_maps) == len(operations) and all(
+        source == target
+        for fragment_map in zero_maps
+        for source, target in fragment_map.items()
+    ):
+        self_count = sum(len(fragment_map) for fragment_map in zero_maps)
+        best = (
+            (-self_count, Fraction(0), (Fraction(0),) * _DIMENSION),
+            (Fraction(0),) * _DIMENSION,
+            tuple(zero_maps),
+            self_count,
         )
-        wrapped = tuple(_wrapped_component(value) for value in translation)
-        norm = sum((wrapped[axis] * cell[axis]) ** 2 for axis in range(_DIMENSION))
-        rank = (-self_count, norm, translation)
-        if best is None or rank < best[0]:
-            best = (rank, translation, tuple(maps), self_count)
+
+    if best is None:
+        residue_range = range(2 * parameter_resolution)
+        valid_residues = []
+        for residues in itertools.product(residue_range, repeat=_DIMENSION):
+            if parameter_resolution == 1:
+                residue_numerators = residues
+            else:
+                residue_numerators = tuple(
+                    Fraction(residue, parameter_resolution) for residue in residues
+                )
+            if all(
+                _candidate_grid_shifts(data, residue_numerators, mesh) is not None
+                for data in operation_data
+            ):
+                valid_residues.append(residues)
+
+        for residues in valid_residues:
+            for coarse in itertools.product(*(range(size) for size in mesh)):
+                indices = tuple(
+                    residues[axis]
+                    + 2 * parameter_resolution * coarse[axis]
+                    for axis in range(_DIMENSION)
+                )
+                if parameter_resolution == 1:
+                    numerators = indices
+                else:
+                    numerators = tuple(
+                        Fraction(index, parameter_resolution) for index in indices
+                    )
+                maps = []
+                for data in operation_data:
+                    shifts = _candidate_grid_shifts(data, numerators, mesh)
+                    if shifts is None:
+                        break
+                    fragment_map = _fast_complete_fragment_map(
+                        data, shifts, mesh, fragment_counts
+                    )
+                    if fragment_map is None:
+                        break
+                    maps.append(fragment_map)
+                if len(maps) != len(operations):
+                    continue
+                self_count = sum(
+                    source == target
+                    for fragment_map in maps
+                    for source, target in fragment_map.items()
+                )
+                translation = tuple(
+                    Fraction(numerators[axis], denominators[axis])
+                    for axis in range(_DIMENSION)
+                )
+                wrapped = tuple(_wrapped_component(value) for value in translation)
+                norm = sum(
+                    (wrapped[axis] * cell[axis]) ** 2
+                    for axis in range(_DIMENSION)
+                )
+                rank = (-self_count, norm, translation)
+                if best is None or rank < best[0]:
+                    best = (rank, translation, tuple(maps), self_count)
     if best is None:
         raise ValueError("no half-grid translation preserves complete fragment boxes")
 

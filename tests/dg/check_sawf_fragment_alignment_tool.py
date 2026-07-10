@@ -335,7 +335,7 @@ class FragmentAlignmentTests(unittest.TestCase):
             )
 
     def test_validated_publication_accepts_decimal_thirds_roundtrip(self):
-        cell = (Fraction(3), Fraction(1), Fraction(1))
+        cell = (Fraction(1), Fraction(1), Fraction(1))
         atoms = tuple(
             self.alignment.PeriodicAtom(
                 "C", (Fraction(index, 3), 0, 0), "'C'", "1"
@@ -348,12 +348,15 @@ class FragmentAlignmentTests(unittest.TestCase):
             )
             for index in range(3)
         )
+        atom_text = self.alignment._render_atoms(atoms, cell)
+        self.assertIn("0.333333333333333333333333", atom_text)
+        self.assertIn("0.666666666666666666666667", atom_text)
         with tempfile.TemporaryDirectory() as temporary:
             output_atom = Path(temporary) / "atom.dat"
             output_sym = Path(temporary) / "sym.dat"
             self.alignment._write_validated_outputs(
                 output_atom, output_sym,
-                self.alignment._render_atoms(atoms, cell),
+                atom_text,
                 self.alignment._render_symmetry(operations, (0, 0, 0), (0, 0, 0)),
                 cell, atoms, operations, Fraction(1, 10**12), False
             )
@@ -363,6 +366,39 @@ class FragmentAlignmentTests(unittest.TestCase):
                 line for line in output_sym.read_text(encoding="ascii").splitlines()
                 if not line.startswith("#")
             ))
+
+    def test_denominator_three_search_uses_residue_filtering(self):
+        identity = self.alignment.SymOp(self.alignment._IDENTITY, (0, 0, 0))
+        inversion = self.inversion(Fraction(1, 96))
+        atom = self.alignment.PeriodicAtom("C", (Fraction(1, 192),) * 3)
+
+        started = time.perf_counter()
+        result = self.alignment.find_fragment_compatible_translation(
+            (atom,), (identity, inversion), (1, 1, 1),
+            (32, 32, 32), (2, 2, 2), (0, 0, 0)
+        )
+        elapsed = time.perf_counter() - started
+
+        self.assertEqual(result.translation, (Fraction(11, 48),) * 3)
+        self.assertEqual(result.grid_maps[1].shift, (15, 15, 15))
+        self.assertLess(elapsed, 10.0, f"denominator-three search took {elapsed:.3f} s")
+
+    def test_already_compatible_identity_uses_zero_translation_fast_path(self):
+        identity = self.alignment.SymOp(self.alignment._IDENTITY, (0, 0, 0))
+        atom = self.alignment.PeriodicAtom("C", (0, 0, 0))
+
+        with mock.patch.object(
+            self.alignment,
+            "_candidate_grid_shifts",
+            wraps=self.alignment._candidate_grid_shifts,
+        ) as grid_shifts:
+            result = self.alignment.find_fragment_compatible_translation(
+                (atom,), (identity,), (1, 1, 1),
+                (32, 32, 32), (2, 2, 2), (0, 0, 0)
+            )
+
+        self.assertEqual(result.translation, (0, 0, 0))
+        self.assertEqual(grid_shifts.call_count, 1)
 
     def test_c64_search_selects_half_grid_center_and_is_deterministic(self):
         atom_path = (
