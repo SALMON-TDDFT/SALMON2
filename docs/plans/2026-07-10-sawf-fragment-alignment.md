@@ -200,10 +200,14 @@ repeated runs choose the same globally compatible translation.
 
 If no candidate exists, exit nonzero with a diagnostic naming the first failing gate and do not create output files.
 
-**Step 4: Implement atomic output publication**
+**Step 4: Implement validated pair publication with rollback**
 
-Write temporary files beside the destination, validate them by re-reading,
-then rename them to the requested atom and symmetry output paths. Include
+Write temporary files beside the destination and validate them by re-reading
+before publishing either file.  Two independent filesystem paths cannot be
+replaced atomically as one operation, so publish them sequentially and roll
+back both destinations on every catchable failure or interruption.  Inputs
+must tell users not to consume the pair while the tool is running; an
+uncatchable process or machine failure remains outside this guarantee. Include
 provenance with input paths, mesh, fragment counts, buffer widths, tolerance,
 and translation.  Do not put a leading comment in the atom file because SALMON
 reads a fixed number of atom rows directly; put provenance in the symmetry file
