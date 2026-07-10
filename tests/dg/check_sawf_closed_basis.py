@@ -12,7 +12,7 @@ program check_sawf_closed_basis
   use, intrinsic :: ieee_arithmetic, only: ieee_value, ieee_quiet_nan
   use lcfo_wannier_sawf_basis, only: close_sawf_candidate_basis
   implicit none
-  real(8), allocatable :: basis(:,:), singular_values(:)
+  real(8), allocatable :: basis(:,:), singular_values(:),candidate_transform(:,:)
   real(8) :: candidate(4,4), duplicate(4,4), identity_candidate(4,2)
   real(8) :: gram(4,4), mapped(4,4), overlap(4,4), nan_value
   integer :: nbasis, i
@@ -25,9 +25,11 @@ program check_sawf_closed_basis
   candidate(:,3)=[0d0,0d0,1d0,1d0]/sqrt(2d0)
   candidate(:,4)=[0d0,1d0,0d0,0d0]
   call close_sawf_candidate_basis(candidate,4,4,1d0,1d-12,4, &
-    basis,nbasis,singular_values,ok,message)
+    basis,nbasis,singular_values,ok,message,candidate_transform=candidate_transform)
   call require(ok,'full inversion orbit closure failed: '//trim(message))
   call require(nbasis==4,'full inversion orbit rank')
+  call require(maxval(abs(basis-matmul(candidate,candidate_transform)))<1d-13, &
+    'published candidate-to-closed transform')
   gram=matmul(transpose(basis),basis)
   call require(maxval(abs(gram-identity4()))<1d-12,'closed basis orthonormality')
   mapped=basis([4,3,2,1],:)
