@@ -1446,10 +1446,14 @@ contains
   subroutine write_prod_dk_data(rgrid_lg, rgrid_mg, system, wf_info, wavefunction)
     use structures,           only: s_rgrid, s_dft_system, s_parallel_info, s_orbital
     use parallelization,      only: nproc_id_global
-    use communication, only: comm_is_root
-    use filesystem,          only: open_filehandle
+    use communication,        only: comm_is_root, comm_sync_all
     use inputoutput,          only: sysname, base_directory, num_kgrid
     use band,                 only: calc_kgrid_prod_block, kgrid_prod_block_size
+    use mpiio_export_ssbe,    only: mpiio_open_write, mpiio_close, mpiio_write_at_all_z, &
+                                    mpiio_wr_c8, mpiio_wr_i, mpiio_wr_i8, mpiio_disp_k, &
+                                    mpiio_csum_local_z, mpiio_csum_reduce, mpiio_abort, &
+                                    mpiio_sync_epoch, &
+                                    MAGIC_PRODK, HDR_PRODK, SBE_FMT_VERSION
     implicit none
     type(s_rgrid),        intent(in) :: rgrid_lg, rgrid_mg
     type(s_dft_system),       intent(in) :: system
@@ -1460,10 +1464,8 @@ contains
     integer, parameter :: ndk = 1
     ! (ndk=1 corresponds to first nearlest neighbors)
 
-    integer :: ik, ik1, ik2, ik3
-    integer :: jdk1, jdk2, jdk3, io, jo
     integer :: fh
-    integer :: nblk, ikb_s, ikb_e
+    integer :: nblk, ikb_s, ikb_e, nbvec_full
     character(256) :: file_prod_dk_data
     integer :: ik3d_tbl(1:3, 1:system%nk)
     ! Streaming export: the product table is computed and written in k-blocks
@@ -1471,7 +1473,15 @@ contains
     ! allocated (the old full-nk export ran out of memory at large nk).
     complex(8), allocatable :: prod_dk_blk(:, :, :, :, :, :)
 
-    ! Export filename: project_directory/sysname_kprod_dk.data
+    ! ---- collective MPI-IO export state (single shared file, k-slice owners) ----
+    integer, parameter :: OFF = kind(HDR_PRODK)
+    integer(OFF) :: disp
+    integer(8)   :: nz_k, csum_loc, csum
+    integer      :: kk_lo, kk_hi, ierr, ierr_h
+    logical      :: is_krep
+
+    ! Export filename: project_directory/sysname_prod_dk.data (now binary,
+    ! magic SBEPRDK1; see mpiio_export_ssbe for the format constants).
     file_prod_dk_data = trim(base_directory) // trim(sysname) // "_prod_dk.data"
 
     ! If k-point is distributed as uniform rectangular grid:
@@ -1480,18 +1490,43 @@ contains
       nblk = kgrid_prod_block_size( &
         & system, num_kgrid(1), num_kgrid(2), num_kgrid(3), ndk)
 
-      if(comm_is_root(nproc_id_global)) then
-        fh = open_filehandle(trim(file_prod_dk_data))
-        ! metadata (reader record-count / ordering check): no nk num_kgrid(1:3) ndk
-        write(fh, '("#",6(1x,i0))') &
-          & system%no, system%nk, num_kgrid(1), num_kgrid(2), num_kgrid(3), ndk
-        write(fh, '(a)') "# 1:ik 2:ik1 3:ik2 4:ik3 5:jk1-ik1 6:jk2-ik2 7:jk3-ik3 8:io 9:jo 10:re 11:im"
+      nbvec_full = (2*ndk + 1)**3
+      nz_k = int(system%no,8)**2 * int(nbvec_full,8)   ! complex(8) elements per k-chunk
+      csum_loc = 0_8
+      is_krep = (wf_info%id_o == 0 .and. wf_info%id_r == 0)  ! k-slice representative
+
+      ! fail-closed: the collective MPI-IO write passes a default-integer element
+      ! count (int(nz)); guard the worst-case per-block count nz_k*nblk (an owned
+      ! k-range never exceeds the whole block) against 2^31-1 overflow.  nz_k, ndk
+      ! and nblk are rank-invariant (nblk = pure function of system/num_kgrid/ndk,
+      ! no communication inside kgrid_prod_block_size), so this is evaluated
+      ! IDENTICALLY on every rank and error-stops all ranks together BEFORE any
+      ! collective MPI-IO call -> collective-safe.  Byte-neutral (Si 8^3 is far
+      ! below the limit; only fires on genuinely huge no/nblk).
+      if (nz_k * int(nblk,8) > int(huge(0),8)) then
+        if (comm_is_root(nproc_id_global)) &
+          write(*,*) "ERROR(write_prod_dk_data): per-block element count exceeds MPI int count."
+        call comm_sync_all;  error stop
       end if
 
+      ! collective open of the single shared file (all ranks of the rko group).
+      call mpiio_open_write(trim(file_prod_dk_data), wf_info%icomm_rko, fh, ierr)
+
+      ! HEADER IS WRITTEN LAST (after the collective data region).  Writing it
+      ! before the collective writes lets the collective two-phase aggregators'
+      ! read-modify-write of the first Lustre stripe (which spans the 36-byte
+      ! header) clobber the not-yet-committed header -- intermittent, silent
+      ! corruption observed for the vnl_kappa writer on Fujitsu MPI + Lustre
+      ! (see write_sbe_vnl_kappa_data below for the full account). The file is
+      ! truncated to 0 at open, so bytes [0,36) stay zero through the data
+      ! epoch and are filled in exactly once, last.
+
       ! All ranks iterate the same deterministic block schedule (collective
-      ! communication inside calc_kgrid_prod_block); the root rank appends
-      ! each block's records to the file in the same global ik order and
-      ! with the same formats as the old full-nk export.
+      ! communication inside calc_kgrid_prod_block); the k-slice representative
+      ! for each block writes its owned contiguous k-range straight from
+      ! prod_dk_blk, which is replicated identically on every rank after the
+      ! allreduce inside calc_kgrid_prod_block, so its Fortran array-element
+      ! order (dim1=io fastest ... dim6=ik slowest) IS the canonical byte order.
       do ikb_s = 1, system%nk, nblk
         ikb_e = min(ikb_s + nblk - 1, system%nk)
 
@@ -1505,35 +1540,49 @@ contains
           & num_kgrid(1), num_kgrid(2), num_kgrid(3), ndk, &
           & ikb_s, ikb_e, ik3d_tbl, prod_dk_blk)
 
-        if(comm_is_root(nproc_id_global)) then
-          do ik = ikb_s, ikb_e
-            ik1 = ik3d_tbl(1, ik)
-            ik2 = ik3d_tbl(2, ik)
-            ik3 = ik3d_tbl(3, ik)
-            do jdk3 = -ndk, ndk
-              do jdk2 = -ndk, ndk
-                do jdk1 = -ndk, ndk
-                  do jo = 1, system%no
-                    do io = 1, system%no
-                      write(fh, '(9(i10),2(e25.16e3))') &
-                        & ik, ik1, ik2, ik3, &
-                        & jdk1, jdk2, jdk3, io, jo, &
-                        & real(prod_dk_blk(io, jo, jdk1, jdk2, jdk3, ik)), &
-                        & aimag(prod_dk_blk(io, jo, jdk1, jdk2, jdk3, ik))
-                    end do
-                  end do
-                end do
-              end do
-            end do
-          end do
+        ! ---- collective MPI-IO write of this k-block ----
+        kk_lo = 0;  kk_hi = -1
+        if (is_krep) then
+          kk_lo = max(ikb_s, wf_info%ik_s);  kk_hi = min(ikb_e, wf_info%ik_e)
+        end if
+        if (kk_hi >= kk_lo) then
+          disp = mpiio_disp_k(HDR_PRODK, nz_k, kk_lo)
+          call mpiio_write_at_all_z(fh, disp, prod_dk_blk(1,1,-ndk,-ndk,-ndk,kk_lo), &
+            & nz_k*int(kk_hi-kk_lo+1,8), ierr)
+          if (ierr /= 0) call mpiio_abort('write_prod_dk_data: collective data write failed', wf_info%icomm_rko)
+          csum_loc = ieor(csum_loc, mpiio_csum_local_z(prod_dk_blk(1,1,-ndk,-ndk,-ndk,kk_lo), &
+            & nz_k*int(kk_hi-kk_lo+1,8), nz_k*int(kk_lo-1,8)))
+        else
+          call mpiio_write_at_all_z(fh, HDR_PRODK, prod_dk_blk, 0_8, ierr)  ! collective no-op
+          if (ierr /= 0) call mpiio_abort('write_prod_dk_data: collective no-op write failed', wf_info%icomm_rko)
         end if
 
         deallocate(prod_dk_blk)
       end do
 
-      if(comm_is_root(nproc_id_global)) then
-        close(fh)
+      ! ---- HEADER LAST: commit all collective data, then rank-0 writes the
+      !      36-byte header (including the checksum computed from the data
+      !      just committed), then commit the header. Nothing collective
+      !      follows, so no first-stripe RMW can clobber it. ----
+      call mpiio_sync_epoch(fh, wf_info%icomm_rko, ierr)   ! commit all collective data writes
+
+      csum = mpiio_csum_reduce(csum_loc, wf_info%icomm_rko)   ! all ranks (allreduce)
+
+      if (comm_is_root(nproc_id_global)) then
+        call mpiio_wr_c8(fh,  0_OFF, MAGIC_PRODK, ierr);  ierr_h = ierr
+        call mpiio_wr_i (fh,  8_OFF, [SBE_FMT_VERSION], 1, ierr);  ierr_h = ior(ierr_h, ierr)
+        call mpiio_wr_i (fh, 12_OFF, [system%nk, system%no, ndk, nbvec_full], 4, ierr);  ierr_h = ior(ierr_h, ierr)
+        call mpiio_wr_i8(fh, 28_OFF, csum, ierr);  ierr_h = ior(ierr_h, ierr)
+        if (ierr_h /= 0) call mpiio_abort('write_prod_dk_data: header field write failed', wf_info%icomm_rko)
       end if
+      call mpiio_sync_epoch(fh, wf_info%icomm_rko, ierr)   ! commit the header before close
+
+      call mpiio_close(fh, ierr)   ! collective (MPI_File_close) -- all ranks call it
+      if (ierr /= 0) call mpiio_abort('write_prod_dk_data: MPI_File_close failed', wf_info%icomm_rko)
+      if (comm_is_root(nproc_id_global)) &
+        write(*,*) "  prod_dk export written: ", trim(file_prod_dk_data)
+
+      call comm_sync_all
     end if
     return
   end subroutine write_prod_dk_data
