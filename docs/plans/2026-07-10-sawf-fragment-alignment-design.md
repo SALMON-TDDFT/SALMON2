@@ -68,15 +68,16 @@ preparation step that writes a new atom file and a matching symmetry file.  The
 original files remain unchanged, and the production input names the aligned
 files explicitly.
 
-The alignment tool accepts the cell, mesh, regular fragment counts, atom file,
-and normalized symmetry operations.  It searches periodic translations and
-accepts one only when all of the following hold:
+The alignment tool accepts the cell, mesh, regular fragment counts, fragment
+buffer widths, atom file, and normalized symmetry operations.  It searches
+periodic translations and accepts one only when all of the following hold:
 
 - every transformed atom maps one-to-one onto an atom of the same species;
 - every symmetry operation induces an exact integer permutation of grid
   indices, while symmetry centers may lie at half-grid positions;
 - each source fragment core maps wholly onto exactly one target core;
-- the mapped buffer geometry is compatible with periodic indexing;
+- the mapped buffer geometry is compatible with periodic indexing, including
+  equal buffer widths for axes exchanged by a symmetry operation;
 - identity, inverse, and group closure remain valid after translation.
 
 If no compatible translation exists, the tool stops.  It does not fall back to

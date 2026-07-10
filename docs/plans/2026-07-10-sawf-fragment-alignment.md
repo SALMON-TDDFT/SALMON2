@@ -175,6 +175,8 @@ Use a temporary C64-like atom file and `sym.dat`. Require the CLI to:
 - refuse to overwrite outputs without `--force`;
 - write no partial output when no compatible translation exists;
 - preserve atom species and non-coordinate columns.
+- accept explicit nonnegative buffer widths and reject an axis-exchanging
+  operation when the exchanged axes have unequal buffer widths.
 
 **Step 2: Run the CLI tests and verify they fail**
 
@@ -200,7 +202,12 @@ If no candidate exists, exit nonzero with a diagnostic naming the first failing 
 
 **Step 4: Implement atomic output publication**
 
-Write temporary files beside the destination, validate them by re-reading, then rename them to the requested atom and symmetry output paths. Include a provenance comment with input paths, mesh, fragment counts, tolerance, and translation.
+Write temporary files beside the destination, validate them by re-reading,
+then rename them to the requested atom and symmetry output paths. Include
+provenance with input paths, mesh, fragment counts, buffer widths, tolerance,
+and translation.  Do not put a leading comment in the atom file because SALMON
+reads a fixed number of atom rows directly; put provenance in the symmetry file
+comments and stdout.
 
 **Step 5: Run tests and commit**
 
