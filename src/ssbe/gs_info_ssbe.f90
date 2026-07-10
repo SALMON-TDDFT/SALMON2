@@ -20,6 +20,12 @@ module gs_info_ssbe
         logical :: spinor = .false.  ! .true. = noncollinear/SOC spinor bands
         real(8) :: focc = 2d0        ! occupation per occupied band (2 / 1)
         integer :: nvb = 0           ! occupied bands inside the window (= ne/focc)
+        ! metal detector (check_gicov_occupation, degenerate_block_ssbe): set
+        ! once by init_sbe_gs_info alongside gs%occup, so every downstream
+        ! consumer (occupation fill, fsum-rule deficiency tensor, the
+        ! norder_correction occupied-band loop) can cheaply consult it without
+        ! recomputing.  .false. (insulator/semiconductor) is the safe default.
+        logical :: is_metal = .false.
         real(8), allocatable :: kpoint(:, :), kweight(:)
         real(8), allocatable :: eigen(:, :)
         real(8), allocatable :: occup(:, :)
@@ -97,7 +103,8 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
                            & yn_sbe_vnl_exact, file_sbe_vnl_kappa, nelec, natom
     use degenerate_block_ssbe, only: build_xi, same_block, blend, theta_on, theta_off, &
                                    & build_block_transport, &
-                                   & prod_dk_axis_slot, gicov_prod_dk_nbvec, expected_prod_dk_nrec
+                                   & prod_dk_axis_slot, gicov_prod_dk_nbvec, expected_prod_dk_nrec, &
+                                   & check_gicov_occupation
     implicit none
     type(s_sbe_gs_info), intent(inout) :: gs
     character(*), intent(in) :: sysname
@@ -112,6 +119,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     integer, intent(in) :: icomm
     integer :: irank, nproc
     integer :: nb_eff, ndeg
+    logical :: is_metal
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
@@ -217,8 +225,35 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     !bands inside the window (nvb = ne/2 spinless, = ne spinor); the frozen
     !bands 1..nb_min-1 are NOT stored (inert, fully occupied) and enter only
     !through gs%ne = ne - focc*(nb_min-1).
-    gs%occup(:,:) = 0d0 !!Experimental!!
-    if (gs%ne > 0) gs%occup(1:gs%nvb,:) = gs%focc !!Experimental!!
+    !
+    !At this point gs%occup already holds the REAL per-(band,k) GS occupation
+    !just read from file and broadcast (read_eigen_data -> comm_bcast above),
+    !so check_gicov_occupation can detect a metal from it BEFORE any fill.
+    call check_gicov_occupation(gs%nb, gs%nk, gs%occup, gs%focc, is_metal)
+    gs%is_metal = is_metal
+
+    if (.not. is_metal) then
+        ! insulator/semiconductor: keep the exact T=0 rigid fill -- bit-identical
+        ! to today for Si/graphene (this is a REGRESSION GUARD, not a stylistic
+        ! choice: it also shields against a not-fully-T=0 or slightly-
+        ! unconverged insulator SCF perturbing gs%occup away from the exact
+        ! 0/focc step the rest of the SBE machinery assumes for gap systems).
+        gs%occup(:,:) = 0d0 !!Experimental!!
+        if (gs%ne > 0) gs%occup(1:gs%nvb,:) = gs%focc !!Experimental!!
+    else
+        ! metal: keep the REAL per-(band,k) GS occupation just read from file
+        ! (already in gs%occup from read_eigen_data) -- do NOT rigid-fill it.
+        if (trim(sbe_lg_degen) == 'gi' .or. trim(sbe_lg_degen) == 'gifix') then
+            if (irank == 0) write(*, '(a)') &
+                & "ERROR(init_sbe_gs_info): metal-like fractional/k-varying occupation " // &
+                & "detected; sbe_lg_degen='gi'/'gifix' assume a gap-isolated insulating " // &
+                & "manifold -- use sbe_lg_degen='gicov' or gauge_sbe='velocity_gauge'."
+            stop 1
+        end if
+        if (irank == 0) write(*, '(a)') &
+            & "# metal-like occupation detected: using REAL per-(band,k) GS occupation " // &
+            & "(Fermi-Dirac), NOT the insulator rigid fill."
+    end if
 
 contains
 
@@ -309,7 +344,9 @@ contains
                 read(fh, *) iib, tmp(1:2)
                 if (ib .ne. iib) stop "ib mismatch"
                 if (ib >= nb_min .and. ib <= nb_hi) gs%eigen(ib - nb_min + 1, ik) = tmp(1) * efac
-                ! gs%occup(ib, ik) = ctmp(2)
+                ! real per-(band,k) GS occupation (column 3, dimensionless --
+                ! no efac unit conversion needed); same window index as eigen.
+                if (ib >= nb_min .and. ib <= nb_hi) gs%occup(ib - nb_min + 1, ik) = tmp(2)
             end do
         end do
         close(fh)
