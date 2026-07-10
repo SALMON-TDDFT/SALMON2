@@ -15,6 +15,11 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 TOOL = ROOT / "tools" / "align_periodic_structure_to_fragments.py"
+SAMPLE = ROOT / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac"
+SOURCE_ATOM = SAMPLE / "atom.dat"
+ALIGNED_ATOM = SAMPLE / "atom_sawf_aligned.dat"
+ALIGNED_SYMMETRY = SAMPLE / "sym_sawf_aligned.dat"
+ALIGNED_INPUT = SAMPLE / "inputfile_gs_w90_pseudo_sawf_aligned_nw576_nb664"
 C64_SYMMETRY_TEXT = (
     "# Identity and inversion about fractional position (1/16, 1/16, 1/16).\n"
     " 1  0  0  0.000\n"
@@ -432,6 +437,110 @@ class FragmentAlignmentTests(unittest.TestCase):
         )
         self.assertEqual(first, second)
         self.assertLess(elapsed, 10.0, f"two C64 searches took {elapsed:.3f} s")
+
+    def test_committed_c64_aligned_files_are_exact_tool_outputs(self):
+        source_atom_before = SOURCE_ATOM.read_bytes()
+        legacy_sym = SAMPLE / "sym.dat"
+        legacy_sym_before = legacy_sym.read_bytes() if legacy_sym.exists() else None
+
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary = Path(temporary)
+            source_sym = write_c64_symmetry(temporary, "source_sym.dat")
+            regenerated_atom = temporary / ALIGNED_ATOM.name
+            regenerated_symmetry = temporary / ALIGNED_SYMMETRY.name
+            completed = subprocess.run(
+                [
+                    sys.executable, str(TOOL),
+                    "--input-atom", str(SOURCE_ATOM),
+                    "--input-sym", str(source_sym),
+                    "--output-atom", str(regenerated_atom),
+                    "--output-sym", str(regenerated_symmetry),
+                    "--cell", "13.44", "13.44", "13.44",
+                    "--mesh", "32", "32", "32",
+                    "--fragments", "2", "2", "2",
+                    "--buffer", "6", "6", "6",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(regenerated_atom.read_bytes(), ALIGNED_ATOM.read_bytes())
+            self.assertEqual(
+                regenerated_symmetry.read_bytes(), ALIGNED_SYMMETRY.read_bytes()
+            )
+
+        aligned_atoms = self.alignment.parse_atom_file(
+            ALIGNED_ATOM, (Fraction("13.44"),) * 3
+        )
+        source_atoms = self.alignment.parse_atom_file(
+            SOURCE_ATOM, (Fraction("13.44"),) * 3
+        )
+        operations = self.alignment.parse_symmetry_file(ALIGNED_SYMMETRY)
+        self.assertEqual(len(aligned_atoms), 64)
+        self.assertTrue(ALIGNED_ATOM.read_text(encoding="ascii").startswith("  'C'"))
+        self.assertFalse(ALIGNED_ATOM.read_text(encoding="ascii").startswith("#"))
+        self.assertEqual(
+            [(atom.label, atom.species_index, atom.trailing) for atom in aligned_atoms],
+            [(atom.label, atom.species_index, atom.trailing) for atom in source_atoms],
+        )
+        expected_translation = (Fraction(11, 64),) * 3
+        for source, aligned in zip(source_atoms, aligned_atoms):
+            self.assertEqual(
+                aligned.position,
+                tuple((value + shift) % 1 for value, shift in zip(
+                    source.position, expected_translation
+                )),
+            )
+        self.assertEqual(operations[1].translation, (Fraction(15, 32),) * 3)
+        self.assertIn("# translation=11/64 11/64 11/64", ALIGNED_SYMMETRY.read_text())
+        self.assertIn("# buffer=6 6 6", ALIGNED_SYMMETRY.read_text())
+        for operation in operations:
+            permutation = self.alignment.periodic_same_species_atom_bijection(
+                operation, aligned_atoms
+            )
+            self.assertEqual(sorted(permutation), list(range(64)))
+            grid_map = self.alignment.integer_grid_map(operation, (32, 32, 32))
+            targets = self.alignment.fragment_target_enumeration(
+                grid_map, (16, 16, 16)
+            )
+            self.assertEqual(len(targets), 8)
+            self.assertTrue(all(targets[source] == frozenset((source,)) for source in targets))
+        inversion_map = self.alignment.integer_grid_map(operations[1], (32, 32, 32))
+        self.assertEqual(inversion_map.shift, (15, 15, 15))
+        self.assertEqual(
+            self.alignment.inversion_center_diagnostic(inversion_map),
+            (Fraction(15, 2),) * 3,
+        )
+        self.assertEqual(Fraction("13.44") * Fraction(11, 64), Fraction("2.31"))
+        self.assertEqual(SOURCE_ATOM.read_bytes(), source_atom_before)
+        if legacy_sym_before is not None:
+            self.assertEqual(legacy_sym.read_bytes(), legacy_sym_before)
+
+    def test_aligned_input_uses_only_dedicated_aligned_geometry(self):
+        text = ALIGNED_INPUT.read_text(encoding="ascii")
+        active = "\n".join(line.split("!", 1)[0] for line in text.splitlines())
+        required = (
+            "sysname = 'c64_dc_pseudo_sawf_aligned_nw576_nb664'",
+            "file_atom_coor = 'atom_sawf_aligned.dat'",
+            "wannier_symmetry_file = 'sym_sawf_aligned.dat'",
+            "wannier_site_symmetry = 'file'",
+            "wannier_symmetry_tolerance = 1.0d-6",
+            "wannier_num_wann = 576",
+            "wannier_num_bands = 664",
+            "nstate = 664",
+            "num_rgrid(1:3) = 32,32,32",
+            "num_fragment(1:3) = 2,2,2",
+            "num_rgrid_buffer(1:3) = 6,6,6",
+            "yn_eigenexa = 'y'",
+        )
+        for setting in required:
+            self.assertEqual(active.count(setting), 1, setting)
+        self.assertNotIn("file_atom_coor = 'atom.dat'", active)
+        self.assertNotIn("wannier_symmetry_file = 'sym.dat'", active)
+        self.assertNotRegex(active, r"(?m)^\s*(?:nstate|wannier_num_(?:wann|bands))\s*=\s*256\b")
+        self.assertNotIn("yn_conventional_from_dcdft", active.lower())
 
     def test_cli_publishes_atomically_and_preserves_inputs(self):
         source_atom = (
