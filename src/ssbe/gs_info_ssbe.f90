@@ -195,6 +195,23 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     call comm_bcast(gs%p_tm_matrix, icomm, 0)
     call comm_bcast(gs%rvnl_tm_matrix, icomm, 0)
 
+    ! Metal detector: gs%occup already holds the REAL per-(band,k) GS
+    ! occupation just read from file and broadcast (every rank sees identical
+    ! data). Run this BEFORE read_prod_dk_data/prepare_matrix/build_xi below
+    ! so a metal misconfigured with sbe_lg_degen='gi'/'gifix' (architecturally
+    ! insulator-only: both assume a gap-isolated manifold) is rejected up
+    ! front rather than after paying for xi/block-transport construction on
+    ! data those modes cannot correctly consume.
+    call check_gicov_occupation(gs%nb, gs%nk, gs%occup, gs%focc, is_metal)
+    gs%is_metal = is_metal
+    if (is_metal .and. (trim(sbe_lg_degen) == 'gi' .or. trim(sbe_lg_degen) == 'gifix')) then
+        if (irank == 0) write(*, '(a)') &
+            & "ERROR(init_sbe_gs_info): metal-like fractional/k-varying occupation " // &
+            & "detected; sbe_lg_degen='gi'/'gifix' assume a gap-isolated insulating " // &
+            & "manifold -- use sbe_lg_degen='gicov' or gauge_sbe='velocity_gauge'."
+        stop 1
+    end if
+
     !Retrieve k-space overlap products from 'file_sbe_prod_dk' (LG-SBE degeneracy):
     if (trim(sbe_lg_degen) == 'gi' .or. trim(sbe_lg_degen) == 'gifix' &
         & .or. trim(sbe_lg_degen) == 'gicov') call read_prod_dk_data()
@@ -226,13 +243,10 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     !bands 1..nb_min-1 are NOT stored (inert, fully occupied) and enter only
     !through gs%ne = ne - focc*(nb_min-1).
     !
-    !At this point gs%occup already holds the REAL per-(band,k) GS occupation
-    !just read from file and broadcast (read_eigen_data -> comm_bcast above),
-    !so check_gicov_occupation can detect a metal from it BEFORE any fill.
-    call check_gicov_occupation(gs%nb, gs%nk, gs%occup, gs%focc, is_metal)
-    gs%is_metal = is_metal
-
-    if (.not. is_metal) then
+    !gs%is_metal was already determined right after gs%occup was read+broadcast
+    !(above, before read_prod_dk_data/prepare_matrix); reuse it here rather
+    !than recomputing.
+    if (.not. gs%is_metal) then
         ! insulator/semiconductor: keep the exact T=0 rigid fill -- bit-identical
         ! to today for Si/graphene (this is a REGRESSION GUARD, not a stylistic
         ! choice: it also shields against a not-fully-T=0 or slightly-
@@ -243,13 +257,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     else
         ! metal: keep the REAL per-(band,k) GS occupation just read from file
         ! (already in gs%occup from read_eigen_data) -- do NOT rigid-fill it.
-        if (trim(sbe_lg_degen) == 'gi' .or. trim(sbe_lg_degen) == 'gifix') then
-            if (irank == 0) write(*, '(a)') &
-                & "ERROR(init_sbe_gs_info): metal-like fractional/k-varying occupation " // &
-                & "detected; sbe_lg_degen='gi'/'gifix' assume a gap-isolated insulating " // &
-                & "manifold -- use sbe_lg_degen='gicov' or gauge_sbe='velocity_gauge'."
-            stop 1
-        end if
+        ! (sbe_lg_degen='gi'/'gifix' were already rejected above for a metal.)
         if (irank == 0) write(*, '(a)') &
             & "# metal-like occupation detected: using REAL per-(band,k) GS occupation " // &
             & "(Fermi-Dirac), NOT the insulator rigid fill."

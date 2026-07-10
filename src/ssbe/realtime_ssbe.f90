@@ -135,6 +135,20 @@ subroutine main_realtime_ssbe(icomm)
         fh_sbe_nex = get_filehandle()
         open(unit=fh_sbe_nex, file=trim(base_directory)//trim(sysname)//"_sbe_nex.data", action="write")
         call write_sbe_nex_header(fh_sbe_nex)
+        if (gs%is_metal) then
+            ! Diagnostic-only caveat (does not affect propagation/current):
+            ! n_ex/n_hole below are read out against the rigid valence split
+            ! 1..gs%nvb, which is not the real per-k occupied-band set for a
+            ! metal-like ground state -- expect a nonzero, non-physical
+            ! n_ex/n_hole already at t=0 (before any pulse). Occupation-
+            ! weighted generalization of this diagnostic is a separate
+            ! follow-up; calc_band_population (SYSNAME_sbe_occ.data) already
+            ! reads out against the real gs%occup and is unaffected.
+            write(*, '(a)') "# WARNING: metal-like occupation detected -- " // &
+                & "_sbe_nex.data n_ex/n_hole use the insulator-only 1..nvb " // &
+                & "valence split and are not physically meaningful here " // &
+                & "(current/dynamics are unaffected; see calc_band_population)."
+        end if
         ! SYSNAME_sbe_occ.data / _sbe_edist.data (band- and energy-resolved population)
         if (yn_sbe_out_occ == 'y') then
             fh_sbe_occ = get_filehandle()

@@ -1672,7 +1672,7 @@ contains
   ! Pure, no SALMON deps -- unit-testable the same way as this module's other
   ! standalone helpers (see the file header / test/test_degenerate_block.f90).
   !-------------------------------------------------------------------
-  subroutine check_gicov_occupation(nb, nk, occup, focc, is_metal, frac_tol)
+  pure subroutine check_gicov_occupation(nb, nk, occup, focc, is_metal, frac_tol)
     implicit none
     integer,  intent(in)  :: nb, nk
     real(8),  intent(in)  :: occup(nb, nk)
