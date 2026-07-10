@@ -288,6 +288,82 @@ class FragmentAlignmentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "identity.*exactly once"):
             self.alignment.validate_symmetry_group((identity, identity))
 
+    def test_nonintegral_base_shift_can_be_aligned_by_a_half_integer_candidate(self):
+        identity = self.alignment.SymOp(self.alignment._IDENTITY, (0, 0, 0))
+        inversion = self.inversion(Fraction(1, 8))
+        atom = self.alignment.PeriodicAtom("C", (Fraction(1, 16),) * 3)
+
+        result = self.alignment.find_fragment_compatible_translation(
+            (atom,), (identity, inversion), (1, 1, 1),
+            (4, 4, 4), (2, 2, 2), (0, 0, 0)
+        )
+
+        self.assertEqual(result.translation, (Fraction(1, 16),) * 3)
+        self.assertEqual(result.grid_maps[1].shift, (1, 1, 1))
+        for source, target in result.fragment_maps[1]:
+            self.assertEqual(source, target)
+
+    def test_tolerant_group_validation_accepts_decimal_thirds(self):
+        translations = tuple(
+            self.alignment.SymOp(
+                self.alignment._IDENTITY, (Fraction(index, 3), 0, 0)
+            )
+            for index in range(3)
+        )
+        rendered = self.alignment._render_symmetry(
+            translations, (0, 0, 0), (0, 0, 0)
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            sym_path = Path(temporary) / "thirds.dat"
+            sym_path.write_text(rendered, encoding="ascii")
+            reread = self.alignment.parse_symmetry_file(sym_path)
+
+        with self.assertRaisesRegex(ValueError, "closure"):
+            self.alignment.validate_symmetry_group(reread)
+        self.alignment.validate_symmetry_group_tolerant(
+            reread, Fraction(1, 10**12)
+        )
+
+        inconsistent = (
+            reread[0],
+            reread[1],
+            self.alignment.SymOp(self.alignment._IDENTITY, (Fraction(67, 100), 0, 0)),
+        )
+        with self.assertRaisesRegex(ValueError, "closure"):
+            self.alignment.validate_symmetry_group_tolerant(
+                inconsistent, Fraction(1, 10**12)
+            )
+
+    def test_validated_publication_accepts_decimal_thirds_roundtrip(self):
+        cell = (Fraction(3), Fraction(1), Fraction(1))
+        atoms = tuple(
+            self.alignment.PeriodicAtom(
+                "C", (Fraction(index, 3), 0, 0), "'C'", "1"
+            )
+            for index in range(3)
+        )
+        operations = tuple(
+            self.alignment.SymOp(
+                self.alignment._IDENTITY, (Fraction(index, 3), 0, 0)
+            )
+            for index in range(3)
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            output_atom = Path(temporary) / "atom.dat"
+            output_sym = Path(temporary) / "sym.dat"
+            self.alignment._write_validated_outputs(
+                output_atom, output_sym,
+                self.alignment._render_atoms(atoms, cell),
+                self.alignment._render_symmetry(operations, (0, 0, 0), (0, 0, 0)),
+                cell, atoms, operations, Fraction(1, 10**12), False
+            )
+
+            self.assertTrue(output_atom.exists())
+            self.assertNotIn("/", "\n".join(
+                line for line in output_sym.read_text(encoding="ascii").splitlines()
+                if not line.startswith("#")
+            ))
+
     def test_c64_search_selects_half_grid_center_and_is_deterministic(self):
         atom_path = (
             ROOT
@@ -447,6 +523,65 @@ class FragmentAlignmentTests(unittest.TestCase):
                         False,
                     )
 
+            self.assertFalse(output_atom.exists())
+            self.assertFalse(output_sym.exists())
+
+    def test_keyboard_interrupt_during_publication_rolls_back_first_output(self):
+        atom = self.alignment.PeriodicAtom("C", (0, 0, 0), "'C'", "1")
+        identity = self.alignment.SymOp(self.alignment._IDENTITY, (0, 0, 0))
+        cell = (Fraction(2),) * 3
+        with tempfile.TemporaryDirectory() as temporary:
+            output_atom = Path(temporary) / "atom.dat"
+            output_sym = Path(temporary) / "sym.dat"
+            real_replace = self.alignment.os.replace
+            calls = 0
+
+            def interrupt_second_replace(source, destination):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise KeyboardInterrupt()
+                return real_replace(source, destination)
+
+            with mock.patch.object(self.alignment.os, "replace", interrupt_second_replace):
+                with self.assertRaises(KeyboardInterrupt):
+                    self.alignment._write_validated_outputs(
+                        output_atom, output_sym,
+                        self.alignment._render_atoms((atom,), cell),
+                        self.alignment._render_symmetry(
+                            (identity,), (0, 0, 0), (1, 1, 1)
+                        ),
+                        cell, (atom,), (identity,), Fraction(1, 10**12), False
+                    )
+
+            self.assertFalse(output_atom.exists())
+            self.assertFalse(output_sym.exists())
+
+    def test_cli_rejects_zero_fragment_count_without_traceback_or_outputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary = Path(temporary)
+            atom_path = temporary / "atom.dat"
+            sym_path = temporary / "sym.dat"
+            output_atom = temporary / "aligned_atom.dat"
+            output_sym = temporary / "aligned_sym.dat"
+            atom_path.write_text("  'C' 0 0 0 1\n", encoding="ascii")
+            sym_path.write_text(
+                "1 0 0 0\n0 1 0 0\n0 0 1 0\n", encoding="ascii"
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable, str(TOOL),
+                    "--input-atom", str(atom_path), "--input-sym", str(sym_path),
+                    "--output-atom", str(output_atom), "--output-sym", str(output_sym),
+                    "--cell", "1", "1", "1", "--mesh", "4", "4", "4",
+                    "--fragments", "0", "2", "2", "--buffer", "0", "0", "0",
+                ],
+                text=True, capture_output=True, check=False,
+            )
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("positive integers", completed.stderr)
+            self.assertNotIn("Traceback", completed.stderr)
             self.assertFalse(output_atom.exists())
             self.assertFalse(output_sym.exists())
 

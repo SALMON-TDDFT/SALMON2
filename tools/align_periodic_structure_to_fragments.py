@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from decimal import Decimal, localcontext
 from fractions import Fraction
 import itertools
+import math
 import os
 from pathlib import Path
 import shlex
@@ -427,6 +428,98 @@ def validate_symmetry_group(operations):
             raise ValueError("symmetry operation has no inverse in the group")
 
 
+def _operations_close(left, right, tolerance):
+    return left.rotation == right.rotation and all(
+        _periodic_difference(left.translation[axis], right.translation[axis])
+        <= tolerance
+        for axis in range(_DIMENSION)
+    )
+
+
+def validate_symmetry_group_tolerant(operations, tolerance):
+    """Validate an affine group after decimal I/O within periodic tolerance."""
+
+    operations = tuple(operations)
+    tolerance = _fraction(tolerance)
+    if tolerance <= 0:
+        raise ValueError("tolerance must be positive")
+    if not operations:
+        raise ValueError("symmetry operation set is empty")
+    identity = SymOp(_IDENTITY, (0, 0, 0))
+    identity_count = sum(
+        _operations_close(operation, identity, tolerance)
+        for operation in operations
+    )
+    if identity_count != 1:
+        raise ValueError("symmetry identity must occur exactly once within tolerance")
+    for index, operation in enumerate(operations):
+        if any(
+            _operations_close(operation, other, tolerance)
+            for other in operations[index + 1:]
+        ):
+            raise ValueError("symmetry operation set contains duplicates within tolerance")
+    for left in operations:
+        for right in operations:
+            product = _compose_operations(left, right)
+            if not any(
+                _operations_close(product, operation, tolerance)
+                for operation in operations
+            ):
+                raise ValueError("symmetry operation set fails group closure within tolerance")
+        if not any(
+            _operations_close(_compose_operations(left, right), identity, tolerance)
+            and _operations_close(_compose_operations(right, left), identity, tolerance)
+            for right in operations
+        ):
+            raise ValueError("symmetry operation has no inverse within tolerance")
+
+
+def periodic_same_species_atom_bijection_tolerant(operation, atoms, tolerance):
+    """Return a same-species atom permutation after decimal I/O."""
+
+    atoms = tuple(atoms)
+    tolerance = _fraction(tolerance)
+    if tolerance <= 0:
+        raise ValueError("tolerance must be positive")
+    unused = set(range(len(atoms)))
+    permutation = []
+    for atom in atoms:
+        transformed = tuple(
+            (
+                sum(
+                    operation.rotation[alpha][beta] * atom.position[beta]
+                    for beta in range(_DIMENSION)
+                )
+                + operation.translation[alpha]
+            )
+            % 1
+            for alpha in range(_DIMENSION)
+        )
+        matches = [
+            index for index in sorted(unused)
+            if atoms[index].species == atom.species
+            and all(
+                _periodic_difference(atoms[index].position[axis], transformed[axis])
+                <= tolerance
+                for axis in range(_DIMENSION)
+            )
+        ]
+        if not matches:
+            raise ValueError(
+                "symmetry does not define a periodic same-species atom "
+                "bijection within tolerance"
+            )
+        target = matches[0]
+        unused.remove(target)
+        permutation.append(target)
+    if unused:
+        raise ValueError(
+            "symmetry does not define a periodic same-species atom "
+            "bijection within tolerance"
+        )
+    return tuple(permutation)
+
+
 def parse_symmetry_file(path):
     """Parse ordered three-row affine operations from ``sym.dat``."""
 
@@ -540,29 +633,47 @@ def _candidate_operation_data(operation, mesh):
                 "signed-axis map must preserve grid spacing across mapped axes"
             )
         shift = mesh[alpha] * operation.translation[alpha]
-        if shift.denominator != 1:
-            raise ValueError(
-                f"symmetry induces a non-integral grid shift on axis {alpha}: {shift}"
-            )
         coefficients.append(coefficient.numerator)
-        base_shift.append(shift.numerator)
-    return sources, tuple(coefficients), tuple(base_shift)
+        base_shift.append(shift)
+    base_shift = tuple(base_shift)
+    integral_base_shift = (
+        tuple(shift.numerator for shift in base_shift)
+        if all(shift.denominator == 1 for shift in base_shift)
+        else None
+    )
+    return sources, tuple(coefficients), base_shift, integral_base_shift
 
 
 def _candidate_grid_shifts(operation_data, numerators, mesh):
     """Apply half-grid translation using integer congruences only."""
 
-    sources, coefficients, base_shift = operation_data
+    sources, coefficients, base_shift, integral_base_shift = operation_data
+    if integral_base_shift is not None and all(
+        isinstance(value, int) for value in numerators
+    ):
+        shifts = []
+        for alpha, (beta, _sign) in enumerate(sources):
+            two_q = (
+                2 * integral_base_shift[alpha]
+                + numerators[alpha]
+                - coefficients[alpha] * numerators[beta]
+            )
+            if two_q % 2:
+                return None
+            shifts.append((two_q // 2) % mesh[alpha])
+        return tuple(shifts)
+
     shifts = []
     for alpha, (beta, _sign) in enumerate(sources):
-        doubled = (
+        two_q = (
             2 * base_shift[alpha]
             + numerators[alpha]
             - coefficients[alpha] * numerators[beta]
         )
-        if doubled % 2:
+        q = two_q / 2
+        if q.denominator != 1:
             return None
-        shifts.append((doubled // 2) % mesh[alpha])
+        shifts.append(q.numerator % mesh[alpha])
     return tuple(shifts)
 
 
@@ -570,7 +681,7 @@ def _fast_complete_fragment_map(operation_data, shifts, mesh, fragment_counts):
     """Map fragment intervals from integer shifts, without any grid enumeration."""
 
     shape = tuple(mesh[axis] // fragment_counts[axis] for axis in range(_DIMENSION))
-    sources, _coefficients, _base_shift = operation_data
+    sources, _coefficients, _base_shift, _integral_base_shift = operation_data
     mapping = {}
     for source in itertools.product(*(range(count) for count in fragment_counts)):
         target = []
@@ -617,8 +728,21 @@ def find_fragment_compatible_translation(
     operation_data = tuple(
         _candidate_operation_data(operation, mesh) for operation in operations
     )
+    parameter_resolution = math.lcm(
+        *(shift.denominator for data in operation_data for shift in data[2])
+    )
+    if parameter_resolution == 1:
+        parameter_values = tuple(range(2 * size) for size in mesh)
+    else:
+        parameter_values = tuple(
+            tuple(
+                Fraction(index, parameter_resolution)
+                for index in range(2 * size * parameter_resolution)
+            )
+            for size in mesh
+        )
     best = None
-    for numerators in itertools.product(*(range(value) for value in denominators)):
+    for numerators in itertools.product(*parameter_values):
         maps = []
         for data in operation_data:
             shifts = _candidate_grid_shifts(data, numerators, mesh)
@@ -761,6 +885,8 @@ def _write_validated_outputs(
     output_atom, output_sym, atom_text, sym_text, cell,
     expected_atoms, expected_operations, tolerance, force
 ):
+    """Publish a validated file pair with rollback on catchable failures."""
+
     output_atom = Path(output_atom)
     output_sym = Path(output_sym)
     if output_atom.resolve() == output_sym.resolve():
@@ -813,12 +939,17 @@ def _write_validated_outputs(
                 for axis in range(_DIMENSION)
             ):
                 raise ValueError("symmetry output failed affine-operation re-validation")
+        validate_symmetry_group_tolerant(reread_operations, tolerance)
+        for operation in reread_operations:
+            periodic_same_species_atom_bijection_tolerant(
+                operation, reread_atoms, tolerance
+            )
         try:
             for destination in destinations:
                 os.replace(temporary_paths[0], destination)
                 temporary_paths.pop(0)
                 published.append(destination)
-        except OSError:
+        except BaseException:
             for destination in published:
                 try:
                     destination.unlink()
@@ -867,8 +998,8 @@ def _build_parser():
 def main(argv=None):
     arguments = _build_parser().parse_args(argv)
     cell = tuple(_fraction(value) for value in arguments.cell)
-    mesh = tuple(arguments.mesh)
-    fragments = tuple(arguments.fragments)
+    mesh = _validate_mesh(tuple(arguments.mesh))
+    fragments = _validate_mesh(tuple(arguments.fragments))
     buffer = _validate_buffer(tuple(arguments.buffer))
     tolerance = _fraction(arguments.tolerance)
     if tolerance <= 0:
