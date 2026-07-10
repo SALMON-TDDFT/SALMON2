@@ -1,9 +1,20 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import math
 from pathlib import Path
 import re
+import shlex
 import tempfile
+
+
+ROOT = Path(__file__).resolve().parents[2]
+FORMAL_SAMPLE = ROOT / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac"
+FORMAL_INPUT_NAME = "inputfile_gs_w90_pseudo_sawf_aligned_nw576_nb664"
+FORMAL_ATOM_NAME = "atom_sawf_aligned.dat"
+FORMAL_SYMMETRY_NAME = "sym_sawf_aligned.dat"
+FORMAL_SYSNAME = "c64_dc_pseudo_sawf_aligned_nw576_nb664"
+FORMAL_ATOM_SHA256 = "d38a4a6fa0e772816610fbe3e7c603ee4a8bc061876883ee9b295e479db71df2"
 
 
 class ValidationError(RuntimeError):
@@ -39,12 +50,15 @@ def _seed_location(log_text: str) -> tuple[Path, str, str]:
     match = re.search(r"\bcd\s+'([^']+)'\s+&&.*'([^']+)'\s*$", run_line)
     if match is None:
         raise ValidationError("cannot recover seed directory/name from Wannier90 run line")
+    seed_name = match.group(2)
+    if re.fullmatch(r"[A-Za-z0-9_-]+", seed_name) is None:
+        raise ValidationError("Wannier90 seed must be a plain basename without path/dot syntax")
     lowered = run_line.lower()
     if "wannier90.x" not in lowered:
         raise ValidationError("normal Wannier90 executable was not invoked")
     if re.search(r"\b(?:export[_-]?only|import[_-]?only|seed[_-]?only|reuse|skip)\b", lowered):
         raise ValidationError("stale-seed/export-only Wannier90 command is forbidden")
-    return Path(match.group(1)).resolve(), match.group(2), run_line
+    return Path(match.group(1)).resolve(), seed_name, run_line
 
 
 def _validate_provenance(log_text: str, seed_dir: Path, expected_bands: int) -> str:
@@ -178,56 +192,185 @@ def _run_root(seed_dir: Path) -> Path:
     return seed_dir.parent.parent.resolve()
 
 
-def _input_assignment(input_file: Path, name: str) -> str:
+def _input_raw_assignment(input_file: Path, name: str) -> str:
     text = _read(input_file, "SALMON input file")
     values = []
-    pattern = re.compile(
-        rf"(?i)^\s*{re.escape(name)}\s*=\s*(['\"])(.*?)\1\s*,?\s*$"
-    )
+    pattern = re.compile(rf"(?i)^\s*{re.escape(name)}\s*=\s*(.*?)\s*$")
     for line in text.splitlines():
         active = line.split("!", 1)[0].strip()
         match = pattern.match(active)
         if match is not None:
-            values.append(match.group(2).strip())
+            value = match.group(1).strip()
+            if value.endswith(","):
+                value = value[:-1].rstrip()
+            values.append(value)
     if len(values) != 1 or not values[0]:
         raise ValidationError(f"input must define exactly one non-empty {name}")
     return values[0]
+
+
+def _input_string_assignment(input_file: Path, name: str) -> str:
+    raw = _input_raw_assignment(input_file, name)
+    match = re.fullmatch(r"(['\"])(.*?)\1", raw)
+    if match is None or not match.group(2).strip():
+        raise ValidationError(f"input {name} must be one non-empty quoted string")
+    return match.group(2).strip()
+
+
+def _input_integer_assignment(input_file: Path, name: str) -> int:
+    raw = _input_raw_assignment(input_file, name)
+    if re.fullmatch(r"[+-]?\d+", raw) is None:
+        raise ValidationError(f"input {name} must be one integer")
+    return int(raw)
+
+
+def _input_integer_vector(input_file: Path, name: str) -> tuple[int, int, int]:
+    raw = _input_raw_assignment(input_file, name)
+    fields = [field for field in re.split(r"[\s,]+", raw) if field]
+    if len(fields) != 3 or any(re.fullmatch(r"[+-]?\d+", field) is None for field in fields):
+        raise ValidationError(f"input {name} must contain exactly three integers")
+    return tuple(int(field) for field in fields)
+
+
+def _resolve_run_root_file(
+    run_root: Path,
+    configured_name: str,
+    expected_name: str,
+    legacy_name: str,
+    label: str,
+) -> Path:
+    if configured_name != expected_name:
+        raise ValidationError(f"formal aligned input must name {expected_name} exactly")
+    candidate = Path(configured_name)
+    resolved = (candidate if candidate.is_absolute() else run_root / candidate).resolve()
+    if resolved.parent != run_root or resolved.name != expected_name:
+        raise ValidationError(f"formal aligned {label} escapes the recovered run root")
+    _require_nonempty(resolved, f"aligned {label}")
+    legacy = run_root / legacy_name
+    if legacy.exists() and resolved.samefile(legacy):
+        raise ValidationError(f"aligned {label} aliases legacy run-root {legacy_name}")
+    return resolved
+
+
+def _parse_atom_rows(
+    path: Path,
+) -> tuple[tuple[str, tuple[float, float, float], str, tuple[str, ...]], ...]:
+    rows = []
+    for line_number, line in enumerate(_read(path, "aligned atom file").splitlines(), 1):
+        active = line.split("#", 1)[0].strip()
+        if not active:
+            continue
+        try:
+            fields = shlex.split(active, posix=False)
+        except ValueError as exc:
+            raise ValidationError(f"malformed atom row {line_number}: {exc}") from exc
+        if len(fields) < 5:
+            raise ValidationError(f"atom row {line_number} has fewer than five fields")
+        coordinates = tuple(
+            _number(fields[index], f"atom row {line_number} coordinate")
+            for index in range(1, 4)
+        )
+        rows.append((fields[0], coordinates, fields[4], tuple(fields[5:])))
+    return tuple(rows)
+
+
+def _validate_formal_atom(actual_path: Path) -> None:
+    reference_path = FORMAL_SAMPLE / FORMAL_ATOM_NAME
+    try:
+        reference_digest = hashlib.sha256(reference_path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise ValidationError(f"cannot read committed aligned atom reference: {exc}") from exc
+    if reference_digest != FORMAL_ATOM_SHA256:
+        raise ValidationError("committed aligned atom reference SHA-256 is not trusted")
+    actual = _parse_atom_rows(actual_path)
+    reference = _parse_atom_rows(reference_path)
+    if len(actual) != 64 or len(reference) != 64:
+        raise ValidationError("formal aligned atom geometry must contain exactly 64 rows")
+    cell = 13.44
+    tolerance = 1.0e-12
+    for index, (actual_row, reference_row) in enumerate(zip(actual, reference), 1):
+        if (actual_row[0], actual_row[2], actual_row[3]) != (
+            reference_row[0], reference_row[2], reference_row[3]
+        ):
+            raise ValidationError(f"aligned atom metadata differs at row {index}")
+        for actual_value, reference_value in zip(actual_row[1], reference_row[1]):
+            difference = abs((actual_value - reference_value) % cell)
+            if min(difference, cell - difference) > tolerance:
+                raise ValidationError(f"aligned atom coordinate differs at row {index}")
 
 
 def _resolve_symmetry_provenance(
     seed_dir: Path,
     input_file: Path | None,
     symmetry_file: Path | None,
-) -> Path:
+) -> tuple[Path, str]:
     run_root = _run_root(seed_dir)
-    named_path = None
-    if input_file is not None:
-        input_file = Path(input_file).resolve()
-        symmetry_name = _input_assignment(input_file, "wannier_symmetry_file")
-        atom_name = _input_assignment(input_file, "file_atom_coor")
-        if symmetry_name != "sym_sawf_aligned.dat":
-            raise ValidationError(
-                "formal aligned input must name sym_sawf_aligned.dat exactly"
-            )
-        if atom_name != "atom_sawf_aligned.dat":
-            raise ValidationError(
-                "formal aligned input must name atom_sawf_aligned.dat exactly"
-            )
-        candidate = Path(symmetry_name)
-        named_path = (candidate if candidate.is_absolute() else run_root / candidate).resolve()
+    if input_file is None:
+        raise ValidationError("formal aligned validation requires --input-file")
+    input_file = Path(input_file).resolve()
+    if input_file.parent != run_root or input_file.name != FORMAL_INPUT_NAME:
+        raise ValidationError(
+            f"formal input must be RUN_ROOT/{FORMAL_INPUT_NAME}"
+        )
+    _require_nonempty(input_file, "formal aligned input file")
+
+    expected_strings = {
+        "sysname": FORMAL_SYSNAME,
+        "wannier_site_symmetry": "file",
+        "wannier_symmetry_file": FORMAL_SYMMETRY_NAME,
+        "file_atom_coor": FORMAL_ATOM_NAME,
+        "yn_eigenexa": "y",
+    }
+    strings = {
+        name: _input_string_assignment(input_file, name)
+        for name in expected_strings
+    }
+    for name, expected in expected_strings.items():
+        if strings[name] != expected:
+            raise ValidationError(f"formal input {name} is not {expected!r}")
+
+    expected_integers = {
+        "wannier_num_wann": 576,
+        "wannier_num_bands": 664,
+        "nstate": 664,
+    }
+    for name, expected in expected_integers.items():
+        if _input_integer_assignment(input_file, name) != expected:
+            raise ValidationError(f"formal input {name} is not {expected}")
+    if any(value == 256 for value in (
+        _input_integer_assignment(input_file, "wannier_num_wann"),
+        _input_integer_assignment(input_file, "wannier_num_bands"),
+        _input_integer_assignment(input_file, "nstate"),
+    )):
+        raise ValidationError("formal aligned input regressed to a 256-state basis")
+
+    expected_vectors = {
+        "num_fragment(1:3)": (2, 2, 2),
+        "num_rgrid_buffer(1:3)": (6, 6, 6),
+        "num_rgrid(1:3)": (32, 32, 32),
+    }
+    for name, expected in expected_vectors.items():
+        if _input_integer_vector(input_file, name) != expected:
+            raise ValidationError(f"formal input {name} is not {expected}")
+
+    named_path = _resolve_run_root_file(
+        run_root, strings["wannier_symmetry_file"], FORMAL_SYMMETRY_NAME,
+        "sym.dat", "symmetry file",
+    )
+    atom_path = _resolve_run_root_file(
+        run_root, strings["file_atom_coor"], FORMAL_ATOM_NAME,
+        "atom.dat", "atom file",
+    )
+    _validate_formal_atom(atom_path)
 
     explicit_path = None
     if symmetry_file is not None:
         candidate = Path(symmetry_file)
         explicit_path = (candidate if candidate.is_absolute() else run_root / candidate).resolve()
 
-    if named_path is None and explicit_path is None:
-        raise ValidationError(
-            "formal aligned validation requires --input-file or --symmetry-file provenance"
-        )
-    if named_path is not None and explicit_path is not None and named_path != explicit_path:
+    if explicit_path is not None and named_path != explicit_path:
         raise ValidationError("explicit symmetry file differs from the input-file setting")
-    resolved = named_path if named_path is not None else explicit_path
+    resolved = named_path
     if resolved.parent != run_root or resolved.name != "sym_sawf_aligned.dat":
         raise ValidationError(
             "formal aligned symmetry must be the dedicated run-root sym_sawf_aligned.dat"
@@ -236,7 +379,7 @@ def _resolve_symmetry_provenance(
     if legacy.exists() and resolved.exists() and resolved.samefile(legacy):
         raise ValidationError("aligned symmetry file aliases legacy run-root sym.dat")
     _require_nonempty(resolved, "aligned symmetry file")
-    return resolved
+    return resolved, strings["sysname"]
 
 
 def _validate_symmetry_file(sym_path: Path, expected_operations: int) -> None:
@@ -445,6 +588,8 @@ def validate_integration(
 ) -> None:
     if expected_operations <= 0 or expected_bands <= 0:
         raise ValidationError("expected operation and band counts must be positive")
+    if expected_operations != 2 or expected_bands != 664:
+        raise ValidationError("formal aligned C64 gate requires exactly 2 operations / 664 bands")
     log_text = _read(log_path, "SALMON integration log")
     relevant = "\n".join(line for line in log_text.splitlines()
                          if "SAWF" in line or "WANNIER" in line)
@@ -452,9 +597,11 @@ def validate_integration(
         raise ValidationError("SAWF/Wannier integration log contains NaN or Inf")
 
     seed_dir, seed_name, _ = _seed_location(log_text)
-    symmetry_path = _resolve_symmetry_provenance(
+    symmetry_path, input_sysname = _resolve_symmetry_provenance(
         seed_dir, input_file, symmetry_file
     )
+    if seed_name != input_sysname:
+        raise ValidationError("Wannier90 run seed differs from formal input sysname")
     _validate_symmetry_file(symmetry_path, expected_operations)
     token = _validate_provenance(log_text, seed_dir, expected_bands)
     operation_count, tolerance = _validate_operations(log_text, expected_operations)
@@ -502,26 +649,35 @@ def _write_good_fixture(
         (directory / "wavefunctions_wannier_seed.provenance").write_text(
             f"-22022220 1\n{token}\n8 {fragment} 1 400 {expected_bands}\n72\n"
         )
-    seed = f"c64_dc_pseudo_sawf_aligned_nw576_nb{expected_bands}"
-    (root / "sym_sawf_aligned.dat").write_text(
+    seed = FORMAL_SYSNAME
+    (root / FORMAL_SYMMETRY_NAME).write_text(
         "# Generated by align_periodic_structure_to_fragments.py\n"
         "# translation=11/64 11/64 11/64\n"
         "# buffer=6 6 6\n"
         "1 0 0 0\n0 1 0 0\n0 0 1 0\n"
         "-1 0 0 0.46875\n0 -1 0 0.46875\n0 0 -1 0.46875\n"
     )
-    (root / "inputfile").write_text(
+    (root / FORMAL_ATOM_NAME).write_bytes(
+        (FORMAL_SAMPLE / FORMAL_ATOM_NAME).read_bytes()
+    )
+    (root / FORMAL_INPUT_NAME).write_text(
         "&control\n"
         f"  sysname = '{seed}'\n/\n"
         "&dc\n"
+        "  num_fragment(1:3) = 2,2,2\n"
+        "  num_rgrid_buffer(1:3) = 6,6,6\n"
         "  wannier_num_wann = 576\n"
         f"  wannier_num_bands = {expected_bands}\n"
         "  wannier_site_symmetry = 'file'\n"
-        "  wannier_symmetry_file = 'sym_sawf_aligned.dat',\n"
+        f"  wannier_symmetry_file = '{FORMAL_SYMMETRY_NAME}',\n"
         "  wannier_symmetry_tolerance = 1.0d-6\n/\n"
+        "&parallel\n"
+        "  yn_eigenexa = 'y'\n/\n"
         "&system\n"
         f"  nstate = {expected_bands}\n"
-        "  file_atom_coor = 'atom_sawf_aligned.dat'\n/\n"
+        f"  file_atom_coor = '{FORMAL_ATOM_NAME}'\n/\n"
+        "&rgrid\n"
+        "  num_rgrid(1:3) = 32,32,32\n/\n"
     )
     (seed_dir / f"{seed}.dmn").write_text(
         "SALMON SAWF integration fixture\n"
@@ -587,8 +743,9 @@ def self_test() -> None:
         expected_operations = 2
         expected_bands = 664
         log = _write_good_fixture(root, expected_operations, expected_bands)
-        input_file = root / "inputfile"
-        symmetry_file = root / "sym_sawf_aligned.dat"
+        input_file = root / FORMAL_INPUT_NAME
+        symmetry_file = root / FORMAL_SYMMETRY_NAME
+        atom_file = root / FORMAL_ATOM_NAME
         validate_integration(
             log, expected_operations, expected_bands,
             input_file=input_file, symmetry_file=symmetry_file,
@@ -596,9 +753,16 @@ def self_test() -> None:
         validate_integration(
             log, expected_operations, expected_bands, input_file=input_file
         )
-        validate_integration(
-            log, expected_operations, expected_bands, symmetry_file=symmetry_file
-        )
+
+        try:
+            validate_integration(
+                log, expected_operations, expected_bands,
+                symmetry_file=symmetry_file,
+            )
+        except ValidationError:
+            pass
+        else:
+            raise AssertionError("self-test accepted explicit symmetry without input")
 
         original = log.read_text()
         seed_dir = root / "data_dcdft/total"
@@ -784,7 +948,8 @@ def self_test() -> None:
         input_file.write_text(original_input)
         try:
             validate_integration(
-                log, expected_operations, expected_bands, symmetry_file=legacy_sym
+                log, expected_operations, expected_bands,
+                input_file=input_file, symmetry_file=legacy_sym,
             )
         except ValidationError:
             pass
@@ -796,7 +961,8 @@ def self_test() -> None:
         sym_path.hardlink_to(legacy_sym)
         try:
             validate_integration(
-                log, expected_operations, expected_bands, symmetry_file=sym_path
+                log, expected_operations, expected_bands,
+                input_file=input_file, symmetry_file=sym_path,
             )
         except ValidationError:
             pass
@@ -804,6 +970,102 @@ def self_test() -> None:
             raise AssertionError("self-test accepted hard-link alias to legacy sym.dat")
         sym_path.unlink()
         sym_path.write_text(original_sym)
+
+        input_mutations = {
+            "sysname mismatch": original_input.replace(FORMAL_SYSNAME, "misleading_seed", 1),
+            "site symmetry disabled": original_input.replace(
+                "wannier_site_symmetry = 'file'", "wannier_site_symmetry = 'none'", 1
+            ),
+            "site symmetry case mismatch": original_input.replace(
+                "wannier_site_symmetry = 'file'", "wannier_site_symmetry = 'FILE'", 1
+            ),
+            "legacy atom name": original_input.replace(FORMAL_ATOM_NAME, "atom.dat", 1),
+            "atom path traversal": original_input.replace(
+                FORMAL_ATOM_NAME, f"../{FORMAL_ATOM_NAME}", 1
+            ),
+            "256 Wannier functions": original_input.replace(
+                "wannier_num_wann = 576", "wannier_num_wann = 256", 1
+            ),
+            "256 bands": original_input.replace(
+                "wannier_num_bands = 664", "wannier_num_bands = 256", 1
+            ),
+            "256 states": original_input.replace("nstate = 664", "nstate = 256", 1),
+            "wrong fragments": original_input.replace(
+                "num_fragment(1:3) = 2,2,2", "num_fragment(1:3) = 1,2,2", 1
+            ),
+            "wrong buffer": original_input.replace(
+                "num_rgrid_buffer(1:3) = 6,6,6",
+                "num_rgrid_buffer(1:3) = 5,6,6",
+                1,
+            ),
+            "wrong mesh": original_input.replace(
+                "num_rgrid(1:3) = 32,32,32", "num_rgrid(1:3) = 24,32,32", 1
+            ),
+            "EigenExa disabled": original_input.replace(
+                "yn_eigenexa = 'y'", "yn_eigenexa = 'n'", 1
+            ),
+        }
+        for label, broken in input_mutations.items():
+            input_file.write_text(broken)
+            reject(label)
+        input_file.write_text(original_input)
+
+        atom_contents = atom_file.read_bytes()
+        atom_file.unlink()
+        reject("missing aligned atom")
+        atom_file.write_bytes((FORMAL_SAMPLE / "atom.dat").read_bytes())
+        reject("unshifted aligned atom")
+        atom_file.write_bytes(
+            atom_contents.replace(b"2.31", b"2.32", 1)
+        )
+        reject("stale aligned atom coordinate")
+        atom_file.write_bytes(atom_contents)
+
+        legacy_atom = root / "atom.dat"
+        legacy_atom.write_bytes(atom_contents)
+        atom_file.unlink()
+        atom_file.hardlink_to(legacy_atom)
+        reject("aligned atom hard-link alias to legacy atom.dat")
+        atom_file.unlink()
+        atom_file.write_bytes(atom_contents)
+
+        global FORMAL_ATOM_SHA256
+        expected_atom_sha256 = FORMAL_ATOM_SHA256
+        FORMAL_ATOM_SHA256 = "0" * 64
+        reject("untrusted committed atom reference")
+        FORMAL_ATOM_SHA256 = expected_atom_sha256
+
+        external_directory = root / "external"
+        external_directory.mkdir()
+        external_input = external_directory / FORMAL_INPUT_NAME
+        external_input.write_text(original_input)
+        try:
+            validate_integration(
+                log, expected_operations, expected_bands,
+                input_file=external_input, symmetry_file=symmetry_file,
+            )
+        except ValidationError:
+            pass
+        else:
+            raise AssertionError("self-test accepted external formal input")
+
+        for bad_seed in ("../seed", "/absolute/seed", "seed.name", r"folder\seed"):
+            bad_log = original.replace(f"'{seed}'", f"'{bad_seed}'", 1)
+            try:
+                _seed_location(bad_log)
+            except ValidationError:
+                pass
+            else:
+                raise AssertionError(f"self-test accepted unsafe seed {bad_seed!r}")
+
+        renamed_seed = "misleading_seed"
+        for suffix in ("dmn", "win", "wout", "chk"):
+            (seed_dir / f"{renamed_seed}.{suffix}").write_bytes(
+                (seed_dir / f"{seed}.{suffix}").read_bytes()
+            )
+        log.write_text(original.replace(f"'{seed}'", f"'{renamed_seed}'", 1))
+        reject("run seed differs from input sysname")
+        log.write_text(original)
 
         sidecar = root / "data_dcdft/fragments/000008/wavefunctions_wannier_seed.provenance"
         original_sidecar = sidecar.read_text()
@@ -839,16 +1101,16 @@ def main() -> None:
         "--input-file",
         type=Path,
         help=(
-            "SALMON input whose wannier_symmetry_file identifies the aligned "
-            "symmetry file relative to the recovered run root"
+            "required run-root formal SALMON input binding sysname, aligned "
+            "atom geometry, and symmetry provenance"
         ),
     )
     parser.add_argument(
         "--symmetry-file",
         type=Path,
         help=(
-            "explicit aligned symmetry path; relative paths are resolved "
-            "against the recovered run root"
+            "optional cross-check of the input-named aligned symmetry path; "
+            "relative paths are resolved against the recovered run root"
         ),
     )
     parser.add_argument("--self-test", action="store_true")
@@ -858,6 +1120,8 @@ def main() -> None:
         return
     if args.log is None:
         parser.error("log is required unless --self-test is used")
+    if args.input_file is None:
+        parser.error("--input-file is required for formal aligned validation")
     if args.expected_operations <= 0 or args.expected_bands <= 0:
         parser.error("--expected-operations and --expected-bands must be positive")
     try:
