@@ -179,7 +179,15 @@ Expected: FAIL because search/output behavior is absent.
 
 **Step 3: Implement deterministic search**
 
-Search a bounded rational translation lattice derived from the mesh and operation denominators. Sort candidates by wrapped Euclidean displacement, then lexicographically, so repeated runs choose the same valid translation. Evaluate the full supplied operation set for every candidate and stop at the first candidate satisfying atom, group, integer-grid, and whole-fragment conditions.
+Search a bounded rational translation lattice derived from the mesh and
+operation denominators.  Rank valid candidates first by the number of
+source fragments that every operation maps onto themselves, then by wrapped
+Euclidean displacement, then lexicographically.  This deliberately selects
+the C64 `a=(11/64)^3`, `q=(15,15,15)` placement, where each 16-point core is
+closed about its own half-grid center, over the shorter
+`a=(-5/64)^3`, `q=(31,31,31)` placement, which merely exchanges the two cores
+on each axis.  Evaluate the full supplied operation set before ranking so
+repeated runs choose the same globally compatible translation.
 
 If no candidate exists, exit nonzero with a diagnostic naming the first failing gate and do not create output files.
 
