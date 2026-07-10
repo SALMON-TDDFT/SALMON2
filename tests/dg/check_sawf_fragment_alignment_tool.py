@@ -5,7 +5,12 @@ from fractions import Fraction
 import importlib.util
 import itertools
 from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import time
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -222,6 +227,221 @@ class FragmentAlignmentTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "same-species.*bijection"):
             self.alignment.periodic_same_species_atom_bijection(inversion, atoms)
+
+    def test_metric_incompatible_finite_order_operation_is_rejected(self):
+        swap_xy = self.alignment.SymOp(
+            rotation=((0, 1, 0), (1, 0, 0), (0, 0, 1)),
+            translation=(0, 0, 0),
+        )
+
+        with self.assertRaisesRegex(ValueError, "lattice metric"):
+            self.alignment.validate_lattice_metric(swap_xy, (10, 12, 14))
+
+    def test_buffer_must_follow_signed_axis_permutation(self):
+        swap_xy = self.alignment.SymOp(
+            rotation=((0, 1, 0), (1, 0, 0), (0, 0, 1)),
+            translation=(0, 0, 0),
+        )
+
+        with self.assertRaisesRegex(ValueError, "buffer.*axis"):
+            self.alignment.validate_buffer_geometry(swap_xy, (4, 6, 8))
+        self.alignment.validate_buffer_geometry(swap_xy, (6, 6, 8))
+
+    def test_symmetry_parser_preserves_order_and_validates_groups(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            sym_path = Path(temporary) / "sym.dat"
+            sym_path.write_text(
+                "# identity then inversion\n"
+                " 1 0 0 0\n 0 1 0 0\n 0 0 1 0\n"
+                "-1 0 0 1/8\n 0 -1 0 1/8\n 0 0 -1 1/8\n",
+                encoding="ascii",
+            )
+            operations = self.alignment.parse_symmetry_file(sym_path)
+
+        self.assertEqual(len(operations), 2)
+        self.assertEqual(operations[0].rotation, self.alignment._IDENTITY)
+        self.assertEqual(operations[1].translation, (Fraction(1, 8),) * 3)
+        self.alignment.validate_symmetry_group(operations)
+
+    def test_symmetry_group_rejects_missing_products_and_duplicate_identity(self):
+        identity = self.alignment.SymOp(self.alignment._IDENTITY, (0, 0, 0))
+        quarter_turn = self.alignment.SymOp(
+            ((0, -1, 0), (1, 0, 0), (0, 0, 1)), (0, 0, 0)
+        )
+        with self.assertRaisesRegex(ValueError, "closure"):
+            self.alignment.validate_symmetry_group((identity, quarter_turn))
+        with self.assertRaisesRegex(ValueError, "identity.*exactly once"):
+            self.alignment.validate_symmetry_group((identity, identity))
+
+    def test_c64_search_selects_half_grid_center_and_is_deterministic(self):
+        atom_path = (
+            ROOT
+            / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/atom.dat"
+        )
+        sym_path = (
+            ROOT
+            / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/sym.dat"
+        )
+        atoms = self.alignment.parse_atom_file(atom_path, (Fraction("13.44"),) * 3)
+        operations = self.alignment.parse_symmetry_file(sym_path)
+
+        started = time.perf_counter()
+        first = self.alignment.find_fragment_compatible_translation(
+            atoms, operations, (Fraction("13.44"),) * 3,
+            (32, 32, 32), (2, 2, 2), (6, 6, 6)
+        )
+        second = self.alignment.find_fragment_compatible_translation(
+            atoms, operations, (Fraction("13.44"),) * 3,
+            (32, 32, 32), (2, 2, 2), (6, 6, 6)
+        )
+        elapsed = time.perf_counter() - started
+
+        self.assertEqual(len(atoms), 64)
+        self.assertEqual(first.translation, (Fraction(11, 64),) * 3)
+        self.assertEqual(first.operations[1].translation, (Fraction(15, 32),) * 3)
+        self.assertEqual(first.grid_maps[1].shift, (15, 15, 15))
+        self.assertEqual(
+            self.alignment.inversion_center_diagnostic(first.grid_maps[1]),
+            (Fraction(15, 2),) * 3,
+        )
+        self.assertEqual(first, second)
+        self.assertLess(elapsed, 10.0, f"two C64 searches took {elapsed:.3f} s")
+
+    def test_cli_publishes_atomically_and_preserves_inputs(self):
+        source_atom = (
+            ROOT
+            / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/atom.dat"
+        )
+        source_sym = (
+            ROOT
+            / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/sym.dat"
+        )
+        atom_before = source_atom.read_bytes()
+        sym_before = source_sym.read_bytes()
+        with tempfile.TemporaryDirectory() as temporary:
+            output_atom = Path(temporary) / "atom_sawf_aligned.dat"
+            output_sym = Path(temporary) / "sym_sawf_aligned.dat"
+            command = [
+                sys.executable, str(TOOL),
+                "--input-atom", str(source_atom),
+                "--input-sym", str(source_sym),
+                "--output-atom", str(output_atom),
+                "--output-sym", str(output_sym),
+                "--cell", "13.44", "13.44", "13.44",
+                "--mesh", "32", "32", "32",
+                "--fragments", "2", "2", "2",
+                "--buffer", "6", "6", "6",
+            ]
+            completed = subprocess.run(command, text=True, capture_output=True, check=False)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn("translation=11/64 11/64 11/64", completed.stdout)
+            self.assertIn("buffer=6 6 6", completed.stdout)
+            self.assertTrue(output_atom.read_text(encoding="ascii").startswith("  'C'"))
+            self.assertIn("buffer=6 6 6", output_sym.read_text(encoding="ascii"))
+            self.assertEqual(len(self.alignment.parse_atom_file(
+                output_atom, (Fraction("13.44"),) * 3
+            )), 64)
+
+            refused = subprocess.run(command, text=True, capture_output=True, check=False)
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn("already exists", refused.stderr)
+
+        self.assertEqual(source_atom.read_bytes(), atom_before)
+        self.assertEqual(source_sym.read_bytes(), sym_before)
+
+    def test_cli_failure_creates_no_partial_outputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary = Path(temporary)
+            atom_path = temporary / "atom.dat"
+            sym_path = temporary / "sym.dat"
+            output_atom = temporary / "aligned_atom.dat"
+            output_sym = temporary / "aligned_sym.dat"
+            atom_path.write_text("  'Si' 0.5 0 0 1\n  'C' 1.5 0 0 2\n", encoding="ascii")
+            sym_path.write_text(
+                "1 0 0 0\n0 1 0 0\n0 0 1 0\n"
+                "-1 0 0 0\n0 -1 0 0\n0 0 -1 0\n",
+                encoding="ascii",
+            )
+            command = [
+                sys.executable, str(TOOL),
+                "--input-atom", str(atom_path), "--input-sym", str(sym_path),
+                "--output-atom", str(output_atom), "--output-sym", str(output_sym),
+                "--cell", "2", "2", "2", "--mesh", "4", "4", "4",
+                "--fragments", "2", "2", "2", "--buffer", "1", "1", "1",
+            ]
+            completed = subprocess.run(command, text=True, capture_output=True, check=False)
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("same-species", completed.stderr)
+            self.assertFalse(output_atom.exists())
+            self.assertFalse(output_sym.exists())
+
+    def test_cli_force_still_rejects_an_output_that_aliases_an_input(self):
+        source_atom = (
+            ROOT
+            / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/atom.dat"
+        )
+        source_sym = (
+            ROOT
+            / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/sym.dat"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary = Path(temporary)
+            atom_path = temporary / "atom.dat"
+            sym_path = temporary / "sym.dat"
+            output_sym = temporary / "aligned_sym.dat"
+            atom_path.write_bytes(source_atom.read_bytes())
+            sym_path.write_bytes(source_sym.read_bytes())
+            atom_before = atom_path.read_bytes()
+            command = [
+                sys.executable, str(TOOL),
+                "--input-atom", str(atom_path), "--input-sym", str(sym_path),
+                "--output-atom", str(atom_path), "--output-sym", str(output_sym),
+                "--cell", "13.44", "13.44", "13.44",
+                "--mesh", "32", "32", "32", "--fragments", "2", "2", "2",
+                "--buffer", "6", "6", "6", "--force",
+            ]
+            completed = subprocess.run(command, text=True, capture_output=True, check=False)
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("dedicated", completed.stderr)
+            self.assertEqual(atom_path.read_bytes(), atom_before)
+            self.assertFalse(output_sym.exists())
+
+    def test_publication_failure_rolls_back_the_first_output(self):
+        atom = self.alignment.PeriodicAtom("C", (0, 0, 0), "'C'", "1")
+        identity = self.alignment.SymOp(self.alignment._IDENTITY, (0, 0, 0))
+        cell = (Fraction(2),) * 3
+        with tempfile.TemporaryDirectory() as temporary:
+            output_atom = Path(temporary) / "atom.dat"
+            output_sym = Path(temporary) / "sym.dat"
+            real_replace = self.alignment.os.replace
+            calls = 0
+
+            def fail_second_replace(source, destination):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise OSError("injected publication failure")
+                return real_replace(source, destination)
+
+            with mock.patch.object(self.alignment.os, "replace", fail_second_replace):
+                with self.assertRaisesRegex(OSError, "injected"):
+                    self.alignment._write_validated_outputs(
+                        output_atom,
+                        output_sym,
+                        self.alignment._render_atoms((atom,), cell),
+                        self.alignment._render_symmetry((identity,), (0, 0, 0), (1, 1, 1)),
+                        cell,
+                        (atom,),
+                        (identity,),
+                        Fraction(1, 10**12),
+                        False,
+                    )
+
+            self.assertFalse(output_atom.exists())
+            self.assertFalse(output_sym.exists())
 
 
 if __name__ == "__main__":
