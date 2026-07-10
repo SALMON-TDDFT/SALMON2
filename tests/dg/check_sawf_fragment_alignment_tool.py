@@ -15,6 +15,21 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 TOOL = ROOT / "tools" / "align_periodic_structure_to_fragments.py"
+C64_SYMMETRY_TEXT = (
+    "# Identity and inversion about fractional position (1/16, 1/16, 1/16).\n"
+    " 1  0  0  0.000\n"
+    " 0  1  0  0.000\n"
+    " 0  0  1  0.000\n"
+    "-1  0  0  0.125\n"
+    " 0 -1  0  0.125\n"
+    " 0  0 -1  0.125\n"
+)
+
+
+def write_c64_symmetry(directory, name="sym.dat"):
+    path = Path(directory) / name
+    path.write_text(C64_SYMMETRY_TEXT, encoding="ascii")
+    return path
 
 
 def load_tool():
@@ -278,12 +293,11 @@ class FragmentAlignmentTests(unittest.TestCase):
             ROOT
             / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/atom.dat"
         )
-        sym_path = (
-            ROOT
-            / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/sym.dat"
-        )
         atoms = self.alignment.parse_atom_file(atom_path, (Fraction("13.44"),) * 3)
-        operations = self.alignment.parse_symmetry_file(sym_path)
+        with tempfile.TemporaryDirectory() as temporary:
+            operations = self.alignment.parse_symmetry_file(
+                write_c64_symmetry(temporary)
+            )
 
         started = time.perf_counter()
         first = self.alignment.find_fragment_compatible_translation(
@@ -312,13 +326,10 @@ class FragmentAlignmentTests(unittest.TestCase):
             ROOT
             / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/atom.dat"
         )
-        source_sym = (
-            ROOT
-            / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/sym.dat"
-        )
         atom_before = source_atom.read_bytes()
-        sym_before = source_sym.read_bytes()
         with tempfile.TemporaryDirectory() as temporary:
+            source_sym = write_c64_symmetry(temporary, "input_sym.dat")
+            sym_before = source_sym.read_bytes()
             output_atom = Path(temporary) / "atom_sawf_aligned.dat"
             output_sym = Path(temporary) / "sym_sawf_aligned.dat"
             command = [
@@ -346,9 +357,9 @@ class FragmentAlignmentTests(unittest.TestCase):
             refused = subprocess.run(command, text=True, capture_output=True, check=False)
             self.assertNotEqual(refused.returncode, 0)
             self.assertIn("already exists", refused.stderr)
+            self.assertEqual(source_sym.read_bytes(), sym_before)
 
         self.assertEqual(source_atom.read_bytes(), atom_before)
-        self.assertEqual(source_sym.read_bytes(), sym_before)
 
     def test_cli_failure_creates_no_partial_outputs(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -382,17 +393,13 @@ class FragmentAlignmentTests(unittest.TestCase):
             ROOT
             / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/atom.dat"
         )
-        source_sym = (
-            ROOT
-            / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/sym.dat"
-        )
         with tempfile.TemporaryDirectory() as temporary:
             temporary = Path(temporary)
             atom_path = temporary / "atom.dat"
             sym_path = temporary / "sym.dat"
             output_sym = temporary / "aligned_sym.dat"
             atom_path.write_bytes(source_atom.read_bytes())
-            sym_path.write_bytes(source_sym.read_bytes())
+            sym_path.write_text(C64_SYMMETRY_TEXT, encoding="ascii")
             atom_before = atom_path.read_bytes()
             command = [
                 sys.executable, str(TOOL),
