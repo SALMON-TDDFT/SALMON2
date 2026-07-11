@@ -86,6 +86,32 @@ module bloch_solver_ssbe
     complex(8), allocatable, save :: gh_rho(:,:,:)    ! persistent rho_full (nb,nb,nk); non-needed entries stay 0 from build
     complex(8), allocatable, save :: gh_Dq(:,:,:,:)   ! persistent Dq (nb,nb,3,nk); only local slice defined per call
 
+    ! --- integral (covariant-Houston) transport cache (sbe_lg_degen='gicov_int') ---
+    ! Built ONCE by build_gicov_integral_cache from the whole-pulse trajectory:
+    ! the driven reduced axis, the pulse span j_max, and -- for every LOCAL k and
+    ! every integer shift n in [-j_max,j_max] -- the bounded transported band-
+    ! energy matrix H~_n and the three transported velocity components v~_{n,i}.
+    ! The single-step Wilson links (gs%u_transport) are replicated full-nk on
+    ! every rank, so the transport chain W(kappa,kappa+n) is assembled ENTIRELY
+    ! ON-RANK (no halo): gi_iknb_p/gi_iknb_m are the +/- reduced-axis neighbour
+    ! index tables.  Cache is complex(8) over the LOCAL k-slice only.
+    logical,    save :: gi_built = .false.
+    integer,    save :: gi_nb = 0, gi_axis = 0, gi_jmax = 0
+    integer,    save :: gi_ikmin = 0, gi_ikmax = 0
+    complex(8), allocatable, save :: gi_Ht(:,:,:,:)      ! (nb,nb,-jmax:jmax, ik_min:ik_max)
+    complex(8), allocatable, save :: gi_vt(:,:,:,:,:)    ! (nb,nb,3,-jmax:jmax, ik_min:ik_max)
+    integer,    allocatable, save :: gi_iknb_p(:), gi_iknb_m(:)   ! (nk) +/- driven-axis neighbour
+    ! per-thread eigensolver work bank (heap allocated ONCE, outside the OMP
+    ! k-loop -- frtpx discipline: no per-thread automatic arrays, no heap in loop)
+    real(8),    allocatable, save :: gi_w_eps(:,:)       ! (nb, 0:nth-1)
+    real(8),    allocatable, save :: gi_w_rw(:,:)        ! (3*nb, 0:nth-1)
+    complex(8), allocatable, save :: gi_w_P(:,:,:), gi_w_R(:,:,:)   ! (nb,nb,0:nth-1)
+    complex(8), allocatable, save :: gi_w_cw(:,:)        ! (lcwork, 0:nth-1)
+    complex(8), allocatable, save :: gi_w_H(:,:,:)       ! (nb,nb,0:nth-1) interpolated H~
+    complex(8), allocatable, save :: gi_w_rout(:,:,:)    ! (nb,nb,0:nth-1) step output
+    complex(8), allocatable, save :: gi_w_v(:,:,:,:)     ! (nb,nb,3,0:nth-1) interpolated v~
+    integer,    save :: gi_lcwork = 0
+
 contains
 
   !-------------------------------------------------------------------
@@ -1983,6 +2009,245 @@ contains
   end subroutine load_stage_qnm
 
 end subroutine dt_evolve_bloch_lg_gicov
+
+!===================================================================
+! Integral (covariant-Houston) transport propagation (sbe_lg_degen='gicov_int').
+!
+! Driven by realtime_ssbe, which analyses the WHOLE precomputed field
+! trajectory: it confirms single-axis linear polarization (gicov_int_axis_single
+! on q_i(t) = num_kgrid(i)*(a(t).a_i)/2pi), fixes the driven reduced axis and
+! the pulse span j_max = ceil(max_t|q_axis(t)|), builds the transport cache
+! once, then per step propagates with the moving-frame shift q_axis(t) evaluated
+! at the STEP MIDPOINT.  The co-moving density rho~ lives in place in sbe%rho
+! (== the physical rho on the X-full path: prepare_qnm set exp_iphi=1, so
+! qnm==rho; the initial rho~(0)=rho(0)=gs occupation since a(0)=0 -> W=I).
+!
+! On-rank only: gs%u_transport (the single-step Wilson links) is replicated
+! full-nk on every rank, so the transport chain W(kappa,kappa+n) is assembled
+! entirely locally -- no halo (contrast gicov_rhs, which halos the DENSITY).
+!===================================================================
+subroutine build_gicov_integral_cache(sbe, gs, axis, jmax, icomm)
+  use salmon_global, only: num_kgrid
+  use degenerate_block_ssbe, only: build_ik_neighbor, polar_unitary
+  use gicov_integral_ssbe, only: gicov_int_transport_op, gicov_int_cache_bytes
+  !$ use omp_lib
+  implicit none
+  type(s_sbe_bloch_solver), intent(in) :: sbe
+  type(s_sbe_gs_info), intent(in) :: gs
+  integer, intent(in) :: axis, jmax, icomm
+  integer :: nb, nk, ik, n, i, istep, kk, krem, ierr, nth
+  integer :: bplus(3, 1), bminus(3, 1)
+  integer, allocatable :: nbtab(:, :)
+  complex(8), allocatable :: Wc(:, :), acc(:, :), Ohost(:, :), Yt(:, :)
+  real(8) :: sigma_min
+  integer(8) :: nbytes
+
+  nb = sbe%nb;  nk = sbe%nk
+  gi_nb = nb;  gi_axis = axis;  gi_jmax = jmax
+  gi_ikmin = sbe%ik_min;  gi_ikmax = sbe%ik_max
+
+  ! +/- driven-axis neighbour tables on the reduced uniform grid
+  bplus = 0;   bplus(axis, 1) = 1
+  bminus = 0;  bminus(axis, 1) = -1
+  allocate(nbtab(1, nk))
+  if (.not. allocated(gi_iknb_p)) allocate(gi_iknb_p(nk))
+  if (.not. allocated(gi_iknb_m)) allocate(gi_iknb_m(nk))
+  call build_ik_neighbor(num_kgrid, bplus,  1, nk, nbtab);  gi_iknb_p(:) = nbtab(1, :)
+  call build_ik_neighbor(num_kgrid, bminus, 1, nk, nbtab);  gi_iknb_m(:) = nbtab(1, :)
+  deallocate(nbtab)
+
+  ! transport cache over the LOCAL k-slice only (never full nk); int64 sizing.
+  nbytes = gicov_int_cache_bytes(jmax, nb, gi_ikmax - gi_ikmin + 1)
+  allocate(gi_Ht(nb, nb, -jmax:jmax, gi_ikmin:gi_ikmax), stat=ierr)
+  if (ierr /= 0) then
+    write(*, '(a,i0,a)') "ERROR build_gicov_integral_cache: gi_Ht alloc failed (", &
+      & int(nbytes / 2_8**20, 4), " MiB/rank requested)"
+    error stop 1
+  end if
+  allocate(gi_vt(nb, nb, 3, -jmax:jmax, gi_ikmin:gi_ikmax), stat=ierr)
+  if (ierr /= 0) then
+    write(*, '(a)') "ERROR build_gicov_integral_cache: gi_vt alloc failed"
+    error stop 1
+  end if
+
+  allocate(Wc(nb, nb), acc(nb, nb), Ohost(nb, nb), Yt(nb, nb))
+  do ik = gi_ikmin, gi_ikmax
+    do n = -jmax, jmax
+      ! W(kappa, kappa+n) by walking |n| single-step links, all on-rank
+      acc = (0d0, 0d0)
+      do i = 1, nb
+        acc(i, i) = (1d0, 0d0)
+      end do
+      kk = ik
+      if (n > 0) then
+        do istep = 1, n
+          acc = matmul(acc, gs%u_transport(:, :, axis, kk))
+          kk = gi_iknb_p(kk)
+        end do
+      else if (n < 0) then
+        do istep = 1, -n
+          kk = gi_iknb_m(kk)
+          acc = matmul(acc, conjg(transpose(gs%u_transport(:, :, axis, kk))))
+        end do
+      end if
+      krem = kk
+      call polar_unitary(acc, nb, Wc, sigma_min, ierr)
+      if (ierr /= 0) Wc = acc                 ! transient window leak: keep raw product
+      ! transported band-energy matrix H~_n = Wc diag(eigen(remote)) Wc^dag
+      Ohost = (0d0, 0d0)
+      do i = 1, nb
+        Ohost(i, i) = cmplx(gs%eigen(i, krem), 0d0, 8)
+      end do
+      call gicov_int_transport_op(Wc, Ohost, nb, Yt)
+      gi_Ht(:, :, n, ik) = Yt
+      ! transported velocity v~_{n,i} = Wc v_i(remote) Wc^dag, i=1..3
+      do i = 1, 3
+        if (sbe%flag_vnl_correction) then
+          Ohost = gs%p_tm_matrix(:, :, i, krem) + gs%rvnl_tm_matrix(:, :, i, krem)
+        else
+          Ohost = gs%p_tm_matrix(:, :, i, krem)
+        end if
+        call gicov_int_transport_op(Wc, Ohost, nb, Yt)
+        gi_vt(:, :, i, n, ik) = Yt
+      end do
+    end do
+  end do
+  deallocate(Wc, acc, Ohost, Yt)
+
+  ! per-thread eigensolver + interp work bank: allocated ONCE here, OUTSIDE any
+  ! OMP loop (frtpx: no heap inside the loop, no per-thread automatic arrays)
+  nth = 1
+  !$ nth = omp_get_max_threads()
+  gi_lcwork = max(1, 2 * nb - 1)
+  allocate(gi_w_eps(nb, 0:nth-1), gi_w_rw(max(1, 3*nb-2), 0:nth-1))
+  allocate(gi_w_P(nb, nb, 0:nth-1), gi_w_R(nb, nb, 0:nth-1))
+  allocate(gi_w_cw(gi_lcwork, 0:nth-1))
+  allocate(gi_w_H(nb, nb, 0:nth-1), gi_w_rout(nb, nb, 0:nth-1), gi_w_v(nb, nb, 3, 0:nth-1))
+
+  gi_built = .true.
+end subroutine build_gicov_integral_cache
+
+! Midpoint-frozen exact-exponential step of the whole local k-slice.  q_mid =
+! q_axis(t + dt/2) (reduced-mesh index units); the kernel evaluates x=kappa-a
+! via floor()+linear interpolation of the bounded cached H~ and steps each
+! k-block exactly with the moving-gap-gated T2.
+subroutine dt_evolve_bloch_lg_integral(sbe, gs, q_mid, dt)
+  use salmon_global, only: t_2, sbe_t2_gate_shape, sbe_t2_gate_theta, &
+                            sbe_t2_gate_width, sbe_lg_degen_floor
+  use gicov_integral_ssbe, only: gicov_int_floor_shift, gicov_int_interp, gicov_int_step_k
+  !$ use omp_lib
+  implicit none
+  type(s_sbe_bloch_solver), intent(inout) :: sbe
+  type(s_sbe_gs_info), intent(in) :: gs
+  real(8), intent(in) :: q_mid, dt
+  integer :: ik, nb, n_int, tid
+  real(8) :: frac, gamma
+
+  if (.not. gi_built) then
+    write(*, '(a)') "ERROR(dt_evolve_bloch_lg_integral): transport cache not built."
+    error stop 1
+  end if
+  nb = sbe%nb
+  gamma = 1d0 / t_2
+  call gicov_int_floor_shift(q_mid, 1d0, n_int, frac)
+  if (n_int < -gi_jmax .or. n_int + 1 > gi_jmax) then
+    write(*, '(a,i0,a,i0)') "ERROR(dt_evolve_bloch_lg_integral): mesh shift ", n_int, &
+      & " exceeds cached span +/-", gi_jmax
+    error stop 1
+  end if
+
+  !$omp parallel do default(shared) private(ik, tid)
+  do ik = gi_ikmin, gi_ikmax
+    tid = 0
+    !$ tid = omp_get_thread_num()
+    call gicov_int_interp(gi_Ht(:, :, n_int, ik), gi_Ht(:, :, n_int + 1, ik), &
+                        & frac, nb, gi_w_H(:, :, tid))
+    call gicov_int_step_k(gi_w_H(:, :, tid), sbe%rho(:, :, ik), nb, dt, gamma, &
+                        & sbe_t2_gate_shape, sbe_t2_gate_theta, sbe_t2_gate_width, &
+                        & sbe_lg_degen_floor, gi_w_eps(:, tid), gi_w_P(:, :, tid), &
+                        & gi_w_R(:, :, tid), gi_w_cw(:, tid), gi_lcwork, gi_w_rw(:, tid), &
+                        & gi_w_rout(:, :, tid))
+    sbe%rho(:, :, ik) = gi_w_rout(:, :, tid)
+    ! X-full carries qnm == rho (exp_iphi=1), so mirror the co-moving density
+    ! into qnm_new -- the length-gauge calc_trace / diagnostics read its diagonal.
+    sbe%qnm_new(:, :, ik) = gi_w_rout(:, :, tid)
+  end do
+  !$omp end parallel do
+end subroutine dt_evolve_bloch_lg_integral
+
+! Integral-form current J_i = (1/Omega sum w) sum_kappa w Tr[rho~ v~_i], with
+! v~_i the cached TRANSPORTED velocity interpolated to x = kappa - a(t).  No
+! D.A subtraction (that is a velocity-gauge concept; the length gauge is Tr(v rho)).
+subroutine calc_current_bloch_lg_integral(sbe, gs, q_now, jmat, icomm)
+  use gicov_integral_ssbe, only: gicov_int_floor_shift, gicov_int_interp, gicov_int_current_k
+  !$ use omp_lib
+  implicit none
+  type(s_sbe_bloch_solver), intent(in) :: sbe
+  type(s_sbe_gs_info), intent(in) :: gs
+  real(8), intent(in) :: q_now
+  real(8), intent(out) :: jmat(3)
+  integer, intent(in) :: icomm
+  integer :: ik, nb, n_int, tid, i
+  real(8) :: frac, jk(3), tmp1(3), tmp(3)
+
+  nb = sbe%nb
+  call gicov_int_floor_shift(q_now, 1d0, n_int, frac)
+  if (n_int < -gi_jmax .or. n_int + 1 > gi_jmax) then
+    write(*, '(a)') "ERROR(calc_current_bloch_lg_integral): mesh shift exceeds cache."
+    error stop 1
+  end if
+  tmp1(:) = 0d0
+  !$omp parallel do default(shared) private(ik, tid, i, jk) reduction(+:tmp1)
+  do ik = gi_ikmin, gi_ikmax
+    tid = 0
+    !$ tid = omp_get_thread_num()
+    do i = 1, 3
+      call gicov_int_interp(gi_vt(:, :, i, n_int, ik), gi_vt(:, :, i, n_int + 1, ik), &
+                          & frac, nb, gi_w_v(:, :, i, tid))
+    end do
+    call gicov_int_current_k(sbe%rho(:, :, ik), gi_w_v(:, :, :, tid), nb, jk)
+    tmp1(1:3) = tmp1(1:3) + gs%kweight(ik) * jk(1:3)
+  end do
+  !$omp end parallel do
+  call comm_summation(tmp1, tmp, 3, icomm)
+  jmat(1:3) = tmp(1:3) / sum(gs%kweight(:)) / gs%volume
+end subroutine calc_current_bloch_lg_integral
+
+! Instantaneous-eigenbasis band populations at x = kappa - a(t) (yn_sbe_out_occ).
+! n_a(x) = (P^dag rho~ P)_aa summed over the local k-slice and reduced; the
+! caller sums over degenerate blocks for a basis-invariant readout.  Diagonal
+! diag(rho~) would be basis-dependent under transport, so it is NOT used.
+subroutine calc_band_population_integral(sbe, gs, q_now, nex_b, icomm)
+  use gicov_integral_ssbe, only: gicov_int_floor_shift, gicov_int_interp, gicov_int_occupation_k
+  implicit none
+  type(s_sbe_bloch_solver), intent(in) :: sbe
+  type(s_sbe_gs_info), intent(in) :: gs
+  real(8), intent(in) :: q_now
+  real(8), intent(out) :: nex_b(1:sbe%nb)
+  integer, intent(in) :: icomm
+  integer :: ik, nb, n_int, ib
+  real(8) :: frac
+  real(8), allocatable :: acc(:), nocc(:)
+
+  nb = sbe%nb
+  call gicov_int_floor_shift(q_now, 1d0, n_int, frac)
+  ! serial over k (periodic diagnostic, not the propagation hot path): reuses
+  ! the thread-0 work slot; a heap 'nocc' allocated OUTSIDE any OMP region.
+  allocate(acc(nb), nocc(nb));  acc(:) = 0d0
+  do ik = gi_ikmin, gi_ikmax
+    call gicov_int_interp(gi_Ht(:, :, n_int, ik), gi_Ht(:, :, n_int + 1, ik), &
+                        & frac, nb, gi_w_H(:, :, 0))
+    call gicov_int_occupation_k(gi_w_H(:, :, 0), sbe%rho(:, :, ik), nb, &
+                              & gi_w_eps(:, 0), gi_w_P(:, :, 0), gi_w_R(:, :, 0), &
+                              & gi_w_cw(:, 0), gi_lcwork, gi_w_rw(:, 0), nocc)
+    do ib = 1, nb
+      acc(ib) = acc(ib) + gs%kweight(ik) * nocc(ib)
+    end do
+  end do
+  call comm_summation(acc, nex_b, nb, icomm)
+  nex_b(1:nb) = nex_b(1:nb) / sum(gs%kweight(:))
+  deallocate(acc, nocc)
+end subroutine calc_band_population_integral
 
 subroutine calc_current_bloch_lg(sbe, gs, jmat, icomm)
     use salmon_global, only: sbe_lg_degen

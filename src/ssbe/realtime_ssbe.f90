@@ -12,6 +12,8 @@ subroutine main_realtime_ssbe(icomm)
     use datafile_ssbe
     use input_checker_sbe
     use filesystem, only: get_filehandle
+    use sbe_lg_mode_ssbe, only: uses_integral_gicov
+    use gicov_integral_ssbe, only: gicov_int_axis_single, gicov_int_jmax
     implicit none
     integer, intent(in) :: icomm
 
@@ -35,6 +37,11 @@ subroutine main_realtime_ssbe(icomm)
     real(8), allocatable :: nex_b(:), edist(:)
     real(8) :: ed_lo, ed_de, ed_sigma
     integer :: ed_nbin
+    ! integral (covariant-Houston) transport mode (sbe_lg_degen='gicov_int')
+    logical :: gi_mode, gi_ok_l
+    integer :: gi_axis_l, gi_jmax_l, jt
+    real(8) :: q_mid, q_now, a_sh(3), qmx, tol_ax, twopi_l
+    real(8), allocatable :: q_all(:, :)
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
@@ -107,6 +114,44 @@ subroutine main_realtime_ssbe(icomm)
     if (yn_sbe_vnl_exact == 'y') then
         call sbe_vnl_validate_trajectory(gs, Ac_ext_t, -1, nt+1, irank)
     end if
+
+    ! Integral (covariant-Houston) transport setup (sbe_lg_degen='gicov_int'):
+    ! analyse the WHOLE trajectory up front.  The reduced-mesh displacement is
+    !   q_i(t) = num_kgrid(i) * (a(t) . a_i) / 2pi,   a(t) = -[A_ext(t)-A_ext(0)],
+    ! (SALMON field convention E = -dA/dt, so da/dt = E; the mesh shift a(t) is
+    ! the negative shifted external vector potential -- getting this sign wrong
+    ! is a pi phase flip).  Require exactly one reduced axis to move over the
+    ! entire pulse (runtime guard, not a deck-vector test), fix j_max from its
+    ! peak span, and build the transport cache once.
+    gi_mode = uses_integral_gicov(sbe_lg_degen)
+    gi_axis_l = 0;  gi_jmax_l = 0;  twopi_l = 2d0 * acos(-1d0)
+    if (gi_mode) then
+        allocate(q_all(3, 0:nt))
+        do jt = 0, nt
+            a_sh(1:3) = -(Ac_ext_t(1:3, jt) - Ac_ext_t(1:3, 0))
+            do i = 1, 3
+                q_all(i, jt) = dble(num_kgrid(i)) &
+                    & * dot_product(a_sh(1:3), gs%a_matrix(1:3, i)) / twopi_l
+            end do
+        end do
+        qmx = maxval(abs(q_all))
+        tol_ax = max(1d-12, 1d-8 * qmx)
+        call gicov_int_axis_single(q_all, 3, nt + 1, tol_ax, gi_ok_l, gi_axis_l)
+        if (.not. gi_ok_l) then
+            if (irank == 0) write(*, '(a)') "ERROR(realtime_ssbe): sbe_lg_degen=" // &
+                & "'gicov_int' requires single-axis linear polarization on a reciprocal-" // &
+                & "mesh axis; the field trajectory drives 0 or >=2 reduced axes " // &
+                & "([110]/elliptic/circular are v1-unsupported)."
+            error stop 1
+        end if
+        gi_jmax_l = gicov_int_jmax(maxval(abs(q_all(gi_axis_l, :))), 1d0)
+        call build_gicov_integral_cache(sbe, gs, gi_axis_l, gi_jmax_l, icomm)
+        if (irank == 0) write(*, '(a,i0,a,i0)') &
+            & "# gicov_int: driven reduced axis = ", gi_axis_l, &
+            & ", transport span j_max = ", gi_jmax_l
+        deallocate(q_all)
+    end if
+
     ! Initial energy
     energy = 0.0d0
     E(:) = 0.0d0; Jmat(:) = 0.0d0;
@@ -179,7 +224,19 @@ subroutine main_realtime_ssbe(icomm)
         if (trim(gauge_sbe) == "velocity_gauge") then
             call dt_evolve_bloch(sbe, gs, Ac_ext_t(:, it), dt)
             call calc_current_bloch(sbe, gs, Ac_ext_t(:, it), Jmat, icomm)
-        else ! trim(gauge_sbe) == "length_gauge")
+        else if (gi_mode) then ! length_gauge, integral covariant-Houston transport
+            ! reduced-mesh shift at the STEP MIDPOINT t_it - dt/2 (propagation)
+            a_sh(1:3) = -(0.5d0 * (Ac_ext_t(1:3, it - 1) + Ac_ext_t(1:3, it)) &
+                &         - Ac_ext_t(1:3, 0))
+            q_mid = dble(num_kgrid(gi_axis_l)) &
+                & * dot_product(a_sh(1:3), gs%a_matrix(1:3, gi_axis_l)) / twopi_l
+            call dt_evolve_bloch_lg_integral(sbe, gs, q_mid, dt)
+            ! reduced-mesh shift at t_it (current readout)
+            a_sh(1:3) = -(Ac_ext_t(1:3, it) - Ac_ext_t(1:3, 0))
+            q_now = dble(num_kgrid(gi_axis_l)) &
+                & * dot_product(a_sh(1:3), gs%a_matrix(1:3, gi_axis_l)) / twopi_l
+            call calc_current_bloch_lg_integral(sbe, gs, q_now, Jmat, icomm)
+        else ! trim(gauge_sbe) == "length_gauge") (FD / gi / gifix / gicov)
             call dt_evolve_bloch_lg(sbe, gs, E(:), bj_am, dt, icomm)
             call calc_current_bloch_lg(sbe, gs, Jmat, icomm)
         end if
@@ -231,7 +288,16 @@ subroutine main_realtime_ssbe(icomm)
             ! calc_* are collective (comm_summation) => every rank calls them;
             ! only rank 0 writes.
             if (yn_sbe_out_occ == 'y') then
-                call calc_band_population(sbe, gs, nex_b, icomm)
+                if (gi_mode) then
+                    ! gicov_int: occupations by projection onto the INSTANTANEOUS
+                    ! eigenbasis at x = kappa - a(t) (diag(rho~) is basis-dependent
+                    ! under transport).  The static-eps energy distribution below is
+                    ! left as an approximate diagnostic in the co-moving frame
+                    ! (moving-frame energy binning is a follow-up).
+                    call calc_band_population_integral(sbe, gs, q_now, nex_b, icomm)
+                else
+                    call calc_band_population(sbe, gs, nex_b, icomm)
+                end if
                 if (irank == 0) call write_sbe_occ_line(fh_sbe_occ, t, nb_sbe_eff, nex_b)
                 call calc_energy_distribution(sbe, gs, ed_lo, ed_de, ed_nbin, ed_sigma, edist, icomm)
                 if (irank == 0) call write_sbe_edist_block(fh_sbe_edist, t, ed_nbin, ed_lo, ed_de, edist)
