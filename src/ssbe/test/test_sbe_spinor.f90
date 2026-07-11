@@ -396,6 +396,61 @@ contains
     call check_true(check_input_variables_sbe(), &
       & "D checker: spinor + length_gauge + sbe_lg_degen='gicov' is accepted", nfail)
 
+    ! ---- gicov_int (integral covariant-Houston transport) checker guards -----
+    ! Shares the X-full spinor accept path with gicov (uses_xfull_links), plus
+    ! the v1 scope reject group.  The reject cases use an UNPOLARIZED baseline so
+    ! the gicov_int rule is the one under test (a noncollinear baseline would let
+    ! the separate spinor+maxwell rule fire on the theory='maxwell_sbe' case).
+    call set_checker_defaults()
+    spin = 'noncollinear'
+    gauge_sbe = 'length_gauge'
+    sbe_lg_degen = 'gicov_int'
+    yn_sbe_gw_collision = 'n'
+    call check_true(check_input_variables_sbe(), &
+      & "D checker: spinor + length_gauge + sbe_lg_degen='gicov_int' is accepted", nfail)
+
+    call set_checker_defaults()
+    spin = 'unpolarized'
+    gauge_sbe = 'length_gauge'
+    sbe_lg_degen = 'gicov_int'
+    yn_sbe_gw_collision = 'n'
+    call check_true(check_input_variables_sbe(), &
+      & "D checker: unpolarized + length_gauge + gicov_int is accepted (baseline)", nfail)
+
+    call set_checker_defaults()
+    spin = 'unpolarized'
+    gauge_sbe = 'velocity_gauge'
+    sbe_lg_degen = 'gicov_int'
+    yn_sbe_gw_collision = 'n'
+    call check_true(.not. check_input_variables_sbe(), &
+      & "D checker: gicov_int + velocity_gauge is REJECTED (requires length_gauge)", nfail)
+
+    call set_checker_defaults()
+    spin = 'unpolarized'
+    gauge_sbe = 'length_gauge'
+    sbe_lg_degen = 'gicov_int'
+    theory = 'maxwell_sbe'
+    yn_sbe_gw_collision = 'n'
+    call check_true(.not. check_input_variables_sbe(), &
+      & "D checker: gicov_int + theory='maxwell_sbe' is REJECTED (v1 scope)", nfail)
+
+    call set_checker_defaults()
+    spin = 'unpolarized'
+    gauge_sbe = 'length_gauge'
+    sbe_lg_degen = 'gicov_int'
+    yn_sbe_gw_collision = 'y'
+    call check_true(.not. check_input_variables_sbe(), &
+      & "D checker: gicov_int + yn_sbe_gw_collision='y' is REJECTED (v1 scope)", nfail)
+
+    call set_checker_defaults()
+    spin = 'unpolarized'
+    gauge_sbe = 'length_gauge'
+    sbe_lg_degen = 'gicov_int'
+    yn_sbe_gw_collision = 'n'
+    yn_sbe_gs_current_subtract = 'y'
+    call check_true(.not. check_input_variables_sbe(), &
+      & "D checker: gicov_int + yn_sbe_gs_current_subtract='y' is REJECTED (v1 scope)", nfail)
+
     call set_checker_defaults()
     spin = 'noncollinear'
     gauge_sbe = 'velocity_gauge'
