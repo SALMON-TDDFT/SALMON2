@@ -2,6 +2,7 @@
 
 module gs_info_ssbe
     use math_constants, only: pi, zI
+    use sbe_lg_mode_ssbe, only: uses_prod_dk, uses_xfull_links
     implicit none
 
     type s_sbe_gs_info
@@ -160,7 +161,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     allocate(gs%occup(1:nb_eff, 1:nk))
     allocate(gs%delta_omega(1:nb_eff, 1:nb_eff, 1:nk))
     allocate(gs%p_mod_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
-    if (trim(sbe_lg_degen) /= 'gicov') then
+    if (.not. uses_xfull_links(sbe_lg_degen)) then
         allocate(gs%d_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
     end if
     allocate(gs%p_tm_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
@@ -213,8 +214,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     end if
 
     !Retrieve k-space overlap products from 'file_sbe_prod_dk' (LG-SBE degeneracy):
-    if (trim(sbe_lg_degen) == 'gi' .or. trim(sbe_lg_degen) == 'gifix' &
-        & .or. trim(sbe_lg_degen) == 'gicov') call read_prod_dk_data()
+    if (uses_prod_dk(sbe_lg_degen)) call read_prod_dk_data()
 
     !VG completion: read the nonlocal kappa-stencil (V/W band matrices) and
     !overwrite rvnl_tm_matrix with the binary-precision W_{i,0}.  MUST run
@@ -227,7 +227,7 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     call prepare_matrix()
     call comm_bcast(gs%p_mod_matrix, icomm, 0)
     call comm_bcast(gs%delta_omega, icomm, 0)
-    if (trim(sbe_lg_degen) /= 'gicov') then
+    if (.not. uses_xfull_links(sbe_lg_degen)) then
         call comm_bcast(gs%d_matrix, icomm, 0) ! Experimental
     end if
 
@@ -1497,7 +1497,7 @@ contains
                 write(*, '(a,es12.4)') "# build_xi: max |U^H U - I| (polar health) = ", resu
                 write(*, '(a,es12.4)') "# build_xi: max |xi - i p/dw| (both-valid) = ", resp_max
             end if
-        else if (trim(sbe_lg_degen) == 'gicov') then
+        else if (uses_xfull_links(sbe_lg_degen)) then
             ! ===== X-full: single full-band block -> full-M Wilson transport =====
             ! block_id≡1 (one block spanning all nb bands) makes
             ! build_block_transport polar-factor the WHOLE nb×nb overlap M =

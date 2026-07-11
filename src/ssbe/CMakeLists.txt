@@ -1,4 +1,5 @@
 set(SOURCES
+    sbe_lg_mode_ssbe.f90
     util_ssbe.f90
     mpiio_export_ssbe.f90
     datafile_ssbe.f90

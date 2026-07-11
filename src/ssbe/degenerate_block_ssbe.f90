@@ -32,6 +32,7 @@
 ! into a single block. theta_on is the tighter core-degeneracy (turn-"on")
 ! bound, reserved for Pb3 dynamic hysteresis (theta_on < theta_off).
 module degenerate_block_ssbe
+  use sbe_lg_mode_ssbe, only: uses_xfull_links
   implicit none
   private
   public :: theta_on, theta_off
@@ -1297,7 +1298,7 @@ contains
     implicit none
     character(*), intent(in) :: sbe_lg_degen
     integer, intent(in) :: ndk, nbvec_full
-    if (trim(sbe_lg_degen) == 'gicov' .and. ndk >= 1) then
+    if (uses_xfull_links(sbe_lg_degen) .and. ndk >= 1) then
       nbvec_out = 3
     else
       nbvec_out = nbvec_full

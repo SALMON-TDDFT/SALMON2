@@ -21,6 +21,7 @@ module input_checker_sbe
     use salmon_global
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global, nproc_size_global
+    use sbe_lg_mode_ssbe, only: uses_xfull_links, uses_integral_gicov
     implicit none
 contains
 
@@ -57,10 +58,10 @@ function check_input_variables_sbe() result(flag)
         ! delta-omega-GATED T2, which correctly never dephases WITHIN a
         ! Kramers pair) is well-defined there.  The velocity gauge carries no
         ! scalar T2 and needs no gate.
-        if (trim(gauge_sbe) == "length_gauge" .and. trim(sbe_lg_degen) /= "gicov") then
+        if (trim(gauge_sbe) == "length_gauge" .and. .not. uses_xfull_links(sbe_lg_degen)) then
             call raise("ERROR! spin='noncollinear' (SO-SBE) with gauge_sbe='length_gauge' requires " // &
-                & "sbe_lg_degen='gicov' (Kramers degeneracy needs the gauge-covariant transport " // &
-                & "and the delta-omega-gated T2)!")
+                & "sbe_lg_degen='gicov' or 'gicov_int' (Kramers degeneracy needs the gauge-covariant " // &
+                & "transport and the delta-omega-gated T2)!")
         end if
         if (comm_is_root(nproc_id_global)) then
             write(*, '(a)') "# SO-SBE (spin='noncollinear'): spinor bands, occupation 1 per band; " // &
@@ -210,15 +211,44 @@ function check_input_variables_sbe() result(flag)
 
     select case(trim(sbe_lg_degen))
     case("off")
-    case("gi", "gifix", "gicov")
+    case("gi", "gifix", "gicov", "gicov_int")
         if (sbe_lg_diag == 2 .or. sbe_lg_diag == 3) then
             call raise("ERROR! 'sbe_lg_degen'='"//trim(sbe_lg_degen)//"' is incompatible with 'sbe_lg_diag'=2 or 3.")
         end if
     case default
-        call raise("ERROR! 'sbe_lg_degen' must be 'off', 'gi', 'gifix', or 'gicov'.")
+        call raise("ERROR! 'sbe_lg_degen' must be 'off', 'gi', 'gifix', 'gicov', or 'gicov_int'.")
     end select
 
     if (sbe_lg_degen_floor <= 0d0) call raise("ERROR! 'sbe_lg_degen_floor' must be positive.")
+
+    ! gicov_int (integral covariant-Houston transport) scope guard (v1).  The
+    ! reformulation assumes a STATIC precomputed field trajectory on a single
+    ! reciprocal-mesh axis of linear polarization: it caches the transported
+    ! bounded fields over the whole pulse and evaluates a per-step moving-gap T2
+    ! gate.  Reject the configurations whose derivation differs (dynamic field /
+    ! collision co-moving transform / velocity-gauge f-sum construction).  The
+    ! actual single-axis / linear-polarization requirement is a RUNTIME check on
+    ! the full trajectory (realtime_ssbe), not a deck-vector test.
+    if (uses_integral_gicov(sbe_lg_degen)) then
+        if (trim(gauge_sbe) /= "length_gauge") then
+            call raise("ERROR! 'sbe_lg_degen'='gicov_int' requires gauge_sbe='length_gauge' " // &
+                & "(it is a length-gauge covariant-transport propagation mode).")
+        end if
+        if (trim(theory) == "maxwell_sbe") then
+            call raise("ERROR! 'sbe_lg_degen'='gicov_int' is not supported with theory='maxwell_sbe' " // &
+                & "(the dynamic Maxwell field is not a static precomputed trajectory; v1 scope).")
+        end if
+        if (yn_sbe_gw_collision == 'y') then
+            call raise("ERROR! 'sbe_lg_degen'='gicov_int' is incompatible with " // &
+                & "'yn_sbe_gw_collision'='y' (the Gamma(k)/f0(k) collision kernel needs a " // &
+                & "separate co-moving transform; v1 scope).")
+        end if
+        if (yn_sbe_gs_current_subtract == 'y') then
+            call raise("ERROR! 'sbe_lg_degen'='gicov_int' is incompatible with " // &
+                & "'yn_sbe_gs_current_subtract'='y' (the f-sum-deficiency D tensor is a " // &
+                & "velocity-gauge construction; the length-gauge current is Tr(v rho)).")
+        end if
+    end if
 
     if (.not. t2_gate_params_ok(sbe_t2_gate_shape, sbe_t2_gate_theta, sbe_t2_gate_width)) then
         call raise("ERROR! 'sbe_t2_gate_shape' must be 'step' or 'gauss', " // &

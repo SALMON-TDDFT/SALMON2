@@ -4,6 +4,7 @@ module bloch_solver_ssbe
                              comm_isend, comm_irecv, comm_wait_all
     use gs_info_ssbe
     use util_ssbe, only: split_range
+    use sbe_lg_mode_ssbe, only: uses_prod_dk, uses_xfull_links, uses_fd_gicov, uses_integral_gicov
     implicit none
 
 
@@ -240,7 +241,7 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     ! (default, and every non-gicov length-gauge path) never touches
     ! sbe%t2_gate_w, so allocating the nb^2 * nk_local array there would waste
     ! memory for no consumer.
-    if (trim(sbe_lg_degen) == 'gicov') then
+    if (uses_fd_gicov(sbe_lg_degen)) then
         allocate(sbe%t2_gate_w(1:sbe%nb, 1:sbe%nb, sbe%ik_min:sbe%ik_max))
         do ik = sbe%ik_min, sbe%ik_max
             do jb = 1, sbe%nb
@@ -1265,7 +1266,7 @@ subroutine prepare_qnm(sbe, gs, icomm)
   nb = sbe%nb
 
   allocate(sbe%qnm(sbe%nb, sbe%nb, sbe%ik_min:sbe%ik_max))
-  if (trim(sbe_lg_degen) /= 'gicov') then
+  if (.not. uses_xfull_links(sbe_lg_degen)) then
     allocate(sbe%grad_qnm(sbe%nb, sbe%nb, 1:3, sbe%nk))
   end if
   allocate(sbe%qnm_new(sbe%nb, sbe%nb, sbe%ik_min:sbe%ik_max))
@@ -1298,7 +1299,7 @@ subroutine prepare_qnm(sbe, gs, icomm)
   end do
   end do
 
-  if (trim(sbe_lg_degen) /= 'gicov') then
+  if (.not. uses_xfull_links(sbe_lg_degen)) then
     !$omp parallel do default(shared) private(ik, ib, jb, jj)
     do ik = sbe%ik_min, sbe%ik_max
       do jj=1,3
@@ -1350,8 +1351,8 @@ subroutine prepare_qnm(sbe, gs, icomm)
   ! not a dipole source.  X-full has a SINGLE full-band block (block_id === 1),
   ! so "same-block" and "ib/=jb" now coincide; the loop body no longer
   ! references block_id.  gi/gifix/off are untouched (this whole block is
-  ! guarded by sbe_lg_degen=='gicov').
-  if (trim(sbe_lg_degen) == 'gicov') then
+  ! guarded to the X-full modes gicov / gicov_int).
+  if (uses_xfull_links(sbe_lg_degen)) then
     !$omp parallel do default(shared) private(ik, ib, jb) collapse(3)
     do ik = sbe%ik_min, sbe%ik_max
       do ib=1,nb
@@ -1696,9 +1697,18 @@ subroutine dt_evolve_bloch_lg(sbe, gs, E, bj_am, dt, icomm)
   ! (imaginary-axis stability 2*sqrt(2)~2.83), NO dqnm_stock / Adams-Moulton history,
   ! NO bare Euler; the GW collision is a separate VG-style substep.  gi/gifix/off/VG
   ! fall through to the AB4 path below (byte-unchanged).
-  if (trim(sbe_lg_degen) == 'gicov') then
+  if (uses_fd_gicov(sbe_lg_degen)) then
     call dt_evolve_bloch_lg_gicov(sbe, gs, E, dt, icomm)
     return
+  end if
+  if (uses_integral_gicov(sbe_lg_degen)) then
+    ! integral (covariant-Houston) transport propagation is driven from
+    ! realtime_ssbe via dt_evolve_bloch_lg_integral (it needs the precomputed
+    ! mesh shift a(t) at the step midpoint, not just E); reaching the generic
+    ! length-gauge dispatch here is a wiring bug.
+    write(*, '(a)') "ERROR(dt_evolve_bloch_lg): sbe_lg_degen='gicov_int' must be " // &
+        & "propagated via dt_evolve_bloch_lg_integral (realtime_ssbe wiring)."
+    error stop 1
   end if
 
   shift_vector(:) = 0.d0 ! shift_vector is set to be 0
@@ -2002,8 +2012,11 @@ subroutine calc_current_bloch_lg(sbe, gs, jmat, icomm)
     ! calc_current_bloch (paramagnetic part; the length gauge carries no Ac*N term).  This
     ! reconstruction is Tr(v rho), gauge-invariant under a consistent GS gauge, so it is the
     ! minimal correct gicov current (subsumes Task 6's in-block current reconstruction).
-    if (trim(sbe_lg_degen) == 'gi' .or. trim(sbe_lg_degen) == 'gifix' &
-        & .or. trim(sbe_lg_degen) == 'gicov') then
+    ! gi/gifix/gicov reconstruct Tr(v rho) at the frozen k.  gicov_int does NOT
+    ! use this branch: its current is Tr[rho~ v~] with the TRANSPORTED velocity
+    ! v~(kappa-a) from the integral-form cache (calc_current_bloch_lg_integral),
+    ! so it is excluded here (uses_prod_dk minus the integral mode).
+    if (uses_prod_dk(sbe_lg_degen) .and. .not. uses_integral_gicov(sbe_lg_degen)) then
         !$omp parallel do default(shared) private(ik,jj,ib,jb,rho_ji) reduction(+:tmp1)
         do ik = sbe%ik_min, sbe%ik_max
         do jj = 1,3
