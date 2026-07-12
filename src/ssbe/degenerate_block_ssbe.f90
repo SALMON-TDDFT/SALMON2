@@ -44,6 +44,8 @@ module degenerate_block_ssbe
   ! Pb3 (non-Abelian xi + smooth blend):
   public :: blend                 ! cos^2 hysteresis ramp 1 -> 0
   public :: build_ik_neighbor     ! k -> k+b index table on the full uniform grid
+  public :: find_bvec             ! locate the bvec column of an integer dk shift (0 = absent)
+  public :: identity_kmap         ! kmap of the REPLICATED layout: kmap(ik) = ik (serial/full-nk callers)
   public :: xi_block_from_overlap ! polar + matrix-log kernel (LAPACK zheev/zgeev)
   public :: build_xi              ! orchestrator: blocks -> links -> xi(nb,nb,3,nk)
   public :: xi_sign               ! sign s in xi = s*i*logm(U)/dk (pinned by test)
@@ -88,6 +90,17 @@ module degenerate_block_ssbe
   ! block_id through every caller.
   integer, allocatable, save :: block_id_store(:, :)
   logical, save :: blocks_built = .false.
+
+  ! k-index neighbour tables of the covariant stencil, cached across calls (see
+  ! get_ik_neighbor_cache).  Pure integer index maps derived from
+  ! (num_kgrid, bvec) -- caching them is bit-neutral and removes an
+  ! O(nbvec*nk) allocate+fill that was paid 4x per RK4 step.
+  integer, allocatable, save :: ikn_store(:, :)   ! (nbvec, nk) forward k + bvec(:,iv)
+  integer, allocatable, save :: bwd_store(:, :)   ! (nk, 3)    backward, per Cartesian axis
+  integer, allocatable, save :: ikn_bvec(:, :)    ! (3, nbvec) cache key
+  integer, save :: ikn_kgrid(3) = 0
+  integer, save :: ikn_nk = 0, ikn_nbvec = 0
+  logical, save :: ikn_built = .false.
 
 contains
 
@@ -1147,13 +1160,21 @@ contains
   ! block error-stops before this subroutine could ever return a
   ! nonzero count.
   !-------------------------------------------------------------------
-  subroutine build_block_transport(nb, nk, nbvec, bvec, prod_dk, block_id, num_kgrid, Umat, n_reject)
+  ! ik_lo:ik_hi is the k-range this rank OWNS -- prod_dk and Umat are indexed
+  ! over exactly that range, and the body is k-LOCAL by construction: M_blk(a,b)
+  ! = prod_dk(srcs(a), srcs(b), iv, ik) reads the SAME ik, and the polar factor
+  ! of one k's overlap block depends on nothing else.  That is what lets the
+  ! whole static-field group be rank-local without touching a single value:
+  ! serial / replicated callers pass 1, nk and get the identical Umat.
+  subroutine build_block_transport(nb, nk, nbvec, bvec, prod_dk, block_id, num_kgrid, Umat, n_reject, &
+                                 & ik_lo, ik_hi)
     implicit none
     integer,    intent(in)  :: nb, nk, nbvec
     integer,    intent(in)  :: bvec(3, nbvec), num_kgrid(3)
-    complex(8), intent(in)  :: prod_dk(nb, nb, nbvec, nk)
+    integer,    intent(in)  :: ik_lo, ik_hi
+    complex(8), intent(in)  :: prod_dk(nb, nb, nbvec, ik_lo:ik_hi)
     integer,    intent(in)  :: block_id(nb, nk)
-    complex(8), intent(out) :: Umat(nb, nb, 3, nk)
+    complex(8), intent(out) :: Umat(nb, nb, 3, ik_lo:ik_hi)
     integer,    intent(out) :: n_reject
     complex(8), allocatable :: M_blk(:, :), Ublk(:, :)
     integer :: iv_axis(3), srcs(nb)
@@ -1168,6 +1189,9 @@ contains
     ! looked up (contrast build_xi's use of build_ik_neighbor for general
     ! per-k block correspondence).
 
+    n_reject = 0
+    if (ik_hi < ik_lo) return    ! empty k-slice (nproc > nk)
+
     iv_axis(1) = find_bvec(bvec, nbvec, 1, 0, 0)
     iv_axis(2) = find_bvec(bvec, nbvec, 0, 1, 0)
     iv_axis(3) = find_bvec(bvec, nbvec, 0, 0, 1)
@@ -1175,7 +1199,7 @@ contains
     ! default: identity everywhere (singletons / out-of-block bands / axes
     ! whose +unit-shift column is absent from bvec)
     Umat = (0d0, 0d0)
-    do ik = 1, nk
+    do ik = ik_lo, ik_hi
       do axis = 1, 3
         do n = 1, nb
           Umat(n, n, axis, ik) = (1d0, 0d0)
@@ -1183,7 +1207,7 @@ contains
       end do
     end do
 
-    do ik = 1, nk
+    do ik = ik_lo, ik_hi
       nblk_k = maxval(block_id(:, ik))
       do bk = 1, nblk_k
         d = 0
@@ -1224,7 +1248,6 @@ contains
       end do
     end do
 
-    n_reject = 0
   end subroutine build_block_transport
 
   !===================================================================
@@ -1391,25 +1414,37 @@ contains
   ! is absent from bvec, OR whose m_max(axis)=0 (singleton axis), leaves
   ! Dq(:,:,axis,:) = 0.
   !-------------------------------------------------------------------
-  subroutine covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq, ik_lo, ik_hi, axis_active)
+  ! kmap/nks: U_full and rho are stored on nks SLOTS, not on the global k-index
+  ! -- kmap(ik) is where k lives (0 = not stored here).  A replicated caller
+  ! passes nks = nk and the identity map, which reproduces the original
+  ! `U_full(:,:,axis,ik)` indexing exactly; a k-local caller passes its owned
+  ! slots plus the halo slots this very stencil's chain walk asked for
+  ! (covariant_halo_needed), so every k read below is present by construction.
+  subroutine covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq, ik_lo, ik_hi, &
+                                & axis_active, nks, kmap)
     implicit none
     integer,    intent(in)  :: nb, nk, nbvec, bvec(3, nbvec), num_kgrid(3)
-    complex(8), intent(in)  :: U_full(nb, nb, 3, nk)
-    complex(8), intent(in)  :: rho(nb, nb, nk)
-    real(8),    intent(in)  :: dk(3)
-    complex(8), intent(out) :: Dq(nb, nb, 3, nk)
     integer,    intent(in)  :: ik_lo, ik_hi   ! local k-range (MPI): only Dq(:,:,:,ik_lo:ik_hi) is computed, OMP-parallel over it. Serial/single-rank callers pass 1, nk. (Required, not optional: an interface mismatch then fails at compile time, not as a silent runtime present()-garbage SEGV.)
+    integer,    intent(in)  :: nks             ! number of stored k slots (= nk when replicated)
+    integer,    intent(in)  :: kmap(nk)        ! global k -> slot; 0 = not stored (never read here: the halo plan covers the stencil's own walk)
+    complex(8), intent(in)  :: U_full(nb, nb, 3, nks)
+    complex(8), intent(in)  :: rho(nb, nb, nks)
+    real(8),    intent(in)  :: dk(3)
+    complex(8), intent(out) :: Dq(nb, nb, 3, ik_lo:ik_hi)
     logical,    intent(in)  :: axis_active(3)  ! skip axes with E(axis)==0: their E*Dq contribution is exactly 0, so their Dq is left 0 (bit-for-bit). Linear pol => 1 axis, circular in-plane => 2. Callers with no field mask pass (/.true.,.true.,.true./).
     real(8), parameter :: cw(4) = (/ 4d0/5d0, -1d0/5d0, 4d0/105d0, -1d0/280d0 /)
-    integer, allocatable :: ik_neighbor(:, :), bwd(:)
     complex(8), allocatable :: Id(:,:)
     integer :: iv_axis(3), axis, iv, ik, n
     integer :: m_max(3), klo, khi
 
-    allocate(ik_neighbor(nbvec, nk), bwd(nk), Id(nb,nb))
+    allocate(Id(nb,nb))
     klo = ik_lo;  khi = ik_hi
 
-    call build_ik_neighbor(num_kgrid, bvec, nbvec, nk, ik_neighbor)
+    ! Neighbour tables are a pure function of (num_kgrid, bvec) -- the SAME
+    ! tables every call.  Rebuilding them here cost an O(nbvec*nk) allocate +
+    ! fill FOUR times per RK4 step; the module cache below builds them once and
+    ! returns bit-identical indices (integer index maps, no arithmetic).
+    call get_ik_neighbor_cache(num_kgrid, bvec, nbvec, nk)
     iv_axis(1) = find_bvec(bvec, nbvec, 1, 0, 0)
     iv_axis(2) = find_bvec(bvec, nbvec, 0, 1, 0)
     iv_axis(3) = find_bvec(bvec, nbvec, 0, 0, 1)
@@ -1440,12 +1475,6 @@ contains
       if (iv == 0) cycle              ! +axis link absent in bvec: Dq(:,:,axis,:) stays 0
       if (m_max(axis) == 0) cycle     ! singleton axis (num_kgrid(axis)=1): Dq(:,:,axis,:) stays 0
 
-      ! backward neighbour map = inverse of the +axis forward permutation
-      ! (bijection on the full periodic grid, so every k has a unique preimage)
-      do ik = 1, nk
-        bwd(ik_neighbor(iv, ik)) = ik
-      end do
-
       ! OMP over the local k-slice. The per-k body runs in cov_grad_one_k, whose
       ! nb x nb work matrices are automatic (stack) arrays = thread-local by
       ! construction (robust on gfortran and Fujitsu frt; avoids the flaky
@@ -1453,14 +1482,77 @@ contains
       ! ik, so the writes never race. Numerically identical to the old inline loop.
       !$omp parallel do default(shared) private(ik) schedule(static)
       do ik = klo, khi
-        call cov_grad_one_k(nb, nbvec, nk, ik, iv, axis, m_max(axis), cw, dk(axis), &
-                            ik_neighbor, bwd, U_full, rho, Id, Dq(:, :, axis, ik))
+        call cov_grad_one_k(nb, nbvec, nk, nks, ik, iv, axis, m_max(axis), cw, dk(axis), &
+                            ikn_store, bwd_store(:, axis), kmap, U_full, rho, Id, Dq(:, :, axis, ik))
       end do
       !$omp end parallel do
     end do
 
-    deallocate(ik_neighbor, bwd, Id)
+    deallocate(Id)
   end subroutine covariant_grad_block
+
+
+  !-------------------------------------------------------------------
+  ! One-shot cache of the k-index neighbour tables used by the covariant
+  ! stencil: the forward map ik_neighbor(iv, ik) = index of k + bvec(:,iv), and
+  ! the per-axis backward map bwd(k + e_axis) = k (the inverse of the +axis
+  ! permutation, well defined on the full periodic grid).  Both are pure integer
+  ! functions of (num_kgrid, bvec), so caching them is bit-neutral; they were
+  ! being rebuilt on every covariant_grad_block call = 4x per RK4 step.
+  ! The cache key is (num_kgrid, bvec, nk): a different grid rebuilds it.
+  !-------------------------------------------------------------------
+  ! The slot map of a REPLICATED k-layout: every k is stored, at its own index.
+  ! Serial and full-nk callers pass this, and every kmap-indexed expression then
+  ! reduces to the original global-k one.
+  pure function identity_kmap(nk) result(kmap)
+    implicit none
+    integer, intent(in) :: nk
+    integer :: kmap(nk)
+    integer :: ik
+    do ik = 1, nk
+      kmap(ik) = ik
+    end do
+  end function identity_kmap
+
+  subroutine get_ik_neighbor_cache(num_kgrid, bvec, nbvec, nk)
+    implicit none
+    integer, intent(in) :: num_kgrid(3), nbvec, nk, bvec(3, nbvec)
+    integer :: iv_axis(3), axis, iv, ik
+    logical :: stale
+
+    stale = .not. ikn_built
+    if (.not. stale) then
+      stale = (ikn_nk /= nk) .or. (ikn_nbvec /= nbvec) .or. &
+            & any(ikn_kgrid(1:3) /= num_kgrid(1:3))
+    end if
+    if (.not. stale) then
+      stale = any(ikn_bvec(1:3, 1:nbvec) /= bvec(1:3, 1:nbvec))
+    end if
+    if (.not. stale) return
+
+    if (allocated(ikn_store))  deallocate(ikn_store)
+    if (allocated(bwd_store))  deallocate(bwd_store)
+    if (allocated(ikn_bvec))   deallocate(ikn_bvec)
+    allocate(ikn_store(nbvec, nk), bwd_store(nk, 3), ikn_bvec(3, nbvec))
+
+    call build_ik_neighbor(num_kgrid, bvec, nbvec, nk, ikn_store)
+    iv_axis(1) = find_bvec(bvec, nbvec, 1, 0, 0)
+    iv_axis(2) = find_bvec(bvec, nbvec, 0, 1, 0)
+    iv_axis(3) = find_bvec(bvec, nbvec, 0, 0, 1)
+    bwd_store(:, :) = 0
+    do axis = 1, 3
+      iv = iv_axis(axis)
+      if (iv == 0) cycle
+      do ik = 1, nk
+        bwd_store(ikn_store(iv, ik), axis) = ik
+      end do
+    end do
+
+    ikn_bvec(1:3, 1:nbvec) = bvec(1:3, 1:nbvec)
+    ikn_kgrid(1:3) = num_kgrid(1:3)
+    ikn_nk = nk;  ikn_nbvec = nbvec
+    ikn_built = .true.
+  end subroutine get_ik_neighbor_cache
 
   !-------------------------------------------------------------------
   ! Per-k covariant-gradient contribution for one axis (called under OMP).
@@ -1470,13 +1562,13 @@ contains
   ! is safe to invoke from a parallel do over ik. Bit-for-bit identical to the
   ! original inlined loop body.
   !-------------------------------------------------------------------
-  subroutine cov_grad_one_k(nb, nbvec, nk, ik, iv, axis, mmax, cw, dkax, &
-                            ik_neighbor, bwd, U_full, rho, Id, Dqk)
+  subroutine cov_grad_one_k(nb, nbvec, nk, nks, ik, iv, axis, mmax, cw, dkax, &
+                            ik_neighbor, bwd, kmap, U_full, rho, Id, Dqk)
     implicit none
-    integer,    intent(in)  :: nb, nbvec, nk, ik, iv, axis, mmax
+    integer,    intent(in)  :: nb, nbvec, nk, nks, ik, iv, axis, mmax
     real(8),    intent(in)  :: cw(4), dkax
-    integer,    intent(in)  :: ik_neighbor(nbvec, nk), bwd(nk)
-    complex(8), intent(in)  :: U_full(nb, nb, 3, nk), rho(nb, nb, nk), Id(nb, nb)
+    integer,    intent(in)  :: ik_neighbor(nbvec, nk), bwd(nk), kmap(nk)
+    complex(8), intent(in)  :: U_full(nb, nb, 3, nks), rho(nb, nb, nks), Id(nb, nb)
     complex(8), intent(out) :: Dqk(nb, nb)
     complex(8) :: Umf(nb,nb), Umb(nb,nb), Utmp(nb,nb), tmp(nb,nb), fterm(nb,nb), bterm(nb,nb)
     integer :: m, kfwd, kbwd, krp
@@ -1488,17 +1580,17 @@ contains
     Dqk  = (0d0, 0d0)
     do m = 1, mmax
       ! ---- forward: Um(k) <- Um(k) * U_full(k+(m-1)e); neighbour = k+m e ----
-      call zmm3('N', 'N', nb, Umf, U_full(:, :, axis, kfwd), Utmp)
+      call zmm3('N', 'N', nb, Umf, U_full(:, :, axis, kmap(kfwd)), Utmp)
       Umf = Utmp
       krp = ik_neighbor(iv, kfwd)                     ! k+m e
-      call zmm3('N', 'N', nb, Umf, rho(:, :, krp), tmp)   ! Umf * rho(k+m e)
+      call zmm3('N', 'N', nb, Umf, rho(:, :, kmap(krp)), tmp)   ! Umf * rho(k+m e)
       call zmm3('N', 'C', nb, tmp, Umf, fterm)            ! ... * Umf^H
 
       ! ---- backward: base = k-m e; Um(k-m e) <- U_full(k-m e) * Um(k-(m-1)e) ----
       kbwd = bwd(kbwd)                                 ! k-m e
-      call zmm3('N', 'N', nb, U_full(:, :, axis, kbwd), Umb, Utmp)
+      call zmm3('N', 'N', nb, U_full(:, :, axis, kmap(kbwd)), Umb, Utmp)
       Umb = Utmp
-      call zmm3('C', 'N', nb, Umb, rho(:, :, kbwd), tmp) ! Umb^H * rho(k-m e)
+      call zmm3('C', 'N', nb, Umb, rho(:, :, kmap(kbwd)), tmp) ! Umb^H * rho(k-m e)
       call zmm3('N', 'N', nb, tmp, Umb, bterm)           ! ... * Umb
 
       Dqk = Dqk + cw(m) * (fterm - bterm) / dkax
@@ -1512,9 +1604,14 @@ contains
   ! chain-walk of cov_grad_one_k exactly (forward k+m e via ik_neighbor,
   ! backward k-m e via the inverse map), over ALL three axes = a superset of
   ! any axis_active mask, so the resulting halo plan is static even though
-  ! the field direction varies in time. U_full is full-nk on every rank, so
-  ! only rho needs this. needed(ik_lo:ik_hi) is also set (local k included).
-  ! An empty slice (ik_lo > ik_hi, possible when nproc > nk) yields all-false.
+  ! the field direction varies in time. needed(ik_lo:ik_hi) is also set (local
+  ! k included).  An empty slice (ik_lo > ik_hi, possible when nproc > nk)
+  ! yields all-false.
+  !
+  ! The SAME set serves the STATIC Wilson links: cov_grad_one_k reads U_full at
+  ! {k+(m-1)e} and {k-m e} for m = 1..m_max, both strict subsets of the {k+-m e}
+  ! marked here, so one plan covers the rho halo AND the u_transport halo (that
+  ! is why gs%kmap can be built from this routine alone).
   !-------------------------------------------------------------------
   subroutine covariant_halo_needed(nk, nbvec, bvec, num_kgrid, ik_lo, ik_hi, needed)
     implicit none

@@ -2,7 +2,7 @@
 
 module gs_info_ssbe
     use math_constants, only: pi, zI
-    use sbe_lg_mode_ssbe, only: uses_prod_dk, uses_xfull_links
+    use sbe_lg_mode_ssbe, only: uses_prod_dk, uses_xfull_links, uses_fd_gicov
     implicit none
 
     type s_sbe_gs_info
@@ -73,6 +73,32 @@ module gs_info_ssbe
         complex(8), allocatable :: vnl_V(:, :, :, :)    ! (nb,nb,-ns:ns, ik-slice)
         complex(8), allocatable :: vnl_W(:, :, :, :, :) ! (nb,nb,3,-ns:ns, ik-slice)
 
+        ! ---- k-decomposition of the STATIC fields (klocal) ----------------
+        ! The per-k static matrices scale as ~248*nb^2*nk BYTES and were held
+        ! full-nk on EVERY rank, which is what caps the reachable k-mesh (the
+        ! covariant noise floor falls as h^(p+1), so the mesh -- not the
+        ! propagation -- is the physics bottleneck).  With klocal they are
+        ! stored on this rank's k-SLICE only, so the term becomes ~1/nproc.
+        !
+        ! TWO index conventions live side by side, deliberately:
+        !   * GLOBAL-k bounds (ik_lo:ik_hi) -- p_mod/p_tm/rvnl/delta_omega/
+        !     prod_dk.  Every consumer of these reads them at a LOCAL k only
+        !     (verified call site by call site), so `array(..., ik)` keeps its
+        !     original spelling and the non-klocal build is textually the same
+        !     code with ik_lo=1, ik_hi=nk.
+        !   * SLOT index via kmap -- u_transport, the ONE static field the
+        !     covariant stencil reads at NEIGHBOUR k.  Slots 1..(ik_hi-ik_lo+1)
+        !     are the local k in ascending order (slot = ik-ik_lo+1); the
+        !     remaining slots up to nks hold the halo k (ascending), filled once
+        !     by the halo exchange.  kmap(ik) = 0 means "not stored here".
+        ! For klocal=.false. the two coincide exactly (ik_lo=1, ik_hi=nk,
+        ! nks=nk, kmap(ik)=ik), which is why every mode that keeps the
+        ! replicated layout stays bit-for-bit unchanged.
+        logical :: klocal = .false.
+        integer :: ik_lo = 1, ik_hi = 0     ! stored (owned) global-k range
+        integer :: nks = 0                  ! stored k slots = local + halo
+        integer, allocatable :: kmap(:)     ! (nk) global k -> slot, 0 = absent
+
         !k-space grid and geometry information
         !NOTE: prepred for uniformally distributed k-grid....
         !integer :: num_kgrid(1:3)
@@ -100,10 +126,12 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     use communication
     use filesystem, only: open_filehandle, get_filehandle
     use common_ssbe, only: grad_k_array_nb1d_double
+    use util_ssbe, only: split_range
     use salmon_global, only: gauge_sbe, file_sbe_prod_dk, sbe_lg_degen, num_kgrid, sbe_lg_degen_floor, spin, &
-                           & yn_sbe_vnl_exact, file_sbe_vnl_kappa, nelec, natom
+                           & yn_sbe_vnl_exact, file_sbe_vnl_kappa, nelec, natom, &
+                           & theory, yn_sbe_gs_current_subtract
     use degenerate_block_ssbe, only: build_xi, same_block, blend, theta_on, theta_off, &
-                                   & build_block_transport, &
+                                   & build_block_transport, covariant_halo_needed, &
                                    & prod_dk_axis_slot, gicov_prod_dk_nbvec, expected_prod_dk_nrec, &
                                    & check_gicov_occupation
     implicit none
@@ -121,8 +149,51 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     integer :: irank, nproc
     integer :: nb_eff, ndeg
     logical :: is_metal
+    integer :: ik_lo, ik_hi, ikk
+    integer, allocatable :: ktbl_min(:), ktbl_max(:)
 
     call comm_get_groupinfo(icomm, irank, nproc)
+
+    ! ---- k-decomposition of the static fields (see the klocal block of
+    ! s_sbe_gs_info).  Enabled ONLY for the X-full covariant modes, whose
+    ! consumers were audited to touch the static matrices at LOCAL k (plus the
+    ! u_transport neighbour shell, which gets an explicit halo).  It is switched
+    ! OFF for the three configurations whose consumers are NOT k-local, so those
+    ! keep the replicated layout and stay bit-for-bit unchanged:
+    !   theory='maxwell_sbe'        -- the multiscale solvers split k on a
+    !                                  DIFFERENT communicator (icomm_macro) than
+    !                                  this gs was built on, so a gs k-slice
+    !                                  would not match the solver k-slice;
+    !   yn_sbe_gs_current_subtract  -- build_fsum_deficiency_tensor sums the
+    !                                  velocity matrices over the WHOLE k-mesh in
+    !                                  a fixed order (slicing it would change the
+    !                                  summation order, i.e. the rounding);
+    !   yn_sbe_vnl_exact            -- velocity-gauge-only, and it OVERWRITES the
+    !                                  full-nk rvnl_tm_matrix by a comm_summation
+    !                                  reconstruct.
+    gs%klocal = uses_xfull_links(sbe_lg_degen) &
+        & .and. (trim(theory) /= 'maxwell_sbe') &
+        & .and. (yn_sbe_gs_current_subtract /= 'y') &
+        & .and. (yn_sbe_vnl_exact /= 'y')
+
+    if (gs%klocal) then
+        allocate(ktbl_min(0:nproc-1), ktbl_max(0:nproc-1))
+        call split_range(1, nk, nproc, ktbl_min, ktbl_max)
+        ik_lo = ktbl_min(irank);  ik_hi = ktbl_max(irank)
+        deallocate(ktbl_min, ktbl_max)
+    else
+        ik_lo = 1;  ik_hi = nk
+    end if
+    gs%ik_lo = ik_lo;  gs%ik_hi = ik_hi
+    ! local slots first, in ascending k (slot = ik - ik_lo + 1); halo slots (if
+    ! any) are appended by prepare_matrix once bvec is known.  Non-klocal: the
+    ! identity map, so every kmap-indexed read is textually the old one.
+    allocate(gs%kmap(1:nk))
+    gs%kmap(:) = 0
+    do ikk = ik_lo, ik_hi
+        gs%kmap(ikk) = ikk - ik_lo + 1
+    end do
+    gs%nks = max(0, ik_hi - ik_lo + 1)
 
     if (nb_min < 1 .or. nb_min > nb_hi .or. nb_hi > nb) then
         if (irank == 0) write(*, '(a,i0,a,i0,a,i0)') &
@@ -155,18 +226,24 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     !Calculate b_matrix, volume_cell and volume_bz from a1..a3 vector.
     call calc_lattice_info()
 
+    ! small, k-COMPLETE tables (a few tens of MB even at the largest meshes) --
+    ! kept replicated: build_fixed_blocks' all-k union-find, sbe_edist_grid's
+    ! min/maxval and the transport cache's remote-node eigen/occup lookups all
+    ! read them at NON-local k.
     allocate(gs%kpoint(1:3, 1:nk))
     allocate(gs%kweight(1:nk))
     allocate(gs%eigen(1:nb_eff, 1:nk))
     allocate(gs%occup(1:nb_eff, 1:nk))
-    allocate(gs%delta_omega(1:nb_eff, 1:nb_eff, 1:nk))
-    allocate(gs%p_mod_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
+    allocate(gs%grad_k_eigen(1:nb_eff, 1:3, 1:nk))
+    ! the ~248*nb^2*nk BYTES/rank group: k-sliced under klocal (ik_lo:ik_hi),
+    ! replicated (1:nk) otherwise.
+    allocate(gs%delta_omega(1:nb_eff, 1:nb_eff, ik_lo:ik_hi))
+    allocate(gs%p_mod_matrix(1:nb_eff, 1:nb_eff, 1:3, ik_lo:ik_hi))
     if (.not. uses_xfull_links(sbe_lg_degen)) then
         allocate(gs%d_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
     end if
-    allocate(gs%p_tm_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
-    allocate(gs%rvnl_tm_matrix(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
-    allocate(gs%grad_k_eigen(1:nb_eff, 1:3, 1:nk))
+    allocate(gs%p_tm_matrix(1:nb_eff, 1:nb_eff, 1:3, ik_lo:ik_hi))
+    allocate(gs%rvnl_tm_matrix(1:nb_eff, 1:nb_eff, 1:3, ik_lo:ik_hi))
 
     if (irank == 0) then
         if (read_bin) then
@@ -180,12 +257,6 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
             !Retrieve k-points from 'SYSNAME_k.data':
             write(*, '(a)') "# read_k_data"
             call read_k_data()
-            !Retrieve transition matrix from 'SYSNAME_tm.data':
-            write(*, '(a)') "# read_tm_data"
-            call read_tm_data()
-            !Export all data from binray
-            write(*, '(a)') "# save_sbe_gs_bin"
-            call save_sbe_gs_bin()
         end if
     end if
 
@@ -193,8 +264,22 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     call comm_bcast(gs%kweight, icomm, 0)
     call comm_bcast(gs%eigen, icomm, 0)
     call comm_bcast(gs%occup, icomm, 0)
-    call comm_bcast(gs%p_tm_matrix, icomm, 0)
-    call comm_bcast(gs%rvnl_tm_matrix, icomm, 0)
+
+    ! Transition matrices: COLLECTIVE reader (rank 0 parses, k-chunks are
+    ! broadcast, every rank keeps its own [ik_lo:ik_hi]).  The parse is
+    ! byte-for-byte the old one -- only WHERE the parsed numbers land changed,
+    ! so the replicated build (ik_lo=1, ik_hi=nk) keeps exactly the old values
+    ! while klocal never materialises the full-nk array on ANY rank (not even
+    ! rank 0, which is the whole point: a rank-0-only full copy would still be
+    ! ~4 GB at the meshes this exists to unlock).
+    if (.not. read_bin) then
+        if (irank == 0) write(*, '(a)') "# read_tm_data"
+        call read_tm_data()
+        if (irank == 0) then
+            write(*, '(a)') "# save_sbe_gs_bin"
+            call save_sbe_gs_bin()
+        end if
+    end if
 
     ! Metal detector: gs%occup already holds the REAL per-(band,k) GS
     ! occupation just read from file and broadcast (every rank sees identical
@@ -225,10 +310,16 @@ subroutine init_sbe_gs_info(gs, sysname, gs_directory, nk, nb, nb_min, nb_hi, ne
     if (irank == 0) write(*,"(a)") "# prepare_matrix"
 
     call prepare_matrix()
-    call comm_bcast(gs%p_mod_matrix, icomm, 0)
-    call comm_bcast(gs%delta_omega, icomm, 0)
-    if (.not. uses_xfull_links(sbe_lg_degen)) then
-        call comm_bcast(gs%d_matrix, icomm, 0) ! Experimental
+    ! prepare_matrix already runs on EVERY rank from data every rank holds, so
+    ! these broadcasts only re-imposed rank 0's (bit-identical) values.  Under
+    ! klocal each rank owns a different k-slice, so there is nothing to impose
+    ! -- and the replicated path keeps the broadcasts verbatim.
+    if (.not. gs%klocal) then
+        call comm_bcast(gs%p_mod_matrix, icomm, 0)
+        call comm_bcast(gs%delta_omega, icomm, 0)
+        if (.not. uses_xfull_links(sbe_lg_degen)) then
+            call comm_bcast(gs%d_matrix, icomm, 0) ! Experimental
+        end if
     end if
 
     select case(trim(gauge_sbe))
@@ -363,56 +454,111 @@ contains
 
 
 
-    ! Read transition dipole moment from SALMON's output file
+    ! Read transition dipole moment from SALMON's output file (COLLECTIVE).
+    !
+    ! Rank 0 parses the ASCII records exactly as before (same order, same
+    ! dcmplx(), same window test -- the arithmetic is untouched), but into a
+    ! k-CHUNK staging buffer instead of the full-nk destination; the chunk is
+    ! broadcast and every rank copies out the k it owns.  Two reasons this is
+    ! not "rank 0 reads it all, then scatter":
+    !   * the file holds the p_tm block first and the rvnl block second, so the
+    !     two passes below mirror the file layout;
+    !   * a full-nk staging copy on rank 0 alone is ~4 GB at the meshes klocal
+    !     exists to unlock -- it would simply move the OOM to rank 0.
+    ! The chunk width is bounded so a single comm_bcast element COUNT can never
+    ! overflow the default integer MPI takes (same guard as read_prod_dk_data).
     subroutine read_tm_data()
         implicit none
         character(256) :: dummy
-        integer :: fh, i, ik, ib, jb, iik, iib, jjb
+        integer :: fh, ik, ib, jb, iik, iib, jjb
+        integer :: ik0, ik1, chunk_nk, jk
+        integer(8) :: elems_per_k
         real(8) :: tmp(1:6)
+        complex(8), allocatable :: buf(:, :, :, :)
 
+        fh = 0
+        elems_per_k = int(nb_eff, 8) * int(nb_eff, 8) * 3_8
+        chunk_nk = max(1, int(min(int(nk, 8), 200000000_8 / max(elems_per_k, 1_8))))
+        allocate(buf(1:nb_eff, 1:nb_eff, 1:3, 1:chunk_nk))
 
-        fh = open_filehandle(trim(gs_directory) // trim(sysname) // '_tm.data', 'old')
-        read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
-        read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
-        read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
-        ! consume ALL nb*nb export records per k (keeps the record alignment);
-        ! store only pairs with both bands inside the window [nb_min : nb_hi]
-        do ik = 1, nk
-            do ib = 1, nb
-                do jb = 1, nb
-                    read(fh, *) iik, iib, jjb, tmp(1:6)
-                    if (ik .ne. iik) stop "ik mismatch"
-                    if (ib .ne. iib) stop "ib mismatch"
-                    if (jb .ne. jjb) stop "jb mismatch"
-                    if (ib >= nb_min .and. ib <= nb_hi .and. &
-                        & jb >= nb_min .and. jb <= nb_hi) then
-                        gs%p_tm_matrix(ib - nb_min + 1, jb - nb_min + 1, 1, ik) = dcmplx(tmp(1), tmp(2))
-                        gs%p_tm_matrix(ib - nb_min + 1, jb - nb_min + 1, 2, ik) = dcmplx(tmp(3), tmp(4))
-                        gs%p_tm_matrix(ib - nb_min + 1, jb - nb_min + 1, 3, ik) = dcmplx(tmp(5), tmp(6))
-                    end if
+        if (irank == 0) then
+            fh = open_filehandle(trim(gs_directory) // trim(sysname) // '_tm.data', 'old')
+            read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
+            read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
+            read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
+        end if
+
+        ! ---- block 1: p_tm ----
+        ik0 = 1
+        do while (ik0 <= nk)
+            ik1 = min(nk, ik0 + chunk_nk - 1)
+            buf(:, :, :, :) = dcmplx(0d0, 0d0)
+            if (irank == 0) then
+                ! consume ALL nb*nb export records per k (keeps the record
+                ! alignment); store only pairs with both bands inside the
+                ! window [nb_min : nb_hi]
+                do ik = ik0, ik1
+                    do ib = 1, nb
+                        do jb = 1, nb
+                            read(fh, *) iik, iib, jjb, tmp(1:6)
+                            if (ik .ne. iik) stop "ik mismatch"
+                            if (ib .ne. iib) stop "ib mismatch"
+                            if (jb .ne. jjb) stop "jb mismatch"
+                            if (ib >= nb_min .and. ib <= nb_hi .and. &
+                                & jb >= nb_min .and. jb <= nb_hi) then
+                                buf(ib - nb_min + 1, jb - nb_min + 1, 1, ik - ik0 + 1) = dcmplx(tmp(1), tmp(2))
+                                buf(ib - nb_min + 1, jb - nb_min + 1, 2, ik - ik0 + 1) = dcmplx(tmp(3), tmp(4))
+                                buf(ib - nb_min + 1, jb - nb_min + 1, 3, ik - ik0 + 1) = dcmplx(tmp(5), tmp(6))
+                            end if
+                        end do
+                    end do
                 end do
+            end if
+            call comm_bcast(buf, icomm, 0)
+            do ik = max(ik0, ik_lo), min(ik1, ik_hi)
+                jk = ik - ik0 + 1
+                gs%p_tm_matrix(:, :, :, ik) = buf(:, :, :, jk)
             end do
+            ik0 = ik1 + 1
         end do
-        read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
-        do ik = 1, nk
-            do ib = 1, nb
-                do jb = 1, nb
-                    read(fh, *) iik, iib, jjb, tmp(1:6)
-                    if (ik .ne. iik) stop "ik mismatch"
-                    if (ib .ne. iib) stop "ib mismatch"
-                    if (jb .ne. jjb) stop "jb mismatch"
-                    if (ib >= nb_min .and. ib <= nb_hi .and. &
-                        & jb >= nb_min .and. jb <= nb_hi) then
-                        gs%rvnl_tm_matrix(ib - nb_min + 1, jb - nb_min + 1, 1, ik) = dcmplx(tmp(1), tmp(2))
-                        gs%rvnl_tm_matrix(ib - nb_min + 1, jb - nb_min + 1, 2, ik) = dcmplx(tmp(3), tmp(4))
-                        gs%rvnl_tm_matrix(ib - nb_min + 1, jb - nb_min + 1, 3, ik) = dcmplx(tmp(5), tmp(6))
-                    end if
+
+        if (irank == 0) then
+            read(fh, "(a)") dummy; write(*, "('#>',4x,a)") trim(dummy)
+        end if
+
+        ! ---- block 2: rvnl ----
+        ik0 = 1
+        do while (ik0 <= nk)
+            ik1 = min(nk, ik0 + chunk_nk - 1)
+            buf(:, :, :, :) = dcmplx(0d0, 0d0)
+            if (irank == 0) then
+                do ik = ik0, ik1
+                    do ib = 1, nb
+                        do jb = 1, nb
+                            read(fh, *) iik, iib, jjb, tmp(1:6)
+                            if (ik .ne. iik) stop "ik mismatch"
+                            if (ib .ne. iib) stop "ib mismatch"
+                            if (jb .ne. jjb) stop "jb mismatch"
+                            if (ib >= nb_min .and. ib <= nb_hi .and. &
+                                & jb >= nb_min .and. jb <= nb_hi) then
+                                buf(ib - nb_min + 1, jb - nb_min + 1, 1, ik - ik0 + 1) = dcmplx(tmp(1), tmp(2))
+                                buf(ib - nb_min + 1, jb - nb_min + 1, 2, ik - ik0 + 1) = dcmplx(tmp(3), tmp(4))
+                                buf(ib - nb_min + 1, jb - nb_min + 1, 3, ik - ik0 + 1) = dcmplx(tmp(5), tmp(6))
+                            end if
+                        end do
+                    end do
                 end do
+            end if
+            call comm_bcast(buf, icomm, 0)
+            do ik = max(ik0, ik_lo), min(ik1, ik_hi)
+                jk = ik - ik0 + 1
+                gs%rvnl_tm_matrix(:, :, :, ik) = buf(:, :, :, jk)
             end do
+            ik0 = ik1 + 1
         end do
 
-
-        close(fh)
+        deallocate(buf)
+        if (irank == 0) close(fh)
     end subroutine read_tm_data
 
 
@@ -643,7 +789,7 @@ contains
 
             ! ---- allocate on ALL ranks (same shape as the ASCII path) ----
             allocate(gs%bvec(1:3, 1:gs%nbvec))
-            allocate(gs%prod_dk(1:nb_eff, 1:nb_eff, 1:gs%nbvec, 1:nk))
+            allocate(gs%prod_dk(1:nb_eff, 1:nb_eff, 1:gs%nbvec, gs%ik_lo:gs%ik_hi))
             gs%bvec(:, :)          = 0
             gs%prod_dk(:, :, :, :) = dcmplx(0d0, 0d0)
 
@@ -729,11 +875,44 @@ contains
             call comm_bcast(ierr, icomm, 0)
             if (ierr /= 0) stop 1
 
-            ! ---- slot-map this rank's k-slice into a local full-nk
-            ! zero-fill buffer, using the SAME reduced/gicov slot logic as
-            ! the ASCII path (prod_dk_axis_slot / linear-pack), windowed to
-            ! [nb_min:nb_hi] exactly like the ASCII path's io_r/jo_r window
-            ! check ----
+            ! ---- slot-map this rank's k-slice, using the SAME reduced/gicov
+            ! slot logic as the ASCII path (prod_dk_axis_slot / linear-pack),
+            ! windowed to [nb_min:nb_hi] exactly like the ASCII path's
+            ! io_r/jo_r window check.
+            !
+            ! klocal: the MPI-IO read slice IS gs's owned slice (both are
+            ! split_range(1,nk,nproc) on the SAME icomm), so the values land
+            ! straight in their final home and the full-nk zero-fill +
+            ! comm_summation reconstruct below is skipped entirely -- it was an
+            ! allreduce over DISJOINT zero-filled slices, i.e. an identity map
+            ! with no cross-rank addition, so dropping it cannot change a bit.
+            ! Replicated: unchanged (each rank still needs every k). ----
+            if (gs%klocal) then
+                do ik = gs%ik_lo, gs%ik_hi
+                    do jd3 = -ndk_loc, ndk_loc
+                        do jd2 = -ndk_loc, ndk_loc
+                            do jd1 = -ndk_loc, ndk_loc
+                                if (reduced) then
+                                    iv = prod_dk_axis_slot(jd1, jd2, jd3)
+                                else
+                                    iv = (jd3 + ndk_loc) * mdk * mdk + (jd2 + ndk_loc) * mdk + (jd1 + ndk_loc) + 1
+                                end if
+                                if (iv > 0) then
+                                    do jo = nb_min, nb_hi
+                                        do io = nb_min, nb_hi
+                                            gs%prod_dk(io - nb_min + 1, jo - nb_min + 1, iv, ik) = &
+                                                & blk(io, jo, jd1, jd2, jd3, ik)
+                                        end do
+                                    end do
+                                end if
+                            end do
+                        end do
+                    end do
+                end do
+                if (allocated(blk)) deallocate(blk)
+                call mpiio_close(fh, ierr)   ! collective (all ranks)
+            else
+
             allocate(prod_dk_l(1:nb_eff, 1:nb_eff, 1:gs%nbvec, 1:nk))
             prod_dk_l(:, :, :, :) = dcmplx(0d0, 0d0)
             do ik = ik_lo, ik_hi
@@ -795,6 +974,8 @@ contains
                 end do
             end block
             deallocate(prod_dk_l)
+
+            end if   ! gs%klocal
 
             if (irank == 0) write(*, '(a)') "#   prod_dk: binary (MPI-IO) k-slice read, checksum verified."
 
@@ -876,7 +1057,7 @@ contains
 
         ! --- allocate on ALL ranks ---
         allocate(gs%bvec(1:3, 1:gs%nbvec))
-        allocate(gs%prod_dk(1:nb_eff, 1:nb_eff, 1:gs%nbvec, 1:nk))
+        allocate(gs%prod_dk(1:nb_eff, 1:nb_eff, 1:gs%nbvec, gs%ik_lo:gs%ik_hi))
         gs%bvec(:, :)          = 0
         gs%prod_dk(:, :, :, :) = dcmplx(0d0, 0d0)
 
@@ -914,83 +1095,96 @@ contains
             ! already at a k20^3=8000 k-point mesh for a realistic file_no).
             nrec          = expected_prod_dk_nrec(nk, nbvec_full, file_no)
             per_k_records = nrec / max(int(nk, 8), 1_8)
-            do irec = 1, nrec
-                read(fh, *, iostat=ios) &
-                    & ik_r, ik1_r, ik2_r, ik3_r, jdk1_r, jdk2_r, jdk3_r, io_r, jo_r, re_r, im_r
-                if (ios /= 0) then
-                    write(*, '(a)') "ERROR(read_prod_dk_data): fewer records than expected."
-                    ierr = 1
-                    exit
-                end if
-                ! ik must run 1..nk in contiguous blocks (matches SBE k ordering)
-                ik_exp = (irec - 1_8) / per_k_records + 1_8
-                if (int(ik_r, 8) /= ik_exp) then
-                    write(*, '(a)') "ERROR(read_prod_dk_data): ik ordering does not match SBE k-grid."
-                    ierr = 1
-                    exit
-                end if
-                if (abs(jdk1_r) > ndk_loc .or. abs(jdk2_r) > ndk_loc .or. abs(jdk3_r) > ndk_loc) then
-                    write(*, '(a)') "ERROR(read_prod_dk_data): dk-shift index out of range."
-                    ierr = 1
-                    exit
-                end if
-                ! keep only the SBE band window [nb_min : nb_hi] (writer emits
-                ! the full band window); store at window indices io/jo - nb_min + 1
-                if (io_r >= nb_min .and. io_r <= nb_hi .and. &
-                    & jo_r >= nb_min .and. jo_r <= nb_hi) then
-                    if (reduced) then
-                        ! gicov: drop everything except the +x/+y/+z columns
-                        ! (see the header comment above prod_dk_axis_slot,
-                        ! degenerate_block_ssbe.f90, for why this is safe).
-                        islot = prod_dk_axis_slot(jdk1_r, jdk2_r, jdk3_r)
-                        if (islot > 0) then
-                            gs%prod_dk(io_r - nb_min + 1, jo_r - nb_min + 1, islot, ik_r) = dcmplx(re_r, im_r)
-                        end if
-                    else
-                        ivec = (jdk3_r + ndk_loc) * mdk * mdk &
-                            & + (jdk2_r + ndk_loc) * mdk &
-                            & + (jdk1_r + ndk_loc) + 1
-                        gs%prod_dk(io_r - nb_min + 1, jo_r - nb_min + 1, ivec, ik_r) = dcmplx(re_r, im_r)
-                    end if
-                end if
-            end do
+        end if
 
-            ! record-count check: no surplus data lines beyond the expected block
-            if (ierr == 0) then
-                read(fh, '(a)', iostat=ios) cline
-                if (ios == 0) then
-                    if (len_trim(cline) > 0) then
-                        write(*, '(a)') "ERROR(read_prod_dk_data): more records than expected."
-                        ierr = 1
-                    end if
+        call comm_bcast(gs%bvec, icomm, 0)
+
+        ! --- k-CHUNKED collective record read.  Rank 0 parses the records in
+        ! the SAME order with the SAME checks and the SAME dcmplx() as before,
+        ! but into a chunk staging buffer; the chunk is broadcast and every rank
+        ! keeps the k it owns.  Chunking also keeps a single comm_bcast element
+        ! COUNT well inside the default integer MPI takes (the pre-existing
+        ! 32-bit 'size(val)' hazard of comm_bcast_array4d_dcomplex). ---
+        block
+            integer(8) :: elems_per_k, krec
+            integer :: chunk_nk, ik0, ik1, ikc
+            complex(8), allocatable :: pbuf(:, :, :, :)
+            elems_per_k = int(nb_eff, 8) * int(nb_eff, 8) * int(gs%nbvec, 8)
+            chunk_nk = max(1, int(min(int(nk, 8), 200000000_8 / max(elems_per_k, 1_8))))
+            allocate(pbuf(1:nb_eff, 1:nb_eff, 1:gs%nbvec, 1:chunk_nk))
+            ik0 = 1
+            do while (ik0 <= nk)
+                ik1 = min(nk, ik0 + chunk_nk - 1)
+                pbuf(:, :, :, :) = dcmplx(0d0, 0d0)
+                if (irank == 0) then
+                    kloop: do ikc = ik0, ik1
+                        do krec = 1_8, per_k_records
+                            read(fh, *, iostat=ios) &
+                                & ik_r, ik1_r, ik2_r, ik3_r, jdk1_r, jdk2_r, jdk3_r, io_r, jo_r, re_r, im_r
+                            if (ios /= 0) then
+                                write(*, '(a)') "ERROR(read_prod_dk_data): fewer records than expected."
+                                ierr = 1
+                                exit kloop
+                            end if
+                            ! ik must run 1..nk in contiguous blocks (matches SBE k ordering)
+                            if (ik_r /= ikc) then
+                                write(*, '(a)') "ERROR(read_prod_dk_data): ik ordering does not match SBE k-grid."
+                                ierr = 1
+                                exit kloop
+                            end if
+                            if (abs(jdk1_r) > ndk_loc .or. abs(jdk2_r) > ndk_loc .or. abs(jdk3_r) > ndk_loc) then
+                                write(*, '(a)') "ERROR(read_prod_dk_data): dk-shift index out of range."
+                                ierr = 1
+                                exit kloop
+                            end if
+                            ! keep only the SBE band window [nb_min : nb_hi] (writer emits
+                            ! the full band window); store at window indices io/jo - nb_min + 1
+                            if (io_r >= nb_min .and. io_r <= nb_hi .and. &
+                                & jo_r >= nb_min .and. jo_r <= nb_hi) then
+                                if (reduced) then
+                                    ! gicov: drop everything except the +x/+y/+z columns
+                                    ! (see the header comment above prod_dk_axis_slot,
+                                    ! degenerate_block_ssbe.f90, for why this is safe).
+                                    islot = prod_dk_axis_slot(jdk1_r, jdk2_r, jdk3_r)
+                                    if (islot > 0) then
+                                        pbuf(io_r - nb_min + 1, jo_r - nb_min + 1, islot, ikc - ik0 + 1) = &
+                                            & dcmplx(re_r, im_r)
+                                    end if
+                                else
+                                    ivec = (jdk3_r + ndk_loc) * mdk * mdk &
+                                        & + (jdk2_r + ndk_loc) * mdk &
+                                        & + (jdk1_r + ndk_loc) + 1
+                                    pbuf(io_r - nb_min + 1, jo_r - nb_min + 1, ivec, ikc - ik0 + 1) = &
+                                        & dcmplx(re_r, im_r)
+                                end if
+                            end if
+                        end do
+                    end do kloop
+                end if
+                call comm_bcast(ierr, icomm, 0)
+                if (ierr /= 0) stop 1
+                call comm_bcast(pbuf, icomm, 0)
+                do ikc = max(ik0, gs%ik_lo), min(ik1, gs%ik_hi)
+                    gs%prod_dk(:, :, :, ikc) = pbuf(:, :, :, ikc - ik0 + 1)
+                end do
+                ik0 = ik1 + 1
+            end do
+            deallocate(pbuf)
+        end block
+
+        ! --- root: surplus-record check, then close ---
+        if (irank == 0) then
+            read(fh, '(a)', iostat=ios) cline
+            if (ios == 0) then
+                if (len_trim(cline) > 0) then
+                    write(*, '(a)') "ERROR(read_prod_dk_data): more records than expected."
+                    ierr = 1
                 end if
             end if
             close(fh)
         end if
-
-        ! --- propagate record-stage error, then broadcast the data (prod_dk
-        ! is bcast in k-CHUNKS so no single MPI_Bcast call's element COUNT
-        ! risks the same 32-bit 'size(val)' class of overflow the nrec fix
-        ! above targets -- comm_bcast_array4d_dcomplex, communication.f90,
-        ! passes a default-integer size(val) to MPI_Bcast with no kind guard;
-        ! reduced (gicov) storage already cuts this ~9x at ndk=1, this is
-        ! defense-in-depth for the remaining gi/gifix/large-nb_eff cases) ---
         call comm_bcast(ierr, icomm, 0)
         if (ierr /= 0) stop 1
-        call comm_bcast(gs%bvec, icomm, 0)
-        block
-            integer(8) :: elems_per_k, max_elems_per_chunk
-            integer :: chunk_nk, ik0, ik1
-            elems_per_k = int(nb_eff, 8) * int(nb_eff, 8) * int(gs%nbvec, 8)
-            max_elems_per_chunk = 200000000_8  ! << 2**31-1, generous headroom
-            chunk_nk = max(1, int(max_elems_per_chunk / max(elems_per_k, 1_8)))
-            ik0 = 1
-            do while (ik0 <= nk)
-                ik1 = min(nk, ik0 + chunk_nk - 1)
-                call comm_bcast(gs%prod_dk(:, :, :, ik0:ik1), icomm, 0)
-                ik0 = ik1 + 1
-            end do
-        end block
         end if
 
         ! ---- Task-6 numeric round-trip gate: optional debug dump of the
@@ -1016,7 +1210,10 @@ contains
                 write(dbgfh, '(a,i0,a,i0,a,i0)') "# nb_eff=", nb_eff, " nk=", nk, " nbvec=", gs%nbvec
                 do iv = 1, gs%nbvec
                     do jk_d = 1, 3
-                        if (idump_ik(jk_d) < 1 .or. idump_ik(jk_d) > nk) cycle
+                        ! klocal: rank 0 only OWNS [ik_lo:ik_hi], so the fixed
+                        ! probe k it does not own are skipped rather than read
+                        ! out of bounds (non-klocal: [1:nk], i.e. unchanged).
+                        if (idump_ik(jk_d) < gs%ik_lo .or. idump_ik(jk_d) > gs%ik_hi) cycle
                         do ip_d = 1, npair
                             write(dbgfh, '(4(i6,1x),2es24.16)') ib_list(ip_d), jb_list(ip_d), iv, idump_ik(jk_d), &
                                 & real (gs%prod_dk(ib_list(ip_d), jb_list(ip_d), iv, idump_ik(jk_d))), &
@@ -1437,6 +1634,8 @@ contains
         real(8) :: x, w, resu, resp, resp_max
         integer :: nrej
         complex(8) :: dpdw(1:3)
+        integer :: nloc, nhalo, islot_h
+        logical, allocatable :: uneed(:)
 
         omega_eps = sbe_lg_degen_floor
 
@@ -1445,7 +1644,8 @@ contains
         if (trim(sbe_lg_degen) == 'gi' .or. trim(sbe_lg_degen) == 'gifix') then
             ! ===== Pb3: non-Abelian xi inside degenerate blocks + smooth blend =====
             ! delta_omega first (needed by the blend), then build xi from prod_dk.
-            do ik=1, nk
+            ! (gi/gifix are never klocal, so ik_lo:ik_hi == 1:nk here.)
+            do ik=ik_lo, ik_hi
                 do ib=1, nb_eff
                     do jb=1, nb_eff
                         gs%delta_omega(ib, jb, ik) = gs%eigen(ib, ik) - gs%eigen(jb, ik)
@@ -1460,7 +1660,7 @@ contains
                         & fixed_blocks=(trim(sbe_lg_degen) == 'gifix'))
 
             resp_max = 0d0
-            do ik=1, nk
+            do ik=ik_lo, ik_hi
                 do ib=1, nb_eff
                     do jb=1, nb_eff
                         x = abs(gs%delta_omega(ib, jb, ik))
@@ -1506,7 +1706,7 @@ contains
             ! E·(∂_k ρ − i[ξ,ρ]) including the interband dipole, so d_matrix
             ! is unused by gicov_rhs (dropped there). No fixed blocks, no
             ! closure, no occupation guard.
-            do ik=1, nk
+            do ik=ik_lo, ik_hi
                 do ib=1, nb_eff
                     do jb=1, nb_eff
                         gs%delta_omega(ib, jb, ik) = gs%eigen(ib, ik) - gs%eigen(jb, ik)
@@ -1514,14 +1714,64 @@ contains
                 end do
             end do
 
+            ! ---- u_transport SLOT layout (see the klocal block of s_sbe_gs_info).
+            ! u_transport is the ONE static field the covariant stencil reads at
+            ! NEIGHBOUR k, so it needs halo slots on top of the owned ones.  The
+            ! needed-set is exactly the stencil's own chain walk
+            ! (covariant_halo_needed = the same routine that plans the rho halo),
+            ! so coverage is by construction and static in time.
+            !   * uses_fd_gicov  -> reserve the +-m_max shells over all 3 axes;
+            !     build_gicov_halo fills them once (bloch_solver_ssbe).
+            !   * gicov_int      -> NO halo here: the transport cache walks the
+            !     driven axis out to +-j_cache, which is deeper than any fixed
+            !     shell, and it marches that walk with a rolling ONE-step shift
+            !     instead (build_gicov_integral_cache), so a resident halo would
+            !     be both insufficient and wasted.
+            !   * not klocal     -> nks = nk and kmap is the identity, i.e. the
+            !     slot index IS the global k: byte-for-byte the old layout.
+            nloc = max(0, ik_hi - ik_lo + 1)
+            if (gs%klocal .and. uses_fd_gicov(sbe_lg_degen)) then
+                allocate(uneed(1:nk))
+                call covariant_halo_needed(nk, gs%nbvec, gs%bvec, num_kgrid, ik_lo, ik_hi, uneed)
+                islot_h = nloc
+                do ik = 1, nk
+                    if (uneed(ik) .and. gs%kmap(ik) == 0) then
+                        islot_h = islot_h + 1
+                        gs%kmap(ik) = islot_h
+                    end if
+                end do
+                nhalo = islot_h - nloc
+                gs%nks = islot_h
+                deallocate(uneed)
+                if (irank == 0) write(*, '(a,i0,a,i0,a)') &
+                    & "# gicov k-local static fields: ", nloc, " owned + ", nhalo, " halo k / rank"
+            else if (gs%klocal) then
+                gs%nks = nloc
+                if (irank == 0) write(*, '(a,i0,a)') &
+                    & "# gicov_int k-local static fields: ", nloc, " owned k / rank (no resident halo)"
+            else
+                gs%nks = nk
+            end if
+
             ! X-full: ONE full-band block (block_id≡1) -> build_block_transport
             ! polar-factors the whole nb×nb overlap M = the full-band Wilson
             ! transport. No fixed blocks, no closure.
             if (.not. allocated(gs%block_id)) allocate(gs%block_id(1:nb_eff, 1:nk))
             gs%block_id(:, :) = 1                                   ! single full-band block
-            if (.not. allocated(gs%u_transport)) allocate(gs%u_transport(1:nb_eff, 1:nb_eff, 1:3, 1:nk))
-            call build_block_transport(nb_eff, nk, gs%nbvec, gs%bvec, gs%prod_dk, &
-                                     & gs%block_id, num_kgrid, gs%u_transport, nrej)
+            if (.not. allocated(gs%u_transport)) &
+                & allocate(gs%u_transport(1:nb_eff, 1:nb_eff, 1:3, 1:max(1, gs%nks)))
+            gs%u_transport(:, :, :, :) = (0d0, 0d0)
+            ! The owned slots are 1..nloc in ascending k (kmap(ik)=ik-ik_lo+1), so
+            ! the leading section IS the owned k-range and can be handed to the
+            ! builder as a plain (.., ik_lo:ik_hi) array: sequence association maps
+            ! slot 1 <-> ik_lo.  Halo slots (if any) are filled by the exchange.
+            if (nloc > 0) then
+                call build_block_transport(nb_eff, nk, gs%nbvec, gs%bvec, gs%prod_dk, &
+                                         & gs%block_id, num_kgrid, gs%u_transport(:, :, :, 1:nloc), &
+                                         & nrej, ik_lo, ik_hi)
+            else
+                nrej = 0
+            end if
 
             ! X-full: the full-band covariant transport supplies the WHOLE field
             ! term incl. the interband dipole (xi_inter = dipole), so d_matrix is
@@ -1532,7 +1782,8 @@ contains
             end if
         else
             ! ===== default 'off': bit-identical to the pre-Pb3 dipole construction =====
-            do ik=1, nk
+            ! ('off' is never klocal, so ik_lo:ik_hi == 1:nk here.)
+            do ik=ik_lo, ik_hi
                 do ib=1, nb_eff
                     do jb=1, nb_eff
                         gs%delta_omega(ib, jb, ik) = gs%eigen(ib, ik) - gs%eigen(jb, ik)
@@ -1557,6 +1808,27 @@ contains
 
 
 end subroutine init_sbe_gs_info
+
+
+! Put a hand-built gs into the REPLICATED k-layout (ik_lo=1, ik_hi=nk, nks=nk,
+! kmap = identity).  init_sbe_gs_info does this itself; test fixtures and any
+! future caller that assembles gs%* directly must call this so the slot-indexed
+! reads (u_transport, gh_rho) resolve.  With the identity map every kmap-indexed
+! expression collapses to the original global-k one, so this IS the pre-klocal
+! behaviour, spelled out.
+subroutine sbe_gs_set_replicated_kmap(gs, nk)
+    implicit none
+    type(s_sbe_gs_info), intent(inout) :: gs
+    integer, intent(in) :: nk
+    integer :: ik
+    gs%klocal = .false.
+    gs%ik_lo = 1;  gs%ik_hi = nk;  gs%nks = nk
+    if (allocated(gs%kmap)) deallocate(gs%kmap)
+    allocate(gs%kmap(1:nk))
+    do ik = 1, nk
+        gs%kmap(ik) = ik
+    end do
+end subroutine sbe_gs_set_replicated_kmap
 
 
 ! T2 Delta-omega dephasing gate weight (design: gw/gw_design/plans/
