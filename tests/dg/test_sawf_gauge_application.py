@@ -8,10 +8,12 @@ if not FC: raise SystemExit('gfortran is required')
 driver=r'''program check_gauge_apply
  use lcfo_wannier_sawf_templates, only: apply_sawf_gauge_connection, &
    stitch_and_apply_sawf_neighbor_pair, stitch_and_apply_sawf_neighbor_pair_real, &
-   build_sawf_neighbor_trace_overlap
+   build_sawf_neighbor_trace_overlap, whiten_sawf_buffered_overlap, &
+   stitch_sawf_buffered_neighbor_gauge
  implicit none
  complex(8)::q(2,2),basis(3,2),ww(2,2),wp(2,1),face_self(2,2),face_neighbor(2,2)
  complex(8)::overlap(2,2),neighbor_q(2,2),gauge(2,2),basis_before(3,2)
+ complex(8)::gram_l(2,2),gram_r(2,2),cross_raw(2,2),cross_white(2,2)
  complex(8)::b0(3,2),w0(2,2),p0(2,1),f0(2,2),n0(2,2)
  real(8)::c,s,residual
  logical::ok
@@ -54,6 +56,17 @@ driver=r'''program check_gauge_apply
  call build_sawf_neighbor_trace_overlap(trace_l,trace_r,.25d0,trace_overlap,ok,msg)
  call req(ok.and.maxval(abs(trace_overlap-.25d0*matmul(transpose(trace_l),trace_r)))<1d-14, &
    'neighbor trace overlap')
+ ! Non-unit raw overlap from a finite buffer must be whitened by both Gram metrics.
+ gram_l=0;gram_l(1,1)=4;gram_l(2,2)=9
+ gram_r=0;gram_r(1,1)=16;gram_r(2,2)=25
+ cross_raw=matmul(reshape([cmplx(2d0,0d0,8),cmplx(0d0,0d0,8), &
+   cmplx(0d0,0d0,8),cmplx(3d0,0d0,8)],[2,2]),matmul(q, &
+   reshape([cmplx(4d0,0d0,8),cmplx(0d0,0d0,8),cmplx(0d0,0d0,8), &
+   cmplx(5d0,0d0,8)],[2,2])))
+ call whiten_sawf_buffered_overlap(cross_raw,gram_l,gram_r,1d-12,cross_white,ok,msg)
+ call req(ok.and.maxval(abs(cross_white-q))<1d-12,'buffer metric whitening')
+ call stitch_sawf_buffered_neighbor_gauge(cross_raw,gram_l,gram_r,1d-12,1d-10,gauge,residual,ok,msg)
+ call req(ok.and.residual<1d-12,'non-unit buffer metric gauge acceptance')
  write(*,'(a)')'PASS gauge connection applied to basis, WW, WP, and DG face blocks'
 contains
  subroutine req(x,t);logical,intent(in)::x;character(*),intent(in)::t
@@ -67,6 +80,7 @@ project(gauge_apply LANGUAGES Fortran)
 find_package(LAPACK REQUIRED)
 add_executable(check "{ROOT/'src/gs/dc/lcfo_wannier_sawf_templates.f90'}" driver.f90)
 target_link_libraries(check PRIVATE ${{LAPACK_LIBRARIES}})
+target_compile_options(check PRIVATE -fcheck=all -fbacktrace)
 ''')
  env=dict(os.environ)
  for cmd in (["cmake","-S",str(td),"-B",str(td/'b'),f"-DCMAKE_Fortran_COMPILER={FC}"],

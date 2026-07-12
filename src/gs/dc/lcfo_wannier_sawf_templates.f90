@@ -30,8 +30,74 @@ module lcfo_wannier_sawf_templates
   public :: stitch_and_apply_sawf_neighbor_pair
   public :: stitch_and_apply_sawf_neighbor_pair_real
   public :: build_sawf_neighbor_trace_overlap
+  public :: whiten_sawf_buffered_overlap
+  public :: stitch_sawf_buffered_neighbor_gauge
 
 contains
+  subroutine stitch_sawf_buffered_neighbor_gauge(cross_overlap,left_gram,right_gram, &
+      relative_cutoff,alignment_tolerance,gauge_unitary,residual,ok,message)
+    complex(8),intent(in)::cross_overlap(:,:),left_gram(:,:),right_gram(:,:)
+    real(8),intent(in)::relative_cutoff,alignment_tolerance
+    complex(8),intent(out)::gauge_unitary(size(cross_overlap,2),size(cross_overlap,1))
+    real(8),intent(out)::residual;logical,intent(out)::ok;character(*),intent(out)::message
+    complex(8),allocatable::whitened(:,:)
+    allocate(whitened(size(cross_overlap,1),size(cross_overlap,2)))
+    call whiten_sawf_buffered_overlap(cross_overlap,left_gram,right_gram,relative_cutoff, &
+      whitened,ok,message)
+    if(.not.ok)return
+    call stitch_sawf_neighbor_gauge(whitened,alignment_tolerance,gauge_unitary,residual,ok,message)
+  end subroutine
+
+  subroutine whiten_sawf_buffered_overlap(cross_overlap,left_gram,right_gram,relative_cutoff, &
+      whitened_overlap,ok,message)
+    complex(8),intent(in)::cross_overlap(:,:),left_gram(:,:),right_gram(:,:)
+    real(8),intent(in)::relative_cutoff
+    complex(8),intent(out)::whitened_overlap(size(cross_overlap,1),size(cross_overlap,2))
+    logical,intent(out)::ok;character(*),intent(out)::message
+    complex(8),allocatable::left_inverse_sqrt(:,:),right_inverse_sqrt(:,:)
+    logical::left_ok,right_ok;character(256)::detail
+    ok=.false.;message='';whitened_overlap=(0d0,0d0)
+    if(size(cross_overlap,1)/=size(cross_overlap,2).or. &
+       any(shape(left_gram)/=shape(cross_overlap)).or.any(shape(right_gram)/=shape(cross_overlap)))then
+      message='SAWF buffered overlap Gram dimensions are inconsistent';return
+    end if
+    call sawf_hermitian_inverse_sqrt(left_gram,relative_cutoff,left_inverse_sqrt,left_ok,detail)
+    if(.not.left_ok)then;message='left '//trim(detail);return;end if
+    call sawf_hermitian_inverse_sqrt(right_gram,relative_cutoff,right_inverse_sqrt,right_ok,detail)
+    if(.not.right_ok)then;message='right '//trim(detail);return;end if
+    whitened_overlap=matmul(left_inverse_sqrt,matmul(cross_overlap,right_inverse_sqrt))
+    ok=.true.
+  end subroutine
+
+  subroutine sawf_hermitian_inverse_sqrt(gram,relative_cutoff,inverse_sqrt,ok,message)
+    complex(8),intent(in)::gram(:,:);real(8),intent(in)::relative_cutoff
+    complex(8),allocatable,intent(out)::inverse_sqrt(:,:)
+    logical,intent(out)::ok;character(*),intent(out)::message
+    complex(8),allocatable::eigenvectors(:,:),work(:),scaled(:,:)
+    complex(8)::query(1);real(8),allocatable::eigenvalues(:),rwork(:)
+    integer::n,info,lwork,i;external::zheev
+    ok=.false.;message=''
+    if(size(gram,1)<=0.or.size(gram,1)/=size(gram,2).or.relative_cutoff<=0d0)then
+      message='SAWF buffered Gram dimensions or cutoff are invalid';return
+    end if
+    n=size(gram,1);allocate(eigenvectors(n,n),eigenvalues(n),rwork(max(1,3*n-2)))
+    eigenvectors=gram;lwork=-1
+    call zheev('V','U',n,eigenvectors,n,eigenvalues,query,lwork,rwork,info)
+    if(info/=0)then;message='SAWF buffered Gram eigensolver query failed';return;end if
+    lwork=max(1,int(real(query(1),8)));allocate(work(lwork));eigenvectors=gram
+    call zheev('V','U',n,eigenvectors,n,eigenvalues,work,lwork,rwork,info)
+    if(info/=0.or.maxval(eigenvalues)<=0d0)then
+      message='SAWF buffered Gram eigensolver failed';return
+    end if
+    if(minval(eigenvalues)<=relative_cutoff*maxval(eigenvalues))then
+      message='SAWF buffered Gram is rank deficient';return
+    end if
+    allocate(scaled(n,n),inverse_sqrt(n,n));scaled=eigenvectors
+    do i=1,n;scaled(:,i)=scaled(:,i)/sqrt(eigenvalues(i));end do
+    inverse_sqrt=matmul(scaled,conjg(transpose(eigenvectors)))
+    ok=.true.
+  end subroutine
+
   subroutine build_sawf_neighbor_trace_overlap(left_trace,right_trace,area_weight,overlap,ok,message)
     real(8),intent(in)::left_trace(:,:),right_trace(:,:),area_weight
     real(8),intent(out)::overlap(size(left_trace,2),size(right_trace,2))
