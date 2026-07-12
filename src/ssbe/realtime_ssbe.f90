@@ -230,7 +230,7 @@ subroutine main_realtime_ssbe(icomm)
                 &         - Ac_ext_t(1:3, 0))
             q_mid = dble(num_kgrid(gi_axis_l)) &
                 & * dot_product(a_sh(1:3), gs%a_matrix(1:3, gi_axis_l)) / twopi_l
-            call dt_evolve_bloch_lg_integral(sbe, gs, q_mid, dt)
+            call dt_evolve_bloch_lg_integral(sbe, gs, q_mid, dt, icomm)
             ! reduced-mesh shift at t_it (current readout)
             a_sh(1:3) = -(Ac_ext_t(1:3, it) - Ac_ext_t(1:3, 0))
             q_now = dble(num_kgrid(gi_axis_l)) &

@@ -32,6 +32,13 @@
 !      gicov) never select the integral machinery, and 'gicov_int' never
 !      selects the finite-difference one -- the static half of the legacy
 !      byte-regression guard (the full byte compare is the Fugaku gate).
+!   T9 eigensolver-failure CONTRACT: a broken instantaneous eigenproblem is
+!      REPORTED through the status flag, never absorbed.  Both kernels used to
+!      swallow it (step_k froze the block = rho_out=rho; occupation_k fell back
+!      to the FORBIDDEN diag(rho~)) -- and because both fallbacks conserve the
+!      trace, the Ne/trace monitor could not see it.  Note zheev itself returns
+!      info=0 on a NaN-poisoned matrix (verified on Accelerate), so the status
+!      must ALSO reject non-finite eigenvalues, or the failure stays silent.
 !
 program test_gicov_integral
   use gicov_integral_ssbe
@@ -47,6 +54,7 @@ program test_gicov_integral
   call t6_axis_guard(nfail)
   call t7_floor_shift(nfail)
   call t8_mode_predicates(nfail)
+  call t9_eigensolver_status(nfail)
 
   if (nfail == 0) then
     write(*, '(a)') "ALL PASS (test_gicov_integral)"
@@ -224,7 +232,7 @@ contains
     complex(8) :: H(nb, nb), rho(nb, nb), rho2(nb, nb)
     complex(8) :: P(nb, nb), R(nb, nb), cwork(64)
     real(8)    :: eps(nb), rwork(64), tr0, herr, dt, gamma
-    integer    :: a, b, it
+    integer    :: a, b, it, ierr
     ! a fixed generic Hermitian H and a Hermitian trace-1 initial rho
     H = (0d0, 0d0)
     H(1, 1) = 0.20d0; H(2, 2) = 0.55d0; H(3, 3) = 0.90d0
@@ -239,7 +247,7 @@ contains
     dt = 0.02d0; gamma = 1d0 / 50d0
     do it = 1, nstep
       call gicov_int_step_k(H, rho, nb, dt, gamma, 'step', 2d-3, 0d0, 1d-9, &
-                          & eps, P, R, cwork, 64, rwork, rho2)
+                          & eps, P, R, cwork, 64, rwork, rho2, ierr)
       rho = rho2
     end do
     ! trace preserved (populations invariant in H's eigenbasis, exactly)
@@ -261,7 +269,7 @@ contains
     complex(8) :: H(nb, nb), rho(nb, nb), rho2(nb, nb)
     complex(8) :: P(nb, nb), R(nb, nb), cwork(64)
     real(8)    :: eps(nb), rwork(64), dt, gamma, c0, cN, expected
-    integer    :: it
+    integer    :: it, ierr
     dt = 0.05d0; gamma = 1d0 / 10d0
     ! (a) EXACTLY degenerate pair: H = 0 (eps_1 = eps_2) -> g(0)=0 -> no decay
     H = (0d0, 0d0)
@@ -271,7 +279,7 @@ contains
     c0 = abs(rho(1, 2))
     do it = 1, 100
       call gicov_int_step_k(H, rho, nb, dt, gamma, 'step', 2d-3, 0d0, 1d-9, &
-                          & eps, P, R, cwork, 64, rwork, rho2)
+                          & eps, P, R, cwork, 64, rwork, rho2, ierr)
       rho = rho2
     end do
     call report("T4 exact-degenerate pair is NOT dephased (g(0)=0 covariance)", &
@@ -284,7 +292,7 @@ contains
     c0 = abs(rho(1, 2))
     do it = 1, 100
       call gicov_int_step_k(H, rho, nb, dt, gamma, 'step', 2d-3, 0d0, 1d-9, &
-                          & eps, P, R, cwork, 64, rwork, rho2)
+                          & eps, P, R, cwork, 64, rwork, rho2, ierr)
       rho = rho2
     end do
     cN = abs(rho(1, 2))
@@ -404,5 +412,70 @@ contains
    .and. (.not. uses_integral_gicov('gifix')) .and. (.not. uses_integral_gicov('gicov'))
     call report("T8 NO legacy mode (off/gi/gifix/gicov) enters the integral path", ok, nfail)
   end subroutine t8_mode_predicates
+
+  !----------------------------------------------------------------
+  ! Eigensolver-failure contract.  A corrupted instantaneous H~ must be
+  ! REPORTED (ierr /= 0) so the caller can abort the whole communicator; it may
+  ! never be silently absorbed, because both former fallbacks (freeze the block
+  ! / read diag(rho~)) preserve the trace and therefore slip past the Ne monitor.
+  subroutine t9_eigensolver_status(nfail)
+    integer, intent(inout) :: nfail
+    integer, parameter :: nb = 3
+    complex(8) :: H(nb, nb), rho(nb, nb), rho2(nb, nb)
+    complex(8) :: P(nb, nb), R(nb, nb), cwork(64)
+    real(8)    :: eps(nb), rwork(64), nocc(nb), nan
+    integer    :: ierr, ierr_ok, a
+    logical    :: ok
+
+    rho = (0d0, 0d0)
+    rho(1, 1) = 0.6d0; rho(2, 2) = 0.3d0; rho(3, 3) = 0.1d0
+    rho(1, 2) = cmplx(0.20d0, 0.05d0, 8); rho(2, 1) = conjg(rho(1, 2))
+
+    ! (a) clean, GAPPED, NON-diagonal H -> success, and the readout is the
+    !     INSTANTANEOUS-eigenbasis projection, provably not diag(rho~):
+    !     if the forbidden diag(rho~) fallback were ever reached it would
+    !     return 0.6/0.3/0.1 -- so a mismatch here is the detector.
+    H = (0d0, 0d0)
+    H(1, 1) = 0.20d0; H(2, 2) = 0.55d0; H(3, 3) = 0.90d0
+    H(1, 2) = cmplx(0.18d0, 0.04d0, 8); H(2, 1) = conjg(H(1, 2))
+    H(1, 3) = cmplx(-0.09d0, 0.06d0, 8); H(3, 1) = conjg(H(1, 3))
+    call gicov_int_occupation_k(H, rho, nb, eps, P, R, cwork, 64, rwork, nocc, ierr_ok)
+    ok = (ierr_ok == 0)
+    ! the instantaneous populations must DIFFER from the frozen-basis diagonal
+    ok = ok .and. (maxval(abs(nocc - (/ 0.6d0, 0.3d0, 0.1d0 /))) > 1d-3)
+    ! ... while still summing to the (basis-invariant) trace
+    ok = ok .and. (abs(sum(nocc) - 1.0d0) < 1d-12)
+    call report("T9 occupation: ierr=0, instantaneous projection (NOT diag(rho~)), trace kept", &
+              & ok, nfail)
+
+    call gicov_int_step_k(H, rho, nb, 0.02d0, 1d0/50d0, 'step', 2d-3, 0d0, 1d-9, &
+                        & eps, P, R, cwork, 64, rwork, rho2, ierr_ok)
+    ok = (ierr_ok == 0)
+    ! and it actually EVOLVED (a frozen block would return rho unchanged)
+    ok = ok .and. (maxdiff(rho2, rho, nb) > 1d-6)
+    call report("T9 step: ierr=0 on a good H and the block genuinely evolves (no freeze)", &
+              & ok, nfail)
+
+    ! (b) non-finite H~ -> MUST be reported by BOTH kernels.  zheev returns
+    !     info=0 here (Accelerate), so this exercises the finite-eigenvalue
+    !     half of the status; without it the corruption would propagate.
+    nan = 0d0; nan = nan / nan
+    H = (0d0, 0d0)
+    H(1, 1) = 0.20d0; H(2, 2) = 0.55d0
+    H(3, 3) = cmplx(nan, 0d0, 8)
+    call gicov_int_step_k(H, rho, nb, 0.02d0, 1d0/50d0, 'step', 2d-3, 0d0, 1d-9, &
+                        & eps, P, R, cwork, 64, rwork, rho2, ierr)
+    call report("T9 step: non-finite H~ is REPORTED (ierr/=0), not silently frozen", &
+              & ierr /= 0, nfail)
+    call gicov_int_occupation_k(H, rho, nb, eps, P, R, cwork, 64, rwork, nocc, ierr)
+    ok = (ierr /= 0)
+    ! and it must NOT have quietly returned the forbidden diag(rho~) fallback
+    do a = 1, nb
+      if (abs(nocc(a) - real(rho(a, a), 8)) > 1d-14) cycle
+    end do
+    ok = ok .and. (maxval(abs(nocc - (/ 0.6d0, 0.3d0, 0.1d0 /))) > 1d-14)
+    call report("T9 occupation: non-finite H~ REPORTED, no diag(rho~) fallback value", &
+              & ok, nfail)
+  end subroutine t9_eigensolver_status
 
 end program test_gicov_integral

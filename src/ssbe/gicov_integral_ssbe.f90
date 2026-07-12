@@ -46,6 +46,7 @@
 !===================================================================
 module gicov_integral_ssbe
   use degenerate_block_ssbe, only: polar_unitary
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
 
@@ -290,9 +291,15 @@ contains
   ! NO heap allocation and NO per-thread automatic array: the caller allocates
   ! one work bank per OpenMP thread OUTSIDE the k-loop and passes the thread's
   ! slice, per the frtpx heap-outside-OMP discipline.  lcwork must be >= 2*nb-1.
+  !
+  ! ierr /= 0 means the instantaneous eigenproblem BROKE and rho_out is NOT to
+  ! be trusted: the caller MUST abort the whole communicator (see
+  ! gicov_int_eig_status).  It is deliberately NOT absorbed here -- the former
+  ! "leave the block unchanged" fallback preserved the trace exactly, so a
+  ! corrupted k-block slipped silently past the Ne/trace monitor.
   !-------------------------------------------------------------------
   subroutine gicov_int_step_k(H, rho, nb, dt, gamma, shape, theta, width, floor, &
-                            & eps, P, R, cwork, lcwork, rwork, rho_out)
+                            & eps, P, R, cwork, lcwork, rwork, rho_out, ierr)
     implicit none
     integer,      intent(in)    :: nb, lcwork
     complex(8),   intent(in)    :: H(nb, nb), rho(nb, nb)
@@ -301,14 +308,16 @@ contains
     real(8),      intent(inout) :: eps(nb), rwork(*)
     complex(8),   intent(inout) :: P(nb, nb), R(nb, nb), cwork(*)
     complex(8),   intent(out)   :: rho_out(nb, nb)
+    integer,      intent(out)   :: ierr
     integer    :: a, b, info
     real(8)    :: dw, g, decay
     complex(8) :: fac
     P = H
     call zheev('V', 'U', nb, P, nb, eps, cwork, lcwork, rwork, info)
-    if (info /= 0) then
-      ! eigensolver failure: leave the block unchanged this step rather than
-      ! propagate a corrupted basis (diagnosable by the caller's trace check)
+    ierr = gicov_int_eig_status(info, eps, nb)
+    if (ierr /= 0) then
+      ! REPORT, never absorb.  rho_out is defined only so the dummy is not left
+      ! undefined; the caller aborts on ierr /= 0 and must not read it.
       rho_out = rho
       return
     end if
@@ -358,21 +367,26 @@ contains
   ! basis (which is basis-dependent under transport).  Degenerate members share
   ! a block; the caller sums n_a over each degenerate block for a basis-
   ! invariant readout.  Work arrays passed in (no heap / no automatic array).
+  !
+  ! ierr /= 0 => the eigenproblem broke and nocc is meaningless; the caller MUST
+  ! abort.  The former fallback -- reading diag(rho~) in the frozen band basis --
+  ! is FORBIDDEN: it is exactly the transport-non-invariant quantity this routine
+  ! exists to replace, and it silently returns a plausible, trace-correct number.
   !-------------------------------------------------------------------
-  subroutine gicov_int_occupation_k(H, rho, nb, eps, P, R, cwork, lcwork, rwork, nocc)
+  subroutine gicov_int_occupation_k(H, rho, nb, eps, P, R, cwork, lcwork, rwork, nocc, ierr)
     implicit none
     integer,    intent(in)    :: nb, lcwork
     complex(8), intent(in)    :: H(nb, nb), rho(nb, nb)
     real(8),    intent(inout) :: eps(nb), rwork(*)
     complex(8), intent(inout) :: P(nb, nb), R(nb, nb), cwork(*)
     real(8),    intent(out)   :: nocc(nb)
+    integer,    intent(out)   :: ierr
     integer :: a, info
     P = H
     call zheev('V', 'U', nb, P, nb, eps, cwork, lcwork, rwork, info)
-    if (info /= 0) then
-      do a = 1, nb
-        nocc(a) = real(rho(a, a), 8)
-      end do
+    ierr = gicov_int_eig_status(info, eps, nb)
+    if (ierr /= 0) then
+      nocc(1:nb) = 0d0        ! NOT diag(rho~): the caller aborts on ierr /= 0
       return
     end if
     R = matmul(matmul(conjg(transpose(P)), rho), P)
@@ -380,5 +394,31 @@ contains
       nocc(a) = real(R(a, a), 8)
     end do
   end subroutine gicov_int_occupation_k
+
+  !-------------------------------------------------------------------
+  ! Status of one instantaneous Hermitian eigensolve.  0 = usable.
+  !
+  ! Checking LAPACK's info alone is NOT sufficient: zheev returns info=0 for a
+  ! NaN-poisoned Hermitian matrix (verified on Accelerate), so a corrupted H~
+  ! would yield NaN eigenvalues, a NaN density, and -- because the unitary-
+  ! similarity update is trace-preserving in form -- no complaint from the
+  ! Ne/trace monitor.  Reject non-finite eigenvalues explicitly.
+  !   info /= 0        -> ierr = info   (LAPACK-reported failure)
+  !   non-finite eps   -> ierr = -999   (silent corruption)
+  !-------------------------------------------------------------------
+  pure integer function gicov_int_eig_status(info, eps, nb) result(ierr)
+    implicit none
+    integer, intent(in) :: info, nb
+    real(8), intent(in) :: eps(nb)
+    integer :: a
+    ierr = info
+    if (ierr /= 0) return
+    do a = 1, nb
+      if (.not. ieee_is_finite(eps(a))) then
+        ierr = -999
+        return
+      end if
+    end do
+  end function gicov_int_eig_status
 
 end module gicov_integral_ssbe

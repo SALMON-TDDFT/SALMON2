@@ -2131,7 +2131,7 @@ end subroutine build_gicov_integral_cache
 ! q_axis(t + dt/2) (reduced-mesh index units); the kernel evaluates x=kappa-a
 ! via floor()+linear interpolation of the bounded cached H~ and steps each
 ! k-block exactly with the moving-gap-gated T2.
-subroutine dt_evolve_bloch_lg_integral(sbe, gs, q_mid, dt)
+subroutine dt_evolve_bloch_lg_integral(sbe, gs, q_mid, dt, icomm)
   use salmon_global, only: t_2, sbe_t2_gate_shape, sbe_t2_gate_theta, &
                             sbe_t2_gate_width, sbe_lg_degen_floor
   use gicov_integral_ssbe, only: gicov_int_floor_shift, gicov_int_interp, gicov_int_step_k
@@ -2140,7 +2140,8 @@ subroutine dt_evolve_bloch_lg_integral(sbe, gs, q_mid, dt)
   type(s_sbe_bloch_solver), intent(inout) :: sbe
   type(s_sbe_gs_info), intent(in) :: gs
   real(8), intent(in) :: q_mid, dt
-  integer :: ik, nb, n_int, tid
+  integer, intent(in) :: icomm
+  integer :: ik, nb, n_int, tid, ierr, nbad_l, nbad
   real(8) :: frac, gamma
 
   if (.not. gi_built) then
@@ -2156,7 +2157,8 @@ subroutine dt_evolve_bloch_lg_integral(sbe, gs, q_mid, dt)
     error stop 1
   end if
 
-  !$omp parallel do default(shared) private(ik, tid)
+  nbad_l = 0
+  !$omp parallel do default(shared) private(ik, tid, ierr) reduction(+: nbad_l)
   do ik = gi_ikmin, gi_ikmax
     tid = 0
     !$ tid = omp_get_thread_num()
@@ -2166,13 +2168,33 @@ subroutine dt_evolve_bloch_lg_integral(sbe, gs, q_mid, dt)
                         & sbe_t2_gate_shape, sbe_t2_gate_theta, sbe_t2_gate_width, &
                         & sbe_lg_degen_floor, gi_w_eps(:, tid), gi_w_P(:, :, tid), &
                         & gi_w_R(:, :, tid), gi_w_cw(:, tid), gi_lcwork, gi_w_rw(:, tid), &
-                        & gi_w_rout(:, :, tid))
-    sbe%rho(:, :, ik) = gi_w_rout(:, :, tid)
-    ! X-full carries qnm == rho (exp_iphi=1), so mirror the co-moving density
-    ! into qnm_new -- the length-gauge calc_trace / diagnostics read its diagonal.
-    sbe%qnm_new(:, :, ik) = gi_w_rout(:, :, tid)
+                        & gi_w_rout(:, :, tid), ierr)
+    if (ierr /= 0) then
+      nbad_l = nbad_l + 1
+    else
+      sbe%rho(:, :, ik) = gi_w_rout(:, :, tid)
+      ! X-full carries qnm == rho (exp_iphi=1), so mirror the co-moving density
+      ! into BOTH qnm and qnm_new -- the length-gauge calc_trace reads qnm_new
+      ! and the _sbe_diag herm/trace monitor reads qnm (the legacy AB4 path
+      ! refreshes qnm itself at :1746; the integral path must do it here, else
+      ! the monitor would report the t=0 density forever).
+      sbe%qnm_new(:, :, ik) = gi_w_rout(:, :, tid)
+      sbe%qnm(:, :, ik)     = gi_w_rout(:, :, tid)
+    end if
   end do
   !$omp end parallel do
+
+  ! COLLECTIVE fail: an instantaneous eigensolve that broke (LAPACK info /= 0 or
+  ! non-finite eigenvalues) must abort the whole communicator, not be absorbed.
+  ! Both former fallbacks were trace-preserving, so the Ne monitor could not see
+  ! them -- silence here is precisely the failure mode this guard exists for.
+  call comm_summation(nbad_l, nbad, icomm)
+  if (nbad > 0) then
+    write(*, '(a,i0,a)') "ERROR(dt_evolve_bloch_lg_integral): instantaneous eigensolve " // &
+      & "failed on ", nbad, " k-block(s) (LAPACK info /= 0 or non-finite eigenvalues). " // &
+      & "The co-moving Hamiltonian is corrupted; aborting rather than propagating it."
+    error stop 1
+  end if
 end subroutine dt_evolve_bloch_lg_integral
 
 ! Integral-form current J_i = (1/Omega sum w) sum_kappa w Tr[rho~ v~_i], with
@@ -2225,7 +2247,7 @@ subroutine calc_band_population_integral(sbe, gs, q_now, nex_b, icomm)
   real(8), intent(in) :: q_now
   real(8), intent(out) :: nex_b(1:sbe%nb)
   integer, intent(in) :: icomm
-  integer :: ik, nb, n_int, ib
+  integer :: ik, nb, n_int, ib, ierr, nbad_l, nbad
   real(8) :: frac
   real(8), allocatable :: acc(:), nocc(:)
 
@@ -2234,16 +2256,30 @@ subroutine calc_band_population_integral(sbe, gs, q_now, nex_b, icomm)
   ! serial over k (periodic diagnostic, not the propagation hot path): reuses
   ! the thread-0 work slot; a heap 'nocc' allocated OUTSIDE any OMP region.
   allocate(acc(nb), nocc(nb));  acc(:) = 0d0
+  nbad_l = 0
   do ik = gi_ikmin, gi_ikmax
     call gicov_int_interp(gi_Ht(:, :, n_int, ik), gi_Ht(:, :, n_int + 1, ik), &
                         & frac, nb, gi_w_H(:, :, 0))
     call gicov_int_occupation_k(gi_w_H(:, :, 0), sbe%rho(:, :, ik), nb, &
                               & gi_w_eps(:, 0), gi_w_P(:, :, 0), gi_w_R(:, :, 0), &
-                              & gi_w_cw(:, 0), gi_lcwork, gi_w_rw(:, 0), nocc)
+                              & gi_w_cw(:, 0), gi_lcwork, gi_w_rw(:, 0), nocc, ierr)
+    if (ierr /= 0) then
+      nbad_l = nbad_l + 1
+      cycle
+    end if
     do ib = 1, nb
       acc(ib) = acc(ib) + gs%kweight(ik) * nocc(ib)
     end do
   end do
+  ! COLLECTIVE fail (same contract as the propagator): a broken instantaneous
+  ! eigenproblem must abort, never fall back to the transport-non-invariant
+  ! diag(rho~) -- that fallback is trace-correct and therefore undetectable.
+  call comm_summation(nbad_l, nbad, icomm)
+  if (nbad > 0) then
+    write(*, '(a,i0,a)') "ERROR(calc_band_population_integral): instantaneous eigensolve " // &
+      & "failed on ", nbad, " k-block(s) (LAPACK info /= 0 or non-finite eigenvalues)."
+    error stop 1
+  end if
   call comm_summation(acc, nex_b, nb, icomm)
   nex_b(1:nb) = nex_b(1:nb) / sum(gs%kweight(:))
   deallocate(acc, nocc)
