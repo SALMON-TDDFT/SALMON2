@@ -30,6 +30,7 @@ assert "call solve_sawf_local_generalized_eigensystem" in flux
 assert "call write_sawf_representative_local_seed" in flux
 assert "call run_sawf_local_preprocessing" in flux
 assert "call read_sawf_nnkp_neighbors" in flux
+assert "call restrict_sawf_stabilizer_representation" in flux
 assert flux.index("call write_sawf_representative_local_seed") < flux.index(
     "call run_sawf_local_preprocessing"
 ) < flux.index("call read_sawf_nnkp_neighbors")

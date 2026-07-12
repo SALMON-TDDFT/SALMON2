@@ -8,8 +8,57 @@ module lcfo_wannier_sawf_seed
   public :: solve_sawf_local_generalized_eigensystem
   public :: read_sawf_nnkp_neighbors
   public :: write_sawf_local_eig_amn
+  public :: restrict_sawf_stabilizer_representation
 
 contains
+
+  subroutine restrict_sawf_stabilizer_representation(global_representation,selected_channel, &
+      stabilizer_operation,tolerance,local_representation,ok,message)
+    complex(8),intent(in)::global_representation(:,:,:)
+    integer,intent(in)::selected_channel(:),stabilizer_operation(:)
+    real(8),intent(in)::tolerance
+    complex(8),intent(out)::local_representation(:,:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    logical,allocatable::selected(:)
+    complex(8),allocatable::identity(:,:)
+    real(8)::leakage,unitarity
+    integer::operation,local_operation,row,column,i,j,nchannel
+
+    ok=.false.;message='';local_representation=(0d0,0d0);nchannel=size(global_representation,1)
+    if(nchannel<=0.or.size(global_representation,2)/=nchannel.or.size(selected_channel)<=0.or. &
+        size(stabilizer_operation)<=0.or.size(local_representation,1)/=size(selected_channel).or. &
+        size(local_representation,2)/=size(selected_channel).or. &
+        size(local_representation,3)/=size(stabilizer_operation).or. &
+        any(selected_channel<1).or.any(selected_channel>nchannel).or. &
+        any(stabilizer_operation<1).or.any(stabilizer_operation>size(global_representation,3)).or. &
+        .not.ieee_is_finite(tolerance).or.tolerance<=0d0)then
+      message='SAWF local stabilizer representation dimensions are invalid';return
+    end if
+    allocate(selected(nchannel),identity(size(selected_channel),size(selected_channel)))
+    selected=.false.;do i=1,size(selected_channel)
+      if(selected(selected_channel(i)))then;message='SAWF selected local channel is duplicated';return;end if
+      selected(selected_channel(i))=.true.
+    end do
+    identity=(0d0,0d0);do i=1,size(selected_channel);identity(i,i)=(1d0,0d0);end do
+    do local_operation=1,size(stabilizer_operation)
+      operation=stabilizer_operation(local_operation);leakage=0d0
+      do column=1,nchannel;do row=1,nchannel
+        if(selected(row).neqv.selected(column))leakage=max(leakage,abs(global_representation(row,column,operation)))
+      end do;end do
+      if(leakage>tolerance)then
+        message='SAWF global representation leaks outside the local complete-shell subspace';return
+      end if
+      do j=1,size(selected_channel);do i=1,size(selected_channel)
+        local_representation(i,j,local_operation)= &
+          global_representation(selected_channel(i),selected_channel(j),operation)
+      end do;end do
+      unitarity=maxval(abs(matmul(conjg(transpose(local_representation(:,:,local_operation))), &
+        local_representation(:,:,local_operation))-identity))
+      if(unitarity>tolerance)then;message='SAWF restricted local representation is not unitary';return;end if
+    end do
+    ok=.true.
+  end subroutine restrict_sawf_stabilizer_representation
 
   subroutine read_sawf_nnkp_neighbors(filename,neighbor_gvec,ok,message)
     character(*),intent(in)::filename

@@ -50,7 +50,7 @@ module lcfo_flux
   use lcfo_wannier_sawf_seed, only: select_sawf_local_complete_shells, &
     build_sawf_local_seed_matrices,write_sawf_local_eig_amn, &
     solve_sawf_local_generalized_eigensystem,read_sawf_nnkp_neighbors, &
-    write_sawf_local_eig_amn_mmn
+    write_sawf_local_eig_amn_mmn,restrict_sawf_stabilizer_representation
   use lcfo_wannier_sawf_win, only: activate_sawf_win, deactivate_sawf_win, &
     t_atomic_win_writer, begin_atomic_win, finish_atomic_win, abort_atomic_win, &
     write_sawf_local_preprocess_win
@@ -6640,6 +6640,7 @@ contains
       real(8), allocatable :: sawf_vacuum_fraction(:)
       complex(8), allocatable :: d_band_local(:,:),d_band_sum(:,:),d_wann(:,:),amn(:,:)
       complex(8), allocatable :: d_band_set(:,:,:),d_wann_set(:,:,:)
+      complex(8),allocatable :: sawf_local_d_wann(:,:,:)
       real(8) :: representation_residual
       type(t_sawf_projection_channel), allocatable :: channels(:)
       type(t_sawf_symop), allocatable :: symmetry_operations(:)
@@ -6919,10 +6920,11 @@ contains
       end if
 
       closure_tolerance=max(1.0d-10,wannier_symmetry_tolerance)
+      allocate(d_wann_set(wannier_num_wann,wannier_num_wann,size(symmetry_operations)), &
+        stat=allocation_status)
+      if(allocation_status/=0)call lcfo_sawf_fatal('SAWF D_wann representation-set allocation failed')
       if(dc%id_tot==0) then
-        allocate(d_band_set(nband_wann,nband_wann,size(symmetry_operations)), &
-          d_wann_set(wannier_num_wann,wannier_num_wann,size(symmetry_operations)), &
-          stat=allocation_status)
+        allocate(d_band_set(nband_wann,nband_wann,size(symmetry_operations)),stat=allocation_status)
         if(allocation_status/=0) call lcfo_sawf_fatal('SAWF representation-set allocation failed')
       end if
       call prepare_sawf_fragment_state_cache(nband_wann,fragment_shape,state_cache,local_ok,message)
@@ -7036,6 +7038,7 @@ contains
           call clear_sawf_fragment_state_cache(state_cache)
           call lcfo_sawf_fatal('SAWF DMN operation validation/write failed: '//trim(message))
         end if
+        call comm_bcast(d_wann_set(:,:,iop),dc%icomm_tot,0)
       end do
 
       failure=0; message=''; representation_residual=0d0
@@ -7054,6 +7057,18 @@ contains
       end if
       if(dc%id_tot==0) write(*,'(1x,a,es13.5)') &
         '[DC-LCFO-SAWF-GROUP] max_representation_residual=',representation_residual
+      if(trim(wannier_sawf_generation)=='hierarchical'.and.dc%id_frag==0.and. &
+          sawf_environment_receipts(dc%i_frag)%requires_execution)then
+        allocate(sawf_local_d_wann(size(sawf_selected_channels),size(sawf_selected_channels), &
+          size(sawf_local_stabilizer)),stat=allocation_status)
+        if(allocation_status/=0)call lcfo_sawf_fatal('SAWF local D_wann allocation failed')
+        call restrict_sawf_stabilizer_representation(d_wann_set,sawf_selected_channels, &
+          sawf_local_stabilizer,closure_tolerance,sawf_local_d_wann,local_ok,message)
+        if(.not.local_ok)then
+          write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-LOCAL-DWANN] rank=',dc%id_tot,' ',trim(message)
+          call lcfo_sawf_fatal('SAWF local D_wann restriction failed')
+        end if
+      end if
 
       failure=0
       if(dc%id_frag==0) then

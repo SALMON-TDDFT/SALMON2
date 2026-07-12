@@ -12,7 +12,7 @@ if not FC:
 driver = r'''program check_local_seed_writer
   use lcfo_wannier_sawf_seed, only: write_sawf_local_eig_amn_mmn,build_sawf_local_seed_matrices, &
     select_sawf_local_complete_shells,solve_sawf_local_generalized_eigensystem, &
-    read_sawf_nnkp_neighbors
+    read_sawf_nnkp_neighbors,restrict_sawf_stabilizer_representation
   use, intrinsic :: ieee_arithmetic, only: ieee_value,ieee_quiet_nan
   implicit none
   real(8) :: energy(2)
@@ -21,6 +21,7 @@ driver = r'''program check_local_seed_writer
   complex(8),allocatable :: local_states(:,:)
   complex(8) :: amn(2,2),mmn(2,2,3)
   complex(8) :: states(2,2),projections(2,2),phase(2,3)
+  complex(8) :: global_rep(4,4,2),local_rep(2,2,2)
   logical :: ok
   character(256) :: message
   integer :: i
@@ -30,6 +31,14 @@ driver = r'''program check_local_seed_writer
   logical :: inside(3)
   inside=[.true.,.false.,.true.]
   neighbor_gvec=reshape([1,0,0,0,1,0,0,0,1],[3,3])
+  global_rep=(0d0,0d0)
+  do i=1,4;global_rep(i,i,1)=1;global_rep(i,i,2)=1;end do
+  global_rep(1,1,2)=0;global_rep(2,2,2)=0;global_rep(1,2,2)=1;global_rep(2,1,2)=1
+  call restrict_sawf_stabilizer_representation(global_rep,[1,2],[1,2],1d-12,local_rep,ok,message)
+  if(.not.ok.or.abs(local_rep(1,2,2)-1d0)>1d-14)error stop 12
+  global_rep(3,1,2)=1d-4
+  call restrict_sawf_stabilizer_representation(global_rep,[1,2],[1,2],1d-12,local_rep,ok,message)
+  if(ok)error stop 13
   buffer_basis=0d0;buffer_basis(1,1)=1d0;buffer_basis(2,2)=1d0
   h_basis=0d0;h_basis(1,1)=-2d0;h_basis(2,2)=3d0
   call solve_sawf_local_generalized_eigensystem(buffer_basis,1d0,h_basis,1d-12, &
