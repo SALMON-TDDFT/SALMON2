@@ -35,8 +35,28 @@ module lcfo_wannier_sawf_templates
   public :: build_sawf_supercell_fingerprint, build_sawf_local_environment_fingerprint
   public :: select_sawf_environment_materialization
   public :: validate_sawf_structure_class
+  public :: build_sawf_file_content_digest
 
 contains
+  subroutine build_sawf_file_content_digest(filename,digest,ok,message)
+    character(*),intent(in)::filename;character(*),intent(out)::digest
+    logical,intent(out)::ok;character(*),intent(out)::message
+    integer::unit,ios;integer(8)::h1,h2,count;character(1)::byte;character(512)::iomsg
+    ok=.false.;message='';digest='';count=0
+    open(newunit=unit,file=filename,access='stream',form='unformatted',status='old',action='read', &
+      iostat=ios,iomsg=iomsg)
+    if(ios/=0)then;message='SAWF pseudopotential content open failed: '//trim(iomsg);return;end if
+    call sawf_hash_begin(h1,h2)
+    do
+      read(unit,iostat=ios)byte
+      if(ios/=0)exit
+      call sawf_hash_byte(iachar(byte),h1,h2);count=count+1
+    end do
+    close(unit)
+    if(count<=0)then;message='SAWF pseudopotential content is empty or unreadable';return;end if
+    call sawf_hash_integer8([count],h1,h2);write(digest,'(a,z16.16,z16.16)')'FILE-',h1,h2;ok=.true.
+  end subroutine
+
   subroutine validate_sawf_structure_class(structure_class,environment_key,vacuum_fraction,orbit,ok,message)
     character(*),intent(in)::structure_class,environment_key(:)
     real(8),intent(in)::vacuum_fraction(:);integer,intent(in)::orbit(:)
@@ -129,49 +149,62 @@ contains
     write(key,'(a,z16.16,z16.16)')'SC-',h1,h2;ok=.true.
   end subroutine
 
-  subroutine build_sawf_local_environment_fingerprint(supercell_key,species,relative_coordinates, &
+  subroutine build_sawf_local_environment_fingerprint(supercell_key,lattice,tolerance,species,relative_coordinates, &
       vacuum_fraction,key,ok,message)
     character(*),intent(in)::supercell_key
+    real(8),intent(in)::lattice(3,3),tolerance
     integer,intent(in)::species(:);real(8),intent(in)::relative_coordinates(:,:),vacuum_fraction
     character(*),intent(out)::key;logical,intent(out)::ok;character(*),intent(out)::message
-    integer(8)::h1,h2
-    integer,allocatable::atom_z(:),pair_code(:)
-    real(8),allocatable::atom_r2(:),pair_r2(:)
-    integer::i,j,k,tmp_i,npair
-    real(8)::tmp_r
+    integer(8)::h1,h2,ah1,ah2,tmp_h,qdist
+    integer(8),allocatable::atom_h1(:),atom_h2(:),neighbor_q(:)
+    integer,allocatable::neighbor_z(:)
+    integer::i,j,k,tmp_i,n
+    real(8)::delta(3),cartesian(3),scale
     ok=.false.;message='';key=''
     if(len_trim(supercell_key)==0.or.size(relative_coordinates,1)/=3.or. &
        size(relative_coordinates,2)/=size(species).or.vacuum_fraction<0d0.or.vacuum_fraction>1d0.or. &
-       .not.all(ieee_is_finite(relative_coordinates)).or..not.ieee_is_finite(vacuum_fraction))then
+       .not.all(ieee_is_finite(relative_coordinates)).or..not.ieee_is_finite(vacuum_fraction).or. &
+       .not.all(ieee_is_finite(lattice)).or.tolerance<=0d0)then
       message='SAWF local-environment fingerprint input is invalid';return
     end if
-    call sawf_hash_begin(h1,h2);call sawf_hash_character('SAWF-LOCAL-V1',h1,h2)
+    call sawf_hash_begin(h1,h2);call sawf_hash_character('SAWF-LOCAL-V2',h1,h2)
     call sawf_hash_character(trim(supercell_key),h1,h2)
-    allocate(atom_z(size(species)),atom_r2(size(species)))
-    atom_z=species
-    do i=1,size(species);atom_r2(i)=sum(relative_coordinates(:,i)**2);end do
-    do i=1,size(species)-1;do j=i+1,size(species)
-      if(atom_z(j)<atom_z(i).or.(atom_z(j)==atom_z(i).and.atom_r2(j)<atom_r2(i)))then
-        tmp_i=atom_z(i);atom_z(i)=atom_z(j);atom_z(j)=tmp_i
-        tmp_r=atom_r2(i);atom_r2(i)=atom_r2(j);atom_r2(j)=tmp_r
+    n=size(species);scale=max(tolerance,epsilon(1d0));allocate(atom_h1(n),atom_h2(n))
+    allocate(neighbor_z(max(0,n-1)),neighbor_q(max(0,n-1)))
+    do i=1,n
+      k=0
+      do j=1,n
+        if(j==i)cycle;k=k+1;delta=relative_coordinates(:,j)-relative_coordinates(:,i)
+        delta=delta-dnint(delta);cartesian=matmul(lattice,delta)
+        neighbor_z(k)=species(j);neighbor_q(k)=nint(sum(cartesian**2)/(scale*scale),8)
+      end do
+      do j=1,max(0,n-2);do k=j+1,n-1
+        if(neighbor_z(k)<neighbor_z(j).or.(neighbor_z(k)==neighbor_z(j).and.neighbor_q(k)<neighbor_q(j)))then
+          tmp_i=neighbor_z(j);neighbor_z(j)=neighbor_z(k);neighbor_z(k)=tmp_i
+          tmp_h=neighbor_q(j);neighbor_q(j)=neighbor_q(k);neighbor_q(k)=tmp_h
+        end if
+      end do;end do
+      call sawf_hash_begin(ah1,ah2);call sawf_hash_integer([species(i)],ah1,ah2)
+      call sawf_hash_integer(neighbor_z,ah1,ah2);call sawf_hash_integer8(neighbor_q,ah1,ah2)
+      atom_h1(i)=ah1;atom_h2(i)=ah2
+    end do
+    do i=1,n-1;do j=i+1,n
+      if(atom_h1(j)<atom_h1(i).or.(atom_h1(j)==atom_h1(i).and.atom_h2(j)<atom_h2(i)))then
+        tmp_h=atom_h1(i);atom_h1(i)=atom_h1(j);atom_h1(j)=tmp_h
+        tmp_h=atom_h2(i);atom_h2(i)=atom_h2(j);atom_h2(j)=tmp_h
       end if
     end do;end do
-    call sawf_hash_integer(atom_z,h1,h2);call sawf_hash_real(atom_r2,h1,h2)
-    npair=size(species)*(size(species)-1)/2
-    allocate(pair_code(npair),pair_r2(npair));k=0
-    do i=1,size(species)-1;do j=i+1,size(species);k=k+1
-      pair_code(k)=min(species(i),species(j))*1000+max(species(i),species(j))
-      pair_r2(k)=sum((relative_coordinates(:,i)-relative_coordinates(:,j))**2)
-    end do;end do
-    do i=1,npair-1;do j=i+1,npair
-      if(pair_code(j)<pair_code(i).or.(pair_code(j)==pair_code(i).and.pair_r2(j)<pair_r2(i)))then
-        tmp_i=pair_code(i);pair_code(i)=pair_code(j);pair_code(j)=tmp_i
-        tmp_r=pair_r2(i);pair_r2(i)=pair_r2(j);pair_r2(j)=tmp_r
-      end if
-    end do;end do
-    call sawf_hash_integer(pair_code,h1,h2);call sawf_hash_real(pair_r2,h1,h2)
-    call sawf_hash_real([vacuum_fraction],h1,h2)
+    call sawf_hash_integer8(atom_h1,h1,h2);call sawf_hash_integer8(atom_h2,h1,h2)
+    qdist=nint(vacuum_fraction/scale,8);call sawf_hash_integer8([qdist],h1,h2)
     write(key,'(a,z16.16,z16.16)')'ENV-',h1,h2;ok=.true.
+  end subroutine
+
+  subroutine sawf_hash_integer8(values,h1,h2)
+    integer(8),intent(in)::values(:);integer(8),intent(inout)::h1,h2
+    integer::i,b
+    do i=1,size(values);do b=0,7
+      call sawf_hash_byte(int(iand(shiftr(values(i),8*b),255_8)),h1,h2)
+    end do;end do
   end subroutine
 
   subroutine sawf_hash_begin(h1,h2)

@@ -10,6 +10,7 @@ if not FC: raise SystemExit('gfortran is required')
 driver=r'''program check_environment_fingerprint
  use lcfo_wannier_sawf_templates, only: build_sawf_supercell_fingerprint, &
    build_sawf_local_environment_fingerprint, validate_sawf_structure_class
+ use lcfo_wannier_sawf_templates, only: build_sawf_file_content_digest
  implicit none
  real(8)::lattice(3,3),xyz(3,4),relative(3,3),rotated(3,3)
  integer::species(4),local_species(3),grid(3),buffer(3),permutation(3)
@@ -17,6 +18,8 @@ driver=r'''program check_environment_fingerprint
  real(8)::vacuum_by_env(3)
  integer::orbit_by_env(3)
  character(256)::keys(3)
+ character(256)::digest_a,digest_b
+ integer::unit
  character(256)::super_a,super_b,bulk_a,bulk_b,defect,interface_env,surface_env,amorphous,msg
  lattice=0;lattice(1,1)=8;lattice(2,2)=8;lattice(3,3)=8
  xyz=reshape([0d0,0d0,0d0,2d0,0d0,0d0,4d0,0d0,0d0,6d0,0d0,0d0],[3,4])
@@ -28,6 +31,7 @@ driver=r'''program check_environment_fingerprint
  call build_sawf_supercell_fingerprint(lattice,pbc,species,xyz,grid,buffer, &
    'sha256:pseudo-si','bands:1-8','shells:sp3','LDA','schema:2',super_b,ok,msg)
  call req(ok.and.super_a/=super_b,'different supercell forbidden')
+ lattice(1,1)=8;lattice(1,2)=1.25d0
  relative=reshape([-1d0,0d0,0d0,0d0,0d0,0d0,1d0,0d0,0d0],[3,3]);local_species=[14,14,14]
  call local(local_species,relative,0d0,bulk_a);call local(local_species,relative,0d0,bulk_b)
  call req(bulk_a==bulk_b,'equivalent bulk')
@@ -36,6 +40,9 @@ driver=r'''program check_environment_fingerprint
  rotated(3,:)=relative(3,permutation)
  call local(local_species(permutation),rotated,0d0,bulk_b)
  call req(bulk_a==bulk_b,'rotation and atom-order invariant bulk fingerprint')
+ rotated=relative;rotated(1,1)=rotated(1,1)+1d0;rotated(2,3)=rotated(2,3)+1d-10
+ call local(local_species,rotated,0d0,bulk_b)
+ call req(bulk_a==bulk_b,'periodic image and sub-tolerance rounding invariant')
  local_species(2)=13;call local(local_species,relative,0d0,defect)
  local_species=[14,14,8];call local(local_species,relative,0d0,interface_env)
  local_species=[14,14,14];call local(local_species,relative,.5d0,surface_env)
@@ -56,11 +63,19 @@ driver=r'''program check_environment_fingerprint
  call req(.not.ok,'surface requires measured vacuum')
  call validate_sawf_structure_class('interface',keys,vacuum_by_env,orbit_by_env,ok,msg)
  call req(ok,'interface multiple environments')
+ open(newunit=unit,file='pseudo-a.dat',status='replace');write(unit,'(a)')'same-content';close(unit)
+ open(newunit=unit,file='pseudo-b.dat',status='replace');write(unit,'(a)')'same-content';close(unit)
+ call build_sawf_file_content_digest('pseudo-a.dat',digest_a,ok,msg);call req(ok,'pseudo digest A')
+ call build_sawf_file_content_digest('pseudo-b.dat',digest_b,ok,msg)
+ call req(ok.and.digest_a==digest_b,'same content different path')
+ open(newunit=unit,file='pseudo-a.dat',status='replace');write(unit,'(a)')'changed-content';close(unit)
+ call build_sawf_file_content_digest('pseudo-a.dat',digest_b,ok,msg)
+ call req(ok.and.digest_a/=digest_b,'same path changed content')
  write(*,'(a)')'PASS exact same-supercell local-environment fingerprints'
 contains
  subroutine local(z,r,vacuum,key)
   integer,intent(in)::z(:);real(8),intent(in)::r(:,:),vacuum;character(256),intent(out)::key
-  call build_sawf_local_environment_fingerprint(super_a,z,r,vacuum,key,ok,msg)
+  call build_sawf_local_environment_fingerprint(super_a,lattice,1d-8,z,r,vacuum,key,ok,msg)
   call req(ok,'local fingerprint')
  end subroutine
  subroutine req(c,t);logical,intent(in)::c;character(*),intent(in)::t

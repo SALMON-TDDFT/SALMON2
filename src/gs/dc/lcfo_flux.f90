@@ -41,6 +41,7 @@ module lcfo_flux
     build_sawf_environment_orbits, build_sawf_supercell_fingerprint, &
     build_sawf_local_environment_fingerprint, select_sawf_environment_materialization
   use lcfo_wannier_sawf_templates, only: validate_sawf_structure_class
+  use lcfo_wannier_sawf_templates, only: build_sawf_file_content_digest
   use lcfo_wannier_sawf_win, only: activate_sawf_win, deactivate_sawf_win, &
     t_atomic_win_writer, begin_atomic_win, finish_atomic_win, abort_atomic_win
   use lcfo_wannier_command, only: select_wannier90_command, execute_wannier90_command, &
@@ -7000,7 +7001,8 @@ contains
 
     subroutine build_sawf_fragment_environment_fingerprints(lattice,fractional_positions,species, &
         mesh,fragment_origin,fragment_shape,environment_key,vacuum_by_environment,ok,message)
-      use salmon_global, only: file_pseudo,xc,wannier_projection,wannier_num_bands,wannier_num_wann
+      use salmon_global, only: file_pseudo,xc,wannier_projection,wannier_num_bands,wannier_num_wann, &
+        wannier_symmetry_tolerance
       real(8),intent(in)::lattice(3,3),fractional_positions(:,:)
       integer,intent(in)::species(:),mesh(3),fragment_origin(:,:),fragment_shape(:,:)
       character(256),intent(out)::environment_key(:)
@@ -7013,6 +7015,7 @@ contains
       logical::inside,pbc(3)
       character(256)::supercell_key
       character(1024)::pseudo_signature
+      character(256)::pseudo_digest,pseudo_filename
       character(64)::band_window,shell
       ok=.false.;message='';pbc=.true.;pseudo_signature=''
       if(size(environment_key)/=size(fragment_origin,2).or.size(fragment_shape,2)/=size(environment_key).or. &
@@ -7020,8 +7023,16 @@ contains
         message='SAWF fragment fingerprint dimensions are inconsistent';return
       end if
       do ia=1,min(size(file_pseudo),maxval(species))
-        if(len_trim(file_pseudo(ia))>0.and.trim(file_pseudo(ia))/='none') &
-          pseudo_signature=trim(pseudo_signature)//'|'//trim(file_pseudo(ia))
+        if(len_trim(file_pseudo(ia))>0.and.trim(file_pseudo(ia))/='none')then
+          if(file_pseudo(ia)(1:1)=='/')then
+            pseudo_filename=trim(file_pseudo(ia))
+          else
+            pseudo_filename=trim(import_run_root_dir())//trim(file_pseudo(ia))
+          end if
+          call build_sawf_file_content_digest(pseudo_filename,pseudo_digest,ok,message)
+          if(.not.ok)return
+          pseudo_signature=trim(pseudo_signature)//'|'//trim(pseudo_digest)
+        end if
       end do
       write(band_window,'(a,i0,a,i0)')'bands=',wannier_num_bands,':wann=',wannier_num_wann
       shell=trim(wannier_projection)
@@ -7059,8 +7070,9 @@ contains
         end do
         vacuum_fraction=1d0-dble(count)/dble(max(1,maxval(local_count)))
         vacuum_by_environment(ifrag)=vacuum_fraction
-        call build_sawf_local_environment_fingerprint(supercell_key,local_species(:count), &
-          relative(:,:count),vacuum_fraction,environment_key(ifrag),ok,message)
+        call build_sawf_local_environment_fingerprint(supercell_key,lattice, &
+          wannier_symmetry_tolerance,local_species(:count),relative(:,:count),vacuum_fraction, &
+          environment_key(ifrag),ok,message)
         if(.not.ok)return
       end do
       ok=.true.
