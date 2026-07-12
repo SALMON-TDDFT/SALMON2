@@ -322,7 +322,8 @@ contains
     integer,intent(out)::orbit(size(defect_intersects))
     logical,intent(out)::regenerate(size(defect_intersects)),ok
     character(*),intent(out)::message
-    integer::i,j,norb
+    integer::i,j,norb,head,tail,current
+    integer,allocatable::queue(:)
     ok=.false.; message=''; orbit=0; regenerate=.false.
     if(size(equivalent,1)/=size(defect_intersects).or.size(equivalent,2)/=size(defect_intersects))then
       message='SAWF environment equivalence matrix has invalid dimensions'; return
@@ -330,12 +331,17 @@ contains
     if(any(equivalent.neqv.transpose(equivalent)).or.any(.not.[(equivalent(i,i),i=1,size(orbit))]))then
       message='SAWF environment equivalence relation is not symmetric/reflexive'; return
     end if
-    norb=0
+    allocate(queue(size(orbit)));norb=0
     do i=1,size(orbit)
       if(orbit(i)==0)then
-        norb=norb+1; orbit(i)=norb; regenerate(i)=.true.
-        do j=i+1,size(orbit)
-          if(equivalent(i,j))orbit(j)=norb
+        norb=norb+1; orbit(i)=norb; regenerate(i)=.true.;head=1;tail=1;queue(1)=i
+        do while(head<=tail)
+          current=queue(head);head=head+1
+          do j=1,size(orbit)
+            if(equivalent(current,j).and.orbit(j)==0)then
+              orbit(j)=norb;tail=tail+1;queue(tail)=j
+            end if
+          end do
         end do
       end if
     end do

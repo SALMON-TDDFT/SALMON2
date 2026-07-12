@@ -8,11 +8,14 @@ if not FC:
     raise SystemExit("gfortran is required")
 
 driver = r'''program check_materialize
-  use lcfo_wannier_sawf_templates, only: materialize_sawf_local_bases
+  use lcfo_wannier_sawf_templates, only: materialize_sawf_local_bases, &
+    build_sawf_environment_orbits
   implicit none
   complex(8) :: reps(4,2,2),dw(2,2,2),local(4,2,3)
   integer :: rep_index(3),op_index(3),point_map(4,2)
   logical :: independent(3),ok
+  logical :: equivalent(3,3),defect(3),regenerate(3)
+  integer :: orbit(3)
   character(256) :: msg
   reps=(0d0,0d0); reps(1,1,1)=1; reps(2,2,1)=1
   reps(3,1,2)=1; reps(4,2,2)=1
@@ -28,6 +31,12 @@ driver = r'''program check_materialize
   independent(3)=.false.; rep_index(3)=1; op_index(3)=0
   call materialize_sawf_local_bases(reps,rep_index,op_index,independent,point_map,dw,local,ok,msg)
   call require(.not.ok.and.index(msg,'operation')>0,'missing defect operation rejected')
+  equivalent=.false.;equivalent(1,1)=.true.;equivalent(2,2)=.true.;equivalent(3,3)=.true.
+  equivalent(1,2)=.true.;equivalent(2,1)=.true.
+  equivalent(2,3)=.true.;equivalent(3,2)=.true.;defect=.false.
+  call build_sawf_environment_orbits(equivalent,defect,orbit,regenerate,ok,msg)
+  call require(ok.and.all(orbit==orbit(1)),'environment orbit transitive closure')
+  call require(count(regenerate)==1,'one representative per transitive orbit')
   write(*,'(a)') 'PASS representative and defect-local SAWF materialization'
 contains
   subroutine require(c,t)
