@@ -17,6 +17,9 @@ module communication
   interface comm_get_max
     module procedure comm_get_max_integer
   end interface
+  interface comm_summation
+    module procedure comm_summation_real8
+  end interface
 contains
   subroutine comm_get_max_integer(value,communicator)
     integer, intent(inout) :: value
@@ -26,6 +29,14 @@ contains
     if(ierr/=MPI_SUCCESS) call MPI_Abort(communicator,91,ierr)
     value=reduced
   end subroutine comm_get_max_integer
+  subroutine comm_summation_real8(local,global,n,communicator)
+    integer, intent(in) :: n,communicator
+    real(8), intent(in) :: local(n)
+    real(8), intent(out) :: global(n)
+    integer :: ierr
+    call MPI_Allreduce(local,global,n,MPI_DOUBLE_PRECISION,MPI_SUM,communicator,ierr)
+    if(ierr/=MPI_SUCCESS) call MPI_Abort(communicator,92,ierr)
+  end subroutine comm_summation_real8
 end module communication
 """
 
@@ -34,7 +45,8 @@ program check_sawf_fragment_symmetry_map_mpi
   use mpi
   use lcfo_wannier_sawf, only: t_sawf_symop
   use lcfo_wannier_sawf_band, only: validate_sawf_fragment_symmetry_map
-  use lcfo_wannier_sawf_collective, only: reduce_sawf_fragment_alignment_failure
+  use lcfo_wannier_sawf_collective, only: reduce_sawf_fragment_alignment_failure, &
+    validate_sawf_density_contribution,assemble_sawf_density_unique
   implicit none
   type(t_sawf_symop) :: op
   integer :: mesh(3),origin(3,8),shape(3,8),buffer(3),rank,nrank,ierr
@@ -43,6 +55,8 @@ program check_sawf_fragment_symmetry_map_mpi
   logical :: grid_ok,fragment_ok,center_available
   real(8) :: residual,center(3)
   character(256) :: message
+  real(8) :: density_local(2),density_global(2)
+  logical :: density_ok
 
   call MPI_Init(ierr)
   call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr)
@@ -68,7 +82,16 @@ program check_sawf_fragment_symmetry_map_mpi
   if(rank==0 .and. local_failure/=0) call MPI_Abort(MPI_COMM_WORLD,1,ierr)
   if(rank==1 .and. local_failure/=1) call MPI_Abort(MPI_COMM_WORLD,2,ierr)
   if(global_failure/=1) call MPI_Abort(MPI_COMM_WORLD,3,ierr)
+  density_local=merge([1d0,2d0],[99d0,99d0],rank==0)
+  call validate_sawf_density_contribution(density_local,rank==0,rank,density_ok,message)
+  if(.not.density_ok) call MPI_Abort(MPI_COMM_WORLD,4,ierr)
+  call assemble_sawf_density_unique(density_local,rank==0,MPI_COMM_WORLD,density_global)
+  if(any(abs(density_global-[1d0,2d0])>1d-14)) call MPI_Abort(MPI_COMM_WORLD,5,ierr)
+  density_local(1)=-1d0
+  call validate_sawf_density_contribution(density_local,.true.,rank,density_ok,message)
+  if(density_ok.or.index(message,'nonnegative')==0) call MPI_Abort(MPI_COMM_WORLD,6,ierr)
   if(rank==0) write(*,'(a)') 'PASS SAWF MPI shared alignment failure reduction'
+  if(rank==0) write(*,'(a)') 'PASS SAWF MPI unique density assembly'
   call MPI_Finalize(ierr)
 end program check_sawf_fragment_symmetry_map_mpi
 """
@@ -144,6 +167,7 @@ target_link_libraries(check_fragment_map_mpi PRIVATE sawf MPI::MPI_Fortran)
             raise SystemExit(result.stdout)
         assert result.stdout.count("[DC-LCFO-SAWF-ALIGN] rank=1 operation=2") == 1
         assert "PASS SAWF MPI shared alignment failure reduction" in result.stdout
+        assert "PASS SAWF MPI unique density assembly" in result.stdout
         print(result.stdout.strip())
 
     shared = (ROOT / "src/gs/dc/lcfo_wannier_sawf_collective.f90").read_text()

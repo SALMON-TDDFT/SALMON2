@@ -96,14 +96,12 @@ contains
     case('auto','amorphous')
       ok=.true.
     case('crystal')
-      ok=unique_count==1.and.maxval(orbit)==1
+      ok=maxval(orbit)==1
       if(.not.ok)message='SAWF crystal class has symmetry-inequivalent measured environments'
     case('defect')
-      ok=unique_count>=2.and.norbit>=2.and.largest_count>=2.and.largest_count>second_count
-      if(.not.ok)message='SAWF defect class requires a dominant bulk orbit and minority local environments'
+      ok=.true.
     case('interface')
-      ok=unique_count>=2.and.count(orbit_count>=2)>=2
-      if(.not.ok)message='SAWF interface class requires at least two repeated extensive environment orbits'
+      ok=.true.
     case('surface')
       ok=maxval(vacuum_fraction)>1d-12
       if(.not.ok)message='SAWF surface class requires measured vacuum occupancy'
@@ -178,7 +176,8 @@ contains
     integer(8),allocatable::atom_h1(:),atom_h2(:),neighbor_q(:)
     integer,allocatable::neighbor_z(:)
     integer::i,j,k,tmp_i,n
-    real(8)::delta(3),cartesian(3),scale
+    real(8)::delta(3),cartesian(3),scale,distance
+    logical::image_ok
     ok=.false.;message='';key=''
     if(len_trim(supercell_key)==0.or.size(relative_coordinates,1)/=3.or. &
        size(relative_coordinates,2)/=size(species).or.vacuum_fraction<0d0.or.vacuum_fraction>1d0.or. &
@@ -194,8 +193,10 @@ contains
       k=0
       do j=1,n
         if(j==i)cycle;k=k+1;delta=relative_coordinates(:,j)-relative_coordinates(:,i)
-        delta=delta-dnint(delta);cartesian=matmul(lattice,delta)
-        neighbor_z(k)=species(j);neighbor_q(k)=nint(sum(cartesian**2)/(scale*scale),8)
+        call sawf_closest_periodic_cartesian(lattice,delta,cartesian,image_ok)
+        if(.not.image_ok)then;message='SAWF periodic closest-image search failed';return;end if
+        distance=sqrt(sum(cartesian**2))
+        neighbor_z(k)=species(j);neighbor_q(k)=nint(distance/scale,8)
       end do
       do j=1,max(0,n-2);do k=j+1,n-1
         if(neighbor_z(k)<neighbor_z(j).or.(neighbor_z(k)==neighbor_z(j).and.neighbor_q(k)<neighbor_q(j)))then
@@ -216,6 +217,36 @@ contains
     call sawf_hash_integer8(atom_h1,h1,h2);call sawf_hash_integer8(atom_h2,h1,h2)
     qdist=nint(vacuum_fraction/scale,8);call sawf_hash_integer8([qdist],h1,h2)
     write(key,'(a,z16.16,z16.16)')'ENV-',h1,h2;ok=.true.
+  end subroutine
+
+  subroutine sawf_closest_periodic_cartesian(lattice,fractional_delta,cartesian,ok)
+    real(8),intent(in)::lattice(3,3),fractional_delta(3)
+    real(8),intent(out)::cartesian(3);logical,intent(out)::ok
+    real(8)::inverse(3,3),det,candidate(3),candidate_cart(3),best2,bound
+    integer::lo(3),hi(3),n1,n2,n3
+    det=lattice(1,1)*(lattice(2,2)*lattice(3,3)-lattice(2,3)*lattice(3,2)) &
+      -lattice(1,2)*(lattice(2,1)*lattice(3,3)-lattice(2,3)*lattice(3,1)) &
+      +lattice(1,3)*(lattice(2,1)*lattice(3,2)-lattice(2,2)*lattice(3,1))
+    ok=.false.;cartesian=0d0
+    if(abs(det)<=tiny(1d0).or..not.ieee_is_finite(det))return
+    inverse(1,:)=[lattice(2,2)*lattice(3,3)-lattice(2,3)*lattice(3,2), &
+      lattice(1,3)*lattice(3,2)-lattice(1,2)*lattice(3,3), &
+      lattice(1,2)*lattice(2,3)-lattice(1,3)*lattice(2,2)]/det
+    inverse(2,:)=[lattice(2,3)*lattice(3,1)-lattice(2,1)*lattice(3,3), &
+      lattice(1,1)*lattice(3,3)-lattice(1,3)*lattice(3,1), &
+      lattice(1,3)*lattice(2,1)-lattice(1,1)*lattice(2,3)]/det
+    inverse(3,:)=[lattice(2,1)*lattice(3,2)-lattice(2,2)*lattice(3,1), &
+      lattice(1,2)*lattice(3,1)-lattice(1,1)*lattice(3,2), &
+      lattice(1,1)*lattice(2,2)-lattice(1,2)*lattice(2,1)]/det
+    candidate=fractional_delta-dnint(fractional_delta);cartesian=matmul(lattice,candidate)
+    best2=sum(cartesian**2);bound=sqrt(sum(inverse**2))*sqrt(best2)+1d-12
+    lo=floor(fractional_delta-bound)-1;hi=ceiling(fractional_delta+bound)+1
+    if(any(hi-lo>200))return
+    do n3=lo(3),hi(3);do n2=lo(2),hi(2);do n1=lo(1),hi(1)
+      candidate=fractional_delta-real([n1,n2,n3],8);candidate_cart=matmul(lattice,candidate)
+      if(sum(candidate_cart**2)<best2)then;best2=sum(candidate_cart**2);cartesian=candidate_cart;end if
+    end do;end do;end do
+    ok=.true.
   end subroutine
 
   subroutine sawf_hash_integer8(values,h1,h2)

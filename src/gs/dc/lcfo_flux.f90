@@ -36,7 +36,8 @@ module lcfo_flux
     build_sawf_closed_core_buffer_basis,clear_sawf_closed_basis
   use lcfo_wannier_sawf_dmn, only: t_sawf_dmn_writer, begin_sawf_dmn, &
     append_sawf_dmn_operation, finish_sawf_dmn, abort_sawf_dmn
-  use lcfo_wannier_sawf_collective, only: reduce_sawf_fragment_alignment_failure
+  use lcfo_wannier_sawf_collective, only: reduce_sawf_fragment_alignment_failure, &
+    validate_sawf_density_contribution,assemble_sawf_density_unique
   use lcfo_wannier_sawf_templates, only: validate_sawf_actual_group_operation, &
     build_sawf_environment_orbits, build_sawf_supercell_fingerprint, &
     build_sawf_local_environment_fingerprint, select_sawf_environment_materialization
@@ -6789,8 +6790,7 @@ contains
         do ifrag=1,dc%n_frag
           sawf_environment_equivalent(ifrag,ifrag)=.true.
           do isym=1,size(symmetry_operations)
-            if(symmetry_fragment_maps(ifrag,isym)>0 .and. &
-                sawf_environment_key(ifrag)==sawf_environment_key(symmetry_fragment_maps(ifrag,isym))) then
+            if(symmetry_fragment_maps(ifrag,isym)>0) then
               sawf_environment_equivalent(ifrag,symmetry_fragment_maps(ifrag,isym))=.true.
               sawf_environment_equivalent(symmetry_fragment_maps(ifrag,isym),ifrag)=.true.
             end if
@@ -7011,7 +7011,7 @@ contains
       logical,intent(out)::ok;character(*),intent(out)::message
       integer::ifrag,ia,axis,count,k,idx(3),start(3),extent(3),delta
       integer,allocatable::local_species(:),local_count(:)
-      real(8),allocatable::relative(:,:),rho_local(:,:,:),rho_global(:,:,:),density_buffer(:)
+      real(8),allocatable::relative(:,:),rho_local(:,:,:),rho_global(:,:,:),density_buffer(:),density_collective(:)
       real(8)::center_fractional(3),vacuum_fraction
       integer::ix,iy,iz,ispin,low_density_count,total_point_count,gx,gy,gz
       logical::inside,pbc(3)
@@ -7044,6 +7044,7 @@ contains
       if(.not.ok)return
       allocate(local_species(size(species)),relative(3,size(species)),local_count(size(environment_key)))
       allocate(rho_local(mesh(1),mesh(2),mesh(3)),rho_global(mesh(1),mesh(2),mesh(3)))
+      allocate(density_collective(2*product(mesh)))
       rho_local=0d0
       if(info%id_ko==0)then
         do iz=mg%is(3),mg%ie(3);do iy=mg%is(2),mg%ie(2);do ix=mg%is(1),mg%ie(1)
@@ -7052,7 +7053,13 @@ contains
           end do
         end do;end do;end do
       end if
-      call comm_summation(rho_local,rho_global,product(mesh),dc%icomm_tot)
+      density_collective(1:product(mesh))=reshape(rho_local,[product(mesh)])
+      call validate_sawf_density_contribution(density_collective(1:product(mesh)), &
+        info%id_ko==0,dc%id_tot,ok,message)
+      if(.not.ok)call lcfo_sawf_fatal(trim(message))
+      call assemble_sawf_density_unique(density_collective(1:product(mesh)),info%id_ko==0, &
+        dc%icomm_tot,density_collective(product(mesh)+1:2*product(mesh)))
+      rho_global=reshape(density_collective(product(mesh)+1:2*product(mesh)),shape(rho_global))
       local_count=0
       do ifrag=1,size(environment_key)
         start=fragment_origin(:,ifrag)-dc%nxyz_buffer;extent=fragment_shape(:,ifrag)+2*dc%nxyz_buffer
