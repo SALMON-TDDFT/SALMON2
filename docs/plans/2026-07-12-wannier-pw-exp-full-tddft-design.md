@@ -17,6 +17,8 @@ absolute physical fidelity of that system is outside this milestone.
 - Time step: `dt = 2 a.u.`
 - Wannier+PW propagator: exponential propagation in the mixed basis
 - Reference: Full TDDFT started from the documented conventional ground state
+- Material scope: gapped systems with integer occupations
+- Exchange-correlation scope: LDA
 
 The initial occupied states are not obtained by merely projecting conventional
 Full TDDFT orbitals into the mixed basis, nor by a one-shot diagonalization in a
@@ -65,6 +67,37 @@ It converges the density/potential, total energy, occupied projector, and
 generalized eigen-residual. The converged condition is
 `[H_DG[n0],rho0]_S = 0`, expressed in a consistent overlap metric. A Wannier
 basis-regeneration loop remains outside this milestone.
+
+### DG-DC energy and potential evaluation
+
+DG-DC uses the same Kohn-Sham LDA total-energy expression as conventional DFT;
+no separate DG energy formula is introduced. DG kinetic, interface, and penalty
+terms are already included in the DG Kohn-Sham eigenvalues. With integer
+occupations `f_i`, the total energy is
+
+`E_tot = sum_i f_i epsilon_i - E_H - integral(n V_xc)
+         + E_xc^LDA + E_ion-ion`.
+
+The LDA terms are local and are evaluated on disjoint fragment core grids:
+
+`E_xc^LDA = sum_K integral_(Omega_K) n epsilon_xc(n)`,
+
+`integral(n V_xc) = sum_K integral_(Omega_K) n V_xc`.
+
+Buffer and halo points are excluded from these energy integrals, and every
+global grid point has exactly one fragment owner. For spin-polarized extensions,
+the same ownership rule applies to the spin densities.
+
+Hartree remains a global operation. The complete mixed-basis density, including
+WW, WP/PW, and PP contributions, is assembled on the global grid, the existing
+SALMON Poisson/Hartree solver produces `V_H`, and `V_H` is redistributed to the
+fragments. The Hartree energy is evaluated as
+
+`E_H = 0.5 integral_Omega n V_H`.
+
+The production energy uses the eigenvalue-sum expression above. A component-
+expectation reconstruction may be retained only as a diagnostic consistency
+check.
 
 During real-time TDDFT, the same basis and kinetic/DG surface matrices remain
 fixed, but the density-dependent Hartree and exchange-correlation potential
@@ -160,6 +193,9 @@ Additional health checks are:
 - Hermiticity of the complete length-gauge position operator in the `S` metric.
 - DG-DC density, potential, total-energy, occupied-projector, and eigen-residual
   convergence;
+- equality of fragment-summed LDA-XC integrals with a direct global-grid
+  diagnostic;
+- unique core-grid ownership with no buffer/halo double counting;
 - explicit separation of mixed basis dimension, retained eigenbasis dimension,
   propagated occupied-orbital count, and occupation weights;
 - recorded overlap cutoff, condition number, discarded metric directions, and
@@ -179,21 +215,24 @@ Additional health checks are:
    density-dependent potential matrix each SCF iteration while retaining the
    fixed DG surface matrix. Converge density, potential, energy, occupied
    projector, and generalized residual.
-5. Export all retained DG eigenvectors needed to span the mixed response space,
+5. Evaluate LDA-XC locally on uniquely owned fragment core grids, assemble the
+   full mixed density for the global Hartree solve, and use the conventional
+   Kohn-Sham eigenvalue-sum double-counting formula for total energy.
+6. Export all retained DG eigenvectors needed to span the mixed response space,
    while marking only `N_occ` orbitals with their physical occupation weights.
-6. Verify that the exported DG-DC state is stationary under the identical
+7. Verify that the exported DG-DC state is stationary under the identical
    field-off RT Hamiltonian and potential update.
-7. Implement the exponential update in the same overlap metric and verify
+8. Implement the exponential update in the same overlap metric and verify
    `S`-unitarity with small-matrix numerical tests.
-8. Verify the complete WW, WP/PW, PP, and DG-interface contributions to the
+9. Verify the complete WW, WP/PW, PP, and DG-interface contributions to the
    length-gauge position operator before interpreting a field-on waveform.
-9. During RT, keep the basis and DG surface matrix fixed but update the
+10. During RT, keep the basis and DG surface matrix fixed but update the
    density-dependent potential through a midpoint predictor-corrector.
-10. Run a PW-count/cutoff sequence at fixed time step and compare `Delta_Pz(t)` against
+11. Run a PW-count/cutoff sequence at fixed time step and compare `Delta_Pz(t)` against
    Full TDDFT using one analysis tool and one manifest schema.
-11. Promote the smallest converged Wannier+PW basis satisfying the 5 percent gate
+12. Promote the smallest converged Wannier+PW basis satisfying the 5 percent gate
    to the reference global configuration.
-12. Only after the global gate passes, validate fragment/distributed propagation
+13. Only after the global gate passes, validate fragment/distributed propagation
    against the global result.
 
 ## Failure Handling

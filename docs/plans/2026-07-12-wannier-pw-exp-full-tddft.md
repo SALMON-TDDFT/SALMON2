@@ -4,7 +4,7 @@
 
 **Goal:** Make one namelist-driven global Wannier+PW exponential propagation path reproduce the continuous-branch Full TDDFT induced polarization `Delta_Pz(t)` within 5 percent relative RMS at `dt=2 a.u.` under a `1e11 W/cm^2`, `1.55 eV`, `10 fs`, `sin^2`, z-polarized pulse.
 
-**Architecture:** Build one fixed global Wannier+PW basis from the conventional reference ground state, solve a separate self-consistent DG-DC ground state with the complete DG interface operator, and export its converged eigensystem to RT. Promote the reduced Wannier+BPW exponential path to an explicit production mode, propagate occupied orbitals in the retained non-occupied response space with an `S`-metric midpoint exponential, and update the TDDFT Hartree and exchange-correlation potential. Keep MPI coefficient ownership and communication outside the first physics comparison, then compare continuous-branch induced polarization and its identically differentiated current.
+**Architecture:** For a gapped LDA system with integer occupations, build one fixed global Wannier+PW basis from the conventional reference ground state, solve a separate self-consistent DG-DC ground state with the complete DG interface operator, and export its converged eigensystem to RT. Evaluate LDA-XC on uniquely owned fragment core grids, solve Hartree from the assembled global density, and reuse the conventional Kohn-Sham eigenvalue-sum total-energy formula. Promote the reduced Wannier+BPW exponential path to an explicit production mode, propagate occupied orbitals in the retained non-occupied response space with an `S`-metric midpoint exponential, and update the TDDFT Hartree and exchange-correlation potential. Keep MPI coefficient ownership and communication outside the first physics comparison, then compare continuous-branch induced polarization and its identically differentiated current.
 
 **Tech Stack:** Fortran 2008, MPI, LAPACK/ScaLAPACK or EigenExa through the existing build, Python 3 standard library plus NumPy/Matplotlib for analysis, CMake/CTest-style source checks.
 
@@ -224,6 +224,9 @@ max_abs(H-H^H)
 SCF density residual
 SCF potential residual
 SCF total-energy difference
+fragment-summed versus global-grid LDA E_xc difference
+fragment-summed versus global-grid integral(n V_xc) difference
+core-grid ownership count and halo exclusion
 occupied-projector difference
 occupied mixed-space norm before/after Exp
 maximum coefficient magnitude
@@ -272,6 +275,9 @@ for k = 0, 1, ...:
     solve H_DG[n(k)] C(k) = S C(k) epsilon(k)
     occupy the lowest physical states using the declared occupation weights
     reconstruct n_out(k) from occupied DG states
+    assemble the complete WW+WP/PW+PP density for the global Hartree solve
+    evaluate local LDA V_xc, E_xc, and integral(n V_xc) on owned core grids
+    compute E_tot from the conventional eigenvalue-sum double-counting formula
     mix n_out(k) with n(k) using the normal SCF policy
     test density, potential, energy, projector, and eigensystem residuals
 end
@@ -285,6 +291,24 @@ tolerances based on machine precision and matrix scale for Hermiticity,
 eigen-residual, and S-orthonormality. Record norm drift without renormalizing the
 propagated state. A violation must reveal the actual error rather than conceal
 it.
+
+Restrict the production mode to a finite-gap integer-occupation system. Reject
+metallic/smeared occupations in this milestone. Reuse SALMON's existing LDA
+exchange-correlation and global Hartree routines. Fragment LDA energy integrals
+must use only uniquely owned core points; buffer and halo points contribute to
+operator construction but not to energy integration.
+
+Use
+
+```text
+E_H = 0.5 * integral_global(n * V_H)
+E_tot = sum_i f_i*epsilon_i - E_H - integral_global(n*V_xc)
+        + E_xc_LDA + E_ion_ion
+```
+
+where `E_xc_LDA` and `integral_global(n*V_xc)` are implemented as fragment-core
+sums and checked against a direct global-grid diagnostic. Do not add DG kinetic,
+surface, or penalty energies again after the eigenvalue sum.
 
 Keep these dimensions distinct:
 
@@ -308,6 +332,8 @@ max_i ||H_DG C_i-S C_i epsilon_i||
 ||n_out-n_in|| / ||n_out||
 ||V_eff_out-V_eff_in|| / ||V_eff_out||
 |E_total(k)-E_total(k-1)|
+|E_xc_fragment_sum-E_xc_global_check|
+|nVxc_fragment_sum-nVxc_global_check|
 ||Q_occ(k)-Q_occ(k-1)||_F / ||Q_occ(k)||_F
 field-off ||Q(t)-Q(0)||_F / ||Q(0)||_F
 ```
