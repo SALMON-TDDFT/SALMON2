@@ -28,6 +28,12 @@ assert "call atomic_create_directory(sawf_seed_bundles" in flux
 assert "call select_sawf_local_complete_shells" in flux
 assert "call solve_sawf_local_generalized_eigensystem" in flux
 assert "call write_sawf_representative_local_seed" in flux
+assert "call run_sawf_local_preprocessing" in flux
+assert "call read_sawf_nnkp_neighbors" in flux
+assert flux.index("call write_sawf_representative_local_seed") < flux.index(
+    "call run_sawf_local_preprocessing"
+) < flux.index("call read_sawf_nnkp_neighbors")
+assert "preprocess_only" in flux
 assert "esp_tot(1:nband_wann" not in flux.split(
     "subroutine write_sawf_representative_local_seed", 1
 )[1].split("end subroutine write_sawf_representative_local_seed", 1)[0]

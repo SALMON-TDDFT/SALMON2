@@ -49,7 +49,8 @@ module lcfo_flux
     build_sawf_environment_execution_plan,build_sawf_seed_bundles
   use lcfo_wannier_sawf_seed, only: select_sawf_local_complete_shells, &
     build_sawf_local_seed_matrices,write_sawf_local_eig_amn, &
-    solve_sawf_local_generalized_eigensystem
+    solve_sawf_local_generalized_eigensystem,read_sawf_nnkp_neighbors, &
+    write_sawf_local_eig_amn_mmn
   use lcfo_wannier_sawf_win, only: activate_sawf_win, deactivate_sawf_win, &
     t_atomic_win_writer, begin_atomic_win, finish_atomic_win, abort_atomic_win, &
     write_sawf_local_preprocess_win
@@ -6447,7 +6448,7 @@ contains
       call write_wannier_mmn_file(nband_wann)
       call comm_sync_all(dc%icomm_tot)
       if(trim(wannier_site_symmetry) /= 'off') then
-        call generate_sawf_dmn(nband_wann)
+        call generate_sawf_dmn(nband_wann,resolved_wannier_command)
         call activate_sawf_win_collective(winfile)
       end if
 
@@ -6609,7 +6610,7 @@ contains
         '[DC-LCFO-SAWF] activated site_symmetry in', trim(winfile)
     end subroutine activate_sawf_win_collective
 
-    subroutine generate_sawf_dmn(nband_wann)
+    subroutine generate_sawf_dmn(nband_wann,resolved_wannier_command)
       use communication, only: comm_get_max,comm_bcast
       use filesystem, only: atomic_create_directory
       use salmon_global, only: izatom, sysname, wannier_num_wann, &
@@ -6619,6 +6620,7 @@ contains
       use, intrinsic :: iso_fortran_env, only: int64
       implicit none
       integer, intent(in) :: nband_wann
+      character(*),intent(in)::resolved_wannier_command
       integer :: allocation_failure, allocation_status, failure, local_failure, ia, ifrag, iop, isym,ibundle
       integer :: projection_lmax
       integer :: mesh(3)
@@ -6628,6 +6630,7 @@ contains
       integer, allocatable :: sawf_environment_orbit(:)
       integer, allocatable :: sawf_representative_fragment(:),sawf_materialize_operation(:)
       integer,allocatable :: sawf_expected_channels(:),sawf_selected_channels(:)
+      integer,allocatable :: sawf_neighbor_gvec(:,:)
       character(256), allocatable :: sawf_environment_key(:)
       real(8) :: a1(3), a2(3), a3(3), lattice(3,3), lattice_inverse(3,3)
       real(8) :: singular_min, singular_max, closure_residual, closure_tolerance
@@ -6929,6 +6932,27 @@ contains
         if(.not.local_ok)then
           write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-LOCAL-SEED] rank=',dc%id_tot,' ',trim(message)
           call lcfo_sawf_fatal('SAWF representative local eigensystem/seed construction failed')
+        end if
+      end if
+      if(trim(wannier_sawf_generation)=='hierarchical')then
+        call run_sawf_local_preprocessing(resolved_wannier_command,sawf_seed_bundles)
+      end if
+      if(trim(wannier_sawf_generation)=='hierarchical'.and. &
+          .not.is_wannier90_export_only_command(resolved_wannier_command).and.dc%id_frag==0.and. &
+          sawf_environment_receipts(dc%i_frag)%requires_execution)then
+        ibundle=findloc(sawf_seed_bundles%environment,dc%i_frag,dim=1)
+        if(ibundle<=0)call lcfo_sawf_fatal('SAWF representative bundle lookup failed after preprocessing')
+        call read_sawf_nnkp_neighbors(trim(sawf_seed_bundles(ibundle)%directory)//'/'// &
+          trim(sawf_seed_bundles(ibundle)%seedname)//'.nnkp',sawf_neighbor_gvec,local_ok,message)
+        if(.not.local_ok)then
+          write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-NNKP] rank=',dc%id_tot,' ',trim(message)
+          call lcfo_sawf_fatal('SAWF representative preprocessing neighbor contract failed')
+        end if
+        call write_sawf_representative_local_seed(state_cache%source,channels, &
+          sawf_selected_channels,sawf_seed_bundles,local_ok,message,sawf_neighbor_gvec)
+        if(.not.local_ok)then
+          write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-MMN] rank=',dc%id_tot,' ',trim(message)
+          call lcfo_sawf_fatal('SAWF representative MMN construction failed')
         end if
       end if
       local_ok=.true.; message=''
@@ -7912,7 +7936,7 @@ contains
     end subroutine checked_sawf_fragment_point_count
 
     subroutine write_sawf_representative_local_seed(entry,projection_channels,selected_channels, &
-        bundles,ok,message)
+        bundles,ok,message,neighbor_gvec)
       use salmon_global, only: wannier_projection_width
       use salmon_math, only: matrix_inverse
       type(t_sawf_fragment_state_entry),intent(in)::entry
@@ -7921,12 +7945,15 @@ contains
       type(t_sawf_seed_bundle),intent(in)::bundles(:)
       logical,intent(out)::ok
       character(*),intent(out)::message
+      integer,intent(in),optional::neighbor_gvec(:,:)
       real(8),parameter::hartree_to_ev=27.211386245988d0
       real(8),allocatable::h_basis(:,:),energy_hartree(:),energy_ev(:)
       complex(8),allocatable::states(:,:),projection(:,:),phase_factor(:,:),amn_local(:,:),mmn_dummy(:,:,:)
       real(8),allocatable::atom_fractional(:,:)
+      real(8),allocatable::gcart(:,:)
       real(8)::a1(3),a2(3),a3(3),lattice(3,3),local_lattice(3,3),lattice_inverse(3,3),x,y,z
       integer::bundle_index,channel,ix,iy,iz,gx,gy,gz,start(3),k,npoint,io,jo,i_halo,nbasis,natom,atom,last_atom
+      integer::nneighbor
 
       ok=.false.;message='';bundle_index=0;nbasis=entry%n_basis
       do k=1,size(bundles)
@@ -7951,11 +7978,25 @@ contains
         message='SAWF local complete projection shell exceeds generalized eigensystem rank';ok=.false.;return
       end if
       npoint=size(states,1)
-      allocate(projection(npoint,size(selected_channels)),phase_factor(npoint,1), &
-        amn_local(size(states,2),size(selected_channels)),mmn_dummy(size(states,2),size(states,2),1), &
+      nneighbor=1
+      if(present(neighbor_gvec))then
+        if(size(neighbor_gvec,1)/=3.or.size(neighbor_gvec,2)<=0)then
+          message='SAWF NNKP neighbor payload dimensions are invalid';ok=.false.;return
+        end if
+        nneighbor=size(neighbor_gvec,2)
+      end if
+      allocate(projection(npoint,size(selected_channels)),phase_factor(npoint,nneighbor), &
+        amn_local(size(states,2),size(selected_channels)),mmn_dummy(size(states,2),size(states,2),nneighbor), &
         energy_ev(size(energy_hartree)))
       call get_lattice_vectors(a1,a2,a3);lattice(:,1)=a1;lattice(:,2)=a2;lattice(:,3)=a3
       lattice_inverse=lattice;call matrix_inverse(lattice_inverse)
+      allocate(gcart(3,nneighbor));gcart=0d0
+      if(present(neighbor_gvec))then
+        do channel=1,nneighbor
+          call reciprocal_vector_from_index(neighbor_gvec(:,channel),a1,a2,a3, &
+            gcart(1,channel),gcart(2,channel),gcart(3,channel))
+        end do
+      end if
       local_lattice=lattice
       do channel=1,3;local_lattice(:,channel)=lattice(:,channel)* &
         real(entry%buffer_shape(channel),8)/real(dc%lg_tot%num(channel),8);end do
@@ -7969,7 +8010,9 @@ contains
             projection_channels(selected_channels(channel)),lattice,lattice_inverse, &
             wannier_projection_width),0d0,kind=8)
         end do
-        phase_factor(k,1)=(1d0,0d0)
+        do channel=1,nneighbor
+          phase_factor(k,channel)=exp(cmplx(0d0,-dot_product(gcart(:,channel),[x,y,z]),kind=8))
+        end do
       end do;end do;end do
       call build_sawf_local_seed_matrices(states,projection,phase_factor,hvol,amn_local,mmn_dummy,ok,message)
       if(.not.ok)return
@@ -7986,12 +8029,17 @@ contains
         atom_fractional(:,natom)=modulo((matmul(lattice_inverse,dc%system_tot%rion(:,atom))* &
           real(dc%lg_tot%num,8)-real(start,8))/real(entry%buffer_shape,8),1d0)
       end do
-      call write_sawf_local_preprocess_win(trim(bundles(bundle_index)%directory)//'/'// &
-        trim(bundles(bundle_index)%seedname)//'.win',size(states,2),size(selected_channels), &
-        local_lattice,atom_fractional,ok,message)
-      if(.not.ok)return
-      call write_sawf_local_eig_amn(bundles(bundle_index)%directory,bundles(bundle_index)%seedname, &
-        energy_ev,amn_local,ok,message)
+      if(present(neighbor_gvec))then
+        call write_sawf_local_eig_amn_mmn(bundles(bundle_index)%directory, &
+          bundles(bundle_index)%seedname,energy_ev,amn_local,mmn_dummy,neighbor_gvec,ok,message)
+      else
+        call write_sawf_local_preprocess_win(trim(bundles(bundle_index)%directory)//'/'// &
+          trim(bundles(bundle_index)%seedname)//'.win',size(states,2),size(selected_channels), &
+          local_lattice,atom_fractional,ok,message)
+        if(.not.ok)return
+        call write_sawf_local_eig_amn(bundles(bundle_index)%directory,bundles(bundle_index)%seedname, &
+          energy_ev,amn_local,ok,message)
+      end if
     end subroutine write_sawf_representative_local_seed
 
     real(8) function sawf_local_projection_value(position,channel,lattice,lattice_inverse,sigma) result(value)
@@ -9028,19 +9076,39 @@ contains
       end do
     end function distance_to_fragment_center
 
-    subroutine run_wannier90_seed_files(resolved_command,seedname_in,directory_in)
+    subroutine run_sawf_local_preprocessing(resolved_command,bundles)
+      use communication,only:comm_sync_all
+      character(*),intent(in)::resolved_command
+      type(t_sawf_seed_bundle),intent(in)::bundles(:)
+      integer::bundle
+      call comm_sync_all(dc%icomm_tot)
+      if(is_wannier90_export_only_command(resolved_command))then
+        if(dc%id_tot==0)write(*,'(1x,a)') &
+          '[DC-LCFO-SAWF-PREPROCESS] export-only: local WIN/EIG/AMN staged; NNKP/MMN deferred'
+        return
+      end if
+      do bundle=1,size(bundles)
+        call run_wannier90_seed_files(resolved_command,bundles(bundle)%seedname, &
+          bundles(bundle)%directory,preprocess_only=.true.)
+      end do
+    end subroutine run_sawf_local_preprocessing
+
+    subroutine run_wannier90_seed_files(resolved_command,seedname_in,directory_in,preprocess_only)
       use communication, only: comm_sync_all, comm_bcast
       use salmon_global, only: sysname
       implicit none
       character(*), intent(in) :: resolved_command
       character(*), intent(in), optional :: seedname_in,directory_in
+      logical,intent(in),optional::preprocess_only
       character(1024) :: seedname
       character(4096) :: command_line, change_dir_command
       character(512) :: command_message
       integer :: command_failure
       logical :: command_ok
+      logical :: run_preprocess
 
       seedname = trim(sysname)
+      run_preprocess=.false.;if(present(preprocess_only))run_preprocess=preprocess_only
       if(present(seedname_in))seedname=trim(seedname_in)
       call comm_sync_all(dc%icomm_tot)
       if(is_wannier90_reuse_command(resolved_command)) then
@@ -9053,8 +9121,9 @@ contains
       if(dc%id_tot == 0) then
         change_dir_command = 'cd '//trim(shell_quote(dc%base_directory))//' && '
         if(present(directory_in))change_dir_command='cd '//trim(shell_quote(directory_in))//' && '
-        command_line = trim(change_dir_command)//trim(mpi_clean_env_prefix())//' '// &
-          trim(resolved_command)//' '//trim(shell_quote(seedname))
+        command_line = trim(change_dir_command)//trim(mpi_clean_env_prefix())//' '//trim(resolved_command)//' '
+        if(run_preprocess)command_line=trim(command_line)//'-pp '
+        command_line=trim(command_line)//trim(shell_quote(seedname))
         write(*,'(1x,a,1x,a)') "[DC-LCFO-WANNIER] run:", trim(command_line)
         call execute_wannier90_command(command_line,command_ok,command_message)
         command_failure = merge(0,1,command_ok)
