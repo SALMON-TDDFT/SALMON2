@@ -44,8 +44,8 @@ module lcfo_flux
   use lcfo_wannier_sawf_templates, only: validate_sawf_structure_class
   use lcfo_wannier_sawf_templates, only: build_sawf_file_content_digest
   use lcfo_wannier_sawf_templates, only: measure_sawf_vacuum_occupancy
-  use lcfo_wannier_sawf_orchestrator, only: t_sawf_environment_receipt, &
-    build_sawf_environment_execution_plan
+  use lcfo_wannier_sawf_orchestrator, only: t_sawf_environment_receipt,t_sawf_seed_bundle, &
+    build_sawf_environment_execution_plan,build_sawf_seed_bundles
   use lcfo_wannier_sawf_win, only: activate_sawf_win, deactivate_sawf_win, &
     t_atomic_win_writer, begin_atomic_win, finish_atomic_win, abort_atomic_win
   use lcfo_wannier_command, only: select_wannier90_command, execute_wannier90_command, &
@@ -6636,6 +6636,7 @@ contains
       type(t_sawf_fragment_state_cache) :: state_cache
       type(t_sawf_closed_basis) :: closed_basis
       type(t_sawf_environment_receipt),allocatable :: sawf_environment_receipts(:)
+      type(t_sawf_seed_bundle),allocatable :: sawf_seed_bundles(:)
       logical :: local_ok,grid_map_ok,fragment_map_ok,center_available,split_fragment_global_mode
       logical, allocatable :: sawf_environment_equivalent(:,:),sawf_defect_intersects(:), &
         sawf_regenerate_environment(:),sawf_generate_independently(:)
@@ -6826,6 +6827,12 @@ contains
         if(.not.local_ok)then
           write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-PLAN] rank=',dc%id_tot,' ',trim(message)
           call lcfo_sawf_fatal('SAWF hierarchical execution-plan construction failed')
+        end if
+        call build_sawf_seed_bundles(sawf_environment_receipts, &
+          trim(dc%base_directory)//'sawf-hierarchical',trim(sysname),sawf_seed_bundles,local_ok,message)
+        if(.not.local_ok)then
+          write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-SEEDS] rank=',dc%id_tot,' ',trim(message)
+          call lcfo_sawf_fatal('SAWF representative seed-bundle construction failed')
         end if
       end if
       call build_sawf_operation_product_table(symmetry_operations,lattice,lattice_inverse, &

@@ -12,10 +12,49 @@ module lcfo_wannier_sawf_orchestrator
     character(256) :: same_supercell_fingerprint=''
   end type t_sawf_environment_receipt
 
+  type, public :: t_sawf_seed_bundle
+    integer :: environment=0
+    character(512) :: directory=''
+    character(256) :: seedname=''
+    character(256) :: same_supercell_fingerprint=''
+  end type t_sawf_seed_bundle
+
   public :: build_sawf_environment_execution_plan
   public :: validate_sawf_environment_receipts
+  public :: build_sawf_seed_bundles
 
 contains
+
+  subroutine build_sawf_seed_bundles(receipts,root_directory,base_seedname,bundles,ok,message)
+    type(t_sawf_environment_receipt),intent(in)::receipts(:)
+    character(*),intent(in)::root_directory,base_seedname
+    type(t_sawf_seed_bundle),allocatable,intent(out)::bundles(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::environment,bundle_index,nrun
+    character(16)::suffix
+
+    ok=.false.;message=''
+    nrun=count(receipts%requires_execution)
+    if(size(receipts)<=0.or.nrun<=0.or.len_trim(root_directory)==0.or.len_trim(base_seedname)==0)then
+      message='SAWF representative seed-bundle inputs are empty';return
+    end if
+    allocate(bundles(nrun));bundle_index=0
+    do environment=1,size(receipts)
+      if(.not.receipts(environment)%requires_execution)cycle
+      if(receipts(environment)%environment/=environment.or. &
+          len_trim(receipts(environment)%same_supercell_fingerprint)==0)then
+        message='SAWF representative seed-bundle receipt provenance is invalid';return
+      end if
+      bundle_index=bundle_index+1;write(suffix,'(i6.6)')environment
+      bundles(bundle_index)%environment=environment
+      bundles(bundle_index)%directory=trim(root_directory)//'/environment-'//trim(suffix)
+      bundles(bundle_index)%seedname=trim(base_seedname)//'-env-'//trim(suffix)
+      bundles(bundle_index)%same_supercell_fingerprint= &
+        trim(receipts(environment)%same_supercell_fingerprint)
+    end do
+    ok=.true.
+  end subroutine build_sawf_seed_bundles
 
   subroutine build_sawf_environment_execution_plan(representative_fragment,operation_index, &
       generated_independently,supercell_fingerprint,receipts,ok,message)

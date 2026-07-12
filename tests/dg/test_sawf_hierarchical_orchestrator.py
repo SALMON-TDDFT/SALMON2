@@ -22,6 +22,7 @@ for token in required:
     assert token in source, f"missing hierarchical orchestrator contract: {token}"
 
 assert "call build_sawf_environment_execution_plan" in flux
+assert "call build_sawf_seed_bundles" in flux
 
 fc = shutil.which("gfortran")
 if not fc:
@@ -31,12 +32,18 @@ driver = r'''program check_orchestrator
   use lcfo_wannier_sawf_orchestrator
   implicit none
   type(t_sawf_environment_receipt),allocatable :: receipt(:)
+  type(t_sawf_seed_bundle),allocatable :: bundle(:)
   logical :: ok
   character(256) :: msg
   call build_sawf_environment_execution_plan([1,1,3],[1,2,1], &
     [.true.,.false.,.true.],'cell-A',receipt,ok,msg)
   call require(ok,'valid plan')
   call require(all(receipt%requires_execution.eqv.[.true.,.false.,.true.]),'execution schedule')
+  call build_sawf_seed_bundles(receipt,'/tmp/sawf','seed',bundle,ok,msg)
+  call require(ok.and.size(bundle)==2,'representative seed bundles')
+  call require(bundle(1)%environment==1.and.bundle(2)%environment==3,'bundle environments')
+  call require(index(bundle(1)%directory,'environment-000001')>0,'isolated seed directory')
+  call require(trim(bundle(1)%seedname)=='seed-env-000001','unique seed name')
   receipt(1)%completed=.true.;receipt(3)%completed=.true.
   call validate_sawf_environment_receipts(receipt,'cell-A',ok,msg)
   call require(ok,'representative receipts accepted: '//trim(msg))
