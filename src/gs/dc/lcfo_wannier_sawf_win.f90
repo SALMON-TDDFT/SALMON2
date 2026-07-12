@@ -30,9 +30,9 @@ module lcfo_wannier_sawf_win
 
 contains
 
-  subroutine write_sawf_local_preprocess_win(filename,num_bands,num_wann,lattice,atoms_fractional,ok,message)
+  subroutine write_sawf_local_preprocess_win(filename,num_bands,num_wann,num_iter,lattice,atoms_fractional,ok,message)
     character(*),intent(in)::filename
-    integer,intent(in)::num_bands,num_wann
+    integer,intent(in)::num_bands,num_wann,num_iter
     real(8),intent(in)::lattice(3,3),atoms_fractional(:,:)
     logical,intent(out)::ok
     character(*),intent(out)::message
@@ -44,7 +44,7 @@ contains
     determinant=lattice(1,1)*(lattice(2,2)*lattice(3,3)-lattice(2,3)*lattice(3,2))- &
       lattice(1,2)*(lattice(2,1)*lattice(3,3)-lattice(2,3)*lattice(3,1))+ &
       lattice(1,3)*(lattice(2,1)*lattice(3,2)-lattice(2,2)*lattice(3,1))
-    if(num_bands<=0.or.num_wann<=0.or.num_wann>num_bands.or.size(atoms_fractional,1)/=3.or. &
+    if(num_bands<=0.or.num_wann<=0.or.num_wann>num_bands.or.num_iter<0.or.size(atoms_fractional,1)/=3.or. &
         size(atoms_fractional,2)<=0.or..not.all(ieee_is_finite(lattice)).or. &
         .not.all(ieee_is_finite(atoms_fractional)).or.abs(determinant)<=1d-14)then
       message='SAWF local preprocess WIN inputs are invalid';return
@@ -53,7 +53,7 @@ contains
     if(.not.ok)return
     write(unit,'(a,i0)',iostat=ios)'num_bands = ',num_bands
     if(ios==0)write(unit,'(a,i0)',iostat=ios)'num_wann = ',num_wann
-    if(ios==0)write(unit,'(a)',iostat=ios)'num_iter = 0'
+    if(ios==0)write(unit,'(a,i0)',iostat=ios)'num_iter = ',num_iter
     if(ios==0)write(unit,'(a)',iostat=ios)'mp_grid = 1 1 1'
     if(ios==0)write(unit,'(a)',iostat=ios)'gamma_only = true'
     if(ios==0)write(unit,'(a)',iostat=ios)'begin unit_cell_cart'

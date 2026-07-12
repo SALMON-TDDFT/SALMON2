@@ -32,7 +32,8 @@ assert "call run_sawf_local_preprocessing" in flux
 assert "call read_sawf_nnkp_neighbors" in flux
 assert "call restrict_sawf_stabilizer_representation" in flux
 assert "call build_sawf_local_band_representation" in flux
-assert "local dmn deferred until wannier90 symmetry-order contract is verified" in flux
+assert "call begin_sawf_dmn(sawf_local_writer" in flux
+assert "call run_sawf_local_wannier" in flux
 assert flux.index("call write_sawf_representative_local_seed") < flux.index(
     "call run_sawf_local_preprocessing"
 ) < flux.index("call read_sawf_nnkp_neighbors")

@@ -17,7 +17,7 @@ driver = r'''program check_local_win
   character(256) :: message
   lattice=0d0;lattice(1,1)=4d0;lattice(2,2)=5d0;lattice(3,3)=6d0
   atoms=reshape([0.1d0,0.2d0,0.3d0,0.6d0,0.7d0,0.8d0],[3,2])
-  call write_sawf_local_preprocess_win('local.win',4,2,lattice,atoms,ok,message)
+  call write_sawf_local_preprocess_win('local.win',4,2,50,lattice,atoms,ok,message)
   if(.not.ok)then;write(*,'(a)')trim(message);error stop 1;end if
   write(*,'(a)')'PASS atomic local SAWF preprocess WIN writer'
 end program'''
@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory(prefix="sawf-local-win-") as td:
                             stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
     if result.returncode: raise SystemExit(result.stdout)
     text=(td / "local.win").read_text().lower()
-    for token in ("num_bands = 4","num_wann = 2","mp_grid = 1 1 1","gamma_only = true",
+    for token in ("num_bands = 4","num_wann = 2","num_iter = 50","mp_grid = 1 1 1","gamma_only = true",
                   "begin unit_cell_cart","begin atoms_frac","begin kpoints"):
         assert token in text, token
     assert not list(td.glob("local.win.tmp.*"))
