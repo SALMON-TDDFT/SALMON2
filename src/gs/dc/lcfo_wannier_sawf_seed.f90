@@ -4,8 +4,48 @@ module lcfo_wannier_sawf_seed
   private
   public :: write_sawf_local_eig_amn_mmn
   public :: build_sawf_local_seed_matrices
+  public :: select_sawf_local_complete_shells
 
 contains
+
+  subroutine select_sawf_local_complete_shells(channel_atom,expected_per_atom,inside_atom, &
+      selected_channel,ok,message)
+    integer,intent(in)::channel_atom(:),expected_per_atom(:)
+    logical,intent(in)::inside_atom(:)
+    integer,allocatable,intent(out)::selected_channel(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer,allocatable::channel_count(:)
+    integer::channel,nselected
+
+    ok=.false.;message=''
+    if(size(channel_atom)<=0.or.size(expected_per_atom)<=0.or. &
+        size(inside_atom)/=size(expected_per_atom).or.any(expected_per_atom<=0).or. &
+        any(channel_atom<1).or.any(channel_atom>size(expected_per_atom)))then
+      message='SAWF local projection-shell dimensions are invalid';return
+    end if
+    do channel=2,size(channel_atom)
+      if(channel_atom(channel)<channel_atom(channel-1))then
+        message='SAWF projection channels are not atom-major';return
+      end if
+    end do
+    allocate(channel_count(size(expected_per_atom)));channel_count=0
+    do channel=1,size(channel_atom)
+      channel_count(channel_atom(channel))=channel_count(channel_atom(channel))+1
+    end do
+    if(any(channel_count/=expected_per_atom))then
+      message='SAWF projection channels do not contain complete atomic shells';return
+    end if
+    nselected=count(inside_atom(channel_atom));allocate(selected_channel(nselected));nselected=0
+    do channel=1,size(channel_atom)
+      if(.not.inside_atom(channel_atom(channel)))cycle
+      nselected=nselected+1;selected_channel(nselected)=channel
+    end do
+    if(nselected<=0)then
+      message='SAWF local core and buffer contain no complete projection shell';return
+    end if
+    ok=.true.
+  end subroutine select_sawf_local_complete_shells
 
   subroutine build_sawf_local_seed_matrices(states,projections,phase_factor,weight,amn,mmn,ok,message)
     complex(8),intent(in)::states(:,:),projections(:,:),phase_factor(:,:)
