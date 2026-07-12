@@ -26,8 +26,23 @@ module lcfo_wannier_sawf_templates
   public :: write_sawf_template_checkpoint, read_sawf_template_checkpoint
   public :: materialize_sawf_local_bases
   public :: apply_sawf_gauge_connection
+  public :: stitch_and_apply_sawf_neighbor_pair
 
 contains
+  subroutine stitch_and_apply_sawf_neighbor_pair(overlap,tolerance,neighbor_gauge_unitary, &
+      basis,ww_block,wp_block,face_self_block,face_neighbor_block,gauge_unitary,residual,ok,message)
+    complex(8),intent(in)::overlap(:,:),neighbor_gauge_unitary(:,:)
+    real(8),intent(in)::tolerance
+    complex(8),intent(inout)::basis(:,:),ww_block(:,:),wp_block(:,:), &
+      face_self_block(:,:),face_neighbor_block(:,:)
+    complex(8),intent(out)::gauge_unitary(size(overlap,2),size(overlap,1))
+    real(8),intent(out)::residual; logical,intent(out)::ok; character(*),intent(out)::message
+    call stitch_sawf_neighbor_gauge(overlap,tolerance,gauge_unitary,residual,ok,message)
+    if(.not.ok)return
+    call apply_sawf_gauge_connection(gauge_unitary,neighbor_gauge_unitary,basis,ww_block, &
+      wp_block,face_self_block,face_neighbor_block)
+  end subroutine
+
   subroutine apply_sawf_gauge_connection(gauge_unitary,neighbor_gauge_unitary,basis,ww_block,wp_block, &
       face_self_block,face_neighbor_block)
     complex(8),intent(in)::gauge_unitary(:,:),neighbor_gauge_unitary(:,:)

@@ -6,11 +6,15 @@ ROOT=Path(__file__).resolve().parents[2]
 FC=shutil.which('gfortran')
 if not FC: raise SystemExit('gfortran is required')
 driver=r'''program check_gauge_apply
- use lcfo_wannier_sawf_templates, only: apply_sawf_gauge_connection
+ use lcfo_wannier_sawf_templates, only: apply_sawf_gauge_connection, &
+   stitch_and_apply_sawf_neighbor_pair
  implicit none
  complex(8)::q(2,2),basis(3,2),ww(2,2),wp(2,1),face_self(2,2),face_neighbor(2,2)
+ complex(8)::overlap(2,2),neighbor_q(2,2),gauge(2,2),basis_before(3,2)
  complex(8)::b0(3,2),w0(2,2),p0(2,1),f0(2,2),n0(2,2)
- real(8)::c,s
+ real(8)::c,s,residual
+ logical::ok
+ character(256)::msg
  integer::i
  c=cos(.31d0);s=sin(.31d0);q=reshape([cmplx(c,0d0,8),cmplx(s,0d0,8), &
    cmplx(-s,0d0,8),cmplx(c,0d0,8)],[2,2])
@@ -25,6 +29,17 @@ driver=r'''program check_gauge_apply
  call req(maxval(abs(wp-matmul(conjg(transpose(q)),p0)))<1d-13,'WP')
  call req(maxval(abs(face_self-matmul(conjg(transpose(q)),matmul(f0,q))))<1d-13,'face self')
  call req(maxval(abs(face_neighbor-matmul(conjg(transpose(q)),matmul(n0,q))))<1d-13,'face neighbor')
+ ! Atomic orchestration: a bad overlap must leave every payload unchanged.
+ basis=b0;ww=w0;wp=p0;face_self=f0;face_neighbor=n0;basis_before=basis
+ overlap=0;overlap(1,1)=1;neighbor_q=0;neighbor_q(1,1)=1;neighbor_q(2,2)=1
+ call stitch_and_apply_sawf_neighbor_pair(overlap,1d-10,neighbor_q,basis,ww,wp, &
+   face_self,face_neighbor,gauge,residual,ok,msg)
+ call req(.not.ok.and.maxval(abs(basis-basis_before))<1d-15,'rank failure is atomic')
+ ! A unitary overlap is accepted and applied.
+ overlap=q;basis=b0;ww=w0;wp=p0;face_self=f0;face_neighbor=n0
+ call stitch_and_apply_sawf_neighbor_pair(overlap,1d-10,neighbor_q,basis,ww,wp, &
+   face_self,face_neighbor,gauge,residual,ok,msg)
+ call req(ok.and.residual<1d-12,'valid stitched application')
  write(*,'(a)')'PASS gauge connection applied to basis, WW, WP, and DG face blocks'
 contains
  subroutine req(x,t);logical,intent(in)::x;character(*),intent(in)::t
