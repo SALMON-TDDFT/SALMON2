@@ -24,8 +24,56 @@ module lcfo_wannier_sawf_templates
   public :: stitch_sawf_neighbor_gauge, validate_sawf_buffer_convergence
   public :: validate_sawf_global_local_equivalence
   public :: write_sawf_template_checkpoint, read_sawf_template_checkpoint
+  public :: materialize_sawf_local_bases
 
 contains
+  subroutine materialize_sawf_local_bases(representative_basis,representative_index, &
+      operation_index,independent_local,point_map,d_wann,local_basis,ok,message)
+    complex(8),intent(in)::representative_basis(:,:,:),d_wann(:,:,:)
+    integer,intent(in)::representative_index(:),operation_index(:),point_map(:,:)
+    logical,intent(in)::independent_local(:)
+    complex(8),intent(out)::local_basis(:,:,:)
+    logical,intent(out)::ok; character(*),intent(out)::message
+    integer::environment,source_point,target_point,representative,operation,npoint,nwann
+    logical,allocatable::seen(:)
+    ok=.false.; message=''; local_basis=(0d0,0d0)
+    npoint=size(representative_basis,1); nwann=size(representative_basis,2)
+    if(size(local_basis,1)/=npoint.or.size(local_basis,2)/=nwann.or. &
+       size(local_basis,3)/=size(representative_index).or. &
+       size(operation_index)/=size(representative_index).or. &
+       size(independent_local)/=size(representative_index).or. &
+       size(point_map,1)/=npoint.or.size(d_wann,1)/=nwann.or.size(d_wann,2)/=nwann)then
+      message='SAWF local materialization dimensions are inconsistent'; return
+    end if
+    allocate(seen(npoint))
+    do environment=1,size(representative_index)
+      representative=representative_index(environment)
+      if(representative<1.or.representative>size(representative_basis,3))then
+        message='SAWF representative environment index is out of range'; return
+      end if
+      if(independent_local(environment))then
+        local_basis(:,:,environment)=representative_basis(:,:,representative)
+        cycle
+      end if
+      operation=operation_index(environment)
+      if(operation<1.or.operation>size(point_map,2).or.operation>size(d_wann,3))then
+        message='SAWF replicated environment operation index is invalid'; return
+      end if
+      seen=.false.
+      do source_point=1,npoint
+        target_point=point_map(source_point,operation)
+        if(target_point<1.or.target_point>npoint.or.seen(target_point))then
+          message='SAWF symmetry point map is not a permutation'; return
+        end if
+        seen(target_point)=.true.
+        local_basis(target_point,:,environment)=matmul( &
+          representative_basis(source_point,:,representative),d_wann(:,:,operation))
+      end do
+      if(.not.all(seen))then; message='SAWF symmetry point map is incomplete'; return; end if
+    end do
+    ok=.true.
+  end subroutine
+
   subroutine clear_sawf_template_checkpoint(template)
     type(t_sawf_template_checkpoint),intent(inout)::template
     if(allocated(template%centers))deallocate(template%centers)
