@@ -136,6 +136,35 @@ module bloch_solver_ssbe
     integer,    allocatable, save :: gi_w_blk(:,:)       ! (nb, 0:nth-1) instantaneous degenerate-block ids
     integer,    save :: gi_lcwork = 0
 
+    ! --- persistent RK4 stage vectors of the FD-gicov propagator ---
+    ! Allocated once on the LOCAL k-slice instead of four full-nk allocate +
+    ! deallocate per step (the malloc churn dominated the fixed per-step cost at
+    ! production nk).  Values and arithmetic are untouched.
+    logical,    save :: gk_built = .false.
+    integer,    save :: gk_nb = 0, gk_lo = 0, gk_hi = -1
+    complex(8), allocatable, save :: gk_rho0(:,:,:), gk_rnew(:,:,:)
+    complex(8), allocatable, save :: gk_k1(:,:,:), gk_k2(:,:,:), gk_k3(:,:,:), gk_k4(:,:,:)
+
+    ! --- k-roughness diagnostic (SBE_KROUGH), see sbe_krough_diag ---
+    complex(8), allocatable, save :: kr_rho0(:,:,:)      ! (nb,nb,ik_min:ik_max) rho~(t=0)
+    logical,    save :: kr_built = .false.
+
+    ! --- driven-axis transport halo (build_gicov_integral_cache; freed after) ---
+    integer, save :: gih_nsrc = 0, gih_ndst = 0, gih_nh = 0
+    integer, allocatable, save :: gih_src_rank(:), gih_src_cnt(:), gih_src_ofs(:), gih_src_k(:)
+    integer, allocatable, save :: gih_dst_rank(:), gih_dst_cnt(:), gih_dst_ofs(:), gih_dst_k(:)
+    integer, allocatable, save :: gih_map(:)             ! (nk) remote k -> compact velocity-halo slot
+    complex(8), allocatable, save :: gih_p(:, :, :, :)   ! (nb,nb,3,nh) p_tm at the remote nodes
+    complex(8), allocatable, save :: gih_r(:, :, :, :)   ! (nb,nb,3,nh) rvnl at the remote nodes
+
+    ! --- one-layer forward halo plan of the k-roughness probe (sbe_krough_diag) ---
+    logical, save :: krp_built = .false.
+    integer, save :: krp_nsrc = 0, krp_ndst = 0, krp_nx = 0
+    integer, allocatable, save :: krp_src_rank(:), krp_src_cnt(:), krp_src_ofs(:), krp_src_k(:)
+    integer, allocatable, save :: krp_dst_rank(:), krp_dst_cnt(:), krp_dst_ofs(:), krp_dst_k(:)
+    integer, allocatable, save :: krp_map(:)             ! (nk) k -> probe slot
+    integer, allocatable, save :: krp_nbr(:, :)          ! (3, nk) forward +e_axis neighbour
+
 contains
 
   !-------------------------------------------------------------------
@@ -191,11 +220,13 @@ contains
     use degenerate_block_ssbe, only: covariant_halo_needed, build_halo_lists
     implicit none
     type(s_sbe_bloch_solver), intent(in) :: sbe
-    type(s_sbe_gs_info), intent(in) :: gs
+    type(s_sbe_gs_info), intent(inout) :: gs
     integer, intent(in) :: icomm
-    integer :: irank, nproc, o, p, ik, nk, nb
+    integer :: irank, nproc, o, p, ik, nk, nb, jj, i, ierr
     integer, allocatable :: itbl_min(:), itbl_max(:)
     logical, allocatable :: needed_all(:,:), covered(:)
+    type(t_gh_buf), allocatable :: usb(:), urb(:)
+    integer, allocatable :: ureqs(:), ureqr(:)
 
     nk = sbe%nk;  nb = sbe%nb
     call comm_get_groupinfo(icomm, irank, nproc)
@@ -215,7 +246,9 @@ contains
                           gh_nsrc, gh_src_rank, gh_src_cnt, gh_src_ofs, gh_src_k, &
                           gh_ndst, gh_dst_rank, gh_dst_cnt, gh_dst_ofs, gh_dst_k)
 
-    ! fail-closed coverage check: every k I need is local or in a recv list
+    ! fail-closed coverage check: every k I need is local or in a recv list, AND
+    ! it has a storage slot (gs%kmap) -- the two must agree, since gs%kmap was
+    ! built from this very same covariant_halo_needed set.
     allocate(covered(nk));  covered = .false.
     covered(sbe%ik_min:sbe%ik_max) = .true.
     do p = 1, gh_nsrc
@@ -226,6 +259,10 @@ contains
     do ik = 1, nk
       if (needed_all(ik, irank) .and. .not. covered(ik)) then
         write(*,*) "ERROR build_gicov_halo: uncovered needed k =", ik
+        error stop
+      end if
+      if (needed_all(ik, irank) .and. gs%kmap(ik) == 0) then
+        write(*,*) "ERROR build_gicov_halo: needed k has no storage slot (kmap=0), k =", ik
         error stop
       end if
     end do
@@ -239,9 +276,63 @@ contains
       allocate(gh_sb(p)%b(nb, nb, gh_dst_cnt(p)))
     end do
     allocate(gh_reqr(max(1, gh_nsrc)), gh_reqs(max(1, gh_ndst)))
-    allocate(gh_rho(nb, nb, nk), gh_Dq(nb, nb, 3, nk))
+    ! gh_rho lives on the SAME slots as the static fields (gs%kmap): owned k
+    ! first, then the halo k this plan ships.  Replicated (kmap = identity,
+    ! nks = nk) reproduces the old full-nk buffer exactly.
+    allocate(gh_rho(nb, nb, max(1, gs%nks)), gh_Dq(nb, nb, 3, sbe%ik_min:sbe%ik_max))
     gh_rho = (0d0, 0d0)   ! one-time zero: never-needed entries stay 0 forever
     gh_nb = nb;  gh_nk = nk
+
+    ! ---- ONE-TIME halo exchange of the STATIC Wilson links.  gs%u_transport is
+    ! built per-k (build_block_transport is k-local), so under klocal each rank
+    ! holds only its own k; the covariant stencil, however, walks U out to the
+    ! +-m_max shells.  Ship those once here -- the links never change in time,
+    ! so this is a setup cost, not a per-step one (contrast gh_rho, which is
+    ! re-exchanged every RHS call because the density does change).
+    ! Skipped when the links are replicated: every k is already local.
+    if (gs%klocal) then
+      allocate(urb(gh_nsrc), usb(gh_ndst))
+      do p = 1, gh_nsrc
+        allocate(urb(p)%b(nb, nb, 3 * gh_src_cnt(p)))
+      end do
+      do p = 1, gh_ndst
+        allocate(usb(p)%b(nb, nb, 3 * gh_dst_cnt(p)))
+      end do
+      allocate(ureqr(max(1, gh_nsrc)), ureqs(max(1, gh_ndst)))
+      do p = 1, gh_nsrc
+        ureqr(p) = comm_irecv(urb(p)%b, gh_src_rank(p), 1, icomm)
+      end do
+      do p = 1, gh_ndst
+        do jj = 1, gh_dst_cnt(p)
+          do i = 1, 3
+            usb(p)%b(:, :, 3 * (jj - 1) + i) = &
+              & gs%u_transport(:, :, i, gs%kmap(gh_dst_k(gh_dst_ofs(p) + jj)))
+          end do
+        end do
+        ureqs(p) = comm_isend(usb(p)%b, gh_dst_rank(p), 1, icomm)
+      end do
+      if (gh_nsrc > 0) then
+        call comm_wait_all(ureqr(1:gh_nsrc))
+        do p = 1, gh_nsrc
+          do jj = 1, gh_src_cnt(p)
+            do i = 1, 3
+              gs%u_transport(:, :, i, gs%kmap(gh_src_k(gh_src_ofs(p) + jj))) = &
+                & urb(p)%b(:, :, 3 * (jj - 1) + i)
+            end do
+          end do
+        end do
+      end if
+      if (gh_ndst > 0) call comm_wait_all(ureqs(1:gh_ndst))
+      do p = 1, gh_nsrc
+        deallocate(urb(p)%b)
+      end do
+      do p = 1, gh_ndst
+        deallocate(usb(p)%b)
+      end do
+      deallocate(urb, usb, ureqr, ureqs)
+      ierr = 0
+    end if
+
     gh_built = .true.
   end subroutine build_gicov_halo
 
@@ -271,6 +362,20 @@ subroutine init_sbe_bloch_solver(sbe, gs, nb_sbe, icomm)
     call split_range(1, sbe%nk, nproc, itbl_min, itbl_max)
     sbe%ik_min = itbl_min(irank)
     sbe%ik_max = itbl_max(irank)
+
+    ! Fail-closed: with rank-local static fields the gs k-slice IS the solver's
+    ! k-slice.  Both come from split_range on the same nk, but they are split on
+    ! the communicator each was HANDED -- a caller that builds gs on one
+    ! communicator and the solver on another (multiscale does exactly that, which
+    ! is why klocal is off for maxwell_sbe) would otherwise read k it does not own.
+    if (gs%klocal) then
+        if (gs%ik_lo /= sbe%ik_min .or. gs%ik_hi /= sbe%ik_max) then
+            write(*, '(a)') "ERROR(init_sbe_bloch_solver): the rank-local gs k-slice does not " // &
+                & "match the solver k-slice (init_sbe_gs_info and init_sbe_bloch_solver were " // &
+                & "given different communicators)."
+            error stop
+        end if
+    end if
 
     allocate(sbe%rho(1:sbe%nb, 1:sbe%nb, sbe%ik_min:sbe%ik_max))
 
@@ -1527,9 +1632,12 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   use degenerate_block_ssbe, only: covariant_grad_block
   implicit none
   type(s_sbe_bloch_solver), intent(in) :: sbe
-  type(s_sbe_gs_info), intent(in) :: gs
+  type(s_sbe_gs_info), intent(inout) :: gs
   real(8), intent(in) :: Efield(1:3)
-  complex(8), intent(out) :: drho(sbe%nb, sbe%nb, sbe%nk)
+  ! only the LOCAL k-slice of drho was ever produced or read (the RK4 stage
+  ! vectors are local-only); declaring the full nk was a per-step nb^2*nk
+  ! complex allocation on every rank for nothing.
+  complex(8), intent(out) :: drho(sbe%nb, sbe%nb, sbe%ik_min:sbe%ik_max)
   integer, intent(in) :: icomm
   integer :: nb, nk, ik, ib, jb, axis
   real(8) :: dk(1:3), cvec(1:3)
@@ -1557,7 +1665,7 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   do ik = sbe%ik_min, sbe%ik_max
     do ib = 1, nb
       do jb = 1, nb
-        gh_rho(ib, jb, ik) = rho_ij_from_q(sbe, ib, jb, ik)
+        gh_rho(ib, jb, gs%kmap(ik)) = rho_ij_from_q(sbe, ib, jb, ik)
       end do
     end do
   end do
@@ -1569,7 +1677,7 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   end do
   do p = 1, gh_ndst
     do jj = 1, gh_dst_cnt(p)
-      gh_sb(p)%b(:, :, jj) = gh_rho(:, :, gh_dst_k(gh_dst_ofs(p) + jj))
+      gh_sb(p)%b(:, :, jj) = gh_rho(:, :, gs%kmap(gh_dst_k(gh_dst_ofs(p) + jj)))
     end do
     gh_reqs(p) = comm_isend(gh_sb(p)%b, gh_dst_rank(p), 0, icomm)
   end do
@@ -1577,7 +1685,7 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
     call comm_wait_all(gh_reqr(1:gh_nsrc))
     do p = 1, gh_nsrc
       do jj = 1, gh_src_cnt(p)
-        gh_rho(:, :, gh_src_k(gh_src_ofs(p) + jj)) = gh_rb(p)%b(:, :, jj)
+        gh_rho(:, :, gs%kmap(gh_src_k(gh_src_ofs(p) + jj))) = gh_rb(p)%b(:, :, jj)
       end do
     end do
   end if
@@ -1650,7 +1758,8 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
   end if
   call system_clock(tc1)
   call covariant_grad_block(nb, nk, gs%nbvec, gs%bvec, num_kgrid, &
-                            gs%u_transport, gh_rho, dk, gh_Dq, sbe%ik_min, sbe%ik_max, axis_active)
+                            gs%u_transport, gh_rho, dk, gh_Dq, sbe%ik_min, sbe%ik_max, axis_active, &
+                            gs%nks, gs%kmap)
   call system_clock(tc2);  sbe_tmr_cov = sbe_tmr_cov + dble(tc2 - tc1) / dble(trate)
 
   deph_by_gw = (yn_sbe_gw_collision == 'y' .and. trim(sbe_deph_mode) == 'gw')
@@ -1676,7 +1785,7 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
         ! (2) coherent band energy + phenomenological dephasing (off-diagonal only)
         if (ib /= jb) then
           drho(ib, jb, ik) = drho(ib, jb, ik) &
-            & - zi * gs%delta_omega(ib, jb, ik) * gh_rho(ib, jb, ik)
+            & - zi * gs%delta_omega(ib, jb, ik) * gh_rho(ib, jb, gs%kmap(ik))
           ! Covariant T2: dephase only ENERGY-DISTINCT pairs. Inside a
           ! (near-)degenerate manifold the scalar -rho/t_2 relaxation is NOT
           ! U(N)-gauge-covariant -- it splits diagonal/off-diagonal, a
@@ -1706,11 +1815,11 @@ subroutine gicov_rhs(sbe, gs, Efield, drho, icomm)
             if (trim(sbe_t2_gate_shape) == 'step') then
               if (abs(gs%delta_omega(ib, jb, ik)) > sbe_t2_gate_theta .and. &
                 & abs(gs%delta_omega(ib, jb, ik)) > sbe_lg_degen_floor) then
-                drho(ib, jb, ik) = drho(ib, jb, ik) - gh_rho(ib, jb, ik) / t_2
+                drho(ib, jb, ik) = drho(ib, jb, ik) - gh_rho(ib, jb, gs%kmap(ik)) / t_2
               end if
             else   ! 'gauss'
               drho(ib, jb, ik) = drho(ib, jb, ik) &
-                & - sbe%t2_gate_w(ib, jb, ik) * gh_rho(ib, jb, ik) / t_2
+                & - sbe%t2_gate_w(ib, jb, ik) * gh_rho(ib, jb, gs%kmap(ik)) / t_2
             end if
           end if
         end if
@@ -1939,18 +2048,28 @@ subroutine dt_evolve_bloch_lg_gicov(sbe, gs, E, dt, icomm)
   real(8), intent(in) :: dt
   integer, intent(in) :: icomm
   integer :: nb, nk, ik, ib, jb
-  complex(8), allocatable :: rho0(:,:,:), rho_new(:,:,:)
-  complex(8), allocatable :: k1(:,:,:), k2(:,:,:), k3(:,:,:), k4(:,:,:)
 
   nb = sbe%nb
   nk = sbe%nk
 
-  allocate(rho0   (nb, nb, sbe%ik_min:sbe%ik_max))
-  allocate(rho_new(nb, nb, sbe%ik_min:sbe%ik_max))
-  allocate(k1(nb, nb, nk), k2(nb, nb, nk), k3(nb, nb, nk), k4(nb, nb, nk))
+  ! RK4 stage vectors: PERSISTENT (module-save), allocated once on the LOCAL
+  ! k-slice.  They used to be allocate/deallocate'd on EVERY step at the FULL
+  ! nk -- four nb^2*nk complex arrays of malloc churn per step (~361 MB/step at
+  ! the graphene k99 production size) for buffers that were only ever written
+  ! and read on [ik_min:ik_max].  Nothing about the arithmetic changes.
+  if (.not. gk_built .or. gk_nb /= nb .or. gk_lo /= sbe%ik_min .or. gk_hi /= sbe%ik_max) then
+    if (allocated(gk_rho0)) deallocate(gk_rho0, gk_rnew, gk_k1, gk_k2, gk_k3, gk_k4)
+    allocate(gk_rho0(nb, nb, sbe%ik_min:sbe%ik_max))
+    allocate(gk_rnew(nb, nb, sbe%ik_min:sbe%ik_max))
+    allocate(gk_k1(nb, nb, sbe%ik_min:sbe%ik_max))
+    allocate(gk_k2(nb, nb, sbe%ik_min:sbe%ik_max))
+    allocate(gk_k3(nb, nb, sbe%ik_min:sbe%ik_max))
+    allocate(gk_k4(nb, nb, sbe%ik_min:sbe%ik_max))
+    gk_nb = nb;  gk_lo = sbe%ik_min;  gk_hi = sbe%ik_max;  gk_built = .true.
+  end if
 
   ! (0) advance the propagated state (previous step's qnm_new) into qnm; then
-  !     reconstruct the physical rho0 at step start on the local k-slice.
+  !     reconstruct the physical gk_rho0 at step start on the local k-slice.
   !$omp parallel do default(shared) private(ik, ib, jb) collapse(3)
   do ik = sbe%ik_min, sbe%ik_max
   do ib = 1, nb
@@ -1963,37 +2082,37 @@ subroutine dt_evolve_bloch_lg_gicov(sbe, gs, E, dt, icomm)
   do ik = sbe%ik_min, sbe%ik_max
   do ib = 1, nb
   do jb = 1, nb
-    rho0(ib, jb, ik) = rho_ij_from_q(sbe, ib, jb, ik)
+    gk_rho0(ib, jb, ik) = rho_ij_from_q(sbe, ib, jb, ik)
   end do
   end do
   end do
 
-  ! (1) RK4 stage 1 (sbe%qnm already holds rho0's representation)
-  call gicov_rhs(sbe, gs, E, k1, icomm)
-  ! (2) stage 2 at rho0 + (dt/2) k1
-  call load_stage_qnm(sbe, rho0, k1, 0.5d0 * dt)
-  call gicov_rhs(sbe, gs, E, k2, icomm)
-  ! (3) stage 3 at rho0 + (dt/2) k2
-  call load_stage_qnm(sbe, rho0, k2, 0.5d0 * dt)
-  call gicov_rhs(sbe, gs, E, k3, icomm)
-  ! (4) stage 4 at rho0 + dt k3
-  call load_stage_qnm(sbe, rho0, k3, dt)
-  call gicov_rhs(sbe, gs, E, k4, icomm)
+  ! (1) RK4 stage 1 (sbe%qnm already holds gk_rho0's representation)
+  call gicov_rhs(sbe, gs, E, gk_k1, icomm)
+  ! (2) stage 2 at gk_rho0 + (dt/2) gk_k1
+  call load_stage_qnm(sbe, gk_rho0, gk_k1, 0.5d0 * dt)
+  call gicov_rhs(sbe, gs, E, gk_k2, icomm)
+  ! (3) stage 3 at gk_rho0 + (dt/2) gk_k2
+  call load_stage_qnm(sbe, gk_rho0, gk_k2, 0.5d0 * dt)
+  call gicov_rhs(sbe, gs, E, gk_k3, icomm)
+  ! (4) stage 4 at gk_rho0 + dt gk_k3
+  call load_stage_qnm(sbe, gk_rho0, gk_k3, dt)
+  call gicov_rhs(sbe, gs, E, gk_k4, icomm)
 
   ! (5) combine on the local slice
   !$omp parallel do default(shared) private(ik, ib, jb) collapse(3)
   do ik = sbe%ik_min, sbe%ik_max
   do ib = 1, nb
   do jb = 1, nb
-    rho_new(ib, jb, ik) = rho0(ib, jb, ik) + (dt / 6.d0) * &
-      & (k1(ib, jb, ik) + 2.d0 * k2(ib, jb, ik) + 2.d0 * k3(ib, jb, ik) + k4(ib, jb, ik))
+    gk_rnew(ib, jb, ik) = gk_rho0(ib, jb, ik) + (dt / 6.d0) * &
+      & (gk_k1(ib, jb, ik) + 2.d0 * gk_k2(ib, jb, ik) + 2.d0 * gk_k3(ib, jb, ik) + gk_k4(ib, jb, ik))
   end do
   end do
   end do
 
   ! (6) GW collision as a SEPARATE substep on the physical rho (VG-style).
   if (yn_sbe_gw_collision == 'y') then
-    call add_collision_vg(rho_new, gs%gamma_gw, gs%f0_ref, dt, &
+    call add_collision_vg(gk_rnew, gs%gamma_gw, gs%f0_ref, dt, &
       & nb, nk, sbe%ik_min, sbe%ik_max, sbe_deph_mode)
   end if
 
@@ -2003,13 +2122,11 @@ subroutine dt_evolve_bloch_lg_gicov(sbe, gs, E, dt, icomm)
   do ik = sbe%ik_min, sbe%ik_max
   do ib = 1, nb
   do jb = 1, nb
-    sbe%qnm_new(ib, jb, ik) = q_ij_from_rho(sbe, rho_new(ib, jb, ik), ib, jb, ik)
-    sbe%qnm(ib, jb, ik)     = q_ij_from_rho(sbe, rho0(ib, jb, ik),    ib, jb, ik)
+    sbe%qnm_new(ib, jb, ik) = q_ij_from_rho(sbe, gk_rnew(ib, jb, ik), ib, jb, ik)
+    sbe%qnm(ib, jb, ik)     = q_ij_from_rho(sbe, gk_rho0(ib, jb, ik),    ib, jb, ik)
   end do
   end do
   end do
-
-  deallocate(rho0, rho_new, k1, k2, k3, k4)
 
 contains
 
@@ -2019,7 +2136,7 @@ contains
     implicit none
     type(s_sbe_bloch_solver), intent(inout) :: sbe
     complex(8), intent(in) :: rho0(nb, nb, sbe%ik_min:sbe%ik_max)
-    complex(8), intent(in) :: kX(nb, nb, nk)
+    complex(8), intent(in) :: kX(nb, nb, sbe%ik_min:sbe%ik_max)
     real(8), intent(in) :: a
     integer :: ik, ib, jb
     !$omp parallel do default(shared) private(ik, ib, jb) collapse(3)
@@ -2046,9 +2163,10 @@ end subroutine dt_evolve_bloch_lg_gicov
 ! (== the physical rho on the X-full path: prepare_qnm set exp_iphi=1, so
 ! qnm==rho; the initial rho~(0)=rho(0)=gs occupation since a(0)=0 -> W=I).
 !
-! On-rank only: gs%u_transport (the single-step Wilson links) is replicated
-! full-nk on every rank, so the transport chain W(kappa,kappa+n) is assembled
-! entirely locally -- no halo (contrast gicov_rhs, which halos the DENSITY).
+! The single-step Wilson links and the velocities are needed at k out to
+! +-j_cache along the driven axis.  They are NOT replicated (that full-nk
+! replication is exactly what caps the k-mesh), so the chain is marched outward
+! with a ROLLING one-step halo shift -- see the comment at the assembly loop.
 !===================================================================
 subroutine build_gicov_integral_cache(sbe, gs, axis, jmax, icomm)
   use salmon_global, only: num_kgrid
@@ -2058,7 +2176,9 @@ subroutine build_gicov_integral_cache(sbe, gs, axis, jmax, icomm)
   !$ use omp_lib
   implicit none
   type(s_sbe_bloch_solver), intent(in) :: sbe
-  type(s_sbe_gs_info), intent(in) :: gs
+  ! inout: the driven-axis halo grows gs%kmap / gs%u_transport by the remote
+  ! nodes the chain walk visits (the link array itself is the halo store)
+  type(s_sbe_gs_info), intent(inout) :: gs
   integer, intent(in) :: axis, jmax, icomm
   integer :: nb, nk, ik, n, i, istep, kk, krem, ierr, nth, jc
   integer :: bplus(3, 1), bminus(3, 1)
@@ -2105,10 +2225,29 @@ subroutine build_gicov_integral_cache(sbe, gs, axis, jmax, icomm)
     error stop 1
   end if
 
+  ! ---- transport-chain assembly over the driven-axis halo --------------
+  ! The chain W(kappa, kappa+n) needs the single-step links AND the velocity at
+  ! REMOTE k, out to +-j_cache along the driven axis.  Those fields are no longer
+  ! replicated full-nk (that replication is the ~248*nb^2*nk B/rank term this
+  ! change removes), so the exact set the walk will touch is fetched ONCE here.
+  !
+  ! The walk BELOW is the original one, statement for statement: same operand
+  ! order, same matmul expressions, same polar_unitary input.  Only the k-index
+  ! is redirected (gs%kmap for the links; the p/rvnl halo for a non-owned node).
+  ! That is deliberate and load-bearing: re-associating the chain into a rolling
+  ! recursion is algebraically identical but NOT bit-identical -- gfortran emits a
+  ! different matmul for a conj-transposed local-array operand than for the
+  ! derived-type-component operand, and the resulting 1e-15 drift in W propagated
+  ! into every cached H~ and v~ (measured; the forward walk, which has no
+  ! conj-transpose, stayed exact).  Bit-identity is the requirement, so the
+  ! arithmetic does not move.
+  call gi_build_axis_halo(gs, nk, axis, jc, gi_ikmin, gi_ikmax, gi_iknb_p, gi_iknb_m, &
+                        & sbe%flag_vnl_correction, icomm)
+
   allocate(Wc(nb, nb), acc(nb, nb), Ohost(nb, nb), Yt(nb, nb))
   do ik = gi_ikmin, gi_ikmax
     do n = -jc, jc
-      ! W(kappa, kappa+n) by walking |n| single-step links, all on-rank
+      ! W(kappa, kappa+n) by walking |n| single-step links
       acc = (0d0, 0d0)
       do i = 1, nb
         acc(i, i) = (1d0, 0d0)
@@ -2116,13 +2255,13 @@ subroutine build_gicov_integral_cache(sbe, gs, axis, jmax, icomm)
       kk = ik
       if (n > 0) then
         do istep = 1, n
-          acc = matmul(acc, gs%u_transport(:, :, axis, kk))
+          acc = matmul(acc, gs%u_transport(:, :, axis, gs%kmap(kk)))
           kk = gi_iknb_p(kk)
         end do
       else if (n < 0) then
         do istep = 1, -n
           kk = gi_iknb_m(kk)
-          acc = matmul(acc, conjg(transpose(gs%u_transport(:, :, axis, kk))))
+          acc = matmul(acc, conjg(transpose(gs%u_transport(:, :, axis, gs%kmap(kk)))))
         end do
       end if
       krem = kk
@@ -2146,10 +2285,20 @@ subroutine build_gicov_integral_cache(sbe, gs, axis, jmax, icomm)
       gi_Ft(:, :, n, ik) = Yt
       ! transported velocity v~_{n,i} = Wc v_i(remote) Wc^dag, i=1..3
       do i = 1, 3
-        if (sbe%flag_vnl_correction) then
-          Ohost = gs%p_tm_matrix(:, :, i, krem) + gs%rvnl_tm_matrix(:, :, i, krem)
+        if (krem >= gi_ikmin .and. krem <= gi_ikmax) then
+          if (sbe%flag_vnl_correction) then
+            Ohost = gs%p_tm_matrix(:, :, i, krem) + gs%rvnl_tm_matrix(:, :, i, krem)
+          else
+            Ohost = gs%p_tm_matrix(:, :, i, krem)
+          end if
         else
-          Ohost = gs%p_tm_matrix(:, :, i, krem)
+          ! non-owned node: the SAME two matrices, fetched from the halo (an
+          ! elementwise sum -- no summation order to perturb)
+          if (sbe%flag_vnl_correction) then
+            Ohost = gih_p(:, :, i, gih_map(krem)) + gih_r(:, :, i, gih_map(krem))
+          else
+            Ohost = gih_p(:, :, i, gih_map(krem))
+          end if
         end if
         call gicov_int_transport_op(Wc, Ohost, nb, Yt)
         gi_vt(:, :, n, i, ik) = Yt
@@ -2157,6 +2306,7 @@ subroutine build_gicov_integral_cache(sbe, gs, axis, jmax, icomm)
     end do
   end do
   deallocate(Wc, acc, Ohost, Yt)
+  call gi_free_axis_halo()
 
   ! per-thread eigensolver + interp work bank: allocated ONCE here, OUTSIDE any
   ! OMP loop (frtpx: no heap inside the loop, no per-thread automatic arrays)
@@ -2169,8 +2319,530 @@ subroutine build_gicov_integral_cache(sbe, gs, axis, jmax, icomm)
   allocate(gi_w_H(nb, nb, 0:nth-1), gi_w_rout(nb, nb, 0:nth-1), gi_w_v(nb, nb, 3, 0:nth-1))
   allocate(gi_w_blk(nb, 0:nth-1))
 
+
+
   gi_built = .true.
 end subroutine build_gicov_integral_cache
+
+
+!===================================================================
+! Driven-axis transport halo for build_gicov_integral_cache.
+!
+! The chain walk reads, for every OWNED k, the single-step links and the
+! velocity at kappa + n*e_axis for n in [-j_cache, j_cache].  Under klocal those
+! nodes may belong to another rank, so fetch exactly that set, once, before the
+! walk:
+!   * the LINKS are appended as extra SLOTS of gs%u_transport (gs%kmap grows to
+!     cover them), so the walk keeps indexing the very same derived-type
+!     component it always did -- only the slot lookup is new.  That is what
+!     makes the chain bit-identical (see the note at the walk).
+!   * the VELOCITIES (p_tm, and rvnl when the nonlocal correction is on) go into
+!     side buffers with their own compact map; they are only ever summed
+!     elementwise, so no expression shape matters there.
+!
+! Size: the set is the axis shell of the owned slice, i.e. ~2*j_cache extra k per
+! boundary row when the driven axis is the fastest one (the production case) --
+! kilobytes.  It is freed as soon as the cache is built; from then on gicov_int
+! reads NOTHING but its own local cache.
+!===================================================================
+subroutine gi_build_axis_halo(gs, nk, axis, jc, ik_lo, ik_hi, knb_p, knb_m, want_rvnl, icomm)
+  use degenerate_block_ssbe, only: build_halo_lists
+  implicit none
+  type(s_sbe_gs_info), intent(inout) :: gs
+  integer, intent(in) :: nk, axis, jc, ik_lo, ik_hi, icomm
+  integer, intent(in) :: knb_p(nk), knb_m(nk)
+  logical, intent(in) :: want_rvnl
+  integer :: irank, nproc, nb, o, ik, kk, n, p, jj, i, nslot0, nh
+  integer, allocatable :: itbl_min(:), itbl_max(:)
+  logical, allocatable :: needed_all(:, :)
+  complex(8), allocatable :: utmp(:, :, :, :)
+  type(t_gh_buf), allocatable :: sb(:), rb(:)
+  integer, allocatable :: reqs(:), reqr(:)
+  integer :: ncomp
+
+  nb = gs%nb
+  call comm_get_groupinfo(icomm, irank, nproc)
+  allocate(gih_map(nk));  gih_map(:) = 0
+  gih_nh = 0
+  if (.not. gs%klocal) return          ! replicated: every node is already here
+
+  ! ---- needed-set of EVERY rank (deterministic, no metadata exchange) ----
+  allocate(itbl_min(0:nproc-1), itbl_max(0:nproc-1))
+  call split_range(1, nk, nproc, itbl_min, itbl_max)
+  allocate(needed_all(nk, 0:nproc-1))
+  needed_all = .false.
+  do o = 0, nproc - 1
+    if (itbl_max(o) < itbl_min(o)) cycle
+    do ik = itbl_min(o), itbl_max(o)
+      needed_all(ik, o) = .true.
+      kk = ik
+      do n = 1, jc
+        kk = knb_p(kk);  needed_all(kk, o) = .true.
+      end do
+      kk = ik
+      do n = 1, jc
+        kk = knb_m(kk);  needed_all(kk, o) = .true.
+      end do
+    end do
+  end do
+  call build_halo_lists(nk, nproc, irank, itbl_min, itbl_max, needed_all, &
+                        gih_nsrc, gih_src_rank, gih_src_cnt, gih_src_ofs, gih_src_k, &
+                        gih_ndst, gih_dst_rank, gih_dst_cnt, gih_dst_ofs, gih_dst_k)
+  deallocate(itbl_min, itbl_max, needed_all)
+
+  ! ---- grow gs%kmap / gs%u_transport by the received nodes ----
+  nslot0 = gs%nks
+  do p = 1, gih_nsrc
+    do jj = 1, gih_src_cnt(p)
+      ik = gih_src_k(gih_src_ofs(p) + jj)
+      if (gs%kmap(ik) == 0) then
+        gs%nks = gs%nks + 1
+        gs%kmap(ik) = gs%nks
+      end if
+      if (gih_map(ik) == 0) then
+        gih_nh = gih_nh + 1
+        gih_map(ik) = gih_nh
+      end if
+    end do
+  end do
+  if (gs%nks > nslot0) then
+    allocate(utmp(nb, nb, 3, gs%nks))
+    utmp(:, :, :, 1:nslot0) = gs%u_transport(:, :, :, 1:nslot0)
+    utmp(:, :, :, nslot0+1:gs%nks) = (0d0, 0d0)
+    call move_alloc(utmp, gs%u_transport)
+  end if
+  nh = max(1, gih_nh)
+  allocate(gih_p(nb, nb, 3, nh))
+  allocate(gih_r(nb, nb, 3, nh))
+  gih_p = (0d0, 0d0);  gih_r = (0d0, 0d0)
+
+  ! ---- ONE exchange carrying the links AND the velocity components ----
+  ncomp = 6
+  if (want_rvnl) ncomp = 9
+  allocate(rb(gih_nsrc), sb(gih_ndst))
+  do p = 1, gih_nsrc
+    allocate(rb(p)%b(nb, nb, ncomp * gih_src_cnt(p)))
+  end do
+  do p = 1, gih_ndst
+    allocate(sb(p)%b(nb, nb, ncomp * gih_dst_cnt(p)))
+  end do
+  allocate(reqr(max(1, gih_nsrc)), reqs(max(1, gih_ndst)))
+  do p = 1, gih_nsrc
+    reqr(p) = comm_irecv(rb(p)%b, gih_src_rank(p), 4, icomm)
+  end do
+  do p = 1, gih_ndst
+    do jj = 1, gih_dst_cnt(p)
+      ik = gih_dst_k(gih_dst_ofs(p) + jj)
+      do i = 1, 3
+        sb(p)%b(:, :, ncomp*(jj-1) + i)     = gs%u_transport(:, :, i, gs%kmap(ik))
+        sb(p)%b(:, :, ncomp*(jj-1) + 3 + i) = gs%p_tm_matrix(:, :, i, ik)
+        if (want_rvnl) sb(p)%b(:, :, ncomp*(jj-1) + 6 + i) = gs%rvnl_tm_matrix(:, :, i, ik)
+      end do
+    end do
+    reqs(p) = comm_isend(sb(p)%b, gih_dst_rank(p), 4, icomm)
+  end do
+  if (gih_nsrc > 0) then
+    call comm_wait_all(reqr(1:gih_nsrc))
+    do p = 1, gih_nsrc
+      do jj = 1, gih_src_cnt(p)
+        ik = gih_src_k(gih_src_ofs(p) + jj)
+        do i = 1, 3
+          gs%u_transport(:, :, i, gs%kmap(ik)) = rb(p)%b(:, :, ncomp*(jj-1) + i)
+          gih_p(:, :, i, gih_map(ik))          = rb(p)%b(:, :, ncomp*(jj-1) + 3 + i)
+          if (want_rvnl) gih_r(:, :, i, gih_map(ik)) = rb(p)%b(:, :, ncomp*(jj-1) + 6 + i)
+        end do
+      end do
+    end do
+  end if
+  if (gih_ndst > 0) call comm_wait_all(reqs(1:gih_ndst))
+  do p = 1, gih_nsrc
+    deallocate(rb(p)%b)
+  end do
+  do p = 1, gih_ndst
+    deallocate(sb(p)%b)
+  end do
+  deallocate(rb, sb, reqr, reqs)
+
+  ! fail-closed: every node the walk will visit must now resolve
+  do ik = ik_lo, ik_hi
+    kk = ik
+    do n = 1, jc
+      kk = knb_p(kk)
+      if (gs%kmap(kk) == 0) then
+        write(*,*) "ERROR gi_build_axis_halo: +axis node has no link slot, k =", kk
+        error stop 1
+      end if
+    end do
+    kk = ik
+    do n = 1, jc
+      kk = knb_m(kk)
+      if (gs%kmap(kk) == 0) then
+        write(*,*) "ERROR gi_build_axis_halo: -axis node has no link slot, k =", kk
+        error stop 1
+      end if
+    end do
+  end do
+
+  if (irank == 0) write(*, '(a,i0,a)') &
+    & "# gicov_int: driven-axis transport halo = ", gih_nh, " remote k / rank (freed after the cache build)"
+end subroutine gi_build_axis_halo
+
+
+subroutine gi_free_axis_halo()
+  implicit none
+  if (allocated(gih_p))        deallocate(gih_p)
+  if (allocated(gih_r))        deallocate(gih_r)
+  if (allocated(gih_map))      deallocate(gih_map)
+  if (allocated(gih_src_rank)) deallocate(gih_src_rank, gih_src_cnt, gih_src_ofs, gih_src_k)
+  if (allocated(gih_dst_rank)) deallocate(gih_dst_rank, gih_dst_cnt, gih_dst_ofs, gih_dst_k)
+  gih_nsrc = 0;  gih_ndst = 0;  gih_nh = 0
+end subroutine gi_free_axis_halo
+
+
+!===================================================================
+! k-ROUGHNESS OF THE DENSITY, measured with the Wilson shift (SBE_KROUGH).
+!
+! What it answers: the covariant noise floor is set by how much of the density
+! sits at the SHORT-wavelength end of the k-mesh -- the part the interpolation
+! (or the finite-difference stencil) cannot represent.  A raw FFT of rho(k)
+! cannot measure that, because rho(k) is expressed in a k-dependent band gauge:
+! its Fourier content is gauge NOISE as much as physics.  The Wilson shift is
+! the gauge-covariant replacement for the plain shift:
+!
+!     (S_a X)(k) = U_a(k) X(k + e_a) U_a(k)^dagger ,
+!     L_a        = 2I - S_a - S_a^dagger            (covariant discrete -d^2/dk^2)
+!     G_a        = <X, L_a X> / (4 <X, X>)          in [0, 1]
+!
+! G_a = 0 means X is perfectly smooth along axis a (in the parallel-transported
+! frame); G_a = 1 means it alternates at the Nyquist wavelength.  Both S_a and
+! the inner product are invariant under a k-local gauge rotation
+! (X -> W^H X W, U -> W(k)^H U W(k+e)), so G_a is a PHYSICAL number.
+!
+! Using <X, L X> = 2(<X,X> - Re<X, S X>) the whole thing costs ONE forward
+! Wilson shift, i.e. a single one-layer halo exchange -- no FFT, no eigensolve.
+!
+! Reported for two probes, because they answer different questions:
+!   X = drho = rho~ - rho~(0)   the EXCITED density -- what actually radiates;
+!   X = [H~, rho~]              the local generator of the dynamics -- the part
+!                               the propagator differentiates/interpolates, so
+!                               its roughness is what the floor tracks.
+!
+! R = the fraction of |X|^2 living in the upper half of the covariant spectrum;
+! G alone bounds it (Markov/Chebyshev on the spectral measure of L in [0,4]):
+!     max(0, (4G-1)/3)  <=  R  <=  min(1, 4G).
+! Both bounds are printed, so a floor claim can be read off without inverting a
+! spectral density that was never computed.
+!===================================================================
+subroutine sbe_krough_diag(sbe, gs, q_now, gval, rlo, rhi, icomm)
+  use salmon_global, only: num_kgrid, sbe_lg_degen
+  use degenerate_block_ssbe, only: build_ik_neighbor, find_bvec, build_halo_lists
+  use gicov_integral_ssbe, only: gicov_int_stencil, gicov_int_interp_p, gicov_int_nsten
+  implicit none
+  type(s_sbe_bloch_solver), intent(in) :: sbe
+  type(s_sbe_gs_info), intent(in) :: gs
+  real(8), intent(in) :: q_now
+  real(8), intent(out) :: gval(3, 2), rlo(3, 2), rhi(3, 2)   ! (axis, probe): 1 = drho, 2 = [H,rho]
+  integer, intent(in) :: icomm
+  integer :: nb, nk, ik, ib, jb, axis, iv, iprobe, ierr
+  integer :: iv_axis(3)
+  integer :: nodes(gicov_int_nsten), nsten
+  real(8) :: wts(gicov_int_nsten)
+  real(8) :: acc_l(7), acc_g(7), xx, sx
+  complex(8), allocatable :: X(:, :, :), Hk(:, :), tmp1(:, :), tmp2(:, :)
+  complex(8) :: rr
+
+  nb = sbe%nb;  nk = sbe%nk
+  gval = 0d0;  rlo = 0d0;  rhi = 0d0
+
+  call kr_build_plan(sbe, gs, icomm)
+  allocate(X(nb, nb, max(1, krp_nx)), Hk(nb, nb), tmp1(nb, nb), tmp2(nb, nb))
+
+  iv_axis(1) = find_bvec(gs%bvec, gs%nbvec, 1, 0, 0)
+  iv_axis(2) = find_bvec(gs%bvec, gs%nbvec, 0, 1, 0)
+  iv_axis(3) = find_bvec(gs%bvec, gs%nbvec, 0, 0, 1)
+
+  ! rho~(t=0): captured by sbe_krough_init BEFORE the first step.  Capturing it
+  ! lazily on first USE would make the excitation probe read zero at its own
+  ! first sample (the reference would be the state at that sample), which is a
+  ! silently plausible and completely wrong curve.
+  if (.not. kr_built) then
+    write(*, '(a)') "ERROR(sbe_krough_diag): rho~(0) reference not captured " // &
+      & "(sbe_krough_init must run before the propagation)."
+    error stop 1
+  end if
+
+  if (uses_integral_gicov(sbe_lg_degen)) then
+    call gicov_int_stencil(q_now, 1d0, gi_jmax, nodes, wts, nsten, ierr)
+    if (ierr /= 0) then
+      write(*, '(a)') "ERROR(sbe_krough_diag): mesh shift leaves the cached span."
+      error stop 1
+    end if
+  end if
+
+  do iprobe = 1, 2
+    ! ---- build the probe field X on the owned k, in the SLOT layout ----
+    do ik = sbe%ik_min, sbe%ik_max
+      call kr_rho_at(sbe, nb, ik, tmp1)
+      if (iprobe == 1) then
+        X(:, :, krp_map(ik)) = tmp1(:, :) - kr_rho0(:, :, ik)
+      else
+        if (uses_integral_gicov(sbe_lg_degen)) then
+          ! instantaneous co-moving Hamiltonian at x = kappa - a(t)
+          call gicov_int_interp_p(gi_Ht(:, :, :, ik), nb, -gi_jmax, gi_jmax, &
+                                & nodes, wts, nsten, Hk)
+          X(:, :, krp_map(ik)) = matmul(Hk, tmp1) - matmul(tmp1, Hk)
+        else
+          ! FD gicov: H0 = diag(eigen), so [H0, rho]_ij = (eps_i - eps_j) rho_ij
+          do jb = 1, nb
+            do ib = 1, nb
+              X(ib, jb, krp_map(ik)) = gs%delta_omega(ib, jb, ik) * tmp1(ib, jb)
+            end do
+          end do
+        end if
+      end if
+    end do
+
+    call kr_exchange(nb, X, icomm)
+
+    ! ---- <X,X> and Re <X, S_a X> for the three axes ----
+    acc_l(:) = 0d0
+    do ik = sbe%ik_min, sbe%ik_max
+      rr = (0d0, 0d0)
+      do jb = 1, nb
+        do ib = 1, nb
+          rr = rr + conjg(X(ib, jb, krp_map(ik))) * X(ib, jb, krp_map(ik))
+        end do
+      end do
+      acc_l(1) = acc_l(1) + gs%kweight(ik) * dble(rr)
+      do axis = 1, 3
+        iv = iv_axis(axis)
+        if (iv == 0) cycle
+        if (num_kgrid(axis) < 2) cycle          ! singleton axis: no shift exists
+        ! S_a X (k) = U_a(k) X(k+e_a) U_a(k)^H
+        call zgemm('N', 'N', nb, nb, nb, (1d0, 0d0), &
+                 & gs%u_transport(:, :, axis, gs%kmap(ik)), nb, &
+                 & X(:, :, krp_map(krp_nbr(axis, ik))), nb, (0d0, 0d0), tmp1, nb)
+        call zgemm('N', 'C', nb, nb, nb, (1d0, 0d0), tmp1, nb, &
+                 & gs%u_transport(:, :, axis, gs%kmap(ik)), nb, (0d0, 0d0), tmp2, nb)
+        rr = (0d0, 0d0)
+        do jb = 1, nb
+          do ib = 1, nb
+            rr = rr + conjg(X(ib, jb, krp_map(ik))) * tmp2(ib, jb)
+          end do
+        end do
+        acc_l(1 + axis) = acc_l(1 + axis) + gs%kweight(ik) * dble(rr)
+      end do
+    end do
+    call comm_summation(acc_l, acc_g, 7, icomm)
+
+    xx = acc_g(1)
+    do axis = 1, 3
+      if (xx <= 0d0) cycle
+      ! an axis with no +shift column, or a singleton axis, carries S_a = I, so
+      ! <X, L_a X> = 0 exactly: report G = 0 rather than the 0.5 an unaccumulated
+      ! sx would fake.
+      if (iv_axis(axis) == 0 .or. num_kgrid(axis) < 2) then
+        gval(axis, iprobe) = 0d0;  rlo(axis, iprobe) = 0d0;  rhi(axis, iprobe) = 0d0
+        cycle
+      end if
+      sx = acc_g(1 + axis)
+      gval(axis, iprobe) = (xx - sx) / (2d0 * xx)
+      rlo(axis, iprobe) = max(0d0, (4d0 * gval(axis, iprobe) - 1d0) / 3d0)
+      rhi(axis, iprobe) = min(1d0, 4d0 * gval(axis, iprobe))
+    end do
+  end do
+
+  deallocate(X, Hk, tmp1, tmp2)
+end subroutine sbe_krough_diag
+
+
+! Capture the t=0 co-moving density, the reference of the excitation probe.
+! Called once, before the first step, when SBE_KROUGH is on.
+subroutine sbe_krough_init(sbe)
+  implicit none
+  type(s_sbe_bloch_solver), intent(in) :: sbe
+  integer :: ik
+  if (kr_built) return
+  allocate(kr_rho0(sbe%nb, sbe%nb, sbe%ik_min:sbe%ik_max))
+  do ik = sbe%ik_min, sbe%ik_max
+    call kr_rho_at(sbe, sbe%nb, ik, kr_rho0(:, :, ik))
+  end do
+  kr_built = .true.
+end subroutine sbe_krough_init
+
+
+! Physical rho~ of the CURRENT propagated state on one owned k.  X-full carries
+! qnm == rho (prepare_qnm forces exp_iphi = 1), and the integral propagator
+! mirrors its result into rho / qnm / qnm_new alike, so qnm_new is the state in
+! BOTH X-full modes.
+subroutine kr_rho_at(sbe, nb, ik, rk)
+  implicit none
+  type(s_sbe_bloch_solver), intent(in) :: sbe
+  integer, intent(in) :: nb, ik
+  complex(8), intent(out) :: rk(nb, nb)
+  integer :: ib, jb
+  do jb = 1, nb
+    do ib = 1, nb
+      rk(ib, jb) = rho_ij_from_q_new(sbe, ib, jb, ik)
+    end do
+  end do
+end subroutine kr_rho_at
+
+pure function rho_ij_from_q_new(sbe, ib, jb, ik) result(r)
+  implicit none
+  type(s_sbe_bloch_solver), intent(in) :: sbe
+  integer, intent(in) :: ib, jb, ik
+  complex(8) :: r
+  if (ib == jb) then
+    r = sbe%qnm_new(ib, jb, ik)
+  else
+    r = sbe%exp_iphi(ib, jb, ik) * sbe%qnm_new(ib, jb, ik)
+  end if
+end function rho_ij_from_q_new
+
+
+! One-layer FORWARD (+e_a, all three axes) halo plan for the roughness probe.
+! Independent of the propagation halos: gicov_int has no resident rho halo at
+! all, and the FD plan carries m_max shells this only needs one of.
+subroutine kr_build_plan(sbe, gs, icomm)
+  use salmon_global, only: num_kgrid
+  use degenerate_block_ssbe, only: build_ik_neighbor, find_bvec, build_halo_lists
+  implicit none
+  type(s_sbe_bloch_solver), intent(in) :: sbe
+  type(s_sbe_gs_info), intent(in) :: gs
+  integer, intent(in) :: icomm
+  integer :: irank, nproc, nk, o, ik, axis, iv, p, jj, iv_axis(3)
+  integer, allocatable :: itbl_min(:), itbl_max(:), ikn(:, :)
+  logical, allocatable :: needed_all(:, :)
+
+  if (krp_built) return
+  nk = sbe%nk
+  call comm_get_groupinfo(icomm, irank, nproc)
+  allocate(ikn(gs%nbvec, nk))
+  call build_ik_neighbor(num_kgrid, gs%bvec, gs%nbvec, nk, ikn)
+  iv_axis(1) = find_bvec(gs%bvec, gs%nbvec, 1, 0, 0)
+  iv_axis(2) = find_bvec(gs%bvec, gs%nbvec, 0, 1, 0)
+  iv_axis(3) = find_bvec(gs%bvec, gs%nbvec, 0, 0, 1)
+
+  allocate(krp_nbr(3, nk))
+  do ik = 1, nk
+    do axis = 1, 3
+      iv = iv_axis(axis)
+      if (iv == 0 .or. num_kgrid(axis) < 2) then
+        krp_nbr(axis, ik) = ik            ! no shift on this axis: S_a = identity
+      else
+        krp_nbr(axis, ik) = ikn(iv, ik)
+      end if
+    end do
+  end do
+
+  allocate(itbl_min(0:nproc-1), itbl_max(0:nproc-1))
+  call split_range(1, nk, nproc, itbl_min, itbl_max)
+  allocate(needed_all(nk, 0:nproc-1))
+  needed_all = .false.
+  do o = 0, nproc - 1
+    if (itbl_max(o) < itbl_min(o)) cycle
+    do ik = itbl_min(o), itbl_max(o)
+      needed_all(ik, o) = .true.
+      do axis = 1, 3
+        needed_all(krp_nbr(axis, ik), o) = .true.
+      end do
+    end do
+  end do
+  call build_halo_lists(nk, nproc, irank, itbl_min, itbl_max, needed_all, &
+                        krp_nsrc, krp_src_rank, krp_src_cnt, krp_src_ofs, krp_src_k, &
+                        krp_ndst, krp_dst_rank, krp_dst_cnt, krp_dst_ofs, krp_dst_k)
+
+  ! slot map: owned k first (ascending), then the received halo k
+  allocate(krp_map(nk))
+  krp_map(:) = 0
+  krp_nx = 0
+  do ik = sbe%ik_min, sbe%ik_max
+    krp_nx = krp_nx + 1
+    krp_map(ik) = krp_nx
+  end do
+  do p = 1, krp_nsrc
+    do jj = 1, krp_src_cnt(p)
+      ik = krp_src_k(krp_src_ofs(p) + jj)
+      if (krp_map(ik) == 0) then
+        krp_nx = krp_nx + 1
+        krp_map(ik) = krp_nx
+      end if
+    end do
+  end do
+  do ik = sbe%ik_min, sbe%ik_max
+    do axis = 1, 3
+      if (krp_map(krp_nbr(axis, ik)) == 0) then
+        write(*,*) "ERROR kr_build_plan: shifted k not covered, k =", ik, " axis =", axis
+        error stop 1
+      end if
+    end do
+  end do
+
+  deallocate(itbl_min, itbl_max, needed_all, ikn)
+  krp_built = .true.
+end subroutine kr_build_plan
+
+
+subroutine kr_exchange(nb, X, icomm)
+  implicit none
+  integer, intent(in) :: nb, icomm
+  complex(8), intent(inout) :: X(nb, nb, *)
+  integer :: p, jj, ik
+  type(t_gh_buf), allocatable :: sb(:), rb(:)
+  integer, allocatable :: reqs(:), reqr(:)
+
+  allocate(rb(krp_nsrc), sb(krp_ndst))
+  do p = 1, krp_nsrc
+    allocate(rb(p)%b(nb, nb, krp_src_cnt(p)))
+  end do
+  do p = 1, krp_ndst
+    allocate(sb(p)%b(nb, nb, krp_dst_cnt(p)))
+  end do
+  allocate(reqr(max(1, krp_nsrc)), reqs(max(1, krp_ndst)))
+  do p = 1, krp_nsrc
+    reqr(p) = comm_irecv(rb(p)%b, krp_src_rank(p), 3, icomm)
+  end do
+  do p = 1, krp_ndst
+    do jj = 1, krp_dst_cnt(p)
+      ik = krp_dst_k(krp_dst_ofs(p) + jj)
+      sb(p)%b(:, :, jj) = X(:, :, krp_map(ik))
+    end do
+    reqs(p) = comm_isend(sb(p)%b, krp_dst_rank(p), 3, icomm)
+  end do
+  if (krp_nsrc > 0) then
+    call comm_wait_all(reqr(1:krp_nsrc))
+    do p = 1, krp_nsrc
+      do jj = 1, krp_src_cnt(p)
+        ik = krp_src_k(krp_src_ofs(p) + jj)
+        X(:, :, krp_map(ik)) = rb(p)%b(:, :, jj)
+      end do
+    end do
+  end if
+  if (krp_ndst > 0) call comm_wait_all(reqs(1:krp_ndst))
+  do p = 1, krp_nsrc
+    deallocate(rb(p)%b)
+  end do
+  do p = 1, krp_ndst
+    deallocate(sb(p)%b)
+  end do
+  deallocate(rb, sb, reqr, reqs)
+end subroutine kr_exchange
+
+
+! Output interval M from the environment (SBE_KROUGH=M); 0 = off (the default,
+! so no run that does not ask for it changes by a single byte).
+integer function sbe_krough_every() result(m)
+  implicit none
+  character(16) :: val
+  integer :: ln, ios
+  m = 0
+  call get_environment_variable('SBE_KROUGH', val, ln)
+  if (ln <= 0) return
+  read(val, *, iostat=ios) m
+  if (ios /= 0 .or. m < 0) m = 0
+end function sbe_krough_every
+
 
 ! Midpoint-frozen exact-exponential step of the whole local k-slice.  q_mid =
 ! q_axis(t + dt/2) (reduced-mesh index units); the kernel evaluates x=kappa-a by
