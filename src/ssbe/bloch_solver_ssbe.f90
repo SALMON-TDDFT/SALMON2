@@ -2134,14 +2134,14 @@ end subroutine build_gicov_integral_cache
 subroutine dt_evolve_bloch_lg_integral(sbe, gs, q_mid, dt, icomm)
   use salmon_global, only: t_2, sbe_t2_gate_shape, sbe_t2_gate_theta, &
                             sbe_t2_gate_width, sbe_lg_degen_floor
-  use gicov_integral_ssbe, only: gicov_int_floor_shift, gicov_int_interp, gicov_int_step_k
+  use gicov_integral_ssbe, only: gicov_int_bracket, gicov_int_interp, gicov_int_step_k
   !$ use omp_lib
   implicit none
   type(s_sbe_bloch_solver), intent(inout) :: sbe
   type(s_sbe_gs_info), intent(in) :: gs
   real(8), intent(in) :: q_mid, dt
   integer, intent(in) :: icomm
-  integer :: ik, nb, n_int, tid, ierr, nbad_l, nbad
+  integer :: ik, nb, n_lo, n_hi, tid, ierr, nbad_l, nbad
   real(8) :: frac, gamma
 
   if (.not. gi_built) then
@@ -2150,10 +2150,10 @@ subroutine dt_evolve_bloch_lg_integral(sbe, gs, q_mid, dt, icomm)
   end if
   nb = sbe%nb
   gamma = 1d0 / t_2
-  call gicov_int_floor_shift(q_mid, 1d0, n_int, frac)
-  if (n_int < -gi_jmax .or. n_int + 1 > gi_jmax) then
-    write(*, '(a,i0,a,i0)') "ERROR(dt_evolve_bloch_lg_integral): mesh shift ", n_int, &
-      & " exceeds cached span +/-", gi_jmax
+  call gicov_int_bracket(q_mid, 1d0, gi_jmax, n_lo, n_hi, frac, ierr)
+  if (ierr /= 0) then
+    write(*, '(a,es16.8,a,i0)') "ERROR(dt_evolve_bloch_lg_integral): mesh shift q=", q_mid, &
+      & " leaves the cached transport span +/-", gi_jmax
     error stop 1
   end if
 
@@ -2162,7 +2162,7 @@ subroutine dt_evolve_bloch_lg_integral(sbe, gs, q_mid, dt, icomm)
   do ik = gi_ikmin, gi_ikmax
     tid = 0
     !$ tid = omp_get_thread_num()
-    call gicov_int_interp(gi_Ht(:, :, n_int, ik), gi_Ht(:, :, n_int + 1, ik), &
+    call gicov_int_interp(gi_Ht(:, :, n_lo, ik), gi_Ht(:, :, n_hi, ik), &
                         & frac, nb, gi_w_H(:, :, tid))
     call gicov_int_step_k(gi_w_H(:, :, tid), sbe%rho(:, :, ik), nb, dt, gamma, &
                         & sbe_t2_gate_shape, sbe_t2_gate_theta, sbe_t2_gate_width, &
@@ -2201,7 +2201,7 @@ end subroutine dt_evolve_bloch_lg_integral
 ! v~_i the cached TRANSPORTED velocity interpolated to x = kappa - a(t).  No
 ! D.A subtraction (that is a velocity-gauge concept; the length gauge is Tr(v rho)).
 subroutine calc_current_bloch_lg_integral(sbe, gs, q_now, jmat, icomm)
-  use gicov_integral_ssbe, only: gicov_int_floor_shift, gicov_int_interp, gicov_int_current_k
+  use gicov_integral_ssbe, only: gicov_int_bracket, gicov_int_interp, gicov_int_current_k
   !$ use omp_lib
   implicit none
   type(s_sbe_bloch_solver), intent(in) :: sbe
@@ -2209,13 +2209,13 @@ subroutine calc_current_bloch_lg_integral(sbe, gs, q_now, jmat, icomm)
   real(8), intent(in) :: q_now
   real(8), intent(out) :: jmat(3)
   integer, intent(in) :: icomm
-  integer :: ik, nb, n_int, tid, i
+  integer :: ik, nb, n_lo, n_hi, tid, i, ierr
   real(8) :: frac, jk(3), tmp1(3), tmp(3)
 
   nb = sbe%nb
-  call gicov_int_floor_shift(q_now, 1d0, n_int, frac)
-  if (n_int < -gi_jmax .or. n_int + 1 > gi_jmax) then
-    write(*, '(a)') "ERROR(calc_current_bloch_lg_integral): mesh shift exceeds cache."
+  call gicov_int_bracket(q_now, 1d0, gi_jmax, n_lo, n_hi, frac, ierr)
+  if (ierr /= 0) then
+    write(*, '(a)') "ERROR(calc_current_bloch_lg_integral): mesh shift leaves the cached span."
     error stop 1
   end if
   tmp1(:) = 0d0
@@ -2224,7 +2224,7 @@ subroutine calc_current_bloch_lg_integral(sbe, gs, q_now, jmat, icomm)
     tid = 0
     !$ tid = omp_get_thread_num()
     do i = 1, 3
-      call gicov_int_interp(gi_vt(:, :, i, n_int, ik), gi_vt(:, :, i, n_int + 1, ik), &
+      call gicov_int_interp(gi_vt(:, :, i, n_lo, ik), gi_vt(:, :, i, n_hi, ik), &
                           & frac, nb, gi_w_v(:, :, i, tid))
     end do
     call gicov_int_current_k(sbe%rho(:, :, ik), gi_w_v(:, :, :, tid), nb, jk)
@@ -2240,25 +2240,29 @@ end subroutine calc_current_bloch_lg_integral
 ! caller sums over degenerate blocks for a basis-invariant readout.  Diagonal
 ! diag(rho~) would be basis-dependent under transport, so it is NOT used.
 subroutine calc_band_population_integral(sbe, gs, q_now, nex_b, icomm)
-  use gicov_integral_ssbe, only: gicov_int_floor_shift, gicov_int_interp, gicov_int_occupation_k
+  use gicov_integral_ssbe, only: gicov_int_bracket, gicov_int_interp, gicov_int_occupation_k
   implicit none
   type(s_sbe_bloch_solver), intent(in) :: sbe
   type(s_sbe_gs_info), intent(in) :: gs
   real(8), intent(in) :: q_now
   real(8), intent(out) :: nex_b(1:sbe%nb)
   integer, intent(in) :: icomm
-  integer :: ik, nb, n_int, ib, ierr, nbad_l, nbad
+  integer :: ik, nb, n_lo, n_hi, ib, ierr, nbad_l, nbad
   real(8) :: frac
   real(8), allocatable :: acc(:), nocc(:)
 
   nb = sbe%nb
-  call gicov_int_floor_shift(q_now, 1d0, n_int, frac)
+  call gicov_int_bracket(q_now, 1d0, gi_jmax, n_lo, n_hi, frac, ierr)
+  if (ierr /= 0) then
+    write(*, '(a)') "ERROR(calc_band_population_integral): mesh shift leaves the cached span."
+    error stop 1
+  end if
   ! serial over k (periodic diagnostic, not the propagation hot path): reuses
   ! the thread-0 work slot; a heap 'nocc' allocated OUTSIDE any OMP region.
   allocate(acc(nb), nocc(nb));  acc(:) = 0d0
   nbad_l = 0
   do ik = gi_ikmin, gi_ikmax
-    call gicov_int_interp(gi_Ht(:, :, n_int, ik), gi_Ht(:, :, n_int + 1, ik), &
+    call gicov_int_interp(gi_Ht(:, :, n_lo, ik), gi_Ht(:, :, n_hi, ik), &
                         & frac, nb, gi_w_H(:, :, 0))
     call gicov_int_occupation_k(gi_w_H(:, :, 0), sbe%rho(:, :, ik), nb, &
                               & gi_w_eps(:, 0), gi_w_P(:, :, 0), gi_w_R(:, :, 0), &

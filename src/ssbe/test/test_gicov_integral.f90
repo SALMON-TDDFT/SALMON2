@@ -39,6 +39,11 @@
 !      trace, the Ne/trace monitor could not see it.  Note zheev itself returns
 !      info=0 on a NaN-poisoned matrix (verified on Accelerate), so the status
 !      must ALSO reject non-finite eigenvalues, or the failure stays silent.
+!  T10 bracket at the cached-span EDGE.  q = -j_max lands exactly on the node
+!      +j_max (s = -q/dk), so the old floor()+"n_int+1" bracket asked for node
+!      j_max+1: one past the cache -- an abort (or, without the guard, an
+!      out-of-bounds read) at a perfectly legal endpoint of the pulse.  A zero
+!      fractional weight must COLLAPSE the bracket onto the node instead.
 !
 program test_gicov_integral
   use gicov_integral_ssbe
@@ -55,6 +60,7 @@ program test_gicov_integral
   call t7_floor_shift(nfail)
   call t8_mode_predicates(nfail)
   call t9_eigensolver_status(nfail)
+  call t10_bracket_edge(nfail)
 
   if (nfail == 0) then
     write(*, '(a)') "ALL PASS (test_gicov_integral)"
@@ -477,5 +483,52 @@ contains
     call report("T9 occupation: non-finite H~ REPORTED, no diag(rho~) fallback value", &
               & ok, nfail)
   end subroutine t9_eigensolver_status
+
+  !----------------------------------------------------------------
+  ! Bracketing at the edge of the cached transport span.  gicov_int_bracket
+  ! must never name a node outside [-jmax, jmax]: when the evaluation point
+  ! falls exactly ON a node (frac = 0) the upper bracket must be the node
+  ! itself, because the cache has nothing beyond the span and the upper
+  ! endpoint would carry zero weight anyway.
+  subroutine t10_bracket_edge(nfail)
+    integer, intent(inout) :: nfail
+    integer, parameter :: jmax = 13
+    integer :: n_lo, n_hi, ierr
+    real(8) :: frac
+    complex(8) :: Ylo(2, 2), Yhi(2, 2), Y(2, 2)
+    logical :: ok
+
+    ! q = -jmax  ->  s = +jmax  ->  lands exactly on node +jmax.
+    ! OLD behaviour: n_int=jmax, n_int+1 = jmax+1 -> outside the cache -> abort.
+    call gicov_int_bracket(-dble(jmax), 1d0, jmax, n_lo, n_hi, frac, ierr)
+    ok = (ierr == 0) .and. (n_lo == jmax) .and. (n_hi == jmax) &
+   .and. (abs(frac) < 1d-15)
+    call report("T10 q=-j_max: bracket collapses onto node +j_max (no j_max+1, no abort)", &
+              & ok, nfail)
+
+    ! the mirror endpoint q = +jmax -> s = -jmax -> node -jmax
+    call gicov_int_bracket(dble(jmax), 1d0, jmax, n_lo, n_hi, frac, ierr)
+    ok = (ierr == 0) .and. (n_lo == -jmax) .and. (n_hi == -jmax) &
+   .and. (abs(frac) < 1d-15)
+    call report("T10 q=+j_max: bracket collapses onto node -j_max", ok, nfail)
+
+    ! ordinary interior point still brackets two DISTINCT nodes
+    call gicov_int_bracket(-2.25d0, 1d0, jmax, n_lo, n_hi, frac, ierr)
+    ok = (ierr == 0) .and. (n_lo == 2) .and. (n_hi == 3) &
+   .and. (abs(frac - 0.25d0) < 1d-12)
+    call report("T10 interior q=-2.25: n_lo=2, n_hi=3, frac=0.25 (normal bracket)", ok, nfail)
+
+    ! genuinely outside the cached span -> reported, not silently clamped
+    call gicov_int_bracket(-dble(jmax) - 0.5d0, 1d0, jmax, n_lo, n_hi, frac, ierr)
+    call report("T10 q beyond the cached span is REPORTED (ierr/=0)", ierr /= 0, nfail)
+
+    ! frac=0 interpolation must return the lower node EXACTLY (so collapsing the
+    ! bracket is not merely safe, it is numerically identical to the old intent)
+    Ylo = (0d0, 0d0);  Ylo(1, 1) = (0.7d0, 0d0);  Ylo(2, 2) = (0.2d0, 0d0)
+    Yhi = (0d0, 0d0);  Yhi(1, 1) = (9.9d0, 0d0);  Yhi(2, 2) = (9.9d0, 0d0)
+    call gicov_int_interp(Ylo, Ylo, 0d0, 2, Y)
+    call report("T10 frac=0 interp on the collapsed bracket reproduces the node exactly", &
+              & maxdiff(Y, Ylo, 2) < 1d-15, nfail)
+  end subroutine t10_bracket_edge
 
 end program test_gicov_integral

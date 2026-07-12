@@ -53,6 +53,7 @@ module gicov_integral_ssbe
   public :: gicov_int_jmax           ! j_max = ceil(a_max / dk) mesh shifts spanned by the pulse
   public :: gicov_int_cache_bytes    ! int64 transport-cache footprint per rank (H~_j + 3 v~_j)
   public :: gicov_int_floor_shift    ! (a,dk) -> floor node shift n_int + fractional weight (floor(), not int())
+  public :: gicov_int_bracket        ! (a,dk,jmax) -> the two cached nodes bracketing x, span-checked
   public :: gicov_int_axis_single    ! runtime all-trajectory single-axis / linear-polarization guard
   public :: gicov_int_gate_weight    ! Delta-omega T2 gate weight (mirror of gs_info t2_gate_weight)
   public :: gicov_int_chain          ! ordered product of single-step Wilson links -> W(kappa,kappa+n), polar
@@ -117,6 +118,39 @@ contains
     n_int = floor(s)
     frac = s - real(n_int, 8)
   end subroutine gicov_int_floor_shift
+
+  !-------------------------------------------------------------------
+  ! The two CACHED nodes bracketing the evaluation point x = kappa - a, with the
+  ! interpolation weight, span-checked against the cache extent [-jmax, jmax].
+  !
+  ! Wraps gicov_int_floor_shift and fixes its endpoint: when x lands exactly on
+  ! a node (frac = 0) the upper bracket must be that node ITSELF, not n_lo+1.
+  ! Otherwise the legal endpoint a = +j_max*dk (i.e. q = -j_max, the far turning
+  ! point of the pulse the cache was sized for) asks for node j_max+1 -- one past
+  ! the cache -- and the run aborts (or, unguarded, reads out of bounds), even
+  ! though that node carries weight frac = 0 and is never actually needed.
+  !
+  ! ierr /= 0 iff the bracket leaves the cached span (a genuine sizing error:
+  ! the pulse moved further than j_max was built for) -- reported, never clamped.
+  !-------------------------------------------------------------------
+  pure subroutine gicov_int_bracket(a, dk, jmax, n_lo, n_hi, frac, ierr)
+    implicit none
+    real(8), intent(in)  :: a, dk
+    integer, intent(in)  :: jmax
+    integer, intent(out) :: n_lo, n_hi, ierr
+    real(8), intent(out) :: frac
+    call gicov_int_floor_shift(a, dk, n_lo, frac)
+    if (frac == 0d0) then
+      n_hi = n_lo            ! exactly on a node: collapse, never reach past it
+    else
+      n_hi = n_lo + 1
+    end if
+    if (n_lo < -jmax .or. n_hi > jmax) then
+      ierr = 1
+    else
+      ierr = 0
+    end if
+  end subroutine gicov_int_bracket
 
   !-------------------------------------------------------------------
   ! Runtime linear-polarization / single-axis guard, evaluated on the WHOLE
