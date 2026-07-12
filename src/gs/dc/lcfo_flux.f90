@@ -6788,7 +6788,6 @@ contains
         sawf_environment_equivalent=.false.; sawf_defect_intersects=.false.
         do ifrag=1,dc%n_frag
           sawf_environment_equivalent(ifrag,ifrag)=.true.
-          if(trim(wannier_sawf_structure_class)=='amorphous')cycle
           do isym=1,size(symmetry_operations)
             if(symmetry_fragment_maps(ifrag,isym)>0 .and. &
                 sawf_environment_key(ifrag)==sawf_environment_key(symmetry_fragment_maps(ifrag,isym))) then

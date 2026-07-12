@@ -19,6 +19,9 @@ driver=r'''program check_environment_fingerprint
  real(8)::vacuum_by_env(3)
  integer::orbit_by_env(3)
  character(256)::keys(3)
+ character(256)::keys4(4)
+ real(8)::vacuum4(4)
+ integer::orbit4(4)
  character(256)::digest_a,digest_b
  integer::unit
  real(8)::measured_vacuum
@@ -63,7 +66,8 @@ driver=r'''program check_environment_fingerprint
  call req(ok,'surface vacuum class')
  call validate_sawf_structure_class('surface',keys,vacuum_by_env,orbit_by_env,ok,msg)
  call req(.not.ok,'surface requires measured vacuum')
- call validate_sawf_structure_class('interface',keys,vacuum_by_env,orbit_by_env,ok,msg)
+ keys4=[bulk_a,bulk_a,interface_env,interface_env];vacuum4=0;orbit4=[1,1,2,2]
+ call validate_sawf_structure_class('interface',keys4,vacuum4,orbit4,ok,msg)
  call req(ok,'interface multiple environments')
  open(newunit=unit,file='pseudo-a.dat',status='replace');write(unit,'(a)')'same-content';close(unit)
  open(newunit=unit,file='pseudo-b.dat',status='replace');write(unit,'(a)')'same-content';close(unit)

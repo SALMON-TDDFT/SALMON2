@@ -73,7 +73,8 @@ contains
     character(*),intent(in)::structure_class,environment_key(:)
     real(8),intent(in)::vacuum_fraction(:);integer,intent(in)::orbit(:)
     logical,intent(out)::ok;character(*),intent(out)::message
-    integer::i,j,unique_count
+    integer::i,j,unique_count,norbit,largest_count,second_count
+    integer,allocatable::orbit_count(:)
     ok=.false.;message='';unique_count=0
     if(size(environment_key)<=0.or.size(vacuum_fraction)/=size(environment_key).or. &
        size(orbit)/=size(environment_key).or.any(vacuum_fraction<0d0).or. &
@@ -85,6 +86,12 @@ contains
       do j=1,i-1;if(environment_key(j)==environment_key(i))exit;end do
       if(j==i)unique_count=unique_count+1
     end do
+    norbit=maxval(orbit);allocate(orbit_count(norbit));orbit_count=0
+    do i=1,size(orbit);orbit_count(orbit(i))=orbit_count(orbit(i))+1;end do
+    largest_count=maxval(orbit_count);second_count=0
+    do i=1,norbit
+      if(orbit_count(i)<largest_count)second_count=max(second_count,orbit_count(i))
+    end do
     select case(trim(structure_class))
     case('auto','amorphous')
       ok=.true.
@@ -92,11 +99,11 @@ contains
       ok=unique_count==1.and.maxval(orbit)==1
       if(.not.ok)message='SAWF crystal class has symmetry-inequivalent measured environments'
     case('defect')
-      ok=unique_count>=2.and.maxval(orbit)>=2
-      if(.not.ok)message='SAWF defect class requires bulk and inequivalent local environments'
+      ok=unique_count>=2.and.norbit>=2.and.largest_count>=2.and.largest_count>second_count
+      if(.not.ok)message='SAWF defect class requires a dominant bulk orbit and minority local environments'
     case('interface')
-      ok=unique_count>=2.and.maxval(orbit)>=2
-      if(.not.ok)message='SAWF interface class requires multiple measured local environments'
+      ok=unique_count>=2.and.count(orbit_count>=2)>=2
+      if(.not.ok)message='SAWF interface class requires at least two repeated extensive environment orbits'
     case('surface')
       ok=maxval(vacuum_fraction)>1d-12
       if(.not.ok)message='SAWF surface class requires measured vacuum occupancy'
