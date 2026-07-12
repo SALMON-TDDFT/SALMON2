@@ -13,12 +13,14 @@ generator = flux.split("subroutine generate_sawf_dmn", 1)[1].split(
     "end subroutine generate_sawf_dmn", 1
 )[0]
 for call in ["call validate_sawf_actual_group_operation",
-             "call build_sawf_environment_orbits"]:
+             "call build_sawf_environment_orbits",
+             "call build_sawf_operation_product_table"]:
     assert call in generator, f"SAWF production generator does not execute {call}"
 assert "wannier_sawf_generation" in generator
 assert generator.index("call build_sawf_environment_orbits") < generator.index(
     "call prepare_sawf_fragment_state_cache"
 )
+assert generator.count("call validate_sawf_operation_set_products") >= 2
 
 d = np.array([[0, 1], [1, 0]], complex)
 s = np.array([[1.0, .2j], [-.2j, .8]], complex)

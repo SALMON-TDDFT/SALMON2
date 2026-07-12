@@ -49,6 +49,7 @@ module lcfo_wannier_sawf
   public :: build_sawf_wannier_representation, sawf_real_harmonic_value
   public :: sawf_spd_projection_count, write_sawf_projection_block
   public :: sawf_projection_shell_lmax
+  public :: build_sawf_operation_product_table
 
 #ifdef HAVE_SPGLIB
   interface
@@ -71,6 +72,38 @@ module lcfo_wannier_sawf
 #endif
 
 contains
+  subroutine build_sawf_operation_product_table(operations,lattice,lattice_inv,tolerance, &
+      left_index,right_index,product_index,ok,message)
+    type(t_sawf_symop),intent(in)::operations(:)
+    real(8),intent(in)::lattice(3,3),lattice_inv(3,3),tolerance
+    integer,allocatable,intent(out)::left_index(:),right_index(:),product_index(:)
+    logical,intent(out)::ok; character(*),intent(out)::message
+    type(t_sawf_operation_index)::operation_index
+    integer::iop,jop,kop,n,mapped_atom,relation
+    integer(int64)::product_w(3,3)
+    real(8)::product_tau(3),residual
+    logical::product_ok,residual_ok
+    ok=.false.; message=''; n=size(operations)
+    call build_operation_index(operations,operation_index,ok,message); if(.not.ok)return
+    allocate(left_index(n*n),right_index(n*n),product_index(n*n)); relation=0
+    do iop=1,n; do jop=1,n
+      relation=relation+1
+      call multiply_integer_matrices(int(operations(iop)%W,int64), &
+        int(operations(jop)%W,int64),product_w,product_ok)
+      if(.not.product_ok)then; message='SAWF product-table integer overflow'; ok=.false.; return; end if
+      product_tau=operations(iop)%tau+matmul(real(operations(iop)%W,8),operations(jop)%tau)
+      mapped_atom=operations(iop)%atom_map(operations(jop)%atom_map(1))
+      call find_indexed_operation(operations,operation_index,product_w,mapped_atom,kop)
+      if(kop==0)then; message='SAWF product-table operation is absent'; ok=.false.; return; end if
+      call translation_residual(product_tau-operations(kop)%tau,lattice,lattice_inv,residual,residual_ok)
+      if(.not.residual_ok.or.residual>tolerance)then
+        message='SAWF product-table translation residual exceeds tolerance'; ok=.false.; return
+      end if
+      left_index(relation)=iop; right_index(relation)=jop; product_index(relation)=kop
+    end do; end do
+    ok=.true.
+  end subroutine
+
 
   subroutine sawf_projection_shell_lmax(num_atoms, num_wann, max_l, ok, message)
     integer, intent(in) :: num_atoms, num_wann

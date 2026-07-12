@@ -25,13 +25,13 @@ module lcfo_flux
     build_sawf_spd_projection_map, build_sawf_wannier_representation, &
     sawf_real_harmonic_value, sawf_spd_projection_count, sawf_projection_shell_lmax, &
     write_sawf_projection_block, &
-    load_sawf_symmetry_auto, load_sawf_symmetry_file
+    load_sawf_symmetry_auto, load_sawf_symmetry_file, build_sawf_operation_product_table
   use lcfo_wannier_sawf_band, only: map_sawf_periodic_grid_point, &
     locate_sawf_fragment_point, validate_sawf_fragment_tiling, &
     validate_sawf_fragment_symmetry_map, build_sawf_fragment_buffer_point_map, &
     accumulate_sawf_dmn_band_blocks, validate_sawf_dmn_band, &
     validate_sawf_seed_header, validate_sawf_seed_basis_metadata, &
-    diagnose_sawf_fragment_basis_closure
+    diagnose_sawf_fragment_basis_closure, validate_sawf_operation_set_products
   use lcfo_wannier_sawf_basis, only: t_sawf_closed_basis,append_sawf_mapped_basis, &
     build_sawf_closed_core_buffer_basis,clear_sawf_closed_basis
   use lcfo_wannier_sawf_dmn, only: t_sawf_dmn_writer, begin_sawf_dmn, &
@@ -6610,12 +6610,15 @@ contains
       integer :: mesh(3)
       integer, allocatable :: species(:), fragment_origin(:,:), fragment_shape(:,:)
       integer, allocatable :: symmetry_fragment_map(:),symmetry_fragment_maps(:,:)
+      integer, allocatable :: product_left(:),product_right(:),product_result(:)
       integer, allocatable :: sawf_environment_orbit(:)
       real(8) :: a1(3), a2(3), a3(3), lattice(3,3), lattice_inverse(3,3)
       real(8) :: singular_min, singular_max, closure_residual, closure_tolerance
       real(8) :: max_grid_residual,center_grid(3)
       real(8), allocatable :: fractional_positions(:,:),d_wann_real(:,:,:)
       complex(8), allocatable :: d_band_local(:,:),d_band_sum(:,:),d_wann(:,:),amn(:,:)
+      complex(8), allocatable :: d_band_set(:,:,:),d_wann_set(:,:,:)
+      real(8) :: representation_residual
       type(t_sawf_projection_channel), allocatable :: channels(:)
       type(t_sawf_symop), allocatable :: symmetry_operations(:)
       type(t_sawf_dmn_writer) :: writer
@@ -6783,6 +6786,12 @@ contains
           call lcfo_sawf_fatal('SAWF hierarchical environment-orbit construction failed')
         end if
       end if
+      call build_sawf_operation_product_table(symmetry_operations,lattice,lattice_inverse, &
+        wannier_symmetry_tolerance,product_left,product_right,product_result,local_ok,message)
+      if(.not.local_ok) then
+        write(*,'(1x,a,i0,2a)') '[DC-LCFO-SAWF-GROUP] rank=',dc%id_tot,' ',trim(message)
+        call lcfo_sawf_fatal('SAWF actual-supercell group product table construction failed')
+      end if
       local_failure=merge(0,1,.not.split_fragment_global_mode)
       call comm_get_max(local_failure,dc%icomm_tot)
       split_fragment_global_mode=(local_failure/=0)
@@ -6814,6 +6823,12 @@ contains
       end if
 
       closure_tolerance=max(1.0d-10,wannier_symmetry_tolerance)
+      if(dc%id_tot==0) then
+        allocate(d_band_set(nband_wann,nband_wann,size(symmetry_operations)), &
+          d_wann_set(wannier_num_wann,wannier_num_wann,size(symmetry_operations)), &
+          stat=allocation_status)
+        if(allocation_status/=0) call lcfo_sawf_fatal('SAWF representation-set allocation failed')
+      end if
       call prepare_sawf_fragment_state_cache(nband_wann,fragment_shape,state_cache,local_ok,message)
       failure=merge(0,1,local_ok)
       if(failure/=0) write(*,'(1x,a,i0,2a)') '[DC-LCFO-SAWF-DMN] rank=',dc%id_tot, &
@@ -6870,6 +6885,8 @@ contains
               local_ok=.false.; message='SAWF D_wann complex conversion allocation failed'
             else
               d_wann=cmplx(d_wann_real(:,:,1),0.0d0,kind=8)
+              d_band_set(:,:,iop)=d_band_sum
+              d_wann_set(:,:,iop)=d_wann
               call append_sawf_dmn_operation(writer,iop,d_wann,d_band_sum, &
                 esp_tot(1:nband_wann,1),amn,iop==1,local_ok,message, &
                 singular_min,singular_max,closure_residual)
@@ -6894,6 +6911,23 @@ contains
           call lcfo_sawf_fatal('SAWF DMN operation validation/write failed: '//trim(message))
         end if
       end do
+
+      failure=0; message=''; representation_residual=0d0
+      if(dc%id_tot==0) then
+        call validate_sawf_operation_set_products(d_band_set,product_left,product_right, &
+          product_result,closure_tolerance,representation_residual,local_ok,message)
+        if(local_ok) call validate_sawf_operation_set_products(d_wann_set,product_left,product_right, &
+          product_result,closure_tolerance,representation_residual,local_ok,message)
+        failure=merge(0,1,local_ok)
+      end if
+      call comm_bcast(failure,dc%icomm_tot,0); call comm_bcast(message,dc%icomm_tot,0)
+      call comm_bcast(representation_residual,dc%icomm_tot,0)
+      if(failure/=0) then
+        if(dc%id_tot==0) call abort_sawf_dmn(writer)
+        call lcfo_sawf_fatal('SAWF D_band/D_wann group representation validation failed: '//trim(message))
+      end if
+      if(dc%id_tot==0) write(*,'(1x,a,es13.5)') &
+        '[DC-LCFO-SAWF-GROUP] max_representation_residual=',representation_residual
 
       failure=0
       if(dc%id_frag==0) then
