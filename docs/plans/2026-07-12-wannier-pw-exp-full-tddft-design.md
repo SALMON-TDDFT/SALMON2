@@ -65,8 +65,9 @@ The DG-DC iteration is
 
 It converges the density/potential, total energy, occupied projector, and
 generalized eigen-residual. The converged condition is
-`[H_DG[n0],rho0]_S = 0`, expressed in a consistent overlap metric. A Wannier
-basis-regeneration loop remains outside this milestone.
+`H_DG[n0] P0 S = S P0 H_DG[n0]`, where
+`P0=C_occ f C_occ^H`. A Wannier basis-regeneration loop remains outside this
+milestone.
 
 ### DG-DC energy and potential evaluation
 
@@ -116,13 +117,15 @@ reproduces the symmetry of the full system.
 
 ## Production Route
 
-The first production target is the global-ownership Wannier+PW path. It uses the
-same physical fragment boundaries and the same DG interface/flux operator as
-the later distributed path, but removes MPI coefficient ownership and halo
-exchange effects from the initial validation. The DG surface terms must not be
-removed or folded away merely because ownership is global. The mixed
-Wannier+PW Hamiltonian is propagated with an exponential operator rather than a
-Taylor expansion.
+The first production target is the global-ownership Wannier+PW path. Here
+"global" refers to coefficient ownership, not automatically to globally
+continuous basis support. Before implementation, the operator contract must
+define whether Wannier and PW functions are fragment-restricted or globally
+supported, and therefore which jumps and DG face blocks exist. Global ownership
+must reproduce that accepted physical operator while removing MPI ownership and
+halo-exchange effects from the first validation. The mixed Wannier+PW
+Hamiltonian is propagated with an exponential operator rather than a Taylor
+expansion.
 
 For a non-orthogonal mixed basis, propagation solves
 
@@ -190,7 +193,7 @@ Additional health checks are:
 - generalized eigen-residual and `S`-orthonormality of the initial states;
 - `S`-unitarity of every exponential update;
 - midpoint density/potential convergence for each real-time step;
-- Hermiticity of the complete length-gauge position operator in the `S` metric.
+- Hermiticity of the derived length-gauge position operator in the `S` metric;
 - DG-DC density, potential, total-energy, occupied-projector, and eigen-residual
   convergence;
 - equality of fragment-summed LDA-XC integrals with a direct global-grid
@@ -203,37 +206,27 @@ Additional health checks are:
 
 ## Implementation Strategy
 
-1. Establish a trustworthy Full TDDFT reference input and record its ground-state
-   provenance, excitation mode, time step, pulse parameters, polarization
-   convention, and volume normalization.
-2. Reduce the existing experimental Wannier+PW `expdiag` branches to one explicit
-   namelist-controlled production path. Required scientific choices must not
-   remain environment-variable-only controls.
-3. Construct one fixed global Wannier+PW basis from the converged conventional
-   reference ground state.
-4. Solve a separate DG-DC SCF problem in that fixed basis. Rebuild the
-   density-dependent potential matrix each SCF iteration while retaining the
-   fixed DG surface matrix. Converge density, potential, energy, occupied
-   projector, and generalized residual.
-5. Evaluate LDA-XC locally on uniquely owned fragment core grids, assemble the
-   full mixed density for the global Hartree solve, and use the conventional
-   Kohn-Sham eigenvalue-sum double-counting formula for total energy.
-6. Export all retained DG eigenvectors needed to span the mixed response space,
-   while marking only `N_occ` orbitals with their physical occupation weights.
-7. Verify that the exported DG-DC state is stationary under the identical
-   field-off RT Hamiltonian and potential update.
-8. Implement the exponential update in the same overlap metric and verify
-   `S`-unitarity with small-matrix numerical tests.
-9. Verify the complete WW, WP/PW, PP, and DG-interface contributions to the
-   length-gauge position operator before interpreting a field-on waveform.
-10. During RT, keep the basis and DG surface matrix fixed but update the
-   density-dependent potential through a midpoint predictor-corrector.
-11. Run a PW-count/cutoff sequence at fixed time step and compare `Delta_Pz(t)` against
-   Full TDDFT using one analysis tool and one manifest schema.
-12. Promote the smallest converged Wannier+PW basis satisfying the 5 percent gate
-   to the reference global configuration.
-13. Only after the global gate passes, validate fragment/distributed propagation
-   against the global result.
+1. Freeze the DG trial-space, face-term, PW-support, and periodic length-gauge
+   operator contract. Derive rather than assume any position-interface term.
+2. Extract common generalized-eigen and `S`-metric Exp algebra usable by GS and
+   RT.
+3. Extract a common complete WW+WP/PW+PP density builder and verify electron
+   number in both real-space and overlap metrics.
+4. Validate fragment-core LDA-XC integration and global Hartree plumbing.
+5. Solve the fixed-basis DG-DC SCF problem and converge density, potential,
+   energy, occupied projector, and generalized residual.
+6. Serialize an operator-complete, fingerprinted DG-DC checkpoint shared by GS
+   and RT.
+7. Prove field-off stationarity and operator identity across the DG-DC to RT
+   handoff.
+8. Implement one namelist-driven midpoint Exp production route, converting or
+   removing all result-changing environment controls on that route.
+9. Implement and validate only the length-gauge observable accepted by the
+   operator contract.
+10. Create the seven-input Stage 2D matrix and provenance manifest.
+11. Run the PW convergence and `Delta_Pz` 5 percent Full TDDFT comparison.
+12. Complete regression/documentation, then plan distributed ownership as a
+   separate milestone.
 
 ## Failure Handling
 
