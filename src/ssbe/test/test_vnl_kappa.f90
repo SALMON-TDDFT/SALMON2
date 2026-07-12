@@ -51,7 +51,7 @@
 !   <clean_dir>/test_vnl_kappa
 !
 program test_vnl_kappa
-  use gs_info_ssbe,      only: s_sbe_gs_info
+  use gs_info_ssbe,      only: s_sbe_gs_info, sbe_gs_set_replicated_kmap
   use bloch_solver_ssbe, only: s_sbe_bloch_solver, init_sbe_bloch_solver, &
                                dt_evolve_bloch, calc_current_bloch, &
                                sbe_vnl_interp_weights, build_fsum_deficiency_tensor
@@ -234,6 +234,8 @@ contains
     real(8) :: h
 
     gs%nk = nk;  gs%nb = nb;  gs%ne = ne
+
+    call sbe_gs_set_replicated_kmap(gs, nk)   ! replicated k layout (kmap = identity)
     gs%focc = 2d0;  gs%nvb = ne / 2
     gs%volume = vol
     if (.not. allocated(gs%kweight)) then

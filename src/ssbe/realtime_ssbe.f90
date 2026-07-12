@@ -12,7 +12,7 @@ subroutine main_realtime_ssbe(icomm)
     use datafile_ssbe
     use input_checker_sbe
     use filesystem, only: get_filehandle
-    use sbe_lg_mode_ssbe, only: uses_integral_gicov
+    use sbe_lg_mode_ssbe, only: uses_integral_gicov, uses_xfull_links
     use gicov_integral_ssbe, only: gicov_int_axis_single, gicov_int_jmax, &
                                    gicov_int_jmax_cache, gicov_int_p_order
     implicit none
@@ -43,6 +43,9 @@ subroutine main_realtime_ssbe(icomm)
     integer :: gi_axis_l, gi_jmax_l, jt
     real(8) :: q_mid, q_now, a_sh(3), qmx, tol_ax, twopi_l
     real(8), allocatable :: q_all(:, :)
+    ! Wilson-shift k-roughness probe (env SBE_KROUGH=M; 0 = off = default)
+    integer :: kr_every, fh_sbe_krough, kax
+    real(8) :: kr_g(3, 2), kr_lo(3, 2), kr_hi(3, 2)
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
@@ -126,6 +129,15 @@ subroutine main_realtime_ssbe(icomm)
     ! peak span, and build the transport cache once.
     gi_mode = uses_integral_gicov(sbe_lg_degen)
     gi_axis_l = 0;  gi_jmax_l = 0;  twopi_l = 2d0 * acos(-1d0)
+
+    ! Wilson-shift k-roughness probe: X-full only (it needs the Wilson links),
+    ! and OFF unless the environment asks for it -- so no existing run gains an
+    ! output file or loses a byte.
+    kr_every = 0
+    fh_sbe_krough = 0
+    q_mid = 0d0;  q_now = 0d0   ! only the integral mode moves the mesh; the FD
+                                ! roughness probe ignores q_now (its H is static)
+    if (uses_xfull_links(sbe_lg_degen)) kr_every = sbe_krough_every()
     if (gi_mode) then
         allocate(q_all(3, 0:nt))
         do jt = 0, nt
@@ -226,6 +238,17 @@ subroutine main_realtime_ssbe(icomm)
                     & "is written as usual."
             end if
         end if
+        ! SYSNAME_sbe_krough.data (Wilson-shift k-roughness; env SBE_KROUGH=M)
+        if (kr_every > 0) then
+            fh_sbe_krough = get_filehandle()
+            open(unit=fh_sbe_krough, file=trim(base_directory)//trim(sysname)//"_sbe_krough.data", &
+                & action="write")
+            write(fh_sbe_krough, '(a)') "# Wilson-shift k-roughness G_a = <X,L_a X>/(4<X,X>), L_a = 2I - S_a - S_a^dag"
+            write(fh_sbe_krough, '(a)') "#   S_a X(k) = U_a(k) X(k+e_a) U_a(k)^dag  (gauge-invariant; a raw FFT is not)"
+            write(fh_sbe_krough, '(a)') "#   probe 1: X = rho~ - rho~(0)   probe 2: X = [H~, rho~]"
+            write(fh_sbe_krough, '(a)') "#   R (short-wavelength weight fraction) is bounded by max(0,(4G-1)/3) <= R <= min(1,4G)"
+            write(fh_sbe_krough, '(a)') "# 1:time[a.u.] 2:axis 3:G_drho 4:Rlo_drho 5:Rhi_drho 6:G_comm 7:Rlo_comm 8:Rhi_comm"
+        end if
         ! SYSNAME_sbe_diag.data (LG-SBE mechanism diagnostics; length_gauge only)
         if (trim(gauge_sbe) == "length_gauge") then
             fh_sbe_diag = get_filehandle()
@@ -237,6 +260,9 @@ subroutine main_realtime_ssbe(icomm)
         write(*, "(a)") "  time-step  time[fs] Current(xyz)[a.u.]                     electrons   Total energy[au]"
         write(*, "(a)") "-----------------------------------------------------------------------------------------"
     end if
+
+    ! t=0 reference of the k-roughness excitation probe (must precede step 1)
+    if (kr_every > 0) call sbe_krough_init(sbe)
 
     call comm_sync_all(icomm)
 
@@ -342,6 +368,20 @@ subroutine main_realtime_ssbe(icomm)
             end if
         end if
 
+        if (kr_every > 0) then
+            if (mod(it, kr_every) == 0) then
+                ! collective (comm_summation inside): every rank calls it
+                call sbe_krough_diag(sbe, gs, q_now, kr_g, kr_lo, kr_hi, icomm)
+                if (irank == 0) then
+                    do kax = 1, 3
+                        write(fh_sbe_krough, '(es24.15e3,1x,i2,6es24.15e3)') t, kax, &
+                            & kr_g(kax, 1), kr_lo(kax, 1), kr_hi(kax, 1), &
+                            & kr_g(kax, 2), kr_lo(kax, 2), kr_hi(kax, 2)
+                    end do
+                end if
+            end if
+        end if
+
         if (mod(it, 500) == 0) then
             if (irank == 0) then
                 flush(fh_sbe_rt)
@@ -352,6 +392,7 @@ subroutine main_realtime_ssbe(icomm)
                     if (.not. gi_mode) flush(fh_sbe_edist)
                 end if
                 if (trim(gauge_sbe) == "length_gauge") flush(fh_sbe_diag)
+                if (kr_every > 0) flush(fh_sbe_krough)
             end if
         end if
     end do
@@ -369,6 +410,7 @@ subroutine main_realtime_ssbe(icomm)
             if (.not. gi_mode) close(fh_sbe_edist)
         end if
         if (trim(gauge_sbe) == "length_gauge") close(fh_sbe_diag)
+        if (kr_every > 0) close(fh_sbe_krough)
     end if
 
     if (yn_sbe_out_occ == 'y') then

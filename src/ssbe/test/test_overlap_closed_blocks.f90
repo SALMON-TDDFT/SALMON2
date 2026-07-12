@@ -178,7 +178,7 @@ program test_overlap_closed_blocks
     logical :: ok
     ! use the CLOSED partition so the scrambled block is well-conditioned
     call build_blocks_fixed_closed(nb, nk, nbvec, bvec, prod_dk, eigen, num_kgrid, block_id_e)
-    call build_block_transport(nb, nk, nbvec, bvec, prod_dk, block_id_e, num_kgrid, Umat, nrej)
+    call build_block_transport(nb, nk, nbvec, bvec, prod_dk, block_id_e, num_kgrid, Umat, nrej, 1, nk)
     if (nrej /= 0) then
       write(*,*) 'FAIL smoke: n_reject/=0 (closed block should build clean)'; nfail = nfail + 1
     end if

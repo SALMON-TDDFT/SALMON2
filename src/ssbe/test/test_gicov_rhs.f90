@@ -73,10 +73,10 @@
 !   <scratch_dir>/test_gicov_rhs
 !
 program test_gicov_rhs
-  use gs_info_ssbe,          only: s_sbe_gs_info
+  use gs_info_ssbe,          only: s_sbe_gs_info, sbe_gs_set_replicated_kmap
   use bloch_solver_ssbe,     only: s_sbe_bloch_solver, init_sbe_bloch_solver, &
                                     prepare_qnm, gicov_rhs, rho_ij_from_q, q_ij_from_rho
-  use degenerate_block_ssbe, only: covariant_grad_block, theta_off
+  use degenerate_block_ssbe, only: covariant_grad_block, theta_off, identity_kmap
   use salmon_global,         only: epdir_re1, am_s, num_kgrid, t_2, sbe_lg_degen, &
                                     sbe_lg_diag, yn_sbe_gw_collision, sbe_deph_mode
   implicit none
@@ -204,6 +204,8 @@ contains
     integer :: ik, ib, jb
 
     gs%nk = nk; gs%nb = nb; gs%ne = 6
+
+    call sbe_gs_set_replicated_kmap(gs, nk)   ! replicated k layout (kmap = identity)
     allocate(gs%eigen(nb, nk), gs%occup(nb, nk))
     allocate(gs%delta_omega(nb, nb, nk))
     allocate(gs%p_mod_matrix(nb, nb, 3, nk))
@@ -378,7 +380,7 @@ contains
       dk(axis) = gs%b_matrix(axis, axis) / dble(num_kgrid(axis))
     end do
     call covariant_grad_block(nb, nk, gs%nbvec, gs%bvec, num_kgrid, &
-                              gs%u_transport, rho, dk, Dq, 1, nk, (/.true.,.true.,.true./))
+                              gs%u_transport, rho, dk, Dq, 1, nk, (/.true.,.true.,.true./), nk, identity_kmap(nk))
     cov_mag = 0d0
     do ik = 1, nk
       do ib = 1, nb

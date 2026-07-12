@@ -63,7 +63,7 @@
 !   <clean_dir>/test_vg_gs_current_subtract
 !
 program test_vg_gs_current_subtract
-  use gs_info_ssbe,      only: s_sbe_gs_info
+  use gs_info_ssbe,      only: s_sbe_gs_info, sbe_gs_set_replicated_kmap
   use bloch_solver_ssbe, only: s_sbe_bloch_solver, init_sbe_bloch_solver, &
                                calc_current_bloch, build_fsum_deficiency_tensor
   use degenerate_block_ssbe, only: theta_off
@@ -135,6 +135,7 @@ contains
     integer, intent(in) :: nb, nk, ne
     gs%nk = nk
     gs%nb = nb
+    call sbe_gs_set_replicated_kmap(gs, nk)   ! replicated k layout (kmap = identity)
     gs%ne = ne
     gs%volume = vol
     allocate(gs%kweight(nk), gs%eigen(nb, nk), gs%occup(nb, nk))

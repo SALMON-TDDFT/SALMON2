@@ -75,7 +75,7 @@
 !   <clean_dir>/test_gicov_propagator
 !
 program test_gicov_propagator
-  use gs_info_ssbe,          only: s_sbe_gs_info
+  use gs_info_ssbe,          only: s_sbe_gs_info, sbe_gs_set_replicated_kmap
   use bloch_solver_ssbe,     only: s_sbe_bloch_solver, init_sbe_bloch_solver, &
                                     prepare_qnm, dt_evolve_bloch_lg, adams_moulton_coefs, &
                                     q_ij_from_rho, calc_current_bloch_lg
@@ -276,6 +276,8 @@ contains
     integer :: ik, ib, jb
 
     gs%nk = nk; gs%nb = nb; gs%ne = 6
+
+    call sbe_gs_set_replicated_kmap(gs, nk)   ! replicated k layout (kmap = identity)
     allocate(gs%eigen(nb, nk), gs%occup(nb, nk), gs%kweight(nk))
     allocate(gs%delta_omega(nb, nb, nk))
     allocate(gs%p_mod_matrix(nb, nb, 3, nk))
@@ -583,6 +585,8 @@ contains
     integer :: ik, ib, jb
 
     gs%nk = nk; gs%nb = nb; gs%ne = 6
+
+    call sbe_gs_set_replicated_kmap(gs, nk)   ! replicated k layout (kmap = identity)
     allocate(gs%eigen(nb, nk), gs%occup(nb, nk), gs%kweight(nk))
     allocate(gs%delta_omega(nb, nb, nk))
     allocate(gs%d_matrix(nb, nb, 3, nk))

@@ -39,7 +39,7 @@
 program test_t2_gate
   use salmon_global, only: sbe_t2_gate_shape, sbe_t2_gate_theta, sbe_t2_gate_width
   use inputoutput,   only: read_input_common
-  use gs_info_ssbe,  only: t2_gate_weight
+  use gs_info_ssbe,  only: t2_gate_weight, sbe_gs_set_replicated_kmap
   use input_checker_sbe, only: t2_gate_params_ok
   implicit none
 
@@ -160,10 +160,10 @@ contains
   !       Hermiticity, which requires the per-pair gate weight be symmetric
   !       under (n,m)->(m,n) (W depends only on |delta_omega|).
   subroutine test_gicov_integration(nfail)
-    use gs_info_ssbe,          only: s_sbe_gs_info
+    use gs_info_ssbe,          only: s_sbe_gs_info, sbe_gs_set_replicated_kmap
     use bloch_solver_ssbe,     only: s_sbe_bloch_solver, init_sbe_bloch_solver, &
                                       prepare_qnm, gicov_rhs, q_ij_from_rho
-    use degenerate_block_ssbe, only: covariant_grad_block, theta_off
+    use degenerate_block_ssbe, only: covariant_grad_block, theta_off, identity_kmap
     use salmon_global,         only: epdir_re1, am_s, num_kgrid, t_2, sbe_lg_degen, &
                                       sbe_lg_diag, yn_sbe_gw_collision, sbe_deph_mode, &
                                       sbe_lg_degen_floor, sbe_t2_gate_shape, &
@@ -211,7 +211,7 @@ contains
       dk(axis) = gs%b_matrix(axis, axis) / dble(num_kgrid(axis))
     end do
     call covariant_grad_block(nb, nk, gs%nbvec, gs%bvec, num_kgrid, &
-                              gs%u_transport, rho, dk, Dq, 1, nk, (/.true.,.true.,.true./))
+                              gs%u_transport, rho, dk, Dq, 1, nk, (/.true.,.true.,.true./), nk, identity_kmap(nk))
     do ik = 1, nk
       do ib = 1, nb
         do jb = 1, nb
@@ -287,7 +287,7 @@ contains
   ! directly for both terms, so this override is self-consistent (gs%eigen is
   ! not read by the RHS).
   subroutine test_step_floor_clamp(nfail)
-    use gs_info_ssbe,      only: s_sbe_gs_info
+    use gs_info_ssbe,      only: s_sbe_gs_info, sbe_gs_set_replicated_kmap
     use bloch_solver_ssbe, only: s_sbe_bloch_solver, init_sbe_bloch_solver, &
                                   prepare_qnm, gicov_rhs
     use salmon_global,     only: epdir_re1, am_s, num_kgrid, t_2, sbe_lg_degen, &
@@ -350,13 +350,15 @@ contains
   ! from itself having a CONTAINS block), sharing nb/nk/blk/zi_/two_pi via
   ! program-level host association.
   subroutine build_gicov_gs(gs)
-    use gs_info_ssbe, only: s_sbe_gs_info
+    use gs_info_ssbe, only: s_sbe_gs_info, sbe_gs_set_replicated_kmap
     implicit none
     type(s_sbe_gs_info), intent(out) :: gs
     real(8) :: eigen(nb), t, ang, c, s, phz
     integer :: ik, ib, jb
 
       gs%nk = nk; gs%nb = nb; gs%ne = 6
+
+      call sbe_gs_set_replicated_kmap(gs, nk)   ! replicated k layout (kmap = identity)
       allocate(gs%eigen(nb, nk), gs%occup(nb, nk))
       allocate(gs%delta_omega(nb, nb, nk))
       allocate(gs%p_mod_matrix(nb, nb, 3, nk))

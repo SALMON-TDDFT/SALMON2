@@ -51,7 +51,7 @@
 !   <scratch_dir>/test_gicov_hex
 !
 program test_gicov_hex
-  use gs_info_ssbe,      only: s_sbe_gs_info
+  use gs_info_ssbe,      only: s_sbe_gs_info, sbe_gs_set_replicated_kmap
   use bloch_solver_ssbe, only: s_sbe_bloch_solver, init_sbe_bloch_solver, &
                                 prepare_qnm, gicov_rhs, q_ij_from_rho, &
                                 set_gicov_force_general_field
@@ -142,6 +142,7 @@ contains
     implicit none
     type(s_sbe_gs_info), intent(out) :: gs
     gs%nk = nk; gs%nb = nb; gs%ne = 6
+    call sbe_gs_set_replicated_kmap(gs, nk)   ! replicated k layout (kmap = identity)
     allocate(gs%eigen(nb, nk), gs%occup(nb, nk))
     allocate(gs%delta_omega(nb, nb, nk))
     allocate(gs%p_mod_matrix(nb, nb, 3, nk))

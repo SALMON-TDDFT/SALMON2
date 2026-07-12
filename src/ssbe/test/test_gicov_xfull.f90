@@ -17,8 +17,8 @@
 !   Test D (drop-dipole equivalence, pure kernel math): proves the underlying
 !     CLAIM directly -- for a fixture with EXACTLY ZERO diagonal (intraband)
 !     Berry connection (so xi_full == xi_inter, no separate intraband piece
-!     to confuse the comparison), covariant_grad_block(full transport) equals
-!     covariant_grad_block(bare, U=I) minus i[xi_inter,rho] to a
+!     to confuse the comparison), covariant_grad_block(full transport, nk, identity_kmap(nk)) equals
+!     covariant_grad_block(bare, U=I, nk, identity_kmap(nk)) minus i[xi_inter,rho] to a
 !     stencil-matched tolerance. Zero diagonal connection is obtained with a
 !     REAL 2x2 rotation V(k) = exp(-i theta(k) sigma_y): sigma_y is pure
 !     imaginary, so -i*theta*sigma_y is REAL antisymmetric and V(k) is a real
@@ -142,7 +142,7 @@ contains
   ! Test D -- drop-dipole equivalence (pure kernel math; see file header).
   !=============================================================================
   subroutine test_D_drop_dipole_equivalence(nfail)
-    use degenerate_block_ssbe, only: covariant_grad_block, build_block_transport
+    use degenerate_block_ssbe, only: covariant_grad_block, build_block_transport, identity_kmap
     implicit none
     integer, intent(inout) :: nfail
     integer, parameter :: nb = 2, nk = 16, nbvec = 3
@@ -192,13 +192,13 @@ contains
       end do
     end do
 
-    ! U_full = build_block_transport(block_id===1) -- the actual X-full
+    ! U_full = build_block_transport(block_id===1, 1, nk) -- the actual X-full
     ! production path (polar factor of the FULL 2x2 overlap M). prod_dk is
     ! already exactly unitary here, so the polar factor reproduces it exactly.
     call build_block_transport(nb, nk, nbvec, bvec, prod_dk, block_id, num_kgrid, &
-                                U_full, n_reject)
+                                U_full, n_reject, 1, nk)
     call check_true(n_reject == 0, &
-      "D: build_block_transport(block_id===1) accepts the full 2x2 overlap (no reject)", nfail)
+      "D: build_block_transport(block_id===1, 1, nk) accepts the full 2x2 overlap (no reject)", nfail)
 
     ! U_bare = identity everywhere (bare-stencil reference, matches Test A of
     ! test_covariant_grad.f90).
@@ -226,8 +226,8 @@ contains
       rho(2, 1, ik) = conjg(rho(1, 2, ik))
     end do
 
-    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq_full, 1, nk, (/.true.,.true.,.true./))
-    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_bare, rho, dk, Dq_bare, 1, nk, (/.true.,.true.,.true./))
+    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_full, rho, dk, Dq_full, 1, nk, (/.true.,.true.,.true./), nk, identity_kmap(nk))
+    call covariant_grad_block(nb, nk, nbvec, bvec, num_kgrid, U_bare, rho, dk, Dq_bare, 1, nk, (/.true.,.true.,.true./), nk, identity_kmap(nk))
 
     ! xi_inter(k) = i <u1(k)| stencil-D_k u2(k)>, using the SAME cw/m_max shells
     ! covariant_grad_block itself uses (not an analytic-continuum derivative) --
@@ -275,7 +275,7 @@ contains
     call check_true(dqfull_scale > 1d-3 .and. dqbare_scale > 1d-3, &
       "D: Dq_full and Dq_bare are both nonzero (nontrivial fixture)", nfail)
     call check_true(resid < 5d-6, &
-      "D: covariant_grad_block(full) = covariant_grad_block(bare) - i[xi_inter,rho] " // &
+      "D: covariant_grad_block(full, nk, identity_kmap(nk)) = covariant_grad_block(bare, nk, identity_kmap(nk)) - i[xi_inter,rho] " // &
       "to stencil-matched tol (drop-dipole equivalence -- the rewrite's core claim)", nfail)
 
     write(*, '(a,es10.2,a,es10.2,a,es10.2,a,es10.2,a,es10.2)') &
@@ -288,7 +288,7 @@ contains
   ! per-k gauge (incl. the current operators), >=200 RK4 steps. See file header.
   !=============================================================================
   subroutine test_U3full(nfail)
-    use gs_info_ssbe, only: s_sbe_gs_info
+    use gs_info_ssbe, only: s_sbe_gs_info, sbe_gs_set_replicated_kmap
     implicit none
     integer, intent(inout) :: nfail
     type(s_sbe_gs_info) :: gs, gsg
@@ -504,14 +504,14 @@ contains
   ! prod_dk axis=1: per-band phase transport at every link EXCEPT the single
   ! "crossing" link ik0, where bands {2,3} undergo a near-pi/2 rotation (the
   ! coarse-mesh band-crossing scenario X-closed could not survive).
-  ! u_transport is built by build_block_transport(block_id===1) from prod_dk
+  ! u_transport is built by build_block_transport(block_id===1, 1, nk) from prod_dk
   ! (the actual production path, not hand-built). d_matrix = 0 (X-full: the
   ! covariant transport supplies the whole field term). p_tm_matrix and
   ! rvnl_tm_matrix are two INDEPENDENT Hermitian operators (different formulas)
   ! so a missed gauge-transform of either would show up distinctly in J(t).
   subroutine build_gs_u3(gs)
-    use gs_info_ssbe, only: s_sbe_gs_info
-    use degenerate_block_ssbe, only: build_block_transport
+    use gs_info_ssbe, only: s_sbe_gs_info, sbe_gs_set_replicated_kmap
+    use degenerate_block_ssbe, only: build_block_transport, identity_kmap
     use salmon_global, only: num_kgrid
     implicit none
     type(s_sbe_gs_info), intent(out) :: gs
@@ -519,6 +519,8 @@ contains
     integer :: ik, ib, jb, n_reject_local
 
     gs%nk = nk; gs%nb = nb; gs%ne = 6
+
+    call sbe_gs_set_replicated_kmap(gs, nk)   ! replicated k layout (kmap = identity)
     allocate(gs%eigen(nb, nk), gs%occup(nb, nk), gs%kweight(nk))
     allocate(gs%delta_omega(nb, nb, nk))
     allocate(gs%p_tm_matrix(nb, nb, 3, nk))
@@ -599,7 +601,7 @@ contains
     end do
 
     call build_block_transport(nb, nk, gs%nbvec, gs%bvec, gs%prod_dk, gs%block_id, &
-                                num_kgrid, gs%u_transport, n_reject_local)
+                                num_kgrid, gs%u_transport, n_reject_local, 1, nk)
   end subroutine build_gs_u3
 
   ! Apply the arbitrary per-k gauge W(k) to EVERY gauge-covariant quantity:
@@ -607,8 +609,8 @@ contains
   ! path) AND the current operators p_tm_matrix/rvnl_tm_matrix (codex review
   ! point -- omitting these would make J(t) spuriously gauge-dependent).
   subroutine gauge_gs_inplace_u3(gs)
-    use gs_info_ssbe, only: s_sbe_gs_info
-    use degenerate_block_ssbe, only: build_block_transport
+    use gs_info_ssbe, only: s_sbe_gs_info, sbe_gs_set_replicated_kmap
+    use degenerate_block_ssbe, only: build_block_transport, identity_kmap
     use salmon_global, only: num_kgrid
     implicit none
     type(s_sbe_gs_info), intent(inout) :: gs
@@ -625,7 +627,7 @@ contains
       gs%prod_dk(:, :, 3, ik) = matmul(matmul(Whi, gs%prod_dk(:, :, 3, ik)), Wi)
     end do
     call build_block_transport(nb, nk, gs%nbvec, gs%bvec, gs%prod_dk, gs%block_id, &
-                                num_kgrid, gs%u_transport, n_reject_local)
+                                num_kgrid, gs%u_transport, n_reject_local, 1, nk)
 
     do ik = 1, nk
       Wi  = make_W_u3(ik)
@@ -658,7 +660,7 @@ contains
   ! which is what the U3f.4a/4b gauge-invariance checks would actually have
   ! caught.
   subroutine corrupt_transport_u3(gs)
-    use gs_info_ssbe, only: s_sbe_gs_info
+    use gs_info_ssbe, only: s_sbe_gs_info, sbe_gs_set_replicated_kmap
     implicit none
     type(s_sbe_gs_info), intent(inout) :: gs
     complex(8) :: Phi(nb, nb)
@@ -726,7 +728,7 @@ contains
 
   !======================= drive the real gicov propagator =====================
   subroutine run_gicov_u3(gs, rho_init, E, dt, tr, Jout, hn_max, all_ok, Jmax, rho_max, coh_drift)
-    use gs_info_ssbe, only: s_sbe_gs_info
+    use gs_info_ssbe, only: s_sbe_gs_info, sbe_gs_set_replicated_kmap
     use bloch_solver_ssbe, only: s_sbe_bloch_solver, init_sbe_bloch_solver, &
                                   prepare_qnm, dt_evolve_bloch_lg, adams_moulton_coefs, &
                                   calc_current_bloch_lg
@@ -793,7 +795,7 @@ contains
   ! one-sided Phi(k) corruption is present, proving the gauge-invariance gate
   ! has teeth (it would have caught this corruption).
   subroutine run_teeth_corrupted_u3(nfail)
-    use gs_info_ssbe, only: s_sbe_gs_info
+    use gs_info_ssbe, only: s_sbe_gs_info, sbe_gs_set_replicated_kmap
     implicit none
     integer, intent(inout) :: nfail
     type(s_sbe_gs_info) :: gst_u, gst_g
