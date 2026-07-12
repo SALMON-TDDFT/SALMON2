@@ -39,7 +39,7 @@ module lcfo_flux
   use lcfo_wannier_sawf_collective, only: reduce_sawf_fragment_alignment_failure
   use lcfo_wannier_sawf_templates, only: validate_sawf_actual_group_operation, &
     build_sawf_environment_orbits, build_sawf_supercell_fingerprint, &
-    build_sawf_local_environment_fingerprint
+    build_sawf_local_environment_fingerprint, select_sawf_environment_materialization
   use lcfo_wannier_sawf_win, only: activate_sawf_win, deactivate_sawf_win, &
     t_atomic_win_writer, begin_atomic_win, finish_atomic_win, abort_atomic_win
   use lcfo_wannier_command, only: select_wannier90_command, execute_wannier90_command, &
@@ -6613,6 +6613,7 @@ contains
       integer, allocatable :: symmetry_fragment_map(:),symmetry_fragment_maps(:,:)
       integer, allocatable :: product_left(:),product_right(:),product_result(:)
       integer, allocatable :: sawf_environment_orbit(:)
+      integer, allocatable :: sawf_representative_fragment(:),sawf_materialize_operation(:)
       character(256), allocatable :: sawf_environment_key(:)
       real(8) :: a1(3), a2(3), a3(3), lattice(3,3), lattice_inverse(3,3)
       real(8) :: singular_min, singular_max, closure_residual, closure_tolerance
@@ -6628,7 +6629,7 @@ contains
       type(t_sawf_closed_basis) :: closed_basis
       logical :: local_ok,grid_map_ok,fragment_map_ok,center_available,split_fragment_global_mode
       logical, allocatable :: sawf_environment_equivalent(:,:),sawf_defect_intersects(:), &
-        sawf_regenerate_environment(:)
+        sawf_regenerate_environment(:),sawf_generate_independently(:)
       integer :: max_targets_per_source
       character(512) :: message
       character(256) :: symmetry_filename,allocation_message,dmn_filename,amn_filename
@@ -6768,7 +6769,9 @@ contains
       if(trim(wannier_sawf_generation)=='hierarchical') then
         allocate(sawf_environment_equivalent(dc%n_frag,dc%n_frag), &
           sawf_defect_intersects(dc%n_frag),sawf_environment_orbit(dc%n_frag), &
-          sawf_regenerate_environment(dc%n_frag),sawf_environment_key(dc%n_frag),stat=allocation_status)
+          sawf_regenerate_environment(dc%n_frag),sawf_environment_key(dc%n_frag), &
+          sawf_representative_fragment(dc%n_frag),sawf_materialize_operation(dc%n_frag), &
+          sawf_generate_independently(dc%n_frag),stat=allocation_status)
         if(allocation_status/=0) call lcfo_sawf_fatal( &
           'SAWF hierarchical environment-orbit allocation failed on this rank')
         call build_sawf_fragment_environment_fingerprints(lattice,fractional_positions,species,mesh, &
@@ -6793,6 +6796,13 @@ contains
         if(.not.local_ok) then
           write(*,'(1x,a,i0,2a)') '[DC-LCFO-SAWF-ORBIT] rank=',dc%id_tot,' ',trim(message)
           call lcfo_sawf_fatal('SAWF hierarchical environment-orbit construction failed')
+        end if
+        call select_sawf_environment_materialization(sawf_environment_orbit, &
+          symmetry_fragment_maps,sawf_representative_fragment,sawf_materialize_operation, &
+          sawf_generate_independently,local_ok,message)
+        if(.not.local_ok)then
+          write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-MATERIALIZE] rank=',dc%id_tot,' ',trim(message)
+          call lcfo_sawf_fatal('SAWF materialization provenance construction failed')
         end if
       end if
       call build_sawf_operation_product_table(symmetry_operations,lattice,lattice_inverse, &

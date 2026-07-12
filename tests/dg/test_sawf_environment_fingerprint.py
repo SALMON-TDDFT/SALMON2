@@ -69,3 +69,4 @@ target_compile_options(check PRIVATE -fcheck=all -fbacktrace)
  print(r.stdout.strip())
 assert 'call build_sawf_fragment_environment_fingerprints' in generator
 assert 'sawf_environment_key(ifrag)==sawf_environment_key(' in generator
+assert 'call select_sawf_environment_materialization' in generator

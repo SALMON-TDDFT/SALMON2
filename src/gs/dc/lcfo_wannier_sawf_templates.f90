@@ -33,8 +33,42 @@ module lcfo_wannier_sawf_templates
   public :: whiten_sawf_buffered_overlap
   public :: stitch_sawf_buffered_neighbor_gauge
   public :: build_sawf_supercell_fingerprint, build_sawf_local_environment_fingerprint
+  public :: select_sawf_environment_materialization
 
 contains
+  subroutine select_sawf_environment_materialization(orbit,fragment_maps,representative_fragment, &
+      operation_index,generate_independently,ok,message)
+    integer,intent(in)::orbit(:),fragment_maps(:,:)
+    integer,intent(out)::representative_fragment(size(orbit)),operation_index(size(orbit))
+    logical,intent(out)::generate_independently(size(orbit)),ok
+    character(*),intent(out)::message
+    integer::environment,candidate,representative,operation,norbit
+    ok=.false.;message='';representative_fragment=0;operation_index=0
+    generate_independently=.false.
+    if(size(orbit)<=0.or.size(fragment_maps,1)/=size(orbit).or.any(orbit<=0))then
+      message='SAWF materialization orbit/map dimensions are invalid';return
+    end if
+    norbit=maxval(orbit)
+    do environment=1,size(orbit)
+      representative=0
+      do candidate=1,size(orbit)
+        if(orbit(candidate)==orbit(environment))then;representative=candidate;exit;end if
+      end do
+      if(representative==0)then;message='SAWF environment orbit has no representative';return;end if
+      representative_fragment(environment)=representative
+      generate_independently(environment)=environment==representative
+      do operation=1,size(fragment_maps,2)
+        if(fragment_maps(representative,operation)==environment)then
+          operation_index(environment)=operation;exit
+        end if
+      end do
+      if(operation_index(environment)==0)then
+        message='SAWF environment has no actual-group materialization operation';return
+      end if
+    end do
+    ok=.true.
+  end subroutine
+
   subroutine build_sawf_supercell_fingerprint(lattice,pbc,species,coordinates,grid,buffer, &
       pseudopotential_digest,band_window,projection_shell,xc,generator,key,ok,message)
     real(8),intent(in)::lattice(3,3),coordinates(:,:)
