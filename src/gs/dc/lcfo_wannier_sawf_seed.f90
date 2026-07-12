@@ -3,8 +3,49 @@ module lcfo_wannier_sawf_seed
   implicit none
   private
   public :: write_sawf_local_eig_amn_mmn
+  public :: build_sawf_local_seed_matrices
 
 contains
+
+  subroutine build_sawf_local_seed_matrices(states,projections,phase_factor,weight,amn,mmn,ok,message)
+    complex(8),intent(in)::states(:,:),projections(:,:),phase_factor(:,:)
+    real(8),intent(in)::weight
+    complex(8),intent(out)::amn(:,:),mmn(:,:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(8),allocatable::normalized_projection(:,:),phased_states(:,:)
+    real(8)::norm2
+    integer::projection,neighbor
+
+    ok=.false.;message='';amn=(0d0,0d0);mmn=(0d0,0d0)
+    if(size(states,1)<=0.or.size(states,2)<=0.or.size(projections,1)/=size(states,1).or. &
+        size(phase_factor,1)/=size(states,1).or.size(phase_factor,2)/=3.or. &
+        size(amn,1)/=size(states,2).or.size(amn,2)/=size(projections,2).or. &
+        size(mmn,1)/=size(states,2).or.size(mmn,2)/=size(states,2).or.size(mmn,3)/=3.or. &
+        .not.ieee_is_finite(weight).or.weight<=0d0)then
+      message='SAWF local seed matrix dimensions or integration weight are invalid';return
+    end if
+    if(.not.all(ieee_is_finite(real(states))).or..not.all(ieee_is_finite(aimag(states))).or. &
+        .not.all(ieee_is_finite(real(projections))).or..not.all(ieee_is_finite(aimag(projections))).or. &
+        .not.all(ieee_is_finite(real(phase_factor))).or..not.all(ieee_is_finite(aimag(phase_factor))))then
+      message='SAWF local seed matrix input contains a non-finite value';return
+    end if
+    allocate(normalized_projection(size(projections,1),size(projections,2)), &
+      phased_states(size(states,1),size(states,2)))
+    do projection=1,size(projections,2)
+      norm2=weight*sum(abs(projections(:,projection))**2)
+      if(norm2<=1d-300)then
+        message='SAWF local projection has zero norm';return
+      end if
+      normalized_projection(:,projection)=projections(:,projection)/sqrt(norm2)
+    end do
+    amn=weight*matmul(conjg(transpose(states)),normalized_projection)
+    do neighbor=1,3
+      phased_states=spread(phase_factor(:,neighbor),2,size(states,2))*states
+      mmn(:,:,neighbor)=weight*matmul(conjg(transpose(states)),phased_states)
+    end do
+    ok=.true.
+  end subroutine build_sawf_local_seed_matrices
 
   subroutine write_sawf_local_eig_amn_mmn(directory,seedname,energy_ev,amn,mmn,ok,message)
     character(*),intent(in)::directory,seedname

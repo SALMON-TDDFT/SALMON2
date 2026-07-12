@@ -10,15 +10,21 @@ if not FC:
     raise SystemExit("gfortran is required")
 
 driver = r'''program check_local_seed_writer
-  use lcfo_wannier_sawf_seed, only: write_sawf_local_eig_amn_mmn
+  use lcfo_wannier_sawf_seed, only: write_sawf_local_eig_amn_mmn,build_sawf_local_seed_matrices
   use, intrinsic :: ieee_arithmetic, only: ieee_value,ieee_quiet_nan
   implicit none
   real(8) :: energy(2)
   complex(8) :: amn(2,2),mmn(2,2,3)
+  complex(8) :: states(2,2),projections(2,2),phase(2,3)
   logical :: ok
   character(256) :: message
   integer :: i
   energy=[-1d0,2d0]
+  states=(0d0,0d0);states(1,1)=1;states(2,2)=1
+  projections=states;phase=(1d0,0d0)
+  call build_sawf_local_seed_matrices(states,projections,phase,1d0,amn,mmn,ok,message)
+  if(.not.ok.or.maxval(abs(amn-states))>1d-14)error stop 3
+  if(maxval(abs(mmn(:,:,1)-states))>1d-14)error stop 4
   amn=(0d0,0d0);amn(1,1)=1;amn(2,2)=1
   mmn=(0d0,0d0)
   do i=1,3;mmn(1,1,i)=1;mmn(2,2,i)=1;end do
