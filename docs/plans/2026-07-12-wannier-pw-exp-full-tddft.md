@@ -4,7 +4,7 @@
 
 **Goal:** For a gapped LDA system with integer occupations, construct a self-consistent Wannier+PW DG-DC initial state and reproduce the continuous-branch Full TDDFT induced polarization `Delta_Pz(t)` within 5 percent relative RMS using `dt=2 a.u.` exponential propagation.
 
-**Architecture:** Construct a symmetry-validated fixed Wannier basis first: use monolithic SAWF for the small reference and representative-environment SAWF, symmetry replication, defect-local regeneration, and gauge stitching for large systems. Then resolve the DG trial-space and length-gauge definitions, build shared overlap-metric and mixed-density components used identically by DG-DC and RT, implement fragment-local LDA plus global Hartree DG-DC, serialize an operator-complete checkpoint, and only then implement the production midpoint Exp path. Global ownership retains the physical DG operator while excluding distributed ownership and halo communication from the first comparison.
+**Architecture:** Construct a symmetry-validated fixed Wannier basis first: use monolithic SAWF for the small reference and representative-environment SAWF, symmetry replication, symmetry-inequivalent local regeneration, and gauge stitching for large systems. Then resolve the DG trial-space and length-gauge definitions, build shared overlap-metric and mixed-density components used identically by DG-DC and RT, implement fragment-local LDA plus global Hartree DG-DC, serialize an operator-complete checkpoint, and only then implement the production midpoint Exp path. Global ownership retains the physical DG operator while excluding distributed ownership and halo communication from the first comparison.
 
 **Tech Stack:** Fortran 2008, MPI, existing SALMON LDA/Hartree infrastructure, LAPACK/EigenExa, Python 3 with NumPy/Matplotlib for tests and analysis, CMake.
 
@@ -35,7 +35,7 @@ small-system monolithic global SAWF reference
 actual supercell symmetry group versus parent-crystal symmetry
 symmetry-closed band and complete projection-shell selection
 representative local environments and their symmetry orbits
-bulk-template reuse versus defect-local regeneration
+same-supercell bulk-template reuse versus symmetry-inequivalent local regeneration
 buffer definition and convergence tolerances
 neighbor gauge-stitching convention
 template provenance and cache invalidation
@@ -56,7 +56,7 @@ H_(gR,gR') = D_wann(g)^H H_(R,R') D_wann(g)
 ```
 
 Reject incomplete orbital shells, non-closed band subsets, invalid atom maps,
-and a parent-crystal operation that is not a symmetry of the defective cell.
+and a parent-crystal operation that is not a symmetry of the actual supercell.
 
 **Step 3: Implement environment orbits and fingerprinted templates**
 
@@ -67,13 +67,16 @@ for geometry, pseudopotential, grid, band window, projection shells, symmetry
 operations, buffer, and code/schema version. A fingerprint mismatch must force
 regeneration. Do not silently fall back to an identity-only group.
 
-**Step 4: Implement defect-local regeneration**
+**Step 4: Implement symmetry-inequivalent local-environment regeneration**
 
-Mark environments whose core or buffer intersects a symmetry-inequivalent
-defect region. Reuse bulk templates elsewhere and generate local Wannier bases
-only for these representatives. Use the defective supercell symmetry group;
-local symmetry breaking is retained rather than projected back to the parent
-crystal.
+Fingerprint every core+buffer local environment in the actual supercell.
+Treat defects, material interfaces, free surfaces/vacuum boundaries, and
+amorphous neighborhoods as independent whenever their exact fingerprints are
+not connected by an operation of the actual supercell symmetry group. Reuse
+bulk templates only inside the same exact supercell; cross-supercell reuse is
+forbidden. Local symmetry breaking is retained rather than projected back to a
+parent crystal. In amorphous regions, do not merge approximately similar local
+geometries: independently regenerate each distinct environment.
 
 **Step 5: Write and implement the neighbor gauge-stitching test**
 
@@ -112,7 +115,7 @@ cmake --build build-mpi-eigenexa -j 2
 ```
 
 Expected: all focused tests pass; the small system agrees with global SAWF and
-the defective fixture rejects parent-group symmetry restoration.
+defect/interface/surface/amorphous fixtures reject parent-group symmetry restoration.
 
 ```bash
 git add docs/plans/2026-07-12-scalable-sawf-contract.md src/gs/dc tests/dg src/io

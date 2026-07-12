@@ -135,17 +135,22 @@ Wannier90 localization. Instead it uses a hierarchical route:
 2. generate SAWFs only for one representative of each symmetry-equivalent bulk
    environment;
 3. replicate them by translations and the validated `D_wann` action;
-4. regenerate Wannier functions only for symmetry-inequivalent environments,
-   including the defect neighborhood and its buffer;
+4. regenerate Wannier functions for every symmetry-inequivalent local
+   environment, including defects, material interfaces, free surfaces/vacuum
+   boundaries, and amorphous neighborhoods and their buffers;
 5. align independently generated neighboring bases by overlap-based unitary
    Procrustes/parallel-transport transformations before constructing overlap,
    Hamiltonian, and DG face blocks;
 6. assemble only sparse local WW, WP, PP, overlap, and DG face blocks globally.
 
-Defect calculations use the symmetry group of the actual defective supercell,
-not the parent-crystal group. Thus the bulk region can reuse cached SAWF
-templates while physical local symmetry breaking is retained near the defect.
-Every cached template carries geometry, pseudopotential, grid, band-window,
+All non-bulk calculations use the symmetry group of the actual supercell, not
+a parent-crystal group. Thus a bulk region can reuse SAWF templates within that
+same supercell while physical local symmetry breaking is retained near defects,
+interfaces, surfaces, vacuum boundaries, and amorphous regions. Template reuse
+across different supercells is forbidden, including geometrically similar
+supercells from separate calculations.
+Every cached template carries a complete supercell fingerprint and a local
+core+buffer environment fingerprint, together with geometry, pseudopotential, grid, band-window,
 projection-shell, symmetry-group, buffer, and generator-version fingerprints.
 Any mismatch forces local regeneration rather than silent reuse.
 
@@ -254,7 +259,8 @@ Additional health checks are:
 ## Implementation Strategy
 
 1. Freeze the SAWF symmetry contract and implement the scalable representative-
-   environment construction, cache, replication, defect-local regeneration,
+   environment construction, cache, replication, symmetry-inequivalent local
+   regeneration,
    gauge stitching, and global-reference equivalence gates.
 2. Freeze the DG trial-space, face-term, PW-support, and periodic length-gauge
    operator contract. Derive rather than assume any position-interface term.

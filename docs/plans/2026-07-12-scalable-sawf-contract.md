@@ -8,9 +8,11 @@ is a Wannier90 request, not an acceptance criterion.
 
 The small validation cell uses a **monolithic global SAWF** calculation as the
 reference.  The hierarchical route classifies representative environments
-using the **actual supercell symmetry group**.  For a defective cell the
-parent-crystal group is provenance only: a parent-crystal operation absent from
-the actual cell is rejected and is never used to restore local symmetry.
+using the **actual supercell symmetry group**.  The supported non-bulk
+environments include defects, material interfaces, free surfaces and vacuum
+boundaries, and amorphous regions.  A parent-crystal group is provenance only:
+an operation absent from the actual supercell is rejected and is never used to
+restore local symmetry.
 
 The selected bands must be symmetry closed and projections must contain every
 member of each complete projection shell.  For every group product the
@@ -20,19 +22,34 @@ fallback is forbidden when a nontrivial group was requested.
 
 One SAWF calculation is made for each representative environment orbit.  A
 bulk template may be translated/rotated with the validated `D_wann`.  Any core
-or buffer intersecting a symmetry-inequivalent defect uses defect-local regeneration.
-Independently generated neighbors are joined by buffered
+or buffer with a symmetry-inequivalent local-environment fingerprint uses
+independent local regeneration.  This includes defect neighborhoods,
+interfaces, surfaces/vacuum boundaries, and normally every distinct amorphous
+environment.  Independently generated neighbors are joined by buffered
 overlap unitary Procrustes alignment before WW, WP, or DG face block assembly.
 Rank loss or a gauge residual above tolerance is fatal on the detecting rank,
 before a collective reduction.
 
 ## Template provenance and cache invalidation
 
-Every template records geometry, pseudopotential, grid, band-window, complete
+Template reuse is restricted to one exact supercell and its restart lineage;
+cross-supercell template import is forbidden.  Every template records the
+supercell fingerprint and local-environment fingerprint plus geometry,
+pseudopotential, grid, band-window, complete
 projection-shell, actual symmetry operations, buffer, schema/code version,
 centers, spreads, `D_band`, and `D_wann` fingerprints.  A missing or unequal
 fingerprint forces regeneration; stale cache reuse is never silent.  The
 recorded gauge unitary and residual form part of the checkpoint.
+
+The supercell fingerprint covers lattice and boundary conditions, all atomic
+species and coordinates, pseudopotential content, grid, buffer, band window,
+projection shells, XC choice, and generator/schema version.  A local fingerprint
+covers the core+buffer species and relative coordinates, local metric,
+coordination/distances, and vacuum occupancy.  Environment reuse requires both
+an exact local fingerprint match and membership in the same orbit of the actual
+supercell symmetry group.  Approximate geometry matching is not an acceptance
+criterion.  In an amorphous region this conservative rule normally produces
+one independently generated representative per local environment.
 
 ## Buffer convergence and global reference gate
 
