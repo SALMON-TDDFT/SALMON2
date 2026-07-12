@@ -139,7 +139,7 @@ git add tests/dg/check_wpw_exp_production_route.py src/rt/dg/rt_dg_integrator_ex
 git commit -m "feat: promote mixed Wannier PW exponential propagation"
 ```
 
-### Task 3: Make the full-DG eigensystem the mandatory initial state
+### Task 3: Make the self-consistent full-DG eigensystem the mandatory initial state
 
 **Files:**
 - Create: `tests/dg/check_wpw_exp_invariants.py`
@@ -164,6 +164,9 @@ The test must require the full Wannier+PW DG Hamiltonian, including DG
 interface/flux blocks, and the explicit overlap matrix in the generalized
 eigenproblem. It must reject initialization by projection alone and require the
 lowest occupied physical full-DG eigenvectors to populate the RT coefficients.
+It must also require a basis-generation counter and DG-operator-generation
+counter with equality at diagonalization: a basis refresh followed by reuse of
+old surface blocks is a fatal error.
 
 The test must assert that non-Hermiticity, non-finite values, or a configurable
 hard norm failure stops before MPI reduction. Normal runs should print only a
@@ -177,13 +180,43 @@ Expected: FAIL because the production-specific invariant block is absent.
 **Step 3: Implement the eigenseed and invariant checks**
 
 Reuse and complete the existing `yn_dg_full_h_eigen_seed` generalized-overlap
-path. Assemble `H_DG` only after all DG interface terms and Wannier-PW/PW-PW
-blocks are ready, solve `H_DG C = S C epsilon`, sort the physical eigenpairs,
-and copy the occupied eigenvectors into the production RT coefficients. Use
+path. Implement the following fixed-potential initialization loop:
+
+```text
+read and freeze V_eff from the converged reference GS
+construct trial global Wannier+PW basis Phi(0)
+for k = 0, 1, ...:
+    rebuild S[Phi(k)]
+    rebuild every volume, nonlocal, W-PW, PW-PW, and DG face/flux block
+    solve H_DG[Phi(k)] C(k) = S[Phi(k)] C(k) epsilon(k)
+    form the occupied projector Q(k) in the S metric
+    if the basis definition is fixed: accept after residual checks
+    otherwise construct Phi(k+1) from Q(k), align its gauge to Phi(k), and test convergence
+end
+copy the converged occupied full-DG eigenvectors into the RT coefficients
+```
+
+The effective potential stays fixed throughout this loop. Basis refresh is the
+only event that invalidates and rebuilds the zero-field DG matrix. A coefficient
+or eigenvector update in an unchanged basis must not rebuild the DG surface
+matrix. Sort the physical eigenpairs and use
 tolerances based on machine precision and matrix scale for Hermiticity,
 eigen-residual, and S-orthonormality. Record norm drift without renormalizing the
 propagated state. A violation must reveal the actual error rather than conceal
 it.
+
+Convergence must include all of:
+
+```text
+||Q(k)-Q(k-1)||_F / ||Q(k)||_F
+max_i |epsilon_i(k)-epsilon_i(k-1)|
+||H_DG(k)-T^H H_DG(k-1) T||_F / ||H_DG(k)||_F
+max_i ||H_DG C_i-S C_i epsilon_i||
+```
+
+Here `T` is the gauge/alignment transformation between successive bases. For a
+fixed global Wannier+PW basis, report `basis_iterations=1` and do not pretend
+that repeated diagonalization is a self-consistency cycle.
 
 Add a field-off stationarity smoke test: after removing the analytically
 expected eigenphases, `Pz`, density, and occupied-subspace projector must remain
@@ -237,8 +270,10 @@ unconverged GS. Set `yn_dg_wpw_exp_production='y'` and
 `yn_dg_full_h_eigen_seed='y'` for the three reduced-space inputs. The imported
 GS supplies the density/potential and basis provenance; it does not directly
 supply the occupied RT coefficients. Those coefficients must be replaced by
-the occupied eigenstates of the complete DG Wannier+PW Hamiltonian. Record exact
-restart paths and provenance in comments and the manifest.
+the converged occupied eigenstates of the complete DG Wannier+PW Hamiltonian.
+Record whether the basis was fixed or iterated, the number of basis iterations,
+the final operator generation, and exact restart provenance in comments and the
+manifest.
 
 **Step 4: Run the parser test and 20-step smoke runs**
 

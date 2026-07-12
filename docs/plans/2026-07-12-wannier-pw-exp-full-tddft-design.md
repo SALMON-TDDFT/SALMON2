@@ -26,6 +26,38 @@ the generalized eigenproblem
 
 `H_DG C = S C epsilon`.
 
+### Basis dependence of the DG operator
+
+For a fixed effective potential, the symmetric interior-penalty DG bilinear
+form can be written schematically as
+
+`a_DG(u,v) = sum_K <grad u,grad v>_K + <u,V_fixed v>
+             - sum_F <{{grad u}},[[v]]>_F
+             - sum_F <[[u]],{{grad v}}>_F
+             + sum_F alpha_F <[[u]],[[v]]>_F`.
+
+Consequently, the matrix is `H_DG[Phi]_(mu,nu)=a_DG(phi_mu,phi_nu)`.
+The surface/flux contribution depends on the traces and normal derivatives of
+the basis functions at fragment faces. It does not depend directly on the
+time-dependent coefficient vector when the basis `Phi` is fixed.
+
+Therefore two update levels must be distinguished:
+
+- coefficient update with fixed Wannier+PW basis: keep the zero-field DG
+  volume and surface matrices fixed and update only the external-field term;
+- basis update: rebuild overlap, volume, nonlocal, Wannier-PW, PW-PW, and all DG
+  surface/flux blocks before solving or propagating in the new basis.
+
+The initial state must be a fixed point of the second level. Starting from the
+imported converged potential and a trial Wannier+PW basis, repeatedly rebuild
+the full DG operator, diagonalize it, reconstruct/update the basis from the
+occupied subspace when the basis construction requires that update, and rebuild
+the DG operator. Stop only after the occupied projector, eigenvalues, DG matrix,
+and eigen-residual have converged. If the chosen global Wannier+PW basis is
+defined once and is not regenerated from the DG eigenvectors, this loop reduces
+to one rebuild and one generalized diagonalization; an artificial coefficient
+iteration must not be introduced.
+
 The local symmetry of individual fragments or Wannier functions is not a
 constraint. For defect systems, local symmetry breaking is physical. A perfect
 crystal may be used as a diagnostic to confirm that the complete Wannier space
@@ -81,8 +113,11 @@ Additional health checks are:
    namelist-controlled production path. Required scientific choices must not
    remain environment-variable-only controls.
 3. Assemble the complete zero-field Wannier+PW DG Hamiltonian and overlap,
-   diagonalize `H_DG C = S C epsilon`, occupy its lowest physical eigenstates,
-   and verify the eigen-residual and field-free stationarity before propagation.
+   diagonalize `H_DG C = S C epsilon`, update the basis if and only if the basis
+   construction depends on the resulting occupied subspace, rebuild every
+   basis-dependent DG block, and iterate to a fixed point. Occupy the converged
+   lowest physical eigenstates and verify the eigen-residual and field-free
+   stationarity before propagation.
 4. Verify the Hamiltonian blocks, position operator, and exponential update
    independently before interpreting the full waveform.
 5. Run a PW-count/cutoff sequence at fixed time step and compare `Pz(t)` against
@@ -100,6 +135,9 @@ Discrepancies are classified before code changes:
   construction;
 - nonzero field-free motion points first to an incorrect DG eigenseed, missing
   DG interface terms, or an inconsistent overlap metric;
+- apparent convergence obtained without rebuilding face terms after a basis
+  refresh is invalid, because it diagonalizes a matrix belonging to the old
+  basis;
 - zero-field drift points to basis non-closure, non-Hermiticity, or propagation
   inconsistency;
 - PW-count dependence points to incomplete mixed-space convergence;
