@@ -18,6 +18,14 @@ absolute physical fidelity of that system is outside this milestone.
 - Wannier+PW propagator: exponential propagation in the mixed basis
 - Reference: Full TDDFT started from the same converged ground-state provenance
 
+The initial occupied states are not obtained by merely projecting the Full
+TDDFT orbitals into the mixed basis. They are the occupied eigenstates of the
+complete zero-field DG Hamiltonian in the Wannier+PW space, including all DG
+interface/flux terms. For a non-orthogonal mixed basis, initialization solves
+the generalized eigenproblem
+
+`H_DG C = S C epsilon`.
+
 The local symmetry of individual fragments or Wannier functions is not a
 constraint. For defect systems, local symmetry breaking is physical. A perfect
 crystal may be used as a diagnostic to confirm that the complete Wannier space
@@ -72,21 +80,26 @@ Additional health checks are:
 2. Reduce the existing experimental Wannier+PW `expdiag` branches to one explicit
    namelist-controlled production path. Required scientific choices must not
    remain environment-variable-only controls.
-3. Verify the mixed-basis initial state, Hamiltonian blocks, position operator,
-   and exponential update independently before interpreting the full waveform.
-4. Run a PW-count/cutoff sequence at fixed time step and compare `Pz(t)` against
+3. Assemble the complete zero-field Wannier+PW DG Hamiltonian and overlap,
+   diagonalize `H_DG C = S C epsilon`, occupy its lowest physical eigenstates,
+   and verify the eigen-residual and field-free stationarity before propagation.
+4. Verify the Hamiltonian blocks, position operator, and exponential update
+   independently before interpreting the full waveform.
+5. Run a PW-count/cutoff sequence at fixed time step and compare `Pz(t)` against
    Full TDDFT using one analysis tool and one manifest schema.
-5. Promote the smallest converged Wannier+PW basis satisfying the 5 percent gate
+6. Promote the smallest converged Wannier+PW basis satisfying the 5 percent gate
    to the reference global configuration.
-6. Only after the global gate passes, validate fragment/distributed propagation
+7. Only after the global gate passes, validate fragment/distributed propagation
    against the global result.
 
 ## Failure Handling
 
 Discrepancies are classified before code changes:
 
-- a mismatch at the first step points to initial projection or operator
+- a mismatch at the first step points to full-DG eigenseed or operator
   construction;
+- nonzero field-free motion points first to an incorrect DG eigenseed, missing
+  DG interface terms, or an inconsistent overlap metric;
 - zero-field drift points to basis non-closure, non-Hermiticity, or propagation
   inconsistency;
 - PW-count dependence points to incomplete mixed-space convergence;
@@ -105,4 +118,6 @@ produces invalid data, before collective reductions obscure its origin.
 - automated `Pz(t)` and derived `Jz(t)` comparison;
 - a PW convergence table including the relative RMS gate;
 - regression tests for the production Exp path;
+- an eigen-residual and field-free stationarity report for the occupied
+  full-DG Wannier+PW initial states;
 - documentation of the accepted basis and remaining limitations.

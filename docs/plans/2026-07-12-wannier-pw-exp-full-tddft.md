@@ -24,7 +24,6 @@ Add a Python test that reads `salmon_global.f90` and `inputoutput.f90` and asser
 ```python
 required = {
     "yn_dg_wpw_exp_production": "character(1)",
-    "yn_dg_wpw_exp_init_project": "character(1)",
     "yn_dg_wpw_exp_trace": "character(1)",
 }
 ```
@@ -52,7 +51,6 @@ Use defaults:
 
 ```fortran
 yn_dg_wpw_exp_production = 'n'
-yn_dg_wpw_exp_init_project = 'y'
 yn_dg_wpw_exp_trace = 'n'
 ```
 
@@ -81,11 +79,13 @@ git commit -m "feat: add Wannier PW Exp production controls"
 **Step 1: Write the failing route test**
 
 The source test must assert that production enablement comes only from
-`yn_dg_wpw_exp_production`, initialization projection comes from
-`yn_dg_wpw_exp_init_project`, and tracing comes from
+`yn_dg_wpw_exp_production`, initialization requires
+`yn_dg_full_h_eigen_seed='y'`, and tracing comes from
 `yn_dg_wpw_exp_trace`. It must reject calls to `get_environment_variable`
 for `SALMON_DG_WPW_REDUCED_EXPDIAG`,
-`SALMON_DG_WPW_REDUCED_INIT_PROJECT`, and the reduced Exp trace controls.
+`SALMON_DG_WPW_REDUCED_INIT_PROJECT`, and the reduced Exp trace controls. It
+must also reject `initialize_wpw_reduced_self_projection` from the production
+branch.
 
 It must also assert a production call to a clearly named routine such as:
 
@@ -107,12 +107,14 @@ Rename/refactor the scientifically required part of
 `dryrun_wpw_reduced_expdiag` into `propagate_wpw_exp_production`. Keep optional
 diagnostics separate. The production routine must:
 
-1. construct or reuse the Hermitian mixed Hamiltonian;
-2. add the midpoint length-gauge field term using the complete WW, WP/PW, and PP position blocks;
-3. diagonalize the Hermitian matrix;
-4. apply `exp(-i H_mid dt)` to every occupied mixed coefficient vector;
-5. write the propagated Wannier and BPW-perpendicular coefficients back;
-6. stop rank-locally on non-finite coefficients before any collective reduction.
+1. require occupied initial coefficients from the generalized eigensystem of
+   the complete zero-field DG Hamiltonian, including interface/flux terms;
+2. construct or reuse the Hermitian mixed Hamiltonian;
+3. add the midpoint length-gauge field term using the complete WW, WP/PW, and PP position blocks;
+4. diagonalize the Hermitian matrix;
+5. apply `exp(-i H_mid dt)` to every occupied mixed coefficient vector;
+6. write the propagated Wannier and BPW-perpendicular coefficients back;
+7. stop rank-locally on non-finite coefficients before any collective reduction.
 
 Delete the three required environment-variable switches after their namelist
 replacements are active. Preserve purely diagnostic environment variables only
@@ -137,10 +139,11 @@ git add tests/dg/check_wpw_exp_production_route.py src/rt/dg/rt_dg_integrator_ex
 git commit -m "feat: promote mixed Wannier PW exponential propagation"
 ```
 
-### Task 3: Add zero-field invariants and first-step diagnostics
+### Task 3: Make the full-DG eigensystem the mandatory initial state
 
 **Files:**
 - Create: `tests/dg/check_wpw_exp_invariants.py`
+- Modify: `src/rt/dg/rt_dg_fragment.f90`
 - Modify: `src/rt/dg/rt_dg_integrator_expdiag.f90`
 - Modify: `src/rt/dg/rt_dg_observables.f90`
 
@@ -149,11 +152,18 @@ git commit -m "feat: promote mixed Wannier PW exponential propagation"
 Require production-mode checks for:
 
 ```text
+max occupied residual ||H_DG C - S C epsilon||
+S-orthonormality ||C^H S C - I||
 max_abs(H-H^H)
 occupied mixed-space norm before/after Exp
 maximum coefficient magnitude
 Pz at the initial and first propagated steps
 ```
+
+The test must require the full Wannier+PW DG Hamiltonian, including DG
+interface/flux blocks, and the explicit overlap matrix in the generalized
+eigenproblem. It must reject initialization by projection alone and require the
+lowest occupied physical full-DG eigenvectors to populate the RT coefficients.
 
 The test must assert that non-Hermiticity, non-finite values, or a configurable
 hard norm failure stops before MPI reduction. Normal runs should print only a
@@ -164,11 +174,20 @@ compact first-step summary; per-step output is enabled by the trace namelist.
 Run `python3 tests/dg/check_wpw_exp_invariants.py`.
 Expected: FAIL because the production-specific invariant block is absent.
 
-**Step 3: Implement minimal invariant checks**
+**Step 3: Implement the eigenseed and invariant checks**
 
-Use tolerances based on machine precision and matrix scale for Hermiticity, and
-record norm drift without renormalizing the propagated state. A norm violation
-must reveal the actual propagation error rather than conceal it.
+Reuse and complete the existing `yn_dg_full_h_eigen_seed` generalized-overlap
+path. Assemble `H_DG` only after all DG interface terms and Wannier-PW/PW-PW
+blocks are ready, solve `H_DG C = S C epsilon`, sort the physical eigenpairs,
+and copy the occupied eigenvectors into the production RT coefficients. Use
+tolerances based on machine precision and matrix scale for Hermiticity,
+eigen-residual, and S-orthonormality. Record norm drift without renormalizing the
+propagated state. A violation must reveal the actual error rather than conceal
+it.
+
+Add a field-off stationarity smoke test: after removing the analytically
+expected eigenphases, `Pz`, density, and occupied-subspace projector must remain
+stationary within numerical tolerance.
 
 **Step 4: Test and build**
 
@@ -179,8 +198,8 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add tests/dg/check_wpw_exp_invariants.py src/rt/dg/rt_dg_integrator_expdiag.f90 src/rt/dg/rt_dg_observables.f90
-git commit -m "test: guard Wannier PW Exp invariants"
+git add tests/dg/check_wpw_exp_invariants.py src/rt/dg/rt_dg_fragment.f90 src/rt/dg/rt_dg_integrator_expdiag.f90 src/rt/dg/rt_dg_observables.f90
+git commit -m "feat: seed Wannier PW Exp from full DG eigenstates"
 ```
 
 ### Task 4: Create reproducible Full TDDFT and Wannier+PW input families
@@ -214,8 +233,12 @@ Expected: FAIL because the Stage 2D inputs and manifest are absent.
 **Step 3: Add the input family and manifest**
 
 Derive all four inputs from the same verified converged GS, not from a smoke or
-unconverged GS. Set `yn_dg_wpw_exp_production='y'` for the three reduced-space
-inputs. Record exact restart paths and provenance in comments and the manifest.
+unconverged GS. Set `yn_dg_wpw_exp_production='y'` and
+`yn_dg_full_h_eigen_seed='y'` for the three reduced-space inputs. The imported
+GS supplies the density/potential and basis provenance; it does not directly
+supply the occupied RT coefficients. Those coefficients must be replaced by
+the occupied eigenstates of the complete DG Wannier+PW Hamiltonian. Record exact
+restart paths and provenance in comments and the manifest.
 
 **Step 4: Run the parser test and 20-step smoke runs**
 
