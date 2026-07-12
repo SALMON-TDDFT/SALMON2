@@ -22,8 +22,42 @@ module lcfo_wannier_sawf_orchestrator
   public :: build_sawf_environment_execution_plan
   public :: validate_sawf_environment_receipts
   public :: build_sawf_seed_bundles
+  public :: complete_sawf_seed_bundle
 
 contains
+
+  subroutine complete_sawf_seed_bundle(bundle,receipt,ok,message)
+    type(t_sawf_seed_bundle),intent(in)::bundle
+    type(t_sawf_environment_receipt),intent(inout)::receipt
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    character(16),parameter::suffix(6)=[character(16)::'win','eig','amn','mmn','dmn','chk']
+    character(1024)::filename
+    character(256)::stored_fingerprint
+    integer::item,unit,ios
+    logical::exists
+
+    ok=.false.;message='';receipt%completed=.false.
+    if(.not.receipt%requires_execution.or.bundle%environment/=receipt%environment.or. &
+        trim(bundle%same_supercell_fingerprint)/=trim(receipt%same_supercell_fingerprint))then
+      message='SAWF seed bundle and execution receipt provenance disagree';return
+    end if
+    do item=1,size(suffix)
+      filename=trim(bundle%directory)//'/'//trim(bundle%seedname)//'.'//trim(suffix(item))
+      inquire(file=trim(filename),exist=exists)
+      if(.not.exists)then
+        message='SAWF seed bundle artifact is missing: '//trim(filename);return
+      end if
+    end do
+    filename=trim(bundle%directory)//'/'//trim(bundle%seedname)//'.sawf-fingerprint'
+    open(newunit=unit,file=trim(filename),status='old',action='read',iostat=ios)
+    if(ios/=0)then;message='SAWF seed bundle fingerprint is missing';return;end if
+    read(unit,'(a)',iostat=ios)stored_fingerprint;close(unit)
+    if(ios/=0.or.trim(stored_fingerprint)/=trim(receipt%same_supercell_fingerprint))then
+      message='SAWF seed bundle belongs to a different supercell fingerprint';return
+    end if
+    receipt%completed=.true.;ok=.true.
+  end subroutine complete_sawf_seed_bundle
 
   subroutine build_sawf_seed_bundles(receipts,root_directory,base_seedname,bundles,ok,message)
     type(t_sawf_environment_receipt),intent(in)::receipts(:)

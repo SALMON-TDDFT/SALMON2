@@ -17,6 +17,7 @@ required = [
     "generated_independently",
     "requires_execution",
     "same_supercell_fingerprint",
+    "complete_sawf_seed_bundle",
 ]
 for token in required:
     assert token in source, f"missing hierarchical orchestrator contract: {token}"
@@ -39,12 +40,19 @@ driver = r'''program check_orchestrator
     [.true.,.false.,.true.],'cell-A',receipt,ok,msg)
   call require(ok,'valid plan')
   call require(all(receipt%requires_execution.eqv.[.true.,.false.,.true.]),'execution schedule')
-  call build_sawf_seed_bundles(receipt,'/tmp/sawf','seed',bundle,ok,msg)
+  call build_sawf_seed_bundles(receipt,'.','seed',bundle,ok,msg)
   call require(ok.and.size(bundle)==2,'representative seed bundles')
   call require(bundle(1)%environment==1.and.bundle(2)%environment==3,'bundle environments')
   call require(index(bundle(1)%directory,'environment-000001')>0,'isolated seed directory')
   call require(trim(bundle(1)%seedname)=='seed-env-000001','unique seed name')
-  receipt(1)%completed=.true.;receipt(3)%completed=.true.
+  call complete_sawf_seed_bundle(bundle(1),receipt(1),ok,msg)
+  call require(ok.and.receipt(1)%completed,'first artifact bundle completed: '//trim(msg))
+  bundle(2)%directory='missing-environment'
+  call complete_sawf_seed_bundle(bundle(2),receipt(3),ok,msg)
+  call require(.not.ok.and..not.receipt(3)%completed,'missing artifact rejected')
+  bundle(2)%directory='./environment-000003'
+  call complete_sawf_seed_bundle(bundle(2),receipt(3),ok,msg)
+  call require(ok.and.receipt(3)%completed,'second artifact bundle completed: '//trim(msg))
   call validate_sawf_environment_receipts(receipt,'cell-A',ok,msg)
   call require(ok,'representative receipts accepted: '//trim(msg))
   receipt(1)%completed=.false.
@@ -63,6 +71,13 @@ end program'''
 
 with tempfile.TemporaryDirectory(prefix="sawf-orchestrator-") as td:
     td = Path(td)
+    for environment in (1, 3):
+        directory = td / f"environment-{environment:06d}"
+        directory.mkdir()
+        seed = f"seed-env-{environment:06d}"
+        for suffix in ("win", "eig", "amn", "mmn", "dmn", "chk"):
+            (directory / f"{seed}.{suffix}").write_text(f"{suffix}\n")
+        (directory / f"{seed}.sawf-fingerprint").write_text("cell-A\n")
     (td / "driver.f90").write_text(driver)
     result = subprocess.run(
         [fc, str(ROOT / "src/gs/dc/lcfo_wannier_sawf_orchestrator.f90"),
