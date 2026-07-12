@@ -34,8 +34,45 @@ module lcfo_wannier_sawf_templates
   public :: stitch_sawf_buffered_neighbor_gauge
   public :: build_sawf_supercell_fingerprint, build_sawf_local_environment_fingerprint
   public :: select_sawf_environment_materialization
+  public :: validate_sawf_structure_class
 
 contains
+  subroutine validate_sawf_structure_class(structure_class,environment_key,vacuum_fraction,orbit,ok,message)
+    character(*),intent(in)::structure_class,environment_key(:)
+    real(8),intent(in)::vacuum_fraction(:);integer,intent(in)::orbit(:)
+    logical,intent(out)::ok;character(*),intent(out)::message
+    integer::i,j,unique_count
+    ok=.false.;message='';unique_count=0
+    if(size(environment_key)<=0.or.size(vacuum_fraction)/=size(environment_key).or. &
+       size(orbit)/=size(environment_key).or.any(vacuum_fraction<0d0).or. &
+       any(vacuum_fraction>1d0).or.any(orbit<=0))then
+      message='SAWF structure-class measured geometry arrays are invalid';return
+    end if
+    do i=1,size(environment_key)
+      if(len_trim(environment_key(i))==0)then;message='SAWF environment fingerprint is blank';return;end if
+      do j=1,i-1;if(environment_key(j)==environment_key(i))exit;end do
+      if(j==i)unique_count=unique_count+1
+    end do
+    select case(trim(structure_class))
+    case('auto','amorphous')
+      ok=.true.
+    case('crystal')
+      ok=unique_count==1.and.maxval(orbit)==1
+      if(.not.ok)message='SAWF crystal class has symmetry-inequivalent measured environments'
+    case('defect')
+      ok=unique_count>=2.and.maxval(orbit)>=2
+      if(.not.ok)message='SAWF defect class requires bulk and inequivalent local environments'
+    case('interface')
+      ok=unique_count>=2.and.maxval(orbit)>=2
+      if(.not.ok)message='SAWF interface class requires multiple measured local environments'
+    case('surface')
+      ok=maxval(vacuum_fraction)>1d-12
+      if(.not.ok)message='SAWF surface class requires measured vacuum occupancy'
+    case default
+      message='SAWF structure class is invalid'
+    end select
+  end subroutine
+
   subroutine select_sawf_environment_materialization(orbit,fragment_maps,representative_fragment, &
       operation_index,generate_independently,ok,message)
     integer,intent(in)::orbit(:),fragment_maps(:,:)
@@ -103,7 +140,7 @@ contains
     integer::i,j,k,tmp_i,npair
     real(8)::tmp_r
     ok=.false.;message='';key=''
-    if(len_trim(supercell_key)==0.or.size(species)<=0.or.size(relative_coordinates,1)/=3.or. &
+    if(len_trim(supercell_key)==0.or.size(relative_coordinates,1)/=3.or. &
        size(relative_coordinates,2)/=size(species).or.vacuum_fraction<0d0.or.vacuum_fraction>1d0.or. &
        .not.all(ieee_is_finite(relative_coordinates)).or..not.ieee_is_finite(vacuum_fraction))then
       message='SAWF local-environment fingerprint input is invalid';return

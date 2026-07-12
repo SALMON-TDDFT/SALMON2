@@ -9,11 +9,14 @@ FC=shutil.which('gfortran')
 if not FC: raise SystemExit('gfortran is required')
 driver=r'''program check_environment_fingerprint
  use lcfo_wannier_sawf_templates, only: build_sawf_supercell_fingerprint, &
-   build_sawf_local_environment_fingerprint
+   build_sawf_local_environment_fingerprint, validate_sawf_structure_class
  implicit none
  real(8)::lattice(3,3),xyz(3,4),relative(3,3),rotated(3,3)
  integer::species(4),local_species(3),grid(3),buffer(3),permutation(3)
  logical::pbc(3),ok
+ real(8)::vacuum_by_env(3)
+ integer::orbit_by_env(3)
+ character(256)::keys(3)
  character(256)::super_a,super_b,bulk_a,bulk_b,defect,interface_env,surface_env,amorphous,msg
  lattice=0;lattice(1,1)=8;lattice(2,2)=8;lattice(3,3)=8
  xyz=reshape([0d0,0d0,0d0,2d0,0d0,0d0,4d0,0d0,0d0,6d0,0d0,0d0],[3,4])
@@ -39,6 +42,20 @@ driver=r'''program check_environment_fingerprint
  relative(1,3)=1.137d0;call local(local_species,relative,0d0,amorphous)
  call req(all([bulk_a/=defect,bulk_a/=interface_env,bulk_a/=surface_env,bulk_a/=amorphous]), &
    'nonbulk environments remain independent')
+ keys=[bulk_a,bulk_a,bulk_a];vacuum_by_env=0;orbit_by_env=1
+ call validate_sawf_structure_class('crystal',keys,vacuum_by_env,orbit_by_env,ok,msg)
+ call req(ok,'crystal class')
+ keys(3)=defect;orbit_by_env(3)=2
+ call validate_sawf_structure_class('defect',keys,vacuum_by_env,orbit_by_env,ok,msg)
+ call req(ok,'defect class')
+ call validate_sawf_structure_class('crystal',keys,vacuum_by_env,orbit_by_env,ok,msg)
+ call req(.not.ok,'crystal rejects inequivalent environment')
+ call validate_sawf_structure_class('surface',keys,[0d0,.5d0,1d0],orbit_by_env,ok,msg)
+ call req(ok,'surface vacuum class')
+ call validate_sawf_structure_class('surface',keys,vacuum_by_env,orbit_by_env,ok,msg)
+ call req(.not.ok,'surface requires measured vacuum')
+ call validate_sawf_structure_class('interface',keys,vacuum_by_env,orbit_by_env,ok,msg)
+ call req(ok,'interface multiple environments')
  write(*,'(a)')'PASS exact same-supercell local-environment fingerprints'
 contains
  subroutine local(z,r,vacuum,key)

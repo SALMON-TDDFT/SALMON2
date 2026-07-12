@@ -40,6 +40,7 @@ module lcfo_flux
   use lcfo_wannier_sawf_templates, only: validate_sawf_actual_group_operation, &
     build_sawf_environment_orbits, build_sawf_supercell_fingerprint, &
     build_sawf_local_environment_fingerprint, select_sawf_environment_materialization
+  use lcfo_wannier_sawf_templates, only: validate_sawf_structure_class
   use lcfo_wannier_sawf_win, only: activate_sawf_win, deactivate_sawf_win, &
     t_atomic_win_writer, begin_atomic_win, finish_atomic_win, abort_atomic_win
   use lcfo_wannier_command, only: select_wannier90_command, execute_wannier90_command, &
@@ -6601,7 +6602,7 @@ contains
       use communication, only: comm_get_max,comm_bcast
       use salmon_global, only: izatom, sysname, wannier_num_wann, &
         wannier_site_symmetry, wannier_symmetry_file, wannier_symmetry_tolerance, &
-        wannier_sawf_generation
+        wannier_sawf_generation,wannier_sawf_structure_class
       use salmon_math, only: matrix_inverse
       use, intrinsic :: iso_fortran_env, only: int64
       implicit none
@@ -6619,6 +6620,7 @@ contains
       real(8) :: singular_min, singular_max, closure_residual, closure_tolerance
       real(8) :: max_grid_residual,center_grid(3)
       real(8), allocatable :: fractional_positions(:,:),d_wann_real(:,:,:)
+      real(8), allocatable :: sawf_vacuum_fraction(:)
       complex(8), allocatable :: d_band_local(:,:),d_band_sum(:,:),d_wann(:,:),amn(:,:)
       complex(8), allocatable :: d_band_set(:,:,:),d_wann_set(:,:,:)
       real(8) :: representation_residual
@@ -6771,11 +6773,11 @@ contains
           sawf_defect_intersects(dc%n_frag),sawf_environment_orbit(dc%n_frag), &
           sawf_regenerate_environment(dc%n_frag),sawf_environment_key(dc%n_frag), &
           sawf_representative_fragment(dc%n_frag),sawf_materialize_operation(dc%n_frag), &
-          sawf_generate_independently(dc%n_frag),stat=allocation_status)
+          sawf_generate_independently(dc%n_frag),sawf_vacuum_fraction(dc%n_frag),stat=allocation_status)
         if(allocation_status/=0) call lcfo_sawf_fatal( &
           'SAWF hierarchical environment-orbit allocation failed on this rank')
         call build_sawf_fragment_environment_fingerprints(lattice,fractional_positions,species,mesh, &
-          fragment_origin,fragment_shape,sawf_environment_key,local_ok,message)
+          fragment_origin,fragment_shape,sawf_environment_key,sawf_vacuum_fraction,local_ok,message)
         if(.not.local_ok)then
           write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-ENV] rank=',dc%id_tot,' ',trim(message)
           call lcfo_sawf_fatal('SAWF local-environment fingerprint construction failed')
@@ -6783,6 +6785,7 @@ contains
         sawf_environment_equivalent=.false.; sawf_defect_intersects=.false.
         do ifrag=1,dc%n_frag
           sawf_environment_equivalent(ifrag,ifrag)=.true.
+          if(trim(wannier_sawf_structure_class)=='amorphous')cycle
           do isym=1,size(symmetry_operations)
             if(symmetry_fragment_maps(ifrag,isym)>0 .and. &
                 sawf_environment_key(ifrag)==sawf_environment_key(symmetry_fragment_maps(ifrag,isym))) then
@@ -6796,6 +6799,12 @@ contains
         if(.not.local_ok) then
           write(*,'(1x,a,i0,2a)') '[DC-LCFO-SAWF-ORBIT] rank=',dc%id_tot,' ',trim(message)
           call lcfo_sawf_fatal('SAWF hierarchical environment-orbit construction failed')
+        end if
+        call validate_sawf_structure_class(wannier_sawf_structure_class,sawf_environment_key, &
+          sawf_vacuum_fraction,sawf_environment_orbit,local_ok,message)
+        if(.not.local_ok)then
+          write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-CLASS] rank=',dc%id_tot,' ',trim(message)
+          call lcfo_sawf_fatal('SAWF declared structure class disagrees with measured geometry')
         end if
         call select_sawf_environment_materialization(sawf_environment_orbit, &
           symmetry_fragment_maps,sawf_representative_fragment,sawf_materialize_operation, &
@@ -6990,14 +6999,15 @@ contains
     end subroutine generate_sawf_dmn
 
     subroutine build_sawf_fragment_environment_fingerprints(lattice,fractional_positions,species, &
-        mesh,fragment_origin,fragment_shape,environment_key,ok,message)
+        mesh,fragment_origin,fragment_shape,environment_key,vacuum_by_environment,ok,message)
       use salmon_global, only: file_pseudo,xc,wannier_projection,wannier_num_bands,wannier_num_wann
       real(8),intent(in)::lattice(3,3),fractional_positions(:,:)
       integer,intent(in)::species(:),mesh(3),fragment_origin(:,:),fragment_shape(:,:)
       character(256),intent(out)::environment_key(:)
+      real(8),intent(out)::vacuum_by_environment(:)
       logical,intent(out)::ok;character(*),intent(out)::message
       integer::ifrag,ia,axis,count,idx(3),start(3),extent(3),delta
-      integer,allocatable::local_species(:)
+      integer,allocatable::local_species(:),local_count(:)
       real(8),allocatable::relative(:,:)
       real(8)::center_fractional(3),vacuum_fraction
       logical::inside,pbc(3)
@@ -7005,7 +7015,8 @@ contains
       character(1024)::pseudo_signature
       character(64)::band_window,shell
       ok=.false.;message='';pbc=.true.;pseudo_signature=''
-      if(size(environment_key)/=size(fragment_origin,2).or.size(fragment_shape,2)/=size(environment_key))then
+      if(size(environment_key)/=size(fragment_origin,2).or.size(fragment_shape,2)/=size(environment_key).or. &
+          size(vacuum_by_environment)/=size(environment_key))then
         message='SAWF fragment fingerprint dimensions are inconsistent';return
       end if
       do ia=1,min(size(file_pseudo),maxval(species))
@@ -7018,7 +7029,18 @@ contains
         dc%nxyz_buffer,trim(pseudo_signature),trim(band_window),trim(shell),trim(xc), &
         'SALMON-SAWF-schema-2',supercell_key,ok,message)
       if(.not.ok)return
-      allocate(local_species(size(species)),relative(3,size(species)))
+      allocate(local_species(size(species)),relative(3,size(species)),local_count(size(environment_key)))
+      local_count=0
+      do ifrag=1,size(environment_key)
+        start=fragment_origin(:,ifrag)-dc%nxyz_buffer;extent=fragment_shape(:,ifrag)+2*dc%nxyz_buffer
+        do ia=1,size(species)
+          idx=1+modulo(floor(fractional_positions(:,ia)*real(mesh,8)),mesh);inside=.true.
+          do axis=1,3
+            delta=modulo((idx(axis)-1)-start(axis),mesh(axis));if(delta>=extent(axis))inside=.false.
+          end do
+          if(inside)local_count(ifrag)=local_count(ifrag)+1
+        end do
+      end do
       do ifrag=1,size(environment_key)
         count=0;start=fragment_origin(:,ifrag)-dc%nxyz_buffer
         extent=fragment_shape(:,ifrag)+2*dc%nxyz_buffer
@@ -7035,10 +7057,8 @@ contains
           relative(:,count)=fractional_positions(:,ia)-center_fractional
           relative(:,count)=relative(:,count)-dnint(relative(:,count))
         end do
-        if(count==0)then
-          message='SAWF core+buffer local environment contains no atoms';return
-        end if
-        vacuum_fraction=max(0d0,1d0-dble(count)/dble(max(1,product(extent))))
+        vacuum_fraction=1d0-dble(count)/dble(max(1,maxval(local_count)))
+        vacuum_by_environment(ifrag)=vacuum_fraction
         call build_sawf_local_environment_fingerprint(supercell_key,local_species(:count), &
           relative(:,:count),vacuum_fraction,environment_key(ifrag),ok,message)
         if(.not.ok)return
