@@ -44,9 +44,12 @@ module lcfo_flux
   use lcfo_wannier_sawf_templates, only: validate_sawf_structure_class
   use lcfo_wannier_sawf_templates, only: build_sawf_file_content_digest
   use lcfo_wannier_sawf_templates, only: measure_sawf_vacuum_occupancy
+  use lcfo_wannier_sawf_templates, only: sawf_closest_periodic_cartesian
   use lcfo_wannier_sawf_orchestrator, only: t_sawf_environment_receipt,t_sawf_seed_bundle, &
     build_sawf_environment_execution_plan,build_sawf_seed_bundles
-  use lcfo_wannier_sawf_seed, only: select_sawf_local_complete_shells
+  use lcfo_wannier_sawf_seed, only: select_sawf_local_complete_shells, &
+    build_sawf_local_seed_matrices,write_sawf_local_eig_amn_mmn, &
+    solve_sawf_local_generalized_eigensystem
   use lcfo_wannier_sawf_win, only: activate_sawf_win, deactivate_sawf_win, &
     t_atomic_win_writer, begin_atomic_win, finish_atomic_win, abort_atomic_win
   use lcfo_wannier_command, only: select_wannier90_command, execute_wannier90_command, &
@@ -6918,6 +6921,15 @@ contains
         call clear_sawf_fragment_state_cache(state_cache)
         call lcfo_sawf_fatal('SAWF source fragment state cache preparation failed')
       end if
+      if(trim(wannier_sawf_generation)=='hierarchical'.and.dc%id_frag==0.and. &
+          sawf_environment_receipts(dc%i_frag)%requires_execution)then
+        call write_sawf_representative_local_seed(state_cache%source,channels, &
+          sawf_selected_channels,sawf_seed_bundles,local_ok,message)
+        if(.not.local_ok)then
+          write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-LOCAL-SEED] rank=',dc%id_tot,' ',trim(message)
+          call lcfo_sawf_fatal('SAWF representative local eigensystem/seed construction failed')
+        end if
+      end if
       local_ok=.true.; message=''
       if(.not.split_fragment_global_mode) call build_sawf_closed_fragment_seed_basis( &
         nband_wann,mesh,fragment_origin,fragment_shape,symmetry_operations, &
@@ -7897,6 +7909,90 @@ contains
       npoints=int(product64)
       ok=.true.
     end subroutine checked_sawf_fragment_point_count
+
+    subroutine write_sawf_representative_local_seed(entry,projection_channels,selected_channels, &
+        bundles,ok,message)
+      use salmon_global, only: wannier_projection_width
+      use salmon_math, only: matrix_inverse
+      type(t_sawf_fragment_state_entry),intent(in)::entry
+      type(t_sawf_projection_channel),intent(in)::projection_channels(:)
+      integer,intent(in)::selected_channels(:)
+      type(t_sawf_seed_bundle),intent(in)::bundles(:)
+      logical,intent(out)::ok
+      character(*),intent(out)::message
+      real(8),parameter::hartree_to_ev=27.211386245988d0
+      real(8),allocatable::h_basis(:,:),energy_hartree(:),energy_ev(:)
+      complex(8),allocatable::states(:,:),projection(:,:),phase_factor(:,:),amn_local(:,:),mmn_local(:,:,:)
+      real(8)::a1(3),a2(3),a3(3),lattice(3,3),lattice_inverse(3,3),gcart(3,3),x,y,z
+      integer,parameter::neighbor_gvec(3,3)=reshape([1,0,0,0,1,0,0,0,1],[3,3])
+      integer::bundle_index,channel,ix,iy,iz,gx,gy,gz,start(3),k,npoint,io,jo,i_halo,nbasis
+
+      ok=.false.;message='';bundle_index=0;nbasis=entry%n_basis
+      do k=1,size(bundles)
+        if(bundles(k)%environment==entry%fragment)then;bundle_index=k;exit;end if
+      end do
+      if(bundle_index==0.or..not.allocated(entry%buffer_basis).or.nbasis<=0.or. &
+          size(entry%buffer_basis,2)/=nbasis.or.size(selected_channels)<=0)then
+        message='SAWF representative local seed payload dimensions are inconsistent';return
+      end if
+      allocate(h_basis(nbasis,nbasis));h_basis=0d0
+      do jo=1,nbasis;do io=1,nbasis
+        h_basis(io,jo)=0.5d0*(mat_H_local(io,jo,1)+mat_H_local(jo,io,1))
+        do i_halo=1,n_halo
+          h_basis(io,jo)=h_basis(io,jo)+0.25d0*(halo(i_halo)%mat_H_local(jo,io,1)+ &
+            halo(i_halo)%mat_H_local(io,jo,1))
+        end do
+      end do;end do
+      call solve_sawf_local_generalized_eigensystem(entry%buffer_basis,hvol,h_basis, &
+        1d-10,states,energy_hartree,ok,message)
+      if(.not.ok)return
+      if(size(selected_channels)>size(states,2))then
+        message='SAWF local complete projection shell exceeds generalized eigensystem rank';ok=.false.;return
+      end if
+      npoint=size(states,1)
+      allocate(projection(npoint,size(selected_channels)),phase_factor(npoint,3), &
+        amn_local(size(states,2),size(selected_channels)),mmn_local(size(states,2),size(states,2),3), &
+        energy_ev(size(energy_hartree)))
+      call get_lattice_vectors(a1,a2,a3);lattice(:,1)=a1;lattice(:,2)=a2;lattice(:,3)=a3
+      lattice_inverse=lattice;call matrix_inverse(lattice_inverse)
+      do channel=1,3
+        call reciprocal_vector_from_index(neighbor_gvec(:,channel),a1,a2,a3, &
+          gcart(1,channel),gcart(2,channel),gcart(3,channel))
+      end do
+      start=dc%ixyz_frag(:,entry%fragment)-entry%buffer_width;k=0
+      do iz=1,entry%buffer_shape(3);do iy=1,entry%buffer_shape(2);do ix=1,entry%buffer_shape(1)
+        gx=1+modulo(start(1)+ix-1,dc%lg_tot%num(1));gy=1+modulo(start(2)+iy-1,dc%lg_tot%num(2))
+        gz=1+modulo(start(3)+iz-1,dc%lg_tot%num(3));k=k+1
+        x=dc%lg_tot%coordinate(gx,1);y=dc%lg_tot%coordinate(gy,2);z=dc%lg_tot%coordinate(gz,3)
+        do channel=1,size(selected_channels)
+          projection(k,channel)=cmplx(sawf_local_projection_value([x,y,z], &
+            projection_channels(selected_channels(channel)),lattice,lattice_inverse, &
+            wannier_projection_width),0d0,kind=8)
+        end do
+        do channel=1,3
+          phase_factor(k,channel)=exp(cmplx(0d0,-dot_product(gcart(:,channel),[x,y,z]),kind=8))
+        end do
+      end do;end do;end do
+      call build_sawf_local_seed_matrices(states,projection,phase_factor,hvol,amn_local,mmn_local,ok,message)
+      if(.not.ok)return
+      energy_ev=energy_hartree*hartree_to_ev
+      call write_sawf_local_eig_amn_mmn(bundles(bundle_index)%directory,bundles(bundle_index)%seedname, &
+        energy_ev,amn_local,mmn_local,neighbor_gvec,ok,message)
+    end subroutine write_sawf_representative_local_seed
+
+    real(8) function sawf_local_projection_value(position,channel,lattice,lattice_inverse,sigma) result(value)
+      real(8),intent(in)::position(3),lattice(3,3),lattice_inverse(3,3),sigma
+      type(t_sawf_projection_channel),intent(in)::channel
+      real(8)::fractional_delta(3),cartesian_delta(3),scaled(3),r2
+      logical::image_ok
+      fractional_delta=matmul(lattice_inverse,position-dc%system_tot%rion(:,channel%atom))
+      call sawf_closest_periodic_cartesian(lattice,fractional_delta,cartesian_delta,image_ok)
+      if(.not.image_ok.or.sigma<=0d0)then;value=0d0;return;end if
+      r2=sum(cartesian_delta**2)
+      if(r2>(8d0*sigma)**2)then;value=0d0;return;end if
+      scaled=cartesian_delta/sigma
+      value=sawf_real_harmonic_value(channel%l,channel%m,scaled)*exp(-0.5d0*r2/(sigma*sigma))
+    end function sawf_local_projection_value
 
     subroutine reduce_sawf_band_matrix(local_matrix,sum_matrix,nband_wann)
       use, intrinsic :: iso_fortran_env, only: int64

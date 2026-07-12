@@ -37,6 +37,7 @@ module lcfo_wannier_sawf_templates
   public :: validate_sawf_structure_class
   public :: build_sawf_file_content_digest
   public :: measure_sawf_vacuum_occupancy
+  public :: sawf_closest_periodic_cartesian
 
 contains
   subroutine measure_sawf_vacuum_occupancy(density,threshold,fraction,ok,message)

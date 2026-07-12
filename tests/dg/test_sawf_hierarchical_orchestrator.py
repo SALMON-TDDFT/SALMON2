@@ -26,6 +26,11 @@ assert "call build_sawf_environment_execution_plan" in flux
 assert "call build_sawf_seed_bundles" in flux
 assert "call atomic_create_directory(sawf_seed_bundles" in flux
 assert "call select_sawf_local_complete_shells" in flux
+assert "call solve_sawf_local_generalized_eigensystem" in flux
+assert "call write_sawf_representative_local_seed" in flux
+assert "esp_tot(1:nband_wann" not in flux.split(
+    "subroutine write_sawf_representative_local_seed", 1
+)[1].split("end subroutine write_sawf_representative_local_seed", 1)[0]
 
 fc = shutil.which("gfortran")
 if not fc:
