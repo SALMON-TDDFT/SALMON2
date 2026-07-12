@@ -80,30 +80,49 @@ module gicov_integral_ssbe
   !
   !     || Y(x) - I_h Y(x) ||  <=  C_p h^(p+1),      h = dk ~ 1/N_k,
   !
-  ! i.e. refining the k-mesh drops the floor by 20*(p+1)*log10(N2/N1) dB.  The
-  ! graphene measurement confirmed the exponent for the p=1 (linear) predecessor
-  ! to 0.13 dB: k33 -> k63 gave -11.33 dB against the -11.2 dB predicted by
-  ! h^2, so the effective order was p = 1.0 and NO second noise source was
-  ! hiding underneath it.  Raising the degree is therefore the direct lever on
-  ! the floor, and p = 3 buys another factor h^2 (~ -22 dB per k33->k63 step).
+  ! i.e. refining the k-mesh drops the floor by 20*(p+1)*log10(N2/N1) dB.  Two
+  ! independent measurements pin this down:
+  !
+  !   - graphene, on the REAL propagator: the k33 -> k63 floor drop was -11.33 dB
+  !     against the -11.2 dB predicted by h^2 at p=1 -- a 0.13 dB match, which
+  !     fixes the effective order at 1.0 AND rules out any second noise source
+  !     hiding underneath (the floor is the interpolation, and nothing else);
+  !   - the non-linear-band toy: h^(p+1) reproduced to within 3% (p=1 slope 1.94,
+  !     p=3 slope 3.86), with every competing suspect (zheev phase jitter, dt
+  !     error, polar-projection drift) excluded at machine precision.
+  !
+  ! The toy also fixed the DEGREE actually needed.  A LINEAR band is p-BLIND (any
+  ! interpolant is exact on it, which is why the original linear-band toy was
+  ! vacuous); the residual only appears on a NON-LINEAR band, and there p=3 is
+  ! NOT enough -- it still leaves 3.5 dB (band curvature lambda=0.3) to 10 dB
+  ! (lambda=0.6) above the exact-transport floor.  p=5 REACHES that floor (0.00 dB
+  ! at lambda=0.3; within 0.3 dB at lambda=0.6).  Hence the production degree is
+  ! FIVE -- a 6-point Lagrange stencil.
+  !
+  ! C^1 continuity across nodes is deliberately NOT pursued (no Hermite): the
+  ! 6-point Lagrange interpolant is only C^0, but its error falls as h^6, so the
+  ! kink at each node crossing enters at the SAME order and sinks with it.
+  ! Smoothness would cost derivative data and buy no measurable floor.
   !
   ! Changing gicov_int_p_order is the WHOLE switch: the stencil width, the halo
   ! the cache is padded by, and the Lagrange weights all follow from it (the
-  ! weights are built by the general cardinal formula, not hardcoded), so a p=5
-  ! scan is a one-line edit here.  p must be ODD (an even-sized centred stencil).
+  ! weights are built by the general cardinal formula, never hardcoded), so a
+  ! p=7 scan stays a one-line edit.  p must be ODD (even-sized centred stencil).
   !
-  !   nsten = p + 1                   nodes per evaluation (4 for p=3)
-  !   halo  = nsten/2 - 1             extra cached shifts on EACH side (1 for p=3)
+  !   nsten = p + 1                   nodes per evaluation  (6 for p=5)
+  !   halo  = nsten/2                 extra cached shifts on EACH side (3 for p=5)
   !
   ! halo: with frac in (0,1) the centred window is [n0-(nsten/2-1), n0+nsten/2]
-  ! and |n0| <= j_max with n0 = +j_max reachable only at frac = 0 (which is
-  ! node-exact and needs no window at all), so padding the cache by nsten/2-1 on
-  ! each side covers every window that is actually built.  Cost: the cache grows
-  ! (2*j_max+3)/(2*j_max+1) ~ 1.1-1.2x (~15% at graphene j_max ~ 5-9).
+  ! and |n0| <= j_max, so nsten/2 extra shifts per side cover EVERY window that
+  ! can be asked for -- including the n0 = +j_max edge -- with no reliance on the
+  ! one-sided fallback.  Cost: the cache grows (2*j_max+2*halo+1)/(2*j_max+1) =
+  ! +22% at graphene k99 (j_max=13), +46% at Si (j_max=6).  The wider stencil
+  ! costs +2-5% of runtime overall: the step is dominated by the per-step zheev
+  ! and by the one-off cache build, not by the weighted sum.
   !-------------------------------------------------------------------
-  integer, parameter, public :: gicov_int_p_order = 3
+  integer, parameter, public :: gicov_int_p_order = 5
   integer, parameter, public :: gicov_int_nsten   = gicov_int_p_order + 1
-  integer, parameter, public :: gicov_int_halo    = gicov_int_nsten / 2 - 1
+  integer, parameter, public :: gicov_int_halo    = gicov_int_nsten / 2
 
 contains
 
@@ -147,8 +166,8 @@ contains
   ! jmax here is the CACHED span, i.e. gicov_int_jmax_cache(pulse span) -- the
   ! physical span PLUS the degree-p stencil halo, since those padding shifts are
   ! really allocated.  Feeding the bare pulse span would under-count the cache by
-  ! (2j+1)/(2j+3) and is precisely the drift the jmax_cache function exists to
-  ! prevent (the lint memory gate applies the same padding).
+  ! (2j+1)/(2j+2*halo+1) and is precisely the drift the jmax_cache function
+  ! exists to prevent (the lint memory gate applies the same padding).
   ! (The factor is 80 = 5 matrices x 16 bytes; F~0 must be TRANSPORTED and
   ! INTERPOLATED exactly like H~ -- between nodes the interpolated H~ and F~0 no
   ! longer share an eigenbasis, so the occupation reference cannot be recovered
@@ -418,8 +437,8 @@ contains
   ! ns cached nodes.  Written in ABSOLUTE node coordinates (not offsets from the
   ! bracket) so that the SAME routine serves the centred window and the one-sided
   ! windows at the ends of the cache without any special case, and the general
-  ! product form -- rather than the four hardcoded cubic weights -- is what makes
-  ! a degree change a one-line edit of gicov_int_p_order.
+  ! product form -- rather than a hardcoded table of weights for one degree -- is
+  ! what makes a degree change a one-line edit of gicov_int_p_order.
   !
   ! Exactness at the nodes is structural, not a tolerance: at xs = n_i every
   ! other numerator carries a zero factor, so w_j = 0 for j /= i and w_i = 1.
@@ -456,7 +475,7 @@ contains
   !      single node with weight 1 (nsten_out = 1), and gicov_int_interp_p then
   !      COPIES it: the interpolator is bypassed entirely rather than trusted to
   !      reproduce the node through a weighted sum.  This is the same node-exact
-  !      discipline the vnl_kappa 4-point stencil already follows, and it keeps
+  !      discipline the vnl_kappa Lagrange stencil already follows, and it keeps
   !      the legal endpoint a = +j_max*dk (frac = 0, the far turning point of the
   !      pulse) from ever asking for a node past the cache.
   !
