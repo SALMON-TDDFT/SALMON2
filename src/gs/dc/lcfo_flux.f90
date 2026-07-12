@@ -6595,10 +6595,12 @@ contains
     end subroutine activate_sawf_win_collective
 
     subroutine generate_sawf_dmn(nband_wann)
-      use lcfo_wannier_sawf_templates, only: validate_sawf_actual_group_operation
+      use lcfo_wannier_sawf_templates, only: validate_sawf_actual_group_operation, &
+        build_sawf_environment_orbits
       use communication, only: comm_get_max,comm_bcast
       use salmon_global, only: izatom, sysname, wannier_num_wann, &
-        wannier_site_symmetry, wannier_symmetry_file, wannier_symmetry_tolerance
+        wannier_site_symmetry, wannier_symmetry_file, wannier_symmetry_tolerance, &
+        wannier_sawf_generation
       use salmon_math, only: matrix_inverse
       use, intrinsic :: iso_fortran_env, only: int64
       implicit none
@@ -6608,6 +6610,7 @@ contains
       integer :: mesh(3)
       integer, allocatable :: species(:), fragment_origin(:,:), fragment_shape(:,:)
       integer, allocatable :: symmetry_fragment_map(:),symmetry_fragment_maps(:,:)
+      integer, allocatable :: sawf_environment_orbit(:)
       real(8) :: a1(3), a2(3), a3(3), lattice(3,3), lattice_inverse(3,3)
       real(8) :: singular_min, singular_max, closure_residual, closure_tolerance
       real(8) :: max_grid_residual,center_grid(3)
@@ -6619,6 +6622,8 @@ contains
       type(t_sawf_fragment_state_cache) :: state_cache
       type(t_sawf_closed_basis) :: closed_basis
       logical :: local_ok,grid_map_ok,fragment_map_ok,center_available,split_fragment_global_mode
+      logical, allocatable :: sawf_environment_equivalent(:,:),sawf_defect_intersects(:), &
+        sawf_regenerate_environment(:)
       integer :: max_targets_per_source
       character(512) :: message
       character(256) :: symmetry_filename,allocation_message,dmn_filename,amn_filename
@@ -6713,6 +6718,12 @@ contains
       symmetry_fragment_maps=0
 
       do isym=1,size(symmetry_operations)
+        call validate_sawf_actual_group_operation(.true.,.false.,local_ok,message)
+        if(.not.local_ok) then
+          write(*,'(1x,a,i0,a,i0,2a)') '[DC-LCFO-SAWF-ACTUAL-GROUP] rank=',dc%id_tot, &
+            ' operation=',isym,' ',trim(message)
+          call lcfo_sawf_fatal('SAWF operation is not in the actual supercell group')
+        end if
         call validate_sawf_fragment_symmetry_map(symmetry_operations(isym),mesh, &
           fragment_origin,fragment_shape,dc%nxyz_buffer,wannier_symmetry_tolerance, &
           grid_map_ok,fragment_map_ok,max_targets_per_source,symmetry_fragment_map, &
@@ -6748,6 +6759,30 @@ contains
         end if
         if(allocated(symmetry_fragment_map)) deallocate(symmetry_fragment_map)
       end do
+
+      if(trim(wannier_sawf_generation)=='hierarchical') then
+        allocate(sawf_environment_equivalent(dc%n_frag,dc%n_frag), &
+          sawf_defect_intersects(dc%n_frag),sawf_environment_orbit(dc%n_frag), &
+          sawf_regenerate_environment(dc%n_frag),stat=allocation_status)
+        if(allocation_status/=0) call lcfo_sawf_fatal( &
+          'SAWF hierarchical environment-orbit allocation failed on this rank')
+        sawf_environment_equivalent=.false.; sawf_defect_intersects=.false.
+        do ifrag=1,dc%n_frag
+          sawf_environment_equivalent(ifrag,ifrag)=.true.
+          do isym=1,size(symmetry_operations)
+            if(symmetry_fragment_maps(ifrag,isym)>0) then
+              sawf_environment_equivalent(ifrag,symmetry_fragment_maps(ifrag,isym))=.true.
+              sawf_environment_equivalent(symmetry_fragment_maps(ifrag,isym),ifrag)=.true.
+            end if
+          end do
+        end do
+        call build_sawf_environment_orbits(sawf_environment_equivalent,sawf_defect_intersects, &
+          sawf_environment_orbit,sawf_regenerate_environment,local_ok,message)
+        if(.not.local_ok) then
+          write(*,'(1x,a,i0,2a)') '[DC-LCFO-SAWF-ORBIT] rank=',dc%id_tot,' ',trim(message)
+          call lcfo_sawf_fatal('SAWF hierarchical environment-orbit construction failed')
+        end if
+      end if
       local_failure=merge(0,1,.not.split_fragment_global_mode)
       call comm_get_max(local_failure,dc%icomm_tot)
       split_fragment_global_mode=(local_failure/=0)

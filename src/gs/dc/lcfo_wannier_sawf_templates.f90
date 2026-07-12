@@ -21,7 +21,7 @@ contains
     logical,intent(out)::regenerate(size(defect_intersects)),ok
     character(*),intent(out)::message
     integer::i,j,norb
-    ok=.false.; message=''; orbit=0; regenerate=defect_intersects
+    ok=.false.; message=''; orbit=0; regenerate=.false.
     if(size(equivalent,1)/=size(defect_intersects).or.size(equivalent,2)/=size(defect_intersects))then
       message='SAWF environment equivalence matrix has invalid dimensions'; return
     end if
@@ -31,12 +31,13 @@ contains
     norb=0
     do i=1,size(orbit)
       if(orbit(i)==0)then
-        norb=norb+1; orbit(i)=norb
+        norb=norb+1; orbit(i)=norb; regenerate(i)=.true.
         do j=i+1,size(orbit)
           if(equivalent(i,j))orbit(j)=norb
         end do
       end if
     end do
+    regenerate=regenerate.or.defect_intersects
     ok=.true.
   end subroutine
 
