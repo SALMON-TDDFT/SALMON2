@@ -27,8 +27,41 @@ module lcfo_wannier_sawf_templates
   public :: materialize_sawf_local_bases
   public :: apply_sawf_gauge_connection
   public :: stitch_and_apply_sawf_neighbor_pair
+  public :: stitch_and_apply_sawf_neighbor_pair_real
 
 contains
+  subroutine stitch_and_apply_sawf_neighbor_pair_real(overlap,tolerance,neighbor_gauge, &
+      basis,ww_block,wp_block,face_self_block,face_neighbor_block,gauge,residual,ok,message)
+    real(8),intent(in)::overlap(:,:),neighbor_gauge(:,:),tolerance
+    real(8),intent(inout)::basis(:,:),ww_block(:,:),wp_block(:,:),face_self_block(:,:), &
+      face_neighbor_block(:,:)
+    real(8),intent(out)::gauge(size(overlap,2),size(overlap,1)),residual
+    logical,intent(out)::ok; character(*),intent(out)::message
+    complex(8),allocatable::overlap_c(:,:),neighbor_c(:,:),basis_c(:,:),ww_c(:,:),wp_c(:,:), &
+      self_c(:,:),face_c(:,:),gauge_c(:,:)
+    real(8)::imaginary_residual
+    allocate(overlap_c(size(overlap,1),size(overlap,2)),neighbor_c(size(neighbor_gauge,1), &
+      size(neighbor_gauge,2)),basis_c(size(basis,1),size(basis,2)), &
+      ww_c(size(ww_block,1),size(ww_block,2)),wp_c(size(wp_block,1),size(wp_block,2)), &
+      self_c(size(face_self_block,1),size(face_self_block,2)), &
+      face_c(size(face_neighbor_block,1),size(face_neighbor_block,2)), &
+      gauge_c(size(overlap,2),size(overlap,1)))
+    overlap_c=cmplx(overlap,0d0,8);neighbor_c=cmplx(neighbor_gauge,0d0,8)
+    basis_c=cmplx(basis,0d0,8);ww_c=cmplx(ww_block,0d0,8);wp_c=cmplx(wp_block,0d0,8)
+    self_c=cmplx(face_self_block,0d0,8);face_c=cmplx(face_neighbor_block,0d0,8)
+    call stitch_and_apply_sawf_neighbor_pair(overlap_c,tolerance,neighbor_c,basis_c,ww_c,wp_c, &
+      self_c,face_c,gauge_c,residual,ok,message)
+    if(.not.ok)return
+    imaginary_residual=maxval(abs(aimag(gauge_c)))
+    if(imaginary_residual>tolerance)then
+      ok=.false.; write(message,'(a,es13.5)') &
+        'SAWF real GS gauge has non-negligible imaginary residual=',imaginary_residual
+      return
+    end if
+    gauge=real(gauge_c,8);basis=real(basis_c,8);ww_block=real(ww_c,8);wp_block=real(wp_c,8)
+    face_self_block=real(self_c,8);face_neighbor_block=real(face_c,8)
+  end subroutine
+
   subroutine stitch_and_apply_sawf_neighbor_pair(overlap,tolerance,neighbor_gauge_unitary, &
       basis,ww_block,wp_block,face_self_block,face_neighbor_block,gauge_unitary,residual,ok,message)
     complex(8),intent(in)::overlap(:,:),neighbor_gauge_unitary(:,:)
