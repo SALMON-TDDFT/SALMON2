@@ -5,8 +5,87 @@ module lcfo_wannier_sawf_seed
   public :: write_sawf_local_eig_amn_mmn
   public :: build_sawf_local_seed_matrices
   public :: select_sawf_local_complete_shells
+  public :: solve_sawf_local_generalized_eigensystem
 
 contains
+
+  subroutine solve_sawf_local_generalized_eigensystem(buffer_basis,weight,h_basis,rank_tolerance, &
+      states,energies,ok,message)
+    real(8),intent(in)::buffer_basis(:,:),weight,h_basis(:,:),rank_tolerance
+    complex(8),allocatable,intent(out)::states(:,:)
+    real(8),allocatable,intent(out)::energies(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    real(8),allocatable::overlap(:,:),overlap_eval(:),whitener(:,:),h_orth(:,:),h_eval(:),coeff(:,:), &
+      diagonal(:,:)
+    complex(8),allocatable::identity(:,:)
+    real(8)::cutoff,orthogonality_residual,diagonalization_residual
+    integer::nbasis,nkeep,index,mode
+
+    ok=.false.;message='';nbasis=size(buffer_basis,2)
+    if(size(buffer_basis,1)<=0.or.nbasis<=0.or.size(h_basis,1)/=nbasis.or. &
+        size(h_basis,2)/=nbasis.or..not.ieee_is_finite(weight).or.weight<=0d0.or. &
+        .not.ieee_is_finite(rank_tolerance).or.rank_tolerance<=0d0.or. &
+        .not.all(ieee_is_finite(buffer_basis)).or..not.all(ieee_is_finite(h_basis)))then
+      message='SAWF local generalized eigensystem inputs are invalid';return
+    end if
+    if(maxval(abs(h_basis-transpose(h_basis)))>rank_tolerance*max(1d0,maxval(abs(h_basis))))then
+      message='SAWF local Hamiltonian is not symmetric';return
+    end if
+    allocate(overlap(nbasis,nbasis),overlap_eval(nbasis))
+    overlap=weight*matmul(transpose(buffer_basis),buffer_basis)
+    call diagonalize_sawf_real_symmetric(overlap,overlap_eval,ok,message)
+    if(.not.ok)return
+    cutoff=rank_tolerance*max(1d0,maxval(overlap_eval));nkeep=count(overlap_eval>cutoff)
+    if(nkeep<=0)then;message='SAWF buffered overlap is rank deficient at all modes';ok=.false.;return;end if
+    allocate(whitener(nbasis,nkeep));index=0
+    do mode=1,nbasis
+      if(overlap_eval(mode)<=cutoff)cycle
+      index=index+1;whitener(:,index)=overlap(:,mode)/sqrt(overlap_eval(mode))
+    end do
+    allocate(h_orth(nkeep,nkeep),h_eval(nkeep))
+    h_orth=matmul(transpose(whitener),matmul(h_basis,whitener))
+    h_orth=0.5d0*(h_orth+transpose(h_orth))
+    call diagonalize_sawf_real_symmetric(h_orth,h_eval,ok,message)
+    if(.not.ok)return
+    allocate(coeff(nbasis,nkeep),states(size(buffer_basis,1),nkeep),energies(nkeep))
+    coeff=matmul(whitener,h_orth)
+    states=cmplx(matmul(buffer_basis,coeff),0d0,kind=8);energies=h_eval
+    allocate(identity(nkeep,nkeep),diagonal(nkeep,nkeep));identity=(0d0,0d0);diagonal=0d0
+    do mode=1,nkeep;identity(mode,mode)=(1d0,0d0);diagonal(mode,mode)=energies(mode);end do
+    orthogonality_residual=maxval(abs(weight*matmul(conjg(transpose(states)),states)-identity))
+    diagonalization_residual=maxval(abs(matmul(transpose(coeff),matmul(h_basis,coeff))-diagonal))
+    if(orthogonality_residual>100d0*rank_tolerance.or. &
+        diagonalization_residual>100d0*rank_tolerance*max(1d0,maxval(abs(energies))))then
+      message='SAWF local generalized eigensystem residual exceeds tolerance';ok=.false.;return
+    end if
+    ok=.true.
+  end subroutine solve_sawf_local_generalized_eigensystem
+
+  subroutine diagonalize_sawf_real_symmetric(matrix,eigenvalue,ok,message)
+    real(8),intent(inout)::matrix(:,:)
+    real(8),intent(out)::eigenvalue(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    real(8),allocatable::work(:)
+    integer::info,lwork,n
+    external::dsyev
+    ok=.false.;n=size(matrix,1)
+    if(size(matrix,2)/=n.or.size(eigenvalue)/=n.or.n<=0)then
+      message='SAWF symmetric eigensolver dimensions are invalid';return
+    end if
+    allocate(work(1));lwork=-1
+    call dsyev('V','U',n,matrix,n,eigenvalue,work,lwork,info)
+    if(info/=0.or..not.ieee_is_finite(work(1)))then
+      message='SAWF symmetric eigensolver workspace query failed';return
+    end if
+    lwork=max(1,int(work(1)));deallocate(work);allocate(work(lwork))
+    call dsyev('V','U',n,matrix,n,eigenvalue,work,lwork,info)
+    if(info/=0.or..not.all(ieee_is_finite(eigenvalue)).or..not.all(ieee_is_finite(matrix)))then
+      message='SAWF symmetric eigensolver failed';return
+    end if
+    ok=.true.;message=''
+  end subroutine diagonalize_sawf_real_symmetric
 
   subroutine select_sawf_local_complete_shells(channel_atom,expected_per_atom,inside_atom, &
       selected_channel,ok,message)

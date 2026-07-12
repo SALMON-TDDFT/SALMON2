@@ -11,10 +11,13 @@ if not FC:
 
 driver = r'''program check_local_seed_writer
   use lcfo_wannier_sawf_seed, only: write_sawf_local_eig_amn_mmn,build_sawf_local_seed_matrices, &
-    select_sawf_local_complete_shells
+    select_sawf_local_complete_shells,solve_sawf_local_generalized_eigensystem
   use, intrinsic :: ieee_arithmetic, only: ieee_value,ieee_quiet_nan
   implicit none
   real(8) :: energy(2)
+  real(8) :: buffer_basis(3,2),h_basis(2,2)
+  real(8),allocatable :: local_energy(:)
+  complex(8),allocatable :: local_states(:,:)
   complex(8) :: amn(2,2),mmn(2,2,3)
   complex(8) :: states(2,2),projections(2,2),phase(2,3)
   logical :: ok
@@ -24,6 +27,14 @@ driver = r'''program check_local_seed_writer
   integer,allocatable :: selected(:)
   logical :: inside(3)
   inside=[.true.,.false.,.true.]
+  buffer_basis=0d0;buffer_basis(1,1)=1d0;buffer_basis(2,2)=1d0
+  h_basis=0d0;h_basis(1,1)=-2d0;h_basis(2,2)=3d0
+  call solve_sawf_local_generalized_eigensystem(buffer_basis,1d0,h_basis,1d-12, &
+    local_states,local_energy,ok,message)
+  if(.not.ok.or.size(local_energy)/=2)error stop 7
+  if(maxval(abs(local_energy-[-2d0,3d0]))>1d-12)error stop 8
+  if(maxval(abs(matmul(conjg(transpose(local_states)),local_states)- &
+    reshape([(1d0,0d0),(0d0,0d0),(0d0,0d0),(1d0,0d0)],[2,2])))>1d-12)error stop 9
   call select_sawf_local_complete_shells([1,1,1,1,2,2,2,2,3,3,3,3],[4,4,4], &
     inside,selected,ok,message)
   if(.not.ok.or.any(selected/=[1,2,3,4,9,10,11,12]))error stop 5
@@ -52,7 +63,7 @@ with tempfile.TemporaryDirectory(prefix="sawf-local-seed-") as td:
     (td / "driver.f90").write_text(driver)
     result = subprocess.run(
         [FC, str(ROOT / "src/gs/dc/lcfo_wannier_sawf_seed.f90"),
-         str(td / "driver.f90"), "-o", str(td / "check")],
+         str(td / "driver.f90"), "-llapack", "-lblas", "-o", str(td / "check")],
         cwd=td, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
     )
     if result.returncode:
