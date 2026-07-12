@@ -16,13 +16,14 @@ absolute physical fidelity of that system is outside this milestone.
 - Polarization direction: `z`
 - Time step: `dt = 2 a.u.`
 - Wannier+PW propagator: exponential propagation in the mixed basis
-- Reference: Full TDDFT started from the same converged ground-state provenance
+- Reference: Full TDDFT started from the documented conventional ground state
 
-The initial occupied states are not obtained by merely projecting the Full
-TDDFT orbitals into the mixed basis. They are the occupied eigenstates of the
-complete zero-field DG Hamiltonian in the Wannier+PW space, including all DG
-interface/flux terms. For a non-orthogonal mixed basis, initialization solves
-the generalized eigenproblem
+The initial occupied states are not obtained by merely projecting conventional
+Full TDDFT orbitals into the mixed basis, nor by a one-shot diagonalization in a
+frozen conventional potential. They are obtained from a separate self-
+consistent DG-DC ground-state calculation in the fixed Wannier+PW basis. Each
+DG-DC SCF iteration solves the complete zero-field DG Hamiltonian, including all
+DG interface/flux terms. For a non-orthogonal mixed basis, it solves
 
 `H_DG C = S C epsilon`.
 
@@ -50,21 +51,30 @@ Therefore two update levels must be distinguished:
   surface/flux blocks before solving or propagating in the new basis.
 
 This milestone uses one fixed global Wannier+PW basis. The basis is constructed
-once from the converged reference ground-state potential and is not regenerated
-from the DG eigenvectors. In that fixed basis, rebuild the complete DG operator
-once and solve one generalized eigenproblem. A basis-self-consistency loop is
-outside this milestone because the current production path has no validated
-Wannier regeneration, gauge tracking, and operator-generation protocol.
+once from the converged conventional reference ground state and is not
+regenerated from the DG eigenvectors. Its overlap, kinetic, ionic nonlocal, and
+DG surface/penalty matrices are basis-fixed. The DG-DC SCF updates the density,
+Hartree and exchange-correlation potentials, their mixed-basis matrix elements,
+and the generalized eigensystem until the input and output density agree.
 
-The potential is fixed only while constructing this initial eigenseed. During
-real-time TDDFT, the basis and its kinetic/DG surface matrices remain fixed, but
-the density-dependent Hartree and exchange-correlation potential matrices are
-updated from the propagated density. Thus the field-on Hamiltonian is
+The DG-DC iteration is
+
+`n(k) -> V_eff[n(k)] -> H_DG[n(k)] -> (epsilon(k),C(k)) -> n(k+1)`.
+
+It converges the density/potential, total energy, occupied projector, and
+generalized eigen-residual. The converged condition is
+`[H_DG[n0],rho0]_S = 0`, expressed in a consistent overlap metric. A Wannier
+basis-regeneration loop remains outside this milestone.
+
+During real-time TDDFT, the same basis and kinetic/DG surface matrices remain
+fixed, but the density-dependent Hartree and exchange-correlation potential
+matrices are updated from the propagated density. Thus the field-on Hamiltonian is
 
 `H(t) = H_kin+DG + V_ion + V_H[n(t)] + V_xc[n(t)] + E(t) Z`.
 
-Freezing `V_H+V_xc` during real-time propagation would define an independent-
-particle approximation and is not an acceptable Full TDDFT reference match.
+Freezing `V_H+V_xc` either during DG-DC convergence or real-time propagation
+would define an independent-particle approximation and is not an acceptable
+Full TDDFT reference match.
 
 The local symmetry of individual fragments or Wannier functions is not a
 constraint. For defect systems, local symmetry breaking is physical. A perfect
@@ -95,9 +105,15 @@ observable evaluation. The numerical propagator must satisfy
 `U^H S U = S` within tolerance.
 
 The midpoint density-dependent Hamiltonian is obtained with a predictor-
-corrector: predict the state with the input Hamiltonian, reconstruct the
-midpoint density and `V_H+V_xc`, rebuild only the basis-fixed potential matrix
-blocks, and repeat until the midpoint density or Hamiltonian is converged.
+corrector. Every corrector iteration restarts from the same input state `C_n`:
+
+`C_(n+1)^(k+1) = U[H(n_mid^(k))] C_n`,
+
+`n_mid^(k) = (n[C_n] + n[C_(n+1)^k])/2`.
+
+Only the trial midpoint density/potential is iterated; the exponential must not
+be accumulated repeatedly within one time step. Stop if the midpoint iteration
+does not converge.
 
 Once the global calculation passes the Full TDDFT comparison, the same
 formulation will be transferred to the fragment/distributed implementation.
@@ -106,20 +122,26 @@ a separate implementation test.
 
 ## Observables
 
-The primary observable is the electronic polarization along the laser axis,
-`Pz(t)`. The current is a derived observable,
+The primary observable is the induced electronic polarization on one continuous
+periodic branch,
 
-`Jz(t) = dPz(t) / dt`.
+`Delta_Pz(t) = Pz(t) - Pz(0)`.
+
+The branch is tracked continuously using the same Wannier/Berry convention in
+both calculations, or reconstructed in both calculations from one consistently
+defined current. The current is a derived observable,
+
+`Jz(t) = d Delta_Pz(t) / dt`.
 
 The same numerical derivative and time window must be applied to both the
 Wannier+PW and Full TDDFT polarization data. Current agreement is secondary and
-must not replace direct comparison of `Pz(t)`.
+must not replace direct comparison of `Delta_Pz(t)`.
 
 ## Acceptance Criteria
 
 The primary acceptance criterion is a relative RMS error of at most 5 percent:
 
-`rel_rms = rms(Pz_WPW - Pz_full) / rms(Pz_full) <= 0.05`.
+`rel_rms = rms(Delta_Pz_WPW - Delta_Pz_full) / rms(Delta_Pz_full) <= 0.05`.
 
 The comparison window includes the pulse and a defined post-pulse interval.
 Both signals must use the same time origin, sampling points, polarization sign,
@@ -136,6 +158,12 @@ Additional health checks are:
 - `S`-unitarity of every exponential update;
 - midpoint density/potential convergence for each real-time step;
 - Hermiticity of the complete length-gauge position operator in the `S` metric.
+- DG-DC density, potential, total-energy, occupied-projector, and eigen-residual
+  convergence;
+- explicit separation of mixed basis dimension, retained eigenbasis dimension,
+  propagated occupied-orbital count, and occupation weights;
+- recorded overlap cutoff, condition number, discarded metric directions, and
+  final effective dimension.
 
 ## Implementation Strategy
 
@@ -145,29 +173,35 @@ Additional health checks are:
 2. Reduce the existing experimental Wannier+PW `expdiag` branches to one explicit
    namelist-controlled production path. Required scientific choices must not
    remain environment-variable-only controls.
-3. Construct one fixed global Wannier+PW basis from the converged reference
-   potential. Rebuild the complete zero-field DG Hamiltonian and overlap in that
-   basis, solve `H_DG C = S C epsilon` once, and occupy the lowest physical
-   eigenstates. Verify the eigen-residual and field-free stationarity.
-4. Implement the exponential update in the same overlap metric and verify
+3. Construct one fixed global Wannier+PW basis from the converged conventional
+   reference ground state.
+4. Solve a separate DG-DC SCF problem in that fixed basis. Rebuild the
+   density-dependent potential matrix each SCF iteration while retaining the
+   fixed DG surface matrix. Converge density, potential, energy, occupied
+   projector, and generalized residual.
+5. Export all retained DG eigenvectors needed to span the mixed response space,
+   while marking only `N_occ` orbitals with their physical occupation weights.
+6. Verify that the exported DG-DC state is stationary under the identical
+   field-off RT Hamiltonian and potential update.
+7. Implement the exponential update in the same overlap metric and verify
    `S`-unitarity with small-matrix numerical tests.
-5. Verify the complete WW, WP/PW, PP, and DG-interface contributions to the
+8. Verify the complete WW, WP/PW, PP, and DG-interface contributions to the
    length-gauge position operator before interpreting a field-on waveform.
-6. During RT, keep the basis and DG surface matrix fixed but update the
+9. During RT, keep the basis and DG surface matrix fixed but update the
    density-dependent potential through a midpoint predictor-corrector.
-7. Run a PW-count/cutoff sequence at fixed time step and compare `Pz(t)` against
+10. Run a PW-count/cutoff sequence at fixed time step and compare `Delta_Pz(t)` against
    Full TDDFT using one analysis tool and one manifest schema.
-8. Promote the smallest converged Wannier+PW basis satisfying the 5 percent gate
+11. Promote the smallest converged Wannier+PW basis satisfying the 5 percent gate
    to the reference global configuration.
-9. Only after the global gate passes, validate fragment/distributed propagation
+12. Only after the global gate passes, validate fragment/distributed propagation
    against the global result.
 
 ## Failure Handling
 
 Discrepancies are classified before code changes:
 
-- a mismatch at the first step points to full-DG eigenseed or operator
-  construction;
+- a mismatch at the first step points to DG-DC/RT handoff, operator
+  construction, occupation, or metric convention;
 - nonzero field-free motion points first to an incorrect DG eigenseed, missing
   DG interface terms, or an inconsistent overlap metric;
 - apparent convergence obtained without rebuilding face terms after a basis
@@ -175,6 +209,8 @@ Discrepancies are classified before code changes:
   basis;
 - norm drift in coefficient space must first be evaluated in the `S` metric;
 - agreement with a frozen-potential calculation is not Full TDDFT agreement;
+- zero-field relaxation immediately after RT start means the DG-DC state and RT
+  potential update do not represent the same stationary problem;
 - a field-on mismatch with a stationary field-off eigenseed points next to the
   position operator or midpoint density/potential update;
 - zero-field drift points to basis non-closure, non-Hermiticity, or propagation
@@ -192,7 +228,7 @@ produces invalid data, before collective reductions obscure its origin.
 
 - one documented Full TDDFT reference input;
 - one namelist-driven global Wannier+PW Exp input family;
-- automated `Pz(t)` and derived `Jz(t)` comparison;
+- automated continuous-branch `Delta_Pz(t)` and derived `Jz(t)` comparison;
 - a PW convergence table including the relative RMS gate;
 - regression tests for the production Exp path;
 - an eigen-residual and field-free stationarity report for the occupied

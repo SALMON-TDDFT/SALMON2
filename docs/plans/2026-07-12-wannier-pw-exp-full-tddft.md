@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Make one namelist-driven global Wannier+PW exponential propagation path reproduce Full TDDFT `Pz(t)` within 5 percent relative RMS at `dt=2 a.u.` under a `1e11 W/cm^2`, `1.55 eV`, `10 fs`, `sin^2`, z-polarized pulse.
+**Goal:** Make one namelist-driven global Wannier+PW exponential propagation path reproduce the continuous-branch Full TDDFT induced polarization `Delta_Pz(t)` within 5 percent relative RMS at `dt=2 a.u.` under a `1e11 W/cm^2`, `1.55 eV`, `10 fs`, `sin^2`, z-polarized pulse.
 
-**Architecture:** Promote the existing reduced Wannier+BPW exponential path from environment-controlled diagnostics to an explicit production mode selected through `&t_dg`. Use one fixed global Wannier+PW basis with the complete DG interface operator, solve its generalized eigenproblem for the initial occupied states, and propagate with an `S`-metric midpoint exponential while updating the TDDFT Hartree and exchange-correlation potential. Keep MPI coefficient ownership and communication outside the first physics comparison, then use one manifest-driven analysis script to compare polarization and its identically differentiated current.
+**Architecture:** Build one fixed global Wannier+PW basis from the conventional reference ground state, solve a separate self-consistent DG-DC ground state with the complete DG interface operator, and export its converged eigensystem to RT. Promote the reduced Wannier+BPW exponential path to an explicit production mode, propagate occupied orbitals in the retained non-occupied response space with an `S`-metric midpoint exponential, and update the TDDFT Hartree and exchange-correlation potential. Keep MPI coefficient ownership and communication outside the first physics comparison, then compare continuous-branch induced polarization and its identically differentiated current.
 
 **Tech Stack:** Fortran 2008, MPI, LAPACK/ScaLAPACK or EigenExa through the existing build, Python 3 standard library plus NumPy/Matplotlib for analysis, CMake/CTest-style source checks.
 
@@ -198,9 +198,16 @@ git add tests/dg/check_wpw_exp_production_route.py src/rt/dg/rt_dg_integrator_ex
 git commit -m "feat: promote mixed Wannier PW exponential propagation"
 ```
 
-### Task 4: Make the fixed-basis full-DG eigensystem the mandatory initial state
+### Task 4: Add a self-consistent DG-DC ground-state solver
 
 **Files:**
+- Create: `src/gs/dc/dg_wannier_pw_scf.f90`
+- Create: `tests/dg/check_dg_wpw_scf_route.py`
+- Create: `tests/dg/test_dg_wpw_scf_fixed_point.py`
+- Modify: `src/gs/dc/CMakeLists.txt`
+- Modify: `src/gs/main_dft.f90`
+- Modify: `src/io/salmon_global.f90`
+- Modify: `src/io/inputoutput.f90`
 - Create: `tests/dg/check_wpw_exp_invariants.py`
 - Modify: `src/rt/dg/rt_dg_fragment.f90`
 - Modify: `src/rt/dg/rt_dg_integrator_expdiag.f90`
@@ -208,21 +215,27 @@ git commit -m "feat: promote mixed Wannier PW exponential propagation"
 
 **Step 1: Write the failing invariant test**
 
-Require production-mode checks for:
+Require DG-DC and RT handoff checks for:
 
 ```text
 max occupied residual ||H_DG C - S C epsilon||
 S-orthonormality ||C^H S C - I||
 max_abs(H-H^H)
+SCF density residual
+SCF potential residual
+SCF total-energy difference
+occupied-projector difference
 occupied mixed-space norm before/after Exp
 maximum coefficient magnitude
-Pz at the initial and first propagated steps
+Delta_Pz at the initial and first propagated steps
 ```
 
-The test must require the full Wannier+PW DG Hamiltonian, including DG
+The test must require a separate DG-DC SCF mode and the full Wannier+PW DG Hamiltonian, including DG
 interface/flux blocks, and the explicit overlap matrix in the generalized
 eigenproblem. It must reject initialization by projection alone and require the
-lowest occupied physical full-DG eigenvectors to populate the RT coefficients.
+converged lowest occupied physical full-DG eigenvectors to populate the RT
+coefficients. The conventional GS may initialize the basis and density, but its
+potential/eigenvectors must not be exported directly as the final DG RT state.
 It must require that the complete DG face/flux blocks are assembled after the
 fixed Wannier+PW basis is finalized. A test configuration with a required face
 block removed must fail.
@@ -233,42 +246,74 @@ compact first-step summary; per-step output is enabled by the trace namelist.
 
 **Step 2: Verify failure**
 
-Run `python3 tests/dg/check_wpw_exp_invariants.py`.
-Expected: FAIL because the production-specific invariant block is absent.
+Run:
+
+```bash
+python3 tests/dg/check_dg_wpw_scf_route.py
+python3 -m unittest tests.dg.test_dg_wpw_scf_fixed_point -v
+python3 tests/dg/check_wpw_exp_invariants.py
+```
+
+Expected: FAIL because the separate self-consistent DG-DC route is absent.
 
 **Step 3: Implement the eigenseed and invariant checks**
 
-Reuse and complete the existing `yn_dg_full_h_eigen_seed` generalized-overlap
-path. Implement the following fixed-potential initialization:
+Reuse the existing DC-LCFO flux matrix construction and full-DG generalized-
+overlap diagonalization, but move them into a true SCF loop rather than the
+post-GS export phase. Implement:
 
 ```text
-read and freeze V_eff from the converged reference GS
+read conventional GS as initial density and Wannier source
 construct and freeze global Wannier+PW basis Phi
-rebuild S[Phi]
-rebuild every volume, nonlocal, W-PW, PW-PW, and DG face/flux block
-solve H_DG[Phi] C = S[Phi] C epsilon
-copy the occupied full-DG eigenvectors into the RT coefficients
+build S, kinetic, ionic nonlocal, W-PW, PW-PW, and DG face/flux blocks once
+for k = 0, 1, ...:
+    construct V_H[n(k)] and V_xc[n(k)]
+    rebuild only density-dependent potential matrix blocks
+    solve H_DG[n(k)] C(k) = S C(k) epsilon(k)
+    occupy the lowest physical states using the declared occupation weights
+    reconstruct n_out(k) from occupied DG states
+    mix n_out(k) with n(k) using the normal SCF policy
+    test density, potential, energy, projector, and eigensystem residuals
+end
+export converged density, potential, eigensystem, overlap metadata, and provenance
 ```
 
-The effective potential stays fixed throughout eigenseed construction. The
-Wannier+PW basis is not regenerated from the DG eigenvectors in this milestone.
-A coefficient or eigenvector update in the unchanged basis must not rebuild the
-DG surface matrix. Sort the physical eigenpairs and use
+The Wannier+PW basis is not regenerated from the DG eigenvectors in this
+milestone. A coefficient/eigenvector or potential update in the unchanged basis
+must not rebuild the DG surface matrix. Sort the physical eigenpairs and use
 tolerances based on machine precision and matrix scale for Hermiticity,
 eigen-residual, and S-orthonormality. Record norm drift without renormalizing the
 propagated state. A violation must reveal the actual error rather than conceal
 it.
+
+Keep these dimensions distinct:
+
+```text
+N_basis = raw mixed Wannier+PW dimension
+N_eff   = dimension after overlap-metric filtering
+N_eig   = retained eigenvectors used to span the RT response space
+N_occ   = propagated occupied KS orbitals
+f_i     = physical occupation weights
+```
+
+Require `N_eig=N_eff` for the first production validation unless a separately
+tested spectral truncation criterion is introduced. Propagate `N_occ` orbital
+columns in the complete retained `N_eig` response space.
 
 Acceptance must include all of:
 
 ```text
 max_i ||H_DG C_i-S C_i epsilon_i||
 ||C^H S C-I||_F
+||n_out-n_in|| / ||n_out||
+||V_eff_out-V_eff_in|| / ||V_eff_out||
+|E_total(k)-E_total(k-1)|
+||Q_occ(k)-Q_occ(k-1)||_F / ||Q_occ(k)||_F
 field-off ||Q(t)-Q(0)||_F / ||Q(0)||_F
 ```
 
 Add a field-off stationarity smoke test: after removing the analytically
-expected eigenphases, `Pz`, density, and occupied-subspace projector must remain
+expected eigenphases, `Delta_Pz`, density, and occupied-subspace projector must remain
 stationary within numerical tolerance.
 
 **Step 4: Test and build**
@@ -280,8 +325,8 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add tests/dg/check_wpw_exp_invariants.py src/rt/dg/rt_dg_fragment.f90 src/rt/dg/rt_dg_integrator_expdiag.f90 src/rt/dg/rt_dg_observables.f90
-git commit -m "feat: seed Wannier PW Exp from full DG eigenstates"
+git add src/gs/dc/dg_wannier_pw_scf.f90 src/gs/dc/CMakeLists.txt src/gs/main_dft.f90 src/io/salmon_global.f90 src/io/inputoutput.f90 tests/dg/check_dg_wpw_scf_route.py tests/dg/test_dg_wpw_scf_fixed_point.py tests/dg/check_wpw_exp_invariants.py src/rt/dg/rt_dg_fragment.f90 src/rt/dg/rt_dg_integrator_expdiag.f90 src/rt/dg/rt_dg_observables.f90
+git commit -m "feat: add self-consistent Wannier PW DG ground state"
 ```
 
 ### Task 5: Validate the complete length-gauge position operator
@@ -338,10 +383,13 @@ density/potential loop.
 
 **Step 3: Implement the midpoint predictor-corrector**
 
-At each step, predict with the input Hamiltonian, form the midpoint density,
-update `V_H+V_xc`, reconstruct only the potential-dependent matrix blocks, and
-repeat until a documented density or Hamiltonian tolerance is reached. Stop on
-non-convergence; do not silently accept the last iterate.
+At each step, save `C_n`, predict from `C_n`, form the midpoint density, update
+`V_H+V_xc`, reconstruct only the potential-dependent matrix blocks, and
+recompute every corrector candidate from the unchanged saved `C_n`. Never apply
+successive correctors cumulatively. Repeat until a documented density or
+Hamiltonian tolerance is reached. Stop on non-convergence; do not silently
+accept the last iterate. Add a negative test that deliberately compounds two
+correctors and must fail the one-step reference.
 
 **Step 4: Test, build, and commit**
 
@@ -352,6 +400,9 @@ commit the midpoint implementation and tests together.
 
 **Files:**
 - Create: `samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/inputfile_stage2d_full_tddft_i1e11_dt2`
+- Create: `samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/inputfile_stage2d_dg_dc_wpw_pw16`
+- Create: `samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/inputfile_stage2d_dg_dc_wpw_pw64`
+- Create: `samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/inputfile_stage2d_dg_dc_wpw_pw128`
 - Create: `samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/inputfile_stage2d_global_wpw_exp_pw16_i1e11_dt2`
 - Create: `samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/inputfile_stage2d_global_wpw_exp_pw64_i1e11_dt2`
 - Create: `samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/inputfile_stage2d_global_wpw_exp_pw128_i1e11_dt2`
@@ -368,7 +419,7 @@ Wannier/PW basis fields differ across the three reduced-space inputs.
 The manifest columns are:
 
 ```text
-path basis_id WF_count PW_count PW_cutoff_or_shell dt propagator_kind observable_source gauge volume_normalization
+path dg_dc_path basis_id WF_count PW_count PW_cutoff_or_shell N_basis N_eff N_eig N_occ occupation_policy S_eval_min S_cutoff S_condition discarded_metric_dirs dt propagator_kind observable_source gauge polarization_branch volume_normalization
 ```
 
 **Step 2: Verify failure**
@@ -378,20 +429,19 @@ Expected: FAIL because the Stage 2D inputs and manifest are absent.
 
 **Step 3: Add the input family and manifest**
 
-Derive all four inputs from the same verified converged GS, not from a smoke or
-unconverged GS. Set `yn_dg_wpw_exp_production='y'` and
-`yn_dg_full_h_eigen_seed='y'` for the three reduced-space inputs. The imported
-GS supplies the density/potential and basis provenance; it does not directly
-supply the occupied RT coefficients. Those coefficients must be replaced by
-the converged occupied eigenstates of the complete DG Wannier+PW Hamiltonian.
-Record that the basis is fixed, the full-DG eigenseed residual, overlap metric
-threshold, midpoint SCF tolerance, and exact restart provenance in comments and
-the manifest.
+Derive every basis from the same verified conventional GS, not from a smoke or
+unconverged GS. Run and converge the matching DG-DC calculation for PW16, PW64,
+and PW128 before creating its RT input. Set `yn_dg_wpw_exp_production='y'` for
+the reduced-space RT inputs and require a matching converged DG-DC checkpoint.
+The conventional GS supplies only the initial density and Wannier provenance;
+the DG-DC checkpoint supplies the RT density, potential, occupied states, and
+retained response eigenspace. Record all convergence and metric metadata in the
+manifest.
 
 **Step 4: Run the parser test and 20-step smoke runs**
 
 Run the parser test, then run each input with `nt=20` copies in a scratch
-directory. Expected: no guard failure, finite `Pz`, and negligible zero-field
+directory. Expected: no guard failure, finite `Delta_Pz`, and negligible zero-field
 drift in a matching field-off smoke case.
 
 **Step 5: Commit**
@@ -401,7 +451,7 @@ git add tests/dg/check_stage2d_wpw_exp_inputs.py samples/exercise_dg_fragment_rt
 git commit -m "test: add Stage 2D Wannier PW Exp inputs"
 ```
 
-### Task 8: Implement the Pz-primary comparison and derived Jz
+### Task 8: Implement the Delta-Pz-primary comparison and derived Jz
 
 **Files:**
 - Create: `samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/compare_stage2d_wpw_exp.py`
@@ -414,8 +464,11 @@ git commit -m "test: add Stage 2D Wannier PW Exp inputs"
 Test that the analysis tool:
 
 - aligns identical time samples and rejects extrapolation;
-- removes only a documented common initial polarization offset;
-- computes `rms(P_wpw-P_full)/rms(P_full)`;
+- constructs a continuous branch of `Delta_Pz=Pz(t)-Pz(0)` using the declared
+  common Berry/Wannier convention or consistent current integration;
+- rejects an unresolved polarization-quantum jump rather than subtracting an
+  arbitrary offset;
+- computes `rms(Delta_P_wpw-Delta_P_full)/rms(Delta_P_full)`;
 - uses the same second-order centered difference for both currents, with
   second-order one-sided endpoint differences;
 - reports PASS only when `rel_rms <= 0.05`;
@@ -436,7 +489,7 @@ stage2d_wpw_exp_waveforms.tsv
 stage2d_wpw_exp_comparison.png
 ```
 
-The summary must include basis metadata, `Pz_rel_rms`, `Jz_rel_rms`, maximum
+The summary must include basis metadata, `Delta_Pz_rel_rms`, `Jz_rel_rms`, maximum
 absolute errors, zero-field drift when available, and PASS/FAIL.
 
 **Step 4: Run unit tests**
@@ -481,7 +534,7 @@ python3 samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/compare_stage2d_wp
 ```
 
 Expected: at least one converged Wannier+PW basis reports `PASS` with
-`Pz_rel_rms <= 0.05`. If none passes, stop and classify the discrepancy using
+`Delta_Pz_rel_rms <= 0.05`. If none passes, stop and classify the discrepancy using
 the design document before changing fragment/distributed code.
 
 **Step 3: Run all focused regression tests**
@@ -505,7 +558,7 @@ Expected: all tests PASS and the build succeeds.
 **Step 4: Document the accepted configuration**
 
 Update `NOTE_DG.md` with the production namelist, GS provenance, accepted
-Wannier/PW counts, comparison window, `Pz_rel_rms`, derived `Jz_rel_rms`, and
+Wannier/PW counts, comparison window, `Delta_Pz_rel_rms`, derived `Jz_rel_rms`, and
 known limitations. State explicitly that local symmetry is not constrained and
 that distributed fragment validation is the next milestone.
 
