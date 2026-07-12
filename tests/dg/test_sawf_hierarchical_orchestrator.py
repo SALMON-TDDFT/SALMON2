@@ -48,6 +48,7 @@ driver = r'''program check_orchestrator
   call require(trim(bundle(1)%seedname)=='seed-env-000001','unique seed name')
   call complete_sawf_seed_bundle(bundle(1),receipt(1),ok,msg)
   call require(ok.and.receipt(1)%completed,'first artifact bundle completed: '//trim(msg))
+  call require(receipt(1)%num_bands==2.and.receipt(1)%num_wann==2,'ragged local dimensions')
   bundle(2)%directory='missing-environment'
   call complete_sawf_seed_bundle(bundle(2),receipt(3),ok,msg)
   call require(.not.ok.and..not.receipt(3)%completed,'missing artifact rejected')
@@ -76,8 +77,9 @@ with tempfile.TemporaryDirectory(prefix="sawf-orchestrator-") as td:
         directory = td / f"environment-{environment:06d}"
         directory.mkdir()
         seed = f"seed-env-{environment:06d}"
-        for suffix in ("win", "eig", "amn", "mmn", "dmn", "chk"):
+        for suffix in ("win", "eig", "mmn", "dmn", "chk"):
             (directory / f"{seed}.{suffix}").write_text(f"{suffix}\n")
+        (directory / f"{seed}.amn").write_text("local projections\n 2 1 2\n")
         (directory / f"{seed}.sawf-fingerprint").write_text("cell-A\n")
     (td / "driver.f90").write_text(driver)
     result = subprocess.run(

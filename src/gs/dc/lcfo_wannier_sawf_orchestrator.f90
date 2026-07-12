@@ -6,6 +6,8 @@ module lcfo_wannier_sawf_orchestrator
     integer :: environment=0
     integer :: representative_fragment=0
     integer :: operation_index=0
+    integer :: num_bands=0
+    integer :: num_wann=0
     logical :: generated_independently=.false.
     logical :: requires_execution=.false.
     logical :: completed=.false.
@@ -33,11 +35,11 @@ contains
     character(*),intent(out)::message
     character(16),parameter::suffix(6)=[character(16)::'win','eig','amn','mmn','dmn','chk']
     character(1024)::filename
-    character(256)::stored_fingerprint
-    integer::item,unit,ios
+    character(256)::stored_fingerprint,header
+    integer::item,unit,ios,num_bands,num_kpoints,num_wann
     logical::exists
 
-    ok=.false.;message='';receipt%completed=.false.
+    ok=.false.;message='';receipt%completed=.false.;receipt%num_bands=0;receipt%num_wann=0
     if(.not.receipt%requires_execution.or.bundle%environment/=receipt%environment.or. &
         trim(bundle%same_supercell_fingerprint)/=trim(receipt%same_supercell_fingerprint))then
       message='SAWF seed bundle and execution receipt provenance disagree';return
@@ -49,6 +51,15 @@ contains
         message='SAWF seed bundle artifact is missing: '//trim(filename);return
       end if
     end do
+    filename=trim(bundle%directory)//'/'//trim(bundle%seedname)//'.amn'
+    open(newunit=unit,file=trim(filename),status='old',action='read',iostat=ios)
+    if(ios/=0)then;message='SAWF local .amn header is missing';return;end if
+    read(unit,'(a)',iostat=ios)header
+    if(ios==0)read(unit,*,iostat=ios)num_bands,num_kpoints,num_wann
+    close(unit)
+    if(ios/=0.or.num_bands<=0.or.num_kpoints/=1.or.num_wann<=0.or.num_wann>num_bands)then
+      message='SAWF local .amn dimensions are invalid';return
+    end if
     filename=trim(bundle%directory)//'/'//trim(bundle%seedname)//'.sawf-fingerprint'
     open(newunit=unit,file=trim(filename),status='old',action='read',iostat=ios)
     if(ios/=0)then;message='SAWF seed bundle fingerprint is missing';return;end if
@@ -56,6 +67,7 @@ contains
     if(ios/=0.or.trim(stored_fingerprint)/=trim(receipt%same_supercell_fingerprint))then
       message='SAWF seed bundle belongs to a different supercell fingerprint';return
     end if
+    receipt%num_bands=num_bands;receipt%num_wann=num_wann
     receipt%completed=.true.;ok=.true.
   end subroutine complete_sawf_seed_bundle
 
