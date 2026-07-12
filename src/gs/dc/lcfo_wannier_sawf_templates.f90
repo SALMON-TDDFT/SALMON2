@@ -32,8 +32,84 @@ module lcfo_wannier_sawf_templates
   public :: build_sawf_neighbor_trace_overlap
   public :: whiten_sawf_buffered_overlap
   public :: stitch_sawf_buffered_neighbor_gauge
+  public :: build_sawf_supercell_fingerprint, build_sawf_local_environment_fingerprint
 
 contains
+  subroutine build_sawf_supercell_fingerprint(lattice,pbc,species,coordinates,grid,buffer, &
+      pseudopotential_digest,band_window,projection_shell,xc,generator,key,ok,message)
+    real(8),intent(in)::lattice(3,3),coordinates(:,:)
+    logical,intent(in)::pbc(3);integer,intent(in)::species(:),grid(3),buffer(3)
+    character(*),intent(in)::pseudopotential_digest,band_window,projection_shell,xc,generator
+    character(*),intent(out)::key;logical,intent(out)::ok;character(*),intent(out)::message
+    integer(8)::h1,h2;integer::i
+    ok=.false.;message='';key=''
+    if(size(coordinates,1)/=3.or.size(coordinates,2)/=size(species).or.size(species)<=0.or. &
+       any(grid<=0).or.any(buffer<0).or..not.all(ieee_is_finite(lattice)).or. &
+       .not.all(ieee_is_finite(coordinates)))then
+      message='SAWF supercell fingerprint input is invalid';return
+    end if
+    call sawf_hash_begin(h1,h2);call sawf_hash_character('SAWF-SUPERCELL-V1',h1,h2)
+    call sawf_hash_real(reshape(lattice,[9]),h1,h2);call sawf_hash_logical(pbc,h1,h2)
+    call sawf_hash_integer(species,h1,h2);call sawf_hash_real(reshape(coordinates,[size(coordinates)]),h1,h2)
+    call sawf_hash_integer(grid,h1,h2);call sawf_hash_integer(buffer,h1,h2)
+    call sawf_hash_character(pseudopotential_digest,h1,h2);call sawf_hash_character(band_window,h1,h2)
+    call sawf_hash_character(projection_shell,h1,h2);call sawf_hash_character(xc,h1,h2)
+    call sawf_hash_character(generator,h1,h2)
+    write(key,'(a,z16.16,z16.16)')'SC-',h1,h2;ok=.true.
+  end subroutine
+
+  subroutine build_sawf_local_environment_fingerprint(supercell_key,species,relative_coordinates, &
+      vacuum_fraction,key,ok,message)
+    character(*),intent(in)::supercell_key
+    integer,intent(in)::species(:);real(8),intent(in)::relative_coordinates(:,:),vacuum_fraction
+    character(*),intent(out)::key;logical,intent(out)::ok;character(*),intent(out)::message
+    integer(8)::h1,h2
+    ok=.false.;message='';key=''
+    if(len_trim(supercell_key)==0.or.size(species)<=0.or.size(relative_coordinates,1)/=3.or. &
+       size(relative_coordinates,2)/=size(species).or.vacuum_fraction<0d0.or.vacuum_fraction>1d0.or. &
+       .not.all(ieee_is_finite(relative_coordinates)).or..not.ieee_is_finite(vacuum_fraction))then
+      message='SAWF local-environment fingerprint input is invalid';return
+    end if
+    call sawf_hash_begin(h1,h2);call sawf_hash_character('SAWF-LOCAL-V1',h1,h2)
+    call sawf_hash_character(trim(supercell_key),h1,h2);call sawf_hash_integer(species,h1,h2)
+    call sawf_hash_real(reshape(relative_coordinates,[size(relative_coordinates)]),h1,h2)
+    call sawf_hash_real([vacuum_fraction],h1,h2)
+    write(key,'(a,z16.16,z16.16)')'ENV-',h1,h2;ok=.true.
+  end subroutine
+
+  subroutine sawf_hash_begin(h1,h2)
+    integer(8),intent(out)::h1,h2;h1=1469598103_8;h2=1099511627_8
+  end subroutine
+  subroutine sawf_hash_byte(value,h1,h2)
+    integer,intent(in)::value;integer(8),intent(inout)::h1,h2
+    integer(8),parameter::prime=2147483647_8
+    h1=modulo(h1*257_8+int(value,8)+1_8,prime)
+    h2=modulo(h2*263_8+int(value,8)+17_8,prime)
+  end subroutine
+  subroutine sawf_hash_character(value,h1,h2)
+    character(*),intent(in)::value;integer(8),intent(inout)::h1,h2;integer::i
+    call sawf_hash_integer([len_trim(value)],h1,h2)
+    do i=1,len_trim(value);call sawf_hash_byte(iachar(value(i:i)),h1,h2);end do
+  end subroutine
+  subroutine sawf_hash_integer(values,h1,h2)
+    integer,intent(in)::values(:);integer(8),intent(inout)::h1,h2
+    integer::i,b;integer(8)::word
+    do i=1,size(values);word=int(values(i),8)
+      do b=0,7;call sawf_hash_byte(int(iand(shiftr(word,8*b),255_8)),h1,h2);end do
+    end do
+  end subroutine
+  subroutine sawf_hash_logical(values,h1,h2)
+    logical,intent(in)::values(:);integer(8),intent(inout)::h1,h2;integer::i
+    do i=1,size(values);call sawf_hash_byte(merge(1,0,values(i)),h1,h2);end do
+  end subroutine
+  subroutine sawf_hash_real(values,h1,h2)
+    real(8),intent(in)::values(:);integer(8),intent(inout)::h1,h2
+    integer::i,b;integer(8)::word
+    do i=1,size(values);word=transfer(values(i),word)
+      do b=0,7;call sawf_hash_byte(int(iand(shiftr(word,8*b),255_8)),h1,h2);end do
+    end do
+  end subroutine
+
   subroutine stitch_sawf_buffered_neighbor_gauge(cross_overlap,left_gram,right_gram, &
       relative_cutoff,alignment_tolerance,gauge_unitary,residual,ok,message)
     complex(8),intent(in)::cross_overlap(:,:),left_gram(:,:),right_gram(:,:)

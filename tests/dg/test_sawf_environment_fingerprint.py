@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import os, shutil, subprocess, tempfile
+
+ROOT=Path(__file__).resolve().parents[2]
+FC=shutil.which('gfortran')
+if not FC: raise SystemExit('gfortran is required')
+driver=r'''program check_environment_fingerprint
+ use lcfo_wannier_sawf_templates, only: build_sawf_supercell_fingerprint, &
+   build_sawf_local_environment_fingerprint
+ implicit none
+ real(8)::lattice(3,3),xyz(3,4),relative(3,3)
+ integer::species(4),local_species(3),grid(3),buffer(3)
+ logical::pbc(3),ok
+ character(256)::super_a,super_b,bulk_a,bulk_b,defect,interface_env,surface_env,amorphous,msg
+ lattice=0;lattice(1,1)=8;lattice(2,2)=8;lattice(3,3)=8
+ xyz=reshape([0d0,0d0,0d0,2d0,0d0,0d0,4d0,0d0,0d0,6d0,0d0,0d0],[3,4])
+ species=[14,14,14,14];grid=[16,16,16];buffer=[2,2,2];pbc=.true.
+ call build_sawf_supercell_fingerprint(lattice,pbc,species,xyz,grid,buffer, &
+   'sha256:pseudo-si','bands:1-8','shells:sp3','LDA','schema:2',super_a,ok,msg)
+ call req(ok,'supercell A')
+ lattice(1,1)=9
+ call build_sawf_supercell_fingerprint(lattice,pbc,species,xyz,grid,buffer, &
+   'sha256:pseudo-si','bands:1-8','shells:sp3','LDA','schema:2',super_b,ok,msg)
+ call req(ok.and.super_a/=super_b,'different supercell forbidden')
+ relative=reshape([-1d0,0d0,0d0,0d0,0d0,0d0,1d0,0d0,0d0],[3,3]);local_species=[14,14,14]
+ call local(local_species,relative,0d0,bulk_a);call local(local_species,relative,0d0,bulk_b)
+ call req(bulk_a==bulk_b,'equivalent bulk')
+ local_species(2)=13;call local(local_species,relative,0d0,defect)
+ local_species=[14,14,8];call local(local_species,relative,0d0,interface_env)
+ local_species=[14,14,14];call local(local_species,relative,.5d0,surface_env)
+ relative(1,3)=1.137d0;call local(local_species,relative,0d0,amorphous)
+ call req(all([bulk_a/=defect,bulk_a/=interface_env,bulk_a/=surface_env,bulk_a/=amorphous]), &
+   'nonbulk environments remain independent')
+ write(*,'(a)')'PASS exact same-supercell local-environment fingerprints'
+contains
+ subroutine local(z,r,vacuum,key)
+  integer,intent(in)::z(:);real(8),intent(in)::r(:,:),vacuum;character(256),intent(out)::key
+  call build_sawf_local_environment_fingerprint(super_a,z,r,vacuum,key,ok,msg)
+  call req(ok,'local fingerprint')
+ end subroutine
+ subroutine req(c,t);logical,intent(in)::c;character(*),intent(in)::t
+  if(.not.c)then;write(*,'(a)')trim(t);error stop 1;endif
+ end subroutine
+end program'''
+with tempfile.TemporaryDirectory(prefix='sawf-env-fingerprint-') as td:
+ td=Path(td);(td/'driver.f90').write_text(driver)
+ (td/'CMakeLists.txt').write_text(f'''cmake_minimum_required(VERSION 3.16)
+project(env_fingerprint LANGUAGES Fortran)
+find_package(LAPACK REQUIRED)
+add_executable(check "{ROOT/'src/gs/dc/lcfo_wannier_sawf_templates.f90'}" driver.f90)
+target_link_libraries(check PRIVATE ${{LAPACK_LIBRARIES}})
+target_compile_options(check PRIVATE -fcheck=all -fbacktrace)
+''')
+ env=dict(os.environ)
+ for cmd in (["cmake","-S",str(td),"-B",str(td/'b'),f"-DCMAKE_Fortran_COMPILER={FC}"],
+             ["cmake","--build",str(td/'b'),"-j","2"]):
+  r=subprocess.run(cmd,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
+  if r.returncode:raise SystemExit(r.stdout)
+ r=subprocess.run([str(td/'b/check')],env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
+ if r.returncode:raise SystemExit(r.stdout)
+ print(r.stdout.strip())
