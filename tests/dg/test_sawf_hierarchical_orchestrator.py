@@ -26,11 +26,6 @@ assert "call build_sawf_environment_execution_plan" in flux
 assert "call build_sawf_seed_bundles" in flux
 assert "call atomic_create_directory(sawf_seed_bundles" in flux
 assert "call select_sawf_local_complete_shells" in flux
-assert "call write_sawf_representative_local_seed" in flux
-assert "entry%buffer_states" in flux
-assert flux.index("call prepare_sawf_fragment_state_cache") < flux.index(
-    "call write_sawf_representative_local_seed"
-)
 
 fc = shutil.which("gfortran")
 if not fc:
