@@ -64,6 +64,10 @@ contains
     integer,intent(in)::species(:);real(8),intent(in)::relative_coordinates(:,:),vacuum_fraction
     character(*),intent(out)::key;logical,intent(out)::ok;character(*),intent(out)::message
     integer(8)::h1,h2
+    integer,allocatable::atom_z(:),pair_code(:)
+    real(8),allocatable::atom_r2(:),pair_r2(:)
+    integer::i,j,k,tmp_i,npair
+    real(8)::tmp_r
     ok=.false.;message='';key=''
     if(len_trim(supercell_key)==0.or.size(species)<=0.or.size(relative_coordinates,1)/=3.or. &
        size(relative_coordinates,2)/=size(species).or.vacuum_fraction<0d0.or.vacuum_fraction>1d0.or. &
@@ -71,8 +75,30 @@ contains
       message='SAWF local-environment fingerprint input is invalid';return
     end if
     call sawf_hash_begin(h1,h2);call sawf_hash_character('SAWF-LOCAL-V1',h1,h2)
-    call sawf_hash_character(trim(supercell_key),h1,h2);call sawf_hash_integer(species,h1,h2)
-    call sawf_hash_real(reshape(relative_coordinates,[size(relative_coordinates)]),h1,h2)
+    call sawf_hash_character(trim(supercell_key),h1,h2)
+    allocate(atom_z(size(species)),atom_r2(size(species)))
+    atom_z=species
+    do i=1,size(species);atom_r2(i)=sum(relative_coordinates(:,i)**2);end do
+    do i=1,size(species)-1;do j=i+1,size(species)
+      if(atom_z(j)<atom_z(i).or.(atom_z(j)==atom_z(i).and.atom_r2(j)<atom_r2(i)))then
+        tmp_i=atom_z(i);atom_z(i)=atom_z(j);atom_z(j)=tmp_i
+        tmp_r=atom_r2(i);atom_r2(i)=atom_r2(j);atom_r2(j)=tmp_r
+      end if
+    end do;end do
+    call sawf_hash_integer(atom_z,h1,h2);call sawf_hash_real(atom_r2,h1,h2)
+    npair=size(species)*(size(species)-1)/2
+    allocate(pair_code(npair),pair_r2(npair));k=0
+    do i=1,size(species)-1;do j=i+1,size(species);k=k+1
+      pair_code(k)=min(species(i),species(j))*1000+max(species(i),species(j))
+      pair_r2(k)=sum((relative_coordinates(:,i)-relative_coordinates(:,j))**2)
+    end do;end do
+    do i=1,npair-1;do j=i+1,npair
+      if(pair_code(j)<pair_code(i).or.(pair_code(j)==pair_code(i).and.pair_r2(j)<pair_r2(i)))then
+        tmp_i=pair_code(i);pair_code(i)=pair_code(j);pair_code(j)=tmp_i
+        tmp_r=pair_r2(i);pair_r2(i)=pair_r2(j);pair_r2(j)=tmp_r
+      end if
+    end do;end do
+    call sawf_hash_integer(pair_code,h1,h2);call sawf_hash_real(pair_r2,h1,h2)
     call sawf_hash_real([vacuum_fraction],h1,h2)
     write(key,'(a,z16.16,z16.16)')'ENV-',h1,h2;ok=.true.
   end subroutine

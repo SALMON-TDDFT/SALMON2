@@ -3,14 +3,16 @@ from pathlib import Path
 import os, shutil, subprocess, tempfile
 
 ROOT=Path(__file__).resolve().parents[2]
+FLUX=(ROOT/'src/gs/dc/lcfo_flux.f90').read_text().lower()
+generator=FLUX.split('subroutine generate_sawf_dmn',1)[1].split('end subroutine generate_sawf_dmn',1)[0]
 FC=shutil.which('gfortran')
 if not FC: raise SystemExit('gfortran is required')
 driver=r'''program check_environment_fingerprint
  use lcfo_wannier_sawf_templates, only: build_sawf_supercell_fingerprint, &
    build_sawf_local_environment_fingerprint
  implicit none
- real(8)::lattice(3,3),xyz(3,4),relative(3,3)
- integer::species(4),local_species(3),grid(3),buffer(3)
+ real(8)::lattice(3,3),xyz(3,4),relative(3,3),rotated(3,3)
+ integer::species(4),local_species(3),grid(3),buffer(3),permutation(3)
  logical::pbc(3),ok
  character(256)::super_a,super_b,bulk_a,bulk_b,defect,interface_env,surface_env,amorphous,msg
  lattice=0;lattice(1,1)=8;lattice(2,2)=8;lattice(3,3)=8
@@ -26,6 +28,11 @@ driver=r'''program check_environment_fingerprint
  relative=reshape([-1d0,0d0,0d0,0d0,0d0,0d0,1d0,0d0,0d0],[3,3]);local_species=[14,14,14]
  call local(local_species,relative,0d0,bulk_a);call local(local_species,relative,0d0,bulk_b)
  call req(bulk_a==bulk_b,'equivalent bulk')
+ permutation=[3,1,2];rotated=0
+ rotated(1,:)=-relative(2,permutation);rotated(2,:)=relative(1,permutation)
+ rotated(3,:)=relative(3,permutation)
+ call local(local_species(permutation),rotated,0d0,bulk_b)
+ call req(bulk_a==bulk_b,'rotation and atom-order invariant bulk fingerprint')
  local_species(2)=13;call local(local_species,relative,0d0,defect)
  local_species=[14,14,8];call local(local_species,relative,0d0,interface_env)
  local_species=[14,14,14];call local(local_species,relative,.5d0,surface_env)
@@ -60,3 +67,5 @@ target_compile_options(check PRIVATE -fcheck=all -fbacktrace)
  r=subprocess.run([str(td/'b/check')],env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
  if r.returncode:raise SystemExit(r.stdout)
  print(r.stdout.strip())
+assert 'call build_sawf_fragment_environment_fingerprints' in generator
+assert 'sawf_environment_key(ifrag)==sawf_environment_key(' in generator
