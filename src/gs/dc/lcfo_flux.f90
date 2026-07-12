@@ -6646,10 +6646,13 @@ contains
       complex(8), allocatable :: d_band_set(:,:,:),d_wann_set(:,:,:)
       complex(8),allocatable :: sawf_local_d_wann(:,:,:)
       complex(8),allocatable :: sawf_local_d_band(:,:,:),sawf_local_states(:,:)
+      complex(8),allocatable :: sawf_local_amn(:,:)
+      real(8),allocatable :: sawf_local_energy(:)
       real(8) :: representation_residual
       type(t_sawf_projection_channel), allocatable :: channels(:)
       type(t_sawf_symop), allocatable :: symmetry_operations(:)
       type(t_sawf_dmn_writer) :: writer
+      type(t_sawf_dmn_writer)::sawf_local_writer
       type(t_sawf_fragment_state_cache) :: state_cache
       type(t_sawf_closed_basis) :: closed_basis
       type(t_sawf_environment_receipt),allocatable :: sawf_environment_receipts(:)
@@ -6945,7 +6948,8 @@ contains
       if(trim(wannier_sawf_generation)=='hierarchical'.and.dc%id_frag==0.and. &
           sawf_environment_receipts(dc%i_frag)%requires_execution)then
         call write_sawf_representative_local_seed(state_cache%source,channels, &
-          sawf_selected_channels,sawf_seed_bundles,local_ok,message,local_states_out=sawf_local_states)
+          sawf_selected_channels,sawf_seed_bundles,local_ok,message,local_states_out=sawf_local_states, &
+          local_energy_out=sawf_local_energy,local_amn_out=sawf_local_amn)
         if(.not.local_ok)then
           write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-LOCAL-SEED] rank=',dc%id_tot,' ',trim(message)
           call lcfo_sawf_fatal('SAWF representative local eigensystem/seed construction failed')
@@ -7126,7 +7130,35 @@ contains
             ' residual=',representation_residual,' ',trim(message)
           call lcfo_sawf_fatal('SAWF local D_band/D_wann representation closure failed')
         end if
+        ibundle=findloc(sawf_seed_bundles%environment,dc%i_frag,dim=1)
+        if(ibundle<=0)call lcfo_sawf_fatal('SAWF local DMN bundle lookup failed')
+        dmn_filename=trim(sawf_seed_bundles(ibundle)%directory)//'/'// &
+          trim(sawf_seed_bundles(ibundle)%seedname)//'.dmn'
+        call begin_sawf_dmn(sawf_local_writer,dmn_filename,size(sawf_local_states,2), &
+          size(sawf_selected_channels),size(sawf_local_stabilizer),closure_tolerance,local_ok,message)
+        if(.not.local_ok)call lcfo_sawf_fatal('SAWF local DMN initialization failed: '//trim(message))
+        do iop=1,size(sawf_local_stabilizer)
+          call append_sawf_dmn_operation(sawf_local_writer,iop,sawf_local_d_wann(:,:,iop), &
+            sawf_local_d_band(:,:,iop),sawf_local_energy,sawf_local_amn, &
+            sawf_local_stabilizer(iop)==1,local_ok,message,singular_min,singular_max,closure_residual)
+          if(.not.local_ok)then
+            call abort_sawf_dmn(sawf_local_writer)
+            call lcfo_sawf_fatal('SAWF local DMN operation failed: '//trim(message))
+          end if
+        end do
+        call finish_sawf_dmn(sawf_local_writer,symmetry_operations(sawf_local_stabilizer), &
+          local_ok,message)
+        if(.not.local_ok)then
+          call abort_sawf_dmn(sawf_local_writer)
+          call lcfo_sawf_fatal('SAWF local DMN publication failed: '//trim(message))
+        end if
+        call activate_sawf_win(trim(sawf_seed_bundles(ibundle)%directory)//'/'// &
+          trim(sawf_seed_bundles(ibundle)%seedname)//'.win',closure_tolerance,local_ok,message,dc%id_tot)
+        if(.not.local_ok)call lcfo_sawf_fatal('SAWF local WIN activation failed: '//trim(message))
       end if
+      if(trim(wannier_sawf_generation)=='hierarchical'.and. &
+          .not.is_wannier90_export_only_command(resolved_wannier_command)) &
+        call run_sawf_local_wannier(resolved_wannier_command,sawf_seed_bundles)
 
       failure=0
       if(dc%id_frag==0) then
@@ -8019,7 +8051,7 @@ contains
     end subroutine checked_sawf_fragment_point_count
 
     subroutine write_sawf_representative_local_seed(entry,projection_channels,selected_channels, &
-        bundles,ok,message,neighbor_gvec,local_states_out)
+        bundles,ok,message,neighbor_gvec,local_states_out,local_energy_out,local_amn_out)
       use salmon_global, only: wannier_projection_width
       use salmon_math, only: matrix_inverse
       type(t_sawf_fragment_state_entry),intent(in)::entry
@@ -8030,6 +8062,8 @@ contains
       character(*),intent(out)::message
       integer,intent(in),optional::neighbor_gvec(:,:)
       complex(8),allocatable,intent(out),optional::local_states_out(:,:)
+      real(8),allocatable,intent(out),optional::local_energy_out(:)
+      complex(8),allocatable,intent(out),optional::local_amn_out(:,:)
       real(8),parameter::hartree_to_ev=27.211386245988d0
       real(8),allocatable::h_basis(:,:),energy_hartree(:),energy_ev(:)
       complex(8),allocatable::states(:,:),projection(:,:),phase_factor(:,:),amn_local(:,:),mmn_dummy(:,:,:)
@@ -8103,6 +8137,12 @@ contains
       end do;end do;end do
       call build_sawf_local_seed_matrices(states,projection,phase_factor,hvol,amn_local,mmn_dummy,ok,message)
       if(.not.ok)return
+      if(present(local_energy_out))then
+        allocate(local_energy_out(size(energy_hartree)));local_energy_out=energy_hartree
+      end if
+      if(present(local_amn_out))then
+        allocate(local_amn_out(size(amn_local,1),size(amn_local,2)));local_amn_out=amn_local
+      end if
       energy_ev=energy_hartree*hartree_to_ev
       natom=1;do channel=2,size(selected_channels)
         if(projection_channels(selected_channels(channel))%atom/= &
@@ -9179,6 +9219,16 @@ contains
           bundles(bundle)%directory,preprocess_only=.true.)
       end do
     end subroutine run_sawf_local_preprocessing
+
+    subroutine run_sawf_local_wannier(resolved_command,bundles)
+      character(*),intent(in)::resolved_command
+      type(t_sawf_seed_bundle),intent(in)::bundles(:)
+      integer::bundle
+      do bundle=1,size(bundles)
+        call run_wannier90_seed_files(resolved_command,bundles(bundle)%seedname, &
+          bundles(bundle)%directory)
+      end do
+    end subroutine run_sawf_local_wannier
 
     subroutine run_wannier90_seed_files(resolved_command,seedname_in,directory_in,preprocess_only)
       use communication, only: comm_sync_all, comm_bcast
