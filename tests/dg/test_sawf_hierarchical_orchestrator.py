@@ -24,6 +24,7 @@ for token in required:
 
 assert "call build_sawf_environment_execution_plan" in flux
 assert "call build_sawf_seed_bundles" in flux
+assert "call atomic_create_directory(sawf_seed_bundles" in flux
 
 fc = shutil.which("gfortran")
 if not fc:

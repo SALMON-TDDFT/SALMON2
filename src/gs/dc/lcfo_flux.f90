@@ -6606,6 +6606,7 @@ contains
 
     subroutine generate_sawf_dmn(nband_wann)
       use communication, only: comm_get_max,comm_bcast
+      use filesystem, only: atomic_create_directory
       use salmon_global, only: izatom, sysname, wannier_num_wann, &
         wannier_site_symmetry, wannier_symmetry_file, wannier_symmetry_tolerance, &
         wannier_sawf_generation,wannier_sawf_structure_class
@@ -6613,7 +6614,7 @@ contains
       use, intrinsic :: iso_fortran_env, only: int64
       implicit none
       integer, intent(in) :: nband_wann
-      integer :: allocation_failure, allocation_status, failure, local_failure, ia, ifrag, iop, isym
+      integer :: allocation_failure, allocation_status, failure, local_failure, ia, ifrag, iop, isym,ibundle
       integer :: projection_lmax
       integer :: mesh(3)
       integer, allocatable :: species(:), fragment_origin(:,:), fragment_shape(:,:)
@@ -6834,6 +6835,11 @@ contains
           write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-SEEDS] rank=',dc%id_tot,' ',trim(message)
           call lcfo_sawf_fatal('SAWF representative seed-bundle construction failed')
         end if
+        call atomic_create_directory(trim(dc%base_directory)//'sawf-hierarchical', &
+          dc%icomm_tot,dc%id_tot)
+        do ibundle=1,size(sawf_seed_bundles)
+          call atomic_create_directory(sawf_seed_bundles(ibundle)%directory,dc%icomm_tot,dc%id_tot)
+        end do
       end if
       call build_sawf_operation_product_table(symmetry_operations,lattice,lattice_inverse, &
         wannier_symmetry_tolerance,product_left,product_right,product_result,local_ok,message)
