@@ -44,6 +44,14 @@
 !      j_max+1: one past the cache -- an abort (or, without the guard, an
 !      out-of-bounds read) at a perfectly legal endpoint of the pulse.  A zero
 !      fractional weight must COLLAPSE the bracket onto the node instead.
+!  T11 near-degenerate CHAIN closure.  "|eps_a-eps_b| <= floor" is not an
+!      equivalence relation: for a chain a~b~c the pairwise gate leaves the
+!      END pair (a,c) dephasing, which makes the result depend on the basis
+!      chosen INSIDE the connected near-degenerate manifold -- the very thing
+!      the floor exists to prevent.  The gate must act on the CONNECTED BLOCK.
+!      T11 also pins the basis-invariant readout: within a degenerate block the
+!      individual eigen-columns are arbitrary, so only the block total is
+!      observable (gicov_int_occupation_k reports it shared equally).
 !
 program test_gicov_integral
   use gicov_integral_ssbe
@@ -61,6 +69,7 @@ program test_gicov_integral
   call t8_mode_predicates(nfail)
   call t9_eigensolver_status(nfail)
   call t10_bracket_edge(nfail)
+  call t11_degenerate_closure(nfail)
 
   if (nfail == 0) then
     write(*, '(a)') "ALL PASS (test_gicov_integral)"
@@ -238,7 +247,7 @@ contains
     complex(8) :: H(nb, nb), rho(nb, nb), rho2(nb, nb)
     complex(8) :: P(nb, nb), R(nb, nb), cwork(64)
     real(8)    :: eps(nb), rwork(64), tr0, herr, dt, gamma
-    integer    :: a, b, it, ierr
+    integer    :: a, b, it, ierr, blk(nb)
     ! a fixed generic Hermitian H and a Hermitian trace-1 initial rho
     H = (0d0, 0d0)
     H(1, 1) = 0.20d0; H(2, 2) = 0.55d0; H(3, 3) = 0.90d0
@@ -253,7 +262,7 @@ contains
     dt = 0.02d0; gamma = 1d0 / 50d0
     do it = 1, nstep
       call gicov_int_step_k(H, rho, nb, dt, gamma, 'step', 2d-3, 0d0, 1d-9, &
-                          & eps, P, R, cwork, 64, rwork, rho2, ierr)
+                          & eps, P, R, cwork, 64, rwork, blk, rho2, ierr)
       rho = rho2
     end do
     ! trace preserved (populations invariant in H's eigenbasis, exactly)
@@ -275,7 +284,7 @@ contains
     complex(8) :: H(nb, nb), rho(nb, nb), rho2(nb, nb)
     complex(8) :: P(nb, nb), R(nb, nb), cwork(64)
     real(8)    :: eps(nb), rwork(64), dt, gamma, c0, cN, expected
-    integer    :: it, ierr
+    integer    :: it, ierr, blk(nb)
     dt = 0.05d0; gamma = 1d0 / 10d0
     ! (a) EXACTLY degenerate pair: H = 0 (eps_1 = eps_2) -> g(0)=0 -> no decay
     H = (0d0, 0d0)
@@ -285,7 +294,7 @@ contains
     c0 = abs(rho(1, 2))
     do it = 1, 100
       call gicov_int_step_k(H, rho, nb, dt, gamma, 'step', 2d-3, 0d0, 1d-9, &
-                          & eps, P, R, cwork, 64, rwork, rho2, ierr)
+                          & eps, P, R, cwork, 64, rwork, blk, rho2, ierr)
       rho = rho2
     end do
     call report("T4 exact-degenerate pair is NOT dephased (g(0)=0 covariance)", &
@@ -298,7 +307,7 @@ contains
     c0 = abs(rho(1, 2))
     do it = 1, 100
       call gicov_int_step_k(H, rho, nb, dt, gamma, 'step', 2d-3, 0d0, 1d-9, &
-                          & eps, P, R, cwork, 64, rwork, rho2, ierr)
+                          & eps, P, R, cwork, 64, rwork, blk, rho2, ierr)
       rho = rho2
     end do
     cN = abs(rho(1, 2))
@@ -430,7 +439,7 @@ contains
     complex(8) :: H(nb, nb), rho(nb, nb), rho2(nb, nb)
     complex(8) :: P(nb, nb), R(nb, nb), cwork(64)
     real(8)    :: eps(nb), rwork(64), nocc(nb), nan
-    integer    :: ierr, ierr_ok, a
+    integer    :: ierr, ierr_ok, a, blk(nb)
     logical    :: ok
 
     rho = (0d0, 0d0)
@@ -445,7 +454,7 @@ contains
     H(1, 1) = 0.20d0; H(2, 2) = 0.55d0; H(3, 3) = 0.90d0
     H(1, 2) = cmplx(0.18d0, 0.04d0, 8); H(2, 1) = conjg(H(1, 2))
     H(1, 3) = cmplx(-0.09d0, 0.06d0, 8); H(3, 1) = conjg(H(1, 3))
-    call gicov_int_occupation_k(H, rho, nb, eps, P, R, cwork, 64, rwork, nocc, ierr_ok)
+    call gicov_int_occupation_k(H, rho, nb, 1d-9, eps, P, R, cwork, 64, rwork, nocc, blk, ierr_ok)
     ok = (ierr_ok == 0)
     ! the instantaneous populations must DIFFER from the frozen-basis diagonal
     ok = ok .and. (maxval(abs(nocc - (/ 0.6d0, 0.3d0, 0.1d0 /))) > 1d-3)
@@ -455,7 +464,7 @@ contains
               & ok, nfail)
 
     call gicov_int_step_k(H, rho, nb, 0.02d0, 1d0/50d0, 'step', 2d-3, 0d0, 1d-9, &
-                        & eps, P, R, cwork, 64, rwork, rho2, ierr_ok)
+                        & eps, P, R, cwork, 64, rwork, blk, rho2, ierr_ok)
     ok = (ierr_ok == 0)
     ! and it actually EVOLVED (a frozen block would return rho unchanged)
     ok = ok .and. (maxdiff(rho2, rho, nb) > 1d-6)
@@ -470,10 +479,10 @@ contains
     H(1, 1) = 0.20d0; H(2, 2) = 0.55d0
     H(3, 3) = cmplx(nan, 0d0, 8)
     call gicov_int_step_k(H, rho, nb, 0.02d0, 1d0/50d0, 'step', 2d-3, 0d0, 1d-9, &
-                        & eps, P, R, cwork, 64, rwork, rho2, ierr)
+                        & eps, P, R, cwork, 64, rwork, blk, rho2, ierr)
     call report("T9 step: non-finite H~ is REPORTED (ierr/=0), not silently frozen", &
               & ierr /= 0, nfail)
-    call gicov_int_occupation_k(H, rho, nb, eps, P, R, cwork, 64, rwork, nocc, ierr)
+    call gicov_int_occupation_k(H, rho, nb, 1d-9, eps, P, R, cwork, 64, rwork, nocc, blk, ierr)
     ok = (ierr /= 0)
     ! and it must NOT have quietly returned the forbidden diag(rho~) fallback
     do a = 1, nb
@@ -530,5 +539,86 @@ contains
     call report("T10 frac=0 interp on the collapsed bracket reproduces the node exactly", &
               & maxdiff(Y, Ylo, 2) < 1d-15, nfail)
   end subroutine t10_bracket_edge
+
+  !----------------------------------------------------------------
+  subroutine t11_degenerate_closure(nfail)
+    integer, intent(inout) :: nfail
+    integer, parameter :: nb = 3
+    complex(8) :: H(nb, nb), rho(nb, nb), rho2(nb, nb)
+    complex(8) :: P(nb, nb), R(nb, nb), cwork(64)
+    real(8)    :: eps(nb), rwork(64), nocc(nb), dt, gamma, c0, cN, expected, fl
+    integer    :: blk(nb), it, ierr
+    logical    :: ok
+
+    fl = 1d-3                 ! degeneracy floor
+    dt = 0.05d0; gamma = 1d0 / 10d0
+
+    ! ---- the block builder itself: a CHAIN 0, 0.75f, 1.5f is ONE block
+    !      (each adjacent gap 0.75f <= floor) even though the end pair is
+    !      1.5f > floor; 3.0f later is a genuinely separate block.
+    eps = (/ 0d0, 0.75d0 * fl, 1.5d0 * fl /)
+    call gicov_int_degen_blocks(eps, nb, fl, blk)
+    call report("T11 connected closure: chain (0, .75f, 1.5f) is ONE block", &
+              & (blk(1) == blk(2)) .and. (blk(2) == blk(3)), nfail)
+    eps = (/ 0d0, 0.75d0 * fl, 3.0d0 * fl /)
+    call gicov_int_degen_blocks(eps, nb, fl, blk)
+    call report("T11 a gap > floor STARTS a new block (0, .75f | 3f)", &
+              & (blk(1) == blk(2)) .and. (blk(3) /= blk(2)), nfail)
+
+    ! ---- T2 gate on the chain.  theta=0 so the 'step' gate weight is 1 for
+    !      ANY gap above the floor: the pairwise rule would then dephase the
+    !      end pair (1,3) (gap 1.5f > floor), the closure must not.
+    H = (0d0, 0d0)
+    H(1, 1) = cmplx(0d0, 0d0, 8)
+    H(2, 2) = cmplx(0.75d0 * fl, 0d0, 8)
+    H(3, 3) = cmplx(1.5d0 * fl, 0d0, 8)
+    rho = (0d0, 0d0)
+    rho(1, 1) = 0.4d0; rho(2, 2) = 0.35d0; rho(3, 3) = 0.25d0
+    rho(1, 3) = cmplx(0.3d0, 0d0, 8); rho(3, 1) = conjg(rho(1, 3))
+    c0 = abs(rho(1, 3))
+    do it = 1, 100
+      call gicov_int_step_k(H, rho, nb, dt, gamma, 'step', 0d0, 0d0, fl, &
+                          & eps, P, R, cwork, 64, rwork, blk, rho2, ierr)
+      rho = rho2
+    end do
+    call report("T11 END pair of a near-degenerate CHAIN is NOT dephased (block closure)", &
+              & (ierr == 0) .and. (abs(abs(rho(1, 3)) - c0) < 1d-12), nfail)
+
+    ! ---- control: a genuinely separated pair still dephases (the gate has teeth)
+    H = (0d0, 0d0)
+    H(1, 1) = cmplx(0d0, 0d0, 8)
+    H(2, 2) = cmplx(0.75d0 * fl, 0d0, 8)
+    H(3, 3) = cmplx(50d0 * fl, 0d0, 8)          ! far above the floor -> own block
+    rho = (0d0, 0d0)
+    rho(1, 1) = 0.4d0; rho(2, 2) = 0.35d0; rho(3, 3) = 0.25d0
+    rho(1, 3) = cmplx(0.3d0, 0d0, 8); rho(3, 1) = conjg(rho(1, 3))
+    c0 = abs(rho(1, 3))
+    do it = 1, 100
+      call gicov_int_step_k(H, rho, nb, dt, gamma, 'step', 0d0, 0d0, fl, &
+                          & eps, P, R, cwork, 64, rwork, blk, rho2, ierr)
+      rho = rho2
+    end do
+    cN = abs(rho(1, 3))
+    expected = c0 * exp(-gamma * dt * 100)
+    call report("T11 control: a well-separated pair DOES dephase (gate still has teeth)", &
+              & abs(cN - expected) < 1d-10, nfail)
+
+    ! ---- basis-invariant readout: members of one degenerate block are not
+    !      individually observable, so the block total is reported shared
+    !      equally -- and the total is preserved.
+    H = (0d0, 0d0)      ! exactly degenerate 1,2 ; 3 separate
+    H(3, 3) = cmplx(50d0 * fl, 0d0, 8)
+    rho = (0d0, 0d0)
+    rho(1, 1) = 0.5d0; rho(2, 2) = 0.1d0; rho(3, 3) = 0.4d0
+    call gicov_int_occupation_k(H, rho, nb, fl, eps, P, R, cwork, 64, rwork, &
+                              & nocc, blk, ierr)
+    ok = (ierr == 0)
+    ok = ok .and. (abs(nocc(1) - nocc(2)) < 1d-12)        ! degenerate pair: equal
+    ok = ok .and. (abs(nocc(1) + nocc(2) - 0.6d0) < 1d-12) ! block TOTAL invariant
+    ok = ok .and. (abs(nocc(3) - 0.4d0) < 1d-12)          ! own block untouched
+    ok = ok .and. (abs(sum(nocc) - 1.0d0) < 1d-12)        ! sum rule kept
+    call report("T11 occupation is a degenerate-BLOCK sum (invariant, sum rule kept)", &
+              & ok, nfail)
+  end subroutine t11_degenerate_closure
 
 end program test_gicov_integral

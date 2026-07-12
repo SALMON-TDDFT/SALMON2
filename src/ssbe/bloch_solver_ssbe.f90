@@ -110,6 +110,7 @@ module bloch_solver_ssbe
     complex(8), allocatable, save :: gi_w_H(:,:,:)       ! (nb,nb,0:nth-1) interpolated H~
     complex(8), allocatable, save :: gi_w_rout(:,:,:)    ! (nb,nb,0:nth-1) step output
     complex(8), allocatable, save :: gi_w_v(:,:,:,:)     ! (nb,nb,3,0:nth-1) interpolated v~
+    integer,    allocatable, save :: gi_w_blk(:,:)       ! (nb, 0:nth-1) instantaneous degenerate-block ids
     integer,    save :: gi_lcwork = 0
 
 contains
@@ -2123,6 +2124,7 @@ subroutine build_gicov_integral_cache(sbe, gs, axis, jmax, icomm)
   allocate(gi_w_P(nb, nb, 0:nth-1), gi_w_R(nb, nb, 0:nth-1))
   allocate(gi_w_cw(gi_lcwork, 0:nth-1))
   allocate(gi_w_H(nb, nb, 0:nth-1), gi_w_rout(nb, nb, 0:nth-1), gi_w_v(nb, nb, 3, 0:nth-1))
+  allocate(gi_w_blk(nb, 0:nth-1))
 
   gi_built = .true.
 end subroutine build_gicov_integral_cache
@@ -2168,7 +2170,7 @@ subroutine dt_evolve_bloch_lg_integral(sbe, gs, q_mid, dt, icomm)
                         & sbe_t2_gate_shape, sbe_t2_gate_theta, sbe_t2_gate_width, &
                         & sbe_lg_degen_floor, gi_w_eps(:, tid), gi_w_P(:, :, tid), &
                         & gi_w_R(:, :, tid), gi_w_cw(:, tid), gi_lcwork, gi_w_rw(:, tid), &
-                        & gi_w_rout(:, :, tid), ierr)
+                        & gi_w_blk(:, tid), gi_w_rout(:, :, tid), ierr)
     if (ierr /= 0) then
       nbad_l = nbad_l + 1
     else
@@ -2240,6 +2242,7 @@ end subroutine calc_current_bloch_lg_integral
 ! caller sums over degenerate blocks for a basis-invariant readout.  Diagonal
 ! diag(rho~) would be basis-dependent under transport, so it is NOT used.
 subroutine calc_band_population_integral(sbe, gs, q_now, nex_b, icomm)
+  use salmon_global, only: sbe_lg_degen_floor
   use gicov_integral_ssbe, only: gicov_int_bracket, gicov_int_interp, gicov_int_occupation_k
   implicit none
   type(s_sbe_bloch_solver), intent(in) :: sbe
@@ -2264,9 +2267,10 @@ subroutine calc_band_population_integral(sbe, gs, q_now, nex_b, icomm)
   do ik = gi_ikmin, gi_ikmax
     call gicov_int_interp(gi_Ht(:, :, n_lo, ik), gi_Ht(:, :, n_hi, ik), &
                         & frac, nb, gi_w_H(:, :, 0))
-    call gicov_int_occupation_k(gi_w_H(:, :, 0), sbe%rho(:, :, ik), nb, &
+    call gicov_int_occupation_k(gi_w_H(:, :, 0), sbe%rho(:, :, ik), nb, sbe_lg_degen_floor, &
                               & gi_w_eps(:, 0), gi_w_P(:, :, 0), gi_w_R(:, :, 0), &
-                              & gi_w_cw(:, 0), gi_lcwork, gi_w_rw(:, 0), nocc, ierr)
+                              & gi_w_cw(:, 0), gi_lcwork, gi_w_rw(:, 0), nocc, &
+                              & gi_w_blk(:, 0), ierr)
     if (ierr /= 0) then
       nbad_l = nbad_l + 1
       cycle

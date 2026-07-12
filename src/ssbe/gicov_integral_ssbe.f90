@@ -56,6 +56,7 @@ module gicov_integral_ssbe
   public :: gicov_int_bracket        ! (a,dk,jmax) -> the two cached nodes bracketing x, span-checked
   public :: gicov_int_axis_single    ! runtime all-trajectory single-axis / linear-polarization guard
   public :: gicov_int_gate_weight    ! Delta-omega T2 gate weight (mirror of gs_info t2_gate_weight)
+  public :: gicov_int_degen_blocks   ! connected closure of |eps_a-eps_b|<=floor over the sorted spectrum
   public :: gicov_int_chain          ! ordered product of single-step Wilson links -> W(kappa,kappa+n), polar
   public :: gicov_int_transport_op   ! Y = W O W^dagger  (transport a band-frame operator into the kappa frame)
   public :: gicov_int_interp         ! linear interpolation of a bounded transported operator between nodes
@@ -222,6 +223,43 @@ contains
   end function gicov_int_gate_weight
 
   !-------------------------------------------------------------------
+  ! Instantaneous degenerate blocks = the CONNECTED COMPONENTS of the relation
+  ! |eps_a - eps_b| <= floor.  blk(a) is the (1-based, ascending) block index of
+  ! eigenvalue a.
+  !
+  ! Why the connected closure and not the pairwise test: "within floor of" is
+  ! NOT transitive, so a near-degenerate CHAIN eps = (0, 0.75*floor, 1.5*floor)
+  ! has both adjacent pairs inside the floor while the END pair (0, 1.5*floor)
+  ! sits outside it.  Gating pair-by-pair therefore dephases the end pair of a
+  ! manifold whose members are physically indistinguishable -- and the answer
+  ! then depends on which basis the eigensolver happened to pick INSIDE that
+  ! manifold, which is exactly the gauge dependence the floor exists to kill.
+  ! The dephasing rate must be a function of the BLOCK, not of the pair.
+  !
+  ! zheev returns eps ASCENDING, so the connected components are precisely the
+  ! runs delimited by an adjacent gap greater than floor -- one linear pass.
+  ! (Ascending order is what makes the single pass exact: any two members of a
+  ! run are connected THROUGH the run, and any two members of different runs are
+  ! separated by at least one gap > floor at every path between them.)
+  !-------------------------------------------------------------------
+  pure subroutine gicov_int_degen_blocks(eps, nb, floor, blk)
+    implicit none
+    integer, intent(in)  :: nb
+    real(8), intent(in)  :: eps(nb), floor
+    integer, intent(out) :: blk(nb)
+    integer :: a
+    if (nb < 1) return
+    blk(1) = 1
+    do a = 2, nb
+      if (eps(a) - eps(a - 1) > floor) then
+        blk(a) = blk(a - 1) + 1     ! adjacent gap breaks the chain: new block
+      else
+        blk(a) = blk(a - 1)         ! still connected to the running block
+      end if
+    end do
+  end subroutine gicov_int_degen_blocks
+
+  !-------------------------------------------------------------------
   ! Ordered product of single-step Wilson links into the transport
   !   W(kappa, kappa+n) = V(kappa)^dagger V(kappa+n)   (telescoped),
   ! with a final polar re-projection (round-off / window-leak cleanup, the same
@@ -333,7 +371,7 @@ contains
   ! corrupted k-block slipped silently past the Ne/trace monitor.
   !-------------------------------------------------------------------
   subroutine gicov_int_step_k(H, rho, nb, dt, gamma, shape, theta, width, floor, &
-                            & eps, P, R, cwork, lcwork, rwork, rho_out, ierr)
+                            & eps, P, R, cwork, lcwork, rwork, blk, rho_out, ierr)
     implicit none
     integer,      intent(in)    :: nb, lcwork
     complex(8),   intent(in)    :: H(nb, nb), rho(nb, nb)
@@ -341,6 +379,7 @@ contains
     character(*), intent(in)    :: shape
     real(8),      intent(inout) :: eps(nb), rwork(*)
     complex(8),   intent(inout) :: P(nb, nb), R(nb, nb), cwork(*)
+    integer,      intent(inout) :: blk(nb)
     complex(8),   intent(out)   :: rho_out(nb, nb)
     integer,      intent(out)   :: ierr
     integer    :: a, b, info
@@ -355,11 +394,19 @@ contains
       rho_out = rho
       return
     end if
+    ! connected near-degenerate manifolds of the INSTANTANEOUS spectrum: the
+    ! dephasing rate is a function of the BLOCK PAIR, never of the raw gap, so
+    ! that no coherence inside a physically indistinguishable manifold decays.
+    call gicov_int_degen_blocks(eps, nb, floor, blk)
     R = matmul(matmul(conjg(transpose(P)), rho), P)
     do b = 1, nb
       do a = 1, nb
         dw = eps(a) - eps(b)
-        g = gicov_int_gate_weight(dw, shape, theta, width, floor)
+        if (blk(a) == blk(b)) then
+          g = 0d0          ! same connected manifold (incl. a==b): NEVER dephase
+        else
+          g = gicov_int_gate_weight(dw, shape, theta, width, floor)
+        end if
         decay = exp( -gamma * g * dt )
         fac = exp( cmplx(0d0, -dw * dt, 8) ) * decay
         R(a, b) = fac * R(a, b)
@@ -402,20 +449,32 @@ contains
   ! a block; the caller sums n_a over each degenerate block for a basis-
   ! invariant readout.  Work arrays passed in (no heap / no automatic array).
   !
+  ! Within a degenerate block the eigensolver's choice of columns is ARBITRARY,
+  ! so the individual n_a are not observable -- only the block total is.  The
+  ! readout is therefore symmetrized over each connected block (blk, the same
+  ! closure the T2 gate uses): every member reports blockTotal/blockSize.  That
+  ! keeps the column basis-invariant AND preserves the sum rule (summing all
+  ! bands still gives the total electron count), unlike reporting the raw
+  ! diagonal of the instantaneous eigenbasis.
+  !
   ! ierr /= 0 => the eigenproblem broke and nocc is meaningless; the caller MUST
   ! abort.  The former fallback -- reading diag(rho~) in the frozen band basis --
   ! is FORBIDDEN: it is exactly the transport-non-invariant quantity this routine
   ! exists to replace, and it silently returns a plausible, trace-correct number.
   !-------------------------------------------------------------------
-  subroutine gicov_int_occupation_k(H, rho, nb, eps, P, R, cwork, lcwork, rwork, nocc, ierr)
+  subroutine gicov_int_occupation_k(H, rho, nb, floor, eps, P, R, cwork, lcwork, &
+                                  & rwork, nocc, blk, ierr)
     implicit none
     integer,    intent(in)    :: nb, lcwork
     complex(8), intent(in)    :: H(nb, nb), rho(nb, nb)
+    real(8),    intent(in)    :: floor
     real(8),    intent(inout) :: eps(nb), rwork(*)
     complex(8), intent(inout) :: P(nb, nb), R(nb, nb), cwork(*)
     real(8),    intent(out)   :: nocc(nb)
+    integer,    intent(inout) :: blk(nb)
     integer,    intent(out)   :: ierr
-    integer :: a, info
+    integer :: a, b, info, m
+    real(8) :: s
     P = H
     call zheev('V', 'U', nb, P, nb, eps, cwork, lcwork, rwork, info)
     ierr = gicov_int_eig_status(info, eps, nb)
@@ -426,6 +485,22 @@ contains
     R = matmul(matmul(conjg(transpose(P)), rho), P)
     do a = 1, nb
       nocc(a) = real(R(a, a), 8)
+    end do
+    ! symmetrize over each connected degenerate block (basis-invariant readout)
+    call gicov_int_degen_blocks(eps, nb, floor, blk)
+    a = 1
+    do while (a <= nb)
+      b = a
+      do while (b < nb)
+        if (blk(b + 1) /= blk(a)) exit
+        b = b + 1
+      end do
+      m = b - a + 1
+      if (m > 1) then
+        s = sum(nocc(a:b)) / real(m, 8)
+        nocc(a:b) = s
+      end if
+      a = b + 1
     end do
   end subroutine gicov_int_occupation_k
 
