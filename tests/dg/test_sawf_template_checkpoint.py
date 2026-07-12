@@ -13,15 +13,20 @@ driver = r'''program check_template_checkpoint
   type(t_sawf_template_fingerprint) :: fp, stale
   type(t_sawf_template_checkpoint) :: written, loaded
   logical :: ok, reuse
+  integer :: i
   character(512) :: msg
   fp%geometry='geom-a'; fp%pseudopotential='ps-a'; fp%grid='8x8x8'
   fp%band_window='1:4'; fp%complete_projection_shell='s+p'
   fp%symmetry='actual-group-a'; fp%buffer='3'; fp%generator='test-v1'
   written%fingerprint=fp
   allocate(written%centers(3,2),written%spreads(2),written%d_band(2,2,1), &
-           written%d_wann(2,2,1),written%gauge_unitary(2,2))
+           written%d_wann(2,2,1),written%gauge_unitary(2,2), &
+           written%basis(4,2),written%buffer_basis(8,2),written%orbitals(4,2))
   written%centers=reshape([0d0,1d0,2d0,3d0,4d0,5d0],[3,2])
   written%spreads=[0.25d0,0.5d0]
+  written%basis=reshape([(dble(i),i=1,8)],[4,2])
+  written%buffer_basis=reshape([(dble(i),i=1,16)],[8,2])
+  written%orbitals=cmplx(written%basis,0d0,kind=8)
   written%d_band=(0d0,0d0); written%d_band(1,1,1)=1; written%d_band(2,2,1)=1
   written%d_wann=written%d_band
   written%gauge_unitary=written%d_band(:,:,1)

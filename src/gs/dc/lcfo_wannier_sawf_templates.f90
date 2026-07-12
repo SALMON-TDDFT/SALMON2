@@ -13,6 +13,7 @@ module lcfo_wannier_sawf_templates
   type, public :: t_sawf_template_checkpoint
     type(t_sawf_template_fingerprint) :: fingerprint
     real(8), allocatable :: centers(:,:),spreads(:)
+    real(8), allocatable :: basis(:,:),buffer_basis(:,:)
     complex(8), allocatable :: orbitals(:,:),d_band(:,:,:),d_wann(:,:,:)
     complex(8), allocatable :: gauge_unitary(:,:)
     real(8) :: gauge_residual=huge(0d0)
@@ -29,6 +30,8 @@ contains
     type(t_sawf_template_checkpoint),intent(inout)::template
     if(allocated(template%centers))deallocate(template%centers)
     if(allocated(template%spreads))deallocate(template%spreads)
+    if(allocated(template%basis))deallocate(template%basis)
+    if(allocated(template%buffer_basis))deallocate(template%buffer_basis)
     if(allocated(template%orbitals))deallocate(template%orbitals)
     if(allocated(template%d_band))deallocate(template%d_band)
     if(allocated(template%d_wann))deallocate(template%d_wann)
@@ -40,17 +43,20 @@ contains
     character(*),intent(in)::filename
     type(t_sawf_template_checkpoint),intent(in)::template
     logical,intent(out)::ok; character(*),intent(out)::message
-    integer::unit,ios,dims(11); character(512)::iomsg
+    integer::unit,ios,dims(15); character(512)::iomsg
     ok=.false.; message=''; dims=0
     if(.not.allocated(template%centers).or..not.allocated(template%spreads).or. &
+       .not.allocated(template%basis).or..not.allocated(template%buffer_basis).or. &
        .not.allocated(template%d_band).or..not.allocated(template%d_wann).or. &
        .not.allocated(template%gauge_unitary))then
       message='SAWF template checkpoint is missing required basis metadata'; return
     end if
-    dims=[size(template%centers,1),size(template%centers,2),size(template%spreads),0,0, &
+    dims=[size(template%centers,1),size(template%centers,2),size(template%spreads), &
+      size(template%basis,1),size(template%basis,2),size(template%buffer_basis,1), &
+      size(template%buffer_basis,2),0,0, &
       size(template%d_band,1),size(template%d_band,2),size(template%d_band,3), &
       size(template%d_wann,1),size(template%d_wann,2),size(template%d_wann,3)]
-    if(allocated(template%orbitals))dims(4:5)=shape(template%orbitals)
+    if(allocated(template%orbitals))dims(8:9)=shape(template%orbitals)
     open(newunit=unit,file=filename,access='stream',form='unformatted',status='replace', &
       action='write',iostat=ios,iomsg=iomsg)
     if(ios/=0)then; message='SAWF template checkpoint open failed: '//trim(iomsg); return; end if
@@ -60,7 +66,7 @@ contains
       template%fingerprint%complete_projection_shell,template%fingerprint%symmetry, &
       template%fingerprint%buffer,template%fingerprint%generator,dims, &
       size(template%gauge_unitary,1),size(template%gauge_unitary,2),template%gauge_residual, &
-      template%centers,template%spreads
+      template%centers,template%spreads,template%basis,template%buffer_basis
     if(ios==0.and.allocated(template%orbitals))write(unit,iostat=ios,iomsg=iomsg)template%orbitals
     if(ios==0)write(unit,iostat=ios,iomsg=iomsg)template%d_band,template%d_wann,template%gauge_unitary
     close(unit)
@@ -74,7 +80,7 @@ contains
     type(t_sawf_template_checkpoint),intent(inout)::template
     logical,intent(out)::reuse,ok; character(*),intent(out)::message
     type(t_sawf_template_fingerprint)::stored
-    integer::unit,ios,dims(11),gauge_dims(2); character(512)::iomsg
+    integer::unit,ios,dims(15),gauge_dims(2); character(512)::iomsg
     character(24)::magic; logical::exists
     call clear_sawf_template_checkpoint(template)
     ok=.false.; reuse=.false.; message=''; inquire(file=filename,exist=exists)
@@ -88,7 +94,8 @@ contains
     if(ios/=0.or.magic/=sawf_template_magic)then
       close(unit); message='SAWF template checkpoint header is invalid'; return
     end if
-    if(any(dims<0).or.any(gauge_dims<=0).or.dims(1)/=3.or.dims(3)/=dims(2))then
+    if(any(dims<0).or.any(gauge_dims<=0).or.dims(1)/=3.or.dims(3)/=dims(2).or. &
+       any(dims(4:7)<=0))then
       close(unit); message='SAWF template checkpoint dimensions are invalid'; return
     end if
     template%fingerprint=stored
@@ -97,11 +104,13 @@ contains
       close(unit); ok=.true.; message='SAWF fingerprint mismatch; regeneration required'; return
     end if
     allocate(template%centers(dims(1),dims(2)),template%spreads(dims(3)), &
-      template%d_band(dims(6),dims(7),dims(8)),template%d_wann(dims(9),dims(10),dims(11)), &
+      template%basis(dims(4),dims(5)),template%buffer_basis(dims(6),dims(7)), &
+      template%d_band(dims(10),dims(11),dims(12)),template%d_wann(dims(13),dims(14),dims(15)), &
       template%gauge_unitary(gauge_dims(1),gauge_dims(2)),stat=ios)
     if(ios/=0)then; close(unit); message='SAWF template checkpoint allocation failed'; return; end if
-    if(dims(4)>0.and.dims(5)>0)allocate(template%orbitals(dims(4),dims(5)),stat=ios)
-    if(ios==0)read(unit,iostat=ios,iomsg=iomsg)template%centers,template%spreads
+    if(dims(8)>0.and.dims(9)>0)allocate(template%orbitals(dims(8),dims(9)),stat=ios)
+    if(ios==0)read(unit,iostat=ios,iomsg=iomsg)template%centers,template%spreads, &
+      template%basis,template%buffer_basis
     if(ios==0.and.allocated(template%orbitals))read(unit,iostat=ios,iomsg=iomsg)template%orbitals
     if(ios==0)read(unit,iostat=ios,iomsg=iomsg)template%d_band,template%d_wann,template%gauge_unitary
     close(unit)
