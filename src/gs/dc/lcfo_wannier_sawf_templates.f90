@@ -25,8 +25,23 @@ module lcfo_wannier_sawf_templates
   public :: validate_sawf_global_local_equivalence
   public :: write_sawf_template_checkpoint, read_sawf_template_checkpoint
   public :: materialize_sawf_local_bases
+  public :: apply_sawf_gauge_connection
 
 contains
+  subroutine apply_sawf_gauge_connection(gauge_unitary,neighbor_gauge_unitary,basis,ww_block,wp_block, &
+      face_self_block,face_neighbor_block)
+    complex(8),intent(in)::gauge_unitary(:,:),neighbor_gauge_unitary(:,:)
+    complex(8),intent(inout)::basis(:,:),ww_block(:,:),wp_block(:,:), &
+      face_self_block(:,:),face_neighbor_block(:,:)
+    complex(8),allocatable::left(:,:)
+    basis=matmul(basis,gauge_unitary)
+    left=conjg(transpose(gauge_unitary))
+    ww_block=matmul(left,matmul(ww_block,gauge_unitary))
+    wp_block=matmul(left,wp_block)
+    face_self_block=matmul(left,matmul(face_self_block,gauge_unitary))
+    face_neighbor_block=matmul(left,matmul(face_neighbor_block,neighbor_gauge_unitary))
+  end subroutine
+
   subroutine materialize_sawf_local_bases(representative_basis,representative_index, &
       operation_index,independent_local,point_map,d_wann,local_basis,ok,message)
     complex(8),intent(in)::representative_basis(:,:,:),d_wann(:,:,:)

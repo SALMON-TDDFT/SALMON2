@@ -3,7 +3,8 @@ import numpy as np
 
 root = Path(__file__).resolve().parents[2]
 src = (root / "src/gs/dc/lcfo_wannier_sawf_templates.f90").read_text().lower()
-for token in ["stitch_sawf_neighbor_gauge", "zgesvd", "gauge_unitary", "rank deficient"]:
+for token in ["stitch_sawf_neighbor_gauge", "apply_sawf_gauge_connection",
+              "zgesvd", "gauge_unitary", "rank deficient"]:
     assert token in src, f"missing gauge-stitch implementation {token}"
 
 theta = .37
