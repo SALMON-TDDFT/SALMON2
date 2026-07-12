@@ -7,6 +7,7 @@ module lcfo_wannier_sawf_orchestrator
     integer :: representative_fragment=0
     integer :: operation_index=0
     logical :: generated_independently=.false.
+    logical :: requires_execution=.false.
     logical :: completed=.false.
     character(256) :: same_supercell_fingerprint=''
   end type t_sawf_environment_receipt
@@ -41,6 +42,7 @@ contains
       receipts(environment)%representative_fragment=representative_fragment(environment)
       receipts(environment)%operation_index=operation_index(environment)
       receipts(environment)%generated_independently=generated_independently(environment)
+      receipts(environment)%requires_execution=generated_independently(environment)
       receipts(environment)%same_supercell_fingerprint=trim(supercell_fingerprint)
     end do
     ok=.true.
@@ -59,7 +61,7 @@ contains
     end if
     do environment=1,size(receipts)
       if(receipts(environment)%environment/=environment.or. &
-          .not.receipts(environment)%completed.or. &
+          (receipts(environment)%requires_execution.and..not.receipts(environment)%completed).or. &
           trim(receipts(environment)%same_supercell_fingerprint)/=trim(supercell_fingerprint))then
         message='SAWF environment receipt is incomplete or belongs to another supercell';return
       end if
