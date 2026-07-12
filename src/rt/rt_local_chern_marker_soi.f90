@@ -125,7 +125,7 @@ contains
           marker_sum(:,:,:) = 0d0
           nloc = size(marker_local,1) * size(marker_local,2) * size(marker_local,3)
           nloc_spin = nloc * system%nspin
-          call copy_occupied_to_temp(ik, ispin, im, nocc, occ_idx, zocc)
+          call copy_occupied_to_temp(ik, ispin, im, nocc, occ_idx, nocc_local, zocc)
           do p = 1, nocc_local
             zocc(:,:,:,:,p) = sqrt(max(0.0d0, local_occ_w(p))) * zocc(:,:,:,:,p)
           end do
@@ -478,16 +478,16 @@ contains
     end subroutine assert_soi_lcm_ready
 
     ! SOI review point: make the occupied-orbital copy logic explicit for complex spinor data.
-    subroutine copy_occupied_to_temp(ik0, ispin0, im0, nocc0, occ_list, zbuf)
+    subroutine copy_occupied_to_temp(ik0, ispin0, im0, nocc0, occ_list, nocc_local_in, zbuf)
       implicit none
-      integer, intent(in) :: ik0, ispin0, im0, nocc0
+      integer, intent(in) :: ik0, ispin0, im0, nocc0, nocc_local_in
       integer, intent(in) :: occ_list(nocc0)
       complex(8), intent(out), dimension(mg%is(1):, mg%is(2):, mg%is(3):, :, :) :: zbuf
 
       integer :: io_g, p, nocc_local0, ispin_local
 
       zbuf(:,:,:,:,:) = (0.0d0, 0.0d0)
-      nocc_local0 = size(zbuf,5)
+      nocc_local0 = nocc_local_in
 
       if (nocc_local0 <= 0) return
 
