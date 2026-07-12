@@ -6581,10 +6581,11 @@ contains
       character(*), intent(in) :: resolved_command
       integer :: failure
       failure = 0
-      if(dc%id_tot == 0 .and. is_wannier90_reuse_command(resolved_command)) failure = 1
+      if(dc%id_tot == 0 .and. (is_wannier90_reuse_command(resolved_command).or. &
+          is_wannier90_import_only_command(resolved_command))) failure = 1
       call comm_bcast(failure,dc%icomm_tot,0)
       if(failure /= 0) call lcfo_sawf_fatal( &
-        'SAWF forbids reuse/skip of an existing Wannier90 checkpoint without a seed/DMN fingerprint binding')
+        'SAWF forbids reuse/import of an existing Wannier90 checkpoint without a seed/DMN fingerprint binding')
     end subroutine reject_sawf_reuse_collective
 
     subroutine activate_sawf_win_collective(winfile)
@@ -6646,13 +6647,10 @@ contains
       complex(8), allocatable :: d_band_set(:,:,:),d_wann_set(:,:,:)
       complex(8),allocatable :: sawf_local_d_wann(:,:,:)
       complex(8),allocatable :: sawf_local_d_band(:,:,:),sawf_local_states(:,:)
-      complex(8),allocatable :: sawf_local_amn(:,:)
-      real(8),allocatable :: sawf_local_energy(:)
       real(8) :: representation_residual
       type(t_sawf_projection_channel), allocatable :: channels(:)
       type(t_sawf_symop), allocatable :: symmetry_operations(:)
       type(t_sawf_dmn_writer) :: writer
-      type(t_sawf_dmn_writer)::sawf_local_writer
       type(t_sawf_fragment_state_cache) :: state_cache
       type(t_sawf_closed_basis) :: closed_basis
       type(t_sawf_environment_receipt),allocatable :: sawf_environment_receipts(:)
@@ -6948,8 +6946,7 @@ contains
       if(trim(wannier_sawf_generation)=='hierarchical'.and.dc%id_frag==0.and. &
           sawf_environment_receipts(dc%i_frag)%requires_execution)then
         call write_sawf_representative_local_seed(state_cache%source,channels, &
-          sawf_selected_channels,sawf_seed_bundles,local_ok,message,local_states_out=sawf_local_states, &
-          local_energy_out=sawf_local_energy,local_amn_out=sawf_local_amn)
+          sawf_selected_channels,sawf_seed_bundles,local_ok,message,local_states_out=sawf_local_states)
         if(.not.local_ok)then
           write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-LOCAL-SEED] rank=',dc%id_tot,' ',trim(message)
           call lcfo_sawf_fatal('SAWF representative local eigensystem/seed construction failed')
@@ -7130,35 +7127,9 @@ contains
             ' residual=',representation_residual,' ',trim(message)
           call lcfo_sawf_fatal('SAWF local D_band/D_wann representation closure failed')
         end if
-        ibundle=findloc(sawf_seed_bundles%environment,dc%i_frag,dim=1)
-        if(ibundle<=0)call lcfo_sawf_fatal('SAWF local DMN bundle lookup failed')
-        dmn_filename=trim(sawf_seed_bundles(ibundle)%directory)//'/'// &
-          trim(sawf_seed_bundles(ibundle)%seedname)//'.dmn'
-        call begin_sawf_dmn(sawf_local_writer,dmn_filename,size(sawf_local_states,2), &
-          size(sawf_selected_channels),size(sawf_local_stabilizer),closure_tolerance,local_ok,message)
-        if(.not.local_ok)call lcfo_sawf_fatal('SAWF local DMN initialization failed: '//trim(message))
-        do iop=1,size(sawf_local_stabilizer)
-          call append_sawf_dmn_operation(sawf_local_writer,iop,sawf_local_d_wann(:,:,iop), &
-            sawf_local_d_band(:,:,iop),sawf_local_energy,sawf_local_amn, &
-            sawf_local_stabilizer(iop)==1,local_ok,message,singular_min,singular_max,closure_residual)
-          if(.not.local_ok)then
-            call abort_sawf_dmn(sawf_local_writer)
-            call lcfo_sawf_fatal('SAWF local DMN operation failed: '//trim(message))
-          end if
-        end do
-        call finish_sawf_dmn(sawf_local_writer,symmetry_operations(sawf_local_stabilizer), &
-          local_ok,message)
-        if(.not.local_ok)then
-          call abort_sawf_dmn(sawf_local_writer)
-          call lcfo_sawf_fatal('SAWF local DMN publication failed: '//trim(message))
-        end if
-        call activate_sawf_win(trim(sawf_seed_bundles(ibundle)%directory)//'/'// &
-          trim(sawf_seed_bundles(ibundle)%seedname)//'.win',closure_tolerance,local_ok,message,dc%id_tot)
-        if(.not.local_ok)call lcfo_sawf_fatal('SAWF local WIN activation failed: '//trim(message))
       end if
-      if(trim(wannier_sawf_generation)=='hierarchical'.and. &
-          .not.is_wannier90_export_only_command(resolved_wannier_command)) &
-        call run_sawf_local_wannier(resolved_wannier_command,sawf_seed_bundles)
+      if(trim(wannier_sawf_generation)=='hierarchical'.and.dc%id_tot==0)write(*,'(1x,a)') &
+        '[DC-LCFO-SAWF-LOCAL] local DMN deferred until Wannier90 symmetry-order contract is verified'
 
       failure=0
       if(dc%id_frag==0) then
@@ -8070,26 +8041,22 @@ contains
       real(8),allocatable::atom_fractional(:,:)
       real(8),allocatable::gcart(:,:)
       real(8)::a1(3),a2(3),a3(3),lattice(3,3),local_lattice(3,3),lattice_inverse(3,3),x,y,z
-      integer::bundle_index,channel,ix,iy,iz,gx,gy,gz,start(3),k,npoint,io,jo,i_halo,nbasis,natom,atom,last_atom
+      integer::bundle_index,channel,ix,iy,iz,gx,gy,gz,start(3),k,npoint,io,jo,nbasis,natom,atom,last_atom
       integer::nneighbor
 
       ok=.false.;message='';bundle_index=0;nbasis=entry%n_basis
       do k=1,size(bundles)
         if(bundles(k)%environment==entry%fragment)then;bundle_index=k;exit;end if
       end do
-      if(bundle_index==0.or..not.allocated(entry%buffer_basis).or.nbasis<=0.or. &
-          size(entry%buffer_basis,2)/=nbasis.or.size(selected_channels)<=0)then
+      if(bundle_index==0.or..not.allocated(entry%basis).or.nbasis<=0.or. &
+          size(entry%basis,2)/=nbasis.or.size(selected_channels)<=0)then
         message='SAWF representative local seed payload dimensions are inconsistent';return
       end if
       allocate(h_basis(nbasis,nbasis));h_basis=0d0
       do jo=1,nbasis;do io=1,nbasis
         h_basis(io,jo)=0.5d0*(mat_H_local(io,jo,1)+mat_H_local(jo,io,1))
-        do i_halo=1,n_halo
-          h_basis(io,jo)=h_basis(io,jo)+0.25d0*(halo(i_halo)%mat_H_local(jo,io,1)+ &
-            halo(i_halo)%mat_H_local(io,jo,1))
-        end do
       end do;end do
-      call solve_sawf_local_generalized_eigensystem(entry%buffer_basis,hvol,h_basis, &
+      call solve_sawf_local_generalized_eigensystem(entry%basis,hvol,h_basis, &
         1d-10,states,energy_hartree,ok,message)
       if(.not.ok)return
       if(present(local_states_out))then
@@ -8111,18 +8078,18 @@ contains
         energy_ev(size(energy_hartree)))
       call get_lattice_vectors(a1,a2,a3);lattice(:,1)=a1;lattice(:,2)=a2;lattice(:,3)=a3
       lattice_inverse=lattice;call matrix_inverse(lattice_inverse)
+      local_lattice=lattice
+      do channel=1,3;local_lattice(:,channel)=lattice(:,channel)* &
+        real(entry%shape(channel),8)/real(dc%lg_tot%num(channel),8);end do
       allocate(gcart(3,nneighbor));gcart=0d0
       if(present(neighbor_gvec))then
         do channel=1,nneighbor
-          call reciprocal_vector_from_index(neighbor_gvec(:,channel),a1,a2,a3, &
-            gcart(1,channel),gcart(2,channel),gcart(3,channel))
+          call reciprocal_vector_from_index(neighbor_gvec(:,channel),local_lattice(:,1), &
+            local_lattice(:,2),local_lattice(:,3),gcart(1,channel),gcart(2,channel),gcart(3,channel))
         end do
       end if
-      local_lattice=lattice
-      do channel=1,3;local_lattice(:,channel)=lattice(:,channel)* &
-        real(entry%buffer_shape(channel),8)/real(dc%lg_tot%num(channel),8);end do
-      start=dc%ixyz_frag(:,entry%fragment)-entry%buffer_width;k=0
-      do iz=1,entry%buffer_shape(3);do iy=1,entry%buffer_shape(2);do ix=1,entry%buffer_shape(1)
+      start=dc%ixyz_frag(:,entry%fragment);k=0
+      do iz=1,entry%shape(3);do iy=1,entry%shape(2);do ix=1,entry%shape(1)
         gx=1+modulo(start(1)+ix-1,dc%lg_tot%num(1));gy=1+modulo(start(2)+iy-1,dc%lg_tot%num(2))
         gz=1+modulo(start(3)+iz-1,dc%lg_tot%num(3));k=k+1
         x=dc%lg_tot%coordinate(gx,1);y=dc%lg_tot%coordinate(gy,2);z=dc%lg_tot%coordinate(gz,3)
@@ -8154,7 +8121,7 @@ contains
         if(atom==last_atom)cycle
         natom=natom+1;last_atom=atom
         atom_fractional(:,natom)=modulo((matmul(lattice_inverse,dc%system_tot%rion(:,atom))* &
-          real(dc%lg_tot%num,8)-real(start,8))/real(entry%buffer_shape,8),1d0)
+          real(dc%lg_tot%num,8)-real(start,8))/real(entry%shape,8),1d0)
       end do
       if(present(neighbor_gvec))then
         call write_sawf_local_eig_amn_mmn(bundles(bundle_index)%directory, &
@@ -9220,16 +9187,6 @@ contains
       end do
     end subroutine run_sawf_local_preprocessing
 
-    subroutine run_sawf_local_wannier(resolved_command,bundles)
-      character(*),intent(in)::resolved_command
-      type(t_sawf_seed_bundle),intent(in)::bundles(:)
-      integer::bundle
-      do bundle=1,size(bundles)
-        call run_wannier90_seed_files(resolved_command,bundles(bundle)%seedname, &
-          bundles(bundle)%directory)
-      end do
-    end subroutine run_sawf_local_wannier
-
     subroutine run_wannier90_seed_files(resolved_command,seedname_in,directory_in,preprocess_only)
       use communication, only: comm_sync_all, comm_bcast
       use salmon_global, only: sysname
@@ -9258,9 +9215,9 @@ contains
       if(dc%id_tot == 0) then
         change_dir_command = 'cd '//trim(shell_quote(dc%base_directory))//' && '
         if(present(directory_in))change_dir_command='cd '//trim(shell_quote(directory_in))//' && '
-        command_line = trim(change_dir_command)//trim(mpi_clean_env_prefix())//' '//trim(resolved_command)//' '
-        if(run_preprocess)command_line=trim(command_line)//'-pp '
-        command_line=trim(command_line)//trim(shell_quote(seedname))
+        command_line = trim(change_dir_command)//trim(mpi_clean_env_prefix())//' '//trim(resolved_command)
+        if(run_preprocess)command_line=trim(command_line)//' -pp'
+        command_line=trim(command_line)//' '//trim(shell_quote(seedname))
         write(*,'(1x,a,1x,a)') "[DC-LCFO-WANNIER] run:", trim(command_line)
         call execute_wannier90_command(command_line,command_ok,command_message)
         command_failure = merge(0,1,command_ok)
