@@ -9,8 +9,51 @@ module lcfo_wannier_sawf_seed
   public :: read_sawf_nnkp_neighbors
   public :: write_sawf_local_eig_amn
   public :: restrict_sawf_stabilizer_representation
+  public :: build_sawf_local_band_representation
 
 contains
+
+  subroutine build_sawf_local_band_representation(states,point_map,weight,tolerance,representation,ok,message)
+    complex(8),intent(in)::states(:,:)
+    integer,intent(in)::point_map(:,:)
+    real(8),intent(in)::weight,tolerance
+    complex(8),intent(out)::representation(:,:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(8),allocatable::transformed(:,:),identity(:,:)
+    logical,allocatable::seen(:)
+    real(8)::unitarity
+    integer::operation,source,target,state,npoint,nstate
+
+    ok=.false.;message='';representation=(0d0,0d0);npoint=size(states,1);nstate=size(states,2)
+    if(npoint<=0.or.nstate<=0.or.size(point_map,1)/=npoint.or.size(point_map,2)<=0.or. &
+        size(representation,1)/=nstate.or.size(representation,2)/=nstate.or. &
+        size(representation,3)/=size(point_map,2).or..not.ieee_is_finite(weight).or.weight<=0d0.or. &
+        .not.ieee_is_finite(tolerance).or.tolerance<=0d0.or. &
+        .not.all(ieee_is_finite(real(states))).or..not.all(ieee_is_finite(aimag(states))))then
+      message='SAWF local D_band inputs are invalid';return
+    end if
+    allocate(transformed(npoint,nstate),seen(npoint),identity(nstate,nstate))
+    identity=(0d0,0d0);do state=1,nstate;identity(state,state)=(1d0,0d0);end do
+    do operation=1,size(point_map,2)
+      transformed=(0d0,0d0);seen=.false.
+      do source=1,npoint
+        target=point_map(source,operation)
+        if(target<1.or.target>npoint.or.seen(target))then
+          message='SAWF local stabilizer grid map is not a permutation';return
+        end if
+        seen(target)=.true.;transformed(target,:)=states(source,:)
+      end do
+      if(.not.all(seen))then;message='SAWF local stabilizer grid map is incomplete';return;end if
+      representation(:,:,operation)=weight*matmul(conjg(transpose(states)),transformed)
+      unitarity=maxval(abs(matmul(conjg(transpose(representation(:,:,operation))), &
+        representation(:,:,operation))-identity))
+      if(unitarity>tolerance)then
+        message='SAWF local D_band is not unitary on the retained eigenspace';return
+      end if
+    end do
+    ok=.true.
+  end subroutine build_sawf_local_band_representation
 
   subroutine restrict_sawf_stabilizer_representation(global_representation,selected_channel, &
       stabilizer_operation,tolerance,local_representation,ok,message)

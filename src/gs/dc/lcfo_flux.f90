@@ -50,7 +50,8 @@ module lcfo_flux
   use lcfo_wannier_sawf_seed, only: select_sawf_local_complete_shells, &
     build_sawf_local_seed_matrices,write_sawf_local_eig_amn, &
     solve_sawf_local_generalized_eigensystem,read_sawf_nnkp_neighbors, &
-    write_sawf_local_eig_amn_mmn,restrict_sawf_stabilizer_representation
+    write_sawf_local_eig_amn_mmn,restrict_sawf_stabilizer_representation, &
+    build_sawf_local_band_representation
   use lcfo_wannier_sawf_win, only: activate_sawf_win, deactivate_sawf_win, &
     t_atomic_win_writer, begin_atomic_win, finish_atomic_win, abort_atomic_win, &
     write_sawf_local_preprocess_win
@@ -6632,6 +6633,9 @@ contains
       integer,allocatable :: sawf_expected_channels(:),sawf_selected_channels(:)
       integer,allocatable :: sawf_neighbor_gvec(:,:)
       integer,allocatable :: sawf_local_stabilizer(:)
+      integer,allocatable :: sawf_local_point_map(:,:),sawf_point_map_column(:)
+      integer,allocatable :: sawf_local_product_left(:),sawf_local_product_right(:), &
+        sawf_local_product_result(:)
       character(256), allocatable :: sawf_environment_key(:)
       real(8) :: a1(3), a2(3), a3(3), lattice(3,3), lattice_inverse(3,3)
       real(8) :: singular_min, singular_max, closure_residual, closure_tolerance
@@ -6641,6 +6645,7 @@ contains
       complex(8), allocatable :: d_band_local(:,:),d_band_sum(:,:),d_wann(:,:),amn(:,:)
       complex(8), allocatable :: d_band_set(:,:,:),d_wann_set(:,:,:)
       complex(8),allocatable :: sawf_local_d_wann(:,:,:)
+      complex(8),allocatable :: sawf_local_d_band(:,:,:),sawf_local_states(:,:)
       real(8) :: representation_residual
       type(t_sawf_projection_channel), allocatable :: channels(:)
       type(t_sawf_symop), allocatable :: symmetry_operations(:)
@@ -6652,7 +6657,7 @@ contains
       logical :: local_ok,grid_map_ok,fragment_map_ok,center_available,split_fragment_global_mode
       logical, allocatable :: sawf_environment_equivalent(:,:),sawf_defect_intersects(:), &
         sawf_regenerate_environment(:),sawf_generate_independently(:),sawf_inside_atom(:)
-      integer :: max_targets_per_source
+      integer :: max_targets_per_source,local_left,local_right,local_relation,global_relation
       character(512) :: message
       character(256) :: symmetry_filename,allocation_message,dmn_filename,amn_filename, &
         sawf_supercell_fingerprint
@@ -6940,7 +6945,7 @@ contains
       if(trim(wannier_sawf_generation)=='hierarchical'.and.dc%id_frag==0.and. &
           sawf_environment_receipts(dc%i_frag)%requires_execution)then
         call write_sawf_representative_local_seed(state_cache%source,channels, &
-          sawf_selected_channels,sawf_seed_bundles,local_ok,message)
+          sawf_selected_channels,sawf_seed_bundles,local_ok,message,local_states_out=sawf_local_states)
         if(.not.local_ok)then
           write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-LOCAL-SEED] rank=',dc%id_tot,' ',trim(message)
           call lcfo_sawf_fatal('SAWF representative local eigensystem/seed construction failed')
@@ -7067,6 +7072,59 @@ contains
         if(.not.local_ok)then
           write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-LOCAL-DWANN] rank=',dc%id_tot,' ',trim(message)
           call lcfo_sawf_fatal('SAWF local D_wann restriction failed')
+        end if
+        allocate(sawf_local_point_map(size(sawf_local_states,1),size(sawf_local_stabilizer)), &
+          sawf_local_d_band(size(sawf_local_states,2),size(sawf_local_states,2), &
+          size(sawf_local_stabilizer)),stat=allocation_status)
+        if(allocation_status/=0)call lcfo_sawf_fatal('SAWF local D_band workspace allocation failed')
+        do iop=1,size(sawf_local_stabilizer)
+          call build_sawf_fragment_buffer_point_map(symmetry_operations(sawf_local_stabilizer(iop)), &
+            mesh,fragment_origin(:,dc%i_frag),fragment_shape(:,dc%i_frag), &
+            fragment_origin(:,dc%i_frag),fragment_shape(:,dc%i_frag),dc%nxyz_buffer, &
+            wannier_symmetry_tolerance,sawf_point_map_column,local_ok,message)
+          if(.not.local_ok.or.size(sawf_point_map_column)/=size(sawf_local_states,1))then
+            write(*,'(1x,a,i0,a,i0,2a)')'[DC-LCFO-SAWF-LOCAL-DBAND] rank=',dc%id_tot, &
+              ' operation=',sawf_local_stabilizer(iop),' ',trim(message)
+            call lcfo_sawf_fatal('SAWF local stabilizer buffer-grid map failed')
+          end if
+          sawf_local_point_map(:,iop)=sawf_point_map_column;deallocate(sawf_point_map_column)
+        end do
+        call build_sawf_local_band_representation(sawf_local_states,sawf_local_point_map,hvol, &
+          closure_tolerance,sawf_local_d_band,local_ok,message)
+        if(.not.local_ok)then
+          write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-LOCAL-DBAND] rank=',dc%id_tot,' ',trim(message)
+          call lcfo_sawf_fatal('SAWF local D_band construction failed')
+        end if
+        allocate(sawf_local_product_left(size(sawf_local_stabilizer)**2), &
+          sawf_local_product_right(size(sawf_local_stabilizer)**2), &
+          sawf_local_product_result(size(sawf_local_stabilizer)**2))
+        local_relation=0
+        do local_left=1,size(sawf_local_stabilizer);do local_right=1,size(sawf_local_stabilizer)
+          local_relation=local_relation+1;global_relation=0
+          do iop=1,size(product_left)
+            if(product_left(iop)==sawf_local_stabilizer(local_left).and. &
+                product_right(iop)==sawf_local_stabilizer(local_right))then
+              global_relation=iop;exit
+            end if
+          end do
+          if(global_relation==0)call lcfo_sawf_fatal('SAWF local stabilizer product lookup failed')
+          sawf_local_product_left(local_relation)=local_left
+          sawf_local_product_right(local_relation)=local_right
+          sawf_local_product_result(local_relation)=findloc(sawf_local_stabilizer== &
+            product_result(global_relation),.true.,dim=1)
+          if(sawf_local_product_result(local_relation)<=0) &
+            call lcfo_sawf_fatal('SAWF local stabilizer product escapes subgroup')
+        end do;end do
+        call validate_sawf_operation_set_products(sawf_local_d_band,sawf_local_product_left, &
+          sawf_local_product_right,sawf_local_product_result,closure_tolerance, &
+          representation_residual,local_ok,message)
+        if(local_ok)call validate_sawf_operation_set_products(sawf_local_d_wann, &
+          sawf_local_product_left,sawf_local_product_right,sawf_local_product_result, &
+          closure_tolerance,representation_residual,local_ok,message)
+        if(.not.local_ok)then
+          write(*,'(1x,a,i0,a,es13.5,2a)')'[DC-LCFO-SAWF-LOCAL-GROUP] rank=',dc%id_tot, &
+            ' residual=',representation_residual,' ',trim(message)
+          call lcfo_sawf_fatal('SAWF local D_band/D_wann representation closure failed')
         end if
       end if
 
@@ -7961,7 +8019,7 @@ contains
     end subroutine checked_sawf_fragment_point_count
 
     subroutine write_sawf_representative_local_seed(entry,projection_channels,selected_channels, &
-        bundles,ok,message,neighbor_gvec)
+        bundles,ok,message,neighbor_gvec,local_states_out)
       use salmon_global, only: wannier_projection_width
       use salmon_math, only: matrix_inverse
       type(t_sawf_fragment_state_entry),intent(in)::entry
@@ -7971,6 +8029,7 @@ contains
       logical,intent(out)::ok
       character(*),intent(out)::message
       integer,intent(in),optional::neighbor_gvec(:,:)
+      complex(8),allocatable,intent(out),optional::local_states_out(:,:)
       real(8),parameter::hartree_to_ev=27.211386245988d0
       real(8),allocatable::h_basis(:,:),energy_hartree(:),energy_ev(:)
       complex(8),allocatable::states(:,:),projection(:,:),phase_factor(:,:),amn_local(:,:),mmn_dummy(:,:,:)
@@ -7999,6 +8058,9 @@ contains
       call solve_sawf_local_generalized_eigensystem(entry%buffer_basis,hvol,h_basis, &
         1d-10,states,energy_hartree,ok,message)
       if(.not.ok)return
+      if(present(local_states_out))then
+        allocate(local_states_out(size(states,1),size(states,2)));local_states_out=states
+      end if
       if(size(selected_channels)>size(states,2))then
         message='SAWF local complete projection shell exceeds generalized eigensystem rank';ok=.false.;return
       end if
