@@ -48,10 +48,11 @@ module lcfo_flux
   use lcfo_wannier_sawf_orchestrator, only: t_sawf_environment_receipt,t_sawf_seed_bundle, &
     build_sawf_environment_execution_plan,build_sawf_seed_bundles
   use lcfo_wannier_sawf_seed, only: select_sawf_local_complete_shells, &
-    build_sawf_local_seed_matrices,write_sawf_local_eig_amn_mmn, &
+    build_sawf_local_seed_matrices,write_sawf_local_eig_amn, &
     solve_sawf_local_generalized_eigensystem
   use lcfo_wannier_sawf_win, only: activate_sawf_win, deactivate_sawf_win, &
-    t_atomic_win_writer, begin_atomic_win, finish_atomic_win, abort_atomic_win
+    t_atomic_win_writer, begin_atomic_win, finish_atomic_win, abort_atomic_win, &
+    write_sawf_local_preprocess_win
   use lcfo_wannier_command, only: select_wannier90_command, execute_wannier90_command, &
     is_wannier90_reuse_command, is_wannier90_export_only_command, &
     is_wannier90_import_only_command, cache_resolved_wannier90_command, &
@@ -7922,10 +7923,10 @@ contains
       character(*),intent(out)::message
       real(8),parameter::hartree_to_ev=27.211386245988d0
       real(8),allocatable::h_basis(:,:),energy_hartree(:),energy_ev(:)
-      complex(8),allocatable::states(:,:),projection(:,:),phase_factor(:,:),amn_local(:,:),mmn_local(:,:,:)
-      real(8)::a1(3),a2(3),a3(3),lattice(3,3),lattice_inverse(3,3),gcart(3,3),x,y,z
-      integer,parameter::neighbor_gvec(3,3)=reshape([1,0,0,0,1,0,0,0,1],[3,3])
-      integer::bundle_index,channel,ix,iy,iz,gx,gy,gz,start(3),k,npoint,io,jo,i_halo,nbasis
+      complex(8),allocatable::states(:,:),projection(:,:),phase_factor(:,:),amn_local(:,:),mmn_dummy(:,:,:)
+      real(8),allocatable::atom_fractional(:,:)
+      real(8)::a1(3),a2(3),a3(3),lattice(3,3),local_lattice(3,3),lattice_inverse(3,3),x,y,z
+      integer::bundle_index,channel,ix,iy,iz,gx,gy,gz,start(3),k,npoint,io,jo,i_halo,nbasis,natom,atom,last_atom
 
       ok=.false.;message='';bundle_index=0;nbasis=entry%n_basis
       do k=1,size(bundles)
@@ -7950,15 +7951,14 @@ contains
         message='SAWF local complete projection shell exceeds generalized eigensystem rank';ok=.false.;return
       end if
       npoint=size(states,1)
-      allocate(projection(npoint,size(selected_channels)),phase_factor(npoint,3), &
-        amn_local(size(states,2),size(selected_channels)),mmn_local(size(states,2),size(states,2),3), &
+      allocate(projection(npoint,size(selected_channels)),phase_factor(npoint,1), &
+        amn_local(size(states,2),size(selected_channels)),mmn_dummy(size(states,2),size(states,2),1), &
         energy_ev(size(energy_hartree)))
       call get_lattice_vectors(a1,a2,a3);lattice(:,1)=a1;lattice(:,2)=a2;lattice(:,3)=a3
       lattice_inverse=lattice;call matrix_inverse(lattice_inverse)
-      do channel=1,3
-        call reciprocal_vector_from_index(neighbor_gvec(:,channel),a1,a2,a3, &
-          gcart(1,channel),gcart(2,channel),gcart(3,channel))
-      end do
+      local_lattice=lattice
+      do channel=1,3;local_lattice(:,channel)=lattice(:,channel)* &
+        real(entry%buffer_shape(channel),8)/real(dc%lg_tot%num(channel),8);end do
       start=dc%ixyz_frag(:,entry%fragment)-entry%buffer_width;k=0
       do iz=1,entry%buffer_shape(3);do iy=1,entry%buffer_shape(2);do ix=1,entry%buffer_shape(1)
         gx=1+modulo(start(1)+ix-1,dc%lg_tot%num(1));gy=1+modulo(start(2)+iy-1,dc%lg_tot%num(2))
@@ -7969,15 +7969,29 @@ contains
             projection_channels(selected_channels(channel)),lattice,lattice_inverse, &
             wannier_projection_width),0d0,kind=8)
         end do
-        do channel=1,3
-          phase_factor(k,channel)=exp(cmplx(0d0,-dot_product(gcart(:,channel),[x,y,z]),kind=8))
-        end do
+        phase_factor(k,1)=(1d0,0d0)
       end do;end do;end do
-      call build_sawf_local_seed_matrices(states,projection,phase_factor,hvol,amn_local,mmn_local,ok,message)
+      call build_sawf_local_seed_matrices(states,projection,phase_factor,hvol,amn_local,mmn_dummy,ok,message)
       if(.not.ok)return
       energy_ev=energy_hartree*hartree_to_ev
-      call write_sawf_local_eig_amn_mmn(bundles(bundle_index)%directory,bundles(bundle_index)%seedname, &
-        energy_ev,amn_local,mmn_local,neighbor_gvec,ok,message)
+      natom=1;do channel=2,size(selected_channels)
+        if(projection_channels(selected_channels(channel))%atom/= &
+            projection_channels(selected_channels(channel-1))%atom)natom=natom+1
+      end do
+      allocate(atom_fractional(3,natom));natom=0;last_atom=0
+      do channel=1,size(selected_channels)
+        atom=projection_channels(selected_channels(channel))%atom
+        if(atom==last_atom)cycle
+        natom=natom+1;last_atom=atom
+        atom_fractional(:,natom)=modulo((matmul(lattice_inverse,dc%system_tot%rion(:,atom))* &
+          real(dc%lg_tot%num,8)-real(start,8))/real(entry%buffer_shape,8),1d0)
+      end do
+      call write_sawf_local_preprocess_win(trim(bundles(bundle_index)%directory)//'/'// &
+        trim(bundles(bundle_index)%seedname)//'.win',size(states,2),size(selected_channels), &
+        local_lattice,atom_fractional,ok,message)
+      if(.not.ok)return
+      call write_sawf_local_eig_amn(bundles(bundle_index)%directory,bundles(bundle_index)%seedname, &
+        energy_ev,amn_local,ok,message)
     end subroutine write_sawf_representative_local_seed
 
     real(8) function sawf_local_projection_value(position,channel,lattice,lattice_inverse,sigma) result(value)

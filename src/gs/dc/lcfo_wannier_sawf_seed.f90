@@ -7,6 +7,7 @@ module lcfo_wannier_sawf_seed
   public :: select_sawf_local_complete_shells
   public :: solve_sawf_local_generalized_eigensystem
   public :: read_sawf_nnkp_neighbors
+  public :: write_sawf_local_eig_amn
 
 contains
 
@@ -225,6 +226,39 @@ contains
       message='SAWF local seed contains a non-finite value';return
     end if
 
+    call write_sawf_local_eig_amn(directory,seedname,energy_ev,amn,ok,message)
+    if(.not.ok)return
+
+    filename=trim(directory)//'/'//trim(seedname)//'.mmn'
+    open(newunit=unit,file=trim(filename),status='replace',action='write',iostat=ios)
+    if(ios/=0)then;message='SAWF local .mmn open failed';ok=.false.;return;end if
+    write(unit,'(a)',iostat=ios)'SALMON local SAWF overlaps'
+    if(ios==0)write(unit,'(3i10)',iostat=ios)size(mmn,1),1,size(mmn,3)
+    do ineighbor=1,size(mmn,3)
+      if(ios==0)write(unit,'(5i8)',iostat=ios)1,1,neighbor_gvec(:,ineighbor)
+      do jband=1,size(mmn,2);do iband=1,size(mmn,1)
+        if(ios==0)write(unit,'(2(1x,es23.15))',iostat=ios)mmn(iband,jband,ineighbor)
+      end do;end do
+    end do
+    close(unit);if(ios/=0)then;message='SAWF local .mmn write failed';ok=.false.;return;end if
+    ok=.true.
+  end subroutine write_sawf_local_eig_amn_mmn
+
+  subroutine write_sawf_local_eig_amn(directory,seedname,energy_ev,amn,ok,message)
+    character(*),intent(in)::directory,seedname
+    real(8),intent(in)::energy_ev(:)
+    complex(8),intent(in)::amn(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    character(1024)::filename
+    integer::unit,ios,iband,iproj
+    ok=.false.;message=''
+    if(len_trim(directory)==0.or.len_trim(seedname)==0.or.size(energy_ev)<=0.or. &
+        size(amn,1)/=size(energy_ev).or.size(amn,2)<=0.or. &
+        .not.all(ieee_is_finite(energy_ev)).or..not.all(ieee_is_finite(real(amn))).or. &
+        .not.all(ieee_is_finite(aimag(amn))))then
+      message='SAWF local eig/amn payload is invalid';return
+    end if
     filename=trim(directory)//'/'//trim(seedname)//'.eig'
     open(newunit=unit,file=trim(filename),status='replace',action='write',iostat=ios)
     if(ios/=0)then;message='SAWF local .eig open failed';return;end if
@@ -241,19 +275,7 @@ contains
     end do;end do
     close(unit);if(ios/=0)then;message='SAWF local .amn write failed';return;end if
 
-    filename=trim(directory)//'/'//trim(seedname)//'.mmn'
-    open(newunit=unit,file=trim(filename),status='replace',action='write',iostat=ios)
-    if(ios/=0)then;message='SAWF local .mmn open failed';return;end if
-    write(unit,'(a)',iostat=ios)'SALMON local SAWF overlaps'
-    if(ios==0)write(unit,'(3i10)',iostat=ios)size(mmn,1),1,size(mmn,3)
-    do ineighbor=1,size(mmn,3)
-      if(ios==0)write(unit,'(5i8)',iostat=ios)1,1,neighbor_gvec(:,ineighbor)
-      do jband=1,size(mmn,2);do iband=1,size(mmn,1)
-        if(ios==0)write(unit,'(2(1x,es23.15))',iostat=ios)mmn(iband,jband,ineighbor)
-      end do;end do
-    end do
-    close(unit);if(ios/=0)then;message='SAWF local .mmn write failed';return;end if
     ok=.true.
-  end subroutine write_sawf_local_eig_amn_mmn
+  end subroutine write_sawf_local_eig_amn
 
 end module lcfo_wannier_sawf_seed
