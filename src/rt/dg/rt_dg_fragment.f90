@@ -473,6 +473,8 @@ contains
       dg_frag%time_integrator = 4
     case('expdiag')
       dg_frag%time_integrator = 5
+    case('krylov')
+      dg_frag%time_integrator = 6
     case default
       dg_frag%time_integrator = 5  ! default: expdiag
     end select
@@ -1099,11 +1101,14 @@ contains
     integer :: nw, nstate_seed, nbf, global_row, irow, nrow
     integer :: idir, occ, virt, nocc, pairs, best_occ, best_virt
     integer :: iwin
-    complex(8), allocatable :: wcoef(:,:), hcoef(:,:), hw_local(:,:), hw(:,:), evec(:,:)
+    complex(8), allocatable :: wcoef(:,:), hcoef(:,:), scoef(:,:)
+    complex(8), allocatable :: hw_local(:,:), hw(:,:), sw_local(:,:), sw(:,:), evec(:,:)
+    complex(8), allocatable :: svec(:,:), sinvhalf(:,:), horth(:,:), zorth(:,:)
     complex(8), allocatable :: r_w(:,:), r_eig(:,:)
     complex(8), allocatable :: pcoef(:,:), p_w_local(:,:,:), p_w(:,:,:), p_eig(:,:)
-    real(8), allocatable :: eval(:)
+    real(8), allocatable :: eval(:), seval(:)
     real(8) :: herm_diff, offdiag_abs, gap, r2sum, fsum_proxy, best_amp2, best_gap
+    real(8) :: s_min, s_max, s_diag_dev, s_offdiag_abs, eig_res_max, eig_res
     real(8) :: p2sum, fsum_p_proxy, pcomm2sum, pdiff2sum
     real(8) :: win_lo(4), win_hi(4), scale_vec(3)
     complex(8) :: pcomm_amp
@@ -1142,7 +1147,10 @@ contains
     win_lo = (/0.0d0, 3.0d0, 3.6d0, 0.0d0/)
     win_hi = (/1.0d0, 3.6d0, 5.0d0, 20.0d0/)
 
-    allocate(wcoef(nrow,nw), hcoef(nrow,nw), hw_local(nw,nw), hw(nw,nw), evec(nw,nw), eval(nw))
+    allocate(wcoef(nrow,nw), hcoef(nrow,nw), scoef(nrow,nw))
+    allocate(hw_local(nw,nw), hw(nw,nw), sw_local(nw,nw), sw(nw,nw), evec(nw,nw))
+    allocate(svec(nw,nw), sinvhalf(nw,nw), horth(nw,nw), zorth(nw,nw))
+    allocate(eval(nw), seval(nw))
     if (dg_frag%has_global_wannier_position .and. allocated(dg_frag%global_wannier_position)) then
       allocate(r_w(nw,nw), r_eig(nstate_seed,nstate_seed))
     end if
@@ -1166,8 +1174,11 @@ contains
       hcoef(:, :) = (0.0d0, 0.0d0)
       call apply_matrix_blocks_batch(dg_frag, dg_frag%H_mat_blocks, ispin, &
                                      wcoef, hcoef, dg_frag%H_local_block_ids)
+      scoef(:, :) = (0.0d0, 0.0d0)
+      call apply_overlap_operator_batch(dg_frag, ispin, wcoef, scoef, .false.)
 
       hw_local(:, :) = (0.0d0, 0.0d0)
+      sw_local(:, :) = (0.0d0, 0.0d0)
       do irow = 1, nrow
         if (allocated(dg_frag%coef_owner)) then
           if (irow > size(dg_frag%coef_owner, 1)) cycle
@@ -1176,10 +1187,12 @@ contains
         do jw = 1, nw
           do iw = 1, nw
             hw_local(iw,jw) = hw_local(iw,jw) + conjg(wcoef(irow,iw)) * hcoef(irow,jw)
+            sw_local(iw,jw) = sw_local(iw,jw) + conjg(wcoef(irow,iw)) * scoef(irow,jw)
           end do
         end do
       end do
       call comm_summation(hw_local, hw, nw*nw, dg_frag%icomm)
+      call comm_summation(sw_local, sw, nw*nw, dg_frag%icomm)
 
       herm_diff = 0.0d0
       offdiag_abs = 0.0d0
@@ -1195,7 +1208,37 @@ contains
         end do
       end do
 
-      call eigen_zheev(hw, eval, evec)
+      s_diag_dev = 0.0d0
+      s_offdiag_abs = 0.0d0
+      do jw = 1, nw
+        sw(jw,jw) = cmplx(real(sw(jw,jw),8), 0.0d0, kind=8)
+        s_diag_dev = max(s_diag_dev, abs(sw(jw,jw) - (1.0d0,0.0d0)))
+        do iw = jw + 1, nw
+          sw(iw,jw) = 0.5d0 * (sw(iw,jw) + conjg(sw(jw,iw)))
+          sw(jw,iw) = conjg(sw(iw,jw))
+          s_offdiag_abs = max(s_offdiag_abs, abs(sw(iw,jw)))
+        end do
+      end do
+      call eigen_zheev(sw, seval, svec)
+      s_min = minval(seval)
+      s_max = maxval(seval)
+      if (s_min <= max(1.0d-12, 1.0d-10*s_max)) then
+        if (comm_is_root(dg_frag%id)) write(*,'(1x,a,2(1pe13.5,1x))') &
+          '[FATAL] global Wannier metric is singular; min/max=', s_min, s_max
+        stop 'DG global Wannier generalized eigenproblem has singular metric'
+      end if
+      sinvhalf(:, :) = (0.0d0, 0.0d0)
+      do iw = 1, nw
+        sinvhalf(:,iw) = svec(:,iw) / sqrt(seval(iw))
+      end do
+      horth(:, :) = matmul(conjg(transpose(sinvhalf)), matmul(hw, sinvhalf))
+      call eigen_zheev(horth, eval, zorth)
+      evec(:, :) = matmul(sinvhalf, zorth)
+      eig_res_max = 0.0d0
+      do jw = 1, nw
+        eig_res = sqrt(sum(abs(matmul(hw,evec(:,jw)) - eval(jw)*matmul(sw,evec(:,jw)))**2))
+        eig_res_max = max(eig_res_max, eig_res)
+      end do
       dg_frag%global_wannier_flux_evec(1:nw,1:nstate_seed) = evec(1:nw,1:nstate_seed)
       dg_frag%global_wannier_flux_eval(1:nstate_seed,ispin) = eval(1:nstate_seed)
 
@@ -1222,12 +1265,15 @@ contains
       end if
 
       if (comm_is_root(dg_frag%id)) then
-        write(*,'(1x,a,2(a,i0),4(a,1pe13.5))') trim(out_label), &
+        write(*,'(1x,a,2(a,i0),10(a,1pe13.5))') trim(out_label), &
           ' spin=', ispin, ' dim_W=', nw, &
           ' herm_diff=', herm_diff, &
           ' offdiag_abs_before=', offdiag_abs, &
           ' eval_min=', eval(1), &
-          ' eval_seed_max=', eval(nstate_seed)
+          ' eval_seed_max=', eval(nstate_seed), &
+          ' S_eval_min=', s_min, ' S_eval_max=', s_max, &
+          ' S_diag_dev=', s_diag_dev, ' S_offdiag_abs=', s_offdiag_abs, &
+          ' eig_res_max=', eig_res_max, ' generalized=', 1.0d0
         flush(6)
       end if
       if (allocated(r_w) .and. allocated(r_eig)) then
@@ -1294,6 +1340,9 @@ contains
           end if
           p_eig(1:nstate_seed,1:nstate_seed) = matmul(conjg(transpose(evec(1:nw,1:nstate_seed))), &
             matmul(p_w(idir,1:nw,1:nw), evec(1:nw,1:nstate_seed)))
+          ! momentum_blocks contain G=<grad>; the physical momentum is p=-iG.
+          p_eig(1:nstate_seed,1:nstate_seed) = cmplx(0.0d0, -1.0d0, kind=8) * &
+            p_eig(1:nstate_seed,1:nstate_seed)
           do iwin = 1, size(win_lo)
             pairs = 0
             p2sum = 0.0d0
@@ -1314,7 +1363,7 @@ contains
                 p2sum = p2sum + abs(p_eig(occ,virt))**2
                 fsum_p_proxy = fsum_p_proxy + 2.0d0 * abs(p_eig(occ,virt))**2 / gap
                 if (allocated(r_eig)) then
-                  pcomm_amp = cmplx(0.0d0, 1.0d0, kind=8) * gap * r_eig(occ,virt)
+                  pcomm_amp = cmplx(0.0d0, -1.0d0, kind=8) * gap * r_eig(occ,virt)
                   pcomm2sum = pcomm2sum + abs(pcomm_amp)**2
                   pdiff2sum = pdiff2sum + abs(p_eig(occ,virt) - pcomm_amp)**2
                 end if
@@ -1375,7 +1424,8 @@ contains
     if (allocated(p_w_local)) deallocate(p_w_local)
     if (allocated(p_w)) deallocate(p_w)
     if (allocated(p_eig)) deallocate(p_eig)
-    deallocate(wcoef, hcoef, hw_local, hw, evec, eval)
+    deallocate(wcoef, hcoef, scoef, hw_local, hw, sw_local, sw, evec)
+    deallocate(svec, sinvhalf, horth, zorth, eval, seval)
   end subroutine refresh_global_wannier_flux_eigen_from_current_hamiltonian
 
   subroutine diagnose_dcdft_lcfo_seed_stationarity(dg_frag, system, mg, ppg, Ac_tot, label, max_rel_res_out)
@@ -1759,6 +1809,7 @@ contains
   end subroutine diagonalize_current_dg_subspace
 
   subroutine diagonalize_current_dg_full_h_seed(dg_frag, label, system)
+    use salmon_global, only: yn_dg_full_h_wannier_band_gauge
     use communication, only: comm_summation, comm_is_root
     use eigen_subdiag_sub, only: eigen_zheev
     use structures, only: s_dft_system
@@ -1767,10 +1818,11 @@ contains
     character(*), intent(in), optional :: label
     type(s_dft_system), intent(in), optional :: system
 
-    integer :: ispin, nrow, nstate, iblk, i, j, ifrag_row, ifrag_col
+    integer :: ispin, nrow, nstate, iblk, i, j, k, ifrag_row, ifrag_col, nocc_report
     integer :: gid_i, gid_j, nbi, nbj, local_idx, state_col
     complex(8), allocatable :: h_local(:,:), h_dense(:,:), evec(:,:)
-    real(8), allocatable :: eval(:)
+    complex(8), allocatable :: s_local(:,:), s_dense(:,:), svec(:,:), sinvhalf(:,:), horth(:,:), zorth(:,:)
+    real(8), allocatable :: eval(:), seval(:)
     real(8) :: herm_diff
     real(8) :: herm_diff_local(1), herm_diff_global(1)
     character(len=96) :: out_label
@@ -1792,15 +1844,20 @@ contains
     if (allocated(dg_frag%full_h_seed_evec)) deallocate(dg_frag%full_h_seed_evec)
     if (allocated(dg_frag%full_h_seed_eval)) deallocate(dg_frag%full_h_seed_eval)
     if (allocated(dg_frag%full_h_seed_xi)) deallocate(dg_frag%full_h_seed_xi)
+    if (allocated(dg_frag%full_h_conventional_alignment)) deallocate(dg_frag%full_h_conventional_alignment)
     dg_frag%has_full_h_seed_eigen = .false.
     dg_frag%has_full_h_seed_xi = .false.
     dg_frag%full_h_seed_nstate = nstate
     allocate(dg_frag%full_h_seed_evec(nrow,nstate,dg_frag%nspin))
     allocate(dg_frag%full_h_seed_eval(nstate,dg_frag%nspin))
+    allocate(dg_frag%full_h_conventional_alignment(nstate,nstate,dg_frag%nspin))
     dg_frag%full_h_seed_evec(:, :, :) = (0.0d0, 0.0d0)
     dg_frag%full_h_seed_eval(:, :) = 0.0d0
+    dg_frag%full_h_conventional_alignment(:, :, :) = (0.0d0,0.0d0)
 
     allocate(h_local(nrow,nrow), h_dense(nrow,nrow), evec(nrow,nrow), eval(nrow))
+    allocate(s_local(nrow,nrow), s_dense(nrow,nrow), svec(nrow,nrow), sinvhalf(nrow,nrow), &
+             horth(nrow,nrow), zorth(nrow,nrow), seval(nrow))
     do ispin = 1, dg_frag%nspin
       h_local(:, :) = (0.0d0, 0.0d0)
       do iblk = 1, size(dg_frag%H_mat_blocks)
@@ -1827,6 +1884,31 @@ contains
 
       call comm_summation(h_local, h_dense, nrow*nrow, dg_frag%icomm)
 
+      s_local(:, :) = (0.0d0, 0.0d0)
+      if (.not. allocated(dg_frag%S_mat_blocks)) stop "DG Full-H seed requires overlap blocks"
+      do iblk = 1, size(dg_frag%S_mat_blocks)
+        if (.not. allocated(dg_frag%S_mat_blocks(iblk)%val)) cycle
+        ifrag_row = dg_frag%S_mat_blocks(iblk)%ifrag_row
+        ifrag_col = dg_frag%S_mat_blocks(iblk)%ifrag_col
+        if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag) cycle
+        if (ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) cycle
+        nbi = min(dg_frag%n_basis(ifrag_row, ispin), size(dg_frag%S_mat_blocks(iblk)%val, 1), &
+                  size(dg_frag%index_basis, 1))
+        nbj = min(dg_frag%n_basis(ifrag_col, ispin), size(dg_frag%S_mat_blocks(iblk)%val, 2), &
+                  size(dg_frag%index_basis, 1))
+        do j = 1, nbj
+          gid_j = dg_frag%index_basis(j, ifrag_col, ispin)
+          if (gid_j < 1 .or. gid_j > nrow) cycle
+          do i = 1, nbi
+            gid_i = dg_frag%index_basis(i, ifrag_row, ispin)
+            if (gid_i < 1 .or. gid_i > nrow) cycle
+            s_local(gid_i,gid_j) = s_local(gid_i,gid_j) + &
+              cmplx(dg_frag%S_mat_blocks(iblk)%val(i,j,ispin), 0.0d0, kind=8)
+          end do
+        end do
+      end do
+      call comm_summation(s_local, s_dense, nrow*nrow, dg_frag%icomm)
+
       herm_diff = 0.0d0
       do j = 1, nrow
         h_dense(j,j) = cmplx(real(h_dense(j,j),8), 0.0d0, kind=8)
@@ -1839,7 +1921,24 @@ contains
       herm_diff_local(1) = herm_diff
       call comm_summation(herm_diff_local, herm_diff_global, 1, dg_frag%icomm)
 
-      call eigen_zheev(h_dense, eval, evec)
+      call eigen_zheev(s_dense, seval, svec)
+      if (minval(seval) <= 1.0d-10) then
+        if (comm_is_root(dg_frag%id)) write(*,'(1x,a,2(1pe13.5,1x))') &
+          '[FATAL] DG Full-H overlap is singular; min/max=', minval(seval), maxval(seval)
+        stop "DG Full-H seed singular overlap"
+      end if
+      sinvhalf(:, :) = (0.0d0, 0.0d0)
+      do k = 1, nrow
+        do j = 1, nrow
+          do i = 1, nrow
+            sinvhalf(i,j) = sinvhalf(i,j) + svec(i,k) * conjg(svec(j,k)) / sqrt(seval(k))
+          end do
+        end do
+      end do
+      horth = matmul(conjg(transpose(sinvhalf)), matmul(h_dense, sinvhalf))
+      call eigen_zheev(horth, eval, zorth)
+      evec = matmul(sinvhalf, zorth)
+      call build_full_h_conventional_alignment(ispin,evec)
       dg_frag%full_h_seed_evec(1:nrow,1:nstate,ispin) = evec(1:nrow,1:nstate)
       dg_frag%full_h_seed_eval(1:nstate,ispin) = eval(1:nstate)
 
@@ -1862,6 +1961,11 @@ contains
           ' spin=', ispin, ' full_dim=', nrow, ' seeded_states=', nstate, &
           ' herm_diff_sum=', herm_diff_global(1), ' eval_min=', minval(eval), &
           ' eval_nstate=', eval(nstate)
+        nocc_report = min(nstate - 1, max(1, dg_frag%nocc_spin(ispin)))
+        write(*,'(1x,a,i0,4(a,1pe13.5))') '[DG-FULL-H-SEED-GAP] spin=', ispin, &
+          ' homo=', eval(nocc_report), ' lumo=', eval(nocc_report + 1), &
+          ' gap_au=', eval(nocc_report + 1) - eval(nocc_report), &
+          ' gap_ev=', (eval(nocc_report + 1) - eval(nocc_report)) * 27.211386245988d0
         flush(6)
       end if
     end do
@@ -1869,10 +1973,104 @@ contains
     dg_frag%has_full_h_seed_eigen = .true.
     call diagnose_full_h_seed_overlap()
     if (present(system)) call build_full_h_seed_position_operator(system)
+    call diagnose_full_h_seed_momentum_position_consistency()
     call invalidate_coef_exchange_cache(dg_frag)
-    deallocate(h_local, h_dense, evec, eval)
+    deallocate(h_local, h_dense, evec, eval, s_local, s_dense, svec, sinvhalf, horth, zorth, seval)
 
   contains
+
+    subroutine build_full_h_conventional_alignment(ispin_loc,evec_in)
+      use communication, only: comm_summation, comm_is_root
+      integer,intent(in) :: ispin_loc
+      complex(8),intent(in) :: evec_in(nrow,nrow)
+      complex(8),allocatable :: cseed(:,:), overlap_local(:,:), overlap(:,:)
+      complex(8),allocatable :: oblock(:,:), metric_block(:,:), metric_vec(:,:), metric_invhalf(:,:), qblock(:,:)
+      real(8),allocatable :: metric_eval(:)
+      integer :: irow, ist, jst, local_idx, local_owner
+      integer :: iblock, block_first, block_last, nblock, i, j, k
+      integer :: nocc_align
+      real(8) :: sigma_min, sigma_max, unitary_res
+
+      allocate(cseed(nrow,nstate),overlap_local(nstate,nstate),overlap(nstate,nstate))
+      cseed=(0.0d0,0.0d0)
+      do irow=1,nrow
+        local_idx=irow
+        if (allocated(dg_frag%coef_global_to_local)) local_idx=dg_frag%coef_global_to_local(irow,ispin_loc)
+        if (local_idx < 1 .or. local_idx > size(dg_frag%coef,1)) cycle
+        cseed(irow,1:nstate)=dg_frag%coef(local_idx,1:nstate,ispin_loc)
+      end do
+      overlap_local=(0.0d0,0.0d0)
+      do irow=1,nrow
+        local_owner=dg_frag%id
+        if (allocated(dg_frag%coef_owner)) then
+          if (irow > size(dg_frag%coef_owner,1)) cycle
+          local_owner=dg_frag%coef_owner(irow,ispin_loc)
+        end if
+        if (local_owner /= dg_frag%id) cycle
+        do jst=1,nstate
+          do ist=1,nstate
+            overlap_local(ist,jst)=overlap_local(ist,jst)+conjg(evec_in(irow,ist))*cseed(irow,jst)
+          end do
+        end do
+      end do
+      call comm_summation(overlap_local,overlap,nstate*nstate,dg_frag%icomm)
+      dg_frag%full_h_conventional_alignment(:,:,ispin_loc)=(0.0d0,0.0d0)
+      nocc_align=min(nstate,max(1,dg_frag%nocc_spin(ispin_loc)))
+      do iblock=1,2
+        if (iblock == 1) then
+          block_first=1
+          block_last=nocc_align
+        else
+          block_first=nocc_align+1
+          block_last=nstate
+        end if
+        nblock=block_last-block_first+1
+        if (nblock <= 0) cycle
+        allocate(oblock(nblock,nblock),metric_block(nblock,nblock),metric_vec(nblock,nblock), &
+                 metric_invhalf(nblock,nblock),qblock(nblock,nblock),metric_eval(nblock))
+        oblock=overlap(block_first:block_last,block_first:block_last)
+        metric_block=matmul(conjg(transpose(oblock)),oblock)
+        call eigen_zheev(metric_block,metric_eval,metric_vec)
+        sigma_min=sqrt(max(0.0d0,minval(metric_eval)))
+        sigma_max=sqrt(max(0.0d0,maxval(metric_eval)))
+        if (minval(metric_eval) <= max(1.0d-12,1.0d-10*maxval(metric_eval))) then
+          if (comm_is_root(dg_frag%id)) write(*,'(1x,a,i0,2(a,1pe13.5))') &
+            '[FATAL] Full-H/conventional Procrustes block is rank deficient: block=',iblock, &
+            ' sigma_min=',sigma_min,' sigma_max=',sigma_max
+          stop 'DG Full-H/conventional Procrustes block is rank deficient'
+        end if
+        metric_invhalf=(0.0d0,0.0d0)
+        do k=1,nblock
+          do j=1,nblock
+            do i=1,nblock
+              metric_invhalf(i,j)=metric_invhalf(i,j)+ &
+                metric_vec(i,k)*conjg(metric_vec(j,k))/sqrt(metric_eval(k))
+            end do
+          end do
+        end do
+        qblock=matmul(oblock,metric_invhalf)
+        metric_block=matmul(conjg(transpose(qblock)),qblock)
+        unitary_res=0.0d0
+        do j=1,nblock
+          do i=1,nblock
+            if (i == j) then
+              unitary_res=max(unitary_res,abs(metric_block(i,j)-(1.0d0,0.0d0)))
+            else
+              unitary_res=max(unitary_res,abs(metric_block(i,j)))
+            end if
+          end do
+        end do
+        dg_frag%full_h_conventional_alignment(block_first:block_last,block_first:block_last,ispin_loc)=qblock
+        if (comm_is_root(dg_frag%id)) then
+          write(*,'(1x,a,i0,2(a,i0),3(a,1pe13.5))') '[DG-FULL-H-PROCRUSTES] block=',iblock, &
+            ' first=',block_first,' last=',block_last,' sigma_min=',sigma_min, &
+            ' sigma_max=',sigma_max,' unitary_res=',unitary_res
+          flush(6)
+        end if
+        deallocate(oblock,metric_block,metric_vec,metric_invhalf,qblock,metric_eval)
+      end do
+      deallocate(cseed,overlap_local,overlap)
+    end subroutine build_full_h_conventional_alignment
 
     subroutine diagnose_full_h_seed_overlap()
       use communication, only: comm_summation, comm_is_root
@@ -1921,6 +2119,95 @@ contains
       deallocate(vcoef, scoef, ssub_local, ssub)
     end subroutine diagnose_full_h_seed_overlap
 
+    subroutine diagnose_full_h_seed_momentum_position_consistency()
+      use communication, only: comm_summation, comm_is_root
+      complex(8), allocatable :: vcoef(:,:), gcoef(:,:), gsub_local(:,:), gsub(:,:), psub(:,:)
+      complex(8) :: pcomm
+      integer :: ispin_loc, idir, irow, ist, jst, iwindow, nocc_diag, local_owner
+      integer :: npair
+      real(8) :: scale_vec(3), gap, gap_ev
+      real(8) :: window_lo(4), window_hi(4)
+      real(8) :: fp_sum, fr_sum, pnorm2, pcomm_norm2, pdiff_norm2
+
+      if (.not. allocated(dg_frag%momentum_blocks)) return
+      if (.not. allocated(dg_frag%full_h_seed_evec)) return
+      if (.not. allocated(dg_frag%full_h_seed_xi)) return
+      if (dg_frag%full_h_seed_nstate <= 1) return
+
+      window_lo = (/0.0d0, 1.0d0, 3.0d0, 5.0d0/)
+      window_hi = (/1.0d0, 3.0d0, 5.0d0, 20.0d0/)
+      allocate(vcoef(nrow,nstate), gcoef(nrow,nstate))
+      allocate(gsub_local(nstate,nstate), gsub(nstate,nstate), psub(nstate,nstate))
+
+      do ispin_loc = 1, dg_frag%nspin
+        vcoef(:, :) = dg_frag%full_h_seed_evec(1:nrow,1:nstate,ispin_loc)
+        nocc_diag = min(nstate - 1, max(1, dg_frag%nocc_spin(ispin_loc)))
+        do idir = 1, 3
+          gcoef(:, :) = (0.0d0, 0.0d0)
+          scale_vec(:) = 0.0d0
+          scale_vec(idir) = 1.0d0
+          call apply_momentum_blocks(dg_frag, ispin_loc, scale_vec, vcoef, gcoef)
+          gsub_local(:, :) = (0.0d0, 0.0d0)
+          do irow = 1, nrow
+            local_owner = dg_frag%id
+            if (allocated(dg_frag%coef_owner)) then
+              if (irow > size(dg_frag%coef_owner, 1)) cycle
+              local_owner = dg_frag%coef_owner(irow, ispin_loc)
+            end if
+            if (local_owner /= dg_frag%id) cycle
+            do jst = 1, nstate
+              do ist = 1, nstate
+                gsub_local(ist,jst) = gsub_local(ist,jst) + &
+                  conjg(vcoef(irow,ist)) * gcoef(irow,jst)
+              end do
+            end do
+          end do
+          call comm_summation(gsub_local, gsub, nstate*nstate, dg_frag%icomm)
+          psub(:, :) = cmplx(0.0d0, -1.0d0, kind=8) * gsub(:, :)
+
+          do iwindow = 1, 4
+            npair = 0
+            fp_sum = 0.0d0
+            fr_sum = 0.0d0
+            pnorm2 = 0.0d0
+            pcomm_norm2 = 0.0d0
+            pdiff_norm2 = 0.0d0
+            do jst = nocc_diag + 1, nstate
+              do ist = 1, nocc_diag
+                gap = dg_frag%full_h_seed_eval(jst,ispin_loc) - &
+                      dg_frag%full_h_seed_eval(ist,ispin_loc)
+                if (gap <= 1.0d-12) cycle
+                gap_ev = gap * 27.211386245988d0
+                if (gap_ev < window_lo(iwindow) .or. gap_ev >= window_hi(iwindow)) cycle
+                npair = npair + 1
+                pcomm = cmplx(0.0d0, -1.0d0, kind=8) * gap * &
+                        dg_frag%full_h_seed_xi(idir,ist,jst,ispin_loc)
+                fp_sum = fp_sum + 2.0d0 * abs(psub(ist,jst))**2 / gap
+                fr_sum = fr_sum + 2.0d0 * gap * &
+                         abs(dg_frag%full_h_seed_xi(idir,ist,jst,ispin_loc))**2
+                pnorm2 = pnorm2 + abs(psub(ist,jst))**2
+                pcomm_norm2 = pcomm_norm2 + abs(pcomm)**2
+                pdiff_norm2 = pdiff_norm2 + abs(psub(ist,jst) - pcomm)**2
+              end do
+            end do
+            if (comm_is_root(dg_frag%id)) then
+              write(*,'(1x,a,i0,a,i0,2(a,f6.1),a,i0,5(a,1pe13.5))') &
+                '[DG-FULL-H-SEED-PCOMM] spin=', ispin_loc, ' axis=', idir, &
+                ' lo_eV=', window_lo(iwindow), ' hi_eV=', window_hi(iwindow), &
+                ' pairs=', npair, &
+                ' f_p_per_occ=', fp_sum / dble(max(1,nocc_diag)), &
+                ' f_r_per_occ=', fr_sum / dble(max(1,nocc_diag)), &
+                ' ratio_p_comm=', sqrt(pnorm2 / max(pcomm_norm2,1.0d-300)), &
+                ' rel_diff=', sqrt(pdiff_norm2 / max(pcomm_norm2,1.0d-300)), &
+                ' pnorm2=', pnorm2
+              flush(6)
+            end if
+          end do
+        end do
+      end do
+      deallocate(vcoef, gcoef, gsub_local, gsub, psub)
+    end subroutine diagnose_full_h_seed_momentum_position_consistency
+
     subroutine build_full_h_seed_position_operator(system_in)
       use communication, only: comm_summation, comm_is_root
       type(s_dft_system), intent(in) :: system_in
@@ -1932,6 +2219,11 @@ contains
       integer :: nx, ny, nz, gid
       real(8) :: coord(3), box_l(3), hvol
       real(8) :: herm_diff, herm_diff_local(1), herm_diff_global(1)
+
+      if (yn_dg_full_h_wannier_band_gauge == 'y') then
+        call build_full_h_seed_band_gauge_position_operator()
+        return
+      end if
 
       if (dg_frag%has_global_wannier_position .and. &
           allocated(dg_frag%global_wannier_coef) .and. &
@@ -2037,13 +2329,128 @@ contains
       deallocate(xi_local, xi_global, phi_eig)
     end subroutine build_full_h_seed_position_operator
 
+    subroutine build_full_h_seed_band_gauge_position_operator()
+      use communication, only: comm_is_root
+      complex(8), allocatable :: gauge(:,:), metric(:,:), metric_vec(:,:), metric_invhalf(:,:)
+      complex(8), allocatable :: gauge_orth(:,:), position_orth(:,:), work(:,:), xi(:,:,:,:)
+      complex(8), allocatable :: principal_gram(:,:), principal_vec(:,:)
+      real(8), allocatable :: metric_eval(:), principal_eval(:)
+      integer :: nb, nw, ispin_loc, idir, i, j, k, nprincipal, nocc_diag
+      integer :: rank_099, rank_090
+      real(8) :: metric_min, metric_max, orth_res, herm_res
+
+      if (.not. allocated(dg_frag%global_wannier_transform)) &
+        stop 'DG Full-H band-gauge position requires global_wannier_transform'
+      if (.not. allocated(dg_frag%global_wannier_position)) &
+        stop 'DG Full-H band-gauge position requires global_wannier_position'
+      if (dg_frag%nspin /= 1) &
+        stop 'DG Full-H band-gauge Procrustes prototype currently requires nspin=1'
+      nb = min(nstate, size(dg_frag%global_wannier_transform,1))
+      nw = min(size(dg_frag%global_wannier_transform,2), &
+               size(dg_frag%global_wannier_position,2), size(dg_frag%global_wannier_position,3))
+      if (nb <= 0 .or. nw <= 0 .or. nb < nw) &
+        stop 'DG Full-H band-gauge position has invalid dimensions'
+
+      allocate(gauge(nb,nw), metric(nw,nw), metric_vec(nw,nw), metric_invhalf(nw,nw))
+      allocate(gauge_orth(nb,nw), position_orth(nw,nw), work(nw,nw))
+      allocate(metric_eval(nw), xi(3,nstate,nstate,dg_frag%nspin))
+      if (.not. allocated(dg_frag%full_h_conventional_alignment)) &
+        stop 'DG Full-H band-gauge position requires conventional alignment'
+      gauge = matmul(dg_frag%full_h_conventional_alignment(1:nb,1:nb,1), &
+                     dg_frag%global_wannier_transform(1:nb,1:nw))
+      metric = matmul(conjg(transpose(gauge)),gauge)
+      call eigen_zheev(metric,metric_eval,metric_vec)
+      metric_min = minval(metric_eval)
+      metric_max = maxval(metric_eval)
+      if (metric_min <= max(1.0d-12,1.0d-10*metric_max)) &
+        stop 'DG Full-H band-gauge transform is rank deficient'
+      metric_invhalf = (0.0d0,0.0d0)
+      do k=1,nw
+        do j=1,nw
+          do i=1,nw
+            metric_invhalf(i,j) = metric_invhalf(i,j) + &
+              metric_vec(i,k)*conjg(metric_vec(j,k))/sqrt(metric_eval(k))
+          end do
+        end do
+      end do
+      gauge_orth = matmul(gauge,metric_invhalf)
+      metric = matmul(conjg(transpose(gauge_orth)),gauge_orth)
+      orth_res = 0.0d0
+      do j=1,nw
+        do i=1,nw
+          if (i == j) then
+            orth_res=max(orth_res,abs(metric(i,j)-(1.0d0,0.0d0)))
+          else
+            orth_res=max(orth_res,abs(metric(i,j)))
+          end if
+        end do
+      end do
+      xi = (0.0d0,0.0d0)
+      herm_res = 0.0d0
+      do idir=1,3
+        work = matmul(dg_frag%global_wannier_position(idir,1:nw,1:nw),metric_invhalf)
+        position_orth = matmul(conjg(transpose(metric_invhalf)),work)
+        position_orth = 0.5d0*(position_orth+conjg(transpose(position_orth)))
+        do ispin_loc=1,dg_frag%nspin
+          xi(idir,1:nb,1:nb,ispin_loc) = matmul(gauge_orth, &
+            matmul(position_orth,conjg(transpose(gauge_orth))))
+          herm_res = max(herm_res,maxval(abs(xi(idir,1:nb,1:nb,ispin_loc)- &
+            conjg(transpose(xi(idir,1:nb,1:nb,ispin_loc))))))
+        end do
+      end do
+
+      if (allocated(dg_frag%full_h_seed_xi)) deallocate(dg_frag%full_h_seed_xi)
+      allocate(dg_frag%full_h_seed_xi(3,nstate,nstate,dg_frag%nspin))
+      dg_frag%full_h_seed_xi = xi
+      dg_frag%has_full_h_seed_xi = .true.
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,2(a,i0),4(a,1pe13.5))') '[DG-FULL-H-BAND-GAUGE-XI]', &
+          ' nbands=',nb,' nwann=',nw,' metric_min=',metric_min,' metric_max=',metric_max, &
+          ' orth_res=',orth_res,' herm_res=',herm_res
+        do ispin_loc=1,dg_frag%nspin
+          nocc_diag=min(nb,max(0,dg_frag%nocc_spin(ispin_loc)))
+          do k=1,2
+            if (k == 1) then
+              nprincipal=nocc_diag
+            else
+              nprincipal=min(nb,nw)
+            end if
+            if (nprincipal <= 0) cycle
+            allocate(principal_gram(nprincipal,nprincipal),principal_vec(nprincipal,nprincipal), &
+                     principal_eval(nprincipal))
+            principal_gram=matmul(gauge_orth(1:nprincipal,1:nw), &
+                                  conjg(transpose(gauge_orth(1:nprincipal,1:nw))))
+            call eigen_zheev(principal_gram,principal_eval,principal_vec)
+            rank_099=count(principal_eval > 0.99d0**2)
+            rank_090=count(principal_eval > 0.90d0**2)
+            write(*,'(1x,a,i0,a,i0,2(a,1pe13.5),2(a,i0))') &
+              '[DG-FULL-H-BAND-GAUGE-PRINCIPAL] spin=',ispin_loc,' dim=',nprincipal, &
+              ' sigma_min=',sqrt(max(0.0d0,minval(principal_eval))), &
+              ' sigma_max=',sqrt(max(0.0d0,maxval(principal_eval))), &
+              ' rank_sigma_gt_099=',rank_099,' rank_sigma_gt_090=',rank_090
+            deallocate(principal_gram,principal_vec,principal_eval)
+          end do
+        end do
+        flush(6)
+      end if
+      deallocate(gauge,metric,metric_vec,metric_invhalf,gauge_orth,position_orth,work,metric_eval,xi)
+    end subroutine build_full_h_seed_band_gauge_position_operator
+
     subroutine build_full_h_seed_global_wannier_position_operator()
       use communication, only: comm_summation, comm_is_root
       complex(8), allocatable :: xi_local(:,:,:,:), xi_global(:,:,:,:)
       complex(8), allocatable :: eig_w_local(:,:), eig_w(:,:), work_w(:,:), r_w(:,:)
-      integer :: ifrag, i_local, ispin_loc, ibasis, iw, ist, jst
-      integer :: nw, nbf, gid, idir
+      complex(8), allocatable :: principal_gram(:,:), principal_vec(:,:)
+      real(8), allocatable :: principal_eval(:)
+      integer :: ifrag, i_local, ispin_loc, ibasis, iw, ist, jst, nocc_diag
+      integer :: nw, nbf, gid, idir, nprincipal, principal_rank_099, principal_rank_090
       real(8) :: herm_diff, herm_diff_local(1), herm_diff_global(1)
+      real(8) :: proj_norm, proj_norm_min_occ, proj_defect_max_occ
+      real(8) :: proj_norm_min_all, proj_defect_max_all
+      real(8) :: xi_ov_frob(3), xi_ov_max(3)
+      real(8) :: r2_axis(3), fsum_axis(3), fsum_occ(3), fsum_min(3), fsum_max(3), gap_fsum
+      real(8) :: fsum_window(3,4), window_lo(4), window_hi(4), gap_ev_fsum
+      integer :: iwindow
 
       if (.not. allocated(dg_frag%full_h_seed_evec)) return
       if (.not. allocated(dg_frag%global_wannier_coef)) return
@@ -2081,6 +2488,65 @@ contains
 
         call comm_summation(eig_w_local, eig_w, nw*nstate, dg_frag%icomm)
         if (comm_is_root(dg_frag%id)) then
+          nocc_diag = min(nstate, max(0, dg_frag%nocc_spin(ispin_loc)))
+          proj_norm_min_occ = huge(1.0d0)
+          proj_defect_max_occ = 0.0d0
+          proj_norm_min_all = huge(1.0d0)
+          proj_defect_max_all = 0.0d0
+          do ist = 1, nstate
+            proj_norm = sum(abs(eig_w(1:nw,ist))**2)
+            proj_norm_min_all = min(proj_norm_min_all, proj_norm)
+            proj_defect_max_all = max(proj_defect_max_all, abs(1.0d0 - proj_norm))
+            if (ist <= nocc_diag) then
+              proj_norm_min_occ = min(proj_norm_min_occ, proj_norm)
+              proj_defect_max_occ = max(proj_defect_max_occ, abs(1.0d0 - proj_norm))
+            end if
+          end do
+          if (nocc_diag <= 0) then
+            proj_norm_min_occ = 0.0d0
+            proj_defect_max_occ = 0.0d0
+          end if
+          write(*,'(1x,a,3(a,i0),4(a,1pe13.5))') &
+            '[DG-FULL-H-SEED-XI-PROJ]', &
+            ' spin=', ispin_loc, ' nstate=', nstate, ' nocc=', nocc_diag, &
+            ' proj_norm_min_occ=', proj_norm_min_occ, &
+            ' proj_defect_max_occ=', proj_defect_max_occ, &
+            ' proj_norm_min_all=', proj_norm_min_all, &
+            ' proj_defect_max_all=', proj_defect_max_all
+          if (nocc_diag > 0) then
+            nprincipal = nocc_diag
+            allocate(principal_gram(nprincipal,nprincipal), principal_vec(nprincipal,nprincipal), &
+                     principal_eval(nprincipal))
+            principal_gram = matmul(conjg(transpose(eig_w(1:nw,1:nprincipal))), &
+                                    eig_w(1:nw,1:nprincipal))
+            call eigen_zheev(principal_gram, principal_eval, principal_vec)
+            principal_rank_099 = count(principal_eval > 0.99d0**2)
+            principal_rank_090 = count(principal_eval > 0.90d0**2)
+            write(*,'(1x,a,i0,a,i0,4(a,1pe13.5),2(a,i0))') &
+              '[DG-FULL-H-SEED-XI-PRINCIPAL] spin=', ispin_loc, ' subspace_dim=', nprincipal, &
+              ' sigma_min=', sqrt(max(0.0d0,minval(principal_eval))), &
+              ' sigma_max=', sqrt(max(0.0d0,maxval(principal_eval))), &
+              ' eval_min=', minval(principal_eval), ' eval_max=', maxval(principal_eval), &
+              ' rank_sigma_gt_099=', principal_rank_099, ' rank_sigma_gt_090=', principal_rank_090
+            deallocate(principal_gram, principal_vec, principal_eval)
+          end if
+          nprincipal = min(nw,nstate)
+          if (nprincipal > 0) then
+            allocate(principal_gram(nprincipal,nprincipal), principal_vec(nprincipal,nprincipal), &
+                     principal_eval(nprincipal))
+            principal_gram = matmul(conjg(transpose(eig_w(1:nw,1:nprincipal))), &
+                                    eig_w(1:nw,1:nprincipal))
+            call eigen_zheev(principal_gram, principal_eval, principal_vec)
+            principal_rank_099 = count(principal_eval > 0.99d0**2)
+            principal_rank_090 = count(principal_eval > 0.90d0**2)
+            write(*,'(1x,a,i0,a,i0,4(a,1pe13.5),2(a,i0))') &
+              '[DG-FULL-H-SEED-XI-PRINCIPAL] spin=', ispin_loc, ' subspace_dim=', nprincipal, &
+              ' sigma_min=', sqrt(max(0.0d0,minval(principal_eval))), &
+              ' sigma_max=', sqrt(max(0.0d0,maxval(principal_eval))), &
+              ' eval_min=', minval(principal_eval), ' eval_max=', maxval(principal_eval), &
+              ' rank_sigma_gt_099=', principal_rank_099, ' rank_sigma_gt_090=', principal_rank_090
+            deallocate(principal_gram, principal_vec, principal_eval)
+          end if
           do idir = 1, 3
             r_w(1:nw,1:nw) = dg_frag%global_wannier_position(idir,1:nw,1:nw)
             work_w(1:nw,1:nstate) = matmul(r_w(1:nw,1:nw), eig_w(1:nw,1:nstate))
@@ -2118,6 +2584,62 @@ contains
           nstate, ' herm_diff_sum=', herm_diff_global(1), &
           ' max_abs=', maxval(abs(xi_global))
         write(*,'(1x,a)') '[DG-FULL-H-SEED-XI] source=global_wannier_position_AA_R'
+        do ispin_loc = 1, dg_frag%nspin
+          nocc_diag = min(nstate, max(0, dg_frag%nocc_spin(ispin_loc)))
+          xi_ov_frob(:) = 0.0d0
+          xi_ov_max(:) = 0.0d0
+          do idir = 1, 3
+            do ist = 1, nocc_diag
+              do jst = nocc_diag + 1, nstate
+                xi_ov_frob(idir) = xi_ov_frob(idir) + abs(xi_global(idir,ist,jst,ispin_loc))**2
+                xi_ov_max(idir) = max(xi_ov_max(idir), abs(xi_global(idir,ist,jst,ispin_loc)))
+              end do
+            end do
+          end do
+          xi_ov_frob(:) = sqrt(xi_ov_frob(:))
+          write(*,'(1x,a,i0,2(a,3(1pe13.5,1x)))') '[DG-FULL-H-SEED-XI-OV] spin=', ispin_loc, &
+            ' frob_xyz=', xi_ov_frob, ' max_xyz=', xi_ov_max
+          r2_axis(:) = 0.0d0
+          fsum_axis(:) = 0.0d0
+          fsum_window(:,:) = 0.0d0
+          window_lo = (/0.0d0, 1.0d0, 3.0d0, 5.0d0/)
+          window_hi = (/1.0d0, 3.0d0, 5.0d0, 20.0d0/)
+          fsum_min(:) = huge(1.0d0)
+          fsum_max(:) = 0.0d0
+          do ist = 1, nocc_diag
+            fsum_occ(:) = 0.0d0
+            do jst = nocc_diag + 1, nstate
+              gap_fsum = dg_frag%full_h_seed_eval(jst,ispin_loc) - &
+                         dg_frag%full_h_seed_eval(ist,ispin_loc)
+              if (gap_fsum <= 1.0d-12) cycle
+              gap_ev_fsum = gap_fsum * 27.211386245988d0
+              do idir = 1, 3
+                r2_axis(idir) = r2_axis(idir) + abs(xi_global(idir,ist,jst,ispin_loc))**2
+                fsum_occ(idir) = fsum_occ(idir) + &
+                  2.0d0 * gap_fsum * abs(xi_global(idir,ist,jst,ispin_loc))**2
+                do iwindow = 1, 4
+                  if (gap_ev_fsum >= window_lo(iwindow) .and. gap_ev_fsum < window_hi(iwindow)) &
+                    fsum_window(idir,iwindow) = fsum_window(idir,iwindow) + &
+                      2.0d0 * gap_fsum * abs(xi_global(idir,ist,jst,ispin_loc))**2
+                end do
+              end do
+            end do
+            fsum_axis(:) = fsum_axis(:) + fsum_occ(:)
+            fsum_min(:) = min(fsum_min(:), fsum_occ(:))
+            fsum_max(:) = max(fsum_max(:), fsum_occ(:))
+          end do
+          if (nocc_diag <= 0) fsum_min(:) = 0.0d0
+          write(*,'(1x,a,i0,3(a,3(1pe13.5,1x)))') '[DG-FULL-H-SEED-FSUM] spin=', ispin_loc, &
+            ' r2_xyz=', r2_axis, ' f_per_occ_xyz=', fsum_axis / dble(max(1,nocc_diag)), &
+            ' f_min_xyz=', fsum_min
+          write(*,'(1x,a,i0,a,3(1pe13.5,1x))') '[DG-FULL-H-SEED-FSUM-MAX] spin=', ispin_loc, &
+            ' f_max_xyz=', fsum_max
+          do iwindow = 1, 4
+            write(*,'(1x,a,i0,2(a,f6.1),a,3(1pe13.5,1x))') '[DG-FULL-H-SEED-FSUM-WINDOW] spin=', &
+              ispin_loc, ' lo_eV=', window_lo(iwindow), ' hi_eV=', window_hi(iwindow), &
+              ' f_per_occ_xyz=', fsum_window(:,iwindow) / dble(max(1,nocc_diag))
+          end do
+        end do
         flush(6)
       end if
       deallocate(xi_local, xi_global, eig_w_local, eig_w, work_w, r_w)
@@ -2436,6 +2958,7 @@ contains
   ! Time evolution using AETRS (Enforced Time-Reversal Symmetry)
   !=======================================================================
 #include "rt_dg_integrator_aetrs.f90"
+#include "rt_dg_integrator_krylov.f90"
 
   !=======================================================================
   ! Calculate observables in fragment basis

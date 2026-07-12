@@ -20,6 +20,7 @@
 #cmakedefine USE_LIBXC
 #cmakedefine USE_FFTW
 #cmakedefine USE_WANNIER90
+#cmakedefine HAVE_SPGLIB
 #cmakedefine WANNIER90_EXECUTABLE_PATH "@WANNIER90_EXECUTABLE_PATH@"
 
 #cmakedefine USE_OPT_ARRAY_PADDING

@@ -51,6 +51,8 @@
       call time_evolution_expdiag(dg_frag, system, info, rt, itt, dt, &
                                   lg, mg, stencil, xc_func, srg, srg_scalar, fg, poisson, pp, ppg, ppn, &
                                   rho, rho_s, Vh, Vxc, Vpsl, energy)
+    case(6)  ! block-sparse Arnoldi exponential action
+      call time_evolution_krylov(dg_frag,system,mg,ppg,rt,itt,dt)
     case default
       stop "Unknown time integrator for DG-Fragment method"
     end select

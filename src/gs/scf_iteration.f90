@@ -21,7 +21,7 @@ contains
 
 subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vlocal,  &
             &   miter,nscf_init_no_diagonal,dc)
-  use salmon_global, only: yn_subspace_diagonalization,ncg,ncg_init
+  use salmon_global, only: yn_subspace_diagonalization,ncg,ncg_init,nstate_freeze_gs
   use structures
   use timer
   use gram_schmidt_orth, only: gram_schmidt
@@ -43,6 +43,10 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
   type(s_dcdft), optional,intent(in)    :: dc
   !
   integer :: nncg
+  integer :: freeze_e
+  logical :: has_frozen_local
+  real(8), allocatable :: frozen_rwf(:,:,:,:,:)
+  complex(8), allocatable :: frozen_zwf(:,:,:,:,:)
   type(ace_update_state), save :: ace_state_gs
   logical, save :: ace_state_gs_initialized = .false.
   complex(8), allocatable :: psi_prev_ace(:,:,:,:,:), psi_curr_ace(:,:,:,:,:)
@@ -72,9 +76,22 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
   else
     nncg = ncg
   end if
+  freeze_e = min(info%io_e,nstate_freeze_gs)
+  has_frozen_local = nstate_freeze_gs > 0 .and. info%io_s <= freeze_e
+  if(has_frozen_local) then
+    if(system%if_real_orbital) then
+      allocate(frozen_rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3), &
+        1:system%nspin,info%io_s:freeze_e))
+      frozen_rwf = spsi%rwf(:,:,:,1:system%nspin,info%io_s:freeze_e,info%ik_s,info%im_s)
+    else
+      allocate(frozen_zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3), &
+        1:system%nspin,info%io_s:freeze_e))
+      frozen_zwf = spsi%zwf(:,:,:,1:system%nspin,info%io_s:freeze_e,info%ik_s,info%im_s)
+    end if
+  end if
 ! subspace diagonalization
   call timer_begin(LOG_CALC_SUBSPACE_DIAG)
-  if(yn_subspace_diagonalization == 'y')then
+  if(yn_subspace_diagonalization == 'y' .and. nstate_freeze_gs == 0)then
     if(miter > nscf_init_no_diagonal)then
       call ssdg(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     end if
@@ -89,6 +106,16 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
     call gscg_zwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,shpsi,sttpsi,cg)
   end if
   call timer_end(LOG_CALC_MINIMIZATION)
+
+  if(has_frozen_local) then
+    if(system%if_real_orbital) then
+      spsi%rwf(:,:,:,1:system%nspin,info%io_s:freeze_e,info%ik_s,info%im_s) = frozen_rwf
+      deallocate(frozen_rwf)
+    else
+      spsi%zwf(:,:,:,1:system%nspin,info%io_s:freeze_e,info%ik_s,info%im_s) = frozen_zwf
+      deallocate(frozen_zwf)
+    end if
+  end if
 
 ! Gram Schmidt orghonormalization
   call gram_schmidt(system, mg, info, spsi)

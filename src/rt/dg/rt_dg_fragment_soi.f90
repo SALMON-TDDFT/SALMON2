@@ -223,6 +223,8 @@ contains
       dg_frag%time_integrator = 4
     case('expdiag')
       dg_frag%time_integrator = 5
+    case('krylov')
+      dg_frag%time_integrator = 6
     case default
       dg_frag%time_integrator = 5  ! default: expdiag
     end select
@@ -465,6 +467,7 @@ contains
   ! Time evolution using AETRS (Enforced Time-Reversal Symmetry)
   !=======================================================================
 #include "rt_dg_integrator_aetrs.f90"
+#include "rt_dg_integrator_krylov.f90"
 
   !=======================================================================
   ! Calculate observables in fragment basis

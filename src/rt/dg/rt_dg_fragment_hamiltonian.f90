@@ -2508,8 +2508,10 @@
       end if
       if (comm_is_root(dg_frag%id)) then
         write(*,*) "        DC-exported velocity operator loaded"
-        write(*,*) "        DC-exported basis is treated as S-orthonormal for propagation"
       end if
+      call calculate_overlap_matrix(dg_frag, system, mg)
+      if (comm_is_root(dg_frag%id)) &
+        write(*,*) "        DC-exported overlap matrix calculated for generalized propagation"
     else if (.not. allocated(dg_frag%momentum_blocks) .and. .not. allocated(dg_frag%momentum_mat)) then
       if (comm_is_root(dg_frag%id)) then
         write(*,*) "  [1/3] Calculating momentum matrix elements (p_ij)..."

@@ -11,6 +11,43 @@ module rt_dg_fragment_io
   public :: initialize_coefficients_from_buffer_wannier_flux
 
 contains
+  character(256) function dg_wavefunction_seed_filename(bdir_frag, ifrag, binfile_wf, binfile_wf_wannier_seed) result(filename)
+    implicit none
+    character(*), intent(in) :: bdir_frag, binfile_wf, binfile_wf_wannier_seed
+    integer, intent(in) :: ifrag
+    character(256) :: candidate
+    logical :: exists
+
+    write(candidate, '(a, i6.6, a)') trim(bdir_frag), ifrag, '/wavefunctions_full_polish_seed.bin'
+    inquire(file=candidate, exist=exists)
+    if (exists) then
+      filename = candidate
+      return
+    end if
+    write(candidate, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_wf_wannier_seed
+    inquire(file=candidate, exist=exists)
+    if (exists) then
+      filename = candidate
+    else
+      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_wf
+    end if
+  end function dg_wavefunction_seed_filename
+
+  character(256) function dg_total_persistent_filename(default_name, persistent_name) result(filename)
+    implicit none
+    character(*), intent(in) :: default_name, persistent_name
+    character(256) :: candidate
+    logical :: exists
+
+    candidate = './data_dcdft/total/'//trim(persistent_name)
+    inquire(file=candidate, exist=exists)
+    if (exists) then
+      filename = candidate
+    else
+      filename = './data_dcdft/total/'//trim(default_name)
+    end if
+  end function dg_total_persistent_filename
+
   subroutine read_dg_occupation_seed(dg_frag)
     use filesystem, only: get_filehandle
     use communication, only: comm_is_root, comm_bcast
@@ -76,6 +113,7 @@ contains
     character(*), intent(in) :: bdir_frag
 
     character(32), parameter :: binfile_wf = "wavefunctions.bin"
+    character(32), parameter :: binfile_wf_wannier_seed = "wavefunctions_wannier_seed.bin"
     character(32), parameter :: binfile_bf = "basis_functions.bin"
     character(32), parameter :: binfile_bfb = "basis_functions_buffer.bin"
     character(32), parameter :: binfile_rg = "rgrid_index.bin"
@@ -106,6 +144,7 @@ contains
     real(8) :: n_basis_avg, nvirt_est_avg
     integer :: state_col, occ_base, occ_extra, frag_occ_s, frag_occ_e, nocc_frag_seed
     logical :: warned_spin_discard, has_buffer_file, has_core_file, identity_seed_coefficients
+    logical :: full_polish_wannier_coef_loaded
     logical :: has_global_wannier_file
     logical :: esp_loaded
     real(8) :: coef_diag_local(2), coef_diag_global(2)
@@ -114,7 +153,7 @@ contains
     if (comm_is_root(dg_frag%id)) then
       ifrag = 1
       iunit = get_filehandle()
-      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_wf
+      filename = dg_wavefunction_seed_filename(bdir_frag, ifrag, binfile_wf, binfile_wf_wannier_seed)
 
       open(iunit, file=filename, form='unformatted', access='stream', status='old')
       read(iunit) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
@@ -205,7 +244,7 @@ contains
     ! index_basis maps local->global indices across ALL fragments; every rank
     ! needs the full table or ranks > 0 will produce zero/NaN current.
     iunit = get_filehandle()
-    write(filename, '(a, i6.6, a, a)') trim(bdir_frag), 1, '/', binfile_wf
+    filename = dg_wavefunction_seed_filename(bdir_frag, 1, binfile_wf, binfile_wf_wannier_seed)
     open(iunit, file=filename, form='unformatted', access='stream', status='old')
     read(iunit) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
     if (nstate_tot_file < 0) nstate_tot_file = -nstate_tot_file
@@ -358,7 +397,12 @@ contains
     dg_frag%coef = 0.0d0
     if (allocated(dg_frag%coef_new)) dg_frag%coef_new = 0.0d0
     if (allocated(dg_frag%coef_work)) dg_frag%coef_work = 0.0d0
-    if (yn_dg_length_gauge == 'y') call read_wannier90_global_basis_data(dg_frag, ifrag_count)
+    full_polish_wannier_coef_loaded = .false.
+    if (yn_dg_length_gauge == 'y') then
+      call read_wannier90_global_basis_data(dg_frag, ifrag_count)
+      if (dg_frag%has_global_wannier_basis) &
+        call read_full_polish_wannier_fragment_coef(dg_frag, bdir_frag, ifrag_count, full_polish_wannier_coef_loaded)
+    end if
 
     if (identity_seed_coefficients) then
       ! Step 5a: Build the initial occupied coefficient columns.  DC writes an
@@ -424,7 +468,7 @@ contains
       do ifrag = dg_frag%ifrag_start, dg_frag%ifrag_end
         i_local = ifrag - dg_frag%ifrag_start + 1
         iunit = get_filehandle()
-        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), ifrag, '/', binfile_wf
+        filename = dg_wavefunction_seed_filename(bdir_frag, ifrag, binfile_wf, binfile_wf_wannier_seed)
         open(iunit, file=filename, form='unformatted', access='stream', status='old')
         read(iunit) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
         read(iunit) n_mat_tmp(1:dg_frag%nspin)
@@ -461,7 +505,8 @@ contains
                 end if
               end if
             end do
-            if (dg_frag%has_global_wannier_basis .and. allocated(dg_frag%global_wannier_coef)) then
+            if (dg_frag%has_global_wannier_basis .and. allocated(dg_frag%global_wannier_coef) .and. &
+                .not. full_polish_wannier_coef_loaded) then
               if (state_col <= dg_frag%global_wannier_num_bands) then
                 do iw = 1, dg_frag%global_wannier_num_wann
                   dg_frag%global_wannier_coef(1:nbasis_iter, iw, ispin, i_local) = &
@@ -1411,6 +1456,7 @@ contains
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     character(48), parameter :: binfile_w90g = "wannier90_global_basis.bin"
+    character(48), parameter :: binfile_w90g_persistent = "wannier90_global_basis_persistent.bin"
     integer, parameter :: wannier90_global_magic = -22022216
     integer, parameter :: wannier90_global_version = 2
     character(256) :: filename
@@ -1422,7 +1468,7 @@ contains
 
     if (.not. comm_is_root(dg_frag%id)) return
 
-    filename = './data_dcdft/total/'//binfile_w90g
+    filename = dg_total_persistent_filename(binfile_w90g, binfile_w90g_persistent)
     iunit = get_filehandle()
     open(iunit, file=filename, form='unformatted', access='stream', status='old', iostat=iostat_open)
     if (iostat_open /= 0) return
@@ -1466,6 +1512,7 @@ contains
     integer, intent(in) :: ifrag_count
 
     character(48), parameter :: binfile_w90seed = "wannier_flux_eigen_seed.bin"
+    character(48), parameter :: binfile_w90seed_persistent = "wannier_flux_eigen_seed_persistent.bin"
     integer, parameter :: wannier_flux_eigen_seed_magic = -22022219
     integer, parameter :: wannier_flux_eigen_seed_version = 1
     character(256) :: filename
@@ -1484,7 +1531,7 @@ contains
     if (.not. allocated(dg_frag%global_wannier_coef)) return
     if (ifrag_count <= 0) return
 
-    filename = './data_dcdft/total/'//binfile_w90seed
+    filename = dg_total_persistent_filename(binfile_w90seed, binfile_w90seed_persistent)
     inquire(file=filename, exist=has_file)
     if (.not. has_file) return
 
@@ -1608,10 +1655,12 @@ contains
   subroutine read_wannier90_global_basis_data(dg_frag, ifrag_count)
     use filesystem, only: get_filehandle
     use communication, only: comm_is_root
+    use salmon_global, only: wannier_num_bands, wannier_num_wann
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     integer, intent(in) :: ifrag_count
     character(48), parameter :: binfile_w90g = "wannier90_global_basis.bin"
+    character(48), parameter :: binfile_w90g_persistent = "wannier90_global_basis_persistent.bin"
     integer, parameter :: wannier90_global_magic = -22022216
     integer, parameter :: wannier90_global_version = 2
     character(256) :: filename
@@ -1644,7 +1693,7 @@ contains
     dg_frag%has_global_wannier_flux_eigen = .false.
 
     if (ifrag_count <= 0) return
-    filename = './data_dcdft/total/'//binfile_w90g
+    filename = dg_total_persistent_filename(binfile_w90g, binfile_w90g_persistent)
     iunit = get_filehandle()
     open(iunit, file=filename, form='unformatted', access='stream', status='old', iostat=iostat_open)
     if (iostat_open /= 0) return
@@ -1668,12 +1717,21 @@ contains
         write(*,'(1x,a)') "[WARN] invalid Wannier90 global basis dimensions; ignoring global Wannier data."
       return
     end if
+    if ((wannier_num_bands > 0 .and. num_bands_file /= wannier_num_bands) .or. &
+        (wannier_num_wann > 0 .and. num_wann_file /= wannier_num_wann)) then
+      close(iunit)
+      if (comm_is_root(dg_frag%id)) write(*,'(1x,a,4(a,i0))') &
+        "[FATAL] Wannier90 global basis dimensions do not match requested RT Wannier space:", &
+        " file_bands=", num_bands_file, " requested_bands=", wannier_num_bands, &
+        " file_wann=", num_wann_file, " requested_wann=", wannier_num_wann
+      stop "DG-Fragment RT: incompatible Wannier90 global basis dimensions"
+    end if
     if (num_bands_file > dg_frag%nstate_tot) then
       close(iunit)
       if (comm_is_root(dg_frag%id)) write(*,'(1x,a,i0,a,i0)') &
-        "[WARN] Wannier90 global basis has more bands than RT states: bands=", &
+        "[FATAL] Wannier90 global basis has more bands than RT wavefunction seed states: bands=", &
         num_bands_file, " nstate_tot=", dg_frag%nstate_tot
-      return
+      stop "DG-Fragment RT: Wannier90 global basis exceeds wavefunction seed states"
     end if
     if (n_frag_file /= dg_frag%n_frag .and. comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,i0,a,i0)') "[WARN] Wannier90 global basis fragment count differs: file=", &
@@ -1730,6 +1788,64 @@ contains
       end if
     end if
   end subroutine read_wannier90_global_basis_data
+
+  subroutine read_full_polish_wannier_fragment_coef(dg_frag, bdir_frag, ifrag_count, loaded)
+    use filesystem, only: get_filehandle
+    use communication, only: comm_is_root
+    implicit none
+    type(s_dg_fragment_rt), intent(inout) :: dg_frag
+    character(*), intent(in) :: bdir_frag
+    integer, intent(in) :: ifrag_count
+    logical, intent(out) :: loaded
+    integer, parameter :: coef_magic = -22022218, coef_version = 1
+    character(256) :: filename
+    integer :: ifrag, i_local, ispin, iunit, io
+    integer :: magic_file, version_file, nbasis_file, nwann_file, nspin_file, nbasis
+    integer :: count_local
+    logical :: exists
+
+    loaded = .false.
+    count_local = 0
+    do i_local = 1, ifrag_count
+      ifrag = dg_frag%ifrag_start + i_local - 1
+      write(filename,'(a,"/",i6.6,"/full_polish_wannier_coef.bin")') trim(bdir_frag), ifrag
+      inquire(file=filename, exist=exists)
+      if (.not. exists) cycle
+      iunit = get_filehandle()
+      open(iunit, file=filename, form='unformatted', access='stream', status='old', iostat=io)
+      if (io /= 0) stop "DG-Fragment RT: cannot open Full-polish Wannier coefficients"
+      read(iunit, iostat=io) magic_file, version_file, nbasis_file, nwann_file, nspin_file
+      if (io /= 0 .or. magic_file /= coef_magic .or. version_file /= coef_version) then
+        close(iunit)
+        stop "DG-Fragment RT: invalid Full-polish Wannier coefficient header"
+      end if
+      if (nbasis_file /= dg_frag%n_basis(ifrag,1) .or. nbasis_file > size(dg_frag%global_wannier_coef,1) .or. &
+          nwann_file /= dg_frag%global_wannier_num_wann .or. nspin_file /= dg_frag%nspin) then
+        close(iunit)
+        stop "DG-Fragment RT: incompatible Full-polish Wannier coefficient dimensions"
+      end if
+      do ispin = 1, dg_frag%nspin
+        nbasis = nbasis_file
+        read(iunit, iostat=io) dg_frag%global_wannier_coef(1:nbasis_file,1:nwann_file,ispin,i_local)
+        if (io /= 0) then
+          close(iunit)
+          stop "DG-Fragment RT: truncated Full-polish Wannier coefficient file"
+        end if
+      end do
+      close(iunit)
+      count_local = count_local + 1
+    end do
+    if (count_local == 0) return
+    if (count_local /= ifrag_count) then
+      if (comm_is_root(dg_frag%id)) write(*,'(1x,a,i0,a,i0)') &
+        "[FATAL] incomplete local Full-polish Wannier fragment coefficient set: found=", count_local, &
+        " expected=", ifrag_count
+      stop "DG-Fragment RT: incomplete Full-polish Wannier coefficients"
+    end if
+    loaded = .true.
+    if (comm_is_root(dg_frag%id)) write(*,'(1x,a,i0)') &
+      "[DG-W90-GLOBAL] Full-polish fragment coefficients loaded on rank: fragments=", count_local
+  end subroutine read_full_polish_wannier_fragment_coef
 
   subroutine read_wannier90_global_position_rdat(num_wann_expected, position_aa_r, ok)
     use filesystem, only: get_filehandle

@@ -315,11 +315,17 @@ contains
       & yn_predictor_corrector, &
       & yn_dg_fragment_rt, &
       & yn_dg_length_gauge, &
+      & yn_dg_nodal_rt, &
       & time_integrator_dg_fragment, &
+      & dg_nodal_gs_relax_step, &
+      & dg_nodal_gs_max_iter, &
+      & dg_nodal_gs_tol, &
+      & dg_nodal_taylor_order, &
       & yn_dg_expdiag_xi_split, &
       & yn_dg_expdiag_refresh_fixed_func, &
       & yn_dg_expdiag_global_flux, &
       & yn_dg_expdiag_global_field, &
+      & yn_dg_full_h_wannier_band_gauge, &
       & yn_dg_expdiag_project_h, &
       & yn_dg_expdiag_delta_h, &
       & yn_dg_mixed_z, &
@@ -357,6 +363,7 @@ contains
       & method_min, &
       & ncg, &
       & ncg_init, &
+      & nstate_freeze_gs, &
       & method_mixing, &
       & mixrate, &
       & nmemory_mb, &
@@ -653,6 +660,7 @@ contains
       & nproc_rgrid_tot, &
       & yn_dc_lcfo, &
       & yn_dc_lcfo_flux, &
+      & yn_dc_lcfo_flux_weak_volume, &
       & yn_dc_lcfo_diag, &
       & yn_dc_fragment_optimization, &
       & yn_dc_lcfo_wannier, &
@@ -677,6 +685,9 @@ contains
       & wannier_dis_win_max, &
       & wannier_pw_cutoff, &
       & wannier_pw_max, &
+      & wannier_site_symmetry, &
+      & wannier_symmetry_file, &
+      & wannier_symmetry_tolerance, &
       & dg_wannier_symmetry_gauge, &
       & energy_cut, &
       & lambda_cut, &
@@ -688,6 +699,11 @@ contains
 
     namelist/dg_fragment/ &
       & yn_dg_fragment_rt, &
+      & yn_dg_nodal_rt, &
+      & dg_nodal_gs_relax_step, &
+      & dg_nodal_gs_max_iter, &
+      & dg_nodal_gs_tol, &
+      & dg_nodal_taylor_order, &
       & yn_dg_frag, &
       & eps_dg_frag, &
       & yn_adaptive_basis_dg, &
@@ -831,11 +847,17 @@ contains
     yn_predictor_corrector = 'n'
     yn_dg_fragment_rt = 'n'
     yn_dg_length_gauge = 'n'
+    yn_dg_nodal_rt = 'n'
     time_integrator_dg_fragment = 'expdiag'
+    dg_nodal_gs_relax_step = 0.002d0
+    dg_nodal_gs_max_iter = 200
+    dg_nodal_gs_tol = 1.0d-8
+    dg_nodal_taylor_order = 8
     yn_dg_expdiag_xi_split = 'n'
     yn_dg_expdiag_refresh_fixed_func = 'n'
     yn_dg_expdiag_global_flux = 'n'
     yn_dg_expdiag_global_field = 'y'
+    yn_dg_full_h_wannier_band_gauge = 'n'
     yn_dg_expdiag_project_h = 'n'
     yn_dg_expdiag_delta_h = 'n'
     yn_dg_mixed_z = 'n'
@@ -872,6 +894,7 @@ contains
     method_min    = 'cg'
     ncg           = 4
     ncg_init      = 4
+    nstate_freeze_gs = 0
     method_mixing = 'broyden'
     mixrate       = 0.5d0
     nmemory_mb    = 8
@@ -1170,6 +1193,7 @@ contains
     nproc_rgrid_tot = 1
     yn_dc_lcfo = 'y'
     yn_dc_lcfo_flux = 'n'
+    yn_dc_lcfo_flux_weak_volume = 'y'
     yn_dc_lcfo_diag = 'y'
     yn_dc_fragment_optimization = 'n'
     yn_dc_lcfo_wannier = 'n'
@@ -1194,6 +1218,9 @@ contains
     wannier_dis_win_max = 0d0
     wannier_pw_cutoff = 0d0
     wannier_pw_max = 0
+    wannier_site_symmetry = 'off'
+    wannier_symmetry_file = 'sym.dat'
+    wannier_symmetry_tolerance = 1d-6
     energy_cut = 0d0
     lambda_cut = 1d-3
 !! == default for &dg_fragment
@@ -1468,10 +1495,16 @@ contains
     call comm_bcast(yn_predictor_corrector,nproc_group_global)
     call comm_bcast(yn_dg_fragment_rt,nproc_group_global)
     call comm_bcast(yn_dg_length_gauge,nproc_group_global)
+    call comm_bcast(yn_dg_nodal_rt,nproc_group_global)
+    call comm_bcast(dg_nodal_gs_relax_step,nproc_group_global)
+    call comm_bcast(dg_nodal_gs_max_iter,nproc_group_global)
+    call comm_bcast(dg_nodal_gs_tol,nproc_group_global)
+    call comm_bcast(dg_nodal_taylor_order,nproc_group_global)
     call comm_bcast(yn_dg_expdiag_xi_split,nproc_group_global)
     call comm_bcast(yn_dg_expdiag_refresh_fixed_func,nproc_group_global)
     call comm_bcast(yn_dg_expdiag_global_flux,nproc_group_global)
     call comm_bcast(yn_dg_expdiag_global_field,nproc_group_global)
+    call comm_bcast(yn_dg_full_h_wannier_band_gauge,nproc_group_global)
     call comm_bcast(yn_dg_expdiag_project_h,nproc_group_global)
     call comm_bcast(yn_dg_expdiag_delta_h,nproc_group_global)
     call comm_bcast(yn_dg_mixed_z,nproc_group_global)
@@ -1510,6 +1543,7 @@ contains
     call comm_bcast(method_min              ,nproc_group_global)
     call comm_bcast(ncg                     ,nproc_group_global)
     call comm_bcast(ncg_init                ,nproc_group_global)
+    call comm_bcast(nstate_freeze_gs        ,nproc_group_global)
     call comm_bcast(method_mixing           ,nproc_group_global)
     call comm_bcast(mixrate                 ,nproc_group_global)
     call comm_bcast(nmemory_mb              ,nproc_group_global)
@@ -1897,6 +1931,7 @@ contains
     call comm_bcast(nproc_rgrid_tot, nproc_group_global)
     call comm_bcast(yn_dc_lcfo, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_flux, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo_flux_weak_volume, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
     call comm_bcast(yn_dc_fragment_optimization, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_wannier, nproc_group_global)
@@ -1925,6 +1960,9 @@ contains
     call comm_bcast(wannier_pw_cutoff, nproc_group_global)
     wannier_pw_cutoff = wannier_pw_cutoff * uenergy_to_au
     call comm_bcast(wannier_pw_max, nproc_group_global)
+    call comm_bcast(wannier_site_symmetry, nproc_group_global)
+    call comm_bcast(wannier_symmetry_file, nproc_group_global)
+    call comm_bcast(wannier_symmetry_tolerance, nproc_group_global)
     call comm_bcast(energy_cut, nproc_group_global)
     energy_cut = energy_cut * uenergy_to_au
     call comm_bcast(lambda_cut, nproc_group_global)
@@ -2450,6 +2488,11 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_predictor_corrector', yn_predictor_corrector
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_fragment_rt', yn_dg_fragment_rt
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_length_gauge', yn_dg_length_gauge
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_nodal_rt', yn_dg_nodal_rt
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_nodal_gs_relax_step', dg_nodal_gs_relax_step
+      write(fh_variables_log, '("#",4X,A,"=",I8)') 'dg_nodal_gs_max_iter', dg_nodal_gs_max_iter
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_nodal_gs_tol', dg_nodal_gs_tol
+      write(fh_variables_log, '("#",4X,A,"=",I8)') 'dg_nodal_taylor_order', dg_nodal_taylor_order
       write(fh_variables_log, '("#",4X,A,"=",A)') 'time_integrator_dg_fragment', trim(time_integrator_dg_fragment)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_expdiag_xi_split', yn_dg_expdiag_xi_split
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_expdiag_refresh_fixed_func', &
@@ -2458,6 +2501,8 @@ contains
         yn_dg_expdiag_global_flux
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_expdiag_global_field', &
         yn_dg_expdiag_global_field
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_full_h_wannier_band_gauge', &
+        yn_dg_full_h_wannier_band_gauge
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_expdiag_project_h', &
         yn_dg_expdiag_project_h
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_expdiag_delta_h', &
@@ -2964,6 +3009,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",3I4)') "nproc_rgrid_tot",nproc_rgrid_tot(1:3)
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_flux",yn_dc_lcfo_flux
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        "yn_dc_lcfo_flux_weak_volume",yn_dc_lcfo_flux_weak_volume
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_fragment_optimization",yn_dc_fragment_optimization
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier",yn_dc_lcfo_wannier
@@ -2988,6 +3035,11 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_dis_win_max', wannier_dis_win_max
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_pw_cutoff', wannier_pw_cutoff
       write(fh_variables_log, '("#",4X,A,"=",I6)') "wannier_pw_max",wannier_pw_max
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_site_symmetry', &
+        trim(wannier_site_symmetry)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_symmetry_file', &
+        trim(wannier_symmetry_file)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_symmetry_tolerance', wannier_symmetry_tolerance
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_wannier_symmetry_gauge', &
         trim(dg_wannier_symmetry_gauge)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
@@ -3097,6 +3149,7 @@ contains
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_flux)
+    call yn_argument_check(yn_dc_lcfo_flux_weak_volume)
     call yn_argument_check(yn_dg_lcfo_seed_exhaustive_check)
     call yn_argument_check(yn_dg_full_h_eigen_seed)
     call yn_argument_check(yn_dc_lcfo_diag)
@@ -3107,11 +3160,28 @@ contains
     call yn_argument_check(yn_dc_lcfo_wannier_pw)
     call yn_argument_check(yn_dc_lcfo_wannier_cluster)
     call yn_argument_check(yn_dc_lcfo_block_diag_h)
+    select case(trim(wannier_site_symmetry))
+    case('off', 'auto', 'file')
+    case default
+      call sawf_input_fatal("wannier_site_symmetry must be off, auto, or file")
+    end select
+    if(trim(wannier_site_symmetry) == 'file' .and. len_trim(wannier_symmetry_file) == 0) then
+      call sawf_input_fatal("wannier_site_symmetry='file' requires nonblank wannier_symmetry_file")
+    end if
+    if(wannier_symmetry_tolerance <= 0d0) then
+      call sawf_input_fatal("wannier_symmetry_tolerance must be positive")
+    end if
+#ifndef HAVE_SPGLIB
+    if(trim(wannier_site_symmetry) == 'auto') then
+      call sawf_input_fatal("wannier_site_symmetry='auto' requires SALMON built with USE_SPGLIB=ON")
+    end if
+#endif
     call yn_argument_check(yn_dg_length_gauge)
     call yn_argument_check(yn_dg_expdiag_xi_split)
     call yn_argument_check(yn_dg_expdiag_refresh_fixed_func)
     call yn_argument_check(yn_dg_expdiag_global_flux)
     call yn_argument_check(yn_dg_expdiag_global_field)
+    call yn_argument_check(yn_dg_full_h_wannier_band_gauge)
     call yn_argument_check(yn_dg_expdiag_project_h)
     call yn_argument_check(yn_dg_expdiag_delta_h)
     call yn_argument_check(yn_dg_mixed_z)
@@ -3147,9 +3217,10 @@ contains
       stop "dg_mixed_z_polarization_branch must be aa_r, center_diag, or center_eig"
     end select
     select case(trim(dg_wannier_symmetry_gauge))
-    case('none', 'diagnose', 'local_inversion_position')
+    case('none', 'diagnose', 'local_inversion_position', 'direct_amn_global', &
+         'direct_amn_bond_block', 'direct_amn_bond_global')
     case default
-      stop "dg_wannier_symmetry_gauge must be none, diagnose, or local_inversion_position"
+      stop "dg_wannier_symmetry_gauge must be none, diagnose, local_inversion_position, direct_amn_global, direct_amn_bond_block, or direct_amn_bond_global"
     end select
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
@@ -3537,11 +3608,21 @@ contains
          time_integrator_dg_fragment/='rk4' .and. &
          time_integrator_dg_fragment/='taylor4pc' .and. &
          time_integrator_dg_fragment/='expdiag' .and. &
+         time_integrator_dg_fragment/='krylov' .and. &
          time_integrator_dg_fragment/='aetrs') &
-      & stop "DG-Fragment RT: time_integrator_dg_fragment must be 'ssprk3', 'rk4', 'taylor4pc', 'expdiag', or 'aetrs'"
+      & stop "DG-Fragment RT: invalid time_integrator_dg_fragment"
     end if
     if(yn_dg_length_gauge=='y' .and. yn_dg_fragment_rt/='y') &
       stop "DG length gauge requires yn_dg_fragment_rt=y."
+    if(yn_dg_nodal_rt=='y' .and. yn_dg_fragment_rt/='y') &
+      stop "Nodal real-space DG requires yn_dg_fragment_rt=y."
+    if(yn_dg_nodal_rt=='y' .and. time_integrator_dg_fragment/='taylor4pc') &
+      stop "Nodal real-space DG requires time_integrator_dg_fragment='taylor4pc'."
+    if(yn_dg_nodal_rt=='y' .and. dt > 0.02d0) &
+      stop "Nodal real-space DG requires dt <= 0.02 au."
+    if(yn_dg_nodal_rt=='y' .and. (dg_nodal_gs_relax_step <= 0.0d0 .or. &
+       dg_nodal_gs_max_iter < 1 .or. dg_nodal_gs_tol <= 0.0d0 .or. dg_nodal_taylor_order < 1)) &
+      stop "Nodal real-space DG has invalid GS/Taylor controls."
     if(yn_dg_length_gauge=='y' .and. yn_spinorbit=='y') &
       stop "DG length gauge is not connected to the SOI DG-Fragment RT path yet."
     if(yn_dg_length_gauge=='y' .and. time_integrator_dg_fragment/='taylor4pc' .and. &
@@ -3549,6 +3630,7 @@ contains
       stop "DG length gauge currently requires time_integrator_dg_fragment='taylor4pc' or 'expdiag'."
     
     call yn_argument_check(yn_dg_fragment_rt)
+    call yn_argument_check(yn_dg_nodal_rt)
 
 #ifdef USE_FFTW
 #else
@@ -3558,6 +3640,17 @@ contains
 #endif
 
   end subroutine check_bad_input
+
+  subroutine sawf_input_fatal(message)
+    use communication, only: comm_is_root
+    use parallelization, only: end_parallel, nproc_id_global
+    implicit none
+    character(*), intent(in) :: message
+
+    if(comm_is_root(nproc_id_global)) write(*,'(a)') 'Bad input: '//trim(message)
+    call end_parallel
+    stop 1
+  end subroutine sawf_input_fatal
 
   subroutine stop_by_bad_input2(inp1,inp2,inp3)
     use parallelization

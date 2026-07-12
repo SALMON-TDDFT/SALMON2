@@ -244,6 +244,13 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
                                        Vh, Vxc, Vpsl, energy, ofl, md, singlescale, spsi_restart)
   use structures
   use rt_dg_fragment_types, only: s_dg_fragment_rt
+  use rt_dg_nodal_types, only: s_dg_nodal_state
+  use rt_dg_nodal_salmon_prepare, only: prepare_nodal_salmon_ground_state
+  use rt_dg_nodal_salmon_adapter, only: build_nodal_local_potential
+  use rt_dg_nodal_salmon_taylor, only: propagate_nodal_salmon_taylor
+  use rt_dg_nodal_diagnostics, only: calculate_nodal_norm_diagnostics_mpi
+  use rt_dg_nodal_current, only: calculate_nodal_velocity_current_mpi
+  use rt_dg_nodal_density, only: reconstruct_nodal_density_mpi
   use rt_dg_fragment, only: init_dg_fragment_rt_std => init_dg_fragment_rt, &
                             tddft_dg_fragment_iteration_std => tddft_dg_fragment_iteration, &
                             finalize_dg_fragment_rt_std => finalize_dg_fragment_rt, &
@@ -276,10 +283,14 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   use salmon_global, only: theory, method_singlescale, yn_ffte, yn_jm, yn_spinorbit, yn_restart, &
                            out_rt_energy_step, nt, dt, iperiodic, yn_dg_length_gauge, &
                           niter_dg_frag_rt_max, yn_dg_full_h_eigen_seed, &
-                          yn_dg_expdiag_refresh_fixed_func
+                          yn_dg_expdiag_refresh_fixed_func, yn_dg_nodal_rt, &
+                          dg_nodal_gs_relax_step, dg_nodal_gs_max_iter, dg_nodal_gs_tol, &
+                          dg_nodal_taylor_order
   use inputoutput, only: t_unit_time
   use fdtd_coulomb_gauge, only: fdtd_singlescale, fourier_singlescale
-  use hamiltonian, only: update_kvector_nonlocalpt_microAc
+  use hamiltonian, only: update_kvector_nonlocalpt, update_kvector_nonlocalpt_microAc
+  use hartree_sub, only: hartree
+  use salmon_xc, only: exchange_correlation
   implicit none
   integer,                intent(in)    :: Mit
   type(s_dft_system),     intent(inout) :: system
@@ -306,6 +317,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   logical, parameter :: trace_dcdft_seed_diagnostics = .true.
 
   type(s_dg_fragment_rt) :: dg_frag
+  type(s_dg_nodal_state) :: nodal_state
   integer :: itt
   integer :: itt_initial_obs
   integer :: env_len, env_status
@@ -330,12 +342,77 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   real(8), allocatable :: rho_before_rebuild(:,:,:)
   real(8), allocatable :: vh_before_rebuild(:,:,:)
   real(8), allocatable :: vxc_before_rebuild(:,:,:)
+  real(8), allocatable :: nodal_vlocal(:,:,:,:)
+  real(8), allocatable :: nodal_eigenvalues(:,:)
+  real(8) :: nodal_kinetic_center, nodal_kinetic_offset(4,3), nodal_gradient_offset(4,3)
+  real(8) :: nodal_gs_residual
+  integer :: nodal_gs_iteration
+  real(8) :: nodal_total_norm,nodal_initial_norm,nodal_norm_drift,nodal_orbital_norm_drift
+  real(8) :: nodal_avec(3)
+  real(8) :: nodal_current(3)
+  real(8) :: nodal_electron_number
+  integer :: nodal_ik
+  type(s_orbital) :: nodal_xc_dummy
   
   ! Initialize DG-Fragment RT
   if (yn_spinorbit == 'y') then
     call init_dg_fragment_rt_soi(dg_frag, system, rt, info, lg, mg, ppg)
   else
     call init_dg_fragment_rt_std(dg_frag, system, rt, info, lg, mg, ppg)
+  end if
+
+  if (yn_dg_nodal_rt == 'y') then
+    if (yn_spinorbit == 'y') stop 'nodal real-space DG does not support SOI yet'
+    call prepare_nodal_salmon_ground_state(dg_frag,system,info,spsi_restart,Vh,Vxc,Vpsl,stencil,ppg, &
+                                            4,dg_nodal_gs_relax_step,dg_nodal_gs_max_iter, &
+                                            dg_nodal_gs_tol,nodal_state,nodal_vlocal,nodal_kinetic_center, &
+                                            nodal_kinetic_offset,nodal_gradient_offset,nodal_eigenvalues, &
+                                            nodal_gs_residual,nodal_gs_iteration)
+    if (.not. nodal_state%dg_ground_state_ready) stop 'nodal DG preflight did not produce a stationary state'
+    if (comm_is_root(dg_frag%id)) then
+      write(*,'(1x,a,1pe13.5,a,i0,2(a,1pe13.5))') '[DG-NODAL-GS]', &
+        nodal_gs_residual,' iterations=',nodal_gs_iteration, &
+        ' eigen_min=',minval(nodal_eigenvalues),' eigen_max=',maxval(nodal_eigenvalues)
+      write(*,'(1x,a)') '[DG-NODAL-GS] complete-H preparation passed; entering self-consistent Taylor RT'
+      flush(6)
+    end if
+    nodal_ik=lbound(ppg%zekr_uV,3)
+    call calculate_nodal_norm_diagnostics_mpi(nodal_state,dg_frag%icomm,nodal_initial_norm, &
+                                               nodal_orbital_norm_drift)
+    system%vec_Ac=rt%Ac_tot(:,max(Mit,lbound(rt%Ac_tot,2)))
+    call calculate_nodal_velocity_current_mpi(nodal_state,dg_frag,system,ppg,nodal_ik, &
+                                               nodal_gradient_offset,dg_frag%icomm,nodal_current)
+    do itt=Mit+1,nt
+      nodal_avec=0.5d0*(rt%Ac_tot(:,itt-1)+rt%Ac_tot(:,itt))
+      system%vec_Ac=nodal_avec
+      call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
+      call propagate_nodal_salmon_taylor(nodal_state,dg_frag,ppg,nodal_ik,nodal_vlocal, &
+                                         nodal_kinetic_center,nodal_kinetic_offset,nodal_gradient_offset, &
+                                         nodal_avec,dt,dg_nodal_taylor_order,dg_frag%icomm)
+      call reconstruct_nodal_density_mpi(nodal_state,dg_frag,system,nodal_ik,dg_frag%icomm, &
+                                         rho_s,rho,nodal_electron_number)
+      call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+      if (xc_func%use_kinetic_energy .or. xc_func%use_current) &
+        stop 'nodal DG RT currently supports density-only XC functionals'
+      call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info, &
+                                nodal_xc_dummy,stencil,Vxc,energy%E_xc)
+      call build_nodal_local_potential(dg_frag,nodal_state,Vh,Vxc,Vpsl,nodal_vlocal)
+      call calculate_nodal_norm_diagnostics_mpi(nodal_state,dg_frag%icomm,nodal_total_norm, &
+                                                 nodal_orbital_norm_drift)
+      system%vec_Ac=rt%Ac_tot(:,itt)
+      call calculate_nodal_velocity_current_mpi(nodal_state,dg_frag,system,ppg,nodal_ik, &
+                                                 nodal_gradient_offset,dg_frag%icomm,nodal_current)
+      nodal_norm_drift=nodal_total_norm-nodal_initial_norm
+      if (comm_is_root(dg_frag%id)) then
+        write(*,'(1x,a,i0,4(a,1pe13.5),2(a,3es13.5))') '[DG-NODAL-RT] itt=',itt,' norm=',nodal_total_norm, &
+          ' norm_drift=',nodal_norm_drift,' orbital_norm_drift=',nodal_orbital_norm_drift, &
+          ' Ne=',nodal_electron_number, &
+          ' Ac=',rt%Ac_tot(:,itt),' current=',nodal_current
+        flush(6)
+      end if
+    end do
+    call finalize_dg_fragment_rt_std(dg_frag)
+    return
   end if
 
   if (yn_restart == 'y') then
@@ -473,6 +550,26 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
       call calculate_hamiltonian_matrix_std(dg_frag, system, lg, mg, stencil, Vh, Vxc, Vpsl, pp, ppg)
       dg_frag%flux_face_trace_mix_enabled = .true.
       call calibrate_dcdft_lcfo_static_hamiltonian_std(dg_frag, system, stencil, Vh, Vxc, Vpsl, Ac_zero)
+      if (yn_dg_full_h_eigen_seed == 'y' .and. yn_dg_length_gauge == 'n') then
+        if (dg_frag%use_plane_wave_basis) then
+          stop 'DG velocity-gauge Full-H seed does not support the mixed PW basis'
+        end if
+        call diagonalize_current_dg_full_h_seed_std(dg_frag, &
+          '[DG-FULL-H-SEED] diagonalized full DG Hamiltonian for velocity-gauge initial seed;')
+        used_full_h_eigen_seed = .true.
+        full_h_seed_hres = -1.0d0
+        call diagnose_dcdft_lcfo_seed_stationarity_std(dg_frag, system, mg, ppg, Ac_zero, &
+                                                       '[DG-FULL-H-SEED-HRES-VG]', full_h_seed_hres)
+        if (full_h_seed_hres > 1.0d-8) then
+          if (comm_is_root(dg_frag%id)) then
+            write(*,'(1x,a,1pe13.5)') &
+              '[FATAL] Velocity-gauge Full DG eigen seed failed the stationarity gate: HRES=', &
+              full_h_seed_hres
+            flush(6)
+          end if
+          stop 'DG-Fragment RT: velocity-gauge Full DG seed is not stationary'
+        end if
+      end if
       if ((yn_fix_func == 'n' .or. yn_dg_expdiag_refresh_fixed_func == 'y') .and. &
           yn_dg_length_gauge == 'y' .and. &
           trim(time_integrator_dg_fragment) == 'expdiag') then
@@ -529,9 +626,19 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
               flush(6)
             end if
           end if
-          if (trace_dcdft_seed_diagnostics) then
-            call diagnose_dcdft_lcfo_seed_stationarity_std(dg_frag, system, mg, ppg, Ac_zero, &
-                                                           '[DG-DCDFT-SEED-HRES-BPW-SCF]')
+          full_h_seed_hres = -1.0d0
+          call diagnose_dcdft_lcfo_seed_stationarity_std(dg_frag, system, mg, ppg, Ac_zero, &
+                                                         '[DG-DCDFT-SEED-HRES-BPW-SCF]', full_h_seed_hres)
+          if (full_h_seed_hres > 1.0d-8) then
+            if (comm_is_root(dg_frag%id)) then
+              write(*,'(1x,a,1pe13.5)') &
+                '[FATAL] Projected Wannier seed is not an eigenstate of the full DG Hamiltonian: HRES=', &
+                full_h_seed_hres
+              write(*,'(1x,a)') &
+                '[FATAL] Stop before RT; use the full-DG eigen seed or repair the projected basis.'
+              flush(6)
+            end if
+            stop 'DG-Fragment RT: projected Wannier seed is not stationary'
           end if
           do ipolish = 1, max(0, niter_dg_frag_rt_max)
             if (comm_is_root(dg_frag%id)) then

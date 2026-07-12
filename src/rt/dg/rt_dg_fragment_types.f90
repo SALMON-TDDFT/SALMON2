@@ -245,6 +245,7 @@ module rt_dg_fragment_types
     integer :: full_h_seed_nstate = 0
     logical :: has_full_h_seed_eigen = .false.
     logical :: has_full_h_seed_xi = .false.
+    complex(8), allocatable :: full_h_conventional_alignment(:,:,:) ! (DG eigen, conventional band, spin)
     logical :: has_local_wannier_basis = .false.
     integer, allocatable :: local_wannier_nbasis(:) ! (local fragment index)
     integer, allocatable :: local_wannier_nproj(:)  ! (local fragment index)

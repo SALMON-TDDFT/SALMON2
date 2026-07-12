@@ -155,11 +155,17 @@ module salmon_global
   character(1)   :: yn_predictor_corrector
   character(1)   :: yn_dg_fragment_rt
   character(1)   :: yn_dg_length_gauge
+  character(1)   :: yn_dg_nodal_rt
   character(16)  :: time_integrator_dg_fragment
+  real(8)        :: dg_nodal_gs_relax_step
+  integer        :: dg_nodal_gs_max_iter
+  real(8)        :: dg_nodal_gs_tol
+  integer        :: dg_nodal_taylor_order
   character(1)   :: yn_dg_expdiag_xi_split
   character(1)   :: yn_dg_expdiag_refresh_fixed_func
   character(1)   :: yn_dg_expdiag_global_flux
   character(1)   :: yn_dg_expdiag_global_field
+  character(1)   :: yn_dg_full_h_wannier_band_gauge
   character(1)   :: yn_dg_expdiag_project_h
   character(1)   :: yn_dg_expdiag_delta_h
   character(1)   :: yn_dg_mixed_z
@@ -198,6 +204,7 @@ module salmon_global
   integer        :: iseed_number_change
   character(8)   :: method_min
   integer        :: ncg,ncg_init
+  integer        :: nstate_freeze_gs
   character(16)  :: method_mixing
   real(8)        :: mixrate
   integer        :: nmemory_mb
@@ -502,6 +509,7 @@ character(256),allocatable :: atom_name(:)
   integer        :: nproc_rgrid_tot(3)
   character(1)   :: yn_dc_lcfo
   character(1)   :: yn_dc_lcfo_flux
+  character(1)   :: yn_dc_lcfo_flux_weak_volume
   character(1)   :: yn_dc_lcfo_diag
   character(1)   :: yn_dc_fragment_optimization
   character(1)   :: yn_dc_lcfo_wannier
@@ -526,6 +534,9 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: wannier_dis_win_max
   real(8)        :: wannier_pw_cutoff
   integer        :: wannier_pw_max
+  character(16)  :: wannier_site_symmetry
+  character(256) :: wannier_symmetry_file
+  real(8)        :: wannier_symmetry_tolerance
   real(8)        :: energy_cut
   real(8)        :: lambda_cut
   

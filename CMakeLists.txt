@@ -47,6 +47,7 @@ option_set(USE_EIGENEXA  "Use EigenExa Library"    OFF)
 option_set(USE_LIBXC     "Use Libxc library"       OFF)
 option_set(USE_FFTW      "Use FFTW library"        OFF)
 option_set(USE_WANNIER90 "Use Wannier90 library"   OFF)
+option_set(USE_SPGLIB    "Use spglib library"       OFF)
 
 ## Optimization for stencil compitations
 option_set(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil"          ON)

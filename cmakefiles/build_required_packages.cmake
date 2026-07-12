@@ -23,3 +23,7 @@ endif ()
 if (USE_WANNIER90)
   include(${CMAKE_SOURCE_DIR}/cmakefiles/Builder/build_wannier90.cmake)
 endif ()
+
+if (USE_SPGLIB)
+  include(${CMAKE_SOURCE_DIR}/cmakefiles/Builder/build_spglib.cmake)
+endif ()

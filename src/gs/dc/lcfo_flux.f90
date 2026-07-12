@@ -21,12 +21,35 @@
 module lcfo_flux
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use dc_fragment_geometry, only: get_fragment_domain
+  use lcfo_wannier_sawf, only: t_sawf_projection_channel, t_sawf_symop, &
+    build_sawf_spd_projection_map, build_sawf_wannier_representation, &
+    sawf_real_harmonic_value, sawf_spd_projection_count, sawf_projection_shell_lmax, &
+    write_sawf_projection_block, &
+    load_sawf_symmetry_auto, load_sawf_symmetry_file
+  use lcfo_wannier_sawf_band, only: map_sawf_periodic_grid_point, &
+    locate_sawf_fragment_point, validate_sawf_fragment_tiling, &
+    validate_sawf_fragment_symmetry_map, build_sawf_fragment_buffer_point_map, &
+    accumulate_sawf_dmn_band_blocks, validate_sawf_dmn_band, &
+    validate_sawf_seed_header, validate_sawf_seed_basis_metadata, &
+    diagnose_sawf_fragment_basis_closure
+  use lcfo_wannier_sawf_basis, only: t_sawf_closed_basis,append_sawf_mapped_basis, &
+    build_sawf_closed_core_buffer_basis,clear_sawf_closed_basis
+  use lcfo_wannier_sawf_dmn, only: t_sawf_dmn_writer, begin_sawf_dmn, &
+    append_sawf_dmn_operation, finish_sawf_dmn, abort_sawf_dmn
+  use lcfo_wannier_sawf_collective, only: reduce_sawf_fragment_alignment_failure
+  use lcfo_wannier_sawf_win, only: activate_sawf_win, deactivate_sawf_win, &
+    t_atomic_win_writer, begin_atomic_win, finish_atomic_win, abort_atomic_win
+  use lcfo_wannier_command, only: select_wannier90_command, execute_wannier90_command, &
+    is_wannier90_reuse_command, is_wannier90_export_only_command, &
+    is_wannier90_import_only_command, cache_resolved_wannier90_command, &
+    get_cached_wannier90_command
   implicit none
 
   private
   public :: dc_lcfo_flux, dc_lcfo_wannier_import_only, dc_lcfo_wannier_import_only_requested
 
   character(48),parameter :: binfile_wf = "wavefunctions.bin", &
+  &                          binfile_wf_wannier_seed = "wavefunctions_wannier_seed.bin", &
   &                          binfile_rg = "rgrid_index.bin", &
   &                          binfile_bf = "basis_functions.bin", &
   &                          binfile_bfb = "basis_functions_buffer.bin", &
@@ -39,7 +62,9 @@ module lcfo_flux
   &                          binfile_bpw = "buffer_periodic_wannier_basis.bin", &
   &                          binfile_bpwt = "buffer_periodic_wannier_trace.bin", &
   &                          binfile_w90g = "wannier90_global_basis.bin", &
+  &                          binfile_w90g_persistent = "wannier90_global_basis_persistent.bin", &
   &                          binfile_w90seed = "wannier_flux_eigen_seed.bin", &
+  &                          binfile_w90seed_persistent = "wannier_flux_eigen_seed_persistent.bin", &
   &                          binfile_wcl = "wannier_cluster_partition.bin"
   integer, parameter :: basis_buffer_magic = -22022212
   integer, parameter :: basis_buffer_version = 2
@@ -55,6 +80,11 @@ module lcfo_flux
   integer, parameter :: wannier_flux_eigen_seed_version = 1
   integer, parameter :: wannier_cluster_magic = -22022217
   integer, parameter :: wannier_cluster_version = 1
+  integer, parameter :: sawf_seed_provenance_magic = -22022220
+  integer, parameter :: sawf_seed_provenance_version = 1
+  integer, parameter :: sawf_closed_seed_magic = -22022221
+  integer, parameter :: sawf_closed_seed_version = 1
+  character(64), save :: current_sawf_seed_token = ''
 
   type :: t_wannier_symop
     integer :: owner_frag = 0
@@ -64,6 +94,25 @@ module lcfo_flux
     real(8) :: atom_residual = 0.0d0
     character(32) :: label = ''
   end type t_wannier_symop
+
+  integer, parameter :: sawf_target_cache_capacity=2
+
+  type :: t_sawf_fragment_state_entry
+    integer :: fragment=0
+    integer :: shape(3)=0
+    integer :: buffer_shape(3)=0,buffer_width(3)=0
+    integer :: nspin=0,nstate_frag=0,nstate_tot=0,n_basis=0
+    real(8), allocatable :: basis(:,:),buffer_basis(:,:)
+    complex(8), allocatable :: states(:,:)
+  end type t_sawf_fragment_state_entry
+
+  type :: t_sawf_fragment_state_cache
+    type(t_sawf_fragment_state_entry) :: source
+    type(t_sawf_fragment_state_entry) :: target(sawf_target_cache_capacity)
+    integer :: next_target_slot=1
+    integer :: source_seed_reads=0,source_reconstructions=0
+    integer :: target_seed_reads=0,target_reconstructions=0,target_cache_hits=0
+  end type t_sawf_fragment_state_cache
 
 contains
 
@@ -107,20 +156,27 @@ contains
   end function matmul_int_real
 
   logical function dc_lcfo_wannier_import_only_requested() result(import_only)
+    use communication, only: comm_bcast
+    use parallelization, only: nproc_group_global, nproc_id_global
     use salmon_global, only: wannier90_command
     implicit none
-    character(1024) :: wannier_command, value
+    character(1024) :: environment_command, resolved_command, compiled_default
     integer :: env_status
 
-    import_only = .false.
-    wannier_command = trim(wannier90_command)
-    if(len_trim(wannier_command) == 0) then
-      call get_environment_variable('SALMON_WANNIER90_COMMAND', wannier_command, status=env_status)
-      if(env_status /= 0 .or. len_trim(wannier_command) == 0) return
+    environment_command = ''; resolved_command = ''
+#ifdef WANNIER90_EXECUTABLE_PATH
+    compiled_default = WANNIER90_EXECUTABLE_PATH
+#else
+    compiled_default = 'wannier90.x'
+#endif
+    if(nproc_id_global == 0) then
+      call get_environment_variable('SALMON_WANNIER90_COMMAND',environment_command,status=env_status)
+      if(env_status /= 0) environment_command = ''
     end if
-    value = adjustl(wannier_command)
-    import_only = trim(value) == 'import_only' .or. trim(value) == 'IMPORT_ONLY' .or. &
-      trim(value) == 'import-only' .or. trim(value) == 'IMPORT-ONLY'
+    call comm_bcast(environment_command,nproc_group_global,0)
+    call select_wannier90_command(wannier90_command,environment_command,compiled_default,resolved_command)
+    call cache_resolved_wannier90_command(resolved_command)
+    import_only = is_wannier90_import_only_command(resolved_command)
   end function dc_lcfo_wannier_import_only_requested
 
   subroutine dc_lcfo_wannier_import_only(dc)
@@ -137,13 +193,24 @@ contains
     type(t_wannier_symop), allocatable :: symops(:)
     real(8), allocatable :: center_aa(:,:), center_bohr(:,:), owner_center_bohr(:,:), spread_aa2(:)
     real(8), allocatable :: esp_file(:,:), eval_seed(:,:)
-    complex(8), allocatable :: v_matrix(:,:), v_direct(:,:), v_direct_global(:,:), aa_global(:,:,:), seed_wannier_to_eigen(:,:)
-    logical :: ok_position, ok_direct
+    complex(8), allocatable :: v_matrix(:,:), v_direct(:,:), v_direct_global(:,:)
+    complex(8), allocatable :: aa_global(:,:,:), aa_direct(:,:,:), seed_wannier_to_eigen(:,:)
+    logical :: ok_position, ok_direct, direct_gauge_requested, direct_gauge_applied
     character(256) :: filename
 
     call read_dc_lcfo_esp_from_wavefunctions_import(dc, nstate_tot_file, nspin_file, esp_file)
 
     if(dc%id_tot == 0) then
+      direct_gauge_requested = (trim(dg_wannier_symmetry_gauge) == 'direct_amn_bond_block' .or. &
+        trim(dg_wannier_symmetry_gauge) == 'direct_amn_bond_global' .or. &
+        trim(dg_wannier_symmetry_gauge) == 'direct_amn_global')
+      direct_gauge_applied = .false.
+      if(direct_gauge_requested .and. trim(dg_wannier_symmetry_gauge) /= 'direct_amn_global' .and. &
+          .not. is_bond_center_projection_import(trim(wannier_projection))) then
+        write(*,'(1x,a,a,a)') "[FATAL] dg_wannier_symmetry_gauge=", &
+          trim(dg_wannier_symmetry_gauge), " requires wannier_projection='bond_centers'."
+        stop "DC-LCFO Wannier import-only: direct AMN bond gauge requires bond_centers projection"
+      end if
       call read_wannier90_checkpoint_transform_import(dc, num_bands_chk, num_wann_chk, &
         v_matrix, center_aa, spread_aa2)
       if(num_wann_chk /= wannier_num_wann) then
@@ -182,6 +249,11 @@ contains
       call diagnose_fragment_wannier_center_symmetry(dc, center_bohr, owner_frag, num_wann_chk, nsym, symops)
       call read_wannier90_global_rmn_gamma_block_import(dc, num_wann_chk, aa_global, ok_position)
       if(.not. ok_position) then
+        if(direct_gauge_requested) then
+          write(*,'(1x,a,a)') "[FATAL] requested direct AMN gauge requires Wannier90 position data: mode=", &
+            trim(dg_wannier_symmetry_gauge)
+          stop "DC-LCFO Wannier import-only: requested direct AMN gauge requires Wannier90 position data"
+        end if
         allocate(aa_global(3,num_wann_chk,num_wann_chk))
         aa_global = (0d0,0d0)
       else
@@ -203,7 +275,24 @@ contains
               num_bands_chk, v_direct, esp_file, nsym, symops, aa_global, .false.)
             call diagnose_global_wannier_pbc_operator_symmetry(dc, owner_center_bohr, num_wann_chk, &
               num_bands_chk, v_direct, esp_file, nsym, symops, aa_global, .false.)
+            if(trim(dg_wannier_symmetry_gauge) == 'direct_amn_bond_block') then
+              call transform_wannier_position_gauge(num_bands_chk, num_wann_chk, v_matrix, v_direct, aa_global, aa_direct)
+              aa_global(1:3,1:num_wann_chk,1:num_wann_chk) = aa_direct(1:3,1:num_wann_chk,1:num_wann_chk)
+              v_matrix(1:num_bands_chk,1:num_wann_chk) = v_direct(1:num_bands_chk,1:num_wann_chk)
+              center_bohr(1:3,1:num_wann_chk) = owner_center_bohr(1:3,1:num_wann_chk)
+              owner_frag(1:num_wann_chk) = bond_owner_frag(1:num_wann_chk)
+              call set_wannier_centers_from_position_diagonal(num_wann_chk, center_bohr, aa_global)
+              do iw=1,num_wann_chk
+                owner_frag(iw) = find_owner_fragment_from_center_import(dc, center_bohr(1:3,iw))
+              end do
+              call rebalance_wannier_owner_fragments_import(dc, center_bohr, owner_frag, num_wann_chk)
+              write(*,'(1x,a)') "[DC-LCFO-W90-IMPORT] basis source=direct_amn_bond_projectors_block"
+              deallocate(aa_direct)
+              direct_gauge_applied = .true.
+            end if
             deallocate(v_direct)
+          else if(trim(dg_wannier_symmetry_gauge) == 'direct_amn_bond_block') then
+            stop "DC-LCFO Wannier import-only: requested direct_amn_bond_block but AMN read failed"
           end if
           call read_wannier90_amn_direct_transform_import(dc, num_bands_chk, num_wann_chk, bond_owner_frag, &
             v_direct_global, ok_direct, .false.)
@@ -213,47 +302,86 @@ contains
               num_bands_chk, v_direct_global, esp_file, nsym, symops, aa_global, .false.)
             call diagnose_global_wannier_pbc_operator_symmetry(dc, owner_center_bohr, num_wann_chk, &
               num_bands_chk, v_direct_global, esp_file, nsym, symops, aa_global, .false.)
+            if(trim(dg_wannier_symmetry_gauge) == 'direct_amn_bond_global') then
+              call transform_wannier_position_gauge(num_bands_chk, num_wann_chk, v_matrix, v_direct_global, aa_global, aa_direct)
+              aa_global(1:3,1:num_wann_chk,1:num_wann_chk) = aa_direct(1:3,1:num_wann_chk,1:num_wann_chk)
+              v_matrix(1:num_bands_chk,1:num_wann_chk) = v_direct_global(1:num_bands_chk,1:num_wann_chk)
+              center_bohr(1:3,1:num_wann_chk) = owner_center_bohr(1:3,1:num_wann_chk)
+              owner_frag(1:num_wann_chk) = bond_owner_frag(1:num_wann_chk)
+              call set_wannier_centers_from_position_diagonal(num_wann_chk, center_bohr, aa_global)
+              do iw=1,num_wann_chk
+                owner_frag(iw) = find_owner_fragment_from_center_import(dc, center_bohr(1:3,iw))
+              end do
+              call rebalance_wannier_owner_fragments_import(dc, center_bohr, owner_frag, num_wann_chk)
+              write(*,'(1x,a)') "[DC-LCFO-W90-IMPORT] basis source=direct_amn_bond_projectors_global"
+              deallocate(aa_direct)
+              direct_gauge_applied = .true.
+            end if
             deallocate(v_direct_global)
+          else if(trim(dg_wannier_symmetry_gauge) == 'direct_amn_bond_global') then
+            stop "DC-LCFO Wannier import-only: requested direct_amn_bond_global but AMN read failed"
           end if
         end if
+        if(trim(dg_wannier_symmetry_gauge) == 'direct_amn_global') then
+          call read_wannier90_amn_direct_transform_import(dc, num_bands_chk, num_wann_chk, owner_frag, &
+            v_direct_global, ok_direct, .false.)
+          if(ok_direct) then
+            call diagnose_wannier_transform_subspace_overlap(num_bands_chk, num_wann_chk, &
+              v_matrix, v_direct_global, "W90_vs_direct_amn_global")
+            call build_direct_wannier_buffer_position_from_lcfo_import(dc, num_bands_chk, num_wann_chk, &
+              owner_frag, center_bohr, v_direct_global, aa_direct, ok_position)
+            if(.not. ok_position) stop "DC-LCFO Wannier import-only: failed to build direct AMN buffer-local position"
+            aa_global(1:3,1:num_wann_chk,1:num_wann_chk) = aa_direct(1:3,1:num_wann_chk,1:num_wann_chk)
+            v_matrix(1:num_bands_chk,1:num_wann_chk) = v_direct_global(1:num_bands_chk,1:num_wann_chk)
+            write(*,'(1x,a)') "[DC-LCFO-W90-IMPORT] position source=direct_amn_buffer_local_r"
+            write(*,'(1x,a)') "[DC-LCFO-W90-IMPORT] basis source=direct_amn_projectors_global"
+            deallocate(aa_direct, v_direct_global)
+            direct_gauge_applied = .true.
+          else
+            stop "DC-LCFO Wannier import-only: requested direct_amn_global but AMN read failed"
+          end if
+        end if
+        if(direct_gauge_requested .and. .not. direct_gauge_applied) &
+          stop "DC-LCFO Wannier import-only: requested direct AMN gauge was not applied"
         if(trim(dg_wannier_symmetry_gauge) == 'local_inversion_position') then
           call symmetrize_fragment_wannier_position_import(dc, center_bohr, owner_frag, num_wann_chk, &
             num_bands_chk, v_matrix, nsym, symops, aa_global)
           call diagnose_fragment_wannier_center_symmetry(dc, center_bohr, owner_frag, num_wann_chk, nsym, symops)
         else
           write(*,'(1x,a,a)') "[DC-LCFO-W90-SYM] position sym mode=", trim(dg_wannier_symmetry_gauge)
+          if(direct_gauge_applied) then
+            if(trim(dg_wannier_symmetry_gauge) == 'direct_amn_global') then
+              write(*,'(1x,a)') "[DC-LCFO-W90-SYM] direct_amn_global operator diagnostic deferred: "// &
+                "unitary symmetry representation required"
+            else
+              call diagnose_global_wannier_pbc_operator_symmetry(dc, center_bohr, num_wann_chk, &
+                num_bands_chk, v_matrix, esp_file, nsym, symops, aa_global, ok_position)
+            end if
+          end if
         end if
       end if
       if(allocated(symops)) deallocate(symops)
       position_available = merge(1, 0, ok_position)
 
       filename = trim(import_run_root_dir())//'data_dcdft/total/'//binfile_w90g
-      iunit = get_filehandle()
-      open(iunit,file=filename,form='unformatted',access='stream',status='replace')
-      write(iunit) wannier90_global_magic, wannier90_global_version
-      write(iunit) num_bands_chk, num_wann_chk, dc%n_frag
-      write(iunit) owner_frag(1:num_wann_chk)
-      write(iunit) center_bohr(1:3,1:num_wann_chk)
-      write(iunit) spread_aa2(1:num_wann_chk)
-      write(iunit) v_matrix(1:num_bands_chk,1:num_wann_chk)
-      write(iunit) position_available
-      write(iunit) aa_global(1:3,1:num_wann_chk,1:num_wann_chk)
-      close(iunit)
+      call write_wannier90_global_basis_stream_import(filename, num_bands_chk, num_wann_chk, dc%n_frag, &
+        owner_frag, center_bohr, spread_aa2, v_matrix, position_available, aa_global)
       write(*,'(1x,a,i0,a,a)') "[DC-LCFO-W90-IMPORT] wrote ", num_wann_chk, &
         " Wannier functions to ", trim(filename)
+      filename = trim(import_run_root_dir())//'data_dcdft/total/'//binfile_w90g_persistent
+      call write_wannier90_global_basis_stream_import(filename, num_bands_chk, num_wann_chk, dc%n_frag, &
+        owner_frag, center_bohr, spread_aa2, v_matrix, position_available, aa_global)
 
       call build_wannier_flux_eigen_seed_from_transform(num_bands_chk, num_wann_chk, nstate_tot_file, &
         nspin_file, v_matrix, esp_file, seed_wannier_to_eigen, eval_seed, nstate_seed)
       filename = trim(import_run_root_dir())//'data_dcdft/total/'//binfile_w90seed
-      iunit = get_filehandle()
-      open(iunit,file=filename,form='unformatted',access='stream',status='replace')
-      write(iunit) wannier_flux_eigen_seed_magic, wannier_flux_eigen_seed_version
-      write(iunit) num_bands_chk, num_wann_chk, nstate_seed, nspin_file, dc%n_frag
-      write(iunit) eval_seed(1:nstate_seed,1:nspin_file)
-      write(iunit) seed_wannier_to_eigen(1:num_wann_chk,1:nstate_seed)
-      close(iunit)
+      call write_wannier_flux_eigen_seed_stream_import(filename, num_bands_chk, num_wann_chk, nstate_seed, &
+        nspin_file, dc%n_frag, eval_seed, seed_wannier_to_eigen)
       write(*,'(1x,a,i0,a,i0,a,a)') "[DC-LCFO-W90-IMPORT] wrote Flux-LCFO eigen seed: states=", &
         nstate_seed, " wann=", num_wann_chk, " file=", trim(filename)
+      filename = trim(import_run_root_dir())//'data_dcdft/total/'//binfile_w90seed_persistent
+      call write_wannier_flux_eigen_seed_stream_import(filename, num_bands_chk, num_wann_chk, nstate_seed, &
+        nspin_file, dc%n_frag, eval_seed, seed_wannier_to_eigen)
       deallocate(seed_wannier_to_eigen, eval_seed)
 
       if(allocated(owner_center_bohr)) deallocate(owner_center_bohr)
@@ -265,6 +393,495 @@ contains
     call comm_sync_all(dc%icomm_tot)
     if(dc%id_tot == 0) write(*,'(1x,a)') "[DC-LCFO-W90-IMPORT] import-only completed without SCF."
   end subroutine dc_lcfo_wannier_import_only
+
+  subroutine transform_wannier_position_gauge(num_bands, num_wann, v_from, v_to, aa_from, aa_to)
+    implicit none
+    integer, intent(in) :: num_bands, num_wann
+    complex(8), intent(in) :: v_from(num_bands,num_wann), v_to(num_bands,num_wann)
+    complex(8), intent(in) :: aa_from(3,num_wann,num_wann)
+    complex(8), allocatable, intent(out) :: aa_to(:,:,:)
+    integer :: idir
+    complex(8), allocatable :: tmp_bw(:,:), band_pos(:,:), tmp_to(:,:)
+
+    allocate(aa_to(3,num_wann,num_wann))
+    allocate(tmp_bw(num_bands,num_wann), band_pos(num_bands,num_bands), tmp_to(num_bands,num_wann))
+    aa_to = (0.0d0, 0.0d0)
+    do idir=1,3
+      tmp_bw(1:num_bands,1:num_wann) = matmul(v_from(1:num_bands,1:num_wann), &
+        aa_from(idir,1:num_wann,1:num_wann))
+      band_pos(1:num_bands,1:num_bands) = matmul(tmp_bw(1:num_bands,1:num_wann), &
+        conjg(transpose(v_from(1:num_bands,1:num_wann))))
+      tmp_to(1:num_bands,1:num_wann) = matmul(band_pos(1:num_bands,1:num_bands), &
+        v_to(1:num_bands,1:num_wann))
+      aa_to(idir,1:num_wann,1:num_wann) = matmul(conjg(transpose(v_to(1:num_bands,1:num_wann))), &
+        tmp_to(1:num_bands,1:num_wann))
+    end do
+    call hermitize_wannier_position_matrix(num_wann, aa_to)
+    deallocate(tmp_bw, band_pos, tmp_to)
+  end subroutine transform_wannier_position_gauge
+
+  subroutine write_wannier90_global_basis_stream_import(filename, num_bands, num_wann, n_frag_file, &
+      owner_frag, center_bohr, spread_aa2, v_matrix, position_available, aa_global)
+    use filesystem, only: get_filehandle
+    implicit none
+    character(*), intent(in) :: filename
+    integer, intent(in) :: num_bands, num_wann, n_frag_file, position_available
+    integer, intent(in) :: owner_frag(num_wann)
+    real(8), intent(in) :: center_bohr(3,num_wann), spread_aa2(num_wann)
+    complex(8), intent(in) :: v_matrix(num_bands,num_wann), aa_global(3,num_wann,num_wann)
+    integer :: iunit
+
+    iunit = get_filehandle()
+    open(iunit,file=filename,form='unformatted',access='stream',status='replace')
+    write(iunit) wannier90_global_magic, wannier90_global_version
+    write(iunit) num_bands, num_wann, n_frag_file
+    write(iunit) owner_frag(1:num_wann)
+    write(iunit) center_bohr(1:3,1:num_wann)
+    write(iunit) spread_aa2(1:num_wann)
+    write(iunit) v_matrix(1:num_bands,1:num_wann)
+    write(iunit) position_available
+    write(iunit) aa_global(1:3,1:num_wann,1:num_wann)
+    close(iunit)
+  end subroutine write_wannier90_global_basis_stream_import
+
+  subroutine write_wannier_flux_eigen_seed_stream_import(filename, num_bands, num_wann, nstate_seed, &
+      nspin_file, n_frag_file, eval_seed, seed_wannier_to_eigen)
+    use filesystem, only: get_filehandle
+    implicit none
+    character(*), intent(in) :: filename
+    integer, intent(in) :: num_bands, num_wann, nstate_seed, nspin_file, n_frag_file
+    real(8), intent(in) :: eval_seed(nstate_seed,nspin_file)
+    complex(8), intent(in) :: seed_wannier_to_eigen(num_wann,nstate_seed)
+    integer :: iunit
+
+    iunit = get_filehandle()
+    open(iunit,file=filename,form='unformatted',access='stream',status='replace')
+    write(iunit) wannier_flux_eigen_seed_magic, wannier_flux_eigen_seed_version
+    write(iunit) num_bands, num_wann, nstate_seed, nspin_file, n_frag_file
+    write(iunit) eval_seed(1:nstate_seed,1:nspin_file)
+    write(iunit) seed_wannier_to_eigen(1:num_wann,1:nstate_seed)
+    close(iunit)
+  end subroutine write_wannier_flux_eigen_seed_stream_import
+
+  subroutine build_direct_wannier_buffer_position_from_lcfo_import(dc, num_bands, num_wann, &
+      owner_frag, center_bohr, v_matrix, aa_direct, ok)
+    use salmon_global, only: num_fragment, lambda_cut
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: num_bands, num_wann
+    integer, intent(in) :: owner_frag(num_wann)
+    real(8), intent(in) :: center_bohr(3,num_wann)
+    complex(8), intent(in) :: v_matrix(num_bands,num_wann)
+    complex(8), allocatable, intent(out) :: aa_direct(:,:,:)
+    logical, intent(out) :: ok
+    integer :: ifrag, nxyz_domain(3), nxyz_buffer(3), nxyz_box(3)
+    integer :: nspin_file, nstate_frag_file, nstate_tot_file, n_basis_frag
+    integer :: npts, ibx, iby, ibz, p, axis
+    integer :: idx0(3)
+    real(8), allocatable :: phi_basis(:,:), coef_wf(:,:), psi_state(:,:)
+    real(8), allocatable :: coord(:), weight(:)
+    complex(8), allocatable :: wannier_frag(:,:), weighted(:,:), overlap_direct(:,:)
+    real(8) :: hvol, hgrid(3), coord_val, global_origin(3)
+    logical :: seed_ok
+
+    ok = .false.
+    if(num_wann > 0 .and. size(owner_frag) < num_wann) return
+    if(num_wann > 0 .and. size(center_bohr, 2) < num_wann) return
+    hvol = dc%system_tot%hvol
+    hgrid(1:3) = dc%system_tot%hgs(1:3)
+    allocate(aa_direct(3,num_wann,num_wann), overlap_direct(num_wann,num_wann))
+    aa_direct = (0.0d0, 0.0d0)
+    overlap_direct = (0.0d0, 0.0d0)
+
+    do ifrag=1,dc%n_frag
+      call read_fragment_lcfo_buffer_seed_for_wannier_import(dc, ifrag, num_bands, &
+        nxyz_domain, nxyz_buffer, nxyz_box, nspin_file, nstate_frag_file, nstate_tot_file, n_basis_frag, &
+        phi_basis, coef_wf, seed_ok)
+      if(.not. seed_ok) then
+        if(allocated(phi_basis)) deallocate(phi_basis)
+        if(allocated(coef_wf)) deallocate(coef_wf)
+        if(allocated(aa_direct)) deallocate(aa_direct)
+        return
+      end if
+
+      npts = product(nxyz_box)
+      idx0(1:3) = dc%ixyz_frag(1:3,ifrag)
+      do axis=1,3
+        global_origin(axis) = dc%lg_tot%coordinate(idx0(axis),axis)
+      end do
+      allocate(psi_state(npts,num_bands), wannier_frag(npts,num_wann), weighted(npts,num_wann), &
+        coord(npts), weight(npts))
+      psi_state = matmul(phi_basis(1:npts,1:n_basis_frag), coef_wf(1:n_basis_frag,1:num_bands))
+      wannier_frag = matmul(cmplx(psi_state(1:npts,1:num_bands), 0.0d0, kind=8), &
+        v_matrix(1:num_bands,1:num_wann))
+
+      p = 0
+      do ibz=1,nxyz_box(3)
+        do iby=1,nxyz_box(2)
+          do ibx=1,nxyz_box(1)
+            p = p + 1
+            weight(p) = buffer_partition_weight_import(nxyz_domain, nxyz_buffer, num_fragment, ibx, iby, ibz)
+          end do
+        end do
+      end do
+      do axis=1,3
+        p = 0
+        do ibz=1,nxyz_box(3)
+          do iby=1,nxyz_box(2)
+            do ibx=1,nxyz_box(1)
+              p = p + 1
+              select case(axis)
+              case(1)
+                coord_val = global_origin(axis) + dble(ibx - nxyz_buffer(axis) - 1) * hgrid(axis)
+              case(2)
+                coord_val = global_origin(axis) + dble(iby - nxyz_buffer(axis) - 1) * hgrid(axis)
+              case default
+                coord_val = global_origin(axis) + dble(ibz - nxyz_buffer(axis) - 1) * hgrid(axis)
+              end select
+              coord(p) = coord_val
+            end do
+          end do
+        end do
+        do p=1,npts
+          weighted(p,1:num_wann) = hvol * weight(p) * coord(p) * wannier_frag(p,1:num_wann)
+        end do
+        aa_direct(axis,1:num_wann,1:num_wann) = aa_direct(axis,1:num_wann,1:num_wann) + &
+          matmul(conjg(transpose(wannier_frag(1:npts,1:num_wann))), weighted(1:npts,1:num_wann))
+      end do
+      do p=1,npts
+        weighted(p,1:num_wann) = hvol * weight(p) * wannier_frag(p,1:num_wann)
+      end do
+      overlap_direct(1:num_wann,1:num_wann) = overlap_direct(1:num_wann,1:num_wann) + &
+        matmul(conjg(transpose(wannier_frag(1:npts,1:num_wann))), weighted(1:npts,1:num_wann))
+
+      deallocate(phi_basis, coef_wf, psi_state, wannier_frag, weighted, coord, weight)
+    end do
+
+    call normalize_wannier_position_by_overlap_import(num_wann, overlap_direct, aa_direct, lambda_cut, ok)
+    if(.not. ok) then
+      if(allocated(aa_direct)) deallocate(aa_direct)
+      if(allocated(overlap_direct)) deallocate(overlap_direct)
+      return
+    end if
+    deallocate(overlap_direct)
+    call hermitize_wannier_position_matrix(num_wann, aa_direct)
+    ok = .true.
+    write(*,'(1x,a,i0,a,i0)') "[DC-LCFO-W90-IMPORT] direct AMN buffer-local position built: bands=", &
+      num_bands, " wann=", num_wann
+  end subroutine build_direct_wannier_buffer_position_from_lcfo_import
+
+  real(8) function buffer_partition_weight_import(nxyz_domain, nxyz_buffer, nfrag_axis, ibx, iby, ibz) result(weight)
+    implicit none
+    integer, intent(in) :: nxyz_domain(3), nxyz_buffer(3), nfrag_axis(3)
+    integer, intent(in) :: ibx, iby, ibz
+    integer :: mult(3)
+
+    mult(1) = buffer_axis_multiplicity_import(nxyz_domain(1), nxyz_buffer(1), nfrag_axis(1), ibx)
+    mult(2) = buffer_axis_multiplicity_import(nxyz_domain(2), nxyz_buffer(2), nfrag_axis(2), iby)
+    mult(3) = buffer_axis_multiplicity_import(nxyz_domain(3), nxyz_buffer(3), nfrag_axis(3), ibz)
+    weight = 1.0d0 / dble(max(1, mult(1) * mult(2) * mult(3)))
+  end function buffer_partition_weight_import
+
+  integer function buffer_axis_multiplicity_import(ndom, nbuf, nfrag_axis, ibox) result(mult)
+    implicit none
+    integer, intent(in) :: ndom, nbuf, nfrag_axis, ibox
+    integer :: jcore
+
+    mult = 1
+    if(ndom <= 0 .or. nbuf <= 0 .or. nfrag_axis <= 1) return
+    jcore = modulo(ibox - nbuf - 1, ndom) + 1
+    if(jcore <= nbuf) mult = mult + 1
+    if(jcore > ndom - nbuf) mult = mult + 1
+  end function buffer_axis_multiplicity_import
+
+  subroutine normalize_wannier_position_by_overlap_import(num_wann, overlap_mat, aa_direct, cutoff, ok)
+    use eigen_subdiag_sub, only: eigen_zheev
+    implicit none
+    integer, intent(in) :: num_wann
+    complex(8), intent(in) :: overlap_mat(num_wann,num_wann)
+    complex(8), intent(inout) :: aa_direct(3,num_wann,num_wann)
+    real(8), intent(in) :: cutoff
+    logical, intent(out) :: ok
+    integer :: axis, i, j, k
+    real(8), allocatable :: eval(:)
+    complex(8), allocatable :: smat(:,:), eigvec(:,:), sinv(:,:), tmp(:,:)
+    real(8) :: min_eval, max_eval, threshold
+
+    ok = .false.
+    if(num_wann <= 0) return
+    allocate(smat(num_wann,num_wann), eigvec(num_wann,num_wann), sinv(num_wann,num_wann), &
+      tmp(num_wann,num_wann), eval(num_wann))
+    smat = overlap_mat
+    call hermitize_square_matrix_import(num_wann, smat)
+    call eigen_zheev(smat, eval, eigvec)
+    min_eval = minval(eval(1:num_wann))
+    max_eval = maxval(eval(1:num_wann))
+    threshold = max(cutoff, 1.0d-12 * max(max_eval, 1.0d0))
+    if(min_eval <= threshold) then
+      write(*,'(1x,a,3(a,es12.5))') "[DC-LCFO-W90-IMPORT] buffer position overlap is rank deficient:", &
+        " min_eval=", min_eval, " max_eval=", max_eval, " threshold=", threshold
+      deallocate(smat, eigvec, sinv, tmp, eval)
+      return
+    end if
+    sinv = (0.0d0, 0.0d0)
+    do i=1,num_wann
+      do j=1,num_wann
+        do k=1,num_wann
+          sinv(i,j) = sinv(i,j) + eigvec(i,k) * (1.0d0 / sqrt(eval(k))) * conjg(eigvec(j,k))
+        end do
+      end do
+    end do
+    do axis=1,3
+      tmp(1:num_wann,1:num_wann) = matmul(aa_direct(axis,1:num_wann,1:num_wann), sinv)
+      aa_direct(axis,1:num_wann,1:num_wann) = matmul(conjg(transpose(sinv)), tmp)
+    end do
+    write(*,'(1x,a,2(a,es12.5))') "[DC-LCFO-W90-IMPORT] buffer position overlap normalized:", &
+      " min_eval=", min_eval, " max_eval=", max_eval
+    deallocate(smat, eigvec, sinv, tmp, eval)
+    ok = .true.
+  end subroutine normalize_wannier_position_by_overlap_import
+
+  subroutine hermitize_square_matrix_import(n, amat)
+    implicit none
+    integer, intent(in) :: n
+    complex(8), intent(inout) :: amat(n,n)
+    integer :: i, j
+    complex(8) :: zij, zji
+
+    do i=1,n
+      amat(i,i) = cmplx(real(amat(i,i), kind=8), 0.0d0, kind=8)
+      do j=i+1,n
+        zij = amat(i,j)
+        zji = amat(j,i)
+        amat(i,j) = 0.5d0 * (zij + conjg(zji))
+        amat(j,i) = conjg(amat(i,j))
+      end do
+    end do
+  end subroutine hermitize_square_matrix_import
+
+  subroutine build_direct_wannier_phase_position_from_lcfo_import(dc, num_bands, num_wann, &
+      v_matrix, aa_direct, ok)
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: num_bands, num_wann
+    complex(8), intent(in) :: v_matrix(num_bands,num_wann)
+    complex(8), allocatable, intent(out) :: aa_direct(:,:,:)
+    logical, intent(out) :: ok
+    integer :: ifrag, nxyz_domain(3), nspin_file, nstate_frag_file, nstate_tot_file, n_basis_frag
+    integer :: npts, ix, iy, iz, p, axis, idx0
+    real(8), allocatable :: phi_basis(:,:), coef_wf(:,:), psi_state(:,:), phase_arg(:)
+    complex(8), allocatable :: wannier_frag(:,:), weighted(:,:), u_phase(:,:,:), x_axis(:,:)
+    real(8) :: hvol, cell_length(3), hgrid(3), total_length(3), fragment_origin(3), coord_val, gvec
+    logical :: seed_ok, axis_ok
+    complex(8), parameter :: zi = (0.0d0, 1.0d0)
+
+    ok = .false.
+    hvol = dc%system_tot%hvol
+    allocate(aa_direct(3,num_wann,num_wann), u_phase(3,num_wann,num_wann))
+    aa_direct = (0.0d0, 0.0d0)
+    u_phase = (0.0d0, 0.0d0)
+    do axis=1,3
+      total_length(axis) = dc%lg_tot%coordinate(dc%lg_tot%num(axis),axis) &
+        + (dc%lg_tot%coordinate(2,axis) - dc%lg_tot%coordinate(1,axis))
+      if(total_length(axis) <= 0.0d0) return
+    end do
+
+    do ifrag=1,dc%n_frag
+      call read_fragment_lcfo_seed_for_wannier_import(dc, ifrag, num_bands, &
+        nxyz_domain, nspin_file, nstate_frag_file, nstate_tot_file, n_basis_frag, &
+        phi_basis, coef_wf, seed_ok)
+      if(.not. seed_ok) then
+        if(allocated(phi_basis)) deallocate(phi_basis)
+        if(allocated(coef_wf)) deallocate(coef_wf)
+        if(allocated(aa_direct)) deallocate(aa_direct)
+        if(allocated(u_phase)) deallocate(u_phase)
+        return
+      end if
+
+      npts = product(nxyz_domain)
+      call fragment_cell_lengths_import(dc, ifrag, cell_length)
+      hgrid(1:3) = cell_length(1:3) / dble(nxyz_domain(1:3))
+      do axis=1,3
+        idx0 = dc%ixyz_frag(axis,ifrag)
+        fragment_origin(axis) = dc%lg_tot%coordinate(idx0,axis)
+      end do
+
+      allocate(psi_state(npts,num_bands), wannier_frag(npts,num_wann), weighted(npts,num_wann), &
+        phase_arg(npts))
+      psi_state = matmul(phi_basis(1:npts,1:n_basis_frag), coef_wf(1:n_basis_frag,1:num_bands))
+      wannier_frag = matmul(cmplx(psi_state(1:npts,1:num_bands), 0.0d0, kind=8), &
+        v_matrix(1:num_bands,1:num_wann))
+
+      do axis=1,3
+        gvec = 2.0d0 * acos(-1.0d0) / total_length(axis)
+        p = 0
+        do iz=1,nxyz_domain(3)
+          do iy=1,nxyz_domain(2)
+            do ix=1,nxyz_domain(1)
+              p = p + 1
+              select case(axis)
+              case(1)
+                coord_val = fragment_origin(axis) + dble(ix - 1) * hgrid(axis)
+              case(2)
+                coord_val = fragment_origin(axis) + dble(iy - 1) * hgrid(axis)
+              case default
+                coord_val = fragment_origin(axis) + dble(iz - 1) * hgrid(axis)
+              end select
+              phase_arg(p) = gvec * coord_val
+            end do
+          end do
+        end do
+        do p=1,npts
+          weighted(p,1:num_wann) = hvol * exp(zi * phase_arg(p)) * wannier_frag(p,1:num_wann)
+        end do
+        u_phase(axis,1:num_wann,1:num_wann) = u_phase(axis,1:num_wann,1:num_wann) + &
+          matmul(conjg(transpose(wannier_frag(1:npts,1:num_wann))), weighted(1:npts,1:num_wann))
+      end do
+
+      deallocate(phi_basis, coef_wf, psi_state, wannier_frag, weighted, phase_arg)
+    end do
+
+    allocate(x_axis(num_wann,num_wann))
+    do axis=1,3
+      call phase_overlap_to_position_matrix(num_wann, total_length(axis), &
+        u_phase(axis,1:num_wann,1:num_wann), x_axis, axis_ok)
+      if(.not. axis_ok) then
+        deallocate(x_axis)
+        if(allocated(aa_direct)) deallocate(aa_direct)
+        if(allocated(u_phase)) deallocate(u_phase)
+        return
+      end if
+      aa_direct(axis,1:num_wann,1:num_wann) = x_axis(1:num_wann,1:num_wann)
+    end do
+    deallocate(x_axis, u_phase)
+    call hermitize_wannier_position_matrix(num_wann, aa_direct)
+    ok = .true.
+    write(*,'(1x,a,i0,a,i0)') "[DC-LCFO-W90-IMPORT] direct AMN phase-log position built: bands=", &
+      num_bands, " wann=", num_wann
+  end subroutine build_direct_wannier_phase_position_from_lcfo_import
+
+  subroutine phase_overlap_to_position_matrix(num_wann, length_axis, u_phase, x_mat, ok)
+    use eigen_subdiag_sub, only: eigen_zheev
+    implicit none
+    integer, intent(in) :: num_wann
+    real(8), intent(in) :: length_axis
+    complex(8), intent(in) :: u_phase(num_wann,num_wann)
+    complex(8), intent(out) :: x_mat(num_wann,num_wann)
+    logical, intent(out) :: ok
+    integer :: iw, jw, k, info, lwork
+    real(8), allocatable :: eval(:), rwork(:), phase(:)
+    complex(8), allocatable :: metric(:,:), eigvec(:,:), invsqrt(:,:), u_polar(:,:), work(:), &
+      wr(:), vl(:,:), vr(:,:), tmp(:,:)
+    complex(8) :: zij, zji, query(1)
+    real(8) :: theta
+    complex(8), parameter :: zi = (0.0d0, 1.0d0)
+    external :: zgeev
+
+    ok = .false.
+    if(length_axis <= 0.0d0) return
+    allocate(metric(num_wann,num_wann), eigvec(num_wann,num_wann), invsqrt(num_wann,num_wann), &
+      u_polar(num_wann,num_wann), eval(num_wann))
+    metric = matmul(conjg(transpose(u_phase)), u_phase)
+    do iw=1,num_wann
+      metric(iw,iw) = cmplx(real(metric(iw,iw), kind=8), 0.0d0, kind=8)
+      do jw=iw+1,num_wann
+        zij = metric(iw,jw)
+        zji = metric(jw,iw)
+        metric(iw,jw) = 0.5d0 * (zij + conjg(zji))
+        metric(jw,iw) = conjg(metric(iw,jw))
+      end do
+    end do
+    call eigen_zheev(metric, eval, eigvec)
+    invsqrt = (0.0d0, 0.0d0)
+    do jw=1,num_wann
+      do iw=1,num_wann
+        do k=1,num_wann
+          if(eval(k) > 1.0d-12) invsqrt(iw,jw) = invsqrt(iw,jw) + &
+            eigvec(iw,k) * (1.0d0 / sqrt(eval(k))) * conjg(eigvec(jw,k))
+        end do
+      end do
+    end do
+    u_polar = matmul(u_phase, invsqrt)
+
+    allocate(wr(num_wann), vl(1,1), vr(num_wann,num_wann), rwork(2*num_wann), phase(num_wann))
+    lwork = -1
+    call zgeev('N','V',num_wann,u_polar,num_wann,wr,vl,1,vr,num_wann,query,lwork,rwork,info)
+    if(info /= 0) then
+      deallocate(metric, eigvec, invsqrt, u_polar, eval, wr, vl, vr, rwork, phase)
+      return
+    end if
+    lwork = max(1, int(real(query(1), kind=8)))
+    allocate(work(lwork))
+    call zgeev('N','V',num_wann,u_polar,num_wann,wr,vl,1,vr,num_wann,work,lwork,rwork,info)
+    if(info /= 0) then
+      deallocate(metric, eigvec, invsqrt, u_polar, eval, wr, vl, vr, rwork, phase, work)
+      return
+    end if
+
+    do k=1,num_wann
+      theta = atan2(aimag(wr(k)), real(wr(k), kind=8))
+      phase(k) = theta * length_axis / (2.0d0 * acos(-1.0d0))
+    end do
+    allocate(tmp(num_wann,num_wann))
+    tmp = (0.0d0, 0.0d0)
+    do k=1,num_wann
+      tmp(k,1:num_wann) = cmplx(phase(k), 0.0d0, kind=8) * conjg(vr(1:num_wann,k))
+    end do
+    x_mat = matmul(vr, tmp)
+    do iw=1,num_wann
+      x_mat(iw,iw) = cmplx(real(x_mat(iw,iw), kind=8), 0.0d0, kind=8)
+      do jw=iw+1,num_wann
+        zij = x_mat(iw,jw)
+        zji = x_mat(jw,iw)
+        x_mat(iw,jw) = 0.5d0 * (zij + conjg(zji))
+        x_mat(jw,iw) = conjg(x_mat(iw,jw))
+      end do
+    end do
+    ok = .true.
+    deallocate(metric, eigvec, invsqrt, u_polar, eval, wr, vl, vr, rwork, phase, work, tmp)
+  end subroutine phase_overlap_to_position_matrix
+
+  subroutine diagnose_wannier_transform_subspace_overlap(num_bands, num_wann, v_from, v_to, label)
+    use eigen_subdiag_sub, only: eigen_zheev
+    implicit none
+    integer, intent(in) :: num_bands, num_wann
+    complex(8), intent(in) :: v_from(num_bands,num_wann), v_to(num_bands,num_wann)
+    character(*), intent(in) :: label
+    integer :: iw, jw, ib
+    complex(8) :: zij, zji
+    complex(8), allocatable :: overlap(:,:), metric(:,:), eigvec(:,:)
+    real(8), allocatable :: eval(:)
+    real(8) :: sval_min, sval_max, trace_loss
+
+    allocate(overlap(num_wann,num_wann), metric(num_wann,num_wann), eigvec(num_wann,num_wann), eval(num_wann))
+    overlap = (0.0d0, 0.0d0)
+    do jw=1,num_wann
+      do iw=1,num_wann
+        do ib=1,num_bands
+          overlap(iw,jw) = overlap(iw,jw) + conjg(v_from(ib,iw)) * v_to(ib,jw)
+        end do
+      end do
+    end do
+    metric = matmul(conjg(transpose(overlap)), overlap)
+    do iw=1,num_wann
+      metric(iw,iw) = cmplx(real(metric(iw,iw), kind=8), 0.0d0, kind=8)
+      do jw=iw+1,num_wann
+        zij = metric(iw,jw)
+        zji = metric(jw,iw)
+        metric(iw,jw) = 0.5d0 * (zij + conjg(zji))
+        metric(jw,iw) = conjg(metric(iw,jw))
+      end do
+    end do
+    call eigen_zheev(metric, eval, eigvec)
+    sval_min = sqrt(max(0.0d0, minval(eval(1:num_wann))))
+    sval_max = sqrt(max(0.0d0, maxval(eval(1:num_wann))))
+    trace_loss = 1.0d0 - sum(eval(1:num_wann)) / dble(max(1,num_wann))
+    write(*,'(1x,a,a,3(a,1pe13.5))') "[DC-LCFO-W90-SYM] subspace overlap ", trim(label), &
+      " smin=", sval_min, " smax=", sval_max, " trace_loss=", trace_loss
+    deallocate(overlap, metric, eigvec, eval)
+  end subroutine diagnose_wannier_transform_subspace_overlap
 
   subroutine build_wannier_flux_eigen_seed_from_transform(num_bands, num_wann, nstate_available, &
     nspin_in, v_matrix, esp_in, seed_wannier_to_eigen, eval_seed, nstate_seed)
@@ -337,12 +954,12 @@ contains
     nstate_tot_file = 0
     nspin_file = 0
     if(dc%id_tot == 0) then
-      filename = trim(import_run_root_dir())//'data_dcdft/fragments/000001/'//binfile_wf
+      filename = wannier_wavefunction_seed_filename_import(1)
       iunit = get_filehandle()
       open(iunit,file=filename,form='unformatted',access='stream',status='old',iostat=io)
       if(io /= 0) then
         write(*,'(1x,2a)') "[DC-LCFO-W90-IMPORT] failed to open wavefunction seed: ", trim(filename)
-        stop "DC-LCFO Wannier import-only: missing wavefunctions.bin"
+        stop "DC-LCFO Wannier import-only: missing wavefunction seed"
       end if
       read(iunit) n_frag_file, nspin_file, nstate_frag_file, nstate_tot_file
       allocate(n_mat_tmp(nspin_file), n_basis_tmp(n_frag_file,nspin_file), &
@@ -365,6 +982,22 @@ contains
     if(nstate_tot_file > 0 .and. nspin_file > 0) &
       call comm_bcast(esp_file, dc%icomm_tot)
   end subroutine read_dc_lcfo_esp_from_wavefunctions_import
+
+  character(256) function wannier_wavefunction_seed_filename_import(ifrag) result(filename)
+    implicit none
+    integer, intent(in) :: ifrag
+    character(256) :: candidate
+    logical :: exists
+
+    write(candidate, '(a,a,i6.6,a,a)') trim(import_run_root_dir()), 'data_dcdft/fragments/', ifrag, '/', &
+      binfile_wf_wannier_seed
+    inquire(file=candidate, exist=exists)
+    if(exists) then
+      filename = candidate
+    else
+      write(filename, '(a,a,i6.6,a,a)') trim(import_run_root_dir()), 'data_dcdft/fragments/', ifrag, '/', binfile_wf
+    end if
+  end function wannier_wavefunction_seed_filename_import
 
   subroutine read_wannier90_checkpoint_transform_import(dc, num_bands_chk, num_wann_chk, &
       v_matrix, center_aa, spread_aa2)
@@ -457,7 +1090,7 @@ contains
       v_direct, ok, block_by_owner)
     use eigen_subdiag_sub, only: eigen_zheev
     use filesystem, only: get_filehandle
-    use salmon_global, only: sysname
+    use salmon_global, only: sysname, lambda_cut
     use structures, only: s_dcdft
     implicit none
     type(s_dcdft), intent(in) :: dc
@@ -468,7 +1101,7 @@ contains
     logical, intent(in), optional :: block_by_owner
     character(256) :: filename, header
     integer :: iunit, io, num_bands_file, num_kpts_file, num_wann_file
-    integer :: irec, iband, iwann, ikpt, i, j, k, ifrag, nowned, iloc
+    integer :: irec, iband, iwann, ikpt, i, j, k, ifrag, nowned, iloc, nreject
     real(8) :: re_val, im_val, min_eval, max_eval, min_eval_all, max_eval_all
     integer, allocatable :: widx(:)
     real(8), allocatable :: eval(:)
@@ -512,6 +1145,7 @@ contains
             v_direct = (0.0d0,0.0d0)
             min_eval_all = huge(1.0d0)
             max_eval_all = -huge(1.0d0)
+            nreject = 0
             if(use_block_by_owner) then
               do ifrag=1,dc%n_frag
                 nowned = count(owner_frag(1:num_wann_expected) == ifrag)
@@ -531,11 +1165,12 @@ contains
                 max_eval = maxval(eval)
                 min_eval_all = min(min_eval_all, min_eval)
                 max_eval_all = max(max_eval_all, max_eval)
+                nreject = nreject + count(eval(1:nowned) <= lambda_cut)
                 sinv = (0.0d0,0.0d0)
                 do i=1,nowned
                   do j=1,nowned
                     do k=1,nowned
-                      if(eval(k) > 1.0d-12) then
+                      if(eval(k) > lambda_cut) then
                         sinv(i,j) = sinv(i,j) + eigvec(i,k) * (1.0d0 / sqrt(eval(k))) * conjg(eigvec(j,k))
                       end if
                     end do
@@ -558,11 +1193,12 @@ contains
               max_eval = maxval(eval)
               min_eval_all = min(min_eval_all, min_eval)
               max_eval_all = max(max_eval_all, max_eval)
+              nreject = nreject + count(eval(1:nowned) <= lambda_cut)
               sinv = (0.0d0,0.0d0)
               do i=1,nowned
                 do j=1,nowned
                   do k=1,nowned
-                    if(eval(k) > 1.0d-12) then
+                    if(eval(k) > lambda_cut) then
                       sinv(i,j) = sinv(i,j) + eigvec(i,k) * (1.0d0 / sqrt(eval(k))) * conjg(eigvec(j,k))
                     end if
                   end do
@@ -571,6 +1207,13 @@ contains
               ablock = matmul(ablock, sinv)
               v_direct(1:num_bands_expected,1:nowned) = ablock(1:num_bands_expected,1:nowned)
               deallocate(ablock, gram, eigvec, sinv, eval)
+            end if
+            if(nreject > 0) then
+              write(*,'(1x,a,i0,3(a,es12.5))') &
+                "[DC-LCFO-W90-IMPORT] direct AMN projection matrix is rank deficient:", &
+                nreject, " min_proj_s=", min_eval_all, " max_proj_s=", max_eval_all, &
+                " lambda_cut=", lambda_cut
+              stop "DC-LCFO Wannier import: direct AMN projection matrix is rank deficient"
             end if
             ok = .true.
             if(use_block_by_owner) then
@@ -714,6 +1357,7 @@ contains
     call find_bond_center_cutoff_import(dc, min_dist, cutoff)
     nbond = count_bond_centers_with_cutoff_import(dc, cutoff)
     if(nbond <= 0) stop "DC-LCFO Wannier import: no bond-center projection candidates were generated."
+    if(nproj > nbond) stop "DC-LCFO Wannier import: target_wann exceeds unique bond-center candidates"
     call total_cell_lengths_import(dc, length_axis)
 
     allocate(center_bohr(3,nproj))
@@ -1858,11 +2502,19 @@ contains
         end do
       end if
 
-      write(*,'(1x,a,i0,a,3(a,es12.5),a,i0)') &
-        "[DC-LCFO-W90-SYM-GLOBAL-OP] origin_frag=", symops(isym)%owner_frag, &
-        " label=inversion", " z_odd_res=", sqrt(z_res2 / max(z_norm2, 1.0d-300)), &
-        " h_even_res=", sqrt(h_res2 / max(h_norm2, 1.0d-300)), &
-        " rho_even_res=", sqrt(rho_res2 / max(rho_norm2, 1.0d-300)), " nocc=", nocc
+      if(position_available) then
+        write(*,'(1x,a,i0,a,3(a,es12.5),a,i0)') &
+          "[DC-LCFO-W90-SYM-GLOBAL-OP] origin_frag=", symops(isym)%owner_frag, &
+          " label=inversion", " z_odd_res=", sqrt(z_res2 / max(z_norm2, 1.0d-300)), &
+          " h_even_res=", sqrt(h_res2 / max(h_norm2, 1.0d-300)), &
+          " rho_even_res=", sqrt(rho_res2 / max(rho_norm2, 1.0d-300)), " nocc=", nocc
+      else
+        write(*,'(1x,a,i0,2a,2(a,es12.5),a,i0)') &
+          "[DC-LCFO-W90-SYM-GLOBAL-OP] origin_frag=", symops(isym)%owner_frag, &
+          " label=inversion", " z_odd_available=F", &
+          " h_even_res=", sqrt(h_res2 / max(h_norm2, 1.0d-300)), &
+          " rho_even_res=", sqrt(rho_res2 / max(rho_norm2, 1.0d-300)), " nocc=", nocc
+      end if
     end do
 
     deallocate(perm, hmat, rhomat, zmat)
@@ -2090,28 +2742,267 @@ contains
 
   subroutine read_fragment_lcfo_seed_for_wannier_import(dc, ifrag, num_bands, &
       nxyz_domain, nspin_file, nstate_frag_file, nstate_tot_file, n_basis_frag, &
-      phi_basis, coef_wf, ok)
+      phi_basis, coef_wf, ok, strict_current_run, failure_message)
     use filesystem, only: get_filehandle
     use structures, only: s_dcdft
+    use, intrinsic :: iso_fortran_env, only: int64
     implicit none
     type(s_dcdft), intent(in) :: dc
     integer, intent(in) :: ifrag, num_bands
     integer, intent(out) :: nxyz_domain(3), nspin_file, nstate_frag_file, nstate_tot_file, n_basis_frag
     real(8), allocatable, intent(out) :: phi_basis(:,:), coef_wf(:,:)
     logical, intent(out) :: ok
-    integer :: iunit, io, n_frag_file, ispin, ibasis, ix, iy, iz, p
+    logical, intent(in), optional :: strict_current_run
+    character(*), intent(out), optional :: failure_message
+    integer :: iunit, io, allocation_status, n_frag_file, ispin, ibasis, ix, iy, iz, p
+    integer :: provenance_magic,provenance_version,provenance_fragments,provenance_fragment
+    integer :: provenance_spins,provenance_fragment_states,provenance_total_states
     integer, allocatable :: n_mat_tmp(:), n_basis_tmp(:,:), index_basis_tmp(:,:,:), n_basis_core(:)
+    integer, allocatable :: provenance_basis(:)
     real(8), allocatable :: coef_all(:,:,:), f_basis(:,:,:,:,:), esp_tmp(:,:)
-    character(256) :: filename
+    integer(int64) :: point_count64,basis_count64,flattened_count64
+    character(64) :: provenance_token
+    character(256) :: filename,provenance_filename
+    character(512) :: message
+    logical :: strict_mode,metadata_ok
 
     ok = .false.
+    strict_mode=.false.
+    if(present(strict_current_run)) strict_mode=strict_current_run
+    if(present(failure_message)) failure_message=''
+    message=''
     nxyz_domain = 0
     nspin_file = 0
     nstate_frag_file = 0
     nstate_tot_file = 0
     n_basis_frag = 0
 
-    write(filename, '(a,a,i6.6,a,a)') trim(import_run_root_dir()), 'data_dcdft/fragments/', ifrag, '/', binfile_wf
+    if(strict_mode) then
+      write(filename,'(a,a,i6.6,a,a)') trim(import_run_root_dir()), &
+        'data_dcdft/fragments/',ifrag,'/',binfile_wf_wannier_seed
+      write(provenance_filename,'(a,a,i6.6,a)') trim(import_run_root_dir()), &
+        'data_dcdft/fragments/',ifrag,'/wavefunctions_wannier_seed.provenance'
+      iunit=get_filehandle()
+      open(iunit,file=provenance_filename,status='old',action='read',iostat=io)
+      if(io /= 0) then
+        message='missing current-run SAWF seed provenance sidecar'
+        goto 900
+      end if
+      read(iunit,*,iostat=io) provenance_magic,provenance_version
+      if(io == 0) read(iunit,'(a)',iostat=io) provenance_token
+      if(io == 0) read(iunit,*,iostat=io) provenance_fragments,provenance_fragment, &
+        provenance_spins,provenance_fragment_states,provenance_total_states
+      if(io /= 0) then
+        close(iunit)
+        message='malformed current-run SAWF seed provenance sidecar'
+        goto 900
+      end if
+      if(provenance_spins <= 0) then
+        close(iunit)
+        message='invalid spin count in SAWF seed provenance sidecar'
+        goto 900
+      end if
+      allocate(provenance_basis(provenance_spins),stat=allocation_status)
+      if(allocation_status /= 0) then
+        close(iunit)
+        message='SAWF provenance basis allocation failed'
+        goto 900
+      end if
+      read(iunit,*,iostat=io) provenance_basis
+      close(iunit)
+      if(io /= 0 .or. provenance_magic /= sawf_seed_provenance_magic .or. &
+          provenance_version /= sawf_seed_provenance_version .or. &
+          trim(provenance_token) /= trim(current_sawf_seed_token) .or. &
+          provenance_fragments /= dc%n_frag .or. provenance_fragment /= ifrag) then
+        message='stale or mixed current-run SAWF seed provenance'
+        goto 900
+      end if
+    else
+      filename = wannier_wavefunction_seed_filename_import(ifrag)
+    end if
+    iunit = get_filehandle()
+    open(iunit,file=filename,form='unformatted',access='stream',status='old',iostat=io)
+    if(io /= 0) then
+      message='failed to open LCFO wavefunction seed'
+      goto 900
+    end if
+    read(iunit,iostat=io) n_frag_file,nspin_file,nstate_frag_file,nstate_tot_file
+    if(io /= 0) then
+      close(iunit)
+      message='failed to read LCFO wavefunction seed header'
+      goto 900
+    end if
+    call validate_sawf_seed_header(dc%n_frag,ifrag,num_bands,n_frag_file,nspin_file, &
+      nstate_frag_file,nstate_tot_file,metadata_ok,message)
+    if(.not.metadata_ok) then
+      close(iunit)
+      goto 900
+    end if
+    allocate(n_mat_tmp(nspin_file), n_basis_tmp(n_frag_file,nspin_file), &
+      index_basis_tmp(nstate_frag_file,n_frag_file,nspin_file), &
+      coef_all(nstate_frag_file,nstate_tot_file,nspin_file),esp_tmp(nstate_tot_file,nspin_file), &
+      stat=allocation_status)
+    if(allocation_status /= 0) then
+      close(iunit)
+      message='LCFO wavefunction seed metadata allocation failed'
+      goto 900
+    end if
+    read(iunit,iostat=io) n_mat_tmp
+    if(io == 0) read(iunit,iostat=io) n_basis_tmp
+    if(io == 0) read(iunit,iostat=io) index_basis_tmp
+    if(io == 0) read(iunit,iostat=io) coef_all
+    if(io == 0) read(iunit,iostat=io) esp_tmp
+    close(iunit)
+    if(io /= 0) then
+      message='truncated LCFO wavefunction seed metadata or coefficients'
+      goto 900
+    end if
+    call validate_sawf_seed_basis_metadata(nstate_frag_file,nstate_tot_file,n_mat_tmp, &
+      n_basis_tmp,metadata_ok,message,index_basis_tmp)
+    if(.not.metadata_ok) goto 900
+    n_basis_frag = n_basis_tmp(ifrag,1)
+    if(n_basis_frag < 1) then
+      message='LCFO wavefunction seed has no basis for the requested fragment'
+      goto 900
+    end if
+    if(strict_mode) then
+      if(provenance_spins /= nspin_file .or. provenance_fragment_states /= nstate_frag_file .or. &
+          provenance_total_states /= nstate_tot_file .or. any(provenance_basis /= n_basis_tmp(ifrag,:))) then
+        message='current-run SAWF provenance and wavefunction metadata disagree'
+        goto 900
+      end if
+    end if
+    allocate(coef_wf(nstate_frag_file,num_bands),stat=allocation_status)
+    if(allocation_status /= 0) then
+      message='LCFO wavefunction coefficient allocation failed'
+      goto 900
+    end if
+    coef_wf(1:nstate_frag_file,1:num_bands) = coef_all(1:nstate_frag_file,1:num_bands,1)
+
+    write(filename, '(a,a,i6.6,a,a)') trim(import_run_root_dir()), 'data_dcdft/fragments/', ifrag, '/', binfile_bf
+    iunit = get_filehandle()
+    open(iunit,file=filename,form='unformatted',access='stream',status='old',iostat=io)
+    if(io /= 0) then
+      message='failed to open LCFO fragment basis file'
+      goto 900
+    end if
+    read(iunit,iostat=io) nxyz_domain(1:3),ispin,ibasis
+    if(io /= 0 .or. any(nxyz_domain <= 0)) then
+      close(iunit)
+      message='invalid LCFO fragment basis header'
+      goto 900
+    end if
+    if(ispin /= nspin_file .or. ibasis /= nstate_frag_file) then
+      close(iunit)
+      message='LCFO basis and wavefunction seed dimensions disagree'
+      goto 900
+    end if
+    point_count64=1_int64
+    do ix=1,3
+      if(point_count64 > huge(0_int64)/int(nxyz_domain(ix),int64)) then
+        close(iunit); message='LCFO basis grid size overflows int64'; goto 900
+      end if
+      point_count64=point_count64*int(nxyz_domain(ix),int64)
+    end do
+    if(point_count64 > int(huge(0),int64)) then
+      close(iunit); message='LCFO basis grid exceeds default integer indexing'; goto 900
+    end if
+    if(point_count64 > huge(0_int64)/int(nspin_file,int64)) then
+      close(iunit); message='LCFO basis grid-spin size overflows int64'; goto 900
+    end if
+    basis_count64=point_count64*int(nspin_file,int64)
+    if(basis_count64 > huge(0_int64)/int(nstate_frag_file,int64)) then
+      close(iunit); message='LCFO basis allocation size overflows int64'; goto 900
+    end if
+    basis_count64=basis_count64*int(nstate_frag_file,int64)
+    if(point_count64 > huge(0_int64)/int(nstate_frag_file,int64)) then
+      close(iunit); message='LCFO flattened basis size overflows int64'; goto 900
+    end if
+    flattened_count64=point_count64*int(nstate_frag_file,int64)
+    if(basis_count64 > int(huge(0),int64) .or. flattened_count64 > int(huge(0),int64)) then
+      close(iunit); message='LCFO basis allocation exceeds default integer indexing'; goto 900
+    end if
+    allocate(n_basis_core(nspin_file),stat=allocation_status)
+    if(allocation_status == 0) allocate(f_basis(nxyz_domain(1),nxyz_domain(2),nxyz_domain(3), &
+      nspin_file,nstate_frag_file),stat=allocation_status)
+    if(allocation_status /= 0) then
+      close(iunit); message='LCFO fragment basis allocation failed'; goto 900
+    end if
+    read(iunit,iostat=io) n_basis_core
+    if(io == 0) read(iunit,iostat=io) f_basis
+    close(iunit)
+    if(io /= 0) then
+      message='truncated LCFO fragment basis file'
+      goto 900
+    end if
+    if(any(n_basis_core /= n_basis_tmp(ifrag,:))) then
+      message='LCFO basis counts disagree with wavefunction seed metadata'
+      goto 900
+    end if
+
+    allocate(phi_basis(int(point_count64),nstate_frag_file),stat=allocation_status)
+    if(allocation_status /= 0) then
+      message='LCFO flattened fragment basis allocation failed'
+      goto 900
+    end if
+    p = 0
+    do iz=1,nxyz_domain(3)
+      do iy=1,nxyz_domain(2)
+        do ix=1,nxyz_domain(1)
+          p = p + 1
+          phi_basis(p,1:nstate_frag_file) = f_basis(ix,iy,iz,1,1:nstate_frag_file)
+        end do
+      end do
+    end do
+    deallocate(n_mat_tmp,n_basis_tmp,index_basis_tmp,coef_all,esp_tmp,n_basis_core,f_basis)
+    if(allocated(provenance_basis)) deallocate(provenance_basis)
+    ok = .true.
+    if(strict_mode) write(*,'(1x,a,i0,2a)') '[DC-LCFO-SAWF-DMN] strict current-run seed fragment=', &
+      ifrag,' token=',trim(current_sawf_seed_token)
+    return
+
+900 continue
+    if(allocated(n_mat_tmp)) deallocate(n_mat_tmp)
+    if(allocated(n_basis_tmp)) deallocate(n_basis_tmp)
+    if(allocated(index_basis_tmp)) deallocate(index_basis_tmp)
+    if(allocated(coef_all)) deallocate(coef_all)
+    if(allocated(esp_tmp)) deallocate(esp_tmp)
+    if(allocated(n_basis_core)) deallocate(n_basis_core)
+    if(allocated(f_basis)) deallocate(f_basis)
+    if(allocated(provenance_basis)) deallocate(provenance_basis)
+    if(allocated(phi_basis)) deallocate(phi_basis)
+    if(allocated(coef_wf)) deallocate(coef_wf)
+    if(present(failure_message)) failure_message=trim(message)
+  end subroutine read_fragment_lcfo_seed_for_wannier_import
+
+  subroutine read_fragment_lcfo_buffer_seed_for_wannier_import(dc, ifrag, num_bands, &
+      nxyz_domain, nxyz_buffer, nxyz_box, nspin_file, nstate_frag_file, nstate_tot_file, n_basis_frag, &
+      phi_basis, coef_wf, ok)
+    use filesystem, only: get_filehandle
+    use structures, only: s_dcdft
+    implicit none
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: ifrag, num_bands
+    integer, intent(out) :: nxyz_domain(3), nxyz_buffer(3), nxyz_box(3)
+    integer, intent(out) :: nspin_file, nstate_frag_file, nstate_tot_file, n_basis_frag
+    real(8), allocatable, intent(out) :: phi_basis(:,:), coef_wf(:,:)
+    logical, intent(out) :: ok
+    integer :: iunit, io, n_frag_file, ispin_read, ibasis_read, ix, iy, iz, p
+    integer :: magic_file, version_file
+    integer, allocatable :: n_mat_tmp(:), n_basis_tmp(:,:), index_basis_tmp(:,:,:), n_basis_file(:)
+    real(8), allocatable :: coef_all(:,:,:), esp_tmp(:,:), phi_tmp(:,:,:)
+    character(256) :: filename
+
+    ok = .false.
+    nxyz_domain = 0
+    nxyz_buffer = 0
+    nxyz_box = 0
+    nspin_file = 0
+    nstate_frag_file = 0
+    nstate_tot_file = 0
+    n_basis_frag = 0
+
+    filename = wannier_wavefunction_seed_filename_import(ifrag)
     iunit = get_filehandle()
     open(iunit,file=filename,form='unformatted',access='stream',status='old',iostat=io)
     if(io /= 0) return
@@ -2142,42 +3033,64 @@ contains
     coef_wf(1:nstate_frag_file,1:num_bands) = coef_all(1:nstate_frag_file,1:num_bands,1)
     deallocate(n_mat_tmp, n_basis_tmp, index_basis_tmp, coef_all, esp_tmp)
 
-    write(filename, '(a,a,i6.6,a,a)') trim(import_run_root_dir()), 'data_dcdft/fragments/', ifrag, '/', binfile_bf
+    write(filename, '(a,a,i6.6,a,a)') trim(import_run_root_dir()), 'data_dcdft/fragments/', ifrag, '/', binfile_bfb
     iunit = get_filehandle()
     open(iunit,file=filename,form='unformatted',access='stream',status='old',iostat=io)
     if(io /= 0) then
       deallocate(coef_wf)
       return
     end if
-    read(iunit) nxyz_domain(1:3), ispin, ibasis
-    if(ispin /= nspin_file .or. ibasis /= nstate_frag_file) then
+    read(iunit) magic_file, version_file
+    if(magic_file /= basis_buffer_magic .or. version_file /= basis_buffer_version) then
       close(iunit)
       deallocate(coef_wf)
       return
     end if
-    allocate(n_basis_core(nspin_file))
-    read(iunit) n_basis_core(1:nspin_file)
-    allocate(f_basis(nxyz_domain(1),nxyz_domain(2),nxyz_domain(3),nspin_file,nstate_frag_file))
-    read(iunit) f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),1:nspin_file,1:nstate_frag_file)
-    close(iunit)
-    if(n_basis_core(1) /= n_basis_frag) then
-      deallocate(n_basis_core, f_basis, coef_wf)
+    read(iunit) nxyz_domain(1:3), nxyz_buffer(1:3), nspin_file, nstate_frag_file
+    if(any(nxyz_domain(1:3) <= 0) .or. any(nxyz_buffer(1:3) < 0)) then
+      close(iunit)
+      deallocate(coef_wf)
+      return
+    end if
+    nxyz_box(1:3) = nxyz_domain(1:3) + 2 * nxyz_buffer(1:3)
+    allocate(n_basis_file(nspin_file))
+    read(iunit) n_basis_file(1:nspin_file)
+    if(n_basis_file(1) /= n_basis_frag) then
+      close(iunit)
+      deallocate(n_basis_file, coef_wf)
       return
     end if
 
-    allocate(phi_basis(product(nxyz_domain),nstate_frag_file))
-    p = 0
-    do iz=1,nxyz_domain(3)
-      do iy=1,nxyz_domain(2)
-        do ix=1,nxyz_domain(1)
-          p = p + 1
-          phi_basis(p,1:nstate_frag_file) = f_basis(ix,iy,iz,1,1:nstate_frag_file)
-        end do
+    allocate(phi_basis(product(nxyz_box),nstate_frag_file))
+    allocate(phi_tmp(nxyz_box(1),nxyz_box(2),nxyz_box(3)))
+    phi_basis = 0.0d0
+    do ispin_read=1,nspin_file
+      do ibasis_read=1,nstate_frag_file
+        read(iunit, iostat=io) phi_tmp(1:nxyz_box(1),1:nxyz_box(2),1:nxyz_box(3))
+        if(io /= 0) exit
+        if(ispin_read == 1) then
+          p = 0
+          do iz=1,nxyz_box(3)
+            do iy=1,nxyz_box(2)
+              do ix=1,nxyz_box(1)
+                p = p + 1
+                phi_basis(p,ibasis_read) = phi_tmp(ix,iy,iz)
+              end do
+            end do
+          end do
+        end if
       end do
+      if(io /= 0) exit
     end do
-    deallocate(n_basis_core, f_basis)
+    close(iunit)
+    if(io /= 0) then
+      deallocate(n_basis_file, phi_tmp, phi_basis, coef_wf)
+      return
+    end if
+
+    deallocate(n_basis_file, phi_tmp)
     ok = .true.
-  end subroutine read_fragment_lcfo_seed_for_wannier_import
+  end subroutine read_fragment_lcfo_buffer_seed_for_wannier_import
 
   subroutine build_fragment_symmetry_grid_map(dc, ifrag, nxyz_domain, symop, pmap, ok, max_residual)
     use structures, only: s_dcdft
@@ -2379,15 +3292,20 @@ contains
     real(8) :: hvol
     real(8),allocatable :: f_basis(:,:,:,:,:),hf(:,:,:,:,:),wrk_array(:,:,:,:,:) &
     & ,esp_tot(:,:),mat_H_local(:,:,:),mat_H_volume_local(:,:,:),mat_H_volume_weak_local(:,:,:) &
+    & ,mat_H_weak_kinetic(:,:,:),mat_H_weak_potential(:,:,:),mat_H_weak_nonlocal(:,:,:) &
     & ,mat_H_surface_self(:,:,:) &
     & ,mat_V_local(:,:,:,:),coef_wf(:,:,:),basis_transform(:,:,:)
+    real(8),allocatable :: sawf_explicit_buffer(:,:,:,:,:)
+    logical :: sawf_explicit_basis_active
     !
     integer :: i,j,n,ix,iy,iz,io,jo,ispin,ifrag,jfrag,i_halo
 
     if(dc%id_tot==0) write(*,*) "start DC-LCFO-Flux"
     hvol = system%hvol
     nspin = system%nspin
+    sawf_explicit_basis_active=.false.
     call init_lcfo
+    call initialize_sawf_seed_provenance()
     call calc_basis
     call hpsi_basis
     if(dc%id_tot==0) write(*,*) "basis functions operation: done"
@@ -2412,10 +3330,14 @@ contains
     if(allocated(coef_wf)) deallocate(coef_wf)
     if(allocated(f_basis)) deallocate(f_basis)
     if(allocated(basis_transform)) deallocate(basis_transform)
+    if(allocated(sawf_explicit_buffer)) deallocate(sawf_explicit_buffer)
     if(allocated(esp_tot)) deallocate(esp_tot)
     if(allocated(mat_H_local)) deallocate(mat_H_local)
     if(allocated(mat_H_volume_local)) deallocate(mat_H_volume_local)
     if(allocated(mat_H_volume_weak_local)) deallocate(mat_H_volume_weak_local)
+    if(allocated(mat_H_weak_kinetic)) deallocate(mat_H_weak_kinetic)
+    if(allocated(mat_H_weak_potential)) deallocate(mat_H_weak_potential)
+    if(allocated(mat_H_weak_nonlocal)) deallocate(mat_H_weak_nonlocal)
     if(allocated(mat_H_surface_self)) deallocate(mat_H_surface_self)
       if(allocated(mat_V_local)) deallocate(mat_V_local)
       do i=1,n_halo
@@ -2427,6 +3349,23 @@ contains
     if(dc%id_tot==0) write(*,*) "end DC-LCFO-Flux"
 
   contains
+
+    subroutine initialize_sawf_seed_provenance()
+      use communication, only: comm_bcast
+      use, intrinsic :: iso_fortran_env, only: int64
+      implicit none
+      integer(int64) :: clock_count
+      integer :: values(8)
+
+      current_sawf_seed_token=''
+      if(dc%id_tot == 0) then
+        call system_clock(count=clock_count)
+        call date_and_time(values=values)
+        write(current_sawf_seed_token,'(7(i0,a),i0)') values(1),'-',values(2),'-',values(3),'-', &
+          values(5),'-',values(6),'-',values(7),'-',values(8),'-',clock_count
+      end if
+      call comm_bcast(current_sawf_seed_token,dc%icomm_tot,0)
+    end subroutine initialize_sawf_seed_provenance
 
     subroutine init_lcfo
       use salmon_global, only: num_fragment
@@ -2682,10 +3621,34 @@ contains
     subroutine hpsi_basis
       use hamiltonian, only: hpsi
       implicit none
+      integer :: ibx,iby,ibz,sx,sy,sz,nxyz_box(3)
 
       allocate(hf       (lg%num(1),lg%num(2),lg%num(3),nspin,dc%nstate_frag))
       allocate(wrk_array(lg%num(1),lg%num(2),lg%num(3),nspin,dc%nstate_frag))
 
+      if(sawf_explicit_basis_active) then
+        sttpsi%rwf=0.0d0
+        nxyz_box=dc%nxyz_domain+2*dc%nxyz_buffer
+        do io=info%io_s,info%io_e
+          if(io>n_basis(dc%i_frag,1)) cycle
+          do ispin=1,nspin
+            do ibz=1,nxyz_box(3)
+              sz=dc_buffer_box_to_local_index(ibz,dc%nxyz_domain(3),dc%nxyz_buffer(3))
+              if(sz<lbound(sttpsi%rwf,3) .or. sz>ubound(sttpsi%rwf,3)) cycle
+              do iby=1,nxyz_box(2)
+                sy=dc_buffer_box_to_local_index(iby,dc%nxyz_domain(2),dc%nxyz_buffer(2))
+                if(sy<lbound(sttpsi%rwf,2) .or. sy>ubound(sttpsi%rwf,2)) cycle
+                do ibx=1,nxyz_box(1)
+                  sx=dc_buffer_box_to_local_index(ibx,dc%nxyz_domain(1),dc%nxyz_buffer(1))
+                  if(sx<lbound(sttpsi%rwf,1) .or. sx>ubound(sttpsi%rwf,1)) cycle
+                  sttpsi%rwf(sx,sy,sz,ispin,io,1,1)= &
+                    sawf_explicit_buffer(ibx,iby,ibz,ispin,io)
+                end do
+              end do
+            end do
+          end do
+        end do
+      end if
     ! shpsi <-- H | lambda > (Hamiltonian operation)
       call hpsi(sttpsi,shpsi,info,mg,v_local,system,stencil,srg,ppg)
 
@@ -2788,36 +3751,41 @@ contains
       integer :: l(3), idir
       real(8), parameter :: surface_penalty_factor = 10.0d0
       real(8) :: area_weight, alpha, u_l, v_l, dnu_l, dnv_l, u_r, dnu_r
-      real(8) :: term_sum, term_face, term_vsum, term_vface, pavg
+      real(8) :: term_sum, term_local, term_nonlocal, term_face, term_vsum, term_vface, pavg
       real(8) :: xi_rel(3), term_xisum(3), term_xiface
       real(8), allocatable :: trace_local(:,:,:)
       real(8), allocatable :: grad_work(:,:,:)
       real(8), allocatable :: basis_grad_all(:,:,:,:,:,:)
-      real(8), allocatable :: basis_kinetic_core(:,:,:,:,:)
+      real(8), allocatable :: basis_nonlocal_core(:,:,:,:,:)
 
     ! diagonal block < lambda_{ifrag,io} | H | lambda_{ifrag,jo} >
       allocate(mat_H_local(dc%nstate_frag,dc%nstate_frag,nspin))
       allocate(mat_H_volume_local(dc%nstate_frag,dc%nstate_frag,nspin))
       allocate(mat_H_volume_weak_local(dc%nstate_frag,dc%nstate_frag,nspin))
+      allocate(mat_H_weak_kinetic(dc%nstate_frag,dc%nstate_frag,nspin))
+      allocate(mat_H_weak_potential(dc%nstate_frag,dc%nstate_frag,nspin))
+      allocate(mat_H_weak_nonlocal(dc%nstate_frag,dc%nstate_frag,nspin))
       allocate(mat_H_surface_self(dc%nstate_frag,dc%nstate_frag,nspin))
       allocate(mat_V_local(3,dc%nstate_frag,dc%nstate_frag,nspin))
       mat_H_local = 0d0
       mat_H_volume_local = 0d0
       mat_H_volume_weak_local = 0d0
+      mat_H_weak_kinetic = 0d0
+      mat_H_weak_potential = 0d0
+      mat_H_weak_nonlocal = 0d0
       mat_H_surface_self = 0d0
       mat_V_local = 0d0
       l = dc%nxyz_domain
       allocate(basis_grad_all(l(1),l(2),l(3),nspin,dc%nstate_frag,3))
-      allocate(basis_kinetic_core(l(1),l(2),l(3),nspin,dc%nstate_frag))
+      allocate(basis_nonlocal_core(l(1),l(2),l(3),nspin,dc%nstate_frag))
       basis_grad_all = 0d0
-      basis_kinetic_core = 0d0
+      call build_fragment_nonlocal_basis_action(basis_nonlocal_core)
       do ispin=1,nspin
       do io=1,n_basis(dc%i_frag,ispin)
 !$omp parallel do collapse(3) private(ix,iy,iz,idir) schedule(static)
         do iz=1,l(3)
         do iy=1,l(2)
         do ix=1,l(1)
-          basis_kinetic_core(ix,iy,iz,ispin,io) = local_basis_kinetic_core(ix,iy,iz,ispin,io)
           do idir=1,3
             basis_grad_all(ix,iy,iz,ispin,io,idir) = local_basis_grad(ix,iy,iz,ispin,io,idir)
           end do
@@ -2828,7 +3796,7 @@ contains
       end do
       end do
       do ispin=1,nspin
-!$omp parallel do private(io,jo,idir,term_sum) schedule(static)
+!$omp parallel do private(io,jo,idir,term_sum,term_local,term_nonlocal) schedule(static)
       do io=1,n_basis(dc%i_frag,ispin)
       do jo=1,n_basis(dc%i_frag,ispin)
         mat_H_volume_local(io,jo,ispin) = &
@@ -2839,10 +3807,15 @@ contains
           & + 0.5d0 * sum(basis_grad_all(1:l(1),1:l(2),1:l(3),ispin,io,idir) &
           &              * basis_grad_all(1:l(1),1:l(2),1:l(3),ispin,jo,idir)) * hvol
         end do
-        mat_H_volume_weak_local(io,jo,ispin) = mat_H_volume_local(io,jo,ispin) &
-        & - sum(f_basis(1:l(1),1:l(2),1:l(3),ispin,io) &
-        &       * basis_kinetic_core(1:l(1),1:l(2),1:l(3),ispin,jo)) * hvol &
-        & + term_sum
+        term_local=sum(f_basis(1:l(1),1:l(2),1:l(3),ispin,io) &
+        &       * V_local(ispin)%f(1:l(1),1:l(2),1:l(3)) &
+        &       * f_basis(1:l(1),1:l(2),1:l(3),ispin,jo)) * hvol
+        term_nonlocal=sum(f_basis(1:l(1),1:l(2),1:l(3),ispin,io) &
+        &       * basis_nonlocal_core(1:l(1),1:l(2),1:l(3),ispin,jo)) * hvol
+        mat_H_weak_kinetic(io,jo,ispin)=term_sum
+        mat_H_weak_potential(io,jo,ispin)=term_local
+        mat_H_weak_nonlocal(io,jo,ispin)=term_nonlocal
+        mat_H_volume_weak_local(io,jo,ispin)=term_sum+term_local+term_nonlocal
         if(use_weak_volume_hamiltonian_mode()) then
           mat_H_local(io,jo,ispin) = mat_H_volume_weak_local(io,jo,ispin)
         else
@@ -3009,9 +3982,46 @@ contains
       end do
       deallocate(hf)
       deallocate(basis_grad_all)
-      deallocate(basis_kinetic_core)
+      deallocate(basis_nonlocal_core)
 
     end subroutine calc_hamiltonian_matrix
+
+    subroutine build_fragment_nonlocal_basis_action(nonlocal_action)
+      use communication, only: comm_summation
+      use nonlocal_potential, only: dpseudo
+      use salmon_global, only: yn_jm
+      implicit none
+      real(8), intent(out) :: nonlocal_action(:,:,:,:,:)
+      real(8), allocatable :: local_action(:,:,:,:,:)
+      integer :: ix1,ix2,iy1,iy2,iz1,iz2
+
+      nonlocal_action=0.0d0
+      if(yn_jm/='n') return
+      ix1=max(mg%is(1),1); ix2=min(mg%ie(1),dc%nxyz_domain(1))
+      iy1=max(mg%is(2),1); iy2=min(mg%ie(2),dc%nxyz_domain(2))
+      iz1=max(mg%is(3),1); iz2=min(mg%ie(3),dc%nxyz_domain(3))
+      sttpsi%rwf=0.0d0
+      shpsi%rwf=0.0d0
+      do io=info%io_s,info%io_e
+        if(io>n_basis(dc%i_frag,1)) cycle
+        do ispin=1,nspin
+          sttpsi%rwf(ix1:ix2,iy1:iy2,iz1:iz2,ispin,io,1,1)= &
+            f_basis(ix1:ix2,iy1:iy2,iz1:iz2,ispin,io)
+        end do
+      end do
+      call dpseudo(sttpsi,shpsi,info,nspin,ppg)
+      allocate(local_action,source=nonlocal_action)
+      local_action=0.0d0
+      do io=info%io_s,info%io_e
+        if(io>n_basis(dc%i_frag,1)) cycle
+        do ispin=1,nspin
+          local_action(ix1:ix2,iy1:iy2,iz1:iz2,ispin,io)= &
+            shpsi%rwf(ix1:ix2,iy1:iy2,iz1:iz2,ispin,io,1,1)
+        end do
+      end do
+      call comm_summation(local_action,nonlocal_action,size(nonlocal_action),info%icomm_rko)
+      deallocate(local_action)
+    end subroutine build_fragment_nonlocal_basis_action
 
     integer function face_point_count(axis) result(npts)
       implicit none
@@ -3056,6 +4066,16 @@ contains
       val = 0d0
       if(ibasis < 1 .or. ibasis > dc%nstate_frag) return
       if(ispin < 1 .or. ispin > nspin) return
+      if(sawf_explicit_basis_active) then
+        sx=ix+dc%nxyz_buffer(1)
+        sy=iy+dc%nxyz_buffer(2)
+        sz=iz+dc%nxyz_buffer(3)
+        if(sx<1 .or. sx>size(sawf_explicit_buffer,1)) return
+        if(sy<1 .or. sy>size(sawf_explicit_buffer,2)) return
+        if(sz<1 .or. sz>size(sawf_explicit_buffer,3)) return
+        val=sawf_explicit_buffer(sx,sy,sz,ispin,ibasis)
+        return
+      end if
       if(ix >= 1 .and. ix <= dc%nxyz_domain(1) .and. &
          iy >= 1 .and. iy <= dc%nxyz_domain(2) .and. &
          iz >= 1 .and. iz <= dc%nxyz_domain(3)) then
@@ -3244,6 +4264,7 @@ contains
       real(8) :: strength_total, strength_max, sum_gap_weighted, sum_inv_gap, occ_sum
       real(8) :: mean_gap, fsum_ratio
       real(8), allocatable :: h_div(:,:), h_ref_div(:,:), v_div(:,:), h(:,:,:)
+      real(8), allocatable :: h_full_local(:,:), h_full(:,:)
       real(8), allocatable :: h_block(:,:,:), h_local_diag(:,:), evec_local(:,:), eval_local(:)
       real(8), allocatable :: eval_list(:)
       real(8), allocatable :: coef_state_norm(:), coef_state_norm_alt(:)
@@ -3296,6 +4317,8 @@ contains
               jfrag_halo(i_halo) = halo(i_halo)%ifrag_src ! src fragment (recv)
               h(:,:,i_halo) = halo(i_halo)%mat_H_local(:,:,ispin)
             end do
+            if(sawf_explicit_basis_active) write(*,'(1x,a,i0,a,6(i0,1x))') &
+              '[DC-LCFO-SAWF-HALO] owner=',ifrag,' sources=',jfrag_halo
           end if
           call comm_bcast( h, dc%icomm_tot, id_array(ifrag) )
           call comm_bcast( jfrag_halo, dc%icomm_tot, id_array(ifrag) )
@@ -3345,6 +4368,23 @@ contains
         if(dc%id_tot==0) write(*,*) "h_div: done"
 
         h_ref_div = h_div
+        if(sawf_explicit_basis_active) then
+          allocate(h_full_local(n,n),h_full(n,n))
+          h_full_local=0.0d0
+          do iy_loc=iy_s,iy_e
+            iy=eigen_translate_l2g(iy_loc,y_nnod,y_inod)
+            if(iy>n) cycle
+            do ix_loc=ix_s,ix_e
+              ix=eigen_translate_l2g(ix_loc,x_nnod,x_inod)
+              if(ix>n) cycle
+              h_full_local(ix,iy)=h_ref_div(ix_loc,iy_loc)
+            end do
+          end do
+          call comm_summation(h_full_local,h_full,n*n,dc%icomm_tot)
+          if(dc%id_tot==0) call diagnose_sawf_hamiltonian_hermiticity( &
+            h_full,ifrag_array,io_array,mat_H_local(:,:,ispin),n_basis(dc%i_frag,ispin))
+          deallocate(h_full_local,h_full)
+        end if
         call eigen_sx(n, n, h_div, nx, esp_tot(1:n,ispin), v_div, nx)
         if(dc%id_tot==0) write(*,*) "eigen_sx: done"
         nocc_nelec = occupied_index_from_input(ispin)
@@ -3763,6 +4803,35 @@ contains
       deallocate(h)
     end subroutine diag_eigenexa
 
+    subroutine diagnose_sawf_hamiltonian_hermiticity( &
+        h,fragment_index,basis_index,local_block,local_basis_count)
+      implicit none
+      real(8), intent(in) :: h(:,:)
+      integer, intent(in) :: fragment_index(:),basis_index(:)
+      real(8), intent(in) :: local_block(:,:)
+      integer, intent(in) :: local_basis_count
+      integer :: location(2),block_location(2),block_start,block_end
+      real(8) :: scale,residual,block_difference
+
+      scale=max(1.0d-300,maxval(abs(h)))
+      location=maxloc(abs(h-transpose(h)))
+      residual=abs(h(location(1),location(2))-h(location(2),location(1)))/scale
+      write(*,'(1x,a,es13.5,2(a,i0),4(a,i0))') &
+        '[DC-LCFO-SAWF-HERMITICITY] relative_max=',residual, &
+        ' row=',location(1),' col=',location(2), &
+        ' row_fragment=',fragment_index(location(1)),' row_basis=',basis_index(location(1)), &
+        ' col_fragment=',fragment_index(location(2)),' col_basis=',basis_index(location(2))
+      block_start=findloc(fragment_index,dc%i_frag,dim=1)
+      block_end=block_start+local_basis_count-1
+      block_location=maxloc(abs(h(block_start:block_end,block_start:block_end)- &
+        local_block(1:local_basis_count,1:local_basis_count)))
+      block_difference=maxval(abs(h(block_start:block_end,block_start:block_end)- &
+        local_block(1:local_basis_count,1:local_basis_count)))
+      write(*,'(1x,a,es13.5,2(a,i0))') &
+        '[DC-LCFO-SAWF-HERMITICITY] local_block_difference=',block_difference, &
+        ' row_basis=',block_location(1),' col_basis=',block_location(2)
+    end subroutine diagnose_sawf_hamiltonian_hermiticity
+
     integer function occupied_index_from_input(ispin_in) result(nocc_input)
       use salmon_global, only: nelec_spin
       implicit none
@@ -3821,12 +4890,14 @@ contains
     end function use_block_diag_hamiltonian_mode
 
     logical function use_weak_volume_hamiltonian_mode() result(enabled)
+      use salmon_global, only: yn_dc_lcfo_flux_weak_volume
       implicit none
       logical, save :: initialized = .false.
       logical, save :: enabled_save = .false.
       character(16) :: env_value
       integer :: env_status
 
+      enabled_save = (yn_dc_lcfo_flux_weak_volume == 'y')
       if(.not. initialized) then
         env_value = ''
         call get_environment_variable('SALMON_DG_FLUX_WEAK_VOLUME', env_value, status=env_status)
@@ -3838,7 +4909,7 @@ contains
         end if
         initialized = .true.
       end if
-      enabled = enabled_save
+      enabled = (yn_dc_lcfo_flux_weak_volume == 'y') .or. enabled_save
     end function use_weak_volume_hamiltonian_mode
 
     logical function use_surface_self_hamiltonian_mode() result(enabled)
@@ -3869,6 +4940,7 @@ contains
         yn_dc_lcfo_local_wannier, yn_dc_lcfo_wannier_cluster, wannier_cluster_size
       use filesystem, only: get_filehandle
       use inputoutput, only: uenergy_from_au
+      use communication, only: comm_sync_all
       implicit none
       integer :: iunit,i_halo
       integer :: nxyz_domain(3)
@@ -3902,7 +4974,6 @@ contains
         close(iunit)
       end if
       if(yn_dc_lcfo_wannier_cluster == 'y' .and. yn_dc_lcfo_diag == 'y') call write_wannier_cluster_partition_file()
-      if(yn_dc_lcfo_wannier == 'y' .and. yn_dc_lcfo_diag == 'y') call write_wannier_seed_files()
 
     ! fragment data
       call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
@@ -3977,18 +5048,6 @@ contains
         end do
         if(dc%id_frag==0) close(iunit)
         deallocate(phi_box_local,phi_box_sum)
-      if(yn_dc_lcfo_local_wannier == 'y' .and. yn_dc_lcfo_diag == 'y') &
-        call write_local_wannier_seed()
-      if(yn_dc_lcfo_wannier == 'y' .and. yn_dc_lcfo_wannier_cluster == 'y' .and. &
-         yn_dc_lcfo_local_wannier /= 'y' .and. yn_dc_lcfo_diag == 'y') then
-        if(all(wannier_cluster_size(1:3) == 1)) then
-          call write_wannier90_global_bpw_seed()
-        else if(dc%id_tot == 0) then
-          write(*,'(1x,a,3(i0,1x),a)') &
-            "[DC-LCFO-W90-BPW] skip fragment BPW: cluster_size=", &
-            wannier_cluster_size(1:3), " requires cluster/global BPW export."
-        end if
-      end if
       if(dc%id_frag==0) then
       ! local hamiltonian matrix
         iunit = get_filehandle()
@@ -4055,6 +5114,38 @@ contains
           write(iunit) coef_wf(1:dc%nstate_frag,1:dc%nstate_tot,1:nspin)
           write(iunit) esp_tot(1:dc%nstate_tot,1:nspin)
           close(iunit)
+          iunit = get_filehandle()
+          filename = trim(base_directory)//binfile_wf_wannier_seed
+          open(iunit,file=filename,form='unformatted',access='stream',status='replace')
+          write(iunit) dc%n_frag, nspin, dc%nstate_frag, dc%nstate_tot
+          write(iunit) n_mat(1:nspin)
+          write(iunit) n_basis(1:dc%n_frag,1:nspin)
+          write(iunit) index_basis(1:dc%nstate_frag,1:dc%n_frag,1:nspin)
+          write(iunit) coef_wf(1:dc%nstate_frag,1:dc%nstate_tot,1:nspin)
+          write(iunit) esp_tot(1:dc%nstate_tot,1:nspin)
+          close(iunit)
+          filename = trim(base_directory)//'wavefunctions_wannier_seed.provenance'
+          open(newunit=iunit,file=filename,status='replace',action='write')
+          write(iunit,'(i0,1x,i0)') sawf_seed_provenance_magic,sawf_seed_provenance_version
+          write(iunit,'(a)') trim(current_sawf_seed_token)
+          write(iunit,'(5(i0,1x))') dc%n_frag,dc%i_frag,nspin,dc%nstate_frag,dc%nstate_tot
+          write(iunit,'(*(i0,1x))') n_basis(dc%i_frag,1:nspin)
+          close(iunit)
+        end if
+      end if
+
+      call comm_sync_all(dc%icomm_tot)
+      if(yn_dc_lcfo_wannier == 'y' .and. yn_dc_lcfo_diag == 'y') call write_wannier_seed_files()
+      if(yn_dc_lcfo_local_wannier == 'y' .and. yn_dc_lcfo_diag == 'y') &
+        call write_local_wannier_seed()
+      if(yn_dc_lcfo_wannier == 'y' .and. yn_dc_lcfo_wannier_cluster == 'y' .and. &
+         yn_dc_lcfo_local_wannier /= 'y' .and. yn_dc_lcfo_diag == 'y') then
+        if(all(wannier_cluster_size(1:3) == 1)) then
+          call write_wannier90_global_bpw_seed()
+        else if(dc%id_tot == 0) then
+          write(*,'(1x,a,3(i0,1x),a)') &
+            "[DC-LCFO-W90-BPW] skip fragment BPW: cluster_size=", &
+            wannier_cluster_size(1:3), " requires cluster/global BPW export."
         end if
       end if
 
@@ -5006,24 +6097,308 @@ contains
       end do
     end subroutine find_atom_core_grid
 
+    subroutine prepare_sawf_closed_seed_eigensystem(nband_wann)
+      use communication, only: comm_get_max,comm_bcast,comm_summation
+      use salmon_global, only: izatom,wannier_site_symmetry,wannier_symmetry_file, &
+        wannier_symmetry_tolerance
+      use salmon_math, only: matrix_inverse
+      implicit none
+      integer, intent(in) :: nband_wann
+      integer :: mesh(3),ifrag,isym,ia,failure,local_failure,allocation_status
+      integer :: max_targets,nbasis_closed,npoint_core,npoint_buffer
+      integer :: itmp(dc%n_frag,nspin)
+      integer, allocatable :: species(:),fragment_origin(:,:),fragment_shape(:,:)
+      integer, allocatable :: fragment_map(:),fragment_maps(:,:)
+      real(8) :: a1(3),a2(3),a3(3),lattice(3,3),lattice_inverse(3,3)
+      real(8) :: max_grid_residual,center_grid(3)
+      real(8), allocatable :: fractional_positions(:,:)
+      type(t_sawf_symop), allocatable :: operations(:)
+      type(t_sawf_fragment_state_cache) :: cache
+      type(t_sawf_closed_basis) :: closed
+      logical :: local_ok,grid_ok,fragment_ok,center_available,split_fragment_global_mode
+      character(512) :: message
+      character(256) :: symmetry_filename
+      integer :: nxyz_box(3),ibasis
+
+      if(dc%n_frag==1) then
+        if(dc%id_tot==0) write(*,'(1x,a)') &
+          '[DC-LCFO-SAWF-GLOBAL-SINGLE] single fragment already spans the global LCFO eigensystem'
+        return
+      end if
+
+      mesh=dc%lg_tot%num
+      allocate(species(dc%system_tot%nion),fractional_positions(3,dc%system_tot%nion), &
+        fragment_origin(3,dc%n_frag),fragment_shape(3,dc%n_frag),stat=allocation_status)
+      failure=merge(0,1,allocation_status==0)
+      call comm_get_max(failure,dc%icomm_tot)
+      if(failure/=0) call lcfo_sawf_fatal('SAWF closed-seed context allocation failed')
+      fragment_origin=dc%ixyz_frag
+      split_fragment_global_mode=(dc%n_frag==1)
+      do ifrag=1,dc%n_frag
+        call get_fragment_domain(dc,ifrag,fragment_shape(:,ifrag))
+      end do
+      call get_lattice_vectors(a1,a2,a3)
+      lattice(:,1)=a1; lattice(:,2)=a2; lattice(:,3)=a3
+      lattice_inverse=lattice; call matrix_inverse(lattice_inverse)
+      do ia=1,dc%system_tot%nion
+        species(ia)=izatom(dc%system_tot%kion(ia))
+        fractional_positions(:,ia)=modulo(matmul(lattice_inverse,dc%system_tot%rion(:,ia)),1.0d0)
+      end do
+      if(trim(wannier_site_symmetry)=='auto') then
+        call load_sawf_symmetry_auto(lattice,fractional_positions,species, &
+          wannier_symmetry_tolerance,operations,local_ok,message)
+      else
+        if(wannier_symmetry_file(1:1)=='/') then
+          symmetry_filename=trim(wannier_symmetry_file)
+        else
+          symmetry_filename=trim(import_run_root_dir())//trim(wannier_symmetry_file)
+        end if
+        call load_sawf_symmetry_file(symmetry_filename,lattice,fractional_positions,species, &
+          wannier_symmetry_tolerance,operations,local_ok,message)
+      end if
+      failure=merge(0,1,local_ok); call comm_get_max(failure,dc%icomm_tot)
+      if(failure/=0) call lcfo_sawf_fatal('SAWF closed-seed symmetry loading failed')
+      call put_sawf_identity_first(operations,wannier_symmetry_tolerance,local_ok,message)
+      failure=merge(0,1,local_ok); call comm_get_max(failure,dc%icomm_tot)
+      if(failure/=0) call lcfo_sawf_fatal('SAWF closed-seed operation normalization failed')
+      if(size(operations)>=2) call diagnose_sawf_vlocal_symmetry(operations(2),mesh, &
+        fragment_origin,fragment_shape,wannier_symmetry_tolerance)
+      allocate(fragment_maps(dc%n_frag,size(operations)),stat=allocation_status)
+      failure=merge(0,1,allocation_status==0); call comm_get_max(failure,dc%icomm_tot)
+      if(failure/=0) call lcfo_sawf_fatal('SAWF closed-seed fragment-map allocation failed')
+      do isym=1,size(operations)
+        call validate_sawf_fragment_symmetry_map(operations(isym),mesh,fragment_origin, &
+          fragment_shape,dc%nxyz_buffer,wannier_symmetry_tolerance,grid_ok,fragment_ok, &
+          max_targets,fragment_map,max_grid_residual,center_available,center_grid,message)
+        local_failure=merge(0,1,grid_ok)
+        call reduce_sawf_fragment_alignment_failure(local_failure,dc%icomm_tot,dc%id_tot,isym, &
+          grid_ok,fragment_ok,max_targets,max_grid_residual,message,failure)
+        if(failure/=0) call lcfo_sawf_fatal('SAWF closed-seed grid alignment failed')
+        local_failure=merge(0,1,fragment_ok)
+        call comm_get_max(local_failure,dc%icomm_tot)
+        if(local_failure/=0) then
+          split_fragment_global_mode=.true.
+          if(allocated(fragment_map)) deallocate(fragment_map)
+          exit
+        end if
+        fragment_maps(:,isym)=fragment_map
+        deallocate(fragment_map)
+      end do
+      if(split_fragment_global_mode) then
+        if(dc%id_tot==0) write(*,'(1x,a)') &
+          '[DC-LCFO-SAWF-GLOBAL-SPLIT] symmetry splits fragment cores; use global LCFO eigensystem'
+        call clear_sawf_fragment_state_cache(cache)
+        deallocate(species,fractional_positions,fragment_origin,fragment_shape,fragment_maps,operations)
+        return
+      end if
+      call prepare_sawf_fragment_state_cache(nband_wann,fragment_shape,cache,local_ok,message)
+      failure=merge(0,1,local_ok); call comm_get_max(failure,dc%icomm_tot)
+      if(failure/=0) call lcfo_sawf_fatal('SAWF closed-seed source cache failed')
+      call build_sawf_closed_fragment_seed_basis(nband_wann,mesh,fragment_origin,fragment_shape, &
+        operations,fragment_maps,cache,closed,local_ok,message)
+      failure=merge(0,1,local_ok); call comm_get_max(failure,dc%icomm_tot)
+      if(failure/=0) call lcfo_sawf_fatal('SAWF closed-seed basis construction failed')
+
+      nbasis_closed=closed%nbasis; npoint_core=closed%npoint_core
+      npoint_buffer=closed%npoint_buffer
+      call comm_bcast(nbasis_closed,dc%icomm_frag,0)
+      call comm_bcast(npoint_core,dc%icomm_frag,0)
+      call comm_bcast(npoint_buffer,dc%icomm_frag,0)
+      if(nbasis_closed>dc%nstate_frag) call lcfo_sawf_fatal( &
+        'SAWF closed basis exceeds nstate_frag; dynamic batching is required')
+      if(dc%id_frag/=0) then
+        allocate(closed%core(npoint_core,nbasis_closed),closed%buffer(npoint_buffer,nbasis_closed))
+        closed%nbasis=nbasis_closed; closed%npoint_core=npoint_core; closed%npoint_buffer=npoint_buffer
+      end if
+      call comm_bcast(closed%core,dc%icomm_frag,0)
+      call comm_bcast(closed%buffer,dc%icomm_frag,0)
+
+      f_basis=0.0d0
+      do ibasis=1,nbasis_closed
+        f_basis(:,:,:,1,ibasis)=reshape(closed%core(:,ibasis),dc%nxyz_domain)
+      end do
+      nxyz_box=dc%nxyz_domain+2*dc%nxyz_buffer
+      if(allocated(sawf_explicit_buffer)) deallocate(sawf_explicit_buffer)
+      allocate(sawf_explicit_buffer(nxyz_box(1),nxyz_box(2),nxyz_box(3),nspin,dc%nstate_frag))
+      sawf_explicit_buffer=0.0d0
+      do ibasis=1,nbasis_closed
+        sawf_explicit_buffer(:,:,:,1,ibasis)=reshape(closed%buffer(:,ibasis),nxyz_box)
+      end do
+      sawf_explicit_basis_active=.true.
+      itmp=0
+      if(dc%id_frag==0) itmp(dc%i_frag,1)=nbasis_closed
+      call comm_summation(itmp,n_basis,dc%n_frag*nspin,dc%icomm_tot)
+      index_basis=0
+      do isym=1,nspin
+        ia=0
+        do ifrag=1,dc%n_frag
+          do ibasis=1,n_basis(ifrag,isym)
+            ia=ia+1; index_basis(ibasis,ifrag,isym)=ia
+          end do
+        end do
+        n_mat(isym)=ia
+      end do
+
+      if(allocated(hf)) deallocate(hf)
+      if(allocated(mat_H_local)) deallocate(mat_H_local)
+      if(allocated(mat_H_volume_local)) deallocate(mat_H_volume_local)
+      if(allocated(mat_H_volume_weak_local)) deallocate(mat_H_volume_weak_local)
+      if(allocated(mat_H_weak_kinetic)) deallocate(mat_H_weak_kinetic)
+      if(allocated(mat_H_weak_potential)) deallocate(mat_H_weak_potential)
+      if(allocated(mat_H_weak_nonlocal)) deallocate(mat_H_weak_nonlocal)
+      if(allocated(mat_H_surface_self)) deallocate(mat_H_surface_self)
+      if(allocated(mat_V_local)) deallocate(mat_V_local)
+      call release_surface_trace_halo()
+      do isym=1,n_halo
+        if(allocated(halo(isym)%mat_H_local)) deallocate(halo(isym)%mat_H_local)
+        if(allocated(halo(isym)%mat_H_surface_cross)) deallocate(halo(isym)%mat_H_surface_cross)
+        if(allocated(halo(isym)%mat_V_local)) deallocate(halo(isym)%mat_V_local)
+        if(allocated(halo(isym)%mat_Xi_flux_local)) deallocate(halo(isym)%mat_Xi_flux_local)
+      end do
+      call hpsi_basis
+      call calc_hamiltonian_matrix
+      if(allocated(esp_tot)) deallocate(esp_tot)
+      if(allocated(coef_wf)) deallocate(coef_wf)
+      allocate(esp_tot(maxval(n_mat),nspin))
+      if(dc%id_frag==0) allocate(coef_wf(dc%nstate_frag,dc%nstate_tot,nspin))
+      if(allocated(coef_wf)) coef_wf=0.0d0
+#ifdef USE_EIGENEXA
+      call diag_eigenexa
+#else
+      call lcfo_sawf_fatal('SAWF closed-seed diagonalization requires EigenExa')
+#endif
+      call write_sawf_closed_seed_file()
+      if(dc%id_tot==0) write(*,'(1x,a,i0,a,i0)') &
+        '[DC-LCFO-SAWF-CLOSED] physical Flux eigensystem basis=',maxval(n_basis),' bands=',nband_wann
+      call clear_sawf_closed_basis(closed)
+      call clear_sawf_fragment_state_cache(cache)
+      deallocate(species,fractional_positions,fragment_origin,fragment_shape,fragment_maps,operations)
+    end subroutine prepare_sawf_closed_seed_eigensystem
+
+    subroutine diagnose_sawf_vlocal_symmetry(operation,mesh,fragment_origin,fragment_shape,tolerance)
+      use communication, only: comm_summation
+      implicit none
+      type(t_sawf_symop), intent(in) :: operation
+      integer, intent(in) :: mesh(3),fragment_origin(:,:),fragment_shape(:,:)
+      real(8), intent(in) :: tolerance
+      real(8), allocatable :: value_local(:),value_global(:),difference(:)
+      integer, allocatable :: count_local(:),count_global(:)
+      integer :: ix,iy,iz,p,q,source(3),target(3),location(1),npoint
+      integer :: source_location(3),target_location(3),failure
+      real(8) :: scale,relative_max,relative_rms
+      logical :: map_ok
+      character(512) :: message
+
+      npoint=product(mesh)
+      allocate(value_local(npoint),value_global(npoint),difference(npoint), &
+        count_local(npoint),count_global(npoint))
+      value_local=0.0d0; count_local=0
+      if(dc%id_frag==0) then
+        do iz=1,fragment_shape(3,dc%i_frag)
+          do iy=1,fragment_shape(2,dc%i_frag)
+            do ix=1,fragment_shape(1,dc%i_frag)
+              source=1+modulo(fragment_origin(:,dc%i_frag)+[ix-1,iy-1,iz-1],mesh)
+              p=source(1)+(source(2)-1)*mesh(1)+(source(3)-1)*mesh(1)*mesh(2)
+              value_local(p)=V_local(1)%f(ix,iy,iz)
+              count_local(p)=1
+            end do
+          end do
+        end do
+      end if
+      call comm_summation(value_local,value_global,npoint,dc%icomm_tot)
+      call comm_summation(count_local,count_global,npoint,dc%icomm_tot)
+      failure=merge(0,1,all(count_global==1))
+      if(dc%id_tot==0 .and. failure/=0) write(*,'(1x,a,i0,a,i0)') &
+        '[DC-LCFO-SAWF-VLOCAL-SYMMETRY] ownership_min=',minval(count_global), &
+        ' ownership_max=',maxval(count_global)
+      if(failure/=0) then
+        deallocate(value_local,value_global,difference,count_local,count_global)
+        return
+      end if
+      if(dc%id_tot==0) then
+        difference=0.0d0
+        do iz=1,mesh(3)
+          do iy=1,mesh(2)
+            do ix=1,mesh(1)
+              source=[ix,iy,iz]
+              call map_sawf_periodic_grid_point(operation,mesh,tolerance,source,target,map_ok,message)
+              if(.not.map_ok) call lcfo_sawf_fatal('SAWF V_local symmetry grid map failed: '//trim(message))
+              p=ix+(iy-1)*mesh(1)+(iz-1)*mesh(1)*mesh(2)
+              q=target(1)+(target(2)-1)*mesh(1)+(target(3)-1)*mesh(1)*mesh(2)
+              difference(p)=value_global(q)-value_global(p)
+            end do
+          end do
+        end do
+        scale=max(1.0d-300,maxval(abs(value_global)))
+        relative_max=maxval(abs(difference))/scale
+        relative_rms=sqrt(sum(difference*difference)/sum(value_global*value_global))
+        location=maxloc(abs(difference)); p=location(1)
+        source_location(1)=1+modulo(p-1,mesh(1))
+        source_location(2)=1+modulo((p-1)/mesh(1),mesh(2))
+        source_location(3)=1+(p-1)/(mesh(1)*mesh(2))
+        call map_sawf_periodic_grid_point(operation,mesh,tolerance,source_location, &
+          target_location,map_ok,message)
+        write(*,'(1x,a,2(a,es13.5),2(a,3(i0,1x)))') &
+          '[DC-LCFO-SAWF-VLOCAL-SYMMETRY]',' relative_max=',relative_max, &
+          ' relative_rms=',relative_rms,' source=',source_location,' target=',target_location
+      end if
+      deallocate(value_local,value_global,difference,count_local,count_global)
+    end subroutine diagnose_sawf_vlocal_symmetry
+
+    subroutine write_sawf_closed_seed_file()
+      use filesystem, only: get_filehandle
+      use salmon_global, only: base_directory
+      implicit none
+      integer :: iunit
+      character(256) :: filename
+      if(dc%id_frag/=0) return
+      filename=trim(base_directory)//'sawf_closed_seed.bin'
+      iunit=get_filehandle()
+      open(iunit,file=filename,form='unformatted',access='stream',status='replace')
+      write(iunit) sawf_closed_seed_magic,sawf_closed_seed_version
+      write(iunit) current_sawf_seed_token
+      write(iunit) dc%nxyz_domain,dc%nxyz_buffer,nspin,dc%nstate_frag,dc%nstate_tot
+      write(iunit) n_basis(dc%i_frag,1)
+      write(iunit) f_basis(:,:,:,1,1:n_basis(dc%i_frag,1))
+      write(iunit) sawf_explicit_buffer(:,:,:,1,1:n_basis(dc%i_frag,1))
+      write(iunit) coef_wf(1:n_basis(dc%i_frag,1),1:dc%nstate_tot,1)
+      write(iunit) esp_tot(1:dc%nstate_tot,1)
+      close(iunit)
+    end subroutine write_sawf_closed_seed_file
+
     subroutine write_wannier_seed_files()
       use salmon_global, only: izatom, sysname, &
         wannier_projection, wannier_num_wann, wannier_num_iter, &
         wannier_projection_width, wannier_dis_froz_max, wannier_dis_win_max, &
-        yn_dc_lcfo_wannier_cluster, yn_dc_lcfo_local_wannier
+        yn_dc_lcfo_wannier_cluster, yn_dc_lcfo_local_wannier, wannier_site_symmetry
       use filesystem, only: get_filehandle
+      use communication, only: comm_bcast
+      use communication, only: comm_sync_all
       implicit none
       real(8), parameter :: hartree_to_ev = 27.211386245988d0
-      integer :: iunit, iband, ikpt, ia, ip, nband_wann, nproj_csp3
-      character(256) :: winfile, eigfile
+      integer :: iunit, iband, ikpt, nband_wann, nproj_csp3
+      integer :: projection_failure
+      character(256) :: winfile, eigfile, projection_failure_message
+      character(1024) :: resolved_wannier_command
+      logical :: projection_ok
       real(8) :: a1(3), a2(3), a3(3)
-      real(8), allocatable :: bond_center_bohr(:,:)
 
+      winfile = trim(dc%base_directory)//trim(sysname)//".win"
+      if(trim(wannier_site_symmetry) /= 'off') call deactivate_sawf_win_collective(winfile)
+      call get_cached_wannier90_command(resolved_wannier_command, projection_ok)
+      if(.not. projection_ok) call lcfo_sawf_fatal( &
+        'Wannier90 command was not resolved during initialization')
+      if(trim(wannier_site_symmetry) /= 'off') &
+        call reject_sawf_reuse_collective(resolved_wannier_command)
       if(nspin /= 1) stop "DC-LCFO Wannier export: spin-polarized Wannier seed files are not implemented."
+
+      call validate_sawf_projection_configuration()
+      projection_failure = 0
+      projection_failure_message = ''
 
       nband_wann = determine_wannier_num_bands()
       nproj_csp3 = count_c_sp3_projections()
-      winfile = trim(dc%base_directory)//trim(sysname)//".win"
+      if(trim(wannier_site_symmetry)/='off') call prepare_sawf_closed_seed_eigensystem(nband_wann)
       eigfile = trim(dc%base_directory)//trim(sysname)//".eig"
       call get_lattice_vectors(a1, a2, a3)
       if(yn_dc_lcfo_wannier_cluster == 'y') call log_wannier_cluster_partition()
@@ -5031,64 +6406,12 @@ contains
       if(dc%id_tot == 0) then
         write(*,'(1x,a,i0,a,i0)') "[DC-LCFO-WANNIER] export bands=", nband_wann, &
           " wann=", wannier_num_wann
-        iunit = get_filehandle()
-        open(iunit,file=winfile,status='replace')
-        write(iunit,'(a)') "num_bands = "//trim(adjustl(int_to_string(nband_wann)))
-        write(iunit,'(a)') "num_wann = "//trim(adjustl(int_to_string(wannier_num_wann)))
-        write(iunit,'(a)') "num_iter = "//trim(adjustl(int_to_string(wannier_num_iter)))
-        write(iunit,'(a)') "mp_grid = 1 1 1"
-        write(iunit,'(a)') "gamma_only = true"
-        write(iunit,'(a)') "write_hr = true"
-        write(iunit,'(a)') "write_rmn = true"
-        if(wannier_dis_froz_max > 0d0) &
-          write(iunit,'(a,1x,es23.15)') "dis_froz_max =", wannier_dis_froz_max * hartree_to_ev
-        if(wannier_dis_win_max > 0d0) &
-          write(iunit,'(a,1x,es23.15)') "dis_win_max =", wannier_dis_win_max * hartree_to_ev
-        write(iunit,'(a)') ""
-        write(iunit,'(a)') "begin unit_cell_cart"
-        write(iunit,'(a)') "bohr"
-        write(iunit,'(3es23.15)') a1(1:3)
-        write(iunit,'(3es23.15)') a2(1:3)
-        write(iunit,'(3es23.15)') a3(1:3)
-        write(iunit,'(a)') "end unit_cell_cart"
-        write(iunit,'(a)') ""
-        write(iunit,'(a)') "begin atoms_cart"
-        write(iunit,'(a)') "bohr"
-        do ia=1,dc%system_tot%nion
-          write(iunit,'(a,3(1x,es23.15))') trim(element_symbol(izatom(dc%system_tot%kion(ia)))), &
-            dc%system_tot%rion(1:3,ia)
-        end do
-        write(iunit,'(a)') "end atoms_cart"
-        write(iunit,'(a)') ""
-        write(iunit,'(a)') "begin kpoints"
-        write(iunit,'(3f12.6)') 0.0d0, 0.0d0, 0.0d0
-        write(iunit,'(a)') "end kpoints"
-        if(len_trim(wannier_projection) > 0) then
-          write(iunit,'(a)') ""
-          write(iunit,'(a)') "begin projections"
-          if(is_bond_center_projection(trim(wannier_projection))) then
-            call build_bond_center_projection_map(wannier_num_wann, bond_center_bohr)
-            do ip=1,wannier_num_wann
-              write(iunit,'(a,f18.12,a,f18.12,a,f18.12,a)') "f=", &
-                bond_center_bohr(1,ip) / cell_length(a1), &
-                ",", &
-                bond_center_bohr(2,ip) / cell_length(a2), &
-                ",", &
-                bond_center_bohr(3,ip) / cell_length(a3), ":s"
-            end do
-            deallocate(bond_center_bohr)
-          else if(is_pseudo_channel_projection(trim(wannier_projection))) then
-            write(iunit,'(a)') "random"
-          else
-            if(is_sp3_projection(trim(wannier_projection)) .and. nproj_csp3 < wannier_num_wann) &
-              write(iunit,'(a)') "random"
-            write(iunit,'(a)') trim(wannier_projection)
-          end if
-          write(iunit,'(a)') "end projections"
-        end if
-        close(iunit)
+        call write_wannier_base_win_atomic(winfile, nband_wann, nproj_csp3, &
+          a1, a2, a3, projection_ok, projection_failure_message)
+        if(.not. projection_ok) projection_failure = 1
 
-        iunit = get_filehandle()
+        if(projection_failure == 0) iunit = get_filehandle()
+        if(projection_failure == 0) then
         open(iunit,file=eigfile,status='replace')
         do ikpt=1,1
           do iband=1,nband_wann
@@ -5096,27 +6419,1345 @@ contains
           end do
         end do
         close(iunit)
+        end if
       end if
+
+      call comm_bcast(projection_failure, dc%icomm_tot, 0)
+      call comm_bcast(projection_failure_message, dc%icomm_tot, 0)
+      if(projection_failure /= 0) call lcfo_sawf_fatal(projection_failure_message)
 
       call diagnose_wannier_coef_rank(nband_wann)
       call write_wannier_amn_file(nband_wann)
       call diagnose_wannier_amn_conditioning(nband_wann, wannier_num_wann)
       call write_wannier_mmn_file(nband_wann)
+      call comm_sync_all(dc%icomm_tot)
+      if(trim(wannier_site_symmetry) /= 'off') then
+        call generate_sawf_dmn(nband_wann)
+        call activate_sawf_win_collective(winfile)
+      end if
 
       if(dc%id_tot == 0) &
         write(*,'(1x,a,2a)') "[DC-LCFO-WANNIER] wrote seed files: ", trim(winfile), " and .eig/.amn/.mmn"
-      if(is_wannier90_export_only_requested()) then
+      if(is_wannier90_export_only_command(resolved_wannier_command)) then
         if(dc%id_tot == 0) then
           write(*,'(1x,a)') "[DC-LCFO-WANNIER] export-only mode: external Wannier90 and checkpoint import are skipped."
-          write(*,'(1x,a)') "  Run Wannier90 separately in the seed directory, then rerun/import with SALMON_WANNIER90_COMMAND=reuse."
+          if(trim(wannier_site_symmetry) /= 'off') then
+            write(*,'(1x,a)') &
+              "  Run Wannier90 separately in the seed directory, then rerun with wannier90_command='import_only'."
+          else
+            write(*,'(1x,a)') &
+              "  Run Wannier90 separately in the seed directory, then rerun/import with SALMON_WANNIER90_COMMAND=reuse."
+          end if
         end if
         return
       end if
 
-      call run_wannier90_seed_files()
+      call run_wannier90_seed_files(resolved_wannier_command)
       call write_wannier90_global_basis_file(nband_wann)
       call write_wannier90_flux_eigen_seed_file(nband_wann)
     end subroutine write_wannier_seed_files
+
+    subroutine write_wannier_base_win_atomic(winfile, nband_wann, nproj_csp3, &
+        a1, a2, a3, ok, message)
+      use salmon_global, only: izatom, wannier_projection, wannier_num_wann, wannier_num_iter, &
+        wannier_dis_froz_max, wannier_dis_win_max
+      implicit none
+      character(*), intent(in) :: winfile
+      integer, intent(in) :: nband_wann, nproj_csp3
+      real(8), intent(in) :: a1(3), a2(3), a3(3)
+      logical, intent(out) :: ok
+      character(*), intent(out) :: message
+      real(8), parameter :: hartree_to_ev = 27.211386245988d0
+      type(t_atomic_win_writer) :: writer
+      real(8), allocatable :: bond_center_bohr(:,:)
+      integer :: iunit, io_status, ia, ip
+      character(512) :: io_message
+      logical :: projection_ok
+
+      call begin_atomic_win(writer, winfile, iunit, ok, message)
+      if(.not. ok) return
+      io_status = 0
+      write(iunit,'(a)',iostat=io_status,iomsg=io_message) &
+        'num_bands = '//trim(adjustl(int_to_string(nband_wann)))
+      if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) &
+        'num_wann = '//trim(adjustl(int_to_string(wannier_num_wann)))
+      if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) &
+        'num_iter = '//trim(adjustl(int_to_string(wannier_num_iter)))
+      if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) 'mp_grid = 1 1 1'
+      if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) 'gamma_only = true'
+      if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) 'write_hr = true'
+      if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) 'write_rmn = true'
+      if(io_status == 0 .and. wannier_dis_froz_max > 0d0) write(iunit,'(a,1x,es23.15)', &
+        iostat=io_status,iomsg=io_message) 'dis_froz_max =', wannier_dis_froz_max*hartree_to_ev
+      if(io_status == 0 .and. wannier_dis_win_max > 0d0) write(iunit,'(a,1x,es23.15)', &
+        iostat=io_status,iomsg=io_message) 'dis_win_max =', wannier_dis_win_max*hartree_to_ev
+      if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) ''
+      if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) 'begin unit_cell_cart'
+      if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) 'bohr'
+      if(io_status == 0) write(iunit,'(3es23.15)',iostat=io_status,iomsg=io_message) a1
+      if(io_status == 0) write(iunit,'(3es23.15)',iostat=io_status,iomsg=io_message) a2
+      if(io_status == 0) write(iunit,'(3es23.15)',iostat=io_status,iomsg=io_message) a3
+      if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) 'end unit_cell_cart'
+      if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) ''
+      if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) 'begin atoms_cart'
+      if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) 'bohr'
+      do ia=1,dc%system_tot%nion
+        if(io_status /= 0) exit
+        write(iunit,'(a,3(1x,es23.15))',iostat=io_status,iomsg=io_message) &
+          trim(element_symbol(izatom(dc%system_tot%kion(ia)))), dc%system_tot%rion(:,ia)
+      end do
+      if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) 'end atoms_cart'
+      if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) ''
+      if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) 'begin kpoints'
+      if(io_status == 0) write(iunit,'(3f12.6)',iostat=io_status,iomsg=io_message) 0d0,0d0,0d0
+      if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) 'end kpoints'
+      if(io_status == 0 .and. len_trim(wannier_projection) > 0) then
+        write(iunit,'(a)',iostat=io_status,iomsg=io_message) ''
+        if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) 'begin projections'
+        if(io_status == 0 .and. is_bond_center_projection(trim(wannier_projection))) then
+          call build_bond_center_projection_map(wannier_num_wann, bond_center_bohr)
+          do ip=1,wannier_num_wann
+            write(iunit,'(a,f18.12,a,f18.12,a,f18.12,a)',iostat=io_status,iomsg=io_message) &
+              'f=', bond_center_bohr(1,ip)/cell_length(a1), ',', &
+              bond_center_bohr(2,ip)/cell_length(a2), ',', &
+              bond_center_bohr(3,ip)/cell_length(a3), ':s'
+            if(io_status /= 0) exit
+          end do
+          deallocate(bond_center_bohr)
+        else if(io_status == 0 .and. is_pseudo_channel_projection(trim(wannier_projection))) then
+          call write_pseudo_channel_projection_block(iunit, projection_ok, message)
+          if(.not. projection_ok) io_status = 1
+        else if(io_status == 0) then
+          if(is_sp3_projection(trim(wannier_projection)) .and. nproj_csp3 < wannier_num_wann) &
+            write(iunit,'(a)',iostat=io_status,iomsg=io_message) 'random'
+          if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) trim(wannier_projection)
+        end if
+        if(io_status == 0) write(iunit,'(a)',iostat=io_status,iomsg=io_message) 'end projections'
+      end if
+      if(io_status /= 0) then
+        if(len_trim(message) == 0) message = 'atomic base .win write failed: '//trim(io_message)
+        call abort_atomic_win(writer); ok = .false.; return
+      end if
+      call finish_atomic_win(writer, ok, message)
+    end subroutine write_wannier_base_win_atomic
+
+    subroutine deactivate_sawf_win_collective(winfile)
+      use communication, only: comm_bcast
+      implicit none
+      character(*), intent(in) :: winfile
+      integer :: failure
+      logical :: local_ok
+      character(512) :: message
+      failure = 0; message = ''
+      if(dc%id_tot == 0) then
+        call deactivate_sawf_win(winfile, local_ok, message)
+        failure = merge(0,1,local_ok)
+      end if
+      call comm_bcast(failure,dc%icomm_tot,0)
+      call comm_bcast(message,dc%icomm_tot,0)
+      if(failure /= 0) call lcfo_sawf_fatal('SAWF stale .win deactivation failed: '//trim(message))
+    end subroutine deactivate_sawf_win_collective
+
+    subroutine reject_sawf_reuse_collective(resolved_command)
+      use communication, only: comm_bcast
+      implicit none
+      character(*), intent(in) :: resolved_command
+      integer :: failure
+      failure = 0
+      if(dc%id_tot == 0 .and. is_wannier90_reuse_command(resolved_command)) failure = 1
+      call comm_bcast(failure,dc%icomm_tot,0)
+      if(failure /= 0) call lcfo_sawf_fatal( &
+        'SAWF forbids reuse/skip of an existing Wannier90 checkpoint without a seed/DMN fingerprint binding')
+    end subroutine reject_sawf_reuse_collective
+
+    subroutine activate_sawf_win_collective(winfile)
+      use communication, only: comm_bcast
+      use salmon_global, only: wannier_symmetry_tolerance
+      implicit none
+      character(*), intent(in) :: winfile
+      integer :: activation_failure
+      logical :: activation_ok
+      character(512) :: activation_message
+
+      activation_failure = 0
+      activation_message = ''
+      if(dc%id_tot == 0) then
+        call activate_sawf_win(winfile, wannier_symmetry_tolerance, activation_ok, &
+          activation_message)
+        activation_failure = merge(0, 1, activation_ok)
+      end if
+      call comm_bcast(activation_failure, dc%icomm_tot, 0)
+      call comm_bcast(activation_message, dc%icomm_tot, 0)
+      if(activation_failure /= 0) call lcfo_sawf_fatal( &
+        'SAWF .win activation failed after .dmn publication: '//trim(activation_message))
+      if(dc%id_tot == 0) write(*,'(1x,a,1x,a)') &
+        '[DC-LCFO-SAWF] activated site_symmetry in', trim(winfile)
+    end subroutine activate_sawf_win_collective
+
+    subroutine generate_sawf_dmn(nband_wann)
+      use communication, only: comm_get_max,comm_bcast
+      use salmon_global, only: izatom, sysname, wannier_num_wann, &
+        wannier_site_symmetry, wannier_symmetry_file, wannier_symmetry_tolerance
+      use salmon_math, only: matrix_inverse
+      use, intrinsic :: iso_fortran_env, only: int64
+      implicit none
+      integer, intent(in) :: nband_wann
+      integer :: allocation_failure, allocation_status, failure, local_failure, ia, ifrag, iop, isym
+      integer :: projection_lmax
+      integer :: mesh(3)
+      integer, allocatable :: species(:), fragment_origin(:,:), fragment_shape(:,:)
+      integer, allocatable :: symmetry_fragment_map(:),symmetry_fragment_maps(:,:)
+      real(8) :: a1(3), a2(3), a3(3), lattice(3,3), lattice_inverse(3,3)
+      real(8) :: singular_min, singular_max, closure_residual, closure_tolerance
+      real(8) :: max_grid_residual,center_grid(3)
+      real(8), allocatable :: fractional_positions(:,:),d_wann_real(:,:,:)
+      complex(8), allocatable :: d_band_local(:,:),d_band_sum(:,:),d_wann(:,:),amn(:,:)
+      type(t_sawf_projection_channel), allocatable :: channels(:)
+      type(t_sawf_symop), allocatable :: symmetry_operations(:)
+      type(t_sawf_dmn_writer) :: writer
+      type(t_sawf_fragment_state_cache) :: state_cache
+      type(t_sawf_closed_basis) :: closed_basis
+      logical :: local_ok,grid_map_ok,fragment_map_ok,center_available,split_fragment_global_mode
+      integer :: max_targets_per_source
+      character(512) :: message
+      character(256) :: symmetry_filename,allocation_message,dmn_filename,amn_filename
+
+      if(trim(wannier_site_symmetry) == 'off') return
+      split_fragment_global_mode=(dc%n_frag==1)
+      call sawf_projection_shell_lmax(dc%system_tot%nion, wannier_num_wann, projection_lmax, local_ok, message)
+      if(.not. local_ok) call lcfo_sawf_fatal(message)
+      mesh = dc%lg_tot%num(1:3)
+      if(any(mesh <= 0) .or. nband_wann <= 0) &
+        call lcfo_sawf_fatal('SAWF D_band requires positive global mesh and band dimensions')
+      if(int(nband_wann,int64) > huge(0_int64)/int(nband_wann,int64)) &
+        call lcfo_sawf_fatal('SAWF D_band matrix size overflows int64')
+
+      allocation_failure = 0
+      allocate(species(dc%system_tot%nion), stat=allocation_status, errmsg=allocation_message)
+      if(allocation_status /= 0) allocation_failure = 1
+      if(allocation_failure == 0) then
+        allocate(fractional_positions(3,dc%system_tot%nion), stat=allocation_status, &
+          errmsg=allocation_message)
+        if(allocation_status /= 0) allocation_failure = 1
+      end if
+      if(allocation_failure == 0) then
+        allocate(fragment_origin(3,dc%n_frag),fragment_shape(3,dc%n_frag), &
+          d_band_local(nband_wann,nband_wann),d_band_sum(nband_wann,nband_wann), &
+          stat=allocation_status,errmsg=allocation_message)
+        if(allocation_status /= 0) allocation_failure = 1
+      end if
+      call comm_get_max(allocation_failure,dc%icomm_tot)
+      if(allocation_failure /= 0) then
+        if(allocated(species)) deallocate(species)
+        if(allocated(fractional_positions)) deallocate(fractional_positions)
+        if(allocated(fragment_origin)) deallocate(fragment_origin)
+        if(allocated(fragment_shape)) deallocate(fragment_shape)
+        if(allocated(d_band_local)) deallocate(d_band_local)
+        if(allocated(d_band_sum)) deallocate(d_band_sum)
+        call lcfo_sawf_fatal('SAWF D_band allocation failed on one or more ranks')
+      end if
+
+      fragment_origin=dc%ixyz_frag
+      do ifrag=1,dc%n_frag
+        call get_fragment_domain(dc,ifrag,fragment_shape(:,ifrag))
+      end do
+      call validate_sawf_fragment_tiling(mesh,fragment_origin,fragment_shape,local_ok,message)
+      failure=merge(0,1,local_ok)
+      if(failure /= 0) write(*,'(1x,a,i0,2a)') &
+        '[DC-LCFO-SAWF-DMN] rank=',dc%id_tot,' fragment tiling failed: ',trim(message)
+      call comm_get_max(failure,dc%icomm_tot)
+      if(failure /= 0) call lcfo_sawf_fatal( &
+        'SAWF fragment core domains do not tile the global mesh exactly once')
+
+      call get_lattice_vectors(a1,a2,a3)
+      lattice(:,1)=a1
+      lattice(:,2)=a2
+      lattice(:,3)=a3
+      lattice_inverse=lattice
+      call matrix_inverse(lattice_inverse)
+      do ia=1,dc%system_tot%nion
+        species(ia)=izatom(dc%system_tot%kion(ia))
+        fractional_positions(:,ia)=modulo(matmul(lattice_inverse,dc%system_tot%rion(:,ia)),1.0d0)
+      end do
+
+      if(trim(wannier_site_symmetry) == 'auto') then
+        call load_sawf_symmetry_auto(lattice,fractional_positions,species, &
+          wannier_symmetry_tolerance,symmetry_operations,local_ok,message)
+      else
+        if(wannier_symmetry_file(1:1) == '/') then
+          symmetry_filename=trim(wannier_symmetry_file)
+        else
+          symmetry_filename=trim(import_run_root_dir())//trim(wannier_symmetry_file)
+        end if
+        call load_sawf_symmetry_file(symmetry_filename,lattice,fractional_positions,species, &
+          wannier_symmetry_tolerance,symmetry_operations,local_ok,message)
+      end if
+      failure=merge(0,1,local_ok)
+      if(failure /= 0) write(*,'(1x,a,i0,2a)') &
+        '[DC-LCFO-SAWF-DMN] rank=',dc%id_tot,' symmetry load failed: ',trim(message)
+      call comm_get_max(failure,dc%icomm_tot)
+      if(failure /= 0) call lcfo_sawf_fatal( &
+        'SAWF D_band symmetry loading failed on one or more ranks')
+
+      call put_sawf_identity_first(symmetry_operations,wannier_symmetry_tolerance,local_ok,message)
+      failure=merge(0,1,local_ok)
+      call comm_get_max(failure,dc%icomm_tot)
+      if(failure /= 0) call lcfo_sawf_fatal('SAWF normalized operation set has no unique identity')
+      allocate(symmetry_fragment_maps(dc%n_frag,size(symmetry_operations)),stat=allocation_status)
+      failure=merge(0,1,allocation_status==0)
+      call comm_get_max(failure,dc%icomm_tot)
+      if(failure/=0) call lcfo_sawf_fatal('SAWF fragment-operation map allocation failed')
+      symmetry_fragment_maps=0
+
+      do isym=1,size(symmetry_operations)
+        call validate_sawf_fragment_symmetry_map(symmetry_operations(isym),mesh, &
+          fragment_origin,fragment_shape,dc%nxyz_buffer,wannier_symmetry_tolerance, &
+          grid_map_ok,fragment_map_ok,max_targets_per_source,symmetry_fragment_map, &
+          max_grid_residual,center_available,center_grid,message)
+        local_failure=merge(0,1,grid_map_ok)
+        call reduce_sawf_fragment_alignment_failure(local_failure,dc%icomm_tot,dc%id_tot,isym, &
+          grid_map_ok,fragment_map_ok,max_targets_per_source,max_grid_residual,message,failure)
+        if(failure/=0) then
+          if(allocated(symmetry_fragment_map)) deallocate(symmetry_fragment_map)
+          call lcfo_sawf_fatal( &
+            'SAWF symmetry operation is incompatible with the periodic grid')
+        end if
+        if(fragment_map_ok) then
+          symmetry_fragment_maps(:,isym)=symmetry_fragment_map
+        else
+          split_fragment_global_mode=.true.
+          symmetry_fragment_maps(:,isym)=0
+        end if
+        if(dc%id_tot==0) then
+          if(center_available) then
+            write(*,'(1x,a,i0,2(a,l1),a,i0,a,es13.5,a,3f12.5)') &
+              '[DC-LCFO-SAWF-ALIGN] operation=',isym, &
+              ' grid_map_ok=',grid_map_ok,' fragment_map_ok=',fragment_map_ok, &
+              ' max_targets_per_source=',max_targets_per_source, &
+              ' max_grid_residual=',max_grid_residual,' center_grid=',center_grid
+          else
+            write(*,'(1x,a,i0,2(a,l1),a,i0,a,es13.5)') &
+              '[DC-LCFO-SAWF-ALIGN] operation=',isym, &
+              ' grid_map_ok=',grid_map_ok,' fragment_map_ok=',fragment_map_ok, &
+              ' max_targets_per_source=',max_targets_per_source, &
+              ' max_grid_residual=',max_grid_residual
+          end if
+        end if
+        if(allocated(symmetry_fragment_map)) deallocate(symmetry_fragment_map)
+      end do
+      local_failure=merge(0,1,.not.split_fragment_global_mode)
+      call comm_get_max(local_failure,dc%icomm_tot)
+      split_fragment_global_mode=(local_failure/=0)
+      if(split_fragment_global_mode .and. dc%id_tot==0) write(*,'(1x,a)') &
+        '[DC-LCFO-SAWF-GLOBAL-SPLIT] build D_band from split fragment blocks; skip local closed-basis gate'
+
+      failure=0; message=''
+      if(dc%id_tot == 0) then
+        call build_sawf_spd_projection_map(dc%system_tot%nion,channels,local_ok,message,projection_lmax)
+        if(local_ok .and. size(channels)/=wannier_num_wann) then
+          local_ok=.false.; message='SAWF D_wann channel count differs from num_wann'
+        end if
+        if(local_ok) then
+          amn_filename=trim(dc%base_directory)//trim(sysname)//'.amn'
+          call read_sawf_amn_matrix(amn_filename,nband_wann,wannier_num_wann,amn,local_ok,message)
+        end if
+        if(local_ok) then
+          dmn_filename=trim(dc%base_directory)//trim(sysname)//'.dmn'
+          call begin_sawf_dmn(writer,dmn_filename,nband_wann,wannier_num_wann, &
+            size(symmetry_operations),max(1.0d-10,wannier_symmetry_tolerance),local_ok,message)
+        end if
+        failure=merge(0,1,local_ok)
+      end if
+      call comm_bcast(failure,dc%icomm_tot,0)
+      call comm_bcast(message,dc%icomm_tot,0)
+      if(failure /= 0) then
+        if(dc%id_tot == 0) call abort_sawf_dmn(writer)
+        call lcfo_sawf_fatal('SAWF DMN initialization failed: '//trim(message))
+      end if
+
+      closure_tolerance=max(1.0d-10,wannier_symmetry_tolerance)
+      call prepare_sawf_fragment_state_cache(nband_wann,fragment_shape,state_cache,local_ok,message)
+      failure=merge(0,1,local_ok)
+      if(failure/=0) write(*,'(1x,a,i0,2a)') '[DC-LCFO-SAWF-DMN] rank=',dc%id_tot, &
+        ' source cache preparation failed: ',trim(message)
+      call comm_get_max(failure,dc%icomm_tot)
+      if(failure/=0) then
+        if(dc%id_tot==0) call abort_sawf_dmn(writer)
+        call clear_sawf_fragment_state_cache(state_cache)
+        call lcfo_sawf_fatal('SAWF source fragment state cache preparation failed')
+      end if
+      local_ok=.true.; message=''
+      if(.not.split_fragment_global_mode) call build_sawf_closed_fragment_seed_basis( &
+        nband_wann,mesh,fragment_origin,fragment_shape,symmetry_operations, &
+        symmetry_fragment_maps,state_cache,closed_basis,local_ok,message)
+      failure=merge(0,1,local_ok)
+      if(failure/=0) write(*,'(1x,a,i0,2a)') '[DC-LCFO-SAWF-CLOSED] rank=',dc%id_tot, &
+        ' construction failed: ',trim(message)
+      call comm_get_max(failure,dc%icomm_tot)
+      if(failure/=0) then
+        if(dc%id_tot==0) call abort_sawf_dmn(writer)
+        call clear_sawf_closed_basis(closed_basis)
+        call clear_sawf_fragment_state_cache(state_cache)
+        call lcfo_sawf_fatal('SAWF symmetry-closed seed basis construction failed')
+      end if
+      do iop=1,size(symmetry_operations)
+        call build_sawf_dmn_operation_fragment_local(nband_wann,mesh,fragment_origin, &
+          fragment_shape,iop,symmetry_operations(iop),wannier_symmetry_tolerance, &
+          state_cache,d_band_local,local_ok,message)
+        failure=merge(0,1,local_ok)
+        if(failure /= 0) write(*,'(1x,a,i0,a,i0,2a)') &
+          '[DC-LCFO-SAWF-DMN] rank=',dc%id_tot,' operation=',iop, &
+          ' fragment-local build failed: ',trim(message)
+        call comm_get_max(failure,dc%icomm_tot)
+        if(failure /= 0) then
+          if(dc%id_tot == 0) call abort_sawf_dmn(writer)
+          call clear_sawf_fragment_state_cache(state_cache)
+          call lcfo_sawf_fatal( &
+            'SAWF D_band fragment-local construction failed on one or more ranks')
+        end if
+        call reduce_sawf_band_matrix(d_band_local,d_band_sum,nband_wann)
+        if(iop==2 .and. dc%id_tot==0) call diagnose_sawf_hamiltonian_covariance_blocks( &
+          d_band_sum,esp_tot(1:nband_wann,1),min(128,nband_wann), &
+          min(wannier_num_wann,nband_wann))
+        if(iop==2) call diagnose_sawf_hamiltonian_component_covariance(d_band_sum,nband_wann)
+
+        failure=0; message=''
+        singular_min=0.0d0; singular_max=0.0d0; closure_residual=0.0d0
+        if(dc%id_tot == 0) then
+          call build_sawf_wannier_representation(symmetry_operations(iop:iop),channels, &
+            d_wann_real,local_ok,message)
+          if(local_ok) then
+            allocate(d_wann(wannier_num_wann,wannier_num_wann),stat=allocation_status)
+            if(allocation_status/=0) then
+              local_ok=.false.; message='SAWF D_wann complex conversion allocation failed'
+            else
+              d_wann=cmplx(d_wann_real(:,:,1),0.0d0,kind=8)
+              call append_sawf_dmn_operation(writer,iop,d_wann,d_band_sum, &
+                esp_tot(1:nband_wann,1),amn,iop==1,local_ok,message, &
+                singular_min,singular_max,closure_residual)
+            end if
+          end if
+          if(allocated(d_wann_real)) deallocate(d_wann_real)
+          if(allocated(d_wann)) deallocate(d_wann)
+          failure=merge(0,1,local_ok)
+        end if
+        call comm_bcast(failure,dc%icomm_tot,0)
+        call comm_bcast(message,dc%icomm_tot,0)
+        call comm_bcast(singular_min,dc%icomm_tot,0)
+        call comm_bcast(singular_max,dc%icomm_tot,0)
+        call comm_bcast(closure_residual,dc%icomm_tot,0)
+        if(dc%id_tot == 0) write(*,'(1x,a,i0,4(a,es13.5))') &
+          '[DC-LCFO-SAWF-DMN] operation=',iop,' singular_min=',singular_min, &
+          ' singular_max=',singular_max,' closure_residual=',closure_residual, &
+          ' tolerance=',closure_tolerance
+        if(failure /= 0) then
+          if(dc%id_tot == 0) call abort_sawf_dmn(writer)
+          call clear_sawf_fragment_state_cache(state_cache)
+          call lcfo_sawf_fatal('SAWF DMN operation validation/write failed: '//trim(message))
+        end if
+      end do
+
+      failure=0
+      if(dc%id_frag==0) then
+        write(*,'(1x,a,i0,5(a,i0))') '[DC-LCFO-SAWF-DMN-CACHE] rank=',dc%id_tot, &
+          ' source_seed_reads=',state_cache%source_seed_reads, &
+          ' source_reconstructions=',state_cache%source_reconstructions, &
+          ' target_seed_reads=',state_cache%target_seed_reads, &
+          ' target_reconstructions=',state_cache%target_reconstructions, &
+          ' target_cache_hits=',state_cache%target_cache_hits
+        if(state_cache%source_seed_reads/=1 .or. state_cache%source_reconstructions/=1) failure=1
+      end if
+      call comm_get_max(failure,dc%icomm_tot)
+      if(failure/=0) then
+        if(dc%id_tot==0) call abort_sawf_dmn(writer)
+        call clear_sawf_fragment_state_cache(state_cache)
+        call lcfo_sawf_fatal('SAWF source fragment was not reconstructed exactly once')
+      end if
+
+      failure=0; message=''
+      if(dc%id_tot == 0) then
+        call finish_sawf_dmn(writer,symmetry_operations,local_ok,message)
+        failure=merge(0,1,local_ok)
+      end if
+      call comm_bcast(failure,dc%icomm_tot,0)
+      call comm_bcast(message,dc%icomm_tot,0)
+      if(failure /= 0) then
+        if(dc%id_tot == 0) call abort_sawf_dmn(writer)
+        call clear_sawf_fragment_state_cache(state_cache)
+        call lcfo_sawf_fatal('SAWF DMN group validation/publication failed: '//trim(message))
+      end if
+      if(dc%id_tot == 0) write(*,'(1x,a,i0,a,i0,5(a,es13.5))') &
+        '[DC-LCFO-SAWF-DMN] published operations=',size(symmetry_operations), &
+        ' bands=',nband_wann,' unitarity_max=',writer%max_unitarity, &
+        ' hamiltonian_max=',writer%max_hamiltonian,' amn_max=',writer%max_amn, &
+        ' group_wann_max=',writer%max_group_wann,' group_band_max=',writer%max_group_band
+      call clear_sawf_fragment_state_cache(state_cache)
+      call clear_sawf_closed_basis(closed_basis)
+      deallocate(species,fractional_positions,fragment_origin,fragment_shape, &
+        d_band_local,d_band_sum,symmetry_operations,symmetry_fragment_maps)
+      if(dc%id_tot == 0) deallocate(channels,amn)
+    end subroutine generate_sawf_dmn
+
+    subroutine put_sawf_identity_first(operations,tolerance,ok,message)
+      type(t_sawf_symop), intent(inout) :: operations(:)
+      real(8), intent(in) :: tolerance
+      logical, intent(out) :: ok
+      character(*), intent(out) :: message
+      type(t_sawf_symop) :: temporary
+      integer :: iop,identity_count,identity_index,i
+      real(8) :: wrapped(3)
+      identity_count=0; identity_index=0
+      do iop=1,size(operations)
+        wrapped=operations(iop)%tau-anint(operations(iop)%tau)
+        if(all(operations(iop)%W==reshape([1,0,0,0,1,0,0,0,1],[3,3])) .and. &
+            maxval(abs(wrapped))<=tolerance) then
+          identity_count=identity_count+1; identity_index=iop
+        end if
+      end do
+      if(identity_count/=1) then
+        ok=.false.; write(message,'(a,i0)') 'SAWF identity operation count=',identity_count; return
+      end if
+      if(identity_index/=1) then
+        temporary=operations(1); operations(1)=operations(identity_index); operations(identity_index)=temporary
+      end if
+      do i=1,size(operations(1)%atom_map)
+        if(operations(1)%atom_map(i)/=i) then
+          ok=.false.; message='SAWF identity operation has a non-identity atom map'; return
+        end if
+      end do
+      ok=.true.; message=''
+    end subroutine put_sawf_identity_first
+
+    subroutine read_sawf_amn_matrix(filename,expected_bands,expected_wann,amn,ok,message)
+      use filesystem, only: get_filehandle
+      implicit none
+      character(*), intent(in) :: filename
+      integer, intent(in) :: expected_bands,expected_wann
+      complex(8), allocatable, intent(out) :: amn(:,:)
+      logical, intent(out) :: ok
+      character(*), intent(out) :: message
+      integer :: iunit,io_status,nb,nk,nw,entry,ib,iw,ik,allocation_status
+      real(8) :: re,im
+      logical, allocatable :: seen(:,:)
+      character(512) :: header,io_message
+      ok=.false.; message=''
+      iunit=get_filehandle()
+      open(iunit,file=filename,status='old',action='read',iostat=io_status,iomsg=io_message)
+      if(io_status/=0) then; message='SAWF AMN open failed: '//trim(io_message); return; endif
+      read(iunit,'(a)',iostat=io_status,iomsg=io_message) header
+      if(io_status==0) read(iunit,*,iostat=io_status,iomsg=io_message) nb,nk,nw
+      if(io_status/=0 .or. nb/=expected_bands .or. nk/=1 .or. nw/=expected_wann) then
+        message='SAWF AMN header does not match current-run Gamma seed'; close(iunit); return
+      end if
+      allocate(amn(nb,nw),seen(nb,nw),stat=allocation_status)
+      if(allocation_status/=0) then; message='SAWF AMN allocation failed'; close(iunit); return; endif
+      amn=(0.0d0,0.0d0); seen=.false.
+      do entry=1,nb*nw
+        read(iunit,*,iostat=io_status,iomsg=io_message) ib,iw,ik,re,im
+        if(io_status/=0 .or. ib<1 .or. ib>nb .or. iw<1 .or. iw>nw .or. ik/=1) then
+          message='SAWF AMN entry is malformed or out of range'; close(iunit); deallocate(amn,seen); return
+        end if
+        if(seen(ib,iw) .or. .not.ieee_is_finite(re) .or. .not.ieee_is_finite(im)) then
+          message='SAWF AMN contains a duplicate or non-finite entry'; close(iunit); deallocate(amn,seen); return
+        end if
+        seen(ib,iw)=.true.; amn(ib,iw)=cmplx(re,im,kind=8)
+      end do
+      read(iunit,*,iostat=io_status)
+      if(io_status==0 .or. .not.all(seen)) then
+        message='SAWF AMN has trailing or missing entries'; close(iunit); deallocate(amn,seen); return
+      end if
+      close(iunit); deallocate(seen); ok=.true.
+    end subroutine read_sawf_amn_matrix
+
+    subroutine prepare_sawf_fragment_state_cache(nband_wann,fragment_shape,cache,ok,message)
+      implicit none
+      integer, intent(in) :: nband_wann,fragment_shape(:,:)
+      type(t_sawf_fragment_state_cache), intent(inout) :: cache
+      logical, intent(out) :: ok
+      character(*), intent(out) :: message
+
+      call clear_sawf_fragment_state_cache(cache)
+      ok=.true.; message=''
+      if(dc%id_frag/=0 .and. dc%n_frag/=1) return
+      cache%source_seed_reads=1
+      call load_sawf_fragment_state_entry(dc%i_frag,nband_wann,fragment_shape(:,dc%i_frag), &
+        cache%source,ok,message)
+      if(ok) cache%source_reconstructions=1
+    end subroutine prepare_sawf_fragment_state_cache
+
+    subroutine get_sawf_target_cache_slot(target_frag,nband_wann,fragment_shape,cache, &
+        use_source,target_slot,ok,message)
+      implicit none
+      integer, intent(in) :: target_frag,nband_wann,fragment_shape(:,:)
+      type(t_sawf_fragment_state_cache), intent(inout) :: cache
+      logical, intent(out) :: use_source,ok
+      integer, intent(out) :: target_slot
+      character(*), intent(out) :: message
+      integer :: slot
+
+      ok=.false.; message=''; use_source=.false.; target_slot=0
+      if(target_frag==cache%source%fragment) then
+        use_source=.true.; ok=.true.; cache%target_cache_hits=cache%target_cache_hits+1
+        return
+      end if
+      do slot=1,sawf_target_cache_capacity
+        if(cache%target(slot)%fragment==target_frag .and. allocated(cache%target(slot)%states)) then
+          target_slot=slot; ok=.true.; cache%target_cache_hits=cache%target_cache_hits+1
+          return
+        end if
+      end do
+      target_slot=cache%next_target_slot
+      cache%next_target_slot=1+modulo(cache%next_target_slot,sawf_target_cache_capacity)
+      call clear_sawf_fragment_state_entry(cache%target(target_slot))
+      cache%target_seed_reads=cache%target_seed_reads+1
+      call load_sawf_fragment_state_entry(target_frag,nband_wann,fragment_shape(:,target_frag), &
+        cache%target(target_slot),ok,message)
+      if(.not.ok) return
+      cache%target_reconstructions=cache%target_reconstructions+1
+      if(cache%target(target_slot)%nspin/=cache%source%nspin .or. &
+          cache%target(target_slot)%nstate_frag/=cache%source%nstate_frag .or. &
+          cache%target(target_slot)%nstate_tot/=cache%source%nstate_tot) then
+        message='SAWF cached target seed metadata differs from the source fragment'
+        call clear_sawf_fragment_state_entry(cache%target(target_slot)); ok=.false.; return
+      end if
+      ok=.true.
+    end subroutine get_sawf_target_cache_slot
+
+    subroutine load_sawf_fragment_state_entry(ifrag,nband_wann,expected_shape,entry,ok,message)
+      implicit none
+      integer, intent(in) :: ifrag,nband_wann,expected_shape(3)
+      type(t_sawf_fragment_state_entry), intent(inout) :: entry
+      logical, intent(out) :: ok
+      character(*), intent(out) :: message
+      integer :: shape_read(3),nspin_file,nstate_frag_file,nstate_tot_file,n_basis_frag
+      integer :: shape_buffer_read(3),nxyz_buffer_read(3),nxyz_box_read(3)
+      integer :: nspin_buffer,nstate_frag_buffer,nstate_tot_buffer,n_basis_buffer
+      integer :: npoints,allocation_status
+      real(8), allocatable :: basis(:,:),coef(:,:),buffer_basis(:,:),coef_buffer(:,:)
+      logical :: read_ok
+      character(512) :: local_message
+
+      call clear_sawf_fragment_state_entry(entry)
+      if(sawf_explicit_basis_active) then
+        call read_sawf_closed_fragment_state_entry(ifrag,nband_wann,expected_shape,entry,ok,message)
+        return
+      end if
+      call read_fragment_lcfo_seed_for_wannier_import(dc,ifrag,nband_wann,shape_read, &
+        nspin_file,nstate_frag_file,nstate_tot_file,n_basis_frag,basis,coef,read_ok,.true.,local_message)
+      if(.not.read_ok .or. any(shape_read/=expected_shape) .or. nspin_file/=1 .or. &
+          nstate_tot_file<nband_wann .or. n_basis_frag<1 .or. n_basis_frag>nstate_frag_file) then
+        write(message,'(a,i0,2a)') 'failed to read consistent current-run LCFO fragment ', &
+          ifrag,': ',trim(local_message)
+        if(allocated(basis)) deallocate(basis)
+        if(allocated(coef)) deallocate(coef)
+        ok=.false.; return
+      end if
+      call checked_sawf_fragment_point_count(shape_read,npoints,ok,local_message)
+      if(.not.ok) then
+        message=trim(local_message); deallocate(basis,coef); return
+      end if
+      call read_fragment_lcfo_buffer_seed_for_wannier_import(dc,ifrag,nband_wann, &
+        shape_buffer_read,nxyz_buffer_read,nxyz_box_read,nspin_buffer,nstate_frag_buffer, &
+        nstate_tot_buffer,n_basis_buffer,buffer_basis,coef_buffer,read_ok)
+      if(.not.read_ok .or. any(shape_buffer_read/=shape_read) .or. &
+          any(nxyz_buffer_read/=dc%nxyz_buffer) .or. nspin_buffer/=nspin_file .or. &
+          nstate_frag_buffer/=nstate_frag_file .or. nstate_tot_buffer/=nstate_tot_file .or. &
+          n_basis_buffer/=n_basis_frag) then
+        message='SAWF buffered fragment seed metadata differs from the current core seed'
+        if(allocated(buffer_basis)) deallocate(buffer_basis)
+        if(allocated(coef_buffer)) deallocate(coef_buffer)
+        deallocate(basis,coef); ok=.false.; return
+      end if
+      allocate(entry%basis(npoints,n_basis_frag),entry%states(npoints,nband_wann), &
+        entry%buffer_basis(product(nxyz_box_read),n_basis_frag), &
+        stat=allocation_status)
+      if(allocation_status/=0) then
+        call clear_sawf_fragment_state_entry(entry)
+        message='SAWF cached fragment-state allocation failed'
+        deallocate(basis,coef,buffer_basis,coef_buffer); ok=.false.; return
+      end if
+      entry%basis=basis(:,1:n_basis_frag)
+      entry%buffer_basis=buffer_basis(:,1:n_basis_frag)
+      entry%states=matmul(cmplx(basis(:,1:n_basis_frag),0.0d0,kind=8), &
+        cmplx(coef(1:n_basis_frag,1:nband_wann),0.0d0,kind=8))
+      entry%fragment=ifrag; entry%shape=shape_read; entry%buffer_shape=nxyz_box_read
+      entry%buffer_width=nxyz_buffer_read; entry%nspin=nspin_file
+      entry%nstate_frag=nstate_frag_file; entry%nstate_tot=nstate_tot_file; entry%n_basis=n_basis_frag
+      deallocate(basis,coef,buffer_basis,coef_buffer); ok=.true.; message=''
+    end subroutine load_sawf_fragment_state_entry
+
+    subroutine read_sawf_closed_fragment_state_entry(ifrag,nband_wann,expected_shape,entry,ok,message)
+      use filesystem, only: get_filehandle
+      implicit none
+      integer, intent(in) :: ifrag,nband_wann,expected_shape(3)
+      type(t_sawf_fragment_state_entry), intent(inout) :: entry
+      logical, intent(out) :: ok
+      character(*), intent(out) :: message
+      integer :: iunit,io,magic_file,version_file,shape_file(3),buffer_file(3)
+      integer :: nspin_file,nstate_frag_file,nstate_tot_file,n_basis_file
+      integer :: npoint_core,npoint_buffer,allocation_status
+      character(64) :: token_file
+      character(256) :: filename
+      real(8), allocatable :: coef(:,:),esp(:)
+
+      ok=.false.; message=''
+      write(filename,'(a,a,i6.6,a,a)') trim(import_run_root_dir()), &
+        'data_dcdft/fragments/',ifrag,'/','sawf_closed_seed.bin'
+      iunit=get_filehandle()
+      open(iunit,file=filename,form='unformatted',access='stream',status='old',iostat=io)
+      if(io/=0) then; message='SAWF closed seed file is missing'; return; end if
+      read(iunit,iostat=io) magic_file,version_file
+      if(io==0) read(iunit,iostat=io) token_file
+      if(io==0) read(iunit,iostat=io) shape_file,buffer_file,nspin_file,nstate_frag_file,nstate_tot_file
+      if(io==0) read(iunit,iostat=io) n_basis_file
+      if(io/=0 .or. magic_file/=sawf_closed_seed_magic .or. &
+          version_file/=sawf_closed_seed_version .or. trim(token_file)/=trim(current_sawf_seed_token)) then
+        close(iunit); message='SAWF closed seed header or current-run token is invalid'; return
+      end if
+      if(any(shape_file/=expected_shape) .or. any(buffer_file/=dc%nxyz_buffer) .or. &
+          nspin_file/=1 .or. nstate_frag_file<1 .or. nstate_tot_file<nband_wann .or. &
+          n_basis_file<1 .or. n_basis_file>nstate_frag_file) then
+        close(iunit); message='SAWF closed seed dimensions are inconsistent'; return
+      end if
+      npoint_core=product(shape_file); npoint_buffer=product(shape_file+2*buffer_file)
+      allocate(entry%basis(npoint_core,n_basis_file), &
+        entry%buffer_basis(npoint_buffer,n_basis_file),entry%states(npoint_core,nband_wann), &
+        coef(n_basis_file,nstate_tot_file),esp(nstate_tot_file),stat=allocation_status)
+      if(allocation_status/=0) then
+        close(iunit); call clear_sawf_fragment_state_entry(entry)
+        message='SAWF closed seed cache allocation failed'; return
+      end if
+      read(iunit,iostat=io) entry%basis
+      if(io==0) read(iunit,iostat=io) entry%buffer_basis
+      if(io==0) read(iunit,iostat=io) coef
+      if(io==0) read(iunit,iostat=io) esp
+      close(iunit)
+      if(io/=0 .or. .not.all(ieee_is_finite(entry%basis)) .or. &
+          .not.all(ieee_is_finite(entry%buffer_basis)) .or. .not.all(ieee_is_finite(coef))) then
+        call clear_sawf_fragment_state_entry(entry); deallocate(coef,esp)
+        message='SAWF closed seed payload is truncated or non-finite'; return
+      end if
+      entry%states=matmul(cmplx(entry%basis,0.0d0,kind=8), &
+        cmplx(coef(:,1:nband_wann),0.0d0,kind=8))
+      entry%fragment=ifrag; entry%shape=shape_file; entry%buffer_width=buffer_file
+      entry%buffer_shape=shape_file+2*buffer_file; entry%nspin=nspin_file
+      entry%nstate_frag=nstate_frag_file; entry%nstate_tot=nstate_tot_file; entry%n_basis=n_basis_file
+      deallocate(coef,esp); ok=.true.; message=''
+    end subroutine read_sawf_closed_fragment_state_entry
+
+    subroutine clear_sawf_fragment_state_entry(entry)
+      implicit none
+      type(t_sawf_fragment_state_entry), intent(inout) :: entry
+      if(allocated(entry%basis)) deallocate(entry%basis)
+      if(allocated(entry%buffer_basis)) deallocate(entry%buffer_basis)
+      if(allocated(entry%states)) deallocate(entry%states)
+      entry%fragment=0; entry%shape=0; entry%buffer_shape=0; entry%buffer_width=0
+      entry%nspin=0; entry%nstate_frag=0
+      entry%nstate_tot=0; entry%n_basis=0
+    end subroutine clear_sawf_fragment_state_entry
+
+    subroutine clear_sawf_fragment_state_cache(cache)
+      implicit none
+      type(t_sawf_fragment_state_cache), intent(inout) :: cache
+      integer :: slot
+      call clear_sawf_fragment_state_entry(cache%source)
+      do slot=1,sawf_target_cache_capacity
+        call clear_sawf_fragment_state_entry(cache%target(slot))
+      end do
+      cache%next_target_slot=1; cache%source_seed_reads=0; cache%source_reconstructions=0
+      cache%target_seed_reads=0; cache%target_reconstructions=0; cache%target_cache_hits=0
+    end subroutine clear_sawf_fragment_state_cache
+
+    subroutine build_sawf_closed_fragment_seed_basis(nband_wann,mesh,fragment_origin, &
+        fragment_shape,operations,fragment_maps,cache,closed,ok,message)
+      use salmon_global, only: wannier_symmetry_tolerance
+      implicit none
+      integer, intent(in) :: nband_wann,mesh(3),fragment_origin(:,:),fragment_shape(:,:)
+      type(t_sawf_symop), intent(in) :: operations(:)
+      integer, intent(in) :: fragment_maps(:,:)
+      type(t_sawf_fragment_state_cache), intent(inout) :: cache
+      type(t_sawf_closed_basis), intent(inout) :: closed
+      logical, intent(out) :: ok
+      character(*), intent(out) :: message
+      real(8), allocatable :: core_candidate(:,:),buffer_candidate(:,:)
+      integer, allocatable :: core_map(:),buffer_map(:)
+      integer :: iop,source_frag,target_frag,target_slot,ncandidate,column_first
+      integer :: npoint_core,npoint_buffer,allocation_status
+      logical :: use_source,local_ok
+      character(512) :: detail
+
+      call clear_sawf_closed_basis(closed)
+      ok=.true.; message=''
+      if(dc%id_frag/=0) return
+      target_frag=dc%i_frag
+      if(size(fragment_maps,1)/=dc%n_frag .or. size(fragment_maps,2)/=size(operations)) then
+        message='SAWF closed-basis fragment-map dimensions are inconsistent'
+        ok=.false.; return
+      end if
+      ncandidate=0
+      do iop=1,size(operations)
+        if(count(fragment_maps(:,iop)==target_frag)/=1) then
+          message='SAWF closed-basis operation has no unique inverse source fragment'
+          ok=.false.; return
+        end if
+        source_frag=findloc(fragment_maps(:,iop)==dc%i_frag,.true.,dim=1)
+        call get_sawf_target_cache_slot(source_frag,nband_wann,fragment_shape,cache, &
+          use_source,target_slot,local_ok,detail)
+        if(.not.local_ok) then; message=trim(detail); ok=.false.; return; end if
+        if(use_source) then
+          ncandidate=ncandidate+cache%source%n_basis
+        else
+          ncandidate=ncandidate+cache%target(target_slot)%n_basis
+        end if
+      end do
+      npoint_core=product(fragment_shape(:,target_frag))
+      npoint_buffer=product(fragment_shape(:,target_frag)+2*dc%nxyz_buffer)
+      allocate(core_candidate(npoint_core,ncandidate), &
+        buffer_candidate(npoint_buffer,ncandidate),stat=allocation_status)
+      if(allocation_status/=0) then
+        message='SAWF closed-basis candidate allocation failed'
+        ok=.false.; return
+      end if
+      core_candidate=0.0d0; buffer_candidate=0.0d0; column_first=1
+      do iop=1,size(operations)
+        source_frag=findloc(fragment_maps(:,iop)==dc%i_frag,.true.,dim=1)
+        call get_sawf_target_cache_slot(source_frag,nband_wann,fragment_shape,cache, &
+          use_source,target_slot,local_ok,detail)
+        if(.not.local_ok) then
+          message=trim(detail); deallocate(core_candidate,buffer_candidate); ok=.false.; return
+        end if
+        call build_sawf_fragment_buffer_point_map(operations(iop),mesh, &
+          fragment_origin(:,source_frag),fragment_shape(:,source_frag), &
+          fragment_origin(:,target_frag),fragment_shape(:,target_frag),[0,0,0], &
+          wannier_symmetry_tolerance,core_map,local_ok,detail)
+        if(.not.local_ok) then
+          message=trim(detail); deallocate(core_candidate,buffer_candidate); ok=.false.; return
+        end if
+        call build_sawf_fragment_buffer_point_map(operations(iop),mesh, &
+          fragment_origin(:,source_frag),fragment_shape(:,source_frag), &
+          fragment_origin(:,target_frag),fragment_shape(:,target_frag),dc%nxyz_buffer, &
+          wannier_symmetry_tolerance,buffer_map,local_ok,detail)
+        if(.not.local_ok) then
+          message=trim(detail); deallocate(core_map,core_candidate,buffer_candidate); ok=.false.; return
+        end if
+        if(use_source) then
+          associate(source_entry=>cache%source)
+            call append_sawf_mapped_basis(source_entry%basis,core_map,core_candidate, &
+              column_first,local_ok,detail)
+            if(local_ok) call append_sawf_mapped_basis(source_entry%buffer_basis,buffer_map, &
+              buffer_candidate,column_first,local_ok,detail)
+            column_first=column_first+source_entry%n_basis
+          end associate
+        else
+          associate(source_entry=>cache%target(target_slot))
+            call append_sawf_mapped_basis(source_entry%basis,core_map,core_candidate, &
+              column_first,local_ok,detail)
+            if(local_ok) call append_sawf_mapped_basis(source_entry%buffer_basis,buffer_map, &
+              buffer_candidate,column_first,local_ok,detail)
+            column_first=column_first+source_entry%n_basis
+          end associate
+        end if
+        deallocate(core_map,buffer_map)
+        if(.not.local_ok) then
+          message=trim(detail); deallocate(core_candidate,buffer_candidate); ok=.false.; return
+        end if
+      end do
+      call build_sawf_closed_core_buffer_basis(core_candidate,buffer_candidate,hvol, &
+        max(1.0d-10,wannier_symmetry_tolerance),npoint_core,closed,local_ok,detail)
+      deallocate(core_candidate,buffer_candidate)
+      if(.not.local_ok) then; message=trim(detail); ok=.false.; return; end if
+      write(*,'(1x,a,i0,4(a,i0),2(a,es13.5))') '[DC-LCFO-SAWF-CLOSED] rank=',dc%id_tot, &
+        ' fragment=',target_frag,' candidates=',closed%ncandidate,' basis=',closed%nbasis, &
+        ' buffer_points=',closed%npoint_buffer,' singular_max=',closed%singular_values(1), &
+        ' singular_min=',closed%singular_values(closed%nbasis)
+      ok=.true.; message=''
+    end subroutine build_sawf_closed_fragment_seed_basis
+
+    subroutine build_sawf_dmn_operation_fragment_local(nband_wann,mesh,fragment_origin, &
+        fragment_shape,operation_index,operation,grid_tolerance,cache,d_band_local,ok,message)
+      implicit none
+      integer, intent(in) :: nband_wann,mesh(3),fragment_origin(:,:),fragment_shape(:,:),operation_index
+      type(t_sawf_symop), intent(in) :: operation
+      real(8), intent(in) :: grid_tolerance
+      type(t_sawf_fragment_state_cache), intent(inout) :: cache
+      complex(8), intent(out) :: d_band_local(nband_wann,nband_wann)
+      logical, intent(out) :: ok
+      character(*), intent(out) :: message
+      integer :: source_frag,target_frag,nsource,nmapped,npair,target_slot,expected_local_points
+      integer, parameter :: histogram_entry_cap=32
+      integer :: source_shape(3),source_global(3),target_global(3)
+      integer :: target_owner,target_local(3),ix,iy,iz,p,allocation_status
+      integer :: listed_entries,nonzero_entries,truncated_entries
+      integer, allocatable :: source_points(:),target_points(:),target_owner_list(:), &
+        target_local_flat(:),target_histogram(:)
+      complex(8), allocatable :: block_contribution(:,:)
+      logical :: map_ok,use_source
+      character(512) :: local_message
+      character(1024) :: histogram_text
+      character(64) :: histogram_entry
+      real(8) :: block_leakage,max_block_leakage,aggregate_leakage
+      real(8) :: block_residual_norm2,block_transformed_norm2
+      real(8) :: residual_norm2_sum,transformed_norm2_sum
+
+      ok=.false.; message=''; d_band_local=(0.0d0,0.0d0)
+      if(dc%id_frag/=0 .and. dc%n_frag/=1) then
+        ok=.true.
+        return
+      end if
+      source_frag=cache%source%fragment
+      if(source_frag/=dc%i_frag .or. .not.allocated(cache%source%states)) then
+        message='SAWF source fragment state cache is not prepared'
+        return
+      end if
+      source_shape=cache%source%shape; nsource=size(cache%source%states,1)
+      allocate(source_points(nsource),target_points(nsource), &
+        target_owner_list(nsource),target_local_flat(nsource), &
+        target_histogram(dc%n_frag),block_contribution(nband_wann,nband_wann), &
+        stat=allocation_status)
+      if(allocation_status /= 0) then
+        message='source fragment D_band allocation failed'
+        return
+      end if
+      p=0
+      do iz=1,source_shape(3)
+        do iy=1,source_shape(2)
+          do ix=1,source_shape(1)
+            p=p+1
+            source_global=1+modulo(fragment_origin(:,source_frag)+[ix-1,iy-1,iz-1],mesh)
+            call map_sawf_periodic_grid_point(operation,mesh,grid_tolerance, &
+              source_global,target_global,map_ok,local_message)
+            if(.not.map_ok) then
+              message=trim(local_message)
+              return
+            end if
+            call locate_sawf_fragment_point(target_global,mesh,fragment_origin,fragment_shape, &
+              target_owner,target_local,map_ok,local_message)
+            if(.not.map_ok) then
+              message=trim(local_message)
+              return
+            end if
+            target_owner_list(p)=target_owner
+            target_local_flat(p)=target_local(1)+(target_local(2)-1)*fragment_shape(1,target_owner) + &
+              (target_local(3)-1)*fragment_shape(1,target_owner)*fragment_shape(2,target_owner)
+          end do
+        end do
+      end do
+      nmapped=0
+      target_histogram=0
+      do p=1,nsource
+        if(dc%n_frag==1 .and. modulo(p-1,dc%isize_frag)/=dc%id_frag) cycle
+        target_histogram(target_owner_list(p))=target_histogram(target_owner_list(p))+1
+        nmapped=nmapped+1
+      end do
+      max_block_leakage=0.0d0
+      residual_norm2_sum=0.0d0
+      transformed_norm2_sum=0.0d0
+      do target_frag=1,dc%n_frag
+        npair=target_histogram(target_frag)
+        if(npair == 0) cycle
+        call get_sawf_target_cache_slot(target_frag,nband_wann,fragment_shape,cache, &
+          use_source,target_slot,map_ok,local_message)
+        if(.not.map_ok) then; message=trim(local_message); return; end if
+        npair=0
+        do p=1,nsource
+          if(dc%n_frag==1 .and. modulo(p-1,dc%isize_frag)/=dc%id_frag) cycle
+          if(target_owner_list(p) /= target_frag) cycle
+          npair=npair+1
+          source_points(npair)=p
+          target_points(npair)=target_local_flat(p)
+        end do
+        if(use_source) then
+          call diagnose_sawf_fragment_basis_closure(cache%source%basis,cache%source%basis, &
+            source_points(1:npair),target_points(1:npair),dc%system_tot%hvol, &
+            block_leakage,block_residual_norm2,block_transformed_norm2,map_ok,local_message)
+          if(.not.map_ok) then; message=trim(local_message); return; end if
+          call accumulate_sawf_dmn_band_blocks(cache%source%states,cache%source%states, &
+            source_points(1:npair),target_points(1:npair),dc%system_tot%hvol, &
+            block_contribution,map_ok,local_message)
+        else
+          call diagnose_sawf_fragment_basis_closure(cache%source%basis, &
+            cache%target(target_slot)%basis,source_points(1:npair),target_points(1:npair), &
+            dc%system_tot%hvol,block_leakage,block_residual_norm2,block_transformed_norm2, &
+            map_ok,local_message)
+          if(.not.map_ok) then; message=trim(local_message); return; end if
+          call accumulate_sawf_dmn_band_blocks(cache%source%states,cache%target(target_slot)%states, &
+            source_points(1:npair),target_points(1:npair),dc%system_tot%hvol, &
+            block_contribution,map_ok,local_message)
+        end if
+        if(.not.map_ok) then
+          message=trim(local_message)
+          return
+        end if
+        max_block_leakage=max(max_block_leakage,block_leakage)
+        residual_norm2_sum=residual_norm2_sum+block_residual_norm2
+        transformed_norm2_sum=transformed_norm2_sum+block_transformed_norm2
+        d_band_local=d_band_local+block_contribution
+      end do
+      expected_local_points=nsource
+      if(dc%n_frag==1) expected_local_points=(nsource+dc%isize_frag-1-dc%id_frag)/dc%isize_frag
+      if(nmapped /= expected_local_points) then
+        write(message,'(a,i0,a,i0)') 'fragment symmetry map count=',nmapped, &
+          ' expected=',expected_local_points
+        return
+      end if
+      aggregate_leakage=residual_norm2_sum/transformed_norm2_sum
+      histogram_text=''; listed_entries=0
+      nonzero_entries=count(target_histogram>0)
+      do target_frag=1,dc%n_frag
+        if(target_histogram(target_frag)>0 .and. listed_entries<histogram_entry_cap) then
+          write(histogram_entry,'(i0,a,i0)') target_frag,':',target_histogram(target_frag)
+          if(listed_entries==0) then
+            histogram_text=trim(histogram_entry)
+          else
+            histogram_text=trim(histogram_text)//','//trim(histogram_entry)
+          end if
+          listed_entries=listed_entries+1
+        end if
+      end do
+      truncated_entries=nonzero_entries-listed_entries
+      if(truncated_entries>0) then
+        write(histogram_entry,'(a,i0)') 'truncated:',truncated_entries
+        histogram_text=trim(histogram_text)//','//trim(histogram_entry)
+      end if
+      write(*,'(1x,a,i0,a,i0,a,i0,3a,es13.5,3(a,es13.5))') &
+        '[DC-LCFO-SAWF-CLOSURE-LOCAL] rank=',dc%id_tot,' operation=',operation_index, &
+        ' source_fragment=',source_frag,' histogram=',trim(histogram_text), &
+        ' aggregate_leakage=',aggregate_leakage,' max_block_leakage=',max_block_leakage, &
+        ' residual_norm2=',residual_norm2_sum,' transformed_norm2=',transformed_norm2_sum
+      deallocate(source_points,target_points, &
+        target_owner_list,target_local_flat,target_histogram,block_contribution)
+      ok=.true.
+    end subroutine build_sawf_dmn_operation_fragment_local
+
+    subroutine diagnose_sawf_hamiltonian_covariance_blocks(d_band,eigenvalues,noccupied,nwann)
+      implicit none
+      complex(8), intent(in) :: d_band(:,:)
+      real(8), intent(in) :: eigenvalues(:)
+      integer, intent(in) :: noccupied,nwann
+      complex(8), allocatable :: weighted(:,:),covariance(:,:)
+      real(8), allocatable :: centered(:)
+      real(8) :: center,scale,residual,leakage
+      integer :: i,nblock
+
+      allocate(weighted(size(d_band,1),size(d_band,2)), &
+        covariance(size(d_band,1),size(d_band,2)),centered(size(eigenvalues)))
+      center=minval(eigenvalues)+0.5d0*(maxval(eigenvalues)-minval(eigenvalues))
+      centered=eigenvalues-center
+      weighted=d_band
+      weighted=spread(centered,2,size(d_band,2))*weighted
+      covariance=matmul(conjg(transpose(d_band)),weighted)
+      do i=1,size(centered); covariance(i,i)=covariance(i,i)-centered(i); end do
+      scale=max(1.0d-300,maxval(abs(centered)))
+      nblock=noccupied
+      residual=maxval(abs(covariance(1:nblock,1:nblock)))/scale
+      leakage=sqrt(sum(abs(d_band(nblock+1:,1:nblock))**2)/dble(nblock))
+      write(*,'(1x,a,a,a,i0,2(a,es13.5))') &
+        '[DC-LCFO-SAWF-H-COVARIANCE-BLOCK] label=','occupied',' bands=',nblock, &
+        ' relative=',residual,' outside_leakage=',leakage
+      nblock=nwann
+      residual=maxval(abs(covariance(1:nblock,1:nblock)))/scale
+      leakage=sqrt(sum(abs(d_band(nblock+1:,1:nblock))**2)/dble(nblock))
+      write(*,'(1x,a,a,a,i0,2(a,es13.5))') &
+        '[DC-LCFO-SAWF-H-COVARIANCE-BLOCK] label=','wannier',' bands=',nblock, &
+        ' relative=',residual,' outside_leakage=',leakage
+      nblock=size(d_band,1)
+      residual=maxval(abs(covariance))/scale
+      write(*,'(1x,a,a,a,i0,2(a,es13.5))') &
+        '[DC-LCFO-SAWF-H-COVARIANCE-BLOCK] label=','all',' bands=',nblock, &
+        ' relative=',residual,' outside_leakage=',0.0d0
+      deallocate(weighted,covariance,centered)
+    end subroutine diagnose_sawf_hamiltonian_covariance_blocks
+
+    subroutine diagnose_sawf_hamiltonian_component_covariance(d_band,nband_wann)
+      use communication, only: comm_summation
+      implicit none
+      integer, intent(in) :: nband_wann
+      complex(8), intent(in) :: d_band(nband_wann,nband_wann)
+      integer :: n,ifrag,io,jo,i_halo,ig,jg,allocation_status
+      real(8), allocatable :: c_local(:,:),c_global(:,:),h_local(:,:),h_global(:,:)
+
+      n=n_mat(1)
+      allocate(c_local(n,nband_wann),c_global(n,nband_wann), &
+        h_local(n,n),h_global(n,n),stat=allocation_status)
+      if(allocation_status/=0) call lcfo_sawf_fatal('SAWF H covariance diagnostic allocation failed')
+      c_local=0.0d0
+      if(dc%id_frag==0 .and. allocated(coef_wf)) then
+        ifrag=dc%i_frag
+        do io=1,n_basis(ifrag,1)
+          ig=index_basis(io,ifrag,1)
+          c_local(ig,:)=coef_wf(io,1:nband_wann,1)
+        end do
+      end if
+      call comm_summation(c_local,c_global,n*nband_wann,dc%icomm_tot)
+
+      call diagnose_sawf_diagonal_h_component(mat_H_weak_kinetic,h_local,h_global,c_global, &
+        d_band,nband_wann,label='volume_kinetic')
+      call diagnose_sawf_diagonal_h_component(mat_H_weak_potential,h_local,h_global,c_global, &
+        d_band,nband_wann,label='volume_local')
+      call diagnose_sawf_diagonal_h_component(mat_H_weak_nonlocal,h_local,h_global,c_global, &
+        d_band,nband_wann,label='volume_nonlocal')
+
+      h_local=0.0d0
+      if(dc%id_frag==0) then
+        ifrag=dc%i_frag
+        do jo=1,n_basis(ifrag,1)
+          jg=index_basis(jo,ifrag,1)
+          do io=1,n_basis(ifrag,1)
+            ig=index_basis(io,ifrag,1)
+            if(use_weak_volume_hamiltonian_mode()) then
+              h_local(ig,jg)=mat_H_volume_weak_local(io,jo,1)
+            else
+              h_local(ig,jg)=mat_H_volume_local(io,jo,1)
+            end if
+          end do
+        end do
+      end if
+      call diagnose_sawf_h_component(h_local,h_global,c_global,d_band,nband_wann,label='volume')
+
+      h_local=0.0d0
+      if(dc%id_frag==0 .and. use_surface_self_hamiltonian_mode()) then
+        ifrag=dc%i_frag
+        do jo=1,n_basis(ifrag,1)
+          jg=index_basis(jo,ifrag,1)
+          do io=1,n_basis(ifrag,1)
+            ig=index_basis(io,ifrag,1)
+            h_local(ig,jg)=mat_H_surface_self(io,jo,1)
+          end do
+        end do
+      end if
+      call diagnose_sawf_h_component(h_local,h_global,c_global,d_band,nband_wann,label='surface_self')
+
+      h_local=0.0d0
+      if(dc%id_frag==0) then
+        ifrag=dc%i_frag
+        do i_halo=1,n_halo
+          do jo=1,n_basis(ifrag,1)
+            jg=index_basis(jo,ifrag,1)
+            do io=1,n_basis(halo(i_halo)%ifrag_src,1)
+              ig=index_basis(io,halo(i_halo)%ifrag_src,1)
+              h_local(ig,jg)=h_local(ig,jg)+0.5d0*halo(i_halo)%mat_H_surface_cross(io,jo,1)
+              h_local(jg,ig)=h_local(jg,ig)+0.5d0*halo(i_halo)%mat_H_surface_cross(io,jo,1)
+            end do
+          end do
+        end do
+      end if
+      call diagnose_sawf_h_component(h_local,h_global,c_global,d_band,nband_wann,label='surface_cross')
+      deallocate(c_local,c_global,h_local,h_global)
+    end subroutine diagnose_sawf_hamiltonian_component_covariance
+
+    subroutine diagnose_sawf_diagonal_h_component(component,local_matrix,global_matrix, &
+        eigenvectors,representation,nband_wann,label)
+      implicit none
+      integer, intent(in) :: nband_wann
+      real(8), intent(in) :: component(:,:,:),eigenvectors(:,:)
+      real(8), intent(inout) :: local_matrix(:,:),global_matrix(:,:)
+      complex(8), intent(in) :: representation(:,:)
+      character(*), intent(in) :: label
+      integer :: io,jo,ig,jg,ifrag
+
+      local_matrix=0.0d0
+      if(dc%id_frag==0) then
+        ifrag=dc%i_frag
+        do jo=1,n_basis(ifrag,1)
+          jg=index_basis(jo,ifrag,1)
+          do io=1,n_basis(ifrag,1)
+            ig=index_basis(io,ifrag,1)
+            local_matrix(ig,jg)=component(io,jo,1)
+          end do
+        end do
+      end if
+      call diagnose_sawf_h_component(local_matrix,global_matrix,eigenvectors, &
+        representation,nband_wann,label)
+    end subroutine diagnose_sawf_diagonal_h_component
+
+    subroutine diagnose_sawf_h_component(local_matrix,global_matrix,eigenvectors, &
+        representation,nband_wann,label)
+      use communication, only: comm_summation
+      implicit none
+      integer, intent(in) :: nband_wann
+      real(8), intent(in) :: local_matrix(:,:),eigenvectors(:,:)
+      real(8), intent(out) :: global_matrix(:,:)
+      complex(8), intent(in) :: representation(:,:)
+      character(*), intent(in) :: label
+      real(8), allocatable :: work(:,:),band_matrix(:,:)
+      complex(8), allocatable :: transformed(:,:)
+      real(8) :: scale,residual
+
+      call comm_summation(local_matrix,global_matrix,size(local_matrix),dc%icomm_tot)
+      if(dc%id_tot/=0) return
+      allocate(work(size(global_matrix,1),nband_wann),band_matrix(nband_wann,nband_wann), &
+        transformed(nband_wann,nband_wann))
+      work=matmul(global_matrix,eigenvectors)
+      band_matrix=matmul(transpose(eigenvectors),work)
+      transformed=matmul(conjg(transpose(representation)), &
+        matmul(cmplx(band_matrix,0.0d0,kind=8),representation))-cmplx(band_matrix,0.0d0,kind=8)
+      scale=max(1.0d-300,maxval(abs(band_matrix)))
+      residual=maxval(abs(transformed))/scale
+      write(*,'(1x,3a,es13.5,a,es13.5)') &
+        '[DC-LCFO-SAWF-H-COVARIANCE] label=',trim(label),' relative=',residual,' scale=',scale
+      deallocate(work,band_matrix,transformed)
+    end subroutine diagnose_sawf_h_component
+
+    subroutine checked_sawf_fragment_point_count(fragment_shape,npoints,ok,message)
+      use, intrinsic :: iso_fortran_env, only: int64
+      implicit none
+      integer, intent(in) :: fragment_shape(3)
+      integer, intent(out) :: npoints
+      logical, intent(out) :: ok
+      character(*), intent(out) :: message
+      integer(int64) :: product64
+      integer :: axis
+
+      ok=.false.; message=''; npoints=0
+      if(any(fragment_shape <= 0)) then
+        message='SAWF fragment shape contains a nonpositive dimension'
+        return
+      end if
+      product64=1_int64
+      do axis=1,3
+        if(product64 > int(huge(0),int64)/int(fragment_shape(axis),int64)) then
+          message='SAWF fragment point count overflows default integer'
+          return
+        end if
+        product64=product64*int(fragment_shape(axis),int64)
+      end do
+      npoints=int(product64)
+      ok=.true.
+    end subroutine checked_sawf_fragment_point_count
+
+    subroutine reduce_sawf_band_matrix(local_matrix,sum_matrix,nband_wann)
+      use, intrinsic :: iso_fortran_env, only: int64
+      implicit none
+      integer, intent(in) :: nband_wann
+      complex(8), intent(in) :: local_matrix(nband_wann,nband_wann)
+      complex(8), intent(out) :: sum_matrix(nband_wann,nband_wann)
+      integer, parameter :: mpi_chunk_limit=1000000
+      integer :: first_column,last_column,column_chunk,count
+
+      if(nband_wann <= 0 .or. int(nband_wann,int64) > int(huge(0),int64)) &
+        call lcfo_sawf_fatal('SAWF D_band MPI row count exceeds default integer')
+      column_chunk=max(1,mpi_chunk_limit/nband_wann)
+      do first_column=1,nband_wann,column_chunk
+        last_column=min(nband_wann,first_column+column_chunk-1)
+        if(int(nband_wann,int64)*int(last_column-first_column+1,int64) > int(huge(0),int64)) &
+          call lcfo_sawf_fatal('SAWF D_band MPI chunk count overflows default integer')
+        count=nband_wann*(last_column-first_column+1)
+        call comm_summation(local_matrix(:,first_column:last_column), &
+          sum_matrix(:,first_column:last_column),count,dc%icomm_tot)
+      end do
+    end subroutine reduce_sawf_band_matrix
+
+    subroutine validate_sawf_projection_configuration()
+      use salmon_global, only: wannier_site_symmetry, wannier_projection, wannier_num_wann, &
+        wannier_dis_froz_max
+      implicit none
+      integer :: channel_count, projection_lmax
+      logical :: ok
+      character(256) :: message
+
+      if(trim(wannier_site_symmetry) == 'off') return
+      if(wannier_dis_froz_max > 0.0d0) then
+        call lcfo_sawf_fatal('SAWF does not support a frozen window; set wannier_dis_froz_max=0')
+      end if
+      if(.not. is_pseudo_channel_projection(trim(wannier_projection))) then
+        call lcfo_sawf_fatal("SAWF requires wannier_projection='pseudo_channels'")
+      end if
+      call sawf_projection_shell_lmax(dc%system_tot%nion, wannier_num_wann, projection_lmax, ok, message)
+      if(.not. ok) call lcfo_sawf_fatal(message)
+      call sawf_spd_projection_count(dc%system_tot%nion, channel_count, ok, message, projection_lmax)
+      if(.not. ok .or. wannier_num_wann /= channel_count) call lcfo_sawf_fatal(message)
+      if(dc%id_tot == 0) write(*,'(1x,a,i0)') &
+        '[DC-LCFO-SAWF] SAWF pseudo_channels ordering: complete atom-major shell lmax=', projection_lmax
+    end subroutine validate_sawf_projection_configuration
+
+    subroutine lcfo_sawf_fatal(message)
+      use parallelization, only: end_parallel
+      implicit none
+      character(*), intent(in) :: message
+
+      if(dc%id_tot == 0) write(*,'(1x,a,a)') '[FATAL] ', trim(message)
+      call end_parallel
+      stop 1
+    end subroutine lcfo_sawf_fatal
+
+    subroutine write_pseudo_channel_projection_block(iunit, ok, message)
+      use salmon_global, only: wannier_site_symmetry, wannier_num_wann
+      use salmon_math, only: matrix_inverse
+      implicit none
+      integer, intent(in) :: iunit
+      logical, intent(out) :: ok
+      character(*), intent(out) :: message
+      integer :: allocation_status, ia, projection_lmax
+      character(256) :: allocation_message
+      real(8) :: lattice(3,3), lattice_inverse(3,3)
+      real(8) :: a1(3), a2(3), a3(3)
+      real(8), allocatable :: fractional_positions(:,:)
+
+      ok = .false.
+      message = ''
+      projection_lmax = 2
+      if(trim(wannier_site_symmetry) /= 'off') then
+        call sawf_projection_shell_lmax(dc%system_tot%nion, wannier_num_wann, projection_lmax, ok, message)
+        if(.not. ok) return
+      end if
+      if(trim(wannier_site_symmetry) == 'off') then
+        allocate(fractional_positions(3,0), stat=allocation_status, errmsg=allocation_message)
+        if(allocation_status /= 0) then
+          message = 'SAWF off projection allocation failed: '//trim(allocation_message)
+          return
+        end if
+        call write_sawf_projection_block(iunit, wannier_site_symmetry, &
+          fractional_positions, ok, message, projection_lmax)
+      else
+        allocate(fractional_positions(3,dc%system_tot%nion), &
+          stat=allocation_status, errmsg=allocation_message)
+        if(allocation_status /= 0) then
+          message = 'SAWF atom projection allocation failed: '//trim(allocation_message)
+          return
+        end if
+        call get_lattice_vectors(a1, a2, a3)
+        lattice(:,1) = a1
+        lattice(:,2) = a2
+        lattice(:,3) = a3
+        lattice_inverse = lattice
+        call matrix_inverse(lattice_inverse)
+        do ia=1,dc%system_tot%nion
+          fractional_positions(:,ia) = matmul(lattice_inverse, dc%system_tot%rion(:,ia))
+          fractional_positions(:,ia) = modulo(fractional_positions(:,ia), 1.0d0)
+        end do
+        call write_sawf_projection_block(iunit, wannier_site_symmetry, &
+          fractional_positions, ok, message, projection_lmax)
+      end if
+      if(allocated(fractional_positions)) deallocate(fractional_positions)
+    end subroutine write_pseudo_channel_projection_block
+
+    integer function pseudo_channel_win_projection_lmax(target_wann) result(lmax_write)
+      implicit none
+      integer, intent(in) :: target_wann
+      integer :: ltry
+
+      lmax_write = -1
+      do ltry=0,2
+        if(count_pseudo_channel_ao_shells_upto(ltry) == target_wann) then
+          lmax_write = ltry
+          return
+        end if
+      end do
+    end function pseudo_channel_win_projection_lmax
+
+    integer function count_pseudo_channel_ao_shells_upto(lmax_limit) result(nproj)
+      use salmon_global, only: izatom
+      implicit none
+      integer, intent(in) :: lmax_limit
+      integer :: ia, iz, lmax_ao
+
+      nproj = 0
+      do ia=1,dc%system_tot%nion
+        iz = izatom(dc%system_tot%kion(ia))
+        lmax_ao = min(pseudo_channel_ao_lmax_for_species(iz), lmax_limit)
+        nproj = nproj + count_real_ao_for_lmax(lmax_ao)
+      end do
+    end function count_pseudo_channel_ao_shells_upto
 
     subroutine diagnose_wannier_coef_rank(nband_wann)
       use communication, only: comm_summation
@@ -5336,19 +7977,13 @@ contains
         position_available = merge(1, 0, ok_position)
 
         filename = trim(dc%base_directory)//binfile_w90g
-        iunit = get_filehandle()
-        open(iunit,file=filename,form='unformatted',access='stream',status='replace')
-        write(iunit) wannier90_global_magic, wannier90_global_version
-        write(iunit) num_bands_chk, num_wann_chk, dc%n_frag
-        write(iunit) owner_frag(1:num_wann_chk)
-        write(iunit) center_bohr(1:3,1:num_wann_chk)
-        write(iunit) spread_aa2(1:num_wann_chk)
-        write(iunit) v_matrix(1:num_bands_chk,1:num_wann_chk)
-        write(iunit) position_available
-        write(iunit) aa_global(1:3,1:num_wann_chk,1:num_wann_chk)
-        close(iunit)
+        call write_wannier90_global_basis_stream_import(filename, num_bands_chk, num_wann_chk, dc%n_frag, &
+          owner_frag, center_bohr, spread_aa2, v_matrix, position_available, aa_global)
         write(*,'(1x,a,i0,a,a)') "[DC-LCFO-W90-GLOBAL] wrote ", num_wann_chk, &
           " Wannier functions to ", trim(filename)
+        filename = trim(dc%base_directory)//binfile_w90g_persistent
+        call write_wannier90_global_basis_stream_import(filename, num_bands_chk, num_wann_chk, dc%n_frag, &
+          owner_frag, center_bohr, spread_aa2, v_matrix, position_available, aa_global)
         if(ok_position) then
           write(*,'(1x,a)') "[DC-LCFO-W90-GLOBAL] stored Wannier90 AA_R position matrix."
         else
@@ -5383,15 +8018,13 @@ contains
           nspin, v_matrix, esp_tot, seed_wannier_to_eigen, eval_seed, nstate_seed)
 
         filename = trim(dc%base_directory)//binfile_w90seed
-        iunit = get_filehandle()
-        open(iunit,file=filename,form='unformatted',access='stream',status='replace')
-        write(iunit) wannier_flux_eigen_seed_magic, wannier_flux_eigen_seed_version
-        write(iunit) num_bands_chk, num_wann_chk, nstate_seed, nspin, dc%n_frag
-        write(iunit) eval_seed(1:nstate_seed,1:nspin)
-        write(iunit) seed_wannier_to_eigen(1:num_wann_chk,1:nstate_seed)
-        close(iunit)
+        call write_wannier_flux_eigen_seed_stream_import(filename, num_bands_chk, num_wann_chk, nstate_seed, &
+          nspin, dc%n_frag, eval_seed, seed_wannier_to_eigen)
         write(*,'(1x,a,i0,a,i0,a,a)') "[DC-LCFO-W90-SEED] wrote Flux-LCFO eigen seed in Wannier basis: states=", &
           nstate_seed, " wann=", num_wann_chk, " file=", trim(filename)
+        filename = trim(dc%base_directory)//binfile_w90seed_persistent
+        call write_wannier_flux_eigen_seed_stream_import(filename, num_bands_chk, num_wann_chk, nstate_seed, &
+          nspin, dc%n_frag, eval_seed, seed_wannier_to_eigen)
         deallocate(seed_wannier_to_eigen, eval_seed, center_aa, spread_aa2, v_matrix)
       end if
       call comm_sync_all(dc%icomm_tot)
@@ -6012,79 +8645,41 @@ contains
       end do
     end function distance_to_fragment_center
 
-    subroutine run_wannier90_seed_files()
-      use communication, only: comm_sync_all
-      use salmon_global, only: sysname, wannier90_command
+    subroutine run_wannier90_seed_files(resolved_command)
+      use communication, only: comm_sync_all, comm_bcast
+      use salmon_global, only: sysname
       implicit none
-      character(1024) :: wannier_command, seedname
+      character(*), intent(in) :: resolved_command
+      character(1024) :: seedname
       character(4096) :: command_line, change_dir_command
-      integer :: env_status, exit_status, cmd_status
+      character(512) :: command_message
+      integer :: command_failure
+      logical :: command_ok
 
       seedname = trim(sysname)
-      wannier_command = trim(wannier90_command)
-      if(len_trim(wannier_command) == 0) then
-        call get_environment_variable('SALMON_WANNIER90_COMMAND', wannier_command, status=env_status)
-      end if
-      if(len_trim(wannier_command) == 0) then
-#ifdef WANNIER90_EXECUTABLE_PATH
-        wannier_command = WANNIER90_EXECUTABLE_PATH
-#else
-        wannier_command = 'wannier90.x'
-#endif
-      end if
-
       call comm_sync_all(dc%icomm_tot)
-      if(dc%id_tot == 0) then
-        if(is_wannier90_skip_command(wannier_command)) then
-          write(*,'(1x,a)') "[DC-LCFO-WANNIER] skip external Wannier90; reuse existing checkpoint."
-          call comm_sync_all(dc%icomm_tot)
-          return
-        end if
-        change_dir_command = 'cd '//trim(shell_quote(dc%base_directory))//' && '
-        command_line = trim(change_dir_command)//trim(mpi_clean_env_prefix())//' '//trim(wannier_command)//' '//trim(shell_quote(seedname))
-        write(*,'(1x,a,1x,a)') "[DC-LCFO-WANNIER] run:", trim(command_line)
-        call execute_command_line(trim(command_line), exitstat=exit_status, cmdstat=cmd_status)
-        if(cmd_status /= 0) then
-          write(*,'(1x,a,i0)') "[DC-LCFO-WANNIER] execute_command_line cmdstat=", cmd_status
-          stop "DC-LCFO Wannier export: failed to launch Wannier90."
-        end if
-        if(exit_status /= 0) then
-          write(*,'(1x,a,i0)') "[DC-LCFO-WANNIER] Wannier90 exit status=", exit_status
-          stop "DC-LCFO Wannier export: Wannier90 failed."
-        end if
-        write(*,'(1x,a)') "[DC-LCFO-WANNIER] Wannier90 completed."
+      if(is_wannier90_reuse_command(resolved_command)) then
+        if(dc%id_tot == 0) write(*,'(1x,a)') &
+          '[DC-LCFO-WANNIER] skip external Wannier90; reuse existing checkpoint.'
+        call comm_sync_all(dc%icomm_tot)
+        return
       end if
+      command_failure = 0; command_message = ''
+      if(dc%id_tot == 0) then
+        change_dir_command = 'cd '//trim(shell_quote(dc%base_directory))//' && '
+        command_line = trim(change_dir_command)//trim(mpi_clean_env_prefix())//' '// &
+          trim(resolved_command)//' '//trim(shell_quote(seedname))
+        write(*,'(1x,a,1x,a)') "[DC-LCFO-WANNIER] run:", trim(command_line)
+        call execute_wannier90_command(command_line,command_ok,command_message)
+        command_failure = merge(0,1,command_ok)
+      end if
+      call comm_bcast(command_failure,dc%icomm_tot,0)
+      call comm_bcast(command_message,dc%icomm_tot,0)
+      if(command_failure /= 0) call lcfo_sawf_fatal( &
+        'DC-LCFO Wannier export failed collectively: '//trim(command_message))
+      if(dc%id_tot == 0) write(*,'(1x,a)') '[DC-LCFO-WANNIER] Wannier90 completed.'
       call comm_sync_all(dc%icomm_tot)
     end subroutine run_wannier90_seed_files
-
-    logical function is_wannier90_skip_command(command) result(is_skip)
-      implicit none
-      character(*), intent(in) :: command
-      character(1024) :: value
-
-      value = adjustl(command)
-      is_skip = trim(value) == 'skip' .or. trim(value) == 'SKIP' .or. &
-        trim(value) == 'reuse' .or. trim(value) == 'REUSE'
-    end function is_wannier90_skip_command
-
-    logical function is_wannier90_export_only_requested() result(export_only)
-      use salmon_global, only: wannier90_command
-      implicit none
-      character(1024) :: wannier_command, value
-      integer :: env_status
-
-      export_only = .false.
-      wannier_command = trim(wannier90_command)
-      if(len_trim(wannier_command) == 0) then
-        call get_environment_variable('SALMON_WANNIER90_COMMAND', wannier_command, status=env_status)
-        if(env_status /= 0 .or. len_trim(wannier_command) == 0) return
-      end if
-      value = adjustl(wannier_command)
-      export_only = trim(value) == 'export_only' .or. trim(value) == 'EXPORT_ONLY' .or. &
-        trim(value) == 'export-only' .or. trim(value) == 'EXPORT-ONLY' .or. &
-        trim(value) == 'seed_only' .or. trim(value) == 'SEED_ONLY' .or. &
-        trim(value) == 'seed-only' .or. trim(value) == 'SEED-ONLY'
-    end function is_wannier90_export_only_requested
 
     function mpi_clean_env_prefix() result(prefix)
       implicit none
@@ -6368,29 +8963,62 @@ contains
     end subroutine write_wannier_amn_file
 
     subroutine write_wannier_amn_file_pseudo_channels(nband_wann)
-      use salmon_global, only: sysname, wannier_num_wann
+      use salmon_global, only: sysname, wannier_num_wann, wannier_site_symmetry
       use filesystem, only: get_filehandle
+      use communication, only: comm_get_max
       implicit none
       integer, intent(in) :: nband_wann
+      integer :: allocation_failure, allocation_status, zero_norm_failure
       integer :: nproj_raw, nproj, chunk_size, p0, p1, nchunk, iunit
-      integer :: ip, ip_raw, iband
+      integer :: ip, ip_raw, iband, projection_lmax, selected_count
       integer, parameter :: amn_target_chunk_elems = 1000000
       integer, allocatable :: proj_atom_raw(:), proj_l_raw(:), proj_m_raw(:)
       integer, allocatable :: raw_index(:), selected_raw(:)
       real(8), allocatable :: projectability(:), a_sum(:,:), norm_sum(:)
-      character(256) :: amnfile
+      logical :: complete_shell
+      character(512) :: shell_message
+      character(256) :: allocation_message, amnfile
 
       if(wannier_num_wann > nband_wann) &
-        stop "DC-LCFO Wannier export: wannier_num_wann must not exceed exported band count."
+        call lcfo_sawf_fatal( &
+          'DC-LCFO Wannier export: wannier_num_wann must not exceed exported band count.')
 
       nproj_raw = count_pseudo_channel_ao_candidates()
-      if(nproj_raw <= 0) stop "DC-LCFO Wannier export: no pseudo-channel AO candidates were generated."
+      if(nproj_raw <= 0) call lcfo_sawf_fatal( &
+        'DC-LCFO Wannier export: no pseudo-channel AO candidates were generated.')
       if(nproj_raw < wannier_num_wann) &
-        stop "DC-LCFO Wannier export: pseudo-channel candidate count is smaller than wannier_num_wann."
+        call lcfo_sawf_fatal( &
+          'DC-LCFO Wannier export: pseudo-channel candidate count is smaller than wannier_num_wann.')
       nproj = wannier_num_wann
+      call sawf_projection_shell_lmax(dc%system_tot%nion, nproj, projection_lmax, &
+        complete_shell, shell_message)
 
-      allocate(proj_atom_raw(nproj_raw), proj_l_raw(nproj_raw), proj_m_raw(nproj_raw))
-      allocate(projectability(nproj_raw), selected_raw(nproj))
+      allocation_failure = 0
+      allocate(proj_atom_raw(nproj_raw), stat=allocation_status, errmsg=allocation_message)
+      if(allocation_status /= 0) allocation_failure = 1
+      if(allocation_failure == 0) then
+        allocate(proj_l_raw(nproj_raw), stat=allocation_status, errmsg=allocation_message)
+        if(allocation_status /= 0) allocation_failure = 1
+      end if
+      if(allocation_failure == 0) then
+        allocate(proj_m_raw(nproj_raw), stat=allocation_status, errmsg=allocation_message)
+        if(allocation_status /= 0) allocation_failure = 1
+      end if
+      if(allocation_failure == 0) then
+        allocate(projectability(nproj_raw), stat=allocation_status, errmsg=allocation_message)
+        if(allocation_status /= 0) allocation_failure = 1
+      end if
+      if(allocation_failure == 0) then
+        allocate(selected_raw(nproj), stat=allocation_status, errmsg=allocation_message)
+        if(allocation_status /= 0) allocation_failure = 1
+      end if
+      call comm_get_max(allocation_failure, dc%icomm_tot)
+      if(allocation_failure /= 0) then
+        call deallocate_pseudo_channel_amn_arrays(proj_atom_raw, proj_l_raw, proj_m_raw, &
+          projectability, selected_raw, raw_index, a_sum, norm_sum)
+        call lcfo_sawf_fatal( &
+          'DC-LCFO Wannier export: pseudo-channel metadata allocation failed on one or more ranks.')
+      end if
       call build_pseudo_channel_ao_candidate_map(proj_atom_raw, proj_l_raw, proj_m_raw)
 
       if(dc%id_tot == 0) then
@@ -6400,7 +9028,24 @@ contains
       end if
 
       chunk_size = max(1, min(nproj_raw, max(1, amn_target_chunk_elems / max(1, nband_wann))))
-      allocate(raw_index(chunk_size), a_sum(nband_wann,chunk_size), norm_sum(chunk_size))
+      allocation_failure = 0
+      allocate(raw_index(chunk_size), stat=allocation_status, errmsg=allocation_message)
+      if(allocation_status /= 0) allocation_failure = 1
+      if(allocation_failure == 0) then
+        allocate(a_sum(nband_wann,chunk_size), stat=allocation_status, errmsg=allocation_message)
+        if(allocation_status /= 0) allocation_failure = 1
+      end if
+      if(allocation_failure == 0) then
+        allocate(norm_sum(chunk_size), stat=allocation_status, errmsg=allocation_message)
+        if(allocation_status /= 0) allocation_failure = 1
+      end if
+      call comm_get_max(allocation_failure, dc%icomm_tot)
+      if(allocation_failure /= 0) then
+        call deallocate_pseudo_channel_amn_arrays(proj_atom_raw, proj_l_raw, proj_m_raw, &
+          projectability, selected_raw, raw_index, a_sum, norm_sum)
+        call lcfo_sawf_fatal( &
+          'DC-LCFO Wannier export: pseudo-channel work allocation failed on one or more ranks.')
+      end if
       projectability(:) = 0d0
 
       do p0=1,nproj_raw,chunk_size
@@ -6411,16 +9056,33 @@ contains
         end do
         call compute_pseudo_channel_projection_chunk(nband_wann, nchunk, raw_index, &
           proj_atom_raw, proj_l_raw, proj_m_raw, a_sum, norm_sum)
+        zero_norm_failure = 0
+        if(any(norm_sum(1:nchunk) <= 1d-300)) zero_norm_failure = 1
+        call comm_get_max(zero_norm_failure, dc%icomm_tot)
+        if(zero_norm_failure /= 0) call lcfo_sawf_fatal( &
+          'DC-LCFO Wannier export: zero norm pseudo-channel projection.')
         do ip=1,nchunk
           ip_raw = raw_index(ip)
-          if(norm_sum(ip) <= 1d-300) &
-            stop "DC-LCFO Wannier export: zero norm pseudo-channel projection."
           a_sum(1:nband_wann,ip) = a_sum(1:nband_wann,ip) / sqrt(norm_sum(ip))
           projectability(ip_raw) = sum(a_sum(1:nband_wann,ip)**2)
         end do
       end do
 
-      call select_top_projectors(projectability, nproj_raw, nproj, selected_raw)
+      if(complete_shell) then
+        selected_count = 0
+        do ip_raw=1,nproj_raw
+          if(proj_l_raw(ip_raw) > projection_lmax) cycle
+          selected_count = selected_count + 1
+          if(selected_count <= nproj) selected_raw(selected_count) = ip_raw
+        end do
+        if(selected_count /= nproj) call lcfo_sawf_fatal( &
+          'DC-LCFO Wannier export: complete pseudo-channel shell count is inconsistent.')
+        if(dc%id_tot == 0) write(*,'(1x,a,i0)') &
+          '[DC-LCFO-WANNIER] pseudo_channels selection: complete atom-major shell lmax=', &
+          projection_lmax
+      else
+        call select_top_projectors(projectability, nproj_raw, nproj, selected_raw)
+      end if
       call write_pseudo_channel_projection_diagnostics(nproj_raw, nproj, proj_l_raw, proj_m_raw, &
         projectability, selected_raw)
 
@@ -6451,10 +9113,13 @@ contains
         end do
         call compute_pseudo_channel_projection_chunk(nband_wann, nchunk, raw_index, &
           proj_atom_raw, proj_l_raw, proj_m_raw, a_sum, norm_sum)
+        zero_norm_failure = 0
+        if(any(norm_sum(1:nchunk) <= 1d-300)) zero_norm_failure = 1
+        call comm_get_max(zero_norm_failure, dc%icomm_tot)
+        if(zero_norm_failure /= 0) call lcfo_sawf_fatal( &
+          'DC-LCFO Wannier export: zero norm selected pseudo-channel projection.')
         if(dc%id_tot == 0) then
           do ip=1,nchunk
-            if(norm_sum(ip) <= 1d-300) &
-              stop "DC-LCFO Wannier export: zero norm selected pseudo-channel projection."
             a_sum(1:nband_wann,ip) = a_sum(1:nband_wann,ip) / sqrt(norm_sum(ip))
             do iband=1,nband_wann
               write(iunit,'(3i8,2(1x,es23.15))') iband, p0 + ip - 1, 1, a_sum(iband,ip), 0d0
@@ -6464,9 +9129,26 @@ contains
       end do
 
       if(dc%id_tot == 0) close(iunit)
-      deallocate(proj_atom_raw, proj_l_raw, proj_m_raw)
-      deallocate(projectability, selected_raw, raw_index, a_sum, norm_sum)
+      call deallocate_pseudo_channel_amn_arrays(proj_atom_raw, proj_l_raw, proj_m_raw, &
+        projectability, selected_raw, raw_index, a_sum, norm_sum)
     end subroutine write_wannier_amn_file_pseudo_channels
+
+    subroutine deallocate_pseudo_channel_amn_arrays(proj_atom, proj_l, proj_m, &
+        projectability, selected, raw_index, a_sum, norm_sum)
+      implicit none
+      integer, allocatable, intent(inout) :: proj_atom(:), proj_l(:), proj_m(:)
+      integer, allocatable, intent(inout) :: selected(:), raw_index(:)
+      real(8), allocatable, intent(inout) :: projectability(:), a_sum(:,:), norm_sum(:)
+
+      if(allocated(proj_atom)) deallocate(proj_atom)
+      if(allocated(proj_l)) deallocate(proj_l)
+      if(allocated(proj_m)) deallocate(proj_m)
+      if(allocated(projectability)) deallocate(projectability)
+      if(allocated(selected)) deallocate(selected)
+      if(allocated(raw_index)) deallocate(raw_index)
+      if(allocated(a_sum)) deallocate(a_sum)
+      if(allocated(norm_sum)) deallocate(norm_sum)
+    end subroutine deallocate_pseudo_channel_amn_arrays
 
     subroutine write_wannier_amn_file_bond_centers(nband_wann)
       use salmon_global, only: sysname, wannier_num_wann, wannier_projection_width
@@ -6892,10 +9574,18 @@ contains
     end function count_bond_centers_with_cutoff
 
     integer function count_pseudo_channel_ao_candidates() result(nproj)
-      use salmon_global, only: izatom
+      use salmon_global, only: izatom, wannier_site_symmetry, wannier_num_wann
       implicit none
-      integer :: ia, iz, lmax_ao
+      integer :: ia, iz, lmax_ao, projection_lmax
+      logical :: ok
+      character(256) :: message
 
+      if(trim(wannier_site_symmetry) /= 'off') then
+        call sawf_projection_shell_lmax(dc%system_tot%nion, wannier_num_wann, projection_lmax, ok, message)
+        if(ok) call sawf_spd_projection_count(dc%system_tot%nion, nproj, ok, message, projection_lmax)
+        if(.not. ok) call lcfo_sawf_fatal(message)
+        return
+      end if
       nproj = 0
       do ia=1,dc%system_tot%nion
         iz = izatom(dc%system_tot%kion(ia))
@@ -6930,10 +9620,35 @@ contains
     end function count_real_ao_for_lmax
 
     subroutine build_pseudo_channel_ao_candidate_map(proj_atom, proj_l, proj_m)
-      use salmon_global, only: izatom
+      use salmon_global, only: izatom, wannier_site_symmetry
+      use communication, only: comm_get_max
       implicit none
       integer, intent(out) :: proj_atom(:), proj_l(:), proj_m(:)
-      integer :: ia, iz, lmax_ao, ip, im
+      type(t_sawf_projection_channel), allocatable :: channels(:)
+      integer :: failure_flag, ia, iz, lmax_ao, ip, im, projection_lmax
+      logical :: ok
+      character(256) :: message
+
+      if(trim(wannier_site_symmetry) /= 'off') then
+        call sawf_projection_shell_lmax(dc%system_tot%nion, size(proj_atom), projection_lmax, ok, message)
+        if(ok) call build_sawf_spd_projection_map(dc%system_tot%nion, channels, ok, message, projection_lmax)
+        failure_flag = 0
+        if(.not. ok) then
+          failure_flag = 1
+        else if(size(proj_atom) /= size(channels) .or. size(proj_l) /= size(channels) .or. &
+            size(proj_m) /= size(channels)) then
+          failure_flag = 1
+        end if
+        call comm_get_max(failure_flag, dc%icomm_tot)
+        if(failure_flag /= 0) call lcfo_sawf_fatal( &
+          'SAWF pseudo-channel map allocation or size validation failed on one or more ranks')
+        do ip=1,size(channels)
+          proj_atom(ip) = channels(ip)%atom
+          proj_l(ip) = channels(ip)%l
+          proj_m(ip) = channels(ip)%m
+        end do
+        return
+      end if
 
       ip = 0
       do ia=1,dc%system_tot%nion
@@ -6983,10 +9698,11 @@ contains
     end subroutine build_c_sp3_projection_map
 
     real(8) function pseudo_channel_projection_value(x, y, z, ia, l, m, sigma) result(val)
+      use salmon_global, only: wannier_site_symmetry
       implicit none
       real(8), intent(in) :: x, y, z, sigma
       integer, intent(in) :: ia, l, m
-      real(8) :: dx, dy, dz, r2, gaussian, inv_sigma, inv_sigma2
+      real(8) :: dx, dy, dz, r2, gaussian, inv_sigma, scaled_r(3)
       real(8) :: a1(3), a2(3), a3(3)
 
       call get_lattice_vectors(a1, a2, a3)
@@ -7001,38 +9717,39 @@ contains
 
       gaussian = exp(-0.5d0 * r2 / (sigma*sigma))
       inv_sigma = 1d0 / sigma
-      inv_sigma2 = inv_sigma * inv_sigma
+      scaled_r = [dx,dy,dz] * inv_sigma
+      if(trim(wannier_site_symmetry) /= 'off') then
+        val = sawf_real_harmonic_value(l, m, scaled_r) * gaussian
+        return
+      end if
+
+      ! Preserve the historical non-SAWF pseudo-channel ordering exactly.
       select case(l)
       case(0)
         val = gaussian
       case(1)
-        select case(m)
-        case(1)
-          val = dx * inv_sigma * gaussian
-        case(2)
-          val = dy * inv_sigma * gaussian
-        case(3)
-          val = dz * inv_sigma * gaussian
-        case default
-          val = 0d0
-        end select
+        if(m >= 1 .and. m <= 3) then
+          val = scaled_r(m) * gaussian
+        else
+          val = 0.0d0
+        end if
       case(2)
         select case(m)
         case(1)
-          val = dx * dy * inv_sigma2 * gaussian
+          val = scaled_r(1)*scaled_r(2)*gaussian
         case(2)
-          val = dy * dz * inv_sigma2 * gaussian
+          val = scaled_r(2)*scaled_r(3)*gaussian
         case(3)
-          val = dz * dx * inv_sigma2 * gaussian
+          val = scaled_r(3)*scaled_r(1)*gaussian
         case(4)
-          val = (dx*dx - dy*dy) * inv_sigma2 * gaussian
+          val = (scaled_r(1)**2-scaled_r(2)**2)*gaussian
         case(5)
-          val = (2d0*dz*dz - dx*dx - dy*dy) * inv_sigma2 * gaussian
+          val = (2.0d0*scaled_r(3)**2-scaled_r(1)**2-scaled_r(2)**2)*gaussian
         case default
-          val = 0d0
+          val = 0.0d0
         end select
       case default
-        val = 0d0
+        val = 0.0d0
       end select
     end function pseudo_channel_projection_value
 

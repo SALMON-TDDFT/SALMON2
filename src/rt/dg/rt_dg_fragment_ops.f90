@@ -3862,6 +3862,7 @@ contains
     if (active_dir_count <= 0) return
 
 !$omp parallel do schedule(static) &
+!$omp& firstprivate(active_dir_count, active_dirs) &
 !$omp& private(istate, iblk, idir, scale, jb, col_idx, ib, row_idx, valid_row_count, valid_col_count, &
 !$omp&         idx_dir, idx_ib, idx_jb, ifrag_row, ifrag_col, nrow, ncol, valid_row_ids, valid_col_ids, &
 !$omp&         row_gid, col_gid)

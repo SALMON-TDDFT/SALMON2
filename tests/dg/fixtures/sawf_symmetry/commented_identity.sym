@@ -1,0 +1,6 @@
+# identity operation with comments and blank rows
+
+1 0 0 0  # first row
+0 1 0 0
+! comment-only row inside an operation
+0 0 1 0  ! final row
