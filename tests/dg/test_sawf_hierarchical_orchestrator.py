@@ -56,6 +56,10 @@ driver = r'''program check_orchestrator
   bundle(2)%directory='./environment-000003'
   call complete_sawf_seed_bundle(bundle(2),receipt(3),ok,msg)
   call require(ok.and.receipt(3)%completed,'second artifact bundle completed: '//trim(msg))
+  call propagate_sawf_representative_receipts(receipt,ok,msg)
+  call require(ok.and.receipt(2)%completed,'replica receipt propagated: '//trim(msg))
+  call require(receipt(2)%num_bands==receipt(1)%num_bands.and. &
+    receipt(2)%num_wann==receipt(1)%num_wann,'replica ragged dimensions')
   call validate_sawf_environment_receipts(receipt,'cell-A',ok,msg)
   call require(ok,'representative receipts accepted: '//trim(msg))
   receipt(1)%completed=.false.
@@ -78,8 +82,10 @@ with tempfile.TemporaryDirectory(prefix="sawf-orchestrator-") as td:
         directory = td / f"environment-{environment:06d}"
         directory.mkdir()
         seed = f"seed-env-{environment:06d}"
-        for suffix in ("win", "eig", "mmn", "dmn", "chk"):
+        for suffix in ("win", "dmn", "chk"):
             (directory / f"{seed}.{suffix}").write_text(f"{suffix}\n")
+        (directory / f"{seed}.eig").write_text("1 1 -1.0\n2 1 2.0\n")
+        (directory / f"{seed}.mmn").write_text("local overlaps\n2 1 3\n")
         (directory / f"{seed}.amn").write_text("local projections\n 2 1 2\n")
         (directory / f"{seed}.sawf-fingerprint").write_text("cell-A\n")
     (td / "driver.f90").write_text(driver)

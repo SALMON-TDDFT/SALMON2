@@ -20,6 +20,7 @@ driver = r'''program check_local_seed_writer
   logical :: ok
   character(256) :: message
   integer :: i
+  integer :: neighbor_gvec(3,3)
   integer,allocatable :: selected(:)
   logical :: inside(3)
   inside=[.true.,.false.,.true.]
@@ -29,6 +30,7 @@ driver = r'''program check_local_seed_writer
   call select_sawf_local_complete_shells([1,1,3,3],[4,4,4],inside,selected,ok,message)
   if(ok)error stop 6
   energy=[-1d0,2d0]
+  neighbor_gvec=reshape([1,0,0,0,1,0,0,0,1],[3,3])
   states=(0d0,0d0);states(1,1)=1;states(2,2)=1
   projections=states;phase=(1d0,0d0)
   call build_sawf_local_seed_matrices(states,projections,phase,1d0,amn,mmn,ok,message)
@@ -37,10 +39,10 @@ driver = r'''program check_local_seed_writer
   amn=(0d0,0d0);amn(1,1)=1;amn(2,2)=1
   mmn=(0d0,0d0)
   do i=1,3;mmn(1,1,i)=1;mmn(2,2,i)=1;end do
-  call write_sawf_local_eig_amn_mmn('.', 'local',energy,amn,mmn,ok,message)
+  call write_sawf_local_eig_amn_mmn('.', 'local',energy,amn,mmn,neighbor_gvec,ok,message)
   if(.not.ok)then;write(*,'(a)')trim(message);error stop 1;end if
   mmn(1,1,1)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,kind=8)
-  call write_sawf_local_eig_amn_mmn('.', 'bad',energy,amn,mmn,ok,message)
+  call write_sawf_local_eig_amn_mmn('.', 'bad',energy,amn,mmn,neighbor_gvec,ok,message)
   if(ok)error stop 2
   write(*,'(a)')'PASS local SAWF eig/amn/mmn writer'
 end program'''

@@ -59,9 +59,10 @@ contains
 
     ok=.false.;message='';amn=(0d0,0d0);mmn=(0d0,0d0)
     if(size(states,1)<=0.or.size(states,2)<=0.or.size(projections,1)/=size(states,1).or. &
-        size(phase_factor,1)/=size(states,1).or.size(phase_factor,2)/=3.or. &
+        size(phase_factor,1)/=size(states,1).or.size(phase_factor,2)<=0.or. &
         size(amn,1)/=size(states,2).or.size(amn,2)/=size(projections,2).or. &
-        size(mmn,1)/=size(states,2).or.size(mmn,2)/=size(states,2).or.size(mmn,3)/=3.or. &
+        size(mmn,1)/=size(states,2).or.size(mmn,2)/=size(states,2).or. &
+        size(mmn,3)/=size(phase_factor,2).or. &
         .not.ieee_is_finite(weight).or.weight<=0d0)then
       message='SAWF local seed matrix dimensions or integration weight are invalid';return
     end if
@@ -80,27 +81,28 @@ contains
       normalized_projection(:,projection)=projections(:,projection)/sqrt(norm2)
     end do
     amn=weight*matmul(conjg(transpose(states)),normalized_projection)
-    do neighbor=1,3
+    do neighbor=1,size(phase_factor,2)
       phased_states=spread(phase_factor(:,neighbor),2,size(states,2))*states
       mmn(:,:,neighbor)=weight*matmul(conjg(transpose(states)),phased_states)
     end do
     ok=.true.
   end subroutine build_sawf_local_seed_matrices
 
-  subroutine write_sawf_local_eig_amn_mmn(directory,seedname,energy_ev,amn,mmn,ok,message)
+  subroutine write_sawf_local_eig_amn_mmn(directory,seedname,energy_ev,amn,mmn,neighbor_gvec,ok,message)
     character(*),intent(in)::directory,seedname
     real(8),intent(in)::energy_ev(:)
     complex(8),intent(in)::amn(:,:),mmn(:,:,:)
+    integer,intent(in)::neighbor_gvec(:,:)
     logical,intent(out)::ok
     character(*),intent(out)::message
-    integer,parameter::gvec(3,3)=reshape([1,0,0,0,1,0,0,0,1],[3,3])
     integer::unit,ios,iband,iproj,ineighbor,jband
     character(1024)::filename
 
     ok=.false.;message=''
     if(len_trim(directory)==0.or.len_trim(seedname)==0.or.size(energy_ev)<=0.or. &
         size(amn,1)/=size(energy_ev).or.size(amn,2)<=0.or. &
-        size(mmn,1)/=size(energy_ev).or.size(mmn,2)/=size(energy_ev).or.size(mmn,3)/=3)then
+        size(mmn,1)/=size(energy_ev).or.size(mmn,2)/=size(energy_ev).or. &
+        size(neighbor_gvec,1)/=3.or.size(neighbor_gvec,2)/=size(mmn,3).or.size(mmn,3)<=0)then
       message='SAWF local seed dimensions are inconsistent';return
     end if
     if(.not.all(ieee_is_finite(energy_ev)).or. &
@@ -129,9 +131,9 @@ contains
     open(newunit=unit,file=trim(filename),status='replace',action='write',iostat=ios)
     if(ios/=0)then;message='SAWF local .mmn open failed';return;end if
     write(unit,'(a)',iostat=ios)'SALMON local SAWF overlaps'
-    if(ios==0)write(unit,'(3i10)',iostat=ios)size(mmn,1),1,3
-    do ineighbor=1,3
-      if(ios==0)write(unit,'(5i8)',iostat=ios)1,1,gvec(:,ineighbor)
+    if(ios==0)write(unit,'(3i10)',iostat=ios)size(mmn,1),1,size(mmn,3)
+    do ineighbor=1,size(mmn,3)
+      if(ios==0)write(unit,'(5i8)',iostat=ios)1,1,neighbor_gvec(:,ineighbor)
       do jband=1,size(mmn,2);do iband=1,size(mmn,1)
         if(ios==0)write(unit,'(2(1x,es23.15))',iostat=ios)mmn(iband,jband,ineighbor)
       end do;end do

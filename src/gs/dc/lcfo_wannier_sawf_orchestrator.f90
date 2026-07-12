@@ -25,8 +25,39 @@ module lcfo_wannier_sawf_orchestrator
   public :: validate_sawf_environment_receipts
   public :: build_sawf_seed_bundles
   public :: complete_sawf_seed_bundle
+  public :: propagate_sawf_representative_receipts
 
 contains
+
+  subroutine propagate_sawf_representative_receipts(receipts,ok,message)
+    type(t_sawf_environment_receipt),intent(inout)::receipts(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::environment,representative
+
+    ok=.false.;message=''
+    do environment=1,size(receipts)
+      if(receipts(environment)%requires_execution)then
+        if(.not.receipts(environment)%completed.or.receipts(environment)%num_bands<=0.or. &
+            receipts(environment)%num_wann<=0)then
+          message='SAWF representative receipt is incomplete';return
+        end if
+        cycle
+      end if
+      representative=receipts(environment)%representative_fragment
+      if(representative<1.or.representative>size(receipts).or. &
+          .not.receipts(representative)%requires_execution.or. &
+          .not.receipts(representative)%completed.or.receipts(environment)%operation_index<=0.or. &
+          trim(receipts(environment)%same_supercell_fingerprint)/= &
+          trim(receipts(representative)%same_supercell_fingerprint))then
+        message='SAWF replica receipt has invalid representative provenance';return
+      end if
+      receipts(environment)%num_bands=receipts(representative)%num_bands
+      receipts(environment)%num_wann=receipts(representative)%num_wann
+      receipts(environment)%completed=.true.
+    end do
+    ok=.true.
+  end subroutine propagate_sawf_representative_receipts
 
   subroutine complete_sawf_seed_bundle(bundle,receipt,ok,message)
     type(t_sawf_seed_bundle),intent(in)::bundle
@@ -36,7 +67,9 @@ contains
     character(16),parameter::suffix(6)=[character(16)::'win','eig','amn','mmn','dmn','chk']
     character(1024)::filename
     character(256)::stored_fingerprint,header
-    integer::item,unit,ios,num_bands,num_kpoints,num_wann
+    integer::item,unit,ios,num_bands,num_kpoints,num_wann,file_size,iband,ikpoint,entry
+    integer::mmn_bands,mmn_kpoints,mmn_neighbors
+    real(8)::energy
     logical::exists
 
     ok=.false.;message='';receipt%completed=.false.;receipt%num_bands=0;receipt%num_wann=0
@@ -46,8 +79,8 @@ contains
     end if
     do item=1,size(suffix)
       filename=trim(bundle%directory)//'/'//trim(bundle%seedname)//'.'//trim(suffix(item))
-      inquire(file=trim(filename),exist=exists)
-      if(.not.exists)then
+      inquire(file=trim(filename),exist=exists,size=file_size)
+      if(.not.exists.or.file_size<=0)then
         message='SAWF seed bundle artifact is missing: '//trim(filename);return
       end if
     end do
@@ -59,6 +92,25 @@ contains
     close(unit)
     if(ios/=0.or.num_bands<=0.or.num_kpoints/=1.or.num_wann<=0.or.num_wann>num_bands)then
       message='SAWF local .amn dimensions are invalid';return
+    end if
+    filename=trim(bundle%directory)//'/'//trim(bundle%seedname)//'.eig'
+    open(newunit=unit,file=trim(filename),status='old',action='read',iostat=ios)
+    if(ios/=0)then;message='SAWF local .eig is unreadable';return;end if
+    do entry=1,num_bands
+      read(unit,*,iostat=ios)iband,ikpoint,energy
+      if(ios/=0.or.iband/=entry.or.ikpoint/=1)exit
+    end do
+    if(ios==0)read(unit,*,iostat=ios)
+    close(unit)
+    if(entry<=num_bands.or.ios==0)then;message='SAWF local .eig dimensions are invalid';return;end if
+    filename=trim(bundle%directory)//'/'//trim(bundle%seedname)//'.mmn'
+    open(newunit=unit,file=trim(filename),status='old',action='read',iostat=ios)
+    if(ios/=0)then;message='SAWF local .mmn is unreadable';return;end if
+    read(unit,'(a)',iostat=ios)header
+    if(ios==0)read(unit,*,iostat=ios)mmn_bands,mmn_kpoints,mmn_neighbors
+    close(unit)
+    if(ios/=0.or.mmn_bands/=num_bands.or.mmn_kpoints/=1.or.mmn_neighbors<=0)then
+      message='SAWF local .mmn dimensions are invalid';return
     end if
     filename=trim(bundle%directory)//'/'//trim(bundle%seedname)//'.sawf-fingerprint'
     open(newunit=unit,file=trim(filename),status='old',action='read',iostat=ios)
