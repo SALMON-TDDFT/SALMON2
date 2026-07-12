@@ -62,6 +62,17 @@
 !      F~0 = W diag(f0(k_remote)) W^dagger, not a rigid "1 below nvb" block:
 !      T12 shows the rigid reference manufactures a spurious excitation for a
 !      METAL (fractional, k-varying f0), which is why F~0 is cached.
+!  T13 dt-halving / field-sampling CONFOUND (documented, not "fixed").  The two
+!      length-gauge modes sample the field at different points of the step: the
+!      finite-difference path takes E at the step ENDPOINT t_it, while the
+!      integral path freezes the transported H~ at the step MIDPOINT.  That is
+!      an O(dt) difference in the TIMING alone, so a gicov vs gicov_int compare
+!      at a fixed dt is confounded and must not be read as a physics discrepancy.
+!      T13 pins the honest statement: the gap between the two samplings is real
+!      at production dt, shrinks ~linearly under dt-halving, and both converge to
+!      the SAME answer -- with the midpoint rule converging at 2nd order and the
+!      endpoint rule at 1st, as advertised.  (The Si dt-halving on the real
+!      propagator is the Fugaku gate; this is its kernel-level counterpart.)
 !
 program test_gicov_integral
   use gicov_integral_ssbe
@@ -81,6 +92,7 @@ program test_gicov_integral
   call t10_bracket_edge(nfail)
   call t11_degenerate_closure(nfail)
   call t12_comoving_f0(nfail)
+  call t13_dt_halving(nfail)
 
   if (nfail == 0) then
     write(*, '(a)') "ALL PASS (test_gicov_integral)"
@@ -703,5 +715,87 @@ contains
     call report("T12 a genuine excitation IS reported (-0.1 / +0.1, charge-conserving)", &
               & ok, nfail)
   end subroutine t12_comoving_f0
+
+  !----------------------------------------------------------------
+  ! A driven 2-band co-moving Hamiltonian H~(t) = H0 + g(t) V, smooth in t.
+  subroutine hdrive(t, H)
+    real(8),    intent(in)  :: t
+    complex(8), intent(out) :: H(2, 2)
+    real(8) :: g
+    g = sin(1.5d0 * t)
+    H(1, 1) = cmplx(-0.5d0, 0d0, 8)
+    H(2, 2) = cmplx( 0.5d0, 0d0, 8)
+    H(1, 2) = cmplx(0.30d0 * g, 0.10d0 * g, 8)
+    H(2, 1) = conjg(H(1, 2))
+  end subroutine hdrive
+
+  ! Propagate to T with nstep steps, freezing H~ at the step MIDPOINT (what the
+  ! integral mode does) or at the step ENDPOINT (the finite-difference mode's
+  ! field timing).  gamma = 0 isolates the propagation from the T2 term.
+  subroutine run_drive(nstep, midpoint, rho_out)
+    integer,    intent(in)  :: nstep
+    logical,    intent(in)  :: midpoint
+    complex(8), intent(out) :: rho_out(2, 2)
+    integer, parameter :: nb = 2
+    real(8), parameter :: Tend = 2d0
+    complex(8) :: H(nb, nb), rho(nb, nb), rho2(nb, nb)
+    complex(8) :: P(nb, nb), R(nb, nb), cwork(64)
+    real(8)    :: eps(nb), rwork(64), dt, ts
+    integer    :: blk(nb), it, ierr
+    dt = Tend / dble(nstep)
+    rho = (0d0, 0d0)
+    rho(1, 1) = (1d0, 0d0)                  ! start in the lower band
+    do it = 1, nstep
+      if (midpoint) then
+        ts = (dble(it) - 0.5d0) * dt        ! integral mode: midpoint-frozen
+      else
+        ts = dble(it) * dt                  ! FD mode: field at the step endpoint
+      end if
+      call hdrive(ts, H)
+      call gicov_int_step_k(H, rho, nb, dt, 0d0, 'step', 0d0, 0d0, 1d-9, &
+                          & eps, P, R, cwork, 64, rwork, blk, rho2, ierr)
+      rho = rho2
+    end do
+    rho_out = rho
+  end subroutine run_drive
+
+  subroutine t13_dt_halving(nfail)
+    integer, intent(inout) :: nfail
+    complex(8) :: ref(2, 2), a1(2, 2), a2(2, 2), a4(2, 2)
+    complex(8) :: b1(2, 2), b2(2, 2), b4(2, 2)
+    real(8)    :: dab1, dab2, dab4, ea4, eb4
+    logical    :: ok
+
+    call run_drive(20000, .true., ref)      ! converged reference
+
+    call run_drive( 100, .true.,  a1);  call run_drive( 100, .false., b1)
+    call run_drive( 200, .true.,  a2);  call run_drive( 200, .false., b2)
+    call run_drive( 400, .true.,  a4);  call run_drive( 400, .false., b4)
+
+    dab1 = maxdiff(a1, b1, 2)
+    dab2 = maxdiff(a2, b2, 2)
+    dab4 = maxdiff(a4, b4, 2)
+
+    ! (a) the confound is REAL at a production-like dt -- a gicov vs gicov_int
+    !     comparison at fixed dt is NOT a clean physics comparison
+    call report("T13 midpoint-vs-endpoint field sampling differ at finite dt (real confound)", &
+              & dab1 > 1d-4, nfail)
+
+    ! (b) it is a TIMING artifact of order dt: halving dt roughly halves it
+    ok = (dab2 < 0.62d0 * dab1) .and. (dab4 < 0.62d0 * dab2)
+    call report("T13 the gap shrinks ~linearly under dt-halving (O(dt) timing, not physics)", &
+              & ok, nfail)
+
+    ! (c) and BOTH samplings converge to the SAME answer as dt -> 0
+    ea4 = maxdiff(a4, ref, 2)
+    eb4 = maxdiff(b4, ref, 2)
+    call report("T13 both samplings converge to the SAME dt->0 limit", &
+              & (ea4 < 1d-4) .and. (eb4 < 1d-2), nfail)
+
+    ! (d) the midpoint rule is the more accurate of the two at equal dt
+    !     (2nd order vs 1st) -- the integral mode's sampling is kept for that
+    call report("T13 midpoint (integral mode) is more accurate than endpoint at equal dt", &
+              & ea4 < eb4, nfail)
+  end subroutine t13_dt_halving
 
 end program test_gicov_integral
