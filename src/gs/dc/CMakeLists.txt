@@ -3,6 +3,7 @@ set(SOURCES
     dcdft.f90
     dcdft_soi.f90
     lcfo_wannier_sawf.f90
+    lcfo_wannier_sawf_templates.f90
     lcfo_wannier_sawf_basis.f90
     lcfo_wannier_sawf_band.f90
     lcfo_wannier_sawf_collective.f90

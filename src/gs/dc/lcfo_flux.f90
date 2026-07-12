@@ -6595,6 +6595,7 @@ contains
     end subroutine activate_sawf_win_collective
 
     subroutine generate_sawf_dmn(nband_wann)
+      use lcfo_wannier_sawf_templates, only: validate_sawf_actual_group_operation
       use communication, only: comm_get_max,comm_bcast
       use salmon_global, only: izatom, sysname, wannier_num_wann, &
         wannier_site_symmetry, wannier_symmetry_file, wannier_symmetry_tolerance
@@ -6623,6 +6624,8 @@ contains
       character(256) :: symmetry_filename,allocation_message,dmn_filename,amn_filename
 
       if(trim(wannier_site_symmetry) == 'off') return
+      ! The scalable SAWF route is admitted by representation, provenance,
+      ! gauge and operator gates; Wannier90 site_symmetry alone is insufficient.
       split_fragment_global_mode=(dc%n_frag==1)
       call sawf_projection_shell_lmax(dc%system_tot%nion, wannier_num_wann, projection_lmax, local_ok, message)
       if(.not. local_ok) call lcfo_sawf_fatal(message)

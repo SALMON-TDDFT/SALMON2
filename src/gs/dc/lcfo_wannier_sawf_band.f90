@@ -1,4 +1,6 @@
 module lcfo_wannier_sawf_band
+  ! D_band construction in this module is consumed by the scalable-template
+  ! gate only after the full operation set passes representation closure.
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use, intrinsic :: iso_fortran_env, only: int64
   use lcfo_wannier_sawf, only: t_sawf_symop

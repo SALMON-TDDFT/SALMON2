@@ -688,6 +688,14 @@ contains
       & wannier_site_symmetry, &
       & wannier_symmetry_file, &
       & wannier_symmetry_tolerance, &
+      & wannier_sawf_generation, &
+      & wannier_sawf_symmetry_scope, &
+      & wannier_sawf_parent_symmetry_file, &
+      & wannier_sawf_cache_directory, &
+      & wannier_sawf_buffer_steps, &
+      & wannier_sawf_gauge_tolerance, &
+      & wannier_sawf_buffer_tolerance, &
+      & wannier_sawf_equivalence_tolerance, &
       & dg_wannier_symmetry_gauge, &
       & energy_cut, &
       & lambda_cut, &
@@ -1221,6 +1229,14 @@ contains
     wannier_site_symmetry = 'off'
     wannier_symmetry_file = 'sym.dat'
     wannier_symmetry_tolerance = 1d-6
+    wannier_sawf_generation = 'monolithic'
+    wannier_sawf_symmetry_scope = 'actual'
+    wannier_sawf_parent_symmetry_file = ''
+    wannier_sawf_cache_directory = 'sawf_templates'
+    wannier_sawf_buffer_steps = [1,2,3]
+    wannier_sawf_gauge_tolerance = 1d-8
+    wannier_sawf_buffer_tolerance = 1d-6
+    wannier_sawf_equivalence_tolerance = 1d-8
     energy_cut = 0d0
     lambda_cut = 1d-3
 !! == default for &dg_fragment
@@ -1963,6 +1979,14 @@ contains
     call comm_bcast(wannier_site_symmetry, nproc_group_global)
     call comm_bcast(wannier_symmetry_file, nproc_group_global)
     call comm_bcast(wannier_symmetry_tolerance, nproc_group_global)
+    call comm_bcast(wannier_sawf_generation, nproc_group_global)
+    call comm_bcast(wannier_sawf_symmetry_scope, nproc_group_global)
+    call comm_bcast(wannier_sawf_parent_symmetry_file, nproc_group_global)
+    call comm_bcast(wannier_sawf_cache_directory, nproc_group_global)
+    call comm_bcast(wannier_sawf_buffer_steps, nproc_group_global)
+    call comm_bcast(wannier_sawf_gauge_tolerance, nproc_group_global)
+    call comm_bcast(wannier_sawf_buffer_tolerance, nproc_group_global)
+    call comm_bcast(wannier_sawf_equivalence_tolerance, nproc_group_global)
     call comm_bcast(energy_cut, nproc_group_global)
     energy_cut = energy_cut * uenergy_to_au
     call comm_bcast(lambda_cut, nproc_group_global)
@@ -3040,6 +3064,19 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_symmetry_file', &
         trim(wannier_symmetry_file)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_symmetry_tolerance', wannier_symmetry_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_generation', trim(wannier_sawf_generation)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_symmetry_scope', trim(wannier_sawf_symmetry_scope)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_parent_symmetry_file', &
+        trim(wannier_sawf_parent_symmetry_file)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_cache_directory', &
+        trim(wannier_sawf_cache_directory)
+      write(fh_variables_log, '("#",4X,A,"=",3I6)') 'wannier_sawf_buffer_steps', wannier_sawf_buffer_steps
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_sawf_gauge_tolerance', &
+        wannier_sawf_gauge_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_sawf_buffer_tolerance', &
+        wannier_sawf_buffer_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_sawf_equivalence_tolerance', &
+        wannier_sawf_equivalence_tolerance
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_wannier_symmetry_gauge', &
         trim(dg_wannier_symmetry_gauge)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
@@ -3170,6 +3207,22 @@ contains
     end if
     if(wannier_symmetry_tolerance <= 0d0) then
       call sawf_input_fatal("wannier_symmetry_tolerance must be positive")
+    end if
+    select case(trim(wannier_sawf_generation))
+    case('monolithic','hierarchical')
+    case default
+      call sawf_input_fatal("wannier_sawf_generation must be monolithic or hierarchical")
+    end select
+    if(trim(wannier_sawf_symmetry_scope)/='actual') then
+      call sawf_input_fatal("wannier_sawf_symmetry_scope must be actual; parent symmetry cannot be forced")
+    end if
+    if(any(wannier_sawf_buffer_steps < 0) .or. &
+        any(wannier_sawf_buffer_steps(2:3) <= wannier_sawf_buffer_steps(1:2))) then
+      call sawf_input_fatal("wannier_sawf_buffer_steps must contain three increasing nonnegative buffers")
+    end if
+    if(wannier_sawf_gauge_tolerance<=0d0 .or. wannier_sawf_buffer_tolerance<=0d0 .or. &
+        wannier_sawf_equivalence_tolerance<=0d0) then
+      call sawf_input_fatal("SAWF scalable-construction tolerances must be positive")
     end if
 #ifndef HAVE_SPGLIB
     if(trim(wannier_site_symmetry) == 'auto') then

@@ -1,5 +1,8 @@
 #include "config.h"
 module lcfo_wannier_sawf
+  ! Symmetry discovery/representation remains here; scalable environment
+  ! ownership, template provenance and operator gates live in
+  ! lcfo_wannier_sawf_templates so site_symmetry is never the sole gate.
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use, intrinsic :: iso_c_binding, only: c_double, c_int
   use, intrinsic :: iso_fortran_env, only: int64
