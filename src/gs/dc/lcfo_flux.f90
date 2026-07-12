@@ -46,6 +46,7 @@ module lcfo_flux
   use lcfo_wannier_sawf_templates, only: measure_sawf_vacuum_occupancy
   use lcfo_wannier_sawf_orchestrator, only: t_sawf_environment_receipt,t_sawf_seed_bundle, &
     build_sawf_environment_execution_plan,build_sawf_seed_bundles
+  use lcfo_wannier_sawf_seed, only: select_sawf_local_complete_shells
   use lcfo_wannier_sawf_win, only: activate_sawf_win, deactivate_sawf_win, &
     t_atomic_win_writer, begin_atomic_win, finish_atomic_win, abort_atomic_win
   use lcfo_wannier_command, only: select_wannier90_command, execute_wannier90_command, &
@@ -6622,6 +6623,7 @@ contains
       integer, allocatable :: product_left(:),product_right(:),product_result(:)
       integer, allocatable :: sawf_environment_orbit(:)
       integer, allocatable :: sawf_representative_fragment(:),sawf_materialize_operation(:)
+      integer,allocatable :: sawf_expected_channels(:),sawf_selected_channels(:)
       character(256), allocatable :: sawf_environment_key(:)
       real(8) :: a1(3), a2(3), a3(3), lattice(3,3), lattice_inverse(3,3)
       real(8) :: singular_min, singular_max, closure_residual, closure_tolerance
@@ -6640,7 +6642,7 @@ contains
       type(t_sawf_seed_bundle),allocatable :: sawf_seed_bundles(:)
       logical :: local_ok,grid_map_ok,fragment_map_ok,center_available,split_fragment_global_mode
       logical, allocatable :: sawf_environment_equivalent(:,:),sawf_defect_intersects(:), &
-        sawf_regenerate_environment(:),sawf_generate_independently(:)
+        sawf_regenerate_environment(:),sawf_generate_independently(:),sawf_inside_atom(:)
       integer :: max_targets_per_source
       character(512) :: message
       character(256) :: symmetry_filename,allocation_message,dmn_filename,amn_filename, &
@@ -6778,6 +6780,15 @@ contains
         if(allocated(symmetry_fragment_map)) deallocate(symmetry_fragment_map)
       end do
 
+      call build_sawf_spd_projection_map(dc%system_tot%nion,channels,local_ok,message,projection_lmax)
+      if(local_ok.and.size(channels)/=wannier_num_wann)then
+        local_ok=.false.;message='SAWF D_wann channel count differs from num_wann'
+      end if
+      failure=merge(0,1,local_ok)
+      if(failure/=0)write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-CHANNEL] rank=',dc%id_tot,' ',trim(message)
+      call comm_get_max(failure,dc%icomm_tot)
+      if(failure/=0)call lcfo_sawf_fatal('SAWF projection-channel construction failed')
+
       if(trim(wannier_sawf_generation)=='hierarchical') then
         allocate(sawf_environment_equivalent(dc%n_frag,dc%n_frag), &
           sawf_defect_intersects(dc%n_frag),sawf_environment_orbit(dc%n_frag), &
@@ -6840,6 +6851,23 @@ contains
         do ibundle=1,size(sawf_seed_bundles)
           call atomic_create_directory(sawf_seed_bundles(ibundle)%directory,dc%icomm_tot,dc%id_tot)
         end do
+        if(sawf_environment_receipts(dc%i_frag)%requires_execution.and.dc%id_frag==0)then
+          allocate(sawf_expected_channels(dc%system_tot%nion),sawf_inside_atom(dc%system_tot%nion))
+          sawf_expected_channels=0;sawf_inside_atom=.false.
+          do ia=1,size(channels)
+            sawf_expected_channels(channels(ia)%atom)=sawf_expected_channels(channels(ia)%atom)+1
+          end do
+          do ia=1,dc%system_tot%nion
+            sawf_inside_atom(ia)=sawf_atom_inside_fragment_buffer(fractional_positions(:,ia),mesh, &
+              fragment_origin(:,dc%i_frag),fragment_shape(:,dc%i_frag),dc%nxyz_buffer)
+          end do
+          call select_sawf_local_complete_shells(channels%atom,sawf_expected_channels, &
+            sawf_inside_atom,sawf_selected_channels,local_ok,message)
+          if(.not.local_ok)then
+            write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-LOCAL-SHELL] rank=',dc%id_tot,' ',trim(message)
+            call lcfo_sawf_fatal('SAWF local complete-shell selection failed before seed writing')
+          end if
+        end if
       end if
       call build_sawf_operation_product_table(symmetry_operations,lattice,lattice_inverse, &
         wannier_symmetry_tolerance,product_left,product_right,product_result,local_ok,message)
@@ -6855,10 +6883,6 @@ contains
 
       failure=0; message=''
       if(dc%id_tot == 0) then
-        call build_sawf_spd_projection_map(dc%system_tot%nion,channels,local_ok,message,projection_lmax)
-        if(local_ok .and. size(channels)/=wannier_num_wann) then
-          local_ok=.false.; message='SAWF D_wann channel count differs from num_wann'
-        end if
         if(local_ok) then
           amn_filename=trim(dc%base_directory)//trim(sysname)//'.amn'
           call read_sawf_amn_matrix(amn_filename,nband_wann,wannier_num_wann,amn,local_ok,message)
@@ -7022,7 +7046,8 @@ contains
       call clear_sawf_closed_basis(closed_basis)
       deallocate(species,fractional_positions,fragment_origin,fragment_shape, &
         d_band_local,d_band_sum,symmetry_operations,symmetry_fragment_maps)
-      if(dc%id_tot == 0) deallocate(channels,amn)
+      deallocate(channels)
+      if(dc%id_tot == 0) deallocate(amn)
     end subroutine generate_sawf_dmn
 
     subroutine build_sawf_fragment_environment_fingerprints(lattice,fractional_positions,species, &
@@ -7132,6 +7157,19 @@ contains
       end do
       ok=.true.
     end subroutine
+
+    logical function sawf_atom_inside_fragment_buffer(fractional_position,mesh,origin,fragment_shape,buffer) &
+        result(inside)
+      real(8),intent(in)::fractional_position(3)
+      integer,intent(in)::mesh(3),origin(3),fragment_shape(3),buffer(3)
+      integer::axis,index(3),delta,extent(3),start(3)
+      index=1+modulo(floor(fractional_position*real(mesh,8)),mesh)
+      start=origin-buffer;extent=fragment_shape+2*buffer;inside=.true.
+      do axis=1,3
+        delta=modulo((index(axis)-1)-start(axis),mesh(axis))
+        if(delta>=extent(axis))inside=.false.
+      end do
+    end function sawf_atom_inside_fragment_buffer
 
     subroutine put_sawf_identity_first(operations,tolerance,ok,message)
       type(t_sawf_symop), intent(inout) :: operations(:)
