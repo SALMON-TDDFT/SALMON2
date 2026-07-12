@@ -8793,11 +8793,12 @@ contains
       end do
     end function distance_to_fragment_center
 
-    subroutine run_wannier90_seed_files(resolved_command)
+    subroutine run_wannier90_seed_files(resolved_command,seedname_in,directory_in)
       use communication, only: comm_sync_all, comm_bcast
       use salmon_global, only: sysname
       implicit none
       character(*), intent(in) :: resolved_command
+      character(*), intent(in), optional :: seedname_in,directory_in
       character(1024) :: seedname
       character(4096) :: command_line, change_dir_command
       character(512) :: command_message
@@ -8805,6 +8806,7 @@ contains
       logical :: command_ok
 
       seedname = trim(sysname)
+      if(present(seedname_in))seedname=trim(seedname_in)
       call comm_sync_all(dc%icomm_tot)
       if(is_wannier90_reuse_command(resolved_command)) then
         if(dc%id_tot == 0) write(*,'(1x,a)') &
@@ -8815,6 +8817,7 @@ contains
       command_failure = 0; command_message = ''
       if(dc%id_tot == 0) then
         change_dir_command = 'cd '//trim(shell_quote(dc%base_directory))//' && '
+        if(present(directory_in))change_dir_command='cd '//trim(shell_quote(directory_in))//' && '
         command_line = trim(change_dir_command)//trim(mpi_clean_env_prefix())//' '// &
           trim(resolved_command)//' '//trim(shell_quote(seedname))
         write(*,'(1x,a,1x,a)') "[DC-LCFO-WANNIER] run:", trim(command_line)
