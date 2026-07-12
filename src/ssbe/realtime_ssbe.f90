@@ -13,7 +13,8 @@ subroutine main_realtime_ssbe(icomm)
     use input_checker_sbe
     use filesystem, only: get_filehandle
     use sbe_lg_mode_ssbe, only: uses_integral_gicov
-    use gicov_integral_ssbe, only: gicov_int_axis_single, gicov_int_jmax
+    use gicov_integral_ssbe, only: gicov_int_axis_single, gicov_int_jmax, &
+                                   gicov_int_jmax_cache, gicov_int_p_order
     implicit none
     integer, intent(in) :: icomm
 
@@ -146,9 +147,14 @@ subroutine main_realtime_ssbe(icomm)
         end if
         gi_jmax_l = gicov_int_jmax(maxval(abs(q_all(gi_axis_l, :))), 1d0)
         call build_gicov_integral_cache(sbe, gs, gi_axis_l, gi_jmax_l, icomm)
-        if (irank == 0) write(*, '(a,i0,a,i0)') &
+        ! the cache is padded past the pulse span by the interpolation halo: the
+        ! moving evaluation point x = kappa - a(t) sits BETWEEN cached shifts and
+        ! its degree-p Lagrange stencil reaches past the bracketing pair.
+        if (irank == 0) write(*, '(a,i0,a,i0,a,i0,a,i0,a)') &
             & "# gicov_int: driven reduced axis = ", gi_axis_l, &
-            & ", transport span j_max = ", gi_jmax_l
+            & ", transport span j_max = ", gi_jmax_l, &
+            & ", cached span = ", gicov_int_jmax_cache(gi_jmax_l), &
+            & " (interpolation degree p = ", gicov_int_p_order, ")"
         deallocate(q_all)
     end if
 

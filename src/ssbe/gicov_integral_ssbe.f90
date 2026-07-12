@@ -51,20 +51,73 @@ module gicov_integral_ssbe
   private
 
   public :: gicov_int_jmax           ! j_max = ceil(a_max / dk) mesh shifts spanned by the pulse
-  public :: gicov_int_cache_bytes    ! int64 transport-cache footprint per rank (H~_j + 3 v~_j)
+  public :: gicov_int_jmax_cache     ! cached span = j_max + halo (room for the interpolation stencil)
+  public :: gicov_int_cache_bytes    ! int64 transport-cache footprint per rank (H~_j + 3 v~_j + F~0_j)
   public :: gicov_int_floor_shift    ! (a,dk) -> floor node shift n_int + fractional weight (floor(), not int())
   public :: gicov_int_bracket        ! (a,dk,jmax) -> the two cached nodes bracketing x, span-checked
+  public :: gicov_int_lagrange_wts   ! Lagrange cardinal weights on an arbitrary integer node list
+  public :: gicov_int_stencil        ! (a,dk,jmax) -> the p+1 cached nodes + Lagrange weights, span-checked
   public :: gicov_int_axis_single    ! runtime all-trajectory single-axis / linear-polarization guard
   public :: gicov_int_gate_weight    ! Delta-omega T2 gate weight (mirror of gs_info t2_gate_weight)
   public :: gicov_int_degen_blocks   ! connected closure of |eps_a-eps_b|<=floor over the sorted spectrum
   public :: gicov_int_chain          ! ordered product of single-step Wilson links -> W(kappa,kappa+n), polar
   public :: gicov_int_transport_op   ! Y = W O W^dagger  (transport a band-frame operator into the kappa frame)
-  public :: gicov_int_interp         ! linear interpolation of a bounded transported operator between nodes
+  public :: gicov_int_interp         ! LINEAR (p=1) interpolation between two nodes -- reference baseline
+  public :: gicov_int_interp_p       ! degree-p Lagrange interpolation of a bounded transported operator
   public :: gicov_int_step_k         ! midpoint-frozen EXACT-exponential step of one k-block + gated T2
   public :: gicov_int_current_k      ! Re Tr[rho~ v~_i] contribution of one k-block (i=1..3)
   public :: gicov_int_occupation_k   ! instantaneous-eigenbasis populations n_a(x) = (P^dag rho~ P)_aa
 
+  !-------------------------------------------------------------------
+  ! THE interpolation degree of the moving-frame transport, in ONE place.
+  !
+  ! The transported operators (H~_j, v~_j, F~0_j) are cached on the INTEGER mesh
+  ! shifts j and must be evaluated at the off-mesh point x = kappa - a(t), whose
+  ! fractional part sweeps continuously as the pulse drives the mesh.  That
+  ! interpolation is the ONLY remaining approximation of the integral propagator
+  ! -- the transport itself (Wilson links) and the step (exact exponential) are
+  ! exact -- so it alone sets the residual floor:
+  !
+  !     || Y(x) - I_h Y(x) ||  <=  C_p h^(p+1),      h = dk ~ 1/N_k,
+  !
+  ! i.e. refining the k-mesh drops the floor by 20*(p+1)*log10(N2/N1) dB.  The
+  ! graphene measurement confirmed the exponent for the p=1 (linear) predecessor
+  ! to 0.13 dB: k33 -> k63 gave -11.33 dB against the -11.2 dB predicted by
+  ! h^2, so the effective order was p = 1.0 and NO second noise source was
+  ! hiding underneath it.  Raising the degree is therefore the direct lever on
+  ! the floor, and p = 3 buys another factor h^2 (~ -22 dB per k33->k63 step).
+  !
+  ! Changing gicov_int_p_order is the WHOLE switch: the stencil width, the halo
+  ! the cache is padded by, and the Lagrange weights all follow from it (the
+  ! weights are built by the general cardinal formula, not hardcoded), so a p=5
+  ! scan is a one-line edit here.  p must be ODD (an even-sized centred stencil).
+  !
+  !   nsten = p + 1                   nodes per evaluation (4 for p=3)
+  !   halo  = nsten/2 - 1             extra cached shifts on EACH side (1 for p=3)
+  !
+  ! halo: with frac in (0,1) the centred window is [n0-(nsten/2-1), n0+nsten/2]
+  ! and |n0| <= j_max with n0 = +j_max reachable only at frac = 0 (which is
+  ! node-exact and needs no window at all), so padding the cache by nsten/2-1 on
+  ! each side covers every window that is actually built.  Cost: the cache grows
+  ! (2*j_max+3)/(2*j_max+1) ~ 1.1-1.2x (~15% at graphene j_max ~ 5-9).
+  !-------------------------------------------------------------------
+  integer, parameter, public :: gicov_int_p_order = 3
+  integer, parameter, public :: gicov_int_nsten   = gicov_int_p_order + 1
+  integer, parameter, public :: gicov_int_halo    = gicov_int_nsten / 2 - 1
+
 contains
+
+  !-------------------------------------------------------------------
+  ! Cached transport span: the PHYSICAL pulse span j_max padded by the halo the
+  ! degree-p stencil needs.  Kept as a function (not an open-coded "+1") so the
+  ! cache builder, the memory estimate and the lint gate cannot drift apart when
+  ! the degree changes.
+  !-------------------------------------------------------------------
+  pure integer function gicov_int_jmax_cache(jmax) result(jc)
+    implicit none
+    integer, intent(in) :: jmax
+    jc = jmax + gicov_int_halo
+  end function gicov_int_jmax_cache
 
   !-------------------------------------------------------------------
   ! Number of integer mesh shifts the pulse spans on the driven axis:
@@ -90,6 +143,12 @@ contains
   ! the LOCAL k-slice only (ik_min:ik_max = nk_local), never the full nk:
   !     bytes = 16 * 5 * (2*j_max+1) * nb^2 * nk_local
   !           = 80 * (2*j_max+1) * nb^2 * nk_local.
+  !
+  ! jmax here is the CACHED span, i.e. gicov_int_jmax_cache(pulse span) -- the
+  ! physical span PLUS the degree-p stencil halo, since those padding shifts are
+  ! really allocated.  Feeding the bare pulse span would under-count the cache by
+  ! (2j+1)/(2j+3) and is precisely the drift the jmax_cache function exists to
+  ! prevent (the lint memory gate applies the same padding).
   ! (The factor is 80 = 5 matrices x 16 bytes; F~0 must be TRANSPORTED and
   ! INTERPOLATED exactly like H~ -- between nodes the interpolated H~ and F~0 no
   ! longer share an eigenbasis, so the occupation reference cannot be recovered
@@ -328,11 +387,18 @@ contains
   end subroutine gicov_int_transport_op
 
   !-------------------------------------------------------------------
-  ! Linear interpolation of a BOUNDED transported operator between the two
+  ! LINEAR (p=1) interpolation of a BOUNDED transported operator between the two
   ! mesh nodes bracketing x = kappa - a:  Y = (1-frac) Ylo + frac Yhi.  The
   ! interpolated object is bounded (||Y|| = ||O||), so the error is O(dk^2) on
   ! a smooth field -- never the 1/dk amplification of interpolating the
   ! singular connection or the finite-difference rate.
+  !
+  ! This is NO LONGER the production path (gicov_int_interp_p at degree
+  ! gicov_int_p_order is): it is retained as the p=1 REFERENCE against which the
+  ! order of the production stencil is measured -- the convergence test refines h
+  ! through both and asserts the p=1 error falls as h^2 while the production one
+  ! falls as h^(p+1).  Measuring the claimed order against a known-order sibling
+  ! is what makes that test an order test rather than a tolerance test.
   !-------------------------------------------------------------------
   pure subroutine gicov_int_interp(Ylo, Yhi, frac, nb, Y)
     implicit none
@@ -342,6 +408,161 @@ contains
     complex(8), intent(out) :: Y(nb, nb)
     Y = (1d0 - frac) * Ylo + frac * Yhi
   end subroutine gicov_int_interp
+
+  !-------------------------------------------------------------------
+  ! Lagrange cardinal weights of an ARBITRARY integer node list, evaluated at xs:
+  !
+  !     w_i = prod_{j /= i} (xs - n_j) / (n_i - n_j),     sum_i w_i = 1,
+  !
+  ! so that sum_i w_i * Y(n_i) is the unique degree-(ns-1) polynomial through the
+  ! ns cached nodes.  Written in ABSOLUTE node coordinates (not offsets from the
+  ! bracket) so that the SAME routine serves the centred window and the one-sided
+  ! windows at the ends of the cache without any special case, and the general
+  ! product form -- rather than the four hardcoded cubic weights -- is what makes
+  ! a degree change a one-line edit of gicov_int_p_order.
+  !
+  ! Exactness at the nodes is structural, not a tolerance: at xs = n_i every
+  ! other numerator carries a zero factor, so w_j = 0 for j /= i and w_i = 1.
+  !-------------------------------------------------------------------
+  pure subroutine gicov_int_lagrange_wts(xs, nodes, ns, wts)
+    implicit none
+    integer, intent(in)  :: ns
+    integer, intent(in)  :: nodes(ns)
+    real(8), intent(in)  :: xs
+    real(8), intent(out) :: wts(ns)
+    integer :: i, j
+    real(8) :: num, den
+    do i = 1, ns
+      num = 1d0
+      den = 1d0
+      do j = 1, ns
+        if (j == i) cycle
+        num = num * (xs - real(nodes(j), 8))
+        den = den * real(nodes(i) - nodes(j), 8)
+      end do
+      wts(i) = num / den
+    end do
+  end subroutine gicov_int_lagrange_wts
+
+  !-------------------------------------------------------------------
+  ! The degree-p interpolation stencil for the off-mesh evaluation point
+  ! x = kappa - a: the nsten cached node shifts and their Lagrange weights,
+  ! span-checked against the cache extent [-jmax, jmax] (jmax = the CACHED span,
+  ! i.e. gicov_int_jmax_cache of the physical pulse span -- not the pulse span).
+  !
+  ! Three behaviours, all fail-closed:
+  !
+  !  (a) NODE-EXACT.  frac = 0 (x lands exactly on a cached shift) returns the
+  !      single node with weight 1 (nsten_out = 1), and gicov_int_interp_p then
+  !      COPIES it: the interpolator is bypassed entirely rather than trusted to
+  !      reproduce the node through a weighted sum.  This is the same node-exact
+  !      discipline the vnl_kappa 4-point stencil already follows, and it keeps
+  !      the legal endpoint a = +j_max*dk (frac = 0, the far turning point of the
+  !      pulse) from ever asking for a node past the cache.
+  !
+  !  (b) INTERIOR.  The centred window [n0-(nsten/2-1) ... n0+nsten/2] straddles
+  !      x with as many nodes on each side as the degree allows.
+  !
+  !  (c) BOUNDARY.  When that window would overhang either end of the cache it is
+  !      SLID inside it, giving a ONE-SIDED Lagrange interpolant of the SAME
+  !      degree (the polynomial order is preserved; only the node placement is
+  !      asymmetric).  Sliding, rather than dropping to a lower degree, is what
+  !      keeps the h^(p+1) floor uniform in time -- a lower-order end-of-pulse
+  !      window would re-introduce exactly the h^2 error the degree lift removes,
+  !      at the field extrema where the response is largest.
+  !
+  ! ierr /= 0 is a genuine sizing error, reported and never clamped:
+  !   ierr = 1 : x itself lies outside the cached span (the pulse drove further
+  !              than j_max was built for)
+  !   ierr = 2 : the cache is too short to hold one stencil (2*jmax+1 < nsten)
+  !-------------------------------------------------------------------
+  pure subroutine gicov_int_stencil(a, dk, jmax, nodes, wts, nsten_out, ierr)
+    implicit none
+    real(8), intent(in)  :: a, dk
+    integer, intent(in)  :: jmax
+    integer, intent(out) :: nodes(gicov_int_nsten)
+    real(8), intent(out) :: wts(gicov_int_nsten)
+    integer, intent(out) :: nsten_out, ierr
+    integer :: n0, lo, s
+    real(8) :: frac, xs
+
+    nodes(:)  = 0
+    wts(:)    = 0d0
+    call gicov_int_floor_shift(a, dk, n0, frac)
+    xs = real(n0, 8) + frac            ! == -a/dk, the evaluation point in node units
+
+    ! (a) exactly on a cached node: collapse, and never interpolate
+    if (frac == 0d0) then
+      nsten_out = 1
+      nodes(1)  = n0
+      wts(1)    = 1d0
+      if (n0 < -jmax .or. n0 > jmax) then
+        ierr = 1
+      else
+        ierr = 0
+      end if
+      return
+    end if
+
+    nsten_out = gicov_int_nsten
+    ! the evaluation point itself must lie within the cached span
+    if (n0 < -jmax .or. n0 + 1 > jmax) then
+      ierr = 1
+      return
+    end if
+    ! the cache must be long enough to seat one whole stencil
+    if (2 * jmax + 1 < gicov_int_nsten) then
+      ierr = 2
+      return
+    end if
+
+    ! (b) centred window, (c) slid inside the cache at the ends (one-sided)
+    lo = n0 - (gicov_int_nsten / 2 - 1)
+    lo = max(lo, -jmax)
+    lo = min(lo, jmax - gicov_int_nsten + 1)
+    do s = 1, gicov_int_nsten
+      nodes(s) = lo + s - 1
+    end do
+    call gicov_int_lagrange_wts(xs, nodes, gicov_int_nsten, wts)
+    ierr = 0
+  end subroutine gicov_int_stencil
+
+  !-------------------------------------------------------------------
+  ! Degree-p Lagrange interpolation of a BOUNDED transported operator, evaluated
+  ! from the cached shifts by the stencil of gicov_int_stencil:
+  !
+  !     Y(x) = sum_s w_s * Ycache(:, :, nodes(s)).
+  !
+  ! Ycache is the WHOLE cached shift range of ONE k-block (jlo:jhi contiguous),
+  ! so the caller hands over a contiguous section and no array temporary is built
+  ! inside the OpenMP k-loop (frtpx: no hidden heap in the loop).
+  !
+  ! nsten <= 1 is the node-exact case: the cached node is COPIED bit-for-bit
+  ! rather than reconstructed through a weighted sum, so an on-node evaluation is
+  ! identical to reading the cache directly (no 0*x sign-of-zero or fused-multiply
+  ! rounding can perturb it).
+  !
+  ! Interpolating the BOUNDED transported operator -- not the connection, not the
+  ! rate -- is the whole point: ||Y|| = ||O|| independently of the mesh, so the
+  ! error is a pure truncation C_p h^(p+1) with no 1/dk amplification anywhere.
+  !-------------------------------------------------------------------
+  pure subroutine gicov_int_interp_p(Ycache, nb, jlo, jhi, nodes, wts, nsten, Y)
+    implicit none
+    integer,    intent(in)  :: nb, jlo, jhi, nsten
+    integer,    intent(in)  :: nodes(nsten)
+    real(8),    intent(in)  :: wts(nsten)
+    complex(8), intent(in)  :: Ycache(nb, nb, jlo:jhi)
+    complex(8), intent(out) :: Y(nb, nb)
+    integer :: s
+    if (nsten <= 1) then
+      Y(:, :) = Ycache(:, :, nodes(1))      ! node-exact: bit-identical copy
+      return
+    end if
+    Y(:, :) = wts(1) * Ycache(:, :, nodes(1))
+    do s = 2, nsten
+      Y(:, :) = Y(:, :) + wts(s) * Ycache(:, :, nodes(s))
+    end do
+  end subroutine gicov_int_interp_p
 
   !-------------------------------------------------------------------
   ! Midpoint-frozen EXACT-exponential update of one k-block over a step dt,

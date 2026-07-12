@@ -95,11 +95,24 @@ module bloch_solver_ssbe
     ! every rank, so the transport chain W(kappa,kappa+n) is assembled ENTIRELY
     ! ON-RANK (no halo): gi_iknb_p/gi_iknb_m are the +/- reduced-axis neighbour
     ! index tables.  Cache is complex(8) over the LOCAL k-slice only.
+    !
+    ! gi_jmax is the CACHED span and gi_jmax_phys the PHYSICAL pulse span; they
+    ! differ by the degree-p interpolation halo (gicov_int_jmax_cache), because
+    ! the moving evaluation point x = kappa - a(t) sits BETWEEN nodes and its
+    ! degree-p stencil reaches past the bracketing pair.  Everything that indexes
+    ! the cache (allocation, stencil span check, memory estimate) uses gi_jmax;
+    ! gi_jmax_phys is kept only to report the pulse span it was derived from.
     logical,    save :: gi_built = .false.
-    integer,    save :: gi_nb = 0, gi_axis = 0, gi_jmax = 0
+    integer,    save :: gi_nb = 0, gi_axis = 0, gi_jmax = 0, gi_jmax_phys = 0
     integer,    save :: gi_ikmin = 0, gi_ikmax = 0
     complex(8), allocatable, save :: gi_Ht(:,:,:,:)      ! (nb,nb,-jmax:jmax, ik_min:ik_max)
-    complex(8), allocatable, save :: gi_vt(:,:,:,:,:)    ! (nb,nb,3,-jmax:jmax, ik_min:ik_max)
+    ! shift index BEFORE the Cartesian component, so that gi_vt(:,:,:,i,ik) -- the
+    ! whole cached shift range of one component of one k-block, i.e. exactly what
+    ! the interpolation stencil consumes -- is CONTIGUOUS.  With the component
+    ! index inner (the natural-looking order) that section is strided, and passing
+    ! it to the kernel would build a copy-in/copy-out temporary on every k of
+    ! every step, inside the OpenMP loop.
+    complex(8), allocatable, save :: gi_vt(:,:,:,:,:)    ! (nb,nb,-jmax:jmax,3, ik_min:ik_max)
     ! co-moving GROUND-STATE occupation reference F~0_n = W diag(f0(k+n)) W^dag.
     ! _sbe_occ.data is an EXCITATION (rho - f0), so the integral path needs f0 in
     ! the SAME instantaneous frame as rho~.  It must be transported and
@@ -2040,13 +2053,14 @@ end subroutine dt_evolve_bloch_lg_gicov
 subroutine build_gicov_integral_cache(sbe, gs, axis, jmax, icomm)
   use salmon_global, only: num_kgrid
   use degenerate_block_ssbe, only: build_ik_neighbor, polar_unitary
-  use gicov_integral_ssbe, only: gicov_int_transport_op, gicov_int_cache_bytes
+  use gicov_integral_ssbe, only: gicov_int_transport_op, gicov_int_cache_bytes, &
+                                 gicov_int_jmax_cache
   !$ use omp_lib
   implicit none
   type(s_sbe_bloch_solver), intent(in) :: sbe
   type(s_sbe_gs_info), intent(in) :: gs
   integer, intent(in) :: axis, jmax, icomm
-  integer :: nb, nk, ik, n, i, istep, kk, krem, ierr, nth
+  integer :: nb, nk, ik, n, i, istep, kk, krem, ierr, nth, jc
   integer :: bplus(3, 1), bminus(3, 1)
   integer, allocatable :: nbtab(:, :)
   complex(8), allocatable :: Wc(:, :), acc(:, :), Ohost(:, :), Yt(:, :)
@@ -2054,7 +2068,10 @@ subroutine build_gicov_integral_cache(sbe, gs, axis, jmax, icomm)
   integer(8) :: nbytes
 
   nb = sbe%nb;  nk = sbe%nk
-  gi_nb = nb;  gi_axis = axis;  gi_jmax = jmax
+  ! jmax is the PHYSICAL pulse span; the cache is padded by the interpolation
+  ! halo so the degree-p stencil of an off-node x never reaches past its end.
+  jc = gicov_int_jmax_cache(jmax)
+  gi_nb = nb;  gi_axis = axis;  gi_jmax = jc;  gi_jmax_phys = jmax
   gi_ikmin = sbe%ik_min;  gi_ikmax = sbe%ik_max
 
   ! +/- driven-axis neighbour tables on the reduced uniform grid
@@ -2068,19 +2085,21 @@ subroutine build_gicov_integral_cache(sbe, gs, axis, jmax, icomm)
   deallocate(nbtab)
 
   ! transport cache over the LOCAL k-slice only (never full nk); int64 sizing.
-  nbytes = gicov_int_cache_bytes(jmax, nb, gi_ikmax - gi_ikmin + 1)
-  allocate(gi_Ht(nb, nb, -jmax:jmax, gi_ikmin:gi_ikmax), stat=ierr)
+  ! Sized on the PADDED span jc -- the halo shifts are really allocated, so the
+  ! estimate must count them (the lint memory gate applies the same padding).
+  nbytes = gicov_int_cache_bytes(jc, nb, gi_ikmax - gi_ikmin + 1)
+  allocate(gi_Ht(nb, nb, -jc:jc, gi_ikmin:gi_ikmax), stat=ierr)
   if (ierr /= 0) then
     write(*, '(a,i0,a)') "ERROR build_gicov_integral_cache: gi_Ht alloc failed (", &
       & int(nbytes / 2_8**20, 4), " MiB/rank requested)"
     error stop 1
   end if
-  allocate(gi_vt(nb, nb, 3, -jmax:jmax, gi_ikmin:gi_ikmax), stat=ierr)
+  allocate(gi_vt(nb, nb, -jc:jc, 3, gi_ikmin:gi_ikmax), stat=ierr)
   if (ierr /= 0) then
     write(*, '(a)') "ERROR build_gicov_integral_cache: gi_vt alloc failed"
     error stop 1
   end if
-  allocate(gi_Ft(nb, nb, -jmax:jmax, gi_ikmin:gi_ikmax), stat=ierr)
+  allocate(gi_Ft(nb, nb, -jc:jc, gi_ikmin:gi_ikmax), stat=ierr)
   if (ierr /= 0) then
     write(*, '(a)') "ERROR build_gicov_integral_cache: gi_Ft alloc failed"
     error stop 1
@@ -2088,7 +2107,7 @@ subroutine build_gicov_integral_cache(sbe, gs, axis, jmax, icomm)
 
   allocate(Wc(nb, nb), acc(nb, nb), Ohost(nb, nb), Yt(nb, nb))
   do ik = gi_ikmin, gi_ikmax
-    do n = -jmax, jmax
+    do n = -jc, jc
       ! W(kappa, kappa+n) by walking |n| single-step links, all on-rank
       acc = (0d0, 0d0)
       do i = 1, nb
@@ -2133,7 +2152,7 @@ subroutine build_gicov_integral_cache(sbe, gs, axis, jmax, icomm)
           Ohost = gs%p_tm_matrix(:, :, i, krem)
         end if
         call gicov_int_transport_op(Wc, Ohost, nb, Yt)
-        gi_vt(:, :, i, n, ik) = Yt
+        gi_vt(:, :, n, i, ik) = Yt
       end do
     end do
   end do
@@ -2154,21 +2173,26 @@ subroutine build_gicov_integral_cache(sbe, gs, axis, jmax, icomm)
 end subroutine build_gicov_integral_cache
 
 ! Midpoint-frozen exact-exponential step of the whole local k-slice.  q_mid =
-! q_axis(t + dt/2) (reduced-mesh index units); the kernel evaluates x=kappa-a
-! via floor()+linear interpolation of the bounded cached H~ and steps each
-! k-block exactly with the moving-gap-gated T2.
+! q_axis(t + dt/2) (reduced-mesh index units); the kernel evaluates x=kappa-a by
+! degree-p Lagrange interpolation of the bounded cached H~ (node-exact when x
+! lands on a shift) and steps each k-block exactly with the moving-gap-gated T2.
+!
+! The stencil is resolved ONCE per step (it depends only on q_mid, not on k) and
+! reused across the whole k-loop.
 subroutine dt_evolve_bloch_lg_integral(sbe, gs, q_mid, dt, icomm)
   use salmon_global, only: t_2, sbe_t2_gate_shape, sbe_t2_gate_theta, &
                             sbe_t2_gate_width, sbe_lg_degen_floor
-  use gicov_integral_ssbe, only: gicov_int_bracket, gicov_int_interp, gicov_int_step_k
+  use gicov_integral_ssbe, only: gicov_int_stencil, gicov_int_interp_p, &
+                                 gicov_int_step_k, gicov_int_nsten
   !$ use omp_lib
   implicit none
   type(s_sbe_bloch_solver), intent(inout) :: sbe
   type(s_sbe_gs_info), intent(in) :: gs
   real(8), intent(in) :: q_mid, dt
   integer, intent(in) :: icomm
-  integer :: ik, nb, n_lo, n_hi, tid, ierr, nbad_l, nbad
-  real(8) :: frac, gamma
+  integer :: ik, nb, tid, ierr, nbad_l, nbad
+  integer :: nodes(gicov_int_nsten), nsten
+  real(8) :: wts(gicov_int_nsten), gamma
 
   if (.not. gi_built) then
     write(*, '(a)') "ERROR(dt_evolve_bloch_lg_integral): transport cache not built."
@@ -2176,7 +2200,7 @@ subroutine dt_evolve_bloch_lg_integral(sbe, gs, q_mid, dt, icomm)
   end if
   nb = sbe%nb
   gamma = 1d0 / t_2
-  call gicov_int_bracket(q_mid, 1d0, gi_jmax, n_lo, n_hi, frac, ierr)
+  call gicov_int_stencil(q_mid, 1d0, gi_jmax, nodes, wts, nsten, ierr)
   if (ierr /= 0) then
     write(*, '(a,es16.8,a,i0)') "ERROR(dt_evolve_bloch_lg_integral): mesh shift q=", q_mid, &
       & " leaves the cached transport span +/-", gi_jmax
@@ -2188,8 +2212,8 @@ subroutine dt_evolve_bloch_lg_integral(sbe, gs, q_mid, dt, icomm)
   do ik = gi_ikmin, gi_ikmax
     tid = 0
     !$ tid = omp_get_thread_num()
-    call gicov_int_interp(gi_Ht(:, :, n_lo, ik), gi_Ht(:, :, n_hi, ik), &
-                        & frac, nb, gi_w_H(:, :, tid))
+    call gicov_int_interp_p(gi_Ht(:, :, :, ik), nb, -gi_jmax, gi_jmax, &
+                          & nodes, wts, nsten, gi_w_H(:, :, tid))
     call gicov_int_step_k(gi_w_H(:, :, tid), sbe%rho(:, :, ik), nb, dt, gamma, &
                         & sbe_t2_gate_shape, sbe_t2_gate_theta, sbe_t2_gate_width, &
                         & sbe_lg_degen_floor, gi_w_eps(:, tid), gi_w_P(:, :, tid), &
@@ -2227,7 +2251,8 @@ end subroutine dt_evolve_bloch_lg_integral
 ! v~_i the cached TRANSPORTED velocity interpolated to x = kappa - a(t).  No
 ! D.A subtraction (that is a velocity-gauge concept; the length gauge is Tr(v rho)).
 subroutine calc_current_bloch_lg_integral(sbe, gs, q_now, jmat, icomm)
-  use gicov_integral_ssbe, only: gicov_int_bracket, gicov_int_interp, gicov_int_current_k
+  use gicov_integral_ssbe, only: gicov_int_stencil, gicov_int_interp_p, &
+                                 gicov_int_current_k, gicov_int_nsten
   !$ use omp_lib
   implicit none
   type(s_sbe_bloch_solver), intent(in) :: sbe
@@ -2235,11 +2260,12 @@ subroutine calc_current_bloch_lg_integral(sbe, gs, q_now, jmat, icomm)
   real(8), intent(in) :: q_now
   real(8), intent(out) :: jmat(3)
   integer, intent(in) :: icomm
-  integer :: ik, nb, n_lo, n_hi, tid, i, ierr
-  real(8) :: frac, jk(3), tmp1(3), tmp(3)
+  integer :: ik, nb, tid, i, ierr
+  integer :: nodes(gicov_int_nsten), nsten
+  real(8) :: wts(gicov_int_nsten), jk(3), tmp1(3), tmp(3)
 
   nb = sbe%nb
-  call gicov_int_bracket(q_now, 1d0, gi_jmax, n_lo, n_hi, frac, ierr)
+  call gicov_int_stencil(q_now, 1d0, gi_jmax, nodes, wts, nsten, ierr)
   if (ierr /= 0) then
     write(*, '(a)') "ERROR(calc_current_bloch_lg_integral): mesh shift leaves the cached span."
     error stop 1
@@ -2250,8 +2276,8 @@ subroutine calc_current_bloch_lg_integral(sbe, gs, q_now, jmat, icomm)
     tid = 0
     !$ tid = omp_get_thread_num()
     do i = 1, 3
-      call gicov_int_interp(gi_vt(:, :, i, n_lo, ik), gi_vt(:, :, i, n_hi, ik), &
-                          & frac, nb, gi_w_v(:, :, i, tid))
+      call gicov_int_interp_p(gi_vt(:, :, :, i, ik), nb, -gi_jmax, gi_jmax, &
+                            & nodes, wts, nsten, gi_w_v(:, :, i, tid))
     end do
     call gicov_int_current_k(sbe%rho(:, :, ik), gi_w_v(:, :, :, tid), nb, jk)
     tmp1(1:3) = tmp1(1:3) + gs%kweight(ik) * jk(1:3)
@@ -2282,20 +2308,22 @@ end subroutine calc_current_bloch_lg_integral
 ! the individual eigen-columns inside a degenerate manifold are arbitrary.
 subroutine calc_band_population_integral(sbe, gs, q_now, nex_b, icomm)
   use salmon_global, only: sbe_lg_degen_floor
-  use gicov_integral_ssbe, only: gicov_int_bracket, gicov_int_interp, gicov_int_occupation_k
+  use gicov_integral_ssbe, only: gicov_int_stencil, gicov_int_interp_p, &
+                                 gicov_int_occupation_k, gicov_int_nsten
   implicit none
   type(s_sbe_bloch_solver), intent(in) :: sbe
   type(s_sbe_gs_info), intent(in) :: gs
   real(8), intent(in) :: q_now
   real(8), intent(out) :: nex_b(1:sbe%nb)
   integer, intent(in) :: icomm
-  integer :: ik, nb, n_lo, n_hi, ib, ierr, nbad_l, nbad
-  real(8) :: frac
+  integer :: ik, nb, ib, ierr, nbad_l, nbad
+  integer :: nodes(gicov_int_nsten), nsten
+  real(8) :: wts(gicov_int_nsten)
   real(8), allocatable :: acc(:), dn(:)
   complex(8), allocatable :: F0(:, :), D(:, :)
 
   nb = sbe%nb
-  call gicov_int_bracket(q_now, 1d0, gi_jmax, n_lo, n_hi, frac, ierr)
+  call gicov_int_stencil(q_now, 1d0, gi_jmax, nodes, wts, nsten, ierr)
   if (ierr /= 0) then
     write(*, '(a)') "ERROR(calc_band_population_integral): mesh shift leaves the cached span."
     error stop 1
@@ -2305,10 +2333,11 @@ subroutine calc_band_population_integral(sbe, gs, q_now, nex_b, icomm)
   allocate(acc(nb), dn(nb), F0(nb, nb), D(nb, nb));  acc(:) = 0d0
   nbad_l = 0
   do ik = gi_ikmin, gi_ikmax
-    call gicov_int_interp(gi_Ht(:, :, n_lo, ik), gi_Ht(:, :, n_hi, ik), &
-                        & frac, nb, gi_w_H(:, :, 0))
+    call gicov_int_interp_p(gi_Ht(:, :, :, ik), nb, -gi_jmax, gi_jmax, &
+                          & nodes, wts, nsten, gi_w_H(:, :, 0))
     ! co-moving GS reference at the SAME x, interpolated the SAME way as H~
-    call gicov_int_interp(gi_Ft(:, :, n_lo, ik), gi_Ft(:, :, n_hi, ik), frac, nb, F0)
+    call gicov_int_interp_p(gi_Ft(:, :, :, ik), nb, -gi_jmax, gi_jmax, &
+                          & nodes, wts, nsten, F0)
     D(:, :) = sbe%rho(:, :, ik) - F0(:, :)      ! Hermitian: the excitation
     call gicov_int_occupation_k(gi_w_H(:, :, 0), D, nb, sbe_lg_degen_floor, &
                               & gi_w_eps(:, 0), gi_w_P(:, :, 0), gi_w_R(:, :, 0), &
@@ -2357,19 +2386,21 @@ end subroutine calc_band_population_integral
 ! than an arbitrary basis-dependent split.
 function calc_valence_trace_integral(sbe, gs, q_now, nvb, icomm) result(trv)
   use salmon_global, only: sbe_lg_degen_floor
-  use gicov_integral_ssbe, only: gicov_int_bracket, gicov_int_interp, gicov_int_occupation_k
+  use gicov_integral_ssbe, only: gicov_int_stencil, gicov_int_interp_p, &
+                                 gicov_int_occupation_k, gicov_int_nsten
   implicit none
   type(s_sbe_bloch_solver), intent(in) :: sbe
   type(s_sbe_gs_info), intent(in) :: gs
   real(8), intent(in) :: q_now
   integer, intent(in) :: nvb, icomm
   real(8) :: trv
-  integer :: ik, nb, n_lo, n_hi, ib, ierr, nbad_l, nbad
-  real(8) :: frac, acc, tmp
+  integer :: ik, nb, ib, ierr, nbad_l, nbad
+  integer :: nodes(gicov_int_nsten), nsten
+  real(8) :: wts(gicov_int_nsten), acc, tmp
   real(8), allocatable :: nocc(:)
 
   nb = sbe%nb
-  call gicov_int_bracket(q_now, 1d0, gi_jmax, n_lo, n_hi, frac, ierr)
+  call gicov_int_stencil(q_now, 1d0, gi_jmax, nodes, wts, nsten, ierr)
   if (ierr /= 0) then
     write(*, '(a)') "ERROR(calc_valence_trace_integral): mesh shift leaves the cached span."
     error stop 1
@@ -2378,8 +2409,8 @@ function calc_valence_trace_integral(sbe, gs, q_now, nvb, icomm) result(trv)
   acc = 0d0
   nbad_l = 0
   do ik = gi_ikmin, gi_ikmax
-    call gicov_int_interp(gi_Ht(:, :, n_lo, ik), gi_Ht(:, :, n_hi, ik), &
-                        & frac, nb, gi_w_H(:, :, 0))
+    call gicov_int_interp_p(gi_Ht(:, :, :, ik), nb, -gi_jmax, gi_jmax, &
+                          & nodes, wts, nsten, gi_w_H(:, :, 0))
     call gicov_int_occupation_k(gi_w_H(:, :, 0), sbe%rho(:, :, ik), nb, sbe_lg_degen_floor, &
                               & gi_w_eps(:, 0), gi_w_P(:, :, 0), gi_w_R(:, :, 0), &
                               & gi_w_cw(:, 0), gi_lcwork, gi_w_rw(:, 0), nocc, &

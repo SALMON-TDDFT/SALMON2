@@ -74,6 +74,49 @@
 !      endpoint rule at 1st, as advertised.  (The Si dt-halving on the real
 !      propagator is the Fugaku gate; this is its kernel-level counterpart.)
 !
+! The T14-T16 group covers the DEGREE LIFT of the moving-frame interpolation
+! (p = 1 linear -> p = gicov_int_p_order = 3, four-point Lagrange).  The graphene
+! run had established that the interpolation is the ONLY remaining residual
+! source -- the Wilson transport and the exponential step are exact, the k33->k63
+! floor drop was -11.33 dB against the -11.2 dB predicted by h^(p+1) at p=1, a
+! 0.13 dB match that simultaneously fixes the effective order at 1.0 and rules
+! out a second noise source underneath.  Raising p is therefore the direct lever
+! on the floor, and these three tests pin that the lever is real:
+!
+!  T14 NODE-EXACTNESS.  When x = kappa - a lands exactly on a cached shift the
+!      interpolator must be BYPASSED, not merely be accurate: gicov_int_stencil
+!      collapses to a single node (nsten = 1) and gicov_int_interp_p COPIES it,
+!      bit for bit.  The test seeds the cache with a signed zero, which a
+!      weighted sum would silently flip (1*(-0.0) + 0*x + ... = +0.0), so it
+!      fails against a "weights are exactly (0,1,0,0), close enough" shortcut and
+!      passes only against the real copy branch.  Same fail-closed discipline as
+!      the existing vnl_kappa 4-point stencil.
+!
+!  T15 THE ORDER ITSELF (the point of the change).  A smooth ANALYTIC non-linear
+!      matrix field (cos/sin, so every derivative survives -- a polynomial of
+!      degree <= p would be interpolated exactly and prove nothing) is cached on
+!      a mesh of spacing h and evaluated off-node at a FIXED fractional offset,
+!      then h is halved.  The error must fall as h^(p+1) = h^4, i.e. by 16x per
+!      halving -- and the SAME cache, the SAME evaluation point, through the
+!      retained p=1 sibling gicov_int_interp, must fall as h^2 (4x).  Holding
+!      frac fixed while refining is what makes the ratio a clean order readout:
+!      the Lagrange error constant depends on frac, so letting it drift would
+!      contaminate the measured exponent with a varying prefactor.  Reporting the
+!      p=1 order from the same data is the control -- it converts "our error got
+!      smaller" into "the exponent moved from 2 to 4".
+!
+!  T16 THE BOUNDARY (one-sided) PATH.  Near the ends of the cached span the
+!      centred window would overhang, so it SLIDES inside the cache instead --
+!      a one-sided Lagrange interpolant of the SAME degree.  Degree preservation
+!      is the load-bearing claim and is tested as such: with the cache filled
+!      from an exact CUBIC, the one-sided window must reproduce it to machine
+!      precision (a window that quietly dropped to linear at the edges would
+!      re-introduce the h^2 floor exactly at the field extrema, where the
+!      response is largest, and would leave the k-scan looking like p=1 again).
+!      Also pins the partition of unity, and the two fail-closed exits: x past
+!      the cached span (ierr=1) and a cache too short to seat one stencil
+!      (ierr=2).
+!
 program test_gicov_integral
   use gicov_integral_ssbe
   implicit none
@@ -93,6 +136,9 @@ program test_gicov_integral
   call t11_degenerate_closure(nfail)
   call t12_comoving_f0(nfail)
   call t13_dt_halving(nfail)
+  call t14_node_exact(nfail)
+  call t15_interp_order(nfail)
+  call t16_stencil_boundary(nfail)
 
   if (nfail == 0) then
     write(*, '(a)') "ALL PASS (test_gicov_integral)"
@@ -358,6 +404,25 @@ contains
     want = 80_8 * 27_8 * nb_ * nb_ * 20000_8
     call report("T5 int64 cache bytes do not overflow at production scale", &
               & (gicov_int_cache_bytes(13, 192, 20000) == want) .and. (want > 2147483647_8), nfail)
+
+    ! --- degree-p stencil halo (the p=1 -> p=3 lift) ---------------------------
+    ! The cache is padded PAST the pulse span so the stencil of an off-node x can
+    ! never reach past its end.  Everything follows from the one named degree.
+    call report("T5 degree constants: p=3 -> 4-point stencil, halo 1 shift per side", &
+              & (gicov_int_p_order == 3) .and. (gicov_int_nsten == 4) &
+              & .and. (gicov_int_halo == 1), nfail)
+    call report("T5 cached span = pulse span + halo (graphene k99: 13 -> 14)", &
+              & (gicov_int_jmax_cache(13) == 14) .and. (gicov_int_jmax_cache(5) == 6), nfail)
+    ! the cache must be SIZED on the padded span -- charging the memory gate the
+    ! bare pulse span would under-count the shifts that are really allocated
+    call report("T5 padded cache bytes = 80*(2*(j+halo)+1)*nb^2*nk_local", &
+              & gicov_int_cache_bytes(gicov_int_jmax_cache(13), 24, 1000) == &
+              & 80_8 * 29_8 * 24_8 * 24_8 * 1000_8, nfail)
+    ! and the padding must stay CHEAP: the whole case for the degree lift is that
+    ! h^4 costs ~15% more memory, not 2x (graphene j_max ~ 5-9 -> 13/11 .. 21/19)
+    call report("T5 halo memory overhead stays under 20% at graphene j_max", &
+              & real(gicov_int_cache_bytes(gicov_int_jmax_cache(5), 24, 1000), 8) < &
+              & 1.20d0 * real(gicov_int_cache_bytes(5, 24, 1000), 8), nfail)
   end subroutine t5_cache_sizing
 
   !----------------------------------------------------------------
@@ -797,5 +862,220 @@ contains
     call report("T13 midpoint (integral mode) is more accurate than endpoint at equal dt", &
               & ea4 < eb4, nfail)
   end subroutine t13_dt_halving
+
+  !----------------------------------------------------------------
+  ! Bit-level equality (NOT ==): IEEE says -0.0 == +0.0, so a plain comparison
+  ! cannot see the sign flip a weighted sum introduces on a signed zero, which is
+  ! exactly the discrepancy T14 exists to catch.  Compare the bit patterns.
+  logical function bits_same(A, B, n)
+    integer,    intent(in) :: n
+    complex(8), intent(in) :: A(n, n), B(n, n)
+    integer :: i, j
+    bits_same = .true.
+    do j = 1, n
+      do i = 1, n
+        if (transfer(real(A(i, j), 8), 0_8) /= transfer(real(B(i, j), 8), 0_8)) bits_same = .false.
+        if (transfer(aimag(A(i, j)), 0_8)   /= transfer(aimag(B(i, j)), 0_8))   bits_same = .false.
+      end do
+    end do
+  end function bits_same
+
+  ! Smooth ANALYTIC non-linear Hermitian field.  cos/sin deliberately: no
+  ! derivative ever terminates, so NO finite-degree interpolant is exact on it
+  ! and the order T15 measures is the interpolant's own -- a polynomial test
+  ! field of degree <= p would be reproduced exactly and would measure nothing.
+  pure subroutine fsmooth(x, F)
+    real(8),    intent(in)  :: x
+    complex(8), intent(out) :: F(2, 2)
+    F(1, 1) = cmplx(cos(x), 0d0, 8)
+    F(2, 2) = cmplx(-cos(x) + 0.2d0 * sin(x), 0d0, 8)
+    F(1, 2) = cmplx(0.4d0 * sin(2d0 * x), 0.3d0 * cos(3d0 * x), 8)
+    F(2, 1) = conjg(F(1, 2))
+  end subroutine fsmooth
+
+  ! Exact CUBIC field: a degree-3 Lagrange interpolant must reproduce it to
+  ! machine precision from ANY 4 distinct nodes -- centred or one-sided.  That is
+  ! what turns T16's boundary check into a DEGREE check.
+  pure subroutine fcubic(x, F)
+    real(8),    intent(in)  :: x
+    complex(8), intent(out) :: F(2, 2)
+    F(1, 1) = cmplx(1d0 + 2d0 * x - 0.5d0 * x**2 + 0.25d0 * x**3, 0d0, 8)
+    F(2, 2) = cmplx(-0.5d0 - x + x**3, 0d0, 8)
+    F(1, 2) = cmplx(0.3d0 * x**3 + x**2, -0.7d0 + 0.2d0 * x**3, 8)
+    F(2, 1) = conjg(F(1, 2))
+  end subroutine fcubic
+
+  !----------------------------------------------------------------
+  ! T14  NODE-EXACTNESS: on a cached shift the interpolator is BYPASSED.
+  subroutine t14_node_exact(nfail)
+    integer, intent(inout) :: nfail
+    integer, parameter :: jm = 5
+    complex(8) :: Yc(2, 2, -jm:jm), Y(2, 2)
+    real(8)    :: wts(gicov_int_nsten)
+    integer    :: nodes(gicov_int_nsten), nsten, ierr, j
+    logical    :: ok_st, ok_bits
+
+    ! deterministic, and deliberately seeded with SIGNED ZEROS: a weighted sum
+    ! with weights (0,1,0,0) returns +0.0 for them (1*(-0.0) + 0.0*x = +0.0), so
+    ! this cache separates the real copy branch from a "the weights are exactly
+    ! (0,1,0,0), close enough" shortcut.
+    do j = -jm, jm
+      Yc(1, 1, j) = cmplx(dble(j) * 1.25d0, 0.5d0 * dble(j), 8)
+      Yc(1, 2, j) = cmplx(-0.0d0, 0.75d0 - dble(j), 8)
+      Yc(2, 1, j) = cmplx(0.75d0 - dble(j), -0.0d0, 8)
+      Yc(2, 2, j) = cmplx(3.5d0 - dble(j) * 0.125d0, dble(j), 8)
+    end do
+
+    ok_st = .true.;  ok_bits = .true.
+    do j = -jm, jm
+      ! x = kappa - a lands exactly on the cached shift j  <=>  a = -j  (dk = 1).
+      ! The loop includes BOTH endpoints j = +/-jm -- the legal turning points of
+      ! the pulse, which the 2-point bracket used to overrun (T10).
+      call gicov_int_stencil(-dble(j), 1d0, jm, nodes, wts, nsten, ierr)
+      if (ierr /= 0 .or. nsten /= 1 .or. nodes(1) /= j .or. wts(1) /= 1d0) ok_st = .false.
+      call gicov_int_interp_p(Yc, 2, -jm, jm, nodes, wts, nsten, Y)
+      if (.not. bits_same(Y, Yc(:, :, j), 2)) ok_bits = .false.
+    end do
+    call report("T14 frac=0 collapses the stencil onto the node (nsten=1, w=1) at every cached shift", &
+              & ok_st, nfail)
+    call report("T14 node-exact interpolation returns the cached node BIT-for-BIT (signed zeros intact)", &
+              & ok_bits, nfail)
+
+    ! and an off-node point must NOT collapse -- a frac test that is too loose
+    ! would silently degrade every interior evaluation to nearest-neighbour
+    call gicov_int_stencil(-0.5d0, 1d0, jm, nodes, wts, nsten, ierr)
+    call report("T14 an off-node point still takes the full p+1 stencil (no spurious collapse)", &
+              & (ierr == 0) .and. (nsten == gicov_int_nsten), nfail)
+  end subroutine t14_node_exact
+
+  !----------------------------------------------------------------
+  ! T15  THE ORDER: the interpolation error falls as h^(p+1) = h^4.
+  subroutine t15_interp_order(nfail)
+    integer, intent(inout) :: nfail
+    integer, parameter :: nlev = 4, m0 = 2
+    real(8), parameter :: h0 = 0.25d0, frac0 = 0.37d0
+    complex(8), allocatable :: Yc(:, :, :)
+    complex(8) :: Y3(2, 2), Y1(2, 2), Fex(2, 2)
+    real(8)    :: h, wts(gicov_int_nsten), e3(nlev), e1(nlev), ord3, ord1
+    integer    :: nodes(gicov_int_nsten), nsten, ierr, l, m, jm, j
+    logical    :: ok
+
+    ok = .true.
+    do l = 1, nlev
+      h  = h0 / 2d0**(l - 1)
+      ! The node index of the evaluation point DOUBLES with the mesh, so the
+      ! fractional offset frac0 is held FIXED under refinement.  That matters:
+      ! the Lagrange error constant depends on frac, so letting frac drift would
+      ! fold a varying prefactor into the measured exponent.  (The physical point
+      ! (m+frac0)*h then converges to m0*h0 = 0.5 from above.)
+      m  = m0 * 2**(l - 1)
+      jm = m + 6                      ! interior: never touches the one-sided branch
+      allocate(Yc(2, 2, -jm:jm))
+      do j = -jm, jm
+        call fsmooth(dble(j) * h, Yc(:, :, j))
+      end do
+      call fsmooth((dble(m) + frac0) * h, Fex)
+
+      ! s = -a/dk = m + frac0  (dk = 1 in node units)
+      call gicov_int_stencil(-(dble(m) + frac0), 1d0, jm, nodes, wts, nsten, ierr)
+      if (ierr /= 0 .or. nsten /= gicov_int_nsten) ok = .false.
+      call gicov_int_interp_p(Yc, 2, -jm, jm, nodes, wts, nsten, Y3)
+      ! the retained p=1 sibling, on the SAME cache at the SAME point: the CONTROL
+      ! that turns "the error got smaller" into "the exponent moved from 2 to 4"
+      call gicov_int_interp(Yc(:, :, m), Yc(:, :, m + 1), frac0, 2, Y1)
+
+      e3(l) = maxdiff(Y3, Fex, 2)
+      e1(l) = maxdiff(Y1, Fex, 2)
+      deallocate(Yc)
+    end do
+    call report("T15 the refinement sweep stays on the interior (centred) stencil throughout", ok, nfail)
+
+    ! exponents from the FINEST halving (most asymptotic)
+    ord3 = log(e3(nlev - 1) / e3(nlev)) / log(2d0)
+    ord1 = log(e1(nlev - 1) / e1(nlev)) / log(2d0)
+    write(*, '(a,4es11.3)') "        T15 p=3 errors vs h/2 sweep : ", e3(1:nlev)
+    write(*, '(a,4es11.3)') "        T15 p=1 errors vs h/2 sweep : ", e1(1:nlev)
+    write(*, '(a,f6.3,a,f6.3)') "        T15 measured order  p=3 : ", ord3, &
+                              & "   p=1 : ", ord1
+
+    call report("T15 p=3 interpolation error falls as h^4 (16x per halving) = THE DEGREE LIFT", &
+              & abs(ord3 - 4d0) < 0.35d0, nfail)
+    call report("T15 the p=1 sibling falls as h^2 on the same data (control: the old floor)", &
+              & abs(ord1 - 2d0) < 0.25d0, nfail)
+    call report("T15 the exponent moved by ~2 -- not merely a smaller prefactor", &
+              & (ord3 - ord1) > 1.6d0, nfail)
+    call report("T15 and p=3 is >20x more accurate than p=1 at the same h", &
+              & e3(nlev) < 0.05d0 * e1(nlev), nfail)
+  end subroutine t15_interp_order
+
+  !----------------------------------------------------------------
+  ! T16  THE BOUNDARY: one-sided windows, degree preserved, fail-closed exits.
+  subroutine t16_stencil_boundary(nfail)
+    integer, intent(inout) :: nfail
+    integer, parameter :: jm = 4
+    complex(8) :: Yc(2, 2, -jm:jm), Y(2, 2), Fex(2, 2)
+    real(8)    :: wts(gicov_int_nsten), s, wsum
+    integer    :: nodes(gicov_int_nsten), nsten, ierr, j
+    logical    :: ok
+
+    do j = -jm, jm
+      call fcubic(dble(j), Yc(:, :, j))       ! cache = an exact CUBIC
+    end do
+
+    ! --- interior: the centred window ---
+    s = 0.5d0
+    call gicov_int_stencil(-s, 1d0, jm, nodes, wts, nsten, ierr)
+    call report("T16 interior point takes the CENTRED window [-1,0,1,2]", &
+              & (ierr == 0) .and. (nsten == 4) .and. all(nodes == (/ -1, 0, 1, 2 /)), nfail)
+    call gicov_int_interp_p(Yc, 2, -jm, jm, nodes, wts, nsten, Y)
+    call fcubic(s, Fex)
+    call report("T16 the centred window reproduces a cubic to machine precision (degree 3)", &
+              & maxdiff(Y, Fex, 2) < 1d-12, nfail)
+
+    ! --- low end: the centred window would need node -5 -> slide inside ---
+    s = -dble(jm) + 0.3d0                     ! n0 = -4, frac = 0.3
+    call gicov_int_stencil(-s, 1d0, jm, nodes, wts, nsten, ierr)
+    call report("T16 low-end point SLIDES to the one-sided window [-4,-3,-2,-1] (no overhang, no abort)", &
+              & (ierr == 0) .and. (nsten == 4) .and. all(nodes == (/ -4, -3, -2, -1 /)), nfail)
+    call gicov_int_interp_p(Yc, 2, -jm, jm, nodes, wts, nsten, Y)
+    call fcubic(s, Fex)
+    ! THE load-bearing claim: sliding preserves the DEGREE.  A window that quietly
+    ! fell back to linear at the ends would re-introduce the h^2 floor exactly at
+    ! the field extrema, where the response is largest -- and the k-scan would
+    ! still read p ~ 1, with nothing to point at.
+    call report("T16 the one-sided window is still DEGREE 3: reproduces the cubic to machine precision", &
+              & maxdiff(Y, Fex, 2) < 1d-12, nfail)
+
+    ! --- high end ---
+    s = dble(jm) - 0.3d0                      ! n0 = 3, frac = 0.7
+    call gicov_int_stencil(-s, 1d0, jm, nodes, wts, nsten, ierr)
+    call report("T16 high-end point SLIDES to the one-sided window [1,2,3,4]", &
+              & (ierr == 0) .and. (nsten == 4) .and. all(nodes == (/ 1, 2, 3, 4 /)), nfail)
+    call gicov_int_interp_p(Yc, 2, -jm, jm, nodes, wts, nsten, Y)
+    call fcubic(s, Fex)
+    call report("T16 the high-end one-sided window is degree 3 too", &
+              & maxdiff(Y, Fex, 2) < 1d-12, nfail)
+
+    ! --- partition of unity across the whole span (centred AND one-sided) ---
+    ok = .true.
+    do j = -2 * jm, 2 * jm
+      s = 0.5d0 * dble(j) + 0.17d0
+      if (abs(s) > dble(jm) - 0.01d0) cycle
+      call gicov_int_stencil(-s, 1d0, jm, nodes, wts, nsten, ierr)
+      if (ierr /= 0) then
+        ok = .false.
+      else
+        wsum = sum(wts(1:nsten))
+        if (abs(wsum - 1d0) > 1d-13) ok = .false.
+      end if
+    end do
+    call report("T16 Lagrange weights are a partition of unity everywhere in the span", ok, nfail)
+
+    ! --- fail-closed exits: reported, never clamped ---
+    call gicov_int_stencil(-(dble(jm) + 0.5d0), 1d0, jm, nodes, wts, nsten, ierr)
+    call report("T16 x past the cached span is REPORTED (ierr=1), never clamped", ierr == 1, nfail)
+    call gicov_int_stencil(-0.5d0, 1d0, 1, nodes, wts, nsten, ierr)
+    call report("T16 a cache too short to seat one stencil is REPORTED (ierr=2)", ierr == 2, nfail)
+  end subroutine t16_stencil_boundary
 
 end program test_gicov_integral
