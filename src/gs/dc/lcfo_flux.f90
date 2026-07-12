@@ -46,7 +46,8 @@ module lcfo_flux
   use lcfo_wannier_sawf_templates, only: measure_sawf_vacuum_occupancy
   use lcfo_wannier_sawf_orchestrator, only: t_sawf_environment_receipt,t_sawf_seed_bundle, &
     build_sawf_environment_execution_plan,build_sawf_seed_bundles
-  use lcfo_wannier_sawf_seed, only: select_sawf_local_complete_shells
+  use lcfo_wannier_sawf_seed, only: select_sawf_local_complete_shells, &
+    build_sawf_local_seed_matrices,write_sawf_local_eig_amn_mmn
   use lcfo_wannier_sawf_win, only: activate_sawf_win, deactivate_sawf_win, &
     t_atomic_win_writer, begin_atomic_win, finish_atomic_win, abort_atomic_win
   use lcfo_wannier_command, only: select_wannier90_command, execute_wannier90_command, &
@@ -113,7 +114,7 @@ module lcfo_flux
     integer :: buffer_shape(3)=0,buffer_width(3)=0
     integer :: nspin=0,nstate_frag=0,nstate_tot=0,n_basis=0
     real(8), allocatable :: basis(:,:),buffer_basis(:,:)
-    complex(8), allocatable :: states(:,:)
+    complex(8), allocatable :: states(:,:),buffer_states(:,:)
   end type t_sawf_fragment_state_entry
 
   type :: t_sawf_fragment_state_cache
@@ -6918,6 +6919,15 @@ contains
         call clear_sawf_fragment_state_cache(state_cache)
         call lcfo_sawf_fatal('SAWF source fragment state cache preparation failed')
       end if
+      if(trim(wannier_sawf_generation)=='hierarchical'.and.dc%id_frag==0.and. &
+          sawf_environment_receipts(dc%i_frag)%requires_execution)then
+        call write_sawf_representative_local_seed(state_cache%source,channels, &
+          sawf_selected_channels,sawf_seed_bundles,esp_tot(1:nband_wann,1),local_ok,message)
+        if(.not.local_ok)then
+          write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-LOCAL-SEED] rank=',dc%id_tot,' ',trim(message)
+          call lcfo_sawf_fatal('SAWF representative local seed writing failed before collective use')
+        end if
+      end if
       local_ok=.true.; message=''
       if(.not.split_fragment_global_mode) call build_sawf_closed_fragment_seed_basis( &
         nband_wann,mesh,fragment_origin,fragment_shape,symmetry_operations, &
@@ -7343,6 +7353,7 @@ contains
       end if
       allocate(entry%basis(npoints,n_basis_frag),entry%states(npoints,nband_wann), &
         entry%buffer_basis(product(nxyz_box_read),n_basis_frag), &
+        entry%buffer_states(product(nxyz_box_read),nband_wann), &
         stat=allocation_status)
       if(allocation_status/=0) then
         call clear_sawf_fragment_state_entry(entry)
@@ -7353,6 +7364,8 @@ contains
       entry%buffer_basis=buffer_basis(:,1:n_basis_frag)
       entry%states=matmul(cmplx(basis(:,1:n_basis_frag),0.0d0,kind=8), &
         cmplx(coef(1:n_basis_frag,1:nband_wann),0.0d0,kind=8))
+      entry%buffer_states=matmul(cmplx(buffer_basis(:,1:n_basis_frag),0.0d0,kind=8), &
+        cmplx(coef_buffer(1:n_basis_frag,1:nband_wann),0.0d0,kind=8))
       entry%fragment=ifrag; entry%shape=shape_read; entry%buffer_shape=nxyz_box_read
       entry%buffer_width=nxyz_buffer_read; entry%nspin=nspin_file
       entry%nstate_frag=nstate_frag_file; entry%nstate_tot=nstate_tot_file; entry%n_basis=n_basis_frag
@@ -7395,6 +7408,7 @@ contains
       npoint_core=product(shape_file); npoint_buffer=product(shape_file+2*buffer_file)
       allocate(entry%basis(npoint_core,n_basis_file), &
         entry%buffer_basis(npoint_buffer,n_basis_file),entry%states(npoint_core,nband_wann), &
+        entry%buffer_states(npoint_buffer,nband_wann), &
         coef(n_basis_file,nstate_tot_file),esp(nstate_tot_file),stat=allocation_status)
       if(allocation_status/=0) then
         close(iunit); call clear_sawf_fragment_state_entry(entry)
@@ -7412,6 +7426,8 @@ contains
       end if
       entry%states=matmul(cmplx(entry%basis,0.0d0,kind=8), &
         cmplx(coef(:,1:nband_wann),0.0d0,kind=8))
+      entry%buffer_states=matmul(cmplx(entry%buffer_basis,0.0d0,kind=8), &
+        cmplx(coef(:,1:nband_wann),0.0d0,kind=8))
       entry%fragment=ifrag; entry%shape=shape_file; entry%buffer_width=buffer_file
       entry%buffer_shape=shape_file+2*buffer_file; entry%nspin=nspin_file
       entry%nstate_frag=nstate_frag_file; entry%nstate_tot=nstate_tot_file; entry%n_basis=n_basis_file
@@ -7424,6 +7440,7 @@ contains
       if(allocated(entry%basis)) deallocate(entry%basis)
       if(allocated(entry%buffer_basis)) deallocate(entry%buffer_basis)
       if(allocated(entry%states)) deallocate(entry%states)
+      if(allocated(entry%buffer_states)) deallocate(entry%buffer_states)
       entry%fragment=0; entry%shape=0; entry%buffer_shape=0; entry%buffer_width=0
       entry%nspin=0; entry%nstate_frag=0
       entry%nstate_tot=0; entry%n_basis=0
@@ -7897,6 +7914,67 @@ contains
       npoints=int(product64)
       ok=.true.
     end subroutine checked_sawf_fragment_point_count
+
+    subroutine write_sawf_representative_local_seed(entry,projection_channels,selected_channels, &
+        bundles,energy_hartree,ok,message)
+      use salmon_global, only: wannier_projection_width
+      type(t_sawf_fragment_state_entry),intent(in)::entry
+      type(t_sawf_projection_channel),intent(in)::projection_channels(:)
+      integer,intent(in)::selected_channels(:)
+      type(t_sawf_seed_bundle),intent(in)::bundles(:)
+      real(8),intent(in)::energy_hartree(:)
+      logical,intent(out)::ok
+      character(*),intent(out)::message
+      real(8),parameter::hartree_to_ev=27.211386245988d0
+      complex(8),allocatable::projection(:,:),phase_factor(:,:),amn_local(:,:),mmn_local(:,:,:)
+      real(8),allocatable::energy_ev(:)
+      real(8)::a1(3),a2(3),a3(3),gcart(3,3),x,y,z
+      integer::bundle_index,channel,ipoint,ix,iy,iz,gx,gy,gz,start(3),k,npoint
+
+      ok=.false.;message='';bundle_index=0
+      do k=1,size(bundles)
+        if(bundles(k)%environment==entry%fragment)then;bundle_index=k;exit;end if
+      end do
+      if(bundle_index==0.or..not.allocated(entry%buffer_states).or.size(selected_channels)<=0.or. &
+          size(energy_hartree)/=size(entry%buffer_states,2).or. &
+          size(selected_channels)>size(entry%buffer_states,2))then
+        message='SAWF representative local seed payload dimensions are inconsistent';return
+      end if
+      npoint=product(entry%buffer_shape)
+      if(size(entry%buffer_states,1)/=npoint)then
+        message='SAWF representative buffered-state point count is inconsistent';return
+      end if
+      allocate(projection(npoint,size(selected_channels)),phase_factor(npoint,3), &
+        amn_local(size(entry%buffer_states,2),size(selected_channels)), &
+        mmn_local(size(entry%buffer_states,2),size(entry%buffer_states,2),3), &
+        energy_ev(size(energy_hartree)))
+      call get_lattice_vectors(a1,a2,a3)
+      call reciprocal_vector_from_index([1,0,0],a1,a2,a3,gcart(1,1),gcart(2,1),gcart(3,1))
+      call reciprocal_vector_from_index([0,1,0],a1,a2,a3,gcart(1,2),gcart(2,2),gcart(3,2))
+      call reciprocal_vector_from_index([0,0,1],a1,a2,a3,gcart(1,3),gcart(2,3),gcart(3,3))
+      start=dc%ixyz_frag(:,entry%fragment)-entry%buffer_width;k=0
+      do iz=1,entry%buffer_shape(3);do iy=1,entry%buffer_shape(2);do ix=1,entry%buffer_shape(1)
+        gx=1+modulo(start(1)+ix-1,dc%lg_tot%num(1));gy=1+modulo(start(2)+iy-1,dc%lg_tot%num(2))
+        gz=1+modulo(start(3)+iz-1,dc%lg_tot%num(3));k=k+1
+        x=dc%lg_tot%coordinate(gx,1);y=dc%lg_tot%coordinate(gy,2);z=dc%lg_tot%coordinate(gz,3)
+        do channel=1,size(selected_channels)
+          associate(projection_channel=>projection_channels(selected_channels(channel)))
+            projection(k,channel)=cmplx(pseudo_channel_projection_value(x,y,z, &
+              projection_channel%atom,projection_channel%l,projection_channel%m, &
+              wannier_projection_width),0d0,kind=8)
+          end associate
+        end do
+        do channel=1,3
+          phase_factor(k,channel)=exp(cmplx(0d0,-dot_product(gcart(:,channel),[x,y,z]),kind=8))
+        end do
+      end do;end do;end do
+      call build_sawf_local_seed_matrices(entry%buffer_states,projection,phase_factor,hvol, &
+        amn_local,mmn_local,ok,message)
+      if(.not.ok)return
+      energy_ev=energy_hartree*hartree_to_ev
+      call write_sawf_local_eig_amn_mmn(bundles(bundle_index)%directory, &
+        bundles(bundle_index)%seedname,energy_ev,amn_local,mmn_local,ok,message)
+    end subroutine write_sawf_representative_local_seed
 
     subroutine reduce_sawf_band_matrix(local_matrix,sum_matrix,nband_wann)
       use, intrinsic :: iso_fortran_env, only: int64
