@@ -6,7 +6,18 @@ src = Path("src/gs/dc/lcfo_flux.f90").read_text()
 if "subroutine write_pseudo_channel_projection_block" not in src:
     raise SystemExit("missing pseudo-channel Wannier90 projection-block writer")
 
-pseudo_branch = src[src.find("else if(is_pseudo_channel_projection"):src.find("else", src.find("else if(is_pseudo_channel_projection") + 1)]
+base_writer_start = src.find("subroutine write_wannier_base_win_atomic")
+base_writer_end = src.find("end subroutine write_wannier_base_win_atomic", base_writer_start)
+if base_writer_start < 0 or base_writer_end < 0:
+    raise SystemExit("missing atomic Wannier90 .win writer")
+
+base_writer = src[base_writer_start:base_writer_end]
+pseudo_branch_start = base_writer.find("else if(io_status == 0 .and. is_pseudo_channel_projection")
+pseudo_branch_end = base_writer.find("else if(io_status == 0)", pseudo_branch_start + 1)
+if pseudo_branch_start < 0 or pseudo_branch_end < 0:
+    raise SystemExit("missing pseudo_channels branch in atomic Wannier90 .win writer")
+
+pseudo_branch = base_writer[pseudo_branch_start:pseudo_branch_end]
 if "call write_pseudo_channel_projection_block" not in pseudo_branch:
     raise SystemExit("pseudo_channels .win branch must write symmetry-aware projections")
 

@@ -4,11 +4,120 @@
 
 **Goal:** For a gapped LDA system with integer occupations, construct a self-consistent Wannier+PW DG-DC initial state and reproduce the continuous-branch Full TDDFT induced polarization `Delta_Pz(t)` within 5 percent relative RMS using `dt=2 a.u.` exponential propagation.
 
-**Architecture:** Resolve the DG trial-space and length-gauge definitions first. Then build shared overlap-metric and mixed-density components used identically by DG-DC and RT, implement fragment-local LDA plus global Hartree DG-DC, serialize an operator-complete checkpoint, and only then implement the production midpoint Exp path. Global ownership retains the physical DG operator while excluding distributed ownership and halo communication from the first comparison.
+**Architecture:** Construct a symmetry-validated fixed Wannier basis first: use monolithic SAWF for the small reference and representative-environment SAWF, symmetry replication, defect-local regeneration, and gauge stitching for large systems. Then resolve the DG trial-space and length-gauge definitions, build shared overlap-metric and mixed-density components used identically by DG-DC and RT, implement fragment-local LDA plus global Hartree DG-DC, serialize an operator-complete checkpoint, and only then implement the production midpoint Exp path. Global ownership retains the physical DG operator while excluding distributed ownership and halo communication from the first comparison.
 
 **Tech Stack:** Fortran 2008, MPI, existing SALMON LDA/Hartree infrastructure, LAPACK/EigenExa, Python 3 with NumPy/Matplotlib for tests and analysis, CMake.
 
 ---
+
+### Task 0: Define and validate the scalable SAWF basis-generation contract
+
+**Files:**
+- Create: `docs/plans/2026-07-12-scalable-sawf-contract.md`
+- Create: `src/gs/dc/lcfo_wannier_sawf_templates.f90`
+- Modify: `src/gs/dc/lcfo_wannier_sawf.f90`
+- Modify: `src/gs/dc/lcfo_wannier_sawf_band.f90`
+- Modify: `src/gs/dc/lcfo_flux.f90`
+- Modify: `src/io/salmon_global.f90`
+- Modify: `src/io/inputoutput.f90`
+- Create: `tests/dg/check_scalable_sawf_contract.py`
+- Create: `tests/dg/test_sawf_template_replication.py`
+- Create: `tests/dg/test_sawf_neighbor_gauge_stitching.py`
+- Create: `tests/dg/test_sawf_buffer_convergence.py`
+- Create: `tests/dg/test_sawf_global_local_equivalence.py`
+
+**Step 1: Write the failing symmetry-contract test**
+
+Require the contract and input route to distinguish:
+
+```text
+small-system monolithic global SAWF reference
+actual supercell symmetry group versus parent-crystal symmetry
+symmetry-closed band and complete projection-shell selection
+representative local environments and their symmetry orbits
+bulk-template reuse versus defect-local regeneration
+buffer definition and convergence tolerances
+neighbor gauge-stitching convention
+template provenance and cache invalidation
+```
+
+The SAWF acceptance gate must validate the group laws and covariance of
+`D_band` and `D_wann`; `site_symmetry=true` alone must not pass the test.
+
+**Step 2: Write failing representative-replication tests**
+
+Construct a deterministic symmetric toy crystal. Generate one representative
+basis and require translated/rotated copies to agree with direct construction:
+
+```text
+w_(gR) = g w_R D_wann(g)
+S_(gR,gR') = D_wann(g)^H S_(R,R') D_wann(g)
+H_(gR,gR') = D_wann(g)^H H_(R,R') D_wann(g)
+```
+
+Reject incomplete orbital shells, non-closed band subsets, invalid atom maps,
+and a parent-crystal operation that is not a symmetry of the defective cell.
+
+**Step 3: Implement environment orbits and fingerprinted templates**
+
+Identify symmetry-equivalent fragment environments under the actual supercell
+group. Run SAWF only for one representative of each bulk orbit and serialize
+the local orbitals plus `D_band`, `D_wann`, centers, spreads, and fingerprints
+for geometry, pseudopotential, grid, band window, projection shells, symmetry
+operations, buffer, and code/schema version. A fingerprint mismatch must force
+regeneration. Do not silently fall back to an identity-only group.
+
+**Step 4: Implement defect-local regeneration**
+
+Mark environments whose core or buffer intersects a symmetry-inequivalent
+defect region. Reuse bulk templates elsewhere and generate local Wannier bases
+only for these representatives. Use the defective supercell symmetry group;
+local symmetry breaking is retained rather than projected back to the parent
+crystal.
+
+**Step 5: Write and implement the neighbor gauge-stitching test**
+
+For every neighboring representative pair, compute the buffered-orbital
+overlap and solve the unitary Procrustes/polar-decomposition alignment. Apply
+the same unitary to all basis-dependent quantities before building WP and DG
+face blocks. Reject rank-deficient overlaps, ambiguous orbital counts, or a
+post-alignment residual above tolerance. Record the unitary and residual in the
+template checkpoint.
+
+**Step 6: Establish buffer convergence**
+
+For at least three increasing buffers, compare centers, occupied projector,
+neighbor overlaps, WW/WP blocks, and every DG face block. The largest two must
+meet documented tolerances. A basis that is localized but whose face blocks
+are not converged does not pass.
+
+**Step 7: Prove local/global equivalence on the small validation system**
+
+Run both the monolithic global SAWF reference and hierarchical construction.
+After one global unitary alignment require agreement of the occupied projector,
+`S`, fixed `H_kin+DG+V_ion`, and all face blocks. This gate must pass before the
+hierarchical basis is accepted as DG-DC input.
+
+**Step 8: Run focused tests, build, and commit**
+
+Run:
+
+```bash
+python3 tests/dg/check_scalable_sawf_contract.py
+python3 tests/dg/test_sawf_template_replication.py
+python3 tests/dg/test_sawf_neighbor_gauge_stitching.py
+python3 tests/dg/test_sawf_buffer_convergence.py
+python3 tests/dg/test_sawf_global_local_equivalence.py
+cmake --build build-mpi-eigenexa -j 2
+```
+
+Expected: all focused tests pass; the small system agrees with global SAWF and
+the defective fixture rejects parent-group symmetry restoration.
+
+```bash
+git add docs/plans/2026-07-12-scalable-sawf-contract.md src/gs/dc tests/dg src/io
+git commit -m "feat: add scalable symmetry-adapted Wannier construction"
+```
 
 ### Task 1: Freeze the mathematical operator contract
 

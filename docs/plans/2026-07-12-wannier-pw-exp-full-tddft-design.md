@@ -115,6 +115,53 @@ constraint. For defect systems, local symmetry breaking is physical. A perfect
 crystal may be used as a diagnostic to confirm that the complete Wannier space
 reproduces the symmetry of the full system.
 
+## Symmetry-adapted Wannier construction and large-system scaling
+
+For a perfect crystal, the fixed Wannier sector is constructed with
+symmetry-adapted Wannier functions (SAWF). The guarantee is conditional: the
+selected Bloch/band subspace must be closed under the supplied crystal symmetry
+group, and the supplied `D_band` and `D_wann` matrices must satisfy the group
+representation and covariance tests. Merely enabling Wannier90
+`site_symmetry` is not an acceptance criterion. Complete symmetry-related
+orbital shells are retained; a band or projection subset rejected by the
+closure test must not be passed to DG-DC.
+
+The small validation system uses a global SAWF construction as the reference
+route. A production-scale supercell must not run one monolithic global
+Wannier90 localization. Instead it uses a hierarchical route:
+
+1. partition the system into local environments with a converged real-space
+   buffer and identify their orbits under the actual supercell symmetry group;
+2. generate SAWFs only for one representative of each symmetry-equivalent bulk
+   environment;
+3. replicate them by translations and the validated `D_wann` action;
+4. regenerate Wannier functions only for symmetry-inequivalent environments,
+   including the defect neighborhood and its buffer;
+5. align independently generated neighboring bases by overlap-based unitary
+   Procrustes/parallel-transport transformations before constructing overlap,
+   Hamiltonian, and DG face blocks;
+6. assemble only sparse local WW, WP, PP, overlap, and DG face blocks globally.
+
+Defect calculations use the symmetry group of the actual defective supercell,
+not the parent-crystal group. Thus the bulk region can reuse cached SAWF
+templates while physical local symmetry breaking is retained near the defect.
+Every cached template carries geometry, pseudopotential, grid, band-window,
+projection-shell, symmetry-group, buffer, and generator-version fingerprints.
+Any mismatch forces local regeneration rather than silent reuse.
+
+Before this hierarchical basis may initialize DG-DC, it must pass four gates:
+
+- symmetry closure and `D_band`/`D_wann` representation residuals;
+- neighbor-overlap rank and gauge-stitching residuals;
+- buffer convergence of local orbitals and all DG face blocks;
+- on a small system, equivalence to the monolithic global SAWF reference for
+  the occupied projector and assembled mixed-basis operator.
+
+The PW enrichment is not localized by SAWF. Its global or distributed storage
+is handled separately, while its WP coupling uses the final stitched Wannier
+gauge. The large-system route changes basis generation and ownership only; it
+must reproduce the same accepted DG operator contract as the global route.
+
 ## Production Route
 
 The first production target is the global-ownership Wannier+PW path. Here
@@ -206,26 +253,29 @@ Additional health checks are:
 
 ## Implementation Strategy
 
-1. Freeze the DG trial-space, face-term, PW-support, and periodic length-gauge
+1. Freeze the SAWF symmetry contract and implement the scalable representative-
+   environment construction, cache, replication, defect-local regeneration,
+   gauge stitching, and global-reference equivalence gates.
+2. Freeze the DG trial-space, face-term, PW-support, and periodic length-gauge
    operator contract. Derive rather than assume any position-interface term.
-2. Extract common generalized-eigen and `S`-metric Exp algebra usable by GS and
+3. Extract common generalized-eigen and `S`-metric Exp algebra usable by GS and
    RT.
-3. Extract a common complete WW+WP/PW+PP density builder and verify electron
+4. Extract a common complete WW+WP/PW+PP density builder and verify electron
    number in both real-space and overlap metrics.
-4. Validate fragment-core LDA-XC integration and global Hartree plumbing.
-5. Solve the fixed-basis DG-DC SCF problem and converge density, potential,
+5. Validate fragment-core LDA-XC integration and global Hartree plumbing.
+6. Solve the fixed-basis DG-DC SCF problem and converge density, potential,
    energy, occupied projector, and generalized residual.
-6. Serialize an operator-complete, fingerprinted DG-DC checkpoint shared by GS
+7. Serialize an operator-complete, fingerprinted DG-DC checkpoint shared by GS
    and RT.
-7. Prove field-off stationarity and operator identity across the DG-DC to RT
+8. Prove field-off stationarity and operator identity across the DG-DC to RT
    handoff.
-8. Implement one namelist-driven midpoint Exp production route, converting or
+9. Implement one namelist-driven midpoint Exp production route, converting or
    removing all result-changing environment controls on that route.
-9. Implement and validate only the length-gauge observable accepted by the
+10. Implement and validate only the length-gauge observable accepted by the
    operator contract.
-10. Create the seven-input Stage 2D matrix and provenance manifest.
-11. Run the PW convergence and `Delta_Pz` 5 percent Full TDDFT comparison.
-12. Complete regression/documentation, then plan distributed ownership as a
+11. Create the seven-input Stage 2D matrix and provenance manifest.
+12. Run the PW convergence and `Delta_Pz` 5 percent Full TDDFT comparison.
+13. Complete regression/documentation, then plan distributed ownership as a
    separate milestone.
 
 ## Failure Handling
