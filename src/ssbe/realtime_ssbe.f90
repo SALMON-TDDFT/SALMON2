@@ -185,23 +185,40 @@ subroutine main_realtime_ssbe(icomm)
             ! n_ex/n_hole below are read out against the rigid valence split
             ! 1..gs%nvb, which is not the real per-k occupied-band set for a
             ! metal-like ground state -- expect a nonzero, non-physical
-            ! n_ex/n_hole already at t=0 (before any pulse). Occupation-
-            ! weighted generalization of this diagnostic is a separate
-            ! follow-up; calc_band_population (SYSNAME_sbe_occ.data) already
-            ! reads out against the real gs%occup and is unaffected.
+            ! n_ex/n_hole already at t=0 (before any pulse).  NOTE this is the
+            ! remaining RIGID-SPLIT caveat only: for gicov_int the valence trace
+            ! is now taken in the instantaneous eigenbasis, so it is at least
+            ! transport-invariant (a pure Wilson rotation no longer fakes
+            ! excitation).  _sbe_occ.data reads out against the real gs%occup
+            ! (transported, for gicov_int) and is free of BOTH defects.
             write(*, '(a)') "# WARNING: metal-like occupation detected -- " // &
                 & "_sbe_nex.data n_ex/n_hole use the insulator-only 1..nvb " // &
                 & "valence split and are not physically meaningful here " // &
-                & "(current/dynamics are unaffected; see calc_band_population)."
+                & "(current/dynamics are unaffected; use _sbe_occ.data)."
         end if
         ! SYSNAME_sbe_occ.data / _sbe_edist.data (band- and energy-resolved population)
         if (yn_sbe_out_occ == 'y') then
             fh_sbe_occ = get_filehandle()
             open(unit=fh_sbe_occ, file=trim(base_directory)//trim(sysname)//"_sbe_occ.data", action="write")
             call write_sbe_occ_header(fh_sbe_occ, nb_sbe_eff)
-            fh_sbe_edist = get_filehandle()
-            open(unit=fh_sbe_edist, file=trim(base_directory)//trim(sysname)//"_sbe_edist.data", action="write")
-            call write_sbe_edist_header(fh_sbe_edist)
+            ! _sbe_edist.data is NOT produced for gicov_int: calc_energy_distribution
+            ! bins diag(rho~) against the STATIC band energies gs%eigen(b,k), and in
+            ! the co-moving frame neither factor means what the histogram assumes --
+            ! the density is expressed in the transported frame and the relevant
+            ! energies are the INSTANTANEOUS eigenvalues at x = kappa - a(t), not the
+            ! frozen ones at kappa.  Emitting it anyway would produce a plausible,
+            ! silently wrong spectrum; a moving-frame binning is a follow-up.  The
+            ! band-resolved _sbe_occ.data above IS valid (instantaneous projection).
+            if (.not. gi_mode) then
+                fh_sbe_edist = get_filehandle()
+                open(unit=fh_sbe_edist, file=trim(base_directory)//trim(sysname)//"_sbe_edist.data", action="write")
+                call write_sbe_edist_header(fh_sbe_edist)
+            else
+                write(*, '(a)') "# NOTE: sbe_lg_degen='gicov_int': _sbe_edist.data is NOT " // &
+                    & "written (static-eigenvalue energy binning is not defined in the " // &
+                    & "co-moving frame). _sbe_occ.data (instantaneous-eigenbasis excitation) " // &
+                    & "is written as usual."
+            end if
         end if
         ! SYSNAME_sbe_diag.data (LG-SBE mechanism diagnostics; length_gauge only)
         if (trim(gauge_sbe) == "length_gauge") then
@@ -301,18 +318,21 @@ subroutine main_realtime_ssbe(icomm)
             ! only rank 0 writes.
             if (yn_sbe_out_occ == 'y') then
                 if (gi_mode) then
-                    ! gicov_int: occupations by projection onto the INSTANTANEOUS
-                    ! eigenbasis at x = kappa - a(t) (diag(rho~) is basis-dependent
-                    ! under transport).  The static-eps energy distribution below is
-                    ! left as an approximate diagnostic in the co-moving frame
-                    ! (moving-frame energy binning is a follow-up).
+                    ! gicov_int: EXCITATION by projection onto the INSTANTANEOUS
+                    ! eigenbasis at x = kappa - a(t), against the co-moving GS
+                    ! reference F~0(x) (diag(rho~) is basis-dependent under
+                    ! transport, and the absolute population is not an excitation).
                     call calc_band_population_integral(sbe, gs, q_now, nex_b, icomm)
                 else
                     call calc_band_population(sbe, gs, nex_b, icomm)
                 end if
                 if (irank == 0) call write_sbe_occ_line(fh_sbe_occ, t, nb_sbe_eff, nex_b)
-                call calc_energy_distribution(sbe, gs, ed_lo, ed_de, ed_nbin, ed_sigma, edist, icomm)
-                if (irank == 0) call write_sbe_edist_block(fh_sbe_edist, t, ed_nbin, ed_lo, ed_de, edist)
+                ! energy-resolved distribution: static-eigenvalue binning, so it is
+                ! only defined OUTSIDE the co-moving frame (see the open block).
+                if (.not. gi_mode) then
+                    call calc_energy_distribution(sbe, gs, ed_lo, ed_de, ed_nbin, ed_sigma, edist, icomm)
+                    if (irank == 0) call write_sbe_edist_block(fh_sbe_edist, t, ed_nbin, ed_lo, ed_de, edist)
+                end if
             end if
         end if
 
@@ -323,7 +343,7 @@ subroutine main_realtime_ssbe(icomm)
                 flush(fh_sbe_nex)
                 if (yn_sbe_out_occ == 'y') then
                     flush(fh_sbe_occ)
-                    flush(fh_sbe_edist)
+                    if (.not. gi_mode) flush(fh_sbe_edist)
                 end if
                 if (trim(gauge_sbe) == "length_gauge") flush(fh_sbe_diag)
             end if
@@ -340,7 +360,7 @@ subroutine main_realtime_ssbe(icomm)
         close(fh_sbe_nex)
         if (yn_sbe_out_occ == 'y') then
             close(fh_sbe_occ)
-            close(fh_sbe_edist)
+            if (.not. gi_mode) close(fh_sbe_edist)
         end if
         if (trim(gauge_sbe) == "length_gauge") close(fh_sbe_diag)
     end if

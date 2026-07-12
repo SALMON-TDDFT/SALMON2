@@ -248,6 +248,20 @@ function check_input_variables_sbe() result(flag)
                 & "'yn_sbe_gs_current_subtract'='y' (the f-sum-deficiency D tensor is a " // &
                 & "velocity-gauge construction; the length-gauge current is Tr(v rho)).")
         end if
+        ! Energy-resolved distribution is UNDEFINED in the co-moving frame: it
+        ! bins the density against the STATIC band energies eps_b(k), whereas
+        ! gicov_int carries the density in the transported frame and its
+        ! spectrum is the INSTANTANEOUS eigenvalues at x = kappa - a(t).  Say so
+        ! here rather than emit a plausible, silently wrong histogram -- WARN and
+        ! suppress the file, since yn_sbe_out_occ also drives the band-resolved
+        ! _sbe_occ.data, which IS valid for gicov_int and must keep working.
+        if (yn_sbe_out_occ == 'y' .and. comm_is_root(nproc_id_global)) then
+            write(*, '(a)') "WARNING: 'sbe_lg_degen'='gicov_int' with 'yn_sbe_out_occ'='y': " // &
+                & "'SYSNAME_sbe_edist.data' (energy-resolved distribution) will NOT be " // &
+                & "written -- static-eigenvalue binning is not defined in the co-moving " // &
+                & "frame (moving-frame binning is a follow-up). 'SYSNAME_sbe_occ.data' " // &
+                & "(band-resolved excitation, instantaneous eigenbasis) IS written."
+        end if
     end if
 
     if (.not. t2_gate_params_ok(sbe_t2_gate_shape, sbe_t2_gate_theta, sbe_t2_gate_width)) then
