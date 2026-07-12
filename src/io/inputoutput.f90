@@ -697,6 +697,7 @@ contains
       & wannier_sawf_gauge_tolerance, &
       & wannier_sawf_buffer_tolerance, &
       & wannier_sawf_equivalence_tolerance, &
+      & wannier_sawf_vacuum_density_threshold, &
       & dg_wannier_symmetry_gauge, &
       & energy_cut, &
       & lambda_cut, &
@@ -1239,6 +1240,7 @@ contains
     wannier_sawf_gauge_tolerance = 1d-8
     wannier_sawf_buffer_tolerance = 1d-6
     wannier_sawf_equivalence_tolerance = 1d-8
+    wannier_sawf_vacuum_density_threshold = 1d-8
     energy_cut = 0d0
     lambda_cut = 1d-3
 !! == default for &dg_fragment
@@ -1990,6 +1992,7 @@ contains
     call comm_bcast(wannier_sawf_gauge_tolerance, nproc_group_global)
     call comm_bcast(wannier_sawf_buffer_tolerance, nproc_group_global)
     call comm_bcast(wannier_sawf_equivalence_tolerance, nproc_group_global)
+    call comm_bcast(wannier_sawf_vacuum_density_threshold, nproc_group_global)
     call comm_bcast(energy_cut, nproc_group_global)
     energy_cut = energy_cut * uenergy_to_au
     call comm_bcast(lambda_cut, nproc_group_global)
@@ -3081,6 +3084,8 @@ contains
         wannier_sawf_buffer_tolerance
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_sawf_equivalence_tolerance', &
         wannier_sawf_equivalence_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_sawf_vacuum_density_threshold', &
+        wannier_sawf_vacuum_density_threshold
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_wannier_symmetry_gauge', &
         trim(dg_wannier_symmetry_gauge)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
@@ -3232,6 +3237,9 @@ contains
     if(wannier_sawf_gauge_tolerance<=0d0 .or. wannier_sawf_buffer_tolerance<=0d0 .or. &
         wannier_sawf_equivalence_tolerance<=0d0) then
       call sawf_input_fatal("SAWF scalable-construction tolerances must be positive")
+    end if
+    if(wannier_sawf_vacuum_density_threshold<=0d0)then
+      call sawf_input_fatal("wannier_sawf_vacuum_density_threshold must be positive")
     end if
 #ifndef HAVE_SPGLIB
     if(trim(wannier_site_symmetry) == 'auto') then

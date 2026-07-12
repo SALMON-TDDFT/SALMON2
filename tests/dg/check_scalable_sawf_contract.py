@@ -21,6 +21,7 @@ controls = [
     "wannier_sawf_gauge_tolerance", "wannier_sawf_buffer_tolerance",
     "wannier_sawf_equivalence_tolerance", "wannier_sawf_cache_directory",
     "wannier_sawf_structure_class",
+    "wannier_sawf_vacuum_density_threshold",
 ]
 for name in controls:
     assert name in global_input, f"missing namelist storage for {name}"

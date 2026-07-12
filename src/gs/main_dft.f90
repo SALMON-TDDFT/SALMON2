@@ -337,7 +337,7 @@ if(yn_dc=='y') then
 #ifdef USE_EIGENEXA
       call finalize_eigenexa(info)
 #endif
-      call dc_lcfo_flux(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
+      call dc_lcfo_flux(lg,mg,system,info,stencil,ppg,energy,rho_s,v_local,spsi,shpsi,sttpsi,srg,dc)
     end if
   else if(yn_dc_lcfo == 'y') then
     if(yn_spinorbit == 'y') then

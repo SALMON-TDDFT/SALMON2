@@ -546,6 +546,7 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: wannier_sawf_gauge_tolerance
   real(8)        :: wannier_sawf_buffer_tolerance
   real(8)        :: wannier_sawf_equivalence_tolerance
+  real(8)        :: wannier_sawf_vacuum_density_threshold
   real(8)        :: energy_cut
   real(8)        :: lambda_cut
   

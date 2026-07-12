@@ -11,6 +11,7 @@ driver=r'''program check_environment_fingerprint
  use lcfo_wannier_sawf_templates, only: build_sawf_supercell_fingerprint, &
    build_sawf_local_environment_fingerprint, validate_sawf_structure_class
  use lcfo_wannier_sawf_templates, only: build_sawf_file_content_digest
+ use lcfo_wannier_sawf_templates, only: measure_sawf_vacuum_occupancy
  implicit none
  real(8)::lattice(3,3),xyz(3,4),relative(3,3),rotated(3,3)
  integer::species(4),local_species(3),grid(3),buffer(3),permutation(3)
@@ -20,6 +21,7 @@ driver=r'''program check_environment_fingerprint
  character(256)::keys(3)
  character(256)::digest_a,digest_b
  integer::unit
+ real(8)::measured_vacuum
  character(256)::super_a,super_b,bulk_a,bulk_b,defect,interface_env,surface_env,amorphous,msg
  lattice=0;lattice(1,1)=8;lattice(2,2)=8;lattice(3,3)=8
  xyz=reshape([0d0,0d0,0d0,2d0,0d0,0d0,4d0,0d0,0d0,6d0,0d0,0d0],[3,4])
@@ -71,6 +73,8 @@ driver=r'''program check_environment_fingerprint
  open(newunit=unit,file='pseudo-a.dat',status='replace');write(unit,'(a)')'changed-content';close(unit)
  call build_sawf_file_content_digest('pseudo-a.dat',digest_b,ok,msg)
  call req(ok.and.digest_a/=digest_b,'same path changed content')
+ call measure_sawf_vacuum_occupancy([0d0,1d-10,1d-3],1d-8,measured_vacuum,ok,msg)
+ call req(ok.and.abs(measured_vacuum-2d0/3d0)<1d-15,'density-based vacuum occupancy')
  write(*,'(a)')'PASS exact same-supercell local-environment fingerprints'
 contains
  subroutine local(z,r,vacuum,key)

@@ -36,8 +36,20 @@ module lcfo_wannier_sawf_templates
   public :: select_sawf_environment_materialization
   public :: validate_sawf_structure_class
   public :: build_sawf_file_content_digest
+  public :: measure_sawf_vacuum_occupancy
 
 contains
+  subroutine measure_sawf_vacuum_occupancy(density,threshold,fraction,ok,message)
+    real(8),intent(in)::density(:),threshold;real(8),intent(out)::fraction
+    logical,intent(out)::ok;character(*),intent(out)::message
+    ok=.false.;message='';fraction=0d0
+    if(size(density)<=0.or.threshold<=0d0.or..not.all(ieee_is_finite(density)).or. &
+       .not.ieee_is_finite(threshold).or.any(density<0d0))then
+      message='SAWF vacuum density input or threshold is invalid';return
+    end if
+    fraction=dble(count(density<threshold))/dble(size(density));ok=.true.
+  end subroutine
+
   subroutine build_sawf_file_content_digest(filename,digest,ok,message)
     character(*),intent(in)::filename;character(*),intent(out)::digest
     logical,intent(out)::ok;character(*),intent(out)::message

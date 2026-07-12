@@ -42,6 +42,7 @@ module lcfo_flux
     build_sawf_local_environment_fingerprint, select_sawf_environment_materialization
   use lcfo_wannier_sawf_templates, only: validate_sawf_structure_class
   use lcfo_wannier_sawf_templates, only: build_sawf_file_content_digest
+  use lcfo_wannier_sawf_templates, only: measure_sawf_vacuum_occupancy
   use lcfo_wannier_sawf_win, only: activate_sawf_win, deactivate_sawf_win, &
     t_atomic_win_writer, begin_atomic_win, finish_atomic_win, abort_atomic_win
   use lcfo_wannier_command, only: select_wannier90_command, execute_wannier90_command, &
@@ -3262,7 +3263,7 @@ contains
   end function import_run_root_dir
 
 
-  subroutine dc_lcfo_flux(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
+  subroutine dc_lcfo_flux(lg,mg,system,info,stencil,ppg,energy,rho_s,v_local,spsi,shpsi,sttpsi,srg,dc)
     use communication, only: comm_summation
     use salmon_global, only: yn_dc_lcfo_diag
     use structures
@@ -3273,6 +3274,7 @@ contains
     type(s_stencil),      intent(in) :: stencil
     type(s_pp_grid),      intent(in) :: ppg
     type(s_dft_energy),   intent(in) :: energy
+    type(s_scalar),       intent(in) :: rho_s(system%nspin)
     type(s_scalar),       intent(in) :: V_local(system%nspin)
     type(s_orbital),      intent(in) :: spsi
     type(s_orbital)                  :: shpsi,sttpsi
@@ -7002,16 +7004,17 @@ contains
     subroutine build_sawf_fragment_environment_fingerprints(lattice,fractional_positions,species, &
         mesh,fragment_origin,fragment_shape,environment_key,vacuum_by_environment,ok,message)
       use salmon_global, only: file_pseudo,xc,wannier_projection,wannier_num_bands,wannier_num_wann, &
-        wannier_symmetry_tolerance
+        wannier_symmetry_tolerance,wannier_sawf_vacuum_density_threshold
       real(8),intent(in)::lattice(3,3),fractional_positions(:,:)
       integer,intent(in)::species(:),mesh(3),fragment_origin(:,:),fragment_shape(:,:)
       character(256),intent(out)::environment_key(:)
       real(8),intent(out)::vacuum_by_environment(:)
       logical,intent(out)::ok;character(*),intent(out)::message
-      integer::ifrag,ia,axis,count,idx(3),start(3),extent(3),delta
+      integer::ifrag,ia,axis,count,k,idx(3),start(3),extent(3),delta
       integer,allocatable::local_species(:),local_count(:)
-      real(8),allocatable::relative(:,:)
+      real(8),allocatable::relative(:,:),rho_local(:,:,:),rho_global(:,:,:),density_buffer(:)
       real(8)::center_fractional(3),vacuum_fraction
+      integer::ix,iy,iz,ispin,low_density_count,total_point_count,gx,gy,gz
       logical::inside,pbc(3)
       character(256)::supercell_key
       character(1024)::pseudo_signature
@@ -7041,6 +7044,16 @@ contains
         'SALMON-SAWF-schema-2',supercell_key,ok,message)
       if(.not.ok)return
       allocate(local_species(size(species)),relative(3,size(species)),local_count(size(environment_key)))
+      allocate(rho_local(mesh(1),mesh(2),mesh(3)),rho_global(mesh(1),mesh(2),mesh(3)))
+      rho_local=0d0
+      if(info%id_ko==0)then
+        do iz=mg%is(3),mg%ie(3);do iy=mg%is(2),mg%ie(2);do ix=mg%is(1),mg%ie(1)
+          do ispin=1,system%nspin
+            rho_local(ix,iy,iz)=rho_local(ix,iy,iz)+rho_s(ispin)%f(ix,iy,iz)
+          end do
+        end do;end do;end do
+      end if
+      call comm_summation(rho_local,rho_global,product(mesh),dc%icomm_tot)
       local_count=0
       do ifrag=1,size(environment_key)
         start=fragment_origin(:,ifrag)-dc%nxyz_buffer;extent=fragment_shape(:,ifrag)+2*dc%nxyz_buffer
@@ -7068,7 +7081,15 @@ contains
           relative(:,count)=fractional_positions(:,ia)-center_fractional
           relative(:,count)=relative(:,count)-dnint(relative(:,count))
         end do
-        vacuum_fraction=1d0-dble(count)/dble(max(1,maxval(local_count)))
+        low_density_count=0;total_point_count=product(extent);allocate(density_buffer(total_point_count));k=0
+        do iz=0,extent(3)-1;do iy=0,extent(2)-1;do ix=0,extent(1)-1
+          gx=1+modulo(start(1)+ix,mesh(1));gy=1+modulo(start(2)+iy,mesh(2))
+          gz=1+modulo(start(3)+iz,mesh(3))
+          k=k+1;density_buffer(k)=rho_global(gx,gy,gz)
+        end do;end do;end do
+        call measure_sawf_vacuum_occupancy(density_buffer,wannier_sawf_vacuum_density_threshold, &
+          vacuum_fraction,ok,message);deallocate(density_buffer)
+        if(.not.ok)return
         vacuum_by_environment(ifrag)=vacuum_fraction
         call build_sawf_local_environment_fingerprint(supercell_key,lattice, &
           wannier_symmetry_tolerance,local_species(:count),relative(:,:count),vacuum_fraction, &
