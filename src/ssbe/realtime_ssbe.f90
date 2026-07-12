@@ -279,8 +279,20 @@ subroutine main_realtime_ssbe(icomm)
             ! 1..gs%nvb (window indices; nvb = nelec_eff/2 spinless, =
             ! nelec_eff spinor); the frozen bands are inert, so n_ex and
             ! n_hole are exact against nelec_eff (not nelec).
+            !
+            ! The FULL trace is a plain Tr rho~ in any basis, so calc_trace is
+            ! valid for it in every mode.  The VALENCE trace is not: for
+            ! gicov_int, calc_trace(.., gs%nvb) would sum the leading nvb
+            ! DIAGONAL entries of the co-moving rho~, and a Wilson rotation
+            ! preserves the full trace but NOT the trace of a leading principal
+            ! block -- pure transport with zero excitation would already report
+            ! n_ex /= 0.  Project onto the instantaneous eigenstates instead.
             tr_all = calc_trace(sbe, gs, nb_sbe_eff, icomm)
-            tr_vb = calc_trace(sbe, gs, gs%nvb, icomm)
+            if (gi_mode) then
+                tr_vb = calc_valence_trace_integral(sbe, gs, q_now, gs%nvb, icomm)
+            else
+                tr_vb = calc_trace(sbe, gs, gs%nvb, icomm)
+            end if
             if (irank == 0) then
                 call write_sbe_nex_line(fh_sbe_nex, t, tr_all - tr_vb, nelec_eff - tr_vb)
             end if

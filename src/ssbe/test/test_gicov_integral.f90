@@ -24,7 +24,9 @@
 !   T4 T2 covariance (risk #3/#7): exact-degenerate pair -> g(0)=0 -> NO
 !      dephasing; a gapped pair decays by exp(-dt/T2).
 !   T5 cache sizing (risk #5/#8): j_max=13 for graphene k99; int64 cache bytes
-!      = 64(2j+1)nb^2 nk_local with no overflow at production scale.
+!      = 80(2j+1)nb^2 nk_local with no overflow at production scale (FIVE
+!      complex matrices per shift: H~, the three v~, and the co-moving f0
+!      reference F~0 -- see T12).
 !   T6 single-axis / linear-polarization guard (risk #6): [110] and circular
 !      are rejected on the whole trajectory; a single axis is accepted.
 !   T7 floor() vs int() bracketing for a>0 (negative mesh shift).
@@ -52,6 +54,14 @@
 !      T11 also pins the basis-invariant readout: within a degenerate block the
 !      individual eigen-columns are arbitrary, so only the block total is
 !      observable (gicov_int_occupation_k reports it shared equally).
+!  T12 co-moving f0(x) REFERENCE.  _sbe_occ.data is an EXCITATION (the
+!      non-gicov_int sibling reports rho_bb - gs%occup); the integral path was
+!      reporting the ABSOLUTE instantaneous population, so an unexcited state
+!      read out as "fully occupied" rather than as zero excitation.  The
+!      reference must be the GS occupation TRANSPORTED into the same frame,
+!      F~0 = W diag(f0(k_remote)) W^dagger, not a rigid "1 below nvb" block:
+!      T12 shows the rigid reference manufactures a spurious excitation for a
+!      METAL (fractional, k-varying f0), which is why F~0 is cached.
 !
 program test_gicov_integral
   use gicov_integral_ssbe
@@ -70,6 +80,7 @@ program test_gicov_integral
   call t9_eigensolver_status(nfail)
   call t10_bracket_edge(nfail)
   call t11_degenerate_closure(nfail)
+  call t12_comoving_f0(nfail)
 
   if (nfail == 0) then
     write(*, '(a)') "ALL PASS (test_gicov_integral)"
@@ -323,13 +334,16 @@ contains
     ! graphene k99 production: a_max=0.102424, dk=0.00788381 -> j_max = 13
     call report("T5 j_max = 13 for graphene k99 (ceil(a_max/dk))", &
               & gicov_int_jmax(0.102424d0, 0.00788381d0) == 13, nfail)
-    ! int64 cache bytes = 64*(2j+1)*nb^2*nk_local, exact past 2**31
-    call report("T5 cache bytes formula (j=13, nb=24, nk_local=1000)", &
+    ! int64 cache bytes = 80*(2j+1)*nb^2*nk_local, exact past 2**31.  80 = FIVE
+    ! complex(8) matrices per shift: H~, v~_{1..3}, and the co-moving f0
+    ! reference F~0 (T12) -- NOT 64: under-counting the cache is exactly the
+    ! class of error the memory gate exists to block.
+    call report("T5 cache bytes formula (j=13, nb=24, nk_local=1000): 5 matrices", &
               & gicov_int_cache_bytes(13, 24, 1000) == &
-              & 64_8 * 27_8 * 24_8 * 24_8 * 1000_8, nfail)
+              & 80_8 * 27_8 * 24_8 * 24_8 * 1000_8, nfail)
     ! production-scale no-overflow (nb=192, nk_local=20000, j=13): > 2**31 bytes
     nb_ = 192_8
-    want = 64_8 * 27_8 * nb_ * nb_ * 20000_8
+    want = 80_8 * 27_8 * nb_ * nb_ * 20000_8
     call report("T5 int64 cache bytes do not overflow at production scale", &
               & (gicov_int_cache_bytes(13, 192, 20000) == want) .and. (want > 2147483647_8), nfail)
   end subroutine t5_cache_sizing
@@ -620,5 +634,74 @@ contains
     call report("T11 occupation is a degenerate-BLOCK sum (invariant, sum rule kept)", &
               & ok, nfail)
   end subroutine t11_degenerate_closure
+
+  !----------------------------------------------------------------
+  ! The co-moving f0(x) reference.  Set up a k-point whose transport W genuinely
+  ! MIXES the bands (a rotation), a METAL-like fractional GS occupation, and an
+  ! UNEXCITED co-moving density rho~ = F~0(x).  The excitation readout must then
+  ! be exactly zero in every band.
+  subroutine t12_comoving_f0(nfail)
+    integer, intent(inout) :: nfail
+    integer, parameter :: nb = 2
+    complex(8) :: W(nb, nb), H(nb, nb), F0(nb, nb), rho(nb, nb), D(nb, nb)
+    complex(8) :: Od(nb, nb), P(nb, nb), R(nb, nb), cwork(64)
+    real(8)    :: eps(nb), rwork(64), nocc(nb), dn(nb), th, fl
+    integer    :: blk(nb), ierr
+    logical    :: ok
+
+    fl = 1d-9
+    th = 0.6d0                                   ! a transport that really mixes
+    W = (0d0, 0d0)
+    W(1, 1) = cmplx( cos(th), 0d0, 8);  W(1, 2) = cmplx(-sin(th), 0d0, 8)
+    W(2, 1) = cmplx( sin(th), 0d0, 8);  W(2, 2) = cmplx( cos(th), 0d0, 8)
+
+    ! co-moving Hamiltonian at the shifted point: H~ = W diag(eigen) W^dag
+    Od = (0d0, 0d0);  Od(1, 1) = (-0.5d0, 0d0);  Od(2, 2) = (0.5d0, 0d0)
+    call gicov_int_transport_op(W, Od, nb, H)
+
+    ! METAL-like GS occupation (fractional, NOT a rigid 1/0 valence block),
+    ! transported into the same frame: F~0 = W diag(f0) W^dag
+    Od = (0d0, 0d0);  Od(1, 1) = (0.7d0, 0d0);  Od(2, 2) = (0.3d0, 0d0)
+    call gicov_int_transport_op(W, Od, nb, F0)
+
+    ! an UNEXCITED co-moving density is exactly that reference
+    rho = F0
+
+    ! (a) excitation against the TRANSPORTED reference: identically zero
+    D = rho - F0
+    call gicov_int_occupation_k(H, D, nb, fl, eps, P, R, cwork, 64, rwork, &
+                              & dn, blk, ierr)
+    call report("T12 unexcited co-moving state -> ZERO excitation (f0 subtracted)", &
+              & (ierr == 0) .and. (maxval(abs(dn)) < 1d-12), nfail)
+
+    ! (b) what the ABSOLUTE readout (the bug) reported instead: the occupation
+    !     itself -- nonzero, and indistinguishable from a real excitation
+    call gicov_int_occupation_k(H, rho, nb, fl, eps, P, R, cwork, 64, rwork, &
+                              & nocc, blk, ierr)
+    call report("T12 the old ABSOLUTE readout is NONzero for the same unexcited state", &
+              & (ierr == 0) .and. (maxval(abs(nocc)) > 0.2d0), nfail)
+
+    ! (c) a RIGID '1 below nvb' reference (no metal f0) manufactures a spurious
+    !     excitation: this is why the GS occupation must be transported, not
+    !     assumed.  diag(1,0) in the co-moving frame, subtracted from rho~.
+    Od = (0d0, 0d0);  Od(1, 1) = (1d0, 0d0);  Od(2, 2) = (0d0, 0d0)
+    D = rho - Od
+    call gicov_int_occupation_k(H, D, nb, fl, eps, P, R, cwork, 64, rwork, &
+                              & dn, blk, ierr)
+    call report("T12 a RIGID 1/0 reference fakes excitation for a metal (so F~0 is needed)", &
+              & (ierr == 0) .and. (maxval(abs(dn)) > 1d-2), nfail)
+
+    ! (d) a GENUINE excitation is still reported, with the right sign and size:
+    !     move 0.1 electrons from the lower to the upper instantaneous state.
+    Od = (0d0, 0d0);  Od(1, 1) = (-0.1d0, 0d0);  Od(2, 2) = (0.1d0, 0d0)
+    call gicov_int_transport_op(W, Od, nb, D)   ! same frame as H~/F~0
+    rho = F0 + D
+    D = rho - F0
+    call gicov_int_occupation_k(H, D, nb, fl, eps, P, R, cwork, 64, rwork, &
+                              & dn, blk, ierr)
+    ok = (ierr == 0) .and. (abs(dn(1) + 0.1d0) < 1d-12) .and. (abs(dn(2) - 0.1d0) < 1d-12)
+    call report("T12 a genuine excitation IS reported (-0.1 / +0.1, charge-conserving)", &
+              & ok, nfail)
+  end subroutine t12_comoving_f0
 
 end program test_gicov_integral

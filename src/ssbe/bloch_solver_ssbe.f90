@@ -100,6 +100,16 @@ module bloch_solver_ssbe
     integer,    save :: gi_ikmin = 0, gi_ikmax = 0
     complex(8), allocatable, save :: gi_Ht(:,:,:,:)      ! (nb,nb,-jmax:jmax, ik_min:ik_max)
     complex(8), allocatable, save :: gi_vt(:,:,:,:,:)    ! (nb,nb,3,-jmax:jmax, ik_min:ik_max)
+    ! co-moving GROUND-STATE occupation reference F~0_n = W diag(f0(k+n)) W^dag.
+    ! _sbe_occ.data is an EXCITATION (rho - f0), so the integral path needs f0 in
+    ! the SAME instantaneous frame as rho~.  It must be transported and
+    ! interpolated exactly like H~: at a node H~ and F~0 share an eigenbasis and
+    ! the occupation could be recovered from eigenvalue order, but BETWEEN nodes
+    ! the interpolated matrices no longer commute, so the reference has to be
+    ! carried explicitly.  Also the only correct metal reference: gs%occup is the
+    ! real fractional, k-varying Fermi-Dirac GS occupation, which a rigid
+    ! "1 below nvb" block would misreport as a spurious excitation.
+    complex(8), allocatable, save :: gi_Ft(:,:,:,:)      ! (nb,nb,-jmax:jmax, ik_min:ik_max)
     integer,    allocatable, save :: gi_iknb_p(:), gi_iknb_m(:)   ! (nk) +/- driven-axis neighbour
     ! per-thread eigensolver work bank (heap allocated ONCE, outside the OMP
     ! k-loop -- frtpx discipline: no per-thread automatic arrays, no heap in loop)
@@ -2070,6 +2080,11 @@ subroutine build_gicov_integral_cache(sbe, gs, axis, jmax, icomm)
     write(*, '(a)') "ERROR build_gicov_integral_cache: gi_vt alloc failed"
     error stop 1
   end if
+  allocate(gi_Ft(nb, nb, -jmax:jmax, gi_ikmin:gi_ikmax), stat=ierr)
+  if (ierr /= 0) then
+    write(*, '(a)') "ERROR build_gicov_integral_cache: gi_Ft alloc failed"
+    error stop 1
+  end if
 
   allocate(Wc(nb, nb), acc(nb, nb), Ohost(nb, nb), Yt(nb, nb))
   do ik = gi_ikmin, gi_ikmax
@@ -2101,6 +2116,15 @@ subroutine build_gicov_integral_cache(sbe, gs, axis, jmax, icomm)
       end do
       call gicov_int_transport_op(Wc, Ohost, nb, Yt)
       gi_Ht(:, :, n, ik) = Yt
+      ! transported GS occupation reference F~0_n = Wc diag(f0(remote)) Wc^dag.
+      ! gs%occup is the REAL per-(band,k) ground-state occupation (fractional and
+      ! k-varying for a metal), so this is the metal-correct f0(x) as well.
+      Ohost = (0d0, 0d0)
+      do i = 1, nb
+        Ohost(i, i) = cmplx(gs%occup(i, krem), 0d0, 8)
+      end do
+      call gicov_int_transport_op(Wc, Ohost, nb, Yt)
+      gi_Ft(:, :, n, ik) = Yt
       ! transported velocity v~_{n,i} = Wc v_i(remote) Wc^dag, i=1..3
       do i = 1, 3
         if (sbe%flag_vnl_correction) then
@@ -2237,10 +2261,25 @@ subroutine calc_current_bloch_lg_integral(sbe, gs, q_now, jmat, icomm)
   jmat(1:3) = tmp(1:3) / sum(gs%kweight(:)) / gs%volume
 end subroutine calc_current_bloch_lg_integral
 
-! Instantaneous-eigenbasis band populations at x = kappa - a(t) (yn_sbe_out_occ).
-! n_a(x) = (P^dag rho~ P)_aa summed over the local k-slice and reduced; the
-! caller sums over degenerate blocks for a basis-invariant readout.  Diagonal
-! diag(rho~) would be basis-dependent under transport, so it is NOT used.
+! Band-resolved EXCITATION at x = kappa - a(t) (yn_sbe_out_occ='y'), the
+! integral-transport counterpart of calc_band_population:
+!
+!   dn_a(x) = ( P^dag [ rho~ - F~0(x) ] P )_aa ,   H~(x) = P diag(eps) P^dag
+!
+! summed over the local k-slice and reduced.  TWO things are essential here and
+! both were wrong before:
+!
+!  (1) the projector must be the INSTANTANEOUS eigenbasis of the interpolated
+!      H~ (diag(rho~) in the frozen band basis is not transport-invariant), and
+!  (2) the reference must be the co-moving GS occupation F~0(x) -- the same
+!      gs%occup, transported by the same W and interpolated to the same x.
+!      Reporting the ABSOLUTE population instead (the previous behaviour) makes
+!      an unexcited state read out as fully occupied, i.e. it is not an
+!      excitation at all; and a rigid "1 below nvb" reference would manufacture
+!      a spurious excitation for a metal, whose f0 is fractional and k-varying.
+!
+! Degenerate members are reported as a block sum (gicov_int_occupation_k), since
+! the individual eigen-columns inside a degenerate manifold are arbitrary.
 subroutine calc_band_population_integral(sbe, gs, q_now, nex_b, icomm)
   use salmon_global, only: sbe_lg_degen_floor
   use gicov_integral_ssbe, only: gicov_int_bracket, gicov_int_interp, gicov_int_occupation_k
@@ -2252,7 +2291,8 @@ subroutine calc_band_population_integral(sbe, gs, q_now, nex_b, icomm)
   integer, intent(in) :: icomm
   integer :: ik, nb, n_lo, n_hi, ib, ierr, nbad_l, nbad
   real(8) :: frac
-  real(8), allocatable :: acc(:), nocc(:)
+  real(8), allocatable :: acc(:), dn(:)
+  complex(8), allocatable :: F0(:, :), D(:, :)
 
   nb = sbe%nb
   call gicov_int_bracket(q_now, 1d0, gi_jmax, n_lo, n_hi, frac, ierr)
@@ -2261,22 +2301,25 @@ subroutine calc_band_population_integral(sbe, gs, q_now, nex_b, icomm)
     error stop 1
   end if
   ! serial over k (periodic diagnostic, not the propagation hot path): reuses
-  ! the thread-0 work slot; a heap 'nocc' allocated OUTSIDE any OMP region.
-  allocate(acc(nb), nocc(nb));  acc(:) = 0d0
+  ! the thread-0 work slot; heap work allocated OUTSIDE any OMP region.
+  allocate(acc(nb), dn(nb), F0(nb, nb), D(nb, nb));  acc(:) = 0d0
   nbad_l = 0
   do ik = gi_ikmin, gi_ikmax
     call gicov_int_interp(gi_Ht(:, :, n_lo, ik), gi_Ht(:, :, n_hi, ik), &
                         & frac, nb, gi_w_H(:, :, 0))
-    call gicov_int_occupation_k(gi_w_H(:, :, 0), sbe%rho(:, :, ik), nb, sbe_lg_degen_floor, &
+    ! co-moving GS reference at the SAME x, interpolated the SAME way as H~
+    call gicov_int_interp(gi_Ft(:, :, n_lo, ik), gi_Ft(:, :, n_hi, ik), frac, nb, F0)
+    D(:, :) = sbe%rho(:, :, ik) - F0(:, :)      ! Hermitian: the excitation
+    call gicov_int_occupation_k(gi_w_H(:, :, 0), D, nb, sbe_lg_degen_floor, &
                               & gi_w_eps(:, 0), gi_w_P(:, :, 0), gi_w_R(:, :, 0), &
-                              & gi_w_cw(:, 0), gi_lcwork, gi_w_rw(:, 0), nocc, &
+                              & gi_w_cw(:, 0), gi_lcwork, gi_w_rw(:, 0), dn, &
                               & gi_w_blk(:, 0), ierr)
     if (ierr /= 0) then
       nbad_l = nbad_l + 1
       cycle
     end if
     do ib = 1, nb
-      acc(ib) = acc(ib) + gs%kweight(ik) * nocc(ib)
+      acc(ib) = acc(ib) + gs%kweight(ik) * dn(ib)
     end do
   end do
   ! COLLECTIVE fail (same contract as the propagator): a broken instantaneous
@@ -2290,8 +2333,75 @@ subroutine calc_band_population_integral(sbe, gs, q_now, nex_b, icomm)
   end if
   call comm_summation(acc, nex_b, nb, icomm)
   nex_b(1:nb) = nex_b(1:nb) / sum(gs%kweight(:))
-  deallocate(acc, nocc)
+  deallocate(acc, dn, F0, D)
 end subroutine calc_band_population_integral
+
+
+! Transport-invariant VALENCE trace at x = kappa - a(t), for _sbe_nex.data.
+!
+!   N_v(x) = sum_kappa w_kappa sum_{a=1..nvb} ( P^dag rho~ P )_aa / sum w
+!
+! The frozen-basis partial trace it replaces -- calc_trace(sbe, gs, gs%nvb),
+! i.e. the sum of the leading nvb DIAGONAL entries of rho~ -- is NOT transport
+! invariant.  A Wilson rotation preserves the FULL trace of rho~ but not the
+! trace of its leading principal block, so a pure transport (no field-driven
+! excitation whatsoever) already moves weight across the nvb cut and is reported
+! as excitation.  Projecting onto the INSTANTANEOUS eigenstates and summing the
+! lowest nvb of them is the invariant statement; the full trace (n_electrons)
+! stays valid as a plain Tr rho~ and keeps using calc_trace.
+!
+! The eigenvalues come back ascending from zheev, so "the lowest nvb
+! instantaneous states" is the leading nvb of the projected diagonal.  Values
+! are block-symmetrized (gicov_int_occupation_k), so a degenerate manifold
+! straddling the nvb cut contributes its invariant proportional share rather
+! than an arbitrary basis-dependent split.
+function calc_valence_trace_integral(sbe, gs, q_now, nvb, icomm) result(trv)
+  use salmon_global, only: sbe_lg_degen_floor
+  use gicov_integral_ssbe, only: gicov_int_bracket, gicov_int_interp, gicov_int_occupation_k
+  implicit none
+  type(s_sbe_bloch_solver), intent(in) :: sbe
+  type(s_sbe_gs_info), intent(in) :: gs
+  real(8), intent(in) :: q_now
+  integer, intent(in) :: nvb, icomm
+  real(8) :: trv
+  integer :: ik, nb, n_lo, n_hi, ib, ierr, nbad_l, nbad
+  real(8) :: frac, acc, tmp
+  real(8), allocatable :: nocc(:)
+
+  nb = sbe%nb
+  call gicov_int_bracket(q_now, 1d0, gi_jmax, n_lo, n_hi, frac, ierr)
+  if (ierr /= 0) then
+    write(*, '(a)') "ERROR(calc_valence_trace_integral): mesh shift leaves the cached span."
+    error stop 1
+  end if
+  allocate(nocc(nb))
+  acc = 0d0
+  nbad_l = 0
+  do ik = gi_ikmin, gi_ikmax
+    call gicov_int_interp(gi_Ht(:, :, n_lo, ik), gi_Ht(:, :, n_hi, ik), &
+                        & frac, nb, gi_w_H(:, :, 0))
+    call gicov_int_occupation_k(gi_w_H(:, :, 0), sbe%rho(:, :, ik), nb, sbe_lg_degen_floor, &
+                              & gi_w_eps(:, 0), gi_w_P(:, :, 0), gi_w_R(:, :, 0), &
+                              & gi_w_cw(:, 0), gi_lcwork, gi_w_rw(:, 0), nocc, &
+                              & gi_w_blk(:, 0), ierr)
+    if (ierr /= 0) then
+      nbad_l = nbad_l + 1
+      cycle
+    end if
+    do ib = 1, min(nvb, nb)
+      acc = acc + gs%kweight(ik) * nocc(ib)
+    end do
+  end do
+  call comm_summation(nbad_l, nbad, icomm)
+  if (nbad > 0) then
+    write(*, '(a,i0,a)') "ERROR(calc_valence_trace_integral): instantaneous eigensolve " // &
+      & "failed on ", nbad, " k-block(s) (LAPACK info /= 0 or non-finite eigenvalues)."
+    error stop 1
+  end if
+  call comm_summation(acc, tmp, icomm)
+  trv = tmp / sum(gs%kweight(:))
+  deallocate(nocc)
+end function calc_valence_trace_integral
 
 subroutine calc_current_bloch_lg(sbe, gs, jmat, icomm)
     use salmon_global, only: sbe_lg_degen

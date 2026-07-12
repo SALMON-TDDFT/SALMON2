@@ -84,19 +84,23 @@ contains
   !-------------------------------------------------------------------
   ! Per-rank transport-cache footprint in BYTES, computed in integer(8) so it
   ! never wraps for production (nb up to ~192, nk_local up to ~O(10^4)).  The
-  ! cache keeps FOUR complex(8) nb x nb matrices per shift -- H~_j and the
-  ! three velocity components v~_{j,1..3} -- over 2*j_max+1 shifts and the
-  ! LOCAL k-slice only (ik_min:ik_max = nk_local), never the full nk:
-  !     bytes = 16 * 4 * (2*j_max+1) * nb^2 * nk_local
-  !           = 64 * (2*j_max+1) * nb^2 * nk_local.
-  ! (The factor is 64 = 4 matrices x 16 bytes, NOT 32; and the k extent is
-  ! nk_local, NOT nk -- a full-nk cache would be ~9-12 GiB/rank at production
-  ! scale and must be rejected by the lint memory gate.)
+  ! cache keeps FIVE complex(8) nb x nb matrices per shift -- H~_j, the three
+  ! velocity components v~_{j,1..3}, and the co-moving ground-state occupation
+  ! reference F~0_j = W diag(f0(k_remote)) W^dagger -- over 2*j_max+1 shifts and
+  ! the LOCAL k-slice only (ik_min:ik_max = nk_local), never the full nk:
+  !     bytes = 16 * 5 * (2*j_max+1) * nb^2 * nk_local
+  !           = 80 * (2*j_max+1) * nb^2 * nk_local.
+  ! (The factor is 80 = 5 matrices x 16 bytes; F~0 must be TRANSPORTED and
+  ! INTERPOLATED exactly like H~ -- between nodes the interpolated H~ and F~0 no
+  ! longer share an eigenbasis, so the occupation reference cannot be recovered
+  ! from eigenvalue ordering alone.  And the k extent is nk_local, NOT nk -- a
+  ! full-nk cache would be ~9-12 GiB/rank at production scale and must be
+  ! rejected by the lint memory gate.)
   !-------------------------------------------------------------------
   pure integer(8) function gicov_int_cache_bytes(jmax, nb, nk_local) result(nbytes)
     implicit none
     integer, intent(in) :: jmax, nb, nk_local
-    nbytes = 64_8 * int(2 * jmax + 1, 8) * int(nb, 8) * int(nb, 8) * int(nk_local, 8)
+    nbytes = 80_8 * int(2 * jmax + 1, 8) * int(nb, 8) * int(nb, 8) * int(nk_local, 8)
   end function gicov_int_cache_bytes
 
   !-------------------------------------------------------------------
