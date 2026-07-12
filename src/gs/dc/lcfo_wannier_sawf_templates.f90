@@ -1,4 +1,5 @@
 module lcfo_wannier_sawf_templates
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
   integer, parameter :: sawf_template_schema_version=1
@@ -28,8 +29,26 @@ module lcfo_wannier_sawf_templates
   public :: apply_sawf_gauge_connection
   public :: stitch_and_apply_sawf_neighbor_pair
   public :: stitch_and_apply_sawf_neighbor_pair_real
+  public :: build_sawf_neighbor_trace_overlap
 
 contains
+  subroutine build_sawf_neighbor_trace_overlap(left_trace,right_trace,area_weight,overlap,ok,message)
+    real(8),intent(in)::left_trace(:,:),right_trace(:,:),area_weight
+    real(8),intent(out)::overlap(size(left_trace,2),size(right_trace,2))
+    logical,intent(out)::ok; character(*),intent(out)::message
+    ok=.false.;message='';overlap=0d0
+    if(size(left_trace,1)<=0.or.size(left_trace,1)/=size(right_trace,1).or. &
+       size(left_trace,2)/=size(right_trace,2).or.area_weight<=0d0)then
+      message='SAWF neighbor face traces have inconsistent dimensions or weight';return
+    end if
+    if(.not.all(ieee_is_finite(left_trace)).or..not.all(ieee_is_finite(right_trace)).or. &
+       .not.ieee_is_finite(area_weight))then
+      message='SAWF neighbor face trace overlap input is non-finite';return
+    end if
+    overlap=area_weight*matmul(transpose(left_trace),right_trace)
+    ok=.true.
+  end subroutine
+
   subroutine stitch_and_apply_sawf_neighbor_pair_real(overlap,tolerance,neighbor_gauge, &
       basis,ww_block,wp_block,face_self_block,face_neighbor_block,gauge,residual,ok,message)
     real(8),intent(in)::overlap(:,:),neighbor_gauge(:,:),tolerance

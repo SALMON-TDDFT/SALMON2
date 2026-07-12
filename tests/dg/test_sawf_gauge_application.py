@@ -7,7 +7,8 @@ FC=shutil.which('gfortran')
 if not FC: raise SystemExit('gfortran is required')
 driver=r'''program check_gauge_apply
  use lcfo_wannier_sawf_templates, only: apply_sawf_gauge_connection, &
-   stitch_and_apply_sawf_neighbor_pair, stitch_and_apply_sawf_neighbor_pair_real
+   stitch_and_apply_sawf_neighbor_pair, stitch_and_apply_sawf_neighbor_pair_real, &
+   build_sawf_neighbor_trace_overlap
  implicit none
  complex(8)::q(2,2),basis(3,2),ww(2,2),wp(2,1),face_self(2,2),face_neighbor(2,2)
  complex(8)::overlap(2,2),neighbor_q(2,2),gauge(2,2),basis_before(3,2)
@@ -18,6 +19,7 @@ driver=r'''program check_gauge_apply
  integer::i
  real(8)::overlap_r(2,2),neighbor_r(2,2),basis_r(3,2),ww_r(2,2),wp_r(2,1), &
    face_self_r(2,2),face_neighbor_r(2,2),gauge_r(2,2)
+ real(8)::trace_l(3,2),trace_r(3,2),trace_overlap(2,2)
  c=cos(.31d0);s=sin(.31d0);q=reshape([cmplx(c,0d0,8),cmplx(s,0d0,8), &
    cmplx(-s,0d0,8),cmplx(c,0d0,8)],[2,2])
  b0=reshape([(cmplx(dble(i),0d0,8),i=1,6)],[3,2]); basis=b0
@@ -48,6 +50,10 @@ driver=r'''program check_gauge_apply
  call stitch_and_apply_sawf_neighbor_pair_real(overlap_r,1d-10,neighbor_r,basis_r,ww_r,wp_r, &
    face_self_r,face_neighbor_r,gauge_r,residual,ok,msg)
  call req(ok.and.residual<1d-12,'real GS gauge path')
+ trace_l=reshape([1d0,0d0,0d0,0d0,1d0,0d0],[3,2]);trace_r=trace_l
+ call build_sawf_neighbor_trace_overlap(trace_l,trace_r,.25d0,trace_overlap,ok,msg)
+ call req(ok.and.maxval(abs(trace_overlap-.25d0*matmul(transpose(trace_l),trace_r)))<1d-14, &
+   'neighbor trace overlap')
  write(*,'(a)')'PASS gauge connection applied to basis, WW, WP, and DG face blocks'
 contains
  subroutine req(x,t);logical,intent(in)::x;character(*),intent(in)::t
