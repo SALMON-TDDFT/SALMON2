@@ -36,7 +36,8 @@
 ! SALMON communication / filesystem / global-variable dependency (the same
 ! standalone-testable discipline as degenerate_block_ssbe.f90): it compiles and
 ! unit-tests on its own against a 2-band analytic model
-!   gfortran degenerate_block_ssbe.f90 gicov_integral_ssbe.f90 \
+!   gfortran sbe_lg_mode_ssbe.f90 degenerate_block_ssbe.f90 \
+!            gicov_integral_ssbe.f90 \
 !            test/test_gicov_integral.f90 -o t -framework Accelerate
 ! The MPI k-halo gather that assembles the per-axis single-step link chain
 ! across ranks, and the SALMON wiring (a(t) cache, dispatch, current), live in

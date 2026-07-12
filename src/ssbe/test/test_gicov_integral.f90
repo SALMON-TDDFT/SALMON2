@@ -8,8 +8,12 @@
 ! tree (unlike the propagator/checker tests that link build_local/):
 !
 !   gfortran -O2 -ffree-line-length-none -fallow-argument-mismatch -w \
-!     src/ssbe/degenerate_block_ssbe.f90 src/ssbe/gicov_integral_ssbe.f90 \
+!     src/ssbe/sbe_lg_mode_ssbe.f90 src/ssbe/degenerate_block_ssbe.f90 \
+!     src/ssbe/gicov_integral_ssbe.f90 \
 !     src/ssbe/test/test_gicov_integral.f90 -o t -framework Accelerate && ./t
+!
+! (sbe_lg_mode_ssbe.f90 is a REQUIRED compile unit: degenerate_block_ssbe uses
+! its predicates, and T8 below asserts the mode truth table directly.)
 !
 ! Covers (task test list 1,2,4 + the SDD risk register):
 !   T1 transport orientation + sign (risk #1): W O W^dagger built from an
@@ -24,6 +28,10 @@
 !   T6 single-axis / linear-polarization guard (risk #6): [110] and circular
 !      are rejected on the whole trajectory; a single axis is accepted.
 !   T7 floor() vs int() bracketing for a>0 (negative mesh shift).
+!   T8 mode-predicate truth table (risk #2): the LEGACY modes (off/gi/gifix/
+!      gicov) never select the integral machinery, and 'gicov_int' never
+!      selects the finite-difference one -- the static half of the legacy
+!      byte-regression guard (the full byte compare is the Fugaku gate).
 !
 program test_gicov_integral
   use gicov_integral_ssbe
@@ -38,6 +46,7 @@ program test_gicov_integral
   call t5_cache_sizing(nfail)
   call t6_axis_guard(nfail)
   call t7_floor_shift(nfail)
+  call t8_mode_predicates(nfail)
 
   if (nfail == 0) then
     write(*, '(a)') "ALL PASS (test_gicov_integral)"
@@ -354,5 +363,46 @@ contains
     call report("T7 a=-1.3, dk=1 -> n_int=1, frac=0.3", &
               & (n_int == 1) .and. (abs(frac - 0.3d0) < 1d-12), nfail)
   end subroutine t7_floor_shift
+
+  !----------------------------------------------------------------
+  ! Mode-predicate truth table (SDD risk #2: "enum added, but a scattered
+  ! trim(sbe_lg_degen)=='gicov' branch was missed").  This is the LOCAL,
+  ! statically-decidable half of the legacy byte-regression guard: every
+  ! pre-existing deck names one of off/gi/gifix/gicov, and NONE of them may
+  ! select the new integral machinery -- so the new code is unreachable for
+  ! them by construction, whatever the shared call sites do.  (The full
+  ! output byte-compare of a legacy 'gicov' + a default deck is the Fugaku
+  ! gate; it cannot run in this standalone unit.)
+  subroutine t8_mode_predicates(nfail)
+    use sbe_lg_mode_ssbe, only: uses_prod_dk, uses_xfull_links, &
+                              & uses_fd_gicov, uses_integral_gicov
+    integer, intent(inout) :: nfail
+    logical :: ok
+
+    ! full truth table over every accepted sbe_lg_degen value
+    ok = (.not. uses_prod_dk('off'))       .and. (.not. uses_xfull_links('off')) &
+   .and. (.not. uses_fd_gicov('off'))      .and. (.not. uses_integral_gicov('off'))
+    call report("T8 'off': selects no covariant machinery", ok, nfail)
+
+    ok = uses_prod_dk('gi')                .and. (.not. uses_xfull_links('gi')) &
+   .and. (.not. uses_fd_gicov('gi'))       .and. (.not. uses_integral_gicov('gi')) &
+   .and. uses_prod_dk('gifix')             .and. (.not. uses_xfull_links('gifix')) &
+   .and. (.not. uses_fd_gicov('gifix'))    .and. (.not. uses_integral_gicov('gifix'))
+    call report("T8 'gi'/'gifix': prod_dk only (no X-full, no FD-gicov, no integral)", ok, nfail)
+
+    ok = uses_prod_dk('gicov')             .and. uses_xfull_links('gicov') &
+   .and. uses_fd_gicov('gicov')            .and. (.not. uses_integral_gicov('gicov'))
+    call report("T8 'gicov': X-full + FD covariant, NEVER the integral path", ok, nfail)
+
+    ok = uses_prod_dk('gicov_int')         .and. uses_xfull_links('gicov_int') &
+   .and. (.not. uses_fd_gicov('gicov_int')) .and. uses_integral_gicov('gicov_int')
+    call report("T8 'gicov_int': X-full + integral, NEVER the FD-gicov path", ok, nfail)
+
+    ! the decisive legacy-regression assertion: no pre-existing mode reaches
+    ! the integral propagator / the moving-gap T2 gate / the transport cache
+    ok = (.not. uses_integral_gicov('off')) .and. (.not. uses_integral_gicov('gi')) &
+   .and. (.not. uses_integral_gicov('gifix')) .and. (.not. uses_integral_gicov('gicov'))
+    call report("T8 NO legacy mode (off/gi/gifix/gicov) enters the integral path", ok, nfail)
+  end subroutine t8_mode_predicates
 
 end program test_gicov_integral
