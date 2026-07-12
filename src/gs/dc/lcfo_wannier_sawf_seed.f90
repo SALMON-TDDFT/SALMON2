@@ -6,8 +6,43 @@ module lcfo_wannier_sawf_seed
   public :: build_sawf_local_seed_matrices
   public :: select_sawf_local_complete_shells
   public :: solve_sawf_local_generalized_eigensystem
+  public :: read_sawf_nnkp_neighbors
 
 contains
+
+  subroutine read_sawf_nnkp_neighbors(filename,neighbor_gvec,ok,message)
+    character(*),intent(in)::filename
+    integer,allocatable,intent(out)::neighbor_gvec(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    character(512)::line
+    integer::unit,ios,nneighbor,neighbor,ikpoint,jkpoint
+    logical::found
+
+    ok=.false.;message='';found=.false.
+    open(newunit=unit,file=trim(filename),status='old',action='read',iostat=ios)
+    if(ios/=0)then;message='SAWF local .nnkp is missing';return;end if
+    do
+      read(unit,'(a)',iostat=ios)line
+      if(ios/=0)exit
+      if(trim(adjustl(line))=='begin nnkpts')then;found=.true.;exit;end if
+    end do
+    if(.not.found)then;close(unit);message='SAWF local .nnkp has no nnkpts block';return;end if
+    read(unit,*,iostat=ios)nneighbor
+    if(ios/=0.or.nneighbor<=0)then;close(unit);message='SAWF local .nnkp neighbor count is invalid';return;end if
+    allocate(neighbor_gvec(3,nneighbor))
+    do neighbor=1,nneighbor
+      read(unit,*,iostat=ios)ikpoint,jkpoint,neighbor_gvec(:,neighbor)
+      if(ios/=0.or.ikpoint/=1.or.jkpoint/=1)then
+        close(unit);message='SAWF local .nnkp is not a Gamma-only neighbor list';return
+      end if
+    end do
+    read(unit,'(a)',iostat=ios)line;close(unit)
+    if(ios/=0.or.trim(adjustl(line))/='end nnkpts')then
+      message='SAWF local .nnkp nnkpts block is truncated';return
+    end if
+    ok=.true.
+  end subroutine read_sawf_nnkp_neighbors
 
   subroutine solve_sawf_local_generalized_eigensystem(buffer_basis,weight,h_basis,rank_tolerance, &
       states,energies,ok,message)

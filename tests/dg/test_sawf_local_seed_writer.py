@@ -11,7 +11,8 @@ if not FC:
 
 driver = r'''program check_local_seed_writer
   use lcfo_wannier_sawf_seed, only: write_sawf_local_eig_amn_mmn,build_sawf_local_seed_matrices, &
-    select_sawf_local_complete_shells,solve_sawf_local_generalized_eigensystem
+    select_sawf_local_complete_shells,solve_sawf_local_generalized_eigensystem, &
+    read_sawf_nnkp_neighbors
   use, intrinsic :: ieee_arithmetic, only: ieee_value,ieee_quiet_nan
   implicit none
   real(8) :: energy(2)
@@ -25,8 +26,10 @@ driver = r'''program check_local_seed_writer
   integer :: i
   integer :: neighbor_gvec(3,3)
   integer,allocatable :: selected(:)
+  integer,allocatable :: parsed_gvec(:,:)
   logical :: inside(3)
   inside=[.true.,.false.,.true.]
+  neighbor_gvec=reshape([1,0,0,0,1,0,0,0,1],[3,3])
   buffer_basis=0d0;buffer_basis(1,1)=1d0;buffer_basis(2,2)=1d0
   h_basis=0d0;h_basis(1,1)=-2d0;h_basis(2,2)=3d0
   call solve_sawf_local_generalized_eigensystem(buffer_basis,1d0,h_basis,1d-12, &
@@ -35,13 +38,15 @@ driver = r'''program check_local_seed_writer
   if(maxval(abs(local_energy-[-2d0,3d0]))>1d-12)error stop 8
   if(maxval(abs(matmul(conjg(transpose(local_states)),local_states)- &
     reshape([(1d0,0d0),(0d0,0d0),(0d0,0d0),(1d0,0d0)],[2,2])))>1d-12)error stop 9
+  call read_sawf_nnkp_neighbors('local.nnkp',parsed_gvec,ok,message)
+  if(.not.ok.or.any(shape(parsed_gvec)/=[3,3]))error stop 10
+  if(any(parsed_gvec/=neighbor_gvec))error stop 11
   call select_sawf_local_complete_shells([1,1,1,1,2,2,2,2,3,3,3,3],[4,4,4], &
     inside,selected,ok,message)
   if(.not.ok.or.any(selected/=[1,2,3,4,9,10,11,12]))error stop 5
   call select_sawf_local_complete_shells([1,1,3,3],[4,4,4],inside,selected,ok,message)
   if(ok)error stop 6
   energy=[-1d0,2d0]
-  neighbor_gvec=reshape([1,0,0,0,1,0,0,0,1],[3,3])
   states=(0d0,0d0);states(1,1)=1;states(2,2)=1
   projections=states;phase=(1d0,0d0)
   call build_sawf_local_seed_matrices(states,projections,phase,1d0,amn,mmn,ok,message)
@@ -61,6 +66,9 @@ end program'''
 with tempfile.TemporaryDirectory(prefix="sawf-local-seed-") as td:
     td = Path(td)
     (td / "driver.f90").write_text(driver)
+    (td / "local.nnkp").write_text(
+        "begin nnkpts\n3\n1 1 1 0 0\n1 1 0 1 0\n1 1 0 0 1\nend nnkpts\n"
+    )
     result = subprocess.run(
         [FC, str(ROOT / "src/gs/dc/lcfo_wannier_sawf_seed.f90"),
          str(td / "driver.f90"), "-llapack", "-lblas", "-o", str(td / "check")],
