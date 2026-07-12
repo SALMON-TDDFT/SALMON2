@@ -17,6 +17,7 @@
 - Gauge alignment uses common buffered-volume Gram and cross-overlap matrices, not face-only overlap.
 - Basis/state coefficients are rotated before WW/WP/DG face construction.
 - Scientific controls remain in `&dc`, never environment variables.
+- `wannier_sawf_structure_class` may only tighten reuse and must be checked against measured geometry.
 
 ---
 
@@ -34,6 +35,7 @@
 - [ ] Run `python3 tests/dg/test_sawf_environment_fingerprint.py`; expect failure because the fingerprint APIs do not exist.
 - [ ] Implement canonical fixed-width serialization of lattice/PBC, all species/coordinates, pseudopotential content hashes, grid, buffer, band window, shells, XC and schema; implement core+buffer local serialization including vacuum occupancy.
 - [ ] Replace `sawf_defect_intersects=.false.` in `generate_sawf_dmn` with classification output and actual-group orbit traversal.
+- [ ] Add and validate `wannier_sawf_structure_class=auto|crystal|defect|interface|surface|amorphous`; reject class/geometry mismatches before basis generation.
 - [ ] Run the compiled test and `python3 tests/dg/test_sawf_local_materialization.py`; expect PASS.
 - [ ] Commit with `git commit -m "feat: classify exact SAWF local environments"`.
 

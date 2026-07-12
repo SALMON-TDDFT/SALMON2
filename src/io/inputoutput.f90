@@ -690,6 +690,7 @@ contains
       & wannier_symmetry_tolerance, &
       & wannier_sawf_generation, &
       & wannier_sawf_symmetry_scope, &
+      & wannier_sawf_structure_class, &
       & wannier_sawf_parent_symmetry_file, &
       & wannier_sawf_cache_directory, &
       & wannier_sawf_buffer_steps, &
@@ -1231,6 +1232,7 @@ contains
     wannier_symmetry_tolerance = 1d-6
     wannier_sawf_generation = 'monolithic'
     wannier_sawf_symmetry_scope = 'actual'
+    wannier_sawf_structure_class = 'auto'
     wannier_sawf_parent_symmetry_file = ''
     wannier_sawf_cache_directory = 'sawf_templates'
     wannier_sawf_buffer_steps = [1,2,3]
@@ -1981,6 +1983,7 @@ contains
     call comm_bcast(wannier_symmetry_tolerance, nproc_group_global)
     call comm_bcast(wannier_sawf_generation, nproc_group_global)
     call comm_bcast(wannier_sawf_symmetry_scope, nproc_group_global)
+    call comm_bcast(wannier_sawf_structure_class, nproc_group_global)
     call comm_bcast(wannier_sawf_parent_symmetry_file, nproc_group_global)
     call comm_bcast(wannier_sawf_cache_directory, nproc_group_global)
     call comm_bcast(wannier_sawf_buffer_steps, nproc_group_global)
@@ -3066,6 +3069,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_symmetry_tolerance', wannier_symmetry_tolerance
       write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_generation', trim(wannier_sawf_generation)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_symmetry_scope', trim(wannier_sawf_symmetry_scope)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_structure_class', trim(wannier_sawf_structure_class)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_parent_symmetry_file', &
         trim(wannier_sawf_parent_symmetry_file)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_cache_directory', &
@@ -3216,6 +3220,11 @@ contains
     if(trim(wannier_sawf_symmetry_scope)/='actual') then
       call sawf_input_fatal("wannier_sawf_symmetry_scope must be actual; parent symmetry cannot be forced")
     end if
+    select case(trim(wannier_sawf_structure_class))
+    case('auto','crystal','defect','interface','surface','amorphous')
+    case default
+      call sawf_input_fatal("wannier_sawf_structure_class must be auto, crystal, defect, interface, surface, or amorphous")
+    end select
     if(any(wannier_sawf_buffer_steps < 0) .or. &
         any(wannier_sawf_buffer_steps(2:3) <= wannier_sawf_buffer_steps(1:2))) then
       call sawf_input_fatal("wannier_sawf_buffer_steps must contain three increasing nonnegative buffers")

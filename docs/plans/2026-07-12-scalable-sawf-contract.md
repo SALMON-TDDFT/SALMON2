@@ -70,3 +70,11 @@ All result-changing choices live in `&dc`: `wannier_sawf_generation`
 `wannier_sawf_parent_symmetry_file` (diagnostic provenance only),
 `wannier_sawf_buffer_steps` (three increasing integers), gauge, buffer, and
 equivalence tolerances, and `wannier_sawf_cache_directory`.
+
+`wannier_sawf_structure_class` declares the intended structure class and may
+be `auto`, `crystal`, `defect`, `interface`, `surface`, or `amorphous`.  It
+never relaxes exact fingerprint or actual-group checks.  Instead it limits
+reuse and validates intent: `crystal` rejects unexplained inequivalent
+environments, `surface` requires vacuum occupancy, and `amorphous` defaults to
+independent generation except for exact actual-group equivalence.  A class
+mismatch fails before basis generation rather than silently changing policy.

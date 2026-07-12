@@ -149,6 +149,13 @@ same supercell while physical local symmetry breaking is retained near defects,
 interfaces, surfaces, vacuum boundaries, and amorphous regions. Template reuse
 across different supercells is forbidden, including geometrically similar
 supercells from separate calculations.
+
+The optional `wannier_sawf_structure_class` namelist declaration (`auto`,
+`crystal`, `defect`, `interface`, `surface`, or `amorphous`) is an intent and
+reuse-ceiling control, not a symmetry guarantee. It cannot merge environments
+rejected by exact fingerprints or the actual supercell group. Class-specific
+checks fail early on inconsistent input; amorphous mode conservatively disables
+reuse unless exact actual-group equivalence is demonstrated.
 Every cached template carries a complete supercell fingerprint and a local
 core+buffer environment fingerprint, together with geometry, pseudopotential, grid, band-window,
 projection-shell, symmetry-group, buffer, and generator-version fingerprints.

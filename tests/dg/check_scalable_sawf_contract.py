@@ -8,7 +8,7 @@ inputoutput = (root / "src/io/inputoutput.f90").read_text().lower()
 required = [
     "monolithic global sawf", "actual supercell symmetry group", "parent-crystal",
     "d_band", "d_wann", "complete projection shell", "representative environment",
-    "defect-local regeneration", "buffer convergence", "unitary procrustes",
+    "independent local regeneration", "buffer convergence", "unitary procrustes",
     "template provenance", "cache invalidation", "dg face block",
 ]
 for token in required:
@@ -20,6 +20,7 @@ controls = [
     "wannier_sawf_parent_symmetry_file", "wannier_sawf_buffer_steps",
     "wannier_sawf_gauge_tolerance", "wannier_sawf_buffer_tolerance",
     "wannier_sawf_equivalence_tolerance", "wannier_sawf_cache_directory",
+    "wannier_sawf_structure_class",
 ]
 for name in controls:
     assert name in global_input, f"missing namelist storage for {name}"

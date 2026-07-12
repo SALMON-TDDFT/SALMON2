@@ -539,6 +539,7 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: wannier_symmetry_tolerance
   character(16)  :: wannier_sawf_generation
   character(16)  :: wannier_sawf_symmetry_scope
+  character(16)  :: wannier_sawf_structure_class
   character(256) :: wannier_sawf_parent_symmetry_file
   character(256) :: wannier_sawf_cache_directory
   integer        :: wannier_sawf_buffer_steps(3)
