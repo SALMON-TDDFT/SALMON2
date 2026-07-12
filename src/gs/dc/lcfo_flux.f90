@@ -44,6 +44,8 @@ module lcfo_flux
   use lcfo_wannier_sawf_templates, only: validate_sawf_structure_class
   use lcfo_wannier_sawf_templates, only: build_sawf_file_content_digest
   use lcfo_wannier_sawf_templates, only: measure_sawf_vacuum_occupancy
+  use lcfo_wannier_sawf_orchestrator, only: t_sawf_environment_receipt, &
+    build_sawf_environment_execution_plan
   use lcfo_wannier_sawf_win, only: activate_sawf_win, deactivate_sawf_win, &
     t_atomic_win_writer, begin_atomic_win, finish_atomic_win, abort_atomic_win
   use lcfo_wannier_command, only: select_wannier90_command, execute_wannier90_command, &
@@ -6633,12 +6635,14 @@ contains
       type(t_sawf_dmn_writer) :: writer
       type(t_sawf_fragment_state_cache) :: state_cache
       type(t_sawf_closed_basis) :: closed_basis
+      type(t_sawf_environment_receipt),allocatable :: sawf_environment_receipts(:)
       logical :: local_ok,grid_map_ok,fragment_map_ok,center_available,split_fragment_global_mode
       logical, allocatable :: sawf_environment_equivalent(:,:),sawf_defect_intersects(:), &
         sawf_regenerate_environment(:),sawf_generate_independently(:)
       integer :: max_targets_per_source
       character(512) :: message
-      character(256) :: symmetry_filename,allocation_message,dmn_filename,amn_filename
+      character(256) :: symmetry_filename,allocation_message,dmn_filename,amn_filename, &
+        sawf_supercell_fingerprint
 
       if(trim(wannier_site_symmetry) == 'off') return
       ! The scalable SAWF route is admitted by representation, provenance,
@@ -6781,7 +6785,8 @@ contains
         if(allocation_status/=0) call lcfo_sawf_fatal( &
           'SAWF hierarchical environment-orbit allocation failed on this rank')
         call build_sawf_fragment_environment_fingerprints(lattice,fractional_positions,species,mesh, &
-          fragment_origin,fragment_shape,sawf_environment_key,sawf_vacuum_fraction,local_ok,message)
+          fragment_origin,fragment_shape,sawf_environment_key,sawf_vacuum_fraction, &
+          sawf_supercell_fingerprint,local_ok,message)
         if(.not.local_ok)then
           write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-ENV] rank=',dc%id_tot,' ',trim(message)
           call lcfo_sawf_fatal('SAWF local-environment fingerprint construction failed')
@@ -6814,6 +6819,13 @@ contains
         if(.not.local_ok)then
           write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-MATERIALIZE] rank=',dc%id_tot,' ',trim(message)
           call lcfo_sawf_fatal('SAWF materialization provenance construction failed')
+        end if
+        call build_sawf_environment_execution_plan(sawf_representative_fragment, &
+          sawf_materialize_operation,sawf_generate_independently,sawf_supercell_fingerprint, &
+          sawf_environment_receipts,local_ok,message)
+        if(.not.local_ok)then
+          write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-PLAN] rank=',dc%id_tot,' ',trim(message)
+          call lcfo_sawf_fatal('SAWF hierarchical execution-plan construction failed')
         end if
       end if
       call build_sawf_operation_product_table(symmetry_operations,lattice,lattice_inverse, &
@@ -7001,13 +7013,15 @@ contains
     end subroutine generate_sawf_dmn
 
     subroutine build_sawf_fragment_environment_fingerprints(lattice,fractional_positions,species, &
-        mesh,fragment_origin,fragment_shape,environment_key,vacuum_by_environment,ok,message)
+        mesh,fragment_origin,fragment_shape,environment_key,vacuum_by_environment, &
+        supercell_fingerprint,ok,message)
       use salmon_global, only: file_pseudo,xc,wannier_projection,wannier_num_bands,wannier_num_wann, &
         wannier_symmetry_tolerance,wannier_sawf_vacuum_density_threshold
       real(8),intent(in)::lattice(3,3),fractional_positions(:,:)
       integer,intent(in)::species(:),mesh(3),fragment_origin(:,:),fragment_shape(:,:)
       character(256),intent(out)::environment_key(:)
       real(8),intent(out)::vacuum_by_environment(:)
+      character(*),intent(out)::supercell_fingerprint
       logical,intent(out)::ok;character(*),intent(out)::message
       integer::ifrag,ia,axis,count,k,idx(3),start(3),extent(3),delta
       integer,allocatable::local_species(:),local_count(:)
@@ -7042,6 +7056,7 @@ contains
         dc%nxyz_buffer,trim(pseudo_signature),trim(band_window),trim(shell),trim(xc), &
         'SALMON-SAWF-schema-2',supercell_key,ok,message)
       if(.not.ok)return
+      supercell_fingerprint=supercell_key
       allocate(local_species(size(species)),relative(3,size(species)),local_count(size(environment_key)))
       allocate(rho_local(mesh(1),mesh(2),mesh(3)),rho_global(mesh(1),mesh(2),mesh(3)))
       allocate(density_collective(2*product(mesh)))
