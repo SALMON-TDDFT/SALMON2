@@ -46,7 +46,7 @@ module lcfo_flux
   use lcfo_wannier_sawf_templates, only: measure_sawf_vacuum_occupancy
   use lcfo_wannier_sawf_templates, only: sawf_closest_periodic_cartesian
   use lcfo_wannier_sawf_orchestrator, only: t_sawf_environment_receipt,t_sawf_seed_bundle, &
-    build_sawf_environment_execution_plan,build_sawf_seed_bundles
+    build_sawf_environment_execution_plan,build_sawf_seed_bundles,select_sawf_environment_stabilizer
   use lcfo_wannier_sawf_seed, only: select_sawf_local_complete_shells, &
     build_sawf_local_seed_matrices,write_sawf_local_eig_amn, &
     solve_sawf_local_generalized_eigensystem,read_sawf_nnkp_neighbors, &
@@ -6631,6 +6631,7 @@ contains
       integer, allocatable :: sawf_representative_fragment(:),sawf_materialize_operation(:)
       integer,allocatable :: sawf_expected_channels(:),sawf_selected_channels(:)
       integer,allocatable :: sawf_neighbor_gvec(:,:)
+      integer,allocatable :: sawf_local_stabilizer(:)
       character(256), allocatable :: sawf_environment_key(:)
       real(8) :: a1(3), a2(3), a3(3), lattice(3,3), lattice_inverse(3,3)
       real(8) :: singular_min, singular_max, closure_residual, closure_tolerance
@@ -6881,6 +6882,15 @@ contains
       if(.not.local_ok) then
         write(*,'(1x,a,i0,2a)') '[DC-LCFO-SAWF-GROUP] rank=',dc%id_tot,' ',trim(message)
         call lcfo_sawf_fatal('SAWF actual-supercell group product table construction failed')
+      end if
+      if(trim(wannier_sawf_generation)=='hierarchical'.and.dc%id_frag==0.and. &
+          sawf_environment_receipts(dc%i_frag)%requires_execution)then
+        call select_sawf_environment_stabilizer(dc%i_frag,symmetry_fragment_maps,product_left, &
+          product_right,product_result,sawf_local_stabilizer,local_ok,message)
+        if(.not.local_ok)then
+          write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-STABILIZER] rank=',dc%id_tot,' ',trim(message)
+          call lcfo_sawf_fatal('SAWF local actual-group stabilizer validation failed')
+        end if
       end if
       local_failure=merge(0,1,.not.split_fragment_global_mode)
       call comm_get_max(local_failure,dc%icomm_tot)

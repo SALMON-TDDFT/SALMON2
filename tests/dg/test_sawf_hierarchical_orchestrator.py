@@ -47,6 +47,7 @@ driver = r'''program check_orchestrator
   implicit none
   type(t_sawf_environment_receipt),allocatable :: receipt(:)
   type(t_sawf_seed_bundle),allocatable :: bundle(:)
+  integer,allocatable :: stabilizer(:)
   logical :: ok
   character(256) :: msg
   call build_sawf_environment_execution_plan([1,1,3],[1,2,1], &
@@ -58,6 +59,9 @@ driver = r'''program check_orchestrator
   call require(bundle(1)%environment==1.and.bundle(2)%environment==3,'bundle environments')
   call require(index(bundle(1)%directory,'environment-000001')>0,'isolated seed directory')
   call require(trim(bundle(1)%seedname)=='seed-env-000001','unique seed name')
+  call select_sawf_environment_stabilizer(1,reshape([1,2,3,1,3,2],[3,2]), &
+    [1,1,2,2],[1,2,1,2],[1,2,2,1],stabilizer,ok,msg)
+  call require(ok.and.all(stabilizer==[1,2]),'actual-group local stabilizer')
   call complete_sawf_seed_bundle(bundle(1),receipt(1),ok,msg)
   call require(ok.and.receipt(1)%completed,'first artifact bundle completed: '//trim(msg))
   call require(receipt(1)%num_bands==2.and.receipt(1)%num_wann==2,'ragged local dimensions')

@@ -26,8 +26,46 @@ module lcfo_wannier_sawf_orchestrator
   public :: build_sawf_seed_bundles
   public :: complete_sawf_seed_bundle
   public :: propagate_sawf_representative_receipts
+  public :: select_sawf_environment_stabilizer
 
 contains
+
+  subroutine select_sawf_environment_stabilizer(environment,fragment_maps,product_left,product_right, &
+      product_result,stabilizer,ok,message)
+    integer,intent(in)::environment,fragment_maps(:,:),product_left(:),product_right(:),product_result(:)
+    integer,allocatable,intent(out)::stabilizer(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::operation,noperation,count_stabilizer,left_slot,right_slot,row,result,count_product
+
+    ok=.false.;message='';noperation=size(fragment_maps,2)
+    if(environment<1.or.environment>size(fragment_maps,1).or.noperation<=0.or. &
+        size(product_right)/=size(product_left).or.size(product_result)/=size(product_left).or. &
+        any(product_left<1).or.any(product_left>noperation).or.any(product_right<1).or. &
+        any(product_right>noperation).or.any(product_result<1).or.any(product_result>noperation))then
+      message='SAWF environment stabilizer inputs are invalid';return
+    end if
+    count_stabilizer=count(fragment_maps(environment,:)==environment)
+    if(count_stabilizer<=0)then;message='SAWF environment stabilizer is empty';return;end if
+    allocate(stabilizer(count_stabilizer));count_stabilizer=0
+    do operation=1,noperation
+      if(fragment_maps(environment,operation)/=environment)cycle
+      count_stabilizer=count_stabilizer+1;stabilizer(count_stabilizer)=operation
+    end do
+    if(.not.any(stabilizer==1))then;message='SAWF environment stabilizer lacks identity operation';return;end if
+    do left_slot=1,size(stabilizer);do right_slot=1,size(stabilizer)
+      count_product=0;result=0
+      do row=1,size(product_left)
+        if(product_left(row)==stabilizer(left_slot).and.product_right(row)==stabilizer(right_slot))then
+          count_product=count_product+1;result=product_result(row)
+        end if
+      end do
+      if(count_product/=1.or..not.any(stabilizer==result))then
+        message='SAWF environment stabilizer is not closed under the actual group';return
+      end if
+    end do;end do
+    ok=.true.
+  end subroutine select_sawf_environment_stabilizer
 
   subroutine propagate_sawf_representative_receipts(receipts,ok,message)
     type(t_sawf_environment_receipt),intent(inout)::receipts(:)
