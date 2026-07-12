@@ -10,7 +10,7 @@ if not FC:
     raise SystemExit("gfortran is required")
 
 driver = r'''program check_local_win
-  use lcfo_wannier_sawf_win, only: write_sawf_local_preprocess_win
+  use lcfo_wannier_sawf_win, only: write_sawf_local_preprocess_win,write_sawf_atomic_text
   implicit none
   real(8) :: lattice(3,3),atoms(3,2)
   logical :: ok
@@ -19,6 +19,8 @@ driver = r'''program check_local_win
   atoms=reshape([0.1d0,0.2d0,0.3d0,0.6d0,0.7d0,0.8d0],[3,2])
   call write_sawf_local_preprocess_win('local.win',4,2,50,lattice,atoms,ok,message)
   if(.not.ok)then;write(*,'(a)')trim(message);error stop 1;end if
+  call write_sawf_atomic_text('local.sawf-fingerprint','cell-A',ok,message)
+  if(.not.ok)error stop 2
   write(*,'(a)')'PASS atomic local SAWF preprocess WIN writer'
 end program'''
 
@@ -36,4 +38,5 @@ with tempfile.TemporaryDirectory(prefix="sawf-local-win-") as td:
                   "begin unit_cell_cart","begin atoms_frac","begin kpoints"):
         assert token in text, token
     assert not list(td.glob("local.win.tmp.*"))
+    assert (td / "local.sawf-fingerprint").read_text().strip() == "cell-A"
     print(result.stdout.strip())

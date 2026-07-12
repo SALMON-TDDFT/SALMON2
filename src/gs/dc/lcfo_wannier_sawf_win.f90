@@ -16,6 +16,7 @@ module lcfo_wannier_sawf_win
   public :: activate_sawf_win, deactivate_sawf_win
   public :: begin_atomic_win, finish_atomic_win, abort_atomic_win
   public :: write_sawf_local_preprocess_win
+  public :: write_sawf_atomic_text
 
   interface
     integer(c_int) function c_rename(old_path, new_path) bind(C, name='rename')
@@ -29,6 +30,19 @@ module lcfo_wannier_sawf_win
   end interface
 
 contains
+
+  subroutine write_sawf_atomic_text(filename,text,ok,message)
+    character(*),intent(in)::filename,text
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    type(t_atomic_win_writer)::writer
+    integer::unit,ios
+    call begin_atomic_win(writer,filename,unit,ok,message)
+    if(.not.ok)return
+    write(unit,'(a)',iostat=ios)trim(text)
+    if(ios/=0)then;call abort_atomic_win(writer);ok=.false.;message='SAWF atomic text write failed';return;end if
+    call finish_atomic_win(writer,ok,message)
+  end subroutine write_sawf_atomic_text
 
   subroutine write_sawf_local_preprocess_win(filename,num_bands,num_wann,num_iter,lattice,atoms_fractional,ok,message)
     character(*),intent(in)::filename

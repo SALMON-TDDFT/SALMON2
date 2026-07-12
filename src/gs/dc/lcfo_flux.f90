@@ -46,7 +46,8 @@ module lcfo_flux
   use lcfo_wannier_sawf_templates, only: measure_sawf_vacuum_occupancy
   use lcfo_wannier_sawf_templates, only: sawf_closest_periodic_cartesian
   use lcfo_wannier_sawf_orchestrator, only: t_sawf_environment_receipt,t_sawf_seed_bundle, &
-    build_sawf_environment_execution_plan,build_sawf_seed_bundles,select_sawf_environment_stabilizer
+    build_sawf_environment_execution_plan,build_sawf_seed_bundles,select_sawf_environment_stabilizer, &
+    complete_sawf_seed_bundle,propagate_sawf_representative_receipts,validate_sawf_environment_receipts
   use lcfo_wannier_sawf_seed, only: select_sawf_local_complete_shells, &
     build_sawf_local_seed_matrices,write_sawf_local_eig_amn, &
     solve_sawf_local_generalized_eigensystem,read_sawf_nnkp_neighbors, &
@@ -54,7 +55,7 @@ module lcfo_flux
     build_sawf_local_band_representation
   use lcfo_wannier_sawf_win, only: activate_sawf_win, deactivate_sawf_win, &
     t_atomic_win_writer, begin_atomic_win, finish_atomic_win, abort_atomic_win, &
-    write_sawf_local_preprocess_win
+    write_sawf_local_preprocess_win,write_sawf_atomic_text
   use lcfo_wannier_command, only: select_wannier90_command, execute_wannier90_command, &
     is_wannier90_reuse_command, is_wannier90_export_only_command, &
     is_wannier90_import_only_command, cache_resolved_wannier90_command, &
@@ -6613,7 +6614,7 @@ contains
     end subroutine activate_sawf_win_collective
 
     subroutine generate_sawf_dmn(nband_wann,resolved_wannier_command)
-      use communication, only: comm_get_max,comm_bcast
+      use communication, only: comm_get_max,comm_bcast,comm_summation
       use filesystem, only: atomic_create_directory
       use salmon_global, only: izatom, sysname, wannier_num_wann, &
         wannier_site_symmetry, wannier_symmetry_file, wannier_symmetry_tolerance, &
@@ -6637,6 +6638,8 @@ contains
       integer,allocatable :: sawf_local_point_map(:,:),sawf_point_map_column(:)
       integer,allocatable :: sawf_local_product_left(:),sawf_local_product_right(:), &
         sawf_local_product_result(:)
+      integer,allocatable :: sawf_receipt_local(:),sawf_receipt_global(:), &
+        sawf_bands_local(:),sawf_bands_global(:),sawf_wann_local(:),sawf_wann_global(:)
       character(256), allocatable :: sawf_environment_key(:)
       real(8) :: a1(3), a2(3), a3(3), lattice(3,3), lattice_inverse(3,3)
       real(8) :: singular_min, singular_max, closure_residual, closure_tolerance
@@ -7160,6 +7163,49 @@ contains
       if(trim(wannier_sawf_generation)=='hierarchical'.and. &
           .not.is_wannier90_export_only_command(resolved_wannier_command)) &
         call run_sawf_local_wannier(resolved_wannier_command,sawf_seed_bundles)
+      if(trim(wannier_sawf_generation)=='hierarchical'.and. &
+          .not.is_wannier90_export_only_command(resolved_wannier_command))then
+        allocate(sawf_receipt_local(dc%n_frag),sawf_receipt_global(dc%n_frag), &
+          sawf_bands_local(dc%n_frag),sawf_bands_global(dc%n_frag), &
+          sawf_wann_local(dc%n_frag),sawf_wann_global(dc%n_frag))
+        sawf_receipt_local=0;sawf_bands_local=0;sawf_wann_local=0
+        if(dc%id_frag==0.and.sawf_environment_receipts(dc%i_frag)%requires_execution)then
+          ibundle=findloc(sawf_seed_bundles%environment,dc%i_frag,dim=1)
+          if(ibundle<=0)call lcfo_sawf_fatal('SAWF receipt bundle lookup failed')
+          call write_sawf_atomic_text(trim(sawf_seed_bundles(ibundle)%directory)//'/'// &
+            trim(sawf_seed_bundles(ibundle)%seedname)//'.sawf-fingerprint', &
+            sawf_seed_bundles(ibundle)%same_supercell_fingerprint,local_ok,message)
+          if(.not.local_ok)then
+            write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-RECEIPT] rank=',dc%id_tot,' ',trim(message)
+            call lcfo_sawf_fatal('SAWF fingerprint publication failed before receipt collective')
+          end if
+          call complete_sawf_seed_bundle(sawf_seed_bundles(ibundle), &
+            sawf_environment_receipts(dc%i_frag),local_ok,message)
+          if(.not.local_ok)then
+            write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-RECEIPT] rank=',dc%id_tot,' ',trim(message)
+            call lcfo_sawf_fatal('SAWF artifact validation failed before receipt collective')
+          end if
+          sawf_receipt_local(dc%i_frag)=1
+          sawf_bands_local(dc%i_frag)=sawf_environment_receipts(dc%i_frag)%num_bands
+          sawf_wann_local(dc%i_frag)=sawf_environment_receipts(dc%i_frag)%num_wann
+        end if
+        call comm_summation(sawf_receipt_local,sawf_receipt_global,dc%n_frag,dc%icomm_tot)
+        call comm_summation(sawf_bands_local,sawf_bands_global,dc%n_frag,dc%icomm_tot)
+        call comm_summation(sawf_wann_local,sawf_wann_global,dc%n_frag,dc%icomm_tot)
+        do ifrag=1,dc%n_frag
+          if(.not.sawf_environment_receipts(ifrag)%requires_execution)cycle
+          if(sawf_receipt_global(ifrag)/=1.or.sawf_bands_global(ifrag)<=0.or. &
+              sawf_wann_global(ifrag)<=0)call lcfo_sawf_fatal( &
+            'SAWF representative receipt collective is missing or duplicated')
+          sawf_environment_receipts(ifrag)%completed=.true.
+          sawf_environment_receipts(ifrag)%num_bands=sawf_bands_global(ifrag)
+          sawf_environment_receipts(ifrag)%num_wann=sawf_wann_global(ifrag)
+        end do
+        call propagate_sawf_representative_receipts(sawf_environment_receipts,local_ok,message)
+        if(local_ok)call validate_sawf_environment_receipts(sawf_environment_receipts, &
+          sawf_supercell_fingerprint,local_ok,message)
+        if(.not.local_ok)call lcfo_sawf_fatal('SAWF collective receipt validation failed: '//trim(message))
+      end if
 
       failure=0
       if(dc%id_frag==0) then
