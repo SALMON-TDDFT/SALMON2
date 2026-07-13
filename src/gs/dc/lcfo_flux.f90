@@ -46,7 +46,8 @@ module lcfo_flux
   use lcfo_wannier_sawf_templates, only: measure_sawf_vacuum_occupancy
   use lcfo_wannier_sawf_templates, only: sawf_closest_periodic_cartesian
   use lcfo_wannier_sawf_templates, only: t_sawf_template_checkpoint,t_sawf_template_fingerprint, &
-    write_sawf_template_checkpoint
+    write_sawf_template_checkpoint,read_sawf_template_checkpoint,t_sawf_ragged_local_basis, &
+    materialize_sawf_ragged_local_basis
   use lcfo_wannier_sawf_orchestrator, only: t_sawf_environment_receipt,t_sawf_seed_bundle, &
     build_sawf_environment_execution_plan,build_sawf_seed_bundles,select_sawf_environment_stabilizer, &
     complete_sawf_seed_bundle,propagate_sawf_representative_receipts,validate_sawf_environment_receipts
@@ -6616,7 +6617,7 @@ contains
     end subroutine activate_sawf_win_collective
 
     subroutine generate_sawf_dmn(nband_wann,resolved_wannier_command)
-      use communication, only: comm_get_max,comm_bcast,comm_summation
+      use communication, only: comm_get_max,comm_bcast,comm_summation,comm_sync_all
       use filesystem, only: atomic_create_directory
       use salmon_global, only: izatom, sysname, wannier_num_wann, &
         wannier_site_symmetry, wannier_symmetry_file, wannier_symmetry_tolerance, &
@@ -6635,6 +6636,8 @@ contains
       integer, allocatable :: sawf_environment_orbit(:)
       integer, allocatable :: sawf_representative_fragment(:),sawf_materialize_operation(:)
       integer,allocatable :: sawf_expected_channels(:),sawf_selected_channels(:)
+      integer,allocatable::sawf_source_channels(:),sawf_core_materialize_map(:), &
+        sawf_buffer_materialize_map(:)
       integer,allocatable :: sawf_neighbor_gvec(:,:)
       integer,allocatable :: sawf_local_stabilizer(:)
       integer,allocatable :: sawf_local_point_map(:,:),sawf_point_map_column(:)
@@ -6655,6 +6658,7 @@ contains
       complex(8),allocatable :: sawf_local_amn(:,:)
       complex(8),allocatable :: sawf_local_v_matrix(:,:),sawf_representative_orbitals(:,:)
       complex(8),allocatable :: sawf_representative_buffer_orbitals(:,:)
+      complex(8),allocatable::sawf_materialize_d_wann(:,:)
       real(8),allocatable :: sawf_local_energy(:)
       real(8),allocatable::sawf_local_coefficients(:,:)
       real(8),allocatable :: sawf_local_centers(:,:),sawf_local_spreads(:)
@@ -6665,15 +6669,17 @@ contains
       type(t_sawf_dmn_writer)::sawf_local_writer
       type(t_sawf_template_checkpoint)::sawf_template
       type(t_sawf_template_fingerprint)::sawf_template_fingerprint
+      type(t_sawf_ragged_local_basis)::sawf_materialized_basis
       type(t_sawf_fragment_state_cache) :: state_cache
       type(t_sawf_closed_basis) :: closed_basis
       type(t_sawf_environment_receipt),allocatable :: sawf_environment_receipts(:)
       type(t_sawf_seed_bundle),allocatable :: sawf_seed_bundles(:)
       logical :: local_ok,grid_map_ok,fragment_map_ok,center_available,split_fragment_global_mode
+      logical::sawf_template_reuse
       logical, allocatable :: sawf_environment_equivalent(:,:),sawf_defect_intersects(:), &
         sawf_regenerate_environment(:),sawf_generate_independently(:),sawf_inside_atom(:)
       integer :: max_targets_per_source,local_left,local_right,local_relation,global_relation, &
-        num_bands_chk,num_wann_chk
+        num_bands_chk,num_wann_chk,representative,materialize_operation
       character(512) :: message
       character(256) :: symmetry_filename,allocation_message,dmn_filename,amn_filename, &
         sawf_supercell_fingerprint
@@ -6882,7 +6888,7 @@ contains
         do ibundle=1,size(sawf_seed_bundles)
           call atomic_create_directory(sawf_seed_bundles(ibundle)%directory,dc%icomm_tot,dc%id_tot)
         end do
-        if(sawf_environment_receipts(dc%i_frag)%requires_execution.and.dc%id_frag==0)then
+        if(dc%id_frag==0)then
           allocate(sawf_expected_channels(dc%system_tot%nion),sawf_inside_atom(dc%system_tot%nion))
           sawf_expected_channels=0;sawf_inside_atom=.false.
           do ia=1,size(channels)
@@ -7265,6 +7271,58 @@ contains
           call write_sawf_template_checkpoint(trim(sawf_seed_bundles(ibundle)%directory)//'/'// &
             trim(sawf_seed_bundles(ibundle)%seedname)//'.sawf-template',sawf_template,local_ok,message)
           if(.not.local_ok)call lcfo_sawf_fatal('SAWF representative template publication failed: '//trim(message))
+        end if
+        call comm_sync_all(dc%icomm_tot)
+        if(dc%id_frag==0)then
+          representative=sawf_environment_receipts(dc%i_frag)%representative_fragment
+          materialize_operation=sawf_environment_receipts(dc%i_frag)%operation_index
+          ibundle=findloc(sawf_seed_bundles%environment,representative,dim=1)
+          if(ibundle<=0)call lcfo_sawf_fatal('SAWF representative template bundle lookup failed')
+          sawf_inside_atom=.false.
+          do ia=1,dc%system_tot%nion
+            sawf_inside_atom(ia)=sawf_atom_inside_fragment_buffer(fractional_positions(:,ia),mesh, &
+              fragment_origin(:,representative),fragment_shape(:,representative),dc%nxyz_buffer)
+          end do
+          call select_sawf_local_complete_shells(channels%atom,sawf_expected_channels, &
+            sawf_inside_atom,sawf_source_channels,local_ok,message)
+          if(.not.local_ok)call lcfo_sawf_fatal('SAWF representative source-shell selection failed')
+          call select_sawf_environment_stabilizer(representative,symmetry_fragment_maps,product_left, &
+            product_right,product_result,sawf_local_stabilizer,local_ok,message)
+          if(.not.local_ok)call lcfo_sawf_fatal('SAWF representative template stabilizer rebuild failed')
+          sawf_template_fingerprint%geometry=sawf_supercell_fingerprint
+          sawf_template_fingerprint%pseudopotential=sawf_supercell_fingerprint
+          sawf_template_fingerprint%grid=sawf_environment_key(representative)
+          write(sawf_template_fingerprint%band_window,'(a,i0,a,i0)')'bands=', &
+            sawf_environment_receipts(representative)%num_bands,':wann=', &
+            sawf_environment_receipts(representative)%num_wann
+          write(sawf_template_fingerprint%complete_projection_shell,'(a,i0)') &
+            'selected_channels=',size(sawf_source_channels)
+          write(sawf_template_fingerprint%symmetry,'(a,i0)')'actual_stabilizer=',size(sawf_local_stabilizer)
+          write(sawf_template_fingerprint%buffer,'(3(i0,1x))')dc%nxyz_buffer
+          sawf_template_fingerprint%generator='SALMON hierarchical SAWF template schema 2'
+          call read_sawf_template_checkpoint(trim(sawf_seed_bundles(ibundle)%directory)//'/'// &
+            trim(sawf_seed_bundles(ibundle)%seedname)//'.sawf-template',sawf_template_fingerprint, &
+            sawf_template,sawf_template_reuse,local_ok,message)
+          if(.not.local_ok.or..not.sawf_template_reuse)call lcfo_sawf_fatal( &
+            'SAWF representative template read/fingerprint validation failed: '//trim(message))
+          call build_sawf_fragment_buffer_point_map(symmetry_operations(materialize_operation),mesh, &
+            fragment_origin(:,representative),fragment_shape(:,representative), &
+            fragment_origin(:,dc%i_frag),fragment_shape(:,dc%i_frag),[0,0,0], &
+            wannier_symmetry_tolerance,sawf_core_materialize_map,local_ok,message)
+          if(local_ok)call build_sawf_fragment_buffer_point_map(symmetry_operations(materialize_operation), &
+            mesh,fragment_origin(:,representative),fragment_shape(:,representative), &
+            fragment_origin(:,dc%i_frag),fragment_shape(:,dc%i_frag),dc%nxyz_buffer, &
+            wannier_symmetry_tolerance,sawf_buffer_materialize_map,local_ok,message)
+          if(.not.local_ok)call lcfo_sawf_fatal('SAWF representative-to-target grid map failed: '//trim(message))
+          if(size(sawf_source_channels)/=size(sawf_selected_channels))call lcfo_sawf_fatal( &
+            'SAWF representative and target ragged channel counts disagree')
+          allocate(sawf_materialize_d_wann(size(sawf_source_channels),size(sawf_selected_channels)))
+          sawf_materialize_d_wann=d_wann_set(sawf_source_channels,sawf_selected_channels,materialize_operation)
+          call materialize_sawf_ragged_local_basis(sawf_template%orbitals,sawf_template%buffer_orbitals, &
+            sawf_core_materialize_map,sawf_buffer_materialize_map,sawf_materialize_d_wann, &
+            representative,materialize_operation,sawf_generate_independently(dc%i_frag), &
+            sawf_materialized_basis,local_ok,message)
+          if(.not.local_ok)call lcfo_sawf_fatal('SAWF ragged production materialization failed: '//trim(message))
         end if
       end if
 
