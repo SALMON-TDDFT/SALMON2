@@ -3332,6 +3332,7 @@ contains
     call init_lcfo
     call initialize_sawf_seed_provenance()
     call calc_basis
+    call check_lcfo_basis_potential_inputs_finite
     call hpsi_basis
     if(dc%id_tot==0) write(*,*) "basis functions operation: done"
 
@@ -3374,6 +3375,35 @@ contains
     if(dc%id_tot==0) write(*,*) "end DC-LCFO-Flux"
 
   contains
+
+    subroutine check_lcfo_basis_potential_inputs_finite
+      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+      implicit none
+      integer :: ix0,iy0,iz0,is0,io0
+
+      do io0=1,size(f_basis,5); do is0=1,size(f_basis,4); do iz0=1,size(f_basis,3)
+        do iy0=1,size(f_basis,2); do ix0=1,size(f_basis,1)
+          if(.not.ieee_is_finite(f_basis(ix0,iy0,iz0,is0,io0))) then
+            write(*,'(1x,a,i0,5(a,i0))') '[DC-LCFO-INPUT-LOCAL] label=basis rank=',dc%id_tot, &
+              ' ix=',ix0,' iy=',iy0,' iz=',iz0,' spin=',is0,' state=',io0
+            stop 'DC-LCFO rank-local basis is non-finite'
+          end if
+        end do; end do
+      end do; end do; end do
+      do is0=1,nspin
+        do iz0=lbound(V_local(is0)%f,3),ubound(V_local(is0)%f,3)
+          do iy0=lbound(V_local(is0)%f,2),ubound(V_local(is0)%f,2)
+            do ix0=lbound(V_local(is0)%f,1),ubound(V_local(is0)%f,1)
+              if(.not.ieee_is_finite(V_local(is0)%f(ix0,iy0,iz0))) then
+                write(*,'(1x,a,i0,4(a,i0))') '[DC-LCFO-INPUT-LOCAL] label=vlocal rank=',dc%id_tot, &
+                  ' ix=',ix0,' iy=',iy0,' iz=',iz0,' spin=',is0
+                stop 'DC-LCFO rank-local potential is non-finite'
+              end if
+            end do
+          end do
+        end do
+      end do
+    end subroutine check_lcfo_basis_potential_inputs_finite
 
     subroutine initialize_sawf_seed_provenance()
       use communication, only: comm_bcast
@@ -3850,6 +3880,10 @@ contains
       end do
 !$omp end parallel do
       end do
+      call check_lcfo_h_component_finite(mat_H_weak_kinetic,'volume_kinetic')
+      call check_lcfo_h_component_finite(mat_H_weak_potential,'volume_local_potential')
+      call check_lcfo_h_component_finite(mat_H_weak_nonlocal,'volume_nonlocal')
+      call check_lcfo_h_component_finite(mat_H_volume_weak_local,'volume_weak_total')
       allocate(grad_work(l(1),l(2),l(3)))
       do ispin=1,nspin
       do idir=1,3
@@ -3989,8 +4023,12 @@ contains
 !$omp end parallel do
           end do
           deallocate(trace_local)
+          call check_lcfo_h_component_finite(halo(i_halo)%mat_H_surface_cross, &
+            'surface_cross')
           if(dc%id_tot==0) write(*,*) "Halo communication #",i_halo,": done"
         end do
+        call check_lcfo_h_component_finite(mat_H_surface_self,'surface_self')
+        call check_lcfo_h_component_finite(mat_H_local,'assembled_local')
         call release_surface_trace_halo()
       end if ! dc%id_frag==0
       do ispin=1,nspin
@@ -4010,6 +4048,26 @@ contains
       deallocate(basis_nonlocal_core)
 
     end subroutine calc_hamiltonian_matrix
+
+    subroutine check_lcfo_h_component_finite(matrix,label)
+      implicit none
+      real(8),intent(in)::matrix(:,:,:)
+      character(*),intent(in)::label
+      integer::i,j,spin
+
+      if(all(ieee_is_finite(matrix)))return
+      do spin=1,size(matrix,3)
+        do j=1,size(matrix,2)
+          do i=1,size(matrix,1)
+            if(ieee_is_finite(matrix(i,j,spin)))cycle
+            write(*,'(1x,3a,i0,3(a,i0),a,es24.16)') &
+              '[DC-LCFO-H-COMPONENT-LOCAL] label=',trim(label),' rank=',dc%id_tot, &
+              ' i=',i,' j=',j,' spin=',spin,' value=',matrix(i,j,spin)
+            stop 'DC-LCFO rank-local Hamiltonian component is non-finite'
+          end do
+        end do
+      end do
+    end subroutine check_lcfo_h_component_finite
 
     subroutine build_fragment_nonlocal_basis_action(nonlocal_action)
       use communication, only: comm_summation
@@ -4391,6 +4449,18 @@ contains
           end do ! iy_loc
         end do ! ifrag
         if(dc%id_tot==0) write(*,*) "h_div: done"
+
+        if(any(.not.ieee_is_finite(h_div))) then
+          do iy_loc=1,size(h_div,2)
+            do ix_loc=1,size(h_div,1)
+              if(ieee_is_finite(h_div(ix_loc,iy_loc))) cycle
+              write(*,'(1x,a,i0,2(a,i0),a,es24.16)') &
+                '[DC-LCFO-EIGENEXA-LOCAL-H] rank=',dc%id_tot, &
+                ' local_i=',ix_loc,' local_j=',iy_loc,' value=',h_div(ix_loc,iy_loc)
+              stop 'DC-LCFO rank-local Hamiltonian is non-finite before EigenExa'
+            end do
+          end do
+        end if
 
         h_ref_div = h_div
         if(sawf_explicit_basis_active) then
@@ -6938,9 +7008,8 @@ contains
       local_failure=merge(0,1,.not.split_fragment_global_mode)
       call comm_get_max(local_failure,dc%icomm_tot)
       split_fragment_global_mode=(local_failure/=0)
-      if(split_fragment_global_mode .and. dc%id_tot==0) write(*,'(1x,a)') &
-        '[DC-LCFO-SAWF-GLOBAL-SPLIT] build D_band from split fragment blocks; skip local closed-basis gate'
-
+      if(split_fragment_global_mode) call lcfo_sawf_fatal( &
+        'SAWF split-fragment symmetry requires a constructed global symmetry-closed basis')
       failure=0; message=''
       if(dc%id_tot == 0) then
         if(local_ok) then
