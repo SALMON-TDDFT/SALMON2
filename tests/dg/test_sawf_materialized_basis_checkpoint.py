@@ -13,12 +13,13 @@ if not FC:
 driver = r'''program check_materialized_checkpoint
   use lcfo_wannier_sawf_templates, only: t_sawf_ragged_local_basis, &
     write_sawf_materialized_basis_checkpoint, read_sawf_materialized_basis_checkpoint, &
-    stitch_sawf_materialized_neighbor_pair
+    stitch_sawf_materialized_neighbor_pair,build_sawf_shared_buffer_point_maps
   implicit none
   type(t_sawf_ragged_local_basis) :: source, loaded
   logical :: ok, reusable
   character(256) :: message
   integer :: i, shared_left(2),shared_right(2)
+  integer,allocatable :: map_left(:),map_right(:)
   type(t_sawf_ragged_local_basis) :: left, right
   complex(8) :: q(2,2), right_before(3,2)
   real(8) :: c,s
@@ -57,6 +58,13 @@ driver = r'''program check_materialized_checkpoint
   call stitch_sawf_materialized_neighbor_pair(left,right,shared_left,shared_right, &
     1d0,1d-12,1d-10,ok,message)
   call req(.not.ok.and.maxval(abs(right%core-right_before))<1d-15,'rank failure atomic')
+  call build_sawf_shared_buffer_point_maps([8,2,1],[0,0,0],[2,2,1], &
+    [2,0,0],[2,2,1],[1,0,0],map_left,map_right,ok,message)
+  call req(ok.and.size(map_left)==4.and.size(map_right)==4,'shared periodic buffer map')
+  call req(all(map_left==[3,4,7,8]).and.all(map_right==[1,2,5,6]),'shared map ordering')
+  call build_sawf_shared_buffer_point_maps([2,2,1],[0,0,0],[2,2,1], &
+    [1,0,0],[1,2,1],[1,0,0],map_left,map_right,ok,message)
+  call req(.not.ok,'duplicate periodic buffer images rejected')
   write(*,'(a)')'PASS materialized SAWF basis checkpoint'
 contains
   subroutine req(condition,label)

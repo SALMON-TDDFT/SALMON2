@@ -51,8 +51,81 @@ module lcfo_wannier_sawf_templates
   public :: write_sawf_materialized_basis_checkpoint
   public :: read_sawf_materialized_basis_checkpoint
   public :: stitch_sawf_materialized_neighbor_pair
+  public :: build_sawf_shared_buffer_point_maps
 
 contains
+  subroutine build_sawf_shared_buffer_point_maps(global_mesh,left_origin,left_shape,right_origin, &
+      right_shape,buffer_width,left_map,right_map,ok,message)
+    integer,intent(in)::global_mesh(3),left_origin(3),left_shape(3),right_origin(3), &
+      right_shape(3),buffer_width(3)
+    integer,allocatable,intent(out)::left_map(:),right_map(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer,allocatable::left_id(:),right_id(:),left_order(:),right_order(:),tmp_left(:),tmp_right(:)
+    integer::nl,nr,i,j,k,row,count,left_box(3),right_box(3),gid
+    ok=.false.;message=''
+    if(any(global_mesh<=0).or.any(left_shape<=0).or.any(right_shape<=0).or.any(buffer_width<0))then
+      message='SAWF shared buffer geometry is invalid';return
+    end if
+    left_box=left_shape+2*buffer_width;right_box=right_shape+2*buffer_width
+    nl=product(left_box);nr=product(right_box)
+    allocate(left_id(nl),left_order(nl),right_id(nr),right_order(nr))
+    row=0
+    do k=0,left_box(3)-1;do j=0,left_box(2)-1;do i=0,left_box(1)-1
+      row=row+1
+      gid=modulo(left_origin(1)-buffer_width(1)+i,global_mesh(1))+ &
+        global_mesh(1)*(modulo(left_origin(2)-buffer_width(2)+j,global_mesh(2))+ &
+        global_mesh(2)*modulo(left_origin(3)-buffer_width(3)+k,global_mesh(3)))
+      left_id(row)=gid;left_order(row)=row
+    end do;end do;end do
+    row=0
+    do k=0,right_box(3)-1;do j=0,right_box(2)-1;do i=0,right_box(1)-1
+      row=row+1
+      gid=modulo(right_origin(1)-buffer_width(1)+i,global_mesh(1))+ &
+        global_mesh(1)*(modulo(right_origin(2)-buffer_width(2)+j,global_mesh(2))+ &
+        global_mesh(2)*modulo(right_origin(3)-buffer_width(3)+k,global_mesh(3)))
+      right_id(row)=gid;right_order(row)=row
+    end do;end do;end do
+    call sawf_sort_grid_pairs(left_id,left_order,1,nl)
+    call sawf_sort_grid_pairs(right_id,right_order,1,nr)
+    if((nl>1.and.any(left_id(2:)==left_id(:nl-1))).or. &
+        (nr>1.and.any(right_id(2:)==right_id(:nr-1))))then
+      message='SAWF buffer contains duplicate periodic grid images';return
+    end if
+    allocate(tmp_left(min(nl,nr)),tmp_right(min(nl,nr)))
+    i=1;j=1;count=0
+    do while(i<=nl.and.j<=nr)
+      if(left_id(i)<right_id(j))then;i=i+1
+      else if(left_id(i)>right_id(j))then;j=j+1
+      else
+        count=count+1;tmp_left(count)=left_order(i);tmp_right(count)=right_order(j);i=i+1;j=j+1
+      end if
+    end do
+    if(count==0)then;message='SAWF neighboring buffers have no shared supercell grid points';return;end if
+    allocate(left_map(count),right_map(count));left_map=tmp_left(:count);right_map=tmp_right(:count)
+    ok=.true.
+  end subroutine
+
+  recursive subroutine sawf_sort_grid_pairs(ids,order,lo,hi)
+    integer,intent(inout)::ids(:),order(:)
+    integer,intent(in)::lo,hi
+    integer::i,j,pivot,tmp
+    if(lo>=hi)return
+    i=lo;j=hi;pivot=ids((lo+hi)/2)
+    do
+      do while(ids(i)<pivot);i=i+1;end do
+      do while(ids(j)>pivot);j=j-1;end do
+      if(i<=j)then
+        tmp=ids(i);ids(i)=ids(j);ids(j)=tmp
+        tmp=order(i);order(i)=order(j);order(j)=tmp
+        i=i+1;j=j-1
+      end if
+      if(i>j)exit
+    end do
+    if(lo<j)call sawf_sort_grid_pairs(ids,order,lo,j)
+    if(i<hi)call sawf_sort_grid_pairs(ids,order,i,hi)
+  end subroutine
+
   subroutine stitch_sawf_materialized_neighbor_pair(left_basis,right_basis,left_shared_points, &
       right_shared_points,grid_weight, &
       relative_cutoff,alignment_tolerance,ok,message)
