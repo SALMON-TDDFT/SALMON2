@@ -74,7 +74,6 @@ contains
     integer, allocatable :: occ_owner(:), occ_pos_owner(:), local_occ_glob(:), local_occ_io(:)
     integer, allocatable :: owner_blk_s(:), owner_blk_e(:), owner_nblk(:)
     real(8), allocatable :: occ_w(:)
-    real(8), allocatable :: local_occ_w(:)
     complex(8), allocatable, target :: zocc(:,:,:,:,:), zt1(:,:,:,:,:), zt2(:,:,:,:,:)
     complex(8), pointer :: zblk(:,:,:,:,:)
     complex(8), pointer :: zocc2d(:,:), zt12d(:,:), zt22d(:,:)
@@ -119,8 +118,8 @@ contains
 
           call validate_sharp_occupation_contract(ik, ispin, nocc, occ_idx, occ_w, electron_multiplicity)
 
-          call build_occ_distribution_cache(nocc, occ_idx, occ_w, info%id_o, occ_owner, occ_pos_owner, &
-            local_occ_glob, local_occ_io, local_occ_w, owner_blk_s, owner_blk_e, owner_nblk, nocc_local)
+          call build_occ_distribution_cache(nocc, occ_idx, info%id_o, occ_owner, occ_pos_owner, &
+            local_occ_glob, local_occ_io, owner_blk_s, owner_blk_e, owner_nblk, nocc_local)
           allocate(zocc(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), system%nspin, max(1,nocc_local)))
           allocate(marker_local(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
           allocate(marker_sum(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3)))
@@ -424,7 +423,7 @@ contains
           deallocate(s1_row, s2_row, s1_row_sum, s2_row_sum, g12_row, g12_row_sum)
           deallocate(zt1, zt2, zocc)
           deallocate(marker_local, marker_sum)
-          deallocate(occ_idx, occ_w, occ_owner, occ_pos_owner, local_occ_glob, local_occ_io, local_occ_w, &
+          deallocate(occ_idx, occ_w, occ_owner, occ_pos_owner, local_occ_glob, local_occ_io, &
             owner_blk_s, owner_blk_e, owner_nblk)
 
         end do
@@ -668,15 +667,13 @@ contains
       deallocate(zsrc)
     end subroutine apply_right_transform_occ_inplace
 
-    subroutine build_occ_distribution_cache(nocc0, occ_list0, occ_w0, owner_id, occ_owner0, occ_pos0, &
-      local_glob0, local_io0, local_w0, owner_blk_s0, owner_blk_e0, owner_nblk0, nlocal)
+    subroutine build_occ_distribution_cache(nocc0, occ_list0, owner_id, occ_owner0, occ_pos0, &
+      local_glob0, local_io0, owner_blk_s0, owner_blk_e0, owner_nblk0, nlocal)
       implicit none
       integer, intent(in) :: nocc0, owner_id
       integer, intent(in) :: occ_list0(nocc0)
-      real(8), intent(in) :: occ_w0(nocc0)
       integer, allocatable, intent(out) :: occ_owner0(:), occ_pos0(:)
       integer, allocatable, intent(out) :: local_glob0(:), local_io0(:)
-      real(8), allocatable, intent(out) :: local_w0(:)
       integer, allocatable, intent(out) :: owner_blk_s0(:), owner_blk_e0(:), owner_nblk0(:)
       integer, intent(out) :: nlocal
       integer :: p, owner, lidx
@@ -703,17 +700,15 @@ contains
       end do
 
       nlocal = owner_nblk0(owner_id+1)
-      allocate(local_glob0(max(1,nlocal)), local_io0(max(1,nlocal)), local_w0(max(1,nlocal)))
+      allocate(local_glob0(max(1,nlocal)), local_io0(max(1,nlocal)))
       local_glob0(:) = 1
       local_io0(:) = 1
-      local_w0(:) = 0d0
       if (nlocal > 0) then
         do p = 1, nocc0
           if (occ_owner0(p) == owner_id) then
             lidx = occ_pos0(p)
             local_glob0(lidx) = p
             local_io0(lidx) = occ_list0(p)
-            local_w0(lidx) = occ_w0(p)
           end if
         end do
       end if
@@ -731,23 +726,6 @@ contains
       owner_id = -1
     end function occ_owner_id
 
-    integer function local_occ_index(nocc0, occ_list0, owner_id, plocal) result(pglob)
-      implicit none
-      integer, intent(in) :: nocc0, occ_list0(nocc0), owner_id, plocal
-      integer :: p, count
-      count = 0
-      pglob = 0
-      do p = 1, nocc0
-        if (occ_owner_id(occ_list0(p)) == owner_id) then
-          count = count + 1
-          if (count == plocal) then
-            pglob = p
-            return
-          end if
-        end if
-      end do
-    end function local_occ_index
-
     integer function local_occ_position(nocc0, occ_list0, io_g, owner_id) result(plocal)
       implicit none
       integer, intent(in) :: nocc0, occ_list0(nocc0), io_g, owner_id
@@ -761,31 +739,6 @@ contains
       end do
       plocal = 0
     end function local_occ_position
-
-    real(8) function local_occ_weight(nocc0, occ_list0, occ_w0, owner_id, plocal) result(w)
-      implicit none
-      integer, intent(in) :: nocc0, occ_list0(nocc0), owner_id, plocal
-      real(8), intent(in) :: occ_w0(nocc0)
-      integer :: pglob
-      pglob = local_occ_index(nocc0, occ_list0, owner_id, plocal)
-      if (pglob > 0) then
-        w = occ_w0(pglob)
-      else
-        w = 0d0
-      end if
-    end function local_occ_weight
-
-    integer function local_occ_global_io(nocc0, occ_list0, owner_id, plocal) result(io_g)
-      implicit none
-      integer, intent(in) :: nocc0, occ_list0(nocc0), owner_id, plocal
-      integer :: pglob
-      pglob = local_occ_index(nocc0, occ_list0, owner_id, plocal)
-      if (pglob > 0) then
-        io_g = occ_list0(pglob)
-      else
-        io_g = 1
-      end if
-    end function local_occ_global_io
 
     subroutine get_owner_occ_block(nocc0, occ_list0, owner_id, blk_s, blk_e, nblk)
       implicit none
