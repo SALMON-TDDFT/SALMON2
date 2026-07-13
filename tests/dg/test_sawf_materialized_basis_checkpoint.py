@@ -131,3 +131,6 @@ assert "sawf neighbor gauge stitching failed" in generator
 closure = generator.index("call validate_sawf_materialized_neighbor_closure", rewrite)
 assert rewrite < closure
 assert "sawf all-neighbor gauge closure failed" in generator
+reduction = generator.index("call comm_get_max(sawf_gauge_residual_local", closure)
+assert closure < reduction
+assert "[dc-lcfo-sawf-gauge-summary]" in generator

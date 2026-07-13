@@ -6668,7 +6668,8 @@ contains
       real(8),allocatable::sawf_local_coefficients(:,:)
       real(8),allocatable :: sawf_local_centers(:,:),sawf_local_spreads(:)
       real(8) :: representation_residual
-      real(8)::sawf_gauge_closure_residual,sawf_gauge_alignment_residual,sawf_gauge_closure_max
+      real(8)::sawf_gauge_closure_residual,sawf_gauge_alignment_residual
+      real(8)::sawf_gauge_residual_local(2),sawf_gauge_residual_global(2)
       type(t_sawf_projection_channel), allocatable :: channels(:)
       type(t_sawf_symop), allocatable :: symmetry_operations(:)
       type(t_sawf_dmn_writer) :: writer
@@ -7375,7 +7376,7 @@ contains
           end if
           call comm_sync_all(dc%icomm_tot)
         end do
-        sawf_gauge_closure_max=0d0
+        sawf_gauge_residual_local=0d0;sawf_gauge_residual_global=0d0
         do ifrag=2,dc%n_frag
           if(dc%id_frag==0.and.dc%i_frag==ifrag)then
             representative=sawf_environment_receipts(ifrag)%representative_fragment
@@ -7412,10 +7413,15 @@ contains
                   ' alignment=',sawf_gauge_alignment_residual
                 call lcfo_sawf_fatal('SAWF all-neighbor gauge closure failed: '//trim(message))
               end if
-              sawf_gauge_closure_max=max(sawf_gauge_closure_max,sawf_gauge_closure_residual)
+              sawf_gauge_residual_local(1)=max(sawf_gauge_residual_local(1),sawf_gauge_closure_residual)
+              sawf_gauge_residual_local(2)=max(sawf_gauge_residual_local(2),sawf_gauge_alignment_residual)
             end do
           end if
         end do
+        call comm_get_max(sawf_gauge_residual_local,sawf_gauge_residual_global,2,dc%icomm_tot)
+        if(dc%id_tot==0)write(*,'(1x,a,2(a,es13.5))')'[DC-LCFO-SAWF-GAUGE-SUMMARY]', &
+          ' closure_max=',sawf_gauge_residual_global(1), &
+          ' alignment_max=',sawf_gauge_residual_global(2)
       end if
 
       failure=0
