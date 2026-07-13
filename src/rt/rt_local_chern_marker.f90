@@ -82,7 +82,7 @@ contains
     complex(8), allocatable :: s1_row(:,:), s2_row(:,:), s1_row_sum(:,:), s2_row_sum(:,:)
     complex(8), allocatable :: g12_row(:,:), g12_row_sum(:,:)
     complex(8) :: phase1, phase2, zterm12, zterm21
-    real(8) :: eps_occ, rvec(3)
+    real(8) :: eps_occ, rvec(3), electron_multiplicity
     real(8) :: t_s12_copy, t_s12_pack, t_s12_gemm, t_s12_accum, t0, t1
     real(8) :: t_inv_s1, t_inv_s2, t_zt12
     real(8) :: b1(3), b2(3)
@@ -107,6 +107,12 @@ contains
       do ispin = 1, system%nspin
         do im = info%im_s, info%im_e
 
+          if (system%nspin == 1) then
+            electron_multiplicity = 2.0d0
+          else
+            electron_multiplicity = 1.0d0
+          end if
+
           nocc = 0
           do io = 1, system%no
             if (system%rocc(io, ik, ispin) > eps_occ) nocc = nocc + 1
@@ -123,6 +129,8 @@ contains
             end if
           end do
 
+          call validate_sharp_occupation_contract(ik, ispin, nocc, occ_idx, occ_w, electron_multiplicity)
+
           call build_occ_distribution_cache(nocc, occ_idx, occ_w, info%id_o, occ_owner, occ_pos_owner, &
             local_occ_glob, local_occ_io, local_occ_w, owner_blk_s, owner_blk_e, owner_nblk, nocc_local)
           allocate(zocc(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), max(1,nocc_local)))
@@ -132,9 +140,6 @@ contains
           marker_sum(:,:,:) = 0d0
           nloc = size(marker_local,1) * size(marker_local,2) * size(marker_local,3)
           call copy_occupied_to_temp(ik, ispin, im, nocc, occ_idx, nocc_local, zocc)
-          do p = 1, nocc_local
-            zocc(:,:,:,p) = sqrt(max(0.0d0, local_occ_w(p))) * zocc(:,:,:,p)
-          end do
           call lowdin_orthonormalize_occupied(nocc, zocc, eps_ortho)
 
           allocate(zt1(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), max(1,nocc_local)))
@@ -399,7 +404,8 @@ contains
                       zterm12 = zterm12 + w12(ig,jloc) * phase1
                       zterm21 = zterm21 + w21(ig,jloc) * phase1
                     end do
-                    marker_local(ix,iy,iz) = marker_local(ix,iy,iz) - aimag(zterm12 - zterm21) * system%wtk(ik) / (2.0d0*pi)
+                    marker_local(ix,iy,iz) = marker_local(ix,iy,iz) - aimag(zterm12 - zterm21) * &
+                      system%wtk(ik) * electron_multiplicity / (2.0d0*pi)
                   end do
                 end do
               end do
@@ -427,6 +433,24 @@ contains
     end if
 
   contains
+
+    subroutine validate_sharp_occupation_contract(ik0, ispin0, nocc0, occ_list, occ_values, expected_occ)
+      implicit none
+      integer, intent(in) :: ik0, ispin0, nocc0
+      integer, intent(in) :: occ_list(nocc0)
+      real(8), intent(in) :: occ_values(nocc0), expected_occ
+      integer :: p0
+      real(8), parameter :: occupation_tol = 1.0d-10
+
+      do p0 = 1, nocc0
+        if (abs(occ_values(p0) - expected_occ) > occupation_tol) then
+          write(*,'(a,4(a,i0),2(a,es24.16))') 'LCM unsupported fractional occupation:', &
+            ' orbital=', occ_list(p0), ' k=', ik0, ' spin=', ispin0, ' rank_o=', info%id_o, &
+            ' occupation=', occ_values(p0), ' expected=', expected_occ
+          stop 'LCM requires sharp all-electron occupations'
+        end if
+      end do
+    end subroutine validate_sharp_occupation_contract
 
     subroutine copy_occupied_to_temp(ik0, ispin0, im0, nocc0, occ_list, nocc_local_in, zbuf)
       implicit none
@@ -864,10 +888,22 @@ contains
       character(*), intent(in) :: label
       complex(8), allocatable :: amat(:,:), row_blk(:,:)
       integer :: owner_id, blk_s, blk_e, nblk
+      logical :: inversion_ok
+      real(8) :: rcond_root
 
+      inversion_ok = .false.
+      rcond_root = 0.0d0
       call assemble_owner_row_matrix_rooted(nocc0, occ_list0, row_local, amat)
       if (info%id_o == 0) then
-        call build_transposed_inverse_coefficients_checked(amat, label)
+        call build_transposed_inverse_coefficients_checked(amat, label, inversion_ok, rcond_root)
+      end if
+      call comm_bcast(inversion_ok, info%icomm_o, 0)
+      call comm_bcast(rcond_root, info%icomm_o, 0)
+      if (.not. inversion_ok) then
+        if (info%id_o == 0) then
+          write(*,'(3a,es12.4)') 'LCM ', trim(label), ' inverse rejected: rcond=', rcond_root
+        end if
+        stop 'LCM dual overlap is ill-conditioned'
       end if
 
       do owner_id = 0, info%isize_o - 1
@@ -885,10 +921,12 @@ contains
     end subroutine build_transposed_inverse_coefficients_rowwise_checked
 
 
-    subroutine build_transposed_inverse_coefficients_checked(a, label)
+    subroutine build_transposed_inverse_coefficients_checked(a, label, inversion_ok, rcond_out)
       implicit none
       complex(8), intent(inout) :: a(:,:)
       character(*), intent(in) :: label
+      logical, intent(out) :: inversion_ok
+      real(8), intent(out) :: rcond_out
       integer :: n, nrhs, lwork, info_inv
       integer, allocatable :: ipiv(:)
       complex(8), allocatable :: work(:)
@@ -899,8 +937,14 @@ contains
       real(8) :: zlange
       integer :: i
 
+      inversion_ok = .false.
+      rcond_out = 0.0d0
       n = size(a,1)
-      if (n <= 0) return
+      if (n <= 0) then
+        inversion_ok = .true.
+        rcond_out = 1.0d0
+        return
+      end if
 
       nrhs = n
       lwork = max(1, n*max(n,64))
@@ -911,17 +955,23 @@ contains
       call zgetrf(n, n, a_lu, n, ipiv, info_inv)
       if (info_inv /= 0) then
         write(*,'(a,1x,a,1x,a,i0)') 'build_transposed_inverse_coefficients_checked:', trim(label), 'zgetrf info=', info_inv
-        stop 'build_transposed_inverse_coefficients_checked: LU factorization failed'
+        deallocate(rhs, a_lu, rwork, ipiv, work)
+        return
       end if
 
       call zgecon('1', n, a_lu, n, anorm, rcond, work, rwork, info_inv)
       if (info_inv /= 0) then
         write(*,'(a,1x,a,1x,a,i0)') 'build_transposed_inverse_coefficients_checked:', trim(label), 'zgecon info=', info_inv
-        stop 'build_transposed_inverse_coefficients_checked: condition estimate failed'
+        deallocate(rhs, a_lu, rwork, ipiv, work)
+        return
       end if
+      rcond_out = rcond
       if (rcond < rcond_warn) then
         write(*,'(a,1x,a,1x,a,es12.4,1x,a,es12.4)') 'build_transposed_inverse_coefficients_checked:', trim(label), &
           'ill-conditioned matrix: rcond=', rcond, 'anorm=', anorm
+        inversion_ok = .false.
+        deallocate(rhs, a_lu, rwork, ipiv, work)
+        return
       end if
 
       rhs(:,:) = (0.0d0, 0.0d0)
@@ -932,10 +982,12 @@ contains
       call zgetrs('T', n, nrhs, a_lu, n, ipiv, rhs, n, info_inv)
       if (info_inv /= 0) then
         write(*,'(a,1x,a,1x,a,i0)') 'build_transposed_inverse_coefficients_checked:', trim(label), 'zgetrs info=', info_inv
-        stop 'build_transposed_inverse_coefficients_checked: linear solve failed'
+        deallocate(rhs, a_lu, rwork, ipiv, work)
+        return
       end if
 
       a(:,:) = rhs(:,:)
+      inversion_ok = .true.
 
       deallocate(rhs, a_lu, rwork, ipiv, work)
     end subroutine build_transposed_inverse_coefficients_checked

@@ -105,8 +105,10 @@
 - `local_chern_marker_zint`
 
 実装上の性格:
-- occupied subspace を sharp occupation で作って Löwdin 直交化している
-- 金属や smeared occupation 向きではない
+- occupied subspace を重みなしの sharp occupation projector として作り、Löwdin 直交化している
+- 出力は全電子 LCM であり、非 SOI の `nspin=1` は電子多重度 2、明示 spin/SOI は各チャネル 1 を数える
+- fractional/smeared occupation は未対応で、LCM 計算開始時に停止する
+- dual overlap `S1/S2` の `rcond < 1e-10`、LU 分解、condition estimate、solve の失敗は全軌道 rank で停止する
 - online RT 中の LCM は重い
 
 現状の性能支配:
