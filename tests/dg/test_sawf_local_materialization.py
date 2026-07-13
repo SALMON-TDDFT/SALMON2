@@ -9,9 +9,11 @@ if not FC:
 
 driver = r'''program check_materialize
   use lcfo_wannier_sawf_templates, only: materialize_sawf_local_bases, &
-    build_sawf_environment_orbits, select_sawf_environment_materialization
+    build_sawf_environment_orbits, select_sawf_environment_materialization, &
+    t_sawf_ragged_local_basis,materialize_sawf_ragged_local_basis
   implicit none
   complex(8) :: reps(4,2,2),dw(2,2,2),local(4,2,3)
+  complex(8)::buffer_rep(8,2)
   integer :: rep_index(3),op_index(3),point_map(4,2)
   logical :: independent(3),ok
   logical :: equivalent(3,3),defect(3),regenerate(3)
@@ -19,7 +21,9 @@ driver = r'''program check_materialize
   integer :: fragment_maps(3,2),representative_fragment(3),materialize_operation(3)
   logical :: generate_independently(3)
   character(256) :: msg
+  type(t_sawf_ragged_local_basis)::ragged
   reps=(0d0,0d0); reps(1,1,1)=1; reps(2,2,1)=1
+  buffer_rep=0d0;buffer_rep(1:4,:)=reps(:,:,1);buffer_rep(5:8,:)=reps(:,:,1)
   reps(3,1,2)=1; reps(4,2,2)=1
   dw=(0d0,0d0); dw(1,1,1)=1; dw(2,2,1)=1
   dw(1,2,2)=1; dw(2,1,2)=1
@@ -46,6 +50,11 @@ driver = r'''program check_materialize
   call require(all(representative_fragment==[1,1,3]),'orbit representatives')
   call require(all(materialize_operation==[1,2,1]),'actual-group operations')
   call require(all(generate_independently.eqv.[.true.,.false.,.true.]),'independent environments')
+  call materialize_sawf_ragged_local_basis(reps(:,:,1),buffer_rep, &
+    [3,4,1,2],[5,6,7,8,1,2,3,4],dw(:,:,2),1,2,.false.,ragged,ok,msg)
+  call require(ok,'ragged materialization: '//trim(msg))
+  call require(all(shape(ragged%core)==[4,2]).and.all(shape(ragged%buffer)==[8,2]), &
+    'ragged core/buffer shapes')
   write(*,'(a)') 'PASS representative and defect-local SAWF materialization'
 contains
   subroutine require(c,t)

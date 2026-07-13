@@ -11,6 +11,12 @@ module lcfo_wannier_sawf_templates
     integer :: schema_version=sawf_template_schema_version
   end type
 
+  type,public::t_sawf_ragged_local_basis
+    integer::representative_fragment=0,operation_index=0
+    logical::generated_independently=.false.
+    complex(8),allocatable::core(:,:),buffer(:,:)
+  end type t_sawf_ragged_local_basis
+
   type, public :: t_sawf_template_checkpoint
     type(t_sawf_template_fingerprint) :: fingerprint
     real(8), allocatable :: centers(:,:),spreads(:)
@@ -39,8 +45,58 @@ module lcfo_wannier_sawf_templates
   public :: build_sawf_file_content_digest
   public :: measure_sawf_vacuum_occupancy
   public :: sawf_closest_periodic_cartesian
+  public :: materialize_sawf_ragged_local_basis
 
 contains
+  subroutine materialize_sawf_ragged_local_basis(representative_core,representative_buffer, &
+      core_map,buffer_map,d_wann,representative_fragment,operation_index,generated_independently, &
+      local_basis,ok,message)
+    complex(8),intent(in)::representative_core(:,:),representative_buffer(:,:),d_wann(:,:)
+    integer,intent(in)::core_map(:),buffer_map(:),representative_fragment,operation_index
+    logical,intent(in)::generated_independently
+    type(t_sawf_ragged_local_basis),intent(inout)::local_basis
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    logical,allocatable::seen(:)
+    integer::source,target
+    if(allocated(local_basis%core))deallocate(local_basis%core)
+    if(allocated(local_basis%buffer))deallocate(local_basis%buffer)
+    ok=.false.;message=''
+    if(size(representative_core,1)<=0.or.size(representative_core,2)<=0.or. &
+        size(representative_buffer,1)<=0.or.size(representative_buffer,2)/=size(representative_core,2).or. &
+        size(core_map)/=size(representative_core,1).or.size(buffer_map)/=size(representative_buffer,1).or. &
+        size(d_wann,1)/=size(representative_core,2).or.size(d_wann,2)/=size(representative_core,2).or. &
+        representative_fragment<=0.or.operation_index<=0)then
+      message='SAWF ragged local materialization dimensions or provenance are invalid';return
+    end if
+    allocate(local_basis%core(size(representative_core,1),size(representative_core,2)), &
+      local_basis%buffer(size(representative_buffer,1),size(representative_buffer,2)))
+    if(generated_independently)then
+      local_basis%core=representative_core;local_basis%buffer=representative_buffer
+    else
+      allocate(seen(size(core_map)));seen=.false.;local_basis%core=(0d0,0d0)
+      do source=1,size(core_map)
+        target=core_map(source)
+        if(target<1.or.target>size(core_map).or.seen(target))then
+          message='SAWF ragged core grid map is not a permutation';return
+        end if
+        seen(target)=.true.;local_basis%core(target,:)=matmul(representative_core(source,:),d_wann)
+      end do
+      deallocate(seen);allocate(seen(size(buffer_map)));seen=.false.;local_basis%buffer=(0d0,0d0)
+      do source=1,size(buffer_map)
+        target=buffer_map(source)
+        if(target<1.or.target>size(buffer_map).or.seen(target))then
+          message='SAWF ragged buffer grid map is not a permutation';return
+        end if
+        seen(target)=.true.;local_basis%buffer(target,:)=matmul(representative_buffer(source,:),d_wann)
+      end do
+    end if
+    local_basis%representative_fragment=representative_fragment
+    local_basis%operation_index=operation_index
+    local_basis%generated_independently=generated_independently
+    ok=.true.
+  end subroutine materialize_sawf_ragged_local_basis
+
   subroutine measure_sawf_vacuum_occupancy(density,threshold,fraction,ok,message)
     real(8),intent(in)::density(:),threshold;real(8),intent(out)::fraction
     logical,intent(out)::ok;character(*),intent(out)::message
