@@ -50,6 +50,8 @@ module lcfo_flux
     materialize_sawf_ragged_local_basis,write_sawf_materialized_basis_checkpoint, &
     read_sawf_materialized_basis_checkpoint,build_sawf_shared_buffer_point_maps, &
     stitch_sawf_materialized_neighbor_pair,build_sawf_fragment_gauge_tree
+  use lcfo_wannier_sawf_templates, only: validate_sawf_materialized_neighbor_closure, &
+    sawf_fragments_share_face
   use lcfo_wannier_sawf_orchestrator, only: t_sawf_environment_receipt,t_sawf_seed_bundle, &
     build_sawf_environment_execution_plan,build_sawf_seed_bundles,select_sawf_environment_stabilizer, &
     complete_sawf_seed_bundle,propagate_sawf_representative_receipts,validate_sawf_environment_receipts
@@ -6666,6 +6668,7 @@ contains
       real(8),allocatable::sawf_local_coefficients(:,:)
       real(8),allocatable :: sawf_local_centers(:,:),sawf_local_spreads(:)
       real(8) :: representation_residual
+      real(8)::sawf_gauge_closure_residual,sawf_gauge_alignment_residual,sawf_gauge_closure_max
       type(t_sawf_projection_channel), allocatable :: channels(:)
       type(t_sawf_symop), allocatable :: symmetry_operations(:)
       type(t_sawf_dmn_writer) :: writer
@@ -7371,6 +7374,47 @@ contains
             if(.not.local_ok)call lcfo_sawf_fatal('SAWF stitched local basis publication failed: '//trim(message))
           end if
           call comm_sync_all(dc%icomm_tot)
+        end do
+        sawf_gauge_closure_max=0d0
+        do ifrag=2,dc%n_frag
+          if(dc%id_frag==0.and.dc%i_frag==ifrag)then
+            representative=sawf_environment_receipts(ifrag)%representative_fragment
+            ibundle=findloc(sawf_seed_bundles%environment,representative,dim=1)
+            if(ibundle<=0)call lcfo_sawf_fatal('SAWF gauge-closure child bundle lookup failed')
+            write(local_basis_filename,'(a,"/fragment-",i0,".sawf-local-basis")') &
+              trim(sawf_seed_bundles(ibundle)%directory),ifrag
+            call read_sawf_materialized_basis_checkpoint(trim(local_basis_filename), &
+              sawf_supercell_fingerprint,ifrag,sawf_materialized_basis,sawf_template_reuse,local_ok,message)
+            if(.not.local_ok.or..not.sawf_template_reuse)call lcfo_sawf_fatal( &
+              'SAWF gauge-closure child checkpoint validation failed: '//trim(message))
+            do parent_fragment=1,ifrag-1
+              if(.not.sawf_fragments_share_face(mesh,fragment_origin(:,parent_fragment), &
+                  fragment_shape(:,parent_fragment),fragment_origin(:,ifrag),fragment_shape(:,ifrag)))cycle
+              parent_representative=sawf_environment_receipts(parent_fragment)%representative_fragment
+              ibundle=findloc(sawf_seed_bundles%environment,parent_representative,dim=1)
+              if(ibundle<=0)call lcfo_sawf_fatal('SAWF gauge-closure parent bundle lookup failed')
+              write(parent_basis_filename,'(a,"/fragment-",i0,".sawf-local-basis")') &
+                trim(sawf_seed_bundles(ibundle)%directory),parent_fragment
+              call read_sawf_materialized_basis_checkpoint(trim(parent_basis_filename), &
+                sawf_supercell_fingerprint,parent_fragment,sawf_parent_basis,sawf_template_reuse,local_ok,message)
+              if(.not.local_ok.or..not.sawf_template_reuse)call lcfo_sawf_fatal( &
+                'SAWF gauge-closure parent checkpoint validation failed: '//trim(message))
+              call build_sawf_shared_buffer_point_maps(mesh,fragment_origin(:,parent_fragment), &
+                fragment_shape(:,parent_fragment),fragment_origin(:,ifrag),fragment_shape(:,ifrag), &
+                dc%nxyz_buffer,sawf_parent_shared_map,sawf_child_shared_map,local_ok,message)
+              if(.not.local_ok)call lcfo_sawf_fatal('SAWF gauge-closure shared map failed: '//trim(message))
+              call validate_sawf_materialized_neighbor_closure(sawf_parent_basis,sawf_materialized_basis, &
+                sawf_parent_shared_map,sawf_child_shared_map,hvol,1d-12,wannier_sawf_gauge_tolerance, &
+                sawf_gauge_closure_residual,sawf_gauge_alignment_residual,local_ok,message)
+              if(.not.local_ok)then
+                write(*,'(1x,a,i0,a,i0,2(a,es13.5))')'[DC-LCFO-SAWF-GAUGE-CLOSURE] left=', &
+                  parent_fragment,' right=',ifrag,' closure=',sawf_gauge_closure_residual, &
+                  ' alignment=',sawf_gauge_alignment_residual
+                call lcfo_sawf_fatal('SAWF all-neighbor gauge closure failed: '//trim(message))
+              end if
+              sawf_gauge_closure_max=max(sawf_gauge_closure_max,sawf_gauge_closure_residual)
+            end do
+          end if
         end do
       end if
 

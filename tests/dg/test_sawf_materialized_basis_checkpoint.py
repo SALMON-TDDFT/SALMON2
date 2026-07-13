@@ -14,7 +14,8 @@ driver = r'''program check_materialized_checkpoint
   use lcfo_wannier_sawf_templates, only: t_sawf_ragged_local_basis, &
     write_sawf_materialized_basis_checkpoint, read_sawf_materialized_basis_checkpoint, &
     stitch_sawf_materialized_neighbor_pair,build_sawf_shared_buffer_point_maps
-  use lcfo_wannier_sawf_templates, only: build_sawf_fragment_gauge_tree
+  use lcfo_wannier_sawf_templates, only: build_sawf_fragment_gauge_tree, &
+    validate_sawf_materialized_neighbor_closure
   implicit none
   type(t_sawf_ragged_local_basis) :: source, loaded
   logical :: ok, reusable
@@ -24,7 +25,7 @@ driver = r'''program check_materialized_checkpoint
   integer :: origins(3,4),shapes(3,4),parents(4)
   type(t_sawf_ragged_local_basis) :: left, right
   complex(8) :: q(2,2), right_before(3,2)
-  real(8) :: c,s
+  real(8) :: c,s,closure_residual,alignment_residual
   allocate(source%core(3,2), source%buffer(5,2), source%gauge_unitary(2,2))
   source%representative_fragment=2; source%operation_index=3
   source%generated_independently=.true.; source%gauge_residual=2d-12
@@ -52,10 +53,17 @@ driver = r'''program check_materialized_checkpoint
   right%gauge_unitary=left%gauge_unitary
   right%gauge_residual=0d0
   shared_left=[1,2];shared_right=[1,2]
+  call validate_sawf_materialized_neighbor_closure(left,right,shared_left,shared_right, &
+    1d0,1d-12,1d-10,closure_residual,alignment_residual,ok,message)
+  call req(.not.ok.and.closure_residual>1d-3.and.alignment_residual<1d-12, &
+    'nontrivial loop gauge rejected despite good alignment')
   call stitch_sawf_materialized_neighbor_pair(left,right,shared_left,shared_right, &
     1d0,1d-12,1d-10,ok,message)
   call req(ok.and.right%gauge_residual<1d-12,'materialized pair stitch')
   call req(maxval(abs(right%core-left%core))<1d-12,'right core aligned')
+  call validate_sawf_materialized_neighbor_closure(left,right,shared_left,shared_right, &
+    1d0,1d-12,1d-10,closure_residual,alignment_residual,ok,message)
+  call req(ok.and.closure_residual<1d-12,'aligned loop gauge closure')
   right_before=right%core;right%buffer(:,2)=right%buffer(:,1)
   call stitch_sawf_materialized_neighbor_pair(left,right,shared_left,shared_right, &
     1d0,1d-12,1d-10,ok,message)
@@ -120,3 +128,6 @@ stitch = generator.index("call stitch_sawf_materialized_neighbor_pair", shared_m
 rewrite = generator.index("call write_sawf_materialized_basis_checkpoint", stitch)
 assert tree < read_parent < shared_map < stitch < rewrite
 assert "sawf neighbor gauge stitching failed" in generator
+closure = generator.index("call validate_sawf_materialized_neighbor_closure", rewrite)
+assert rewrite < closure
+assert "sawf all-neighbor gauge closure failed" in generator

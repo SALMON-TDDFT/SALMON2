@@ -62,13 +62,54 @@ module lcfo_wannier_sawf_templates
   public :: write_sawf_materialized_basis_checkpoint
   public :: read_sawf_materialized_basis_checkpoint
   public :: stitch_sawf_materialized_neighbor_pair
+  public :: validate_sawf_materialized_neighbor_closure
   public :: build_sawf_shared_buffer_point_maps
   public :: build_sawf_fragment_gauge_tree
+  public :: sawf_fragments_share_face
   public :: write_sawf_acceptance_checkpoint,read_sawf_acceptance_checkpoint
   public :: validate_sawf_acceptance_checkpoint
   public :: admit_sawf_hierarchical_basis
 
 contains
+  subroutine validate_sawf_materialized_neighbor_closure(left_basis,right_basis,left_shared_points, &
+      right_shared_points,grid_weight,relative_cutoff,tolerance,closure_residual, &
+      alignment_residual,ok,message)
+    type(t_sawf_ragged_local_basis),intent(in)::left_basis,right_basis
+    integer,intent(in)::left_shared_points(:),right_shared_points(:)
+    real(8),intent(in)::grid_weight,relative_cutoff,tolerance
+    real(8),intent(out)::closure_residual,alignment_residual
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(8),allocatable::cross_overlap(:,:),left_gram(:,:),right_gram(:,:),gauge(:,:)
+    integer::n,i
+    ok=.false.;message='';closure_residual=huge(0d0);alignment_residual=huge(0d0)
+    if(.not.allocated(left_basis%buffer).or..not.allocated(right_basis%buffer).or. &
+        grid_weight<=0d0.or.size(left_shared_points)<=0.or. &
+        size(left_shared_points)/=size(right_shared_points).or. &
+        size(left_basis%buffer,2)/=size(right_basis%buffer,2))then
+      message='SAWF neighbor closure dimensions or grid weight are ambiguous';return
+    end if
+    n=size(left_basis%buffer,2)
+    if(n<=0.or.any(left_shared_points<1).or.any(left_shared_points>size(left_basis%buffer,1)).or. &
+        any(right_shared_points<1).or.any(right_shared_points>size(right_basis%buffer,1)))then
+      message='SAWF neighbor closure shared-point map is invalid';return
+    end if
+    allocate(cross_overlap(n,n),left_gram(n,n),right_gram(n,n),gauge(n,n))
+    left_gram=grid_weight*matmul(conjg(transpose(left_basis%buffer(left_shared_points,:))), &
+      left_basis%buffer(left_shared_points,:))
+    right_gram=grid_weight*matmul(conjg(transpose(right_basis%buffer(right_shared_points,:))), &
+      right_basis%buffer(right_shared_points,:))
+    cross_overlap=grid_weight*matmul(conjg(transpose(left_basis%buffer(left_shared_points,:))), &
+      right_basis%buffer(right_shared_points,:))
+    call stitch_sawf_buffered_neighbor_gauge(cross_overlap,left_gram,right_gram,relative_cutoff, &
+      tolerance,gauge,alignment_residual,ok,message)
+    if(.not.ok)return
+    do i=1,n;gauge(i,i)=gauge(i,i)-(1d0,0d0);end do
+    closure_residual=sqrt(sum(abs(gauge)**2)/dble(n))
+    ok=closure_residual<=tolerance
+    if(.not.ok)message='SAWF neighbor gauge-loop closure residual exceeds tolerance'
+  end subroutine
+
   subroutine admit_sawf_hierarchical_basis(filename,expected_fingerprint,tolerance,checkpoint,ok,message)
     character(*),intent(in)::filename,expected_fingerprint
     real(8),intent(in)::tolerance
