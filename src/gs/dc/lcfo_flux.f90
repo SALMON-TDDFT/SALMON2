@@ -6169,6 +6169,7 @@ contains
         species(ia)=izatom(dc%system_tot%kion(ia))
         fractional_positions(:,ia)=modulo(matmul(lattice_inverse,dc%system_tot%rion(:,ia)),1.0d0)
       end do
+      symmetry_filename='<auto>'
       if(trim(wannier_site_symmetry)=='auto') then
         call load_sawf_symmetry_auto(lattice,fractional_positions,species, &
           wannier_symmetry_tolerance,operations,local_ok,message)
@@ -6181,6 +6182,9 @@ contains
         call load_sawf_symmetry_file(symmetry_filename,lattice,fractional_positions,species, &
           wannier_symmetry_tolerance,operations,local_ok,message)
       end if
+      if(.not.local_ok) write(*,'(1x,a,i0,3(a))') &
+        '[FATAL] SAWF closed-seed symmetry load rank=',dc%id_tot, &
+        ' source=',trim(symmetry_filename),' reason='//trim(message)
       failure=merge(0,1,local_ok); call comm_get_max(failure,dc%icomm_tot)
       if(failure/=0) call lcfo_sawf_fatal('SAWF closed-seed symmetry loading failed')
       call put_sawf_identity_first(operations,wannier_symmetry_tolerance,local_ok,message)
