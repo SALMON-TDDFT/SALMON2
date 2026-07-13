@@ -4965,7 +4965,7 @@ contains
       integer :: nxyz_box(3), nxyz_buffer_seed(3)
       integer :: lb_rwf(3), ub_rwf(3), io_lb, io_ub
       integer :: ibasis, raw_io, ibx, iby, ibz, sx, sy, sz
-      character(256) :: filename
+      character(1024) :: filename
       real(8) :: coef_val
       real(8), allocatable :: phi_box_local(:,:,:), phi_box_sum(:,:,:)
 
@@ -6651,7 +6651,9 @@ contains
       complex(8),allocatable :: sawf_local_d_wann(:,:,:)
       complex(8),allocatable :: sawf_local_d_band(:,:,:),sawf_local_states(:,:)
       complex(8),allocatable :: sawf_local_amn(:,:)
+      complex(8),allocatable :: sawf_local_v_matrix(:,:),sawf_representative_orbitals(:,:)
       real(8),allocatable :: sawf_local_energy(:)
+      real(8),allocatable :: sawf_local_centers(:,:),sawf_local_spreads(:)
       real(8) :: representation_residual
       type(t_sawf_projection_channel), allocatable :: channels(:)
       type(t_sawf_symop), allocatable :: symmetry_operations(:)
@@ -6664,10 +6666,12 @@ contains
       logical :: local_ok,grid_map_ok,fragment_map_ok,center_available,split_fragment_global_mode
       logical, allocatable :: sawf_environment_equivalent(:,:),sawf_defect_intersects(:), &
         sawf_regenerate_environment(:),sawf_generate_independently(:),sawf_inside_atom(:)
-      integer :: max_targets_per_source,local_left,local_right,local_relation,global_relation
+      integer :: max_targets_per_source,local_left,local_right,local_relation,global_relation, &
+        num_bands_chk,num_wann_chk
       character(512) :: message
       character(256) :: symmetry_filename,allocation_message,dmn_filename,amn_filename, &
         sawf_supercell_fingerprint
+      character(512)::local_chk_filename
 
       if(trim(wannier_site_symmetry) == 'off') return
       ! The scalable SAWF route is admitted by representation, provenance,
@@ -7205,6 +7209,19 @@ contains
         if(local_ok)call validate_sawf_environment_receipts(sawf_environment_receipts, &
           sawf_supercell_fingerprint,local_ok,message)
         if(.not.local_ok)call lcfo_sawf_fatal('SAWF collective receipt validation failed: '//trim(message))
+        if(dc%id_frag==0.and.sawf_environment_receipts(dc%i_frag)%requires_execution)then
+          ibundle=findloc(sawf_seed_bundles%environment,dc%i_frag,dim=1)
+          local_chk_filename=trim(sawf_seed_bundles(ibundle)%directory)//'/'// &
+            trim(sawf_seed_bundles(ibundle)%seedname)//'.chk'
+          call read_wannier90_checkpoint_transform(num_bands_chk,num_wann_chk,sawf_local_v_matrix, &
+            sawf_local_centers,sawf_local_spreads,local_chk_filename)
+          if(num_bands_chk/=sawf_environment_receipts(dc%i_frag)%num_bands.or. &
+              num_wann_chk/=sawf_environment_receipts(dc%i_frag)%num_wann.or. &
+              size(sawf_local_states,2)/=num_bands_chk)call lcfo_sawf_fatal( &
+            'SAWF local checkpoint dimensions disagree with validated receipt/eigensystem')
+          allocate(sawf_representative_orbitals(size(sawf_local_states,1),num_wann_chk))
+          sawf_representative_orbitals=matmul(sawf_local_states,sawf_local_v_matrix)
+        end if
       end if
 
       failure=0
@@ -9046,13 +9063,15 @@ contains
       end if
     end subroutine read_wannier90_global_basis_file_full
 
-    subroutine read_wannier90_checkpoint_transform(num_bands_chk, num_wann_chk, v_matrix, center_aa, spread_aa2)
+    subroutine read_wannier90_checkpoint_transform(num_bands_chk,num_wann_chk,v_matrix,center_aa, &
+        spread_aa2,filename_in)
       use filesystem, only: get_filehandle
       use salmon_global, only: sysname
       implicit none
       integer, intent(out) :: num_bands_chk, num_wann_chk
       complex(8), allocatable, intent(out) :: v_matrix(:,:)
       real(8), allocatable, intent(out) :: center_aa(:,:), spread_aa2(:)
+      character(*),intent(in),optional::filename_in
       integer :: iunit, io, i, j, k, nkp
       integer :: num_exclude_bands_chk, num_kpts_chk, nntot_chk
       integer :: mp_grid_chk(3)
@@ -9062,11 +9081,12 @@ contains
       logical :: have_disentangled_chk
       logical, allocatable :: lwindow(:,:)
       complex(8), allocatable :: u_matrix(:,:,:), u_matrix_opt(:,:,:), m_matrix(:,:,:,:)
-      character(256) :: filename
+      character(1024) :: filename
       character(33) :: header_chk
       character(20) :: checkpoint_chk
 
       filename = trim(dc%base_directory)//trim(sysname)//".chk"
+      if(present(filename_in))filename=trim(filename_in)
       iunit = get_filehandle()
       open(iunit,file=filename,status='old',form='unformatted',iostat=io)
       if(io /= 0) then

@@ -37,6 +37,8 @@ assert "call run_sawf_local_wannier" in flux
 assert "call complete_sawf_seed_bundle" in flux
 assert "call propagate_sawf_representative_receipts" in flux
 assert "call validate_sawf_environment_receipts" in flux
+assert "call read_wannier90_checkpoint_transform" in flux
+assert "local_chk_filename" in flux
 assert flux.index("call write_sawf_representative_local_seed") < flux.index(
     "call run_sawf_local_preprocessing"
 ) < flux.index("call read_sawf_nnkp_neighbors")
