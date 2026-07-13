@@ -12,12 +12,16 @@ if not FC:
 
 driver = r'''program check_materialized_checkpoint
   use lcfo_wannier_sawf_templates, only: t_sawf_ragged_local_basis, &
-    write_sawf_materialized_basis_checkpoint, read_sawf_materialized_basis_checkpoint
+    write_sawf_materialized_basis_checkpoint, read_sawf_materialized_basis_checkpoint, &
+    stitch_sawf_materialized_neighbor_pair
   implicit none
   type(t_sawf_ragged_local_basis) :: source, loaded
   logical :: ok, reusable
   character(256) :: message
-  integer :: i
+  integer :: i, shared_left(2),shared_right(2)
+  type(t_sawf_ragged_local_basis) :: left, right
+  complex(8) :: q(2,2), right_before(3,2)
+  real(8) :: c,s
   allocate(source%core(3,2), source%buffer(5,2), source%gauge_unitary(2,2))
   source%representative_fragment=2; source%operation_index=3
   source%generated_independently=.true.; source%gauge_residual=2d-12
@@ -35,6 +39,24 @@ driver = r'''program check_materialized_checkpoint
   call req(ok.and..not.reusable,'cross-supercell rejection')
   call read_sawf_materialized_basis_checkpoint('basis.chk','same-supercell-A',5,loaded,reusable,ok,message)
   call req(ok.and..not.reusable,'fragment mismatch rejection')
+  allocate(left%core(3,2),left%buffer(3,2),left%gauge_unitary(2,2), &
+    right%core(3,2),right%buffer(3,2),right%gauge_unitary(2,2))
+  left%core=0;left%core(1,1)=1;left%core(2,2)=1;left%buffer=left%core
+  c=cos(.23d0);s=sin(.23d0)
+  q=reshape([cmplx(c,0d0,8),cmplx(s,0d0,8),cmplx(-s,0d0,8),cmplx(c,0d0,8)],[2,2])
+  right%core=matmul(left%core,conjg(transpose(q)));right%buffer=right%core
+  left%gauge_unitary=0;left%gauge_unitary(1,1)=1;left%gauge_unitary(2,2)=1
+  right%gauge_unitary=left%gauge_unitary
+  right%gauge_residual=0d0
+  shared_left=[1,2];shared_right=[1,2]
+  call stitch_sawf_materialized_neighbor_pair(left,right,shared_left,shared_right, &
+    1d0,1d-12,1d-10,ok,message)
+  call req(ok.and.right%gauge_residual<1d-12,'materialized pair stitch')
+  call req(maxval(abs(right%core-left%core))<1d-12,'right core aligned')
+  right_before=right%core;right%buffer(:,2)=right%buffer(:,1)
+  call stitch_sawf_materialized_neighbor_pair(left,right,shared_left,shared_right, &
+    1d0,1d-12,1d-10,ok,message)
+  call req(.not.ok.and.maxval(abs(right%core-right_before))<1d-15,'rank failure atomic')
   write(*,'(a)')'PASS materialized SAWF basis checkpoint'
 contains
   subroutine req(condition,label)

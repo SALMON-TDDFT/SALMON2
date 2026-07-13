@@ -50,8 +50,52 @@ module lcfo_wannier_sawf_templates
   public :: materialize_sawf_ragged_local_basis
   public :: write_sawf_materialized_basis_checkpoint
   public :: read_sawf_materialized_basis_checkpoint
+  public :: stitch_sawf_materialized_neighbor_pair
 
 contains
+  subroutine stitch_sawf_materialized_neighbor_pair(left_basis,right_basis,left_shared_points, &
+      right_shared_points,grid_weight, &
+      relative_cutoff,alignment_tolerance,ok,message)
+    type(t_sawf_ragged_local_basis),intent(in)::left_basis
+    type(t_sawf_ragged_local_basis),intent(inout)::right_basis
+    integer,intent(in)::left_shared_points(:),right_shared_points(:)
+    real(8),intent(in)::grid_weight,relative_cutoff,alignment_tolerance
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(8),allocatable::cross_overlap(:,:),left_gram(:,:),right_gram(:,:),gauge(:,:)
+    real(8)::residual
+    integer::n
+    ok=.false.;message=''
+    if(.not.allocated(left_basis%buffer).or..not.allocated(right_basis%buffer).or. &
+        .not.allocated(right_basis%core).or..not.allocated(right_basis%gauge_unitary).or. &
+        grid_weight<=0d0.or.size(left_shared_points)<=0.or. &
+        size(left_shared_points)/=size(right_shared_points).or. &
+        size(left_basis%buffer,2)/=size(right_basis%buffer,2).or. &
+        size(right_basis%core,2)/=size(right_basis%buffer,2))then
+      message='SAWF materialized neighbor basis dimensions or grid weight are ambiguous';return
+    end if
+    n=size(left_basis%buffer,2)
+    if(n<=0.or.any(shape(right_basis%gauge_unitary)/=[n,n]).or. &
+        any(left_shared_points<1).or.any(left_shared_points>size(left_basis%buffer,1)).or. &
+        any(right_shared_points<1).or.any(right_shared_points>size(right_basis%buffer,1)))then
+      message='SAWF materialized neighbor gauge dimensions are inconsistent';return
+    end if
+    allocate(cross_overlap(n,n),left_gram(n,n),right_gram(n,n),gauge(n,n))
+    left_gram=grid_weight*matmul(conjg(transpose(left_basis%buffer(left_shared_points,:))), &
+      left_basis%buffer(left_shared_points,:))
+    right_gram=grid_weight*matmul(conjg(transpose(right_basis%buffer(right_shared_points,:))), &
+      right_basis%buffer(right_shared_points,:))
+    cross_overlap=grid_weight*matmul(conjg(transpose(left_basis%buffer(left_shared_points,:))), &
+      right_basis%buffer(right_shared_points,:))
+    call stitch_sawf_buffered_neighbor_gauge(cross_overlap,left_gram,right_gram,relative_cutoff, &
+      alignment_tolerance,gauge,residual,ok,message)
+    if(.not.ok)return
+    right_basis%core=matmul(right_basis%core,gauge)
+    right_basis%buffer=matmul(right_basis%buffer,gauge)
+    right_basis%gauge_unitary=matmul(right_basis%gauge_unitary,gauge)
+    right_basis%gauge_residual=max(right_basis%gauge_residual,residual)
+  end subroutine
+
   subroutine write_sawf_materialized_basis_checkpoint(filename,supercell_fingerprint,fragment, &
       basis,ok,message)
     character(*),intent(in)::filename,supercell_fingerprint
