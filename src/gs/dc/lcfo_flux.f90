@@ -47,7 +47,7 @@ module lcfo_flux
   use lcfo_wannier_sawf_templates, only: sawf_closest_periodic_cartesian
   use lcfo_wannier_sawf_templates, only: t_sawf_template_checkpoint,t_sawf_template_fingerprint, &
     write_sawf_template_checkpoint,read_sawf_template_checkpoint,t_sawf_ragged_local_basis, &
-    materialize_sawf_ragged_local_basis
+    materialize_sawf_ragged_local_basis,write_sawf_materialized_basis_checkpoint
   use lcfo_wannier_sawf_orchestrator, only: t_sawf_environment_receipt,t_sawf_seed_bundle, &
     build_sawf_environment_execution_plan,build_sawf_seed_bundles,select_sawf_environment_stabilizer, &
     complete_sawf_seed_bundle,propagate_sawf_representative_receipts,validate_sawf_environment_receipts
@@ -6683,7 +6683,7 @@ contains
       character(512) :: message
       character(256) :: symmetry_filename,allocation_message,dmn_filename,amn_filename, &
         sawf_supercell_fingerprint
-      character(512)::local_chk_filename
+      character(512)::local_chk_filename,local_basis_filename
 
       if(trim(wannier_site_symmetry) == 'off') return
       ! The scalable SAWF route is admitted by representation, provenance,
@@ -7323,7 +7323,16 @@ contains
             representative,materialize_operation,sawf_generate_independently(dc%i_frag), &
             sawf_materialized_basis,local_ok,message)
           if(.not.local_ok)call lcfo_sawf_fatal('SAWF ragged production materialization failed: '//trim(message))
+          write(local_basis_filename,'(a,"/fragment-",i0,".sawf-local-basis")') &
+            trim(sawf_seed_bundles(ibundle)%directory),dc%i_frag
+          call write_sawf_materialized_basis_checkpoint(trim(local_basis_filename), &
+            sawf_supercell_fingerprint,dc%i_frag,sawf_materialized_basis,local_ok,message)
+          if(.not.local_ok)then
+            write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-LOCAL-BASIS] rank=',dc%id_tot,' ',trim(message)
+            call lcfo_sawf_fatal('SAWF local basis publication failed')
+          end if
         end if
+        call comm_sync_all(dc%icomm_tot)
       end if
 
       failure=0

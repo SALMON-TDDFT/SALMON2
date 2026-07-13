@@ -15,6 +15,8 @@ module lcfo_wannier_sawf_templates
     integer::representative_fragment=0,operation_index=0
     logical::generated_independently=.false.
     complex(8),allocatable::core(:,:),buffer(:,:)
+    complex(8),allocatable::gauge_unitary(:,:)
+    real(8)::gauge_residual=huge(0d0)
   end type t_sawf_ragged_local_basis
 
   type, public :: t_sawf_template_checkpoint
@@ -46,8 +48,74 @@ module lcfo_wannier_sawf_templates
   public :: measure_sawf_vacuum_occupancy
   public :: sawf_closest_periodic_cartesian
   public :: materialize_sawf_ragged_local_basis
+  public :: write_sawf_materialized_basis_checkpoint
+  public :: read_sawf_materialized_basis_checkpoint
 
 contains
+  subroutine write_sawf_materialized_basis_checkpoint(filename,supercell_fingerprint,fragment, &
+      basis,ok,message)
+    character(*),intent(in)::filename,supercell_fingerprint
+    integer,intent(in)::fragment
+    type(t_sawf_ragged_local_basis),intent(in)::basis
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    character(32),parameter::magic='SALMON_SAWF_LOCAL_BASIS_V1'
+    character(256)::stored_fingerprint
+    integer::unit,ios,dims(4)
+    ok=.false.;message=''
+    if(fragment<=0.or.len_trim(supercell_fingerprint)==0.or..not.allocated(basis%core).or. &
+        .not.allocated(basis%buffer).or..not.allocated(basis%gauge_unitary))then
+      message='SAWF materialized basis checkpoint input is incomplete';return
+    end if
+    dims=[size(basis%core,1),size(basis%core,2),size(basis%buffer,1),size(basis%buffer,2)]
+    if(dims(2)<=0.or.dims(2)/=dims(4).or.any(shape(basis%gauge_unitary)/=[dims(2),dims(2)]))then
+      message='SAWF materialized basis checkpoint dimensions are inconsistent';return
+    end if
+    open(newunit=unit,file=filename,status='replace',access='stream',form='unformatted',iostat=ios)
+    if(ios/=0)then;message='cannot open SAWF materialized basis checkpoint';return;end if
+    stored_fingerprint=supercell_fingerprint
+    write(unit,iostat=ios)magic,stored_fingerprint,fragment,basis%representative_fragment, &
+      basis%operation_index,basis%generated_independently,dims,basis%gauge_residual, &
+      basis%core,basis%buffer,basis%gauge_unitary
+    close(unit)
+    if(ios/=0)then;message='cannot write SAWF materialized basis checkpoint';return;end if
+    ok=.true.
+  end subroutine
+
+  subroutine read_sawf_materialized_basis_checkpoint(filename,expected_supercell_fingerprint, &
+      expected_fragment,basis,reusable,ok,message)
+    character(*),intent(in)::filename,expected_supercell_fingerprint
+    integer,intent(in)::expected_fragment
+    type(t_sawf_ragged_local_basis),intent(inout)::basis
+    logical,intent(out)::reusable,ok
+    character(*),intent(out)::message
+    character(32),parameter::expected_magic='SALMON_SAWF_LOCAL_BASIS_V1'
+    character(32)::magic
+    character(256)::stored_fingerprint
+    integer::unit,ios,fragment,dims(4)
+    ok=.false.;reusable=.false.;message=''
+    open(newunit=unit,file=filename,status='old',access='stream',form='unformatted',iostat=ios)
+    if(ios/=0)then;message='cannot open SAWF materialized basis checkpoint';return;end if
+    read(unit,iostat=ios)magic,stored_fingerprint,fragment,basis%representative_fragment, &
+      basis%operation_index,basis%generated_independently,dims,basis%gauge_residual
+    if(ios/=0.or.magic/=expected_magic.or.dims(1)<=0.or.dims(2)<=0.or.dims(3)<=0.or. &
+        dims(2)/=dims(4))then
+      close(unit);message='SAWF materialized basis checkpoint header is invalid';return
+    end if
+    if(allocated(basis%core))deallocate(basis%core)
+    if(allocated(basis%buffer))deallocate(basis%buffer)
+    if(allocated(basis%gauge_unitary))deallocate(basis%gauge_unitary)
+    allocate(basis%core(dims(1),dims(2)),basis%buffer(dims(3),dims(4)), &
+      basis%gauge_unitary(dims(2),dims(2)))
+    read(unit,iostat=ios)basis%core,basis%buffer,basis%gauge_unitary
+    close(unit)
+    if(ios/=0)then;message='SAWF materialized basis checkpoint payload is invalid';return;end if
+    ok=.true.
+    reusable=trim(stored_fingerprint)==trim(expected_supercell_fingerprint).and. &
+      fragment==expected_fragment
+    if(.not.reusable)message='SAWF materialized basis checkpoint provenance mismatch'
+  end subroutine
+
   subroutine materialize_sawf_ragged_local_basis(representative_core,representative_buffer, &
       core_map,buffer_map,d_wann,representative_fragment,operation_index,generated_independently, &
       local_basis,ok,message)
@@ -61,6 +129,7 @@ contains
     integer::source,target
     if(allocated(local_basis%core))deallocate(local_basis%core)
     if(allocated(local_basis%buffer))deallocate(local_basis%buffer)
+    if(allocated(local_basis%gauge_unitary))deallocate(local_basis%gauge_unitary)
     ok=.false.;message=''
     if(size(representative_core,1)<=0.or.size(representative_core,2)<=0.or. &
         size(representative_buffer,1)<=0.or.size(representative_buffer,2)/=size(representative_core,2).or. &
@@ -94,6 +163,10 @@ contains
     local_basis%representative_fragment=representative_fragment
     local_basis%operation_index=operation_index
     local_basis%generated_independently=generated_independently
+    allocate(local_basis%gauge_unitary(size(d_wann,1),size(d_wann,2)))
+    local_basis%gauge_unitary=(0d0,0d0)
+    do source=1,size(d_wann,1);local_basis%gauge_unitary(source,source)=(1d0,0d0);end do
+    local_basis%gauge_residual=0d0
     ok=.true.
   end subroutine materialize_sawf_ragged_local_basis
 
