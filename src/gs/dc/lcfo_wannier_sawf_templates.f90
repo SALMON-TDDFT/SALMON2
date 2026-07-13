@@ -52,8 +52,63 @@ module lcfo_wannier_sawf_templates
   public :: read_sawf_materialized_basis_checkpoint
   public :: stitch_sawf_materialized_neighbor_pair
   public :: build_sawf_shared_buffer_point_maps
+  public :: build_sawf_fragment_gauge_tree
 
 contains
+  subroutine build_sawf_fragment_gauge_tree(global_mesh,fragment_origin,fragment_shape,parent,ok,message)
+    integer,intent(in)::global_mesh(3),fragment_origin(:,:),fragment_shape(:,:)
+    integer,intent(out)::parent(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::fragment,candidate
+    ok=.false.;message='';parent=0
+    if(any(global_mesh<=0).or.size(fragment_origin,1)/=3.or. &
+        any(shape(fragment_shape)/=shape(fragment_origin)).or. &
+        size(parent)/=size(fragment_origin,2).or.size(parent)<=0.or. &
+        any(fragment_origin<0).or.any(fragment_shape<=0))then
+      message='SAWF fragment gauge tree geometry is invalid';return
+    end if
+    do fragment=1,size(parent)
+      if(any(fragment_origin(:,fragment)+fragment_shape(:,fragment)>global_mesh))then
+        message='SAWF fragment gauge tree extends outside the supercell mesh';return
+      end if
+    end do
+    do fragment=2,size(parent)
+      do candidate=1,fragment-1
+        if(sawf_fragments_share_face(global_mesh,fragment_origin(:,candidate), &
+            fragment_shape(:,candidate),fragment_origin(:,fragment),fragment_shape(:,fragment))) &
+          parent(fragment)=candidate
+      end do
+      if(parent(fragment)==0)then
+        write(message,'(a,i0)')'SAWF fragment gauge graph is disconnected at fragment ',fragment
+        return
+      end if
+    end do
+    ok=.true.
+  end subroutine
+
+  logical function sawf_fragments_share_face(global_mesh,left_origin,left_shape,right_origin,right_shape)
+    integer,intent(in)::global_mesh(3),left_origin(3),left_shape(3),right_origin(3),right_shape(3)
+    integer::axis,other,touch_count
+    logical::touch,overlap
+    touch_count=0
+    do axis=1,3
+      touch=left_origin(axis)+left_shape(axis)==right_origin(axis).or. &
+        right_origin(axis)+right_shape(axis)==left_origin(axis).or. &
+        (left_origin(axis)+left_shape(axis)==global_mesh(axis).and.right_origin(axis)==0).or. &
+        (right_origin(axis)+right_shape(axis)==global_mesh(axis).and.left_origin(axis)==0)
+      if(.not.touch)cycle
+      overlap=.true.
+      do other=1,3
+        if(other==axis)cycle
+        overlap=overlap.and.max(left_origin(other),right_origin(other))< &
+          min(left_origin(other)+left_shape(other),right_origin(other)+right_shape(other))
+      end do
+      if(overlap)touch_count=touch_count+1
+    end do
+    sawf_fragments_share_face=touch_count==1
+  end function
+
   subroutine build_sawf_shared_buffer_point_maps(global_mesh,left_origin,left_shape,right_origin, &
       right_shape,buffer_width,left_map,right_map,ok,message)
     integer,intent(in)::global_mesh(3),left_origin(3),left_shape(3),right_origin(3), &

@@ -47,7 +47,9 @@ module lcfo_flux
   use lcfo_wannier_sawf_templates, only: sawf_closest_periodic_cartesian
   use lcfo_wannier_sawf_templates, only: t_sawf_template_checkpoint,t_sawf_template_fingerprint, &
     write_sawf_template_checkpoint,read_sawf_template_checkpoint,t_sawf_ragged_local_basis, &
-    materialize_sawf_ragged_local_basis,write_sawf_materialized_basis_checkpoint
+    materialize_sawf_ragged_local_basis,write_sawf_materialized_basis_checkpoint, &
+    read_sawf_materialized_basis_checkpoint,build_sawf_shared_buffer_point_maps, &
+    stitch_sawf_materialized_neighbor_pair,build_sawf_fragment_gauge_tree
   use lcfo_wannier_sawf_orchestrator, only: t_sawf_environment_receipt,t_sawf_seed_bundle, &
     build_sawf_environment_execution_plan,build_sawf_seed_bundles,select_sawf_environment_stabilizer, &
     complete_sawf_seed_bundle,propagate_sawf_representative_receipts,validate_sawf_environment_receipts
@@ -6621,7 +6623,7 @@ contains
       use filesystem, only: atomic_create_directory
       use salmon_global, only: izatom, sysname, wannier_num_wann, &
         wannier_site_symmetry, wannier_symmetry_file, wannier_symmetry_tolerance, &
-        wannier_sawf_generation,wannier_sawf_structure_class
+        wannier_sawf_generation,wannier_sawf_structure_class,wannier_sawf_gauge_tolerance
       use salmon_math, only: matrix_inverse
       use, intrinsic :: iso_fortran_env, only: int64
       implicit none
@@ -6637,7 +6639,8 @@ contains
       integer, allocatable :: sawf_representative_fragment(:),sawf_materialize_operation(:)
       integer,allocatable :: sawf_expected_channels(:),sawf_selected_channels(:)
       integer,allocatable::sawf_source_channels(:),sawf_core_materialize_map(:), &
-        sawf_buffer_materialize_map(:)
+        sawf_buffer_materialize_map(:),sawf_gauge_parent(:),sawf_parent_shared_map(:), &
+        sawf_child_shared_map(:)
       integer,allocatable :: sawf_neighbor_gvec(:,:)
       integer,allocatable :: sawf_local_stabilizer(:)
       integer,allocatable :: sawf_local_point_map(:,:),sawf_point_map_column(:)
@@ -6670,6 +6673,7 @@ contains
       type(t_sawf_template_checkpoint)::sawf_template
       type(t_sawf_template_fingerprint)::sawf_template_fingerprint
       type(t_sawf_ragged_local_basis)::sawf_materialized_basis
+      type(t_sawf_ragged_local_basis)::sawf_parent_basis
       type(t_sawf_fragment_state_cache) :: state_cache
       type(t_sawf_closed_basis) :: closed_basis
       type(t_sawf_environment_receipt),allocatable :: sawf_environment_receipts(:)
@@ -6679,11 +6683,11 @@ contains
       logical, allocatable :: sawf_environment_equivalent(:,:),sawf_defect_intersects(:), &
         sawf_regenerate_environment(:),sawf_generate_independently(:),sawf_inside_atom(:)
       integer :: max_targets_per_source,local_left,local_right,local_relation,global_relation, &
-        num_bands_chk,num_wann_chk,representative,materialize_operation
+        num_bands_chk,num_wann_chk,representative,materialize_operation,parent_fragment,parent_representative
       character(512) :: message
       character(256) :: symmetry_filename,allocation_message,dmn_filename,amn_filename, &
         sawf_supercell_fingerprint
-      character(512)::local_chk_filename,local_basis_filename
+      character(512)::local_chk_filename,local_basis_filename,parent_basis_filename
 
       if(trim(wannier_site_symmetry) == 'off') return
       ! The scalable SAWF route is admitted by representation, provenance,
@@ -7333,6 +7337,41 @@ contains
           end if
         end if
         call comm_sync_all(dc%icomm_tot)
+        allocate(sawf_gauge_parent(dc%n_frag))
+        call build_sawf_fragment_gauge_tree(mesh,fragment_origin,fragment_shape,sawf_gauge_parent, &
+          local_ok,message)
+        if(.not.local_ok)call lcfo_sawf_fatal('SAWF gauge spanning tree construction failed: '//trim(message))
+        do ifrag=2,dc%n_frag
+          if(dc%id_frag==0.and.dc%i_frag==ifrag)then
+            parent_fragment=sawf_gauge_parent(ifrag)
+            parent_representative=sawf_environment_receipts(parent_fragment)%representative_fragment
+            ibundle=findloc(sawf_seed_bundles%environment,parent_representative,dim=1)
+            if(ibundle<=0)call lcfo_sawf_fatal('SAWF parent gauge checkpoint bundle lookup failed')
+            write(parent_basis_filename,'(a,"/fragment-",i0,".sawf-local-basis")') &
+              trim(sawf_seed_bundles(ibundle)%directory),parent_fragment
+            call read_sawf_materialized_basis_checkpoint(trim(parent_basis_filename), &
+              sawf_supercell_fingerprint,parent_fragment,sawf_parent_basis,sawf_template_reuse,local_ok,message)
+            if(.not.local_ok.or..not.sawf_template_reuse)call lcfo_sawf_fatal( &
+              'SAWF parent gauge checkpoint validation failed: '//trim(message))
+            call build_sawf_shared_buffer_point_maps(mesh,fragment_origin(:,parent_fragment), &
+              fragment_shape(:,parent_fragment),fragment_origin(:,ifrag),fragment_shape(:,ifrag), &
+              dc%nxyz_buffer,sawf_parent_shared_map,sawf_child_shared_map,local_ok,message)
+            if(.not.local_ok)call lcfo_sawf_fatal('SAWF neighbor shared-buffer map failed: '//trim(message))
+            call stitch_sawf_materialized_neighbor_pair(sawf_parent_basis,sawf_materialized_basis, &
+              sawf_parent_shared_map,sawf_child_shared_map,hvol,1d-12,wannier_sawf_gauge_tolerance, &
+              local_ok,message)
+            if(.not.local_ok)call lcfo_sawf_fatal('SAWF neighbor gauge stitching failed: '//trim(message))
+            representative=sawf_environment_receipts(ifrag)%representative_fragment
+            ibundle=findloc(sawf_seed_bundles%environment,representative,dim=1)
+            if(ibundle<=0)call lcfo_sawf_fatal('SAWF child gauge checkpoint bundle lookup failed')
+            write(local_basis_filename,'(a,"/fragment-",i0,".sawf-local-basis")') &
+              trim(sawf_seed_bundles(ibundle)%directory),ifrag
+            call write_sawf_materialized_basis_checkpoint(trim(local_basis_filename), &
+              sawf_supercell_fingerprint,ifrag,sawf_materialized_basis,local_ok,message)
+            if(.not.local_ok)call lcfo_sawf_fatal('SAWF stitched local basis publication failed: '//trim(message))
+          end if
+          call comm_sync_all(dc%icomm_tot)
+        end do
       end if
 
       failure=0
