@@ -21,12 +21,15 @@ driver = r'''program check_template_checkpoint
   written%fingerprint=fp
   allocate(written%centers(3,2),written%spreads(2),written%d_band(2,2,1), &
            written%d_wann(2,2,1),written%gauge_unitary(2,2), &
-           written%basis(4,2),written%buffer_basis(8,2),written%orbitals(4,2))
+           written%basis(4,2),written%buffer_basis(8,2),written%orbitals(4,2), &
+           written%buffer_orbitals(8,2),written%band_to_wannier(2,2))
   written%centers=reshape([0d0,1d0,2d0,3d0,4d0,5d0],[3,2])
   written%spreads=[0.25d0,0.5d0]
   written%basis=reshape([(dble(i),i=1,8)],[4,2])
   written%buffer_basis=reshape([(dble(i),i=1,16)],[8,2])
   written%orbitals=cmplx(written%basis,0d0,kind=8)
+  written%buffer_orbitals=cmplx(written%buffer_basis,0d0,kind=8)
+  written%band_to_wannier=(0d0,0d0);written%band_to_wannier(1,1)=1;written%band_to_wannier(2,2)=1
   written%d_band=(0d0,0d0); written%d_band(1,1,1)=1; written%d_band(2,2,1)=1
   written%d_wann=written%d_band
   written%gauge_unitary=written%d_band(:,:,1)
@@ -38,6 +41,8 @@ driver = r'''program check_template_checkpoint
   call require(maxval(abs(loaded%centers-written%centers))<1d-15,'centers roundtrip')
   call require(maxval(abs(loaded%d_band-written%d_band))<1d-15,'D_band roundtrip')
   call require(maxval(abs(loaded%d_wann-written%d_wann))<1d-15,'D_wann roundtrip')
+  call require(maxval(abs(loaded%buffer_orbitals-written%buffer_orbitals))<1d-15,'buffer orbitals roundtrip')
+  call require(maxval(abs(loaded%band_to_wannier-written%band_to_wannier))<1d-15,'transform roundtrip')
   call require(abs(loaded%gauge_residual-written%gauge_residual)<1d-20,'gauge residual roundtrip')
   stale=fp; stale%buffer='4'
   call read_sawf_template_checkpoint('template.chk',stale,loaded,reuse,ok,msg)

@@ -138,12 +138,13 @@ contains
   end subroutine read_sawf_nnkp_neighbors
 
   subroutine solve_sawf_local_generalized_eigensystem(buffer_basis,weight,h_basis,rank_tolerance, &
-      states,energies,ok,message)
+      states,energies,ok,message,coefficients)
     real(8),intent(in)::buffer_basis(:,:),weight,h_basis(:,:),rank_tolerance
     complex(8),allocatable,intent(out)::states(:,:)
     real(8),allocatable,intent(out)::energies(:)
     logical,intent(out)::ok
     character(*),intent(out)::message
+    real(8),allocatable,intent(out),optional::coefficients(:,:)
     real(8),allocatable::overlap(:,:),overlap_eval(:),whitener(:,:),h_orth(:,:),h_eval(:),coeff(:,:), &
       diagonal(:,:)
     complex(8),allocatable::identity(:,:)
@@ -178,6 +179,9 @@ contains
     if(.not.ok)return
     allocate(coeff(nbasis,nkeep),states(size(buffer_basis,1),nkeep),energies(nkeep))
     coeff=matmul(whitener,h_orth)
+    if(present(coefficients))then
+      allocate(coefficients(size(coeff,1),size(coeff,2)));coefficients=coeff
+    end if
     states=cmplx(matmul(buffer_basis,coeff),0d0,kind=8);energies=h_eval
     allocate(identity(nkeep,nkeep),diagonal(nkeep,nkeep));identity=(0d0,0d0);diagonal=0d0
     do mode=1,nkeep;identity(mode,mode)=(1d0,0d0);diagonal(mode,mode)=energies(mode);end do

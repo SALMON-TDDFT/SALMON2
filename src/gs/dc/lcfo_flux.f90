@@ -45,6 +45,8 @@ module lcfo_flux
   use lcfo_wannier_sawf_templates, only: build_sawf_file_content_digest
   use lcfo_wannier_sawf_templates, only: measure_sawf_vacuum_occupancy
   use lcfo_wannier_sawf_templates, only: sawf_closest_periodic_cartesian
+  use lcfo_wannier_sawf_templates, only: t_sawf_template_checkpoint,t_sawf_template_fingerprint, &
+    write_sawf_template_checkpoint
   use lcfo_wannier_sawf_orchestrator, only: t_sawf_environment_receipt,t_sawf_seed_bundle, &
     build_sawf_environment_execution_plan,build_sawf_seed_bundles,select_sawf_environment_stabilizer, &
     complete_sawf_seed_bundle,propagate_sawf_representative_receipts,validate_sawf_environment_receipts
@@ -6652,13 +6654,17 @@ contains
       complex(8),allocatable :: sawf_local_d_band(:,:,:),sawf_local_states(:,:)
       complex(8),allocatable :: sawf_local_amn(:,:)
       complex(8),allocatable :: sawf_local_v_matrix(:,:),sawf_representative_orbitals(:,:)
+      complex(8),allocatable :: sawf_representative_buffer_orbitals(:,:)
       real(8),allocatable :: sawf_local_energy(:)
+      real(8),allocatable::sawf_local_coefficients(:,:)
       real(8),allocatable :: sawf_local_centers(:,:),sawf_local_spreads(:)
       real(8) :: representation_residual
       type(t_sawf_projection_channel), allocatable :: channels(:)
       type(t_sawf_symop), allocatable :: symmetry_operations(:)
       type(t_sawf_dmn_writer) :: writer
       type(t_sawf_dmn_writer)::sawf_local_writer
+      type(t_sawf_template_checkpoint)::sawf_template
+      type(t_sawf_template_fingerprint)::sawf_template_fingerprint
       type(t_sawf_fragment_state_cache) :: state_cache
       type(t_sawf_closed_basis) :: closed_basis
       type(t_sawf_environment_receipt),allocatable :: sawf_environment_receipts(:)
@@ -6957,7 +6963,8 @@ contains
           sawf_environment_receipts(dc%i_frag)%requires_execution)then
         call write_sawf_representative_local_seed(state_cache%source,channels, &
           sawf_selected_channels,sawf_seed_bundles,local_ok,message,local_states_out=sawf_local_states, &
-          local_energy_out=sawf_local_energy,local_amn_out=sawf_local_amn)
+          local_energy_out=sawf_local_energy,local_amn_out=sawf_local_amn, &
+          local_coeff_out=sawf_local_coefficients)
         if(.not.local_ok)then
           write(*,'(1x,a,i0,2a)')'[DC-LCFO-SAWF-LOCAL-SEED] rank=',dc%id_tot,' ',trim(message)
           call lcfo_sawf_fatal('SAWF representative local eigensystem/seed construction failed')
@@ -7221,6 +7228,43 @@ contains
             'SAWF local checkpoint dimensions disagree with validated receipt/eigensystem')
           allocate(sawf_representative_orbitals(size(sawf_local_states,1),num_wann_chk))
           sawf_representative_orbitals=matmul(sawf_local_states,sawf_local_v_matrix)
+          allocate(sawf_representative_buffer_orbitals(size(state_cache%source%buffer_basis,1),num_wann_chk))
+          sawf_representative_buffer_orbitals=matmul(cmplx(state_cache%source%buffer_basis,0d0,kind=8), &
+            matmul(cmplx(sawf_local_coefficients,0d0,kind=8),sawf_local_v_matrix))
+          sawf_template_fingerprint%geometry=sawf_supercell_fingerprint
+          sawf_template_fingerprint%pseudopotential=sawf_supercell_fingerprint
+          sawf_template_fingerprint%grid=sawf_environment_key(dc%i_frag)
+          write(sawf_template_fingerprint%band_window,'(a,i0,a,i0)')'bands=',num_bands_chk,':wann=',num_wann_chk
+          write(sawf_template_fingerprint%complete_projection_shell,'(a,i0)') &
+            'selected_channels=',size(sawf_selected_channels)
+          write(sawf_template_fingerprint%symmetry,'(a,i0)')'actual_stabilizer=',size(sawf_local_stabilizer)
+          write(sawf_template_fingerprint%buffer,'(3(i0,1x))')state_cache%source%buffer_width
+          sawf_template_fingerprint%generator='SALMON hierarchical SAWF template schema 2'
+          sawf_template%fingerprint=sawf_template_fingerprint
+          allocate(sawf_template%centers(3,num_wann_chk),sawf_template%spreads(num_wann_chk), &
+            sawf_template%basis(size(state_cache%source%basis,1),size(state_cache%source%basis,2)), &
+            sawf_template%buffer_basis(size(state_cache%source%buffer_basis,1), &
+              size(state_cache%source%buffer_basis,2)), &
+            sawf_template%orbitals(size(sawf_representative_orbitals,1),num_wann_chk), &
+            sawf_template%buffer_orbitals(size(sawf_representative_buffer_orbitals,1),num_wann_chk), &
+            sawf_template%band_to_wannier(num_bands_chk,num_wann_chk), &
+            sawf_template%d_band(size(sawf_local_d_band,1),size(sawf_local_d_band,2), &
+              size(sawf_local_d_band,3)), &
+            sawf_template%d_wann(size(sawf_local_d_wann,1),size(sawf_local_d_wann,2), &
+              size(sawf_local_d_wann,3)),sawf_template%gauge_unitary(num_wann_chk,num_wann_chk))
+          sawf_template%centers=sawf_local_centers;sawf_template%spreads=sawf_local_spreads
+          sawf_template%basis=state_cache%source%basis
+          sawf_template%buffer_basis=state_cache%source%buffer_basis
+          sawf_template%orbitals=sawf_representative_orbitals
+          sawf_template%buffer_orbitals=sawf_representative_buffer_orbitals
+          sawf_template%band_to_wannier=sawf_local_v_matrix
+          sawf_template%d_band=sawf_local_d_band;sawf_template%d_wann=sawf_local_d_wann
+          sawf_template%gauge_unitary=(0d0,0d0)
+          do iop=1,num_wann_chk;sawf_template%gauge_unitary(iop,iop)=(1d0,0d0);end do
+          sawf_template%gauge_residual=0d0
+          call write_sawf_template_checkpoint(trim(sawf_seed_bundles(ibundle)%directory)//'/'// &
+            trim(sawf_seed_bundles(ibundle)%seedname)//'.sawf-template',sawf_template,local_ok,message)
+          if(.not.local_ok)call lcfo_sawf_fatal('SAWF representative template publication failed: '//trim(message))
         end if
       end if
 
@@ -8115,7 +8159,7 @@ contains
     end subroutine checked_sawf_fragment_point_count
 
     subroutine write_sawf_representative_local_seed(entry,projection_channels,selected_channels, &
-        bundles,ok,message,neighbor_gvec,local_states_out,local_energy_out,local_amn_out)
+        bundles,ok,message,neighbor_gvec,local_states_out,local_energy_out,local_amn_out,local_coeff_out)
       use salmon_global, only: wannier_projection_width,wannier_num_iter
       use salmon_math, only: matrix_inverse
       type(t_sawf_fragment_state_entry),intent(in)::entry
@@ -8128,8 +8172,9 @@ contains
       complex(8),allocatable,intent(out),optional::local_states_out(:,:)
       real(8),allocatable,intent(out),optional::local_energy_out(:)
       complex(8),allocatable,intent(out),optional::local_amn_out(:,:)
+      real(8),allocatable,intent(out),optional::local_coeff_out(:,:)
       real(8),parameter::hartree_to_ev=27.211386245988d0
-      real(8),allocatable::h_basis(:,:),energy_hartree(:),energy_ev(:)
+      real(8),allocatable::h_basis(:,:),energy_hartree(:),energy_ev(:),local_coefficients(:,:)
       complex(8),allocatable::states(:,:),projection(:,:),phase_factor(:,:),amn_local(:,:),mmn_dummy(:,:,:)
       real(8),allocatable::atom_fractional(:,:)
       real(8),allocatable::gcart(:,:)
@@ -8150,10 +8195,14 @@ contains
         h_basis(io,jo)=0.5d0*(mat_H_local(io,jo,1)+mat_H_local(jo,io,1))
       end do;end do
       call solve_sawf_local_generalized_eigensystem(entry%basis,hvol,h_basis, &
-        1d-10,states,energy_hartree,ok,message)
+        1d-10,states,energy_hartree,ok,message,local_coefficients)
       if(.not.ok)return
       if(present(local_states_out))then
         allocate(local_states_out(size(states,1),size(states,2)));local_states_out=states
+      end if
+      if(present(local_coeff_out))then
+        allocate(local_coeff_out(size(local_coefficients,1),size(local_coefficients,2)))
+        local_coeff_out=local_coefficients
       end if
       if(size(selected_channels)>size(states,2))then
         message='SAWF local complete projection shell exceeds generalized eigensystem rank';ok=.false.;return

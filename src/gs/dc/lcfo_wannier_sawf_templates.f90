@@ -2,8 +2,8 @@ module lcfo_wannier_sawf_templates
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
-  integer, parameter :: sawf_template_schema_version=1
-  character(24),parameter :: sawf_template_magic='SALMON_SAWF_TEMPLATE_V1'
+  integer, parameter :: sawf_template_schema_version=2
+  character(24),parameter :: sawf_template_magic='SALMON_SAWF_TEMPLATE_V2'
 
   type, public :: t_sawf_template_fingerprint
     character(256) :: geometry='', pseudopotential='', grid='', band_window=''
@@ -16,6 +16,7 @@ module lcfo_wannier_sawf_templates
     real(8), allocatable :: centers(:,:),spreads(:)
     real(8), allocatable :: basis(:,:),buffer_basis(:,:)
     complex(8), allocatable :: orbitals(:,:),d_band(:,:,:),d_wann(:,:,:)
+    complex(8),allocatable :: buffer_orbitals(:,:),band_to_wannier(:,:)
     complex(8), allocatable :: gauge_unitary(:,:)
     real(8) :: gauge_residual=huge(0d0)
   end type
@@ -486,6 +487,8 @@ contains
     if(allocated(template%basis))deallocate(template%basis)
     if(allocated(template%buffer_basis))deallocate(template%buffer_basis)
     if(allocated(template%orbitals))deallocate(template%orbitals)
+    if(allocated(template%buffer_orbitals))deallocate(template%buffer_orbitals)
+    if(allocated(template%band_to_wannier))deallocate(template%band_to_wannier)
     if(allocated(template%d_band))deallocate(template%d_band)
     if(allocated(template%d_wann))deallocate(template%d_wann)
     if(allocated(template%gauge_unitary))deallocate(template%gauge_unitary)
@@ -496,10 +499,11 @@ contains
     character(*),intent(in)::filename
     type(t_sawf_template_checkpoint),intent(in)::template
     logical,intent(out)::ok; character(*),intent(out)::message
-    integer::unit,ios,dims(15); character(512)::iomsg
+    integer::unit,ios,dims(19); character(512)::iomsg
     ok=.false.; message=''; dims=0
     if(.not.allocated(template%centers).or..not.allocated(template%spreads).or. &
        .not.allocated(template%basis).or..not.allocated(template%buffer_basis).or. &
+       .not.allocated(template%buffer_orbitals).or..not.allocated(template%band_to_wannier).or. &
        .not.allocated(template%d_band).or..not.allocated(template%d_wann).or. &
        .not.allocated(template%gauge_unitary))then
       message='SAWF template checkpoint is missing required basis metadata'; return
@@ -508,7 +512,9 @@ contains
       size(template%basis,1),size(template%basis,2),size(template%buffer_basis,1), &
       size(template%buffer_basis,2),0,0, &
       size(template%d_band,1),size(template%d_band,2),size(template%d_band,3), &
-      size(template%d_wann,1),size(template%d_wann,2),size(template%d_wann,3)]
+      size(template%d_wann,1),size(template%d_wann,2),size(template%d_wann,3), &
+      size(template%buffer_orbitals,1),size(template%buffer_orbitals,2), &
+      size(template%band_to_wannier,1),size(template%band_to_wannier,2)]
     if(allocated(template%orbitals))dims(8:9)=shape(template%orbitals)
     open(newunit=unit,file=filename,access='stream',form='unformatted',status='replace', &
       action='write',iostat=ios,iomsg=iomsg)
@@ -521,7 +527,8 @@ contains
       size(template%gauge_unitary,1),size(template%gauge_unitary,2),template%gauge_residual, &
       template%centers,template%spreads,template%basis,template%buffer_basis
     if(ios==0.and.allocated(template%orbitals))write(unit,iostat=ios,iomsg=iomsg)template%orbitals
-    if(ios==0)write(unit,iostat=ios,iomsg=iomsg)template%d_band,template%d_wann,template%gauge_unitary
+    if(ios==0)write(unit,iostat=ios,iomsg=iomsg)template%buffer_orbitals,template%band_to_wannier, &
+      template%d_band,template%d_wann,template%gauge_unitary
     close(unit)
     if(ios/=0)then; message='SAWF template checkpoint write failed: '//trim(iomsg); return; end if
     ok=.true.
@@ -533,7 +540,7 @@ contains
     type(t_sawf_template_checkpoint),intent(inout)::template
     logical,intent(out)::reuse,ok; character(*),intent(out)::message
     type(t_sawf_template_fingerprint)::stored
-    integer::unit,ios,dims(15),gauge_dims(2); character(512)::iomsg
+    integer::unit,ios,dims(19),gauge_dims(2); character(512)::iomsg
     character(24)::magic; logical::exists
     call clear_sawf_template_checkpoint(template)
     ok=.false.; reuse=.false.; message=''; inquire(file=filename,exist=exists)
@@ -548,7 +555,7 @@ contains
       close(unit); message='SAWF template checkpoint header is invalid'; return
     end if
     if(any(dims<0).or.any(gauge_dims<=0).or.dims(1)/=3.or.dims(3)/=dims(2).or. &
-       any(dims(4:7)<=0))then
+       any(dims(4:7)<=0).or.any(dims(16:19)<=0))then
       close(unit); message='SAWF template checkpoint dimensions are invalid'; return
     end if
     template%fingerprint=stored
@@ -559,13 +566,15 @@ contains
     allocate(template%centers(dims(1),dims(2)),template%spreads(dims(3)), &
       template%basis(dims(4),dims(5)),template%buffer_basis(dims(6),dims(7)), &
       template%d_band(dims(10),dims(11),dims(12)),template%d_wann(dims(13),dims(14),dims(15)), &
+      template%buffer_orbitals(dims(16),dims(17)),template%band_to_wannier(dims(18),dims(19)), &
       template%gauge_unitary(gauge_dims(1),gauge_dims(2)),stat=ios)
     if(ios/=0)then; close(unit); message='SAWF template checkpoint allocation failed'; return; end if
     if(dims(8)>0.and.dims(9)>0)allocate(template%orbitals(dims(8),dims(9)),stat=ios)
     if(ios==0)read(unit,iostat=ios,iomsg=iomsg)template%centers,template%spreads, &
       template%basis,template%buffer_basis
     if(ios==0.and.allocated(template%orbitals))read(unit,iostat=ios,iomsg=iomsg)template%orbitals
-    if(ios==0)read(unit,iostat=ios,iomsg=iomsg)template%d_band,template%d_wann,template%gauge_unitary
+    if(ios==0)read(unit,iostat=ios,iomsg=iomsg)template%buffer_orbitals,template%band_to_wannier, &
+      template%d_band,template%d_wann,template%gauge_unitary
     close(unit)
     if(ios/=0)then
       call clear_sawf_template_checkpoint(template)
