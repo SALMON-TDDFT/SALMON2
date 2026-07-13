@@ -28,6 +28,9 @@ include(${CMAKE_SOURCE_DIR}/cmakefiles/Builder/build_scalapack.cmake)
 ExternalProject_Add(eigenexa-project
   URL               "https://www.r-ccs.riken.jp/labs/lpnctrt/assets/img/EigenExa-${EIGENEXA_VERSION}.tgz"
   PREFIX            ${CMAKE_BINARY_DIR}/eigenexa
+  PATCH_COMMAND     ${CMAKE_COMMAND}
+                    -DEIGENEXA_SOURCE_DIR=<SOURCE_DIR>
+                    -P ${CMAKE_SOURCE_DIR}/cmakefiles/Builder/patches/apply_eigenexa_2_4b_single_thread.cmake
   CONFIGURE_COMMAND ${CMAKE_BINARY_DIR}/eigenexa/src/eigenexa-project/configure ${HOST_OPTION} --prefix=${CMAKE_CURRENT_BINARY_DIR} ${CC} ${FC} ${CFLAGS} ${FFLAGS} ${FFLAGS0}
   BUILD_COMMAND     gmake -C src "FFLAGS0=${CMAKE_Fortran_FLAGS} -O0" libEigenExa.a
   STEP_TARGETS      build

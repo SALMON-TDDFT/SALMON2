@@ -281,11 +281,26 @@ module communication
 
 contains
   subroutine comm_init
-    use mpi, only: MPI_THREAD_FUNNELED
+    use mpi, only: MPI_THREAD_FUNNELED, MPI_THREAD_MULTIPLE, MPI_COMM_WORLD, MPI_Abort
     implicit none
-    integer :: ierr
-    integer :: iprovided
-    MPI_ERROR_CHECK(call MPI_Init_thread(MPI_THREAD_FUNNELED, iprovided, ierr))
+    integer :: ierr, iprovided, irequired, abort_ierr
+#ifdef USE_EIGENEXA
+    irequired = MPI_THREAD_MULTIPLE
+#else
+    irequired = MPI_THREAD_FUNNELED
+#endif
+    MPI_ERROR_CHECK(call MPI_Init_thread(irequired, iprovided, ierr))
+    if (iprovided < irequired) then
+#ifdef USE_EIGENEXA
+      write(*,'(a,2(a,i0))') '[FATAL] EigenExa requires MPI_THREAD_MULTIPLE:', &
+        ' required=', irequired, ' provided=', iprovided
+#else
+      write(*,'(a,2(a,i0))') '[FATAL] MPI thread support is insufficient:', &
+        ' required=', irequired, ' provided=', iprovided
+#endif
+      call MPI_Abort(MPI_COMM_WORLD, 1, abort_ierr)
+      stop 1
+    end if
   end subroutine
 
   subroutine comm_finalize

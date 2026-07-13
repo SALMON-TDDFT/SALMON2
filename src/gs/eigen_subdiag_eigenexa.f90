@@ -46,6 +46,8 @@ contains
     allocate( h_div(info%nrow_local,info%ncol_local), &
               v_div(info%nrow_local,info%ncol_local), &
               v_tmp(n,n) )
+    h_div = 0d0
+    v_div = 0d0
 
 !$omp parallel do private(i,j,i_loc,j_loc) collapse(2)
     do j_loc=is(2),ie(2)
@@ -103,6 +105,8 @@ contains
               v_div(info%nrow_local,info%ncol_local), &
               tmp_mat(system%no, info%numo_max), &
               tmp_mat2(system%no, info%numo_max) )
+    h_div = 0d0
+    v_div = 0d0
 
     do m = 0, info%nporbital - 1
       if(m == info%id_o) then
