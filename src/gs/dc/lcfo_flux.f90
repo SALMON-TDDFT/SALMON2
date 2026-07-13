@@ -6668,6 +6668,8 @@ contains
       real(8),allocatable::sawf_local_coefficients(:,:)
       real(8),allocatable :: sawf_local_centers(:,:),sawf_local_spreads(:)
       real(8) :: representation_residual
+      real(8)::sawf_representation_max,sawf_local_representation_local(1), &
+        sawf_local_representation_global(1)
       real(8)::sawf_gauge_closure_residual,sawf_gauge_alignment_residual
       real(8)::sawf_gauge_residual_local(2),sawf_gauge_residual_global(2)
       type(t_sawf_projection_channel), allocatable :: channels(:)
@@ -7079,22 +7081,27 @@ contains
         call comm_bcast(d_wann_set(:,:,iop),dc%icomm_tot,0)
       end do
 
-      failure=0; message=''; representation_residual=0d0
+      failure=0; message=''; representation_residual=0d0;sawf_representation_max=0d0
       if(dc%id_tot==0) then
         call validate_sawf_operation_set_products(d_band_set,product_left,product_right, &
           product_result,closure_tolerance,representation_residual,local_ok,message)
-        if(local_ok) call validate_sawf_operation_set_products(d_wann_set,product_left,product_right, &
-          product_result,closure_tolerance,representation_residual,local_ok,message)
+        if(local_ok)sawf_representation_max=max(sawf_representation_max,representation_residual)
+        if(local_ok)then
+          call validate_sawf_operation_set_products(d_wann_set,product_left,product_right, &
+            product_result,closure_tolerance,representation_residual,local_ok,message)
+          if(local_ok)sawf_representation_max=max(sawf_representation_max,representation_residual)
+        end if
         failure=merge(0,1,local_ok)
       end if
       call comm_bcast(failure,dc%icomm_tot,0); call comm_bcast(message,dc%icomm_tot,0)
-      call comm_bcast(representation_residual,dc%icomm_tot,0)
+      call comm_bcast(sawf_representation_max,dc%icomm_tot,0)
       if(failure/=0) then
         if(dc%id_tot==0) call abort_sawf_dmn(writer)
         call lcfo_sawf_fatal('SAWF D_band/D_wann group representation validation failed: '//trim(message))
       end if
       if(dc%id_tot==0) write(*,'(1x,a,es13.5)') &
-        '[DC-LCFO-SAWF-GROUP] max_representation_residual=',representation_residual
+        '[DC-LCFO-SAWF-GROUP] max_representation_residual=',sawf_representation_max
+      sawf_local_representation_local=0d0;sawf_local_representation_global=0d0
       if(trim(wannier_sawf_generation)=='hierarchical'.and.dc%id_frag==0.and. &
           sawf_environment_receipts(dc%i_frag)%requires_execution)then
         allocate(sawf_local_d_wann(size(sawf_selected_channels),size(sawf_selected_channels), &
@@ -7151,9 +7158,15 @@ contains
         call validate_sawf_operation_set_products(sawf_local_d_band,sawf_local_product_left, &
           sawf_local_product_right,sawf_local_product_result,closure_tolerance, &
           representation_residual,local_ok,message)
-        if(local_ok)call validate_sawf_operation_set_products(sawf_local_d_wann, &
-          sawf_local_product_left,sawf_local_product_right,sawf_local_product_result, &
-          closure_tolerance,representation_residual,local_ok,message)
+        if(local_ok)sawf_local_representation_local(1)=max( &
+          sawf_local_representation_local(1),representation_residual)
+        if(local_ok)then
+          call validate_sawf_operation_set_products(sawf_local_d_wann, &
+            sawf_local_product_left,sawf_local_product_right,sawf_local_product_result, &
+            closure_tolerance,representation_residual,local_ok,message)
+          if(local_ok)sawf_local_representation_local(1)=max( &
+            sawf_local_representation_local(1),representation_residual)
+        end if
         if(.not.local_ok)then
           write(*,'(1x,a,i0,a,es13.5,2a)')'[DC-LCFO-SAWF-LOCAL-GROUP] rank=',dc%id_tot, &
             ' residual=',representation_residual,' ',trim(message)
@@ -7184,6 +7197,11 @@ contains
         call activate_sawf_win(trim(sawf_seed_bundles(ibundle)%directory)//'/'// &
           trim(sawf_seed_bundles(ibundle)%seedname)//'.win',closure_tolerance,local_ok,message,dc%id_tot)
         if(.not.local_ok)call lcfo_sawf_fatal('SAWF local WIN activation failed: '//trim(message))
+      end if
+      if(trim(wannier_sawf_generation)=='hierarchical')then
+        call comm_get_max(sawf_local_representation_local,sawf_local_representation_global,1,dc%icomm_tot)
+        if(dc%id_tot==0)write(*,'(1x,a,a,es13.5)')'[DC-LCFO-SAWF-SYMMETRY-SUMMARY]', &
+          ' D_band_D_wann_closure_max=',sawf_local_representation_global(1)
       end if
       if(trim(wannier_sawf_generation)=='hierarchical'.and. &
           .not.is_wannier90_export_only_command(resolved_wannier_command)) &

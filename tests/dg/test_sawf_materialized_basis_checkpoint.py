@@ -134,3 +134,5 @@ assert "sawf all-neighbor gauge closure failed" in generator
 reduction = generator.index("call comm_get_max(sawf_gauge_residual_local", closure)
 assert closure < reduction
 assert "[dc-lcfo-sawf-gauge-summary]" in generator
+assert "[dc-lcfo-sawf-symmetry-summary]" in generator
+assert "d_band_d_wann_closure_max" in generator
