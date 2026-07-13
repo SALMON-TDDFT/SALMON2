@@ -63,6 +63,14 @@ basis into agreement with the monolithic reference for occupied projector,
 overlap, fixed `H_kin+DG+V_ion`, and every face block.  Only after this
 operator-equivalence gate may hierarchical SAWF data initialize DG-DC.
 
+SAWF generation and DG-DC admission are deliberately separate phases.  The
+generation phase may publish fingerprinted local bases before operator blocks
+exist.  It does not thereby authorize their use in DG-DC.  The only
+hierarchical handoff is `admit_sawf_hierarchical_basis`, which requires a
+matching operator-complete acceptance checkpoint and re-evaluates the
+configured tolerance.  A missing, stale, incomplete, or failing checkpoint is
+fatal at the handoff; there is no fallback to orbital-only convergence.
+
 ## Namelist controls
 
 All result-changing choices live in `&dc`: `wannier_sawf_generation`

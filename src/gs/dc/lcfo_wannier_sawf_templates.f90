@@ -66,8 +66,25 @@ module lcfo_wannier_sawf_templates
   public :: build_sawf_fragment_gauge_tree
   public :: write_sawf_acceptance_checkpoint,read_sawf_acceptance_checkpoint
   public :: validate_sawf_acceptance_checkpoint
+  public :: admit_sawf_hierarchical_basis
 
 contains
+  subroutine admit_sawf_hierarchical_basis(filename,expected_fingerprint,tolerance,checkpoint,ok,message)
+    character(*),intent(in)::filename,expected_fingerprint
+    real(8),intent(in)::tolerance
+    type(t_sawf_acceptance_checkpoint),intent(inout)::checkpoint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    logical::reusable
+    call read_sawf_acceptance_checkpoint(filename,expected_fingerprint,checkpoint,reusable,ok,message)
+    if(.not.ok)return
+    if(.not.reusable)then
+      ok=.false.;message='hierarchical SAWF acceptance provenance does not match this supercell';return
+    end if
+    call validate_sawf_acceptance_checkpoint(checkpoint,tolerance,ok,message)
+    if(.not.ok)message='hierarchical SAWF admission rejected: '//trim(message)
+  end subroutine
+
   subroutine validate_sawf_acceptance_checkpoint(checkpoint,tolerance,ok,message)
     type(t_sawf_acceptance_checkpoint),intent(in)::checkpoint
     real(8),intent(in)::tolerance

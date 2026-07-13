@@ -8,6 +8,7 @@ if not FC: raise SystemExit('gfortran is required')
 driver=r'''program check_acceptance
  use lcfo_wannier_sawf_templates, only: t_sawf_acceptance_checkpoint, &
    write_sawf_acceptance_checkpoint,read_sawf_acceptance_checkpoint,validate_sawf_acceptance_checkpoint
+ use lcfo_wannier_sawf_templates, only: admit_sawf_hierarchical_basis
  implicit none
  type(t_sawf_acceptance_checkpoint)::a,b
  logical::ok,reusable
@@ -27,6 +28,10 @@ driver=r'''program check_acceptance
  call validate_sawf_acceptance_checkpoint(b,1d-8,ok,msg);call req(ok,'roundtrip validate')
  call read_sawf_acceptance_checkpoint('accept.chk','cell-B',b,reusable,ok,msg)
  call req(ok.and..not.reusable,'cross-supercell rejection')
+ call admit_sawf_hierarchical_basis('accept.chk','cell-A',1d-8,b,ok,msg)
+ call req(ok,'hierarchical admission')
+ call admit_sawf_hierarchical_basis('accept.chk','cell-B',1d-8,b,ok,msg)
+ call req(.not.ok,'hierarchical provenance rejection')
  a%face_residual(2,2)=2d-8
  call validate_sawf_acceptance_checkpoint(a,1d-8,ok,msg);call req(.not.ok,'face convergence rejection')
  a%face_residual(2,2)=-1d-9
