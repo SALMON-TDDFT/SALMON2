@@ -31,6 +31,7 @@ module lcfo_wannier_sawf_templates
 
   type,public::t_sawf_acceptance_checkpoint
     character(256)::supercell_fingerprint=''
+    character(256)::operator_fingerprint=''
     integer,allocatable::buffer_size(:)
     real(8),allocatable::center_residual(:),projector_residual(:),overlap_residual(:)
     real(8),allocatable::ww_residual(:),wp_residual(:),face_residual(:,:)
@@ -110,14 +111,16 @@ contains
     if(.not.ok)message='SAWF neighbor gauge-loop closure residual exceeds tolerance'
   end subroutine
 
-  subroutine admit_sawf_hierarchical_basis(filename,expected_fingerprint,tolerance,checkpoint,ok,message)
-    character(*),intent(in)::filename,expected_fingerprint
+  subroutine admit_sawf_hierarchical_basis(filename,expected_fingerprint,expected_operator_fingerprint, &
+      tolerance,checkpoint,ok,message)
+    character(*),intent(in)::filename,expected_fingerprint,expected_operator_fingerprint
     real(8),intent(in)::tolerance
     type(t_sawf_acceptance_checkpoint),intent(inout)::checkpoint
     logical,intent(out)::ok
     character(*),intent(out)::message
     logical::reusable
-    call read_sawf_acceptance_checkpoint(filename,expected_fingerprint,checkpoint,reusable,ok,message)
+    call read_sawf_acceptance_checkpoint(filename,expected_fingerprint,expected_operator_fingerprint, &
+      checkpoint,reusable,ok,message)
     if(.not.ok)return
     if(.not.reusable)then
       ok=.false.;message='hierarchical SAWF acceptance provenance does not match this supercell';return
@@ -133,7 +136,8 @@ contains
     character(*),intent(out)::message
     integer::npair,nface
     ok=.false.;message=''
-    if(tolerance<=0d0.or.len_trim(checkpoint%supercell_fingerprint)==0)then
+    if(tolerance<=0d0.or.len_trim(checkpoint%supercell_fingerprint)==0.or. &
+        len_trim(checkpoint%operator_fingerprint)==0)then
       message='SAWF acceptance tolerance or fingerprint is invalid';return
     end if
     if(.not.allocated(checkpoint%buffer_size).or..not.allocated(checkpoint%center_residual).or. &
@@ -191,7 +195,7 @@ contains
     type(t_sawf_acceptance_checkpoint),intent(in)::checkpoint
     logical,intent(out)::ok
     character(*),intent(out)::message
-    character(32),parameter::magic='SALMON_SAWF_ACCEPTANCE_V1'
+    character(32),parameter::magic='SALMON_SAWF_ACCEPTANCE_V2'
     integer::unit,ios,dims(3)
     call validate_sawf_acceptance_checkpoint(checkpoint,huge(0d0),ok,message)
     if(.not.ok)return
@@ -199,7 +203,8 @@ contains
       size(checkpoint%global_local_face_residual)]
     open(newunit=unit,file=filename,status='replace',access='stream',form='unformatted',iostat=ios)
     if(ios/=0)then;ok=.false.;message='cannot open SAWF acceptance checkpoint';return;end if
-    write(unit,iostat=ios)magic,checkpoint%supercell_fingerprint,dims,checkpoint%buffer_size, &
+    write(unit,iostat=ios)magic,checkpoint%supercell_fingerprint,checkpoint%operator_fingerprint, &
+      dims,checkpoint%buffer_size, &
       checkpoint%center_residual,checkpoint%projector_residual,checkpoint%overlap_residual, &
       checkpoint%ww_residual,checkpoint%wp_residual,checkpoint%face_residual, &
       checkpoint%global_local_projector_residual,checkpoint%global_local_overlap_residual, &
@@ -208,18 +213,19 @@ contains
     if(.not.ok)message='cannot write SAWF acceptance checkpoint'
   end subroutine
 
-  subroutine read_sawf_acceptance_checkpoint(filename,expected_fingerprint,checkpoint,reusable,ok,message)
-    character(*),intent(in)::filename,expected_fingerprint
+  subroutine read_sawf_acceptance_checkpoint(filename,expected_fingerprint,expected_operator_fingerprint, &
+      checkpoint,reusable,ok,message)
+    character(*),intent(in)::filename,expected_fingerprint,expected_operator_fingerprint
     type(t_sawf_acceptance_checkpoint),intent(inout)::checkpoint
     logical,intent(out)::reusable,ok
     character(*),intent(out)::message
-    character(32),parameter::expected_magic='SALMON_SAWF_ACCEPTANCE_V1'
+    character(32),parameter::expected_magic='SALMON_SAWF_ACCEPTANCE_V2'
     character(32)::magic
     integer::unit,ios,dims(3),npair
     ok=.false.;reusable=.false.;message=''
     open(newunit=unit,file=filename,status='old',access='stream',form='unformatted',iostat=ios)
     if(ios/=0)then;message='cannot open SAWF acceptance checkpoint';return;end if
-    read(unit,iostat=ios)magic,checkpoint%supercell_fingerprint,dims
+    read(unit,iostat=ios)magic,checkpoint%supercell_fingerprint,checkpoint%operator_fingerprint,dims
     if(ios/=0.or.magic/=expected_magic.or.dims(1)<3.or.dims(2)<=0.or.dims(3)<=0)then
       close(unit);message='SAWF acceptance checkpoint header is invalid';return
     end if
@@ -243,8 +249,9 @@ contains
       checkpoint%global_local_face_residual
     close(unit)
     if(ios/=0)then;message='SAWF acceptance checkpoint payload is invalid';return;end if
-    ok=.true.;reusable=trim(checkpoint%supercell_fingerprint)==trim(expected_fingerprint)
-    if(.not.reusable)message='SAWF acceptance checkpoint supercell fingerprint mismatch'
+    ok=.true.;reusable=trim(checkpoint%supercell_fingerprint)==trim(expected_fingerprint).and. &
+      trim(checkpoint%operator_fingerprint)==trim(expected_operator_fingerprint)
+    if(.not.reusable)message='SAWF acceptance checkpoint supercell or operator fingerprint mismatch'
   end subroutine
 
   subroutine build_sawf_fragment_gauge_tree(global_mesh,fragment_origin,fragment_shape,parent,ok,message)

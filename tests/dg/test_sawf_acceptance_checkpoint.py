@@ -16,21 +16,23 @@ driver=r'''program check_acceptance
  allocate(a%buffer_size(3),a%center_residual(2),a%projector_residual(2), &
    a%overlap_residual(2),a%ww_residual(2),a%wp_residual(2),a%face_residual(3,2), &
    a%global_local_face_residual(3))
- a%supercell_fingerprint='cell-A';a%buffer_size=[2,3,4]
+ a%supercell_fingerprint='cell-A';a%operator_fingerprint='operator-A';a%buffer_size=[2,3,4]
  a%center_residual=1d-9;a%projector_residual=2d-9;a%overlap_residual=3d-9
  a%ww_residual=4d-9;a%wp_residual=5d-9;a%face_residual=6d-9
  a%global_local_projector_residual=2d-9;a%global_local_overlap_residual=3d-9
  a%global_local_fixed_h_residual=4d-9;a%global_local_face_residual=5d-9
  call validate_sawf_acceptance_checkpoint(a,1d-8,ok,msg);call req(ok,'valid acceptance')
  call write_sawf_acceptance_checkpoint('accept.chk',a,ok,msg);call req(ok,'write')
- call read_sawf_acceptance_checkpoint('accept.chk','cell-A',b,reusable,ok,msg)
+ call read_sawf_acceptance_checkpoint('accept.chk','cell-A','operator-A',b,reusable,ok,msg)
  call req(ok.and.reusable,'matching read')
  call validate_sawf_acceptance_checkpoint(b,1d-8,ok,msg);call req(ok,'roundtrip validate')
- call read_sawf_acceptance_checkpoint('accept.chk','cell-B',b,reusable,ok,msg)
+ call read_sawf_acceptance_checkpoint('accept.chk','cell-B','operator-A',b,reusable,ok,msg)
  call req(ok.and..not.reusable,'cross-supercell rejection')
- call admit_sawf_hierarchical_basis('accept.chk','cell-A',1d-8,b,ok,msg)
+ call read_sawf_acceptance_checkpoint('accept.chk','cell-A','operator-B',b,reusable,ok,msg)
+ call req(ok.and..not.reusable,'stale operator rejection')
+ call admit_sawf_hierarchical_basis('accept.chk','cell-A','operator-A',1d-8,b,ok,msg)
  call req(ok,'hierarchical admission')
- call admit_sawf_hierarchical_basis('accept.chk','cell-B',1d-8,b,ok,msg)
+ call admit_sawf_hierarchical_basis('accept.chk','cell-B','operator-A',1d-8,b,ok,msg)
  call req(.not.ok,'hierarchical provenance rejection')
  a%face_residual(2,2)=2d-8
  call validate_sawf_acceptance_checkpoint(a,1d-8,ok,msg);call req(.not.ok,'face convergence rejection')

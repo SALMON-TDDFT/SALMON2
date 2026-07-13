@@ -70,6 +70,10 @@ hierarchical handoff is `admit_sawf_hierarchical_basis`, which requires a
 matching operator-complete acceptance checkpoint and re-evaluates the
 configured tolerance.  A missing, stale, incomplete, or failing checkpoint is
 fatal at the handoff; there is no fallback to orbital-only convergence.
+The checkpoint carries separate supercell and operator fingerprints.  The
+operator fingerprint covers the basis schema, WW/WP definitions, DG face
+orientation and penalty convention, fixed-H components, and diagnostic schema;
+both fingerprints must match at admission.
 
 ## Namelist controls
 
