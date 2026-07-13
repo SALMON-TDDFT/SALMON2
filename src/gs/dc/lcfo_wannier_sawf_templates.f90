@@ -29,6 +29,17 @@ module lcfo_wannier_sawf_templates
     real(8) :: gauge_residual=huge(0d0)
   end type
 
+  type,public::t_sawf_acceptance_checkpoint
+    character(256)::supercell_fingerprint=''
+    integer,allocatable::buffer_size(:)
+    real(8),allocatable::center_residual(:),projector_residual(:),overlap_residual(:)
+    real(8),allocatable::ww_residual(:),wp_residual(:),face_residual(:,:)
+    real(8)::global_local_projector_residual=huge(0d0)
+    real(8)::global_local_overlap_residual=huge(0d0)
+    real(8)::global_local_fixed_h_residual=huge(0d0)
+    real(8),allocatable::global_local_face_residual(:)
+  end type
+
   public :: build_sawf_environment_orbits, validate_sawf_template_fingerprint
   public :: validate_sawf_actual_group_operation, replicate_sawf_operator_block
   public :: stitch_sawf_neighbor_gauge, validate_sawf_buffer_convergence
@@ -53,8 +64,131 @@ module lcfo_wannier_sawf_templates
   public :: stitch_sawf_materialized_neighbor_pair
   public :: build_sawf_shared_buffer_point_maps
   public :: build_sawf_fragment_gauge_tree
+  public :: write_sawf_acceptance_checkpoint,read_sawf_acceptance_checkpoint
+  public :: validate_sawf_acceptance_checkpoint
 
 contains
+  subroutine validate_sawf_acceptance_checkpoint(checkpoint,tolerance,ok,message)
+    type(t_sawf_acceptance_checkpoint),intent(in)::checkpoint
+    real(8),intent(in)::tolerance
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::npair,nface
+    ok=.false.;message=''
+    if(tolerance<=0d0.or.len_trim(checkpoint%supercell_fingerprint)==0)then
+      message='SAWF acceptance tolerance or fingerprint is invalid';return
+    end if
+    if(.not.allocated(checkpoint%buffer_size).or..not.allocated(checkpoint%center_residual).or. &
+        .not.allocated(checkpoint%projector_residual).or..not.allocated(checkpoint%overlap_residual).or. &
+        .not.allocated(checkpoint%ww_residual).or..not.allocated(checkpoint%wp_residual).or. &
+        .not.allocated(checkpoint%face_residual).or. &
+        .not.allocated(checkpoint%global_local_face_residual))then
+      message='SAWF acceptance checkpoint is incomplete';return
+    end if
+    if(size(checkpoint%buffer_size)<3.or.any(checkpoint%buffer_size<=0).or. &
+        any(checkpoint%buffer_size(2:)<=checkpoint%buffer_size(:size(checkpoint%buffer_size)-1)))then
+      message='SAWF acceptance requires at least three increasing buffers';return
+    end if
+    npair=size(checkpoint%buffer_size)-1;nface=size(checkpoint%global_local_face_residual)
+    if(nface<=0.or.size(checkpoint%face_residual,1)/=nface.or. &
+        size(checkpoint%center_residual)/=npair.or. &
+        size(checkpoint%projector_residual)/=npair.or.size(checkpoint%overlap_residual)/=npair.or. &
+        size(checkpoint%ww_residual)/=npair.or.size(checkpoint%wp_residual)/=npair.or. &
+        any(shape(checkpoint%face_residual)/=[nface,npair]))then
+      message='SAWF acceptance residual series dimensions are inconsistent';return
+    end if
+    if(.not.all(ieee_is_finite(checkpoint%center_residual)).or. &
+        .not.all(ieee_is_finite(checkpoint%projector_residual)).or. &
+        .not.all(ieee_is_finite(checkpoint%overlap_residual)).or. &
+        .not.all(ieee_is_finite(checkpoint%ww_residual)).or. &
+        .not.all(ieee_is_finite(checkpoint%wp_residual)).or. &
+        .not.all(ieee_is_finite(checkpoint%face_residual)).or. &
+        .not.ieee_is_finite(checkpoint%global_local_projector_residual).or. &
+        .not.ieee_is_finite(checkpoint%global_local_overlap_residual).or. &
+        .not.ieee_is_finite(checkpoint%global_local_fixed_h_residual).or. &
+        .not.all(ieee_is_finite(checkpoint%global_local_face_residual)))then
+      message='SAWF acceptance checkpoint contains non-finite residuals';return
+    end if
+    if(any(checkpoint%center_residual<0d0).or.any(checkpoint%projector_residual<0d0).or. &
+        any(checkpoint%overlap_residual<0d0).or.any(checkpoint%ww_residual<0d0).or. &
+        any(checkpoint%wp_residual<0d0).or.any(checkpoint%face_residual<0d0).or. &
+        checkpoint%global_local_projector_residual<0d0.or. &
+        checkpoint%global_local_overlap_residual<0d0.or. &
+        checkpoint%global_local_fixed_h_residual<0d0.or. &
+        any(checkpoint%global_local_face_residual<0d0))then
+      message='SAWF acceptance residuals must be nonnegative';return
+    end if
+    call validate_sawf_buffer_convergence(checkpoint%center_residual(npair), &
+      checkpoint%projector_residual(npair),checkpoint%overlap_residual(npair), &
+      checkpoint%ww_residual(npair),checkpoint%wp_residual(npair), &
+      checkpoint%face_residual(:,npair),tolerance,ok,message)
+    if(.not.ok)return
+    call validate_sawf_global_local_equivalence(checkpoint%global_local_projector_residual, &
+      checkpoint%global_local_overlap_residual,checkpoint%global_local_fixed_h_residual, &
+      checkpoint%global_local_face_residual,tolerance,ok,message)
+  end subroutine
+
+  subroutine write_sawf_acceptance_checkpoint(filename,checkpoint,ok,message)
+    character(*),intent(in)::filename
+    type(t_sawf_acceptance_checkpoint),intent(in)::checkpoint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    character(32),parameter::magic='SALMON_SAWF_ACCEPTANCE_V1'
+    integer::unit,ios,dims(3)
+    call validate_sawf_acceptance_checkpoint(checkpoint,huge(0d0),ok,message)
+    if(.not.ok)return
+    dims=[size(checkpoint%buffer_size),size(checkpoint%face_residual,1), &
+      size(checkpoint%global_local_face_residual)]
+    open(newunit=unit,file=filename,status='replace',access='stream',form='unformatted',iostat=ios)
+    if(ios/=0)then;ok=.false.;message='cannot open SAWF acceptance checkpoint';return;end if
+    write(unit,iostat=ios)magic,checkpoint%supercell_fingerprint,dims,checkpoint%buffer_size, &
+      checkpoint%center_residual,checkpoint%projector_residual,checkpoint%overlap_residual, &
+      checkpoint%ww_residual,checkpoint%wp_residual,checkpoint%face_residual, &
+      checkpoint%global_local_projector_residual,checkpoint%global_local_overlap_residual, &
+      checkpoint%global_local_fixed_h_residual,checkpoint%global_local_face_residual
+    close(unit);ok=ios==0
+    if(.not.ok)message='cannot write SAWF acceptance checkpoint'
+  end subroutine
+
+  subroutine read_sawf_acceptance_checkpoint(filename,expected_fingerprint,checkpoint,reusable,ok,message)
+    character(*),intent(in)::filename,expected_fingerprint
+    type(t_sawf_acceptance_checkpoint),intent(inout)::checkpoint
+    logical,intent(out)::reusable,ok
+    character(*),intent(out)::message
+    character(32),parameter::expected_magic='SALMON_SAWF_ACCEPTANCE_V1'
+    character(32)::magic
+    integer::unit,ios,dims(3),npair
+    ok=.false.;reusable=.false.;message=''
+    open(newunit=unit,file=filename,status='old',access='stream',form='unformatted',iostat=ios)
+    if(ios/=0)then;message='cannot open SAWF acceptance checkpoint';return;end if
+    read(unit,iostat=ios)magic,checkpoint%supercell_fingerprint,dims
+    if(ios/=0.or.magic/=expected_magic.or.dims(1)<3.or.dims(2)<=0.or.dims(3)<=0)then
+      close(unit);message='SAWF acceptance checkpoint header is invalid';return
+    end if
+    npair=dims(1)-1
+    if(allocated(checkpoint%buffer_size))deallocate(checkpoint%buffer_size)
+    if(allocated(checkpoint%center_residual))deallocate(checkpoint%center_residual)
+    if(allocated(checkpoint%projector_residual))deallocate(checkpoint%projector_residual)
+    if(allocated(checkpoint%overlap_residual))deallocate(checkpoint%overlap_residual)
+    if(allocated(checkpoint%ww_residual))deallocate(checkpoint%ww_residual)
+    if(allocated(checkpoint%wp_residual))deallocate(checkpoint%wp_residual)
+    if(allocated(checkpoint%face_residual))deallocate(checkpoint%face_residual)
+    if(allocated(checkpoint%global_local_face_residual))deallocate(checkpoint%global_local_face_residual)
+    allocate(checkpoint%buffer_size(dims(1)),checkpoint%center_residual(npair), &
+      checkpoint%projector_residual(npair),checkpoint%overlap_residual(npair), &
+      checkpoint%ww_residual(npair),checkpoint%wp_residual(npair), &
+      checkpoint%face_residual(dims(2),npair),checkpoint%global_local_face_residual(dims(3)))
+    read(unit,iostat=ios)checkpoint%buffer_size,checkpoint%center_residual, &
+      checkpoint%projector_residual,checkpoint%overlap_residual,checkpoint%ww_residual, &
+      checkpoint%wp_residual,checkpoint%face_residual,checkpoint%global_local_projector_residual, &
+      checkpoint%global_local_overlap_residual,checkpoint%global_local_fixed_h_residual, &
+      checkpoint%global_local_face_residual
+    close(unit)
+    if(ios/=0)then;message='SAWF acceptance checkpoint payload is invalid';return;end if
+    ok=.true.;reusable=trim(checkpoint%supercell_fingerprint)==trim(expected_fingerprint)
+    if(.not.reusable)message='SAWF acceptance checkpoint supercell fingerprint mismatch'
+  end subroutine
+
   subroutine build_sawf_fragment_gauge_tree(global_mesh,fragment_origin,fragment_shape,parent,ok,message)
     integer,intent(in)::global_mesh(3),fragment_origin(:,:),fragment_shape(:,:)
     integer,intent(out)::parent(:)
