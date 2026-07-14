@@ -4,6 +4,8 @@
     use communication, only: comm_summation, comm_bcast, COMM_GROUP_NULL
     use rt_dg_fragment_ops, only: refresh_pw_coef_cache, apply_overlap_operator_batch, fetch_remote_coef_rows
     use rt_dg_fragment_types, only: s_dg_fragment_rt, density_grid_point_info
+    use dg_wpw_density, only: build_wpw_density
+    use mpi, only: MPI_Abort, MPI_COMM_WORLD
     implicit none
     type(s_dg_fragment_rt), intent(inout) :: dg_frag
     type(s_dft_system),     intent(in)    :: system
@@ -92,6 +94,8 @@
     complex(8), allocatable :: phase_cache(:,:), coef_pw_blk(:,:), pw_tmp_z(:,:)
     complex(8), allocatable :: density_mix(:,:,:), density_mix_partial(:,:), basis_mix_blk(:,:), density_mix_tmp(:,:)
     complex(8), allocatable :: basis_mix_blk_t(:,:), density_mix_tmp_t(:,:)
+    complex(8), allocatable :: psi_w_common(:,:), psi_p_common(:,:)
+    real(8), allocatable :: rho_direct_common(:), rho_ww_common(:), rho_wp_common(:), rho_pp_common(:)
     complex(8), allocatable :: transform_frag_spin(:,:,:), transform_pw_spin(:,:,:)
     complex(8), allocatable :: mix_transform_spin(:,:), mix_overlap_spin(:,:), s_mix(:,:), s_mix_work(:,:)
     complex(8), allocatable :: coef_mix_eff(:,:), coef_mix_metric(:,:), coef_mix_spin(:,:,:)
@@ -109,6 +113,8 @@
     integer :: env_status
     integer :: rho_mix_mode_kind
     integer :: info_lapack
+    integer :: density_kernel_info
+    integer :: density_abort_ierr
     integer :: itt_tag
     logical :: need_full_coef_mix_spin
     logical :: density_on_frag_root
@@ -523,6 +529,9 @@
       allocate(density_mix_tmp(grid_block_size, max_mixed_basis))
       allocate(basis_mix_blk_t(max_mixed_basis, grid_block_size))
       allocate(density_mix_tmp_t(max_mixed_basis, grid_block_size))
+      allocate(psi_w_common(grid_block_size,state_block_size),psi_p_common(grid_block_size,state_block_size))
+      allocate(rho_direct_common(grid_block_size),rho_ww_common(grid_block_size), &
+        rho_wp_common(grid_block_size),rho_pp_common(grid_block_size))
       allocate(transform_frag_spin(dg_frag%nstate_frag, max_mixed_basis, system%nspin))
       allocate(n_basis_mix_spin(system%nspin))
       n_basis_mix_spin(:) = 0
@@ -1217,6 +1226,8 @@
                     basis_mix_blk(1:npt_blk, 1:nbatch), npt_blk * nbatch, dg_frag%icomm_frag, 0)
                   if (dg_frag%is_frag_root) then
                     density_mix_tmp(1:npt_blk, 1:nbatch) = basis_mix_blk(1:npt_blk, 1:nbatch)
+                    psi_w_common(1:npt_blk,1:nbatch)=density_mix_tmp(1:npt_blk,1:nbatch)
+                    psi_p_common(1:npt_blk,1:nbatch)=(0d0,0d0)
                     if (n_pw > 0) then
                       do ipw0 = 1, n_pw, pw_block_size
                         npw_blk = min(pw_block_size, n_pw - ipw0 + 1)
@@ -1224,28 +1235,30 @@
                           transform_pw_spin(ipw0:ipw0+npw_blk-1, 1:n_basis_mix, ispin), &
                           coef_mix_spin(1:n_basis_mix, io0:io0+nbatch-1, ispin))
                         call zgemm('N', 'N', npt_blk, nbatch, npw_blk, zone, phase_cache(1, ipw0), grid_block_size, &
-                                   coef_pw_blk, pw_block_size, zone, density_mix_tmp, grid_block_size)
+                                   coef_pw_blk, pw_block_size, zone, psi_p_common, grid_block_size)
                       end do
                     end if
                     occ_blk(1:nbatch) = occ_cache(io0:io0+nbatch-1)
-                    do io = 1, nbatch
-                      occ_factor = occ_blk(io)
-                      if (occ_factor <= 0.0d0) cycle
-!$omp parallel do private(igrid) schedule(static)
-                      do igrid = 1, npt_blk
-                        rho_blk(igrid) = rho_blk(igrid) + occ_factor * &
-                          (real(density_mix_tmp(igrid, io), kind=8)**2 + aimag(density_mix_tmp(igrid, io))**2)
-                      end do
-!$omp end parallel do
-                    end do
+                    call build_wpw_density(psi_w_common(1:npt_blk,1:nbatch),psi_p_common(1:npt_blk,1:nbatch), &
+                      occ_blk(1:nbatch),npt_blk,nbatch,rho_direct_common(1:npt_blk),rho_ww_common(1:npt_blk), &
+                      rho_wp_common(1:npt_blk),rho_pp_common(1:npt_blk),density_kernel_info)
+                    if(density_kernel_info/=0)then
+                      write(*,'(a,i0,3(a,i0))')'[FATAL] DG mixed density kernel: rank=',dg_frag%id, &
+                        ' fragment=',ifrag,' spin=',ispin,' info=',density_kernel_info
+                      call MPI_Abort(MPI_COMM_WORLD,density_kernel_info,density_abort_ierr)
+                      stop 1
+                    endif
+                    rho_blk(1:npt_blk)=rho_blk(1:npt_blk)+rho_direct_common(1:npt_blk)
                   end if
                 end do
               else
+                if(dg_frag%is_frag_root)then
                 basis_mix_blk(1:npt_blk, 1:n_basis_mix) = (0.0d0, 0.0d0)
                 if (nbf_frag_count > 0) then
                   basis_mix_blk(1:npt_blk, 1:n_basis_mix) = matmul(phi_blk(1:npt_blk, nbf_frag_is:nbf_frag_ie), &
                     transform_frag_spin(ib_s_frag:ib_e_frag, 1:n_basis_mix, ispin))
                 end if
+                density_mix_tmp(1:npt_blk,1:n_basis_mix)=basis_mix_blk(1:npt_blk,1:n_basis_mix)
                 if (n_pw > 0) then
                   call zgemm('N', 'N', npt_blk, n_basis_mix, n_pw, zone, phase_cache, grid_block_size, &
                     transform_pw_spin(1, 1, ispin), n_pw, zone, basis_mix_blk, grid_block_size)
@@ -1263,18 +1276,22 @@
                     nbatch = min(state_block_size, nocc_spin - io0 + 1)
                     call zgemm('N', 'N', npt_blk, nbatch, n_basis_mix, zone, basis_mix_blk, grid_block_size, &
                       coef_mix_spin(1, io0, ispin), max_mixed_basis, zzero, pw_tmp_z, grid_block_size)
+                    call zgemm('N', 'N', npt_blk, nbatch, n_basis_mix, zone, density_mix_tmp, grid_block_size, &
+                      coef_mix_spin(1, io0, ispin), max_mixed_basis, zzero, psi_w_common, grid_block_size)
+                    psi_p_common(1:npt_blk,1:nbatch)=pw_tmp_z(1:npt_blk,1:nbatch)-psi_w_common(1:npt_blk,1:nbatch)
                     occ_blk(1:nbatch) = occ_cache(io0:io0+nbatch-1)
-                    do io = 1, nbatch
-                      occ_factor = occ_blk(io)
-                      if (occ_factor <= 0.0d0) cycle
-!$omp parallel do private(igrid) schedule(static)
-                      do igrid = 1, npt_blk
-                        rho_blk(igrid) = rho_blk(igrid) + occ_factor * &
-                          (real(pw_tmp_z(igrid, io), kind=8)**2 + aimag(pw_tmp_z(igrid, io))**2)
-                      end do
-!$omp end parallel do
-                    end do
+                    call build_wpw_density(psi_w_common(1:npt_blk,1:nbatch),psi_p_common(1:npt_blk,1:nbatch), &
+                      occ_blk(1:nbatch),npt_blk,nbatch,rho_direct_common(1:npt_blk),rho_ww_common(1:npt_blk), &
+                      rho_wp_common(1:npt_blk),rho_pp_common(1:npt_blk),density_kernel_info)
+                    if(density_kernel_info/=0)then
+                      write(*,'(a,i0,3(a,i0))')'[FATAL] DG mixed density kernel: rank=',dg_frag%id, &
+                        ' fragment=',ifrag,' spin=',ispin,' info=',density_kernel_info
+                      call MPI_Abort(MPI_COMM_WORLD,density_kernel_info,density_abort_ierr)
+                      stop 1
+                    endif
+                    rho_blk(1:npt_blk)=rho_blk(1:npt_blk)+rho_direct_common(1:npt_blk)
                   end do
+                endif
               end if
               if (dg_frag%isize_frag > 1 .and. dg_frag%icomm_frag /= COMM_GROUP_NULL .and. &
                   .not. dg_frag%parallel_mode_orbital) then
@@ -2083,6 +2100,8 @@
     if (allocated(density_mix_tmp)) deallocate(density_mix_tmp)
     if (allocated(basis_mix_blk_t)) deallocate(basis_mix_blk_t)
     if (allocated(density_mix_tmp_t)) deallocate(density_mix_tmp_t)
+    if (allocated(psi_w_common)) deallocate(psi_w_common,psi_p_common)
+    if (allocated(rho_direct_common)) deallocate(rho_direct_common,rho_ww_common,rho_wp_common,rho_pp_common)
     if (allocated(transform_frag_spin)) deallocate(transform_frag_spin)
     if (allocated(transform_pw_spin)) deallocate(transform_pw_spin)
     if (allocated(mix_transform_spin)) deallocate(mix_transform_spin)
