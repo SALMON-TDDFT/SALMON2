@@ -12,6 +12,7 @@ set(SOURCES
    total_energy.f90
    lattice.f90
    force.f90
+   dg_generalized_algebra.f90
    )
 
 if (IS_FUJITSU_COMPILER)
