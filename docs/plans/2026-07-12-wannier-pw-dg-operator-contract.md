@@ -94,6 +94,18 @@ Let `B = {W_(K mu)} union {P_(K G)}`.  Covariant matrices are
   contributions from the formula above.  It is a component of `H`, not a
   separate Hamiltonian and not an MPI halo term.
 
+The support qualifications above apply to local volume and face terms, not to
+the separable nonlocal pseudopotential.  For
+`V_nl=sum_p |beta_p> D_p <beta_p|`, the Hamiltonian retains every nonzero
+projector-mediated block
+
+`<B_a|V_nl|B_b> = sum_p <B_a|beta_p> D_p <beta_p|B_b>`.
+
+This rule is independent of direct support intersection and includes WW, WP,
+PW, and PP pairs that are not face neighbors when both basis functions overlap
+the same projector.  Nonlocal sparsity may be inferred only from vanishing
+projector overlaps, never merely from basis-support or fragment adjacency.
+
 `S` contains every support-overlap block and no face integral.  Its sparsity is
 set by the actual Wannier and window supports; it is not restricted to immediate
 face neighbors when a configured window reaches farther.  All retained mixed
@@ -190,6 +202,23 @@ matrix is assembled entirely by volume quadrature.  Applying the global polar
 factor and spectral logarithm does not create an element-face bilinear form.
 DG face effects therefore enter through `H` in the S-metric commutator, not
 through an independently postulated correction to `Z_S`.
+
+The periodic `Z_S` is the phase/polar/log operator defined above; it is not
+identified with the finite-space projection of a raw sawtooth coordinate.
+Consequently, the numerical relation is checked directly in the observable
+form.  A deterministic generalized model propagates the same initial state
+with the complete `H_DG=H_volume+H_face`, obtains `d<Pz>/dt` by a centered time
+difference, and compares it with the expectation of
+`i(H_DG S^-1 Z_S-Z_S S^-1 H_DG)`.  The finite-difference dPz/dt residual must
+converge at the expected time-difference order.
+
+The same fixture also evaluates a velocity in which `H_face` is deliberately
+omitted from the commutator while propagation retains it.  Its face-omitted velocity residual must be nonzero.
+This demonstrates that DG face physics
+enters velocity through `H_DG`; it does not justify or require a separate face
+bilinear form in `Z_S`.  A direct-coordinate product-rule test is rejected for
+this periodic contract because projection, polar unitarization, and the matrix
+logarithm do not commute in a finite mixed basis.
 
 The rejected alternative is a nonzero interface position correction added
 without a weak-form derivation and a small-model identity test.  Such a term
