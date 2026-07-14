@@ -1,5 +1,6 @@
 set(SOURCES
     dc_fragment_geometry.f90
+    dg_wpw_lda_hartree.f90
     dcdft.f90
     dcdft_soi.f90
     lcfo_wannier_sawf.f90
