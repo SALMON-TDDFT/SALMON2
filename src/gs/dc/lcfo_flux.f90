@@ -5235,13 +5235,7 @@ contains
         call write_local_wannier_seed()
       if(yn_dc_lcfo_wannier == 'y' .and. yn_dc_lcfo_wannier_cluster == 'y' .and. &
          yn_dc_lcfo_local_wannier /= 'y' .and. yn_dc_lcfo_diag == 'y') then
-        if(all(wannier_cluster_size(1:3) == 1)) then
-          call write_wannier90_global_bpw_seed()
-        else if(dc%id_tot == 0) then
-          write(*,'(1x,a,3(i0,1x),a)') &
-            "[DC-LCFO-W90-BPW] skip fragment BPW: cluster_size=", &
-            wannier_cluster_size(1:3), " requires cluster/global BPW export."
-        end if
+        call write_wannier90_global_bpw_seed()
       end if
 
     end subroutine output
@@ -6295,6 +6289,9 @@ contains
       if(failure/=0) call lcfo_sawf_fatal('SAWF closed-seed source cache failed')
       call build_sawf_closed_fragment_seed_basis(nband_wann,mesh,fragment_origin,fragment_shape, &
         operations,fragment_maps,cache,closed,local_ok,message)
+      if(.not.local_ok) write(*,'(1x,a,i0,a,i0,2a)') &
+        '[FATAL] SAWF closed-seed basis rank=',dc%id_tot,' fragment=',dc%i_frag, &
+        ' reason=',trim(message)
       failure=merge(0,1,local_ok); call comm_get_max(failure,dc%icomm_tot)
       if(failure/=0) call lcfo_sawf_fatal('SAWF closed-seed basis construction failed')
 
@@ -6699,7 +6696,8 @@ contains
       use filesystem, only: atomic_create_directory
       use salmon_global, only: izatom, sysname, wannier_num_wann, &
         wannier_site_symmetry, wannier_symmetry_file, wannier_symmetry_tolerance, &
-        wannier_sawf_generation,wannier_sawf_structure_class,wannier_sawf_gauge_tolerance
+        wannier_sawf_generation,wannier_sawf_structure_class,wannier_sawf_gauge_tolerance, &
+        wannier_sawf_hamiltonian_tolerance
       use salmon_math, only: matrix_inverse
       use, intrinsic :: iso_fortran_env, only: int64
       implicit none
@@ -6727,6 +6725,7 @@ contains
       character(256), allocatable :: sawf_environment_key(:)
       real(8) :: a1(3), a2(3), a3(3), lattice(3,3), lattice_inverse(3,3)
       real(8) :: singular_min, singular_max, closure_residual, closure_tolerance
+      real(8) :: hamiltonian_tolerance
       real(8) :: max_grid_residual,center_grid(3)
       real(8), allocatable :: fractional_positions(:,:),d_wann_real(:,:,:)
       real(8), allocatable :: sawf_vacuum_fraction(:)
@@ -7010,6 +7009,10 @@ contains
       split_fragment_global_mode=(local_failure/=0)
       if(split_fragment_global_mode) call lcfo_sawf_fatal( &
         'SAWF split-fragment symmetry requires a constructed global symmetry-closed basis')
+      closure_tolerance=max(1.0d-10,wannier_symmetry_tolerance)
+      hamiltonian_tolerance=closure_tolerance
+      if(wannier_sawf_hamiltonian_tolerance>0d0) &
+        hamiltonian_tolerance=max(closure_tolerance,wannier_sawf_hamiltonian_tolerance)
       failure=0; message=''
       if(dc%id_tot == 0) then
         if(local_ok) then
@@ -7019,7 +7022,8 @@ contains
         if(local_ok) then
           dmn_filename=trim(dc%base_directory)//trim(sysname)//'.dmn'
           call begin_sawf_dmn(writer,dmn_filename,nband_wann,wannier_num_wann, &
-            size(symmetry_operations),max(1.0d-10,wannier_symmetry_tolerance),local_ok,message)
+            size(symmetry_operations),closure_tolerance,local_ok,message, &
+            hamiltonian_tolerance=hamiltonian_tolerance)
         end if
         failure=merge(0,1,local_ok)
       end if
@@ -7030,7 +7034,6 @@ contains
         call lcfo_sawf_fatal('SAWF DMN initialization failed: '//trim(message))
       end if
 
-      closure_tolerance=max(1.0d-10,wannier_symmetry_tolerance)
       allocate(d_wann_set(wannier_num_wann,wannier_num_wann,size(symmetry_operations)), &
         stat=allocation_status)
       if(allocation_status/=0)call lcfo_sawf_fatal('SAWF D_wann representation-set allocation failed')
@@ -7038,6 +7041,7 @@ contains
         allocate(d_band_set(nband_wann,nband_wann,size(symmetry_operations)),stat=allocation_status)
         if(allocation_status/=0) call lcfo_sawf_fatal('SAWF representation-set allocation failed')
       end if
+      local_ok=.true.; message=''
       call prepare_sawf_fragment_state_cache(nband_wann,fragment_shape,state_cache,local_ok,message)
       failure=merge(0,1,local_ok)
       if(failure/=0) write(*,'(1x,a,i0,2a)') '[DC-LCFO-SAWF-DMN] rank=',dc%id_tot, &
@@ -7250,7 +7254,8 @@ contains
         dmn_filename=trim(sawf_seed_bundles(ibundle)%directory)//'/'// &
           trim(sawf_seed_bundles(ibundle)%seedname)//'.dmn'
         call begin_sawf_dmn(sawf_local_writer,dmn_filename,size(sawf_local_states,2), &
-          size(sawf_selected_channels),size(sawf_local_stabilizer),closure_tolerance,local_ok,message)
+          size(sawf_selected_channels),size(sawf_local_stabilizer),closure_tolerance,local_ok,message, &
+          hamiltonian_tolerance=hamiltonian_tolerance)
         if(.not.local_ok)call lcfo_sawf_fatal('SAWF local DMN initialization failed: '//trim(message))
         do iop=1,size(sawf_local_stabilizer)
           call append_sawf_dmn_operation(sawf_local_writer,iop,sawf_local_d_wann(:,:,iop), &
@@ -7544,10 +7549,11 @@ contains
         call clear_sawf_fragment_state_cache(state_cache)
         call lcfo_sawf_fatal('SAWF DMN group validation/publication failed: '//trim(message))
       end if
-      if(dc%id_tot == 0) write(*,'(1x,a,i0,a,i0,5(a,es13.5))') &
+      if(dc%id_tot == 0) write(*,'(1x,a,i0,a,i0,6(a,es13.5))') &
         '[DC-LCFO-SAWF-DMN] published operations=',size(symmetry_operations), &
         ' bands=',nband_wann,' unitarity_max=',writer%max_unitarity, &
-        ' hamiltonian_max=',writer%max_hamiltonian,' amn_max=',writer%max_amn, &
+        ' hamiltonian_max=',writer%max_hamiltonian, &
+        ' hamiltonian_tolerance=',writer%hamiltonian_tolerance,' amn_max=',writer%max_amn, &
         ' group_wann_max=',writer%max_group_wann,' group_band_max=',writer%max_group_band
       call clear_sawf_fragment_state_cache(state_cache)
       call clear_sawf_closed_basis(closed_basis)
@@ -8052,6 +8058,7 @@ contains
         ' singular_min=',closed%singular_values(closed%nbasis)
       ok=.true.; message=''
     end subroutine build_sawf_closed_fragment_seed_basis
+
 
     subroutine build_sawf_dmn_operation_fragment_local(nband_wann,mesh,fragment_origin, &
         fragment_shape,operation_index,operation,grid_tolerance,cache,d_band_local,ok,message)
@@ -8593,6 +8600,15 @@ contains
       call end_parallel
       stop 1
     end subroutine lcfo_sawf_fatal
+
+    subroutine lcfo_sawf_rank_local_fatal(message)
+      implicit none
+      character(*), intent(in) :: message
+
+      write(*,'(1x,a,i0,a,i0,2a)') '[FATAL] SAWF rank-local rank=',dc%id_tot, &
+        ' fragment=',dc%i_frag,' reason=',trim(message)
+      stop 1
+    end subroutine lcfo_sawf_rank_local_fatal
 
     subroutine write_pseudo_channel_projection_block(iunit, ok, message)
       use salmon_global, only: wannier_site_symmetry, wannier_num_wann
@@ -9197,7 +9213,7 @@ contains
       integer, intent(in) :: nbasis, nkeep
       integer, intent(in) :: nxyz_domain(3), nxyz_buffer_seed(3), nxyz_box(3)
       real(8), intent(in) :: wcoef(nbasis,nkeep)
-      integer :: iunit, ibasis_read, ispin_read, iw
+      integer :: iunit, ibasis_read, ispin_read, iw, io_status
       integer :: magic_file, version_file, nspin_file, nstate_frag_file
       integer :: nxyz_domain_file(3), nxyz_buffer_file(3)
       integer :: axis, side, face, npts, face_pt
@@ -9207,48 +9223,88 @@ contains
       real(8), allocatable :: face_u(:,:), face_dn(:,:)
       real(8) :: grad_axis, area_weight, alpha
       character(256) :: filename
+      character(512) :: io_message
       real(8), parameter :: surface_penalty_factor = 10.0d0
 
       if(dc%id_frag /= 0) return
-      if(nspin /= 1) return
+      if(nspin /= 1) call lcfo_sawf_rank_local_fatal( &
+        'global Wannier trace export supports nspin=1 only')
+      if(any(nxyz_buffer_seed(1:3)<size(stencil%coef_nab,1))) &
+        call lcfo_sawf_rank_local_fatal( &
+          'global Wannier trace export buffer is smaller than finite-difference stencil radius')
 
       allocate(phi_tmp(nxyz_box(1),nxyz_box(2),nxyz_box(3)))
       allocate(phi_wann(nxyz_box(1),nxyz_box(2),nxyz_box(3),nkeep))
       allocate(n_basis_file(nspin))
       phi_wann = 0d0
 
-      filename = trim(base_directory)//binfile_bfb
-      iunit = get_filehandle()
-      open(iunit,file=filename,form='unformatted',access='stream',status='old')
-      read(iunit) magic_file, version_file
-      if(magic_file /= basis_buffer_magic .or. version_file /= basis_buffer_version) &
-        stop "DC-LCFO global Wannier trace export: invalid buffered basis header."
-      read(iunit) nxyz_domain_file(1:3), nxyz_buffer_file(1:3), nspin_file, nstate_frag_file
-      if(any(nxyz_domain_file(1:3) /= nxyz_domain(1:3)) .or. &
-         any(nxyz_buffer_file(1:3) /= nxyz_buffer_seed(1:3)) .or. &
-         nspin_file /= nspin .or. nstate_frag_file /= dc%nstate_frag) &
-        stop "DC-LCFO global Wannier trace export: buffered basis metadata mismatch."
-      read(iunit) n_basis_file(1:nspin)
-      if(n_basis_file(1) < nbasis) stop "DC-LCFO global Wannier trace export: basis count mismatch."
-      do ispin_read=1,nspin_file
-        do ibasis_read=1,nstate_frag_file
-          read(iunit) phi_tmp(1:nxyz_box(1),1:nxyz_box(2),1:nxyz_box(3))
-          if(ispin_read /= 1 .or. ibasis_read > nbasis) cycle
+      if(sawf_explicit_basis_active) then
+        if(.not.allocated(sawf_explicit_buffer) .or. &
+           any(shape(sawf_explicit_buffer(:,:,:,1,1))/=nxyz_box) .or. &
+           size(sawf_explicit_buffer,5)<nbasis) &
+          call lcfo_sawf_rank_local_fatal( &
+            'global Wannier trace export closed SAWF buffer basis count mismatch')
+        do ibasis_read=1,nbasis
           do iw=1,nkeep
             if(abs(wcoef(ibasis_read,iw)) <= 0d0) cycle
             phi_wann(:,:,:,iw) = phi_wann(:,:,:,iw) + &
-              wcoef(ibasis_read,iw) * phi_tmp(:,:,:)
+              wcoef(ibasis_read,iw) * sawf_explicit_buffer(:,:,:,1,ibasis_read)
           end do
         end do
-      end do
-      close(iunit)
+      else
+        filename = trim(base_directory)//binfile_bfb
+        iunit = get_filehandle()
+        open(iunit,file=filename,form='unformatted',access='stream',status='old', &
+          iostat=io_status,iomsg=io_message)
+        if(io_status/=0) call lcfo_sawf_rank_local_fatal( &
+          'global Wannier trace export cannot open buffered basis: '//trim(io_message))
+        read(iunit,iostat=io_status,iomsg=io_message) magic_file, version_file
+        if(io_status/=0) call lcfo_sawf_rank_local_fatal( &
+          'global Wannier trace export cannot read buffered basis header: '//trim(io_message))
+        if(magic_file /= basis_buffer_magic .or. version_file /= basis_buffer_version) &
+          call lcfo_sawf_rank_local_fatal('global Wannier trace export invalid buffered basis header')
+        read(iunit,iostat=io_status,iomsg=io_message) nxyz_domain_file(1:3), &
+          nxyz_buffer_file(1:3), nspin_file, nstate_frag_file
+        if(io_status/=0) call lcfo_sawf_rank_local_fatal( &
+          'global Wannier trace export cannot read buffered basis metadata: '//trim(io_message))
+        if(any(nxyz_domain_file(1:3) /= nxyz_domain(1:3)) .or. &
+           any(nxyz_buffer_file(1:3) /= nxyz_buffer_seed(1:3)) .or. &
+           nspin_file /= nspin .or. nstate_frag_file /= dc%nstate_frag) &
+          call lcfo_sawf_rank_local_fatal('global Wannier trace export buffered basis metadata mismatch')
+        read(iunit,iostat=io_status,iomsg=io_message) n_basis_file(1:nspin)
+        if(io_status/=0) call lcfo_sawf_rank_local_fatal( &
+          'global Wannier trace export cannot read buffered basis count: '//trim(io_message))
+        if(n_basis_file(1) < nbasis) call lcfo_sawf_rank_local_fatal( &
+          'global Wannier trace export basis count mismatch')
+        do ispin_read=1,nspin_file
+          do ibasis_read=1,nstate_frag_file
+            read(iunit,iostat=io_status,iomsg=io_message) &
+              phi_tmp(1:nxyz_box(1),1:nxyz_box(2),1:nxyz_box(3))
+            if(io_status/=0) call lcfo_sawf_rank_local_fatal( &
+              'global Wannier trace export cannot read buffered basis payload: '//trim(io_message))
+            if(ispin_read /= 1 .or. ibasis_read > nbasis) cycle
+            do iw=1,nkeep
+              if(abs(wcoef(ibasis_read,iw)) <= 0d0) cycle
+              phi_wann(:,:,:,iw) = phi_wann(:,:,:,iw) + wcoef(ibasis_read,iw) * phi_tmp(:,:,:)
+            end do
+          end do
+        end do
+        close(iunit)
+      end if
 
       filename = trim(base_directory)//binfile_bpwt
       iunit = get_filehandle()
-      open(iunit,file=filename,form='unformatted',access='stream',status='replace')
-      write(iunit) buffer_periodic_wannier_trace_magic, buffer_periodic_wannier_trace_version
-      write(iunit) dc%i_frag, nxyz_domain(1:3), nxyz_buffer_seed(1:3), nxyz_box(1:3)
-      write(iunit) system%hgs(1:3), hvol, nkeep
+      open(iunit,file=filename,form='unformatted',access='stream',status='replace', &
+        iostat=io_status,iomsg=io_message)
+      if(io_status/=0) call lcfo_sawf_rank_local_fatal( &
+        'global Wannier trace export cannot open output: '//trim(io_message))
+      write(iunit,iostat=io_status,iomsg=io_message) &
+        buffer_periodic_wannier_trace_magic, buffer_periodic_wannier_trace_version
+      if(io_status==0) write(iunit,iostat=io_status,iomsg=io_message) &
+        dc%i_frag, nxyz_domain(1:3), nxyz_buffer_seed(1:3), nxyz_box(1:3)
+      if(io_status==0) write(iunit,iostat=io_status,iomsg=io_message) system%hgs(1:3), hvol, nkeep
+      if(io_status/=0) call lcfo_sawf_rank_local_fatal( &
+        'global Wannier trace export cannot write output header: '//trim(io_message))
       do face=1,6
         axis = (face + 1) / 2
         if(mod(face,2) == 1) then
@@ -9292,12 +9348,16 @@ contains
         end do
         end do
         end do
-        write(iunit) axis, side, npts, area_weight, alpha
-        write(iunit) face_u(1:npts,1:nkeep)
-        write(iunit) face_dn(1:npts,1:nkeep)
+        write(iunit,iostat=io_status,iomsg=io_message) axis, side, npts, area_weight, alpha
+        if(io_status==0) write(iunit,iostat=io_status,iomsg=io_message) face_u(1:npts,1:nkeep)
+        if(io_status==0) write(iunit,iostat=io_status,iomsg=io_message) face_dn(1:npts,1:nkeep)
+        if(io_status/=0) call lcfo_sawf_rank_local_fatal( &
+          'global Wannier trace export cannot write face payload: '//trim(io_message))
         deallocate(face_u, face_dn)
       end do
-      close(iunit)
+      close(iunit,iostat=io_status,iomsg=io_message)
+      if(io_status/=0) call lcfo_sawf_rank_local_fatal( &
+        'global Wannier trace export cannot close output: '//trim(io_message))
       write(*,'(1x,a,i0,a,a)') "[DC-LCFO-W90-BPW-TRACE] fragment=", dc%i_frag, &
         " wrote ", trim(filename)
 

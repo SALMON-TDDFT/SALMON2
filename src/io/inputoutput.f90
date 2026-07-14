@@ -223,6 +223,7 @@ contains
       & yn_self_checkpoint,  &
       & checkpoint_interval, &
       & yn_reset_step_restart, &
+      & yn_reset_occupation_restart, &
       & read_gs_restart_data,  &
       & write_gs_restart_data, &
       & time_shutdown,         &
@@ -689,6 +690,8 @@ contains
       & wannier_symmetry_file, &
       & wannier_symmetry_tolerance, &
       & wannier_sawf_generation, &
+      & wannier_sawf_global_reference_source, &
+      & wannier_sawf_initial_wavefunction_directory, &
       & wannier_sawf_symmetry_scope, &
       & wannier_sawf_structure_class, &
       & wannier_sawf_parent_symmetry_file, &
@@ -696,6 +699,7 @@ contains
       & wannier_sawf_buffer_steps, &
       & wannier_sawf_gauge_tolerance, &
       & wannier_sawf_buffer_tolerance, &
+      & wannier_sawf_hamiltonian_tolerance, &
       & wannier_sawf_equivalence_tolerance, &
       & wannier_sawf_vacuum_density_threshold, &
       & dg_wannier_symmetry_gauge, &
@@ -773,6 +777,7 @@ contains
     yn_self_checkpoint    = 'n'
     checkpoint_interval   = -1
     yn_reset_step_restart = 'n'
+    yn_reset_occupation_restart = 'n'
     read_gs_restart_data  = 'all'
     write_gs_restart_data = 'all'
     time_shutdown         = -1d0
@@ -1232,11 +1237,14 @@ contains
     wannier_symmetry_file = 'sym.dat'
     wannier_symmetry_tolerance = 1d-6
     wannier_sawf_generation = 'monolithic'
+    wannier_sawf_global_reference_source = 'lcfo'
+    wannier_sawf_initial_wavefunction_directory = ''
     wannier_sawf_symmetry_scope = 'actual'
     wannier_sawf_structure_class = 'auto'
     wannier_sawf_parent_symmetry_file = ''
     wannier_sawf_cache_directory = 'sawf_templates'
     wannier_sawf_buffer_steps = [1,2,3]
+    wannier_sawf_hamiltonian_tolerance = 0d0
     wannier_sawf_gauge_tolerance = 1d-8
     wannier_sawf_buffer_tolerance = 1d-6
     wannier_sawf_equivalence_tolerance = 1d-8
@@ -1412,6 +1420,7 @@ contains
       checkpoint_interval = -1 ! FIXME: workaround for zero-divide problem
     call comm_bcast(checkpoint_interval   ,nproc_group_global)
     call comm_bcast(yn_reset_step_restart ,nproc_group_global)
+    call comm_bcast(yn_reset_occupation_restart,nproc_group_global)
     call comm_bcast(read_gs_restart_data  ,nproc_group_global)
     call comm_bcast(write_gs_restart_data ,nproc_group_global)
     call comm_bcast(time_shutdown         ,nproc_group_global)
@@ -1984,11 +1993,14 @@ contains
     call comm_bcast(wannier_symmetry_file, nproc_group_global)
     call comm_bcast(wannier_symmetry_tolerance, nproc_group_global)
     call comm_bcast(wannier_sawf_generation, nproc_group_global)
+    call comm_bcast(wannier_sawf_global_reference_source, nproc_group_global)
+    call comm_bcast(wannier_sawf_initial_wavefunction_directory, nproc_group_global)
     call comm_bcast(wannier_sawf_symmetry_scope, nproc_group_global)
     call comm_bcast(wannier_sawf_structure_class, nproc_group_global)
     call comm_bcast(wannier_sawf_parent_symmetry_file, nproc_group_global)
     call comm_bcast(wannier_sawf_cache_directory, nproc_group_global)
     call comm_bcast(wannier_sawf_buffer_steps, nproc_group_global)
+    call comm_bcast(wannier_sawf_hamiltonian_tolerance, nproc_group_global)
     call comm_bcast(wannier_sawf_gauge_tolerance, nproc_group_global)
     call comm_bcast(wannier_sawf_buffer_tolerance, nproc_group_global)
     call comm_bcast(wannier_sawf_equivalence_tolerance, nproc_group_global)
@@ -2403,6 +2415,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_self_checkpoint', yn_self_checkpoint
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'checkpoint_interval', checkpoint_interval
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_reset_step_restart', yn_reset_step_restart
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_reset_occupation_restart', yn_reset_occupation_restart
       write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_restart_data', trim(read_gs_restart_data)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_restart_data', trim(write_gs_restart_data)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'time_shutdown', time_shutdown
@@ -3071,6 +3084,10 @@ contains
         trim(wannier_symmetry_file)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_symmetry_tolerance', wannier_symmetry_tolerance
       write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_generation', trim(wannier_sawf_generation)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_global_reference_source', &
+        trim(wannier_sawf_global_reference_source)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_initial_wavefunction_directory', &
+        trim(wannier_sawf_initial_wavefunction_directory)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_symmetry_scope', trim(wannier_sawf_symmetry_scope)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_structure_class', trim(wannier_sawf_structure_class)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_parent_symmetry_file', &
@@ -3082,6 +3099,8 @@ contains
         wannier_sawf_gauge_tolerance
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_sawf_buffer_tolerance', &
         wannier_sawf_buffer_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_sawf_hamiltonian_tolerance', &
+        wannier_sawf_hamiltonian_tolerance
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_sawf_equivalence_tolerance', &
         wannier_sawf_equivalence_tolerance
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_sawf_vacuum_density_threshold', &
@@ -3132,6 +3151,7 @@ contains
     call yn_argument_check(yn_restart)
     call yn_argument_check(yn_self_checkpoint)
     call yn_argument_check(yn_reset_step_restart)
+    call yn_argument_check(yn_reset_occupation_restart)
     call yn_argument_check(yn_ffte)
     call yn_argument_check(yn_fftw)
     call yn_argument_check(yn_scalapack)
@@ -3222,6 +3242,14 @@ contains
     case default
       call sawf_input_fatal("wannier_sawf_generation must be monolithic or hierarchical")
     end select
+    select case(trim(wannier_sawf_global_reference_source))
+    case('lcfo')
+    case default
+      call sawf_input_fatal("accepted SAWF global reference source must be lcfo")
+    end select
+    if(len_trim(wannier_sawf_initial_wavefunction_directory)>0) then
+      call sawf_input_fatal("conventional initial wavefunction seed is deferred until pre-diagonalization support")
+    end if
     if(trim(wannier_sawf_symmetry_scope)/='actual') then
       call sawf_input_fatal("wannier_sawf_symmetry_scope must be actual; parent symmetry cannot be forced")
     end if
@@ -3235,6 +3263,7 @@ contains
       call sawf_input_fatal("wannier_sawf_buffer_steps must contain three increasing nonnegative buffers")
     end if
     if(wannier_sawf_gauge_tolerance<=0d0 .or. wannier_sawf_buffer_tolerance<=0d0 .or. &
+        wannier_sawf_hamiltonian_tolerance<0d0 .or. &
         wannier_sawf_equivalence_tolerance<=0d0) then
       call sawf_input_fatal("SAWF scalable-construction tolerances must be positive")
     end if

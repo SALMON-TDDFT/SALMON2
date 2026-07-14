@@ -57,6 +57,7 @@ module salmon_global
   character(1)   :: yn_self_checkpoint
   integer        :: checkpoint_interval
   character(1)   :: yn_reset_step_restart
+  character(1)   :: yn_reset_occupation_restart
   character(256) :: read_gs_restart_data
   character(256) :: write_gs_restart_data
   real(8)        :: time_shutdown
@@ -538,6 +539,8 @@ character(256),allocatable :: atom_name(:)
   character(256) :: wannier_symmetry_file
   real(8)        :: wannier_symmetry_tolerance
   character(16)  :: wannier_sawf_generation
+  character(32)  :: wannier_sawf_global_reference_source
+  character(256) :: wannier_sawf_initial_wavefunction_directory
   character(16)  :: wannier_sawf_symmetry_scope
   character(16)  :: wannier_sawf_structure_class
   character(256) :: wannier_sawf_parent_symmetry_file
@@ -545,6 +548,7 @@ character(256),allocatable :: atom_name(:)
   integer        :: wannier_sawf_buffer_steps(3)
   real(8)        :: wannier_sawf_gauge_tolerance
   real(8)        :: wannier_sawf_buffer_tolerance
+  real(8)        :: wannier_sawf_hamiltonian_tolerance
   real(8)        :: wannier_sawf_equivalence_tolerance
   real(8)        :: wannier_sawf_vacuum_density_threshold
   real(8)        :: energy_cut

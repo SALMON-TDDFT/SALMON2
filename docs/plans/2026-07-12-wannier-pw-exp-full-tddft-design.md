@@ -20,6 +20,39 @@ absolute physical fidelity of that system is outside this milestone.
 - Material scope: gapped systems with integer occupations
 - Exchange-correlation scope: LDA
 
+## First admission gates for a successful DG calculation
+
+Completing the DG method takes priority over broad size-scaling studies.  Two
+conditions are the first mandatory gates.  First, the initial occupied
+subspace must consist of generalized eigenstates of the self-consistent,
+zero-field DG Hamiltonian in the fixed Wannier+PW basis.  The eigenproblem must
+include the complete DG interface, flux, and penalty terms; a projection of
+conventional orbitals or eigenstates of a Hamiltonian with the DG terms omitted
+is not an admissible initial state.  Second, the Wannier sector of a perfect
+crystal must preserve the symmetry of the actual supercell through a
+symmetry-closed band space and validated `D_band` and `D_wann`
+representations.  `site_symmetry=true` alone does not satisfy this gate.
+
+Do not force exact parent-crystal symmetry by modifying a converged DC density
+or potential.  Preserve the computed LCFO Hamiltonian and distinguish strict
+Wannier representation closure from the finite Hamiltonian-covariance error of
+the DC approximation.  The latter has a separate, explicit namelist tolerance;
+its measured residual remains part of the acceptance record.
+
+`wannier_sawf_initial_wavefunction_directory` is reserved for a future
+pre-diagonalization eigensolver seed and currently fails closed when nonblank.
+Post-diagonalization replacement of LCFO eigenvectors is forbidden because it
+would separate the orbitals from their eigenvalues and AMN/MMN provenance.
+
+For Si, construct the primary Wannier sector from the complete atomic `s+p`
+shell (`wannier_num_wann = 4*N_Si`).  Silicon `d` projectors are not part of the
+default valence basis.  A complete `s+p+d` shell is retained only as an explicit
+basis-convergence comparison and must not silently replace the `s+p` model.
+
+DG-DC and DG-RT implementation proceeds only after these two gates have direct
+numerical residuals and fail-fast diagnostics.  Additional system-size studies
+are follow-up validation and must not displace completion of these gates.
+
 The initial occupied states are not obtained by merely projecting conventional
 Full TDDFT orbitals into the mixed basis, nor by a one-shot diagonalization in a
 frozen conventional potential. They are obtained from a separate self-
@@ -168,6 +201,21 @@ Before this hierarchical basis may initialize DG-DC, it must pass four gates:
 - buffer convergence of local orbitals and all DG face blocks;
 - on a small system, equivalence to the monolithic global SAWF reference for
   the occupied projector and assembled mixed-basis operator.
+
+The small-system comparison is primarily an implementation and operator-
+contract test.  It must not be used by itself to reject DC-LCFO as a production
+basis: small cells can have an unusually large fragment-boundary and buffer
+fraction.  Production evidence includes prior approximately 4000-atom silicon
+and water calculations in which DC-LCFO wavefunctions reproduced the full-
+calculation high-harmonic response through the seventh harmonic.  Quantitative
+size and buffer scaling remains required later, but the immediate success
+criterion is the DG-Hamiltonian eigenseed plus symmetry-preserving Wannier
+construction described above.
+
+For the present C64 code-path smoke test, `num_rgrid_buffer=8` is accepted
+because it exercises symmetry closure, BPW publication, and every DG face
+trace without periodic point duplication.  It is not evidence of quantitative
+buffer convergence and does not replace the production buffer-scaling gate.
 
 The PW enrichment is not localized by SAWF. Its global or distributed storage
 is handled separately, while its WP coupling uses the final stitched Wannier

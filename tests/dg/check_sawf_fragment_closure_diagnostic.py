@@ -103,7 +103,7 @@ assert re.search(r"residual_norm2\s*=", diagnostic, re.I)
 assert re.search(r"transformed_norm2\s*=", diagnostic, re.I)
 
 # Logging must happen after the grid map loops, never once per grid point.
-point_loops_end = builder.find("nmapped=nsource")
+point_loops_end = builder.find("nmapped=0")
 log_site = builder.find("[DC-LCFO-SAWF-CLOSURE-LOCAL]")
 assert point_loops_end >= 0 and log_site > point_loops_end
 

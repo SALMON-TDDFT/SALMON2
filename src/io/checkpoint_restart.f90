@@ -25,8 +25,6 @@ module checkpoint_restart_sub
 
 contains
 
-!===================================================================================================================================
-
 subroutine init_dir_out_restart(ofl)
   use structures,  only: s_ofile
   use filesystem,  only: atomic_create_directory
@@ -405,7 +403,8 @@ subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,
   use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_scalar
   use parallelization, only: nproc_id_global,nproc_group_global,nproc_size_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
-  use salmon_global, only: yn_restart, theory,calc_mode,read_gs_restart_data, yn_reset_step_restart
+  use salmon_global, only: yn_restart, theory,calc_mode,read_gs_restart_data, yn_reset_step_restart, &
+    yn_reset_occupation_restart
   use nvtx
   implicit none
   character(*)              ,intent(in) :: idir
@@ -439,6 +438,7 @@ subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,
         flag_read_occ  = .false.
      endif
   endif
+  if(flag_GS .and. yn_reset_occupation_restart=='y')flag_read_occ=.false.
 
   if (present(is_self_checkpoint)) then
     iself = is_self_checkpoint

@@ -12,6 +12,7 @@ module lcfo_wannier_sawf_dmn
     integer :: text_unit=0, wann_unit=0, band_unit=0
     integer :: num_bands=0, num_wann=0, num_symmetry=0, appended=0
     real(8) :: tolerance=0.0d0
+    real(8) :: hamiltonian_tolerance=0.0d0
     real(8) :: max_unitarity=0.0d0, max_hamiltonian=0.0d0, max_amn=0.0d0
     real(8) :: max_group_wann=0.0d0, max_group_band=0.0d0
     logical :: active=.false.
@@ -47,7 +48,7 @@ module lcfo_wannier_sawf_dmn
 contains
 
   subroutine begin_sawf_dmn(writer,final_path,num_bands,num_wann,num_symmetry,tolerance,ok,message, &
-      temp_nonce)
+      temp_nonce,hamiltonian_tolerance)
     type(t_sawf_dmn_writer), intent(inout) :: writer
     character(*), intent(in) :: final_path
     integer, intent(in) :: num_bands,num_wann,num_symmetry
@@ -55,6 +56,7 @@ contains
     logical, intent(out) :: ok
     character(*), intent(out) :: message
     integer, intent(in), optional :: temp_nonce
+    real(8), intent(in), optional :: hamiltonian_tolerance
     integer :: clock_count,io_status,attempt
     integer(int64) :: nonce
     character(256) :: suffix,io_message
@@ -112,6 +114,15 @@ contains
     end if
     writer%num_bands=num_bands; writer%num_wann=num_wann
     writer%num_symmetry=num_symmetry; writer%tolerance=tolerance; writer%appended=0
+    writer%hamiltonian_tolerance=tolerance
+    if(present(hamiltonian_tolerance)) then
+      if(.not.ieee_is_finite(hamiltonian_tolerance) .or. hamiltonian_tolerance<tolerance) then
+        message='SAWF DMN Hamiltonian tolerance must be finite and no smaller than closure tolerance'
+        call abort_sawf_dmn(writer)
+        return
+      end if
+      writer%hamiltonian_tolerance=hamiltonian_tolerance
+    end if
     writer%max_unitarity=0.0d0; writer%max_hamiltonian=0.0d0; writer%max_amn=0.0d0
     writer%max_group_wann=0.0d0; writer%max_group_band=0.0d0; writer%active=.true.
     write(writer%text_unit,'(a)',iostat=io_status,iomsg=io_message) &
@@ -168,7 +179,8 @@ contains
     if(present(closure_residual)) closure_residual=closure
     if(.not.ok) return
     call validate_sawf_dmn_covariances(d_wann,d_band,eigenvalues,amn,writer%tolerance, &
-      covariance_ok,message,unitarity,ham_residual,amn_residual)
+      covariance_ok,message,unitarity,ham_residual,amn_residual, &
+      writer%hamiltonian_tolerance)
     if(.not.covariance_ok) then
       ok=.false.
       return
@@ -206,22 +218,28 @@ contains
 
 
   subroutine validate_sawf_dmn_covariances(d_wann,d_band,eigenvalues,amn,tolerance,ok,message, &
-      unitarity_residual,hamiltonian_residual,amn_residual)
+      unitarity_residual,hamiltonian_residual,amn_residual,hamiltonian_tolerance)
     complex(8), intent(in) :: d_wann(:,:),d_band(:,:),amn(:,:)
     real(8), intent(in) :: eigenvalues(:),tolerance
     logical, intent(out) :: ok
     character(*), intent(out) :: message
     real(8), intent(out), optional :: unitarity_residual,hamiltonian_residual,amn_residual
+    real(8), intent(in), optional :: hamiltonian_tolerance
     complex(8), allocatable :: metric(:,:),left(:,:),right(:,:),weighted(:,:)
     real(8) :: ures,hres,ares,energy_scale,amn_scale,energy_center,energy_min,energy_max
+    real(8) :: hamiltonian_tolerance_effective
     real(8), allocatable :: centered_energy(:)
     integer :: allocation_status,i,nb,nw
 
     ok=.false.; message=''; ures=huge(0.0d0); hres=huge(0.0d0); ares=huge(0.0d0)
+    hamiltonian_tolerance_effective=tolerance
+    if(present(hamiltonian_tolerance))hamiltonian_tolerance_effective=hamiltonian_tolerance
     nb=size(d_band,1); nw=size(d_wann,1)
     if(nb<=0 .or. nw<=0 .or. size(d_band,2)/=nb .or. size(d_wann,2)/=nw .or. &
         size(eigenvalues)/=nb .or. any(shape(amn)/=[nb,nw]) .or. &
         .not.ieee_is_finite(tolerance) .or. tolerance<=0.0d0 .or. &
+        .not.ieee_is_finite(hamiltonian_tolerance_effective) .or. &
+        hamiltonian_tolerance_effective<tolerance .or. &
         .not.all(ieee_is_finite(eigenvalues)) .or. .not.complex_finite(d_wann) .or. &
         .not.complex_finite(d_band) .or. .not.complex_finite(amn)) then
       message='SAWF DMN covariance inputs are invalid or non-finite'
@@ -259,9 +277,9 @@ contains
     else
       hres=maxval(abs(weighted))/energy_scale
     end if
-    if(hres>tolerance) then
+    if(hres>hamiltonian_tolerance_effective) then
       write(message,'(a,es13.5,a,es13.5)') 'SAWF DMN Hamiltonian covariance residual=', &
-        hres,' tolerance=',tolerance
+        hres,' tolerance=',hamiltonian_tolerance_effective
       deallocate(metric,left,right,weighted,centered_energy); call set_optional_residuals(); return
     end if
     ! Wannier90 sitesym equation at Gamma: U=d_band U D_wann^dag,

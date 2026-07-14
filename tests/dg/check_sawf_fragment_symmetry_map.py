@@ -200,7 +200,10 @@ target_link_libraries(check_fragment_map PRIVATE sawf)
             raise SystemExit(result.stdout)
         print(result.stdout.strip())
 
-    flux = (ROOT / "src/gs/dc/lcfo_flux.f90").read_text()
+    flux_source = (ROOT / "src/gs/dc/lcfo_flux.f90").read_text()
+    flux = flux_source.split("subroutine generate_sawf_dmn", 1)[1].split(
+        "end subroutine generate_sawf_dmn", 1
+    )[0]
     load = flux.index("call put_sawf_identity_first")
     validate = flux.index("call validate_sawf_fragment_symmetry_map", load)
     project = flux.index("call build_sawf_spd_projection_map", validate)

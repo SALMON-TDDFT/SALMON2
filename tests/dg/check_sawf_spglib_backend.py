@@ -109,12 +109,16 @@ with tempfile.TemporaryDirectory(prefix="sawf-spglib-") as temp:
 
     incompatible_package_dir = temp_path / "package-2.0"
     write_mock_package(incompatible_package_dir, version="2.0.0")
+    incompatible_probe = temp_path / "incompatible-probe"
+    incompatible_probe.mkdir()
+    (incompatible_probe / "CMakeLists.txt").write_text(
+        "cmake_minimum_required(VERSION 3.20)\n"
+        "project(check_spglib_version NONE)\n"
+        f'find_package(Spglib 2.1 CONFIG REQUIRED PATHS "{incompatible_package_dir}" NO_DEFAULT_PATH)\n'
+    )
     incompatible = run(
         [
-            "cmake", "-S", FIXTURES, "-B", temp_path / "focused-on-2.0",
-            f"-DSALMON_ROOT={ROOT}",
-            "-DSAWF_TEST_HAVE_SPGLIB=ON",
-            f"-DSpglib_DIR={incompatible_package_dir}",
+            "cmake", "-S", incompatible_probe, "-B", temp_path / "focused-on-2.0",
         ]
     )
     diagnostic = incompatible.stdout.lower()

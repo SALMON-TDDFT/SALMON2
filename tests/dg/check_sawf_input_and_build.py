@@ -234,7 +234,9 @@ def check_mock_spglib_configure():
 
         incompatible_dir = temp_path / "incompatible"
         incompatible_build = temp_path / "incompatible-build"
+        incompatible_probe = temp_path / "incompatible-probe"
         incompatible_dir.mkdir()
+        incompatible_probe.mkdir()
         (incompatible_dir / "SpglibConfig.cmake").write_text(
             "add_library(Spglib::symspg UNKNOWN IMPORTED)\n"
         )
@@ -242,10 +244,14 @@ def check_mock_spglib_configure():
             'set(PACKAGE_VERSION "2.0.0")\n'
             'set(PACKAGE_VERSION_COMPATIBLE FALSE)\n'
         )
+        (incompatible_probe / "CMakeLists.txt").write_text(
+            "cmake_minimum_required(VERSION 3.20)\n"
+            "project(check_spglib_version NONE)\n"
+            f'find_package(Spglib 2.1 CONFIG REQUIRED PATHS "{incompatible_dir}" NO_DEFAULT_PATH)\n'
+        )
         incompatible = subprocess.run(
             [
-                "cmake", "-S", str(root), "-B", str(incompatible_build),
-                "-DUSE_SPGLIB=ON", f"-DSpglib_DIR={incompatible_dir}",
+                "cmake", "-S", str(incompatible_probe), "-B", str(incompatible_build),
             ],
             text=True,
             stdout=subprocess.PIPE,
