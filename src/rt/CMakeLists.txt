@@ -42,6 +42,7 @@ set(SOURCES
     dg/rt_dg_wpw_grid_point_adapter.f90
     dg/rt_dg_wpw_face_trace_provider.f90
     dg/rt_dg_wpw_quadrature_assembler.f90
+    dg/rt_dg_wpw_face_trace_scanner.f90
     dg/rt_dg_wpw_owner_exchange.f90
     dg/rt_dg_wpw_matrix_free_adapter.f90
     dg/rt_dg_fragment_coefficients.f90

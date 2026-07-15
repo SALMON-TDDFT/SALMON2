@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 provider = ROOT / "src/rt/dg/rt_dg_wpw_face_trace_provider.f90"
+scanner = ROOT / "src/rt/dg/rt_dg_wpw_face_trace_scanner.f90"
 
 assert provider.exists(), "missing WPW face trace provider"
 text = provider.read_text().lower()
@@ -24,4 +25,23 @@ for token in (
 for forbidden in ("mpi_", "h_mat", "s_mat", "dense_h", "dense_s", "pp_face"):
     assert forbidden not in text, f"provider crosses forbidden boundary: {forbidden}"
 
-print("PASS WPW face trace provider source contract")
+assert scanner.exists(), "missing WPW canonical face trace scanner"
+scan = scanner.read_text().lower()
+for token in (
+    "module rt_dg_wpw_face_trace_scanner",
+    "assemble_wpw_canonical_face_grid",
+    "k_minus", "k_plus", "axis", "side_from_k_minus",
+    "normal(axis)=dble(side_from_k_minus)",
+    "h_normal=hgs(axis)",
+    "face_weight=hgs(tangent(1))*hgs(tangent(2))",
+    "evaluate_wpw_face_traces",
+    "assemble_wpw_canonical_face_point",
+    "strictly_increasing(w_row_ids)",
+    "strictly_increasing(p_column_ids)",
+    "temporary_block", "wp_face_h=temporary_block",
+):
+    assert token in scan, f"missing canonical face scanner contract: {token}"
+for forbidden in ("do k=1,n_frag", "do ifrag=1,n_frag", "mpi_", "pp_face", "h_mat", "s_mat", "dense_h", "dense_s"):
+    assert forbidden not in scan, f"scanner crosses forbidden boundary: {forbidden}"
+
+print("PASS WPW face trace provider/scanner source contract")
