@@ -7,6 +7,7 @@ module rt_dg_wpw_sparse_builder
 
   integer, parameter, public :: wpw_candidate_volume = 1
   integer, parameter, public :: wpw_candidate_face = 2
+  integer, parameter, public :: wpw_candidate_volume_face = 3
 
   type, public :: s_dg_wpw_sparse_candidates
     integer, allocatable :: wp_w_row_ids(:), wp_pw_col_ids(:)
@@ -78,7 +79,8 @@ contains
         return
       end if
       if (candidates%wp_origin(i) /= wpw_candidate_volume .and. &
-          candidates%wp_origin(i) /= wpw_candidate_face) then
+          candidates%wp_origin(i) /= wpw_candidate_face .and. &
+          candidates%wp_origin(i) /= wpw_candidate_volume_face) then
         info = 14
         return
       end if
