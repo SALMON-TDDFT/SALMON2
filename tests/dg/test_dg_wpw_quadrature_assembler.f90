@@ -5,11 +5,13 @@ program test_dg_wpw_quadrature_assembler
     build_windowed_sparse_wpw_operators
   use rt_dg_wpw_column_layout, only: s_dg_wpw_column_layout, initialize_wpw_column_layout
   use rt_dg_wpw_sparse_blocks, only: s_dg_wpw_sparse_blocks
+  use rt_dg_wpw_point_evaluator, only: evaluate_windowed_kg_point, evaluate_wannier_point
   implicit none
   complex(8) :: w(1), gw(3,1), po(1), gpo(3,1), ps(1), gps(3,1)
   complex(8) :: wp_h(1,1), wp_s(1,1), pp_h(1,1), pp_s(1,1)
   complex(8) :: wm(1), wx(1), gwm(3,1), gwx(3,1), pm(1), px(1), gpm(3,1), gpx(3,1)
   complex(8) :: face_h(1,1), reverse_h(1,1), zero_h(1,1)
+  complex(8) :: pval,pgrad(3),wout(1),gwout(3,1),coef(2,1),bval(2),bgrad(3,2)
   integer :: info
   type(s_dg_wpw_sparse_candidates) :: candidates
   type(s_dg_wpw_column_layout) :: layout
@@ -47,5 +49,14 @@ program test_dg_wpw_quadrature_assembler
   if(info/=0) error stop 11
   call build_windowed_sparse_wpw_operators(layout,0,1,candidates,h_blocks,s_blocks,info)
   if(info/=0 .or. size(h_blocks%wp_values,1)/=1 .or. size(h_blocks%pp_values,1)/=1) error stop 12
+  call evaluate_windowed_kg_point(0.5d0,[0.1d0,0d0,0d0],[1d0,0d0,0d0], &
+    [2d0,0d0,0d0],4d0,pval,pgrad,info)
+  if(info/=0 .or. abs(pval-0.25d0*exp((0d0,2d0)))>tol) error stop 13
+  coef(:,1)=[(1d0,0d0),(0d0,1d0)]; bval=[(2d0,0d0),(3d0,0d0)]
+  bgrad(:,1)=reshape([(1d0,0d0),(0d0,0d0),(0d0,0d0)],[3])
+  bgrad(:,2)=reshape([(0d0,0d0),(2d0,0d0),(0d0,0d0)],[3])
+  call evaluate_wannier_point(coef,bval,bgrad,wout,gwout,info)
+  if(info/=0 .or. abs(wout(1)-(2d0,3d0))>tol .or. abs(gwout(1,1)-(1d0,0d0))>tol .or. &
+     abs(gwout(2,1)-(0d0,2d0))>tol) error stop 14
   write(*,'(a)') 'PASS one-point support-local WP/PP quadrature assembler'
 end program test_dg_wpw_quadrature_assembler

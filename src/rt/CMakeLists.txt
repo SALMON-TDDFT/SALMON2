@@ -37,6 +37,9 @@ set(SOURCES
     dg/rt_dg_wpw_column_layout.f90
     dg/rt_dg_wpw_weak_form_evaluator.f90
     dg/rt_dg_wpw_sparse_builder.f90
+    dg/rt_dg_wpw_point_evaluator.f90
+    dg/rt_dg_wpw_canonical_faces.f90
+    dg/rt_dg_wpw_grid_point_adapter.f90
     dg/rt_dg_wpw_quadrature_assembler.f90
     dg/rt_dg_wpw_owner_exchange.f90
     dg/rt_dg_wpw_matrix_free_adapter.f90
