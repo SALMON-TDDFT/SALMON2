@@ -26,6 +26,12 @@ for token in (
     assert token in text, f"missing face trace provider contract: {token}"
 for forbidden in ("mpi_", "h_mat", "s_mat", "dense_h", "dense_s", "pp_face"):
     assert forbidden not in text, f"provider crosses forbidden boundary: {forbidden}"
+bind_body = text.split("subroutine bind_wpw_face_trace_provider", 1)[1]
+bind_body = bind_body.split("end subroutine bind_wpw_face_trace_provider", 1)[0]
+assert "class(*), pointer, intent(inout) :: user_context" in bind_body, \
+    "binding must require a caller-owned persistent context pointer"
+assert "class(*), target, intent(inout) :: user_context" not in bind_body, \
+    "TARGET dummy can retain a pointer to a non-TARGET actual after return"
 
 assert scanner.exists(), "missing WPW canonical face trace scanner"
 scan = scanner.read_text().lower()
@@ -50,7 +56,8 @@ for forbidden in ("do k=1,n_frag", "do ifrag=1,n_frag", "mpi_", "pp_face", "h_ma
 assert fixture.exists() and runner.exists(), "missing linked canonical face fixture"
 fixture_text = fixture.read_text().lower()
 for token in ("point_count", "expected_grids", "deterministic_traces", "assemble_wpw_canonical_face_point",
-              "failure_after", "nan_point", "p_mismatch_point", "wrapped_minus", "wrapped_plus"):
+              "failure_after", "nan_point", "p_mismatch_point", "wrapped_minus", "wrapped_plus",
+              "oriented_plus", "oriented_reversed", "reverse_traces"):
     assert token in fixture_text, f"numerical fixture misses contract: {token}"
 assert "--build-dir" in runner.read_text(), "fixture runner must accept the configured build directory"
 

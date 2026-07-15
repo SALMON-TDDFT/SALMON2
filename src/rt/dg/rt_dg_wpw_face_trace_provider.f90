@@ -29,12 +29,14 @@ contains
 
   subroutine bind_wpw_face_trace_provider(provider,user_context,callback,info)
     type(s_wpw_face_trace_provider), intent(inout) :: provider
-    class(*), target, intent(inout) :: user_context
+    class(*), pointer, intent(inout) :: user_context
     procedure(wpw_face_trace_callback) :: callback
     integer, intent(out) :: info
 
     call unbind_wpw_face_trace_provider(provider)
     provider%user_context=>user_context
+    ! CALLBACK and USER_CONTEXT must both outlive PROVIDER or be explicitly
+    ! detached with unbind_wpw_face_trace_provider before either lifetime ends.
     provider%callback=>callback
     info=0
   end subroutine bind_wpw_face_trace_provider

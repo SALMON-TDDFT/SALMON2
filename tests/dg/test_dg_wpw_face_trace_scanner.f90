@@ -14,19 +14,24 @@ program test_dg_wpw_face_trace_scanner
     integer :: nan_point=0
     integer :: p_mismatch_point=0
     integer :: expected_side=1
+    logical :: reverse_traces=.false.
   end type s_mock_context
 
-  type(s_mock_context), target :: mock
+  type(s_mock_context), pointer :: mock
+  class(*), pointer :: bound_context
   type(s_wpw_face_trace_provider) :: provider
   complex(8) :: actual(1,1),expected(1,1),point_value(1,1),wrapped_minus(1,1),wrapped_plus(1,1)
+  complex(8) :: oriented_plus(1,1),oriented_reversed(1,1)
   complex(8) :: wm(1),wp(1),gwm(3,1),gwp(3,1)
   complex(8) :: pm(1),pp(1),gpm(3,1),gpp(3,1)
   integer :: info,point_info,iy,iz,grid(3),expected_grids(3,4)
   integer, parameter :: w_ids(1)=[7],p_ids(1)=[11]
   real(8), parameter :: hgs(3)=[0.5d0,0.25d0,0.4d0]
 
+  allocate(mock)
+  bound_context=>mock
   expected_grids=reshape([2,1,1, 2,2,1, 2,1,2, 2,2,2],[3,4])
-  call bind_wpw_face_trace_provider(provider,mock,mock_face_traces,info)
+  call bind_wpw_face_trace_provider(provider,bound_context,mock_face_traces,info)
   if(info/=0) error stop 1
   call assemble_wpw_canonical_face_grid(provider,1,2,1,1,[1,1,1],[2,2,2], &
     [2,1,1],[3,2,2],hgs,w_ids,p_ids,actual,info)
@@ -96,7 +101,18 @@ program test_dg_wpw_face_trace_scanner
   if(info/=0 .or. .not.mock%identity_ok .or. mock%point_count/=4 .or. &
     any(mock%visited(1,:)/=2)) error stop 15
   if(abs(wrapped_minus(1,1)-wrapped_plus(1,1))<1d-13) error stop 16
+
+  mock%point_count=0; mock%expected_side=1; mock%reverse_traces=.false.
+  call assemble_wpw_canonical_face_grid(provider,1,2,1,1,[2,1,1],[2,2,2], &
+    [2,1,1],[2,2,2],hgs,w_ids,p_ids,oriented_plus,info)
+  if(info/=0) error stop 17
+  mock%point_count=0; mock%expected_side=-1; mock%reverse_traces=.true.
+  call assemble_wpw_canonical_face_grid(provider,1,2,1,-1,[2,1,1],[2,2,2], &
+    [2,1,1],[2,2,2],hgs,w_ids,p_ids,oriented_reversed,info)
+  if(info/=0 .or. maxval(abs(oriented_plus-oriented_reversed))>1d-13) error stop 18
   call unbind_wpw_face_trace_provider(provider)
+  nullify(bound_context)
+  deallocate(mock)
   print '(a)', 'PASS canonical WPW face trace numerical fixture'
 
 contains
@@ -109,6 +125,7 @@ contains
     complex(8), intent(out) :: w_minus(:),w_plus(:),grad_w_minus(:,:),grad_w_plus(:,:)
     complex(8), intent(out) :: p_minus(:),p_plus(:),grad_p_minus(:,:),grad_p_plus(:,:)
     integer, intent(out) :: callback_info
+    complex(8), allocatable :: temporary(:),temporary_gradient(:,:)
     select type(context=>user_context)
     type is(s_mock_context)
       context%point_count=context%point_count+1
@@ -125,6 +142,15 @@ contains
       if(context%point_count==context%nan_point) &
         w_minus(1)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,kind=8)
       if(context%point_count==context%p_mismatch_point) p_plus(1)=p_minus(1)+1d-6
+      if(context%reverse_traces) then
+        allocate(temporary(size(w_minus)),temporary_gradient(3,size(w_minus)))
+        temporary=w_minus; w_minus=w_plus; w_plus=temporary
+        temporary_gradient=grad_w_minus; grad_w_minus=grad_w_plus; grad_w_plus=temporary_gradient
+        deallocate(temporary,temporary_gradient)
+        allocate(temporary(size(p_minus)),temporary_gradient(3,size(p_minus)))
+        temporary=p_minus; p_minus=p_plus; p_plus=temporary
+        temporary_gradient=grad_p_minus; grad_p_minus=grad_p_plus; grad_p_plus=temporary_gradient
+      end if
       callback_info=0
     class default
       callback_info=1
