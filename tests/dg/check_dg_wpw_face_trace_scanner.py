@@ -41,6 +41,7 @@ for token in (
     "strictly_increasing(w_row_ids)",
     "strictly_increasing(p_column_ids)",
     "temporary_block", "wp_face_h=temporary_block",
+    "ieee_is_finite", "finite_complex(w_minus)", "finite_complex(grad_p_plus)",
 ):
     assert token in scan, f"missing canonical face scanner contract: {token}"
 for forbidden in ("do k=1,n_frag", "do ifrag=1,n_frag", "mpi_", "pp_face", "h_mat", "s_mat", "dense_h", "dense_s"):
@@ -48,7 +49,8 @@ for forbidden in ("do k=1,n_frag", "do ifrag=1,n_frag", "mpi_", "pp_face", "h_ma
 
 assert fixture.exists() and runner.exists(), "missing linked canonical face fixture"
 fixture_text = fixture.read_text().lower()
-for token in ("point_count", "expected_grids", "deterministic_traces", "assemble_wpw_canonical_face_point"):
+for token in ("point_count", "expected_grids", "deterministic_traces", "assemble_wpw_canonical_face_point",
+              "failure_after", "nan_point", "p_mismatch_point", "wrapped_minus", "wrapped_plus"):
     assert token in fixture_text, f"numerical fixture misses contract: {token}"
 assert "--build-dir" in runner.read_text(), "fixture runner must accept the configured build directory"
 

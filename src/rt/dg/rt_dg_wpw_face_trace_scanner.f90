@@ -1,4 +1,5 @@
 module rt_dg_wpw_face_trace_scanner
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use rt_dg_wpw_face_trace_provider, only: s_wpw_face_trace_provider, evaluate_wpw_face_traces
   use rt_dg_wpw_quadrature_assembler, only: assemble_wpw_canonical_face_point
   implicit none
@@ -70,6 +71,13 @@ contains
           info=3
           return
         end if
+        if(.not.all(finite_complex(w_minus)) .or. .not.all(finite_complex(w_plus)) .or. &
+           .not.all(finite_complex(grad_w_minus)) .or. .not.all(finite_complex(grad_w_plus)) .or. &
+           .not.all(finite_complex(p_minus)) .or. .not.all(finite_complex(p_plus)) .or. &
+           .not.all(finite_complex(grad_p_minus)) .or. .not.all(finite_complex(grad_p_plus))) then
+          info=3
+          return
+        end if
         call assemble_wpw_canonical_face_point(k_minus,k_plus,w_minus,w_plus,grad_w_minus, &
           grad_w_plus,p_minus,p_plus,grad_p_minus,grad_p_plus,normal,h_normal,face_weight, &
           point_block,point_info)
@@ -94,5 +102,10 @@ contains
       end if
     end do
   end function strictly_increasing
+
+  elemental logical function finite_complex(value) result(ok)
+    complex(8), intent(in) :: value
+    ok=ieee_is_finite(real(value,8)) .and. ieee_is_finite(aimag(value))
+  end function finite_complex
 
 end module rt_dg_wpw_face_trace_scanner
