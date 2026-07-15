@@ -222,17 +222,32 @@ is handled separately, while its WP coupling uses the final stitched Wannier
 gauge. The large-system route changes basis generation and ownership only; it
 must reproduce the same accepted DG operator contract as the global route.
 
+The production windowed enrichment and the legacy global-PW reference are
+distinct basis kinds.  The legacy basis has G-only columns
+`exp(i G.r)/sqrt(Omega)` and remains a small-system RT/reference path.  The
+production basis is the direct sum
+`P_(K,G)=chi_K exp(i G.r)/sqrt(Omega)`.  It uses a separate
+`s_dg_wpw_column_layout` and never changes the meaning of legacy
+`n_plane_waves`, `k_pw`, or their checkpoints.
+
+Each production column has the stable fragment-major id
+`column_id=(K-1)*n_G+G_id`, explicit `pw_fragment_ids` and `pw_g_ids`, a unique
+owner, and a basis-kind tag.  A rank stores owned columns plus only the
+support-neighbor columns required by local PP action.  Sparse WP entries are
+stored on the PW-column owner; sparse PP entries are stored on the PW-row
+owner.  No checkpoint or runtime adapter may infer the basis kind from array
+shape.
+
 ## Production Route
 
-The first production target is the global-ownership Wannier+PW path. Here
-"global" refers to coefficient ownership, not automatically to globally
-continuous basis support. Before implementation, the operator contract must
-define whether Wannier and PW functions are fragment-restricted or globally
-supported, and therefore which jumps and DG face blocks exist. Global ownership
-must reproduce that accepted physical operator while removing MPI ownership and
-halo-exchange effects from the first validation. The mixed Wannier+PW
-Hamiltonian is propagated with an exponential operator rather than a Taylor
-expansion.
+The production target is the matrix-free distributed `windowed_kg` Wannier+PW
+path. Its physical DG interfaces are independent of MPI ownership: Wannier and
+PW support, jumps, and face blocks follow the operator contract, while owner
+callbacks and halo exchanges only distribute that fixed algebra. The dense
+global implementation is a small-system oracle, and the legacy G-only RT path
+is restricted to reference and smoke testing; neither defines the production
+basis or its scaling behavior. The mixed Wannier+PW Hamiltonian is propagated
+with an exponential operator rather than a Taylor expansion.
 
 For a non-orthogonal mixed basis, propagation solves
 
@@ -258,10 +273,10 @@ Only the trial midpoint density/potential is iterated; the exponential must not
 be accumulated repeatedly within one time step. Stop if the midpoint iteration
 does not converge.
 
-Once the global calculation passes the Full TDDFT comparison, the same
-formulation will be transferred to the fragment/distributed implementation.
-Agreement between global and distributed calculations will then be treated as
-a separate implementation test.
+The distributed calculation must agree with the dense small-system oracle
+before the Full TDDFT comparison is interpreted physically. This agreement is
+an implementation test of ownership and communication, not a second physical
+formulation.
 
 ## Observables
 
@@ -336,8 +351,8 @@ Additional health checks are:
    operator contract.
 11. Create the seven-input Stage 2D matrix and provenance manifest.
 12. Run the PW convergence and `Delta_Pz` 5 percent Full TDDFT comparison.
-13. Complete regression/documentation, then plan distributed ownership as a
-   separate milestone.
+13. Complete regression/documentation and record both distributed scaling
+   evidence and dense-oracle equivalence.
 
 ## Failure Handling
 

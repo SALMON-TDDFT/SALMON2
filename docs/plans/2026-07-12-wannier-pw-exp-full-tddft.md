@@ -4,7 +4,7 @@
 
 **Goal:** For a gapped LDA system with integer occupations, construct a self-consistent Wannier+PW DG-DC initial state and reproduce the continuous-branch Full TDDFT induced polarization `Delta_Pz(t)` within 5 percent relative RMS using `dt=2 a.u.` exponential propagation.
 
-**Architecture:** Construct a symmetry-validated fixed Wannier basis first: use monolithic SAWF for the small reference and representative-environment SAWF, symmetry replication, symmetry-inequivalent local regeneration, and gauge stitching for large systems. Then resolve the DG trial-space and length-gauge definitions, build shared overlap-metric and mixed-density components used identically by DG-DC and RT, implement fragment-local LDA plus global Hartree DG-DC, serialize an operator-complete checkpoint, and only then implement the production midpoint Exp path. Global ownership retains the physical DG operator while excluding distributed ownership and halo communication from the first comparison.
+**Architecture:** Construct a symmetry-validated fixed Wannier basis first: use monolithic SAWF for the small reference and representative-environment SAWF, symmetry replication, symmetry-inequivalent local regeneration, and gauge stitching for large systems. Then resolve the DG trial-space and length-gauge definitions, build shared overlap-metric and mixed-density components used identically by DG-DC and RT, implement fragment-local LDA plus global Hartree DG-DC, serialize an operator-complete checkpoint, and only then implement the production midpoint Exp path. The scalable production basis is distributed `windowed_kg`; dense/global and legacy G-only routes remain small-system oracle, reference, and smoke paths only.
 
 **Tech Stack:** Fortran 2008, MPI, existing SALMON LDA/Hartree infrastructure, LAPACK/EigenExa, Python 3 with NumPy/Matplotlib for tests and analysis, CMake.
 
@@ -282,7 +282,89 @@ Run the focused test and build. Commit this layer before adding SCF control.
 - Create: `tests/dg/check_dg_wpw_scf_route.py`
 - Create: `tests/dg/test_dg_wpw_scf_fixed_point.py`
 
-**Step 1: Write failing route and fixed-point tests**
+**Scalability correction:**
+
+The dense solver in `dg_wannier_pw_scf.f90` is a small-system mathematical
+oracle only.  Production must never assemble a global dense `H`, `S`, or
+density matrix and must never compute the full eigenspectrum.  Production
+uses block/neighbor storage with rank-local fragment and PW coefficient rows
+and face-neighbor halo exchange.  The Task-2 transitional layout in
+`prepare_local_fragment_pw_blocks` (every rank requests every PW row) and the
+optional dense `H_mat_pw(n_pw,n_pw,nspin)` storage are explicitly not a
+production matrix-free implementation.
+
+**Step 1: Freeze the matrix-free production contract**
+
+Create `tests/dg/check_dg_wpw_scf_route.py` first.  Require:
+
+```text
+dense reference solver is not called from main_dft
+global dense H/S allocation is forbidden in the production route
+H and S are consumed only through batched apply callbacks
+only occupied states plus a bounded buffer are retained
+rank-local invalid data is diagnosed before collective reductions
+complete density is distributed to the existing global Poisson solver
+```
+
+Keep `tests/dg/test_dg_wpw_scf_fixed_point.py` as the independent NumPy-backed
+small-system oracle for the equations and energy expression.
+
+**Step 2: Complete distributed PW-row ownership**
+
+Create `src/rt/dg/rt_dg_wpw_column_layout.f90` and
+`tests/dg/test_dg_wpw_column_layout.f90`.  Define
+`s_dg_wpw_column_layout` with `basis_kind`, `n_global_columns`, `n_g_modes`,
+`pw_fragment_ids`, `pw_g_ids`, `pw_owner`, and `owned_column_ids`.  Use
+fragment-major ids `column_id=(K-1)*n_G+G_id`.  Reject nonpositive dimensions,
+invalid ranks, overflow of the default integer id space, duplicate/missing
+pairs, and any basis kind other than `windowed_kg`.
+
+Run the layout fixture with one and multiple ranks.  Require a bijection
+between ids and `(K,G)`, deterministic ownership, bounded owned-column count,
+and an exact inverse map.  This layout is separate from legacy G-only
+`n_plane_waves/k_pw`; do not add `(K,G)` fields to `s_dg_fragment_rt`.
+
+Represent every enrichment column by a stable pair `(K,G)`, with explicit
+`pw_fragment_ids` and `pw_g_ids`; do not collapse the K index by summing all
+window contributions into one G-only column.  The accepted Task-1 basis is the
+direct sum `P_(K,G)=chi_K exp(iG.r)/sqrt(Omega_cell)`.  Existing diagnostic
+`compute_wpw_overlap/compute_wpw_kinetic_weak` routines that accumulate every
+fragment window into a single `n_pw by n_pw` G-only matrix are not the
+production operator builder.
+
+Replace the Task-2 transitional all-PW request list by bounded rank-local PW
+ownership plus the remote rows required by local FP/PP action.  The PP apply
+must use diagonal or explicitly sparse/block-distributed storage; production
+must fail closed rather than allocate or consume a dense global `H_mat_pw`.
+No rank may retain `O(n_pw)` rows merely because PW enrichment is enabled.
+
+Store each sparse WP entry on the owner of its PW column.  That owner
+halo-fetches only support-coupled W coefficients, computes its owned PW output,
+and sends partial W-output sums to the unique W-row owners.  Store PP by PW
+output-row owner and halo-fetch only support-neighbor PW coefficients.  This
+layout reproduces both Hermitian WP/PW directions without replicating all PW
+columns or all fragment rows.  `tests/dg/test_dg_wpw_distributed_block_action.py`
+is the ownership-independent dense-equivalence oracle for this decomposition.
+
+**Step 3: Extract a GS/RT-neutral block operator adapter**
+
+Expose a plain callback contract for batched `Y=HX` and `Y=SX`.  The RT
+adapter must use compact WW blocks, row-local FP blocks, distributed PP action,
+and a row-local mixed-overlap apply; it must not call the global-replicated
+`apply_overlap_operator_batch` or copy block data into dense global arrays.
+Add a small-system equivalence fixture comparing callback action against the
+dense oracle for WW, WP, PW, and face-neighbor blocks.
+
+**Step 4: Implement distributed occupied-subspace iteration**
+
+Use block subspace iteration with S-orthonormalization and Rayleigh--Ritz only
+inside the bounded occupied trial subspace.  The retained dimension is
+`n_occ + dg_wpw_scf_extra_states`; it must not scale to the full basis size.
+The local coefficient storage follows existing DG row ownership.  Reject a
+rank-deficient metric, a missing unoccupied buffer state, or a gap below the
+positive namelist threshold.
+
+**Step 5: Write failing route and fixed-point tests**
 
 Require gapped LDA, integer occupations, fixed Wannier+PW basis, fixed DG
 kinetic/surface blocks, updated `V_H+V_xc`, and convergence of:
@@ -297,12 +379,13 @@ max_i ||H C_i-S C_i epsilon_i||
 Tr(SP)-N_e
 ```
 
-**Step 2: Implement the SCF loop**
+**Step 6: Implement the matrix-free SCF loop**
 
 Use the conventional GS only for the initial density and fixed basis. Reuse
-Task 2 algebra, Task 3 density, Task 4 LDA/Hartree, and the existing DG matrix
-builders. Mix the potential/density using one documented existing SALMON policy.
-Reject metallic/smeared occupation in this milestone.
+Task 2 algebra inside the bounded Rayleigh--Ritz subspace, Task 3 rank-local
+density reconstruction, Task 4 distributed LDA/global-Poisson plumbing, and
+the existing block DG matrix builders. Mix the potential using SALMON's simple
+potential policy. Reject metallic/smeared occupation in this milestone.
 
 Use the conventional eigenvalue-sum energy:
 
@@ -314,10 +397,13 @@ E_tot = sum_i f_i epsilon_i - E_H - integral(n V_xc)
 DG kinetic/surface/penalty terms are already in the eigenvalues and must not be
 added again.
 
-**Step 3: Run a field-free fixed-point test and commit**
+**Step 7: Run field-free fixed-point and scaling tests and commit**
 
 The converged DG density passed through one additional SCF map must reproduce
-itself. Commit the solver, input contract, and tests.
+itself.  A scaling fixture must increase the fragment count while asserting
+that no allocation proportional to `n_basis**2` is made and that each apply
+touches only local and face-neighbor blocks. Commit the solver, input contract,
+and tests.
 
 ### Task 6: Define and implement the DG-DC checkpoint contract
 
@@ -534,6 +620,6 @@ accepted basis, `Delta_Pz_rel_rms`, `Jz_rel_rms`, and limitations.
 
 **Step 3: Commit the validated summary**
 
-Only after the global path passes, create a separate plan for fragment/distributed
-ownership. Do not combine distributed scaling changes with the global physics
-validation.
+Complete the scalable `windowed_kg` validation using the matrix-free distributed
+ownership contract established in Task 5. Dense/global and legacy G-only runs
+may validate small-system physics but cannot serve as production scaling evidence.

@@ -15,6 +15,7 @@ set(SOURCES
    dg_generalized_algebra.f90
    dg_wpw_density.f90
    dg_wpw_fixed_operator.f90
+   dg_wpw_matrix_free_operator.f90
    )
 
 if (IS_FUJITSU_COMPILER)

@@ -33,6 +33,12 @@ set(SOURCES
     rt_local_chern_marker.f90
     rt_local_chern_marker_soi.f90
     dg/rt_dg_fragment_ops.f90
+    dg/rt_dg_wpw_sparse_blocks.f90
+    dg/rt_dg_wpw_column_layout.f90
+    dg/rt_dg_wpw_weak_form_evaluator.f90
+    dg/rt_dg_wpw_sparse_builder.f90
+    dg/rt_dg_wpw_owner_exchange.f90
+    dg/rt_dg_wpw_matrix_free_adapter.f90
     dg/rt_dg_fragment_coefficients.f90
     dg/rt_dg_fragment_layout.f90
     dg/rt_dg_fragment_lifecycle.f90

@@ -1,4 +1,5 @@
 module rt_dg_fragment_ops
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use communication, only: comm_bcast, comm_get_max, comm_is_root, comm_summation, COMM_GROUP_NULL
   use rt_dg_fragment_types, only: s_dg_fragment_rt, matrix_block_info, complex_matrix_block_info, &
                                   invalidate_coef_exchange_cache
@@ -18,6 +19,8 @@ module rt_dg_fragment_ops
   public :: apply_nonlocal_projector_overlap_batch
   public :: apply_matrix_blocks
   public :: apply_matrix_blocks_batch
+  public :: apply_matrix_blocks_batch_compact
+  public :: apply_complex_matrix_blocks_batch_compact
   public :: apply_complex_matrix_blocks_batch
   public :: apply_mixed_hamiltonian
   public :: apply_mixed_hamiltonian_local_rows
@@ -3572,6 +3575,264 @@ contains
       end do
     end subroutine apply_one_real_block
   end subroutine apply_matrix_blocks_batch
+
+  subroutine apply_matrix_blocks_batch_compact(dg_frag, blocks, ispin, compact_row_ids, x, y, block_ids, info)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(matrix_block_info), intent(in) :: blocks(:)
+    integer, intent(in) :: ispin
+    integer, intent(in) :: compact_row_ids(:), block_ids(:)
+    complex(8), intent(in) :: x(:, :)
+    complex(8), intent(inout) :: y(:, :)
+    integer, intent(out) :: info
+
+    integer :: iblk_idx, iblk, ifrag_row, ifrag_col, nrow, ncol
+    integer :: ii, jj, row_gid, col_gid, row_pos, col_pos, istate, nstate
+
+    info = 0
+    if (ispin < 1 .or. ispin > dg_frag%nspin) then
+      info = 1
+      return
+    end if
+    if (.not. allocated(dg_frag%index_basis) .or. .not. allocated(dg_frag%n_basis)) then
+      info = 2
+      return
+    end if
+    if (size(x, 1) /= size(compact_row_ids) .or. size(y, 1) /= size(compact_row_ids) .or. &
+        size(x, 2) /= size(y, 2)) then
+      info = 3
+      return
+    end if
+    if (.not. compact_ids_strictly_increasing(compact_row_ids)) then
+      info = 4
+      return
+    end if
+
+    ! Validate every referenced row and value before changing y.  The caller
+    ! performs the collective handshake only after this rank-local check.
+    do iblk_idx = 1, size(block_ids)
+      iblk = block_ids(iblk_idx)
+      if (iblk < 1 .or. iblk > size(blocks)) then
+        info = 5
+        return
+      end if
+      ifrag_row = blocks(iblk)%ifrag_row
+      ifrag_col = blocks(iblk)%ifrag_col
+      if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag .or. &
+          ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) then
+        info = 6
+        return
+      end if
+      if (.not. allocated(blocks(iblk)%val)) then
+        info = 7
+        return
+      end if
+      nrow = dg_frag%n_basis(ifrag_row, ispin)
+      ncol = dg_frag%n_basis(ifrag_col, ispin)
+      if (nrow > size(dg_frag%index_basis, 1) .or. ncol > size(dg_frag%index_basis, 1) .or. &
+          nrow > size(blocks(iblk)%val, 1) .or. ncol > size(blocks(iblk)%val, 2) .or. &
+          ispin > size(blocks(iblk)%val, 3)) then
+        info = 8
+        return
+      end if
+      do ii = 1, nrow
+        row_gid = dg_frag%index_basis(ii, ifrag_row, ispin)
+        if (find_compact_row(compact_row_ids, row_gid) <= 0) then
+          info = 9
+          return
+        end if
+      end do
+      do jj = 1, ncol
+        col_gid = dg_frag%index_basis(jj, ifrag_col, ispin)
+        if (find_compact_row(compact_row_ids, col_gid) <= 0) then
+          info = 10
+          return
+        end if
+      end do
+      do jj = 1, ncol
+        do ii = 1, nrow
+          if (.not. ieee_is_finite(blocks(iblk)%val(ii, jj, ispin))) then
+            info = 11
+            return
+          end if
+        end do
+      end do
+    end do
+
+    nstate = size(x, 2)
+    do iblk_idx = 1, size(block_ids)
+      iblk = block_ids(iblk_idx)
+      ifrag_row = blocks(iblk)%ifrag_row
+      ifrag_col = blocks(iblk)%ifrag_col
+      nrow = dg_frag%n_basis(ifrag_row, ispin)
+      ncol = dg_frag%n_basis(ifrag_col, ispin)
+      do jj = 1, ncol
+        col_gid = dg_frag%index_basis(jj, ifrag_col, ispin)
+        col_pos = find_compact_row(compact_row_ids, col_gid)
+        do ii = 1, nrow
+          row_gid = dg_frag%index_basis(ii, ifrag_row, ispin)
+          row_pos = find_compact_row(compact_row_ids, row_gid)
+          do istate = 1, nstate
+            y(row_pos, istate) = y(row_pos, istate) + &
+              blocks(iblk)%val(ii, jj, ispin) * x(col_pos, istate)
+          end do
+        end do
+      end do
+    end do
+
+  contains
+    logical function compact_ids_strictly_increasing(ids) result(ok)
+      integer, intent(in) :: ids(:)
+      integer :: i
+      ok = .true.
+      do i = 2, size(ids)
+        if (ids(i) <= ids(i-1)) then
+          ok = .false.
+          return
+        end if
+      end do
+    end function compact_ids_strictly_increasing
+
+    integer function find_compact_row(ids, target) result(position)
+      integer, intent(in) :: ids(:), target
+      integer :: left, middle, right
+      position = 0
+      left = 1
+      right = size(ids)
+      do while (left <= right)
+        middle = left + (right - left) / 2
+        if (ids(middle) == target) then
+          position = middle
+          return
+        else if (ids(middle) < target) then
+          left = middle + 1
+        else
+          right = middle - 1
+        end if
+      end do
+    end function find_compact_row
+  end subroutine apply_matrix_blocks_batch_compact
+
+  subroutine apply_complex_matrix_blocks_batch_compact(dg_frag, blocks, ispin, compact_row_ids, x, y, block_ids, info)
+    implicit none
+    type(s_dg_fragment_rt), intent(in) :: dg_frag
+    type(complex_matrix_block_info), intent(in) :: blocks(:)
+    integer, intent(in) :: ispin
+    integer, intent(in) :: compact_row_ids(:), block_ids(:)
+    complex(8), intent(in) :: x(:, :)
+    complex(8), intent(inout) :: y(:, :)
+    integer, intent(out) :: info
+
+    integer :: iblk_idx, iblk, ifrag_row, ifrag_col, nrow, ncol
+    integer :: ii, jj, row_gid, col_gid, row_pos, col_pos, istate
+
+    info = 0
+    if (ispin < 1 .or. ispin > dg_frag%nspin) info = 1
+    if (.not. allocated(dg_frag%index_basis) .or. .not. allocated(dg_frag%n_basis)) info = max(info, 2)
+    if (size(x, 1) /= size(compact_row_ids) .or. size(y, 1) /= size(compact_row_ids) .or. &
+        size(x, 2) /= size(y, 2)) info = max(info, 3)
+    if (.not. compact_ids_strictly_increasing(compact_row_ids)) info = max(info, 4)
+    if (info /= 0) return
+
+    do iblk_idx = 1, size(block_ids)
+      iblk = block_ids(iblk_idx)
+      if (iblk < 1 .or. iblk > size(blocks)) then
+        info = 5
+        return
+      end if
+      ifrag_row = blocks(iblk)%ifrag_row
+      ifrag_col = blocks(iblk)%ifrag_col
+      if (ifrag_row < 1 .or. ifrag_row > dg_frag%n_frag .or. &
+          ifrag_col < 1 .or. ifrag_col > dg_frag%n_frag) then
+        info = 6
+        return
+      end if
+      if (.not. allocated(blocks(iblk)%val)) then
+        info = 7
+        return
+      end if
+      nrow = dg_frag%n_basis(ifrag_row, ispin)
+      ncol = dg_frag%n_basis(ifrag_col, ispin)
+      if (nrow > size(dg_frag%index_basis, 1) .or. ncol > size(dg_frag%index_basis, 1) .or. &
+          nrow > size(blocks(iblk)%val, 1) .or. ncol > size(blocks(iblk)%val, 2) .or. &
+          ispin > size(blocks(iblk)%val, 3)) then
+        info = 8
+        return
+      end if
+      do ii = 1, nrow
+        if (find_compact_row(compact_row_ids, dg_frag%index_basis(ii, ifrag_row, ispin)) <= 0) then
+          info = 9
+          return
+        end if
+      end do
+      do jj = 1, ncol
+        if (find_compact_row(compact_row_ids, dg_frag%index_basis(jj, ifrag_col, ispin)) <= 0) then
+          info = 10
+          return
+        end if
+      end do
+      do jj = 1, ncol
+        do ii = 1, nrow
+          if (.not. ieee_is_finite(real(blocks(iblk)%val(ii, jj, ispin), 8)) .or. &
+              .not. ieee_is_finite(aimag(blocks(iblk)%val(ii, jj, ispin)))) then
+            info = 11
+            return
+          end if
+        end do
+      end do
+    end do
+
+    do iblk_idx = 1, size(block_ids)
+      iblk = block_ids(iblk_idx)
+      ifrag_row = blocks(iblk)%ifrag_row
+      ifrag_col = blocks(iblk)%ifrag_col
+      nrow = dg_frag%n_basis(ifrag_row, ispin)
+      ncol = dg_frag%n_basis(ifrag_col, ispin)
+      do jj = 1, ncol
+        col_gid = dg_frag%index_basis(jj, ifrag_col, ispin)
+        col_pos = find_compact_row(compact_row_ids, col_gid)
+        do ii = 1, nrow
+          row_gid = dg_frag%index_basis(ii, ifrag_row, ispin)
+          row_pos = find_compact_row(compact_row_ids, row_gid)
+          do istate = 1, size(x, 2)
+            y(row_pos, istate) = y(row_pos, istate) + blocks(iblk)%val(ii, jj, ispin) * x(col_pos, istate)
+          end do
+        end do
+      end do
+    end do
+
+  contains
+    logical function compact_ids_strictly_increasing(ids) result(ok)
+      integer, intent(in) :: ids(:)
+      integer :: i
+      ok = .true.
+      do i = 2, size(ids)
+        if (ids(i) <= ids(i-1)) then
+          ok = .false.
+          return
+        end if
+      end do
+    end function compact_ids_strictly_increasing
+
+    integer function find_compact_row(ids, target) result(position)
+      integer, intent(in) :: ids(:), target
+      integer :: left, middle, right
+      position = 0
+      left = 1
+      right = size(ids)
+      do while (left <= right)
+        middle = left + (right - left) / 2
+        if (ids(middle) == target) then
+          position = middle
+          return
+        else if (ids(middle) < target) then
+          left = middle + 1
+        else
+          right = middle - 1
+        end if
+      end do
+    end function find_compact_row
+  end subroutine apply_complex_matrix_blocks_batch_compact
 
   subroutine apply_complex_matrix_blocks_batch(dg_frag, blocks, ispin, x, y, block_ids)
     implicit none

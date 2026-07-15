@@ -1,4 +1,5 @@
 module dg_wannier_pw_scf
+ ! Small-system mathematical oracle only; production uses matrix-free occupied-subspace SCF.
  use dg_wpw_fixed_operator,only:s_dg_wpw_fixed_operator,compose_dg_wpw_hamiltonian, &
   dg_wpw_fixed_dimensions,copy_dg_wpw_metric
  use dg_generalized_algebra,only:dg_generalized_eigh
