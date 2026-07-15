@@ -4,6 +4,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 provider = ROOT / "src/rt/dg/rt_dg_wpw_face_trace_provider.f90"
 scanner = ROOT / "src/rt/dg/rt_dg_wpw_face_trace_scanner.f90"
+fixture = ROOT / "tests/dg/test_dg_wpw_face_trace_scanner.f90"
+runner = ROOT / "tests/dg/run_dg_wpw_face_trace_fixture.py"
 
 assert provider.exists(), "missing WPW face trace provider"
 text = provider.read_text().lower()
@@ -43,5 +45,11 @@ for token in (
     assert token in scan, f"missing canonical face scanner contract: {token}"
 for forbidden in ("do k=1,n_frag", "do ifrag=1,n_frag", "mpi_", "pp_face", "h_mat", "s_mat", "dense_h", "dense_s"):
     assert forbidden not in scan, f"scanner crosses forbidden boundary: {forbidden}"
+
+assert fixture.exists() and runner.exists(), "missing linked canonical face fixture"
+fixture_text = fixture.read_text().lower()
+for token in ("point_count", "expected_grids", "deterministic_traces", "assemble_wpw_canonical_face_point"):
+    assert token in fixture_text, f"numerical fixture misses contract: {token}"
+assert "--build-dir" in runner.read_text(), "fixture runner must accept the configured build directory"
 
 print("PASS WPW face trace provider/scanner source contract")
