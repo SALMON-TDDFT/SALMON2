@@ -66,8 +66,8 @@ subroutine generate_checkpoint_directory_name(header,iter,gdir,pdir)
   character(256),intent(out) :: gdir
   character(256),intent(out) :: pdir
 
-  ! global directory
-  write(gdir,'(A,A,A,I6.6,A)') trim(base_directory)//"checkpoint_",trim(header),"_",iter,"/"
+  ! global directory (i0.6: keep 6-digit zero-padding but widen automatically for iter >= 1e6)
+  write(gdir,'(A,A,A,i0.6,A)') trim(base_directory)//"checkpoint_",trim(header),"_",iter,"/"
   ! process private directory
   write(pdir,'(A,A,I6.6,A)')   trim(gdir),'rank_',nproc_id_global,'/'
 end subroutine generate_checkpoint_directory_name
@@ -79,8 +79,9 @@ subroutine generate_restart_directory_name(basedir,gdir,pdir)
   character(256),intent(out) :: gdir
   character(256),intent(out) :: pdir
 
-  ! global directory
-  write(gdir,'(A,I6.6,A)')   trim(basedir)
+  ! global directory (gdir = basedir; the old '(A,I6.6,A)' had no integer arg for I6.6,
+  !  a format/output-list mismatch that aborts under the Fujitsu runtime on the final RT-restart write)
+  write(gdir,'(A)')          trim(basedir)
   ! process private directory
   write(pdir,'(A,A,I6.6,A)') trim(gdir),'rank_',nproc_id_global,'/'
 end subroutine generate_restart_directory_name
