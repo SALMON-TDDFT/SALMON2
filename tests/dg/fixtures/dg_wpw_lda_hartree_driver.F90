@@ -39,7 +39,9 @@ contains
   end subroutine
 end module
 module salmon_xc
+  use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   integer::xc_calls=0
+  logical::force_xc_nan=.false.
   real(8),allocatable::eexc_tmp(:,:,:)
 contains
   subroutine exchange_correlation(system,xc,mg,srgs,srg,rhos,pp,ppn,info,psi,stencil,vxc,exc)
@@ -53,6 +55,7 @@ contains
     if(.not.allocated(eexc_tmp))allocate(eexc_tmp,source=rhos(1)%f)
     eexc_tmp=-.45d0*rhos(1)%f**(4d0/3d0)
     vxc(1)%f=-.6d0*rhos(1)%f**(1d0/3d0)
+    if(force_xc_nan)vxc(1)%f(1,1,1)=ieee_value(0d0,ieee_quiet_nan)
     exc=sum(eexc_tmp)*system%hvol
   end subroutine
 end module
@@ -61,7 +64,7 @@ program dg_wpw_lda_hartree_driver
   use dg_wpw_lda_hartree
   use structures
   use hartree_sub,only:hartree_calls
-  use salmon_xc,only:xc_calls
+  use salmon_xc,only:xc_calls,force_xc_nan
   use salmon_global,only:yn_hse
   use communication,only:forced_integer_bad,integer_sum_calls
   implicit none
@@ -104,22 +107,31 @@ program dg_wpw_lda_hartree_driver
   call req(info==0.and.hartree_calls==1.and.xc_calls==1,'valid production update')
   call req(maxval(abs(reshape(rhos(1)%f,[np])-rhog))<1d-13,'Fortran grid order')
   call req(abs(excs-exc_core)<1d-13,'actual XC core/global equality')
+  call update_wpw_owned_lda_hartree(lg,mg,system,pinfo,stencil,xc,pp,ppn,psi,srg,srgs,poisson,fg,&
+    rtot,rhos,vh_s,vxc_s,reshape(rhog,[np,1]),np,excs,exc_core,nvxc_core,info)
+  call req(info==0.and.hartree_calls==2.and.xc_calls==2,'owned-grid production update')
+  call req(maxval(abs(reshape(rhos(1)%f,[np])-rhog))<1d-13,'owned-grid Fortran order')
+  force_xc_nan=.true.
+  call update_wpw_owned_lda_hartree(lg,mg,system,pinfo,stencil,xc,pp,ppn,psi,srg,srgs,poisson,fg,&
+    rtot,rhos,vh_s,vxc_s,reshape(rhog,[np,1]),np,excs,exc_core,nvxc_core,info)
+  call req(info/=0.and.hartree_calls==3.and.xc_calls==3,'owned-grid post-solver NaN rejected')
+  force_xc_nan=.false.
   xc%use_gradient=.true.
   call update_wpw_lda_hartree(lg,mg,system,pinfo,stencil,xc,pp,ppn,psi,srg,srgs,poisson,fg, &
     rtot,rhos,vh_s,vxc_s,rho_core,core,np,nf,excs,exc_core,nvxc_core,info,bad)
-  call req(info==10.and.hartree_calls==1.and.xc_calls==1,'GGA rejected before solvers');xc%use_gradient=.false.
+  call req(info==10.and.hartree_calls==3.and.xc_calls==3,'GGA rejected before solvers');xc%use_gradient=.false.
   yn_hse='y'
   call update_wpw_lda_hartree(lg,mg,system,pinfo,stencil,xc,pp,ppn,psi,srg,srgs,poisson,fg, &
     rtot,rhos,vh_s,vxc_s,rho_core,core,np,nf,excs,exc_core,nvxc_core,info,bad)
-  call req(info==10.and.hartree_calls==1.and.xc_calls==1,'HSE rejected before solvers');yn_hse='n'
+  call req(info==10.and.hartree_calls==3.and.xc_calls==3,'HSE rejected before solvers');yn_hse='n'
   core(3,:)=.false.
   call update_wpw_lda_hartree(lg,mg,system,pinfo,stencil,xc,pp,ppn,psi,srg,srgs,poisson,fg, &
     rtot,rhos,vh_s,vxc_s,rho_core,core,np,nf,excs,exc_core,nvxc_core,info,bad)
-  call req(info==2.and.hartree_calls==1.and.xc_calls==1,'ownership rejected before solvers')
+  call req(info==2.and.hartree_calls==3.and.xc_calls==3,'ownership rejected before solvers')
   core(3,1)=.true.;rho_core(2,1,1)=ieee_value(0d0,ieee_quiet_nan)
   call update_wpw_lda_hartree(lg,mg,system,pinfo,stencil,xc,pp,ppn,psi,srg,srgs,poisson,fg, &
     rtot,rhos,vh_s,vxc_s,rho_core,core,np,nf,excs,exc_core,nvxc_core,info,bad)
-  call req(info==11.and.hartree_calls==1.and.xc_calls==1,'NaN rejected before solvers')
+  call req(info==11.and.hartree_calls==3.and.xc_calls==3,'NaN rejected before solvers')
   write(*,'(a)')'PASS DG WPW LDA Hartree Fortran driver'
 contains
   subroutine req(ok,msg);logical,intent(in)::ok;character(*),intent(in)::msg

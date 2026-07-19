@@ -374,6 +374,16 @@ contains
       & yn_auto_mixing, &
       & update_mixing_ratio, &
       & nscf, &
+      & yn_dg_wpw_production, &
+      & yn_dg_wpw_fixed_h_relaxation, &
+      & dg_wpw_extra_states, &
+      & dg_wpw_scf_max_iter, &
+      & dg_wpw_window_buffer, &
+      & dg_wpw_window_width, &
+      & dg_wpw_gap_threshold, &
+      & dg_wpw_metric_cutoff, &
+      & dg_wpw_scf_mix, &
+      & dg_wpw_scf_residual_tolerance, &
       & yn_subspace_diagonalization, &
       & convergence, &
       & threshold, &
@@ -709,7 +719,14 @@ contains
       & basis_update_threshold, &
       & yn_dg_fragment_from_dcdft, &
       & yn_dg_lcfo_seed_exhaustive_check, &
-      & yn_dg_full_h_eigen_seed
+      & yn_dg_full_h_eigen_seed, &
+      & yn_dg_wpw_checkpoint_rt, &
+      & dg_wpw_checkpoint_manifest, &
+      & dg_wpw_checkpoint_rank_prefix, &
+      & dg_wpw_checkpoint_identity_tolerance, &
+      & dg_wpw_exp_max_corrector, &
+      & dg_wpw_exp_corrector_tolerance, &
+      & dg_wpw_exp_norm_tolerance
 
     namelist/dg_fragment/ &
       & yn_dg_fragment_rt, &
@@ -726,7 +743,14 @@ contains
       & basis_update_threshold, &
       & yn_dg_fragment_from_dcdft, &
       & yn_dg_lcfo_seed_exhaustive_check, &
-      & yn_dg_full_h_eigen_seed
+      & yn_dg_full_h_eigen_seed, &
+      & yn_dg_wpw_checkpoint_rt, &
+      & dg_wpw_checkpoint_manifest, &
+      & dg_wpw_checkpoint_rank_prefix, &
+      & dg_wpw_checkpoint_identity_tolerance, &
+      & dg_wpw_exp_max_corrector, &
+      & dg_wpw_exp_corrector_tolerance, &
+      & dg_wpw_exp_norm_tolerance
 
 !! == default for &unit ==
     unit_system='au'
@@ -919,6 +943,16 @@ contains
     yn_auto_mixing = 'n'
     update_mixing_ratio = 3.d0
     nscf          = 300
+    yn_dg_wpw_production = 'n'
+    yn_dg_wpw_fixed_h_relaxation = 'n'
+    dg_wpw_extra_states = 8
+    dg_wpw_scf_max_iter = 200
+    dg_wpw_window_buffer = 3
+    dg_wpw_window_width = 2
+    dg_wpw_gap_threshold = 1d-6
+    dg_wpw_metric_cutoff = 1d-10
+    dg_wpw_scf_mix = 0.3d0
+    dg_wpw_scf_residual_tolerance = 1d-8
     yn_subspace_diagonalization = 'y'
     convergence   = 'rho_dne'
     threshold     = -1d0  !a.u. (default value for 'rho_dne'is given later)
@@ -1261,6 +1295,13 @@ contains
     yn_dg_fragment_from_dcdft = 'n'
     yn_dg_lcfo_seed_exhaustive_check = 'n'
     yn_dg_full_h_eigen_seed = 'y'
+    yn_dg_wpw_checkpoint_rt = 'n'
+    dg_wpw_checkpoint_manifest = ''
+    dg_wpw_checkpoint_rank_prefix = ''
+    dg_wpw_checkpoint_identity_tolerance = 1d-8
+    dg_wpw_exp_max_corrector = 12
+    dg_wpw_exp_corrector_tolerance = 1d-10
+    dg_wpw_exp_norm_tolerance = 1d-10
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1582,6 +1623,16 @@ contains
     call comm_bcast(yn_auto_mixing          ,nproc_group_global)
     call comm_bcast(update_mixing_ratio     ,nproc_group_global)
     call comm_bcast(nscf                    ,nproc_group_global)
+    call comm_bcast(yn_dg_wpw_production    ,nproc_group_global)
+    call comm_bcast(yn_dg_wpw_fixed_h_relaxation,nproc_group_global)
+    call comm_bcast(dg_wpw_extra_states     ,nproc_group_global)
+    call comm_bcast(dg_wpw_scf_max_iter     ,nproc_group_global)
+    call comm_bcast(dg_wpw_window_buffer    ,nproc_group_global)
+    call comm_bcast(dg_wpw_window_width     ,nproc_group_global)
+    call comm_bcast(dg_wpw_gap_threshold    ,nproc_group_global)
+    call comm_bcast(dg_wpw_metric_cutoff    ,nproc_group_global)
+    call comm_bcast(dg_wpw_scf_mix          ,nproc_group_global)
+    call comm_bcast(dg_wpw_scf_residual_tolerance,nproc_group_global)
     call comm_bcast(yn_subspace_diagonalization,nproc_group_global)
     call comm_bcast(convergence             ,nproc_group_global)
     call comm_bcast(threshold               ,nproc_group_global)
@@ -2019,6 +2070,13 @@ contains
     call comm_bcast(yn_dg_fragment_from_dcdft, nproc_group_global)
     call comm_bcast(yn_dg_lcfo_seed_exhaustive_check, nproc_group_global)
     call comm_bcast(yn_dg_full_h_eigen_seed, nproc_group_global)
+    call comm_bcast(yn_dg_wpw_checkpoint_rt, nproc_group_global)
+    call comm_bcast(dg_wpw_checkpoint_manifest, nproc_group_global)
+    call comm_bcast(dg_wpw_checkpoint_rank_prefix, nproc_group_global)
+    call comm_bcast(dg_wpw_checkpoint_identity_tolerance, nproc_group_global)
+    call comm_bcast(dg_wpw_exp_max_corrector, nproc_group_global)
+    call comm_bcast(dg_wpw_exp_corrector_tolerance, nproc_group_global)
+    call comm_bcast(dg_wpw_exp_norm_tolerance, nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -2610,6 +2668,18 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_auto_mixing', yn_auto_mixing
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'update_mixing_ratio', update_mixing_ratio
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf', nscf
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_wpw_production', yn_dg_wpw_production
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_wpw_fixed_h_relaxation', &
+        yn_dg_wpw_fixed_h_relaxation
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_extra_states', dg_wpw_extra_states
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_scf_max_iter', dg_wpw_scf_max_iter
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_window_buffer', dg_wpw_window_buffer
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_window_width', dg_wpw_window_width
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_wpw_gap_threshold', dg_wpw_gap_threshold
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_wpw_metric_cutoff', dg_wpw_metric_cutoff
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_wpw_scf_mix', dg_wpw_scf_mix
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_wpw_scf_residual_tolerance', dg_wpw_scf_residual_tolerance
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_subspace_diagonalization', yn_subspace_diagonalization
       write(fh_variables_log, '("#",4X,A,"=",A)') 'convergence', convergence
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold', threshold
@@ -3163,6 +3233,22 @@ contains
     call yn_argument_check(yn_fix_func)
     call yn_argument_check(yn_predictor_corrector)
     call yn_argument_check(yn_auto_mixing)
+    call yn_argument_check(yn_dg_wpw_production)
+    call yn_argument_check(yn_dg_wpw_fixed_h_relaxation)
+    if(yn_dg_wpw_fixed_h_relaxation=='y'.and.yn_dg_wpw_production/='y') &
+      stop 'yn_dg_wpw_fixed_h_relaxation=y requires yn_dg_wpw_production=y'
+    if(yn_dg_wpw_production=='y') then
+      if(yn_dc/='y') stop 'yn_dg_wpw_production=y requires yn_dc=y'
+      if(dg_wpw_extra_states<1 .or. dg_wpw_scf_max_iter<1) &
+        stop 'DG WPW production dimensions must be positive'
+      if(dg_wpw_window_buffer<1 .or. dg_wpw_window_width<1 .or. &
+         dg_wpw_window_width>dg_wpw_window_buffer) &
+        stop 'invalid DG WPW production window buffer or transition width'
+      if(dg_wpw_gap_threshold<=0d0 .or. dg_wpw_metric_cutoff<=0d0 .or. &
+         dg_wpw_scf_mix<=0d0 .or. dg_wpw_scf_mix>1d0 .or. &
+         dg_wpw_scf_residual_tolerance<=0d0) &
+        stop 'invalid DG WPW production SCF tolerance or mixing control'
+    endif
     call yn_argument_check(yn_subspace_diagonalization)
     call yn_argument_check(yn_out_psi)
     call yn_argument_check(yn_out_dos)
@@ -3722,6 +3808,17 @@ contains
     if(yn_dg_nodal_rt=='y' .and. (dg_nodal_gs_relax_step <= 0.0d0 .or. &
        dg_nodal_gs_max_iter < 1 .or. dg_nodal_gs_tol <= 0.0d0 .or. dg_nodal_taylor_order < 1)) &
       stop "Nodal real-space DG has invalid GS/Taylor controls."
+    call yn_argument_check(yn_dg_wpw_checkpoint_rt)
+    if(yn_dg_wpw_checkpoint_rt=='y')then
+      if(yn_dg_fragment_rt/='y')stop 'WPW checkpoint-backed RT requires yn_dg_fragment_rt=y.'
+      if(yn_restart=='y')stop 'WPW checkpoint-backed RT forbids conventional yn_restart=y.'
+      if(len_trim(dg_wpw_checkpoint_manifest)==0.or.len_trim(dg_wpw_checkpoint_rank_prefix)==0)&
+        stop 'WPW checkpoint-backed RT requires manifest and rank-prefix paths.'
+      if(dg_wpw_checkpoint_identity_tolerance<=0d0)&
+        stop 'WPW checkpoint identity tolerance must be positive.'
+      if(dg_wpw_exp_max_corrector<1.or.dg_wpw_exp_corrector_tolerance<=0d0.or.&
+         dg_wpw_exp_norm_tolerance<=0d0)stop 'WPW midpoint Exp controls must be positive.'
+    endif
     if(yn_dg_length_gauge=='y' .and. yn_spinorbit=='y') &
       stop "DG length gauge is not connected to the SOI DG-Fragment RT path yet."
     if(yn_dg_length_gauge=='y' .and. time_integrator_dg_fragment/='taylor4pc' .and. &

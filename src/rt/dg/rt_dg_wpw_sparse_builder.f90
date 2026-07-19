@@ -1,6 +1,7 @@
 module rt_dg_wpw_sparse_builder
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
-  use rt_dg_wpw_column_layout, only: s_dg_wpw_column_layout, wpw_column_pair, wpw_column_owner
+  use rt_dg_wpw_column_layout, only: s_dg_wpw_column_layout, wpw_column_pair, wpw_column_owner, &
+    wpw_fragment_root_owner
   use rt_dg_wpw_sparse_blocks, only: s_dg_wpw_sparse_blocks
   implicit none
   private
@@ -149,7 +150,14 @@ contains
       integer, intent(out) :: column_owner, k_id, local_g_id, validation_info
       call wpw_column_pair(column_id, layout%n_g_modes, k_id, local_g_id, validation_info)
       if (validation_info /= 0 .or. column_id > layout%n_global_columns) return
-      column_owner = wpw_column_owner(column_id, layout%n_global_columns, nrank, validation_info)
+      select case(trim(layout%ownership_kind))
+      case('fragment_root')
+        column_owner=wpw_fragment_root_owner(column_id,layout%n_g_modes,nrank,validation_info)
+      case('arithmetic')
+        column_owner=wpw_column_owner(column_id,layout%n_global_columns,nrank,validation_info)
+      case default
+        column_owner=-1;validation_info=1
+      end select
     end subroutine validate_column
   end subroutine build_windowed_sparse_wpw_operators
 

@@ -1,7 +1,8 @@
 module dg_generalized_algebra
  implicit none
  private
- public::dg_metric_factor,dg_generalized_eigh,dg_s_exp_action,dg_metric_to_orth,dg_metric_from_orth
+ public::dg_metric_factor,dg_generalized_eigh,dg_reduced_generalized_eigh,dg_s_exp_action, &
+  dg_metric_to_orth,dg_metric_from_orth
 contains
  subroutine heev(a,n,e,info)
   integer,intent(in)::n;complex(8),intent(inout)::a(n,n);real(8),intent(out)::e(n);integer,intent(out)::info
@@ -49,6 +50,39 @@ contains
   do i=1,n;r(:,i)=matmul(h,c(:,i))-e(i)*matmul(s,c(:,i));enddo
   residual=maxval(abs(r));eye=matmul(conjg(transpose(c)),matmul(s,c));do i=1,n;eye(i,i)=eye(i,i)-1;enddo
   orthogonality=maxval(abs(eye))
+ end subroutine
+ subroutine dg_reduced_generalized_eigh(h,s,n,nev,cutoff,e,c,effective_rank,residual,orthogonality,info)
+  integer,intent(in)::n,nev;real(8),intent(in)::cutoff;complex(8),intent(in)::h(n,n),s(n,n)
+  real(8),intent(out)::e(nev),residual,orthogonality;complex(8),intent(out)::c(n,nev)
+  integer,intent(out)::effective_rank,info
+  complex(8),allocatable::v(:,:),x(:,:),ho(:,:),r(:,:),eye(:,:)
+  real(8),allocatable::se(:),he(:)
+  real(8)::emax
+  integer::i,j
+  c=0;e=0;effective_rank=0;residual=huge(1d0);orthogonality=huge(1d0);info=1
+  if(n<1.or.nev<1.or.nev>n.or.cutoff<=0d0)return
+  if(maxval(abs(s-conjg(transpose(s))))>1d-10*max(1d0,maxval(abs(s))))then;info=10;return;endif
+  if(maxval(abs(h-conjg(transpose(h))))>1d-10*max(1d0,maxval(abs(h))))then;info=20;return;endif
+  allocate(v(n,n),se(n));v=.5d0*(s+conjg(transpose(s)));call heev(v,n,se,info)
+  if(info/=0)return
+  emax=se(n)
+  if(emax<=0d0)then;info=11;return;endif
+  effective_rank=count(se>cutoff*emax)
+  if(effective_rank<nev)then;info=100+(nev-effective_rank);return;endif
+  allocate(x(n,effective_rank));j=0
+  do i=1,n
+   if(se(i)<=cutoff*emax)cycle
+   j=j+1;x(:,j)=v(:,i)/sqrt(se(i))
+  enddo
+  allocate(ho(effective_rank,effective_rank),he(effective_rank))
+  ho=matmul(conjg(transpose(x)),matmul(h,x));ho=.5d0*(ho+conjg(transpose(ho)))
+  call heev(ho,effective_rank,he,info);if(info/=0)return
+  c=matmul(x,ho(:,1:nev));e=he(1:nev)
+  allocate(r(n,nev),eye(nev,nev))
+  do i=1,nev;r(:,i)=matmul(h,c(:,i))-e(i)*matmul(s,c(:,i));enddo
+  residual=maxval(abs(r));eye=matmul(conjg(transpose(c)),matmul(s,c))
+  do i=1,nev;eye(i,i)=eye(i,i)-1;enddo
+  orthogonality=maxval(abs(eye));info=0
  end subroutine
  subroutine dg_s_exp_action(h,s,n,cutoff,dt,c0,c1,sunitarity,condition,discarded,info)
   integer,intent(in)::n;real(8),intent(in)::cutoff,dt;complex(8),intent(in)::h(n,n),s(n,n),c0(n)

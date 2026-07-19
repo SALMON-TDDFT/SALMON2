@@ -4,7 +4,63 @@ module dg_wpw_lda_hartree
   private
   public :: validate_core_ownership, integrate_core_lda_terms
   public :: hartree_energy_global, update_wpw_lda_hartree
+  public :: update_wpw_owned_lda_hartree
 contains
+  subroutine update_wpw_owned_lda_hartree(lg,mg,system,info,stencil,xc_func,pp,ppn,spsi,&
+      srg,srg_scalar,poisson,fg,rho,rho_s,vh,vxc,rho_owned,npoint,e_xc,e_xc_owned,n_vxc_owned,status)
+    use structures
+    use hartree_sub,only:hartree
+    use salmon_xc,only:exchange_correlation,eexc_tmp
+    use salmon_global,only:yn_hse
+    use communication,only:comm_summation
+    type(s_rgrid),intent(in)::lg,mg;type(s_dft_system),intent(in)::system
+    type(s_parallel_info),intent(in)::info;type(s_stencil),intent(in)::stencil
+    type(s_xc_functional),intent(in)::xc_func;type(s_pp_info),intent(in)::pp;type(s_pp_nlcc),intent(in)::ppn
+    type(s_orbital),intent(inout)::spsi;type(s_sendrecv_grid),intent(inout)::srg,srg_scalar
+    type(s_poisson),intent(inout)::poisson;type(s_reciprocal_grid),intent(inout)::fg
+    type(s_scalar),intent(inout)::rho,rho_s(system%nspin),vh,vxc(system%nspin)
+    integer,intent(in)::npoint;real(8),intent(in)::rho_owned(npoint,system%nspin)
+    real(8),intent(out)::e_xc,e_xc_owned,n_vxc_owned;integer,intent(out)::status
+    integer::ispin,local_bad,global_bad,local_reason
+    real(8)::e_local,nv_local
+    e_xc=0d0;e_xc_owned=0d0;n_vxc_owned=0d0;status=0
+    if(xc_func%use_gradient.or.xc_func%use_laplacian.or.xc_func%use_kinetic_energy.or.&
+       xc_func%use_current.or.yn_hse=='y')status=10
+    if(status==0.and.(npoint/=size(rho_s(1)%f).or..not.all(ieee_is_finite(rho_owned))))status=11
+    local_bad=merge(1,0,status/=0);call comm_summation(local_bad,global_bad,info%icomm_r)
+    if(global_bad/=0)then;if(status==0)status=13;return;endif
+    do ispin=1,system%nspin
+      rho_s(ispin)%f=reshape(rho_owned(:,ispin),shape(rho_s(ispin)%f))
+    enddo
+    rho%f=0d0;do ispin=1,system%nspin;rho%f=rho%f+rho_s(ispin)%f;enddo
+    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,vh)
+    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi,stencil,vxc,e_xc)
+    local_bad=0;local_reason=0
+    if(.not.allocated(eexc_tmp))then;local_bad=1;local_reason=1
+    else if(any(shape(eexc_tmp)/=mg%num))then;local_bad=1;local_reason=2
+    endif
+    if(local_bad==0)then
+      if(.not.all(ieee_is_finite(rho%f)))then;local_bad=1;local_reason=3
+      else if(.not.all(ieee_is_finite(vh%f)))then;local_bad=1;local_reason=4
+      else if(.not.all(ieee_is_finite(eexc_tmp)))then;local_bad=1;local_reason=5
+      endif
+      do ispin=1,system%nspin
+        if(.not.all(ieee_is_finite(rho_s(ispin)%f)))then;local_bad=1;local_reason=10+ispin
+        else if(.not.all(ieee_is_finite(vxc(ispin)%f)))then;local_bad=1;local_reason=20+ispin
+        endif
+      enddo
+    endif
+    if(local_bad/=0)write(*,'(1x,a,i0)')'[DG-WPW-LOCAL-FAIL] lda_hartree_nonfinite reason=',local_reason
+    call comm_summation(local_bad,global_bad,info%icomm_r)
+    if(global_bad/=0)then;status=16;return;endif
+    e_local=sum(eexc_tmp)*system%hvol;nv_local=0d0
+    do ispin=1,system%nspin
+      nv_local=nv_local+sum(rho_s(ispin)%f*vxc(ispin)%f)*system%hvol
+    enddo
+    call comm_summation(e_local,e_xc_owned,info%icomm_r)
+    call comm_summation(nv_local,n_vxc_owned,info%icomm_r)
+    if(abs(e_xc_owned-e_xc)>1d-11*max(1d0,abs(e_xc)))status=14
+  end subroutine update_wpw_owned_lda_hartree
   subroutine validate_core_ownership(core_owner,npoint,nfragment,info,bad_point)
     integer,intent(in) :: npoint,nfragment
     logical,intent(in) :: core_owner(npoint,nfragment)

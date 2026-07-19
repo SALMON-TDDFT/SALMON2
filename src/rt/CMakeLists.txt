@@ -43,7 +43,15 @@ set(SOURCES
     dg/rt_dg_wpw_face_trace_provider.f90
     dg/rt_dg_wpw_quadrature_assembler.f90
     dg/rt_dg_wpw_face_trace_scanner.f90
-    dg/rt_dg_wpw_owner_exchange.f90
+    dg/rt_dg_wpw_trace_halo_provider.f90
+    dg/rt_dg_wpw_face_side_halo.f90
+    dg/rt_dg_wpw_face_trace_binding.f90
+    dg/rt_dg_wpw_volume_halo_provider.f90
+    dg/rt_dg_wpw_candidate_halo.f90
+    dg/rt_dg_wpw_production_builder.f90
+    dg/rt_dg_wpw_checkpoint_handoff.f90
+  dg/rt_dg_wpw_exp_production.f90
+  dg/rt_dg_wpw_length_gauge.f90
     dg/rt_dg_wpw_matrix_free_adapter.f90
     dg/rt_dg_fragment_coefficients.f90
     dg/rt_dg_fragment_layout.f90

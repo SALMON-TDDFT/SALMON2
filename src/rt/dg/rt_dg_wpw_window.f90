@@ -19,6 +19,8 @@
 
 module rt_dg_wpw_window
   use rt_dg_fragment_types, only: s_dg_fragment_rt
+  use dg_wpw_windows, only: evaluate_dg_wpw_normalized_windows
+  use salmon_global, only: dg_wpw_window_buffer,dg_wpw_window_width
   implicit none
 
   private
@@ -38,27 +40,7 @@ contains
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: axis
-    character(len=64) :: env_value
-    integer :: env_len, env_stat, ios
-    integer, save :: cached_buf = -1
-    logical, save :: initialized = .false.
-
-    if (.not. initialized) then
-      env_value = ''
-      call get_environment_variable('SALMON_DG_WPW_WINDOW_BUFFER', env_value, length=env_len, status=env_stat)
-      if (env_stat == 0 .and. env_len > 0) then
-        read(env_value(1:env_len), *, iostat=ios) cached_buf
-        if (ios /= 0) cached_buf = -1
-      end if
-      initialized = .true.
-    end if
-
-    if (cached_buf >= 0) then
-      buf = cached_buf
-    else
-      buf = 3
-    end if
-    buf = max(0, buf)
+    buf = max(0, dg_wpw_window_buffer)
   end function wpw_window_buffer_axis
 
 
@@ -66,26 +48,7 @@ contains
     implicit none
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: axis
-    character(len=64) :: env_value
-    integer :: env_len, env_stat, ios
-    integer, save :: cached_width = -1
-    logical, save :: initialized = .false.
-
-    if (.not. initialized) then
-      env_value = ''
-      call get_environment_variable('SALMON_DG_WPW_WINDOW_WIDTH', env_value, length=env_len, status=env_stat)
-      if (env_stat == 0 .and. env_len > 0) then
-        read(env_value(1:env_len), *, iostat=ios) cached_width
-        if (ios /= 0) cached_width = -1
-      end if
-      initialized = .true.
-    end if
-
-    if (cached_width > 0) then
-      width = cached_width
-    else
-      width = 2
-    end if
+    width = dg_wpw_window_width
     width = max(0, min(width, max(0, wpw_window_buffer_axis(dg_frag, axis))))
   end function wpw_window_transition_width_axis
 
@@ -200,31 +163,37 @@ contains
     type(s_dg_fragment_rt), intent(in) :: dg_frag
     integer, intent(in) :: ifrag, gx, gy, gz
     real(8), intent(out) :: chi, grad_chi(3)
-    integer :: jfrag, nfrag
-    real(8), allocatable :: q(:), gq(:,:)
-    real(8) :: qsum, sqrt_qsum, qg_sum(3)
-    real(8), parameter :: tiny_q = 1.0d-28
+    integer :: jfrag, nfrag, info
+    integer :: total_grid(3), buffer(3), width(3)
+    integer, allocatable :: core_lo(:,:), core_hi(:,:)
+    real(8), allocatable :: chi_all(:), grad_chi_all(:,:)
 
     nfrag = dg_frag%n_frag
     chi = 0.0d0
     grad_chi(:) = 0.0d0
-    allocate(q(nfrag), gq(3, nfrag))
-    q = 0.0d0
-    gq = 0.0d0
-    do jfrag = 1, nfrag
-      call wpw_raw_window_at_grid(dg_frag, jfrag, gx, gy, gz, q(jfrag), gq(:, jfrag))
-    end do
-    qsum = sum(q(1:nfrag)**2)
-    if (qsum > tiny_q) then
-      sqrt_qsum = sqrt(qsum)
-      qg_sum(1:3) = 0.0d0
+    if (ifrag < 1 .or. ifrag > nfrag) return
+    allocate(core_lo(3, nfrag), core_hi(3, nfrag), chi_all(nfrag), grad_chi_all(3, nfrag))
+    if (allocated(dg_frag%frag_core_lo) .and. allocated(dg_frag%frag_core_hi)) then
+      core_lo = dg_frag%frag_core_lo(:, 1:nfrag)
+      core_hi = dg_frag%frag_core_hi(:, 1:nfrag)
+    else
       do jfrag = 1, nfrag
-        qg_sum(1:3) = qg_sum(1:3) + q(jfrag) * gq(1:3, jfrag)
+        core_lo(:, jfrag) = dg_frag%ixyz_frag(:, jfrag)
+        core_hi(:, jfrag) = dg_frag%ixyz_frag(:, jfrag) + dg_frag%nxyz_domain(:, jfrag) - 1
       end do
-      chi = q(ifrag) / sqrt_qsum
-      grad_chi(1:3) = gq(1:3, ifrag) / sqrt_qsum - q(ifrag) * qg_sum(1:3) / (qsum * sqrt_qsum)
     end if
-    deallocate(q, gq)
+    total_grid = max(1, dg_frag%lgnum_total)
+    do jfrag = 1, 3
+      buffer(jfrag) = wpw_window_buffer_axis(dg_frag, jfrag)
+      width(jfrag) = wpw_window_transition_width_axis(dg_frag, jfrag)
+    end do
+    call evaluate_dg_wpw_normalized_windows(core_lo, core_hi, total_grid, dg_frag%hgs, buffer, width, &
+      [gx, gy, gz], chi_all, grad_chi_all, info)
+    if (info == 0) then
+      chi = chi_all(ifrag)
+      grad_chi = grad_chi_all(:, ifrag)
+    end if
+    deallocate(core_lo, core_hi, chi_all, grad_chi_all)
   end subroutine wpw_normalized_window_at_grid
 
 

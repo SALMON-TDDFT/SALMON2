@@ -120,11 +120,26 @@ contains
     nspin = system%nspin
 
     if (nspin==1) then
+      if (allocated(rho_tmp)) then
+        if (any(shape(rho_tmp) /= mg%num)) deallocate(rho_tmp)
+      endif
+      if (allocated(vxc_tmp)) then
+        if (any(shape(vxc_tmp) /= mg%num)) deallocate(vxc_tmp)
+      endif
       if (.not.allocated(rho_tmp)) allocate(rho_tmp(mg%num(1), mg%num(2), mg%num(3)))
       if (.not.allocated(vxc_tmp)) allocate(vxc_tmp(mg%num(1), mg%num(2), mg%num(3)))
     else if(nspin==2)then
+      if (allocated(rho_s_tmp)) then
+        if (any(shape(rho_s_tmp) /= [mg%num,2])) deallocate(rho_s_tmp)
+      endif
+      if (allocated(vxc_s_tmp)) then
+        if (any(shape(vxc_s_tmp) /= [mg%num,2])) deallocate(vxc_s_tmp)
+      endif
       if (.not.allocated(rho_s_tmp)) allocate(rho_s_tmp(mg%num(1), mg%num(2), mg%num(3),2))
       if (.not.allocated(vxc_s_tmp)) allocate(vxc_s_tmp(mg%num(1), mg%num(2), mg%num(3),2))
+    endif
+    if (allocated(eexc_tmp)) then
+      if (any(shape(eexc_tmp) /= mg%num)) deallocate(eexc_tmp)
     endif
     if (.not.allocated(eexc_tmp)) allocate(eexc_tmp(mg%num(1), mg%num(2), mg%num(3)))
 

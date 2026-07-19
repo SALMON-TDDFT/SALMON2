@@ -10,6 +10,9 @@ SRC = ROOT / "src/gs/dc/dg_wpw_lda_hartree.f90"
 
 assert SRC.exists(), "missing dg_wpw_lda_hartree module"
 text = SRC.read_text().lower()
+structures = (ROOT / "src/common/structures.f90").read_text().lower()
+dcdft = (ROOT / "src/gs/dc/dcdft.f90").read_text().lower()
+salmon_xc = (ROOT / "src/xc/salmon_xc.f90").read_text().lower()
 
 for token in (
     "module dg_wpw_lda_hartree",
@@ -17,12 +20,19 @@ for token in (
     "subroutine integrate_core_lda_terms",
     "subroutine hartree_energy_global",
     "subroutine update_wpw_lda_hartree",
+    "subroutine update_wpw_owned_lda_hartree",
     "use hartree_sub, only: hartree",
     "use salmon_xc, only: exchange_correlation",
     "call hartree(",
     "call exchange_correlation(",
 ):
     assert token in text, f"missing contract token: {token}"
+
+assert "srg_tot" in structures, "DC total-system state does not retain the XC send/recv grid"
+assert "dc%srg_tot" in dcdft and "finalize_sendrecv_grid_storage(dc%srg_tot)" in dcdft, \
+    "DC total-system XC communication state lacks initialization/finalization ownership"
+assert "any(shape(eexc_tmp) /= mg%num)" in salmon_xc and "deallocate(eexc_tmp)" in salmon_xc, \
+    "XC scratch must be reallocated when fragment and total-grid shapes differ"
 
 # Two fragments see the full grid, but each point has exactly one core owner.
 core = np.array([

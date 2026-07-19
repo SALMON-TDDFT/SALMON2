@@ -16,6 +16,16 @@ set(SOURCES
    dg_wpw_density.f90
    dg_wpw_fixed_operator.f90
    dg_wpw_matrix_free_operator.f90
+   dg_wpw_owner_exchange.f90
+   dg_wpw_bounded_operator.f90
+   dg_wpw_nonlocal_projector.f90
+   dg_wpw_g_modes.f90
+   dg_wpw_fragment_support.f90
+   dg_wpw_w_row_layout.f90
+   dg_wpw_canonical_face_schedule.f90
+   dg_wpw_windows.f90
+   dg_wpw_production_context.f90
+   dg_wpw_checkpoint.f90
    )
 
 if (IS_FUJITSU_COMPILER)

@@ -1,0 +1,79 @@
+&calculation
+  theory = 'dft'
+  yn_dc = 'y'
+/
+&control
+  sysname = 'stage2d_si64_dg_dc_wpw'
+  yn_reset_step_restart = 'y'
+  write_gs_restart_data = 'no'
+/
+&units
+  unit_system = 'a.u.'
+/
+&dc
+  yn_dc_lcfo_flux_weak_volume = 'y'
+  energy_cut = 0.1d0
+  num_fragment(1:3) = 2,2,2
+  num_rgrid_buffer(1:3) = 6,6,6
+  nproc_rgrid_tot(1:3) = 2,2,2
+  nstate_frag = 400
+  yn_dc_lcfo = 'y'
+  yn_dc_lcfo_flux = 'y'
+  yn_dc_lcfo_diag = 'y'
+  yn_dc_fragment_optimization = 'n'
+  lambda_cut = 1.0d-8
+/
+&parallel
+  nproc_k = 1
+  nproc_ob = 1
+  nproc_rgrid(1:3) = 1,1,1
+  yn_eigenexa = 'y'
+/
+&system
+  yn_periodic = 'y'
+  al = 20.52d0,20.52d0,20.52d0
+  nelem = 1
+  nstate = 256
+  nelec = 256
+  natom = 64
+  file_atom_coor = 'atom.dat'
+  temperature_k = 300.0d0
+/
+&pseudo
+  izatom(1) = 14
+  file_pseudo(1) = 'Si_rps.dat'
+  lloc_ps(1) = 2
+/
+&functional
+  xc = 'PZ'
+/
+&rgrid
+  num_rgrid(1:3) = 24,24,24
+/
+&kgrid
+  num_kgrid(1:3) = 1,1,1
+/
+&propagation
+  yn_plane_wave_basis = 'y'
+  n_plane_waves_dg = 128
+  k_cutoff_plane_wave = 2.0d0
+/
+&scf
+  nscf_init_redistribution = 10
+  nscf_init_no_diagonal = 0
+  nscf = 1000
+  ncg = 5
+  method_mixing = 'simple'
+  mixrate = 0.2d0
+  threshold = 1.0d-9
+  yn_preconditioning = 'y'
+  yn_dg_wpw_production = 'y'
+  dg_wpw_extra_states = 32
+  dg_wpw_scf_max_iter = 200
+  dg_wpw_window_buffer = 3
+  dg_wpw_window_width = 2
+  dg_wpw_gap_threshold = 1.0d-6
+  dg_wpw_metric_cutoff = 1.0d-10
+  dg_wpw_scf_mix = 0.3d0
+  dg_wpw_scf_residual_tolerance = 1.0d-8
+/

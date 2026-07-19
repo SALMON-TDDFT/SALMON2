@@ -630,6 +630,7 @@ contains
   !=======================================================================
   subroutine init_plane_wave_basis(dg_frag, system, lg, info)
     use structures
+    use dg_wpw_g_modes, only: select_dg_wpw_g_modes
     use salmon_global, only: yn_plane_wave_basis, n_plane_waves_dg, k_cutoff_plane_wave
     use inputoutput, only: t_unit_energy
     use communication, only: comm_is_root
@@ -639,12 +640,12 @@ contains
     type(s_rgrid),          intent(in)    :: lg
     type(s_parallel_info),  intent(in)    :: info
 
-    integer :: ikx, iky, ikz, ipw, nk(3)
-    real(8) :: Lbox(3), k_vec(3), k_norm
+    integer :: ipw, mode_info
+    real(8) :: Lbox(3)
     real(8) :: energy_cutoff_pw
     real(8), parameter :: pi = 4.0d0*atan(1.0d0)
     integer, allocatable :: k_indices(:,:)
-    integer :: n_pw_candidate, n_selected, n_shell_selected
+    real(8), allocatable :: selected_g(:,:)
 
     ! Check if plane wave basis is enabled
     if (yn_plane_wave_basis /= 'y') then
@@ -668,104 +669,11 @@ contains
       write(*,'(1x,a,f10.4,a)') "k cutoff [a.u.^-1]: ", dg_frag%k_cutoff_pw, ""
     end if
 
-    ! Estimate number of k-points within cutoff sphere
-    nk(1:3) = ceiling(dg_frag%k_cutoff_pw * Lbox(1:3) / (2.0d0*pi)) + 1
-    n_pw_candidate = (2*nk(1)+1) * (2*nk(2)+1) * (2*nk(3)+1)
-
-    ! Allocate temporary array for k-point selection
-    allocate(k_indices(3, n_pw_candidate))
-    n_selected = 0
-
-    ! Select k-points within cutoff sphere
-    do ikz = -nk(3), nk(3)
-      do iky = -nk(2), nk(2)
-        do ikx = -nk(1), nk(1)
-          if (ikx == 0 .and. iky == 0 .and. ikz == 0) cycle
-
-          k_vec(1) = 2.0d0*pi/Lbox(1) * dble(ikx)
-          k_vec(2) = 2.0d0*pi/Lbox(2) * dble(iky)
-          k_vec(3) = 2.0d0*pi/Lbox(3) * dble(ikz)
-          k_norm = sqrt(sum(k_vec**2))
-
-          if (k_norm <= dg_frag%k_cutoff_pw) then
-            n_selected = n_selected + 1
-            if (n_selected <= n_pw_candidate) then
-              k_indices(1:3, n_selected) = [ikx, iky, ikz]
-            end if
-          end if
-        end do
-      end do
-    end do
-
-    ! Sort k-points by cubic shell.  A shell is all integer G vectors
-    ! with the same ikx^2+iky^2+ikz^2; never cut a shell halfway.
-    block
-      integer, allocatable :: shell_keys(:)
-      integer :: ii, jj, itemp(3)
-      integer :: itemp_key
-      integer :: shell_start, shell_end, shell_count
-      integer :: prev_total, next_total, target
-
-      allocate(shell_keys(n_selected))
-
-      do ipw = 1, n_selected
-        ikx = k_indices(1, ipw)
-        iky = k_indices(2, ipw)
-        ikz = k_indices(3, ipw)
-        shell_keys(ipw) = ikx*ikx + iky*iky + ikz*ikz
-      end do
-
-      do ii = 2, n_selected
-        do jj = ii, 2, -1
-          if (shell_keys(jj) < shell_keys(jj-1) .or. &
-              (shell_keys(jj) == shell_keys(jj-1) .and. cubic_k_order_less(k_indices(:,jj), k_indices(:,jj-1)))) then
-            itemp_key = shell_keys(jj)
-            shell_keys(jj) = shell_keys(jj-1)
-            shell_keys(jj-1) = itemp_key
-            itemp = k_indices(:, jj)
-            k_indices(:, jj) = k_indices(:, jj-1)
-            k_indices(:, jj-1) = itemp
-          else
-            exit
-          end if
-        end do
-      end do
-
-      target = max(0, n_plane_waves_dg)
-      n_shell_selected = 0
-      shell_start = 1
-      do while (shell_start <= n_selected)
-        shell_end = shell_start
-        do while (shell_end < n_selected .and. shell_keys(shell_end+1) == shell_keys(shell_start))
-          shell_end = shell_end + 1
-        end do
-        shell_count = shell_end - shell_start + 1
-        prev_total = n_shell_selected
-        next_total = shell_end
-        if (target <= 0) then
-          n_shell_selected = 0
-          exit
-        end if
-        if (next_total <= target) then
-          n_shell_selected = next_total
-        else
-          if (prev_total <= 0) then
-            n_shell_selected = next_total
-          else if (abs(next_total - target) < abs(prev_total - target)) then
-            n_shell_selected = next_total
-          end if
-          exit
-        end if
-        shell_start = shell_end + 1
-      end do
-
-      deallocate(shell_keys)
-    end block
-
-    dg_frag%n_plane_waves = min(n_selected, n_shell_selected)
+    call select_dg_wpw_g_modes(Lbox,energy_cutoff_pw,n_plane_waves_dg,k_indices,selected_g,mode_info)
+    if(mode_info/=0) stop 'DG WPW G-mode selection failed'
+    dg_frag%n_plane_waves=size(k_indices,2)
 
     if (comm_is_root(info%id_rko)) then
-      write(*,'(1x,a,i0)') "k-points within cutoff: ", n_selected
       write(*,'(1x,a,i0)') "Requested plane waves: ", n_plane_waves_dg
       write(*,'(1x,a,i0,a)') "Using plane waves: ", dg_frag%n_plane_waves, " (complete cubic shells)"
     end if
@@ -775,12 +683,7 @@ contains
     dg_frag%coef_pw = (0.0d0, 0.0d0)
 
     do ipw = 1, dg_frag%n_plane_waves
-      ikx = k_indices(1, ipw)
-      iky = k_indices(2, ipw)
-      ikz = k_indices(3, ipw)
-      dg_frag%k_pw(1, ipw) = 2.0d0*pi/Lbox(1) * dble(ikx)
-      dg_frag%k_pw(2, ipw) = 2.0d0*pi/Lbox(2) * dble(iky)
-      dg_frag%k_pw(3, ipw) = 2.0d0*pi/Lbox(3) * dble(ikz)
+      dg_frag%k_pw(:,ipw)=selected_g(:,ipw)
     end do
 
     if (comm_is_root(info%id_rko)) then
@@ -796,7 +699,7 @@ contains
       end if
     end if
 
-    deallocate(k_indices)
+    deallocate(k_indices,selected_g)
 
     if (comm_is_root(info%id_rko)) then
       write(*,*) "Plane wave basis initialization complete"

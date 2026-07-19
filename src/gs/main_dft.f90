@@ -21,7 +21,7 @@ subroutine main_dft
 use math_constants, only: pi, zi
 use structures
 use inputoutput
-use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier
+use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_wpw_production
 #ifdef USE_EIGENEXA
 use eigenexa_module, only: finalize_eigenexa
 #endif
@@ -95,6 +95,8 @@ integer :: ilevel_print
 if(theory=='dft_band'.and.iperiodic/=3) return
 
 if(yn_dc=='y') then
+  if(yn_dg_wpw_production=='y'.and.yn_dc_lcfo_flux/='y') &
+    stop 'DG WPW production requires yn_dc_lcfo_flux=y'
   if(yn_spinorbit=='y') then
     call init_dcdft_soi(dc,pp,mixing,ewald)
   else
@@ -337,7 +339,8 @@ if(yn_dc=='y') then
 #ifdef USE_EIGENEXA
       call finalize_eigenexa(info)
 #endif
-      call dc_lcfo_flux(lg,mg,system,info,stencil,ppg,energy,rho_s,v_local,spsi,shpsi,sttpsi,srg,dc)
+      call dc_lcfo_flux(lg,mg,system,info,stencil,xc_func,pp,ppn,ppg,energy,rho_s,v_local,&
+        spsi,shpsi,sttpsi,srg,dc)
     end if
   else if(yn_dc_lcfo == 'y') then
     if(yn_spinorbit == 'y') then

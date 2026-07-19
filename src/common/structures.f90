@@ -493,7 +493,7 @@ module structures
     type(s_pp_grid)         :: ppg_tot
     type(s_reciprocal_grid) :: fg_tot
     type(s_poisson)         :: poisson_tot
-    type(s_sendrecv_grid)   :: srg_scalar_tot
+    type(s_sendrecv_grid)   :: srg_tot,srg_scalar_tot
     type(s_scalar) :: vpsl_tot,vh_tot,rho_tot
     type(s_scalar),allocatable :: rho_tot_s(:),vloc_tot(:),vxc_tot(:)
   ! own fragment

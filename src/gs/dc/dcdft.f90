@@ -67,7 +67,6 @@ contains
       implicit none
       integer :: i
       type(s_stencil) :: stencil_dummy
-      type(s_sendrecv_grid) :: srg_dummy
       type(s_ofile) :: ofile_dummy
       
     ! MPI for the total system
@@ -86,9 +85,8 @@ contains
      
     ! initialization for the total system
       call init_dft(dc%icomm_tot,dc%info_tot,dc%lg_tot,dc%mg_tot,dc%system_tot, &
-      & stencil_dummy,dc%fg_tot,dc%poisson_tot,srg_dummy,dc%srg_scalar_tot,ofile_dummy)
+      & stencil_dummy,dc%fg_tot,dc%poisson_tot,dc%srg_tot,dc%srg_scalar_tot,ofile_dummy)
       deallocate(dc%system_tot%rocc)
-      call dealloc_cache(srg_dummy)
       
       call allocate_scalar(dc%mg_tot,dc%rho_tot)
       call allocate_scalar(dc%mg_tot,dc%vh_tot)
@@ -408,6 +406,7 @@ contains
     call deallocate_pp_grid(dc%ppg_tot)
     call finalize_reciprocal_grid(dc%fg_tot)
     call finalize_poisson(dc%poisson_tot)
+    call finalize_sendrecv_grid_storage(dc%srg_tot)
     call finalize_sendrecv_grid_storage(dc%srg_scalar_tot)
 
     call deallocate_scalar(dc%vpsl_tot)

@@ -251,6 +251,10 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   use rt_dg_nodal_diagnostics, only: calculate_nodal_norm_diagnostics_mpi
   use rt_dg_nodal_current, only: calculate_nodal_velocity_current_mpi
   use rt_dg_nodal_density, only: reconstruct_nodal_density_mpi
+  use rt_dg_wpw_checkpoint_handoff,only:s_rt_dg_wpw_checkpoint_handoff,load_rt_dg_wpw_checkpoint_handoff
+  use rt_dg_wpw_exp_production,only:s_dg_wpw_exp_state,initialize_dg_wpw_exp_state,&
+    advance_dg_wpw_length_gauge_exp
+  use rt_dg_wpw_length_gauge,only:evaluate_wpw_polarization,update_wpw_polarization_branch
   use rt_dg_fragment, only: init_dg_fragment_rt_std => init_dg_fragment_rt, &
                             tddft_dg_fragment_iteration_std => tddft_dg_fragment_iteration, &
                             finalize_dg_fragment_rt_std => finalize_dg_fragment_rt, &
@@ -286,6 +290,9 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
                           yn_dg_expdiag_refresh_fixed_func, yn_dg_nodal_rt, &
                           dg_nodal_gs_relax_step, dg_nodal_gs_max_iter, dg_nodal_gs_tol, &
                           dg_nodal_taylor_order
+  use salmon_global,only:yn_dg_wpw_checkpoint_rt,dg_wpw_checkpoint_manifest,&
+    dg_wpw_checkpoint_rank_prefix,dg_wpw_checkpoint_identity_tolerance,dg_wpw_exp_max_corrector,&
+    dg_wpw_exp_corrector_tolerance,dg_wpw_exp_norm_tolerance
   use inputoutput, only: t_unit_time
   use fdtd_coulomb_gauge, only: fdtd_singlescale, fourier_singlescale
   use hamiltonian, only: update_kvector_nonlocalpt, update_kvector_nonlocalpt_microAc
@@ -318,6 +325,13 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
 
   type(s_dg_fragment_rt) :: dg_frag
   type(s_dg_nodal_state) :: nodal_state
+  type(s_rt_dg_wpw_checkpoint_handoff) :: wpw_checkpoint_handoff
+  type(s_dg_wpw_exp_state) :: wpw_exp_state
+  complex(8),allocatable::wpw_exp_initial(:,:)
+  real(8)::wpw_exp_norm_drift,wpw_field_mid,wpw_pz_raw,wpw_pz,wpw_pz_ref,wpw_pz_previous
+  real(8)::wpw_delta_pz,wpw_jz,wpw_branch_period
+  logical::wpw_observable_ok
+  integer::wpw_exp_info,wpw_exp_correctors,wpw_exp_i
   integer :: itt
   integer :: itt_initial_obs
   integer :: env_len, env_status
@@ -360,6 +374,53 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
   else
     call init_dg_fragment_rt_std(dg_frag, system, rt, info, lg, mg, ppg)
   end if
+
+  if(yn_dg_wpw_checkpoint_rt=='y')then
+    if(yn_spinorbit=='y')stop 'WPW checkpoint-backed RT does not support SOI'
+    if(yn_restart=='y')stop 'WPW checkpoint-backed RT forbids conventional restart projection'
+    if(len_trim(dg_wpw_checkpoint_manifest)==0.or.len_trim(dg_wpw_checkpoint_rank_prefix)==0)&
+      stop 'WPW checkpoint-backed RT requires manifest and rank prefix'
+    call load_rt_dg_wpw_checkpoint_handoff(trim(dg_wpw_checkpoint_manifest),&
+      trim(dg_wpw_checkpoint_rank_prefix),dg_frag%icomm,dg_wpw_checkpoint_identity_tolerance,&
+      wpw_checkpoint_handoff,itt)
+    if(itt/=0.or..not.wpw_checkpoint_handoff%valid)stop 'WPW checkpoint-backed RT identity validation failed'
+    if(maxval(abs(rt%E_tot(1:2,:)))>10d0*epsilon(1d0))&
+      stop 'WPW production length gauge currently supports z-polarized fields only'
+    allocate(wpw_exp_initial(size(wpw_checkpoint_handoff%state%eigenvalues),&
+      wpw_checkpoint_handoff%state%n_occ));wpw_exp_initial=0
+    do wpw_exp_i=1,wpw_checkpoint_handoff%state%n_occ;wpw_exp_initial(wpw_exp_i,wpw_exp_i)=1d0;enddo
+    call initialize_dg_wpw_exp_state(wpw_exp_state,wpw_exp_initial,dt,dg_wpw_exp_max_corrector,&
+      dg_wpw_exp_corrector_tolerance,dg_wpw_exp_norm_tolerance,wpw_exp_info)
+    if(wpw_exp_info/=0)stop 'WPW production midpoint Exp initialization failed'
+    call evaluate_wpw_polarization(wpw_checkpoint_handoff%position_reduced,wpw_exp_state%coeff,&
+      wpw_checkpoint_handoff%state%occupations(1:wpw_checkpoint_handoff%state%n_occ),wpw_pz_ref,wpw_observable_ok)
+    if(.not.wpw_observable_ok)stop 'WPW initial polarization evaluation failed'
+    wpw_pz_previous=wpw_pz_ref
+    wpw_branch_period=maxval(wpw_checkpoint_handoff%state%occupations(1:wpw_checkpoint_handoff%state%n_occ))*&
+      system%hgs(3)*dble(lg%num(3))
+    if(comm_is_root(nproc_id_global))write(*,'(1x,a,3(a,es13.5),a)')'[DG-WPW-OBS] Pz=',wpw_pz_ref,&
+      ' Delta_Pz=',0d0,' Jz=',0d0,' branch=continuous_sawtooth_z occupation_scaled_quantum'
+    do wpw_exp_i=Mit+1,nt
+      wpw_field_mid=0.5d0*(rt%E_tot(3,wpw_exp_i-1)+rt%E_tot(3,wpw_exp_i))
+      call advance_dg_wpw_length_gauge_exp(wpw_exp_state,wpw_checkpoint_handoff%state%eigenvalues,&
+        wpw_checkpoint_handoff%position_reduced,wpw_field_mid,&
+        wpw_exp_correctors,wpw_exp_norm_drift,wpw_exp_info)
+      if(wpw_exp_info/=0)stop 'WPW production midpoint Exp corrector failed'
+      call evaluate_wpw_polarization(wpw_checkpoint_handoff%position_reduced,wpw_exp_state%coeff,&
+        wpw_checkpoint_handoff%state%occupations(1:wpw_checkpoint_handoff%state%n_occ),wpw_pz_raw,wpw_observable_ok)
+      if(.not.wpw_observable_ok)stop 'WPW polarization evaluation failed'
+      call update_wpw_polarization_branch(wpw_pz_raw,wpw_pz_previous,wpw_branch_period,dt,&
+        wpw_pz,wpw_jz,wpw_observable_ok)
+      if(.not.wpw_observable_ok)stop 'WPW polarization branch update failed'
+      wpw_delta_pz=wpw_pz-wpw_pz_ref;wpw_pz_previous=wpw_pz
+      if(comm_is_root(nproc_id_global))write(*,'(1x,a,i0,a,i0,a,es13.5)')'[DG-WPW-EXP] step=',&
+        wpw_exp_i,' correctors=',wpw_exp_correctors,' norm_drift=',wpw_exp_norm_drift
+      if(comm_is_root(nproc_id_global))write(*,'(1x,a,i0,4(a,es13.5))')'[DG-WPW-OBS] step=',wpw_exp_i,&
+        ' Pz=',wpw_pz,' Delta_Pz=',wpw_delta_pz,' Jz=',wpw_jz,' Ez_mid=',wpw_field_mid
+    enddo
+    call finalize_dg_fragment_rt_std(dg_frag)
+    return
+  endif
 
   if (yn_dg_nodal_rt == 'y') then
     if (yn_spinorbit == 'y') stop 'nodal real-space DG does not support SOI yet'
@@ -415,7 +476,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
     return
   end if
 
-  if (yn_restart == 'y') then
+  if (yn_restart == 'y' .and. yn_dg_wpw_checkpoint_rt /= 'y') then
     if (yn_spinorbit == 'y') then
       if (comm_is_root(nproc_id_global)) then
         write(*,'(1x,a)') '[DG-RESTART-PROJECT] SOI restart projection is not implemented; keeping DC seed.'

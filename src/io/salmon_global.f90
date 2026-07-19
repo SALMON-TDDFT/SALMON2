@@ -215,6 +215,16 @@ module salmon_global
   character(1)   :: yn_auto_mixing
   real(8)        :: update_mixing_ratio
   integer        :: nscf
+  character(1)   :: yn_dg_wpw_production
+  character(1)   :: yn_dg_wpw_fixed_h_relaxation
+  integer        :: dg_wpw_extra_states
+  integer        :: dg_wpw_scf_max_iter
+  integer        :: dg_wpw_window_buffer
+  integer        :: dg_wpw_window_width
+  real(8)        :: dg_wpw_gap_threshold
+  real(8)        :: dg_wpw_metric_cutoff
+  real(8)        :: dg_wpw_scf_mix
+  real(8)        :: dg_wpw_scf_residual_tolerance
   character(1)   :: yn_subspace_diagonalization
   character(16)  :: convergence
   real(8)        :: threshold
@@ -565,5 +575,12 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_dg_fragment_from_dcdft  ! Initialize DG-Fragment RT from DC-LCFO data
   character(1)   :: yn_dg_lcfo_seed_exhaustive_check
   character(1)   :: yn_dg_full_h_eigen_seed
+  character(1)   :: yn_dg_wpw_checkpoint_rt
+  character(256) :: dg_wpw_checkpoint_manifest
+  character(256) :: dg_wpw_checkpoint_rank_prefix
+  real(8)        :: dg_wpw_checkpoint_identity_tolerance
+  integer        :: dg_wpw_exp_max_corrector
+  real(8)        :: dg_wpw_exp_corrector_tolerance
+  real(8)        :: dg_wpw_exp_norm_tolerance
 
 end module salmon_global

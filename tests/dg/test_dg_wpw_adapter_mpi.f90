@@ -1,7 +1,10 @@
 program test_dg_wpw_adapter_mpi
   use mpi
+  use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   use rt_dg_fragment_types, only: s_dg_fragment_rt, matrix_block_info, complex_matrix_block_info
   use rt_dg_wpw_sparse_blocks, only: s_dg_wpw_sparse_blocks
+  use dg_wpw_owner_exchange, only: s_dg_wpw_owner_schedule, initialize_dg_wpw_owner_schedule, &
+    release_dg_wpw_owner_schedule
   use rt_dg_wpw_matrix_free_adapter, only: s_rt_dg_wpw_operator_context, &
     apply_h_wpw_callback, apply_s_wpw_callback, bind_rt_dg_wpw_operator_context, &
     ww_real_local_sipg, ww_complex_nonlocal
@@ -10,13 +13,15 @@ program test_dg_wpw_adapter_mpi
   type(s_dg_fragment_rt), target :: dg
   type(matrix_block_info), target :: ww_blocks(4)
   type(complex_matrix_block_info), target :: ww_nl_blocks(4)
-  type(s_dg_wpw_sparse_blocks), target :: mixed_h, mixed_s
-  type(s_rt_dg_wpw_operator_context) :: ctx_h, ctx_s
+  type(s_dg_wpw_sparse_blocks), target :: mixed_h, mixed_s,bad_mixed
+  type(s_rt_dg_wpw_operator_context) :: ctx_h, ctx_s,bad_ctx
+  type(s_dg_wpw_owner_schedule), target :: w_schedule, p_schedule,bad_w_schedule
   integer, target :: owner_extent = 2
   integer, target :: owned_w(1), owned_p(1), input_w(2) = [1,2], input_p(2) = [1,2]
   integer, target :: block_ids(4) = [1,2,3,4], nl_block_ids(4) = [1,2,3,4]
   integer :: ierr, rank_id, nrank, info, iblk, irow, icol
   complex(8) :: xw(1,1), xp(1,1), yh_w(1,1), yh_p(1,1), ys_w(1,1), ys_p(1,1)
+  complex(8)::bad_yw(1,1),bad_yp(1,1)
   complex(8) :: xall(4), expected_h(4), expected_s(4)
   complex(8) :: dense_h(4,4), dense_s(4,4), ww(2,2), nl(2,2), wp(2,2), pp(2,2)
   complex(8) :: swp(2,2), spp(2,2)
@@ -66,12 +71,29 @@ program test_dg_wpw_adapter_mpi
   owned_p = rank_id + 1
   call init_mixed(mixed_h, owned_p(1), wp, pp)
   call init_mixed(mixed_s, owned_p(1), swp, spp)
+  call initialize_dg_wpw_owner_schedule(w_schedule,MPI_COMM_WORLD,[1-rank_id],owned_w,input_w,info)
+  if(info/=0)call MPI_Abort(MPI_COMM_WORLD,3,ierr)
+  call initialize_dg_wpw_owner_schedule(p_schedule,MPI_COMM_WORLD,[1-rank_id],owned_p,input_p,info)
+  if(info/=0)call MPI_Abort(MPI_COMM_WORLD,4,ierr)
+  call initialize_dg_wpw_owner_schedule(bad_w_schedule,MPI_COMM_WORLD,[1-rank_id],[rank_id+3],[3,4],info)
+  if(info/=0)call MPI_Abort(MPI_COMM_WORLD,5,ierr)
   call bind_context(ctx_h, mixed_h, .false.)
   call bind_context(ctx_s, mixed_s, .true.)
-  call bind_rt_dg_wpw_operator_context(ctx_h, ww_real_local_sipg, ww_complex_nonlocal, info)
+  call bind_rt_dg_wpw_operator_context(ctx_h,MPI_COMM_SELF,ww_real_local_sipg,ww_complex_nonlocal,info)
+  if(info==0)call MPI_Abort(MPI_COMM_WORLD,84,ierr)
+  bad_ctx=s_rt_dg_wpw_operator_context()
+  call bind_rt_dg_wpw_operator_context(bad_ctx,MPI_COMM_WORLD,ww_real_local_sipg,ww_complex_nonlocal,info)
+  if(info==0)call MPI_Abort(MPI_COMM_WORLD,85,ierr)
+  bad_yw=9;bad_yp=9
+  call apply_h_wpw_callback(bad_ctx,xw,xp,bad_yw,bad_yp,info)
+  if(info==0.or.any(bad_yw/=(0d0,0d0)).or.any(bad_yp/=(0d0,0d0)))call MPI_Abort(MPI_COMM_WORLD,86,ierr)
+  call bind_rt_dg_wpw_operator_context(ctx_h,MPI_COMM_WORLD,ww_real_local_sipg,ww_complex_nonlocal,info)
   if (info /= 0) call MPI_Abort(MPI_COMM_WORLD, 5 + info, ierr)
-  call bind_rt_dg_wpw_operator_context(ctx_s, ww_real_local_sipg, ww_complex_nonlocal, info)
+  call bind_rt_dg_wpw_operator_context(ctx_s,MPI_COMM_WORLD,ww_real_local_sipg,ww_complex_nonlocal,info)
   if (info /= 0) call MPI_Abort(MPI_COMM_WORLD, 7 + info, ierr)
+  bad_ctx=ctx_h;bad_ctx%w_schedule=>bad_w_schedule
+  call bind_rt_dg_wpw_operator_context(bad_ctx,MPI_COMM_WORLD,ww_real_local_sipg,ww_complex_nonlocal,info)
+  if(info==0)call MPI_Abort(MPI_COMM_WORLD,89,ierr)
 
   xall = [cmplx(1d0,0.2d0,8), cmplx(-0.3d0,0.4d0,8), &
           cmplx(0.7d0,-0.1d0,8), cmplx(-0.2d0,0.5d0,8)]
@@ -81,6 +103,13 @@ program test_dg_wpw_adapter_mpi
   if (info /= 0) call MPI_Abort(MPI_COMM_WORLD, 10 + info, ierr)
   call apply_s_wpw_callback(ctx_s, xw, xp, ys_w, ys_p, info)
   if (info /= 0) call MPI_Abort(MPI_COMM_WORLD, 20 + info, ierr)
+  bad_mixed=mixed_h;bad_mixed%wp_values(1,1)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,8)
+  bad_ctx=ctx_h;bad_ctx%mixed_blocks=>bad_mixed
+  call bind_rt_dg_wpw_operator_context(bad_ctx,MPI_COMM_WORLD,ww_real_local_sipg,ww_complex_nonlocal,info)
+  if(info/=0)call MPI_Abort(MPI_COMM_WORLD,87,ierr)
+  bad_yw=9;bad_yp=9
+  call apply_h_wpw_callback(bad_ctx,xw,xp,bad_yw,bad_yp,info)
+  if(info==0.or.any(bad_yw/=(0d0,0d0)).or.any(bad_yp/=(0d0,0d0)))call MPI_Abort(MPI_COMM_WORLD,88,ierr)
 
   dense_h = (0d0,0d0)
   dense_h(1:2,1:2) = ww + nl
@@ -100,6 +129,9 @@ program test_dg_wpw_adapter_mpi
   call MPI_Allreduce(local_error, global_error, 1, MPI_DOUBLE_PRECISION, MPI_MAX, MPI_COMM_WORLD, ierr)
   if (global_error > 1d-12) call MPI_Abort(MPI_COMM_WORLD, 90, ierr)
   if (rank_id == 0) write(*,'(a,es12.4)') 'PASS end-to-end WPW H/S callback MPI equivalence, error=', global_error
+  call release_dg_wpw_owner_schedule(w_schedule)
+  call release_dg_wpw_owner_schedule(p_schedule)
+  call release_dg_wpw_owner_schedule(bad_w_schedule)
   call MPI_Finalize(ierr)
 
 contains
@@ -124,10 +156,8 @@ contains
     logical, intent(in) :: identity_ww
     ctx%dg_frag => dg
     ctx%ispin = 1
-    ctx%w_row_owner => cyclic_owner
-    ctx%pw_row_owner => cyclic_owner
-    ctx%w_owner_context => owner_extent
-    ctx%pw_owner_context => owner_extent
+    ctx%w_schedule => w_schedule
+    ctx%pw_schedule => p_schedule
     ctx%owned_w_row_ids => owned_w
     ctx%owned_pw_row_ids => owned_p
     ctx%w_input_row_ids => input_w
