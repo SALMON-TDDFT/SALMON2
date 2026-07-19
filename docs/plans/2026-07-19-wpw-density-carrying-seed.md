@@ -45,8 +45,11 @@
    every root enters the same production-communicator collectives.
 5. Make validation shape-safe: test allocation and shape before comparing
    array values.
-6. Add an MPI mutation oracle for one H0 array, one interface array, and one
-   transport ID. Each mutation must be detected collectively without deadlock.
+6. Add MPI mutation oracles for WW projector-local and projector-cross values,
+   one WP/PP nonlocal value, one H0 cache, one interface cache, sparse/cache
+   index arrays, ownership/support IDs, and one routing/callback binding
+   record. Each value, shape, or ID mutation must be detected collectively
+   without deadlock.
 7. Verify rollback leaves the last valid operator and callbacks intact.
 
 ### Task 2: Replace the false projection oracle with `S C=B`
@@ -69,10 +72,19 @@
    `intent(in)` and `intent(out)` actual argument.
 8. Run the test and confirm RED.
 9. Implement a bounded distributed metric solve for `S C=B`. Report the true
-   relative equation residual. A fixed iteration cap must return failure, not a
-   partially converged result.
+   relative equation residual and every RHS residual. A fixed iteration cap or
+   collective stagnation condition must return failure, not a partially
+   converged result.
 10. Apply rank-revealing S-orthonormalization only after the solve.
-11. Run the MPI oracle and expect PASS.
+11. Add positive diagonal Jacobi preconditioning from the locally owned
+    diagonal of `S`. Reject nonfinite or nonpositive diagonal entries
+    collectively; report global diagonal spread and per-RHS residual history.
+    Forbid global dense fallback and all-state gathers. Do not introduce a
+    block-local preconditioner unless a focused oracle first proves diagonal
+    Jacobi insufficient and a separate design review approves the change.
+12. Add a fixture in which one RHS converges before the others and require the
+    remaining active RHS columns to continue without zero-denominator failure.
+13. Run the MPI oracle and expect PASS.
 
 ### Task 3: Build both W and P overlap blocks from the DC ensemble
 
@@ -88,16 +100,29 @@
 4. Define the source occupation map from the converged DC fragment ensemble.
    Check occupation counts and total charge collectively; do not assume that
    every fragment has the same count.
-5. Accumulate `W^dagger phi` and `P^dagger phi` on fragment-owned core points
-   with the production quadrature weights.
-6. Reduce fragment contributions to fragment roots, then solve `S C=B` across
-   the production-root communicator.
-7. Record metric residual, captured norm, effective rank, S-orthogonality, and
-   charge. Reject nonfinite or inconsistent results.
-8. State explicitly in output and manifest that the source is the direct sum
+5. Accumulate partial `W^dagger phi` and `P^dagger phi` on fragment-owned core
+   points for every support basis row that is nonzero there, using the
+   production quadrature weights.
+6. Route each partial by stable W/P row ID to its canonical basis-row owner and
+   sum contributions from every fragment core. Do not assume source-fragment
+   ownership equals basis-row ownership.
+7. Add a two-fragment RED oracle with a W row owned on rank 0 whose correct
+   overlap requires a nonzero contribution computed on rank 1. Require both W
+   and P contributions; omission of either must fail before `S C=B`.
+8. Solve `S C_raw=B` across the production-root communicator. Before occupied
+   normalization, record the equation residual and occupation-weighted
+   captured norm `Tr(F B^dagger C_raw)` relative to
+   `Tr(F Phi_src^dagger Phi_src)`. Use the converged DC occupations in `F`.
+9. S-orthonormalize `C_raw`, then separately record effective rank,
+   S-orthogonality, occupied-projector invariance, and charge. Reject nonfinite
+   or inconsistent results.
+10. State explicitly in output and manifest that the source is the direct sum
    of DC fragment occupied orbitals, not `coef_wf` from Flux diagonalization.
-9. Add a small two-fragment oracle whose P overlap is required for the correct
-   answer.
+11. Add a rotated-source oracle and require captured norm, occupied rank, and
+   the S-metric occupied projector to be invariant within tolerance. Rotate
+   only equal-occupation blocks, or transform the full occupation matrix as
+   `F -> U^dagger F U`; do not claim density invariance after rotating unequal
+   diagonal occupations while leaving `F` fixed.
 
 ### Task 4: Complete deterministic extra states without polluting occupancy
 
@@ -172,13 +197,15 @@
 1. Run all focused tests listed in the handoff document.
 2. Run `cmake --build build-mpi-eigenexa -j4` and `git diff --check`.
 3. Perform a findings-first review focused on collective ordering, metric
-   projection mathematics, frozen-state coverage, rollback, and provenance.
+   projection mathematics, support-row overlap routing, raw-versus-normalized
+   diagnostics, frozen-state coverage, rollback, and provenance.
 4. Fix every P0/P1 finding and rerun the focused suite.
 5. Run only a short low-cost preflight. Confirm MPI ranks, OpenMP threads,
    estimated memory, output path, and free capacity first.
 6. Do not start the full Si64 production checkpoint until the preflight proves
-   that projection, zero-interface solve, and at least one continuation trial
-   finish with finite diagnostics.
+   that every metric RHS converges without stagnation, routed overlap assembly
+   passes its identity checks, projection and zero-interface solve converge,
+   and at least one continuation trial finishes with finite diagnostics.
 
 ### Task 9: Resume the production sequence
 

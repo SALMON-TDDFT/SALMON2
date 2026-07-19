@@ -1,5 +1,5 @@
 module dg_wpw_matrix_free_scf
-  use mpi,only:MPI_Allreduce,MPI_Comm_rank,MPI_INTEGER,MPI_MAX,MPI_SUCCESS
+  use mpi,only:MPI_Allreduce,MPI_Comm_rank,MPI_INTEGER,MPI_MAX,MPI_MIN,MPI_DOUBLE_PRECISION,MPI_SUCCESS
   use dg_wpw_matrix_free_operator,only:apply_h_batch,apply_s_batch,global_gram_batch
   use dg_generalized_algebra,only:dg_generalized_eigh,dg_reduced_generalized_eigh,dg_metric_factor
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
@@ -44,20 +44,23 @@ module dg_wpw_matrix_free_scf
   public::initialize_dg_wpw_metric_projected_occupied
 contains
   subroutine initialize_dg_wpw_metric_projected_occupied(context,comm,apply_s,global_gram,nw,np,nocc,&
-      tolerance,max_iterations,bw,bp,qw,qp,relative_residual,effective_rank,orthogonality,info)
+      tolerance,max_iterations,diagonal_w,diagonal_p,bw,bp,qw,qp,relative_residual,rhs_residuals,&
+      rhs_residual_history,iterations,diagonal_spread,effective_rank,orthogonality,info)
     class(*),intent(inout)::context
     integer,intent(in)::comm,nw,np,nocc,max_iterations
     procedure(apply_s_batch)::apply_s
     procedure(global_gram_batch)::global_gram
-    real(8),intent(in)::tolerance
+    real(8),intent(in)::tolerance,diagonal_w(nw),diagonal_p(np)
     complex(8),intent(in)::bw(nw,nocc),bp(np,nocc)
     complex(8),intent(out)::qw(nw,nocc),qp(np,nocc)
-    real(8),intent(out)::relative_residual,orthogonality
-    integer,intent(out)::effective_rank,info
+    real(8),intent(out)::relative_residual,rhs_residuals(nocc),rhs_residual_history(max_iterations,nocc),&
+      diagonal_spread,orthogonality
+    integer,intent(out)::iterations,effective_rank,info
 
     qw=(0d0,0d0);qp=(0d0,0d0);effective_rank=0;orthogonality=huge(1d0)
     call solve_dg_wpw_metric_projection(context,comm,apply_s,global_gram,nw,np,nocc,&
-      tolerance,max_iterations,bw,bp,qw,qp,relative_residual,info)
+      tolerance,max_iterations,diagonal_w,diagonal_p,bw,bp,qw,qp,relative_residual,rhs_residuals,&
+      rhs_residual_history,iterations,diagonal_spread,info)
     if(info/=0)return
     call initialize_dg_wpw_projected_occupied(context,comm,apply_s,global_gram,nw,np,nocc,&
       tolerance,qw,qp,effective_rank,orthogonality,info)
@@ -67,41 +70,61 @@ contains
   end subroutine initialize_dg_wpw_metric_projected_occupied
 
   subroutine solve_dg_wpw_metric_projection(context,comm,apply_s,global_gram,nw,np,nrhs,&
-      tolerance,max_iterations,bw,bp,cw,cp,relative_residual,info)
+      tolerance,max_iterations,diagonal_w,diagonal_p,bw,bp,cw,cp,relative_residual,rhs_residuals,&
+      rhs_residual_history,iterations,diagonal_spread,info)
     class(*),intent(inout)::context
     integer,intent(in)::comm,nw,np,nrhs,max_iterations
     procedure(apply_s_batch)::apply_s
     procedure(global_gram_batch)::global_gram
-    real(8),intent(in)::tolerance
+    real(8),intent(in)::tolerance,diagonal_w(nw),diagonal_p(np)
     complex(8),intent(in)::bw(nw,nrhs),bp(np,nrhs)
     complex(8),intent(out)::cw(nw,nrhs),cp(np,nrhs)
-    real(8),intent(out)::relative_residual
-    integer,intent(out)::info
-    complex(8),allocatable::b(:,:),x(:,:),r(:,:),p(:,:),ap(:,:),gram(:,:)
-    real(8),allocatable::rr_old(:),rr_new(:),denom(:),rhs_norm2(:)
+    real(8),intent(out)::relative_residual,rhs_residuals(nrhs),rhs_residual_history(max_iterations,nrhs),&
+      diagonal_spread
+    integer,intent(out)::iterations,info
+    complex(8),allocatable::b(:,:),x(:,:),r(:,:),z(:,:),p(:,:),ap(:,:),gram(:,:)
+    real(8),allocatable::rho_old(:),rho_new(:),rr(:),denom(:),rhs_norm2(:),diagonal(:),best(:)
     logical,allocatable::active(:)
-    real(8)::bnorm
+    integer,allocatable::stagnant(:)
+    real(8)::bnorm,local_min,local_max,global_min,global_max
     integer::i,iter,astat,local_bad,global_bad,ierr,apply_info,gram_info
 
-    cw=(0d0,0d0);cp=(0d0,0d0);relative_residual=huge(1d0);info=1
+    cw=(0d0,0d0);cp=(0d0,0d0);relative_residual=huge(1d0);rhs_residuals=huge(1d0)
+    rhs_residual_history=huge(1d0);diagonal_spread=huge(1d0);iterations=0;info=1
     local_bad=merge(0,1,nw>=0.and.np>=0.and.nw+np>0.and.nrhs>0.and.&
-      max_iterations>0.and.tolerance>0d0.and.finite_complex(bw).and.finite_complex(bp))
+      max_iterations>0.and.tolerance>0d0.and.finite_complex(bw).and.finite_complex(bp).and.&
+      all(ieee_is_finite(diagonal_w)).and.all(ieee_is_finite(diagonal_p)).and.&
+      all(diagonal_w>0d0).and.all(diagonal_p>0d0))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
-    allocate(b(nw+np,nrhs),x(nw+np,nrhs),r(nw+np,nrhs),p(nw+np,nrhs),&
-      ap(nw+np,nrhs),gram(nrhs,nrhs),rr_old(nrhs),rr_new(nrhs),denom(nrhs),&
-      rhs_norm2(nrhs),active(nrhs),stat=astat)
+    allocate(b(nw+np,nrhs),x(nw+np,nrhs),r(nw+np,nrhs),z(nw+np,nrhs),p(nw+np,nrhs),&
+      ap(nw+np,nrhs),gram(nrhs,nrhs),rho_old(nrhs),rho_new(nrhs),rr(nrhs),denom(nrhs),&
+      rhs_norm2(nrhs),diagonal(nw+np),best(nrhs),active(nrhs),stagnant(nrhs),stat=astat)
     local_bad=merge(0,1,astat==0)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
-    b(1:nw,:)=bw;b(nw+1:nw+np,:)=bp;x=(0d0,0d0);r=b;p=r
+    diagonal(1:nw)=diagonal_w;diagonal(nw+1:nw+np)=diagonal_p
+    local_min=minval(diagonal);local_max=maxval(diagonal)
+    call MPI_Allreduce(local_min,global_min,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(local_max,global_max,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    diagonal_spread=global_max/global_min
+    b(1:nw,:)=bw;b(nw+1:nw+np,:)=bp;x=(0d0,0d0);r=b
+    do i=1,nrhs;z(:,i)=r(:,i)/diagonal;enddo
+    p=z
     call global_gram(b,b,nw+np,nrhs,nrhs,gram,gram_info)
     if(gram_info/=0)return
-    do i=1,nrhs;rr_old(i)=real(gram(i,i),8);enddo
-    local_bad=merge(0,1,all(ieee_is_finite(rr_old)).and.all(rr_old>tolerance*tolerance))
+    do i=1,nrhs;rhs_norm2(i)=real(gram(i,i),8);enddo
+    call global_gram(r,z,nw+np,nrhs,nrhs,gram,gram_info)
+    if(gram_info/=0)return
+    do i=1,nrhs;rho_old(i)=real(gram(i,i),8);enddo
+    local_bad=merge(0,1,all(ieee_is_finite(rhs_norm2)).and.all(rhs_norm2>tolerance*tolerance).and.&
+      all(ieee_is_finite(rho_old)).and.all(rho_old>0d0))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
-    rhs_norm2=rr_old;active=.true.;bnorm=sqrt(sum(rhs_norm2));relative_residual=1d0
+    active=.true.;bnorm=sqrt(sum(rhs_norm2));relative_residual=1d0;rhs_residuals=1d0
+    best=1d0;stagnant=0
     do iter=1,max_iterations
       call apply_s(context,p(1:nw,:),p(nw+1:nw+np,:),ap(1:nw,:),ap(nw+1:nw+np,:),apply_info)
       if(apply_info/=0)return
@@ -116,28 +139,46 @@ contains
       if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
       do i=1,nrhs
         if(active(i))then
-          x(:,i)=x(:,i)+(rr_old(i)/denom(i))*p(:,i)
-          r(:,i)=r(:,i)-(rr_old(i)/denom(i))*ap(:,i)
+          x(:,i)=x(:,i)+(rho_old(i)/denom(i))*p(:,i)
+          r(:,i)=r(:,i)-(rho_old(i)/denom(i))*ap(:,i)
         endif
       enddo
       call global_gram(r,r,nw+np,nrhs,nrhs,gram,gram_info)
       if(gram_info/=0)return
-      do i=1,nrhs;rr_new(i)=max(0d0,real(gram(i,i),8));enddo
-      relative_residual=sqrt(sum(rr_new))/bnorm
+      do i=1,nrhs
+        rr(i)=max(0d0,real(gram(i,i),8));rhs_residuals(i)=sqrt(rr(i)/rhs_norm2(i))
+      enddo
+      rhs_residual_history(iter,:)=rhs_residuals
+      relative_residual=sqrt(sum(rr))/bnorm;iterations=iter
       if(.not.ieee_is_finite(relative_residual))return
-      if(relative_residual<=tolerance)then
+      if(all(rhs_residuals<=tolerance))then
         cw=x(1:nw,:);cp=x(nw+1:nw+np,:);info=0;return
       endif
       do i=1,nrhs
-        if(rr_new(i)<=tolerance*tolerance*rhs_norm2(i))then
+        if(rhs_residuals(i)<=tolerance)then
           active(i)=.false.;p(:,i)=(0d0,0d0)
-        else if(active(i).and.rr_old(i)>0d0)then
-          p(:,i)=r(:,i)+(rr_new(i)/rr_old(i))*p(:,i)
-        else
-          return
+        else if(active(i))then
+          if(rhs_residuals(i)<best(i)*(1d0-1d-12))then;best(i)=rhs_residuals(i);stagnant(i)=0
+          else;stagnant(i)=stagnant(i)+1;endif
         endif
       enddo
-      rr_old=rr_new
+      local_bad=merge(1,0,any(stagnant>=12))
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+      do i=1,nrhs;z(:,i)=r(:,i)/diagonal;enddo
+      call global_gram(r,z,nw+np,nrhs,nrhs,gram,gram_info)
+      if(gram_info/=0)return
+      do i=1,nrhs;rho_new(i)=real(gram(i,i),8);enddo
+      local_bad=0
+      do i=1,nrhs
+        if(active(i).and.(.not.ieee_is_finite(rho_new(i)).or.rho_new(i)<=0d0.or.rho_old(i)<=0d0))local_bad=1
+      enddo
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+      do i=1,nrhs
+        if(active(i))p(:,i)=z(:,i)+(rho_new(i)/rho_old(i))*p(:,i)
+      enddo
+      rho_old=rho_new
     enddo
   end subroutine solve_dg_wpw_metric_projection
 
@@ -152,8 +193,8 @@ contains
     integer,intent(out)::effective_rank
     real(8),intent(out)::orthogonality
     integer,intent(out)::info
-    complex(8),allocatable::qocc(:,:),qextra(:,:),sextra(:,:),overlap(:,:)
-    integer::nextra
+    complex(8),allocatable::qocc(:,:),qextra(:,:),sextra(:,:),overlap(:,:),qall(:,:),sall(:,:),full_gram(:,:)
+    integer::nextra,i
 
     info=1;effective_rank=0;orthogonality=huge(1d0);nextra=nretain-nocc
     if(nocc<1.or.nextra<1)return
@@ -168,8 +209,15 @@ contains
     call initialize_dg_wpw_projected_occupied(context,comm,apply_s,global_gram,nw,np,nextra,&
       metric_cutoff,qw(:,nocc+1:nretain),qp(:,nocc+1:nretain),effective_rank,orthogonality,info)
     if(info/=0.or.effective_rank/=nextra)return
-    call initialize_dg_wpw_projected_occupied(context,comm,apply_s,global_gram,nw,np,nretain,&
-      metric_cutoff,qw,qp,effective_rank,orthogonality,info)
+    allocate(qall(nw+np,nretain),sall(nw+np,nretain),full_gram(nretain,nretain))
+    qall(1:nw,:)=qw;qall(nw+1:,:)=qp
+    call apply_s(context,qall(1:nw,:),qall(nw+1:,:),sall(1:nw,:),sall(nw+1:,:),info)
+    if(info/=0)return
+    call global_gram(qall,sall,nw+np,nretain,nretain,full_gram,info);if(info/=0)return
+    do i=1,nretain;full_gram(i,i)=full_gram(i,i)-(1d0,0d0);enddo
+    orthogonality=maxval(abs(full_gram))
+    if(.not.ieee_is_finite(orthogonality))then;info=1;effective_rank=0;return;endif
+    effective_rank=nretain;info=0
   end subroutine complete_dg_wpw_projected_subspace
 
   subroutine initialize_dg_wpw_projected_occupied(context,comm,apply_s,global_gram,nw,np,nocc,&

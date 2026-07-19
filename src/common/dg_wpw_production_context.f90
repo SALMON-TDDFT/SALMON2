@@ -1,7 +1,10 @@
 module dg_wpw_production_context
   use,intrinsic::iso_fortran_env,only:int64
-  use dg_wpw_bounded_operator,only:s_dg_wpw_bounded_operator
-  use mpi, only: MPI_COMM_NULL, MPI_Comm_rank, MPI_Comm_size, MPI_SUCCESS
+  use dg_wpw_bounded_operator,only:s_dg_wpw_bounded_operator,&
+    s_dg_wpw_bounded_operator_snapshot,snapshot_dg_wpw_bounded_operator,&
+    validate_dg_wpw_bounded_operator_snapshot,release_dg_wpw_bounded_operator_snapshot
+  use mpi, only: MPI_COMM_NULL, MPI_Comm_rank, MPI_Comm_size, MPI_SUCCESS,&
+    MPI_Allreduce,MPI_INTEGER,MPI_MAX
   implicit none
   private
   type,public::s_dg_wpw_production_context
@@ -42,9 +45,149 @@ module dg_wpw_production_context
     procedure::apply_h=>apply_h_context
     procedure::apply_s=>apply_s_context
   end type
+  type,public::s_dg_wpw_production_context_snapshot
+    integer::halo_epoch=-1,scan_epoch=-1,operator_epoch=-1
+    integer(int64)::ww_provenance_fingerprint=0_int64
+    logical::valid=.false.,callbacks_bound=.false.,operator_valid=.false.,&
+      ww_projector_nonlocal_valid=.false.
+    character(16)::ownership_kind=''
+    character(32)::ww_metric_convention=''
+    complex(8),allocatable::wp_h_volume(:),wp_h_nonlocal(:),wp_h_face(:),&
+      pp_h_volume(:),pp_h_nonlocal(:),ww_projector_nonlocal(:,:),&
+      ww_projector_cross_value(:)
+    integer,allocatable::ww_projector_cross_row_id(:),ww_projector_cross_col_id(:)
+    type(s_dg_wpw_bounded_operator_snapshot)::bounded_operator
+  end type
   public::initialize_dg_wpw_production_context,initialize_dg_wpw_fragment_root_context
   public::consume_dg_wpw_bounded_subspace
+  public::snapshot_dg_wpw_production_context,validate_dg_wpw_production_context_snapshot
+  public::release_dg_wpw_production_context_snapshot
 contains
+  subroutine snapshot_dg_wpw_production_context(ctx,snapshot,info)
+    type(s_dg_wpw_production_context),intent(in)::ctx
+    type(s_dg_wpw_production_context_snapshot),intent(inout)::snapshot
+    integer,intent(out)::info
+    integer::astat,local_bad,global_bad,ierr
+    call release_dg_wpw_production_context_snapshot(snapshot)
+    local_bad=merge(0,1,ctx%comm/=MPI_COMM_NULL.and.ctx%operator_valid.and.&
+      ctx%callbacks_bound.and.ctx%ww_projector_nonlocal_valid)
+    if(local_bad==0)then
+      allocate(snapshot%wp_h_volume,source=ctx%wp_h_volume,stat=astat);if(astat/=0)local_bad=1
+    endif
+    if(local_bad==0)then
+      allocate(snapshot%wp_h_nonlocal,source=ctx%wp_h_nonlocal,stat=astat);if(astat/=0)local_bad=1
+    endif
+    if(local_bad==0)then
+      allocate(snapshot%wp_h_face,source=ctx%wp_h_face,stat=astat);if(astat/=0)local_bad=1
+    endif
+    if(local_bad==0)then
+      allocate(snapshot%pp_h_volume,source=ctx%pp_h_volume,stat=astat);if(astat/=0)local_bad=1
+    endif
+    if(local_bad==0)then
+      allocate(snapshot%pp_h_nonlocal,source=ctx%pp_h_nonlocal,stat=astat);if(astat/=0)local_bad=1
+    endif
+    if(local_bad==0)then
+      allocate(snapshot%ww_projector_nonlocal,source=ctx%ww_projector_nonlocal,stat=astat)
+      if(astat/=0)local_bad=1
+    endif
+    if(local_bad==0)then
+      allocate(snapshot%ww_projector_cross_value,source=ctx%ww_projector_cross_value,stat=astat)
+      if(astat/=0)local_bad=1
+    endif
+    if(local_bad==0)then
+      allocate(snapshot%ww_projector_cross_row_id,source=ctx%ww_projector_cross_row_id,stat=astat)
+      if(astat/=0)local_bad=1
+    endif
+    if(local_bad==0)then
+      allocate(snapshot%ww_projector_cross_col_id,source=ctx%ww_projector_cross_col_id,stat=astat)
+      if(astat/=0)local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,ctx%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      call release_dg_wpw_production_context_snapshot(snapshot);info=1;return
+    endif
+    call snapshot_dg_wpw_bounded_operator(ctx%bounded_operator,snapshot%bounded_operator,info)
+    if(info/=0)then;call release_dg_wpw_production_context_snapshot(snapshot);return;endif
+    snapshot%halo_epoch=ctx%halo_epoch;snapshot%scan_epoch=ctx%scan_epoch
+    snapshot%operator_epoch=ctx%operator_epoch
+    snapshot%ww_provenance_fingerprint=ctx%ww_provenance_fingerprint
+    snapshot%callbacks_bound=ctx%callbacks_bound;snapshot%operator_valid=ctx%operator_valid
+    snapshot%ww_projector_nonlocal_valid=ctx%ww_projector_nonlocal_valid
+    snapshot%ownership_kind=ctx%ownership_kind
+    snapshot%ww_metric_convention=ctx%ww_metric_convention
+    snapshot%valid=.true.;info=0
+  end subroutine snapshot_dg_wpw_production_context
+
+  subroutine validate_dg_wpw_production_context_snapshot(ctx,snapshot,info)
+    type(s_dg_wpw_production_context),intent(in)::ctx
+    type(s_dg_wpw_production_context_snapshot),intent(in)::snapshot
+    integer,intent(out)::info
+    integer::local_bad,global_bad,ierr,operator_info
+    local_bad=merge(0,1,snapshot%valid.and.ctx%comm/=MPI_COMM_NULL.and.&
+      snapshot%halo_epoch==ctx%halo_epoch.and.snapshot%scan_epoch==ctx%scan_epoch.and.&
+      snapshot%operator_epoch==ctx%operator_epoch.and.&
+      snapshot%ww_provenance_fingerprint==ctx%ww_provenance_fingerprint.and.&
+      (snapshot%callbacks_bound.eqv.ctx%callbacks_bound).and.&
+      (snapshot%operator_valid.eqv.ctx%operator_valid).and.&
+      (snapshot%ww_projector_nonlocal_valid.eqv.ctx%ww_projector_nonlocal_valid).and.&
+      snapshot%ownership_kind==ctx%ownership_kind.and.&
+      snapshot%ww_metric_convention==ctx%ww_metric_convention)
+    if(local_bad==0.and..not.same_context_z1(snapshot%wp_h_volume,ctx%wp_h_volume))local_bad=1
+    if(local_bad==0.and..not.same_context_z1(snapshot%wp_h_nonlocal,ctx%wp_h_nonlocal))local_bad=1
+    if(local_bad==0.and..not.same_context_z1(snapshot%wp_h_face,ctx%wp_h_face))local_bad=1
+    if(local_bad==0.and..not.same_context_z1(snapshot%pp_h_volume,ctx%pp_h_volume))local_bad=1
+    if(local_bad==0.and..not.same_context_z1(snapshot%pp_h_nonlocal,ctx%pp_h_nonlocal))local_bad=1
+    if(local_bad==0.and..not.same_context_z2(snapshot%ww_projector_nonlocal,&
+      ctx%ww_projector_nonlocal))local_bad=1
+    if(local_bad==0.and..not.same_context_z1(snapshot%ww_projector_cross_value,&
+      ctx%ww_projector_cross_value))local_bad=1
+    if(local_bad==0.and..not.same_context_i1(snapshot%ww_projector_cross_row_id,&
+      ctx%ww_projector_cross_row_id))local_bad=1
+    if(local_bad==0.and..not.same_context_i1(snapshot%ww_projector_cross_col_id,&
+      ctx%ww_projector_cross_col_id))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,ctx%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;info=1;return;endif
+    call validate_dg_wpw_bounded_operator_snapshot(ctx%bounded_operator,&
+      snapshot%bounded_operator,operator_info)
+    info=merge(0,1,operator_info==0)
+  end subroutine validate_dg_wpw_production_context_snapshot
+
+  logical function same_context_z1(left,right)result(ok)
+    complex(8),allocatable,intent(in)::left(:),right(:)
+    ok=allocated(left).and.allocated(right);if(.not.ok)return
+    ok=size(left)==size(right);if(.not.ok)return
+    ok=all(left==right)
+  end function same_context_z1
+
+  logical function same_context_z2(left,right)result(ok)
+    complex(8),allocatable,intent(in)::left(:,:),right(:,:)
+    ok=allocated(left).and.allocated(right);if(.not.ok)return
+    ok=all(shape(left)==shape(right));if(.not.ok)return
+    ok=all(left==right)
+  end function same_context_z2
+
+  logical function same_context_i1(left,right)result(ok)
+    integer,allocatable,intent(in)::left(:),right(:)
+    ok=allocated(left).and.allocated(right);if(.not.ok)return
+    ok=size(left)==size(right);if(.not.ok)return
+    ok=all(left==right)
+  end function same_context_i1
+
+  subroutine release_dg_wpw_production_context_snapshot(snapshot)
+    type(s_dg_wpw_production_context_snapshot),intent(inout)::snapshot
+    if(allocated(snapshot%wp_h_volume))deallocate(snapshot%wp_h_volume)
+    if(allocated(snapshot%wp_h_nonlocal))deallocate(snapshot%wp_h_nonlocal)
+    if(allocated(snapshot%wp_h_face))deallocate(snapshot%wp_h_face)
+    if(allocated(snapshot%pp_h_volume))deallocate(snapshot%pp_h_volume)
+    if(allocated(snapshot%pp_h_nonlocal))deallocate(snapshot%pp_h_nonlocal)
+    if(allocated(snapshot%ww_projector_nonlocal))deallocate(snapshot%ww_projector_nonlocal)
+    if(allocated(snapshot%ww_projector_cross_value))deallocate(snapshot%ww_projector_cross_value)
+    if(allocated(snapshot%ww_projector_cross_row_id))deallocate(snapshot%ww_projector_cross_row_id)
+    if(allocated(snapshot%ww_projector_cross_col_id))deallocate(snapshot%ww_projector_cross_col_id)
+    call release_dg_wpw_bounded_operator_snapshot(snapshot%bounded_operator)
+    snapshot%valid=.false.
+  end subroutine release_dg_wpw_production_context_snapshot
+
   subroutine initialize_dg_wpw_production_context(ctx,comm,n_fragments,n_g,n_w,owned_w_ids,support_w_ids,info)
     type(s_dg_wpw_production_context),intent(out)::ctx
     integer,intent(in)::comm,n_fragments,n_g,n_w,owned_w_ids(:),support_w_ids(:)

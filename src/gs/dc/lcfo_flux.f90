@@ -3297,7 +3297,10 @@ contains
     use dg_wpw_canonical_face_schedule,only:s_dg_wpw_canonical_face_record,&
       build_dg_wpw_canonical_face_schedule
     use dg_wpw_w_row_layout,only:build_complete_wpw_w_row_layout=>build_dg_wpw_w_row_layout
-    use dg_wpw_production_context, only: s_dg_wpw_production_context,initialize_dg_wpw_fragment_root_context
+    use dg_wpw_production_context, only: s_dg_wpw_production_context,&
+      s_dg_wpw_production_context_snapshot,initialize_dg_wpw_fragment_root_context,&
+      snapshot_dg_wpw_production_context,validate_dg_wpw_production_context_snapshot,&
+      release_dg_wpw_production_context_snapshot
     use rt_dg_wpw_volume_halo_provider,only:s_dg_wpw_volume_halo_send,s_dg_wpw_volume_halo_state,&
       pack_dg_wpw_volume_halo_send,exchange_dg_wpw_volume_halo_schedule
     use rt_dg_wpw_volume_halo_provider,only:broadcast_dg_wpw_volume_halos
@@ -3315,7 +3318,8 @@ contains
       import_dg_wpw_lcfo_ww_components,publish_dg_wpw_lcfo_ww_components,&
       validate_dg_wpw_surface_self_policy
     use dg_wpw_bounded_operator,only:release_dg_wpw_bounded_operator,fetch_dg_wpw_support_coefficients,&
-      apply_h_dg_wpw_bounded,apply_s_dg_wpw_bounded,global_gram_dg_wpw_bounded
+      apply_h_dg_wpw_bounded,apply_s_dg_wpw_bounded,global_gram_dg_wpw_bounded,&
+      get_dg_wpw_owned_metric_diagonal,reduce_dg_wpw_metric_rhs_partials
     use dg_wpw_nonlocal_projector,only:s_dg_wpw_projector_overlap,&
       build_dg_wpw_projector_overlap_partials,reduce_dg_wpw_p_projector_partials,&
       exchange_dg_wpw_projector_overlaps,assemble_dg_wpw_nonlocal_blocks,&
@@ -3325,7 +3329,7 @@ contains
     use dg_wpw_matrix_free_scf,only:run_dg_wpw_matrix_free_algebra_step,&
       initialize_dg_wpw_deterministic_seed,initialize_dg_wpw_projected_occupied
     use dg_wpw_matrix_free_scf,only:complete_dg_wpw_projected_subspace,&
-      initialize_dg_wpw_metric_projected_occupied
+      solve_dg_wpw_metric_projection
     use dg_wpw_checkpoint,only:s_dg_wpw_checkpoint_state,write_dg_wpw_checkpoint,&
       write_dg_wpw_checkpoint_manifest,dg_wpw_checkpoint_checksum
     use dg_wpw_lcfo_potential_map,only:s_dg_wpw_grid_route,build_dg_wpw_core_density,&
@@ -3400,6 +3404,7 @@ contains
     type(s_dg_wpw_lcfo_ww_components)::wpw_ww_components
     type(s_dg_wpw_lcfo_ww_components)::wpw_saved_ww_components
     type(s_dg_wpw_lcfo_ww_components)::wpw_frozen_ww_components
+    type(s_dg_wpw_production_context_snapshot)::wpw_frozen_production_context
     type(s_dg_wpw_scf_iteration_state)::wpw_scf_state
     type(s_dg_wpw_grid_route)::wpw_density_route
     complex(8),allocatable::wpw_qw(:,:),wpw_qp(:,:),wpw_q_old_occ(:,:)
@@ -3407,6 +3412,10 @@ contains
     complex(8),allocatable::wpw_saved_wp_volume(:),wpw_saved_pp_volume(:)
     complex(8),allocatable::wpw_frozen_wp_volume(:),wpw_frozen_wp_nonlocal(:),wpw_frozen_wp_face(:),&
       wpw_frozen_pp_volume(:),wpw_frozen_pp_nonlocal(:)
+    complex(8),allocatable::wpw_frozen_ww_projector_nonlocal(:,:),&
+      wpw_frozen_ww_projector_cross_value(:)
+    integer,allocatable::wpw_frozen_ww_projector_cross_row_id(:),&
+      wpw_frozen_ww_projector_cross_col_id(:)
     complex(8),allocatable::wpw_frozen_ww_h0_dense(:,:),wpw_frozen_ww_interface_dense(:,:),&
       wpw_frozen_wp_h0_dense(:,:),wpw_frozen_wp_interface_dense(:,:),&
       wpw_frozen_pp_h0_dense(:,:),wpw_frozen_pp_interface_dense(:,:)
@@ -3419,6 +3428,9 @@ contains
       wpw_frozen_vxc_tot(:,:,:),wpw_frozen_vloc_tot(:,:,:)
     integer,allocatable::wpw_total_owned_grid_ids(:),wpw_core_destinations(:)
     integer::wpw_nocc,wpw_nretain
+    integer::wpw_frozen_halo_epoch,wpw_frozen_scan_epoch,wpw_frozen_operator_epoch
+    logical::wpw_frozen_callbacks_bound,wpw_frozen_operator_valid,&
+      wpw_frozen_ww_projector_nonlocal_valid
     integer::wpw_projection_rank
     real(8)::wpw_projection_residual,wpw_projection_captured_norm,&
       wpw_projection_orthogonality,wpw_projection_charge
@@ -3893,6 +3905,11 @@ contains
         if(.not.wpw_ww_components_fully_allocated().or..not.allocated(wpw_context%wp_h_volume).or.&
            .not.allocated(wpw_context%wp_h_nonlocal).or..not.allocated(wpw_context%wp_h_face).or.&
            .not.allocated(wpw_context%pp_h_volume).or..not.allocated(wpw_context%pp_h_nonlocal).or.&
+           .not.wpw_context%ww_projector_nonlocal_valid.or.&
+           .not.allocated(wpw_context%ww_projector_nonlocal).or.&
+           .not.allocated(wpw_context%ww_projector_cross_value).or.&
+           .not.allocated(wpw_context%ww_projector_cross_row_id).or.&
+           .not.allocated(wpw_context%ww_projector_cross_col_id).or.&
            .not.wpw_context%bounded_operator%valid)local_bad=1
       endif
       if(dc%id_frag==0.and.local_bad==0)then
@@ -3902,6 +3919,22 @@ contains
         if(local_bad==0)then;allocate(wpw_frozen_wp_face,source=wpw_context%wp_h_face,stat=astat);if(astat/=0)local_bad=1;endif
         if(local_bad==0)then;allocate(wpw_frozen_pp_volume,source=wpw_context%pp_h_volume,stat=astat);if(astat/=0)local_bad=1;endif
         if(local_bad==0)then;allocate(wpw_frozen_pp_nonlocal,source=wpw_context%pp_h_nonlocal,stat=astat);if(astat/=0)local_bad=1;endif
+        if(local_bad==0)then
+          allocate(wpw_frozen_ww_projector_nonlocal,&
+            source=wpw_context%ww_projector_nonlocal,stat=astat);if(astat/=0)local_bad=1
+        endif
+        if(local_bad==0)then
+          allocate(wpw_frozen_ww_projector_cross_value,&
+            source=wpw_context%ww_projector_cross_value,stat=astat);if(astat/=0)local_bad=1
+        endif
+        if(local_bad==0)then
+          allocate(wpw_frozen_ww_projector_cross_row_id,&
+            source=wpw_context%ww_projector_cross_row_id,stat=astat);if(astat/=0)local_bad=1
+        endif
+        if(local_bad==0)then
+          allocate(wpw_frozen_ww_projector_cross_col_id,&
+            source=wpw_context%ww_projector_cross_col_id,stat=astat);if(astat/=0)local_bad=1
+        endif
         if(local_bad==0)then;allocate(wpw_frozen_ww_h0_dense,source=wpw_context%bounded_operator%ww_h0_dense,stat=astat);if(astat/=0)local_bad=1;endif
         if(local_bad==0)then;allocate(wpw_frozen_ww_interface_dense,source=wpw_context%bounded_operator%ww_interface_dense,stat=astat);if(astat/=0)local_bad=1;endif
         if(local_bad==0)then;allocate(wpw_frozen_wp_h0_dense,source=wpw_context%bounded_operator%wp_h0_dense,stat=astat);if(astat/=0)local_bad=1;endif
@@ -3912,6 +3945,19 @@ contains
         if(local_bad==0)then;allocate(wpw_frozen_required_w_ids,source=wpw_context%bounded_operator%required_w_ids,stat=astat);if(astat/=0)local_bad=1;endif
         if(local_bad==0)then;allocate(wpw_frozen_owned_p_ids,source=wpw_context%bounded_operator%owned_p_ids,stat=astat);if(astat/=0)local_bad=1;endif
         if(local_bad==0)then;allocate(wpw_frozen_required_p_ids,source=wpw_context%bounded_operator%required_p_ids,stat=astat);if(astat/=0)local_bad=1;endif
+        if(local_bad==0)then
+          wpw_frozen_halo_epoch=wpw_context%halo_epoch
+          wpw_frozen_scan_epoch=wpw_context%scan_epoch
+          wpw_frozen_operator_epoch=wpw_context%operator_epoch
+          wpw_frozen_callbacks_bound=wpw_context%callbacks_bound
+          wpw_frozen_operator_valid=wpw_context%operator_valid
+          wpw_frozen_ww_projector_nonlocal_valid=wpw_context%ww_projector_nonlocal_valid
+        endif
+      endif
+      if(dc%id_frag==0)then
+        call synchronize_wpw_projector_root_info(local_bad)
+        if(local_bad==0)call snapshot_dg_wpw_production_context(&
+          wpw_context,wpw_frozen_production_context,local_bad)
       endif
       snapshot_info=local_bad
       if(.not.wpw_potential_stage_ok(snapshot_info))snapshot_info=1
@@ -3952,6 +3998,10 @@ contains
       if(allocated(wpw_frozen_wp_face))deallocate(wpw_frozen_wp_face)
       if(allocated(wpw_frozen_pp_volume))deallocate(wpw_frozen_pp_volume)
       if(allocated(wpw_frozen_pp_nonlocal))deallocate(wpw_frozen_pp_nonlocal)
+      if(allocated(wpw_frozen_ww_projector_nonlocal))deallocate(wpw_frozen_ww_projector_nonlocal)
+      if(allocated(wpw_frozen_ww_projector_cross_value))deallocate(wpw_frozen_ww_projector_cross_value)
+      if(allocated(wpw_frozen_ww_projector_cross_row_id))deallocate(wpw_frozen_ww_projector_cross_row_id)
+      if(allocated(wpw_frozen_ww_projector_cross_col_id))deallocate(wpw_frozen_ww_projector_cross_col_id)
       if(allocated(wpw_frozen_ww_h0_dense))deallocate(wpw_frozen_ww_h0_dense)
       if(allocated(wpw_frozen_ww_interface_dense))deallocate(wpw_frozen_ww_interface_dense)
       if(allocated(wpw_frozen_wp_h0_dense))deallocate(wpw_frozen_wp_h0_dense)
@@ -3974,6 +4024,7 @@ contains
       if(allocated(wpw_frozen_ww_components%cross_side))deallocate(wpw_frozen_ww_components%cross_side)
       if(allocated(wpw_frozen_ww_components%cross_image))deallocate(wpw_frozen_ww_components%cross_image)
       if(allocated(wpw_frozen_ww_components%cross_value))deallocate(wpw_frozen_ww_components%cross_value)
+      call release_dg_wpw_production_context_snapshot(wpw_frozen_production_context)
       wpw_frozen_ww_components%valid=.false.
     end subroutine release_wpw_frozen_h_state
 
@@ -3989,9 +4040,13 @@ contains
 
     subroutine validate_wpw_frozen_h_state(validation_info)
       integer,intent(out)::validation_info
-      integer::local_bad
+      integer::local_bad,operator_info
 
+      operator_info=0
+      if(dc%id_frag==0)call validate_dg_wpw_production_context_snapshot(&
+        wpw_context,wpw_frozen_production_context,operator_info)
       local_bad=merge(0,1,wpw_frozen_state_local_matches())
+      if(operator_info/=0)local_bad=1
       validation_info=local_bad
       if(.not.wpw_potential_stage_ok(validation_info))validation_info=1
     end subroutine validate_wpw_frozen_h_state
@@ -4009,6 +4064,21 @@ contains
       if(.not.same_complex1(wpw_frozen_wp_face,wpw_context%wp_h_face))return
       if(.not.same_complex1(wpw_frozen_pp_volume,wpw_context%pp_h_volume))return
       if(.not.same_complex1(wpw_frozen_pp_nonlocal,wpw_context%pp_h_nonlocal))return
+      if(.not.same_complex2(wpw_frozen_ww_projector_nonlocal,&
+        wpw_context%ww_projector_nonlocal))return
+      if(.not.same_complex1(wpw_frozen_ww_projector_cross_value,&
+        wpw_context%ww_projector_cross_value))return
+      if(.not.same_integer1(wpw_frozen_ww_projector_cross_row_id,&
+        wpw_context%ww_projector_cross_row_id))return
+      if(.not.same_integer1(wpw_frozen_ww_projector_cross_col_id,&
+        wpw_context%ww_projector_cross_col_id))return
+      if(wpw_frozen_halo_epoch/=wpw_context%halo_epoch.or.&
+         wpw_frozen_scan_epoch/=wpw_context%scan_epoch.or.&
+         wpw_frozen_operator_epoch/=wpw_context%operator_epoch.or.&
+         wpw_frozen_callbacks_bound.neqv.wpw_context%callbacks_bound.or.&
+         wpw_frozen_operator_valid.neqv.wpw_context%operator_valid.or.&
+         wpw_frozen_ww_projector_nonlocal_valid.neqv.&
+           wpw_context%ww_projector_nonlocal_valid)return
       if(.not.same_complex2(wpw_frozen_ww_h0_dense,wpw_context%bounded_operator%ww_h0_dense))return
       if(.not.same_complex2(wpw_frozen_ww_interface_dense,wpw_context%bounded_operator%ww_interface_dense))return
       if(.not.same_complex2(wpw_frozen_wp_h0_dense,wpw_context%bounded_operator%wp_h0_dense))return
@@ -4089,7 +4159,7 @@ contains
 
       call validate_wpw_frozen_h_state(fixed_info)
       if(fixed_info/=0)return
-      call build_wpw_projected_occupied_seed(fixed_info)
+      call build_wpw_density_carrying_fragment_seed(fixed_info)
       if(fixed_info/=0)return
       ! The occupied-subspace projection and cooled block-CG continuation are
       ! installed by the following plan tasks.  Until then this opt-in route
@@ -4099,18 +4169,23 @@ contains
       fixed_info=2
     end subroutine run_wpw_fixed_h_relaxation
 
-    subroutine build_wpw_projected_occupied_seed(seed_info)
+    subroutine build_wpw_density_carrying_fragment_seed(seed_info)
       integer,intent(out)::seed_info
-      integer::local_nocc,io_occ,io_state,point,ixp,iyp,izp,iw,offset,ierr,root_info
+      integer::local_nocc,io_occ,io_state,point,ixp,iyp,izp,iw,offset,ierr,root_info,point_info
+      integer::grid_point(3)
       integer::occ_counts(dc%n_frag),occ_counts_all(dc%n_frag)
       integer,allocatable::occ_states(:)
-      complex(8),allocatable::local_overlap_w(:,:),root_overlap_w(:,:),&
+      complex(8),allocatable::local_overlap_w(:,:),root_overlap_w(:,:),support_w_values(:),&
+        support_w_gradients(:,:),owned_w_values(:),owned_w_gradients(:,:),&
         local_overlap_p(:,:),root_overlap_p(:,:),metric_rhs_w(:,:),metric_rhs_p(:,:),&
-        rhs_all(:,:),q_all(:,:),capture(:,:),occupations_local(:)
-      real(8),allocatable::local_source_norm(:),root_source_norm(:)
-      real(8)::projection_norms_local(2),projection_norms_global(2)
+        metric_partial_w(:,:),metric_partial_p(:,:),rhs_all(:,:),q_all(:,:),capture(:,:)
+      real(8),allocatable::local_source_norm(:),root_source_norm(:),metric_diagonal_w(:),&
+        metric_diagonal_p(:),metric_rhs_residuals(:),occupations_local(:),source_norm_local_global(:),&
+        source_norm_global(:)
+      real(8),allocatable::metric_rhs_residual_history(:,:)
+      real(8)::projection_norms_local(2),projection_norms_global(2),metric_diagonal_spread
       real(8)::projection_orth
-      integer::projection_rank
+      integer::projection_rank,metric_iterations
 
       seed_info=1;root_info=0
       local_nocc=count(system%rocc(1:system%no,1,1)>1d-12)
@@ -4125,30 +4200,38 @@ contains
       wpw_nocc=occupied_index_from_input(1);wpw_nretain=wpw_nocc+dg_wpw_extra_states
       if(sum(occ_counts_all)/=wpw_nocc.or.local_nocc<1.or.&
          wpw_nretain>n_mat(1)+dc%n_frag*size(wpw_g_indices,2))root_info=1
-      allocate(local_overlap_w(size(wpw_owned_w_ids),local_nocc),&
-        root_overlap_w(size(wpw_owned_w_ids),local_nocc),&
-        local_overlap_p(size(wpw_g_indices,2),local_nocc),&
-        root_overlap_p(size(wpw_g_indices,2),local_nocc),local_source_norm(local_nocc),&
-        root_source_norm(local_nocc))
+      allocate(local_overlap_w(size(wpw_support_w_ids),local_nocc),&
+        root_overlap_w(size(wpw_support_w_ids),local_nocc),&
+        local_overlap_p(size(wpw_support_fragment_ids)*size(wpw_g_indices,2),local_nocc),&
+        root_overlap_p(size(wpw_support_fragment_ids)*size(wpw_g_indices,2),local_nocc),local_source_norm(local_nocc),&
+        root_source_norm(local_nocc),support_w_values(size(wpw_support_w_ids)),&
+        support_w_gradients(3,size(wpw_support_w_ids)),owned_w_values(size(wpw_owned_w_ids)),&
+        owned_w_gradients(3,size(wpw_owned_w_ids)))
       local_overlap_w=0;root_overlap_w=0;local_overlap_p=0;root_overlap_p=0
       local_source_norm=0;root_source_norm=0;point=0
       do izp=max(mg%is(3),1),min(mg%ie(3),size(f_basis,3))
         do iyp=max(mg%is(2),1),min(mg%ie(2),size(f_basis,2))
           do ixp=max(mg%is(1),1),min(mg%ie(1),size(f_basis,1))
             point=point+1
+            owned_w_values=wpw_volume_accumulator%w_points(:,point)
+            owned_w_gradients=wpw_volume_accumulator%grad_w_points(:,:,point)
+            grid_point=dc%ixyz_frag(:,dc%i_frag)+[ixp,iyp,izp]-1
+            call evaluate_dg_wpw_core_w_support(wpw_owned_w_ids,owned_w_values,owned_w_gradients,&
+              wpw_support_w_ids,wpw_volume_halos,grid_point,1,support_w_values,support_w_gradients,&
+              point_info,zero_outside_halo=.true.)
+            if(point_info/=0)then;root_info=1;cycle;endif
             do io_occ=1,local_nocc
               io_state=occ_states(io_occ)
               if(io_state<info%io_s.or.io_state>info%io_e)cycle
               local_source_norm(io_occ)=local_source_norm(io_occ)+&
                 abs(spsi%rwf(ixp,iyp,izp,1,io_state,1,1))**2*&
                 wpw_volume_accumulator%weights(point)
-              do iw=1,size(wpw_owned_w_ids)
-                local_overlap_w(iw,io_occ)=local_overlap_w(iw,io_occ)+conjg(&
-                  wpw_volume_accumulator%w_points(iw,point))*&
+              do iw=1,size(wpw_support_w_ids)
+                local_overlap_w(iw,io_occ)=local_overlap_w(iw,io_occ)+conjg(support_w_values(iw))*&
                   cmplx(spsi%rwf(ixp,iyp,izp,1,io_state,1,1),0d0,8)*&
                   wpw_volume_accumulator%weights(point)
               enddo
-              do iw=1,size(wpw_g_indices,2)
+              do iw=1,size(local_overlap_p,1)
                 local_overlap_p(iw,io_occ)=local_overlap_p(iw,io_occ)+conjg(&
                   wpw_volume_accumulator%p_points(iw,point))*&
                   cmplx(spsi%rwf(ixp,iyp,izp,1,io_state,1,1),0d0,8)*&
@@ -4181,10 +4264,20 @@ contains
         call initialize_dg_wpw_deterministic_seed(wpw_owned_w_ids,&
           wpw_context%bounded_operator%owned_p_ids,wpw_qw,wpw_qp,root_info)
         offset=sum(occ_counts_all(1:dc%i_frag-1))
-        allocate(metric_rhs_w(size(wpw_qw,1),wpw_nocc),metric_rhs_p(size(wpw_qp,1),wpw_nocc))
-        metric_rhs_w=0;metric_rhs_p=0
-        metric_rhs_w(:,offset+1:offset+local_nocc)=root_overlap_w
-        metric_rhs_p(:,offset+1:offset+local_nocc)=root_overlap_p
+        allocate(metric_rhs_w(size(wpw_qw,1),wpw_nocc),metric_rhs_p(size(wpw_qp,1),wpw_nocc),&
+          metric_partial_w(size(root_overlap_w,1),wpw_nocc),&
+          metric_partial_p(size(root_overlap_p,1),wpw_nocc),&
+          metric_diagonal_w(size(wpw_qw,1)),metric_diagonal_p(size(wpw_qp,1)),&
+          metric_rhs_residuals(wpw_nocc),metric_rhs_residual_history(256,wpw_nocc),&
+          occupations_local(wpw_nocc),source_norm_local_global(wpw_nocc),source_norm_global(wpw_nocc))
+        metric_rhs_w=0;metric_rhs_p=0;metric_partial_w=0;metric_partial_p=0
+        occupations_local=0;source_norm_local_global=0;source_norm_global=0
+        metric_partial_w(:,offset+1:offset+local_nocc)=root_overlap_w
+        metric_partial_p(:,offset+1:offset+local_nocc)=root_overlap_p
+        occupations_local(offset+1:offset+local_nocc)=system%rocc(occ_states,1,1)
+        source_norm_local_global(offset+1:offset+local_nocc)=root_source_norm
+        call reduce_dg_wpw_metric_rhs_partials(wpw_context%bounded_operator,metric_partial_w,&
+          metric_partial_p,metric_rhs_w,metric_rhs_p,root_info)
         projection_norms_local=[sum(abs(root_overlap_w)**2)+sum(abs(root_overlap_p)**2),&
           sum(root_source_norm)]
         call MPI_Allreduce(projection_norms_local,projection_norms_global,2,MPI_DOUBLE_PRECISION,MPI_SUM,&
@@ -4193,13 +4286,20 @@ contains
           projection_norms_global(2)<=0d0)then
           root_info=1
         endif
-        if(root_info==0)call initialize_dg_wpw_metric_projected_occupied(wpw_context,&
+        call MPI_Allreduce(occupations_local,wpw_occupations,wpw_nocc,MPI_DOUBLE_PRECISION,MPI_SUM,&
+          wpw_production_comm,ierr)
+        if(ierr/=MPI_SUCCESS.or.any(wpw_occupations<=0d0))root_info=1
+        call MPI_Allreduce(source_norm_local_global,source_norm_global,wpw_nocc,MPI_DOUBLE_PRECISION,&
+          MPI_SUM,wpw_production_comm,ierr)
+        if(ierr/=MPI_SUCCESS.or.any(source_norm_global<=0d0))root_info=1
+        if(root_info==0)call get_dg_wpw_owned_metric_diagonal(wpw_context%bounded_operator,&
+          metric_diagonal_w,metric_diagonal_p,root_info)
+        if(root_info==0)call solve_dg_wpw_metric_projection(wpw_context,&
           wpw_production_comm,wpw_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),&
-          wpw_nocc,dg_wpw_metric_cutoff,256,metric_rhs_w,metric_rhs_p,&
+          wpw_nocc,dg_wpw_metric_cutoff,256,metric_diagonal_w,metric_diagonal_p,metric_rhs_w,metric_rhs_p,&
           wpw_qw(:,1:wpw_nocc),wpw_qp(:,1:wpw_nocc),wpw_projection_residual,&
-          projection_rank,projection_orth,root_info)
-        if(root_info==0.and.(projection_rank/=wpw_nocc.or.&
-          projection_orth>100d0*dg_wpw_metric_cutoff))root_info=1
+          metric_rhs_residuals,metric_rhs_residual_history,metric_iterations,metric_diagonal_spread,&
+          root_info)
         if(root_info==0)then
           allocate(rhs_all(size(wpw_qw,1)+size(wpw_qp,1),wpw_nocc),&
             q_all(size(wpw_qw,1)+size(wpw_qp,1),wpw_nocc),capture(wpw_nocc,wpw_nocc))
@@ -4208,21 +4308,22 @@ contains
           q_all(1:size(wpw_qw,1),:)=wpw_qw(:,1:wpw_nocc)
           q_all(size(wpw_qw,1)+1:,:)=wpw_qp(:,1:wpw_nocc)
           call wpw_global_gram(rhs_all,q_all,size(rhs_all,1),wpw_nocc,wpw_nocc,capture,root_info)
-          wpw_projection_captured_norm=sum([(real(capture(iw,iw),8),iw=1,wpw_nocc)])
+          wpw_projection_captured_norm=sum([(wpw_occupations(iw)*real(capture(iw,iw),8),iw=1,wpw_nocc)])/&
+            sum(wpw_occupations*source_norm_global)
           if(.not.ieee_is_finite(wpw_projection_captured_norm).or.&
              wpw_projection_captured_norm<=0d0)root_info=1
         endif
+        if(root_info==0)call initialize_dg_wpw_projected_occupied(wpw_context,wpw_production_comm,&
+          wpw_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,dg_wpw_metric_cutoff,&
+          wpw_qw(:,1:wpw_nocc),wpw_qp(:,1:wpw_nocc),projection_rank,projection_orth,root_info)
+        if(root_info==0.and.(projection_rank/=wpw_nocc.or.&
+          projection_orth>100d0*dg_wpw_metric_cutoff))root_info=1
         if(root_info==0)call complete_dg_wpw_projected_subspace(wpw_context,wpw_production_comm,&
           wpw_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,wpw_nretain,&
           dg_wpw_metric_cutoff,wpw_qw,wpw_qp,projection_rank,projection_orth,root_info)
         if(root_info==0.and.(projection_rank/=wpw_nretain.or.&
           projection_orth>100d0*dg_wpw_metric_cutoff))root_info=1
         wpw_projection_rank=projection_rank;wpw_projection_orthogonality=projection_orth
-        allocate(occupations_local(wpw_nocc));occupations_local=0
-        occupations_local(offset+1:offset+local_nocc)=system%rocc(occ_states,1,1)
-        call MPI_Allreduce(occupations_local,wpw_occupations,wpw_nocc,MPI_DOUBLE_PRECISION,MPI_SUM,&
-          wpw_production_comm,ierr)
-        if(ierr/=MPI_SUCCESS.or.any(wpw_occupations<=0d0))root_info=1
         wpw_projection_charge=sum(wpw_occupations)
         if(wpw_context%rank_id==0.and.root_info==0)write(*,'(1x,a,i0,4(a,es12.4))')&
           '[DG-WPW-PROJECTION] source=density_carrying_fragment_seed rank=',wpw_projection_rank,&
@@ -4239,7 +4340,7 @@ contains
       wpw_q_old_occ(1:size(wpw_qw,1),:)=wpw_qw(:,1:wpw_nocc)
       wpw_q_old_occ(size(wpw_qw,1)+1:,:)=wpw_qp(:,1:wpw_nocc)
       seed_info=0
-    end subroutine build_wpw_projected_occupied_seed
+    end subroutine build_wpw_density_carrying_fragment_seed
 
     subroutine run_wpw_production_scf(scf_info)
       integer,intent(out)::scf_info

@@ -16,11 +16,15 @@ program test_dg_wpw_matrix_free_scf_mpi
   real(8)::density(1)=[0d0],eval(2),occ(1)=[2d0]
   complex(8),allocatable::qw(:,:),qp(:,:)
   complex(8),allocatable::qold(:,:)
+  complex(8),allocatable::qocc_before(:,:)
   complex(8),allocatable::projected_ref(:,:),projected_rot(:,:),srot(:,:)
   complex(8)::rotation(2,2),overlap_occ(2,2)
   complex(8)::metric_w(1,2),metric_p(1,2),metric_bw(1,2),metric_bp(1,2),&
-    metric_cw(1,2),metric_cp(1,2)
-  real(8)::metric_residual
+    metric_cw(1,2),metric_cp(1,2),metric_bw_ref(1,2),metric_bp_ref(1,2),metric_cw_ref(1,2),metric_cp_ref(1,2)
+  real(8)::metric_residual,metric_rhs_residuals(2),metric_diagonal_w(1),metric_diagonal_p(1),metric_diagonal_spread
+  real(8)::metric_rhs_residual_history(64,2)
+  real(8)::capture_local,capture_ref,capture_rot
+  integer::metric_iterations
   real(8)::projection_orth,projector_defect
   integer::projection_rank
   real(8)::gap,residual,orth,projector
@@ -30,25 +34,54 @@ program test_dg_wpw_matrix_free_scf_mpi
   ctx%metric_coupled=.true.
   metric_w=(0d0,0d0);metric_p=(0d0,0d0)
   metric_w(1,ctx%rank+1)=(1d0,0d0)
-  metric_p(1,3-(ctx%rank+1))=(0.5d0,0.25d0)
+  metric_p(1,2)=cmplx(0.5d0,0.25d0*dble(1-2*ctx%rank),8)
+  metric_diagonal_w(1)=merge(2d0,2.5d0,ctx%rank==0)
+  metric_diagonal_p(1)=merge(1.8d0,2.2d0,ctx%rank==0)
   call apply_s(ctx,metric_w,metric_p,metric_bw,metric_bp,info)
   if(info/=0)call MPI_Abort(MPI_COMM_WORLD,201,ierr)
   metric_cw=(0d0,0d0);metric_cp=(0d0,0d0)
   call solve_dg_wpw_metric_projection(ctx,MPI_COMM_WORLD,apply_s,global_gram,1,1,2,&
-    1d-12,64,metric_bw,metric_bp,metric_cw,metric_cp,metric_residual,info)
+    1d-12,64,metric_diagonal_w,metric_diagonal_p,metric_bw,metric_bp,metric_cw,metric_cp,&
+    metric_residual,metric_rhs_residuals,metric_rhs_residual_history,metric_iterations,metric_diagonal_spread,info)
   if(info/=0.or.metric_residual>1d-10.or.maxval(abs(metric_cw-metric_w))>1d-9.or.&
-    maxval(abs(metric_cp-metric_p))>1d-9)call MPI_Abort(MPI_COMM_WORLD,202,ierr)
+    maxval(abs(metric_cp-metric_p))>1d-9.or.maxval(metric_rhs_residuals)>1d-10.or.&
+    metric_iterations<=1.or.metric_rhs_residual_history(1,1)>1d-12.or.&
+    metric_rhs_residual_history(1,2)<=1d-12.or.&
+    abs(metric_diagonal_spread-2.5d0/1.8d0)>1d-12)call MPI_Abort(MPI_COMM_WORLD,202,ierr)
+  metric_bw_ref=metric_bw;metric_bp_ref=metric_bp;metric_cw_ref=metric_cw;metric_cp_ref=metric_cp
+  capture_local=real(sum(conjg(metric_bw_ref)*metric_cw_ref)+sum(conjg(metric_bp_ref)*metric_cp_ref),8)
+  call MPI_Allreduce(capture_local,capture_ref,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+  rotation=reshape([cmplx(cos(0.37d0),0d0,8),cmplx(-sin(0.37d0),0d0,8),&
+    cmplx(sin(0.37d0),0d0,8),cmplx(cos(0.37d0),0d0,8)],[2,2])
+  metric_bw=matmul(metric_bw_ref,rotation);metric_bp=matmul(metric_bp_ref,rotation)
+  call solve_dg_wpw_metric_projection(ctx,MPI_COMM_WORLD,apply_s,global_gram,1,1,2,&
+    1d-12,64,metric_diagonal_w,metric_diagonal_p,metric_bw,metric_bp,metric_cw,metric_cp,&
+    metric_residual,metric_rhs_residuals,metric_rhs_residual_history,metric_iterations,metric_diagonal_spread,info)
+  capture_local=real(sum(conjg(metric_bw)*metric_cw)+sum(conjg(metric_bp)*metric_cp),8)
+  call MPI_Allreduce(capture_local,capture_rot,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+  if(info/=0.or.abs(capture_rot-capture_ref)>1d-10.or.&
+    maxval(abs(metric_cw-matmul(metric_cw_ref,rotation)))>1d-9.or.&
+    maxval(abs(metric_cp-matmul(metric_cp_ref,rotation)))>1d-9)call MPI_Abort(MPI_COMM_WORLD,2021,ierr)
+  metric_bw=metric_bw_ref;metric_bp=metric_bp_ref
   metric_bw(:,2)=metric_bw(:,1);metric_bp(:,2)=metric_bp(:,1)
   call initialize_dg_wpw_metric_projected_occupied(ctx,MPI_COMM_WORLD,apply_s,global_gram,1,1,2,&
-    1d-12,64,metric_bw,metric_bp,metric_cw,metric_cp,metric_residual,projection_rank,&
-    projection_orth,info)
+    1d-12,64,metric_diagonal_w,metric_diagonal_p,metric_bw,metric_bp,metric_cw,metric_cp,&
+    metric_residual,metric_rhs_residuals,metric_rhs_residual_history,metric_iterations,metric_diagonal_spread,&
+    projection_rank,projection_orth,info)
   if(info==0.or.projection_rank>=2)call MPI_Abort(MPI_COMM_WORLD,203,ierr)
   call apply_s(ctx,metric_w,metric_p,metric_bw,metric_bp,info)
   if(ctx%rank==1)metric_bp(1,1)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,8)
   call initialize_dg_wpw_metric_projected_occupied(ctx,MPI_COMM_WORLD,apply_s,global_gram,1,1,2,&
-    1d-12,64,metric_bw,metric_bp,metric_cw,metric_cp,metric_residual,projection_rank,&
-    projection_orth,info)
+    1d-12,64,metric_diagonal_w,metric_diagonal_p,metric_bw,metric_bp,metric_cw,metric_cp,&
+    metric_residual,metric_rhs_residuals,metric_rhs_residual_history,metric_iterations,metric_diagonal_spread,&
+    projection_rank,projection_orth,info)
   if(info==0)call MPI_Abort(MPI_COMM_WORLD,204,ierr)
+  call apply_s(ctx,metric_w,metric_p,metric_bw,metric_bp,info)
+  if(ctx%rank==1)metric_diagonal_p(1)=0d0
+  call solve_dg_wpw_metric_projection(ctx,MPI_COMM_WORLD,apply_s,global_gram,1,1,2,&
+    1d-12,64,metric_diagonal_w,metric_diagonal_p,metric_bw,metric_bp,metric_cw,metric_cp,&
+    metric_residual,metric_rhs_residuals,metric_rhs_residual_history,metric_iterations,metric_diagonal_spread,info)
+  if(info==0)call MPI_Abort(MPI_COMM_WORLD,205,ierr)
   ctx%metric_coupled=.false.
   if(ctx%rank==0)then;ctx%first=1;ctx%nlocal=2;else;ctx%first=3;ctx%nlocal=1;endif
   nlocal=ctx%nlocal;allocate(qw(0,2),qp(nlocal,2));qp=(0d0,0d0)
@@ -80,14 +113,16 @@ program test_dg_wpw_matrix_free_scf_mpi
   call initialize_dg_wpw_projected_occupied(ctx,MPI_COMM_WORLD,apply_s,global_gram,0,nlocal,&
     1,1d-12,qw(:,1:1),projected_rot(:,1:1),projection_rank,projection_orth,info)
   if(info/=0)call MPI_Abort(MPI_COMM_WORLD,7,ierr)
+  allocate(qocc_before(nlocal,1));qocc_before=projected_rot(:,1:1)
   call complete_dg_wpw_projected_subspace(ctx,MPI_COMM_WORLD,apply_s,global_gram,0,nlocal,&
     1,2,1d-12,qw,projected_rot,projection_rank,projection_orth,info)
-  if(info/=0.or.projection_rank/=2.or.projection_orth>1d-10)call MPI_Abort(MPI_COMM_WORLD,8,ierr)
+  if(info/=0.or.projection_rank/=2.or.projection_orth>1d-10.or.&
+    maxval(abs(projected_rot(:,1:1)-qocc_before))>1d-12)call MPI_Abort(MPI_COMM_WORLD,8,ierr)
   call apply_s(ctx,qw,projected_rot,qw,srot,info);if(info/=0)call MPI_Abort(MPI_COMM_WORLD,9,ierr)
   call global_gram(projected_rot,srot,nlocal,2,2,overlap_occ,info)
   overlap_occ(1,1)=overlap_occ(1,1)-1;overlap_occ(2,2)=overlap_occ(2,2)-1
   if(info/=0.or.maxval(abs(overlap_occ))>1d-10)call MPI_Abort(MPI_COMM_WORLD,91,ierr)
-  deallocate(projected_ref,projected_rot,srot)
+  deallocate(projected_ref,projected_rot,srot,qocc_before)
   call run_dg_wpw_matrix_free_scf(ctx,MPI_COMM_WORLD,apply_h,apply_s,global_gram,potential_map,0,nlocal,1,1,occ,&
     density,0.5d0,30,1d-12,0.5d0,1d-8,qw,qp,eval,result,info)
   if(info/=0.or..not.result%converged)call MPI_Abort(MPI_COMM_WORLD,10+info,ierr)
@@ -181,10 +216,12 @@ contains
     integer::mpi_info
     xlocal=(0d0,0d0);xlocal(c%rank+1,:)=xw(1,:);xlocal(c%rank+3,:)=xp(1,:)
     call MPI_Allreduce(xlocal,xglobal,4*size(xw,2),MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_COMM_WORLD,mpi_info)
-    smat=reshape([(2d0,0d0),(0.2d0,0d0),(0.3d0,0.1d0),(0.1d0,0d0),&
-      (0.2d0,0d0),(2.5d0,0d0),(0.05d0,0d0),(0.25d0,-0.1d0),&
-      (0.3d0,-0.1d0),(0.05d0,0d0),(1.8d0,0d0),(0.15d0,0d0),&
-      (0.1d0,0d0),(0.25d0,0.1d0),(0.15d0,0d0),(2.2d0,0d0)],[4,4])
+    ! W1 is an isolated Jacobi eigenvector, so RHS 1 converges in one step;
+    ! RHS 2 exercises the still-active coupled W/P block for later iterations.
+    smat=reshape([(2d0,0d0),(0d0,0d0),(0d0,0d0),(0d0,0d0),&
+      (0d0,0d0),(2.5d0,0d0),(0.05d0,0d0),(0.25d0,-0.1d0),&
+      (0d0,0d0),(0.05d0,0d0),(1.8d0,0d0),(0.15d0,0d0),&
+      (0d0,0d0),(0.25d0,0.1d0),(0.15d0,0d0),(2.2d0,0d0)],[4,4])
     xlocal=matmul(smat,xglobal)
     yw(1,:)=xlocal(c%rank+1,:);yp(1,:)=xlocal(c%rank+3,:)
     apply_info=merge(0,1,mpi_info==MPI_SUCCESS)

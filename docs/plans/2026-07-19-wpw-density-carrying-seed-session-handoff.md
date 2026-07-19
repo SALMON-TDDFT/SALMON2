@@ -101,6 +101,29 @@ rank-qualify and S-normalize c
 
 The MPI oracle must use nonzero W/P coupling so the old implementation fails.
 
+### P1: incomplete distributed overlap right-hand side
+
+`B` is owned by W/P basis-row ID, not by source fragment. Each fragment core
+must evaluate every support W/P row that is nonzero there, then route partial
+overlaps to the canonical row owner. A local fragment root may not populate
+only its locally owned rows and columns. Add a two-fragment oracle where a W
+row owned on one rank requires a nonzero overlap contribution from the other
+fragment core.
+
+Compute captured norm from the raw metric solution before occupied
+S-orthonormalization:
+
+```text
+C_raw = solve(S,B)
+captured_norm = Tr(F B^dagger C_raw)
+source_norm = Tr(F Phi_src^dagger Phi_src)
+```
+
+Here `F` contains the converged DC occupations. Do not compute this diagnostic
+with the normalized occupied block. A unitary-rotation density-invariance test
+must be restricted to equal-occupation blocks or transform the full occupation
+matrix as `F -> U^dagger F U`.
+
 ### P1: source naming and provenance
 
 The source is the direct sum of occupied DC fragment orbitals that carries the
@@ -122,17 +145,25 @@ IDs.
 - Avoid derived-type deep assignment as the only transactional mechanism.
 - Remove callback argument aliasing in the MPI projection test.
 - Test both nonzero W and P rows.
+- Report per-RHS metric residuals, detect collective stagnation, and exercise a
+  case where one RHS converges before the remaining active columns.
+- Require positive diagonal Jacobi preconditioning from owned `S` diagonal
+  entries before Si64. Report global diagonal spread and per-RHS residual
+  history; do not use a global dense fallback. Block-local preconditioning
+  requires a focused failure oracle and a separate design review.
 
 ## Findings-first review checklist
 
 Review in this order:
 
 1. **Projection mathematics:** Does the code construct both overlap blocks and
-   solve `S C=B`? Is the reported residual the equation residual?
+   route every support-row contribution to the canonical owner before solving
+   `S C=B`? Is the reported residual the equation residual for `C_raw`?
 2. **Source provenance:** Are the orbitals exactly the DC density-carrying
    fragment ensemble? Are occupations and charge consistent collectively?
 3. **Occupied projector:** Is occupied rank preserved? Is the S-projector
-   invariant under unitary rotations and extra-state completion?
+   invariant under unitary rotations and extra-state completion? Is captured
+   norm computed from `C_raw`, not the normalized block?
 4. **Frozen H0:** Can any density, potential, H0 value, cache, or ID change
    without detection?
 5. **Interface map:** Are only WW self/cross face and WP face terms scaled?
@@ -152,6 +183,9 @@ Review in this order:
 Stop and report before Si64 production if:
 
 - the metric projection needs an unbounded global dense solve;
+- any support-row overlap contribution is missing or ownership-ambiguous;
+- captured norm is not computed from the raw metric solution;
+- any metric RHS stagnates or lacks a bounded preconditioner for Si64;
 - occupied rank is lost;
 - source occupation count/charge is inconsistent;
 - frozen-state mutation is not detected collectively;

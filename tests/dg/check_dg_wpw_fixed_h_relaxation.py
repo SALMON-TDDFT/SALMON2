@@ -24,6 +24,12 @@ for token in (
     "wpw_frozen_wp_nonlocal",
     "wpw_frozen_wp_face",
     "wpw_frozen_pp_nonlocal",
+    "wpw_frozen_ww_projector_nonlocal",
+    "wpw_frozen_ww_projector_cross_value",
+    "wpw_frozen_ww_projector_cross_row_id",
+    "wpw_frozen_ww_projector_cross_col_id",
+    "wpw_frozen_callbacks_bound",
+    "wpw_frozen_operator_epoch",
     "wpw_frozen_owned_w_ids",
     "wpw_frozen_required_w_ids",
     "wpw_frozen_owned_p_ids",
@@ -61,13 +67,23 @@ assert "wpw_potential_stage_ok" in validate_body, (
     "frozen validation failures must be synchronized collectively"
 )
 
-seed_start = LCFO.index("subroutine build_wpw_projected_occupied_seed")
-seed_end = LCFO.index("end subroutine build_wpw_projected_occupied_seed", seed_start)
+seed_start = LCFO.index("subroutine build_wpw_density_carrying_fragment_seed")
+seed_end = LCFO.index("end subroutine build_wpw_density_carrying_fragment_seed", seed_start)
 seed_body = LCFO[seed_start:seed_end]
 assert "root_overlap_p" in seed_body, "density-carrying seed must accumulate a P overlap block"
 assert "wpw_volume_accumulator%p_points" in seed_body, "P overlap must use production P basis values"
-assert "initialize_dg_wpw_metric_projected_occupied" in seed_body, (
-    "density-carrying overlaps must be projected by solving S C=B"
+assert "evaluate_dg_wpw_core_w_support" in seed_body, "W overlap must include support rows on every fragment core"
+assert "reduce_dg_wpw_metric_rhs_partials" in seed_body, "W/P overlap partials must route to canonical owners"
+assert "solve_dg_wpw_metric_projection" in seed_body, "density-carrying overlaps must solve S C_raw=B"
+solve_pos = seed_body.index("call solve_dg_wpw_metric_projection")
+capture_pos = seed_body.index("wpw_projection_captured_norm=")
+normalize_pos = seed_body.index("call initialize_dg_wpw_projected_occupied", solve_pos)
+assert solve_pos < capture_pos < normalize_pos, "captured norm must use C_raw before S-orthonormalization"
+assert "wpw_occupations(iw)*real(capture(iw,iw),8)" in seed_body, (
+    "captured norm must be occupation weighted"
+)
+assert "sum(wpw_occupations*source_norm_global)" in seed_body, (
+    "captured norm must be relative to the occupation-weighted source norm"
 )
 assert "wpw_qp(:,1:wpw_nocc)=0" not in seed_body, "occupied P coefficients must not be zeroed"
 assert "density_carrying_fragment_seed" in seed_body, "seed provenance must be explicit in diagnostics"

@@ -1,11 +1,17 @@
 program test_dg_wpw_production_operator_mpi
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   use mpi
-  use dg_wpw_production_context, only: s_dg_wpw_production_context, initialize_dg_wpw_fragment_root_context
+  use dg_wpw_production_context, only: s_dg_wpw_production_context,&
+    s_dg_wpw_production_context_snapshot,initialize_dg_wpw_fragment_root_context,&
+    snapshot_dg_wpw_production_context,validate_dg_wpw_production_context_snapshot,&
+    release_dg_wpw_production_context_snapshot
   use dg_wpw_lcfo_operator_adapter,only:s_dg_wpw_lcfo_ww_components,import_dg_wpw_lcfo_ww_components,&
     publish_dg_wpw_lcfo_ww_components
   use dg_wpw_bounded_operator,only:apply_h_dg_wpw_bounded,apply_s_dg_wpw_bounded,&
-    set_dg_wpw_interface_lambda,release_dg_wpw_bounded_operator
+    set_dg_wpw_interface_lambda,release_dg_wpw_bounded_operator,&
+    s_dg_wpw_bounded_operator_snapshot,snapshot_dg_wpw_bounded_operator,&
+    validate_dg_wpw_bounded_operator_snapshot,release_dg_wpw_bounded_operator_snapshot,&
+    reduce_dg_wpw_metric_rhs_partials
   use rt_dg_wpw_trace_halo_provider, only: s_dg_wpw_trace_halo_state, prepare_dg_wpw_trace_halo
   use rt_dg_wpw_face_trace_provider, only: s_wpw_face_trace_provider
   use rt_dg_wpw_production_builder, only: build_dg_wpw_rank_local_quadrature, &
@@ -13,6 +19,8 @@ program test_dg_wpw_production_operator_mpi
     build_dg_wpw_production_operator, bind_dg_wpw_hs_callbacks,install_dg_wpw_projector_nonlocal
   implicit none
   type(s_dg_wpw_production_context) :: context
+  type(s_dg_wpw_bounded_operator_snapshot)::frozen_operator
+  type(s_dg_wpw_production_context_snapshot)::frozen_context
   type(s_dg_wpw_lcfo_ww_components)::ww_components
   type(s_wpw_face_trace_provider) :: provider
   type(s_dg_wpw_trace_halo_state),target :: halo
@@ -32,7 +40,11 @@ program test_dg_wpw_production_operator_mpi
   complex(8)::ww_nl_local(1,1),ww_nl_cross(1),wp_nl(2),pp_nl(2)
   complex(8)::saved_ww_nl_local(1,1),saved_ww_nl_cross(1),saved_wp_nl(2),saved_pp_nl(2)
   complex(8)::saved_wp_volume(2),saved_wp_total(2)
+  complex(8)::saved_h0_cache,saved_interface_cache
+  complex(8)::saved_context_value
+  integer::saved_transport_id
   complex(8)::bxw(1,1),bxp(1,1),byw(1,1),byp(1,1),bsw(1,1),bsp(1,1),bounded_local(4),bounded(4)
+  complex(8)::rhs_partial_w(2,2),rhs_partial_p(2,2),rhs_owned_w(1,2),rhs_owned_p(1,2)
   complex(8) :: wm(2,1),wplus(2,1),gwm(3,2,1),gwplus(3,2,1)
   complex(8) :: pm(2,1),pplus(2,1),gpm(3,2,1),gpplus(3,2,1)
 
@@ -108,8 +120,75 @@ program test_dg_wpw_production_operator_mpi
   call build_dg_wpw_production_operator(context,info)
   if(info/=0) error stop 15
   if(.not.context%bounded_operator%valid)error stop 151
+  rhs_partial_w=reshape([cmplx(1+rank,0d0,8),cmplx(10*(1+rank),0d0,8),&
+    cmplx(2*(1+rank),0d0,8),cmplx(20*(1+rank),0d0,8)],[2,2])
+  rhs_partial_p=cmplx(3d0,0d0,8)*rhs_partial_w
+  call reduce_dg_wpw_metric_rhs_partials(context%bounded_operator,rhs_partial_w,rhs_partial_p,&
+    rhs_owned_w,rhs_owned_p,info)
+  if(info/=0)error stop 1511
+  if(maxval(abs(rhs_owned_w(1,:)-merge([cmplx(3d0,0d0,8),cmplx(6d0,0d0,8)],&
+    [cmplx(30d0,0d0,8),cmplx(60d0,0d0,8)],rank==0)))>1d-12)error stop 1512
+  if(maxval(abs(rhs_owned_p-3d0*rhs_owned_w))>1d-12)error stop 1513
+  call snapshot_dg_wpw_bounded_operator(context%bounded_operator,frozen_operator,info)
+  if(info/=0)error stop 152
+  saved_h0_cache=context%bounded_operator%ww_h0_dense(1,1)
+  saved_interface_cache=context%bounded_operator%wp_interface_dense(1,1)
+  saved_transport_id=context%bounded_operator%owned_w_ids(1)
+  if(rank==0)context%bounded_operator%ww_h0_dense(1,1)=&
+    context%bounded_operator%ww_h0_dense(1,1)+(0.125d0,0d0)
+  call validate_dg_wpw_bounded_operator_snapshot(context%bounded_operator,frozen_operator,info)
+  if(info==0)error stop 153
+  if(rank==0)context%bounded_operator%ww_h0_dense(1,1)=saved_h0_cache
+  call validate_dg_wpw_bounded_operator_snapshot(context%bounded_operator,frozen_operator,info)
+  if(info/=0)error stop 154
+  if(rank==0)then
+    deallocate(context%bounded_operator%ww_h0_dense)
+    allocate(context%bounded_operator%ww_h0_dense(0,0))
+  endif
+  call validate_dg_wpw_bounded_operator_snapshot(context%bounded_operator,frozen_operator,info)
+  if(info==0)error stop 1541
+  if(rank==0)then
+    deallocate(context%bounded_operator%ww_h0_dense)
+    allocate(context%bounded_operator%ww_h0_dense,source=frozen_operator%ww_h0_dense)
+  endif
+  call validate_dg_wpw_bounded_operator_snapshot(context%bounded_operator,frozen_operator,info)
+  if(info/=0)error stop 1542
+  if(rank==1)context%bounded_operator%wp_interface_dense(1,1)=&
+    context%bounded_operator%wp_interface_dense(1,1)+(0.25d0,0d0)
+  call validate_dg_wpw_bounded_operator_snapshot(context%bounded_operator,frozen_operator,info)
+  if(info==0)error stop 155
+  if(rank==1)context%bounded_operator%wp_interface_dense(1,1)=saved_interface_cache
+  if(rank==0)context%bounded_operator%owned_w_ids(1)=context%bounded_operator%owned_w_ids(1)+100
+  call validate_dg_wpw_bounded_operator_snapshot(context%bounded_operator,frozen_operator,info)
+  if(info==0)error stop 156
+  if(rank==0)context%bounded_operator%owned_w_ids(1)=saved_transport_id
+  call validate_dg_wpw_bounded_operator_snapshot(context%bounded_operator,frozen_operator,info)
+  if(info/=0)error stop 157
   call bind_dg_wpw_hs_callbacks(context,info)
   if(info/=0) error stop 16
+  call snapshot_dg_wpw_production_context(context,frozen_context,info)
+  if(info/=0)error stop 158
+  saved_context_value=context%ww_projector_nonlocal(1,1)
+  if(rank==0)context%ww_projector_nonlocal(1,1)=saved_context_value+(0.375d0,0d0)
+  call validate_dg_wpw_production_context_snapshot(context,frozen_context,info)
+  if(info==0)error stop 159
+  if(rank==0)context%ww_projector_nonlocal(1,1)=saved_context_value
+  saved_context_value=context%ww_projector_cross_value(1)
+  if(rank==1)context%ww_projector_cross_value(1)=saved_context_value+(0.5d0,0d0)
+  call validate_dg_wpw_production_context_snapshot(context,frozen_context,info)
+  if(info==0)error stop 160
+  if(rank==1)context%ww_projector_cross_value(1)=saved_context_value
+  saved_context_value=context%wp_h_nonlocal(1)
+  if(rank==0)context%wp_h_nonlocal(1)=saved_context_value+(0.625d0,0d0)
+  call validate_dg_wpw_production_context_snapshot(context,frozen_context,info)
+  if(info==0)error stop 161
+  if(rank==0)context%wp_h_nonlocal(1)=saved_context_value
+  if(rank==1)context%callbacks_bound=.false.
+  call validate_dg_wpw_production_context_snapshot(context,frozen_context,info)
+  if(info==0)error stop 162
+  if(rank==1)context%callbacks_bound=.true.
+  call validate_dg_wpw_production_context_snapshot(context,frozen_context,info)
+  if(info/=0)error stop 163
   x=[(1d0,0.2d0),(-0.3d0,0.4d0),(0.7d0,-0.1d0),(-0.2d0,0.5d0)]
   call context%apply_h(x,yh_local,info); if(info/=0) error stop 17
   call context%apply_s(x,ys_local,info); if(info/=0) error stop 18
@@ -196,6 +275,8 @@ program test_dg_wpw_production_operator_mpi
   call build_dg_wpw_production_operator(context,info)
   if(info/=0.or.context%bounded_operator%layout_fingerprint==old_fingerprint)error stop 25
   if(rank==0) print '(a)','PASS two-rank rank-local production operator matches dense oracle'
+  call release_dg_wpw_bounded_operator_snapshot(frozen_operator)
+  call release_dg_wpw_production_context_snapshot(frozen_context)
   call release_dg_wpw_bounded_operator(context%bounded_operator)
   call MPI_Finalize(ierr)
 end program

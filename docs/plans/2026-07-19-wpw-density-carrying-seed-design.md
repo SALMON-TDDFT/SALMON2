@@ -33,8 +33,9 @@ The alternatives were rejected:
 
 ## Mathematical contract
 
-Let `B=(W,P)` be the distributed W+P basis and `S=B^dagger B`. For every
-occupied fragment orbital `phi_a`, construct both overlap blocks
+Let `A=(W,P)` be the distributed W+P basis, `S=A^dagger A`, and
+`Phi_src=(phi_1,...,phi_nocc)` the density-carrying source ensemble. Construct
+the distributed overlap right-hand side `B=A^dagger Phi_src` from both blocks
 
 ```text
 b_W = W^dagger phi_a
@@ -52,14 +53,54 @@ The implementation must not replace this solve with coefficient
 normalization. After the metric solve, the occupied columns are
 S-orthonormalized with rank revelation. Loss of occupied rank is fatal.
 
+### Distributed overlap assembly contract
+
+The right-hand side is distributed by basis-row ownership, not by source
+fragment ownership. Every fragment computes partial W and P overlaps on its
+owned core points for every support basis row that is nonzero there. Those
+partials are routed and summed to the canonical owner of each W/P row. A
+fragment root must not assume that its source orbitals overlap only basis rows
+owned by the same fragment.
+
+The assembly oracle must include a W row owned by one root whose overlap has a
+required nonzero contribution from the other fragment core. It must also
+include a nonzero P block. Omitting either routed contribution must make the
+oracle fail before the metric solve.
+
 Projection diagnostics are:
 
 - relative metric-equation residual `||S C-B||/||B||`;
-- captured norm `Tr(B^dagger C)` relative to the source core norm;
+- occupation-weighted captured norm `Tr(F B^dagger C_raw)` relative to the
+  occupation-weighted source core norm `Tr(F Phi_src^dagger Phi_src)`, where
+  `F=diag(f_a)` and `C_raw` is the converged solution of `S C_raw=B` before
+  any occupied S-orthonormalization;
 - occupied effective rank;
 - S-orthogonality defect;
 - occupation-derived charge;
 - S-metric projector change under an occupied unitary rotation.
+
+The captured norm and metric-equation residual are properties of `C_raw`.
+Rank and S-orthogonality are properties of the qualified occupied block after
+normalization. Diagnostics must not substitute the normalized block into the
+captured-norm formula.
+
+The unitary-rotation oracle may rotate only within equal-occupation blocks.
+For a general occupied rotation it must transform the occupation matrix as
+`F -> U^dagger F U`; rotating orbitals while leaving unequal diagonal
+occupations fixed changes the physical density and is not an invariance test.
+
+### Metric-solver qualification
+
+The distributed metric solve remains rank-local plus bounded owner/halo
+exchange. It must report per-RHS residuals as well as the block residual,
+detect nonfinite values and stagnation collectively, and fail at a fixed
+iteration cap. The first production preconditioner is positive diagonal
+Jacobi built from the owned diagonal of `S`; reject nonfinite or nonpositive
+diagonal entries collectively. Report the global diagonal spread and the
+per-RHS residual history as conditioning diagnostics. Introduce a block-local
+preconditioner only if a focused oracle proves diagonal Jacobi insufficient,
+and require a separate design review before doing so. The solver must not fall
+back to a global dense solve or all-state gather.
 
 ## Extra-state contract
 
@@ -121,7 +162,9 @@ Stop before checkpoint publication if any of the following occurs:
 
 - source occupation count or charge is inconsistent with DC provenance;
 - W or P overlap construction is incomplete or nonfinite;
+- any support-row overlap contribution is not routed to its canonical owner;
 - the metric solve fails or loses occupied rank;
+- any RHS stagnates, exceeds the iteration cap, or has a nonfinite residual;
 - projection residual or S-orthogonality exceeds the active tolerance profile;
 - any frozen value, cache, ID, or provenance record changes;
 - a fixed-H solve or continuation step is nonfinite or unconverged;

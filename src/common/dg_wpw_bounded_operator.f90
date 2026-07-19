@@ -1,5 +1,6 @@
 module dg_wpw_bounded_operator
-  use mpi,only:MPI_Allreduce,MPI_INTEGER,MPI_MAX,MPI_MIN,MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_SUCCESS
+  use mpi,only:MPI_Allreduce,MPI_INTEGER,MPI_MAX,MPI_MIN,MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_SUCCESS,&
+    MPI_COMM_NULL
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
   use dg_wpw_owner_exchange,only:s_dg_wpw_owner_schedule,initialize_dg_wpw_owner_schedule,&
     fetch_rows_from_owners,reduce_w_partial_to_owners,release_dg_wpw_owner_schedule
@@ -21,12 +22,230 @@ module dg_wpw_bounded_operator
       wp_h0_dense(:,:),wp_interface_dense(:,:),pp_h0_dense(:,:),pp_interface_dense(:,:)
     type(s_dg_wpw_owner_schedule)::w_schedule,p_schedule
   end type
+  type,public::s_dg_wpw_bounded_operator_snapshot
+    integer::operator_epoch=-1
+    integer(8)::layout_fingerprint=0
+    real(8)::interface_lambda=0d0
+    character(32)::ownership_kind='',metric_convention='',operator_convention=''
+    logical::valid=.false.
+    integer,allocatable::owned_w_ids(:),owned_p_ids(:),required_w_ids(:),required_p_ids(:)
+    integer,allocatable::ww_r(:),ww_c(:),wp_w(:),wp_p(:),pp_r(:),pp_c(:)
+    integer,allocatable::ww_ri(:),ww_ci(:),wp_wi(:),wp_pi(:),pp_ri(:),pp_ci(:)
+    complex(8),allocatable::ww_h0_dense(:,:),ww_interface_dense(:,:),&
+      wp_h0_dense(:,:),wp_interface_dense(:,:),pp_h0_dense(:,:),pp_interface_dense(:,:)
+  end type
   public::initialize_dg_wpw_bounded_operator,apply_h_dg_wpw_bounded,apply_s_dg_wpw_bounded
   public::global_gram_dg_wpw_bounded
   public::fetch_dg_wpw_support_coefficients
   public::release_dg_wpw_bounded_operator
   public::set_dg_wpw_interface_lambda
+  public::snapshot_dg_wpw_bounded_operator,validate_dg_wpw_bounded_operator_snapshot
+  public::release_dg_wpw_bounded_operator_snapshot
+  public::get_dg_wpw_owned_metric_diagonal
+  public::reduce_dg_wpw_metric_rhs_partials
 contains
+  subroutine reduce_dg_wpw_metric_rhs_partials(op,partial_w,partial_p,owned_w,owned_p,info)
+    type(s_dg_wpw_bounded_operator),intent(in)::op
+    complex(8),intent(in)::partial_w(:,:),partial_p(:,:)
+    complex(8),intent(out)::owned_w(:,:),owned_p(:,:)
+    integer,intent(out)::info
+    integer::local_bad,global_bad,ierr,w_info,p_info
+    owned_w=0;owned_p=0;info=1;local_bad=0
+    if(.not.op%valid.or.size(partial_w,1)/=size(op%required_w_ids).or.&
+      size(partial_p,1)/=size(op%required_p_ids).or.size(partial_w,2)/=size(partial_p,2).or.&
+      any(shape(owned_w)/=[size(op%owned_w_ids),size(partial_w,2)]).or.&
+      any(shape(owned_p)/=[size(op%owned_p_ids),size(partial_p,2)]).or.&
+      .not.finite2(partial_w).or..not.finite2(partial_p))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    call reduce_w_partial_to_owners(op%w_schedule,partial_w,owned_w,w_info)
+    call reduce_w_partial_to_owners(op%p_schedule,partial_p,owned_p,p_info)
+    local_bad=merge(0,1,w_info==0.and.p_info==0.and.finite2(owned_w).and.finite2(owned_p))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr==MPI_SUCCESS.and.global_bad==0)info=0
+  end subroutine reduce_dg_wpw_metric_rhs_partials
+
+  subroutine get_dg_wpw_owned_metric_diagonal(op,diagonal_w,diagonal_p,info)
+    type(s_dg_wpw_bounded_operator),intent(in)::op
+    real(8),intent(out)::diagonal_w(:),diagonal_p(:)
+    integer,intent(out)::info
+    integer::i,pos,local_bad,global_bad,ierr
+    diagonal_w=0d0;diagonal_p=0d0;local_bad=0;info=1
+    if(.not.op%valid.or.size(diagonal_w)/=size(op%owned_w_ids).or.&
+      size(diagonal_p)/=size(op%owned_p_ids))local_bad=1
+    if(local_bad==0)then
+      do i=1,size(diagonal_w)
+        pos=find_id_sorted(op%required_w_ids,op%owned_w_ids(i))
+        if(pos==0)then;local_bad=1;else;diagonal_w(i)=real(op%ww_s_dense(pos,pos),8);endif
+      enddo
+      do i=1,size(diagonal_p)
+        pos=find_id_sorted(op%required_p_ids,op%owned_p_ids(i))
+        if(pos==0)then;local_bad=1;else;diagonal_p(i)=real(op%pp_s_dense(i,pos),8);endif
+      enddo
+      if(.not.all(ieee_is_finite(diagonal_w)).or..not.all(ieee_is_finite(diagonal_p)).or.&
+        any(diagonal_w<=0d0).or.any(diagonal_p<=0d0))local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr==MPI_SUCCESS.and.global_bad==0)info=0
+  end subroutine get_dg_wpw_owned_metric_diagonal
+
+  subroutine snapshot_dg_wpw_bounded_operator(op,snapshot,info)
+    type(s_dg_wpw_bounded_operator),intent(in)::op
+    type(s_dg_wpw_bounded_operator_snapshot),intent(inout)::snapshot
+    integer,intent(out)::info
+    integer::astat,local_bad,global_bad,ierr
+    call release_dg_wpw_bounded_operator_snapshot(snapshot)
+    local_bad=merge(0,1,op%valid.and.op%w_schedule%comm/=MPI_COMM_NULL)
+    if(local_bad==0)then
+      allocate(snapshot%owned_w_ids,source=op%owned_w_ids,stat=astat);if(astat/=0)local_bad=1
+    endif
+    if(local_bad==0)then
+      allocate(snapshot%owned_p_ids,source=op%owned_p_ids,stat=astat);if(astat/=0)local_bad=1
+    endif
+    if(local_bad==0)then
+      allocate(snapshot%required_w_ids,source=op%required_w_ids,stat=astat);if(astat/=0)local_bad=1
+    endif
+    if(local_bad==0)then
+      allocate(snapshot%required_p_ids,source=op%required_p_ids,stat=astat);if(astat/=0)local_bad=1
+    endif
+    if(local_bad==0)call copy_bounded_snapshot_index_arrays(op,snapshot,local_bad)
+    if(local_bad==0)call copy_bounded_snapshot_dense_arrays(op,snapshot,local_bad)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      call release_dg_wpw_bounded_operator_snapshot(snapshot);info=1;return
+    endif
+    snapshot%operator_epoch=op%operator_epoch
+    snapshot%layout_fingerprint=op%layout_fingerprint
+    snapshot%interface_lambda=op%interface_lambda
+    snapshot%ownership_kind=op%ownership_kind
+    snapshot%metric_convention=op%metric_convention
+    snapshot%operator_convention=op%operator_convention
+    snapshot%valid=.true.;info=0
+  end subroutine snapshot_dg_wpw_bounded_operator
+
+  subroutine copy_bounded_snapshot_index_arrays(op,snapshot,info)
+    type(s_dg_wpw_bounded_operator),intent(in)::op
+    type(s_dg_wpw_bounded_operator_snapshot),intent(inout)::snapshot
+    integer,intent(inout)::info
+    integer::astat
+    allocate(snapshot%ww_r,source=op%ww_r,stat=astat);if(astat/=0)info=1
+    if(info==0)then;allocate(snapshot%ww_c,source=op%ww_c,stat=astat);if(astat/=0)info=1;endif
+    if(info==0)then;allocate(snapshot%wp_w,source=op%wp_w,stat=astat);if(astat/=0)info=1;endif
+    if(info==0)then;allocate(snapshot%wp_p,source=op%wp_p,stat=astat);if(astat/=0)info=1;endif
+    if(info==0)then;allocate(snapshot%pp_r,source=op%pp_r,stat=astat);if(astat/=0)info=1;endif
+    if(info==0)then;allocate(snapshot%pp_c,source=op%pp_c,stat=astat);if(astat/=0)info=1;endif
+    if(info==0)then;allocate(snapshot%ww_ri,source=op%ww_ri,stat=astat);if(astat/=0)info=1;endif
+    if(info==0)then;allocate(snapshot%ww_ci,source=op%ww_ci,stat=astat);if(astat/=0)info=1;endif
+    if(info==0)then;allocate(snapshot%wp_wi,source=op%wp_wi,stat=astat);if(astat/=0)info=1;endif
+    if(info==0)then;allocate(snapshot%wp_pi,source=op%wp_pi,stat=astat);if(astat/=0)info=1;endif
+    if(info==0)then;allocate(snapshot%pp_ri,source=op%pp_ri,stat=astat);if(astat/=0)info=1;endif
+    if(info==0)then;allocate(snapshot%pp_ci,source=op%pp_ci,stat=astat);if(astat/=0)info=1;endif
+  end subroutine copy_bounded_snapshot_index_arrays
+
+  subroutine copy_bounded_snapshot_dense_arrays(op,snapshot,info)
+    type(s_dg_wpw_bounded_operator),intent(in)::op
+    type(s_dg_wpw_bounded_operator_snapshot),intent(inout)::snapshot
+    integer,intent(inout)::info
+    integer::astat
+    allocate(snapshot%ww_h0_dense,source=op%ww_h0_dense,stat=astat);if(astat/=0)info=1
+    if(info==0)then
+      allocate(snapshot%ww_interface_dense,source=op%ww_interface_dense,stat=astat);if(astat/=0)info=1
+    endif
+    if(info==0)then;allocate(snapshot%wp_h0_dense,source=op%wp_h0_dense,stat=astat);if(astat/=0)info=1;endif
+    if(info==0)then
+      allocate(snapshot%wp_interface_dense,source=op%wp_interface_dense,stat=astat);if(astat/=0)info=1
+    endif
+    if(info==0)then;allocate(snapshot%pp_h0_dense,source=op%pp_h0_dense,stat=astat);if(astat/=0)info=1;endif
+    if(info==0)then
+      allocate(snapshot%pp_interface_dense,source=op%pp_interface_dense,stat=astat);if(astat/=0)info=1
+    endif
+  end subroutine copy_bounded_snapshot_dense_arrays
+
+  subroutine validate_dg_wpw_bounded_operator_snapshot(op,snapshot,info)
+    type(s_dg_wpw_bounded_operator),intent(in)::op
+    type(s_dg_wpw_bounded_operator_snapshot),intent(in)::snapshot
+    integer,intent(out)::info
+    integer::local_bad,global_bad,ierr
+    local_bad=merge(0,1,snapshot%valid.and.op%valid.and.&
+      snapshot%operator_epoch==op%operator_epoch.and.&
+      snapshot%layout_fingerprint==op%layout_fingerprint.and.&
+      snapshot%interface_lambda==op%interface_lambda.and.&
+      snapshot%ownership_kind==op%ownership_kind.and.&
+      snapshot%metric_convention==op%metric_convention.and.&
+      snapshot%operator_convention==op%operator_convention)
+    if(local_bad==0.and..not.same_i1(snapshot%owned_w_ids,op%owned_w_ids))local_bad=1
+    if(local_bad==0.and..not.same_i1(snapshot%owned_p_ids,op%owned_p_ids))local_bad=1
+    if(local_bad==0.and..not.same_i1(snapshot%required_w_ids,op%required_w_ids))local_bad=1
+    if(local_bad==0.and..not.same_i1(snapshot%required_p_ids,op%required_p_ids))local_bad=1
+    if(local_bad==0.and..not.same_snapshot_index_arrays(op,snapshot))local_bad=1
+    if(local_bad==0.and..not.same_snapshot_dense_arrays(op,snapshot))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    info=merge(0,1,ierr==MPI_SUCCESS.and.global_bad==0)
+  end subroutine validate_dg_wpw_bounded_operator_snapshot
+
+  logical function same_snapshot_index_arrays(op,snapshot)result(ok)
+    type(s_dg_wpw_bounded_operator),intent(in)::op
+    type(s_dg_wpw_bounded_operator_snapshot),intent(in)::snapshot
+    ok=same_i1(snapshot%ww_r,op%ww_r).and.same_i1(snapshot%ww_c,op%ww_c).and.&
+      same_i1(snapshot%wp_w,op%wp_w).and.same_i1(snapshot%wp_p,op%wp_p).and.&
+      same_i1(snapshot%pp_r,op%pp_r).and.same_i1(snapshot%pp_c,op%pp_c).and.&
+      same_i1(snapshot%ww_ri,op%ww_ri).and.same_i1(snapshot%ww_ci,op%ww_ci).and.&
+      same_i1(snapshot%wp_wi,op%wp_wi).and.same_i1(snapshot%wp_pi,op%wp_pi).and.&
+      same_i1(snapshot%pp_ri,op%pp_ri).and.same_i1(snapshot%pp_ci,op%pp_ci)
+  end function same_snapshot_index_arrays
+
+  logical function same_snapshot_dense_arrays(op,snapshot)result(ok)
+    type(s_dg_wpw_bounded_operator),intent(in)::op
+    type(s_dg_wpw_bounded_operator_snapshot),intent(in)::snapshot
+    ok=same_z2(snapshot%ww_h0_dense,op%ww_h0_dense).and.&
+      same_z2(snapshot%ww_interface_dense,op%ww_interface_dense).and.&
+      same_z2(snapshot%wp_h0_dense,op%wp_h0_dense).and.&
+      same_z2(snapshot%wp_interface_dense,op%wp_interface_dense).and.&
+      same_z2(snapshot%pp_h0_dense,op%pp_h0_dense).and.&
+      same_z2(snapshot%pp_interface_dense,op%pp_interface_dense)
+  end function same_snapshot_dense_arrays
+
+  logical function same_i1(left,right)result(ok)
+    integer,allocatable,intent(in)::left(:),right(:)
+    ok=allocated(left).and.allocated(right);if(.not.ok)return
+    ok=size(left)==size(right);if(.not.ok)return
+    ok=all(left==right)
+  end function same_i1
+
+  logical function same_z2(left,right)result(ok)
+    complex(8),allocatable,intent(in)::left(:,:),right(:,:)
+    ok=allocated(left).and.allocated(right);if(.not.ok)return
+    ok=all(shape(left)==shape(right));if(.not.ok)return
+    ok=all(left==right)
+  end function same_z2
+
+  subroutine release_dg_wpw_bounded_operator_snapshot(snapshot)
+    type(s_dg_wpw_bounded_operator_snapshot),intent(inout)::snapshot
+    if(allocated(snapshot%owned_w_ids))deallocate(snapshot%owned_w_ids)
+    if(allocated(snapshot%owned_p_ids))deallocate(snapshot%owned_p_ids)
+    if(allocated(snapshot%required_w_ids))deallocate(snapshot%required_w_ids)
+    if(allocated(snapshot%required_p_ids))deallocate(snapshot%required_p_ids)
+    if(allocated(snapshot%ww_r))deallocate(snapshot%ww_r)
+    if(allocated(snapshot%ww_c))deallocate(snapshot%ww_c)
+    if(allocated(snapshot%wp_w))deallocate(snapshot%wp_w)
+    if(allocated(snapshot%wp_p))deallocate(snapshot%wp_p)
+    if(allocated(snapshot%pp_r))deallocate(snapshot%pp_r)
+    if(allocated(snapshot%pp_c))deallocate(snapshot%pp_c)
+    if(allocated(snapshot%ww_ri))deallocate(snapshot%ww_ri)
+    if(allocated(snapshot%ww_ci))deallocate(snapshot%ww_ci)
+    if(allocated(snapshot%wp_wi))deallocate(snapshot%wp_wi)
+    if(allocated(snapshot%wp_pi))deallocate(snapshot%wp_pi)
+    if(allocated(snapshot%pp_ri))deallocate(snapshot%pp_ri)
+    if(allocated(snapshot%pp_ci))deallocate(snapshot%pp_ci)
+    if(allocated(snapshot%ww_h0_dense))deallocate(snapshot%ww_h0_dense)
+    if(allocated(snapshot%ww_interface_dense))deallocate(snapshot%ww_interface_dense)
+    if(allocated(snapshot%wp_h0_dense))deallocate(snapshot%wp_h0_dense)
+    if(allocated(snapshot%wp_interface_dense))deallocate(snapshot%wp_interface_dense)
+    if(allocated(snapshot%pp_h0_dense))deallocate(snapshot%pp_h0_dense)
+    if(allocated(snapshot%pp_interface_dense))deallocate(snapshot%pp_interface_dense)
+    snapshot%valid=.false.
+  end subroutine release_dg_wpw_bounded_operator_snapshot
+
   subroutine initialize_dg_wpw_bounded_operator(op,comm,epoch,fingerprint,ownership,metric,convention,&
       peers,owned_w,owned_p,required_w,required_p,ww_r,ww_c,ww_h,ww_s,wp_w,wp_p,wp_h,wp_s,&
       pp_r,pp_c,pp_h,pp_s,info,ww_h0,ww_interface,wp_h0,wp_interface,pp_h0,pp_interface)
