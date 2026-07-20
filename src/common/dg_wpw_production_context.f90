@@ -1,6 +1,7 @@
 module dg_wpw_production_context
   use,intrinsic::iso_fortran_env,only:int64
   use dg_wpw_bounded_operator,only:s_dg_wpw_bounded_operator,&
+    s_dg_wpw_fragment_block_preconditioner,&
     s_dg_wpw_bounded_operator_snapshot,snapshot_dg_wpw_bounded_operator,&
     validate_dg_wpw_bounded_operator_snapshot,release_dg_wpw_bounded_operator_snapshot
   use mpi, only: MPI_COMM_NULL, MPI_Comm_rank, MPI_Comm_size, MPI_SUCCESS,&
@@ -35,6 +36,7 @@ module dg_wpw_production_context
     integer,allocatable::owned_column_ids(:),support_column_ids(:),owned_w_ids(:),support_w_ids(:)
     integer,allocatable::support_fragment_ids(:)
     type(s_dg_wpw_bounded_operator)::bounded_operator
+    type(s_dg_wpw_fragment_block_preconditioner)::metric_block_preconditioner
     integer,allocatable::wp_w(:),wp_p(:),wp_origin(:),pp_r(:),pp_c(:),pp_origin(:)
     complex(8),allocatable::wp_h(:),wp_h_volume(:),wp_h_nonlocal(:),wp_h_face(:),wp_s(:)
     complex(8),allocatable::pp_h(:),pp_h_volume(:),pp_h_nonlocal(:),pp_s(:)
@@ -118,11 +120,14 @@ contains
     snapshot%valid=.true.;info=0
   end subroutine snapshot_dg_wpw_production_context
 
-  subroutine validate_dg_wpw_production_context_snapshot(ctx,snapshot,info)
+  subroutine validate_dg_wpw_production_context_snapshot(ctx,snapshot,info,allow_interface_lambda_change)
     type(s_dg_wpw_production_context),intent(in)::ctx
     type(s_dg_wpw_production_context_snapshot),intent(in)::snapshot
     integer,intent(out)::info
+    logical,intent(in),optional::allow_interface_lambda_change
     integer::local_bad,global_bad,ierr,operator_info
+    logical::allow_lambda
+    allow_lambda=.false.;if(present(allow_interface_lambda_change))allow_lambda=allow_interface_lambda_change
     local_bad=merge(0,1,snapshot%valid.and.ctx%comm/=MPI_COMM_NULL.and.&
       snapshot%halo_epoch==ctx%halo_epoch.and.snapshot%scan_epoch==ctx%scan_epoch.and.&
       snapshot%operator_epoch==ctx%operator_epoch.and.&
@@ -148,7 +153,7 @@ contains
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,ctx%comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;info=1;return;endif
     call validate_dg_wpw_bounded_operator_snapshot(ctx%bounded_operator,&
-      snapshot%bounded_operator,operator_info)
+      snapshot%bounded_operator,operator_info,allow_lambda)
     info=merge(0,1,operator_info==0)
   end subroutine validate_dg_wpw_production_context_snapshot
 

@@ -1,6 +1,6 @@
 module dg_wpw_bounded_operator
   use mpi,only:MPI_Allreduce,MPI_INTEGER,MPI_MAX,MPI_MIN,MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_SUCCESS,&
-    MPI_COMM_NULL
+    MPI_COMM_NULL,MPI_DOUBLE_PRECISION
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
   use dg_wpw_owner_exchange,only:s_dg_wpw_owner_schedule,initialize_dg_wpw_owner_schedule,&
     fetch_rows_from_owners,reduce_w_partial_to_owners,release_dg_wpw_owner_schedule
@@ -34,6 +34,15 @@ module dg_wpw_bounded_operator
     complex(8),allocatable::ww_h0_dense(:,:),ww_interface_dense(:,:),&
       wp_h0_dense(:,:),wp_interface_dense(:,:),pp_h0_dense(:,:),pp_interface_dense(:,:)
   end type
+  type,public::s_dg_wpw_fragment_block_preconditioner
+    integer::operator_epoch=-1,dimension=0,nw=0,np=0
+    integer(8)::layout_fingerprint=0
+    logical::valid=.false.
+    real(8)::relative_cutoff=0d0,hermitian_defect=huge(1d0),&
+      minimum_eigenvalue=0d0,maximum_eigenvalue=0d0,condition_number=huge(1d0)
+    real(8),allocatable::eigenvalues(:)
+    complex(8),allocatable::eigenvectors(:,:)
+  end type
   public::initialize_dg_wpw_bounded_operator,apply_h_dg_wpw_bounded,apply_s_dg_wpw_bounded
   public::global_gram_dg_wpw_bounded
   public::fetch_dg_wpw_support_coefficients
@@ -43,7 +52,179 @@ module dg_wpw_bounded_operator
   public::release_dg_wpw_bounded_operator_snapshot
   public::get_dg_wpw_owned_metric_diagonal
   public::reduce_dg_wpw_metric_rhs_partials
+  public::initialize_dg_wpw_fragment_block_preconditioner
+  public::apply_dg_wpw_fragment_block_preconditioner
+  public::release_dg_wpw_fragment_block_preconditioner
 contains
+  subroutine initialize_dg_wpw_fragment_block_preconditioner(op,relative_cutoff,preconditioner,info)
+    type(s_dg_wpw_bounded_operator),intent(in)::op
+    real(8),intent(in)::relative_cutoff
+    type(s_dg_wpw_fragment_block_preconditioner),intent(inout)::preconditioner
+    integer,intent(out)::info
+    type(s_dg_wpw_fragment_block_preconditioner)::candidate
+    complex(8),allocatable::block(:,:),work(:)
+    real(8),allocatable::rwork(:)
+    complex(8)::work_query(1)
+    real(8)::scale
+    integer,allocatable::wpos(:),ppos(:)
+    integer::i,j,n,astat,local_bad,global_bad,ierr,lwork,lapack_info
+    external::zheev
+
+    info=1;local_bad=0;n=0
+    if(op%w_schedule%comm==MPI_COMM_NULL)return
+    if(.not.op%valid.or..not.allocated(op%owned_w_ids).or..not.allocated(op%owned_p_ids).or.&
+      .not.allocated(op%required_w_ids).or..not.allocated(op%required_p_ids).or.&
+      .not.allocated(op%ww_s_dense).or..not.allocated(op%wp_s_dense).or.&
+      .not.allocated(op%pp_s_dense))local_bad=1
+    if(local_bad==0)n=size(op%owned_w_ids)+size(op%owned_p_ids)
+    if(n<=0.or..not.ieee_is_finite(relative_cutoff).or.relative_cutoff<=0d0.or.&
+      relative_cutoff>=1d0)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    allocate(block(n,n),wpos(size(op%owned_w_ids)),ppos(size(op%owned_p_ids)),stat=astat)
+    local_bad=merge(0,1,astat==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    do i=1,size(wpos);wpos(i)=find_id_sorted(op%required_w_ids,op%owned_w_ids(i));enddo
+    do i=1,size(ppos);ppos(i)=find_id_sorted(op%required_p_ids,op%owned_p_ids(i));enddo
+    if(any(wpos==0).or.any(ppos==0))local_bad=1
+    if(local_bad==0)then
+      block=(0d0,0d0)
+      do j=1,size(wpos)
+        do i=1,size(wpos);block(i,j)=op%ww_s_dense(wpos(i),wpos(j));enddo
+      enddo
+      do j=1,size(ppos)
+        do i=1,size(wpos)
+          block(i,size(wpos)+j)=op%wp_s_dense(wpos(i),j)
+          block(size(wpos)+j,i)=conjg(block(i,size(wpos)+j))
+        enddo
+      enddo
+      do j=1,size(ppos)
+        do i=1,size(ppos)
+          block(size(wpos)+i,size(wpos)+j)=op%pp_s_dense(i,ppos(j))
+        enddo
+      enddo
+      if(.not.finite2(block))local_bad=1
+    endif
+    if(local_bad==0)then
+      scale=max(1d-300,maxval(abs(block)))
+      candidate%hermitian_defect=maxval(abs(block-conjg(transpose(block))))/scale
+      if(.not.ieee_is_finite(candidate%hermitian_defect).or.&
+        candidate%hermitian_defect>relative_cutoff)local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    allocate(candidate%eigenvalues(n),rwork(max(1,3*n-2)),stat=astat)
+    local_bad=merge(0,1,astat==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    lwork=-1
+    call zheev('V','U',n,block,n,candidate%eigenvalues,work_query,lwork,rwork,lapack_info)
+    if(lapack_info/=0.or..not.ieee_is_finite(real(work_query(1),8)))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    lwork=max(1,int(real(work_query(1),8)));allocate(work(lwork),stat=astat)
+    local_bad=merge(0,1,astat==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    call zheev('V','U',n,block,n,candidate%eigenvalues,work,lwork,rwork,lapack_info)
+    if(lapack_info/=0.or..not.all(ieee_is_finite(candidate%eigenvalues)))local_bad=1
+    if(local_bad==0)then
+      candidate%minimum_eigenvalue=candidate%eigenvalues(1)
+      candidate%maximum_eigenvalue=candidate%eigenvalues(n)
+      if(candidate%maximum_eigenvalue<=0d0.or.candidate%minimum_eigenvalue<=&
+        relative_cutoff*candidate%maximum_eigenvalue)then
+        local_bad=1
+      else
+        candidate%condition_number=candidate%maximum_eigenvalue/candidate%minimum_eigenvalue
+      endif
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    allocate(candidate%eigenvectors(n,n),stat=astat)
+    local_bad=merge(0,1,astat==0)
+    if(local_bad==0)candidate%eigenvectors=block
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    candidate%operator_epoch=op%operator_epoch;candidate%layout_fingerprint=op%layout_fingerprint
+    candidate%dimension=n;candidate%nw=size(wpos);candidate%np=size(ppos)
+    candidate%relative_cutoff=relative_cutoff;candidate%valid=.true.
+    call move_fragment_block_preconditioner(candidate,preconditioner)
+    info=0
+  end subroutine initialize_dg_wpw_fragment_block_preconditioner
+
+  subroutine apply_dg_wpw_fragment_block_preconditioner(op,preconditioner,rw,rp,zw,zp,info)
+    type(s_dg_wpw_bounded_operator),intent(in)::op
+    type(s_dg_wpw_fragment_block_preconditioner),intent(in)::preconditioner
+    complex(8),intent(in)::rw(:,:),rp(:,:)
+    complex(8),intent(out)::zw(:,:),zp(:,:)
+    integer,intent(out)::info
+    complex(8),allocatable::rhs(:,:),spectral(:,:),solution(:,:)
+    integer::i,nrhs,astat,local_bad,global_bad,ierr
+    zw=0;zp=0;info=1;nrhs=size(rw,2);local_bad=0
+    if(op%w_schedule%comm==MPI_COMM_NULL)return
+    if(.not.op%valid.or..not.preconditioner%valid.or.&
+      preconditioner%operator_epoch/=op%operator_epoch.or.&
+      preconditioner%layout_fingerprint/=op%layout_fingerprint.or.&
+      preconditioner%nw/=size(op%owned_w_ids).or.preconditioner%np/=size(op%owned_p_ids).or.&
+      size(rp,2)/=nrhs.or.any(shape(zw)/=shape(rw)).or.any(shape(zp)/=shape(rp)).or.&
+      size(rw,1)/=preconditioner%nw.or.size(rp,1)/=preconditioner%np.or.&
+      .not.finite2(rw).or..not.finite2(rp))local_bad=1
+    if(.not.allocated(preconditioner%eigenvectors).or.&
+      .not.allocated(preconditioner%eigenvalues))local_bad=1
+    if(local_bad==0)then
+      if(any(shape(preconditioner%eigenvectors)/=[preconditioner%dimension,preconditioner%dimension]).or.&
+        size(preconditioner%eigenvalues)/=preconditioner%dimension)local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    allocate(rhs(preconditioner%dimension,nrhs),spectral(preconditioner%dimension,nrhs),&
+      solution(preconditioner%dimension,nrhs),stat=astat)
+    local_bad=merge(0,1,astat==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    rhs(1:preconditioner%nw,:)=rw
+    rhs(preconditioner%nw+1:preconditioner%dimension,:)=rp
+    spectral=matmul(conjg(transpose(preconditioner%eigenvectors)),rhs)
+    do i=1,preconditioner%dimension
+      spectral(i,:)=spectral(i,:)/preconditioner%eigenvalues(i)
+    enddo
+    solution=matmul(preconditioner%eigenvectors,spectral)
+    local_bad=merge(0,1,finite2(solution))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    zw=solution(1:preconditioner%nw,:)
+    zp=solution(preconditioner%nw+1:preconditioner%dimension,:)
+    info=0
+  end subroutine apply_dg_wpw_fragment_block_preconditioner
+
+  subroutine move_fragment_block_preconditioner(source,destination)
+    type(s_dg_wpw_fragment_block_preconditioner),intent(inout)::source,destination
+    call release_dg_wpw_fragment_block_preconditioner(destination)
+    destination%operator_epoch=source%operator_epoch
+    destination%layout_fingerprint=source%layout_fingerprint
+    destination%dimension=source%dimension;destination%nw=source%nw;destination%np=source%np
+    destination%relative_cutoff=source%relative_cutoff
+    destination%hermitian_defect=source%hermitian_defect
+    destination%minimum_eigenvalue=source%minimum_eigenvalue
+    destination%maximum_eigenvalue=source%maximum_eigenvalue
+    destination%condition_number=source%condition_number
+    call move_alloc(source%eigenvalues,destination%eigenvalues)
+    call move_alloc(source%eigenvectors,destination%eigenvectors)
+    destination%valid=source%valid;source%valid=.false.
+  end subroutine move_fragment_block_preconditioner
+
+  subroutine release_dg_wpw_fragment_block_preconditioner(preconditioner)
+    type(s_dg_wpw_fragment_block_preconditioner),intent(inout)::preconditioner
+    if(allocated(preconditioner%eigenvalues))deallocate(preconditioner%eigenvalues)
+    if(allocated(preconditioner%eigenvectors))deallocate(preconditioner%eigenvectors)
+    preconditioner%operator_epoch=-1;preconditioner%layout_fingerprint=0
+    preconditioner%dimension=0;preconditioner%nw=0;preconditioner%np=0
+    preconditioner%relative_cutoff=0d0;preconditioner%hermitian_defect=huge(1d0)
+    preconditioner%minimum_eigenvalue=0d0;preconditioner%maximum_eigenvalue=0d0
+    preconditioner%condition_number=huge(1d0);preconditioner%valid=.false.
+  end subroutine release_dg_wpw_fragment_block_preconditioner
+
   subroutine reduce_dg_wpw_metric_rhs_partials(op,partial_w,partial_p,owned_w,owned_p,info)
     type(s_dg_wpw_bounded_operator),intent(in)::op
     complex(8),intent(in)::partial_w(:,:),partial_p(:,:)
@@ -161,15 +342,18 @@ contains
     endif
   end subroutine copy_bounded_snapshot_dense_arrays
 
-  subroutine validate_dg_wpw_bounded_operator_snapshot(op,snapshot,info)
+  subroutine validate_dg_wpw_bounded_operator_snapshot(op,snapshot,info,allow_interface_lambda_change)
     type(s_dg_wpw_bounded_operator),intent(in)::op
     type(s_dg_wpw_bounded_operator_snapshot),intent(in)::snapshot
     integer,intent(out)::info
+    logical,intent(in),optional::allow_interface_lambda_change
     integer::local_bad,global_bad,ierr
+    logical::allow_lambda
+    allow_lambda=.false.;if(present(allow_interface_lambda_change))allow_lambda=allow_interface_lambda_change
     local_bad=merge(0,1,snapshot%valid.and.op%valid.and.&
       snapshot%operator_epoch==op%operator_epoch.and.&
       snapshot%layout_fingerprint==op%layout_fingerprint.and.&
-      snapshot%interface_lambda==op%interface_lambda.and.&
+      (allow_lambda.or.snapshot%interface_lambda==op%interface_lambda).and.&
       snapshot%ownership_kind==op%ownership_kind.and.&
       snapshot%metric_convention==op%metric_convention.and.&
       snapshot%operator_convention==op%operator_convention)

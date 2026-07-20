@@ -8,6 +8,7 @@ program test_dg_wpw_matrix_free_scf_mpi
   implicit none
   type::s_fixture_context
     integer::rank=0,nrank=1,first=1,nlocal=0
+    integer::metric_precondition_calls=0
     logical::bad_fixed_energy=.false.,wide_spectrum=.false.,metric_coupled=.false.
   end type
   type(s_fixture_context)::ctx
@@ -17,14 +18,15 @@ program test_dg_wpw_matrix_free_scf_mpi
   complex(8),allocatable::qw(:,:),qp(:,:)
   complex(8),allocatable::qold(:,:)
   complex(8),allocatable::qocc_before(:,:)
-  complex(8),allocatable::projected_ref(:,:),projected_rot(:,:),srot(:,:)
-  complex(8)::rotation(2,2),overlap_occ(2,2)
+  complex(8),allocatable::projected_ref(:,:),projected_rot(:,:),srot(:,:),projected_raw(:,:)
+  complex(8)::rotation(2,2),overlap_occ(2,2),normalization_transform(2,2)
   complex(8)::metric_w(1,2),metric_p(1,2),metric_bw(1,2),metric_bp(1,2),&
     metric_cw(1,2),metric_cp(1,2),metric_bw_ref(1,2),metric_bp_ref(1,2),metric_cw_ref(1,2),metric_cp_ref(1,2)
   real(8)::metric_residual,metric_rhs_residuals(2),metric_diagonal_w(1),metric_diagonal_p(1),metric_diagonal_spread
   real(8)::metric_rhs_residual_history(64,2)
   real(8)::capture_local,capture_ref,capture_rot
   integer::metric_iterations
+  logical::metric_diagnostic_continuation
   real(8)::projection_orth,projector_defect
   integer::projection_rank
   real(8)::gap,residual,orth,projector
@@ -48,6 +50,22 @@ program test_dg_wpw_matrix_free_scf_mpi
     metric_iterations<=1.or.metric_rhs_residual_history(1,1)>1d-12.or.&
     metric_rhs_residual_history(1,2)<=1d-12.or.&
     abs(metric_diagonal_spread-2.5d0/1.8d0)>1d-12)call MPI_Abort(MPI_COMM_WORLD,202,ierr)
+  metric_cw=(0d0,0d0);metric_cp=(0d0,0d0);ctx%metric_precondition_calls=0
+  call solve_dg_wpw_metric_projection(ctx,MPI_COMM_WORLD,apply_s,global_gram,1,1,2,&
+    1d-12,64,metric_diagonal_w,metric_diagonal_p,metric_bw,metric_bp,metric_cw,metric_cp,&
+    metric_residual,metric_rhs_residuals,metric_rhs_residual_history,metric_iterations,&
+    metric_diagonal_spread,info,apply_metric_preconditioner=apply_metric_diagonal)
+  if(info/=0.or.ctx%metric_precondition_calls<1.or.maxval(abs(metric_cw-metric_w))>1d-9.or.&
+    maxval(abs(metric_cp-metric_p))>1d-9)call MPI_Abort(MPI_COMM_WORLD,2021,ierr)
+  metric_cw=(0d0,0d0);metric_cp=(0d0,0d0);metric_diagnostic_continuation=.false.
+  call solve_dg_wpw_metric_projection(ctx,MPI_COMM_WORLD,apply_s,global_gram,1,1,2,&
+    1d-30,3,metric_diagonal_w,metric_diagonal_p,metric_bw,metric_bp,metric_cw,metric_cp,&
+    metric_residual,metric_rhs_residuals,metric_rhs_residual_history(1:3,:),metric_iterations,&
+    metric_diagonal_spread,info,stagnation_limit=4,allow_diagnostic_continuation=.true.,&
+    diagnostic_continuation=metric_diagnostic_continuation)
+  if(info/=0.or..not.metric_diagnostic_continuation.or.metric_iterations/=3.or.&
+    maxval(abs(metric_cw))+maxval(abs(metric_cp))<=0d0.or.maxval(metric_rhs_residuals)>=1d0)&
+    call MPI_Abort(MPI_COMM_WORLD,2022,ierr)
   metric_bw_ref=metric_bw;metric_bp_ref=metric_bp;metric_cw_ref=metric_cw;metric_cp_ref=metric_cp
   capture_local=real(sum(conjg(metric_bw_ref)*metric_cw_ref)+sum(conjg(metric_bp_ref)*metric_cp_ref),8)
   call MPI_Allreduce(capture_local,capture_ref,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
@@ -90,15 +108,17 @@ program test_dg_wpw_matrix_free_scf_mpi
     qp(i,1)=cmplx(seed1(j),0d0,8)
     qp(i,2)=cmplx(seed2(j),0d0,8)
   enddo
-  allocate(projected_ref(nlocal,2),projected_rot(nlocal,2),srot(nlocal,2))
-  projected_ref=qp
+  allocate(projected_ref(nlocal,2),projected_rot(nlocal,2),srot(nlocal,2),projected_raw(nlocal,2))
+  projected_raw=qp;projected_ref=qp
   call initialize_dg_wpw_projected_occupied(ctx,MPI_COMM_WORLD,apply_s,global_gram,0,nlocal,&
-    2,1d-12,qw,projected_ref,projection_rank,projection_orth,info)
+    2,1d-12,qw,projected_ref,projection_rank,projection_orth,info,normalization_transform)
   if(info/=0.or.projection_rank/=2.or.projection_orth>1d-10)then
     write(*,'(a,i0,2(a,i0),a,es12.4)')'projection init rank=',ctx%rank,' info=',info,&
       ' effective_rank=',projection_rank,' orth=',projection_orth
     call MPI_Abort(MPI_COMM_WORLD,3,ierr)
   endif
+  if(maxval(abs(projected_ref-matmul(projected_raw,normalization_transform)))>1d-12)&
+    call MPI_Abort(MPI_COMM_WORLD,31,ierr)
   rotation=reshape([cmplx(cos(0.37d0),0d0,8),cmplx(-sin(0.37d0),0d0,8),&
     cmplx(sin(0.37d0),0d0,8),cmplx(cos(0.37d0),0d0,8)],[2,2])
   projected_rot=matmul(qp,rotation)
@@ -232,6 +252,21 @@ contains
     local=matmul(conjg(transpose(x)),y);call MPI_Allreduce(local,g,nx*ny,MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_COMM_WORLD,mpi_info)
     gram_info=merge(0,1,mpi_info==MPI_SUCCESS)
   end subroutine
+  subroutine apply_metric_diagonal(context,rw,rp,zw,zp,apply_info)
+    class(*),intent(inout)::context
+    complex(8),intent(in)::rw(:,:),rp(:,:)
+    complex(8),intent(out)::zw(:,:),zp(:,:)
+    integer,intent(out)::apply_info
+    select type(c=>context)
+    type is(s_fixture_context)
+      zw=rw/merge(2d0,2.5d0,c%rank==0)
+      zp=rp/merge(1.8d0,2.2d0,c%rank==0)
+      c%metric_precondition_calls=c%metric_precondition_calls+1
+      apply_info=0
+    class default
+      zw=0;zp=0;apply_info=1
+    end select
+  end subroutine apply_metric_diagonal
   subroutine potential_map(context,cw,cp,f,nocc,density_in,mix,density_out,pot_res,energy,charge,map_info)
     class(*),intent(inout)::context;integer,intent(in)::nocc;complex(8),intent(in)::cw(:,:),cp(:,:)
     real(8),intent(in)::f(nocc),density_in(:),mix;real(8),intent(out)::density_out(:),pot_res,energy,charge

@@ -11,7 +11,9 @@ program test_dg_wpw_production_operator_mpi
     set_dg_wpw_interface_lambda,release_dg_wpw_bounded_operator,&
     s_dg_wpw_bounded_operator_snapshot,snapshot_dg_wpw_bounded_operator,&
     validate_dg_wpw_bounded_operator_snapshot,release_dg_wpw_bounded_operator_snapshot,&
-    reduce_dg_wpw_metric_rhs_partials
+    reduce_dg_wpw_metric_rhs_partials,s_dg_wpw_fragment_block_preconditioner,&
+    initialize_dg_wpw_fragment_block_preconditioner,apply_dg_wpw_fragment_block_preconditioner,&
+    release_dg_wpw_fragment_block_preconditioner
   use rt_dg_wpw_trace_halo_provider, only: s_dg_wpw_trace_halo_state, prepare_dg_wpw_trace_halo
   use rt_dg_wpw_face_trace_provider, only: s_wpw_face_trace_provider
   use rt_dg_wpw_production_builder, only: build_dg_wpw_rank_local_quadrature, &
@@ -20,6 +22,7 @@ program test_dg_wpw_production_operator_mpi
   implicit none
   type(s_dg_wpw_production_context) :: context
   type(s_dg_wpw_bounded_operator_snapshot)::frozen_operator
+  type(s_dg_wpw_fragment_block_preconditioner)::block_preconditioner
   type(s_dg_wpw_production_context_snapshot)::frozen_context
   type(s_dg_wpw_lcfo_ww_components)::ww_components
   type(s_wpw_face_trace_provider) :: provider
@@ -40,10 +43,13 @@ program test_dg_wpw_production_operator_mpi
   complex(8)::ww_nl_local(1,1),ww_nl_cross(1),wp_nl(2),pp_nl(2)
   complex(8)::saved_ww_nl_local(1,1),saved_ww_nl_cross(1),saved_wp_nl(2),saved_pp_nl(2)
   complex(8)::saved_wp_volume(2),saved_wp_total(2)
-  complex(8)::saved_h0_cache,saved_interface_cache
+  complex(8)::saved_h0_cache,saved_interface_cache,saved_trial_h
   complex(8)::saved_context_value
   integer::saved_transport_id
   complex(8)::bxw(1,1),bxp(1,1),byw(1,1),byp(1,1),bsw(1,1),bsp(1,1),bounded_local(4),bounded(4)
+  complex(8)::block_rhs_w(1,2),block_rhs_p(1,2),block_z_w(1,2),block_z_p(1,2),&
+    block_expected(2,2),block_solution(2,2),block_matrix(2,2),saved_block_z_w(1,2),&
+    saved_block_z_p(1,2),saved_metric_value
   complex(8)::rhs_partial_w(2,2),rhs_partial_p(2,2),rhs_owned_w(1,2),rhs_owned_p(1,2)
   complex(8) :: wm(2,1),wplus(2,1),gwm(3,2,1),gwplus(3,2,1)
   complex(8) :: pm(2,1),pplus(2,1),gpm(3,2,1),gpplus(3,2,1)
@@ -120,6 +126,35 @@ program test_dg_wpw_production_operator_mpi
   call build_dg_wpw_production_operator(context,info)
   if(info/=0) error stop 15
   if(.not.context%bounded_operator%valid)error stop 151
+  call initialize_dg_wpw_fragment_block_preconditioner(context%bounded_operator,1d-8,&
+    block_preconditioner,info)
+  if(info/=0.or..not.block_preconditioner%valid.or.block_preconditioner%dimension/=2.or.&
+    block_preconditioner%condition_number<1d0)error stop 1501
+  block_rhs_w=reshape([(1d0,0.25d0),(-0.5d0,0.2d0)],[1,2])
+  block_rhs_p=reshape([(0.3d0,-0.1d0),(0.8d0,0.4d0)],[1,2])
+  call apply_dg_wpw_fragment_block_preconditioner(context%bounded_operator,block_preconditioner,&
+    block_rhs_w,block_rhs_p,block_z_w,block_z_p,info)
+  if(info/=0)error stop 1502
+  block_matrix=0
+  block_matrix(1,1)=context%bounded_operator%ww_s_dense(rank+1,rank+1)
+  block_matrix(1,2)=context%bounded_operator%wp_s_dense(rank+1,1)
+  block_matrix(2,1)=conjg(block_matrix(1,2))
+  block_matrix(2,2)=context%bounded_operator%pp_s_dense(1,rank+1)
+  block_expected(1,:)=block_rhs_w(1,:)
+  block_expected(2,:)=block_rhs_p(1,:)
+  block_solution(1,:)=block_z_w(1,:);block_solution(2,:)=block_z_p(1,:)
+  if(maxval(abs(matmul(block_matrix,block_solution)-block_expected))>1d-11)error stop 1503
+  saved_block_z_w=block_z_w;saved_block_z_p=block_z_p
+  saved_metric_value=context%bounded_operator%ww_s_dense(rank+1,rank+1)
+  if(rank==0)context%bounded_operator%ww_s_dense(1,1)=cmplx(-1d0,0d0,8)
+  call initialize_dg_wpw_fragment_block_preconditioner(context%bounded_operator,1d-8,&
+    block_preconditioner,info)
+  if(info==0.or..not.block_preconditioner%valid)error stop 1504
+  context%bounded_operator%ww_s_dense(rank+1,rank+1)=saved_metric_value
+  call apply_dg_wpw_fragment_block_preconditioner(context%bounded_operator,block_preconditioner,&
+    block_rhs_w,block_rhs_p,block_z_w,block_z_p,info)
+  if(info/=0.or.maxval(abs(block_z_w-saved_block_z_w))>1d-13.or.&
+    maxval(abs(block_z_p-saved_block_z_p))>1d-13)error stop 1505
   rhs_partial_w=reshape([cmplx(1+rank,0d0,8),cmplx(10*(1+rank),0d0,8),&
     cmplx(2*(1+rank),0d0,8),cmplx(20*(1+rank),0d0,8)],[2,2])
   rhs_partial_p=cmplx(3d0,0d0,8)*rhs_partial_w
@@ -237,6 +272,16 @@ program test_dg_wpw_production_operator_mpi
      any(context%bounded_operator%required_w_ids/=saved_required_w).or.&
      any(context%bounded_operator%owned_p_ids/=saved_owned_p).or.&
      any(context%bounded_operator%required_p_ids/=saved_required_p))error stop 227
+  saved_h0_cache=context%bounded_operator%ww_h0_dense(1,1)
+  saved_interface_cache=context%bounded_operator%ww_interface_dense(1,1)
+  saved_trial_h=context%bounded_operator%ww_h_dense(1,1)
+  saved_transport_id=context%bounded_operator%owned_w_ids(1)
+  call set_dg_wpw_interface_lambda(context%bounded_operator,1.25d0,info)
+  if(info==0.or.context%bounded_operator%interface_lambda/=0.5d0.or.&
+    context%bounded_operator%ww_h0_dense(1,1)/=saved_h0_cache.or.&
+    context%bounded_operator%ww_interface_dense(1,1)/=saved_interface_cache.or.&
+    context%bounded_operator%ww_h_dense(1,1)/=saved_trial_h.or.&
+    context%bounded_operator%owned_w_ids(1)/=saved_transport_id)error stop 2271
   call set_dg_wpw_interface_lambda(context%bounded_operator,1d0,info)
   if(info/=0)error stop 228
   call apply_s_dg_wpw_bounded(context%bounded_operator,context%bounded_operator%operator_epoch,&

@@ -13,15 +13,93 @@ module dg_wpw_rank_local_quadrature
     complex(8),allocatable::w_points(:,:),p_points(:,:)
     complex(8),allocatable::grad_w_points(:,:,:),grad_p_points(:,:,:)
   end type
+  type,public::s_dg_wpw_core_p_accumulator
+    logical::valid=.false.,failed=.false.
+    integer::npoint=0,point_capacity=0
+    complex(8),allocatable::pp_h(:,:),pp_s(:,:)
+    integer,allocatable::grid_ids(:)
+    real(8),allocatable::potentials(:),weights(:),densities(:)
+    complex(8),allocatable::p_points(:,:),grad_p_points(:,:,:)
+  end type
   public::accumulate_dg_wpw_core_volume
   public::initialize_dg_wpw_volume_accumulator,add_dg_wpw_core_point
   public::finalize_dg_wpw_volume_accumulator
+  public::initialize_dg_wpw_core_p_accumulator,add_dg_wpw_core_p_point,&
+    finalize_dg_wpw_core_p_accumulator
   public::build_dg_wpw_rank_local_quadrature
   interface build_dg_wpw_rank_local_quadrature
     module procedure build_dg_wpw_rank_local_quadrature_batch
     module procedure build_dg_wpw_rank_local_quadrature_accumulator
   end interface
 contains
+  subroutine initialize_dg_wpw_core_p_accumulator(accumulator,npo,nps,info,point_capacity)
+    type(s_dg_wpw_core_p_accumulator),intent(out)::accumulator
+    integer,intent(in)::npo,nps
+    integer,intent(out)::info
+    integer,intent(in),optional::point_capacity
+    integer::capacity
+    info=1;capacity=0;if(present(point_capacity))capacity=point_capacity
+    if(npo<=0.or.nps<=0.or.capacity<=0)return
+    allocate(accumulator%pp_h(npo,nps),accumulator%pp_s(npo,nps),&
+      accumulator%grid_ids(capacity),accumulator%potentials(capacity),&
+      accumulator%weights(capacity),accumulator%densities(capacity),&
+      accumulator%p_points(nps,capacity),accumulator%grad_p_points(3,nps,capacity))
+    accumulator%pp_h=(0d0,0d0);accumulator%pp_s=(0d0,0d0)
+    accumulator%grid_ids=0;accumulator%potentials=0d0;accumulator%weights=0d0
+    accumulator%densities=0d0;accumulator%p_points=(0d0,0d0);accumulator%grad_p_points=(0d0,0d0)
+    accumulator%point_capacity=capacity;accumulator%npoint=0
+    accumulator%valid=.true.;accumulator%failed=.false.;info=0
+  end subroutine initialize_dg_wpw_core_p_accumulator
+
+  subroutine add_dg_wpw_core_p_point(accumulator,p_owned,grad_p_owned,p_support,grad_p_support,&
+      potential,weight,info,grid_id,density)
+    type(s_dg_wpw_core_p_accumulator),intent(inout)::accumulator
+    complex(8),intent(in)::p_owned(:),grad_p_owned(:,:),p_support(:),grad_p_support(:,:)
+    real(8),intent(in)::potential,weight
+    integer,intent(out)::info
+    integer,intent(in),optional::grid_id
+    real(8),intent(in),optional::density
+    complex(8)::overlap,hvalue
+    integer::ip,jp,pair_info,next_point,point_id
+    real(8)::point_density
+    info=1;point_density=0d0;if(present(density))point_density=density
+    if(.not.accumulator%valid.or.accumulator%failed)return
+    if(.not.ieee_is_finite(point_density).or.any(shape(grad_p_owned)/=[3,size(p_owned)]).or.&
+       any(shape(grad_p_support)/=[3,size(p_support)]).or.&
+       any(shape(accumulator%pp_h)/=[size(p_owned),size(p_support)]))then
+      accumulator%failed=.true.;return
+    endif
+    next_point=accumulator%npoint+1
+    if(next_point>accumulator%point_capacity)then;accumulator%failed=.true.;return;endif
+    do ip=1,size(p_owned);do jp=1,size(p_support)
+      call wpw_volume_weak_pair(p_owned(ip),grad_p_owned(:,ip),p_support(jp),grad_p_support(:,jp),&
+        potential,weight,overlap,hvalue,pair_info)
+      if(pair_info/=0)then;accumulator%failed=.true.;return;endif
+    enddo;enddo
+    point_id=0;if(present(grid_id))point_id=grid_id
+    accumulator%grid_ids(next_point)=point_id;accumulator%potentials(next_point)=potential
+    accumulator%weights(next_point)=weight;accumulator%densities(next_point)=point_density
+    accumulator%p_points(:,next_point)=p_support
+    accumulator%grad_p_points(:,:,next_point)=grad_p_support
+    do ip=1,size(p_owned);do jp=1,size(p_support)
+      call wpw_volume_weak_pair(p_owned(ip),grad_p_owned(:,ip),p_support(jp),grad_p_support(:,jp),&
+        potential,weight,overlap,hvalue,pair_info)
+      accumulator%pp_s(ip,jp)=accumulator%pp_s(ip,jp)+overlap
+      accumulator%pp_h(ip,jp)=accumulator%pp_h(ip,jp)+hvalue
+    enddo;enddo
+    accumulator%npoint=next_point;info=0
+  end subroutine add_dg_wpw_core_p_point
+
+  subroutine finalize_dg_wpw_core_p_accumulator(accumulator,pp_h,pp_s,info)
+    type(s_dg_wpw_core_p_accumulator),intent(in)::accumulator
+    complex(8),intent(out)::pp_h(:,:),pp_s(:,:)
+    integer,intent(out)::info
+    pp_h=(0d0,0d0);pp_s=(0d0,0d0);info=1
+    if(.not.accumulator%valid.or.accumulator%failed.or.accumulator%npoint<=0)return
+    if(any(shape(pp_h)/=shape(accumulator%pp_h)).or.any(shape(pp_s)/=shape(accumulator%pp_s)))return
+    pp_h=accumulator%pp_h;pp_s=accumulator%pp_s;info=0
+  end subroutine finalize_dg_wpw_core_p_accumulator
+
   subroutine build_dg_wpw_rank_local_quadrature_batch(comm,root,w,grad_w,p_owned,grad_p_owned,p_support,&
       grad_p_support,potential,weight,wp_h,wp_s,pp_h,pp_s,info)
     use mpi,only:MPI_Comm_rank,MPI_Comm_size,MPI_Allreduce,MPI_Reduce,MPI_INTEGER,MPI_MAX,&

@@ -1,6 +1,8 @@
 program test_dg_wpw_rank_local_quadrature
   use dg_wpw_rank_local_quadrature, only: accumulate_dg_wpw_core_volume,s_dg_wpw_volume_accumulator,&
-    initialize_dg_wpw_volume_accumulator,add_dg_wpw_core_point,finalize_dg_wpw_volume_accumulator
+    initialize_dg_wpw_volume_accumulator,add_dg_wpw_core_point,finalize_dg_wpw_volume_accumulator,&
+    s_dg_wpw_core_p_accumulator,initialize_dg_wpw_core_p_accumulator,add_dg_wpw_core_p_point,&
+    finalize_dg_wpw_core_p_accumulator
   implicit none
   integer,parameter::nw=1,npo=1,nps=2,np=2
   complex(8)::w(nw,np),gw(3,nw,np),po(npo,np),gpo(3,npo,np),ps(nps,np),gps(3,nps,np)
@@ -9,6 +11,7 @@ program test_dg_wpw_rank_local_quadrature
   real(8)::potential(np),weight(np)
   integer::info,ipoint,j
   type(s_dg_wpw_volume_accumulator)::accumulator
+  type(s_dg_wpw_core_p_accumulator)::core_p
 
   w(1,:)=[(1d0,0.2d0),(0.5d0,-0.1d0)];gw=(0d0,0d0)
   gw(1,1,:)=[(0.2d0,0.1d0),(-0.1d0,0.05d0)]
@@ -47,6 +50,18 @@ program test_dg_wpw_rank_local_quadrature
     maxval(abs(accumulator%p_points-ps))>1d-14.or.maxval(abs(accumulator%grad_w_points-gw))>1d-14.or.&
     maxval(abs(accumulator%grad_p_points-gps))>1d-14.or.any(accumulator%weights/=weight).or.&
     any(accumulator%densities/=[0.6d0,0.9d0]))error stop 12
+  call initialize_dg_wpw_core_p_accumulator(core_p,npo,nps,info,point_capacity=np)
+  if(info/=0)error stop 13
+  do ipoint=1,np
+    call add_dg_wpw_core_p_point(core_p,po(:,ipoint),gpo(:,:,ipoint),ps(:,ipoint),gps(:,:,ipoint),&
+      potential(ipoint),weight(ipoint),info,grid_id=200+ipoint,density=merge(0.6d0,0.9d0,ipoint==1))
+    if(info/=0)error stop 14
+  enddo
+  call finalize_dg_wpw_core_p_accumulator(core_p,pp_h,pp_s,info)
+  if(info/=0.or.maxval(abs(pp_h-pp_h_ref))>1d-13.or.maxval(abs(pp_s-pp_s_ref))>1d-13)error stop 15
+  if(any(core_p%grid_ids/=[201,202]).or.maxval(abs(core_p%p_points-ps))>1d-14.or.&
+    maxval(abs(core_p%grad_p_points-gps))>1d-14.or.any(core_p%weights/=weight).or.&
+    any(core_p%densities/=[0.6d0,0.9d0]))error stop 16
   call accumulate_dg_wpw_core_volume(w(:,1:1),gw(:,:,1:1),po,gpo,ps,gps,potential,weight,&
     wp_h,wp_s,pp_h,pp_s,info)
   if(info==0)error stop 4

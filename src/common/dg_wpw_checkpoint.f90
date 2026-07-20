@@ -4,13 +4,17 @@ module dg_wpw_checkpoint
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
   implicit none
   private
-  character(16),parameter::checkpoint_magic='DG_WPW_CHECKPT_V2'
+  character(17),parameter::checkpoint_magic='DG_WPW_CHECKPT_V3'
   character(16),parameter::manifest_magic='DG_WPW_MANIFEST1'
-  integer,parameter::checkpoint_version=2,max_dimension=10000000
+  integer,parameter::checkpoint_version=3,max_dimension=10000000
   type,public::s_dg_wpw_checkpoint_state
     integer::schema_version=checkpoint_version,operator_epoch=-1,n_occ=0
+    integer::fixed_h_mode=0,projection_rank=0
     integer(int64)::layout_fingerprint=0
+    integer(int64)::frozen_layout_fingerprint=0,frozen_ww_provenance_fingerprint=0
     character(32)::ownership_kind='',metric_convention='',operator_convention=''
+    character(48)::seed_provenance='',tolerance_profile=''
+    real(8)::metric_residual=0d0,captured_norm=0d0,projection_charge=0d0,final_interface_lambda=0d0
     integer,allocatable::peer_ranks(:),owned_w_ids(:),owned_p_ids(:),support_w_ids(:),support_p_ids(:)
     integer,allocatable::ww_r(:),ww_c(:),wp_w(:),wp_p(:),pp_r(:),pp_c(:)
     real(8),allocatable::eigenvalues(:),occupations(:),potential(:)
@@ -42,7 +46,10 @@ contains
     open(newunit=unit,file=tmp,access='stream',form='unformatted',status='replace',action='write',iostat=ios)
     if(ios/=0)return
     write(unit,iostat=ios)checkpoint_magic,state%schema_version,state%operator_epoch,state%n_occ,&
-      state%layout_fingerprint,state%ownership_kind,state%metric_convention,state%operator_convention,d,checksum
+      state%fixed_h_mode,state%projection_rank,state%layout_fingerprint,state%frozen_layout_fingerprint,&
+      state%frozen_ww_provenance_fingerprint,state%ownership_kind,state%metric_convention,&
+      state%operator_convention,state%seed_provenance,state%tolerance_profile,state%metric_residual,&
+      state%captured_norm,state%projection_charge,state%final_interface_lambda,d,checksum
     if(ios==0)write(unit,iostat=ios)state%peer_ranks,state%owned_w_ids,state%owned_p_ids,state%support_w_ids,state%support_p_ids,&
       state%eigenvalues,state%occupations,state%coeff_w,state%coeff_p,state%potential,&
       state%ww_r,state%ww_c,state%wp_w,state%wp_p,state%pp_r,state%pp_c,&
@@ -59,7 +66,7 @@ contains
     type(s_dg_wpw_checkpoint_state),intent(out)::state
     integer,intent(out)::info
     integer(int64),intent(in),optional::expected_fingerprint
-    character(16)::magic
+    character(17)::magic
     integer::unit,ios,d(18)
     integer(int64)::stored_checksum
     integer(int8)::trailing
@@ -67,7 +74,10 @@ contains
     open(newunit=unit,file=path,access='stream',form='unformatted',status='old',action='read',iostat=ios)
     if(ios/=0)return
     read(unit,iostat=ios)magic,state%schema_version,state%operator_epoch,state%n_occ,&
-      state%layout_fingerprint,state%ownership_kind,state%metric_convention,state%operator_convention,d,stored_checksum
+      state%fixed_h_mode,state%projection_rank,state%layout_fingerprint,state%frozen_layout_fingerprint,&
+      state%frozen_ww_provenance_fingerprint,state%ownership_kind,state%metric_convention,&
+      state%operator_convention,state%seed_provenance,state%tolerance_profile,state%metric_residual,&
+      state%captured_norm,state%projection_charge,state%final_interface_lambda,d,stored_checksum
     if(ios/=0.or.magic/=checkpoint_magic.or.state%schema_version/=checkpoint_version.or.&
        any(d<0).or.any(d>max_dimension))then;close(unit);return;endif
     if(present(expected_fingerprint))then
@@ -156,6 +166,14 @@ contains
     if(s%schema_version/=checkpoint_version.or.s%operator_epoch<=0.or.s%layout_fingerprint==0.or.&
        len_trim(s%ownership_kind)==0.or.len_trim(s%metric_convention)==0.or.&
        len_trim(s%operator_convention)==0)return
+    if(s%fixed_h_mode<0.or.s%fixed_h_mode>1)return
+    if(s%fixed_h_mode==1)then
+      if(s%projection_rank<s%n_occ.or.s%frozen_layout_fingerprint/=s%layout_fingerprint.or.&
+        s%frozen_ww_provenance_fingerprint==0.or.trim(s%seed_provenance)/='density_carrying_fragment_seed'.or.&
+        len_trim(s%tolerance_profile)==0.or..not.all(ieee_is_finite([s%metric_residual,s%captured_norm,&
+        s%projection_charge,s%final_interface_lambda])).or.s%metric_residual<0d0.or.s%captured_norm<=0d0.or.&
+        s%projection_charge<=0d0.or.s%final_interface_lambda/=1d0)return
+    endif
     if(.not.all_allocated(s))return
     call dimensions(s,d)
     if(any(d<0).or.any(d>max_dimension).or..not.dimension_relations(d,s%n_occ))return
@@ -191,9 +209,15 @@ contains
     h=1469598103934665603_int64
     call mix_i(h,int(s%schema_version,int64));call mix_i(h,int(s%operator_epoch,int64))
     call mix_i(h,int(s%n_occ,int64));call mix_i(h,s%layout_fingerprint)
+    call mix_i(h,int(s%fixed_h_mode,int64));call mix_i(h,int(s%projection_rank,int64))
+    call mix_i(h,s%frozen_layout_fingerprint);call mix_i(h,s%frozen_ww_provenance_fingerprint)
     do i=1,len(s%ownership_kind);call mix_i(h,int(iachar(s%ownership_kind(i:i)),int64));enddo
     do i=1,len(s%metric_convention);call mix_i(h,int(iachar(s%metric_convention(i:i)),int64));enddo
     do i=1,len(s%operator_convention);call mix_i(h,int(iachar(s%operator_convention(i:i)),int64));enddo
+    do i=1,len(s%seed_provenance);call mix_i(h,int(iachar(s%seed_provenance(i:i)),int64));enddo
+    do i=1,len(s%tolerance_profile);call mix_i(h,int(iachar(s%tolerance_profile(i:i)),int64));enddo
+    call mix_i(h,transfer(s%metric_residual,h));call mix_i(h,transfer(s%captured_norm,h))
+    call mix_i(h,transfer(s%projection_charge,h));call mix_i(h,transfer(s%final_interface_lambda,h))
     call mix_int_array(h,s%peer_ranks);call mix_int_array(h,s%owned_w_ids);call mix_int_array(h,s%owned_p_ids)
     call mix_int_array(h,s%support_w_ids);call mix_int_array(h,s%support_p_ids)
     call mix_real_array(h,s%eigenvalues);call mix_real_array(h,s%occupations);call mix_real_array(h,s%potential)

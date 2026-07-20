@@ -33,10 +33,17 @@ module dg_wpw_matrix_free_scf
       complex(8),intent(out)::zw(:,:),zp(:,:)
       integer,intent(out)::info
     end subroutine
+    subroutine dg_wpw_metric_preconditioner(context,rw,rp,zw,zp,info)
+      class(*),intent(inout)::context
+      complex(8),intent(in)::rw(:,:),rp(:,:)
+      complex(8),intent(out)::zw(:,:),zp(:,:)
+      integer,intent(out)::info
+    end subroutine
   end interface
 
   public::run_dg_wpw_matrix_free_scf,dg_wpw_scf_map
   public::run_dg_wpw_matrix_free_algebra_step,dg_wpw_preconditioner
+  public::dg_wpw_metric_preconditioner
   public::initialize_dg_wpw_deterministic_seed
   public::initialize_dg_wpw_projected_occupied
   public::complete_dg_wpw_projected_subspace
@@ -71,7 +78,8 @@ contains
 
   subroutine solve_dg_wpw_metric_projection(context,comm,apply_s,global_gram,nw,np,nrhs,&
       tolerance,max_iterations,diagonal_w,diagonal_p,bw,bp,cw,cp,relative_residual,rhs_residuals,&
-      rhs_residual_history,iterations,diagonal_spread,info)
+      rhs_residual_history,iterations,diagonal_spread,info,stagnation_limit,diagnose_recurrence,&
+      apply_metric_preconditioner,allow_diagnostic_continuation,diagnostic_continuation)
     class(*),intent(inout)::context
     integer,intent(in)::comm,nw,np,nrhs,max_iterations
     procedure(apply_s_batch)::apply_s
@@ -82,27 +90,58 @@ contains
     real(8),intent(out)::relative_residual,rhs_residuals(nrhs),rhs_residual_history(max_iterations,nrhs),&
       diagonal_spread
     integer,intent(out)::iterations,info
-    complex(8),allocatable::b(:,:),x(:,:),r(:,:),z(:,:),p(:,:),ap(:,:),gram(:,:)
+    integer,optional,intent(in)::stagnation_limit
+    logical,optional,intent(in)::diagnose_recurrence
+    procedure(dg_wpw_metric_preconditioner),optional::apply_metric_preconditioner
+    logical,optional,intent(in)::allow_diagnostic_continuation
+    logical,optional,intent(out)::diagnostic_continuation
+    complex(8),allocatable::b(:,:),x(:,:),r(:,:),z(:,:),p(:,:),ap(:,:),gram(:,:),&
+      explicit_r(:,:),diagnostic_work(:,:),diagnostic_gram(:,:),best_x(:,:)
     real(8),allocatable::rho_old(:),rho_new(:),rr(:),denom(:),rhs_norm2(:),diagonal(:),best(:)
+    real(8),allocatable::cg_alpha(:,:),cg_beta(:,:),ritz_matrix(:,:),ritz_values(:),ritz_work(:)
     logical,allocatable::active(:)
     integer,allocatable::stagnant(:)
-    real(8)::bnorm,local_min,local_max,global_min,global_max
-    integer::i,iter,astat,local_bad,global_bad,ierr,apply_info,gram_info
+    real(8)::bnorm,local_min,local_max,global_min,global_max,hermitian_defect,&
+      hermitian_scale,true_residual_max,recurrence_defect
+    integer::i,iter,astat,local_bad,global_bad,ierr,apply_info,gram_info,stagnation_window,rank
+    integer::ritz_rhs,ritz_dimension,ritz_info,ritz_lwork,near_null_count
+    real(8)::ritz_query(1),ritz_relative_min,near_null_weight
+    logical::run_recurrence_diagnostic,metric_converged,allow_diagnostic
+    external::dsyev
 
     cw=(0d0,0d0);cp=(0d0,0d0);relative_residual=huge(1d0);rhs_residuals=huge(1d0)
     rhs_residual_history=huge(1d0);diagonal_spread=huge(1d0);iterations=0;info=1
+    stagnation_window=12;if(present(stagnation_limit))stagnation_window=stagnation_limit
+    run_recurrence_diagnostic=.false.
+    metric_converged=.false.
+    allow_diagnostic=.false.;if(present(allow_diagnostic_continuation))&
+      allow_diagnostic=allow_diagnostic_continuation
+    if(present(diagnostic_continuation))diagnostic_continuation=.false.
+    if(present(diagnose_recurrence))run_recurrence_diagnostic=diagnose_recurrence
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
     local_bad=merge(0,1,nw>=0.and.np>=0.and.nw+np>0.and.nrhs>0.and.&
-      max_iterations>0.and.tolerance>0d0.and.finite_complex(bw).and.finite_complex(bp).and.&
+      max_iterations>0.and.stagnation_window>0.and.tolerance>0d0.and.finite_complex(bw).and.finite_complex(bp).and.&
       all(ieee_is_finite(diagonal_w)).and.all(ieee_is_finite(diagonal_p)).and.&
       all(diagonal_w>0d0).and.all(diagonal_p>0d0))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
     allocate(b(nw+np,nrhs),x(nw+np,nrhs),r(nw+np,nrhs),z(nw+np,nrhs),p(nw+np,nrhs),&
       ap(nw+np,nrhs),gram(nrhs,nrhs),rho_old(nrhs),rho_new(nrhs),rr(nrhs),denom(nrhs),&
-      rhs_norm2(nrhs),diagonal(nw+np),best(nrhs),active(nrhs),stagnant(nrhs),stat=astat)
+      rhs_norm2(nrhs),diagonal(nw+np),best(nrhs),active(nrhs),stagnant(nrhs),&
+      best_x(nw+np,nrhs),stat=astat)
     local_bad=merge(0,1,astat==0)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    if(run_recurrence_diagnostic)then
+      allocate(explicit_r(nw+np,nrhs),diagnostic_work(nw+np,nrhs),diagnostic_gram(nrhs,nrhs),stat=astat)
+      local_bad=merge(0,1,astat==0)
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+      allocate(cg_alpha(max_iterations,nrhs),cg_beta(max_iterations,nrhs),stat=astat)
+      local_bad=merge(0,1,astat==0);cg_alpha=0d0;cg_beta=0d0
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    endif
     diagonal(1:nw)=diagonal_w;diagonal(nw+1:nw+np)=diagonal_p
     local_min=minval(diagonal);local_max=maxval(diagonal)
     call MPI_Allreduce(local_min,global_min,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
@@ -111,7 +150,13 @@ contains
     if(ierr/=MPI_SUCCESS)return
     diagonal_spread=global_max/global_min
     b(1:nw,:)=bw;b(nw+1:nw+np,:)=bp;x=(0d0,0d0);r=b
-    do i=1,nrhs;z(:,i)=r(:,i)/diagonal;enddo
+    if(present(apply_metric_preconditioner))then
+      call apply_metric_preconditioner(context,r(1:nw,:),r(nw+1:nw+np,:),z(1:nw,:),&
+        z(nw+1:nw+np,:),apply_info)
+      if(apply_info/=0)return
+    else
+      do i=1,nrhs;z(:,i)=r(:,i)/diagonal;enddo
+    endif
     p=z
     call global_gram(b,b,nw+np,nrhs,nrhs,gram,gram_info)
     if(gram_info/=0)return
@@ -124,12 +169,16 @@ contains
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
     active=.true.;bnorm=sqrt(sum(rhs_norm2));relative_residual=1d0;rhs_residuals=1d0
-    best=1d0;stagnant=0
+    best=1d0;best_x=(0d0,0d0);stagnant=0
     do iter=1,max_iterations
       call apply_s(context,p(1:nw,:),p(nw+1:nw+np,:),ap(1:nw,:),ap(nw+1:nw+np,:),apply_info)
       if(apply_info/=0)return
       call global_gram(p,ap,nw+np,nrhs,nrhs,gram,gram_info)
       if(gram_info/=0)return
+      if(run_recurrence_diagnostic)then
+        hermitian_scale=max(1d-300,maxval(abs(gram)))
+        hermitian_defect=maxval(abs(gram-conjg(transpose(gram))))/hermitian_scale
+      endif
       do i=1,nrhs;denom(i)=real(gram(i,i),8);enddo
       local_bad=0
       do i=1,nrhs
@@ -139,6 +188,7 @@ contains
       if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
       do i=1,nrhs
         if(active(i))then
+          if(run_recurrence_diagnostic)cg_alpha(iter,i)=rho_old(i)/denom(i)
           x(:,i)=x(:,i)+(rho_old(i)/denom(i))*p(:,i)
           r(:,i)=r(:,i)-(rho_old(i)/denom(i))*ap(:,i)
         endif
@@ -148,24 +198,60 @@ contains
       do i=1,nrhs
         rr(i)=max(0d0,real(gram(i,i),8));rhs_residuals(i)=sqrt(rr(i)/rhs_norm2(i))
       enddo
+      if(run_recurrence_diagnostic)then
+        call apply_s(context,x(1:nw,:),x(nw+1:nw+np,:),diagnostic_work(1:nw,:),&
+          diagnostic_work(nw+1:nw+np,:),apply_info)
+        if(apply_info/=0)return
+        explicit_r=b-diagnostic_work
+        call global_gram(explicit_r,explicit_r,nw+np,nrhs,nrhs,diagnostic_gram,gram_info)
+        if(gram_info/=0)return
+        true_residual_max=0d0
+        do i=1,nrhs
+          true_residual_max=max(true_residual_max,sqrt(max(0d0,real(diagnostic_gram(i,i),8))/rhs_norm2(i)))
+        enddo
+        diagnostic_work=explicit_r-r
+        call global_gram(diagnostic_work,diagnostic_work,nw+np,nrhs,nrhs,diagnostic_gram,gram_info)
+        if(gram_info/=0)return
+        recurrence_defect=0d0
+        do i=1,nrhs
+          recurrence_defect=max(recurrence_defect,&
+            sqrt(max(0d0,real(diagnostic_gram(i,i),8))/rhs_norm2(i)))
+        enddo
+        if(rank==0)write(*,'(1x,a,i0,3(a,es12.4))')'[DG-WPW-METRIC-RECURRENCE] iter=',iter,&
+          ' recursive_max=',maxval(rhs_residuals),' explicit_max=',true_residual_max,&
+          ' recurrence_defect=',recurrence_defect
+        if(rank==0)write(*,'(1x,a,i0,a,es12.4)')'[DG-WPW-METRIC-HERMITIAN] iter=',iter,&
+          ' defect=',hermitian_defect
+      endif
       rhs_residual_history(iter,:)=rhs_residuals
       relative_residual=sqrt(sum(rr))/bnorm;iterations=iter
       if(.not.ieee_is_finite(relative_residual))return
+      do i=1,nrhs
+        if(rhs_residuals(i)<best(i))best_x(:,i)=x(:,i)
+      enddo
       if(all(rhs_residuals<=tolerance))then
-        cw=x(1:nw,:);cp=x(nw+1:nw+np,:);info=0;return
+        cw=x(1:nw,:);cp=x(nw+1:nw+np,:);info=0;metric_converged=.true.;exit
       endif
       do i=1,nrhs
         if(rhs_residuals(i)<=tolerance)then
+          if(rhs_residuals(i)<best(i))then;best(i)=rhs_residuals(i);best_x(:,i)=x(:,i);endif
           active(i)=.false.;p(:,i)=(0d0,0d0)
         else if(active(i))then
-          if(rhs_residuals(i)<best(i)*(1d0-1d-12))then;best(i)=rhs_residuals(i);stagnant(i)=0
+          if(rhs_residuals(i)<best(i)*(1d0-1d-12))then
+            best(i)=rhs_residuals(i);best_x(:,i)=x(:,i);stagnant(i)=0
           else;stagnant(i)=stagnant(i)+1;endif
         endif
       enddo
-      local_bad=merge(1,0,any(stagnant>=12))
+      local_bad=merge(1,0,any(stagnant>=stagnation_window))
       call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
       if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
-      do i=1,nrhs;z(:,i)=r(:,i)/diagonal;enddo
+      if(present(apply_metric_preconditioner))then
+        call apply_metric_preconditioner(context,r(1:nw,:),r(nw+1:nw+np,:),z(1:nw,:),&
+          z(nw+1:nw+np,:),apply_info)
+        if(apply_info/=0)return
+      else
+        do i=1,nrhs;z(:,i)=r(:,i)/diagonal;enddo
+      endif
       call global_gram(r,z,nw+np,nrhs,nrhs,gram,gram_info)
       if(gram_info/=0)return
       do i=1,nrhs;rho_new(i)=real(gram(i,i),8);enddo
@@ -176,10 +262,68 @@ contains
       call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
       if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
       do i=1,nrhs
-        if(active(i))p(:,i)=z(:,i)+(rho_new(i)/rho_old(i))*p(:,i)
+        if(active(i))then
+          if(run_recurrence_diagnostic)then
+            cg_beta(iter,i)=rho_new(i)/rho_old(i)
+            p(:,i)=z(:,i)+cg_beta(iter,i)*p(:,i)
+          else
+            p(:,i)=z(:,i)+(rho_new(i)/rho_old(i))*p(:,i)
+          endif
+        endif
       enddo
       rho_old=rho_new
     enddo
+    if(run_recurrence_diagnostic.and.iterations>0)then
+      ritz_rhs=maxloc(rhs_residuals,dim=1);ritz_dimension=iterations
+      allocate(ritz_matrix(ritz_dimension,ritz_dimension),ritz_values(ritz_dimension))
+      ritz_matrix=0d0
+      ritz_matrix(1,1)=1d0/cg_alpha(1,ritz_rhs)
+      do i=2,ritz_dimension
+        ritz_matrix(i,i)=1d0/cg_alpha(i,ritz_rhs)+&
+          cg_beta(i-1,ritz_rhs)/cg_alpha(i-1,ritz_rhs)
+        ritz_matrix(i-1,i)=sqrt(max(0d0,cg_beta(i-1,ritz_rhs)))/cg_alpha(i-1,ritz_rhs)
+        ritz_matrix(i,i-1)=ritz_matrix(i-1,i)
+      enddo
+      ritz_lwork=-1
+      call dsyev('V','U',ritz_dimension,ritz_matrix,ritz_dimension,ritz_values,ritz_query,&
+        ritz_lwork,ritz_info)
+      if(ritz_info==0)then
+        ritz_lwork=max(1,int(ritz_query(1)));allocate(ritz_work(ritz_lwork))
+        call dsyev('V','U',ritz_dimension,ritz_matrix,ritz_dimension,ritz_values,ritz_work,&
+          ritz_lwork,ritz_info)
+      endif
+      if(ritz_info==0)then
+        ritz_relative_min=ritz_values(1)/max(1d-300,ritz_values(ritz_dimension))
+        near_null_count=count(ritz_values<=tolerance*ritz_values(ritz_dimension))
+        near_null_weight=sum(ritz_matrix(1,1:near_null_count)**2)
+        if(rank==0)write(*,'(1x,a,i0,a,i0,4(a,es12.4),a,i0)')&
+          '[DG-WPW-METRIC-RITZ] rhs=',ritz_rhs,' dimension=',ritz_dimension,&
+          ' min=',ritz_values(1),' max=',ritz_values(ritz_dimension),&
+          ' ritz_relative_min=',ritz_relative_min,' near_null_weight=',near_null_weight,&
+          ' near_null_count=',near_null_count
+      else if(rank==0)then
+        write(*,'(1x,a,i0)')'[DG-WPW-METRIC-RITZ-FAIL] lapack_info=',ritz_info
+      endif
+    endif
+    if(.not.metric_converged.and.allow_diagnostic.and.iterations==max_iterations)then
+      call apply_s(context,best_x(1:nw,:),best_x(nw+1:nw+np,:),ap(1:nw,:),&
+        ap(nw+1:nw+np,:),apply_info)
+      if(apply_info/=0)return
+      r=b-ap
+      call global_gram(r,r,nw+np,nrhs,nrhs,gram,gram_info)
+      if(gram_info/=0)return
+      do i=1,nrhs
+        rhs_residuals(i)=sqrt(max(0d0,real(gram(i,i),8))/rhs_norm2(i))
+      enddo
+      relative_residual=sqrt(sum([(max(0d0,real(gram(i,i),8)),i=1,nrhs)]))/bnorm
+      local_bad=merge(0,1,finite_complex(best_x).and.all(ieee_is_finite(rhs_residuals)).and.&
+        all(rhs_residuals<1d-1).and.ieee_is_finite(relative_residual))
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+      cw=best_x(1:nw,:);cp=best_x(nw+1:nw+np,:);info=0
+      if(present(diagnostic_continuation))diagnostic_continuation=.true.
+    endif
+    if(metric_converged)info=0
   end subroutine solve_dg_wpw_metric_projection
 
   subroutine complete_dg_wpw_projected_subspace(context,comm,apply_s,global_gram,nw,np,nocc,nretain,&
@@ -221,7 +365,7 @@ contains
   end subroutine complete_dg_wpw_projected_subspace
 
   subroutine initialize_dg_wpw_projected_occupied(context,comm,apply_s,global_gram,nw,np,nocc,&
-      metric_cutoff,qw,qp,effective_rank,orthogonality,info)
+      metric_cutoff,qw,qp,effective_rank,orthogonality,info,normalization_transform)
     class(*),intent(inout)::context
     integer,intent(in)::comm,nw,np,nocc
     procedure(apply_s_batch)::apply_s
@@ -231,11 +375,13 @@ contains
     integer,intent(out)::effective_rank
     real(8),intent(out)::orthogonality
     integer,intent(out)::info
+    complex(8),optional,intent(out)::normalization_transform(nocc,nocc)
     complex(8),allocatable::q(:,:),sq(:,:),metric(:,:),inverse_sqrt(:,:),check(:,:)
     real(8)::emin,emax,condition
     integer::discarded,local_bad,global_bad,ierr,i
 
     info=1;effective_rank=0;orthogonality=huge(1d0)
+    if(present(normalization_transform))normalization_transform=(0d0,0d0)
     local_bad=merge(0,1,nw>=0.and.np>=0.and.nocc>=1.and.metric_cutoff>0d0.and.&
       finite_complex(qw).and.finite_complex(qp))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -249,6 +395,7 @@ contains
     effective_rank=nocc-discarded
     if(info/=0)return
     q=matmul(q,inverse_sqrt)
+    if(present(normalization_transform))normalization_transform=inverse_sqrt
     call apply_s(context,q(1:nw,:),q(nw+1:nw+np,:),sq(1:nw,:),sq(nw+1:nw+np,:),info)
     if(info/=0)return
     call global_gram(q,sq,nw+np,nocc,nocc,check,info);if(info/=0)return

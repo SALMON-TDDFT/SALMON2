@@ -2,7 +2,7 @@ module dg_wpw_core_w_provider
   use rt_dg_wpw_volume_halo_provider,only:s_dg_wpw_volume_halo_state,read_dg_wpw_volume_halo
   implicit none
   private
-  public::evaluate_dg_wpw_core_w_support
+  public::evaluate_dg_wpw_core_w_support,reconstruct_dg_wpw_core_w_support
 contains
   subroutine evaluate_dg_wpw_core_w_support(owned_ids,owned_values,owned_gradients,support_ids,halos,&
       grid,epoch,values,gradients,info,zero_outside_halo)
@@ -50,6 +50,31 @@ contains
     if(.not.all(finite_complex(candidate_values)).or..not.all(finite_complex(candidate_gradients)))return
     values=candidate_values;gradients=candidate_gradients;info=0
   end subroutine
+
+  subroutine reconstruct_dg_wpw_core_w_support(owned_ids,owned_values,owned_gradients,support_ids,halos,&
+      grid,epoch,coefficients,support_values,support_gradients,reconstructed,info,zero_outside_halo)
+    integer,intent(in)::owned_ids(:),support_ids(:),grid(3),epoch
+    complex(8),intent(in)::owned_values(:),owned_gradients(:,:),coefficients(:,:)
+    type(s_dg_wpw_volume_halo_state),intent(in)::halos(:)
+    complex(8),intent(inout)::support_values(:),support_gradients(:,:)
+    complex(8),intent(out)::reconstructed(:)
+    integer,intent(out)::info
+    logical,intent(in),optional::zero_outside_halo
+    complex(8),allocatable::candidate(:)
+    logical::allow_zero
+
+    reconstructed=(0d0,0d0);info=1
+    if(size(coefficients,1)/=size(support_ids).or.size(reconstructed)/=size(coefficients,2).or.&
+       .not.all(finite_complex(coefficients)))return
+    allow_zero=.false.;if(present(zero_outside_halo))allow_zero=zero_outside_halo
+    call evaluate_dg_wpw_core_w_support(owned_ids,owned_values,owned_gradients,support_ids,halos,&
+      grid,epoch,support_values,support_gradients,info,zero_outside_halo=allow_zero)
+    if(info/=0)return
+    allocate(candidate(size(reconstructed)))
+    candidate=matmul(support_values,coefficients)
+    if(.not.all(finite_complex(candidate)))then;info=1;return;endif
+    reconstructed=candidate;info=0
+  end subroutine reconstruct_dg_wpw_core_w_support
 
   logical function strictly_increasing(ids)result(ok)
     integer,intent(in)::ids(:);integer::i

@@ -39,7 +39,7 @@ contains
     integer,intent(in)::r
     integer::wid,pid
     wid=r+1;pid=3+r
-    s%schema_version=2;s%operator_epoch=4;s%layout_fingerprint=111_8+r
+    s%schema_version=3;s%operator_epoch=4;s%layout_fingerprint=111_8+r
     s%ownership_kind='fragment_root_v1';s%metric_convention='orthonormal_ww'
     s%operator_convention='windowed_kg_sipg_v1';s%n_occ=1
     s%peer_ranks=[integer::]

@@ -28,6 +28,6 @@ sources = [
     ROOT / "tests/dg/test_dg_wpw_production_operator_mpi.f90",
 ]
 cmd = [FC, "-J", str(MOD), "-I", str(MOD), "-I", str(BUILD),
-       *(str(path) for path in sources), "-o", str(EXE)]
+       *(str(path) for path in sources), "-llapack", "-lblas", "-o", str(EXE)]
 subprocess.run(cmd, cwd="/tmp", check=True)
 subprocess.run(["mpirun", "-np", "2", str(EXE)], cwd=ROOT, check=True)

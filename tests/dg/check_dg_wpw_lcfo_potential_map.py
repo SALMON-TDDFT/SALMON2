@@ -22,7 +22,9 @@ for forbidden in ('global_h(', 'global_s(', 'all_fragment_owner', 'do ifrag=1,n_
                   'mpi_allgather', 'mpi_allgatherv', 'rho_global(:)'):
   assert forbidden not in text+volume, f'forbidden production construct: {forbidden}'
 assert 'grid_id=wpw_core_global_grid_id(grid)' in lcfo, \
-  'production quadrature does not retain the unwrapped global grid ID for each core point'
+  'production quadrature does not retain its established zero-origin global grid ID convention'
+assert 'global_grid_id=wpw_core_global_grid_id(global_point-1)' in lcfo, \
+  'Wannier tail points are not converted from jxyz_tot to the core accumulator grid ID convention'
 assert 'point_capacity=wpw_local_core_point_count' in lcfo, \
   'production quadrature does not preallocate bounded local core-point storage'
 print('PASS transactional LCFO density/Hartree/LDA potential-map source contract')

@@ -10,8 +10,253 @@ module lcfo_wannier_sawf_seed
   public :: write_sawf_local_eig_amn
   public :: restrict_sawf_stabilizer_representation
   public :: build_sawf_local_band_representation
+  public :: canonicalize_sawf_wannier_center
+  public :: transform_sawf_wannier_occupation
+  public :: build_sawf_projected_wannier
+  public :: build_sawf_projected_wannier_from_overlap
+  public :: apply_sawf_projected_wannier_transform
+  public :: canonicalize_sawf_bond_identity
+  public :: build_sawf_wannier_density
+  public :: qualify_sawf_wannier_density_projection
 
 contains
+
+  subroutine canonicalize_sawf_wannier_center(center,cell_length,core_lower,core_upper,tolerance,&
+      wrapped,image,owned,info)
+    real(8),intent(in)::center(3),cell_length(3),core_lower(3),core_upper(3),tolerance
+    real(8),intent(out)::wrapped(3)
+    integer,intent(out)::image(3),info
+    logical,intent(out)::owned
+    integer::axis
+
+    info=1;wrapped=0d0;image=0;owned=.false.
+    if(any(cell_length<=0d0).or.any(core_lower<0d0).or.any(core_upper>cell_length).or.&
+        any(core_upper<=core_lower).or.tolerance<=0d0.or.&
+        .not.all(ieee_is_finite(center)).or..not.all(ieee_is_finite(cell_length)).or.&
+        .not.all(ieee_is_finite(core_lower)).or..not.all(ieee_is_finite(core_upper)).or.&
+        .not.ieee_is_finite(tolerance))return
+    do axis=1,3
+      image(axis)=floor(center(axis)/cell_length(axis))
+      wrapped(axis)=center(axis)-dble(image(axis))*cell_length(axis)
+      if(wrapped(axis)<0d0)then
+        wrapped(axis)=wrapped(axis)+cell_length(axis);image(axis)=image(axis)-1
+      endif
+      if(abs(wrapped(axis)-cell_length(axis))<=tolerance)then
+        wrapped(axis)=0d0;image(axis)=image(axis)+1
+      elseif(abs(wrapped(axis))<=tolerance)then
+        wrapped(axis)=0d0
+      endif
+      if(abs(wrapped(axis)-core_lower(axis))<=tolerance)wrapped(axis)=core_lower(axis)
+      if(abs(wrapped(axis)-core_upper(axis))<=tolerance)wrapped(axis)=core_upper(axis)
+    enddo
+    owned=all(wrapped>=core_lower.and.wrapped<core_upper)
+    info=0
+  end subroutine canonicalize_sawf_wannier_center
+
+  subroutine canonicalize_sawf_bond_identity(atom_a,atom_b,directed_image,atoms,canonical_image,info)
+    integer,intent(in)::atom_a,atom_b,directed_image(3)
+    integer,intent(out)::atoms(2),canonical_image(3),info
+    info=1;atoms=0;canonical_image=0
+    if(atom_a<=0.or.atom_b<=0.or.atom_a==atom_b)return
+    if(atom_a<atom_b)then
+      atoms=[atom_a,atom_b];canonical_image=directed_image
+    else
+      atoms=[atom_b,atom_a];canonical_image=-directed_image
+    endif
+    info=0
+  end subroutine canonicalize_sawf_bond_identity
+
+  subroutine build_sawf_wannier_density(values,occupation,weight,density,charge,info)
+    complex(8),intent(in)::values(:,:),occupation(:,:)
+    real(8),intent(in)::weight(:)
+    real(8),intent(out)::density(:),charge
+    integer,intent(out)::info
+    integer::point,nsource
+    real(8)::scale
+    complex(8)::rho
+
+    info=1;density=0d0;charge=0d0;nsource=size(values,2)
+    if(size(values,1)<=0.or.nsource<=0.or.any(shape(occupation)/=[nsource,nsource]).or.&
+        size(weight)/=size(values,1).or.size(density)/=size(values,1).or.any(weight<=0d0).or.&
+        .not.all(ieee_is_finite(real(values))).or..not.all(ieee_is_finite(aimag(values))).or.&
+        .not.all(ieee_is_finite(real(occupation))).or..not.all(ieee_is_finite(aimag(occupation))).or.&
+        .not.all(ieee_is_finite(weight)))return
+    scale=max(1d0,maxval(abs(occupation)))
+    if(maxval(abs(occupation-conjg(transpose(occupation))))>100d0*epsilon(1d0)*scale)return
+    do point=1,size(values,1)
+      rho=sum(values(point,:)*matmul(occupation,conjg(values(point,:))))
+      if(abs(aimag(rho))>100d0*epsilon(1d0)*max(1d0,abs(real(rho,8))))return
+      density(point)=real(rho,8)
+      if(density(point)<-100d0*epsilon(1d0)*scale)return
+      density(point)=max(0d0,density(point))
+    enddo
+    charge=sum(weight*density)
+    if(.not.ieee_is_finite(charge))return
+    info=0
+  end subroutine build_sawf_wannier_density
+
+  subroutine qualify_sawf_wannier_density_projection(source,projected,normalized,weight,expected_charge,&
+      captured_norm,tolerance,projection_residual,normalization_residual,charge_error,info)
+    real(8),intent(in)::source(:),projected(:),normalized(:),weight(:)
+    real(8),intent(in)::expected_charge,captured_norm,tolerance
+    real(8),intent(out)::projection_residual,normalization_residual,charge_error
+    integer,intent(out)::info
+    real(8)::source_norm,projected_norm
+
+    info=1;projection_residual=huge(1d0);normalization_residual=huge(1d0);charge_error=huge(1d0)
+    if(size(source)<=0.or.size(projected)/=size(source).or.size(normalized)/=size(source).or.&
+        size(weight)/=size(source).or.any(weight<=0d0).or.any(source<0d0).or.any(projected<0d0).or.&
+        any(normalized<0d0).or.expected_charge<=0d0.or.tolerance<=0d0.or.&
+        .not.all(ieee_is_finite(source)).or..not.all(ieee_is_finite(projected)).or.&
+        .not.all(ieee_is_finite(normalized)).or..not.all(ieee_is_finite(weight)).or.&
+        .not.all(ieee_is_finite([expected_charge,captured_norm,tolerance])))return
+    source_norm=sqrt(sum(weight*source**2));projected_norm=sqrt(sum(weight*projected**2))
+    if(source_norm<=0d0.or.projected_norm<=0d0)return
+    projection_residual=sqrt(sum(weight*(projected-source)**2))/source_norm
+    normalization_residual=sqrt(sum(weight*(normalized-projected)**2))/projected_norm
+    charge_error=abs(sum(weight*projected)-expected_charge)
+    if(max(projection_residual,max(normalization_residual,max(charge_error,&
+      abs(1d0-captured_norm))))>tolerance)return
+    info=0
+  end subroutine qualify_sawf_wannier_density_projection
+
+  subroutine transform_sawf_wannier_occupation(transform,f_source,f_normalized,info)
+    complex(8),intent(in)::transform(:,:),f_source(:,:)
+    complex(8),intent(out)::f_normalized(:,:)
+    integer,intent(out)::info
+    complex(8),allocatable::inverse(:,:),work(:)
+    integer,allocatable::pivot(:)
+    integer::n,lwork
+    external::zgetrf,zgetri
+
+    info=1;f_normalized=(0d0,0d0);n=size(transform,1)
+    if(n<=0.or.size(transform,2)/=n.or.any(shape(f_source)/=[n,n]).or.&
+        any(shape(f_normalized)/=[n,n]).or..not.all(ieee_is_finite(real(transform))).or.&
+        .not.all(ieee_is_finite(aimag(transform))).or..not.all(ieee_is_finite(real(f_source))).or.&
+        .not.all(ieee_is_finite(aimag(f_source))))return
+    allocate(inverse(n,n),pivot(n),work(1));inverse=transform
+    call zgetrf(n,n,inverse,n,pivot,info);if(info/=0)return
+    lwork=-1;call zgetri(n,inverse,n,pivot,work,lwork,info)
+    if(info/=0.or..not.ieee_is_finite(real(work(1))).or..not.ieee_is_finite(aimag(work(1))))return
+    lwork=max(1,int(real(work(1))));deallocate(work);allocate(work(lwork))
+    call zgetri(n,inverse,n,pivot,work,lwork,info);if(info/=0)return
+    f_normalized=matmul(inverse,matmul(f_source,conjg(transpose(inverse))))
+    f_normalized=0.5d0*(f_normalized+conjg(transpose(f_normalized)))
+    if(.not.all(ieee_is_finite(real(f_normalized))).or.&
+        .not.all(ieee_is_finite(aimag(f_normalized))))then;info=1;return;endif
+    info=0
+  end subroutine transform_sawf_wannier_occupation
+
+  subroutine build_sawf_projected_wannier(occupied,trial,weight,rank_cutoff,wannier,condition,info)
+    complex(8),intent(in)::occupied(:,:),trial(:,:)
+    real(8),intent(in)::weight,rank_cutoff
+    complex(8),intent(out)::wannier(:,:)
+    real(8),intent(out)::condition
+    integer,intent(out)::info
+    complex(8),allocatable::projected(:,:),gram(:,:),inverse_sqrt(:,:),work(:),identity(:,:)
+    real(8),allocatable::eigenvalue(:),rwork(:)
+    integer::npoint,noccupied,ntrial,i,j,lwork
+    external::zheev
+
+    info=1;wannier=(0d0,0d0);condition=huge(1d0)
+    npoint=size(occupied,1);noccupied=size(occupied,2);ntrial=size(trial,2)
+    if(npoint<=0.or.noccupied<ntrial.or.ntrial<=0.or.size(trial,1)/=npoint.or.&
+        any(shape(wannier)/=[npoint,ntrial]).or.weight<=0d0.or.rank_cutoff<=0d0.or.&
+        .not.ieee_is_finite(weight).or..not.ieee_is_finite(rank_cutoff).or.&
+        .not.all(ieee_is_finite(real(occupied))).or..not.all(ieee_is_finite(aimag(occupied))).or.&
+        .not.all(ieee_is_finite(real(trial))).or..not.all(ieee_is_finite(aimag(trial))))return
+    allocate(identity(noccupied,noccupied));identity=0
+    do i=1,noccupied;identity(i,i)=1;enddo
+    if(maxval(abs(weight*matmul(conjg(transpose(occupied)),occupied)-identity))>&
+        100d0*rank_cutoff)return
+    allocate(projected(npoint,ntrial),gram(ntrial,ntrial),inverse_sqrt(ntrial,ntrial),&
+      eigenvalue(ntrial),rwork(max(1,3*ntrial-2)),work(1))
+    projected=matmul(occupied,weight*matmul(conjg(transpose(occupied)),trial))
+    gram=weight*matmul(conjg(transpose(projected)),projected)
+    lwork=-1;call zheev('V','U',ntrial,gram,ntrial,eigenvalue,work,lwork,rwork,info)
+    if(info/=0.or..not.ieee_is_finite(real(work(1))))return
+    lwork=max(1,int(real(work(1))));deallocate(work);allocate(work(lwork))
+    call zheev('V','U',ntrial,gram,ntrial,eigenvalue,work,lwork,rwork,info)
+    if(info/=0.or..not.all(ieee_is_finite(eigenvalue)).or.&
+        eigenvalue(1)<=rank_cutoff*max(1d0,eigenvalue(ntrial)))then;info=1;return;endif
+    condition=eigenvalue(ntrial)/eigenvalue(1);inverse_sqrt=0
+    do j=1,ntrial;do i=1,ntrial
+      inverse_sqrt(i,j)=sum(gram(i,:)*conjg(gram(j,:))/sqrt(eigenvalue(:)))
+    enddo;enddo
+    wannier=matmul(projected,inverse_sqrt)
+    if(.not.all(ieee_is_finite(real(wannier))).or..not.all(ieee_is_finite(aimag(wannier))))then
+      info=1;return
+    endif
+    info=0
+  end subroutine build_sawf_projected_wannier
+
+  subroutine build_sawf_projected_wannier_from_overlap(occupied_values,projection_overlap,weight,&
+      rank_cutoff,wannier_values,polar_transform,condition,info)
+    complex(8),intent(in)::occupied_values(:,:),projection_overlap(:,:)
+    real(8),intent(in)::weight,rank_cutoff
+    complex(8),intent(out)::wannier_values(:,:),polar_transform(:,:)
+    real(8),intent(out)::condition
+    integer,intent(out)::info
+    complex(8),allocatable::gram(:,:),work(:)
+    real(8),allocatable::eigenvalue(:),rwork(:)
+    integer::noccupied,ntrial,i,j,lwork
+    external::zheev
+
+    info=1;wannier_values=(0d0,0d0);polar_transform=(0d0,0d0);condition=huge(1d0)
+    noccupied=size(occupied_values,2);ntrial=size(projection_overlap,2)
+    if(size(occupied_values,1)<=0.or.noccupied<=0.or.ntrial<=0.or.&
+        size(projection_overlap,1)/=noccupied.or.&
+        any(shape(wannier_values)/=[size(occupied_values,1),ntrial]).or.&
+        any(shape(polar_transform)/=[ntrial,ntrial]).or.weight<=0d0.or.rank_cutoff<=0d0.or.&
+        .not.ieee_is_finite(weight).or..not.ieee_is_finite(rank_cutoff).or.&
+        .not.all(ieee_is_finite(real(occupied_values))).or.&
+        .not.all(ieee_is_finite(aimag(occupied_values))).or.&
+        .not.all(ieee_is_finite(real(projection_overlap))).or.&
+        .not.all(ieee_is_finite(aimag(projection_overlap))))return
+    allocate(gram(ntrial,ntrial),eigenvalue(ntrial),rwork(max(1,3*ntrial-2)),work(1))
+    gram=matmul(conjg(transpose(projection_overlap)),projection_overlap)
+    lwork=-1;call zheev('V','U',ntrial,gram,ntrial,eigenvalue,work,lwork,rwork,info)
+    if(info/=0.or..not.ieee_is_finite(real(work(1))))return
+    lwork=max(1,int(real(work(1))));deallocate(work);allocate(work(lwork))
+    call zheev('V','U',ntrial,gram,ntrial,eigenvalue,work,lwork,rwork,info)
+    if(info/=0.or..not.all(ieee_is_finite(eigenvalue)).or.&
+        eigenvalue(1)<=rank_cutoff*max(1d0,eigenvalue(ntrial)))then;info=1;return;endif
+    condition=eigenvalue(ntrial)/eigenvalue(1);polar_transform=(0d0,0d0)
+    do j=1,ntrial;do i=1,ntrial
+      polar_transform(i,j)=sum(gram(i,:)*conjg(gram(j,:))/sqrt(eigenvalue(:)))
+    enddo;enddo
+    wannier_values=matmul(matmul(occupied_values,projection_overlap),polar_transform)
+    if(.not.all(ieee_is_finite(real(wannier_values))).or.&
+        .not.all(ieee_is_finite(aimag(wannier_values))))then;info=1;return;endif
+    info=0
+  end subroutine build_sawf_projected_wannier_from_overlap
+
+  subroutine apply_sawf_projected_wannier_transform(occupied_samples,projection_overlap,&
+      polar_transform,wannier_samples,info)
+    complex(8),intent(in)::occupied_samples(:,:),projection_overlap(:,:),polar_transform(:,:)
+    complex(8),intent(out)::wannier_samples(:,:)
+    integer,intent(out)::info
+    integer::noccupied,ntrial
+
+    info=1;wannier_samples=(0d0,0d0)
+    noccupied=size(occupied_samples,2);ntrial=size(projection_overlap,2)
+    if(size(occupied_samples,1)<=0.or.noccupied<=0.or.ntrial<=0.or.&
+        size(projection_overlap,1)/=noccupied.or.&
+        any(shape(polar_transform)/=[ntrial,ntrial]).or.&
+        any(shape(wannier_samples)/=[size(occupied_samples,1),ntrial]).or.&
+        .not.all(ieee_is_finite(real(occupied_samples))).or.&
+        .not.all(ieee_is_finite(aimag(occupied_samples))).or.&
+        .not.all(ieee_is_finite(real(projection_overlap))).or.&
+        .not.all(ieee_is_finite(aimag(projection_overlap))).or.&
+        .not.all(ieee_is_finite(real(polar_transform))).or.&
+        .not.all(ieee_is_finite(aimag(polar_transform))))return
+    wannier_samples=matmul(matmul(occupied_samples,projection_overlap),polar_transform)
+    if(.not.all(ieee_is_finite(real(wannier_samples))).or.&
+        .not.all(ieee_is_finite(aimag(wannier_samples))))then
+      wannier_samples=(0d0,0d0);return
+    endif
+    info=0
+  end subroutine apply_sawf_projected_wannier_transform
 
   subroutine build_sawf_local_band_representation(states,point_map,weight,tolerance,representation,ok,message)
     complex(8),intent(in)::states(:,:)

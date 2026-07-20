@@ -50,7 +50,11 @@ contains
   subroutine make_state(s)
     type(s_dg_wpw_checkpoint_state),intent(out)::s
     integer::i
-    s%schema_version=2;s%operator_epoch=7;s%layout_fingerprint=987654321_8
+    s%schema_version=3;s%operator_epoch=7;s%layout_fingerprint=987654321_8
+    s%fixed_h_mode=1;s%projection_rank=2
+    s%frozen_layout_fingerprint=s%layout_fingerprint;s%frozen_ww_provenance_fingerprint=1234567_8
+    s%seed_provenance='density_carrying_fragment_seed';s%tolerance_profile='test_profile'
+    s%metric_residual=1d-12;s%captured_norm=0.95d0;s%projection_charge=2d0;s%final_interface_lambda=1d0
     s%ownership_kind='fragment_root_v1';s%metric_convention='orthonormal_ww'
     s%operator_convention='windowed_kg_sipg_v1';s%n_occ=1
     s%peer_ranks=[integer::]
@@ -69,6 +73,12 @@ contains
     type(s_dg_wpw_checkpoint_state),intent(in)::a,b
     same_state=a%schema_version==b%schema_version.and.a%operator_epoch==b%operator_epoch.and.&
       a%layout_fingerprint==b%layout_fingerprint.and.a%n_occ==b%n_occ.and.&
+      a%fixed_h_mode==b%fixed_h_mode.and.a%projection_rank==b%projection_rank.and.&
+      a%frozen_layout_fingerprint==b%frozen_layout_fingerprint.and.&
+      a%frozen_ww_provenance_fingerprint==b%frozen_ww_provenance_fingerprint.and.&
+      a%seed_provenance==b%seed_provenance.and.a%tolerance_profile==b%tolerance_profile.and.&
+      a%metric_residual==b%metric_residual.and.a%captured_norm==b%captured_norm.and.&
+      a%projection_charge==b%projection_charge.and.a%final_interface_lambda==b%final_interface_lambda.and.&
       trim(a%ownership_kind)==trim(b%ownership_kind).and.all(a%owned_w_ids==b%owned_w_ids).and.&
       all(a%peer_ranks==b%peer_ranks).and.&
       all(a%owned_p_ids==b%owned_p_ids).and.all(a%support_w_ids==b%support_w_ids).and.&
