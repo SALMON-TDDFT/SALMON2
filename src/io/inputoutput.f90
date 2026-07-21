@@ -2920,6 +2920,7 @@ contains
     if(yn_dc=='y') then
       if(theory/='dft') stop "DC method (yn_dc=y): theory must be dft"
       if(yn_conventional_from_dcdft=='y') stop "contradiction: yn_dc=y & yn_conventional_from_dcdft=y"
+      if(iflag_atom_coor/=ntype_atom_coor_cartesian) stop "DC method (yn_dc=y): use cartesian coordinate."
       !if(temperature < 0d0) stop "DC method (yn_dc=y): temperature must be specified."
       if(num_fragment(1)*num_fragment(2)*num_fragment(3) == 0) &
       & stop "DC method (yn_dc=y): num_fragment must be specified."
@@ -2933,6 +2934,12 @@ contains
       if(yn_jm=='y') stop "DC method (yn_dc=y): yn_jm=y is not supported."
       if(base_directory /= './') stop "DC method (yn_dc=y): base_directory must be default."
       if(nproc_k/=1) stop "DC method (yn_dc=y): nproc_k must be 1 for both the total system and fragments."
+      if(write_gs_restart_data /= 'no') then
+        if (comm_is_root(nproc_id_global)) then
+          write(*,*) "WARNING(yn_dc=y): write_gs_restart_data is internally set to 'no'"
+        end if
+        write_gs_restart_data = 'no'
+      end if
     end if
 
 #ifdef USE_FFTW
