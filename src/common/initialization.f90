@@ -248,8 +248,9 @@ subroutine init_dft_system(lg,system,stencil)
   if(stencil%if_orthogonal) then
     stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
   else
-    if(nproc_rgrid(1)*nproc_rgrid(2)*nproc_rgrid(3)/=1) &
-      stop "error: nonorthogonal lattice and r-space parallelization"
+    ! nonorthogonal + r-space parallelization (nproc_rgrid>1) is supported via the two-pass
+    ! kinetic path hpsi_nonorth_rspace (df/dx,df/dy halo exchange in hamiltonian.f90) and the
+    ! diagonal-metric CG preconditioner zstencil_nonorthogonal_preconditioning_diag.
     stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*  &
                       & ( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
   end if
@@ -263,8 +264,9 @@ subroutine init_dft_system(lg,system,stencil)
   if(stencil%if_orthogonal) then
     stencil%coef_lap0_nd1 = -0.5d0*cNmat(0,1)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
   else
-    if(nproc_rgrid(1)*nproc_rgrid(2)*nproc_rgrid(3)/=1) &
-      stop "error: nonorthogonal lattice and r-space parallelization"
+    ! nonorthogonal + r-space parallelization (nproc_rgrid>1) is supported via the two-pass
+    ! kinetic path hpsi_nonorth_rspace (df/dx,df/dy halo exchange in hamiltonian.f90) and the
+    ! diagonal-metric CG preconditioner zstencil_nonorthogonal_preconditioning_diag.
     stencil%coef_lap0_nd1 = -0.5d0*cNmat(0,1)*  &
                       & ( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
   end if
@@ -1277,16 +1279,28 @@ subroutine init_nion_div(system,lg,mg,info)
 
   else !(flag_cuboid=.false.)
 
-     ! assuming r-space parallelization is not available in nonorthogonal lattice cell
-     info%nion_mg = system%nion
-     allocate( info%ia_mg(info%nion_mg) )
+     ! nonorthogonal lattice: the cuboid Cartesian domain test does not apply (skewed grid),
+     ! so partition the atoms round-robin over the r-space ranks (each atom on exactly one
+     ! rank). info%ia_mg is used only by the Ewald ion-ion sums (energy/stress/force), which
+     ! loop over the local atoms and reduce over icomm_r; the round-robin split makes that
+     ! reduction give the full sum (replicating all atoms over-counts it by nproc_rgrid).
+     info%nion_mg = 0
      do ia=1,system%nion
-        info%ia_mg(ia) = ia
+        if( mod(ia-1, info%isize_r) == info%id_r ) info%nion_mg = info%nion_mg + 1
+     enddo
+     allocate( info%ia_mg(info%nion_mg) )
+     iia = 0
+     do ia=1,system%nion
+        if( mod(ia-1, info%isize_r) == info%id_r ) then
+           iia = iia + 1
+           info%ia_mg(iia) = ia
+        endif
      enddo
 
   endif
 
-  !check
+  !check: each atom is assigned to exactly one r-space rank (cuboid: by domain; nonorthogonal:
+  ! round-robin), so the per-rank counts must sum to the total over icomm_r.
   call comm_summation(info%nion_mg, nion_total, info%icomm_r)
   if( nion_total .ne. system%nion ) stop "Error2 in dividing atom in mg domain"
 
