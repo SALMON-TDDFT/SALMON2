@@ -1,361 +1,263 @@
-# New Session Instructions and Review Points
+# 新セッション指示書・レビューポイント
 
-## Objective
+## 新セッションへの最初の指示
 
-Continue the fixed-H WPW checkpoint work from the existing dirty worktree.
-Repair Task 3 so that the initial state is a true nonorthogonal W+P projection
-of deterministic core-owned projected Wannier functions and communicated
-tails, then implement zero-interface
-relaxation and interface continuation. Do not begin long Si64 production until
-the focused implementation and review gates pass.
+次の一文から開始すること。
 
-## Workspace identity
+> この指示書と参照計画書を読み、`executing-plans` を使って occupied-W bootstrap 計画の Task 6 から開始してください。
+
+Task 1–5を最初からやり直さない。Task 5までの実装をfocused verificationで再確認し、Task 6のdensity-carrying solveとSi64 physical gateを進める。
+
+## 作業場所
 
 ```text
 worktree: /Users/otobetoshihito/SALMON-dev/SALMON2_RTDG
 branch:   codex/singlescale-vortex-observables
-HEAD:     87435fb88f8242c828753c931b2578e9dba6a47f
+HEAD:     daa982838f8972ab93c1787f46a96c6473818728
 ```
 
-This is a local worktree. The unrelated OneDrive workspace shown in some app
-environment metadata is not the worktree for this task.
+これはローカルworktreeである。Codexの環境表示に現れるOneDrive側の
+`SALMON-v.2.2.2`を今回の作業場所として使わない。
 
-## Non-negotiable constraints
+## 最初に読む文書
 
-- Preserve all existing uncommitted Task 5–10 and review-fix changes.
-- Do not use checkout, reset, clean, or destructive restoration.
-- Do not redo Tasks 0–10 from the beginning.
-- Do not commit, push, or open a PR.
-- Do not overwrite historical sample results.
-- Use dedicated directories for every run.
-- Do not proceed from a failed or provenance-ambiguous checkpoint.
-- Do not run or interpret long-time HHG.
+1. `docs/plans/2026-07-20-wpw-occupied-w-bootstrap.md`
+2. `docs/plans/2026-07-19-wpw-density-carrying-seed-design.md`
+3. `docs/plans/2026-07-19-wpw-density-carrying-seed.md`
+4. この指示書
 
-## Documents to read first
+最初の計画レビューでは、occupied-W bootstrap計画のTask 6を現在の開始点とする。
+古いdensity-carrying seed計画にもTask 5/6という番号があるため、どの文書のTask番号かを必ず明記する。
 
-1. `docs/plans/2026-07-19-wpw-density-carrying-seed-design.md`
-2. `docs/plans/2026-07-19-wpw-density-carrying-seed.md`
-3. `docs/plans/2026-07-19-wpw-fixed-hamiltonian-basis-flux-relaxation-design.md`
-4. `docs/plans/2026-07-19-wpw-fixed-hamiltonian-basis-flux-relaxation.md`
-5. The earlier Task 5–10 remediation and ownership/adapter plans listed in the
-   original session handoff.
+## dirty worktree保護
 
-## State inherited from the previous session
+現在のworktreeには、Task 5までの意図した未commit変更と未追跡の実行結果がある。
+すべてユーザー資産として保存する。
 
-Implemented and previously passing:
+- `checkout`、`reset`、`clean`、stash、破壊的復元を行わない。
+- 無関係な差分を編集・整形しない。
+- `samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/stage2d_wpw_runs/`を削除・上書きしない。
+- 新しい計算は必ず一意な新規run directoryで行う。
+- commit、push、PR作成は、ユーザーが新セッションで明示的に指示しない限り行わない。
 
-- explicit opt-in `yn_dg_wpw_fixed_h_relaxation` control;
-- fixed-H snapshot/validation route, initially fail-closed;
-- H0/interface decomposition in the bounded operator;
-- `lambda_interface` cache rebuild at λ=0, 0.5, and 1;
-- dense MPI oracle proving the interface mapping and unchanged transport IDs;
-- an S-orthonormalization helper and deterministic extra-state completion.
-
-Important: Task 3 was reopened again after the Si64 preflight. The current
-`build_wpw_density_carrying_fragment_seed` counts every occupied eigenvector in
-each buffered fragment, producing 1024 source columns instead of the required
-128, and fails collectively before projection. Replace it with the
-core-owned projected-Wannier construction, tail halo, W/P overlap assembly,
-transformed occupation matrix, and `S C=B` route in the revised Task 3.
-
-The previous session also began strengthening frozen-value snapshots. Treat
-those newest edits as unverified until compilation, focused tests, and review
-are rerun.
-
-## First commands
+開始確認:
 
 ```bash
+cd /Users/otobetoshihito/SALMON-dev/SALMON2_RTDG
 pwd
 git branch --show-current
 git rev-parse HEAD
 git status --short
 git diff --check
-cmake --build build-mpi-eigenexa -j4
+```
+
+HEADが上記と異なる場合でも即座に戻さず、履歴と差分を調べてユーザーへ報告する。
+
+## 引き継ぐ実装状態
+
+occupied-W bootstrap計画のTask 1–5は実装済みである。
+
+- W非依存のcore-grid/P bootstrap
+- deterministicなoccupied projected-Wannier descriptor、stable ID、16 W/fragment・128 W/global契約
+- descriptorから構築するW owner/support layoutとtail halo
+- tail-carrying実空間WW/WP/PP metric
+- occupied-Wのkinetic/local-potential、stable projector-channelによるcomplex nonlocal、canonical-face WW/WP項
+- dynamic local-potential refreshのoccupied-W support-tail経路
+- checkpointのstable W IDおよびWP Z support-tail routing
+- fixed-H H0/interface分離、frozen snapshot、fingerprint、rollback
+
+Task 5の無条件停止と、WPW production経路からのlegacy
+`import_wpw_lcfo_ww_components`呼出しは除去済みである。到達可能なproduction経路は
+legacy `wpw_ww_components`に依存しない。legacy helper自体はdead codeとして残るが、
+Task 6開始前の整理対象にはしない。
+
+最終コードレビューではP0–P3 findingなし。直前の修正では次を確認した。
+
+- real-space WW metricをproduction readinessとして受理する。
+- final WWのmetric/H0/interface/projectorをfingerprintする。
+- checkpoint WP Zをsupport-tailまでstable IDでrouteし、exact coverageを検査する。
+- MPI collective/reductionの順序を全rankで一致させる。
+- checkpoint provenanceはatomic publish後のoccupied-W descriptor fingerprintと
+  frozen production snapshotから取る。
+
+## 直前にPASSした検証
+
+- `python3 tests/dg/run_dg_wpw_production_operator_mpi.py`
+- `python3 tests/dg/test_dg_wpw_checkpoint_roundtrip.py`
+- `python3 tests/dg/test_dg_dc_rt_handoff.py`
+- `python3 tests/dg/check_dg_wpw_fixed_h_relaxation.py`
+- `python3 tests/dg/check_dg_wpw_checkpoint_publication.py`
+- `cmake --build build-mpi-eigenexa -j 4`
+- `git diff --check`
+
+新セッションでは少なくとも次を再実行してから物理runへ進む。
+
+```bash
 python3 tests/dg/check_dg_wpw_fixed_h_relaxation.py
-python3 tests/dg/test_dg_wpw_matrix_free_scf.py
+python3 tests/dg/check_dg_wpw_checkpoint_publication.py
+python3 tests/dg/check_dg_wpw_quadrature_assembler.py
+python3 tests/dg/run_dg_wpw_candidate_halo_mpi.py
+python3 tests/dg/run_dg_wpw_rank_local_quadrature_mpi.py
 python3 tests/dg/run_dg_wpw_production_operator_mpi.py
-python3 tests/dg/run_dg_wpw_gs_bounded_apply_mpi.py
-python3 tests/dg/check_dg_wpw_bounded_index_cache.py
+python3 tests/dg/test_dg_wpw_checkpoint_roundtrip.py
+python3 tests/dg/test_dg_dc_rt_handoff.py
+cmake --build build-mpi-eigenexa -j 4
+git diff --check
 ```
 
-If a command fails, inspect the rank-local diagnostic that first failed. Do not
-infer a method failure from only the reduced aggregate result.
+MPIテストがlocal socket制限で失敗した場合は、数値失敗と決めつけず、同じコマンドを必要な権限で再実行する。
 
-## Required corrections before proceeding
+## 次の作業: occupied-W bootstrap計画 Task 6
 
-### P1: false nonorthogonal projection
+1. density seedがbootstrap時にpublishした単一のoccupied-W descriptorを、source ensembleとW basis provenanceの双方に使うことを確認する。第二のprojected-Wannier構築や別gaugeを許さない。
+2. W/P両方のoverlapから同じcoupled metric方程式 `S C = B` を解く。
+3. metric solver未収束時のbest-iterate continuationは、既存の明示的なnonpublishable diagnostic flagの下だけで許可する。
+4. focused testsとfull MPI buildの後、過去結果を上書きしない新規directoryでSi64を実行する。
+5. physical gateを満たさなければfixed-H、checkpoint/manifest publication、RTへ進まない。
 
-Current behavior:
+このTaskでは「コード経路が到達可能」であることと「Si64で物理的に妥当」であることを区別する。
+Task 5 stopを外した後のSi64 production physical runはまだ実行していない。
+
+### 2026-07-21 Task 6実行結果
+
+Task 6のSi64 production physical runを
+`stage2d_wpw_runs/20260721_task6_realspace_fix_gate`で実行した。固定6点bufferと
+片側4点stencilから、DG項の共通value/gradient領域をcore外側2点までとし、準備済み
+fragment grid外への再帰的buffer要求は除去した。
+
+runは128 global occupied W、routed/direct capture identity、assembled/real-space
+WW/WP/PP identityを通過した。その途中で、real-space WW metricが有効なのに未allocateの
+legacy `ww_*`をbounded operatorがコピーする不具合を再現テスト付きで修正した。
+
+最終的にはpre-fixed-H physical gateでcollective stopした。主な値は
+`captured_norm=9.6927E-01`、density projection residual `1.7052E-01`、projected
+charge error `9.8323E-01`、DC-density residual `4.3791E-02`であり、設定値
+`1.0E-08`を満たさない。checkpoint/manifestはpublishされていない。したがって次は
+buffer閾値を緩和するのではなく、約3.1%のmissing occupied-subspace captureの由来を
+調査する。fixed-Hへは進まない。
+
+### 2026-07-22 B=10 image-periodization再実行結果
+
+ユーザー指定bufferを収束パラメータとして扱い、片側4点stencilに対して
+`D = 1-B+r:n+B-r`とする実装で、B=10のSi64 runを
+`stage2d_wpw_runs/20260722_task6_b10_image_periodized/run_retry.log`まで完走させた。
+同一canonical点へ写る異なるfragment-box imageは値・勾配を先に加算し、二次形式は
+加算後の場から構築した。これにより以前の`tail_route`停止を越え、128 occupied W、
+projection/Gram/chargeの代数的identityを通過した。
+
+ただしpre-fixed-H physical density gateは通過していない。B=10では
+`captured_norm=1.0000E+00`、projection residual `1.2430E-10`、projected charge
+error `1.9826E-11`である一方、DC-density residualは`9.3116E-01`だった。
+比較対象のB=6 common-source runはそれぞれ`1.0000E+00`、`7.3312E-11`、
+`3.7168E-11`、`5.0195E-01`である。source chargeもB=6の`3.2217E+01`から
+B=10の`1.0386E+01`へ低下し、post-periodization W normの最大値は
+`1.2968`から`0.75210`へ変化した。したがってbuffer増加による密度収束は確認できず、
+むしろ悪化した。runは`fixed_h_stage=density_seed`でcollective fatal stopし、
+fixed-H、checkpoint/manifest publication、RTには進んでいない。
+
+またB=10ではfragment box 32点がtotal cell 24点を越えるため、現行の
+`outer_shell_norm=0`診断は有効な収束指標になっていない。次は許容値を変更せず、
+source chargeとW normがBに強く依存するデータ経路、およびouter-shell診断の
+box>cell条件をroot-cause tracingする。
+
+## Si64 physical gate
+
+### 2026-07-22 unwrapped-P修正後のfresh buffer系列
+
+周期境界をfragment storage生成時に完了し、cyclic storageをunwrapped連続Pへ
+並べ替えてからDを作る修正後バイナリで、過去結果を上書きせずB=6/10/12を実行した。
+canonical aliasの後段加算は行っていない。
+
+- B=6: `20260722_task6_unwrapped_b6/run.log`。DC-SCFは87反復で
+  `diff=9.8498E-10`、charge 256を保った。occupied-W buffer gateは
+  `outer_shell_norm=9.3038E-01`、`outer_ratio=7.2686E-03`でcollective stop。
+- B=10: `20260722_task6_unwrapped_b10/run.log`。DC-SCFは85反復で
+  `diff=9.4464E-10`、charge 256を保った。buffer gateは
+  `outer_shell_norm=3.6267E-01`、`outer_ratio=2.8333E-03`でcollective stop。
+- B=12（初回、無効）: `20260722_task6_unwrapped_b12/run.log`。36点coverageにより
+  fragment当たり864電子となる一方、`nstate_frag=400`は800電子分しか保持できず、
+  DC-SCF 88時点で`integral(rho_tot)=236.86594`（target 256）だったため手動停止した。
+  これはbuffer実装の失敗ではなく、状態数不足を検出した診断runである。
+- B=12（修正版）: `20260722_task6_unwrapped_b12_n500/run.log`。`nstate_frag=500`へ
+  増やすとDC-SCFは88反復、`diff=8.1943E-10`で収束し、charge 256を保った。
+  buffer gateは`outer_shell_norm=1.3883E+00`、`outer_ratio=1.0846E-02`で
+  collective stopした。
+
+B=6からB=10ではouter ratioが減少したが、有効なB=12点では
+`1.0846E-02`へ再増加し、いずれも基準`1E-8`には遠い。したがってfixed-H、
+checkpoint publication、RTへは進まない。状態数不足を除去しても非単調性が残るため、
+次の問題は後段periodizationやDC chargeではなく、outer-shell normをbuffer収束の
+必須ゲートとする物理的定義と、B依存で選択されるoccupied subspace/Wannier表現である。
+
+### 2026-07-22 occupied-W spread診断
+
+Wannier90のGamma点離散per-W spread規約を実装し、Pから一つの24点canonical cellを
+選んで128個のruntime projected-Wを測定した。B=6 fresh run
+`20260722_task7_spread_b6/run.log`では全128中心が有効で、`sqrt(Omega)`は
+最小`1.26877 A`、平均`1.28540 A`、median/p90/max`1.29094 A`だった。以前の
+約`1.2 A`よりわずかに大きいが、異常な非局在化は認められない。
+
+B=10 fresh run `20260722_task7_spread_b10/run.log`はDC-SCF 85反復、
+`diff=9.4464E-10`、charge 256で収束した後、`occupied_w_link_assembly`で停止した。
+32点Pには同一canonical点の複数preimageが含まれるため、duplicate-image不一致と
+整合するが、現ログは抽出とlink組立てを同じstageにしており、失敗座標と最大差を
+まだ直接出力していない。aliasを加算も任意選択もしていない。
+したがって現時点では最局在化を実装せず、抽出/link境界を計測してB>6のfragment
+projected-W Pが物理24点周期像の同一性を満たすかを次のroot-cause対象とする。outer-shell failureを
+Wannier幅の過大さで説明する根拠は得られなかった。
+
+少なくとも以下をrank-local値とcollective aggregateの両方で確認する。
+
+- occupied Wが16/fragment、128/globalであり、stable ownerが一意である。
+- core値と隣接fragmentへ通信したWannier tailから得るW normが有限かつ妥当である。
+- routed overlapとdirect overlapのtotal/W/P captureが一致する。
+- assembled Sと実空間 `A^dagger A` のWW/WP/PP分解が一致する。
+- `captured_norm`、source/projected/normalized density、chargeが物理的な許容範囲に入る。
+- occupied rank、source Gram、normalization-density identityが合格する。
+- fixed-Hへ入る場合、H0/interface分離、frozen value/shape/fingerprint、transport IDが不変である。
+- failure時に全rankが同じ場所で停止し、部分的context/checkpointをpublishしない。
+
+## 全RHS収束条件の扱い
+
+metric solveの全RHS `1e-10`条件を今すぐ緩和・変更しない。これまでのblock Jacobi診断では
+condition estimateは約`1.06e5`から`2.31e3`へ改善したが、256反復でworst RHSは
+`O(1e-7)`だった。その後に見つかった巨大charge/densityは、PCGだけでなく旧W表現と
+metric/operator contractの不一致が原因だった。
+
+occupied-W routeで物理計算をfixed-H到達点まで進め、その結果を得てから、全RHS条件、
+iteration cap、overlap-1 Additive Schwarzの必要性を再検討する。physical gate前に
+cutoffを緩めたり、反復数だけを増やして問題を隠さない。
+
+## レビューポイント
+
+レビューは次の順序で行う。
+
+1. source provenance: descriptorの再構築やgaugeの二重化がないか。
+2. overlap routing: 各coreがnonzeroな全support W/P rowを評価し、stable source IDとbasis-row IDでcanonical ownerへrouteしているか。
+3. metric/operator identity: WW/WP/PPが同じtail-carrying fieldから組み立てられているか。
+4. MPI collective: rank依存分岐の外でcollective順序が一致し、missing/duplicate/wrong-imageをcollective failureにするか。
+5. transaction/rollback: allocation・validation失敗時に既存contextとcheckpoint stateを変えないか。
+6. frozen invariant: 値、shape、stable ID、H0/interface、projector、face項を実データとfingerprintの双方で検査するか。
+7. publication boundary: diagnostic continuationからcheckpoint/manifest/RTへ到達できないか。
+
+## 停止条件と後続順序
+
+以下のいずれかで停止して診断・レビューする。
+
+- W count/owner/tail coverage不一致
+- assembled/real-space metric identity不一致
+- 非物理的なcapture、charge、density、rank
+- provenance曖昧、frozen invariant破壊、collective不一致
+- nonpublishable diagnostic結果しか得られない状態
+
+全physical gateが通った場合のみ、既存計画に従ってzero-interface fixed-H、interface continuation、
+field-off、20-step laser smokeの順で進む。Si64長時間productionやHHG解釈には進まない。
+
+## 新セッション開始文（コピー用）
 
 ```text
-q_W = W^dagger phi
-q_P = 0
-normalize q in S
+/Users/otobetoshihito/SALMON-dev/SALMON2_RTDG/docs/plans/2026-07-19-wpw-density-carrying-seed-session-handoff.md
+を読み、executing-plansを使ってoccupied-W bootstrap計画のTask 6から開始してください。
+dirty worktreeと既存のstage2d_wpw_runsを保護し、最初にworktree/branch/HEAD/status/diff-checkとfocused verificationを確認してください。
+commit・push・PRは新たに明示指示するまで行わないでください。
 ```
-
-Required behavior:
-
-```text
-b_W = W^dagger phi
-b_P = P^dagger phi
-solve S c = (b_W,b_P)
-rank-qualify and S-normalize c
-```
-
-The MPI oracle must use nonzero W/P coupling so the old implementation fails.
-
-### P1: incomplete distributed overlap right-hand side
-
-`B` is owned by W/P basis-row ID, not by source fragment. Each fragment core
-must evaluate every support W/P row that is nonzero there, then route partial
-overlaps to the canonical row owner. A local fragment root may not populate
-only its locally owned rows and columns. Add a two-fragment oracle where a W
-row owned on one rank requires a nonzero overlap contribution from the other
-fragment core.
-
-Compute captured norm from the raw metric solution before occupied
-S-orthonormalization:
-
-```text
-C_raw = solve(S,B)
-captured_norm = Tr(F B^dagger C_raw)
-source_norm = Tr(F Phi_src^dagger Phi_src)
-```
-
-Here `F` contains the converged source occupations. Do not compute this
-diagnostic with the normalized occupied block. A gauge oracle rotates the input
-occupied fragment eigenvectors and repeats deterministic projected-Wannier
-construction; it compares ensemble density, stable center-ID set, and projector,
-not individual Wannier columns.
-
-### P1: nonorthogonal source density across normalization
-
-Projected Wannier functions from independent buffered fragments are not
-assumed mutually orthogonal. If `Q=C_raw T` and
-`T^dagger(C_raw^dagger S C_raw)T=I`, carry
-`F_Q=T^{-1}F_src T^{-dagger}` and verify
-`C_raw F_src C_raw^dagger = Q F_Q Q^dagger`. Replacing `F_Q` by a diagonal
-occupation vector before this identity check is forbidden. Report source-Gram
-condition and density-identity residual collectively.
-
-Separately qualify projection loss: reconstruct `density[A C_raw,F_src]` on the
-global core tiling and compare it with both the selected source density and the
-converged DC density. Require relative L2 error, charge error, and
-`abs(1-captured_norm)` below `dg_wpw_wannier_density_tolerance`. Repeat with
-`density[A Q,F_Q]`. A converged metric equation and full rank do not waive this
-publication gate.
-
-### P1: source selection, naming, and provenance
-
-The source is the direct sum of core-owned projected Wannier functions. For the
-Si64 route, construct them deterministically by projecting existing
-bond-center/SAWF trials into the converged fragment occupied subspace and
-applying the polar/Löwdin factor. It is
-not the direct sum of every occupied eigenvector in each buffered fragment
-calculation and is not the global Flux-LCFO eigenvector set `coef_wf`. Rotate
-each converged fragment occupied subspace to Wannier functions, verify density
-invariance, wrap their centers periodically, and select centers with the
-half-open core ownership rule `[lower,upper)` in every axis. Do not select the
-first `N` fragment eigenvectors by energy order.
-
-For non-spin-polarized Si64 2x2x2, require 32 core electrons and 16 doubly
-occupied Wannier functions per fragment, hence 128 source columns and 256
-electrons globally. The current `count(system%rocc>0)` result of 128 columns per
-fragment and 1024 columns globally is a failing oracle, not a valid source.
-Every selected stable bond-center ID must have exactly one fragment owner. Do
-not run `diag_eigenexa`, import global `coef_wf`, or launch an external
-iterative Wannier90 optimization merely to generate this seed. Record the
-projected-Wannier method, bond/image ID, phase convention, ownership rule, and
-source provenance in diagnostics and checkpoint metadata.
-
-Do not infer that center selection preserves density merely because the input
-occupied projector is gauge-invariant. Communicate each selected Wannier tail to every
-neighboring core intersected by its buffered support, then reconstruct the
-selected ensemble on the global core tiling and compare it with the converged
-DC density. Halo records must identify stable source-Wannier ID, source and
-destination fragments, periodic image, and destination support. Missing,
-duplicate, wrong-image, or asymmetrically scheduled records fail collectively.
-Route overlaps separately by stable source ID and basis-row ID. Representation
-failure is a stop condition and occupations must not be rescaled to conceal it.
-Enumerate every periodic image represented by the fragment buffer, bound
-deliberately discarded available tails using the named tail tolerance, measure
-the outer-buffer-shell norm, and stop unless the independent DC density
-comparison qualifies the finite buffer. Run the specified one-decade tolerance
-sensitivity oracle; do not tune tolerances solely to make Si64 pass.
-
-### P1: incomplete frozen invariant
-
-Compare actual values and shapes for every frozen component and bounded cache.
-A stored fingerprint alone is insufficient because an accidental mutation may
-not recompute it. Include WP/PP nonlocal and face contributions and transport
-IDs.
-
-### P2: allocation and oracle safety
-
-- Add `stat=` and collective failure handling to new large allocations.
-- Avoid grouped deallocation unless all members are known allocated.
-- Avoid derived-type deep assignment as the only transactional mechanism.
-- Remove callback argument aliasing in the MPI projection test.
-- Test both nonzero W and P rows.
-- Report per-RHS metric residuals, detect collective stagnation, and exercise a
-  case where one RHS converges before the remaining active columns.
-- Require positive diagonal Jacobi preconditioning from owned `S` diagonal
-  entries before Si64. Report global diagonal spread and per-RHS residual
-  history; do not use a global dense fallback. The focused failure and separate
-  design review are now complete: Si64 gives a preconditioned Ritz condition
-  estimate near `1.06e5`, no cutoff-level near-null modes, and no convergence
-  after 256 PCG iterations. Implement Task 2B's canonical-fragment coupled W+P
-  block Jacobi as a diagnostic first stage. Extract the owned principal block
-  using the actual required-W/owned-P/required-P dense-store shapes; the
-  preconditioner action itself is local on canonical-owned Krylov rows and must
-  not add an owner exchange. Qualify every local block spectrally and fail
-  rather than silently truncate. Require every RHS to converge and the
-  estimated condition number to improve by at least one decade. If Si64
-  improvement is insufficient, stop for a separate overlap-1 additive Schwarz
-  design review.
-
-The dedicated `20260720_block_jacobi_preflight` reached the strict solver
-target stop condition.
-The corrected full-cell buffer shell had zero norm. Coupled block Jacobi
-reduced the estimated condition number from `1.06e5` to `2.31e3`, but the
-256-step aggregate/worst-RHS residuals were `1.41e-7`/`3.40e-7`, above the
-`1e-10` cutoff. Recursive and explicit residuals agreed and no near-null mode
-was found. Implement Task 2C: return per-RHS best iterates only under an
-explicit diagnostic-continuation option, run the physical representation and
-fixed-H diagnostics, and prohibit all checkpoint/manifest publication. Do not
-silently increase the cap or relax the cutoff. Decide whether overlap-1
-Schwarz is required only after those physical diagnostics are reviewed.
-
-Task 2C physical diagnostics are now available from
-`20260720_metric_physical_diagnostic2`. The best metric iterate had aggregate/
-worst residuals `1.39e-7`/`2.73e-7`, but captured norm was `8.49e5`, projected
-density error `1.36e6`, and projected charge `2.717e7` versus source charge 32.
-The normalization-density residual was `1.42e-14`, so the failure precedes
-Löwdin normalization. Stop before fixed-H. Diagnose original-metric extreme
-mode amplification versus an `S`/routed-`B`/real-space reconstruction mismatch
-before assuming overlap-1 Schwarz alone is sufficient.
-
-Task 2D corrected that reconstruction mismatch in
-`20260720_support_w_reconstruction`: raw and normalized W fields now contract
-the full support coefficient block, including neighboring Wannier tails.
-Routed/direct total, W, and P captures agree with relative defect `1.10e-15`.
-The common value is nevertheless unphysical (`8.4905e5`), and the
-projected/normalized charge is `2.6624e14` versus source charge 32 despite
-S-orthogonality `5.25e-12`. The next diagnostic must compare assembled `S`
-against the real-space `A^dagger A` Gram and split W-W, W-P, and P-P. Do not
-return to PCG tuning or overlap-1 Schwarz until this metric/operator contract
-is resolved.
-
-Task 2E (`20260720_metric_realspace_gram`) applied the production S explicitly
-to `C_raw`. The normalized quadratic forms were assembled S `8.4905e5` versus
-real-space total `8.3200e12`, split as WW `8.3277e12`, WP `-7.7479e9`, PP
-`4.6702e7`. The discrepancy is therefore WW-dominated. The WW adapter labels
-its metric `orthonormal_ww`; verify that assumption against the actual
-tail-carrying W functions with an assembled block split and real-space W
-norm/overlap probes before implementing a replacement metric.
-
-Task 2G localized the W norm blow-up completely to halo tails. On all eight
-fragments the worst W is the last local row (`165, 330, ..., 1320`), with
-owner-core norm exactly `1.0000` and halo-tail norm `2.5096e6`. The next step
-is to identify the active buffer-value path and log the worst source index,
-buffer coordinate, destination/image, and pre-pack value. A likely mechanism
-to test is amplification of a core-near-null closure direction when its
-core-orthonormalizing transform is applied to the buffer, but this is not yet
-proven and must not be fixed by an arbitrary tail cutoff.
-
-Task 2H proves packing is innocent. The active path is `transformed_spsi`;
-pre-pack and packed maxima are identical (`2.91e2`--`2.97e2`, defect zero) at
-outside-core buffer coordinates across valid periodic images. The blow-up is
-already present when a core-only `basis_transform` is applied to buffered
-fragment states. Return to the approved occupied-W contract: Si64 must expose
-16 core-owned projected Wannier W rows per fragment, not all 165 retained
-Flux-LCFO core directions. Plan the representation change across WW, traces,
-halos, and IDs before editing production code.
-
-## Findings-first review checklist
-
-Review in this order:
-
-1. **Projection mathematics:** Does the code construct both overlap blocks and
-   route every support-row contribution to the canonical owner before solving
-   `S C=B`? Is the reported residual the equation residual for `C_raw`?
-2. **Source provenance:** Are the orbitals exactly the core-owned occupied
-   projected-Wannier ensemble? Is projected construction deterministic and
-   invariant to input occupied gauge? Does every wrapped
-   center have exactly one half-open core owner? Are local/global counts and
-   charge consistent collectively, including Si64's 16x8=128 contract? Does
-   the selected ensemble, including explicitly communicated cross-core tails,
-   reproduce the DC core density independently of the input-gauge
-   check? Is every tail received exactly once with the correct periodic image?
-   Are omitted-tail norm/charge and finite-buffer sufficiency proved?
-3. **Occupied projector:** Is occupied rank preserved? Is the S-projector
-   invariant after deterministic reconstruction from a rotated input gauge and
-   after extra-state completion? Is captured
-   norm computed from `C_raw`, not the normalized block? Is the non-diagonal
-   occupation matrix transformed through S-normalization with a verified
-   density identity? Does the physical W+P-projected density match source and
-   DC densities before and after normalization?
-4. **Frozen H0:** Can any density, potential, H0 value, cache, or ID change
-   without detection?
-5. **Interface map:** Are only WW self/cross face and WP face terms scaled?
-6. **MPI ordering:** Can one rank return before peers enter a collective? Are
-   allocation and validation failures synchronized before communication?
-7. **Transactional behavior:** Do failed solves, lambda trials, publications,
-   and callback bindings restore the last valid state?
-8. **Finite and shape checks:** Are allocation and shape tested before array
-   comparison or indexing? Are all derived diagnostics finite?
-9. **Performance:** Are operations rank-local plus bounded owner/halo exchange?
-   Is any global dense matrix or all-state gather reintroduced?
-10. **Provenance/publication:** Can an incomplete or diagnostic-only run leave a
-    checkpoint that RT might accept?
-
-## Stop conditions
-
-Stop and report before Si64 production if:
-
-- the metric projection needs an unbounded global dense solve;
-- any support-row overlap contribution is missing or ownership-ambiguous;
-- captured norm is not computed from the raw metric solution;
-- any metric RHS stagnates or lacks a bounded preconditioner for Si64;
-- occupied rank is lost;
-- source occupation count/charge is inconsistent;
-- any Wannier center is multiply owned, unowned, or boundary-ambiguous;
-- projected-Wannier construction is not invariant to the input occupied gauge
-  within tolerance;
-- the selected ensemble does not reproduce the DC density on the global core
-  tiling within the representation tolerance;
-- any required neighboring Wannier tail is missing, duplicated, assigned the
-  wrong periodic image, or uses an asymmetric halo schedule;
-- omitted tail norm/charge exceeds tolerance or the finite buffer cannot bound
-  the missing support;
-- source-Gram conditioning or transformed-occupation density identity fails;
-- source-to-W+P projected density/charge or captured-norm deficit exceeds the
-  named density tolerance;
-- frozen-state mutation is not detected collectively;
-- zero-interface convergence is not demonstrated in a small preflight;
-- interface rollback is not exact;
-- memory/rank/thread/storage estimates are missing;
-- the checkpoint manifest does not distinguish the density-carrying seed from
-  global LCFO eigenvectors.
-
-## Expected handoff after implementation
-
-Report:
-
-- files changed in the new session;
-- exact focused tests and build result;
-- projection residual, captured norm, rank, S-orthogonality, and charge from
-  the preflight;
-- per-fragment core electron count, core-owned Wannier count, and collective
-  unique-center ownership result;
-- Wannier-tail halo send/receive counts, periodic-image validation, duplicate
-  detection, image range, omitted-tail bounds, peak storage, and density
-  reconstruction error with communication enabled;
-- source-Gram condition and transformed-occupation density-identity residual;
-- source-to-W+P projected density and charge residuals before and after
-  normalization, plus captured-norm deficit;
-- zero-interface solver iterations and residuals;
-- accepted/rejected continuation steps and final lambda;
-- frozen-state validation result;
-- findings-first review, including “no P0/P1 findings” only if supported by a
-  fresh independent review.

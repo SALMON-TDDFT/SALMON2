@@ -229,3 +229,37 @@ and repeat review.
 git add docs/plans/2026-07-19-wpw-density-carrying-seed-session-handoff.md docs/plans/2026-07-22-wpw-occupied-w-localization.md
 git commit -m "docs: record occupied Wannier spread measurement"
 ```
+
+## 2026-07-22 execution checkpoint
+
+Tasks 1-4 passed focused serial/MPI tests, the full MPI/EigenExa build, and
+findings-first review with no remaining Critical or Important findings.
+
+Fresh B=6 (`20260722_task7_spread_b6/run.log`) converged DC-SCF at iteration 87
+with `diff=9.8498E-10` and charge 256. All 128 centers were valid. The exact
+per-W discrete widths were:
+
+- minimum `1.26877 Angstrom`;
+- mean `1.28540 Angstrom`;
+- median/p90/maximum `1.29094 Angstrom`;
+- 128 rows above the historical approximate `1.2 Angstrom` reference.
+
+This is close to, rather than qualitatively broader than, the historical
+Wannier90 result. The unchanged outer-shell gate still failed at ratio
+`7.2686E-03`.
+
+Fresh B=10 (`20260722_task7_spread_b10/run.log`) converged DC-SCF at iteration
+85 with `diff=9.4464E-10` and charge 256, then failed collectively at
+`occupied_w_link_assembly`. P contains multiple preimages of canonical points
+when its extent is 32 and the physical cell is 24, so this failure is
+consistent with a duplicate-image inconsistency, but the current log does not
+yet isolate extraction from numerical link assembly or report the failing
+coordinate and mismatch. No image was summed or silently selected, and no
+B=10 spread was reported.
+
+Task 5 therefore stops at its specified periodic extraction/link-assembly
+investigation boundary. The evidence does not justify implementing
+localization: B=6 W widths are already close to 1.2 Angstrom. The next root
+cause investigation must instrument the extraction/link boundary and determine
+whether the fragment projected-W P field violates the assumed physical-cell
+image identity for B>6.
