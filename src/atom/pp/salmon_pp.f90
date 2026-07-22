@@ -418,10 +418,16 @@ module salmon_pp
       return ! Do nothing
     end if
 
+    ! cuboid only if all six off-diagonal lattice-vector components vanish;
+    ! checking the upper triangle alone would treat a lower-triangular skew
+    ! (primitive_a(2,1)/(3,1)/(3,2) /= 0) as cuboid and skip rmatrix_a below.
     flag_cuboid = .true.
     if( abs(sys%primitive_a(1,2)).ge.1d-10 .or.  &
         abs(sys%primitive_a(1,3)).ge.1d-10 .or.  &
-        abs(sys%primitive_a(2,3)).ge.1d-10 )  flag_cuboid=.false.
+        abs(sys%primitive_a(2,3)).ge.1d-10 .or.  &
+        abs(sys%primitive_a(2,1)).ge.1d-10 .or.  &
+        abs(sys%primitive_a(3,1)).ge.1d-10 .or.  &
+        abs(sys%primitive_a(3,2)).ge.1d-10 )  flag_cuboid=.false.
 
 
 !$omp parallel do &
@@ -439,11 +445,17 @@ module salmon_pp
       end do
   
       do i1 = irepr_min, irepr_max
-        Rion_repr(1) = sys%Rion(1, a) + i1 * sys%primitive_a(1, 1)
       do i2 = irepr_min, irepr_max
-        Rion_repr(2) = sys%Rion(2, a) + i2 * sys%primitive_a(2, 2)
       do i3 = irepr_min, irepr_max
-        Rion_repr(3) = sys%Rion(3, a) + i3 * sys%primitive_a(3, 3)
+        ! Periodic replica of the ion. Use the full lattice vectors so that a
+        ! non-orthogonal (or non-axis-aligned) cell is handled correctly; the
+        ! previous code displaced by the diagonal components only
+        ! (i1*primitive_a(1,1), i2*primitive_a(2,2), i3*primitive_a(3,3)), which
+        ! is correct only for a cuboid cell. For a cuboid cell this is identical.
+        Rion_repr(1:3) = sys%Rion(1:3, a)                  &
+                       + i1 * sys%primitive_a(1:3, 1)        &
+                       + i2 * sys%primitive_a(1:3, 2)        &
+                       + i3 * sys%primitive_a(1:3, 3)
 
         do j1 = rg%is(1), rg%ie(1)
            u = (j1-1) * sys%hgs(1)
