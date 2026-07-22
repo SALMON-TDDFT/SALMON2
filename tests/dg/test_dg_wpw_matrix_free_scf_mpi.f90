@@ -4,7 +4,7 @@ program test_dg_wpw_matrix_free_scf_mpi
   use dg_wpw_matrix_free_scf,only:s_dg_wpw_matrix_free_scf_result,run_dg_wpw_matrix_free_scf,&
     run_dg_wpw_matrix_free_algebra_step,initialize_dg_wpw_projected_occupied,&
     complete_dg_wpw_projected_subspace,solve_dg_wpw_metric_projection,&
-    initialize_dg_wpw_metric_projected_occupied
+    initialize_dg_wpw_metric_projected_occupied,summarize_dg_wpw_window_state_residuals
   implicit none
   type::s_fixture_context
     integer::rank=0,nrank=1,first=1,nlocal=0
@@ -30,9 +30,49 @@ program test_dg_wpw_matrix_free_scf_mpi
   real(8)::projection_orth,projector_defect
   integer::projection_rank
   real(8)::gap,residual,orth,projector
+  real(8)::raw_norm2(4),preconditioned_norm2(4),occupied_max,extra_max,occupied_preconditioned,&
+    extra_preconditioned,occupied_ratio,extra_ratio
+  integer::occupied_worst,extra_worst
   real(8),parameter::seed1(3)=[1d0,0.3d0,0.1d0],seed2(3)=[0.2d0,1d0,0.4d0]
   call MPI_Init(ierr);call MPI_Comm_rank(MPI_COMM_WORLD,ctx%rank,ierr);call MPI_Comm_size(MPI_COMM_WORLD,ctx%nrank,ierr)
   if(ctx%nrank/=2)call MPI_Abort(MPI_COMM_WORLD,2,ierr)
+  raw_norm2=[1d0,9d0,16d0,4d0];preconditioned_norm2=[4d0,36d0,4d0,1d0]
+  call summarize_dg_wpw_window_state_residuals(raw_norm2,preconditioned_norm2,2,occupied_max,&
+    occupied_worst,extra_max,extra_worst,occupied_preconditioned,extra_preconditioned,&
+    occupied_ratio,extra_ratio,info)
+  if(info/=0.or.occupied_max/=3d0.or.occupied_worst/=2.or.extra_max/=4d0.or.extra_worst/=3.or.&
+    occupied_preconditioned/=6d0.or.extra_preconditioned/=2d0.or.&
+    occupied_ratio/=2d0.or.extra_ratio/=0.5d0)call MPI_Abort(MPI_COMM_WORLD,101,ierr)
+  raw_norm2=[9d0,9d0,4d0,4d0];preconditioned_norm2=[9d0,9d0,1d0,1d0]
+  call summarize_dg_wpw_window_state_residuals(raw_norm2,preconditioned_norm2,3,occupied_max,&
+    occupied_worst,extra_max,extra_worst,occupied_preconditioned,extra_preconditioned,&
+    occupied_ratio,extra_ratio,info)
+  if(info/=0.or.occupied_worst/=1.or.extra_worst/=4.or.extra_max/=2d0.or.&
+    extra_preconditioned/=1d0)call MPI_Abort(MPI_COMM_WORLD,102,ierr)
+  raw_norm2=[1d0,1d0,4d0,4d0];preconditioned_norm2=raw_norm2
+  call summarize_dg_wpw_window_state_residuals(raw_norm2,preconditioned_norm2,2,occupied_max,&
+    occupied_worst,extra_max,extra_worst,occupied_preconditioned,extra_preconditioned,&
+    occupied_ratio,extra_ratio,info)
+  if(info/=0.or.extra_worst/=3)call MPI_Abort(MPI_COMM_WORLD,1021,ierr)
+  raw_norm2=[0d0,1d0,4d0,0d0];preconditioned_norm2=[0d0,1d0,4d0,0d0]
+  call summarize_dg_wpw_window_state_residuals(raw_norm2,preconditioned_norm2,3,occupied_max,&
+    occupied_worst,extra_max,extra_worst,occupied_preconditioned,extra_preconditioned,&
+    occupied_ratio,extra_ratio,info)
+  if(info/=0.or.extra_worst/=4.or.extra_ratio/=0d0)call MPI_Abort(MPI_COMM_WORLD,103,ierr)
+  call summarize_dg_wpw_window_state_residuals(raw_norm2,preconditioned_norm2,0,occupied_max,&
+    occupied_worst,extra_max,extra_worst,occupied_preconditioned,extra_preconditioned,&
+    occupied_ratio,extra_ratio,info)
+  if(info==0)call MPI_Abort(MPI_COMM_WORLD,104,ierr)
+  raw_norm2(1)=-1d0
+  call summarize_dg_wpw_window_state_residuals(raw_norm2,preconditioned_norm2,2,occupied_max,&
+    occupied_worst,extra_max,extra_worst,occupied_preconditioned,extra_preconditioned,&
+    occupied_ratio,extra_ratio,info)
+  if(info==0)call MPI_Abort(MPI_COMM_WORLD,105,ierr)
+  raw_norm2(1)=ieee_value(0d0,ieee_quiet_nan)
+  call summarize_dg_wpw_window_state_residuals(raw_norm2,preconditioned_norm2,2,occupied_max,&
+    occupied_worst,extra_max,extra_worst,occupied_preconditioned,extra_preconditioned,&
+    occupied_ratio,extra_ratio,info)
+  if(info==0)call MPI_Abort(MPI_COMM_WORLD,106,ierr)
   ctx%metric_coupled=.true.
   metric_w=(0d0,0d0);metric_p=(0d0,0d0)
   metric_w(1,ctx%rank+1)=(1d0,0d0)

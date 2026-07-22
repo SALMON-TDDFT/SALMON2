@@ -49,7 +49,49 @@ module dg_wpw_matrix_free_scf
   public::complete_dg_wpw_projected_subspace
   public::solve_dg_wpw_metric_projection
   public::initialize_dg_wpw_metric_projected_occupied
+  public::summarize_dg_wpw_window_state_residuals
 contains
+  pure subroutine summarize_dg_wpw_window_state_residuals(raw_norm2,preconditioned_norm2,nocc,&
+      occupied_max,occupied_worst,extra_max,extra_worst,occupied_preconditioned,&
+      extra_preconditioned,occupied_ratio,extra_ratio,info)
+    real(8),intent(in)::raw_norm2(:),preconditioned_norm2(:)
+    integer,intent(in)::nocc
+    real(8),intent(out)::occupied_max,extra_max,occupied_preconditioned,extra_preconditioned,&
+      occupied_ratio,extra_ratio
+    integer,intent(out)::occupied_worst,extra_worst,info
+    integer::location(1),nstate
+
+    info=1;occupied_max=huge(1d0);extra_max=huge(1d0)
+    occupied_preconditioned=huge(1d0);extra_preconditioned=huge(1d0)
+    occupied_ratio=huge(1d0);extra_ratio=huge(1d0);occupied_worst=0;extra_worst=0
+    nstate=size(raw_norm2)
+    if(nstate<2.or.size(preconditioned_norm2)/=nstate.or.nocc<1.or.nocc>=nstate.or.&
+      .not.all(ieee_is_finite(raw_norm2)).or..not.all(ieee_is_finite(preconditioned_norm2)).or.&
+      any(raw_norm2<0d0).or.any(preconditioned_norm2<0d0))return
+    location=maxloc(raw_norm2(1:nocc));occupied_worst=location(1)
+    location=maxloc(raw_norm2(nocc+1:nstate));extra_worst=nocc+location(1)
+    occupied_max=sqrt(raw_norm2(occupied_worst));extra_max=sqrt(raw_norm2(extra_worst))
+    occupied_preconditioned=sqrt(preconditioned_norm2(occupied_worst))
+    extra_preconditioned=sqrt(preconditioned_norm2(extra_worst))
+    if(raw_norm2(occupied_worst)>0d0)then
+      occupied_ratio=sqrt(preconditioned_norm2(occupied_worst)/raw_norm2(occupied_worst))
+    else if(preconditioned_norm2(occupied_worst)==0d0)then
+      occupied_ratio=0d0
+    else
+      return
+    endif
+    if(raw_norm2(extra_worst)>0d0)then
+      extra_ratio=sqrt(preconditioned_norm2(extra_worst)/raw_norm2(extra_worst))
+    else if(preconditioned_norm2(extra_worst)==0d0)then
+      extra_ratio=0d0
+    else
+      return
+    endif
+    if(.not.all(ieee_is_finite([occupied_max,extra_max,occupied_preconditioned,&
+      extra_preconditioned,occupied_ratio,extra_ratio])))return
+    info=0
+  end subroutine summarize_dg_wpw_window_state_residuals
+
   subroutine initialize_dg_wpw_metric_projected_occupied(context,comm,apply_s,global_gram,nw,np,nocc,&
       tolerance,max_iterations,diagonal_w,diagonal_p,bw,bp,qw,qp,relative_residual,rhs_residuals,&
       rhs_residual_history,iterations,diagonal_spread,effective_rank,orthogonality,info)
@@ -467,7 +509,7 @@ contains
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
     allocate(q(nw+np,nretain));q(1:nw,:)=qw;q(nw+1:nw+np,:)=qp
-    call solve_window(context,comm,apply_h,apply_s,global_gram,nw,np,nretain,metric_cutoff,&
+    call solve_window(context,comm,apply_h,apply_s,global_gram,nw,np,nocc,nretain,metric_cutoff,&
       residual_tolerance,q,eigenvalues,residual,orth,info,precondition)
     if(info/=0)return
     gap=eigenvalues(nocc+1)-eigenvalues(nocc)
@@ -520,7 +562,7 @@ contains
     energy_old=huge(1d0);q_old_occ=(0d0,0d0)
 
     do iter=1,max_iter
-      call solve_window(context,comm,apply_h,apply_s,global_gram,n_w_local,n_p_local,nretain,&
+      call solve_window(context,comm,apply_h,apply_s,global_gram,n_w_local,n_p_local,n_occ,nretain,&
         metric_cutoff,residual_tolerance,q,eigenvalues,result%generalized_residual,&
         result%metric_orthonormality,info,precondition)
       if(info/=0)return
@@ -561,12 +603,12 @@ contains
     density=density_check;qw=q(1:n_w_local,:);qp=q(n_w_local+1:nlocal,:)
   end subroutine
 
-  subroutine solve_window(context,comm,apply_h,apply_s,gram,nw,np,nretain,cutoff,tol,q,eval,residual,orth,info,&
+  subroutine solve_window(context,comm,apply_h,apply_s,gram,nw,np,nocc,nretain,cutoff,tol,q,eval,residual,orth,info,&
       precondition)
     class(*),intent(inout)::context
     procedure(apply_h_batch)::apply_h;procedure(apply_s_batch)::apply_s;procedure(global_gram_batch)::gram
     procedure(dg_wpw_preconditioner),optional::precondition
-    integer,intent(in)::comm,nw,np,nretain;real(8),intent(in)::cutoff,tol
+    integer,intent(in)::comm,nw,np,nocc,nretain;real(8),intent(in)::cutoff,tol
     complex(8),intent(inout)::q(nw+np,nretain);real(8),intent(out)::eval(nretain),residual,orth
     integer,intent(out)::info
     complex(8)::hq(nw+np,nretain),sq(nw+np,nretain),a(nretain,nretain),b(nretain,nretain)
@@ -576,7 +618,9 @@ contains
     complex(8)::reduced_h(3*nretain,3*nretain),reduced_s(3*nretain,3*nretain)
     complex(8)::reduced_c(3*nretain,nretain)
     real(8)::condition,reduced_eval(nretain),reduced_residual,reduced_orth
-    integer::discarded,effective_rank,i,inner
+    real(8)::raw_norm2(nretain),preconditioned_norm2(nretain),occupied_max,extra_max,&
+      occupied_preconditioned,extra_preconditioned,occupied_ratio,extra_ratio
+    integer::discarded,effective_rank,i,inner,occupied_worst,extra_worst,diagnostic_info,rank,ierr
     real(8)::stage_clock
     info=0;residual=huge(1d0);orth=huge(1d0);search=(0d0,0d0);call cpu_time(stage_clock)
     do inner=1,160
@@ -591,6 +635,7 @@ contains
       q=matmul(q,u);hq=matmul(hq,u);sq=matmul(sq,u)
       do i=1,nretain;r(:,i)=hq(:,i)-eval(i)*sq(:,i);enddo
       call gram(r,r,nw+np,nretain,nretain,g,info);if(info/=0)return
+      raw_norm2=real([(g(i,i),i=1,nretain)],8)
       residual=sqrt(max(0d0,maxval(real([(g(i,i),i=1,nretain)],8))))
       call gram(q,sq,nw+np,nretain,nretain,g,info);if(info/=0)return
       do i=1,nretain;g(i,i)=g(i,i)-1d0;enddo
@@ -602,6 +647,23 @@ contains
         if(info/=0)return
       else
         preconditioned=r
+      endif
+      if(window_state_residual_iteration(inner))then
+        call gram(preconditioned,preconditioned,nw+np,nretain,nretain,g,info);if(info/=0)return
+        preconditioned_norm2=real([(g(i,i),i=1,nretain)],8)
+        call summarize_dg_wpw_window_state_residuals(raw_norm2,preconditioned_norm2,nocc,&
+          occupied_max,occupied_worst,extra_max,extra_worst,occupied_preconditioned,&
+          extra_preconditioned,occupied_ratio,extra_ratio,diagnostic_info)
+        if(diagnostic_info/=0)then;info=41;return;endif
+        call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)then;info=42;return;endif
+        if(rank==0)write(*,'(1x,a,i0,2(a,es12.4,a,i0,2(a,es12.4)))')&
+          '[DG-WPW-WINDOW-STATE-RESIDUAL] inner=',inner,&
+          ' occupied_max=',occupied_max,' occupied_worst=',occupied_worst,&
+          ' occupied_preconditioned=',occupied_preconditioned,&
+          ' occupied_precondition_ratio=',occupied_ratio,&
+          ' extra_max=',extra_max,' extra_worst=',extra_worst,&
+          ' extra_preconditioned=',extra_preconditioned,&
+          ' extra_precondition_ratio=',extra_ratio
       endif
       z(:,1:nretain)=q;z(:,nretain+1:2*nretain)=preconditioned;z(:,2*nretain+1:)=search
       call apply_s(context,z(1:nw,:),z(nw+1:nw+np,:),sz(1:nw,:),sz(nw+1:nw+np,:),info)
@@ -623,6 +685,11 @@ contains
     enddo
     info=40
   end subroutine
+
+  pure logical function window_state_residual_iteration(inner)result(selected)
+    integer,intent(in)::inner
+    selected=inner==1.or.inner==2.or.inner==4.or.inner==8.or.mod(inner,16)==0
+  end function window_state_residual_iteration
 
   subroutine trace_solve_window(stage,comm,stage_clock,inner,effective_rank,residual,orth)
     character(*),intent(in)::stage

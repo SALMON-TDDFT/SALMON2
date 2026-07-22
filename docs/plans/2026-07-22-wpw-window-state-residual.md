@@ -32,7 +32,8 @@
 
 1. Add RED source-contract assertions requiring `nocc` in `solve_window`, the
    selected-iteration predicate, a diagnostic-only preconditioned Gram, and
-   `[DG-WPW-WINDOW-STATE-RESIDUAL]` output after raw convergence evaluation.
+   `[DG-WPW-WINDOW-STATE-RESIDUAL]` output after raw convergence evaluation at
+   selected iterations, including capped failure iteration 160.
 2. Run both source-contract tests and verify RED.
 3. Pass `nocc` through both matrix-free callers.  At selected iterations,
    compute per-state raw and preconditioned norm squares with the existing

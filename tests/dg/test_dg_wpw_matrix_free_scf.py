@@ -50,6 +50,20 @@ for stage in (
         f"missing solve-window boundary diagnostic: {stage}"
 assert "dg_wpw_preconditioner" in source and "present(precondition)" in source, \
     "matrix-free solver must accept an optional bounded preconditioner callback"
+solve_start = source.index("subroutine solve_window")
+solve_end = source.index("end subroutine", solve_start)
+solve_body = source[solve_start:solve_end]
+assert "nw,np,nocc,nretain" in solve_body[:500], "solve_window must know the occupied/extra partition"
+assert "window_state_residual_iteration(inner)" in solve_body, "state diagnostics need bounded selected iterations"
+assert "call gram(preconditioned,preconditioned" in solve_body, \
+    "preconditioner response must use the production global Gram"
+assert "occupied_preconditioned=" in solve_body and "extra_preconditioned=" in solve_body, \
+    "diagnostic must print preconditioned norms as well as ratios"
+state_diag_pos = solve_body.index("[dg-wpw-window-state-residual]")
+convergence_pos = solve_body.index("if(residual<tol.and.orth<tol)return")
+assert convergence_pos < state_diag_pos, "state diagnostics must not replace the existing convergence decision"
+assert "residual=max(occupied_max,extra_max)" not in solve_body, \
+    "split diagnostics must not feed back into convergence"
 
 for token in (
     "yn_dg_wpw_production",

@@ -14,7 +14,7 @@ whether the physically occupied 128-state projector is stalled or whether the
 Keep the solver, tolerance, iteration cap, acceptance rule, and checkpoint
 boundary unchanged.  Extend `solve_window` with the occupied-state count and
 emit a diagnostic summary at iterations 1, 2, 4, 8, every 16 iterations, and
-the final iteration:
+therefore at the capped failure iteration 160:
 
 - maximum residual and worst one-based state index in the occupied block;
 - maximum residual and worst one-based state index in the extra block;
@@ -26,6 +26,10 @@ maximum.  Preconditioned norms are diagnostics only and are computed only at
 the selected iterations to limit collective cost.  Invalid/nonfinite
 diagnostic values remain fatal because they expose an invalid solver state.
 No convergence decision may consume these new split values in this task.
+An iteration that already satisfies the unchanged scalar convergence test
+returns without an additional diagnostic-only preconditioner call; the final
+iteration here means the observed capped failure boundary, not every
+successful solve's last iteration.
 
 ## Alternatives considered
 

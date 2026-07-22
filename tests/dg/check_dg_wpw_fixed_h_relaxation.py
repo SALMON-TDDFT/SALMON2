@@ -7,6 +7,15 @@ INPUT = (ROOT / "src/io/inputoutput.f90").read_text().lower()
 LCFO = (ROOT / "src/gs/dc/lcfo_flux.f90").read_text().lower()
 MATRIX_FREE = (ROOT / "src/gs/dc/dg_wpw_matrix_free_scf.f90").read_text().lower()
 
+window_start = MATRIX_FREE.index("subroutine solve_window")
+window_end = MATRIX_FREE.index("end subroutine", window_start)
+window_body = MATRIX_FREE[window_start:window_end]
+assert "[dg-wpw-window-state-residual]" in window_body
+assert "call summarize_dg_wpw_window_state_residuals" in window_body
+assert window_body.index("if(residual<tol.and.orth<tol)return") < window_body.index(
+    "[dg-wpw-window-state-residual]"
+), "diagnostic split must remain downstream of the unchanged scalar convergence gate"
+
 control = "yn_dg_wpw_fixed_h_relaxation"
 assert control in GLOBAL, "missing explicit fixed-H production control"
 assert control in INPUT, "fixed-H control is absent from input/default/broadcast/log validation"
