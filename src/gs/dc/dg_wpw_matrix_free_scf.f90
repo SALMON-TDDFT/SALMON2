@@ -489,12 +489,13 @@ contains
 
   subroutine run_dg_wpw_matrix_free_algebra_step(context,comm,apply_h,apply_s,global_gram,nw,np,nocc,nretain,&
       iteration,metric_cutoff,residual_tolerance,qw,qp,q_old_occ,eigenvalues,gap,residual,orth,&
-      projector_residual,info,precondition)
+      projector_residual,info,precondition,retain_search_history)
     class(*),intent(inout)::context
     integer,intent(in)::comm
     procedure(apply_h_batch)::apply_h;procedure(apply_s_batch)::apply_s
     procedure(global_gram_batch)::global_gram
     procedure(dg_wpw_preconditioner),optional::precondition
+    logical,intent(in),optional::retain_search_history
     integer,intent(in)::nw,np,nocc,nretain,iteration
     real(8),intent(in)::metric_cutoff,residual_tolerance
     complex(8),intent(inout)::qw(nw,nretain),qp(np,nretain)
@@ -503,6 +504,7 @@ contains
     integer,intent(out)::info
     complex(8),allocatable::q(:,:)
     integer::local_bad,global_bad,ierr
+    logical::keep_search
     info=1;gap=0d0;residual=huge(1d0);orth=huge(1d0);projector_residual=huge(1d0)
     local_bad=merge(0,1,nw>=0.and.np>=0.and.nw+np>=1.and.nocc>=1.and.nretain>nocc.and.iteration>=1.and.&
        metric_cutoff>0d0.and.residual_tolerance>0d0.and.finite_complex(qw).and.&
@@ -510,8 +512,14 @@ contains
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
     allocate(q(nw+np,nretain));q(1:nw,:)=qw;q(nw+1:nw+np,:)=qp
-    call solve_window(context,comm,apply_h,apply_s,global_gram,nw,np,nocc,nretain,metric_cutoff,&
-      residual_tolerance,q,eigenvalues,residual,orth,info,precondition)
+    keep_search=.true.;if(present(retain_search_history))keep_search=retain_search_history
+    if(present(precondition))then
+      call solve_window(context,comm,apply_h,apply_s,global_gram,nw,np,nocc,nretain,metric_cutoff,&
+        residual_tolerance,q,eigenvalues,residual,orth,info,precondition,keep_search)
+    else
+      call solve_window(context,comm,apply_h,apply_s,global_gram,nw,np,nocc,nretain,metric_cutoff,&
+        residual_tolerance,q,eigenvalues,residual,orth,info,retain_search_history=keep_search)
+    endif
     if(info/=0)return
     gap=eigenvalues(nocc+1)-eigenvalues(nocc)
     if(.not.ieee_is_finite(gap))then;info=2;return;endif
@@ -605,10 +613,11 @@ contains
   end subroutine
 
   subroutine solve_window(context,comm,apply_h,apply_s,gram,nw,np,nocc,nretain,cutoff,tol,q,eval,residual,orth,info,&
-      precondition)
+      precondition,retain_search_history)
     class(*),intent(inout)::context
     procedure(apply_h_batch)::apply_h;procedure(apply_s_batch)::apply_s;procedure(global_gram_batch)::gram
     procedure(dg_wpw_preconditioner),optional::precondition
+    logical,intent(in),optional::retain_search_history
     integer,intent(in)::comm,nw,np,nocc,nretain;real(8),intent(in)::cutoff,tol
     complex(8),intent(inout)::q(nw+np,nretain);real(8),intent(out)::eval(nretain),residual,orth
     integer,intent(out)::info
@@ -628,6 +637,8 @@ contains
     integer::discarded,effective_rank,i,inner,occupied_worst,extra_worst,diagnostic_info,rank,ierr,&
       metric_effective_rank
     real(8)::stage_clock
+    logical::keep_search
+    keep_search=.true.;if(present(retain_search_history))keep_search=retain_search_history
     info=0;residual=huge(1d0);orth=huge(1d0);search=(0d0,0d0);call cpu_time(stage_clock)
     do inner=1,160
       call trace_solve_window('initial_apply_begin',comm,stage_clock,inner,0,residual,orth)
@@ -704,8 +715,10 @@ contains
       call trace_solve_window('reduced_eigh_end',comm,stage_clock,inner,effective_rank,&
         reduced_residual,reduced_orth)
       q=matmul(z,reduced_c);eval=reduced_eval
-      search=matmul(preconditioned,reduced_c(nretain+1:2*nretain,:))+&
-        matmul(search,reduced_c(2*nretain+1:3*nretain,:))
+      if(keep_search)then
+        search=matmul(preconditioned,reduced_c(nretain+1:2*nretain,:))+&
+          matmul(search,reduced_c(2*nretain+1:3*nretain,:))
+      else;search=(0d0,0d0);endif
       call trace_solve_window('inner_end',comm,stage_clock,inner,effective_rank,residual,orth)
     enddo
     info=40

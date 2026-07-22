@@ -36,6 +36,19 @@ for routine in ("run_wpw_fixed_h_relaxation", "continue_wpw_fixed_h_interface"):
     assert "wpw_precondition" in body[branch:fallback]
     assert "wpw_precondition" not in body[fallback:closing]
 
+history_control = "yn_dg_wpw_search_history"
+assert history_control in global_text, "missing explicit WPW search-history comparison control"
+assert history_control in input_text, "WPW search-history control is absent from input plumbing"
+assert f"{history_control} = 'y'" in input_text, "current search-history route must remain the default"
+for required in (
+    "call comm_bcast(yn_dg_wpw_search_history",
+    "'yn_dg_wpw_search_history', yn_dg_wpw_search_history",
+    "call yn_argument_check(yn_dg_wpw_search_history)",
+):
+    assert required in input_text, f"missing WPW search-history input contract: {required}"
+assert lcfo.count("retain_search_history=yn_dg_wpw_search_history=='y'") >= 3, \
+    "all production algebra routes must propagate the search-history choice"
+
 for token in (
     "run_dg_wpw_matrix_free_scf",
     "apply_h_batch",
@@ -73,6 +86,13 @@ assert "dg_wpw_preconditioner" in source and "present(precondition)" in source, 
 solve_start = source.index("subroutine solve_window")
 solve_end = source.index("end subroutine", solve_start)
 solve_body = source[solve_start:solve_end]
+assert "retain_search_history" in solve_body[:600], "solve_window must accept the restart comparison flag"
+assert "keep_search=.true." in solve_body and "present(retain_search_history)" in solve_body, \
+    "omitting the comparison flag must retain the current search-history behavior"
+search_update = solve_body.index("search=matmul(preconditioned")
+search_branch = solve_body.rfind("if(keep_search)then", 0, search_update)
+assert search_branch >= 0 and "else;search=(0d0,0d0);endif" in solve_body[search_update:], \
+    "explicit restart mode must skip the discarded history update and clear only the search block"
 assert "nw,np,nocc,nretain" in solve_body[:500], "solve_window must know the occupied/extra partition"
 assert "window_state_residual_iteration(inner)" in solve_body, "state diagnostics need bounded selected iterations"
 assert "call gram(preconditioned,preconditioned" in solve_body, \
