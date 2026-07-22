@@ -336,6 +336,26 @@ fallbackしてSALMON自体はexit 0で終了した。
 診断する。その結果により、occupied-projector収束を判定対象とするか、extra-state seed/
 preconditionerを改善するかを選ぶ。
 
+### 2026-07-22 fixed-H状態別残差診断
+
+`920381e`で収束判定を変えずにoccupied/extra blockの最大残差、raw-worst state、
+preconditioned norm/ratioを追加した。fresh B=6 run
+`stage2d_wpw_runs/20260722_task14_window_state_residual_b6/run.log`は同じdensity seedを
+再現し、fixed-H反復160で再び`info=40`となった。
+
+- inner 1: occupied `6.2988E-02` (state 94)、extra `3.3809E-01` (state 160)
+- inner 32: occupied `2.9049E-03` (state 128)、extra `5.3288E-03` (state 150)
+- inner 80: occupied `1.1683E-03` (state 64)、extra `3.5465E-03` (state 144)
+- inner 160: occupied `4.8659E-04` (state 66)、extra `1.6650E-03` (state 146)
+
+extra blockが全160状態の最大残差を決めるが、occupied blockだけでも`1E-8`より約4桁
+大きく、extra statesを判定から除くだけではfixed-Hをqualifyできない。さらにinner 160の
+raw-worst stateで、現diagonal preconditionerはoccupied残差normを`2.2726E-02`
+（ratio `46.704`）、extraを`5.6867E-01`（ratio `341.54`）へ増幅する。selected history
+全体でもratioはoccupied約33--563、extra約8--910であり、次の主対象は許容値や
+Wannier tailではなく`H_ii-epsilon S_ii` diagonal preconditionerの小分母・符号・scaleである。
+checkpoint/manifest/RTはpublishされていない。
+
 ## 新セッション開始文（コピー用）
 
 ```text

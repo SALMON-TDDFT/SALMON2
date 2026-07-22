@@ -55,3 +55,21 @@
 5. Run a fresh eight-rank B=6 calculation.
 6. Record occupied/extra residual histories, worst state IDs,
    preconditioner-response ratios, stopping point, and publication status.
+
+## Execution result
+
+Implemented in `920381e`; focused matrix-free, fixed-H, and occupied-W tests,
+the full MPI build, and two review passes completed without a remaining
+Critical or Important issue.  Fresh B=6 run
+`20260722_task14_window_state_residual_b6` reproduced the structural seed
+diagnostics and reached the same `info=40` fixed-H boundary.
+
+Both blocks remain unconverged at iteration 160: occupied maximum
+`4.8659E-04` at state 66 and extra maximum `1.6650E-03` at state 146.  Thus
+extra states set the scalar maximum, but accepting only the occupied block
+would still miss `1E-8` by about four orders of magnitude.  The diagonal
+preconditioner amplifies the raw-worst residual: at iteration 160 the occupied
+norm changes from `4.8659E-04` to `2.2726E-02` (ratio `46.704`), and the extra
+norm from `1.6650E-03` to `5.6867E-01` (ratio `341.54`).  Ratios over the
+selected history range from about 33 to 563 for occupied states and 8 to 910
+for extra states.  No WPW checkpoint, manifest, or RT state was published.
