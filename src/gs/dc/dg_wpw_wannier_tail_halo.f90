@@ -10,6 +10,7 @@ module dg_wpw_wannier_tail_halo
   public::locate_sawf_wannier_tail_rank
   public::qualify_sawf_wannier_buffer_tail
   public::classify_sawf_wannier_buffer_tail
+  public::classify_sawf_dc_density_residual
   public::is_sawf_outer_buffer_shell
 contains
   logical function is_sawf_outer_buffer_shell(point,box_shape,total_shape)result(is_outer)
@@ -59,6 +60,22 @@ contains
     warning=outer_shell_ratio>tolerance
     info=0
   end subroutine classify_sawf_wannier_buffer_tail
+
+  pure subroutine classify_sawf_dc_density_residual(difference_norm2,reference_norm2,tolerance,&
+      residual,warning,info)
+    real(8),intent(in)::difference_norm2,reference_norm2,tolerance
+    real(8),intent(out)::residual
+    logical,intent(out)::warning
+    integer,intent(out)::info
+
+    info=1;residual=huge(1d0);warning=.false.
+    if(.not.all(ieee_is_finite([difference_norm2,reference_norm2,tolerance])).or.&
+        difference_norm2<0d0.or.reference_norm2<=0d0.or.tolerance<=0d0)return
+    residual=sqrt(difference_norm2/reference_norm2)
+    if(.not.ieee_is_finite(residual))return
+    warning=residual>tolerance
+    info=0
+  end subroutine classify_sawf_dc_density_residual
 
   subroutine locate_sawf_wannier_tail_rank(destination_fragment,destination_local,rank_fragment,&
       rank_orbital_lane,rank_grid_lo,rank_grid_hi,destination_rank,info)

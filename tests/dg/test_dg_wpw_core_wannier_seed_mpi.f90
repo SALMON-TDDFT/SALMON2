@@ -16,6 +16,7 @@ program test_dg_wpw_core_wannier_seed_mpi
   use dg_wpw_wannier_tail_halo,only:locate_sawf_wannier_tail_rank
   use dg_wpw_wannier_tail_halo,only:qualify_sawf_wannier_buffer_tail
   use dg_wpw_wannier_tail_halo,only:classify_sawf_wannier_buffer_tail
+  use dg_wpw_wannier_tail_halo,only:classify_sawf_dc_density_residual
   use dg_wpw_wannier_tail_halo,only:is_sawf_outer_buffer_shell
   implicit none
   integer::ierr,rank,info,owner_count,image(3),destination_fragment,destination_local(3),destination_rank
@@ -231,6 +232,26 @@ program test_dg_wpw_core_wannier_seed_mpi
   call classify_sawf_wannier_buffer_tail(2d0,ieee_value(0d0,ieee_quiet_nan),1d-2,&
     outer_shell_ratio,tail_warning,info)
   if(info==0)error stop 170
+  call classify_sawf_dc_density_residual(0d0,2d0,1d-2,outer_shell_ratio,tail_warning,info)
+  if(info/=0.or.tail_warning.or.outer_shell_ratio/=0d0)error stop 1701
+  call classify_sawf_dc_density_residual(5d-5,2d0,1d-2,outer_shell_ratio,tail_warning,info)
+  if(info/=0.or.tail_warning.or.abs(outer_shell_ratio-5d-3)>1d-15)error stop 1702
+  call classify_sawf_dc_density_residual(2d-4,2d0,1d-2,outer_shell_ratio,tail_warning,info)
+  if(info/=0.or.tail_warning.or.abs(outer_shell_ratio-1d-2)>1d-15)error stop 1703
+  call classify_sawf_dc_density_residual(8d-4,2d0,1d-2,outer_shell_ratio,tail_warning,info)
+  if(info/=0.or..not.tail_warning.or.abs(outer_shell_ratio-2d-2)>1d-15)error stop 1704
+  call classify_sawf_dc_density_residual(-1d0,2d0,1d-2,outer_shell_ratio,tail_warning,info)
+  if(info==0)error stop 1705
+  call classify_sawf_dc_density_residual(0d0,0d0,1d-2,outer_shell_ratio,tail_warning,info)
+  if(info==0)error stop 1706
+  call classify_sawf_dc_density_residual(0d0,-1d0,1d-2,outer_shell_ratio,tail_warning,info)
+  if(info==0)error stop 1707
+  call classify_sawf_dc_density_residual(ieee_value(0d0,ieee_positive_inf),2d0,1d-2,&
+    outer_shell_ratio,tail_warning,info)
+  if(info==0)error stop 1708
+  call classify_sawf_dc_density_residual(0d0,ieee_value(0d0,ieee_quiet_nan),1d-2,&
+    outer_shell_ratio,tail_warning,info)
+  if(info==0)error stop 1709
   if(.not.is_sawf_outer_buffer_shell([1,12,24],[24,24,24],[24,24,24]))error stop 17
   if(.not.is_sawf_outer_buffer_shell([1,12,18],[18,18,18],[24,24,24]))error stop 18
   if(.not.is_sawf_outer_buffer_shell([32,12,12],[32,32,32],[24,24,24]))error stop 181

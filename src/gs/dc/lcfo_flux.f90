@@ -3353,7 +3353,8 @@ contains
       validate_sawf_projected_wannier_columns
     use dg_wpw_wannier_tail_halo,only:exchange_sawf_wannier_tail_values,&
       exchange_sawf_discovered_wannier_tails,locate_sawf_wannier_tail_core,&
-      locate_sawf_wannier_tail_rank,classify_sawf_wannier_buffer_tail,is_sawf_outer_buffer_shell
+      locate_sawf_wannier_tail_rank,classify_sawf_wannier_buffer_tail,&
+      classify_sawf_dc_density_residual,is_sawf_outer_buffer_shell
     use dg_wpw_occupied_w_basis,only:s_dg_wpw_occupied_w_basis,t_dg_wpw_periodic_image_mismatch,&
       gather_dg_wpw_occupied_w_payload,initialize_dg_wpw_occupied_w_basis_collective,&
       broadcast_dg_wpw_occupied_w_basis,evaluate_dg_wpw_occupied_w_point,&
@@ -4922,7 +4923,8 @@ contains
 
     subroutine build_wpw_density_carrying_fragment_seed(seed_info)
       integer,intent(out)::seed_info
-      integer::local_nsource,isource,point,ixp,iyp,izp,iw,offset,ierr,root_info,point_info,source_info
+      integer::local_nsource,isource,point,ixp,iyp,izp,iw,offset,ierr,root_info,point_info,source_info,&
+        density_dc_info
       integer::grid_point(3)
       integer::occ_counts(dc%n_frag),occ_counts_all(dc%n_frag)
       integer,allocatable::source_w_ids_local(:),source_w_ids(:)
@@ -4943,6 +4945,7 @@ contains
       real(8)::projection_norms_local(2),projection_norms_global(2),metric_diagonal_spread
       real(8)::projection_orth,source_condition,source_charge,projected_charge,normalized_charge,&
         density_projection_residual,density_normalization_residual,density_charge_error,&
+        density_dc_residual,&
         density_dc_local(2),density_dc_global(2),direct_cross_local,direct_cross_global,&
         direct_captured_norm,direct_w_local,direct_w_global,direct_p_local,direct_p_global,&
         routed_w_local,routed_w_global,routed_p_local,routed_p_global,capture_denominator,&
@@ -4951,6 +4954,7 @@ contains
       integer::projection_rank,metric_iterations,metric_history_iter,w_norm_count_local,w_norm_count_global,&
         source_w_position,local_source_position
       integer::w_norm_max_location(1)
+      logical::density_dc_warning
 
       seed_info=1;root_info=0
       local_nsource=wpw_bootstrap_source_count;source_condition=wpw_bootstrap_source_condition
@@ -5428,7 +5432,12 @@ contains
       else
         density_dc_local=0d0
       endif
+      density_dc_residual=huge(1d0);density_dc_warning=.false.
       call MPI_Allreduce(density_dc_local,density_dc_global,2,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr)
+      density_dc_info=merge(0,1,ierr==MPI_SUCCESS)
+      if(density_dc_info==0)call classify_sawf_dc_density_residual(density_dc_global(1),density_dc_global(2),&
+        dg_wpw_scf_residual_tolerance,density_dc_residual,density_dc_warning,density_dc_info)
+      source_info=max(source_info,density_dc_info)
       if(dc%id_tot==0)write(*,'(1x,a,8(a,es12.4),a,i0)')'[DG-WPW-PHYSICAL-DIAGNOSTIC]',&
         ' captured_norm=',wpw_projection_captured_norm,&
         ' projection_residual=',density_projection_residual,&
@@ -5436,12 +5445,13 @@ contains
         ' projected_charge_error=',density_charge_error,&
         ' source_charge=',source_charge,' projected_charge=',projected_charge,&
         ' normalized_charge=',normalized_charge,' dc_density_residual=',&
-        sqrt(max(0d0,density_dc_global(1))/max(1d-300,density_dc_global(2))),&
+        density_dc_residual,&
         ' local_info=',source_info
-      if(ierr/=MPI_SUCCESS.or.density_dc_global(2)<=0d0.or.&
-        sqrt(density_dc_global(1)/density_dc_global(2))>dg_wpw_scf_residual_tolerance)source_info=1
       call MPI_Allreduce(source_info,root_info,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
       if(ierr/=MPI_SUCCESS.or.root_info/=0)return
+      if(dc%id_tot==0.and.density_dc_warning)write(*,'(1x,a,2(a,es12.4))')&
+        '[DG-WPW-DC-DENSITY-WARNING] status=warning',&
+        ' residual=',density_dc_residual,' tolerance=',dg_wpw_scf_residual_tolerance
       wpw_q_old_occ(1:size(wpw_qw,1),:)=wpw_qw(:,1:wpw_nocc)
       wpw_q_old_occ(size(wpw_qw,1)+1:,:)=wpw_qp(:,1:wpw_nocc)
       seed_info=0

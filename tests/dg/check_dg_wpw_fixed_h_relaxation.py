@@ -146,6 +146,24 @@ assert "wpw_occupations(iw)*real(capture(iw,iw),8)" in seed_body, (
 assert "sum(wpw_occupations*source_norm_global)" in seed_body, (
     "captured norm must be relative to the occupation-weighted source norm"
 )
+assert "call classify_sawf_dc_density_residual" in seed_body, (
+    "source-to-DC density quality must use the nonblocking diagnostic classifier"
+)
+dc_warning_pos = seed_body.index("[dg-wpw-dc-density-warning]")
+dc_classify_pos = seed_body.index("call classify_sawf_dc_density_residual")
+dc_combine_pos = seed_body.index("source_info=max(source_info,density_dc_info)", dc_classify_pos)
+dc_collective_pos = seed_body.index("call mpi_allreduce(source_info,root_info", dc_combine_pos)
+dc_return_pos = seed_body.index("if(ierr/=mpi_success.or.root_info/=0)return", dc_collective_pos)
+assert dc_classify_pos < dc_combine_pos < dc_collective_pos < dc_return_pos < dc_warning_pos, (
+    "structural and DC-density validity must be combined collectively before warning"
+)
+assert "source_info=merge(0,1,ierr==mpi_success)" not in seed_body, (
+    "DC diagnostic MPI status must not overwrite structural projection failures"
+)
+assert "status=warning" in seed_body[dc_warning_pos:dc_warning_pos + 250]
+assert "sqrt(density_dc_global(1)/density_dc_global(2))>dg_wpw_scf_residual_tolerance" not in seed_body, (
+    "a valid source-to-DC approximation residual must not fail the seed"
+)
 assert "wpw_qp(:,1:wpw_nocc)=0" not in seed_body, "occupied P coefficients must not be zeroed"
 assert "density_carrying_fragment_seed" in seed_body, "seed provenance must be explicit in diagnostics"
 assert "coef_wf" not in seed_body, "density-carrying seed must not use Flux-LCFO eigenvectors"
