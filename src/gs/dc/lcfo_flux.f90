@@ -4435,6 +4435,7 @@ contains
         source_condition,occupied_w_basis,source_info)
       use communication,only:comm_summation
       use salmon_global,only:wannier_projection_width
+      use inputoutput,only:au_length_aa
       complex(8),allocatable,intent(out)::source_values(:,:)
       integer,intent(out)::source_count,source_info
       real(8),intent(out)::source_condition
@@ -4460,9 +4461,11 @@ contains
       real(8)::x,y,z,gval,wrapped_center(3),fractional_center(3),core_lower(3),core_upper(3)
       real(8)::tail_norm_local(2),tail_norm_global(2),outer_shell_ratio,omitted_tail_ratio
       real(8),allocatable::spread_coordinates(:,:),spread_bvec(:,:),spread_weight(:),&
-        spread_norm(:),spread_norm_partial(:),spread_norm_global(:),spread_center(:,:),spread_omega(:)
+        spread_norm(:),spread_norm_partial(:),spread_norm_global(:),spread_center(:,:),spread_omega(:),&
+        spread_omega_a2(:),spread_width_a(:),spread_width_sorted(:)
       complex(8),allocatable::spread_link(:,:),spread_link_partial(:,:),spread_link_global(:,:)
       logical,allocatable::spread_center_valid(:)
+      integer,allocatable::spread_order(:),spread_stable_id(:),spread_owner(:)
       integer::ixp,iyp,izp,ixb,iyb,izb,sx,sy,sz,io_state,isource,jsource,point,local_info,center_image(3),&
         canonical_atoms(2),canonical_image(3),buffer_point,buffer_count,record,max_record,&
         destination_fragment,destination_local(3),destination_rank,global_point(3),global_grid_id,&
@@ -4470,6 +4473,9 @@ contains
         descriptor_buffer_lo(3),descriptor_buffer_hi(3),descriptor_gradient_lo(3),&
         descriptor_gradient_hi(3),descriptor_grid(3),gradient_point,gradient_extent(3),&
         unwrapped_point(3),periodic_image(3),local_grid(3),axis
+      integer::iw,jw,kw,widest_w,count_above_1p2a,valid_spread_count,comparison_axis,owner_offset
+      real(8)::spread_swap,median_a,p90_a
+      logical::spread_key_less
       logical::center_owned
 
       source_info=1;source_count=0;source_condition=huge(1d0)
@@ -4604,8 +4610,12 @@ contains
       allocate(occupied_w_p(stencil_extent(1),stencil_extent(2),stencil_extent(3),source_count),&
         canonical_occupied_w(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),source_count),&
         spread_coordinates(3,product(dc%lg_tot%num)),spread_bvec(3,6),spread_weight(6),&
-        spread_norm(source_count),spread_link(source_count,6),spread_center(3,source_count),&
-        spread_omega(source_count),spread_center_valid(source_count),&
+        spread_norm(source_count),spread_link(source_count,6),spread_center(3,global_source_count),&
+        spread_omega(global_source_count),spread_center_valid(global_source_count),&
+        spread_omega_a2(global_source_count),spread_width_a(global_source_count),&
+        spread_width_sorted(global_source_count),&
+        spread_order(global_source_count),spread_stable_id(global_source_count),&
+        spread_owner(global_source_count),&
         spread_norm_partial(global_source_count),spread_norm_global(global_source_count),&
         spread_link_partial(global_source_count,6),spread_link_global(global_source_count,6))
       occupied_w_p=reshape(buffer_values,shape(occupied_w_p));canonical_occupied_w=(0d0,0d0)
@@ -4614,6 +4624,11 @@ contains
       spread_norm_partial=0d0;spread_norm_global=0d0
       spread_link_partial=(0d0,0d0);spread_link_global=(0d0,0d0)
       spread_omega=huge(1d0);spread_center_valid=.false.;local_info=0
+      do axis=1,3
+        spread_bvec(axis,2*axis-1)=2d0*acos(-1d0)/wpw_box_length(axis)
+        spread_bvec(axis,2*axis)=-spread_bvec(axis,2*axis-1)
+        spread_weight(2*axis-1:2*axis)=0.5d0/spread_bvec(axis,2*axis-1)**2
+      enddo
       if(dc%id_frag==0)then
         call extract_dg_wpw_canonical_cell(occupied_w_p,dc%nxyz_domain,dc%nxyz_buffer,&
           dc%lg_tot%num,dc%ixyz_frag(:,dc%i_frag),canonical_occupied_w,local_info)
@@ -4623,11 +4638,6 @@ contains
             point=point+1
             spread_coordinates(:,point)=system%hgs*dble([ixp-1,iyp-1,izp-1])
           enddo;enddo;enddo
-          do axis=1,3
-            spread_bvec(axis,2*axis-1)=2d0*acos(-1d0)/wpw_box_length(axis)
-            spread_bvec(axis,2*axis)=-spread_bvec(axis,2*axis-1)
-            spread_weight(2*axis-1:2*axis)=0.5d0/spread_bvec(axis,2*axis-1)**2
-          enddo
           call assemble_sawf_diagonal_periodic_links(&
             reshape(canonical_occupied_w,[product(dc%lg_tot%num),source_count]),&
             spread_coordinates,spread_bvec,system%hvol,spread_norm,spread_link,local_info)
@@ -4645,6 +4655,96 @@ contains
         all(ieee_is_finite(real(spread_link_global))).and.&
         all(ieee_is_finite(aimag(spread_link_global))))
       if(.not.wpw_seed_collective_stage_ok('occupied_w_link_collection',local_info))return
+      call diagnose_sawf_discrete_wannier_spread(spread_link_global,spread_norm_global,&
+        spread_bvec,spread_weight,spread_center,spread_omega,spread_center_valid,local_info,&
+        require_unit_norm=.true.)
+      if(local_info==0)then
+        spread_omega_a2=spread_omega*au_length_aa**2
+        spread_width_a=sqrt(max(0d0,spread_omega_a2))
+        spread_order=[(iw,iw=1,global_source_count)]
+        do iw=1,global_source_count-1
+          kw=iw
+          do jw=iw+1,global_source_count
+            spread_key_less=.false.
+            do comparison_axis=1,5
+              if(source_key_global(comparison_axis,spread_order(jw))<&
+                  source_key_global(comparison_axis,spread_order(kw)))then
+                spread_key_less=.true.;exit
+              elseif(source_key_global(comparison_axis,spread_order(jw))>&
+                  source_key_global(comparison_axis,spread_order(kw)))then
+                exit
+              endif
+            enddo
+            if(spread_key_less)kw=jw
+          enddo
+          if(kw/=iw)then
+            jw=spread_order(iw);spread_order(iw)=spread_order(kw);spread_order(kw)=jw
+          endif
+        enddo
+        spread_stable_id=0;spread_owner=0;owner_offset=0
+        do iw=1,global_source_count
+          spread_stable_id(spread_order(iw))=iw
+        enddo
+        do iw=1,dc%n_frag
+          spread_owner(owner_offset+1:owner_offset+source_counts_all(iw))=iw
+          owner_offset=owner_offset+source_counts_all(iw)
+        enddo
+        valid_spread_count=count(spread_center_valid);spread_width_sorted=0d0;jw=0
+        do iw=1,global_source_count
+          if(.not.spread_center_valid(iw))cycle
+          jw=jw+1;spread_width_sorted(jw)=spread_width_a(iw)
+        enddo
+        do iw=2,valid_spread_count
+          spread_swap=spread_width_sorted(iw);jw=iw-1
+          do while(jw>=1)
+            if(spread_width_sorted(jw)<=spread_swap)exit
+            spread_width_sorted(jw+1)=spread_width_sorted(jw);jw=jw-1
+          enddo
+          spread_width_sorted(jw+1)=spread_swap
+        enddo
+        if(valid_spread_count>0)then
+          if(mod(valid_spread_count,2)==0)then
+            median_a=0.5d0*(spread_width_sorted(valid_spread_count/2)+&
+              spread_width_sorted(valid_spread_count/2+1))
+          else
+            median_a=spread_width_sorted((valid_spread_count+1)/2)
+          endif
+          p90_a=spread_width_sorted(ceiling(0.9d0*dble(valid_spread_count)))
+          count_above_1p2a=count(spread_width_a>1.2d0.and.spread_center_valid)
+          widest_w=0
+          do iw=1,global_source_count
+            if(.not.spread_center_valid(iw))cycle
+            if(widest_w==0.or.spread_width_a(iw)>spread_width_a(widest_w))widest_w=iw
+          enddo
+        else
+          median_a=huge(1d0);p90_a=huge(1d0);count_above_1p2a=0;widest_w=0
+        endif
+        if(dc%id_tot==0)then
+          do iw=1,global_source_count
+            if(spread_center_valid(iw))then
+              write(*,'(1x,a,i0,a,i0,a,l1,5(a,es13.5))')'[DG-WPW-WANNIER-SPREAD] id=',&
+                spread_stable_id(iw),' fragment=',spread_owner(iw),' center_valid=',.true.,&
+                ' center_x_A=',spread_center(1,iw)*au_length_aa,&
+                ' center_y_A=',spread_center(2,iw)*au_length_aa,&
+                ' center_z_A=',spread_center(3,iw)*au_length_aa,&
+                ' omega_A2=',spread_omega_a2(iw),' width_A=',spread_width_a(iw)
+            else
+              write(*,'(1x,a,i0,a,i0,a,l1)')'[DG-WPW-WANNIER-SPREAD] id=',&
+                spread_stable_id(iw),' fragment=',spread_owner(iw),' center_valid=',.false.
+            endif
+          enddo
+          if(valid_spread_count>0)write(*,'(1x,a,5(a,es13.5),4(a,i0))')&
+            '[DG-WPW-WANNIER-SPREAD-SUMMARY]',&
+            ' min_A=',spread_width_sorted(1),&
+            ' mean_A=',sum(spread_width_a,mask=spread_center_valid)/dble(valid_spread_count),&
+            ' median_A=',median_a,' p90_A=',p90_a,' max_A=',spread_width_sorted(valid_spread_count),&
+            ' count_above_1p2A=',count_above_1p2a,' valid_count=',valid_spread_count,&
+            ' invalid_count=',global_source_count-valid_spread_count,&
+            ' widest_id=',merge(spread_stable_id(widest_w),0,widest_w>0)
+        endif
+        if(.not.all(spread_center_valid))local_info=1
+      endif
+      if(.not.wpw_seed_collective_stage_ok('occupied_w_spread_diagnostic',local_info))return
       allocate(compact_gradient_partial(3,product(gradient_extent),source_count),&
         compact_gradient_values(3,product(gradient_extent),source_count))
       call build_sawf_projected_buffer_gradients(occupied_stencil,stencil%coef_nab,overlap,&
