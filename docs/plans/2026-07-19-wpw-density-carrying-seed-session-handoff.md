@@ -215,6 +215,14 @@ stopした。したがってraw B=10 fragment projected-W Pは物理24点並進�
 fragment arrayのbuffer生成時に一意なphysical-cell representativeから周期像を構築する
 設計を行う。
 
+静的追跡では`src/gs/dc/dcdft.f90:init_fragment`がfragment計算セルとgridを
+`domain+2B`へ置換している。B=10のraw fragment orbitalは32点fragment-cell周期で
+あり、`dc%jxyz_tot`だけがその32 storage点を24点physical cellへfoldする。したがって
+storage 15/23が同じglobal点へ写っても値は一致しない。発生源はWannier変換やP reorder
+ではなく、raw fragment wavefunctionをphysical gridへ対応付ける境界である。修正では
+raw fragment orbitalへ24点周期性を要求せず、`dc%jxyz_tot`ごとに一意なrepresentativeを
+選び、その値からWPW用Pの全周期像を微分前に構築する必要がある。
+
 少なくとも以下をrank-local値とcollective aggregateの両方で確認する。
 
 - occupied Wが16/fragment、128/globalであり、stable ownerが一意である。

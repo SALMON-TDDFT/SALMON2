@@ -280,3 +280,18 @@ The run then stopped collectively at the newly isolated
 B=10 fragment projected-W P values are not periodic under the 24-point
 physical-cell translation. The discrepancy is many orders of magnitude above
 the `100*epsilon*scale` image-consistency tolerance and is not roundoff.
+
+Static root-cause tracing reaches `src/gs/dc/dcdft.f90:init_fragment`. The
+fragment calculation replaces its cell/grid by `domain+2B`; hence B=10
+fragment orbitals obey a 32-point fragment-cell periodicity. In contrast,
+`dc%jxyz_tot` folds those 32 storage points onto the 24-point physical cell.
+Storage indices 15 and 23 can therefore map to the same physical grid point
+without being equal fragment-cell points. The mismatch exists at the raw
+fragment-wavefunction/physical-grid mapping boundary, before projected-W
+transformation or P reordering.
+
+The corrective design must construct the WPW physical-periodic P from a unique
+representative for each `dc%jxyz_tot` value and populate every P image from
+that representative before differentiation. It must not require the raw
+fragment SCF orbital, whose boundary condition belongs to the larger fragment
+box, to be 24-point periodic.
