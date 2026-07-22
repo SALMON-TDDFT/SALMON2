@@ -1,10 +1,15 @@
 program wpw_generalized_driver
  use dg_generalized_algebra
+ use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
  implicit none
  integer,parameter::n=3
  complex(8)::s(n,n),h0(n,n),hf(n,n),h(n,n),c(n,n),x(n,n),u(n,n),c0(n),c1(n),ce(n),cnf(n),tmp(n,n),d(n,1),back(n,1)
  real(8)::eval(n),resid,orth,cond,sunit,emin,emax,nfull,neuclid
  integer::info,discarded,i,j
+ complex(8)::metric_diag(4,4),metric_overlap(4,3)
+ real(8)::metric_minimum,metric_maximum,minimum_ratio,retained_minimum_ratio,occupied_discarded_fraction,&
+   extra_discarded_fraction,occupied_low_fraction,extra_low_fraction
+ integer::effective_rank
  s=reshape([cmplx(1.4d0,0d0,8),cmplx(.12d0,-.04d0,8),cmplx(.03d0,.02d0,8), &
             cmplx(.12d0,.04d0,8),cmplx(1.1d0,0d0,8),cmplx(.08d0,-.01d0,8), &
             cmplx(.03d0,-.02d0,8),cmplx(.08d0,.01d0,8),cmplx(.9d0,0d0,8)],[n,n])
@@ -28,6 +33,40 @@ program wpw_generalized_driver
  call dg_s_exp_action(h0,s,n,1d-10,.17d0,c0,cnf,sunit,cond,discarded,info);call req(maxval(abs(cnf-c1))>1d-4,'missing face control')
  call euclidean_action(h,n,.17d0,c0,ce);neuclid=abs(real(dot_product(ce,matmul(s,ce)),8)-1d0)
  call req(neuclid>1d-5,'Euclidean negative control')
+ metric_diag=0;metric_diag(1,1)=1d-12;metric_diag(2,2)=5d-10
+ metric_diag(3,3)=1d-8;metric_diag(4,4)=1d0;metric_overlap=0
+ metric_overlap(1,1)=3d0;metric_overlap(3,1)=4d0;metric_overlap(2,2)=1d0
+ metric_overlap(3,3)=2d0;metric_overlap(4,3)=1d0
+ call dg_metric_mode_residual_split(metric_diag,metric_overlap,4,3,2,1d-9,metric_minimum,metric_maximum,minimum_ratio,&
+   retained_minimum_ratio,effective_rank,occupied_discarded_fraction,extra_discarded_fraction,&
+   occupied_low_fraction,extra_low_fraction,info)
+ call req(info==0.and.effective_rank==2.and.abs(metric_minimum-1d-12)<1d-20.and.metric_maximum==1d0.and.&
+   abs(minimum_ratio-1d-12)<1d-20.and.&
+   abs(retained_minimum_ratio-1d-8)<1d-16.and.&
+   abs(occupied_discarded_fraction-10d0/26d0)<1d-12.and.&
+   abs(extra_discarded_fraction)<1d-12.and.abs(occupied_low_fraction-16d0/26d0)<1d-12.and.&
+   abs(extra_low_fraction-4d0/5d0)<1d-12,'metric mode residual split')
+ metric_overlap=0
+ call dg_metric_mode_residual_split(metric_diag,metric_overlap,4,3,2,1d-9,metric_minimum,metric_maximum,minimum_ratio,&
+   retained_minimum_ratio,effective_rank,occupied_discarded_fraction,extra_discarded_fraction,&
+   occupied_low_fraction,extra_low_fraction,info)
+ call req(info==0.and.max(occupied_discarded_fraction,extra_discarded_fraction,&
+   occupied_low_fraction,extra_low_fraction)==0d0,'zero metric overlap')
+ metric_diag=0;do i=1,4;metric_diag(i,i)=dble(i);enddo
+ call dg_metric_mode_residual_split(metric_diag,metric_overlap,4,3,2,1d-9,metric_minimum,metric_maximum,minimum_ratio,&
+   retained_minimum_ratio,effective_rank,occupied_discarded_fraction,extra_discarded_fraction,&
+   occupied_low_fraction,extra_low_fraction,info)
+ call req(info==0.and.effective_rank==4.and.occupied_discarded_fraction==0d0,'no discarded metric mode')
+ metric_overlap(1,1)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,8)
+ call dg_metric_mode_residual_split(metric_diag,metric_overlap,4,3,2,1d-9,metric_minimum,metric_maximum,minimum_ratio,&
+   retained_minimum_ratio,effective_rank,occupied_discarded_fraction,extra_discarded_fraction,&
+   occupied_low_fraction,extra_low_fraction,info)
+ call req(info/=0,'nonfinite metric overlap')
+ metric_overlap=0;metric_overlap(4,1)=cmplx(sqrt(huge(1d0)),sqrt(huge(1d0)),8)
+ call dg_metric_mode_residual_split(metric_diag,metric_overlap,4,3,2,1d-9,metric_minimum,metric_maximum,minimum_ratio,&
+   retained_minimum_ratio,effective_rank,occupied_discarded_fraction,extra_discarded_fraction,&
+   occupied_low_fraction,extra_low_fraction,info)
+ call req(info/=0,'overflowed metric overlap weight')
  write(*,'(a,*(1x,es24.16))')'EVAL',eval
  write(*,'(a,*(1x,es24.16))')'X',((real(x(i,j),8),aimag(x(i,j)),i=1,n),j=1,n)
  write(*,'(a,*(1x,es24.16))')'C',((real(c(i,j),8),aimag(c(i,j)),i=1,n),j=1,n)

@@ -84,6 +84,11 @@ convergence_pos = solve_body.index("if(residual<tol.and.orth<tol)return")
 assert convergence_pos < state_diag_pos, "state diagnostics must not replace the existing convergence decision"
 assert "residual=max(occupied_max,extra_max)" not in solve_body, \
     "split diagnostics must not feed back into convergence"
+metric_mode_pos = solve_body.index("[dg-wpw-search-metric-mode]")
+assert "call gram(z,r" in solve_body[:metric_mode_pos], "search metric diagnostic must assemble Z^H R"
+assert "call dg_metric_mode_residual_split" in solve_body[:metric_mode_pos]
+assert metric_mode_pos < solve_body.index("call dg_reduced_generalized_eigh"), \
+    "metric-mode diagnostic must observe, not replace, the production reduced solve"
 
 for token in (
     "yn_dg_wpw_production",

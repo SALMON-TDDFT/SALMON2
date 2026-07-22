@@ -1,9 +1,61 @@
 module dg_generalized_algebra
+ use,intrinsic::ieee_arithmetic,only:ieee_is_finite
  implicit none
  private
  public::dg_metric_factor,dg_generalized_eigh,dg_reduced_generalized_eigh,dg_s_exp_action, &
-  dg_metric_to_orth,dg_metric_from_orth
+  dg_metric_to_orth,dg_metric_from_orth,dg_metric_mode_residual_split
 contains
+ subroutine dg_metric_mode_residual_split(s,b,n,nrhs,nocc,cutoff,metric_minimum,metric_maximum,minimum_ratio,&
+   retained_minimum_ratio,effective_rank,occupied_discarded_fraction,extra_discarded_fraction,&
+   occupied_low_fraction,extra_low_fraction,info)
+  integer,intent(in)::n,nrhs,nocc
+  real(8),intent(in)::cutoff
+  complex(8),intent(in)::s(n,n),b(n,nrhs)
+  real(8),intent(out)::metric_minimum,metric_maximum,minimum_ratio,retained_minimum_ratio,occupied_discarded_fraction,&
+    extra_discarded_fraction,occupied_low_fraction,extra_low_fraction
+  integer,intent(out)::effective_rank,info
+  complex(8)::v(n,n),projected(n,nrhs)
+  real(8)::e(n),emax,threshold,occupied_total,extra_total
+  integer::first_retained
+
+  info=1;effective_rank=0;metric_minimum=huge(1d0);metric_maximum=huge(1d0)
+  minimum_ratio=huge(1d0);retained_minimum_ratio=huge(1d0)
+  occupied_discarded_fraction=huge(1d0);extra_discarded_fraction=huge(1d0)
+  occupied_low_fraction=huge(1d0);extra_low_fraction=huge(1d0)
+  if(n<2.or.nrhs<2.or.nocc<1.or.nocc>=nrhs.or..not.ieee_is_finite(cutoff).or.cutoff<=0d0.or.&
+    .not.all(ieee_is_finite(real(s,8))).or..not.all(ieee_is_finite(aimag(s))).or.&
+    .not.all(ieee_is_finite(real(b,8))).or..not.all(ieee_is_finite(aimag(b))))return
+  if(maxval(abs(s-conjg(transpose(s))))>1d-10*max(1d0,maxval(abs(s))))then;info=10;return;endif
+  v=.5d0*(s+conjg(transpose(s)));call heev(v,n,e,info);if(info/=0)return
+  emax=e(n);if(.not.all(ieee_is_finite(e)).or.emax<=0d0.or.e(1)<-1d-12*emax)then;info=11;return;endif
+  threshold=cutoff*emax;if(.not.ieee_is_finite(threshold))then;info=13;return;endif
+  effective_rank=count(e>threshold)
+  if(effective_rank<1)then;info=12;return;endif
+  first_retained=n-effective_rank+1
+  metric_minimum=e(1);metric_maximum=emax
+  minimum_ratio=max(0d0,e(1)/emax);retained_minimum_ratio=e(first_retained)/emax
+  projected=matmul(conjg(transpose(v)),b)
+  if(.not.all(ieee_is_finite(real(projected,8))).or.&
+    .not.all(ieee_is_finite(aimag(projected))))then;info=14;return;endif
+  occupied_total=sum(abs(projected(:,1:nocc))**2)
+  extra_total=sum(abs(projected(:,nocc+1:nrhs))**2)
+  if(.not.all(ieee_is_finite([occupied_total,extra_total])))then;info=15;return;endif
+  occupied_discarded_fraction=0d0;extra_discarded_fraction=0d0
+  occupied_low_fraction=0d0;extra_low_fraction=0d0
+  if(occupied_total>0d0)then
+   occupied_discarded_fraction=sum(abs(projected(1:first_retained-1,1:nocc))**2)/occupied_total
+   occupied_low_fraction=sum(abs(projected(first_retained:n,1:nocc))**2,&
+     mask=spread(e(first_retained:n)<=10d0*threshold,2,nocc))/occupied_total
+  endif
+  if(extra_total>0d0)then
+   extra_discarded_fraction=sum(abs(projected(1:first_retained-1,nocc+1:nrhs))**2)/extra_total
+   extra_low_fraction=sum(abs(projected(first_retained:n,nocc+1:nrhs))**2,&
+     mask=spread(e(first_retained:n)<=10d0*threshold,2,nrhs-nocc))/extra_total
+  endif
+  if(.not.all(ieee_is_finite([metric_minimum,metric_maximum,minimum_ratio,retained_minimum_ratio,&
+    occupied_discarded_fraction,extra_discarded_fraction,occupied_low_fraction,extra_low_fraction])))return
+  info=0
+ end subroutine dg_metric_mode_residual_split
  subroutine heev(a,n,e,info)
   integer,intent(in)::n;complex(8),intent(inout)::a(n,n);real(8),intent(out)::e(n);integer,intent(out)::info
   complex(8),allocatable::w(:);real(8),allocatable::rw(:);complex(8)::q(1);integer::lw

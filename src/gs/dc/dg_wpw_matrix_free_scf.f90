@@ -1,7 +1,8 @@
 module dg_wpw_matrix_free_scf
   use mpi,only:MPI_Allreduce,MPI_Comm_rank,MPI_INTEGER,MPI_MAX,MPI_MIN,MPI_DOUBLE_PRECISION,MPI_SUCCESS
   use dg_wpw_matrix_free_operator,only:apply_h_batch,apply_s_batch,global_gram_batch
-  use dg_generalized_algebra,only:dg_generalized_eigh,dg_reduced_generalized_eigh,dg_metric_factor
+  use dg_generalized_algebra,only:dg_generalized_eigh,dg_reduced_generalized_eigh,dg_metric_factor,&
+    dg_metric_mode_residual_split
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
   implicit none
   private
@@ -617,10 +618,15 @@ contains
     complex(8)::hz(nw+np,3*nretain),sz(nw+np,3*nretain)
     complex(8)::reduced_h(3*nretain,3*nretain),reduced_s(3*nretain,3*nretain)
     complex(8)::reduced_c(3*nretain,nretain)
+    complex(8)::metric_residual_overlap(3*nretain,nretain)
     real(8)::condition,reduced_eval(nretain),reduced_residual,reduced_orth
     real(8)::raw_norm2(nretain),preconditioned_norm2(nretain),occupied_max,extra_max,&
       occupied_preconditioned,extra_preconditioned,occupied_ratio,extra_ratio
-    integer::discarded,effective_rank,i,inner,occupied_worst,extra_worst,diagnostic_info,rank,ierr
+    real(8)::metric_minimum,metric_maximum,metric_minimum_ratio,metric_retained_minimum_ratio,&
+      occupied_discarded_fraction,&
+      extra_discarded_fraction,occupied_low_fraction,extra_low_fraction
+    integer::discarded,effective_rank,i,inner,occupied_worst,extra_worst,diagnostic_info,rank,ierr,&
+      metric_effective_rank
     real(8)::stage_clock
     info=0;residual=huge(1d0);orth=huge(1d0);search=(0d0,0d0);call cpu_time(stage_clock)
     do inner=1,160
@@ -673,6 +679,25 @@ contains
       call trace_solve_window('expanded_apply_end',comm,stage_clock,inner,0,residual,orth)
       call gram(z,hz,nw+np,3*nretain,3*nretain,reduced_h,info);if(info/=0)return
       call gram(z,sz,nw+np,3*nretain,3*nretain,reduced_s,info);if(info/=0)return
+      if(window_state_residual_iteration(inner))then
+        call gram(z,r,nw+np,3*nretain,nretain,metric_residual_overlap,info);if(info/=0)return
+        call dg_metric_mode_residual_split(reduced_s,metric_residual_overlap,3*nretain,nretain,nocc,&
+          cutoff,metric_minimum,metric_maximum,metric_minimum_ratio,metric_retained_minimum_ratio,&
+          metric_effective_rank,&
+          occupied_discarded_fraction,extra_discarded_fraction,occupied_low_fraction,&
+          extra_low_fraction,diagnostic_info)
+        if(diagnostic_info/=0)then;info=43;return;endif
+        if(rank==0)write(*,'(1x,a,i0,4(a,es12.4),a,i0,4(a,es12.4))')&
+          '[DG-WPW-SEARCH-METRIC-MODE] inner=',inner,&
+          ' minimum=',metric_minimum,' maximum=',metric_maximum,&
+          ' minimum_ratio=',metric_minimum_ratio,&
+          ' retained_minimum_ratio=',metric_retained_minimum_ratio,&
+          ' effective_rank=',metric_effective_rank,&
+          ' occupied_discarded_fraction=',occupied_discarded_fraction,&
+          ' occupied_low_fraction=',occupied_low_fraction,&
+          ' extra_discarded_fraction=',extra_discarded_fraction,&
+          ' extra_low_fraction=',extra_low_fraction
+      endif
       call dg_reduced_generalized_eigh(reduced_h,reduced_s,3*nretain,nretain,cutoff,&
         reduced_eval,reduced_c,effective_rank,reduced_residual,reduced_orth,info)
       if(info/=0)return

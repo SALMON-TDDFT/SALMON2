@@ -15,6 +15,8 @@ assert "call summarize_dg_wpw_window_state_residuals" in window_body
 assert window_body.index("if(residual<tol.and.orth<tol)return") < window_body.index(
     "[dg-wpw-window-state-residual]"
 ), "diagnostic split must remain downstream of the unchanged scalar convergence gate"
+assert "[dg-wpw-search-metric-mode]" in window_body
+assert "call dg_metric_mode_residual_split" in window_body
 
 control = "yn_dg_wpw_fixed_h_relaxation"
 assert control in GLOBAL, "missing explicit fixed-H production control"
