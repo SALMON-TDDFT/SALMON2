@@ -389,6 +389,29 @@ discardだけでは`O(1E-4)` plateauを説明できない。
 優先して示す。次はsearch履歴を毎回3-blockで累積する現更新と、明示restart
 （例えば`Z=[Q,R]`または一定間隔で`search=0`）を同一基底上で比較する。
 
+### 2026-07-22 完全search restart比較
+
+`54f334b`でdefault=`y`の`yn_dg_wpw_search_history`を追加し、明示`n`では各reduced
+update後にsearch blockを直接zero化して、次反復を`Z=[Q,R,0]`とした。無効時は捨てる
+history `matmul`自体を実行しない。preconditioner有無、fixed-H、continuation、通常の
+production algebra routeへ同じcontrolを伝播した。関連テスト、MPI fixture、全体
+MPI/EigenExa buildが通り、コードレビューはCritical/Importantなしだった。
+
+fresh B=6、無preconditioner、完全restart runは
+`stage2d_wpw_runs/20260722_task17_search_restart_no_precondition_b6/run.log`。同じseedを再現し、
+inner 160で同じ`info=40`となった。履歴ありTask 16に対し、inner 96のoccupied/extraは
+`1.1676E-03`/`1.8784E-03`（履歴あり`3.6079E-04`/`1.1093E-03`）、inner 160は
+`8.0773E-04`/`1.2379E-03`（履歴あり`2.5607E-04`/`2.0289E-04`）である。完全restartは
+最終occupiedを約3.15倍、extraを約6.10倍悪化させた。
+
+完全restartのeffective rankはinner 32/96/160で320/315/305、履歴ありは437/292/213
+なので、冗長性を抑えても残差は改善しない。従って累積search historyはplateau原因ではなく、
+むしろ収束に必要である。現時点ではphysical occupied-W空間が悪いという証拠より、
+retained Rayleigh--Ritz/operator recurrenceまたはcorrection direction生成の手続きに問題が
+残るという証拠が強い。ただし単純な完全restartは対策にならない。次は履歴を保持したまま、
+reduced solve後の明示残差最小化・Ritz pairの再計算整合性を診断する。cutoff、tolerance、
+basis、publication gateは変更しない。
+
 ## 新セッション開始文（コピー用）
 
 ```text
