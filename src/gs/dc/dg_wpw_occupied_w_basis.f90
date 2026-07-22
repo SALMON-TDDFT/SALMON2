@@ -26,6 +26,7 @@ module dg_wpw_occupied_w_basis
   public::dg_wpw_unwrapped_to_storage_index
   public::reorder_dg_wpw_fragment_buffer
   public::periodize_dg_wpw_fragment_buffer
+  public::assemble_dg_wpw_canonical_buffer_norm
   public::extract_dg_wpw_canonical_cell
 contains
   integer function dg_wpw_unwrapped_to_storage_index(local_grid,domain,buffer)result(storage)
@@ -74,10 +75,7 @@ contains
     integer,intent(out)::info
     logical,allocatable::seen(:,:,:)
     integer,allocatable::best_p(:,:,:,:)
-    integer(int64),allocatable::best_box_distance(:,:,:)
-    integer::extent(3),ix,iy,iz,cx,cy,cz,g(3),candidate(3),current(3),axis
-    integer(int64)::box_distance,delta
-    logical::better
+    integer::extent(3),ix,iy,iz,cx,cy,cz,g(3),current(3),map_info
 
     info=1;extent=domain+2*buffer
     if(any(domain<=0).or.any(buffer<0).or.any(total_shape<=0).or.&
@@ -85,6 +83,64 @@ contains
         any(fragment_origin>=total_shape).or.size(unwrapped_values,4)<=0.or.&
         any(shape(unwrapped_values)/=[extent,size(unwrapped_values,4)]).or.&
         .not.all(finite_complex(unwrapped_values)))return
+    call build_dg_wpw_fragment_representatives(domain,buffer,total_shape,fragment_origin,&
+      seen,best_p,map_info)
+    if(map_info/=0)return
+    do iz=1,extent(3);do iy=1,extent(2);do ix=1,extent(1)
+      g=[ix-buffer(1),iy-buffer(2),iz-buffer(3)]
+      cx=modulo(fragment_origin(1)+g(1)-1,total_shape(1))+1
+      cy=modulo(fragment_origin(2)+g(2)-1,total_shape(2))+1
+      cz=modulo(fragment_origin(3)+g(3)-1,total_shape(3))+1
+      current=best_p(:,cx,cy,cz)
+      unwrapped_values(ix,iy,iz,:)=unwrapped_values(current(1),current(2),current(3),:)
+    enddo;enddo;enddo
+    info=0
+  end subroutine periodize_dg_wpw_fragment_buffer
+
+  subroutine assemble_dg_wpw_canonical_buffer_norm(unwrapped_values,domain,buffer,total_shape,&
+      fragment_origin,quadrature_weight,norm,info)
+    complex(8),intent(in)::unwrapped_values(:,:,:,:)
+    integer,intent(in)::domain(3),buffer(3),total_shape(3),fragment_origin(3)
+    real(8),intent(in)::quadrature_weight
+    real(8),intent(out)::norm(:)
+    integer,intent(out)::info
+    logical,allocatable::seen(:,:,:)
+    integer,allocatable::best_p(:,:,:,:)
+    integer::extent(3),cx,cy,cz,current(3),map_info
+
+    info=1;norm=0d0;extent=domain+2*buffer
+    if(size(norm)/=size(unwrapped_values,4).or.size(norm)<=0.or.&
+        any(shape(unwrapped_values)/=[extent,size(unwrapped_values,4)]).or.&
+        quadrature_weight<=0d0.or..not.ieee_is_finite(quadrature_weight).or.&
+        .not.all(finite_complex(unwrapped_values)))return
+    call build_dg_wpw_fragment_representatives(domain,buffer,total_shape,fragment_origin,&
+      seen,best_p,map_info)
+    if(map_info/=0)return
+    do cz=1,total_shape(3);do cy=1,total_shape(2);do cx=1,total_shape(1)
+      if(.not.seen(cx,cy,cz))cycle
+      current=best_p(:,cx,cy,cz)
+      norm=norm+abs(unwrapped_values(current(1),current(2),current(3),:))**2*quadrature_weight
+    enddo;enddo;enddo
+    if(any(norm<=0d0).or..not.all(ieee_is_finite(norm)))then
+      norm=0d0;return
+    endif
+    info=0
+  end subroutine assemble_dg_wpw_canonical_buffer_norm
+
+  subroutine build_dg_wpw_fragment_representatives(domain,buffer,total_shape,fragment_origin,&
+      seen,best_p,info)
+    integer,intent(in)::domain(3),buffer(3),total_shape(3),fragment_origin(3)
+    logical,allocatable,intent(out)::seen(:,:,:)
+    integer,allocatable,intent(out)::best_p(:,:,:,:)
+    integer,intent(out)::info
+    integer(int64),allocatable::best_box_distance(:,:,:)
+    integer::extent(3),ix,iy,iz,cx,cy,cz,g(3),candidate(3),current(3),axis
+    integer(int64)::box_distance,delta
+    logical::better
+
+    info=1;extent=domain+2*buffer
+    if(any(domain<=0).or.any(buffer<0).or.any(total_shape<=0).or.&
+        any(domain>total_shape).or.any(fragment_origin<0).or.any(fragment_origin>=total_shape))return
     allocate(seen(total_shape(1),total_shape(2),total_shape(3)),&
       best_p(3,total_shape(1),total_shape(2),total_shape(3)),&
       best_box_distance(total_shape(1),total_shape(2),total_shape(3)))
@@ -117,16 +173,8 @@ contains
         best_box_distance(cx,cy,cz)=box_distance
       endif
     enddo;enddo;enddo
-    do iz=1,extent(3);do iy=1,extent(2);do ix=1,extent(1)
-      g=[ix-buffer(1),iy-buffer(2),iz-buffer(3)]
-      cx=modulo(fragment_origin(1)+g(1)-1,total_shape(1))+1
-      cy=modulo(fragment_origin(2)+g(2)-1,total_shape(2))+1
-      cz=modulo(fragment_origin(3)+g(3)-1,total_shape(3))+1
-      current=best_p(:,cx,cy,cz)
-      unwrapped_values(ix,iy,iz,:)=unwrapped_values(current(1),current(2),current(3),:)
-    enddo;enddo;enddo
     info=0
-  end subroutine periodize_dg_wpw_fragment_buffer
+  end subroutine build_dg_wpw_fragment_representatives
 
   subroutine extract_dg_wpw_canonical_cell(unwrapped_values,domain,buffer,total_shape,&
       fragment_origin,canonical_values,info,mismatch)

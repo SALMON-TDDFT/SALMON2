@@ -4,7 +4,7 @@ program test_dg_wpw_occupied_w_basis
     initialize_dg_wpw_occupied_w_basis,&
     evaluate_dg_wpw_occupied_w_point,dg_wpw_unwrapped_to_storage_index,&
     reorder_dg_wpw_fragment_buffer,periodize_dg_wpw_fragment_buffer,&
-    extract_dg_wpw_canonical_cell
+    assemble_dg_wpw_canonical_buffer_norm,extract_dg_wpw_canonical_cell
   implicit none
   type(s_dg_wpw_occupied_w_basis)::basis,changed_basis
   integer::global_keys(5,4),owners(4),local_keys(5,2),grid_ids(3),info
@@ -19,6 +19,7 @@ program test_dg_wpw_occupied_w_basis
   complex(8)::partial5(22,1,1,1),partial5_before(22,1,1,1)
   complex(8)::aliases10(32,1,1,1),aliases10_before(32,1,1,1),tie_aliases(4,1,1,1)
   integer::canonical_grid(3),origin(3)
+  real(8)::canonical_norm(1),expected_norm
   type(t_dg_wpw_periodic_image_mismatch)::mismatch
 
   ! Physical periodization accepts a partial P (B=5) and requests no extra
@@ -31,6 +32,10 @@ program test_dg_wpw_occupied_w_basis
   call periodize_dg_wpw_fragment_buffer(partial5,[12,1,1],[5,0,0],&
     [24,1,1],[12,0,0],info)
   if(info/=0.or.maxval(abs(partial5-partial5_before))>0d0)error stop 180
+  expected_norm=0.25d0*sum(abs(partial5(:,1,1,1))**2)
+  call assemble_dg_wpw_canonical_buffer_norm(partial5,[12,1,1],[5,0,0],&
+    [24,1,1],[12,0,0],0.25d0,canonical_norm,info)
+  if(info/=0.or.abs(canonical_norm(1)-expected_norm)>1d-12*max(1d0,expected_norm))error stop 190
 
   ! For B=10, P indices i and i+24 are physical aliases.  The latter is
   ! closer to the closed core [11:22] and must be the representative.
@@ -50,6 +55,13 @@ program test_dg_wpw_occupied_w_basis
       abs(aliases10(ix+24,1,1,1)-aliases10_before(ix,1,1,1))>0d0)error stop 182
   enddo
   if(maxval(abs(aliases10(11:22,1,1,1)-aliases10_before(11:22,1,1,1)))>0d0)error stop 183
+  expected_norm=0.25d0*sum(abs(aliases10(1:24,1,1,1))**2)
+  call assemble_dg_wpw_canonical_buffer_norm(aliases10,[12,1,1],[10,0,0],&
+    [24,1,1],[12,0,0],0.25d0,canonical_norm,info)
+  if(info/=0.or.abs(canonical_norm(1)-expected_norm)>1d-12*max(1d0,expected_norm))error stop 191
+  call assemble_dg_wpw_canonical_buffer_norm(aliases10,[12,1,1],[10,0,0],&
+    [24,1,1],[12,0,0],0d0,canonical_norm,info)
+  if(info==0.or.any(canonical_norm/=0d0))error stop 192
   aliases10_before=aliases10
   call periodize_dg_wpw_fragment_buffer(aliases10,[12,1,1],[10,0,0],&
     [24,1,1],[12,0,0],info)
