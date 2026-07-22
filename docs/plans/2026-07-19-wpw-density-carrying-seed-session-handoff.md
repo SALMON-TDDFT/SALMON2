@@ -437,6 +437,34 @@ retained residual correction directionを十分速く取り込めない手続き
 preconditionerの欠如を優先して示す。既存diagonal preconditionerは悪化が実測済みなので、
 それを戻さず、S-metricを考慮したcorrection equation/preconditionerを次に設計する。
 
+### 2026-07-23 fragment-local metric block correction比較
+
+`803f6df`でdefault-offの`yn_dg_wpw_metric_preconditioner`とcollective production adapterを
+追加した。既存diagonal controlとの同時`y`は拒否し、fixed-H/continuationだけを
+metric/diagonal/noneに分岐する。通常production algebraはcallback-freeのままである。
+adapterはbounded-operator communicatorで固有値/RHS metadataをcollective検証してから
+既存fragment-local block inverseへ委譲し、因子のepoch/fingerprint拘束を保持する。
+2-rank実fixtureはexact block solve、interface lambda変更後の再利用、operator rebuild後の
+stale拒否を確認した。関連回帰、MPI/EigenExa build、レビューはすべてPASSし、
+Critical/Importantはなかった。
+
+fresh B=6 runは
+`stage2d_wpw_runs/20260723_task19_metric_block_b6/run.log`。Task 16と同一seed、
+diagonal=`n`、metric=`y`、history=`y`で8 rank実行した。fragment blockはdimension 138、
+condition `4.5069E+05`。inner 32/96/160のoccupied/extraはそれぞれ
+`7.6809E-05/6.2909E-03`、`2.4120E-06/1.2688E-03`、
+`1.9816E-06/9.5958E-04`だった。Task 16に対してoccupiedは約25.6/149.6/129.2倍改善したが、
+extraは約1.56/1.14/4.73倍悪化した。effective rankは337/210/175（Task 16は
+437/292/213）。inner 160のpreconditioned/residual比はoccupied`1.5280E+02`、
+extra`8.4597E+02`で、局所逆によるextra過増幅が明確である。
+
+Ritz post/direct defectは最大`1.81E-09`、metric orthogonalityは
+`1.97E-12`から`1.08E-13`で、既存更新の
+整合性は保たれた。fixed-Hは`info=40`、publicationなし。これは局所
+`S_block^{-1}r` block-Jacobi近似の失敗であり、metric-aware correction一般やoccupied-W
+基底空間の失敗とは解釈しない。次はextra stateの過増幅を抑えるregularization/state別適用、
+または`H-epsilon S`を近似するmetric-consistent correctionを同一条件で設計・比較する。
+
 ## 新セッション開始文（コピー用）
 
 ```text
