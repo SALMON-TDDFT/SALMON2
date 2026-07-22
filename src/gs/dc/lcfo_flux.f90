@@ -3356,7 +3356,8 @@ contains
     use dg_wpw_occupied_w_basis,only:s_dg_wpw_occupied_w_basis,t_dg_wpw_periodic_image_mismatch,&
       gather_dg_wpw_occupied_w_payload,initialize_dg_wpw_occupied_w_basis_collective,&
       broadcast_dg_wpw_occupied_w_basis,evaluate_dg_wpw_occupied_w_point,&
-      dg_wpw_unwrapped_to_storage_index,reorder_dg_wpw_fragment_buffer
+      dg_wpw_unwrapped_to_storage_index,reorder_dg_wpw_fragment_buffer,&
+      periodize_dg_wpw_fragment_buffer
     use dg_wpw_occupied_w_basis,only:extract_dg_wpw_canonical_cell
     use rt_dg_wpw_production_builder,only:route_dg_wpw_staged_candidates,&
       scan_dg_wpw_canonical_faces=>scan_and_route_dg_wpw_canonical_faces,&
@@ -4472,11 +4473,12 @@ contains
         source_index,core_point,core_descriptor_point,rank_meta(8),ierr,stencil_radius,stencil_extent(3),stencil_lo(3),&
         descriptor_buffer_lo(3),descriptor_buffer_hi(3),descriptor_gradient_lo(3),&
         descriptor_gradient_hi(3),descriptor_grid(3),gradient_point,gradient_extent(3),&
-        unwrapped_point(3),periodic_image(3),local_grid(3),axis
+        unwrapped_point(3),periodic_image(3),local_grid(3),axis,&
+        full_cell_coverage_local,full_cell_coverage_global
       integer::iw,jw,kw,widest_w,count_above_1p2a,valid_spread_count,comparison_axis,owner_offset
       real(8)::spread_swap,median_a,p90_a
       logical::spread_key_less
-      logical::center_owned
+      logical::center_owned,full_cell_coverage
       type(t_dg_wpw_periodic_image_mismatch)::periodic_mismatch
 
       source_info=1;source_count=0;source_condition=huge(1d0)
@@ -4592,6 +4594,9 @@ contains
       call reorder_dg_wpw_fragment_buffer(occupied_storage,dc%nxyz_domain,dc%nxyz_buffer,&
         occupied_stencil,local_info)
       if(.not.wpw_seed_collective_stage_ok('unwrapped_buffer_order',local_info))return
+      call periodize_dg_wpw_fragment_buffer(occupied_stencil,dc%nxyz_domain,dc%nxyz_buffer,&
+        dc%lg_tot%num,dc%ixyz_frag(:,dc%i_frag),local_info)
+      if(.not.wpw_seed_collective_stage_ok('physical_periodic_p',local_info))return
       occupied_buffer=(0d0,0d0);buffer_point=0
       do izb=1,stencil_extent(3)
         do iyb=1,stencil_extent(2)
@@ -4630,7 +4635,13 @@ contains
         spread_bvec(axis,2*axis)=-spread_bvec(axis,2*axis-1)
         spread_weight(2*axis-1:2*axis)=0.5d0/spread_bvec(axis,2*axis-1)**2
       enddo
-      if(dc%id_frag==0)then
+      full_cell_coverage_local=merge(1,0,all(stencil_extent>=dc%lg_tot%num))
+      call MPI_Allreduce(full_cell_coverage_local,full_cell_coverage_global,1,MPI_INTEGER,MPI_MIN,&
+        dc%icomm_tot,ierr)
+      local_info=merge(0,1,ierr==MPI_SUCCESS)
+      if(.not.wpw_seed_collective_stage_ok('full_cell_coverage_globalization',local_info))return
+      full_cell_coverage=full_cell_coverage_global==1
+      if(full_cell_coverage.and.dc%id_frag==0)then
         call extract_dg_wpw_canonical_cell(occupied_w_p,dc%nxyz_domain,dc%nxyz_buffer,&
           dc%lg_tot%num,dc%ixyz_frag(:,dc%i_frag),canonical_occupied_w,local_info,periodic_mismatch)
         if(periodic_mismatch%valid)write(*,'(1x,a,i0,4(a,3(i0,1x)),a,i0,a,es13.5)')&
@@ -4639,8 +4650,9 @@ contains
           ' second_p=',periodic_mismatch%second_p,' domain=',dc%nxyz_domain,&
           ' w_row=',periodic_mismatch%w_row,' max_abs_diff=',periodic_mismatch%abs_diff
       endif
-      if(.not.wpw_seed_collective_stage_ok('occupied_w_canonical_cell_extraction',local_info))return
-      local_info=0
+      if(full_cell_coverage)then
+        if(.not.wpw_seed_collective_stage_ok('occupied_w_canonical_cell_extraction',local_info))return
+        local_info=0
       if(dc%id_frag==0)then
         point=0
         do izp=1,dc%lg_tot%num(3);do iyp=1,dc%lg_tot%num(2);do ixp=1,dc%lg_tot%num(1)
@@ -4753,6 +4765,10 @@ contains
         if(.not.all(spread_center_valid))local_info=1
       endif
       if(.not.wpw_seed_collective_stage_ok('occupied_w_spread_diagnostic',local_info))return
+      elseif(dc%id_tot==0)then
+        write(*,'(1x,a,3(i0,1x),a,3(i0,1x))')'[DG-WPW-WANNIER-SPREAD-SKIPPED] p_extent=',&
+          stencil_extent,' physical_extent=',dc%lg_tot%num
+      endif
       allocate(compact_gradient_partial(3,product(gradient_extent),source_count),&
         compact_gradient_values(3,product(gradient_extent),source_count))
       call build_sawf_projected_buffer_gradients(occupied_stencil,stencil%coef_nab,overlap,&

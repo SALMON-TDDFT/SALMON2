@@ -192,6 +192,34 @@ assert ",source_core," not in gather_call, (
 assert "reorder_dg_wpw_fragment_buffer" in source_body, (
     "fragment cyclic storage must be reordered into unwrapped P before differentiation"
 )
+assert "call periodize_dg_wpw_fragment_buffer(occupied_stencil" in source_body, (
+    "assembled occupied-orbital P must be made physical-periodic before projection"
+)
+unwrapped_stage_pos = source_body.index("'unwrapped_buffer_order'")
+periodize_p_pos = source_body.index("call periodize_dg_wpw_fragment_buffer(occupied_stencil")
+periodic_stage_pos = source_body.index("'physical_periodic_p'")
+occupied_buffer_pos = source_body.index("occupied_buffer=(0d0,0d0)")
+projected_transform_pos = source_body.index("call apply_sawf_projected_wannier_transform(occupied_buffer")
+analytic_gradient_pos = source_body.index("call build_sawf_projected_buffer_gradients(occupied_stencil")
+assert unwrapped_stage_pos < periodize_p_pos < periodic_stage_pos < occupied_buffer_pos, (
+    "physical periodization must follow unwrapped assembly and precede flattened P construction"
+)
+assert periodize_p_pos < projected_transform_pos and periodize_p_pos < analytic_gradient_pos, (
+    "projected values and analytic gradients must consume the same physical-periodic P"
+)
+periodize_call = source_body[periodize_p_pos:periodize_p_pos + 400]
+assert "spsi" not in periodize_call, "raw DC fragment orbitals must remain unchanged"
+coverage_local_pos = source_body.index("full_cell_coverage_local=")
+coverage_reduce_pos = source_body.index("call mpi_allreduce(full_cell_coverage_local")
+coverage_stage_pos = source_body.index("'full_cell_coverage_globalization'")
+coverage_branch_pos = source_body.index("if(full_cell_coverage)then")
+assert coverage_local_pos < coverage_reduce_pos < coverage_stage_pos < coverage_branch_pos, (
+    "full-cell diagnostics must branch only after total-communicator coverage globalization"
+)
+coverage_reduce = source_body[coverage_reduce_pos:coverage_reduce_pos + 300]
+assert "mpi_min" in coverage_reduce and "dc%icomm_tot" in coverage_reduce, (
+    "spread diagnostics require full-cell coverage on every fragment/rank"
+)
 assert "comm_summation(occupied_stencil_partial,occupied_storage" in source_body and (
     "info%icomm_r" in source_body
 ), "distributed storage pieces must be assembled before unwrapped P differentiation"

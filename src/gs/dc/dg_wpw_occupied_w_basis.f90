@@ -72,7 +72,6 @@ contains
     complex(8),intent(inout)::unwrapped_values(:,:,:,:)
     integer,intent(in)::domain(3),buffer(3),total_shape(3),fragment_origin(3)
     integer,intent(out)::info
-    complex(8),allocatable::source_values(:,:,:,:)
     logical,allocatable::seen(:,:,:)
     integer,allocatable::best_p(:,:,:,:)
     integer(int64),allocatable::best_box_distance(:,:,:)
@@ -86,7 +85,6 @@ contains
         any(fragment_origin>=total_shape).or.size(unwrapped_values,4)<=0.or.&
         any(shape(unwrapped_values)/=[extent,size(unwrapped_values,4)]).or.&
         .not.all(finite_complex(unwrapped_values)))return
-    allocate(source_values,source=unwrapped_values)
     allocate(seen(total_shape(1),total_shape(2),total_shape(3)),&
       best_p(3,total_shape(1),total_shape(2),total_shape(3)),&
       best_box_distance(total_shape(1),total_shape(2),total_shape(3)))
@@ -125,7 +123,7 @@ contains
       cy=modulo(fragment_origin(2)+g(2)-1,total_shape(2))+1
       cz=modulo(fragment_origin(3)+g(3)-1,total_shape(3))+1
       current=best_p(:,cx,cy,cz)
-      unwrapped_values(ix,iy,iz,:)=source_values(current(1),current(2),current(3),:)
+      unwrapped_values(ix,iy,iz,:)=unwrapped_values(current(1),current(2),current(3),:)
     enddo;enddo;enddo
     info=0
   end subroutine periodize_dg_wpw_fragment_buffer
