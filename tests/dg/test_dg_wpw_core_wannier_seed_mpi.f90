@@ -1,5 +1,5 @@
 program test_dg_wpw_core_wannier_seed_mpi
-  use, intrinsic :: ieee_arithmetic,only:ieee_value,ieee_positive_inf
+  use, intrinsic :: ieee_arithmetic,only:ieee_value,ieee_positive_inf,ieee_quiet_nan
   use mpi
   use lcfo_wannier_sawf_seed,only:canonicalize_sawf_wannier_center,&
     transform_sawf_wannier_occupation,build_sawf_projected_wannier,&
@@ -15,6 +15,7 @@ program test_dg_wpw_core_wannier_seed_mpi
   use dg_wpw_wannier_tail_halo,only:locate_sawf_wannier_tail_core
   use dg_wpw_wannier_tail_halo,only:locate_sawf_wannier_tail_rank
   use dg_wpw_wannier_tail_halo,only:qualify_sawf_wannier_buffer_tail
+  use dg_wpw_wannier_tail_halo,only:classify_sawf_wannier_buffer_tail
   use dg_wpw_wannier_tail_halo,only:is_sawf_outer_buffer_shell
   implicit none
   integer::ierr,rank,info,owner_count,image(3),destination_fragment,destination_local(3),destination_rank
@@ -54,7 +55,7 @@ program test_dg_wpw_core_wannier_seed_mpi
   complex(8)::normalization_polar(2,2),normalization_core(3,2),normalization_p(4,2),&
     normalization_polar_before(2,2),normalization_core_before(3,2),normalization_p_before(4,2)
   integer::ip,ib
-  logical::owned
+  logical::owned,tail_warning
 
   call MPI_Init(ierr)
   call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr)
@@ -202,6 +203,34 @@ program test_dg_wpw_core_wannier_seed_mpi
   call qualify_sawf_wannier_buffer_tail(2d0,0d0,4d-8,0d0,1d-10,&
     outer_shell_ratio,omitted_tail_ratio,info)
   if(info==0.or.outer_shell_ratio<=1d-10)error stop 16
+  call classify_sawf_wannier_buffer_tail(2d0,0d0,1d-2,outer_shell_ratio,tail_warning,info)
+  if(info/=0.or.tail_warning.or.outer_shell_ratio/=0d0)error stop 161
+  call classify_sawf_wannier_buffer_tail(2d0,1d-2,1d-2,outer_shell_ratio,tail_warning,info)
+  if(info/=0.or.tail_warning.or.abs(outer_shell_ratio-5d-3)>1d-15)error stop 162
+  call classify_sawf_wannier_buffer_tail(2d0,2d-2,1d-2,outer_shell_ratio,tail_warning,info)
+  if(info/=0.or.tail_warning.or.abs(outer_shell_ratio-1d-2)>1d-15)error stop 163
+  call classify_sawf_wannier_buffer_tail(2d0,4d-2,1d-2,outer_shell_ratio,tail_warning,info)
+  if(info/=0.or..not.tail_warning.or.abs(outer_shell_ratio-2d-2)>1d-15)error stop 164
+  call classify_sawf_wannier_buffer_tail(0d0,0d0,1d-2,outer_shell_ratio,tail_warning,info)
+  if(info==0)error stop 165
+  call classify_sawf_wannier_buffer_tail(-1d0,0d0,1d-2,outer_shell_ratio,tail_warning,info)
+  if(info==0)error stop 166
+  call classify_sawf_wannier_buffer_tail(2d0,-1d-3,1d-2,outer_shell_ratio,tail_warning,info)
+  if(info==0)error stop 167
+  call classify_sawf_wannier_buffer_tail(2d0,2.1d0,1d-2,outer_shell_ratio,tail_warning,info)
+  if(info==0)error stop 168
+  call classify_sawf_wannier_buffer_tail(2d0,2d0+100d0*epsilon(1d0)*2d0,&
+    1d-2,outer_shell_ratio,tail_warning,info)
+  if(info/=0.or..not.tail_warning.or.outer_shell_ratio/=1d0)error stop 1681
+  call classify_sawf_wannier_buffer_tail(2d0,2d0+101d0*epsilon(1d0)*2d0,&
+    1d-2,outer_shell_ratio,tail_warning,info)
+  if(info==0)error stop 1682
+  call classify_sawf_wannier_buffer_tail(ieee_value(0d0,ieee_positive_inf),0d0,1d-2,&
+    outer_shell_ratio,tail_warning,info)
+  if(info==0)error stop 169
+  call classify_sawf_wannier_buffer_tail(2d0,ieee_value(0d0,ieee_quiet_nan),1d-2,&
+    outer_shell_ratio,tail_warning,info)
+  if(info==0)error stop 170
   if(.not.is_sawf_outer_buffer_shell([1,12,24],[24,24,24],[24,24,24]))error stop 17
   if(.not.is_sawf_outer_buffer_shell([1,12,18],[18,18,18],[24,24,24]))error stop 18
   if(.not.is_sawf_outer_buffer_shell([32,12,12],[32,32,32],[24,24,24]))error stop 181

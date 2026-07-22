@@ -9,6 +9,7 @@ module dg_wpw_wannier_tail_halo
   public::locate_sawf_wannier_tail_core
   public::locate_sawf_wannier_tail_rank
   public::qualify_sawf_wannier_buffer_tail
+  public::classify_sawf_wannier_buffer_tail
   public::is_sawf_outer_buffer_shell
 contains
   logical function is_sawf_outer_buffer_shell(point,box_shape,total_shape)result(is_outer)
@@ -40,6 +41,24 @@ contains
     if(max(outer_shell_ratio,max(omitted_tail_ratio,omitted_charge_bound))>tolerance)return
     info=0
   end subroutine qualify_sawf_wannier_buffer_tail
+
+  pure subroutine classify_sawf_wannier_buffer_tail(total_norm,outer_shell_norm,tolerance,&
+      outer_shell_ratio,warning,info)
+    real(8),intent(in)::total_norm,outer_shell_norm,tolerance
+    real(8),intent(out)::outer_shell_ratio
+    logical,intent(out)::warning
+    integer,intent(out)::info
+    real(8)::roundoff_allowance
+
+    info=1;outer_shell_ratio=huge(1d0);warning=.false.
+    if(.not.all(ieee_is_finite([total_norm,outer_shell_norm,tolerance])).or.&
+        total_norm<=0d0.or.outer_shell_norm<0d0.or.tolerance<=0d0)return
+    roundoff_allowance=100d0*epsilon(1d0)*max(1d0,total_norm)
+    if(outer_shell_norm>total_norm+roundoff_allowance)return
+    outer_shell_ratio=min(1d0,max(0d0,outer_shell_norm/total_norm))
+    warning=outer_shell_ratio>tolerance
+    info=0
+  end subroutine classify_sawf_wannier_buffer_tail
 
   subroutine locate_sawf_wannier_tail_rank(destination_fragment,destination_local,rank_fragment,&
       rank_orbital_lane,rank_grid_lo,rank_grid_hi,destination_rank,info)

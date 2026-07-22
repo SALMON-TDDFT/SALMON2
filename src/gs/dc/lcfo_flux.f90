@@ -3353,7 +3353,7 @@ contains
       validate_sawf_projected_wannier_columns
     use dg_wpw_wannier_tail_halo,only:exchange_sawf_wannier_tail_values,&
       exchange_sawf_discovered_wannier_tails,locate_sawf_wannier_tail_core,&
-      locate_sawf_wannier_tail_rank,qualify_sawf_wannier_buffer_tail,is_sawf_outer_buffer_shell
+      locate_sawf_wannier_tail_rank,classify_sawf_wannier_buffer_tail,is_sawf_outer_buffer_shell
     use dg_wpw_occupied_w_basis,only:s_dg_wpw_occupied_w_basis,t_dg_wpw_periodic_image_mismatch,&
       gather_dg_wpw_occupied_w_payload,initialize_dg_wpw_occupied_w_basis_collective,&
       broadcast_dg_wpw_occupied_w_basis,evaluate_dg_wpw_occupied_w_point,&
@@ -4480,7 +4480,7 @@ contains
         worst_norm_w
       real(8)::spread_swap,median_a,p90_a
       logical::spread_key_less
-      logical::center_owned,full_cell_coverage
+      logical::center_owned,full_cell_coverage,tail_warning
       type(t_dg_wpw_periodic_image_mismatch)::periodic_mismatch
 
       source_info=1;source_count=0;source_condition=huge(1d0)
@@ -4839,10 +4839,13 @@ contains
         ' outer_shell_norm=',tail_norm_global(2),' outer_ratio=',&
         tail_norm_global(2)/max(1d-300,tail_norm_global(1)),&
         ' tolerance=',dg_wpw_scf_residual_tolerance
-      if(local_info==0)call qualify_sawf_wannier_buffer_tail(tail_norm_global(1),0d0,&
-        tail_norm_global(2),0d0,dg_wpw_scf_residual_tolerance,outer_shell_ratio,&
-        omitted_tail_ratio,local_info)
-      if(.not.wpw_seed_collective_stage_ok('buffer_sufficiency',local_info))return
+      tail_warning=.false.
+      if(local_info==0)call classify_sawf_wannier_buffer_tail(tail_norm_global(1),&
+        tail_norm_global(2),dg_wpw_scf_residual_tolerance,outer_shell_ratio,tail_warning,local_info)
+      if(.not.wpw_seed_collective_stage_ok('buffer_tail_validity',local_info))return
+      if(tail_warning.and.dc%id_tot==0)write(*,'(1x,a,2(a,es12.4))')&
+        '[DG-WPW-SEED-BUFFER-WARNING] status=warning',' outer_ratio=',outer_shell_ratio,&
+        ' tolerance=',dg_wpw_scf_residual_tolerance
 
       ! P already contains its periodic buffer in one unwrapped-contiguous
       ! ordering.  Do not canonicalize and add aliases back into core values.

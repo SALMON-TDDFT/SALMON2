@@ -292,8 +292,18 @@ for token in (
 ):
     assert token in source_body, f"missing occupied-W localization diagnostic: {token}"
 spread_diagnostic_pos = source_body.index("call diagnose_sawf_discrete_wannier_spread")
-buffer_gate_pos = source_body.index("'buffer_sufficiency'")
-assert spread_diagnostic_pos < buffer_gate_pos, "spread diagnostic must precede the unchanged buffer gate"
+assert "'buffer_sufficiency'" not in source_body, "outer-tail tolerance must no longer stop bootstrap"
+tail_classify_pos = source_body.index("call classify_sawf_wannier_buffer_tail")
+tail_validity_pos = source_body.index("'buffer_tail_validity'", tail_classify_pos)
+tail_warning_pos = source_body.index("[dg-wpw-seed-buffer-warning]", tail_validity_pos)
+descriptor_commit_pos = source_body.index("'occupied_w_descriptor_commit'", tail_warning_pos)
+post_normalization_pos = source_body.index("'occupied_w_post_normalization_norm'")
+assert spread_diagnostic_pos < tail_classify_pos < tail_validity_pos < tail_warning_pos < descriptor_commit_pos
+assert post_normalization_pos < tail_classify_pos, "tail warning must not replace normalization"
+assert "dg_wpw_scf_residual_tolerance" in source_body[tail_classify_pos:tail_classify_pos + 500], (
+    "tail warning must retain the configured reference tolerance"
+)
+assert "status=warning" in source_body[tail_warning_pos:tail_warning_pos + 250]
 assert "localize_sawf" not in source_body, "diagnostic phase must not rotate occupied W"
 bootstrap_pos = LCFO.index("call assemble_wpw_core_p_bootstrap")
 legacy_layout_pos = LCFO.index("call build_wpw_w_row_layout")
@@ -419,8 +429,18 @@ for token in ("canonicalize_sawf_wannier_center", "canonicalize_sawf_bond_identi
 assert "exchange_sawf_discovered_wannier_tails" not in source_body, (
     "already-periodic P must not be canonicalized and accumulated a second time"
 )
-assert "qualify_sawf_wannier_buffer_tail" in source_body, (
-    "core-owned source builder must reject an insufficient outer buffer shell"
+assert "classify_sawf_wannier_buffer_tail" in source_body, (
+    "core-owned source builder must classify structural tail validity"
+)
+metric_solve_pos = source_body.index("call solve_dg_wpw_metric_projection", descriptor_commit_pos)
+density_qualify_pos = source_body.index("call qualify_sawf_wannier_density_projection", metric_solve_pos)
+assert descriptor_commit_pos < metric_solve_pos < density_qualify_pos, (
+    "tail warning must precede the unchanged metric and density/electron-count gates"
+)
+descriptor_build_top_pos = LCFO.index("call build_core_owned_projected_wannier_density_seed")
+fixed_h_call_pos = LCFO.index("call run_wpw_fixed_h_relaxation", descriptor_build_top_pos)
+assert "call build_dg_wpw_metric_gram" in LCFO and descriptor_build_top_pos < fixed_h_call_pos, (
+    "tail warning must continue toward the unchanged downstream physical gates"
 )
 assert source_body.count("wpw_seed_collective_stage_ok") >= 5, (
     "Wannier source phases must synchronize local failures before later collectives"
