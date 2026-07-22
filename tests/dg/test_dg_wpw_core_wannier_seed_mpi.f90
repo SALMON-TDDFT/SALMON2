@@ -8,7 +8,7 @@ program test_dg_wpw_core_wannier_seed_mpi
     apply_sawf_projected_wannier_gradient_transform,&
     canonicalize_sawf_bond_identity,build_sawf_wannier_density,&
     qualify_sawf_wannier_density_projection,diagnose_sawf_discrete_wannier_spread,&
-    assemble_sawf_diagonal_periodic_links
+    assemble_sawf_diagonal_periodic_links,normalize_sawf_projected_wannier_columns
   use dg_wpw_wannier_tail_halo,only:validate_sawf_wannier_tail_schedule,&
     exchange_sawf_wannier_tail_values,exchange_sawf_discovered_wannier_tails
   use dg_wpw_wannier_tail_halo,only:sawf_tail_records_unique
@@ -50,6 +50,9 @@ program test_dg_wpw_core_wannier_seed_mpi
   logical::spread_center_valid(2)
   complex(8)::link_values(4,2),link_local(2,6),link_global(2,6),link_expected(2,6)
   real(8)::link_coordinates(3,4),link_norm_local(2),link_norm_global(2),link_norm_expected(2)
+  real(8)::column_norm(2)
+  complex(8)::normalization_polar(2,2),normalization_core(3,2),normalization_p(4,2),&
+    normalization_polar_before(2,2),normalization_core_before(3,2),normalization_p_before(4,2)
   integer::ip,ib
   logical::owned
 
@@ -57,6 +60,40 @@ program test_dg_wpw_core_wannier_seed_mpi
   call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr)
   if(ierr/=MPI_SUCCESS)error stop 10
   if(rank>1)error stop 11
+  normalization_polar=reshape([(cmplx(dble(info),-0.1d0*dble(info),8),info=1,4)],[2,2])
+  normalization_core=reshape([(cmplx(0.2d0*dble(info),0.05d0*dble(info),8),info=1,6)],[3,2])
+  normalization_p=reshape([(cmplx(-0.1d0*dble(info),0.03d0*dble(info),8),info=1,8)],[4,2])
+  normalization_polar_before=normalization_polar;normalization_core_before=normalization_core
+  normalization_p_before=normalization_p;column_norm=[4d0,9d0]
+  call normalize_sawf_projected_wannier_columns(column_norm,normalization_polar,&
+    normalization_core,normalization_p,info)
+  if(info/=0.or.maxval(abs(normalization_polar(:,1)-0.5d0*normalization_polar_before(:,1)))>tol.or.&
+    maxval(abs(normalization_polar(:,2)-normalization_polar_before(:,2)/3d0))>tol.or.&
+    maxval(abs(normalization_core(:,1)-0.5d0*normalization_core_before(:,1)))>tol.or.&
+    maxval(abs(normalization_core(:,2)-normalization_core_before(:,2)/3d0))>tol.or.&
+    maxval(abs(normalization_p(:,1)-0.5d0*normalization_p_before(:,1)))>tol.or.&
+    maxval(abs(normalization_p(:,2)-normalization_p_before(:,2)/3d0))>tol)error stop 123
+  normalization_polar_before=normalization_polar;normalization_core_before=normalization_core
+  normalization_p_before=normalization_p;column_norm=1d0
+  call normalize_sawf_projected_wannier_columns(column_norm,normalization_polar,&
+    normalization_core,normalization_p,info)
+  if(info/=0.or.maxval(abs(normalization_polar-normalization_polar_before))>0d0.or.&
+    maxval(abs(normalization_core-normalization_core_before))>0d0.or.&
+    maxval(abs(normalization_p-normalization_p_before))>0d0)error stop 124
+  column_norm=[1d0,0d0]
+  call normalize_sawf_projected_wannier_columns(column_norm,normalization_polar,&
+    normalization_core,normalization_p,info)
+  if(info==0.or.maxval(abs(normalization_polar-normalization_polar_before))>0d0.or.&
+    maxval(abs(normalization_core-normalization_core_before))>0d0.or.&
+    maxval(abs(normalization_p-normalization_p_before))>0d0)error stop 125
+  column_norm=[1d0,ieee_value(0d0,ieee_positive_inf)]
+  call normalize_sawf_projected_wannier_columns(column_norm,normalization_polar,&
+    normalization_core,normalization_p,info)
+  if(info==0.or.maxval(abs(normalization_polar-normalization_polar_before))>0d0)error stop 126
+  column_norm=1d0
+  call normalize_sawf_projected_wannier_columns(column_norm,normalization_polar(:,1:1),&
+    normalization_core,normalization_p,info)
+  if(info==0.or.maxval(abs(normalization_core-normalization_core_before))>0d0)error stop 127
   link_values=reshape([(cmplx(0.1d0*dble(info),-0.03d0*dble(info),8),info=1,8)],[4,2])
   link_coordinates=reshape([0d0,0d0,0d0, 0.4d0,0.2d0,0.1d0, 0.9d0,0.3d0,0.7d0, &
     1.4d0,0.8d0,1.1d0],[3,4])
