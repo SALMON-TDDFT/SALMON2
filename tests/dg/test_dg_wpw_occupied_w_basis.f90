@@ -3,7 +3,8 @@ program test_dg_wpw_occupied_w_basis
   use dg_wpw_occupied_w_basis,only:s_dg_wpw_occupied_w_basis,t_dg_wpw_periodic_image_mismatch,&
     initialize_dg_wpw_occupied_w_basis,&
     evaluate_dg_wpw_occupied_w_point,dg_wpw_unwrapped_to_storage_index,&
-    reorder_dg_wpw_fragment_buffer,extract_dg_wpw_canonical_cell
+    reorder_dg_wpw_fragment_buffer,periodize_dg_wpw_fragment_buffer,&
+    extract_dg_wpw_canonical_cell
   implicit none
   type(s_dg_wpw_occupied_w_basis)::basis,changed_basis
   integer::global_keys(5,4),owners(4),local_keys(5,2),grid_ids(3),info
@@ -14,8 +15,59 @@ program test_dg_wpw_occupied_w_basis
   integer::sx,sy,sz,ix,iy,iz
   complex(8),allocatable::p6(:,:,:,:),p10(:,:,:,:),p5(:,:,:,:),canonical6(:,:,:,:),canonical10(:,:,:,:)
   complex(8),allocatable::canonical_bad(:,:,:,:),pzero(:,:,:,:),canonical_zero(:,:,:,:)
+  complex(8),allocatable::p6_before(:,:,:,:)
+  complex(8)::partial5(22,1,1,1),partial5_before(22,1,1,1)
+  complex(8)::aliases10(32,1,1,1),aliases10_before(32,1,1,1),tie_aliases(4,1,1,1)
   integer::canonical_grid(3),origin(3)
   type(t_dg_wpw_periodic_image_mismatch)::mismatch
+
+  ! Physical periodization accepts a partial P (B=5) and requests no extra
+  ! points.  With no aliases present, every value, including the core, stays
+  ! unchanged.  Origin is zero based and P index i has logical grid i-B.
+  do ix=1,22
+    partial5(ix,1,1,1)=cmplx(dble(ix),-0.25d0*dble(ix),8)
+  enddo
+  partial5_before=partial5
+  call periodize_dg_wpw_fragment_buffer(partial5,[12,1,1],[5,0,0],&
+    [24,1,1],[12,0,0],info)
+  if(info/=0.or.maxval(abs(partial5-partial5_before))>0d0)error stop 180
+
+  ! For B=10, P indices i and i+24 are physical aliases.  The latter is
+  ! closer to the closed core [11:22] and must be the representative.
+  do ix=1,32
+    aliases10(ix,1,1,1)=cmplx(dble(ix),0.5d0*dble(ix),8)
+  enddo
+  aliases10_before=aliases10
+  call periodize_dg_wpw_fragment_buffer(aliases10,[12,1,1],[10,0,0],&
+    [24,1,1],[12,0,0],info)
+  if(info/=0)error stop 181
+  do ix=1,4
+    if(abs(aliases10(ix,1,1,1)-aliases10_before(ix+24,1,1,1))>0d0.or.&
+      abs(aliases10(ix+24,1,1,1)-aliases10_before(ix+24,1,1,1))>0d0)error stop 182
+  enddo
+  do ix=5,8
+    if(abs(aliases10(ix,1,1,1)-aliases10_before(ix,1,1,1))>0d0.or.&
+      abs(aliases10(ix+24,1,1,1)-aliases10_before(ix,1,1,1))>0d0)error stop 182
+  enddo
+  if(maxval(abs(aliases10(11:22,1,1,1)-aliases10_before(11:22,1,1,1)))>0d0)error stop 183
+  aliases10_before=aliases10
+  call periodize_dg_wpw_fragment_buffer(aliases10,[12,1,1],[10,0,0],&
+    [24,1,1],[12,0,0],info)
+  if(info/=0.or.maxval(abs(aliases10-aliases10_before))>0d0)error stop 184
+
+  ! Equidistant aliases use lexicographic P index.
+  tie_aliases(:,1,1,1)=[(cmplx(dble(ix),0d0,8),ix=1,4)]
+  call periodize_dg_wpw_fragment_buffer(tie_aliases,[2,1,1],[1,0,0],&
+    [3,1,1],[0,0,0],info)
+  if(info/=0.or.abs(tie_aliases(4,1,1,1)-cmplx(1d0,0d0,8))>0d0)error stop 185
+  tie_aliases(1,1,1,1)=cmplx(ieee_value(0d0,ieee_positive_inf),0d0,8)
+  call periodize_dg_wpw_fragment_buffer(tie_aliases,[2,1,1],[1,0,0],&
+    [3,1,1],[0,0,0],info)
+  if(info==0)error stop 186
+  tie_aliases=(0d0,0d0)
+  call periodize_dg_wpw_fragment_buffer(tie_aliases,[4,1,1],[0,0,0],&
+    [3,1,1],[0,0,0],info)
+  if(info==0)error stop 187
 
   ! Fragment storage is core/positive-buffer followed by negative-buffer.
   ! Logical P must instead be contiguous from 1-B through n+B.
@@ -42,6 +94,26 @@ program test_dg_wpw_occupied_w_basis
     canonical_grid=modulo(origin+[ix-6,iy-6,iz-6]-1,[24,24,24])+1
     p6(ix,iy,iz,1)=cmplx(canonical_grid(1)+100*canonical_grid(2)+10000*canonical_grid(3),0d0,8)
   enddo;enddo;enddo
+  do iz=1,32;do iy=1,32;do ix=1,32
+    canonical_grid=modulo(origin+[ix-10,iy-10,iz-10]-1,[24,24,24])+1
+    p10(ix,iy,iz,1)=cmplx(canonical_grid(1)+100*canonical_grid(2)+10000*canonical_grid(3),0d0,8)
+  enddo;enddo;enddo
+  ! B=6 covers exactly one physical cell and is therefore unchanged.  The
+  ! later absolute canonical assertions also lock the nonzero-origin seam.
+  allocate(p6_before,source=p6)
+  call periodize_dg_wpw_fragment_buffer(p6,[12,12,12],[6,6,6],&
+    [24,24,24],origin,info)
+  if(info/=0.or.maxval(abs(p6-p6_before))>0d0)error stop 188
+  ! Exercise simultaneous aliases in all three axes with deliberately
+  ! inconsistent B=10 data.  For indices 1 and 25, index 25 is nearer core.
+  do iz=1,32;do iy=1,32;do ix=1,32
+    p10(ix,iy,iz,1)=cmplx(ix+100*iy+10000*iz,0d0,8)
+  enddo;enddo;enddo
+  call periodize_dg_wpw_fragment_buffer(p10,[12,12,12],[10,10,10],&
+    [24,24,24],origin,info)
+  if(info/=0.or.abs(p10(1,1,1,1)-cmplx(25+100*25+10000*25,0d0,8))>0d0.or.&
+    abs(p10(25,25,25,1)-p10(1,1,1,1))>0d0)error stop 189
+  ! Restore exact physical-period values for canonical extraction tests.
   do iz=1,32;do iy=1,32;do ix=1,32
     canonical_grid=modulo(origin+[ix-10,iy-10,iz-10]-1,[24,24,24])+1
     p10(ix,iy,iz,1)=cmplx(canonical_grid(1)+100*canonical_grid(2)+10000*canonical_grid(3),0d0,8)

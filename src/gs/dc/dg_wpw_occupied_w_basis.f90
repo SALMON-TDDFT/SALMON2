@@ -25,6 +25,7 @@ module dg_wpw_occupied_w_basis
   public::evaluate_dg_wpw_occupied_w_point
   public::dg_wpw_unwrapped_to_storage_index
   public::reorder_dg_wpw_fragment_buffer
+  public::periodize_dg_wpw_fragment_buffer
   public::extract_dg_wpw_canonical_cell
 contains
   integer function dg_wpw_unwrapped_to_storage_index(local_grid,domain,buffer)result(storage)
@@ -65,6 +66,69 @@ contains
     endif
     info=0
   end subroutine reorder_dg_wpw_fragment_buffer
+
+  subroutine periodize_dg_wpw_fragment_buffer(unwrapped_values,domain,buffer,total_shape,&
+      fragment_origin,info)
+    complex(8),intent(inout)::unwrapped_values(:,:,:,:)
+    integer,intent(in)::domain(3),buffer(3),total_shape(3),fragment_origin(3)
+    integer,intent(out)::info
+    complex(8),allocatable::source_values(:,:,:,:)
+    logical,allocatable::seen(:,:,:)
+    integer,allocatable::best_p(:,:,:,:)
+    integer(int64),allocatable::best_box_distance(:,:,:)
+    integer::extent(3),ix,iy,iz,cx,cy,cz,g(3),candidate(3),current(3),axis
+    integer(int64)::box_distance,delta
+    logical::better
+
+    info=1;extent=domain+2*buffer
+    if(any(domain<=0).or.any(buffer<0).or.any(total_shape<=0).or.&
+        any(domain>total_shape).or.any(fragment_origin<0).or.&
+        any(fragment_origin>=total_shape).or.size(unwrapped_values,4)<=0.or.&
+        any(shape(unwrapped_values)/=[extent,size(unwrapped_values,4)]).or.&
+        .not.all(finite_complex(unwrapped_values)))return
+    allocate(source_values,source=unwrapped_values)
+    allocate(seen(total_shape(1),total_shape(2),total_shape(3)),&
+      best_p(3,total_shape(1),total_shape(2),total_shape(3)),&
+      best_box_distance(total_shape(1),total_shape(2),total_shape(3)))
+    seen=.false.;best_p=0;best_box_distance=huge(0_int64)
+    do iz=1,extent(3);do iy=1,extent(2);do ix=1,extent(1)
+      g=[ix-buffer(1),iy-buffer(2),iz-buffer(3)]
+      cx=modulo(fragment_origin(1)+g(1)-1,total_shape(1))+1
+      cy=modulo(fragment_origin(2)+g(2)-1,total_shape(2))+1
+      cz=modulo(fragment_origin(3)+g(3)-1,total_shape(3))+1
+      box_distance=0_int64
+      do axis=1,3
+        if(g(axis)<1)then
+          delta=int(1-g(axis),int64)
+        elseif(g(axis)>domain(axis))then
+          delta=int(g(axis)-domain(axis),int64)
+        else
+          delta=0_int64
+        endif
+        box_distance=box_distance+delta*delta
+      enddo
+      candidate=[ix,iy,iz];current=best_p(:,cx,cy,cz)
+      better=.not.seen(cx,cy,cz)
+      if(.not.better.and.box_distance<best_box_distance(cx,cy,cz))better=.true.
+      if(.not.better.and.box_distance==best_box_distance(cx,cy,cz))then
+        better=candidate(1)<current(1).or.(candidate(1)==current(1).and.&
+          (candidate(2)<current(2).or.(candidate(2)==current(2).and.candidate(3)<current(3))))
+      endif
+      if(better)then
+        seen(cx,cy,cz)=.true.;best_p(:,cx,cy,cz)=candidate
+        best_box_distance(cx,cy,cz)=box_distance
+      endif
+    enddo;enddo;enddo
+    do iz=1,extent(3);do iy=1,extent(2);do ix=1,extent(1)
+      g=[ix-buffer(1),iy-buffer(2),iz-buffer(3)]
+      cx=modulo(fragment_origin(1)+g(1)-1,total_shape(1))+1
+      cy=modulo(fragment_origin(2)+g(2)-1,total_shape(2))+1
+      cz=modulo(fragment_origin(3)+g(3)-1,total_shape(3))+1
+      current=best_p(:,cx,cy,cz)
+      unwrapped_values(ix,iy,iz,:)=source_values(current(1),current(2),current(3),:)
+    enddo;enddo;enddo
+    info=0
+  end subroutine periodize_dg_wpw_fragment_buffer
 
   subroutine extract_dg_wpw_canonical_cell(unwrapped_values,domain,buffer,total_shape,&
       fragment_origin,canonical_values,info,mismatch)
