@@ -42,3 +42,22 @@
 2. Run fresh preconditioned and unpreconditioned B=6 cases.
 3. Record metric ranks and occupied/extra discarded/near-cutoff fractions at
    iterations 1, 32, 96, and 160 in the session handoff.
+
+## Execution result
+
+Implemented in `e7ca9ca`; focused generalized-algebra, matrix-free, fixed-H,
+and full MPI build checks pass, and repeated review found no blocker.  Fresh
+unpreconditioned B=6 run `20260722_task16_search_metric_no_precondition_b6`
+reproduced the prior residual history and `info=40` boundary.
+
+The 480-column search metric becomes increasingly rank-deficient: effective
+rank is 437 at iteration 32, 292 at 96, and 213 at 160, with the smallest
+retained eigenvalue held just above the `1E-10` relative cutoff.  Nevertheless,
+the residual is not concentrated in discarded directions.  At iteration 160,
+discarded fractions are `1.0231E-03` occupied and `1.6596E-03` extra; the
+lowest retained decade contains `9.3282E-03` occupied and `3.6089E-02` extra.
+Thus more than 99%/96% of occupied/extra residual weight remains outside the
+discarded-plus-lowest-retained metric modes.  Search-space redundancy exists
+but cannot account for the residual plateau.  The evidence points next to the
+LOBPCG recurrence/restart update in retained directions, not to a deficient
+physical occupied-W span.  No checkpoint, manifest, or RT state was published.

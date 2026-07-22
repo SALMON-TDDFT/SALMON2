@@ -371,6 +371,24 @@ optional preconditioner callbackを省略する。fresh B=6
 原因をpreconditionerだけに限定できない。残る候補はW/P metricの悪条件性とLOBPCG
 search-space更新である。checkpoint/manifest/RTはpublishされていない。
 
+### 2026-07-22 search metric-mode診断
+
+`e7ca9ca`でselected iterationの`Z^dagger S Z` spectrumと
+`V^dagger(Z^dagger R)` weightを診断した。fresh無preconditioner B=6 run
+`stage2d_wpw_runs/20260722_task16_search_metric_no_precondition_b6/run.log`は同じ
+residual historyと`info=40`を再現した。
+
+480-column search metricのeffective rankはinner 32/96/160で437/292/213まで低下し、
+search spaceの冗長化は明白である。しかしinner 160のdiscarded residual fractionは
+occupied `1.0231E-03`、extra `1.6596E-03`、cutoff直上のlowest retained decadeも
+occupied `9.3282E-03`、extra `3.6089E-02`に留まる。従って残差weightの99%弱
+（occupied）および96%以上（extra）はcutoff近傍外のretained方向にあり、metric modeの
+discardだけでは`O(1E-4)` plateauを説明できない。
+
+現在の証拠は、physical occupied-W spanの不足よりLOBPCG recurrence/restartの手続き不良を
+優先して示す。次はsearch履歴を毎回3-blockで累積する現更新と、明示restart
+（例えば`Z=[Q,R]`または一定間隔で`search=0`）を同一基底上で比較する。
+
 ## 新セッション開始文（コピー用）
 
 ```text
