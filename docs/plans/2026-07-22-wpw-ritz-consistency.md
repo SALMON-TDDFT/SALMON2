@@ -70,3 +70,31 @@
    with post updates 31/95/159).
 7. Record the evidence and next hypothesis in this plan and the session handoff.
 8. Run `git diff --check` and commit only the two result documents.
+
+## Result (2026-07-23)
+
+Implemented in `f9fe8b4`.  The two-rank long-spectrum fixture executes all three
+transactions and verifies near-zero boundary defects.  Focused tests, the full
+MPI/EigenExa build, and two review rounds reported no blocking issue.
+
+The fresh physical run is
+`stage2d_wpw_runs/20260723_task18_ritz_consistency_b6/run.log`.  It uses the
+Task 16 B=6 input with no preconditioner and retained search history, reproduces
+the residual history, and reaches the unchanged `info=40` limit.  Matched values
+are:
+
+| post→direct | reduced occupied / extra | physical occupied / extra | relative boundary defect occupied / extra | metric orthogonality |
+|---:|---:|---:|---:|---:|
+| 31→32 | `3.21E-08 / 7.37E-08` | `1.97E-03 / 4.04E-03` | `3.29E-12 / 9.71E-13` | `1.62E-11` |
+| 95→96 | `3.72E-09 / 9.71E-09` | `3.57E-04 / 1.03E-03` | `1.29E-11 / 2.21E-11` | `2.34E-12` |
+| 159→160 | `1.99E-09 / 1.48E-09` | `2.56E-04 / 2.09E-04` | `3.90E-11 / 1.02E-10` | `1.98E-13` |
+
+The post-update `HZ*C`/`SZ*C` residual and the following direct H/S residual
+agree to at least about `1E-10` relatively, and the updated Ritz vectors remain
+metric orthonormal.  The reduced eigenproblem is also solved much more accurately
+than the physical Ritz residual.  Therefore stale operator images, an inconsistent
+Ritz update, and the update-to-next-application recurrence are not the plateau
+source.  The large residual lies outside the current Rayleigh--Ritz search span;
+the remaining diagnosis should address why retained residual correction
+directions reduce it so slowly (especially metric-aware preconditioning), not
+change the occupied-W representation, cutoff, tolerance, or publication gates.

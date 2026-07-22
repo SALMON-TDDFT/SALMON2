@@ -412,6 +412,31 @@ retained Rayleigh--Ritz/operator recurrenceまたはcorrection direction生成�
 reduced solve後の明示残差最小化・Ritz pairの再計算整合性を診断する。cutoff、tolerance、
 basis、publication gateは変更しない。
 
+### 2026-07-23 Ritz update整合性診断
+
+`f9fe8b4`で、post update 31/95/159の`Q=ZC`、`HQ=HZC`、`SQ=SZC`から得る
+physical Ritz residualを保持し、次のdirect H/S適用32/96/160と同一stateの残差vectorを
+比較した。同時に`Hred*C-Sred*C*lambda`のstate別reduced residualと
+`Q^dagger S Q-I`を測定した。全rankでpending transactionとfinite/Gram検証を揃え、
+solver state、収束判定、operator call回数は変更していない。2-rank runtime fixtureは
+3組全てを実行し、関連テスト、全体build、二回のレビューはblockerなし。
+
+fresh B=6、無preconditioner、履歴ありrunは
+`stage2d_wpw_runs/20260723_task18_ritz_consistency_b6/run.log`。31→32、95→96、159→160の
+reduced occupied/extra residualはそれぞれ`3.21E-08/7.37E-08`、
+`3.72E-09/9.71E-09`、`1.99E-09/1.48E-09`であるのに対し、physical residualは
+`1.97E-03/4.04E-03`、`3.57E-04/1.03E-03`、`2.56E-04/2.09E-04`だった。
+一方、post/direct残差vectorの相対defectは`3.29E-12/9.71E-13`、
+`1.29E-11/2.21E-11`、`3.90E-11/1.02E-10`、post metric orthogonalityは
+`1.62E-11`、`2.34E-12`、`1.98E-13`である。
+
+従ってstale H/S image、Ritz update、次反復direct operatorとのrecurrence不整合はplateau
+原因ではない。reduced problemはphysical残差より4--5桁以上高精度に解けており、残差は
+現在のRayleigh--Ritz search spanの外にある。現時点の証拠はoccupied-W物理表現の不足より、
+retained residual correction directionを十分速く取り込めない手続き、特に適切なmetric-aware
+preconditionerの欠如を優先して示す。既存diagonal preconditionerは悪化が実測済みなので、
+それを戻さず、S-metricを考慮したcorrection equation/preconditionerを次に設計する。
+
 ## 新セッション開始文（コピー用）
 
 ```text
