@@ -54,6 +54,7 @@ module dg_wpw_bounded_operator
   public::reduce_dg_wpw_metric_rhs_partials
   public::initialize_dg_wpw_fragment_block_preconditioner
   public::apply_dg_wpw_fragment_block_preconditioner
+  public::apply_dg_wpw_fragment_block_eigen_correction
   public::release_dg_wpw_fragment_block_preconditioner
 contains
   subroutine initialize_dg_wpw_fragment_block_preconditioner(op,relative_cutoff,preconditioner,info)
@@ -197,6 +198,24 @@ contains
     zp=solution(preconditioner%nw+1:preconditioner%dimension,:)
     info=0
   end subroutine apply_dg_wpw_fragment_block_preconditioner
+
+  subroutine apply_dg_wpw_fragment_block_eigen_correction(op,preconditioner,eigenvalues,rw,rp,zw,zp,info)
+    type(s_dg_wpw_bounded_operator),intent(in)::op
+    type(s_dg_wpw_fragment_block_preconditioner),intent(in)::preconditioner
+    real(8),intent(in)::eigenvalues(:)
+    complex(8),intent(in)::rw(:,:),rp(:,:)
+    complex(8),intent(out)::zw(:,:),zp(:,:)
+    integer,intent(out)::info
+    integer::local_bad,global_bad,ierr
+
+    zw=0;zp=0;info=1;local_bad=0
+    if(op%w_schedule%comm==MPI_COMM_NULL)return
+    if(size(eigenvalues)/=size(rw,2).or.size(rp,2)/=size(rw,2).or.&
+      .not.all(ieee_is_finite(eigenvalues)).or..not.finite2(rw).or..not.finite2(rp))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    call apply_dg_wpw_fragment_block_preconditioner(op,preconditioner,rw,rp,zw,zp,info)
+  end subroutine apply_dg_wpw_fragment_block_eigen_correction
 
   subroutine move_fragment_block_preconditioner(source,destination)
     type(s_dg_wpw_fragment_block_preconditioner),intent(inout)::source,destination

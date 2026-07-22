@@ -8,6 +8,7 @@ LCFO = ROOT / "src/gs/dc/lcfo_flux.f90"
 CONTEXT = ROOT / "src/common/dg_wpw_production_context.f90"
 BUILDER = ROOT / "src/rt/dg/rt_dg_wpw_production_builder.f90"
 SCANNER = ROOT / "src/rt/dg/rt_dg_wpw_face_trace_scanner.f90"
+BOUNDED = ROOT / "src/common/dg_wpw_bounded_operator.f90"
 
 main = MAIN.read_text().lower()
 lcfo = LCFO.read_text().lower()
@@ -18,6 +19,18 @@ context = CONTEXT.read_text().lower()
 builder = BUILDER.read_text().lower()
 scanner = SCANNER.read_text().lower()
 owner_exchange = (ROOT / "src/common/dg_wpw_owner_exchange.f90").read_text().lower()
+bounded = BOUNDED.read_text().lower()
+
+adapter = "apply_dg_wpw_fragment_block_eigen_correction"
+assert f"public::{adapter}" in bounded, "metric block eigensolver adapter is not public"
+adapter_start = bounded.index(f"subroutine {adapter}")
+adapter_end = bounded.index("end subroutine", adapter_start)
+adapter_body = bounded[adapter_start:adapter_end]
+collective = adapter_body.index("call mpi_allreduce(local_bad,global_bad")
+delegate = adapter_body.index("call apply_dg_wpw_fragment_block_preconditioner")
+assert collective < delegate, "adapter must validate metadata collectively before delegation"
+assert "ieee_is_finite(eigenvalues)" in adapter_body and "size(eigenvalues)/=size(rw,2)" in adapter_body
+assert "op%w_schedule%comm" in adapter_body
 
 for token in (
     "initialize_dg_wpw_fragment_root_context",

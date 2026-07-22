@@ -3288,7 +3288,7 @@ contains
       MPI_INTEGER,MPI_INTEGER8,MPI_MAX,MPI_MIN,MPI_Abort,MPI_Bcast,MPI_Reduce,MPI_Gather,&
       MPI_DOUBLE_COMPLEX,MPI_DOUBLE_PRECISION,MPI_LOGICAL,MPI_SUM
     use salmon_global, only: yn_dc_lcfo_diag,yn_dg_wpw_production,yn_dg_wpw_fixed_h_relaxation,&
-      yn_dg_wpw_preconditioner,yn_dg_wpw_search_history,&
+      yn_dg_wpw_preconditioner,yn_dg_wpw_metric_preconditioner,yn_dg_wpw_search_history,&
       n_plane_waves_dg,k_cutoff_plane_wave,&
       dg_wpw_window_buffer,dg_wpw_window_width,dg_wpw_extra_states,dg_wpw_scf_max_iter,&
       dg_wpw_gap_threshold,dg_wpw_metric_cutoff,dg_wpw_scf_mix,dg_wpw_scf_residual_tolerance,num_fragment
@@ -3325,7 +3325,8 @@ contains
     use dg_wpw_bounded_operator,only:release_dg_wpw_bounded_operator,fetch_dg_wpw_support_coefficients,&
       apply_h_dg_wpw_bounded,apply_s_dg_wpw_bounded,global_gram_dg_wpw_bounded,&
       get_dg_wpw_owned_metric_diagonal,reduce_dg_wpw_metric_rhs_partials,set_dg_wpw_interface_lambda,&
-      initialize_dg_wpw_fragment_block_preconditioner,apply_dg_wpw_fragment_block_preconditioner
+      initialize_dg_wpw_fragment_block_preconditioner,apply_dg_wpw_fragment_block_preconditioner,&
+      apply_dg_wpw_fragment_block_eigen_correction
     use dg_wpw_nonlocal_projector,only:s_dg_wpw_projector_overlap,&
       build_dg_wpw_projector_overlap_partials,reduce_dg_wpw_p_projector_partials,&
       exchange_dg_wpw_projector_overlaps,assemble_dg_wpw_nonlocal_blocks,&
@@ -4228,6 +4229,15 @@ contains
       if(ierr/=MPI_SUCCESS.or.root_info/=0)return
       call validate_wpw_frozen_h_state(fixed_info)
       if(fixed_info/=0)return
+      if(dc%id_tot==0)then
+        if(yn_dg_wpw_metric_preconditioner=='y')then
+          write(*,'(1x,a)')'[DG-WPW-CORRECTION-MODE] fixed_h=metric_block'
+        elseif(yn_dg_wpw_preconditioner=='y')then
+          write(*,'(1x,a)')'[DG-WPW-CORRECTION-MODE] fixed_h=diagonal'
+        else
+          write(*,'(1x,a)')'[DG-WPW-CORRECTION-MODE] fixed_h=none'
+        endif
+      endif
       call build_wpw_density_carrying_fragment_seed(fixed_info)
       if(fixed_info/=0)then
         if(dc%id_tot==0)write(*,'(1x,a,i0)')'[DG-WPW-LOCAL-FAIL] fixed_h_stage=density_seed info=',fixed_info
@@ -4243,7 +4253,13 @@ contains
         call validate_wpw_frozen_h_state(fixed_info)
         if(fixed_info/=0)return
         if(dc%id_frag==0)then
-          if(yn_dg_wpw_preconditioner=='y')then
+          if(yn_dg_wpw_metric_preconditioner=='y')then
+            call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,wpw_apply_h,&
+              wpw_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,wpw_nretain,&
+              iter+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
+              wpw_q_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,wpw_metric_precondition,&
+              retain_search_history=yn_dg_wpw_search_history=='y')
+          elseif(yn_dg_wpw_preconditioner=='y')then
             call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,wpw_apply_h,&
               wpw_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,wpw_nretain,&
               iter+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
@@ -4343,7 +4359,13 @@ contains
         if(ierr/=MPI_SUCCESS.or.root_info/=0)return
         call validate_wpw_frozen_h_state(continuation_info);if(continuation_info/=0)return
         if(dc%id_frag==0)then
-          if(yn_dg_wpw_preconditioner=='y')then
+          if(yn_dg_wpw_metric_preconditioner=='y')then
+            call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,&
+              wpw_apply_h,wpw_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,&
+              wpw_nretain,trial+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
+              accepted_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,wpw_metric_precondition,&
+              retain_search_history=yn_dg_wpw_search_history=='y')
+          elseif(yn_dg_wpw_preconditioner=='y')then
             call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,&
               wpw_apply_h,wpw_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,&
               wpw_nretain,trial+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
@@ -5931,6 +5953,21 @@ contains
       precondition_info=merge(0,1,ierr==MPI_SUCCESS.and.global_bad==0)
       if(precondition_info/=0)then;zw=0;zp=0;endif
     end subroutine wpw_precondition
+
+    subroutine wpw_metric_precondition(context,eigenvalues,rw,rp,zw,zp,precondition_info)
+      class(*),intent(inout)::context
+      real(8),intent(in)::eigenvalues(:)
+      complex(8),intent(in)::rw(:,:),rp(:,:)
+      complex(8),intent(out)::zw(:,:),zp(:,:)
+      integer,intent(out)::precondition_info
+      select type(c=>context)
+      type is(s_dg_wpw_production_context)
+        call apply_dg_wpw_fragment_block_eigen_correction(c%bounded_operator,&
+          c%metric_block_preconditioner,eigenvalues,rw,rp,zw,zp,precondition_info)
+      class default
+        zw=0;zp=0;precondition_info=1
+      end select
+    end subroutine wpw_metric_precondition
 
     subroutine wpw_apply_h(context,xw,xp,yw,yp,apply_info)
       class(*),intent(inout)::context

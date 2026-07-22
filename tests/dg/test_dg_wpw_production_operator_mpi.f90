@@ -13,6 +13,7 @@ program test_dg_wpw_production_operator_mpi
     validate_dg_wpw_bounded_operator_snapshot,release_dg_wpw_bounded_operator_snapshot,&
     reduce_dg_wpw_metric_rhs_partials,s_dg_wpw_fragment_block_preconditioner,&
     initialize_dg_wpw_fragment_block_preconditioner,apply_dg_wpw_fragment_block_preconditioner,&
+    apply_dg_wpw_fragment_block_eigen_correction,&
     release_dg_wpw_fragment_block_preconditioner
   use rt_dg_wpw_trace_halo_provider, only: s_dg_wpw_trace_halo_state, prepare_dg_wpw_trace_halo
   use rt_dg_wpw_face_trace_provider, only: s_wpw_face_trace_provider
@@ -30,6 +31,7 @@ program test_dg_wpw_production_operator_mpi
   integer :: ierr, rank, info, owned_p
   integer(8)::old_fingerprint
   real(8)::old_ww_potential
+  real(8)::block_eigenvalues(2)
   integer,allocatable::fkminus(:),fkplus(:),faxis(:),fside(:)
   integer,allocatable::fminus_lo(:,:),fminus_hi(:,:),fplus_lo(:,:),fplus_hi(:,:)
   integer :: wp_w(2), wp_p(2), pp_r(2), pp_c(2)
@@ -145,6 +147,11 @@ program test_dg_wpw_production_operator_mpi
   block_solution(1,:)=block_z_w(1,:);block_solution(2,:)=block_z_p(1,:)
   if(maxval(abs(matmul(block_matrix,block_solution)-block_expected))>1d-11)error stop 1503
   saved_block_z_w=block_z_w;saved_block_z_p=block_z_p
+  block_eigenvalues=[-0.25d0,0.75d0]
+  call apply_dg_wpw_fragment_block_eigen_correction(context%bounded_operator,block_preconditioner,&
+    block_eigenvalues,block_rhs_w,block_rhs_p,block_z_w,block_z_p,info)
+  if(info/=0.or.maxval(abs(block_z_w-saved_block_z_w))>1d-13.or.&
+    maxval(abs(block_z_p-saved_block_z_p))>1d-13)error stop 15031
   saved_metric_value=context%bounded_operator%ww_s_dense(rank+1,rank+1)
   if(rank==0)context%bounded_operator%ww_s_dense(1,1)=cmplx(-1d0,0d0,8)
   call initialize_dg_wpw_fragment_block_preconditioner(context%bounded_operator,1d-8,&
@@ -262,6 +269,10 @@ program test_dg_wpw_production_operator_mpi
   if(maxval(abs(bounded-matmul(h0_oracle,x)))>1d-12)error stop 223
   call set_dg_wpw_interface_lambda(context%bounded_operator,0.5d0,info)
   if(info/=0)error stop 224
+  call apply_dg_wpw_fragment_block_eigen_correction(context%bounded_operator,block_preconditioner,&
+    block_eigenvalues,block_rhs_w,block_rhs_p,block_z_w,block_z_p,info)
+  if(info/=0.or.maxval(abs(block_z_w-saved_block_z_w))>1d-13.or.&
+    maxval(abs(block_z_p-saved_block_z_p))>1d-13)error stop 2241
   call apply_h_dg_wpw_bounded(context%bounded_operator,context%bounded_operator%operator_epoch,&
     context%bounded_operator%layout_fingerprint,bxw,bxp,byw,byp,info)
   if(info/=0)error stop 225
@@ -319,6 +330,9 @@ program test_dg_wpw_production_operator_mpi
   if(info==0.or.maxval(abs(context%wp_h-saved_total))>1d-14)error stop 248
   call build_dg_wpw_production_operator(context,info)
   if(info/=0.or.context%bounded_operator%layout_fingerprint==old_fingerprint)error stop 25
+  call apply_dg_wpw_fragment_block_eigen_correction(context%bounded_operator,block_preconditioner,&
+    block_eigenvalues,block_rhs_w,block_rhs_p,block_z_w,block_z_p,info)
+  if(info==0)error stop 2501
   if(rank==0) print '(a)','PASS two-rank rank-local production operator matches dense oracle'
   call release_dg_wpw_bounded_operator_snapshot(frozen_operator)
   call release_dg_wpw_production_context_snapshot(frozen_context)

@@ -19,22 +19,43 @@ input_text = INPUT.read_text().lower()
 controls = global_text + input_text
 
 precondition_control = "yn_dg_wpw_preconditioner"
+metric_precondition_control = "yn_dg_wpw_metric_preconditioner"
 assert precondition_control in global_text, "missing explicit WPW preconditioner comparison control"
 assert precondition_control in input_text, "WPW preconditioner control is absent from input plumbing"
 assert f"{precondition_control} = 'y'" in input_text, "current preconditioned route must remain the default"
 for required in ("call comm_bcast(yn_dg_wpw_preconditioner", "call yn_argument_check(yn_dg_wpw_preconditioner)"):
     assert required in input_text, f"missing WPW preconditioner input contract: {required}"
-assert lcfo.count("if(yn_dg_wpw_preconditioner=='y')then") >= 2, \
-    "fixed-H and continuation routes must independently select the optional preconditioner"
+assert metric_precondition_control in global_text, "missing metric-block correction comparison control"
+assert metric_precondition_control in input_text, "metric-block correction control is absent from input plumbing"
+assert f"{metric_precondition_control} = 'n'" in input_text, \
+    "metric-block correction must remain default-off"
+for required in (
+    "call comm_bcast(yn_dg_wpw_metric_preconditioner",
+    "'yn_dg_wpw_metric_preconditioner', yn_dg_wpw_metric_preconditioner",
+    "call yn_argument_check(yn_dg_wpw_metric_preconditioner)",
+):
+    assert required in input_text, f"missing metric-block correction input contract: {required}"
+assert "yn_dg_wpw_preconditioner=='y'.and.yn_dg_wpw_metric_preconditioner=='y'" in \
+       input_text.replace(" ", ""), "diagonal and metric-block corrections must be mutually exclusive"
 for routine in ("run_wpw_fixed_h_relaxation", "continue_wpw_fixed_h_interface"):
     start = lcfo.index(f"subroutine {routine}")
     end = lcfo.index("end subroutine", start)
     body = lcfo[start:end]
-    branch = body.index("if(yn_dg_wpw_preconditioner=='y')then")
-    fallback = body.index("else", branch)
+    metric_branch = body.index("if(yn_dg_wpw_metric_preconditioner=='y')then")
+    diagonal_branch = body.index("elseif(yn_dg_wpw_preconditioner=='y')then", metric_branch)
+    fallback = body.index("\n          else\n", diagonal_branch)
     closing = body.index("endif", fallback)
-    assert "wpw_precondition" in body[branch:fallback]
-    assert "wpw_precondition" not in body[fallback:closing]
+    assert "wpw_metric_precondition" in body[metric_branch:diagonal_branch]
+    assert "wpw_precondition" in body[diagonal_branch:fallback]
+    assert "precondition=" not in body[fallback:closing]
+    assert body[metric_branch:closing].count("retain_search_history=yn_dg_wpw_search_history=='y'") == 3
+
+algebra_start = lcfo.index("subroutine wpw_algebra_step")
+algebra_end = lcfo.index("end subroutine wpw_algebra_step", algebra_start)
+algebra_body = lcfo[algebra_start:algebra_end]
+assert "precondition=" not in algebra_body, "normal production algebra must remain callback-free"
+assert "retain_search_history=yn_dg_wpw_search_history=='y'" in algebra_body
+assert "[dg-wpw-correction-mode]" in lcfo, "effective fixed-H correction mode must be logged"
 
 history_control = "yn_dg_wpw_search_history"
 assert history_control in global_text, "missing explicit WPW search-history comparison control"
