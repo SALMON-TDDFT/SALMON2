@@ -223,6 +223,43 @@ storage 15/23が同じglobal点へ写っても値は一致しない。発生源�
 raw fragment orbitalへ24点周期性を要求せず、`dc%jxyz_tot`ごとに一意なrepresentativeを
 選び、その値からWPW用Pの全周期像を微分前に構築する必要がある。
 
+### 2026-07-22 physical-periodic PとWannier規格化
+
+WPW用occupied-orbital Pを`unwrapped_buffer_order`直後にphysical-periodic化した。
+各canonical点についてclosed core boxへ最も近いpreimageを一つ選び、P内の全aliasへ
+同じ値をcopyする。加算・平均は行わず、raw fragment `spsi`も変更しない。このPから
+projected Wと解析微分の双方を作る。実装commitは`e15f7de`、production placementは
+`1d7c22a`である。
+
+B=10でcanonical mismatchは解消したが、32点fragment cell規格化から24点physical
+representativeを選ぶことで初期W normが`0.987447--0.990242`となることを計測した。
+各Wをprepared P内のunique canonical点上で規格化し、同じ列scaleを
+`polar_transform`、core値、P値へ一度だけ適用した。解析微分はscaled transformから
+生成する。全rankがnormとlocal fieldをcollective preflightした後にのみmutationし、
+補正後normを全Bで再測定する。helperは`e612c94`、canonical norm assemblerは
+`7625f45`、production integrationは`ae4b754`である。
+
+fresh結果は次の通り。
+
+- B=5: `20260722_task11_normalized_b5/run.log`。Si64 fragment SCFがiteration 75以降
+  不安定化し、iteration 167で`diff=1.2466E-01`のため停止した。半径4に対してB=5は
+  形式上有効だが、この物質ではupstream fragment SCFが未収束で、WPW bootstrapの
+  end-to-end検証は未完了である。partial-Pがbuffer拡張を要求しない契約はfocused
+  helper/source-contract testで検証しているが、このrunの実測結果ではない。
+- B=6: `20260722_task11_normalized_b6/run.log`。SCF 87反復、
+  `diff=9.8498E-10`。128 Wの最大norm誤差`1.11022E-15`、mismatchなし、width
+  `1.26877--1.29094 A`、mean `1.28540 A`。
+- B=10: `20260722_task11_normalized_b10/run.log`。SCF 85反復、
+  `diff=9.4464E-10`。128 Wの最大norm誤差`1.15463E-14`、mismatchなし、width
+  `1.23411--1.26600 A`、mean `1.25543 A`。
+
+B=6/B=10の最大center component差は出力精度で`7.531E-03 A`、最大Omega差
+`8.676E-02 A^2`、最大width差`3.466E-02 A`であり、局在幅は従来想定の約1.2 Aに近い。
+一方、未変更outer-shell gateはB=6で`7.2686E-03`、B=10で`2.2432E-02`
+（tolerance `1E-08`）のため、いずれもfixed-H前で停止した。B>6のPにはphysical
+canonical aliasが含まれるため、P全点を数える現outer-shell/total normは重複像を含み、
+buffer収束指標として再定義が必要である。gateを緩和して先へ進めてはいけない。
+
 少なくとも以下をrank-local値とcollective aggregateの両方で確認する。
 
 - occupied Wが16/fragment、128/globalであり、stable ownerが一意である。
