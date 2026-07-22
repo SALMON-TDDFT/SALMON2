@@ -3349,7 +3349,8 @@ contains
       build_sawf_wannier_density,transform_sawf_wannier_occupation,&
       qualify_sawf_wannier_density_projection,canonicalize_sawf_wannier_center,&
       canonicalize_sawf_bond_identity,assemble_sawf_diagonal_periodic_links,&
-      diagnose_sawf_discrete_wannier_spread
+      diagnose_sawf_discrete_wannier_spread,normalize_sawf_projected_wannier_columns,&
+      validate_sawf_projected_wannier_columns
     use dg_wpw_wannier_tail_halo,only:exchange_sawf_wannier_tail_values,&
       exchange_sawf_discovered_wannier_tails,locate_sawf_wannier_tail_core,&
       locate_sawf_wannier_tail_rank,qualify_sawf_wannier_buffer_tail,is_sawf_outer_buffer_shell
@@ -3357,7 +3358,7 @@ contains
       gather_dg_wpw_occupied_w_payload,initialize_dg_wpw_occupied_w_basis_collective,&
       broadcast_dg_wpw_occupied_w_basis,evaluate_dg_wpw_occupied_w_point,&
       dg_wpw_unwrapped_to_storage_index,reorder_dg_wpw_fragment_buffer,&
-      periodize_dg_wpw_fragment_buffer
+      periodize_dg_wpw_fragment_buffer,assemble_dg_wpw_canonical_buffer_norm
     use dg_wpw_occupied_w_basis,only:extract_dg_wpw_canonical_cell
     use rt_dg_wpw_production_builder,only:route_dg_wpw_staged_candidates,&
       scan_dg_wpw_canonical_faces=>scan_and_route_dg_wpw_canonical_faces,&
@@ -4475,7 +4476,8 @@ contains
         descriptor_gradient_hi(3),descriptor_grid(3),gradient_point,gradient_extent(3),&
         unwrapped_point(3),periodic_image(3),local_grid(3),axis,&
         full_cell_coverage_local,full_cell_coverage_global
-      integer::iw,jw,kw,widest_w,count_above_1p2a,valid_spread_count,comparison_axis,owner_offset
+      integer::iw,jw,kw,widest_w,count_above_1p2a,valid_spread_count,comparison_axis,owner_offset,&
+        worst_norm_w
       real(8)::spread_swap,median_a,p90_a
       logical::spread_key_less
       logical::center_owned,full_cell_coverage
@@ -4635,6 +4637,38 @@ contains
         spread_bvec(axis,2*axis)=-spread_bvec(axis,2*axis-1)
         spread_weight(2*axis-1:2*axis)=0.5d0/spread_bvec(axis,2*axis-1)**2
       enddo
+      if(dc%id_frag==0)call assemble_dg_wpw_canonical_buffer_norm(occupied_w_p,&
+        dc%nxyz_domain,dc%nxyz_buffer,dc%lg_tot%num,dc%ixyz_frag(:,dc%i_frag),&
+        system%hvol,spread_norm,local_info)
+      if(.not.wpw_seed_collective_stage_ok('occupied_w_normalization_norm_assembly',local_info))return
+      if(dc%id_frag==0)spread_norm_partial(source_offset+1:source_offset+source_count)=spread_norm
+      call comm_summation(spread_norm_partial,spread_norm_global,size(spread_norm_global),dc%icomm_tot)
+      local_info=merge(0,1,all(spread_norm_global>0d0).and.all(ieee_is_finite(spread_norm_global)))
+      spread_norm=spread_norm_global(source_offset+1:source_offset+source_count)
+      if(local_info==0)call validate_sawf_projected_wannier_columns(spread_norm,polar_transform,&
+        source_core,buffer_values,local_info)
+      if(.not.wpw_seed_collective_stage_ok('occupied_w_normalization_precheck',local_info))return
+      call normalize_sawf_projected_wannier_columns(spread_norm,polar_transform,source_core,&
+        buffer_values,local_info)
+      if(.not.wpw_seed_collective_stage_ok('occupied_w_physical_normalization',local_info))return
+      source_values(:,source_offset+1:source_offset+source_count)=source_core
+      occupied_w_p=reshape(buffer_values,shape(occupied_w_p));canonical_occupied_w=(0d0,0d0)
+      spread_norm=0d0;spread_link=(0d0,0d0)
+      spread_norm_partial=0d0;spread_norm_global=0d0
+      spread_link_partial=(0d0,0d0);spread_link_global=(0d0,0d0)
+      if(dc%id_frag==0)call assemble_dg_wpw_canonical_buffer_norm(occupied_w_p,&
+        dc%nxyz_domain,dc%nxyz_buffer,dc%lg_tot%num,dc%ixyz_frag(:,dc%i_frag),&
+        system%hvol,spread_norm,local_info)
+      if(.not.wpw_seed_collective_stage_ok('occupied_w_post_normalization_norm_assembly',local_info))return
+      if(dc%id_frag==0)spread_norm_partial(source_offset+1:source_offset+source_count)=spread_norm
+      call comm_summation(spread_norm_partial,spread_norm_global,size(spread_norm_global),dc%icomm_tot)
+      worst_norm_w=maxloc(abs(spread_norm_global-1d0),dim=1)
+      if(dc%id_tot==0)write(*,'(1x,a,3(a,es13.5),a,i0)')'[DG-WPW-WANNIER-NORM]',&
+        ' min=',minval(spread_norm_global),' max=',maxval(spread_norm_global),&
+        ' max_abs_unit_error=',maxval(abs(spread_norm_global-1d0)),' row=',worst_norm_w
+      local_info=merge(0,1,all(spread_norm_global>0d0).and.&
+        all(ieee_is_finite(spread_norm_global)).and.maxval(abs(spread_norm_global-1d0))<=1d-8)
+      if(.not.wpw_seed_collective_stage_ok('occupied_w_post_normalization_norm',local_info))return
       full_cell_coverage_local=merge(1,0,all(stencil_extent>=dc%lg_tot%num))
       call MPI_Allreduce(full_cell_coverage_local,full_cell_coverage_global,1,MPI_INTEGER,MPI_MIN,&
         dc%icomm_tot,ierr)
@@ -4652,7 +4686,9 @@ contains
       endif
       if(full_cell_coverage)then
         if(.not.wpw_seed_collective_stage_ok('occupied_w_canonical_cell_extraction',local_info))return
-        local_info=0
+        local_info=0;spread_norm=0d0;spread_link=(0d0,0d0)
+        spread_norm_partial=0d0;spread_norm_global=0d0
+        spread_link_partial=(0d0,0d0);spread_link_global=(0d0,0d0)
       if(dc%id_frag==0)then
         point=0
         do izp=1,dc%lg_tot%num(3);do iyp=1,dc%lg_tot%num(2);do ixp=1,dc%lg_tot%num(1)

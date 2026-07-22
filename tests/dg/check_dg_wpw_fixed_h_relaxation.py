@@ -220,6 +220,50 @@ coverage_reduce = source_body[coverage_reduce_pos:coverage_reduce_pos + 300]
 assert "mpi_min" in coverage_reduce and "dc%icomm_tot" in coverage_reduce, (
     "spread diagnostics require full-cell coverage on every fragment/rank"
 )
+first_norm_pos = source_body.index("call assemble_dg_wpw_canonical_buffer_norm(occupied_w_p")
+first_collect_pos = source_body.index(
+    "call comm_summation(spread_norm_partial,spread_norm_global", first_norm_pos
+)
+norm_validate_pos = source_body.index("'occupied_w_normalization_precheck'", first_collect_pos)
+field_preflight_pos = source_body.index(
+    "call validate_sawf_projected_wannier_columns(spread_norm", first_collect_pos
+)
+normalize_columns_pos = source_body.index(
+    "call normalize_sawf_projected_wannier_columns(spread_norm", norm_validate_pos
+)
+normalize_stage_pos = source_body.index("'occupied_w_physical_normalization'", normalize_columns_pos)
+source_rescale_pos = source_body.index(
+    "source_values(:,source_offset+1:source_offset+source_count)=source_core", normalize_stage_pos
+)
+second_p_pos = source_body.index("occupied_w_p=reshape(buffer_values", source_rescale_pos)
+second_norm_pos = source_body.index(
+    "call assemble_dg_wpw_canonical_buffer_norm(occupied_w_p", second_p_pos
+)
+second_collect_pos = source_body.index(
+    "call comm_summation(spread_norm_partial,spread_norm_global", second_norm_pos
+)
+post_norm_pos = source_body.index("'occupied_w_post_normalization_norm'", second_collect_pos)
+assert first_norm_pos < first_collect_pos < field_preflight_pos < norm_validate_pos < normalize_columns_pos < normalize_stage_pos, (
+    "norms and every rank-local field must be collectively validated before any rank scales W columns"
+)
+assert source_body.count("call normalize_sawf_projected_wannier_columns(spread_norm") == 1, (
+    "physical normalization must scale each W column exactly once"
+)
+assert normalize_stage_pos < source_rescale_pos < second_p_pos < second_norm_pos < second_collect_pos < post_norm_pos, (
+    "scaled core/P fields must be rebuilt and their canonical norms measured a second time"
+)
+assert "dc%icomm_tot" in source_body[first_collect_pos:first_collect_pos + 300]
+assert "dc%icomm_tot" in source_body[second_collect_pos:second_collect_pos + 300]
+assert "spread_norm_partial=0d0" in source_body[normalize_stage_pos:second_norm_pos], (
+    "first-pass norm contributions must be cleared before the measured second pass"
+)
+assert "spread_link_partial=(0d0,0d0)" in source_body[normalize_stage_pos:second_norm_pos], (
+    "link partials must be cleared before post-normalization spread assembly"
+)
+assert post_norm_pos < analytic_gradient_pos, "analytic gradients must use the scaled polar transform"
+assert "require_unit_norm=.true." in source_body[post_norm_pos:], (
+    "physical normalization must not weaken the existing spread unit-norm gate"
+)
 assert "comm_summation(occupied_stencil_partial,occupied_storage" in source_body and (
     "info%icomm_r" in source_body
 ), "distributed storage pieces must be assembled before unwrapped P differentiation"

@@ -23,6 +23,7 @@ module lcfo_wannier_sawf_seed
   public :: diagnose_sawf_discrete_wannier_spread
   public :: assemble_sawf_diagonal_periodic_links
   public :: normalize_sawf_projected_wannier_columns
+  public :: validate_sawf_projected_wannier_columns
 
 contains
 
@@ -32,6 +33,23 @@ contains
     integer,intent(out)::info
     real(8)::scale(size(norm))
     integer::iw
+
+    call validate_sawf_projected_wannier_columns(norm,polar_transform,core_values,p_values,info)
+    if(info/=0)return
+    scale=1d0/sqrt(norm)
+    if(.not.all(ieee_is_finite(scale)))return
+    do iw=1,size(norm)
+      polar_transform(:,iw)=polar_transform(:,iw)*scale(iw)
+      core_values(:,iw)=core_values(:,iw)*scale(iw)
+      p_values(:,iw)=p_values(:,iw)*scale(iw)
+    enddo
+    info=0
+  end subroutine normalize_sawf_projected_wannier_columns
+
+  subroutine validate_sawf_projected_wannier_columns(norm,polar_transform,core_values,p_values,info)
+    real(8),intent(in)::norm(:)
+    complex(8),intent(in)::polar_transform(:,:),core_values(:,:),p_values(:,:)
+    integer,intent(out)::info
 
     info=1
     if(size(norm)<=0.or.any(shape(polar_transform)/=[size(norm),size(norm)]).or.&
@@ -44,15 +62,8 @@ contains
         .not.all(ieee_is_finite(aimag(core_values))).or.&
         .not.all(ieee_is_finite(real(p_values))).or.&
         .not.all(ieee_is_finite(aimag(p_values))))return
-    scale=1d0/sqrt(norm)
-    if(.not.all(ieee_is_finite(scale)))return
-    do iw=1,size(norm)
-      polar_transform(:,iw)=polar_transform(:,iw)*scale(iw)
-      core_values(:,iw)=core_values(:,iw)*scale(iw)
-      p_values(:,iw)=p_values(:,iw)*scale(iw)
-    enddo
     info=0
-  end subroutine normalize_sawf_projected_wannier_columns
+  end subroutine validate_sawf_projected_wannier_columns
 
   subroutine assemble_sawf_diagonal_periodic_links(values,coordinates,bvec,quadrature_weight,&
       norm,diagonal_link,info)
