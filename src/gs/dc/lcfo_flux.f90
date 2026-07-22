@@ -3296,7 +3296,7 @@ contains
       dg_wpw_support_overlap_box
     use dg_wpw_canonical_face_schedule,only:s_dg_wpw_canonical_face_record,&
       build_dg_wpw_canonical_face_schedule
-    use dg_wpw_w_row_layout,only:build_complete_wpw_w_row_layout=>build_dg_wpw_w_row_layout
+    use dg_wpw_w_row_layout,only:build_dg_wpw_w_row_layout_from_owned_ids
     use dg_wpw_production_context, only: s_dg_wpw_production_context,&
       s_dg_wpw_production_context_snapshot,initialize_dg_wpw_fragment_root_context,&
       snapshot_dg_wpw_production_context,validate_dg_wpw_production_context_snapshot,&
@@ -3313,7 +3313,11 @@ contains
     use dg_wpw_core_point_builder,only:evaluate_dg_wpw_core_point
     use dg_wpw_rank_local_quadrature,only:s_dg_wpw_volume_accumulator,s_dg_wpw_core_p_accumulator,&
       initialize_dg_wpw_volume_accumulator,add_dg_wpw_core_point,build_dg_wpw_rank_local_quadrature,&
-      accumulate_dg_wpw_core_volume,initialize_dg_wpw_core_p_accumulator,add_dg_wpw_core_p_point
+      accumulate_dg_wpw_core_volume,initialize_dg_wpw_core_p_accumulator,add_dg_wpw_core_p_point,&
+      s_dg_wpw_metric_accumulator,initialize_dg_wpw_metric_accumulator,add_dg_wpw_metric_point,&
+      build_dg_wpw_metric_gram,build_dg_wpw_hamiltonian_volume,build_dg_wpw_ww_volume_components
+    use rt_dg_wpw_candidate_halo,only:s_dg_wpw_staged_candidate,s_dg_wpw_owned_candidates,&
+      route_dg_wpw_candidate_halo,wpw_candidate_kind_ww,wpw_candidate_kind_wp,wpw_candidate_kind_pp
     use dg_wpw_lcfo_operator_adapter,only:s_dg_wpw_lcfo_ww_components,&
       import_dg_wpw_lcfo_ww_components,publish_dg_wpw_lcfo_ww_components,&
       validate_dg_wpw_surface_self_policy
@@ -3324,7 +3328,9 @@ contains
     use dg_wpw_nonlocal_projector,only:s_dg_wpw_projector_overlap,&
       build_dg_wpw_projector_overlap_partials,reduce_dg_wpw_p_projector_partials,&
       exchange_dg_wpw_projector_overlaps,assemble_dg_wpw_nonlocal_blocks,&
-      reduce_dg_wpw_projector_records,validate_dg_wpw_projector_provenance
+      reduce_dg_wpw_projector_records,validate_dg_wpw_projector_provenance,&
+      canonicalize_dg_wpw_projector_records
+    use dg_wpw_projector_nonlocal,only:validate_dg_wpw_projector_channels_collective
     use dg_wpw_scf_driver,only:s_dg_wpw_scf_iteration_state,initialize_dg_wpw_scf_iteration_state,&
       advance_dg_wpw_scf_iteration,verify_dg_wpw_scf_fixed_point
     use dg_wpw_matrix_free_scf,only:run_dg_wpw_matrix_free_algebra_step,&
@@ -3338,17 +3344,25 @@ contains
       evaluate_and_run_dg_wpw_lcfo_potential_map
     use dg_wpw_lda_hartree,only:update_wpw_owned_lda_hartree,hartree_energy_global
     use lcfo_wannier_sawf_seed,only:build_sawf_projected_wannier_from_overlap,&
-      apply_sawf_projected_wannier_transform,&
+      apply_sawf_projected_wannier_transform,build_sawf_projected_buffer_gradients,&
+      apply_sawf_projected_wannier_gradient_transform,&
       build_sawf_wannier_density,transform_sawf_wannier_occupation,&
       qualify_sawf_wannier_density_projection,canonicalize_sawf_wannier_center,&
-      canonicalize_sawf_bond_identity
+      canonicalize_sawf_bond_identity,assemble_sawf_diagonal_periodic_links,&
+      diagnose_sawf_discrete_wannier_spread
     use dg_wpw_wannier_tail_halo,only:exchange_sawf_wannier_tail_values,&
       exchange_sawf_discovered_wannier_tails,locate_sawf_wannier_tail_core,&
       locate_sawf_wannier_tail_rank,qualify_sawf_wannier_buffer_tail,is_sawf_outer_buffer_shell
+    use dg_wpw_occupied_w_basis,only:s_dg_wpw_occupied_w_basis,&
+      gather_dg_wpw_occupied_w_payload,initialize_dg_wpw_occupied_w_basis_collective,&
+      broadcast_dg_wpw_occupied_w_basis,evaluate_dg_wpw_occupied_w_point,&
+      dg_wpw_unwrapped_to_storage_index,reorder_dg_wpw_fragment_buffer
+    use dg_wpw_occupied_w_basis,only:extract_dg_wpw_canonical_cell
     use rt_dg_wpw_production_builder,only:route_dg_wpw_staged_candidates,&
       scan_dg_wpw_canonical_faces=>scan_and_route_dg_wpw_canonical_faces,&
       build_dg_wpw_production_operator,bind_dg_wpw_hs_callbacks,replace_dg_wpw_potential_volume,&
-      route_and_replace_dg_wpw_potential_volume,install_dg_wpw_projector_nonlocal
+      route_and_replace_dg_wpw_potential_volume,install_dg_wpw_projector_nonlocal,&
+      publish_dg_wpw_realspace_metric
     use structures
     implicit none
     type(s_rgrid),        intent(in) :: lg,mg
@@ -3390,7 +3404,7 @@ contains
     & ,mat_V_local(:,:,:,:),coef_wf(:,:,:),basis_transform(:,:,:)
     real(8),allocatable :: sawf_explicit_buffer(:,:,:,:,:)
     integer,allocatable :: wpw_g_indices(:,:)
-    integer,allocatable :: wpw_owned_w_ids(:),wpw_support_w_ids(:)
+    integer,allocatable :: wpw_owned_w_ids(:),wpw_support_w_ids(:),wpw_support_w_owner(:)
     integer,allocatable :: wpw_support_fragment_ids(:),wpw_support_core_lo(:,:),wpw_support_core_hi(:,:)
     integer,allocatable :: wpw_support_overlap_lo(:,:),wpw_support_overlap_hi(:,:)
     type(s_dg_wpw_support_record),allocatable::wpw_support_records(:)
@@ -3403,6 +3417,9 @@ contains
     type(s_wpw_face_trace_provider)::wpw_trace_provider
     real(8),allocatable :: wpw_g_vectors(:,:)
     complex(8),allocatable::wpw_volume_wp_h(:,:),wpw_volume_wp_s(:,:),wpw_volume_pp_h(:,:),wpw_volume_pp_s(:,:)
+    complex(8),allocatable::wpw_metric_ww_s(:,:),wpw_metric_wp_s(:,:),wpw_metric_pp_s(:,:)
+    complex(8),allocatable::wpw_metric_ww_h(:,:),wpw_metric_wp_h(:,:),wpw_metric_pp_h(:,:)
+    complex(8),allocatable::wpw_metric_ww_kinetic(:,:),wpw_metric_ww_potential(:,:)
     integer :: wpw_mode_info
     integer :: wpw_production_comm,wpw_mpi_info,wpw_color
     integer :: wpw_failure_local,wpw_failure_global
@@ -3411,15 +3428,20 @@ contains
     type(s_dg_wpw_production_context) :: wpw_context
     type(s_dg_wpw_volume_accumulator)::wpw_volume_accumulator
     type(s_dg_wpw_core_p_accumulator)::wpw_core_p_accumulator
+    type(s_dg_wpw_metric_accumulator)::wpw_metric_accumulator
+    type(s_dg_wpw_occupied_w_basis)::wpw_occupied_w_basis
     type(s_dg_wpw_lcfo_ww_components)::wpw_ww_components
-    type(s_dg_wpw_lcfo_ww_components)::wpw_saved_ww_components
     type(s_dg_wpw_lcfo_ww_components)::wpw_frozen_ww_components
     type(s_dg_wpw_production_context_snapshot)::wpw_frozen_production_context
     type(s_dg_wpw_scf_iteration_state)::wpw_scf_state
     type(s_dg_wpw_grid_route)::wpw_density_route
     complex(8),allocatable::wpw_qw(:,:),wpw_qp(:,:),wpw_q_old_occ(:,:)
+    complex(8),allocatable::wpw_bootstrap_source_values(:,:)
+    integer,allocatable::wpw_bootstrap_source_keys(:,:)
     real(8),allocatable::wpw_eigenvalues(:),wpw_occupations(:)
-    complex(8),allocatable::wpw_saved_wp_volume(:),wpw_saved_pp_volume(:)
+    real(8)::wpw_bootstrap_source_condition
+    integer::wpw_bootstrap_source_count,wpw_bootstrap_source_info
+    complex(8),allocatable::wpw_saved_wp_volume(:),wpw_saved_pp_volume(:),wpw_saved_ww_potential(:)
     complex(8),allocatable::wpw_frozen_wp_volume(:),wpw_frozen_wp_nonlocal(:),wpw_frozen_wp_face(:),&
       wpw_frozen_pp_volume(:),wpw_frozen_pp_nonlocal(:)
     complex(8),allocatable::wpw_frozen_ww_projector_nonlocal(:,:),&
@@ -3460,10 +3482,11 @@ contains
     wpw_nonowned_candidates_pending=.false.
     wpw_fixed_point_mode=.false.
     wpw_metric_diagnostic_only=.false.
-    wpw_window_buffer=merge(dg_wpw_window_buffer,0,num_fragment>1)
+    wpw_window_buffer=0
     wpw_window_width=merge(dg_wpw_window_width,0,num_fragment>1)
     wpw_production_comm=MPI_COMM_NULL
     call init_lcfo
+    wpw_window_buffer=merge(dc%nxyz_buffer-stencil_radius,0,num_fragment>1)
     call initialize_sawf_seed_provenance()
     call calc_basis
     if(yn_dg_wpw_production=='y') then
@@ -3477,17 +3500,25 @@ contains
       call wpw_collective_require(wpw_mode_info==0,'DG WPW bounded support geometry initialization failed')
       call build_wpw_canonical_face_geometry(wpw_mode_info)
       call wpw_collective_require(wpw_mode_info==0,'DG WPW canonical-face schedule initialization failed')
+      wpw_color=merge(1,MPI_UNDEFINED,dc%id_frag==0)
+      call MPI_Comm_split(dc%icomm_tot,wpw_color,dc%i_frag,wpw_production_comm,wpw_mpi_info)
+      call wpw_collective_require(wpw_mpi_info==MPI_SUCCESS,'DG WPW production communicator split failed collectively')
+      call assemble_wpw_core_p_bootstrap(wpw_mode_info)
+      call wpw_collective_require(wpw_mode_info==0,'DG WPW W-independent core/P bootstrap failed collectively')
+      call build_core_owned_projected_wannier_density_seed(wpw_bootstrap_source_values,&
+        wpw_bootstrap_source_count,wpw_bootstrap_source_condition,wpw_occupied_w_basis,&
+        wpw_bootstrap_source_info)
+      call wpw_collective_require(wpw_bootstrap_source_info==0,&
+        'DG WPW occupied-W descriptor bootstrap failed collectively')
       call build_wpw_w_row_layout(wpw_owned_w_ids,wpw_support_w_ids,wpw_mode_info)
       call wpw_collective_require(wpw_mode_info==0,'DG WPW W-row layout initialization failed')
       call broadcast_wpw_w_row_layout(wpw_mode_info)
       call wpw_collective_require(wpw_mode_info==0,'DG WPW fragment W-row layout broadcast failed collectively')
-      wpw_color=merge(1,MPI_UNDEFINED,dc%id_frag==0)
-      call MPI_Comm_split(dc%icomm_tot,wpw_color,dc%i_frag,wpw_production_comm,wpw_mpi_info)
-      call wpw_collective_require(wpw_mpi_info==MPI_SUCCESS,'DG WPW production communicator split failed collectively')
       wpw_mode_info=0
       if(dc%id_frag==0)then
         call initialize_dg_wpw_fragment_root_context(wpw_context,wpw_production_comm,dc%n_frag,&
-          size(wpw_g_indices,2),n_mat(1),dc%i_frag,wpw_support_fragment_ids,wpw_owned_w_ids,&
+          size(wpw_g_indices,2),wpw_occupied_w_basis%global_count,dc%i_frag,&
+          wpw_support_fragment_ids,wpw_owned_w_ids,&
           wpw_support_w_ids,wpw_mode_info)
       endif
       call wpw_collective_require(wpw_mode_info==0,'DG WPW fragment-root context initialization failed collectively')
@@ -3515,9 +3546,6 @@ contains
     call calc_hamiltonian_matrix
     if(dc%id_tot==0) write(*,*) "Hamiltonian matrix: done"
     if(yn_dg_wpw_production=='y')then
-      wpw_mode_info=0
-      if(dc%id_frag==0)call import_wpw_lcfo_ww_components(wpw_mode_info)
-      call wpw_collective_require(wpw_mode_info==0,'DG WPW LCFO WW component import failed collectively')
       call assemble_wpw_projector_nonlocal(wpw_mode_info)
       call wpw_collective_require(wpw_mode_info==0,'DG WPW projector nonlocal assembly failed collectively')
       wpw_mode_info=0
@@ -3560,6 +3588,7 @@ contains
     if(allocated(wpw_g_vectors)) deallocate(wpw_g_vectors)
     if(allocated(wpw_owned_w_ids)) deallocate(wpw_owned_w_ids)
     if(allocated(wpw_support_w_ids)) deallocate(wpw_support_w_ids)
+    if(allocated(wpw_support_w_owner)) deallocate(wpw_support_w_owner)
     if(allocated(wpw_support_fragment_ids)) deallocate(wpw_support_fragment_ids)
     if(allocated(wpw_support_core_lo)) deallocate(wpw_support_core_lo)
     if(allocated(wpw_support_core_hi)) deallocate(wpw_support_core_hi)
@@ -3599,11 +3628,12 @@ contains
     subroutine assemble_wpw_projector_nonlocal(nonlocal_info)
       integer,intent(out)::nonlocal_info
       type(s_dg_wpw_projector_overlap),allocatable::local_records(:),w_records(:),p_partial(:),&
-        p_owned(:),owned_records(:),support_records(:)
-      integer::nw,np,nlma,nsample,ilma,ia,j,sample,i,ib,ip,nwrec,nprec,ilocal,&
-        ierr_nl,root_info,local_info,npeer,ncross,k,production_bad,astat
+        p_owned(:),owned_records(:),support_records(:),canonical_records(:)
+      integer::nw,np,nlma,nsample,ilma,ia,j,sample,i,ib,ip,nwrec,nprec,ilocal,n_w_global,&
+        ierr_nl,root_info,local_info,npeer,ncross,k,production_bad,astat,ik,ll,lproj,m,l0,&
+        channel_scan,angular_code,projector_ordinal
       integer,allocatable::p_ids(:),sample_grid_ids(:),sample_projector_ids(:),peers(:),projector_ids(:),&
-        ww_rows(:),ww_cols(:),cross_rows(:),cross_cols(:)
+        ww_rows(:),ww_cols(:),cross_rows(:),cross_cols(:),projector_channel_key(:,:),projector_owner(:)
       complex(8),allocatable::sample_values(:),ww_values(:),&
         cross_values(:),wp_values(:),pp_values(:)
       real(8)::scale,projector_stage_clock
@@ -3614,12 +3644,12 @@ contains
 
       nonlocal_info=1;root_info=0;nsample=0
       call cpu_time(projector_stage_clock)
-      nw=size(wpw_owned_w_ids);np=0
+      nw=size(wpw_owned_w_ids);n_w_global=wpw_occupied_w_basis%global_count;np=0
       np8=int(size(wpw_support_fragment_ids),8)*int(size(wpw_g_indices,2),8)
       if(np8<=0_8.or.np8>int(huge(0),8))root_info=1
       if(root_info==0)np=int(np8)
       nlma=ppg%Nlma
-      if(nw<=0.or.np<=0.or.nlma<=0.or..not.allocated(ppg%uV).or.&
+      if(nw<=0.or.n_w_global<=0.or.np<=0.or.nlma<=0.or..not.allocated(ppg%uV).or.&
          .not.allocated(ppg%rinv_uvu).or..not.allocated(ppg%ia_tbl).or.&
          .not.allocated(ppg%mps).or..not.allocated(ppg%jxyz).or.&
          .not.allocated(ppg%ilocal_nlma2ilma).or.&
@@ -3632,6 +3662,38 @@ contains
         do ilocal=1,ppg%ilocal_nlma
           ilma=ppg%ilocal_nlma2ilma(ilocal);ia=ppg%ilocal_nlma2ia(ilocal)
           if(ilma<1.or.ilma>nlma.or.ia<1.or.ia>size(ppg%mps))root_info=1
+        enddo
+      endif
+      if(root_info==0)then
+        if(.not.allocated(ppg%lma_tbl).or..not.allocated(system%kion).or.&
+          .not.allocated(pp%mlps).or..not.allocated(pp%nproj).or..not.allocated(pp%inorm))root_info=1
+      endif
+      if(root_info==0)then
+        if(any(ppg%ia_tbl(1:nlma)<1))root_info=1
+      endif
+      if(root_info==0)then
+        if(size(system%kion)<maxval(ppg%ia_tbl(1:nlma)).or.&
+          size(ppg%lma_tbl,2)<maxval(ppg%ia_tbl(1:nlma)))root_info=1
+      endif
+      if(root_info==0)then
+        do ia=1,maxval(ppg%ia_tbl(1:nlma))
+          if(count(ppg%ia_tbl(1:nlma)==ia)>size(ppg%lma_tbl,1))then;root_info=1;exit;endif
+        enddo
+      endif
+      if(root_info==0)then
+        if(any(system%kion(ppg%ia_tbl(1:nlma))<1).or.&
+          any(system%kion(ppg%ia_tbl(1:nlma))>size(pp%mlps)))root_info=1
+      endif
+      if(root_info==0)then
+        if(size(pp%nproj,2)<maxval(system%kion(ppg%ia_tbl(1:nlma))).or.&
+          size(pp%inorm,2)<maxval(system%kion(ppg%ia_tbl(1:nlma))))root_info=1
+      endif
+      if(root_info==0)then
+        do i=1,nlma
+          ik=system%kion(ppg%ia_tbl(i))
+          if(lbound(pp%nproj,1)>0.or.ubound(pp%nproj,1)<pp%mlps(ik).or.&
+            lbound(pp%inorm,1)>0)then;root_info=1;exit;endif
+          if(ubound(pp%inorm,1)<sum(pp%nproj(0:pp%mlps(ik),ik))-1)then;root_info=1;exit;endif
         enddo
       endif
       if(root_info==0)then
@@ -3676,10 +3738,10 @@ contains
         deallocate(local_records)
         call build_dg_wpw_projector_overlap_partials(&
           wpw_volume_accumulator%grid_ids(1:wpw_volume_accumulator%npoint),&
-          wpw_volume_accumulator%weights(1:wpw_volume_accumulator%npoint),wpw_owned_w_ids,&
-          wpw_volume_accumulator%w_points(:,1:wpw_volume_accumulator%npoint),p_ids,&
-          wpw_volume_accumulator%p_points(:,1:wpw_volume_accumulator%npoint),sample_grid_ids,&
-          sample_projector_ids,sample_values,n_mat(1),local_records,local_info)
+          wpw_metric_accumulator%weights(1:wpw_metric_accumulator%npoint),wpw_support_w_ids,&
+          wpw_metric_accumulator%w_points(:,1:wpw_metric_accumulator%npoint),p_ids,&
+          wpw_metric_accumulator%p_points(:,1:wpw_metric_accumulator%npoint),sample_grid_ids,&
+          sample_projector_ids,sample_values,n_w_global,local_records,local_info)
         if(local_info/=0)write(*,'(1x,a,i0,a,i0)')'[DG-WPW-LOCAL-FAIL] projector_quadrature rank=',&
           dc%id_tot,' info=',local_info
       endif
@@ -3690,7 +3752,7 @@ contains
           dc%i_frag,' info=',root_info
         nwrec=0;nprec=0
         if(root_info==0)then
-          nwrec=count(support_records%basis_id<=n_mat(1))
+          nwrec=count(support_records%basis_id<=n_w_global)
           nprec=size(support_records)-nwrec
         endif
         allocate(w_records(nwrec),p_partial(nprec),stat=astat)
@@ -3699,24 +3761,46 @@ contains
         nwrec=0;nprec=0
         if(root_info==0)then
           do i=1,size(support_records)
-            if(support_records(i)%basis_id<=n_mat(1))then
+            if(support_records(i)%basis_id<=n_w_global)then
               nwrec=nwrec+1;w_records(nwrec)=support_records(i)
             else
               nprec=nprec+1;p_partial(nprec)=support_records(i)
             endif
           enddo
         endif
-        allocate(projector_ids(max(1,nlma)),projector_weights(max(1,nlma)),stat=astat)
+        allocate(projector_ids(max(1,nlma)),projector_weights(max(1,nlma)),&
+          projector_channel_key(6,max(1,nlma)),projector_owner(max(1,nlma)),stat=astat)
         if(astat/=0)root_info=1
         call synchronize_wpw_projector_root_info(root_info)
         if(root_info==0)then
-          projector_ids=0;projector_weights=0d0
+          projector_ids=0;projector_weights=0d0;projector_channel_key=0;projector_owner=0
           projector_weights=ppg%rinv_uvu(1:nlma)/hvol
           if(.not.all(ieee_is_finite(projector_weights)))root_info=1
         endif
         if(root_info==0)then
-          projector_ids=[(i,i=1,nlma)]
+          do i=1,nlma
+            ia=ppg%ia_tbl(i)
+            ik=system%kion(ia);channel_scan=0;angular_code=-1;projector_ordinal=0;l0=0
+            channel_lookup: do ll=0,pp%mlps(ik)
+              do lproj=l0,l0+pp%nproj(ll,ik)-1
+                if(pp%inorm(lproj,ik)==0)cycle
+                do m=-ll,ll
+                  channel_scan=channel_scan+1
+                  if(ppg%lma_tbl(channel_scan,ia)==i)then
+                    angular_code=ll*(ll+1)+m;projector_ordinal=lproj-l0+1
+                    exit channel_lookup
+                  endif
+                enddo
+              enddo
+              l0=lproj
+            enddo channel_lookup
+            projector_channel_key(:,i)=[ia,0,0,0,angular_code,projector_ordinal]
+            projector_owner(i)=modulo(ia-1,dc%n_frag)
+            projector_ids(i)=i
+          enddo
         endif
+        call validate_dg_wpw_projector_channels_collective(wpw_production_comm,&
+          projector_channel_key(:,1:nlma),projector_owner(1:nlma),root_info)
         if(root_info==0)then
           call validate_dg_wpw_projector_provenance(wpw_production_comm,projector_ids,&
             ppg%ia_tbl(1:nlma),ppg%rinv_uvu(1:nlma),local_info,root_info)
@@ -3728,44 +3812,12 @@ contains
         if(local_info/=0)root_info=1
         call MPI_Allreduce(root_info,production_bad,1,MPI_INTEGER,MPI_MAX,wpw_production_comm,ierr_nl)
         if(ierr_nl/=MPI_SUCCESS.or.production_bad/=0)root_info=1
-        if(root_info==0)then
-        npeer=count(wpw_support_fragment_ids/=dc%i_frag);allocate(peers(npeer),stat=astat)
-        if(astat/=0)root_info=1
+        if(root_info==0)call canonicalize_dg_wpw_projector_records(wpw_production_comm,&
+          projector_ids(1:nlma),projector_owner(1:nlma),support_records,canonical_records,root_info)
         call synchronize_wpw_projector_root_info(root_info)
-        k=0
-        if(root_info==0)then
-        do i=1,size(wpw_support_fragment_ids)
-          if(wpw_support_fragment_ids(i)==dc%i_frag)cycle
-          k=k+1;peers(k)=wpw_support_fragment_ids(i)-1
-        enddo
-        endif
-        if(root_info==0)then
-        call reduce_dg_wpw_p_projector_partials(wpw_production_comm,size(wpw_g_indices,2),peers,&
-          p_partial,p_owned,root_info,basis_offset=n_mat(1))
-        endif
-        if(root_info/=0)write(*,'(1x,a,i0,a,i0)')'[DG-WPW-LOCAL-FAIL] projector_p_owner fragment=',&
-          dc%i_frag,' info=',root_info
-        if(root_info==0)then
-          nentry8=int(size(w_records),8)+int(size(p_owned),8)
-          if(nentry8>int(huge(0),8))root_info=1
-        endif
+        if(root_info==0)call move_alloc(canonical_records,support_records)
         call synchronize_wpw_projector_root_info(root_info)
-        if(root_info==0)then
-          allocate(owned_records(size(w_records)+size(p_owned)),stat=astat)
-          if(astat/=0)root_info=1
-        endif
-        call synchronize_wpw_projector_root_info(root_info)
-        if(root_info==0)then
-          owned_records(1:size(w_records))=w_records
-          owned_records(size(w_records)+1:)=p_owned
-          call exchange_dg_wpw_projector_overlaps(wpw_production_comm,peers,owned_records,&
-            support_records,root_info)
-          if(root_info/=0)write(*,'(1x,a,i0,a,i0)')'[DG-WPW-LOCAL-FAIL] projector_peer_exchange fragment=',&
-            dc%i_frag,' info=',root_info
-        endif
-        endif
-        call synchronize_wpw_projector_root_info(root_info)
-        call trace_wpw_projector_stage('overlap_exchange',projector_stage_clock,size(support_records),&
+        call trace_wpw_projector_stage('canonical_projector_owner',projector_stage_clock,size(support_records),&
           size(wpw_context%pp_r))
         nentry8=int(nw,8)*int(nw,8)
         if(nentry8>int(huge(0),8))root_info=1
@@ -3818,9 +3870,9 @@ contains
         if(allocated(cross_values))call trace_wpw_projector_stage('ww_cross',projector_stage_clock,&
           size(support_records),size(cross_values))
         if(root_info==0)then
-          if(n_mat(1)<0.or.any(int(wpw_context%wp_p,8)>int(huge(0),8)-int(n_mat(1),8)).or.&
-             any(int(wpw_context%pp_r,8)>int(huge(0),8)-int(n_mat(1),8)).or.&
-             any(int(wpw_context%pp_c,8)>int(huge(0),8)-int(n_mat(1),8)))root_info=1
+          if(any(int(wpw_context%wp_p,8)>int(huge(0),8)-int(n_w_global,8)).or.&
+             any(int(wpw_context%pp_r,8)>int(huge(0),8)-int(n_w_global,8)).or.&
+             any(int(wpw_context%pp_c,8)>int(huge(0),8)-int(n_w_global,8)))root_info=1
         endif
         call synchronize_wpw_projector_root_info(root_info)
         if(root_info==0)then
@@ -3830,35 +3882,19 @@ contains
         call synchronize_wpw_projector_root_info(root_info)
         if(root_info==0)then
           call assemble_dg_wpw_nonlocal_blocks(support_records,projector_ids,projector_weights,&
-            wpw_context%wp_w,n_mat(1)+wpw_context%wp_p,wp_values,root_info)
+            wpw_context%wp_w,n_w_global+wpw_context%wp_p,wp_values,root_info)
           if(root_info/=0)write(*,'(1x,a,i0,a,i0)')'[DG-WPW-LOCAL-FAIL] projector_wp fragment=',&
             dc%i_frag,' info=',root_info
           if(allocated(wp_values))call trace_wpw_projector_stage('wp',projector_stage_clock,&
             size(support_records),size(wp_values))
           if(root_info==0)call assemble_dg_wpw_nonlocal_blocks(support_records,projector_ids,&
-            projector_weights,n_mat(1)+wpw_context%pp_r,n_mat(1)+wpw_context%pp_c,pp_values,root_info)
+            projector_weights,n_w_global+wpw_context%pp_r,n_w_global+wpw_context%pp_c,pp_values,root_info)
           if(root_info/=0)write(*,'(1x,a,i0,a,i0)')'[DG-WPW-LOCAL-FAIL] projector_pp fragment=',&
             dc%i_frag,' info=',root_info
         endif
         call synchronize_wpw_projector_root_info(root_info)
         if(allocated(pp_values))call trace_wpw_projector_stage('pp',projector_stage_clock,&
           size(support_records),size(pp_values))
-        if(root_info==0)then
-          if(any(shape(wpw_ww_components%nonlocal)/=[nw,nw]))then
-            write(*,'(1x,a,i0,a,2(i0,1x),a,i0)')'[DG-WPW-LOCAL-FAIL] projector_ww_shape fragment=',&
-              dc%i_frag,' imported=',shape(wpw_ww_components%nonlocal),' expected=',nw
-            root_info=2
-          else
-            scale=max(1d0,maxval(abs(wpw_ww_components%nonlocal)))
-            if(maxval(abs(reshape(ww_values,[nw,nw])-wpw_ww_components%nonlocal))>1d-10*scale)then
-              write(*,'(1x,a,i0,a,es12.4,a,es12.4)')'[DG-WPW-LOCAL-FAIL] projector_ww_mismatch fragment=',&
-                dc%i_frag,' max_diff=',maxval(abs(reshape(ww_values,[nw,nw])-wpw_ww_components%nonlocal)),&
-                ' scale=',scale
-              root_info=2
-            endif
-          endif
-        endif
-        call synchronize_wpw_projector_root_info(root_info)
         if(root_info==0)then
           call install_dg_wpw_projector_nonlocal(wpw_context,reshape(ww_values,[nw,nw]),&
             cross_rows,cross_cols,cross_values,wp_values,pp_values,root_info)
@@ -3916,7 +3952,7 @@ contains
       if(local_bad==0)then;allocate(wpw_frozen_vxc_tot,source=dc%vxc_tot(1)%f,stat=astat);if(astat/=0)local_bad=1;endif
       if(local_bad==0)then;allocate(wpw_frozen_vloc_tot,source=dc%vloc_tot(1)%f,stat=astat);if(astat/=0)local_bad=1;endif
       if(dc%id_frag==0.and.local_bad==0)then
-        if(.not.wpw_ww_components_fully_allocated().or..not.allocated(wpw_context%wp_h_volume).or.&
+        if(.not.wpw_context%realspace_ww_metric_valid.or..not.allocated(wpw_context%wp_h_volume).or.&
            .not.allocated(wpw_context%wp_h_nonlocal).or..not.allocated(wpw_context%wp_h_face).or.&
            .not.allocated(wpw_context%pp_h_volume).or..not.allocated(wpw_context%pp_h_nonlocal).or.&
            .not.wpw_context%ww_projector_nonlocal_valid.or.&
@@ -3927,8 +3963,7 @@ contains
            .not.wpw_context%bounded_operator%valid)local_bad=1
       endif
       if(dc%id_frag==0.and.local_bad==0)then
-        call snapshot_wpw_frozen_ww_components(astat);if(astat/=0)local_bad=1
-        if(local_bad==0)then;allocate(wpw_frozen_wp_volume,source=wpw_context%wp_h_volume,stat=astat);if(astat/=0)local_bad=1;endif
+        allocate(wpw_frozen_wp_volume,source=wpw_context%wp_h_volume,stat=astat);if(astat/=0)local_bad=1
         if(local_bad==0)then;allocate(wpw_frozen_wp_nonlocal,source=wpw_context%wp_h_nonlocal,stat=astat);if(astat/=0)local_bad=1;endif
         if(local_bad==0)then;allocate(wpw_frozen_wp_face,source=wpw_context%wp_h_face,stat=astat);if(astat/=0)local_bad=1;endif
         if(local_bad==0)then;allocate(wpw_frozen_pp_volume,source=wpw_context%pp_h_volume,stat=astat);if(astat/=0)local_bad=1;endif
@@ -4072,7 +4107,6 @@ contains
       if(.not.same_real3(wpw_frozen_vxc_tot,dc%vxc_tot(1)%f))return
       if(.not.same_real3(wpw_frozen_vloc_tot,dc%vloc_tot(1)%f))return
       if(dc%id_frag/=0)then;ok=.true.;return;endif
-      if(.not.same_wpw_ww_components(wpw_frozen_ww_components,wpw_ww_components))return
       if(.not.same_complex1(wpw_frozen_wp_volume,wpw_context%wp_h_volume))return
       if(.not.same_complex1(wpw_frozen_wp_nonlocal,wpw_context%wp_h_nonlocal))return
       if(.not.same_complex1(wpw_frozen_wp_face,wpw_context%wp_h_face))return
@@ -4398,27 +4432,44 @@ contains
     end function wpw_seed_collective_stage_ok
 
     subroutine build_core_owned_projected_wannier_density_seed(source_values,source_count,&
-        source_condition,source_info)
+        source_condition,occupied_w_basis,source_info)
       use communication,only:comm_summation
       use salmon_global,only:wannier_projection_width
       complex(8),allocatable,intent(out)::source_values(:,:)
       integer,intent(out)::source_count,source_info
       real(8),intent(out)::source_condition
+      type(s_dg_wpw_occupied_w_basis),intent(inout)::occupied_w_basis
       real(8),allocatable::bond_center(:,:)
       integer,allocatable::bond_atoms(:,:),bond_images(:,:)
       complex(8),allocatable::overlap_local(:,:),overlap(:,:),occupied_values(:,:),&
         source_partial(:,:),source_core(:,:),polar_transform(:,:),occupied_buffer(:,:),&
-        buffer_partial(:,:),buffer_values(:,:),send_value(:),received_value(:)
+        buffer_partial(:,:),buffer_values(:,:),occupied_stencil_partial(:,:,:,:),&
+        occupied_storage(:,:,:,:),occupied_stencil(:,:,:,:),&
+        occupied_w_p(:,:,:,:),canonical_occupied_w(:,:,:,:),&
+        buffer_gradient_partial(:,:,:),buffer_gradient_values(:,:,:),&
+        compact_gradient_partial(:,:,:),compact_gradient_values(:,:,:),&
+        descriptor_buffer_values(:,:),descriptor_buffer_gradients(:,:,:),send_value(:),received_value(:)
       integer::source_counts(dc%n_frag),source_counts_all(dc%n_frag),source_offset,global_source_count
       integer,allocatable::source_key_local(:,:),source_key_partial(:,:),source_key_global(:,:)
-      integer,allocatable::send_source(:,:),send_destination(:),send_point(:),received_source(:,:),&
-        received_point(:),all_rank_meta(:,:),fragment_start(:,:),fragment_shape(:,:)
+      integer,allocatable::local_buffer_point_ids(:),gathered_core_grid_ids(:)
+      complex(8),allocatable::gathered_core_values(:,:),gathered_buffer_values(:,:),&
+        gathered_buffer_gradients(:,:,:)
+      integer,allocatable::send_source(:,:),send_destination(:),send_point(:),send_image(:,:),&
+        received_source(:,:),received_point(:),received_image(:,:),all_rank_meta(:,:),&
+        fragment_start(:,:),fragment_shape(:,:)
       real(8)::x,y,z,gval,wrapped_center(3),fractional_center(3),core_lower(3),core_upper(3)
       real(8)::tail_norm_local(2),tail_norm_global(2),outer_shell_ratio,omitted_tail_ratio
-      integer::ixp,iyp,izp,io_state,isource,jsource,point,local_info,center_image(3),&
+      real(8),allocatable::spread_coordinates(:,:),spread_bvec(:,:),spread_weight(:),&
+        spread_norm(:),spread_norm_partial(:),spread_norm_global(:),spread_center(:,:),spread_omega(:)
+      complex(8),allocatable::spread_link(:,:),spread_link_partial(:,:),spread_link_global(:,:)
+      logical,allocatable::spread_center_valid(:)
+      integer::ixp,iyp,izp,ixb,iyb,izb,sx,sy,sz,io_state,isource,jsource,point,local_info,center_image(3),&
         canonical_atoms(2),canonical_image(3),buffer_point,buffer_count,record,max_record,&
         destination_fragment,destination_local(3),destination_rank,global_point(3),global_grid_id,&
-        source_index,core_point,rank_meta(8),ierr
+        source_index,core_point,core_descriptor_point,rank_meta(8),ierr,stencil_radius,stencil_extent(3),stencil_lo(3),&
+        descriptor_buffer_lo(3),descriptor_buffer_hi(3),descriptor_gradient_lo(3),&
+        descriptor_gradient_hi(3),descriptor_grid(3),gradient_point,gradient_extent(3),&
+        unwrapped_point(3),periodic_image(3),local_grid(3),axis
       logical::center_owned
 
       source_info=1;source_count=0;source_condition=huge(1d0)
@@ -4450,6 +4501,8 @@ contains
       allocate(source_key_local(5,source_count),source_key_partial(5,global_source_count),&
         source_key_global(5,global_source_count))
       source_key_local(1:2,:)=bond_atoms;source_key_local(3:5,:)=bond_images
+      if(allocated(wpw_bootstrap_source_keys))deallocate(wpw_bootstrap_source_keys)
+      allocate(wpw_bootstrap_source_keys,source=source_key_local)
       source_key_partial=0
       if(dc%id_frag==0)source_key_partial(:,source_offset+1:source_offset+source_count)=source_key_local
       call comm_summation(source_key_partial,source_key_global,size(source_key_global),dc%icomm_tot)
@@ -4503,27 +4556,118 @@ contains
       source_values=(0d0,0d0)
       source_values(:,source_offset+1:source_offset+source_count)=source_core
 
-      buffer_count=product(mg%ie-mg%is+1)
+      buffer_count=product(dc%nxyz_domain+2*dc%nxyz_buffer)
       allocate(occupied_buffer(buffer_count,system%no),buffer_partial(buffer_count,source_count),&
-        buffer_values(buffer_count,source_count))
+        buffer_values(buffer_count,source_count),buffer_gradient_partial(3,buffer_count,source_count),&
+        buffer_gradient_values(3,buffer_count,source_count))
+      stencil_radius=size(stencil%coef_nab,1)
+      local_info=merge(0,1,all(dc%nxyz_buffer>stencil_radius))
+      stencil_lo=1;stencil_extent=dc%nxyz_domain+2*dc%nxyz_buffer
+      gradient_extent=stencil_extent-2*stencil_radius
+      if(any(gradient_extent<=0))local_info=1
+      if(.not.wpw_seed_collective_stage_ok('buffer_gradient_window',local_info))return
+      allocate(occupied_stencil_partial(stencil_extent(1),stencil_extent(2),stencil_extent(3),system%no),&
+        occupied_storage(stencil_extent(1),stencil_extent(2),stencil_extent(3),system%no),&
+        occupied_stencil(stencil_extent(1),stencil_extent(2),stencil_extent(3),system%no))
+      occupied_stencil_partial=(0d0,0d0)
+      do izp=max(1,mg%is(3)),min(stencil_extent(3),mg%ie(3))
+        do iyp=max(1,mg%is(2)),min(stencil_extent(2),mg%ie(2))
+          do ixp=max(1,mg%is(1)),min(stencil_extent(1),mg%ie(1))
+            do io_state=info%io_s,info%io_e
+              if(system%rocc(io_state,1,1)<=1d-12)cycle
+              occupied_stencil_partial(ixp,iyp,izp,io_state)=&
+                cmplx(spsi%rwf(ixp,iyp,izp,1,io_state,1,1),0d0,8)
+            enddo
+          enddo
+        enddo
+      enddo
+      call comm_summation(occupied_stencil_partial,occupied_storage,size(occupied_storage),info%icomm_r)
+      call reorder_dg_wpw_fragment_buffer(occupied_storage,dc%nxyz_domain,dc%nxyz_buffer,&
+        occupied_stencil,local_info)
+      if(.not.wpw_seed_collective_stage_ok('unwrapped_buffer_order',local_info))return
       occupied_buffer=(0d0,0d0);buffer_point=0
-      do izp=mg%is(3),mg%ie(3);do iyp=mg%is(2),mg%ie(2);do ixp=mg%is(1),mg%ie(1)
+      do izb=1,stencil_extent(3)
+        do iyb=1,stencil_extent(2)
+          do ixb=1,stencil_extent(1)
         buffer_point=buffer_point+1
         do io_state=info%io_s,info%io_e
           if(system%rocc(io_state,1,1)<=1d-12)cycle
-          occupied_buffer(buffer_point,io_state)=cmplx(spsi%rwf(ixp,iyp,izp,1,io_state,1,1),0d0,8)
+          occupied_buffer(buffer_point,io_state)=occupied_stencil(ixb,iyb,izb,io_state)
         enddo
       enddo;enddo;enddo
       call apply_sawf_projected_wannier_transform(occupied_buffer,overlap,polar_transform,&
         buffer_partial,local_info)
       if(.not.wpw_seed_collective_stage_ok('buffer_projection',local_info))return
       call comm_summation(buffer_partial,buffer_values,size(buffer_values),info%icomm_o)
+      local_info=merge(0,1,global_source_count==128.and.dc%n_frag==8.and.source_count==16)
+      if(.not.wpw_seed_collective_stage_ok('occupied_w_link_shape',local_info))return
+      allocate(occupied_w_p(stencil_extent(1),stencil_extent(2),stencil_extent(3),source_count),&
+        canonical_occupied_w(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),source_count),&
+        spread_coordinates(3,product(dc%lg_tot%num)),spread_bvec(3,6),spread_weight(6),&
+        spread_norm(source_count),spread_link(source_count,6),spread_center(3,source_count),&
+        spread_omega(source_count),spread_center_valid(source_count),&
+        spread_norm_partial(global_source_count),spread_norm_global(global_source_count),&
+        spread_link_partial(global_source_count,6),spread_link_global(global_source_count,6))
+      occupied_w_p=reshape(buffer_values,shape(occupied_w_p));canonical_occupied_w=(0d0,0d0)
+      spread_coordinates=0d0;spread_bvec=0d0;spread_weight=0d0
+      spread_norm=0d0;spread_link=(0d0,0d0);spread_center=0d0
+      spread_norm_partial=0d0;spread_norm_global=0d0
+      spread_link_partial=(0d0,0d0);spread_link_global=(0d0,0d0)
+      spread_omega=huge(1d0);spread_center_valid=.false.;local_info=0
+      if(dc%id_frag==0)then
+        call extract_dg_wpw_canonical_cell(occupied_w_p,dc%nxyz_domain,dc%nxyz_buffer,&
+          dc%lg_tot%num,dc%ixyz_frag(:,dc%i_frag),canonical_occupied_w,local_info)
+        if(local_info==0)then
+          point=0
+          do izp=1,dc%lg_tot%num(3);do iyp=1,dc%lg_tot%num(2);do ixp=1,dc%lg_tot%num(1)
+            point=point+1
+            spread_coordinates(:,point)=system%hgs*dble([ixp-1,iyp-1,izp-1])
+          enddo;enddo;enddo
+          do axis=1,3
+            spread_bvec(axis,2*axis-1)=2d0*acos(-1d0)/wpw_box_length(axis)
+            spread_bvec(axis,2*axis)=-spread_bvec(axis,2*axis-1)
+            spread_weight(2*axis-1:2*axis)=0.5d0/spread_bvec(axis,2*axis-1)**2
+          enddo
+          call assemble_sawf_diagonal_periodic_links(&
+            reshape(canonical_occupied_w,[product(dc%lg_tot%num),source_count]),&
+            spread_coordinates,spread_bvec,system%hvol,spread_norm,spread_link,local_info)
+        endif
+      endif
+      if(.not.wpw_seed_collective_stage_ok('occupied_w_link_assembly',local_info))return
+      if(dc%id_frag==0)then
+        spread_norm_partial(source_offset+1:source_offset+source_count)=spread_norm
+        spread_link_partial(source_offset+1:source_offset+source_count,:)=spread_link
+      endif
+      call comm_summation(spread_norm_partial,spread_norm_global,size(spread_norm_global),dc%icomm_tot)
+      call comm_summation(spread_link_partial,spread_link_global,size(spread_link_global),dc%icomm_tot)
+      local_info=merge(0,1,all(spread_norm_global>0d0).and.&
+        all(ieee_is_finite(spread_norm_global)).and.&
+        all(ieee_is_finite(real(spread_link_global))).and.&
+        all(ieee_is_finite(aimag(spread_link_global))))
+      if(.not.wpw_seed_collective_stage_ok('occupied_w_link_collection',local_info))return
+      allocate(compact_gradient_partial(3,product(gradient_extent),source_count),&
+        compact_gradient_values(3,product(gradient_extent),source_count))
+      call build_sawf_projected_buffer_gradients(occupied_stencil,stencil%coef_nab,overlap,&
+        polar_transform,compact_gradient_partial,local_info)
+      if(.not.wpw_seed_collective_stage_ok('buffer_gradient_projection',local_info))return
+      call comm_summation(compact_gradient_partial,compact_gradient_values,&
+        size(compact_gradient_values),info%icomm_o)
+      buffer_gradient_values=(0d0,0d0);gradient_point=0
+      do izp=1+stencil_radius,stencil_extent(3)-stencil_radius
+        do iyp=1+stencil_radius,stencil_extent(2)-stencil_radius
+          do ixp=1+stencil_radius,stencil_extent(1)-stencil_radius
+            gradient_point=gradient_point+1
+            buffer_point=ixp+(iyp-1)*stencil_extent(1)+(izp-1)*stencil_extent(1)*stencil_extent(2)
+            buffer_gradient_values(:,buffer_point,:)=compact_gradient_values(:,gradient_point,:)
+          enddo
+        enddo
+      enddo
       tail_norm_local=0d0;buffer_point=0
       if(info%id_o==0)then
-        do izp=mg%is(3),mg%ie(3);do iyp=mg%is(2),mg%ie(2);do ixp=mg%is(1),mg%ie(1)
+        do izb=1,stencil_extent(3);do iyb=1,stencil_extent(2);do ixb=1,stencil_extent(1)
           buffer_point=buffer_point+1
           tail_norm_local(1)=tail_norm_local(1)+sum(abs(buffer_values(buffer_point,:))**2)*system%hvol
-          if(is_sawf_outer_buffer_shell([ixp,iyp,izp],lg%num,dc%lg_tot%num))&
+          if(is_sawf_outer_buffer_shell([ixb,iyb,izb],stencil_extent,dc%lg_tot%num))&
             tail_norm_local(2)=tail_norm_local(2)+&
               sum(abs(buffer_values(buffer_point,:))**2)*system%hvol
         enddo;enddo;enddo
@@ -4540,60 +4684,76 @@ contains
         omitted_tail_ratio,local_info)
       if(.not.wpw_seed_collective_stage_ok('buffer_sufficiency',local_info))return
 
-      allocate(all_rank_meta(8,dc%isize_tot),fragment_start(3,dc%n_frag),fragment_shape(3,dc%n_frag))
-      rank_meta=[dc%i_frag,info%id_o,mg%is(1),mg%is(2),mg%is(3),mg%ie(1),mg%ie(2),mg%ie(3)]
-      call MPI_Allgather(rank_meta,8,MPI_INTEGER,all_rank_meta,8,MPI_INTEGER,dc%icomm_tot,ierr)
-      local_info=merge(0,1,ierr==MPI_SUCCESS)
-      if(.not.wpw_seed_collective_stage_ok('rank_metadata',local_info))return
-      fragment_start=dc%ixyz_frag+1;fragment_shape=dc%nxyz_domain_frag
-      max_record=merge(buffer_count*source_count,0,info%id_o==0)
-      allocate(send_source(5,max_record),send_destination(max_record),send_point(max_record),&
-        send_value(max_record));record=0;buffer_point=0
-      if(info%id_o==0)then
-        buffer_route: do izp=mg%is(3),mg%ie(3);do iyp=mg%is(2),mg%ie(2);do ixp=mg%is(1),mg%ie(1)
-          buffer_point=buffer_point+1
-          global_point=[dc%jxyz_tot(ixp,1),dc%jxyz_tot(iyp,2),dc%jxyz_tot(izp,3)]
-          call locate_sawf_wannier_tail_core(global_point,dc%lg_tot%num,fragment_start,fragment_shape,&
-            destination_fragment,destination_local,local_info)
-          if(local_info/=0)exit buffer_route
-          if(destination_fragment==dc%i_frag)cycle
-          call locate_sawf_wannier_tail_rank(destination_fragment,destination_local,all_rank_meta(1,:),&
-            all_rank_meta(2,:),all_rank_meta(3:5,:),all_rank_meta(6:8,:),&
-            destination_rank,local_info)
-          if(local_info/=0)exit buffer_route
-          global_grid_id=wpw_core_global_grid_id(global_point-1)
-          do isource=1,source_count
-            if(abs(buffer_values(buffer_point,isource))<=0d0)cycle
-            record=record+1;send_source(:,record)=source_key_local(:,isource)
-            send_destination(record)=destination_rank;send_point(record)=global_grid_id
-            send_value(record)=buffer_values(buffer_point,isource)
+      ! P already contains its periodic buffer in one unwrapped-contiguous
+      ! ordering.  Do not canonicalize and add aliases back into core values.
+      local_info=merge(0,1,all(ieee_is_finite(real(source_values))).and.&
+        all(ieee_is_finite(aimag(source_values))))
+      if(.not.wpw_seed_collective_stage_ok('unwrapped_source_values',local_info))return
+      descriptor_buffer_lo=1-dc%nxyz_buffer+stencil_radius
+      descriptor_buffer_hi=dc%nxyz_domain+dc%nxyz_buffer-stencil_radius
+      descriptor_gradient_lo=descriptor_buffer_lo
+      descriptor_gradient_hi=descriptor_buffer_hi
+      allocate(local_buffer_point_ids(product(gradient_extent)),&
+        descriptor_buffer_values(product(gradient_extent),source_count),&
+        descriptor_buffer_gradients(3,product(gradient_extent),source_count))
+      gradient_point=0
+      do izb=1+stencil_radius,stencil_extent(3)-stencil_radius
+        do iyb=1+stencil_radius,stencil_extent(2)-stencil_radius
+          do ixb=1+stencil_radius,stencil_extent(1)-stencil_radius
+        gradient_point=gradient_point+1
+        buffer_point=ixb+(iyb-1)*stencil_extent(1)+(izb-1)*stencil_extent(1)*stencil_extent(2)
+        descriptor_grid=[ixb,iyb,izb]-dc%nxyz_buffer
+        local_buffer_point_ids(gradient_point)=descriptor_grid(1)-descriptor_buffer_lo(1)+1+&
+          (descriptor_grid(2)-descriptor_buffer_lo(2))*(descriptor_buffer_hi(1)-descriptor_buffer_lo(1)+1)+&
+          (descriptor_grid(3)-descriptor_buffer_lo(3))*(descriptor_buffer_hi(1)-descriptor_buffer_lo(1)+1)*&
+            (descriptor_buffer_hi(2)-descriptor_buffer_lo(2)+1)
+        descriptor_buffer_values(gradient_point,:)=buffer_values(buffer_point,:)
+        descriptor_buffer_gradients(:,gradient_point,:)=compact_gradient_values(:,gradient_point,:)
+      enddo;enddo;enddo
+      point=0
+      do izp=max(mg%is(3),1),min(mg%ie(3),dc%nxyz_domain(3))
+        do iyp=max(mg%is(2),1),min(mg%ie(2),dc%nxyz_domain(2))
+          do ixp=max(mg%is(1),1),min(mg%ie(1),dc%nxyz_domain(1))
+            point=point+1;descriptor_grid=[ixp,iyp,izp]
+            core_descriptor_point=descriptor_grid(1)-descriptor_buffer_lo(1)+1+&
+              (descriptor_grid(2)-descriptor_buffer_lo(2))*gradient_extent(1)+&
+              (descriptor_grid(3)-descriptor_buffer_lo(3))*gradient_extent(1)*gradient_extent(2)
+            if(core_descriptor_point<1.or.core_descriptor_point>size(descriptor_buffer_values,1).or.&
+              maxval(abs(source_core(point,:)-descriptor_buffer_values(core_descriptor_point,:)))>&
+                1d-12*max(1d0,maxval(abs(source_core(point,:)))))local_info=1
           enddo
-        enddo;enddo;enddo buffer_route
-      endif
-      if(.not.wpw_seed_collective_stage_ok('tail_route',local_info))return
-      call exchange_sawf_discovered_wannier_tails(dc%icomm_tot,send_source(:,1:record),&
-        send_destination(1:record),send_point(1:record),send_value(1:record),received_source,&
-        received_point,received_value,local_info)
-      if(.not.wpw_seed_collective_stage_ok('tail_exchange',local_info))return
-      do record=1,size(received_point)
-        source_index=0
-        do isource=1,global_source_count
-          if(all(received_source(:,record)==source_key_global(:,isource)))then
-            source_index=isource;exit
-          endif
         enddo
-        core_point=0
-        do point=1,wpw_core_p_accumulator%npoint
-          if(wpw_core_p_accumulator%grid_ids(point)==received_point(record))then
-            core_point=point;exit
-          endif
-        enddo
-        if(source_index==0.or.core_point==0)then;local_info=1;exit;endif
-        source_values(core_point,source_index)=source_values(core_point,source_index)+received_value(record)
       enddo
-      if(.not.all(ieee_is_finite(real(source_values))).or.&
-        .not.all(ieee_is_finite(aimag(source_values))))local_info=1
-      if(.not.wpw_seed_collective_stage_ok('received_tail_map',local_info))return
+      if(point/=size(source_core,1))local_info=1
+      if(.not.wpw_seed_collective_stage_ok('descriptor_core_d_invariant',local_info))return
+      write(*,'(1x,a,3(a,i0),4(a,3(i0,1x)),2(a,l1))')'[DG-WPW-GRADIENT-WINDOW]',&
+        ' rank=',dc%id_tot,' fragment=',dc%i_frag,' orbital_rank=',info%id_o,&
+        ' mg_lo=',mg%is,' mg_hi=',mg%ie,' dg_lo=',descriptor_buffer_lo,&
+        ' dg_hi=',descriptor_buffer_hi,' values_finite=',&
+        all(ieee_is_finite(real(descriptor_buffer_values))).and.&
+        all(ieee_is_finite(aimag(descriptor_buffer_values))),&
+        ' gradients_finite=',all(ieee_is_finite(real(descriptor_buffer_gradients))).and.&
+        all(ieee_is_finite(aimag(descriptor_buffer_gradients)))
+      call gather_dg_wpw_occupied_w_payload(dc%icomm_frag,info%id_o==0,&
+        wpw_core_p_accumulator%grid_ids(1:wpw_core_p_accumulator%npoint),&
+        source_values(:,source_offset+1:source_offset+source_count),&
+        local_buffer_point_ids,descriptor_buffer_values,descriptor_buffer_gradients,&
+        product(dc%nxyz_domain),&
+        product(descriptor_buffer_hi-descriptor_buffer_lo+1),gathered_core_grid_ids,&
+        gathered_core_values,gathered_buffer_values,gathered_buffer_gradients,local_info)
+      if(.not.wpw_seed_collective_stage_ok('occupied_w_payload_gather',local_info))return
+      local_info=0
+      if(dc%id_frag==0)then
+        if(global_source_count==128.and.dc%n_frag==8.and.source_count/=16)local_info=1
+        if(local_info==0)call initialize_dg_wpw_occupied_w_basis_collective(occupied_w_basis,&
+          wpw_production_comm,dc%i_frag,source_key_local,gathered_core_grid_ids,gathered_core_values,&
+          descriptor_buffer_lo,descriptor_buffer_hi,gathered_buffer_values,gathered_buffer_gradients,&
+          source_condition,1,global_source_count,local_info,&
+          descriptor_gradient_lo,descriptor_gradient_hi)
+      endif
+      if(.not.wpw_seed_collective_stage_ok('occupied_w_descriptor_commit',local_info))return
+      call broadcast_dg_wpw_occupied_w_basis(dc%icomm_frag,0,occupied_w_basis,local_info)
+      if(.not.wpw_seed_collective_stage_ok('occupied_w_descriptor_broadcast',local_info))return
       source_info=0
     end subroutine build_core_owned_projected_wannier_density_seed
 
@@ -4602,6 +4762,7 @@ contains
       integer::local_nsource,isource,point,ixp,iyp,izp,iw,offset,ierr,root_info,point_info,source_info
       integer::grid_point(3)
       integer::occ_counts(dc%n_frag),occ_counts_all(dc%n_frag)
+      integer,allocatable::source_w_ids_local(:),source_w_ids(:)
       complex(8),allocatable::local_overlap_w(:,:),root_overlap_w(:,:),support_w_values(:),&
         support_w_gradients(:,:),owned_w_values(:),owned_w_gradients(:,:),&
         local_overlap_p(:,:),root_overlap_p(:,:),metric_rhs_w(:,:),metric_rhs_p(:,:),&
@@ -4624,12 +4785,18 @@ contains
         routed_w_local,routed_w_global,routed_p_local,routed_p_global,capture_denominator,&
         metric_s_norm_local,metric_s_norm_global,gram_split_local(3),gram_split_global(3),&
         assembled_split_local(3),assembled_split_global(3),w_norm_stats_local(3),w_norm_stats_global(3)
-      integer::projection_rank,metric_iterations,metric_history_iter,w_norm_count_local,w_norm_count_global
+      integer::projection_rank,metric_iterations,metric_history_iter,w_norm_count_local,w_norm_count_global,&
+        source_w_position,local_source_position
       integer::w_norm_max_location(1)
 
       seed_info=1;root_info=0
-      call build_core_owned_projected_wannier_density_seed(source_values,local_nsource,&
-        source_condition,source_info)
+      local_nsource=wpw_bootstrap_source_count;source_condition=wpw_bootstrap_source_condition
+      source_info=wpw_bootstrap_source_info
+      if(allocated(wpw_bootstrap_source_values))then
+        allocate(source_values,source=wpw_bootstrap_source_values)
+      else
+        source_info=1
+      endif
       if(.not.wpw_seed_collective_stage_ok('source_build',source_info))return
       occ_counts=0
       if(dc%id_frag==0)occ_counts(dc%i_frag)=local_nsource
@@ -4637,6 +4804,28 @@ contains
       wpw_nocc=occupied_index_from_input(1);wpw_nretain=wpw_nocc+dg_wpw_extra_states
       if(sum(occ_counts_all)/=wpw_nocc.or.local_nsource<1.or.&
          wpw_nretain>n_mat(1)+dc%n_frag*size(wpw_g_indices,2))root_info=1
+      allocate(source_w_ids_local(wpw_nocc),source_w_ids(wpw_nocc));source_w_ids_local=0
+      offset=sum(occ_counts_all(1:dc%i_frag-1))
+      if(dc%id_frag==0)then
+        do isource=1,local_nsource
+          local_source_position=0
+          do iw=1,wpw_occupied_w_basis%local_count
+            if(all(wpw_occupied_w_basis%stable_keys(:,iw)==wpw_bootstrap_source_keys(:,isource)))then
+              local_source_position=iw;exit
+            endif
+          enddo
+          if(local_source_position==0)then
+            root_info=1
+          else
+            source_w_ids_local(offset+isource)=wpw_occupied_w_basis%owned_ids(local_source_position)
+          endif
+        enddo
+      endif
+      call comm_summation(source_w_ids_local,source_w_ids,wpw_nocc,dc%icomm_tot)
+      if(any(source_w_ids<=0))root_info=1
+      do isource=1,wpw_nocc;do iw=isource+1,wpw_nocc
+        if(source_w_ids(isource)==source_w_ids(iw))root_info=1
+      enddo;enddo
       allocate(local_overlap_w(size(wpw_support_w_ids),wpw_nocc),&
         root_overlap_w(size(wpw_support_w_ids),wpw_nocc),&
         local_overlap_p(size(wpw_support_fragment_ids)*size(wpw_g_indices,2),wpw_nocc),&
@@ -4677,6 +4866,12 @@ contains
             enddo
             do isource=1,wpw_nocc
               if(info%id_o/=0)cycle
+              source_w_position=find_integer_id(wpw_support_w_ids,source_w_ids(isource))
+              if(source_w_position>0)then
+                source_values(point,isource)=support_w_values(source_w_position)
+              else
+                source_values(point,isource)=(0d0,0d0)
+              endif
               local_source_norm(isource)=local_source_norm(isource)+&
                 abs(source_values(point,isource))**2*&
                 wpw_volume_accumulator%weights(point)
@@ -5182,7 +5377,7 @@ contains
       use salmon_global,only:sysname
       type(s_dg_wpw_checkpoint_state)::checkpoint,verified_checkpoint
       real(8),allocatable::retained_occupations(:)
-      complex(8),allocatable::ww_z_dense(:,:),wp_z_dense(:,:),pp_z_dense(:,:)
+      complex(8),allocatable::ww_z_sparse(:),wp_z_sparse(:),pp_z_dense(:,:)
       character(1024)::checkpoint_path
       integer,intent(out)::checkpoint_info
       integer::ierr,local_bad,global_bad,manifest_unit,manifest_ios
@@ -5228,7 +5423,7 @@ contains
       endif
       checkpoint_info=local_bad
       if(.not.wpw_potential_stage_ok(checkpoint_info))return
-      call build_wpw_checkpoint_position_volume(ww_z_dense,wp_z_dense,pp_z_dense,checkpoint_info)
+      call build_wpw_checkpoint_position_volume(ww_z_sparse,wp_z_sparse,pp_z_dense,checkpoint_info)
       if(checkpoint_info/=0)return
       if(dc%id_frag==0)then
         allocate(retained_occupations(wpw_nretain));retained_occupations=0d0
@@ -5250,7 +5445,8 @@ contains
           checkpoint%final_interface_lambda=wpw_context%bounded_operator%interface_lambda
           checkpoint%tolerance_profile='metric_and_scf_residual_tolerance'
           checkpoint%frozen_layout_fingerprint=wpw_frozen_production_context%bounded_operator%layout_fingerprint
-          checkpoint%frozen_ww_provenance_fingerprint=wpw_frozen_ww_components%provenance_fingerprint
+          checkpoint%frozen_ww_provenance_fingerprint=&
+            wpw_frozen_production_context%ww_provenance_fingerprint
         endif
         checkpoint%peer_ranks=pack(wpw_context%support_fragment_ids-1,&
           wpw_context%support_fragment_ids/=wpw_context%owned_fragment_id)
@@ -5277,7 +5473,7 @@ contains
         checkpoint%pp_s=wpw_context%bounded_operator%pp_s
         allocate(checkpoint%ww_z(size(checkpoint%ww_r)),checkpoint%wp_z(size(checkpoint%wp_w)),&
           checkpoint%pp_z(size(checkpoint%pp_r)))
-        call map_wpw_checkpoint_position_sparse(checkpoint,ww_z_dense,wp_z_dense,pp_z_dense,checkpoint_info)
+        call map_wpw_checkpoint_position_sparse(checkpoint,ww_z_sparse,wp_z_sparse,pp_z_dense,checkpoint_info)
         if(checkpoint_info/=0)local_bad=1
         local_checksum=dg_wpw_checkpoint_checksum(checkpoint)
         write(checkpoint_path,'(a,a,a,i6.6,a)')trim(import_run_root_dir()),trim(sysname),&
@@ -5309,26 +5505,30 @@ contains
     end subroutine publish_wpw_production_checkpoint
 
     subroutine build_wpw_checkpoint_position_volume(ww_z,wp_z,pp_z,position_info)
-      complex(8),allocatable,intent(out)::ww_z(:,:),wp_z(:,:),pp_z(:,:)
+      complex(8),allocatable,intent(out)::ww_z(:),wp_z(:),pp_z(:,:)
       integer,intent(out)::position_info
-      complex(8),allocatable::local_ww(:,:),local_wp(:,:),local_pp(:,:)
-      integer::point,iw,jw,ip,jp,gid,iz,ierr,row
+      complex(8),allocatable::local_ww(:,:),root_ww(:,:),local_wp(:,:),root_wp(:,:),local_pp(:,:)
+      type(s_dg_wpw_staged_candidate),allocatable::staged(:)
+      type(s_dg_wpw_owned_candidates)::owned
+      integer::point,iw,jw,ip,jp,gid,iz,ierr,row,entry,match,nmatch,route_info,ierr_ww,ierr_wp,ierr_pp
       real(8)::z
-      allocate(local_ww(size(wpw_owned_w_ids),size(wpw_owned_w_ids)),&
-        local_wp(size(wpw_owned_w_ids),size(wpw_context%support_column_ids)),&
+      allocate(local_ww(size(wpw_support_w_ids),size(wpw_support_w_ids)),&
+        root_ww(size(wpw_support_w_ids),size(wpw_support_w_ids)),&
+        local_wp(size(wpw_support_w_ids),size(wpw_context%support_column_ids)),&
+        root_wp(size(wpw_support_w_ids),size(wpw_context%support_column_ids)),&
         local_pp(n_plane_waves_dg,size(wpw_context%support_column_ids)))
-      allocate(ww_z,source=local_ww);allocate(wp_z,source=local_wp);allocate(pp_z,source=local_pp)
-      local_ww=(0d0,0d0);local_wp=(0d0,0d0);local_pp=(0d0,0d0)
+      allocate(pp_z,source=local_pp)
+      local_ww=(0d0,0d0);root_ww=(0d0,0d0);local_wp=(0d0,0d0);root_wp=(0d0,0d0);local_pp=(0d0,0d0)
       do point=1,wpw_volume_accumulator%npoint
         gid=wpw_volume_accumulator%grid_ids(point)
         iz=(gid-1)/(dc%lg_tot%num(1)*dc%lg_tot%num(2))+1
         z=modulo(dble(iz-1)*system%hgs(3)+0.5d0*wpw_box_length(3),wpw_box_length(3))-0.5d0*wpw_box_length(3)
-        do jw=1,size(wpw_owned_w_ids);do iw=1,size(wpw_owned_w_ids)
+        do jw=1,size(wpw_support_w_ids);do iw=1,size(wpw_support_w_ids)
           local_ww(iw,jw)=local_ww(iw,jw)+conjg(wpw_volume_accumulator%w_points(iw,point))*z*&
             wpw_volume_accumulator%w_points(jw,point)*wpw_volume_accumulator%weights(point)
         enddo;enddo
         do jp=1,size(wpw_context%support_column_ids)
-          do iw=1,size(wpw_owned_w_ids)
+          do iw=1,size(wpw_support_w_ids)
             local_wp(iw,jp)=local_wp(iw,jp)+conjg(wpw_volume_accumulator%w_points(iw,point))*z*&
               wpw_volume_accumulator%p_points(jp,point)*wpw_volume_accumulator%weights(point)
           enddo
@@ -5340,26 +5540,79 @@ contains
           enddo
         enddo
       enddo
-      call MPI_Reduce(local_ww,ww_z,size(ww_z),MPI_DOUBLE_COMPLEX,MPI_SUM,0,dc%icomm_frag,ierr)
-      if(ierr==MPI_SUCCESS)call MPI_Reduce(local_wp,wp_z,size(wp_z),MPI_DOUBLE_COMPLEX,MPI_SUM,0,dc%icomm_frag,ierr)
-      if(ierr==MPI_SUCCESS)call MPI_Reduce(local_pp,pp_z,size(pp_z),MPI_DOUBLE_COMPLEX,MPI_SUM,0,dc%icomm_frag,ierr)
-      position_info=merge(0,1,ierr==MPI_SUCCESS)
+      call MPI_Reduce(local_ww,root_ww,size(root_ww),MPI_DOUBLE_COMPLEX,MPI_SUM,0,dc%icomm_frag,ierr_ww)
+      call MPI_Reduce(local_wp,root_wp,size(root_wp),MPI_DOUBLE_COMPLEX,MPI_SUM,0,dc%icomm_frag,ierr_wp)
+      call MPI_Reduce(local_pp,pp_z,size(pp_z),MPI_DOUBLE_COMPLEX,MPI_SUM,0,dc%icomm_frag,ierr_pp)
+      position_info=merge(0,1,ierr_ww==MPI_SUCCESS.and.ierr_wp==MPI_SUCCESS.and.ierr_pp==MPI_SUCCESS)
+      if(dc%id_frag==0.and.position_info==0)then
+        allocate(staged(size(root_ww)));entry=0
+        do jw=1,size(wpw_support_w_ids);do iw=1,size(wpw_support_w_ids)
+          entry=entry+1;staged(entry)%kind=wpw_candidate_kind_ww;staged(entry)%image_id=dc%i_frag
+          staged(entry)%target_fragment=wpw_support_w_owner(iw)
+          staged(entry)%ww_r=wpw_support_w_ids(iw);staged(entry)%ww_c=wpw_support_w_ids(jw)
+          staged(entry)%ww_h=root_ww(iw,jw)
+        enddo;enddo
+        call route_dg_wpw_candidate_halo(wpw_production_comm,wpw_context%halo_epoch,dc%n_frag,&
+          size(wpw_g_indices,2),wpw_support_fragment_ids,staged,owned,route_info,size(staged))
+        position_info=route_info
+        if(position_info==0)then
+          allocate(ww_z(size(wpw_context%bounded_operator%ww_r)));ww_z=(0d0,0d0)
+          do iw=1,size(owned%ww_r)
+            match=0;nmatch=0
+            do entry=1,size(wpw_context%bounded_operator%ww_r)
+              if(wpw_context%bounded_operator%ww_r(entry)==owned%ww_r(iw).and.&
+                wpw_context%bounded_operator%ww_c(entry)==owned%ww_c(iw))then
+                match=entry;nmatch=nmatch+1
+              endif
+            enddo
+            if(nmatch/=1)then;position_info=1;exit;endif
+            ww_z(match)=owned%ww_h(iw)
+          enddo
+          if(size(owned%ww_r)/=size(ww_z))position_info=1
+        endif
+        if(position_info==0)then
+          deallocate(staged);allocate(staged(size(root_wp)));entry=0
+          do jp=1,size(wpw_context%support_column_ids);do iw=1,size(wpw_support_w_ids)
+            entry=entry+1;staged(entry)%kind=wpw_candidate_kind_wp;staged(entry)%image_id=dc%i_frag
+            staged(entry)%wp_w=wpw_support_w_ids(iw)
+            staged(entry)%wp_p=wpw_context%support_column_ids(jp);staged(entry)%wp_h=root_wp(iw,jp)
+          enddo;enddo
+          call route_dg_wpw_candidate_halo(wpw_production_comm,wpw_context%halo_epoch,dc%n_frag,&
+            size(wpw_g_indices,2),wpw_support_fragment_ids,staged,owned,route_info,size(staged))
+          position_info=route_info
+        endif
+        if(position_info==0)then
+          allocate(wp_z(size(wpw_context%bounded_operator%wp_w)));wp_z=(0d0,0d0)
+          do iw=1,size(owned%wp_w)
+            match=0;nmatch=0
+            do entry=1,size(wpw_context%bounded_operator%wp_w)
+              if(wpw_context%bounded_operator%wp_w(entry)==owned%wp_w(iw).and.&
+                wpw_context%bounded_operator%wp_p(entry)==owned%wp_p(iw))then
+                match=entry;nmatch=nmatch+1
+              endif
+            enddo
+            if(nmatch/=1)then;position_info=1;exit;endif
+            wp_z(match)=owned%wp_h(iw)
+          enddo
+          if(size(owned%wp_w)/=size(wp_z))position_info=1
+        endif
+      else
+        allocate(ww_z(0),wp_z(0))
+      endif
+      call MPI_Bcast(position_info,1,MPI_INTEGER,0,dc%icomm_frag,ierr)
+      if(ierr/=MPI_SUCCESS)position_info=1
     end subroutine build_wpw_checkpoint_position_volume
 
     subroutine map_wpw_checkpoint_position_sparse(checkpoint,ww_z,wp_z,pp_z,position_info)
       type(s_dg_wpw_checkpoint_state),intent(inout)::checkpoint
-      complex(8),intent(in)::ww_z(:,:),wp_z(:,:),pp_z(:,:)
+      complex(8),intent(in)::ww_z(:),wp_z(:),pp_z(:,:)
       integer,intent(out)::position_info
       integer::i,row,column
       checkpoint%ww_z=(0d0,0d0);checkpoint%wp_z=(0d0,0d0);checkpoint%pp_z=(0d0,0d0)
-      do i=1,size(checkpoint%ww_z)
-        row=find_integer_id(wpw_owned_w_ids,checkpoint%ww_r(i));column=find_integer_id(wpw_owned_w_ids,checkpoint%ww_c(i))
-        if(row>0.and.column>0)checkpoint%ww_z(i)=ww_z(row,column)
-      enddo
-      do i=1,size(checkpoint%wp_z)
-        row=find_integer_id(wpw_owned_w_ids,checkpoint%wp_w(i));column=find_integer_id(wpw_context%support_column_ids,checkpoint%wp_p(i))
-        if(row>0.and.column>0)checkpoint%wp_z(i)=wp_z(row,column)
-      enddo
+      if(size(ww_z)/=size(checkpoint%ww_z))then;position_info=1;return;endif
+      checkpoint%ww_z=ww_z
+      if(size(wp_z)/=size(checkpoint%wp_z))then;position_info=1;return;endif
+      checkpoint%wp_z=wp_z
       do i=1,size(checkpoint%pp_z)
         row=checkpoint%pp_r(i)-(dc%i_frag-1)*n_plane_waves_dg
         column=find_integer_id(wpw_context%support_column_ids,checkpoint%pp_c(i))
@@ -5374,7 +5627,7 @@ contains
       if(dc%id_frag==0)then
         wpw_saved_wp_volume=wpw_context%wp_h_volume
         wpw_saved_pp_volume=wpw_context%pp_h_volume
-        wpw_saved_ww_components=wpw_ww_components
+        wpw_saved_ww_potential=wpw_context%realspace_ww_potential
       endif
       wpw_saved_accumulator_potential=&
         wpw_volume_accumulator%potentials(1:wpw_volume_accumulator%npoint)
@@ -5398,12 +5651,10 @@ contains
       dc%vh_tot%f=wpw_saved_vh_tot
       dc%vxc_tot(1)%f=wpw_saved_vxc_tot
       if(dc%id_frag==0)then
-        call publish_dg_wpw_lcfo_ww_components(wpw_context,wpw_saved_ww_components,restore_info)
-        if(restore_info==0)call replace_dg_wpw_potential_volume(wpw_context,wpw_saved_wp_volume,&
-          wpw_saved_pp_volume,restore_info)
+        call replace_dg_wpw_potential_volume(wpw_context,wpw_saved_wp_volume,&
+          wpw_saved_pp_volume,restore_info,ww_potential=wpw_saved_ww_potential)
         if(restore_info==0)call build_dg_wpw_production_operator(wpw_context,restore_info)
         if(restore_info==0)call bind_dg_wpw_hs_callbacks(wpw_context,restore_info)
-        if(restore_info==0)wpw_ww_components=wpw_saved_ww_components
       endif
       call MPI_Bcast(restore_info,1,MPI_INTEGER,0,dc%icomm_frag,ierr)
       if(ierr/=MPI_SUCCESS)restore_info=1
@@ -5547,7 +5798,7 @@ contains
       integer,intent(out)::potential_info
       complex(8),allocatable::rw(:,:),rw_support(:,:),rp(:,:),local_wp_h(:,:),local_wp_s(:,:),local_pp_h(:,:),local_pp_s(:,:)
       complex(8),allocatable::root_wp_h(:,:),root_wp_s(:,:),root_pp_h(:,:),root_pp_s(:,:)
-      real(8),allocatable::local_ww_potential(:,:),root_ww_potential(:,:)
+      complex(8),allocatable::local_ww_potential(:,:),root_ww_potential(:,:)
       real(8),allocatable::rho_raw(:),rho_candidate(:),rho_owned(:,:),potential_owned(:),potential_core(:)
       integer,allocatable::owned_ids(:),destinations(:)
       real(8)::charge,e_xc,e_xc_owned,n_vxc,e_h,band_energy,wpw_mix,energy_min_total,energy_max_total
@@ -5609,15 +5860,14 @@ contains
       endif
       allocate(root_wp_h,source=local_wp_h);allocate(root_wp_s,source=local_wp_s)
       allocate(root_pp_h,source=local_pp_h);allocate(root_pp_s,source=local_pp_s)
-      allocate(local_ww_potential(size(wpw_owned_w_ids),size(wpw_owned_w_ids)),&
-        root_ww_potential(size(wpw_owned_w_ids),size(wpw_owned_w_ids)))
-      local_ww_potential=0d0;root_ww_potential=0d0
-      do jw=1,size(wpw_owned_w_ids)
-        do iw=1,size(wpw_owned_w_ids)
+      allocate(local_ww_potential(nw_support,nw_support),root_ww_potential(nw_support,nw_support))
+      local_ww_potential=(0d0,0d0);root_ww_potential=(0d0,0d0)
+      do jw=1,nw_support
+        do iw=1,nw_support
           do point=1,size(density_in)
-            local_ww_potential(iw,jw)=local_ww_potential(iw,jw)+real(conjg(&
+            local_ww_potential(iw,jw)=local_ww_potential(iw,jw)+conjg(&
               wpw_volume_accumulator%w_points(iw,point))*potential_core(point)*&
-              wpw_volume_accumulator%w_points(jw,point),8)*wpw_volume_accumulator%weights(point)
+              wpw_volume_accumulator%w_points(jw,point)*wpw_volume_accumulator%weights(point)
           enddo
         enddo
       enddo
@@ -5625,7 +5875,7 @@ contains
       call MPI_Reduce(local_wp_s,root_wp_s,size(local_wp_s),MPI_DOUBLE_COMPLEX,MPI_SUM,0,dc%icomm_frag,ierr)
       call MPI_Reduce(local_pp_h,root_pp_h,size(local_pp_h),MPI_DOUBLE_COMPLEX,MPI_SUM,0,dc%icomm_frag,ierr)
       call MPI_Reduce(local_pp_s,root_pp_s,size(local_pp_s),MPI_DOUBLE_COMPLEX,MPI_SUM,0,dc%icomm_frag,ierr)
-      call MPI_Reduce(local_ww_potential,root_ww_potential,size(local_ww_potential),MPI_DOUBLE_PRECISION,&
+      call MPI_Reduce(local_ww_potential,root_ww_potential,size(local_ww_potential),MPI_DOUBLE_COMPLEX,&
         MPI_SUM,0,dc%icomm_frag,ierr)
       if(ierr/=MPI_SUCCESS)return
       density_out=rho_candidate
@@ -5699,16 +5949,24 @@ contains
 
     subroutine publish_wpw_iterated_operator(root_wp_h,root_pp_h,root_ww_potential,publish_info)
       complex(8),intent(in)::root_wp_h(:,:),root_pp_h(:,:)
-      real(8),intent(in)::root_ww_potential(:,:)
+      complex(8),intent(in)::root_ww_potential(:,:)
       integer,intent(out)::publish_info
-      type(s_dg_wpw_lcfo_ww_components)::candidate_ww
-      complex(8),allocatable::wp_volume(:),pp_volume(:),old_wp_volume(:),old_pp_volume(:)
+      type(s_dg_wpw_staged_candidate),allocatable::ww_staged(:)
+      type(s_dg_wpw_owned_candidates)::ww_owned
+      complex(8),allocatable::wp_volume(:),pp_volume(:),old_wp_volume(:),old_pp_volume(:),&
+        old_ww_potential(:),candidate_ww_potential(:)
       integer,allocatable::wp_w(:),wp_p(:),pp_r(:),pp_c(:)
-      integer::entry,iw,ip,rollback_info
+      integer::entry,iw,jw,ip,rollback_info,nmatch,match,route_info
       logical::old_operator_valid,old_callbacks_bound
       publish_info=1
+      route_info=merge(0,1,all(ieee_is_finite(real(root_ww_potential,8))).and.&
+        all(ieee_is_finite(aimag(root_ww_potential))).and.&
+        maxval(abs(root_ww_potential-conjg(transpose(root_ww_potential))))<=1d-12)
+      call MPI_Allreduce(route_info,publish_info,1,MPI_INTEGER,MPI_MAX,wpw_production_comm,rollback_info)
+      if(rollback_info/=MPI_SUCCESS.or.publish_info/=0)return
       allocate(old_wp_volume,source=wpw_context%wp_h_volume)
       allocate(old_pp_volume,source=wpw_context%pp_h_volume)
+      allocate(old_ww_potential,source=wpw_context%realspace_ww_potential)
       old_operator_valid=wpw_context%operator_valid;old_callbacks_bound=wpw_context%callbacks_bound
       allocate(wp_w(size(root_wp_h)),wp_p(size(root_wp_h)),wp_volume(size(root_wp_h)))
       entry=0
@@ -5726,30 +5984,57 @@ contains
         wpw_support_fragment_ids,wp_w,wp_p,wp_volume,pp_r,pp_c,pp_volume,&
         size(wp_w)+size(pp_r),publish_info)
       if(publish_info/=0)return
-      call import_dg_wpw_lcfo_ww_components(dc%i_frag,n_basis(:,1),index_basis(:,:,1),&
-        wpw_ww_components%kinetic,root_ww_potential,wpw_ww_components%nonlocal,wpw_ww_components%face_self,&
-        wpw_ww_components%cross_face_id,wpw_ww_components%cross_row_id,wpw_ww_components%cross_col_id,&
-        wpw_ww_components%cross_axis,wpw_ww_components%cross_side,wpw_ww_components%cross_image,&
-        wpw_ww_components%cross_value,'orthonormal_ww',candidate_ww,publish_info)
-      if(publish_info/=0)then
-        call replace_dg_wpw_potential_volume(wpw_context,old_wp_volume,old_pp_volume,rollback_info);return
+      allocate(ww_staged(size(root_ww_potential)));entry=0
+      do jw=1,size(wpw_support_w_ids);do iw=1,size(wpw_support_w_ids)
+        entry=entry+1;ww_staged(entry)%kind=wpw_candidate_kind_ww
+        ww_staged(entry)%image_id=dc%i_frag;ww_staged(entry)%target_fragment=wpw_support_w_owner(iw)
+        ww_staged(entry)%ww_r=wpw_support_w_ids(iw);ww_staged(entry)%ww_c=wpw_support_w_ids(jw)
+        ww_staged(entry)%ww_potential=root_ww_potential(iw,jw)
+      enddo;enddo
+      call route_dg_wpw_candidate_halo(wpw_production_comm,wpw_context%halo_epoch,dc%n_frag,&
+        size(wpw_g_indices,2),wpw_support_fragment_ids,ww_staged,ww_owned,route_info,size(ww_staged))
+      if(route_info/=0)then
+        call replace_dg_wpw_potential_volume(wpw_context,old_wp_volume,old_pp_volume,rollback_info,&
+          ww_potential=old_ww_potential);return
       endif
-      call publish_dg_wpw_lcfo_ww_components(wpw_context,candidate_ww,publish_info)
+      allocate(candidate_ww_potential(size(wpw_context%realspace_ww_potential)))
+      candidate_ww_potential=(0d0,0d0)
+      do iw=1,size(ww_owned%ww_r)
+        match=0;nmatch=0
+        do entry=1,size(wpw_context%realspace_ww_r)
+          if(wpw_context%realspace_ww_r(entry)==ww_owned%ww_r(iw).and.&
+            wpw_context%realspace_ww_c(entry)==ww_owned%ww_c(iw))then
+            match=entry;nmatch=nmatch+1
+          endif
+        enddo
+        if(nmatch/=1)then;route_info=1;exit;endif
+        candidate_ww_potential(match)=ww_owned%ww_potential(iw)
+      enddo
+      if(size(ww_owned%ww_r)/=size(candidate_ww_potential))route_info=1
+      call MPI_Allreduce(route_info,publish_info,1,MPI_INTEGER,MPI_MAX,wpw_production_comm,rollback_info)
+      if(rollback_info/=MPI_SUCCESS.or.publish_info/=0)then
+        call replace_dg_wpw_potential_volume(wpw_context,old_wp_volume,old_pp_volume,rollback_info,&
+          ww_potential=old_ww_potential);return
+      endif
+      call replace_dg_wpw_potential_volume(wpw_context,wpw_context%wp_h_volume,&
+        wpw_context%pp_h_volume,publish_info,ww_potential=candidate_ww_potential)
       if(publish_info/=0)then
-        call replace_dg_wpw_potential_volume(wpw_context,old_wp_volume,old_pp_volume,rollback_info);return
+        call replace_dg_wpw_potential_volume(wpw_context,old_wp_volume,old_pp_volume,rollback_info,&
+          ww_potential=old_ww_potential);return
       endif
       call build_dg_wpw_production_operator(wpw_context,publish_info)
       if(publish_info/=0)then
-        call replace_dg_wpw_potential_volume(wpw_context,old_wp_volume,old_pp_volume,rollback_info)
+        call replace_dg_wpw_potential_volume(wpw_context,old_wp_volume,old_pp_volume,rollback_info,&
+          ww_potential=old_ww_potential)
         wpw_context%pending_ww_valid=.false.;wpw_context%operator_valid=old_operator_valid
         wpw_context%callbacks_bound=old_callbacks_bound
         return
       endif
       call bind_dg_wpw_hs_callbacks(wpw_context,publish_info)
       if(publish_info==0)then
-        wpw_ww_components=candidate_ww
       else
-        call replace_dg_wpw_potential_volume(wpw_context,old_wp_volume,old_pp_volume,rollback_info)
+        call replace_dg_wpw_potential_volume(wpw_context,old_wp_volume,old_pp_volume,rollback_info,&
+          ww_potential=old_ww_potential)
         wpw_context%pending_ww_valid=.false.;wpw_context%operator_valid=old_operator_valid
         wpw_context%callbacks_bound=old_callbacks_bound
       endif
@@ -5770,9 +6055,11 @@ contains
     subroutine prepare_wpw_volume_halo(halo_info)
       use salmon_global,only:num_fragment
       integer,intent(out)::halo_info
-      integer::domain(3),local_lo(3),local_hi(3),buffer(3),buffer_lo(3),buffer_hi(3),buffer_extent(3)
+      integer::domain(3),local_lo(3),local_hi(3),buffer(3),buffer_lo(3),buffer_hi(3),buffer_extent(3),&
+        descriptor_extent(3)
       integer::target_lo(3),target_hi(3),send_lo(3),send_hi(3),cell_extent(3)
-      integer::k,ib,ixb,iyb,izb,point,local_grid(3),pack_info,local_failure,global_failure,ierr_halo
+      integer::k,ixb,iyb,izb,point,local_grid(3),pack_info,local_failure,global_failure,ierr_halo,&
+        descriptor_point
       integer::max_location(2),best_location(2),best_send,best_grid(3),best_unwrapped(3),source_point
       complex(8),allocatable::buffer_values(:,:),buffer_gradients(:,:,:)
       complex(8)::packed_max_value,prepack_max_value
@@ -5781,10 +6068,11 @@ contains
 
       halo_info=1;local_failure=0
       if(dc%id_frag/=0.or.wpw_production_comm==MPI_COMM_NULL)local_failure=1
-      if(sawf_explicit_basis_active)then
-        if(.not.allocated(sawf_explicit_buffer))local_failure=1
-      else
-        if(.not.allocated(basis_transform).or..not.allocated(spsi%rwf))local_failure=1
+      if(.not.wpw_occupied_w_basis%valid.or.&
+        wpw_occupied_w_basis%local_fragment/=dc%i_frag.or.&
+        wpw_occupied_w_basis%local_count/=size(wpw_owned_w_ids))local_failure=1
+      if(local_failure==0)then
+        if(any(wpw_occupied_w_basis%owned_ids/=wpw_owned_w_ids))local_failure=1
       endif
       buffer=wpw_window_buffer
       if(any(buffer<0).or.any(buffer>dc%nxyz_buffer))local_failure=1
@@ -5793,23 +6081,33 @@ contains
       call get_fragment_domain(dc,dc%i_frag,domain)
       local_lo=dc%ixyz_frag(:,dc%i_frag);local_hi=local_lo+domain-1
       buffer_lo=local_lo-buffer;buffer_hi=local_hi+buffer;buffer_extent=buffer_hi-buffer_lo+1
+      descriptor_extent=wpw_occupied_w_basis%buffer_hi-wpw_occupied_w_basis%buffer_lo+1
       cell_extent=dc%lg_tot%num
       allocate(buffer_values(size(wpw_owned_w_ids),product(buffer_extent)),&
         buffer_gradients(3,size(wpw_owned_w_ids),product(buffer_extent)))
+      buffer_values=(0d0,0d0);buffer_gradients=(0d0,0d0)
       point=0
       do izb=buffer_lo(3),buffer_hi(3)
         do iyb=buffer_lo(2),buffer_hi(2)
           do ixb=buffer_lo(1),buffer_hi(1)
             point=point+1;local_grid=[ixb,iyb,izb]-local_lo+1
-            do ib=1,size(wpw_owned_w_ids)
-              buffer_values(ib,point)=cmplx(local_basis_value(local_grid(1),local_grid(2),local_grid(3),1,ib),0d0,8)
-              buffer_gradients(1,ib,point)=cmplx(local_basis_grad(local_grid(1),local_grid(2),local_grid(3),1,ib,1),0d0,8)
-              buffer_gradients(2,ib,point)=cmplx(local_basis_grad(local_grid(1),local_grid(2),local_grid(3),1,ib,2),0d0,8)
-              buffer_gradients(3,ib,point)=cmplx(local_basis_grad(local_grid(1),local_grid(2),local_grid(3),1,ib,3),0d0,8)
-            enddo
+            descriptor_point=local_grid(1)-wpw_occupied_w_basis%buffer_lo(1)+1+&
+              (local_grid(2)-wpw_occupied_w_basis%buffer_lo(2))*descriptor_extent(1)+&
+              (local_grid(3)-wpw_occupied_w_basis%buffer_lo(3))*descriptor_extent(1)*descriptor_extent(2)
+            if(descriptor_point<1.or.descriptor_point>size(wpw_occupied_w_basis%buffer_values,1))then
+              local_failure=1;cycle
+            endif
+            if(any(local_grid<wpw_occupied_w_basis%gradient_lo).or.&
+              any(local_grid>wpw_occupied_w_basis%gradient_hi))then
+              local_failure=1;cycle
+            endif
+            buffer_values(:,point)=wpw_occupied_w_basis%buffer_values(descriptor_point,:)
+            buffer_gradients(:,:,point)=wpw_occupied_w_basis%buffer_gradients(:,descriptor_point,:)
           enddo
         enddo
       enddo
+      call MPI_Allreduce(local_failure,global_failure,1,MPI_INTEGER,MPI_MAX,wpw_production_comm,ierr_halo)
+      if(ierr_halo/=MPI_SUCCESS.or.global_failure/=0)return
       if(size(wpw_support_records)==0)then
         allocate(wpw_volume_send(0),wpw_volume_halos(0));halo_info=0;return
       endif
@@ -5844,8 +6142,7 @@ contains
           (best_unwrapped(3)-buffer_lo(3))*buffer_extent(1)*buffer_extent(2)
         packed_max_value=wpw_volume_send(best_send)%values(best_location(1),best_location(2))
         prepack_max_value=buffer_values(best_location(1),source_point)
-        if(sawf_explicit_basis_active)then;buffer_path='explicit_buffer'
-        else;buffer_path='transformed_spsi';endif
+        buffer_path='occupied_w_descriptor'
         write(*,'(1x,a,5(a,i0),4(a,3(i0,1x)),3(a,es12.4),2a)')'[DG-WPW-W-HALO-PACK-MAX]',&
           ' rank=',wpw_context%rank_id,' source_fragment=',dc%i_frag,&
           ' target_rank=',wpw_volume_send(best_send)%peer,&
@@ -5896,24 +6193,33 @@ contains
       integer,intent(out)::volume_info
       integer::domain(3),local_lo(3),ix1,ix2,iy1,iy2,iz1,iz2,ixq,iyq,izq,ibq,ng,nps,owned_k(1)
       integer::grid(3),local_grid(3),point_info,owned_p_lo,owned_p_hi
-      integer::local_failure,global_failure,ierr_quadrature,wpw_local_core_point_count
+      integer::local_failure,global_failure,ierr_quadrature,wpw_local_core_point_count,&
+        core_descriptor_point,buffer_descriptor_point,descriptor_extent(3),astat
       integer,allocatable::column_ids(:)
       real(8),allocatable::chi(:),grad_chi(:,:)
-      complex(8),allocatable::owned_w(:),owned_grad_w(:,:)
+      complex(8),allocatable::owned_w(:),owned_grad_w(:,:),support_w(:),support_grad_w(:,:)
       complex(8),allocatable::support_p(:),support_grad_p(:,:)
       real(8)::omega_cell
 
       volume_info=1;local_failure=0;ng=size(wpw_g_vectors,2);nps=size(wpw_support_fragment_ids)*ng
       if(ng<=0.or.nps<=0.or.size(wpw_owned_w_ids)<=0.or.size(wpw_support_w_ids)<=0)local_failure=1
+      if(.not.wpw_occupied_w_basis%valid.or.&
+        wpw_occupied_w_basis%local_count/=size(wpw_owned_w_ids))local_failure=1
+      if(local_failure==0)then
+        if(any(wpw_occupied_w_basis%owned_ids/=wpw_owned_w_ids))local_failure=1
+      endif
       owned_k=findloc(wpw_support_fragment_ids,dc%i_frag)
       if(owned_k(1)<=0)local_failure=1
       call MPI_Allreduce(local_failure,global_failure,1,MPI_INTEGER,MPI_MAX,dc%icomm_frag,ierr_quadrature)
       if(ierr_quadrature/=MPI_SUCCESS.or.global_failure/=0)return
       owned_p_lo=(owned_k(1)-1)*ng+1;owned_p_hi=owned_p_lo+ng-1
-      allocate(column_ids(nps),chi(size(wpw_support_fragment_ids)),&
-        grad_chi(3,size(wpw_support_fragment_ids)))
-      allocate(owned_w(size(wpw_owned_w_ids)),owned_grad_w(3,size(wpw_owned_w_ids)))
-      allocate(support_p(nps),support_grad_p(3,nps))
+      astat=0;allocate(column_ids(nps),chi(size(wpw_support_fragment_ids)),&
+        grad_chi(3,size(wpw_support_fragment_ids)),owned_w(size(wpw_owned_w_ids)),&
+        owned_grad_w(3,size(wpw_owned_w_ids)),support_w(size(wpw_support_w_ids)),&
+        support_grad_w(3,size(wpw_support_w_ids)),support_p(nps),support_grad_p(3,nps),stat=astat)
+      local_failure=merge(0,1,astat==0)
+      call MPI_Allreduce(local_failure,global_failure,1,MPI_INTEGER,MPI_MAX,dc%icomm_frag,ierr_quadrature)
+      if(ierr_quadrature/=MPI_SUCCESS.or.global_failure/=0)return
       call get_fragment_domain(dc,dc%i_frag,domain);local_lo=dc%ixyz_frag(:,dc%i_frag)
       ix1=max(mg%is(1),1);ix2=min(mg%ie(1),domain(1))
       iy1=max(mg%is(2),1);iy2=min(mg%ie(2),domain(2))
@@ -5922,22 +6228,35 @@ contains
       call initialize_dg_wpw_volume_accumulator(wpw_volume_accumulator,size(owned_w),nps,nps,point_info,&
         point_capacity=wpw_local_core_point_count)
       if(point_info/=0)local_failure=1
-      call initialize_dg_wpw_core_p_accumulator(wpw_core_p_accumulator,nps,nps,point_info,&
+      call initialize_dg_wpw_metric_accumulator(wpw_metric_accumulator,size(support_w),nps,point_info,&
         point_capacity=wpw_local_core_point_count)
       if(point_info/=0)local_failure=1
       call MPI_Allreduce(local_failure,global_failure,1,MPI_INTEGER,MPI_MAX,dc%icomm_frag,ierr_quadrature)
       if(ierr_quadrature/=MPI_SUCCESS.or.global_failure/=0)return
       omega_cell=product(wpw_box_length)
+      descriptor_extent=wpw_occupied_w_basis%buffer_hi-wpw_occupied_w_basis%buffer_lo+1
+      if(info%id_o==0)then
       quadrature_z: do izq=iz1,iz2
         do iyq=iy1,iy2
           do ixq=ix1,ix2
             local_grid=[ixq,iyq,izq];grid=local_lo+local_grid-1
-            do ibq=1,size(owned_w)
-              owned_w(ibq)=cmplx(local_basis_value(ixq,iyq,izq,1,ibq),0d0,8)
-              owned_grad_w(1,ibq)=cmplx(local_basis_grad(ixq,iyq,izq,1,ibq,1),0d0,8)
-              owned_grad_w(2,ibq)=cmplx(local_basis_grad(ixq,iyq,izq,1,ibq,2),0d0,8)
-              owned_grad_w(3,ibq)=cmplx(local_basis_grad(ixq,iyq,izq,1,ibq,3),0d0,8)
-            enddo
+            buffer_descriptor_point=local_grid(1)-wpw_occupied_w_basis%buffer_lo(1)+1+&
+              (local_grid(2)-wpw_occupied_w_basis%buffer_lo(2))*descriptor_extent(1)+&
+              (local_grid(3)-wpw_occupied_w_basis%buffer_lo(3))*descriptor_extent(1)*descriptor_extent(2)
+            if(buffer_descriptor_point<1.or.&
+              buffer_descriptor_point>size(wpw_occupied_w_basis%buffer_values,1))then
+              local_failure=1;exit quadrature_z
+            endif
+            if(any(local_grid<wpw_occupied_w_basis%gradient_lo).or.&
+              any(local_grid>wpw_occupied_w_basis%gradient_hi))then
+              local_failure=1;exit quadrature_z
+            endif
+            call evaluate_dg_wpw_occupied_w_point(wpw_occupied_w_basis,local_grid,&
+              owned_w,owned_grad_w,point_info)
+            if(point_info/=0)then;local_failure=1;exit quadrature_z;endif
+            call evaluate_dg_wpw_core_w_support(wpw_owned_w_ids,owned_w,owned_grad_w,wpw_support_w_ids,&
+              wpw_volume_halos,grid,1,support_w,support_grad_w,point_info,zero_outside_halo=.true.)
+            if(point_info/=0)then;local_failure=1;exit quadrature_z;endif
             call evaluate_dg_wpw_core_point(wpw_support_core_lo,wpw_support_core_hi,&
               wpw_support_fragment_ids,dc%lg_tot%num,system%hgs,&
               wpw_window_buffer,wpw_window_width,wpw_g_vectors,grid,&
@@ -5961,31 +6280,108 @@ contains
                 dc%id_tot,' grid=',grid,' info=',point_info
               local_failure=1;exit quadrature_z
             endif
-            call add_dg_wpw_core_p_point(wpw_core_p_accumulator,support_p,support_grad_p,support_p,&
-              support_grad_p,V_local(1)%f(ixq,iyq,izq),hvol,point_info,&
-              grid_id=wpw_core_global_grid_id(grid),density=rho_s(1)%f(ixq,iyq,izq))
-            if(point_info/=0)then
-              local_failure=1;exit quadrature_z
-            endif
+            call add_dg_wpw_metric_point(wpw_metric_accumulator,support_w,support_p,hvol,point_info,&
+              grid_id=wpw_core_global_grid_id(grid),w_grad=support_grad_w,p_grad=support_grad_p,&
+              potential=V_local(1)%f(ixq,iyq,izq))
+            if(point_info/=0)then;local_failure=1;exit quadrature_z;endif
           enddo
         enddo
       enddo quadrature_z
-      call MPI_Allreduce(local_failure,global_failure,1,MPI_INTEGER,MPI_MAX,dc%icomm_frag,ierr_quadrature)
-      if(ierr_quadrature/=MPI_SUCCESS.or.global_failure/=0)return
-      if(wpw_core_p_accumulator%npoint/=wpw_volume_accumulator%npoint.or.&
-         any(wpw_core_p_accumulator%grid_ids/=wpw_volume_accumulator%grid_ids).or.&
-         maxval(abs(wpw_core_p_accumulator%pp_h-wpw_volume_accumulator%pp_h))>1d-12.or.&
-         maxval(abs(wpw_core_p_accumulator%pp_s-wpw_volume_accumulator%pp_s))>1d-12)then
-        local_failure=1
       endif
       call MPI_Allreduce(local_failure,global_failure,1,MPI_INTEGER,MPI_MAX,dc%icomm_frag,ierr_quadrature)
       if(ierr_quadrature/=MPI_SUCCESS.or.global_failure/=0)return
-      allocate(wpw_volume_wp_h(size(owned_w),nps),wpw_volume_wp_s(size(owned_w),nps),&
-        wpw_volume_pp_h(nps,nps),wpw_volume_pp_s(nps,nps))
+      if(info%id_o==0)then
+        if(wpw_core_p_accumulator%npoint/=wpw_volume_accumulator%npoint.or.&
+           any(wpw_core_p_accumulator%grid_ids/=wpw_volume_accumulator%grid_ids).or.&
+           maxval(abs(wpw_core_p_accumulator%pp_h-wpw_volume_accumulator%pp_h))>1d-12.or.&
+           maxval(abs(wpw_core_p_accumulator%pp_s-wpw_volume_accumulator%pp_s))>1d-12)then
+          local_failure=1
+        endif
+      endif
+      call MPI_Allreduce(local_failure,global_failure,1,MPI_INTEGER,MPI_MAX,dc%icomm_frag,ierr_quadrature)
+      if(ierr_quadrature/=MPI_SUCCESS.or.global_failure/=0)return
+      astat=0;allocate(wpw_volume_wp_h(size(owned_w),nps),wpw_volume_wp_s(size(owned_w),nps),&
+        wpw_volume_pp_h(nps,nps),wpw_volume_pp_s(nps,nps),stat=astat)
+      local_failure=merge(0,1,astat==0)
+      call MPI_Allreduce(local_failure,global_failure,1,MPI_INTEGER,MPI_MAX,dc%icomm_frag,ierr_quadrature)
+      if(ierr_quadrature/=MPI_SUCCESS.or.global_failure/=0)return
       call build_dg_wpw_rank_local_quadrature(dc%icomm_frag,0,wpw_volume_accumulator,&
         wpw_volume_wp_h,wpw_volume_wp_s,wpw_volume_pp_h,wpw_volume_pp_s,volume_info)
+      if(volume_info/=0)return
+      astat=0;allocate(wpw_metric_ww_s(size(support_w),size(support_w)),&
+        wpw_metric_wp_s(size(support_w),nps),wpw_metric_pp_s(nps,nps),stat=astat)
+      local_failure=merge(0,1,astat==0)
+      call MPI_Allreduce(local_failure,global_failure,1,MPI_INTEGER,MPI_MAX,dc%icomm_frag,ierr_quadrature)
+      if(ierr_quadrature/=MPI_SUCCESS.or.global_failure/=0)return
+      call build_dg_wpw_metric_gram(dc%icomm_frag,0,wpw_metric_accumulator,&
+        wpw_metric_ww_s,wpw_metric_wp_s,wpw_metric_pp_s,volume_info)
+      astat=0;allocate(wpw_metric_ww_h(size(support_w),size(support_w)),&
+        wpw_metric_wp_h(size(support_w),nps),wpw_metric_pp_h(nps,nps),&
+        wpw_metric_ww_kinetic(size(support_w),size(support_w)),&
+        wpw_metric_ww_potential(size(support_w),size(support_w)),stat=astat)
+      local_failure=merge(0,1,astat==0)
+      call MPI_Allreduce(local_failure,global_failure,1,MPI_INTEGER,MPI_MAX,dc%icomm_frag,ierr_quadrature)
+      if(ierr_quadrature/=MPI_SUCCESS.or.global_failure/=0)return
+      if(volume_info==0)call build_dg_wpw_hamiltonian_volume(dc%icomm_frag,0,wpw_metric_accumulator,&
+        wpw_metric_ww_h,wpw_metric_wp_h,wpw_metric_pp_h,volume_info)
+      if(volume_info==0)call build_dg_wpw_ww_volume_components(dc%icomm_frag,0,wpw_metric_accumulator,&
+        wpw_metric_ww_kinetic,wpw_metric_ww_potential,volume_info)
+      if(volume_info==0.and.dc%id_frag==0)then
+        if(maxval(abs(wpw_metric_pp_s-wpw_volume_pp_s))>1d-12.or.&
+          maxval(abs(wpw_metric_pp_h-wpw_volume_pp_h))>1d-12)volume_info=1
+      endif
       if(volume_info==0)wpw_nonowned_candidates_pending=.true.
     end subroutine assemble_wpw_core_volume_quadrature
+
+    subroutine assemble_wpw_core_p_bootstrap(bootstrap_info)
+      integer,intent(out)::bootstrap_info
+      integer::domain(3),local_lo(3),ix1,ix2,iy1,iy2,iz1,iz2,ixq,iyq,izq,ng,nps,owned_k(1),ibq
+      integer::grid(3),local_grid(3),point_info,owned_p_lo,owned_p_hi,local_failure,global_failure,&
+        ierr_quadrature,local_core_point_count
+      integer,allocatable::column_ids(:)
+      real(8),allocatable::chi(:),grad_chi(:,:)
+      complex(8),allocatable::support_p(:),support_grad_p(:,:)
+      real(8)::omega_cell
+
+      bootstrap_info=1;local_failure=0;ng=size(wpw_g_vectors,2)
+      nps=size(wpw_support_fragment_ids)*ng
+      if(ng<=0.or.nps<=0)local_failure=1
+      owned_k=findloc(wpw_support_fragment_ids,dc%i_frag)
+      if(owned_k(1)<=0)local_failure=1
+      call MPI_Allreduce(local_failure,global_failure,1,MPI_INTEGER,MPI_MAX,dc%icomm_frag,ierr_quadrature)
+      if(ierr_quadrature/=MPI_SUCCESS.or.global_failure/=0)return
+      owned_p_lo=(owned_k(1)-1)*ng+1;owned_p_hi=owned_p_lo+ng-1
+      allocate(column_ids(nps),chi(size(wpw_support_fragment_ids)),&
+        grad_chi(3,size(wpw_support_fragment_ids)),support_p(nps),support_grad_p(3,nps))
+      call get_fragment_domain(dc,dc%i_frag,domain);local_lo=dc%ixyz_frag(:,dc%i_frag)
+      ix1=max(mg%is(1),1);ix2=min(mg%ie(1),domain(1))
+      iy1=max(mg%is(2),1);iy2=min(mg%ie(2),domain(2))
+      iz1=max(mg%is(3),1);iz2=min(mg%ie(3),domain(3))
+      local_core_point_count=max(0,ix2-ix1+1)*max(0,iy2-iy1+1)*max(0,iz2-iz1+1)
+      call initialize_dg_wpw_core_p_accumulator(wpw_core_p_accumulator,nps,nps,point_info,&
+        point_capacity=local_core_point_count)
+      if(point_info/=0)local_failure=1
+      call MPI_Allreduce(local_failure,global_failure,1,MPI_INTEGER,MPI_MAX,dc%icomm_frag,ierr_quadrature)
+      if(ierr_quadrature/=MPI_SUCCESS.or.global_failure/=0)return
+      omega_cell=product(wpw_box_length)
+      bootstrap_z: do izq=iz1,iz2;do iyq=iy1,iy2;do ixq=ix1,ix2
+        local_grid=[ixq,iyq,izq];grid=local_lo+local_grid-1
+        call evaluate_dg_wpw_core_point(wpw_support_core_lo,wpw_support_core_hi,&
+          wpw_support_fragment_ids,dc%lg_tot%num,system%hgs,wpw_window_buffer,wpw_window_width,&
+          wpw_g_vectors,grid,omega_cell,column_ids,chi,grad_chi,support_p,support_grad_p,point_info)
+        if(point_info/=0.or.any(column_ids(owned_p_lo:owned_p_hi)/=&
+          [((dc%i_frag-1)*ng+ibq,ibq=1,ng)]))then
+          local_failure=1;exit bootstrap_z
+        endif
+        call add_dg_wpw_core_p_point(wpw_core_p_accumulator,support_p,support_grad_p,support_p,&
+          support_grad_p,V_local(1)%f(ixq,iyq,izq),hvol,point_info,&
+          grid_id=wpw_core_global_grid_id(grid),density=rho_s(1)%f(ixq,iyq,izq))
+        if(point_info/=0)then;local_failure=1;exit bootstrap_z;endif
+      enddo;enddo;enddo bootstrap_z
+      call MPI_Allreduce(local_failure,global_failure,1,MPI_INTEGER,MPI_MAX,dc%icomm_frag,ierr_quadrature)
+      if(ierr_quadrature/=MPI_SUCCESS.or.global_failure/=0)return
+      bootstrap_info=0
+    end subroutine assemble_wpw_core_p_bootstrap
 
     integer function wpw_core_global_grid_id(grid)result(grid_id)
       integer,intent(in)::grid(3)
@@ -5997,35 +6393,128 @@ contains
 
     subroutine publish_wpw_core_volume_candidates(candidate_info)
       integer,intent(out)::candidate_info
-      integer::nw,np_support,iwp,ipp,iw,ip,max_candidates
+      integer::nw,np_support,iwp,ipp,iww,iw,jw,ip,max_candidates,entry,owner_fragment,&
+        local_bad,global_bad,ierr_publish,local_info,astat
       integer,allocatable::wp_w(:),wp_p(:),pp_r(:),pp_c(:)
       complex(8),allocatable::wp_h(:),wp_s(:),pp_h(:),pp_s(:)
-      candidate_info=1
-      if(dc%id_frag/=0.or..not.allocated(wpw_volume_wp_h).or..not.allocated(wpw_volume_pp_h))return
-      nw=size(wpw_owned_w_ids);np_support=size(wpw_context%support_column_ids)
-      if(any(shape(wpw_volume_wp_h)/=[nw,np_support]).or.&
-         any(shape(wpw_volume_pp_h)/=[np_support,np_support]))return
-      allocate(wp_w(nw*np_support),wp_p(nw*np_support),wp_h(nw*np_support),wp_s(nw*np_support))
+      type(s_dg_wpw_staged_candidate),allocatable::staged(:),staged_conjugate(:)
+      type(s_dg_wpw_owned_candidates)::owned,owned_conjugate
+      candidate_info=1;local_bad=0
+      if(dc%id_frag/=0.or..not.allocated(wpw_volume_wp_h).or..not.allocated(wpw_volume_pp_h).or.&
+        .not.allocated(wpw_metric_ww_s).or..not.allocated(wpw_metric_wp_s).or.&
+        .not.allocated(wpw_metric_pp_s))local_bad=1
+      if(local_bad==0)then
+        nw=size(wpw_support_w_ids);np_support=size(wpw_context%support_column_ids)
+        if(any(shape(wpw_metric_ww_s)/=[nw,nw]).or.any(shape(wpw_metric_wp_s)/=[nw,np_support]).or.&
+          any(shape(wpw_metric_pp_s)/=[np_support,np_support]).or.&
+          any(shape(wpw_volume_wp_h)/=[size(wpw_owned_w_ids),np_support]).or.&
+          any(shape(wpw_volume_pp_h)/=[np_support,np_support]))local_bad=1
+      endif
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,wpw_production_comm,ierr_publish)
+      if(ierr_publish/=MPI_SUCCESS.or.global_bad/=0)return
+      astat=0;allocate(wpw_support_w_owner(nw),stat=astat)
+      local_bad=merge(0,1,astat==0)
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,wpw_production_comm,ierr_publish)
+      if(ierr_publish/=MPI_SUCCESS.or.global_bad/=0)return
+      wpw_support_w_owner=0
+      do iw=1,nw
+        if(any(wpw_owned_w_ids==wpw_support_w_ids(iw)))wpw_support_w_owner(iw)=dc%i_frag
+        do ip=1,size(wpw_volume_halos)
+          if(.not.wpw_volume_halos(ip)%valid.or..not.allocated(wpw_volume_halos(ip)%w_ids))cycle
+          if(.not.any(wpw_volume_halos(ip)%w_ids==wpw_support_w_ids(iw)))cycle
+          owner_fragment=wpw_volume_halos(ip)%source_rank+1
+          if(wpw_support_w_owner(iw)==0)then;wpw_support_w_owner(iw)=owner_fragment
+          else if(wpw_support_w_owner(iw)/=owner_fragment)then;wpw_support_w_owner(iw)=-1;endif
+        enddo
+      enddo
+      local_bad=merge(0,1,all(wpw_support_w_owner>0))
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,wpw_production_comm,ierr_publish)
+      if(ierr_publish/=MPI_SUCCESS.or.global_bad/=0)return
+      astat=0
+      allocate(wp_w(nw*np_support),wp_p(nw*np_support),wp_h(nw*np_support),wp_s(nw*np_support),stat=astat)
+      local_bad=merge(0,1,astat==0)
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,wpw_production_comm,ierr_publish)
+      if(ierr_publish/=MPI_SUCCESS.or.global_bad/=0)return
       iwp=0
       do ip=1,np_support
         do iw=1,nw
-          iwp=iwp+1;wp_w(iwp)=wpw_owned_w_ids(iw);wp_p(iwp)=wpw_context%support_column_ids(ip)
-          wp_h(iwp)=wpw_volume_wp_h(iw,ip);wp_s(iwp)=wpw_volume_wp_s(iw,ip)
+          iwp=iwp+1;wp_w(iwp)=wpw_support_w_ids(iw);wp_p(iwp)=wpw_context%support_column_ids(ip)
+          wp_h(iwp)=wpw_metric_wp_h(iw,ip);wp_s(iwp)=wpw_metric_wp_s(iw,ip)
         enddo
       enddo
+      astat=0
       allocate(pp_r(np_support*np_support),pp_c(np_support*np_support),&
-        pp_h(np_support*np_support),pp_s(np_support*np_support))
+        pp_h(np_support*np_support),pp_s(np_support*np_support),stat=astat)
+      local_bad=merge(0,1,astat==0)
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,wpw_production_comm,ierr_publish)
+      if(ierr_publish/=MPI_SUCCESS.or.global_bad/=0)return
       ipp=0
       do ip=1,np_support
         do iw=1,np_support
           ipp=ipp+1;pp_r(ipp)=wpw_context%support_column_ids(ip);pp_c(ipp)=wpw_context%support_column_ids(iw)
-          pp_h(ipp)=wpw_volume_pp_h(ip,iw);pp_s(ipp)=wpw_volume_pp_s(ip,iw)
+          pp_h(ipp)=wpw_metric_pp_h(ip,iw);pp_s(ipp)=wpw_metric_pp_s(ip,iw)
         enddo
       enddo
-      max_candidates=size(wp_w)+size(pp_r)
-      call route_dg_wpw_staged_candidates(wpw_context,1,wpw_support_fragment_ids,wp_w,wp_p,wp_h,wp_s,&
-        pp_r,pp_c,pp_h,pp_s,max_candidates,candidate_info)
-      if(candidate_info==0)wpw_nonowned_candidates_pending=.false.
+      astat=0;allocate(staged(nw*nw+size(wp_w)+size(pp_r)),stat=astat)
+      local_bad=merge(0,1,astat==0)
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,wpw_production_comm,ierr_publish)
+      if(ierr_publish/=MPI_SUCCESS.or.global_bad/=0)return
+      entry=0;iww=0
+      do jw=1,nw;do iw=1,nw
+        entry=entry+1;iww=iww+1;staged(entry)%kind=wpw_candidate_kind_ww
+        staged(entry)%image_id=iww;staged(entry)%target_fragment=wpw_support_w_owner(iw)
+        staged(entry)%ww_r=wpw_support_w_ids(iw);staged(entry)%ww_c=wpw_support_w_ids(jw)
+        staged(entry)%ww_s=wpw_metric_ww_s(iw,jw)
+        staged(entry)%ww_h=wpw_metric_ww_h(iw,jw)
+        staged(entry)%ww_kinetic=wpw_metric_ww_kinetic(iw,jw)
+        staged(entry)%ww_potential=wpw_metric_ww_potential(iw,jw)
+      enddo;enddo
+      do iwp=1,size(wp_w)
+        entry=entry+1;staged(entry)%kind=wpw_candidate_kind_wp;staged(entry)%image_id=entry
+        staged(entry)%wp_w=wp_w(iwp);staged(entry)%wp_p=wp_p(iwp)
+        staged(entry)%wp_h=wp_h(iwp);staged(entry)%wp_s=wp_s(iwp)
+      enddo
+      do ipp=1,size(pp_r)
+        entry=entry+1;staged(entry)%kind=wpw_candidate_kind_pp;staged(entry)%image_id=entry
+        staged(entry)%pp_r=pp_r(ipp);staged(entry)%pp_c=pp_c(ipp)
+        staged(entry)%pp_h=pp_h(ipp);staged(entry)%pp_s=pp_s(ipp)
+      enddo
+      max_candidates=size(staged)
+      call route_dg_wpw_candidate_halo(wpw_production_comm,1,dc%n_frag,size(wpw_g_indices,2),&
+        wpw_support_fragment_ids,staged,owned,candidate_info,max_candidates)
+      if(candidate_info/=0)return
+      astat=0;allocate(staged_conjugate(nw*nw),stat=astat)
+      local_bad=merge(0,1,astat==0)
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,wpw_production_comm,ierr_publish)
+      if(ierr_publish/=MPI_SUCCESS.or.global_bad/=0)return
+      entry=0
+      do jw=1,nw;do iw=1,nw
+        entry=entry+1;staged_conjugate(entry)%kind=wpw_candidate_kind_ww
+        staged_conjugate(entry)%image_id=entry;staged_conjugate(entry)%target_fragment=wpw_support_w_owner(jw)
+        staged_conjugate(entry)%ww_r=wpw_support_w_ids(jw)
+        staged_conjugate(entry)%ww_c=wpw_support_w_ids(iw)
+        staged_conjugate(entry)%ww_s=conjg(wpw_metric_ww_s(iw,jw))
+        staged_conjugate(entry)%ww_h=conjg(wpw_metric_ww_h(iw,jw))
+        staged_conjugate(entry)%ww_kinetic=conjg(wpw_metric_ww_kinetic(iw,jw))
+        staged_conjugate(entry)%ww_potential=conjg(wpw_metric_ww_potential(iw,jw))
+      enddo;enddo
+      call route_dg_wpw_candidate_halo(wpw_production_comm,1,dc%n_frag,size(wpw_g_indices,2),&
+        wpw_support_fragment_ids,staged_conjugate,owned_conjugate,local_info,max_candidates)
+      candidate_info=max(candidate_info,local_info)
+      if(candidate_info/=0)return
+      local_bad=0
+      if(size(owned%ww_r)/=size(owned_conjugate%ww_r))then;local_bad=1
+      else if(any(owned%ww_r/=owned_conjugate%ww_r).or.any(owned%ww_c/=owned_conjugate%ww_c))then;local_bad=1;endif
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,wpw_production_comm,ierr_publish)
+      if(ierr_publish/=MPI_SUCCESS.or.global_bad/=0)return
+      call publish_dg_wpw_realspace_metric(wpw_context,owned%wp_w,owned%wp_p,owned%wp_h,owned%wp_s,&
+        owned%pp_r,owned%pp_c,owned%pp_h,owned%pp_s,owned%ww_r,owned%ww_c,owned%ww_s,&
+        owned_conjugate%ww_s,owned%ww_kinetic,owned_conjugate%ww_kinetic,&
+        owned%ww_potential,owned_conjugate%ww_potential,'tail_carrying_realspace_gram',candidate_info)
+      if(candidate_info==0)then
+        wpw_context%ww_provenance_fingerprint=wpw_occupied_w_basis%fingerprint
+        wpw_nonowned_candidates_pending=.false.
+      endif
     end subroutine publish_wpw_core_volume_candidates
 
     subroutine prepare_wpw_canonical_face_trace_provider(trace_info)
@@ -6065,12 +6554,9 @@ contains
           grid(:,point)=grid_point
           if(any(local_grid<mg%is).or.any(local_grid>mg%ie))cycle
           owned_count=owned_count+1;coverage(point)=1
-          do ib=1,size(owned_w)
-            owned_w(ib)=cmplx(local_basis_value(local_grid(1),local_grid(2),local_grid(3),1,ib),0d0,8)
-            owned_grad_w(1,ib)=cmplx(local_basis_grad(local_grid(1),local_grid(2),local_grid(3),1,ib,1),0d0,8)
-            owned_grad_w(2,ib)=cmplx(local_basis_grad(local_grid(1),local_grid(2),local_grid(3),1,ib,2),0d0,8)
-            owned_grad_w(3,ib)=cmplx(local_basis_grad(local_grid(1),local_grid(2),local_grid(3),1,ib,3),0d0,8)
-          enddo
+          call evaluate_dg_wpw_occupied_w_point(wpw_occupied_w_basis,local_grid,&
+            owned_w,owned_grad_w,point_info)
+          if(point_info/=0)then;w_fail=w_fail+1;coverage(point)=0;cycle;endif
           call evaluate_dg_wpw_core_w_support(wpw_owned_w_ids,owned_w,owned_grad_w,wpw_support_w_ids,&
             wpw_volume_halos,grid_point,epoch,side_w(:,point),side_grad_w(:,:,point),point_info,&
             zero_outside_halo=.true.)
@@ -6148,10 +6634,11 @@ contains
         plus_hi(:,jface)=plus_lo(:,jface)+domain-1
         if(sides(jface)>0)minus_hi(axes(jface),jface)=minus_hi(axes(jface),jface)+1
       enddo
-      max_candidates=max(1,nface*size(wpw_support_w_ids)*size(wpw_context%support_column_ids))
+      max_candidates=max(1,nface*size(wpw_support_w_ids)*(&
+        size(wpw_context%support_column_ids)+size(wpw_support_w_ids)))
       call scan_dg_wpw_canonical_faces(wpw_context,1,wpw_support_fragment_ids,wpw_trace_provider,&
         kminus,kplus,axes,sides,minus_lo,minus_hi,plus_lo,plus_hi,system%hgs,&
-        wpw_support_w_ids,wpw_context%support_column_ids,max_candidates,scan_info)
+        wpw_support_w_ids,wpw_support_w_owner,wpw_context%support_column_ids,max_candidates,scan_info)
       if(scan_info/=0)write(*,'(1x,a,i0,3(a,i0))')'[DG-WPW-LOCAL-FAIL] face_scan rank=',dc%id_tot,&
         ' info=',scan_info,' nface=',nface,' max_candidates=',max_candidates
     end subroutine scan_wpw_canonical_faces
@@ -6163,7 +6650,7 @@ contains
       integer,allocatable,intent(out)::overlap_lo(:,:),overlap_hi(:,:)
       integer,intent(out)::support_info
       integer::extent(3),domain(3),k,local_lo(3),local_hi(3),buffer(3)
-      extent=merge(1,0,num_fragment>1 .and. dg_wpw_window_buffer>0)
+      extent=merge(1,0,num_fragment>1 .and. wpw_window_buffer>0)
       call build_dg_wpw_fragment_support(dc%i_frag,num_fragment,extent,records,fragment_ids,support_info)
       if(support_info/=0)return
       allocate(core_lo(3,size(fragment_ids)),core_hi(3,size(fragment_ids)))
@@ -6189,8 +6676,11 @@ contains
       if(dc%id_frag/=0)then
         allocate(owned_ids(0),support_ids(0));layout_info=0;return
       endif
-      call build_complete_wpw_w_row_layout(dc%i_frag,wpw_support_fragment_ids,n_basis(:,1),&
-        index_basis(:,:,1),owned_ids,support_ids,layout_info)
+      if(.not.wpw_occupied_w_basis%valid.or.wpw_occupied_w_basis%local_fragment/=dc%i_frag)then
+        layout_info=1;return
+      endif
+      call build_dg_wpw_w_row_layout_from_owned_ids(wpw_production_comm,dc%i_frag,&
+        wpw_support_fragment_ids,wpw_occupied_w_basis%owned_ids,owned_ids,support_ids,layout_info)
     end subroutine
 
     subroutine check_lcfo_basis_potential_inputs_finite

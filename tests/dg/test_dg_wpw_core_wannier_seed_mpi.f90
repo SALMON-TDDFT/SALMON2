@@ -7,7 +7,8 @@ program test_dg_wpw_core_wannier_seed_mpi
     apply_sawf_projected_wannier_transform,&
     apply_sawf_projected_wannier_gradient_transform,&
     canonicalize_sawf_bond_identity,build_sawf_wannier_density,&
-    qualify_sawf_wannier_density_projection,diagnose_sawf_discrete_wannier_spread
+    qualify_sawf_wannier_density_projection,diagnose_sawf_discrete_wannier_spread,&
+    assemble_sawf_diagonal_periodic_links
   use dg_wpw_wannier_tail_halo,only:validate_sawf_wannier_tail_schedule,&
     exchange_sawf_wannier_tail_values,exchange_sawf_discovered_wannier_tails
   use dg_wpw_wannier_tail_halo,only:sawf_tail_records_unique
@@ -47,17 +48,38 @@ program test_dg_wpw_core_wannier_seed_mpi
   real(8)::spread_norm(2),spread_bvec(3,6),spread_weight(6),spread_center(3,2),spread_omega(2)
   real(8)::spread_center_expected(3),spread_sigma,spread_expected
   logical::spread_center_valid(2)
+  complex(8)::link_values(4,2),link_local(2,6),link_global(2,6),link_expected(2,6)
+  real(8)::link_coordinates(3,4),link_norm_local(2),link_norm_global(2),link_norm_expected(2)
+  integer::ip,ib
   logical::owned
 
   call MPI_Init(ierr)
   call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr)
   if(ierr/=MPI_SUCCESS)error stop 10
   if(rank>1)error stop 11
+  link_values=reshape([(cmplx(0.1d0*dble(info),-0.03d0*dble(info),8),info=1,8)],[4,2])
+  link_coordinates=reshape([0d0,0d0,0d0, 0.4d0,0.2d0,0.1d0, 0.9d0,0.3d0,0.7d0, &
+    1.4d0,0.8d0,1.1d0],[3,4])
   spread_bvec=0d0
   spread_bvec(1,1:2)=[1d0,-1d0]
   spread_bvec(2,3:4)=[1d0,-1d0]
   spread_bvec(3,5:6)=[1d0,-1d0]
   spread_weight=0.5d0
+  link_expected=(0d0,0d0);link_norm_expected=0d0
+  do ib=1,6;do ip=1,4
+    link_expected(:,ib)=link_expected(:,ib)+abs(link_values(ip,:))**2*&
+      exp(cmplx(0d0,-dot_product(spread_bvec(:,ib),link_coordinates(:,ip)),8))*0.25d0
+    link_norm_expected=link_norm_expected+merge(abs(link_values(ip,:))**2*0.25d0,0d0,ib==1)
+  enddo;enddo
+  link_local=(0d0,0d0);link_norm_local=0d0
+  if(rank==0)call assemble_sawf_diagonal_periodic_links(link_values,link_coordinates,spread_bvec,&
+    0.25d0,link_norm_local,link_local,info)
+  if(rank==0.and.info/=0)error stop 121
+  call MPI_Allreduce(link_local,link_global,size(link_global),MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_COMM_WORLD,ierr)
+  call MPI_Allreduce(link_norm_local,link_norm_global,size(link_norm_global),MPI_DOUBLE_PRECISION,&
+    MPI_SUM,MPI_COMM_WORLD,ierr)
+  if(ierr/=MPI_SUCCESS.or.maxval(abs(link_global-link_expected))>1d-14.or.&
+    maxval(abs(link_norm_global-link_norm_expected))>1d-14)error stop 122
   spread_center_expected=[0.2d0,-0.15d0,0.1d0]
   spread_sigma=0.3d0
   do ix=1,6

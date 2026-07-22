@@ -21,8 +21,43 @@ module lcfo_wannier_sawf_seed
   public :: build_sawf_wannier_density
   public :: qualify_sawf_wannier_density_projection
   public :: diagnose_sawf_discrete_wannier_spread
+  public :: assemble_sawf_diagonal_periodic_links
 
 contains
+
+  subroutine assemble_sawf_diagonal_periodic_links(values,coordinates,bvec,quadrature_weight,&
+      norm,diagonal_link,info)
+    complex(8),intent(in)::values(:,:)
+    real(8),intent(in)::coordinates(:,:),bvec(:,:),quadrature_weight
+    real(8),intent(out)::norm(:)
+    complex(8),intent(out)::diagonal_link(:,:)
+    integer,intent(out)::info
+    integer::point,neighbor
+    complex(8)::phase
+
+    info=1;norm=0d0;diagonal_link=(0d0,0d0)
+    if(size(values,1)<=0.or.size(values,2)<=0.or.size(coordinates,1)/=3.or.&
+        size(coordinates,2)/=size(values,1).or.size(bvec,1)/=3.or.size(bvec,2)<=0.or.&
+        size(norm)/=size(values,2).or.&
+        any(shape(diagonal_link)/=[size(values,2),size(bvec,2)]).or.&
+        quadrature_weight<=0d0.or..not.ieee_is_finite(quadrature_weight).or.&
+        .not.all(ieee_is_finite(real(values))).or..not.all(ieee_is_finite(aimag(values))).or.&
+        .not.all(ieee_is_finite(coordinates)).or..not.all(ieee_is_finite(bvec)))return
+    do point=1,size(values,1)
+      norm=norm+abs(values(point,:))**2*quadrature_weight
+      do neighbor=1,size(bvec,2)
+        phase=exp(cmplx(0d0,-dot_product(bvec(:,neighbor),coordinates(:,point)),8))
+        diagonal_link(:,neighbor)=diagonal_link(:,neighbor)+&
+          abs(values(point,:))**2*phase*quadrature_weight
+      enddo
+    enddo
+    if(any(norm<=0d0).or..not.all(ieee_is_finite(norm)).or.&
+        .not.all(ieee_is_finite(real(diagonal_link))).or.&
+        .not.all(ieee_is_finite(aimag(diagonal_link))))then
+      norm=0d0;diagonal_link=(0d0,0d0);return
+    endif
+    info=0
+  end subroutine assemble_sawf_diagonal_periodic_links
 
   subroutine diagnose_sawf_discrete_wannier_spread(diagonal_link,norm,bvec,weight,&
       center,omega,center_valid,info,require_unit_norm)
