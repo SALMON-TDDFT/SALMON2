@@ -217,6 +217,7 @@ module salmon_global
   integer        :: nscf
   character(1)   :: yn_dg_wpw_production
   character(1)   :: yn_dg_wpw_fixed_h_relaxation
+  character(1)   :: yn_dg_wpw_preconditioner
   integer        :: dg_wpw_extra_states
   integer        :: dg_wpw_scf_max_iter
   integer        :: dg_wpw_window_buffer

@@ -376,6 +376,7 @@ contains
       & nscf, &
       & yn_dg_wpw_production, &
       & yn_dg_wpw_fixed_h_relaxation, &
+      & yn_dg_wpw_preconditioner, &
       & dg_wpw_extra_states, &
       & dg_wpw_scf_max_iter, &
       & dg_wpw_window_buffer, &
@@ -945,6 +946,7 @@ contains
     nscf          = 300
     yn_dg_wpw_production = 'n'
     yn_dg_wpw_fixed_h_relaxation = 'n'
+    yn_dg_wpw_preconditioner = 'y'
     dg_wpw_extra_states = 8
     dg_wpw_scf_max_iter = 200
     dg_wpw_window_buffer = 3
@@ -1625,6 +1627,7 @@ contains
     call comm_bcast(nscf                    ,nproc_group_global)
     call comm_bcast(yn_dg_wpw_production    ,nproc_group_global)
     call comm_bcast(yn_dg_wpw_fixed_h_relaxation,nproc_group_global)
+    call comm_bcast(yn_dg_wpw_preconditioner,nproc_group_global)
     call comm_bcast(dg_wpw_extra_states     ,nproc_group_global)
     call comm_bcast(dg_wpw_scf_max_iter     ,nproc_group_global)
     call comm_bcast(dg_wpw_window_buffer    ,nproc_group_global)
@@ -2671,6 +2674,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_wpw_production', yn_dg_wpw_production
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_wpw_fixed_h_relaxation', &
         yn_dg_wpw_fixed_h_relaxation
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_wpw_preconditioner', &
+        yn_dg_wpw_preconditioner
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_extra_states', dg_wpw_extra_states
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_scf_max_iter', dg_wpw_scf_max_iter
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_window_buffer', dg_wpw_window_buffer
@@ -3235,6 +3240,7 @@ contains
     call yn_argument_check(yn_auto_mixing)
     call yn_argument_check(yn_dg_wpw_production)
     call yn_argument_check(yn_dg_wpw_fixed_h_relaxation)
+    call yn_argument_check(yn_dg_wpw_preconditioner)
     if(yn_dg_wpw_fixed_h_relaxation=='y'.and.yn_dg_wpw_production/='y') &
       stop 'yn_dg_wpw_fixed_h_relaxation=y requires yn_dg_wpw_production=y'
     if(yn_dg_wpw_production=='y') then

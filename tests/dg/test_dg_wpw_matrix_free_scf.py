@@ -14,7 +14,27 @@ assert SOURCE.exists(), "missing bounded matrix-free DG-DC consumer"
 source = SOURCE.read_text().lower()
 main = MAIN.read_text().lower()
 lcfo = LCFO.read_text().lower()
-controls = (GLOBAL.read_text() + INPUT.read_text()).lower()
+global_text = GLOBAL.read_text().lower()
+input_text = INPUT.read_text().lower()
+controls = global_text + input_text
+
+precondition_control = "yn_dg_wpw_preconditioner"
+assert precondition_control in global_text, "missing explicit WPW preconditioner comparison control"
+assert precondition_control in input_text, "WPW preconditioner control is absent from input plumbing"
+assert f"{precondition_control} = 'y'" in input_text, "current preconditioned route must remain the default"
+for required in ("call comm_bcast(yn_dg_wpw_preconditioner", "call yn_argument_check(yn_dg_wpw_preconditioner)"):
+    assert required in input_text, f"missing WPW preconditioner input contract: {required}"
+assert lcfo.count("if(yn_dg_wpw_preconditioner=='y')then") >= 2, \
+    "fixed-H and continuation routes must independently select the optional preconditioner"
+for routine in ("run_wpw_fixed_h_relaxation", "continue_wpw_fixed_h_interface"):
+    start = lcfo.index(f"subroutine {routine}")
+    end = lcfo.index("end subroutine", start)
+    body = lcfo[start:end]
+    branch = body.index("if(yn_dg_wpw_preconditioner=='y')then")
+    fallback = body.index("else", branch)
+    closing = body.index("endif", fallback)
+    assert "wpw_precondition" in body[branch:fallback]
+    assert "wpw_precondition" not in body[fallback:closing]
 
 for token in (
     "run_dg_wpw_matrix_free_scf",

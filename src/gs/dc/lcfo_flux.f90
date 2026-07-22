@@ -3288,6 +3288,7 @@ contains
       MPI_INTEGER,MPI_INTEGER8,MPI_MAX,MPI_MIN,MPI_Abort,MPI_Bcast,MPI_Reduce,MPI_Gather,&
       MPI_DOUBLE_COMPLEX,MPI_DOUBLE_PRECISION,MPI_LOGICAL,MPI_SUM
     use salmon_global, only: yn_dc_lcfo_diag,yn_dg_wpw_production,yn_dg_wpw_fixed_h_relaxation,&
+      yn_dg_wpw_preconditioner,&
       n_plane_waves_dg,k_cutoff_plane_wave,&
       dg_wpw_window_buffer,dg_wpw_window_width,dg_wpw_extra_states,dg_wpw_scf_max_iter,&
       dg_wpw_gap_threshold,dg_wpw_metric_cutoff,dg_wpw_scf_mix,dg_wpw_scf_residual_tolerance,num_fragment
@@ -4242,10 +4243,17 @@ contains
         call validate_wpw_frozen_h_state(fixed_info)
         if(fixed_info/=0)return
         if(dc%id_frag==0)then
-          call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,wpw_apply_h,&
-            wpw_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,wpw_nretain,&
-            iter+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
-            wpw_q_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,wpw_precondition)
+          if(yn_dg_wpw_preconditioner=='y')then
+            call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,wpw_apply_h,&
+              wpw_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,wpw_nretain,&
+              iter+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
+              wpw_q_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,wpw_precondition)
+          else
+            call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,wpw_apply_h,&
+              wpw_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,wpw_nretain,&
+              iter+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
+              wpw_q_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info)
+          endif
           if(root_info==0)then
             occupied_trace=sum(wpw_occupations*wpw_eigenvalues(1:wpw_nocc))
             trace_change=merge(abs(occupied_trace-previous_trace),huge(1d0),iter>1)
@@ -4333,10 +4341,17 @@ contains
         if(ierr/=MPI_SUCCESS.or.root_info/=0)return
         call validate_wpw_frozen_h_state(continuation_info);if(continuation_info/=0)return
         if(dc%id_frag==0)then
-          call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,&
-            wpw_apply_h,wpw_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,&
-            wpw_nretain,trial+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
-            accepted_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,wpw_precondition)
+          if(yn_dg_wpw_preconditioner=='y')then
+            call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,&
+              wpw_apply_h,wpw_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,&
+              wpw_nretain,trial+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
+              accepted_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,wpw_precondition)
+          else
+            call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,&
+              wpw_apply_h,wpw_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,&
+              wpw_nretain,trial+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
+              accepted_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info)
+          endif
           if(root_info==0)then
             trial_merit=max(residual,orth)
             trial_accepted=ieee_is_finite(trial_merit).and.ieee_is_finite(projector).and.&
