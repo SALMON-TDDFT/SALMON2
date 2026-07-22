@@ -13,6 +13,11 @@ module dg_wpw_occupied_w_basis
     integer,allocatable::owned_ids(:),stable_keys(:,:),core_grid_ids(:)
     complex(8),allocatable::core_values(:,:),buffer_values(:,:),buffer_gradients(:,:,:)
   end type
+  type,public::t_dg_wpw_periodic_image_mismatch
+    logical::valid=.false.
+    integer::canonical(3)=0,first_p(3)=0,second_p(3)=0,w_row=0
+    real(8)::abs_diff=0d0
+  end type
   public::initialize_dg_wpw_occupied_w_basis
   public::initialize_dg_wpw_occupied_w_basis_collective
   public::gather_dg_wpw_occupied_w_payload
@@ -62,41 +67,53 @@ contains
   end subroutine reorder_dg_wpw_fragment_buffer
 
   subroutine extract_dg_wpw_canonical_cell(unwrapped_values,domain,buffer,total_shape,&
-      fragment_origin,canonical_values,info)
+      fragment_origin,canonical_values,info,mismatch)
     ! fragment_origin is the zero-based global index of fragment core point 1.
     complex(8),intent(in)::unwrapped_values(:,:,:,:)
     integer,intent(in)::domain(3),buffer(3),total_shape(3),fragment_origin(3)
     complex(8),intent(out)::canonical_values(:,:,:,:)
     integer,intent(out)::info
+    type(t_dg_wpw_periodic_image_mismatch),intent(out),optional::mismatch
     logical,allocatable::seen(:,:,:)
-    integer::extent(3),ix,iy,iz,cx,cy,cz
-    real(8)::scale,tolerance
+    integer,allocatable::first_p(:,:,:,:)
+    integer::extent(3),ix,iy,iz,cx,cy,cz,row
+    real(8)::scale,tolerance,difference
+    type(t_dg_wpw_periodic_image_mismatch)::diagnostic
 
-    info=1;canonical_values=(0d0,0d0);extent=domain+2*buffer
+    info=1;canonical_values=(0d0,0d0);extent=domain+2*buffer;diagnostic=t_dg_wpw_periodic_image_mismatch()
+    if(present(mismatch))mismatch=diagnostic
     if(any(domain<=0).or.any(buffer<0).or.any(total_shape<=0).or.any(extent<total_shape).or.&
         any(fragment_origin<0).or.any(fragment_origin>=total_shape).or.&
         size(unwrapped_values,4)<=0.or.&
         any(shape(unwrapped_values)/=[extent,size(unwrapped_values,4)]).or.&
         any(shape(canonical_values)/=[total_shape,size(unwrapped_values,4)]).or.&
         .not.all(finite_complex(unwrapped_values)))return
-    allocate(seen(total_shape(1),total_shape(2),total_shape(3)));seen=.false.
+    allocate(seen(total_shape(1),total_shape(2),total_shape(3)),&
+      first_p(3,total_shape(1),total_shape(2),total_shape(3)))
+    seen=.false.;first_p=0
     do iz=1,extent(3);do iy=1,extent(2);do ix=1,extent(1)
       cx=modulo(fragment_origin(1)+ix-buffer(1)-1,total_shape(1))+1
       cy=modulo(fragment_origin(2)+iy-buffer(2)-1,total_shape(2))+1
       cz=modulo(fragment_origin(3)+iz-buffer(3)-1,total_shape(3))+1
       if(.not.seen(cx,cy,cz))then
         canonical_values(cx,cy,cz,:)=unwrapped_values(ix,iy,iz,:)
-        seen(cx,cy,cz)=.true.
+        seen(cx,cy,cz)=.true.;first_p(:,cx,cy,cz)=[ix,iy,iz]
       else
         scale=max(1d0,maxval(abs(canonical_values(cx,cy,cz,:))),&
           maxval(abs(unwrapped_values(ix,iy,iz,:))))
         tolerance=100d0*epsilon(1d0)*scale
-        if(maxval(abs(canonical_values(cx,cy,cz,:)-unwrapped_values(ix,iy,iz,:)))>tolerance)then
-          canonical_values=(0d0,0d0);return
+        difference=maxval(abs(canonical_values(cx,cy,cz,:)-unwrapped_values(ix,iy,iz,:)))
+        if(difference>tolerance.and.difference>diagnostic%abs_diff)then
+          row=maxloc(abs(canonical_values(cx,cy,cz,:)-unwrapped_values(ix,iy,iz,:)),dim=1)
+          diagnostic%valid=.true.;diagnostic%canonical=[cx,cy,cz]
+          diagnostic%first_p=first_p(:,cx,cy,cz);diagnostic%second_p=[ix,iy,iz]
+          diagnostic%w_row=row;diagnostic%abs_diff=difference
         endif
       endif
     enddo;enddo;enddo
     if(.not.all(seen))then;canonical_values=(0d0,0d0);return;endif
+    if(present(mismatch))mismatch=diagnostic
+    if(diagnostic%valid)return
     info=0
   end subroutine extract_dg_wpw_canonical_cell
 

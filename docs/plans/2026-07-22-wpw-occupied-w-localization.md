@@ -263,3 +263,20 @@ localization: B=6 W widths are already close to 1.2 Angstrom. The next root
 cause investigation must instrument the extraction/link boundary and determine
 whether the fragment projected-W P field violates the assumed physical-cell
 image identity for B>6.
+
+### Instrumented B=10 result
+
+The extraction and link stages were separated and the extraction failure now
+reports its largest duplicate-image mismatch. Fresh run
+`20260722_task8_image_diag_b10/run.log` again converged at iteration 85
+(`diff=9.4464E-10`, charge 256). Every fragment reported a mismatch between P
+coordinates `[1,16,19]` and `[25,16,19]`, which differ by exactly the physical
+24-point period in x and map to the same canonical point. The maximum absolute
+W-value difference was `3.92919E-02` on every fragment. The affected local W
+row and canonical coordinate transform with the fragment as expected.
+
+The run then stopped collectively at the newly isolated
+`occupied_w_canonical_cell_extraction` stage. This directly proves that the raw
+B=10 fragment projected-W P values are not periodic under the 24-point
+physical-cell translation. The discrepancy is many orders of magnitude above
+the `100*epsilon*scale` image-consistency tolerance and is not roundoff.

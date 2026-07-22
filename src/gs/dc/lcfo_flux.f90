@@ -3353,7 +3353,7 @@ contains
     use dg_wpw_wannier_tail_halo,only:exchange_sawf_wannier_tail_values,&
       exchange_sawf_discovered_wannier_tails,locate_sawf_wannier_tail_core,&
       locate_sawf_wannier_tail_rank,qualify_sawf_wannier_buffer_tail,is_sawf_outer_buffer_shell
-    use dg_wpw_occupied_w_basis,only:s_dg_wpw_occupied_w_basis,&
+    use dg_wpw_occupied_w_basis,only:s_dg_wpw_occupied_w_basis,t_dg_wpw_periodic_image_mismatch,&
       gather_dg_wpw_occupied_w_payload,initialize_dg_wpw_occupied_w_basis_collective,&
       broadcast_dg_wpw_occupied_w_basis,evaluate_dg_wpw_occupied_w_point,&
       dg_wpw_unwrapped_to_storage_index,reorder_dg_wpw_fragment_buffer
@@ -4477,6 +4477,7 @@ contains
       real(8)::spread_swap,median_a,p90_a
       logical::spread_key_less
       logical::center_owned
+      type(t_dg_wpw_periodic_image_mismatch)::periodic_mismatch
 
       source_info=1;source_count=0;source_condition=huge(1d0)
       call build_local_bond_center_projection_map(source_count,bond_center,bond_atoms,bond_images)
@@ -4631,17 +4632,24 @@ contains
       enddo
       if(dc%id_frag==0)then
         call extract_dg_wpw_canonical_cell(occupied_w_p,dc%nxyz_domain,dc%nxyz_buffer,&
-          dc%lg_tot%num,dc%ixyz_frag(:,dc%i_frag),canonical_occupied_w,local_info)
-        if(local_info==0)then
-          point=0
-          do izp=1,dc%lg_tot%num(3);do iyp=1,dc%lg_tot%num(2);do ixp=1,dc%lg_tot%num(1)
-            point=point+1
-            spread_coordinates(:,point)=system%hgs*dble([ixp-1,iyp-1,izp-1])
-          enddo;enddo;enddo
-          call assemble_sawf_diagonal_periodic_links(&
-            reshape(canonical_occupied_w,[product(dc%lg_tot%num),source_count]),&
-            spread_coordinates,spread_bvec,system%hvol,spread_norm,spread_link,local_info)
-        endif
+          dc%lg_tot%num,dc%ixyz_frag(:,dc%i_frag),canonical_occupied_w,local_info,periodic_mismatch)
+        if(periodic_mismatch%valid)write(*,'(1x,a,i0,4(a,3(i0,1x)),a,i0,a,es13.5)')&
+          '[DG-WPW-CANONICAL-IMAGE-MISMATCH] fragment=',dc%i_frag,&
+          ' canonical=',periodic_mismatch%canonical,' first_p=',periodic_mismatch%first_p,&
+          ' second_p=',periodic_mismatch%second_p,' domain=',dc%nxyz_domain,&
+          ' w_row=',periodic_mismatch%w_row,' max_abs_diff=',periodic_mismatch%abs_diff
+      endif
+      if(.not.wpw_seed_collective_stage_ok('occupied_w_canonical_cell_extraction',local_info))return
+      local_info=0
+      if(dc%id_frag==0)then
+        point=0
+        do izp=1,dc%lg_tot%num(3);do iyp=1,dc%lg_tot%num(2);do ixp=1,dc%lg_tot%num(1)
+          point=point+1
+          spread_coordinates(:,point)=system%hgs*dble([ixp-1,iyp-1,izp-1])
+        enddo;enddo;enddo
+        call assemble_sawf_diagonal_periodic_links(&
+          reshape(canonical_occupied_w,[product(dc%lg_tot%num),source_count]),&
+          spread_coordinates,spread_bvec,system%hvol,spread_norm,spread_link,local_info)
       endif
       if(.not.wpw_seed_collective_stage_ok('occupied_w_link_assembly',local_info))return
       if(dc%id_frag==0)then

@@ -1,6 +1,7 @@
 program test_dg_wpw_occupied_w_basis
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_positive_inf
-  use dg_wpw_occupied_w_basis,only:s_dg_wpw_occupied_w_basis,initialize_dg_wpw_occupied_w_basis,&
+  use dg_wpw_occupied_w_basis,only:s_dg_wpw_occupied_w_basis,t_dg_wpw_periodic_image_mismatch,&
+    initialize_dg_wpw_occupied_w_basis,&
     evaluate_dg_wpw_occupied_w_point,dg_wpw_unwrapped_to_storage_index,&
     reorder_dg_wpw_fragment_buffer,extract_dg_wpw_canonical_cell
   implicit none
@@ -14,6 +15,7 @@ program test_dg_wpw_occupied_w_basis
   complex(8),allocatable::p6(:,:,:,:),p10(:,:,:,:),p5(:,:,:,:),canonical6(:,:,:,:),canonical10(:,:,:,:)
   complex(8),allocatable::canonical_bad(:,:,:,:),pzero(:,:,:,:),canonical_zero(:,:,:,:)
   integer::canonical_grid(3),origin(3)
+  type(t_dg_wpw_periodic_image_mismatch)::mismatch
 
   ! Fragment storage is core/positive-buffer followed by negative-buffer.
   ! Logical P must instead be contiguous from 1-B through n+B.
@@ -65,8 +67,10 @@ program test_dg_wpw_occupied_w_basis
   call extract_dg_wpw_canonical_cell(p10,[12,12,12],[10,10,10],[24,24,24],origin,canonical10,info)
   if(info/=0)error stop 210
   p10(25,1,1,1)=p10(1,1,1,1)+200d0*epsilon(1d0)*max(1d0,abs(p10(1,1,1,1)))
-  call extract_dg_wpw_canonical_cell(p10,[12,12,12],[10,10,10],[24,24,24],origin,canonical10,info)
-  if(info==0)error stop 211
+  call extract_dg_wpw_canonical_cell(p10,[12,12,12],[10,10,10],[24,24,24],origin,canonical10,info,mismatch)
+  if(info==0.or..not.mismatch%valid.or.any(mismatch%canonical/=[3,15,3]).or.&
+    any(mismatch%first_p/=[1,1,1]).or.any(mismatch%second_p/=[25,1,1]).or.&
+    mismatch%w_row/=1.or.mismatch%abs_diff<=0d0)error stop 211
   allocate(pzero(24,24,24,0),canonical_zero(24,24,24,0))
   call extract_dg_wpw_canonical_cell(pzero,[12,12,12],[6,6,6],[24,24,24],origin,canonical_zero,info)
   if(info==0)error stop 212

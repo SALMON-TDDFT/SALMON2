@@ -206,6 +206,15 @@ B=10 fresh run `20260722_task7_spread_b10/run.log`はDC-SCF 85反復、
 projected-W Pが物理24点周期像の同一性を満たすかを次のroot-cause対象とする。outer-shell failureを
 Wannier幅の過大さで説明する根拠は得られなかった。
 
+instrumented B=10 run `20260722_task8_image_diag_b10/run.log`で抽出stageを
+link組立てから分離した。全8 fragmentで、P座標`[1,16,19]`と`[25,16,19]`
+（x方向に物理周期24点差、同一canonical点）のW値が一致せず、最大絶対差は共通して
+`3.92919E-02`だった。runは`occupied_w_canonical_cell_extraction`でcollective
+stopした。したがってraw B=10 fragment projected-W Pは物理24点並進の周期像同一性を
+満たしていないことが直接確認された。次はこのraw boxを後段で任意選択するのではなく、
+fragment arrayのbuffer生成時に一意なphysical-cell representativeから周期像を構築する
+設計を行う。
+
 少なくとも以下をrank-local値とcollective aggregateの両方で確認する。
 
 - occupied Wが16/fragment、128/globalであり、stable ownerが一意である。
