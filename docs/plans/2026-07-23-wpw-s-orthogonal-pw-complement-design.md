@@ -46,8 +46,10 @@ S'=T^\dagger ST,\qquad H'=T^\dagger HT
 であり、有限精度内で`S'_{WP}=0`となる。`H'_{WP}`は消さない。従って固有状態は
 HamiltonianによりWと補空間を混成でき、metric重複だけが除去される。
 
-この変換は非特異な座標変換であるため、補空間rankを落とさない限り元のWPW spanと
-一般化固有値は変わらない。数値的にrankを失ったPW方向だけを既存metric cutoffで除く。
+この変換は非特異な座標変換であり、元のWPW spanと一般化固有値を変えない。初回比較では
+補空間PW列を削除しない。`S_perp`の数値rankとcutoff以下のweightは診断するが、実際の
+方向選別は従来どおりreduced solveのmetric cutoffだけに任せる。これにより座標変換の効果と
+基底縮小の効果を混同しない。
 
 ## 演算子構成
 
@@ -99,7 +101,7 @@ fragment-local inverseではなく、occupied-W全空間に対する射影とす
 
 1. `||W^dagger S P_perp||`がscale相対`1E-11`以下。
 2. 変換前後のprojector/span defectが`1E-11`以下。
-3. retained PW rankとdiscarded metric weightを記録する。
+3. numerical PW-complement rankとcutoff以下のmetric weightを記録するが、基底列は削除しない。
 4. 変換前後の一般化固有値がrank保持ケースで`1E-10`相対以内。
 5. 係数往復と密度再構築が`1E-11`以内。
 6. interface lambda変更後も変換が有効。
@@ -113,5 +115,5 @@ Ritz boundary defect、最終`info`、publication状態をTask 16およびTask 1
 
 補空間化で改善すれば、occupied-W空間自体よりW--PW metric重複と座標条件が主要因だったと
 判断する。改善しなければ、同一span内の単なる座標変換ではplateauを解消できず、
-`H-epsilon S` correctionやstate別補正へ進む。rankを落とした場合の変化は基底空間変更を
-含むため、rank保持比較と分けて解釈する。
+`H-epsilon S` correctionやstate別補正へ進む。PW列を実際に削る実験は基底空間変更を
+伴うため、必要になった場合は別設計とする。
