@@ -109,6 +109,38 @@ assert "call gram(z,r" in solve_body[:metric_mode_pos], "search metric diagnosti
 assert "call dg_metric_mode_residual_split" in solve_body[:metric_mode_pos]
 assert metric_mode_pos < solve_body.index("call dg_reduced_generalized_eigh"), \
     "metric-mode diagnostic must observe, not replace, the production reduced solve"
+for token in (
+    "ritz_consistency_comparison_iteration(inner)",
+    "ritz_consistency_arm_iteration(inner)",
+    "pending_ritz_residual",
+    "direct_ritz_residual-pending_ritz_residual",
+    "matmul(reduced_h,reduced_c(:,i))",
+    "matmul(reduced_s,reduced_c(:,i))",
+    "call mpi_allreduce(local_bad,global_bad",
+    "call gram(q,post_ritz_sq",
+    "[dg-wpw-ritz-consistency]",
+):
+    assert token in solve_body, f"missing Ritz-boundary diagnostic contract: {token}"
+assert "max(direct_norm,post_norm)" in source and "direct_norm==0d0.and.post_norm==0d0" in source, \
+    "Ritz relative vector defects need symmetric zero-safe normalization"
+assert "inner==31.or.inner==95.or.inner==159" in source
+assert "inner==32.or.inner==96.or.inner==160" in source
+ritz_pos = solve_body.index("[dg-wpw-ritz-consistency]")
+assert convergence_pos < solve_body.index("if(ritz_consistency_arm_iteration"), \
+    "Ritz pending state must only be armed after the unchanged convergence test fails"
+assert solve_body.index("call trace_solve_window('initial_apply_end'") < ritz_pos, \
+    "Ritz comparison must reuse the next production direct H/S application"
+compare_start = solve_body.index("if(pending_ritz_comparison.and.ritz_consistency_comparison_iteration(inner))then")
+compare_end = solve_body.index("call gram(q,hq", compare_start)
+compare_body = solve_body[compare_start:compare_end]
+assert compare_body.count("call mpi_allreduce(local_bad,global_bad") >= 2
+assert compare_body.count("pending_ritz_comparison=.false.") >= 2
+arm_start = solve_body.index("if(ritz_consistency_arm_iteration(inner))then")
+arm_end = solve_body.index("call trace_solve_window('inner_end'", arm_start)
+arm_body = solve_body[arm_start:arm_end]
+assert arm_body.count("call mpi_allreduce(local_bad,global_bad") >= 2
+assert "pending_ritz_comparison=.false." in arm_body and "pending_ritz_comparison=.true." in arm_body
+assert "pending_inner+1==inner" in compare_body
 
 for token in (
     "yn_dg_wpw_production",
@@ -129,7 +161,22 @@ subprocess.run([fc,"-J",str(mod),"-I",str(mod),
     str(ROOT/"src/common/dg_generalized_algebra.f90"),
     str(ROOT/"src/common/dg_wpw_matrix_free_operator.f90"),str(SOURCE),
     str(ROOT/"tests/dg/test_dg_wpw_matrix_free_scf_mpi.f90"),"-llapack","-lblas","-o",str(exe)],check=True,cwd="/tmp")
-subprocess.run(["mpirun","-np","2",str(exe)],check=True,cwd=ROOT)
+run = subprocess.run(["mpirun","-np","2",str(exe)],check=True,cwd=ROOT,
+    stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
+ritz_lines = [line for line in run.stdout.splitlines() if "[DG-WPW-RITZ-CONSISTENCY]" in line]
+print("\n".join(ritz_lines))
+for post_inner,direct_inner in ((31,32),(95,96),(159,160)):
+    line = None
+    values = None
+    for candidate in ritz_lines:
+        fields = candidate.replace("=", " ").split()
+        parsed = {fields[i]: float(fields[i+1]) for i in range(len(fields)-1)
+            if fields[i] in {"post_inner", "direct_inner", "relative_occupied", "relative_extra", "post_metric_orth"}}
+        if int(parsed["post_inner"]) == post_inner and int(parsed["direct_inner"]) == direct_inner:
+            line = candidate; values = parsed; break
+    assert line is not None, f"missing runtime Ritz comparison {post_inner}->{direct_inner}"
+    assert values["relative_occupied"] < 1e-8 and values["relative_extra"] < 1e-8, line
+    assert values["post_metric_orth"] < 1e-8, line
 assert "call dc_lcfo_flux" in main, "main_dft does not reach the LCFO production owner"
 assert "call run_wpw_production_scf" in lcfo, "lcfo_flux does not reach the stepwise production consumer"
 print("PASS bounded matrix-free DG-DC production route contract")

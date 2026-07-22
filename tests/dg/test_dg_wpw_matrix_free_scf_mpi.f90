@@ -9,7 +9,7 @@ program test_dg_wpw_matrix_free_scf_mpi
   type::s_fixture_context
     integer::rank=0,nrank=1,first=1,nlocal=0
     integer::metric_precondition_calls=0
-    logical::bad_fixed_energy=.false.,wide_spectrum=.false.,metric_coupled=.false.
+    logical::bad_fixed_energy=.false.,wide_spectrum=.false.,long_spectrum=.false.,metric_coupled=.false.
   end type
   type(s_fixture_context)::ctx
   type(s_dg_wpw_matrix_free_scf_result)::result
@@ -230,6 +230,17 @@ program test_dg_wpw_matrix_free_scf_mpi
     1d-12,1d-8,qw,qp,qold,eval,gap,residual,orth,projector,info)
   if(info/=0.or.maxval(abs(eval-[0d0,1d0]))>1d-8.or.abs(gap-1d0)>1d-8.or.&
     max(residual,orth)>1d-8)call MPI_Abort(MPI_COMM_WORLD,56,ierr)
+  deallocate(qw,qp,qold);ctx%wide_spectrum=.false.;ctx%long_spectrum=.true.
+  ctx%nlocal=40;ctx%first=1+40*ctx%rank;nlocal=ctx%nlocal
+  allocate(qw(0,2),qp(nlocal,2),qold(nlocal,1));qold=0
+  do i=1,nlocal
+    j=ctx%first+i-1
+    qp(i,1)=cmplx(sin(0.37d0*dble(j))+0.2d0*cos(0.11d0*dble(j)),0d0,8)
+    qp(i,2)=cmplx(cos(0.29d0*dble(j))-0.3d0*sin(0.07d0*dble(j)),0d0,8)
+  enddo
+  call run_dg_wpw_matrix_free_algebra_step(ctx,MPI_COMM_WORLD,apply_h,apply_s,global_gram,0,nlocal,1,2,1,&
+    1d-12,1d-30,qw,qp,qold,eval,gap,residual,orth,projector,info)
+  if(info/=40)call MPI_Abort(MPI_COMM_WORLD,57,ierr)
   call MPI_Finalize(ierr)
 contains
   subroutine apply_h(context,xw,xp,yw,yp,apply_info)
@@ -237,7 +248,11 @@ contains
     integer,intent(out)::apply_info;integer::k
     yw=(0d0,0d0);yp=(0d0,0d0);apply_info=0
     select type(c=>context);type is(s_fixture_context)
-      if(c%wide_spectrum)then
+      if(c%long_spectrum)then
+        do k=1,c%nlocal
+          yp(k,:)=((dble(c%first+k-1)/80d0)**2)*xp(k,:)
+        enddo
+      else if(c%wide_spectrum)then
         do k=1,c%nlocal
           select case(c%first+k-1)
           case(1);yp(k,:)=0d0*xp(k,:)
@@ -260,7 +275,7 @@ contains
     select type(c=>context);type is(s_fixture_context)
       if(c%metric_coupled)then
         call apply_coupled_metric(c,xw,xp,yw,yp,apply_info)
-      else if(c%wide_spectrum)then
+      else if(c%wide_spectrum.or.c%long_spectrum)then
         yp=xp
       else
         do k=1,c%nlocal;yp(k,:)=dble(c%first+k)*xp(k,:);enddo

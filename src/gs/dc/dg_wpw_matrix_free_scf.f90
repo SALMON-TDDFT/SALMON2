@@ -628,23 +628,85 @@ contains
     complex(8)::reduced_h(3*nretain,3*nretain),reduced_s(3*nretain,3*nretain)
     complex(8)::reduced_c(3*nretain,nretain)
     complex(8)::metric_residual_overlap(3*nretain,nretain)
+    complex(8)::post_ritz_hq(nw+np,nretain),post_ritz_sq(nw+np,nretain)
+    complex(8)::pending_ritz_residual(nw+np,nretain),direct_ritz_residual(nw+np,nretain)
+    complex(8)::ritz_residual_defect(nw+np,nretain),reduced_ritz_residual(3*nretain,nretain)
     real(8)::condition,reduced_eval(nretain),reduced_residual,reduced_orth
     real(8)::raw_norm2(nretain),preconditioned_norm2(nretain),occupied_max,extra_max,&
       occupied_preconditioned,extra_preconditioned,occupied_ratio,extra_ratio
     real(8)::metric_minimum,metric_maximum,metric_minimum_ratio,metric_retained_minimum_ratio,&
       occupied_discarded_fraction,&
       extra_discarded_fraction,occupied_low_fraction,extra_low_fraction
+    real(8)::pending_norm2(nretain),direct_norm2(nretain),defect_norm2(nretain),&
+      reduced_norm2(nretain),relative_defect(nretain),post_ritz_orth
+    real(8)::post_occ,post_extra,direct_occ,direct_extra,reduced_occ,reduced_extra,&
+      defect_occ,defect_extra,relative_occ,relative_extra,direct_norm,post_norm
     integer::discarded,effective_rank,i,inner,occupied_worst,extra_worst,diagnostic_info,rank,ierr,&
       metric_effective_rank
+    integer::post_occ_worst,post_extra_worst,direct_occ_worst,direct_extra_worst,&
+      reduced_occ_worst,reduced_extra_worst,defect_occ_worst,defect_extra_worst,&
+      relative_occ_worst,relative_extra_worst,pending_inner,local_bad,global_bad
     real(8)::stage_clock
-    logical::keep_search
+    logical::keep_search,pending_ritz_comparison
     keep_search=.true.;if(present(retain_search_history))keep_search=retain_search_history
-    info=0;residual=huge(1d0);orth=huge(1d0);search=(0d0,0d0);call cpu_time(stage_clock)
+    info=0;residual=huge(1d0);orth=huge(1d0);search=(0d0,0d0);pending_ritz_comparison=.false.
+    pending_ritz_residual=(0d0,0d0);call MPI_Comm_rank(comm,rank,ierr)
+    if(ierr/=MPI_SUCCESS)then;info=42;return;endif
+    call cpu_time(stage_clock)
     do inner=1,160
       call trace_solve_window('initial_apply_begin',comm,stage_clock,inner,0,residual,orth)
       call apply_s(context,q(1:nw,:),q(nw+1:nw+np,:),sq(1:nw,:),sq(nw+1:nw+np,:),info);if(info/=0)return
       call apply_h(context,q(1:nw,:),q(nw+1:nw+np,:),hq(1:nw,:),hq(nw+1:nw+np,:),info);if(info/=0)return
       call trace_solve_window('initial_apply_end',comm,stage_clock,inner,0,residual,orth)
+      if(pending_ritz_comparison.and.ritz_consistency_comparison_iteration(inner))then
+        do i=1,nretain
+          direct_ritz_residual(:,i)=hq(:,i)-eval(i)*sq(:,i)
+        enddo
+        local_bad=merge(0,1,finite_complex(direct_ritz_residual).and.finite_complex(pending_ritz_residual).and.&
+          pending_inner+1==inner)
+        call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+        if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;pending_ritz_comparison=.false.;info=44;return;endif
+        ritz_residual_defect=direct_ritz_residual-pending_ritz_residual
+        call gram(direct_ritz_residual,direct_ritz_residual,nw+np,nretain,nretain,g,info);if(info/=0)return
+        direct_norm2=real([(g(i,i),i=1,nretain)],8)
+        call gram(ritz_residual_defect,ritz_residual_defect,nw+np,nretain,nretain,g,info);if(info/=0)return
+        defect_norm2=real([(g(i,i),i=1,nretain)],8)
+        local_bad=merge(0,1,all(ieee_is_finite(direct_norm2)).and.all(ieee_is_finite(defect_norm2)).and.&
+          minval(direct_norm2)>=-100d0*epsilon(1d0)*max(1d0,maxval(abs(direct_norm2))).and.&
+          minval(defect_norm2)>=-100d0*epsilon(1d0)*max(1d0,maxval(abs(defect_norm2))))
+        call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+        if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;pending_ritz_comparison=.false.;info=47;return;endif
+        direct_norm2=max(0d0,direct_norm2);defect_norm2=max(0d0,defect_norm2)
+        do i=1,nretain
+          direct_norm=sqrt(direct_norm2(i));post_norm=sqrt(pending_norm2(i))
+          relative_defect(i)=ritz_relative_defect(sqrt(defect_norm2(i)),direct_norm,post_norm)
+        enddo
+        call ritz_block_maxima(pending_norm2,nocc,post_occ,post_occ_worst,post_extra,post_extra_worst)
+        call ritz_block_maxima(direct_norm2,nocc,direct_occ,direct_occ_worst,direct_extra,direct_extra_worst)
+        call ritz_block_maxima(reduced_norm2,nocc,reduced_occ,reduced_occ_worst,reduced_extra,reduced_extra_worst)
+        call ritz_block_maxima(defect_norm2,nocc,defect_occ,defect_occ_worst,defect_extra,defect_extra_worst)
+        relative_occ=maxval(relative_defect(1:nocc));relative_occ_worst=maxloc(relative_defect(1:nocc),dim=1)
+        relative_extra=maxval(relative_defect(nocc+1:nretain))
+        relative_extra_worst=nocc+maxloc(relative_defect(nocc+1:nretain),dim=1)
+        if(.not.all(ieee_is_finite([post_occ,post_extra,direct_occ,direct_extra,reduced_occ,reduced_extra,&
+          defect_occ,defect_extra,relative_occ,relative_extra,post_ritz_orth])))then
+          pending_ritz_comparison=.false.;info=45;return
+        endif
+        if(rank==0)write(*,*)'[DG-WPW-RITZ-CONSISTENCY]',&
+          ' post_inner=',pending_inner,' direct_inner=',inner,&
+          ' reduced_occupied=',reduced_occ,' reduced_occupied_worst=',reduced_occ_worst,&
+          ' reduced_extra=',reduced_extra,' reduced_extra_worst=',reduced_extra_worst,&
+          ' post_occupied=',post_occ,' post_occupied_worst=',post_occ_worst,&
+          ' post_extra=',post_extra,' post_extra_worst=',post_extra_worst,&
+          ' direct_occupied=',direct_occ,' direct_occupied_worst=',direct_occ_worst,&
+          ' direct_extra=',direct_extra,' direct_extra_worst=',direct_extra_worst,&
+          ' defect_occupied=',defect_occ,' defect_occupied_worst=',defect_occ_worst,&
+          ' defect_extra=',defect_extra,' defect_extra_worst=',defect_extra_worst,&
+          ' relative_occupied=',relative_occ,' relative_occupied_worst=',relative_occ_worst,&
+          ' relative_extra=',relative_extra,' relative_extra_worst=',relative_extra_worst,&
+          ' post_metric_orth=',post_ritz_orth
+        pending_ritz_comparison=.false.
+      endif
       call gram(q,hq,nw+np,nretain,nretain,a,info);if(info/=0)return
       call gram(q,sq,nw+np,nretain,nretain,b,info);if(info/=0)return
       call dg_generalized_eigh(a,b,nretain,cutoff,eval,u,residual,orth,condition,discarded,info);if(info/=0)return
@@ -719,10 +781,60 @@ contains
         search=matmul(preconditioned,reduced_c(nretain+1:2*nretain,:))+&
           matmul(search,reduced_c(2*nretain+1:3*nretain,:))
       else;search=(0d0,0d0);endif
+      if(ritz_consistency_arm_iteration(inner))then
+        post_ritz_hq=matmul(hz,reduced_c);post_ritz_sq=matmul(sz,reduced_c)
+        do i=1,nretain
+          pending_ritz_residual(:,i)=post_ritz_hq(:,i)-reduced_eval(i)*post_ritz_sq(:,i)
+          reduced_ritz_residual(:,i)=matmul(reduced_h,reduced_c(:,i))-&
+            reduced_eval(i)*matmul(reduced_s,reduced_c(:,i))
+          reduced_norm2(i)=sum(abs(reduced_ritz_residual(:,i))**2)
+        enddo
+        local_bad=merge(0,1,finite_complex(pending_ritz_residual).and.finite_complex(post_ritz_sq).and.&
+          all(ieee_is_finite(reduced_norm2)))
+        call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+        if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;pending_ritz_comparison=.false.;info=46;return;endif
+        call gram(pending_ritz_residual,pending_ritz_residual,nw+np,nretain,nretain,g,info);if(info/=0)return
+        pending_norm2=real([(g(i,i),i=1,nretain)],8)
+        call gram(q,post_ritz_sq,nw+np,nretain,nretain,g,info);if(info/=0)return
+        do i=1,nretain;g(i,i)=g(i,i)-1d0;enddo
+        post_ritz_orth=maxval(abs(g))
+        local_bad=merge(0,1,all(ieee_is_finite(pending_norm2)).and.ieee_is_finite(post_ritz_orth).and.&
+          minval(pending_norm2)>=-100d0*epsilon(1d0)*max(1d0,maxval(abs(pending_norm2))))
+        call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+        if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;pending_ritz_comparison=.false.;info=48;return;endif
+        pending_norm2=max(0d0,pending_norm2);pending_inner=inner;pending_ritz_comparison=.true.
+      endif
       call trace_solve_window('inner_end',comm,stage_clock,inner,effective_rank,residual,orth)
     enddo
     info=40
   end subroutine
+
+  pure real(8) function ritz_relative_defect(defect_norm,direct_norm,post_norm)result(relative)
+    real(8),intent(in)::defect_norm,direct_norm,post_norm
+    if(direct_norm==0d0.and.post_norm==0d0)then
+      relative=0d0
+    else
+      relative=defect_norm/max(direct_norm,post_norm)
+    endif
+  end function ritz_relative_defect
+
+  pure subroutine ritz_block_maxima(norm2,nocc,occupied,occupied_worst,extra,extra_worst)
+    real(8),intent(in)::norm2(:);integer,intent(in)::nocc
+    real(8),intent(out)::occupied,extra;integer,intent(out)::occupied_worst,extra_worst
+    occupied_worst=maxloc(norm2(1:nocc),dim=1)
+    extra_worst=nocc+maxloc(norm2(nocc+1:),dim=1)
+    occupied=sqrt(norm2(occupied_worst));extra=sqrt(norm2(extra_worst))
+  end subroutine ritz_block_maxima
+
+  pure logical function ritz_consistency_arm_iteration(inner)result(selected)
+    integer,intent(in)::inner
+    selected=inner==31.or.inner==95.or.inner==159
+  end function ritz_consistency_arm_iteration
+
+  pure logical function ritz_consistency_comparison_iteration(inner)result(selected)
+    integer,intent(in)::inner
+    selected=inner==32.or.inner==96.or.inner==160
+  end function ritz_consistency_comparison_iteration
 
   pure logical function window_state_residual_iteration(inner)result(selected)
     integer,intent(in)::inner
