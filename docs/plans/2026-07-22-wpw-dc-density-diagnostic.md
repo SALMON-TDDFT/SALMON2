@@ -57,3 +57,15 @@
    fixed-H boundary.  Record fixed-H residuals, charge, density diagnostics,
    exact stopping point, and whether checkpoint/RT publication occurred.
 6. Update the session handoff with the fresh evidence and request code review.
+
+## Execution result
+
+Implemented in `6622842`; focused source-contract/MPI tests and the full MPI
+build pass, and the second review found no Critical or Important issues.  The
+fresh B=6 run `20260722_task13_dc_density_warning_b6` passed both warning-only
+diagnostics and all structural density-seed gates.  It reached fixed-H and
+then stopped the WPW route at algebra iteration 1 with `info=40`: after 160
+window iterations, the maximum retained-state generalized residual was
+`1.6650E-03` versus `1E-8`, while metric orthogonality was `1.3563E-14`.
+No WPW checkpoint, manifest, or RT state was published; the program safely
+fell back to full LCFO and exited normally.

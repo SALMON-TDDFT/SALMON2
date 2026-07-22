@@ -307,6 +307,35 @@ cutoffを緩めたり、反復数だけを増やして問題を隠さない。
 全physical gateが通った場合のみ、既存計画に従ってzero-interface fixed-H、interface continuation、
 field-off、20-step laser smokeの順で進む。Si64長時間productionやHHG解釈には進まない。
 
+## 2026-07-22 規格化後の非停止診断とfixed-H到達結果
+
+ユーザー方針に従い、規格化済みoccupied-Wの近似品質を実計算で評価するため、有限で
+構造的に妥当なouter-tail超過とsource-to-DC density差をwarningへ分離した。非有限値、
+非正norm、射影・規格化・電荷・rank不良は引き続きcollective fatalであり、fixed-H、
+frozen-state、checkpoint/RTの各gateは変更していない。実装は`06e0b0c`と`6622842`、
+設計・計画は`da152bc`と`1dae824`。二回目のコードレビューでCritical/Importantなし。
+
+fresh B=6 runは
+`stage2d_wpw_runs/20260722_task13_dc_density_warning_b6/run.log`。DC-SCFは87反復、
+`diff=9.8498E-10`、電子数256を維持した。128 Wのtail ratio `7.2686E-03`はwarningで
+通過した。続くdensity seedは`captured_norm=1`、projection residual
+`7.7960E-11`、normalization residual `1.3946E-15`、projected charge error
+`5.9380E-11`で構造gateを通過し、source-to-DC residual `6.0445E-02`をwarningとして
+初めてzero-interface fixed-H algebraへ到達した。
+
+fixed-Hの最初の`solve_window`は160 inner反復で`info=40`となった。これは反復上限で
+`residual < 1E-8`を満たさなかったことを表す。orthogonalityは約`1.36E-14`を維持したが、
+最大generalized residualは初回`3.3809E-01`から反復150で`1.8466E-03`、反復160で
+`1.6650E-03`までしか低下せず停滞した。したがって現在の次の境界はWannier tailや
+source-density gateではなく、fixed-H window eigensolverの全160 retained stateに対する
+最大残差である。runはWPW checkpoint/manifest/RTをpublishせず、full LCFOへ安全に
+fallbackしてSALMON自体はexit 0で終了した。
+
+次は許容値や反復上限を直ちに変更せず、occupied 128 stateとextra 32 stateの残差を分離し、
+最大残差がoccupied側かextra側か、またpreconditioner後にどのstateが停滞しているかを
+診断する。その結果により、occupied-projector収束を判定対象とするか、extra-state seed/
+preconditionerを改善するかを選ぶ。
+
 ## 新セッション開始文（コピー用）
 
 ```text
