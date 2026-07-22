@@ -5,10 +5,12 @@ program test_dg_wpw_core_wannier_seed_mpi
     transform_sawf_wannier_occupation,build_sawf_projected_wannier,&
     build_sawf_projected_wannier_from_overlap,&
     apply_sawf_projected_wannier_transform,&
+    apply_sawf_projected_wannier_gradient_transform,&
     canonicalize_sawf_bond_identity,build_sawf_wannier_density,&
-    qualify_sawf_wannier_density_projection
+    qualify_sawf_wannier_density_projection,diagnose_sawf_discrete_wannier_spread
   use dg_wpw_wannier_tail_halo,only:validate_sawf_wannier_tail_schedule,&
     exchange_sawf_wannier_tail_values,exchange_sawf_discovered_wannier_tails
+  use dg_wpw_wannier_tail_halo,only:sawf_tail_records_unique
   use dg_wpw_wannier_tail_halo,only:locate_sawf_wannier_tail_core
   use dg_wpw_wannier_tail_halo,only:locate_sawf_wannier_tail_rank
   use dg_wpw_wannier_tail_halo,only:qualify_sawf_wannier_buffer_tail
@@ -19,12 +21,17 @@ program test_dg_wpw_core_wannier_seed_mpi
   integer::rank_fragment(2),rank_orbital_lane(2),rank_grid_lo(3,2),rank_grid_hi(3,2)
   integer::bond_atoms(2),bond_image(3)
   integer,allocatable::send_source(:,:),send_destination(:),send_point(:),recv_source(:,:),recv_point(:)
+  integer,allocatable::send_image(:,:),discovered_image(:,:)
+  integer,allocatable::many_source(:,:),many_destination(:),many_point(:),many_image(:,:)
   real(8),parameter::tol=1d-10
   real(8)::lower(3),upper(3),wrapped(3)
   complex(8)::c(2,2),t(2,2),f_source(2,2),f_q(2,2),q(2,2),rho_source(2,2),rho_q(2,2)
   complex(8)::occupied(4,3),occupied_rotated(4,3),trial(4,2),wannier(4,2),wannier_rotated(4,2)
   complex(8)::projection_overlap(3,2),wannier_from_overlap(4,2),polar_transform(2,2)
   complex(8)::sample_values(2,3),transformed_samples(2,2)
+  complex(8)::occupied_gradients(3,3,3),gradient_partial(3,3,2),gradient_total(3,3,2)
+  complex(8)::expected_gradient(3,2),derivative(3,3)
+  integer::ix
   complex(8)::rotation(3,3),rank_bad_trial(4,2),rank_bad_wannier(4,2)
   complex(8),allocatable::send_value(:),recv_value(:)
   integer,allocatable::discovered_source(:,:),discovered_point(:)
@@ -36,12 +43,86 @@ program test_dg_wpw_core_wannier_seed_mpi
   real(8)::projection_residual,normalization_residual,projection_charge_error
   real(8)::outer_shell_ratio,omitted_tail_ratio
   real(8)::condition,condition_rotated,condition_bad,theta
+  complex(8)::spread_link(2,6)
+  real(8)::spread_norm(2),spread_bvec(3,6),spread_weight(6),spread_center(3,2),spread_omega(2)
+  real(8)::spread_center_expected(3),spread_sigma,spread_expected
+  logical::spread_center_valid(2)
   logical::owned
 
   call MPI_Init(ierr)
   call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr)
   if(ierr/=MPI_SUCCESS)error stop 10
   if(rank>1)error stop 11
+  spread_bvec=0d0
+  spread_bvec(1,1:2)=[1d0,-1d0]
+  spread_bvec(2,3:4)=[1d0,-1d0]
+  spread_bvec(3,5:6)=[1d0,-1d0]
+  spread_weight=0.5d0
+  spread_center_expected=[0.2d0,-0.15d0,0.1d0]
+  spread_sigma=0.3d0
+  do ix=1,6
+    spread_link(1,ix)=exp(cmplx(-0.5d0*spread_sigma**2*sum(spread_bvec(:,ix)**2),&
+      -dot_product(spread_bvec(:,ix),spread_center_expected),8))
+  enddo
+  spread_norm=[1d0,4d0]
+  spread_link(2,:)=4d0*spread_link(1,:)
+  call diagnose_sawf_discrete_wannier_spread(spread_link,spread_norm,spread_bvec,spread_weight,&
+    spread_center,spread_omega,spread_center_valid,info)
+  spread_expected=3d0*(1d0-exp(-spread_sigma**2))
+  if(info/=0.or..not.all(spread_center_valid).or.&
+    maxval(abs(spread_center-spread(spread_center_expected,2,2)))>1d-12.or.&
+    maxval(abs(spread_omega-spread_expected))>1d-12)error stop 110
+  call diagnose_sawf_discrete_wannier_spread(spread_link,spread_norm,spread_bvec,spread_weight,&
+    spread_center,spread_omega,spread_center_valid,info,require_unit_norm=.true.)
+  if(info==0)error stop 114
+  spread_norm=1d0;spread_link(2,:)=spread_link(1,:)
+  spread_center_expected=[acos(-1d0)-0.1d0,0d0,0d0]
+  do ix=1,6
+    spread_link(:,ix)=exp(cmplx(0d0,-dot_product(spread_bvec(:,ix),spread_center_expected),8))
+  enddo
+  call diagnose_sawf_discrete_wannier_spread(spread_link,spread_norm,spread_bvec,spread_weight,&
+    spread_center,spread_omega,spread_center_valid,info,require_unit_norm=.true.)
+  if(info/=0.or..not.all(spread_center_valid).or.&
+    maxval(abs(spread_center-spread(spread_center_expected,2,2)))>1d-12.or.&
+    maxval(abs(spread_omega))>1d-12)error stop 115
+  spread_link=cmplx(0d0,0d0,8)
+  call diagnose_sawf_discrete_wannier_spread(spread_link,spread_norm,spread_bvec,spread_weight,&
+    spread_center,spread_omega,spread_center_valid,info)
+  if(info/=0.or.any(spread_center_valid).or.any(spread_omega<huge(1d0)))error stop 116
+  spread_link=cmplx(1d0,0d0,8)
+  spread_link(1,1)=cmplx(ieee_value(0d0,ieee_positive_inf),0d0,8)
+  call diagnose_sawf_discrete_wannier_spread(spread_link,spread_norm,spread_bvec,spread_weight,&
+    spread_center,spread_omega,spread_center_valid,info)
+  if(info==0)error stop 117
+  spread_link=cmplx(1d0,0d0,8);spread_weight(1)=0.4d0
+  call diagnose_sawf_discrete_wannier_spread(spread_link,spread_norm,spread_bvec,spread_weight,&
+    spread_center,spread_omega,spread_center_valid,info)
+  if(info==0)error stop 118
+  spread_weight=0.5d0
+  call diagnose_sawf_discrete_wannier_spread(spread_link,spread_norm,spread_bvec(:,1:5),spread_weight,&
+    spread_center,spread_omega,spread_center_valid,info)
+  if(info==0)error stop 119
+  spread_link(1,:)=2d0;spread_link(2,:)=2d0
+  call diagnose_sawf_discrete_wannier_spread(spread_link,spread_norm,spread_bvec,spread_weight,&
+    spread_center,spread_omega,spread_center_valid,info)
+  if(info==0)error stop 120
+  spread_center_expected=[0.2d0,-0.15d0,0.1d0]
+  do ix=1,6
+    spread_link(:,ix)=exp(cmplx(-0.5d0*spread_sigma**2*sum(spread_bvec(:,ix)**2),&
+      -dot_product(spread_bvec(:,ix),spread_center_expected),8))
+  enddo
+  spread_link(1,2)=spread_link(1,1)
+  call diagnose_sawf_discrete_wannier_spread(spread_link,spread_norm,spread_bvec,spread_weight,&
+    spread_center,spread_omega,spread_center_valid,info)
+  if(info==0)error stop 113
+  allocate(many_source(5,100000),many_destination(100000),many_point(100000),many_image(3,100000))
+  many_source=0;many_source(1,:)=[(info,info=1,100000)]
+  many_destination=1-rank;many_point=[(info,info=1,100000)];many_image=0
+  if(.not.sawf_tail_records_unique(many_source,many_destination,many_point,many_image))error stop 111
+  many_image(:,100000)=many_image(:,99999);many_source(:,100000)=many_source(:,99999)
+  many_point(100000)=many_point(99999)
+  if(sawf_tail_records_unique(many_source,many_destination,many_point,many_image))error stop 112
+  deallocate(many_source,many_destination,many_point,many_image)
   lower=[0.5d0*dble(rank),0d0,0d0]
   upper=[0.5d0*dble(rank+1),1d0,1d0]
   fragment_start=reshape([1,1,1,5,1,1],[3,2]);fragment_shape=4
@@ -62,8 +143,9 @@ program test_dg_wpw_core_wannier_seed_mpi
   call qualify_sawf_wannier_buffer_tail(2d0,0d0,4d-8,0d0,1d-10,&
     outer_shell_ratio,omitted_tail_ratio,info)
   if(info==0.or.outer_shell_ratio<=1d-10)error stop 16
-  if(is_sawf_outer_buffer_shell([1,12,24],[24,24,24],[24,24,24]))error stop 17
+  if(.not.is_sawf_outer_buffer_shell([1,12,24],[24,24,24],[24,24,24]))error stop 17
   if(.not.is_sawf_outer_buffer_shell([1,12,18],[18,18,18],[24,24,24]))error stop 18
+  if(.not.is_sawf_outer_buffer_shell([32,12,12],[32,32,32],[24,24,24]))error stop 181
 
   call canonicalize_sawf_wannier_center([0.5d0,0.25d0,0.75d0],[1d0,1d0,1d0],&
     lower,upper,tol,wrapped,image,owned,info)
@@ -123,6 +205,21 @@ program test_dg_wpw_core_wannier_seed_mpi
   call apply_sawf_projected_wannier_transform(sample_values(:,1:2),projection_overlap,&
     polar_transform,transformed_samples,info)
   if(info==0.or.maxval(abs(transformed_samples))>0d0)error stop 403
+  occupied_gradients=0
+  derivative=0;derivative(:,1)=[cmplx(1d0,0d0,8),cmplx(2d0,0d0,8),cmplx(3d0,0d0,8)]
+  derivative(:,2)=[cmplx(-2d0,0d0,8),cmplx(0.5d0,0d0,8),cmplx(1d0,0d0,8)]
+  do ix=1,3
+    occupied_gradients(ix,:,rank+1)=spread(derivative(ix,rank+1),1,3)
+  enddo
+  call apply_sawf_projected_wannier_gradient_transform(occupied_gradients,projection_overlap,&
+    polar_transform,gradient_partial,info)
+  if(info/=0)error stop 404
+  call MPI_Allreduce(gradient_partial,gradient_total,size(gradient_total),MPI_DOUBLE_COMPLEX,&
+    MPI_SUM,MPI_COMM_WORLD,ierr)
+  do ix=1,3
+    expected_gradient(ix,:)=matmul(derivative(ix,:),matmul(projection_overlap,polar_transform))
+    if(maxval(abs(gradient_total(ix,:,:)-spread(expected_gradient(ix,:),1,3)))>1d-12)error stop 405
+  enddo
   theta=0.37d0;rotation=0;rotation(1,1)=cos(theta);rotation(2,1)=sin(theta)
   rotation(1,2)=-sin(theta);rotation(2,2)=cos(theta);rotation(3,3)=1
   occupied_rotated=matmul(occupied,rotation)
@@ -181,11 +278,13 @@ program test_dg_wpw_core_wannier_seed_mpi
   if(info==0)error stop 603
   send_value(1)=merge(cmplx(2d0,3d0,8),cmplx(-1d0,0.5d0,8),rank==0)
   call exchange_sawf_discovered_wannier_tails(MPI_COMM_WORLD,send_source,send_destination,&
-    send_point,send_value,discovered_source,discovered_point,discovered_value,info)
+    send_point,reshape([0,0,0],[3,1]),send_value,discovered_source,discovered_point,&
+    discovered_image,discovered_value,info)
   if(info/=0.or.size(discovered_point)/=1.or.discovered_point(1)/=recv_point(1).or.&
     any(discovered_source(:,1)/=recv_source(:,1)).or.abs(discovered_value(1)-&
       merge(cmplx(-1d0,0.5d0,8),cmplx(2d0,3d0,8),rank==0))>1d-14)&
     error stop 604
+  if(any(discovered_image(:,1)/=0))error stop 605
 
   if(rank==1)recv_source(3,1)=2
   call validate_sawf_wannier_tail_schedule(MPI_COMM_WORLD,send_source,send_destination,send_point,&
@@ -205,6 +304,32 @@ program test_dg_wpw_core_wannier_seed_mpi
   call validate_sawf_wannier_tail_schedule(MPI_COMM_WORLD,send_source,send_destination,send_point,&
     recv_source,recv_point,info)
   if(info==0)error stop 62
+
+  deallocate(send_source,send_destination,send_point,send_value)
+  if(rank==0)then
+    allocate(send_source(5,2),send_destination(2),send_point(2),send_image(3,2),send_value(2))
+    send_source(:,1)=[1,2,1,0,0];send_source(:,2)=send_source(:,1)
+    send_destination=1;send_point=7
+    send_image(:,1)=[0,0,0];send_image(:,2)=[1,0,0]
+    send_value=[cmplx(2d0,0d0,8),cmplx(3d0,0d0,8)]
+  else
+    allocate(send_source(5,0),send_destination(0),send_point(0),send_image(3,0),send_value(0))
+  endif
+  call exchange_sawf_discovered_wannier_tails(MPI_COMM_WORLD,send_source,send_destination,&
+    send_point,send_image,send_value,discovered_source,discovered_point,discovered_image,&
+    discovered_value,info)
+  if(info/=0)error stop 63
+  if(rank==1)then
+    if(size(discovered_point)/=2.or.any(discovered_point/=7).or.&
+      abs(sum(discovered_value)-cmplx(5d0,0d0,8))>1d-14)error stop 64
+  else if(size(discovered_point)/=0)then
+    error stop 65
+  endif
+  if(rank==0)send_image(:,2)=send_image(:,1)
+  call exchange_sawf_discovered_wannier_tails(MPI_COMM_WORLD,send_source,send_destination,&
+    send_point,send_image,send_value,discovered_source,discovered_point,discovered_image,&
+    discovered_value,info)
+  if(info==0)error stop 66
 
   point_values=reshape([cmplx(1d0,0d0,8),cmplx(0d0,0d0,8),&
     cmplx(0.5d0,0d0,8),cmplx(0d0,1d0,8)],[2,2])

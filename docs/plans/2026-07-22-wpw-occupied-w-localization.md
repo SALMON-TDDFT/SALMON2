@@ -14,8 +14,8 @@
 
 **Files:**
 - Modify: `src/gs/dc/lcfo_wannier_sawf_seed.f90`
-- Modify: `tests/dg/test_lcfo_wannier_sawf_seed.f90`
-- Modify: `tests/dg/run_lcfo_wannier_sawf_seed.py`
+- Modify: `tests/dg/test_dg_wpw_core_wannier_seed_mpi.f90`
+- Modify: `tests/dg/run_dg_wpw_core_wannier_seed_mpi.py`
 
 **Step 1: Write failing tests**
 
@@ -32,7 +32,7 @@ to be Hermitian.
 
 **Step 2: Verify RED**
 
-Run: `python3 tests/dg/run_lcfo_wannier_sawf_seed.py`
+Run: `python3 tests/dg/run_dg_wpw_core_wannier_seed_mpi.py`
 
 Expected: compile failure because the spread API is absent.
 
@@ -48,13 +48,13 @@ mask. Do not implement an incomplete 16-W `Omega_I/Omega_OD` decomposition.
 
 **Step 4: Verify GREEN**
 
-Run the focused seed driver. Expected: PASS with analytic values and rejection
+Run the focused core-W seed driver. Expected: PASS with analytic values and rejection
 cases.
 
 **Step 5: Commit**
 
 ```bash
-git add src/gs/dc/lcfo_wannier_sawf_seed.f90 tests/dg/test_lcfo_wannier_sawf_seed.f90 tests/dg/run_lcfo_wannier_sawf_seed.py
+git add src/gs/dc/lcfo_wannier_sawf_seed.f90 tests/dg/test_dg_wpw_core_wannier_seed_mpi.f90 tests/dg/run_dg_wpw_core_wannier_seed_mpi.py
 git commit -m "feat: compute discrete occupied Wannier spreads"
 ```
 

@@ -15,11 +15,82 @@ module lcfo_wannier_sawf_seed
   public :: build_sawf_projected_wannier
   public :: build_sawf_projected_wannier_from_overlap
   public :: apply_sawf_projected_wannier_transform
+  public :: apply_sawf_projected_wannier_gradient_transform
+  public :: build_sawf_projected_buffer_gradients
   public :: canonicalize_sawf_bond_identity
   public :: build_sawf_wannier_density
   public :: qualify_sawf_wannier_density_projection
+  public :: diagnose_sawf_discrete_wannier_spread
 
 contains
+
+  subroutine diagnose_sawf_discrete_wannier_spread(diagonal_link,norm,bvec,weight,&
+      center,omega,center_valid,info,require_unit_norm)
+    complex(8),intent(in)::diagonal_link(:,:)
+    real(8),intent(in)::norm(:),bvec(:,:),weight(:)
+    real(8),intent(out)::center(:,:),omega(:)
+    logical,intent(out)::center_valid(:)
+    integer,intent(out)::info
+    logical,intent(in),optional::require_unit_norm
+    real(8)::metric(3,3),identity(3,3),phase(size(weight)),scale,pair_tolerance
+    complex(8)::link(size(weight))
+    integer::iw,ib,jb,axis,pair_count
+
+    info=1;center=0d0;omega=huge(1d0);center_valid=.false.
+    if(size(diagonal_link,1)<=0.or.size(diagonal_link,2)<=0.or.&
+        size(norm)/=size(diagonal_link,1).or.size(bvec,1)/=3.or.&
+        size(bvec,2)/=size(diagonal_link,2).or.size(weight)/=size(diagonal_link,2).or.&
+        any(shape(center)/=[3,size(diagonal_link,1)]).or.&
+        size(omega)/=size(diagonal_link,1).or.size(center_valid)/=size(diagonal_link,1).or.&
+        any(norm<=0d0).or.any(weight<=0d0).or.&
+        .not.all(ieee_is_finite(real(diagonal_link))).or.&
+        .not.all(ieee_is_finite(aimag(diagonal_link))).or.&
+        .not.all(ieee_is_finite(norm)).or..not.all(ieee_is_finite(bvec)).or.&
+        .not.all(ieee_is_finite(weight)))return
+    if(present(require_unit_norm))then
+      if(require_unit_norm.and.any(abs(norm-1d0)>1d-8))return
+    endif
+    metric=0d0
+    do ib=1,size(weight)
+      do axis=1,3
+        metric(axis,:)=metric(axis,:)+weight(ib)*bvec(axis,ib)*bvec(:,ib)
+      enddo
+    enddo
+    identity=0d0
+    do axis=1,3;identity(axis,axis)=1d0;enddo
+    if(maxval(abs(metric-identity))>1000d0*epsilon(1d0))return
+    do iw=1,size(diagonal_link,1)
+      link=diagonal_link(iw,:)/norm(iw)
+      scale=max(1d0,maxval(abs(link)))
+      pair_tolerance=1000d0*epsilon(1d0)*scale
+      do ib=1,size(weight)
+        pair_count=0
+        do jb=1,size(weight)
+          if(maxval(abs(bvec(:,jb)+bvec(:,ib)))<=1000d0*epsilon(1d0)*&
+              max(1d0,maxval(abs(bvec))))then
+            pair_count=pair_count+1
+            if(abs(weight(jb)-weight(ib))>1000d0*epsilon(1d0)*max(1d0,weight(ib)).or.&
+                abs(link(jb)-conjg(link(ib)))>pair_tolerance)return
+          endif
+        enddo
+        if(pair_count/=1)return
+      enddo
+      if(any(abs(link)<=sqrt(epsilon(1d0))))cycle
+      phase=atan2(aimag(link),real(link,8))
+      center(:,iw)=0d0
+      do ib=1,size(weight)
+        center(:,iw)=center(:,iw)-weight(ib)*bvec(:,ib)*phase(ib)
+      enddo
+      omega(iw)=0d0
+      do ib=1,size(weight)
+        omega(iw)=omega(iw)+weight(ib)*(1d0-abs(link(ib))**2+&
+          (phase(ib)+dot_product(bvec(:,ib),center(:,iw)))**2)
+      enddo
+      if(omega(iw)<-1000d0*epsilon(1d0)*max(1d0,maxval(weight)))return
+      omega(iw)=max(0d0,omega(iw));center_valid(iw)=.true.
+    enddo
+    info=0
+  end subroutine diagnose_sawf_discrete_wannier_spread
 
   subroutine canonicalize_sawf_wannier_center(center,cell_length,core_lower,core_upper,tolerance,&
       wrapped,image,owned,info)
@@ -257,6 +328,79 @@ contains
     endif
     info=0
   end subroutine apply_sawf_projected_wannier_transform
+
+  subroutine apply_sawf_projected_wannier_gradient_transform(occupied_gradients,&
+      projection_overlap,polar_transform,wannier_gradients,info)
+    complex(8),intent(in)::occupied_gradients(:,:,:),projection_overlap(:,:),polar_transform(:,:)
+    complex(8),intent(out)::wannier_gradients(:,:,:)
+    integer,intent(out)::info
+    integer::axis,local_info,npoint,noccupied,ntrial
+
+    info=1;wannier_gradients=(0d0,0d0)
+    npoint=size(occupied_gradients,2);noccupied=size(occupied_gradients,3)
+    ntrial=size(projection_overlap,2)
+    if(size(occupied_gradients,1)/=3.or.npoint<=0.or.noccupied<=0.or.ntrial<=0.or.&
+        size(projection_overlap,1)/=noccupied.or.any(shape(polar_transform)/=[ntrial,ntrial]).or.&
+        any(shape(wannier_gradients)/=[3,npoint,ntrial]).or.&
+        .not.all(ieee_is_finite(real(occupied_gradients))).or.&
+        .not.all(ieee_is_finite(aimag(occupied_gradients))))return
+    do axis=1,3
+      call apply_sawf_projected_wannier_transform(occupied_gradients(axis,:,:),projection_overlap,&
+        polar_transform,wannier_gradients(axis,:,:),local_info)
+      if(local_info/=0)then
+        wannier_gradients=(0d0,0d0);return
+      endif
+    enddo
+    info=0
+  end subroutine apply_sawf_projected_wannier_gradient_transform
+
+  subroutine build_sawf_projected_buffer_gradients(occupied_stencil,gradient_coefficients,&
+      projection_overlap,polar_transform,wannier_gradients,info)
+    complex(8),intent(in)::occupied_stencil(:,:,:,:),projection_overlap(:,:),polar_transform(:,:)
+    real(8),intent(in)::gradient_coefficients(:,:)
+    complex(8),intent(out)::wannier_gradients(:,:,:)
+    integer,intent(out)::info
+    complex(8),allocatable::occupied_gradient(:,:)
+    integer::radius,extent(3),noccupied,ntrial,ix,iy,iz,point,axis,dist,local_info
+
+    info=1;wannier_gradients=(0d0,0d0);radius=size(gradient_coefficients,1)
+    extent=[size(occupied_stencil,1),size(occupied_stencil,2),size(occupied_stencil,3)]-2*radius
+    noccupied=size(occupied_stencil,4);ntrial=size(projection_overlap,2)
+    if(radius<=0.or.size(gradient_coefficients,2)/=3.or.any(extent<=0).or.noccupied<=0.or.&
+        ntrial<=0.or.size(projection_overlap,1)/=noccupied.or.&
+        any(shape(polar_transform)/=[ntrial,ntrial]).or.&
+        any(shape(wannier_gradients)/=[3,product(extent),ntrial]).or.&
+        .not.all(ieee_is_finite(gradient_coefficients)).or.&
+        .not.all(ieee_is_finite(real(occupied_stencil))).or.&
+        .not.all(ieee_is_finite(aimag(occupied_stencil))))return
+    allocate(occupied_gradient(product(extent),noccupied))
+    do axis=1,3
+      occupied_gradient=(0d0,0d0);point=0
+      do iz=1,extent(3);do iy=1,extent(2);do ix=1,extent(1)
+        point=point+1
+        do dist=1,radius
+          select case(axis)
+          case(1)
+            occupied_gradient(point,:)=occupied_gradient(point,:)+gradient_coefficients(dist,axis)*&
+              (occupied_stencil(ix+radius+dist,iy+radius,iz+radius,:)-&
+               occupied_stencil(ix+radius-dist,iy+radius,iz+radius,:))
+          case(2)
+            occupied_gradient(point,:)=occupied_gradient(point,:)+gradient_coefficients(dist,axis)*&
+              (occupied_stencil(ix+radius,iy+radius+dist,iz+radius,:)-&
+               occupied_stencil(ix+radius,iy+radius-dist,iz+radius,:))
+          case(3)
+            occupied_gradient(point,:)=occupied_gradient(point,:)+gradient_coefficients(dist,axis)*&
+              (occupied_stencil(ix+radius,iy+radius,iz+radius+dist,:)-&
+               occupied_stencil(ix+radius,iy+radius,iz+radius-dist,:))
+          end select
+        enddo
+      enddo;enddo;enddo
+      call apply_sawf_projected_wannier_transform(occupied_gradient,projection_overlap,&
+        polar_transform,wannier_gradients(axis,:,:),local_info)
+      if(local_info/=0)return
+    enddo
+    info=0
+  end subroutine build_sawf_projected_buffer_gradients
 
   subroutine build_sawf_local_band_representation(states,point_map,weight,tolerance,representation,ok,message)
     complex(8),intent(in)::states(:,:)
