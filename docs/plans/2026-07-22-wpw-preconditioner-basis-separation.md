@@ -51,3 +51,20 @@
 4. Run matched fresh B=6 cases with the switch `'y'` and `'n'`.
 5. Compare occupied/extra histories, exact stopping boundary, denominator
    statistics, and publication status; record the conclusion in the handoff.
+
+## Task 1 comparison result
+
+The default-on comparison control was implemented in `a59c5f9`, passed the
+focused MPI test and full build, and was reviewed without a blocker.  Fresh
+unpreconditioned B=6 run `20260722_task15_no_precondition_b6` used the same
+normalized seed and reached the same 160-iteration `info=40` boundary.
+
+Removing the diagonal preconditioner materially improves convergence.  At
+iteration 96, occupied/extra maxima are `3.6079E-04`/`1.1093E-03`, versus
+`1.0673E-03`/`3.4053E-03` with preconditioning.  At iteration 160 they are
+`2.5607E-04`/`2.0289E-04`, versus `4.8659E-04`/`1.6650E-03`.  Thus the current
+diagonal preconditioner is harmful, especially for extra states.  However,
+the unpreconditioned residuals remain about four orders above `1E-8` and are
+nonmonotone after iteration 112, so removing it does not establish that the
+W/P basis is well-conditioned or that the LOBPCG search update is adequate.
+No WPW checkpoint, manifest, or RT state was published.

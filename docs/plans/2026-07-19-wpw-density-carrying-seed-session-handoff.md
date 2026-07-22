@@ -356,6 +356,21 @@ raw-worst stateで、現diagonal preconditionerはoccupied残差normを`2.2726E-
 Wannier tailではなく`H_ii-epsilon S_ii` diagonal preconditionerの小分母・符号・scaleである。
 checkpoint/manifest/RTはpublishされていない。
 
+### 2026-07-22 無preconditioner比較
+
+`a59c5f9`でdefault=`y`の明示比較controlを追加し、`n`のときだけfixed-H/continuationの
+optional preconditioner callbackを省略する。fresh B=6
+`stage2d_wpw_runs/20260722_task15_no_precondition_b6/run.log`は同じnormalized seedを
+使い、反復160の`info=40`まで実行した。
+
+無preconditionerではinner 96のoccupied/extra残差が`3.6079E-04`/`1.1093E-03`
+（有りでは`1.0673E-03`/`3.4053E-03`）、inner 160が
+`2.5607E-04`/`2.0289E-04`（有りでは`4.8659E-04`/`1.6650E-03`）となった。
+従って現diagonal preconditionerは明確な悪化要因であり、特にextra statesをinner 160で
+約8.2倍悪化させる。しかし無しでも`1E-8`より約4桁大きく、inner 112以降は非単調なので、
+原因をpreconditionerだけに限定できない。残る候補はW/P metricの悪条件性とLOBPCG
+search-space更新である。checkpoint/manifest/RTはpublishされていない。
+
 ## 新セッション開始文（コピー用）
 
 ```text
