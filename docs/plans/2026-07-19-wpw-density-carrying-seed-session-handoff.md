@@ -492,6 +492,33 @@ span-preservingな座標変換だけでは不十分である。normal SCF/checkp
 次はstate-partitioned/regularized correctionまたは`H-epsilon S`型の
 metric-consistent correctionを設計する。
 
+### 2026-07-23 H-epsilon-S correction比較
+
+Task 16 restartを`/tmp/20260723_task3_h_epsilon_s_b6`へcloneし、親作業ツリーの
+未コミット前提実装と今回branchのTask 1/2を重ねた一時overlay buildを使って8 rank実行した。
+親の不足実装はbranchへ取り込んでいない。Task 16のbasis、seed、cutoff、tolerance、
+continuation、history、publication設定を維持し、diagonal/metric/S-orthogonal=`n`、
+H-epsilon-S=`y`とした。DC-SCFは同じ87反復だった。
+
+factorはdimension `138`、S condition `4.5069E+05`、generalized spectrum
+`[-1.4491E-01,1.5978E+01]`、relative floor `1.0E-10`だった。inner 32/96/160の
+occupied/extra residualは`2.2451E-03/1.7313E-02`、
+`2.2449E-03/1.7318E-02`、`2.2445E-03/1.7322E-02`で、Task 16比では
+occupiedが`1.142/6.222/8.765`倍、extraが`4.282/15.612/85.376`倍悪化した。
+effective rankは`205/205/206`で、Task 16の`437/292/213`より大きく低下した。
+
+correction/residual比はoccupied約`176`、extra約`370`、maximum inverseは
+`1.14E+05`以上だった。denominator floorは発火せず、floored weightも0で、global
+S projectionは約21.8%を除去した。inner 160のdiscarded residual fractionはoccupied
+`0.643`、extra `0.297`まで増えた。Ritz post/direct defectは最大`2.21E-12`で更新整合性は
+保たれたが、fixed-Hは`info=40`、publicationなしだった。
+
+従って今回のfragment-local `H-epsilon S` dense spectral approximationはrejectする。
+問題はfloor発火ではなく、局所固有mode inverseによる両state群の過増幅とsearch-space
+collapseである。default-off比較routeは維持するがnormal SCF/checkpoint/RTへ昇格しない。
+次はglobal iterative correction solve、またはoccupied/extraを明示分割してextra側の
+amplificationを制限するstate-partitioned correctionを設計候補とする。
+
 ## 新セッション開始文（コピー用）
 
 ```text

@@ -140,6 +140,50 @@
 12. Commit only the two result documents:
     `git commit -m "docs(dg-wpw): record H-epsilon-S B=6 gate"`.
 
+#### 2026-07-23 B=6 physical gate result
+
+Task 16 restartを読み取り専用の比較元として
+`/tmp/20260723_task3_h_epsilon_s_b6`へcloneし、Task 2検証で作成した一時overlay
+source/buildの`salmon`を使って8 MPI rankで実行した。このbinaryは親作業ツリーの
+未コミット前提実装に依存するが、その前提実装はこのbranchへ取り込んでいない。
+Task 16から変更した入力はdiagonal=`n`、metric-block=`n`、
+S-orthogonal complement=`n`、H-epsilon-S=`y`、history=`y`の明示だけであり、
+basis、seed、cutoff、tolerance、continuation、publication設定は維持した。
+DC-SCFは同じ87反復でfixed-H境界へ到達した。
+
+rank 0 fragment-local factor recordはdimension `138`、S spectrum
+`[4.1210E-06,1.8573E+00]`、condition `4.5069E+05`、generalized
+`H-epsilon S` spectrum `[-1.4491E-01,1.5978E+01]`、relative floor
+`1.0000E-10`、epoch `1`、fingerprint `-6581501611198156709`だった。
+selected iterationの証拠は次の通り。
+
+| inner | occupied raw | extra raw | occupied correction norm/ratio | extra correction norm/ratio | denominator min occupied/extra | floored modes/weight | projected fraction | effective rank |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 32 | `2.2451E-03` | `1.7313E-02` | `3.9594E-01` / `1.7635E+02` | `6.4026E+00` / `3.6981E+02` | `1.3677E-05` / `8.4375E-06` | `0/0`, weight `0/0` | `2.1826E-01` | 205 |
+| 96 | `2.2449E-03` | `1.7318E-02` | `3.9541E-01` / `1.7614E+02` | `6.4071E+00` / `3.6996E+02` | `1.3675E-05` / `8.5677E-06` | `0/0`, weight `0/0` | `2.1824E-01` | 205 |
+| 160 | `2.2445E-03` | `1.7322E-02` | `3.9544E-01` / `1.7618E+02` | `6.4088E+00` / `3.6997E+02` | `1.3672E-05` / `8.7591E-06` | `0/0`, weight `0/0` | `2.1821E-01` | 206 |
+
+最大inverse magnitudeはinner 32/96/160で`1.1852E+05`/
+`1.1672E+05`/`1.1417E+05`だった。floorは一度も発火せず、約21.8%を
+global S projectionが除去してもcorrectionはoccupiedを約176倍、extraを約370倍へ
+増幅した。search metricのdiscarded residual fractionはinner 160でoccupied
+`6.4268E-01`、extra `2.9668E-01`まで増えた。
+
+Task 16比の残差比（H-epsilon-S / Task 16）はinner 32/96/160でoccupied
+`1.142/6.222/8.765`、extra `4.282/15.612/85.376`であり、両state群が悪化した。
+Task 19比ではinner 160がoccupied約`1.13E+03`倍、extra約`18.1`倍悪く、
+S-orthogonal gate比でもoccupied約`10.9`倍、extra約`109`倍悪い。
+Ritz post/direct relative defectの最大は`2.21E-12`、post metric orthogonalityの
+最大は`1.85E-14`で、stale imageやRitz更新不整合は見られない。一方effective rankは
+Task 16の`437/292/213`に対し`205/205/206`となり、重いrank lossが生じた。
+
+fixed-Hは`info=40`で終了し、checkpoint/manifest/RT publicationは行われなかった。
+従ってこのfragment-local dense spectral approximationはrejectする。floor未発火にも
+かかわらず強い過増幅とsearch-space collapseが起きたため、次の仮説は単なるfloor調整では
+なく、global iterative correction solve、またはoccupied/extraを明示分割してextra側の
+inverse amplificationを制限するstate-partitioned correctionである。default-off routeは
+比較用に維持し、normal SCF/checkpoint/RTへは昇格させない。
+
 ### Task 4: Decision checkpoint
 
 Do not promote this correction into normal outer SCF, checkpoint schema,
