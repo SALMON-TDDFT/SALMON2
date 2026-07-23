@@ -58,6 +58,58 @@ assert "ieee_is_finite(eigenvalues)" in adapter_body and "size(eigenvalues)/=siz
 assert "op%w_schedule%comm" in adapter_body
 
 for token in (
+    "type,public::s_dg_wpw_h_epsilon_s_factor",
+    "type,public::s_dg_wpw_h_epsilon_s_diagnostics",
+    "initialize_dg_wpw_h_epsilon_s_factor",
+    "apply_dg_wpw_h_epsilon_s_correction",
+    "release_dg_wpw_h_epsilon_s_factor",
+):
+    assert token in bounded, f"missing H-epsilon-S correction API: {token}"
+for forbidden in ("global_h", "global_s", "root_h", "root_s"):
+    assert forbidden not in bounded, \
+        f"single-rank global H-epsilon-S allocation: {forbidden}"
+hese_init = bounded[bounded.index("subroutine initialize_dg_wpw_h_epsilon_s_factor"):
+                    bounded.index("end subroutine initialize_dg_wpw_h_epsilon_s_factor")]
+hese_apply = bounded[bounded.index("subroutine apply_dg_wpw_h_epsilon_s_correction"):
+                     bounded.index("end subroutine apply_dg_wpw_h_epsilon_s_correction")]
+assert "zhegv" in hese_init, "H-epsilon-S factor must use a generalized Hermitian solve"
+assert "n=size(op%owned_w_ids)+size(op%owned_p_ids)" in hese_init.replace(" ", ""), \
+    "H-epsilon-S factor must remain rank-local in owned W+P dimensions"
+assert "find_id_sorted(op%required_w_ids,op%owned_w_ids(i))" in hese_init.replace(" ", "") and \
+       "find_id_sorted(op%required_p_ids,op%owned_p_ids(i))" in hese_init.replace(" ", ""), \
+    "H-epsilon-S assembly must use canonical owned-to-required row mappings"
+assert not re.search(r"\bmpi_(?:gather|gatherv|allgather|allgatherv|bcast)\b", hese_init + hese_apply), \
+    "H-epsilon-S route must not form or publish a single-rank global operator"
+assert "apply_dg_wpw_fragment_block" not in hese_apply and "fallback" not in hese_apply, \
+    "H-epsilon-S correction must reject failure rather than silently delegate"
+assert hese_init.count("call zhegv") == 2, "generalized solve must query and execute explicitly"
+assert hese_init.count("if(lapack_info/=0") >= 4, \
+    "every standard/generalized eigensolver call must reject LAPACK failure"
+for match in re.finditer(r"call zhegv", hese_init):
+    tail = hese_init[match.end():]
+    failure = tail.index("if(lapack_info/=0")
+    collective = tail.index("call mpi_allreduce(local_bad,global_bad")
+    assert failure < collective, "generalized eigensolver failure must be rejected collectively"
+assert hese_init.index("call mpi_allreduce(local_bad,global_bad") < hese_init.index("call zhegv"), \
+    "factor input must be validated collectively before factorization"
+assert hese_apply.index("call mpi_allreduce(local_bad,global_bad") < hese_apply.index("allocate("), \
+    "correction input must be validated collectively before application"
+for token in (
+    "operator_epoch/=op%operator_epoch",
+    "layout_fingerprint/=op%layout_fingerprint",
+    "ieee_is_finite(eigenvalues)",
+    "finite2(rw)",
+    "finite2(rp)",
+):
+    assert token in hese_apply.replace(" ", ""), f"missing collective correction validation: {token}"
+assert "sign(max(abs(delta),floor),delta)" in hese_apply.replace(" ", ""), \
+    "signed relative floor is missing"
+assert "if(delta==0d0)denominator=floor" in hese_apply.replace(" ", ""), \
+    "exact zero must map deterministically to positive floor"
+assert "solution=-matmul" in hese_apply.replace(" ", ""), \
+    "correction equation requires a leading minus sign"
+
+for token in (
     "initialize_dg_wpw_fragment_root_context",
     "owned_w_ids",
     "support_w_ids",

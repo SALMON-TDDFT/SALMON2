@@ -1,5 +1,5 @@
 program test_dg_wpw_production_operator_mpi
-  use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
+  use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan,ieee_is_finite
   use mpi
   use dg_wpw_production_context, only: s_dg_wpw_production_context,&
     s_dg_wpw_production_context_snapshot,initialize_dg_wpw_fragment_root_context,&
@@ -14,7 +14,9 @@ program test_dg_wpw_production_operator_mpi
     reduce_dg_wpw_metric_rhs_partials,s_dg_wpw_fragment_block_preconditioner,&
     initialize_dg_wpw_fragment_block_preconditioner,apply_dg_wpw_fragment_block_preconditioner,&
     apply_dg_wpw_fragment_block_eigen_correction,&
-    release_dg_wpw_fragment_block_preconditioner
+    release_dg_wpw_fragment_block_preconditioner,s_dg_wpw_h_epsilon_s_factor,&
+    s_dg_wpw_h_epsilon_s_diagnostics,initialize_dg_wpw_h_epsilon_s_factor,&
+    apply_dg_wpw_h_epsilon_s_correction,release_dg_wpw_h_epsilon_s_factor
   use dg_wpw_s_orthogonal_complement,only:s_dg_wpw_s_orthogonal_complement,&
     initialize_dg_wpw_s_orthogonal_complement,apply_h_dg_wpw_s_orthogonal_complement,&
     validate_dg_wpw_s_orthogonal_complement,release_dg_wpw_s_orthogonal_complement
@@ -27,15 +29,21 @@ program test_dg_wpw_production_operator_mpi
   type(s_dg_wpw_production_context) :: context
   type(s_dg_wpw_bounded_operator_snapshot)::frozen_operator
   type(s_dg_wpw_fragment_block_preconditioner)::block_preconditioner
+  type(s_dg_wpw_h_epsilon_s_factor)::hese_factor
+  type(s_dg_wpw_h_epsilon_s_diagnostics)::hese_diagnostics
   type(s_dg_wpw_s_orthogonal_complement)::complement
   type(s_dg_wpw_production_context_snapshot)::frozen_context
   type(s_dg_wpw_lcfo_ww_components)::ww_components
   type(s_wpw_face_trace_provider) :: provider
   type(s_dg_wpw_trace_halo_state),target :: halo
-  integer :: ierr, rank, info, owned_p, k
+  integer :: ierr, rank, info, owned_p, k, lapack_info, lwork
   integer(8)::old_fingerprint
   real(8)::old_ww_potential
   real(8)::block_eigenvalues(2)
+  real(8)::hese_eigenvalues(6),hese_theta(2),hese_rwork(4),hese_floor,hese_delta,hese_denominator,&
+    hese_raw_expected(6),hese_floored_expected(6),hese_weight_expected(6),hese_inverse_expected(6),&
+    hese_total_weight,hese_floored_weight
+  integer::hese_count_expected(6)
   integer,allocatable::fkminus(:),fkplus(:),faxis(:),fside(:)
   integer,allocatable::fminus_lo(:,:),fminus_hi(:,:),fplus_lo(:,:),fplus_hi(:,:)
   integer :: wp_w(2), wp_p(2), pp_r(2), pp_c(2)
@@ -58,6 +66,10 @@ program test_dg_wpw_production_operator_mpi
   complex(8)::block_rhs_w(1,2),block_rhs_p(1,2),block_z_w(1,2),block_z_p(1,2),&
     block_expected(2,2),block_solution(2,2),block_matrix(2,2),saved_block_z_w(1,2),&
     saved_block_z_p(1,2),saved_metric_value
+  complex(8)::hese_h(2,2),hese_s(2,2),hese_s_original(2,2),hese_u(2,2),hese_rhs(2,6),&
+    hese_spectral(2,6),hese_expected(2,6),hese_solution(2,6),hese_rw(1,6),hese_rp(1,6),&
+    hese_zw(1,6),hese_zp(1,6),hese_work_query(1),saved_hese_h(2,2)
+  complex(8),allocatable::hese_work(:)
   complex(8)::rhs_partial_w(2,2),rhs_partial_p(2,2),rhs_owned_w(1,2),rhs_owned_p(1,2)
   complex(8) :: wm(2,1),wplus(2,1),gwm(3,2,1),gwplus(3,2,1)
   complex(8) :: pm(2,1),pplus(2,1),gpm(3,2,1),gpplus(3,2,1)
@@ -176,6 +188,140 @@ program test_dg_wpw_production_operator_mpi
     block_rhs_w,block_rhs_p,block_z_w,block_z_p,info)
   if(info/=0.or.maxval(abs(block_z_w-saved_block_z_w))>1d-13.or.&
     maxval(abs(block_z_p-saved_block_z_p))>1d-13)error stop 1505
+
+  ! RED: fragment-local generalized spectral H-epsilon-S correction.
+  hese_h(1,1)=context%bounded_operator%ww_h_dense(rank+1,rank+1)
+  hese_h(1,2)=context%bounded_operator%wp_h_dense(rank+1,1)
+  hese_h(2,1)=conjg(hese_h(1,2))
+  hese_h(2,2)=context%bounded_operator%pp_h_dense(1,rank+1)
+  hese_s(1,1)=context%bounded_operator%ww_s_dense(rank+1,rank+1)
+  hese_s(1,2)=context%bounded_operator%wp_s_dense(rank+1,1)
+  hese_s(2,1)=conjg(hese_s(1,2))
+  hese_s(2,2)=context%bounded_operator%pp_s_dense(1,rank+1)
+  hese_s_original=hese_s
+  if(maxval(abs(matmul(hese_h,hese_s)-matmul(hese_s,hese_h)))<1d-8)error stop 1506
+  hese_u=hese_h;lwork=-1
+  call zhegv(1,'V','U',2,hese_u,2,hese_s,2,hese_theta,hese_work_query,lwork,hese_rwork,lapack_info)
+  if(lapack_info/=0)error stop 1507
+  lwork=max(1,int(real(hese_work_query(1),8)));allocate(hese_work(lwork))
+  hese_u=hese_h
+  call zhegv(1,'V','U',2,hese_u,2,hese_s,2,hese_theta,hese_work,lwork,hese_rwork,lapack_info)
+  if(lapack_info/=0.or.maxval(abs(matmul(conjg(transpose(hese_u)),&
+    matmul(block_matrix,hese_u))-reshape([(1d0,0d0),(0d0,0d0),(0d0,0d0),(1d0,0d0)],[2,2])))>1d-11)&
+    error stop 1508
+  hese_floor=1d-6*max(1d0,maxval(abs(hese_theta)))
+  hese_eigenvalues=[hese_theta(1)-1d0,hese_theta(1),hese_theta(1)+0.25d0*hese_floor,&
+    hese_theta(2)-0.25d0*hese_floor,0.5d0*sum(hese_theta),hese_theta(2)+1d0]
+  hese_rw=reshape([(1d0,0.25d0),(-0.5d0,0.2d0),(0.3d0,-0.1d0),(0.8d0,0.4d0),&
+    (-0.2d0,0.7d0),(0.6d0,-0.35d0)],[1,6])
+  hese_rp=reshape([(0.2d0,-0.3d0),(0.6d0,0.1d0),(-0.4d0,0.5d0),(0.7d0,-0.2d0),&
+    (0.9d0,0.15d0),(-0.1d0,-0.45d0)],[1,6])
+  hese_rhs(1,:)=hese_rw(1,:);hese_rhs(2,:)=hese_rp(1,:)
+  hese_spectral=matmul(conjg(transpose(hese_u)),hese_rhs)
+  do k=1,6
+    hese_floor=1d-6*max(1d0,maxval(abs(hese_theta)),abs(hese_eigenvalues(k)))
+    hese_raw_expected(k)=minval(abs(hese_theta-hese_eigenvalues(k)))
+    hese_floored_expected(k)=huge(1d0);hese_count_expected(k)=0
+    hese_total_weight=sum(abs(hese_spectral(:,k))**2);hese_floored_weight=0d0
+    do owned_p=1,2
+      hese_delta=hese_theta(owned_p)-hese_eigenvalues(k)
+      hese_denominator=sign(max(abs(hese_delta),hese_floor),hese_delta)
+      if(hese_delta==0d0)hese_denominator=hese_floor
+      hese_floored_expected(k)=min(hese_floored_expected(k),abs(hese_denominator))
+      if(abs(hese_delta)<hese_floor)then
+        hese_count_expected(k)=hese_count_expected(k)+1
+        hese_floored_weight=hese_floored_weight+abs(hese_spectral(owned_p,k))**2
+      endif
+      hese_spectral(owned_p,k)=hese_spectral(owned_p,k)/hese_denominator
+    enddo
+    hese_weight_expected(k)=hese_floored_weight/max(hese_total_weight,tiny(1d0))
+    hese_inverse_expected(k)=1d0/hese_floored_expected(k)
+  enddo
+  hese_expected=-matmul(hese_u,hese_spectral)
+  owned_p=rank+1
+  call initialize_dg_wpw_h_epsilon_s_factor(context%bounded_operator,1d-6,hese_factor,info)
+  if(info/=0.or..not.hese_factor%valid.or.hese_factor%dimension/=2.or.&
+    hese_factor%condition_number<1d0)error stop 1509
+  call apply_dg_wpw_h_epsilon_s_correction(context%bounded_operator,hese_factor,hese_eigenvalues,&
+    hese_rw,hese_rp,hese_zw,hese_zp,hese_diagnostics,info)
+  if(info/=0)error stop 1510
+  hese_solution(1,:)=hese_zw(1,:);hese_solution(2,:)=hese_zp(1,:)
+  if(maxval(abs(hese_solution-hese_expected))/max(1d0,maxval(abs(hese_expected)))>1d-11)&
+    error stop 15101
+  if(.not.all(ieee_is_finite(real(hese_solution))).or.&
+    .not.all(ieee_is_finite(aimag(hese_solution))))error stop 15102
+  if(any(hese_diagnostics%floored_mode_count/=hese_count_expected).or.&
+    maxval(abs(hese_diagnostics%raw_minimum_denominator-hese_raw_expected))>1d-12.or.&
+    maxval(abs(hese_diagnostics%floored_minimum_denominator-hese_floored_expected))>1d-12.or.&
+    maxval(abs(hese_diagnostics%floored_residual_weight-hese_weight_expected))>1d-12.or.&
+    maxval(abs(hese_diagnostics%maximum_inverse_magnitude-hese_inverse_expected))/&
+      max(1d0,maxval(hese_inverse_expected))>1d-12)error stop 15103
+  if(hese_diagnostics%floored_mode_count(2)/=1.or.hese_diagnostics%floored_mode_count(3)/=1.or.&
+    hese_diagnostics%floored_mode_count(4)/=1)error stop 15104
+
+  ! Occupied/extra labels do not alter the per-column rule.
+  call apply_dg_wpw_h_epsilon_s_correction(context%bounded_operator,hese_factor,&
+    hese_eigenvalues([4,5,6,1,2,3]),hese_rw(:,[4,5,6,1,2,3]),hese_rp(:,[4,5,6,1,2,3]),&
+    hese_zw,hese_zp,hese_diagnostics,info)
+  if(info/=0)error stop 15105
+  hese_solution(1,:)=hese_zw(1,:);hese_solution(2,:)=hese_zp(1,:)
+  if(maxval(abs(hese_solution-hese_expected(:,[4,5,6,1,2,3])))>1d-11)error stop 15106
+
+  ! All invalid inputs are rejected collectively without stale-factor fallback.
+  hese_eigenvalues(1)=ieee_value(0d0,ieee_quiet_nan)
+  call apply_dg_wpw_h_epsilon_s_correction(context%bounded_operator,hese_factor,hese_eigenvalues,&
+    hese_rw,hese_rp,hese_zw,hese_zp,hese_diagnostics,info)
+  if(info==0)error stop 15107
+  hese_eigenvalues(1)=hese_theta(1)-1d0
+  if(rank==0)hese_rw(1,1)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,8)
+  call apply_dg_wpw_h_epsilon_s_correction(context%bounded_operator,hese_factor,hese_eigenvalues,&
+    hese_rw,hese_rp,hese_zw,hese_zp,hese_diagnostics,info)
+  if(info==0)error stop 15108
+  hese_rw(1,1)=(1d0,0.25d0)
+  if(rank==0)then
+    call apply_dg_wpw_h_epsilon_s_correction(context%bounded_operator,hese_factor,&
+      hese_eigenvalues(1:5),hese_rw(:,1:5),hese_rp(:,1:5),hese_zw(:,1:5),hese_zp(:,1:5),&
+      hese_diagnostics,info)
+  else
+    call apply_dg_wpw_h_epsilon_s_correction(context%bounded_operator,hese_factor,hese_eigenvalues,&
+      hese_rw,hese_rp,hese_zw,hese_zp,hese_diagnostics,info)
+  endif
+  if(info==0)error stop 151081
+  hese_factor%operator_epoch=hese_factor%operator_epoch+merge(1,0,rank==0)
+  call apply_dg_wpw_h_epsilon_s_correction(context%bounded_operator,hese_factor,hese_eigenvalues,&
+    hese_rw,hese_rp,hese_zw,hese_zp,hese_diagnostics,info)
+  if(info==0)error stop 15109
+  hese_factor%operator_epoch=context%bounded_operator%operator_epoch
+  hese_factor%layout_fingerprint=hese_factor%layout_fingerprint+merge(1_8,0_8,rank==1)
+  call apply_dg_wpw_h_epsilon_s_correction(context%bounded_operator,hese_factor,hese_eigenvalues,&
+    hese_rw,hese_rp,hese_zw,hese_zp,hese_diagnostics,info)
+  if(info==0)error stop 15110
+  hese_factor%layout_fingerprint=context%bounded_operator%layout_fingerprint
+  if(rank==0)context%bounded_operator%ww_h_dense(1,1)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,8)
+  call initialize_dg_wpw_h_epsilon_s_factor(context%bounded_operator,1d-6,hese_factor,info)
+  if(info==0.or..not.hese_factor%valid)error stop 15111
+  context%bounded_operator%ww_h_dense(rank+1,rank+1)=hese_h(1,1)
+  if(rank==1)context%bounded_operator%ww_s_dense(2,2)=&
+    cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,8)
+  call initialize_dg_wpw_h_epsilon_s_factor(context%bounded_operator,1d-6,hese_factor,info)
+  if(info==0.or..not.hese_factor%valid)error stop 151111
+  context%bounded_operator%ww_s_dense(rank+1,rank+1)=hese_s_original(1,1)
+  if(rank==0)context%bounded_operator%ww_s_dense(1,1)=(-1d0,0d0)
+  call initialize_dg_wpw_h_epsilon_s_factor(context%bounded_operator,1d-6,hese_factor,info)
+  if(info==0.or..not.hese_factor%valid)error stop 15112
+  context%bounded_operator%ww_s_dense(rank+1,rank+1)=hese_s_original(1,1)
+  call initialize_dg_wpw_h_epsilon_s_factor(context%bounded_operator,-1d-6,hese_factor,info)
+  if(info==0.or..not.hese_factor%valid)error stop 15113
+  saved_hese_h=hese_h
+  context%bounded_operator%ww_h_dense(rank+1,rank+1)=cmplx(huge(1d0),0d0,8)
+  context%bounded_operator%wp_h_dense(rank+1,1)=cmplx(huge(1d0),0d0,8)
+  context%bounded_operator%pp_h_dense(1,rank+1)=cmplx(huge(1d0),0d0,8)
+  call initialize_dg_wpw_h_epsilon_s_factor(context%bounded_operator,1d-6,hese_factor,info)
+  if(info==0.or..not.hese_factor%valid)error stop 15114
+  context%bounded_operator%ww_h_dense(rank+1,rank+1)=saved_hese_h(1,1)
+  context%bounded_operator%wp_h_dense(rank+1,1)=saved_hese_h(1,2)
+  context%bounded_operator%pp_h_dense(1,rank+1)=saved_hese_h(2,2)
+  deallocate(hese_work)
   rhs_partial_w=reshape([cmplx(1+rank,0d0,8),cmplx(10*(1+rank),0d0,8),&
     cmplx(2*(1+rank),0d0,8),cmplx(20*(1+rank),0d0,8)],[2,2])
   rhs_partial_p=cmplx(3d0,0d0,8)*rhs_partial_w
@@ -388,6 +534,7 @@ program test_dg_wpw_production_operator_mpi
   call release_dg_wpw_bounded_operator_snapshot(frozen_operator)
   call release_dg_wpw_production_context_snapshot(frozen_context)
   call release_dg_wpw_s_orthogonal_complement(complement)
+  call release_dg_wpw_h_epsilon_s_factor(hese_factor)
   call release_dg_wpw_bounded_operator(context%bounded_operator)
   call MPI_Finalize(ierr)
 end program

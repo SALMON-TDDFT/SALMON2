@@ -43,6 +43,20 @@ module dg_wpw_bounded_operator
     real(8),allocatable::eigenvalues(:)
     complex(8),allocatable::eigenvectors(:,:)
   end type
+  type,public::s_dg_wpw_h_epsilon_s_factor
+    integer::operator_epoch=-1,dimension=0,nw=0,np=0
+    integer(8)::layout_fingerprint=0
+    logical::valid=.false.
+    real(8)::relative_floor=0d0,s_minimum_eigenvalue=0d0,s_maximum_eigenvalue=0d0,&
+      condition_number=huge(1d0)
+    real(8),allocatable::eigenvalues(:)
+    complex(8),allocatable::eigenvectors(:,:)
+  end type
+  type,public::s_dg_wpw_h_epsilon_s_diagnostics
+    real(8),allocatable::raw_minimum_denominator(:),floored_minimum_denominator(:),&
+      floored_residual_weight(:),maximum_inverse_magnitude(:)
+    integer,allocatable::floored_mode_count(:)
+  end type
   public::initialize_dg_wpw_bounded_operator,apply_h_dg_wpw_bounded,apply_s_dg_wpw_bounded
   public::global_gram_dg_wpw_bounded
   public::fetch_dg_wpw_support_coefficients
@@ -56,7 +70,253 @@ module dg_wpw_bounded_operator
   public::apply_dg_wpw_fragment_block_preconditioner
   public::apply_dg_wpw_fragment_block_eigen_correction
   public::release_dg_wpw_fragment_block_preconditioner
+  public::initialize_dg_wpw_h_epsilon_s_factor
+  public::apply_dg_wpw_h_epsilon_s_correction
+  public::release_dg_wpw_h_epsilon_s_factor
 contains
+  subroutine initialize_dg_wpw_h_epsilon_s_factor(op,relative_floor,factor,info)
+    type(s_dg_wpw_bounded_operator),intent(in)::op
+    real(8),intent(in)::relative_floor
+    type(s_dg_wpw_h_epsilon_s_factor),intent(inout)::factor
+    integer,intent(out)::info
+    type(s_dg_wpw_h_epsilon_s_factor)::candidate
+    complex(8),allocatable::h_block(:,:),s_block(:,:),s_spectrum(:,:),work(:)
+    real(8),allocatable::s_eigenvalues(:),rwork(:)
+    complex(8)::work_query(1)
+    integer,allocatable::wpos(:),ppos(:)
+    real(8)::h_scale,s_scale
+    integer::i,j,n,astat,local_bad,global_bad,ierr,lwork,lapack_info
+    external::zheev,zhegv
+
+    info=1;local_bad=0;n=0
+    if(op%w_schedule%comm==MPI_COMM_NULL)return
+    if(.not.op%valid.or..not.allocated(op%owned_w_ids).or..not.allocated(op%owned_p_ids).or.&
+      .not.allocated(op%required_w_ids).or..not.allocated(op%required_p_ids).or.&
+      .not.allocated(op%ww_h_dense).or..not.allocated(op%wp_h_dense).or.&
+      .not.allocated(op%pp_h_dense).or..not.allocated(op%ww_s_dense).or.&
+      .not.allocated(op%wp_s_dense).or..not.allocated(op%pp_s_dense))local_bad=1
+    if(local_bad==0)n=size(op%owned_w_ids)+size(op%owned_p_ids)
+    if(n<=0.or..not.ieee_is_finite(relative_floor).or.relative_floor<=0d0.or.&
+      relative_floor>=1d0)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    allocate(h_block(n,n),s_block(n,n),s_spectrum(n,n),s_eigenvalues(n),&
+      wpos(size(op%owned_w_ids)),ppos(size(op%owned_p_ids)),stat=astat)
+    local_bad=merge(0,1,astat==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    do i=1,size(wpos);wpos(i)=find_id_sorted(op%required_w_ids,op%owned_w_ids(i));enddo
+    do i=1,size(ppos);ppos(i)=find_id_sorted(op%required_p_ids,op%owned_p_ids(i));enddo
+    if(any(wpos==0).or.any(ppos==0))local_bad=1
+    if(local_bad==0)then
+      h_block=(0d0,0d0);s_block=(0d0,0d0)
+      do j=1,size(wpos)
+        do i=1,size(wpos)
+          h_block(i,j)=op%ww_h_dense(wpos(i),wpos(j))
+          s_block(i,j)=op%ww_s_dense(wpos(i),wpos(j))
+        enddo
+      enddo
+      do j=1,size(ppos)
+        do i=1,size(wpos)
+          h_block(i,size(wpos)+j)=op%wp_h_dense(wpos(i),j)
+          h_block(size(wpos)+j,i)=conjg(h_block(i,size(wpos)+j))
+          s_block(i,size(wpos)+j)=op%wp_s_dense(wpos(i),j)
+          s_block(size(wpos)+j,i)=conjg(s_block(i,size(wpos)+j))
+        enddo
+      enddo
+      do j=1,size(ppos)
+        do i=1,size(ppos)
+          h_block(size(wpos)+i,size(wpos)+j)=op%pp_h_dense(i,ppos(j))
+          s_block(size(wpos)+i,size(wpos)+j)=op%pp_s_dense(i,ppos(j))
+        enddo
+      enddo
+      if(.not.finite2(h_block).or..not.finite2(s_block))local_bad=1
+    endif
+    if(local_bad==0)then
+      h_scale=max(1d-300,maxval(abs(h_block)));s_scale=max(1d-300,maxval(abs(s_block)))
+      if(maxval(abs(h_block-conjg(transpose(h_block))))>relative_floor*h_scale.or.&
+        maxval(abs(s_block-conjg(transpose(s_block))))>relative_floor*s_scale)local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    allocate(rwork(max(1,3*n-2)),stat=astat)
+    local_bad=merge(0,1,astat==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    s_spectrum=s_block;lwork=-1
+    call zheev('N','U',n,s_spectrum,n,s_eigenvalues,work_query,lwork,rwork,lapack_info)
+    if(lapack_info/=0.or..not.ieee_is_finite(real(work_query(1),8)))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    lwork=max(1,int(real(work_query(1),8)));allocate(work(lwork),stat=astat)
+    local_bad=merge(0,1,astat==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    call zheev('N','U',n,s_spectrum,n,s_eigenvalues,work,lwork,rwork,lapack_info)
+    if(lapack_info/=0.or..not.all(ieee_is_finite(s_eigenvalues)))local_bad=1
+    if(local_bad==0)then
+      candidate%s_minimum_eigenvalue=s_eigenvalues(1)
+      candidate%s_maximum_eigenvalue=s_eigenvalues(n)
+      if(candidate%s_maximum_eigenvalue<=0d0.or.candidate%s_minimum_eigenvalue<=&
+        relative_floor*candidate%s_maximum_eigenvalue)then
+        local_bad=1
+      else
+        candidate%condition_number=candidate%s_maximum_eigenvalue/candidate%s_minimum_eigenvalue
+      endif
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    deallocate(work);allocate(candidate%eigenvalues(n),stat=astat)
+    local_bad=merge(0,1,astat==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    lwork=-1
+    call zhegv(1,'V','U',n,h_block,n,s_block,n,candidate%eigenvalues,work_query,lwork,rwork,lapack_info)
+    if(lapack_info/=0.or..not.ieee_is_finite(real(work_query(1),8)))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    lwork=max(1,int(real(work_query(1),8)));allocate(work(lwork),stat=astat)
+    local_bad=merge(0,1,astat==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    call zhegv(1,'V','U',n,h_block,n,s_block,n,candidate%eigenvalues,work,lwork,rwork,lapack_info)
+    if(lapack_info/=0.or..not.all(ieee_is_finite(candidate%eigenvalues)).or.&
+      .not.finite2(h_block))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    allocate(candidate%eigenvectors(n,n),stat=astat)
+    local_bad=merge(0,1,astat==0)
+    if(local_bad==0)candidate%eigenvectors=h_block
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    candidate%operator_epoch=op%operator_epoch;candidate%layout_fingerprint=op%layout_fingerprint
+    candidate%dimension=n;candidate%nw=size(wpos);candidate%np=size(ppos)
+    candidate%relative_floor=relative_floor;candidate%valid=.true.
+    call move_h_epsilon_s_factor(candidate,factor)
+    info=0
+  end subroutine initialize_dg_wpw_h_epsilon_s_factor
+
+  subroutine apply_dg_wpw_h_epsilon_s_correction(op,factor,eigenvalues,rw,rp,zw,zp,diagnostics,info)
+    type(s_dg_wpw_bounded_operator),intent(in)::op
+    type(s_dg_wpw_h_epsilon_s_factor),intent(in)::factor
+    real(8),intent(in)::eigenvalues(:)
+    complex(8),intent(in)::rw(:,:),rp(:,:)
+    complex(8),intent(out)::zw(:,:),zp(:,:)
+    type(s_dg_wpw_h_epsilon_s_diagnostics),intent(inout)::diagnostics
+    integer,intent(out)::info
+    complex(8),allocatable::rhs(:,:),spectral(:,:),solution(:,:)
+    real(8)::scale,floor,delta,denominator,total_weight,floored_weight
+    integer::i,j,nrhs,minimum_nrhs,maximum_nrhs,astat,local_bad,global_bad,ierr
+
+    zw=0;zp=0;info=1;nrhs=size(rw,2);local_bad=0
+    call release_h_epsilon_s_diagnostics(diagnostics)
+    if(op%w_schedule%comm==MPI_COMM_NULL)return
+    call MPI_Allreduce(nrhs,minimum_nrhs,1,MPI_INTEGER,MPI_MIN,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(nrhs,maximum_nrhs,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    if(minimum_nrhs/=maximum_nrhs)local_bad=1
+    if(.not.op%valid.or..not.factor%valid.or.factor%operator_epoch/=op%operator_epoch.or.&
+      factor%layout_fingerprint/=op%layout_fingerprint.or.factor%nw/=size(op%owned_w_ids).or.&
+      factor%np/=size(op%owned_p_ids).or.size(eigenvalues)/=nrhs.or.size(rp,2)/=nrhs.or.&
+      any(shape(zw)/=shape(rw)).or.any(shape(zp)/=shape(rp)).or.size(rw,1)/=factor%nw.or.&
+      size(rp,1)/=factor%np.or..not.all(ieee_is_finite(eigenvalues)).or..not.finite2(rw).or.&
+      .not.finite2(rp).or..not.ieee_is_finite(factor%relative_floor).or.&
+      factor%relative_floor<=0d0.or.factor%relative_floor>=1d0)local_bad=1
+    if(.not.allocated(factor%eigenvectors).or..not.allocated(factor%eigenvalues))local_bad=1
+    if(local_bad==0)then
+      if(any(shape(factor%eigenvectors)/=[factor%dimension,factor%dimension]).or.&
+        size(factor%eigenvalues)/=factor%dimension.or..not.finite2(factor%eigenvectors).or.&
+        .not.all(ieee_is_finite(factor%eigenvalues)))local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    allocate(rhs(factor%dimension,nrhs),spectral(factor%dimension,nrhs),&
+      solution(factor%dimension,nrhs),diagnostics%raw_minimum_denominator(nrhs),&
+      diagnostics%floored_minimum_denominator(nrhs),diagnostics%floored_residual_weight(nrhs),&
+      diagnostics%maximum_inverse_magnitude(nrhs),diagnostics%floored_mode_count(nrhs),stat=astat)
+    local_bad=merge(0,1,astat==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      call release_h_epsilon_s_diagnostics(diagnostics);return
+    endif
+    rhs(1:factor%nw,:)=rw;rhs(factor%nw+1:factor%dimension,:)=rp
+    spectral=matmul(conjg(transpose(factor%eigenvectors)),rhs)
+    do j=1,nrhs
+      scale=max(1d0,maxval(abs(factor%eigenvalues)),abs(eigenvalues(j)))
+      floor=factor%relative_floor*scale
+      diagnostics%raw_minimum_denominator(j)=minval(abs(factor%eigenvalues-eigenvalues(j)))
+      diagnostics%floored_minimum_denominator(j)=huge(1d0)
+      diagnostics%floored_mode_count(j)=0
+      total_weight=sum(abs(spectral(:,j))**2);floored_weight=0d0
+      do i=1,factor%dimension
+        delta=factor%eigenvalues(i)-eigenvalues(j)
+        denominator=sign(max(abs(delta),floor),delta)
+        if(delta==0d0)denominator=floor
+        diagnostics%floored_minimum_denominator(j)=min(&
+          diagnostics%floored_minimum_denominator(j),abs(denominator))
+        if(abs(delta)<floor)then
+          diagnostics%floored_mode_count(j)=diagnostics%floored_mode_count(j)+1
+          floored_weight=floored_weight+abs(spectral(i,j))**2
+        endif
+      enddo
+      diagnostics%floored_residual_weight(j)=floored_weight/max(total_weight,tiny(1d0))
+      diagnostics%maximum_inverse_magnitude(j)=1d0/diagnostics%floored_minimum_denominator(j)
+      do i=1,factor%dimension
+        delta=factor%eigenvalues(i)-eigenvalues(j)
+        denominator=sign(max(abs(delta),floor),delta)
+        if(delta==0d0)denominator=floor
+        spectral(i,j)=spectral(i,j)/denominator
+      enddo
+    enddo
+    solution=-matmul(factor%eigenvectors,spectral)
+    local_bad=merge(0,1,finite2(solution).and.&
+      all(ieee_is_finite(diagnostics%raw_minimum_denominator)).and.&
+      all(ieee_is_finite(diagnostics%floored_minimum_denominator)).and.&
+      all(ieee_is_finite(diagnostics%floored_residual_weight)).and.&
+      all(ieee_is_finite(diagnostics%maximum_inverse_magnitude)))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,op%w_schedule%comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      call release_h_epsilon_s_diagnostics(diagnostics);return
+    endif
+    zw=solution(1:factor%nw,:);zp=solution(factor%nw+1:factor%dimension,:)
+    info=0
+  end subroutine apply_dg_wpw_h_epsilon_s_correction
+
+  subroutine move_h_epsilon_s_factor(source,destination)
+    type(s_dg_wpw_h_epsilon_s_factor),intent(inout)::source,destination
+    call release_dg_wpw_h_epsilon_s_factor(destination)
+    destination%operator_epoch=source%operator_epoch
+    destination%layout_fingerprint=source%layout_fingerprint
+    destination%dimension=source%dimension;destination%nw=source%nw;destination%np=source%np
+    destination%relative_floor=source%relative_floor
+    destination%s_minimum_eigenvalue=source%s_minimum_eigenvalue
+    destination%s_maximum_eigenvalue=source%s_maximum_eigenvalue
+    destination%condition_number=source%condition_number
+    call move_alloc(source%eigenvalues,destination%eigenvalues)
+    call move_alloc(source%eigenvectors,destination%eigenvectors)
+    destination%valid=source%valid;source%valid=.false.
+  end subroutine move_h_epsilon_s_factor
+
+  subroutine release_dg_wpw_h_epsilon_s_factor(factor)
+    type(s_dg_wpw_h_epsilon_s_factor),intent(inout)::factor
+    if(allocated(factor%eigenvalues))deallocate(factor%eigenvalues)
+    if(allocated(factor%eigenvectors))deallocate(factor%eigenvectors)
+    factor%operator_epoch=-1;factor%layout_fingerprint=0
+    factor%dimension=0;factor%nw=0;factor%np=0;factor%relative_floor=0d0
+    factor%s_minimum_eigenvalue=0d0;factor%s_maximum_eigenvalue=0d0
+    factor%condition_number=huge(1d0);factor%valid=.false.
+  end subroutine release_dg_wpw_h_epsilon_s_factor
+
+  subroutine release_h_epsilon_s_diagnostics(diagnostics)
+    type(s_dg_wpw_h_epsilon_s_diagnostics),intent(inout)::diagnostics
+    if(allocated(diagnostics%raw_minimum_denominator))deallocate(diagnostics%raw_minimum_denominator)
+    if(allocated(diagnostics%floored_minimum_denominator))deallocate(diagnostics%floored_minimum_denominator)
+    if(allocated(diagnostics%floored_residual_weight))deallocate(diagnostics%floored_residual_weight)
+    if(allocated(diagnostics%maximum_inverse_magnitude))deallocate(diagnostics%maximum_inverse_magnitude)
+    if(allocated(diagnostics%floored_mode_count))deallocate(diagnostics%floored_mode_count)
+  end subroutine release_h_epsilon_s_diagnostics
+
   subroutine initialize_dg_wpw_fragment_block_preconditioner(op,relative_cutoff,preconditioner,info)
     type(s_dg_wpw_bounded_operator),intent(in)::op
     real(8),intent(in)::relative_cutoff
