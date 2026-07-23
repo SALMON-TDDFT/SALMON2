@@ -220,6 +220,7 @@ module salmon_global
   character(1)   :: yn_dg_wpw_preconditioner
   character(1)   :: yn_dg_wpw_metric_preconditioner
   character(1)   :: yn_dg_wpw_search_history
+  character(1)   :: yn_dg_wpw_s_orthogonal_pw
   integer        :: dg_wpw_extra_states
   integer        :: dg_wpw_scf_max_iter
   integer        :: dg_wpw_window_buffer

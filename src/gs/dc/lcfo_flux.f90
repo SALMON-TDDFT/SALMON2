@@ -3288,6 +3288,7 @@ contains
       MPI_INTEGER,MPI_INTEGER8,MPI_MAX,MPI_MIN,MPI_Abort,MPI_Bcast,MPI_Reduce,MPI_Gather,&
       MPI_DOUBLE_COMPLEX,MPI_DOUBLE_PRECISION,MPI_LOGICAL,MPI_SUM
     use salmon_global, only: yn_dc_lcfo_diag,yn_dg_wpw_production,yn_dg_wpw_fixed_h_relaxation,&
+      yn_dg_wpw_s_orthogonal_pw,&
       yn_dg_wpw_preconditioner,yn_dg_wpw_metric_preconditioner,yn_dg_wpw_search_history,&
       n_plane_waves_dg,k_cutoff_plane_wave,&
       dg_wpw_window_buffer,dg_wpw_window_width,dg_wpw_extra_states,dg_wpw_scf_max_iter,&
@@ -3339,6 +3340,12 @@ contains
       initialize_dg_wpw_deterministic_seed,initialize_dg_wpw_projected_occupied
     use dg_wpw_matrix_free_scf,only:complete_dg_wpw_projected_subspace,&
       solve_dg_wpw_metric_projection
+    use dg_wpw_matrix_free_operator,only:apply_h_batch,apply_s_batch
+    use dg_wpw_s_orthogonal_complement,only:s_dg_wpw_s_orthogonal_complement,&
+      initialize_dg_wpw_s_orthogonal_complement,apply_h_dg_wpw_s_orthogonal_complement,&
+      apply_s_dg_wpw_s_orthogonal_complement,map_dg_wpw_complement_to_original,&
+      map_dg_wpw_original_to_complement,validate_dg_wpw_s_orthogonal_complement,&
+      release_dg_wpw_s_orthogonal_complement
     use dg_wpw_checkpoint,only:s_dg_wpw_checkpoint_state,write_dg_wpw_checkpoint,&
       read_dg_wpw_checkpoint,write_dg_wpw_checkpoint_manifest,dg_wpw_checkpoint_checksum
     use dg_wpw_lcfo_potential_map,only:s_dg_wpw_grid_route,build_dg_wpw_core_density,&
@@ -3439,6 +3446,7 @@ contains
     type(s_dg_wpw_lcfo_ww_components)::wpw_frozen_ww_components
     type(s_dg_wpw_production_context_snapshot)::wpw_frozen_production_context
     type(s_dg_wpw_scf_iteration_state)::wpw_scf_state
+    type(s_dg_wpw_s_orthogonal_complement)::wpw_s_orthogonal_transform
     type(s_dg_wpw_grid_route)::wpw_density_route
     complex(8),allocatable::wpw_qw(:,:),wpw_qp(:,:),wpw_q_old_occ(:,:)
     complex(8),allocatable::wpw_bootstrap_source_values(:,:)
@@ -3474,6 +3482,8 @@ contains
     real(8)::wpw_fixed_h_final_residual,wpw_fixed_h_final_orthogonality,&
       wpw_fixed_h_final_projector,wpw_fixed_h_density_baseline,wpw_fixed_h_charge_error
     logical::wpw_fixed_h_qualified,wpw_metric_diagnostic_only
+    procedure(apply_h_batch),pointer::wpw_fixed_apply_h=>null()
+    procedure(apply_s_batch),pointer::wpw_fixed_apply_s=>null()
     logical :: sawf_explicit_basis_active
     logical::wpw_nonowned_candidates_pending
     logical::wpw_fixed_point_mode
@@ -3556,6 +3566,24 @@ contains
       wpw_mode_info=0
       if(dc%id_frag==0)call build_dg_wpw_production_operator(wpw_context,wpw_mode_info)
       call wpw_collective_require(wpw_mode_info==0,'DG WPW sparse production operator build failed collectively')
+      if(yn_dg_wpw_s_orthogonal_pw=='y')then
+        wpw_mode_info=0
+        if(dc%id_frag==0)call initialize_dg_wpw_s_orthogonal_complement(&
+          wpw_context%bounded_operator,dg_wpw_metric_cutoff,wpw_s_orthogonal_transform,wpw_mode_info)
+        call wpw_collective_require(wpw_mode_info==0,'DG WPW S-orthogonal PW complement initialization failed')
+        if(dc%id_frag==0)write(*,'(1x,a,i0,3(a,es12.4),a,i0)')&
+          '[DG-WPW-PW-COMPLEMENT] mode=S-orthogonal fingerprint=',&
+          wpw_s_orthogonal_transform%metric_fingerprint,&
+          ' solve_residual=',wpw_s_orthogonal_transform%solve_residual,&
+          ' cross_metric_defect=',wpw_s_orthogonal_transform%cross_metric_defect,&
+          ' cutoff=',wpw_s_orthogonal_transform%relative_cutoff,&
+          ' numerical_p_rank=',wpw_s_orthogonal_transform%numerical_p_rank
+        wpw_fixed_apply_h=>wpw_apply_h_complement
+        wpw_fixed_apply_s=>wpw_apply_s_complement
+      else
+        wpw_fixed_apply_h=>wpw_apply_h
+        wpw_fixed_apply_s=>wpw_apply_s
+      endif
       wpw_mode_info=0
       if(dc%id_frag==0)call bind_dg_wpw_hs_callbacks(wpw_context,wpw_mode_info)
       call wpw_collective_require(wpw_mode_info==0,'DG WPW H/S callback binding failed collectively')
@@ -3609,8 +3637,10 @@ contains
     if(allocated(wpw_volume_wp_s))deallocate(wpw_volume_wp_s)
     if(allocated(wpw_volume_pp_h))deallocate(wpw_volume_pp_h)
     if(allocated(wpw_volume_pp_s))deallocate(wpw_volume_pp_s)
-    if(wpw_production_comm/=MPI_COMM_NULL.and.dc%id_frag==0) &
+    if(wpw_production_comm/=MPI_COMM_NULL.and.dc%id_frag==0)then
+      call release_dg_wpw_s_orthogonal_complement(wpw_s_orthogonal_transform)
       call release_dg_wpw_bounded_operator(wpw_context%bounded_operator)
+    endif
     if(wpw_production_comm/=MPI_COMM_NULL)call MPI_Comm_free(wpw_production_comm,wpw_mpi_info)
     if(allocated(mat_H_local)) deallocate(mat_H_local)
     if(allocated(mat_H_volume_local)) deallocate(mat_H_volume_local)
@@ -4099,6 +4129,9 @@ contains
       operator_info=0
       if(dc%id_frag==0)call validate_dg_wpw_production_context_snapshot(&
         wpw_context,wpw_frozen_production_context,operator_info,allow_interface_lambda_change=.true.)
+      if(dc%id_frag==0.and.operator_info==0.and.yn_dg_wpw_s_orthogonal_pw=='y')&
+        call validate_dg_wpw_s_orthogonal_complement(wpw_context%bounded_operator,&
+          wpw_s_orthogonal_transform,operator_info)
       local_bad=merge(0,1,wpw_frozen_state_local_matches())
       if(operator_info/=0)local_bad=1
       validation_info=local_bad
@@ -4254,20 +4287,20 @@ contains
         if(fixed_info/=0)return
         if(dc%id_frag==0)then
           if(yn_dg_wpw_metric_preconditioner=='y')then
-            call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,wpw_apply_h,&
-              wpw_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,wpw_nretain,&
+            call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,wpw_fixed_apply_h,&
+              wpw_fixed_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,wpw_nretain,&
               iter+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
               wpw_q_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,wpw_metric_precondition,&
               retain_search_history=yn_dg_wpw_search_history=='y')
           elseif(yn_dg_wpw_preconditioner=='y')then
-            call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,wpw_apply_h,&
-              wpw_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,wpw_nretain,&
+            call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,wpw_fixed_apply_h,&
+              wpw_fixed_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,wpw_nretain,&
               iter+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
               wpw_q_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,wpw_precondition,&
               retain_search_history=yn_dg_wpw_search_history=='y')
           else
-            call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,wpw_apply_h,&
-              wpw_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,wpw_nretain,&
+            call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,wpw_fixed_apply_h,&
+              wpw_fixed_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,wpw_nretain,&
               iter+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
               wpw_q_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,&
               retain_search_history=yn_dg_wpw_search_history=='y')
@@ -4361,19 +4394,19 @@ contains
         if(dc%id_frag==0)then
           if(yn_dg_wpw_metric_preconditioner=='y')then
             call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,&
-              wpw_apply_h,wpw_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,&
+              wpw_fixed_apply_h,wpw_fixed_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,&
               wpw_nretain,trial+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
               accepted_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,wpw_metric_precondition,&
               retain_search_history=yn_dg_wpw_search_history=='y')
           elseif(yn_dg_wpw_preconditioner=='y')then
             call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,&
-              wpw_apply_h,wpw_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,&
+              wpw_fixed_apply_h,wpw_fixed_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,&
               wpw_nretain,trial+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
               accepted_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,wpw_precondition,&
               retain_search_history=yn_dg_wpw_search_history=='y')
           else
             call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,&
-              wpw_apply_h,wpw_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,&
+              wpw_fixed_apply_h,wpw_fixed_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,&
               wpw_nretain,trial+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
               accepted_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,&
               retain_search_history=yn_dg_wpw_search_history=='y')
@@ -4430,17 +4463,23 @@ contains
     subroutine diagnose_wpw_fixed_h_density(representation_baseline,charge_error,diagnostic_info)
       real(8),intent(out)::representation_baseline,charge_error
       integer,intent(out)::diagnostic_info
-      complex(8),allocatable::rw_support(:,:),rw(:,:),rp(:,:)
+      complex(8),allocatable::rw_support(:,:),rw(:,:),rp(:,:),original_qw(:,:),original_qp(:,:)
       real(8),allocatable::rho_raw(:)
       real(8)::charge_local,totals_local(3),totals_global(3)
       integer::iw,wpos,stage_info,ierr
       diagnostic_info=1;representation_baseline=huge(1d0);charge_error=huge(1d0)
       allocate(rw_support(size(wpw_support_w_ids),wpw_nocc),rw(size(wpw_owned_w_ids),wpw_nocc),&
         rp(size(wpw_support_fragment_ids)*size(wpw_g_indices,2),wpw_nocc),&
-        rho_raw(wpw_volume_accumulator%npoint))
+        rho_raw(wpw_volume_accumulator%npoint),original_qw(size(wpw_qw,1),wpw_nocc),&
+        original_qp(size(wpw_qp,1),wpw_nocc))
       rw_support=0;rw=0;rp=0;stage_info=0
-      if(dc%id_frag==0)call fetch_dg_wpw_support_coefficients(wpw_context%bounded_operator,&
-        wpw_qw(:,1:wpw_nocc),wpw_qp(:,1:wpw_nocc),rw_support,rp,stage_info)
+      original_qw=wpw_qw(:,1:wpw_nocc);original_qp=wpw_qp(:,1:wpw_nocc)
+      if(dc%id_frag==0.and.yn_dg_wpw_s_orthogonal_pw=='y')&
+        call map_dg_wpw_complement_to_original(wpw_context%bounded_operator,&
+          wpw_s_orthogonal_transform,wpw_qw(:,1:wpw_nocc),wpw_qp(:,1:wpw_nocc),&
+          original_qw,original_qp,stage_info)
+      if(dc%id_frag==0.and.stage_info==0)call fetch_dg_wpw_support_coefficients(&
+        wpw_context%bounded_operator,original_qw,original_qp,rw_support,rp,stage_info)
       call MPI_Bcast(stage_info,1,MPI_INTEGER,0,dc%icomm_frag,ierr)
       if(ierr/=MPI_SUCCESS.or.stage_info/=0)return
       call MPI_Bcast(rw_support,size(rw_support),MPI_DOUBLE_COMPLEX,0,dc%icomm_frag,ierr)
@@ -4978,6 +5017,7 @@ contains
         density_rw_support(:,:),density_rp(:,:),density_values(:,:),metric_s_w(:,:),metric_s_p(:,:),&
         metric_zero_w(:,:),metric_zero_p(:,:)
       complex(8),allocatable::density_w_values(:,:),density_p_values(:,:)
+      complex(8),allocatable::complement_qw(:,:),complement_qp(:,:)
       real(8),allocatable::local_source_norm(:),root_source_norm(:),metric_diagonal_w(:),&
         metric_diagonal_p(:),metric_rhs_residuals(:),occupations_local(:),source_norm_local_global(:),&
         source_norm_global(:)
@@ -5493,6 +5533,20 @@ contains
       if(dc%id_tot==0.and.density_dc_warning)write(*,'(1x,a,2(a,es12.4))')&
         '[DG-WPW-DC-DENSITY-WARNING] status=warning',&
         ' residual=',density_dc_residual,' tolerance=',dg_wpw_scf_residual_tolerance
+      if(yn_dg_wpw_s_orthogonal_pw=='y')then
+        allocate(complement_qw(size(wpw_qw,1),wpw_nretain),&
+          complement_qp(size(wpw_qp,1),wpw_nretain))
+        complement_qw=0;complement_qp=0;root_info=0
+        if(dc%id_frag==0)call map_dg_wpw_original_to_complement(wpw_context%bounded_operator,&
+          wpw_s_orthogonal_transform,wpw_qw,wpw_qp,complement_qw,complement_qp,root_info)
+        call MPI_Bcast(root_info,1,MPI_INTEGER,0,dc%icomm_frag,ierr)
+        if(ierr/=MPI_SUCCESS.or.root_info/=0)return
+        call MPI_Bcast(complement_qw,size(complement_qw),MPI_DOUBLE_COMPLEX,0,dc%icomm_frag,ierr)
+        if(ierr==MPI_SUCCESS)call MPI_Bcast(complement_qp,size(complement_qp),MPI_DOUBLE_COMPLEX,0,&
+          dc%icomm_frag,ierr)
+        if(ierr/=MPI_SUCCESS)return
+        wpw_qw=complement_qw;wpw_qp=complement_qp
+      endif
       wpw_q_old_occ(1:size(wpw_qw,1),:)=wpw_qw(:,1:wpw_nocc)
       wpw_q_old_occ(size(wpw_qw,1)+1:,:)=wpw_qp(:,1:wpw_nocc)
       seed_info=0
@@ -5591,7 +5645,7 @@ contains
       use salmon_global,only:sysname
       type(s_dg_wpw_checkpoint_state)::checkpoint,verified_checkpoint
       real(8),allocatable::retained_occupations(:)
-      complex(8),allocatable::ww_z_sparse(:),wp_z_sparse(:),pp_z_dense(:,:)
+      complex(8),allocatable::ww_z_sparse(:),wp_z_sparse(:),pp_z_dense(:,:),checkpoint_qw(:,:),checkpoint_qp(:,:)
       character(1024)::checkpoint_path
       integer,intent(out)::checkpoint_info
       integer::ierr,local_bad,global_bad,manifest_unit,manifest_ios
@@ -5638,7 +5692,12 @@ contains
       checkpoint_info=local_bad
       if(.not.wpw_potential_stage_ok(checkpoint_info))return
       call build_wpw_checkpoint_position_volume(ww_z_sparse,wp_z_sparse,pp_z_dense,checkpoint_info)
-      if(checkpoint_info/=0)return
+      if(.not.wpw_potential_stage_ok(checkpoint_info))return
+      allocate(checkpoint_qw,source=wpw_qw);allocate(checkpoint_qp,source=wpw_qp)
+      if(dc%id_frag==0.and.yn_dg_wpw_s_orthogonal_pw=='y')call map_dg_wpw_complement_to_original(&
+        wpw_context%bounded_operator,wpw_s_orthogonal_transform,wpw_qw,wpw_qp,&
+        checkpoint_qw,checkpoint_qp,checkpoint_info)
+      if(.not.wpw_potential_stage_ok(checkpoint_info))return
       if(dc%id_frag==0)then
         allocate(retained_occupations(wpw_nretain));retained_occupations=0d0
         retained_occupations(1:wpw_nocc)=wpw_occupations
@@ -5670,8 +5729,8 @@ contains
         checkpoint%support_p_ids=wpw_context%bounded_operator%required_p_ids
         checkpoint%eigenvalues=wpw_eigenvalues
         checkpoint%occupations=retained_occupations
-        checkpoint%coeff_w=wpw_qw
-        checkpoint%coeff_p=wpw_qp
+        checkpoint%coeff_w=checkpoint_qw
+        checkpoint%coeff_p=checkpoint_qp
         checkpoint%potential=wpw_volume_accumulator%potentials(1:wpw_volume_accumulator%npoint)
         checkpoint%ww_r=wpw_context%bounded_operator%ww_r
         checkpoint%ww_c=wpw_context%bounded_operator%ww_c
@@ -5994,6 +6053,32 @@ contains
         yw=0;yp=0;apply_info=1
       end select
     end subroutine wpw_apply_s
+
+    subroutine wpw_apply_h_complement(context,xw,xp,yw,yp,apply_info)
+      class(*),intent(inout)::context
+      complex(8),intent(in)::xw(:,:),xp(:,:);complex(8),intent(out)::yw(:,:),yp(:,:)
+      integer,intent(out)::apply_info
+      select type(context)
+      type is(s_dg_wpw_production_context)
+        call apply_h_dg_wpw_s_orthogonal_complement(context%bounded_operator,&
+          wpw_s_orthogonal_transform,xw,xp,yw,yp,apply_info)
+      class default
+        yw=0;yp=0;apply_info=1
+      end select
+    end subroutine wpw_apply_h_complement
+
+    subroutine wpw_apply_s_complement(context,xw,xp,yw,yp,apply_info)
+      class(*),intent(inout)::context
+      complex(8),intent(in)::xw(:,:),xp(:,:);complex(8),intent(out)::yw(:,:),yp(:,:)
+      integer,intent(out)::apply_info
+      select type(context)
+      type is(s_dg_wpw_production_context)
+        call apply_s_dg_wpw_s_orthogonal_complement(context%bounded_operator,&
+          wpw_s_orthogonal_transform,xw,xp,yw,yp,apply_info)
+      class default
+        yw=0;yp=0;apply_info=1
+      end select
+    end subroutine wpw_apply_s_complement
 
     subroutine wpw_apply_metric_block_preconditioner(context,rw,rp,zw,zp,apply_info)
       class(*),intent(inout)::context

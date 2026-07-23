@@ -23,6 +23,17 @@ assert control in GLOBAL, "missing explicit fixed-H production control"
 assert control in INPUT, "fixed-H control is absent from input/default/broadcast/log validation"
 assert f"{control} = 'n'" in INPUT, "fixed-H mode must not change repository defaults"
 
+complement_control = "yn_dg_wpw_s_orthogonal_pw"
+assert complement_control in GLOBAL and complement_control in INPUT
+assert f"{complement_control} = 'n'" in INPUT
+operator_build_pos = LCFO.index("call build_dg_wpw_production_operator")
+complement_init_pos = LCFO.index("call initialize_dg_wpw_s_orthogonal_complement")
+density_seed_call_pos = LCFO.index("call build_wpw_density_carrying_fragment_seed")
+assert operator_build_pos < complement_init_pos < density_seed_call_pos, \
+    "complement must be initialized from the completed bounded metric before the density seed solve"
+assert "validate_dg_wpw_s_orthogonal_complement" in LCFO
+assert "[dg-wpw-pw-complement]" in LCFO
+
 for token in (
     "snapshot_wpw_frozen_h_state",
     "validate_wpw_frozen_h_state",
@@ -76,6 +87,7 @@ assert "set_dg_wpw_interface_lambda" in continuation_body, "continuation cannot 
 assert continuation_body.count("validate_wpw_frozen_h_state") >= 2, (
     "continuation must validate frozen state around every trial"
 )
+assert "wpw_fixed_apply_h" in continuation_body and "wpw_fixed_apply_s" in continuation_body
 
 snapshot_start = LCFO.index("subroutine snapshot_wpw_frozen_h_state")
 snapshot_end = LCFO.index("end subroutine snapshot_wpw_frozen_h_state", snapshot_start)
@@ -101,6 +113,10 @@ assert "wpw_potential_stage_ok" in validate_body, (
 seed_start = LCFO.index("subroutine build_wpw_density_carrying_fragment_seed")
 seed_end = LCFO.index("end subroutine build_wpw_density_carrying_fragment_seed", seed_start)
 seed_body = LCFO[seed_start:seed_end]
+seed_map_pos = seed_body.index("call map_dg_wpw_original_to_complement")
+seed_old_occ_pos = seed_body.index("wpw_q_old_occ(1:size(wpw_qw,1),:)=wpw_qw")
+assert seed_map_pos < seed_old_occ_pos, \
+    "density-carrying seed must enter complement coordinates before solver history"
 source_start = LCFO.index("subroutine build_core_owned_projected_wannier_density_seed")
 source_body = LCFO[source_start:seed_end]
 source_end = LCFO.index("end subroutine build_core_owned_projected_wannier_density_seed", source_start)

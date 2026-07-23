@@ -15,6 +15,9 @@ program test_dg_wpw_production_operator_mpi
     initialize_dg_wpw_fragment_block_preconditioner,apply_dg_wpw_fragment_block_preconditioner,&
     apply_dg_wpw_fragment_block_eigen_correction,&
     release_dg_wpw_fragment_block_preconditioner
+  use dg_wpw_s_orthogonal_complement,only:s_dg_wpw_s_orthogonal_complement,&
+    initialize_dg_wpw_s_orthogonal_complement,apply_h_dg_wpw_s_orthogonal_complement,&
+    validate_dg_wpw_s_orthogonal_complement,release_dg_wpw_s_orthogonal_complement
   use rt_dg_wpw_trace_halo_provider, only: s_dg_wpw_trace_halo_state, prepare_dg_wpw_trace_halo
   use rt_dg_wpw_face_trace_provider, only: s_wpw_face_trace_provider
   use rt_dg_wpw_production_builder, only: build_dg_wpw_rank_local_quadrature, &
@@ -24,11 +27,12 @@ program test_dg_wpw_production_operator_mpi
   type(s_dg_wpw_production_context) :: context
   type(s_dg_wpw_bounded_operator_snapshot)::frozen_operator
   type(s_dg_wpw_fragment_block_preconditioner)::block_preconditioner
+  type(s_dg_wpw_s_orthogonal_complement)::complement
   type(s_dg_wpw_production_context_snapshot)::frozen_context
   type(s_dg_wpw_lcfo_ww_components)::ww_components
   type(s_wpw_face_trace_provider) :: provider
   type(s_dg_wpw_trace_halo_state),target :: halo
-  integer :: ierr, rank, info, owned_p
+  integer :: ierr, rank, info, owned_p, k
   integer(8)::old_fingerprint
   real(8)::old_ww_potential
   real(8)::block_eigenvalues(2)
@@ -40,6 +44,8 @@ program test_dg_wpw_production_operator_mpi
   complex(8) :: x(4), yh_local(4), ys_local(4), yh(4), ys(4)
   complex(8) :: h_oracle(4,4), s_oracle(4,4), wp(2,2), swp(2,2), pp(2,2), spp(2,2)
   complex(8) :: h0_oracle(4,4),interface_oracle(4,4)
+  complex(8) :: complement_t(4,4),complement_a_local(2,2),complement_a(2,2),&
+    wrapped_local(4),wrapped(4),wrapped_expected(4),rebuilt_h(4,4)
   integer,allocatable::saved_owned_w(:),saved_required_w(:),saved_owned_p(:),saved_required_p(:)
   complex(8) :: face_delta_local(2,2),face_delta(2,2)
   complex(8)::ww_nl_local(1,1),ww_nl_cross(1),wp_nl(2),pp_nl(2)
@@ -128,6 +134,14 @@ program test_dg_wpw_production_operator_mpi
   call build_dg_wpw_production_operator(context,info)
   if(info/=0) error stop 15
   if(.not.context%bounded_operator%valid)error stop 151
+  call initialize_dg_wpw_s_orthogonal_complement(context%bounded_operator,1d-10,complement,info)
+  if(info/=0.or..not.complement%valid)error stop 1510
+  complement_a_local=0
+  complement_a_local(rank+1,:)=complement%a_owned_w_global_p(1,:)
+  call MPI_Allreduce(complement_a_local,complement_a,4,MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_COMM_WORLD,ierr)
+  complement_t=0
+  do k=1,4;complement_t(k,k)=1;enddo
+  complement_t(1:2,3:4)=-complement_a
   call initialize_dg_wpw_fragment_block_preconditioner(context%bounded_operator,1d-8,&
     block_preconditioner,info)
   if(info/=0.or..not.block_preconditioner%valid.or.block_preconditioner%dimension/=2.or.&
@@ -261,14 +275,24 @@ program test_dg_wpw_production_operator_mpi
   saved_required_p=context%bounded_operator%required_p_ids
   call set_dg_wpw_interface_lambda(context%bounded_operator,0d0,info)
   if(info/=0)error stop 221
+  call validate_dg_wpw_s_orthogonal_complement(context%bounded_operator,complement,info)
+  if(info/=0)error stop 2210
   call apply_h_dg_wpw_bounded(context%bounded_operator,context%bounded_operator%operator_epoch,&
     context%bounded_operator%layout_fingerprint,bxw,bxp,byw,byp,info)
   if(info/=0)error stop 222
   bounded_local=0;bounded_local(rank+1)=byw(1,1);bounded_local(2+owned_p)=byp(1,1)
   call MPI_Allreduce(bounded_local,bounded,4,MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_COMM_WORLD,ierr)
   if(maxval(abs(bounded-matmul(h0_oracle,x)))>1d-12)error stop 223
+  call apply_h_dg_wpw_s_orthogonal_complement(context%bounded_operator,complement,bxw,bxp,byw,byp,info)
+  if(info/=0)error stop 2230
+  wrapped_local=0;wrapped_local(rank+1)=byw(1,1);wrapped_local(2+owned_p)=byp(1,1)
+  call MPI_Allreduce(wrapped_local,wrapped,4,MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_COMM_WORLD,ierr)
+  wrapped_expected=matmul(conjg(transpose(complement_t)),matmul(h0_oracle,matmul(complement_t,x)))
+  if(maxval(abs(wrapped-wrapped_expected))>1d-11)error stop 2231
   call set_dg_wpw_interface_lambda(context%bounded_operator,0.5d0,info)
   if(info/=0)error stop 224
+  call validate_dg_wpw_s_orthogonal_complement(context%bounded_operator,complement,info)
+  if(info/=0)error stop 2240
   call apply_dg_wpw_fragment_block_eigen_correction(context%bounded_operator,block_preconditioner,&
     block_eigenvalues,block_rhs_w,block_rhs_p,block_z_w,block_z_p,info)
   if(info/=0.or.maxval(abs(block_z_w-saved_block_z_w))>1d-13.or.&
@@ -295,6 +319,8 @@ program test_dg_wpw_production_operator_mpi
     context%bounded_operator%owned_w_ids(1)/=saved_transport_id)error stop 2271
   call set_dg_wpw_interface_lambda(context%bounded_operator,1d0,info)
   if(info/=0)error stop 228
+  call validate_dg_wpw_s_orthogonal_complement(context%bounded_operator,complement,info)
+  if(info/=0)error stop 2280
   call apply_s_dg_wpw_bounded(context%bounded_operator,context%bounded_operator%operator_epoch,&
     context%bounded_operator%layout_fingerprint,bxw,bxp,bsw,bsp,info)
   if(info/=0)error stop 23
@@ -330,12 +356,38 @@ program test_dg_wpw_production_operator_mpi
   if(info==0.or.maxval(abs(context%wp_h-saved_total))>1d-14)error stop 248
   call build_dg_wpw_production_operator(context,info)
   if(info/=0.or.context%bounded_operator%layout_fingerprint==old_fingerprint)error stop 25
+  call validate_dg_wpw_s_orthogonal_complement(context%bounded_operator,complement,info)
+  if(info/=0)error stop 250
+  rebuilt_h=0
+  do k=1,4
+    bxw=0;bxp=0
+    if(k==rank+1)bxw(1,1)=1
+    if(k==2+owned_p)bxp(1,1)=1
+    call apply_h_dg_wpw_bounded(context%bounded_operator,context%bounded_operator%operator_epoch,&
+      context%bounded_operator%layout_fingerprint,bxw,bxp,byw,byp,info)
+    if(info/=0)error stop 2500
+    bounded_local=0;bounded_local(rank+1)=byw(1,1);bounded_local(2+owned_p)=byp(1,1)
+    call MPI_Allreduce(bounded_local,rebuilt_h(:,k),4,MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_COMM_WORLD,ierr)
+  enddo
+  bxw(1,1)=x(rank+1);bxp(1,1)=x(2+owned_p)
+  call apply_h_dg_wpw_s_orthogonal_complement(context%bounded_operator,complement,bxw,bxp,byw,byp,info)
+  if(info/=0)error stop 2503
+  wrapped_local=0;wrapped_local(rank+1)=byw(1,1);wrapped_local(2+owned_p)=byp(1,1)
+  call MPI_Allreduce(wrapped_local,wrapped,4,MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_COMM_WORLD,ierr)
+  wrapped_expected=matmul(conjg(transpose(complement_t)),matmul(rebuilt_h,matmul(complement_t,x)))
+  if(maxval(abs(wrapped-wrapped_expected))>1d-11)error stop 2504
+  saved_metric_value=context%bounded_operator%ww_s_dense(rank+1,rank+1)
+  if(rank==0)context%bounded_operator%ww_s_dense(1,1)=saved_metric_value+(0.125d0,0d0)
+  call validate_dg_wpw_s_orthogonal_complement(context%bounded_operator,complement,info)
+  if(info==0)error stop 2502
+  context%bounded_operator%ww_s_dense(rank+1,rank+1)=saved_metric_value
   call apply_dg_wpw_fragment_block_eigen_correction(context%bounded_operator,block_preconditioner,&
     block_eigenvalues,block_rhs_w,block_rhs_p,block_z_w,block_z_p,info)
   if(info==0)error stop 2501
   if(rank==0) print '(a)','PASS two-rank rank-local production operator matches dense oracle'
   call release_dg_wpw_bounded_operator_snapshot(frozen_operator)
   call release_dg_wpw_production_context_snapshot(frozen_context)
+  call release_dg_wpw_s_orthogonal_complement(complement)
   call release_dg_wpw_bounded_operator(context%bounded_operator)
   call MPI_Finalize(ierr)
 end program

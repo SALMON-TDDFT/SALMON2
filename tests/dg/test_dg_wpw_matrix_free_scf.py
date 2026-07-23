@@ -18,6 +18,29 @@ global_text = GLOBAL.read_text().lower()
 input_text = INPUT.read_text().lower()
 controls = global_text + input_text
 
+complement_control = "yn_dg_wpw_s_orthogonal_pw"
+assert complement_control in global_text, "missing S-orthogonal PW comparison control"
+assert complement_control in input_text, "S-orthogonal PW control is absent from input plumbing"
+assert f"{complement_control} = 'n'" in input_text, "S-orthogonal PW comparison must remain default-off"
+for required in (
+    "call comm_bcast(yn_dg_wpw_s_orthogonal_pw",
+    "'yn_dg_wpw_s_orthogonal_pw', yn_dg_wpw_s_orthogonal_pw",
+    "call yn_argument_check(yn_dg_wpw_s_orthogonal_pw)",
+):
+    assert required in input_text, f"missing S-orthogonal PW input contract: {required}"
+assert "yn_dg_wpw_s_orthogonal_pw=='y'.and.yn_dg_wpw_fixed_h_relaxation/='y'" in \
+       input_text.replace(" ", ""), "S-orthogonal PW comparison must be fixed-H-only"
+assert "initialize_dg_wpw_s_orthogonal_complement" in lcfo
+assert "wpw_apply_h_complement" in lcfo and "wpw_apply_s_complement" in lcfo
+assert "wpw_fixed_apply_h=>wpw_apply_h_complement" in lcfo.replace(" ", "")
+assert "wpw_fixed_apply_h=>wpw_apply_h" in lcfo.replace(" ", "")
+assert "[dg-wpw-pw-complement] mode=s-orthogonal fingerprint=" in lcfo
+for field in ("solve_residual=", "cross_metric_defect=", "numerical_p_rank="):
+    assert field in lcfo, f"missing complement log field: {field}"
+assert "map_dg_wpw_original_to_complement" in lcfo
+assert lcfo.count("map_dg_wpw_complement_to_original") >= 2, \
+    "density and checkpoint boundaries must restore original coordinates"
+
 precondition_control = "yn_dg_wpw_preconditioner"
 metric_precondition_control = "yn_dg_wpw_metric_preconditioner"
 assert precondition_control in global_text, "missing explicit WPW preconditioner comparison control"

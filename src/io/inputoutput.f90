@@ -379,6 +379,7 @@ contains
       & yn_dg_wpw_preconditioner, &
       & yn_dg_wpw_metric_preconditioner, &
       & yn_dg_wpw_search_history, &
+      & yn_dg_wpw_s_orthogonal_pw, &
       & dg_wpw_extra_states, &
       & dg_wpw_scf_max_iter, &
       & dg_wpw_window_buffer, &
@@ -951,6 +952,7 @@ contains
     yn_dg_wpw_preconditioner = 'y'
     yn_dg_wpw_metric_preconditioner = 'n'
     yn_dg_wpw_search_history = 'y'
+    yn_dg_wpw_s_orthogonal_pw = 'n'
     dg_wpw_extra_states = 8
     dg_wpw_scf_max_iter = 200
     dg_wpw_window_buffer = 3
@@ -1634,6 +1636,7 @@ contains
     call comm_bcast(yn_dg_wpw_preconditioner,nproc_group_global)
     call comm_bcast(yn_dg_wpw_metric_preconditioner,nproc_group_global)
     call comm_bcast(yn_dg_wpw_search_history,nproc_group_global)
+    call comm_bcast(yn_dg_wpw_s_orthogonal_pw,nproc_group_global)
     call comm_bcast(dg_wpw_extra_states     ,nproc_group_global)
     call comm_bcast(dg_wpw_scf_max_iter     ,nproc_group_global)
     call comm_bcast(dg_wpw_window_buffer    ,nproc_group_global)
@@ -2684,6 +2687,7 @@ contains
         yn_dg_wpw_preconditioner
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_wpw_metric_preconditioner', yn_dg_wpw_metric_preconditioner
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_wpw_search_history', yn_dg_wpw_search_history
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_wpw_s_orthogonal_pw', yn_dg_wpw_s_orthogonal_pw
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_extra_states', dg_wpw_extra_states
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_scf_max_iter', dg_wpw_scf_max_iter
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_window_buffer', dg_wpw_window_buffer
@@ -3251,10 +3255,13 @@ contains
     call yn_argument_check(yn_dg_wpw_preconditioner)
     call yn_argument_check(yn_dg_wpw_metric_preconditioner)
     call yn_argument_check(yn_dg_wpw_search_history)
+    call yn_argument_check(yn_dg_wpw_s_orthogonal_pw)
     if(yn_dg_wpw_preconditioner=='y'.and.yn_dg_wpw_metric_preconditioner=='y') &
       stop 'yn_dg_wpw_preconditioner and yn_dg_wpw_metric_preconditioner are mutually exclusive'
     if(yn_dg_wpw_fixed_h_relaxation=='y'.and.yn_dg_wpw_production/='y') &
       stop 'yn_dg_wpw_fixed_h_relaxation=y requires yn_dg_wpw_production=y'
+    if(yn_dg_wpw_s_orthogonal_pw=='y'.and.yn_dg_wpw_fixed_h_relaxation/='y') &
+      stop 'yn_dg_wpw_s_orthogonal_pw=y requires yn_dg_wpw_fixed_h_relaxation=y'
     if(yn_dg_wpw_production=='y') then
       if(yn_dc/='y') stop 'yn_dg_wpw_production=y requires yn_dc=y'
       if(dg_wpw_extra_states<1 .or. dg_wpw_scf_max_iter<1) &

@@ -20,6 +20,7 @@ sources = [
     ROOT / "src/rt/dg/rt_dg_wpw_face_trace_scanner.f90",
     ROOT / "src/common/dg_wpw_owner_exchange.f90",
     ROOT / "src/common/dg_wpw_bounded_operator.f90",
+    ROOT / "src/common/dg_wpw_s_orthogonal_complement.f90",
     ROOT / "src/common/dg_wpw_production_context.f90",
     ROOT / "src/gs/dc/dg_wpw_lcfo_operator_adapter.f90",
     ROOT / "src/rt/dg/rt_dg_wpw_trace_halo_provider.f90",
