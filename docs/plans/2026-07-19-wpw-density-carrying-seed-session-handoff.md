@@ -519,6 +519,35 @@ collapseである。default-off比較routeは維持するがnormal SCF/checkpoin
 次はglobal iterative correction solve、またはoccupied/extraを明示分割してextra側の
 amplificationを制限するstate-partitioned correctionを設計候補とする。
 
+### 2026-07-23 global projected correction比較
+
+Task 16 restartを`/tmp/20260723_task4_global_projected_b6`へcloneし、親作業ツリーの
+未コミット前提実装と今回branchのcommit済みTask 1/2だけを重ねたTask 3一時overlay
+binaryで、`OMP_NUM_THREADS=1`、8 rank実行した。親の未コミット実装はbranchへ
+取り込んでいない。Task 16のbasis、normalized seed、cutoff、tolerance、continuation、
+search history、publication設定を維持し、diagonal/metric-block/fragment-local
+H-epsilon-S/S-orthogonal complementを`n`、global projected correctionだけを`y`とした。
+GMRES controlはrestart `8`、maximum iterations `32`、relative tolerance `1E-2`、
+state batch `8`である。
+
+DC-SCFは同じ87反復で、tail ratio `7.2686E-03`、density-seed projection residual
+`7.7960E-11`、normalization residual `1.3946E-15`、projected charge error
+`5.9380E-11`、source-to-DC residual `6.0445E-02`を再現した。しかし最初のfixed-H
+correctionで160 state中7 stateが32 GMRES反復内に収束せず、accepted correctionを
+返す前にfail closedした。failure summaryは`info=1`、operator snapshot再検証
+`post_snapshot_info=0`、最大final projected-equation residual/equation defect
+`4.6571063211358618E-04`、maximum iterations `32`、failed breakdown `0`である。
+
+従ってinner 32/96/160、outer occupied/extra residual、search metric rank/discarded
+weight、Ritz defectへは到達しておらず、このrunについてそれらの値は存在しない。
+Task 16 no-precondition、Task 19 metric-block、S-orthogonal complement、
+fragment-local H-epsilon-Sとの同一inner比較以前に、受入条件のGMRES nonconvergence
+なしを満たさなかった。runは`fixed_h_stage=algebra iter=1 info=1`から既存full-LCFOへ
+fallbackしてexit 0となり、WPW checkpoint/manifest/RTはpublishされていない。
+このgateはrejectし、routeはdefault-off fixed-H/continuation比較用のまま維持する。
+normal SCF/checkpoint/publication/RTへは昇格しない。次の設計候補は収束困難な7 stateを
+明示するstate-partitioned policy、または特異・不定補正方程式向けMINRES-QLPである。
+
 ## 新セッション開始文（コピー用）
 
 ```text

@@ -439,6 +439,45 @@ Commit only the two result documents:
 git commit -m "docs(dg-wpw): record global correction B=6 gate"
 ```
 
+#### Task 4 execution result
+
+The Task 16 restart was cloned to
+`/tmp/20260723_task4_global_projected_b6` and run with the Task 3 overlay
+binary on eight MPI ranks with `OMP_NUM_THREADS=1`. The copied input retained
+the Task 16 basis, normalized seed, cutoff, tolerance, continuation, search
+history, and publication settings. The variables log confirms that diagonal,
+metric-block, fragment-local H-epsilon-S, and S-orthogonal-complement routes
+were all `n`; only global projected correction was `y`, with restart `8`,
+maximum iterations `32`, tolerance `1.0E-2`, and state batch `8`.
+
+The physical prerequisites reproduced: DC-SCF converged in 87 iterations,
+the occupied-W tail ratio was `7.2686E-03` (warning), and the density seed had
+captured norm `1`, projection residual `7.7960E-11`, normalization residual
+`1.3946E-15`, projected charge error `5.9380E-11`, and source-to-DC residual
+`6.0445E-02` (warning).
+
+The first fixed-H correction failed closed before completing inner iteration
+1. Seven of 160 state solves did not reach the requested relative tolerance
+within 32 GMRES iterations. The failure summary reported
+`info=1`, `post_snapshot_info=0`, maximum final projected-equation residual
+and equation defect both `4.6571063211358618E-04`, maximum iterations `32`,
+`nonconverged=7`, and `failed_breakdown=0`. Because no correction application
+was accepted, the inner 32/96/160 design diagnostics, outer occupied/extra
+residuals, search-metric rank/discarded weights, and Ritz post/direct defects
+do not exist for this run; reporting baseline values in those slots would
+misrepresent them as global-route measurements. The run instead emitted
+`[DG-WPW-LOCAL-FAIL] fixed_h_stage=algebra iter=1 info=1`, performed the
+existing full-LCFO fallback, exited normally, and published no WPW
+checkpoint/manifest/RT state.
+
+This gate is rejected. Unlike Task 16 no-precondition, Task 19 metric-block,
+the S-orthogonal complement, and the rejected fragment-local H-epsilon-S
+route, the global route did not reach inner 32 and therefore cannot show
+simultaneous occupied/extra improvement. It also violates the explicit
+no-GMRES-nonconvergence acceptance condition. The route remains default-off
+and fixed-H/continuation-only; it is not promoted to normal SCF, checkpoint,
+publication, or RT.
+
 ### Task 5: Decision checkpoint
 
 Do not promote this route into normal outer SCF, checkpoint schema,
