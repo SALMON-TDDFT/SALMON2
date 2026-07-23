@@ -83,6 +83,48 @@
 8. Record the result and next hypothesis in this plan and the session handoff.
 9. Run `git diff --check` and commit only the two result documents.
 
+#### 2026-07-23 B=6 physical gate result
+
+Task 16のrestartを`/tmp/20260723_task3_s_orthogonal_b6`へ複製し、8 MPI rankで
+diagonal/metric preconditioner=`n`、search history=`y`、S-orthogonal complement=`y`
+として実行した。basis、cutoff、tolerance、continuation、publication設定は変更していない。
+DC-SCFは87 iteration、最終差`9.8498230E-10`で既存seedを再現した。
+
+補空間初期化のsolve residualとW--P cross-metric defectはいずれも
+`6.4725E-13`、metric fingerprintは`-8374564770650107427`だった。raw PW列数は
+8 fragment x 128=`1024`のまま、cutoff `1.0E-10`でnumerical complement rankは`976`
+（低metric-weight 48方向）である。production runに不足した診断値だけを、solver stateを
+変更しない一時logging buildで再実行したところ、original→complement→originalの最大係数
+round-trip defectは`4.2352E-22`だった。
+
+inner 32/96/160のoccupied/extra residualは
+`1.8708E-03/3.4680E-03`、`2.9849E-04/8.7240E-04`、
+`2.0653E-04/1.5936E-04`で、search metric effective rankは`426/284/202`だった。
+retained最小固有値比は`1.0433E-10/1.0063E-10/1.1730E-10`
+（condition proxy約`9.59E9/9.94E9/8.53E9`）。Ritz post/direct residual-vectorの
+occupied/extra相対defectは順に`2.96E-12/1.26E-12`、
+`1.35E-11/2.69E-11`、`4.94E-11/1.29E-10`、metric orthogonality defectは
+`6.80E-12/1.29E-12/3.50E-13`だった。
+
+Task 16のresidual `1.9667E-03/4.0432E-03`、
+`3.6079E-04/1.1093E-03`、`2.5607E-04/2.0289E-04`に対する改善は約
+1.05--1.27倍に留まった。Task 19 metric-block correctionに対してoccupiedは約
+24--124倍悪い一方、extraは約1.45--6.02倍良い。全runともfixed-Hは`info=40`で、
+checkpoint/publicationは行われなかった。
+
+同じ一時logging buildによるuntransformed比較では、selected generalized eigenvalue
+`(e1,e_occ,e_extra1,e_last)`の絶対差はそれぞれ
+`1.13E-08/8.33E-08/2.66E-08/1.61E-06`だった。これは非収束runの
+`O(1E-4)` residualより十分小さく、座標変換による固有値の有意な変化は認めないが、
+非収束値を厳密な不変量とは扱わない。
+
+従ってS-orthogonal化はmetric overlapを正しく除去し、同一retained spanを保つものの、
+plateauを質的には改善しない。座標/metric overlapだけが主因ではなく、span-preservingな
+座標変換だけでは不十分である。default-off診断routeは保持し、normal outer SCF、
+checkpoint、RTへは昇格させない。次の仮説はextra stateの過増幅を抑えた
+state-partitioned/regularized correction、または`H-epsilon S`に基づく
+metric-consistent correctionである。
+
 ### Task 4: Promotion decision checkpoint
 
 Do not integrate complement coordinates into normal outer SCF, checkpoint schema, or RT handoff automatically.

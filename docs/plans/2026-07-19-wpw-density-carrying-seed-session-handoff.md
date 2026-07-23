@@ -465,6 +465,33 @@ Ritz post/direct defectは最大`1.81E-09`、metric orthogonalityは
 基底空間の失敗とは解釈しない。次はextra stateの過増幅を抑えるregularization/state別適用、
 または`H-epsilon S`を近似するmetric-consistent correctionを同一条件で設計・比較する。
 
+### 2026-07-23 S-orthogonal PW complement比較
+
+`0087f37`でdistributed `A=S_WW^{-1}S_WP`と
+`T=[[I,-A],[0,I]]`を実装し、`db67872`でdefault-offかつfixed-H限定の
+`yn_dg_wpw_s_orthogonal_pw` routeを統合した。H/S actionは`T^dagger H T`/
+`T^dagger S T`で包み、seed・density境界の係数mapを明示した。metric-only fingerprintは
+H/interface更新で維持し、S/ID変更ではcollectiveにstale拒否する。関連fixture、source
+contract、MPI/EigenExa build、コードレビューはPASSした。
+
+Task 16 restartからfresh B=6を8 rankで実行し、diagonal/metric preconditioner=`n`、
+history=`y`、complement=`y`とした。complement solve residualとcross-metric defectは
+ともに`6.4725E-13`、raw PW 1024列を削除せずnumerical rankは976、係数round-trip defectは
+`4.2352E-22`だった。
+
+inner 32/96/160のoccupied/extra residualは
+`1.8708E-03/3.4680E-03`、`2.9849E-04/8.7240E-04`、
+`2.0653E-04/1.5936E-04`、effective rankは`426/284/202`である。Task 16比の改善は
+約1.05--1.27倍に留まり、`info=40`、publicationなしだった。Ritz post/direct defectは
+最大`1.29E-10`、metric orthogonalityは最大`6.80E-12`で、座標mapと更新整合性に異常はない。
+
+matching untransformed runとのselected generalized eigenvalueの絶対差は
+`1.13E-08/8.33E-08/2.66E-08/1.61E-06`で、非収束runの`O(1E-4)` residualと整合する。
+従ってS-orthogonal complementはmetric overlapを除去してもplateauを質的に改善せず、
+span-preservingな座標変換だけでは不十分である。normal SCF/checkpoint/RTへは昇格させず、
+次はstate-partitioned/regularized correctionまたは`H-epsilon S`型の
+metric-consistent correctionを設計する。
+
 ## 新セッション開始文（コピー用）
 
 ```text
