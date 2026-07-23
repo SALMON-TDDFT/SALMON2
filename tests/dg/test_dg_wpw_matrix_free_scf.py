@@ -9,6 +9,33 @@ MAIN = ROOT / "src/gs/main_dft.f90"
 LCFO = ROOT / "src/gs/dc/lcfo_flux.f90"
 GLOBAL = ROOT / "src/io/salmon_global.f90"
 INPUT = ROOT / "src/io/inputoutput.f90"
+GLOBAL_CORRECTION = ROOT / "src/common/dg_wpw_global_projected_correction.f90"
+COMMON_CMAKE = ROOT / "src/common/CMakeLists.txt"
+
+assert GLOBAL_CORRECTION.exists(), "missing global projected correction source"
+global_correction = GLOBAL_CORRECTION.read_text().lower()
+assert "dg_wpw_global_projected_correction.f90" in COMMON_CMAKE.read_text().lower()
+for required in (
+    "right=x-matmul(q,global_gram_q_sx)",
+    "left=y-matmul(sq,global_gram_q_y)",
+    "explicit_final_residual",
+    "state_batch",
+    "initial_residual",
+    "final_residual",
+    "relative_residual",
+    "s_orthogonality",
+    "equation_defect",
+    "projected_fraction",
+    "correction_norm",
+    "amplification",
+    "restart_count",
+    "breakdown_status",
+    "state_status",
+):
+    assert required in global_correction.replace(" ", ""), \
+        f"missing global correction contract: {required}"
+for forbidden in ("allocate(h_global", "allocate(s_global", "assemble_global_h", "assemble_global_s"):
+    assert forbidden not in global_correction, f"dense global assembly forbidden: {forbidden}"
 
 assert SOURCE.exists(), "missing bounded matrix-free DG-DC consumer"
 source = SOURCE.read_text().lower()

@@ -16,6 +16,7 @@ set(SOURCES
    dg_wpw_density.f90
    dg_wpw_fixed_operator.f90
    dg_wpw_matrix_free_operator.f90
+   dg_wpw_global_projected_correction.f90
    dg_wpw_owner_exchange.f90
    dg_wpw_bounded_operator.f90
    dg_wpw_s_orthogonal_complement.f90
