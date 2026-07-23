@@ -18,6 +18,7 @@ set(SOURCES
    dg_wpw_matrix_free_operator.f90
    dg_wpw_owner_exchange.f90
    dg_wpw_bounded_operator.f90
+   dg_wpw_s_orthogonal_complement.f90
    dg_wpw_nonlocal_projector.f90
    dg_wpw_g_modes.f90
    dg_wpw_fragment_support.f90
