@@ -3290,10 +3290,13 @@ contains
     use salmon_global, only: yn_dc_lcfo_diag,yn_dg_wpw_production,yn_dg_wpw_fixed_h_relaxation,&
       yn_dg_wpw_s_orthogonal_pw,&
       yn_dg_wpw_preconditioner,yn_dg_wpw_metric_preconditioner,yn_dg_wpw_h_epsilon_s_correction,&
+      yn_dg_wpw_global_projected_correction,&
       yn_dg_wpw_search_history,&
       n_plane_waves_dg,k_cutoff_plane_wave,&
       dg_wpw_window_buffer,dg_wpw_window_width,dg_wpw_extra_states,dg_wpw_scf_max_iter,&
-      dg_wpw_gap_threshold,dg_wpw_metric_cutoff,dg_wpw_scf_mix,dg_wpw_scf_residual_tolerance,num_fragment
+      dg_wpw_gap_threshold,dg_wpw_metric_cutoff,dg_wpw_scf_mix,dg_wpw_scf_residual_tolerance,&
+      dg_wpw_global_correction_restart,dg_wpw_global_correction_max_iterations,&
+      dg_wpw_global_correction_state_batch,dg_wpw_global_correction_tolerance,num_fragment
     use dg_wpw_g_modes, only: select_dg_wpw_g_modes
     use dg_wpw_fragment_support, only: s_dg_wpw_support_record,build_dg_wpw_fragment_support,&
       dg_wpw_support_overlap_box
@@ -3330,7 +3333,12 @@ contains
       initialize_dg_wpw_fragment_block_preconditioner,apply_dg_wpw_fragment_block_preconditioner,&
       apply_dg_wpw_fragment_block_eigen_correction,s_dg_wpw_h_epsilon_s_diagnostics,&
       initialize_dg_wpw_h_epsilon_s_factor,apply_dg_wpw_h_epsilon_s_correction,&
-      release_dg_wpw_h_epsilon_s_factor
+      release_dg_wpw_h_epsilon_s_factor,s_dg_wpw_bounded_operator_snapshot,&
+      snapshot_dg_wpw_bounded_operator,validate_dg_wpw_bounded_operator_snapshot,&
+      release_dg_wpw_bounded_operator_snapshot
+    use dg_wpw_global_projected_correction,only:solve_dg_wpw_global_projected_correction,&
+      release_dg_wpw_global_correction_diagnostics,s_dg_wpw_global_correction_controls,&
+      s_dg_wpw_global_correction_diagnostics
     use dg_wpw_nonlocal_projector,only:s_dg_wpw_projector_overlap,&
       build_dg_wpw_projector_overlap_partials,reduce_dg_wpw_p_projector_partials,&
       exchange_dg_wpw_projector_overlaps,assemble_dg_wpw_nonlocal_blocks,&
@@ -3474,6 +3482,7 @@ contains
       wpw_saved_vh_tot(:,:,:),wpw_saved_vxc_tot(:,:,:)
     real(8),allocatable::wpw_frozen_rho_tot(:,:,:),wpw_frozen_vh_tot(:,:,:),&
       wpw_frozen_vxc_tot(:,:,:),wpw_frozen_vloc_tot(:,:,:)
+    complex(8),allocatable::wpw_global_current_qw(:,:),wpw_global_current_qp(:,:)
     integer,allocatable::wpw_total_owned_grid_ids(:),wpw_core_destinations(:)
     integer::wpw_nocc,wpw_nretain
     integer::wpw_frozen_halo_epoch,wpw_frozen_scan_epoch,wpw_frozen_operator_epoch
@@ -3486,6 +3495,7 @@ contains
       wpw_fixed_h_final_projector,wpw_fixed_h_density_baseline,wpw_fixed_h_charge_error
     logical::wpw_fixed_h_qualified,wpw_metric_diagnostic_only
     integer::wpw_h_epsilon_s_application_count
+    integer::wpw_global_projected_application_count
     procedure(apply_h_batch),pointer::wpw_fixed_apply_h=>null()
     procedure(apply_s_batch),pointer::wpw_fixed_apply_s=>null()
     logical :: sawf_explicit_basis_active
@@ -3505,6 +3515,7 @@ contains
     wpw_window_width=merge(dg_wpw_window_width,0,num_fragment>1)
     wpw_production_comm=MPI_COMM_NULL
     wpw_h_epsilon_s_application_count=0
+    wpw_global_projected_application_count=0
     call init_lcfo
     wpw_window_buffer=merge(dc%nxyz_buffer-stencil_radius,0,num_fragment>1)
     call initialize_sawf_seed_provenance()
@@ -3633,6 +3644,8 @@ contains
     if(allocated(wpw_support_overlap_lo)) deallocate(wpw_support_overlap_lo)
     if(allocated(wpw_support_overlap_hi)) deallocate(wpw_support_overlap_hi)
     if(allocated(wpw_support_records)) deallocate(wpw_support_records)
+    if(allocated(wpw_global_current_qw))deallocate(wpw_global_current_qw)
+    if(allocated(wpw_global_current_qp))deallocate(wpw_global_current_qp)
     if(allocated(wpw_canonical_faces))deallocate(wpw_canonical_faces)
     if(allocated(wpw_volume_send)) deallocate(wpw_volume_send)
     if(allocated(wpw_volume_halos)) deallocate(wpw_volume_halos)
@@ -3645,6 +3658,14 @@ contains
     if(wpw_production_comm/=MPI_COMM_NULL.and.dc%id_frag==0)then
       call release_dg_wpw_s_orthogonal_complement(wpw_s_orthogonal_transform)
       call release_dg_wpw_h_epsilon_s_factor(wpw_context%h_epsilon_s_factor)
+      if(allocated(wpw_context%global_correction_diagnostics))then
+        select type(d=>wpw_context%global_correction_diagnostics)
+        type is(s_dg_wpw_global_correction_diagnostics)
+          call release_dg_wpw_global_correction_diagnostics(d)
+        end select
+        deallocate(wpw_context%global_correction_diagnostics)
+      endif
+      if(allocated(wpw_context%global_correction_controls))deallocate(wpw_context%global_correction_controls)
       call release_dg_wpw_bounded_operator(wpw_context%bounded_operator)
     endif
     if(wpw_production_comm/=MPI_COMM_NULL)call MPI_Comm_free(wpw_production_comm,wpw_mpi_info)
@@ -4268,6 +4289,17 @@ contains
       if(ierr/=MPI_SUCCESS.or.root_info/=0)return
       call validate_wpw_frozen_h_state(fixed_info)
       if(fixed_info/=0)return
+      if(allocated(wpw_context%global_correction_controls))deallocate(wpw_context%global_correction_controls)
+      if(allocated(wpw_context%global_correction_diagnostics))deallocate(wpw_context%global_correction_diagnostics)
+      allocate(s_dg_wpw_global_correction_controls::wpw_context%global_correction_controls)
+      allocate(s_dg_wpw_global_correction_diagnostics::wpw_context%global_correction_diagnostics)
+      select type(global_controls=>wpw_context%global_correction_controls)
+      type is(s_dg_wpw_global_correction_controls)
+        global_controls%restart=dg_wpw_global_correction_restart
+        global_controls%max_iterations=dg_wpw_global_correction_max_iterations
+        global_controls%state_batch=dg_wpw_global_correction_state_batch
+        global_controls%relative_tolerance=dg_wpw_global_correction_tolerance
+      end select
       if(dc%id_frag==0.and.yn_dg_wpw_h_epsilon_s_correction=='y')then
         call refresh_wpw_h_epsilon_s_factor(.true.,root_info)
       endif
@@ -4278,6 +4310,12 @@ contains
           write(*,'(1x,a)')'[DG-WPW-CORRECTION-MODE] fixed_h=metric_block'
         elseif(yn_dg_wpw_h_epsilon_s_correction=='y')then
           write(*,'(1x,a)')'[DG-WPW-CORRECTION-MODE] fixed_h=H-epsilon-S'
+        elseif(yn_dg_wpw_global_projected_correction=='y')then
+          write(*,'(1x,a,3(a,i0),a,es12.4)')'[DG-WPW-CORRECTION-MODE] fixed_h=global_projected',&
+            ' restart=',dg_wpw_global_correction_restart,&
+            ' max_iterations=',dg_wpw_global_correction_max_iterations,&
+            ' state_batch=',dg_wpw_global_correction_state_batch,&
+            ' tolerance=',dg_wpw_global_correction_tolerance
         elseif(yn_dg_wpw_preconditioner=='y')then
           write(*,'(1x,a)')'[DG-WPW-CORRECTION-MODE] fixed_h=diagonal'
         else
@@ -4311,6 +4349,13 @@ contains
               iter+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
               wpw_q_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,&
               wpw_h_epsilon_s_precondition,retain_search_history=yn_dg_wpw_search_history=='y')
+          elseif(yn_dg_wpw_global_projected_correction=='y')then
+            call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,wpw_fixed_apply_h,&
+              wpw_fixed_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,wpw_nretain,&
+              iter+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
+              wpw_q_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,&
+              wpw_global_projected_precondition,retain_search_history=yn_dg_wpw_search_history=='y',&
+              observe_ritz=wpw_capture_current_ritz)
           elseif(yn_dg_wpw_preconditioner=='y')then
             call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,wpw_fixed_apply_h,&
               wpw_fixed_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,wpw_nretain,&
@@ -4427,6 +4472,13 @@ contains
               wpw_nretain,trial+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
               accepted_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,&
               wpw_h_epsilon_s_precondition,retain_search_history=yn_dg_wpw_search_history=='y')
+          elseif(yn_dg_wpw_global_projected_correction=='y')then
+            call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,&
+              wpw_fixed_apply_h,wpw_fixed_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,&
+              wpw_nretain,trial+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
+              accepted_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,&
+              wpw_global_projected_precondition,retain_search_history=yn_dg_wpw_search_history=='y',&
+              observe_ritz=wpw_capture_current_ritz)
           elseif(yn_dg_wpw_preconditioner=='y')then
             call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,&
               wpw_fixed_apply_h,wpw_fixed_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,&
@@ -6057,6 +6109,136 @@ contains
         zw=0;zp=0;precondition_info=1
       end select
     end subroutine wpw_h_epsilon_s_precondition
+
+    subroutine wpw_global_projected_precondition(context,eigenvalues,rw,rp,zw,zp,precondition_info)
+      class(*),intent(inout)::context
+      real(8),intent(in)::eigenvalues(:)
+      complex(8),intent(in)::rw(:,:),rp(:,:)
+      complex(8),intent(out)::zw(:,:),zp(:,:)
+      integer,intent(out)::precondition_info
+      type(s_dg_wpw_bounded_operator_snapshot)::snapshot
+      integer::snapshot_info
+
+      zw=0;zp=0;precondition_info=1
+      select type(c=>context)
+      type is(s_dg_wpw_production_context)
+        if(.not.allocated(c%global_correction_controls).or.&
+          .not.allocated(c%global_correction_diagnostics).or.&
+          .not.allocated(wpw_global_current_qw).or..not.allocated(wpw_global_current_qp))return
+        call snapshot_dg_wpw_bounded_operator(c%bounded_operator,snapshot,snapshot_info)
+        if(snapshot_info/=0)return
+        select type(global_controls=>c%global_correction_controls)
+        type is(s_dg_wpw_global_correction_controls)
+          select type(global_diagnostics=>c%global_correction_diagnostics)
+          type is(s_dg_wpw_global_correction_diagnostics)
+            call solve_dg_wpw_global_projected_correction(c,wpw_production_comm,wpw_fixed_apply_h,&
+              wpw_fixed_apply_s,wpw_global_gram,validate_wpw_global_operator_state,&
+              snapshot%operator_epoch,snapshot%layout_fingerprint,wpw_global_current_qw,&
+              wpw_global_current_qp,eigenvalues,rw,rp,&
+              global_controls,zw,zp,global_diagnostics,precondition_info)
+            call validate_dg_wpw_bounded_operator_snapshot(c%bounded_operator,snapshot,snapshot_info)
+            if(snapshot_info/=0)precondition_info=1
+            if(precondition_info/=0.and.c%rank_id==0.and.allocated(global_diagnostics%state_status))then
+              write(*,*)'[DG-WPW-GLOBAL-PROJECTED-FAIL] info=',&
+                precondition_info,' post_snapshot_info=',snapshot_info,&
+                ' final_residual=',merge(maxval(global_diagnostics%final_residual,&
+                  mask=global_diagnostics%initial_residual>0d0),0d0,&
+                  any(global_diagnostics%initial_residual>0d0)),&
+                ' equation_defect=',merge(maxval(global_diagnostics%equation_defect,&
+                  mask=global_diagnostics%initial_residual>0d0),0d0,&
+                  any(global_diagnostics%initial_residual>0d0)),&
+                ' iterations=',maxval(global_diagnostics%iterations),&
+                ' nonconverged=',count(global_diagnostics%state_status==3),&
+                ' failed_breakdown=',count(global_diagnostics%breakdown_status==2)
+            endif
+            if(precondition_info==0)then
+              wpw_global_projected_application_count=wpw_global_projected_application_count+1
+              if(c%rank_id==0.and.(wpw_global_projected_application_count==32.or.&
+                wpw_global_projected_application_count==96.or.&
+                wpw_global_projected_application_count==160))then
+                write(*,*)'[DG-WPW-GLOBAL-PROJECTED-CORRECTION] inner=',&
+                  wpw_global_projected_application_count,&
+                  ' occupied_initial=',maxval(global_diagnostics%initial_residual(1:wpw_nocc)),&
+                  ' extra_initial=',maxval(global_diagnostics%initial_residual(wpw_nocc+1:)),&
+                  ' occupied_residual=',maxval(global_diagnostics%final_residual(1:wpw_nocc)),&
+                  ' extra_residual=',maxval(global_diagnostics%final_residual(wpw_nocc+1:)),&
+                  ' occupied_relative=',maxval(global_diagnostics%relative_residual(1:wpw_nocc)),&
+                  ' extra_relative=',maxval(global_diagnostics%relative_residual(wpw_nocc+1:)),&
+                  ' occupied_s_orth=',maxval(global_diagnostics%s_orthogonality(1:wpw_nocc)),&
+                  ' extra_s_orth=',maxval(global_diagnostics%s_orthogonality(wpw_nocc+1:)),&
+                  ' occupied_equation_defect=',maxval(global_diagnostics%equation_defect(1:wpw_nocc)),&
+                  ' extra_equation_defect=',maxval(global_diagnostics%equation_defect(wpw_nocc+1:)),&
+                  ' occupied_projected_fraction=',maxval(global_diagnostics%projected_fraction(1:wpw_nocc)),&
+                  ' extra_projected_fraction=',maxval(global_diagnostics%projected_fraction(wpw_nocc+1:)),&
+                  ' occupied_correction_norm=',maxval(global_diagnostics%correction_norm(1:wpw_nocc)),&
+                  ' extra_correction_norm=',maxval(global_diagnostics%correction_norm(wpw_nocc+1:)),&
+                  ' occupied_amplification=',maxval(global_diagnostics%amplification(1:wpw_nocc)),&
+                  ' extra_amplification=',maxval(global_diagnostics%amplification(wpw_nocc+1:)),&
+                  ' occupied_iterations=',maxval(global_diagnostics%iterations(1:wpw_nocc)),&
+                  ' extra_iterations=',maxval(global_diagnostics%iterations(wpw_nocc+1:)),&
+                  ' occupied_restarts=',maxval(global_diagnostics%restart_count(1:wpw_nocc)),&
+                  ' extra_restarts=',maxval(global_diagnostics%restart_count(wpw_nocc+1:)),&
+                  ' occupied_happy_breakdown=',count(global_diagnostics%breakdown_status(1:wpw_nocc)==1),&
+                  ' extra_happy_breakdown=',count(global_diagnostics%breakdown_status(wpw_nocc+1:)==1),&
+                  ' occupied_failed_breakdown=',count(global_diagnostics%breakdown_status(1:wpw_nocc)==2),&
+                  ' extra_failed_breakdown=',count(global_diagnostics%breakdown_status(wpw_nocc+1:)==2),&
+                  ' occupied_converged=',count(global_diagnostics%converged(1:wpw_nocc)),&
+                  ' extra_converged=',count(global_diagnostics%converged(wpw_nocc+1:)),&
+                  ' occupied_nonconverged=',count(global_diagnostics%state_status(1:wpw_nocc)==3),&
+                  ' extra_nonconverged=',count(global_diagnostics%state_status(wpw_nocc+1:)==3),&
+                  ' occupied_callback_failure=',count(global_diagnostics%state_status(1:wpw_nocc)==4),&
+                  ' extra_callback_failure=',count(global_diagnostics%state_status(wpw_nocc+1:)==4),&
+                  ' occupied_stale=',count(global_diagnostics%state_status(1:wpw_nocc)==5),&
+                  ' extra_stale=',count(global_diagnostics%state_status(wpw_nocc+1:)==5),&
+                  ' occupied_invalid=',count(global_diagnostics%state_status(1:wpw_nocc)==6),&
+                  ' extra_invalid=',count(global_diagnostics%state_status(wpw_nocc+1:)==6)
+              endif
+            endif
+          end select
+        end select
+        call release_dg_wpw_bounded_operator_snapshot(snapshot)
+        if(precondition_info/=0)then;zw=0;zp=0;return;endif
+      class default
+        zw=0;zp=0;precondition_info=1
+      end select
+    end subroutine wpw_global_projected_precondition
+
+    subroutine wpw_capture_current_ritz(context,qw,qp,capture_info)
+      class(*),intent(inout)::context
+      complex(8),intent(in)::qw(:,:),qp(:,:)
+      integer,intent(out)::capture_info
+      integer::astat,local_bad,global_bad,ierr
+      capture_info=1
+      if(allocated(wpw_global_current_qw))deallocate(wpw_global_current_qw)
+      if(allocated(wpw_global_current_qp))deallocate(wpw_global_current_qp)
+      allocate(wpw_global_current_qw,source=qw,stat=astat)
+      local_bad=merge(0,1,astat==0)
+      if(local_bad==0)then
+        allocate(wpw_global_current_qp,source=qp,stat=astat)
+        if(astat/=0)local_bad=1
+      endif
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,wpw_production_comm,ierr)
+      capture_info=merge(0,1,ierr==MPI_SUCCESS.and.global_bad==0)
+      if(capture_info/=0)then
+        if(allocated(wpw_global_current_qw))deallocate(wpw_global_current_qw)
+        if(allocated(wpw_global_current_qp))deallocate(wpw_global_current_qp)
+      endif
+    end subroutine wpw_capture_current_ritz
+
+    subroutine validate_wpw_global_operator_state(context,expected_epoch,expected_fingerprint,validate_info)
+      class(*),intent(inout)::context
+      integer,intent(in)::expected_epoch
+      integer(8),intent(in)::expected_fingerprint
+      integer,intent(out)::validate_info
+      select type(c=>context)
+      type is(s_dg_wpw_production_context)
+        validate_info=merge(0,1,c%bounded_operator%valid.and.&
+          c%bounded_operator%operator_epoch==expected_epoch.and.&
+          c%bounded_operator%layout_fingerprint==expected_fingerprint)
+      class default
+        validate_info=1
+      end select
+    end subroutine validate_wpw_global_operator_state
 
     subroutine measure_wpw_s_norm2(context,zw,zp,norm2,measure_info)
       class(*),intent(inout)::context

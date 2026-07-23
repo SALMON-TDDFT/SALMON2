@@ -25,6 +25,19 @@ assert f"{control} = 'n'" in INPUT, "fixed-H mode must not change repository def
 
 complement_control = "yn_dg_wpw_s_orthogonal_pw"
 hese_control = "yn_dg_wpw_h_epsilon_s_correction"
+global_control = "yn_dg_wpw_global_projected_correction"
+assert global_control in GLOBAL and global_control in INPUT
+assert f"{global_control} = 'n'" in INPUT
+for token in (
+    "dg_wpw_global_correction_restart = 8",
+    "dg_wpw_global_correction_max_iterations = 32",
+    "dg_wpw_global_correction_tolerance = 1d-2",
+    "dg_wpw_global_correction_state_batch = 8",
+    "call comm_bcast(yn_dg_wpw_global_projected_correction",
+    "'yn_dg_wpw_global_projected_correction', yn_dg_wpw_global_projected_correction",
+    "call yn_argument_check(yn_dg_wpw_global_projected_correction)",
+):
+    assert token in INPUT, f"missing global projected correction input contract: {token}"
 assert hese_control in GLOBAL and hese_control in INPUT
 assert f"{hese_control} = 'n'" in INPUT
 assert complement_control in GLOBAL and complement_control in INPUT
@@ -93,6 +106,12 @@ assert continuation_body.count("validate_wpw_frozen_h_state") >= 2, (
 assert "wpw_fixed_apply_h" in continuation_body and "wpw_fixed_apply_s" in continuation_body
 assert "wpw_h_epsilon_s_precondition" in fixed_body
 assert "wpw_h_epsilon_s_precondition" in continuation_body
+assert "wpw_global_projected_precondition" in fixed_body
+assert "wpw_global_projected_precondition" in continuation_body
+assert "solve_dg_wpw_global_projected_correction" in LCFO
+assert "snapshot_dg_wpw_bounded_operator" in LCFO
+assert "validate_dg_wpw_bounded_operator_snapshot" in LCFO
+assert "release_dg_wpw_global_correction_diagnostics" in LCFO
 assert "initialize_dg_wpw_h_epsilon_s_factor" in LCFO
 assert LCFO.index("call build_dg_wpw_production_operator") < \
        LCFO.index("call initialize_dg_wpw_h_epsilon_s_factor"), \

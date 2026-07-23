@@ -10,6 +10,9 @@ program test_dg_wpw_matrix_free_scf_mpi
   type::s_fixture_context
     integer::rank=0,nrank=1,first=1,nlocal=0
     integer::metric_precondition_calls=0
+    integer::ritz_observer_calls=0,ritz_precondition_calls=0,fail_precondition_call=0
+    real(8)::first_ritz_checksum=0d0
+    logical::ritz_changed=.false.
     logical::bad_fixed_energy=.false.,wide_spectrum=.false.,long_spectrum=.false.,metric_coupled=.false.
   end type
   type(s_fixture_context)::ctx
@@ -260,6 +263,19 @@ program test_dg_wpw_matrix_free_scf_mpi
     qp(i,1)=cmplx(sin(dble(17*j))+0.1d0*cos(dble(5*j)),0d0,8)
     qp(i,2)=cmplx(cos(dble(13*j))-0.2d0*sin(dble(3*j)),0d0,8)
   enddo
+  ctx%fail_precondition_call=2
+  call run_dg_wpw_matrix_free_algebra_step(ctx,MPI_COMM_WORLD,apply_h,apply_s,global_gram,0,nlocal,1,2,1,&
+    1d-12,1d-30,qw,qp,qold,eval,gap,residual,orth,projector,info,observe_precondition,&
+    observe_ritz=record_current_ritz)
+  if(info==0.or.ctx%ritz_precondition_calls/=2.or.ctx%ritz_observer_calls/=2)&
+    call MPI_Abort(MPI_COMM_WORLD,571,ierr)
+  ctx%fail_precondition_call=0;ctx%ritz_precondition_calls=0;ctx%ritz_observer_calls=0
+  ctx%ritz_changed=.false.;ctx%first_ritz_checksum=0d0
+  do i=1,nlocal
+    j=ctx%first+i-1
+    qp(i,1)=cmplx(sin(0.37d0*dble(j))+0.2d0*cos(0.11d0*dble(j)),0d0,8)
+    qp(i,2)=cmplx(cos(0.29d0*dble(j))-0.3d0*sin(0.07d0*dble(j)),0d0,8)
+  enddo
   call run_dg_wpw_matrix_free_algebra_step(ctx,MPI_COMM_WORLD,apply_h,apply_s,global_gram,0,nlocal,1,2,1,&
     1d-12,1d-8,qw,qp,qold,eval,gap,residual,orth,projector,info)
   if(info/=0.or.maxval(abs(eval-[0d0,1d0]))>1d-8.or.abs(gap-1d0)>1d-8.or.&
@@ -273,10 +289,47 @@ program test_dg_wpw_matrix_free_scf_mpi
     qp(i,2)=cmplx(cos(0.29d0*dble(j))-0.3d0*sin(0.07d0*dble(j)),0d0,8)
   enddo
   call run_dg_wpw_matrix_free_algebra_step(ctx,MPI_COMM_WORLD,apply_h,apply_s,global_gram,0,nlocal,1,2,1,&
-    1d-12,1d-30,qw,qp,qold,eval,gap,residual,orth,projector,info)
-  if(info/=40)call MPI_Abort(MPI_COMM_WORLD,57,ierr)
+    1d-12,1d-30,qw,qp,qold,eval,gap,residual,orth,projector,info,observe_precondition,&
+    observe_ritz=record_current_ritz)
+  if(info/=40.or.ctx%ritz_observer_calls<2.or.ctx%ritz_precondition_calls/=ctx%ritz_observer_calls.or.&
+    .not.ctx%ritz_changed)call MPI_Abort(MPI_COMM_WORLD,57,ierr)
   call MPI_Finalize(ierr)
 contains
+  subroutine record_current_ritz(context,current_qw,current_qp,observe_info)
+    class(*),intent(inout)::context
+    complex(8),intent(in)::current_qw(:,:),current_qp(:,:)
+    integer,intent(out)::observe_info
+    real(8)::checksum
+    select type(c=>context)
+    type is(s_fixture_context)
+      checksum=sum(abs(current_qw))+sum(abs(current_qp))
+      c%ritz_observer_calls=c%ritz_observer_calls+1
+      if(c%ritz_observer_calls==1)then
+        c%first_ritz_checksum=checksum
+      elseif(abs(checksum-c%first_ritz_checksum)>1d-10)then
+        c%ritz_changed=.true.
+      endif
+      observe_info=0
+    class default;observe_info=1;end select
+  end subroutine
+  subroutine observe_precondition(context,eigenvalues,rw,rp,zw,zp,apply_info)
+    class(*),intent(inout)::context
+    real(8),intent(in)::eigenvalues(:)
+    complex(8),intent(in)::rw(:,:),rp(:,:)
+    complex(8),intent(out)::zw(:,:),zp(:,:)
+    integer,intent(out)::apply_info
+    select type(c=>context)
+    type is(s_fixture_context)
+      c%ritz_precondition_calls=c%ritz_precondition_calls+1
+      zw=0;zp=0
+      if(c%ritz_observer_calls/=c%ritz_precondition_calls.or.&
+        c%ritz_precondition_calls==c%fail_precondition_call)then
+        zw=0;zp=0;apply_info=1
+      else
+        zw=rw;zp=rp;apply_info=0
+      endif
+    class default;zw=0;zp=0;apply_info=1;end select
+  end subroutine
   subroutine apply_h(context,xw,xp,yw,yp,apply_info)
     class(*),intent(inout)::context;complex(8),intent(in)::xw(:,:),xp(:,:);complex(8),intent(out)::yw(:,:),yp(:,:)
     integer,intent(out)::apply_info;integer::k

@@ -20,6 +20,7 @@
 module inputoutput
   use phys_constants
   use salmon_global
+  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
   implicit none
 !Physical constant
   real(8),parameter :: au_time_fs = 0.02418884326505d0
@@ -379,16 +380,21 @@ contains
       & yn_dg_wpw_preconditioner, &
       & yn_dg_wpw_metric_preconditioner, &
       & yn_dg_wpw_h_epsilon_s_correction, &
+      & yn_dg_wpw_global_projected_correction, &
       & yn_dg_wpw_search_history, &
       & yn_dg_wpw_s_orthogonal_pw, &
       & dg_wpw_extra_states, &
       & dg_wpw_scf_max_iter, &
+      & dg_wpw_global_correction_restart, &
+      & dg_wpw_global_correction_max_iterations, &
+      & dg_wpw_global_correction_state_batch, &
       & dg_wpw_window_buffer, &
       & dg_wpw_window_width, &
       & dg_wpw_gap_threshold, &
       & dg_wpw_metric_cutoff, &
       & dg_wpw_scf_mix, &
       & dg_wpw_scf_residual_tolerance, &
+      & dg_wpw_global_correction_tolerance, &
       & yn_subspace_diagonalization, &
       & convergence, &
       & threshold, &
@@ -953,16 +959,21 @@ contains
     yn_dg_wpw_preconditioner = 'y'
     yn_dg_wpw_metric_preconditioner = 'n'
     yn_dg_wpw_h_epsilon_s_correction = 'n'
+    yn_dg_wpw_global_projected_correction = 'n'
     yn_dg_wpw_search_history = 'y'
     yn_dg_wpw_s_orthogonal_pw = 'n'
     dg_wpw_extra_states = 8
     dg_wpw_scf_max_iter = 200
+    dg_wpw_global_correction_restart = 8
+    dg_wpw_global_correction_max_iterations = 32
+    dg_wpw_global_correction_state_batch = 8
     dg_wpw_window_buffer = 3
     dg_wpw_window_width = 2
     dg_wpw_gap_threshold = 1d-6
     dg_wpw_metric_cutoff = 1d-10
     dg_wpw_scf_mix = 0.3d0
     dg_wpw_scf_residual_tolerance = 1d-8
+    dg_wpw_global_correction_tolerance = 1d-2
     yn_subspace_diagonalization = 'y'
     convergence   = 'rho_dne'
     threshold     = -1d0  !a.u. (default value for 'rho_dne'is given later)
@@ -1638,16 +1649,21 @@ contains
     call comm_bcast(yn_dg_wpw_preconditioner,nproc_group_global)
     call comm_bcast(yn_dg_wpw_metric_preconditioner,nproc_group_global)
     call comm_bcast(yn_dg_wpw_h_epsilon_s_correction,nproc_group_global)
+    call comm_bcast(yn_dg_wpw_global_projected_correction,nproc_group_global)
     call comm_bcast(yn_dg_wpw_search_history,nproc_group_global)
     call comm_bcast(yn_dg_wpw_s_orthogonal_pw,nproc_group_global)
     call comm_bcast(dg_wpw_extra_states     ,nproc_group_global)
     call comm_bcast(dg_wpw_scf_max_iter     ,nproc_group_global)
+    call comm_bcast(dg_wpw_global_correction_restart,nproc_group_global)
+    call comm_bcast(dg_wpw_global_correction_max_iterations,nproc_group_global)
+    call comm_bcast(dg_wpw_global_correction_state_batch,nproc_group_global)
     call comm_bcast(dg_wpw_window_buffer    ,nproc_group_global)
     call comm_bcast(dg_wpw_window_width     ,nproc_group_global)
     call comm_bcast(dg_wpw_gap_threshold    ,nproc_group_global)
     call comm_bcast(dg_wpw_metric_cutoff    ,nproc_group_global)
     call comm_bcast(dg_wpw_scf_mix          ,nproc_group_global)
     call comm_bcast(dg_wpw_scf_residual_tolerance,nproc_group_global)
+    call comm_bcast(dg_wpw_global_correction_tolerance,nproc_group_global)
     call comm_bcast(yn_subspace_diagonalization,nproc_group_global)
     call comm_bcast(convergence             ,nproc_group_global)
     call comm_bcast(threshold               ,nproc_group_global)
@@ -2691,10 +2707,18 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_wpw_metric_preconditioner', yn_dg_wpw_metric_preconditioner
       write(fh_variables_log, '("#",4X,A,"=",A)') &
         'yn_dg_wpw_h_epsilon_s_correction', yn_dg_wpw_h_epsilon_s_correction
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        'yn_dg_wpw_global_projected_correction', yn_dg_wpw_global_projected_correction
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_wpw_search_history', yn_dg_wpw_search_history
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_wpw_s_orthogonal_pw', yn_dg_wpw_s_orthogonal_pw
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_extra_states', dg_wpw_extra_states
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_scf_max_iter', dg_wpw_scf_max_iter
+      write(fh_variables_log, '("#",4X,A,"=",I6)') &
+        'dg_wpw_global_correction_restart', dg_wpw_global_correction_restart
+      write(fh_variables_log, '("#",4X,A,"=",I6)') &
+        'dg_wpw_global_correction_max_iterations', dg_wpw_global_correction_max_iterations
+      write(fh_variables_log, '("#",4X,A,"=",I6)') &
+        'dg_wpw_global_correction_state_batch', dg_wpw_global_correction_state_batch
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_window_buffer', dg_wpw_window_buffer
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_window_width', dg_wpw_window_width
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_wpw_gap_threshold', dg_wpw_gap_threshold
@@ -2702,6 +2726,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_wpw_scf_mix', dg_wpw_scf_mix
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
         'dg_wpw_scf_residual_tolerance', dg_wpw_scf_residual_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_wpw_global_correction_tolerance', dg_wpw_global_correction_tolerance
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_subspace_diagonalization', yn_subspace_diagonalization
       write(fh_variables_log, '("#",4X,A,"=",A)') 'convergence', convergence
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold', threshold
@@ -3260,10 +3286,11 @@ contains
     call yn_argument_check(yn_dg_wpw_preconditioner)
     call yn_argument_check(yn_dg_wpw_metric_preconditioner)
     call yn_argument_check(yn_dg_wpw_h_epsilon_s_correction)
+    call yn_argument_check(yn_dg_wpw_global_projected_correction)
     call yn_argument_check(yn_dg_wpw_search_history)
     call yn_argument_check(yn_dg_wpw_s_orthogonal_pw)
     if(count([yn_dg_wpw_preconditioner,yn_dg_wpw_metric_preconditioner,&
-      yn_dg_wpw_h_epsilon_s_correction]=='y')>1) &
+      yn_dg_wpw_h_epsilon_s_correction,yn_dg_wpw_global_projected_correction]=='y')>1) &
       stop 'DG WPW correction controls are mutually exclusive'
     if(yn_dg_wpw_fixed_h_relaxation=='y'.and.yn_dg_wpw_production/='y') &
       stop 'yn_dg_wpw_fixed_h_relaxation=y requires yn_dg_wpw_production=y'
@@ -3271,6 +3298,14 @@ contains
       stop 'yn_dg_wpw_s_orthogonal_pw=y requires yn_dg_wpw_fixed_h_relaxation=y'
     if(yn_dg_wpw_h_epsilon_s_correction=='y'.and.yn_dg_wpw_fixed_h_relaxation/='y') &
       stop 'yn_dg_wpw_h_epsilon_s_correction=y requires yn_dg_wpw_fixed_h_relaxation=y'
+    if(yn_dg_wpw_global_projected_correction=='y'.and.yn_dg_wpw_fixed_h_relaxation/='y') &
+      stop 'yn_dg_wpw_global_projected_correction=y requires yn_dg_wpw_fixed_h_relaxation=y'
+    if(dg_wpw_global_correction_restart<1.or.dg_wpw_global_correction_restart>16.or.&
+      dg_wpw_global_correction_max_iterations<1.or.dg_wpw_global_correction_max_iterations>64.or.&
+      dg_wpw_global_correction_state_batch<1.or.dg_wpw_global_correction_state_batch>16.or.&
+      .not.ieee_is_finite(dg_wpw_global_correction_tolerance).or.&
+      dg_wpw_global_correction_tolerance<=0d0.or.dg_wpw_global_correction_tolerance>=1d0)&
+      stop 'invalid DG WPW global projected correction controls'
     if(yn_dg_wpw_production=='y') then
       if(yn_dc/='y') stop 'yn_dg_wpw_production=y requires yn_dc=y'
       if(dg_wpw_extra_states<1 .or. dg_wpw_scf_max_iter<1) &

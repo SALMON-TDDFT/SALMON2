@@ -40,11 +40,17 @@ module dg_wpw_matrix_free_scf
       complex(8),intent(out)::zw(:,:),zp(:,:)
       integer,intent(out)::info
     end subroutine
+    subroutine dg_wpw_ritz_observer(context,qw,qp,info)
+      class(*),intent(inout)::context
+      complex(8),intent(in)::qw(:,:),qp(:,:)
+      integer,intent(out)::info
+    end subroutine
   end interface
 
   public::run_dg_wpw_matrix_free_scf,dg_wpw_scf_map
   public::run_dg_wpw_matrix_free_algebra_step,dg_wpw_preconditioner
   public::dg_wpw_metric_preconditioner
+  public::dg_wpw_ritz_observer
   public::initialize_dg_wpw_deterministic_seed
   public::initialize_dg_wpw_projected_occupied
   public::complete_dg_wpw_projected_subspace
@@ -533,12 +539,13 @@ contains
 
   subroutine run_dg_wpw_matrix_free_algebra_step(context,comm,apply_h,apply_s,global_gram,nw,np,nocc,nretain,&
       iteration,metric_cutoff,residual_tolerance,qw,qp,q_old_occ,eigenvalues,gap,residual,orth,&
-      projector_residual,info,precondition,retain_search_history)
+      projector_residual,info,precondition,retain_search_history,observe_ritz)
     class(*),intent(inout)::context
     integer,intent(in)::comm
     procedure(apply_h_batch)::apply_h;procedure(apply_s_batch)::apply_s
     procedure(global_gram_batch)::global_gram
     procedure(dg_wpw_preconditioner),optional::precondition
+    procedure(dg_wpw_ritz_observer),optional::observe_ritz
     logical,intent(in),optional::retain_search_history
     integer,intent(in)::nw,np,nocc,nretain,iteration
     real(8),intent(in)::metric_cutoff,residual_tolerance
@@ -559,7 +566,7 @@ contains
     keep_search=.true.;if(present(retain_search_history))keep_search=retain_search_history
     if(present(precondition))then
       call solve_window(context,comm,apply_h,apply_s,global_gram,nw,np,nocc,nretain,metric_cutoff,&
-        residual_tolerance,q,eigenvalues,residual,orth,info,precondition,keep_search)
+        residual_tolerance,q,eigenvalues,residual,orth,info,precondition,keep_search,observe_ritz)
     else
       call solve_window(context,comm,apply_h,apply_s,global_gram,nw,np,nocc,nretain,metric_cutoff,&
         residual_tolerance,q,eigenvalues,residual,orth,info,retain_search_history=keep_search)
@@ -657,10 +664,11 @@ contains
   end subroutine
 
   subroutine solve_window(context,comm,apply_h,apply_s,gram,nw,np,nocc,nretain,cutoff,tol,q,eval,residual,orth,info,&
-      precondition,retain_search_history)
+      precondition,retain_search_history,observe_ritz)
     class(*),intent(inout)::context
     procedure(apply_h_batch)::apply_h;procedure(apply_s_batch)::apply_s;procedure(global_gram_batch)::gram
     procedure(dg_wpw_preconditioner),optional::precondition
+    procedure(dg_wpw_ritz_observer),optional::observe_ritz
     logical,intent(in),optional::retain_search_history
     integer,intent(in)::comm,nw,np,nocc,nretain;real(8),intent(in)::cutoff,tol
     complex(8),intent(inout)::q(nw+np,nretain);real(8),intent(out)::eval(nretain),residual,orth
@@ -765,6 +773,9 @@ contains
       orth=maxval(abs(g))
       if(residual<tol.and.orth<tol)return
       if(present(precondition))then
+        if(present(observe_ritz))then
+          call observe_ritz(context,q(1:nw,:),q(nw+1:nw+np,:),info);if(info/=0)return
+        endif
         call precondition(context,eval,r(1:nw,:),r(nw+1:nw+np,:),preconditioned(1:nw,:),&
           preconditioned(nw+1:nw+np,:),info)
         if(info/=0)return

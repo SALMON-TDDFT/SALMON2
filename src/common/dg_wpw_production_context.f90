@@ -38,6 +38,8 @@ module dg_wpw_production_context
     type(s_dg_wpw_bounded_operator)::bounded_operator
     type(s_dg_wpw_fragment_block_preconditioner)::metric_block_preconditioner
     type(s_dg_wpw_h_epsilon_s_factor)::h_epsilon_s_factor
+    class(*),allocatable::global_correction_controls
+    class(*),allocatable::global_correction_diagnostics
     integer,allocatable::wp_w(:),wp_p(:),wp_origin(:),pp_r(:),pp_c(:),pp_origin(:)
     complex(8),allocatable::wp_h(:),wp_h_volume(:),wp_h_nonlocal(:),wp_h_face(:),wp_s(:)
     complex(8),allocatable::pp_h(:),pp_h_volume(:),pp_h_nonlocal(:),pp_s(:)
