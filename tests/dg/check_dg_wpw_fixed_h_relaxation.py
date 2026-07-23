@@ -24,6 +24,9 @@ assert control in INPUT, "fixed-H control is absent from input/default/broadcast
 assert f"{control} = 'n'" in INPUT, "fixed-H mode must not change repository defaults"
 
 complement_control = "yn_dg_wpw_s_orthogonal_pw"
+hese_control = "yn_dg_wpw_h_epsilon_s_correction"
+assert hese_control in GLOBAL and hese_control in INPUT
+assert f"{hese_control} = 'n'" in INPUT
 assert complement_control in GLOBAL and complement_control in INPUT
 assert f"{complement_control} = 'n'" in INPUT
 operator_build_pos = LCFO.index("call build_dg_wpw_production_operator")
@@ -88,6 +91,14 @@ assert continuation_body.count("validate_wpw_frozen_h_state") >= 2, (
     "continuation must validate frozen state around every trial"
 )
 assert "wpw_fixed_apply_h" in continuation_body and "wpw_fixed_apply_s" in continuation_body
+assert "wpw_h_epsilon_s_precondition" in fixed_body
+assert "wpw_h_epsilon_s_precondition" in continuation_body
+assert "initialize_dg_wpw_h_epsilon_s_factor" in LCFO
+assert LCFO.index("call build_dg_wpw_production_operator") < \
+       LCFO.index("call initialize_dg_wpw_h_epsilon_s_factor"), \
+       "factor must be initialized only after the final fixed-H H/S installation"
+assert "h_epsilon_s_factor%operator_epoch" in LCFO and \
+       "h_epsilon_s_factor%layout_fingerprint" in LCFO
 
 snapshot_start = LCFO.index("subroutine snapshot_wpw_frozen_h_state")
 snapshot_end = LCFO.index("end subroutine snapshot_wpw_frozen_h_state", snapshot_start)

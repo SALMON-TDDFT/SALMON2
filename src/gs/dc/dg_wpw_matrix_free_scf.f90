@@ -51,7 +51,51 @@ module dg_wpw_matrix_free_scf
   public::solve_dg_wpw_metric_projection
   public::initialize_dg_wpw_metric_projected_occupied
   public::summarize_dg_wpw_window_state_residuals
+  public::project_dg_wpw_correction_s_orthogonal
 contains
+  subroutine project_dg_wpw_correction_s_orthogonal(context,comm,apply_s,global_gram,qw,qp,zw,zp,info)
+    class(*),intent(inout)::context
+    integer,intent(in)::comm
+    procedure(apply_s_batch)::apply_s
+    procedure(global_gram_batch)::global_gram
+    complex(8),intent(in)::qw(:,:),qp(:,:)
+    complex(8),intent(inout)::zw(:,:),zp(:,:)
+    integer,intent(out)::info
+    complex(8),allocatable::q(:,:),sz(:,:),sw(:,:),sp(:,:),coefficients(:,:)
+    integer::nw,np,nq,nz,astat,local_bad,global_bad,ierr,apply_info,gram_info
+    integer::minimum_columns(2),maximum_columns(2),local_columns(2)
+
+    info=1;nw=size(qw,1);np=size(qp,1);nq=size(qw,2);nz=size(zw,2);local_bad=0
+    local_columns=[nq,nz]
+    call MPI_Allreduce(local_columns,minimum_columns,2,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(local_columns,maximum_columns,2,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    if(any(minimum_columns/=maximum_columns).or.nw+np<=0.or.nq<=0.or.nz<=0.or.&
+      size(qp,2)/=nq.or.size(zw,1)/=nw.or.size(zp,2)/=nz.or.size(zp,1)/=np.or..not.finite_complex(qw).or.&
+      .not.finite_complex(qp).or..not.finite_complex(zw).or..not.finite_complex(zp))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    allocate(q(nw+np,nq),sz(nw+np,nz),sw(nw,nz),sp(np,nz),coefficients(nq,nz),stat=astat)
+    local_bad=merge(0,1,astat==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    call apply_s(context,zw,zp,sw,sp,apply_info)
+    local_bad=merge(0,1,apply_info==0.and.finite_complex(sw).and.finite_complex(sp))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    q(1:nw,:)=qw;q(nw+1:nw+np,:)=qp
+    sz(1:nw,:)=sw;sz(nw+1:nw+np,:)=sp
+    call global_gram(q,sz,nw+np,nq,nz,coefficients,gram_info)
+    local_bad=merge(0,1,gram_info==0.and.finite_complex(coefficients))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    zw=zw-matmul(qw,coefficients);zp=zp-matmul(qp,coefficients)
+    local_bad=merge(0,1,finite_complex(zw).and.finite_complex(zp))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr==MPI_SUCCESS.and.global_bad==0)info=0
+  end subroutine project_dg_wpw_correction_s_orthogonal
+
   pure subroutine summarize_dg_wpw_window_state_residuals(raw_norm2,preconditioned_norm2,nocc,&
       occupied_max,occupied_worst,extra_max,extra_worst,occupied_preconditioned,&
       extra_preconditioned,occupied_ratio,extra_ratio,info)

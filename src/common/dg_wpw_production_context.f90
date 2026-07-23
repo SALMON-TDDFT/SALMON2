@@ -1,7 +1,7 @@
 module dg_wpw_production_context
   use,intrinsic::iso_fortran_env,only:int64
   use dg_wpw_bounded_operator,only:s_dg_wpw_bounded_operator,&
-    s_dg_wpw_fragment_block_preconditioner,&
+    s_dg_wpw_fragment_block_preconditioner,s_dg_wpw_h_epsilon_s_factor,&
     s_dg_wpw_bounded_operator_snapshot,snapshot_dg_wpw_bounded_operator,&
     validate_dg_wpw_bounded_operator_snapshot,release_dg_wpw_bounded_operator_snapshot
   use mpi, only: MPI_COMM_NULL, MPI_Comm_rank, MPI_Comm_size, MPI_SUCCESS,&
@@ -37,6 +37,7 @@ module dg_wpw_production_context
     integer,allocatable::support_fragment_ids(:)
     type(s_dg_wpw_bounded_operator)::bounded_operator
     type(s_dg_wpw_fragment_block_preconditioner)::metric_block_preconditioner
+    type(s_dg_wpw_h_epsilon_s_factor)::h_epsilon_s_factor
     integer,allocatable::wp_w(:),wp_p(:),wp_origin(:),pp_r(:),pp_c(:),pp_origin(:)
     complex(8),allocatable::wp_h(:),wp_h_volume(:),wp_h_nonlocal(:),wp_h_face(:),wp_s(:)
     complex(8),allocatable::pp_h(:),pp_h_volume(:),pp_h_nonlocal(:),pp_s(:)

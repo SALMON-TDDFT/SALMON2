@@ -3289,7 +3289,8 @@ contains
       MPI_DOUBLE_COMPLEX,MPI_DOUBLE_PRECISION,MPI_LOGICAL,MPI_SUM
     use salmon_global, only: yn_dc_lcfo_diag,yn_dg_wpw_production,yn_dg_wpw_fixed_h_relaxation,&
       yn_dg_wpw_s_orthogonal_pw,&
-      yn_dg_wpw_preconditioner,yn_dg_wpw_metric_preconditioner,yn_dg_wpw_search_history,&
+      yn_dg_wpw_preconditioner,yn_dg_wpw_metric_preconditioner,yn_dg_wpw_h_epsilon_s_correction,&
+      yn_dg_wpw_search_history,&
       n_plane_waves_dg,k_cutoff_plane_wave,&
       dg_wpw_window_buffer,dg_wpw_window_width,dg_wpw_extra_states,dg_wpw_scf_max_iter,&
       dg_wpw_gap_threshold,dg_wpw_metric_cutoff,dg_wpw_scf_mix,dg_wpw_scf_residual_tolerance,num_fragment
@@ -3327,7 +3328,9 @@ contains
       apply_h_dg_wpw_bounded,apply_s_dg_wpw_bounded,global_gram_dg_wpw_bounded,&
       get_dg_wpw_owned_metric_diagonal,reduce_dg_wpw_metric_rhs_partials,set_dg_wpw_interface_lambda,&
       initialize_dg_wpw_fragment_block_preconditioner,apply_dg_wpw_fragment_block_preconditioner,&
-      apply_dg_wpw_fragment_block_eigen_correction
+      apply_dg_wpw_fragment_block_eigen_correction,s_dg_wpw_h_epsilon_s_diagnostics,&
+      initialize_dg_wpw_h_epsilon_s_factor,apply_dg_wpw_h_epsilon_s_correction,&
+      release_dg_wpw_h_epsilon_s_factor
     use dg_wpw_nonlocal_projector,only:s_dg_wpw_projector_overlap,&
       build_dg_wpw_projector_overlap_partials,reduce_dg_wpw_p_projector_partials,&
       exchange_dg_wpw_projector_overlaps,assemble_dg_wpw_nonlocal_blocks,&
@@ -3339,7 +3342,7 @@ contains
     use dg_wpw_matrix_free_scf,only:run_dg_wpw_matrix_free_algebra_step,&
       initialize_dg_wpw_deterministic_seed,initialize_dg_wpw_projected_occupied
     use dg_wpw_matrix_free_scf,only:complete_dg_wpw_projected_subspace,&
-      solve_dg_wpw_metric_projection
+      solve_dg_wpw_metric_projection,project_dg_wpw_correction_s_orthogonal
     use dg_wpw_matrix_free_operator,only:apply_h_batch,apply_s_batch
     use dg_wpw_s_orthogonal_complement,only:s_dg_wpw_s_orthogonal_complement,&
       initialize_dg_wpw_s_orthogonal_complement,apply_h_dg_wpw_s_orthogonal_complement,&
@@ -3482,6 +3485,7 @@ contains
     real(8)::wpw_fixed_h_final_residual,wpw_fixed_h_final_orthogonality,&
       wpw_fixed_h_final_projector,wpw_fixed_h_density_baseline,wpw_fixed_h_charge_error
     logical::wpw_fixed_h_qualified,wpw_metric_diagnostic_only
+    integer::wpw_h_epsilon_s_application_count
     procedure(apply_h_batch),pointer::wpw_fixed_apply_h=>null()
     procedure(apply_s_batch),pointer::wpw_fixed_apply_s=>null()
     logical :: sawf_explicit_basis_active
@@ -3500,6 +3504,7 @@ contains
     wpw_window_buffer=0
     wpw_window_width=merge(dg_wpw_window_width,0,num_fragment>1)
     wpw_production_comm=MPI_COMM_NULL
+    wpw_h_epsilon_s_application_count=0
     call init_lcfo
     wpw_window_buffer=merge(dc%nxyz_buffer-stencil_radius,0,num_fragment>1)
     call initialize_sawf_seed_provenance()
@@ -3639,6 +3644,7 @@ contains
     if(allocated(wpw_volume_pp_s))deallocate(wpw_volume_pp_s)
     if(wpw_production_comm/=MPI_COMM_NULL.and.dc%id_frag==0)then
       call release_dg_wpw_s_orthogonal_complement(wpw_s_orthogonal_transform)
+      call release_dg_wpw_h_epsilon_s_factor(wpw_context%h_epsilon_s_factor)
       call release_dg_wpw_bounded_operator(wpw_context%bounded_operator)
     endif
     if(wpw_production_comm/=MPI_COMM_NULL)call MPI_Comm_free(wpw_production_comm,wpw_mpi_info)
@@ -4262,9 +4268,16 @@ contains
       if(ierr/=MPI_SUCCESS.or.root_info/=0)return
       call validate_wpw_frozen_h_state(fixed_info)
       if(fixed_info/=0)return
+      if(dc%id_frag==0.and.yn_dg_wpw_h_epsilon_s_correction=='y')then
+        call refresh_wpw_h_epsilon_s_factor(.true.,root_info)
+      endif
+      call MPI_Bcast(root_info,1,MPI_INTEGER,0,dc%icomm_frag,ierr)
+      if(ierr/=MPI_SUCCESS.or.root_info/=0)return
       if(dc%id_tot==0)then
         if(yn_dg_wpw_metric_preconditioner=='y')then
           write(*,'(1x,a)')'[DG-WPW-CORRECTION-MODE] fixed_h=metric_block'
+        elseif(yn_dg_wpw_h_epsilon_s_correction=='y')then
+          write(*,'(1x,a)')'[DG-WPW-CORRECTION-MODE] fixed_h=H-epsilon-S'
         elseif(yn_dg_wpw_preconditioner=='y')then
           write(*,'(1x,a)')'[DG-WPW-CORRECTION-MODE] fixed_h=diagonal'
         else
@@ -4292,6 +4305,12 @@ contains
               iter+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
               wpw_q_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,wpw_metric_precondition,&
               retain_search_history=yn_dg_wpw_search_history=='y')
+          elseif(yn_dg_wpw_h_epsilon_s_correction=='y')then
+            call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,wpw_fixed_apply_h,&
+              wpw_fixed_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,wpw_nretain,&
+              iter+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
+              wpw_q_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,&
+              wpw_h_epsilon_s_precondition,retain_search_history=yn_dg_wpw_search_history=='y')
           elseif(yn_dg_wpw_preconditioner=='y')then
             call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,wpw_fixed_apply_h,&
               wpw_fixed_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,wpw_nretain,&
@@ -4391,6 +4410,10 @@ contains
         call MPI_Bcast(root_info,1,MPI_INTEGER,0,dc%icomm_frag,ierr)
         if(ierr/=MPI_SUCCESS.or.root_info/=0)return
         call validate_wpw_frozen_h_state(continuation_info);if(continuation_info/=0)return
+        if(dc%id_frag==0.and.yn_dg_wpw_h_epsilon_s_correction=='y')&
+          call refresh_wpw_h_epsilon_s_factor(.false.,root_info)
+        call MPI_Bcast(root_info,1,MPI_INTEGER,0,dc%icomm_frag,ierr)
+        if(ierr/=MPI_SUCCESS.or.root_info/=0)return
         if(dc%id_frag==0)then
           if(yn_dg_wpw_metric_preconditioner=='y')then
             call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,&
@@ -4398,6 +4421,12 @@ contains
               wpw_nretain,trial+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
               accepted_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,wpw_metric_precondition,&
               retain_search_history=yn_dg_wpw_search_history=='y')
+          elseif(yn_dg_wpw_h_epsilon_s_correction=='y')then
+            call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,&
+              wpw_fixed_apply_h,wpw_fixed_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,&
+              wpw_nretain,trial+1,dg_wpw_metric_cutoff,dg_wpw_scf_residual_tolerance,wpw_qw,wpw_qp,&
+              accepted_old_occ,wpw_eigenvalues,gap,residual,orth,projector,root_info,&
+              wpw_h_epsilon_s_precondition,retain_search_history=yn_dg_wpw_search_history=='y')
           elseif(yn_dg_wpw_preconditioner=='y')then
             call run_dg_wpw_matrix_free_algebra_step(wpw_context,wpw_production_comm,&
               wpw_fixed_apply_h,wpw_fixed_apply_s,wpw_global_gram,size(wpw_qw,1),size(wpw_qp,1),wpw_nocc,&
@@ -4443,6 +4472,10 @@ contains
           wpw_q_old_occ=accepted_old_occ
           if(dc%id_frag==0)call set_dg_wpw_interface_lambda(wpw_context%bounded_operator,&
             accepted_lambda,root_info)
+          call MPI_Bcast(root_info,1,MPI_INTEGER,0,dc%icomm_frag,ierr)
+          if(ierr/=MPI_SUCCESS.or.root_info/=0)return
+          if(dc%id_frag==0.and.yn_dg_wpw_h_epsilon_s_correction=='y')&
+            call refresh_wpw_h_epsilon_s_factor(.false.,root_info)
           call MPI_Bcast(root_info,1,MPI_INTEGER,0,dc%icomm_frag,ierr)
           if(ierr/=MPI_SUCCESS.or.root_info/=0)return
           lambda_step=0.5d0*lambda_step
@@ -5956,6 +5989,102 @@ contains
         wpw_q_old_occ(size(wpw_qw,1)+1:,:)=cp
       endif
     end subroutine wpw_algebra_step
+
+    subroutine refresh_wpw_h_epsilon_s_factor(log_metadata,refresh_info)
+      logical,intent(in)::log_metadata
+      integer,intent(out)::refresh_info
+      call initialize_dg_wpw_h_epsilon_s_factor(wpw_context%bounded_operator,dg_wpw_metric_cutoff,&
+        wpw_context%h_epsilon_s_factor,refresh_info)
+      if(refresh_info==0.and.log_metadata.and.wpw_context%rank_id==0)then
+        write(*,'(1x,a,i0,6(a,es12.4),a,i0,a,i0)')'[DG-WPW-H-EPSILON-S-FACTOR] dimension=',&
+          wpw_context%h_epsilon_s_factor%dimension,&
+          ' s_min=',wpw_context%h_epsilon_s_factor%s_minimum_eigenvalue,&
+          ' s_max=',wpw_context%h_epsilon_s_factor%s_maximum_eigenvalue,&
+          ' s_condition=',wpw_context%h_epsilon_s_factor%condition_number,&
+          ' theta_min=',minval(wpw_context%h_epsilon_s_factor%eigenvalues),&
+          ' theta_max=',maxval(wpw_context%h_epsilon_s_factor%eigenvalues),&
+          ' relative_floor=',wpw_context%h_epsilon_s_factor%relative_floor,&
+          ' epoch=',wpw_context%h_epsilon_s_factor%operator_epoch,&
+          ' fingerprint=',wpw_context%h_epsilon_s_factor%layout_fingerprint
+      endif
+    end subroutine refresh_wpw_h_epsilon_s_factor
+
+    subroutine wpw_h_epsilon_s_precondition(context,eigenvalues,rw,rp,zw,zp,precondition_info)
+      class(*),intent(inout)::context
+      real(8),intent(in)::eigenvalues(:)
+      complex(8),intent(in)::rw(:,:),rp(:,:)
+      complex(8),intent(out)::zw(:,:),zp(:,:)
+      integer,intent(out)::precondition_info
+      type(s_dg_wpw_h_epsilon_s_diagnostics)::diagnostics
+      real(8)::s_norm2_before,s_norm2_after,projected_fraction,norm_tolerance
+
+      zw=0;zp=0;precondition_info=1
+      select type(c=>context)
+      type is(s_dg_wpw_production_context)
+        call apply_dg_wpw_h_epsilon_s_correction(c%bounded_operator,c%h_epsilon_s_factor,&
+          eigenvalues,rw,rp,zw,zp,diagnostics,precondition_info)
+        if(precondition_info/=0)return
+        call measure_wpw_s_norm2(c,zw,zp,s_norm2_before,precondition_info)
+        if(precondition_info/=0)return
+        call project_dg_wpw_correction_s_orthogonal(c,wpw_production_comm,wpw_fixed_apply_s,&
+          wpw_global_gram,wpw_qw,wpw_qp,zw,zp,precondition_info)
+        if(precondition_info/=0)return
+        call measure_wpw_s_norm2(c,zw,zp,s_norm2_after,precondition_info)
+        if(precondition_info/=0)return
+        norm_tolerance=100d0*epsilon(1d0)*max(1d0,s_norm2_before,s_norm2_after)
+        if(s_norm2_after>s_norm2_before+norm_tolerance)then
+          zw=0;zp=0;precondition_info=1;return
+        endif
+        projected_fraction=max(0d0,min(1d0,&
+          1d0-sqrt(max(0d0,s_norm2_after)/max(s_norm2_before,tiny(1d0)))))
+        wpw_h_epsilon_s_application_count=wpw_h_epsilon_s_application_count+1
+        if(wpw_context%rank_id==0.and.(wpw_h_epsilon_s_application_count==32.or.&
+          wpw_h_epsilon_s_application_count==96.or.wpw_h_epsilon_s_application_count==160))then
+          write(*,'(1x,a,i0,8(a,es12.4),2(a,i0))')'[DG-WPW-H-EPSILON-S-CORRECTION] inner=',&
+            wpw_h_epsilon_s_application_count,&
+            ' occupied_raw_min=',minval(diagnostics%raw_minimum_denominator(1:wpw_nocc)),&
+            ' extra_raw_min=',minval(diagnostics%raw_minimum_denominator(wpw_nocc+1:)),&
+            ' occupied_floor_min=',minval(diagnostics%floored_minimum_denominator(1:wpw_nocc)),&
+            ' extra_floor_min=',minval(diagnostics%floored_minimum_denominator(wpw_nocc+1:)),&
+            ' occupied_floor_weight=',maxval(diagnostics%floored_residual_weight(1:wpw_nocc)),&
+            ' extra_floor_weight=',maxval(diagnostics%floored_residual_weight(wpw_nocc+1:)),&
+            ' max_inverse=',maxval(diagnostics%maximum_inverse_magnitude),&
+            ' projected_fraction=',projected_fraction,&
+            ' occupied_floored_modes=',sum(diagnostics%floored_mode_count(1:wpw_nocc)),&
+            ' extra_floored_modes=',sum(diagnostics%floored_mode_count(wpw_nocc+1:))
+        endif
+      class default
+        zw=0;zp=0;precondition_info=1
+      end select
+    end subroutine wpw_h_epsilon_s_precondition
+
+    subroutine measure_wpw_s_norm2(context,zw,zp,norm2,measure_info)
+      class(*),intent(inout)::context
+      complex(8),intent(in)::zw(:,:),zp(:,:)
+      real(8),intent(out)::norm2
+      integer,intent(out)::measure_info
+      complex(8),allocatable::sw(:,:),sp(:,:)
+      real(8)::local_norm2,negative_tolerance
+      integer::astat,apply_info,local_bad,global_bad,ierr
+
+      norm2=0d0;measure_info=1
+      allocate(sw(size(zw,1),size(zw,2)),sp(size(zp,1),size(zp,2)),stat=astat)
+      local_bad=merge(0,1,astat==0)
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,wpw_production_comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+      call wpw_fixed_apply_s(context,zw,zp,sw,sp,apply_info)
+      local_bad=merge(0,1,apply_info==0.and.all(ieee_is_finite(real(sw,8))).and.&
+        all(ieee_is_finite(aimag(sw))).and.all(ieee_is_finite(real(sp,8))).and.&
+        all(ieee_is_finite(aimag(sp))))
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,wpw_production_comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+      local_norm2=sum(real(conjg(zw)*sw,8))+sum(real(conjg(zp)*sp,8))
+      call MPI_Allreduce(local_norm2,norm2,1,MPI_DOUBLE_PRECISION,MPI_SUM,wpw_production_comm,ierr)
+      if(ierr/=MPI_SUCCESS.or..not.ieee_is_finite(norm2))return
+      negative_tolerance=100d0*epsilon(1d0)*max(1d0,abs(norm2))
+      if(norm2 < -negative_tolerance)return
+      norm2=max(0d0,norm2);measure_info=0
+    end subroutine measure_wpw_s_norm2
 
     subroutine wpw_precondition(context,eigenvalues,rw,rp,zw,zp,precondition_info)
       class(*),intent(inout)::context

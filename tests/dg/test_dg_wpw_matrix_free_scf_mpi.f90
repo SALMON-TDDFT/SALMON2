@@ -4,7 +4,8 @@ program test_dg_wpw_matrix_free_scf_mpi
   use dg_wpw_matrix_free_scf,only:s_dg_wpw_matrix_free_scf_result,run_dg_wpw_matrix_free_scf,&
     run_dg_wpw_matrix_free_algebra_step,initialize_dg_wpw_projected_occupied,&
     complete_dg_wpw_projected_subspace,solve_dg_wpw_metric_projection,&
-    initialize_dg_wpw_metric_projected_occupied,summarize_dg_wpw_window_state_residuals
+    initialize_dg_wpw_metric_projected_occupied,summarize_dg_wpw_window_state_residuals,&
+    project_dg_wpw_correction_s_orthogonal
   implicit none
   type::s_fixture_context
     integer::rank=0,nrank=1,first=1,nlocal=0
@@ -16,6 +17,7 @@ program test_dg_wpw_matrix_free_scf_mpi
   integer::ierr,info,nlocal,i,j
   real(8)::density(1)=[0d0],eval(2),occ(1)=[2d0]
   complex(8),allocatable::qw(:,:),qp(:,:)
+  complex(8),allocatable::mismatched_zw(:,:),mismatched_zp(:,:)
   complex(8),allocatable::qold(:,:)
   complex(8),allocatable::qocc_before(:,:)
   complex(8),allocatable::projected_ref(:,:),projected_rot(:,:),srot(:,:),projected_raw(:,:)
@@ -28,6 +30,9 @@ program test_dg_wpw_matrix_free_scf_mpi
   integer::metric_iterations
   logical::metric_diagnostic_continuation
   real(8)::projection_orth,projector_defect
+  complex(8)::correction_qw(1,1),correction_qp(1,1),correction_zw(1,2),correction_zp(1,2),&
+    correction_before_w(1,2),correction_before_p(1,2),correction_sw(1,2),correction_sp(1,2),&
+    correction_q(2,1),correction_sz(2,2),correction_gram(1,2),correction_norm(1,1)
   integer::projection_rank
   real(8)::gap,residual,orth,projector
   real(8)::raw_norm2(4),preconditioned_norm2(4),occupied_max,extra_max,occupied_preconditioned,&
@@ -79,6 +84,35 @@ program test_dg_wpw_matrix_free_scf_mpi
   metric_p(1,2)=cmplx(0.5d0,0.25d0*dble(1-2*ctx%rank),8)
   metric_diagonal_w(1)=merge(2d0,2.5d0,ctx%rank==0)
   metric_diagonal_p(1)=merge(1.8d0,2.2d0,ctx%rank==0)
+  correction_qw=reshape([cmplx(1d0+0.2d0*ctx%rank,0.1d0,8)],[1,1])
+  correction_qp=reshape([cmplx(0.4d0,-0.15d0+0.1d0*ctx%rank,8)],[1,1])
+  call apply_s(ctx,correction_qw,correction_qp,correction_sw(:,1:1),correction_sp(:,1:1),info)
+  correction_q(1,:)=correction_qw(1,:);correction_q(2,:)=correction_qp(1,:)
+  correction_sz(1,1)=correction_sw(1,1);correction_sz(2,1)=correction_sp(1,1)
+  call global_gram(correction_q,correction_sz,2,1,1,correction_norm,info)
+  correction_qw=correction_qw/sqrt(real(correction_norm(1,1),8))
+  correction_qp=correction_qp/sqrt(real(correction_norm(1,1),8))
+  correction_zw=reshape([(0.8d0,0.2d0),(-0.3d0,0.6d0)],[1,2])
+  correction_zp=reshape([(0.1d0,-0.4d0),(0.7d0,0.3d0)],[1,2])
+  call project_dg_wpw_correction_s_orthogonal(ctx,MPI_COMM_WORLD,apply_s,global_gram,&
+    correction_qw,correction_qp,correction_zw,correction_zp,info)
+  if(info/=0)call MPI_Abort(MPI_COMM_WORLD,190,ierr)
+  call apply_s(ctx,correction_zw,correction_zp,correction_sw,correction_sp,info)
+  correction_q(1,:)=correction_qw(1,:);correction_q(2,:)=correction_qp(1,:)
+  correction_sz(1,:)=correction_sw(1,:);correction_sz(2,:)=correction_sp(1,:)
+  call global_gram(correction_q,correction_sz,2,1,2,correction_gram,info)
+  if(info/=0.or.maxval(abs(correction_gram))>1d-11)call MPI_Abort(MPI_COMM_WORLD,191,ierr)
+  correction_before_w=correction_zw;correction_before_p=correction_zp
+  call project_dg_wpw_correction_s_orthogonal(ctx,MPI_COMM_WORLD,apply_s,global_gram,&
+    correction_qw,correction_qp,correction_zw,correction_zp,info)
+  if(info/=0.or.maxval(abs(correction_zw-correction_before_w))>1d-11.or.&
+    maxval(abs(correction_zp-correction_before_p))>1d-11)call MPI_Abort(MPI_COMM_WORLD,192,ierr)
+  allocate(mismatched_zw(merge(2,1,ctx%rank==0),2),mismatched_zp(1,2))
+  mismatched_zw=(0d0,0d0);mismatched_zp=(0d0,0d0)
+  call project_dg_wpw_correction_s_orthogonal(ctx,MPI_COMM_WORLD,apply_s,global_gram,&
+    correction_qw,correction_qp,mismatched_zw,mismatched_zp,info)
+  if(info==0)call MPI_Abort(MPI_COMM_WORLD,193,ierr)
+  deallocate(mismatched_zw,mismatched_zp)
   call apply_s(ctx,metric_w,metric_p,metric_bw,metric_bp,info)
   if(info/=0)call MPI_Abort(MPI_COMM_WORLD,201,ierr)
   metric_cw=(0d0,0d0);metric_cp=(0d0,0d0)
