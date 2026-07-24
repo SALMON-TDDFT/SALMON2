@@ -12,6 +12,8 @@ module rt_dg_nodal_ground_state_solver
   use mpi
 #endif
   use rt_dg_nodal_types, only: s_dg_nodal_state, accept_nodal_dg_ground_state
+  use dg_nodal_interfaces, only: nodal_hamiltonian_action => nodal_complete_h_action
+  use dg_nodal_interfaces, only: nodal_subspace_rotation
   use rt_dg_nodal_mpi, only: exchange_nodal_face_halos
   use rt_dg_nodal_hamiltonian, only: apply_nodal_local_hamiltonian
   use rt_dg_nodal_ground_state, only: verify_nodal_dg_eigenstate_mpi
@@ -19,21 +21,6 @@ module rt_dg_nodal_ground_state_solver
   private
   public :: relax_nodal_dg_ground_state_mpi, relax_nodal_ground_state_action_mpi
   public :: orthonormalize_nodal_states_mpi, nodal_hamiltonian_action
-
-  abstract interface
-    subroutine nodal_hamiltonian_action(state,hpsi)
-      import :: s_dg_nodal_state
-      type(s_dg_nodal_state), intent(inout) :: state
-      complex(8), intent(out) :: hpsi(:,:,:,:,:)
-    end subroutine nodal_hamiltonian_action
-    subroutine nodal_subspace_rotation(state,hpsi,eigenvalues,communicator)
-      import :: s_dg_nodal_state
-      type(s_dg_nodal_state), intent(inout) :: state
-      complex(8), intent(inout) :: hpsi(:,:,:,:,:)
-      real(8), intent(out) :: eigenvalues(state%nstate,state%nspin)
-      integer, intent(in) :: communicator
-    end subroutine nodal_subspace_rotation
-  end interface
 
 contains
 
@@ -54,7 +41,7 @@ contains
 
     if (relaxation_step <= 0.0d0) stop 'nodal DG: ground-state relaxation step must be positive'
     if (max_iteration < 1 .or. tolerance <= 0.0d0) stop 'nodal DG: invalid ground-state solver control'
-    state%dg_ground_state_ready = .false.
+    state%ground_state_ready = .false.
     state%dg_ground_state_residual = huge(1.0d0)
     allocate(hpsi, mold=state%psi_core)
     call orthonormalize_nodal_states_mpi(state, communicator)
@@ -113,7 +100,7 @@ contains
 
     if (relaxation_step <= 0.0d0) stop 'nodal DG: callback GS relaxation step must be positive'
     if (max_iteration < 1 .or. tolerance <= 0.0d0) stop 'nodal DG: invalid callback GS control'
-    state%dg_ground_state_ready = .false.
+    state%ground_state_ready = .false.
     state%dg_ground_state_residual = huge(1.0d0)
     allocate(hpsi,mold=state%psi_core)
     myrank=0

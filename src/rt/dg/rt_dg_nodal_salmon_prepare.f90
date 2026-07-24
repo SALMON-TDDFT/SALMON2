@@ -62,7 +62,7 @@ contains
                                               max_residual,niteration)
     call cpu_time(t1)
     if (comm_is_root(dg_frag%id)) write(*,'(1x,a,1pe13.5)') '[DG-NODAL-PREP] gs_seconds=',t1-t0
-    if (.not. state%dg_ground_state_ready) stop 'nodal DG: complete-H ground-state preparation failed'
+    if (.not. state%ground_state_ready) stop 'nodal DG: complete-H ground-state preparation failed'
   end subroutine prepare_nodal_salmon_ground_state
 
 end module rt_dg_nodal_salmon_prepare

@@ -12,25 +12,12 @@ module rt_dg_nodal_cg
   use mpi
 #endif
   use rt_dg_nodal_types, only: s_dg_nodal_state, accept_nodal_dg_ground_state
+  use dg_nodal_interfaces, only: nodal_hamiltonian_action => nodal_complete_h_action
+  use dg_nodal_interfaces, only: nodal_subspace_rotation
   use rt_dg_nodal_ground_state_solver, only: orthonormalize_nodal_states_mpi
   implicit none
   private
   public :: solve_nodal_ground_state_cg_mpi
-
-  abstract interface
-    subroutine nodal_hamiltonian_action(state,hpsi)
-      import :: s_dg_nodal_state
-      type(s_dg_nodal_state), intent(inout) :: state
-      complex(8), intent(out) :: hpsi(:,:,:,:,:)
-    end subroutine nodal_hamiltonian_action
-    subroutine nodal_subspace_rotation(state,hpsi,eigenvalues,communicator)
-      import :: s_dg_nodal_state
-      type(s_dg_nodal_state), intent(inout) :: state
-      complex(8), intent(inout) :: hpsi(:,:,:,:,:)
-      real(8), intent(out) :: eigenvalues(state%nstate,state%nspin)
-      integer, intent(in) :: communicator
-    end subroutine nodal_subspace_rotation
-  end interface
 
 contains
 
@@ -54,6 +41,7 @@ contains
     integer :: iteration,istate,ispin,ierr,myrank
 
     if (max_iteration < 1 .or. tolerance <= 0.0d0) stop 'nodal DG: invalid CG eigensolver control'
+    state%ground_state_ready=.false.
     allocate(hpsi,mold=state%psi_core)
     allocate(residual,mold=state%psi_core)
     allocate(search_direction,mold=state%psi_core)

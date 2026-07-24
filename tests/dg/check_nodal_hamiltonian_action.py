@@ -6,6 +6,7 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
 types = root / "src/rt/dg/rt_dg_nodal_types.f90"
+common = root / "src/common/dg_nodal_state.f90"
 operator = root / "src/rt/dg/rt_dg_nodal_hamiltonian.f90"
 assert operator.exists(), "missing matrix-free nodal Hamiltonian"
 
@@ -50,8 +51,10 @@ with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
     source = tmp / "check.f90"
     source.write_text(driver)
+    (tmp / "config.h").write_text("")
     exe = tmp / "check"
-    subprocess.run([fc, str(types), str(operator), str(source), "-o", str(exe)], check=True)
+    subprocess.run([fc, "-cpp", "-I", str(tmp), str(common), str(types), str(operator), str(source),
+                    "-o", str(exe)], check=True, cwd=tmp)
     result = subprocess.run([str(exe)], check=True, text=True, capture_output=True)
     assert "PASS nodal Hamiltonian action" in result.stdout
 print("PASS decomposed periodic nodal Hamiltonian matches reference")

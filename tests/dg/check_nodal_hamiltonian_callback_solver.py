@@ -2,9 +2,11 @@
 from pathlib import Path
 root=Path(__file__).resolve().parents[2]
 solver=(root/'src/rt/dg/rt_dg_nodal_ground_state_solver.f90').read_text()
+interfaces=(root/'src/common/dg_nodal_interfaces.f90').read_text()
 salmon=(root/'src/rt/dg/rt_dg_nodal_salmon_ground_state.f90')
-assert 'abstract interface' in solver
-assert 'subroutine nodal_hamiltonian_action' in solver
+assert 'use dg_nodal_interfaces' in solver
+assert 'abstract interface' in interfaces
+assert 'subroutine nodal_complete_h_action' in interfaces
 assert 'subroutine relax_nodal_ground_state_action_mpi' in solver
 assert 'procedure(nodal_hamiltonian_action) :: apply_hamiltonian' in solver
 assert 'call apply_hamiltonian(state,hpsi)' in solver

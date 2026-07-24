@@ -2,7 +2,8 @@
 import os, shutil, subprocess, tempfile
 from pathlib import Path
 root=Path(__file__).resolve().parents[2]
-sources=[root/'src/rt/dg/rt_dg_nodal_types.f90',root/'src/rt/dg/rt_dg_nodal_halo.f90',
+sources=[root/'src/common/dg_nodal_state.f90',root/'src/rt/dg/rt_dg_nodal_types.f90',
+ root/'src/rt/dg/rt_dg_nodal_halo.f90',
  root/'src/rt/dg/rt_dg_nodal_mpi.f90',root/'src/rt/dg/rt_dg_nodal_hamiltonian.f90',
  root/'src/rt/dg/rt_dg_nodal_ground_state.f90']
 assert sources[-1].exists(),'missing nodal DG ground-state verifier'
@@ -34,7 +35,7 @@ program check_ground_residual
  end do
  v=0d0; kin=0d0; grad=0d0; kin(1,1)=-0.5d0
  call verify_nodal_dg_eigenstate_mpi(state,eval,v,1d0,kin,grad,[0d0,0d0,0d0],MPI_COMM_WORLD,1d-12,res)
- if(.not.state%dg_ground_state_ready .or. res>1d-12) error stop 'ground-state verification failed'
+ if(.not.state%ground_state_ready .or. res>1d-12) error stop 'ground-state verification failed'
  if(rank==0) print *,'PASS nodal DG eigen residual',res
  call MPI_Finalize(ierr)
 end program
@@ -42,7 +43,8 @@ end program
 fc=shutil.which('mpifort'); run=shutil.which('mpiexec'); assert fc and run
 with tempfile.TemporaryDirectory() as tmp:
  tmp=Path(tmp); src=tmp/'check.f90'; src.write_text(driver); exe=tmp/'check'
- subprocess.run([fc,'-cpp','-I',str(root/'cmakefiles/build-mpi'),*map(str,sources),str(src),'-o',str(exe)],check=True)
+ (tmp/'config.h').write_text('')
+ subprocess.run([fc,'-cpp','-DUSE_MPI','-I',str(tmp),*map(str,sources),str(src),'-o',str(exe)],check=True,cwd=tmp)
  env=os.environ.copy(); env.setdefault('OMPI_MCA_rmaps_base_oversubscribe','1')
  out=subprocess.run([run,'-n','2',str(exe)],check=True,text=True,capture_output=True,env=env).stdout
  assert 'PASS nodal DG eigen residual' in out

@@ -6,6 +6,7 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
 sources = [
+    root / "src/common/dg_nodal_state.f90",
     root / "src/rt/dg/rt_dg_nodal_types.f90",
     root / "src/rt/dg/rt_dg_nodal_halo.f90",
     root / "src/rt/dg/rt_dg_nodal_mpi.f90",
@@ -47,7 +48,8 @@ with tempfile.TemporaryDirectory() as tmp:
     source.write_text(driver)
     (tmp / "config.h").write_text("")
     exe = tmp / "check"
-    subprocess.run([fc, "-cpp", "-I", str(tmp), *map(str, sources), str(source), "-o", str(exe)], check=True)
+    subprocess.run([fc, "-cpp", "-I", str(tmp), *map(str, sources), str(source), "-o", str(exe)],
+                   check=True, cwd=tmp)
     out = subprocess.run([str(exe)], check=True, text=True, capture_output=True).stdout
     assert "PASS nodal Taylor" in out
 print("PASS nodal Taylor uses a refreshed halo for each Hamiltonian action")

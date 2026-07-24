@@ -38,7 +38,7 @@ contains
     complex(8), allocatable :: accumulated(:,:,:,:,:), hterm(:,:,:,:,:)
     integer :: iorder
 
-    if (.not. state%dg_ground_state_ready) stop 'nodal DG Taylor requires a verified DG ground state'
+    if (.not. state%ground_state_ready) stop 'nodal DG Taylor requires a verified DG ground state'
     if (state%dg_ground_state_residual /= state%dg_ground_state_residual) &
       stop 'nodal DG Taylor received an invalid DG ground-state residual'
     if (dt <= 0.0d0 .or. dt > 0.02d0) stop 'nodal DG Taylor requires 0 < dt <= 0.02 au'
@@ -74,7 +74,7 @@ contains
     complex(8), allocatable :: term(:,:,:,:,:), accumulated(:,:,:,:,:), hterm(:,:,:,:,:)
     integer :: iorder
 
-    if (.not. state%dg_ground_state_ready) stop 'nodal DG Taylor requires a verified DG ground state'
+    if (.not. state%ground_state_ready) stop 'nodal DG Taylor requires a verified DG ground state'
     if (state%dg_ground_state_residual /= state%dg_ground_state_residual) &
       stop 'nodal DG Taylor received an invalid DG ground-state residual'
     if (dt <= 0.0d0 .or. dt > 0.02d0) stop 'nodal DG Taylor requires 0 < dt <= 0.02 au'
@@ -105,7 +105,7 @@ contains
     complex(8), allocatable :: term(:,:,:,:,:), accumulated(:,:,:,:,:), hterm(:,:,:,:,:)
     integer :: iorder
 
-    if (.not. state%dg_ground_state_ready) stop 'nodal DG Taylor requires a verified DG ground state'
+    if (.not. state%ground_state_ready) stop 'nodal DG Taylor requires a verified DG ground state'
     if (state%dg_ground_state_residual /= state%dg_ground_state_residual) &
       stop 'nodal DG Taylor received an invalid DG ground-state residual'
     if (dt <= 0.0d0 .or. dt > 0.02d0) stop 'nodal DG Taylor requires 0 < dt <= 0.02 au'

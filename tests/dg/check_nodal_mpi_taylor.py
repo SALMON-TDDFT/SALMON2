@@ -3,7 +3,8 @@ import os, shutil, subprocess, tempfile
 from pathlib import Path
 
 root=Path(__file__).resolve().parents[2]
-sources=[root/'src/rt/dg/rt_dg_nodal_types.f90',root/'src/rt/dg/rt_dg_nodal_halo.f90',
+sources=[root/'src/common/dg_nodal_state.f90',root/'src/rt/dg/rt_dg_nodal_types.f90',
+         root/'src/rt/dg/rt_dg_nodal_halo.f90',
          root/'src/rt/dg/rt_dg_nodal_mpi.f90',root/'src/rt/dg/rt_dg_nodal_hamiltonian.f90',
          root/'src/rt/dg/rt_dg_nodal_taylor.f90']
 body=sources[-1].read_text()
@@ -54,7 +55,9 @@ end program
 mpifort=shutil.which('mpifort'); mpiexec=shutil.which('mpiexec'); assert mpifort and mpiexec
 with tempfile.TemporaryDirectory() as tmp:
     tmp=Path(tmp); src=tmp/'check.f90'; src.write_text(driver); exe=tmp/'check'
-    subprocess.run([mpifort,'-cpp','-I',str(root/'cmakefiles/build-mpi'),*map(str,sources),str(src),'-o',str(exe)],check=True)
+    (tmp/'config.h').write_text('')
+    subprocess.run([mpifort,'-cpp','-DUSE_MPI','-I',str(tmp),*map(str,sources),str(src),'-o',str(exe)],
+                   check=True,cwd=tmp)
     env=os.environ.copy(); env.setdefault('OMPI_MCA_rmaps_base_oversubscribe','1')
     out=subprocess.run([mpiexec,'-n','2',str(exe)],check=True,text=True,capture_output=True,env=env).stdout
     assert 'PASS nodal MPI Taylor' in out

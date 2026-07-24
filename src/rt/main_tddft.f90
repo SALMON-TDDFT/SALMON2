@@ -429,7 +429,7 @@ subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc
                                             dg_nodal_gs_tol,nodal_state,nodal_vlocal,nodal_kinetic_center, &
                                             nodal_kinetic_offset,nodal_gradient_offset,nodal_eigenvalues, &
                                             nodal_gs_residual,nodal_gs_iteration)
-    if (.not. nodal_state%dg_ground_state_ready) stop 'nodal DG preflight did not produce a stationary state'
+    if (.not. nodal_state%ground_state_ready) stop 'nodal DG preflight did not produce a stationary state'
     if (comm_is_root(dg_frag%id)) then
       write(*,'(1x,a,1pe13.5,a,i0,2(a,1pe13.5))') '[DG-NODAL-GS]', &
         nodal_gs_residual,' iterations=',nodal_gs_iteration, &

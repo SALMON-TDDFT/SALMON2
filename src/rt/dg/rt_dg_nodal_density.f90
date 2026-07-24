@@ -14,6 +14,7 @@ module rt_dg_nodal_density
   use structures, only: s_dft_system,s_scalar
   use rt_dg_fragment_types, only: s_dg_fragment_rt
   use rt_dg_nodal_types, only: s_dg_nodal_state
+  use dg_nodal_interfaces, only: nodal_density_builder
   use sym_rho_sub, only: sym_rho
   implicit none
   private

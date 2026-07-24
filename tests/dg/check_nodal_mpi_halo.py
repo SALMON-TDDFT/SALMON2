@@ -7,13 +7,14 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
 sources = [
+    root / "src/common/dg_nodal_state.f90",
     root / "src/rt/dg/rt_dg_nodal_types.f90",
     root / "src/rt/dg/rt_dg_nodal_halo.f90",
     root / "src/rt/dg/rt_dg_nodal_mpi.f90",
     root / "src/rt/dg/rt_dg_nodal_hamiltonian.f90",
 ]
-assert sources[2].exists(), "missing nodal MPI face exchange"
-assert '#include "config.h"' in sources[2].read_text()
+assert sources[3].exists(), "missing nodal MPI face exchange"
+assert '#include "config.h"' in sources[3].read_text()
 
 driver = r"""
 program check_nodal_mpi
@@ -68,10 +69,15 @@ with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
     source = tmp / "check.f90"
     source.write_text(driver)
+    (tmp / "config.h").write_text("")
     exe = tmp / "check"
-    subprocess.run([mpifort, "-cpp", "-I", str(root/"cmakefiles/build-mpi"), *map(str, sources), str(source), "-o", str(exe)], check=True)
+    subprocess.run([mpifort, "-cpp", "-DUSE_MPI", "-I", str(tmp), *map(str, sources), str(source), "-o", str(exe)],
+                   check=True, cwd=tmp)
     env = os.environ.copy()
     env.setdefault("OMPI_MCA_rmaps_base_oversubscribe", "1")
-    out = subprocess.run([mpiexec, "-n", "2", str(exe)], check=True, text=True, capture_output=True, env=env).stdout
+    completed = subprocess.run([mpiexec, "-n", "2", str(exe)], text=True, capture_output=True, env=env)
+    if completed.returncode != 0:
+        raise AssertionError(f"MPI halo failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}")
+    out = completed.stdout
     assert "PASS nodal MPI halo" in out
 print("PASS two-fragment MPI halo preserves the periodic Hamiltonian action")
