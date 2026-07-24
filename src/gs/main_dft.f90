@@ -25,7 +25,7 @@ use mpi, only: MPI_Allreduce, MPI_INTEGER8, MPI_BXOR, MPI_SUCCESS
 use structures
 use inputoutput
 use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_wpw_production, &
-  yn_dg_dc_local_periodic, dg_dc_handoff_min_iter, dg_dc_handoff_tolerance, &
+  yn_dg_dc_local_periodic, ncg, dg_dc_handoff_min_iter, dg_dc_handoff_tolerance, &
   dg_dc_candidate_orbitals_per_atom, dg_dc_metric_rank_tolerance, &
   dg_dc_gs_intermediate_orbital_tolerance,dg_dc_gs_intermediate_density_tolerance, &
   dg_dc_gs_final_orbital_tolerance,dg_dc_gs_final_density_tolerance,dg_dc_gs_subspace_tolerance, &
@@ -33,7 +33,8 @@ use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_wpw_producti
   dg_dc_gs_allowed_residual_growth,dg_dc_gs_density_mix_rate,dg_dc_gs_hermiticity_tolerance, &
   dg_dc_gs_orthogonality_tolerance,dg_dc_gs_face_balance_tolerance,dg_dc_gs_electron_count_tolerance, &
   dg_dc_gs_minimum_projector_overlap,dg_dc_gs_maximum_scf_iterations, &
-  dg_dc_gs_maximum_eigensolver_iterations,dg_dc_gs_maximum_rollbacks
+  dg_dc_gs_maximum_eigensolver_iterations,dg_dc_gs_maximum_rollbacks, &
+  dg_dc_gs_sipg_penalty_factor,dg_dc_gs_target_lambda
 use dg_dc_handoff, only: dg_dc_handoff_runtime, dg_dc_nodal_runtime, initialize_dg_dc_handoff, &
   materialize_dg_dc_candidates
 use dg_dc_ground_state, only: s_dg_dc_gs_controls,s_dg_dc_gs_result,s_dg_dc_gs_diagnostics, &
@@ -42,6 +43,16 @@ use dg_dc_ground_state_adapter, only: expand_dg_dc_global_candidate_axis,reconst
   mix_dg_dc_density_transaction,initialize_dg_dc_physical_faces,apply_dg_dc_sipg_operator_mpi, &
   compose_dg_dc_hamiltonian,build_dg_dc_interior_volume_action,execute_dg_dc_production_iteration
 use dg_nodal_state, only: s_dg_nodal_common_state
+use dg_dc_local_basis_ground_state, only: s_dg_dc_local_basis_layout, &
+  initialize_dg_dc_local_basis_layout,orthonormalize_dg_dc_fragment_core_basis, &
+  transform_dg_dc_fragment_buffer_basis, &
+  project_dg_dc_local_basis_volume,assemble_dg_dc_local_basis_interface_rows, &
+  compose_dg_dc_distributed_hamiltonian_rows,initialize_dg_dc_local_basis_coefficients, &
+  assign_dg_dc_local_basis_occupations,solve_dg_dc_local_basis_bands_cg, &
+  reconstruct_dg_dc_local_basis_density,validate_dg_dc_local_basis_density, &
+  s_dg_dc_local_basis_production_state,dg_dc_local_basis_state
+use dg_ground_state_checkpoint, only: s_dg_ground_state_checkpoint, &
+  populate_dg_ground_state_checkpoint,publish_dg_ground_state_checkpoint
 use rt_dg_nodal_cg, only: solve_nodal_ground_state_cg_mpi
 use rt_dg_nodal_rayleigh_ritz, only: rayleigh_ritz_nodal_subspace_mpi
 #ifdef USE_EIGENEXA
@@ -109,6 +120,7 @@ type(s_dcdft) :: dc
 
 logical :: rion_update
 logical :: flag_opt_conv
+logical :: local_basis_route_active
 integer :: Miopt, iopt,nopt_max,i
 integer :: iter_band_kpt, iter_band_kpt_end, iter_band_kpt_stride
 logical :: is_checkpoint_iter, is_shutdown_time
@@ -329,7 +341,7 @@ if(yn_opt=='y') then
       is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(iopt,checkpoint_interval) == 0)
       is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
 
-      if(is_checkpoint_iter .or. is_shutdown_time) then
+      if(yn_dg_dc_local_periodic/='y' .and. (is_checkpoint_iter .or. is_shutdown_time)) then
          if (is_shutdown_time .and. comm_is_root(info%id_rko)) then
            print *, 'shutdown the calculation, iopt =', iopt
          end if
@@ -366,13 +378,12 @@ call fipp_stop ! performance profiling
 
 !------------ Writing part -----------
 call timer_begin(LOG_WRITE_GS_RESULTS)
+local_basis_route_active=.false.
 
 if(yn_dc=='y') then
   if(yn_dg_dc_local_periodic == 'y' .and. dg_dc_handoff_runtime%accepted) then
-    ! Candidate materialization is performed by the GS-native handoff owner before
-    ! any legacy LCFO/Wannier consumer is eligible to run.
-    call materialize_dg_dc_candidates_for_main()
-    call run_dg_dc_ground_state_for_main()
+    call run_dg_dc_local_basis_ground_state_for_main()
+    local_basis_route_active=.true.
   else if(yn_dc_lcfo_flux == 'y') then
     if(yn_spinorbit == 'y') then
       stop "yn_dc_lcfo_flux=y is not implemented for spin-orbit mode"
@@ -392,14 +403,15 @@ if(yn_dc=='y') then
       call dc_lcfo(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
     end if
   end if
-  if(yn_spinorbit == 'y') then
+  if(.not.local_basis_route_active .and. yn_spinorbit == 'y') then
     call write_total_dcdft_soi(system,dc)
-  else
+  else if(.not.local_basis_route_active) then
     call write_total_dcdft(system,dc)
   end if
 end if
 
 ! write GS: basic data
+if(.not.local_basis_route_active) then
 if(yn_dc=='n') call write_band_information(system,energy)
 call write_eigen(ofl,system,energy)
 call write_info_data(Miter,system,energy,pp)
@@ -412,11 +424,13 @@ if(yn_out_dns =='y') call write_dns(lg,mg,system,info,rho_s)
 if(yn_out_dos =='y') call write_dos(system,energy)
 if(yn_out_pdos=='y') call write_pdos(lg,mg,system,info,pp,energy,spsi)
 if(yn_out_elf =='y') call write_elf(0,lg,mg,system,info,stencil,rho,srg,srg_scalar,spsi)
+end if
 
 call timer_end(LOG_WRITE_GS_RESULTS)
 
 ! write GS: binary data for restart
 call timer_begin(LOG_WRITE_GS_DATA)
+if(.not.local_basis_route_active) then
 if(write_gs_restart_data=="no") then
    if(comm_is_root(nproc_id_global)) &
       write(*,'(a)')"  no restart data writing."
@@ -446,6 +460,9 @@ if(yn_self_checkpoint=='y') then
    call comm_sync_all
 endif
 if(comm_is_root(nproc_id_global)) write(*,'(a)')"  writing completed."
+else if(comm_is_root(nproc_id_global)) then
+  write(*,'(a)')'  DG local-basis result retained in memory; standard restart publication skipped.'
+end if
 call timer_end(LOG_WRITE_GS_DATA)
 
 !call timer_begin(LOG_WRITE_GS_INFO)  !if needed, please take back, sory: AY
@@ -466,27 +483,265 @@ call timer_end(LOG_TOTAL)
 
 contains
 
+  subroutine run_dg_dc_local_basis_ground_state_for_main()
+    type(s_dg_dc_local_basis_layout) :: layout
+    type(s_dg_dc_local_basis_production_state) :: candidate_state
+    complex(8), allocatable :: raw_basis(:,:),orthonormal_basis(:,:),basis_transform(:,:)
+    complex(8), allocatable :: full_raw_basis(:,:),full_fragment_basis(:,:)
+    complex(8), allocatable :: basis(:,:,:,:),hbasis(:,:),volume_block(:,:),interface_rows(:,:)
+    complex(8), allocatable :: hamiltonian_rows(:,:),overlap_rows(:,:),coefficient_rows(:,:)
+    real(8), allocatable :: eigenvalues(:),occupations(:),local_density(:),quadrature_weights(:)
+    real(8), allocatable :: previous_density(:,:,:,:),trial_density(:,:,:,:),mixed_density(:,:,:,:)
+    integer :: core_size(3),npoint,nraw,neffective,ix,iy,iz,io,point,global_row
+    integer :: spsi_shape(7),sttpsi_shape(7),shpsi_shape(7)
+    integer :: iteration,local_rank,local_first,allocation_status,full_point_count
+    integer(8) :: iteration_operator_fingerprint
+    real(8) :: density_residual_local,density_residual_global,mix_rate
+    logical :: ok
+    character(256) :: message
+
+    ok=system%nspin==1 .and. system%if_real_orbital .and. allocated(spsi%rwf) .and. &
+      allocated(sttpsi%rwf) .and. allocated(shpsi%rwf) .and. dc%isize_tot==dc%n_frag .and. &
+      .not.dc%optimized_fragment_geometry
+    call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+    if(.not.dg_handoff_ok) stop 'DG DC local-basis production topology is unsupported'
+    spsi_shape=shape(spsi%rwf);sttpsi_shape=shape(sttpsi%rwf);shpsi_shape=shape(shpsi%rwf)
+    core_size=dc%nxyz_domain_frag(:,dc%i_frag)
+    ok=all(spsi_shape(1:3)==sttpsi_shape(1:3)) .and. &
+      all(spsi_shape(1:3)==shpsi_shape(1:3)) .and. all(spsi_shape(1:3)>=core_size) .and. &
+      spsi_shape(4)>=1 .and. sttpsi_shape(4)>=1 .and. shpsi_shape(4)>=1 .and. &
+      spsi_shape(5)>=system%no .and. sttpsi_shape(5)>=system%no .and. shpsi_shape(5)>=system%no .and. &
+      spsi_shape(6)>=1 .and. sttpsi_shape(6)>=1 .and. shpsi_shape(6)>=1 .and. &
+      spsi_shape(7)>=1 .and. sttpsi_shape(7)>=1 .and. shpsi_shape(7)>=1
+    call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+    if(.not.dg_handoff_ok) stop 'DG DC local-basis orbital shape mismatch collectively'
+    npoint=product(core_size)
+    nraw=system%no
+    full_point_count=size(spsi%rwf,1)*size(spsi%rwf,2)*size(spsi%rwf,3)
+    allocate(raw_basis(npoint,nraw),orthonormal_basis(npoint,nraw),basis_transform(nraw,nraw), &
+      full_raw_basis(full_point_count,nraw),stat=allocation_status)
+    ok=allocation_status==0
+    call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+    if(.not.dg_handoff_ok) stop 'DG DC local-basis basis allocation failed collectively'
+    point=0
+    do iz=1,core_size(3); do iy=1,core_size(2); do ix=1,core_size(1)
+      point=point+1
+      do io=1,nraw
+        raw_basis(point,io)=cmplx(spsi%rwf(ix,iy,iz,1,io,1,1),0d0,8)
+      end do
+    end do; end do; end do
+    do io=1,nraw
+      full_raw_basis(:,io)=reshape(cmplx(spsi%rwf(:,:,:,1,io,1,1),0d0,8),[full_point_count])
+    end do
+    call orthonormalize_dg_dc_fragment_core_basis(raw_basis,system%hvol,dg_dc_metric_rank_tolerance, &
+      orthonormal_basis,basis_transform,neffective,ok,message)
+    call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+    if(.not.dg_handoff_ok) stop 'DG DC local-basis core orthonormalization failed collectively'
+    allocate(basis(core_size(1),core_size(2),core_size(3),neffective), &
+      full_fragment_basis(full_point_count,neffective),stat=allocation_status)
+    ok=allocation_status==0
+    call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+    if(.not.dg_handoff_ok) stop 'DG DC local-basis transformed basis allocation failed collectively'
+    call transform_dg_dc_fragment_buffer_basis(full_raw_basis,basis_transform,neffective, &
+      full_fragment_basis,ok,message)
+    ok=ok .and. maxval(abs(aimag(full_fragment_basis)))<=1d-12*max(1d0,maxval(abs(full_fragment_basis)))
+    call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+    if(.not.dg_handoff_ok) stop 'DG DC local-basis full buffer transform failed collectively'
+    do io=1,neffective
+      basis(:,:,:,io)=reshape(orthonormal_basis(:,io),core_size)
+    end do
+    call initialize_dg_dc_local_basis_layout(layout,dc%i_frag,neffective,dc%nstate_tot, &
+      dg_dc_geometry_fingerprint(),dg_dc_operator_fingerprint(),dc%icomm_tot,ok,message)
+    if(.not.ok) stop 'DG DC local-basis distributed layout failed'
+    allocate(interface_rows(neffective,layout%global_basis_count),stat=allocation_status)
+    ok=allocation_status==0
+    call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+    if(.not.dg_handoff_ok) stop 'DG DC local-basis interface allocation failed collectively'
+    call assemble_dg_dc_local_basis_interface_rows(layout,basis,dc%ixyz_frag,dc%nxyz_domain_frag, &
+      dc%lg_tot%num,system%hgs,dg_dc_gs_sipg_penalty_factor,dc%icomm_tot,interface_rows,ok,message)
+    call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+    if(.not.dg_handoff_ok) stop 'DG DC local-basis SIPG interface assembly failed collectively'
+    allocate(volume_block(neffective,neffective),hamiltonian_rows(neffective,layout%global_basis_count), &
+      overlap_rows(neffective,layout%global_basis_count),coefficient_rows(neffective,layout%global_band_count), &
+      eigenvalues(layout%global_band_count),occupations(layout%global_band_count),local_density(npoint), &
+      quadrature_weights(npoint),stat=allocation_status)
+    ok=allocation_status==0
+    call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+    if(.not.dg_handoff_ok) stop 'DG DC local-basis SCF allocation failed collectively'
+    quadrature_weights=system%hvol
+    overlap_rows=(0d0,0d0)
+    local_rank=dc%id_tot
+    local_first=layout%basis_offsets(local_rank)+1
+    do io=1,neffective
+      global_row=local_first+io-1
+      overlap_rows(io,global_row)=1d0
+    end do
+    call initialize_dg_dc_local_basis_coefficients(layout,coefficient_rows,ok,message)
+    call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+    if(.not.dg_handoff_ok) stop 'DG DC local-basis coefficient initialization failed collectively'
+    call assign_dg_dc_local_basis_occupations(dc%elec_num_tot,occupations,ok,message)
+    call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+    if(.not.dg_handoff_ok) stop 'DG DC local-basis occupation initialization failed collectively'
+    allocate(previous_density(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),1), &
+      trial_density(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),1), &
+      mixed_density(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),1),stat=allocation_status)
+    ok=allocation_status==0
+    call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+    if(.not.dg_handoff_ok) stop 'DG DC local-basis density allocation failed collectively'
+    previous_density(:,:,:,1)=dc%rho_tot_s(1)%f
+    mix_rate=dg_dc_gs_density_mix_rate
+    do iteration=1,dg_dc_gs_maximum_scf_iterations
+      iteration_operator_fingerprint=dg_dc_operator_fingerprint()
+      sttpsi%rwf=0d0
+      do io=1,neffective
+        sttpsi%rwf(:,:,:,1,io,1,1)=reshape(real(full_fragment_basis(:,io),8),shape(sttpsi%rwf(:,:,:,1,io,1,1)))
+      end do
+      call hpsi(sttpsi,shpsi,info,mg,v_local,system,stencil,srg,ppg)
+      allocate(hbasis(npoint,neffective),stat=allocation_status)
+      ok=allocation_status==0
+      call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+      if(.not.dg_handoff_ok) stop 'DG DC local-basis H-basis allocation failed collectively'
+      point=0
+      do iz=1,core_size(3); do iy=1,core_size(2); do ix=1,core_size(1)
+        point=point+1
+        do io=1,neffective
+          hbasis(point,io)=cmplx(shpsi%rwf(ix,iy,iz,1,io,1,1),0d0,8)
+        end do
+      end do; end do; end do
+      call project_dg_dc_local_basis_volume(orthonormal_basis(:,1:neffective),hbasis,system%hvol, &
+        volume_block,ok,message)
+      deallocate(hbasis)
+      call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+      if(.not.dg_handoff_ok) stop 'DG DC local-basis DC volume projection failed collectively'
+      call compose_dg_dc_distributed_hamiltonian_rows(layout,volume_block,interface_rows, &
+        dg_dc_gs_target_lambda, &
+        hamiltonian_rows,ok,message)
+      call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+      if(.not.dg_handoff_ok) stop 'DG DC local-basis Hamiltonian row composition failed collectively'
+      call solve_dg_dc_local_basis_bands_cg(layout,hamiltonian_rows,overlap_rows,dc%icomm_tot, &
+        dg_dc_gs_maximum_eigensolver_iterations,dg_dc_gs_final_orbital_tolerance, &
+        coefficient_rows,eigenvalues,ok,message)
+      call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+      if(.not.dg_handoff_ok) stop 'DG DC local-basis coefficient CG failed collectively'
+      call reconstruct_dg_dc_local_basis_density(orthonormal_basis(:,1:neffective),coefficient_rows, &
+        occupations,local_density,ok,message)
+      call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+      if(.not.dg_handoff_ok) stop 'DG DC local-basis density reconstruction failed collectively'
+      call validate_dg_dc_local_basis_density(occupations,2d0,dc%elec_num_tot,local_density, &
+        quadrature_weights,dc%icomm_tot,ok,message)
+      if(.not.ok) stop 'DG DC local-basis density charge validation failed collectively'
+      rho_s(1)%f=0d0
+      point=0
+      do iz=1,core_size(3); do iy=1,core_size(2); do ix=1,core_size(1)
+        point=point+1
+        rho_s(1)%f(ix,iy,iz)=local_density(point)
+      end do; end do; end do
+      call calc_rho_total_dcdft(system%nspin,lg,mg,info,rho_s,dc)
+      trial_density(:,:,:,1)=dc%rho_tot_s(1)%f
+      density_residual_local=sum((trial_density(:,:,:,1)-previous_density(:,:,:,1))**2)* &
+        dc%system_tot%hvol/real(dc%isize_tot,8)
+      call comm_summation(density_residual_local,density_residual_global,dc%icomm_tot)
+      density_residual_global=sqrt(max(0d0,density_residual_global))
+      mixed_density=(1d0-mix_rate)*previous_density+mix_rate*trial_density
+      previous_density=mixed_density
+      call dg_dc_update_potential_from_density(previous_density,ok,message)
+      call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+      if(.not.dg_handoff_ok) stop 'DG DC local-basis Hartree/XC/vlocal update failed collectively'
+      if(density_residual_global<=dg_dc_gs_final_density_tolerance) exit
+    end do
+    if(iteration>dg_dc_gs_maximum_scf_iterations) &
+      stop 'DG DC local-basis SCF did not converge'
+    if(comm_is_root(nproc_id_global)) write(*,'(a,i0,2(a,es24.16))') &
+      '[DG-DC-LOCAL-BASIS] converged iterations=',iteration,' density_residual=',density_residual_global, &
+      ' lambda=',dg_dc_gs_target_lambda
+    allocate(candidate_state%coefficient_rows,source=coefficient_rows,stat=allocation_status)
+    if(allocation_status==0) allocate(candidate_state%full_fragment_basis,source=full_fragment_basis, &
+      stat=allocation_status)
+    if(allocation_status==0) allocate(candidate_state%basis_transform, &
+      source=basis_transform(:,1:neffective),stat=allocation_status)
+    if(allocation_status==0) allocate(candidate_state%eigenvalues,source=eigenvalues,stat=allocation_status)
+    if(allocation_status==0) allocate(candidate_state%occupations,source=occupations,stat=allocation_status)
+    if(allocation_status==0) allocate(candidate_state%basis_offsets,source=layout%basis_offsets, &
+      stat=allocation_status)
+    if(allocation_status==0) allocate(candidate_state%fragment_ids,source=layout%fragment_ids, &
+      stat=allocation_status)
+    ok=allocation_status==0
+    call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+    if(.not.dg_handoff_ok) stop 'DG DC local-basis result state allocation failed collectively'
+    candidate_state%scf_iterations=iteration
+    candidate_state%geometry_fingerprint=layout%geometry_fingerprint
+    candidate_state%operator_fingerprint=iteration_operator_fingerprint
+    candidate_state%density_residual=density_residual_global
+    candidate_state%interface_scale=dg_dc_gs_target_lambda
+    candidate_state%fragment_id=layout%fragment_id
+    candidate_state%local_basis_count=layout%local_basis_count
+    candidate_state%global_basis_count=layout%global_basis_count
+    candidate_state%global_band_count=layout%global_band_count
+    candidate_state%core_size=core_size
+    candidate_state%full_spatial_shape=spsi_shape(1:3)
+    candidate_state%ready=.true.
+    if(allocated(dg_dc_local_basis_state%coefficient_rows)) deallocate(dg_dc_local_basis_state%coefficient_rows)
+    if(allocated(dg_dc_local_basis_state%full_fragment_basis)) &
+      deallocate(dg_dc_local_basis_state%full_fragment_basis)
+    if(allocated(dg_dc_local_basis_state%basis_transform)) deallocate(dg_dc_local_basis_state%basis_transform)
+    if(allocated(dg_dc_local_basis_state%eigenvalues)) deallocate(dg_dc_local_basis_state%eigenvalues)
+    if(allocated(dg_dc_local_basis_state%occupations)) deallocate(dg_dc_local_basis_state%occupations)
+    if(allocated(dg_dc_local_basis_state%basis_offsets)) deallocate(dg_dc_local_basis_state%basis_offsets)
+    if(allocated(dg_dc_local_basis_state%fragment_ids)) deallocate(dg_dc_local_basis_state%fragment_ids)
+    call move_alloc(candidate_state%coefficient_rows,dg_dc_local_basis_state%coefficient_rows)
+    call move_alloc(candidate_state%full_fragment_basis,dg_dc_local_basis_state%full_fragment_basis)
+    call move_alloc(candidate_state%basis_transform,dg_dc_local_basis_state%basis_transform)
+    call move_alloc(candidate_state%eigenvalues,dg_dc_local_basis_state%eigenvalues)
+    call move_alloc(candidate_state%occupations,dg_dc_local_basis_state%occupations)
+    call move_alloc(candidate_state%basis_offsets,dg_dc_local_basis_state%basis_offsets)
+    call move_alloc(candidate_state%fragment_ids,dg_dc_local_basis_state%fragment_ids)
+    dg_dc_local_basis_state%scf_iterations=candidate_state%scf_iterations
+    dg_dc_local_basis_state%geometry_fingerprint=candidate_state%geometry_fingerprint
+    dg_dc_local_basis_state%operator_fingerprint=candidate_state%operator_fingerprint
+    dg_dc_local_basis_state%density_residual=candidate_state%density_residual
+    dg_dc_local_basis_state%interface_scale=candidate_state%interface_scale
+    dg_dc_local_basis_state%fragment_id=candidate_state%fragment_id
+    dg_dc_local_basis_state%local_basis_count=candidate_state%local_basis_count
+    dg_dc_local_basis_state%global_basis_count=candidate_state%global_basis_count
+    dg_dc_local_basis_state%global_band_count=candidate_state%global_band_count
+    dg_dc_local_basis_state%core_size=candidate_state%core_size
+    dg_dc_local_basis_state%full_spatial_shape=candidate_state%full_spatial_shape
+    dg_dc_local_basis_state%ready=.true.
+  end subroutine run_dg_dc_local_basis_ground_state_for_main
+
   subroutine materialize_dg_dc_candidates_for_main()
     complex(8), allocatable :: candidate_box(:,:,:,:,:)
     integer(8), allocatable :: owner(:,:,:)
-    integer :: box_size(3),core_size(3),buffer(3),maximum_candidate_count
+    integer :: box_size(3),orbital_storage_size(3),core_size(3),buffer(3),maximum_candidate_count
     integer :: ix,iy,iz,io,is,ix_tot,iy_tot,iz_tot,raw_ix,raw_iy,raw_iz
     integer(8) :: geometry_fingerprint,operator_fingerprint
     logical :: local_preflight,global_preflight
 
     local_preflight=dc%isize_tot==dc%n_frag .and. (allocated(spsi%rwf) .or. allocated(spsi%zwf))
     call comm_logical_and(local_preflight,global_preflight,dc%icomm_tot)
-    if(.not.global_preflight) stop 'DG DC local-periodic handoff topology/orbital preflight failed collectively'
+    if(.not.global_preflight) then
+      if(comm_is_root(nproc_id_global)) write(*,'(a,2(a,i0),2(a,l1))')'[DG-DC-GS] preflight failure', &
+        ' ranks=',dc%isize_tot,' fragments=',dc%n_frag,' rwf=',allocated(spsi%rwf),' zwf=',allocated(spsi%zwf)
+      stop 'DG DC local-periodic handoff topology/orbital preflight failed collectively'
+    end if
     buffer=dc%nxyz_buffer
     core_size=dc%nxyz_domain_frag(:,dc%i_frag)
     if(allocated(spsi%rwf)) then
-      box_size=[size(spsi%rwf,1),size(spsi%rwf,2),size(spsi%rwf,3)]
+      orbital_storage_size=[size(spsi%rwf,1),size(spsi%rwf,2),size(spsi%rwf,3)]
     else
-      box_size=[size(spsi%zwf,1),size(spsi%zwf,2),size(spsi%zwf,3)]
+      orbital_storage_size=[size(spsi%zwf,1),size(spsi%zwf,2),size(spsi%zwf,3)]
     end if
-    local_preflight=all(box_size==core_size+2*buffer) .and. system%no==natom*dg_dc_candidate_orbitals_per_atom
+    box_size=core_size+2*buffer
+    local_preflight=all(orbital_storage_size>=box_size) .and. &
+      system%no==natom*dg_dc_candidate_orbitals_per_atom
     call comm_logical_and(local_preflight,global_preflight,dc%icomm_tot)
-    if(.not.global_preflight) stop 'DG DC handoff candidate/geometry preflight failed collectively'
+    if(.not.global_preflight) then
+      if(comm_is_root(nproc_id_global)) write(*,'(a,4(a,3(i0,1x)),3(a,i0))') &
+        '[DG-DC-GS] candidate preflight failure',' storage=',orbital_storage_size,' core=',core_size, &
+        ' buffer=',buffer,' physical_box=',box_size,' local_states=',system%no,' atoms=',natom, &
+        ' candidates_per_atom=',dg_dc_candidate_orbitals_per_atom
+      stop 'DG DC handoff candidate/geometry preflight failed collectively'
+    end if
     maximum_candidate_count=system%no
     call comm_get_max(maximum_candidate_count,dc%icomm_tot)
     allocate(candidate_box(box_size(1),box_size(2),box_size(3),maximum_candidate_count,system%nspin))
@@ -527,7 +782,11 @@ contains
       core_size,buffer,owner, &
       natom,system%no,geometry_fingerprint,operator_fingerprint,dc%icomm_tot,dg_handoff_ok, &
       dg_handoff_message)
-    if(.not.dg_handoff_ok) stop 'DG DC candidate materialization failed'
+    if(.not.dg_handoff_ok) then
+      if(comm_is_root(nproc_id_global)) write(*,'(a,1x,a)')'[DG-DC-GS] materialization failure', &
+        trim(dg_handoff_message)
+      stop 'DG DC candidate materialization failed'
+    end if
   end subroutine materialize_dg_dc_candidates_for_main
 
   subroutine run_dg_dc_ground_state_for_main()
@@ -541,13 +800,20 @@ contains
     end do
     call expand_dg_dc_global_candidate_axis(dg_dc_nodal_runtime,local_candidate_count,dc%icomm_tot, &
       dg_handoff_ok,dg_handoff_message)
-    if(.not.dg_handoff_ok) stop 'DG DC global candidate layout failed collectively'
+    if(.not.dg_handoff_ok) then
+      if(comm_is_root(nproc_id_global)) write(*,'(a,1x,a)')'[DG-DC-GS] global layout failure',trim(dg_handoff_message)
+      stop 'DG DC global candidate layout failed collectively'
+    end if
     allocate(dg_gs_fragment_origins(3,dc%n_frag),dg_gs_fragment_sizes(3,dc%n_frag))
     dg_gs_fragment_origins=dc%ixyz_frag
     dg_gs_fragment_sizes=dc%nxyz_domain_frag
     call initialize_dg_dc_physical_faces(dg_dc_nodal_runtime,dg_gs_fragment_origins,dg_gs_fragment_sizes, &
       dc%lg_tot%num,dc%icomm_tot,dg_handoff_ok,dg_handoff_message)
-    if(.not.dg_handoff_ok) stop 'DG DC physical face topology failed collectively'
+    if(.not.dg_handoff_ok) then
+      if(comm_is_root(nproc_id_global)) write(*,'(a,1x,a)')'[DG-DC-GS] face topology failure', &
+        trim(dg_handoff_message)
+      stop 'DG DC physical face topology failed collectively'
+    end if
     allocate(dg_gs_density(size(dc%rho_tot_s(1)%f,1),size(dc%rho_tot_s(1)%f,2), &
       size(dc%rho_tot_s(1)%f,3),system%nspin))
     do is=1,system%nspin
@@ -586,7 +852,62 @@ contains
       if(.not.dg_handoff_ok) stop 'DG DC accepted potential rollback failed collectively'
       stop 'DG DC ground-state continuation failed collectively'
     end if
+    call publish_dg_dc_ground_state_for_main(dg_handoff_ok,dg_handoff_message)
+    if(.not.dg_handoff_ok) stop 'DG DC verified ground-state checkpoint publication failed collectively'
   end subroutine run_dg_dc_ground_state_for_main
+
+  subroutine publish_dg_dc_ground_state_for_main(ok,message)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    type(s_dg_ground_state_checkpoint)::checkpoint
+    real(8),allocatable::checkpoint_vxc(:,:,:,:),checkpoint_vlocal(:,:,:,:)
+    integer::is,iface
+    integer::face_neighbors(6)
+    character(512)::checkpoint_root
+    allocate(checkpoint_vxc(size(dg_gs_density,1),size(dg_gs_density,2),size(dg_gs_density,3),system%nspin))
+    allocate(checkpoint_vlocal,mold=checkpoint_vxc)
+    do is=1,system%nspin
+      checkpoint_vxc(:,:,:,is)=dc%Vxc_tot(is)%f
+      checkpoint_vlocal(:,:,:,is)=dc%vloc_tot(is)%f
+    end do
+    do iface=1,size(face_neighbors)
+      face_neighbors(iface)=dg_dc_nodal_runtime%faces(iface)%neighbor_fragment-1
+    end do
+    call populate_dg_ground_state_checkpoint(checkpoint,dg_dc_nodal_runtime,dg_gs_result,dg_gs_controls,dg_gs_density, &
+      dc%Vh_tot%f,checkpoint_vxc,checkpoint_vlocal,dc%lg_tot%num,dg_gs_fragment_origins, &
+      dg_gs_fragment_sizes,face_neighbors,'DG_DC_GS',ok,message)
+    if(.not.ok)return
+    checkpoint_root=trim(sysname)//'.dg_dc_gs'
+    call publish_dg_ground_state_checkpoint(trim(checkpoint_root),checkpoint,dc%icomm_tot,ok,message)
+    if(ok .and. comm_is_root(nproc_id_global)) call report_dg_dc_ground_state_for_main(checkpoint_root)
+  end subroutine publish_dg_dc_ground_state_for_main
+
+  subroutine report_dg_dc_ground_state_for_main(checkpoint_root)
+    character(*),intent(in)::checkpoint_root
+    integer::ihistory
+    write(*,'(a,1x,a)')'[DG-DC-GS] checkpoint',trim(checkpoint_root)//'.manifest'
+    write(*,'(a,5(a,i0),3(a,es24.16))')'[DG-DC-GS] continuation', &
+      ' accepted_steps=',dg_gs_result%naccepted_steps,' rollbacks=',dg_gs_result%nrollbacks, &
+      ' mixing_resets=',dg_gs_result%mixing_reset_count,' scf_iterations=',dg_gs_result%total_scf_iterations, &
+      ' metric_rank=',dg_dc_handoff_runtime%metric_rank, &
+      ' lambda=',dg_gs_result%lambda,' projector_min=',dg_gs_result%minimum_projector_overlap, &
+      ' dc_handoff_energy=',energy%E_tot
+    do ihistory=1,dg_gs_result%naccepted_steps
+      write(*,'(a,i0,2(a,es24.16))')'[DG-DC-GS] lambda_history step=',ihistory, &
+        ' lambda=',dg_gs_result%lambda_history(ihistory),' delta=',dg_gs_result%lambda_steps(ihistory)
+    end do
+    write(*,'(a,8(a,es24.16),2(a,i0))')'[DG-DC-GS] acceptance', &
+      ' orbital=',dg_gs_result%final_diagnostics%orbital_residual, &
+      ' density=',dg_gs_result%final_diagnostics%density_residual, &
+      ' subspace=',dg_gs_result%final_diagnostics%subspace_residual, &
+      ' charge=',dg_gs_result%final_diagnostics%electron_number, &
+      ' orthogonality=',dg_gs_result%final_diagnostics%orthogonality_defect, &
+      ' hermiticity=',dg_gs_result%final_diagnostics%hermiticity_defect, &
+      ' face_balance=',dg_gs_result%final_diagnostics%face_balance_defect, &
+      ' fixed_point_lambda=',dg_gs_result%final_diagnostics%interface_scale, &
+      ' eigensolver_iterations=',dg_gs_result%final_diagnostics%eigensolver_iterations, &
+      ' potential_epoch=',dg_gs_result%final_diagnostics%updated_potential_epoch
+  end subroutine report_dg_dc_ground_state_for_main
 
   subroutine dg_dc_salmon_scf_step(state,density_arg,lambda,density_mix,reset_mixing,unmixed, &
       diagnostics,communicator,step_ok,step_message)
@@ -627,9 +948,9 @@ contains
     dg_gs_operator_ok=.true.
     dg_gs_operator_message=''
     call solve_nodal_ground_state_cg_mpi(state,dg_dc_apply_complete_h_for_main, &
-      dg_gs_controls%maximum_eigensolver_iterations, &
+      ncg, &
       merge(dg_gs_controls%final_orbital_tolerance,dg_gs_controls%intermediate_orbital_tolerance,lambda==1d0), &
-      communicator,dg_gs_eigenvalues,orbital_residual,eigensolver_iterations,dg_dc_rotate_subspace_for_main)
+      communicator,dg_gs_eigenvalues,orbital_residual,eigensolver_iterations,dg_dc_rotate_subspace_for_main,.false.)
     if(.not.dg_gs_operator_ok) then
       step_ok=.false.; step_message=dg_gs_operator_message; return
     end if
@@ -961,6 +1282,8 @@ contains
     local_hash=not(0_8)
     call hash_integer8(local_hash,global_potential_hash)
     call hash_integer(local_hash,dc%system_tot%nspin)
+    call hash_real(local_hash,dg_dc_gs_sipg_penalty_factor)
+    call hash_real(local_hash,dg_dc_gs_target_lambda)
     call hash_real(local_hash,stencil%coef_lap0)
     do jj=1,3
     do ii=1,4

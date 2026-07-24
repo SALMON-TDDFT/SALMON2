@@ -329,6 +329,7 @@ DFT_Iteration : do iter=Miter+1,nscf
        call mark_dg_dc_mixing_discarded(dg_dc_handoff_runtime)
        if(comm_is_root(dc%id_tot)) write(*,'(1x,a,i0,a,es12.4)') &
          '[DG-DC] accepted early nodal handoff at iteration ',Miter,' residual=',sum1
+       call timer_end(LOG_WRITE_GS_RESULTS)
        exit DFT_Iteration
      end if
    end if

@@ -4,7 +4,18 @@
 
 **Goal:** Build a default-off Si64/LDA/Gamma/non-SOI route that hands off a loosely converged DC density to a self-consistent local-periodic real-space SIPG ground-state solve, then constructs a manifest-complete core-owned local Wannier basis.
 
-**Architecture:** Reusable nodal state/operator/density components move behind a GS/RT-neutral common API. A GS-native driver materializes the untruncated DC candidate pool on local-periodic `core + buffer` boxes, introduces the complete Hermitian SIPG face operator by adaptive continuation, verifies an unmixed full-DG fixed point, and only then runs manifest/projectability-driven local Wannier disentanglement and neighbor gauge alignment.
+**Architecture:** Reuse the conventional DC fragment orbitals rather than
+materializing global nodal orbitals.  Orthonormalize each fragment basis in
+the uniquely owned core metric, apply that same transform to its complete
+periodic `core + buffer` storage, and evaluate the existing DC
+kinetic/local/nonlocal Hamiltonian on the full transformed buffer basis.
+Store only distributed global-band coefficient rows.  Add the complete
+Hermitian SIPG coupling on the six signed physical faces, solve all occupied
+and empty configured bands with the existing orthogonalized-CG/metric
+Gram--Schmidt pattern, and rebuild the density from core-owned values.
+Density, Hartree, XC, and local potential updates reuse the existing DC path.
+No LCFO, EigenExa, global real-space wavefunction, normal checkpoint
+publication, or RT promotion occurs on this route.
 
 **Tech Stack:** Fortran 2008, MPI, SALMON DC/Poisson/XC/pseudopotential infrastructure, symmetric interior-penalty DG, LAPACK/ScaLAPACK/EigenExa, Wannier90-compatible algebra, Python source contracts, CMake.
 
@@ -29,6 +40,32 @@
   `@superpowers:verification-before-completion` before every commit.
 - Each Task requires RED evidence, focused verification, specification review,
   code-quality review, and resolution of all Critical/Important findings.
+
+### Authoritative Task 3--5 refinement
+
+This section supersedes the older nodal-materialization wording inside Tasks
+3--5 below.
+
+- Task 3 hands off the accepted DC density and builds the fragment-local basis
+  coefficient representation.  The core metric determines the rank and
+  transform, but the transform is applied to every DC `core + buffer` point
+  before the conventional DC Hamiltonian action.  Projection and density
+  ownership use core points only.  The global band axis is retained in full,
+  including empty states.
+- The coefficient CG holds the complete Hamiltonian fixed during each inner
+  solve.  Only the outer SCF rebuilds density and the reused DC
+  Hartree/XC/vlocal terms.  SIPG communication covers exactly the signed six
+  physical faces; edge/corner members of the DC 27-neighbor buffer halo are
+  not DG faces.
+- Task 4 adds adaptive continuation of the complete SIPG operator and the
+  unmixed fixed-point gate in this same distributed coefficient
+  representation.  It must not switch to LCFO/EigenExa or global nodal
+  orbitals.
+- Task 5 is the Si64/LDA/Gamma/non-SOI DG ground-state gate for this local
+  representation.  Its converged coefficients and eigenvalues live in an
+  explicit DG-only in-memory state; standard DC output/checkpoint publication
+  remains disabled until a later task explicitly defines and verifies that
+  contract.
 
 ### Task 1: Introduce a GS/RT-neutral nodal DG core
 
@@ -415,8 +452,9 @@ git commit -m "feat(dg): add atomic orbital coverage manifests"
 
 Verify frozen occupied-projector inclusion, manifest target rank,
 disentanglement from an oversized outer window, local-periodic localization,
-unique home-atom/core ownership, exclusion of buffer-only functions, band and
-density reproduction, and failure on insufficient projectability.
+unique home-atom/core ownership, exclusion of buffer-only centers, retention
+of Wannier tails throughout the periodic buffer, band and density
+reproduction, and failure on insufficient projectability.
 
 **Step 2: Write RED gauge-alignment tests**
 
@@ -430,7 +468,12 @@ overlaps and ambiguous ownership.
 Build manifest projections for core and buffer atoms, expand the outer window
 until rank criteria pass, freeze the occupied projector, disentangle the full
 manifest target, localize in each auxiliary periodic box, and retain only
-core-owned centers.
+core-owned centers.  Do not truncate a Wannier function at its core boundary.
+Keep its translated tails throughout the auxiliary periodic buffer, recording
+the center and lattice image.  The auxiliary buffer boundary is a
+representation boundary, not an additional physical DG face; density is
+owned once on the core and SIPG surface terms are owned once on actual
+core--core interfaces.
 
 **Step 4: Implement static gauge alignment**
 
@@ -448,13 +491,47 @@ ownership, loop closure, and absence of RT scope.
 git commit -m "feat(dg): add core-owned local periodic Wannier basis"
 ```
 
-### Task 8: Run the Si64 orbital-coverage and Wannier physical gates
+### Task 8: Solve self-consistently in the periodic-buffer Wannier basis and run the Si64 gates
 
 **Files:**
+- Create: `src/gs/dc/dg_local_periodic_wannier_scf.f90`
+- Modify: `src/gs/dc/CMakeLists.txt`
+- Create: `tests/dg/test_dg_local_periodic_wannier_scf_mpi.f90`
+- Create: `tests/dg/run_dg_local_periodic_wannier_scf_mpi.py`
 - Modify: `docs/plans/2026-07-24-dg-dc-local-periodic-wannier.md`
 - Modify: `docs/plans/2026-07-19-wpw-density-carrying-seed-session-handoff.md`
 
-**Step 1: Run Tier 0 and Tier 1**
+**Step 1: Write RED Wannier-SCF tests**
+
+With fixed periodic-buffer Wannier functions, verify
+
+```text
+H_W[n] = H_DC_W[n] + H_DG_W
+```
+
+is held fixed during each coefficient CG solve, including occupied and empty
+bands. Reconstruct density only on uniquely owned core points, then reuse the
+DC Hartree, XC, `vlocal`, and mixing updates. Require self-consistency of the
+Wannier coefficients and density. Prove that auxiliary buffer wraps add no
+DG interface and that increasing the periodic buffer converges tail, density,
+and SIPG matrix errors.
+
+For a complete untruncated unitary basis, verify equivalence to the accepted
+Task 5 real-space/local-basis DG fixed point. For a truncated Wannier basis,
+verify that a transform-only result is rejected until the Wannier-space SCF
+converges.
+
+**Step 2: Implement fixed-basis Wannier SCF**
+
+Transform the accepted Task 5 DC-volume-plus-SIPG Hamiltonian into the
+periodic-buffer Wannier basis. Keep Wannier functions fixed for the inner
+SCF; solve coefficients with orthogonalized CG and metric Gram--Schmidt,
+reconstruct core density, and update the existing DC potentials. Rebuild
+Wannier functions only in an explicitly controlled outer loop if buffer or
+subspace convergence fails. Do not invoke LCFO/EigenExa full-system
+wavefunctions.
+
+**Step 3: Run Tier 0 and Tier 1**
 
 From an accepted Task 5 checkpoint, run:
 
@@ -463,17 +540,19 @@ From an accepted Task 5 checkpoint, run:
 - at least two outer-window sizes;
 - at least two buffer widths.
 
-**Step 2: Record evidence**
+**Step 4: Record evidence**
 
 Record candidate/metric/outer/target ranks, projection singular values,
 occupied-inclusion error, centers, spreads, ownership, neighbor overlap,
-loop closure, band/density errors, buffer sensitivity, and runtime/memory.
+loop closure, band/density errors, pre/post-Wannier-SCF differences, Wannier
+coefficient and density residuals, tail norm at the core and buffer
+boundaries, buffer sensitivity of the SIPG matrix, and runtime/memory.
 
 Select the smallest manifest tier for which requested occupied and conduction
 observables, density, projectability, spreads, and retained Hamiltonian
 elements are converged.
 
-**Step 3: Final review and commit**
+**Step 5: Final review and commit**
 
 Review all values against raw logs. Rerun all focused tests, overlay build,
 and `git diff --check`. Resolve every Critical/Important finding. Commit only

@@ -554,6 +554,8 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: dg_dc_gs_maximum_lambda_step
   real(8)        :: dg_dc_gs_allowed_residual_growth
   real(8)        :: dg_dc_gs_density_mix_rate
+  real(8)        :: dg_dc_gs_sipg_penalty_factor
+  real(8)        :: dg_dc_gs_target_lambda
   real(8)        :: dg_dc_gs_hermiticity_tolerance
   real(8)        :: dg_dc_gs_orthogonality_tolerance
   real(8)        :: dg_dc_gs_face_balance_tolerance

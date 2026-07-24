@@ -6,14 +6,18 @@
 fragment-local orbital machinery and adding only physical-face SIPG coupling,
 without concatenating local candidates into global real-space states.
 
-**Architecture:** DC continues to generate and update
+**Architecture:** DC continues to generate
 `natom_fragment * dg_dc_candidate_orbitals_per_atom` fragment orbitals,
-including empty states.  Production reuses `solve_orbitals`, its
-orthogonalized CG, and BLAS Gram--Schmidt, adding SIPG physical-face action to
-the two Hamiltonian applications inside CG.  It then reuses the existing DC
-density, Hartree/XC/`vlocal`, and mixing path.  Production does not construct
-LCFO functions, diagonalize an LCFO coefficient matrix with EigenExa, or
-materialize whole-system real-space wavefunctions.
+including empty states.  Production core-orthonormalizes those fragment
+orbitals into unequal-sized local basis rows, projects the existing DC
+volume/nonlocal action and physical-face SIPG action into that basis, and
+solves only the global band coefficients with a distributed CG-like Ritz
+iteration and metric Gram--Schmidt.  A coefficient eigensolve holds
+`H_DC[n] + lambda H_SIPG` fixed; density, Hartree/XC/`vlocal`, and the DC
+volume block update only in the outer SCF.  The SIPG face block is rebuilt
+only when the basis, physical-face traces, or continuation lambda changes.
+Production does not construct LCFO functions, diagonalize an LCFO coefficient
+matrix with EigenExa, or materialize whole-system real-space wavefunctions.
 
 **Tech Stack:** Fortran 2008, MPI, BLAS/LAPACK, existing SALMON DC structures,
 existing physical-face SIPG helpers, Python contract runners.
@@ -161,7 +165,7 @@ git add src/gs/dc/dg_dc_local_basis_ground_state.f90 \
 git commit -m "feat(dg): add SIPG coupling to DC local basis"
 ```
 
-### Task 3: Add SIPG to the existing DC orbital solve and SCF path
+### Task 3: Add the distributed local-basis coefficient solve to the DC SCF path
 
 **Files:**
 - Modify: `src/gs/dc/dg_dc_local_basis_ground_state.f90`
@@ -176,9 +180,9 @@ git commit -m "feat(dg): add SIPG coupling to DC local basis"
 Use a small two-fragment orbital model.  Verify that:
 
 - the existing DC orbital count, including empty states, is retained;
-- both `H psi` and `H p` receive the same SIPG action;
-- existing Gram--Schmidt remains the orthogonalization owner;
-- density is built directly from the updated fragment orbitals;
+- both `H C` and `H P` use the same fixed DC-volume-plus-SIPG row action;
+- coefficient metric Gram--Schmidt remains the orthogonalization owner;
+- density is built from fragment basis pieces times local coefficient rows;
 - the existing DC density, Hartree, XC, `vlocal`, and mixing callbacks are
   invoked once per SCF iteration;
 - lambda zero reproduces the DC result and lambda one includes SIPG coupling.
@@ -195,10 +199,12 @@ Expected: FAIL because the global local-basis solve is absent.
 
 **Step 3: Implement the minimal solve**
 
-Pass default-off DG controls through `solve_orbitals` to the existing DC CG.
-Add the same physical-face SIPG operator to the initial-orbital and search
-direction Hamiltonian applications.  Keep the existing BLAS Gram--Schmidt and
-DC density/potential/mixing calls unchanged.
+Core-orthonormalize each fragment's DC orbitals, so the distributed
+coefficient metric is explicitly the identity.  Solve the global coefficient
+rows with the CG-like Ritz iteration and S-metric Gram--Schmidt; the small
+two-vector Ritz metric remains generalized.  Add the physical-face SIPG blocks
+to the row-distributed Hamiltonian.  Keep the existing DC
+density/potential/mixing calls unchanged.
 
 Remove the production calls to:
 

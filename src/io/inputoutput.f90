@@ -706,6 +706,8 @@ contains
       & dg_dc_gs_maximum_lambda_step, &
       & dg_dc_gs_allowed_residual_growth, &
       & dg_dc_gs_density_mix_rate, &
+      & dg_dc_gs_sipg_penalty_factor, &
+      & dg_dc_gs_target_lambda, &
       & dg_dc_gs_hermiticity_tolerance, &
       & dg_dc_gs_orthogonality_tolerance, &
       & dg_dc_gs_face_balance_tolerance, &
@@ -1310,6 +1312,8 @@ contains
     dg_dc_gs_maximum_lambda_step = 0.5d0
     dg_dc_gs_allowed_residual_growth = 4d0
     dg_dc_gs_density_mix_rate = 0.5d0
+    dg_dc_gs_sipg_penalty_factor = 81d0
+    dg_dc_gs_target_lambda = 1d0
     dg_dc_gs_hermiticity_tolerance = 1d-10
     dg_dc_gs_orthogonality_tolerance = 1d-10
     dg_dc_gs_face_balance_tolerance = 1d-10
@@ -2112,6 +2116,8 @@ contains
     call comm_bcast(dg_dc_gs_maximum_lambda_step, nproc_group_global)
     call comm_bcast(dg_dc_gs_allowed_residual_growth, nproc_group_global)
     call comm_bcast(dg_dc_gs_density_mix_rate, nproc_group_global)
+    call comm_bcast(dg_dc_gs_sipg_penalty_factor, nproc_group_global)
+    call comm_bcast(dg_dc_gs_target_lambda, nproc_group_global)
     call comm_bcast(dg_dc_gs_hermiticity_tolerance, nproc_group_global)
     call comm_bcast(dg_dc_gs_orthogonality_tolerance, nproc_group_global)
     call comm_bcast(dg_dc_gs_face_balance_tolerance, nproc_group_global)
@@ -3479,6 +3485,12 @@ contains
       call sawf_input_fatal("invalid DG DC GS residual growth")
     if(.not.ieee_is_finite(dg_dc_gs_density_mix_rate) .or. dg_dc_gs_density_mix_rate<=0d0 .or. &
        dg_dc_gs_density_mix_rate>1d0) call sawf_input_fatal("invalid DG DC GS density mix rate")
+    if(.not.ieee_is_finite(dg_dc_gs_sipg_penalty_factor) .or. dg_dc_gs_sipg_penalty_factor<=0d0) &
+      call sawf_input_fatal("invalid DG DC GS SIPG penalty factor")
+    if(.not.ieee_is_finite(dg_dc_gs_target_lambda) .or. dg_dc_gs_target_lambda/=1d0) &
+      call sawf_input_fatal("DG DC GS target lambda must be one")
+    if(yn_dg_dc_local_periodic=='y' .and. time_shutdown>0d0) &
+      call sawf_input_fatal("DG DC local-periodic route does not publish shutdown checkpoints")
     if(.not.ieee_is_finite(dg_dc_gs_hermiticity_tolerance) .or. dg_dc_gs_hermiticity_tolerance<=0d0 .or. &
        .not.ieee_is_finite(dg_dc_gs_orthogonality_tolerance) .or. dg_dc_gs_orthogonality_tolerance<=0d0 .or. &
        .not.ieee_is_finite(dg_dc_gs_face_balance_tolerance) .or. dg_dc_gs_face_balance_tolerance<=0d0 .or. &

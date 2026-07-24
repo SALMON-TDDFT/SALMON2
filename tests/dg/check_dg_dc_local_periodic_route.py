@@ -7,6 +7,9 @@ global_source = (root / "src/io/salmon_global.f90").read_text()
 input_source = (root / "src/io/inputoutput.f90").read_text()
 scf_source = (root / "src/gs/scf_iteration_dft.f90").read_text()
 main_source = (root / "src/gs/main_dft.f90").read_text()
+main_driver_source = main_source.split("contains", 1)[0]
+scf_kernel_source = (root / "src/gs/scf_iteration.f90").read_text()
+cg_source = (root / "src/gs/conjugate_gradient.f90").read_text()
 dc_source = (root / "src/gs/dc/dcdft.f90").read_text()
 handoff_source = (root / "src/gs/dc/dg_dc_handoff.f90").read_text()
 ground_state_source = (root / "src/gs/dc/dg_dc_ground_state.f90").read_text()
@@ -32,16 +35,25 @@ for name in controls.keys() - {"yn_dg_dc_local_periodic"}:
 
 assert "dg_dc_handoff.f90" in cmake_source
 assert re.search(r"call\s+evaluate_dg_dc_handoff", scf_source, re.I)
-assert re.search(r"exit\s+DFT_Iteration", scf_source, re.I)
-assert re.search(r"call\s+materialize_dg_dc_candidates", main_source, re.I)
-assert "MPI_COMM_SELF" not in main_source, "production materialization must be globally collective"
-assert re.search(r"materialize_dg_dc_candidates.*dc%icomm_tot", main_source, re.I | re.S)
+handoff_accept = re.search(
+    r"if\s*\(\s*dg_handoff_accept\s*\)\s*then(.*?)exit\s+DFT_Iteration",
+    scf_source, re.I | re.S,
+)
+assert handoff_accept and re.search(
+    r"call\s+timer_end\s*\(\s*LOG_WRITE_GS_RESULTS\s*\)", handoff_accept.group(1), re.I
+), "accepted DC handoff must close the active results timer"
+assert not re.search(r"call\s+materialize_dg_dc_candidates", main_driver_source, re.I), \
+    "coefficient DG route must not materialize a global nodal state"
+assert not re.search(r"call\s+solve_nodal_ground_state_cg_mpi", main_driver_source, re.I), \
+    "production DG route must use distributed local-basis coefficients"
 assert re.search(
     r"nstate\s*=\s*dg_dc_candidate_orbitals_per_atom\s*\*\s*natom", dc_source, re.I
 ), "enabled DC solve must create the complete configured untruncated candidate pool"
 assert re.search(r"call\s+preserve_dg_dc_density_potential", scf_source, re.I)
 assert re.search(r"call\s+discard_dc_mixing_history", scf_source, re.I)
 assert "candidate_metric_rank" in handoff_source and "maxloc" in handoff_source
+assert re.search(r"call\s+gram_schmidt\s*\(", scf_kernel_source, re.I), \
+    "existing Gram-Schmidt must remain the orthogonalization owner"
 for token in [
     "DG_DC_PRECONVERGENCE",
     "DG_DC_CONTINUATION",
@@ -68,6 +80,8 @@ gs_controls = [
     "dg_dc_gs_maximum_lambda_step",
     "dg_dc_gs_allowed_residual_growth",
     "dg_dc_gs_density_mix_rate",
+    "dg_dc_gs_sipg_penalty_factor",
+    "dg_dc_gs_target_lambda",
     "dg_dc_gs_hermiticity_tolerance",
     "dg_dc_gs_orthogonality_tolerance",
     "dg_dc_gs_face_balance_tolerance",
@@ -84,7 +98,59 @@ for name in gs_controls:
 
 assert "dg_dc_ground_state.f90" in cmake_source
 assert "dg_dc_ground_state_adapter.f90" in cmake_source
-assert re.search(r"call\s+run_dg_dc_ground_state\s*\(", main_source, re.I)
+assert re.search(r"call\s+run_dg_dc_local_basis_ground_state_for_main\s*\(", main_driver_source, re.I), \
+    "production DG route must enter the fragment-local-basis coefficient solver"
+local_basis_driver = re.search(
+    r"subroutine\s+run_dg_dc_local_basis_ground_state_for_main\b(.*?)"
+    r"end\s+subroutine\s+run_dg_dc_local_basis_ground_state_for_main",
+    main_source, re.I | re.S,
+)
+assert local_basis_driver, "production local-basis adapter must be defined"
+for required_call in [
+    "orthonormalize_dg_dc_fragment_core_basis",
+    "transform_dg_dc_fragment_buffer_basis",
+    "project_dg_dc_local_basis_volume",
+    "assemble_dg_dc_local_basis_interface_rows",
+    "compose_dg_dc_distributed_hamiltonian_rows",
+    "solve_dg_dc_local_basis_bands_cg",
+    "reconstruct_dg_dc_local_basis_density",
+    "validate_dg_dc_local_basis_density",
+    "calc_rho_total_dcdft",
+    "dg_dc_update_potential_from_density",
+]:
+    assert re.search(rf"call\s+{required_call}\s*\(", local_basis_driver.group(1), re.I), \
+        f"production local-basis adapter must call {required_call}"
+assert not re.search(r"nodal|lcfo|eigenexa", local_basis_driver.group(1), re.I), \
+    "production local-basis adapter must not fall back to nodal, LCFO, or EigenExa paths"
+assert re.search(r"call\s+comm_logical_and\s*\(\s*ok\b", local_basis_driver.group(1), re.I), \
+    "rank-local stages must gate failure collectively"
+assert "81d0" not in local_basis_driver.group(1), \
+    "production SIPG penalty must come from a validated control"
+assert re.search(r"dg_dc_local_basis_state", local_basis_driver.group(1), re.I), \
+    "converged coefficients/eigenvalues must persist in an explicit DG-only state"
+assert re.search(r"spsi_shape\s*\(\s*1\s*:\s*3\s*\)\s*==\s*sttpsi_shape",
+                 local_basis_driver.group(1), re.I), \
+    "production adapter must reject mismatched full-buffer orbital shapes"
+for persisted_field in ["full_fragment_basis", "basis_transform", "basis_offsets", "fragment_ids"]:
+    assert re.search(rf"candidate_state%{persisted_field}", local_basis_driver.group(1), re.I), \
+        f"DG-only result must transactionally retain {persisted_field}"
+assert re.search(r"iteration_operator_fingerprint\s*=\s*dg_dc_operator_fingerprint\s*\(\s*\)",
+                 local_basis_driver.group(1), re.I), \
+    "persisted state must identify the Hamiltonian used by the final coefficient solve"
+assert re.search(r"yn_dg_dc_local_periodic\s*/=\s*'y'.*?checkpoint_gs",
+                 main_source, re.I | re.S), \
+    "pre-DG structure checkpoints must be disabled for the opt-in route"
+assert re.search(r"yn_dg_dc_local_periodic\s*==\s*'y'.*?time_shutdown\s*>\s*0",
+                 input_source, re.I | re.S), \
+    "the no-checkpoint route must reject shutdown-checkpoint mode up front"
+assert re.search(r"local_basis_route_active\s*=\s*\.true\.", main_source, re.I), \
+    "the DG-only result must mark the standard publication path inactive"
+assert re.search(r"if\s*\(\s*\.not\.\s*local_basis_route_active\s*\)\s*then.*?"
+                 r"checkpoint_gs", main_source, re.I | re.S), \
+    "standard checkpoint publication must be gated off for the DG-only state"
+assert "solve_dg_dc_local_basis_bands_reference" not in main_source, \
+    "production DG route must not call the replicated root reference eigensolver"
+assert not re.search(r"call\s+publish_dg_dc_ground_state_for_main\s*\(", main_driver_source, re.I)
 assert re.search(r"call\s+calc_rho_total_dcdft\s*\(", main_source, re.I)
 assert re.search(r"call\s+calc_vlocal_fragment_dcdft\s*\(", main_source, re.I)
 assert re.search(r"hpsi\s*=\s*hpsi_volume_nonlocal\s*\+\s*lambda\s*\*\s*hpsi_sipg", adapter_source, re.I)
