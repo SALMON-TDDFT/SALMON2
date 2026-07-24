@@ -539,6 +539,11 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_dc_lcfo_wannier_pw
   character(1)   :: yn_dc_lcfo_wannier_cluster
   character(1)   :: yn_dc_lcfo_block_diag_h
+  character(1)   :: yn_dg_dc_local_periodic
+  integer        :: dg_dc_handoff_min_iter
+  real(8)        :: dg_dc_handoff_tolerance
+  integer        :: dg_dc_candidate_orbitals_per_atom
+  real(8)        :: dg_dc_metric_rank_tolerance
   character(256) :: wannier90_command
   character(256) :: wannier_projection
   integer        :: nstate_frag

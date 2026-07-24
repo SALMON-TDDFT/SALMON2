@@ -53,6 +53,10 @@ use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_pl
 use noncollinear_module, only: calc_magnetization
 use dcdft
 use dcdft_soi
+use salmon_global, only: yn_dg_dc_local_periodic
+use dg_dc_handoff, only: dg_dc_handoff_runtime, evaluate_dg_dc_handoff, &
+  preserve_dg_dc_density_potential, mark_dg_dc_mixing_discarded
+use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 implicit none
 integer :: ix,iy,iz,ik,is
 integer :: ilevel_print !=3:print-all
@@ -89,6 +93,10 @@ type(s_dcdft),optional :: dc
 logical :: rion_update, flag_conv
 integer :: i,j, icnt_conv_nomix
 logical :: is_checkpoint_iter, is_shutdown_time
+logical :: dg_handoff_accept
+character(256) :: dg_handoff_message
+real(8), allocatable :: dg_handoff_density(:),dg_handoff_potential(:,:)
+integer(8), allocatable :: dg_handoff_owner(:)
 type(s_scalar) :: rho_old,Vlocal_old
 real(8) :: rNe
 
@@ -280,6 +288,50 @@ DFT_Iteration : do iter=Miter+1,nscf
        & "DC #SCF = ",Miter,"Total Energy = ",energy%E_tot*au_energy_ev,"diff = ",sum1
      end if
    end if
+
+   if(yn_dc=='y' .and. yn_dg_dc_local_periodic=='y') then
+     rNebox1=0d0
+     do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
+     do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
+     do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
+       rNebox1=rNebox1+dc%rho_tot%f(ix,iy,iz)
+     end do
+     end do
+     end do
+     call comm_summation(rNebox1,rNebox2,dc%icomm_tot)
+     rNebox2=rNebox2*dc%system_tot%Hvol
+     call evaluate_dg_dc_handoff(dg_dc_handoff_runtime,Miter,sum1,rNebox2,dc%elec_num_tot, &
+       dg_fragment_solution_is_finite(),dg_dc_handoff_runtime%lcfo_started, &
+       dg_dc_handoff_runtime%wannier_started,dg_dc_handoff_runtime%window_truncated, &
+       dc%icomm_tot,dg_handoff_accept,dg_handoff_message)
+     if(dg_handoff_accept) then
+       allocate(dg_handoff_density(size(dc%rho_tot%f)))
+       allocate(dg_handoff_potential(size(dc%rho_tot%f),dc%system_tot%nspin))
+       allocate(dg_handoff_owner(size(dc%rho_tot%f)))
+       dg_handoff_density=reshape(dc%rho_tot%f,[size(dc%rho_tot%f)])
+       i=0
+       do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
+       do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
+       do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
+         i=i+1
+         dg_handoff_owner(i)=int(ix-dc%lg_tot%is(1)+1,8)+int(dc%lg_tot%num(1),8)* &
+           (int(iy-dc%lg_tot%is(2),8)+int(dc%lg_tot%num(2),8)*int(iz-dc%lg_tot%is(3),8))
+       end do
+       end do
+       end do
+       do is=1,dc%system_tot%nspin
+         dg_handoff_potential(:,is)=reshape(dc%vloc_tot(is)%f,[size(dc%vloc_tot(is)%f)])
+       end do
+       call preserve_dg_dc_density_potential(dg_dc_handoff_runtime,dg_handoff_density,dg_handoff_potential, &
+         dg_handoff_owner,dc%icomm_tot,dg_handoff_accept,dg_handoff_message)
+       if(.not.dg_handoff_accept) stop 'DG DC density/potential preservation failed collectively'
+       call discard_dc_mixing_history(mixing)
+       call mark_dg_dc_mixing_discarded(dg_dc_handoff_runtime)
+       if(comm_is_root(dc%id_tot)) write(*,'(1x,a,i0,a,es12.4)') &
+         '[DG-DC] accepted early nodal handoff at iteration ',Miter,' residual=',sum1
+       exit DFT_Iteration
+     end if
+   end if
    
    if( ilevel_print.ge.3 ) then
    if(comm_is_root(nproc_id_global)) then
@@ -427,6 +479,42 @@ endif
 endif
 
 contains
+
+  logical function dg_fragment_solution_is_finite()
+    if(allocated(spsi%rwf)) then
+      dg_fragment_solution_is_finite=all(ieee_is_finite(spsi%rwf))
+    else if(allocated(spsi%zwf)) then
+      dg_fragment_solution_is_finite=all(ieee_is_finite(real(spsi%zwf,8))) .and. &
+        all(ieee_is_finite(aimag(spsi%zwf)))
+    else
+      dg_fragment_solution_is_finite=.false.
+    end if
+  end function dg_fragment_solution_is_finite
+
+  subroutine discard_dc_mixing_history(history)
+    type(s_mixing), intent(inout) :: history
+    integer :: ii,jj
+    do ii=1,size(history%rho_in)
+      history%rho_in(ii)%f=0d0
+      history%rho_out(ii)%f=0d0
+      history%Vh_in(ii)%f=0d0
+      history%Vh_out(ii)%f=0d0
+      do jj=1,size(history%Vxc_in,2)
+        history%Vxc_in(ii,jj)%f=0d0
+        history%Vxc_out(ii,jj)%f=0d0
+      end do
+    end do
+    if(allocated(history%rho_s_in)) then
+      do jj=1,size(history%rho_s_in,2)
+      do ii=1,size(history%rho_s_in,1)
+        history%rho_s_in(ii,jj)%f=0d0
+        history%rho_s_out(ii,jj)%f=0d0
+      end do
+      end do
+    end if
+    history%flag_mix_zero=.true.
+    history%convergence_value_prev=huge(1d0)
+  end subroutine discard_dc_mixing_history
 
   subroutine init_convergence_check()
     implicit none

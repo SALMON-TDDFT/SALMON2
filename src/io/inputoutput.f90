@@ -691,6 +691,11 @@ contains
       & yn_dc_lcfo_wannier_pw, &
       & yn_dc_lcfo_wannier_cluster, &
       & yn_dc_lcfo_block_diag_h, &
+      & yn_dg_dc_local_periodic, &
+      & dg_dc_handoff_min_iter, &
+      & dg_dc_handoff_tolerance, &
+      & dg_dc_candidate_orbitals_per_atom, &
+      & dg_dc_metric_rank_tolerance, &
       & wannier90_command, &
       & wannier_projection, &
       & nstate_frag, &
@@ -1272,6 +1277,11 @@ contains
     yn_dc_lcfo_wannier_pw = 'n'
     yn_dc_lcfo_wannier_cluster = 'n'
     yn_dc_lcfo_block_diag_h = 'n'
+    yn_dg_dc_local_periodic = 'n'
+    dg_dc_handoff_min_iter = 3
+    dg_dc_handoff_tolerance = 1d-3
+    dg_dc_candidate_orbitals_per_atom = 40
+    dg_dc_metric_rank_tolerance = 1d-10
     wannier90_command = ''
     wannier_projection = ''
     nstate_frag = 0
@@ -2051,6 +2061,11 @@ contains
     call comm_bcast(yn_dc_lcfo_wannier_pw, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_wannier_cluster, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_block_diag_h, nproc_group_global)
+    call comm_bcast(yn_dg_dc_local_periodic, nproc_group_global)
+    call comm_bcast(dg_dc_handoff_min_iter, nproc_group_global)
+    call comm_bcast(dg_dc_handoff_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_candidate_orbitals_per_atom, nproc_group_global)
+    call comm_bcast(dg_dc_metric_rank_tolerance, nproc_group_global)
     call comm_bcast(wannier90_command, nproc_group_global)
     call comm_bcast(wannier_projection, nproc_group_global)
     call comm_bcast(nstate_frag, nproc_group_global)
@@ -3381,6 +3396,15 @@ contains
     call yn_argument_check(yn_dc_lcfo_wannier_pw)
     call yn_argument_check(yn_dc_lcfo_wannier_cluster)
     call yn_argument_check(yn_dc_lcfo_block_diag_h)
+    call yn_argument_check(yn_dg_dc_local_periodic)
+    if(dg_dc_handoff_min_iter < 1) &
+      call sawf_input_fatal("dg_dc_handoff_min_iter must be positive")
+    if(.not.ieee_is_finite(dg_dc_handoff_tolerance) .or. dg_dc_handoff_tolerance <= 0d0) &
+      call sawf_input_fatal("dg_dc_handoff_tolerance must be positive")
+    if(dg_dc_candidate_orbitals_per_atom < 1) &
+      call sawf_input_fatal("dg_dc_candidate_orbitals_per_atom must be positive")
+    if(.not.ieee_is_finite(dg_dc_metric_rank_tolerance) .or. dg_dc_metric_rank_tolerance <= 0d0) &
+      call sawf_input_fatal("dg_dc_metric_rank_tolerance must be positive")
     select case(trim(wannier_site_symmetry))
     case('off', 'auto', 'file')
     case default

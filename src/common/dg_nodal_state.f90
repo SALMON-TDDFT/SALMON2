@@ -52,6 +52,7 @@ module dg_nodal_state
   public :: initialize_dg_nodal_common_state_local
   public :: release_dg_nodal_common_state
   public :: validate_dg_nodal_common_state_mpi
+  public :: validate_unique_core_ownership
   public :: dg_nodal_face_slot, allocate_dg_nodal_face_buffers
 
 contains
