@@ -446,6 +446,7 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: xi_dc
   character(1)   :: yn_dc_lcfo
   character(1)   :: yn_dc_lcfo_diag
+  character(16)  :: lcfo_eigensolver
   integer        :: nstate_frag
   real(8)        :: energy_cut
   real(8)        :: lambda_cut
