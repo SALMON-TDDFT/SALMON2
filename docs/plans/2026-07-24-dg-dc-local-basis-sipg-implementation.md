@@ -23,10 +23,10 @@ existing physical-face SIPG helpers, Python contract runners.
 
 **Files:**
 - Create: `src/gs/dc/dg_dc_local_basis_ground_state.f90`
-- Modify: `src/common/CMakeLists.txt`
+- Modify: `src/gs/dc/CMakeLists.txt`
 - Create: `tests/dg/test_dg_dc_local_basis_layout_mpi.f90`
 - Create: `tests/dg/run_dg_dc_local_basis_layout_mpi.py`
-- Modify: `tests/dg/check_dg_dc_local_periodic_route.py`
+- Modify: `docs/plans/2026-07-24-dg-dc-local-basis-sipg-implementation.md`
 
 **Step 1: Write the failing layout test**
 
@@ -59,9 +59,10 @@ Add `s_dg_dc_local_basis_layout` containing local/global basis counts, global
 band count, rank offsets, fragment IDs, and fingerprints.  Build offsets with
 MPI collectives and validate them collectively in O(number of fragments).
 
-Do not allocate a nodal state with
-`local_candidate_count * number_of_fragments` states.  Mark
-`expand_dg_dc_global_candidate_axis` as non-production in the route contract.
+Do not integrate the layout into the production solver yet: unequal local row
+counts are unsafe until the distributed coefficient representation exists.
+Task 3 performs the atomic production switch and removes
+`expand_dg_dc_global_candidate_axis` from production.
 
 **Step 4: Verify GREEN**
 
@@ -69,7 +70,6 @@ Run:
 
 ```bash
 python3 tests/dg/run_dg_dc_local_basis_layout_mpi.py
-python3 tests/dg/check_dg_dc_local_periodic_route.py
 git diff --check
 ```
 
@@ -77,17 +77,18 @@ Expected: PASS.
 
 **Step 5: Run specification and code-quality reviews**
 
-Confirm no local-candidate/global-band conflation remains.  Resolve every
-Critical/Important finding before continuing.
+Confirm the new layout API keeps local basis rows and global band columns
+distinct and that no partial production integration was introduced.  Resolve
+every Critical/Important finding before continuing.
 
 **Step 6: Commit**
 
 ```bash
 git add src/gs/dc/dg_dc_local_basis_ground_state.f90 \
-  src/common/CMakeLists.txt \
+  src/gs/dc/CMakeLists.txt \
   tests/dg/test_dg_dc_local_basis_layout_mpi.f90 \
   tests/dg/run_dg_dc_local_basis_layout_mpi.py \
-  tests/dg/check_dg_dc_local_periodic_route.py
+  docs/plans/2026-07-24-dg-dc-local-basis-sipg-implementation.md
 git commit -m "refactor(dg): separate local basis from global bands"
 ```
 
