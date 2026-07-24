@@ -1,6 +1,8 @@
 set(SOURCES
     dc_fragment_geometry.f90
     dg_dc_handoff.f90
+  dg_dc_ground_state.f90
+  dg_dc_ground_state_adapter.f90
     dg_wpw_lda_hartree.f90
     dg_wannier_pw_scf.f90
     dg_wpw_matrix_free_scf.f90

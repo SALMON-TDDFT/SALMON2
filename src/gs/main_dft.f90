@@ -26,9 +26,24 @@ use structures
 use inputoutput
 use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_wpw_production, &
   yn_dg_dc_local_periodic, dg_dc_handoff_min_iter, dg_dc_handoff_tolerance, &
-  dg_dc_candidate_orbitals_per_atom, dg_dc_metric_rank_tolerance
+  dg_dc_candidate_orbitals_per_atom, dg_dc_metric_rank_tolerance, &
+  dg_dc_gs_intermediate_orbital_tolerance,dg_dc_gs_intermediate_density_tolerance, &
+  dg_dc_gs_final_orbital_tolerance,dg_dc_gs_final_density_tolerance,dg_dc_gs_subspace_tolerance, &
+  dg_dc_gs_initial_lambda_step,dg_dc_gs_minimum_lambda_step,dg_dc_gs_maximum_lambda_step, &
+  dg_dc_gs_allowed_residual_growth,dg_dc_gs_density_mix_rate,dg_dc_gs_hermiticity_tolerance, &
+  dg_dc_gs_orthogonality_tolerance,dg_dc_gs_face_balance_tolerance,dg_dc_gs_electron_count_tolerance, &
+  dg_dc_gs_minimum_projector_overlap,dg_dc_gs_maximum_scf_iterations, &
+  dg_dc_gs_maximum_eigensolver_iterations,dg_dc_gs_maximum_rollbacks
 use dg_dc_handoff, only: dg_dc_handoff_runtime, dg_dc_nodal_runtime, initialize_dg_dc_handoff, &
   materialize_dg_dc_candidates
+use dg_dc_ground_state, only: s_dg_dc_gs_controls,s_dg_dc_gs_result,s_dg_dc_gs_diagnostics, &
+  default_dg_dc_gs_controls,run_dg_dc_ground_state
+use dg_dc_ground_state_adapter, only: expand_dg_dc_global_candidate_axis,reconstruct_dg_dc_core_density, &
+  mix_dg_dc_density_transaction,initialize_dg_dc_physical_faces,apply_dg_dc_sipg_operator_mpi, &
+  compose_dg_dc_hamiltonian,build_dg_dc_interior_volume_action,execute_dg_dc_production_iteration
+use dg_nodal_state, only: s_dg_nodal_common_state
+use rt_dg_nodal_cg, only: solve_nodal_ground_state_cg_mpi
+use rt_dg_nodal_rayleigh_ritz, only: rayleigh_ritz_nodal_subspace_mpi
 #ifdef USE_EIGENEXA
 use eigenexa_module, only: finalize_eigenexa
 #endif
@@ -99,6 +114,16 @@ integer :: iter_band_kpt, iter_band_kpt_end, iter_band_kpt_stride
 logical :: is_checkpoint_iter, is_shutdown_time
 logical :: dg_handoff_ok
 character(256) :: dg_handoff_message
+type(s_dg_dc_gs_controls) :: dg_gs_controls
+type(s_dg_dc_gs_result) :: dg_gs_result
+real(8), allocatable :: dg_gs_density(:,:,:,:),dg_gs_raw_density(:,:,:,:),dg_gs_core_density(:,:,:,:)
+real(8), allocatable :: dg_gs_mixed_density(:,:,:,:)
+real(8), allocatable :: dg_gs_eigenvalues(:,:)
+real(8) :: dg_gs_current_lambda,dg_gs_face_hermiticity,dg_gs_face_balance
+integer, allocatable :: dg_gs_fragment_origins(:,:),dg_gs_fragment_sizes(:,:)
+integer(8) :: dg_gs_potential_epoch,dg_gs_hamiltonian_potential_epoch
+logical :: dg_gs_operator_ok
+character(256) :: dg_gs_operator_message
 integer :: ilevel_print
 
 if(theory=='dft_band'.and.iperiodic/=3) return
@@ -347,6 +372,7 @@ if(yn_dc=='y') then
     ! Candidate materialization is performed by the GS-native handoff owner before
     ! any legacy LCFO/Wannier consumer is eligible to run.
     call materialize_dg_dc_candidates_for_main()
+    call run_dg_dc_ground_state_for_main()
   else if(yn_dc_lcfo_flux == 'y') then
     if(yn_spinorbit == 'y') then
       stop "yn_dc_lcfo_flux=y is not implemented for spin-orbit mode"
@@ -503,6 +529,368 @@ contains
       dg_handoff_message)
     if(.not.dg_handoff_ok) stop 'DG DC candidate materialization failed'
   end subroutine materialize_dg_dc_candidates_for_main
+
+  subroutine run_dg_dc_ground_state_for_main()
+    integer :: is,local_candidate_count
+    local_candidate_count=dg_dc_handoff_runtime%candidate_count
+    if(system%nspin/=1 .or. .not.system%if_real_orbital) &
+      stop 'DG DC local-periodic production requires non-spin-polarized Gamma real orbitals'
+    do is=1,system%nspin
+      dg_dc_nodal_runtime%occupations(1:local_candidate_count,is)= &
+        system%rocc(1:local_candidate_count,info%ik_s,is)
+    end do
+    call expand_dg_dc_global_candidate_axis(dg_dc_nodal_runtime,local_candidate_count,dc%icomm_tot, &
+      dg_handoff_ok,dg_handoff_message)
+    if(.not.dg_handoff_ok) stop 'DG DC global candidate layout failed collectively'
+    allocate(dg_gs_fragment_origins(3,dc%n_frag),dg_gs_fragment_sizes(3,dc%n_frag))
+    dg_gs_fragment_origins=dc%ixyz_frag
+    dg_gs_fragment_sizes=dc%nxyz_domain_frag
+    call initialize_dg_dc_physical_faces(dg_dc_nodal_runtime,dg_gs_fragment_origins,dg_gs_fragment_sizes, &
+      dc%lg_tot%num,dc%icomm_tot,dg_handoff_ok,dg_handoff_message)
+    if(.not.dg_handoff_ok) stop 'DG DC physical face topology failed collectively'
+    allocate(dg_gs_density(size(dc%rho_tot_s(1)%f,1),size(dc%rho_tot_s(1)%f,2), &
+      size(dc%rho_tot_s(1)%f,3),system%nspin))
+    do is=1,system%nspin
+      dg_gs_density(:,:,:,is)=dc%rho_tot_s(is)%f
+    end do
+    allocate(dg_gs_raw_density,mold=dg_gs_density)
+    allocate(dg_gs_mixed_density,mold=dg_gs_density)
+    allocate(dg_gs_core_density(dg_dc_nodal_runtime%core_size(1),dg_dc_nodal_runtime%core_size(2), &
+      dg_dc_nodal_runtime%core_size(3),system%nspin))
+    allocate(dg_gs_eigenvalues(dg_dc_nodal_runtime%nstate,system%nspin))
+    dg_gs_controls=default_dg_dc_gs_controls()
+    dg_gs_potential_epoch=0_8
+    dg_gs_controls%intermediate_orbital_tolerance=dg_dc_gs_intermediate_orbital_tolerance
+    dg_gs_controls%intermediate_density_tolerance=dg_dc_gs_intermediate_density_tolerance
+    dg_gs_controls%final_orbital_tolerance=dg_dc_gs_final_orbital_tolerance
+    dg_gs_controls%final_density_tolerance=dg_dc_gs_final_density_tolerance
+    dg_gs_controls%subspace_tolerance=dg_dc_gs_subspace_tolerance
+    dg_gs_controls%initial_lambda_step=dg_dc_gs_initial_lambda_step
+    dg_gs_controls%minimum_lambda_step=dg_dc_gs_minimum_lambda_step
+    dg_gs_controls%maximum_lambda_step=dg_dc_gs_maximum_lambda_step
+    dg_gs_controls%allowed_residual_growth=dg_dc_gs_allowed_residual_growth
+    dg_gs_controls%density_mix_rate=dg_dc_gs_density_mix_rate
+    dg_gs_controls%hermiticity_tolerance=dg_dc_gs_hermiticity_tolerance
+    dg_gs_controls%orthogonality_tolerance=dg_dc_gs_orthogonality_tolerance
+    dg_gs_controls%face_balance_tolerance=dg_dc_gs_face_balance_tolerance
+    dg_gs_controls%electron_count_tolerance=dg_dc_gs_electron_count_tolerance
+    dg_gs_controls%minimum_projector_overlap=dg_dc_gs_minimum_projector_overlap
+    dg_gs_controls%maximum_scf_iterations=dg_dc_gs_maximum_scf_iterations
+    dg_gs_controls%maximum_eigensolver_iterations=dg_dc_gs_maximum_eigensolver_iterations
+    dg_gs_controls%maximum_rollbacks=dg_dc_gs_maximum_rollbacks
+    call run_dg_dc_ground_state(dg_dc_nodal_runtime,dg_gs_density,dg_gs_controls, &
+      dg_dc_salmon_scf_step,dc%icomm_tot,dg_gs_result,dg_handoff_ok,dg_handoff_message)
+    if(.not.dg_handoff_ok .or. .not.dg_gs_result%accepted .or. dg_gs_result%lambda/=1d0 .or. &
+      .not.dg_gs_result%unmixed_verified) then
+      call dg_dc_update_potential_from_density(dg_gs_density,dg_handoff_ok,dg_handoff_message)
+      if(.not.dg_handoff_ok) stop 'DG DC accepted potential rollback failed collectively'
+      stop 'DG DC ground-state continuation failed collectively'
+    end if
+  end subroutine run_dg_dc_ground_state_for_main
+
+  subroutine dg_dc_salmon_scf_step(state,density_arg,lambda,density_mix,reset_mixing,unmixed, &
+      diagnostics,communicator,step_ok,step_message)
+    type(s_dg_nodal_common_state), intent(inout) :: state
+    real(8), intent(inout) :: density_arg(:,:,:,:)
+    real(8), intent(in) :: lambda,density_mix
+    logical, intent(in) :: reset_mixing,unmixed
+    type(s_dg_dc_gs_diagnostics), intent(out) :: diagnostics
+    integer, intent(in) :: communicator
+    logical, intent(out) :: step_ok
+    character(*), intent(out) :: step_message
+    call execute_dg_dc_production_iteration(state,density_arg,lambda,density_mix,reset_mixing,unmixed, &
+      dg_dc_salmon_restore_step,dg_dc_salmon_solve_step,dg_dc_salmon_update_step,communicator, &
+      diagnostics,step_ok,step_message)
+  end subroutine dg_dc_salmon_scf_step
+
+  subroutine dg_dc_salmon_restore_step(state,density_arg,communicator,step_ok,step_message)
+    type(s_dg_nodal_common_state), intent(inout) :: state
+    real(8), intent(inout) :: density_arg(:,:,:,:)
+    integer, intent(in) :: communicator
+    logical, intent(out) :: step_ok
+    character(*), intent(out) :: step_message
+    call dg_dc_update_potential_from_density(density_arg,step_ok,step_message)
+  end subroutine dg_dc_salmon_restore_step
+
+  subroutine dg_dc_salmon_solve_step(state,lambda,communicator,diagnostics,step_ok,step_message)
+    type(s_dg_nodal_common_state), intent(inout) :: state
+    real(8), intent(in) :: lambda
+    integer, intent(in) :: communicator
+    type(s_dg_dc_gs_diagnostics), intent(inout) :: diagnostics
+    logical, intent(out) :: step_ok
+    character(*), intent(out) :: step_message
+    real(8) :: orbital_residual
+    integer :: eigensolver_iterations
+
+    dg_gs_current_lambda=lambda
+    dg_gs_hamiltonian_potential_epoch=dg_gs_potential_epoch
+    dg_gs_operator_ok=.true.
+    dg_gs_operator_message=''
+    call solve_nodal_ground_state_cg_mpi(state,dg_dc_apply_complete_h_for_main, &
+      dg_gs_controls%maximum_eigensolver_iterations, &
+      merge(dg_gs_controls%final_orbital_tolerance,dg_gs_controls%intermediate_orbital_tolerance,lambda==1d0), &
+      communicator,dg_gs_eigenvalues,orbital_residual,eigensolver_iterations,dg_dc_rotate_subspace_for_main)
+    if(.not.dg_gs_operator_ok) then
+      step_ok=.false.; step_message=dg_gs_operator_message; return
+    end if
+    call dg_dc_assign_ground_state_occupations(state,step_ok,step_message)
+    if(.not.step_ok) return
+    diagnostics%orbital_residual=orbital_residual
+    diagnostics%subspace_residual=orbital_residual
+    diagnostics%projector_overlap=0d0
+    diagnostics%hermiticity_defect=dg_gs_face_hermiticity
+    diagnostics%face_balance_defect=dg_gs_face_balance
+    diagnostics%interface_scale=lambda
+    diagnostics%eigensolver_iterations=eigensolver_iterations
+    diagnostics%hamiltonian_potential_epoch=dg_gs_hamiltonian_potential_epoch
+    diagnostics%eigensolver_converged=orbital_residual<=merge(dg_gs_controls%final_orbital_tolerance, &
+      dg_gs_controls%intermediate_orbital_tolerance,lambda==1d0)
+    step_ok=.true.
+    step_message=''
+  end subroutine dg_dc_salmon_solve_step
+
+  subroutine dg_dc_salmon_update_step(state,density_arg,density_mix,unmixed,communicator,diagnostics, &
+      step_ok,step_message)
+    type(s_dg_nodal_common_state), intent(inout) :: state
+    real(8), intent(inout) :: density_arg(:,:,:,:)
+    real(8), intent(in) :: density_mix
+    logical, intent(in) :: unmixed
+    integer, intent(in) :: communicator
+    type(s_dg_dc_gs_diagnostics), intent(inout) :: diagnostics
+    logical, intent(out) :: step_ok
+    character(*), intent(out) :: step_message
+    real(8) :: density_residual,electron_number,orthogonality_defect
+
+    call dg_dc_update_density_potential(state,density_arg,density_mix,unmixed,density_residual, &
+      electron_number,step_ok,step_message)
+    if(.not.step_ok) return
+    call dg_dc_orthogonality_defect(state,communicator,orthogonality_defect,step_ok)
+    if(.not.step_ok) then
+      step_message='DG DC GS: orthogonality diagnostic reduction failed'
+      return
+    end if
+    diagnostics%density_residual=density_residual
+    diagnostics%orthogonality_defect=orthogonality_defect
+    diagnostics%electron_number=electron_number
+    diagnostics%expected_electron_number=dc%elec_num_tot
+    diagnostics%updated_potential_epoch=dg_gs_potential_epoch
+    diagnostics%finite=all(ieee_is_finite([diagnostics%orbital_residual,density_residual,electron_number, &
+      orthogonality_defect,dg_gs_face_hermiticity,dg_gs_face_balance]))
+    step_ok=diagnostics%finite
+    if(step_ok) then
+      step_message=''
+    else
+      step_message='DG DC GS: nonfinite SALMON production diagnostics'
+    end if
+  end subroutine dg_dc_salmon_update_step
+
+  subroutine dg_dc_apply_complete_h_for_main(state,hpsi_complete)
+    type(s_dg_nodal_common_state), intent(inout) :: state
+    complex(8), intent(out) :: hpsi_complete(:,:,:,:,:)
+    complex(8), allocatable :: hpsi_volume_nonlocal(:,:,:,:,:),hpsi_sipg(:,:,:,:,:)
+    logical :: action_ok
+    character(256) :: action_message
+    if(.not.dg_gs_operator_ok) then
+      hpsi_complete=(0d0,0d0)
+      return
+    end if
+    allocate(hpsi_volume_nonlocal,mold=state%psi_core)
+    allocate(hpsi_sipg,mold=state%psi_core)
+    call dg_dc_apply_volume_nonlocal_for_main(state,hpsi_volume_nonlocal,action_ok,action_message)
+    action_ok=action_ok .and. dg_gs_operator_ok
+    call comm_logical_and(action_ok,dg_gs_operator_ok,dc%icomm_tot)
+    if(.not.dg_gs_operator_ok) then
+      hpsi_complete=(0d0,0d0); dg_gs_operator_message='DG DC volume/nonlocal Hamiltonian action failed'; return
+    end if
+    call apply_dg_dc_sipg_operator_mpi(state,dg_gs_fragment_origins,dg_gs_fragment_sizes, &
+      dc%lg_tot%num,dc%system_tot%hgs,81d0,dc%icomm_tot,hpsi_sipg,dg_gs_face_hermiticity, &
+      dg_gs_face_balance,action_ok,action_message)
+    action_ok=action_ok .and. dg_gs_operator_ok
+    call comm_logical_and(action_ok,dg_gs_operator_ok,dc%icomm_tot)
+    if(.not.dg_gs_operator_ok) then
+      hpsi_complete=(0d0,0d0); dg_gs_operator_message='DG DC SIPG Hamiltonian action failed'; return
+    end if
+    call compose_dg_dc_hamiltonian(hpsi_volume_nonlocal,hpsi_sipg,dg_gs_current_lambda, &
+      hpsi_complete,action_ok,action_message)
+    action_ok=action_ok .and. dg_gs_operator_ok
+    call comm_logical_and(action_ok,dg_gs_operator_ok,dc%icomm_tot)
+    if(.not.dg_gs_operator_ok) then
+      hpsi_complete=(0d0,0d0); dg_gs_operator_message='DG DC complete Hamiltonian composition failed'
+    end if
+  end subroutine dg_dc_apply_complete_h_for_main
+
+  subroutine dg_dc_apply_volume_nonlocal_for_main(state,hpsi_volume_nonlocal,ok,message)
+    type(s_dg_nodal_common_state), intent(in) :: state
+    complex(8), intent(out) :: hpsi_volume_nonlocal(:,:,:,:,:)
+    logical, intent(out) :: ok
+    character(*), intent(out) :: message
+    integer :: first_state,batch_count,slot,global_state,is,ix,iy,iz
+    real(8) :: scale
+    real(8), allocatable :: vlocal_core(:,:,:,:)
+    complex(8), allocatable :: zero_extended_local(:,:,:,:,:),interior_volume(:,:,:,:,:)
+    hpsi_volume_nonlocal=(0d0,0d0)
+    ok=system%if_real_orbital .and. all(shape(hpsi_volume_nonlocal)==shape(state%psi_core))
+    if(.not.ok) then
+      message='DG DC GS: unsupported volume/nonlocal orbital layout'
+      return
+    end if
+    scale=sqrt(dc%system_tot%hvol)
+    do first_state=1,state%nstate,system%no
+      batch_count=min(system%no,state%nstate-first_state+1)
+      spsi%rwf=0d0
+      do slot=1,batch_count
+        global_state=first_state+slot-1
+        do is=1,system%nspin
+          do iz=1,state%core_size(3); do iy=1,state%core_size(2); do ix=1,state%core_size(1)
+            spsi%rwf(ix,iy,iz,is,slot,info%ik_s,info%im_s)= &
+              real(state%psi_core(ix,iy,iz,global_state,is),8)/scale
+          end do; end do; end do
+        end do
+      end do
+      call hpsi(spsi,shpsi,info,mg,v_local,system,stencil,srg,ppg)
+      do slot=1,batch_count
+        global_state=first_state+slot-1
+        do is=1,system%nspin
+          do iz=1,state%core_size(3); do iy=1,state%core_size(2); do ix=1,state%core_size(1)
+            hpsi_volume_nonlocal(ix,iy,iz,global_state,is)= &
+              cmplx(scale*shpsi%rwf(ix,iy,iz,is,slot,info%ik_s,info%im_s),0d0,8)
+          end do; end do; end do
+        end do
+      end do
+    end do
+    allocate(vlocal_core(state%core_size(1),state%core_size(2),state%core_size(3),state%nspin))
+    do is=1,state%nspin
+      vlocal_core(:,:,:,is)=v_local(is)%f(1:state%core_size(1),1:state%core_size(2),1:state%core_size(3))
+    end do
+    allocate(zero_extended_local,mold=state%psi_core)
+    allocate(interior_volume,mold=state%psi_core)
+    call build_dg_dc_interior_volume_action(state%psi_core,vlocal_core,stencil%coef_lap0, &
+      stencil%coef_lap,zero_extended_local,interior_volume,ok,message)
+    if(.not.ok) return
+    hpsi_volume_nonlocal=hpsi_volume_nonlocal-zero_extended_local+interior_volume
+    ok=all(ieee_is_finite(real(hpsi_volume_nonlocal,8))) .and. &
+      all(ieee_is_finite(aimag(hpsi_volume_nonlocal)))
+    if(ok) then
+      message=''
+    else
+      message='DG DC GS: nonfinite volume/nonlocal action'
+    end if
+  end subroutine dg_dc_apply_volume_nonlocal_for_main
+
+  subroutine dg_dc_rotate_subspace_for_main(state,hpsi_complete,eigenvalues,communicator)
+    type(s_dg_nodal_common_state), intent(inout) :: state
+    complex(8), intent(inout) :: hpsi_complete(:,:,:,:,:)
+    real(8), intent(out) :: eigenvalues(state%nstate,state%nspin)
+    integer, intent(in) :: communicator
+    call rayleigh_ritz_nodal_subspace_mpi(state,hpsi_complete,eigenvalues,communicator)
+  end subroutine dg_dc_rotate_subspace_for_main
+
+  subroutine dg_dc_assign_ground_state_occupations(state,ok,message)
+    type(s_dg_nodal_common_state), intent(inout) :: state
+    logical, intent(out) :: ok
+    character(*), intent(out) :: message
+    integer :: nfilled
+    real(8) :: remaining
+    state%occupations=0d0
+    nfilled=min(state%nstate,int(dc%elec_num_tot/2d0))
+    if(nfilled>0) state%occupations(1:nfilled,1)=2d0
+    remaining=dc%elec_num_tot-2d0*dble(nfilled)
+    if(remaining>10d0*epsilon(1d0) .and. nfilled<state%nstate) state%occupations(nfilled+1,1)=remaining
+    ok=remaining<2d0+10d0*epsilon(1d0) .and. dc%elec_num_tot<=2d0*dble(state%nstate)
+    if(ok) then
+      message=''
+    else
+      message='DG DC GS: insufficient global candidate states for electron count'
+    end if
+  end subroutine dg_dc_assign_ground_state_occupations
+
+  subroutine dg_dc_update_density_potential(state,density_arg,density_mix,unmixed,density_residual, &
+      electron_number,ok,message)
+    type(s_dg_nodal_common_state), intent(in) :: state
+    real(8), intent(inout) :: density_arg(:,:,:,:)
+    real(8), intent(in) :: density_mix
+    logical, intent(in) :: unmixed
+    real(8), intent(out) :: density_residual,electron_number
+    logical, intent(out) :: ok
+    character(*), intent(out) :: message
+    integer :: is,ix,iy,iz
+    real(8) :: local_norm,global_norm,local_charge
+    call reconstruct_dg_dc_core_density(state,state%nstate,dg_gs_core_density,ok,message)
+    if(.not.ok) return
+    dg_gs_core_density=dg_gs_core_density/dc%system_tot%hvol
+    do is=1,system%nspin
+      rho_s(is)%f=0d0
+      do iz=1,state%core_size(3); do iy=1,state%core_size(2); do ix=1,state%core_size(1)
+        rho_s(is)%f(ix,iy,iz)=dg_gs_core_density(ix,iy,iz,is)
+      end do; end do; end do
+    end do
+    call calc_rho_total_dcdft(system%nspin,lg,mg,info,rho_s,dc)
+    do is=1,system%nspin
+      dg_gs_raw_density(:,:,:,is)=dc%rho_tot_s(is)%f
+    end do
+    local_norm=sum((dg_gs_raw_density-density_arg)**2)
+    call comm_summation(local_norm,global_norm,dc%icomm_tot)
+    density_residual=sqrt(global_norm*dc%system_tot%hvol)
+    local_charge=sum(dg_gs_raw_density)*dc%system_tot%hvol
+    call comm_summation(local_charge,electron_number,dc%icomm_tot)
+    call mix_dg_dc_density_transaction(density_arg,dg_gs_raw_density,density_mix,unmixed, &
+      dg_gs_mixed_density,ok,message)
+    if(.not.ok) return
+    density_arg=dg_gs_mixed_density
+    call dg_dc_update_potential_from_density(density_arg,ok,message)
+  end subroutine dg_dc_update_density_potential
+
+  subroutine dg_dc_update_potential_from_density(density_arg,ok,message)
+    real(8), intent(in) :: density_arg(:,:,:,:)
+    logical, intent(out) :: ok
+    character(*), intent(out) :: message
+    integer :: is
+    do is=1,system%nspin
+      dc%rho_tot_s(is)%f=density_arg(:,:,:,is)
+    end do
+    dc%rho_tot%f=0d0
+    do is=1,system%nspin
+      dc%rho_tot%f=dc%rho_tot%f+dc%rho_tot_s(is)%f
+    end do
+    call hartree(dc%lg_tot,dc%mg_tot,dc%info_tot,dc%system_tot,dc%fg_tot,dc%poisson_tot, &
+      dc%srg_scalar_tot,stencil,dc%rho_tot,dc%Vh_tot)
+    call exchange_correlation(dc%system_tot,xc_func,dc%mg_tot,srg_scalar,srg,dc%rho_tot_s, &
+      pp,ppn,dc%info_tot,spsi,stencil,dc%Vxc_tot,energy%E_xc)
+    call update_vlocal(dc%mg_tot,dc%system_tot%nspin,dc%Vh_tot,dc%Vpsl_tot,dc%Vxc_tot,dc%vloc_tot)
+    call calc_vlocal_fragment_dcdft(system%nspin,mg,v_local,dc)
+    dg_gs_potential_epoch=dg_gs_potential_epoch+1_8
+    ok=all(ieee_is_finite(dc%rho_tot%f)) .and. all(ieee_is_finite(dc%Vh_tot%f))
+    do is=1,system%nspin
+      ok=ok .and. all(ieee_is_finite(dc%Vxc_tot(is)%f)) .and. all(ieee_is_finite(dc%vloc_tot(is)%f))
+    end do
+    if(ok) then
+      message=''
+    else
+      message='DG DC GS: nonfinite DC Hartree/XC/vlocal update'
+    end if
+  end subroutine dg_dc_update_potential_from_density
+
+  subroutine dg_dc_orthogonality_defect(state,communicator,defect,ok)
+    type(s_dg_nodal_common_state), intent(in) :: state
+    integer, intent(in) :: communicator
+    real(8), intent(out) :: defect
+    logical, intent(out) :: ok
+    complex(8), allocatable :: local_overlap(:,:),global_overlap(:,:)
+    integer :: i,j,ierr
+    allocate(local_overlap(state%nstate,state%nstate),global_overlap(state%nstate,state%nstate))
+    local_overlap=(0d0,0d0)
+    do j=1,state%nstate
+      do i=1,state%nstate
+        local_overlap(i,j)=sum(conjg(state%psi_core(:,:,:,i,1))*state%psi_core(:,:,:,j,1))
+      end do
+    end do
+    call comm_summation(local_overlap,global_overlap,size(local_overlap),communicator)
+    do i=1,state%nstate
+      global_overlap(i,i)=global_overlap(i,i)-(1d0,0d0)
+    end do
+    defect=maxval(abs(global_overlap))
+    ok=ieee_is_finite(defect)
+  end subroutine dg_dc_orthogonality_defect
 
   integer function canonical_to_dc_index(index,core_count,buffer_count)
     integer, intent(in) :: index,core_count,buffer_count

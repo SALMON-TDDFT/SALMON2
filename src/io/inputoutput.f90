@@ -696,6 +696,24 @@ contains
       & dg_dc_handoff_tolerance, &
       & dg_dc_candidate_orbitals_per_atom, &
       & dg_dc_metric_rank_tolerance, &
+      & dg_dc_gs_intermediate_orbital_tolerance, &
+      & dg_dc_gs_intermediate_density_tolerance, &
+      & dg_dc_gs_final_orbital_tolerance, &
+      & dg_dc_gs_final_density_tolerance, &
+      & dg_dc_gs_subspace_tolerance, &
+      & dg_dc_gs_initial_lambda_step, &
+      & dg_dc_gs_minimum_lambda_step, &
+      & dg_dc_gs_maximum_lambda_step, &
+      & dg_dc_gs_allowed_residual_growth, &
+      & dg_dc_gs_density_mix_rate, &
+      & dg_dc_gs_hermiticity_tolerance, &
+      & dg_dc_gs_orthogonality_tolerance, &
+      & dg_dc_gs_face_balance_tolerance, &
+      & dg_dc_gs_electron_count_tolerance, &
+      & dg_dc_gs_minimum_projector_overlap, &
+      & dg_dc_gs_maximum_scf_iterations, &
+      & dg_dc_gs_maximum_eigensolver_iterations, &
+      & dg_dc_gs_maximum_rollbacks, &
       & wannier90_command, &
       & wannier_projection, &
       & nstate_frag, &
@@ -1282,6 +1300,24 @@ contains
     dg_dc_handoff_tolerance = 1d-3
     dg_dc_candidate_orbitals_per_atom = 40
     dg_dc_metric_rank_tolerance = 1d-10
+    dg_dc_gs_intermediate_orbital_tolerance = 1d-5
+    dg_dc_gs_intermediate_density_tolerance = 1d-5
+    dg_dc_gs_final_orbital_tolerance = 1d-7
+    dg_dc_gs_final_density_tolerance = 1d-7
+    dg_dc_gs_subspace_tolerance = 1d-7
+    dg_dc_gs_initial_lambda_step = 0.125d0
+    dg_dc_gs_minimum_lambda_step = 0.015625d0
+    dg_dc_gs_maximum_lambda_step = 0.5d0
+    dg_dc_gs_allowed_residual_growth = 4d0
+    dg_dc_gs_density_mix_rate = 0.5d0
+    dg_dc_gs_hermiticity_tolerance = 1d-10
+    dg_dc_gs_orthogonality_tolerance = 1d-10
+    dg_dc_gs_face_balance_tolerance = 1d-10
+    dg_dc_gs_electron_count_tolerance = 1d-8
+    dg_dc_gs_minimum_projector_overlap = 0.9d0
+    dg_dc_gs_maximum_scf_iterations = 100
+    dg_dc_gs_maximum_eigensolver_iterations = 500
+    dg_dc_gs_maximum_rollbacks = 8
     wannier90_command = ''
     wannier_projection = ''
     nstate_frag = 0
@@ -2066,6 +2102,24 @@ contains
     call comm_bcast(dg_dc_handoff_tolerance, nproc_group_global)
     call comm_bcast(dg_dc_candidate_orbitals_per_atom, nproc_group_global)
     call comm_bcast(dg_dc_metric_rank_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_gs_intermediate_orbital_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_gs_intermediate_density_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_gs_final_orbital_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_gs_final_density_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_gs_subspace_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_gs_initial_lambda_step, nproc_group_global)
+    call comm_bcast(dg_dc_gs_minimum_lambda_step, nproc_group_global)
+    call comm_bcast(dg_dc_gs_maximum_lambda_step, nproc_group_global)
+    call comm_bcast(dg_dc_gs_allowed_residual_growth, nproc_group_global)
+    call comm_bcast(dg_dc_gs_density_mix_rate, nproc_group_global)
+    call comm_bcast(dg_dc_gs_hermiticity_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_gs_orthogonality_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_gs_face_balance_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_gs_electron_count_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_gs_minimum_projector_overlap, nproc_group_global)
+    call comm_bcast(dg_dc_gs_maximum_scf_iterations, nproc_group_global)
+    call comm_bcast(dg_dc_gs_maximum_eigensolver_iterations, nproc_group_global)
+    call comm_bcast(dg_dc_gs_maximum_rollbacks, nproc_group_global)
     call comm_bcast(wannier90_command, nproc_group_global)
     call comm_bcast(wannier_projection, nproc_group_global)
     call comm_bcast(nstate_frag, nproc_group_global)
@@ -3405,6 +3459,36 @@ contains
       call sawf_input_fatal("dg_dc_candidate_orbitals_per_atom must be positive")
     if(.not.ieee_is_finite(dg_dc_metric_rank_tolerance) .or. dg_dc_metric_rank_tolerance <= 0d0) &
       call sawf_input_fatal("dg_dc_metric_rank_tolerance must be positive")
+    if(.not.ieee_is_finite(dg_dc_gs_intermediate_orbital_tolerance) .or. &
+       dg_dc_gs_intermediate_orbital_tolerance<=0d0) call sawf_input_fatal("invalid DG DC GS intermediate orbital tolerance")
+    if(.not.ieee_is_finite(dg_dc_gs_intermediate_density_tolerance) .or. &
+       dg_dc_gs_intermediate_density_tolerance<=0d0) call sawf_input_fatal("invalid DG DC GS intermediate density tolerance")
+    if(.not.ieee_is_finite(dg_dc_gs_final_orbital_tolerance) .or. dg_dc_gs_final_orbital_tolerance<=0d0) &
+      call sawf_input_fatal("invalid DG DC GS final orbital tolerance")
+    if(.not.ieee_is_finite(dg_dc_gs_final_density_tolerance) .or. dg_dc_gs_final_density_tolerance<=0d0) &
+      call sawf_input_fatal("invalid DG DC GS final density tolerance")
+    if(.not.ieee_is_finite(dg_dc_gs_subspace_tolerance) .or. dg_dc_gs_subspace_tolerance<=0d0) &
+      call sawf_input_fatal("invalid DG DC GS subspace tolerance")
+    if(.not.ieee_is_finite(dg_dc_gs_initial_lambda_step) .or. dg_dc_gs_initial_lambda_step<=0d0 .or. &
+       .not.ieee_is_finite(dg_dc_gs_minimum_lambda_step) .or. dg_dc_gs_minimum_lambda_step<=0d0 .or. &
+       .not.ieee_is_finite(dg_dc_gs_maximum_lambda_step) .or. dg_dc_gs_maximum_lambda_step<=0d0 .or. &
+       dg_dc_gs_minimum_lambda_step>dg_dc_gs_initial_lambda_step .or. &
+       dg_dc_gs_initial_lambda_step>dg_dc_gs_maximum_lambda_step .or. dg_dc_gs_maximum_lambda_step>1d0) &
+      call sawf_input_fatal("invalid DG DC GS lambda step bounds")
+    if(.not.ieee_is_finite(dg_dc_gs_allowed_residual_growth) .or. dg_dc_gs_allowed_residual_growth<=0d0) &
+      call sawf_input_fatal("invalid DG DC GS residual growth")
+    if(.not.ieee_is_finite(dg_dc_gs_density_mix_rate) .or. dg_dc_gs_density_mix_rate<=0d0 .or. &
+       dg_dc_gs_density_mix_rate>1d0) call sawf_input_fatal("invalid DG DC GS density mix rate")
+    if(.not.ieee_is_finite(dg_dc_gs_hermiticity_tolerance) .or. dg_dc_gs_hermiticity_tolerance<=0d0 .or. &
+       .not.ieee_is_finite(dg_dc_gs_orthogonality_tolerance) .or. dg_dc_gs_orthogonality_tolerance<=0d0 .or. &
+       .not.ieee_is_finite(dg_dc_gs_face_balance_tolerance) .or. dg_dc_gs_face_balance_tolerance<=0d0 .or. &
+       .not.ieee_is_finite(dg_dc_gs_electron_count_tolerance) .or. dg_dc_gs_electron_count_tolerance<=0d0) &
+      call sawf_input_fatal("invalid DG DC GS acceptance tolerance")
+    if(.not.ieee_is_finite(dg_dc_gs_minimum_projector_overlap) .or. &
+       dg_dc_gs_minimum_projector_overlap<=0d0 .or. dg_dc_gs_minimum_projector_overlap>1d0) &
+      call sawf_input_fatal("invalid DG DC GS minimum projector overlap")
+    if(dg_dc_gs_maximum_scf_iterations<1 .or. dg_dc_gs_maximum_eigensolver_iterations<1 .or. &
+       dg_dc_gs_maximum_rollbacks<0) call sawf_input_fatal("invalid DG DC GS iteration bound")
     select case(trim(wannier_site_symmetry))
     case('off', 'auto', 'file')
     case default

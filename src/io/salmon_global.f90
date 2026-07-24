@@ -544,6 +544,24 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: dg_dc_handoff_tolerance
   integer        :: dg_dc_candidate_orbitals_per_atom
   real(8)        :: dg_dc_metric_rank_tolerance
+  real(8)        :: dg_dc_gs_intermediate_orbital_tolerance
+  real(8)        :: dg_dc_gs_intermediate_density_tolerance
+  real(8)        :: dg_dc_gs_final_orbital_tolerance
+  real(8)        :: dg_dc_gs_final_density_tolerance
+  real(8)        :: dg_dc_gs_subspace_tolerance
+  real(8)        :: dg_dc_gs_initial_lambda_step
+  real(8)        :: dg_dc_gs_minimum_lambda_step
+  real(8)        :: dg_dc_gs_maximum_lambda_step
+  real(8)        :: dg_dc_gs_allowed_residual_growth
+  real(8)        :: dg_dc_gs_density_mix_rate
+  real(8)        :: dg_dc_gs_hermiticity_tolerance
+  real(8)        :: dg_dc_gs_orthogonality_tolerance
+  real(8)        :: dg_dc_gs_face_balance_tolerance
+  real(8)        :: dg_dc_gs_electron_count_tolerance
+  real(8)        :: dg_dc_gs_minimum_projector_overlap
+  integer        :: dg_dc_gs_maximum_scf_iterations
+  integer        :: dg_dc_gs_maximum_eigensolver_iterations
+  integer        :: dg_dc_gs_maximum_rollbacks
   character(256) :: wannier90_command
   character(256) :: wannier_projection
   integer        :: nstate_frag
