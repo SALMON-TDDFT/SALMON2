@@ -15,6 +15,7 @@ set(SOURCES
    dg_generalized_algebra.f90
    dg_nodal_state.f90
    dg_nodal_interfaces.f90
+   dg_nodal_sipg.f90
    dg_wpw_density.f90
    dg_wpw_fixed_operator.f90
    dg_wpw_matrix_free_operator.f90

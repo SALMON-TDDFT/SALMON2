@@ -4,6 +4,7 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[2]
 common_state = root / "src/common/dg_nodal_state.f90"
 common_interfaces = root / "src/common/dg_nodal_interfaces.f90"
+sipg = root / "src/common/dg_nodal_sipg.f90"
 rt_types = root / "src/rt/dg/rt_dg_nodal_types.f90"
 solver = root / "src/rt/dg/rt_dg_nodal_ground_state_solver.f90"
 cg = root / "src/rt/dg/rt_dg_nodal_cg.f90"
@@ -11,6 +12,7 @@ density = root / "src/rt/dg/rt_dg_nodal_density.f90"
 
 assert common_state.exists(), "missing GS/RT-neutral nodal state"
 assert common_interfaces.exists(), "missing GS/RT-neutral nodal callback interfaces"
+assert sipg.exists(), "missing complete Hermitian nodal SIPG face operator"
 
 state_body = common_state.read_text().lower()
 for token in (
@@ -47,5 +49,22 @@ for path in (solver, cg, density):
 common_cmake = (root / "src/common/CMakeLists.txt").read_text()
 assert "dg_nodal_state.f90" in common_cmake
 assert "dg_nodal_interfaces.f90" in common_cmake
+assert "dg_nodal_sipg.f90" in common_cmake
+
+sipg_body = sipg.read_text().lower()
+for token in (
+    "consistency_value",
+    "symmetry_normal",
+    "penalty_value",
+    "hermiticity_defect",
+    "internal_cancellation_defect",
+    "jump_norm",
+    "penalty_energy",
+    "trace_epoch",
+    "canonical_owner",
+    "physical_face",
+    "auxiliary_periodic_wrap",
+):
+    assert token in sipg_body, f"missing SIPG contract: {token}"
 
 print("PASS nodal ground-state route depends on the GS/RT-neutral common core")
