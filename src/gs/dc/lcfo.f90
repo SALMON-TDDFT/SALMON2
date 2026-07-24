@@ -18,9 +18,6 @@
 ! DC-LCFO method [Phys. Rev. B 95, 045106 (2017).]
 
 #include "config.h"
-#ifdef USE_SLEPC
-#include <slepc/finclude/slepceps.h>
-#endif
 module lcfo
   implicit none
   
@@ -560,17 +557,17 @@ contains
       use communication, only: comm_create_group, comm_free_group
       use slepceps
       implicit none
-      Mat :: mat_h
-      Vec :: eigvec
-      EPS :: eps
-      PetscInt :: n_petsc,nev,n_local,row_start,row_end
-      PetscInt :: nconv,niter,ieig,k,gidx,expected_start
-      PetscInt :: row(1),ncols,col_start,col_end,diag_count
-      PetscErrorCode :: ierr
-      PetscScalar :: eig_r,eig_i
-      PetscReal :: rel_error,max_error
-      PetscInt,allocatable :: d_nnz(:),o_nnz(:),cols(:),eig_indices(:)
-      PetscScalar,allocatable :: vals(:),eig_values(:)
+      type(tMat) :: mat_h
+      type(tVec) :: eigvec
+      type(tEPS) :: eps
+      integer(PETSC_INT_KIND) :: n_petsc,nev,n_local,row_start,row_end
+      integer(PETSC_INT_KIND) :: nconv,niter,ieig,k,gidx,expected_start
+      integer(PETSC_INT_KIND) :: row(1),ncols,col_start,col_end,diag_count
+      integer :: ierr
+      real(PETSC_REAL_KIND) :: eig_r,eig_i
+      real(PETSC_REAL_KIND) :: rel_error,max_error
+      integer(PETSC_INT_KIND),allocatable :: d_nnz(:),o_nnz(:),cols(:),eig_indices(:)
+      real(PETSC_REAL_KIND),allocatable :: vals(:),eig_values(:)
       integer :: icomm_slepc,key_slepc,n_local_default,local_offset
       integer :: n_before,n_connected,io_local
       integer,allocatable :: adjacency_local(:,:),adjacency(:,:)
@@ -772,7 +769,7 @@ contains
     subroutine check_slepc(ierr,where)
       use slepceps
       implicit none
-      PetscErrorCode,intent(in) :: ierr
+      integer,intent(in) :: ierr
       character(*),intent(in) :: where
       if(ierr /= 0) then
         if(dc%id_tot==0) write(*,*) "SLEPc/PETSc error in ",trim(where),": ",ierr
