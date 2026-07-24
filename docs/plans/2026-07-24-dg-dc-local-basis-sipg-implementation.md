@@ -7,12 +7,13 @@ fragment-local orbital machinery and adding only physical-face SIPG coupling,
 without concatenating local candidates into global real-space states.
 
 **Architecture:** DC continues to generate and update
-`natom_fragment * dg_dc_candidate_orbitals_per_atom` local orbitals per
-fragment.  A new default-off local-basis adapter assembles the global
-Hermitian Hamiltonian from existing DC volume blocks plus SIPG neighbor blocks,
-solves the requested total-system `nstate` bands, and reconstructs density for
-the existing DC Hartree/XC/`vlocal`/mixing path.  The adaptive continuation and
-transactional checkpoint consume this representation.
+`natom_fragment * dg_dc_candidate_orbitals_per_atom` fragment orbitals,
+including empty states.  Production reuses `solve_orbitals`, its
+orthogonalized CG, and BLAS Gram--Schmidt, adding SIPG physical-face action to
+the two Hamiltonian applications inside CG.  It then reuses the existing DC
+density, Hartree/XC/`vlocal`, and mixing path.  Production does not construct
+LCFO functions, diagonalize an LCFO coefficient matrix with EigenExa, or
+materialize whole-system real-space wavefunctions.
 
 **Tech Stack:** Fortran 2008, MPI, BLAS/LAPACK, existing SALMON DC structures,
 existing physical-face SIPG helpers, Python contract runners.
@@ -160,7 +161,7 @@ git add src/gs/dc/dg_dc_local_basis_ground_state.f90 \
 git commit -m "feat(dg): add SIPG coupling to DC local basis"
 ```
 
-### Task 3: Solve global bands and reuse the DC SCF path
+### Task 3: Add SIPG to the existing DC orbital solve and SCF path
 
 **Files:**
 - Modify: `src/gs/dc/dg_dc_local_basis_ground_state.f90`
@@ -172,13 +173,12 @@ git commit -m "feat(dg): add SIPG coupling to DC local basis"
 
 **Step 1: Write the failing SCF test**
 
-Use a small two-fragment Hermitian model with known eigenpairs.  Verify that:
+Use a small two-fragment orbital model.  Verify that:
 
-- the solver returns the requested global band count, not the local basis sum;
-- empty bands are retained;
-- eigenvectors are orthonormal in the local-basis metric;
-- density reconstructed from coefficients and fragment-local orbitals matches
-  the analytic density;
+- the existing DC orbital count, including empty states, is retained;
+- both `H psi` and `H p` receive the same SIPG action;
+- existing Gram--Schmidt remains the orthogonalization owner;
+- density is built directly from the updated fragment orbitals;
 - the existing DC density, Hartree, XC, `vlocal`, and mixing callbacks are
   invoked once per SCF iteration;
 - lambda zero reproduces the DC result and lambda one includes SIPG coupling.
@@ -195,18 +195,19 @@ Expected: FAIL because the global local-basis solve is absent.
 
 **Step 3: Implement the minimal solve**
 
-Use the existing DC CG and BLAS Gram--Schmidt to update fragment-local
-orbitals.  Assemble the local-basis overlap and Hamiltonian matrices and solve
-the Hermitian generalized eigenproblem for total-system `nstate` bands with the
-configured distributed eigensolver.  Reconstruct core density from the
-eigenvectors and occupations, then call the existing DC potential update and
-mixing path.
+Pass default-off DG controls through `solve_orbitals` to the existing DC CG.
+Add the same physical-face SIPG operator to the initial-orbital and search
+direction Hamiltonian applications.  Keep the existing BLAS Gram--Schmidt and
+DC density/potential/mixing calls unchanged.
 
 Remove the production calls to:
 
 - `expand_dg_dc_global_candidate_axis`;
 - `solve_nodal_ground_state_cg_mpi`;
 - nodal Cholesky orthogonalization.
+
+Forbid production calls to LCFO, EigenExa, and
+`solve_dg_dc_local_basis_bands_reference`.
 
 Keep those neutral RT/common modules available only for their existing
 non-production tests and consumers.

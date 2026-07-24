@@ -1,4 +1,26 @@
-# DG-DC Local-Basis SIPG Ground-State Design
+# DG-DC Direct Fragment-Orbital SIPG Ground-State Design
+
+## 2026-07-24 architecture correction
+
+The production ground-state path does not construct LCFO functions, solve a
+global LCFO coefficient eigenproblem, or materialize whole-system real-space
+wavefunctions.  Each DC fragment already owns
+`dg_dc_candidate_orbitals_per_atom * natom_fragment` orbitals, including the
+required empty states.  The DG path keeps those orbitals in the existing
+`spsi` representation and reuses the existing `solve_orbitals` sequence:
+
+1. apply the existing DC volume/nonlocal Hamiltonian;
+2. add the physical-face SIPG action to both the orbital and CG search
+   direction Hamiltonian applications;
+3. update all fragment orbitals with the existing orthogonalized CG;
+4. run the existing BLAS Gram--Schmidt;
+5. reuse the existing DC density, Hartree, XC, `vlocal`, and mixing update.
+
+The only new cross-fragment data are face values and normal-derivative stencil
+layers for the same orbital indices.  No local-basis coefficient matrix is
+needed by the production path.  The small generalized-eigenproblem helper
+remains a test/reference utility and is forbidden by the production route
+contract.
 
 ## Decision
 
