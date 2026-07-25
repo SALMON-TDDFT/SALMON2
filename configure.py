@@ -62,11 +62,15 @@ group.add_option('--enable-scalapack',  action='store_true',  dest='scalapack')
 group.add_option('--disable-scalapack', action='store_false', dest='scalapack', help='enable/disable computations with ScaLAPACK library.')
 group.add_option('--enable-eigenexa',   action='store_true',  dest='eigenexa')
 group.add_option('--disable-eigenexa',  action='store_false', dest='eigenexa', help='enable/disable computations with EigenExa library (SALMON will build it internally)')
+group.add_option('--enable-slepc',      action='store_true',  dest='slepc')
+group.add_option('--disable-slepc',     action='store_false', dest='slepc', help='enable/disable SLEPc library (SALMON will build PETSc/SLEPc internally when needed)')
 group.add_option('--enable-libxc',      action='store_true',  dest='libxc')
 group.add_option('--disable-libxc',     action='store_false', dest='libxc', help='enable/disable Libxc library.')
 group.add_option('--enable-fftw',        action='store_true',  dest='fftw')
 group.add_option('--disable-fftw',       action='store_false', dest='fftw', help='enable/disable computations FFTW library.')
 group.add_option('--with-lapack',       action='store', type=str, default=None, dest='lapack_installdir', help='specify install path to LAPACK/ScaLAPACK')
+group.add_option('--with-slepc',        action='store', type=str, default=None, dest='slepc_installdir', help='specify install path to SLEPc')
+group.add_option('--with-petsc',        action='store', type=str, default=None, dest='petsc_installdir', help='specify install path to PETSc used by SLEPc')
 group.add_option('--with-libxc',        action='store', type=str, default=None, dest='libxc_installdir', help='specify install path to Libxc package')
 
 parser.add_option_group(group)
@@ -90,6 +94,10 @@ parser.add_option_group(group)
 ### check options
 if (options.libxc_installdir is not None):
   options.libxc = True
+if (options.slepc_installdir is not None):
+  options.slepc = True
+if options.slepc:
+  options.mpi = True
 
 dict = {}
 if options.arch is not None:
@@ -100,11 +108,14 @@ dict['CMAKE_BUILD_TYPE']           = debug_or_release(options.debug)
 dict['CMAKE_VERBOSE_MAKEFILE']     = on_or_off(options.verbose)
 
 add_env(dict, 'LAPACK_INSTALLDIR', options.lapack_installdir)
+add_env(dict, 'SLEPC_INSTALLDIR',  options.slepc_installdir)
+add_env(dict, 'PETSC_INSTALLDIR',  options.petsc_installdir)
 add_env(dict, 'LIBXC_INSTALLDIR',  options.libxc_installdir)
 
 add_option(dict, 'USE_MPI',             options.mpi)
 add_option(dict, 'USE_SCALAPACK',       options.scalapack)
 add_option(dict, 'USE_EIGENEXA',        options.eigenexa)
+add_option(dict, 'USE_SLEPC',           options.slepc)
 add_option(dict, 'USE_LIBXC',           options.libxc)
 add_option(dict, 'USE_FFTW',            options.fftw)
 

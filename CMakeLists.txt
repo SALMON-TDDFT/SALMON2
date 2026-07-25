@@ -43,8 +43,16 @@ endif()
 option_set(USE_MPI       "Use MPI parallelization" OFF)
 option_set(USE_SCALAPACK "Use ScaLAPACK Library"   OFF)
 option_set(USE_EIGENEXA  "Use EigenExa Library"    OFF)
+option_set(USE_SLEPC     "Use SLEPc Library"       OFF)
 option_set(USE_LIBXC     "Use Libxc library"       OFF)
 option_set(USE_FFTW      "Use FFTW library"        OFF)
+
+if (USE_SLEPC AND NOT USE_MPI)
+  message(FATAL_ERROR "SLEPc support requires USE_MPI=ON.")
+endif ()
+
+set(PETSC_CONFIGURE_OPTIONS "" CACHE STRING
+    "Additional options passed to PETSc configure when SALMON builds PETSc")
 
 ## Optimization for stencil compitations
 option_set(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil"          ON)

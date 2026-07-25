@@ -600,6 +600,7 @@ contains
       & xi_dc, &
       & yn_dc_lcfo, &
       & yn_dc_lcfo_diag, &
+      & lcfo_eigensolver, &
       & nstate_frag, &
       & energy_cut, &
       & lambda_cut
@@ -1024,6 +1025,11 @@ contains
     xi_dc = -1d0
     yn_dc_lcfo = 'y'
     yn_dc_lcfo_diag = 'y'
+#ifdef USE_EIGENEXA
+    lcfo_eigensolver = 'eigenexa'
+#else
+    lcfo_eigensolver = 'lapack'
+#endif
     nstate_frag = 0
     energy_cut = 0d0
     lambda_cut = 1d-3
@@ -1150,6 +1156,7 @@ contains
       end do
     end if
     call string_lowercase(lattice)
+    call string_lowercase(lcfo_eigensolver)
 
 ! Broad cast
 !! == bcast for &calculation
@@ -1652,6 +1659,7 @@ contains
     call comm_bcast(xi_dc, nproc_group_global)
     call comm_bcast(yn_dc_lcfo, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
+    call comm_bcast(lcfo_eigensolver, nproc_group_global)
     call comm_bcast(nstate_frag, nproc_group_global)
     call comm_bcast(energy_cut, nproc_group_global)
     energy_cut = energy_cut * uenergy_to_au
@@ -2615,6 +2623,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'xi_dc', xi_dc
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
+      write(fh_variables_log, '("#",4X,A,"=",A)') "lcfo_eigensolver",trim(lcfo_eigensolver)
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
@@ -2715,6 +2724,25 @@ contains
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
+
+    select case(trim(lcfo_eigensolver))
+    case('lapack')
+      continue
+    case('eigenexa')
+#ifdef USE_EIGENEXA
+      continue
+#else
+      stop 'lcfo_eigensolver=eigenexa requires a build with EigenExa support.'
+#endif
+    case('slepc')
+#ifdef USE_SLEPC
+      continue
+#else
+      stop 'lcfo_eigensolver=slepc requires a build with SLEPc support.'
+#endif
+    case default
+      stop "lcfo_eigensolver must be 'lapack', 'eigenexa', or 'slepc'."
+    end select
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
       stop "Nk must be 1 when yn_periodic=='n'"
