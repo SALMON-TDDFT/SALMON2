@@ -1,9 +1,10 @@
 include(ExternalProject)
 find_program(SALMON_EXTERNAL_MAKE NAMES gmake make REQUIRED)
 
-if (CMAKE_CROSSCOMPILING OR IS_FUJITSU_COMPILER)
+if ((CMAKE_CROSSCOMPILING OR IS_FUJITSU_COMPILER) AND
+    NOT SALMON_PETSC_CROSS_BUILD)
   message(FATAL_ERROR
-    "Automatic PETSc/SLEPc builds are not supported for cross or Fujitsu builds. "
+    "Automatic PETSc/SLEPc builds are not supported for this cross or Fujitsu build. "
     "Install PETSc and SLEPc for the target platform and set SLEPC_INSTALLDIR "
     "(and PETSC_INSTALLDIR when needed).")
 endif ()
@@ -11,14 +12,26 @@ endif ()
 set(PETSC_VERSION "3.25.3")
 set(SALMON_PETSC_PREFIX "${CMAKE_BINARY_DIR}/petsc-install")
 
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-  set(_petsc_debugging 1)
+if (SALMON_PETSC_COPTFLAGS)
+  set(_petsc_coptflags "${SALMON_PETSC_COPTFLAGS}")
+elseif (CMAKE_BUILD_TYPE STREQUAL "Debug")
   set(_petsc_coptflags "${CMAKE_C_FLAGS_DEBUG}")
+else ()
+  set(_petsc_coptflags "${CMAKE_C_FLAGS_RELEASE}")
+endif ()
+
+if (SALMON_PETSC_FOPTFLAGS)
+  set(_petsc_foptflags "${SALMON_PETSC_FOPTFLAGS}")
+elseif (CMAKE_BUILD_TYPE STREQUAL "Debug")
   set(_petsc_foptflags "${CMAKE_Fortran_FLAGS_DEBUG}")
 else ()
-  set(_petsc_debugging 0)
-  set(_petsc_coptflags "${CMAKE_C_FLAGS_RELEASE}")
   set(_petsc_foptflags "${CMAKE_Fortran_FLAGS_RELEASE}")
+endif ()
+
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+  set(_petsc_debugging 1)
+else ()
+  set(_petsc_debugging 0)
 endif ()
 
 set(_petsc_blaslapack_options)
@@ -57,6 +70,12 @@ if (PETSC_CONFIGURE_OPTIONS)
                      "${PETSC_CONFIGURE_OPTIONS}")
 endif ()
 
+set(_petsc_platform_options)
+if (SALMON_PETSC_PLATFORM_OPTIONS)
+  separate_arguments(_petsc_platform_options NATIVE_COMMAND
+                     "${SALMON_PETSC_PLATFORM_OPTIONS}")
+endif ()
+
 set(_petsc_dependencies)
 if (SALMON_LAPACK_BUILD_TARGET)
   list(APPEND _petsc_dependencies ${SALMON_LAPACK_BUILD_TARGET})
@@ -83,6 +102,7 @@ ExternalProject_Add(petsc-project
                     "COPTFLAGS=${_petsc_coptflags}"
                     "FOPTFLAGS=${_petsc_foptflags}"
                     ${_petsc_blaslapack_options}
+                    ${_petsc_platform_options}
                     ${_petsc_extra_options}
   BUILD_COMMAND     ${CMAKE_COMMAND} -E env
                     "PETSC_DIR=<SOURCE_DIR>" ${SALMON_EXTERNAL_MAKE} all
