@@ -13,6 +13,7 @@ cg_source = (root / "src/gs/conjugate_gradient.f90").read_text()
 dc_source = (root / "src/gs/dc/dcdft.f90").read_text()
 handoff_source = (root / "src/gs/dc/dg_dc_handoff.f90").read_text()
 buffer_projector_source = (root / "src/common/dg_buffer_window_projector.f90").read_text()
+buffer_core_faces_source = (root / "src/gs/dc/dg_dc_buffer_core_faces.f90").read_text()
 ground_state_source = (root / "src/gs/dc/dg_dc_ground_state.f90").read_text()
 adapter_source = (root / "src/gs/dc/dg_dc_ground_state_adapter.f90").read_text()
 cmake_source = (root / "src/gs/dc/CMakeLists.txt").read_text()
@@ -48,6 +49,41 @@ for projector_contract in [
 ]:
     assert projector_contract.lower() in buffer_projector_source.lower(), \
         f"buffer-window projector is missing {projector_contract}"
+assert "dg_dc_buffer_core_faces.f90" in cmake_source
+for face_contract in [
+    "physical_grid_ids",
+    "local_buffer_indices",
+    "neighbor_core_indices",
+    "neighbor_core_values",
+    "neighbor_core_normals",
+    "configured_states",
+    "MPI_Allreduce",
+    "project_dg_dc_buffer_core_face",
+]:
+    assert face_contract.lower() in buffer_core_faces_source.lower(), \
+        f"buffer/core face mapping is missing {face_contract}"
+assert re.search(r"allocate\s*\(\s*faces\s*\(\s*6\s*\)",buffer_core_faces_source,re.I), \
+    "DG mapping must construct exactly six signed physical faces"
+assert "27" not in buffer_core_faces_source, \
+    "edge/corner DC neighbor metadata must not become DG faces"
+assert re.search(
+    r"candidate_normals\s*=\s*matmul\s*\(\s*face%neighbor_core_normals\s*,\s*"
+    r"candidate_coefficients\s*\)",
+    buffer_core_faces_source,re.I,
+), "value and normal traces must use the same frozen projector coefficients"
+for preparation_call in [
+    "build_dg_dc_buffer_core_faces",
+    "validate_dg_dc_buffer_core_faces",
+    "exchange_dg_dc_buffer_core_state_window",
+    "project_dg_dc_buffer_core_face",
+]:
+    assert re.search(rf"call\s+{preparation_call}\s*\(", adapter_source, re.I), \
+        f"ground-state adapter must actually call {preparation_call}"
+assert re.search(
+    r"subroutine\s+prepare_dg_dc_buffer_core_projectors\b",
+    adapter_source,
+    re.I,
+), "outer-SCF projector preparation entry point is missing"
 assert re.search(r"call\s+evaluate_dg_dc_handoff", scf_source, re.I)
 handoff_accept = re.search(
     r"if\s*\(\s*dg_handoff_accept\s*\)\s*then(.*?)exit\s+DFT_Iteration",

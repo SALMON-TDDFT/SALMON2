@@ -12,6 +12,9 @@ module dg_dc_ground_state_adapter
   use dg_nodal_state, only: s_dg_nodal_common_state,dg_nodal_face_slot,allocate_dg_nodal_face_buffers
   use dg_nodal_sipg, only: s_dg_nodal_sipg_action,evaluate_dg_nodal_sipg_face
   use dg_dc_ground_state, only: s_dg_dc_gs_diagnostics
+  use dg_dc_buffer_core_faces, only: s_dg_dc_buffer_core_face,build_dg_dc_buffer_core_faces, &
+    exchange_dg_dc_buffer_core_state_window,validate_dg_dc_buffer_core_faces, &
+    assemble_dg_dc_local_buffer_state_window,project_dg_dc_buffer_core_face
   implicit none
   private
   real(8), parameter :: dg_dc_maximum_candidate_workspace_bytes=8d0*1024d0**3
@@ -31,6 +34,7 @@ module dg_dc_ground_state_adapter
   public :: measure_dg_dc_cross_hermiticity_mpi
   public :: validate_dg_dc_candidate_memory
   public :: execute_dg_dc_production_iteration
+  public :: prepare_dg_dc_buffer_core_projectors
 
   abstract interface
     subroutine dg_dc_restore_callback(state,density,communicator,ok,message)
@@ -66,6 +70,69 @@ module dg_dc_ground_state_adapter
   end interface
 
 contains
+
+  subroutine prepare_dg_dc_buffer_core_projectors(local_fragment,fragment_origins,fragment_sizes,&
+      global_size,local_core_origin,local_core_size,buffer_width,generation,operator_fingerprint,&
+      core_physical_grid_ids,core_values,core_gradients,owned_state_ids,configured_states,&
+      buffer_face_values,buffer_face_weights,rank_tolerance,minimum_retained_rank,&
+      maximum_projection_residual,maximum_escape_norm,maximum_projection_mismatch,&
+      communicator,faces,ok,message)
+    integer,intent(in) :: local_fragment,fragment_origins(:,:),fragment_sizes(:,:),global_size(3)
+    integer,intent(in) :: local_core_origin(3),local_core_size(3),buffer_width,generation
+    integer(8),intent(in) :: operator_fingerprint,core_physical_grid_ids(:,:,:)
+    real(8),intent(in) :: core_values(:,:,:,:),core_gradients(:,:,:,:,:)
+    integer,intent(in) :: owned_state_ids(:),configured_states
+    real(8),intent(in) :: buffer_face_values(:,:,:),buffer_face_weights(:,:)
+    real(8),intent(in) :: rank_tolerance
+    integer,intent(in) :: minimum_retained_rank
+    real(8),intent(in) :: maximum_projection_residual,maximum_escape_norm,maximum_projection_mismatch
+    integer,intent(in) :: communicator
+    type(s_dg_dc_buffer_core_face),allocatable,intent(out) :: faces(:)
+    logical,intent(out) :: ok
+    character(*),intent(out) :: message
+    integer :: iface
+    logical :: local_ok
+
+    call build_dg_dc_buffer_core_faces(local_fragment,fragment_origins,fragment_sizes,global_size,&
+      buffer_width,generation,communicator,faces,local_ok,message,local_core_origin,local_core_size)
+    call dg_dc_collective_and(local_ok,communicator,ok)
+    if(.not.ok)return
+    call validate_dg_dc_buffer_core_faces(faces,fragment_origins,fragment_sizes,global_size,&
+      communicator,local_ok,message)
+    call dg_dc_collective_and(local_ok,communicator,ok)
+    if(.not.ok)return
+    call exchange_dg_dc_buffer_core_state_window(faces,fragment_origins,fragment_sizes,global_size,&
+      local_core_origin,local_core_size,&
+      core_physical_grid_ids,core_values,core_gradients,owned_state_ids,configured_states,&
+      communicator,local_ok,message)
+    call dg_dc_collective_and(local_ok,communicator,ok)
+    if(.not.ok)return
+    call assemble_dg_dc_local_buffer_state_window(faces,buffer_face_values,owned_state_ids,&
+      configured_states,communicator,local_ok,message)
+    call dg_dc_collective_and(local_ok,communicator,ok)
+    if(.not.ok)return
+    local_ok=size(buffer_face_values,2)==size(owned_state_ids).and.size(buffer_face_values,3)==6.and.&
+      size(buffer_face_weights,2)==6.and.size(buffer_face_values,1)==size(buffer_face_weights,1)
+    do iface=1,6
+      if(.not.local_ok)exit
+      if(faces(iface)%point_count==0)cycle
+      if(faces(iface)%point_count>size(buffer_face_values,1))then
+        local_ok=.false.;exit
+      endif
+      call project_dg_dc_buffer_core_face(faces(iface),&
+        faces(iface)%local_buffer_values,&
+        buffer_face_weights(1:faces(iface)%point_count,iface),rank_tolerance,minimum_retained_rank,&
+        maximum_projection_residual,maximum_escape_norm,maximum_projection_mismatch,generation,&
+        operator_fingerprint,local_ok,message)
+      if(.not.local_ok)exit
+    enddo
+    call dg_dc_collective_and(local_ok,communicator,ok)
+    if(ok)then
+      message=''
+    else if(len_trim(message)==0)then
+      message='DG DC GS adapter: collective buffer/core projector preparation failed'
+    endif
+  end subroutine prepare_dg_dc_buffer_core_projectors
 
   subroutine execute_dg_dc_production_iteration(state,density,lambda,density_mix,reset_mixing,unmixed, &
       restore_potential,solve_complete_h,update_density_potential,communicator,diagnostics,ok,message)
