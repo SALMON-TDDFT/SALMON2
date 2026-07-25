@@ -12,6 +12,7 @@ scf_kernel_source = (root / "src/gs/scf_iteration.f90").read_text()
 cg_source = (root / "src/gs/conjugate_gradient.f90").read_text()
 dc_source = (root / "src/gs/dc/dcdft.f90").read_text()
 handoff_source = (root / "src/gs/dc/dg_dc_handoff.f90").read_text()
+buffer_projector_source = (root / "src/common/dg_buffer_window_projector.f90").read_text()
 ground_state_source = (root / "src/gs/dc/dg_dc_ground_state.f90").read_text()
 adapter_source = (root / "src/gs/dc/dg_dc_ground_state_adapter.f90").read_text()
 cmake_source = (root / "src/gs/dc/CMakeLists.txt").read_text()
@@ -34,6 +35,19 @@ for name in controls.keys() - {"yn_dg_dc_local_periodic"}:
     assert re.search(rf"{name}\s*(<=|<)\s*", input_source, re.I), f"{name} must be validated even disabled"
 
 assert "dg_dc_handoff.f90" in cmake_source
+assert "dg_buffer_window_projector.f90" in (root / "src/common/CMakeLists.txt").read_text()
+assert "occupation" not in buffer_projector_source.lower(), \
+    "the full configured window projector must not apply occupation weighting"
+for projector_contract in [
+    "S_dg_buffer_projector_diagnostics",
+    "build_dg_buffer_window_projector",
+    "retained_rank",
+    "minimum_retained_singular_value",
+    "projection_residual",
+    "escape_norm",
+]:
+    assert projector_contract.lower() in buffer_projector_source.lower(), \
+        f"buffer-window projector is missing {projector_contract}"
 assert re.search(r"call\s+evaluate_dg_dc_handoff", scf_source, re.I)
 handoff_accept = re.search(
     r"if\s*\(\s*dg_handoff_accept\s*\)\s*then(.*?)exit\s+DFT_Iteration",
