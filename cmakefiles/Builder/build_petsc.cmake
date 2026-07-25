@@ -81,12 +81,21 @@ if (SALMON_LAPACK_BUILD_TARGET)
   list(APPEND _petsc_dependencies ${SALMON_LAPACK_BUILD_TARGET})
 endif ()
 
+set(_petsc_patch_command)
+if (IS_FUJITSU_COMPILER)
+  set(_petsc_patch_command
+      ${CMAKE_COMMAND}
+      "-DPETSC_SOURCE_DIR=<SOURCE_DIR>"
+      -P "${CMAKE_SOURCE_DIR}/cmakefiles/Builder/patch_petsc_fujitsu.cmake")
+endif ()
+
 message(STATUS "Build PETSc version ${PETSC_VERSION}")
 ExternalProject_Add(petsc-project
   URL               "https://web.cels.anl.gov/projects/petsc/download/release-snapshots/petsc-${PETSC_VERSION}.tar.gz"
   URL_HASH          SHA256=95ce60df2c7f9c5044d6a544c41e996a512557f91df1a60bdb690b332904ebb5
   PREFIX            "${CMAKE_BINARY_DIR}/petsc"
   BUILD_IN_SOURCE   on
+  PATCH_COMMAND     ${_petsc_patch_command}
   CONFIGURE_COMMAND <SOURCE_DIR>/configure
                     "--prefix=${SALMON_PETSC_PREFIX}"
                     "--with-cc=${CMAKE_C_COMPILER}"
