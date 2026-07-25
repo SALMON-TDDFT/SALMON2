@@ -44,6 +44,7 @@ module dg_dc_local_basis_ground_state
   public :: pack_dg_dc_local_basis_face_trace
   public :: accumulate_dg_dc_local_basis_interface_rows
   public :: build_dg_dc_six_face_neighbors
+  public :: diagnose_dg_dc_six_face_balance
   public :: assemble_dg_dc_local_basis_interface_rows
   public :: compose_dg_dc_local_basis_pair_hamiltonian
   public :: solve_dg_dc_local_basis_bands_reference
@@ -54,12 +55,141 @@ module dg_dc_local_basis_ground_state
   public :: assign_dg_dc_local_basis_occupations
   public :: reconstruct_dg_dc_local_basis_density
   public :: validate_dg_dc_local_basis_density
+  public :: diagnose_dg_dc_local_basis_continuation
   public :: orthonormalize_dg_dc_fragment_core_basis
   public :: transform_dg_dc_fragment_buffer_basis
   public :: project_dg_dc_local_basis_volume
   public :: compose_dg_dc_distributed_hamiltonian_rows
 
 contains
+
+  subroutine diagnose_dg_dc_local_basis_continuation(layout,hamiltonian_rows,coefficient_rows, &
+      reference_coefficient_rows,occupations,communicator,projector_overlap,orthogonality_defect, &
+      hermiticity_defect,ok,message)
+    type(s_dg_dc_local_basis_layout), intent(in) :: layout
+    complex(8), intent(in) :: hamiltonian_rows(:,:),coefficient_rows(:,:),reference_coefficient_rows(:,:)
+    real(8), intent(in) :: occupations(:)
+    integer, intent(in) :: communicator
+    real(8), intent(out) :: projector_overlap,orthogonality_defect,hermiticity_defect
+    logical, intent(out) :: ok
+    character(*), intent(out) :: message
+    complex(8), allocatable :: send_buffer(:),receive_buffer(:),local_gram(:,:),global_gram(:,:), &
+      local_overlap(:,:),global_overlap(:,:)
+    integer, allocatable :: send_counts(:),receive_counts(:),send_displacements(:),receive_displacements(:), &
+      occupied_indices(:)
+    integer :: nproc,column,noccupied,info,allocation_status,peer,first,last,offset,peer_count
+    real(8) :: local_scale,global_scale,local_hermiticity,global_hermiticity
+
+    projector_overlap=0d0;orthogonality_defect=huge(1d0);hermiticity_defect=huge(1d0)
+    nproc=size(layout%fragment_ids)
+    allocate(send_counts(nproc),receive_counts(nproc),send_displacements(nproc),receive_displacements(nproc), &
+      stat=allocation_status)
+    ok=allocation_status==0
+    if(ok) then
+      ok=all(shape(hamiltonian_rows)==[layout%local_basis_count,layout%global_basis_count]) .and. &
+        all(shape(coefficient_rows)==[layout%local_basis_count,layout%global_band_count]) .and. &
+        all(shape(reference_coefficient_rows)==shape(coefficient_rows)) .and. &
+        size(occupations)==layout%global_band_count .and. all(occupations>=0d0)
+    end if
+    call collective_logical_and(ok,communicator,ok)
+    if(.not.ok) then
+      message='DG DC local basis: invalid continuation diagnostic layout'; return
+    end if
+    offset=0
+    do peer=1,nproc
+      peer_count=layout%basis_offsets(peer)-layout%basis_offsets(peer-1)
+      send_counts(peer)=layout%local_basis_count*peer_count
+      receive_counts(peer)=send_counts(peer)
+      send_displacements(peer)=offset
+      receive_displacements(peer)=offset
+      offset=offset+send_counts(peer)
+    end do
+    allocate(send_buffer(offset),receive_buffer(offset), &
+      local_gram(layout%global_band_count,layout%global_band_count), &
+      global_gram(layout%global_band_count,layout%global_band_count), &
+      local_overlap(layout%global_band_count,layout%global_band_count), &
+      global_overlap(layout%global_band_count,layout%global_band_count),stat=allocation_status)
+    call collective_logical_and(allocation_status==0,communicator,ok)
+    if(.not.ok) then
+      message='DG DC local basis: continuation diagnostic allocation failed'; return
+    end if
+    do peer=1,nproc
+      first=layout%basis_offsets(peer-1)+1
+      last=layout%basis_offsets(peer)
+      offset=send_displacements(peer)
+      send_buffer(offset+1:offset+send_counts(peer))=reshape(hamiltonian_rows(:,first:last),[send_counts(peer)])
+    end do
+#ifdef USE_MPI
+    call MPI_Alltoallv(send_buffer,send_counts,send_displacements,MPI_DOUBLE_COMPLEX,receive_buffer, &
+      receive_counts,receive_displacements,MPI_DOUBLE_COMPLEX,communicator,info)
+#else
+    receive_buffer=send_buffer
+    info=merge(0,1,communicator>=0)
+#endif
+    call collective_logical_and(info==0,communicator,ok)
+    if(.not.ok) then
+      message='DG DC local basis: distributed Hermiticity exchange failed'; return
+    end if
+    local_scale=max(1d0,maxval(abs(hamiltonian_rows)))
+    local_hermiticity=0d0
+    do peer=1,nproc
+      first=layout%basis_offsets(peer-1)+1
+      last=layout%basis_offsets(peer)
+      peer_count=last-first+1
+      offset=receive_displacements(peer)
+      local_hermiticity=max(local_hermiticity,maxval(abs(hamiltonian_rows(:,first:last)- &
+        conjg(transpose(reshape(receive_buffer(offset+1:offset+receive_counts(peer)), &
+        [peer_count,layout%local_basis_count]))))))
+    end do
+    local_gram=matmul(conjg(transpose(coefficient_rows)),coefficient_rows)
+    local_overlap=matmul(conjg(transpose(reference_coefficient_rows)),coefficient_rows)
+#ifdef USE_MPI
+    call MPI_Allreduce(local_scale,global_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,communicator,info)
+    call collective_logical_and(info==MPI_SUCCESS,communicator,ok)
+    if(ok) call MPI_Allreduce(local_hermiticity,global_hermiticity,1,MPI_DOUBLE_PRECISION, &
+      MPI_MAX,communicator,info)
+    call collective_logical_and(ok .and. info==MPI_SUCCESS,communicator,ok)
+    if(ok) call MPI_Allreduce(local_gram,global_gram,size(local_gram),MPI_DOUBLE_COMPLEX, &
+      MPI_SUM,communicator,info)
+    call collective_logical_and(ok .and. info==MPI_SUCCESS,communicator,ok)
+    if(ok) call MPI_Allreduce(local_overlap,global_overlap,size(local_overlap), &
+      MPI_DOUBLE_COMPLEX,MPI_SUM,communicator,info)
+    call collective_logical_and(ok .and. info==MPI_SUCCESS,communicator,ok)
+#else
+    global_scale=local_scale
+    global_hermiticity=local_hermiticity
+    global_gram=local_gram
+    global_overlap=local_overlap
+#endif
+    ok=ok .and. all(ieee_is_finite(real(global_gram,8))) .and. &
+      all(ieee_is_finite(aimag(global_gram))) .and. all(ieee_is_finite(real(global_overlap,8))) .and. &
+      all(ieee_is_finite(aimag(global_overlap)))
+    if(ok) then
+      hermiticity_defect=global_hermiticity/global_scale
+      do column=1,layout%global_band_count
+        global_gram(column,column)=global_gram(column,column)-1d0
+      end do
+      orthogonality_defect=maxval(abs(global_gram))
+      noccupied=count(occupations>0d0)
+      ok=noccupied>0
+    end if
+    if(ok) then
+      allocate(occupied_indices(noccupied),stat=allocation_status)
+      ok=allocation_status==0
+    end if
+    if(ok) then
+      occupied_indices=pack([(column,column=1,layout%global_band_count)],occupations>0d0)
+      projector_overlap=sum(abs(global_overlap(occupied_indices,occupied_indices))**2)/real(noccupied,8)
+      ok=all(ieee_is_finite([projector_overlap,orthogonality_defect,hermiticity_defect])) .and. &
+        projector_overlap>=0d0 .and. projector_overlap<=1d0+1d-10
+    end if
+    call collective_logical_and(ok,communicator,ok)
+    if(ok) then
+      message=''
+    else
+      message='DG DC local basis: invalid continuation diagnostics'
+    end if
+  end subroutine diagnose_dg_dc_local_basis_continuation
 
   subroutine transform_dg_dc_fragment_buffer_basis(raw_basis,basis_transform,effective_basis_count, &
       transformed_basis,ok,message)
@@ -443,6 +573,64 @@ contains
       message='DG DC local basis: missing or ambiguous six-face neighbor'
     end if
   end subroutine build_dg_dc_six_face_neighbors
+
+  subroutine diagnose_dg_dc_six_face_balance(fragment_origins,fragment_sizes,global_size,communicator, &
+      defect,ok,message)
+    integer, intent(in) :: fragment_origins(:,:),fragment_sizes(:,:),global_size(3),communicator
+    real(8), intent(out) :: defect
+    logical, intent(out) :: ok
+    character(*), intent(out) :: message
+    integer :: fragment,axis,side_index,opposite,neighbor,canonical_count,expected_count
+    integer :: neighbors(3,2),shifts(3,2),peer_neighbors(3,2),peer_shifts(3,2)
+    logical :: local_ok,stage_ok
+    real(8) :: local_defect
+
+    local_ok=size(fragment_origins,1)==3 .and. all(shape(fragment_sizes)==shape(fragment_origins)) .and. &
+      size(fragment_origins,2)>0
+    local_defect=0d0
+    canonical_count=0
+    if(local_ok) then
+      do fragment=1,size(fragment_origins,2)
+        call build_dg_dc_six_face_neighbors(fragment,fragment_origins,fragment_sizes,global_size, &
+          neighbors,shifts,stage_ok,message)
+        if(.not.stage_ok) then; local_ok=.false.; exit; end if
+        do axis=1,3
+          do side_index=1,2
+            neighbor=neighbors(axis,side_index)
+            opposite=3-side_index
+            call build_dg_dc_six_face_neighbors(neighbor,fragment_origins,fragment_sizes,global_size, &
+              peer_neighbors,peer_shifts,stage_ok,message)
+            if(.not.stage_ok) then; local_ok=.false.; exit; end if
+            if(peer_neighbors(axis,opposite)/=fragment .or. &
+              peer_shifts(axis,opposite)/=-shifts(axis,side_index)) local_defect=1d0
+            if(fragment<neighbor .or. (fragment==neighbor .and. side_index==2)) &
+              canonical_count=canonical_count+1
+          end do
+          if(.not.local_ok) exit
+        end do
+        if(.not.local_ok) exit
+      end do
+    end if
+    expected_count=3*size(fragment_origins,2)
+    if(canonical_count/=expected_count) local_defect=1d0
+    local_ok=local_ok .and. local_defect==0d0
+    call collective_logical_and(local_ok,communicator,ok)
+#ifdef USE_MPI
+    block
+      integer :: ierr
+      call MPI_Allreduce(local_defect,defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,communicator,ierr)
+      ok=ok .and. ierr==MPI_SUCCESS
+    end block
+#else
+    defect=local_defect
+#endif
+    if(ok) then
+      message=''
+    else
+      defect=huge(1d0)
+      message='DG DC local basis: unbalanced canonical six-face schedule'
+    end if
+  end subroutine diagnose_dg_dc_six_face_balance
 
   subroutine assemble_dg_dc_local_basis_interface_rows(layout,basis,fragment_origins,fragment_sizes, &
       global_size,grid_spacing,penalty_factor,communicator,interface_rows,ok,message)

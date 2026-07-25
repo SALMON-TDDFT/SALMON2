@@ -50,6 +50,8 @@ use dg_dc_local_basis_ground_state, only: s_dg_dc_local_basis_layout, &
   compose_dg_dc_distributed_hamiltonian_rows,initialize_dg_dc_local_basis_coefficients, &
   assign_dg_dc_local_basis_occupations,solve_dg_dc_local_basis_bands_cg, &
   reconstruct_dg_dc_local_basis_density,validate_dg_dc_local_basis_density, &
+  diagnose_dg_dc_local_basis_continuation, &
+  diagnose_dg_dc_six_face_balance, &
   s_dg_dc_local_basis_production_state,dg_dc_local_basis_state
 use dg_ground_state_checkpoint, only: s_dg_ground_state_checkpoint, &
   populate_dg_ground_state_checkpoint,publish_dg_ground_state_checkpoint
@@ -490,14 +492,21 @@ contains
     complex(8), allocatable :: full_raw_basis(:,:),full_fragment_basis(:,:)
     complex(8), allocatable :: basis(:,:,:,:),hbasis(:,:),volume_block(:,:),interface_rows(:,:)
     complex(8), allocatable :: hamiltonian_rows(:,:),overlap_rows(:,:),coefficient_rows(:,:)
+    complex(8), allocatable :: accepted_coefficient_rows(:,:)
     real(8), allocatable :: eigenvalues(:),occupations(:),local_density(:),quadrature_weights(:)
+    real(8), allocatable :: accepted_eigenvalues(:)
     real(8), allocatable :: previous_density(:,:,:,:),trial_density(:,:,:,:),mixed_density(:,:,:,:)
+    real(8), allocatable :: accepted_density(:,:,:,:)
     integer :: core_size(3),npoint,nraw,neffective,ix,iy,iz,io,point,global_row
     integer :: spsi_shape(7),sttpsi_shape(7),shpsi_shape(7)
-    integer :: iteration,local_rank,local_first,allocation_status,full_point_count
+    integer :: iteration,local_rank,local_first,allocation_status,full_point_count,rollback_count
+    integer :: accepted_step_count,stage_iteration
     integer(8) :: iteration_operator_fingerprint
     real(8) :: density_residual_local,density_residual_global,mix_rate
-    logical :: ok
+    real(8) :: accepted_lambda,trial_lambda,lambda_step,previous_stage_residual,stage_residual
+    real(8) :: orbital_tolerance,density_tolerance
+    real(8) :: projector_overlap,orthogonality_defect,hermiticity_defect,face_balance_defect
+    logical :: ok,stage_ok,stage_converged,unmixed_gate,first_stage
     character(256) :: message
 
     ok=system%nspin==1 .and. system%if_real_orbital .and. allocated(spsi%rwf) .and. &
@@ -561,6 +570,9 @@ contains
       dc%lg_tot%num,system%hgs,dg_dc_gs_sipg_penalty_factor,dc%icomm_tot,interface_rows,ok,message)
     call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
     if(.not.dg_handoff_ok) stop 'DG DC local-basis SIPG interface assembly failed collectively'
+    call diagnose_dg_dc_six_face_balance(dc%ixyz_frag,dc%nxyz_domain_frag,dc%lg_tot%num, &
+      dc%icomm_tot,face_balance_defect,ok,message)
+    if(.not.ok) stop 'DG DC local-basis canonical face balance failed collectively'
     allocate(volume_block(neffective,neffective),hamiltonian_rows(neffective,layout%global_basis_count), &
       overlap_rows(neffective,layout%global_basis_count),coefficient_rows(neffective,layout%global_band_count), &
       eigenvalues(layout%global_band_count),occupations(layout%global_band_count),local_density(npoint), &
@@ -584,13 +596,42 @@ contains
     if(.not.dg_handoff_ok) stop 'DG DC local-basis occupation initialization failed collectively'
     allocate(previous_density(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),1), &
       trial_density(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),1), &
-      mixed_density(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),1),stat=allocation_status)
+      mixed_density(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),1), &
+      accepted_density(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),1), &
+      accepted_coefficient_rows(neffective,layout%global_band_count), &
+      accepted_eigenvalues(layout%global_band_count),stat=allocation_status)
     ok=allocation_status==0
     call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
     if(.not.dg_handoff_ok) stop 'DG DC local-basis density allocation failed collectively'
     previous_density(:,:,:,1)=dc%rho_tot_s(1)%f
+    accepted_density=previous_density
+    accepted_coefficient_rows=coefficient_rows
+    accepted_eigenvalues=0d0
     mix_rate=dg_dc_gs_density_mix_rate
-    do iteration=1,dg_dc_gs_maximum_scf_iterations
+    accepted_lambda=0d0
+    lambda_step=dg_dc_gs_initial_lambda_step
+    rollback_count=0
+    accepted_step_count=0
+    iteration=0
+    first_stage=.true.
+    unmixed_gate=.false.
+Continuation_Stages: do
+      if(unmixed_gate) then
+        trial_lambda=dg_dc_gs_target_lambda
+      else if(first_stage) then
+        trial_lambda=0d0
+      else
+        trial_lambda=min(dg_dc_gs_target_lambda,accepted_lambda+lambda_step)
+      end if
+      orbital_tolerance=merge(dg_dc_gs_final_orbital_tolerance, &
+        dg_dc_gs_intermediate_orbital_tolerance,trial_lambda==dg_dc_gs_target_lambda)
+      density_tolerance=merge(dg_dc_gs_final_density_tolerance, &
+        dg_dc_gs_intermediate_density_tolerance,trial_lambda==dg_dc_gs_target_lambda)
+      stage_converged=.false.
+      stage_ok=.true.
+      previous_stage_residual=huge(1d0)
+      do stage_iteration=1,merge(1,dg_dc_gs_maximum_scf_iterations,unmixed_gate)
+      iteration=iteration+1
       iteration_operator_fingerprint=dg_dc_operator_fingerprint()
       sttpsi%rwf=0d0
       do io=1,neffective
@@ -612,24 +653,35 @@ contains
         volume_block,ok,message)
       deallocate(hbasis)
       call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
-      if(.not.dg_handoff_ok) stop 'DG DC local-basis DC volume projection failed collectively'
+      if(.not.dg_handoff_ok) then; stage_ok=.false.; exit; end if
       call compose_dg_dc_distributed_hamiltonian_rows(layout,volume_block,interface_rows, &
-        dg_dc_gs_target_lambda, &
+        trial_lambda, &
         hamiltonian_rows,ok,message)
       call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
-      if(.not.dg_handoff_ok) stop 'DG DC local-basis Hamiltonian row composition failed collectively'
+      if(.not.dg_handoff_ok) then; stage_ok=.false.; exit; end if
       call solve_dg_dc_local_basis_bands_cg(layout,hamiltonian_rows,overlap_rows,dc%icomm_tot, &
-        dg_dc_gs_maximum_eigensolver_iterations,dg_dc_gs_final_orbital_tolerance, &
+        dg_dc_gs_maximum_eigensolver_iterations,orbital_tolerance, &
         coefficient_rows,eigenvalues,ok,message)
       call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
-      if(.not.dg_handoff_ok) stop 'DG DC local-basis coefficient CG failed collectively'
+      if(.not.dg_handoff_ok) then; stage_ok=.false.; exit; end if
+      call diagnose_dg_dc_local_basis_continuation(layout,hamiltonian_rows,coefficient_rows, &
+        accepted_coefficient_rows,occupations,dc%icomm_tot,projector_overlap,orthogonality_defect, &
+        hermiticity_defect,ok,message)
+      ok=ok .and. projector_overlap>=dg_dc_gs_minimum_projector_overlap .and. &
+        orthogonality_defect<=dg_dc_gs_orthogonality_tolerance .and. &
+        hermiticity_defect<=dg_dc_gs_hermiticity_tolerance .and. &
+        face_balance_defect<=dg_dc_gs_face_balance_tolerance .and. &
+        layout%geometry_fingerprint==dg_dc_geometry_fingerprint() .and. &
+        iteration_operator_fingerprint==dg_dc_operator_fingerprint()
+      call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+      if(.not.dg_handoff_ok) then; stage_ok=.false.; exit; end if
       call reconstruct_dg_dc_local_basis_density(orthonormal_basis(:,1:neffective),coefficient_rows, &
         occupations,local_density,ok,message)
       call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
-      if(.not.dg_handoff_ok) stop 'DG DC local-basis density reconstruction failed collectively'
+      if(.not.dg_handoff_ok) then; stage_ok=.false.; exit; end if
       call validate_dg_dc_local_basis_density(occupations,2d0,dc%elec_num_tot,local_density, &
         quadrature_weights,dc%icomm_tot,ok,message)
-      if(.not.ok) stop 'DG DC local-basis density charge validation failed collectively'
+      if(.not.ok) then; stage_ok=.false.; exit; end if
       rho_s(1)%f=0d0
       point=0
       do iz=1,core_size(3); do iy=1,core_size(2); do ix=1,core_size(1)
@@ -642,15 +694,63 @@ contains
         dc%system_tot%hvol/real(dc%isize_tot,8)
       call comm_summation(density_residual_local,density_residual_global,dc%icomm_tot)
       density_residual_global=sqrt(max(0d0,density_residual_global))
-      mixed_density=(1d0-mix_rate)*previous_density+mix_rate*trial_density
+      if(unmixed_gate) then
+        mixed_density=trial_density
+      else
+        mixed_density=(1d0-mix_rate)*previous_density+mix_rate*trial_density
+      end if
       previous_density=mixed_density
       call dg_dc_update_potential_from_density(previous_density,ok,message)
       call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
-      if(.not.dg_handoff_ok) stop 'DG DC local-basis Hartree/XC/vlocal update failed collectively'
-      if(density_residual_global<=dg_dc_gs_final_density_tolerance) exit
-    end do
-    if(iteration>dg_dc_gs_maximum_scf_iterations) &
-      stop 'DG DC local-basis SCF did not converge'
+      if(.not.dg_handoff_ok) then; stage_ok=.false.; exit; end if
+      stage_residual=density_residual_global
+      if(stage_iteration>1 .and. stage_residual>dg_dc_gs_allowed_residual_growth* &
+        max(previous_stage_residual,epsilon(1d0))) then
+        stage_ok=.false.; exit
+      end if
+      previous_stage_residual=stage_residual
+      if(density_residual_global<=density_tolerance) then
+        stage_converged=.true.; exit
+      end if
+      end do
+      if(unmixed_gate) then
+        if(.not.stage_ok .or. .not.stage_converged) then
+          coefficient_rows=accepted_coefficient_rows
+          eigenvalues=accepted_eigenvalues
+          previous_density=accepted_density
+          call dg_dc_update_potential_from_density(previous_density,ok,message)
+          call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+          if(.not.dg_handoff_ok) stop 'DG DC local-basis unmixed rollback potential restore failed'
+          stop 'DG DC local-basis unmixed fixed-point gate failed'
+        end if
+        exit Continuation_Stages
+      end if
+      if(.not.stage_ok .or. .not.stage_converged) then
+        coefficient_rows=accepted_coefficient_rows
+        eigenvalues=accepted_eigenvalues
+        previous_density=accepted_density
+        call dg_dc_update_potential_from_density(previous_density,ok,message)
+        call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
+        if(.not.dg_handoff_ok) stop 'DG DC local-basis rollback potential restore failed collectively'
+        rollback_count=rollback_count+1
+        lambda_step=0.5d0*lambda_step
+        if(first_stage .or. rollback_count>dg_dc_gs_maximum_rollbacks .or. &
+          lambda_step<dg_dc_gs_minimum_lambda_step) &
+          stop 'DG DC local-basis continuation rollback limit reached'
+        cycle Continuation_Stages
+      end if
+      accepted_lambda=trial_lambda
+      accepted_coefficient_rows=coefficient_rows
+      accepted_eigenvalues=eigenvalues
+      accepted_density=previous_density
+      accepted_step_count=accepted_step_count+1
+      first_stage=.false.
+      if(accepted_lambda==dg_dc_gs_target_lambda) then
+        unmixed_gate=.true.
+      else
+        lambda_step=min(dg_dc_gs_maximum_lambda_step,1.5d0*lambda_step)
+      end if
+    end do Continuation_Stages
     if(comm_is_root(nproc_id_global)) write(*,'(a,i0,2(a,es24.16))') &
       '[DG-DC-LOCAL-BASIS] converged iterations=',iteration,' density_residual=',density_residual_global, &
       ' lambda=',dg_dc_gs_target_lambda
@@ -1149,10 +1249,10 @@ contains
     do is=1,system%nspin
       dg_gs_raw_density(:,:,:,is)=dc%rho_tot_s(is)%f
     end do
-    local_norm=sum((dg_gs_raw_density-density_arg)**2)
+    local_norm=sum((dg_gs_raw_density-density_arg)**2)/real(dc%isize_tot,8)
     call comm_summation(local_norm,global_norm,dc%icomm_tot)
     density_residual=sqrt(global_norm*dc%system_tot%hvol)
-    local_charge=sum(dg_gs_raw_density)*dc%system_tot%hvol
+    local_charge=sum(dg_gs_raw_density)*dc%system_tot%hvol/real(dc%isize_tot,8)
     call comm_summation(local_charge,electron_number,dc%icomm_tot)
     call mix_dg_dc_density_transaction(density_arg,dg_gs_raw_density,density_mix,unmixed, &
       dg_gs_mixed_density,ok,message)

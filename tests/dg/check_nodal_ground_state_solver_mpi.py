@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, shutil, subprocess, tempfile
+import os, shutil, subprocess, sys, tempfile
 from pathlib import Path
 root=Path(__file__).resolve().parents[2]
 sources=[root/'src/common/dg_nodal_state.f90',root/'src/common/dg_nodal_interfaces.f90',
@@ -12,6 +12,13 @@ assert 'subroutine relax_nodal_dg_ground_state_mpi' in body
 assert 'call exchange_nodal_face_halos' in body
 assert 'hpsi(:,:,:,istate,ispin) - eigenvalues(istate,ispin)' in body
 assert 'call orthonormalize_nodal_states_mpi' in body
+orthonormalize = body.split('subroutine orthonormalize_nodal_states_mpi', 1)[1].split(
+ 'end subroutine orthonormalize_nodal_states_mpi', 1
+)[0]
+assert "call zgemm('C','N'" in orthonormalize
+assert "call zpotrf('U'" in orthonormalize
+assert "call ztrsm('R','U','N','N'" in orthonormalize
+assert 'do jstate = 1, istate - 1' not in orthonormalize
 assert 'call verify_nodal_dg_eigenstate_mpi' in body
 driver=r"""
 program check_nodal_gs
@@ -45,7 +52,9 @@ fc=shutil.which('mpifort'); run=shutil.which('mpiexec'); assert fc and run
 with tempfile.TemporaryDirectory() as tmp:
  tmp=Path(tmp); src=tmp/'check.f90'; src.write_text(driver); exe=tmp/'check'
  (tmp/'config.h').write_text('')
- subprocess.run([fc,'-cpp','-DUSE_MPI','-I',str(tmp),*map(str,sources),str(src),'-o',str(exe)],check=True,cwd=tmp)
+ linear_algebra=['-framework','Accelerate'] if sys.platform=='darwin' else ['-llapack','-lblas']
+ subprocess.run([fc,'-cpp','-DUSE_MPI','-I',str(tmp),*map(str,sources),str(src),
+                 *linear_algebra,'-o',str(exe)],check=True,cwd=tmp)
  env=os.environ.copy(); env.setdefault('OMPI_MCA_rmaps_base_oversubscribe','1')
  out=subprocess.run([run,'-n','2',str(exe)],check=True,text=True,capture_output=True,env=env).stdout
  assert 'PASS nodal matrix-free GS' in out

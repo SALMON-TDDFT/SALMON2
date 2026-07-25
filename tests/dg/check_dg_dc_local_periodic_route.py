@@ -62,9 +62,9 @@ for token in [
     "DG_DC_ACCEPTED",
     "DG_DC_FAILED",
     "lambda_step=0.5d0*lambda_step",
-    "accepted_state=state",
+    "allocate(accepted_state,source=state",
     "accepted_density=density",
-    "state=accepted_state",
+    "restore_nodal_state(state,accepted_state)",
     "density=accepted_density",
 ]:
     assert token.replace(" ", "").lower() in ground_state_source.replace(" ", "").lower(), token
@@ -137,6 +137,21 @@ for persisted_field in ["full_fragment_basis", "basis_transform", "basis_offsets
 assert re.search(r"iteration_operator_fingerprint\s*=\s*dg_dc_operator_fingerprint\s*\(\s*\)",
                  local_basis_driver.group(1), re.I), \
     "persisted state must identify the Hamiltonian used by the final coefficient solve"
+for continuation_control in [
+    "dg_dc_gs_initial_lambda_step",
+    "dg_dc_gs_minimum_lambda_step",
+    "dg_dc_gs_maximum_lambda_step",
+    "dg_dc_gs_allowed_residual_growth",
+    "dg_dc_gs_maximum_rollbacks",
+]:
+    assert continuation_control in local_basis_driver.group(1), \
+        f"production local-basis continuation must use {continuation_control}"
+assert re.search(r"trial_lambda", local_basis_driver.group(1), re.I), \
+    "production local-basis Hamiltonian must use a variable continuation scale"
+assert re.search(r"rollback", local_basis_driver.group(1), re.I), \
+    "production local-basis continuation must rollback rejected trials"
+assert re.search(r"unmixed", local_basis_driver.group(1), re.I), \
+    "production local-basis route must perform an unmixed fixed-point gate"
 assert re.search(r"yn_dg_dc_local_periodic\s*/=\s*'y'.*?checkpoint_gs",
                  main_source, re.I | re.S), \
     "pre-DG structure checkpoints must be disabled for the opt-in route"

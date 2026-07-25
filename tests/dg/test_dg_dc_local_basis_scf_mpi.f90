@@ -11,6 +11,7 @@ program test_dg_dc_local_basis_scf_mpi
   complex(8) :: full_raw_basis(5,2),full_transformed_basis(5,2)
   complex(8) :: projected_volume(2,2),volume_basis(3,2),volume_hbasis(3,2)
   real(8) :: eigenvalues(2),occupations(2),density(2),expected_density(2)
+  real(8) :: projector_overlap,orthogonality_defect,hermiticity_defect
   complex(8) :: residual(3,2),metric(2,2)
   integer :: ierr,rank,nproc,first,last,i,effective_basis_count
   logical :: ok
@@ -140,6 +141,10 @@ program test_dg_dc_local_basis_scf_mpi
   call solve_dg_dc_local_basis_bands_cg(layout,h_rows,s_rows,MPI_COMM_WORLD,80,1d-11, &
     coefficient_rows,eigenvalues,ok,message)
   call require(ok,'distributed coefficient CG solve')
+  call diagnose_dg_dc_local_basis_continuation(layout,h_rows,coefficient_rows,coefficient_rows, &
+    occupations,MPI_COMM_WORLD,projector_overlap,orthogonality_defect,hermiticity_defect,ok,message)
+  call require(ok .and. projector_overlap>1d0-1d-12 .and. orthogonality_defect<1d-10 .and. &
+    hermiticity_defect<1d-12,'continuation diagnostics accept the same occupied projector')
   call gather_coefficients(coefficient_rows,distributed_coefficients)
   residual=matmul(hamiltonian,distributed_coefficients)- &
     matmul(overlap,distributed_coefficients)*spread(cmplx(eigenvalues,0d0,8),1,3)

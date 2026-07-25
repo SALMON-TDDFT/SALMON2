@@ -7,15 +7,20 @@ assert source.exists(), 'missing nodal callback CG eigensolver'
 body = source.read_text()
 assert 'subroutine solve_nodal_ground_state_cg_mpi' in body
 assert 'procedure(nodal_hamiltonian_action) :: apply_hamiltonian' in body
+assert 'logical, intent(in), optional :: require_convergence' in body
+assert 'must_converge=.' in body
 assert 'search_direction' in body
 assert 'previous_residual_norm' in body
 assert 'call zhegv' in body
+assert 'call project_search_outside_occupied' not in body
+assert 'hpsi(:,:,:,istate,ispin)=h2(1,1)*hpsi(:,:,:,istate,ispin)' in body
 assert 'call orthonormalize_nodal_states_mpi' in body
 assert 'call rotate_subspace(state,hpsi,eigenvalues,communicator)' in body
-assert 'max_residual <= tolerance .and. mod(iteration-1,cg_block_length) == 0' in body
-accepted = body.split('niteration=iteration', 1)[1].split('deallocate(', 1)[0]
-assert 'orthonormalize_nodal_states_mpi' not in accepted
-assert 'apply_hamiltonian' not in accepted
+assert 'if(must_converge) stop' in body
+accepted = body.split('niteration=min(iteration,max_iteration)', 1)[1].split('deallocate(', 1)[0]
+assert accepted.index('orthonormalize_nodal_states_mpi') < accepted.index('apply_hamiltonian')
+assert accepted.index('apply_hamiltonian') < accepted.index('rotate_subspace')
+assert accepted.index('rotate_subspace') < accepted.index('build_residuals')
 
 wrapper = (root / 'src/rt/dg/rt_dg_nodal_salmon_ground_state.f90').read_text()
 assert 'use rt_dg_nodal_cg' in wrapper

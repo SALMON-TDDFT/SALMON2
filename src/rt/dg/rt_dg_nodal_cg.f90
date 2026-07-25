@@ -23,7 +23,7 @@ contains
 
   subroutine solve_nodal_ground_state_cg_mpi(state,apply_hamiltonian,max_iteration,tolerance, &
                                                communicator,eigenvalues,max_residual,niteration, &
-                                               rotate_subspace)
+                                               rotate_subspace,require_convergence)
     type(s_dg_nodal_state), intent(inout) :: state
     procedure(nodal_hamiltonian_action) :: apply_hamiltonian
     integer, intent(in) :: max_iteration, communicator
@@ -31,7 +31,7 @@ contains
     real(8), intent(out) :: eigenvalues(state%nstate,state%nspin),max_residual
     integer, intent(out) :: niteration
     procedure(nodal_subspace_rotation) :: rotate_subspace
-    integer, parameter :: cg_block_length=4
+    logical, intent(in), optional :: require_convergence
     complex(8), allocatable :: hpsi(:,:,:,:,:),residual(:,:,:,:,:),search_direction(:,:,:,:,:)
     complex(8), allocatable :: hsearch(:,:,:,:,:),psi_saved(:,:,:,:,:)
     real(8), allocatable :: residual_norm(:,:),previous_residual_norm(:,:)
@@ -39,8 +39,11 @@ contains
     real(8) :: eval2(2),rwork(9),beta,pnorm_local,pnorm_global
     complex(8) :: overlap_local,overlap_global
     integer :: iteration,istate,ispin,ierr,myrank
+    logical :: must_converge
 
     if (max_iteration < 1 .or. tolerance <= 0.0d0) stop 'nodal DG: invalid CG eigensolver control'
+    must_converge=.true.
+    if(present(require_convergence)) must_converge=require_convergence
     state%ground_state_ready=.false.
     allocate(hpsi,mold=state%psi_core)
     allocate(residual,mold=state%psi_core)
@@ -57,21 +60,17 @@ contains
     if (ierr /= MPI_SUCCESS) stop 'nodal DG: CG rank query failed'
 #endif
     call orthonormalize_nodal_states_mpi(state,communicator)
+    call apply_hamiltonian(state,hpsi)
+    call rotate_subspace(state,hpsi,eigenvalues,communicator)
 
     do iteration=1,max_iteration
-      call apply_hamiltonian(state,hpsi)
-      if (iteration == 1 .or. mod(iteration-1,cg_block_length) == 0) then
-        call rotate_subspace(state,hpsi,eigenvalues,communicator)
-        search_direction=(0.0d0,0.0d0)
-        previous_residual_norm=0.0d0
-      end if
       call build_residuals(state,hpsi,eigenvalues,residual,residual_norm,max_residual,communicator)
       if (myrank == 0 .and. (iteration == 1 .or. mod(iteration,10) == 0 .or. max_residual <= tolerance)) then
         write(*,'(1x,a,i0,3(a,1pe13.5))') '[DG-NODAL-CG-ITER] iter=',iteration, &
           ' residual=',max_residual,' eigen_min=',minval(eigenvalues),' eigen_max=',maxval(eigenvalues)
         flush(6)
       end if
-      if (max_residual <= tolerance .and. mod(iteration-1,cg_block_length) == 0) exit
+      if (max_residual <= tolerance) exit
 
       do ispin=1,state%nspin
         do istate=1,state%nstate
@@ -84,7 +83,6 @@ contains
             beta*search_direction(:,:,:,istate,ispin)
         end do
       end do
-      call project_search_outside_occupied(state,search_direction,communicator)
       previous_residual_norm=residual_norm
 
       do ispin=1,state%nspin
@@ -121,14 +119,22 @@ contains
           h2(:,1)=h2(:,1)*phase
           state%psi_core(:,:,:,istate,ispin)=h2(1,1)*state%psi_core(:,:,:,istate,ispin)+ &
             h2(2,1)*search_direction(:,:,:,istate,ispin)
+          hpsi(:,:,:,istate,ispin)=h2(1,1)*hpsi(:,:,:,istate,ispin)+ &
+            h2(2,1)*hsearch(:,:,:,istate,ispin)
           eigenvalues(istate,ispin)=eval2(1)
         end do
       end do
-      if (mod(iteration,cg_block_length) == 0) call orthonormalize_nodal_states_mpi(state,communicator)
     end do
-    niteration=iteration
-    if (max_residual > tolerance) stop 'nodal DG: callback CG eigensolver did not converge'
-    call accept_nodal_dg_ground_state(state,max_residual,tolerance)
+    niteration=min(iteration,max_iteration)
+    call orthonormalize_nodal_states_mpi(state,communicator)
+    call apply_hamiltonian(state,hpsi)
+    call rotate_subspace(state,hpsi,eigenvalues,communicator)
+    call build_residuals(state,hpsi,eigenvalues,residual,residual_norm,max_residual,communicator)
+    if(max_residual>tolerance) then
+      if(must_converge) stop 'nodal DG: callback CG eigensolver did not converge'
+    else
+      call accept_nodal_dg_ground_state(state,max_residual,tolerance)
+    end if
     deallocate(hpsi,residual,search_direction,hsearch,psi_saved,residual_norm,previous_residual_norm)
   end subroutine solve_nodal_ground_state_cg_mpi
 
@@ -156,26 +162,6 @@ contains
     end do; end do
   end subroutine build_residuals
 
-  subroutine project_search_outside_occupied(state,search_direction,communicator)
-    type(s_dg_nodal_state), intent(in) :: state
-    complex(8), intent(inout) :: search_direction(:,:,:,:,:)
-    integer, intent(in) :: communicator
-    complex(8), allocatable :: local_overlap(:,:),global_overlap(:,:)
-    integer :: i,j,ispin
-    allocate(local_overlap(state%nstate,state%nstate),global_overlap(state%nstate,state%nstate))
-    do ispin=1,state%nspin
-      do j=1,state%nstate; do i=1,state%nstate
-        local_overlap(i,j)=sum(conjg(state%psi_core(:,:,:,i,ispin))*search_direction(:,:,:,j,ispin))
-      end do; end do
-      call global_complex_array_sum(local_overlap,global_overlap,communicator)
-      do j=1,state%nstate; do i=1,state%nstate
-        search_direction(:,:,:,j,ispin)=search_direction(:,:,:,j,ispin)- &
-          global_overlap(i,j)*state%psi_core(:,:,:,i,ispin)
-      end do; end do
-    end do
-    deallocate(local_overlap,global_overlap)
-  end subroutine project_search_outside_occupied
-
   subroutine global_real_sum(local_value,global_value,communicator)
     real(8), intent(in) :: local_value
     real(8), intent(out) :: global_value
@@ -201,18 +187,5 @@ contains
     global_value=local_value
 #endif
   end subroutine global_complex_sum
-
-  subroutine global_complex_array_sum(local_value,global_value,communicator)
-    complex(8), intent(in) :: local_value(:,:)
-    complex(8), intent(out) :: global_value(:,:)
-    integer, intent(in) :: communicator
-#ifdef USE_MPI
-    integer :: ierr
-    call MPI_Allreduce(local_value,global_value,size(local_value),MPI_DOUBLE_COMPLEX,MPI_SUM,communicator,ierr)
-    if (ierr /= MPI_SUCCESS) stop 'nodal DG: CG array reduction failed'
-#else
-    global_value=local_value
-#endif
-  end subroutine global_complex_array_sum
 
 end module rt_dg_nodal_cg

@@ -91,6 +91,13 @@ program test_dg_dc_ground_state_mpi
   call run_dg_dc_ground_state(nodal,density,controls,toy_step,MPI_COMM_WORLD,result,ok,message)
   call require(.not.ok,'rank-local callback failure propagates collectively')
 
+  call reset_fixture(nodal,density)
+  mode=7
+  forced_failure_count=0
+  call run_dg_dc_ground_state(nodal,density,controls,toy_step,MPI_COMM_WORLD,result,ok,message)
+  call require(ok .and. result%accepted .and. result%nrollbacks==0, &
+    'fixed inexact orbital sweeps converge through outer SCF')
+
   if(rank==0) print '(a)','PASS adaptive self-consistent DG continuation'
   call MPI_Finalize(ierr)
 
@@ -146,6 +153,10 @@ contains
     if(mode==5 .and. rank==1 .and. lambda>0d0) &
       diagnostics%orbital_residual=ieee_value(0d0,ieee_quiet_nan)
     if(mode==6 .and. rank==1 .and. lambda>0d0) step_ok=.false.
+    if(mode==7 .and. .not.unmixed .and. forced_failure_count<3) then
+      diagnostics%eigensolver_converged=.false.
+      forced_failure_count=forced_failure_count+1
+    end if
     if(.not.(mode==6 .and. rank==1 .and. lambda>0d0)) step_ok=.true.
     step_message=''
   end subroutine toy_step

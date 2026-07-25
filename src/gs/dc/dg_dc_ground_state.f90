@@ -101,12 +101,12 @@ contains
     type(s_dg_dc_gs_result), intent(out) :: result
     logical, intent(out) :: ok
     character(*), intent(out) :: message
-    type(s_dg_nodal_common_state) :: accepted_state
+    type(s_dg_nodal_common_state), allocatable :: accepted_state,candidate_state
     real(8), allocatable :: accepted_density(:,:,:,:)
     type(s_dg_dc_gs_diagnostics) :: diagnostics
     real(8) :: lambda,trial_lambda,lambda_step,iteration_residual,previous_iteration_residual
     integer(8) :: geometry_fingerprint,operator_fingerprint
-    integer :: max_history,scf_iteration
+    integer :: max_history,scf_iteration,allocation_status
     logical :: stage_ok,converged,at_final,callback_ok,validation_ok,growth_ok,local_converged
 
     call validate_controls(controls,communicator,ok,message)
@@ -114,12 +114,22 @@ contains
       result%phase=DG_DC_FAILED; result%failed=.true.; return
     end if
     max_history=controls%maximum_rollbacks+ceiling(1d0/controls%minimum_lambda_step)+4
-    allocate(result%lambda_history(max_history),result%lambda_steps(max_history))
+    allocate(result%lambda_history(max_history),result%lambda_steps(max_history),stat=allocation_status)
+    call collective_and(allocation_status==0,communicator,stage_ok)
+    if(.not.stage_ok) then
+      result%phase=DG_DC_FAILED;result%failed=.true.;ok=.false.
+      message='DG DC GS: continuation history allocation failed collectively';return
+    end if
     result%lambda_history=0d0; result%lambda_steps=0d0
     geometry_fingerprint=state%geometry_fingerprint
     operator_fingerprint=state%operator_fingerprint
-    accepted_state=state
-    allocate(accepted_density,source=density)
+    allocate(accepted_state,source=state,stat=allocation_status)
+    if(allocation_status==0) allocate(accepted_density,source=density,stat=allocation_status)
+    call collective_and(allocation_status==0,communicator,stage_ok)
+    if(.not.stage_ok) then
+      result%phase=DG_DC_FAILED;result%failed=.true.;ok=.false.
+      message='DG DC GS: continuation snapshot allocation failed collectively';return
+    end if
     lambda=0d0
     lambda_step=controls%initial_lambda_step
 
@@ -168,7 +178,7 @@ contains
       end do
 
       if(.not.stage_ok .or. .not.converged) then
-        state=accepted_state
+        call restore_nodal_state(state,accepted_state)
         density=accepted_density
         result%nrollbacks=result%nrollbacks+1
         lambda_step=0.5d0*lambda_step
@@ -182,7 +192,14 @@ contains
       end if
 
       lambda=trial_lambda
-      accepted_state=state
+      allocate(candidate_state,source=state,stat=allocation_status)
+      call collective_and(allocation_status==0,communicator,stage_ok)
+      if(.not.stage_ok) then
+        call restore_nodal_state(state,accepted_state);density=accepted_density
+        result%phase=DG_DC_FAILED;result%failed=.true.;ok=.false.
+        message='DG DC GS: accepted-state snapshot allocation failed collectively';return
+      end if
+      call move_alloc(candidate_state,accepted_state)
       accepted_density=density
       result%naccepted_steps=result%naccepted_steps+1
       result%lambda_history(result%naccepted_steps)=lambda
@@ -197,7 +214,7 @@ contains
     call collective_and(callback_ok,communicator,stage_ok)
     if(stage_ok) call occupied_projector_overlap(accepted_state,state,communicator,diagnostics%projector_overlap,stage_ok)
     if(.not.stage_ok) then
-      state=accepted_state; density=accepted_density
+      call restore_nodal_state(state,accepted_state); density=accepted_density
       result%phase=DG_DC_FAILED; result%failed=.true.; ok=.false.
       if(len_trim(message)==0) message='DG DC GS: unmixed callback/projector failure'
       return
@@ -207,7 +224,7 @@ contains
     local_converged=validation_ok .and. step_converged(diagnostics,controls,.true.)
     call collective_and(local_converged,communicator,stage_ok)
     if(.not.stage_ok) then
-      state=accepted_state; density=accepted_density
+      call restore_nodal_state(state,accepted_state); density=accepted_density
       result%phase=DG_DC_FAILED; result%failed=.true.; ok=.false.
       if(len_trim(message)==0) message='DG DC GS: unmixed fixed-point verification failed'
       return
@@ -221,6 +238,20 @@ contains
     ok=.true.; message=''
   end subroutine run_dg_dc_ground_state
 
+  subroutine restore_nodal_state(state,snapshot)
+    type(s_dg_nodal_common_state), intent(inout) :: state
+    type(s_dg_nodal_common_state), intent(in) :: snapshot
+    state%enabled=snapshot%enabled
+    state%initialized=snapshot%initialized
+    state%ground_state_ready=snapshot%ground_state_ready
+    state%geometry_fingerprint=snapshot%geometry_fingerprint
+    state%operator_fingerprint=snapshot%operator_fingerprint
+    state%dg_ground_state_residual=snapshot%dg_ground_state_residual
+    state%psi_core=snapshot%psi_core
+    state%hpsi_core=snapshot%hpsi_core
+    state%occupations=snapshot%occupations
+  end subroutine restore_nodal_state
+
   logical function step_converged(diagnostics,controls,final_stage)
     type(s_dg_dc_gs_diagnostics), intent(in) :: diagnostics
     type(s_dg_dc_gs_controls), intent(in) :: controls
@@ -228,7 +259,8 @@ contains
     real(8) :: orbital_tolerance,density_tolerance
     orbital_tolerance=merge(controls%final_orbital_tolerance,controls%intermediate_orbital_tolerance,final_stage)
     density_tolerance=merge(controls%final_density_tolerance,controls%intermediate_density_tolerance,final_stage)
-    step_converged=diagnostics%orbital_residual<=orbital_tolerance .and. &
+    step_converged=diagnostics%eigensolver_converged .and. &
+      diagnostics%orbital_residual<=orbital_tolerance .and. &
       diagnostics%density_residual<=density_tolerance .and. &
       diagnostics%subspace_residual<=controls%subspace_tolerance
   end function step_converged
@@ -250,7 +282,7 @@ contains
       diagnostics%projector_overlap,diagnostics%hermiticity_defect,diagnostics%orthogonality_defect, &
       diagnostics%face_balance_defect,diagnostics%electron_number,diagnostics%expected_electron_number, &
       diagnostics%interface_scale]
-    local_ok=diagnostics%finite .and. all(ieee_is_finite(values)) .and. diagnostics%eigensolver_converged .and. &
+    local_ok=diagnostics%finite .and. all(ieee_is_finite(values)) .and. &
       diagnostics%eigensolver_iterations>=0 .and. &
       diagnostics%eigensolver_iterations<=controls%maximum_eigensolver_iterations .and. &
       abs(diagnostics%interface_scale-lambda)<=10d0*epsilon(1d0) .and. &
@@ -287,7 +319,8 @@ contains
       controls%maximum_lambda_step>=controls%initial_lambda_step .and. controls%maximum_lambda_step<=1d0 .and. &
       ieee_is_finite(controls%electron_count_tolerance) .and. controls%electron_count_tolerance>0d0 .and. &
       controls%maximum_scf_iterations>0 .and. controls%maximum_eigensolver_iterations>0 .and. &
-      controls%maximum_rollbacks>=0
+      controls%maximum_rollbacks>=0 .and. controls%maximum_rollbacks<=100000 .and. &
+      controls%minimum_lambda_step>=1d-6
     call collective_and(local_ok,communicator,ok)
     if(ok) then
       message=''
@@ -320,10 +353,14 @@ contains
         call collective_and(ok,communicator,ok)
         return
       end if
-      allocate(reference_index(noccupied),current_index(noccupied))
+      allocate(reference_index(noccupied),current_index(noccupied),stat=ierr)
+      call collective_and(ierr==0,communicator,ok)
+      if(.not.ok) return
       reference_index=pack([(io,io=1,reference%nstate)],reference%occupations(:,is)>0d0)
       current_index=pack([(io,io=1,current%nstate)],current%occupations(:,is)>0d0)
-      allocate(local_overlap(noccupied,noccupied),global_overlap(noccupied,noccupied))
+      allocate(local_overlap(noccupied,noccupied),global_overlap(noccupied,noccupied),stat=ierr)
+      call collective_and(ierr==0,communicator,ok)
+      if(.not.ok) return
       do jo=1,noccupied
       do io=1,noccupied
         local_overlap(io,jo)=sum(conjg(reference%psi_core(:,:,:,reference_index(io),is))* &

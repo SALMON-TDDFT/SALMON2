@@ -22,6 +22,7 @@ program test_dg_dc_local_basis_sipg_mpi
   complex(8), allocatable :: production_basis(:,:,:,:),production_rows(:,:),production_global(:,:)
   integer :: production_origins(3,2),production_sizes(3,2)
   integer :: ierr,rank,nproc,i
+  real(8) :: face_schedule_defect
   logical :: ok
   character(256) :: message
 
@@ -37,6 +38,10 @@ program test_dg_dc_local_basis_sipg_mpi
     origins8(:,fragment)=[ix8,iy8,iz8]
     sizes8(:,fragment)=1
   end do
+  call diagnose_dg_dc_six_face_balance(origins8,sizes8,[2,2,2],MPI_COMM_WORLD, &
+    face_schedule_defect,ok,message)
+  call require(ok .and. face_schedule_defect==0d0, &
+    'canonical six-face schedule is reciprocal and singly paired')
   do fragment=1,8
     call build_dg_dc_six_face_neighbors(fragment,origins8,sizes8,[2,2,2],face_neighbors,face_shifts,ok,message)
     call require(ok,'six-face topology construction')

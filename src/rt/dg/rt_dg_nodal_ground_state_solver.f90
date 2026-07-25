@@ -181,32 +181,30 @@ contains
   subroutine orthonormalize_nodal_states_mpi(state, communicator)
     type(s_dg_nodal_state), intent(inout) :: state
     integer, intent(in) :: communicator
-    complex(8), allocatable :: overlap_local(:), overlap_global(:)
-    real(8) :: norm_local, norm_global
-    integer :: ispin, istate, jstate
+    complex(8), allocatable :: overlap_local(:,:), overlap_global(:,:)
+    integer :: ispin,npoint,info
+#ifdef USE_MPI
+    integer :: ierr
+#endif
 
-    allocate(overlap_local(state%nstate),overlap_global(state%nstate))
-
+    allocate(overlap_local(state%nstate,state%nstate),overlap_global(state%nstate,state%nstate))
+    npoint=size(state%psi_core,1)*size(state%psi_core,2)*size(state%psi_core,3)
     do ispin = 1, state%nspin
-      do istate = 1, state%nstate
-        overlap_local(:)=(0.0d0,0.0d0)
-        overlap_global(:)=(0.0d0,0.0d0)
-        do jstate = 1, istate - 1
-          overlap_local(jstate) = sum(conjg(state%psi_core(:,:,:,jstate,ispin)) * &
-                                      state%psi_core(:,:,:,istate,ispin))
-        end do
-        if (istate > 1) then
-          call global_complex_array_sum(overlap_local(1:istate-1),overlap_global(1:istate-1),communicator)
-        end if
-        do jstate = 1, istate - 1
-          state%psi_core(:,:,:,istate,ispin) = state%psi_core(:,:,:,istate,ispin) - &
-            overlap_global(jstate) * state%psi_core(:,:,:,jstate,ispin)
-        end do
-        norm_local = sum(abs(state%psi_core(:,:,:,istate,ispin))**2)
-        call global_real_sum(norm_local, norm_global, communicator)
-        if (norm_global <= 1.0d-28) stop 'nodal DG: linearly dependent ground-state trial orbitals'
-        state%psi_core(:,:,:,istate,ispin) = state%psi_core(:,:,:,istate,ispin) / sqrt(norm_global)
-      end do
+      call zgemm('C','N',state%nstate,state%nstate,npoint,(1.0d0,0.0d0), &
+        state%psi_core(1,1,1,1,ispin),npoint,state%psi_core(1,1,1,1,ispin),npoint, &
+        (0.0d0,0.0d0),overlap_local(1,1),state%nstate)
+#ifdef USE_MPI
+      call MPI_Allreduce(overlap_local,overlap_global,state%nstate*state%nstate,MPI_DOUBLE_COMPLEX, &
+        MPI_SUM,communicator,ierr)
+      if(ierr/=MPI_SUCCESS) stop 'nodal DG: overlap-matrix reduction failed'
+#else
+      overlap_global=overlap_local
+      if(communicator<0) stop 'nodal DG: invalid serial communicator'
+#endif
+      call zpotrf('U',state%nstate,overlap_global,state%nstate,info)
+      if(info/=0) stop 'nodal DG: linearly dependent ground-state trial orbitals'
+      call ztrsm('R','U','N','N',npoint,state%nstate,(1.0d0,0.0d0),overlap_global,state%nstate, &
+        state%psi_core(1,1,1,1,ispin),npoint)
     end do
     deallocate(overlap_local,overlap_global)
   end subroutine orthonormalize_nodal_states_mpi
