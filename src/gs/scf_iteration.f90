@@ -16,16 +16,19 @@
 !=======================================================================
 module scf_iteration_sub
   implicit none
+  integer,save :: dg_dc_projector_generation=0
+  integer(8),save :: dg_dc_frozen_operator_fingerprint=0_8
 
 contains
 
 subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vlocal,  &
-            &   miter,nscf_init_no_diagonal,dc)
-  use salmon_global, only: yn_subspace_diagonalization,ncg,ncg_init,nstate_freeze_gs
+            &   miter,nscf_init_no_diagonal,dc,dg_scale)
+  use salmon_global, only: yn_subspace_diagonalization,ncg,ncg_init,nstate_freeze_gs, &
+    yn_dg_dc_local_periodic
   use structures
   use timer
   use gram_schmidt_orth, only: gram_schmidt
-  use Conjugate_Gradient, only: gscg_zwf,gscg_rwf
+  use Conjugate_Gradient, only: gscg_zwf,gscg_rwf,prepare_dc_direct_dg_projectors_rwf
   use subspace_diagonalization, only: ssdg
   use xc_ace_update_manager, only: ace_update_state, ace_update_init_from_env, ace_update_decision
   implicit none
@@ -41,10 +44,11 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
   integer,                intent(in)    :: miter
   integer,                intent(in)    :: nscf_init_no_diagonal
   type(s_dcdft), optional,intent(in)    :: dc
+  real(8), optional,intent(in)          :: dg_scale
   !
   integer :: nncg
   integer :: freeze_e
-  logical :: has_frozen_local
+  logical :: has_frozen_local,direct_dg_active
   real(8), allocatable :: frozen_rwf(:,:,:,:,:)
   complex(8), allocatable :: frozen_zwf(:,:,:,:,:)
   type(ace_update_state), save :: ace_state_gs
@@ -78,6 +82,8 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
   end if
   freeze_e = min(info%io_e,nstate_freeze_gs)
   has_frozen_local = nstate_freeze_gs > 0 .and. info%io_s <= freeze_e
+  direct_dg_active = yn_dg_dc_local_periodic=='y' .and. present(dc) .and. present(dg_scale)
+  if(direct_dg_active) direct_dg_active=dg_scale>0d0
   if(has_frozen_local) then
     if(system%if_real_orbital) then
       allocate(frozen_rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3), &
@@ -91,7 +97,7 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
   end if
 ! subspace diagonalization
   call timer_begin(LOG_CALC_SUBSPACE_DIAG)
-  if(yn_subspace_diagonalization == 'y' .and. nstate_freeze_gs == 0)then
+  if(yn_subspace_diagonalization == 'y' .and. nstate_freeze_gs == 0 .and. .not.direct_dg_active)then
     if(miter > nscf_init_no_diagonal)then
       call ssdg(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     end if
@@ -101,7 +107,21 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
 ! conjugate gradient method
   call timer_begin(LOG_CALC_MINIMIZATION)
   if(system%if_real_orbital) then
-    call gscg_rwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,shpsi,sttpsi,cg)
+    if(yn_dg_dc_local_periodic=='y' .and. present(dc) .and. present(dg_scale))then
+      if(direct_dg_active)then
+        dg_dc_projector_generation=dg_dc_projector_generation+1
+        dg_dc_frozen_operator_fingerprint=int(miter,8)*1000003_8+int(dg_dc_projector_generation,8)
+        call prepare_dc_direct_dg_projectors_rwf(mg,system,info,stencil,dc,spsi,&
+          dg_dc_projector_generation,dg_dc_frozen_operator_fingerprint)
+        call gscg_rwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,shpsi,sttpsi,cg,dc,dg_scale,&
+          frozen_projector_generation=dg_dc_projector_generation,&
+          frozen_operator_fingerprint=dg_dc_frozen_operator_fingerprint)
+      else
+        call gscg_rwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,shpsi,sttpsi,cg,dc,dg_scale)
+      endif
+    else
+      call gscg_rwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,shpsi,sttpsi,cg)
+    end if
   else
     call gscg_zwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,shpsi,sttpsi,cg)
   end if

@@ -57,5 +57,28 @@ with tempfile.TemporaryDirectory(prefix="dg-buffer-core-faces-") as temporary_di
                 f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
             )
         assert "PASS buffer-to-neighbor-core physical face mapping" in completed.stdout
+    surrogate = build / "test_dg_dc_empty_state_surrogate_mpi"
+    subprocess.run(
+        [
+            mpifort, "-cpp", "-DUSE_MPI", "-I", str(build), "-J", str(build),
+            "-fcheck=all", "-fbacktrace", "-g",
+            str(ROOT / "src/common/dg_buffer_window_projector.f90"),
+            str(ROOT / "src/gs/dc/dg_dc_buffer_core_faces.f90"),
+            str(ROOT / "tests/dg/test_dg_dc_empty_state_surrogate_mpi.f90"),
+            "-llapack", "-lblas", "-o", str(surrogate),
+        ],
+        check=True,
+        cwd=build,
+    )
+    completed = subprocess.run(
+        [mpiexec, "-n", "2", str(surrogate)], text=True, capture_output=True,
+        env=environment, timeout=60,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(
+            f"empty-state surrogate failed ({completed.returncode})\n"
+            f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
+        )
+    assert "PASS empty-state duplicate-core surrogate" in completed.stdout
 
 print("PASS DG DC buffer/core face MPI fixture on 1, 2, and 8 ranks")

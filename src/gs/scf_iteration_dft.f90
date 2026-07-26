@@ -56,6 +56,7 @@ use dcdft_soi
 use salmon_global, only: yn_dg_dc_local_periodic
 use dg_dc_handoff, only: dg_dc_handoff_runtime, evaluate_dg_dc_handoff, &
   preserve_dg_dc_density_potential, mark_dg_dc_mixing_discarded
+use Conjugate_Gradient, only: apply_dc_direct_dg_hpsi_rwf
 use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 implicit none
 integer :: ix,iy,iz,ik,is
@@ -115,7 +116,8 @@ if(nscf_init_mix_zero.gt.1)then
    DFT_NoMix_Iteration : do iter=1,nscf_init_mix_zero
 
       if(yn_jm=='n') rion_update = check_rion_update() .or. (iter == 1)
-      call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local,iter,nscf_init_no_diagonal,dc)
+      call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local, &
+        iter,nscf_init_no_diagonal,dc,dg_dc_handoff_runtime%interface_scale)
       call timer_begin(LOG_CALC_TOTAL_ENERGY)
       call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
       select case(iperiodic)
@@ -182,7 +184,8 @@ DFT_Iteration : do iter=Miter+1,nscf
          call ne2mu(energy,system,ilevel_print)
       end if
    end if
-   call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local,miter,nscf_init_no_diagonal,dc)
+   call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local, &
+     miter,nscf_init_no_diagonal,dc,dg_dc_handoff_runtime%interface_scale)
    if(calc_mode/='DFT_BAND' .and. yn_dc=='n') then
      call copy_density(Miter,system%nspin,mg,rho_s,mixing)
      call timer_begin(LOG_CALC_RHO)
@@ -234,6 +237,12 @@ DFT_Iteration : do iter=Miter+1,nscf
      call calc_magnetization(system,mg,info,magnetization)
    end if
    call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
+   if(yn_dg_dc_local_periodic=='y' .and. dg_dc_handoff_runtime%interface_scale>0d0)then
+     call apply_dc_direct_dg_hpsi_rwf(mg,system,info,stencil,dc,spsi,shpsi, &
+       dg_dc_handoff_runtime%interface_scale,dg_dc_projector_generation,&
+       dg_dc_frozen_operator_fingerprint)
+     call recompute_direct_dg_eigenvalues()
+   endif
    call get_band_gap(system,energy,ene_gap)
    if(calc_mode/='DFT_BAND' .and. yn_dc=='n')then
       select case(iperiodic)
@@ -491,6 +500,28 @@ contains
       dg_fragment_solution_is_finite=.false.
     end if
   end function dg_fragment_solution_is_finite
+
+  subroutine recompute_direct_dg_eigenvalues()
+    real(8),allocatable::local_values(:,:,:),global_values(:,:,:)
+    integer::io_local,ik_local,is_local
+    allocate(local_values(system%nspin,system%no,system%nk),global_values(system%nspin,system%no,system%nk))
+    local_values=0d0
+    do ik_local=info%ik_s,info%ik_e
+    do io_local=info%io_s,info%io_e
+    do is_local=1,system%nspin
+      local_values(is_local,io_local,ik_local)=system%Hvol*sum( &
+        spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2), &
+        mg%is(3):mg%ie(3),is_local,io_local,ik_local,1)* &
+        shpsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2), &
+        mg%is(3):mg%ie(3),is_local,io_local,ik_local,1))
+    enddo
+    enddo
+    enddo
+    call comm_summation(local_values,global_values,size(local_values),info%icomm_rko)
+    do is_local=1,system%nspin
+      energy%esp(:,:,is_local)=global_values(is_local,:,:)
+    enddo
+  end subroutine recompute_direct_dg_eigenvalues
 
   subroutine discard_dc_mixing_history(history)
     type(s_mixing), intent(inout) :: history

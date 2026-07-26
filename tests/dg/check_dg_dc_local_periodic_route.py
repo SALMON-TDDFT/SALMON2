@@ -10,6 +10,8 @@ main_source = (root / "src/gs/main_dft.f90").read_text()
 main_driver_source = main_source.split("contains", 1)[0]
 scf_kernel_source = (root / "src/gs/scf_iteration.f90").read_text()
 cg_source = (root / "src/gs/conjugate_gradient.f90").read_text()
+direct_sipg_source = (root / "src/common/dg_dc_direct_sipg.f90").read_text()
+scf_driver_source = (root / "src/gs/scf_iteration.f90").read_text()
 dc_source = (root / "src/gs/dc/dcdft.f90").read_text()
 handoff_source = (root / "src/gs/dc/dg_dc_handoff.f90").read_text()
 buffer_projector_source = (root / "src/common/dg_buffer_window_projector.f90").read_text()
@@ -85,13 +87,80 @@ assert re.search(
     re.I,
 ), "outer-SCF projector preparation entry point is missing"
 assert re.search(r"call\s+evaluate_dg_dc_handoff", scf_source, re.I)
-handoff_accept = re.search(
-    r"if\s*\(\s*dg_handoff_accept\s*\)\s*then(.*?)exit\s+DFT_Iteration",
-    scf_source, re.I | re.S,
+assert re.search(
+    r"call\s+solve_orbitals\s*\(.*?\bdc\s*,\s*dg_dc_handoff_runtime%interface_scale\s*\)",
+    scf_source,re.I|re.S,
+), "the existing DC orbital solve must receive the current DG scale"
+assert re.search(
+    r"call\s+gscg_rwf\s*\(.*?\bdc\s*,\s*dg_scale\s*\)",
+    scf_driver_source,re.I|re.S,
+), "the existing orthogonalized CG must own the direct DG action"
+assert re.search(
+    r"direct_dg_active\s*=.*present\s*\(\s*dg_scale\s*\).*dg_scale\s*>\s*0",
+    scf_driver_source,re.I|re.S,
+), "the orbital solver must identify a nonzero direct-DG Hamiltonian"
+assert re.search(
+    r"if\s*\(\s*yn_subspace_diagonalization\s*==\s*'y'.*?"
+    r"\.not\.\s*direct_dg_active\s*\)\s*then",
+    scf_driver_source,re.I|re.S,
+), "volume-only subspace diagonalization must be disabled for a nonzero DG Hamiltonian"
+assert len(re.findall(r"call\s+apply_dc_direct_dg_hpsi_rwf\s*\(",cg_source,re.I))>=3, \
+    "the DG action must be recomputed for xk, pk, and refreshed xk"
+direct_cg_operator = re.search(
+    r"subroutine\s+apply_dc_direct_dg_hpsi_rwf\b(.*?)"
+    r"end\s+subroutine\s+apply_dc_direct_dg_hpsi_rwf",
+    cg_source,re.I|re.S,
 )
-assert handoff_accept and re.search(
-    r"call\s+timer_end\s*\(\s*LOG_WRITE_GS_RESULTS\s*\)", handoff_accept.group(1), re.I
-), "accepted DC handoff must close the active results timer"
+assert direct_cg_operator
+direct_projector_prepare = re.search(
+    r"subroutine\s+prepare_dc_direct_dg_projectors_rwf\b(.*?)"
+    r"end\s+subroutine\s+prepare_dc_direct_dg_projectors_rwf",
+    cg_source,re.I|re.S,
+)
+assert direct_projector_prepare
+assert re.search(
+    r"call\s+prepare_dg_dc_buffer_core_projectors",direct_projector_prepare.group(1),re.I
+), "outer-SCF freeze must use the validated Task 2 buffer/core projector API"
+assert re.search(
+    r"call\s+build_dg_dc_buffer_core_faces",direct_projector_prepare.group(1),re.I
+), "production projector preparation must construct canonical six-face metadata"
+assert "frozen_projector_generation" in direct_cg_operator.group(1)
+assert re.search(
+    r"call\s+apply_dg_dc_frozen_projected_face_plane",direct_cg_operator.group(1),re.I
+), "production Hamiltonian must consume reconstructed remote value and normal traces"
+assert re.search(
+    r"call\s+comm_summation\s*\(\s*owned_buffer_face_values\s*,\s*global_buffer_values",
+    direct_cg_operator.group(1),re.I,
+), "each frozen action must assemble the complete distributed state window"
+assert re.search(
+    r"call\s+comm_summation\s*\(\s*core_trace_owned\s*,\s*core_trace_values",
+    direct_cg_operator.group(1),re.I,
+), "normal traces must be assembled from raw core owners"
+assert re.search(r"do\s+iface\s*=\s*1\s*,\s*6",direct_cg_operator.group(1),re.I)
+assert "same-state" not in direct_cg_operator.group(1).lower()
+assert not re.search(
+    r"neighbor_value\s*=\s*cmplx\s*\(\s*buf_recv\(.*?\bilo\b",
+    direct_cg_operator.group(1),re.I|re.S,
+), "production Hamiltonian must not use the same local state index"
+gscg_rwf_source = re.search(
+    r"subroutine\s+gscg_rwf\b(.*?)end\s+subroutine\s+gscg_rwf",
+    cg_source,re.I|re.S,
+)
+assert gscg_rwf_source and not re.search(
+    r"build_dg_buffer_window_projector|prepare_dg_dc_buffer_core_projectors",
+    gscg_rwf_source.group(1),re.I,
+), "the frozen projector must not be rebuilt inside the orbital CG sweep"
+assert not re.search(r"call\s+apply_dc_lcfo_flux_hpsi_rwf",direct_cg_operator.group(1),re.I)
+assert "total_value" in direct_sipg_source and "total_normal" in direct_sipg_source
+assert re.search(
+    r"use\s+dg_dc_direct_sipg\s*,\s*only\s*:\s*apply_dg_dc_frozen_projected_face_plane",
+    direct_cg_operator.group(1),re.I,
+)
+assert re.search(
+    r"call\s+calc_eigen_energy.*?call\s+apply_dc_direct_dg_hpsi_rwf"
+    r".*?call\s+recompute_direct_dg_eigenvalues",
+    scf_source,re.I|re.S,
+), "energy evaluation must restore the same direct DG action"
 assert not re.search(r"call\s+materialize_dg_dc_candidates", main_driver_source, re.I), \
     "coefficient DG route must not materialize a global nodal state"
 assert not re.search(r"call\s+solve_nodal_ground_state_cg_mpi", main_driver_source, re.I), \
@@ -148,8 +217,8 @@ for name in gs_controls:
 
 assert "dg_dc_ground_state.f90" in cmake_source
 assert "dg_dc_ground_state_adapter.f90" in cmake_source
-assert re.search(r"call\s+run_dg_dc_local_basis_ground_state_for_main\s*\(", main_driver_source, re.I), \
-    "production DG route must enter the fragment-local-basis coefficient solver"
+assert not re.search(r"call\s+run_dg_dc_local_basis_ground_state_for_main\s*\(", main_driver_source, re.I), \
+    "production DG route must stay in the existing DC orbital CG"
 local_basis_driver = re.search(
     r"subroutine\s+run_dg_dc_local_basis_ground_state_for_main\b(.*?)"
     r"end\s+subroutine\s+run_dg_dc_local_basis_ground_state_for_main",
