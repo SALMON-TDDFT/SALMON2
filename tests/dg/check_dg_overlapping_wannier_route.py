@@ -20,6 +20,7 @@ main_source = source("src/gs/main_dft.f90")
 scf_source = source("src/gs/scf_iteration_dft.f90")
 dcdft_source = source("src/gs/dc/dcdft.f90")
 types_source = source("src/gs/dc/dg_overlapping_wannier_types.f90")
+construction_source = source("src/gs/dc/dg_overlapping_wannier_construction.f90")
 dc_cmake = source("src/gs/dc/CMakeLists.txt")
 
 flag = r"yn_dg_dc_overlapping_wannier"
@@ -76,6 +77,15 @@ assert re.search(
     main_source,
     re.I | re.S,
 ), "main_dft needs an explicit, terminating new-route dispatch"
+scf_position = main_source.lower().find("call scf_iteration_dft")
+route_dispatch_position = main_source.lower().find(
+    "call dispatch_dg_overlapping_wannier_route"
+)
+lcfo_position = main_source.lower().find("call dc_lcfo_flux", route_dispatch_position)
+assert 0 <= scf_position < route_dispatch_position < lcfo_position, (
+    "construction dispatch must consume the conventional candidate window "
+    "after SCF and terminate before LCFO"
+)
 assert re.search(
     r"subroutine\s+dispatch_dg_overlapping_wannier_route.*?"
     r"error\s+stop\s*['\"]overlapping Wannier route: construction not implemented['\"]",
@@ -84,7 +94,7 @@ assert re.search(
 ), "Task 1 dispatcher must stop before forbidden stages"
 
 dispatch_block = re.search(
-    rf"if\s*\(\s*{flag}\s*==\s*'y'\s*\)\s*then(?P<body>.*?)end\s*if",
+    rf"if\s*\(\s*{flag}\s*==\s*'y'\s*\)\s*then(?P<body>.*?)else\s+if",
     main_source,
     re.I | re.S,
 )
@@ -123,5 +133,11 @@ for token in (
     "MPI_Allgatherv",
 ):
     assert token.lower() in types_source.lower(), f"missing Task 2 metadata contract: {token}"
+
+assert "dg_overlapping_wannier_construction.f90" in dc_cmake
+for forbidden in ("dc_lcfo", "eigenexa", "dg_wpw", "direct_sipg"):
+    assert forbidden not in construction_source.lower(), (
+        f"construction path must not call forbidden stage: {forbidden}"
+    )
 
 print("overlapping-Wannier route contract: PASS")

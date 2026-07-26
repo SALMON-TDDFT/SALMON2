@@ -144,10 +144,6 @@ integer :: ilevel_print
 if(theory=='dft_band'.and.iperiodic/=3) return
 
 if(yn_dc=='y') then
-  if(yn_dg_dc_overlapping_wannier=='y') then
-    call dispatch_dg_overlapping_wannier_route
-    return
-  end if
   call initialize_dg_dc_handoff(dg_dc_handoff_runtime,yn_dg_dc_local_periodic=='y', &
     dg_dc_handoff_min_iter,dg_dc_handoff_tolerance,dg_dc_candidate_orbitals_per_atom, &
     dg_dc_metric_rank_tolerance,dg_handoff_ok,dg_handoff_message)
@@ -393,7 +389,11 @@ call timer_begin(LOG_WRITE_GS_RESULTS)
 local_basis_route_active=.false.
 
 if(yn_dc=='y') then
-  if(yn_dg_dc_local_periodic == 'y') then
+  if(yn_dg_dc_overlapping_wannier == 'y') then
+    local_basis_route_active=.true.
+    call dispatch_dg_overlapping_wannier_route
+    return
+  else if(yn_dg_dc_local_periodic == 'y') then
     local_basis_route_active=.true.
     if(.not.dg_dc_handoff_runtime%direct_ground_state_complete) &
       stop 'DG DC route reached publication without a full-scale fixed point'
