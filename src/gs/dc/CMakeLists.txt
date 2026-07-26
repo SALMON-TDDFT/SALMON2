@@ -3,6 +3,7 @@ set(SOURCES
     dg_overlapping_wannier_types.f90
     dg_overlapping_wannier_metric.f90
     dg_overlapping_wannier_construction.f90
+    dg_overlapping_wannier_operators.f90
     dg_dc_handoff.f90
   dg_dc_buffer_core_faces.f90
   dg_dc_ground_state.f90

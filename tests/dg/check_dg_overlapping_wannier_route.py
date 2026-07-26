@@ -21,6 +21,7 @@ scf_source = source("src/gs/scf_iteration_dft.f90")
 dcdft_source = source("src/gs/dc/dcdft.f90")
 types_source = source("src/gs/dc/dg_overlapping_wannier_types.f90")
 construction_source = source("src/gs/dc/dg_overlapping_wannier_construction.f90")
+operators_source = source("src/gs/dc/dg_overlapping_wannier_operators.f90")
 dc_cmake = source("src/gs/dc/CMakeLists.txt")
 
 flag = r"yn_dg_dc_overlapping_wannier"
@@ -138,6 +139,16 @@ assert "dg_overlapping_wannier_construction.f90" in dc_cmake
 for forbidden in ("dc_lcfo", "eigenexa", "dg_wpw", "direct_sipg"):
     assert forbidden not in construction_source.lower(), (
         f"construction path must not call forbidden stage: {forbidden}"
+    )
+
+assert "dg_overlapping_wannier_operators.f90" in dc_cmake
+for required in ("gradients", "local_potential", "unique-core", "MPI_Allreduce"):
+    assert required.lower() in operators_source.lower(), (
+        f"missing weak-operator contract: {required}"
+    )
+for forbidden in ("direct_sipg", "face_hamiltonian", "buffer_volume"):
+    assert forbidden not in operators_source.lower(), (
+        f"weak operator must not add an independent path: {forbidden}"
     )
 
 print("overlapping-Wannier route contract: PASS")
