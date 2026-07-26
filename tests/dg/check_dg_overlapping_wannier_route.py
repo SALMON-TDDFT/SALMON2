@@ -19,6 +19,8 @@ input_source = source("src/io/inputoutput.f90")
 main_source = source("src/gs/main_dft.f90")
 scf_source = source("src/gs/scf_iteration_dft.f90")
 dcdft_source = source("src/gs/dc/dcdft.f90")
+types_source = source("src/gs/dc/dg_overlapping_wannier_types.f90")
+dc_cmake = source("src/gs/dc/CMakeLists.txt")
 
 flag = r"yn_dg_dc_overlapping_wannier"
 
@@ -105,5 +107,21 @@ assert re.search(
 assert "yn_dg_dc_overlapping_wannier" not in scf_source, (
     "Task 1 must stop before, not alter, the conventional SCF call graph"
 )
+
+assert "dg_overlapping_wannier_types.f90" in dc_cmake
+for token in (
+    "type,public :: s_dg_wannier_tail",
+    "type,public :: s_dg_overlapping_wannier_basis",
+    "owned_core_physical_ids",
+    "physical_grid_ids",
+    "gradient",
+    "generation",
+    "geometry_fingerprint",
+    "basis_fingerprint",
+    "checked_dg_wannier_extent_product",
+    "MPI_Allreduce",
+    "MPI_Allgatherv",
+):
+    assert token.lower() in types_source.lower(), f"missing Task 2 metadata contract: {token}"
 
 print("overlapping-Wannier route contract: PASS")
