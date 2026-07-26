@@ -692,6 +692,7 @@ contains
       & yn_dc_lcfo_wannier_cluster, &
       & yn_dc_lcfo_block_diag_h, &
       & yn_dg_dc_local_periodic, &
+      & yn_dg_dc_overlapping_wannier, &
       & dg_dc_handoff_min_iter, &
       & dg_dc_handoff_tolerance, &
       & dg_dc_candidate_orbitals_per_atom, &
@@ -1298,6 +1299,7 @@ contains
     yn_dc_lcfo_wannier_cluster = 'n'
     yn_dc_lcfo_block_diag_h = 'n'
     yn_dg_dc_local_periodic = 'n'
+    yn_dg_dc_overlapping_wannier = 'n'
     dg_dc_handoff_min_iter = 3
     dg_dc_handoff_tolerance = 1d-3
     dg_dc_candidate_orbitals_per_atom = 40
@@ -2102,6 +2104,7 @@ contains
     call comm_bcast(yn_dc_lcfo_wannier_cluster, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_block_diag_h, nproc_group_global)
     call comm_bcast(yn_dg_dc_local_periodic, nproc_group_global)
+    call comm_bcast(yn_dg_dc_overlapping_wannier, nproc_group_global)
     call comm_bcast(dg_dc_handoff_min_iter, nproc_group_global)
     call comm_bcast(dg_dc_handoff_tolerance, nproc_group_global)
     call comm_bcast(dg_dc_candidate_orbitals_per_atom, nproc_group_global)
@@ -3255,6 +3258,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier_pw",yn_dc_lcfo_wannier_pw
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier_cluster",yn_dc_lcfo_wannier_cluster
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_block_diag_h",yn_dc_lcfo_block_diag_h
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dg_dc_local_periodic",yn_dg_dc_local_periodic
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        "yn_dg_dc_overlapping_wannier",yn_dg_dc_overlapping_wannier
       write(fh_variables_log, '("#",4X,A,"=",A)') "wannier90_command",trim(wannier90_command)
       write(fh_variables_log, '("#",4X,A,"=",A)') "wannier_projection",trim(wannier_projection)
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
@@ -3457,6 +3463,39 @@ contains
     call yn_argument_check(yn_dc_lcfo_wannier_cluster)
     call yn_argument_check(yn_dc_lcfo_block_diag_h)
     call yn_argument_check(yn_dg_dc_local_periodic)
+    call yn_argument_check(yn_dg_dc_overlapping_wannier)
+    if(yn_dg_dc_overlapping_wannier=='y' .and. trim(theory)/='dft') &
+      call sawf_input_fatal("overlapping Wannier route is ground-state DFT only")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. yn_dc/='y') &
+      call sawf_input_fatal("overlapping Wannier route requires yn_dc='y'")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. yn_periodic/='y') &
+      call sawf_input_fatal("overlapping Wannier route requires periodic DC input")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. yn_spinorbit=='y') &
+      call sawf_input_fatal("overlapping Wannier route requires real non-SOI orbitals")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. &
+       num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) &
+      call sawf_input_fatal("overlapping Wannier route is Gamma only")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. trim(xc)/='pz') &
+      call sawf_input_fatal("overlapping Wannier route currently requires PZ LDA")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. &
+       (yn_dc_lcfo=='y' .or. yn_dc_lcfo_flux=='y' .or. yn_dc_lcfo_wannier=='y' .or. &
+        yn_dc_lcfo_local_wannier=='y' .or. yn_dc_lcfo_wannier_pw=='y')) &
+      call sawf_input_fatal("overlapping Wannier route forbids LCFO")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. yn_eigenexa=='y') &
+      call sawf_input_fatal("overlapping Wannier route forbids EigenExa")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. &
+       (yn_dg_wpw_production=='y' .or. yn_dg_wpw_checkpoint_rt=='y')) &
+      call sawf_input_fatal("overlapping Wannier route forbids WPW")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. yn_dg_dc_local_periodic=='y') &
+      call sawf_input_fatal("overlapping Wannier route forbids direct real-space DG")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. yn_dg_fragment_rt=='y') &
+      call sawf_input_fatal("overlapping Wannier route forbids conventional RT")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. yn_self_checkpoint=='y') &
+      call sawf_input_fatal("overlapping Wannier route forbids normal checkpoint publication")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. checkpoint_interval>=1) &
+      call sawf_input_fatal("overlapping Wannier route forbids periodic normal checkpoints")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. trim(write_gs_restart_data)/='no') &
+      call sawf_input_fatal("overlapping Wannier route requires write_gs_restart_data='no'")
     if(yn_dg_dc_local_periodic=='y' .and. trim(theory)/='dft') &
       call sawf_input_fatal("DG DC local-periodic route is ground-state DFT only")
     if(yn_dg_dc_local_periodic=='y' .and. yn_dc/='y') &

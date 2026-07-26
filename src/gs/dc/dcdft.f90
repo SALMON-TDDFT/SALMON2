@@ -19,6 +19,11 @@ module dcdft
   implicit none
 contains
 
+  subroutine dispatch_dg_overlapping_wannier_route
+    implicit none
+    error stop 'overlapping Wannier route: construction not implemented'
+  end subroutine dispatch_dg_overlapping_wannier_route
+
   subroutine init_dcdft(dc,pp,mixing,ewald)
     use structures
     use salmon_global, only: nproc_k, nproc_ob, nproc_rgrid, nproc_rgrid_tot &
@@ -168,7 +173,7 @@ contains
     
     subroutine init_fragment
       use salmon_global, only: num_rgrid_buffer, kion, rion, natom, num_rgrid, al, num_fragment, &
-      & yn_dc_fragment_optimization, yn_dg_dc_local_periodic, dg_dc_candidate_orbitals_per_atom, nstate
+      & yn_dc_fragment_optimization
       implicit none
       integer :: i_frag,n,i,j,k,ii,jj,kk
       integer :: iatom,iatom_frag,max_natom_frag
@@ -264,10 +269,6 @@ contains
       
     ! natom, rion, kion (total system) --> natom, rion, kion (fragment)
       natom = natom_frag(dc%i_frag)
-      if(yn_dg_dc_local_periodic == 'y') then
-        nstate=dg_dc_candidate_orbitals_per_atom*natom
-        dc%nstate_frag=nstate
-      end if
       deallocate(rion,kion)
       allocate(rion(3,natom),kion(natom))
       rion(1:3,1:natom) = rion_frag(1:3,1:natom,dc%i_frag)

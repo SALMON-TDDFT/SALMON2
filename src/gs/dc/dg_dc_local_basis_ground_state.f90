@@ -27,12 +27,13 @@ module dg_dc_local_basis_ground_state
     logical :: ready=.false.
     integer :: scf_iterations=0
     integer(8) :: geometry_fingerprint=0_8,operator_fingerprint=0_8
+    integer(8) :: hamiltonian_operator_fingerprint=0_8
     real(8) :: density_residual=huge(1d0),interface_scale=0d0
     complex(8), allocatable :: coefficient_rows(:,:)
     complex(8), allocatable :: full_fragment_basis(:,:),basis_transform(:,:)
     real(8), allocatable :: eigenvalues(:),occupations(:)
     integer, allocatable :: basis_offsets(:),fragment_ids(:)
-    integer :: fragment_id=0,local_basis_count=0,global_basis_count=0,global_band_count=0
+    integer :: fragment_id=0,local_basis_count=0,global_basis_count=0,global_band_count=0,raw_basis_count=0
     integer :: core_size(3)=0,full_spatial_shape(3)=0
   end type s_dg_dc_local_basis_production_state
   type(s_dg_dc_local_basis_production_state), public, save :: dg_dc_local_basis_state
@@ -1348,7 +1349,7 @@ contains
   end subroutine solve_dg_dc_local_basis_bands_reference
 
   subroutine solve_dg_dc_local_basis_bands_cg(layout,hamiltonian_rows,overlap_rows,communicator, &
-      maximum_iterations,tolerance,coefficient_rows,eigenvalues,ok,message)
+      maximum_iterations,tolerance,coefficient_rows,eigenvalues,ok,message,iterations_used,maximum_residual)
     type(s_dg_dc_local_basis_layout), intent(in) :: layout
     complex(8), intent(in) :: hamiltonian_rows(:,:),overlap_rows(:,:)
     integer, intent(in) :: communicator,maximum_iterations
@@ -1357,14 +1358,19 @@ contains
     real(8), intent(out) :: eigenvalues(:)
     logical, intent(out) :: ok
     character(*), intent(out) :: message
+    integer, intent(out), optional :: iterations_used
+    real(8), intent(out), optional :: maximum_residual
     complex(8), allocatable :: global_vector(:),hvector(:),svector(:),residual(:),direction(:), &
       hdirection(:),sdirection(:)
     complex(8) :: reduced_h(2,2),reduced_s(2,2),work(8),overlap_value
-    real(8) :: reduced_eigenvalues(2),rwork(4),residual_norm,denominator
+    real(8) :: reduced_eigenvalues(2),rwork(4),residual_norm,denominator,largest_residual
     integer :: iband,jband,iteration,info,allocation_status
     logical :: stage_ok,operation_ok
 
     eigenvalues=0d0
+    if(present(iterations_used))iterations_used=0
+    if(present(maximum_residual))maximum_residual=huge(1d0)
+    largest_residual=0d0
     ok=layout%local_basis_count>0 .and. layout%global_basis_count>=layout%global_band_count .and. &
       maximum_iterations>0 .and. tolerance>0d0 .and. ieee_is_finite(tolerance) .and. &
       all(shape(hamiltonian_rows)==[layout%local_basis_count,layout%global_basis_count]) .and. &
@@ -1410,6 +1416,8 @@ contains
         call distributed_inner_product(residual,residual,communicator,overlap_value,operation_ok)
         stage_ok=stage_ok .and. operation_ok
         residual_norm=sqrt(max(0d0,real(overlap_value,8)))
+        largest_residual=max(largest_residual,residual_norm)
+        if(present(iterations_used))iterations_used=max(iterations_used,iteration)
         if(.not.stage_ok .or. .not.ieee_is_finite(residual_norm)) then
           stage_ok=.false.; exit
         end if
@@ -1458,6 +1466,7 @@ contains
       end if
     end do
     call collective_logical_and(stage_ok,communicator,ok)
+    if(present(maximum_residual))maximum_residual=largest_residual
     if(ok) then
       message=''
     else
