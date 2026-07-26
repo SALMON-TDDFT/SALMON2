@@ -31,6 +31,14 @@ module Conjugate_Gradient
   integer, save :: flux_halo_cache_nbuf(3) = -1
   integer, save :: flux_halo_cache_radius(3) = -1
   integer, save :: flux_halo_cache_num_fragment(3) = -1
+  integer,save :: direct_dg_projector_retained_rank(6)=0
+  integer,save :: direct_dg_projector_required_rank(6)=0
+  real(8),save :: direct_dg_projector_projection_residual(6)=huge(1d0)
+  real(8),save :: direct_dg_projector_escape_norm(6)=huge(1d0)
+  real(8),save :: direct_dg_projector_residual_limit(6)=0d0
+  real(8),save :: direct_dg_projector_escape_limit(6)=0d0
+  real(8),save :: direct_dg_face_action_norm(6)=huge(1d0)
+  real(8),save :: direct_dg_face_pair_balance(3)=huge(1d0)
 
   type direct_dg_frozen_halo
     type(s_dg_dc_frozen_face_projector),allocatable :: spin(:)
@@ -1481,6 +1489,13 @@ subroutine prepare_dc_direct_dg_projectors_rwf(mg,system,info,stencil,dc,referen
   call comm_summation(failure_local,failure_global,dc%icomm_tot)
   if(failure_global>0)stop 'direct DC SIPG: global frozen face cache allocation failed'
   if(allocated(direct_dg_frozen_projectors))deallocate(direct_dg_frozen_projectors)
+  direct_dg_projector_retained_rank=0
+  direct_dg_projector_required_rank=0
+  direct_dg_projector_projection_residual=huge(1d0)
+  direct_dg_projector_escape_norm=huge(1d0)
+  direct_dg_projector_residual_limit=0d0
+  direct_dg_projector_escape_limit=0d0
+  direct_dg_face_pair_balance=0d0
   allocate(direct_dg_frozen_projectors(6),stat=allocation_status)
   failure_local=merge(0,1,allocation_status==0)
   do iface=1,6
@@ -1519,6 +1534,19 @@ subroutine prepare_dc_direct_dg_projectors_rwf(mg,system,info,stencil,dc,referen
       deallocate(global_coefficients,global_reconstructed,reverse_coefficients,reverse_reconstructed)
       cycle
     endif
+    direct_dg_projector_retained_rank(iface)=min(global_diagnostics%retained_rank, &
+      reverse_diagnostics%retained_rank)
+    direct_dg_projector_required_rank(iface)=min(dc%nstate_frag, &
+      direct_dg_frozen_faces(iface)%point_count)
+    direct_dg_projector_projection_residual(iface)=max(global_diagnostics%projection_residual, &
+      reverse_diagnostics%projection_residual)
+    direct_dg_projector_escape_norm(iface)=max(global_diagnostics%escape_norm,reverse_diagnostics%escape_norm)
+    direct_dg_projector_residual_limit(iface)=projector_acceptance_tolerance
+    direct_dg_projector_escape_limit(iface)=projector_acceptance_tolerance* &
+      sqrt(max(1d0,dble(direct_dg_frozen_faces(iface)%point_count)*product(system%hgs)))
+    axis=direct_dg_frozen_faces(iface)%axis
+    direct_dg_face_pair_balance(axis)=max(direct_dg_face_pair_balance(axis), &
+      abs(global_diagnostics%projection_residual-reverse_diagnostics%projection_residual))
     call freeze_dg_dc_face_projector(direct_dg_frozen_faces(iface)%neighbor_core_values,&
       direct_dg_frozen_faces(iface)%neighbor_core_values(1:face_plane,:),&
       direct_dg_frozen_faces(iface)%neighbor_core_normals(1:face_plane,:),&
@@ -1556,13 +1584,14 @@ subroutine apply_dc_direct_dg_hpsi_rwf(mg,system,info,stencil,dc,psi,hpsi,interf
   integer::maximum_plane_points,maximum_weight
   integer::il(3),ilift(3),storage(3),allocation_status,component
   integer::failure_local,failure_global
-  real(8)::cell_volume,face_weight,action_scale
+  real(8)::cell_volume,face_weight,action_scale,local_face_norm(6),global_face_norm(6)
   real(8),allocatable::derivative_weights(:),owned_buffer_face_values(:,:,:),global_buffer_values(:,:,:)
   real(8),allocatable::core_trace_owned(:,:,:,:),core_trace_values(:,:,:,:)
   real(8),allocatable::face_value_actions(:,:),face_normal_lifts(:,:,:)
   logical::ok
   character(256)::message
   action_scale=1d0;if(present(interface_scale))action_scale=interface_scale
+  local_face_norm=0d0
   failure_local=0
   if(.not.allocated(psi%rwf).or..not.allocated(hpsi%rwf).or.dc%id_frag<0)return
   if(info%ik_s /= 1.or.info%ik_e/=1.or.info%im_s /= 1.or.info%im_e/=1)failure_local=1
@@ -1651,6 +1680,7 @@ subroutine apply_dc_direct_dg_hpsi_rwf(mg,system,info,stencil,dc,psi,hpsi,interf
     if(.not.ok)then
       failure_local=1
     else
+      if(dc%id_frag==0)local_face_norm(iface)=sum(face_value_actions**2)+sum(face_normal_lifts**2)
       do point=1,face_plane
         il=direct_dg_frozen_faces(iface)%local_buffer_indices(:,point)
         il(axis)=merge(dc%nxyz_buffer(axis)+1,dc%nxyz_buffer(axis)+ncore(axis),side<0)
@@ -1675,6 +1705,8 @@ subroutine apply_dc_direct_dg_hpsi_rwf(mg,system,info,stencil,dc,psi,hpsi,interf
   enddo
   call comm_summation(failure_local,failure_global,dc%icomm_tot)
   if(failure_global>0)stop 'direct DC SIPG: projected six-face action failed collectively'
+  call comm_summation(local_face_norm,global_face_norm,6,dc%icomm_tot)
+  direct_dg_face_action_norm=sqrt(max(0d0,global_face_norm))
 end subroutine apply_dc_direct_dg_hpsi_rwf
 
 #if 0

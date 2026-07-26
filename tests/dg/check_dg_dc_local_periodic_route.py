@@ -14,6 +14,7 @@ direct_sipg_source = (root / "src/common/dg_dc_direct_sipg.f90").read_text()
 scf_driver_source = (root / "src/gs/scf_iteration.f90").read_text()
 dc_source = (root / "src/gs/dc/dcdft.f90").read_text()
 handoff_source = (root / "src/gs/dc/dg_dc_handoff.f90").read_text()
+checkpoint_source = (root / "src/common/dg_ground_state_checkpoint.f90").read_text()
 buffer_projector_source = (root / "src/common/dg_buffer_window_projector.f90").read_text()
 buffer_core_faces_source = (root / "src/gs/dc/dg_dc_buffer_core_faces.f90").read_text()
 ground_state_source = (root / "src/gs/dc/dg_dc_ground_state.f90").read_text()
@@ -34,6 +35,11 @@ for name, default_pattern in controls.items():
     assert re.search(rf"call\s+comm_bcast\s*\(\s*{name}\b", input_source, re.I), f"missing broadcast for {name}"
 
 assert re.search(r"call\s+yn_argument_check\s*\(\s*yn_dg_dc_local_periodic\s*\)", input_source, re.I)
+assert re.search(
+    r"yn_dg_dc_local_periodic\s*==\s*'y'\s*\.and\.\s*yn_spinorbit\s*==\s*'y'.*?"
+    r"sawf_input_fatal",
+    input_source,re.I|re.S,
+), "real-orbital-only DG direct route must reject spin-orbit input before initialization"
 for name in controls.keys() - {"yn_dg_dc_local_periodic"}:
     assert re.search(rf"{name}\s*(<=|<)\s*", input_source, re.I), f"{name} must be validated even disabled"
 
@@ -124,24 +130,37 @@ assert re.search(
 assert re.search(
     r"call\s+build_dg_dc_buffer_core_faces",direct_projector_prepare.group(1),re.I
 ), "production projector preparation must construct canonical six-face metadata"
-assert "frozen_projector_generation" in direct_cg_operator.group(1)
+assert re.search(
+    r"active_core\s*=\s*\.not\.\s*any\s*\(\s*local_core_size\s*<=\s*0\s*\).*?"
+    r"nowned\s*=\s*merge\s*\(.*?0\s*,\s*active_core\s*\)",
+    direct_projector_prepare.group(1),re.I|re.S,
+), "buffer-only r-space ranks must remain in collectives with an empty state directory"
+assert "frozen_projector_generation" in direct_cg_operator.group(1), \
+    "production direct-DG action must accept the frozen outer-SCF projector generation"
 assert re.search(
     r"call\s+apply_dg_dc_frozen_projected_face_plane",direct_cg_operator.group(1),re.I
 ), "production Hamiltonian must consume reconstructed remote value and normal traces"
 assert re.search(
     r"call\s+comm_summation\s*\(\s*owned_buffer_face_values\s*,\s*global_buffer_values",
     direct_cg_operator.group(1),re.I,
-), "each frozen action must assemble the complete distributed state window"
+), "each frozen action must assemble the complete distributed nstate_frag buffer window"
 assert re.search(
     r"call\s+comm_summation\s*\(\s*core_trace_owned\s*,\s*core_trace_values",
     direct_cg_operator.group(1),re.I,
 ), "normal traces must be assembled from raw core owners"
-assert re.search(r"do\s+iface\s*=\s*1\s*,\s*6",direct_cg_operator.group(1),re.I)
-assert "same-state" not in direct_cg_operator.group(1).lower()
+assert len(re.findall(
+    r"if\s*\(\s*all\s*\(\s*il(?:ift)?\s*>=\s*mg%is\s*\).*?"
+    r"hpsi%rwf",
+    direct_cg_operator.group(1),re.I|re.S,
+)) >= 2, "face values and normal lifts must be written only by their raw-grid owner"
+assert re.search(r"do\s+iface\s*=\s*1\s*,\s*6",direct_cg_operator.group(1),re.I), \
+    "the production Hamiltonian must apply all six signed physical faces"
+assert "same-state" not in direct_cg_operator.group(1).lower(), \
+    "same-state neighbor diagnostics must not remain in the production Hamiltonian"
 assert not re.search(
     r"neighbor_value\s*=\s*cmplx\s*\(\s*buf_recv\(.*?\bilo\b",
     direct_cg_operator.group(1),re.I|re.S,
-), "production Hamiltonian must not use the same local state index"
+), "production Hamiltonian must not use the neighbor state with the same local io index"
 gscg_rwf_source = re.search(
     r"subroutine\s+gscg_rwf\b(.*?)end\s+subroutine\s+gscg_rwf",
     cg_source,re.I|re.S,
@@ -150,26 +169,187 @@ assert gscg_rwf_source and not re.search(
     r"build_dg_buffer_window_projector|prepare_dg_dc_buffer_core_projectors",
     gscg_rwf_source.group(1),re.I,
 ), "the frozen projector must not be rebuilt inside the orbital CG sweep"
-assert not re.search(r"call\s+apply_dc_lcfo_flux_hpsi_rwf",direct_cg_operator.group(1),re.I)
-assert "total_value" in direct_sipg_source and "total_normal" in direct_sipg_source
+assert not re.search(r"call\s+apply_dc_lcfo_flux_hpsi_rwf",direct_cg_operator.group(1),re.I), \
+    "the direct SIPG action must not delegate to the LCFO flux approximation"
+for component in ["total_value", "total_normal"]:
+    assert component in direct_sipg_source, \
+        f"direct CG SIPG action is missing {component}"
+assert "dg_dc_gs_sipg_penalty_factor" in direct_cg_operator.group(1)
+assert "evaluate_dg_nodal_sipg_face" in direct_sipg_source
 assert re.search(
     r"use\s+dg_dc_direct_sipg\s*,\s*only\s*:\s*apply_dg_dc_frozen_projected_face_plane",
     direct_cg_operator.group(1),re.I,
-)
+), "production CG must use the numerically tested route-neutral SIPG evaluator"
+assert re.search(
+    r"call\s+apply_dg_dc_frozen_projected_face_plane",direct_cg_operator.group(1),re.I
+), "production CG must call the tested SIPG evaluator"
 assert re.search(
     r"call\s+calc_eigen_energy.*?call\s+apply_dc_direct_dg_hpsi_rwf"
     r".*?call\s+recompute_direct_dg_eigenvalues",
     scf_source,re.I|re.S,
-), "energy evaluation must restore the same direct DG action"
+), "energy evaluation must restore the same direct DG action after conventional hpsi"
+assert re.search(
+    r"yn_dg_dc_local_periodic\s*==\s*'y'.*?"
+    r"comm_logical_and\s*\(\s*system%if_real_orbital\s*\.and\.\s*allocated\s*\(\s*spsi%rwf\s*\)",
+    main_source,re.I|re.S,
+), "DG direct route must collectively preflight real allocated orbitals before SCF"
+direct_diagnostics = re.search(
+    r"subroutine\s+diagnose_direct_dg_orbitals\b(.*?)"
+    r"end\s+subroutine\s+diagnose_direct_dg_orbitals",
+    scf_source,re.I|re.S,
+)
+assert direct_diagnostics
+assert re.search(
+    r"do\s+jo_local\s*=\s*1\s*,\s*system%no.*?"
+    r"call\s+comm_bcast\s*\(.*?info%icomm_o\s*,\s*info%irank_io\s*\(\s*jo_local\s*\)\s*\)",
+    direct_diagnostics.group(1),re.I|re.S,
+), "full-scale diagnostics must exchange every state-axis shard before forming global matrices"
+assert re.search(
+    r"do\s+io_local\s*=\s*info%io_s\s*,\s*info%io_e",
+    direct_diagnostics.group(1),re.I,
+), "full-scale diagnostics may directly index only the rank-local state interval"
+for guard in ["info%ik_s /= 1", "info%im_s /= 1", "psi orbital range mismatch",
+              "hpsi orbital range mismatch", "spin range mismatch"]:
+    assert guard.lower() in direct_cg_operator.group(1).lower(), \
+        f"direct CG decomposition preflight is missing {guard}"
+assert re.search(
+    r"allocate\s*\(\s*owned_buffer_face_values.*?stat\s*=",
+    direct_cg_operator.group(1),re.I|re.S,
+), "direct CG projected-face allocation must be checked"
+assert re.search(r"call\s+comm_summation\s*\(\s*failure_local\s*,\s*failure_global",
+                 direct_cg_operator.group(1),re.I), \
+    "rank-local SIPG failures must be agreed before the next halo exchange"
+assert re.search(r"use_direct_dg\s*=.*yn_dg_dc_local_periodic\s*==\s*'y'",cg_source,re.I), \
+    "the direct DG hook must be independent of LCFO controls"
+assert re.search(
+    r"if\s*\(\s*use_direct_dg\s*\)\s*use_fixed_flux\s*=\s*\.false\.",
+    cg_source,re.I,
+), "direct DG must suppress the legacy LCFO-flux diagnostics and operator path"
+assert re.search(r"dg_fragment_orbitals_are_finite\s*\(\s*\)", scf_source, re.I)
+assert re.search(r"handoff rejected:.*residual\(max\).*charge_error\(max\)",
+                 scf_source, re.I | re.S), \
+    "below-threshold handoff rejection must expose collective diagnostics"
+assert re.search(
+    r"if\s*\(\s*dg_handoff_accept\s*\.and\.\s*\.not\.\s*dg_was_accepted\s*\)\s*then"
+    r".*?call\s+initialize_dg_dc_direct_continuation"
+    r".*?call\s+timer_end\s*\(\s*LOG_WRITE_GS_RESULTS\s*\)",
+    scf_source, re.I | re.S,
+), "accepted DC handoff must continue through the normal results-timer close"
 assert not re.search(r"call\s+materialize_dg_dc_candidates", main_driver_source, re.I), \
     "coefficient DG route must not materialize a global nodal state"
 assert not re.search(r"call\s+solve_nodal_ground_state_cg_mpi", main_driver_source, re.I), \
     "production DG route must use distributed local-basis coefficients"
 assert re.search(
-    r"nstate\s*=\s*dg_dc_candidate_orbitals_per_atom\s*\*\s*natom", dc_source, re.I
-), "enabled DC solve must create the complete configured untruncated candidate pool"
+    r"direct_ground_state_complete.*?call\s+publish_dg_dc_direct_ground_state_for_main",
+    main_driver_source,re.I|re.S,
+), "direct checkpoint publication must be guarded by full-scale fixed-point completion"
+assert re.search(
+    r"subroutine\s+publish_dg_dc_direct_ground_state_for_main.*?"
+    r"call\s+publish_dg_dc_direct_checkpoint",
+    main_source,re.I|re.S,
+), "production must publish the direct fragment-orbital checkpoint"
+assert re.search(r"checkpoint%nstate\s*=\s*system%no",main_source,re.I), \
+    "direct checkpoint must persist the global nstate_frag count"
+assert re.search(r"checkpoint%state_start\s*=\s*info%io_s",main_source,re.I), \
+    "direct checkpoint must persist the rank-local state-axis origin"
+assert re.search(
+    r"orbital_core_start\s*=\s*max\s*\(\s*mg%is\s*,\s*\[\s*1\s*,\s*1\s*,\s*1\s*\]\s*\).*?"
+    r"checkpoint%orbital_core_origin\s*=\s*checkpoint%fragment_origin",
+    main_source,re.I|re.S,
+), "direct checkpoint orbital ownership must come from fragment mg, not total-density decomposition"
+assert not re.search(
+    r"checkpoint%orbital_core_(origin|size)\s*=\s*checkpoint%density_(origin|size)",
+    main_source,re.I,
+), "fragment orbital ownership must remain independent of total-density ownership"
+assert re.search(
+    r"checkpoint%occupations\s*=\s*system%rocc\s*\(\s*info%io_s\s*:\s*info%io_e",
+    main_source,re.I,
+), "direct checkpoint occupations must match the rank-local orbital shard"
+assert not re.search(
+    r"nstate\s*=\s*dg_dc_candidate_orbitals_per_atom\s*\*", dc_source, re.I
+), "DC fragment state count must come from namelist nstate_frag, not a fixed per-atom multiplier"
+assert re.search(
+    r"dc%nstate_frag\s*=\s*nstate_frag", dc_source, re.I
+), "DC fragment state count must preserve the namelist value"
+assert not re.search(
+    r"(system%no|configured_count)\s*==\s*natom\s*\*\s*"
+    r"(dg_dc_candidate_orbitals_per_atom|state%candidate_orbitals_per_atom)",
+    main_source + handoff_source, re.I,
+), "DG handoff must accept the namelist nstate_frag instead of imposing states-per-atom"
 assert re.search(r"call\s+preserve_dg_dc_density_potential", scf_source, re.I)
-assert re.search(r"call\s+discard_dc_mixing_history", scf_source, re.I)
+for rollback_field in ["rho_tot_s", "Vh_tot", "Vxc_tot", "vloc_tot"]:
+    assert re.search(
+        rf"dg_continuation_rollback.*?dc%{rollback_field}",
+        scf_source,re.I|re.S,
+    ), f"continuation rollback does not restore {rollback_field}"
+mixing_reset = re.search(
+    r"subroutine\s+discard_dc_mixing_history\b(.*?)"
+    r"end\s+subroutine\s+discard_dc_mixing_history",
+    scf_source,re.I|re.S,
+)
+assert mixing_reset, "DG continuation must define an explicit mixing-history reset"
+assert re.search(
+    r"subroutine\s+discard_dc_mixing_history\s*\(\s*history\s*,\s*rho_s\s*,\s*Vh\s*,\s*Vxc\s*\)",
+    scf_source,re.I,
+), "mixing reset must be seeded from the accepted density and potential"
+assert not re.search(
+    r"history%(rho(_s)?|Vh|Vxc)_(in|out).*?=\s*0d0",
+    mixing_reset.group(1),re.I|re.S,
+), "mixing reset must not replace the accepted state with a zero-density history"
+assert len(re.findall(
+    r"call\s+discard_dc_mixing_history\s*\(\s*mixing\s*,\s*dc%rho_tot_s\s*,"
+    r"\s*dc%Vh_tot\s*,\s*dc%Vxc_tot\s*\)",
+    scf_source,re.I,
+)) >= 3, "handoff, stage advance, and rollback must all reseed mixing from the restored state"
+assert "direct_dg_solve_count" in handoff_source, \
+    "handoff state must record completed direct-DG orbital solves"
+assert re.search(
+    r"call\s+solve_orbitals.*?interface_scale\s*\).*?"
+    r"direct_dg_solve_count\s*=\s*dg_dc_handoff_runtime%direct_dg_solve_count\s*\+\s*1",
+    scf_source,re.I|re.S,
+), "a nonzero-DG CG pass must be recorded immediately after the orbital solve"
+assert re.search(
+    r"sum1\s*<\s*threshold.*?direct_ground_state_complete",
+    scf_source,re.I|re.S,
+), "the DG route must not declare convergence before the full-scale fixed point"
+assert re.search(
+    r"end\s*do\s+DFT_Iteration.*?yn_dg_dc_local_periodic.*?\.not\.\s*"
+    r"dg_dc_handoff_runtime%direct_ground_state_complete.*?stop",
+    scf_source,re.I|re.S,
+), "nscf exhaustion must not return any DG state before the full-scale fixed point"
+assert re.search(
+    r"if\s*\(\s*yn_dg_dc_local_periodic\s*==\s*'y'\s*\)\s*then.*?"
+    r"direct_ground_state_complete.*?publish_dg_dc_direct_ground_state_for_main.*?"
+    r"else\s+if\s*\(\s*yn_dc_lcfo_flux",
+    main_source,re.I|re.S,
+), "the DG publication branch must not fall through to LCFO or normal DC output"
+assert re.search(
+    r"dg_continuation_rollback.*?dg_dc_projector_generation\s*="
+    r"dg_dc_projector_generation\s*\+\s*1.*?"
+    r"dg_dc_frozen_operator_fingerprint\s*=\s*0_8",
+    scf_source,re.I|re.S,
+), "rollback must explicitly invalidate the rejected frozen projector"
+assert re.search(
+    r"call\s+collective_and\s*\(\s*unmixed\s*,\s*communicator\s*,\s*collective_unmixed\s*\).*?"
+    r"state%interface_scale\s*<\s*1d0.*?else\s+if\s*\(\s*collective_unmixed\s*\)\s*then"
+    r".*?state%direct_ground_state_complete\s*=\s*\.true\.",
+    handoff_source,re.I|re.S,
+), "direct completion must require collective agreement on a full-scale unmixed fixed point"
+for diagnostic_gate in [
+    "direct_orbital_residual", "direct_orthogonality_defect",
+    "direct_hermiticity_defect", "direct_face_balance_defect", "charge_error",
+]:
+    assert re.search(
+        rf"{diagnostic_gate}\s*<=\s*dg_dc_gs_",scf_source,re.I
+    ), f"direct completion gate is missing measured {diagnostic_gate}"
+assert re.search(
+    r"allocate\s*\(\s*density_candidate.*?stat\s*=\s*allocation_status",
+    handoff_source,re.I|re.S,
+), "handoff snapshot allocation must be checked"
+assert re.search(
+    r"call\s+collective_and\s*\(\s*local_ok\s*,\s*communicator\s*,\s*ok\s*\)",
+    handoff_source,re.I,
+), "handoff snapshot allocation failure must be agreed collectively"
 assert "candidate_metric_rank" in handoff_source and "maxloc" in handoff_source
 assert re.search(r"call\s+gram_schmidt\s*\(", scf_kernel_source, re.I), \
     "existing Gram-Schmidt must remain the orthogonalization owner"
@@ -247,6 +427,8 @@ assert "81d0" not in local_basis_driver.group(1), \
     "production SIPG penalty must come from a validated control"
 assert re.search(r"dg_dc_local_basis_state", local_basis_driver.group(1), re.I), \
     "converged coefficients/eigenvalues must persist in an explicit DG-only state"
+assert re.search(r"call\s+publish_dg_dc_ground_state_for_main\s*\(",local_basis_driver.group(1),re.I), \
+    "accepted local-basis fixed point must publish the DG-only checkpoint"
 assert re.search(r"spsi_shape\s*\(\s*1\s*:\s*3\s*\)\s*==\s*sttpsi_shape",
                  local_basis_driver.group(1), re.I), \
     "production adapter must reject mismatched full-buffer orbital shapes"
@@ -256,6 +438,11 @@ for persisted_field in ["full_fragment_basis", "basis_transform", "basis_offsets
 assert re.search(r"iteration_operator_fingerprint\s*=\s*dg_dc_operator_fingerprint\s*\(\s*\)",
                  local_basis_driver.group(1), re.I), \
     "persisted state must identify the Hamiltonian used by the final coefficient solve"
+assert re.search(r"hamiltonian_operator_fingerprint\s*=\s*iteration_operator_fingerprint",
+                 local_basis_driver.group(1),re.I)
+assert re.search(r"candidate_state%operator_fingerprint\s*=\s*dg_dc_operator_fingerprint\s*\(\s*\)",
+                 local_basis_driver.group(1),re.I), \
+    "checkpoint identity must fingerprint the updated potential actually published"
 for continuation_control in [
     "dg_dc_gs_initial_lambda_step",
     "dg_dc_gs_minimum_lambda_step",
@@ -274,9 +461,25 @@ assert re.search(r"unmixed", local_basis_driver.group(1), re.I), \
 assert re.search(r"yn_dg_dc_local_periodic\s*/=\s*'y'.*?checkpoint_gs",
                  main_source, re.I | re.S), \
     "pre-DG structure checkpoints must be disabled for the opt-in route"
+assert re.search(r"yn_dg_dc_local_periodic\s*/=\s*'y'.*?checkpoint_gs",
+                 scf_source, re.I | re.S), \
+    "in-loop standard checkpoints must be disabled for the opt-in route"
+assert re.search(
+    r"dg_handoff_count\s*=\s*product\s*\(\s*dc%mg_tot%ie\s*-\s*"
+    r"dc%mg_tot%is\s*\+\s*1\s*\)",
+    scf_source, re.I,
+), "handoff snapshots must allocate only the locally owned grid points"
 assert re.search(r"yn_dg_dc_local_periodic\s*==\s*'y'.*?time_shutdown\s*>\s*0",
                  input_source, re.I | re.S), \
     "the no-checkpoint route must reject shutdown-checkpoint mode up front"
+assert re.search(
+    r"yn_dg_dc_local_periodic\s*==\s*'y'.*?trim\s*\(\s*theory\s*\)\s*/=\s*'dft'",
+    input_source,re.I|re.S,
+), "the DG ground-state flag must reject conventional RT theories"
+assert re.search(
+    r"yn_dg_dc_local_periodic\s*==\s*'y'.*?yn_dc_lcfo.*?yn_eigenexa",
+    input_source,re.I|re.S,
+), "the DG route must reject LCFO, EigenExa, and WPW fallback controls"
 assert re.search(r"local_basis_route_active\s*=\s*\.true\.", main_source, re.I), \
     "the DG-only result must mark the standard publication path inactive"
 assert re.search(r"if\s*\(\s*\.not\.\s*local_basis_route_active\s*\)\s*then.*?"
@@ -285,6 +488,29 @@ assert re.search(r"if\s*\(\s*\.not\.\s*local_basis_route_active\s*\)\s*then.*?"
 assert "solve_dg_dc_local_basis_bands_reference" not in main_source, \
     "production DG route must not call the replicated root reference eigensolver"
 assert not re.search(r"call\s+publish_dg_dc_ground_state_for_main\s*\(", main_driver_source, re.I)
+assert re.search(r"type\s*,\s*public\s*::\s*s_dg_dc_direct_checkpoint_state",
+                 checkpoint_source,re.I), \
+    "DG checkpoint must define a direct fragment-orbital payload"
+direct_checkpoint_type = re.search(
+    r"type\s*,\s*public\s*::\s*s_dg_dc_direct_checkpoint_state(.*?)end\s+type",
+    checkpoint_source,re.I|re.S,
+)
+assert direct_checkpoint_type
+for field in ["fragment_orbitals", "occupations", "nstate", "nspin", "core_size",
+              "full_spatial_shape", "geometry_fingerprint", "operator_fingerprint"]:
+    assert field in direct_checkpoint_type.group(1), f"direct checkpoint is missing {field}"
+assert "coefficient_rows" not in direct_checkpoint_type.group(1), \
+    "direct checkpoint must not persist projected coefficient rows"
+for field in ["projector_generation", "projector_fingerprint", "projector_retained_rank",
+              "projector_projection_residual", "projector_escape_norm",
+              "face_action_norm", "face_pair_balance", "accepted", "unmixed_verified"]:
+    assert field in direct_checkpoint_type.group(1), f"direct checkpoint is missing {field}"
+assert re.search(
+    r"checkpoint%geometry_fingerprint\s*=\s*dg_dc_geometry_fingerprint\s*\(\s*\).*?"
+    r"checkpoint%operator_fingerprint\s*=\s*dg_dc_operator_fingerprint\s*\(\s*\).*?"
+    r"hamiltonian_operator_fingerprint\s*=\s*ieor",
+    main_source,re.I|re.S,
+), "direct checkpoint must identify the final geometry, potential, and frozen projector"
 assert re.search(r"call\s+calc_rho_total_dcdft\s*\(", main_source, re.I)
 assert re.search(r"call\s+calc_vlocal_fragment_dcdft\s*\(", main_source, re.I)
 assert re.search(r"hpsi\s*=\s*hpsi_volume_nonlocal\s*\+\s*lambda\s*\*\s*hpsi_sipg", adapter_source, re.I)

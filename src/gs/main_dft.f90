@@ -38,7 +38,7 @@ use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_wpw_producti
 use dg_dc_handoff, only: dg_dc_handoff_runtime, dg_dc_nodal_runtime, initialize_dg_dc_handoff, &
   materialize_dg_dc_candidates
 use dg_dc_ground_state, only: s_dg_dc_gs_controls,s_dg_dc_gs_result,s_dg_dc_gs_diagnostics, &
-  default_dg_dc_gs_controls,run_dg_dc_ground_state
+  default_dg_dc_gs_controls,run_dg_dc_ground_state,DG_DC_ACCEPTED
 use dg_dc_ground_state_adapter, only: expand_dg_dc_global_candidate_axis,reconstruct_dg_dc_core_density, &
   mix_dg_dc_density_transaction,initialize_dg_dc_physical_faces,apply_dg_dc_sipg_operator_mpi, &
   compose_dg_dc_hamiltonian,build_dg_dc_interior_volume_action,execute_dg_dc_production_iteration
@@ -51,10 +51,10 @@ use dg_dc_local_basis_ground_state, only: s_dg_dc_local_basis_layout, &
   assign_dg_dc_local_basis_occupations,solve_dg_dc_local_basis_bands_cg, &
   reconstruct_dg_dc_local_basis_density,validate_dg_dc_local_basis_density, &
   diagnose_dg_dc_local_basis_continuation, &
-  diagnose_dg_dc_six_face_balance, &
+  diagnose_dg_dc_six_face_balance,build_dg_dc_six_face_neighbors, &
   s_dg_dc_local_basis_production_state,dg_dc_local_basis_state
-use dg_ground_state_checkpoint, only: s_dg_ground_state_checkpoint, &
-  populate_dg_ground_state_checkpoint,publish_dg_ground_state_checkpoint
+use dg_ground_state_checkpoint, only: s_dg_ground_state_checkpoint,s_dg_dc_direct_checkpoint_state, &
+  populate_dg_ground_state_checkpoint,publish_dg_ground_state_checkpoint,publish_dg_dc_direct_checkpoint
 use rt_dg_nodal_cg, only: solve_nodal_ground_state_cg_mpi
 use rt_dg_nodal_rayleigh_ritz, only: rayleigh_ritz_nodal_subspace_mpi
 #ifdef USE_EIGENEXA
@@ -189,6 +189,11 @@ call initialization2_dft( Miter, nspin, rion_update,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,   &
                           xc_func, mixing )
+
+if(yn_dg_dc_local_periodic=='y')then
+  call comm_logical_and(system%if_real_orbital.and.allocated(spsi%rwf),dg_handoff_ok,dc%icomm_tot)
+  if(.not.dg_handoff_ok)stop 'DG DC local-periodic route requires allocated real orbitals collectively'
+endif
 
 Miopt = 0
 nopt_max = 1
@@ -383,9 +388,12 @@ call timer_begin(LOG_WRITE_GS_RESULTS)
 local_basis_route_active=.false.
 
 if(yn_dc=='y') then
-  if(yn_dg_dc_local_periodic == 'y' .and. dg_dc_handoff_runtime%accepted) then
-    call run_dg_dc_local_basis_ground_state_for_main()
+  if(yn_dg_dc_local_periodic == 'y') then
     local_basis_route_active=.true.
+    if(.not.dg_dc_handoff_runtime%direct_ground_state_complete) &
+      stop 'DG DC route reached publication without a full-scale fixed point'
+    call publish_dg_dc_direct_ground_state_for_main(dg_handoff_ok,dg_handoff_message)
+    if(.not.dg_handoff_ok)stop 'DG DC direct checkpoint publication failed collectively'
   else if(yn_dc_lcfo_flux == 'y') then
     if(yn_spinorbit == 'y') then
       stop "yn_dc_lcfo_flux=y is not implemented for spin-orbit mode"
@@ -495,17 +503,19 @@ contains
     complex(8), allocatable :: accepted_coefficient_rows(:,:)
     real(8), allocatable :: eigenvalues(:),occupations(:),local_density(:),quadrature_weights(:)
     real(8), allocatable :: accepted_eigenvalues(:)
+    real(8), allocatable :: lambda_history(:),lambda_steps(:)
     real(8), allocatable :: previous_density(:,:,:,:),trial_density(:,:,:,:),mixed_density(:,:,:,:)
     real(8), allocatable :: accepted_density(:,:,:,:)
     integer :: core_size(3),npoint,nraw,neffective,ix,iy,iz,io,point,global_row
     integer :: spsi_shape(7),sttpsi_shape(7),shpsi_shape(7)
     integer :: iteration,local_rank,local_first,allocation_status,full_point_count,rollback_count
-    integer :: accepted_step_count,stage_iteration
+    integer :: accepted_step_count,stage_iteration,eigensolver_iterations
     integer(8) :: iteration_operator_fingerprint
     real(8) :: density_residual_local,density_residual_global,mix_rate
     real(8) :: accepted_lambda,trial_lambda,lambda_step,previous_stage_residual,stage_residual
-    real(8) :: orbital_tolerance,density_tolerance
-    real(8) :: projector_overlap,orthogonality_defect,hermiticity_defect,face_balance_defect
+    real(8) :: orbital_tolerance,density_tolerance,orbital_residual
+    real(8) :: projector_overlap,minimum_projector_seen,subspace_residual
+    real(8) :: orthogonality_defect,hermiticity_defect,face_balance_defect
     logical :: ok,stage_ok,stage_converged,unmixed_gate,first_stage
     character(256) :: message
 
@@ -545,7 +555,10 @@ contains
     call orthonormalize_dg_dc_fragment_core_basis(raw_basis,system%hvol,dg_dc_metric_rank_tolerance, &
       orthonormal_basis,basis_transform,neffective,ok,message)
     call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
-    if(.not.dg_handoff_ok) stop 'DG DC local-basis core orthonormalization failed collectively'
+    if(.not.dg_handoff_ok) then
+      write(*,'(a,i0,2a)')'[DG-DC-LOCAL-BASIS] rank ',local_rank,' orthonormalization: ',trim(message)
+      stop 'DG DC local-basis core orthonormalization failed collectively'
+    end if
     allocate(basis(core_size(1),core_size(2),core_size(3),neffective), &
       full_fragment_basis(full_point_count,neffective),stat=allocation_status)
     ok=allocation_status==0
@@ -599,7 +612,9 @@ contains
       mixed_density(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),1), &
       accepted_density(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),1), &
       accepted_coefficient_rows(neffective,layout%global_band_count), &
-      accepted_eigenvalues(layout%global_band_count),stat=allocation_status)
+      accepted_eigenvalues(layout%global_band_count), &
+      lambda_history(dg_dc_gs_maximum_scf_iterations+dg_dc_gs_maximum_rollbacks+2), &
+      lambda_steps(dg_dc_gs_maximum_scf_iterations+dg_dc_gs_maximum_rollbacks+2),stat=allocation_status)
     ok=allocation_status==0
     call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
     if(.not.dg_handoff_ok) stop 'DG DC local-basis density allocation failed collectively'
@@ -607,14 +622,18 @@ contains
     accepted_density=previous_density
     accepted_coefficient_rows=coefficient_rows
     accepted_eigenvalues=0d0
+    lambda_history=0d0
+    lambda_steps=0d0
     mix_rate=dg_dc_gs_density_mix_rate
     accepted_lambda=0d0
     lambda_step=dg_dc_gs_initial_lambda_step
     rollback_count=0
     accepted_step_count=0
+    minimum_projector_seen=1d0
     iteration=0
     first_stage=.true.
     unmixed_gate=.false.
+    dg_gs_potential_epoch=0_8
 Continuation_Stages: do
       if(unmixed_gate) then
         trial_lambda=dg_dc_gs_target_lambda
@@ -633,6 +652,7 @@ Continuation_Stages: do
       do stage_iteration=1,merge(1,dg_dc_gs_maximum_scf_iterations,unmixed_gate)
       iteration=iteration+1
       iteration_operator_fingerprint=dg_dc_operator_fingerprint()
+      dg_gs_hamiltonian_potential_epoch=dg_gs_potential_epoch
       sttpsi%rwf=0d0
       do io=1,neffective
         sttpsi%rwf(:,:,:,1,io,1,1)=reshape(real(full_fragment_basis(:,io),8),shape(sttpsi%rwf(:,:,:,1,io,1,1)))
@@ -661,13 +681,15 @@ Continuation_Stages: do
       if(.not.dg_handoff_ok) then; stage_ok=.false.; exit; end if
       call solve_dg_dc_local_basis_bands_cg(layout,hamiltonian_rows,overlap_rows,dc%icomm_tot, &
         dg_dc_gs_maximum_eigensolver_iterations,orbital_tolerance, &
-        coefficient_rows,eigenvalues,ok,message)
+        coefficient_rows,eigenvalues,ok,message,eigensolver_iterations,orbital_residual)
       call comm_logical_and(ok,dg_handoff_ok,dc%icomm_tot)
       if(.not.dg_handoff_ok) then; stage_ok=.false.; exit; end if
       call diagnose_dg_dc_local_basis_continuation(layout,hamiltonian_rows,coefficient_rows, &
         accepted_coefficient_rows,occupations,dc%icomm_tot,projector_overlap,orthogonality_defect, &
         hermiticity_defect,ok,message)
+      subspace_residual=sqrt(max(0d0,1d0-projector_overlap))
       ok=ok .and. projector_overlap>=dg_dc_gs_minimum_projector_overlap .and. &
+        subspace_residual<=dg_dc_gs_subspace_tolerance .and. &
         orthogonality_defect<=dg_dc_gs_orthogonality_tolerance .and. &
         hermiticity_defect<=dg_dc_gs_hermiticity_tolerance .and. &
         face_balance_defect<=dg_dc_gs_face_balance_tolerance .and. &
@@ -739,11 +761,14 @@ Continuation_Stages: do
           stop 'DG DC local-basis continuation rollback limit reached'
         cycle Continuation_Stages
       end if
+      accepted_step_count=accepted_step_count+1
+      minimum_projector_seen=min(minimum_projector_seen,projector_overlap)
+      lambda_history(accepted_step_count)=trial_lambda
+      lambda_steps(accepted_step_count)=trial_lambda-accepted_lambda
       accepted_lambda=trial_lambda
       accepted_coefficient_rows=coefficient_rows
       accepted_eigenvalues=eigenvalues
       accepted_density=previous_density
-      accepted_step_count=accepted_step_count+1
       first_stage=.false.
       if(accepted_lambda==dg_dc_gs_target_lambda) then
         unmixed_gate=.true.
@@ -770,13 +795,15 @@ Continuation_Stages: do
     if(.not.dg_handoff_ok) stop 'DG DC local-basis result state allocation failed collectively'
     candidate_state%scf_iterations=iteration
     candidate_state%geometry_fingerprint=layout%geometry_fingerprint
-    candidate_state%operator_fingerprint=iteration_operator_fingerprint
+    candidate_state%hamiltonian_operator_fingerprint=iteration_operator_fingerprint
+    candidate_state%operator_fingerprint=dg_dc_operator_fingerprint()
     candidate_state%density_residual=density_residual_global
     candidate_state%interface_scale=dg_dc_gs_target_lambda
     candidate_state%fragment_id=layout%fragment_id
     candidate_state%local_basis_count=layout%local_basis_count
     candidate_state%global_basis_count=layout%global_basis_count
     candidate_state%global_band_count=layout%global_band_count
+    candidate_state%raw_basis_count=nraw
     candidate_state%core_size=core_size
     candidate_state%full_spatial_shape=spsi_shape(1:3)
     candidate_state%ready=.true.
@@ -798,15 +825,70 @@ Continuation_Stages: do
     dg_dc_local_basis_state%scf_iterations=candidate_state%scf_iterations
     dg_dc_local_basis_state%geometry_fingerprint=candidate_state%geometry_fingerprint
     dg_dc_local_basis_state%operator_fingerprint=candidate_state%operator_fingerprint
+    dg_dc_local_basis_state%hamiltonian_operator_fingerprint= &
+      candidate_state%hamiltonian_operator_fingerprint
     dg_dc_local_basis_state%density_residual=candidate_state%density_residual
     dg_dc_local_basis_state%interface_scale=candidate_state%interface_scale
     dg_dc_local_basis_state%fragment_id=candidate_state%fragment_id
     dg_dc_local_basis_state%local_basis_count=candidate_state%local_basis_count
     dg_dc_local_basis_state%global_basis_count=candidate_state%global_basis_count
     dg_dc_local_basis_state%global_band_count=candidate_state%global_band_count
+    dg_dc_local_basis_state%raw_basis_count=candidate_state%raw_basis_count
     dg_dc_local_basis_state%core_size=candidate_state%core_size
     dg_dc_local_basis_state%full_spatial_shape=candidate_state%full_spatial_shape
     dg_dc_local_basis_state%ready=.true.
+    dg_gs_controls=default_dg_dc_gs_controls()
+    dg_gs_controls%intermediate_orbital_tolerance=dg_dc_gs_intermediate_orbital_tolerance
+    dg_gs_controls%intermediate_density_tolerance=dg_dc_gs_intermediate_density_tolerance
+    dg_gs_controls%final_orbital_tolerance=dg_dc_gs_final_orbital_tolerance
+    dg_gs_controls%final_density_tolerance=dg_dc_gs_final_density_tolerance
+    dg_gs_controls%subspace_tolerance=dg_dc_gs_subspace_tolerance
+    dg_gs_controls%initial_lambda_step=dg_dc_gs_initial_lambda_step
+    dg_gs_controls%minimum_lambda_step=dg_dc_gs_minimum_lambda_step
+    dg_gs_controls%maximum_lambda_step=dg_dc_gs_maximum_lambda_step
+    dg_gs_controls%allowed_residual_growth=dg_dc_gs_allowed_residual_growth
+    dg_gs_controls%density_mix_rate=dg_dc_gs_density_mix_rate
+    dg_gs_controls%hermiticity_tolerance=dg_dc_gs_hermiticity_tolerance
+    dg_gs_controls%orthogonality_tolerance=dg_dc_gs_orthogonality_tolerance
+    dg_gs_controls%face_balance_tolerance=dg_dc_gs_face_balance_tolerance
+    dg_gs_controls%electron_count_tolerance=dg_dc_gs_electron_count_tolerance
+    dg_gs_controls%minimum_projector_overlap=dg_dc_gs_minimum_projector_overlap
+    dg_gs_controls%maximum_scf_iterations=dg_dc_gs_maximum_scf_iterations
+    dg_gs_controls%maximum_eigensolver_iterations=dg_dc_gs_maximum_eigensolver_iterations
+    dg_gs_controls%maximum_rollbacks=dg_dc_gs_maximum_rollbacks
+    if(allocated(dg_gs_result%lambda_history))deallocate(dg_gs_result%lambda_history)
+    if(allocated(dg_gs_result%lambda_steps))deallocate(dg_gs_result%lambda_steps)
+    allocate(dg_gs_result%lambda_history(accepted_step_count),dg_gs_result%lambda_steps(accepted_step_count))
+    dg_gs_result%lambda_history=lambda_history(:accepted_step_count)
+    dg_gs_result%lambda_steps=lambda_steps(:accepted_step_count)
+    dg_gs_result%phase=DG_DC_ACCEPTED
+    dg_gs_result%naccepted_steps=accepted_step_count
+    dg_gs_result%nrollbacks=rollback_count
+    dg_gs_result%mixing_reset_count=1
+    dg_gs_result%total_scf_iterations=iteration
+    dg_gs_result%lambda=accepted_lambda
+    dg_gs_result%maximum_interface_scale=accepted_lambda
+    dg_gs_result%minimum_projector_overlap=min(minimum_projector_seen,projector_overlap)
+    dg_gs_result%accepted=.true.
+    dg_gs_result%failed=.false.
+    dg_gs_result%unmixed_verified=.true.
+    dg_gs_result%final_diagnostics%orbital_residual=orbital_residual
+    dg_gs_result%final_diagnostics%density_residual=density_residual_global
+    dg_gs_result%final_diagnostics%subspace_residual=subspace_residual
+    dg_gs_result%final_diagnostics%projector_overlap=projector_overlap
+    dg_gs_result%final_diagnostics%hermiticity_defect=hermiticity_defect
+    dg_gs_result%final_diagnostics%orthogonality_defect=orthogonality_defect
+    dg_gs_result%final_diagnostics%face_balance_defect=face_balance_defect
+    dg_gs_result%final_diagnostics%electron_number=sum(occupations)
+    dg_gs_result%final_diagnostics%expected_electron_number=dc%elec_num_tot
+    dg_gs_result%final_diagnostics%interface_scale=accepted_lambda
+    dg_gs_result%final_diagnostics%eigensolver_iterations=eigensolver_iterations
+    dg_gs_result%final_diagnostics%hamiltonian_potential_epoch=dg_gs_hamiltonian_potential_epoch
+    dg_gs_result%final_diagnostics%updated_potential_epoch=dg_gs_potential_epoch
+    dg_gs_result%final_diagnostics%eigensolver_converged=.true.
+    dg_gs_result%final_diagnostics%finite=.true.
+    call publish_dg_dc_ground_state_for_main(dg_handoff_ok,dg_handoff_message)
+    if(.not.dg_handoff_ok) stop 'DG DC local-basis checkpoint publication failed collectively'
   end subroutine run_dg_dc_local_basis_ground_state_for_main
 
   subroutine materialize_dg_dc_candidates_for_main()
@@ -832,8 +914,7 @@ Continuation_Stages: do
       orbital_storage_size=[size(spsi%zwf,1),size(spsi%zwf,2),size(spsi%zwf,3)]
     end if
     box_size=core_size+2*buffer
-    local_preflight=all(orbital_storage_size>=box_size) .and. &
-      system%no==natom*dg_dc_candidate_orbitals_per_atom
+    local_preflight=all(orbital_storage_size>=box_size) .and. system%no>0
     call comm_logical_and(local_preflight,global_preflight,dc%icomm_tot)
     if(.not.global_preflight) then
       if(comm_is_root(nproc_id_global)) write(*,'(a,4(a,3(i0,1x)),3(a,i0))') &
@@ -956,26 +1037,129 @@ Continuation_Stages: do
     if(.not.dg_handoff_ok) stop 'DG DC verified ground-state checkpoint publication failed collectively'
   end subroutine run_dg_dc_ground_state_for_main
 
+  subroutine publish_dg_dc_direct_ground_state_for_main(ok,message)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    type(s_dg_dc_direct_checkpoint_state)::checkpoint
+    integer::neighbors(3,2),periodic_shifts(3,2),axis,side_index,iface,is
+    integer::orbital_core_start(3),orbital_core_end(3)
+    character(512)::checkpoint_root
+    call build_dg_dc_six_face_neighbors(dc%i_frag,dc%ixyz_frag,dc%nxyz_domain_frag,dc%lg_tot%num, &
+      neighbors,periodic_shifts,ok,message)
+    if(.not.ok)return
+    checkpoint%ready=.true.
+    checkpoint%accepted=dg_dc_handoff_runtime%direct_ground_state_complete
+    checkpoint%unmixed_verified=dg_dc_handoff_runtime%direct_ground_state_complete
+    checkpoint%fragment_id=dc%i_frag
+    checkpoint%nstate=system%no
+    checkpoint%state_start=info%io_s
+    checkpoint%state_count=info%io_e-info%io_s+1
+    checkpoint%nspin=system%nspin
+    checkpoint%scf_iterations=Miter
+    checkpoint%core_size=dc%nxyz_domain_frag(:,dc%i_frag)
+    checkpoint%full_spatial_shape=[size(spsi%rwf,1),size(spsi%rwf,2),size(spsi%rwf,3)]
+    checkpoint%orbital_spatial_lower_bound=[lbound(spsi%rwf,1),lbound(spsi%rwf,2),lbound(spsi%rwf,3)]
+    checkpoint%global_size=dc%lg_tot%num
+    checkpoint%fragment_origin=dc%ixyz_frag(:,dc%i_frag)
+    checkpoint%fragment_size=checkpoint%core_size
+    checkpoint%density_origin=dc%mg_tot%is-dc%lg_tot%is
+    checkpoint%density_size=dc%mg_tot%ie-dc%mg_tot%is+1
+    orbital_core_start=max(mg%is,[1,1,1])
+    orbital_core_end=min(mg%ie,checkpoint%core_size)
+    checkpoint%orbital_core_local_origin=orbital_core_start
+    checkpoint%orbital_core_size=max(0,orbital_core_end-orbital_core_start+1)
+    checkpoint%orbital_core_origin=checkpoint%fragment_origin+min(orbital_core_start-1,checkpoint%core_size)
+    do axis=1,3
+    do side_index=1,2
+      iface=2*(axis-1)+side_index
+      checkpoint%face_neighbors(iface)=neighbors(axis,side_index)
+    enddo
+    enddo
+    checkpoint%continuation_rollbacks=dg_dc_handoff_runtime%continuation_rollbacks
+    checkpoint%projector_generation=dg_dc_handoff_runtime%projector_generation
+    checkpoint%projector_retained_rank=dg_dc_handoff_runtime%projector_retained_rank
+    checkpoint%projector_required_rank=dg_dc_handoff_runtime%projector_required_rank
+    checkpoint%geometry_fingerprint=dg_dc_geometry_fingerprint()
+    checkpoint%operator_fingerprint=dg_dc_operator_fingerprint()
+    checkpoint%hamiltonian_operator_fingerprint=ieor(checkpoint%operator_fingerprint, &
+      dg_dc_frozen_operator_fingerprint)
+    if(checkpoint%hamiltonian_operator_fingerprint==0_8)checkpoint%hamiltonian_operator_fingerprint=1_8
+    checkpoint%projector_fingerprint=dg_dc_handoff_runtime%projector_fingerprint
+    checkpoint%density_residual=dg_dc_handoff_runtime%accepted_stage_residual
+    checkpoint%interface_scale=dg_dc_handoff_runtime%accepted_interface_scale
+    checkpoint%orbital_residual=dg_dc_handoff_runtime%direct_orbital_residual
+    checkpoint%orthogonality_defect=dg_dc_handoff_runtime%direct_orthogonality_defect
+    checkpoint%hermiticity_defect=dg_dc_handoff_runtime%direct_hermiticity_defect
+    checkpoint%charge_error=dg_dc_handoff_runtime%charge_error
+    checkpoint%face_balance_defect=dg_dc_handoff_runtime%direct_face_balance_defect
+    checkpoint%density_tolerance=dg_dc_gs_final_density_tolerance
+    checkpoint%orbital_tolerance=dg_dc_gs_final_orbital_tolerance
+    checkpoint%orthogonality_tolerance=dg_dc_gs_orthogonality_tolerance
+    checkpoint%hermiticity_tolerance=dg_dc_gs_hermiticity_tolerance
+    checkpoint%charge_tolerance=dg_dc_gs_electron_count_tolerance
+    checkpoint%face_balance_tolerance=dg_dc_gs_face_balance_tolerance
+    checkpoint%projector_projection_residual=dg_dc_handoff_runtime%projector_projection_residual
+    checkpoint%projector_escape_norm=dg_dc_handoff_runtime%projector_escape_norm
+    checkpoint%projector_residual_limit=dg_dc_handoff_runtime%projector_residual_limit
+    checkpoint%projector_escape_limit=dg_dc_handoff_runtime%projector_escape_limit
+    checkpoint%face_action_norm=dg_dc_handoff_runtime%face_action_norm
+    checkpoint%face_pair_balance=dg_dc_handoff_runtime%face_pair_balance
+    checkpoint%fragment_orbitals=spsi%rwf
+    checkpoint%occupations=system%rocc(info%io_s:info%io_e,:,:)
+    checkpoint%continuation_scale_history=dg_dc_handoff_runtime%continuation_scale_history
+    checkpoint%continuation_step_history=dg_dc_handoff_runtime%continuation_step_history
+    allocate(checkpoint%density(checkpoint%density_size(1),checkpoint%density_size(2), &
+      checkpoint%density_size(3),system%nspin))
+    allocate(checkpoint%hartree(checkpoint%density_size(1),checkpoint%density_size(2), &
+      checkpoint%density_size(3)))
+    allocate(checkpoint%vxc,mold=checkpoint%density)
+    allocate(checkpoint%vlocal,mold=checkpoint%density)
+    checkpoint%hartree=dc%Vh_tot%f
+    do is=1,system%nspin
+      checkpoint%density(:,:,:,is)=dc%rho_tot_s(is)%f
+      checkpoint%vxc(:,:,:,is)=dc%Vxc_tot(is)%f
+      checkpoint%vlocal(:,:,:,is)=dc%vloc_tot(is)%f
+    enddo
+    checkpoint_root=trim(sysname)//'.dg_dc_direct'
+    call publish_dg_dc_direct_checkpoint(trim(checkpoint_root),checkpoint,dc%icomm_tot,ok,message)
+    if(ok.and.comm_is_root(nproc_id_global))then
+      write(*,'(a,1x,a)')'[DG-DC-DIRECT] checkpoint',trim(checkpoint_root)
+      write(*,'(a,2(a,es24.16),a,i0)')'[DG-DC-DIRECT] diagnostics', &
+        ' orbital_residual=',checkpoint%orbital_residual, &
+        ' density_residual=',checkpoint%density_residual, &
+        ' rollbacks=',checkpoint%continuation_rollbacks
+    endif
+  end subroutine publish_dg_dc_direct_ground_state_for_main
+
   subroutine publish_dg_dc_ground_state_for_main(ok,message)
     logical,intent(out)::ok
     character(*),intent(out)::message
     type(s_dg_ground_state_checkpoint)::checkpoint
-    real(8),allocatable::checkpoint_vxc(:,:,:,:),checkpoint_vlocal(:,:,:,:)
-    integer::is,iface
+    real(8),allocatable::checkpoint_density(:,:,:,:),checkpoint_vxc(:,:,:,:),checkpoint_vlocal(:,:,:,:)
+    integer::is,axis,side_index,iface
     integer::face_neighbors(6)
+    integer::neighbors(3,2),periodic_shifts(3,2)
     character(512)::checkpoint_root
-    allocate(checkpoint_vxc(size(dg_gs_density,1),size(dg_gs_density,2),size(dg_gs_density,3),system%nspin))
+    allocate(checkpoint_density(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),system%nspin))
+    allocate(checkpoint_vxc,mold=checkpoint_density)
     allocate(checkpoint_vlocal,mold=checkpoint_vxc)
     do is=1,system%nspin
+      checkpoint_density(:,:,:,is)=dc%rho_tot_s(is)%f
       checkpoint_vxc(:,:,:,is)=dc%Vxc_tot(is)%f
       checkpoint_vlocal(:,:,:,is)=dc%vloc_tot(is)%f
     end do
-    do iface=1,size(face_neighbors)
-      face_neighbors(iface)=dg_dc_nodal_runtime%faces(iface)%neighbor_fragment-1
+    call build_dg_dc_six_face_neighbors(dc%i_frag,dc%ixyz_frag,dc%nxyz_domain_frag,dc%lg_tot%num, &
+      neighbors,periodic_shifts,ok,message)
+    if(.not.ok)return
+    do axis=1,3
+    do side_index=1,2
+      iface=2*(axis-1)+side_index
+      face_neighbors(iface)=neighbors(axis,side_index)-1
     end do
-    call populate_dg_ground_state_checkpoint(checkpoint,dg_dc_nodal_runtime,dg_gs_result,dg_gs_controls,dg_gs_density, &
-      dc%Vh_tot%f,checkpoint_vxc,checkpoint_vlocal,dc%lg_tot%num,dg_gs_fragment_origins, &
-      dg_gs_fragment_sizes,face_neighbors,'DG_DC_GS',ok,message)
+    end do
+    call populate_dg_ground_state_checkpoint(checkpoint,dg_dc_local_basis_state,dg_gs_result,dg_gs_controls, &
+      checkpoint_density,dc%Vh_tot%f,checkpoint_vxc,checkpoint_vlocal,dc%lg_tot%num,dc%ixyz_frag, &
+      dc%nxyz_domain_frag,face_neighbors,'DG_DC_GS',ok,message)
     if(.not.ok)return
     checkpoint_root=trim(sysname)//'.dg_dc_gs'
     call publish_dg_ground_state_checkpoint(trim(checkpoint_root),checkpoint,dc%icomm_tot,ok,message)

@@ -3457,6 +3457,16 @@ contains
     call yn_argument_check(yn_dc_lcfo_wannier_cluster)
     call yn_argument_check(yn_dc_lcfo_block_diag_h)
     call yn_argument_check(yn_dg_dc_local_periodic)
+    if(yn_dg_dc_local_periodic=='y' .and. trim(theory)/='dft') &
+      call sawf_input_fatal("DG DC local-periodic route is ground-state DFT only")
+    if(yn_dg_dc_local_periodic=='y' .and. yn_dc/='y') &
+      call sawf_input_fatal("DG DC local-periodic route requires yn_dc='y'")
+    if(yn_dg_dc_local_periodic=='y' .and. yn_spinorbit=='y') &
+      call sawf_input_fatal("DG DC local-periodic route currently requires real non-SOI orbitals")
+    if(yn_dg_dc_local_periodic=='y' .and. (yn_dc_lcfo=='y' .or. yn_dc_lcfo_flux=='y' .or. &
+       yn_dc_lcfo_wannier=='y' .or. yn_dc_lcfo_local_wannier=='y' .or. &
+       yn_dc_lcfo_wannier_pw=='y' .or. yn_eigenexa=='y')) &
+      call sawf_input_fatal("DG DC local-periodic route forbids LCFO, EigenExa, and WPW fallback controls")
     if(dg_dc_handoff_min_iter < 1) &
       call sawf_input_fatal("dg_dc_handoff_min_iter must be positive")
     if(.not.ieee_is_finite(dg_dc_handoff_tolerance) .or. dg_dc_handoff_tolerance <= 0d0) &
