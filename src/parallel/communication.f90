@@ -15,7 +15,7 @@
 !
 module communication
   use mpi, only: MPI_COMM_NULL,MPI_PROC_NULL
-  use nvtx
+  use nvtx_wrapper
   implicit none
 
   integer, public, parameter :: COMM_GROUP_NULL = MPI_COMM_NULL
@@ -43,6 +43,10 @@ module communication
   ! application stops when a following routines is called in no-mpi environment
   public :: comm_send_init
   public :: comm_recv_init
+#ifdef USE_OPENACC
+  public :: comm_send_init_device
+  public :: comm_recv_init_device
+#endif
   public :: comm_start_all
   public :: comm_free_reqs
 
@@ -150,6 +154,20 @@ module communication
     module procedure comm_recv_init_array5d_double
     module procedure comm_recv_init_array5d_dcomplex
   end interface
+
+#ifdef USE_OPENACC
+  interface comm_send_init_device
+    ! 4-D array
+    module procedure comm_send_init_device_array4d_double
+    module procedure comm_send_init_device_array4d_dcomplex
+  end interface
+
+  interface comm_recv_init_device
+    ! 4-D array
+    module procedure comm_recv_init_device_array4d_double
+    module procedure comm_recv_init_device_array4d_dcomplex
+  end interface
+#endif
 
   interface comm_summation
     ! scalar
@@ -623,6 +641,28 @@ contains
     MPI_ERROR_CHECK(call MPI_Send_init(invalue, size(invalue), MPI_DOUBLE_COMPLEX, ndest, ntag, ngroup, req, ierr))
   end function
 
+#ifdef USE_OPENACC
+  function comm_send_init_device_array4d_double(invalue, ndest, ntag, ngroup) result(req)
+    use cudafor
+    use mpi, only: MPI_DOUBLE_PRECISION
+    implicit none
+    real(8), intent(in), device :: invalue(:,:,:,:)
+    integer, intent(in) :: ndest, ntag, ngroup
+    integer :: ierr, req
+    MPI_ERROR_CHECK(call MPI_Send_init(invalue, size(invalue), MPI_DOUBLE_PRECISION, ndest, ntag, ngroup, req, ierr))
+  end function
+
+  function comm_send_init_device_array4d_dcomplex(invalue, ndest, ntag, ngroup) result(req)
+    use cudafor
+    use mpi, only: MPI_DOUBLE_COMPLEX
+    implicit none
+    complex(8), intent(in), device :: invalue(:,:,:,:)
+    integer, intent(in)    :: ndest, ntag, ngroup
+    integer :: ierr, req
+    MPI_ERROR_CHECK(call MPI_Send_init(invalue, size(invalue), MPI_DOUBLE_COMPLEX, ndest, ntag, ngroup, req, ierr))
+  end function
+#endif
+
   function comm_send_init_array5d_double(invalue, ndest, ntag, ngroup) result(req)
     use mpi, only: MPI_DOUBLE_PRECISION
     implicit none
@@ -676,6 +716,28 @@ contains
     integer :: ierr, req
     MPI_ERROR_CHECK(call MPI_Recv_init(outvalue, size(outvalue), MPI_DOUBLE_COMPLEX, nsrc, ntag, ngroup, req, ierr))
   end function
+
+#ifdef USE_OPENACC
+  function comm_recv_init_device_array4d_double(outvalue, nsrc, ntag, ngroup) result(req)
+    use cudafor
+    use mpi, only: MPI_DOUBLE_PRECISION
+    implicit none
+    real(8), intent(out), device :: outvalue(:,:,:,:)
+    integer, intent(in)  :: nsrc, ntag, ngroup
+    integer :: ierr, req
+    MPI_ERROR_CHECK(call MPI_Recv_init(outvalue, size(outvalue), MPI_DOUBLE_PRECISION, nsrc, ntag, ngroup, req, ierr))
+  end function
+
+  function comm_recv_init_device_array4d_dcomplex(outvalue, nsrc, ntag, ngroup) result(req)
+    use cudafor
+    use mpi, only: MPI_DOUBLE_COMPLEX
+    implicit none
+    complex(8), intent(out), device :: outvalue(:,:,:,:)
+    integer, intent(in)     :: nsrc, ntag, ngroup
+    integer :: ierr, req
+    MPI_ERROR_CHECK(call MPI_Recv_init(outvalue, size(outvalue), MPI_DOUBLE_COMPLEX, nsrc, ntag, ngroup, req, ierr))
+  end function
+#endif
 
   function comm_recv_init_array5d_double(outvalue, nsrc, ntag, ngroup) result(req)
     use mpi, only: MPI_DOUBLE_PRECISION

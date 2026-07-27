@@ -33,7 +33,7 @@ contains
 
   subroutine dc_lcfo(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
     use communication, only: comm_summation
-    use salmon_global, only: yn_dc_lcfo_diag
+    use salmon_global, only: yn_dc_lcfo_diag, lcfo_eigensolver
     use structures
     implicit none
     type(s_rgrid),        intent(in) :: lg,mg
@@ -77,12 +77,31 @@ contains
     
     if(yn_dc_lcfo_diag=='y') then
       allocate(esp_tot(maxval(n_mat),nspin))
-      if(dc%id_frag==0) allocate(coef_wf(dc%nstate_frag,dc%nstate_tot,nspin))
+      if(dc%id_frag==0) then
+        allocate(coef_wf(dc%nstate_frag,dc%nstate_tot,nspin))
+        coef_wf = 0d0
+      end if
+      if(any(n_mat < dc%nstate_tot)) then
+        stop "DC-LCFO: nstate_tot exceeds the Hamiltonian matrix dimension."
+      end if
+      select case(trim(lcfo_eigensolver))
+      case('lapack')
+        call diag_lapack
+      case('eigenexa')
 #ifdef USE_EIGENEXA
-      call diag_eigenexa
+        call diag_eigenexa
 #else
-      call diag_lapack
+        stop "DC-LCFO: EigenExa support is not enabled."
 #endif
+      case('slepc')
+#ifdef USE_SLEPC
+        call diag_slepc
+#else
+        stop "DC-LCFO: SLEPc support is not enabled."
+#endif
+      case default
+        stop "DC-LCFO: invalid lcfo_eigensolver."
+      end select
       if(dc%id_tot==0) write(*,*) "diagonalization: done"
 !      call test_write_psi
     end if
@@ -320,6 +339,7 @@ contains
       
     ! diagonal block < lambda_{ifrag,io} | H | lambda_{ifrag,jo} >
       allocate(mat_H_local(dc%nstate_frag,dc%nstate_frag,nspin))
+      mat_H_local = 0d0
       l = dc%nxyz_domain
       do ispin=1,nspin
       do io=1,n_basis(dc%i_frag,ispin)
@@ -530,6 +550,232 @@ contains
       
       deallocate(h,v_tmp1,v_tmp2)
     end subroutine diag_eigenexa
+#endif
+
+#ifdef USE_SLEPC
+    subroutine diag_slepc
+      use communication, only: comm_create_group, comm_free_group
+      use slepceps
+      implicit none
+      type(tMat) :: mat_h
+      type(tVec) :: eigvec
+      type(tEPS) :: eps
+      integer(PETSC_INT_KIND) :: n_petsc,nev,n_local,row_start,row_end
+      integer(PETSC_INT_KIND) :: nconv,niter,ieig,k,gidx,expected_start
+      integer(PETSC_INT_KIND) :: row(1),ncols,col_start,col_end,diag_count
+      integer :: ierr
+      real(PETSC_REAL_KIND) :: eig_r,eig_i
+      real(PETSC_REAL_KIND) :: rel_error,max_error
+      integer(PETSC_INT_KIND),allocatable :: d_nnz(:),o_nnz(:),cols(:),eig_indices(:)
+      real(PETSC_REAL_KIND),allocatable :: vals(:),eig_values(:)
+      integer :: icomm_slepc,key_slepc,n_local_default,local_offset
+      integer :: n_before,n_connected,io_local
+      integer,allocatable :: adjacency_local(:,:),adjacency(:,:)
+      real(8),allocatable :: coef_local(:,:),coef_fragment(:,:)
+
+      call SlepcInitialize(PETSC_NULL_CHARACTER,ierr)
+      call check_slepc(ierr,'SlepcInitialize')
+
+      key_slepc = (dc%i_frag-1)*dc%isize_tot + dc%id_frag
+      icomm_slepc = comm_create_group(dc%icomm_tot,0,key_slepc)
+
+      allocate(adjacency_local(dc%n_frag,dc%n_frag))
+      allocate(adjacency(dc%n_frag,dc%n_frag))
+      adjacency_local = 0
+      if(dc%id_frag==0) then
+        adjacency_local(dc%i_frag,dc%i_frag) = 1
+        do i_halo=1,n_halo
+          adjacency_local(dc%i_frag,halo(i_halo)%ifrag_src) = 1
+        end do
+      end if
+      call comm_summation(adjacency_local,adjacency,dc%n_frag*dc%n_frag,dc%icomm_tot)
+      adjacency = max(adjacency,transpose(adjacency))
+      deallocate(adjacency_local)
+
+      allocate(coef_local(dc%nstate_frag,dc%nstate_tot))
+      allocate(coef_fragment(dc%nstate_frag,dc%nstate_tot))
+      allocate(cols(max(1,dc%nstate_frag)),vals(max(1,dc%nstate_frag)))
+
+      do ispin=1,nspin
+        if(dc%id_tot==0) write(*,*) "SLEPc Krylov-Schur diag, #dim=",n_mat(ispin)
+        n = n_mat(ispin)
+        n_petsc = int(n,PETSC_INT_KIND)
+        nev = int(dc%nstate_tot,PETSC_INT_KIND)
+
+        n_local_default = n_basis(dc%i_frag,ispin)/dc%isize_frag
+        if(dc%id_frag < mod(n_basis(dc%i_frag,ispin),dc%isize_frag)) then
+          n_local_default = n_local_default + 1
+        end if
+        local_offset = dc%id_frag*(n_basis(dc%i_frag,ispin)/dc%isize_frag) &
+        & + min(dc%id_frag,mod(n_basis(dc%i_frag,ispin),dc%isize_frag))
+        n_before = sum(n_basis(1:dc%i_frag-1,ispin))
+        expected_start = int(n_before+local_offset,PETSC_INT_KIND)
+        n_local = int(n_local_default,PETSC_INT_KIND)
+
+        call MatCreate(icomm_slepc,mat_h,ierr)
+        call check_slepc(ierr,'MatCreate')
+        call MatSetSizes(mat_h,n_local,n_local,n_petsc,n_petsc,ierr)
+        call check_slepc(ierr,'MatSetSizes')
+        call MatSetType(mat_h,MATMPIAIJ,ierr)
+        call check_slepc(ierr,'MatSetType')
+        call MatGetOwnershipRange(mat_h,row_start,row_end,ierr)
+        call check_slepc(ierr,'MatGetOwnershipRange')
+        if(row_start /= expected_start .or. row_end-row_start /= n_local) then
+          stop "DC-LCFO: unexpected PETSc row ownership."
+        end if
+
+        allocate(d_nnz(n_local_default),o_nnz(n_local_default))
+        diag_count = 0_PETSC_INT_KIND
+        n_connected = 0
+        do jfrag=1,dc%n_frag
+          if(adjacency(dc%i_frag,jfrag)==0) cycle
+          col_start = int(sum(n_basis(1:jfrag-1,ispin)),PETSC_INT_KIND)
+          col_end = col_start + int(n_basis(jfrag,ispin),PETSC_INT_KIND)
+          diag_count = diag_count + max(0_PETSC_INT_KIND, &
+          & min(col_end,row_end)-max(col_start,row_start))
+          n_connected = n_connected + n_basis(jfrag,ispin)
+        end do
+        d_nnz = diag_count
+        o_nnz = int(n_connected,PETSC_INT_KIND)-diag_count
+        call MatMPIAIJSetPreallocation(mat_h,0_PETSC_INT_KIND,d_nnz, &
+        & 0_PETSC_INT_KIND,o_nnz,ierr)
+        call check_slepc(ierr,'MatMPIAIJSetPreallocation')
+        deallocate(d_nnz,o_nnz)
+        call MatSetOption(mat_h,MAT_SYMMETRIC,PETSC_TRUE,ierr)
+        call check_slepc(ierr,'MatSetOption(MAT_SYMMETRIC)')
+        call MatSetOption(mat_h,MAT_SYMMETRY_ETERNAL,PETSC_TRUE,ierr)
+        call check_slepc(ierr,'MatSetOption(MAT_SYMMETRY_ETERNAL)')
+
+        if(dc%id_frag==0) then
+          ifrag = dc%i_frag
+          ncols = int(n_basis(ifrag,ispin),PETSC_INT_KIND)
+          do io=1,n_basis(ifrag,ispin)
+            row(1) = int(index_basis(io,ifrag,ispin)-1,PETSC_INT_KIND)
+            do jo=1,n_basis(ifrag,ispin)
+              cols(jo) = int(index_basis(jo,ifrag,ispin)-1,PETSC_INT_KIND)
+              if(io <= jo) then
+                vals(jo) = mat_H_local(io,jo,ispin)
+              else
+                vals(jo) = mat_H_local(jo,io,ispin)
+              end if
+            end do
+            call MatSetValues(mat_h,1_PETSC_INT_KIND,row,ncols,cols,vals,ADD_VALUES,ierr)
+            call check_slepc(ierr,'MatSetValues(diagonal block)')
+          end do
+
+          do i_halo=1,n_halo
+            jfrag = halo(i_halo)%ifrag_src
+            ncols = int(n_basis(jfrag,ispin),PETSC_INT_KIND)
+            do io=1,n_basis(ifrag,ispin)
+              row(1) = int(index_basis(io,ifrag,ispin)-1,PETSC_INT_KIND)
+              do jo=1,n_basis(jfrag,ispin)
+                cols(jo) = int(index_basis(jo,jfrag,ispin)-1,PETSC_INT_KIND)
+                vals(jo) = 0.5d0*halo(i_halo)%mat_H_local(jo,io,ispin)
+              end do
+              call MatSetValues(mat_h,1_PETSC_INT_KIND,row,ncols,cols,vals,ADD_VALUES,ierr)
+              call check_slepc(ierr,'MatSetValues(off-diagonal block)')
+            end do
+
+            ncols = int(n_basis(ifrag,ispin),PETSC_INT_KIND)
+            do jo=1,n_basis(jfrag,ispin)
+              row(1) = int(index_basis(jo,jfrag,ispin)-1,PETSC_INT_KIND)
+              do io=1,n_basis(ifrag,ispin)
+                cols(io) = int(index_basis(io,ifrag,ispin)-1,PETSC_INT_KIND)
+                vals(io) = 0.5d0*halo(i_halo)%mat_H_local(jo,io,ispin)
+              end do
+              call MatSetValues(mat_h,1_PETSC_INT_KIND,row,ncols,cols,vals,ADD_VALUES,ierr)
+              call check_slepc(ierr,'MatSetValues(transposed off-diagonal block)')
+            end do
+          end do
+        end if
+
+        call MatAssemblyBegin(mat_h,MAT_FINAL_ASSEMBLY,ierr)
+        call check_slepc(ierr,'MatAssemblyBegin')
+        call MatAssemblyEnd(mat_h,MAT_FINAL_ASSEMBLY,ierr)
+        call check_slepc(ierr,'MatAssemblyEnd')
+
+        call EPSCreate(icomm_slepc,eps,ierr)
+        call check_slepc(ierr,'EPSCreate')
+        call EPSSetOperators(eps,mat_h,PETSC_NULL_MAT,ierr)
+        call check_slepc(ierr,'EPSSetOperators')
+        call EPSSetProblemType(eps,EPS_HEP,ierr)
+        call check_slepc(ierr,'EPSSetProblemType')
+        call EPSSetType(eps,EPSKRYLOVSCHUR,ierr)
+        call check_slepc(ierr,'EPSSetType')
+        call EPSSetWhichEigenpairs(eps,EPS_SMALLEST_REAL,ierr)
+        call check_slepc(ierr,'EPSSetWhichEigenpairs')
+        call EPSSetDimensions(eps,nev,PETSC_DETERMINE,PETSC_DETERMINE,ierr)
+        call check_slepc(ierr,'EPSSetDimensions')
+        call EPSSetOptionsPrefix(eps,'dc_lcfo_',ierr)
+        call check_slepc(ierr,'EPSSetOptionsPrefix')
+        call EPSSetFromOptions(eps,ierr)
+        call check_slepc(ierr,'EPSSetFromOptions')
+        call EPSSolve(eps,ierr)
+        call check_slepc(ierr,'EPSSolve')
+        call EPSGetConverged(eps,nconv,ierr)
+        call check_slepc(ierr,'EPSGetConverged')
+        if(nconv < nev) then
+          if(dc%id_tot==0) write(*,*) "SLEPc converged eigenpairs:",nconv," requested:",nev
+          stop "DC-LCFO: SLEPc did not converge all requested eigenpairs."
+        end if
+
+        call MatCreateVecs(mat_h,eigvec,PETSC_NULL_VEC,ierr)
+        call check_slepc(ierr,'MatCreateVecs')
+        allocate(eig_indices(n_local_default),eig_values(n_local_default))
+        do k=0_PETSC_INT_KIND,n_local-1_PETSC_INT_KIND
+          eig_indices(k+1) = row_start+k
+        end do
+        coef_local = 0d0
+        max_error = 0d0
+        do ieig=0_PETSC_INT_KIND,nev-1_PETSC_INT_KIND
+          call EPSGetEigenpair(eps,ieig,eig_r,eig_i,eigvec,PETSC_NULL_VEC,ierr)
+          call check_slepc(ierr,'EPSGetEigenpair')
+          esp_tot(ieig+1,ispin) = real(eig_r,8)
+          call VecGetValues(eigvec,n_local,eig_indices,eig_values,ierr)
+          call check_slepc(ierr,'VecGetValues')
+          do k=0_PETSC_INT_KIND,n_local-1_PETSC_INT_KIND
+            gidx = row_start+k
+            io_local = int(gidx-int(n_before,PETSC_INT_KIND))+1
+            coef_local(io_local,ieig+1) = real(eig_values(k+1),8)
+          end do
+          call EPSComputeError(eps,ieig,EPS_ERROR_RELATIVE,rel_error,ierr)
+          call check_slepc(ierr,'EPSComputeError')
+          max_error = max(max_error,rel_error)
+        end do
+        call comm_summation(coef_local,coef_fragment, &
+        & dc%nstate_frag*dc%nstate_tot,dc%icomm_frag)
+        if(dc%id_frag==0) coef_wf(:,:,ispin) = coef_fragment
+
+        call EPSGetIterationNumber(eps,niter,ierr)
+        call check_slepc(ierr,'EPSGetIterationNumber')
+        if(dc%id_tot==0) then
+          write(*,*) "SLEPc iterations:",niter," max relative residual:",max_error
+        end if
+        deallocate(eig_indices,eig_values)
+        call VecDestroy(eigvec,ierr)
+        call check_slepc(ierr,'VecDestroy')
+        call EPSDestroy(eps,ierr)
+        call check_slepc(ierr,'EPSDestroy')
+        call MatDestroy(mat_h,ierr)
+        call check_slepc(ierr,'MatDestroy')
+      end do
+
+      deallocate(adjacency,coef_local,coef_fragment,cols,vals)
+      call comm_free_group(icomm_slepc)
+      call SlepcFinalize(ierr)
+      call check_slepc(ierr,'SlepcFinalize')
+    end subroutine diag_slepc
+
+    subroutine check_slepc(ierr,where)
+      use slepceps
+      implicit none
+      integer,intent(in) :: ierr
+      character(*),intent(in) :: where
+      if(ierr /= 0) then
+        if(dc%id_tot==0) write(*,*) "SLEPc/PETSc error in ",trim(where),": ",ierr
+        stop "DC-LCFO: SLEPc/PETSc call failed."
+      end if
+    end subroutine check_slepc
 #endif
     
     subroutine output

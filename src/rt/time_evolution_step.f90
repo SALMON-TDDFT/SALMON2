@@ -41,8 +41,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   use em_field, only: calcVbox, calc_emfields
   use dip, only: subdip
   use gram_schmidt_orth, only: gram_schmidt
-  use nvtx
   use dm_unfold_sub, only: dm_unfold
+  use nvtx_wrapper
   implicit none
   integer,intent(in)       :: itt
   integer,intent(in)       :: itotNtime
@@ -523,7 +523,7 @@ END SUBROUTINE time_evolution_step
 subroutine calc_current_ion(lg,system,pp,curr_i)
   use structures
   use salmon_global, only: natom,Kion
-  use nvtx
+  use nvtx_wrapper
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_dft_system) :: system

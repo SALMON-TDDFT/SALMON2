@@ -590,7 +590,10 @@ contains
       & nelec_sbe, &
       & al_sbe, &
       & al_vec1_sbe,al_vec2_sbe,al_vec3_sbe, &
-      & norder_correction
+      & norder_correction, &
+      & gauge_sbe, &
+      & t_2, &
+      & am_s
       
     namelist/dc/ &
       & num_fragment, &
@@ -600,6 +603,7 @@ contains
       & xi_dc, &
       & yn_dc_lcfo, &
       & yn_dc_lcfo_diag, &
+      & lcfo_eigensolver, &
       & nstate_frag, &
       & energy_cut, &
       & lambda_cut
@@ -1027,6 +1031,9 @@ contains
     al_vec2_sbe(:,:) = 0.d0
     al_vec3_sbe(:,:) = 0.d0
     norder_correction = 0
+    gauge_sbe = 'velocity_gauge'
+    t_2 = -1.d0
+    am_s = 4
 !! == default for &dc
     num_fragment = 0
     num_rgrid_buffer = 0
@@ -1035,6 +1042,11 @@ contains
     xi_dc = -1d0
     yn_dc_lcfo = 'y'
     yn_dc_lcfo_diag = 'y'
+#ifdef USE_EIGENEXA
+    lcfo_eigensolver = 'eigenexa'
+#else
+    lcfo_eigensolver = 'lapack'
+#endif
     nstate_frag = 0
     energy_cut = 0d0
     lambda_cut = 1d-3
@@ -1176,6 +1188,7 @@ contains
     end if
     call string_lowercase(lattice)
     call string_lowercase(dm_unfold_option)
+    call string_lowercase(lcfo_eigensolver)
 
 ! Broad cast
 !! == bcast for &calculation
@@ -1668,6 +1681,10 @@ contains
     al_vec2_sbe = al_vec2_sbe * ulength_to_au
     al_vec3_sbe = al_vec3_sbe * ulength_to_au
     call comm_bcast(norder_correction,nproc_group_global)
+    call comm_bcast(gauge_sbe        ,nproc_group_global)
+    call comm_bcast(t_2              ,nproc_group_global)
+    t_2 = t_2 * utime_to_au
+    call comm_bcast(am_s             ,nproc_group_global)
 !! == bcast for dc
     call comm_bcast(num_fragment ,nproc_group_global)
     call comm_bcast(num_rgrid_buffer, nproc_group_global)
@@ -1676,6 +1693,7 @@ contains
     call comm_bcast(xi_dc, nproc_group_global)
     call comm_bcast(yn_dc_lcfo, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
+    call comm_bcast(lcfo_eigensolver, nproc_group_global)
     call comm_bcast(nstate_frag, nproc_group_global)
     call comm_bcast(energy_cut, nproc_group_global)
     energy_cut = energy_cut * uenergy_to_au
@@ -2639,6 +2657,9 @@ contains
         write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec3_sbe(1:3',i,')', al_vec3_sbe(1:3,i)
       end do
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'norder_correction', norder_correction
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'gauge_sbe', gauge_sbe
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't_2', t_2
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'am_s', am_s
       
       if(inml_dc >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', inml_dc
@@ -2649,6 +2670,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'xi_dc', xi_dc
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
+      write(fh_variables_log, '("#",4X,A,"=",A)') "lcfo_eigensolver",trim(lcfo_eigensolver)
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
@@ -2768,6 +2790,25 @@ contains
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
+
+    select case(trim(lcfo_eigensolver))
+    case('lapack')
+      continue
+    case('eigenexa')
+#ifdef USE_EIGENEXA
+      continue
+#else
+      stop 'lcfo_eigensolver=eigenexa requires a build with EigenExa support.'
+#endif
+    case('slepc')
+#ifdef USE_SLEPC
+      continue
+#else
+      stop 'lcfo_eigensolver=slepc requires a build with SLEPc support.'
+#endif
+    case default
+      stop "lcfo_eigensolver must be 'lapack', 'eigenexa', or 'slepc'."
+    end select
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
       stop "Nk must be 1 when yn_periodic=='n'"
@@ -2973,6 +3014,7 @@ contains
     if(yn_dc=='y') then
       if(theory/='dft') stop "DC method (yn_dc=y): theory must be dft"
       if(yn_conventional_from_dcdft=='y') stop "contradiction: yn_dc=y & yn_conventional_from_dcdft=y"
+      if(iflag_atom_coor/=ntype_atom_coor_cartesian) stop "DC method (yn_dc=y): use cartesian coordinate."
       !if(temperature < 0d0) stop "DC method (yn_dc=y): temperature must be specified."
       if(num_fragment(1)*num_fragment(2)*num_fragment(3) == 0) &
       & stop "DC method (yn_dc=y): num_fragment must be specified."
@@ -2986,6 +3028,12 @@ contains
       if(yn_jm=='y') stop "DC method (yn_dc=y): yn_jm=y is not supported."
       if(base_directory /= './') stop "DC method (yn_dc=y): base_directory must be default."
       if(nproc_k/=1) stop "DC method (yn_dc=y): nproc_k must be 1 for both the total system and fragments."
+      if(write_gs_restart_data /= 'no') then
+        if (comm_is_root(nproc_id_global)) then
+          write(*,*) "WARNING(yn_dc=y): write_gs_restart_data is internally set to 'no'"
+        end if
+        write_gs_restart_data = 'no'
+      end if
     end if
 
 #ifdef USE_FFTW
