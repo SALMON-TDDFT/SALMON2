@@ -601,6 +601,23 @@ Do not call direct real-space DG, LCFO, EigenExa, or WPW.
 
 Publish the new checkpoint only after every focused ground-state gate passes.
 
+Before publication, connect a concrete `main_dft`-owned production adapter.
+Do not use an optional global procedure registration. The adapter must:
+
+- consume the real DC buffer-periodic candidate orbitals and unique-core
+  physical state;
+- pass the periodic box IDs, symmetry image map, localization phases, values,
+  and gradients through construction;
+- recompute symmetry closure from those authoritative mapped values and
+  gradients and bind it to the basis fingerprint;
+- assemble the weak unique-core operators, execute SCF, and publish/reuse the
+  route-specific checkpoint within one rollback-capable transaction.
+
+Add RED route-level tests proving that an accepted transaction publishes,
+SCF or unmixed failure preserves the prior manifest, one-sided periodic-tail
+corruption fails collectively, and the new route cannot reach normal shutdown
+checkpoint publication.
+
 **Step 4: Focused verification**
 
 Run both fixtures on 1, 2, 4, and 8 ranks, all previous focused tests,

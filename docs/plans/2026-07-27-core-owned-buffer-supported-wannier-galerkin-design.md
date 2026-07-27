@@ -311,3 +311,29 @@ With the new route enabled:
 
 With the route disabled, established DC SCF, LCFO, EigenExa, checkpoint, and
 RT behavior is unchanged.
+
+## Production ground-state adapter
+
+The overlapping-Wannier route uses a concrete adapter owned by `main_dft`.
+It receives the already initialized DC fragment state, periodic buffer
+candidate orbitals, core ownership, physical grid IDs, quadrature weights,
+local fields, mixing state, and occupations. It does not use a process-global
+procedure registration that can be left unset.
+
+The adapter performs one closed transaction:
+
+1. materialize the conventional fragment DC occupied-plus-empty candidates
+   on their buffer-periodic boxes;
+2. construct the center-owned, buffer-supported symmetry-preserving Wannier
+   basis;
+3. derive periodic closure from the authoritative periodic-image mapping by
+   comparing mapped values and mapped gradients, and bind that closure data
+   into the basis fingerprint;
+4. assemble unique-core weak operators and run the outer coefficient SCF;
+5. publish or reuse only the route-specific checkpoint after every algebra,
+   symmetry, unmixed-density, charge, and provenance gate passes.
+
+A missing periodic image, one-sided tail corruption, stale generation, or
+failed SCF rolls back the complete transaction and terminates the route.
+There is no fallback. Shutdown and periodic checkpoint handling skip normal
+ground-state checkpoint publication while this route is active.
