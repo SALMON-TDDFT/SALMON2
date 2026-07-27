@@ -21,13 +21,21 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer::nproc,ierr,local_bad,global_bad,total_count,i,j,p,matrix_count
+    integer::nproc,ierr,local_bad,global_bad,total_count,i,j,p,matrix_count,nwann_min,nwann_max
     integer,allocatable::counts(:),displs(:)
     integer(int64),allocatable::all_ids(:)
-    integer(int64)::matrix_count64
+    integer(int64)::matrix_count64,expected_min,expected_max
     complex(real64),allocatable::local_matrix(:,:)
     logical::shape_ok,finite_overlap
+    real(real64)::hermiticity_defect,scale
     ok=.false.;message='';ownership_count=0;local_bad=0
+    call MPI_Allreduce(nwann,nwann_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(nwann,nwann_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(expected_projector_count,expected_min,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(expected_projector_count,expected_max,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(nwann_min/=nwann_max.or.expected_min/=expected_max)then
+      message='inconsistent nonlocal assembly contract across ranks';return
+    endif
     shape_ok=size(strength)==size(projector_ids).and.size(overlap,1)==nwann.and.&
       size(overlap,2)==size(projector_ids).and.size(complete_tail_overlap,1)==nwann.and.&
       size(complete_tail_overlap,2)==size(projector_ids)
@@ -75,6 +83,11 @@ contains
       local_matrix(i,j)=local_matrix(i,j)+strength(p)*conjg(overlap(i,p))*overlap(j,p)
     enddo;enddo;enddo
     call MPI_Allreduce(local_matrix,matrix,matrix_count,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    scale=max(1d0,maxval(abs(matrix)))
+    hermiticity_defect=maxval(abs(matrix-conjg(transpose(matrix))))
+    if(hermiticity_defect>1d-12*scale)then
+      message='nonlocal Hermiticity defect exceeds tolerance';return
+    endif
     matrix=0.5d0*(matrix+conjg(transpose(matrix)))
     ownership_count=total_count;ok=.true.
 #else

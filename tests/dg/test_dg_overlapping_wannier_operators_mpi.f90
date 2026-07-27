@@ -66,6 +66,12 @@ program test_dg_overlapping_wannier_operators_mpi
   call require(maxval(abs(potential-matmul(conjg(gauge),matmul(reference_potential,transpose(gauge)))))<1d-12,&
     'potential retained-space rotation covariance')
 
+  if(nproc>1)then
+    call assemble_dg_overlapping_wannier_weak_operators(comm,merge(4,3,rank==0),ids,weights,values,&
+      gradients,vlocal,6_8,kinetic,potential,owned,ok,message)
+    call require(.not.ok,'rank-inconsistent weak-operator contract rejection')
+  endif
+
   if(rank==0.and.size(ids)>0)then
     ids=[ids,ids(1)];weights=[weights,weights(1)];vlocal=[vlocal,vlocal(1)]
     values=reshape([values,values(:,1)],[3,size(ids)])

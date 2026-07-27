@@ -1,6 +1,7 @@
 #include "config.h"
 module dg_overlapping_wannier_types
   use iso_fortran_env, only: int64,real64
+  use,intrinsic :: ieee_arithmetic,only:ieee_is_finite
 #ifdef USE_MPI
   use mpi
 #endif
@@ -80,6 +81,9 @@ contains
     if(any(physical_grid_ids<=0_int64))then
       message='invalid physical grid id';return
     endif
+    if(.not.all(ieee_is_finite(values)).or..not.all(ieee_is_finite(gradients)))then
+      message='non-finite tail value or gradient';return
+    endif
     call checked_dg_wannier_extent_product([3_int64,int(size(values),int64)],allocation_size,extent_ok)
     if(.not.extent_ok)then
       message='tail allocation extent overflow';return
@@ -112,7 +116,7 @@ contains
     integer,allocatable :: core_counts(:),tail_counts(:),core_displs(:),tail_displs(:)
     integer,allocatable :: local_centers(:),global_centers(:)
     integer(int64),allocatable :: global_core(:)
-    integer(int64) :: fp_min,fp_max,geo_min,geo_max,total64,tail_total64
+    integer(int64) :: fp_min,fp_max,geo_min,geo_max,total64,tail_total64,expected_min,expected_max
     logical :: extent_ok
 
     ok=.false.;message=''
@@ -120,6 +124,12 @@ contains
     if(present(fingerprint))fingerprint=0_int64
     call MPI_Comm_rank(comm,rank,ierr)
     call MPI_Comm_size(comm,nproc,ierr)
+    call MPI_Allreduce(expected_core_count,expected_min,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(expected_core_count,expected_max,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(expected_min/=expected_max)then
+      message='inconsistent expected core ownership count across ranks'
+      return
+    endif
 
     local_bad=merge(0,1,locally_valid(basis,rank))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -245,6 +255,8 @@ contains
       if(size(basis%tail(i)%gradient,1)/=3.or. &
           size(basis%tail(i)%gradient,2)/=size(basis%tail(i)%value))return
       if(any(basis%tail(i)%physical_grid_ids<=0_int64))return
+      if(.not.all(ieee_is_finite(basis%tail(i)%value)).or.&
+          .not.all(ieee_is_finite(basis%tail(i)%gradient)))return
       do j=1,size(basis%tail(i)%physical_grid_ids)
         if(any(basis%tail(i)%physical_grid_ids(j)==basis%tail(i)%physical_grid_ids(j+1:)))return
       enddo

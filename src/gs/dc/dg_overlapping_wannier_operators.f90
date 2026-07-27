@@ -20,13 +20,21 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer::nproc,ierr,local_bad,global_bad,total_count,i,j,p,matrix_count
+    integer::nproc,ierr,local_bad,global_bad,total_count,i,j,p,matrix_count,nwann_min,nwann_max
     integer,allocatable::counts(:),displs(:)
     integer(int64),allocatable::all_ids(:)
-    integer(int64)::matrix_count64
+    integer(int64)::matrix_count64,expected_min,expected_max
     complex(real64),allocatable::local_kinetic(:,:),local_potential_matrix(:,:)
     logical::finite_payload,shapes_valid
+    real(real64)::hermiticity_defect,scale
     ok=.false.;message='';ownership_count=0;local_bad=0
+    call MPI_Allreduce(nwann,nwann_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(nwann,nwann_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(expected_core_count,expected_min,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(expected_core_count,expected_max,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(nwann_min/=nwann_max.or.expected_min/=expected_max)then
+      message='inconsistent weak-operator assembly contract across ranks';return
+    endif
     finite_payload=all(ieee_is_finite(weights)).and.all(ieee_is_finite(local_potential))
     if(nwann<=0.or.expected_core_count<=0_int64)local_bad=1
     if(size(weights)/=size(core_ids).or.size(local_potential)/=size(core_ids))local_bad=1
@@ -88,6 +96,12 @@ contains
     allocate(kinetic(nwann,nwann),potential(nwann,nwann))
     call MPI_Allreduce(local_kinetic,kinetic,matrix_count,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
     call MPI_Allreduce(local_potential_matrix,potential,matrix_count,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    scale=max(1d0,max(maxval(abs(kinetic)),maxval(abs(potential))))
+    hermiticity_defect=max(maxval(abs(kinetic-conjg(transpose(kinetic)))),&
+      maxval(abs(potential-conjg(transpose(potential)))))
+    if(hermiticity_defect>1d-12*scale)then
+      message='weak-operator Hermiticity defect exceeds tolerance';return
+    endif
     kinetic=0.5d0*(kinetic+conjg(transpose(kinetic)))
     potential=0.5d0*(potential+conjg(transpose(potential)))
     ownership_count=total_count;ok=.true.

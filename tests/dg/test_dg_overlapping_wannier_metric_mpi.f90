@@ -56,6 +56,12 @@ program test_dg_overlapping_wannier_metric_mpi
   call require(.not.ok,'missing owner-pair rejection')
   pairs=.true.
 
+  if(nproc>1)then
+    call assemble_dg_overlapping_wannier_metric(comm,merge(4,3,rank==0),ids,weights,values,pairs,&
+      4_8,1d-10,metric,vectors,spectrum,minimum,condition,rejected,owned,ok,message)
+    call require(.not.ok,'rank-inconsistent metric contract rejection')
+  endif
+
   if(rank==0.and.size(ids)>0)then
     ids=[ids,ids(1)];weights=[weights,weights(1)]
     values=reshape([values,values(:,1)],[3,size(ids)])

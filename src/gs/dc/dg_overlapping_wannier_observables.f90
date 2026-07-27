@@ -26,15 +26,26 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer::nproc,ierr,local_bad,global_bad,total_count,i,j,p,axis,matrix_count
+    integer::nproc,ierr,local_bad,global_bad,total_count,i,j,p,axis,matrix_count,nwann_min,nwann_max
     integer,allocatable::counts(:),displs(:)
     integer(int64),allocatable::all_ids(:)
-    integer(int64)::matrix_count64
+    integer(int64)::matrix_count64,expected_min,expected_max
     complex(real64),allocatable::local_position(:,:,:),local_derivative(:,:,:),identity(:,:),&
       total_hamiltonian(:,:),reference_matrix(:,:)
-    real(real64)::wrapped_coordinate
+    real(real64)::wrapped_coordinate,tolerance_min,tolerance_max,position_defect,position_scale,&
+      reference_geometry(6)
+    character(len(position_convention))::reference_convention
     logical::shape_ok,finite_payload
     ok=.false.;message='';ownership_count=0;local_bad=0
+    call MPI_Allreduce(nwann,nwann_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(nwann,nwann_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(expected_core_count,expected_min,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(expected_core_count,expected_max,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(antihermitian_tolerance,tolerance_min,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(antihermitian_tolerance,tolerance_max,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(nwann_min/=nwann_max.or.expected_min/=expected_max.or.tolerance_min/=tolerance_max)then
+      message='inconsistent observable assembly contract across ranks';return
+    endif
     shape_ok=size(weights)==size(core_ids).and.size(coordinates,1)==3.and.&
       size(coordinates,2)==size(core_ids).and.size(values,1)==nwann.and.&
       size(values,2)==size(core_ids).and.size(gradients,1)==3.and.&
@@ -60,6 +71,14 @@ contains
     endif
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(global_bad/=0)then;message='invalid observable unique-core payload or position convention';return;endif
+    reference_geometry=[origin,cell_length]
+    call MPI_Bcast(reference_geometry,6,MPI_DOUBLE_PRECISION,0,comm,ierr)
+    reference_convention=position_convention
+    call MPI_Bcast(reference_convention,len(reference_convention),MPI_CHARACTER,0,comm,ierr)
+    local_bad=merge(0,1,maxval(abs(reference_geometry-[origin,cell_length]))<=antihermitian_tolerance.and.&
+      reference_convention==position_convention)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then;message='inconsistent observable cell/origin convention across ranks';return;endif
     matrix_count=int(matrix_count64)
     allocate(reference_matrix(nwann,nwann))
     reference_matrix=metric
@@ -124,6 +143,9 @@ contains
         MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
       call MPI_Allreduce(local_derivative(axis,:,:),derivative(axis,:,:),matrix_count,&
         MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      position_scale=max(1d0,maxval(abs(position(axis,:,:))))
+      position_defect=maxval(abs(position(axis,:,:)-conjg(transpose(position(axis,:,:)))))
+      if(position_defect>antihermitian_tolerance*position_scale)local_bad=1
       position(axis,:,:)=0.5d0*(position(axis,:,:)+conjg(transpose(position(axis,:,:))))
       if(maxval(abs(derivative(axis,:,:)+conjg(transpose(derivative(axis,:,:)))))>&
           antihermitian_tolerance)then
@@ -132,7 +154,9 @@ contains
       canonical_momentum(axis,:,:)=-cmplx(0d0,1d0,real64)*derivative(axis,:,:)
     enddo
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(global_bad/=0)then;message='canonical derivative is not anti-Hermitian';return;endif
+    if(global_bad/=0)then
+      message='position is not Hermitian or canonical derivative is not anti-Hermitian';return
+    endif
     allocate(total_hamiltonian,source=local_hamiltonian+nonlocal_hamiltonian)
     do axis=1,3
       velocity(axis,:,:)=cmplx(0d0,1d0,real64)*(matmul(total_hamiltonian,&

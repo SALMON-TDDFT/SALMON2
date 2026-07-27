@@ -24,13 +24,14 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer::nproc,ierr,local_bad,global_bad,i,j,p,total_count,info,lwork,nretained,matrix_count
+    integer::nproc,ierr,local_bad,global_bad,i,j,p,total_count,info,lwork,nretained,matrix_count,&
+      nwann_min,nwann_max
     integer,allocatable::counts(:),displs(:)
     integer(int64),allocatable::all_ids(:)
     complex(real64),allocatable::local_metric(:,:),eigenvectors(:,:),work(:)
     real(real64),allocatable::eigenvalues(:),rwork(:)
-    real(real64)::cutoff,largest
-    integer(int64)::matrix_count64
+    real(real64)::cutoff,largest,threshold_min,threshold_max,hermiticity_defect,scale
+    integer(int64)::matrix_count64,expected_min,expected_max
     logical::finite_values
     interface
       subroutine zheev(jobz,uplo,n,a,lda,w,work,lwork,rwork,info)
@@ -45,6 +46,15 @@ contains
     ok=.false.;message='';minimum_eigenvalue=0d0;condition_number=huge(1d0)
     rejected_rank=0;ownership_count=0
     call MPI_Comm_size(comm,nproc,ierr)
+    call MPI_Allreduce(nwann,nwann_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(nwann,nwann_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(expected_core_count,expected_min,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(expected_core_count,expected_max,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(relative_threshold,threshold_min,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(relative_threshold,threshold_max,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(nwann_min/=nwann_max.or.expected_min/=expected_max.or.threshold_min/=threshold_max)then
+      message='inconsistent metric assembly contract across ranks';return
+    endif
     finite_values=.true.
     do p=1,size(values,2)
       do i=1,size(values,1)
@@ -105,6 +115,11 @@ contains
     enddo
     matrix_count=int(matrix_count64)
     call MPI_Allreduce(local_metric,metric,matrix_count,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    scale=max(1d0,maxval(abs(metric)))
+    hermiticity_defect=maxval(abs(metric-conjg(transpose(metric))))
+    if(hermiticity_defect>relative_threshold*scale)then
+      message='overlapping-Wannier metric Hermiticity defect exceeds tolerance';return
+    endif
     metric=0.5d0*(metric+conjg(transpose(metric)))
     allocate(eigenvectors,source=metric)
     allocate(eigenvalues(nwann),rwork(max(1,3*nwann-2)),work(1))

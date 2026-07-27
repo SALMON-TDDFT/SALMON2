@@ -6,6 +6,7 @@ program test_dg_overlapping_wannier_metadata_mpi
   use dg_overlapping_wannier_types, only: s_dg_overlapping_wannier_basis, &
     initialize_dg_wannier_tail,validate_dg_overlapping_wannier_basis, &
     checked_dg_wannier_extent_product,release_dg_overlapping_wannier_basis
+  use,intrinsic :: ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   implicit none
   integer :: comm,rank,nproc,ierr,scenario,ownership_count
   integer(8) :: fingerprint,product_value
@@ -39,10 +40,23 @@ program test_dg_overlapping_wannier_metadata_mpi
     call release_dg_overlapping_wannier_basis(basis)
   enddo
 
+  if(nproc>1)then
+    call make_valid_basis(2,basis)
+    call validate_dg_overlapping_wannier_basis(basis,comm,merge(3_8,2_8,rank==0),ok,message)
+    call require(.not.ok,'rank-inconsistent expected core count rejection')
+    call release_dg_overlapping_wannier_basis(basis)
+  endif
+
   call make_valid_basis(2,basis)
   call add_duplicate_center(basis)
   call validate_dg_overlapping_wannier_basis(basis,comm,2_8,ok,message)
   call require(.not.ok,'duplicate center owner rejection')
+  call release_dg_overlapping_wannier_basis(basis)
+
+  call make_valid_basis(2,basis)
+  if(rank==0.and.size(basis%tail)>0)basis%tail(1)%value(1)=ieee_value(0d0,ieee_quiet_nan)
+  call validate_dg_overlapping_wannier_basis(basis,comm,2_8,ok,message)
+  call require(.not.ok,'non-finite tail rejection')
   call release_dg_overlapping_wannier_basis(basis)
 
   call make_valid_basis(2,basis)

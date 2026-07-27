@@ -88,6 +88,12 @@ program test_dg_overlapping_wannier_observables_mpi
     call require(maxval(abs(velocity(i,:,:)-matmul(conjg(gauge),&
       matmul(reference_velocity(i,:,:),transpose(gauge)))))<1d-12,'velocity gauge covariance')
   enddo
+  if(nproc>1)then
+    call assemble_dg_overlapping_wannier_observables(comm,merge(3,2,rank==0),ids,weights,coordinates,&
+      origin,cell,'cell_wrapped',rotated_values,rotated_gradients,metric,metric_inverse,hlocal,&
+      hnonlocal,4_8,1d-12,position,derivative,momentum,velocity,nonlocal_velocity,owned,ok,message)
+    call require(.not.ok,'rank-inconsistent observable contract rejection')
+  endif
   if(rank==0)then
     write(*,'(a,i0,a,4(es24.16,1x))')'OBSERVABLES ranks=',nproc,' values=',&
       real(reference_position(1,1,2)),aimag(reference_position(1,1,2)),&

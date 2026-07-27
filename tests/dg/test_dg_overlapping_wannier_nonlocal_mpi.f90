@@ -44,6 +44,11 @@ program test_dg_overlapping_wannier_nonlocal_mpi
   call require(ok,trim(message))
   call require(maxval(abs(matrix-matmul(conjg(gauge),matmul(reference,transpose(gauge)))))<1d-12,&
     'nonlocal gauge covariance')
+  if(nproc>1)then
+    call assemble_dg_overlapping_wannier_nonlocal(comm,merge(4,3,rank==0),ids,strength,overlap,&
+      complete,3_8,matrix,owned,ok,message)
+    call require(.not.ok,'rank-inconsistent nonlocal contract rejection')
+  endif
   if(rank==0.and.size(ids)>0)complete(1,1)=.false.
   call assemble_dg_overlapping_wannier_nonlocal(comm,3,ids,strength,overlap,complete,3_8,&
     matrix,owned,ok,message)
