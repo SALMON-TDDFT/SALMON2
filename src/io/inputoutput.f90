@@ -2740,8 +2740,14 @@ contains
 #else
       stop 'lcfo_eigensolver=slepc requires a build with SLEPc support.'
 #endif
+    case('chefsi')
+#ifdef USE_SCALAPACK
+      continue
+#else
+      stop 'lcfo_eigensolver=chefsi requires a build with ScaLAPACK support.'
+#endif
     case default
-      stop "lcfo_eigensolver must be 'lapack', 'eigenexa', or 'slepc'."
+      stop "lcfo_eigensolver must be 'lapack', 'eigenexa', 'slepc', or 'chefsi'."
     end select
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
