@@ -20,7 +20,97 @@ module dg_overlapping_wannier_construction
     real(real64)::metric_minimum_eigenvalue=0d0,metric_condition_number=huge(1d0)
   end type
   public::construct_dg_overlapping_wannier_basis,release_dg_overlapping_wannier_construction
+  public::verify_dg_overlapping_wannier_periodic_closure
 contains
+  subroutine verify_dg_overlapping_wannier_periodic_closure(comm,box_ids,symmetry_target_box_ids,&
+      values,gradients,symmetry_representation,gradient_transform,expected_box_count,tolerance,&
+      residual,fingerprint,ok,message)
+    integer,intent(in)::comm
+    integer(int64),intent(in)::box_ids(:),symmetry_target_box_ids(:,:),expected_box_count
+    complex(real64),intent(in)::values(:,:),gradients(:,:,:),symmetry_representation(:,:,:)
+    real(real64),intent(in)::gradient_transform(:,:,:),tolerance
+    real(real64),intent(out)::residual
+    integer(int64),intent(out)::fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    complex(real64),allocatable::all_values(:,:),all_gradients(:,:,:),local_values(:,:),local_gradients(:,:,:)
+    complex(real64),allocatable::mapped_value(:),mapped_gradient(:,:)
+    integer,allocatable::owners(:)
+    integer::nwann,nsym,nbox,p,j,isym,target,ierr,bad,global_bad,rank
+    integer(int64)::local_hash,bits,payload_count64
+    ok=.false.;message='';residual=huge(1d0);fingerprint=0_int64
+    call MPI_Comm_rank(comm,rank,ierr)
+    nwann=size(values,1);nsym=size(symmetry_target_box_ids,2)
+    bad=0
+    if(expected_box_count<1_int64.or.expected_box_count>10000000_int64.or.nwann<1.or.nsym<1)bad=1
+    if(size(values,2)/=size(box_ids).or.any(shape(gradients)/=[3,nwann,size(box_ids)]).or.&
+       size(symmetry_target_box_ids,1)/=size(box_ids).or.&
+       any(shape(symmetry_representation)/=[nwann,nwann,nsym]).or.&
+       any(shape(gradient_transform)/=[3,3,nsym]).or.tolerance<=0d0)bad=1
+    if(any(box_ids<1_int64).or.any(box_ids>expected_box_count))bad=1
+    if(nwann>0.and.expected_box_count<=huge(1_int64)/int(nwann,int64))then
+      payload_count64=int(nwann,int64)*expected_box_count
+      if(payload_count64>int(huge(nbox),int64)/3_int64.or.&
+         payload_count64>268435456_int64)bad=1
+    else
+      payload_count64=0_int64;bad=1
+    endif
+    if(.not.all(ieee_is_finite(real(values))).or..not.all(ieee_is_finite(aimag(values))).or.&
+       .not.all(ieee_is_finite(real(gradients))).or..not.all(ieee_is_finite(aimag(gradients))).or.&
+       .not.all(ieee_is_finite(gradient_transform)).or..not.ieee_is_finite(tolerance))bad=1
+    call MPI_Allreduce(bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then;message='invalid authoritative periodic closure payload';return;endif
+    nbox=int(expected_box_count)
+    allocate(local_values(nwann,nbox),all_values(nwann,nbox),local_gradients(3,nwann,nbox),&
+      all_gradients(3,nwann,nbox),owners(nbox))
+    local_values=(0d0,0d0);local_gradients=(0d0,0d0);owners=0
+    do p=1,size(box_ids)
+      local_values(:,int(box_ids(p)))=values(:,p)
+      local_gradients(:,:,int(box_ids(p)))=gradients(:,:,p)
+      owners(int(box_ids(p)))=owners(int(box_ids(p)))+1
+    enddo
+    call MPI_Allreduce(local_values,all_values,nwann*nbox,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    call MPI_Allreduce(local_gradients,all_gradients,3*nwann*nbox,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,owners,nbox,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(any(owners/=1))then;message='periodic closure box ownership is incomplete';return;endif
+    allocate(mapped_value(nwann),mapped_gradient(3,nwann));residual=0d0;local_hash=0_int64
+    do isym=1,nsym;do p=1,size(box_ids)
+      target=int(symmetry_target_box_ids(p,isym))
+      if(target<1.or.target>nbox)then;bad=1;cycle;endif
+      mapped_value=matmul(transpose(symmetry_representation(:,:,isym)),all_values(:,target))
+      mapped_gradient=matmul(gradient_transform(:,:,isym),&
+        matmul(all_gradients(:,:,target),symmetry_representation(:,:,isym)))
+      residual=max(residual,maxval(abs(values(:,p)-mapped_value)),&
+        maxval(abs(gradients(:,:,p)-mapped_gradient)))
+      do j=1,nwann
+        bits=transfer(real(mapped_value(j),real64),bits)
+        local_hash=ieor(local_hash,ishftc(bits,mod(j+7*isym+int(modulo(box_ids(p),63_int64)),63)))
+      enddo
+      local_hash=ieor(local_hash,ishftc(symmetry_target_box_ids(p,isym),&
+        mod(11*isym+int(modulo(box_ids(p),53_int64)),63)))
+    enddo;enddo
+    if(rank==0)then
+      do isym=1,nsym;do j=1,3;do p=1,3
+        bits=transfer(gradient_transform(j,p,isym),bits)
+        local_hash=ieor(local_hash,ishftc(bits,mod(13*j+17*p+19*isym,63)))
+      enddo;enddo;enddo
+    endif
+    call MPI_Allreduce(MPI_IN_PLACE,bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,residual,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_hash,fingerprint,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
+    fingerprint=ieor(fingerprint,int(z'510E527FADE682D1',int64))
+    if(fingerprint==0_int64)fingerprint=1_int64
+    if(bad/=0.or.residual>tolerance)then
+      message='authoritative periodic value/gradient closure failed';return
+    endif
+    ok=.true.
+#else
+    residual=huge(1d0);fingerprint=0_int64;ok=.false.
+    message='authoritative periodic closure requires MPI'
+#endif
+  end subroutine
+
   subroutine construct_dg_overlapping_wannier_basis(comm,ncandidate,ntarget,noccupied,physical_ids,&
       core_fragment,weights,localization_coordinate,boundary_mask,candidate_value,candidate_gradient,&
       occupied_coefficients,expected_core_count,generation,boundary_value_tolerance,&
@@ -60,6 +150,7 @@ contains
     integer(int64),allocatable::all_box_ids(:),all_target_ids(:,:),canonical_target_ids(:,:),&
       sorted_target_ids(:)
     integer,allocatable::box_counts(:),box_displs(:),value_counts(:),value_displs(:),all_fragments(:),&
+      canonical_fragments(:),canonical_ranks(:),&
       phase_counts(:),phase_displs(:)
     integer::nlocal,i,j,p,ierr,nproc,rank,local_bad,global_bad,&
       ncomp,nneed,start_index,matrix_count,scalar_min(4),scalar_max(4),scalar_local(4),&
@@ -192,8 +283,6 @@ contains
     if(nlocal>0)then
       fragment_min=minval(core_fragment);fragment_max=maxval(core_fragment)
     endif
-    call MPI_Allreduce(MPI_IN_PLACE,fragment_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
-    call MPI_Allreduce(MPI_IN_PLACE,fragment_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(fragment_min/=fragment_max)then
       message='construction call must contain exactly one fragment box';return
     endif
@@ -250,11 +339,11 @@ contains
         call MPI_Allgatherv(symmetry_target_box_ids(:,isym),nlocal,MPI_INTEGER8,all_target_ids(:,isym),&
           box_counts,box_displs,MPI_INTEGER8,comm,ierr)
       enddo
-      if(int(total_box,int64)/=expected_box_count.or.any(all_fragments/=all_fragments(1)))then
-        message='periodic-box construction call must contain exactly one complete fragment box';return
+      if(int(total_box,int64)/=expected_box_count)then
+        message='periodic-box construction call must contain complete fragment boxes';return
       endif
       allocate(all_candidate(ncandidate,total_box),all_box_weights(total_box),canonical_core(total_box),&
-        canonical_phase(3,total_box))
+        canonical_phase(3,total_box),canonical_fragments(total_box),canonical_ranks(total_box))
       allocate(canonical_target_ids(total_box,nsym))
       do source=1,total_box
         if(all_box_ids(source)<1_int64.or.all_box_ids(source)>int(total_box,int64))then
@@ -264,6 +353,8 @@ contains
         all_candidate(:,target)=all_candidate_flat((source-1)*ncandidate+1:source*ncandidate)
         all_box_weights(target)=all_box_weights_unsorted(source)
         canonical_core(target)=all_core_unsorted(source)
+        canonical_fragments(target)=all_fragments(source)
+        canonical_ranks(target)=count(box_displs<=source-1)-1
         canonical_phase(:,target)=all_phase_flat((source-1)*3+1:source*3)
         canonical_target_ids(target,:)=all_target_ids(source,:)
       enddo
@@ -593,8 +684,15 @@ contains
 
     call MPI_Comm_rank(comm,rank,ierr)
     allocate(result%center_owner_rank(ntarget),result%center_owner_fragment(ntarget))
-    result%center_owner_rank=0
-    result%center_owner_fragment=fragment_min
+    if(nsym>0)then
+      do j=1,ntarget
+        result%center_owner_rank(j)=canonical_ranks(int(result%center_box_point_ids(j)))
+        result%center_owner_fragment(j)=canonical_fragments(int(result%center_box_point_ids(j)))
+      enddo
+    else
+      result%center_owner_rank=rank
+      result%center_owner_fragment=fragment_min
+    endif
 
     local_fingerprint=0_int64
     if(rank==0)local_fingerprint=ieor(int(generation,int64),ishftc(int(ntarget,int64),11))

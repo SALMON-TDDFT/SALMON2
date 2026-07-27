@@ -22,6 +22,8 @@ dcdft_source = source("src/gs/dc/dcdft.f90")
 types_source = source("src/gs/dc/dg_overlapping_wannier_types.f90")
 construction_source = source("src/gs/dc/dg_overlapping_wannier_construction.f90")
 operators_source = source("src/gs/dc/dg_overlapping_wannier_operators.f90")
+ow_scf_source = source("src/gs/dc/dg_overlapping_wannier_scf.f90")
+ow_checkpoint_source = source("src/gs/dc/dg_overlapping_wannier_checkpoint.f90")
 dc_cmake = source("src/gs/dc/CMakeLists.txt")
 
 flag = r"yn_dg_dc_overlapping_wannier"
@@ -44,6 +46,13 @@ assert re.search(
 assert re.search(rf"call\s+yn_argument_check\s*\(\s*{flag}\s*\)", input_source, re.I), (
     "the new flag must accept only y/n"
 )
+for tolerance in (
+    "dg_ow_boundary_value_tolerance",
+    "dg_ow_boundary_gradient_tolerance",
+    "dg_ow_symmetry_tolerance",
+):
+    assert tolerance in global_source
+    assert tolerance in input_source
 
 route_checks = [
     (r"trim\s*\(\s*theory\s*\)\s*/=\s*'dft'", "ground-state DFT only"),
@@ -73,26 +82,71 @@ for condition, requirement in route_checks:
 
 assert re.search(
     rf"if\s*\(\s*{flag}\s*==\s*'y'\s*\)\s*then.*?"
-    r"call\s+dispatch_dg_overlapping_wannier_route.*?"
+    r"call\s+run_dg_overlapping_wannier_ground_state_for_main.*?"
     r"(?:return|error\s+stop)",
     main_source,
     re.I | re.S,
 ), "main_dft needs an explicit, terminating new-route dispatch"
 scf_position = main_source.lower().find("call scf_iteration_dft")
 route_dispatch_position = main_source.lower().find(
-    "call dispatch_dg_overlapping_wannier_route"
+    "call run_dg_overlapping_wannier_ground_state_for_main"
 )
 lcfo_position = main_source.lower().find("call dc_lcfo_flux", route_dispatch_position)
 assert 0 <= scf_position < route_dispatch_position < lcfo_position, (
     "construction dispatch must consume the conventional candidate window "
     "after SCF and terminate before LCFO"
 )
+assert "register_dg_overlapping_wannier_route_driver" not in ow_scf_source
+assert "execute_registered_dg_overlapping_wannier_ground_state" not in ow_scf_source
 assert re.search(
-    r"subroutine\s+dispatch_dg_overlapping_wannier_route.*?"
-    r"error\s+stop\s*['\"]overlapping Wannier route: construction not implemented['\"]",
-    dcdft_source,
+    r"subroutine\s+run_dg_overlapping_wannier_ground_state_for_main.*?"
+    r"construct_dg_overlapping_wannier_basis.*?"
+    r"run_dg_overlapping_wannier_scf.*?"
+    r"write_dg_overlapping_wannier_checkpoint",
+    main_source,
     re.I | re.S,
-), "Task 1 dispatcher must stop before forbidden stages"
+), "main_dft needs a concrete construction-to-SCF-to-checkpoint production adapter"
+production_adapter = re.search(
+    r"subroutine\s+run_dg_overlapping_wannier_ground_state_for_main(?P<body>.*?)"
+    r"end\s+subroutine",
+    main_source,
+    re.I | re.S,
+)
+assert production_adapter
+adapter_body = production_adapter.group("body")
+assert re.search(
+    r"ncandidate\s*=\s*(?:system%no|local_candidate_count)\s*\*\s*nproc",
+    adapter_body,
+    re.I,
+), (
+    "production candidates must retain the per-fragment direct-sum identity"
+)
+assert re.search(r"candidate_offset\s*=\s*.*(?:fragment|i_frag)", adapter_body, re.I), (
+    "production candidates need an explicit fragment/local-orbital block offset"
+)
+assert "build_dc_translation_symmetry_map" in adapter_body.lower(), (
+    "production symmetry must be derived from DC fragment geometry"
+)
+assert not re.search(r"modulo\s*\(\s*rank\s*\+\s*isym", adapter_body, re.I), (
+    "communicator-rank arithmetic is not a physical fragment symmetry"
+)
+assert "assemble_dg_overlapping_wannier_weak_operators" in main_source.lower(), (
+    "production Hamiltonian must use the Task 5 weak unique-core assembly"
+)
+hamiltonian_adapter = re.search(
+    r"subroutine\s+ow_build_hamiltonian(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+)
+assert hamiltonian_adapter and not re.search(
+    r"call\s+hpsi", hamiltonian_adapter.group("body"), re.I
+), "production Hamiltonian must not project the strong fragment stencil"
+assert re.search(
+    r"if\s*\(\s*yn_dg_dc_local_periodic\s*/=\s*'y'\s*\.and\.\s*"
+    r"yn_dg_dc_overlapping_wannier\s*/=\s*'y'\s*\.and\..*?checkpoint_gs",
+    main_source,
+    re.I | re.S,
+), "overlapping-Wannier route must suppress normal shutdown checkpoint publication"
 
 dispatch_block = re.search(
     rf"if\s*\(\s*{flag}\s*==\s*'y'\s*\)\s*then(?P<body>.*?)else\s+if",
@@ -150,5 +204,28 @@ for forbidden in ("direct_sipg", "face_hamiltonian", "buffer_volume"):
     assert forbidden not in operators_source.lower(), (
         f"weak operator must not add an independent path: {forbidden}"
     )
+
+for required in (
+    "run_dg_overlapping_wannier_scf",
+    "unmixed_density_residual",
+    "mix_density",
+    "rollback_transaction",
+):
+    assert required.lower() in ow_scf_source.lower(), f"missing Task 8 SCF contract: {required}"
+for required in (
+    "manifest_magic",
+    "shard_magic",
+    "versioned_shard_name",
+    "call rename",
+    "unmixed_density_residual",
+    "orthogonality_defect",
+    "metric_condition",
+):
+    assert required.lower() in ow_checkpoint_source.lower(), (
+        f"missing Task 8 route-checkpoint contract: {required}"
+    )
+for forbidden in ("direct_sipg", "lcfo", "eigenexa", "dg_wpw", "checkpoint_gs", "main_tddft"):
+    assert forbidden not in ow_scf_source.lower()
+    assert forbidden not in ow_checkpoint_source.lower()
 
 print("overlapping-Wannier route contract: PASS")

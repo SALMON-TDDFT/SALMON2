@@ -19,11 +19,6 @@ module dcdft
   implicit none
 contains
 
-  subroutine dispatch_dg_overlapping_wannier_route
-    implicit none
-    error stop 'overlapping Wannier route: construction not implemented'
-  end subroutine dispatch_dg_overlapping_wannier_route
-
   subroutine init_dcdft(dc,pp,mixing,ewald)
     use structures
     use salmon_global, only: nproc_k, nproc_ob, nproc_rgrid, nproc_rgrid_tot &

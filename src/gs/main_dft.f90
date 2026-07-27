@@ -20,12 +20,13 @@
 subroutine main_dft
 use math_constants, only: pi, zi
 #ifdef USE_MPI
-use mpi, only: MPI_Allreduce, MPI_INTEGER8, MPI_BXOR, MPI_SUCCESS
+use mpi, only: MPI_Allreduce,MPI_Allgather,MPI_Allgatherv,MPI_INTEGER8,MPI_BXOR,MPI_SUCCESS,MPI_INTEGER,&
+  MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_MIN,MPI_MAX
 #endif
 use structures
 use inputoutput
 use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_wpw_production, &
-  yn_dg_dc_local_periodic, yn_dg_dc_overlapping_wannier, ncg, &
+  yn_dg_dc_local_periodic, yn_dg_dc_overlapping_wannier, ncg, base_directory, &
   dg_dc_handoff_min_iter, dg_dc_handoff_tolerance, &
   dg_dc_candidate_orbitals_per_atom, dg_dc_metric_rank_tolerance, &
   dg_dc_gs_intermediate_orbital_tolerance,dg_dc_gs_intermediate_density_tolerance, &
@@ -35,7 +36,8 @@ use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_wpw_producti
   dg_dc_gs_orthogonality_tolerance,dg_dc_gs_face_balance_tolerance,dg_dc_gs_electron_count_tolerance, &
   dg_dc_gs_minimum_projector_overlap,dg_dc_gs_maximum_scf_iterations, &
   dg_dc_gs_maximum_eigensolver_iterations,dg_dc_gs_maximum_rollbacks, &
-  dg_dc_gs_sipg_penalty_factor,dg_dc_gs_target_lambda
+  dg_dc_gs_sipg_penalty_factor,dg_dc_gs_target_lambda,dg_ow_boundary_value_tolerance,&
+  dg_ow_boundary_gradient_tolerance,dg_ow_symmetry_tolerance
 use dg_dc_handoff, only: dg_dc_handoff_runtime, dg_dc_nodal_runtime, initialize_dg_dc_handoff, &
   materialize_dg_dc_candidates
 use dg_dc_ground_state, only: s_dg_dc_gs_controls,s_dg_dc_gs_result,s_dg_dc_gs_diagnostics, &
@@ -56,6 +58,16 @@ use dg_dc_local_basis_ground_state, only: s_dg_dc_local_basis_layout, &
   s_dg_dc_local_basis_production_state,dg_dc_local_basis_state
 use dg_ground_state_checkpoint, only: s_dg_ground_state_checkpoint,s_dg_dc_direct_checkpoint_state, &
   populate_dg_ground_state_checkpoint,publish_dg_ground_state_checkpoint,publish_dg_dc_direct_checkpoint
+use dg_overlapping_wannier_construction, only: s_dg_overlapping_wannier_construction, &
+  construct_dg_overlapping_wannier_basis,verify_dg_overlapping_wannier_periodic_closure
+use dg_overlapping_wannier_metric, only: assemble_dg_overlapping_wannier_metric
+use dg_overlapping_wannier_operators, only: assemble_dg_overlapping_wannier_weak_operators
+use dg_overlapping_wannier_nonlocal, only: assemble_dg_overlapping_wannier_nonlocal
+use dg_overlapping_wannier_scf, only: s_dg_overlapping_wannier_scf_state, &
+  s_dg_overlapping_wannier_scf_result,run_dg_overlapping_wannier_scf, &
+  compute_dg_overlapping_wannier_scf_fingerprint
+use dg_overlapping_wannier_checkpoint, only: s_dg_overlapping_wannier_checkpoint, &
+  write_dg_overlapping_wannier_checkpoint,read_dg_overlapping_wannier_checkpoint
 use rt_dg_nodal_cg, only: solve_nodal_ground_state_cg_mpi
 use rt_dg_nodal_rayleigh_ritz, only: rayleigh_ritz_nodal_subspace_mpi
 #ifdef USE_EIGENEXA
@@ -139,6 +151,23 @@ integer, allocatable :: dg_gs_fragment_origins(:,:),dg_gs_fragment_sizes(:,:)
 integer(8) :: dg_gs_potential_epoch,dg_gs_hamiltonian_potential_epoch
 logical :: dg_gs_operator_ok
 character(256) :: dg_gs_operator_message
+type(s_dg_overlapping_wannier_construction) :: ow_basis
+type(s_dg_overlapping_wannier_scf_state) :: ow_state
+type(s_dg_overlapping_wannier_scf_result) :: ow_result
+type(s_dg_overlapping_wannier_checkpoint) :: ow_checkpoint
+complex(8),allocatable :: ow_s(:,:),ow_core_values(:,:),ow_core_gradients(:,:,:),&
+  ow_box_values(:,:),ow_box_gradients(:,:,:)
+integer(8),allocatable :: ow_core_ids(:),ow_row_ids(:)
+integer,allocatable :: ow_tail_generation(:,:)
+integer,allocatable :: ow_core_box_positions(:)
+real(8),allocatable :: ow_core_weights(:)
+integer :: ow_box_size(3),ow_core_size(3),ow_buffer(3)
+integer(8) :: ow_symmetry_fingerprint
+integer(8) :: ow_potential_epoch_snapshot
+integer(8) :: ow_global_grid_count
+real(8),allocatable :: ow_density_snapshot(:,:,:,:)
+real(8),allocatable :: ow_work_density(:,:,:,:)
+logical :: ow_transaction_active
 integer :: ilevel_print
 
 if(theory=='dft_band'.and.iperiodic/=3) return
@@ -349,7 +378,8 @@ if(yn_opt=='y') then
       is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(iopt,checkpoint_interval) == 0)
       is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
 
-      if(yn_dg_dc_local_periodic/='y' .and. (is_checkpoint_iter .or. is_shutdown_time)) then
+      if(yn_dg_dc_local_periodic/='y' .and. yn_dg_dc_overlapping_wannier/='y' .and. &
+         (is_checkpoint_iter .or. is_shutdown_time)) then
          if (is_shutdown_time .and. comm_is_root(info%id_rko)) then
            print *, 'shutdown the calculation, iopt =', iopt
          end if
@@ -391,7 +421,7 @@ local_basis_route_active=.false.
 if(yn_dc=='y') then
   if(yn_dg_dc_overlapping_wannier == 'y') then
     local_basis_route_active=.true.
-    call dispatch_dg_overlapping_wannier_route
+    call run_dg_overlapping_wannier_ground_state_for_main
     return
   else if(yn_dg_dc_local_periodic == 'y') then
     local_basis_route_active=.true.
@@ -497,6 +527,580 @@ end if
 call timer_end(LOG_TOTAL)
 
 contains
+
+  subroutine checked_ow_extent_product(extent,value,ok)
+    integer,intent(in)::extent(3)
+    integer(8),intent(out)::value
+    logical,intent(out)::ok
+    integer::axis
+    value=1_8;ok=all(extent>0)
+    if(.not.ok)return
+    do axis=1,3
+      if(value>huge(value)/int(extent(axis),8))then
+        value=0_8;ok=.false.;return
+      endif
+      value=value*int(extent(axis),8)
+    enddo
+  end subroutine
+
+  subroutine run_dg_overlapping_wannier_ground_state_for_main()
+    complex(8),allocatable::candidate(:,:),candidate_gradient(:,:,:),occupied_coefficients(:,:),&
+      periodic_phase(:,:),retained_vectors(:,:)
+    real(8),allocatable::weights(:),coordinate(:),spectrum(:),occupations(:),gradient_rotation(:,:,:)
+    integer(8),allocatable::physical_ids(:),box_ids(:),symmetry_map(:,:)
+    integer,allocatable::fragments(:)
+    logical,allocatable::boundary(:),core_mask(:),pairs(:,:)
+    integer::ix,iy,iz,io,p,nbox,ncore,ncandidate,noccupied,ntarget,nsym,rank,nproc,&
+      raw_ix,raw_iy,raw_iz,core_index,rejected_rank,ownership_count,ierr,allocation_status,&
+      local_candidate_count,local_occupied_count,candidate_offset
+    integer(8)::expected_core_count,expected_box_count,basis_fingerprint,nbox8,ncore8,product8,nxy8
+    real(8)::minimum_eigenvalue,condition_number,closure_residual
+    logical::ok,reusable
+    character(256)::message,prefix
+
+    call MPI_Comm_rank(dc%icomm_tot,rank,ierr);call MPI_Comm_size(dc%icomm_tot,nproc,ierr)
+    ok=system%nspin==1.and.system%if_real_orbital.and.allocated(spsi%rwf)
+    call comm_logical_and(ok,reusable,dc%icomm_tot)
+    if(.not.reusable)error stop 'overlapping-Wannier production requires Gamma real DC candidates'
+    ok=nproc==dc%n_frag.and..not.dc%optimized_fragment_geometry
+    call comm_logical_and(ok,reusable,dc%icomm_tot)
+    if(.not.reusable)&
+      error stop 'overlapping-Wannier production requires one rank per valid DC fragment'
+    ow_core_size=dc%nxyz_domain_frag(:,dc%i_frag);ow_buffer=dc%nxyz_buffer
+    do ix=1,3
+      if(ow_buffer(ix)>huge(ow_box_size(ix))/2)&
+        error stop 'overlapping-Wannier buffer extent overflow'
+      if(ow_core_size(ix)>huge(ow_box_size(ix))-2*ow_buffer(ix))&
+        error stop 'overlapping-Wannier buffer extent overflow'
+    enddo
+    ow_box_size=ow_core_size+2*ow_buffer
+    ok=all(ow_buffer>=size(stencil%coef_nab,1).or.ow_core_size==dc%lg_tot%num)
+    call comm_logical_and(ok,reusable,dc%icomm_tot)
+    if(.not.reusable)error stop 'overlapping-Wannier buffer is smaller than the SALMON gradient stencil'
+    ok=.not.any([size(spsi%rwf,1),size(spsi%rwf,2),size(spsi%rwf,3)]<ow_box_size)
+    call comm_logical_and(ok,reusable,dc%icomm_tot)
+    if(.not.reusable)&
+      error stop 'overlapping-Wannier candidate buffer box is incomplete'
+    call checked_ow_extent_product(ow_box_size,nbox8,ok)
+    call checked_ow_extent_product(ow_core_size,ncore8,reusable);ok=ok.and.reusable
+    if(.not.ok.or.nbox8>int(huge(nbox),8).or.ncore8>int(huge(ncore),8))&
+      error stop 'overlapping-Wannier grid extent overflow'
+    nbox=int(nbox8);ncore=int(ncore8)
+    local_candidate_count=system%no
+    local_occupied_count=count(system%rocc(1:local_candidate_count,info%ik_s,1)>1d-12)
+    if(local_candidate_count>huge(ncandidate)/nproc.or.local_occupied_count>huge(noccupied)/nproc)&
+      error stop 'overlapping-Wannier candidate direct-sum extent overflow'
+    ncandidate=local_candidate_count*nproc;noccupied=local_occupied_count*nproc
+    if(nbox8>huge(product8)/int(ncandidate,8))&
+      error stop 'overlapping-Wannier candidate payload overflow'
+    product8=int(ncandidate,8)*nbox8
+    if(product8>int(huge(nbox),8)/3_8)&
+      error stop 'overlapping-Wannier candidate payload exceeds collective count'
+    candidate_offset=(dc%i_frag-1)*local_candidate_count
+    ntarget=ncandidate;nsym=nproc
+    if(noccupied<1.or.noccupied>ntarget)error stop 'invalid overlapping-Wannier occupied window'
+    call checked_ow_extent_product(dc%lg_tot%num,expected_core_count,ok)
+    if(.not.ok.or.expected_core_count>int(huge(nbox),8))&
+      error stop 'overlapping-Wannier global grid exceeds addressable extent'
+    ow_global_grid_count=expected_core_count
+    nxy8=int(dc%lg_tot%num(1),8)*int(dc%lg_tot%num(2),8)
+    if(.not.ok.or.nbox8>huge(expected_box_count)/int(nproc,8))&
+      error stop 'overlapping-Wannier global extent overflow'
+    expected_box_count=nbox8*int(nproc,8)
+    allocate(candidate(ncandidate,nbox),candidate_gradient(3,ncandidate,nbox),weights(nbox),&
+      coordinate(nbox),periodic_phase(3,nbox),physical_ids(nbox),box_ids(nbox),&
+      symmetry_map(nbox,nsym),fragments(nbox),boundary(nbox),core_mask(nbox),&
+      occupied_coefficients(ncandidate,noccupied),gradient_rotation(3,3,nsym),stat=allocation_status)
+    call comm_logical_and(allocation_status==0,reusable,dc%icomm_tot)
+    if(.not.reusable)error stop 'overlapping-Wannier production allocation failed'
+    candidate=(0d0,0d0);candidate_gradient=(0d0,0d0);weights=system%hvol
+    occupied_coefficients=(0d0,0d0)
+    do p=1,nproc
+      do io=1,local_occupied_count
+        occupied_coefficients((p-1)*local_candidate_count+io,(p-1)*local_occupied_count+io)=1d0
+      enddo
+    enddo
+    gradient_rotation=0d0
+    do io=1,nsym;do ix=1,3;gradient_rotation(ix,ix,io)=1d0;enddo;enddo
+    p=0;core_index=0
+    do iz=1,ow_box_size(3);do iy=1,ow_box_size(2);do ix=1,ow_box_size(1)
+      p=p+1;box_ids(p)=int(dc%i_frag-1,8)*nbox8+int(p,8);fragments(p)=dc%i_frag
+      core_mask(p)=ix>ow_buffer(1).and.ix<=ow_buffer(1)+ow_core_size(1).and.&
+        iy>ow_buffer(2).and.iy<=ow_buffer(2)+ow_core_size(2).and.&
+        iz>ow_buffer(3).and.iz<=ow_buffer(3)+ow_core_size(3)
+      boundary(p)=ix==1.or.ix==ow_box_size(1).or.iy==1.or.iy==ow_box_size(2).or.&
+        iz==1.or.iz==ow_box_size(3)
+      raw_ix=canonical_to_dc_index(ix,ow_core_size(1),ow_buffer(1))
+      raw_iy=canonical_to_dc_index(iy,ow_core_size(2),ow_buffer(2))
+      raw_iz=canonical_to_dc_index(iz,ow_core_size(3),ow_buffer(3))
+      do io=1,local_candidate_count
+        candidate(candidate_offset+io,p)=cmplx(spsi%rwf(raw_ix,raw_iy,raw_iz,1,io,1,1),0d0,8)
+      enddo
+      physical_ids(p)=1_8+int(modulo(dc%ixyz_frag(1,dc%i_frag)-1+ix-ow_buffer(1)-1,dc%lg_tot%num(1)),8)+&
+        int(dc%lg_tot%num(1),8)*(int(modulo(dc%ixyz_frag(2,dc%i_frag)-1+iy-ow_buffer(2)-1,&
+        dc%lg_tot%num(2)),8)+int(dc%lg_tot%num(2),8)*int(modulo(dc%ixyz_frag(3,dc%i_frag)-1+&
+        iz-ow_buffer(3)-1,dc%lg_tot%num(3)),8))
+      coordinate(p)=real(physical_ids(p),8)
+      periodic_phase(1,p)=exp(cmplx(0d0,2d0*pi*real(modulo(physical_ids(p)-1_8,&
+        int(dc%lg_tot%num(1),8)),8)/real(dc%lg_tot%num(1),8),8))
+      periodic_phase(2,p)=exp(cmplx(0d0,2d0*pi*real(modulo((physical_ids(p)-1_8)/&
+        int(dc%lg_tot%num(1),8),int(dc%lg_tot%num(2),8)),8)/real(dc%lg_tot%num(2),8),8))
+      periodic_phase(3,p)=exp(cmplx(0d0,2d0*pi*real((physical_ids(p)-1_8)/&
+        nxy8,8)/real(dc%lg_tot%num(3),8),8))
+      if(core_mask(p))then
+        core_index=core_index+1
+      endif
+    enddo;enddo;enddo
+    call build_dc_translation_symmetry_map(nbox,symmetry_map,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'invalid DC translation symmetry';endif
+    call periodic_box_gradients(candidate,ow_box_size,stencil%coef_nab,candidate_gradient)
+    call construct_dg_overlapping_wannier_basis(dc%icomm_tot,ncandidate,ntarget,noccupied,physical_ids,&
+      fragments,weights,coordinate,boundary,candidate,candidate_gradient,occupied_coefficients,&
+      expected_core_count,1,dg_ow_boundary_value_tolerance,dg_ow_boundary_gradient_tolerance,&
+      dg_dc_metric_rank_tolerance,ow_basis,ok,message,core_mask,box_ids,symmetry_map,&
+      expected_box_count,dg_ow_symmetry_tolerance,periodic_phase)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'overlapping-Wannier construction gate failed';endif
+    ow_box_values=ow_basis%value;ow_box_gradients=ow_basis%gradient
+    call verify_dg_overlapping_wannier_periodic_closure(dc%icomm_tot,box_ids,symmetry_map,ow_box_values,&
+      ow_box_gradients,ow_basis%symmetry_representation,gradient_rotation,expected_box_count,&
+      dg_ow_symmetry_tolerance,closure_residual,ow_symmetry_fingerprint,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'overlapping-Wannier symmetry gate failed';endif
+    allocate(ow_core_values(ntarget,ncore),ow_core_gradients(3,ntarget,ncore),&
+      ow_core_weights(ncore),ow_core_ids(ncore),&
+      ow_core_box_positions(ncore));core_index=0
+    do p=1,nbox
+      if(.not.core_mask(p))cycle
+      core_index=core_index+1;ow_core_values(:,core_index)=ow_box_values(:,p)
+      ow_core_gradients(:,:,core_index)=ow_box_gradients(:,:,p)
+      ow_core_weights(core_index)=weights(p);ow_core_ids(core_index)=physical_ids(p)
+      ow_core_box_positions(core_index)=p
+    enddo
+    allocate(pairs(ntarget,ntarget));pairs=.true.
+    call assemble_dg_overlapping_wannier_metric(dc%icomm_tot,ntarget,ow_core_ids,ow_core_weights,&
+      ow_core_values,pairs,expected_core_count,dg_dc_metric_rank_tolerance,ow_s,retained_vectors,&
+      spectrum,minimum_eigenvalue,condition_number,rejected_rank,ownership_count,ok,message)
+    if(.not.ok.or.rejected_rank/=0)error stop 'overlapping-Wannier metric gate failed'
+    allocate(ow_row_ids(count(ow_basis%center_owner_rank==rank)))
+    io=0
+    do p=1,ntarget
+      if(ow_basis%center_owner_rank(p)/=rank)cycle
+      io=io+1;ow_row_ids(io)=p
+    enddo
+    allocate(ow_tail_generation(ntarget,ncore));ow_tail_generation=ow_basis%generation
+    call compute_dg_overlapping_wannier_scf_fingerprint(dc%icomm_tot,ow_row_ids,&
+      ow_s(int(ow_row_ids),:),ow_core_ids,ow_core_weights,ow_core_values,ow_tail_generation,&
+      basis_fingerprint,ow_symmetry_fingerprint)
+    prefix=trim(base_directory)//'/overlapping_wannier_gs'
+    call read_dg_overlapping_wannier_checkpoint(dc%icomm_tot,trim(prefix),ow_basis%generation,1,&
+      basis_fingerprint,dg_dc_operator_fingerprint(.false.),[dg_dc_gs_final_density_tolerance,&
+      dg_dc_gs_final_orbital_tolerance,10d0*dg_dc_gs_final_orbital_tolerance,&
+      dg_dc_gs_electron_count_tolerance,1d0/dg_dc_metric_rank_tolerance,dg_ow_symmetry_tolerance],&
+      ow_checkpoint,reusable,ok,message)
+    if(ok.and.reusable)then
+      call restore_ow_checkpoint_density(ow_checkpoint,ok,message)
+      if(.not.ok)error stop 'overlapping-Wannier checkpoint density restore failed'
+      if(comm_is_root(nproc_id_global))write(*,'(a)')'[OW-GS] reused accepted route checkpoint'
+      return
+    endif
+    allocate(occupations(noccupied))
+    do p=1,nproc
+      occupations((p-1)*local_occupied_count+1:p*local_occupied_count)=&
+        system%rocc(1:local_occupied_count,info%ik_s,1)
+    enddo
+    allocate(ow_state%density(ncore),ow_state%potential(ncore),ow_state%coefficients(ntarget,noccupied),&
+      ow_state%eigenvalues(noccupied),ow_state%density_history(ncore,2))
+    do p=1,ncore
+      ow_state%density(p)=dc%rho_tot_s(1)%f(int(modulo(ow_core_ids(p)-1_8,int(dc%lg_tot%num(1),8)))+1,&
+        int(modulo((ow_core_ids(p)-1_8)/int(dc%lg_tot%num(1),8),int(dc%lg_tot%num(2),8)))+1,&
+        int((ow_core_ids(p)-1_8)/nxy8)+1)
+      ow_state%potential(p)=0d0
+    enddo
+    ow_state%coefficients=(0d0,0d0);do io=1,noccupied;ow_state%coefficients(io,io)=1d0;enddo
+    ow_state%eigenvalues=0d0;ow_state%density_history(:,1)=ow_state%density
+    ow_state%density_history(:,2)=ow_state%density;ow_state%history_count=1
+    ow_state%basis_generation=ow_basis%generation;ow_state%geometry_generation=1
+    ow_state%basis_fingerprint=basis_fingerprint
+    ow_state%operator_fingerprint=dg_dc_operator_fingerprint(.false.)
+    call run_dg_overlapping_wannier_scf(dc%icomm_tot,ow_row_ids,ow_s(int(ow_row_ids),:),ow_core_ids,&
+      ow_core_weights,ow_core_values,ow_tail_generation,ow_basis%generation,1,basis_fingerprint,&
+      occupations,closure_residual,dg_ow_symmetry_tolerance,ow_symmetry_fingerprint,&
+      expected_core_count,dg_dc_gs_density_mix_rate,dg_dc_gs_maximum_scf_iterations,&
+      dg_dc_gs_maximum_eigensolver_iterations,dg_dc_gs_final_density_tolerance,&
+      dg_dc_gs_final_orbital_tolerance,ow_build_hamiltonian,ow_mix_density,ow_transaction,&
+      ow_commit_transaction,ow_state,ow_result,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'overlapping-Wannier SCF gate failed';endif
+    call populate_ow_checkpoint(occupations,condition_number,closure_residual)
+    call write_dg_overlapping_wannier_checkpoint(dc%icomm_tot,trim(prefix),ow_checkpoint,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'overlapping-Wannier checkpoint publication failed';endif
+  end subroutine
+
+  subroutine periodic_box_gradients(values,box_size,gradient_coefficients,gradients)
+    complex(8),intent(in)::values(:,:)
+    integer,intent(in)::box_size(3)
+    real(8),intent(in)::gradient_coefficients(:,:)
+    complex(8),intent(out)::gradients(:,:,:)
+    integer::i,j,k,p,pm,pp,axis,nstate,index(3),minus(3),plus(3),dist,radius
+    nstate=size(values,1)
+    radius=size(gradient_coefficients,1)
+    do k=1,box_size(3);do j=1,box_size(2);do i=1,box_size(1)
+      index=[i,j,k];p=i+box_size(1)*((j-1)+box_size(2)*(k-1))
+      do axis=1,3
+        gradients(axis,:,p)=(0d0,0d0)
+        if(index(axis)>radius.and.index(axis)<=box_size(axis)-radius)then
+          do dist=1,radius
+            minus=index;plus=index;minus(axis)=index(axis)-dist;plus(axis)=index(axis)+dist
+            pm=minus(1)+box_size(1)*((minus(2)-1)+box_size(2)*(minus(3)-1))
+            pp=plus(1)+box_size(1)*((plus(2)-1)+box_size(2)*(plus(3)-1))
+            gradients(axis,:,p)=gradients(axis,:,p)+gradient_coefficients(dist,axis)*&
+              (values(:,pp)-values(:,pm))
+          enddo
+        else if(ow_core_size(axis)==dc%lg_tot%num(axis).and.ow_buffer(axis)==0)then
+          do dist=1,radius
+            minus=index;plus=index
+            minus(axis)=modulo(index(axis)-dist-1,box_size(axis))+1
+            plus(axis)=modulo(index(axis)+dist-1,box_size(axis))+1
+            pm=minus(1)+box_size(1)*((minus(2)-1)+box_size(2)*(minus(3)-1))
+            pp=plus(1)+box_size(1)*((plus(2)-1)+box_size(2)*(plus(3)-1))
+            gradients(axis,:,p)=gradients(axis,:,p)+gradient_coefficients(dist,axis)*&
+              (values(:,pp)-values(:,pm))
+          enddo
+        else
+          minus=index;plus=index
+          minus(axis)=max(1,index(axis)-1);plus(axis)=min(box_size(axis),index(axis)+1)
+          pm=minus(1)+box_size(1)*((minus(2)-1)+box_size(2)*(minus(3)-1))
+          pp=plus(1)+box_size(1)*((plus(2)-1)+box_size(2)*(plus(3)-1))
+          gradients(axis,:,p)=(values(:,pp)-values(:,pm))/&
+            (real(plus(axis)-minus(axis),8)*system%hgs(axis))
+        endif
+      enddo
+    enddo;enddo;enddo
+  end subroutine
+
+  subroutine build_dc_translation_symmetry_map(nbox,symmetry_map,ok,message)
+    integer,intent(in)::nbox
+    integer(8),intent(out)::symmetry_map(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer,allocatable::rank_fragments(:)
+    integer::source_fragment,operation,target_fragment,candidate_fragment,axis,p,match_count,ierr
+    integer::translation(3),target_origin(3)
+    logical::local_ok,global_ok
+
+    allocate(rank_fragments(dc%n_frag))
+    call MPI_Allgather(dc%i_frag,1,MPI_INTEGER,rank_fragments,1,MPI_INTEGER,dc%icomm_tot,ierr)
+    local_ok=ierr==MPI_SUCCESS.and.nbox>0.and.size(symmetry_map,1)==nbox.and.&
+      size(symmetry_map,2)==dc%n_frag.and.dc%n_frag==size(rank_fragments)
+    do p=1,dc%n_frag
+      local_ok=local_ok.and.count(rank_fragments==p)==1
+    enddo
+    local_ok=local_ok.and.all(dc%nxyz_domain_frag==spread(dc%nxyz_domain_frag(:,1),2,dc%n_frag))
+    source_fragment=dc%i_frag
+    if(local_ok)then
+      do operation=1,dc%n_frag
+        translation=dc%ixyz_frag(:,operation)-dc%ixyz_frag(:,1)
+        target_origin=1+modulo(dc%ixyz_frag(:,source_fragment)-1+translation,dc%lg_tot%num)
+        match_count=0;target_fragment=0
+        do candidate_fragment=1,dc%n_frag
+          if(all(1+modulo(dc%ixyz_frag(:,candidate_fragment)-1,dc%lg_tot%num)==target_origin))then
+            match_count=match_count+1;target_fragment=candidate_fragment
+          endif
+        enddo
+        if(match_count/=1)then
+          local_ok=.false.;exit
+        endif
+        do p=1,nbox
+          symmetry_map(p,operation)=int((target_fragment-1)*nbox+p,8)
+        enddo
+      enddo
+    endif
+    call comm_logical_and(local_ok,global_ok,dc%icomm_tot)
+    ok=global_ok
+    if(ok)then
+      message=''
+    else
+      message='DC fragment origins do not form a uniform periodic translation group'
+    endif
+  end subroutine
+
+  subroutine restore_ow_checkpoint_density(checkpoint,ok,message)
+    type(s_dg_overlapping_wannier_checkpoint),intent(in)::checkpoint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    real(8),allocatable::local_density(:),global_density(:),density4(:,:,:,:)
+    integer::p
+    allocate(local_density(int(ow_global_grid_count)),global_density(int(ow_global_grid_count)))
+    local_density=0d0
+    do p=1,size(checkpoint%core_physical_ids)
+      local_density(int(checkpoint%core_physical_ids(p)))=checkpoint%density(p)
+    enddo
+    call comm_summation(local_density,global_density,size(local_density),dc%icomm_tot)
+    allocate(density4(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),1))
+    density4(:,:,:,1)=reshape(global_density,dc%lg_tot%num)
+    call dg_dc_update_potential_from_density(density4,ok,message)
+  end subroutine
+
+  subroutine ow_build_hamiltonian(comm,density,potential,hrows,new_potential,fingerprint,ok,message)
+    integer,intent(in)::comm
+    real(8),intent(in)::density(:),potential(:)
+    complex(8),intent(out)::hrows(:,:)
+    real(8),intent(out)::new_potential(:)
+    integer(8),intent(out)::fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    real(8),allocatable::global_density(:),summed_density(:),core_potential(:)
+    complex(8),allocatable::kinetic(:,:),local_matrix(:,:),nonlocal_matrix(:,:),global_h(:,:)
+    integer::p,ix,iy,iz,nwann,owned_core,owned_projectors
+    allocate(global_density(int(ow_global_grid_count)),summed_density(int(ow_global_grid_count)))
+    global_density=0d0
+    do p=1,size(ow_core_ids);global_density(int(ow_core_ids(p)))=density(p);enddo
+    call comm_summation(global_density,summed_density,size(global_density),comm)
+    if(allocated(ow_work_density))deallocate(ow_work_density)
+    allocate(ow_work_density(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),1))
+    ow_work_density(:,:,:,1)=reshape(summed_density,dc%lg_tot%num)
+    call dg_dc_update_potential_from_density(ow_work_density,ok,message)
+    if(.not.ok)return
+    nwann=size(ow_box_values,1);allocate(core_potential(size(ow_core_ids)))
+    p=0
+    do iz=1,ow_core_size(3);do iy=1,ow_core_size(2);do ix=1,ow_core_size(1)
+      p=p+1;core_potential(p)=v_local(1)%f(ix,iy,iz)
+    enddo;enddo;enddo
+    call assemble_dg_overlapping_wannier_weak_operators(comm,nwann,ow_core_ids,ow_core_weights,&
+      ow_core_values,ow_core_gradients,core_potential,ow_global_grid_count,&
+      kinetic,local_matrix,owned_core,ok,message)
+    if(.not.ok)return
+    call assemble_ow_nonlocal(comm,nonlocal_matrix,owned_projectors,ok,message)
+    if(.not.ok)return
+    allocate(global_h(nwann,nwann));global_h=kinetic+local_matrix+nonlocal_matrix
+    if(maxval(abs(global_h-conjg(transpose(global_h))))>&
+       dg_dc_gs_hermiticity_tolerance*max(1d0,maxval(abs(global_h))))then
+      ok=.false.;message='weak overlapping-Wannier Hamiltonian is not Hermitian';return
+    endif
+    do p=1,size(ow_row_ids);hrows(p,:)=global_h(int(ow_row_ids(p)),:);enddo
+    new_potential=core_potential
+    fingerprint=dg_dc_operator_fingerprint(.false.)
+    ok=all(ieee_is_finite(real(global_h))).and.all(ieee_is_finite(aimag(global_h)))
+    if(ok)then;message='';else;message='nonfinite projected DC Hamiltonian';endif
+  end subroutine
+
+  subroutine assemble_ow_nonlocal(comm,matrix,ownership_count,ok,message)
+    integer,intent(in)::comm
+    complex(8),allocatable,intent(out)::matrix(:,:)
+    integer,intent(out)::ownership_count
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(8),allocatable::local_overlap(:,:),owned_overlap(:,:)
+    integer,allocatable::projector_counts(:),displacements(:),local_atom_ids(:),local_ordinals(:),&
+      all_atom_ids(:),all_ordinals(:),all_unique_ids(:)
+    integer(8),allocatable::projector_ids(:)
+    real(8),allocatable::strength(:)
+    logical,allocatable::complete(:,:)
+    logical::global_ok
+    integer::ilma,ia,j,ix,iy,iz,p,q,nwann,ierr,rank,nproc,total_records,total_projectors,&
+      canonical_index(3),nowned,global_index,ordinal
+
+    nwann=size(ow_core_values,1)
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    allocate(projector_counts(nproc),displacements(nproc))
+    call MPI_Allgather(ppg%Nlma,1,MPI_INTEGER,projector_counts,1,MPI_INTEGER,comm,ierr)
+    ok=ierr==MPI_SUCCESS.and.all(projector_counts>=0)
+    total_records=0;displacements(1)=0
+    do p=1,nproc
+      if(total_records>huge(total_records)-projector_counts(p))ok=.false.
+      if(p>1)displacements(p)=total_records
+      if(ok)total_records=total_records+projector_counts(p)
+    enddo
+    call comm_logical_and(ok,global_ok,comm);ok=global_ok
+    if(.not.ok)then;message='invalid fragment-local nonlocal projector namespace';return;endif
+    if(total_records==0)then
+      allocate(matrix(nwann,nwann));matrix=(0d0,0d0);ownership_count=0
+      ok=.true.;message='';return
+    endif
+    allocate(local_overlap(nwann,ppg%Nlma),local_atom_ids(ppg%Nlma),local_ordinals(ppg%Nlma),&
+      all_atom_ids(total_records),all_ordinals(total_records),all_unique_ids(total_records))
+    local_overlap=(0d0,0d0);local_atom_ids=0;local_ordinals=0
+    do ilma=1,ppg%Nlma
+      ia=ppg%ia_tbl(ilma)
+      call map_dc_atom_to_physical_atom(ia,local_atom_ids(ilma),ok)
+      ordinal=count(ppg%ia_tbl(1:ilma)==ia);local_ordinals(ilma)=ordinal
+      do j=1,ppg%mps(ia)
+        ix=ppg%jxyz(1,j,ia);iy=ppg%jxyz(2,j,ia);iz=ppg%jxyz(3,j,ia)
+        canonical_index=[dc_to_canonical_index(ix,ow_core_size(1),ow_buffer(1)),&
+          dc_to_canonical_index(iy,ow_core_size(2),ow_buffer(2)),&
+          dc_to_canonical_index(iz,ow_core_size(3),ow_buffer(3))]
+        if(any(canonical_index<1).or.any(canonical_index>ow_box_size))then
+          ok=.false.;cycle
+        endif
+        p=canonical_index(1)+ow_box_size(1)*((canonical_index(2)-1)+&
+          ow_box_size(2)*(canonical_index(3)-1))
+        local_overlap(:,ilma)=local_overlap(:,ilma)+ppg%uV(j,ilma)*ow_box_values(:,p)
+      enddo
+    enddo
+    call comm_logical_and(ok,global_ok,comm);ok=global_ok
+    if(.not.ok)then;message='cannot canonicalize complete physical atom/projector support';return;endif
+    call MPI_Allgatherv(local_atom_ids,ppg%Nlma,MPI_INTEGER,all_atom_ids,projector_counts,&
+      displacements,MPI_INTEGER,comm,ierr)
+    call MPI_Allgatherv(local_ordinals,ppg%Nlma,MPI_INTEGER,all_ordinals,projector_counts,&
+      displacements,MPI_INTEGER,comm,ierr)
+    total_projectors=0
+    do p=1,total_records
+      all_unique_ids(p)=0
+      do q=1,p-1
+        if(all_atom_ids(q)==all_atom_ids(p).and.all_ordinals(q)==all_ordinals(p))then
+          all_unique_ids(p)=all_unique_ids(q);exit
+        endif
+      enddo
+      if(all_unique_ids(p)==0)then
+        total_projectors=total_projectors+1;all_unique_ids(p)=total_projectors
+      endif
+    enddo
+    nowned=0
+    do ilma=1,ppg%Nlma
+      global_index=displacements(rank+1)+ilma
+      if(count(all_unique_ids(1:global_index)==all_unique_ids(global_index))==1)nowned=nowned+1
+    enddo
+    allocate(owned_overlap(nwann,nowned),projector_ids(nowned),strength(nowned),complete(nwann,nowned))
+    p=0
+    do ilma=1,ppg%Nlma
+      global_index=displacements(rank+1)+ilma
+      if(count(all_unique_ids(1:global_index)==all_unique_ids(global_index))/=1)cycle
+      p=p+1;projector_ids(p)=int(all_unique_ids(global_index),8)
+      strength(p)=system%hvol*ppg%rinv_uvu(ilma);owned_overlap(:,p)=local_overlap(:,ilma)
+    enddo
+    complete=.true.
+    call assemble_dg_overlapping_wannier_nonlocal(comm,nwann,projector_ids,strength,owned_overlap,&
+      complete,int(total_projectors,8),matrix,ownership_count,ok,message)
+  end subroutine
+
+  subroutine map_dc_atom_to_physical_atom(local_atom,physical_atom,ok)
+    integer,intent(in)::local_atom
+    integer,intent(out)::physical_atom
+    logical,intent(out)::ok
+    real(8)::position(3),delta(3),best,tolerance
+    integer::atom,sx,sy,sz
+    position=system%Rion(:,local_atom)+dc%rxyz_frag(:,dc%i_frag)
+    best=huge(best);physical_atom=0
+    do atom=1,dc%system_tot%nion
+      if(system%kion(local_atom)/=dc%system_tot%kion(atom))cycle
+      do sz=-1,1;do sy=-1,1;do sx=-1,1
+        delta=position-dc%system_tot%Rion(:,atom)-sx*dc%system_tot%primitive_a(:,1)-&
+          sy*dc%system_tot%primitive_a(:,2)-sz*dc%system_tot%primitive_a(:,3)
+        if(sum(delta*delta)<best)then;best=sum(delta*delta);physical_atom=atom;endif
+      enddo;enddo;enddo
+    enddo
+    tolerance=1d-16*max(1d0,maxval(abs(dc%system_tot%primitive_a)))**2
+    ok=physical_atom>0.and.best<=tolerance
+  end subroutine
+
+  integer function dc_to_canonical_index(index,core_count,buffer_count)
+    integer,intent(in)::index,core_count,buffer_count
+    if(index<=core_count+buffer_count)then
+      dc_to_canonical_index=buffer_count+index
+    else
+      dc_to_canonical_index=index-(core_count+buffer_count)
+    endif
+  end function
+
+  subroutine ow_mix_density(comm,mixing_rate,current_density,raw_density,history,history_count,&
+      mixed_density,new_history,new_history_count,ok,message)
+    integer,intent(in)::comm,history_count
+    real(8),intent(in)::mixing_rate,current_density(:),raw_density(:),history(:,:)
+    real(8),intent(out)::mixed_density(:),new_history(:,:)
+    integer,intent(out)::new_history_count
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::keep
+    real(8),allocatable::accepted4(:,:,:,:),raw4(:,:,:,:),mixed4(:,:,:,:)
+    allocate(accepted4(size(current_density),1,1,1),raw4(size(raw_density),1,1,1),&
+      mixed4(size(mixed_density),1,1,1))
+    accepted4(:,1,1,1)=current_density;raw4(:,1,1,1)=raw_density
+    call mix_dg_dc_density_transaction(accepted4,raw4,mixing_rate,.false.,mixed4,ok,message)
+    if(.not.ok)return
+    mixed_density=mixed4(:,1,1,1)
+    new_history=history;keep=min(history_count,size(new_history,2)-1)
+    if(keep>0)new_history(:,1:keep)=history(:,history_count-keep+1:history_count)
+    new_history(:,keep+1)=raw_density;new_history_count=keep+1
+    ok=all(ieee_is_finite(mixed_density));message=''
+  end subroutine
+
+  subroutine ow_transaction(action,ok,message)
+    integer,intent(in)::action
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::is
+    ok=.true.;message=''
+    select case(action)
+    case(0)
+      if(allocated(ow_density_snapshot))deallocate(ow_density_snapshot)
+      allocate(ow_density_snapshot(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),system%nspin))
+      do is=1,system%nspin;ow_density_snapshot(:,:,:,is)=dc%rho_tot_s(is)%f;enddo
+      ow_potential_epoch_snapshot=dg_gs_potential_epoch
+      ow_transaction_active=.true.
+    case(-1)
+      if(.not.ow_transaction_active)then;ok=.false.;message='missing overlapping-Wannier rollback snapshot';return;endif
+      call dg_dc_update_potential_from_density(ow_density_snapshot,ok,message)
+      if(ok)dg_gs_potential_epoch=ow_potential_epoch_snapshot
+      ow_transaction_active=.false.
+    case(1)
+      ok=ow_transaction_active
+      if(.not.ok)message='missing overlapping-Wannier prepared transaction'
+    end select
+  end subroutine
+
+  subroutine ow_commit_transaction()
+    ow_transaction_active=.false.
+    if(allocated(ow_density_snapshot))deallocate(ow_density_snapshot)
+  end subroutine
+
+  subroutine populate_ow_checkpoint(occupations,condition_number,closure_residual)
+    real(8),intent(in)::occupations(:),condition_number,closure_residual
+    integer::rank,i,j,nowned,nbox,nproc,ierr
+    integer(8)::tail_count8
+    integer(8),allocatable::all_tail_ids(:)
+    call MPI_Comm_rank(dc%icomm_tot,rank,i)
+    call MPI_Comm_size(dc%icomm_tot,nproc,ierr)
+    nowned=count(ow_basis%center_owner_rank==rank)
+    if(size(ow_basis%physical_grid_ids)>huge(nbox)/nproc)&
+      error stop 'overlapping-Wannier checkpoint box extent overflow'
+    nbox=size(ow_basis%physical_grid_ids)*nproc
+    tail_count8=int(nowned,8)*int(nbox,8)
+    if(tail_count8>int(huge(nbox),8))error stop 'overlapping-Wannier checkpoint tail extent overflow'
+    allocate(all_tail_ids(nbox))
+    call MPI_Allgather(ow_basis%physical_grid_ids,size(ow_basis%physical_grid_ids),MPI_INTEGER8,&
+      all_tail_ids,size(ow_basis%physical_grid_ids),MPI_INTEGER8,dc%icomm_tot,ierr)
+    ow_checkpoint=s_dg_overlapping_wannier_checkpoint()
+    ow_checkpoint%basis_generation=ow_basis%generation;ow_checkpoint%geometry_generation=1
+    ow_checkpoint%basis_fingerprint=ow_state%basis_fingerprint
+    ow_checkpoint%operator_fingerprint=ow_state%operator_fingerprint
+    allocate(ow_checkpoint%center_owner,source=ow_basis%center_owner_rank)
+    allocate(ow_checkpoint%overlap,source=ow_s)
+    allocate(ow_checkpoint%coefficients,source=ow_state%coefficients)
+    allocate(ow_checkpoint%occupations,source=occupations)
+    allocate(ow_checkpoint%core_physical_ids,source=ow_core_ids)
+    allocate(ow_checkpoint%density,source=ow_state%density)
+    allocate(ow_checkpoint%tail_center(nowned),ow_checkpoint%tail_generation(nowned),&
+      ow_checkpoint%tail_offsets(nowned+1),ow_checkpoint%tail_physical_ids(int(tail_count8)))
+    i=0;ow_checkpoint%tail_offsets(1)=1
+    do j=1,size(ow_basis%center_owner_rank)
+      if(ow_basis%center_owner_rank(j)/=rank)cycle
+      i=i+1;ow_checkpoint%tail_center(i)=j;ow_checkpoint%tail_generation(i)=ow_basis%generation
+      ow_checkpoint%tail_offsets(i+1)=i*nbox+1
+      ow_checkpoint%tail_physical_ids((i-1)*nbox+1:i*nbox)=all_tail_ids
+    enddo
+    ow_checkpoint%density_residual=ow_result%density_residual
+    ow_checkpoint%unmixed_density_residual=ow_result%unmixed_density_residual
+    ow_checkpoint%coefficient_residual=ow_result%coefficient_residual
+    ow_checkpoint%orthogonality_defect=ow_result%orthogonality_defect
+    ow_checkpoint%metric_condition=condition_number
+    ow_checkpoint%charge_error=ow_result%integrated_charge-ow_result%trace_charge
+    ow_checkpoint%density_tolerance=dg_dc_gs_final_density_tolerance
+    ow_checkpoint%coefficient_tolerance=dg_dc_gs_final_orbital_tolerance
+    ow_checkpoint%orthogonality_tolerance=10d0*dg_dc_gs_final_orbital_tolerance
+    ow_checkpoint%charge_tolerance=dg_dc_gs_electron_count_tolerance
+    ow_checkpoint%condition_limit=1d0/dg_dc_metric_rank_tolerance
+    ow_checkpoint%symmetry_closure_residual=closure_residual
+    ow_checkpoint%symmetry_tolerance=dg_ow_symmetry_tolerance
+    ow_checkpoint%accepted=ow_result%converged
+  end subroutine
 
   subroutine run_dg_dc_local_basis_ground_state_for_main()
     type(s_dg_dc_local_basis_layout) :: layout
@@ -1543,10 +2147,14 @@ Continuation_Stages: do
     dg_dc_geometry_fingerprint=local_hash
   end function dg_dc_geometry_fingerprint
 
-  integer(8) function dg_dc_operator_fingerprint()
+  integer(8) function dg_dc_operator_fingerprint(include_potential)
+    logical,intent(in),optional::include_potential
     integer(8) :: local_hash,point_hash,global_potential_hash,point_owner
     integer :: ix,iy,iz,is,ii,jj,kk,mpi_error
-    local_hash=0_8
+    logical::hash_potential
+    hash_potential=.true.;if(present(include_potential))hash_potential=include_potential
+    local_hash=0_8;global_potential_hash=0_8
+    if(hash_potential)then
     do is=1,dc%system_tot%nspin
     do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
     do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
@@ -1568,6 +2176,7 @@ Continuation_Stages: do
 #else
     global_potential_hash=local_hash
 #endif
+    endif
     local_hash=not(0_8)
     call hash_integer8(local_hash,global_potential_hash)
     call hash_integer(local_hash,dc%system_tot%nspin)

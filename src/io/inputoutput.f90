@@ -712,6 +712,9 @@ contains
       & dg_dc_gs_hermiticity_tolerance, &
       & dg_dc_gs_orthogonality_tolerance, &
       & dg_dc_gs_face_balance_tolerance, &
+      & dg_ow_boundary_value_tolerance, &
+      & dg_ow_boundary_gradient_tolerance, &
+      & dg_ow_symmetry_tolerance, &
       & dg_dc_gs_electron_count_tolerance, &
       & dg_dc_gs_minimum_projector_overlap, &
       & dg_dc_gs_maximum_scf_iterations, &
@@ -1319,6 +1322,9 @@ contains
     dg_dc_gs_hermiticity_tolerance = 1d-10
     dg_dc_gs_orthogonality_tolerance = 1d-10
     dg_dc_gs_face_balance_tolerance = 1d-10
+    dg_ow_boundary_value_tolerance = 1d-6
+    dg_ow_boundary_gradient_tolerance = 1d-6
+    dg_ow_symmetry_tolerance = 1d-10
     dg_dc_gs_electron_count_tolerance = 1d-8
     dg_dc_gs_minimum_projector_overlap = 0.9d0
     dg_dc_gs_maximum_scf_iterations = 100
@@ -2124,6 +2130,9 @@ contains
     call comm_bcast(dg_dc_gs_hermiticity_tolerance, nproc_group_global)
     call comm_bcast(dg_dc_gs_orthogonality_tolerance, nproc_group_global)
     call comm_bcast(dg_dc_gs_face_balance_tolerance, nproc_group_global)
+    call comm_bcast(dg_ow_boundary_value_tolerance, nproc_group_global)
+    call comm_bcast(dg_ow_boundary_gradient_tolerance, nproc_group_global)
+    call comm_bcast(dg_ow_symmetry_tolerance, nproc_group_global)
     call comm_bcast(dg_dc_gs_electron_count_tolerance, nproc_group_global)
     call comm_bcast(dg_dc_gs_minimum_projector_overlap, nproc_group_global)
     call comm_bcast(dg_dc_gs_maximum_scf_iterations, nproc_group_global)
@@ -3548,6 +3557,10 @@ contains
     if(.not.ieee_is_finite(dg_dc_gs_minimum_projector_overlap) .or. &
        dg_dc_gs_minimum_projector_overlap<=0d0 .or. dg_dc_gs_minimum_projector_overlap>1d0) &
       call sawf_input_fatal("invalid DG DC GS minimum projector overlap")
+    if(.not.ieee_is_finite(dg_ow_boundary_value_tolerance) .or. dg_ow_boundary_value_tolerance<=0d0 .or. &
+       .not.ieee_is_finite(dg_ow_boundary_gradient_tolerance) .or. dg_ow_boundary_gradient_tolerance<=0d0 .or. &
+       .not.ieee_is_finite(dg_ow_symmetry_tolerance) .or. dg_ow_symmetry_tolerance<=0d0) &
+      call sawf_input_fatal("invalid overlapping-Wannier buffer/symmetry tolerance")
     if(dg_dc_gs_maximum_scf_iterations<1 .or. dg_dc_gs_maximum_eigensolver_iterations<1 .or. &
        dg_dc_gs_maximum_rollbacks<0) call sawf_input_fatal("invalid DG DC GS iteration bound")
     select case(trim(wannier_site_symmetry))

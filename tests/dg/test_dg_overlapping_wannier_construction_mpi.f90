@@ -2,9 +2,10 @@
 program test_dg_overlapping_wannier_construction_mpi
   use mpi
   use dg_overlapping_wannier_construction,only:s_dg_overlapping_wannier_construction,&
-    construct_dg_overlapping_wannier_basis,release_dg_overlapping_wannier_construction
+    construct_dg_overlapping_wannier_basis,release_dg_overlapping_wannier_construction,&
+    verify_dg_overlapping_wannier_periodic_closure
   implicit none
-  integer::comm,rank,nproc,ierr,i,p,nlocal,index,ncore
+  integer::comm,rank,nproc,ierr,i,p,nlocal,nclosure,index,ncore
   integer(8),allocatable::ids(:),box_ids(:),symmetry_map(:,:),broken_symmetry_map(:,:)
   integer,allocatable::fragment(:)
   real(8),allocatable::weight(:),coordinate(:)
@@ -17,6 +18,11 @@ program test_dg_overlapping_wannier_construction_mpi
   integer,allocatable::reference_owner(:),reference_center_fragment(:)
   integer(8),allocatable::reference_center_box_ids(:)
   integer(8)::reference_fingerprint
+  integer(8)::closure_fingerprint
+  integer(8),allocatable::closure_ids(:),closure_map(:,:)
+  complex(8),allocatable::closure_values(:,:),closure_gradients(:,:,:)
+  complex(8)::closure_representation(2,2,1)
+  real(8)::closure_rotation(3,3,1),closure_residual
   logical::ok
   character(256)::message
 
@@ -42,7 +48,7 @@ program test_dg_overlapping_wannier_construction_mpi
       case default;ids(index)=2_8
       end select
     endif
-    fragment(index)=1;box_ids(index)=p
+    fragment(index)=rank+1;box_ids(index)=p
     symmetry_map(index,:)=[int(p,8),int(13-p,8)]
     broken_symmetry_map(index,:)=[int(p,8),int(mod(p,12)+1,8)]
     weight(index)=1d0
@@ -94,6 +100,27 @@ program test_dg_overlapping_wannier_construction_mpi
   reference_center_box_ids=result%center_box_point_ids
   reference_fingerprint=result%transform_fingerprint
   call release_dg_overlapping_wannier_construction(result)
+
+  closure_representation=(0d0,0d0);closure_representation(1,1,1)=1d0;closure_representation(2,2,1)=1d0
+  closure_rotation=0d0
+  do i=1,3;closure_rotation(i,i,1)=1d0;enddo
+  nclosure=count([(mod(p-1,nproc)==rank,p=1,2)])
+  allocate(closure_ids(nclosure),closure_map(nclosure,1),closure_values(2,nclosure),closure_gradients(3,2,nclosure))
+  index=0
+  do p=1,2
+    if(mod(p-1,nproc)/=rank)cycle
+    index=index+1;closure_ids(index)=p;closure_map(index,1)=3-p
+    closure_values(:,index)=[(1d0,0d0),(2d0,0d0)];closure_gradients(:,:,index)=1d0
+  enddo
+  call verify_dg_overlapping_wannier_periodic_closure(comm,closure_ids,closure_map,closure_values,&
+    closure_gradients,closure_representation,closure_rotation,2_8,1d-12,closure_residual,&
+    closure_fingerprint,ok,message)
+  call require(ok.and.closure_residual<1d-12,'authoritative periodic value/gradient closure')
+  if(rank==0)closure_gradients(1,1,1)=2d0
+  call verify_dg_overlapping_wannier_periodic_closure(comm,closure_ids,closure_map,closure_values,&
+    closure_gradients,closure_representation,closure_rotation,2_8,1d-12,closure_residual,&
+    closure_fingerprint,ok,message)
+  call require(.not.ok,'one-sided periodic gradient-tail corruption rejected collectively')
 
   coordinate=-1000d0*coordinate+37d0
   call construct_dg_overlapping_wannier_basis(comm,4,3,2,ids,fragment,weight,coordinate,boundary,&
@@ -147,6 +174,8 @@ program test_dg_overlapping_wannier_construction_mpi
   call require(ok,trim(message));call local_projector(result%value,projector)
   call require(maxval(abs(projector-reference_projector))<1d-9,'candidate-window gauge invariance')
   call require(all(result%center_owner_rank==reference_owner),'deterministic center ownership')
+  call require(all(result%center_owner_fragment>=1.and.result%center_owner_fragment<=nproc),&
+    'centers retain their real DC fragment ownership')
   call require(all(result%center_box_point_ids==reference_center_box_ids),&
     'deterministic symmetry-compatible centers under candidate gauge rotation')
   call require(result%transform_fingerprint==reference_fingerprint,'deterministic transform fingerprint')
@@ -171,7 +200,7 @@ program test_dg_overlapping_wannier_construction_mpi
 
   if(rank==0)then
     write(*,'(a,i0,a,i0,a,*(i0,1x))')'CONSTRUCTION ranks=',nproc,' fingerprint=',&
-      reference_fingerprint,' centers=',reference_center_fragment
+      reference_fingerprint,' centers=',reference_center_box_ids
     write(*,'(a,i0,a)')'PASS overlapping-Wannier construction on ',nproc,' ranks'
   endif
   call MPI_Finalize(ierr)
