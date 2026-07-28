@@ -13,6 +13,7 @@ parser.add_argument("--build-dir", type=Path,
 args = parser.parse_args()
 BUILD = args.build_dir.resolve()
 SAWF = ROOT / "src/gs/dc/lcfo_wannier_sawf.f90"
+PROJECTION = ROOT / "src/gs/dc/dg_overlapping_wannier_projection.f90"
 LCFO = ROOT / "src/gs/dc/lcfo_flux.f90"
 W90_ORACLE = (BUILD / "wannier90/src/wannier90-project/pwscf/v6.5/"
               "pw2wannier90.f90")
@@ -220,7 +221,7 @@ end module
 """)
     (tmp / "driver.f90").write_text(DRIVER)
     result = run([fc, "-cpp", *strict_flags, "-I", tmp, "-J", tmp,
-                  tmp / "sym_stub.f90", SAWF, tmp / "driver.f90", "-o", tmp / "check"])
+                  tmp / "sym_stub.f90", PROJECTION, SAWF, tmp / "driver.f90", "-o", tmp / "check"])
     if result.returncode:
         raise SystemExit(result.stdout)
     off_file = tmp / "off_projection.txt"

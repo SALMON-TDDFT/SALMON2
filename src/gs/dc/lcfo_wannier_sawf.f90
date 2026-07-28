@@ -7,6 +7,10 @@ module lcfo_wannier_sawf
   use, intrinsic :: iso_c_binding, only: c_double, c_int
   use, intrinsic :: iso_fortran_env, only: int64
   use sym_sub, only: read_symmetry_file
+  use dg_overlapping_wannier_projection, only: &
+    t_sawf_projection_channel=>t_dg_projection_channel,&
+    dg_complete_shell_target_count,build_dg_complete_shell_manifest,&
+    validate_dg_complete_shell_manifest
   implicit none
   private
 
@@ -31,21 +35,13 @@ module lcfo_wannier_sawf
     real(8) :: atom_map_residual = 0.0d0
   end type t_sawf_symop
 
-  ! Shared .win/.amn/.dmn channel key.  The only SAWF ordering currently
-  ! supported is the Wannier90 mr order: atom-major s, p(z,x,y),
-  ! d(3z2-r2,xz,yz,x2-y2,xy).
-  type, public :: t_sawf_projection_channel
-    integer :: atom = 0
-    integer :: l = -1
-    integer :: m = 0
-  end type t_sawf_projection_channel
-
   type :: t_sawf_operation_index
     integer, allocatable :: slots(:)
   end type t_sawf_operation_index
 
   public :: load_sawf_symmetry_auto, load_sawf_symmetry_file
   public :: build_sawf_spd_projection_map, validate_sawf_spd_projection_map
+  public :: t_sawf_projection_channel
   public :: build_sawf_wannier_representation, sawf_real_harmonic_value
   public :: sawf_spd_projection_count, write_sawf_projection_block
   public :: sawf_projection_shell_lmax
@@ -130,29 +126,18 @@ contains
     logical, intent(out) :: ok
     character(*), intent(out) :: message
     integer, intent(in), optional :: max_l
-    integer :: channels_per_atom
+    integer :: shell_l
 
-    ok = .false.
-    message = ''
-    channel_count = 0
     if (num_atoms < 0) then
+      ok=.false.;channel_count=0
       message = 'SAWF projection map atom count is negative'
       return
     end if
-    channels_per_atom = 9
-    if (present(max_l)) then
-      if (max_l == 1) channels_per_atom = 4
-      if (max_l /= 1 .and. max_l /= 2) then
-        message = 'SAWF projection max_l must be 1 or 2'
-        return
-      end if
-    end if
-    if (num_atoms > huge(channel_count)/channels_per_atom) then
-      message = 'SAWF complete-shell projection count overflow'
-      return
-    end if
-    channel_count = channels_per_atom*num_atoms
-    ok = .true.
+    if(num_atoms==0)then
+      channel_count=0;ok=.true.;message='';return
+    endif
+    shell_l=2;if(present(max_l))shell_l=max_l
+    call dg_complete_shell_target_count(num_atoms,shell_l,channel_count,ok,message)
   end subroutine sawf_spd_projection_count
 
 
@@ -162,35 +147,16 @@ contains
     logical, intent(out) :: ok
     character(*), intent(out) :: message
     integer, intent(in), optional :: max_l
-    integer :: allocation_status, atom, channel_count, ip, m, shell_l
-    character(256) :: allocation_message
+    integer :: shell_l,atom
+    integer,allocatable::atom_ids(:)
 
     shell_l = 2
     if (present(max_l)) shell_l = max_l
-    call sawf_spd_projection_count(num_atoms, channel_count, ok, message, shell_l)
-    if (.not. ok) return
-    allocate(channels(channel_count), stat=allocation_status, errmsg=allocation_message)
-    if (allocation_status /= 0) then
-      message = 'SAWF complete s+p+d projection allocation failed: '//trim(allocation_message)
-      ok = .false.
-      return
-    end if
-    ip = 0
-    do atom = 1, num_atoms
-      ip = ip + 1
-      channels(ip) = t_sawf_projection_channel(atom, 0, 1)
-      do m = 1, 3
-        ip = ip + 1
-        channels(ip) = t_sawf_projection_channel(atom, 1, m)
-      end do
-      if (shell_l == 2) then
-        do m = 1, 5
-          ip = ip + 1
-          channels(ip) = t_sawf_projection_channel(atom, 2, m)
-        end do
-      end if
-    end do
-    ok = .true.
+    if(num_atoms==0)then
+      allocate(channels(0));ok=.true.;message='';return
+    endif
+    allocate(atom_ids(num_atoms));atom_ids=[(atom,atom=1,num_atoms)]
+    call build_dg_complete_shell_manifest(atom_ids,shell_l,channels,ok,message)
   end subroutine build_sawf_spd_projection_map
 
 
@@ -199,31 +165,16 @@ contains
     integer, intent(in) :: num_atoms
     logical, intent(out) :: ok
     character(*), intent(out) :: message
-    type(t_sawf_projection_channel), allocatable :: expected(:)
-    integer :: channel_count, ip, max_l
+    integer :: max_l,atom
+    integer,allocatable::atom_ids(:)
 
     ok = .false.
     message = ''
     call sawf_projection_shell_lmax(num_atoms, size(channels), max_l, ok, message)
     if (.not. ok) return
-    call sawf_spd_projection_count(num_atoms, channel_count, ok, message, max_l)
-    ok = .false.
-    if (num_atoms <= 0 .or. size(channels) /= channel_count) then
-      message = 'SAWF pseudo_channels requires complete s+p+d shells or complete s+p shells'
-      return
-    end if
-    call build_sawf_spd_projection_map(num_atoms, expected, ok, message, max_l)
-    if (.not. ok) return
-    do ip = 1, size(channels)
-      if (channels(ip)%atom /= expected(ip)%atom .or. &
-          channels(ip)%l /= expected(ip)%l .or. &
-          channels(ip)%m /= expected(ip)%m) then
-        write(message,'(a,i0,a)') 'SAWF pseudo_channels channel ', ip, &
-          ' breaks the complete atom-major s+p+d ordering'
-        return
-      end if
-    end do
-    ok = .true.
+    allocate(atom_ids(num_atoms));atom_ids=[(atom,atom=1,num_atoms)]
+    call validate_dg_complete_shell_manifest(channels,atom_ids,max_l,ok,message)
+    if(.not.ok)message='SAWF pseudo_channels requires complete s+p+d shells or complete s+p shells: '//trim(message)
   end subroutine validate_sawf_spd_projection_map
 
 
