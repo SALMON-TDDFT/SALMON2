@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Derive the overlapping-Wannier target from complete pseudopotential-backed atomic `s+p` shells and pass the Si64 ground-state gate with a 256-function global basis.
+**Goal:** Derive the overlapping-Wannier target from the exact direct sum of the frozen occupied space and complete pseudopotential-backed atomic `s+p` residual shells, and pass the Si64 ground-state gate with the measured 384-function global basis.
 
-**Architecture:** Reuse the tested SAWF pseudo-channel shell map and projection machinery without calling LCFO or Wannier90.  Freeze the DC core-owned occupied projector, complete it with full-rank `s+p` projected directions in each periodic buffer box, localize only within that accepted space, and translate one representative basis to equivalent fragments.
+**Architecture:** Reuse the tested SAWF pseudo-channel shell map and projection machinery without calling LCFO or Wannier90. Freeze the DC core-owned occupied projector, form its metric-orthogonal direct sum with every full-rank `s+p` projected residual direction in each periodic buffer box, localize only within that accepted space, and translate one representative basis to equivalent fragments. The manifest count controls shell completeness, while the measured direct-sum rank controls the retained basis count.
 
 **Tech Stack:** Fortran 2008, MPI, BLAS/LAPACK, SALMON DC pseudopotential/projector data, Python source-contract and Si64 evidence checkers.
 
@@ -107,9 +107,10 @@ allocation size, and pseudopotential fingerprint coverage.
 **Step 1: Write the failing test**
 
 Use a gauge-rotated candidate space with a two-dimensional occupied
-projector and a complete four-channel manifest.  Require:
+projector and a complete four-channel manifest whose residual rank is
+measured independently. Require:
 
-- target rank four;
+- target rank equal to occupied rank plus complete-shell residual rank;
 - exact occupied inclusion;
 - invariant target projector under candidate gauge rotation;
 - rejection when one `p` channel is linearly dependent;
@@ -123,9 +124,9 @@ Run both focused fixtures and confirm failure at the new selection contract.
 
 Project the manifest into the candidate metric, remove the frozen occupied
 component, diagonalize the projected complement Gram matrix, enforce a
-scale-aware singular-value floor, and retain exactly the directions required
-to reach the complete manifest rank.  Localize only by a unitary rotation
-inside this target.
+scale-aware singular-value floor, and retain every independent residual
+direction. Set the target to the occupied rank plus the measured residual
+rank. Localize only by a unitary rotation inside this target.
 
 **Step 4: Verify GREEN**
 
@@ -146,7 +147,8 @@ candidate-gauge invariance, and bounded memory.
 
 **Step 1: Write the failing test**
 
-Require target count `4 * core_owned_atom_count`, correct fragment IDs
+Require manifest count `4 * core_owned_atom_count`, target count equal to
+occupied rank plus measured complete-shell residual rank, correct fragment IDs
 independent of MPI rank order, representative value/gradient translation,
 and bond-center orbit closure after localization.
 
@@ -156,9 +158,10 @@ Run the source contract and focused construction fixture.
 
 **Step 3: Implement the production adapter**
 
-Replace the numeric target-window authority with the manifest count.
-Retain the candidate-window input only as the outer-space convergence
-control.  Keep complete buffer tails and the existing streaming closure.
+Replace the numeric target-window authority with the measured direct-sum
+rank. Retain the manifest count as the shell-completeness authority and the
+candidate-window input only as the outer-space convergence control. Keep
+complete buffer tails and the existing streaming closure.
 
 **Step 4: Verify GREEN**
 
@@ -178,7 +181,8 @@ Resolve all Critical/Important specification and quality findings.
 
 **Step 1: Write the RED evidence requirements**
 
-Require 32 functions per fragment and 256 globally for 2x2x2 Si64,
+Require 32 complete-shell channels, measured residual rank 32, 48 retained
+functions per fragment and 384 globally for 2x2x2 Si64,
 complete-shell/projectability diagnostics, occupied rank 16 per fragment,
 bond-center closure, and the existing full ground-state metrics.
 
@@ -213,4 +217,3 @@ git commit -m "test(dg): pass complete-sp Si64 Wannier gate"
 ```
 
 Task 10 remains blocked unless this commit is backed by a passing Si64 gate.
-

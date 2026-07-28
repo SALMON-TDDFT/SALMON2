@@ -65,6 +65,22 @@ complete retained buffer tails. The candidate-window and target ranks are
 recorded. The retained space must contain the requested occupied subspace
 under the global core quadrature metric.
 
+For a pseudopotential-backed complete-shell target, shell count is not the
+retained basis count. Let \(Q_{\rm occ}\) be the frozen core-owned occupied
+space and \(P_{sp}\) the candidate-space projection of every complete atomic
+\(s+p\) channel. The accepted target is the metric-orthogonal direct sum
+
+\[
+Q_{\rm target}=Q_{\rm occ}\oplus(I-\Pi_{\rm occ})P_{sp}.
+\]
+
+No residual shell direction may be truncated to force the basis back to the
+raw manifest count. The target rank is therefore the occupied rank plus the
+scale-aware rank of the complete-shell residual. For the Si64 gate the
+measured ranks are 16 and 32 per fragment, so the accepted target is 48
+functions per fragment and 384 globally. This remains the \(s+p\) tier and
+does not add \(d\) channels.
+
 The buffer exterior is an auxiliary numerical boundary, not a physical DG
 interface. The value and gradient norms of every retained Wannier function
 at that boundary must be below their tolerances. Increasing the buffer must
