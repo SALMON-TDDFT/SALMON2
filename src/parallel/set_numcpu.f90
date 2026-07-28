@@ -53,12 +53,17 @@ contains
   end if
 end function check_numcpu
 
-subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,info)
+subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,info,rspace_allowed)
   use structures, only: s_parallel_info
   use communication, only: comm_get_groupinfo
   implicit none
   integer,intent(in)                :: iprefer_dist,numk,numo,icomm1
   type(s_parallel_info),intent(out) :: info
+  ! rspace_allowed=.false. forbids real-space (domain) parallelization, used for
+  ! non-orthogonal lattices. Optional; defaults to .true. (previous behaviour).
+  logical,intent(in),optional       :: rspace_allowed
+  logical :: allow_rspace
+  logical :: if_found
   integer :: nproc_size_comm1, nproc_id_comm1
 
   integer :: ip
@@ -73,6 +78,9 @@ subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,info)
 
   integer :: nk,no
 
+  allow_rspace = .true.
+  if (present(rspace_allowed)) allow_rspace = rspace_allowed
+
   call comm_get_groupinfo(icomm1, nproc_id_comm1, nproc_size_comm1)
   nproc_size_comm1_tmp=nproc_size_comm1
 
@@ -82,6 +90,26 @@ subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,info)
   nproc_k   = 1
   nproc_ob  = 1
   nproc_d_o = 1
+
+  if (.not. allow_rspace) then
+    ! Non-orthogonal lattice: r-space (domain) parallelization is unavailable, so
+    ! every rank must be placed in k x orbital only (nprgrid = 1). The greedy loop
+    ! below can leave an unplaceable residual and abort even when a valid k x orbital
+    ! split exists, so search the rank-count divisors for one (preferring a clean
+    ! division of nk / no and the requested distribution axis) before giving up.
+    call set_kob_only(iprefer_dist, nproc_size_comm1, nk, no, nproc_k, nproc_ob, if_found)
+    if (.not. if_found) then
+      stop "automatic process distribution: a non-orthogonal lattice cannot use &
+           &r-space parallelization, and no nproc_k*nproc_ob split fits the rank &
+           &count; set nproc_k and nproc_ob explicitly so their product equals the &
+           &number of MPI processes."
+    end if
+    nproc_d_o = 1
+    info%npk          = nproc_k
+    info%nporbital    = nproc_ob
+    info%nprgrid(1:3) = nproc_d_o(1:3)
+    return
+  end if
 
   do ip=iprefer_dist,iprefer_domain_distribution
 
@@ -113,6 +141,16 @@ subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,info)
 
     ! rgrid
     case(iprefer_domain_distribution)
+      if(.not. allow_rspace)then
+        ! Non-orthogonal lattice: real-space (domain) parallelization is not
+        ! supported. Any processes left after k/orbital distribution cannot be
+        ! placed without it, so this is a user configuration error.
+        if(nproc_size_comm1_tmp /= 1) &
+          stop "automatic process distribution: a non-orthogonal lattice cannot use &
+               &r-space parallelization; set nproc_k*nproc_ob = (number of MPI processes)."
+        nproc_d_o = 1
+        cycle
+      end if
       num_factor2=0
       do ii=1,26
         if(mod(nproc_size_comm1_tmp,2)==0)then
@@ -185,5 +223,51 @@ subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,info)
   info%nprgrid(1:3) = nproc_d_o(1:3)
 
 end subroutine set_numcpu_general
+
+subroutine set_kob_only(iprefer_dist, nproc, nk, no, nproc_k, nproc_ob, if_found)
+  ! Distribute `nproc` ranks over k x orbital only (no r-space parallelization,
+  ! for non-orthogonal lattices): find nproc_k*nproc_ob = nproc with nproc_k<=nk
+  ! and nproc_ob<=no. Pass 1 also requires nk and no to divide evenly; pass 2
+  ! relaxes that to the <= bounds. Among candidates the requested axis (k or
+  ! orbital) is maximized. if_found=.false. if no such split exists.
+  implicit none
+  integer,intent(in)  :: iprefer_dist, nproc, nk, no
+  integer,intent(out) :: nproc_k, nproc_ob
+  logical,intent(out) :: if_found
+  integer :: p, pk, po, pass
+  logical :: prefer_k, clean, ok
+
+  prefer_k = (iprefer_dist == iprefer_k_distribution)
+  if_found = .false.
+  nproc_k  = 1
+  nproc_ob = 1
+
+  do pass = 1, 2
+    clean = (pass == 1)
+    do p = 1, nproc
+      if (mod(nproc,p) /= 0) cycle
+      if (prefer_k) then
+        pk = p ;          po = nproc/p
+      else
+        po = p ;          pk = nproc/p
+      end if
+      if (pk > nk .or. po > no) cycle
+      if (clean) then
+        if (mod(nk,pk) /= 0 .or. mod(no,po) /= 0) cycle
+      end if
+      if (prefer_k) then
+        ok = (.not. if_found) .or. (pk > nproc_k)
+      else
+        ok = (.not. if_found) .or. (po > nproc_ob)
+      end if
+      if (ok) then
+        nproc_k  = pk
+        nproc_ob = po
+        if_found = .true.
+      end if
+    end do
+    if (if_found) exit
+  end do
+end subroutine set_kob_only
 
 end module set_numcpu
