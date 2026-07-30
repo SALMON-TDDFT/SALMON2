@@ -10,24 +10,23 @@ module dg_overlapping_wannier_density
   public::reconstruct_dg_overlapping_wannier_density
 contains
   subroutine reconstruct_dg_overlapping_wannier_density(comm,physical_ids,weights,values,tail_generation,&
-      expected_generation,coefficients,occupations,expected_core_count,overlap,tolerance,density,&
+      expected_generation,coefficients,occupations,expected_core_count,row_ids,srows,tolerance,density,&
       integrated_charge,trace_charge,ok,message)
     integer,intent(in)::comm,expected_generation
-    integer(int64),intent(in)::physical_ids(:),expected_core_count
+    integer(int64),intent(in)::physical_ids(:),expected_core_count,row_ids(:)
     real(8),intent(in)::weights(:),occupations(:),tolerance
-    complex(8),intent(in)::values(:,:),coefficients(:,:),overlap(:,:)
+    complex(8),intent(in)::values(:,:),coefficients(:,:),srows(:,:)
     integer,intent(in)::tail_generation(:,:)
     real(8),intent(out)::density(:),integrated_charge,trace_charge
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
     integer::nlocal,nwann,nstate,p,i,j,ierr,local_bad,global_bad,scalar_local(3),scalar_min(3),scalar_max(3)
-    integer,allocatable::owners(:)
-    complex(8),allocatable::psi(:,:),density_matrix(:,:),sp(:,:),reference_coefficients(:,:),&
-      reference_overlap(:,:)
+    integer,allocatable::owners(:),row_owners(:)
+    complex(8),allocatable::psi(:,:),reference_coefficients(:,:),sc(:,:)
     real(8),allocatable::reference_occupations(:)
     real(8)::local_charge,trace_imag,tol_min,tol_max,payload_defect,global_payload_defect
-    complex(8)::trace_value
+    complex(8)::trace_value,local_trace
     integer(int64)::expected_min,expected_max
 
     ok=.false.;message='';density=0d0;integrated_charge=huge(1d0);trace_charge=huge(1d0)
@@ -48,34 +47,32 @@ contains
     if(int(nwann,int64)>int(huge(1),int64)/int(max(1,nstate),int64))local_bad=1
     if(expected_generation<=0)local_bad=1
     if(size(weights)/=nlocal.or.size(values,2)/=nlocal.or.any(shape(tail_generation)/=shape(values)))local_bad=1
-    if(size(density)/=nlocal.or.size(occupations)/=nstate.or.any(shape(overlap)/=[nwann,nwann]))local_bad=1
+    if(size(density)/=nlocal.or.size(occupations)/=nstate.or.&
+       any(shape(srows)/=[size(row_ids),nwann]))local_bad=1
+    if(any(row_ids<1_int64).or.any(row_ids>int(nwann,int64)))local_bad=1
     if(any(physical_ids<1_int64).or.any(physical_ids>expected_core_count))local_bad=1
     if(any(weights<=0d0).or.any(occupations<0d0).or.tolerance<=0d0)local_bad=1
     if(.not.all(ieee_is_finite(weights)).or..not.all(ieee_is_finite(occupations)))local_bad=1
-    if(.not.finite_matrix(values).or..not.finite_matrix(coefficients).or..not.finite_matrix(overlap))local_bad=1
+    if(.not.finite_matrix(values).or..not.finite_matrix(coefficients).or..not.finite_matrix(srows))local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(global_bad/=0)then;message='invalid overlapping-Wannier density contract';return;endif
     allocate(reference_coefficients,source=coefficients);allocate(reference_occupations,source=occupations)
-    allocate(reference_overlap,source=overlap)
     call MPI_Bcast(reference_coefficients,nwann*nstate,MPI_DOUBLE_COMPLEX,0,comm,ierr)
     call MPI_Bcast(reference_occupations,nstate,MPI_DOUBLE_PRECISION,0,comm,ierr)
-    call MPI_Bcast(reference_overlap,nwann*nwann,MPI_DOUBLE_COMPLEX,0,comm,ierr)
     payload_defect=max(maxval(abs(coefficients-reference_coefficients)),&
-      max(maxval(abs(occupations-reference_occupations)),maxval(abs(overlap-reference_overlap))))
+      maxval(abs(occupations-reference_occupations)))
     call MPI_Allreduce(payload_defect,global_payload_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     if(global_payload_defect>tolerance)then
-      message='inconsistent replicated density coefficients, occupations, or overlap';return
+      message='inconsistent replicated density coefficients or occupations';return
     endif
     allocate(owners(int(expected_core_count)));owners=0
     do p=1,nlocal;owners(int(physical_ids(p)))=owners(int(physical_ids(p)))+1;enddo
     call MPI_Allreduce(MPI_IN_PLACE,owners,size(owners),MPI_INTEGER,MPI_SUM,comm,ierr)
     if(any(owners/=1))then;message='duplicate or missing unique-core density ownership';return;endif
-    allocate(density_matrix(nwann,nwann))
-    density_matrix=(0d0,0d0)
-    do i=1,nstate
-      density_matrix=density_matrix+occupations(i)*&
-        matmul(reshape(coefficients(:,i),[nwann,1]),reshape(conjg(coefficients(:,i)),[1,nwann]))
-    enddo
+    allocate(row_owners(nwann));row_owners=0
+    do i=1,size(row_ids);row_owners(int(row_ids(i)))=row_owners(int(row_ids(i)))+1;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,row_owners,nwann,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(any(row_owners/=1))then;message='duplicate or missing overlap-row density ownership';return;endif
     local_bad=0
     do p=1,nlocal
       do i=1,nwann
@@ -91,8 +88,12 @@ contains
     if(.not.all(ieee_is_finite(density)))then;message='nonfinite reconstructed core density';return;endif
     local_charge=sum(weights*density)
     call MPI_Allreduce(local_charge,integrated_charge,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
-    sp=matmul(overlap,density_matrix);trace_value=(0d0,0d0)
-    do i=1,nwann;trace_value=trace_value+sp(i,i);enddo
+    allocate(sc(size(row_ids),nstate));sc=matmul(srows,coefficients)
+    local_trace=(0d0,0d0)
+    do i=1,size(row_ids)
+      local_trace=local_trace+sum(occupations*conjg(coefficients(int(row_ids(i)),:))*sc(i,:))
+    enddo
+    call MPI_Allreduce(local_trace,trace_value,1,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
     trace_charge=real(trace_value,8);trace_imag=abs(aimag(trace_value))
     if(.not.all(ieee_is_finite([integrated_charge,trace_charge,trace_imag])).or.&
         trace_imag>tolerance*max(1d0,abs(trace_charge)))then

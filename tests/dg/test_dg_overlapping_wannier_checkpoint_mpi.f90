@@ -5,7 +5,7 @@ program test_dg_overlapping_wannier_checkpoint_mpi
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_positive_inf
   use dg_overlapping_wannier_checkpoint
   implicit none
-  integer::comm,rank,nproc,ierr,nlocal,i,unit,ntail,j
+  integer::comm,rank,nproc,ierr,nlocal,i,unit,ntail,j,nrow
   integer(int64)::original_publication_id
   character(512)::prefix,prefix2,prefix_bad,shard
   type(s_dg_overlapping_wannier_checkpoint)::a,b
@@ -26,9 +26,16 @@ program test_dg_overlapping_wannier_checkpoint_mpi
   a%density_tolerance=1d-9;a%coefficient_tolerance=1d-9;a%orthogonality_tolerance=1d-9
   a%charge_tolerance=1d-9;a%condition_limit=10d0
   a%symmetry_closure_residual=1d-12;a%symmetry_tolerance=1d-9
-  allocate(a%center_owner(2),a%core_physical_ids(nlocal),a%overlap(2,2),a%coefficients(2,1),&
+  allocate(a%center_owner(2),a%core_physical_ids(nlocal),a%coefficients(2,1),&
     a%occupations(1),a%density(nlocal))
-  a%center_owner=[0,mod(1,nproc)];a%overlap=(0d0,0d0);a%overlap(1,1)=1d0;a%overlap(2,2)=1d0
+  a%center_owner=[0,mod(1,nproc)]
+  nrow=count(a%center_owner==rank)
+  allocate(a%overlap_row_ids(nrow),a%overlap(nrow,2));a%overlap=(0d0,0d0)
+  j=0
+  do i=1,2
+    if(a%center_owner(i)/=rank)cycle
+    j=j+1;a%overlap_row_ids(j)=i;a%overlap(j,i)=1d0
+  enddo
   a%coefficients=reshape([cmplx(1d0,0d0,8),cmplx(0d0,0d0,8)],[2,1]);a%occupations=1d0
   ntail=count(a%center_owner==rank)
   allocate(a%tail_center(ntail),a%tail_generation(ntail),a%tail_offsets(ntail+1),&
@@ -51,14 +58,27 @@ program test_dg_overlapping_wannier_checkpoint_mpi
     b,reusable,ok,message)
   call require(ok.and.reusable,trim(message))
   call require(all(b%center_owner==a%center_owner).and.all(b%tail_physical_ids==a%tail_physical_ids).and.&
-    all(b%tail_center==a%tail_center).and.all(b%core_physical_ids==a%core_physical_ids),&
+    all(b%tail_center==a%tail_center).and.all(b%core_physical_ids==a%core_physical_ids).and.&
+    all(b%overlap_row_ids==a%overlap_row_ids),&
     'checkpoint ownership round trip')
-  call require(all(b%coefficients==a%coefficients).and.all(b%density==a%density),&
+  call require(all(b%overlap==a%overlap).and.all(b%coefficients==a%coefficients).and.all(b%density==a%density),&
     'checkpoint payload round trip')
-  a%accepted=.false.
+  do i=1,size(a%overlap_row_ids)
+    if(a%overlap_row_ids(i)==2_int64)a%overlap_row_ids(i)=1_int64
+  enddo
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'duplicate/missing overlap row rejected')
+  do i=1,size(a%overlap_row_ids)
+    if(a%center_owner(2)==rank.and.a%overlap_row_ids(i)==1_int64.and.i>1)&
+      a%overlap_row_ids(i)=2_int64
+    if(a%center_owner(2)==rank.and.nproc>1.and.a%overlap_row_ids(i)==1_int64)&
+      a%overlap_row_ids(i)=2_int64
+  enddo
+  a%accepted=.false.;a%charge_error=2d-8
   call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix),a,ok,message)
   call require(.not.ok,'unaccepted checkpoint publication rejected')
-  a%accepted=.true.
+  call require(index(message,'code=65')>0,'checkpoint rejection identifies failed invariant')
+  a%accepted=.true.;a%charge_error=3d-13
   call read_dg_overlapping_wannier_checkpoint(comm,trim(prefix),7,3,700_int64,900_int64,current_gates,&
     b,reusable,ok,message)
   call require(ok.and.reusable,'failed publication preserves prior atomic checkpoint')

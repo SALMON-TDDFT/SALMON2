@@ -7,14 +7,14 @@ module dg_overlapping_wannier_checkpoint
 #endif
   implicit none
   private
-  character(32),parameter::manifest_magic='SALMON_OW_GS_CHECKPOINT_V1'
-  character(32),parameter::shard_magic='SALMON_OW_GS_RANK_SHARD_V1'
+  character(32),parameter::manifest_magic='SALMON_OW_GS_CHECKPOINT_V2'
+  character(32),parameter::shard_magic='SALMON_OW_GS_RANK_SHARD_V2'
   type,public::s_dg_overlapping_wannier_checkpoint
     integer::basis_generation=0,geometry_generation=0
     integer(int64)::basis_fingerprint=0_int64,operator_fingerprint=0_int64
     integer(int64)::publication_id=0_int64
     integer,allocatable::center_owner(:),tail_center(:),tail_generation(:),tail_offsets(:)
-    integer(int64),allocatable::tail_physical_ids(:),core_physical_ids(:)
+    integer(int64),allocatable::tail_physical_ids(:),core_physical_ids(:),overlap_row_ids(:)
     complex(8),allocatable::overlap(:,:),coefficients(:,:)
     real(8),allocatable::occupations(:),density(:)
     real(8)::density_residual=huge(1d0),coefficient_residual=huge(1d0),charge_error=huge(1d0)
@@ -35,7 +35,8 @@ contains
     character(*),intent(out)::message
     integer,intent(in),optional::failure_injection_rank
 #ifdef USE_MPI
-    integer::rank,nproc,ierr,unit,ios,flush_ios,close_ios,local_bad,global_bad,dims(4)
+    integer::rank,nproc,ierr,unit,ios,flush_ios,close_ios,local_bad,global_bad,dims(4),&
+      local_rejection_code,global_rejection_code
     integer(int64)::transaction_id,previous_publication_id,shard_size,manifest_size,shard_digest,manifest_digest
     character(512)::manifest,manifest_temporary,shard,shard_temporary,reservation
     character(256)::iomsg
@@ -44,7 +45,16 @@ contains
     previous_publication_id=checkpoint%publication_id
     call validate_checkpoint(checkpoint,nproc,local_bad)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(global_bad/=0)then;message='invalid or unaccepted overlapping-Wannier checkpoint';return;endif
+    local_rejection_code=checkpoint_rejection_code(checkpoint,nproc)
+    if(local_bad/=0.and.local_rejection_code==0)local_rejection_code=ibset(local_rejection_code,15)
+    call MPI_Allreduce(local_rejection_code,global_rejection_code,1,MPI_INTEGER,MPI_BOR,comm,ierr)
+    if(global_bad/=0.or.global_rejection_code/=0)then
+      write(message,'(a,i0,a,l1,3(a,es12.4))')&
+        'invalid or unaccepted overlapping-Wannier checkpoint code=',global_rejection_code,&
+        ' accepted=',checkpoint%accepted,' density=',checkpoint%density_residual,&
+        ' unmixed=',checkpoint%unmixed_density_residual,' tolerance=',checkpoint%density_tolerance
+      return
+    endif
     call validate_replicated_payload(comm,checkpoint,local_bad)
     if(local_bad/=0)then;message='rank-inconsistent overlapping-Wannier checkpoint manifest payload';return;endif
     call validate_shard_ownership(comm,checkpoint,local_bad)
@@ -68,9 +78,10 @@ contains
       write(unit,iostat=ios,iomsg=iomsg)shard_magic,rank,nproc,checkpoint%basis_generation,&
         checkpoint%geometry_generation,checkpoint%basis_fingerprint,checkpoint%operator_fingerprint,transaction_id,&
         shard_size,shard_digest,size(checkpoint%tail_center),size(checkpoint%tail_physical_ids),&
-        size(checkpoint%core_physical_ids)
+        size(checkpoint%core_physical_ids),size(checkpoint%overlap_row_ids)
       if(ios==0)write(unit,iostat=ios,iomsg=iomsg)checkpoint%tail_center,checkpoint%tail_generation,&
-        checkpoint%tail_offsets,checkpoint%tail_physical_ids,checkpoint%core_physical_ids,checkpoint%density
+        checkpoint%tail_offsets,checkpoint%tail_physical_ids,checkpoint%core_physical_ids,checkpoint%density,&
+        checkpoint%overlap_row_ids,checkpoint%overlap
       flush_ios=0;close_ios=0
       if(ios==0)flush(unit,iostat=flush_ios)
       close(unit,iostat=close_ios)
@@ -104,7 +115,7 @@ contains
     endif
     call MPI_Barrier(comm,ierr)
     if(rank==0)then
-      dims=[size(checkpoint%center_owner),size(checkpoint%overlap,1),size(checkpoint%coefficients,2),&
+      dims=[size(checkpoint%center_owner),size(checkpoint%coefficients,1),size(checkpoint%coefficients,2),&
         size(checkpoint%occupations)]
       manifest_digest=digest_manifest(checkpoint,transaction_id)
       manifest_size=expected_manifest_size(checkpoint)
@@ -120,7 +131,7 @@ contains
           checkpoint%charge_tolerance,checkpoint%condition_limit,&
           checkpoint%symmetry_closure_residual,checkpoint%symmetry_tolerance,&
           checkpoint%accepted
-        if(ios==0)write(unit,iostat=ios,iomsg=iomsg)checkpoint%center_owner,checkpoint%overlap,&
+        if(ios==0)write(unit,iostat=ios,iomsg=iomsg)checkpoint%center_owner,&
           checkpoint%coefficients,checkpoint%occupations
         flush_ios=0;close_ios=0
         if(ios==0)flush(unit,iostat=flush_ios)
@@ -154,7 +165,8 @@ contains
     logical,intent(out)::reusable,ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer::rank,nproc,ierr,unit,ios,file_nproc,dims(4),local_bad,global_bad,shard_rank,shard_nproc,gate_bad
+    integer::rank,nproc,ierr,unit,ios,file_nproc,dims(4),local_bad,global_bad,shard_rank,shard_nproc,&
+      gate_bad,allocation_status
     integer::integer_metadata(4)
     integer::expected_integers(2),expected_integer_min(2),expected_integer_max(2)
     integer(int64)::fingerprint_metadata(2),count64,file_bytes,transaction_id,shard_transaction_id,&
@@ -162,7 +174,7 @@ contains
       expected_fingerprints(2),&
       expected_fingerprint_min(2),expected_fingerprint_max(2)
     real(8)::acceptance_metadata(13),gate_min(6),gate_max(6)
-    integer::nbasis_gen,ngeometry_gen,ntail_record,ntail_id,ncore
+    integer::nbasis_gen,ngeometry_gen,ntail_record,ntail_id,ncore,noverlap_row
     integer(int64)::basis_fp,operator_fp
     character(32)::magic
     character(512)::manifest,shard
@@ -207,14 +219,15 @@ contains
         endif
         if(ios==0.and.(file_bytes/=stored_size.or.stored_size<128_int64))ios=1
         if(ios==0)then
-          count64=int(dims(2),int64)*int(dims(2),int64)+int(dims(2),int64)*int(dims(3),int64)
+          count64=int(dims(2),int64)*int(dims(3),int64)
           if(count64>100000000_int64)ios=1
         endif
         if(ios==0)then
-          allocate(checkpoint%center_owner(dims(1)),checkpoint%overlap(dims(2),dims(2)),&
-            checkpoint%coefficients(dims(2),dims(3)),checkpoint%occupations(dims(4)))
-          read(unit,iostat=ios,iomsg=iomsg)checkpoint%center_owner,checkpoint%overlap,&
-            checkpoint%coefficients,checkpoint%occupations
+          allocate(checkpoint%center_owner(dims(1)),checkpoint%coefficients(dims(2),dims(3)),&
+            checkpoint%occupations(dims(4)),stat=allocation_status)
+          if(allocation_status/=0)ios=1
+          if(ios==0)read(unit,iostat=ios,iomsg=iomsg)checkpoint%center_owner,checkpoint%coefficients,&
+            checkpoint%occupations
           if(ios==0)then
             if(stored_size/=expected_manifest_size(checkpoint).or.&
                stored_digest/=digest_manifest(checkpoint,transaction_id))ios=1
@@ -228,8 +241,14 @@ contains
     call MPI_Bcast(ios,1,MPI_INTEGER,0,comm,ierr)
     if(ios/=0)then;message='overlapping-Wannier manifest is missing or belongs to another route';return;endif
     call MPI_Bcast(dims,4,MPI_INTEGER,0,comm,ierr)
-    if(rank/=0)allocate(checkpoint%center_owner(dims(1)),checkpoint%overlap(dims(2),dims(2)),&
-      checkpoint%coefficients(dims(2),dims(3)),checkpoint%occupations(dims(4)))
+    allocation_status=0
+    if(rank/=0)allocate(checkpoint%center_owner(dims(1)),checkpoint%coefficients(dims(2),dims(3)),&
+      checkpoint%occupations(dims(4)),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then
+      message='cannot allocate overlapping-Wannier manifest payload collectively';return
+    endif
     if(rank==0)then
       integer_metadata=[checkpoint%basis_generation,checkpoint%geometry_generation,file_nproc,0]
       fingerprint_metadata=[checkpoint%basis_fingerprint,checkpoint%operator_fingerprint]
@@ -255,7 +274,6 @@ contains
     checkpoint%symmetry_closure_residual=acceptance_metadata(12);checkpoint%symmetry_tolerance=acceptance_metadata(13)
     call MPI_Bcast(checkpoint%accepted,1,MPI_LOGICAL,0,comm,ierr)
     call MPI_Bcast(checkpoint%center_owner,dims(1),MPI_INTEGER,0,comm,ierr)
-    call MPI_Bcast(checkpoint%overlap,dims(2)*dims(2),MPI_DOUBLE_COMPLEX,0,comm,ierr)
     call MPI_Bcast(checkpoint%coefficients,dims(2)*dims(3),MPI_DOUBLE_COMPLEX,0,comm,ierr)
     call MPI_Bcast(checkpoint%occupations,dims(4),MPI_DOUBLE_PRECISION,0,comm,ierr)
     call versioned_shard_name(prefix,checkpoint%basis_generation,checkpoint%operator_fingerprint,&
@@ -266,15 +284,19 @@ contains
       inquire(unit=unit,size=file_bytes)
       if(file_bytes<72)ios=1
       if(ios==0)read(unit,iostat=ios,iomsg=iomsg)magic,shard_rank,shard_nproc,nbasis_gen,ngeometry_gen,basis_fp,&
-        operator_fp,shard_transaction_id,stored_size,stored_digest,ntail_record,ntail_id,ncore
+        operator_fp,shard_transaction_id,stored_size,stored_digest,ntail_record,ntail_id,ncore,noverlap_row
       if(ios==0.and.magic==shard_magic.and.shard_rank==rank.and.shard_nproc==nproc.and.&
           ntail_record>=0.and.ntail_id>=0.and.ncore>=0.and.ntail_record<=1000000.and.&
-          ntail_id<=10000000.and.ncore<=10000000)then
+          ntail_id<=10000000.and.ncore<=10000000.and.noverlap_row>=0.and.noverlap_row<=dims(2))then
         allocate(checkpoint%tail_center(ntail_record),checkpoint%tail_generation(ntail_record),&
           checkpoint%tail_offsets(ntail_record+1),checkpoint%tail_physical_ids(ntail_id),&
-          checkpoint%core_physical_ids(ncore),checkpoint%density(ncore))
-        read(unit,iostat=ios,iomsg=iomsg)checkpoint%tail_center,checkpoint%tail_generation,&
-          checkpoint%tail_offsets,checkpoint%tail_physical_ids,checkpoint%core_physical_ids,checkpoint%density
+          checkpoint%core_physical_ids(ncore),checkpoint%density(ncore),&
+          checkpoint%overlap_row_ids(noverlap_row),checkpoint%overlap(noverlap_row,dims(2)),&
+          stat=allocation_status)
+        if(allocation_status/=0)ios=1
+        if(ios==0)read(unit,iostat=ios,iomsg=iomsg)checkpoint%tail_center,checkpoint%tail_generation,&
+          checkpoint%tail_offsets,checkpoint%tail_physical_ids,checkpoint%core_physical_ids,checkpoint%density,&
+          checkpoint%overlap_row_ids,checkpoint%overlap
         if(ios==0)then
           if(file_bytes/=stored_size.or.stored_size/=expected_shard_size(checkpoint).or.&
              stored_digest/=digest_shard(checkpoint,rank,shard_transaction_id))ios=1
@@ -326,17 +348,19 @@ contains
     expected_manifest_size=int(storage_size(manifest_magic)/8,int64)+&
       integer_bytes*int(7+size(checkpoint%center_owner),int64)+integer8_bytes*5_int64+&
       real_bytes*int(13+size(checkpoint%occupations),int64)+logical_bytes+&
-      complex_bytes*int(size(checkpoint%overlap)+size(checkpoint%coefficients),int64)
+      complex_bytes*int(size(checkpoint%coefficients),int64)
   end function
 
   integer(int64) function expected_shard_size(checkpoint)
     type(s_dg_overlapping_wannier_checkpoint),intent(in)::checkpoint
-    integer(int64)::integer_bytes,integer8_bytes,real_bytes
+    integer(int64)::integer_bytes,integer8_bytes,real_bytes,complex_bytes
     integer_bytes=storage_size(0)/8;integer8_bytes=storage_size(0_int64)/8;real_bytes=storage_size(0d0)/8
+    complex_bytes=storage_size((0d0,0d0))/8
     expected_shard_size=int(storage_size(shard_magic)/8,int64)+integer_bytes*&
-      int(8+3*size(checkpoint%tail_center),int64)+integer8_bytes*&
-      int(5+size(checkpoint%tail_physical_ids)+size(checkpoint%core_physical_ids),int64)+&
-      real_bytes*int(size(checkpoint%density),int64)
+      int(9+3*size(checkpoint%tail_center),int64)+integer8_bytes*&
+      int(5+size(checkpoint%tail_physical_ids)+size(checkpoint%core_physical_ids)+&
+      size(checkpoint%overlap_row_ids),int64)+real_bytes*int(size(checkpoint%density),int64)+&
+      complex_bytes*int(size(checkpoint%overlap),int64)
   end function
 
   integer(int64) function digest_manifest(checkpoint,transaction_id)
@@ -351,9 +375,6 @@ contains
     call digest_integer(hash,checkpoint%operator_fingerprint,position)
     call digest_integer(hash,transaction_id,position)
     do i=1,size(checkpoint%center_owner);call digest_integer(hash,int(checkpoint%center_owner(i),int64),position);enddo
-    do j=1,size(checkpoint%overlap,2);do i=1,size(checkpoint%overlap,1)
-      call digest_complex(hash,checkpoint%overlap(i,j),position)
-    enddo;enddo
     do j=1,size(checkpoint%coefficients,2);do i=1,size(checkpoint%coefficients,1)
       call digest_complex(hash,checkpoint%coefficients(i,j),position)
     enddo;enddo
@@ -379,7 +400,7 @@ contains
     type(s_dg_overlapping_wannier_checkpoint),intent(in)::checkpoint
     integer,intent(in)::rank
     integer(int64),intent(in)::transaction_id
-    integer::i,position
+    integer::i,j,position
     integer(int64)::hash
     hash=int(z'3C6EF372FE94F82B',int64);position=1
     call digest_integer(hash,int(rank,int64),position)
@@ -394,6 +415,12 @@ contains
     do i=1,size(checkpoint%tail_physical_ids);call digest_integer(hash,checkpoint%tail_physical_ids(i),position);enddo
     do i=1,size(checkpoint%core_physical_ids);call digest_integer(hash,checkpoint%core_physical_ids(i),position);enddo
     do i=1,size(checkpoint%density);call digest_real(hash,checkpoint%density(i),position);enddo
+    do i=1,size(checkpoint%overlap_row_ids)
+      call digest_integer(hash,checkpoint%overlap_row_ids(i),position)
+    enddo
+    do j=1,size(checkpoint%overlap,2);do i=1,size(checkpoint%overlap,1)
+      call digest_complex(hash,checkpoint%overlap(i,j),position)
+    enddo;enddo
     digest_shard=hash
   end function
 
@@ -423,9 +450,9 @@ contains
     integer,intent(in)::comm
     type(s_dg_overlapping_wannier_checkpoint),intent(in)::checkpoint
     integer,intent(out)::bad
-    integer::nproc,rank,ierr,i,total,local_count,expected_tail_count,global_bad
+    integer::nproc,rank,ierr,i,total,local_count,expected_tail_count,global_bad,row_count,row_total
     integer(int64)::total64
-    integer,allocatable::counts(:),owners(:)
+    integer,allocatable::counts(:),owners(:),row_owners(:)
     local_count=size(checkpoint%core_physical_ids)
     call MPI_Comm_size(comm,nproc,ierr);call MPI_Comm_rank(comm,rank,ierr)
     allocate(counts(nproc))
@@ -473,6 +500,27 @@ contains
     enddo
     if(any(checkpoint%tail_generation/=checkpoint%basis_generation).or.&
        any(checkpoint%tail_physical_ids<=0_int64))bad=1
+    row_count=size(checkpoint%overlap_row_ids)
+    if(row_count/=expected_tail_count.or.size(checkpoint%overlap,1)/=row_count.or.&
+        size(checkpoint%overlap,2)/=size(checkpoint%center_owner))bad=1
+    call MPI_Allreduce(row_count,row_total,1,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(row_total/=size(checkpoint%center_owner))bad=1
+    allocate(row_owners(max(1,size(checkpoint%center_owner))));row_owners=0
+    do i=1,row_count
+      if(checkpoint%overlap_row_ids(i)<1_int64.or.&
+          checkpoint%overlap_row_ids(i)>int(size(checkpoint%center_owner),int64))then
+        bad=1
+      else
+        row_owners(int(checkpoint%overlap_row_ids(i)))=&
+          row_owners(int(checkpoint%overlap_row_ids(i)))+1
+        if(checkpoint%center_owner(int(checkpoint%overlap_row_ids(i)))/=rank)bad=1
+      endif
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,row_owners,max(1,size(checkpoint%center_owner)),&
+      MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(size(checkpoint%center_owner)>0)then
+      if(any(row_owners(1:size(checkpoint%center_owner))/=1))bad=1
+    endif
     call MPI_Allreduce(MPI_IN_PLACE,bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
   end subroutine
 
@@ -483,10 +531,10 @@ contains
     integer::ierr,dims(4),dims_min(4),dims_max(4),integer_values(3),integer_min(3),integer_max(3)
     integer(int64)::fingerprints(2),fingerprints_min(2),fingerprints_max(2)
     integer,allocatable::owner_reference(:)
-    complex(8),allocatable::overlap_reference(:,:),coefficients_reference(:,:)
+    complex(8),allocatable::coefficients_reference(:,:)
     real(8),allocatable::occupations_reference(:)
     real(8)::local_defect,global_defect,metrics(13),metrics_min(13),metrics_max(13)
-    dims=[size(checkpoint%center_owner),size(checkpoint%overlap,1),size(checkpoint%coefficients,2),&
+    dims=[size(checkpoint%center_owner),size(checkpoint%coefficients,1),size(checkpoint%coefficients,2),&
       size(checkpoint%occupations)]
     integer_values=[checkpoint%basis_generation,checkpoint%geometry_generation,merge(1,0,checkpoint%accepted)]
     fingerprints=[checkpoint%basis_fingerprint,checkpoint%operator_fingerprint]
@@ -507,17 +555,15 @@ contains
     if(any(dims_min/=dims_max).or.any(integer_min/=integer_max).or.any(fingerprints_min/=fingerprints_max).or.&
        any(metrics_min/=metrics_max))bad=1
     if(bad/=0)return
-    allocate(owner_reference(dims(1)),overlap_reference(dims(2),dims(2)),&
-      coefficients_reference(dims(2),dims(3)),occupations_reference(dims(4)))
-    owner_reference=checkpoint%center_owner;overlap_reference=checkpoint%overlap
+    allocate(owner_reference(dims(1)),coefficients_reference(dims(2),dims(3)),&
+      occupations_reference(dims(4)))
+    owner_reference=checkpoint%center_owner
     coefficients_reference=checkpoint%coefficients;occupations_reference=checkpoint%occupations
     call MPI_Bcast(owner_reference,dims(1),MPI_INTEGER,0,comm,ierr)
-    call MPI_Bcast(overlap_reference,dims(2)*dims(2),MPI_DOUBLE_COMPLEX,0,comm,ierr)
     call MPI_Bcast(coefficients_reference,dims(2)*dims(3),MPI_DOUBLE_COMPLEX,0,comm,ierr)
     call MPI_Bcast(occupations_reference,dims(4),MPI_DOUBLE_PRECISION,0,comm,ierr)
-    local_defect=max(maxval(abs(checkpoint%overlap-overlap_reference)),&
-      max(maxval(abs(checkpoint%coefficients-coefficients_reference)),&
-      maxval(abs(checkpoint%occupations-occupations_reference))))
+    local_defect=max(maxval(abs(checkpoint%coefficients-coefficients_reference)),&
+      maxval(abs(checkpoint%occupations-occupations_reference)))
     if(any(checkpoint%center_owner/=owner_reference))local_defect=huge(1d0)
     call MPI_Allreduce(local_defect,global_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     bad=merge(0,1,global_defect==0d0)
@@ -529,46 +575,91 @@ contains
     integer,intent(out)::bad
     integer(int64)::matrix_count
     bad=0
-    if(.not.checkpoint%accepted.or.checkpoint%basis_generation<=0.or.checkpoint%geometry_generation<=0)bad=1
-    if(checkpoint%basis_fingerprint==0_int64.or.checkpoint%operator_fingerprint==0_int64)bad=1
+    if(.not.checkpoint%accepted.or.checkpoint%basis_generation<=0.or.checkpoint%geometry_generation<=0)bad=ibset(bad,0)
+    if(checkpoint%basis_fingerprint==0_int64.or.checkpoint%operator_fingerprint==0_int64)bad=ibset(bad,1)
     if(.not.allocated(checkpoint%center_owner).or..not.allocated(checkpoint%tail_center).or.&
        .not.allocated(checkpoint%tail_generation).or..not.allocated(checkpoint%tail_offsets).or.&
        .not.allocated(checkpoint%tail_physical_ids).or..not.allocated(checkpoint%core_physical_ids).or.&
-       .not.allocated(checkpoint%overlap).or..not.allocated(checkpoint%coefficients).or.&
+       .not.allocated(checkpoint%overlap_row_ids).or..not.allocated(checkpoint%overlap).or.&
+       .not.allocated(checkpoint%coefficients).or.&
        .not.allocated(checkpoint%occupations).or..not.allocated(checkpoint%density))then
-      bad=1;return
+      bad=ibset(bad,2);return
     endif
-    if(size(checkpoint%center_owner)<1.or.any(checkpoint%center_owner<0).or.any(checkpoint%center_owner>=nproc))bad=1
-    if(size(checkpoint%center_owner)/=size(checkpoint%overlap,1))bad=1
-    if(size(checkpoint%overlap,1)/=size(checkpoint%overlap,2).or.&
-       size(checkpoint%coefficients,1)/=size(checkpoint%overlap,1).or.&
-       size(checkpoint%coefficients,2)/=size(checkpoint%occupations))bad=1
+    if(size(checkpoint%center_owner)<1.or.any(checkpoint%center_owner<0).or.any(checkpoint%center_owner>=nproc))&
+      bad=ibset(bad,3)
+    if(size(checkpoint%center_owner)/=size(checkpoint%overlap,2).or.&
+       size(checkpoint%overlap_row_ids)/=size(checkpoint%overlap,1))bad=ibset(bad,4)
+    if(size(checkpoint%coefficients,1)/=size(checkpoint%center_owner).or.&
+       size(checkpoint%coefficients,2)/=size(checkpoint%occupations))bad=ibset(bad,5)
     matrix_count=int(size(checkpoint%overlap,1),int64)*int(size(checkpoint%overlap,2),int64)+&
       int(size(checkpoint%coefficients,1),int64)*int(size(checkpoint%coefficients,2),int64)
-    if(matrix_count>100000000_int64)bad=1
-    if(any(checkpoint%core_physical_ids<=0_int64).or.any(checkpoint%density<0d0).or.any(checkpoint%occupations<0d0))bad=1
+    if(matrix_count>100000000_int64)bad=ibset(bad,6)
+    if(any(checkpoint%core_physical_ids<=0_int64).or.any(checkpoint%density<0d0).or.any(checkpoint%occupations<0d0))&
+      bad=ibset(bad,7)
     if(size(checkpoint%core_physical_ids)>10000000.or.size(checkpoint%tail_physical_ids)>10000000.or.&
-       size(checkpoint%tail_center)>1000000)bad=1
+       size(checkpoint%tail_center)>1000000)bad=ibset(bad,8)
     if(.not.all(ieee_is_finite(checkpoint%density)).or..not.all(ieee_is_finite(checkpoint%occupations)).or.&
        .not.all(ieee_is_finite([checkpoint%density_residual,checkpoint%coefficient_residual,&
        checkpoint%charge_error,checkpoint%unmixed_density_residual,checkpoint%orthogonality_defect,&
        checkpoint%metric_condition,checkpoint%density_tolerance,checkpoint%coefficient_tolerance,&
-       checkpoint%orthogonality_tolerance,checkpoint%charge_tolerance,checkpoint%condition_limit])))bad=1
-    if(.not.all(ieee_is_finite([checkpoint%symmetry_closure_residual,checkpoint%symmetry_tolerance])))bad=1
+       checkpoint%orthogonality_tolerance,checkpoint%charge_tolerance,checkpoint%condition_limit])))bad=ibset(bad,9)
+    if(.not.all(ieee_is_finite([checkpoint%symmetry_closure_residual,checkpoint%symmetry_tolerance])))&
+      bad=ibset(bad,10)
     if(min(checkpoint%density_residual,checkpoint%coefficient_residual,checkpoint%unmixed_density_residual,&
-       checkpoint%orthogonality_defect)<0d0.or.checkpoint%metric_condition<1d0)bad=1
+       checkpoint%orthogonality_defect)<0d0.or.checkpoint%metric_condition<1d0)bad=ibset(bad,11)
     if(min(checkpoint%density_tolerance,checkpoint%coefficient_tolerance,checkpoint%orthogonality_tolerance,&
-       checkpoint%charge_tolerance,checkpoint%condition_limit)<=0d0)bad=1
+       checkpoint%charge_tolerance,checkpoint%condition_limit)<=0d0)bad=ibset(bad,12)
     if(checkpoint%density_residual>checkpoint%density_tolerance.or.&
        checkpoint%unmixed_density_residual>checkpoint%density_tolerance.or.&
        checkpoint%coefficient_residual>checkpoint%coefficient_tolerance.or.&
        checkpoint%orthogonality_defect>checkpoint%orthogonality_tolerance.or.&
        abs(checkpoint%charge_error)>checkpoint%charge_tolerance.or.&
-       checkpoint%metric_condition>checkpoint%condition_limit)bad=1
+       checkpoint%metric_condition>checkpoint%condition_limit)bad=ibset(bad,13)
     if(checkpoint%symmetry_tolerance<=0d0.or.checkpoint%symmetry_closure_residual<0d0.or.&
-       checkpoint%symmetry_closure_residual>checkpoint%symmetry_tolerance)bad=1
-    if(.not.finite_complex(checkpoint%overlap).or..not.finite_complex(checkpoint%coefficients))bad=1
+       checkpoint%symmetry_closure_residual>checkpoint%symmetry_tolerance)bad=ibset(bad,14)
+    if(.not.finite_complex(checkpoint%overlap).or..not.finite_complex(checkpoint%coefficients))bad=ibset(bad,15)
   end subroutine
+
+  integer function checkpoint_rejection_code(checkpoint,nproc) result(code)
+    type(s_dg_overlapping_wannier_checkpoint),intent(in)::checkpoint
+    integer,intent(in)::nproc
+    code=0
+    if(.not.checkpoint%accepted)code=ibset(code,0)
+    if(checkpoint%basis_generation<=0.or.checkpoint%geometry_generation<=0)code=ibset(code,1)
+    if(checkpoint%basis_fingerprint==0_int64.or.checkpoint%operator_fingerprint==0_int64)code=ibset(code,2)
+    if(.not.allocated(checkpoint%center_owner).or..not.allocated(checkpoint%tail_center).or.&
+       .not.allocated(checkpoint%tail_generation).or..not.allocated(checkpoint%tail_offsets).or.&
+       .not.allocated(checkpoint%tail_physical_ids).or..not.allocated(checkpoint%core_physical_ids).or.&
+       .not.allocated(checkpoint%overlap_row_ids).or..not.allocated(checkpoint%overlap).or.&
+       .not.allocated(checkpoint%coefficients).or.&
+       .not.allocated(checkpoint%occupations).or..not.allocated(checkpoint%density))then
+      code=ibset(code,3);return
+    endif
+    if(.not.ieee_is_finite(checkpoint%density_residual).or.&
+       checkpoint%density_residual<0d0.or.checkpoint%density_residual>checkpoint%density_tolerance)&
+      code=ibset(code,4)
+    if(.not.ieee_is_finite(checkpoint%unmixed_density_residual).or.&
+       checkpoint%unmixed_density_residual<0d0.or.&
+       checkpoint%unmixed_density_residual>checkpoint%density_tolerance)code=ibset(code,5)
+    if(.not.ieee_is_finite(checkpoint%charge_error).or.&
+       abs(checkpoint%charge_error)>checkpoint%charge_tolerance)code=ibset(code,6)
+    if(.not.ieee_is_finite(checkpoint%coefficient_residual).or.&
+       checkpoint%coefficient_residual<0d0.or.&
+       checkpoint%coefficient_residual>checkpoint%coefficient_tolerance)code=ibset(code,7)
+    if(.not.ieee_is_finite(checkpoint%orthogonality_defect).or.&
+       checkpoint%orthogonality_defect<0d0.or.&
+       checkpoint%orthogonality_defect>checkpoint%orthogonality_tolerance)code=ibset(code,8)
+    if(.not.ieee_is_finite(checkpoint%metric_condition).or.checkpoint%metric_condition<1d0.or.&
+       checkpoint%metric_condition>checkpoint%condition_limit)code=ibset(code,9)
+    if(.not.ieee_is_finite(checkpoint%symmetry_closure_residual).or.&
+       checkpoint%symmetry_closure_residual<0d0.or.&
+       checkpoint%symmetry_closure_residual>checkpoint%symmetry_tolerance)code=ibset(code,10)
+    if(size(checkpoint%center_owner)<1.or.any(checkpoint%center_owner<0).or.&
+       any(checkpoint%center_owner>=nproc).or.any(checkpoint%core_physical_ids<=0_int64).or.&
+       any(checkpoint%density<0d0).or.any(checkpoint%occupations<0d0).or.&
+       .not.finite_complex(checkpoint%overlap).or..not.finite_complex(checkpoint%coefficients))&
+      code=ibset(code,11)
+  end function
 
   logical function finite_complex(values)
     complex(8),intent(in)::values(:,:)

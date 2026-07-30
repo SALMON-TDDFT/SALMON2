@@ -655,9 +655,9 @@ contents, not trust hand-authored Boolean fields.
 
 Require the exact Cartesian matrix:
 
-- two equivalent fragment decompositions;
-- two buffer widths;
-- two candidate/target Wannier windows.
+- fixed `2x2x2` physical decomposition on 8 MPI ranks;
+- buffer 5 production profile and buffer 6 diagnostic profile;
+- two candidate windows at each buffer.
 
 For every row parse and validate runtime, memory, ranks, metric spectrum,
 centers, spreads, tail value/gradient norms, \(S/H/T/V_{\rm NL}/v\)
@@ -679,6 +679,13 @@ normal checkpoint, or conventional RT markers.
 
 Record the complete raw evidence and hashes.
 
+Before scaling beyond the smoke case, execute
+`docs/plans/2026-07-30-overlapping-wannier-row-owned-matrices.md`.
+Production overlap, weak-operator, Hamiltonian, and checkpoint storage must
+use the coefficient solver's row ownership. A full \(N_W^2\) metric is
+permitted only as a rank-zero temporary for the exact spectral gate and must
+be released before SCF.
+
 **Step 4: Enforce the gate**
 
 At least one configuration must pass:
@@ -686,7 +693,9 @@ At least one configuration must pass:
 - occupied inclusion;
 - positive well-conditioned \(S\);
 - buffer tail value and gradient gates;
-- buffer/window convergence of \(S,H,T,v,\rho\);
+- candidate-window convergence of \(S,H,T,v,\rho\) within buffer 5;
+- individually valid buffer-6 diagnostic rows, with cross-buffer
+  sensitivity recorded rather than thresholded;
 - all operator Hermiticity gates;
 - generalized eigen residual and \(S\)-orthonormality;
 - unmixed density fixed point;

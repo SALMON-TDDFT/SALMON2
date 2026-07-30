@@ -10,7 +10,8 @@ module lcfo_wannier_sawf
   use dg_overlapping_wannier_projection, only: &
     t_sawf_projection_channel=>t_dg_projection_channel,&
     dg_complete_shell_target_count,build_dg_complete_shell_manifest,&
-    validate_dg_complete_shell_manifest
+    validate_dg_complete_shell_manifest,&
+    shared_real_harmonic_value=>dg_real_harmonic_value
   implicit none
   private
 
@@ -235,37 +236,7 @@ contains
   real(8) function sawf_real_harmonic_value(l, m, r) result(value)
     integer, intent(in) :: l, m
     real(8), intent(in) :: r(3)
-    real(8), parameter :: sqrt2 = sqrt(2.0d0)
-    real(8), parameter :: inv_sqrt2 = 1.0d0/sqrt(2.0d0)
-    real(8), parameter :: inv_sqrt6 = 1.0d0/sqrt(6.0d0)
-
-    value = 0.0d0
-    select case (l)
-    case (0)
-      if (m == 1) value = 1.0d0
-    case (1)
-      select case (m)
-      case (1)
-        value = r(3)
-      case (2)
-        value = r(1)
-      case (3)
-        value = r(2)
-      end select
-    case (2)
-      select case (m)
-      case (1)
-        value = inv_sqrt6*(2.0d0*r(3)*r(3)-r(1)*r(1)-r(2)*r(2))
-      case (2)
-        value = sqrt2*r(3)*r(1)
-      case (3)
-        value = sqrt2*r(2)*r(3)
-      case (4)
-        value = inv_sqrt2*(r(1)*r(1)-r(2)*r(2))
-      case (5)
-        value = sqrt2*r(1)*r(2)
-      end select
-    end select
+    value=shared_real_harmonic_value(l,m,r)
   end function sawf_real_harmonic_value
 
 

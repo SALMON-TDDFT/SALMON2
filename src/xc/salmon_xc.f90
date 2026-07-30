@@ -1088,16 +1088,35 @@ contains
 
     subroutine exec_builtin_pz()
       use nvtx
+      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
       implicit none
       call nvtxStartRange('exec_builtin_pz', __LINE__)
 
       if (xc%ispin == 0) then
+        if (allocated(rho_s_1d)) then
+          if (size(rho_s_1d,1) /= nl) deallocate(rho_s_1d)
+        end if
+        if (allocated(vexc_1d)) then
+          if (size(vexc_1d,1) /= nl) deallocate(vexc_1d)
+        end if
         if (.not.allocated(rho_s_1d)) allocate(rho_s_1d(nl))
         if (.not.allocated(vexc_1d)) allocate(vexc_1d(nl))
       else
+        if (allocated(rho_s_sp_1d)) then
+          if (size(rho_s_sp_1d,1) /= nl) deallocate(rho_s_sp_1d)
+        end if
+        if (allocated(vexc_sp_1d)) then
+          if (size(vexc_sp_1d,1) /= nl) deallocate(vexc_sp_1d)
+        end if
         if (.not.allocated(rho_s_sp_1d)) allocate(rho_s_sp_1d(nl,2))
         if (.not.allocated(vexc_sp_1d)) allocate(vexc_sp_1d(nl,2))
       endif
+      if (allocated(exc_1d)) then
+        if (size(exc_1d,1) /= nl) deallocate(exc_1d)
+      end if
+      if (allocated(eexc_1d)) then
+        if (size(eexc_1d,1) /= nl) deallocate(eexc_1d)
+      end if
       if (.not.allocated(exc_1d)) allocate(exc_1d(nl))
       if (.not.allocated(eexc_1d)) allocate(eexc_1d(nl))
 
@@ -1117,6 +1136,7 @@ contains
 
 #ifndef SALMON_DEBUG_NEGLECT_NLCC
       if (present(rho_nlcc)) then
+      if (pp%flag_nlcc) then
 #ifdef USE_OPENACC
         if ( xc%ispin == 0 ) then
           call exec_builtin_calc_axpy(rho_s_1d, 0.5d0, rho_nlcc, nl)
@@ -1132,13 +1152,24 @@ contains
           rho_s_sp_1d(:,2) = rho_s_sp_1d(:,2) + reshape(rho_nlcc, (/nl/)) * 0.5
         end if
 #endif
+      end if
       endif
 #endif
 
       if (xc%ispin == 0) then
         call exc_cor_pz(nl, rho_s_1d, exc_1d, eexc_1d, vexc_1d)
+        if (.not.all(ieee_is_finite(vexc_1d))) then
+          write(*,'(a,i0,a,2(es12.4,1x),a,l1)') '[XC-PZ-DIAGNOSTIC] nl=',nl, &
+            ' rho_s_min/max=',minval(rho_s_1d),maxval(rho_s_1d), &
+            ' nlcc=',pp%flag_nlcc
+        end if
       else if (xc%ispin == 1) then
         call exc_cor_pz_sp(nl, rho_s_sp_1d, exc_1d, eexc_1d, vexc_sp_1d)
+        if (.not.all(ieee_is_finite(vexc_sp_1d))) then
+          write(*,'(a,i0,a,2(es12.4,1x),a,l1)') '[XC-PZ-DIAGNOSTIC] nl=',nl, &
+            ' rho_s_min/max=',minval(rho_s_sp_1d),maxval(rho_s_sp_1d), &
+            ' nlcc=',pp%flag_nlcc
+        end if
       end if
 
       if (xc%ispin == 0) then

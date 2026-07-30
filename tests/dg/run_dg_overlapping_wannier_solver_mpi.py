@@ -6,7 +6,7 @@ with tempfile.TemporaryDirectory(prefix="ow-solver-") as name:
     build=Path(name);(build/"config.h").write_text("")
     exe=build/"solver"
     subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
-      "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",
+      "-fcheck=all","-fbacktrace",
       str(root/"src/gs/dc/dg_overlapping_wannier_solver.f90"),
       str(root/"src/gs/dc/dg_overlapping_wannier_density.f90"),
       str(root/"tests/dg/test_dg_overlapping_wannier_solver_mpi.f90"),

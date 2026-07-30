@@ -276,7 +276,9 @@ no automatic basis update and no fallback to conventional RT.
 - occupied-subspace inclusion;
 - centers and spreads;
 - buffer-boundary value and gradient norms;
-- convergence of \(S,H,T,v,\rho\) across at least two buffer widths.
+- convergence of \(S,H,T,v,\rho\) across candidate windows within the
+  fixed production buffer profile;
+- recorded sensitivity to an additional diagnostic buffer profile.
 
 ### Operators
 
@@ -292,7 +294,8 @@ no automatic basis update and no fallback to conventional RT.
 - \(C^\dagger SC=I\);
 - unmixed density fixed point;
 - \(\operatorname{Tr}(PS)\), integrated charge, and target electron count;
-- energy and density agreement across accepted windows and buffers.
+- energy and density agreement across accepted windows in the fixed
+  production buffer profile.
 
 ### Real time
 
@@ -304,11 +307,12 @@ no automatic basis update and no fallback to conventional RT.
 ### Si64 production matrix
 
 The Gamma, non-SOI, PZ Si64 gate uses 8 MPI ranks and 1 OpenMP thread. It
-compares at least:
+uses:
 
-- two equivalent fragment decompositions;
-- two buffer widths;
-- two candidate/target Wannier windows.
+- the fixed `2x2x2` physical decomposition;
+- buffer 5 as the production profile;
+- buffer 6 as required diagnostic evidence;
+- two candidate windows at each buffer.
 
 It records runtime, peak memory, ranks, metric spectrum, centers, spreads,
 tail norms, operator defects, density and coefficient residuals, charge,
@@ -353,3 +357,40 @@ A missing periodic image, one-sided tail corruption, stale generation, or
 failed SCF rolls back the complete transaction and terminates the route.
 There is no fallback. Shutdown and periodic checkpoint handling skip normal
 ground-state checkpoint publication while this route is active.
+
+## Row-owned production matrices
+
+Production overlap and Hamiltonian storage follows the coefficient solver's
+existing row ownership. If rank \(r\) owns the global Wannier indices
+\(I_r\), it stores only
+
+\[
+S_{I_r,:},\qquad H_{I_r,:}.
+\]
+
+Unique-core quadrature ranks accumulate partial contributions only for their
+local physical core points. Contributions are reduced to the rank owning the
+destination matrix row; a full \(N_W\times N_W\) matrix must not be
+materialized on every rank. Hermiticity diagnostics compare distributed
+rows with their conjugate partners collectively.
+
+The metric spectrum gate may gather the distributed overlap rows to rank
+zero as a temporary diagnostic matrix. Rank zero performs the exact
+Hermitian eigensolve, broadcasts only the accepted spectrum and retained
+transformation needed by all ranks, and releases the temporary full matrix
+before ground-state SCF. This exception does not permit a persistent full
+overlap matrix on rank zero or any full matrix on non-root ranks.
+
+Route checkpoints are row-sharded. Each shard records its exact global row
+IDs and row payload; restart collectively proves that every row occurs once
+before reconstructing only the local rows. Coefficients remain distributed
+by rows. The complete coefficient matrix and small projected
+\(N_{\rm state}\times N_{\rm state}\) matrices may be replicated because
+their scaling is distinct from a replicated \(N_W^2\) operator.
+
+The core-value table \(W(:,\Omega_r)\) remains local because density and
+operator quadrature need every retained Wannier value on the rank owning
+those physical core points. Removing that \(O(N_W N_{\rm core,local})\)
+storage, and replacing global tail materialization with sparse owner routing,
+are separate optimizations; neither justifies retaining replicated
+\(O(N_W^2)\) matrices.

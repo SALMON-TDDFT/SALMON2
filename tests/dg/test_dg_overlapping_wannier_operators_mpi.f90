@@ -1,17 +1,19 @@
 #include "config.h"
 program test_dg_overlapping_wannier_operators_mpi
   use mpi
-  use dg_overlapping_wannier_operators,only:assemble_dg_overlapping_wannier_weak_operators
+  use dg_overlapping_wannier_operators,only:assemble_dg_overlapping_wannier_weak_operators,&
+    assemble_dg_overlapping_wannier_weak_operator_rows
   implicit none
   integer::comm,rank,nproc,ierr,p,i,j,nlocal,index,owned
-  integer(8),allocatable::ids(:)
+  integer(8),allocatable::ids(:),row_ids(:)
   real(8),allocatable::weights(:),vlocal(:)
   complex(8),allocatable::values(:,:),gradients(:,:,:),kinetic(:,:),potential(:,:),&
-    reference_kinetic(:,:),reference_potential(:,:),rotated_values(:,:),rotated_gradients(:,:,:)
+    reference_kinetic(:,:),reference_potential(:,:),rotated_values(:,:),rotated_gradients(:,:,:),&
+    kinetic_rows(:,:),potential_rows(:,:)
   complex(8)::gauge(3,3)
   logical::ok
   character(256)::message
-  real(8)::x,k
+  real(8)::x,k,row_error
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
   nlocal=count([(mod(p-1,nproc)==rank,p=1,6)])
@@ -38,6 +40,22 @@ program test_dg_overlapping_wannier_operators_mpi
     'plane-wave kinetic reference')
   call require(abs(kinetic(2,3))>1d-8.and.abs(potential(1,3))>1d-8,'off-fragment tail blocks')
   reference_kinetic=kinetic;reference_potential=potential
+  allocate(row_ids(count([(mod(i-1,nproc)==rank,i=1,3)])))
+  index=0
+  do i=1,3
+    if(mod(i-1,nproc)/=rank)cycle
+    index=index+1;row_ids(index)=i
+  enddo
+  call assemble_dg_overlapping_wannier_weak_operator_rows(comm,3,row_ids,ids,weights,values,&
+    gradients,vlocal,6_8,kinetic_rows,potential_rows,owned,ok,message)
+  call require(ok,trim(message))
+  call require(all(shape(kinetic_rows)==[size(row_ids),3]),'row-owned kinetic shape')
+  row_error=0d0
+  if(size(row_ids)>0)row_error=maxval(abs(kinetic_rows-reference_kinetic(int(row_ids),:)))
+  call require(row_error<1d-13,'row-owned kinetic reference')
+  row_error=0d0
+  if(size(row_ids)>0)row_error=maxval(abs(potential_rows-reference_potential(int(row_ids),:)))
+  call require(row_error<1d-13,'row-owned potential reference')
 
   gauge=(0d0,0d0);gauge(1,2)=1d0;gauge(2,1)=-1d0;gauge(3,3)=1d0
   rotated_values=matmul(gauge,values);allocate(rotated_gradients(3,3,nlocal))
@@ -67,6 +85,12 @@ program test_dg_overlapping_wannier_operators_mpi
     'potential retained-space rotation covariance')
 
   if(nproc>1)then
+    call assemble_dg_overlapping_wannier_weak_operator_rows(comm,merge(4,3,rank==0),row_ids,ids,&
+      weights,values,gradients,vlocal,6_8,kinetic_rows,potential_rows,owned,ok,message)
+    call require(.not.ok,'rank-inconsistent row-owned nwann rejection')
+    call assemble_dg_overlapping_wannier_weak_operator_rows(comm,3,row_ids,ids,weights,values,&
+      gradients,vlocal,merge(7_8,6_8,rank==0),kinetic_rows,potential_rows,owned,ok,message)
+    call require(.not.ok,'rank-inconsistent row-owned core-count rejection')
     call assemble_dg_overlapping_wannier_weak_operators(comm,merge(4,3,rank==0),ids,weights,values,&
       gradients,vlocal,6_8,kinetic,potential,owned,ok,message)
     call require(.not.ok,'rank-inconsistent weak-operator contract rejection')

@@ -563,6 +563,8 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: dg_ow_boundary_value_tolerance
   real(8)        :: dg_ow_boundary_gradient_tolerance
   real(8)        :: dg_ow_symmetry_tolerance
+  integer        :: dg_ow_candidate_states_per_fragment
+  integer        :: dg_ow_target_wanniers_per_fragment
   real(8)        :: dg_dc_gs_electron_count_tolerance
   real(8)        :: dg_dc_gs_minimum_projector_overlap
   integer        :: dg_dc_gs_maximum_scf_iterations

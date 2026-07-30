@@ -715,6 +715,8 @@ contains
       & dg_ow_boundary_value_tolerance, &
       & dg_ow_boundary_gradient_tolerance, &
       & dg_ow_symmetry_tolerance, &
+      & dg_ow_candidate_states_per_fragment, &
+      & dg_ow_target_wanniers_per_fragment, &
       & dg_dc_gs_electron_count_tolerance, &
       & dg_dc_gs_minimum_projector_overlap, &
       & dg_dc_gs_maximum_scf_iterations, &
@@ -1325,6 +1327,8 @@ contains
     dg_ow_boundary_value_tolerance = 1d-6
     dg_ow_boundary_gradient_tolerance = 1d-6
     dg_ow_symmetry_tolerance = 1d-10
+    dg_ow_candidate_states_per_fragment = 0
+    dg_ow_target_wanniers_per_fragment = 0
     dg_dc_gs_electron_count_tolerance = 1d-8
     dg_dc_gs_minimum_projector_overlap = 0.9d0
     dg_dc_gs_maximum_scf_iterations = 100
@@ -2133,6 +2137,8 @@ contains
     call comm_bcast(dg_ow_boundary_value_tolerance, nproc_group_global)
     call comm_bcast(dg_ow_boundary_gradient_tolerance, nproc_group_global)
     call comm_bcast(dg_ow_symmetry_tolerance, nproc_group_global)
+    call comm_bcast(dg_ow_candidate_states_per_fragment, nproc_group_global)
+    call comm_bcast(dg_ow_target_wanniers_per_fragment, nproc_group_global)
     call comm_bcast(dg_dc_gs_electron_count_tolerance, nproc_group_global)
     call comm_bcast(dg_dc_gs_minimum_projector_overlap, nproc_group_global)
     call comm_bcast(dg_dc_gs_maximum_scf_iterations, nproc_group_global)
@@ -3505,6 +3511,12 @@ contains
       call sawf_input_fatal("overlapping Wannier route forbids periodic normal checkpoints")
     if(yn_dg_dc_overlapping_wannier=='y' .and. trim(write_gs_restart_data)/='no') &
       call sawf_input_fatal("overlapping Wannier route requires write_gs_restart_data='no'")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. &
+       any(num_rgrid/num_fragment+2*num_rgrid_buffer>num_rgrid)) &
+      call sawf_input_fatal("overlapping Wannier buffer box must not exceed the periodic system")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. &
+       all(num_rgrid/num_fragment+2*num_rgrid_buffer==num_rgrid)) &
+      call sawf_input_fatal("overlapping Wannier buffer box must not equal the complete periodic system")
     if(yn_dg_dc_local_periodic=='y' .and. trim(theory)/='dft') &
       call sawf_input_fatal("DG DC local-periodic route is ground-state DFT only")
     if(yn_dg_dc_local_periodic=='y' .and. yn_dc/='y') &
@@ -3561,6 +3573,10 @@ contains
        .not.ieee_is_finite(dg_ow_boundary_gradient_tolerance) .or. dg_ow_boundary_gradient_tolerance<=0d0 .or. &
        .not.ieee_is_finite(dg_ow_symmetry_tolerance) .or. dg_ow_symmetry_tolerance<=0d0) &
       call sawf_input_fatal("invalid overlapping-Wannier buffer/symmetry tolerance")
+    if(dg_ow_candidate_states_per_fragment<0 .or. dg_ow_target_wanniers_per_fragment<0 .or. &
+       (dg_ow_candidate_states_per_fragment>0 .and. dg_ow_target_wanniers_per_fragment>&
+        dg_ow_candidate_states_per_fragment)) &
+      call sawf_input_fatal("invalid overlapping-Wannier candidate/target window")
     if(dg_dc_gs_maximum_scf_iterations<1 .or. dg_dc_gs_maximum_eigensolver_iterations<1 .or. &
        dg_dc_gs_maximum_rollbacks<0) call sawf_input_fatal("invalid DG DC GS iteration bound")
     select case(trim(wannier_site_symmetry))

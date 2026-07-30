@@ -1,18 +1,21 @@
 #include "config.h"
 program test_dg_overlapping_wannier_metric_mpi
   use mpi
-  use dg_overlapping_wannier_metric,only:assemble_dg_overlapping_wannier_metric
+  use,intrinsic::ieee_arithmetic,only:ieee_get_halting_mode,ieee_set_halting_mode,ieee_overflow
+  use dg_overlapping_wannier_metric,only:assemble_dg_overlapping_wannier_metric,&
+    assemble_dg_overlapping_wannier_metric_rows
   implicit none
   integer::comm,rank,nproc,ierr,i,nlocal,owned,rejected,reference_owned
-  integer(8),allocatable::ids(:)
+  integer(8),allocatable::ids(:),row_ids(:)
   real(8),allocatable::weights(:)
   complex(8),allocatable::values(:,:),metric(:,:),vectors(:,:)
-  complex(8),allocatable::base_values(:,:),reference_metric(:,:)
+  complex(8),allocatable::base_values(:,:),reference_metric(:,:),metric_rows(:,:)
   real(8),allocatable::spectrum(:),reference_spectrum(:)
   complex(8)::rotation(3,3)
   logical,allocatable::pairs(:,:)
-  real(8)::minimum,condition
-  logical::ok
+  real(8)::minimum,condition,reference_minimum,reference_condition
+  integer::reference_rejected
+  logical::ok,overflow_halting
   character(256)::message
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
@@ -34,6 +37,19 @@ program test_dg_overlapping_wannier_metric_mpi
   call require(minimum>0d0.and.condition>=1d0.and.rejected==0,'positive rank revelation')
   call require_same_matrix(metric)
   reference_spectrum=spectrum;base_values=values;reference_metric=metric;reference_owned=owned
+  allocate(row_ids(count([(mod(i-1,nproc)==rank,i=1,3)])))
+  nlocal=0
+  do i=1,3
+    if(mod(i-1,nproc)/=rank)cycle
+    nlocal=nlocal+1;row_ids(nlocal)=i
+  enddo
+  call assemble_dg_overlapping_wannier_metric_rows(comm,3,row_ids,ids,weights,values,pairs,4_8,&
+    1d-10,metric_rows,spectrum,minimum,condition,rejected,owned,ok,message)
+  call require(ok,trim(message))
+  minimum=0d0
+  if(size(row_ids)>0)minimum=maxval(abs(metric_rows-reference_metric(int(row_ids),:)))
+  call require(minimum<1d-13,'row-owned metric reference')
+  call require(maxval(abs(spectrum-reference_spectrum))<1d-12,'row-owned metric spectrum')
 
   values=base_values;values(2,:)=-values(2,:)
   call check_invariant('sign invariance')
@@ -48,6 +64,40 @@ program test_dg_overlapping_wannier_metric_mpi
   call assemble_dg_overlapping_wannier_metric(comm,3,ids,weights,values,pairs,4_8,1d-10,&
     metric,vectors,spectrum,minimum,condition,rejected,owned,ok,message)
   call require(ok.and.rejected==1,'positive-metric null-space rank revelation')
+  reference_rejected=rejected;reference_minimum=minimum;reference_condition=condition
+  reference_spectrum=spectrum
+  call assemble_dg_overlapping_wannier_metric_rows(comm,3,row_ids,ids,weights,values,pairs,4_8,&
+    1d-10,metric_rows,spectrum,minimum,condition,rejected,owned,ok,message)
+  call require(ok.and.rejected==reference_rejected,'row-owned null-space rank revelation')
+  call require(abs(minimum-reference_minimum)<1d-12,'row-owned retained minimum')
+  call require(abs(condition-reference_condition)<1d-10*reference_condition,'row-owned condition')
+  call require(maxval(abs(spectrum-reference_spectrum))<1d-12,'row-owned retained spectrum')
+
+  values=base_values
+  values(3,:)=values(1,:)+1d-4*values(2,:)+1d-5*cmplx(real(ids,8)**2,0d0,8)
+  call assemble_dg_overlapping_wannier_metric(comm,3,ids,weights,values,pairs,4_8,1d-12,&
+    metric,vectors,spectrum,minimum,condition,rejected,owned,ok,message)
+  call require(ok,'ill-conditioned legacy metric')
+  reference_rejected=rejected;reference_minimum=minimum;reference_condition=condition
+  reference_spectrum=spectrum
+  call assemble_dg_overlapping_wannier_metric_rows(comm,3,row_ids,ids,weights,values,pairs,4_8,&
+    1d-12,metric_rows,spectrum,minimum,condition,rejected,owned,ok,message)
+  call require(ok.and.rejected==reference_rejected,'row-owned ill-conditioned rank')
+  call require(abs(minimum-reference_minimum)<1d-12*max(1d0,reference_minimum),&
+    'row-owned ill-conditioned minimum')
+  call require(abs(condition-reference_condition)<1d-4*reference_condition,&
+    'row-owned ill-conditioned condition')
+  call require(maxval(abs(spectrum-reference_spectrum))<1d-10,'row-owned ill-conditioned spectrum')
+
+  if(nproc>1)then
+    call ieee_get_halting_mode(ieee_overflow,overflow_halting)
+    call ieee_set_halting_mode(ieee_overflow,.false.)
+    values=(1d0,0d0);weights=huge(1d0)/3d0
+    call assemble_dg_overlapping_wannier_metric_rows(comm,3,row_ids,ids,weights,values,pairs,4_8,&
+      1d-10,metric_rows,spectrum,minimum,condition,rejected,owned,ok,message)
+    call require(.not.ok,'nonfinite assembled row-owned metric rejection')
+    call ieee_set_halting_mode(ieee_overflow,overflow_halting)
+  endif
 
   values=base_values
   if(rank==0.and.size(ids)>0)pairs(1,1)=.false.
@@ -57,6 +107,12 @@ program test_dg_overlapping_wannier_metric_mpi
   pairs=.true.
 
   if(nproc>1)then
+    call assemble_dg_overlapping_wannier_metric_rows(comm,merge(4,3,rank==0),row_ids,ids,weights,&
+      values,pairs,4_8,1d-10,metric_rows,spectrum,minimum,condition,rejected,owned,ok,message)
+    call require(.not.ok,'rank-inconsistent row-owned metric nwann rejection')
+    call assemble_dg_overlapping_wannier_metric_rows(comm,3,row_ids,ids,weights,values,pairs,&
+      merge(5_8,4_8,rank==0),1d-10,metric_rows,spectrum,minimum,condition,rejected,owned,ok,message)
+    call require(.not.ok,'rank-inconsistent row-owned metric core-count rejection')
     call assemble_dg_overlapping_wannier_metric(comm,merge(4,3,rank==0),ids,weights,values,pairs,&
       4_8,1d-10,metric,vectors,spectrum,minimum,condition,rejected,owned,ok,message)
     call require(.not.ok,'rank-inconsistent metric contract rejection')

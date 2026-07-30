@@ -48,6 +48,31 @@ program test_dg_overlapping_wannier_solver_mpi
   call dense_generalized_reference(reference_h,reference_s,reference_eval,work,rwork,lapack_info)
   call require(lapack_info==0.and.maxval(abs(eval-reference_eval(1:3)))<1d-8,&
     'distributed solver agrees with dense LAPACK fixture reference')
+  call solve_dg_overlapping_wannier_coefficients(comm,row_ids,hrows,srows,3,1,1d-9,1d-10,&
+    coeff,eval,residual,orthogonality,condition,ok,message,reference_h(:,1:3))
+  call require(ok.and.residual<1d-9,'exact warm start converges in one block iteration')
+  reference_h(4,1)=reference_h(4,1)+cmplx(1d-8,-2d-8,8)
+  reference_h(3,2)=reference_h(3,2)+cmplx(-2d-8,1d-8,8)
+  call solve_dg_overlapping_wannier_coefficients(comm,row_ids,hrows,srows,3,20,1d-10,1d-10,&
+    coeff,eval,residual,orthogonality,condition,ok,message,reference_h(:,1:3))
+  call require(ok.and.residual<1d-10,'near-converged warm start retains small residual directions')
+  reference_h(4,1)=reference_h(4,1)-cmplx(1d-8,-2d-8,8)
+  reference_h(3,2)=reference_h(3,2)-cmplx(-2d-8,1d-8,8)
+  if(nproc>1)then
+    if(rank==0)then
+      call solve_dg_overlapping_wannier_coefficients(comm,row_ids,hrows,srows,3,1,1d-9,1d-10,&
+        coeff,eval,residual,orthogonality,condition,ok,message,reference_h(:,1:3))
+    else
+      call solve_dg_overlapping_wannier_coefficients(comm,row_ids,hrows,srows,3,1,1d-9,1d-10,&
+        coeff,eval,residual,orthogonality,condition,ok,message)
+    endif
+    call require(.not.ok,'rank-mismatched warm-start presence rejection')
+    if(rank==0)reference_h(1,1)=reference_h(1,1)+1d-3
+    call solve_dg_overlapping_wannier_coefficients(comm,row_ids,hrows,srows,3,1,1d-9,1d-10,&
+      coeff,eval,residual,orthogonality,condition,ok,message,reference_h(:,1:3))
+    call require(.not.ok,'rank-corrupted warm-start payload rejection')
+    if(rank==0)reference_h(1,1)=reference_h(1,1)-1d-3
+  endif
 
   gauge=(0d0,0d0);gauge(1,1)=sqrt(0.5d0);gauge(1,2)=sqrt(0.5d0)
   gauge(2,1)=-sqrt(0.5d0);gauge(2,2)=sqrt(0.5d0);gauge(3,3)=1d0;gauge(4,4)=1d0
@@ -109,7 +134,7 @@ program test_dg_overlapping_wannier_solver_mpi
     coeff(:,1:2),eval(1:2),residual,orthogonality,condition,ok,message)
   call require(ok,trim(message))
   call reconstruct_dg_overlapping_wannier_density(comm,point_ids,weights,values,tail_generation,17,&
-    coeff(:,1:2),[2d0,1d0],6_8,smetric,1d-10,rho,charge,trace_charge,ok,message)
+    coeff(:,1:2),[2d0,1d0],6_8,row_ids,srows,1d-10,rho,charge,trace_charge,ok,message)
   call require(ok,trim(message))
   call require(maxval(abs(rho-sum(abs(matmul(transpose(values),coeff(:,1:2)))**2*&
     spread([2d0,1d0],1,nlocal),dim=2)))<1d-10,'all covering tails in density')
@@ -117,23 +142,23 @@ program test_dg_overlapping_wannier_solver_mpi
   if(nproc>1)then
     if(rank==0)coeff(1,1)=coeff(1,1)+1d-3
     call reconstruct_dg_overlapping_wannier_density(comm,point_ids,weights,values,tail_generation,17,&
-      coeff(:,1:2),[2d0,1d0],6_8,smetric,1d-10,rho,charge,trace_charge,ok,message)
+      coeff(:,1:2),[2d0,1d0],6_8,row_ids,srows,1d-10,rho,charge,trace_charge,ok,message)
     call require(.not.ok,'rank-corrupted replicated density payload rejection')
     if(rank==0)coeff(1,1)=coeff(1,1)-1d-3
   endif
 
   if(rank==0.and.nlocal>0)bad_ids(1)=2_8
   call reconstruct_dg_overlapping_wannier_density(comm,bad_ids,weights,values,tail_generation,17,&
-    coeff(:,1:2),[2d0,1d0],6_8,smetric,1d-10,rho,charge,trace_charge,ok,message)
+    coeff(:,1:2),[2d0,1d0],6_8,row_ids,srows,1d-10,rho,charge,trace_charge,ok,message)
   call require(.not.ok,'duplicate or missing core write rejection')
   if(nlocal>0)tail_generation(4,1)=0
   call reconstruct_dg_overlapping_wannier_density(comm,point_ids,weights,values,tail_generation,17,&
-    coeff(:,1:2),[2d0,1d0],6_8,smetric,1d-10,rho,charge,trace_charge,ok,message)
+    coeff(:,1:2),[2d0,1d0],6_8,row_ids,srows,1d-10,rho,charge,trace_charge,ok,message)
   call require(.not.ok,'missing tail pair rejection')
   tail_generation=17
   if(nproc>1)then
     call reconstruct_dg_overlapping_wannier_density(comm,point_ids,weights,values,tail_generation,17,&
-      coeff(:,1:2),[2d0,1d0],merge(7_8,6_8,rank==0),smetric,1d-10,rho,charge,trace_charge,ok,message)
+      coeff(:,1:2),[2d0,1d0],merge(7_8,6_8,rank==0),row_ids,srows,1d-10,rho,charge,trace_charge,ok,message)
     call require(.not.ok,'rank-mismatched density count rejection')
   endif
 
@@ -170,6 +195,7 @@ contains
     h=matmul(linv,matmul(h,conjg(transpose(linv))))
     h=0.5d0*(h+conjg(transpose(h)))
     call zheev('V','U',4,h,4,e,w,size(w),rw,info)
+    if(info==0)h=matmul(conjg(transpose(linv)),h)
   end subroutine
 
   subroutine require(condition,label)

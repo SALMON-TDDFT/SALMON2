@@ -1,12 +1,13 @@
 #include "config.h"
 program test_dg_overlapping_wannier_nonlocal_mpi
   use mpi
-  use dg_overlapping_wannier_nonlocal,only:assemble_dg_overlapping_wannier_nonlocal
+  use dg_overlapping_wannier_nonlocal,only:assemble_dg_overlapping_wannier_nonlocal,&
+    assemble_dg_overlapping_wannier_nonlocal_rows
   implicit none
   integer::comm,rank,nproc,ierr,p,i,j,nlocal,index,owned
-  integer(8),allocatable::ids(:)
+  integer(8),allocatable::ids(:),row_ids(:)
   real(8),allocatable::strength(:)
-  complex(8),allocatable::overlap(:,:),matrix(:,:),reference(:,:),rotated(:,:)
+  complex(8),allocatable::overlap(:,:),matrix(:,:),reference(:,:),rotated(:,:),matrix_rows(:,:)
   complex(8)::direct_local(3,3),direct_global(3,3)
   logical,allocatable::complete(:,:)
   complex(8)::gauge(3,3)
@@ -36,6 +37,22 @@ program test_dg_overlapping_wannier_nonlocal_mpi
   call require(maxval(abs(matrix-direct_global))<1d-13,'direct nonlocal reference')
   call require(abs(matrix(1,2))>1d-8,'overlapping tail-projector block')
   reference=matrix
+  allocate(row_ids(count([(mod(i-1,nproc)==rank,i=1,3)])))
+  index=0
+  do i=1,3
+    if(mod(i-1,nproc)/=rank)cycle
+    index=index+1;row_ids(index)=i
+  enddo
+  call assemble_dg_overlapping_wannier_nonlocal_rows(comm,3,row_ids,ids,strength,overlap,complete,&
+    3_8,matrix_rows,owned,ok,message)
+  call require(ok,trim(message))
+  if(size(row_ids)>0)then
+    direct_local=(0d0,0d0)
+    direct_local(1:size(row_ids),:)=matrix_rows-reference(int(row_ids),:)
+  else
+    direct_local=(0d0,0d0)
+  endif
+  call require(maxval(abs(direct_local))<1d-13,'row-owned nonlocal reference')
   gauge=(0d0,0d0);gauge(1,1)=sqrt(0.5d0);gauge(1,2)=sqrt(0.5d0)
   gauge(2,1)=-sqrt(0.5d0);gauge(2,2)=sqrt(0.5d0);gauge(3,3)=1d0
   rotated=matmul(gauge,overlap)
@@ -45,6 +62,12 @@ program test_dg_overlapping_wannier_nonlocal_mpi
   call require(maxval(abs(matrix-matmul(conjg(gauge),matmul(reference,transpose(gauge)))))<1d-12,&
     'nonlocal gauge covariance')
   if(nproc>1)then
+    call assemble_dg_overlapping_wannier_nonlocal_rows(comm,merge(4,3,rank==0),row_ids,ids,&
+      strength,overlap,complete,3_8,matrix_rows,owned,ok,message)
+    call require(.not.ok,'rank-inconsistent row-owned nonlocal nwann rejection')
+    call assemble_dg_overlapping_wannier_nonlocal_rows(comm,3,row_ids,ids,strength,overlap,&
+      complete,merge(4_8,3_8,rank==0),matrix_rows,owned,ok,message)
+    call require(.not.ok,'rank-inconsistent row-owned projector-count rejection')
     call assemble_dg_overlapping_wannier_nonlocal(comm,merge(4,3,rank==0),ids,strength,overlap,&
       complete,3_8,matrix,owned,ok,message)
     call require(.not.ok,'rank-inconsistent nonlocal contract rejection')

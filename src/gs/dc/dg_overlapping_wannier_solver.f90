@@ -11,7 +11,7 @@ module dg_overlapping_wannier_solver
 contains
   subroutine solve_dg_overlapping_wannier_coefficients(comm,row_ids,hrows,srows,nstate,max_iterations,&
       tolerance,metric_tolerance,coefficients,eigenvalues,maximum_residual,orthogonality_defect,&
-      metric_condition,ok,message)
+      metric_condition,ok,message,initial_coefficients)
     integer,intent(in)::comm,nstate,max_iterations
     integer(8),intent(in)::row_ids(:)
     complex(8),intent(in)::hrows(:,:),srows(:,:)
@@ -20,13 +20,18 @@ contains
     real(8),intent(out)::eigenvalues(:),maximum_residual,orthogonality_defect,metric_condition
     logical,intent(out)::ok
     character(*),intent(out)::message
+    complex(8),intent(in),optional::initial_coefficients(:,:)
 #ifdef USE_MPI
     complex(8),allocatable::qlocal(:,:),vector(:),hvector(:),svector(:),residual(:),direction(:),&
-      hdirection(:),sdirection(:),gram(:,:)
+      hdirection(:),sdirection(:),gram(:,:),block_basis(:,:),block_coefficients(:,:),&
+      block_h(:,:),block_s(:,:),block_residual(:,:),candidate_block(:,:),previous_direction(:,:),old_q(:,:)
+    complex(8),allocatable::reference_initial(:,:)
     complex(8)::value,reduced_h(2,2),reduced_s(2,2),ritz_vector(2)
-    real(8)::ritz_value,pivot,residual_norm
+    real(8),allocatable::block_eigenvalues(:)
+    real(8)::ritz_value,pivot,residual_norm,block_maximum_residual,warm_defect,global_warm_defect
     integer,allocatable::ownership(:)
-    integer::n,nlocal,i,j,band,iteration,ierr,local_bad,global_bad
+    integer::n,nlocal,i,j,band,iteration,ierr,local_bad,global_bad,block_size,maximum_block_size,&
+      warm_local,warm_min,warm_max
     integer::scalar_local(3),scalar_min(3),scalar_max(3)
     real(8)::real_local(2),real_min(2),real_max(2)
 
@@ -39,8 +44,11 @@ contains
     real_local=[tolerance,metric_tolerance]
     call MPI_Allreduce(real_local,real_min,2,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
     call MPI_Allreduce(real_local,real_max,2,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    warm_local=merge(1,0,present(initial_coefficients))
+    call MPI_Allreduce(warm_local,warm_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(warm_local,warm_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     local_bad=0
-    if(any(scalar_min/=scalar_max).or.any(real_min/=real_max))local_bad=1
+    if(any(scalar_min/=scalar_max).or.any(real_min/=real_max).or.warm_min/=warm_max)local_bad=1
     if(n<1.or.nstate<1.or.nstate>n.or.max_iterations<1)local_bad=1
     if(tolerance<=0d0.or.metric_tolerance<=0d0.or.metric_tolerance>=1d0)local_bad=1
     if(.not.all(ieee_is_finite(real_local)))local_bad=1
@@ -48,10 +56,23 @@ contains
     if(any(shape(coefficients)/=[n,nstate]).or.size(eigenvalues)/=nstate)local_bad=1
     if(any(row_ids<1_8).or.any(row_ids>int(n,8)))local_bad=1
     if(.not.finite_matrix(hrows).or..not.finite_matrix(srows))local_bad=1
+    if(present(initial_coefficients))then
+      if(any(shape(initial_coefficients)/=[n,nstate]).or..not.finite_matrix(initial_coefficients))local_bad=1
+    endif
     if(int(n,int64)>0_int64.and.int(n,int64)>int(huge(1),int64)/int(n,int64))local_bad=1
     if(int(nstate,int64)>0_int64.and.int(nstate,int64)>int(huge(1),int64)/int(nstate,int64))local_bad=1
+    if(int(nstate,int64)>int(huge(1),int64)/3_int64)local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(global_bad/=0)then;message='invalid distributed overlapping-Wannier coefficient solve contract';return;endif
+    if(warm_max==1)then
+      allocate(reference_initial,source=initial_coefficients)
+      call MPI_Bcast(reference_initial,n*nstate,MPI_DOUBLE_COMPLEX,0,comm,ierr)
+      warm_defect=maxval(abs(initial_coefficients-reference_initial))
+      call MPI_Allreduce(warm_defect,global_warm_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      if(global_warm_defect>metric_tolerance)then
+        message='rank-inconsistent warm-start coefficient block';return
+      endif
+    endif
 
     allocate(ownership(n));ownership=0
     do i=1,nlocal;ownership(int(row_ids(i)))=ownership(int(row_ids(i)))+1;enddo
@@ -75,55 +96,74 @@ contains
     if(.not.ok.or.metric_condition*metric_tolerance>=1d0)then
       ok=.false.;message='overlap metric condition gate failed';return
     endif
-
-    do band=1,nstate
-      call s_orthogonalize(comm,row_ids,srows,qlocal(:,band),qlocal(:,1:band-1),pivot,ok)
-      if(.not.ok)then;message='starting coefficient vector lost S rank';return;endif
-      do iteration=1,max_iterations
-        call gather_vector(comm,row_ids,qlocal(:,band),vector)
-        hvector=matmul(hrows,vector);svector=matmul(srows,vector)
-        call inner(comm,qlocal(:,band),hvector,value)
-        eigenvalues(band)=real(value,8)
-        residual=hvector-eigenvalues(band)*svector
-        call relative_residual(comm,residual,hvector,svector,eigenvalues(band),residual_norm)
-        if(.not.ieee_is_finite(residual_norm))then;ok=.false.;message='nonfinite coefficient residual';return;endif
-        if(residual_norm<=tolerance)exit
-        direction=-residual
-        call s_project_out(comm,row_ids,srows,direction,qlocal(:,1:band-1),ok)
-        if(.not.ok)return
-        call s_orthogonalize(comm,row_ids,srows,direction,qlocal(:,1:band-1),pivot,ok)
-        if(.not.ok)then;message='coefficient search direction lost metric rank';return;endif
-        call gather_vector(comm,row_ids,direction,vector)
-        hdirection=matmul(hrows,vector);sdirection=matmul(srows,vector)
-        if(.not.finite_matrix(reshape(hdirection,[size(hdirection),1])).or.&
-            .not.finite_matrix(reshape(sdirection,[size(sdirection),1])))then
-          ok=.false.;message='nonfinite coefficient search action';return
-        endif
-        call inner(comm,qlocal(:,band),hvector,reduced_h(1,1))
-        call inner(comm,qlocal(:,band),hdirection,reduced_h(1,2))
-        call inner(comm,direction,hvector,reduced_h(2,1))
-        call inner(comm,direction,hdirection,reduced_h(2,2))
-        call inner(comm,qlocal(:,band),svector,reduced_s(1,1))
-        call inner(comm,qlocal(:,band),sdirection,reduced_s(1,2))
-        call inner(comm,direction,svector,reduced_s(2,1))
-        call inner(comm,direction,sdirection,reduced_s(2,2))
-        reduced_h=0.5d0*(reduced_h+conjg(transpose(reduced_h)))
-        reduced_s=0.5d0*(reduced_s+conjg(transpose(reduced_s)))
-        if(.not.finite_matrix(reduced_h).or..not.finite_matrix(reduced_s))then
-          ok=.false.;message='nonfinite reduced coefficient problem';return
-        endif
-        if(real(reduced_s(2,2),8)<=metric_tolerance.or.real(reduced_s(1,1),8)<=metric_tolerance.or.&
-            real(reduced_s(2,2),8)-abs(reduced_s(1,2))**2/real(reduced_s(1,1),8)<=metric_tolerance)then
-          ok=.false.;message='coefficient search space lost positive metric rank';return
-        endif
-        call lowest_generalized_2x2(reduced_h,reduced_s,ritz_value,ritz_vector,ok)
-        if(.not.ok)then;message='coefficient Rayleigh-Ritz step failed';return;endif
-        qlocal(:,band)=qlocal(:,band)*ritz_vector(1)+direction*ritz_vector(2)
-        call s_orthogonalize(comm,row_ids,srows,qlocal(:,band),qlocal(:,1:band-1),pivot,ok)
-        if(.not.ok)return
+    if(present(initial_coefficients))then
+      do j=1,nstate
+        do i=1,nlocal
+          qlocal(i,j)=initial_coefficients(int(row_ids(i)),j)
+        enddo
+        call s_orthogonalize(comm,row_ids,srows,qlocal(:,j),qlocal(:,1:j-1),pivot,ok)
+        if(.not.ok)then;message='warm-start coefficient block lost metric rank';return;endif
       enddo
-      if(iteration>max_iterations)then;ok=.false.;message='coefficient iteration did not converge';return;endif
+    endif
+
+    maximum_block_size=min(n,3*nstate)
+    allocate(block_basis(nlocal,maximum_block_size),block_coefficients(n,maximum_block_size),&
+      block_eigenvalues(maximum_block_size),block_h(nlocal,nstate),block_s(nlocal,nstate),&
+      block_residual(nlocal,nstate),candidate_block(nlocal,2*nstate),&
+      previous_direction(nlocal,nstate),old_q(nlocal,nstate))
+    previous_direction=(0d0,0d0)
+    do iteration=1,max_iterations
+      do band=1,nstate
+        call gather_vector(comm,row_ids,qlocal(:,band),coefficients(:,band))
+      enddo
+      call block_rayleigh_ritz(comm,row_ids,hrows,srows,qlocal(:,1:nstate),coefficients,eigenvalues,ok)
+      if(.not.ok)then;message='coefficient block Rayleigh-Ritz failed';return;endif
+      block_h=matmul(hrows,coefficients);block_s=matmul(srows,coefficients)
+      block_maximum_residual=0d0
+      do band=1,nstate
+        block_residual(:,band)=block_h(:,band)-eigenvalues(band)*block_s(:,band)
+        call relative_residual(comm,block_residual(:,band),block_h(:,band),block_s(:,band),&
+          eigenvalues(band),residual_norm)
+        if(.not.ieee_is_finite(residual_norm))then
+          ok=.false.;message='nonfinite coefficient block residual';return
+        endif
+        block_maximum_residual=max(block_maximum_residual,residual_norm)
+      enddo
+      if(block_maximum_residual<=tolerance)exit
+      block_basis=(0d0,0d0);block_basis(:,1:nstate)=qlocal(:,1:nstate);block_size=nstate
+      old_q=qlocal(:,1:nstate)
+      candidate_block(:,1:nstate)=-block_residual
+      candidate_block(:,nstate+1:2*nstate)=previous_direction
+      call append_s_orthonormal_block(comm,row_ids,srows,&
+        candidate_block(:,1:merge(2*nstate,nstate,iteration>1)),block_basis,block_size,ok)
+      if(.not.ok)then;message='coefficient block residual orthogonalization failed';return;endif
+      if(block_size==nstate)then
+        ok=.false.;message='coefficient block residual space lost metric rank';return
+      endif
+      do j=1,block_size
+        call gather_vector(comm,row_ids,block_basis(:,j),block_coefficients(:,j))
+      enddo
+      call block_rayleigh_ritz(comm,row_ids,hrows,srows,block_basis(:,1:block_size),&
+        block_coefficients(:,1:block_size),block_eigenvalues(1:block_size),ok)
+      if(.not.ok)then;message='coefficient expanded block Rayleigh-Ritz failed';return;endif
+      previous_direction=old_q
+      qlocal(:,1:nstate)=block_basis(:,1:nstate)
+      if(block_size==n)then
+        eigenvalues=block_eigenvalues(1:nstate)
+        coefficients=block_coefficients(:,1:nstate)
+        call coefficient_diagnostics(comm,row_ids,hrows,srows,coefficients,eigenvalues,&
+          maximum_residual,orthogonality_defect)
+        if(maximum_residual<=10d0*tolerance.and.orthogonality_defect<=10d0*tolerance)exit
+        ok=.false.;message='full-space Ritz residual exceeds numerical quality gate';return
+      endif
     enddo
+    if(iteration>max_iterations)then
+      ok=.false.
+      write(message,'(a,i0,a,es12.4,a,es12.4)')&
+        'coefficient block iteration did not converge: iterations=',max_iterations,&
+        ' residual=',block_maximum_residual,' metric_condition=',metric_condition
+      return
+    endif
     do band=1,nstate
       call gather_vector(comm,row_ids,qlocal(:,band),coefficients(:,band))
     enddo
@@ -207,14 +247,34 @@ contains
     complex(8),intent(in)::rows(:,:)
     real(8),intent(in)::tolerance
     integer,intent(out)::bad
-    complex(8),allocatable::full(:,:)
-    real(8)::scale
-    integer::i,ierr,n
-    n=size(rows,2);allocate(full(n,n));full=(0d0,0d0)
-    do i=1,size(row_ids);full(int(row_ids(i)),:)=rows(i,:);enddo
-    call MPI_Allreduce(MPI_IN_PLACE,full,n*n,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
-    scale=max(1d0,maxval(abs(full)))
-    bad=merge(1,0,maxval(abs(full-conjg(transpose(full))))>tolerance*scale)
+    integer,parameter::row_batch_size=32
+    complex(8),allocatable::local_batch(:,:),global_batch(:,:)
+    real(8)::local_scale,scale,local_defect,defect
+    integer::i,j,ierr,n,first,last,nbatch
+    n=size(rows,2)
+    allocate(local_batch(min(row_batch_size,n),n),global_batch(min(row_batch_size,n),n))
+    local_scale=1d0
+    if(size(rows)>0)local_scale=max(local_scale,maxval(abs(rows)))
+    local_defect=0d0
+    do first=1,n,row_batch_size
+      last=min(n,first+row_batch_size-1);nbatch=last-first+1
+      local_batch=(0d0,0d0)
+      do i=1,size(row_ids)
+        if(row_ids(i)>=int(first,8).and.row_ids(i)<=int(last,8))&
+          local_batch(int(row_ids(i))-first+1,:)=rows(i,:)
+      enddo
+      call MPI_Allreduce(local_batch,global_batch,size(local_batch),&
+        MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      do i=1,size(row_ids)
+        do j=first,last
+          local_defect=max(local_defect,&
+            abs(rows(i,j)-conjg(global_batch(j-first+1,int(row_ids(i))))))
+        enddo
+      enddo
+    enddo
+    call MPI_Allreduce(local_scale,scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_defect,defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    bad=merge(1,0,defect>tolerance*scale)
   end subroutine
 
   subroutine relative_residual(comm,residual,hvector,svector,eigenvalue,value)
@@ -236,36 +296,58 @@ contains
     complex(8),intent(in)::srows(:,:),q(:,:)
     real(8),intent(out)::condition
     logical,intent(out)::ok
-    complex(8),allocatable::local_gram(:,:),gram(:,:)
-    real(8)::squares_s,squares_inverse,local_squares,local_scale,scale_s,scale_inverse,&
+    complex(8),allocatable::gathered_column(:),root_q(:,:)
+    integer(8),allocatable::gathered_ids(:)
+    complex(8)::gram_value
+    real(8)::squares_s,squares_inverse,local_squares,local_scale,scale_s,&
       norm_s,norm_inverse
-    real(8)::factor_s,factor_inverse
-    integer::ierr,n
-    n=size(q,2);allocate(local_gram(n,n),gram(n,n))
-    local_scale=maxval(abs(srows))
+    real(8)::factor_s
+    integer,allocatable::counts(:),displacements(:)
+    integer::ierr,n,i,j,k,rank,nproc,nlocal
+    n=size(q,2)
+    nlocal=size(row_ids)
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    local_scale=0d0
+    if(size(srows)>0)local_scale=maxval(abs(srows))
     call MPI_Allreduce(local_scale,scale_s,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     if(scale_s<=0d0.or..not.ieee_is_finite(scale_s))then;ok=.false.;return;endif
     local_squares=sum((abs(srows)/scale_s)**2)
     call MPI_Allreduce(local_squares,squares_s,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
-    local_gram=matmul(conjg(transpose(q)),q)
-    call MPI_Allreduce(local_gram,gram,n*n,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
-    scale_inverse=maxval(abs(gram))
-    if(scale_inverse<=0d0.or..not.ieee_is_finite(scale_inverse))then;ok=.false.;return;endif
-    squares_inverse=sum((abs(gram)/scale_inverse)**2)
-    factor_s=sqrt(squares_s);factor_inverse=sqrt(squares_inverse)
+    allocate(counts(nproc),displacements(nproc))
+    call MPI_Gather(nlocal,1,MPI_INTEGER,counts,1,MPI_INTEGER,0,comm,ierr)
+    if(rank==0)then
+      displacements(1)=0
+      do i=2,nproc;displacements(i)=displacements(i-1)+counts(i-1);enddo
+      allocate(gathered_ids(n),gathered_column(n),root_q(n,n))
+    else
+      allocate(gathered_ids(1),gathered_column(1),root_q(1,1))
+    endif
+    call MPI_Gatherv(row_ids,nlocal,MPI_INTEGER8,gathered_ids,counts,displacements,&
+      MPI_INTEGER8,0,comm,ierr)
+    do j=1,n
+      call MPI_Gatherv(q(:,j),nlocal,MPI_DOUBLE_COMPLEX,gathered_column,counts,displacements,&
+        MPI_DOUBLE_COMPLEX,0,comm,ierr)
+      if(rank==0)then
+        do k=1,n;root_q(int(gathered_ids(k)),j)=gathered_column(k);enddo
+      endif
+    enddo
+    squares_inverse=0d0
+    if(rank==0)then
+      do j=1,n;do i=1,n
+        gram_value=dot_product(root_q(:,i),root_q(:,j))
+        squares_inverse=squares_inverse+abs(gram_value)**2
+      enddo;enddo
+    endif
+    call MPI_Bcast(squares_inverse,1,MPI_DOUBLE_PRECISION,0,comm,ierr)
+    factor_s=sqrt(squares_s)
     if(factor_s<=0d0)then;ok=.false.;return;endif
-    if(factor_inverse<=0d0)then;ok=.false.;return;endif
+    if(squares_inverse<=0d0.or..not.ieee_is_finite(squares_inverse))then;ok=.false.;return;endif
     if(factor_s>1d0)then
       if(scale_s>huge(1d0)/factor_s)then
         condition=huge(1d0);ok=.false.;return
       endif
     endif
-    if(factor_inverse>1d0)then
-      if(scale_inverse>huge(1d0)/factor_inverse)then
-        condition=huge(1d0);ok=.false.;return
-      endif
-    endif
-    norm_s=scale_s*factor_s;norm_inverse=scale_inverse*factor_inverse
+    norm_s=scale_s*factor_s;norm_inverse=sqrt(squares_inverse)
     if(norm_inverse>1d0)then
       if(norm_s>huge(1d0)/norm_inverse)then
         condition=huge(1d0);ok=.false.;return
@@ -283,14 +365,13 @@ contains
     integer(8),intent(in)::row_ids(:)
     complex(8),intent(in)::hrows(:,:),srows(:,:)
     complex(8),intent(inout)::qlocal(:,:)
-    complex(8),intent(out)::coefficients(:,:)
+    complex(8),intent(inout)::coefficients(:,:)
     real(8),intent(out)::eigenvalues(:)
     logical,intent(out)::ok
-    complex(8),allocatable::hq(:,:),projected(:,:),local_projected(:,:),rotation(:,:),&
-      rotated_projected(:,:),rotated_q(:,:)
-    complex(8)::subh(2,2),subs(2,2),v(2),tmpcol(size(qlocal,1))
-    real(8)::ev,offdiag
-    integer::p,q,sweep,i,ierr,n
+    complex(8),allocatable::hq(:,:),projected(:,:),local_projected(:,:),rotated_q(:,:),work(:)
+    real(8),allocatable::rwork(:)
+    integer::p,ierr,n,lapack_info,lwork
+    external::zheev
     n=size(eigenvalues)
     hq=matmul(hrows,coefficients)
     local_projected=matmul(conjg(transpose(qlocal)),hq)
@@ -298,36 +379,77 @@ contains
     call MPI_Allreduce(local_projected,projected,size(eigenvalues)**2,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
     projected=0.5d0*(projected+conjg(transpose(projected)))
     if(.not.finite_matrix(projected))then;ok=.false.;return;endif
-    allocate(rotation(n,n),rotated_projected(n,n),rotated_q(size(qlocal,1),n))
-    subs=(0d0,0d0);subs(1,1)=1d0;subs(2,2)=1d0
-    do sweep=1,100
-      offdiag=0d0
-      do q=2,n;do p=1,q-1
-        offdiag=max(offdiag,abs(projected(p,q)))
-        if(abs(projected(p,q))<=1d-13*max(1d0,maxval(abs(projected))))cycle
-        subh=reshape([projected(p,p),projected(q,p),projected(p,q),projected(q,q)],[2,2])
-        call lowest_generalized_2x2(subh,subs,ev,v,ok);if(.not.ok)return
-        rotation=(0d0,0d0);do i=1,n;rotation(i,i)=1d0;enddo
-        rotation(p,p)=v(1);rotation(q,p)=v(2)
-        rotation(p,q)=-conjg(v(2));rotation(q,q)=conjg(v(1))
-        rotated_projected=matmul(conjg(transpose(rotation)),matmul(projected,rotation))
-        rotated_q=matmul(qlocal,rotation)
-        projected=0.5d0*(rotated_projected+conjg(transpose(rotated_projected)))
-        qlocal=rotated_q
-      enddo;enddo
-      if(offdiag<=1d-12*max(1d0,maxval(abs(projected))))exit
-    enddo
-    if(sweep>100.or..not.finite_matrix(projected))then;ok=.false.;return;endif
-    eigenvalues=[(real(projected(p,p),8),p=1,size(eigenvalues))]
-    do p=1,size(eigenvalues)-1
-      q=minloc(eigenvalues(p:),dim=1)+p-1
-      if(q/=p)then
-        ev=eigenvalues(p);eigenvalues(p)=eigenvalues(q);eigenvalues(q)=ev
-        tmpcol=qlocal(:,p);qlocal(:,p)=qlocal(:,q);qlocal(:,q)=tmpcol
-      endif
-    enddo
+    allocate(rwork(max(1,3*n-2)))
+    lwork=max(1,2*n-1)
+    allocate(work(lwork))
+    call zheev('V','U',n,projected,n,eigenvalues,work,lwork,rwork,lapack_info)
+    if(lapack_info/=0.or..not.finite_matrix(projected))then;ok=.false.;return;endif
+    allocate(rotated_q(size(qlocal,1),n))
+    rotated_q=matmul(qlocal,projected)
+    qlocal=rotated_q
     do p=1,size(eigenvalues);call gather_vector(comm,row_ids,qlocal(:,p),coefficients(:,p));enddo
     ok=all(ieee_is_finite(eigenvalues)).and.finite_matrix(coefficients)
+  end subroutine
+
+  subroutine append_s_orthonormal_block(comm,row_ids,srows,candidates,basis,basis_size,ok)
+    integer,intent(in)::comm
+    integer(8),intent(in)::row_ids(:)
+    complex(8),intent(in)::srows(:,:),candidates(:,:)
+    complex(8),intent(inout)::basis(:,:)
+    integer,intent(inout)::basis_size
+    logical,intent(out)::ok
+    complex(8),allocatable::work_block(:,:),global_block(:,:),sblock(:,:),cross(:,:),local_cross(:,:),&
+      gram(:,:),local_gram(:,:),work(:),rotated(:,:)
+    real(8),allocatable::spectrum(:),rwork(:)
+    integer::ncandidate,n,keep,i,j,ierr,info,lwork,projection_pass
+    external::zheev
+    ncandidate=size(candidates,2);n=size(srows,2)
+    allocate(work_block(size(candidates,1),ncandidate),global_block(n,ncandidate),&
+      sblock(size(candidates,1),ncandidate))
+    work_block=candidates
+    if(basis_size>0)then
+      allocate(local_cross(basis_size,ncandidate),cross(basis_size,ncandidate))
+      do projection_pass=1,2
+        call gather_block(comm,row_ids,work_block,global_block)
+        sblock=matmul(srows,global_block)
+        local_cross=matmul(conjg(transpose(basis(:,1:basis_size))),sblock)
+        call MPI_Allreduce(local_cross,cross,basis_size*ncandidate,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+        work_block=work_block-matmul(basis(:,1:basis_size),cross)
+      enddo
+    endif
+    call gather_block(comm,row_ids,work_block,global_block)
+    sblock=matmul(srows,global_block)
+    allocate(local_gram(ncandidate,ncandidate),gram(ncandidate,ncandidate),spectrum(ncandidate))
+    local_gram=matmul(conjg(transpose(work_block)),sblock)
+    call MPI_Allreduce(local_gram,gram,ncandidate*ncandidate,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    gram=0.5d0*(gram+conjg(transpose(gram)))
+    allocate(rwork(max(1,3*ncandidate-2)))
+    lwork=max(1,2*ncandidate-1);allocate(work(lwork))
+    call zheev('V','U',ncandidate,gram,ncandidate,spectrum,work,lwork,rwork,info)
+    if(info/=0.or..not.all(ieee_is_finite(spectrum)))then;ok=.false.;return;endif
+    keep=count(spectrum>max(tiny(1d0),1d-12*max(0d0,maxval(spectrum))))
+    keep=min(keep,size(basis,2)-basis_size)
+    if(keep<1)then;ok=.true.;return;endif
+    allocate(rotated(size(work_block,1),keep))
+    do j=1,keep
+      i=ncandidate-keep+j
+      rotated(:,j)=matmul(work_block,gram(:,i))/sqrt(spectrum(i))
+    enddo
+    basis(:,basis_size+1:basis_size+keep)=rotated
+    basis_size=basis_size+keep
+    ok=finite_matrix(rotated)
+  end subroutine
+
+  subroutine gather_block(comm,row_ids,local,global)
+    integer,intent(in)::comm
+    integer(8),intent(in)::row_ids(:)
+    complex(8),intent(in)::local(:,:)
+    complex(8),intent(out)::global(:,:)
+    complex(8),allocatable::staged(:,:)
+    integer::i,ierr
+    allocate(staged(size(global,1),size(global,2)));staged=(0d0,0d0)
+    do i=1,size(local,1);staged(int(row_ids(i)),:)=local(i,:);enddo
+    call MPI_Allreduce(staged,global,size(global),MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
   end subroutine
 
   subroutine coefficient_diagnostics(comm,row_ids,hrows,srows,c,e,residual,orthogonality)
