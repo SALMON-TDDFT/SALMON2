@@ -27,8 +27,8 @@ use omp_lib, only: omp_get_max_threads
 #endif
 use structures
 use inputoutput
-use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_wpw_production, &
-  yn_dg_dc_local_periodic, yn_dg_dc_overlapping_wannier, ncg, base_directory, &
+use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, &
+  yn_dg_dc_overlapping_wannier, ncg, base_directory, &
   dg_dc_handoff_min_iter, dg_dc_handoff_tolerance, &
   dg_dc_candidate_orbitals_per_atom, dg_dc_metric_rank_tolerance, &
   dg_dc_gs_intermediate_orbital_tolerance,dg_dc_gs_intermediate_density_tolerance, &
@@ -190,12 +190,10 @@ integer :: ilevel_print
 if(theory=='dft_band'.and.iperiodic/=3) return
 
 if(yn_dc=='y') then
-  call initialize_dg_dc_handoff(dg_dc_handoff_runtime,yn_dg_dc_local_periodic=='y', &
+  call initialize_dg_dc_handoff(dg_dc_handoff_runtime,.false., &
     dg_dc_handoff_min_iter,dg_dc_handoff_tolerance,dg_dc_candidate_orbitals_per_atom, &
     dg_dc_metric_rank_tolerance,dg_handoff_ok,dg_handoff_message)
   if(.not.dg_handoff_ok) stop 'invalid DG DC handoff controls'
-  if(yn_dg_wpw_production=='y'.and.yn_dc_lcfo_flux/='y') &
-    stop 'DG WPW production requires yn_dc_lcfo_flux=y'
   if(yn_spinorbit=='y') then
     call init_dcdft_soi(dc,pp,mixing,ewald)
   else
@@ -236,11 +234,6 @@ call initialization2_dft( Miter, nspin, rion_update,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,   &
                           xc_func, mixing )
-
-if(yn_dg_dc_local_periodic=='y')then
-  call comm_logical_and(system%if_real_orbital.and.allocated(spsi%rwf),dg_handoff_ok,dc%icomm_tot)
-  if(.not.dg_handoff_ok)stop 'DG DC local-periodic route requires allocated real orbitals collectively'
-endif
 
 Miopt = 0
 nopt_max = 1
@@ -395,7 +388,7 @@ if(yn_opt=='y') then
       is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(iopt,checkpoint_interval) == 0)
       is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
 
-      if(yn_dg_dc_local_periodic/='y' .and. yn_dg_dc_overlapping_wannier/='y' .and. &
+      if(yn_dg_dc_overlapping_wannier/='y' .and. &
          (is_checkpoint_iter .or. is_shutdown_time)) then
          if (is_shutdown_time .and. comm_is_root(info%id_rko)) then
            print *, 'shutdown the calculation, iopt =', iopt
@@ -442,12 +435,6 @@ if(yn_dc=='y') then
       error stop 'overlapping-Wannier route requires a converged conventional DC state'
     call run_dg_overlapping_wannier_ground_state_for_main
     return
-  else if(yn_dg_dc_local_periodic == 'y') then
-    local_basis_route_active=.true.
-    if(.not.dg_dc_handoff_runtime%direct_ground_state_complete) &
-      stop 'DG DC route reached publication without a full-scale fixed point'
-    call publish_dg_dc_direct_ground_state_for_main(dg_handoff_ok,dg_handoff_message)
-    if(.not.dg_handoff_ok)stop 'DG DC direct checkpoint publication failed collectively'
   else if(yn_dc_lcfo_flux == 'y') then
     if(yn_spinorbit == 'y') then
       stop "yn_dc_lcfo_flux=y is not implemented for spin-orbit mode"

@@ -62,7 +62,6 @@ module inputoutput
   integer :: inml_band
   integer :: inml_sbe
   integer :: inml_dc
-  integer :: inml_dg_fragment
 
 !Input/Output units
   integer :: iflag_unit_time
@@ -315,26 +314,14 @@ contains
       & propagator, &
       & yn_fix_func, &
       & yn_predictor_corrector, &
-      & yn_dg_fragment_rt, &
       & yn_dg_overlapping_wannier_rt, &
       & yn_dg_overlapping_wannier_rt_restart, &
       & yn_dg_length_gauge, &
-      & yn_dg_nodal_rt, &
       & time_integrator_dg_fragment, &
       & dg_nodal_gs_relax_step, &
       & dg_nodal_gs_max_iter, &
       & dg_nodal_gs_tol, &
       & dg_nodal_taylor_order, &
-      & yn_dg_expdiag_xi_split, &
-      & yn_dg_expdiag_refresh_fixed_func, &
-      & yn_dg_expdiag_global_flux, &
-      & yn_dg_expdiag_global_field, &
-      & yn_dg_full_h_wannier_band_gauge, &
-      & yn_dg_expdiag_project_h, &
-      & yn_dg_expdiag_delta_h, &
-      & yn_dg_mixed_z, &
-      & yn_dg_mixed_z_include_ww, &
-      & yn_dg_mixed_z_local_prop_writeback, &
       & dg_mixed_z_local_prop_backend, &
       & dg_mixed_z_neighbor_env_shell, &
       & dg_mixed_z_frag_local_field_block, &
@@ -343,10 +330,6 @@ contains
       & dg_mixed_z_wp_position_branch, &
       & dg_mixed_z_pp_position_branch, &
       & dg_mixed_z_polarization_branch, &
-      & yn_dg_mixed_z_local_rho_writeback_wwonly, &
-      & yn_dg_mixed_z_local_pz_writeback_total, &
-      & yn_dg_mixed_z_local_current_writeback_total, &
-      & yn_dg_mixed_z_decomp_output, &
       & dg_wannier_symmetry_gauge, &
       & yn_plane_wave_basis, &
       & n_plane_waves_dg, &
@@ -357,7 +340,6 @@ contains
       & dg_bpw_auto_min_n, &
       & dg_bpw_auto_report, &
       & dg_bpw_position_mode, &
-      & yn_dg_subspace_diag, &
       & dg_subspace_extra_states, &
       & dg_subspace_pw_vectors
 
@@ -377,14 +359,6 @@ contains
       & yn_auto_mixing, &
       & update_mixing_ratio, &
       & nscf, &
-      & yn_dg_wpw_production, &
-      & yn_dg_wpw_fixed_h_relaxation, &
-      & yn_dg_wpw_preconditioner, &
-      & yn_dg_wpw_metric_preconditioner, &
-      & yn_dg_wpw_h_epsilon_s_correction, &
-      & yn_dg_wpw_global_projected_correction, &
-      & yn_dg_wpw_search_history, &
-      & yn_dg_wpw_s_orthogonal_pw, &
       & dg_wpw_extra_states, &
       & dg_wpw_scf_max_iter, &
       & dg_wpw_global_correction_restart, &
@@ -585,7 +559,6 @@ contains
       & out_lcm_rt_step, &
       & yn_out_lz_rt, &
       & out_lz_rt_step, &
-      & yn_dg_hse_ace, &
       & dg_hse_ace_max_age, &
       & dg_hse_ace_coef_thresh, &
       & yn_out_tm, &
@@ -693,7 +666,6 @@ contains
       & yn_dc_lcfo_wannier_pw, &
       & yn_dc_lcfo_wannier_cluster, &
       & yn_dc_lcfo_block_diag_h, &
-      & yn_dg_dc_local_periodic, &
       & yn_dg_dc_overlapping_wannier, &
       & dg_dc_handoff_min_iter, &
       & dg_dc_handoff_tolerance, &
@@ -759,36 +731,7 @@ contains
       & dg_wannier_symmetry_gauge, &
       & energy_cut, &
       & lambda_cut, &
-      & yn_adaptive_basis, &
       & basis_update_threshold, &
-      & yn_dg_fragment_from_dcdft, &
-      & yn_dg_lcfo_seed_exhaustive_check, &
-      & yn_dg_full_h_eigen_seed, &
-      & yn_dg_wpw_checkpoint_rt, &
-      & dg_wpw_checkpoint_manifest, &
-      & dg_wpw_checkpoint_rank_prefix, &
-      & dg_wpw_checkpoint_identity_tolerance, &
-      & dg_wpw_exp_max_corrector, &
-      & dg_wpw_exp_corrector_tolerance, &
-      & dg_wpw_exp_norm_tolerance
-
-    namelist/dg_fragment/ &
-      & yn_dg_fragment_rt, &
-      & yn_dg_nodal_rt, &
-      & dg_nodal_gs_relax_step, &
-      & dg_nodal_gs_max_iter, &
-      & dg_nodal_gs_tol, &
-      & dg_nodal_taylor_order, &
-      & yn_dg_frag, &
-      & eps_dg_frag, &
-      & yn_adaptive_basis_dg, &
-      & niter_dg_frag_rt_max, &
-      & yn_adaptive_basis, &
-      & basis_update_threshold, &
-      & yn_dg_fragment_from_dcdft, &
-      & yn_dg_lcfo_seed_exhaustive_check, &
-      & yn_dg_full_h_eigen_seed, &
-      & yn_dg_wpw_checkpoint_rt, &
       & dg_wpw_checkpoint_manifest, &
       & dg_wpw_checkpoint_rank_prefix, &
       & dg_wpw_checkpoint_identity_tolerance, &
@@ -928,26 +871,14 @@ contains
     propagator  = 'middlepoint'
     yn_fix_func = 'n'
     yn_predictor_corrector = 'n'
-    yn_dg_fragment_rt = 'n'
     yn_dg_overlapping_wannier_rt = 'n'
     yn_dg_overlapping_wannier_rt_restart = 'n'
     yn_dg_length_gauge = 'n'
-    yn_dg_nodal_rt = 'n'
     time_integrator_dg_fragment = 'expdiag'
     dg_nodal_gs_relax_step = 0.002d0
     dg_nodal_gs_max_iter = 200
     dg_nodal_gs_tol = 1.0d-8
     dg_nodal_taylor_order = 8
-    yn_dg_expdiag_xi_split = 'n'
-    yn_dg_expdiag_refresh_fixed_func = 'n'
-    yn_dg_expdiag_global_flux = 'n'
-    yn_dg_expdiag_global_field = 'y'
-    yn_dg_full_h_wannier_band_gauge = 'n'
-    yn_dg_expdiag_project_h = 'n'
-    yn_dg_expdiag_delta_h = 'n'
-    yn_dg_mixed_z = 'n'
-    yn_dg_mixed_z_include_ww = 'y'
-    yn_dg_mixed_z_local_prop_writeback = 'n'
     dg_mixed_z_local_prop_backend = 'global_mixed_split_backend'
     dg_mixed_z_neighbor_env_shell = 1
     dg_mixed_z_frag_local_field_block = 'all'
@@ -956,10 +887,6 @@ contains
     dg_mixed_z_wp_position_branch = 'zero'
     dg_mixed_z_pp_position_branch = 'zero'
     dg_mixed_z_polarization_branch = 'center_diag'
-    yn_dg_mixed_z_local_rho_writeback_wwonly = 'n'
-    yn_dg_mixed_z_local_pz_writeback_total = 'n'
-    yn_dg_mixed_z_local_current_writeback_total = 'n'
-    yn_dg_mixed_z_decomp_output = 'n'
     dg_wannier_symmetry_gauge = 'diagnose'
     yn_plane_wave_basis = 'n'
     n_plane_waves_dg = 50
@@ -970,7 +897,6 @@ contains
     dg_bpw_auto_min_n = -1
     dg_bpw_auto_report = 'y'
     dg_bpw_position_mode = 'auto'
-    yn_dg_subspace_diag = 'n'
     dg_subspace_extra_states = 8
     dg_subspace_pw_vectors = 4
 !! == default for &scf
@@ -989,14 +915,6 @@ contains
     yn_auto_mixing = 'n'
     update_mixing_ratio = 3.d0
     nscf          = 300
-    yn_dg_wpw_production = 'n'
-    yn_dg_wpw_fixed_h_relaxation = 'n'
-    yn_dg_wpw_preconditioner = 'y'
-    yn_dg_wpw_metric_preconditioner = 'n'
-    yn_dg_wpw_h_epsilon_s_correction = 'n'
-    yn_dg_wpw_global_projected_correction = 'n'
-    yn_dg_wpw_search_history = 'y'
-    yn_dg_wpw_s_orthogonal_pw = 'n'
     dg_wpw_extra_states = 8
     dg_wpw_scf_max_iter = 200
     dg_wpw_global_correction_restart = 8
@@ -1203,7 +1121,6 @@ contains
     out_lcm_rt_step     = 100
     yn_out_lz_rt        = 'n'
     out_lz_rt_step      = 100
-    yn_dg_hse_ace          = 'n'
     dg_hse_ace_max_age     = 20
     dg_hse_ace_coef_thresh = 5.0d-3
     yn_out_tm           = 'n'
@@ -1307,7 +1224,6 @@ contains
     yn_dc_lcfo_wannier_pw = 'n'
     yn_dc_lcfo_wannier_cluster = 'n'
     yn_dc_lcfo_block_diag_h = 'n'
-    yn_dg_dc_local_periodic = 'n'
     yn_dg_dc_overlapping_wannier = 'n'
     dg_dc_handoff_min_iter = 3
     dg_dc_handoff_tolerance = 1d-3
@@ -1373,16 +1289,9 @@ contains
     energy_cut = 0d0
     lambda_cut = 1d-3
 !! == default for &dg_fragment
-    yn_dg_frag = 'n'
     eps_dg_frag = 1.0d-10
-    yn_adaptive_basis_dg = 'n'
     niter_dg_frag_rt_max = 0
-    yn_adaptive_basis = 'n'
     basis_update_threshold = 0.1d0  ! 0.1 a.u. (~2.7 eV)
-    yn_dg_fragment_from_dcdft = 'n'
-    yn_dg_lcfo_seed_exhaustive_check = 'n'
-    yn_dg_full_h_eigen_seed = 'y'
-    yn_dg_wpw_checkpoint_rt = 'n'
     dg_wpw_checkpoint_manifest = ''
     dg_wpw_checkpoint_rank_prefix = ''
     dg_wpw_checkpoint_identity_tolerance = 1d-8
@@ -1467,8 +1376,6 @@ contains
       rewind(fh_namelist)
       
       read(fh_namelist, nml=dc, iostat=inml_dc)
-      rewind(fh_namelist)
-      read(fh_namelist, nml=dg_fragment, iostat=inml_dg_fragment)
       rewind(fh_namelist)
 
       close(fh_namelist)
@@ -1650,25 +1557,13 @@ contains
     call comm_bcast(propagator ,nproc_group_global)
     call comm_bcast(yn_fix_func,nproc_group_global)
     call comm_bcast(yn_predictor_corrector,nproc_group_global)
-    call comm_bcast(yn_dg_fragment_rt,nproc_group_global)
     call comm_bcast(yn_dg_overlapping_wannier_rt,nproc_group_global)
     call comm_bcast(yn_dg_overlapping_wannier_rt_restart,nproc_group_global)
     call comm_bcast(yn_dg_length_gauge,nproc_group_global)
-    call comm_bcast(yn_dg_nodal_rt,nproc_group_global)
     call comm_bcast(dg_nodal_gs_relax_step,nproc_group_global)
     call comm_bcast(dg_nodal_gs_max_iter,nproc_group_global)
     call comm_bcast(dg_nodal_gs_tol,nproc_group_global)
     call comm_bcast(dg_nodal_taylor_order,nproc_group_global)
-    call comm_bcast(yn_dg_expdiag_xi_split,nproc_group_global)
-    call comm_bcast(yn_dg_expdiag_refresh_fixed_func,nproc_group_global)
-    call comm_bcast(yn_dg_expdiag_global_flux,nproc_group_global)
-    call comm_bcast(yn_dg_expdiag_global_field,nproc_group_global)
-    call comm_bcast(yn_dg_full_h_wannier_band_gauge,nproc_group_global)
-    call comm_bcast(yn_dg_expdiag_project_h,nproc_group_global)
-    call comm_bcast(yn_dg_expdiag_delta_h,nproc_group_global)
-    call comm_bcast(yn_dg_mixed_z,nproc_group_global)
-    call comm_bcast(yn_dg_mixed_z_include_ww,nproc_group_global)
-    call comm_bcast(yn_dg_mixed_z_local_prop_writeback,nproc_group_global)
     call comm_bcast(dg_mixed_z_local_prop_backend,nproc_group_global)
     call comm_bcast(dg_mixed_z_neighbor_env_shell,nproc_group_global)
     call comm_bcast(dg_mixed_z_frag_local_field_block,nproc_group_global)
@@ -1677,10 +1572,6 @@ contains
     call comm_bcast(dg_mixed_z_wp_position_branch,nproc_group_global)
     call comm_bcast(dg_mixed_z_pp_position_branch,nproc_group_global)
     call comm_bcast(dg_mixed_z_polarization_branch,nproc_group_global)
-    call comm_bcast(yn_dg_mixed_z_local_rho_writeback_wwonly,nproc_group_global)
-    call comm_bcast(yn_dg_mixed_z_local_pz_writeback_total,nproc_group_global)
-    call comm_bcast(yn_dg_mixed_z_local_current_writeback_total,nproc_group_global)
-    call comm_bcast(yn_dg_mixed_z_decomp_output,nproc_group_global)
     call comm_bcast(dg_wannier_symmetry_gauge,nproc_group_global)
     call comm_bcast(yn_plane_wave_basis,nproc_group_global)
     call comm_bcast(n_plane_waves_dg,nproc_group_global)
@@ -1691,7 +1582,6 @@ contains
     call comm_bcast(dg_bpw_auto_min_n,nproc_group_global)
     call comm_bcast(dg_bpw_auto_report,nproc_group_global)
     call comm_bcast(dg_bpw_position_mode,nproc_group_global)
-    call comm_bcast(yn_dg_subspace_diag,nproc_group_global)
     call comm_bcast(dg_subspace_extra_states,nproc_group_global)
     call comm_bcast(dg_subspace_pw_vectors,nproc_group_global)
     k_cutoff_plane_wave = k_cutoff_plane_wave * uenergy_to_au
@@ -1712,14 +1602,6 @@ contains
     call comm_bcast(yn_auto_mixing          ,nproc_group_global)
     call comm_bcast(update_mixing_ratio     ,nproc_group_global)
     call comm_bcast(nscf                    ,nproc_group_global)
-    call comm_bcast(yn_dg_wpw_production    ,nproc_group_global)
-    call comm_bcast(yn_dg_wpw_fixed_h_relaxation,nproc_group_global)
-    call comm_bcast(yn_dg_wpw_preconditioner,nproc_group_global)
-    call comm_bcast(yn_dg_wpw_metric_preconditioner,nproc_group_global)
-    call comm_bcast(yn_dg_wpw_h_epsilon_s_correction,nproc_group_global)
-    call comm_bcast(yn_dg_wpw_global_projected_correction,nproc_group_global)
-    call comm_bcast(yn_dg_wpw_search_history,nproc_group_global)
-    call comm_bcast(yn_dg_wpw_s_orthogonal_pw,nproc_group_global)
     call comm_bcast(dg_wpw_extra_states     ,nproc_group_global)
     call comm_bcast(dg_wpw_scf_max_iter     ,nproc_group_global)
     call comm_bcast(dg_wpw_global_correction_restart,nproc_group_global)
@@ -2005,7 +1887,6 @@ contains
     call comm_bcast(out_lcm_rt_step     ,nproc_group_global)
     call comm_bcast(yn_out_lz_rt        ,nproc_group_global)
     call comm_bcast(out_lz_rt_step      ,nproc_group_global)
-    call comm_bcast(yn_dg_hse_ace          ,nproc_group_global)
     call comm_bcast(dg_hse_ace_max_age     ,nproc_group_global)
     call comm_bcast(dg_hse_ace_coef_thresh ,nproc_group_global)
     call comm_bcast(yn_out_tm           ,nproc_group_global)
@@ -2119,7 +2000,6 @@ contains
     call comm_bcast(yn_dc_lcfo_wannier_pw, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_wannier_cluster, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_block_diag_h, nproc_group_global)
-    call comm_bcast(yn_dg_dc_local_periodic, nproc_group_global)
     call comm_bcast(yn_dg_dc_overlapping_wannier, nproc_group_global)
     call comm_bcast(dg_dc_handoff_min_iter, nproc_group_global)
     call comm_bcast(dg_dc_handoff_tolerance, nproc_group_global)
@@ -2190,17 +2070,10 @@ contains
     energy_cut = energy_cut * uenergy_to_au
     call comm_bcast(lambda_cut, nproc_group_global)
 !! == bcast for dg_fragment
-    call comm_bcast(yn_dg_frag, nproc_group_global)
     call comm_bcast(eps_dg_frag, nproc_group_global)
-    call comm_bcast(yn_adaptive_basis_dg, nproc_group_global)
     call comm_bcast(niter_dg_frag_rt_max, nproc_group_global)
-    call comm_bcast(yn_adaptive_basis, nproc_group_global)
     call comm_bcast(basis_update_threshold, nproc_group_global)
     basis_update_threshold = basis_update_threshold * uenergy_to_au
-    call comm_bcast(yn_dg_fragment_from_dcdft, nproc_group_global)
-    call comm_bcast(yn_dg_lcfo_seed_exhaustive_check, nproc_group_global)
-    call comm_bcast(yn_dg_full_h_eigen_seed, nproc_group_global)
-    call comm_bcast(yn_dg_wpw_checkpoint_rt, nproc_group_global)
     call comm_bcast(dg_wpw_checkpoint_manifest, nproc_group_global)
     call comm_bcast(dg_wpw_checkpoint_rank_prefix, nproc_group_global)
     call comm_bcast(dg_wpw_checkpoint_identity_tolerance, nproc_group_global)
@@ -2717,35 +2590,15 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'propagator', trim(propagator)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_fix_func', yn_fix_func
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_predictor_corrector', yn_predictor_corrector
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_fragment_rt', yn_dg_fragment_rt
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_overlapping_wannier_rt', yn_dg_overlapping_wannier_rt
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_overlapping_wannier_rt_restart', &
         yn_dg_overlapping_wannier_rt_restart
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_length_gauge', yn_dg_length_gauge
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_nodal_rt', yn_dg_nodal_rt
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_nodal_gs_relax_step', dg_nodal_gs_relax_step
       write(fh_variables_log, '("#",4X,A,"=",I8)') 'dg_nodal_gs_max_iter', dg_nodal_gs_max_iter
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_nodal_gs_tol', dg_nodal_gs_tol
       write(fh_variables_log, '("#",4X,A,"=",I8)') 'dg_nodal_taylor_order', dg_nodal_taylor_order
       write(fh_variables_log, '("#",4X,A,"=",A)') 'time_integrator_dg_fragment', trim(time_integrator_dg_fragment)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_expdiag_xi_split', yn_dg_expdiag_xi_split
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_expdiag_refresh_fixed_func', &
-        yn_dg_expdiag_refresh_fixed_func
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_expdiag_global_flux', &
-        yn_dg_expdiag_global_flux
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_expdiag_global_field', &
-        yn_dg_expdiag_global_field
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_full_h_wannier_band_gauge', &
-        yn_dg_full_h_wannier_band_gauge
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_expdiag_project_h', &
-        yn_dg_expdiag_project_h
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_expdiag_delta_h', &
-        yn_dg_expdiag_delta_h
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z', yn_dg_mixed_z
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z_include_ww', &
-        yn_dg_mixed_z_include_ww
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z_local_prop_writeback', &
-        yn_dg_mixed_z_local_prop_writeback
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_local_prop_backend', &
         trim(dg_mixed_z_local_prop_backend)
       write(fh_variables_log, '("#",4X,A,"=",I0)') 'dg_mixed_z_neighbor_env_shell', &
@@ -2762,14 +2615,6 @@ contains
         trim(dg_mixed_z_pp_position_branch)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_polarization_branch', &
         trim(dg_mixed_z_polarization_branch)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z_local_rho_writeback_wwonly', &
-        yn_dg_mixed_z_local_rho_writeback_wwonly
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z_local_pz_writeback_total', &
-        yn_dg_mixed_z_local_pz_writeback_total
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z_local_current_writeback_total', &
-        yn_dg_mixed_z_local_current_writeback_total
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_mixed_z_decomp_output', &
-        yn_dg_mixed_z_decomp_output
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_wannier_symmetry_gauge', &
         trim(dg_wannier_symmetry_gauge)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_plane_wave_basis', yn_plane_wave_basis
@@ -2781,7 +2626,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_bpw_auto_min_n', dg_bpw_auto_min_n
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_bpw_auto_report', dg_bpw_auto_report
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_bpw_position_mode', trim(dg_bpw_position_mode)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_subspace_diag', yn_dg_subspace_diag
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_subspace_extra_states', dg_subspace_extra_states
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_subspace_pw_vectors', dg_subspace_pw_vectors
 
@@ -2801,18 +2645,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_auto_mixing', yn_auto_mixing
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'update_mixing_ratio', update_mixing_ratio
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf', nscf
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_wpw_production', yn_dg_wpw_production
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_wpw_fixed_h_relaxation', &
-        yn_dg_wpw_fixed_h_relaxation
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_wpw_preconditioner', &
-        yn_dg_wpw_preconditioner
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_wpw_metric_preconditioner', yn_dg_wpw_metric_preconditioner
-      write(fh_variables_log, '("#",4X,A,"=",A)') &
-        'yn_dg_wpw_h_epsilon_s_correction', yn_dg_wpw_h_epsilon_s_correction
-      write(fh_variables_log, '("#",4X,A,"=",A)') &
-        'yn_dg_wpw_global_projected_correction', yn_dg_wpw_global_projected_correction
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_wpw_search_history', yn_dg_wpw_search_history
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_wpw_s_orthogonal_pw', yn_dg_wpw_s_orthogonal_pw
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_extra_states', dg_wpw_extra_states
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_scf_max_iter', dg_wpw_scf_max_iter
       write(fh_variables_log, '("#",4X,A,"=",I6)') &
@@ -3118,7 +2950,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_lcm_rt_step', out_lcm_rt_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_lz_rt', yn_out_lz_rt
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_lz_rt_step', out_lz_rt_step
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_hse_ace', yn_dg_hse_ace
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_hse_ace_max_age', dg_hse_ace_max_age
       write(fh_variables_log, '("#",4X,A,"=",ES15.7)') 'dg_hse_ace_coef_thresh', dg_hse_ace_coef_thresh
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
@@ -3265,8 +3096,6 @@ contains
       
       if(inml_dc >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', inml_dc
-      if(inml_dg_fragment >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dg_fragment', inml_dg_fragment
       write(fh_variables_log, '("#",4X,A,"=",3I4)') 'num_fragment',num_fragment(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3I4)') "num_rgrid_buffer", num_rgrid_buffer(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3I4)') "nproc_rgrid_tot",nproc_rgrid_tot(1:3)
@@ -3282,7 +3111,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier_pw",yn_dc_lcfo_wannier_pw
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier_cluster",yn_dc_lcfo_wannier_cluster
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_block_diag_h",yn_dc_lcfo_block_diag_h
-      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dg_dc_local_periodic",yn_dg_dc_local_periodic
       write(fh_variables_log, '("#",4X,A,"=",A)') &
         "yn_dg_dc_overlapping_wannier",yn_dg_dc_overlapping_wannier
       write(fh_variables_log, '("#",4X,A,"=",A)') "wannier90_command",trim(wannier90_command)
@@ -3332,10 +3160,6 @@ contains
         trim(dg_wannier_symmetry_gauge)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_fragment_from_dcdft', yn_dg_fragment_from_dcdft
-      write(fh_variables_log, '("#",4X,A,"=",A)') &
-        'yn_dg_lcfo_seed_exhaustive_check', yn_dg_lcfo_seed_exhaustive_check
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_full_h_eigen_seed', yn_dg_full_h_eigen_seed
       
       close(fh_variables_log)
     end if
@@ -3386,43 +3210,12 @@ contains
     call yn_argument_check(yn_fix_func)
     call yn_argument_check(yn_predictor_corrector)
     call yn_argument_check(yn_auto_mixing)
-    call yn_argument_check(yn_dg_wpw_production)
-    call yn_argument_check(yn_dg_wpw_fixed_h_relaxation)
-    call yn_argument_check(yn_dg_wpw_preconditioner)
-    call yn_argument_check(yn_dg_wpw_metric_preconditioner)
-    call yn_argument_check(yn_dg_wpw_h_epsilon_s_correction)
-    call yn_argument_check(yn_dg_wpw_global_projected_correction)
-    call yn_argument_check(yn_dg_wpw_search_history)
-    call yn_argument_check(yn_dg_wpw_s_orthogonal_pw)
-    if(count([yn_dg_wpw_preconditioner,yn_dg_wpw_metric_preconditioner,&
-      yn_dg_wpw_h_epsilon_s_correction,yn_dg_wpw_global_projected_correction]=='y')>1) &
-      stop 'DG WPW correction controls are mutually exclusive'
-    if(yn_dg_wpw_fixed_h_relaxation=='y'.and.yn_dg_wpw_production/='y') &
-      stop 'yn_dg_wpw_fixed_h_relaxation=y requires yn_dg_wpw_production=y'
-    if(yn_dg_wpw_s_orthogonal_pw=='y'.and.yn_dg_wpw_fixed_h_relaxation/='y') &
-      stop 'yn_dg_wpw_s_orthogonal_pw=y requires yn_dg_wpw_fixed_h_relaxation=y'
-    if(yn_dg_wpw_h_epsilon_s_correction=='y'.and.yn_dg_wpw_fixed_h_relaxation/='y') &
-      stop 'yn_dg_wpw_h_epsilon_s_correction=y requires yn_dg_wpw_fixed_h_relaxation=y'
-    if(yn_dg_wpw_global_projected_correction=='y'.and.yn_dg_wpw_fixed_h_relaxation/='y') &
-      stop 'yn_dg_wpw_global_projected_correction=y requires yn_dg_wpw_fixed_h_relaxation=y'
     if(dg_wpw_global_correction_restart<1.or.dg_wpw_global_correction_restart>16.or.&
       dg_wpw_global_correction_max_iterations<1.or.dg_wpw_global_correction_max_iterations>64.or.&
       dg_wpw_global_correction_state_batch<1.or.dg_wpw_global_correction_state_batch>16.or.&
       .not.ieee_is_finite(dg_wpw_global_correction_tolerance).or.&
       dg_wpw_global_correction_tolerance<=0d0.or.dg_wpw_global_correction_tolerance>=1d0)&
       stop 'invalid DG WPW global projected correction controls'
-    if(yn_dg_wpw_production=='y') then
-      if(yn_dc/='y') stop 'yn_dg_wpw_production=y requires yn_dc=y'
-      if(dg_wpw_extra_states<1 .or. dg_wpw_scf_max_iter<1) &
-        stop 'DG WPW production dimensions must be positive'
-      if(dg_wpw_window_buffer<1 .or. dg_wpw_window_width<1 .or. &
-         dg_wpw_window_width>dg_wpw_window_buffer) &
-        stop 'invalid DG WPW production window buffer or transition width'
-      if(dg_wpw_gap_threshold<=0d0 .or. dg_wpw_metric_cutoff<=0d0 .or. &
-         dg_wpw_scf_mix<=0d0 .or. dg_wpw_scf_mix>1d0 .or. &
-         dg_wpw_scf_residual_tolerance<=0d0) &
-        stop 'invalid DG WPW production SCF tolerance or mixing control'
-    endif
     call yn_argument_check(yn_subspace_diagonalization)
     call yn_argument_check(yn_out_psi)
     call yn_argument_check(yn_out_dos)
@@ -3439,7 +3232,6 @@ contains
     call yn_argument_check(yn_out_rvf_rt)
     call yn_argument_check(yn_out_lcm_rt)
     call yn_argument_check(yn_out_lz_rt)
-    call yn_argument_check(yn_dg_hse_ace)
     call yn_argument_check(yn_out_tm)
     call yn_argument_check(yn_out_intraband_current)
     call yn_argument_check(yn_out_current_decomposed)
@@ -3476,8 +3268,6 @@ contains
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_flux)
     call yn_argument_check(yn_dc_lcfo_flux_weak_volume)
-    call yn_argument_check(yn_dg_lcfo_seed_exhaustive_check)
-    call yn_argument_check(yn_dg_full_h_eigen_seed)
     call yn_argument_check(yn_dc_lcfo_diag)
     call yn_argument_check(yn_dc_fragment_optimization)
     call yn_argument_check(yn_dc_lcfo_wannier)
@@ -3486,7 +3276,6 @@ contains
     call yn_argument_check(yn_dc_lcfo_wannier_pw)
     call yn_argument_check(yn_dc_lcfo_wannier_cluster)
     call yn_argument_check(yn_dc_lcfo_block_diag_h)
-    call yn_argument_check(yn_dg_dc_local_periodic)
     call yn_argument_check(yn_dg_dc_overlapping_wannier)
     if(yn_dg_dc_overlapping_wannier=='y' .and. trim(theory)/='dft') &
       call sawf_input_fatal("overlapping Wannier route is ground-state DFT only")
@@ -3507,13 +3296,6 @@ contains
       call sawf_input_fatal("overlapping Wannier route forbids LCFO")
     if(yn_dg_dc_overlapping_wannier=='y' .and. yn_eigenexa=='y') &
       call sawf_input_fatal("overlapping Wannier route forbids EigenExa")
-    if(yn_dg_dc_overlapping_wannier=='y' .and. &
-       (yn_dg_wpw_production=='y' .or. yn_dg_wpw_checkpoint_rt=='y')) &
-      call sawf_input_fatal("overlapping Wannier route forbids WPW")
-    if(yn_dg_dc_overlapping_wannier=='y' .and. yn_dg_dc_local_periodic=='y') &
-      call sawf_input_fatal("overlapping Wannier route forbids direct real-space DG")
-    if(yn_dg_dc_overlapping_wannier=='y' .and. yn_dg_fragment_rt=='y') &
-      call sawf_input_fatal("overlapping Wannier route forbids conventional RT")
     if(yn_dg_dc_overlapping_wannier=='y' .and. yn_self_checkpoint=='y') &
       call sawf_input_fatal("overlapping Wannier route forbids normal checkpoint publication")
     if(yn_dg_dc_overlapping_wannier=='y' .and. checkpoint_interval>=1) &
@@ -3526,16 +3308,6 @@ contains
     if(yn_dg_dc_overlapping_wannier=='y' .and. &
        all(num_rgrid/num_fragment+2*num_rgrid_buffer==num_rgrid)) &
       call sawf_input_fatal("overlapping Wannier buffer box must not equal the complete periodic system")
-    if(yn_dg_dc_local_periodic=='y' .and. trim(theory)/='dft') &
-      call sawf_input_fatal("DG DC local-periodic route is ground-state DFT only")
-    if(yn_dg_dc_local_periodic=='y' .and. yn_dc/='y') &
-      call sawf_input_fatal("DG DC local-periodic route requires yn_dc='y'")
-    if(yn_dg_dc_local_periodic=='y' .and. yn_spinorbit=='y') &
-      call sawf_input_fatal("DG DC local-periodic route currently requires real non-SOI orbitals")
-    if(yn_dg_dc_local_periodic=='y' .and. (yn_dc_lcfo=='y' .or. yn_dc_lcfo_flux=='y' .or. &
-       yn_dc_lcfo_wannier=='y' .or. yn_dc_lcfo_local_wannier=='y' .or. &
-       yn_dc_lcfo_wannier_pw=='y' .or. yn_eigenexa=='y')) &
-      call sawf_input_fatal("DG DC local-periodic route forbids LCFO, EigenExa, and WPW fallback controls")
     if(dg_dc_handoff_min_iter < 1) &
       call sawf_input_fatal("dg_dc_handoff_min_iter must be positive")
     if(.not.ieee_is_finite(dg_dc_handoff_tolerance) .or. dg_dc_handoff_tolerance <= 0d0) &
@@ -3568,8 +3340,6 @@ contains
       call sawf_input_fatal("invalid DG DC GS SIPG penalty factor")
     if(.not.ieee_is_finite(dg_dc_gs_target_lambda) .or. dg_dc_gs_target_lambda/=1d0) &
       call sawf_input_fatal("DG DC GS target lambda must be one")
-    if(yn_dg_dc_local_periodic=='y' .and. time_shutdown>0d0) &
-      call sawf_input_fatal("DG DC local-periodic route does not publish shutdown checkpoints")
     if(.not.ieee_is_finite(dg_dc_gs_hermiticity_tolerance) .or. dg_dc_gs_hermiticity_tolerance<=0d0 .or. &
        .not.ieee_is_finite(dg_dc_gs_orthogonality_tolerance) .or. dg_dc_gs_orthogonality_tolerance<=0d0 .or. &
        .not.ieee_is_finite(dg_dc_gs_face_balance_tolerance) .or. dg_dc_gs_face_balance_tolerance<=0d0 .or. &
@@ -3638,20 +3408,6 @@ contains
     end if
 #endif
     call yn_argument_check(yn_dg_length_gauge)
-    call yn_argument_check(yn_dg_expdiag_xi_split)
-    call yn_argument_check(yn_dg_expdiag_refresh_fixed_func)
-    call yn_argument_check(yn_dg_expdiag_global_flux)
-    call yn_argument_check(yn_dg_expdiag_global_field)
-    call yn_argument_check(yn_dg_full_h_wannier_band_gauge)
-    call yn_argument_check(yn_dg_expdiag_project_h)
-    call yn_argument_check(yn_dg_expdiag_delta_h)
-    call yn_argument_check(yn_dg_mixed_z)
-    call yn_argument_check(yn_dg_mixed_z_include_ww)
-    call yn_argument_check(yn_dg_mixed_z_local_prop_writeback)
-    call yn_argument_check(yn_dg_mixed_z_local_rho_writeback_wwonly)
-    call yn_argument_check(yn_dg_mixed_z_local_pz_writeback_total)
-    call yn_argument_check(yn_dg_mixed_z_local_current_writeback_total)
-    call yn_argument_check(yn_dg_mixed_z_decomp_output)
     select case(trim(dg_mixed_z_direct_origin))
     case('global', 'fragment')
     case default
@@ -3768,7 +3524,7 @@ contains
 #endif
     end if
 
-    if (yn_eigenexa == 'y' .and. yn_scalapack == 'y' .and. yn_dg_fragment_rt /= 'y') then
+    if (yn_eigenexa == 'y' .and. yn_scalapack == 'y') then
       stop "both yn_scalapack and yn_eigenexa is specified 'y'"
     end if
     
@@ -3908,17 +3664,10 @@ contains
     if(yn_out_lz_rt=='y' .and. out_lz_rt_step<=0) then
       stop "out_lz_rt_step must be positive when yn_out_lz_rt=y"
     end if
-    if(yn_dg_hse_ace=='y' .and. dg_hse_ace_max_age < 1) then
-      stop "dg_hse_ace_max_age must be >= 1 when yn_dg_hse_ace=y"
-    end if
-    if(yn_dg_hse_ace=='y' .and. dg_hse_ace_coef_thresh <= 0.0d0) then
-      stop "dg_hse_ace_coef_thresh must be positive when yn_dg_hse_ace=y"
-    end if
 
     if(yn_dc=='y') then
       if(theory/='dft') stop "DC method (yn_dc=y): theory must be dft"
       if(yn_conventional_from_dcdft=='y') stop "contradiction: yn_dc=y & yn_conventional_from_dcdft=y"
-      if(yn_dg_fragment_rt=='y') stop "contradiction: yn_dc=y & yn_dg_fragment_rt=y"
       ! Reduced coordinates are converted to Cartesian later in init_dft_system before DC fragment setup.
       if(iflag_atom_coor/=ntype_atom_coor_cartesian .and. &
       &  iflag_atom_coor/=ntype_atom_coor_reduced) &
@@ -4050,86 +3799,26 @@ contains
       & stop "DC-LCFO local Wannier PW augmentation requires wannier_pw_max >= 0."
     end if
 
-    ! DG-Fragment RT method checks
-    if(yn_dg_fragment_rt=='y') then
-      if(theory/='tddft_pulse' .and. theory/='tddft_response' .and. theory/='single_scale_maxwell_tddft') &
-      & stop "DG-Fragment RT (yn_dg_fragment_rt=y): theory must be tddft_pulse, tddft_response, or single_scale_maxwell_tddft"
-      ! INCOMPATIBILITY: yn_conventional_from_dcdft is for CONVENTIONAL RT, not DG-Fragment RT
-      ! DG-Fragment RT must use yn_dg_fragment_from_dcdft='y' instead
-      if(yn_conventional_from_dcdft=='y') &
-      & stop "DG-Fragment RT: yn_conventional_from_dcdft='y' is for conventional RT. " // &
-      &      "Use yn_dg_fragment_from_dcdft='y' in &dc namelist instead."
-      ! Check data source for DG-Fragment RT
-      if(yn_dg_fragment_from_dcdft=='n' .and. yn_restart=='n') &
-      & stop "DG-Fragment RT: requires DC-LCFO data. Set yn_dg_fragment_from_dcdft='y' in &dc (or &dg_fragment) namelist."
-      if(num_fragment(1)*num_fragment(2)*num_fragment(3) == 0) &
-      & stop "DG-Fragment RT (yn_dg_fragment_rt=y): num_fragment must be specified (must match DC-LCFO calculation)"
-      if(num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) &
-      & stop "DG-Fragment RT (yn_dg_fragment_rt=y): # of k-points must be 1."
-      if(nproc_k/=1) &
-      & stop "DG-Fragment RT (yn_dg_fragment_rt=y): nproc_k must be 1."
-      ! nstate_frag is read from the DC-LCFO fragment files.  Runtime caps/truncation
-      ! are not part of the DG-Fragment RT path.
-      if(time_integrator_dg_fragment/='ssprk3' .and. &
-         time_integrator_dg_fragment/='rk4' .and. &
-         time_integrator_dg_fragment/='taylor4pc' .and. &
-         time_integrator_dg_fragment/='expdiag' .and. &
-         time_integrator_dg_fragment/='krylov' .and. &
-         time_integrator_dg_fragment/='aetrs') &
-      & stop "DG-Fragment RT: invalid time_integrator_dg_fragment"
-    end if
     if(yn_dg_overlapping_wannier_rt=='y')then
       if(theory/='tddft_pulse'.and.theory/='tddft_response')&
         stop 'overlapping-Wannier coefficient RT requires TDDFT pulse or response theory.'
-      if(yn_dg_fragment_rt=='y'.or.yn_dg_nodal_rt=='y'.or.yn_dg_wpw_checkpoint_rt=='y')&
-        stop 'overlapping-Wannier coefficient RT forbids every legacy DG RT route.'
       if(yn_self_checkpoint=='y'.or.checkpoint_interval>=1)&
         stop 'overlapping-Wannier coefficient RT forbids conventional checkpoint publication.'
       if(yn_restart=='y')stop 'overlapping-Wannier coefficient RT forbids conventional yn_restart.'
-      if(yn_dc_lcfo=='y'.or.yn_eigenexa=='y'.or.yn_dg_wpw_production=='y'.or.&
-         yn_dg_dc_local_periodic=='y')&
-        stop 'overlapping-Wannier coefficient RT forbids LCFO, EigenExa, WPW, and direct-DG routes.'
-      if(yn_adaptive_basis=='y'.or.yn_adaptive_basis_dg=='y')&
-        stop 'overlapping-Wannier coefficient RT requires an immutable accepted basis.'
+      if(yn_dc_lcfo=='y'.or.yn_eigenexa=='y')&
+        stop 'overlapping-Wannier coefficient RT forbids LCFO and EigenExa routes.'
       if(yn_dg_length_gauge/='y')&
         stop 'overlapping-Wannier coefficient RT currently requires the validated length gauge.'
       if(nt<1.or.dt<=0d0)stop 'overlapping-Wannier coefficient RT requires positive nt and dt.'
     endif
     if(yn_dg_overlapping_wannier_rt_restart=='y'.and.yn_dg_overlapping_wannier_rt/='y')&
       stop 'overlapping-Wannier RT restart requires its dedicated coefficient RT route.'
-    if(yn_dg_length_gauge=='y' .and. yn_dg_fragment_rt/='y' .and. &
-       yn_dg_overlapping_wannier_rt/='y') &
-      stop "DG length gauge requires a DG coefficient or fragment RT route."
-    if(yn_dg_nodal_rt=='y' .and. yn_dg_fragment_rt/='y') &
-      stop "Nodal real-space DG requires yn_dg_fragment_rt=y."
-    if(yn_dg_nodal_rt=='y' .and. time_integrator_dg_fragment/='taylor4pc') &
-      stop "Nodal real-space DG requires time_integrator_dg_fragment='taylor4pc'."
-    if(yn_dg_nodal_rt=='y' .and. dt > 0.02d0) &
-      stop "Nodal real-space DG requires dt <= 0.02 au."
-    if(yn_dg_nodal_rt=='y' .and. (dg_nodal_gs_relax_step <= 0.0d0 .or. &
-       dg_nodal_gs_max_iter < 1 .or. dg_nodal_gs_tol <= 0.0d0 .or. dg_nodal_taylor_order < 1)) &
-      stop "Nodal real-space DG has invalid GS/Taylor controls."
-    call yn_argument_check(yn_dg_wpw_checkpoint_rt)
-    if(yn_dg_wpw_checkpoint_rt=='y')then
-      if(yn_dg_fragment_rt/='y')stop 'WPW checkpoint-backed RT requires yn_dg_fragment_rt=y.'
-      if(yn_restart=='y')stop 'WPW checkpoint-backed RT forbids conventional yn_restart=y.'
-      if(len_trim(dg_wpw_checkpoint_manifest)==0.or.len_trim(dg_wpw_checkpoint_rank_prefix)==0)&
-        stop 'WPW checkpoint-backed RT requires manifest and rank-prefix paths.'
-      if(dg_wpw_checkpoint_identity_tolerance<=0d0)&
-        stop 'WPW checkpoint identity tolerance must be positive.'
-      if(dg_wpw_exp_max_corrector<1.or.dg_wpw_exp_corrector_tolerance<=0d0.or.&
-         dg_wpw_exp_norm_tolerance<=0d0)stop 'WPW midpoint Exp controls must be positive.'
-    endif
+    if(yn_dg_length_gauge=='y' .and. yn_dg_overlapping_wannier_rt/='y') &
+      stop "DG length gauge requires the overlapping-Wannier coefficient RT route."
     if(yn_dg_length_gauge=='y' .and. yn_spinorbit=='y') &
       stop "DG length gauge is not connected to the SOI DG-Fragment RT path yet."
-    if(yn_dg_length_gauge=='y' .and. time_integrator_dg_fragment/='taylor4pc' .and. &
-       time_integrator_dg_fragment/='expdiag') &
-      stop "DG length gauge currently requires time_integrator_dg_fragment='taylor4pc' or 'expdiag'."
-    
-    call yn_argument_check(yn_dg_fragment_rt)
     call yn_argument_check(yn_dg_overlapping_wannier_rt)
     call yn_argument_check(yn_dg_overlapping_wannier_rt_restart)
-    call yn_argument_check(yn_dg_nodal_rt)
 
 #ifdef USE_FFTW
 #else

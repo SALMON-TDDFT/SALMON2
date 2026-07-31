@@ -87,6 +87,13 @@ REQUIRED_SOURCES = {
     "src/rt/dg/rt_dg_overlapping_wannier.f90",
 }
 
+REQUIRED_INPUTS = {
+    "yn_dg_dc_overlapping_wannier",
+    "yn_dg_length_gauge",
+    "yn_dg_overlapping_wannier_rt",
+    "yn_dg_overlapping_wannier_rt_restart",
+}
+
 PROTECTED_NORMAL_SOURCES = {
     "src/gs/dc/lcfo.f90": "src/gs/dc/CMakeLists.txt",
     "src/gs/eigen_subdiag_eigenexa.f90": "src/gs/CMakeLists.txt",
@@ -127,6 +134,29 @@ def main() -> int:
     failures: list[str] = []
     all_files = repository_files()
     texts = text_files()
+    global_source = (ROOT / "src/io/salmon_global.f90").read_text().lower()
+    input_source = (ROOT / "src/io/inputoutput.f90").read_text().lower()
+    gs_dispatch_source = (ROOT / "src/gs/main_dft.f90").read_text().lower()
+    rt_dispatch_source = (ROOT / "src/rt/main_tddft.f90").read_text().lower()
+
+    for required_input in sorted(REQUIRED_INPUTS):
+        if required_input not in global_source:
+            failures.append(f"missing retained input declaration: {required_input}")
+        if required_input not in input_source:
+            failures.append(f"missing retained input handling: {required_input}")
+
+    if "namelist/dg_fragment/" in input_source.replace(" ", ""):
+        failures.append("forbidden namelist remains: dg_fragment")
+    if "time_evolution_dg_fragment" in rt_dispatch_source:
+        failures.append("forbidden RT dispatch remains: time_evolution_dg_fragment")
+    if rt_dispatch_source.find(
+        "call run_dg_overlapping_wannier_coefficient_rt"
+    ) > rt_dispatch_source.find(
+        "call initialization_rt"
+    ):
+        failures.append("coefficient RT dispatch must precede conventional RT initialization")
+    if "yn_dg_dc_local_periodic" in gs_dispatch_source or "yn_dg_wpw_production" in gs_dispatch_source:
+        failures.append("forbidden GS dispatch remains")
 
     for required in sorted(REQUIRED_SOURCES):
         if not (ROOT / required).is_file():

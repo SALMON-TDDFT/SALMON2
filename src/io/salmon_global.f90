@@ -154,26 +154,14 @@ module salmon_global
   character(16)  :: propagator
   character(1)   :: yn_fix_func
   character(1)   :: yn_predictor_corrector
-  character(1)   :: yn_dg_fragment_rt
   character(1)   :: yn_dg_overlapping_wannier_rt
   character(1)   :: yn_dg_overlapping_wannier_rt_restart
   character(1)   :: yn_dg_length_gauge
-  character(1)   :: yn_dg_nodal_rt
   character(16)  :: time_integrator_dg_fragment
   real(8)        :: dg_nodal_gs_relax_step
   integer        :: dg_nodal_gs_max_iter
   real(8)        :: dg_nodal_gs_tol
   integer        :: dg_nodal_taylor_order
-  character(1)   :: yn_dg_expdiag_xi_split
-  character(1)   :: yn_dg_expdiag_refresh_fixed_func
-  character(1)   :: yn_dg_expdiag_global_flux
-  character(1)   :: yn_dg_expdiag_global_field
-  character(1)   :: yn_dg_full_h_wannier_band_gauge
-  character(1)   :: yn_dg_expdiag_project_h
-  character(1)   :: yn_dg_expdiag_delta_h
-  character(1)   :: yn_dg_mixed_z
-  character(1)   :: yn_dg_mixed_z_include_ww
-  character(1)   :: yn_dg_mixed_z_local_prop_writeback
   character(48)  :: dg_mixed_z_local_prop_backend
   integer        :: dg_mixed_z_neighbor_env_shell
   character(32)  :: dg_mixed_z_frag_local_field_block
@@ -182,10 +170,6 @@ module salmon_global
   character(32)  :: dg_mixed_z_wp_position_branch
   character(32)  :: dg_mixed_z_pp_position_branch
   character(32)  :: dg_mixed_z_polarization_branch
-  character(1)   :: yn_dg_mixed_z_local_rho_writeback_wwonly
-  character(1)   :: yn_dg_mixed_z_local_pz_writeback_total
-  character(1)   :: yn_dg_mixed_z_local_current_writeback_total
-  character(1)   :: yn_dg_mixed_z_decomp_output
   character(32)  :: dg_wannier_symmetry_gauge
   
   ! Plane wave basis mixing for DG-Fragment RT
@@ -198,7 +182,6 @@ module salmon_global
   integer        :: dg_bpw_auto_min_n            ! Optional report warning threshold for selected BPW count
   character(1)   :: dg_bpw_auto_report           ! Write dg_bpw_auto_report.dat when dg_bpw_auto='y'
   character(32)  :: dg_bpw_position_mode         ! BPW length-gauge position source: auto, rwann, berry, v_over_gap
-  character(1)   :: yn_dg_subspace_diag          ! Use DG subspace diagonalization for basis updates
   integer        :: dg_subspace_extra_states     ! Extra fragment states kept in the trial subspace
   integer        :: dg_subspace_pw_vectors       ! Number of PW helper vectors appended to the trial subspace
 
@@ -217,14 +200,6 @@ module salmon_global
   character(1)   :: yn_auto_mixing
   real(8)        :: update_mixing_ratio
   integer        :: nscf
-  character(1)   :: yn_dg_wpw_production
-  character(1)   :: yn_dg_wpw_fixed_h_relaxation
-  character(1)   :: yn_dg_wpw_preconditioner
-  character(1)   :: yn_dg_wpw_metric_preconditioner
-  character(1)   :: yn_dg_wpw_h_epsilon_s_correction
-  character(1)   :: yn_dg_wpw_global_projected_correction
-  character(1)   :: yn_dg_wpw_search_history
-  character(1)   :: yn_dg_wpw_s_orthogonal_pw
   integer        :: dg_wpw_extra_states
   integer        :: dg_wpw_scf_max_iter
   integer        :: dg_wpw_global_correction_restart
@@ -424,7 +399,6 @@ module salmon_global
   integer        :: out_lcm_rt_step
   character(1)   :: yn_out_lz_rt
   integer        :: out_lz_rt_step
-  character(1)   :: yn_dg_hse_ace
   integer        :: dg_hse_ace_max_age
   real(8)        :: dg_hse_ace_coef_thresh
   character(1)   :: yn_out_tm
@@ -541,7 +515,6 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_dc_lcfo_wannier_pw
   character(1)   :: yn_dc_lcfo_wannier_cluster
   character(1)   :: yn_dc_lcfo_block_diag_h
-  character(1)   :: yn_dg_dc_local_periodic
   character(1)   :: yn_dg_dc_overlapping_wannier
   integer        :: dg_dc_handoff_min_iter
   real(8)        :: dg_dc_handoff_tolerance
@@ -607,18 +580,9 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: energy_cut
   real(8)        :: lambda_cut
   
-  !! &dg_fragment (DG-Fragment RT-TDDFT)
-  ! Legacy entries kept for backward-compatible parsing of existing inputs.
-  character(1)   :: yn_dg_frag
   real(8)        :: eps_dg_frag
-  character(1)   :: yn_adaptive_basis_dg
   integer        :: niter_dg_frag_rt_max
-  character(1)   :: yn_adaptive_basis
   real(8)        :: basis_update_threshold
-  character(1)   :: yn_dg_fragment_from_dcdft  ! Initialize DG-Fragment RT from DC-LCFO data
-  character(1)   :: yn_dg_lcfo_seed_exhaustive_check
-  character(1)   :: yn_dg_full_h_eigen_seed
-  character(1)   :: yn_dg_wpw_checkpoint_rt
   character(256) :: dg_wpw_checkpoint_manifest
   character(256) :: dg_wpw_checkpoint_rank_prefix
   real(8)        :: dg_wpw_checkpoint_identity_tolerance

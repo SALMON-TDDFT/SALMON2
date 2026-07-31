@@ -228,9 +228,6 @@ route_checks = [
     (r"trim\s*\(\s*xc\s*\)\s*/=\s*'pz'", "PZ LDA only"),
     (r"\byn_dc_lcfo\s*==\s*'y'", "LCFO forbidden"),
     (r"\byn_eigenexa\s*==\s*'y'", "EigenExa forbidden"),
-    (r"\byn_dg_wpw_production\s*==\s*'y'", "WPW forbidden"),
-    (r"\byn_dg_dc_local_periodic\s*==\s*'y'", "direct-DG forbidden"),
-    (r"\byn_dg_fragment_rt\s*==\s*'y'", "conventional RT forbidden"),
     (r"\byn_self_checkpoint\s*==\s*'y'", "normal checkpoint forbidden"),
     (r"\bcheckpoint_interval\s*>=\s*1", "periodic checkpoint forbidden"),
 ]
@@ -396,8 +393,7 @@ assert hamiltonian_adapter and not re.search(
     r"call\s+hpsi", hamiltonian_adapter.group("body"), re.I
 ), "production Hamiltonian must not project the strong fragment stencil"
 assert re.search(
-    r"if\s*\(\s*yn_dg_dc_local_periodic\s*/=\s*'y'\s*\.and\.\s*"
-    r"yn_dg_dc_overlapping_wannier\s*/=\s*'y'\s*\.and\..*?checkpoint_gs",
+    r"if\s*\(\s*yn_dg_dc_overlapping_wannier\s*/=\s*'y'\s*\.and\..*?checkpoint_gs",
     main_source,
     re.I | re.S,
 ), "overlapping-Wannier route must suppress normal shutdown checkpoint publication"
