@@ -25,35 +25,12 @@ set(SOURCES
     dg/rt_dg_nodal_current.f90
     dg/rt_dg_nodal_density.f90
     dg/rt_dg_basis_projection.f90
-    dg/rt_dg_wpw_linalg.f90
-    dg/rt_dg_wpw_window.f90
-    dg/rt_dg_wpw_reduced_mixedz_diag.f90
     dg/rt_dg_overlapping_wannier.f90
     dg/rt_dg_plane_wave.f90
     rt_angular_momentum.f90
     rt_local_chern_marker.f90
     rt_local_chern_marker_soi.f90
     dg/rt_dg_fragment_ops.f90
-    dg/rt_dg_wpw_sparse_blocks.f90
-    dg/rt_dg_wpw_column_layout.f90
-    dg/rt_dg_wpw_weak_form_evaluator.f90
-    dg/rt_dg_wpw_sparse_builder.f90
-    dg/rt_dg_wpw_point_evaluator.f90
-    dg/rt_dg_wpw_canonical_faces.f90
-    dg/rt_dg_wpw_grid_point_adapter.f90
-    dg/rt_dg_wpw_face_trace_provider.f90
-    dg/rt_dg_wpw_quadrature_assembler.f90
-    dg/rt_dg_wpw_face_trace_scanner.f90
-    dg/rt_dg_wpw_trace_halo_provider.f90
-    dg/rt_dg_wpw_face_side_halo.f90
-    dg/rt_dg_wpw_face_trace_binding.f90
-    dg/rt_dg_wpw_volume_halo_provider.f90
-    dg/rt_dg_wpw_candidate_halo.f90
-    dg/rt_dg_wpw_production_builder.f90
-    dg/rt_dg_wpw_checkpoint_handoff.f90
-  dg/rt_dg_wpw_exp_production.f90
-  dg/rt_dg_wpw_length_gauge.f90
-    dg/rt_dg_wpw_matrix_free_adapter.f90
     dg/rt_dg_fragment_coefficients.f90
     dg/rt_dg_fragment_layout.f90
     dg/rt_dg_fragment_lifecycle.f90

@@ -58,6 +58,7 @@ FORBIDDEN_SOURCE_PREFIXES = (
 )
 
 FORBIDDEN_SOURCE_FILES = {
+    "src/common/dg_generalized_algebra.f90",
     "src/common/dg_dc_direct_sipg.f90",
     "src/common/dg_ground_state_checkpoint.f90",
     "src/gs/dc/dg_dc_ground_state.f90",
@@ -77,6 +78,7 @@ FORBIDDEN_ASSET_GLOBS = (
     "tests/dg/*dg_wpw*",
     "tests/dg/*nodal*",
     "tests/dg/*wpw*",
+    "tests/dg/fixtures/*wpw*",
     "samples/exercise_dg_fragment_C2H2/**",
     "samples/exercise_dg_fragment_rt/**",
     "samples/exercise_dg_rt_hse_test/**",
