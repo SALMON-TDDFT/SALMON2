@@ -1,5 +1,9 @@
 # WPW Bounded Operator Index Cache Implementation Plan
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 > **For Codex:** Execute with test-driven development in the existing protected worktree.
 
 **Goal:** Remove invariant stable-ID linear searches from every bounded H/S application.

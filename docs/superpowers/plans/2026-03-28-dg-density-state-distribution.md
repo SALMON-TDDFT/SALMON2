@@ -1,5 +1,9 @@
 # DG Density State-Distribution Implementation Plan
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `calculate_density_from_fragments` の project ステージを状態分散並列化によって高速化する（n_pw=0 で ~32×、n_pw>0 で ~15× 通信削減）。

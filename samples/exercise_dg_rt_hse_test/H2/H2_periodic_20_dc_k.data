@@ -1,8 +1,0 @@
-# k-point distribution
-# ik: k-point index
-# kx,ky,kz: Reduced coordinate of k-points
-# wk: Weight of k-point
-# 1:ik[none] 2:kx[none] 3:ky[none] 4:kz[none] 5:wk[none]
-     1  0.000000000000000E+000  0.000000000000000E+000  0.000000000000000E+000  0.100000000000000E+001
-# coefficients (2*pi/a [a.u.]) in kx, ky, kz
- 0.112199737628207E+000 0.314159265358979E+000 0.314159265358979E+000

@@ -1,5 +1,9 @@
 # WPW Search-history Restart Comparison Implementation Plan
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Test whether accumulated LOBPCG search history causes the fixed-H residual plateau.

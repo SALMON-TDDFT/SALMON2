@@ -1,5 +1,9 @@
 # DG-Wannier Length-Gauge Formal Implementation Plan
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Implement the length-gauge DG-Wannier propagation route described in the user specification, while preserving DG neighbor communication and weak scaling.
@@ -199,4 +203,3 @@ Acceptance:
 - `Pz` response does not show the previous artificial very-high-frequency
   zero-cross count;
 - `rt iterations / step < 1 s` for the 2x2x2 test.
-

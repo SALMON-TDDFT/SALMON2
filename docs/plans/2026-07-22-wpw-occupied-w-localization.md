@@ -1,5 +1,9 @@
 # Occupied-W Localization Diagnostic Implementation Plan
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Measure the runtime projected occupied-W widths with the same discrete Gamma-point spread convention used by the existing Wannier90 path, without changing the occupied gauge or production gates.

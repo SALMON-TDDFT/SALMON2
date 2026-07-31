@@ -1,5 +1,9 @@
 # WPW Density-Carrying Seed and Fixed-H Relaxation Design
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 ## Status and decision
 
 This document supersedes the occupied-subspace initialization part of

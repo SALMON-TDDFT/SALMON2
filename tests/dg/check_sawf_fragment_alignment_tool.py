@@ -15,7 +15,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 TOOL = ROOT / "tools" / "align_periodic_structure_to_fragments.py"
-SAMPLE = ROOT / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac"
+SAMPLE = ROOT / "tests/dg/data/si64_sawf_alignment"
 SOURCE_ATOM = SAMPLE / "atom.dat"
 ALIGNED_ATOM = SAMPLE / "atom_sawf_aligned.dat"
 ALIGNED_SYMMETRY = SAMPLE / "sym_sawf_aligned.dat"
@@ -408,7 +408,7 @@ class FragmentAlignmentTests(unittest.TestCase):
     def test_c64_search_selects_half_grid_center_and_is_deterministic(self):
         atom_path = (
             ROOT
-            / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/atom.dat"
+            / "tests/dg/data/si64_sawf_alignment/atom.dat"
         )
         atoms = self.alignment.parse_atom_file(atom_path, (Fraction("13.44"),) * 3)
         with tempfile.TemporaryDirectory() as temporary:
@@ -545,7 +545,7 @@ class FragmentAlignmentTests(unittest.TestCase):
     def test_cli_publishes_atomically_and_preserves_inputs(self):
         source_atom = (
             ROOT
-            / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/atom.dat"
+            / "tests/dg/data/si64_sawf_alignment/atom.dat"
         )
         atom_before = source_atom.read_bytes()
         with tempfile.TemporaryDirectory() as temporary:
@@ -612,7 +612,7 @@ class FragmentAlignmentTests(unittest.TestCase):
     def test_cli_force_still_rejects_an_output_that_aliases_an_input(self):
         source_atom = (
             ROOT
-            / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac/atom.dat"
+            / "tests/dg/data/si64_sawf_alignment/atom.dat"
         )
         with tempfile.TemporaryDirectory() as temporary:
             temporary = Path(temporary)

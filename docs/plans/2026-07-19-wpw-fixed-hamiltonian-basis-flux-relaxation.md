@@ -1,5 +1,9 @@
 # WPW Fixed-Hamiltonian Basis/Flux Relaxation Implementation Plan
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Produce a qualified Si64 W+P checkpoint by projecting the converged occupied subspace and continuing the complete DG interface operator while keeping the DC density and H0 fixed.

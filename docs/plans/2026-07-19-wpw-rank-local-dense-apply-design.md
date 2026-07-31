@@ -1,5 +1,9 @@
 # WPW Rank-Local Dense Apply Design
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 ## Problem
 
 The Si64 2x2x2 production preflight reaches the first matrix-free LOBPCG step, but bounded H/S application treats rank-local WW/WP/PP blocks as scalar sparse entries.  For 160 retained states (480 vectors in the expanded subspace), this performs hundreds of millions of small vector updates per application even though WP and PP are complete bounded rectangles.

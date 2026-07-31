@@ -1,5 +1,9 @@
 # DC Wannier Flux Eigen Seed Implementation Plan
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Create a one-time DC post-processing seed that diagonalizes the Flux Hamiltonian in the global Wannier space and lets RT start from that prepared seed without using full-system matrices during time evolution.
@@ -54,4 +58,3 @@
 2. Run short RT with `OMP_NUM_THREADS=2`, `mpirun -np 8`, and `SALMON_DG_COEF_TRACE=1`.
 3. Expected: `norm_base` is order `1e2`, not `1e-27`.
 4. Then run `dt=0.02, nt=1000` and inspect Pz.
-

@@ -1,5 +1,9 @@
 # WPW Candidate Routing Performance Implementation Plan
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 > **For Codex:** Execute task-by-task with test-driven development.
 
 **Goal:** Replace the O(M^2) WPW candidate routing sort with deterministic O(M log M) index sorting and reusable orders.

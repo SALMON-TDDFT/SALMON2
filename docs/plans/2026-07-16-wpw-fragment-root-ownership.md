@@ -1,5 +1,9 @@
 # WPW Fragment-Root Ownership Remediation Implementation Plan
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Replace the provisional all-rank arithmetic P-column ownership with a bounded fragment-root layout that preserves every window-overlap volume and canonical-face contribution.

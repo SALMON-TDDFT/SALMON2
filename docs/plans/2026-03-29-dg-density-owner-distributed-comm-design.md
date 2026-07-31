@@ -1,5 +1,9 @@
 # DG Density Owner-Distributed Communication Design
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 **Date:** 2026-03-29
 
 **Goal:** `calculate_density_from_fragments` の world 通信集中を解消し、`rank 0` に偏っている `recv_wait` / `unpack` を owner rank 側へ分散する。
@@ -74,4 +78,3 @@ subgroup 内 reduce は維持しつつ、reduce 後の world 通信担当を sub
 - 静的 `mod` 割当だと owner 分布次第で偏りが残る可能性がある
 - sender/receiver で handler 規則を完全一致させないと deadlock になる
 - 既存 trace は root 前提の箇所があるため、ログ解釈を少し更新する必要がある
-

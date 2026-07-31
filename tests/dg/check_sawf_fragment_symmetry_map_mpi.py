@@ -2,13 +2,16 @@
 """Run the production SAWF alignment-failure collective on two MPI ranks."""
 
 from pathlib import Path
+import os
 import re
 import subprocess
 import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
-BUILD = ROOT / "build-mpi-eigenexa-wannier-lib"
+BUILD = Path(
+    os.environ.get("SALMON_TEST_BUILD", ROOT / "build-mpi-eigenexa-wannier-lib")
+)
 
 COMMUNICATION_STUB = r"""
 module communication
@@ -139,9 +142,13 @@ find_package(MPI REQUIRED COMPONENTS Fortran)
 add_library(sawf
   {source / 'sym_stub.f90'}
   {source / 'communication.f90'}
+  {ROOT / 'src/gs/dc/dg_overlapping_wannier_projection.f90'}
   {ROOT / 'src/gs/dc/lcfo_wannier_sawf.f90'}
   {ROOT / 'src/gs/dc/lcfo_wannier_sawf_band.f90'}
   {ROOT / 'src/gs/dc/lcfo_wannier_sawf_collective.f90'})
+set_source_files_properties(
+  {ROOT / 'src/gs/dc/lcfo_wannier_sawf.f90'}
+  PROPERTIES Fortran_PREPROCESS ON)
 target_include_directories(sawf PRIVATE {source})
 target_link_libraries(sawf PUBLIC MPI::MPI_Fortran)
 if(TARGET LAPACK::LAPACK)

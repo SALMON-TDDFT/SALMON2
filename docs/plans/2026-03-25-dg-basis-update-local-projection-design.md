@@ -1,5 +1,9 @@
 # DG Basis Update Local Projection Design
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 **Date:** 2026-03-25
 
 **Goal:** Replace the current basis-update-time global re-diagonalization path with a local projection transfer that uses fragment-fragment and fragment-PW overlaps, so RT basis updates no longer require global dense mixed operators to remain resident.

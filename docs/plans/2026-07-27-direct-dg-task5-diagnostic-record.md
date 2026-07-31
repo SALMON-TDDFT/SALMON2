@@ -1,5 +1,9 @@
 # Direct-DG Task 5 diagnostic record
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 ## Status
 
 The direct real-space DG Task 5 gate did **not** pass. No accepted Task 5

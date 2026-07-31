@@ -1,6 +1,6 @@
 # Obsolete DG Route Inventory
 
-Status: removal inventory for
+Status: removal completed through Task 7 of
 `2026-07-31-remove-obsolete-experimental-dg-routes.md`.
 
 The only retained experimental DG production path is:
@@ -99,9 +99,10 @@ samples/exercise_dg_fragment_rt/
 samples/exercise_dg_rt_hse_test/
 ```
 
-The exact file-level inventory is intentionally emitted by
-`tests/dg/check_obsolete_dg_routes_removed.py` while RED, so additions cannot
-silently escape the contract.
+The obsolete assets above, together with their Full-H, mixed-Z, direct-AMN,
+Krylov, and fragment-operator source checks, have been removed. The checker
+now rejects their reintroduction, stale CMake registrations, and historical
+documents that present a removed route without a `Historical/removed` notice.
 
 ## Protected retained consumers
 
@@ -111,7 +112,7 @@ silently escape the contract.
 | V3 route checkpoint | `src/gs/dc/dg_overlapping_wannier_checkpoint.f90`, Si64 gate, restart hash checks |
 | generalized-eigenvalue Exp coefficient RT | `src/rt/dg/rt_dg_overlapping_wannier.f90`; calls `zhegv`; no Crank/conventional RT fallback |
 | buffer/core support | `src/common/dg_buffer_window_projector.f90`, `src/gs/dc/dg_dc_buffer_core_faces.f90` while direct consumers remain |
-| generalized algebra | `src/common/dg_generalized_algebra.f90` pending direct-consumer audit in Task 4 |
+| generalized algebra | removed after the Task 4 direct-consumer audit found no retained consumer |
 | normal DC LCFO | `src/gs/dc/lcfo.f90` and `src/gs/dc/CMakeLists.txt` |
 | EigenExa | `src/gs/eigen_subdiag_eigenexa.f90` and `src/gs/CMakeLists.txt` |
 | Wannier90 | `src/gs/dc/lcfo_wannier_*` normal LCFO sources; remove no symbol without an exclusive-consumer proof |

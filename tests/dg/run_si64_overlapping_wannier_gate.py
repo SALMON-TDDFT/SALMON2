@@ -98,8 +98,7 @@ def main() -> int:
         raise RuntimeError(f"result root must be fresh: {result_root}")
     result_root.mkdir(parents=True)
     fixture = args.repo / "tests/dg/data/si64_overlapping_wannier"
-    sample = args.repo / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac"
-    atom = sample / "atom.dat"
+    atom = fixture / "atom.dat"
     pseudo = args.repo / "samples/exercise_01_C2H2_gs/C_rps.dat"
     if not args.skip_reference:
         reference = result_root / "normal-reference"

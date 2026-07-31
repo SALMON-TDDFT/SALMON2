@@ -1,5 +1,9 @@
 # WPW Global Projected Correction Implementation Plan
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add a default-off fixed-H comparison route that solves the global projected `H-epsilon S` correction equation with bounded-memory restarted GMRES and tests it on the Task 16 B=6 gate.

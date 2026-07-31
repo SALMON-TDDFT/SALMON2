@@ -2,12 +2,15 @@
 """Compile and exercise the real SAWF fragment-symmetry validator."""
 
 from pathlib import Path
+import os
 import subprocess
 import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
-BUILD = ROOT / "build-mpi-eigenexa-wannier-lib"
+BUILD = Path(
+    os.environ.get("SALMON_TEST_BUILD", ROOT / "build-mpi-eigenexa-wannier-lib")
+)
 
 DRIVER = r"""
 program check_sawf_fragment_symmetry_map
@@ -177,8 +180,12 @@ project(sawf_fragment_map LANGUAGES Fortran)
 find_package(LAPACK REQUIRED)
 add_library(sawf
   {source / 'sym_stub.f90'}
+  {ROOT / 'src/gs/dc/dg_overlapping_wannier_projection.f90'}
   {ROOT / 'src/gs/dc/lcfo_wannier_sawf.f90'}
   {ROOT / 'src/gs/dc/lcfo_wannier_sawf_band.f90'})
+set_source_files_properties(
+  {ROOT / 'src/gs/dc/lcfo_wannier_sawf.f90'}
+  PROPERTIES Fortran_PREPROCESS ON)
 target_include_directories(sawf PRIVATE {source})
 if(TARGET LAPACK::LAPACK)
   target_link_libraries(sawf PUBLIC LAPACK::LAPACK)

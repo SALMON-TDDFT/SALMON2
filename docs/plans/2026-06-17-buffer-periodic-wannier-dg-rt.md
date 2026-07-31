@@ -1,5 +1,9 @@
 # Buffer-Periodic Wannier DG-RT Implementation Plan
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Build a DG-RT path where local Wannier bases are generated from buffered DC fragment wavefunctions with periodic boundary conditions, then RT starts from eigenstates of the Flux-including DG Hamiltonian without keeping full-system density matrices.

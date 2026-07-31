@@ -1,5 +1,9 @@
 # WPW Search-history Restart Comparison Design
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 ## Decision
 
 Add a default-on `yn_dg_wpw_search_history` control.  With the default `y`,

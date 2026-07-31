@@ -1,5 +1,9 @@
 # WPW Full-Rank Deterministic Seed Implementation Plan
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 > **For Codex:** Use test-driven development and execute this plan task-by-task in the existing protected worktree.
 
 **Goal:** Replace the rank-eight WPW production seed with a deterministic, local, full-rank seed for the 160-state Si64 retained subspace.

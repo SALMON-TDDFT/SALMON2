@@ -1,5 +1,9 @@
 # WPW Global Projected Correction Design
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 **Date:** 2026-07-23
 
 **Status:** Approved

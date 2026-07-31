@@ -9,7 +9,7 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
-FORMAL_SAMPLE = ROOT / "samples/exercise_dg_fragment_rt/diamond64_dc_flux_mac"
+FORMAL_SAMPLE = ROOT / "tests/dg/data/si64_sawf_alignment"
 FORMAL_INPUT_NAME = "inputfile_gs_w90_pseudo_sawf_aligned_nw576_nb664"
 FORMAL_ATOM_NAME = "atom_sawf_aligned.dat"
 FORMAL_SYMMETRY_NAME = "sym_sawf_aligned.dat"

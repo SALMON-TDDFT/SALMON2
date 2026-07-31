@@ -1,5 +1,9 @@
 # WPW S-Orthogonal PW Complement Design
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 ## 目的
 
 occupied-Wannier空間をWPW法の主空間とし、PWをそのS-metric上の厳密な補空間として扱う。

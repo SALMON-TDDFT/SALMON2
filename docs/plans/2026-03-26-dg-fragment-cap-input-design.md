@@ -1,5 +1,9 @@
 # DG Fragment Cap Input Design
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 ## Goal
 
 DG-Fragment RT の行列次元 cap を入力ファイルから制御できるようにし、計算量とメモリ量を柔軟に調整できるようにする。

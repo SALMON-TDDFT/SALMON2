@@ -1,5 +1,9 @@
 # Occupied-W WPW Bootstrap Implementation Plan
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 > **For Codex:** REQUIRED SUB-SKILL: Use `executing-plans` and
 > `test-driven-development` to implement this plan task-by-task.
 

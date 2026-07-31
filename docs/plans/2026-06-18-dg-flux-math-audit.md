@@ -1,5 +1,9 @@
 # DG Flux Math Audit
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 ## Current Symptom
 
 For the 2x2x2 diamond DC-LCFO case:

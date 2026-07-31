@@ -1,5 +1,9 @@
 # DG Fragment Cap Input Implementation Plan
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** DG-Fragment RT の `n_mat` cap を namelist から制御できるようにし、固定 cap と占有軌道数倍率 cap を選べるようにする。

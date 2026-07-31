@@ -1,5 +1,9 @@
 # WPW Nonlocal Projector Blocks Implementation Plan
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 > **For Codex:** Execute with test-driven development in the existing protected worktree.
 
 **Goal:** Add complete bounded projector-mediated WW/WP/PP nonlocal pseudopotential blocks to the production WPW operator.

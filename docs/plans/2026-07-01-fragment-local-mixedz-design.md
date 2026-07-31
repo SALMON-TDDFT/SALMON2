@@ -1,5 +1,9 @@
 # Fragment-Local Mixed-Z Propagation Design
 
+> **Historical/removed:** This document describes an obsolete experimental DG route
+> removed on 2026-07-31. It is retained only as an implementation record and is
+> not executable guidance.
+
 ## Goal
 
 Move the DG mixed-Z real-time propagation from the current global mixed split backend to a fragment-local backend while keeping the validated global backend as the reference.

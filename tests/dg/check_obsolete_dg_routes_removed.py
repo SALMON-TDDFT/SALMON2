@@ -117,6 +117,13 @@ FORBIDDEN_SOURCE_FILES = {
 }
 
 FORBIDDEN_ASSET_GLOBS = (
+    "tests/dg/check_direct_amn_global_gauge.py",
+    "tests/dg/check_full_h_*",
+    "tests/dg/check_global_wannier_generalized_eigen.py",
+    "tests/dg/check_krylov_velocity_integrator.py",
+    "tests/dg/check_mixed_z_field_sign.py",
+    "tests/dg/check_momentum_active_axis_openmp.py",
+    "tests/dg/check_velocity_gauge_full_h_seed.py",
     "tests/dg/*dg_dc_direct*",
     "tests/dg/*dg_dc_ground_state*",
     "tests/dg/*dg_dc_handoff*",
@@ -154,6 +161,34 @@ SCAN_ROOTS = (
     ROOT / "src",
     ROOT / "tests" / "dg",
     ROOT / "samples",
+)
+
+HISTORICAL_NOTICE = "historical/removed"
+HISTORICAL_DOC_TOKENS = (
+    "samples/exercise_dg_fragment_c2h2",
+    "samples/exercise_dg_fragment_rt",
+    "samples/exercise_dg_rt_hse_test",
+    "yn_dg_frag",
+    "yn_dg_fragment_rt",
+    "yn_dg_mixed_z",
+    "yn_dg_wpw_",
+    "rt_dg_fragment",
+    "dg_wpw_",
+)
+CURRENT_REMOVAL_DOCS = {
+    "docs/plans/2026-07-31-obsolete-dg-route-inventory.md",
+    "docs/plans/2026-07-31-remove-obsolete-experimental-dg-routes-design.md",
+    "docs/plans/2026-07-31-remove-obsolete-experimental-dg-routes.md",
+    "docs/plans/2026-07-31-remove-obsolete-experimental-dg-routes-results.md",
+}
+FORBIDDEN_TEST_REGISTRATION_TOKENS = (
+    "check_direct_amn_global_gauge",
+    "check_full_h_",
+    "check_global_wannier_generalized_eigen",
+    "check_krylov_velocity_integrator",
+    "check_mixed_z_field_sign",
+    "check_momentum_active_axis_openmp",
+    "check_velocity_gauge_full_h_seed",
 )
 
 
@@ -236,11 +271,28 @@ def main() -> int:
     for path, text in texts:
         lower = text.lower()
         rel = relative(path)
+        if path.name == "CMakeLists.txt":
+            for token in FORBIDDEN_TEST_REGISTRATION_TOKENS:
+                if token in lower:
+                    failures.append(f"forbidden test registration: {rel}: {token}")
         for token in sorted(FORBIDDEN_INPUTS):
             token_pattern = re.compile(rf"(?<![a-z0-9_]){re.escape(token)}(?![a-z0-9_])")
             for match in token_pattern.finditer(lower):
                 line = lower.count("\n", 0, match.start()) + 1
                 failures.append(f"forbidden input: {rel}:{line}: {token}")
+
+    for docs_root in (ROOT / "docs/plans", ROOT / "docs/superpowers"):
+        for path in docs_root.rglob("*.md"):
+            rel = relative(path)
+            if rel in CURRENT_REMOVAL_DOCS:
+                continue
+            lower = path.read_text(errors="replace").lower()
+            if any(token in lower for token in HISTORICAL_DOC_TOKENS):
+                if HISTORICAL_NOTICE not in lower:
+                    failures.append(
+                        "obsolete executable documentation lacks historical notice: "
+                        f"{rel}"
+                    )
 
     if failures:
         print("obsolete DG route removal contract: FAIL")
