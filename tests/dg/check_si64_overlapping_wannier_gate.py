@@ -190,7 +190,7 @@ def validate_row(root: Path, decomposition: str, box_profile: str, window: str) 
     if integers["core_atoms_per_fragment"] != 8 or integers["global_target"] != 384:
         fail(f"{row_name}: occupied plus complete-s+p target is not 8 atoms/48 local/384 global")
     if integers["checkpoint_format_version"] != 3:
-        fail(f"{row_name}: row-owned checkpoint format V2 was not published")
+        fail(f"{row_name}: row-owned checkpoint format V3 was not published")
     max_rows = integers["matrix_owned_rows_max"]
     if max_rows <= 0 or max_rows >= integers["global_target"]:
         fail(f"{row_name}: projected matrices are not distributed by owned rows")
@@ -227,14 +227,14 @@ def validate_row(root: Path, decomposition: str, box_profile: str, window: str) 
     manifest = row / "overlapping_wannier_gs.manifest"
     if not manifest.is_file() or digest(manifest) != raw["checkpoint_manifest_sha256"]:
         fail(f"{row_name}: checkpoint manifest hash mismatch")
-    if manifest.read_bytes()[:32].rstrip(b" \x00") != b"SALMON_OW_GS_CHECKPOINT_V2":
-        fail(f"{row_name}: checkpoint manifest is not V2")
+    if manifest.read_bytes()[:32].rstrip(b" \x00") != b"SALMON_OW_GS_CHECKPOINT_V3":
+        fail(f"{row_name}: checkpoint manifest is not V3")
     shards = sorted(row.glob("overlapping_wannier_gs.*.rank*"))
     if len(shards) != integers["mpi_ranks"]:
-        fail(f"{row_name}: expected one V2 checkpoint shard per MPI rank")
+        fail(f"{row_name}: expected one V3 checkpoint shard per MPI rank")
     for shard in shards:
-        if shard.read_bytes()[:32].rstrip(b" \x00") != b"SALMON_OW_GS_RANK_SHARD_V2":
-            fail(f"{row_name}: checkpoint shard is not V2: {shard.name}")
+        if shard.read_bytes()[:32].rstrip(b" \x00") != b"SALMON_OW_GS_RANK_SHARD_V3":
+            fail(f"{row_name}: checkpoint shard is not V3: {shard.name}")
     if not SHA256.fullmatch(raw["checkpoint_manifest_sha256"]):
         fail(f"{row_name}: malformed checkpoint manifest digest")
     validate_restart_log(row / "restart.log")

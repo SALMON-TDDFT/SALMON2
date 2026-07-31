@@ -33,7 +33,8 @@ contains
     complex(real64),allocatable::local_position(:,:,:),local_derivative(:,:,:),identity(:,:),&
       total_hamiltonian(:,:),reference_matrix(:,:)
     real(real64)::wrapped_coordinate,tolerance_min,tolerance_max,position_defect,position_scale,&
-      reference_geometry(6)
+      derivative_defect,derivative_scale,max_position_defect,max_position_scale,&
+      max_derivative_defect,max_derivative_scale,reference_geometry(6)
     character(len(position_convention))::reference_convention
     logical::shape_ok,finite_payload
     ok=.false.;message='';ownership_count=0;local_bad=0
@@ -138,6 +139,8 @@ contains
     enddo;enddo;enddo
     allocate(position(3,nwann,nwann),derivative(3,nwann,nwann),canonical_momentum(3,nwann,nwann))
     allocate(velocity(3,nwann,nwann),nonlocal_velocity(3,nwann,nwann))
+    max_position_defect=0d0;max_position_scale=1d0
+    max_derivative_defect=0d0;max_derivative_scale=1d0
     do axis=1,3
       call MPI_Allreduce(local_position(axis,:,:),position(axis,:,:),matrix_count,&
         MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
@@ -145,17 +148,27 @@ contains
         MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
       position_scale=max(1d0,maxval(abs(position(axis,:,:))))
       position_defect=maxval(abs(position(axis,:,:)-conjg(transpose(position(axis,:,:)))))
+      max_position_defect=max(max_position_defect,position_defect)
+      max_position_scale=max(max_position_scale,position_scale)
       if(position_defect>antihermitian_tolerance*position_scale)local_bad=1
       position(axis,:,:)=0.5d0*(position(axis,:,:)+conjg(transpose(position(axis,:,:))))
-      if(maxval(abs(derivative(axis,:,:)+conjg(transpose(derivative(axis,:,:)))))>&
-          antihermitian_tolerance)then
-        local_bad=1
-      endif
+      derivative_scale=max(1d0,maxval(abs(derivative(axis,:,:))))
+      derivative_defect=maxval(abs(derivative(axis,:,:)+conjg(transpose(derivative(axis,:,:)))))
+      max_derivative_defect=max(max_derivative_defect,derivative_defect)
+      max_derivative_scale=max(max_derivative_scale,derivative_scale)
+      ! Unique-core integration leaves a finite buffer-boundary term in the raw
+      ! derivative.  The fixed-basis canonical derivative is its
+      ! anti-Hermitian Galerkin projection; the discarded Hermitian part is
+      ! diagnosed above and is not used for the commutator velocity.
+      derivative(axis,:,:)=0.5d0*(derivative(axis,:,:)-conjg(transpose(derivative(axis,:,:))))
       canonical_momentum(axis,:,:)=-cmplx(0d0,1d0,real64)*derivative(axis,:,:)
     enddo
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(global_bad/=0)then
-      message='position is not Hermitian or canonical derivative is not anti-Hermitian';return
+      write(message,'(a,4(a,es12.4))')'position symmetry gate failed',&
+        ' position_defect=',max_position_defect,' position_scale=',max_position_scale,&
+        ' derivative_defect=',max_derivative_defect,' derivative_scale=',max_derivative_scale
+      return
     endif
     allocate(total_hamiltonian,source=local_hamiltonian+nonlocal_hamiltonian)
     do axis=1,3

@@ -8,7 +8,7 @@ program test_dg_overlapping_wannier_observables_mpi
   real(8),allocatable::weights(:),coordinates(:,:)
   complex(8),allocatable::values(:,:),gradients(:,:,:),position(:,:,:),momentum(:,:,:),&
     derivative(:,:,:),velocity(:,:,:),nonlocal_velocity(:,:,:),rotated_values(:,:),&
-    rotated_gradients(:,:,:)
+    rotated_gradients(:,:,:),boundary_gradients(:,:,:)
   complex(8)::metric(2,2),metric_inverse(2,2),hlocal(2,2),hnonlocal(2,2),gauge(2,2),basis_map(2,2),&
     reference_position(3,2,2),reference_velocity(3,2,2),direct(2,2)
   real(8)::origin(3),cell(3),x
@@ -67,6 +67,18 @@ program test_dg_overlapping_wannier_observables_mpi
       'explicit nonlocal commutator contribution')
   enddo
   call require(abs(momentum(1,1,2))>1d-8,'canonical momentum diagnostic')
+  allocate(boundary_gradients,source=gradients)
+  do p=1,nlocal
+    boundary_gradients(1,1,p)=boundary_gradients(1,1,p)+0.05d0*values(1,p)
+  enddo
+  call assemble_dg_overlapping_wannier_observables(comm,2,ids,weights,coordinates,origin,cell,&
+    'cell_wrapped',values,boundary_gradients,metric,metric_inverse,hlocal,hnonlocal,4_8,1d-12,&
+    position,derivative,momentum,velocity,nonlocal_velocity,owned,ok,message)
+  call require(ok,'finite core-boundary derivative term is projected')
+  do i=1,3
+    call require(maxval(abs(derivative(i,:,:)+conjg(transpose(derivative(i,:,:)))))<1d-13,&
+      'core-boundary derivative projection is anti-Hermitian')
+  enddo
   reference_position=position;reference_velocity=velocity
   gauge=reshape([cmplx(sqrt(0.5d0),0d0,8),cmplx(-sqrt(0.5d0),0d0,8),&
     cmplx(sqrt(0.5d0),0d0,8),cmplx(sqrt(0.5d0),0d0,8)],[2,2])

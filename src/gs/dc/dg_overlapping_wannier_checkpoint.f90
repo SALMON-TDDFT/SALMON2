@@ -41,7 +41,8 @@ contains
     integer::rank,nproc,ierr,unit,ios,flush_ios,close_ios,local_bad,global_bad,dims(4),&
       local_rejection_code,global_rejection_code
     integer(int64)::transaction_id,previous_publication_id,shard_size,manifest_size,shard_digest,manifest_digest,&
-      computed_hamiltonian_fingerprint,computed_observable_fingerprint
+      computed_hamiltonian_fingerprint,computed_observable_fingerprint,digest_position,payload_position,&
+      integer_bytes,integer8_bytes,file_bytes
     character(512)::manifest,manifest_temporary,shard,shard_temporary,reservation
     character(256)::iomsg
     logical::matrix_ok
@@ -100,6 +101,31 @@ contains
       close(unit,iostat=close_ios)
       if(ios==0.and.flush_ios/=0)ios=flush_ios
       if(ios==0.and.close_ios/=0)ios=close_ios
+    endif
+    if(ios==0)then
+      integer_bytes=int(storage_size(0)/8,int64)
+      integer8_bytes=int(storage_size(0_int64)/8,int64)
+      digest_position=int(storage_size(shard_magic)/8,int64)+4_int64*integer_bytes+&
+        4_int64*integer8_bytes+1_int64
+      payload_position=int(storage_size(shard_magic)/8,int64)+8_int64*integer_bytes+&
+        5_int64*integer8_bytes+1_int64
+      if(ios==0)open(newunit=unit,file=trim(shard_temporary),status='old',access='stream',form='unformatted',&
+        action='readwrite',iostat=ios,iomsg=iomsg)
+      if(ios==0)then
+        inquire(unit=unit,size=file_bytes)
+        if(file_bytes/=shard_size)ios=1
+        if(ios==0)then
+          call digest_serialized_shard(unit,payload_position,checkpoint,rank,transaction_id,shard_digest,ios,iomsg)
+        endif
+        if(ios==0)then
+          write(unit,pos=digest_position,iostat=ios,iomsg=iomsg)shard_digest
+        endif
+        flush_ios=0;close_ios=0
+        if(ios==0)flush(unit,iostat=flush_ios)
+        close(unit,iostat=close_ios)
+        if(ios==0.and.flush_ios/=0)ios=flush_ios
+        if(ios==0.and.close_ios/=0)ios=close_ios
+      endif
     endif
     local_bad=merge(0,1,ios==0)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -522,6 +548,149 @@ contains
     enddo;enddo
     digest_shard=hash
   end function
+
+  subroutine digest_serialized_shard(unit,payload_position,checkpoint,rank,transaction_id,hash,ios,iomsg)
+    integer,intent(in)::unit,rank
+    integer(int64),intent(in)::payload_position,transaction_id
+    type(s_dg_overlapping_wannier_checkpoint),intent(in)::checkpoint
+    integer(int64),intent(out)::hash
+    integer,intent(out)::ios
+    character(*),intent(out)::iomsg
+    integer,parameter::digest_block_size=4096
+    integer::i,j,axis,digest_index,integer_value,first,nblock,k,total
+    integer(int64)::integer8_value,position_start,velocity_start,complex_bytes,integer_bytes,integer8_bytes,&
+      real_bytes,stream_position,element_offset
+    real(8)::real_value
+    complex(8)::complex_value
+    integer::integer_block(digest_block_size)
+    integer(int64)::integer8_block(digest_block_size)
+    real(8)::real_block(digest_block_size)
+    complex(8)::complex_block(digest_block_size),position_block(3,digest_block_size),&
+      velocity_block(3,digest_block_size)
+    hash=int(z'3C6EF372FE94F82B',int64);digest_index=1;ios=0;iomsg=''
+    integer_bytes=int(storage_size(integer_value)/8,int64)
+    integer8_bytes=int(storage_size(integer8_value)/8,int64)
+    real_bytes=int(storage_size(real_value)/8,int64)
+    complex_bytes=int(storage_size(complex_value)/8,int64)
+    stream_position=payload_position
+    call digest_integer(hash,int(rank,int64),digest_index)
+    call digest_integer(hash,int(checkpoint%basis_generation,int64),digest_index)
+    call digest_integer(hash,int(checkpoint%geometry_generation,int64),digest_index)
+    call digest_integer(hash,checkpoint%basis_fingerprint,digest_index)
+    call digest_integer(hash,checkpoint%operator_fingerprint,digest_index)
+    call digest_integer(hash,transaction_id,digest_index)
+    total=size(checkpoint%tail_center)
+    do first=1,total,digest_block_size
+      nblock=min(digest_block_size,total-first+1)
+      read(unit,pos=stream_position,iostat=ios,iomsg=iomsg)integer_block(1:nblock)
+      if(ios/=0)return
+      stream_position=stream_position+integer_bytes*int(nblock,int64)
+      do k=1,nblock
+        call digest_integer(hash,int(integer_block(k),int64),digest_index)
+      enddo
+    enddo
+    total=size(checkpoint%tail_generation)
+    do first=1,total,digest_block_size
+      nblock=min(digest_block_size,total-first+1)
+      read(unit,pos=stream_position,iostat=ios,iomsg=iomsg)integer_block(1:nblock)
+      if(ios/=0)return
+      stream_position=stream_position+integer_bytes*int(nblock,int64)
+      do k=1,nblock
+        call digest_integer(hash,int(integer_block(k),int64),digest_index)
+      enddo
+    enddo
+    total=size(checkpoint%tail_offsets)
+    do first=1,total,digest_block_size
+      nblock=min(digest_block_size,total-first+1)
+      read(unit,pos=stream_position,iostat=ios,iomsg=iomsg)integer_block(1:nblock)
+      if(ios/=0)return
+      stream_position=stream_position+integer_bytes*int(nblock,int64)
+      do k=1,nblock
+        call digest_integer(hash,int(integer_block(k),int64),digest_index)
+      enddo
+    enddo
+    total=size(checkpoint%tail_physical_ids)
+    do first=1,total,digest_block_size
+      nblock=min(digest_block_size,total-first+1)
+      read(unit,pos=stream_position,iostat=ios,iomsg=iomsg)integer8_block(1:nblock)
+      if(ios/=0)return
+      stream_position=stream_position+integer8_bytes*int(nblock,int64)
+      do k=1,nblock
+        call digest_integer(hash,integer8_block(k),digest_index)
+      enddo
+    enddo
+    total=size(checkpoint%core_physical_ids)
+    do first=1,total,digest_block_size
+      nblock=min(digest_block_size,total-first+1)
+      read(unit,pos=stream_position,iostat=ios,iomsg=iomsg)integer8_block(1:nblock)
+      if(ios/=0)return
+      stream_position=stream_position+integer8_bytes*int(nblock,int64)
+      do k=1,nblock
+        call digest_integer(hash,integer8_block(k),digest_index)
+      enddo
+    enddo
+    total=size(checkpoint%density)
+    do first=1,total,digest_block_size
+      nblock=min(digest_block_size,total-first+1)
+      read(unit,pos=stream_position,iostat=ios,iomsg=iomsg)real_block(1:nblock)
+      if(ios/=0)return
+      stream_position=stream_position+real_bytes*int(nblock,int64)
+      do k=1,nblock
+        call digest_real(hash,real_block(k),digest_index)
+      enddo
+    enddo
+    total=size(checkpoint%overlap_row_ids)
+    do first=1,total,digest_block_size
+      nblock=min(digest_block_size,total-first+1)
+      read(unit,pos=stream_position,iostat=ios,iomsg=iomsg)integer8_block(1:nblock)
+      if(ios/=0)return
+      stream_position=stream_position+integer8_bytes*int(nblock,int64)
+      do k=1,nblock
+        call digest_integer(hash,integer8_block(k),digest_index)
+      enddo
+    enddo
+    total=size(checkpoint%overlap)
+    do first=1,total,digest_block_size
+      nblock=min(digest_block_size,total-first+1)
+      read(unit,pos=stream_position,iostat=ios,iomsg=iomsg)complex_block(1:nblock)
+      if(ios/=0)return
+      stream_position=stream_position+complex_bytes*int(nblock,int64)
+      do k=1,nblock
+        call digest_complex(hash,complex_block(k),digest_index)
+      enddo
+    enddo
+    total=size(checkpoint%hamiltonian0)
+    do first=1,total,digest_block_size
+      nblock=min(digest_block_size,total-first+1)
+      read(unit,pos=stream_position,iostat=ios,iomsg=iomsg)complex_block(1:nblock)
+      if(ios/=0)return
+      stream_position=stream_position+complex_bytes*int(nblock,int64)
+      do k=1,nblock
+        call digest_complex(hash,complex_block(k),digest_index)
+      enddo
+    enddo
+    position_start=stream_position
+    velocity_start=position_start+complex_bytes*int(size(checkpoint%position),int64)
+    total=size(checkpoint%position,2)*size(checkpoint%position,3)
+    do first=1,total,digest_block_size
+      nblock=min(digest_block_size,total-first+1)
+      element_offset=3_int64*int(first-1,int64)
+      read(unit,pos=position_start+complex_bytes*element_offset,iostat=ios,iomsg=iomsg)&
+        position_block(:,1:nblock)
+      if(ios/=0)return
+      read(unit,pos=velocity_start+complex_bytes*element_offset,iostat=ios,iomsg=iomsg)&
+        velocity_block(:,1:nblock)
+      if(ios/=0)return
+      do k=1,nblock
+        do axis=1,3
+          call digest_complex(hash,position_block(axis,k),digest_index)
+        enddo
+        do axis=1,3
+          call digest_complex(hash,velocity_block(axis,k),digest_index)
+        enddo
+      enddo
+    enddo
+  end subroutine
 
   subroutine digest_integer(hash,value,position)
     integer(int64),intent(inout)::hash

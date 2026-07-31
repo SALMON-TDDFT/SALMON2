@@ -69,6 +69,8 @@ assert re.search(
 ), "the focused smoke gate must use the demonstrated buffer-6 configuration"
 assert "manifest_digest_before" in si64_runner_source
 assert "route checkpoint changed during restart reuse" in si64_runner_source
+assert "SALMON_OW_GS_CHECKPOINT_V3" in si64_checker_source
+assert "SALMON_OW_GS_RANK_SHARD_V3" in si64_checker_source
 for token in ("validate_restart_log", "[ow-scf-diagnostic]", "forbidden route marker"):
     assert token in si64_checker_source.lower(), (
         "restart validation must reject recomputation and forbidden route markers"
