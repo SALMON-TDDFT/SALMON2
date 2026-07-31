@@ -14,8 +14,6 @@
 !  limitations under the License.
 !
 module Conjugate_Gradient
-  use dg_dc_direct_sipg, only: s_dg_dc_frozen_face_projector,dg_dc_canonical_to_raw_index
-  use dg_dc_buffer_core_faces, only: s_dg_dc_buffer_core_face
   implicit none
 
   type halo_cg_info
@@ -31,33 +29,16 @@ module Conjugate_Gradient
   integer, save :: flux_halo_cache_nbuf(3) = -1
   integer, save :: flux_halo_cache_radius(3) = -1
   integer, save :: flux_halo_cache_num_fragment(3) = -1
-  integer,save :: direct_dg_projector_retained_rank(6)=0
-  integer,save :: direct_dg_projector_required_rank(6)=0
-  real(8),save :: direct_dg_projector_projection_residual(6)=huge(1d0)
-  real(8),save :: direct_dg_projector_escape_norm(6)=huge(1d0)
-  real(8),save :: direct_dg_projector_residual_limit(6)=0d0
-  real(8),save :: direct_dg_projector_escape_limit(6)=0d0
-  real(8),save :: direct_dg_face_action_norm(6)=huge(1d0)
-  real(8),save :: direct_dg_face_pair_balance(3)=huge(1d0)
-
-  type direct_dg_frozen_halo
-    type(s_dg_dc_frozen_face_projector),allocatable :: spin(:)
-  end type direct_dg_frozen_halo
-  type(direct_dg_frozen_halo),allocatable,save :: direct_dg_frozen_projectors(:)
-  type(s_dg_dc_buffer_core_face),allocatable,save :: direct_dg_frozen_faces(:)
-  integer,save :: direct_dg_frozen_generation=0
-  integer(8),save :: direct_dg_frozen_fingerprint=0_8
 
 contains
 
-subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg,dc,flux_weight,flux_iter,&
-    frozen_projector_generation,frozen_operator_fingerprint)
+subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg,dc,flux_weight,flux_iter)
   use structures
   use timer
   use hamiltonian, only: hpsi
   use communication, only: comm_summation, comm_is_root
   use parallelization, only: nproc_id_global
-  use salmon_global, only: yn_preconditioning, yn_dc_lcfo_flux,yn_dg_dc_local_periodic
+  use salmon_global, only: yn_preconditioning, yn_dc_lcfo_flux
   !$ use omp_lib
   implicit none
   integer           ,intent(in) :: ncg
@@ -73,8 +54,6 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg,dc,fl
   type(s_dcdft),optional,intent(in) :: dc
   real(8),optional,intent(in) :: flux_weight
   integer,optional,intent(in) :: flux_iter
-  integer,optional,intent(in) :: frozen_projector_generation
-  integer(8),optional,intent(in) :: frozen_operator_fingerprint
   type(s_orbital) :: flux_hxk,flux_hxk_raw,flux_hpk
   !
   integer,parameter :: nd=4
@@ -87,8 +66,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg,dc,fl
   real(8),allocatable :: rb(:,:),E(:,:),E1(:,:),gkgk(:,:),bk(:,:),res(:,:)
   real(8),allocatable :: utmp3(:,:,:),wtmp2(:,:,:)
   real(8) :: utmp2(2,2),btmp2(2,2)
-  logical :: use_fixed_flux,use_direct_dg,use_interface_action,any_rejected,allow_cg_early_exit
-  real(8) :: interface_weight
+  logical :: use_fixed_flux,any_rejected,allow_cg_early_exit
 
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ gscg"
 
@@ -100,13 +78,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg,dc,fl
   io_e = info%io_e
   use_fixed_flux = present(dc) .and. present(flux_weight) .and. yn_dc_lcfo_flux == 'y'
   if(use_fixed_flux) use_fixed_flux = flux_weight > 0d0
-  use_direct_dg = present(dc) .and. present(flux_weight) .and. yn_dg_dc_local_periodic == 'y'
-  if(use_direct_dg) use_direct_dg = flux_weight > 0d0
-  if(use_direct_dg)use_fixed_flux=.false.
-  use_interface_action=use_fixed_flux .or. use_direct_dg
-  interface_weight=0d0
-  if(use_interface_action)interface_weight=flux_weight
-  allow_cg_early_exit = .not. use_interface_action
+  allow_cg_early_exit = .not. use_fixed_flux
 
   if(.not. allocated(cg%pk%rwf)) then
     call allocate_orbital_real(nspin,mg,info,cg%pk)
@@ -124,29 +96,23 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg,dc,fl
   allocate(utmp3(2,system%nspin,system%no))
   allocate(res(system%nspin,system%no))
   res = 0.0d0
-  if(use_interface_action) then
+  if(use_fixed_flux) then
     call allocate_orbital_real(nspin,mg,info,flux_hxk_raw)
     call allocate_orbital_real(nspin,mg,info,flux_hxk)
     call allocate_orbital_real(nspin,mg,info,flux_hpk)
     flux_hxk_raw%rwf = 0d0
     flux_hxk%rwf = 0d0
     flux_hpk%rwf = 0d0
-    if(use_direct_dg)then
-      call apply_dc_direct_dg_hpsi_rwf(mg,system,info,stencil,dc,xk,flux_hxk_raw,&
-        frozen_projector_generation=frozen_projector_generation,&
-        frozen_operator_fingerprint=frozen_operator_fingerprint)
-    else
-      call apply_dc_lcfo_flux_hpsi_rwf(mg,system,info,stencil,dc,xk,flux_hxk_raw)
-    end if
-    flux_hxk%rwf = interface_weight*flux_hxk_raw%rwf
+    call apply_dc_lcfo_flux_hpsi_rwf(mg,system,info,stencil,dc,xk,flux_hxk_raw)
+    flux_hxk%rwf = flux_weight*flux_hxk_raw%rwf
   end if
   
   call timer_end(LOG_GSCG_ISOLATED_CALC)
 
   call timer_begin(LOG_GSCG_ISOLATED_HPSI)
   call hpsi(xk,hxk,info,mg,vlocal,system,stencil,srg,ppg)
-  if(use_interface_action) then
-    if(use_fixed_flux)call print_fixed_flux_diagnostics
+  if(use_fixed_flux) then
+    call print_fixed_flux_diagnostics
     call add_fixed_flux_operator(hxk,flux_hxk)
   end if
   call timer_end(LOG_GSCG_ISOLATED_HPSI)
@@ -249,16 +215,10 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg,dc,fl
 
     call timer_begin(LOG_GSCG_ISOLATED_HPSI)
     call hpsi(cg%pk,cg%hpk,info,mg,vlocal,system,stencil,srg,ppg)
-    if(use_interface_action) then
+    if(use_fixed_flux) then
       flux_hpk%rwf = 0d0
-      if(use_direct_dg)then
-        call apply_dc_direct_dg_hpsi_rwf(mg,system,info,stencil,dc,cg%pk,flux_hpk,&
-          frozen_projector_generation=frozen_projector_generation,&
-          frozen_operator_fingerprint=frozen_operator_fingerprint)
-      else
-        call apply_dc_lcfo_flux_hpsi_rwf(mg,system,info,stencil,dc,cg%pk,flux_hpk)
-      end if
-      flux_hpk%rwf = interface_weight*flux_hpk%rwf
+      call apply_dc_lcfo_flux_hpsi_rwf(mg,system,info,stencil,dc,cg%pk,flux_hpk)
+      flux_hpk%rwf = flux_weight*flux_hpk%rwf
       call add_fixed_flux_operator(cg%hpk,flux_hpk)
     end if
     call timer_end(LOG_GSCG_ISOLATED_HPSI)
@@ -334,7 +294,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg,dc,fl
     any_rejected = any(bk(:,io_s:io_e) >= 0d0)
     reject_local = 0
     if(any_rejected) reject_local = 1
-    if(use_interface_action) then
+    if(use_fixed_flux) then
       call comm_summation(reject_local,reject_global,dc%icomm_tot)
     else
       call comm_summation(reject_local,reject_global,info%icomm_rko)
@@ -364,16 +324,10 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg,dc,fl
       call timer_end(LOG_GSCG_ISOLATED_CALC)
       call timer_begin(LOG_GSCG_ISOLATED_HPSI)
       call hpsi(xk,hxk,info,mg,vlocal,system,stencil,srg,ppg)
-      if(use_interface_action) then
+      if(use_fixed_flux) then
         flux_hxk_raw%rwf = 0d0
-        if(use_direct_dg)then
-          call apply_dc_direct_dg_hpsi_rwf(mg,system,info,stencil,dc,xk,flux_hxk_raw,&
-            frozen_projector_generation=frozen_projector_generation,&
-            frozen_operator_fingerprint=frozen_operator_fingerprint)
-        else
-          call apply_dc_lcfo_flux_hpsi_rwf(mg,system,info,stencil,dc,xk,flux_hxk_raw)
-        end if
-        flux_hxk%rwf = interface_weight*flux_hxk_raw%rwf
+        call apply_dc_lcfo_flux_hpsi_rwf(mg,system,info,stencil,dc,xk,flux_hxk_raw)
+        flux_hxk%rwf = flux_weight*flux_hxk_raw%rwf
         call add_fixed_flux_operator(hxk,flux_hxk)
       end if
       call timer_end(LOG_GSCG_ISOLATED_HPSI)
@@ -1171,740 +1125,6 @@ subroutine prepare_dc_lcfo_flux_halo_cache(dc,ncore,stencil_radius,npg_base)
   flux_halo_cache_radius = stencil_radius
   flux_halo_cache_num_fragment = num_fragment
 end subroutine prepare_dc_lcfo_flux_halo_cache
-
-subroutine prepare_dc_direct_dg_projectors_rwf(mg,system,info,stencil,dc,reference_orbitals,&
-    projector_generation,operator_fingerprint)
-  use structures
-  use communication,only:comm_summation,comm_get_min
-  use dc_fragment_geometry,only:get_fragment_domain
-  use dg_dc_ground_state_adapter,only:prepare_dg_dc_buffer_core_projectors,&
-    build_dg_dc_one_sided_derivative_weights
-  use dg_dc_buffer_core_faces,only:build_dg_dc_buffer_core_faces
-  use dg_dc_direct_sipg,only:freeze_dg_dc_face_projector
-  use dg_buffer_window_projector,only:build_dg_buffer_window_projector,&
-    s_dg_buffer_projector_diagnostics
-  use salmon_global,only:dg_dc_metric_rank_tolerance
-  implicit none
-  type(s_rgrid),intent(in)::mg
-  type(s_dft_system),intent(in)::system
-  type(s_parallel_info),intent(in)::info
-  type(s_stencil),intent(in)::stencil
-  type(s_dcdft),intent(in)::dc
-  type(s_orbital),intent(in)::reference_orbitals
-  integer,intent(in)::projector_generation
-  integer(8),intent(inout)::operator_fingerprint
-  type(s_dg_dc_buffer_core_face),allocatable::mapping_faces(:),global_mapping_faces(:)
-  type(s_dg_dc_buffer_core_face),allocatable::local_projected_faces(:)
-  real(8),allocatable::core_values(:,:,:,:),core_gradients(:,:,:,:,:)
-  real(8),allocatable::low_weights(:,:),high_weights(:,:)
-  real(8),allocatable::buffer_face_values(:,:,:),buffer_face_weights(:,:)
-  real(8),allocatable::global_owned(:,:,:),global_values(:,:,:)
-  real(8),allocatable::global_neighbor_owned(:,:,:),global_neighbor_values(:,:,:)
-  real(8),allocatable::global_normal_owned(:,:,:),global_normal_values(:,:,:)
-  real(8),allocatable::reference_trace_owned(:,:,:,:),reference_trace_values(:,:,:,:)
-  real(8),allocatable::global_coefficients(:,:),global_reconstructed(:,:)
-  real(8),allocatable::reverse_coefficients(:,:),reverse_reconstructed(:,:)
-  real(8)::projector_acceptance_tolerance,projector_escape_tolerance
-  real(8)::signature_local,signature_global,active_rank_candidate
-  integer(8),allocatable::core_physical_grid_ids(:,:,:)
-  integer,allocatable::owned_state_ids(:)
-  integer::ncore(3),core_storage_lo(3),core_storage_hi(3),local_core_size(3),local_core_origin(3)
-  integer::surrogate_origin_local(3),surrogate_origin(3),surrogate_size_local(3),surrogate_size(3)
-  integer::buffer_depth
-  integer::ix,iy,iz,io,ispin,iface,point,axis,storage(3),minus(3),plus(3),ngrad_axis(3),n
-  integer::failure_local,failure_global,allocation_status,maximum_face_points,minimum_face_points,face_plane
-  integer::maximum_global_points,global_point,maximum_plane_points,maximum_weight,trace_point,nowned
-  logical::ok,active_core
-  logical::reverse_ok
-  character(256)::message
-  character(256)::reverse_message
-  type(s_dg_buffer_projector_diagnostics)::global_diagnostics,reverse_diagnostics
-
-  failure_local=0
-  if(projector_generation<=0.or.operator_fingerprint==0_8.or.dc%nstate_frag/=system%no)&
-    failure_local=1
-  buffer_depth=minval(dc%nxyz_buffer)
-  if(any(mg%is>mg%ie).or.buffer_depth<1.or.any(dc%nxyz_buffer/=buffer_depth))failure_local=1
-  if(info%io_s<1.or.info%io_e>dc%nstate_frag.or.info%io_e<info%io_s)failure_local=1
-  call get_fragment_domain(dc,dc%i_frag,ncore)
-  core_storage_lo=max(mg%is,[1,1,1])
-  core_storage_hi=min(mg%ie,ncore)
-  local_core_size=core_storage_hi-core_storage_lo+1
-  local_core_origin=dc%ixyz_frag(:,dc%i_frag)+core_storage_lo-1
-  active_core=.not.any(local_core_size<=0)
-  active_rank_candidate=merge(dble(dc%id_frag),huge(1d0),active_core)
-  call comm_get_min(active_rank_candidate,dc%icomm_frag)
-  if(active_rank_candidate>=huge(1d0))failure_local=1
-  surrogate_origin_local=0;surrogate_size_local=0
-  if(active_core.and.dc%id_frag==nint(active_rank_candidate))then
-    surrogate_origin_local=local_core_origin
-    surrogate_size_local=local_core_size
-  endif
-  call comm_summation(surrogate_origin_local,surrogate_origin,3,dc%icomm_frag)
-  call comm_summation(surrogate_size_local,surrogate_size,3,dc%icomm_frag)
-  if(.not.active_core)then
-    local_core_size=surrogate_size
-    local_core_origin=surrogate_origin
-    core_storage_lo=local_core_origin-dc%ixyz_frag(:,dc%i_frag)+1
-  endif
-  nowned=merge(info%io_e-info%io_s+1,0,active_core)
-  call comm_summation(failure_local,failure_global,dc%icomm_tot)
-  if(failure_global>0)stop 'direct DC SIPG: invalid frozen projector preparation context'
-  allocate(owned_state_ids(nowned),&
-    core_values(local_core_size(1),local_core_size(2),local_core_size(3),nowned),&
-    core_gradients(local_core_size(1),local_core_size(2),local_core_size(3),&
-      nowned,3),&
-    core_physical_grid_ids(local_core_size(1),local_core_size(2),local_core_size(3)),stat=allocation_status)
-  failure_local=merge(0,1,allocation_status==0)
-  call comm_summation(failure_local,failure_global,dc%icomm_tot)
-  if(failure_global>0)stop 'direct DC SIPG: local core projector input allocation failed'
-  if(active_core)owned_state_ids=[(io,io=info%io_s,info%io_e)]
-  ngrad_axis=min(5,ncore)
-  allocate(low_weights(maxval(ngrad_axis),3),high_weights(maxval(ngrad_axis),3),stat=allocation_status)
-  failure_local=merge(0,1,allocation_status==0)
-  do axis=1,3
-    if(failure_local/=0)exit
-    call build_dg_dc_one_sided_derivative_weights(system%hgs(axis),-1,&
-      low_weights(1:ngrad_axis(axis),axis),ok,message)
-    if(.not.ok)failure_local=1
-    call build_dg_dc_one_sided_derivative_weights(system%hgs(axis),1,&
-      high_weights(1:ngrad_axis(axis),axis),ok,message)
-    if(.not.ok)failure_local=1
-  enddo
-  call comm_summation(failure_local,failure_global,dc%icomm_tot)
-  if(failure_global>0)stop 'direct DC SIPG: derivative preparation failed collectively'
-  do iz=1,local_core_size(3);do iy=1,local_core_size(2);do ix=1,local_core_size(1)
-    storage=core_storage_lo+[ix-1,iy-1,iz-1]
-    core_physical_grid_ids(ix,iy,iz)=1_8+int(local_core_origin(1)+ix-1,8)+&
-      int(dc%lg_tot%num(1),8)*(int(local_core_origin(2)+iy-1,8)+&
-      int(dc%lg_tot%num(2),8)*int(local_core_origin(3)+iz-1,8))
-    do io=info%io_s,merge(info%io_e,info%io_s-1,active_core);do ispin=1,system%nspin
-      if(ispin/=1)cycle
-      core_values(ix,iy,iz,io-info%io_s+1)=&
-        reference_orbitals%rwf(storage(1),storage(2),storage(3),ispin,io,1,1)
-      do axis=1,3
-        if(storage(axis)==1)then
-          core_gradients(ix,iy,iz,io-info%io_s+1,axis)=0d0
-          do n=1,ngrad_axis(axis)
-            plus=storage;plus(axis)=n
-            core_gradients(ix,iy,iz,io-info%io_s+1,axis)=&
-              core_gradients(ix,iy,iz,io-info%io_s+1,axis)-low_weights(n,axis)*&
-              reference_orbitals%rwf(plus(1),plus(2),plus(3),ispin,io,1,1)
-          enddo
-        else if(storage(axis)==ncore(axis))then
-          core_gradients(ix,iy,iz,io-info%io_s+1,axis)=0d0
-          do n=1,ngrad_axis(axis)
-            minus=storage;minus(axis)=ncore(axis)-n+1
-            core_gradients(ix,iy,iz,io-info%io_s+1,axis)=&
-              core_gradients(ix,iy,iz,io-info%io_s+1,axis)+high_weights(n,axis)*&
-              reference_orbitals%rwf(minus(1),minus(2),minus(3),ispin,io,1,1)
-          enddo
-        else
-          minus=storage;plus=storage;minus(axis)=minus(axis)-1;plus(axis)=plus(axis)+1
-          core_gradients(ix,iy,iz,io-info%io_s+1,axis)=&
-            (reference_orbitals%rwf(plus(1),plus(2),plus(3),ispin,io,1,1)-&
-             reference_orbitals%rwf(minus(1),minus(2),minus(3),ispin,io,1,1))/(2d0*system%hgs(axis))
-        endif
-      enddo
-    enddo;enddo
-  enddo;enddo;enddo
-  call build_dg_dc_buffer_core_faces(dc%i_frag,dc%ixyz_frag,dc%nxyz_domain_frag,&
-    dc%lg_tot%num,buffer_depth,projector_generation,dc%icomm_tot,mapping_faces,ok,message,&
-    local_core_origin,local_core_size)
-  if(.not.ok)stop 'direct DC SIPG: canonical face mapping construction failed'
-  call build_dg_dc_buffer_core_faces(dc%i_frag,dc%ixyz_frag,dc%nxyz_domain_frag,&
-    dc%lg_tot%num,buffer_depth,projector_generation,dc%icomm_tot,global_mapping_faces,ok,message,&
-    dc%ixyz_frag(:,dc%i_frag),ncore)
-  if(.not.ok)stop 'direct DC SIPG: global canonical face mapping construction failed'
-  maximum_plane_points=maxval([(global_mapping_faces(iface)%point_count/&
-    global_mapping_faces(iface)%overlap_depth,iface=1,6)])
-  maximum_weight=maxval(ngrad_axis)
-  allocate(reference_trace_owned(maximum_plane_points,maximum_weight,dc%nstate_frag,6),&
-    reference_trace_values(maximum_plane_points,maximum_weight,dc%nstate_frag,6),stat=allocation_status)
-  failure_local=merge(0,1,allocation_status==0)
-  if(failure_local==0)then
-    reference_trace_owned=0d0
-    do iface=1,6
-      axis=global_mapping_faces(iface)%axis
-      face_plane=global_mapping_faces(iface)%point_count/global_mapping_faces(iface)%overlap_depth
-      do point=1,face_plane;do n=1,ngrad_axis(axis)
-        storage=global_mapping_faces(iface)%local_buffer_indices(:,point)
-        storage(axis)=merge(dc%nxyz_buffer(axis)+n,&
-          dc%nxyz_buffer(axis)+ncore(axis)-n+1,global_mapping_faces(iface)%side<0)
-        do global_point=1,3
-          storage(global_point)=dg_dc_canonical_to_raw_index(storage(global_point),&
-            ncore(global_point),dc%nxyz_buffer(global_point))
-        enddo
-        if(any(storage<mg%is).or.any(storage>mg%ie))cycle
-        do io=info%io_s,info%io_e
-          reference_trace_owned(point,n,io,iface)=&
-            reference_orbitals%rwf(storage(1),storage(2),storage(3),1,io,1,1)
-        enddo
-      enddo;enddo
-    enddo
-  endif
-  call comm_summation(failure_local,failure_global,dc%icomm_tot)
-  if(failure_global>0)stop 'direct DC SIPG: reference core trace allocation failed collectively'
-  call comm_summation(reference_trace_owned,reference_trace_values,size(reference_trace_owned),dc%icomm_frag)
-  do iz=1,local_core_size(3);do iy=1,local_core_size(2);do ix=1,local_core_size(1)
-    storage=core_storage_lo+[ix-1,iy-1,iz-1]
-    do axis=1,3
-      if(storage(axis)/=1.and.storage(axis)/=ncore(axis))cycle
-      iface=2*(axis-1)+merge(1,2,storage(axis)==1)
-      face_plane=global_mapping_faces(iface)%point_count/global_mapping_faces(iface)%overlap_depth
-      trace_point=0
-      do point=1,face_plane
-        plus=global_mapping_faces(iface)%local_buffer_indices(:,point)
-        plus(axis)=dc%nxyz_buffer(axis)+merge(1,ncore(axis),storage(axis)==1)
-        do global_point=1,3
-          plus(global_point)=dg_dc_canonical_to_raw_index(plus(global_point),&
-            ncore(global_point),dc%nxyz_buffer(global_point))
-        enddo
-        if(all(pack(plus,[1,2,3]/=axis)==pack(storage,[1,2,3]/=axis)))then
-          trace_point=point;exit
-        endif
-      enddo
-      if(trace_point==0)then;failure_local=1;cycle;endif
-      do io=info%io_s,merge(info%io_e,info%io_s-1,active_core)
-        core_gradients(ix,iy,iz,io-info%io_s+1,axis)=0d0
-        do n=1,ngrad_axis(axis)
-          if(storage(axis)==1)then
-            core_gradients(ix,iy,iz,io-info%io_s+1,axis)=&
-              core_gradients(ix,iy,iz,io-info%io_s+1,axis)-&
-              low_weights(n,axis)*reference_trace_values(trace_point,n,io,iface)
-          else
-            core_gradients(ix,iy,iz,io-info%io_s+1,axis)=&
-              core_gradients(ix,iy,iz,io-info%io_s+1,axis)+&
-              high_weights(n,axis)*reference_trace_values(trace_point,n,io,iface)
-          endif
-        enddo
-      enddo
-    enddo
-  enddo;enddo;enddo
-  call comm_summation(failure_local,failure_global,dc%icomm_tot)
-  if(failure_global>0)stop 'direct DC SIPG: owner-safe boundary normal assembly failed collectively'
-  maximum_face_points=maxval([(mapping_faces(iface)%point_count,iface=1,6)])
-  minimum_face_points=minval([(mapping_faces(iface)%point_count,iface=1,6)],&
-    mask=[(mapping_faces(iface)%point_count>0,iface=1,6)])
-  maximum_global_points=maxval([(global_mapping_faces(iface)%point_count,iface=1,6)])
-  projector_acceptance_tolerance=sqrt(dg_dc_metric_rank_tolerance)
-  projector_escape_tolerance=projector_acceptance_tolerance*&
-    sqrt(max(1d0,dble(maximum_face_points)*product(system%hgs)))
-  allocate(buffer_face_values(maximum_face_points,size(owned_state_ids),6),&
-    buffer_face_weights(maximum_face_points,6),&
-    global_owned(maximum_global_points,dc%nstate_frag,6),&
-    global_values(maximum_global_points,dc%nstate_frag,6),stat=allocation_status)
-  failure_local=merge(0,1,allocation_status==0)
-  if(failure_local==0)then
-    buffer_face_values=0d0;buffer_face_weights=product(system%hgs);global_owned=0d0
-    do iface=1,6;do point=1,global_mapping_faces(iface)%point_count
-      storage=global_mapping_faces(iface)%local_buffer_indices(:,point)
-      do axis=1,3
-        storage(axis)=dg_dc_canonical_to_raw_index(storage(axis),ncore(axis),dc%nxyz_buffer(axis))
-      enddo
-      if(any(storage<mg%is).or.any(storage>mg%ie))cycle
-      do io=info%io_s,info%io_e
-        global_owned(point,io,iface)=&
-          reference_orbitals%rwf(storage(1),storage(2),storage(3),1,io,1,1)
-      enddo
-    enddo;enddo
-  endif
-  call comm_summation(failure_local,failure_global,dc%icomm_tot)
-  if(failure_global>0)stop 'direct DC SIPG: global buffer face allocation failed collectively'
-  call comm_summation(global_owned,global_values,size(global_owned),dc%icomm_frag)
-  signature_local=0d0
-  if(dc%id_frag==0)signature_local=sum(global_values**2)
-  call comm_summation(signature_local,signature_global,dc%icomm_tot)
-  operator_fingerprint=ieor(operator_fingerprint,transfer(signature_global,operator_fingerprint))
-  if(operator_fingerprint==0_8)operator_fingerprint=1_8
-  do iface=1,6;do point=1,mapping_faces(iface)%point_count
-    global_point=0
-    do n=1,global_mapping_faces(iface)%point_count
-      if(global_mapping_faces(iface)%physical_grid_ids(n)==mapping_faces(iface)%physical_grid_ids(point))then
-        global_point=n;exit
-      endif
-    enddo
-    if(global_point==0)then;failure_local=1;cycle;endif
-    do io=info%io_s,merge(info%io_e,info%io_s-1,active_core)
-      buffer_face_values(point,io-info%io_s+1,iface)=global_values(global_point,io,iface)
-    enddo
-  enddo;enddo
-  call comm_summation(failure_local,failure_global,dc%icomm_tot)
-  if(failure_global>0)stop 'direct DC SIPG: physical-ID buffer face lookup failed collectively'
-  call prepare_dg_dc_buffer_core_projectors(dc%i_frag,dc%ixyz_frag,dc%nxyz_domain_frag,&
-    dc%lg_tot%num,local_core_origin,local_core_size,buffer_depth,projector_generation,operator_fingerprint,&
-    core_physical_grid_ids,core_values,core_gradients,owned_state_ids,dc%nstate_frag,&
-    buffer_face_values,buffer_face_weights,dg_dc_metric_rank_tolerance,&
-    min(dc%nstate_frag,minimum_face_points),projector_acceptance_tolerance,&
-    projector_escape_tolerance,projector_acceptance_tolerance,&
-    dc%icomm_tot,local_projected_faces,ok,message)
-  if(.not.ok)stop 'direct DC SIPG: validated buffer/core projector preparation failed'
-  allocate(global_neighbor_owned(maximum_global_points,dc%nstate_frag,6),&
-    global_neighbor_values(maximum_global_points,dc%nstate_frag,6),&
-    global_normal_owned(maximum_global_points,dc%nstate_frag,6),&
-    global_normal_values(maximum_global_points,dc%nstate_frag,6),stat=allocation_status)
-  failure_local=merge(0,1,allocation_status==0)
-  if(failure_local==0)then
-    global_neighbor_owned=0d0;global_normal_owned=0d0
-    if(active_core.and.info%io_s==1)then
-      do iface=1,6;do point=1,local_projected_faces(iface)%point_count
-        global_point=0
-        do n=1,global_mapping_faces(iface)%point_count
-          if(global_mapping_faces(iface)%physical_grid_ids(n)==&
-             local_projected_faces(iface)%physical_grid_ids(point))then
-            global_point=n;exit
-          endif
-        enddo
-        if(global_point==0)then;failure_local=1;cycle;endif
-        global_neighbor_owned(global_point,:,iface)=local_projected_faces(iface)%neighbor_core_values(point,:)
-        global_normal_owned(global_point,:,iface)=local_projected_faces(iface)%neighbor_core_normals(point,:)
-      enddo;enddo
-    endif
-  endif
-  call comm_summation(failure_local,failure_global,dc%icomm_tot)
-  if(failure_global>0)stop 'direct DC SIPG: global neighbor face allocation/mapping failed'
-  call comm_summation(global_neighbor_owned,global_neighbor_values,size(global_neighbor_owned),dc%icomm_frag)
-  call comm_summation(global_normal_owned,global_normal_values,size(global_normal_owned),dc%icomm_frag)
-  if(allocated(direct_dg_frozen_faces))deallocate(direct_dg_frozen_faces)
-  allocate(direct_dg_frozen_faces(6),stat=allocation_status)
-  failure_local=merge(0,1,allocation_status==0)
-  if(failure_local==0)then
-    do iface=1,6
-      direct_dg_frozen_faces(iface)=global_mapping_faces(iface)
-      allocate(direct_dg_frozen_faces(iface)%neighbor_core_values(&
-        global_mapping_faces(iface)%point_count,dc%nstate_frag),&
-        direct_dg_frozen_faces(iface)%neighbor_core_normals(&
-        global_mapping_faces(iface)%point_count,dc%nstate_frag),&
-        direct_dg_frozen_faces(iface)%local_buffer_values(&
-        global_mapping_faces(iface)%point_count,dc%nstate_frag),stat=allocation_status)
-      if(allocation_status/=0)then;failure_local=1;exit;endif
-      direct_dg_frozen_faces(iface)%neighbor_core_values=&
-        global_neighbor_values(1:global_mapping_faces(iface)%point_count,:,iface)
-      direct_dg_frozen_faces(iface)%neighbor_core_normals=&
-        global_normal_values(1:global_mapping_faces(iface)%point_count,:,iface)
-      direct_dg_frozen_faces(iface)%local_buffer_values=&
-        global_values(1:global_mapping_faces(iface)%point_count,:,iface)
-    enddo
-  endif
-  call comm_summation(failure_local,failure_global,dc%icomm_tot)
-  if(failure_global>0)stop 'direct DC SIPG: global frozen face cache allocation failed'
-  if(allocated(direct_dg_frozen_projectors))deallocate(direct_dg_frozen_projectors)
-  direct_dg_projector_retained_rank=0
-  direct_dg_projector_required_rank=0
-  direct_dg_projector_projection_residual=huge(1d0)
-  direct_dg_projector_escape_norm=huge(1d0)
-  direct_dg_projector_residual_limit=0d0
-  direct_dg_projector_escape_limit=0d0
-  direct_dg_face_pair_balance=0d0
-  allocate(direct_dg_frozen_projectors(6),stat=allocation_status)
-  failure_local=merge(0,1,allocation_status==0)
-  do iface=1,6
-    if(failure_local/=0)exit
-    allocate(direct_dg_frozen_projectors(iface)%spin(1),stat=allocation_status)
-    if(allocation_status/=0)then;failure_local=1;exit;endif
-    if(direct_dg_frozen_faces(iface)%point_count==0)cycle
-    face_plane=direct_dg_frozen_faces(iface)%point_count/direct_dg_frozen_faces(iface)%overlap_depth
-    allocate(global_coefficients(dc%nstate_frag,dc%nstate_frag),&
-      global_reconstructed(direct_dg_frozen_faces(iface)%point_count,dc%nstate_frag),&
-      reverse_coefficients(dc%nstate_frag,dc%nstate_frag),&
-      reverse_reconstructed(direct_dg_frozen_faces(iface)%point_count,dc%nstate_frag),&
-      stat=allocation_status)
-    if(allocation_status/=0)then;failure_local=1;exit;endif
-    call build_dg_buffer_window_projector(direct_dg_frozen_faces(iface)%neighbor_core_values,&
-      direct_dg_frozen_faces(iface)%local_buffer_values,&
-      [(product(system%hgs),n=1,direct_dg_frozen_faces(iface)%point_count)],&
-      dg_dc_metric_rank_tolerance,global_coefficients,global_reconstructed,&
-      global_diagnostics,ok,message)
-    call build_dg_buffer_window_projector(direct_dg_frozen_faces(iface)%local_buffer_values,&
-      direct_dg_frozen_faces(iface)%neighbor_core_values,&
-      [(product(system%hgs),n=1,direct_dg_frozen_faces(iface)%point_count)],&
-      dg_dc_metric_rank_tolerance,reverse_coefficients,reverse_reconstructed,&
-      reverse_diagnostics,reverse_ok,reverse_message)
-    if(.not.ok.or..not.reverse_ok.or.&
-      min(global_diagnostics%retained_rank,reverse_diagnostics%retained_rank)<&
-        min(dc%nstate_frag,direct_dg_frozen_faces(iface)%point_count).or.&
-      max(global_diagnostics%projection_residual,reverse_diagnostics%projection_residual)>&
-        projector_acceptance_tolerance.or.&
-      max(global_diagnostics%escape_norm,reverse_diagnostics%escape_norm)>&
-        projector_acceptance_tolerance*sqrt(max(1d0,dble(direct_dg_frozen_faces(iface)%point_count)*&
-        product(system%hgs))).or.&
-      abs(global_diagnostics%projection_residual-reverse_diagnostics%projection_residual)>&
-        projector_acceptance_tolerance)then
-      failure_local=1
-      deallocate(global_coefficients,global_reconstructed,reverse_coefficients,reverse_reconstructed)
-      cycle
-    endif
-    direct_dg_projector_retained_rank(iface)=min(global_diagnostics%retained_rank, &
-      reverse_diagnostics%retained_rank)
-    direct_dg_projector_required_rank(iface)=min(dc%nstate_frag, &
-      direct_dg_frozen_faces(iface)%point_count)
-    direct_dg_projector_projection_residual(iface)=max(global_diagnostics%projection_residual, &
-      reverse_diagnostics%projection_residual)
-    direct_dg_projector_escape_norm(iface)=max(global_diagnostics%escape_norm,reverse_diagnostics%escape_norm)
-    direct_dg_projector_residual_limit(iface)=projector_acceptance_tolerance
-    direct_dg_projector_escape_limit(iface)=projector_acceptance_tolerance* &
-      sqrt(max(1d0,dble(direct_dg_frozen_faces(iface)%point_count)*product(system%hgs)))
-    axis=direct_dg_frozen_faces(iface)%axis
-    direct_dg_face_pair_balance(axis)=max(direct_dg_face_pair_balance(axis), &
-      abs(global_diagnostics%projection_residual-reverse_diagnostics%projection_residual))
-    call freeze_dg_dc_face_projector(direct_dg_frozen_faces(iface)%neighbor_core_values,&
-      direct_dg_frozen_faces(iface)%neighbor_core_values(1:face_plane,:),&
-      direct_dg_frozen_faces(iface)%neighbor_core_normals(1:face_plane,:),&
-      [(product(system%hgs),n=1,direct_dg_frozen_faces(iface)%point_count)],&
-      dg_dc_metric_rank_tolerance,projector_generation,operator_fingerprint,&
-      direct_dg_frozen_projectors(iface)%spin(1),ok,message)
-    if(.not.ok)failure_local=1
-    deallocate(global_coefficients,global_reconstructed,reverse_coefficients,reverse_reconstructed)
-  enddo
-  call comm_summation(failure_local,failure_global,dc%icomm_tot)
-  if(failure_global>0)stop 'direct DC SIPG: factorized face projector freeze failed collectively'
-  direct_dg_frozen_generation=projector_generation
-  direct_dg_frozen_fingerprint=operator_fingerprint
-end subroutine prepare_dc_direct_dg_projectors_rwf
-
-subroutine apply_dc_direct_dg_hpsi_rwf(mg,system,info,stencil,dc,psi,hpsi,interface_scale,&
-    frozen_projector_generation,frozen_operator_fingerprint)
-  use structures
-  use communication,only:comm_summation
-  use dg_dc_ground_state_adapter,only:build_dg_dc_one_sided_derivative_weights
-  use dg_dc_direct_sipg,only:apply_dg_dc_frozen_projected_face_plane
-  use salmon_global,only:dg_dc_gs_sipg_penalty_factor
-  implicit none
-  type(s_rgrid),intent(in)::mg
-  type(s_dft_system),intent(in)::system
-  type(s_parallel_info),intent(in)::info
-  type(s_stencil),intent(in)::stencil
-  type(s_dcdft),intent(in)::dc
-  type(s_orbital),intent(in)::psi
-  type(s_orbital),intent(inout)::hpsi
-  real(8),optional,intent(in)::interface_scale
-  integer,optional,intent(in)::frozen_projector_generation
-  integer(8),optional,intent(in)::frozen_operator_fingerprint
-  integer::ncore(3),iface,axis,side,nweight,n,io,point,maximum_face_points,face_plane
-  integer::maximum_plane_points,maximum_weight
-  integer::il(3),ilift(3),storage(3),allocation_status,component
-  integer::failure_local,failure_global
-  real(8)::cell_volume,face_weight,action_scale,local_face_norm(6),global_face_norm(6)
-  real(8),allocatable::derivative_weights(:),owned_buffer_face_values(:,:,:),global_buffer_values(:,:,:)
-  real(8),allocatable::core_trace_owned(:,:,:,:),core_trace_values(:,:,:,:)
-  real(8),allocatable::face_value_actions(:,:),face_normal_lifts(:,:,:)
-  logical::ok
-  character(256)::message
-  action_scale=1d0;if(present(interface_scale))action_scale=interface_scale
-  local_face_norm=0d0
-  failure_local=0
-  if(.not.allocated(psi%rwf).or..not.allocated(hpsi%rwf).or.dc%id_frag<0)return
-  if(info%ik_s /= 1.or.info%ik_e/=1.or.info%im_s /= 1.or.info%im_e/=1)failure_local=1
-  if(info%io_s<1.or.info%io_e>dc%nstate_frag.or.info%io_e<info%io_s)failure_local=1
-  if(info%io_s<lbound(psi%rwf,5).or.info%io_e>ubound(psi%rwf,5))failure_local=1 ! psi orbital range mismatch
-  if(info%io_s<lbound(hpsi%rwf,5).or.info%io_e>ubound(hpsi%rwf,5))failure_local=1 ! hpsi orbital range mismatch
-  if(system%nspin/=1.or..not.stencil%if_orthogonal.or.dc%optimized_fragment_geometry)&
-    failure_local=1 ! spin range mismatch
-  if(.not.present(frozen_projector_generation).or..not.present(frozen_operator_fingerprint))then
-    failure_local=1
-  else if(frozen_projector_generation/=direct_dg_frozen_generation.or.&
-      frozen_operator_fingerprint/=direct_dg_frozen_fingerprint)then
-    failure_local=1
-  endif
-  if(.not.allocated(direct_dg_frozen_faces).or..not.allocated(direct_dg_frozen_projectors))failure_local=1
-  call comm_summation(failure_local,failure_global,dc%icomm_tot)
-  if(failure_global>0)stop 'direct DC SIPG: invalid frozen six-face action context collectively'
-  ncore=dc%nxyz_domain_frag(:,dc%i_frag);cell_volume=product(system%hgs)
-  maximum_face_points=maxval([(direct_dg_frozen_faces(iface)%point_count,iface=1,6)])
-  maximum_plane_points=maxval([(direct_dg_frozen_faces(iface)%point_count/&
-    direct_dg_frozen_faces(iface)%overlap_depth,iface=1,6)])
-  maximum_weight=min(5,maxval(ncore))
-  allocate(owned_buffer_face_values(maximum_face_points,dc%nstate_frag,6),&
-    global_buffer_values(maximum_face_points,dc%nstate_frag,6),&
-    core_trace_owned(maximum_plane_points,maximum_weight,dc%nstate_frag,6),&
-    core_trace_values(maximum_plane_points,maximum_weight,dc%nstate_frag,6),stat=allocation_status)
-  failure_local=merge(0,1,allocation_status==0)
-  if(failure_local==0)then
-    owned_buffer_face_values=0d0;core_trace_owned=0d0
-    do iface=1,6;do point=1,direct_dg_frozen_faces(iface)%point_count
-      storage=direct_dg_frozen_faces(iface)%local_buffer_indices(:,point)
-      do axis=1,3
-        storage(axis)=dg_dc_canonical_to_raw_index(storage(axis),ncore(axis),dc%nxyz_buffer(axis))
-      enddo
-      if(any(storage<mg%is).or.any(storage>mg%ie))cycle
-      do io=info%io_s,info%io_e
-        owned_buffer_face_values(point,io,iface)=&
-          psi%rwf(storage(1),storage(2),storage(3),1,io,1,1)
-      enddo
-    enddo;enddo
-    do iface=1,6
-      axis=direct_dg_frozen_faces(iface)%axis;side=direct_dg_frozen_faces(iface)%side
-      face_plane=direct_dg_frozen_faces(iface)%point_count/direct_dg_frozen_faces(iface)%overlap_depth
-      nweight=min(5,ncore(axis))
-      do point=1,face_plane;do n=1,nweight
-        storage=direct_dg_frozen_faces(iface)%local_buffer_indices(:,point)
-        storage(axis)=merge(dc%nxyz_buffer(axis)+n,&
-          dc%nxyz_buffer(axis)+ncore(axis)-n+1,side<0)
-        do component=1,3
-          storage(component)=dg_dc_canonical_to_raw_index(storage(component),&
-            ncore(component),dc%nxyz_buffer(component))
-        enddo
-        if(any(storage<mg%is).or.any(storage>mg%ie))cycle
-        do io=info%io_s,info%io_e
-          core_trace_owned(point,n,io,iface)=psi%rwf(storage(1),storage(2),storage(3),1,io,1,1)
-        enddo
-      enddo;enddo
-    enddo
-  endif
-  call comm_summation(failure_local,failure_global,dc%icomm_tot)
-  if(failure_global>0)stop 'direct DC SIPG: current projected-face workspace failed collectively'
-  call comm_summation(owned_buffer_face_values,global_buffer_values,size(owned_buffer_face_values),&
-    dc%icomm_frag)
-  call comm_summation(core_trace_owned,core_trace_values,size(core_trace_owned),dc%icomm_frag)
-  do iface=1,6
-    direct_dg_frozen_faces(iface)%local_buffer_values=&
-      global_buffer_values(1:direct_dg_frozen_faces(iface)%point_count,:,iface)
-  enddo
-  do iface=1,6
-    if(failure_local/=0.or.direct_dg_frozen_faces(iface)%point_count==0)cycle
-    axis=direct_dg_frozen_faces(iface)%axis;side=direct_dg_frozen_faces(iface)%side
-    face_plane=direct_dg_frozen_faces(iface)%point_count/direct_dg_frozen_faces(iface)%overlap_depth
-    nweight=min(5,ncore(axis));face_weight=cell_volume/system%hgs(axis)
-    allocate(derivative_weights(nweight),&
-      face_value_actions(face_plane,dc%nstate_frag),&
-      face_normal_lifts(face_plane,nweight,dc%nstate_frag),&
-      stat=allocation_status)
-    if(allocation_status/=0)then;failure_local=1;cycle;endif
-    call build_dg_dc_one_sided_derivative_weights(system%hgs(axis),side,derivative_weights,ok,message)
-    if(ok)call apply_dg_dc_frozen_projected_face_plane(&
-      direct_dg_frozen_projectors(iface)%spin(1),&
-      direct_dg_frozen_faces(iface)%local_buffer_values,&
-      core_trace_values(1:face_plane,1:nweight,:,iface),derivative_weights,&
-      frozen_projector_generation,frozen_operator_fingerprint,side,system%hgs(axis),&
-      face_weight,dg_dc_gs_sipg_penalty_factor,face_value_actions,face_normal_lifts,ok,message)
-    if(.not.ok)then
-      failure_local=1
-    else
-      if(dc%id_frag==0)local_face_norm(iface)=sum(face_value_actions**2)+sum(face_normal_lifts**2)
-      do point=1,face_plane
-        il=direct_dg_frozen_faces(iface)%local_buffer_indices(:,point)
-        il(axis)=merge(dc%nxyz_buffer(axis)+1,dc%nxyz_buffer(axis)+ncore(axis),side<0)
-        do n=1,3
-          il(n)=dg_dc_canonical_to_raw_index(il(n),ncore(n),dc%nxyz_buffer(n))
-        enddo
-        do io=info%io_s,info%io_e
-          if(all(il>=mg%is).and.all(il<=mg%ie))&
-            hpsi%rwf(il(1),il(2),il(3),1,io,1,1)=hpsi%rwf(il(1),il(2),il(3),1,io,1,1)+&
-              action_scale*face_value_actions(point,io)/cell_volume
-          do n=1,nweight
-            ilift=il;ilift(axis)=merge(n,ncore(axis)-n+1,side<0)
-            if(all(ilift>=mg%is).and.all(ilift<=mg%ie))&
-              hpsi%rwf(ilift(1),ilift(2),ilift(3),1,io,1,1)=&
-                hpsi%rwf(ilift(1),ilift(2),ilift(3),1,io,1,1)+&
-                action_scale*face_normal_lifts(point,n,io)/cell_volume
-          enddo
-        enddo
-      enddo
-    endif
-    deallocate(derivative_weights,face_value_actions,face_normal_lifts)
-  enddo
-  call comm_summation(failure_local,failure_global,dc%icomm_tot)
-  if(failure_global>0)stop 'direct DC SIPG: projected six-face action failed collectively'
-  call comm_summation(local_face_norm,global_face_norm,6,dc%icomm_tot)
-  direct_dg_face_action_norm=sqrt(max(0d0,global_face_norm))
-end subroutine apply_dc_direct_dg_hpsi_rwf
-
-#if 0
-! Historical raw same-index halo implementation retained only in the pre-Task-3
-! investigation diff. It is deliberately excluded from every build and route.
-subroutine apply_dc_direct_dg_hpsi_rwf_legacy_unreachable(mg,system,info,stencil,dc,psi,hpsi,interface_scale,&
-    frozen_projector_generation,frozen_operator_fingerprint)
-  use structures
-  use communication, only: comm_summation
-  use dc_fragment_geometry, only: get_fragment_domain
-  use dg_dc_ground_state_adapter, only: build_dg_dc_one_sided_derivative_weights
-  use dg_dc_direct_sipg, only: evaluate_dg_dc_direct_local_face,reconstruct_dg_dc_frozen_face
-  use salmon_global, only: dg_dc_gs_sipg_penalty_factor
-  implicit none
-  type(s_rgrid),intent(in)::mg
-  type(s_dft_system),intent(in)::system
-  type(s_parallel_info),intent(in)::info
-  type(s_stencil),intent(in)::stencil
-  type(s_dcdft),intent(in)::dc
-  type(s_orbital),intent(in)::psi
-  type(s_orbital),intent(inout)::hpsi
-  real(8),optional,intent(in)::interface_scale
-  integer,optional,intent(in)::frozen_projector_generation
-  integer(8),optional,intent(in)::frozen_operator_fingerprint
-  type(halo_cg_info),pointer :: halo(:)
-  integer :: ncore(3),stencil_radius(3),npg_base,n_halo,i_halo
-  integer :: l(3),lo(3),hi(3),axis,side,nweight,n,ix,iy,iz,io,ispin,point,npoint
-  integer :: il(3),ineighbor(3),ilift(3)
-  integer :: info_sipg,allocation_status
-  integer :: failure_local,failure_global
-  real(8) :: cell_volume,face_weight,action_scale
-  real(8),allocatable :: derivative_weights(:)
-  real(8),allocatable :: buf_send(:,:,:,:,:),buf_recv(:,:,:,:,:)
-  real(8),allocatable :: buffer_matrix(:,:),reconstructed_neighbor_value(:,:)
-  real(8),allocatable :: reconstructed_neighbor_normal(:,:)
-  complex(8) :: local_value,local_normal,neighbor_value,neighbor_normal,face_value_action,face_normal_action
-  logical :: owns_target_face,ok
-  character(256) :: message
-
-  if(.not.allocated(psi%rwf) .or. .not.allocated(hpsi%rwf) .or. dc%id_frag<0)return
-  action_scale=1d0
-  if(present(interface_scale))action_scale=interface_scale
-  failure_local=0
-  if(info%ik_s /= 1 .or. info%ik_e /= 1) failure_local=1 ! psi orbital range mismatch: k layout
-  if(info%im_s /= 1 .or. info%im_e /= 1) failure_local=1 ! psi orbital range mismatch: m layout
-  if(info%io_e<info%io_s .or. info%io_s<lbound(psi%rwf,5) .or. &
-     info%io_e>ubound(psi%rwf,5)) failure_local=1 ! psi orbital range mismatch
-  if(info%io_e<info%io_s .or. info%io_s<lbound(hpsi%rwf,5) .or. &
-     info%io_e>ubound(hpsi%rwf,5)) failure_local=1 ! hpsi orbital range mismatch
-  if(system%nspin>ubound(psi%rwf,4) .or. system%nspin>ubound(hpsi%rwf,4)) &
-    failure_local=1 ! spin range mismatch
-  if(.not.stencil%if_orthogonal .or. dc%optimized_fragment_geometry .or. &
-     mod(dc%isize_tot,dc%n_frag)/=0) failure_local=1
-  if(.not.present(frozen_projector_generation).or..not.present(frozen_operator_fingerprint))then
-    failure_local=1
-  else if(frozen_projector_generation/=direct_dg_frozen_generation.or.&
-          frozen_operator_fingerprint/=direct_dg_frozen_fingerprint)then
-    failure_local=1
-  endif
-  call comm_summation(failure_local,failure_global,dc%icomm_tot)
-  if(failure_global>0) stop 'direct DC SIPG: unsupported decomposition or orbital bounds collectively'
-  call get_fragment_domain(dc,dc%i_frag,ncore)
-  do n=1,3
-    stencil_radius(n)=active_laplacian_radius(stencil,n)
-  end do
-  npg_base=dc%isize_tot/dc%n_frag
-  call prepare_dc_lcfo_flux_halo_cache(dc,ncore,stencil_radius,npg_base)
-  n_halo=flux_halo_cache_n
-  halo=>flux_halo_cache
-  cell_volume=product(system%hgs)
-  do i_halo=1,n_halo
-    l=halo(i_halo)%length
-    axis=halo(i_halo)%axis
-    side=-halo(i_halo)%dvec(axis)
-    nweight=min(5,ncore(axis),l(axis))
-    npoint=product(l)
-    failure_local=0
-    allocate(buf_send(l(1),l(2),l(3),system%nspin,dc%nstate_frag),stat=allocation_status)
-    if(allocation_status/=0)failure_local=1
-    if(failure_local==0)allocate(buf_recv,mold=buf_send,stat=allocation_status)
-    if(allocation_status/=0)failure_local=1
-    if(failure_local==0)allocate(derivative_weights(nweight),stat=allocation_status)
-    if(allocation_status/=0)failure_local=1
-    if(failure_local==0)allocate(buffer_matrix(npoint,dc%nstate_frag),&
-      reconstructed_neighbor_value(npoint,dc%nstate_frag),&
-      reconstructed_neighbor_normal(npoint,dc%nstate_frag),stat=allocation_status)
-    if(allocation_status/=0)failure_local=1
-    if(failure_local==0)then
-      call build_dg_dc_one_sided_derivative_weights(system%hgs(axis),side,derivative_weights,ok,message)
-      if(.not.ok)failure_local=1
-    end if
-    call comm_summation(failure_local,failure_global,dc%icomm_tot)
-    if(failure_global>0) stop 'direct DC SIPG: halo workspace preflight failed collectively'
-    buf_send=0d0
-    buf_recv=0d0
-    lo=max([1,1,1],[lbound(psi%rwf,1),lbound(psi%rwf,2),lbound(psi%rwf,3)]- &
-      halo(i_halo)%dsp_send)
-    hi=min(l,[ubound(psi%rwf,1),ubound(psi%rwf,2),ubound(psi%rwf,3)]- &
-      halo(i_halo)%dsp_send)
-    if(.not.any(lo>hi))then
-!$omp parallel do collapse(3) private(iz,iy,ix,il,io,ispin) schedule(static)
-      do iz=lo(3),hi(3); do iy=lo(2),hi(2); do ix=lo(1),hi(1)
-        il=halo(i_halo)%dsp_send+[ix,iy,iz]
-        do io=info%io_s,info%io_e
-          do ispin=1,system%nspin
-            buf_send(ix,iy,iz,ispin,io)=psi%rwf(il(1),il(2),il(3),ispin,io,1,1)
-          end do
-        end do
-      end do; end do; end do
-!$omp end parallel do
-    end if
-    owns_target_face=owns_flux_target_face(mg,ncore,halo(i_halo)%dvec,stencil_radius)
-    call comm_summation(buf_send,buf_recv,size(buf_send),dc%icomm_frag)
-    if(.not.owns_target_face)then
-      failure_local=0
-      call comm_summation(failure_local,failure_global,dc%icomm_tot)
-      deallocate(derivative_weights,buf_send,buf_recv,buffer_matrix,&
-        reconstructed_neighbor_value,reconstructed_neighbor_normal)
-      cycle
-    end if
-    do ispin=1,system%nspin
-      point=0
-      do iz=1,l(3);do iy=1,l(2);do ix=1,l(1)
-        point=point+1
-        buffer_matrix(point,:)=buf_recv(ix,iy,iz,ispin,:)
-      enddo;enddo;enddo
-      call reconstruct_dg_dc_frozen_face(direct_dg_frozen_projectors(i_halo)%spin(ispin),&
-        buffer_matrix,frozen_projector_generation,frozen_operator_fingerprint,&
-        reconstructed_neighbor_value,reconstructed_neighbor_normal,ok,message)
-      failure_local=merge(0,1,ok)
-      call comm_summation(failure_local,failure_global,dc%icomm_tot)
-      if(failure_global>0)stop 'direct DC SIPG: frozen projected trace reconstruction failed'
-      point=0
-      do iz=1,l(3);do iy=1,l(2);do ix=1,l(1)
-        point=point+1
-        buf_send(ix,iy,iz,ispin,:)=reconstructed_neighbor_value(point,:)
-        buf_recv(ix,iy,iz,ispin,:)=reconstructed_neighbor_normal(point,:)
-      enddo;enddo;enddo
-    enddo
-
-    face_weight=cell_volume/system%hgs(axis)
-    lo=1
-    hi=l
-    do n=1,3
-      if(n/=axis)then
-        lo(n)=max(lo(n),mg%is(n))
-        hi(n)=min(hi(n),mg%ie(n))
-      end if
-    end do
-    lo(axis)=1
-    hi(axis)=1
-    failure_local=0
-!$omp parallel do collapse(3) private(iz,iy,ix,il,ineighbor,ilift,io,ispin,n,local_value, &
-!$omp& local_normal,neighbor_value,neighbor_normal,face_value_action,face_normal_action,info_sipg) &
-!$omp& reduction(max:failure_local) schedule(static)
-    do iz=lo(3),hi(3); do iy=lo(2),hi(2); do ix=lo(1),hi(1)
-      il=[ix,iy,iz]
-      il(axis)=merge(1,ncore(axis),side<0)
-      ineighbor=[ix,iy,iz]
-      ineighbor(axis)=merge(l(axis),1,side<0)
-      do io=info%io_s,info%io_e
-        do ispin=1,system%nspin
-          local_value=cmplx(psi%rwf(il(1),il(2),il(3),ispin,io,1,1),0d0,8)
-          neighbor_value=cmplx(buf_send(ineighbor(1),ineighbor(2),ineighbor(3),ispin,io),0d0,8)
-          local_normal=(0d0,0d0)
-          neighbor_normal=cmplx(buf_recv(ineighbor(1),ineighbor(2),ineighbor(3),ispin,io),0d0,8)
-          do n=1,nweight
-            ilift=il
-            ilift(axis)=merge(n,ncore(axis)-n+1,side<0)
-            local_normal=local_normal+derivative_weights(n)* &
-              psi%rwf(ilift(1),ilift(2),ilift(3),ispin,io,1,1)
-          end do
-          call evaluate_dg_dc_direct_local_face(local_value,local_normal,neighbor_value,neighbor_normal, &
-            side,system%hgs(axis),face_weight,dg_dc_gs_sipg_penalty_factor,1d0,face_value_action, &
-            face_normal_action,info_sipg)
-          if(info_sipg/=0)failure_local=1
-          face_value_action=action_scale*face_value_action/cell_volume
-          face_normal_action=action_scale*face_normal_action/cell_volume
-          hpsi%rwf(il(1),il(2),il(3),ispin,io,1,1)= &
-            hpsi%rwf(il(1),il(2),il(3),ispin,io,1,1)+real(face_value_action,8)
-          do n=1,nweight
-            ilift=il
-            ilift(axis)=merge(n,ncore(axis)-n+1,side<0)
-            hpsi%rwf(ilift(1),ilift(2),ilift(3),ispin,io,1,1)= &
-              hpsi%rwf(ilift(1),ilift(2),ilift(3),ispin,io,1,1)+ &
-              derivative_weights(n)*real(face_normal_action,8)
-          end do
-        end do
-      end do
-    end do; end do; end do
-!$omp end parallel do
-    call comm_summation(failure_local,failure_global,dc%icomm_tot)
-    if(failure_global>0) stop 'direct DC SIPG: face evaluation failed collectively'
-    deallocate(derivative_weights,buf_send,buf_recv,buffer_matrix,&
-      reconstructed_neighbor_value,reconstructed_neighbor_normal)
-  end do
-end subroutine apply_dc_direct_dg_hpsi_rwf_legacy_unreachable
-#endif
 
 subroutine apply_dc_lcfo_flux_hpsi_rwf(mg,system,info,stencil,dc,psi,hpsi)
   use structures

@@ -29,7 +29,38 @@ module dg_overlapping_wannier_construction
   public::verify_dg_fragment_wannier_streaming_closure
   public::build_dg_core_owned_occupied_subspace
   public::verify_dg_uniform_fragment_target_rank
+  public::assign_dg_overlapping_wannier_occupations
 contains
+  subroutine assign_dg_overlapping_wannier_occupations(electron_count,occupations,ok,message)
+    real(real64),intent(in)::electron_count
+    real(real64),intent(out)::occupations(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::fully_occupied
+    real(real64)::remainder
+
+    occupations=0d0
+    ok=size(occupations)>0.and.electron_count>=0d0.and.ieee_is_finite(electron_count).and.&
+      electron_count<=2d0*real(size(occupations),real64)+10d0*epsilon(1d0)
+    if(.not.ok)then
+      message='overlapping-Wannier: insufficient global bands for electron count'
+      return
+    endif
+    fully_occupied=min(size(occupations),int(electron_count/2d0))
+    if(fully_occupied>0)occupations(1:fully_occupied)=2d0
+    remainder=electron_count-2d0*real(fully_occupied,real64)
+    if(remainder>10d0*epsilon(1d0).and.fully_occupied<size(occupations))&
+      occupations(fully_occupied+1)=remainder
+    ok=all(occupations>=0d0).and.all(occupations<=2d0).and.&
+      abs(sum(occupations)-electron_count)<=10d0*epsilon(1d0)*max(1d0,electron_count)
+    if(ok)then
+      message=''
+    else
+      occupations=0d0
+      message='overlapping-Wannier: invalid global occupations'
+    endif
+  end subroutine
+
   subroutine verify_dg_uniform_fragment_target_rank(comm,local_target_rank,ok,message)
     integer,intent(in)::comm,local_target_rank
     logical,intent(out)::ok

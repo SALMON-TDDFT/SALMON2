@@ -11,11 +11,7 @@ set(SOURCES
     dg_overlapping_wannier_density.f90
     dg_overlapping_wannier_scf.f90
     dg_overlapping_wannier_checkpoint.f90
-    dg_dc_handoff.f90
   dg_dc_buffer_core_faces.f90
-  dg_dc_ground_state.f90
-  dg_dc_ground_state_adapter.f90
-  dg_dc_local_basis_ground_state.f90
     dg_wpw_lda_hartree.f90
     dg_wannier_pw_scf.f90
     dg_wpw_matrix_free_scf.f90

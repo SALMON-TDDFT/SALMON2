@@ -53,24 +53,13 @@ use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_pl
 use noncollinear_module, only: calc_magnetization
 use dcdft
 use dcdft_soi
-use salmon_global, only: yn_dg_dc_local_periodic
-use dg_dc_handoff, only: dg_dc_handoff_runtime, evaluate_dg_dc_handoff, &
-  preserve_dg_dc_density_potential, mark_dg_dc_mixing_discarded, &
-  preserve_dg_dc_fragment_orbitals,restore_dg_dc_fragment_orbitals, &
-  initialize_dg_dc_direct_continuation,evaluate_dg_dc_direct_continuation
-use Conjugate_Gradient, only: apply_dc_direct_dg_hpsi_rwf,direct_dg_projector_retained_rank, &
-  direct_dg_projector_required_rank, &
-  direct_dg_projector_projection_residual,direct_dg_projector_escape_norm, &
-  direct_dg_projector_residual_limit,direct_dg_projector_escape_limit, &
-  direct_dg_face_action_norm,direct_dg_face_pair_balance
-use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 implicit none
 integer :: ix,iy,iz,ik,is
 integer :: ilevel_print !=3:print-all
                         !=2:print-only energy & convergence
                         !=1:print-minimum
                         !=0:no-print
-integer :: iter,Miter,iob,p1,p2,p5,dg_handoff_count
+integer :: iter,Miter,iob,p1,p2,p5
 real(8) :: sum1
 real(8) :: rNebox1,rNebox2
 
@@ -100,15 +89,8 @@ type(s_dcdft),optional :: dc
 logical :: rion_update, flag_conv
 integer :: i,j, icnt_conv_nomix
 logical :: is_checkpoint_iter, is_shutdown_time
-logical :: dg_handoff_accept,dg_was_accepted,dg_continuation_advance,dg_continuation_rollback
-logical :: dg_continuation_complete
-character(256) :: dg_handoff_message
-real(8), allocatable :: dg_handoff_density(:),dg_handoff_potential(:,:)
-real(8),allocatable::dg_handoff_density_spin(:,:),dg_handoff_hartree(:),dg_handoff_xc(:,:)
-integer(8), allocatable :: dg_handoff_owner(:)
 type(s_scalar) :: rho_old,Vlocal_old
 real(8) :: rNe
-real(8) :: dg_unmixed_density_residual,dg_unmixed_local_sum,dg_unmixed_global_sum
 
 real(8),allocatable :: esp_old(:,:,:)
 real(8) :: ene_gap, magnetization(3)
@@ -125,8 +107,7 @@ if(nscf_init_mix_zero.gt.1)then
    DFT_NoMix_Iteration : do iter=1,nscf_init_mix_zero
 
       if(yn_jm=='n') rion_update = check_rion_update() .or. (iter == 1)
-      call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local, &
-        iter,nscf_init_no_diagonal,dc,dg_dc_handoff_runtime%interface_scale)
+      call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local,iter,nscf_init_no_diagonal,dc)
       call timer_begin(LOG_CALC_TOTAL_ENERGY)
       call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
       select case(iperiodic)
@@ -168,10 +149,8 @@ sum1=1d9
 
 !DFT_Iteration : do iter=1,nscf
 DFT_Iteration : do iter=Miter+1,nscf
-   dg_unmixed_density_residual=huge(1d0)
 
-   if( sum1 < threshold .and. &
-       (yn_dg_dc_local_periodic/='y' .or. dg_dc_handoff_runtime%direct_ground_state_complete) ) then
+   if( sum1 < threshold ) then
       flag_conv = .true.
       if( ilevel_print.ge.3 .and. comm_is_root(nproc_id_global)) then
          write(*,'(a,i6,a,e15.8)') "  #GS converged at",iter, "  :",sum1
@@ -195,10 +174,7 @@ DFT_Iteration : do iter=Miter+1,nscf
          call ne2mu(energy,system,ilevel_print)
       end if
    end if
-   call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local, &
-     miter,nscf_init_no_diagonal,dc,dg_dc_handoff_runtime%interface_scale)
-   if(yn_dg_dc_local_periodic=='y' .and. dg_dc_handoff_runtime%interface_scale>0d0) &
-     dg_dc_handoff_runtime%direct_dg_solve_count=dg_dc_handoff_runtime%direct_dg_solve_count+1
+   call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local,miter,nscf_init_no_diagonal,dc)
    if(calc_mode/='DFT_BAND' .and. yn_dc=='n') then
      call copy_density(Miter,system%nspin,mg,rho_s,mixing)
      call timer_begin(LOG_CALC_RHO)
@@ -227,23 +203,6 @@ DFT_Iteration : do iter=Miter+1,nscf
      else
        call calc_rho_total_dcdft(system%nspin,lg,mg,info,rho_s,dc)
      end if
-     if(yn_dg_dc_local_periodic=='y' .and. dg_dc_handoff_runtime%continuation_initialized .and. &
-        dg_dc_handoff_runtime%interface_scale>=1d0 .and. &
-        dg_dc_handoff_runtime%density_potential_preserved)then
-       dg_unmixed_local_sum=0d0
-       i=0
-       do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
-       do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
-       do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
-         i=i+1
-         dg_unmixed_local_sum=dg_unmixed_local_sum+ &
-           (dc%rho_tot%f(ix,iy,iz)-dg_dc_handoff_runtime%density_snapshot(i))**2
-       end do
-       end do
-       end do
-       call comm_summation(dg_unmixed_local_sum,dg_unmixed_global_sum,dc%icomm_tot)
-       dg_unmixed_density_residual=sqrt(max(0d0,dg_unmixed_global_sum)/dble(product(dc%lg_tot%num)))
-     end if
      ! mixing & local KS potential (total system)
      call update_density_and_potential(dc%lg_tot,dc%mg_tot,dc%system_tot,dc%info_tot, &
      & stencil,xc_func,pp,ppn,iter, &
@@ -267,25 +226,6 @@ DFT_Iteration : do iter=Miter+1,nscf
      call calc_magnetization(system,mg,info,magnetization)
    end if
    call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
-   if(yn_dg_dc_local_periodic=='y' .and. dg_dc_handoff_runtime%interface_scale>0d0)then
-     call apply_dc_direct_dg_hpsi_rwf(mg,system,info,stencil,dc,spsi,shpsi, &
-       dg_dc_handoff_runtime%interface_scale,dg_dc_projector_generation,&
-       dg_dc_frozen_operator_fingerprint)
-     dg_dc_handoff_runtime%projector_generation=dg_dc_projector_generation
-     dg_dc_handoff_runtime%projector_fingerprint=dg_dc_frozen_operator_fingerprint
-     dg_dc_handoff_runtime%projector_retained_rank=direct_dg_projector_retained_rank
-     dg_dc_handoff_runtime%projector_required_rank=direct_dg_projector_required_rank
-     dg_dc_handoff_runtime%projector_projection_residual=direct_dg_projector_projection_residual
-     dg_dc_handoff_runtime%projector_escape_norm=direct_dg_projector_escape_norm
-     dg_dc_handoff_runtime%projector_residual_limit=direct_dg_projector_residual_limit
-     dg_dc_handoff_runtime%projector_escape_limit=direct_dg_projector_escape_limit
-     dg_dc_handoff_runtime%face_action_norm=direct_dg_face_action_norm
-     dg_dc_handoff_runtime%face_pair_balance=direct_dg_face_pair_balance
-     call recompute_direct_dg_eigenvalues()
-     if(dg_dc_handoff_runtime%interface_scale>=1d0 .and. &
-        dg_unmixed_density_residual<=dg_dc_gs_final_density_tolerance) &
-       call diagnose_direct_dg_orbitals()
-   endif
    call get_band_gap(system,energy,ene_gap)
    if(calc_mode/='DFT_BAND' .and. yn_dc=='n')then
       select case(iperiodic)
@@ -338,145 +278,6 @@ DFT_Iteration : do iter=Miter+1,nscf
      if(comm_is_root(dc%id_tot)) then
        write(*,'(a, i6 ,3x , a, e15.8, 3x, a, e15.8)') &
        & "DC #SCF = ",Miter,"Total Energy = ",energy%E_tot*au_energy_ev,"diff = ",sum1
-     end if
-   end if
-
-   if(yn_dc=='y' .and. yn_dg_dc_local_periodic=='y') then
-     rNebox1=0d0
-     do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
-     do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
-     do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
-       rNebox1=rNebox1+dc%rho_tot%f(ix,iy,iz)
-     end do
-     end do
-     end do
-     call comm_summation(rNebox1,rNebox2,dc%icomm_tot)
-     rNebox2=rNebox2*dc%system_tot%Hvol
-     if(dg_dc_handoff_runtime%accepted) &
-       dg_dc_handoff_runtime%charge_error=abs(rNebox2-dc%elec_num_tot)
-     dg_was_accepted=dg_dc_handoff_runtime%accepted
-     call evaluate_dg_dc_handoff(dg_dc_handoff_runtime,Miter,sum1,rNebox2,dc%elec_num_tot, &
-       dg_fragment_orbitals_are_finite(),dg_dc_handoff_runtime%lcfo_started, &
-       dg_dc_handoff_runtime%wannier_started,dg_dc_handoff_runtime%window_truncated, &
-       dc%icomm_tot,dg_handoff_accept,dg_handoff_message)
-     if(.not.dg_handoff_accept .and. sum1<=dg_dc_handoff_runtime%tolerance .and. &
-        comm_is_root(dc%id_tot)) then
-       write(*,'(1x,a,1x,a,a,es12.4,a,es12.4)')'[DG-DC] handoff rejected:', &
-         trim(dg_handoff_message),' residual(max)=',dg_dc_handoff_runtime%residual, &
-         ' charge_error(max)=',dg_dc_handoff_runtime%charge_error
-     end if
-     if(dg_handoff_accept .and. .not.dg_was_accepted) then
-       dg_handoff_count=product(dc%mg_tot%ie-dc%mg_tot%is+1)
-       allocate(dg_handoff_density(dg_handoff_count))
-       allocate(dg_handoff_potential(dg_handoff_count,dc%system_tot%nspin))
-       allocate(dg_handoff_density_spin(dg_handoff_count,dc%system_tot%nspin))
-       allocate(dg_handoff_hartree(dg_handoff_count),dg_handoff_xc(dg_handoff_count,dc%system_tot%nspin))
-       allocate(dg_handoff_owner(dg_handoff_count))
-       i=0
-       do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
-       do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
-       do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
-         i=i+1
-         dg_handoff_density(i)=dc%rho_tot%f(ix,iy,iz)
-         dg_handoff_hartree(i)=dc%Vh_tot%f(ix,iy,iz)
-         dg_handoff_owner(i)=int(ix-dc%lg_tot%is(1)+1,8)+int(dc%lg_tot%num(1),8)* &
-           (int(iy-dc%lg_tot%is(2),8)+int(dc%lg_tot%num(2),8)*int(iz-dc%lg_tot%is(3),8))
-         do is=1,dc%system_tot%nspin
-           dg_handoff_potential(i,is)=dc%vloc_tot(is)%f(ix,iy,iz)
-           dg_handoff_density_spin(i,is)=dc%rho_tot_s(is)%f(ix,iy,iz)
-           dg_handoff_xc(i,is)=dc%Vxc_tot(is)%f(ix,iy,iz)
-         end do
-       end do
-       end do
-       end do
-       call preserve_dg_dc_density_potential(dg_dc_handoff_runtime,dg_handoff_density,dg_handoff_potential, &
-         dg_handoff_owner,dc%icomm_tot,dg_handoff_accept,dg_handoff_message,dg_handoff_density_spin, &
-         dg_handoff_hartree,dg_handoff_xc)
-       if(.not.dg_handoff_accept) stop 'DG DC density/potential preservation failed collectively'
-       call discard_dc_mixing_history(mixing,dc%rho_tot_s,dc%Vh_tot,dc%Vxc_tot)
-       call mark_dg_dc_mixing_discarded(dg_dc_handoff_runtime)
-       call preserve_dg_dc_fragment_orbitals(dg_dc_handoff_runtime,spsi%rwf,dc%icomm_tot, &
-         dg_handoff_accept,dg_handoff_message,system%rocc,system%mu,energy%esp)
-       if(.not.dg_handoff_accept) stop 'DG DC fragment-orbital preservation failed collectively'
-       call initialize_dg_dc_direct_continuation(dg_dc_handoff_runtime,dg_dc_gs_initial_lambda_step, &
-         dg_dc_gs_minimum_lambda_step,dg_dc_gs_maximum_lambda_step,dg_dc_gs_allowed_residual_growth, &
-         dg_dc_gs_maximum_rollbacks,dg_handoff_accept,dg_handoff_message)
-       if(.not.dg_handoff_accept) stop 'DG DC direct continuation initialization failed'
-       if(comm_is_root(dc%id_tot)) write(*,'(1x,a,i0,a,es12.4)') &
-         '[DG-DC] enabled direct DG term in DC CG at iteration ',Miter,' residual=',sum1
-     end if
-     if(dg_dc_handoff_runtime%continuation_initialized .and. &
-        dg_dc_handoff_runtime%direct_dg_solve_count>0)then
-       call evaluate_dg_dc_direct_continuation(dg_dc_handoff_runtime, &
-         merge(dg_unmixed_density_residual,sum1,dg_dc_handoff_runtime%interface_scale>=1d0), &
-         merge(dg_dc_gs_final_density_tolerance,dg_dc_gs_intermediate_density_tolerance, &
-         dg_dc_handoff_runtime%interface_scale>=1d0), &
-         dg_dc_handoff_runtime%interface_scale>=1d0 .and. &
-         dg_unmixed_density_residual<=dg_dc_gs_final_density_tolerance .and. &
-         ieee_is_finite(dg_dc_handoff_runtime%direct_orbital_residual) .and. &
-         dg_dc_handoff_runtime%direct_orbital_residual<=dg_dc_gs_final_orbital_tolerance .and. &
-         dg_dc_handoff_runtime%direct_orthogonality_defect<=dg_dc_gs_orthogonality_tolerance .and. &
-         dg_dc_handoff_runtime%direct_hermiticity_defect<=dg_dc_gs_hermiticity_tolerance .and. &
-         dg_dc_handoff_runtime%direct_face_balance_defect<=dg_dc_gs_face_balance_tolerance .and. &
-         dg_dc_handoff_runtime%projector_generation==dg_dc_projector_generation .and. &
-         dg_dc_handoff_runtime%projector_fingerprint==dg_dc_frozen_operator_fingerprint .and. &
-         all(dg_dc_handoff_runtime%projector_retained_rank>= &
-           dg_dc_handoff_runtime%projector_required_rank) .and. &
-         all(ieee_is_finite(dg_dc_handoff_runtime%projector_projection_residual)) .and. &
-         all(ieee_is_finite(dg_dc_handoff_runtime%projector_escape_norm)) .and. &
-         all(dg_dc_handoff_runtime%projector_projection_residual<= &
-           dg_dc_handoff_runtime%projector_residual_limit) .and. &
-         all(dg_dc_handoff_runtime%projector_escape_norm<= &
-           dg_dc_handoff_runtime%projector_escape_limit) .and. &
-         all(ieee_is_finite(dg_dc_handoff_runtime%face_action_norm)) .and. &
-         all(dg_dc_handoff_runtime%face_pair_balance<=dg_dc_gs_face_balance_tolerance) .and. &
-         dg_dc_handoff_runtime%charge_error<=dg_dc_gs_electron_count_tolerance,dc%icomm_tot, &
-         dg_continuation_advance,dg_continuation_rollback,dg_continuation_complete,dg_handoff_message)
-       if(dg_dc_handoff_runtime%continuation_failed) &
-         stop 'DG DC direct continuation exhausted rollback controls'
-       if(dg_continuation_advance)then
-         call preserve_dg_dc_fragment_orbitals(dg_dc_handoff_runtime,spsi%rwf,dc%icomm_tot, &
-           dg_handoff_accept,dg_handoff_message,system%rocc,system%mu,energy%esp)
-         if(.not.dg_handoff_accept)stop 'DG DC accepted orbital snapshot failed collectively'
-         dg_handoff_count=product(dc%mg_tot%ie-dc%mg_tot%is+1)
-         i=0
-         do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3);do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
-         do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
-           i=i+1
-           dg_handoff_density(i)=dc%rho_tot%f(ix,iy,iz)
-           dg_handoff_hartree(i)=dc%Vh_tot%f(ix,iy,iz)
-           do is=1,dc%system_tot%nspin
-             dg_handoff_potential(i,is)=dc%vloc_tot(is)%f(ix,iy,iz)
-             dg_handoff_density_spin(i,is)=dc%rho_tot_s(is)%f(ix,iy,iz)
-             dg_handoff_xc(i,is)=dc%Vxc_tot(is)%f(ix,iy,iz)
-           end do
-         end do;end do;end do
-         call preserve_dg_dc_density_potential(dg_dc_handoff_runtime,dg_handoff_density, &
-           dg_handoff_potential,dg_handoff_owner,dc%icomm_tot,dg_handoff_accept,dg_handoff_message, &
-           dg_handoff_density_spin,dg_handoff_hartree,dg_handoff_xc)
-         if(.not.dg_handoff_accept)stop 'DG DC accepted density snapshot failed collectively'
-         call discard_dc_mixing_history(mixing,dc%rho_tot_s,dc%Vh_tot,dc%Vxc_tot)
-       else if(dg_continuation_rollback)then
-         call restore_dg_dc_fragment_orbitals(dg_dc_handoff_runtime,spsi%rwf,dc%icomm_tot, &
-           dg_handoff_accept,dg_handoff_message,system%rocc,system%mu,energy%esp)
-         if(.not.dg_handoff_accept)stop 'DG DC orbital rollback failed collectively'
-         i=0
-         do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3);do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
-         do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
-           i=i+1
-           dc%rho_tot%f(ix,iy,iz)=dg_dc_handoff_runtime%density_snapshot(i)
-           dc%Vh_tot%f(ix,iy,iz)=dg_dc_handoff_runtime%hartree_snapshot(i)
-           do is=1,dc%system_tot%nspin
-             dc%vloc_tot(is)%f(ix,iy,iz)=dg_dc_handoff_runtime%potential_snapshot(i,is)
-             dc%rho_tot_s(is)%f(ix,iy,iz)=dg_dc_handoff_runtime%density_spin_snapshot(i,is)
-             dc%Vxc_tot(is)%f(ix,iy,iz)=dg_dc_handoff_runtime%xc_snapshot(i,is)
-           end do
-         end do;end do;end do
-         call calc_vlocal_fragment_dcdft(system%nspin,mg,v_local,dc)
-         call discard_dc_mixing_history(mixing,dc%rho_tot_s,dc%Vh_tot,dc%Vxc_tot)
-         dg_dc_projector_generation=dg_dc_projector_generation+1
-         dg_dc_frozen_operator_fingerprint=0_8
-       end if
      end if
    end if
    
@@ -596,7 +397,7 @@ DFT_Iteration : do iter=Miter+1,nscf
 
    end if !calc_mode/=DFT_BAND
 
-   if(theory=='dft' .and. yn_opt=='n' .and. yn_dg_dc_local_periodic/='y')then
+   if(theory=='dft' .and. yn_opt=='n')then
      is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(Miter,checkpoint_interval) == 0)
      is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
 
@@ -617,10 +418,6 @@ DFT_Iteration : do iter=Miter+1,nscf
 
 end do DFT_Iteration
 
-if(yn_dg_dc_local_periodic=='y' .and. &
-   .not.dg_dc_handoff_runtime%direct_ground_state_complete) &
-  stop 'DG DC direct ground state did not reach the full-scale fixed point'
-
 if(calc_mode/='DFT_BAND')then
 if(.not.flag_conv) then
    if( ilevel_print.ge.1 .and. comm_is_root(nproc_id_global)) then
@@ -630,134 +427,6 @@ endif
 endif
 
 contains
-
-  ! The conventional DC orbital CG has no recoverable convergence status: it
-  ! either returns a complete orbital payload or terminates the calculation.
-  ! Its remaining nonfatal failure invariant is therefore payload finiteness.
-  logical function dg_fragment_orbitals_are_finite()
-    if(allocated(spsi%rwf)) then
-      dg_fragment_orbitals_are_finite=all(ieee_is_finite(spsi%rwf))
-    else if(allocated(spsi%zwf)) then
-      dg_fragment_orbitals_are_finite=all(ieee_is_finite(real(spsi%zwf,8))) .and. &
-        all(ieee_is_finite(aimag(spsi%zwf)))
-    else
-      dg_fragment_orbitals_are_finite=.false.
-    end if
-  end function dg_fragment_orbitals_are_finite
-
-  subroutine recompute_direct_dg_eigenvalues()
-    real(8),allocatable::local_values(:,:,:),global_values(:,:,:)
-    integer::io_local,ik_local,is_local
-    allocate(local_values(system%nspin,system%no,system%nk),global_values(system%nspin,system%no,system%nk))
-    local_values=0d0
-    do ik_local=info%ik_s,info%ik_e
-    do io_local=info%io_s,info%io_e
-    do is_local=1,system%nspin
-      local_values(is_local,io_local,ik_local)=system%Hvol*sum( &
-        spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3), &
-        is_local,io_local,ik_local,1)*shpsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2), &
-        mg%is(3):mg%ie(3),is_local,io_local,ik_local,1))
-    enddo
-    enddo
-    enddo
-    call comm_summation(local_values,global_values,size(local_values),info%icomm_rko)
-    do is_local=1,system%nspin
-      energy%esp(:,:,is_local)=global_values(is_local,:,:)
-    enddo
-  end subroutine recompute_direct_dg_eigenvalues
-
-  subroutine diagnose_direct_dg_orbitals()
-    real(8),allocatable::local_gram(:,:,:),global_gram(:,:,:),local_hamiltonian(:,:,:),global_hamiltonian(:,:,:)
-    real(8),allocatable::local_residual(:,:),global_residual(:,:)
-    real(8),allocatable::remote_psi(:,:,:),remote_hpsi(:,:,:)
-    real(8)::scale
-    integer::io_local,jo_local,is_local
-    allocate(local_gram(system%no,system%no,system%nspin),global_gram(system%no,system%no,system%nspin))
-    allocate(local_hamiltonian(system%no,system%no,system%nspin), &
-      global_hamiltonian(system%no,system%no,system%nspin))
-    allocate(local_residual(system%no,system%nspin),global_residual(system%no,system%nspin))
-    allocate(remote_psi(lbound(spsi%rwf,1):ubound(spsi%rwf,1), &
-      lbound(spsi%rwf,2):ubound(spsi%rwf,2),lbound(spsi%rwf,3):ubound(spsi%rwf,3)))
-    allocate(remote_hpsi,mold=remote_psi)
-    local_gram=0d0
-    local_hamiltonian=0d0
-    local_residual=0d0
-    do is_local=1,system%nspin
-    do jo_local=1,system%no
-      if(info%io_s<=jo_local .and. jo_local<=info%io_e)then
-        remote_psi=spsi%rwf(:,:,:,is_local,jo_local,1,1)
-        remote_hpsi=shpsi%rwf(:,:,:,is_local,jo_local,1,1)
-      endif
-      if(info%if_divide_orbit)then
-        call comm_bcast(remote_psi,info%icomm_o,info%irank_io(jo_local))
-        call comm_bcast(remote_hpsi,info%icomm_o,info%irank_io(jo_local))
-      endif
-    do io_local=info%io_s,info%io_e
-      local_gram(io_local,jo_local,is_local)=system%Hvol*sum( &
-        spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3), &
-        is_local,io_local,1,1)*remote_psi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-      local_hamiltonian(io_local,jo_local,is_local)=system%Hvol*sum( &
-        spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3), &
-        is_local,io_local,1,1)*remote_hpsi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-    enddo
-    enddo
-    do io_local=info%io_s,info%io_e
-      local_residual(io_local,is_local)=system%Hvol*sum((shpsi%rwf(mg%is(1):mg%ie(1), &
-        mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is_local,io_local,1,1)- &
-        energy%esp(io_local,1,is_local)*spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2), &
-        mg%is(3):mg%ie(3),is_local,io_local,1,1))**2)
-    enddo
-    enddo
-    call comm_summation(local_gram,global_gram,size(local_gram),info%icomm_rko)
-    call comm_summation(local_hamiltonian,global_hamiltonian,size(local_hamiltonian),info%icomm_rko)
-    call comm_summation(local_residual,global_residual,size(local_residual),info%icomm_rko)
-    dg_dc_handoff_runtime%direct_orbital_residual=sqrt(max(0d0,maxval(global_residual)))
-    do is_local=1,system%nspin
-      do io_local=1,system%no
-        global_gram(io_local,io_local,is_local)=global_gram(io_local,io_local,is_local)-1d0
-      enddo
-    enddo
-    dg_dc_handoff_runtime%direct_orthogonality_defect=maxval(abs(global_gram))
-    scale=max(1d0,maxval(abs(global_hamiltonian)))
-    dg_dc_handoff_runtime%direct_hermiticity_defect=maxval(abs(global_hamiltonian- &
-      transpose_direct_dg_matrix(global_hamiltonian)))/scale
-    dg_dc_handoff_runtime%direct_face_balance_defect=maxval(direct_dg_face_pair_balance)
-  end subroutine diagnose_direct_dg_orbitals
-
-  function transpose_direct_dg_matrix(matrix)result(transposed)
-    real(8),intent(in)::matrix(:,:,:)
-    real(8)::transposed(size(matrix,1),size(matrix,2),size(matrix,3))
-    integer::is_local
-    do is_local=1,size(matrix,3)
-      transposed(:,:,is_local)=transpose(matrix(:,:,is_local))
-    enddo
-  end function transpose_direct_dg_matrix
-
-  subroutine discard_dc_mixing_history(history,rho_s,Vh,Vxc)
-    type(s_mixing), intent(inout) :: history
-    type(s_scalar), intent(in) :: rho_s(:),Vh,Vxc(:)
-    integer :: ii,jj
-    do ii=1,size(history%rho_in)
-      history%rho_in(ii)%f=rho_s(1)%f
-      history%rho_out(ii)%f=rho_s(1)%f
-      history%Vh_in(ii)%f=Vh%f
-      history%Vh_out(ii)%f=Vh%f
-      do jj=1,size(history%Vxc_in,2)
-        history%Vxc_in(ii,jj)%f=Vxc(jj)%f
-        history%Vxc_out(ii,jj)%f=Vxc(jj)%f
-      end do
-    end do
-    if(allocated(history%rho_s_in)) then
-      do jj=1,size(history%rho_s_in,2)
-      do ii=1,size(history%rho_s_in,1)
-        history%rho_s_in(ii,jj)%f=rho_s(jj)%f
-        history%rho_s_out(ii,jj)%f=rho_s(jj)%f
-      end do
-      end do
-    end if
-    history%flag_mix_zero=.true.
-    history%convergence_value_prev=huge(1d0)
-  end subroutine discard_dc_mixing_history
 
   subroutine init_convergence_check()
     implicit none

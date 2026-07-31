@@ -294,10 +294,15 @@ assert re.search(
     re.I | re.S,
 ), "Wannier occupied inclusion must use the DC core-weighted chemical-potential subspace"
 assert re.search(
-    r"assign_dg_dc_local_basis_occupations\s*\(\s*dc%elec_num_tot\s*,\s*occupations",
+    r"assign_dg_overlapping_wannier_occupations\s*\(\s*dc%elec_num_tot\s*,\s*occupations",
     adapter_body,
     re.I,
 ), "Galerkin occupations must use the DC total core electron count"
+assert re.search(
+    r"subroutine\s+assign_dg_overlapping_wannier_occupations\b",
+    construction_source,
+    re.I,
+), "retained occupation assignment must live in the overlapping-Wannier namespace"
 assert re.search(
     r"allocate\s*\(\s*candidate\s*\(\s*local_candidate_count\s*,\s*nbox",
     adapter_body,

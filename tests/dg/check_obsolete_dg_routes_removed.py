@@ -72,6 +72,7 @@ FORBIDDEN_ASSET_GLOBS = (
     "tests/dg/*dg_dc_ground_state*",
     "tests/dg/*dg_dc_handoff*",
     "tests/dg/*dg_dc_local_basis*",
+    "tests/dg/*dg_dc_local_periodic*",
     "tests/dg/*dg_ground_state_checkpoint*",
     "tests/dg/*dg_wpw*",
     "tests/dg/*nodal*",

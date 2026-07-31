@@ -6,7 +6,7 @@ program test_dg_overlapping_wannier_construction_mpi
     verify_dg_overlapping_wannier_periodic_closure,assemble_dg_distributed_candidate_symmetry,&
     align_dg_fragment_wannier_gauge,replicate_dg_fragment_wannier_representative,&
     verify_dg_fragment_wannier_streaming_closure,verify_dg_fragment_center_orbit,&
-    verify_dg_uniform_fragment_target_rank
+    verify_dg_uniform_fragment_target_rank,assign_dg_overlapping_wannier_occupations
   implicit none
   integer::comm,rank,nproc,ierr,i,p,nlocal,nclosure,index,ncore,fragment_id
   integer(8),allocatable::ids(:),box_ids(:),symmetry_map(:,:),broken_symmetry_map(:,:)
@@ -27,6 +27,7 @@ program test_dg_overlapping_wannier_construction_mpi
   real(8),allocatable::seed_values(:,:)
   real(8),allocatable::occupied_seed_values(:,:)
   real(8),allocatable::raw_seed_values(:,:)
+  real(8)::occupations(3)
   type(s_dg_overlapping_wannier_construction)::result
   integer,allocatable::reference_owner(:),reference_center_fragment(:)
   integer(8),allocatable::reference_center_box_ids(:)
@@ -46,6 +47,11 @@ program test_dg_overlapping_wannier_construction_mpi
 
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+  call assign_dg_overlapping_wannier_occupations(5d0,occupations,ok,message)
+  call require(ok.and.maxval(abs(occupations-[2d0,2d0,1d0]))<1d-14,&
+    'overlapping-Wannier fractional occupation assignment')
+  call assign_dg_overlapping_wannier_occupations(7d0,occupations,ok,message)
+  call require(.not.ok,'overlapping-Wannier occupation capacity gate')
   call verify_dg_uniform_fragment_target_rank(comm,4,ok,message)
   call require(ok,'uniform fragment target rank accepted')
   if(nproc>1)then
