@@ -20,6 +20,9 @@
 
 subroutine main_tddft
 use math_constants, only: pi
+#ifdef USE_MPI
+use mpi, only: MPI_Comm_rank,MPI_Bcast,MPI_INTEGER
+#endif
 use salmon_global
 use structures
 use parallelization, only: adjust_elapse_time, nproc_group_global
@@ -33,6 +36,12 @@ use checkpoint_restart_sub
 use jellium, only: check_condition_jm
 use rt_angular_momentum, only: write_local_angular_momentum_xy, flush_local_angular_momentum_xy
 use rt_local_chern_marker, only: compute_local_chern_marker_from_orbital
+use dg_overlapping_wannier_checkpoint, only: s_dg_overlapping_wannier_checkpoint, &
+  read_dg_overlapping_wannier_checkpoint
+use rt_dg_overlapping_wannier, only: s_dg_overlapping_wannier_rt_state, &
+  initialize_dg_overlapping_wannier_rt,advance_dg_overlapping_wannier_rt,&
+  write_dg_overlapping_wannier_rt_restart,read_dg_overlapping_wannier_rt_restart
+use em_field, only: calc_Ac_ext_t
 use nvtx
 use parallelization, only: nproc_id_global
 implicit none
@@ -63,6 +72,11 @@ type(s_singlescale) :: singlescale
 
 integer :: Mit, itt
 logical :: is_checkpoint_iter, is_shutdown_time, is_checkpoint
+
+if(yn_dg_overlapping_wannier_rt=='y')then
+  call run_dg_overlapping_wannier_coefficient_rt()
+  return
+endif
 
 !check condition for using jellium model
 if(yn_jm=='y') call check_condition_jm
@@ -238,6 +252,78 @@ end if
 call finalize_xc(xc_func)
 
 contains
+
+subroutine run_dg_overlapping_wannier_coefficient_rt()
+  type(s_dg_overlapping_wannier_checkpoint)::checkpoint
+  type(s_dg_overlapping_wannier_rt_state)::state
+  complex(8),allocatable::coefficients(:,:)
+  real(8),allocatable::vector_potential_samples(:,:)
+  real(8)::electric_field(3),vector_potential(3),acceptance_gates(6)
+  integer,allocatable::row_ids(:)
+  integer::step,rank,ierr
+  logical::ok,reusable
+  character(256)::message
+#ifdef USE_MPI
+  call MPI_Comm_rank(nproc_group_global,rank,ierr)
+#else
+  rank=0
+#endif
+  acceptance_gates=[dg_dc_gs_final_density_tolerance,dg_dc_gs_final_orbital_tolerance,&
+    10d0*dg_dc_gs_final_orbital_tolerance,dg_dc_gs_electron_count_tolerance,&
+    1d0/dg_dc_metric_rank_tolerance,dg_ow_symmetry_tolerance]
+  call read_dg_overlapping_wannier_checkpoint(nproc_group_global,'./overlapping_wannier_gs',&
+    0,0,0_8,0_8,acceptance_gates,checkpoint,reusable,ok,message)
+  if(.not.ok.or..not.reusable)then
+    if(rank==0)write(0,'(a)')trim(message)
+    error stop 'accepted V3 overlapping-Wannier checkpoint is required'
+  endif
+  if(trim(checkpoint%field_coupling_convention)/='cell_wrapped_length_velocity')&
+    error stop 'unsupported overlapping-Wannier field convention'
+  ! The V3 reader certifies that every retained tail covers each physical
+  ! periodic-grid id at least once; overlapping buffers may repeat IDs.
+  ! With basis updates forbidden, every
+  ! coefficient combination remains in that closed periodic support, so
+  ! a nonzero representational tail escape is structurally impossible.
+  allocate(row_ids(size(checkpoint%overlap_row_ids)));row_ids=int(checkpoint%overlap_row_ids)
+  allocate(coefficients,source=checkpoint%coefficients)
+  call initialize_dg_overlapping_wannier_rt(nproc_group_global,row_ids,checkpoint%overlap,&
+    checkpoint%hamiltonian0,checkpoint%position,checkpoint%velocity,&
+    checkpoint%basis_generation,checkpoint%geometry_generation,checkpoint%basis_fingerprint,&
+    checkpoint%operator_fingerprint,checkpoint%hamiltonian_fingerprint,&
+    checkpoint%observable_fingerprint,checkpoint%field_coupling_convention,&
+    checkpoint%basis_generation,checkpoint%geometry_generation,&
+    checkpoint%basis_fingerprint,checkpoint%operator_fingerprint,coefficients,state,ok,message)
+  if(.not.ok)then
+    if(rank==0)write(0,'(a)')trim(message)
+    error stop 'overlapping-Wannier coefficient RT initialization failed'
+  endif
+  if(yn_dg_overlapping_wannier_rt_restart=='y')then
+    call read_dg_overlapping_wannier_rt_restart(nproc_group_global,&
+      './overlapping_wannier_rt.restart',coefficients,state,ok,message)
+    if(.not.ok)then
+      if(rank==0)write(0,'(a)')trim(message)
+      error stop 'overlapping-Wannier coefficient RT restart failed'
+    endif
+  endif
+  allocate(vector_potential_samples(3,0:nt+1))
+  call calc_Ac_ext_t(0d0,dt,0,nt+1,vector_potential_samples)
+  do step=state%step+1,nt
+    electric_field=-(vector_potential_samples(:,step)-vector_potential_samples(:,step-1))/dt
+    vector_potential=0d0
+    call advance_dg_overlapping_wannier_rt(nproc_group_global,dt,electric_field,&
+      vector_potential,coefficients,state,ok,message)
+    if(.not.ok)then
+      if(rank==0)write(0,'(a,i0,2a)')'coefficient RT failed at step ',step,': ',trim(message)
+      error stop 'overlapping-Wannier coefficient RT propagation failed'
+    endif
+  enddo
+  call write_dg_overlapping_wannier_rt_restart(nproc_group_global,&
+    './overlapping_wannier_rt.restart',coefficients,state,ok,message)
+  if(.not.ok)then
+    if(rank==0)write(0,'(a)')trim(message)
+    error stop 'cannot publish overlapping-Wannier coefficient RT restart'
+  endif
+end subroutine
 
 subroutine time_evolution_dg_fragment(Mit, system, rt, info, lg, mg, stencil, xc_func, &
                                        srg, srg_scalar, fg, poisson, pp, ppg, ppn, rho, rho_s, &

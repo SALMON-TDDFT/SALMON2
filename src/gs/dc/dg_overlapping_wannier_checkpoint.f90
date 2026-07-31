@@ -7,15 +7,17 @@ module dg_overlapping_wannier_checkpoint
 #endif
   implicit none
   private
-  character(32),parameter::manifest_magic='SALMON_OW_GS_CHECKPOINT_V2'
-  character(32),parameter::shard_magic='SALMON_OW_GS_RANK_SHARD_V2'
+  character(32),parameter::manifest_magic='SALMON_OW_GS_CHECKPOINT_V3'
+  character(32),parameter::shard_magic='SALMON_OW_GS_RANK_SHARD_V3'
   type,public::s_dg_overlapping_wannier_checkpoint
     integer::basis_generation=0,geometry_generation=0
     integer(int64)::basis_fingerprint=0_int64,operator_fingerprint=0_int64
+    integer(int64)::hamiltonian_fingerprint=0_int64,observable_fingerprint=0_int64
     integer(int64)::publication_id=0_int64
+    character(64)::field_coupling_convention=''
     integer,allocatable::center_owner(:),tail_center(:),tail_generation(:),tail_offsets(:)
     integer(int64),allocatable::tail_physical_ids(:),core_physical_ids(:),overlap_row_ids(:)
-    complex(8),allocatable::overlap(:,:),coefficients(:,:)
+    complex(8),allocatable::overlap(:,:),hamiltonian0(:,:),position(:,:,:),velocity(:,:,:),coefficients(:,:)
     real(8),allocatable::occupations(:),density(:)
     real(8)::density_residual=huge(1d0),coefficient_residual=huge(1d0),charge_error=huge(1d0)
     real(8)::unmixed_density_residual=huge(1d0),orthogonality_defect=huge(1d0)
@@ -26,6 +28,7 @@ module dg_overlapping_wannier_checkpoint
     logical::accepted=.false.
   end type
   public::write_dg_overlapping_wannier_checkpoint,read_dg_overlapping_wannier_checkpoint
+  public::compute_dg_overlapping_wannier_matrix_fingerprints
 contains
   subroutine write_dg_overlapping_wannier_checkpoint(comm,prefix,checkpoint,ok,message,failure_injection_rank)
     integer,intent(in)::comm
@@ -37,13 +40,23 @@ contains
 #ifdef USE_MPI
     integer::rank,nproc,ierr,unit,ios,flush_ios,close_ios,local_bad,global_bad,dims(4),&
       local_rejection_code,global_rejection_code
-    integer(int64)::transaction_id,previous_publication_id,shard_size,manifest_size,shard_digest,manifest_digest
+    integer(int64)::transaction_id,previous_publication_id,shard_size,manifest_size,shard_digest,manifest_digest,&
+      computed_hamiltonian_fingerprint,computed_observable_fingerprint
     character(512)::manifest,manifest_temporary,shard,shard_temporary,reservation
     character(256)::iomsg
+    logical::matrix_ok
     call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
     ok=.false.;message='';local_bad=0
     previous_publication_id=checkpoint%publication_id
     call validate_checkpoint(checkpoint,nproc,local_bad)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad==0)then
+      call compute_dg_overlapping_wannier_matrix_fingerprints(comm,checkpoint%overlap_row_ids,&
+        checkpoint%hamiltonian0,checkpoint%position,checkpoint%velocity,&
+        computed_hamiltonian_fingerprint,computed_observable_fingerprint,matrix_ok)
+      if(.not.matrix_ok.or.computed_hamiltonian_fingerprint/=checkpoint%hamiltonian_fingerprint.or.&
+         computed_observable_fingerprint/=checkpoint%observable_fingerprint)local_bad=1
+    endif
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     local_rejection_code=checkpoint_rejection_code(checkpoint,nproc)
     if(local_bad/=0.and.local_rejection_code==0)local_rejection_code=ibset(local_rejection_code,15)
@@ -81,7 +94,7 @@ contains
         size(checkpoint%core_physical_ids),size(checkpoint%overlap_row_ids)
       if(ios==0)write(unit,iostat=ios,iomsg=iomsg)checkpoint%tail_center,checkpoint%tail_generation,&
         checkpoint%tail_offsets,checkpoint%tail_physical_ids,checkpoint%core_physical_ids,checkpoint%density,&
-        checkpoint%overlap_row_ids,checkpoint%overlap
+        checkpoint%overlap_row_ids,checkpoint%overlap,checkpoint%hamiltonian0,checkpoint%position,checkpoint%velocity
       flush_ios=0;close_ios=0
       if(ios==0)flush(unit,iostat=flush_ios)
       close(unit,iostat=close_ios)
@@ -124,7 +137,9 @@ contains
       if(ios==0)then
         write(unit,iostat=ios,iomsg=iomsg)manifest_magic,nproc,checkpoint%basis_generation,&
           checkpoint%geometry_generation,checkpoint%basis_fingerprint,checkpoint%operator_fingerprint,&
-          transaction_id,manifest_size,manifest_digest,dims,checkpoint%density_residual,&
+          checkpoint%hamiltonian_fingerprint,checkpoint%observable_fingerprint,&
+          checkpoint%field_coupling_convention,transaction_id,manifest_size,manifest_digest,dims,&
+          checkpoint%density_residual,&
           checkpoint%coefficient_residual,checkpoint%charge_error,&
           checkpoint%unmixed_density_residual,checkpoint%orthogonality_defect,checkpoint%metric_condition,&
           checkpoint%density_tolerance,checkpoint%coefficient_tolerance,checkpoint%orthogonality_tolerance,&
@@ -169,13 +184,13 @@ contains
       gate_bad,allocation_status
     integer::integer_metadata(4)
     integer::expected_integers(2),expected_integer_min(2),expected_integer_max(2)
-    integer(int64)::fingerprint_metadata(2),count64,file_bytes,transaction_id,shard_transaction_id,&
+    integer(int64)::fingerprint_metadata(4),count64,file_bytes,transaction_id,shard_transaction_id,&
       stored_size,stored_digest,&
       expected_fingerprints(2),&
       expected_fingerprint_min(2),expected_fingerprint_max(2)
     real(8)::acceptance_metadata(13),gate_min(6),gate_max(6)
     integer::nbasis_gen,ngeometry_gen,ntail_record,ntail_id,ncore,noverlap_row
-    integer(int64)::basis_fp,operator_fp
+    integer(int64)::basis_fp,operator_fp,computed_hamiltonian_fingerprint,computed_observable_fingerprint
     character(32)::magic
     character(512)::manifest,shard
     character(256)::iomsg
@@ -206,7 +221,9 @@ contains
         if(file_bytes<128)ios=1
         if(ios==0)read(unit,iostat=ios,iomsg=iomsg)magic,file_nproc,checkpoint%basis_generation,&
           checkpoint%geometry_generation,checkpoint%basis_fingerprint,checkpoint%operator_fingerprint,&
-          transaction_id,stored_size,stored_digest,dims,checkpoint%density_residual,&
+          checkpoint%hamiltonian_fingerprint,checkpoint%observable_fingerprint,&
+          checkpoint%field_coupling_convention,transaction_id,stored_size,stored_digest,dims,&
+          checkpoint%density_residual,&
           checkpoint%coefficient_residual,checkpoint%charge_error,&
           checkpoint%unmixed_density_residual,checkpoint%orthogonality_defect,checkpoint%metric_condition,&
           checkpoint%density_tolerance,checkpoint%coefficient_tolerance,checkpoint%orthogonality_tolerance,&
@@ -251,7 +268,8 @@ contains
     endif
     if(rank==0)then
       integer_metadata=[checkpoint%basis_generation,checkpoint%geometry_generation,file_nproc,0]
-      fingerprint_metadata=[checkpoint%basis_fingerprint,checkpoint%operator_fingerprint]
+      fingerprint_metadata=[checkpoint%basis_fingerprint,checkpoint%operator_fingerprint,&
+        checkpoint%hamiltonian_fingerprint,checkpoint%observable_fingerprint]
       acceptance_metadata(1:6)=[checkpoint%density_residual,checkpoint%coefficient_residual,checkpoint%charge_error,&
         checkpoint%unmixed_density_residual,checkpoint%orthogonality_defect,checkpoint%metric_condition]
       acceptance_metadata(7:11)=[checkpoint%density_tolerance,checkpoint%coefficient_tolerance,&
@@ -259,12 +277,15 @@ contains
       acceptance_metadata(12:13)=[checkpoint%symmetry_closure_residual,checkpoint%symmetry_tolerance]
     endif
     call MPI_Bcast(integer_metadata,4,MPI_INTEGER,0,comm,ierr)
-    call MPI_Bcast(fingerprint_metadata,2,MPI_INTEGER8,0,comm,ierr)
+    call MPI_Bcast(fingerprint_metadata,4,MPI_INTEGER8,0,comm,ierr)
+    call MPI_Bcast(checkpoint%field_coupling_convention,len(checkpoint%field_coupling_convention),MPI_CHARACTER,0,comm,ierr)
     call MPI_Bcast(transaction_id,1,MPI_INTEGER8,0,comm,ierr)
     checkpoint%publication_id=transaction_id
     call MPI_Bcast(acceptance_metadata,13,MPI_DOUBLE_PRECISION,0,comm,ierr)
     checkpoint%basis_generation=integer_metadata(1);checkpoint%geometry_generation=integer_metadata(2)
     checkpoint%basis_fingerprint=fingerprint_metadata(1);checkpoint%operator_fingerprint=fingerprint_metadata(2)
+    checkpoint%hamiltonian_fingerprint=fingerprint_metadata(3)
+    checkpoint%observable_fingerprint=fingerprint_metadata(4)
     checkpoint%density_residual=acceptance_metadata(1);checkpoint%coefficient_residual=acceptance_metadata(2)
     checkpoint%charge_error=acceptance_metadata(3);checkpoint%unmixed_density_residual=acceptance_metadata(4)
     checkpoint%orthogonality_defect=acceptance_metadata(5);checkpoint%metric_condition=acceptance_metadata(6)
@@ -292,11 +313,13 @@ contains
           checkpoint%tail_offsets(ntail_record+1),checkpoint%tail_physical_ids(ntail_id),&
           checkpoint%core_physical_ids(ncore),checkpoint%density(ncore),&
           checkpoint%overlap_row_ids(noverlap_row),checkpoint%overlap(noverlap_row,dims(2)),&
+          checkpoint%hamiltonian0(noverlap_row,dims(2)),checkpoint%position(3,noverlap_row,dims(2)),&
+          checkpoint%velocity(3,noverlap_row,dims(2)),&
           stat=allocation_status)
         if(allocation_status/=0)ios=1
         if(ios==0)read(unit,iostat=ios,iomsg=iomsg)checkpoint%tail_center,checkpoint%tail_generation,&
           checkpoint%tail_offsets,checkpoint%tail_physical_ids,checkpoint%core_physical_ids,checkpoint%density,&
-          checkpoint%overlap_row_ids,checkpoint%overlap
+          checkpoint%overlap_row_ids,checkpoint%overlap,checkpoint%hamiltonian0,checkpoint%position,checkpoint%velocity
         if(ios==0)then
           if(file_bytes/=stored_size.or.stored_size/=expected_shard_size(checkpoint).or.&
              stored_digest/=digest_shard(checkpoint,rank,shard_transaction_id))ios=1
@@ -319,10 +342,17 @@ contains
     if(global_bad/=0)then;message='overlapping-Wannier checkpoint payload is invalid';return;endif
     call validate_shard_ownership(comm,checkpoint,local_bad)
     if(local_bad/=0)then;message='overlapping-Wannier checkpoint ownership is incomplete';return;endif
-    reusable=checkpoint%basis_generation==expected_basis_generation.and.&
-      checkpoint%geometry_generation==expected_geometry_generation.and.&
-      checkpoint%basis_fingerprint==expected_basis_fingerprint.and.&
-      checkpoint%operator_fingerprint==expected_operator_fingerprint.and.&
+    call compute_dg_overlapping_wannier_matrix_fingerprints(comm,checkpoint%overlap_row_ids,&
+      checkpoint%hamiltonian0,checkpoint%position,checkpoint%velocity,&
+      computed_hamiltonian_fingerprint,computed_observable_fingerprint,reusable)
+    if(.not.reusable.or.computed_hamiltonian_fingerprint/=checkpoint%hamiltonian_fingerprint.or.&
+       computed_observable_fingerprint/=checkpoint%observable_fingerprint)then
+      reusable=.false.;message='overlapping-Wannier matrix fingerprint mismatch';return
+    endif
+    reusable=(expected_basis_generation==0.or.checkpoint%basis_generation==expected_basis_generation).and.&
+      (expected_geometry_generation==0.or.checkpoint%geometry_generation==expected_geometry_generation).and.&
+      (expected_basis_fingerprint==0_int64.or.checkpoint%basis_fingerprint==expected_basis_fingerprint).and.&
+      (expected_operator_fingerprint==0_int64.or.checkpoint%operator_fingerprint==expected_operator_fingerprint).and.&
       checkpoint%density_residual<=expected_acceptance_gates(1).and.&
       checkpoint%unmixed_density_residual<=expected_acceptance_gates(1).and.&
       checkpoint%coefficient_residual<=expected_acceptance_gates(2).and.&
@@ -338,6 +368,57 @@ contains
 #endif
   end subroutine
 
+  subroutine compute_dg_overlapping_wannier_matrix_fingerprints(comm,row_ids,hamiltonian,position,&
+      velocity,hamiltonian_fingerprint,observable_fingerprint,ok)
+    integer,intent(in)::comm
+    integer(int64),intent(in)::row_ids(:)
+    complex(8),intent(in)::hamiltonian(:,:),position(:,:,:),velocity(:,:,:)
+    integer(int64),intent(out)::hamiltonian_fingerprint,observable_fingerprint
+    logical,intent(out)::ok
+#ifdef USE_MPI
+    integer::i,j,axis,ierr,local_bad,global_bad
+    integer(int64)::local_h,local_o
+    local_bad=0
+    if(size(hamiltonian,1)/=size(row_ids).or.&
+       any(shape(position)/=[3,size(row_ids),size(hamiltonian,2)]).or.&
+       any(shape(velocity)/=[3,size(row_ids),size(hamiltonian,2)]).or.&
+       .not.finite_complex(hamiltonian).or..not.finite_complex3(position).or.&
+       .not.finite_complex3(velocity))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then
+      hamiltonian_fingerprint=0_int64;observable_fingerprint=0_int64;ok=.false.;return
+    endif
+    local_h=0_int64;local_o=0_int64
+    do j=1,size(hamiltonian,2);do i=1,size(row_ids)
+      local_h=ieor(local_h,matrix_entry_fingerprint(hamiltonian(i,j),row_ids(i),j,0,1))
+      do axis=1,3
+        local_o=ieor(local_o,matrix_entry_fingerprint(position(axis,i,j),row_ids(i),j,axis,2))
+        local_o=ieor(local_o,matrix_entry_fingerprint(velocity(axis,i,j),row_ids(i),j,axis,3))
+      enddo
+    enddo;enddo
+    call MPI_Allreduce(local_h,hamiltonian_fingerprint,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
+    call MPI_Allreduce(local_o,observable_fingerprint,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
+    if(hamiltonian_fingerprint==0_int64)hamiltonian_fingerprint=1_int64
+    if(observable_fingerprint==0_int64)observable_fingerprint=1_int64
+    ok=.true.
+#else
+    hamiltonian_fingerprint=0_int64;observable_fingerprint=0_int64;ok=.false.
+#endif
+  end subroutine
+
+  integer(int64) function matrix_entry_fingerprint(value,row,column,axis,kind)
+    complex(8),intent(in)::value
+    integer(int64),intent(in)::row
+    integer,intent(in)::column,axis,kind
+    integer(int64)::real_bits,imaginary_bits,key
+    real_bits=transfer(real(value,8),real_bits);imaginary_bits=transfer(aimag(value),imaginary_bits)
+    key=ieor(row,ishft(int(column,int64),17))
+    key=ieor(key,ishft(int(axis,int64),37));key=ieor(key,ishft(int(kind,int64),43))
+    matrix_entry_fingerprint=ieor(ishftc(real_bits,modulo(int(row),63)),&
+      ishftc(imaginary_bits,modulo(column+7*axis+11*kind,63)))
+    matrix_entry_fingerprint=ieor(matrix_entry_fingerprint,ishftc(key,23))
+  end function
+
 #ifdef USE_MPI
   integer(int64) function expected_manifest_size(checkpoint)
     type(s_dg_overlapping_wannier_checkpoint),intent(in)::checkpoint
@@ -346,7 +427,8 @@ contains
     real_bytes=storage_size(0d0)/8;complex_bytes=storage_size((0d0,0d0))/8
     logical_bytes=storage_size(.false.)/8
     expected_manifest_size=int(storage_size(manifest_magic)/8,int64)+&
-      integer_bytes*int(7+size(checkpoint%center_owner),int64)+integer8_bytes*5_int64+&
+      integer_bytes*int(7+size(checkpoint%center_owner),int64)+integer8_bytes*7_int64+&
+      int(storage_size(checkpoint%field_coupling_convention)/8,int64)+&
       real_bytes*int(13+size(checkpoint%occupations),int64)+logical_bytes+&
       complex_bytes*int(size(checkpoint%coefficients),int64)
   end function
@@ -360,7 +442,8 @@ contains
       int(9+3*size(checkpoint%tail_center),int64)+integer8_bytes*&
       int(5+size(checkpoint%tail_physical_ids)+size(checkpoint%core_physical_ids)+&
       size(checkpoint%overlap_row_ids),int64)+real_bytes*int(size(checkpoint%density),int64)+&
-      complex_bytes*int(size(checkpoint%overlap),int64)
+      complex_bytes*int(size(checkpoint%overlap)+size(checkpoint%hamiltonian0)+&
+      size(checkpoint%position)+size(checkpoint%velocity),int64)
   end function
 
   integer(int64) function digest_manifest(checkpoint,transaction_id)
@@ -373,6 +456,11 @@ contains
     call digest_integer(hash,int(checkpoint%geometry_generation,int64),position)
     call digest_integer(hash,checkpoint%basis_fingerprint,position)
     call digest_integer(hash,checkpoint%operator_fingerprint,position)
+    call digest_integer(hash,checkpoint%hamiltonian_fingerprint,position)
+    call digest_integer(hash,checkpoint%observable_fingerprint,position)
+    do i=1,len(checkpoint%field_coupling_convention)
+      call digest_integer(hash,int(iachar(checkpoint%field_coupling_convention(i:i)),int64),position)
+    enddo
     call digest_integer(hash,transaction_id,position)
     do i=1,size(checkpoint%center_owner);call digest_integer(hash,int(checkpoint%center_owner(i),int64),position);enddo
     do j=1,size(checkpoint%coefficients,2);do i=1,size(checkpoint%coefficients,1)
@@ -421,6 +509,17 @@ contains
     do j=1,size(checkpoint%overlap,2);do i=1,size(checkpoint%overlap,1)
       call digest_complex(hash,checkpoint%overlap(i,j),position)
     enddo;enddo
+    do j=1,size(checkpoint%hamiltonian0,2);do i=1,size(checkpoint%hamiltonian0,1)
+      call digest_complex(hash,checkpoint%hamiltonian0(i,j),position)
+    enddo;enddo
+    do j=1,size(checkpoint%position,3);do i=1,size(checkpoint%position,2)
+      call digest_complex(hash,checkpoint%position(1,i,j),position)
+      call digest_complex(hash,checkpoint%position(2,i,j),position)
+      call digest_complex(hash,checkpoint%position(3,i,j),position)
+      call digest_complex(hash,checkpoint%velocity(1,i,j),position)
+      call digest_complex(hash,checkpoint%velocity(2,i,j),position)
+      call digest_complex(hash,checkpoint%velocity(3,i,j),position)
+    enddo;enddo
     digest_shard=hash
   end function
 
@@ -450,9 +549,11 @@ contains
     integer,intent(in)::comm
     type(s_dg_overlapping_wannier_checkpoint),intent(in)::checkpoint
     integer,intent(out)::bad
-    integer::nproc,rank,ierr,i,total,local_count,expected_tail_count,global_bad,row_count,row_total
+    integer::nproc,rank,ierr,i,j,total,local_count,expected_tail_count,global_bad,row_count,row_total,&
+      tail_first,tail_last
     integer(int64)::total64
-    integer,allocatable::counts(:),owners(:),row_owners(:)
+    integer,allocatable::counts(:),owners(:),row_owners(:),tail_owners(:)
+    logical::tail_offsets_safe
     local_count=size(checkpoint%core_physical_ids)
     call MPI_Comm_size(comm,nproc,ierr);call MPI_Comm_rank(comm,rank,ierr)
     allocate(counts(nproc))
@@ -482,13 +583,18 @@ contains
       if(any(owners(1:total)/=1))bad=1
     endif
     expected_tail_count=count(checkpoint%center_owner==rank)
+    tail_offsets_safe=size(checkpoint%tail_offsets)==expected_tail_count+1.and.&
+      size(checkpoint%tail_offsets)==size(checkpoint%tail_center)+1
     if(size(checkpoint%tail_center)/=expected_tail_count.or.&
        size(checkpoint%tail_generation)/=expected_tail_count.or.&
        size(checkpoint%tail_offsets)/=expected_tail_count+1)bad=1
-    if(expected_tail_count>=0.and.size(checkpoint%tail_offsets)>0)then
-      if(checkpoint%tail_offsets(1)/=1.or.&
-         checkpoint%tail_offsets(size(checkpoint%tail_offsets))/=size(checkpoint%tail_physical_ids)+1)bad=1
-      if(any(checkpoint%tail_offsets(2:)<checkpoint%tail_offsets(:size(checkpoint%tail_offsets)-1)))bad=1
+    if(tail_offsets_safe)then
+      tail_offsets_safe=checkpoint%tail_offsets(1)==1.and.&
+        checkpoint%tail_offsets(size(checkpoint%tail_offsets))==size(checkpoint%tail_physical_ids)+1.and.&
+        all(checkpoint%tail_offsets>=1).and.&
+        all(checkpoint%tail_offsets<=size(checkpoint%tail_physical_ids)+1).and.&
+        all(checkpoint%tail_offsets(2:)>=checkpoint%tail_offsets(:size(checkpoint%tail_offsets)-1))
+      if(.not.tail_offsets_safe)bad=1
     endif
     do i=1,size(checkpoint%tail_center)
       if(checkpoint%tail_center(i)<1.or.checkpoint%tail_center(i)>size(checkpoint%center_owner))then
@@ -497,12 +603,33 @@ contains
         bad=1
       endif
       if(count(checkpoint%tail_center==checkpoint%tail_center(i))/=1)bad=1
+      if(.not.tail_offsets_safe)cycle
+      tail_first=checkpoint%tail_offsets(i);tail_last=checkpoint%tail_offsets(i+1)-1
+      if(tail_first>tail_last.or.tail_last-tail_first+1<total)then
+        bad=1
+      else
+        allocate(tail_owners(total));tail_owners=0
+        do j=tail_first,tail_last
+          if(checkpoint%tail_physical_ids(j)<1_int64.or.&
+             checkpoint%tail_physical_ids(j)>int(total,int64))then
+            bad=1
+          else
+            tail_owners(int(checkpoint%tail_physical_ids(j)))=&
+              tail_owners(int(checkpoint%tail_physical_ids(j)))+1
+          endif
+        enddo
+        if(any(tail_owners<1))bad=1
+        deallocate(tail_owners)
+      endif
     enddo
     if(any(checkpoint%tail_generation/=checkpoint%basis_generation).or.&
        any(checkpoint%tail_physical_ids<=0_int64))bad=1
     row_count=size(checkpoint%overlap_row_ids)
     if(row_count/=expected_tail_count.or.size(checkpoint%overlap,1)/=row_count.or.&
         size(checkpoint%overlap,2)/=size(checkpoint%center_owner))bad=1
+    if(any(shape(checkpoint%hamiltonian0)/=[row_count,size(checkpoint%center_owner)]).or.&
+       any(shape(checkpoint%position)/=[3,row_count,size(checkpoint%center_owner)]).or.&
+       any(shape(checkpoint%velocity)/=[3,row_count,size(checkpoint%center_owner)]))bad=1
     call MPI_Allreduce(row_count,row_total,1,MPI_INTEGER,MPI_SUM,comm,ierr)
     if(row_total/=size(checkpoint%center_owner))bad=1
     allocate(row_owners(max(1,size(checkpoint%center_owner))));row_owners=0
@@ -529,7 +656,8 @@ contains
     type(s_dg_overlapping_wannier_checkpoint),intent(in)::checkpoint
     integer,intent(out)::bad
     integer::ierr,dims(4),dims_min(4),dims_max(4),integer_values(3),integer_min(3),integer_max(3)
-    integer(int64)::fingerprints(2),fingerprints_min(2),fingerprints_max(2)
+    integer(int64)::fingerprints(4),fingerprints_min(4),fingerprints_max(4)
+    character(64)::convention_reference
     integer,allocatable::owner_reference(:)
     complex(8),allocatable::coefficients_reference(:,:)
     real(8),allocatable::occupations_reference(:)
@@ -537,7 +665,8 @@ contains
     dims=[size(checkpoint%center_owner),size(checkpoint%coefficients,1),size(checkpoint%coefficients,2),&
       size(checkpoint%occupations)]
     integer_values=[checkpoint%basis_generation,checkpoint%geometry_generation,merge(1,0,checkpoint%accepted)]
-    fingerprints=[checkpoint%basis_fingerprint,checkpoint%operator_fingerprint]
+    fingerprints=[checkpoint%basis_fingerprint,checkpoint%operator_fingerprint,&
+      checkpoint%hamiltonian_fingerprint,checkpoint%observable_fingerprint]
     metrics=[checkpoint%density_residual,checkpoint%coefficient_residual,checkpoint%charge_error,&
       checkpoint%unmixed_density_residual,checkpoint%orthogonality_defect,checkpoint%metric_condition,&
       checkpoint%density_tolerance,checkpoint%coefficient_tolerance,checkpoint%orthogonality_tolerance,&
@@ -547,14 +676,17 @@ contains
     call MPI_Allreduce(dims,dims_max,4,MPI_INTEGER,MPI_MAX,comm,ierr)
     call MPI_Allreduce(integer_values,integer_min,3,MPI_INTEGER,MPI_MIN,comm,ierr)
     call MPI_Allreduce(integer_values,integer_max,3,MPI_INTEGER,MPI_MAX,comm,ierr)
-    call MPI_Allreduce(fingerprints,fingerprints_min,2,MPI_INTEGER8,MPI_MIN,comm,ierr)
-    call MPI_Allreduce(fingerprints,fingerprints_max,2,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(fingerprints,fingerprints_min,4,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(fingerprints,fingerprints_max,4,MPI_INTEGER8,MPI_MAX,comm,ierr)
     call MPI_Allreduce(metrics,metrics_min,13,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
     call MPI_Allreduce(metrics,metrics_max,13,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     bad=0
     if(any(dims_min/=dims_max).or.any(integer_min/=integer_max).or.any(fingerprints_min/=fingerprints_max).or.&
        any(metrics_min/=metrics_max))bad=1
     if(bad/=0)return
+    convention_reference=checkpoint%field_coupling_convention
+    call MPI_Bcast(convention_reference,len(convention_reference),MPI_CHARACTER,0,comm,ierr)
+    if(checkpoint%field_coupling_convention/=convention_reference)then;bad=1;return;endif
     allocate(owner_reference(dims(1)),coefficients_reference(dims(2),dims(3)),&
       occupations_reference(dims(4)))
     owner_reference=checkpoint%center_owner
@@ -576,11 +708,15 @@ contains
     integer(int64)::matrix_count
     bad=0
     if(.not.checkpoint%accepted.or.checkpoint%basis_generation<=0.or.checkpoint%geometry_generation<=0)bad=ibset(bad,0)
-    if(checkpoint%basis_fingerprint==0_int64.or.checkpoint%operator_fingerprint==0_int64)bad=ibset(bad,1)
+    if(checkpoint%basis_fingerprint==0_int64.or.checkpoint%operator_fingerprint==0_int64.or.&
+       checkpoint%hamiltonian_fingerprint==0_int64.or.checkpoint%observable_fingerprint==0_int64.or.&
+       trim(checkpoint%field_coupling_convention)/='cell_wrapped_length_velocity')bad=ibset(bad,1)
     if(.not.allocated(checkpoint%center_owner).or..not.allocated(checkpoint%tail_center).or.&
        .not.allocated(checkpoint%tail_generation).or..not.allocated(checkpoint%tail_offsets).or.&
        .not.allocated(checkpoint%tail_physical_ids).or..not.allocated(checkpoint%core_physical_ids).or.&
        .not.allocated(checkpoint%overlap_row_ids).or..not.allocated(checkpoint%overlap).or.&
+       .not.allocated(checkpoint%hamiltonian0).or..not.allocated(checkpoint%position).or.&
+       .not.allocated(checkpoint%velocity).or.&
        .not.allocated(checkpoint%coefficients).or.&
        .not.allocated(checkpoint%occupations).or..not.allocated(checkpoint%density))then
       bad=ibset(bad,2);return
@@ -589,9 +725,12 @@ contains
       bad=ibset(bad,3)
     if(size(checkpoint%center_owner)/=size(checkpoint%overlap,2).or.&
        size(checkpoint%overlap_row_ids)/=size(checkpoint%overlap,1))bad=ibset(bad,4)
+    if(any(shape(checkpoint%hamiltonian0)/=shape(checkpoint%overlap)).or.&
+       any(shape(checkpoint%position)/=[3,size(checkpoint%overlap,1),size(checkpoint%overlap,2)]).or.&
+       any(shape(checkpoint%velocity)/=[3,size(checkpoint%overlap,1),size(checkpoint%overlap,2)]))bad=ibset(bad,4)
     if(size(checkpoint%coefficients,1)/=size(checkpoint%center_owner).or.&
        size(checkpoint%coefficients,2)/=size(checkpoint%occupations))bad=ibset(bad,5)
-    matrix_count=int(size(checkpoint%overlap,1),int64)*int(size(checkpoint%overlap,2),int64)+&
+    matrix_count=8_int64*int(size(checkpoint%overlap,1),int64)*int(size(checkpoint%overlap,2),int64)+&
       int(size(checkpoint%coefficients,1),int64)*int(size(checkpoint%coefficients,2),int64)
     if(matrix_count>100000000_int64)bad=ibset(bad,6)
     if(any(checkpoint%core_physical_ids<=0_int64).or.any(checkpoint%density<0d0).or.any(checkpoint%occupations<0d0))&
@@ -617,7 +756,9 @@ contains
        checkpoint%metric_condition>checkpoint%condition_limit)bad=ibset(bad,13)
     if(checkpoint%symmetry_tolerance<=0d0.or.checkpoint%symmetry_closure_residual<0d0.or.&
        checkpoint%symmetry_closure_residual>checkpoint%symmetry_tolerance)bad=ibset(bad,14)
-    if(.not.finite_complex(checkpoint%overlap).or..not.finite_complex(checkpoint%coefficients))bad=ibset(bad,15)
+    if(.not.finite_complex(checkpoint%overlap).or..not.finite_complex(checkpoint%hamiltonian0).or.&
+       .not.finite_complex3(checkpoint%position).or..not.finite_complex3(checkpoint%velocity).or.&
+       .not.finite_complex(checkpoint%coefficients))bad=ibset(bad,15)
   end subroutine
 
   integer function checkpoint_rejection_code(checkpoint,nproc) result(code)
@@ -626,11 +767,15 @@ contains
     code=0
     if(.not.checkpoint%accepted)code=ibset(code,0)
     if(checkpoint%basis_generation<=0.or.checkpoint%geometry_generation<=0)code=ibset(code,1)
-    if(checkpoint%basis_fingerprint==0_int64.or.checkpoint%operator_fingerprint==0_int64)code=ibset(code,2)
+    if(checkpoint%basis_fingerprint==0_int64.or.checkpoint%operator_fingerprint==0_int64.or.&
+       checkpoint%hamiltonian_fingerprint==0_int64.or.checkpoint%observable_fingerprint==0_int64.or.&
+       trim(checkpoint%field_coupling_convention)/='cell_wrapped_length_velocity')code=ibset(code,2)
     if(.not.allocated(checkpoint%center_owner).or..not.allocated(checkpoint%tail_center).or.&
        .not.allocated(checkpoint%tail_generation).or..not.allocated(checkpoint%tail_offsets).or.&
        .not.allocated(checkpoint%tail_physical_ids).or..not.allocated(checkpoint%core_physical_ids).or.&
        .not.allocated(checkpoint%overlap_row_ids).or..not.allocated(checkpoint%overlap).or.&
+       .not.allocated(checkpoint%hamiltonian0).or..not.allocated(checkpoint%position).or.&
+       .not.allocated(checkpoint%velocity).or.&
        .not.allocated(checkpoint%coefficients).or.&
        .not.allocated(checkpoint%occupations).or..not.allocated(checkpoint%density))then
       code=ibset(code,3);return
@@ -657,13 +802,20 @@ contains
     if(size(checkpoint%center_owner)<1.or.any(checkpoint%center_owner<0).or.&
        any(checkpoint%center_owner>=nproc).or.any(checkpoint%core_physical_ids<=0_int64).or.&
        any(checkpoint%density<0d0).or.any(checkpoint%occupations<0d0).or.&
-       .not.finite_complex(checkpoint%overlap).or..not.finite_complex(checkpoint%coefficients))&
+       .not.finite_complex(checkpoint%overlap).or..not.finite_complex(checkpoint%hamiltonian0).or.&
+       .not.finite_complex3(checkpoint%position).or..not.finite_complex3(checkpoint%velocity).or.&
+       .not.finite_complex(checkpoint%coefficients))&
       code=ibset(code,11)
   end function
 
   logical function finite_complex(values)
     complex(8),intent(in)::values(:,:)
     finite_complex=all(ieee_is_finite(real(values,8))).and.all(ieee_is_finite(aimag(values)))
+  end function
+
+  logical function finite_complex3(values)
+    complex(8),intent(in)::values(:,:,:)
+    finite_complex3=all(ieee_is_finite(real(values,8))).and.all(ieee_is_finite(aimag(values)))
   end function
 
   subroutine versioned_shard_name(prefix,generation,fingerprint,transaction_id,rank,name)

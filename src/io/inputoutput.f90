@@ -316,6 +316,8 @@ contains
       & yn_fix_func, &
       & yn_predictor_corrector, &
       & yn_dg_fragment_rt, &
+      & yn_dg_overlapping_wannier_rt, &
+      & yn_dg_overlapping_wannier_rt_restart, &
       & yn_dg_length_gauge, &
       & yn_dg_nodal_rt, &
       & time_integrator_dg_fragment, &
@@ -927,6 +929,8 @@ contains
     yn_fix_func = 'n'
     yn_predictor_corrector = 'n'
     yn_dg_fragment_rt = 'n'
+    yn_dg_overlapping_wannier_rt = 'n'
+    yn_dg_overlapping_wannier_rt_restart = 'n'
     yn_dg_length_gauge = 'n'
     yn_dg_nodal_rt = 'n'
     time_integrator_dg_fragment = 'expdiag'
@@ -1647,6 +1651,8 @@ contains
     call comm_bcast(yn_fix_func,nproc_group_global)
     call comm_bcast(yn_predictor_corrector,nproc_group_global)
     call comm_bcast(yn_dg_fragment_rt,nproc_group_global)
+    call comm_bcast(yn_dg_overlapping_wannier_rt,nproc_group_global)
+    call comm_bcast(yn_dg_overlapping_wannier_rt_restart,nproc_group_global)
     call comm_bcast(yn_dg_length_gauge,nproc_group_global)
     call comm_bcast(yn_dg_nodal_rt,nproc_group_global)
     call comm_bcast(dg_nodal_gs_relax_step,nproc_group_global)
@@ -2712,6 +2718,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_fix_func', yn_fix_func
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_predictor_corrector', yn_predictor_corrector
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_fragment_rt', yn_dg_fragment_rt
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_overlapping_wannier_rt', yn_dg_overlapping_wannier_rt
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_overlapping_wannier_rt_restart', &
+        yn_dg_overlapping_wannier_rt_restart
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_length_gauge', yn_dg_length_gauge
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_nodal_rt', yn_dg_nodal_rt
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_nodal_gs_relax_step', dg_nodal_gs_relax_step
@@ -4069,8 +4078,28 @@ contains
          time_integrator_dg_fragment/='aetrs') &
       & stop "DG-Fragment RT: invalid time_integrator_dg_fragment"
     end if
-    if(yn_dg_length_gauge=='y' .and. yn_dg_fragment_rt/='y') &
-      stop "DG length gauge requires yn_dg_fragment_rt=y."
+    if(yn_dg_overlapping_wannier_rt=='y')then
+      if(theory/='tddft_pulse'.and.theory/='tddft_response')&
+        stop 'overlapping-Wannier coefficient RT requires TDDFT pulse or response theory.'
+      if(yn_dg_fragment_rt=='y'.or.yn_dg_nodal_rt=='y'.or.yn_dg_wpw_checkpoint_rt=='y')&
+        stop 'overlapping-Wannier coefficient RT forbids every legacy DG RT route.'
+      if(yn_self_checkpoint=='y'.or.checkpoint_interval>=1)&
+        stop 'overlapping-Wannier coefficient RT forbids conventional checkpoint publication.'
+      if(yn_restart=='y')stop 'overlapping-Wannier coefficient RT forbids conventional yn_restart.'
+      if(yn_dc_lcfo=='y'.or.yn_eigenexa=='y'.or.yn_dg_wpw_production=='y'.or.&
+         yn_dg_dc_local_periodic=='y')&
+        stop 'overlapping-Wannier coefficient RT forbids LCFO, EigenExa, WPW, and direct-DG routes.'
+      if(yn_adaptive_basis=='y'.or.yn_adaptive_basis_dg=='y')&
+        stop 'overlapping-Wannier coefficient RT requires an immutable accepted basis.'
+      if(yn_dg_length_gauge/='y')&
+        stop 'overlapping-Wannier coefficient RT currently requires the validated length gauge.'
+      if(nt<1.or.dt<=0d0)stop 'overlapping-Wannier coefficient RT requires positive nt and dt.'
+    endif
+    if(yn_dg_overlapping_wannier_rt_restart=='y'.and.yn_dg_overlapping_wannier_rt/='y')&
+      stop 'overlapping-Wannier RT restart requires its dedicated coefficient RT route.'
+    if(yn_dg_length_gauge=='y' .and. yn_dg_fragment_rt/='y' .and. &
+       yn_dg_overlapping_wannier_rt/='y') &
+      stop "DG length gauge requires a DG coefficient or fragment RT route."
     if(yn_dg_nodal_rt=='y' .and. yn_dg_fragment_rt/='y') &
       stop "Nodal real-space DG requires yn_dg_fragment_rt=y."
     if(yn_dg_nodal_rt=='y' .and. time_integrator_dg_fragment/='taylor4pc') &
@@ -4098,6 +4127,8 @@ contains
       stop "DG length gauge currently requires time_integrator_dg_fragment='taylor4pc' or 'expdiag'."
     
     call yn_argument_check(yn_dg_fragment_rt)
+    call yn_argument_check(yn_dg_overlapping_wannier_rt)
+    call yn_argument_check(yn_dg_overlapping_wannier_rt_restart)
     call yn_argument_check(yn_dg_nodal_rt)
 
 #ifdef USE_FFTW

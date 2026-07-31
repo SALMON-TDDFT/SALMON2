@@ -17,6 +17,7 @@ def source(path: str) -> str:
 global_source = source("src/io/salmon_global.f90")
 input_source = source("src/io/inputoutput.f90")
 main_source = source("src/gs/main_dft.f90")
+rt_main_source = source("src/rt/main_tddft.f90")
 scf_source = source("src/gs/scf_iteration_dft.f90")
 dcdft_source = source("src/gs/dc/dcdft.f90")
 types_source = source("src/gs/dc/dg_overlapping_wannier_types.f90")
@@ -26,6 +27,7 @@ operators_source = source("src/gs/dc/dg_overlapping_wannier_operators.f90")
 ow_scf_source = source("src/gs/dc/dg_overlapping_wannier_scf.f90")
 ow_solver_source = source("src/gs/dc/dg_overlapping_wannier_solver.f90")
 ow_checkpoint_source = source("src/gs/dc/dg_overlapping_wannier_checkpoint.f90")
+ow_rt_source = source("src/rt/dg/rt_dg_overlapping_wannier.f90")
 dc_cmake = source("src/gs/dc/CMakeLists.txt")
 xc_source = source("src/xc/salmon_xc.f90")
 si64_runner_source = source("tests/dg/run_si64_overlapping_wannier_gate.py")
@@ -111,6 +113,60 @@ assert re.search(r"do\s+projection_pass\s*=\s*1\s*,\s*2", append_body, re.I), (
 )
 
 flag = r"yn_dg_dc_overlapping_wannier"
+rt_flag = r"yn_dg_overlapping_wannier_rt"
+rt_restart_flag = r"yn_dg_overlapping_wannier_rt_restart"
+
+assert re.search(rf"character\s*\(\s*1\s*\).*::\s*{rt_flag}", global_source, re.I)
+assert re.search(rf"\b{rt_flag}\s*=\s*'n'", input_source, re.I)
+assert re.search(rf"namelist\s*/\s*propagation\s*/.*?\b{rt_flag}\b", input_source, re.I | re.S)
+assert re.search(rf"call\s+comm_bcast\s*\(\s*{rt_flag}\b", input_source, re.I)
+assert re.search(rf"write\s*\(\s*fh_variables_log.*?{rt_flag}", input_source, re.I | re.S)
+assert re.search(rf"call\s+yn_argument_check\s*\(\s*{rt_flag}\s*\)", input_source, re.I)
+assert re.search(rf"character\s*\(\s*1\s*\).*::\s*{rt_restart_flag}", global_source, re.I)
+assert re.search(rf"\b{rt_restart_flag}\s*=\s*'n'", input_source, re.I)
+assert re.search(rf"call\s+yn_argument_check\s*\(\s*{rt_restart_flag}\s*\)", input_source, re.I)
+assert re.search(r"if\s*\(\s*yn_restart\s*==\s*'y'\s*\).*?forbids conventional", input_source, re.I | re.S)
+assert re.search(
+    rf"if\s*\(\s*{rt_flag}\s*==\s*'y'\s*\)\s*then.*?"
+    r"call\s+run_dg_overlapping_wannier_coefficient_rt.*?return",
+    rt_main_source,
+    re.I | re.S,
+), "coefficient RT needs a terminating dispatch before conventional RT initialization"
+rt_dispatch = rt_main_source.lower().find("call run_dg_overlapping_wannier_coefficient_rt")
+legacy_init = rt_main_source.lower().find("call initialization_rt")
+assert 0 <= rt_dispatch < legacy_init
+coefficient_driver = re.search(
+    r"subroutine\s+run_dg_overlapping_wannier_coefficient_rt(?P<body>.*?)end\s+subroutine",
+    rt_main_source,
+    re.I | re.S,
+)
+assert coefficient_driver
+coefficient_body = coefficient_driver.group("body")
+for required in (
+    "read_dg_overlapping_wannier_checkpoint",
+    "initialize_dg_overlapping_wannier_rt",
+    "advance_dg_overlapping_wannier_rt",
+    "read_dg_overlapping_wannier_rt_restart",
+    "write_dg_overlapping_wannier_rt_restart",
+    "calc_ac_ext_t",
+):
+    assert required in coefficient_body.lower()
+for forbidden in (
+    "initialization_rt",
+    "time_evolution_step",
+    "time_evolution_dg_fragment",
+    "dc_lcfo",
+    "eigenexa",
+    "dg_wpw",
+    "checkpoint_rt",
+):
+    assert forbidden not in coefficient_body.lower(), (
+        f"coefficient RT must not enter forbidden route: {forbidden}"
+    )
+assert "close(unit,iostat=close_ios)" in ow_rt_source.lower()
+assert "stored_digest/=rt_restart_digest" in ow_rt_source.lower()
+assert "call zhegv" in ow_rt_source.lower()
+assert "crank" not in ow_rt_source.lower()
 
 assert re.search(rf"character\s*\(\s*1\s*\).*::\s*{flag}", global_source, re.I), (
     "the overlapping-Wannier route needs its own global flag"

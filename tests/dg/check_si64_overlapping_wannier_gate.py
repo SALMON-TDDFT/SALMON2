@@ -189,7 +189,7 @@ def validate_row(root: Path, decomposition: str, box_profile: str, window: str) 
         fail(f"{row_name}: runtime window does not match matrix coordinate")
     if integers["core_atoms_per_fragment"] != 8 or integers["global_target"] != 384:
         fail(f"{row_name}: occupied plus complete-s+p target is not 8 atoms/48 local/384 global")
-    if integers["checkpoint_format_version"] != 2:
+    if integers["checkpoint_format_version"] != 3:
         fail(f"{row_name}: row-owned checkpoint format V2 was not published")
     max_rows = integers["matrix_owned_rows_max"]
     if max_rows <= 0 or max_rows >= integers["global_target"]:

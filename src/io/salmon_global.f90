@@ -155,6 +155,8 @@ module salmon_global
   character(1)   :: yn_fix_func
   character(1)   :: yn_predictor_corrector
   character(1)   :: yn_dg_fragment_rt
+  character(1)   :: yn_dg_overlapping_wannier_rt
+  character(1)   :: yn_dg_overlapping_wannier_rt_restart
   character(1)   :: yn_dg_length_gauge
   character(1)   :: yn_dg_nodal_rt
   character(16)  :: time_integrator_dg_fragment

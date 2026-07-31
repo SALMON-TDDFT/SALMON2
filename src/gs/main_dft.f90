@@ -79,7 +79,9 @@ use dg_overlapping_wannier_scf, only: s_dg_overlapping_wannier_scf_state, &
   s_dg_overlapping_wannier_scf_result,run_dg_overlapping_wannier_scf, &
   compute_dg_overlapping_wannier_scf_fingerprint,mix_dg_overlapping_wannier_density_history
 use dg_overlapping_wannier_checkpoint, only: s_dg_overlapping_wannier_checkpoint, &
-  write_dg_overlapping_wannier_checkpoint,read_dg_overlapping_wannier_checkpoint
+  write_dg_overlapping_wannier_checkpoint,read_dg_overlapping_wannier_checkpoint,&
+  compute_dg_overlapping_wannier_matrix_fingerprints
+use dg_overlapping_wannier_observables, only: assemble_dg_overlapping_wannier_observables
 use rt_dg_nodal_cg, only: solve_nodal_ground_state_cg_mpi
 use rt_dg_nodal_rayleigh_ritz, only: rayleigh_ritz_nodal_subspace_mpi
 #ifdef USE_EIGENEXA
@@ -1398,6 +1400,24 @@ contains
     if(ow_collective_operator_fingerprint==0_8)ow_collective_operator_fingerprint=1_8
   end function
 
+  subroutine invert_ow_metric(metric,inverse,ok,message)
+    complex(8),intent(in)::metric(:,:)
+    complex(8),allocatable,intent(out)::inverse(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::n,info,i,j
+    external::zpotrf,zpotri
+    n=size(metric,1);ok=.false.;message=''
+    if(n<1.or.size(metric,2)/=n)then;message='invalid metric extent';return;endif
+    allocate(inverse,source=metric)
+    call zpotrf('U',n,inverse,n,info)
+    if(info/=0)then;message='metric is not positive definite';return;endif
+    call zpotri('U',n,inverse,n,info)
+    if(info/=0)then;message='metric inversion failed';return;endif
+    do j=1,n;do i=j+1,n;inverse(i,j)=conjg(inverse(j,i));enddo;enddo
+    ok=.true.
+  end subroutine
+
   subroutine compute_ow_periodic_spread(comm,spread_max)
     integer,intent(in)::comm
     real(8),intent(out)::spread_max
@@ -1469,7 +1489,7 @@ contains
     write(*,'(a,i0)')'[OW-GS-EVIDENCE] target_per_fragment=',local_target
     write(*,'(a,i0)')'[OW-GS-EVIDENCE] core_atoms_per_fragment=',core_atoms
     write(*,'(a,i0)')'[OW-GS-EVIDENCE] global_target=',size(ow_basis%center_owner_rank)
-    write(*,'(a,i0)')'[OW-GS-EVIDENCE] checkpoint_format_version=',2
+    write(*,'(a,i0)')'[OW-GS-EVIDENCE] checkpoint_format_version=',3
     write(*,'(a,i0)')'[OW-GS-EVIDENCE] matrix_owned_rows_max=',max_owned_rows
     write(*,'(a,i0)')'[OW-GS-EVIDENCE] overlap_local_bytes_max=',max_overlap_bytes
     write(*,'(a,i0)')'[OW-GS-EVIDENCE] hamiltonian_local_bytes_max=',max_hamiltonian_bytes
@@ -1684,9 +1704,18 @@ contains
   subroutine populate_ow_checkpoint(occupations,condition_number,closure_residual,operator_fingerprint)
     real(8),intent(in)::occupations(:),condition_number,closure_residual
     integer(8),intent(in)::operator_fingerprint
-    integer::rank,i,j,nowned,nbox,nproc,ierr
+    integer::rank,i,j,nowned,nbox,nproc,ierr,axis,point,ownership_count
     integer(8)::tail_count8
     integer(8),allocatable::all_tail_ids(:)
+    complex(8),allocatable::hrows(:,:),metric(:,:),hamiltonian(:,:),metric_inverse(:,:),zero_hamiltonian(:,:),&
+      position(:,:,:),derivative(:,:,:),canonical_momentum(:,:,:),velocity(:,:,:),nonlocal_velocity(:,:,:),&
+      residual_rows(:,:)
+    real(8),allocatable::new_potential(:),coordinates(:,:)
+    real(8)::origin(3),cell_length(3),local_residual_norm,global_residual_norm,&
+      local_h_norm,global_h_norm,local_s_norm,global_s_norm,published_coefficient_residual
+    logical::ok
+    character(256)::message
+    integer(8)::final_operator_fingerprint
     call MPI_Comm_rank(dc%icomm_tot,rank,i)
     call MPI_Comm_size(dc%icomm_tot,nproc,ierr)
     nowned=count(ow_basis%center_owner_rank==rank)
@@ -1698,12 +1727,77 @@ contains
     allocate(all_tail_ids(nbox))
     call MPI_Allgather(ow_basis%physical_grid_ids,size(ow_basis%physical_grid_ids),MPI_INTEGER8,&
       all_tail_ids,size(ow_basis%physical_grid_ids),MPI_INTEGER8,dc%icomm_tot,ierr)
+    allocate(hrows(size(ow_row_ids),size(ow_srows,2)),new_potential(size(ow_state%potential)))
+    call ow_build_hamiltonian(dc%icomm_tot,ow_state%density,ow_state%potential,hrows,new_potential,&
+      final_operator_fingerprint,ok,message)
+    if(.not.ok.or.final_operator_fingerprint/=operator_fingerprint)then
+      write(0,'(a)')trim(message)
+      error stop 'overlapping-Wannier final Hamiltonian publication gate failed'
+    endif
+    allocate(residual_rows(size(hrows,1),size(ow_state%coefficients,2)))
+    residual_rows=matmul(hrows,ow_state%coefficients)
+    do j=1,size(residual_rows,2)
+      residual_rows(:,j)=residual_rows(:,j)-&
+        ow_state%eigenvalues(j)*matmul(ow_srows,ow_state%coefficients(:,j))
+    enddo
+    published_coefficient_residual=0d0
+    do j=1,size(residual_rows,2)
+      local_residual_norm=sum(abs(residual_rows(:,j))**2)
+      local_h_norm=sum(abs(matmul(hrows,ow_state%coefficients(:,j)))**2)
+      local_s_norm=sum(abs(matmul(ow_srows,ow_state%coefficients(:,j)))**2)
+      call MPI_Allreduce(local_residual_norm,global_residual_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,&
+        dc%icomm_tot,ierr)
+      call MPI_Allreduce(local_h_norm,global_h_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr)
+      call MPI_Allreduce(local_s_norm,global_s_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr)
+      published_coefficient_residual=max(published_coefficient_residual,&
+        sqrt(max(0d0,global_residual_norm))/max(tiny(1d0),sqrt(max(0d0,global_h_norm))+&
+        abs(ow_state%eigenvalues(j))*sqrt(max(0d0,global_s_norm))))
+    enddo
+    if(published_coefficient_residual>dg_dc_gs_final_orbital_tolerance)&
+      error stop 'published overlapping-Wannier H0 is inconsistent with accepted GS coefficients'
+    allocate(metric(size(ow_srows,2),size(ow_srows,2)),hamiltonian(size(ow_srows,2),size(ow_srows,2)))
+    metric=(0d0,0d0);hamiltonian=(0d0,0d0)
+    do i=1,size(ow_row_ids)
+      metric(int(ow_row_ids(i)),:)=ow_srows(i,:)
+      hamiltonian(int(ow_row_ids(i)),:)=hrows(i,:)
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,metric,size(metric),MPI_DOUBLE_COMPLEX,MPI_SUM,dc%icomm_tot,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,hamiltonian,size(hamiltonian),MPI_DOUBLE_COMPLEX,MPI_SUM,dc%icomm_tot,ierr)
+    call invert_ow_metric(metric,metric_inverse,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'overlapping-Wannier metric inverse publication gate failed';endif
+    allocate(zero_hamiltonian(size(metric,1),size(metric,2)));zero_hamiltonian=(0d0,0d0)
+    allocate(coordinates(3,size(ow_core_ids)))
+    do point=1,size(ow_core_ids)
+      coordinates(1,point)=real(modulo(ow_core_ids(point)-1_8,int(dc%lg_tot%num(1),8)),8)*dc%system_tot%hgs(1)
+      coordinates(2,point)=real(modulo((ow_core_ids(point)-1_8)/int(dc%lg_tot%num(1),8),&
+        int(dc%lg_tot%num(2),8)),8)*dc%system_tot%hgs(2)
+      coordinates(3,point)=real((ow_core_ids(point)-1_8)/&
+        (int(dc%lg_tot%num(1),8)*int(dc%lg_tot%num(2),8)),8)*dc%system_tot%hgs(3)
+    enddo
+    origin=0d0;cell_length=real(dc%lg_tot%num,8)*dc%system_tot%hgs
+    call assemble_dg_overlapping_wannier_observables(dc%icomm_tot,size(metric,1),ow_core_ids,&
+      ow_core_weights,coordinates,origin,cell_length,'cell_wrapped',ow_core_values,ow_core_gradients,&
+      metric,metric_inverse,hamiltonian,zero_hamiltonian,ow_global_grid_count,&
+      dg_dc_gs_hermiticity_tolerance,position,derivative,canonical_momentum,velocity,&
+      nonlocal_velocity,ownership_count,ok,message)
+    if(.not.ok.or.int(ownership_count,8)/=ow_global_grid_count)then
+      write(0,'(a)')trim(message)
+      error stop 'overlapping-Wannier observable publication gate failed'
+    endif
     ow_checkpoint=s_dg_overlapping_wannier_checkpoint()
     ow_checkpoint%basis_generation=ow_basis%generation;ow_checkpoint%geometry_generation=1
     ow_checkpoint%basis_fingerprint=ow_state%basis_fingerprint
     ow_checkpoint%operator_fingerprint=operator_fingerprint
+    call compute_dg_overlapping_wannier_matrix_fingerprints(dc%icomm_tot,ow_row_ids,hrows,&
+      position(:,ow_row_ids,:),velocity(:,ow_row_ids,:),ow_checkpoint%hamiltonian_fingerprint,&
+      ow_checkpoint%observable_fingerprint,ok)
+    if(.not.ok)error stop 'overlapping-Wannier matrix fingerprint publication gate failed'
+    ow_checkpoint%field_coupling_convention='cell_wrapped_length_velocity'
     allocate(ow_checkpoint%center_owner,source=ow_basis%center_owner_rank)
     allocate(ow_checkpoint%overlap,source=ow_srows)
+    allocate(ow_checkpoint%hamiltonian0,source=hrows)
+    allocate(ow_checkpoint%position,source=position(:,ow_row_ids,:))
+    allocate(ow_checkpoint%velocity,source=velocity(:,ow_row_ids,:))
     allocate(ow_checkpoint%overlap_row_ids,source=ow_row_ids)
     allocate(ow_checkpoint%coefficients,source=ow_state%coefficients)
     allocate(ow_checkpoint%occupations,source=occupations)

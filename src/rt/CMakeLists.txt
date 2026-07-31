@@ -28,6 +28,7 @@ set(SOURCES
     dg/rt_dg_wpw_linalg.f90
     dg/rt_dg_wpw_window.f90
     dg/rt_dg_wpw_reduced_mixedz_diag.f90
+    dg/rt_dg_overlapping_wannier.f90
     dg/rt_dg_plane_wave.f90
     rt_angular_momentum.f90
     rt_local_chern_marker.f90
