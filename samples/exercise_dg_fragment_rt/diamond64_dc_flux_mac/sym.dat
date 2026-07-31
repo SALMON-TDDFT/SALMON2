@@ -1,8 +1,0 @@
-# Identity and inversion about fractional position (1/16, 1/16, 1/16).
-# This closed subgroup is the minimum C64 SAWF gate for even-order response.
- 1  0  0  0.000
- 0  1  0  0.000
- 0  0  1  0.000
--1  0  0  0.125
- 0 -1  0  0.125
- 0  0 -1  0.125

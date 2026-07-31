@@ -53,6 +53,8 @@ FORBIDDEN_INPUTS = {
 FORBIDDEN_SOURCE_PREFIXES = (
     "src/common/dg_wpw_",
     "src/gs/dc/dg_wpw_",
+    "src/rt/dg/rt_dg_fragment",
+    "src/rt/dg/rt_dg_integrator_",
     "src/rt/dg/rt_dg_wpw_",
     "src/rt/dg/rt_dg_nodal_",
 )
