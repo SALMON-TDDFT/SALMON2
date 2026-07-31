@@ -20,6 +20,8 @@ module rt_dg_overlapping_wannier
   end type
   public::initialize_dg_overlapping_wannier_rt,advance_dg_overlapping_wannier_rt
   public::write_dg_overlapping_wannier_rt_restart,read_dg_overlapping_wannier_rt_restart
+  public::evaluate_dg_overlapping_wannier_observables
+  public::write_dg_overlapping_wannier_rt_observable_sample
 contains
   subroutine initialize_dg_overlapping_wannier_rt(comm,row_ids,srows,hrows,xrows,vrows,&
       basis_generation,geometry_generation,basis_fingerprint,operator_fingerprint,&
@@ -169,6 +171,199 @@ contains
 #else
     state=s_dg_overlapping_wannier_rt_state();ok=.false.
     message='overlapping-Wannier coefficient RT requires MPI'
+#endif
+  end subroutine
+
+  subroutine evaluate_dg_overlapping_wannier_observables(comm,coefficients,occupations,&
+      volume,state,polarization,current,ok,message)
+    integer,intent(in)::comm
+    complex(real64),intent(in)::coefficients(:,:)
+    real(real64),intent(in)::occupations(:),volume
+    type(s_dg_overlapping_wannier_rt_state),intent(in)::state
+    real(real64),intent(out)::polarization(3),current(3)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,ierr,local_bad,global_bad,axis,state_index
+    integer::shape_contract(2),shape_min(2),shape_max(2)
+    real(real64)::volume_min,volume_max,coefficient_defect,occupation_defect
+    complex(real64),allocatable::coefficient_reference(:,:)
+    real(real64),allocatable::occupation_reference(:)
+
+    call MPI_Comm_rank(comm,rank,ierr)
+    polarization=0d0;current=0d0;ok=.false.;message='';local_bad=0
+    shape_contract=shape(coefficients)
+    call MPI_Allreduce(shape_contract,shape_min,2,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(shape_contract,shape_max,2,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(any(shape_min/=shape_max).or..not.ieee_is_finite(volume))local_bad=1
+    if(ieee_is_finite(volume))then
+      if(volume<=0d0)local_bad=1
+    endif
+    if(state%nwann<1.or.state%fingerprint==0_int64.or.&
+       state%basis_fingerprint==0_int64.or.state%operator_fingerprint==0_int64.or.&
+       state%hamiltonian_fingerprint==0_int64.or.state%observable_fingerprint==0_int64.or.&
+       trim(state%field_coupling_convention)/='cell_wrapped_length_velocity'.or.&
+       size(coefficients,1)/=state%nwann.or.size(coefficients,2)<1.or.&
+       size(occupations)/=size(coefficients,2))local_bad=1
+    if(.not.finite_complex_2d(coefficients).or.any(.not.ieee_is_finite(occupations)))local_bad=1
+    if(all(ieee_is_finite(occupations)))then
+      if(any(occupations<0d0))local_bad=1
+    endif
+    if(.not.allocated(state%position).or..not.allocated(state%velocity))local_bad=1
+    if(rank==0)then
+      if(allocated(state%position).and.allocated(state%velocity))then
+        if(any(shape(state%position)/=[3,state%nwann,state%nwann]).or.&
+           any(shape(state%velocity)/=[3,state%nwann,state%nwann]))local_bad=1
+      endif
+    else
+      if(allocated(state%position).and.allocated(state%velocity))then
+        if(size(state%position)/=0.or.size(state%velocity)/=0)local_bad=1
+      endif
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then
+      message='invalid overlapping-Wannier observable contract';return
+    endif
+    call MPI_Allreduce(volume,volume_min,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(volume,volume_max,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(volume_min/=volume_max)then
+      message='rank-inconsistent overlapping-Wannier observable volume';return
+    endif
+
+    allocate(coefficient_reference(size(coefficients,1),size(coefficients,2)),&
+      occupation_reference(size(occupations)))
+    coefficient_reference=coefficients;occupation_reference=occupations
+    call MPI_Bcast(coefficient_reference,size(coefficient_reference),MPI_DOUBLE_COMPLEX,0,comm,ierr)
+    call MPI_Bcast(occupation_reference,size(occupation_reference),MPI_DOUBLE_PRECISION,0,comm,ierr)
+    coefficient_defect=maxval(abs(coefficients-coefficient_reference))
+    occupation_defect=maxval(abs(occupations-occupation_reference))
+    call MPI_Allreduce(MPI_IN_PLACE,coefficient_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,occupation_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(coefficient_defect/=0d0.or.occupation_defect/=0d0)then
+      message='rank-inconsistent overlapping-Wannier observable payload';return
+    endif
+
+    if(rank==0)then
+      do axis=1,3
+        do state_index=1,size(coefficients,2)
+          polarization(axis)=polarization(axis)-occupations(state_index)*real(&
+            dot_product(coefficients(:,state_index),matmul(state%position(axis,:,:),&
+              coefficients(:,state_index))),real64)/volume
+          current(axis)=current(axis)-occupations(state_index)*real(&
+            dot_product(coefficients(:,state_index),matmul(state%velocity(axis,:,:),&
+              coefficients(:,state_index))),real64)/volume
+        enddo
+      enddo
+      local_bad=merge(0,1,all(ieee_is_finite(polarization)).and.all(ieee_is_finite(current)))
+    endif
+    call MPI_Bcast(local_bad,1,MPI_INTEGER,0,comm,ierr)
+    if(local_bad/=0)then
+      message='nonfinite overlapping-Wannier observables';return
+    endif
+    call MPI_Bcast(polarization,3,MPI_DOUBLE_PRECISION,0,comm,ierr)
+    call MPI_Bcast(current,3,MPI_DOUBLE_PRECISION,0,comm,ierr)
+    ok=.true.
+#else
+    polarization=0d0;current=0d0;ok=.false.
+    message='overlapping-Wannier observables require MPI'
+#endif
+  end subroutine
+
+  subroutine write_dg_overlapping_wannier_rt_observable_sample(comm,path,electric_field,&
+      polarization,current,volume,state,restart_mode,ok,message)
+    integer,intent(in)::comm
+    character(*),intent(in)::path
+    real(real64),intent(in)::electric_field(3),polarization(3),current(3),volume
+    type(s_dg_overlapping_wannier_rt_state),intent(in)::state
+    logical,intent(in)::restart_mode
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    character(*),parameter::magic='# SALMON_OW_COEFFICIENT_RT_OBSERVABLES_V1'
+    character(*),parameter::columns='# step time Ex Ey Ez Px Py Pz Jx Jy Jz'
+    character(1024)::line,expected_provenance,expected_volume
+    integer::rank,ierr,unit,ios,local_bad,global_bad,last_step
+    real(real64)::payload(10),last_payload(10)
+    logical::exists,have_data,duplicate
+
+    call MPI_Comm_rank(comm,rank,ierr);ok=.false.;message='';local_bad=0
+    payload=[state%time,electric_field,polarization,current]
+    if(len_trim(path)==0.or.state%nwann<1.or.state%fingerprint==0_int64.or.state%step<0.or.&
+       state%time<0d0.or.volume<=0d0.or..not.ieee_is_finite(volume).or.&
+       any(.not.ieee_is_finite(payload)))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then;message='invalid overlapping-Wannier observable sample';return;endif
+    write(expected_volume,'(a,es26.17e3)')'# volume_au ',volume
+    write(expected_provenance,'(a,7(1x,i0),1x,a)')'# provenance',state%nwann,&
+      state%basis_generation,state%geometry_generation,state%basis_fingerprint,&
+      state%operator_fingerprint,state%hamiltonian_fingerprint,state%observable_fingerprint,&
+      trim(state%field_coupling_convention)
+    ios=0;duplicate=.false.
+    if(rank==0)then
+      inquire(file=trim(path),exist=exists)
+      if(.not.exists)then
+        if(restart_mode.or.state%step/=0)then
+          ios=1
+        else
+          open(newunit=unit,file=trim(path),status='new',action='write',form='formatted',iostat=ios)
+          if(ios==0)then
+            write(unit,'(a)',iostat=ios)magic
+            if(ios==0)write(unit,'(a)',iostat=ios)'# sign electronic_charge=-1'
+            if(ios==0)write(unit,'(a)',iostat=ios)&
+              '# units time=au electric_field=au polarization=electron/bohr^2 current=electron/(bohr^2*au)'
+            if(ios==0)write(unit,'(a)',iostat=ios)trim(expected_volume)
+            if(ios==0)write(unit,'(a)',iostat=ios)trim(expected_provenance)
+            if(ios==0)write(unit,'(a)',iostat=ios)columns
+            if(ios==0)write(unit,'(i12,1x,10(es26.17e3,1x))',iostat=ios)state%step,payload
+            close(unit)
+          endif
+        endif
+      else
+        open(newunit=unit,file=trim(path),status='old',action='read',form='formatted',iostat=ios)
+        have_data=.false.;last_step=-1;last_payload=0d0
+        if(ios==0)then
+          read(unit,'(a)',iostat=ios)line;if(ios==0.and.trim(line)/=magic)ios=1
+          if(ios==0)read(unit,'(a)',iostat=ios)line
+          if(ios==0.and.trim(line)/='# sign electronic_charge=-1')ios=1
+          if(ios==0)read(unit,'(a)',iostat=ios)line
+          if(ios==0.and.trim(line)/=&
+            '# units time=au electric_field=au polarization=electron/bohr^2 current=electron/(bohr^2*au)')ios=1
+          if(ios==0)read(unit,'(a)',iostat=ios)line
+          if(ios==0.and.trim(line)/=trim(expected_volume))ios=1
+          if(ios==0)read(unit,'(a)',iostat=ios)line
+          if(ios==0.and.trim(line)/=trim(expected_provenance))ios=1
+          if(ios==0)read(unit,'(a)',iostat=ios)line
+          if(ios==0.and.trim(line)/=columns)ios=1
+        endif
+        do while(ios==0)
+          read(unit,'(a)',iostat=ios)line
+          if(ios/=0)exit
+          read(line,*,iostat=ios)last_step,last_payload
+          if(ios==0)have_data=.true.
+        enddo
+        if(is_iostat_end(ios))ios=0
+        close(unit)
+        if(ios==0.and..not.have_data)ios=1
+        if(ios==0)then
+          duplicate=last_step==state%step.and.all(last_payload==payload)
+          if(last_step==state%step.and..not.duplicate)ios=1
+          if(last_step/=state%step.and.last_step/=state%step-1)ios=1
+          if(restart_mode.and.last_step==state%step.and..not.duplicate)ios=1
+        endif
+        if(ios==0.and..not.duplicate)then
+          open(newunit=unit,file=trim(path),status='old',position='append',action='write',iostat=ios)
+          if(ios==0)then
+            write(unit,'(i12,1x,10(es26.17e3,1x))',iostat=ios)state%step,payload
+            close(unit)
+          endif
+        endif
+      endif
+    endif
+    call MPI_Bcast(ios,1,MPI_INTEGER,0,comm,ierr)
+    if(ios/=0)then;message='observable file is missing, corrupt, stale, or mismatched';return;endif
+    ok=.true.
+#else
+    ok=.false.;message='overlapping-Wannier observable publication requires MPI'
 #endif
   end subroutine
 

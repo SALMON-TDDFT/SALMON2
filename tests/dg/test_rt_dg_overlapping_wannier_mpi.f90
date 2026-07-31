@@ -2,7 +2,6 @@
 program test_rt_dg_overlapping_wannier_mpi
   use mpi
   use iso_fortran_env,only:int64,real64
-  use ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   use rt_dg_overlapping_wannier,only:s_dg_overlapping_wannier_rt_state,&
     initialize_dg_overlapping_wannier_rt,advance_dg_overlapping_wannier_rt,&
     write_dg_overlapping_wannier_rt_restart,read_dg_overlapping_wannier_rt_restart,&
@@ -218,6 +217,7 @@ contains
     real(real64)::occupations(2),bad_occupations(2),polarization(3),current(3),&
       expected_polarization(3),expected_current(3),field(3),sample_p(3),sample_j(3)
     integer::axis,band,corrupt_unit
+    integer(int64)::nan_bits(2)
 
     position_reference=(0d0,0d0);velocity_reference=(0d0,0d0)
     position_reference(1,2,2)=1d0
@@ -255,6 +255,9 @@ contains
       call evaluate_dg_overlapping_wannier_observables(comm,coefficients,bad_occupations,4d0,&
         observable_state,polarization,current,ok,message)
       call require(.not.ok,'collectively inconsistent occupations rejection')
+      call evaluate_dg_overlapping_wannier_observables(comm,coefficients,occupations,&
+        merge(4d0,5d0,rank==0),observable_state,polarization,current,ok,message)
+      call require(.not.ok,'collectively inconsistent volume rejection')
     endif
     call evaluate_dg_overlapping_wannier_observables(comm,coefficients,occupations(:1),4d0,&
       observable_state,polarization,current,ok,message)
@@ -263,16 +266,22 @@ contains
       observable_state,polarization,current,ok,message)
     call require(.not.ok,'nonpositive volume rejection')
     call evaluate_dg_overlapping_wannier_observables(comm,coefficients,occupations,&
-      ieee_value(4d0,ieee_quiet_nan),observable_state,polarization,current,ok,message)
+      transfer(int(z'7ff8000000000000',int64),0d0),observable_state,polarization,current,ok,message)
     call require(.not.ok,'nonfinite volume rejection')
     bad_coefficients=coefficients
-    bad_coefficients(1,1)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,real64)
+    nan_bits=[int(z'7ff8000000000000',int64),0_int64]
+    bad_coefficients(1,1)=transfer(nan_bits,bad_coefficients(1,1))
     call evaluate_dg_overlapping_wannier_observables(comm,bad_coefficients,occupations,4d0,&
       observable_state,polarization,current,ok,message)
     call require(.not.ok,'nonfinite coefficients rejection')
     call evaluate_dg_overlapping_wannier_observables(comm,coefficients,occupations,4d0,&
       invalid_state,polarization,current,ok,message)
     call require(.not.ok,'uninitialized observable state rejection')
+    invalid_state=observable_state
+    invalid_state%observable_fingerprint=0_int64
+    call evaluate_dg_overlapping_wannier_observables(comm,coefficients,occupations,4d0,&
+      invalid_state,polarization,current,ok,message)
+    call require(.not.ok,'stale observable state rejection')
 
     sample_state=observable_state;field=[0.01d0,0d0,0d0]
     sample_p=expected_polarization;sample_j=expected_current
