@@ -190,6 +190,29 @@ assert "close(unit,iostat=close_ios)" in ow_rt_source.lower()
 assert "stored_digest/=rt_restart_digest" in ow_rt_source.lower()
 assert "call zhegv" in ow_rt_source.lower()
 assert "crank" not in ow_rt_source.lower()
+for observable_api in (
+    "evaluate_dg_overlapping_wannier_observables",
+    "write_dg_overlapping_wannier_rt_observable_sample",
+):
+    assert re.search(rf"public\s*::.*?{observable_api}", ow_rt_source, re.I | re.S), (
+        f"coefficient RT must expose {observable_api}"
+    )
+for observable_call in (
+    "evaluate_dg_overlapping_wannier_observables",
+    "write_dg_overlapping_wannier_rt_observable_sample",
+):
+    assert re.search(rf"call\s+{observable_call}", coefficient_body, re.I), (
+        f"production coefficient RT must call {observable_call}"
+    )
+assert "checkpoint%occupations" in coefficient_body.lower(), (
+    "production observables must use V3 checkpoint occupations"
+)
+assert "overlapping_wannier_rt_observables.dat" in coefficient_body.lower(), (
+    "production coefficient RT must publish the dedicated observable time series"
+)
+assert "step time ex ey ez px py pz jx jy jz" in ow_rt_source.lower(), (
+    "observable evidence must declare the deterministic E/P/J column order"
+)
 
 assert re.search(rf"character\s*\(\s*1\s*\).*::\s*{flag}", global_source, re.I), (
     "the overlapping-Wannier route needs its own global flag"

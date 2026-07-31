@@ -2,9 +2,12 @@
 program test_rt_dg_overlapping_wannier_mpi
   use mpi
   use iso_fortran_env,only:int64,real64
+  use ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   use rt_dg_overlapping_wannier,only:s_dg_overlapping_wannier_rt_state,&
     initialize_dg_overlapping_wannier_rt,advance_dg_overlapping_wannier_rt,&
-    write_dg_overlapping_wannier_rt_restart,read_dg_overlapping_wannier_rt_restart
+    write_dg_overlapping_wannier_rt_restart,read_dg_overlapping_wannier_rt_restart,&
+    evaluate_dg_overlapping_wannier_observables,&
+    write_dg_overlapping_wannier_rt_observable_sample
   implicit none
   integer::comm,rank,nproc,ierr,i,nlocal,unit
   integer,allocatable::row_ids(:)
@@ -22,10 +25,12 @@ program test_rt_dg_overlapping_wannier_mpi
   logical::ok
   character(256)::message
   character(512)::restart_prefix
+  character(512)::observable_prefix
 
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
   call get_environment_variable('OW_RT_RESTART_PREFIX',restart_prefix)
+  call get_environment_variable('OW_RT_OBSERVABLE_PREFIX',observable_prefix)
   nlocal=count([(mod(i-1,nproc)==rank,i=1,2)])
   allocate(row_ids(nlocal),srows(nlocal,2),hrows(nlocal,2),xrows(3,nlocal,2),vrows(3,nlocal,2))
   nlocal=0
@@ -56,6 +61,7 @@ program test_rt_dg_overlapping_wannier_mpi
   call require(ok,trim(message))
   call require((rank==0.and.size(state%metric)==4).or.(rank/=0.and.size(state%metric)==0),&
     'dense eigensystem storage is root-owned')
+  call test_observable_contracts(state,metric,full_position,full_velocity,trim(observable_prefix))
   call advance_dg_overlapping_wannier_rt(comm,0.05d0,[0d0,0d0,0d0],[0d0,0d0,0d0],&
     continuous,state,ok,message)
   call require(ok,trim(message))
@@ -201,6 +207,123 @@ program test_rt_dg_overlapping_wannier_mpi
     nproc,' ranks fingerprint=',state%fingerprint
   call MPI_Finalize(ierr)
 contains
+  subroutine test_observable_contracts(observable_state,metric_reference,position_reference,&
+      velocity_reference,output_prefix)
+    type(s_dg_overlapping_wannier_rt_state),intent(in)::observable_state
+    complex(real64),intent(in)::metric_reference(2,2)
+    complex(real64),intent(out)::position_reference(3,2,2),velocity_reference(3,2,2)
+    character(*),intent(in)::output_prefix
+    type(s_dg_overlapping_wannier_rt_state)::sample_state,invalid_state
+    complex(real64)::coefficients(2,2),bad_coefficients(2,2),operator_product(2)
+    real(real64)::occupations(2),bad_occupations(2),polarization(3),current(3),&
+      expected_polarization(3),expected_current(3),field(3),sample_p(3),sample_j(3)
+    integer::axis,band,corrupt_unit
+
+    position_reference=(0d0,0d0);velocity_reference=(0d0,0d0)
+    position_reference(1,2,2)=1d0
+    velocity_reference(1,1,2)=cmplx(0d0,0.1d0,real64)
+    velocity_reference(1,2,1)=cmplx(0d0,-0.1d0,real64)
+    coefficients(:,1)=[cmplx(0.6d0,0.2d0,real64),cmplx(-0.3d0,0.1d0,real64)]
+    coefficients(:,1)=coefficients(:,1)/sqrt(real(dot_product(coefficients(:,1),&
+      matmul(metric_reference,coefficients(:,1))),real64))
+    coefficients(:,2)=[cmplx(0.1d0,-0.4d0,real64),cmplx(0.5d0,0.2d0,real64)]
+    coefficients(:,2)=coefficients(:,2)/sqrt(real(dot_product(coefficients(:,2),&
+      matmul(metric_reference,coefficients(:,2))),real64))
+    occupations=[2d0,0.5d0]
+    expected_polarization=0d0;expected_current=0d0
+    do axis=1,3
+      do band=1,2
+        operator_product=matmul(position_reference(axis,:,:),coefficients(:,band))
+        expected_polarization(axis)=expected_polarization(axis)-occupations(band)*&
+          real(dot_product(coefficients(:,band),operator_product),real64)/4d0
+        operator_product=matmul(velocity_reference(axis,:,:),coefficients(:,band))
+        expected_current(axis)=expected_current(axis)-occupations(band)*&
+          real(dot_product(coefficients(:,band),operator_product),real64)/4d0
+      enddo
+    enddo
+    call evaluate_dg_overlapping_wannier_observables(comm,coefficients,occupations,4d0,&
+      observable_state,polarization,current,ok,message)
+    call require(ok,trim(message))
+    call require(maxval(abs(polarization-expected_polarization))<1d-14,&
+      'occupation-weighted polarization divided by volume')
+    call require(maxval(abs(current-expected_current))<1d-14,&
+      'occupation-weighted current divided by volume')
+
+    if(nproc>1)then
+      bad_occupations=occupations
+      if(rank==0)bad_occupations(2)=0.25d0
+      call evaluate_dg_overlapping_wannier_observables(comm,coefficients,bad_occupations,4d0,&
+        observable_state,polarization,current,ok,message)
+      call require(.not.ok,'collectively inconsistent occupations rejection')
+    endif
+    call evaluate_dg_overlapping_wannier_observables(comm,coefficients,occupations(:1),4d0,&
+      observable_state,polarization,current,ok,message)
+    call require(.not.ok,'wrong occupation count rejection')
+    call evaluate_dg_overlapping_wannier_observables(comm,coefficients,occupations,0d0,&
+      observable_state,polarization,current,ok,message)
+    call require(.not.ok,'nonpositive volume rejection')
+    call evaluate_dg_overlapping_wannier_observables(comm,coefficients,occupations,&
+      ieee_value(4d0,ieee_quiet_nan),observable_state,polarization,current,ok,message)
+    call require(.not.ok,'nonfinite volume rejection')
+    bad_coefficients=coefficients
+    bad_coefficients(1,1)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,real64)
+    call evaluate_dg_overlapping_wannier_observables(comm,bad_coefficients,occupations,4d0,&
+      observable_state,polarization,current,ok,message)
+    call require(.not.ok,'nonfinite coefficients rejection')
+    call evaluate_dg_overlapping_wannier_observables(comm,coefficients,occupations,4d0,&
+      invalid_state,polarization,current,ok,message)
+    call require(.not.ok,'uninitialized observable state rejection')
+
+    sample_state=observable_state;field=[0.01d0,0d0,0d0]
+    sample_p=expected_polarization;sample_j=expected_current
+    sample_state%step=0;sample_state%time=0d0
+    call write_dg_overlapping_wannier_rt_observable_sample(comm,trim(output_prefix)//'-one.dat',&
+      field,sample_p,sample_j,4d0,sample_state,.false.,ok,message)
+    call require(ok,trim(message))
+    sample_state%step=1;sample_state%time=0.05d0;sample_p(1)=sample_p(1)+0.001d0
+    call write_dg_overlapping_wannier_rt_observable_sample(comm,trim(output_prefix)//'-one.dat',&
+      field,sample_p,sample_j,4d0,sample_state,.false.,ok,message)
+    call require(ok,trim(message))
+    sample_state%step=2;sample_state%time=0.10d0;sample_p(1)=sample_p(1)+0.001d0
+    call write_dg_overlapping_wannier_rt_observable_sample(comm,trim(output_prefix)//'-one.dat',&
+      field,sample_p,sample_j,4d0,sample_state,.false.,ok,message)
+    call require(ok,trim(message))
+
+    sample_state%step=0;sample_state%time=0d0;sample_p=expected_polarization
+    call write_dg_overlapping_wannier_rt_observable_sample(comm,trim(output_prefix)//'-split.dat',&
+      field,sample_p,sample_j,4d0,sample_state,.false.,ok,message)
+    call require(ok,trim(message))
+    sample_state%step=1;sample_state%time=0.05d0;sample_p(1)=sample_p(1)+0.001d0
+    call write_dg_overlapping_wannier_rt_observable_sample(comm,trim(output_prefix)//'-split.dat',&
+      field,sample_p,sample_j,4d0,sample_state,.false.,ok,message)
+    call require(ok,trim(message))
+    call write_dg_overlapping_wannier_rt_observable_sample(comm,trim(output_prefix)//'-split.dat',&
+      field,sample_p,sample_j,4d0,sample_state,.true.,ok,message)
+    call require(ok,trim(message))
+    invalid_state=sample_state
+    invalid_state%observable_fingerprint=ieor(invalid_state%observable_fingerprint,1_int64)
+    call write_dg_overlapping_wannier_rt_observable_sample(comm,trim(output_prefix)//'-split.dat',&
+      field,sample_p,sample_j,4d0,invalid_state,.true.,ok,message)
+    call require(.not.ok,'stale observable provenance rejection')
+    call write_dg_overlapping_wannier_rt_observable_sample(comm,trim(output_prefix)//'-split.dat',&
+      field,sample_p,sample_j,5d0,sample_state,.true.,ok,message)
+    call require(.not.ok,'mismatched observable volume rejection')
+    sample_state%step=2;sample_state%time=0.10d0;sample_p(1)=sample_p(1)+0.001d0
+    call write_dg_overlapping_wannier_rt_observable_sample(comm,trim(output_prefix)//'-split.dat',&
+      field,sample_p,sample_j,4d0,sample_state,.true.,ok,message)
+    call require(ok,trim(message))
+
+    if(rank==0)then
+      open(newunit=corrupt_unit,file=trim(output_prefix)//'-corrupt.dat',status='replace')
+      write(corrupt_unit,'(a)')'truncated observable evidence'
+      close(corrupt_unit)
+    endif
+    call MPI_Barrier(comm,ierr)
+    call write_dg_overlapping_wannier_rt_observable_sample(comm,trim(output_prefix)//'-corrupt.dat',&
+      field,sample_p,sample_j,4d0,sample_state,.true.,ok,message)
+    call require(.not.ok,'truncated observable file rejection')
+  end subroutine
+
   subroutine require(condition,label)
     logical,intent(in)::condition
     character(*),intent(in)::label
