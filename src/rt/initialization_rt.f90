@@ -57,8 +57,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use em_field, only: set_vonf,calc_Ac_ext_t
   use dip, only: calc_dip
   use sendrecv_grid
-  use salmon_global, only: quiet, yn_conventional_from_dcdft, yn_dg_fragment_rt, yn_dg_fragment_from_dcdft, yn_spinorbit, &
-                           nproc_rgrid, nproc_rgrid_tot, nproc_ob, aEwald, cutoff_r, yn_jm
+  use salmon_global, only: quiet, yn_conventional_from_dcdft, yn_spinorbit, yn_jm
   use gram_schmidt_orth, only: gram_schmidt
   use jellium, only: make_rho_jm
   use filesystem, only: open_filehandle
@@ -66,8 +65,6 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use lcfo_soi_init, only: init_conventional_from_dcdft_soi
   implicit none
   integer,parameter :: Nd = 4
-  character(256) :: restart_gdir, restart_wdir
-
   real(8)       :: debye2au   ! [D]  -> [a.u.]
 
   type(s_rgrid) :: lg
@@ -104,9 +101,6 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   character(100):: comment_line
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
   integer :: itt
-  integer :: nproc_rgrid_tmp(3)
-  integer :: nproc_ob_tmp
-  integer :: expected_ob
   logical :: rion_update
 
   call nvtxStartRange('initialization_rt', __LINE__)
@@ -203,41 +197,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   call timer_begin(LOG_READ_GS_DATA)
   call nvtxStartRange('READ_GS_DATA', __LINE__)
   
-  if (yn_dg_fragment_rt == 'y') then
-    nproc_rgrid_tmp = nproc_rgrid
-    nproc_ob_tmp = nproc_ob
-    nproc_rgrid = nproc_rgrid_tot
-    ! In DG-RT, nproc_ob is the orbital-parallel width inside each fragment
-    ! subgroup.  Keep it as an orbital dimension during the parent grid setup;
-    ! do not fold it into nproc_rgrid, or the run silently reverts to extra
-    ! real-space splitting such as 8,8,8 x nproc_ob -> 32,8,8.
-  end if
-
   call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile)
-
-  if (yn_dg_fragment_rt == 'y') then
-    expected_ob = max(1, nproc_ob_tmp)
-    if (comm_is_root(nproc_id_global)) then
-      write(*,'(1x,a,i0,a,3(i0,1x))') '[DG-RT-PARENT] nproc_ob=', info%nporbital, &
-        ' nproc_rgrid=', info%nprgrid(1), info%nprgrid(2), info%nprgrid(3)
-      flush(6)
-    end if
-    if (info%nporbital /= expected_ob .or. any(info%nprgrid(1:3) /= nproc_rgrid_tot(1:3))) then
-      if (comm_is_root(nproc_id_global)) then
-        write(*,'(1x,a)') '[FATAL] DG-RT parent MPI layout mismatch.'
-        write(*,'(1x,a,i0,a,3(i0,1x))') '        actual   nproc_ob=', info%nporbital, &
-          ' nproc_rgrid=', info%nprgrid(1), info%nprgrid(2), info%nprgrid(3)
-        write(*,'(1x,a,i0,a,3(i0,1x))') '        expected nproc_ob=', expected_ob, &
-          ' nproc_rgrid_tot=', nproc_rgrid_tot(1), nproc_rgrid_tot(2), nproc_rgrid_tot(3)
-        write(*,'(1x,a)') '        Use &parallel nproc_ob for fragment-internal orbital parallelism;'
-        write(*,'(1x,a)') '        do not fold it into nproc_rgrid.'
-        flush(6)
-      end if
-      stop 'DG-RT parent MPI layout mismatch'
-    end if
-    nproc_rgrid = nproc_rgrid_tmp
-    nproc_ob = nproc_ob_tmp
-  end if
   
   call init_code_optimization
   
@@ -287,21 +247,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   
   call timer_begin(LOG_RESTART_SYNC)
   call timer_begin(LOG_RESTART_SELF)
-  if (yn_dg_fragment_rt == 'y' .and. yn_dg_fragment_from_dcdft == 'y') then
-    if (yn_restart == 'y') then
-      if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
-        write(*,'(1x,a)') 'DG-Fragment RT: read polished conventional restart for DG projection'
-      end if
-      call generate_restart_directory_name(directory_read_data, restart_gdir, restart_wdir)
-      restart_wdir = restart_gdir
-      call read_bin(restart_wdir,lg,mg,system,info,spsi_in,Mit,is_self_checkpoint=.false.)
-    else
-      if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
-        write(*,'(1x,a)') "DG-Fragment RT: skip conventional DC-LCFO real-space wavefunction reconstruction"
-        write(*,'(1x,a)') "DG-Fragment RT: density and potentials will be reconstructed from fragment coefficients"
-      end if
-    end if
-  else if(yn_conventional_from_dcdft=='n') then
+  if(yn_conventional_from_dcdft=='n') then
     call restart_rt(lg,mg,system,info,spsi_in,Mit,rt,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2)
   else
   ! conventional TDDFT wavefunctions are reconstructed from DC-LCFO data
@@ -317,7 +263,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   call timer_end(LOG_RESTART_SYNC)
   if(yn_restart=='n') Mit=0
 
-  if((gram_schmidt_interval == 0) .and. .not.(yn_dg_fragment_rt == 'y' .and. yn_dg_fragment_from_dcdft == 'y')) then
+  if(gram_schmidt_interval == 0) then
     call gram_schmidt(system, mg, info, spsi_in)
   end if
 
@@ -329,51 +275,6 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
     end if
   end if
 
-  if (yn_dg_fragment_rt == 'y' .and. yn_dg_fragment_from_dcdft == 'y') then
-    allocate(energy%esp(system%no,system%nk,system%nspin))
-    energy%esp(:, :, :) = 0.0d0
-    energy%E_tot = 0.0d0
-    energy%E_kin = 0.0d0
-    energy%E_h = 0.0d0
-    energy%E_xc = 0.0d0
-    energy%E_ion_ion = 0.0d0
-    energy%E_ion_loc = 0.0d0
-    energy%E_ion_nloc = 0.0d0
-    energy%E_U = 0.0d0
-    select case(iperiodic)
-    case(0)
-       ewald%yn_bookkeep='n'
-       call compute_dg_initial_isolated_ion_ion_energy
-    case(3)
-       ewald%yn_bookkeep='y'
-       call init_nion_div(system, lg, mg, info)
-       call init_ewald(system, info, ewald)
-       call compute_dg_initial_ion_ion_energy
-    end select
-    if(comm_is_root(nproc_id_global))then
-       write(ofl%file_rt_data,"(2A,'_rt.data')") trim(base_directory),trim(SYSname)
-       write(ofl%file_rt_energy_data,"(2A,'_rt_energy.data')") trim(base_directory),trim(SYSname)
-       write(ofl%file_response_data,"(2A,'_response.data')") trim(base_directory),trim(SYSname)
-       write(ofl%file_pulse_data,"(2A,'_pulse.data')") trim(base_directory),trim(SYSname)
-    endif
-    call comm_bcast(ofl%file_rt_data,       nproc_group_global)
-    call comm_bcast(ofl%file_rt_energy_data,nproc_group_global)
-    call comm_bcast(ofl%file_response_data, nproc_group_global)
-    call comm_bcast(ofl%file_pulse_data,    nproc_group_global)
-    select case(iperiodic)
-    case(0) ; call write_rt_data_0d(-1,ofl,dt,system,rt)
-    case(3) ; call write_rt_data_3d(-1,ofl,dt,system,curr_e_tmp,curr_i_tmp)
-    end select
-    call write_rt_energy_data(-1,ofl,dt,energy,md)
-    if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
-      write(*,'(1x,a)') "DG-Fragment RT: enter DG propagation setup without conventional spsi reconstruction"
-    end if
-    call nvtxEndRange
-    call timer_end(LOG_READ_GS_DATA)
-    call nvtxEndRange
-    return
-  end if
-  
   call calc_density(system,rho_s,spsi_in,info,mg)
   rho%f = 0d0
   do jspin=1,system%nspin
@@ -433,31 +334,6 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   end select
   if(ewald%yn_bookkeep=='y') call init_ewald(system,info,ewald)
 
-  if (yn_dg_fragment_rt == 'y') then
-    ! DG-RT initialization returns before conventional eigen-energy and
-    ! standard orbital propagation setup.  The DG branch builds its own
-    ! fragment Hamiltonian and observables in time_evolution_dg_fragment.
-    if(comm_is_root(nproc_id_global))then
-       write(ofl%file_rt_data,"(2A,'_rt.data')") trim(base_directory),trim(SYSname)
-       write(ofl%file_rt_energy_data,"(2A,'_rt_energy.data')") trim(base_directory),trim(SYSname)
-       write(ofl%file_response_data,"(2A,'_response.data')") trim(base_directory),trim(SYSname)
-       write(ofl%file_pulse_data,"(2A,'_pulse.data')") trim(base_directory),trim(SYSname)
-    endif
-    call comm_bcast(ofl%file_rt_data,       nproc_group_global)
-    call comm_bcast(ofl%file_rt_energy_data,nproc_group_global)
-    call comm_bcast(ofl%file_response_data, nproc_group_global)
-    call comm_bcast(ofl%file_pulse_data,    nproc_group_global)
-    select case(iperiodic)
-    case(0) ; call write_rt_data_0d(-1,ofl,dt,system,rt)
-    case(3) ; call write_rt_data_3d(-1,ofl,dt,system,curr_e_tmp,curr_i_tmp)
-    end select
-    call write_rt_energy_data(-1,ofl,dt,energy,md)
-    if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
-      write(*,'(1x,a)') "DG-Fragment RT: skip conventional calc_eigen_energy and enter DG propagation setup"
-    end if
-    return
-  end if
-  
   ! calculation of GS total energy
   call calc_eigen_energy(energy,spsi_in,spsi_out,tpsi,system,info,mg,V_local,stencil,srg,ppg)
   if(yn_jm=='n') then
@@ -684,96 +560,6 @@ subroutine init_code_optimization
   call nvtxEndRange
 end subroutine init_code_optimization
 
-subroutine compute_dg_initial_ion_ion_energy
-  implicit none
-  integer :: ix, iy, iz, iia, ia, ib, ipair
-  integer :: zps1, zps2
-  real(8) :: sysvol, E_real, E_recip_local, E_work(2), E_sum(2)
-  real(8) :: rr, rab(3), r(3)
-  complex(8) :: rho_i
-
-  if (yn_jm == 'y') then
-    energy%E_ion_ion = 0.0d0
-    return
-  end if
-  if (iperiodic /= 3) then
-    energy%E_ion_ion = 0.0d0
-    return
-  end if
-  if (ewald%yn_bookkeep /= 'y') then
-    stop "DG-Fragment RT: Ewald bookkeeping missing for DG ion-ion energy"
-  end if
-
-  sysvol = system%det_a
-  E_real = 0.0d0
-  do iia = 1, info%nion_mg
-    ia = info%ia_mg(iia)
-    do ipair = 1, ewald%npair_bk(iia)
-      ix = ewald%bk(1, ipair, iia)
-      iy = ewald%bk(2, ipair, iia)
-      iz = ewald%bk(3, ipair, iia)
-      ib = ewald%bk(4, ipair, iia)
-      r(1) = ix * system%primitive_a(1,1) + iy * system%primitive_a(1,2) + iz * system%primitive_a(1,3)
-      r(2) = ix * system%primitive_a(2,1) + iy * system%primitive_a(2,2) + iz * system%primitive_a(2,3)
-      r(3) = ix * system%primitive_a(3,1) + iy * system%primitive_a(3,2) + iz * system%primitive_a(3,3)
-      rab(1) = system%Rion(1, ia) - r(1) - system%Rion(1, ib)
-      rab(2) = system%Rion(2, ia) - r(2) - system%Rion(2, ib)
-      rab(3) = system%Rion(3, ia) - r(3) - system%Rion(3, ib)
-      rr = sum(rab(:)**2)
-      if (rr > cutoff_r**2) cycle
-      E_real = E_real + 0.5d0 * pp%Zps(system%kion(ia)) * pp%Zps(system%kion(ib)) * &
-        erfc_salmon(sqrt(aEwald * rr)) / sqrt(rr)
-    end do
-  end do
-
-  E_recip_local = 0.0d0
-  do iz = mg%is(3), mg%ie(3)
-    do iy = mg%is(2), mg%ie(2)
-      do ix = mg%is(1), mg%ie(1)
-        rho_i = ppg%zrhoG_ion(ix, iy, iz)
-        E_recip_local = E_recip_local + sysvol * fg%coef(ix, iy, iz) * &
-          (abs(rho_i)**2 * fg%exp_ewald(ix, iy, iz) * 0.5d0)
-      end do
-    end do
-  end do
-
-  E_work(1) = E_recip_local
-  E_work(2) = E_real
-  call comm_summation(E_work, E_sum, 2, info%icomm_r)
-  zps1 = 0
-  zps2 = 0
-  do ia = 1, system%nion
-    zps1 = zps1 + pp%Zps(system%kion(ia))
-    zps2 = zps2 + pp%Zps(system%kion(ia))**2
-  end do
-  E_sum(2) = E_sum(2) - pi * zps1**2 / (2.0d0 * aEwald * sysvol) - sqrt(aEwald / pi) * zps2
-  energy%E_ion_ion = E_sum(2) + E_sum(1)
-end subroutine compute_dg_initial_ion_ion_energy
-
-subroutine compute_dg_initial_isolated_ion_ion_energy
-  implicit none
-  integer :: ia, ib
-  real(8) :: rr, eion
-
-  if (yn_jm == 'y') then
-    energy%E_ion_ion = 0.0d0
-    return
-  end if
-
-  eion = 0.0d0
-  do ia = 1, system%nion
-    do ib = 1, ia - 1
-      rr = sqrt((system%Rion(1, ia) - system%Rion(1, ib))**2 + &
-                (system%Rion(2, ia) - system%Rion(2, ib))**2 + &
-                (system%Rion(3, ia) - system%Rion(3, ib))**2)
-      if (rr <= 0.0d0) then
-        stop "DG-Fragment RT: overlapping ions in isolated ion-ion energy"
-      end if
-      eion = eion + pp%Zps(system%kion(ia)) * pp%Zps(system%kion(ib)) / rr
-    end do
-  end do
-  energy%E_ion_ion = eion
-end subroutine compute_dg_initial_isolated_ion_ion_energy
 
 end subroutine initialization_rt
 

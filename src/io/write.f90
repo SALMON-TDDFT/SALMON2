@@ -857,7 +857,7 @@ contains
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use salmon_global, only: ensemble, thermostat, out_rt_energy_step, yn_periodic, yn_jm, yn_fix_func &
-    &   ,yn_out_rt_energy_components, yn_dg_fragment_rt, nelec
+    &   ,yn_out_rt_energy_components
     use filesystem, only: open_filehandle
     use inputoutput, only: yn_md,t_unit_time,t_unit_energy
     implicit none
@@ -884,11 +884,6 @@ contains
          write(uid,10) "E_ion", "Electron-ion energy"
          write(uid,10) "E_xc", "Exchange-correlation energy"
          write(uid,10) "E_ion_ion", "Ion-ion energy"
-       end if
-       if(yn_dg_fragment_rt=='y') then
-         write(uid,10) "Ne_raw", "Total electrons before DG rho renormalization"
-         write(uid,10) "Ne_raw-Ne0", "Deviation of pre-renormalization electron number"
-         write(uid,10) "PW_weight_raw", "Simple sum of |coef_pw|^2 over occupied states"
        end if
        if(yn_md=='y') then
        write(uid,10) "Tion", "Kinetic energy of ions"
@@ -923,13 +918,6 @@ contains
          & icolumn+5, "E_ion_ion", trim(t_unit_energy%name)
          icolumn = icolumn + 5
        end if
-       if(yn_dg_fragment_rt=='y') then
-         write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
-        & icolumn+1, "Ne_raw", "none", &
-        & icolumn+2, "Ne_raw-Ne0", "none", &
-        & icolumn+3, "PW_weight_raw", "none"
-         icolumn = icolumn + 3
-       end if
 
        if(yn_md=='y') then
        write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
@@ -946,7 +934,6 @@ contains
 
        write(uid,*)
        flush(uid)
-       if(yn_dg_fragment_rt=='y') return
        
        if( (yn_periodic=='y' .and. yn_jm=='y') .or. yn_fix_func=='y' ) then
          write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
@@ -966,12 +953,6 @@ contains
          & energy%E_xc * t_unit_energy%conv, &
          & energy%E_ion_ion * t_unit_energy%conv
        end if
-       if(yn_dg_fragment_rt=='y') then
-         write(uid, "(99(1X,E23.15E3))",advance='no') &
-            & dble(nelec), &
-            & 0d0, &
-            & 0d0
-       end if
        if(yn_md=='y') then
          write(uid, "(99(1X,E23.15E3))",advance='no') &
              & md%Tene * t_unit_energy%conv, &
@@ -983,7 +964,7 @@ contains
        flush(uid)
 
     else  !it>=0
-       if(mod(it,out_rt_energy_step)==0 .or. (yn_dg_fragment_rt=='y' .and. it==1))then
+       if(mod(it,out_rt_energy_step)==0)then
           uid = ofl%fh_rt_energy
    
           if( (yn_periodic=='y' .and. yn_jm=='y') .or. yn_fix_func=='y' ) then
@@ -1003,12 +984,6 @@ contains
             & (energy%E_ion_loc+energy%E_ion_nloc) * t_unit_energy%conv, &
             & energy%E_xc * t_unit_energy%conv, &
             & energy%E_ion_ion * t_unit_energy%conv
-          end if
-          if(yn_dg_fragment_rt=='y') then
-            write(uid, "(99(1X,E23.15E3))",advance='no') &
-               & energy%elec_num_raw, &
-               & (energy%elec_num_raw - dble(nelec)), &
-               & energy%pw_weight_raw
           end if
           if(yn_md=='y') then
           write(uid, "(99(1X,E23.15E3))",advance='no') &

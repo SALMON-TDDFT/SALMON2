@@ -157,33 +157,9 @@ module salmon_global
   character(1)   :: yn_dg_overlapping_wannier_rt
   character(1)   :: yn_dg_overlapping_wannier_rt_restart
   character(1)   :: yn_dg_length_gauge
-  character(16)  :: time_integrator_dg_fragment
-  real(8)        :: dg_nodal_gs_relax_step
-  integer        :: dg_nodal_gs_max_iter
-  real(8)        :: dg_nodal_gs_tol
-  integer        :: dg_nodal_taylor_order
-  character(48)  :: dg_mixed_z_local_prop_backend
-  integer        :: dg_mixed_z_neighbor_env_shell
-  character(32)  :: dg_mixed_z_frag_local_field_block
-  character(32)  :: dg_mixed_z_direct_origin
-  character(32)  :: dg_mixed_z_ww_position_branch
-  character(32)  :: dg_mixed_z_wp_position_branch
-  character(32)  :: dg_mixed_z_pp_position_branch
-  character(32)  :: dg_mixed_z_polarization_branch
   character(32)  :: dg_wannier_symmetry_gauge
   
   ! Plane wave basis mixing for DG-Fragment RT
-  character(1)   :: yn_plane_wave_basis         ! Enable plane wave mixing (default: 'n')
-  integer        :: n_plane_waves_dg             ! Number of plane waves (default: 50)
-  real(8)        :: k_cutoff_plane_wave          ! Cutoff energy for PW selection in unit_energy (default: 0.5)
-  character(1)   :: dg_bpw_auto                  ! Report-only automatic BPW basis diagnostics (default: 'n')
-  real(8)        :: dg_bpw_auto_accuracy         ! Singular-value threshold used in BPW auto diagnostics
-  integer        :: dg_bpw_auto_max_n            ! Optional report warning threshold for selected BPW count
-  integer        :: dg_bpw_auto_min_n            ! Optional report warning threshold for selected BPW count
-  character(1)   :: dg_bpw_auto_report           ! Write dg_bpw_auto_report.dat when dg_bpw_auto='y'
-  character(32)  :: dg_bpw_position_mode         ! BPW length-gauge position source: auto, rwann, berry, v_over_gap
-  integer        :: dg_subspace_extra_states     ! Extra fragment states kept in the trial subspace
-  integer        :: dg_subspace_pw_vectors       ! Number of PW helper vectors appended to the trial subspace
 
 !! &scf
   character(8)   :: method_init_wf
@@ -200,18 +176,6 @@ module salmon_global
   character(1)   :: yn_auto_mixing
   real(8)        :: update_mixing_ratio
   integer        :: nscf
-  integer        :: dg_wpw_extra_states
-  integer        :: dg_wpw_scf_max_iter
-  integer        :: dg_wpw_global_correction_restart
-  integer        :: dg_wpw_global_correction_max_iterations
-  integer        :: dg_wpw_global_correction_state_batch
-  integer        :: dg_wpw_window_buffer
-  integer        :: dg_wpw_window_width
-  real(8)        :: dg_wpw_gap_threshold
-  real(8)        :: dg_wpw_metric_cutoff
-  real(8)        :: dg_wpw_scf_mix
-  real(8)        :: dg_wpw_scf_residual_tolerance
-  real(8)        :: dg_wpw_global_correction_tolerance
   character(1)   :: yn_subspace_diagonalization
   character(16)  :: convergence
   real(8)        :: threshold
@@ -580,14 +544,5 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: energy_cut
   real(8)        :: lambda_cut
   
-  real(8)        :: eps_dg_frag
-  integer        :: niter_dg_frag_rt_max
-  real(8)        :: basis_update_threshold
-  character(256) :: dg_wpw_checkpoint_manifest
-  character(256) :: dg_wpw_checkpoint_rank_prefix
-  real(8)        :: dg_wpw_checkpoint_identity_tolerance
-  integer        :: dg_wpw_exp_max_corrector
-  real(8)        :: dg_wpw_exp_corrector_tolerance
-  real(8)        :: dg_wpw_exp_norm_tolerance
 
 end module salmon_global

@@ -317,31 +317,7 @@ contains
       & yn_dg_overlapping_wannier_rt, &
       & yn_dg_overlapping_wannier_rt_restart, &
       & yn_dg_length_gauge, &
-      & time_integrator_dg_fragment, &
-      & dg_nodal_gs_relax_step, &
-      & dg_nodal_gs_max_iter, &
-      & dg_nodal_gs_tol, &
-      & dg_nodal_taylor_order, &
-      & dg_mixed_z_local_prop_backend, &
-      & dg_mixed_z_neighbor_env_shell, &
-      & dg_mixed_z_frag_local_field_block, &
-      & dg_mixed_z_direct_origin, &
-      & dg_mixed_z_ww_position_branch, &
-      & dg_mixed_z_wp_position_branch, &
-      & dg_mixed_z_pp_position_branch, &
-      & dg_mixed_z_polarization_branch, &
-      & dg_wannier_symmetry_gauge, &
-      & yn_plane_wave_basis, &
-      & n_plane_waves_dg, &
-      & k_cutoff_plane_wave, &
-      & dg_bpw_auto, &
-      & dg_bpw_auto_accuracy, &
-      & dg_bpw_auto_max_n, &
-      & dg_bpw_auto_min_n, &
-      & dg_bpw_auto_report, &
-      & dg_bpw_position_mode, &
-      & dg_subspace_extra_states, &
-      & dg_subspace_pw_vectors
+      & dg_wannier_symmetry_gauge
 
     namelist/scf/ &
       & method_init_wf, &
@@ -359,18 +335,6 @@ contains
       & yn_auto_mixing, &
       & update_mixing_ratio, &
       & nscf, &
-      & dg_wpw_extra_states, &
-      & dg_wpw_scf_max_iter, &
-      & dg_wpw_global_correction_restart, &
-      & dg_wpw_global_correction_max_iterations, &
-      & dg_wpw_global_correction_state_batch, &
-      & dg_wpw_window_buffer, &
-      & dg_wpw_window_width, &
-      & dg_wpw_gap_threshold, &
-      & dg_wpw_metric_cutoff, &
-      & dg_wpw_scf_mix, &
-      & dg_wpw_scf_residual_tolerance, &
-      & dg_wpw_global_correction_tolerance, &
       & yn_subspace_diagonalization, &
       & convergence, &
       & threshold, &
@@ -730,14 +694,7 @@ contains
       & wannier_sawf_vacuum_density_threshold, &
       & dg_wannier_symmetry_gauge, &
       & energy_cut, &
-      & lambda_cut, &
-      & basis_update_threshold, &
-      & dg_wpw_checkpoint_manifest, &
-      & dg_wpw_checkpoint_rank_prefix, &
-      & dg_wpw_checkpoint_identity_tolerance, &
-      & dg_wpw_exp_max_corrector, &
-      & dg_wpw_exp_corrector_tolerance, &
-      & dg_wpw_exp_norm_tolerance
+      & lambda_cut
 
 !! == default for &unit ==
     unit_system='au'
@@ -874,31 +831,7 @@ contains
     yn_dg_overlapping_wannier_rt = 'n'
     yn_dg_overlapping_wannier_rt_restart = 'n'
     yn_dg_length_gauge = 'n'
-    time_integrator_dg_fragment = 'expdiag'
-    dg_nodal_gs_relax_step = 0.002d0
-    dg_nodal_gs_max_iter = 200
-    dg_nodal_gs_tol = 1.0d-8
-    dg_nodal_taylor_order = 8
-    dg_mixed_z_local_prop_backend = 'global_mixed_split_backend'
-    dg_mixed_z_neighbor_env_shell = 1
-    dg_mixed_z_frag_local_field_block = 'all'
-    dg_mixed_z_direct_origin = 'fragment'
-    dg_mixed_z_ww_position_branch = 'center_eig'
-    dg_mixed_z_wp_position_branch = 'zero'
-    dg_mixed_z_pp_position_branch = 'zero'
-    dg_mixed_z_polarization_branch = 'center_diag'
     dg_wannier_symmetry_gauge = 'diagnose'
-    yn_plane_wave_basis = 'n'
-    n_plane_waves_dg = 50
-    k_cutoff_plane_wave = 0.5d0
-    dg_bpw_auto = 'n'
-    dg_bpw_auto_accuracy = 1.0d-3
-    dg_bpw_auto_max_n = -1
-    dg_bpw_auto_min_n = -1
-    dg_bpw_auto_report = 'y'
-    dg_bpw_position_mode = 'auto'
-    dg_subspace_extra_states = 8
-    dg_subspace_pw_vectors = 4
 !! == default for &scf
     method_init_wf = 'gauss'
     iseed_number_change  =  0
@@ -915,18 +848,6 @@ contains
     yn_auto_mixing = 'n'
     update_mixing_ratio = 3.d0
     nscf          = 300
-    dg_wpw_extra_states = 8
-    dg_wpw_scf_max_iter = 200
-    dg_wpw_global_correction_restart = 8
-    dg_wpw_global_correction_max_iterations = 32
-    dg_wpw_global_correction_state_batch = 8
-    dg_wpw_window_buffer = 3
-    dg_wpw_window_width = 2
-    dg_wpw_gap_threshold = 1d-6
-    dg_wpw_metric_cutoff = 1d-10
-    dg_wpw_scf_mix = 0.3d0
-    dg_wpw_scf_residual_tolerance = 1d-8
-    dg_wpw_global_correction_tolerance = 1d-2
     yn_subspace_diagonalization = 'y'
     convergence   = 'rho_dne'
     threshold     = -1d0  !a.u. (default value for 'rho_dne'is given later)
@@ -1289,15 +1210,6 @@ contains
     energy_cut = 0d0
     lambda_cut = 1d-3
 !! == default for &dg_fragment
-    eps_dg_frag = 1.0d-10
-    niter_dg_frag_rt_max = 0
-    basis_update_threshold = 0.1d0  ! 0.1 a.u. (~2.7 eV)
-    dg_wpw_checkpoint_manifest = ''
-    dg_wpw_checkpoint_rank_prefix = ''
-    dg_wpw_checkpoint_identity_tolerance = 1d-8
-    dg_wpw_exp_max_corrector = 12
-    dg_wpw_exp_corrector_tolerance = 1d-10
-    dg_wpw_exp_norm_tolerance = 1d-10
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1394,14 +1306,6 @@ contains
     call string_lowercase(alibc)
 #endif
     call string_lowercase(process_allocation)
-    call string_lowercase(time_integrator_dg_fragment)
-    call string_lowercase(dg_mixed_z_local_prop_backend)
-    call string_lowercase(dg_mixed_z_frag_local_field_block)
-    call string_lowercase(dg_mixed_z_direct_origin)
-    call string_lowercase(dg_mixed_z_ww_position_branch)
-    call string_lowercase(dg_mixed_z_wp_position_branch)
-    call string_lowercase(dg_mixed_z_pp_position_branch)
-    call string_lowercase(dg_mixed_z_polarization_branch)
     call string_lowercase(propagator)
     call string_lowercase(method_init_wf)
     call string_lowercase(method_min)
@@ -1560,32 +1464,7 @@ contains
     call comm_bcast(yn_dg_overlapping_wannier_rt,nproc_group_global)
     call comm_bcast(yn_dg_overlapping_wannier_rt_restart,nproc_group_global)
     call comm_bcast(yn_dg_length_gauge,nproc_group_global)
-    call comm_bcast(dg_nodal_gs_relax_step,nproc_group_global)
-    call comm_bcast(dg_nodal_gs_max_iter,nproc_group_global)
-    call comm_bcast(dg_nodal_gs_tol,nproc_group_global)
-    call comm_bcast(dg_nodal_taylor_order,nproc_group_global)
-    call comm_bcast(dg_mixed_z_local_prop_backend,nproc_group_global)
-    call comm_bcast(dg_mixed_z_neighbor_env_shell,nproc_group_global)
-    call comm_bcast(dg_mixed_z_frag_local_field_block,nproc_group_global)
-    call comm_bcast(dg_mixed_z_direct_origin,nproc_group_global)
-    call comm_bcast(dg_mixed_z_ww_position_branch,nproc_group_global)
-    call comm_bcast(dg_mixed_z_wp_position_branch,nproc_group_global)
-    call comm_bcast(dg_mixed_z_pp_position_branch,nproc_group_global)
-    call comm_bcast(dg_mixed_z_polarization_branch,nproc_group_global)
     call comm_bcast(dg_wannier_symmetry_gauge,nproc_group_global)
-    call comm_bcast(yn_plane_wave_basis,nproc_group_global)
-    call comm_bcast(n_plane_waves_dg,nproc_group_global)
-    call comm_bcast(k_cutoff_plane_wave,nproc_group_global)
-    call comm_bcast(dg_bpw_auto,nproc_group_global)
-    call comm_bcast(dg_bpw_auto_accuracy,nproc_group_global)
-    call comm_bcast(dg_bpw_auto_max_n,nproc_group_global)
-    call comm_bcast(dg_bpw_auto_min_n,nproc_group_global)
-    call comm_bcast(dg_bpw_auto_report,nproc_group_global)
-    call comm_bcast(dg_bpw_position_mode,nproc_group_global)
-    call comm_bcast(dg_subspace_extra_states,nproc_group_global)
-    call comm_bcast(dg_subspace_pw_vectors,nproc_group_global)
-    k_cutoff_plane_wave = k_cutoff_plane_wave * uenergy_to_au
-    call comm_bcast(time_integrator_dg_fragment,nproc_group_global)
 !! == bcast for &scf
     call comm_bcast(method_init_wf          ,nproc_group_global)
     call comm_bcast(iseed_number_change     ,nproc_group_global)
@@ -1602,18 +1481,6 @@ contains
     call comm_bcast(yn_auto_mixing          ,nproc_group_global)
     call comm_bcast(update_mixing_ratio     ,nproc_group_global)
     call comm_bcast(nscf                    ,nproc_group_global)
-    call comm_bcast(dg_wpw_extra_states     ,nproc_group_global)
-    call comm_bcast(dg_wpw_scf_max_iter     ,nproc_group_global)
-    call comm_bcast(dg_wpw_global_correction_restart,nproc_group_global)
-    call comm_bcast(dg_wpw_global_correction_max_iterations,nproc_group_global)
-    call comm_bcast(dg_wpw_global_correction_state_batch,nproc_group_global)
-    call comm_bcast(dg_wpw_window_buffer    ,nproc_group_global)
-    call comm_bcast(dg_wpw_window_width     ,nproc_group_global)
-    call comm_bcast(dg_wpw_gap_threshold    ,nproc_group_global)
-    call comm_bcast(dg_wpw_metric_cutoff    ,nproc_group_global)
-    call comm_bcast(dg_wpw_scf_mix          ,nproc_group_global)
-    call comm_bcast(dg_wpw_scf_residual_tolerance,nproc_group_global)
-    call comm_bcast(dg_wpw_global_correction_tolerance,nproc_group_global)
     call comm_bcast(yn_subspace_diagonalization,nproc_group_global)
     call comm_bcast(convergence             ,nproc_group_global)
     call comm_bcast(threshold               ,nproc_group_global)
@@ -2070,16 +1937,6 @@ contains
     energy_cut = energy_cut * uenergy_to_au
     call comm_bcast(lambda_cut, nproc_group_global)
 !! == bcast for dg_fragment
-    call comm_bcast(eps_dg_frag, nproc_group_global)
-    call comm_bcast(niter_dg_frag_rt_max, nproc_group_global)
-    call comm_bcast(basis_update_threshold, nproc_group_global)
-    basis_update_threshold = basis_update_threshold * uenergy_to_au
-    call comm_bcast(dg_wpw_checkpoint_manifest, nproc_group_global)
-    call comm_bcast(dg_wpw_checkpoint_rank_prefix, nproc_group_global)
-    call comm_bcast(dg_wpw_checkpoint_identity_tolerance, nproc_group_global)
-    call comm_bcast(dg_wpw_exp_max_corrector, nproc_group_global)
-    call comm_bcast(dg_wpw_exp_corrector_tolerance, nproc_group_global)
-    call comm_bcast(dg_wpw_exp_norm_tolerance, nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -2594,40 +2451,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_overlapping_wannier_rt_restart', &
         yn_dg_overlapping_wannier_rt_restart
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_length_gauge', yn_dg_length_gauge
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_nodal_gs_relax_step', dg_nodal_gs_relax_step
-      write(fh_variables_log, '("#",4X,A,"=",I8)') 'dg_nodal_gs_max_iter', dg_nodal_gs_max_iter
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_nodal_gs_tol', dg_nodal_gs_tol
-      write(fh_variables_log, '("#",4X,A,"=",I8)') 'dg_nodal_taylor_order', dg_nodal_taylor_order
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'time_integrator_dg_fragment', trim(time_integrator_dg_fragment)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_local_prop_backend', &
-        trim(dg_mixed_z_local_prop_backend)
-      write(fh_variables_log, '("#",4X,A,"=",I0)') 'dg_mixed_z_neighbor_env_shell', &
-        dg_mixed_z_neighbor_env_shell
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_frag_local_field_block', &
-        trim(dg_mixed_z_frag_local_field_block)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_direct_origin', &
-        trim(dg_mixed_z_direct_origin)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_ww_position_branch', &
-        trim(dg_mixed_z_ww_position_branch)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_wp_position_branch', &
-        trim(dg_mixed_z_wp_position_branch)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_pp_position_branch', &
-        trim(dg_mixed_z_pp_position_branch)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_mixed_z_polarization_branch', &
-        trim(dg_mixed_z_polarization_branch)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_wannier_symmetry_gauge', &
         trim(dg_wannier_symmetry_gauge)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_plane_wave_basis', yn_plane_wave_basis
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'n_plane_waves_dg', n_plane_waves_dg
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'k_cutoff_plane_wave', k_cutoff_plane_wave
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_bpw_auto', dg_bpw_auto
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_bpw_auto_accuracy', dg_bpw_auto_accuracy
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_bpw_auto_max_n', dg_bpw_auto_max_n
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_bpw_auto_min_n', dg_bpw_auto_min_n
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_bpw_auto_report', dg_bpw_auto_report
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_bpw_position_mode', trim(dg_bpw_position_mode)
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_subspace_extra_states', dg_subspace_extra_states
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_subspace_pw_vectors', dg_subspace_pw_vectors
 
       if(inml_scf >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'scf', inml_scf
@@ -2645,23 +2470,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_auto_mixing', yn_auto_mixing
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'update_mixing_ratio', update_mixing_ratio
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf', nscf
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_extra_states', dg_wpw_extra_states
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_scf_max_iter', dg_wpw_scf_max_iter
-      write(fh_variables_log, '("#",4X,A,"=",I6)') &
-        'dg_wpw_global_correction_restart', dg_wpw_global_correction_restart
-      write(fh_variables_log, '("#",4X,A,"=",I6)') &
-        'dg_wpw_global_correction_max_iterations', dg_wpw_global_correction_max_iterations
-      write(fh_variables_log, '("#",4X,A,"=",I6)') &
-        'dg_wpw_global_correction_state_batch', dg_wpw_global_correction_state_batch
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_window_buffer', dg_wpw_window_buffer
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_wpw_window_width', dg_wpw_window_width
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_wpw_gap_threshold', dg_wpw_gap_threshold
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_wpw_metric_cutoff', dg_wpw_metric_cutoff
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dg_wpw_scf_mix', dg_wpw_scf_mix
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
-        'dg_wpw_scf_residual_tolerance', dg_wpw_scf_residual_tolerance
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
-        'dg_wpw_global_correction_tolerance', dg_wpw_global_correction_tolerance
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_subspace_diagonalization', yn_subspace_diagonalization
       write(fh_variables_log, '("#",4X,A,"=",A)') 'convergence', convergence
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold', threshold
@@ -3210,12 +3018,6 @@ contains
     call yn_argument_check(yn_fix_func)
     call yn_argument_check(yn_predictor_corrector)
     call yn_argument_check(yn_auto_mixing)
-    if(dg_wpw_global_correction_restart<1.or.dg_wpw_global_correction_restart>16.or.&
-      dg_wpw_global_correction_max_iterations<1.or.dg_wpw_global_correction_max_iterations>64.or.&
-      dg_wpw_global_correction_state_batch<1.or.dg_wpw_global_correction_state_batch>16.or.&
-      .not.ieee_is_finite(dg_wpw_global_correction_tolerance).or.&
-      dg_wpw_global_correction_tolerance<=0d0.or.dg_wpw_global_correction_tolerance>=1d0)&
-      stop 'invalid DG WPW global projected correction controls'
     call yn_argument_check(yn_subspace_diagonalization)
     call yn_argument_check(yn_out_psi)
     call yn_argument_check(yn_out_dos)
@@ -3408,31 +3210,6 @@ contains
     end if
 #endif
     call yn_argument_check(yn_dg_length_gauge)
-    select case(trim(dg_mixed_z_direct_origin))
-    case('global', 'fragment')
-    case default
-      stop "dg_mixed_z_direct_origin must be global or fragment"
-    end select
-    select case(trim(dg_mixed_z_ww_position_branch))
-    case('aa_r', 'center_eig', 'center_eig_local', 'center_eig_local_sym')
-    case default
-      stop "dg_mixed_z_ww_position_branch must be aa_r, center_eig, center_eig_local, or center_eig_local_sym"
-    end select
-    select case(trim(dg_mixed_z_wp_position_branch))
-    case('aa_r', 'zero')
-    case default
-      stop "dg_mixed_z_wp_position_branch must be aa_r or zero"
-    end select
-    select case(trim(dg_mixed_z_pp_position_branch))
-    case('zero', 'cell_sawtooth')
-    case default
-      stop "dg_mixed_z_pp_position_branch must be zero or cell_sawtooth"
-    end select
-    select case(trim(dg_mixed_z_polarization_branch))
-    case('aa_r', 'center_diag', 'center_eig')
-    case default
-      stop "dg_mixed_z_polarization_branch must be aa_r, center_diag, or center_eig"
-    end select
     select case(trim(dg_wannier_symmetry_gauge))
     case('none', 'diagnose', 'local_inversion_position', 'direct_amn_global', &
          'direct_amn_bond_block', 'direct_amn_bond_global')

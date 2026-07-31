@@ -98,6 +98,7 @@ use lcfo_soi
 implicit none
 integer :: ix,iy,iz
 integer :: Miter,iatom,jj,nspin
+integer(8) :: dg_gs_potential_epoch
 real(8) :: sum1
 character(100) :: comment_line
 
@@ -406,7 +407,7 @@ if(yn_dc=='y') then
 #ifdef USE_EIGENEXA
       call finalize_eigenexa(info)
 #endif
-      call dc_lcfo_flux(lg,mg,system,info,stencil,xc_func,pp,ppn,ppg,energy,rho_s,v_local,&
+      call dc_lcfo_flux(lg,mg,system,info,stencil,ppg,energy,rho_s,v_local,&
         spsi,shpsi,sttpsi,srg,dc)
     end if
   else if(yn_dc_lcfo == 'y') then

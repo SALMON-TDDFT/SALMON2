@@ -771,7 +771,7 @@ contains
   subroutine init_conventional_from_dcdft(lg,mg,system,info,spsi)
     use communication, only: comm_is_root, comm_summation, comm_bcast
     use filesystem, only: get_filehandle
-    use salmon_global,only: num_fragment, yn_conventional_from_dcdft, yn_dg_fragment_rt, yn_dg_fragment_from_dcdft
+    use salmon_global,only: num_fragment, yn_conventional_from_dcdft
     use structures
     implicit none
     type(s_rgrid),        intent(in) :: lg,mg
@@ -783,12 +783,10 @@ contains
     character(256) :: filename
     integer :: iunit, n_frag, nspin, nstate_frag, nstate_tot
     integer :: i,j,jfrag,ispin,io,jo,ix,iy,iz,ix_tot,iy_tot,iz_tot,n
-    integer :: magic_file, version_file
-    integer,dimension(3) :: lgnum_frag,lgnum_tmp,nxyz_domain,nxyz_buffer_file,nxyz_box
+    integer,dimension(3) :: lgnum_frag,lgnum_tmp,nxyz_domain
     !
     integer,allocatable :: n_mat(:),n_basis(:,:),index_basis(:,:,:),jxyz_tot(:,:)
     real(8),allocatable :: f_basis(:,:,:,:,:),coef_wf(:,:,:),wrk1(:,:,:),wrk2(:,:,:)
-    real(8),allocatable :: phi_box(:,:,:)
     
     nspin = system%nspin
     n_frag = product(num_fragment)
@@ -797,15 +795,11 @@ contains
     if(comm_is_root(info%id_rko)) then
       if (yn_conventional_from_dcdft == 'y') then
         write(*,*) "start init_conventional_from_dcdft"
-      else if (yn_dg_fragment_rt == 'y' .and. yn_dg_fragment_from_dcdft == 'y') then
-        write(*,*) "start init_dg_fragment_from_dcdft"
       else
         write(*,*) "start init_from_dcdft"
       end if
       if (yn_conventional_from_dcdft == 'y') then
         write(*,*) "yn_conventional_from_dcdft==y : conventional calculation but wavefunctions are reconstructed from DC-LCFO data"
-      else if (yn_dg_fragment_rt == 'y' .and. yn_dg_fragment_from_dcdft == 'y') then
-        write(*,*) "yn_dg_fragment_from_dcdft==y : DG-Fragment RT basis states are reconstructed from DC-LCFO data"
       else
         write(*,*) "wavefunctions are reconstructed from DC-LCFO data"
       end if
@@ -854,48 +848,16 @@ contains
       close(iunit)
     ! basis functions | lambda >
       iunit = get_filehandle()
-      if (yn_dg_fragment_rt == 'y' .and. yn_dg_fragment_from_dcdft == 'y') then
-        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_bfb
-        open(iunit,file=filename,form='unformatted',access='stream')
-        read(iunit) magic_file, version_file
-        if (magic_file /= basis_buffer_magic .or. version_file /= basis_buffer_version) then
-          stop "data_dcdft: input mismatch (basis_functions_buffer.bin header)"
-        end if
-        read(iunit) nxyz_domain(1:3),nxyz_buffer_file(1:3),i,j ! i,j: dummy
-        read(iunit) lgnum_tmp(1:nspin) ! dummy
-        if(i /= nspin .or. j /= nstate_frag .or. any( lgnum_tmp(1:nspin) /= n_basis(jfrag,1:nspin) ) ) then
-          stop "data_dcdft: input mismatch (basis_functions_buffer.bin)"
-        end if
-        nxyz_box(1:3) = nxyz_domain(1:3) + 2 * nxyz_buffer_file(1:3)
-        allocate(f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),1:nspin,1:nstate_frag))
-        allocate(phi_box(1:nxyz_box(1),1:nxyz_box(2),1:nxyz_box(3)))
-        do ispin = 1, nspin
-          do io = 1, nstate_frag
-            read(iunit) phi_box(1:nxyz_box(1),1:nxyz_box(2),1:nxyz_box(3))
-            do iz = 1, nxyz_domain(3)
-            do iy = 1, nxyz_domain(2)
-            do ix = 1, nxyz_domain(1)
-              f_basis(ix,iy,iz,ispin,io) = &
-                phi_box(ix + nxyz_buffer_file(1), iy + nxyz_buffer_file(2), iz + nxyz_buffer_file(3))
-            end do
-            end do
-            end do
-          end do
-        end do
-        close(iunit)
-        deallocate(phi_box)
-      else
-        write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_bf
-        open(iunit,file=filename,form='unformatted',access='stream')
-        read(iunit) nxyz_domain(1:3),i,j ! i,j: dummy
-        read(iunit) lgnum_tmp(1:nspin) ! dummy
-        if(i /= nspin .or. j /= nstate_frag .or. any( lgnum_tmp(1:nspin) /= n_basis(jfrag,1:nspin) ) ) then
-          stop "data_dcdft: input mismatch (basis_functions.bin)"
-        end if
-        allocate(f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),1:nspin,1:nstate_frag))
-        read(iunit) f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),1:nspin,1:nstate_frag)
-        close(iunit)
+      write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_bf
+      open(iunit,file=filename,form='unformatted',access='stream')
+      read(iunit) nxyz_domain(1:3),i,j ! i,j: dummy
+      read(iunit) lgnum_tmp(1:nspin) ! dummy
+      if(i /= nspin .or. j /= nstate_frag .or. any( lgnum_tmp(1:nspin) /= n_basis(jfrag,1:nspin) ) ) then
+        stop "data_dcdft: input mismatch (basis_functions.bin)"
       end if
+      allocate(f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),1:nspin,1:nstate_frag))
+      read(iunit) f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3),1:nspin,1:nstate_frag)
+      close(iunit)
     end if
     
   ! r-grid wavefunctions
@@ -942,8 +904,6 @@ contains
     if(comm_is_root(info%id_rko)) then
       if (yn_conventional_from_dcdft == 'y') then
         write(*,*) "end init_conventional_from_dcdft"
-      else if (yn_dg_fragment_rt == 'y' .and. yn_dg_fragment_from_dcdft == 'y') then
-        write(*,*) "end init_dg_fragment_from_dcdft"
       else
         write(*,*) "end init_from_dcdft"
       end if
