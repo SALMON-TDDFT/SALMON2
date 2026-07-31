@@ -9,6 +9,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
+for retained_contract_path in (
+    "tests/dg/check_obsolete_dg_routes_removed.py",
+    "docs/plans/2026-07-31-obsolete-dg-route-inventory.md",
+    "src/gs/dc/dg_overlapping_wannier_checkpoint.f90",
+    "src/gs/dc/dg_overlapping_wannier_construction.f90",
+    "src/rt/dg/rt_dg_overlapping_wannier.f90",
+    "src/gs/dc/lcfo.f90",
+    "src/gs/eigen_subdiag_eigenexa.f90",
+):
+    assert (ROOT / retained_contract_path).is_file(), (
+        f"missing retained route contract/source: {retained_contract_path}"
+    )
+
 
 def source(path: str) -> str:
     return (ROOT / path).read_text()
