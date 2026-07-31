@@ -286,6 +286,14 @@ contains
     sample_state=observable_state;field=[0.01d0,0d0,0d0]
     sample_p=expected_polarization;sample_j=expected_current
     sample_state%step=0;sample_state%time=0d0
+    if(nproc>1)then
+      if(rank==0)field(1)=0.02d0
+      call write_dg_overlapping_wannier_rt_observable_sample(comm,&
+        trim(output_prefix)//'-inconsistent.dat',field,sample_p,sample_j,4d0,&
+        sample_state,.false.,ok,message)
+      call require(.not.ok,'rank-inconsistent observable sample rejection')
+      field=[0.01d0,0d0,0d0]
+    endif
     call write_dg_overlapping_wannier_rt_observable_sample(comm,trim(output_prefix)//'-one.dat',&
       field,sample_p,sample_j,4d0,sample_state,.false.,ok,message)
     call require(ok,trim(message))

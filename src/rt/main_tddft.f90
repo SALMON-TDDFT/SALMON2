@@ -40,7 +40,9 @@ use dg_overlapping_wannier_checkpoint, only: s_dg_overlapping_wannier_checkpoint
   read_dg_overlapping_wannier_checkpoint
 use rt_dg_overlapping_wannier, only: s_dg_overlapping_wannier_rt_state, &
   initialize_dg_overlapping_wannier_rt,advance_dg_overlapping_wannier_rt,&
-  write_dg_overlapping_wannier_rt_restart,read_dg_overlapping_wannier_rt_restart
+  write_dg_overlapping_wannier_rt_restart,read_dg_overlapping_wannier_rt_restart,&
+  evaluate_dg_overlapping_wannier_observables,&
+  write_dg_overlapping_wannier_rt_observable_sample
 use em_field, only: calc_Ac_ext_t
 use nvtx
 use parallelization, only: nproc_id_global
@@ -249,7 +251,8 @@ subroutine run_dg_overlapping_wannier_coefficient_rt()
   type(s_dg_overlapping_wannier_rt_state)::state
   complex(8),allocatable::coefficients(:,:)
   real(8),allocatable::vector_potential_samples(:,:)
-  real(8)::electric_field(3),vector_potential(3),acceptance_gates(6)
+  real(8)::electric_field(3),vector_potential(3),acceptance_gates(6),&
+    polarization(3),current(3),cell_volume
   integer,allocatable::row_ids(:)
   integer::step,rank,ierr
   logical::ok,reusable
@@ -270,6 +273,8 @@ subroutine run_dg_overlapping_wannier_coefficient_rt()
   endif
   if(trim(checkpoint%field_coupling_convention)/='cell_wrapped_length_velocity')&
     error stop 'unsupported overlapping-Wannier field convention'
+  cell_volume=product(al)
+  if(cell_volume<=0d0)error stop 'invalid overlapping-Wannier RT cell volume'
   ! The V3 reader certifies that every retained tail covers each physical
   ! periodic-grid id at least once; overlapping buffers may repeat IDs.
   ! With basis updates forbidden, every
@@ -296,6 +301,20 @@ subroutine run_dg_overlapping_wannier_coefficient_rt()
       error stop 'overlapping-Wannier coefficient RT restart failed'
     endif
   endif
+  electric_field=0d0
+  call evaluate_dg_overlapping_wannier_observables(nproc_group_global,coefficients,&
+    checkpoint%occupations,cell_volume,state,polarization,current,ok,message)
+  if(.not.ok)then
+    if(rank==0)write(0,'(a)')trim(message)
+    error stop 'overlapping-Wannier coefficient RT observable evaluation failed'
+  endif
+  call write_dg_overlapping_wannier_rt_observable_sample(nproc_group_global,&
+    './overlapping_wannier_rt_observables.dat',electric_field,polarization,current,&
+    cell_volume,state,yn_dg_overlapping_wannier_rt_restart=='y',ok,message)
+  if(.not.ok)then
+    if(rank==0)write(0,'(a)')trim(message)
+    error stop 'overlapping-Wannier coefficient RT observable publication failed'
+  endif
   allocate(vector_potential_samples(3,0:nt+1))
   call calc_Ac_ext_t(0d0,dt,0,nt+1,vector_potential_samples)
   do step=state%step+1,nt
@@ -313,6 +332,19 @@ subroutine run_dg_overlapping_wannier_coefficient_rt()
     if(.not.ok)then
       if(rank==0)write(0,'(a,i0,2a)')'coefficient RT failed at step ',step,': ',trim(message)
       error stop 'overlapping-Wannier coefficient RT propagation failed'
+    endif
+    call evaluate_dg_overlapping_wannier_observables(nproc_group_global,coefficients,&
+      checkpoint%occupations,cell_volume,state,polarization,current,ok,message)
+    if(.not.ok)then
+      if(rank==0)write(0,'(a,i0,2a)')'observable evaluation failed at step ',step,': ',trim(message)
+      error stop 'overlapping-Wannier coefficient RT observable evaluation failed'
+    endif
+    call write_dg_overlapping_wannier_rt_observable_sample(nproc_group_global,&
+      './overlapping_wannier_rt_observables.dat',electric_field,polarization,current,&
+      cell_volume,state,yn_dg_overlapping_wannier_rt_restart=='y',ok,message)
+    if(.not.ok)then
+      if(rank==0)write(0,'(a,i0,2a)')'observable publication failed at step ',step,': ',trim(message)
+      error stop 'overlapping-Wannier coefficient RT observable publication failed'
     endif
   enddo
   call write_dg_overlapping_wannier_rt_restart(nproc_group_global,&

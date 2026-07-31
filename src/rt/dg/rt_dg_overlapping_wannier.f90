@@ -283,8 +283,14 @@ contains
     character(*),parameter::columns='# step time Ex Ey Ez Px Py Pz Jx Jy Jz'
     character(1024)::line,expected_provenance,expected_volume
     integer::rank,ierr,unit,ios,local_bad,global_bad,last_step
-    real(real64)::payload(10),last_payload(10)
+    integer::metadata(5),metadata_min(5),metadata_max(5),restart_integer,&
+      restart_min,restart_max
+    integer(int64)::fingerprints(5),fingerprint_min(5),fingerprint_max(5)
+    real(real64)::payload(10),last_payload(10),real_contract(11),&
+      real_min(11),real_max(11)
     logical::exists,have_data,duplicate
+    character(len(path))::path_reference
+    character(64)::convention_reference
 
     call MPI_Comm_rank(comm,rank,ierr);ok=.false.;message='';local_bad=0
     payload=[state%time,electric_field,polarization,current]
@@ -293,6 +299,32 @@ contains
        any(.not.ieee_is_finite(payload)))local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(global_bad/=0)then;message='invalid overlapping-Wannier observable sample';return;endif
+    metadata=[state%nwann,state%basis_generation,state%geometry_generation,state%step,&
+      len_trim(state%field_coupling_convention)]
+    fingerprints=[state%basis_fingerprint,state%operator_fingerprint,&
+      state%hamiltonian_fingerprint,state%observable_fingerprint,state%fingerprint]
+    real_contract=[volume,payload]
+    restart_integer=merge(1,0,restart_mode)
+    call MPI_Allreduce(metadata,metadata_min,5,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(metadata,metadata_max,5,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(fingerprints,fingerprint_min,5,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(fingerprints,fingerprint_max,5,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(real_contract,real_min,11,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(real_contract,real_max,11,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(restart_integer,restart_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(restart_integer,restart_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    path_reference=path
+    call MPI_Bcast(path_reference,len(path_reference),MPI_CHARACTER,0,comm,ierr)
+    convention_reference=state%field_coupling_convention
+    call MPI_Bcast(convention_reference,len(convention_reference),MPI_CHARACTER,0,comm,ierr)
+    local_bad=merge(1,0,any(metadata_min/=metadata_max).or.&
+      any(fingerprint_min/=fingerprint_max).or.any(real_min/=real_max).or.&
+      restart_min/=restart_max.or.path_reference/=path.or.&
+      convention_reference/=state%field_coupling_convention)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then
+      message='rank-inconsistent overlapping-Wannier observable sample';return
+    endif
     write(expected_volume,'(a,es26.17e3)')'# volume_au ',volume
     write(expected_provenance,'(a,7(1x,i0),1x,a)')'# provenance',state%nwann,&
       state%basis_generation,state%geometry_generation,state%basis_fingerprint,&
