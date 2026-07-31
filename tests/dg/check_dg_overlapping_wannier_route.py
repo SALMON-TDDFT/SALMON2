@@ -157,6 +157,14 @@ coefficient_driver = re.search(
 )
 assert coefficient_driver
 coefficient_body = coefficient_driver.group("body")
+compact_coefficient_body = re.sub(r"\s+", "", coefficient_body.lower())
+for token in (
+    "step==1.and.state%step==0.and.trim(ae_shape1)=='impulse'",
+    "electric_field=-vector_potential_samples(:,step)/dt",
+):
+    assert token in compact_coefficient_body, (
+        f"coefficient RT must preserve the fresh impulse jump: {token}"
+    )
 for required in (
     "read_dg_overlapping_wannier_checkpoint",
     "initialize_dg_overlapping_wannier_rt",

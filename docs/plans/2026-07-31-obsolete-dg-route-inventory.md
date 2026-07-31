@@ -1,6 +1,6 @@
 # Obsolete DG Route Inventory
 
-Status: removal completed through Task 7 of
+Status: removal and production acceptance completed through Task 8 of
 `2026-07-31-remove-obsolete-experimental-dg-routes.md`.
 
 The only retained experimental DG production path is:
@@ -133,3 +133,8 @@ DG-Fragment RT, and that `yn_dg_hse_ace` is exclusive to the DG HSE exchange.
 The code-quality review requires identifier-boundary matching, deterministic
 sorted output, reports all findings in one run, skips binary files, and
 excludes only the checker itself from token scanning.
+
+Task 8 confirmed the final inventory in a clean archive overlay: the only
+source below `src/rt/dg/` is `rt_dg_overlapping_wannier.f90`. The retained
+production chain, normal DC protection, hashes, and review disposition are
+recorded in `2026-07-31-obsolete-dg-route-removal-results.md`.

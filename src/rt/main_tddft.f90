@@ -299,7 +299,14 @@ subroutine run_dg_overlapping_wannier_coefficient_rt()
   allocate(vector_potential_samples(3,0:nt+1))
   call calc_Ac_ext_t(0d0,dt,0,nt+1,vector_potential_samples)
   do step=state%step+1,nt
-    electric_field=-(vector_potential_samples(:,step)-vector_potential_samples(:,step-1))/dt
+    if(step==1.and.state%step==0.and.trim(ae_shape1)=='impulse')then
+      ! The SALMON impulse is a vector-potential jump at t=0.  The value just
+      ! before the first coefficient interval is zero, not the already-jumped
+      ! sample stored at index zero.
+      electric_field=-vector_potential_samples(:,step)/dt
+    else
+      electric_field=-(vector_potential_samples(:,step)-vector_potential_samples(:,step-1))/dt
+    endif
     vector_potential=0d0
     call advance_dg_overlapping_wannier_rt(nproc_group_global,dt,electric_field,&
       vector_potential,coefficients,state,ok,message)
