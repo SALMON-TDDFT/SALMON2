@@ -5,7 +5,105 @@ module dg_overlapping_wannier_symmetry
   integer,parameter::maximum_crystallographic_point_group_order=48
   integer,parameter::maximum_enumerated_subgroups=65536
   public::select_dg_exact_fragment_subgroup
+  public::build_dg_fragment_group_representation
 contains
+  subroutine build_dg_fragment_group_representation(metric,raw,product_table,tolerance, &
+      representation,raw_unitarity_defect,unitarity_defect,closure_defect,ok,message)
+    complex(8),intent(in)::metric(:,:),raw(:,:,:)
+    integer,intent(in)::product_table(:,:)
+    real(8),intent(in)::tolerance
+    complex(8),allocatable,intent(out)::representation(:,:,:)
+    real(8),intent(out)::raw_unitarity_defect,unitarity_defect,closure_defect
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(8),allocatable::metric_sqrt(:,:),metric_inverse_sqrt(:,:),gram_inverse_sqrt(:,:), &
+      transformed(:,:),unitary(:,:),difference(:,:)
+    real(8)::metric_scale,representation_scale,correction_limit
+    integer::n,nop,iop,jop,kop
+    logical::power_ok
+    ok=.false.;message='';raw_unitarity_defect=huge(1d0);unitarity_defect=huge(1d0)
+    closure_defect=huge(1d0);n=size(metric,1);nop=size(raw,3)
+    if(n<1.or.size(metric,2)/=n.or.size(raw,1)/=n.or.size(raw,2)/=n.or.nop<1.or. &
+        size(product_table,1)/=nop.or.size(product_table,2)/=nop)then
+      message='fragment group representation arrays have inconsistent dimensions';return
+    end if
+    if(.not.ieee_is_finite(tolerance).or.tolerance<=0d0)then
+      message='fragment group representation tolerance must be finite and positive';return
+    end if
+    if(any(product_table<1).or.any(product_table>nop))then
+      message='fragment group representation product table has an invalid index';return
+    end if
+    metric_scale=max(1d0,maxval(abs(metric)))
+    if(maxval(abs(metric-conjg(transpose(metric))))>tolerance*metric_scale)then
+      message='fragment group representation metric is not Hermitian';return
+    end if
+    call hermitian_matrix_power(metric,0.5d0,tolerance,metric_sqrt,power_ok)
+    if(.not.power_ok)then;message='fragment group representation metric is not positive definite';return;end if
+    call hermitian_matrix_power(metric,-0.5d0,tolerance,metric_inverse_sqrt,power_ok)
+    if(.not.power_ok)then;message='fragment group representation metric inverse failed';return;end if
+    allocate(representation(n,n,nop),transformed(n,n),unitary(n,n),difference(n,n))
+    raw_unitarity_defect=0d0
+    do iop=1,nop
+      difference=matmul(conjg(transpose(raw(:,:,iop))),matmul(metric,raw(:,:,iop)))-metric
+      raw_unitarity_defect=max(raw_unitarity_defect,maxval(abs(difference))/metric_scale)
+      transformed=matmul(metric_sqrt,matmul(raw(:,:,iop),metric_inverse_sqrt))
+      call hermitian_matrix_power(matmul(conjg(transpose(transformed)),transformed),-0.5d0, &
+        tolerance,gram_inverse_sqrt,power_ok)
+      if(.not.power_ok)then;message='fragment group representation polar correction is singular';return;end if
+      unitary=matmul(transformed,gram_inverse_sqrt)
+      representation(:,:,iop)=matmul(metric_inverse_sqrt,matmul(unitary,metric_sqrt))
+    end do
+    correction_limit=sqrt(tolerance)
+    if(raw_unitarity_defect>correction_limit)then
+      message='fragment group representation raw unitarity defect exceeds correction limit';return
+    end if
+    unitarity_defect=0d0
+    do iop=1,nop
+      difference=matmul(conjg(transpose(representation(:,:,iop))), &
+        matmul(metric,representation(:,:,iop)))-metric
+      unitarity_defect=max(unitarity_defect,maxval(abs(difference))/metric_scale)
+    end do
+    representation_scale=max(1d0,maxval(abs(representation)))
+    closure_defect=0d0
+    do iop=1,nop;do jop=1,nop
+      kop=product_table(iop,jop)
+      difference=matmul(representation(:,:,iop),representation(:,:,jop))-representation(:,:,kop)
+      closure_defect=max(closure_defect,maxval(abs(difference))/representation_scale)
+    end do;end do
+    if(unitarity_defect>tolerance)then
+      message='fragment group representation metric unitarity exceeds tolerance';return
+    end if
+    if(closure_defect>tolerance)then
+      message='fragment group representation closure exceeds tolerance';return
+    end if
+    ok=.true.
+  end subroutine build_dg_fragment_group_representation
+
+  subroutine hermitian_matrix_power(matrix,power,tolerance,result,ok)
+    complex(8),intent(in)::matrix(:,:)
+    real(8),intent(in)::power,tolerance
+    complex(8),allocatable,intent(out)::result(:,:)
+    logical,intent(out)::ok
+    complex(8),allocatable::vectors(:,:),work(:)
+    real(8),allocatable::eigenvalues(:),rwork(:)
+    complex(8)::work_query(1)
+    integer::n,info,lwork,i
+    n=size(matrix,1);ok=.false.
+    allocate(vectors(n,n),eigenvalues(n),rwork(max(1,3*n-2)))
+    vectors=matrix
+    call zheev('V','U',n,vectors,n,eigenvalues,work_query,-1,rwork,info)
+    if(info/=0)return
+    lwork=max(1,int(real(work_query(1))));allocate(work(lwork));vectors=matrix
+    call zheev('V','U',n,vectors,n,eigenvalues,work,lwork,rwork,info)
+    if(info/=0.or.minval(eigenvalues)<=tolerance*max(1d0,maxval(abs(eigenvalues))))return
+    allocate(result(n,n));result=(0d0,0d0)
+    do i=1,n
+      result=result+eigenvalues(i)**power*spread(vectors(:,i),2,n)* &
+        spread(conjg(vectors(:,i)),1,n)
+    end do
+    ok=.true.
+  end subroutine hermitian_matrix_power
+
   subroutine select_dg_exact_fragment_subgroup(product_table,atom_residual,boundary_residual, &
       grid_residual,center_residual,atom_tolerance,boundary_tolerance,grid_tolerance, &
       center_tolerance,subgroup,ok,message)
