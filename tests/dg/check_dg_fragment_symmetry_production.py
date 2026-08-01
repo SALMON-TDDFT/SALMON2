@@ -25,6 +25,11 @@ for routine in (
     require(re.search(rf"\bcall\s+{routine}\b", MAIN) is not None,
             f"production overlapping-Wannier route does not call {routine}")
 
+require("fingerprint_dg_exact_fragment_symmetry" in MAIN,
+        "V3 basis provenance must bind each exact fragment group")
+require("exact_fragment_symmetry_fingerprints" in MAIN and "mpi_allgather" in MAIN,
+        "V3 basis provenance must bind the rank-ordered fragment-group collection")
+
 require("dc%system_tot%rion" in MAIN and "dc%system_tot%kion" in MAIN,
         "fragment symmetry discovery must use instantaneous coordinates and species")
 require(re.search(r"fragment.*atom.*(mask|index)", MAIN) is not None,

@@ -65,7 +65,7 @@ use dg_overlapping_wannier_observables, only: assemble_dg_overlapping_wannier_ob
 use dg_overlapping_wannier_symmetry, only: select_dg_exact_fragment_subgroup,&
   build_dg_fragment_site_stabilizer,build_dg_fragment_group_representation,&
   promote_dg_exact_global_subgroup,project_dg_fragment_covariant_operators,&
-  evaluate_dg_covariance_residuals_by_operation
+  evaluate_dg_covariance_residuals_by_operation,fingerprint_dg_exact_fragment_symmetry
 use lcfo_wannier_sawf, only: t_sawf_crystallographic_catalog,&
   load_sawf_crystallographic_catalog_auto
 use lcfo_wannier_sawf_band, only: validate_sawf_fragment_symmetry_map,&
@@ -529,7 +529,8 @@ contains
     real(8),allocatable::manifest_values(:,:),initial_density_local(:),initial_density_global(:)
     type(t_dg_projection_channel),allocatable::manifest_channels(:)
     integer(8),allocatable::physical_ids(:),box_ids(:),symmetry_map(:,:),local_box_ids(:),&
-      local_symmetry_map(:,:),center_representatives(:),representative_center_ids(:)
+      local_symmetry_map(:,:),center_representatives(:),representative_center_ids(:),&
+      exact_fragment_symmetry_fingerprints(:)
     integer,allocatable::fragments(:),local_point_product(:,:),local_point_integer_rotations(:,:,:)
     logical,allocatable::boundary(:),core_mask(:),pairs(:,:)
     integer::ix,iy,iz,io,p,nbox,ncore,ncandidate,noccupied,nstate,ntarget,nsym,rank,nproc,&
@@ -537,7 +538,7 @@ contains
       local_candidate_count,local_occupied_count,local_target_count
     integer::complete_sp_core_atom_count
     integer(8)::expected_core_count,expected_box_count,basis_fingerprint,operator_fingerprint,&
-      pseudopotential_fingerprint,nbox8,ncore8,product8,nxy8
+      pseudopotential_fingerprint,nbox8,ncore8,product8,nxy8,local_exact_symmetry_fingerprint
     real(8)::minimum_eigenvalue,condition_number,closure_residual,spread_max,gauge_correction,&
       core_electron_count
     logical::ok,reusable
@@ -724,6 +725,18 @@ contains
       box_ids,symmetry_map,ow_box_values,ow_box_gradients,dg_ow_symmetry_tolerance,&
       closure_residual,ow_symmetry_fingerprint,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'overlapping-Wannier symmetry gate failed';endif
+    local_exact_symmetry_fingerprint=fingerprint_dg_exact_fragment_symmetry(&
+      local_point_integer_rotations,local_point_product,dg_ow_symmetry_tolerance)
+    if(local_exact_symmetry_fingerprint==0_8)&
+      error stop 'invalid exact fragment symmetry checkpoint evidence'
+    allocate(exact_fragment_symmetry_fingerprints(nproc))
+    call MPI_Allgather(local_exact_symmetry_fingerprint,1,MPI_INTEGER8,&
+      exact_fragment_symmetry_fingerprints,1,MPI_INTEGER8,dc%icomm_tot,ierr)
+    do p=1,nproc
+      ow_symmetry_fingerprint=ieor(ow_symmetry_fingerprint,ishftc(&
+        ieor(exact_fragment_symmetry_fingerprints(p),int(p,8)),modulo(13*p,63)))
+    end do
+    deallocate(exact_fragment_symmetry_fingerprints)
     allocate(ow_core_values(ntarget,ncore),ow_core_gradients(3,ntarget,ncore),&
       ow_core_weights(ncore),ow_core_ids(ncore),&
       ow_core_box_positions(ncore));core_index=0

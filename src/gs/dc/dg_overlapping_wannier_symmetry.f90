@@ -1,5 +1,6 @@
 module dg_overlapping_wannier_symmetry
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+  use iso_fortran_env,only:int64
   implicit none
   private
   integer,parameter::maximum_crystallographic_point_group_order=48
@@ -10,7 +11,41 @@ module dg_overlapping_wannier_symmetry
   public::promote_dg_exact_global_subgroup
   public::build_dg_fragment_site_stabilizer
   public::evaluate_dg_covariance_residuals_by_operation
+  public::fingerprint_dg_exact_fragment_symmetry
 contains
+  integer(int64) function fingerprint_dg_exact_fragment_symmetry(rotations,product_table,tolerance)
+    integer,intent(in)::rotations(:,:,:),product_table(:,:)
+    real(8),intent(in)::tolerance
+    integer(int64)::word
+    integer::i,j,k,shift,nop
+    nop=size(rotations,3)
+    if(nop<1.or.size(rotations,1)/=3.or.size(rotations,2)/=3.or. &
+        size(product_table,1)/=nop.or.size(product_table,2)/=nop.or. &
+        .not.ieee_is_finite(tolerance).or.tolerance<=0d0)then
+      fingerprint_dg_exact_fragment_symmetry=0_int64;return
+    end if
+    fingerprint_dg_exact_fragment_symmetry=ieor(int(nop,int64),int(z'243F6A8885A308D3',int64))
+    do k=1,nop;do j=1,3;do i=1,3
+      shift=modulo(11*i+17*j+23*k,63)
+      word=int(rotations(i,j,k),int64)
+      fingerprint_dg_exact_fragment_symmetry=ieor(fingerprint_dg_exact_fragment_symmetry, &
+        ishftc(ieor(word,int(97*i+193*j+389*k,int64)),shift))
+    end do;end do;end do
+    do j=1,nop;do i=1,nop
+      if(product_table(i,j)<1.or.product_table(i,j)>nop)then
+        fingerprint_dg_exact_fragment_symmetry=0_int64;return
+      end if
+      shift=modulo(7*i+29*j,63)
+      word=int(product_table(i,j),int64)
+      fingerprint_dg_exact_fragment_symmetry=ieor(fingerprint_dg_exact_fragment_symmetry, &
+        ishftc(ieor(word,int(521*i+1031*j,int64)),shift))
+    end do;end do
+    word=transfer(tolerance,word)
+    fingerprint_dg_exact_fragment_symmetry=ieor(fingerprint_dg_exact_fragment_symmetry,ishftc(word,37))
+    if(fingerprint_dg_exact_fragment_symmetry==0_int64)&
+      fingerprint_dg_exact_fragment_symmetry=int(z'13198A2E03707344',int64)
+  end function fingerprint_dg_exact_fragment_symmetry
+
   subroutine evaluate_dg_covariance_residuals_by_operation(representation,rotations,scalars,vectors, &
       scalar_residual,vector_residual,ok,message)
     complex(8),intent(in)::representation(:,:,:),scalars(:,:,:),vectors(:,:,:,:)

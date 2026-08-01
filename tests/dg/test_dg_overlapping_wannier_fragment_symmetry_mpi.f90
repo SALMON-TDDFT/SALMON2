@@ -2,9 +2,12 @@
 program test_dg_overlapping_wannier_fragment_symmetry_mpi
   use mpi
   use dg_overlapping_wannier_symmetry, only: select_dg_exact_fragment_subgroup, &
-    promote_dg_exact_global_subgroup,build_dg_fragment_site_stabilizer
+    promote_dg_exact_global_subgroup,build_dg_fragment_site_stabilizer, &
+    fingerprint_dg_exact_fragment_symmetry
+  use iso_fortran_env,only:int64
   implicit none
   integer :: ierr,rank,nproc,i,j
+  integer(int64) :: c4_fingerprint,c1_fingerprint,tolerance_fingerprint
   integer :: product_table(4,4)
   integer :: invalid_product_table(4,4)
   integer :: affine_rotation(3,3,6)
@@ -89,6 +92,14 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
     affine_allowed,1d-10,subgroup,affine_product,site_residual,ok,message)
   call require(ok.and.all(subgroup==[1,6]),'fractional-center inversion site stabilizer')
   call require(all(affine_product==reshape([1,2,2,1],[2,2])),'inversion affine closure')
+
+  c4_fingerprint=fingerprint_dg_exact_fragment_symmetry(affine_rotation(:,:,1:4),product_table,1d-10)
+  c1_fingerprint=fingerprint_dg_exact_fragment_symmetry(affine_rotation(:,:,1:1),reshape([1],[1,1]),1d-10)
+  tolerance_fingerprint=fingerprint_dg_exact_fragment_symmetry(&
+    affine_rotation(:,:,1:4),product_table,2d-10)
+  call require(c4_fingerprint/=0_int64,'exact fragment symmetry fingerprint is nonzero')
+  call require(c4_fingerprint/=c1_fingerprint,'C4 and displaced C1 checkpoint evidence differ')
+  call require(c4_fingerprint/=tolerance_fingerprint,'symmetry tolerance is checkpoint evidence')
 
   if(rank==0)write(*,'(a,i0,a)')'PASS exact buffered-fragment symmetry on ',nproc,' ranks'
   call MPI_Finalize(ierr)
