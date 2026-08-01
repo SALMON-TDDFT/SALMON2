@@ -1,6 +1,8 @@
 #include "spglib.h"
 
 #include <math.h>
+#include <stdlib.h>
+#include <string.h>
 
 enum mock_case {
   MOCK_UNKNOWN,
@@ -66,6 +68,23 @@ static void set_identity(int rotation[3][3], double translation[3]) {
     }
   }
 }
+
+SpglibDataset *spg_get_dataset(const double lattice[3][3],
+                               const double position[][3], const int types[],
+                               int num_atom, double symprec) {
+  enum mock_case test_case = classify(lattice, position, types, num_atom);
+  SpglibDataset *dataset;
+  (void)symprec;
+  if (test_case == MOCK_UNKNOWN || test_case == MOCK_API_FAILURE) return NULL;
+  dataset = malloc(sizeof(*dataset));
+  if (dataset == NULL) return NULL;
+  dataset->spacegroup_number = test_case == MOCK_DIAMOND ? 227 : 1;
+  dataset->hall_number = test_case == MOCK_DIAMOND ? 525 : 1;
+  strcpy(dataset->pointgroup_symbol, test_case == MOCK_DIAMOND ? "m-3m" : "1");
+  return dataset;
+}
+
+void spg_free_dataset(SpglibDataset *dataset) { free(dataset); }
 
 int spg_get_multiplicity(const double lattice[3][3],
                          const double position[][3], const int types[],

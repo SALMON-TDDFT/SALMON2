@@ -4,7 +4,7 @@ module lcfo_wannier_sawf
   ! ownership, template provenance and operator gates live in
   ! lcfo_wannier_sawf_templates so site_symmetry is never the sole gate.
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
-  use, intrinsic :: iso_c_binding, only: c_double, c_int
+  use, intrinsic :: iso_c_binding, only: c_char, c_double, c_int, c_null_char
   use, intrinsic :: iso_fortran_env, only: int64
   use sym_sub, only: read_symmetry_file
   use dg_overlapping_wannier_projection, only: &
@@ -36,11 +36,21 @@ module lcfo_wannier_sawf
     real(8) :: atom_map_residual = 0.0d0
   end type t_sawf_symop
 
+  type, public :: t_sawf_crystallographic_catalog
+    integer :: space_group_number = 0
+    integer :: hall_number = 0
+    character(6) :: point_group_symbol = ''
+    integer, allocatable :: integer_rotation(:,:,:)
+    real(8), allocatable :: fractional_translation(:,:)
+    type(t_sawf_symop), allocatable :: operations(:)
+  end type t_sawf_crystallographic_catalog
+
   type :: t_sawf_operation_index
     integer, allocatable :: slots(:)
   end type t_sawf_operation_index
 
   public :: load_sawf_symmetry_auto, load_sawf_symmetry_file
+  public :: load_sawf_crystallographic_catalog_auto
   public :: build_sawf_spd_projection_map, validate_sawf_spd_projection_map
   public :: t_sawf_projection_channel
   public :: build_sawf_wannier_representation, sawf_real_harmonic_value
@@ -65,10 +75,67 @@ module lcfo_wannier_sawf
       real(c_double), intent(out) :: translations(*)
       integer(c_int), intent(out) :: num_operations
     end function salmon_sawf_spglib_get_symmetry
+    integer(c_int) function salmon_sawf_spglib_get_dataset_metadata( &
+        lattice_columns, fractional_positions, species, num_atoms, tolerance, &
+        spacegroup_number, hall_number, pointgroup_symbol, pointgroup_capacity) &
+        bind(C, name='salmon_sawf_spglib_get_dataset_metadata')
+      import :: c_char, c_double, c_int
+      real(c_double), intent(in) :: lattice_columns(*)
+      real(c_double), intent(in) :: fractional_positions(*)
+      integer(c_int), intent(in) :: species(*)
+      integer(c_int), value :: num_atoms
+      real(c_double), value :: tolerance
+      integer(c_int), intent(out) :: spacegroup_number, hall_number
+      character(c_char), intent(out) :: pointgroup_symbol(*)
+      integer(c_int), value :: pointgroup_capacity
+    end function salmon_sawf_spglib_get_dataset_metadata
   end interface
 #endif
 
 contains
+  subroutine load_sawf_crystallographic_catalog_auto(lattice,frac_pos,species,tolerance,catalog,ok,message)
+    real(8),intent(in)::lattice(3,3),frac_pos(:,:),tolerance
+    integer,intent(in)::species(:)
+    type(t_sawf_crystallographic_catalog),intent(out)::catalog
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef HAVE_SPGLIB
+    integer(c_int),allocatable::c_species(:)
+    integer(c_int)::status,spacegroup_number,hall_number
+    character(c_char)::pointgroup_symbol(7)
+    integer::i,nop
+#endif
+    catalog%space_group_number=0; catalog%hall_number=0; catalog%point_group_symbol=''
+    call load_sawf_symmetry_auto(lattice,frac_pos,species,tolerance,catalog%operations,ok,message)
+    if(.not.ok)return
+#ifndef HAVE_SPGLIB
+    message='SAWF automatic crystallographic catalog requires SALMON built with USE_SPGLIB=ON'
+    ok=.false.; return
+#else
+    allocate(c_species(size(species))); c_species=int(species,c_int)
+    pointgroup_symbol=c_null_char
+    status=salmon_sawf_spglib_get_dataset_metadata(lattice,frac_pos,c_species, &
+      int(size(species),c_int),real(tolerance,c_double),spacegroup_number,hall_number, &
+      pointgroup_symbol,int(size(pointgroup_symbol),c_int))
+    if(status/=sawf_spglib_success)then
+      call set_spglib_error(status,'dataset metadata',message); ok=.false.; return
+    end if
+    catalog%space_group_number=int(spacegroup_number)
+    catalog%hall_number=int(hall_number)
+    do i=1,min(len(catalog%point_group_symbol),size(pointgroup_symbol))
+      if(pointgroup_symbol(i)==c_null_char)exit
+      catalog%point_group_symbol(i:i)=pointgroup_symbol(i)
+    end do
+    nop=size(catalog%operations)
+    allocate(catalog%integer_rotation(3,3,nop),catalog%fractional_translation(3,nop))
+    do i=1,nop
+      catalog%integer_rotation(:,:,i)=catalog%operations(i)%W
+      catalog%fractional_translation(:,i)=catalog%operations(i)%tau
+    end do
+    ok=.true.; message=''
+#endif
+  end subroutine load_sawf_crystallographic_catalog_auto
+
   subroutine build_sawf_operation_product_table(operations,lattice,lattice_inv,tolerance, &
       left_index,right_index,product_index,ok,message)
     type(t_sawf_symop),intent(in)::operations(:)

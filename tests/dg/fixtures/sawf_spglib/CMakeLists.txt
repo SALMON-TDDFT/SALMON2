@@ -16,6 +16,7 @@ configure_file(
 
 set(SAWF_TEST_SOURCES
   mock_sym_sub.f90
+  ${SALMON_ROOT}/src/gs/dc/dg_overlapping_wannier_projection.f90
   ${CMAKE_CURRENT_BINARY_DIR}/lcfo_wannier_sawf.F90
   driver.F90
 )

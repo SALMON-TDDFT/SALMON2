@@ -1,13 +1,15 @@
 #include "config.h"
 program check_sawf_spglib_backend_driver
   use, intrinsic :: ieee_arithmetic, only: ieee_value, ieee_quiet_nan
-  use lcfo_wannier_sawf, only: t_sawf_symop, load_sawf_symmetry_auto
+  use lcfo_wannier_sawf, only: t_sawf_symop, load_sawf_symmetry_auto, &
+    t_sawf_crystallographic_catalog,load_sawf_crystallographic_catalog_auto
   implicit none
 
 #ifndef HAVE_SPGLIB
   call check_fallback
 #else
   call check_diamond
+  call check_diamond_catalog
   call check_translated_order
   call check_noncentrosymmetric
   call check_failure(4, 0.04d0, 'operation count')
@@ -19,6 +21,21 @@ program check_sawf_spglib_backend_driver
   write(*,'(a)') 'PASS focused SAWF Spglib backend'
 
 contains
+
+  subroutine check_diamond_catalog
+    real(8)::lattice(3,3),frac_pos(3,2)
+    integer::species(2)
+    type(t_sawf_crystallographic_catalog)::catalog
+    logical::ok
+    character(512)::message
+    lattice(:,1)=[0d0,0.5d0,0.5d0]; lattice(:,2)=[0.5d0,0d0,0.5d0]
+    lattice(:,3)=[0.5d0,0.5d0,0d0]; frac_pos(:,1)=0d0; frac_pos(:,2)=0.25d0; species=6
+    call load_sawf_crystallographic_catalog_auto(lattice,frac_pos,species,1d-8,catalog,ok,message)
+    call require(ok,'diamond catalog failed: '//trim(message))
+    call require(catalog%space_group_number==227.and.catalog%hall_number==525,'diamond catalog numbers')
+    call require(trim(catalog%point_group_symbol)=='m-3m','diamond point group')
+    call require(size(catalog%integer_rotation,3)==2,'diamond catalog operations')
+  end subroutine check_diamond_catalog
 
   subroutine check_fallback
     real(8) :: lattice(3,3), frac_pos(3,1)
