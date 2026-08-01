@@ -2,14 +2,18 @@
 program test_dg_overlapping_wannier_fragment_symmetry_mpi
   use mpi
   use dg_overlapping_wannier_symmetry, only: select_dg_exact_fragment_subgroup, &
-    promote_dg_exact_global_subgroup
+    promote_dg_exact_global_subgroup,build_dg_fragment_site_stabilizer
   implicit none
   integer :: ierr,rank,nproc,i,j
   integer :: product_table(4,4)
   integer :: invalid_product_table(4,4)
+  integer :: affine_rotation(3,3,6)
+  integer,allocatable :: affine_product(:,:)
   integer,allocatable :: subgroup(:)
   logical :: fragment_exact(2,4)
+  logical :: affine_allowed(6)
   real(8) :: scalar_block_residual(3,4),vector_block_residual(3,4)
+  real(8) :: affine_translation(3,6),fragment_center(3),site_residual
   real(8) :: atom(4),boundary(4),grid(4),center(4)
   logical :: ok
   character(256) :: message
@@ -66,6 +70,25 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
     vector_block_residual,1d-10,subgroup,ok,message)
   call require(ok.and.size(subgroup)==1.and.subgroup(1)==1, &
     'locally broken neighboring fragment reduces promotion to C1')
+
+  affine_rotation=0;affine_translation=0d0;affine_allowed=.true.
+  affine_rotation(:,:,1)=reshape([1,0,0,0,1,0,0,0,1],[3,3])
+  affine_rotation(:,:,2)=reshape([0,1,0,-1,0,0,0,0,1],[3,3])
+  affine_rotation(:,:,3)=reshape([-1,0,0,0,-1,0,0,0,1],[3,3])
+  affine_rotation(:,:,4)=reshape([0,-1,0,1,0,0,0,0,1],[3,3])
+  affine_rotation(:,:,5)=affine_rotation(:,:,2);affine_translation(1,5)=0.5d0
+  affine_rotation(:,:,6)=reshape([-1,0,0,0,-1,0,0,0,-1],[3,3])
+  affine_translation(:,6)=0.5d0
+  fragment_center=0d0
+  call build_dg_fragment_site_stabilizer(affine_rotation,affine_translation,fragment_center, &
+    affine_allowed,1d-10,subgroup,affine_product,site_residual,ok,message)
+  call require(ok.and.all(subgroup==[1,2,3,4]),'origin-centered C4 site stabilizer')
+  call require(site_residual<1d-13,'C4 site residual')
+  affine_allowed=.false.;affine_allowed([1,6])=.true.;fragment_center=0.25d0
+  call build_dg_fragment_site_stabilizer(affine_rotation,affine_translation,fragment_center, &
+    affine_allowed,1d-10,subgroup,affine_product,site_residual,ok,message)
+  call require(ok.and.all(subgroup==[1,6]),'fractional-center inversion site stabilizer')
+  call require(all(affine_product==reshape([1,2,2,1],[2,2])),'inversion affine closure')
 
   if(rank==0)write(*,'(a,i0,a)')'PASS exact buffered-fragment symmetry on ',nproc,' ranks'
   call MPI_Finalize(ierr)

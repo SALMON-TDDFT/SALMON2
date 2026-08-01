@@ -62,6 +62,13 @@ use dg_overlapping_wannier_checkpoint, only: s_dg_overlapping_wannier_checkpoint
   write_dg_overlapping_wannier_checkpoint,read_dg_overlapping_wannier_checkpoint,&
   compute_dg_overlapping_wannier_matrix_fingerprints
 use dg_overlapping_wannier_observables, only: assemble_dg_overlapping_wannier_observables
+use dg_overlapping_wannier_symmetry, only: select_dg_exact_fragment_subgroup,&
+  build_dg_fragment_site_stabilizer,build_dg_fragment_group_representation,&
+  promote_dg_exact_global_subgroup,project_dg_fragment_covariant_operators
+use lcfo_wannier_sawf, only: t_sawf_crystallographic_catalog,&
+  load_sawf_crystallographic_catalog_auto
+use lcfo_wannier_sawf_band, only: validate_sawf_fragment_symmetry_map,&
+  build_sawf_fragment_buffer_point_map
 #ifdef USE_EIGENEXA
 use eigenexa_module, only: finalize_eigenexa
 #endif
@@ -516,12 +523,13 @@ contains
     complex(8),allocatable::candidate(:,:),occupied_coefficients(:,:),augmented_candidate(:,:),&
       augmented_gradient(:,:,:),augmented_occupied(:,:),periodic_phase(:,:),&
       fragment_wannier(:,:),fragment_wannier_gradient(:,:,:)
-    real(8),allocatable::weights(:),coordinate(:),spectrum(:),occupations(:),gradient_rotation(:,:,:)
+    real(8),allocatable::weights(:),coordinate(:),spectrum(:),occupations(:),gradient_rotation(:,:,:),&
+      local_point_rotations(:,:,:)
     real(8),allocatable::manifest_values(:,:),initial_density_local(:),initial_density_global(:)
     type(t_dg_projection_channel),allocatable::manifest_channels(:)
     integer(8),allocatable::physical_ids(:),box_ids(:),symmetry_map(:,:),local_box_ids(:),&
       local_symmetry_map(:,:),center_representatives(:),representative_center_ids(:)
-    integer,allocatable::fragments(:)
+    integer,allocatable::fragments(:),local_point_product(:,:)
     logical,allocatable::boundary(:),core_mask(:),pairs(:,:)
     integer::ix,iy,iz,io,p,nbox,ncore,ncandidate,noccupied,nstate,ntarget,nsym,rank,nproc,&
       raw_ix,raw_iy,raw_iz,core_index,rejected_rank,ownership_count,ierr,allocation_status,&
@@ -584,7 +592,7 @@ contains
     expected_box_count=nbox8*int(nproc,8)
     allocate(candidate(local_candidate_count,nbox),weights(nbox),&
       coordinate(nbox),periodic_phase(3,nbox),physical_ids(nbox),box_ids(nbox),&
-      symmetry_map(nbox,nsym),local_box_ids(nbox),local_symmetry_map(nbox,1),&
+      symmetry_map(nbox,nsym),local_box_ids(nbox),&
       center_representatives(nbox),fragments(nbox),boundary(nbox),core_mask(nbox),&
       gradient_rotation(3,3,nsym),stat=allocation_status)
     call comm_logical_and(allocation_status==0,reusable,dc%icomm_tot)
@@ -595,7 +603,7 @@ contains
     p=0;core_index=0
     do iz=1,ow_box_size(3);do iy=1,ow_box_size(2);do ix=1,ow_box_size(1)
       p=p+1;box_ids(p)=int(dc%i_frag-1,8)*nbox8+int(p,8)
-      local_box_ids(p)=int(p,8);local_symmetry_map(p,1)=int(p,8);fragments(p)=dc%i_frag
+      local_box_ids(p)=int(p,8);fragments(p)=dc%i_frag
       center_representatives(p)=int(ow_buffer(1)+1+modulo(ix-ow_buffer(1)-1,ow_core_size(1)),8)+&
         int(ow_box_size(1),8)*(int(ow_buffer(2)+modulo(iy-ow_buffer(2)-1,ow_core_size(2)),8)+&
         int(ow_box_size(2),8)*int(ow_buffer(3)+modulo(iz-ow_buffer(3)-1,ow_core_size(3)),8))
@@ -664,6 +672,12 @@ contains
     deallocate(candidate,occupied_coefficients)
     call build_dc_translation_symmetry_map(nbox,symmetry_map,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'invalid DC translation symmetry';endif
+    call prepare_ow_exact_fragment_symmetry(local_symmetry_map,local_point_rotations,&
+      local_point_product,ok,message)
+    if(.not.ok)then
+      write(0,'(a)')trim(message)
+      error stop 'invalid exact buffered-fragment crystallographic symmetry'
+    end if
     call periodic_box_gradients(augmented_candidate,ow_box_size,stencil%coef_nab,augmented_gradient)
     call construct_dg_overlapping_wannier_basis(MPI_COMM_SELF,ncandidate,local_target_count,&
       noccupied,physical_ids,&
@@ -1194,6 +1208,80 @@ contains
       message='DC fragment origins do not form a uniform periodic translation group'
     endif
   end subroutine
+
+  subroutine prepare_ow_exact_fragment_symmetry(local_symmetry_map,point_rotations, &
+      point_product,ok,message)
+    integer(8),allocatable,intent(out)::local_symmetry_map(:,:)
+    real(8),allocatable,intent(out)::point_rotations(:,:,:)
+    integer,allocatable,intent(out)::point_product(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    type(t_sawf_crystallographic_catalog)::catalog
+    real(8),allocatable::fragment_positions(:,:)
+    integer,allocatable::fragment_species(:),fragment_atom_index(:),selected(:),source_to_target(:),point_map(:)
+    logical,allocatable::fragment_atom_mask(:),operation_allowed(:)
+    real(8)::lattice_inverse(3,3),determinant,fragment_center(3),grid_residual,center_grid(3),site_residual
+    integer::atom,axis,iop,ifrag,nfragment_atoms,max_targets,relative_index(3),grid_index(3)
+    logical::inverse_ok,grid_ok,fragment_ok,center_available,map_ok
+    character(256)::detail
+
+    ok=.false.;message='';ifrag=dc%i_frag
+    call invert_ow_lattice(dc%system_tot%primitive_a,lattice_inverse,determinant,inverse_ok)
+    if(.not.inverse_ok)then;message='exact fragment symmetry lattice is singular';return;end if
+    allocate(fragment_atom_mask(dc%system_tot%nion),fragment_atom_index(dc%system_tot%nion))
+    fragment_atom_mask=.false.;fragment_atom_index=0;nfragment_atoms=0
+    do atom=1,dc%system_tot%nion
+      grid_index=modulo(floor(modulo(matmul(lattice_inverse,dc%system_tot%Rion(:,atom)),1d0)* &
+        real(dc%lg_tot%num,8)),dc%lg_tot%num)
+      do axis=1,3
+        relative_index(axis)=modulo(grid_index(axis)-(dc%ixyz_frag(axis,ifrag)-1)+ow_buffer(axis), &
+          dc%lg_tot%num(axis))-ow_buffer(axis)
+      end do
+      if(all(relative_index>=-ow_buffer).and.all(relative_index<ow_core_size+ow_buffer))then
+        nfragment_atoms=nfragment_atoms+1;fragment_atom_mask(atom)=.true.
+        fragment_atom_index(nfragment_atoms)=atom
+      end if
+    end do
+    if(nfragment_atoms<1)then;message='exact buffered fragment contains no instantaneous atom';return;end if
+    allocate(fragment_positions(3,nfragment_atoms),fragment_species(nfragment_atoms))
+    do atom=1,nfragment_atoms
+      fragment_positions(:,atom)=modulo(matmul(lattice_inverse,&
+        dc%system_tot%Rion(:,fragment_atom_index(atom))),1d0)
+      fragment_species(atom)=dc%system_tot%kion(fragment_atom_index(atom))
+    end do
+    call load_sawf_crystallographic_catalog_auto(dc%system_tot%primitive_a,fragment_positions, &
+      fragment_species,dg_ow_symmetry_tolerance,catalog,ok,detail)
+    if(.not.ok)then;message='fragment crystallographic catalog: '//trim(detail);return;end if
+    allocate(operation_allowed(size(catalog%operations)));operation_allowed=.false.
+    do iop=1,size(catalog%operations)
+      call validate_sawf_fragment_symmetry_map(catalog%operations(iop),dc%lg_tot%num,&
+        dc%ixyz_frag-1,dc%nxyz_domain_frag,ow_buffer,dg_ow_symmetry_tolerance,grid_ok,&
+        fragment_ok,max_targets,source_to_target,grid_residual,center_available,center_grid,detail)
+      operation_allowed(iop)=grid_ok.and.fragment_ok
+      if(operation_allowed(iop))operation_allowed(iop)=source_to_target(ifrag)==ifrag
+    end do
+    fragment_center=modulo((real(dc%ixyz_frag(:,ifrag)-1,8)+0.5d0*real(ow_core_size,8))/ &
+      real(dc%lg_tot%num,8),1d0)
+    call build_dg_fragment_site_stabilizer(catalog%integer_rotation,catalog%fractional_translation,&
+      fragment_center,operation_allowed,dg_ow_symmetry_tolerance,selected,point_product,&
+      site_residual,ok,detail)
+    if(.not.ok)then;message='fragment site stabilizer: '//trim(detail);return;end if
+    allocate(local_symmetry_map(product(ow_box_size),size(selected)),point_rotations(3,3,size(selected)))
+    do iop=1,size(selected)
+      call build_sawf_fragment_buffer_point_map(catalog%operations(selected(iop)),dc%lg_tot%num,&
+        dc%ixyz_frag(:,ifrag)-1,dc%nxyz_domain_frag(:,ifrag),&
+        dc%ixyz_frag(:,ifrag)-1,dc%nxyz_domain_frag(:,ifrag),ow_buffer,&
+        dg_ow_symmetry_tolerance,point_map,map_ok,detail)
+      if(.not.map_ok)then;message='fragment point map: '//trim(detail);ok=.false.;return;end if
+      local_symmetry_map(:,iop)=int(point_map,8)
+      point_rotations(:,:,iop)=catalog%operations(selected(iop))%R
+    end do
+    write(*,'(a,i0,a,i0,a,i0,a,i0,2a,a,es12.4)')&
+      '[OW-GS-DIAGNOSTIC] fragment=',ifrag,' exact_site_group_order=',size(selected),&
+      ' space_group_number=',catalog%space_group_number,' hall_number=',catalog%hall_number,&
+      ' point_group_symbol=',trim(catalog%point_group_symbol),' site_residual=',site_residual
+    ok=.true.;message=''
+  end subroutine prepare_ow_exact_fragment_symmetry
 
   subroutine restore_ow_checkpoint_density(checkpoint,ok,message)
     type(s_dg_overlapping_wannier_checkpoint),intent(in)::checkpoint

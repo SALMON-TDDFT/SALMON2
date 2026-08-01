@@ -8,7 +8,85 @@ module dg_overlapping_wannier_symmetry
   public::build_dg_fragment_group_representation
   public::project_dg_fragment_covariant_operators
   public::promote_dg_exact_global_subgroup
+  public::build_dg_fragment_site_stabilizer
 contains
+  subroutine build_dg_fragment_site_stabilizer(rotations,translations,fragment_center,allowed, &
+      tolerance,selected,product_table,maximum_site_residual,ok,message)
+    integer,intent(in)::rotations(:,:,:)
+    real(8),intent(in)::translations(:,:),fragment_center(3),tolerance
+    logical,intent(in)::allowed(:)
+    integer,allocatable,intent(out)::selected(:),product_table(:,:)
+    real(8),intent(out)::maximum_site_residual
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer,allocatable::work_selected(:)
+    integer(8)::product_rotation(3,3)
+    real(8)::mapped_center(3),residual,product_translation(3)
+    integer::nop,iop,jop,kop,nselected,identity_position,i,j,k
+    logical::duplicate,matched
+    ok=.false.;message='';maximum_site_residual=0d0;nop=size(rotations,3)
+    if(nop<1.or.size(rotations,1)/=3.or.size(rotations,2)/=3.or. &
+        size(translations,1)/=3.or.size(translations,2)/=nop.or.size(allowed)/=nop)then
+      message='fragment site-stabilizer arrays have inconsistent dimensions';return
+    end if
+    if(.not.ieee_is_finite(tolerance).or.tolerance<=0d0.or. &
+        .not.all(ieee_is_finite(translations)).or..not.all(ieee_is_finite(fragment_center)))then
+      message='fragment site-stabilizer coordinates or tolerance are not finite';return
+    end if
+    allocate(work_selected(min(nop,maximum_crystallographic_point_group_order)))
+    nselected=0
+    do iop=1,nop
+      if(.not.allowed(iop))cycle
+      mapped_center=matmul(real(rotations(:,:,iop),8),fragment_center)+translations(:,iop)-fragment_center
+      residual=maxval(abs(mapped_center-anint(mapped_center)))
+      if(residual>tolerance)cycle
+      duplicate=.false.
+      do i=1,nselected
+        if(all(rotations(:,:,work_selected(i))==rotations(:,:,iop)))then
+          duplicate=.true.;exit
+        end if
+      end do
+      if(duplicate)cycle
+      if(nselected>=maximum_crystallographic_point_group_order)then
+        message='fragment site stabilizer exceeds crystallographic point-group order 48';return
+      end if
+      nselected=nselected+1;work_selected(nselected)=iop
+      maximum_site_residual=max(maximum_site_residual,residual)
+    end do
+    if(nselected<1)then;message='fragment site stabilizer has no admissible operation';return;end if
+    identity_position=0
+    do i=1,nselected
+      iop=work_selected(i)
+      if(all(rotations(:,:,iop)==reshape([1,0,0,0,1,0,0,0,1],[3,3])).and. &
+          maxval(abs(translations(:,iop)-anint(translations(:,iop))))<=tolerance)then
+        identity_position=i;exit
+      end if
+    end do
+    if(identity_position==0)then;message='fragment site stabilizer is missing identity';return;end if
+    if(identity_position/=1)then
+      iop=work_selected(1);work_selected(1)=work_selected(identity_position)
+      work_selected(identity_position)=iop
+    end if
+    allocate(selected(nselected),product_table(nselected,nselected));selected=work_selected(1:nselected)
+    do i=1,nselected;do j=1,nselected
+      iop=selected(i);jop=selected(j)
+      product_rotation=matmul(int(rotations(:,:,iop),8),int(rotations(:,:,jop),8))
+      product_translation=translations(:,iop)+matmul(real(rotations(:,:,iop),8),translations(:,jop))
+      matched=.false.;kop=0
+      do k=1,nselected
+        if(any(product_rotation/=int(rotations(:,:,selected(k)),8)))cycle
+        residual=maxval(abs(product_translation-translations(:,selected(k))- &
+          anint(product_translation-translations(:,selected(k)))))
+        if(residual<=tolerance)then;matched=.true.;kop=k;exit;end if
+      end do
+      if(.not.matched)then
+        message='fragment site stabilizer affine operations are not closed';return
+      end if
+      product_table(i,j)=kop
+    end do;end do
+    ok=.true.
+  end subroutine build_dg_fragment_site_stabilizer
+
   subroutine promote_dg_exact_global_subgroup(product_table,fragment_exact,scalar_block_residual, &
       vector_block_residual,tolerance,subgroup,ok,message)
     integer,intent(in)::product_table(:,:)

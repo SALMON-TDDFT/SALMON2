@@ -17,7 +17,7 @@ def require(condition: bool, message: str) -> None:
 
 for routine in (
     "load_sawf_crystallographic_catalog_auto",
-    "select_dg_exact_fragment_subgroup",
+    "build_dg_fragment_site_stabilizer",
     "build_dg_fragment_group_representation",
     "promote_dg_exact_global_subgroup",
     "project_dg_fragment_covariant_operators",
