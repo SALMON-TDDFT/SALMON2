@@ -62,7 +62,7 @@
 &emfield
  ae_shape1='Acos2'
  I_wcm2_1=1d8
- tw1=413.4d0
+ tw1=@PULSE_DURATION@
  omega1=0.05696d0
  epdir_re1=@AXIS@
 /

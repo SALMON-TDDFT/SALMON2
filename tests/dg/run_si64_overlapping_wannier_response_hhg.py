@@ -11,10 +11,28 @@ import re
 import shutil
 import subprocess
 import sys
+import math
 from pathlib import Path
 
 
 AXES = {"x": "1d0,0d0,0d0", "y": "0d0,1d0,0d0", "z": "0d0,0d0,1d0"}
+LASER_OMEGA_AU = 0.05696
+LASER_CYCLES = 10.0
+POST_PULSE_CYCLES = 2.0
+LASER_DT_AU = 2.0
+LASER_REFERENCE_DT_AU = 1.0
+LASER_PULSE_DURATION_AU = LASER_CYCLES * 2.0 * math.pi / LASER_OMEGA_AU
+LASER_TOTAL_DURATION_AU = round(
+    (LASER_CYCLES + POST_PULSE_CYCLES) * 2.0 * math.pi / LASER_OMEGA_AU
+    / LASER_DT_AU
+) * LASER_DT_AU
+
+
+def laser_sample_count(dt_au: float) -> int:
+    count = round(LASER_TOTAL_DURATION_AU / dt_au)
+    if not math.isclose(count * dt_au, LASER_TOTAL_DURATION_AU, abs_tol=1.0e-12):
+        raise ValueError("laser time steps do not share one physical duration")
+    return count
 
 
 def sha256(path: Path) -> str:
@@ -37,6 +55,7 @@ def main() -> int:
     parser.add_argument("checkpoint_dir", type=Path)
     parser.add_argument("result_root", type=Path)
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[2])
+    parser.add_argument("--structure", choices=("ideal", "displaced"), default="ideal")
     args = parser.parse_args()
     binary = args.binary.resolve(strict=True)
     checkpoint = args.checkpoint_dir.resolve(strict=True)
@@ -47,8 +66,9 @@ def main() -> int:
     atom_lines = [line for line in atoms.splitlines() if line.strip()]
     if len(atom_lines) != 64 or any("'Si'" not in line for line in atom_lines):
         raise RuntimeError("checkpoint provenance is not 64 silicon atoms")
-    if atoms != (args.repo / "tests/dg/data/si64_overlapping_wannier_rt/atom.dat").read_text():
-        raise RuntimeError("checkpoint Si64 coordinates differ from the tracked production fixture")
+    fixture_name = "atom.dat" if args.structure == "ideal" else "atom_displaced.dat"
+    if atoms != (args.repo / "tests/dg/data/si64_overlapping_wannier_rt" / fixture_name).read_text():
+        raise RuntimeError(f"checkpoint Si64 coordinates differ from the tracked {args.structure} fixture")
     if not (checkpoint / "Si_rps.dat").is_file():
         raise RuntimeError("genuine Si pseudopotential is missing")
     if sha256(checkpoint / "Si_rps.dat") != sha256(args.repo / "samples/exercise_04_bulkSi_gs/Si_rps.dat"):
@@ -58,22 +78,30 @@ def main() -> int:
         raise RuntimeError("accepted V3 checkpoint manifest is missing")
     root.mkdir(parents=True)
     fixtures = args.repo / "tests/dg/data/si64_overlapping_wannier_rt"
+    coarse_dt = f"{LASER_DT_AU:.1f}d0"; fine_dt = f"{LASER_REFERENCE_DT_AU:.1f}d0"
+    coarse_nt = str(laser_sample_count(LASER_DT_AU))
+    fine_nt = str(laser_sample_count(LASER_REFERENCE_DT_AU))
     cases: list[tuple[str, str, str, str, str]] = [
-        ("fieldoff", "input_fieldoff.in", "x", "0.5d0", "800"),
-        ("fieldoff-half-dt", "input_fieldoff.in", "x", "0.25d0", "1600"),
-        ("impulse-x", "input_impulse.in", "x", "0.5d0", "800"),
-        ("impulse-x-half", "input_impulse.in", "x", "0.5d0", "800"),
-        ("impulse-y", "input_impulse.in", "y", "0.5d0", "800"),
-        ("impulse-z", "input_impulse.in", "z", "0.5d0", "800"),
-        ("laser-weak-x", "input_laser_weak.in", "x", "0.5d0", "800"),
-        ("laser-hhg-x", "input_laser_hhg.in", "x", "0.5d0", "800"),
-        ("laser-hhg-y", "input_laser_hhg.in", "y", "0.5d0", "800"),
-        ("laser-hhg-z", "input_laser_hhg.in", "z", "0.5d0", "800"),
-        ("laser-hhg-x-half-dt", "input_laser_hhg.in", "x", "0.25d0", "1600"),
+        ("fieldoff", "input_fieldoff.in", "x", coarse_dt, coarse_nt),
+        ("fieldoff-half-dt", "input_fieldoff.in", "x", fine_dt, fine_nt),
+        ("impulse-x", "input_impulse.in", "x", coarse_dt, coarse_nt),
+        ("impulse-x-half", "input_impulse.in", "x", coarse_dt, coarse_nt),
+        ("impulse-y", "input_impulse.in", "y", coarse_dt, coarse_nt),
+        ("impulse-z", "input_impulse.in", "z", coarse_dt, coarse_nt),
+        ("laser-weak-x", "input_laser_weak.in", "x", coarse_dt, coarse_nt),
+        ("laser-hhg-x", "input_laser_hhg.in", "x", coarse_dt, coarse_nt),
+        ("laser-hhg-y", "input_laser_hhg.in", "y", coarse_dt, coarse_nt),
+        ("laser-hhg-z", "input_laser_hhg.in", "z", coarse_dt, coarse_nt),
+        ("laser-hhg-x-half-dt", "input_laser_hhg.in", "x", fine_dt, fine_nt),
     ]
     checkpoint_files = sorted(checkpoint.glob("overlapping_wannier_gs*"))
     checkpoint_hashes = {item.name: sha256(item) for item in checkpoint_files}
     checkpoint_digest = sha256(manifest_path)
+    gs_log = (checkpoint / "run.log").read_text(errors="replace")
+    local_group_orders = [int(value) for value in re.findall(r"exact_site_group_order=(\d+)", gs_log)]
+    promoted_orders = [int(value) for value in re.findall(r"promoted_point_group_order=(\d+)", gs_log)]
+    if len(local_group_orders) != 8 or not promoted_orders or len(set(promoted_orders)) != 1:
+        raise RuntimeError("fresh checkpoint lacks exact fragment-symmetry publication evidence")
     for name, template, axis, dt, nt in cases:
         case = root / name; case.mkdir()
         shutil.copy2(checkpoint / "atom.dat", case / "atom.dat")
@@ -83,6 +111,7 @@ def main() -> int:
         impulse = "5d-3" if name == "impulse-x-half" else "1d-2"
         render(fixtures / template, case / "inputfile", {
             "AXIS": AXES[axis], "DT": dt, "NT": nt, "IMPULSE": impulse,
+            "PULSE_DURATION": f"{LASER_PULSE_DURATION_AU:.12f}d0",
         })
         with (case / "inputfile").open("rb") as source, (case / "run.log").open("wb") as log:
             result = subprocess.run(["mpirun", "-np", "8", str(binary)], cwd=case,
@@ -97,6 +126,10 @@ def main() -> int:
             raise RuntimeError(f"{name}: restart missing or source V3 checkpoint changed")
         evidence = {
             "material": "Si", "atomic_number": 14, "atom_count": 64,
+            "structure": args.structure,
+            "atom_sha256": sha256(checkpoint / "atom.dat"),
+            "local_exact_group_orders": local_group_orders,
+            "promoted_point_group_order": promoted_orders[0],
             "checkpoint_magic": "SALMON_OW_GS_CHECKPOINT_V3",
             "checkpoint_manifest_sha256": checkpoint_digest,
             "observable_sha256": sha256(observable), "axis": axis,
@@ -105,6 +138,13 @@ def main() -> int:
             "binary_sha256": sha256(binary),
             "dt_au": float(dt.removesuffix("d0")), "nt": int(nt),
         }
+        if name.startswith("laser"):
+            evidence.update({
+                "laser_cycles": LASER_CYCLES,
+                "post_pulse_cycles": POST_PULSE_CYCLES,
+                "pulse_duration_au": LASER_PULSE_DURATION_AU,
+                "total_duration_au": LASER_TOTAL_DURATION_AU,
+            })
         (case / "manifest.json").write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n")
         if name.startswith("laser-hhg") or name == "laser-weak-x":
             background = root / ("fieldoff-half-dt" if "half-dt" in name else "fieldoff")
