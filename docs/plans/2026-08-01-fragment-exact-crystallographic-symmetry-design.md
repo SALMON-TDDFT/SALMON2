@@ -74,17 +74,33 @@ buffered real-space overlaps.  Apply polar correction only to remove numerical
 non-unitarity, then require metric unitarity, multiplication-table closure, and
 inverse consistency.
 
-Use Reynolds averaging within each fragment's exact group:
+Use each fragment's exact group to symmetry-close and validate its buffered
+Wannier construction.  This is a local basis constraint, not permission to
+symmetrize couplings to a different environment.
+
+Before Reynolds averaging assembled matrices, promote an operation to the
+global projection group only when its action is exact on every participating
+buffer and on every overlapping inter-fragment matrix block.  The promoted
+operations must form a closed group.  An operation that is exact in one
+fragment but fails on a neighboring buffer or cross-fragment coupling remains
+local diagnostic data and is not applied to global matrices.  This two-level
+gate prevents a locally symmetric fragment from erasing physical zero-point or
+thermal dephasing carried by its environment.
+
+For the promoted global exact group, use Reynolds averaging:
 
 - scalar matrices: `S` and `H` transform invariantly;
 - polar-vector matrices: `X` and `V` transform with the Cartesian rotation;
 - improper rotations use the polar-vector convention, including inversion;
-- no averaging is performed for C1.
+- no averaging is performed when the promoted group is C1, even if one or more
+  isolated fragments have a larger local group.
 
 Validate pre- and post-projection covariance.  Projection may remove numerical
-noise only; a large pre-projection defect is a hard failure because it signals
-an inconsistent basis, operator, or map.  Fragment contributions are assembled
-after their local projections, so no global point group is assumed.
+noise only; a large pre-projection defect removes that operation from global
+promotion and is a hard failure if metadata had already classified it as
+global.  Fragment groups, promotion decisions, and rejected cross-block
+residuals are recorded separately.  Ideal crystals may promote their full
+crystallographic group; displaced snapshots normally promote a subgroup or C1.
 
 ### V3 checkpoint and RT
 
@@ -135,4 +151,3 @@ RED tests precede every implementation unit.  Focused verification includes:
 Every task retains RED evidence, focused verification, specification review,
 code-quality review, resolution of all Critical and Important findings, and a
 clean-first parent-prerequisite overlay build before acceptance.
-

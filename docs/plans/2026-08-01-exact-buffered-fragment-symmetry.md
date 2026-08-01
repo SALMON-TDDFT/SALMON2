@@ -241,6 +241,12 @@ proper and improper point groups.  Require Reynolds projection to restore
 scalar invariance and vector covariance, including inversion signs.  Require
 C1 to be byte-preserving and large pre-projection defects to fail.
 
+Add a production promotion RED: an operation may enter the global projection
+group only if every buffered fragment representation and every overlapping
+cross-fragment `S/H/X/V` block satisfy the scalar or polar-vector transformation
+law.  A locally exact operation with a perturbed neighboring block must remain
+local-only and reduce the promoted group to a closed subgroup or C1.
+
 **Step 2: Run RED**
 
 Run:
@@ -253,9 +259,14 @@ Expected: FAIL because only Hermiticity gates exist.
 
 **Step 3: Implement local Reynolds projection**
 
-Project each fragment before distributed global assembly, using its own exact
-group and retained-basis representation.  Validate pre/post residuals and use
-the polar-vector Cartesian convention for `X/V` under improper operations.
+Use each exact local group while constructing and validating its buffered
+Wannier basis.  Assemble the overlapping matrices, evaluate covariance per
+fragment block and cross-fragment block, and deterministically select the
+largest closed group passing every block.  Apply Reynolds projection only for
+that promoted global exact group.  Validate pre/post residuals and use the
+polar-vector Cartesian convention for `X/V` under improper operations.  C1 is
+byte-preserving; never promote parent symmetry through a thermally displaced
+block.
 
 **Step 4: Focused verification and reviews**
 
@@ -408,4 +419,3 @@ git commit -m "test(dg): verify exact fragment symmetry route"
 
 After verification-before-completion, push the branch to both `origin` and
 `upstream` and verify both remote refs equal local HEAD.
-
