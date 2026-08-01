@@ -1,0 +1,73 @@
+&calculation
+ theory='dft'
+ yn_dc='y'
+/
+&control
+ sysname='si64_ow'
+ yn_reset_step_restart='y'
+ write_gs_restart_data='no'
+/
+&units
+ unit_system='a.u.'
+/
+&dc
+ num_fragment=2,2,2
+ num_rgrid_buffer=6,6,6
+ nproc_rgrid_tot=2,2,2
+ nstate_frag=400
+ yn_dc_lcfo='n'
+ yn_dc_lcfo_flux='n'
+ yn_dc_lcfo_diag='n'
+ yn_dc_fragment_optimization='n'
+ yn_dg_dc_overlapping_wannier='y'
+ dg_ow_candidate_states_per_fragment=192
+ dg_ow_target_wanniers_per_fragment=0
+ dg_dc_gs_density_mix_rate=0.2d0
+ dg_dc_gs_maximum_scf_iterations=120
+ dg_dc_gs_final_density_tolerance=1d-7
+ dg_dc_gs_final_orbital_tolerance=1d-7
+ dg_dc_gs_electron_count_tolerance=1d-8
+ dg_ow_boundary_value_tolerance=1d-6
+ dg_ow_boundary_gradient_tolerance=1d-6
+ dg_ow_symmetry_tolerance=1d-10
+/
+&parallel
+ nproc_k=1
+ nproc_ob=1
+ nproc_rgrid=1,1,1
+ yn_eigenexa='n'
+/
+&system
+ yn_periodic='y'
+ al=20.52d0,20.52d0,20.52d0
+ nelem=1
+ nstate=256
+ nelec=256
+ natom=64
+ file_atom_coor='atom.dat'
+ temperature_k=300d0
+/
+&pseudo
+ izatom(1)=14
+ file_pseudo(1)='Si_rps.dat'
+ lloc_ps(1)=2
+/
+&functional
+ xc='PZ'
+/
+&rgrid
+ num_rgrid=32,32,32
+/
+&kgrid
+ num_kgrid=1,1,1
+/
+&scf
+ nscf_init_redistribution=10
+ nscf_init_no_diagonal=0
+ nscf=1000
+ ncg=5
+ method_mixing='simple'
+ mixrate=0.2d0
+ threshold=1d-9
+ yn_preconditioning='y'
+/
