@@ -64,7 +64,8 @@ use dg_overlapping_wannier_checkpoint, only: s_dg_overlapping_wannier_checkpoint
 use dg_overlapping_wannier_observables, only: assemble_dg_overlapping_wannier_observables
 use dg_overlapping_wannier_symmetry, only: select_dg_exact_fragment_subgroup,&
   build_dg_fragment_site_stabilizer,build_dg_fragment_group_representation,&
-  promote_dg_exact_global_subgroup,project_dg_fragment_covariant_operators
+  promote_dg_exact_global_subgroup,project_dg_fragment_covariant_operators,&
+  evaluate_dg_covariance_residuals_by_operation
 use lcfo_wannier_sawf, only: t_sawf_crystallographic_catalog,&
   load_sawf_crystallographic_catalog_auto
 use lcfo_wannier_sawf_band, only: validate_sawf_fragment_symmetry_map,&
@@ -522,14 +523,14 @@ contains
   subroutine run_dg_overlapping_wannier_ground_state_for_main()
     complex(8),allocatable::candidate(:,:),occupied_coefficients(:,:),augmented_candidate(:,:),&
       augmented_gradient(:,:,:),augmented_occupied(:,:),periodic_phase(:,:),&
-      fragment_wannier(:,:),fragment_wannier_gradient(:,:,:)
+      fragment_wannier(:,:),fragment_wannier_gradient(:,:,:),local_retained_representation(:,:,:)
     real(8),allocatable::weights(:),coordinate(:),spectrum(:),occupations(:),gradient_rotation(:,:,:),&
       local_point_rotations(:,:,:)
     real(8),allocatable::manifest_values(:,:),initial_density_local(:),initial_density_global(:)
     type(t_dg_projection_channel),allocatable::manifest_channels(:)
     integer(8),allocatable::physical_ids(:),box_ids(:),symmetry_map(:,:),local_box_ids(:),&
       local_symmetry_map(:,:),center_representatives(:),representative_center_ids(:)
-    integer,allocatable::fragments(:),local_point_product(:,:)
+    integer,allocatable::fragments(:),local_point_product(:,:),local_point_integer_rotations(:,:,:)
     logical,allocatable::boundary(:),core_mask(:),pairs(:,:)
     integer::ix,iy,iz,io,p,nbox,ncore,ncandidate,noccupied,nstate,ntarget,nsym,rank,nproc,&
       raw_ix,raw_iy,raw_iz,core_index,rejected_rank,ownership_count,ierr,allocation_status,&
@@ -672,8 +673,8 @@ contains
     deallocate(candidate,occupied_coefficients)
     call build_dc_translation_symmetry_map(nbox,symmetry_map,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'invalid DC translation symmetry';endif
-    call prepare_ow_exact_fragment_symmetry(local_symmetry_map,local_point_rotations,&
-      local_point_product,ok,message)
+    call prepare_ow_exact_fragment_symmetry(local_symmetry_map,local_point_integer_rotations,&
+      local_point_rotations,local_point_product,ok,message)
     if(.not.ok)then
       write(0,'(a)')trim(message)
       error stop 'invalid exact buffered-fragment crystallographic symmetry'
@@ -688,6 +689,7 @@ contains
       center_representative_box_ids=center_representatives,&
       projection_seed_values=manifest_values)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'overlapping-Wannier construction gate failed';endif
+    allocate(local_retained_representation,source=ow_basis%symmetry_representation)
     local_target_count=ow_basis%target_rank
     call verify_dg_uniform_fragment_target_rank(dc%icomm_tot,local_target_count,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'nonuniform overlapping-Wannier target rank';endif
@@ -808,7 +810,9 @@ contains
       dg_dc_gs_final_orbital_tolerance,ow_build_hamiltonian,ow_mix_density,ow_transaction,&
       ow_commit_transaction,ow_state,ow_result,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'overlapping-Wannier SCF gate failed';endif
-    call populate_ow_checkpoint(occupations,condition_number,closure_residual,operator_fingerprint)
+    call populate_ow_checkpoint(occupations,condition_number,closure_residual,operator_fingerprint,&
+      local_point_integer_rotations,local_point_rotations,local_point_product,&
+      local_retained_representation)
     call write_dg_overlapping_wannier_checkpoint(dc%icomm_tot,trim(prefix),ow_checkpoint,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'overlapping-Wannier checkpoint publication failed';endif
     call compute_ow_periodic_spread(dc%icomm_tot,spread_max)
@@ -1209,9 +1213,10 @@ contains
     endif
   end subroutine
 
-  subroutine prepare_ow_exact_fragment_symmetry(local_symmetry_map,point_rotations, &
+  subroutine prepare_ow_exact_fragment_symmetry(local_symmetry_map,point_integer_rotations,point_rotations, &
       point_product,ok,message)
     integer(8),allocatable,intent(out)::local_symmetry_map(:,:)
+    integer,allocatable,intent(out)::point_integer_rotations(:,:,:)
     real(8),allocatable,intent(out)::point_rotations(:,:,:)
     integer,allocatable,intent(out)::point_product(:,:)
     logical,intent(out)::ok
@@ -1266,7 +1271,8 @@ contains
       fragment_center,operation_allowed,dg_ow_symmetry_tolerance,selected,point_product,&
       site_residual,ok,detail)
     if(.not.ok)then;message='fragment site stabilizer: '//trim(detail);return;end if
-    allocate(local_symmetry_map(product(ow_box_size),size(selected)),point_rotations(3,3,size(selected)))
+    allocate(local_symmetry_map(product(ow_box_size),size(selected)),&
+      point_integer_rotations(3,3,size(selected)),point_rotations(3,3,size(selected)))
     do iop=1,size(selected)
       call build_sawf_fragment_buffer_point_map(catalog%operations(selected(iop)),dc%lg_tot%num,&
         dc%ixyz_frag(:,ifrag)-1,dc%nxyz_domain_frag(:,ifrag),&
@@ -1274,6 +1280,7 @@ contains
         dg_ow_symmetry_tolerance,point_map,map_ok,detail)
       if(.not.map_ok)then;message='fragment point map: '//trim(detail);ok=.false.;return;end if
       local_symmetry_map(:,iop)=int(point_map,8)
+      point_integer_rotations(:,:,iop)=catalog%integer_rotation(:,:,selected(iop))
       point_rotations(:,:,iop)=catalog%operations(selected(iop))%R
     end do
     write(*,'(a,i0,a,i0,a,i0,a,i0,2a,a,es12.4)')&
@@ -1739,9 +1746,181 @@ contains
     if(allocated(ow_density_snapshot))deallocate(ow_density_snapshot)
   end subroutine
 
-  subroutine populate_ow_checkpoint(occupations,condition_number,closure_residual,operator_fingerprint)
+  subroutine promote_and_project_ow_matrices(metric,hamiltonian,position,velocity,&
+      local_integer_rotations,local_cartesian_rotations,local_product,local_representation,&
+      pre_projection_defect,post_projection_defect,promoted_group_order,ok,message)
+    complex(8),intent(inout)::metric(:,:),hamiltonian(:,:),position(:,:,:),velocity(:,:,:)
+    integer,intent(in)::local_integer_rotations(:,:,:),local_product(:,:)
+    real(8),intent(in)::local_cartesian_rotations(:,:,:)
+    complex(8),intent(in)::local_representation(:,:,:)
+    real(8),intent(out)::pre_projection_defect,post_projection_defect
+    integer,intent(out)::promoted_group_order
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer,allocatable::root_integer_rotations(:,:,:),common_integer_rotations(:,:,:),&
+      local_match(:),common_product(:,:),promoted(:),promoted_product(:,:)
+    real(8),allocatable::root_cartesian_rotations(:,:,:),common_cartesian_rotations(:,:,:),&
+      promoted_rotations(:,:,:),cross_block_scalar_residual(:,:),cross_block_vector_residual(:,:),&
+      scalar_residual(:),vector_residual(:)
+    complex(8),allocatable::raw_representation(:,:,:),promoted_raw(:,:,:),representation(:,:,:),&
+      local_block(:,:),all_blocks(:,:,:),scalars(:,:,:),vectors(:,:,:,:),&
+      projected_scalars(:,:,:),projected_vectors(:,:,:,:),transformed_block(:,:),target_block(:,:)
+    logical,allocatable::fragment_exact(:,:)
+    integer::rank,nproc,ierr,root_count,common_count,local_index,present_local,present_global,&
+      iop,jop,kop,i,j,k,nlocal,nwann,source,target,block,axis,field
+    real(8)::raw_unitarity_defect,unitarity_defect,closure_defect,scalar_scale,vector_scale
+    logical::residual_ok
+
+    ok=.false.;message='';promoted_group_order=0;pre_projection_defect=huge(1d0)
+    post_projection_defect=huge(1d0)
+    call MPI_Comm_rank(dc%icomm_tot,rank,ierr);call MPI_Comm_size(dc%icomm_tot,nproc,ierr)
+    nwann=size(metric,1);nlocal=size(local_representation,1)
+    if(size(metric,2)/=nwann.or.any(shape(hamiltonian)/=[nwann,nwann]).or. &
+        any(shape(position)/=[3,nwann,nwann]).or.any(shape(velocity)/=[3,nwann,nwann]).or. &
+        size(local_representation,2)/=nlocal.or.size(local_representation,3)/= &
+        size(local_integer_rotations,3).or.nwann/=nlocal*nproc.or. &
+        size(local_integer_rotations,1)/=3.or.size(local_integer_rotations,2)/=3.or. &
+        any(shape(local_cartesian_rotations)/=shape(local_integer_rotations)).or. &
+        any(shape(local_product)/=[size(local_representation,3),size(local_representation,3)]))then
+      message='invalid local/global crystallographic promotion dimensions';return
+    end if
+    root_count=0;if(rank==0)root_count=size(local_integer_rotations,3)
+    call MPI_Bcast(root_count,1,MPI_INTEGER,0,dc%icomm_tot,ierr)
+    allocate(root_integer_rotations(3,3,root_count),root_cartesian_rotations(3,3,root_count))
+    if(rank==0)then
+      root_integer_rotations=local_integer_rotations;root_cartesian_rotations=local_cartesian_rotations
+    end if
+    call MPI_Bcast(root_integer_rotations,9*root_count,MPI_INTEGER,0,dc%icomm_tot,ierr)
+    call MPI_Bcast(root_cartesian_rotations,9*root_count,MPI_DOUBLE_PRECISION,0,dc%icomm_tot,ierr)
+    allocate(local_match(root_count));local_match=0;common_count=0
+    do iop=1,root_count
+      do jop=1,size(local_integer_rotations,3)
+        if(all(local_integer_rotations(:,:,jop)==root_integer_rotations(:,:,iop)))then
+          local_match(iop)=jop;exit
+        end if
+      end do
+      present_local=merge(1,0,local_match(iop)>0)
+      call MPI_Allreduce(present_local,present_global,1,MPI_INTEGER,MPI_MIN,dc%icomm_tot,ierr)
+      if(present_global==1)common_count=common_count+1
+    end do
+    if(common_count<1)then;message='fragment point groups have no common identity';return;end if
+    allocate(common_integer_rotations(3,3,common_count),common_cartesian_rotations(3,3,common_count),&
+      raw_representation(nwann,nwann,common_count),common_product(common_count,common_count))
+    raw_representation=(0d0,0d0);common_count=0
+    do iop=1,root_count
+      present_local=merge(1,0,local_match(iop)>0)
+      call MPI_Allreduce(present_local,present_global,1,MPI_INTEGER,MPI_MIN,dc%icomm_tot,ierr)
+      if(present_global/=1)cycle
+      common_count=common_count+1;common_integer_rotations(:,:,common_count)=root_integer_rotations(:,:,iop)
+      common_cartesian_rotations(:,:,common_count)=root_cartesian_rotations(:,:,iop)
+      allocate(local_block(nlocal,nlocal),all_blocks(nlocal,nlocal,nproc))
+      local_block=local_representation(:,:,local_match(iop))
+      call MPI_Allgather(local_block,nlocal*nlocal,MPI_DOUBLE_COMPLEX,all_blocks,nlocal*nlocal,&
+        MPI_DOUBLE_COMPLEX,dc%icomm_tot,ierr)
+      do source=1,nproc
+        raw_representation((source-1)*nlocal+1:source*nlocal,&
+          (source-1)*nlocal+1:source*nlocal,common_count)=all_blocks(:,:,source)
+      end do
+      deallocate(local_block,all_blocks)
+    end do
+    do iop=1,common_count;do jop=1,common_count
+      kop=0
+      do k=1,common_count
+        if(all(matmul(common_integer_rotations(:,:,iop),common_integer_rotations(:,:,jop))== &
+            common_integer_rotations(:,:,k)))then;kop=k;exit;end if
+      end do
+      if(kop==0)then;message='common fragment point rotations are not closed';return;end if
+      common_product(iop,jop)=kop
+    end do;end do
+    allocate(scalars(nwann,nwann,2),vectors(nwann,nwann,3,2))
+    scalars(:,:,1)=metric;scalars(:,:,2)=hamiltonian
+    do i=1,3
+      vectors(:,:,i,1)=position(i,:,:);vectors(:,:,i,2)=velocity(i,:,:)
+    end do
+    call evaluate_dg_covariance_residuals_by_operation(raw_representation,common_cartesian_rotations,&
+      scalars,vectors,scalar_residual,vector_residual,residual_ok,message)
+    if(.not.residual_ok)return
+    allocate(fragment_exact(nproc,common_count),&
+      cross_block_scalar_residual(nproc*nproc,common_count),&
+      cross_block_vector_residual(nproc*nproc,common_count),&
+      transformed_block(nlocal,nlocal),target_block(nlocal,nlocal));fragment_exact=.true.
+    cross_block_scalar_residual=0d0;cross_block_vector_residual=0d0
+    do iop=1,common_count
+      block=0
+      do source=1,nproc;do target=1,nproc
+        block=block+1
+        do field=1,size(scalars,3)
+          scalar_scale=max(1d0,maxval(abs(scalars(:,:,field))))
+          transformed_block=matmul(conjg(transpose(raw_representation(&
+            (source-1)*nlocal+1:source*nlocal,(source-1)*nlocal+1:source*nlocal,iop))),&
+            matmul(scalars((source-1)*nlocal+1:source*nlocal,&
+              (target-1)*nlocal+1:target*nlocal,field),raw_representation(&
+              (target-1)*nlocal+1:target*nlocal,(target-1)*nlocal+1:target*nlocal,iop)))
+          cross_block_scalar_residual(block,iop)=max(cross_block_scalar_residual(block,iop),&
+            maxval(abs(transformed_block-scalars((source-1)*nlocal+1:source*nlocal,&
+            (target-1)*nlocal+1:target*nlocal,field)))/scalar_scale)
+        end do
+        do field=1,size(vectors,4)
+          vector_scale=max(1d0,maxval(abs(vectors(:,:,:,field))))
+          do axis=1,3
+          transformed_block=matmul(conjg(transpose(raw_representation(&
+            (source-1)*nlocal+1:source*nlocal,(source-1)*nlocal+1:source*nlocal,iop))),&
+            matmul(vectors((source-1)*nlocal+1:source*nlocal,&
+              (target-1)*nlocal+1:target*nlocal,axis,field),raw_representation(&
+              (target-1)*nlocal+1:target*nlocal,(target-1)*nlocal+1:target*nlocal,iop)))
+          target_block=(0d0,0d0)
+          do j=1,3
+            target_block=target_block+common_cartesian_rotations(axis,j,iop)*vectors(&
+              (source-1)*nlocal+1:source*nlocal,(target-1)*nlocal+1:target*nlocal,j,field)
+          end do
+          cross_block_vector_residual(block,iop)=max(cross_block_vector_residual(block,iop),&
+            maxval(abs(transformed_block-target_block))/vector_scale)
+          end do
+        end do
+      end do;end do
+    end do
+    call promote_dg_exact_global_subgroup(common_product,fragment_exact,cross_block_scalar_residual,&
+      cross_block_vector_residual,dg_ow_symmetry_tolerance,promoted,ok,message)
+    if(.not.ok)return
+    if(rank==0)then
+      do iop=1,common_count
+        write(*,'(a,i0,a,es12.4,a,es12.4,a,l1)')&
+          '[OW-GS-DIAGNOSTIC] common_point_operation=',iop,&
+          ' cross_block_scalar_residual=',maxval(cross_block_scalar_residual(:,iop)),&
+          ' cross_block_vector_residual=',maxval(cross_block_vector_residual(:,iop)),&
+          ' promoted=',any(promoted==iop)
+      end do
+    end if
+    promoted_group_order=size(promoted)
+    allocate(promoted_raw(nwann,nwann,promoted_group_order),&
+      promoted_rotations(3,3,promoted_group_order),promoted_product(promoted_group_order,promoted_group_order))
+    promoted_raw=raw_representation(:,:,promoted);promoted_rotations=common_cartesian_rotations(:,:,promoted)
+    do i=1,promoted_group_order;do j=1,promoted_group_order
+      kop=common_product(promoted(i),promoted(j));k=findloc(promoted,kop,dim=1)
+      if(k==0)then;message='promoted crystallographic subgroup is not closed';ok=.false.;return;end if
+      promoted_product(i,j)=k
+    end do;end do
+    call build_dg_fragment_group_representation(metric,promoted_raw,promoted_product,&
+      dg_ow_symmetry_tolerance,representation,raw_unitarity_defect,unitarity_defect,&
+      closure_defect,ok,message)
+    if(.not.ok)return
+    call project_dg_fragment_covariant_operators(representation,promoted_rotations,scalars,vectors,&
+      dg_ow_symmetry_tolerance,projected_scalars,projected_vectors,pre_projection_defect,&
+      post_projection_defect,ok,message)
+    if(.not.ok)return
+    metric=projected_scalars(:,:,1);hamiltonian=projected_scalars(:,:,2)
+    do i=1,3
+      position(i,:,:)=projected_vectors(:,:,i,1);velocity(i,:,:)=projected_vectors(:,:,i,2)
+    end do
+  end subroutine promote_and_project_ow_matrices
+
+  subroutine populate_ow_checkpoint(occupations,condition_number,closure_residual,operator_fingerprint,&
+      local_point_integer_rotations,local_point_rotations,local_point_product,local_representation)
     real(8),intent(in)::occupations(:),condition_number,closure_residual
     integer(8),intent(in)::operator_fingerprint
+    integer,intent(in)::local_point_integer_rotations(:,:,:),local_point_product(:,:)
+    real(8),intent(in)::local_point_rotations(:,:,:)
+    complex(8),intent(in)::local_representation(:,:,:)
     integer::rank,i,j,nowned,nbox,nproc,ierr,axis,point,ownership_count
     integer(8)::tail_count8
     integer(8),allocatable::all_tail_ids(:)
@@ -1751,6 +1930,8 @@ contains
     real(8),allocatable::new_potential(:),coordinates(:,:)
     real(8)::origin(3),cell_length(3),local_residual_norm,global_residual_norm,&
       local_h_norm,global_h_norm,local_s_norm,global_s_norm,published_coefficient_residual
+    real(8)::pre_projection_defect,post_projection_defect
+    integer::promoted_group_order
     logical::ok
     character(256)::message
     integer(8)::final_operator_fingerprint
@@ -1822,6 +2003,40 @@ contains
       write(0,'(a)')trim(message)
       error stop 'overlapping-Wannier observable publication gate failed'
     endif
+    call promote_and_project_ow_matrices(metric,hamiltonian,position,velocity,&
+      local_point_integer_rotations,local_point_rotations,local_point_product,local_representation,&
+      pre_projection_defect,post_projection_defect,promoted_group_order,ok,message)
+    if(.not.ok)then
+      write(0,'(a)')trim(message)
+      error stop 'overlapping-Wannier crystallographic covariance publication gate failed'
+    end if
+    call invert_ow_metric(metric,metric_inverse,ok,message)
+    if(.not.ok)error stop 'projected overlapping-Wannier metric inverse failed'
+    do i=1,size(ow_row_ids)
+      ow_srows(i,:)=metric(int(ow_row_ids(i)),:)
+      hrows(i,:)=hamiltonian(int(ow_row_ids(i)),:)
+    end do
+    residual_rows=matmul(hrows,ow_state%coefficients)
+    published_coefficient_residual=0d0
+    do j=1,size(residual_rows,2)
+      residual_rows(:,j)=residual_rows(:,j)-&
+        ow_state%eigenvalues(j)*matmul(ow_srows,ow_state%coefficients(:,j))
+      local_residual_norm=sum(abs(residual_rows(:,j))**2)
+      local_h_norm=sum(abs(matmul(hrows,ow_state%coefficients(:,j)))**2)
+      local_s_norm=sum(abs(matmul(ow_srows,ow_state%coefficients(:,j)))**2)
+      call MPI_Allreduce(local_residual_norm,global_residual_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,&
+        dc%icomm_tot,ierr)
+      call MPI_Allreduce(local_h_norm,global_h_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr)
+      call MPI_Allreduce(local_s_norm,global_s_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr)
+      published_coefficient_residual=max(published_coefficient_residual,&
+        sqrt(max(0d0,global_residual_norm))/max(tiny(1d0),sqrt(max(0d0,global_h_norm))+&
+        abs(ow_state%eigenvalues(j))*sqrt(max(0d0,global_s_norm))))
+    end do
+    if(published_coefficient_residual>dg_dc_gs_final_orbital_tolerance)&
+      error stop 'symmetry-projected H0 is inconsistent with accepted GS coefficients'
+    write(*,'(a,i0,a,es12.4,a,es12.4)')'[OW-GS-DIAGNOSTIC] promoted_point_group_order=',&
+      promoted_group_order,' pre_projection_defect=',pre_projection_defect,&
+      ' post_projection_defect=',post_projection_defect
     ow_checkpoint=s_dg_overlapping_wannier_checkpoint()
     ow_checkpoint%basis_generation=ow_basis%generation;ow_checkpoint%geometry_generation=1
     ow_checkpoint%basis_fingerprint=ow_state%basis_fingerprint

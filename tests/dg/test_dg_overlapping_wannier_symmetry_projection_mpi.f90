@@ -1,11 +1,13 @@
 #include "config.h"
 program test_dg_overlapping_wannier_symmetry_projection_mpi
   use mpi
-  use dg_overlapping_wannier_symmetry,only:project_dg_fragment_covariant_operators
+  use dg_overlapping_wannier_symmetry,only:project_dg_fragment_covariant_operators,&
+    evaluate_dg_covariance_residuals_by_operation
   implicit none
   integer::ierr,rank,nproc
   complex(8)::representation(2,2,2),scalars(2,2,2),vectors(2,2,3,2)
   real(8)::rotations(3,3,2),pre_defect,post_defect
+  real(8),allocatable::scalar_residual(:),vector_residual(:)
   complex(8),allocatable::projected_scalars(:,:,:),projected_vectors(:,:,:,:)
   logical::ok
   character(256)::message
@@ -16,12 +18,19 @@ program test_dg_overlapping_wannier_symmetry_projection_mpi
   rotations=0d0;rotations(1,1,1)=1d0;rotations(2,2,1)=1d0;rotations(3,3,1)=1d0
   rotations(1,1,2)=-1d0;rotations(2,2,2)=-1d0;rotations(3,3,2)=-1d0
   scalars=(0d0,0d0);scalars(:,:,1)=reshape([cmplx(2d0,0d0,8),cmplx(1d-7,0d0,8), &
-    cmplx(1d-7,0d0,8),cmplx(1d0,0d0,8)],[2,2]);scalars(:,:,2)=2d0*scalars(:,:,1)
+    cmplx(1d-7,0d0,8),cmplx(1d0,0d0,8)],[2,2]);scalars(:,:,2)=(0d0,0d0)
+  scalars(1,1,2)=1d12;scalars(2,2,2)=1d12
   vectors=(0d0,0d0)
   vectors(:,:,1,1)=reshape([cmplx(1d-7,0d0,8),cmplx(1d0,0d0,8), &
     cmplx(1d0,0d0,8),cmplx(-1d-7,0d0,8)],[2,2])
   vectors(:,:,2,1)=2d0*vectors(:,:,1,1);vectors(:,:,3,1)=3d0*vectors(:,:,1,1)
   vectors(:,:,:,2)=4d0*vectors(:,:,:,1)
+  call evaluate_dg_covariance_residuals_by_operation(representation,rotations,scalars,vectors,&
+    scalar_residual,vector_residual,ok,message)
+  call require(ok,trim(message));call require(scalar_residual(1)==0d0.and.vector_residual(1)==0d0,&
+    'identity operation covariance residual')
+  call require(scalar_residual(2)>1d-8.and.vector_residual(2)>1d-8,&
+    'per-operation covariance noise must be visible')
   call project_dg_fragment_covariant_operators(representation,rotations,scalars,vectors,1d-10, &
     projected_scalars,projected_vectors,pre_defect,post_defect,ok,message)
   call require(ok,trim(message));call require(pre_defect>1d-8,'fixture needs nonzero covariance noise')

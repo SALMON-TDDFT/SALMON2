@@ -9,7 +9,54 @@ module dg_overlapping_wannier_symmetry
   public::project_dg_fragment_covariant_operators
   public::promote_dg_exact_global_subgroup
   public::build_dg_fragment_site_stabilizer
+  public::evaluate_dg_covariance_residuals_by_operation
 contains
+  subroutine evaluate_dg_covariance_residuals_by_operation(representation,rotations,scalars,vectors, &
+      scalar_residual,vector_residual,ok,message)
+    complex(8),intent(in)::representation(:,:,:),scalars(:,:,:),vectors(:,:,:,:)
+    real(8),intent(in)::rotations(:,:,:)
+    real(8),allocatable,intent(out)::scalar_residual(:),vector_residual(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(8),allocatable::transformed(:,:),target(:,:)
+    real(8)::scalar_scale,vector_scale
+    integer::n,nop,iop,i,a,b
+    ok=.false.;message='';n=size(representation,1);nop=size(representation,3)
+    if(n<1.or.size(representation,2)/=n.or.nop<1.or.size(rotations,1)/=3.or. &
+        size(rotations,2)/=3.or.size(rotations,3)/=nop.or.size(scalars,1)/=n.or. &
+        size(scalars,2)/=n.or.size(scalars,3)<1.or.size(vectors,1)/=n.or. &
+        size(vectors,2)/=n.or.size(vectors,3)/=3.or.size(vectors,4)<1)then
+      message='operation covariance residual arrays have inconsistent dimensions';return
+    end if
+    if(.not.all(ieee_is_finite(real(representation))).or. &
+        .not.all(ieee_is_finite(aimag(representation))).or..not.all(ieee_is_finite(rotations)).or. &
+        .not.all(ieee_is_finite(real(scalars))).or..not.all(ieee_is_finite(aimag(scalars))).or. &
+        .not.all(ieee_is_finite(real(vectors))).or..not.all(ieee_is_finite(aimag(vectors))))then
+      message='operation covariance residual payload is not finite';return
+    end if
+    allocate(scalar_residual(nop),vector_residual(nop),transformed(n,n),target(n,n))
+    scalar_residual=0d0;vector_residual=0d0
+    do iop=1,nop
+      do i=1,size(scalars,3)
+        scalar_scale=max(1d0,maxval(abs(scalars(:,:,i))))
+        transformed=matmul(conjg(transpose(representation(:,:,iop))), &
+          matmul(scalars(:,:,i),representation(:,:,iop)))
+        scalar_residual(iop)=max(scalar_residual(iop),maxval(abs(transformed-scalars(:,:,i)))/scalar_scale)
+      end do
+      do i=1,size(vectors,4)
+        vector_scale=max(1d0,maxval(abs(vectors(:,:,:,i))))
+        do a=1,3
+        transformed=matmul(conjg(transpose(representation(:,:,iop))), &
+          matmul(vectors(:,:,a,i),representation(:,:,iop)))
+        target=(0d0,0d0)
+        do b=1,3;target=target+rotations(a,b,iop)*vectors(:,:,b,i);end do
+        vector_residual(iop)=max(vector_residual(iop),maxval(abs(transformed-target))/vector_scale)
+        end do
+      end do
+    end do
+    ok=.true.
+  end subroutine evaluate_dg_covariance_residuals_by_operation
+
   subroutine build_dg_fragment_site_stabilizer(rotations,translations,fragment_center,allowed, &
       tolerance,selected,product_table,maximum_site_residual,ok,message)
     integer,intent(in)::rotations(:,:,:)
@@ -125,7 +172,7 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     complex(8),allocatable::transformed(:,:),target(:,:)
-    real(8)::scale,rotation_defect,determinant,correction_limit
+    real(8)::rotation_defect,determinant,correction_limit
     integer::n,nop,nscalar,nvector,iop,i,j,a,b
     ok=.false.;message='';pre_projection_defect=huge(1d0);post_projection_defect=huge(1d0)
     n=size(representation,1);nop=size(representation,3);nscalar=size(scalars,3);nvector=size(vectors,4)
@@ -160,8 +207,7 @@ contains
       projected_scalars=scalars;projected_vectors=vectors
       pre_projection_defect=0d0;post_projection_defect=0d0;ok=.true.;return
     end if
-    scale=max(1d0,max(maxval(abs(scalars)),maxval(abs(vectors))))
-    call covariance_defect(representation,rotations,scalars,vectors,scale,pre_projection_defect)
+    call covariance_defect(representation,rotations,scalars,vectors,pre_projection_defect)
     correction_limit=sqrt(tolerance)
     if(pre_projection_defect>correction_limit)then
       message='fragment operator pre-projection covariance defect exceeds correction limit';return
@@ -186,33 +232,38 @@ contains
     end do
     projected_scalars=projected_scalars/real(nop,8);projected_vectors=projected_vectors/real(nop,8)
     call covariance_defect(representation,rotations,projected_scalars,projected_vectors, &
-      scale,post_projection_defect)
+      post_projection_defect)
     if(post_projection_defect>tolerance)then
       message='fragment operator post-projection covariance exceeds tolerance';return
     end if
     ok=.true.
   end subroutine project_dg_fragment_covariant_operators
 
-  subroutine covariance_defect(representation,rotations,scalars,vectors,scale,defect)
+  subroutine covariance_defect(representation,rotations,scalars,vectors,defect)
     complex(8),intent(in)::representation(:,:,:),scalars(:,:,:),vectors(:,:,:,:)
-    real(8),intent(in)::rotations(:,:,:),scale
+    real(8),intent(in)::rotations(:,:,:)
     real(8),intent(out)::defect
     complex(8),allocatable::transformed(:,:),target(:,:)
     integer::n,iop,i,a,b
+    real(8)::scale
     n=size(representation,1);allocate(transformed(n,n),target(n,n));defect=0d0
     do iop=1,size(representation,3)
       do i=1,size(scalars,3)
+        scale=max(1d0,maxval(abs(scalars(:,:,i))))
         transformed=matmul(conjg(transpose(representation(:,:,iop))), &
           matmul(scalars(:,:,i),representation(:,:,iop)))
         defect=max(defect,maxval(abs(transformed-scalars(:,:,i)))/scale)
       end do
-      do i=1,size(vectors,4);do a=1,3
+      do i=1,size(vectors,4)
+        scale=max(1d0,maxval(abs(vectors(:,:,:,i))))
+        do a=1,3
         transformed=matmul(conjg(transpose(representation(:,:,iop))), &
           matmul(vectors(:,:,a,i),representation(:,:,iop)))
         target=(0d0,0d0)
         do b=1,3;target=target+rotations(a,b,iop)*vectors(:,:,b,i);end do
         defect=max(defect,maxval(abs(transformed-target))/scale)
-      end do;end do
+        end do
+      end do
     end do
   end subroutine covariance_defect
 
