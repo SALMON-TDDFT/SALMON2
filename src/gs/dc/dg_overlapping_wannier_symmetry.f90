@@ -7,7 +7,37 @@ module dg_overlapping_wannier_symmetry
   public::select_dg_exact_fragment_subgroup
   public::build_dg_fragment_group_representation
   public::project_dg_fragment_covariant_operators
+  public::promote_dg_exact_global_subgroup
 contains
+  subroutine promote_dg_exact_global_subgroup(product_table,fragment_exact,scalar_block_residual, &
+      vector_block_residual,tolerance,subgroup,ok,message)
+    integer,intent(in)::product_table(:,:)
+    logical,intent(in)::fragment_exact(:,:)
+    real(8),intent(in)::scalar_block_residual(:,:),vector_block_residual(:,:),tolerance
+    integer,allocatable,intent(out)::subgroup(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    real(8),allocatable::fragment_residual(:),scalar_residual(:),vector_residual(:),zero_residual(:)
+    integer::nop,iop
+    nop=size(product_table,1);ok=.false.;message=''
+    if(nop<1.or.size(product_table,2)/=nop.or.size(fragment_exact,1)<1.or. &
+        size(fragment_exact,2)/=nop.or.size(scalar_block_residual,1)<1.or. &
+        size(scalar_block_residual,2)/=nop.or.size(vector_block_residual,1)<1.or. &
+        size(vector_block_residual,2)/=nop)then
+      message='global symmetry promotion arrays have inconsistent dimensions';return
+    end if
+    allocate(fragment_residual(nop),scalar_residual(nop),vector_residual(nop),zero_residual(nop))
+    zero_residual=0d0
+    do iop=1,nop
+      fragment_residual(iop)=merge(0d0,2d0*tolerance,all(fragment_exact(:,iop)))
+      scalar_residual(iop)=maxval(scalar_block_residual(:,iop))
+      vector_residual(iop)=maxval(vector_block_residual(:,iop))
+    end do
+    call select_dg_exact_fragment_subgroup(product_table,fragment_residual,scalar_residual, &
+      vector_residual,zero_residual,tolerance,tolerance,tolerance,tolerance,subgroup,ok,message)
+    if(.not.ok)message='global symmetry promotion failed: '//trim(message)
+  end subroutine promote_dg_exact_global_subgroup
+
   subroutine project_dg_fragment_covariant_operators(representation,rotations,scalars,vectors, &
       tolerance,projected_scalars,projected_vectors,pre_projection_defect,post_projection_defect,ok,message)
     complex(8),intent(in)::representation(:,:,:),scalars(:,:,:),vectors(:,:,:,:)

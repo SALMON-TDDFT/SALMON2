@@ -1,12 +1,15 @@
 #include "config.h"
 program test_dg_overlapping_wannier_fragment_symmetry_mpi
   use mpi
-  use dg_overlapping_wannier_symmetry, only: select_dg_exact_fragment_subgroup
+  use dg_overlapping_wannier_symmetry, only: select_dg_exact_fragment_subgroup, &
+    promote_dg_exact_global_subgroup
   implicit none
   integer :: ierr,rank,nproc,i,j
   integer :: product_table(4,4)
   integer :: invalid_product_table(4,4)
   integer,allocatable :: subgroup(:)
+  logical :: fragment_exact(2,4)
+  real(8) :: scalar_block_residual(3,4),vector_block_residual(3,4)
   real(8) :: atom(4),boundary(4),grid(4),center(4)
   logical :: ok
   character(256) :: message
@@ -52,6 +55,17 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
   call select_dg_exact_fragment_subgroup(invalid_product_table,atom,boundary,grid,center, &
     1d-10,1d-10,1d-10,1d-10,subgroup,ok,message)
   call require(.not.ok.and.index(message,'group')>0,'non-group product table is fatal')
+
+  fragment_exact=.true.;scalar_block_residual=1d-13;vector_block_residual=1d-13
+  scalar_block_residual(:,2)=2d-4;scalar_block_residual(:,4)=2d-4
+  call promote_dg_exact_global_subgroup(product_table,fragment_exact,scalar_block_residual, &
+    vector_block_residual,1d-10,subgroup,ok,message)
+  call require(ok.and.all(subgroup==[1,3]),'cross-block covariance promotes only exact C2')
+  fragment_exact(2,3)=.false.
+  call promote_dg_exact_global_subgroup(product_table,fragment_exact,scalar_block_residual, &
+    vector_block_residual,1d-10,subgroup,ok,message)
+  call require(ok.and.size(subgroup)==1.and.subgroup(1)==1, &
+    'locally broken neighboring fragment reduces promotion to C1')
 
   if(rank==0)write(*,'(a,i0,a)')'PASS exact buffered-fragment symmetry on ',nproc,' ranks'
   call MPI_Finalize(ierr)

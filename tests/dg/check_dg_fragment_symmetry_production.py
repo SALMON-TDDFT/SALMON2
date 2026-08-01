@@ -19,6 +19,7 @@ for routine in (
     "load_sawf_crystallographic_catalog_auto",
     "select_dg_exact_fragment_subgroup",
     "build_dg_fragment_group_representation",
+    "promote_dg_exact_global_subgroup",
     "project_dg_fragment_covariant_operators",
 ):
     require(re.search(rf"\bcall\s+{routine}\b", MAIN) is not None,
@@ -34,6 +35,11 @@ require("point_group_symbol" in MAIN and "space_group_number" in MAIN,
         "production diagnostics must identify each exact fragment group")
 require("pre_projection_defect" in MAIN and "post_projection_defect" in MAIN,
         "production evidence must report covariance before and after projection")
+require("cross_block_scalar_residual" in MAIN and "cross_block_vector_residual" in MAIN,
+        "global promotion must audit scalar and vector cross-fragment blocks")
+require(MAIN.index("call promote_dg_exact_global_subgroup") <
+        MAIN.index("call project_dg_fragment_covariant_operators"),
+        "local fragment symmetry must not project global matrices before promotion")
 require(MAIN.index("call project_dg_fragment_covariant_operators") <
         MAIN.index("call compute_dg_overlapping_wannier_matrix_fingerprints"),
         "S/H/X/V must be projected before V3 matrix fingerprints are published")
