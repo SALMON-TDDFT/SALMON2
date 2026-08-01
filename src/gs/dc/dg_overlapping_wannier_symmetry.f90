@@ -6,7 +6,127 @@ module dg_overlapping_wannier_symmetry
   integer,parameter::maximum_enumerated_subgroups=65536
   public::select_dg_exact_fragment_subgroup
   public::build_dg_fragment_group_representation
+  public::project_dg_fragment_covariant_operators
 contains
+  subroutine project_dg_fragment_covariant_operators(representation,rotations,scalars,vectors, &
+      tolerance,projected_scalars,projected_vectors,pre_projection_defect,post_projection_defect,ok,message)
+    complex(8),intent(in)::representation(:,:,:),scalars(:,:,:),vectors(:,:,:,:)
+    real(8),intent(in)::rotations(:,:,:),tolerance
+    complex(8),allocatable,intent(out)::projected_scalars(:,:,:),projected_vectors(:,:,:,:)
+    real(8),intent(out)::pre_projection_defect,post_projection_defect
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(8),allocatable::transformed(:,:),target(:,:)
+    real(8)::scale,rotation_defect,determinant,correction_limit
+    integer::n,nop,nscalar,nvector,iop,i,j,a,b
+    ok=.false.;message='';pre_projection_defect=huge(1d0);post_projection_defect=huge(1d0)
+    n=size(representation,1);nop=size(representation,3);nscalar=size(scalars,3);nvector=size(vectors,4)
+    if(n<1.or.size(representation,2)/=n.or.nop<1.or.size(rotations,1)/=3.or. &
+        size(rotations,2)/=3.or.size(rotations,3)/=nop.or.size(scalars,1)/=n.or. &
+        size(scalars,2)/=n.or.nscalar<1.or.size(vectors,1)/=n.or.size(vectors,2)/=n.or. &
+        size(vectors,3)/=3.or.nvector<1)then
+      message='fragment covariant operator arrays have inconsistent dimensions';return
+    end if
+    if(.not.ieee_is_finite(tolerance).or.tolerance<=0d0.or. &
+        .not.all(ieee_is_finite(real(representation))).or. &
+        .not.all(ieee_is_finite(aimag(representation))).or. &
+        .not.all(ieee_is_finite(rotations)).or..not.all(ieee_is_finite(real(scalars))).or. &
+        .not.all(ieee_is_finite(aimag(scalars))).or..not.all(ieee_is_finite(real(vectors))).or. &
+        .not.all(ieee_is_finite(aimag(vectors))))then
+      message='fragment covariant operators or tolerance are not finite';return
+    end if
+    do iop=1,nop
+      rotation_defect=maxval(abs(matmul(transpose(rotations(:,:,iop)),rotations(:,:,iop))-identity3()))
+      determinant=determinant3(rotations(:,:,iop))
+      if(rotation_defect>tolerance.or.abs(abs(determinant)-1d0)>tolerance)then
+        message='fragment covariant operator Cartesian rotation is not orthogonal';return
+      end if
+    end do
+    if(maxval(abs(representation(:,:,1)-complex_identity(n)))>tolerance.or. &
+        maxval(abs(rotations(:,:,1)-identity3()))>tolerance)then
+      message='fragment covariant operator group is not identity-first';return
+    end if
+    allocate(projected_scalars(n,n,nscalar),projected_vectors(n,n,3,nvector), &
+      transformed(n,n),target(n,n))
+    if(nop==1)then
+      projected_scalars=scalars;projected_vectors=vectors
+      pre_projection_defect=0d0;post_projection_defect=0d0;ok=.true.;return
+    end if
+    scale=max(1d0,max(maxval(abs(scalars)),maxval(abs(vectors))))
+    call covariance_defect(representation,rotations,scalars,vectors,scale,pre_projection_defect)
+    correction_limit=sqrt(tolerance)
+    if(pre_projection_defect>correction_limit)then
+      message='fragment operator pre-projection covariance defect exceeds correction limit';return
+    end if
+    projected_scalars=(0d0,0d0);projected_vectors=(0d0,0d0)
+    do iop=1,nop
+      do i=1,nscalar
+        projected_scalars(:,:,i)=projected_scalars(:,:,i)+matmul(conjg(transpose( &
+          representation(:,:,iop))),matmul(scalars(:,:,i),representation(:,:,iop)))
+      end do
+      do i=1,nvector
+        do a=1,3
+          target=(0d0,0d0)
+          do b=1,3
+            transformed=matmul(conjg(transpose(representation(:,:,iop))), &
+              matmul(vectors(:,:,b,i),representation(:,:,iop)))
+            target=target+rotations(b,a,iop)*transformed
+          end do
+          projected_vectors(:,:,a,i)=projected_vectors(:,:,a,i)+target
+        end do
+      end do
+    end do
+    projected_scalars=projected_scalars/real(nop,8);projected_vectors=projected_vectors/real(nop,8)
+    call covariance_defect(representation,rotations,projected_scalars,projected_vectors, &
+      scale,post_projection_defect)
+    if(post_projection_defect>tolerance)then
+      message='fragment operator post-projection covariance exceeds tolerance';return
+    end if
+    ok=.true.
+  end subroutine project_dg_fragment_covariant_operators
+
+  subroutine covariance_defect(representation,rotations,scalars,vectors,scale,defect)
+    complex(8),intent(in)::representation(:,:,:),scalars(:,:,:),vectors(:,:,:,:)
+    real(8),intent(in)::rotations(:,:,:),scale
+    real(8),intent(out)::defect
+    complex(8),allocatable::transformed(:,:),target(:,:)
+    integer::n,iop,i,a,b
+    n=size(representation,1);allocate(transformed(n,n),target(n,n));defect=0d0
+    do iop=1,size(representation,3)
+      do i=1,size(scalars,3)
+        transformed=matmul(conjg(transpose(representation(:,:,iop))), &
+          matmul(scalars(:,:,i),representation(:,:,iop)))
+        defect=max(defect,maxval(abs(transformed-scalars(:,:,i)))/scale)
+      end do
+      do i=1,size(vectors,4);do a=1,3
+        transformed=matmul(conjg(transpose(representation(:,:,iop))), &
+          matmul(vectors(:,:,a,i),representation(:,:,iop)))
+        target=(0d0,0d0)
+        do b=1,3;target=target+rotations(a,b,iop)*vectors(:,:,b,i);end do
+        defect=max(defect,maxval(abs(transformed-target))/scale)
+      end do;end do
+    end do
+  end subroutine covariance_defect
+
+  function complex_identity(n)result(identity)
+    integer,intent(in)::n
+    complex(8)::identity(n,n)
+    integer::i
+    identity=(0d0,0d0);do i=1,n;identity(i,i)=1d0;end do
+  end function complex_identity
+
+  function identity3()result(identity)
+    real(8)::identity(3,3)
+    identity=0d0;identity(1,1)=1d0;identity(2,2)=1d0;identity(3,3)=1d0
+  end function identity3
+
+  real(8) function determinant3(matrix)
+    real(8),intent(in)::matrix(3,3)
+    determinant3=matrix(1,1)*(matrix(2,2)*matrix(3,3)-matrix(2,3)*matrix(3,2))- &
+      matrix(1,2)*(matrix(2,1)*matrix(3,3)-matrix(2,3)*matrix(3,1))+ &
+      matrix(1,3)*(matrix(2,1)*matrix(3,2)-matrix(2,2)*matrix(3,1))
+  end function determinant3
+
   subroutine build_dg_fragment_group_representation(metric,raw,product_table,tolerance, &
       representation,raw_unitarity_defect,unitarity_defect,closure_defect,ok,message)
     complex(8),intent(in)::metric(:,:),raw(:,:,:)
