@@ -48,6 +48,10 @@ program test_dg_overlapping_wannier_solver_mpi
   call dense_generalized_reference(reference_h,reference_s,reference_eval,work,rwork,lapack_info)
   call require(lapack_info==0.and.maxval(abs(eval-reference_eval(1:3)))<1d-8,&
     'distributed solver agrees with dense LAPACK fixture reference')
+  call solve_dg_overlapping_wannier_coefficients(comm,row_ids,hrows,srows,1,1,1d-9,1d-10,&
+    coeff(:,1:1),eval(1:1),residual,orthogonality,condition,ok,message)
+  call require(ok.and.abs(eval(1)-reference_eval(1))<1d-8,&
+    'cold generalized solve is gauge invariant in one full-space Ritz step')
   call solve_dg_overlapping_wannier_coefficients(comm,row_ids,hrows,srows,3,1,1d-9,1d-10,&
     coeff,eval,residual,orthogonality,condition,ok,message,reference_h(:,1:3))
   call require(ok.and.residual<1d-9,'exact warm start converges in one block iteration')

@@ -26,11 +26,41 @@ module dg_overlapping_wannier_construction
   public::align_dg_fragment_wannier_gauge
   public::replicate_dg_fragment_wannier_representative
   public::verify_dg_fragment_center_orbit
+  public::verify_dg_fragment_subspace_density_covariance
   public::verify_dg_fragment_wannier_streaming_closure
   public::build_dg_core_owned_occupied_subspace
   public::verify_dg_uniform_fragment_target_rank
   public::assign_dg_overlapping_wannier_occupations
 contains
+  subroutine verify_dg_fragment_subspace_density_covariance(values,target_ids,tolerance,ok,message)
+    complex(real64),intent(in)::values(:,:)
+    integer(int64),intent(in)::target_ids(:,:)
+    real(real64),intent(in)::tolerance
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    real(real64),allocatable::density(:)
+    real(real64)::scale
+    integer::operation,point,target
+    ok=.false.;message=''
+    if(size(values,1)<1.or.size(values,2)<1.or.size(target_ids,1)/=size(values,2).or. &
+        size(target_ids,2)<1.or.tolerance<=0d0.or..not.ieee_is_finite(tolerance).or. &
+        .not.all(ieee_is_finite(real(values))).or..not.all(ieee_is_finite(aimag(values))))then
+      message='invalid Wannier subspace-density covariance contract';return
+    end if
+    if(any(target_ids<1_int64).or.any(target_ids>int(size(values,2),int64)))then
+      message='Wannier subspace-density symmetry target is out of range';return
+    end if
+    allocate(density(size(values,2)));density=sum(abs(values)**2,dim=1)
+    scale=max(1d0,maxval(density))
+    do operation=1,size(target_ids,2);do point=1,size(values,2)
+      target=int(target_ids(point,operation))
+      if(abs(density(target)-density(point))>tolerance*scale)then
+        message='periodic-box Wannier subspace density is not symmetry covariant';return
+      end if
+    end do;end do
+    ok=.true.
+  end subroutine verify_dg_fragment_subspace_density_covariance
+
   subroutine assign_dg_overlapping_wannier_occupations(electron_count,occupations,ok,message)
     real(real64),intent(in)::electron_count
     real(real64),intent(out)::occupations(:)
@@ -114,10 +144,10 @@ contains
   end subroutine
 
   subroutine build_dg_core_owned_occupied_subspace(candidate,core_mask,weights,occupations,&
-      coefficients,core_electron_count,ok,message)
+      owned_electron_count,coefficients,core_electron_count,ok,message)
     complex(real64),intent(in)::candidate(:,:)
     logical,intent(in)::core_mask(:)
-    real(real64),intent(in)::weights(:),occupations(:)
+    real(real64),intent(in)::weights(:),occupations(:),owned_electron_count
     complex(real64),allocatable,intent(out)::coefficients(:,:)
     real(real64),intent(out)::core_electron_count
     logical,intent(out)::ok
@@ -130,7 +160,8 @@ contains
     ok=.false.;message='';core_electron_count=0d0
     ncandidate=size(candidate,1);nbox=size(candidate,2)
     if(ncandidate<1.or.nbox<1.or.size(core_mask)/=nbox.or.size(weights)/=nbox.or.&
-        size(occupations)/=ncandidate.or.any(weights<=0d0))then
+        size(occupations)/=ncandidate.or.any(weights<=0d0).or.&
+        .not.ieee_is_finite(owned_electron_count).or.owned_electron_count<=0d0)then
       message='invalid core-owned occupied-subspace contract';return
     endif
     occupied_index=pack([(i,i=1,ncandidate)],occupations>1d-12)
@@ -143,9 +174,9 @@ contains
       enddo
       core_electron_count=core_electron_count+occupations(i)*core_norm(i)
     enddo
-    nowned=nint(0.5d0*core_electron_count)
-    if(nowned<1.or.nowned>nband.or.abs(core_electron_count-2d0*real(nowned,real64))>1d-6)then
-      message='DC core electron count does not define an integral occupied rank';return
+    nowned=nint(0.5d0*owned_electron_count)
+    if(nowned<1.or.nowned>nband.or.abs(owned_electron_count-2d0*real(nowned,real64))>1d-10)then
+      message='core-owned ionic valence does not define an integral occupied rank';return
     endif
     allocate(core_gram(nband,nband));core_gram=(0d0,0d0)
     do j=1,nband;do i=1,nband
@@ -569,7 +600,6 @@ contains
     complex(real64),allocatable::symmetry_block(:,:)
     complex(real64),allocatable::block_vectors(:,:)
     complex(real64),allocatable::retained_projector(:,:),retained_projector_vectors(:,:)
-    complex(real64),allocatable::symmetry_mapped_wannier(:)
     real(real64),allocatable::spectrum(:),occ_spectrum(:),residual_spectrum(:),comp_spectrum(:),&
       metric_spectrum(:),center_max_local(:),center_max_global(:),polar_spectrum(:)
     real(real64),allocatable::block_spectrum(:)
@@ -1335,31 +1365,9 @@ contains
         endif
         result%center_box_point_ids(j)=int(center_index,int64)
       enddo
-      allocate(symmetry_mapped_wannier(total_box))
-      do isym=1,nsym;do j=1,selected_target
-        symmetry_mapped_wannier=matmul(result%symmetry_representation(:,j,isym),all_wannier)
-        largest=maxval(abs(symmetry_mapped_wannier)**2)
-        if(largest<=0d0.or..not.ieee_is_finite(largest))then
-          ok=.false.;message='symmetry-mapped periodic-box Wannier has no finite center density';return
-        endif
-        target=int(canonical_target_ids(int(result%center_box_point_ids(j)),isym))
-        if(present(center_representative_box_ids))then
-          center_index=0
-          do source=1,total_box
-            if(largest-abs(symmetry_mapped_wannier(source))**2<=active_symmetry_tolerance*largest)then
-              center_index=int(center_representative_box_ids(source));exit
-            endif
-          enddo
-          if(center_index/=target)then
-            ok=.false.;message='folded periodic-box Wannier centers do not form a symmetry orbit';return
-          endif
-        else
-          if(largest-abs(symmetry_mapped_wannier(target))**2 .gt. &
-              active_symmetry_tolerance*largest)then
-            ok=.false.;message='periodic-box Wannier centers do not form the required symmetry orbit';return
-          endif
-        endif
-      enddo;enddo
+      call verify_dg_fragment_subspace_density_covariance(all_wannier,canonical_target_ids,&
+        active_symmetry_tolerance,ok,message)
+      if(.not.ok)return
       endif
     endif
 

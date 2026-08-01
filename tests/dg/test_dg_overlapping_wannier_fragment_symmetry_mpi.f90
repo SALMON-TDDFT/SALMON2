@@ -3,7 +3,7 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
   use mpi
   use dg_overlapping_wannier_symmetry, only: select_dg_exact_fragment_subgroup, &
     promote_dg_exact_global_subgroup,build_dg_fragment_site_stabilizer, &
-    fingerprint_dg_exact_fragment_symmetry
+    fingerprint_dg_exact_fragment_symmetry,build_dg_fragment_permuted_representation
   use iso_fortran_env,only:int64
   implicit none
   integer :: ierr,rank,nproc,i,j
@@ -17,6 +17,10 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
   logical :: affine_allowed(6)
   real(8) :: scalar_block_residual(3,4),vector_block_residual(3,4)
   real(8) :: affine_translation(3,6),fragment_center(3),site_residual
+  real(8) :: pair_centers(3,2),inversion_cartesian(3,3,1)
+  complex(8) :: local_pair_representation(1,1,1)
+  complex(8),allocatable :: global_pair_representation(:,:,:)
+  integer,allocatable :: fragment_permutation(:,:)
   real(8) :: atom(4),boundary(4),grid(4),center(4)
   logical :: ok
   character(256) :: message
@@ -100,6 +104,16 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
   call require(c4_fingerprint/=0_int64,'exact fragment symmetry fingerprint is nonzero')
   call require(c4_fingerprint/=c1_fingerprint,'C4 and displaced C1 checkpoint evidence differ')
   call require(c4_fingerprint/=tolerance_fingerprint,'symmetry tolerance is checkpoint evidence')
+  pair_centers=reshape([0.25d0,0.5d0,0.5d0,0.75d0,0.5d0,0.5d0],[3,2])
+  inversion_cartesian(:,:,1)=0d0
+  inversion_cartesian(1,1,1)=-1d0;inversion_cartesian(2,2,1)=1d0
+  inversion_cartesian(3,3,1)=1d0;local_pair_representation=1d0
+  call build_dg_fragment_permuted_representation(local_pair_representation,inversion_cartesian,&
+    pair_centers,1d-12,global_pair_representation,fragment_permutation,ok,message)
+  call require(ok.and.all(fragment_permutation(:,1)==[2,1]),'point operation permutes fragment centers')
+  call require(abs(global_pair_representation(2,1,1)-1d0)<1d-14.and.&
+    abs(global_pair_representation(1,2,1)-1d0)<1d-14,&
+    'global point representation contains source-to-target fragment blocks')
 
   if(rank==0)write(*,'(a,i0,a)')'PASS exact buffered-fragment symmetry on ',nproc,' ranks'
   call MPI_Finalize(ierr)

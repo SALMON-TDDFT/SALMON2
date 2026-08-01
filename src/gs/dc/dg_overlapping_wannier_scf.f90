@@ -193,9 +193,15 @@ contains
       if(.not.step_ok)then
         ok=.false.;message=step_message;call rollback_transaction(comm,transaction,message);return
       endif
-      call solve_dg_overlapping_wannier_coefficients(comm,row_ids,hrows,srows,nstate,max_inner,&
-        coefficient_tolerance,coefficient_tolerance,coeff,eval,residual,orthogonality,condition,step_ok,step_message,&
-        candidate%coefficients)
+      if(iteration==1)then
+        call solve_dg_overlapping_wannier_coefficients(comm,row_ids,hrows,srows,nstate,max_inner,&
+          coefficient_tolerance,coefficient_tolerance,coeff,eval,residual,orthogonality,condition,&
+          step_ok,step_message)
+      else
+        call solve_dg_overlapping_wannier_coefficients(comm,row_ids,hrows,srows,nstate,max_inner,&
+          coefficient_tolerance,coefficient_tolerance,coeff,eval,residual,orthogonality,condition,&
+          step_ok,step_message,candidate%coefficients)
+      end if
       call collective_step_status(comm,step_ok,step_message,ok,message)
       if(.not.ok)then;call rollback_transaction(comm,transaction,message);return;endif
       call reconstruct_dg_overlapping_wannier_density(comm,physical_ids,weights,values,tail_generation,&

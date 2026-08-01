@@ -2,16 +2,20 @@
 program test_dg_overlapping_wannier_nonlocal_mpi
   use mpi
   use dg_overlapping_wannier_nonlocal,only:assemble_dg_overlapping_wannier_nonlocal,&
-    assemble_dg_overlapping_wannier_nonlocal_rows
+    assemble_dg_overlapping_wannier_nonlocal_rows,&
+    collect_dg_overlapping_wannier_projector_overlaps
   implicit none
-  integer::comm,rank,nproc,ierr,p,i,j,nlocal,index,owned
+  integer::comm,rank,nproc,ierr,p,i,j,nlocal,index,owned,expected_projectors
   integer(8),allocatable::ids(:),row_ids(:)
   real(8),allocatable::strength(:)
   complex(8),allocatable::overlap(:,:),matrix(:,:),reference(:,:),rotated(:,:),matrix_rows(:,:)
+  complex(8),allocatable::collected_overlap(:,:)
+  integer(8),allocatable::collected_ids(:)
+  real(8),allocatable::collected_strength(:)
   complex(8)::direct_local(3,3),direct_global(3,3)
   logical,allocatable::complete(:,:)
   complex(8)::gauge(3,3)
-  logical::ok
+  logical::ok,split_metadata_ok,split_overlap_ok
   character(256)::message
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
@@ -84,6 +88,29 @@ program test_dg_overlapping_wannier_nonlocal_mpi
   call assemble_dg_overlapping_wannier_nonlocal(comm,3,ids,strength,overlap,complete,3_8,&
     matrix,owned,ok,message)
   call require(.not.ok,'duplicate projector rejection')
+  if(nproc==2)then
+    deallocate(ids,strength,overlap,complete)
+    allocate(ids(1),strength(1),overlap(3,1),complete(3,1))
+    ids(1)=17_8;strength(1)=0.4d0
+    if(rank==0)then
+      overlap(:,1)=[cmplx(0.3d0,0.1d0,8),cmplx(-0.2d0,0d0,8),cmplx(0.1d0,-0.1d0,8)]
+    else
+      overlap(:,1)=[cmplx(-0.1d0,0.2d0,8),cmplx(0.05d0,0.1d0,8),cmplx(0.2d0,0d0,8)]
+    end if
+    complete=.false.
+    call collect_dg_overlapping_wannier_projector_overlaps(comm,3,[5],[2],strength,overlap,&
+      collected_ids,collected_strength,collected_overlap,expected_projectors,ok,message)
+    call require(ok,trim(message));call require(expected_projectors==1,'split projector identity collection')
+    call require(size(collected_ids)==merge(1,0,rank==0),'split projector has one deterministic owner')
+    split_metadata_ok=.true.;split_overlap_ok=.true.
+    if(rank==0)then
+      split_metadata_ok=collected_ids(1)==1_8.and.abs(collected_strength(1)-0.4d0)<1d-14
+      split_overlap_ok=maxval(abs(collected_overlap(:,1)-&
+        [cmplx(0.2d0,0.3d0,8),cmplx(-0.15d0,0.1d0,8),cmplx(0.3d0,-0.1d0,8)]))<1d-14
+    end if
+    call require(split_metadata_ok,'split projector metadata')
+    call require(split_overlap_ok,'split projector overlap is coherently summed')
+  end if
   if(rank==0)then
     write(*,'(a,i0,a,4(es24.16,1x))')'NONLOCAL ranks=',nproc,' values=',real(reference(1,1)),&
       aimag(reference(1,2)),real(reference(2,3)),aimag(reference(2,3))

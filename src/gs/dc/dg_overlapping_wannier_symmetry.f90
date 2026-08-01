@@ -12,7 +12,53 @@ module dg_overlapping_wannier_symmetry
   public::build_dg_fragment_site_stabilizer
   public::evaluate_dg_covariance_residuals_by_operation
   public::fingerprint_dg_exact_fragment_symmetry
+  public::build_dg_fragment_permuted_representation
 contains
+  subroutine build_dg_fragment_permuted_representation(local_representation,rotations,&
+      fragment_centers,tolerance,global_representation,fragment_permutation,ok,message)
+    complex(8),intent(in)::local_representation(:,:,:)
+    real(8),intent(in)::rotations(:,:,:),fragment_centers(:,:),tolerance
+    complex(8),allocatable,intent(out)::global_representation(:,:,:)
+    integer,allocatable,intent(out)::fragment_permutation(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    real(8)::mapped(3),difference(3),residual,best
+    integer::nlocal,nfragment,nop,operation,source,target,best_target
+    ok=.false.;message='';nlocal=size(local_representation,1)
+    nfragment=size(fragment_centers,2);nop=size(local_representation,3)
+    if(nlocal<1.or.size(local_representation,2)/=nlocal.or.nfragment<1.or.nop<1.or. &
+        size(fragment_centers,1)/=3.or.size(rotations,1)/=3.or.size(rotations,2)/=3.or. &
+        size(rotations,3)/=nop.or.tolerance<=0d0.or..not.ieee_is_finite(tolerance).or. &
+        .not.all(ieee_is_finite(fragment_centers)).or..not.all(ieee_is_finite(rotations)).or. &
+        .not.all(ieee_is_finite(real(local_representation))).or. &
+        .not.all(ieee_is_finite(aimag(local_representation))))then
+      message='invalid fragment-permuted representation contract';return
+    end if
+    allocate(global_representation(nlocal*nfragment,nlocal*nfragment,nop),&
+      fragment_permutation(nfragment,nop));global_representation=(0d0,0d0)
+    do operation=1,nop;do source=1,nfragment
+      mapped=modulo(matmul(rotations(:,:,operation),fragment_centers(:,source)-0.5d0)+0.5d0,1d0)
+      best=huge(1d0);best_target=0
+      do target=1,nfragment
+        difference=mapped-fragment_centers(:,target);difference=difference-anint(difference)
+        residual=maxval(abs(difference))
+        if(residual<best)then;best=residual;best_target=target;end if
+      end do
+      if(best_target==0.or.best>tolerance)then
+        message='point operation does not permute fragment centers';return
+      end if
+      fragment_permutation(source,operation)=best_target
+      global_representation((best_target-1)*nlocal+1:best_target*nlocal,&
+        (source-1)*nlocal+1:source*nlocal,operation)=local_representation(:,:,operation)
+    end do;end do
+    do operation=1,nop
+      if(any([(count(fragment_permutation(:,operation)==target),target=1,nfragment)]/=1))then
+        message='point operation fragment map is not a permutation';return
+      end if
+    end do
+    ok=.true.
+  end subroutine build_dg_fragment_permuted_representation
+
   integer(int64) function fingerprint_dg_exact_fragment_symmetry(rotations,product_table,tolerance)
     integer,intent(in)::rotations(:,:,:),product_table(:,:)
     real(8),intent(in)::tolerance

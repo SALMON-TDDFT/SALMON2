@@ -6,7 +6,8 @@ program test_dg_overlapping_wannier_construction_mpi
     verify_dg_overlapping_wannier_periodic_closure,assemble_dg_distributed_candidate_symmetry,&
     align_dg_fragment_wannier_gauge,replicate_dg_fragment_wannier_representative,&
     verify_dg_fragment_wannier_streaming_closure,verify_dg_fragment_center_orbit,&
-    verify_dg_uniform_fragment_target_rank,assign_dg_overlapping_wannier_occupations
+    verify_dg_uniform_fragment_target_rank,assign_dg_overlapping_wannier_occupations,&
+    verify_dg_fragment_subspace_density_covariance,build_dg_core_owned_occupied_subspace
   implicit none
   integer::comm,rank,nproc,ierr,i,p,nlocal,nclosure,index,ncore,fragment_id
   integer(8),allocatable::ids(:),box_ids(:),symmetry_map(:,:),broken_symmetry_map(:,:)
@@ -41,6 +42,11 @@ program test_dg_overlapping_wannier_construction_mpi
   real(8)::closure_rotation(3,3,1),closure_residual
   real(8)::gauge_residual,gauge_correction,theta
   complex(8)::gauge_values(2,2),gauge_gradients(3,2,2)
+  complex(8)::mixed_wannier(2,2)
+  complex(8)::fractional_core_candidates(2,2)
+  complex(8),allocatable::core_occupied_coefficients(:,:)
+  integer(8)::mixed_map(2,1)
+  real(8)::fractional_core_electrons
   real(8)::gauge_weights(2)
   logical::ok
   character(256)::message
@@ -92,6 +98,24 @@ program test_dg_overlapping_wannier_construction_mpi
   call verify_dg_fragment_center_orbit(local_centers,reshape(global_centers,[4]),&
     center_orbit_map,ok,message)
   call require(.not.ok,'broken translated center orbit rejected')
+  mixed_wannier=reshape([1d0,1d0,1d0,-1d0],[2,2])/sqrt(2d0)
+  mixed_map(:,1)=[2_8,1_8]
+  call verify_dg_fragment_subspace_density_covariance(mixed_wannier,mixed_map,1d-12,ok,message)
+  call require(ok,'unitary-mixed Wannier subspace density is symmetry covariant')
+  mixed_wannier(1,1)=2d0*mixed_wannier(1,1)
+  call verify_dg_fragment_subspace_density_covariance(mixed_wannier,mixed_map,1d-12,ok,message)
+  call require(.not.ok,'broken Wannier subspace density covariance rejected')
+  fractional_core_candidates=0d0
+  fractional_core_candidates(1,1)=sqrt(0.6d0)
+  fractional_core_candidates(2,1)=sqrt(0.3d0)
+  fractional_core_candidates(1,2)=sqrt(0.4d0)
+  fractional_core_candidates(2,2)=sqrt(0.7d0)
+  call build_dg_core_owned_occupied_subspace(fractional_core_candidates,[.true.,.false.],&
+    [1d0,1d0],[2d0,2d0],2d0,core_occupied_coefficients,fractional_core_electrons,ok,message)
+  call require(ok.and.size(core_occupied_coefficients,2)==1,&
+    'ionic electron ownership fixes rank despite fractional instantaneous core charge')
+  call require(abs(fractional_core_electrons-1.8d0)<1d-12,&
+    'fractional instantaneous core charge remains diagnostic evidence')
   if(nproc>1)then
     allocate(mismatch_values(2+mod(rank,2),2),mismatch_gradients(3,2+mod(rank,2),2))
     mismatch_values=1d0;mismatch_gradients=1d0

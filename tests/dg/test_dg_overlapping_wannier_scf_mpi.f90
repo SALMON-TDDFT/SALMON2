@@ -79,10 +79,12 @@ program test_dg_overlapping_wannier_scf_mpi
   call require(.not.ok.and.index(message,'did not converge')>0,&
     'outer-iteration exhaustion is an explicit failure: '//trim(message))
   call require(all(state%density==before%density),'outer-iteration exhaustion rolls back state')
+  state%coefficients=(0d0,0d0)
   call run_dg_overlapping_wannier_scf(comm,row_ids,srows,point_ids,weights,values,generations,7,&
     3,basis_fingerprint,[1d0],1d-12,1d-9,77_int64,2_int64,0.5d0,40,100,1d-9,1d-10,build_toy,mix_toy,transaction_toy,&
     commit_toy,state,result,ok,message)
   call require(ok.and.result%converged,trim(message))
+  call require(maxval(abs(state%coefficients))>0d0,'first SCF solve ignores placeholder coefficient gauge')
   call require(result%unmixed_density_residual<1d-9,'unmixed fixed point')
   call require(result%hamiltonian_rebuilds==result%iterations+1,'H rebuild only at outer boundaries')
   call require(state%history_count>1,'seeded mixing history retained')

@@ -8,7 +8,99 @@ module dg_overlapping_wannier_nonlocal
   implicit none
   private
   public::assemble_dg_overlapping_wannier_nonlocal,assemble_dg_overlapping_wannier_nonlocal_rows
+  public::collect_dg_overlapping_wannier_projector_overlaps
 contains
+  subroutine collect_dg_overlapping_wannier_projector_overlaps(comm,nwann,atom_ids,ordinals,&
+      strength,partial_overlap,projector_ids,owned_strength,owned_overlap,expected_projector_count,ok,message)
+    integer,intent(in)::comm,nwann,atom_ids(:),ordinals(:)
+    real(real64),intent(in)::strength(:)
+    complex(real64),intent(in)::partial_overlap(:,:)
+    integer(int64),allocatable,intent(out)::projector_ids(:)
+    real(real64),allocatable,intent(out)::owned_strength(:)
+    complex(real64),allocatable,intent(out)::owned_overlap(:,:)
+    integer,intent(out)::expected_projector_count
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,nproc,ierr,r,p,q,total_records,nowned,unique_count,local_bad,global_bad
+    integer,allocatable::counts(:),displacements(:),complex_counts(:),complex_displacements(:),&
+      all_atom_ids(:),all_ordinals(:),unique_ids(:),owner_ranks(:)
+    real(real64),allocatable::all_strength(:)
+    complex(real64),allocatable::all_overlap(:,:)
+    logical::matched
+    ok=.false.;message='';expected_projector_count=0;local_bad=0
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)local_bad=1
+    call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)local_bad=1
+    if(nwann<1.or.size(atom_ids)/=size(ordinals).or.size(atom_ids)/=size(strength).or.&
+        size(partial_overlap,1)/=nwann.or.&
+        size(partial_overlap,2)/=size(atom_ids))local_bad=1
+    if(local_bad==0)then
+      if(any(atom_ids<1).or.any(ordinals<1).or.&
+          any(.not.ieee_is_finite(strength)).or..not.all(ieee_is_finite(real(partial_overlap))).or.&
+          .not.all(ieee_is_finite(aimag(partial_overlap))))local_bad=1
+    end if
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then;message='invalid fragment projector overlap payload';return;end if
+    allocate(counts(nproc),displacements(nproc),complex_counts(nproc),complex_displacements(nproc))
+    call MPI_Allgather(size(atom_ids),1,MPI_INTEGER,counts,1,MPI_INTEGER,comm,ierr)
+    total_records=0
+    do r=1,nproc
+      displacements(r)=total_records;total_records=total_records+counts(r)
+      complex_counts(r)=nwann*counts(r);complex_displacements(r)=nwann*displacements(r)
+    end do
+    allocate(all_atom_ids(total_records),all_ordinals(total_records),all_strength(total_records),&
+      all_overlap(nwann,total_records),unique_ids(total_records),owner_ranks(total_records))
+    call MPI_Allgatherv(atom_ids,size(atom_ids),MPI_INTEGER,all_atom_ids,counts,displacements,&
+      MPI_INTEGER,comm,ierr)
+    call MPI_Allgatherv(ordinals,size(ordinals),MPI_INTEGER,all_ordinals,counts,displacements,&
+      MPI_INTEGER,comm,ierr)
+    call MPI_Allgatherv(strength,size(strength),MPI_DOUBLE_PRECISION,all_strength,counts,displacements,&
+      MPI_DOUBLE_PRECISION,comm,ierr)
+    call MPI_Allgatherv(partial_overlap,size(partial_overlap),MPI_DOUBLE_COMPLEX,all_overlap,&
+      complex_counts,complex_displacements,MPI_DOUBLE_COMPLEX,comm,ierr)
+    unique_count=0
+    do p=1,total_records
+      unique_ids(p)=0
+      do q=1,p-1
+        if(all_atom_ids(q)==all_atom_ids(p).and.all_ordinals(q)==all_ordinals(p))then
+          unique_ids(p)=unique_ids(q);exit
+        end if
+      end do
+      if(unique_ids(p)==0)then
+        unique_count=unique_count+1;unique_ids(p)=unique_count
+        owner_ranks(unique_count)=0
+        do r=1,nproc
+          if(p>displacements(r).and.p<=displacements(r)+counts(r))then
+            owner_ranks(unique_count)=r-1;exit
+          end if
+        end do
+      end if
+    end do
+    expected_projector_count=unique_count;nowned=count(owner_ranks(1:unique_count)==rank)
+    allocate(projector_ids(nowned),owned_strength(nowned),owned_overlap(nwann,nowned))
+    owned_overlap=(0d0,0d0);nowned=0
+    do q=1,unique_count
+      if(owner_ranks(q)/=rank)cycle
+      nowned=nowned+1;projector_ids(nowned)=int(q,int64);matched=.false.
+      do p=1,total_records
+        if(unique_ids(p)/=q)cycle
+        if(.not.matched)then
+          owned_strength(nowned)=all_strength(p);matched=.true.
+        else if(abs(all_strength(p)-owned_strength(nowned))>&
+            1024d0*epsilon(1d0)*max(1d0,abs(owned_strength(nowned))))then
+          local_bad=1
+        end if
+        owned_overlap(:,nowned)=owned_overlap(:,nowned)+all_overlap(:,p)
+      end do
+    end do
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then;message='fragment copies disagree on nonlocal projector strength';return;end if
+    ok=.true.;message=''
+#else
+    ok=.false.;message='fragment projector overlap collection requires MPI';expected_projector_count=0
+#endif
+  end subroutine collect_dg_overlapping_wannier_projector_overlaps
+
   subroutine assemble_dg_overlapping_wannier_nonlocal_rows(comm,nwann,row_ids,projector_ids,strength,&
       overlap,complete_tail_overlap,expected_projector_count,matrix_rows,ownership_count,ok,message)
     integer,intent(in)::comm,nwann

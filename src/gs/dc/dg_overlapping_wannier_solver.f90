@@ -26,8 +26,10 @@ contains
       hdirection(:),sdirection(:),gram(:,:),block_basis(:,:),block_coefficients(:,:),&
       block_h(:,:),block_s(:,:),block_residual(:,:),candidate_block(:,:),previous_direction(:,:),old_q(:,:)
     complex(8),allocatable::reference_initial(:,:)
+    complex(8),allocatable::full_coefficients(:,:)
     complex(8)::value,reduced_h(2,2),reduced_s(2,2),ritz_vector(2)
     real(8),allocatable::block_eigenvalues(:)
+    real(8),allocatable::full_eigenvalues(:)
     real(8)::ritz_value,pivot,residual_norm,block_maximum_residual,warm_defect,global_warm_defect
     integer,allocatable::ownership(:)
     integer::n,nlocal,i,j,band,iteration,ierr,local_bad,global_bad,block_size,maximum_block_size,&
@@ -96,6 +98,20 @@ contains
     if(.not.ok.or.metric_condition*metric_tolerance>=1d0)then
       ok=.false.;message='overlap metric condition gate failed';return
     endif
+    if(.not.present(initial_coefficients))then
+      allocate(full_coefficients(n,n),full_eigenvalues(n))
+      do j=1,n;call gather_vector(comm,row_ids,qlocal(:,j),full_coefficients(:,j));end do
+      call block_rayleigh_ritz(comm,row_ids,hrows,srows,qlocal,full_coefficients,&
+        full_eigenvalues,ok)
+      if(.not.ok)then;message='cold full-space Rayleigh-Ritz failed';return;end if
+      coefficients=full_coefficients(:,1:nstate);eigenvalues=full_eigenvalues(1:nstate)
+      call coefficient_diagnostics(comm,row_ids,hrows,srows,coefficients,eigenvalues,&
+        maximum_residual,orthogonality_defect)
+      if(maximum_residual>10d0*tolerance.or.orthogonality_defect>10d0*tolerance)then
+        ok=.false.;message='cold full-space generalized residual exceeds numerical quality gate';return
+      end if
+      ok=.true.;message='';return
+    end if
     if(present(initial_coefficients))then
       do j=1,nstate
         do i=1,nlocal
