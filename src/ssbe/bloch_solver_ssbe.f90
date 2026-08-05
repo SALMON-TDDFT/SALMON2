@@ -104,11 +104,21 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
                         pni_Ac = gs%p_tm_matrix(nb, ib, 1, ik) * Ac(1) + &
                                  gs%p_tm_matrix(nb, ib, 2, ik) * Ac(2) + &
                                  gs%p_tm_matrix(nb, ib, 3, ik) * Ac(3)
+                        if (sbe%flag_vnl_correction) then
+                            ! Consideration of nonlocal momentum components
+                            pin(idir) = pin(idir) &
+                                + gs%rvnl_tm_matrix(ib, nb, idir, ik)
+                            pni_Ac = pni_Ac &
+                                + gs%rvnl_tm_matrix(nb, ib, 1, ik) * Ac(1) &
+                                + gs%rvnl_tm_matrix(nb, ib, 2, ik) * Ac(2) &
+                                + gs%rvnl_tm_matrix(nb, ib, 3, ik) * Ac(3)
+                        end if
                         if(nb /= ib) then
                             if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3)then
-                                tmp1(idir) = tmp1(idir) - gs%kweight(ik) * &
-                                    2.d0 * sbe%rho(nb, nb, ik) * &
-                                    dble(pni_Ac*pin(idir)) / gs%delta_omega(ib, nb, ik) 
+                                ! Bug fix: sign problem
+                                tmp1(idir) = tmp1(idir) + gs%kweight(ik) * &
+                                    2.d0 * gs%occup(nb, ik) * &
+                                    dble(pni_Ac*pin(idir)) / gs%delta_omega(ib, nb, ik)
                             end if
                         end if
                     end do
@@ -307,8 +317,11 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
 
     call comm_summation(tmp1, tmp, 3, icomm)
 
-    jmat(:) = (real(tmp(1:3)) / sum(gs%kweight(:)) &
-        & + Ac * calc_trace(sbe, gs, sbe%nb, icomm)) / gs%volume
+    jmat(:) = real(tmp(1:3)) / sum(gs%kweight(:)) / gs%volume
+    if (.not. (norder_correction >= 1)) then
+        ! Gauge current cancellation
+        jmat(:) = jmat(:) + Ac * calc_trace(sbe, gs, sbe%nb, icomm) / gs%volume
+    end if
 
     return
 end subroutine calc_current_bloch
