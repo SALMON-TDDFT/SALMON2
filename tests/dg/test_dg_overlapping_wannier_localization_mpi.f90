@@ -3,10 +3,13 @@ program test_dg_overlapping_wannier_localization_mpi
   use mpi
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   use dg_overlapping_wannier_localization,only:evaluate_dg_periodic_localization,&
-    optimize_dg_wannier_pair
+    optimize_dg_wannier_pair,build_dg_overlapping_pair_graph
   implicit none
   complex(8)::values(2,4),phases(3,4),shifted_phases(3,4),moment(3,2),shifted_moment(3,2)
   complex(8)::gradients(3,2,4),rotation(2,2),identity(2,2)
+  complex(8)::graph_values(4,4)
+  integer,allocatable::pair_first(:),pair_second(:)
+  real(8),allocatable::pair_support(:)
   real(8)::weights(4),norm(2),shifted_norm(2),spread,shifted_spread,nan_value,&
     before,after,pair_gradient,density_before(4),gradient_norm_before
   logical::ok,accepted
@@ -59,6 +62,17 @@ program test_dg_overlapping_wannier_localization_mpi
     rotation,before,after,pair_gradient,accepted,ok,message)
   call require(ok.and..not.accepted.and.abs(after-before)<1d-13,&
     'stationary localized pair remains unchanged')
+
+  graph_values=(0d0,0d0)
+  graph_values(1,1)=1d0;graph_values(2,1)=0.8d0;graph_values(2,2)=0.6d0
+  graph_values(3,3)=1d0;graph_values(4,3)=0.8d0;graph_values(4,4)=0.6d0
+  call build_dg_overlapping_pair_graph(MPI_COMM_WORLD,graph_values,weights,0.2d0,&
+    pair_first,pair_second,pair_support,ok,message)
+  call require(ok.and.size(pair_first)==2,'sparse overlapping-pair graph size')
+  call require(all(pair_first==[1,3]).and.all(pair_second==[2,4]),&
+    'pair graph retains only shared buffered support')
+  call require(all(pair_support>0.8d0).and.all(pair_support<=1d0),&
+    'pair support is rank-independent and normalized')
 
   nan_value=ieee_value(0d0,ieee_quiet_nan);weights(2)=nan_value
   call evaluate_dg_periodic_localization(values,weights,phases,norm,moment,spread,ok,message)

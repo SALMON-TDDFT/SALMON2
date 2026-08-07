@@ -1,11 +1,93 @@
 module dg_overlapping_wannier_localization
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
   use,intrinsic::iso_fortran_env,only:real64
+#ifdef USE_MPI
+  use mpi
+#endif
   implicit none
   private
   public::evaluate_dg_periodic_localization
   public::optimize_dg_wannier_pair
+  public::build_dg_overlapping_pair_graph
 contains
+  subroutine build_dg_overlapping_pair_graph(comm,values,weights,support_tolerance,&
+      pair_first,pair_second,pair_support,ok,message)
+    integer,intent(in)::comm
+    complex(real64),intent(in)::values(:,:)
+    real(real64),intent(in)::weights(:),support_tolerance
+    integer,allocatable,intent(out)::pair_first(:),pair_second(:)
+    real(real64),allocatable,intent(out)::pair_support(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    real(real64),allocatable::local_diagonal(:),global_diagonal(:),local_row(:),global_row(:)
+    real(real64)::score
+    integer::nwannier,npoint,first,second,point,npair,index,ierr
+
+    ok=.false.;message='';nwannier=size(values,1);npoint=size(values,2)
+    if(nwannier<1.or.npoint<1.or.size(weights)/=npoint.or.support_tolerance<0d0.or.&
+        support_tolerance>1d0.or..not.ieee_is_finite(support_tolerance).or.&
+        .not.all(ieee_is_finite(weights)).or.any(weights<=0d0).or.&
+        .not.all(ieee_is_finite(real(values))).or.&
+        .not.all(ieee_is_finite(aimag(values))))then
+      message='invalid overlapping Wannier pair-graph contract';return
+    end if
+    allocate(local_diagonal(nwannier),global_diagonal(nwannier),&
+      local_row(nwannier),global_row(nwannier));local_diagonal=0d0
+    do point=1,npoint
+      local_diagonal=local_diagonal+weights(point)*abs(values(:,point))**4
+    end do
+#ifdef USE_MPI
+    call MPI_Allreduce(local_diagonal,global_diagonal,nwannier,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='pair-graph diagonal collective failed';return;end if
+#else
+    global_diagonal=local_diagonal
+#endif
+    if(any(global_diagonal<=tiny(1d0)))then
+      message='pair-graph Wannier support norm is zero';return
+    end if
+    npair=0
+    do first=1,nwannier-1
+      call pair_support_row(first,local_row)
+#ifdef USE_MPI
+      call MPI_Allreduce(local_row,global_row,nwannier,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='pair-graph row collective failed';return;end if
+#else
+      global_row=local_row
+#endif
+      do second=first+1,nwannier
+        score=global_row(second)/sqrt(global_diagonal(first)*global_diagonal(second))
+        if(score>support_tolerance)npair=npair+1
+      end do
+    end do
+    allocate(pair_first(npair),pair_second(npair),pair_support(npair));index=0
+    do first=1,nwannier-1
+      call pair_support_row(first,local_row)
+#ifdef USE_MPI
+      call MPI_Allreduce(local_row,global_row,nwannier,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='pair-graph row collective failed';return;end if
+#else
+      global_row=local_row
+#endif
+      do second=first+1,nwannier
+        score=global_row(second)/sqrt(global_diagonal(first)*global_diagonal(second))
+        if(score<=support_tolerance)cycle
+        index=index+1;pair_first(index)=first;pair_second(index)=second
+        pair_support(index)=min(1d0,max(0d0,score))
+      end do
+    end do
+    ok=.true.
+  contains
+    subroutine pair_support_row(source,row)
+      integer,intent(in)::source
+      real(real64),intent(out)::row(:)
+      integer::p
+      row=0d0
+      do p=1,npoint
+        row=row+weights(p)*abs(values(source,p))**2*abs(values(:,p))**2
+      end do
+    end subroutine pair_support_row
+  end subroutine build_dg_overlapping_pair_graph
+
   subroutine optimize_dg_wannier_pair(values,gradients,weights,phases,first,second,&
       spread_tolerance,rotation,before,after,gradient,accepted,ok,message)
     complex(real64),intent(inout)::values(:,:),gradients(:,:,:)

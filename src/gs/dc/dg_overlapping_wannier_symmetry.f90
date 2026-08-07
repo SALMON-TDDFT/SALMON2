@@ -13,7 +13,165 @@ module dg_overlapping_wannier_symmetry
   public::evaluate_dg_covariance_residuals_by_operation
   public::fingerprint_dg_exact_fragment_symmetry
   public::build_dg_fragment_permuted_representation
+  public::build_dg_fragment_symmetry_orbits
+  public::build_dg_symmetry_constrained_pair_generator
 contains
+  subroutine build_dg_symmetry_constrained_pair_generator(first,second,amplitude,representation,&
+      product_table,tolerance,generator,antihermiticity_defect,commutator_defect,&
+      active_indices,ok,message)
+    integer,intent(in)::first,second
+    complex(8),intent(in)::amplitude,representation(:,:,:)
+    integer,intent(in)::product_table(:,:)
+    real(8),intent(in)::tolerance
+    complex(8),allocatable,intent(out)::generator(:,:)
+    real(8),intent(out)::antihermiticity_defect,commutator_defect
+    integer,allocatable,intent(out)::active_indices(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(8),allocatable::identity(:,:),difference(:,:),work(:,:),block_representation(:,:,:),seed(:,:)
+    logical,allocatable::active(:)
+    real(8)::unitarity_defect,closure_defect,leakage
+    integer::n,noperation,operation,left,right,product,i,source,target,nactive,first_local,second_local
+    logical::changed
+
+    ok=.false.;message='';antihermiticity_defect=huge(1d0);commutator_defect=huge(1d0)
+    n=size(representation,1);noperation=size(representation,3)
+    if(n<2.or.size(representation,2)/=n.or.noperation<1.or.first<1.or.second<1.or.&
+        first>n.or.second>n.or.first==second.or.&
+        .not.ieee_is_finite(real(amplitude)).or..not.ieee_is_finite(aimag(amplitude)).or.&
+        abs(amplitude)<=tiny(1d0).or.any(shape(product_table)/=[noperation,noperation]).or.&
+        tolerance<=0d0.or..not.ieee_is_finite(tolerance).or.&
+        .not.all(ieee_is_finite(real(representation))).or.&
+        .not.all(ieee_is_finite(aimag(representation))))then
+      message='invalid symmetry-constrained pair-generator contract';return
+    end if
+    if(any(product_table<1).or.any(product_table>noperation))then
+      message='symmetry-constrained generator product table is invalid';return
+    end if
+    allocate(active(n));active=.false.;active([first,second])=.true.
+    do
+      changed=.false.
+      do operation=1,noperation;do source=1,n
+        if(.not.active(source))cycle
+        do target=1,n
+          if(abs(representation(target,source,operation))<=tolerance.or.active(target))cycle
+          active(target)=.true.;changed=.true.
+        end do
+      end do;end do
+      if(.not.changed)exit
+    end do
+    nactive=count(active);allocate(active_indices(nactive));active_indices=pack([(i,i=1,n)],active)
+    allocate(identity(nactive,nactive),difference(nactive,nactive),work(nactive,nactive),&
+      generator(nactive,nactive),block_representation(nactive,nactive,noperation),seed(nactive,nactive))
+    identity=(0d0,0d0);do i=1,nactive;identity(i,i)=1d0;end do
+    do operation=1,noperation
+      block_representation(:,:,operation)=representation(active_indices,active_indices,operation)
+    end do
+    leakage=0d0
+    do operation=1,noperation;do source=1,nactive;do target=1,n
+      if(active(target))cycle
+      leakage=max(leakage,abs(representation(target,active_indices(source),operation)))
+    end do;end do;end do
+    if(leakage>tolerance)then
+      message='symmetry-constrained pair support block is not invariant';return
+    end if
+    unitarity_defect=0d0
+    do operation=1,noperation
+      difference=matmul(conjg(transpose(block_representation(:,:,operation))),&
+        block_representation(:,:,operation))-identity
+      unitarity_defect=max(unitarity_defect,maxval(abs(difference)))
+    end do
+    if(unitarity_defect>tolerance)then
+      message='symmetry-constrained representation is not unitary';return
+    end if
+    closure_defect=0d0
+    do left=1,noperation;do right=1,noperation
+      product=product_table(left,right)
+      difference=matmul(block_representation(:,:,left),block_representation(:,:,right))-&
+        block_representation(:,:,product)
+      closure_defect=max(closure_defect,maxval(abs(difference)))
+    end do;end do
+    if(closure_defect>tolerance)then
+      message='symmetry-constrained representation is not group closed';return
+    end if
+    seed=(0d0,0d0);first_local=findloc(active_indices,first,dim=1)
+    second_local=findloc(active_indices,second,dim=1)
+    seed(first_local,second_local)=amplitude;seed(second_local,first_local)=-conjg(amplitude)
+    generator=(0d0,0d0)
+    do operation=1,noperation
+      generator=generator+matmul(block_representation(:,:,operation),&
+        matmul(seed,conjg(transpose(block_representation(:,:,operation)))))
+    end do
+    generator=generator/real(noperation,8)
+    antihermiticity_defect=maxval(abs(generator+conjg(transpose(generator))))/&
+      max(1d0,maxval(abs(generator)))
+    commutator_defect=0d0
+    do operation=1,noperation
+      work=matmul(generator,block_representation(:,:,operation))-&
+        matmul(block_representation(:,:,operation),generator)
+      commutator_defect=max(commutator_defect,maxval(abs(work))/&
+        max(1d0,maxval(abs(generator))))
+    end do
+    if(antihermiticity_defect>tolerance)then
+      message='symmetry-constrained generator lost anti-Hermiticity';return
+    end if
+    if(commutator_defect>tolerance)then
+      message='symmetry-constrained generator does not commute with the group';return
+    end if
+    ok=.true.
+  end subroutine build_dg_symmetry_constrained_pair_generator
+
+  subroutine build_dg_fragment_symmetry_orbits(fragment_permutation,fragment_orbit,&
+      orbit_representative,ok,message)
+    integer,intent(in)::fragment_permutation(:,:)
+    integer,allocatable,intent(out)::fragment_orbit(:),orbit_representative(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer,allocatable::representative(:)
+    integer::nfragment,noperation,operation,source,target,root
+    logical::changed
+
+    ok=.false.;message='';nfragment=size(fragment_permutation,1)
+    noperation=size(fragment_permutation,2)
+    if(nfragment<1.or.noperation<1)then
+      message='invalid fragment symmetry-orbit contract';return
+    end if
+    do operation=1,noperation
+      if(any(fragment_permutation(:,operation)<1).or.&
+          any(fragment_permutation(:,operation)>nfragment))then
+        message='fragment symmetry operation is not a permutation';return
+      end if
+      do target=1,nfragment
+        if(count(fragment_permutation(:,operation)==target)/=1)then
+          message='fragment symmetry operation is not a permutation';return
+        end if
+      end do
+    end do
+    allocate(representative(nfragment));representative=[(source,source=1,nfragment)]
+    do
+      changed=.false.
+      do operation=1,noperation;do source=1,nfragment
+        target=fragment_permutation(source,operation)
+        root=min(representative(source),representative(target))
+        if(representative(source)/=root.or.representative(target)/=root)changed=.true.
+        representative(source)=root;representative(target)=root
+      end do;end do
+      do source=1,nfragment
+        root=representative(source)
+        do while(representative(root)/=root);root=representative(root);end do
+        if(representative(source)/=root)changed=.true.
+        representative(source)=root
+      end do
+      if(.not.changed)exit
+    end do
+    allocate(fragment_orbit(nfragment),orbit_representative(nfragment))
+    do source=1,nfragment
+      root=representative(source);orbit_representative(source)=root
+      fragment_orbit(source)=count([(representative(target)==target,target=1,root)])
+    end do
+    ok=.true.
+  end subroutine build_dg_fragment_symmetry_orbits
+
   subroutine build_dg_fragment_permuted_representation(local_representation,rotations,&
       fragment_centers,tolerance,global_representation,fragment_permutation,ok,message)
     complex(8),intent(in)::local_representation(:,:,:)
@@ -245,13 +403,15 @@ contains
   end subroutine promote_dg_exact_global_subgroup
 
   subroutine project_dg_fragment_covariant_operators(representation,rotations,scalars,vectors, &
-      tolerance,projected_scalars,projected_vectors,pre_projection_defect,post_projection_defect,ok,message)
+      tolerance,projected_scalars,projected_vectors,pre_projection_defect,post_projection_defect,ok,message,&
+      maximum_pre_projection_defect)
     complex(8),intent(in)::representation(:,:,:),scalars(:,:,:),vectors(:,:,:,:)
     real(8),intent(in)::rotations(:,:,:),tolerance
     complex(8),allocatable,intent(out)::projected_scalars(:,:,:),projected_vectors(:,:,:,:)
     real(8),intent(out)::pre_projection_defect,post_projection_defect
     logical,intent(out)::ok
     character(*),intent(out)::message
+    real(8),intent(in),optional::maximum_pre_projection_defect
     complex(8),allocatable::transformed(:,:),target(:,:)
     real(8)::rotation_defect,determinant,correction_limit
     integer::n,nop,nscalar,nvector,iop,i,j,a,b
@@ -290,6 +450,10 @@ contains
     end if
     call covariance_defect(representation,rotations,scalars,vectors,pre_projection_defect)
     correction_limit=sqrt(tolerance)
+    if(present(maximum_pre_projection_defect))correction_limit=maximum_pre_projection_defect
+    if(.not.ieee_is_finite(correction_limit).or.correction_limit<=0d0)then
+      message='fragment operator correction limit must be finite and positive';return
+    end if
     if(pre_projection_defect>correction_limit)then
       message='fragment operator pre-projection covariance defect exceeds correction limit';return
     end if
@@ -368,7 +532,8 @@ contains
   end function determinant3
 
   subroutine build_dg_fragment_group_representation(metric,raw,product_table,tolerance, &
-      representation,raw_unitarity_defect,unitarity_defect,closure_defect,ok,message)
+      representation,raw_unitarity_defect,unitarity_defect,closure_defect,ok,message,&
+      maximum_raw_unitarity_defect)
     complex(8),intent(in)::metric(:,:),raw(:,:,:)
     integer,intent(in)::product_table(:,:)
     real(8),intent(in)::tolerance
@@ -376,6 +541,7 @@ contains
     real(8),intent(out)::raw_unitarity_defect,unitarity_defect,closure_defect
     logical,intent(out)::ok
     character(*),intent(out)::message
+    real(8),intent(in),optional::maximum_raw_unitarity_defect
     complex(8),allocatable::metric_sqrt(:,:),metric_inverse_sqrt(:,:),gram_inverse_sqrt(:,:), &
       transformed(:,:),unitary(:,:),difference(:,:)
     real(8)::metric_scale,representation_scale,correction_limit
@@ -414,6 +580,10 @@ contains
       representation(:,:,iop)=matmul(metric_inverse_sqrt,matmul(unitary,metric_sqrt))
     end do
     correction_limit=sqrt(tolerance)
+    if(present(maximum_raw_unitarity_defect))correction_limit=maximum_raw_unitarity_defect
+    if(.not.ieee_is_finite(correction_limit).or.correction_limit<=0d0)then
+      message='fragment group representation correction limit must be finite and positive';return
+    end if
     if(raw_unitarity_defect>correction_limit)then
       message='fragment group representation raw unitarity defect exceeds correction limit';return
     end if

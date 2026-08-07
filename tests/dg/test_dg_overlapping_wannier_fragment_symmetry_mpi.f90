@@ -3,7 +3,8 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
   use mpi
   use dg_overlapping_wannier_symmetry, only: select_dg_exact_fragment_subgroup, &
     promote_dg_exact_global_subgroup,build_dg_fragment_site_stabilizer, &
-    fingerprint_dg_exact_fragment_symmetry,build_dg_fragment_permuted_representation
+    fingerprint_dg_exact_fragment_symmetry,build_dg_fragment_permuted_representation, &
+    build_dg_fragment_symmetry_orbits,build_dg_symmetry_constrained_pair_generator
   use iso_fortran_env,only:int64
   implicit none
   integer :: ierr,rank,nproc,i,j
@@ -20,7 +21,14 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
   real(8) :: pair_centers(3,2),inversion_cartesian(3,3,1)
   complex(8) :: local_pair_representation(1,1,1)
   complex(8),allocatable :: global_pair_representation(:,:,:)
+  complex(8) :: dense_representation(4,4,2),broken_representation(4,4,2)
+  complex(8),allocatable :: constrained_generator(:,:)
+  integer,allocatable :: generator_active_indices(:)
+  integer :: generator_product(2,2)
+  real(8) :: antihermiticity_defect,commutator_defect
   integer,allocatable :: fragment_permutation(:,:)
+  integer :: multi_orbit_map(4,2),identity_orbit_map(4,1),invalid_orbit_map(4,2)
+  integer,allocatable :: fragment_orbit(:),orbit_representative(:)
   real(8) :: atom(4),boundary(4),grid(4),center(4)
   logical :: ok
   character(256) :: message
@@ -114,6 +122,56 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
   call require(abs(global_pair_representation(2,1,1)-1d0)<1d-14.and.&
     abs(global_pair_representation(1,2,1)-1d0)<1d-14,&
     'global point representation contains source-to-target fragment blocks')
+
+  multi_orbit_map(:,1)=[1,2,3,4]
+  multi_orbit_map(:,2)=[2,1,4,3]
+  call build_dg_fragment_symmetry_orbits(multi_orbit_map,fragment_orbit,&
+    orbit_representative,ok,message)
+  call require(ok.and.all(fragment_orbit==[1,1,2,2]),&
+    'disconnected fragment symmetry components form separate orbits')
+  call require(all(orbit_representative==[1,1,3,3]),&
+    'each fragment orbit has its own deterministic representative')
+  identity_orbit_map(:,1)=[1,2,3,4]
+  call build_dg_fragment_symmetry_orbits(identity_orbit_map,fragment_orbit,&
+    orbit_representative,ok,message)
+  call require(ok.and.all(fragment_orbit==[1,2,3,4]).and.&
+    all(orbit_representative==[1,2,3,4]),&
+    'fully broken symmetry retains independent fragment-local construction')
+  invalid_orbit_map=multi_orbit_map;invalid_orbit_map(:,2)=[2,2,4,3]
+  call build_dg_fragment_symmetry_orbits(invalid_orbit_map,fragment_orbit,&
+    orbit_representative,ok,message)
+  call require(.not.ok.and.index(message,'permutation')>0,&
+    'non-bijective fragment symmetry operation is rejected')
+
+  dense_representation=(0d0,0d0)
+  do i=1,4;dense_representation(i,i,1)=1d0;end do
+  dense_representation(1,1,2)=1d0/sqrt(2d0);dense_representation(1,2,2)=1d0/sqrt(2d0)
+  dense_representation(2,1,2)=1d0/sqrt(2d0);dense_representation(2,2,2)=-1d0/sqrt(2d0)
+  dense_representation(3:4,3:4,2)=dense_representation(1:2,1:2,2)
+  generator_product=reshape([1,2,2,1],[2,2])
+  call build_dg_symmetry_constrained_pair_generator(1,3,(1d0,0d0),dense_representation,&
+    generator_product,1d-12,constrained_generator,antihermiticity_defect,&
+    commutator_defect,generator_active_indices,ok,message)
+  call require(ok,'dense-representation generator group average')
+  call require(antihermiticity_defect<1d-12.and.commutator_defect<1d-12,&
+    'constrained generator is anti-Hermitian and symmetry commuting')
+  call require(all(generator_active_indices==[1,2,3,4]).and.&
+    abs(constrained_generator(2,4))>1d-3,&
+    'dense symmetry representation expands a sparse pair seed')
+  call build_dg_symmetry_constrained_pair_generator(1,3,(1d0,0d0),&
+    dense_representation(:,:,1:1),&
+    reshape([1],[1,1]),1d-12,constrained_generator,antihermiticity_defect,&
+    commutator_defect,generator_active_indices,ok,message)
+  call require(ok.and.all(generator_active_indices==[1,3]).and.&
+    maxval(abs(constrained_generator-reshape([(0d0,0d0),(-1d0,0d0),&
+      (1d0,0d0),(0d0,0d0)],[2,2])))<1d-14,&
+    'identity-only symmetry retains the local pair generator')
+  broken_representation=dense_representation;broken_representation(1,1,2)=2d0
+  call build_dg_symmetry_constrained_pair_generator(1,3,(1d0,0d0),broken_representation,&
+    generator_product,1d-12,constrained_generator,antihermiticity_defect,&
+    commutator_defect,generator_active_indices,ok,message)
+  call require(.not.ok.and.index(message,'unitary')>0,&
+    'nonunitary symmetry representation is rejected')
 
   if(rank==0)write(*,'(a,i0,a)')'PASS exact buffered-fragment symmetry on ',nproc,' ranks'
   call MPI_Finalize(ierr)
