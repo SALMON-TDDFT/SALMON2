@@ -38,6 +38,22 @@ module lcfo_diag_chefsi
     integer :: lda = 1
   end type s_matrix_layout
 
+  type :: s_hamiltonian_workspace
+    integer, allocatable :: request_send(:)
+    integer, allocatable :: request_recv(:)
+    real(8), allocatable :: x_halo(:,:,:)
+  end type s_hamiltonian_workspace
+
+  type :: s_chefsi_workspace
+    type(s_hamiltonian_workspace) :: hamiltonian
+    real(8), allocatable :: q0(:,:),q1(:,:),q2(:,:),hx(:,:)
+    real(8), allocatable :: xd(:,:),hxd(:,:),xrot(:,:)
+    real(8), allocatable :: projected(:,:),ritz_vector(:,:)
+    real(8), allocatable :: residual_local(:),residual(:)
+    real(8), allocatable :: eigen_work(:)
+    integer, allocatable :: eigen_iwork(:)
+  end type s_chefsi_workspace
+
   public :: diag_chefsi
 
 contains
@@ -49,6 +65,8 @@ contains
     & comm_summation, comm_wait_all
     use eigen_subdiag_sub, only: eigen_dsyev
     use structures, only: s_dcdft
+    use timer, only: LOG_CHEFSI_SETUP,LOG_CHEFSI_TOTAL, &
+    & timer_begin,timer_end
     implicit none
     type(s_dcdft), intent(in) :: dc
     integer, intent(in) :: nspin,n_basis(:,:),n_mat(:),n_halo
@@ -62,6 +80,8 @@ contains
     integer :: max_basis,npadded
     real(8), allocatable :: h_row(:,:,:,:),h_diag_sym(:,:,:)
 
+    call timer_begin(LOG_CHEFSI_TOTAL)
+    call timer_begin(LOG_CHEFSI_SETUP)
     max_basis = size(h_diag,1)
     npadded = max_basis*dc%n_frag
     nbuffer = min(256,max(8,dc%nstate_tot/100))
@@ -82,6 +102,7 @@ contains
     allocate(h_row(max_basis,max_basis,nspin,n_halo))
     allocate(h_diag_sym(max_basis,max_basis,nspin))
     call prepare_hamiltonian_blocks
+    call timer_end(LOG_CHEFSI_SETUP)
 
     if(dc%id_tot==0) then
       write(*,*) "CheFSI subspace:",nsub," target:",dc%nstate_tot
@@ -95,6 +116,7 @@ contains
     deallocate(h_diag_sym,h_row)
     call comm_free_group(icomm_row)
     call finalize_blacs_grids(grid_natural,grid_dense)
+    call timer_end(LOG_CHEFSI_TOTAL)
 
   contains
 
@@ -150,6 +172,7 @@ contains
       implicit none
       integer, intent(in) :: s
       type(s_matrix_layout) :: layout_natural,layout_dense,layout_small
+      type(s_chefsi_workspace) :: workspace
       integer :: cycle,ncol,nstate
       real(8) :: lambda_upper,lambda_cut,max_residual
       real(8), allocatable :: x(:,:),eigenvalue(:)
@@ -160,13 +183,15 @@ contains
       ncol = layout_natural%ncol_local
       allocate(x(layout_natural%lda,max(1,ncol)))
       allocate(eigenvalue(nsub))
+      call initialize_workspace(layout_natural,layout_dense, &
+      & layout_small,nstate,eigenvalue,workspace)
       x = 0d0
 
       call initialize_subspace(s,layout_natural,x)
       call rayleigh_ritz(s,layout_natural,layout_dense,layout_small, &
-      & x,eigenvalue)
+      & x,eigenvalue,workspace)
       call calculate_residual(s,layout_natural,x,eigenvalue, &
-      & nstate,max_residual)
+      & nstate,max_residual,workspace)
       lambda_upper = estimate_upper_bound(s)
 
       if(dc%id_tot==0) then
@@ -180,13 +205,13 @@ contains
         if(nsub==n_mat(s)) exit
         lambda_cut = eigenvalue(nsub)
         call chebyshev_filter(s,layout_natural,x,lambda_cut, &
-        & lambda_upper)
+        & lambda_upper,workspace)
         call orthonormalize(layout_natural,layout_dense, &
-        & layout_small,x)
+        & layout_small,x,workspace)
         call rayleigh_ritz(s,layout_natural,layout_dense, &
-        & layout_small,x,eigenvalue)
+        & layout_small,x,eigenvalue,workspace)
         call calculate_residual(s,layout_natural,x,eigenvalue, &
-        & nstate,max_residual)
+        & nstate,max_residual,workspace)
         if(dc%id_tot==0) then
           write(*,*) "CheFSI cycle:",cycle," maximum residual:", &
           & max_residual
@@ -201,8 +226,71 @@ contains
 
       esp_tot(1:nstate,s) = eigenvalue(1:nstate)
       call export_coefficients(s,layout_natural,x,nstate)
+      call finalize_workspace(workspace)
       deallocate(eigenvalue,x)
     end subroutine solve_one_spin
+
+    subroutine initialize_workspace(layout_n,layout_d,layout_g,nstate, &
+    & eigenvalue,workspace)
+      use timer, only: LOG_CHEFSI_SETUP,timer_begin,timer_end
+      implicit none
+      type(s_matrix_layout), intent(in) :: layout_n,layout_d,layout_g
+      integer, intent(in) :: nstate
+      real(8), intent(inout) :: eigenvalue(:)
+      type(s_chefsi_workspace), intent(out) :: workspace
+      integer :: info,liwork,lwork,lwork_min,ncol
+      real(8) :: work_query(1)
+
+      call timer_begin(LOG_CHEFSI_SETUP)
+      ncol = max(1,layout_n%ncol_local)
+      allocate(workspace%hamiltonian%request_send(max(1,n_halo)))
+      allocate(workspace%hamiltonian%request_recv(max(1,n_halo)))
+      allocate(workspace%hamiltonian%x_halo(max_basis,ncol,max(1,n_halo)))
+      allocate(workspace%q0(layout_n%lda,ncol))
+      allocate(workspace%q1(layout_n%lda,ncol))
+      allocate(workspace%q2(layout_n%lda,ncol))
+      allocate(workspace%hx(layout_n%lda,ncol))
+      allocate(workspace%xd(layout_d%lda,max(1,layout_d%ncol_local)))
+      allocate(workspace%hxd(layout_d%lda,max(1,layout_d%ncol_local)))
+      allocate(workspace%xrot(layout_d%lda,max(1,layout_d%ncol_local)))
+      allocate(workspace%projected(layout_g%lda, &
+      & max(1,layout_g%ncol_local)))
+      allocate(workspace%ritz_vector(layout_g%lda, &
+      & max(1,layout_g%ncol_local)))
+      allocate(workspace%residual_local(nstate),workspace%residual(nstate))
+
+      liwork = max(1,2+7*nsub+8*grid_dense%npcol)
+      allocate(workspace%eigen_iwork(liwork))
+      call pdsyevd('V','L',nsub,workspace%projected,1,1,layout_g%desc, &
+      & eigenvalue,workspace%ritz_vector,1,1,layout_g%desc, &
+      & work_query,-1,workspace%eigen_iwork,liwork,info)
+      if(info/=0) then
+        stop "DC-LCFO CheFSI: PDSYEVD workspace query failed."
+      end if
+      lwork_min = max(1+6*nsub+2*layout_g%nrow_local* &
+      & layout_g%ncol_local,3*nsub+max(dense_block_size* &
+      & (layout_g%nrow_local+1),3*dense_block_size))
+      lwork = max(10*lwork_min,10*nint(work_query(1)))
+      allocate(workspace%eigen_work(lwork))
+      call timer_end(LOG_CHEFSI_SETUP)
+    end subroutine initialize_workspace
+
+    subroutine finalize_workspace(workspace)
+      use timer, only: LOG_CHEFSI_SETUP,timer_begin,timer_end
+      implicit none
+      type(s_chefsi_workspace), intent(inout) :: workspace
+
+      call timer_begin(LOG_CHEFSI_SETUP)
+      deallocate(workspace%eigen_iwork,workspace%eigen_work)
+      deallocate(workspace%residual,workspace%residual_local)
+      deallocate(workspace%ritz_vector,workspace%projected)
+      deallocate(workspace%xrot,workspace%hxd,workspace%xd)
+      deallocate(workspace%hx,workspace%q2,workspace%q1,workspace%q0)
+      deallocate(workspace%hamiltonian%x_halo)
+      deallocate(workspace%hamiltonian%request_recv)
+      deallocate(workspace%hamiltonian%request_send)
+      call timer_end(LOG_CHEFSI_SETUP)
+    end subroutine finalize_workspace
 
     subroutine initialize_subspace(s,layout,x)
       use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -252,102 +340,130 @@ contains
       deallocate(order,value_global,value_local,vector,value,block)
     end subroutine initialize_subspace
 
-    subroutine apply_hamiltonian(s,layout,x,y)
+    subroutine apply_hamiltonian(s,layout,x,y,workspace)
+      use timer, only: LOG_CHEFSI_H_APPLY,LOG_CHEFSI_H_COMM_POST, &
+      & LOG_CHEFSI_H_DIAG,LOG_CHEFSI_H_HALO, &
+      & LOG_CHEFSI_H_RECV_WAIT,LOG_CHEFSI_H_SEND_WAIT, &
+      & timer_begin,timer_end
       implicit none
       integer, intent(in) :: s
       type(s_matrix_layout), intent(in) :: layout
       real(8), intent(in) :: x(:,:)
       real(8), intent(out) :: y(:,:)
+      type(s_hamiltonian_workspace), intent(inout) :: workspace
       integer :: h,nb,ncol,source_rank,destination_rank
-      integer, allocatable :: request_send(:),request_recv(:)
-      real(8), allocatable :: x_halo(:,:,:)
 
+      call timer_begin(LOG_CHEFSI_H_APPLY)
       nb = n_basis(dc%i_frag,s)
       ncol = layout%ncol_local
       y = 0d0
-      if(ncol==0) return
+      if(ncol==0) then
+        call timer_end(LOG_CHEFSI_H_APPLY)
+        return
+      end if
 
-      allocate(x_halo(max_basis,ncol,n_halo))
-      allocate(request_send(n_halo),request_recv(n_halo))
+      call timer_begin(LOG_CHEFSI_H_COMM_POST)
       do h=1,n_halo
         source_rank = halo_src(h)-1
         destination_rank = halo_dst(h)-1
-        request_send(h) = comm_isend(x(:,1:ncol),destination_rank, &
+        workspace%request_send(h) = comm_isend( &
+        & x(:,1:ncol),destination_rank, &
         & dc%i_frag,icomm_row)
-        request_recv(h) = comm_irecv(x_halo(:,:,h),source_rank, &
-        & halo_src(h),icomm_row)
+        workspace%request_recv(h) = comm_irecv( &
+        & workspace%x_halo(:,1:ncol,h),source_rank,halo_src(h), &
+        & icomm_row)
       end do
+      call timer_end(LOG_CHEFSI_H_COMM_POST)
 
+      call timer_begin(LOG_CHEFSI_H_DIAG)
       call dgemm('N','N',nb,ncol,nb,1d0,h_diag_sym(:,:,s), &
       & max_basis,x,layout%lda,0d0,y,layout%lda)
-      call comm_wait_all(request_recv)
+      call timer_end(LOG_CHEFSI_H_DIAG)
+      if(n_halo>0) then
+        call timer_begin(LOG_CHEFSI_H_RECV_WAIT)
+        call comm_wait_all(workspace%request_recv(1:n_halo))
+        call timer_end(LOG_CHEFSI_H_RECV_WAIT)
+      end if
+      call timer_begin(LOG_CHEFSI_H_HALO)
       do h=1,n_halo
         call dgemm('N','N',nb,ncol,n_basis(halo_src(h),s),1d0, &
-        & h_row(:,:,s,h),max_basis,x_halo(:,:,h),max_basis, &
+        & h_row(:,:,s,h),max_basis,workspace%x_halo(:,:,h),max_basis, &
         & 1d0,y,layout%lda)
       end do
-      call comm_wait_all(request_send)
-      deallocate(request_recv,request_send,x_halo)
+      call timer_end(LOG_CHEFSI_H_HALO)
+      if(n_halo>0) then
+        call timer_begin(LOG_CHEFSI_H_SEND_WAIT)
+        call comm_wait_all(workspace%request_send(1:n_halo))
+        call timer_end(LOG_CHEFSI_H_SEND_WAIT)
+      end if
+      call timer_end(LOG_CHEFSI_H_APPLY)
     end subroutine apply_hamiltonian
 
-    subroutine chebyshev_filter(s,layout,x,cutoff,upper)
+    subroutine chebyshev_filter(s,layout,x,cutoff,upper,workspace)
+      use timer, only: LOG_CHEFSI_FILTER,timer_begin,timer_end
       implicit none
       integer, intent(in) :: s
       type(s_matrix_layout), intent(in) :: layout
       real(8), intent(inout) :: x(:,:)
       real(8), intent(in) :: cutoff,upper
+      type(s_chefsi_workspace), intent(inout) :: workspace
       integer :: degree,ncol
       real(8) :: center,radius
-      real(8), allocatable :: q0(:,:),q1(:,:),q2(:,:),work(:,:)
 
       ncol = layout%ncol_local
       if(ncol==0) return
+      call timer_begin(LOG_CHEFSI_FILTER)
       center = 0.5d0*(upper+cutoff)
       radius = 0.5d0*(upper-cutoff)
       if(radius<=epsilon(1d0)*max(1d0,abs(center))) then
         stop "DC-LCFO CheFSI: invalid filter interval."
       end if
 
-      allocate(q0(layout%lda,ncol),q1(layout%lda,ncol))
-      allocate(q2(layout%lda,ncol),work(layout%lda,ncol))
-      q0 = x(:,1:ncol)
-      call apply_hamiltonian(s,layout,q0,work)
-      q1 = (work-center*q0)/radius
+      workspace%q0(:,1:ncol) = x(:,1:ncol)
+      call apply_hamiltonian(s,layout,workspace%q0,workspace%hx, &
+      & workspace%hamiltonian)
+      workspace%q1(:,1:ncol) = (workspace%hx(:,1:ncol) &
+      & -center*workspace%q0(:,1:ncol))/radius
       do degree=2,filter_degree
-        call apply_hamiltonian(s,layout,q1,work)
-        q2 = 2d0*(work-center*q1)/radius-q0
-        q0 = q1
-        q1 = q2
+        call apply_hamiltonian(s,layout,workspace%q1,workspace%hx, &
+        & workspace%hamiltonian)
+        workspace%q2(:,1:ncol) = 2d0*(workspace%hx(:,1:ncol) &
+        & -center*workspace%q1(:,1:ncol))/radius &
+        & -workspace%q0(:,1:ncol)
+        workspace%q0(:,1:ncol) = workspace%q1(:,1:ncol)
+        workspace%q1(:,1:ncol) = workspace%q2(:,1:ncol)
       end do
-      x(:,1:ncol) = q1
-      deallocate(work,q2,q1,q0)
+      x(:,1:ncol) = workspace%q1(:,1:ncol)
+      call timer_end(LOG_CHEFSI_FILTER)
     end subroutine chebyshev_filter
 
-    subroutine orthonormalize(layout_n,layout_d,layout_g,x)
+    subroutine orthonormalize(layout_n,layout_d,layout_g,x,workspace)
+      use timer, only: LOG_CHEFSI_ORTHO,timer_begin,timer_end
       implicit none
       type(s_matrix_layout), intent(in) :: layout_n,layout_d,layout_g
       real(8), intent(inout) :: x(:,:)
+      type(s_chefsi_workspace), intent(inout) :: workspace
       integer :: info,pass
-      real(8), allocatable :: xd(:,:),gram(:,:)
 
-      allocate(xd(layout_d%lda,max(1,layout_d%ncol_local)))
-      allocate(gram(layout_g%lda,max(1,layout_g%ncol_local)))
-      xd = 0d0
-      call redistribute_to_dense(layout_n,x,layout_d,xd)
+      call timer_begin(LOG_CHEFSI_ORTHO)
+      workspace%xd = 0d0
+      call redistribute_to_dense(layout_n,x,layout_d,workspace%xd)
       do pass=1,2
-        gram = 0d0
-        call pdsyrk('L','T',nsub,npadded,1d0,xd,1,1, &
-        & layout_d%desc,0d0,gram,1,1,layout_g%desc)
-        call pdpotrf('L',nsub,gram,1,1,layout_g%desc,info)
+        workspace%projected = 0d0
+        call pdsyrk('L','T',nsub,npadded,1d0,workspace%xd,1,1, &
+        & layout_d%desc,0d0,workspace%projected,1,1,layout_g%desc)
+        call pdpotrf('L',nsub,workspace%projected,1,1, &
+        & layout_g%desc,info)
         if(info/=0) then
-          call distributed_qr(layout_d,xd)
+          call distributed_qr(layout_d,workspace%xd)
           exit
         end if
-        call pdtrsm('R','L','T','N',npadded,nsub,1d0,gram, &
-        & 1,1,layout_g%desc,xd,1,1,layout_d%desc)
+        call pdtrsm('R','L','T','N',npadded,nsub,1d0, &
+        & workspace%projected,1,1,layout_g%desc,workspace%xd, &
+        & 1,1,layout_d%desc)
       end do
-      call redistribute_to_natural(layout_d,xd,layout_n,x)
-      deallocate(gram,xd)
+      call redistribute_to_natural(layout_d,workspace%xd,layout_n,x)
+      call timer_end(LOG_CHEFSI_ORTHO)
     end subroutine orthonormalize
 
     subroutine distributed_qr(layout,xd)
@@ -382,103 +498,99 @@ contains
       deallocate(work,tau)
     end subroutine distributed_qr
 
-    subroutine rayleigh_ritz(s,layout_n,layout_d,layout_g,x,eigenvalue)
+    subroutine rayleigh_ritz(s,layout_n,layout_d,layout_g,x,eigenvalue, &
+    & workspace)
+      use timer, only: LOG_CHEFSI_PROJECT,LOG_CHEFSI_RAYLEIGH_RITZ, &
+      & LOG_CHEFSI_ROTATE,timer_begin,timer_end
       implicit none
       integer, intent(in) :: s
       type(s_matrix_layout), intent(in) :: layout_n,layout_d,layout_g
       real(8), intent(inout) :: x(:,:)
       real(8), intent(out) :: eigenvalue(:)
-      real(8), allocatable :: hx(:,:),xd(:,:),hxd(:,:),xrot(:,:)
-      real(8), allocatable :: projected(:,:),ritz_vector(:,:)
+      type(s_chefsi_workspace), intent(inout) :: workspace
 
-      allocate(hx(layout_n%lda,max(1,layout_n%ncol_local)))
-      allocate(xd(layout_d%lda,max(1,layout_d%ncol_local)))
-      allocate(hxd(layout_d%lda,max(1,layout_d%ncol_local)))
-      allocate(xrot(layout_d%lda,max(1,layout_d%ncol_local)))
-      allocate(projected(layout_g%lda,max(1,layout_g%ncol_local)))
-      allocate(ritz_vector(layout_g%lda,max(1,layout_g%ncol_local)))
-
-      call apply_hamiltonian(s,layout_n,x,hx)
-      xd = 0d0
-      hxd = 0d0
-      call redistribute_to_dense(layout_n,x,layout_d,xd)
-      call redistribute_to_dense(layout_n,hx,layout_d,hxd)
-      projected = 0d0
-      call pdgemm('T','N',nsub,nsub,npadded,1d0,xd,1,1, &
-      & layout_d%desc,hxd,1,1,layout_d%desc,0d0,projected, &
-      & 1,1,layout_g%desc)
-      call diagonalize_projected(layout_g,projected,eigenvalue, &
-      & ritz_vector)
-      xrot = 0d0
-      call pdgemm('N','N',npadded,nsub,nsub,1d0,xd,1,1, &
-      & layout_d%desc,ritz_vector,1,1,layout_g%desc,0d0, &
-      & xrot,1,1,layout_d%desc)
-      call redistribute_to_natural(layout_d,xrot,layout_n,x)
-
-      deallocate(ritz_vector,projected,xrot,hxd,xd,hx)
+      call timer_begin(LOG_CHEFSI_RAYLEIGH_RITZ)
+      call apply_hamiltonian(s,layout_n,x,workspace%hx, &
+      & workspace%hamiltonian)
+      workspace%xd = 0d0
+      workspace%hxd = 0d0
+      call redistribute_to_dense(layout_n,x,layout_d,workspace%xd)
+      call redistribute_to_dense(layout_n,workspace%hx,layout_d, &
+      & workspace%hxd)
+      workspace%projected = 0d0
+      call timer_begin(LOG_CHEFSI_PROJECT)
+      call pdgemm('T','N',nsub,nsub,npadded,1d0,workspace%xd,1,1, &
+      & layout_d%desc,workspace%hxd,1,1,layout_d%desc,0d0, &
+      & workspace%projected,1,1,layout_g%desc)
+      call timer_end(LOG_CHEFSI_PROJECT)
+      call diagonalize_projected(layout_g,workspace%projected, &
+      & eigenvalue,workspace%ritz_vector,workspace%eigen_work, &
+      & workspace%eigen_iwork)
+      workspace%xrot = 0d0
+      call timer_begin(LOG_CHEFSI_ROTATE)
+      call pdgemm('N','N',npadded,nsub,nsub,1d0,workspace%xd,1,1, &
+      & layout_d%desc,workspace%ritz_vector,1,1,layout_g%desc,0d0, &
+      & workspace%xrot,1,1,layout_d%desc)
+      call timer_end(LOG_CHEFSI_ROTATE)
+      call redistribute_to_natural(layout_d,workspace%xrot,layout_n,x)
+      call timer_end(LOG_CHEFSI_RAYLEIGH_RITZ)
     end subroutine rayleigh_ritz
 
-    subroutine diagonalize_projected(layout,projected,eigenvalue,vector)
+    subroutine diagonalize_projected(layout,projected,eigenvalue, &
+    & vector,work,iwork)
+      use timer, only: LOG_CHEFSI_PROJECT_EIGEN,timer_begin,timer_end
       implicit none
       type(s_matrix_layout), intent(in) :: layout
       real(8), intent(inout) :: projected(:,:)
       real(8), intent(out) :: eigenvalue(:),vector(:,:)
-      integer :: info,lwork,liwork,lwork_min
-      integer, allocatable :: iwork(:)
-      real(8) :: work_query(1)
-      real(8), allocatable :: work(:)
+      real(8), intent(inout) :: work(:)
+      integer, intent(inout) :: iwork(:)
+      integer :: info
 
-      liwork = max(1,2+7*nsub+8*grid_dense%npcol)
-      allocate(iwork(liwork))
+      call timer_begin(LOG_CHEFSI_PROJECT_EIGEN)
       call pdsyevd('V','L',nsub,projected,1,1,layout%desc, &
-      & eigenvalue,vector,1,1,layout%desc,work_query,-1, &
-      & iwork,liwork,info)
-      if(info/=0) stop "DC-LCFO CheFSI: PDSYEVD workspace query failed."
-      lwork_min = max(1+6*nsub+2*layout%nrow_local* &
-      & layout%ncol_local,3*nsub+max(dense_block_size* &
-      & (layout%nrow_local+1),3*dense_block_size))
-      ! PDSYEVD partitions WORK internally before calling PDLASRT.  Some
-      ! ScaLAPACK versions under-report that nested workspace in a query.
-      lwork = max(10*lwork_min,10*nint(work_query(1)))
-      allocate(work(lwork))
-      call pdsyevd('V','L',nsub,projected,1,1,layout%desc, &
-      & eigenvalue,vector,1,1,layout%desc,work,lwork, &
-      & iwork,liwork,info)
+      & eigenvalue,vector,1,1,layout%desc,work,size(work), &
+      & iwork,size(iwork),info)
       if(info/=0) then
         if(dc%id_tot==0) write(*,*) "PDSYEVD error:",info
         stop "DC-LCFO CheFSI: projected eigensolver failed."
       end if
-      deallocate(work,iwork)
+      call timer_end(LOG_CHEFSI_PROJECT_EIGEN)
     end subroutine diagonalize_projected
 
-    subroutine calculate_residual(s,layout,x,eigenvalue,nstate,max_residual)
+    subroutine calculate_residual(s,layout,x,eigenvalue,nstate, &
+    & max_residual,workspace)
+      use timer, only: LOG_CHEFSI_RESIDUAL,timer_begin,timer_end
       implicit none
       integer, intent(in) :: s,nstate
       type(s_matrix_layout), intent(in) :: layout
       real(8), intent(in) :: x(:,:),eigenvalue(:)
       real(8), intent(out) :: max_residual
+      type(s_chefsi_workspace), intent(inout) :: workspace
       integer :: global_column,local_column,nb
-      real(8), allocatable :: hx(:,:),residual_local(:),residual(:)
 
-      allocate(hx(layout%lda,max(1,layout%ncol_local)))
-      allocate(residual_local(nstate),residual(nstate))
-      call apply_hamiltonian(s,layout,x,hx)
-      residual_local = 0d0
+      call timer_begin(LOG_CHEFSI_RESIDUAL)
+      call apply_hamiltonian(s,layout,x,workspace%hx, &
+      & workspace%hamiltonian)
+      workspace%residual_local = 0d0
       nb = n_basis(dc%i_frag,s)
       do local_column=1,layout%ncol_local
         global_column = natural_global_column(local_column, &
         & grid_natural%mycol,nsub,grid_natural%npcol)
         if(global_column>nstate) cycle
-        residual_local(global_column) = sum((hx(1:nb,local_column) &
+        workspace%residual_local(global_column) = sum(( &
+        & workspace%hx(1:nb,local_column) &
         & -eigenvalue(global_column)*x(1:nb,local_column))**2)
       end do
-      call comm_summation(residual_local,residual,nstate,dc%icomm_tot)
+      call comm_summation(workspace%residual_local,workspace%residual, &
+      & nstate,dc%icomm_tot)
       do global_column=1,nstate
-        residual(global_column) = sqrt(max(0d0,residual(global_column))) &
+        workspace%residual(global_column) = sqrt(max(0d0, &
+        & workspace%residual(global_column))) &
         & /max(1d0,abs(eigenvalue(global_column)))
       end do
-      max_residual = maxval(residual)
-      deallocate(residual,residual_local,hx)
+      max_residual = maxval(workspace%residual)
+      call timer_end(LOG_CHEFSI_RESIDUAL)
     end subroutine calculate_residual
 
     function estimate_upper_bound(s) result(upper)
@@ -506,6 +618,7 @@ contains
     end function estimate_upper_bound
 
     subroutine export_coefficients(s,layout,x,nstate)
+      use timer, only: LOG_CHEFSI_EXPORT,timer_begin,timer_end
       implicit none
       integer, intent(in) :: s,nstate
       type(s_matrix_layout), intent(in) :: layout
@@ -513,6 +626,7 @@ contains
       integer :: global_column,local_column,nb
       real(8), allocatable :: local_coef(:,:),fragment_coef(:,:)
 
+      call timer_begin(LOG_CHEFSI_EXPORT)
       nb = n_basis(dc%i_frag,s)
       allocate(local_coef(max_basis,nstate),fragment_coef(max_basis,nstate))
       local_coef = 0d0
@@ -526,24 +640,31 @@ contains
       & dc%icomm_frag)
       if(dc%id_frag==0) coef_wf(:,:,s) = fragment_coef
       deallocate(fragment_coef,local_coef)
+      call timer_end(LOG_CHEFSI_EXPORT)
     end subroutine export_coefficients
 
     subroutine redistribute_to_dense(layout_n,xn,layout_d,xd)
+      use timer, only: LOG_CHEFSI_REDISTRIBUTE,timer_begin,timer_end
       implicit none
       type(s_matrix_layout), intent(in) :: layout_n,layout_d
       real(8), intent(in) :: xn(:,:)
       real(8), intent(inout) :: xd(:,:)
+      call timer_begin(LOG_CHEFSI_REDISTRIBUTE)
       call pdgemr2d(npadded,nsub,xn,1,1,layout_n%desc,xd,1,1, &
       & layout_d%desc,grid_natural%ictxt)
+      call timer_end(LOG_CHEFSI_REDISTRIBUTE)
     end subroutine redistribute_to_dense
 
     subroutine redistribute_to_natural(layout_d,xd,layout_n,xn)
+      use timer, only: LOG_CHEFSI_REDISTRIBUTE,timer_begin,timer_end
       implicit none
       type(s_matrix_layout), intent(in) :: layout_d,layout_n
       real(8), intent(in) :: xd(:,:)
       real(8), intent(inout) :: xn(:,:)
+      call timer_begin(LOG_CHEFSI_REDISTRIBUTE)
       call pdgemr2d(npadded,nsub,xd,1,1,layout_d%desc,xn,1,1, &
       & layout_n%desc,grid_natural%ictxt)
+      call timer_end(LOG_CHEFSI_REDISTRIBUTE)
     end subroutine redistribute_to_natural
 
   end subroutine diag_chefsi
