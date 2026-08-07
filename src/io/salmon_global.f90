@@ -502,6 +502,10 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: dg_ow_boundary_value_tolerance
   real(8)        :: dg_ow_boundary_gradient_tolerance
   real(8)        :: dg_ow_symmetry_tolerance
+  real(8)        :: dg_ow_localization_support_tolerance
+  real(8)        :: dg_ow_localization_spread_tolerance
+  real(8)        :: dg_ow_localization_gradient_tolerance
+  integer        :: dg_ow_localization_max_iterations
   integer        :: dg_ow_candidate_states_per_fragment
   integer        :: dg_ow_target_wanniers_per_fragment
   real(8)        :: dg_dc_gs_electron_count_tolerance

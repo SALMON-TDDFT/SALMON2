@@ -47,6 +47,10 @@ program test_dg_overlapping_wannier_symmetry_projection_mpi
   call project_dg_fragment_covariant_operators(representation,rotations,scalars,vectors,1d-10, &
     projected_scalars,projected_vectors,pre_defect,post_defect,ok,message)
   call require(.not.ok.and.index(message,'pre-projection')>0,'large covariance defect must fail')
+  call project_dg_fragment_covariant_operators(representation,rotations,scalars,vectors,1d-10, &
+    projected_scalars,projected_vectors,pre_defect,post_defect,ok,message,1d-1)
+  call require(ok.and.pre_defect>sqrt(1d-10).and.post_defect<1d-13,&
+    'explicit exact-symmetry correction limit must permit an audited projection')
   if(rank==0)write(*,'(a,i0,a)')'PASS overlapping-Wannier symmetry projection on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains

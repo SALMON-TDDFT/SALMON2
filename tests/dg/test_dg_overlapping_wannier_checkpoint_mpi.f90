@@ -28,6 +28,9 @@ program test_dg_overlapping_wannier_checkpoint_mpi
   a%density_tolerance=1d-9;a%coefficient_tolerance=1d-9;a%orthogonality_tolerance=1d-9
   a%charge_tolerance=1d-9;a%condition_limit=10d0
   a%symmetry_closure_residual=1d-12;a%symmetry_tolerance=1d-9
+  a%localization_initial_spread=2d0;a%localization_final_spread=1d0
+  a%localization_maximum_gradient=1d-7;a%localization_iterations=6
+  a%localization_converged=.true.
   allocate(a%center_owner(2),a%core_physical_ids(nlocal),a%coefficients(2,1),&
     a%occupations(1),a%density(nlocal))
   a%center_owner=[0,mod(1,nproc)]
@@ -77,6 +80,18 @@ program test_dg_overlapping_wannier_checkpoint_mpi
     'checkpoint ownership round trip')
   call require(all(b%overlap==a%overlap).and.all(b%coefficients==a%coefficients).and.all(b%density==a%density),&
     'checkpoint payload round trip')
+  call require(b%localization_converged.and.b%localization_iterations==a%localization_iterations.and.&
+    b%localization_initial_spread==a%localization_initial_spread.and.&
+    b%localization_final_spread==a%localization_final_spread.and.&
+    b%localization_maximum_gradient==a%localization_maximum_gradient,&
+    'checkpoint localization evidence round trip')
+  a%localization_converged=.false.
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'nonconverged localization evidence rejected')
+  a%localization_converged=.true.;a%localization_final_spread=3d0
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'nonmonotone localization evidence rejected')
+  a%localization_final_spread=1d0
   call require(all(b%hamiltonian0==a%hamiltonian0).and.all(b%position==a%position).and.&
     all(b%velocity==a%velocity).and.b%hamiltonian_fingerprint==a%hamiltonian_fingerprint.and.&
     b%observable_fingerprint==a%observable_fingerprint.and.&

@@ -237,9 +237,14 @@ for tolerance in (
     "dg_ow_boundary_value_tolerance",
     "dg_ow_boundary_gradient_tolerance",
     "dg_ow_symmetry_tolerance",
+    "dg_ow_localization_support_tolerance",
+    "dg_ow_localization_spread_tolerance",
+    "dg_ow_localization_gradient_tolerance",
 ):
     assert tolerance in global_source
     assert tolerance in input_source
+assert "dg_ow_localization_max_iterations" in global_source
+assert "dg_ow_localization_max_iterations" in input_source
 for window in (
     "dg_ow_candidate_states_per_fragment",
     "dg_ow_target_wanniers_per_fragment",
@@ -623,6 +628,25 @@ assert re.search(
     adapter_body,
     re.I,
 ), "production must materialize each fragment from one full-system symmetry representative"
+materialize_position = adapter_body.lower().index("call materialize_ow_global_tails")
+localize_position = adapter_body.lower().index("call localize_dg_overlapping_wannier_basis")
+metric_position = adapter_body.lower().index("call assemble_dg_overlapping_wannier_metric_rows")
+assert materialize_position < localize_position < metric_position, (
+    "localization must use materialized tails and finish before metric/SCF publication"
+)
+for evidence in (
+    "localization_initial_spread",
+    "localization_final_spread",
+    "localization_maximum_gradient",
+    "localization_iterations",
+    "localization_converged",
+):
+    assert evidence in ow_checkpoint_source, f"V3 checkpoint misses {evidence}"
+assert re.search(
+    r"if\s*\(\s*\.not\.\s*localization_converged\s*\).*?error\s+stop",
+    adapter_body,
+    re.I | re.S,
+), "nonconverged localized gauges must not reach V3 publication"
 assert not re.search(
     r"call\s+align_dg_fragment_wannier_gauge",
     adapter_body,

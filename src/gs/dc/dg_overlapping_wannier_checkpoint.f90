@@ -25,6 +25,10 @@ module dg_overlapping_wannier_checkpoint
     real(8)::density_tolerance=0d0,coefficient_tolerance=0d0,orthogonality_tolerance=0d0
     real(8)::charge_tolerance=0d0,condition_limit=0d0
     real(8)::symmetry_closure_residual=huge(1d0),symmetry_tolerance=0d0
+    real(8)::localization_initial_spread=huge(1d0),localization_final_spread=huge(1d0)
+    real(8)::localization_maximum_gradient=huge(1d0)
+    integer::localization_iterations=0
+    logical::localization_converged=.false.
     logical::accepted=.false.
   end type
   public::write_dg_overlapping_wannier_checkpoint,read_dg_overlapping_wannier_checkpoint
@@ -171,7 +175,9 @@ contains
           checkpoint%density_tolerance,checkpoint%coefficient_tolerance,checkpoint%orthogonality_tolerance,&
           checkpoint%charge_tolerance,checkpoint%condition_limit,&
           checkpoint%symmetry_closure_residual,checkpoint%symmetry_tolerance,&
-          checkpoint%accepted
+          checkpoint%localization_initial_spread,checkpoint%localization_final_spread,&
+          checkpoint%localization_maximum_gradient,checkpoint%localization_iterations,&
+          checkpoint%localization_converged,checkpoint%accepted
         if(ios==0)write(unit,iostat=ios,iomsg=iomsg)checkpoint%center_owner,&
           checkpoint%coefficients,checkpoint%occupations
         flush_ios=0;close_ios=0
@@ -214,7 +220,7 @@ contains
       stored_size,stored_digest,&
       expected_fingerprints(2),&
       expected_fingerprint_min(2),expected_fingerprint_max(2)
-    real(8)::acceptance_metadata(13),gate_min(6),gate_max(6)
+    real(8)::acceptance_metadata(16),gate_min(6),gate_max(6)
     integer::nbasis_gen,ngeometry_gen,ntail_record,ntail_id,ncore,noverlap_row
     integer(int64)::basis_fp,operator_fp,computed_hamiltonian_fingerprint,computed_observable_fingerprint
     character(32)::magic
@@ -255,7 +261,9 @@ contains
           checkpoint%density_tolerance,checkpoint%coefficient_tolerance,checkpoint%orthogonality_tolerance,&
           checkpoint%charge_tolerance,checkpoint%condition_limit,&
           checkpoint%symmetry_closure_residual,checkpoint%symmetry_tolerance,&
-          checkpoint%accepted
+          checkpoint%localization_initial_spread,checkpoint%localization_final_spread,&
+          checkpoint%localization_maximum_gradient,checkpoint%localization_iterations,&
+          checkpoint%localization_converged,checkpoint%accepted
         if(ios==0)then
           if(magic/=manifest_magic.or.file_nproc/=nproc.or.dims(1)<=0.or.dims(2)<=0.or.dims(3)<=0.or.&
              dims(4)/=dims(3).or.any(dims>1000000))ios=1
@@ -293,7 +301,8 @@ contains
       message='cannot allocate overlapping-Wannier manifest payload collectively';return
     endif
     if(rank==0)then
-      integer_metadata=[checkpoint%basis_generation,checkpoint%geometry_generation,file_nproc,0]
+      integer_metadata=[checkpoint%basis_generation,checkpoint%geometry_generation,file_nproc,&
+        checkpoint%localization_iterations]
       fingerprint_metadata=[checkpoint%basis_fingerprint,checkpoint%operator_fingerprint,&
         checkpoint%hamiltonian_fingerprint,checkpoint%observable_fingerprint]
       acceptance_metadata(1:6)=[checkpoint%density_residual,checkpoint%coefficient_residual,checkpoint%charge_error,&
@@ -301,13 +310,15 @@ contains
       acceptance_metadata(7:11)=[checkpoint%density_tolerance,checkpoint%coefficient_tolerance,&
         checkpoint%orthogonality_tolerance,checkpoint%charge_tolerance,checkpoint%condition_limit]
       acceptance_metadata(12:13)=[checkpoint%symmetry_closure_residual,checkpoint%symmetry_tolerance]
+      acceptance_metadata(14:16)=[checkpoint%localization_initial_spread,&
+        checkpoint%localization_final_spread,checkpoint%localization_maximum_gradient]
     endif
     call MPI_Bcast(integer_metadata,4,MPI_INTEGER,0,comm,ierr)
     call MPI_Bcast(fingerprint_metadata,4,MPI_INTEGER8,0,comm,ierr)
     call MPI_Bcast(checkpoint%field_coupling_convention,len(checkpoint%field_coupling_convention),MPI_CHARACTER,0,comm,ierr)
     call MPI_Bcast(transaction_id,1,MPI_INTEGER8,0,comm,ierr)
     checkpoint%publication_id=transaction_id
-    call MPI_Bcast(acceptance_metadata,13,MPI_DOUBLE_PRECISION,0,comm,ierr)
+    call MPI_Bcast(acceptance_metadata,16,MPI_DOUBLE_PRECISION,0,comm,ierr)
     checkpoint%basis_generation=integer_metadata(1);checkpoint%geometry_generation=integer_metadata(2)
     checkpoint%basis_fingerprint=fingerprint_metadata(1);checkpoint%operator_fingerprint=fingerprint_metadata(2)
     checkpoint%hamiltonian_fingerprint=fingerprint_metadata(3)
@@ -319,6 +330,11 @@ contains
     checkpoint%orthogonality_tolerance=acceptance_metadata(9);checkpoint%charge_tolerance=acceptance_metadata(10)
     checkpoint%condition_limit=acceptance_metadata(11)
     checkpoint%symmetry_closure_residual=acceptance_metadata(12);checkpoint%symmetry_tolerance=acceptance_metadata(13)
+    checkpoint%localization_initial_spread=acceptance_metadata(14)
+    checkpoint%localization_final_spread=acceptance_metadata(15)
+    checkpoint%localization_maximum_gradient=acceptance_metadata(16)
+    checkpoint%localization_iterations=integer_metadata(4)
+    call MPI_Bcast(checkpoint%localization_converged,1,MPI_LOGICAL,0,comm,ierr)
     call MPI_Bcast(checkpoint%accepted,1,MPI_LOGICAL,0,comm,ierr)
     call MPI_Bcast(checkpoint%center_owner,dims(1),MPI_INTEGER,0,comm,ierr)
     call MPI_Bcast(checkpoint%coefficients,dims(2)*dims(3),MPI_DOUBLE_COMPLEX,0,comm,ierr)
@@ -453,9 +469,9 @@ contains
     real_bytes=storage_size(0d0)/8;complex_bytes=storage_size((0d0,0d0))/8
     logical_bytes=storage_size(.false.)/8
     expected_manifest_size=int(storage_size(manifest_magic)/8,int64)+&
-      integer_bytes*int(7+size(checkpoint%center_owner),int64)+integer8_bytes*7_int64+&
+      integer_bytes*int(8+size(checkpoint%center_owner),int64)+integer8_bytes*7_int64+&
       int(storage_size(checkpoint%field_coupling_convention)/8,int64)+&
-      real_bytes*int(13+size(checkpoint%occupations),int64)+logical_bytes+&
+      real_bytes*int(16+size(checkpoint%occupations),int64)+2_int64*logical_bytes+&
       complex_bytes*int(size(checkpoint%coefficients),int64)
   end function
 
@@ -506,6 +522,11 @@ contains
     call digest_real(hash,checkpoint%condition_limit,position)
     call digest_real(hash,checkpoint%symmetry_closure_residual,position)
     call digest_real(hash,checkpoint%symmetry_tolerance,position)
+    call digest_real(hash,checkpoint%localization_initial_spread,position)
+    call digest_real(hash,checkpoint%localization_final_spread,position)
+    call digest_real(hash,checkpoint%localization_maximum_gradient,position)
+    call digest_integer(hash,int(checkpoint%localization_iterations,int64),position)
+    call digest_integer(hash,int(merge(1,0,checkpoint%localization_converged),int64),position)
     call digest_integer(hash,int(merge(1,0,checkpoint%accepted),int64),position)
     digest_manifest=hash
   end function
@@ -824,31 +845,34 @@ contains
     integer,intent(in)::comm
     type(s_dg_overlapping_wannier_checkpoint),intent(in)::checkpoint
     integer,intent(out)::bad
-    integer::ierr,dims(4),dims_min(4),dims_max(4),integer_values(3),integer_min(3),integer_max(3)
+    integer::ierr,dims(4),dims_min(4),dims_max(4),integer_values(5),integer_min(5),integer_max(5)
     integer(int64)::fingerprints(4),fingerprints_min(4),fingerprints_max(4)
     character(64)::convention_reference
     integer,allocatable::owner_reference(:)
     complex(8),allocatable::coefficients_reference(:,:)
     real(8),allocatable::occupations_reference(:)
-    real(8)::local_defect,global_defect,metrics(13),metrics_min(13),metrics_max(13)
+    real(8)::local_defect,global_defect,metrics(16),metrics_min(16),metrics_max(16)
     dims=[size(checkpoint%center_owner),size(checkpoint%coefficients,1),size(checkpoint%coefficients,2),&
       size(checkpoint%occupations)]
-    integer_values=[checkpoint%basis_generation,checkpoint%geometry_generation,merge(1,0,checkpoint%accepted)]
+    integer_values=[checkpoint%basis_generation,checkpoint%geometry_generation,&
+      checkpoint%localization_iterations,merge(1,0,checkpoint%localization_converged),&
+      merge(1,0,checkpoint%accepted)]
     fingerprints=[checkpoint%basis_fingerprint,checkpoint%operator_fingerprint,&
       checkpoint%hamiltonian_fingerprint,checkpoint%observable_fingerprint]
     metrics=[checkpoint%density_residual,checkpoint%coefficient_residual,checkpoint%charge_error,&
       checkpoint%unmixed_density_residual,checkpoint%orthogonality_defect,checkpoint%metric_condition,&
       checkpoint%density_tolerance,checkpoint%coefficient_tolerance,checkpoint%orthogonality_tolerance,&
       checkpoint%charge_tolerance,checkpoint%condition_limit,checkpoint%symmetry_closure_residual,&
-      checkpoint%symmetry_tolerance]
+      checkpoint%symmetry_tolerance,checkpoint%localization_initial_spread,&
+      checkpoint%localization_final_spread,checkpoint%localization_maximum_gradient]
     call MPI_Allreduce(dims,dims_min,4,MPI_INTEGER,MPI_MIN,comm,ierr)
     call MPI_Allreduce(dims,dims_max,4,MPI_INTEGER,MPI_MAX,comm,ierr)
-    call MPI_Allreduce(integer_values,integer_min,3,MPI_INTEGER,MPI_MIN,comm,ierr)
-    call MPI_Allreduce(integer_values,integer_max,3,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(integer_values,integer_min,5,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(integer_values,integer_max,5,MPI_INTEGER,MPI_MAX,comm,ierr)
     call MPI_Allreduce(fingerprints,fingerprints_min,4,MPI_INTEGER8,MPI_MIN,comm,ierr)
     call MPI_Allreduce(fingerprints,fingerprints_max,4,MPI_INTEGER8,MPI_MAX,comm,ierr)
-    call MPI_Allreduce(metrics,metrics_min,13,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
-    call MPI_Allreduce(metrics,metrics_max,13,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(metrics,metrics_min,16,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(metrics,metrics_max,16,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     bad=0
     if(any(dims_min/=dims_max).or.any(integer_min/=integer_max).or.any(fingerprints_min/=fingerprints_max).or.&
        any(metrics_min/=metrics_max))bad=1
@@ -913,6 +937,8 @@ contains
        checkpoint%orthogonality_tolerance,checkpoint%charge_tolerance,checkpoint%condition_limit])))bad=ibset(bad,9)
     if(.not.all(ieee_is_finite([checkpoint%symmetry_closure_residual,checkpoint%symmetry_tolerance])))&
       bad=ibset(bad,10)
+    if(.not.all(ieee_is_finite([checkpoint%localization_initial_spread,&
+       checkpoint%localization_final_spread,checkpoint%localization_maximum_gradient])))bad=ibset(bad,10)
     if(min(checkpoint%density_residual,checkpoint%coefficient_residual,checkpoint%unmixed_density_residual,&
        checkpoint%orthogonality_defect)<0d0.or.checkpoint%metric_condition<1d0)bad=ibset(bad,11)
     if(min(checkpoint%density_tolerance,checkpoint%coefficient_tolerance,checkpoint%orthogonality_tolerance,&
@@ -925,6 +951,11 @@ contains
        checkpoint%metric_condition>checkpoint%condition_limit)bad=ibset(bad,13)
     if(checkpoint%symmetry_tolerance<=0d0.or.checkpoint%symmetry_closure_residual<0d0.or.&
        checkpoint%symmetry_closure_residual>checkpoint%symmetry_tolerance)bad=ibset(bad,14)
+    if(.not.checkpoint%localization_converged.or.checkpoint%localization_iterations<0.or.&
+       checkpoint%localization_initial_spread<0d0.or.checkpoint%localization_final_spread<0d0.or.&
+       checkpoint%localization_maximum_gradient<0d0.or.&
+       checkpoint%localization_final_spread>checkpoint%localization_initial_spread+&
+       64d0*epsilon(1d0)*max(1d0,checkpoint%localization_initial_spread))bad=ibset(bad,14)
     if(.not.finite_complex(checkpoint%overlap).or..not.finite_complex(checkpoint%hamiltonian0).or.&
        .not.finite_complex3(checkpoint%position).or..not.finite_complex3(checkpoint%velocity).or.&
        .not.finite_complex(checkpoint%coefficients))bad=ibset(bad,15)
@@ -968,6 +999,13 @@ contains
     if(.not.ieee_is_finite(checkpoint%symmetry_closure_residual).or.&
        checkpoint%symmetry_closure_residual<0d0.or.&
        checkpoint%symmetry_closure_residual>checkpoint%symmetry_tolerance)code=ibset(code,10)
+    if(.not.checkpoint%localization_converged.or.checkpoint%localization_iterations<0.or.&
+       .not.all(ieee_is_finite([checkpoint%localization_initial_spread,&
+       checkpoint%localization_final_spread,checkpoint%localization_maximum_gradient])).or.&
+       checkpoint%localization_initial_spread<0d0.or.checkpoint%localization_final_spread<0d0.or.&
+       checkpoint%localization_maximum_gradient<0d0.or.&
+       checkpoint%localization_final_spread>checkpoint%localization_initial_spread+&
+       64d0*epsilon(1d0)*max(1d0,checkpoint%localization_initial_spread))code=ibset(code,12)
     if(size(checkpoint%center_owner)<1.or.any(checkpoint%center_owner<0).or.&
        any(checkpoint%center_owner>=nproc).or.any(checkpoint%core_physical_ids<=0_int64).or.&
        any(checkpoint%density<0d0).or.any(checkpoint%occupations<0d0).or.&

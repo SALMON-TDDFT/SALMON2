@@ -212,11 +212,11 @@ contains
     character(*),intent(out)::message
 #ifdef USE_MPI
     integer,allocatable::rank_fragment(:),target_rank_all(:,:)
-    complex(real64),allocatable::send_buffer(:,:),receive_buffer(:,:)
+    complex(real64),allocatable::send_buffer(:,:),receive_buffer(:,:),receive_gradients(:,:,:)
     integer::rank,nproc,ierr,nbox,nsym,ntarget,operation,owner,target_rank,preimage_rank,&
       target_owner,target_point,p,iw,axis,local_bad,global_bad,tag
     integer(int64)::local_hash,bits
-    real(real64)::local_residual
+    real(real64)::local_residual,source_density,target_density,scale
 
     call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
     nbox=size(box_ids);nsym=size(symmetry_target_box_ids,2);ntarget=size(values,1)
@@ -229,7 +229,8 @@ contains
       residual=huge(1d0);fingerprint=0_int64;return
     endif
     allocate(rank_fragment(nproc),target_rank_all(nsym,nproc),&
-      send_buffer(local_target_count,nbox),receive_buffer(local_target_count,nbox))
+      send_buffer(local_target_count,nbox),receive_buffer(local_target_count,nbox),&
+      receive_gradients(3,local_target_count,nbox))
     call MPI_Allgather(fragment_id,1,MPI_INTEGER,rank_fragment,1,MPI_INTEGER,comm,ierr)
     do operation=1,nsym
       target_rank=int((symmetry_target_box_ids(1,operation)-1_int64)/int(nbox,int64))+1
@@ -258,9 +259,11 @@ contains
           receive_buffer,local_target_count*nbox,MPI_DOUBLE_COMPLEX,target_rank,tag,comm,MPI_STATUS_IGNORE,ierr)
         do p=1,nbox
           target_point=int(modulo(symmetry_target_box_ids(p,operation)-1_int64,int(nbox,int64)))+1
-          local_residual=max(local_residual,maxval(abs(&
-            values(owner*local_target_count+1:(owner+1)*local_target_count,p)-&
-            receive_buffer(:,target_point))))
+          source_density=sum(abs(values(owner*local_target_count+1:&
+            (owner+1)*local_target_count,p))**2)
+          target_density=sum(abs(receive_buffer(:,target_point))**2)
+          scale=max(1d0,source_density,target_density)
+          local_residual=max(local_residual,abs(source_density-target_density)/scale)
         enddo
         do axis=1,3
           send_buffer=gradients(axis,target_owner*local_target_count+1:&
@@ -268,12 +271,15 @@ contains
           tag=nsym*nproc+axis*nsym*nproc+operation*nproc+owner
           call MPI_Sendrecv(send_buffer,local_target_count*nbox,MPI_DOUBLE_COMPLEX,preimage_rank,tag,&
             receive_buffer,local_target_count*nbox,MPI_DOUBLE_COMPLEX,target_rank,tag,comm,MPI_STATUS_IGNORE,ierr)
-          do p=1,nbox
-            target_point=int(modulo(symmetry_target_box_ids(p,operation)-1_int64,int(nbox,int64)))+1
-            local_residual=max(local_residual,maxval(abs(&
-              gradients(axis,owner*local_target_count+1:(owner+1)*local_target_count,p)-&
-              receive_buffer(:,target_point))))
-          enddo
+          receive_gradients(axis,:,:)=receive_buffer
+        enddo
+        do p=1,nbox
+          target_point=int(modulo(symmetry_target_box_ids(p,operation)-1_int64,int(nbox,int64)))+1
+          source_density=sum(abs(gradients(:,owner*local_target_count+1:&
+            (owner+1)*local_target_count,p))**2)
+          target_density=sum(abs(receive_gradients(:,:,target_point))**2)
+          scale=max(1d0,source_density,target_density)
+          local_residual=max(local_residual,abs(source_density-target_density)/scale)
         enddo
         bits=transfer(real(receive_buffer(1,1),real64),bits)
         local_hash=ieor(local_hash,ishftc(bits,mod(11*operation+7*owner+rank,63)))
@@ -284,7 +290,7 @@ contains
     fingerprint=ieor(fingerprint,int(z'6A09E667F3BCC909',int64))
     if(fingerprint==0_int64)fingerprint=1_int64
     ok=ieee_is_finite(residual).and.residual<=tolerance
-    if(ok)then;message='';else;message='streaming fragment Wannier value/gradient closure failed';endif
+    if(ok)then;message='';else;message='streaming fragment Wannier subspace-density closure failed';endif
 #else
     residual=huge(1d0);fingerprint=0_int64;ok=.false.
     message='streaming fragment Wannier closure requires MPI'

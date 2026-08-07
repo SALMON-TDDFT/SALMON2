@@ -653,6 +653,10 @@ contains
       & dg_ow_boundary_value_tolerance, &
       & dg_ow_boundary_gradient_tolerance, &
       & dg_ow_symmetry_tolerance, &
+      & dg_ow_localization_support_tolerance, &
+      & dg_ow_localization_spread_tolerance, &
+      & dg_ow_localization_gradient_tolerance, &
+      & dg_ow_localization_max_iterations, &
       & dg_ow_candidate_states_per_fragment, &
       & dg_ow_target_wanniers_per_fragment, &
       & dg_dc_gs_electron_count_tolerance, &
@@ -1168,6 +1172,10 @@ contains
     dg_ow_boundary_value_tolerance = 1d-6
     dg_ow_boundary_gradient_tolerance = 1d-6
     dg_ow_symmetry_tolerance = 1d-10
+    dg_ow_localization_support_tolerance = 1d-8
+    dg_ow_localization_spread_tolerance = 1d-12
+    dg_ow_localization_gradient_tolerance = 1d-6
+    dg_ow_localization_max_iterations = 32
     dg_ow_candidate_states_per_fragment = 0
     dg_ow_target_wanniers_per_fragment = 0
     dg_dc_gs_electron_count_tolerance = 1d-8
@@ -1890,6 +1898,10 @@ contains
     call comm_bcast(dg_ow_boundary_value_tolerance, nproc_group_global)
     call comm_bcast(dg_ow_boundary_gradient_tolerance, nproc_group_global)
     call comm_bcast(dg_ow_symmetry_tolerance, nproc_group_global)
+    call comm_bcast(dg_ow_localization_support_tolerance, nproc_group_global)
+    call comm_bcast(dg_ow_localization_spread_tolerance, nproc_group_global)
+    call comm_bcast(dg_ow_localization_gradient_tolerance, nproc_group_global)
+    call comm_bcast(dg_ow_localization_max_iterations, nproc_group_global)
     call comm_bcast(dg_ow_candidate_states_per_fragment, nproc_group_global)
     call comm_bcast(dg_ow_target_wanniers_per_fragment, nproc_group_global)
     call comm_bcast(dg_dc_gs_electron_count_tolerance, nproc_group_global)
@@ -3154,6 +3166,13 @@ contains
        .not.ieee_is_finite(dg_ow_boundary_gradient_tolerance) .or. dg_ow_boundary_gradient_tolerance<=0d0 .or. &
        .not.ieee_is_finite(dg_ow_symmetry_tolerance) .or. dg_ow_symmetry_tolerance<=0d0) &
       call sawf_input_fatal("invalid overlapping-Wannier buffer/symmetry tolerance")
+    if(.not.ieee_is_finite(dg_ow_localization_support_tolerance) .or. &
+       dg_ow_localization_support_tolerance<0d0 .or. dg_ow_localization_support_tolerance>1d0 .or. &
+       .not.ieee_is_finite(dg_ow_localization_spread_tolerance) .or. &
+       dg_ow_localization_spread_tolerance<0d0 .or. &
+       .not.ieee_is_finite(dg_ow_localization_gradient_tolerance) .or. &
+       dg_ow_localization_gradient_tolerance<=0d0 .or. dg_ow_localization_max_iterations<1) &
+      call sawf_input_fatal("invalid overlapping-Wannier localization control")
     if(dg_ow_candidate_states_per_fragment<0 .or. dg_ow_target_wanniers_per_fragment<0 .or. &
        (dg_ow_candidate_states_per_fragment>0 .and. dg_ow_target_wanniers_per_fragment>&
         dg_ow_candidate_states_per_fragment)) &

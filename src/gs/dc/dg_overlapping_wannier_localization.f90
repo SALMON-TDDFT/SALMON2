@@ -52,12 +52,14 @@ contains
     call build_dg_overlapping_pair_graph(comm,values,weights,support_tolerance,&
       pair_first,pair_second,pair_support,step_ok,detail)
     if(.not.step_ok)then;message=trim(detail);return;end if
-    if(size(pair_first)<1)then;message='localization pair graph has no overlapping edge';return;end if
     allocate(total_transform(nwannier,nwannier));total_transform=(0d0,0d0)
     do i=1,nwannier;total_transform(i,i)=1d0;end do
     call collective_periodic_spread(comm,values,weights,phases,initial_spread,step_ok,detail)
     if(.not.step_ok)then;message=trim(detail);return;end if
     final_spread=initial_spread
+    if(size(pair_first)<1)then
+      maximum_pair_gradient=0d0;iterations=0;converged=.true.;ok=.true.;return
+    end if
     do iterations=1,maximum_iterations
       maximum_pair_gradient=0d0
       do edge=1,size(pair_first)

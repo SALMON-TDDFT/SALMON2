@@ -135,6 +135,16 @@ program test_dg_overlapping_wannier_localization_mpi
   call require(ok.and.converged.and.final_spread<initial_spread,&
     'identity-only symmetry permits independent local localization')
 
+  sweep_values=(0d0,0d0);sweep_gradients=(0d0,0d0)
+  do point=1,4;sweep_values(point,point)=1d0;end do
+  sweep_gradients(1,:,:)=sweep_values
+  call localize_dg_overlapping_wannier_basis(MPI_COMM_WORLD,sweep_values,sweep_gradients,&
+    weights,phases,sweep_representation(:,:,1:1),reshape([1],[1,1]),&
+    0.99d0,1d-16,1d-7,1d-12,32,initial_spread,final_spread,maximum_pair_gradient,&
+    sweep_iterations,converged,sweep_transform,ok,message)
+  call require(ok.and.converged.and.sweep_iterations==0.and.maximum_pair_gradient==0d0,&
+    'empty overlap graph is an already localized zero-iteration result')
+
   nan_value=ieee_value(0d0,ieee_quiet_nan);weights(2)=nan_value
   call evaluate_dg_periodic_localization(values,weights,phases,norm,moment,spread,ok,message)
   call require(.not.ok.and.index(message,'finite')>0,'nonfinite weights rejected')

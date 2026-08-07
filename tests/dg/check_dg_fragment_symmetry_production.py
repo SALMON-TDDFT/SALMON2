@@ -42,6 +42,20 @@ require("pre_projection_defect" in MAIN and "post_projection_defect" in MAIN,
         "production evidence must report covariance before and after projection")
 require("cross_block_scalar_residual" in MAIN and "cross_block_vector_residual" in MAIN,
         "global promotion must audit scalar and vector cross-fragment blocks")
+require("global_inversion_promoted" in MAIN,
+        "V3 publication must report whether exact global inversion was promoted")
+require("project_ow_exact_global_group" in MAIN,
+        "fragment-spanning symmetries must be projected as one exact global group")
+require("global_exact_group_promoted" in MAIN and "global_exact_group_order" in MAIN,
+        "V3 publication must report the simultaneously promoted exact global group")
+require("selected_operations" in MAIN and "fixed_residual" in MAIN,
+        "global projection must use every exact operation fixing one inversion center")
+require("replicate_ow_global_symmetry_orbit" in MAIN,
+        "representative local Wanniers must be propagated by full-system affine symmetry")
+require("build_dg_fragment_symmetry_orbits" in SYMMETRY,
+        "fragment-local generation must support multiple full-system symmetry orbits")
+require("call build_dg_fragment_symmetry_orbits" in MAIN,
+        "production replication must select one representative per fragment orbit")
 require(MAIN.index("call promote_dg_exact_global_subgroup") <
         MAIN.index("call project_dg_fragment_covariant_operators"),
         "local fragment symmetry must not project global matrices before promotion")
