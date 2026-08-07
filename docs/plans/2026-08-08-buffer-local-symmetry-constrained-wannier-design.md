@@ -19,14 +19,19 @@ only the initial gauge.  A new localization stage applies small unitary Jacobi
 rotations between Wannier functions whose buffered supports overlap.  It never
 forms a dense full-system wavefunction array.
 
-For every exact full-system symmetry operation `g`, updates on symmetry-related
-fragment pairs are tied by
+For every exact full-system symmetry operation `g`, a sparse anti-Hermitian
+pair seed `K` is promoted to the symmetry-compatible generator
 
 ```text
-U(g I, g J) = D(g) U(I, J) D(g)^dagger.
+K_sym = |G|^-1 sum_g D(g) K D(g)^dagger
+U_sym = exp(K_sym).
 ```
 
-The optimizer therefore moves only inside symmetry-compatible gauges.  If the
+This group average is required because `D(g)` can mix a complete local orbital
+multiplet and need not be a Wannier permutation.  The exponential is evaluated
+only on the connected support block generated from the buffered pair graph;
+no dense full-system gauge is formed.  The optimizer therefore moves only
+inside symmetry-compatible gauges.  If the
 instantaneous structure has only identity symmetry, every fragment orbit is a
 singleton and no parent-crystal symmetry is restored.
 
@@ -37,10 +42,10 @@ singleton and no parent-crystal symmetry is restored.
 2. Form the retained overlapping basis and its exact fragment-orbit maps.
 3. Evaluate periodic localization matrices from the existing phase links,
    weights, and buffered values.
-4. Enumerate overlapping Wannier pairs and group them into exact-symmetry
-   orbits.
-5. Optimize one small anti-Hermitian generator per pair orbit and propagate it
-   covariantly to all related pairs.
+4. Enumerate overlapping Wannier pairs and their connected support blocks.
+5. Optimize a sparse pair seed, group-average its anti-Hermitian generator with
+   the exact dense Wannier representations, and exponentiate the resulting
+   connected block.
 6. Accept an iteration only when the periodic spread does not increase and the
    metric orthogonality and symmetry closure gates remain satisfied.
 7. Publish the optimized basis, then assemble and project `S`, `H`, `X`, and
@@ -67,7 +72,8 @@ maximum accepted pair-gradient magnitude.
 - The final pair-gradient is below the configured tolerance.
 - `W^dagger S W = I` is preserved within the metric tolerance.
 - Symmetry representation unitarity and group closure are unchanged.
-- Symmetry-related pair updates are identical after representation transport.
+- Every accepted generator is anti-Hermitian and commutes with each retained
+  exact representation within tolerance.
 - Boundary value and gradient gates remain satisfied.
 - Increasing the buffer produces converged spread, operator matrices, and
   polarization-derived spectra.

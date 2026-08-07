@@ -93,7 +93,7 @@ git add src/gs/dc/dg_overlapping_wannier_localization.f90 \
 git commit -m "feat(dg): minimize periodic spread with local pair rotations"
 ```
 
-### Task 3: Build sparse overlapping-pair and symmetry-pair orbits
+### Task 3: Build sparse pairs and dense-representation symmetry generators
 
 **Files:**
 - Modify: `src/gs/dc/dg_overlapping_wannier_localization.f90`
@@ -103,7 +103,7 @@ git commit -m "feat(dg): minimize periodic spread with local pair rotations"
 
 **Step 1: Write the RED tests**
 
-Require `build_dg_overlapping_pair_graph` to retain only pairs sharing buffer support above tolerance.  Require `build_dg_wannier_pair_symmetry_orbits` to group symmetry-related unordered pairs, choose deterministic representatives, reject incomplete/non-bijective actions, and reduce to singleton pair orbits for identity-only symmetry.
+Require `build_dg_overlapping_pair_graph` to retain only pairs sharing buffer support above tolerance.  Require `build_dg_symmetry_constrained_generator` to group-average a sparse anti-Hermitian pair seed as `sum_g D(g) K D(g)^dagger / |G|`, preserve a nontrivial dense-mixing representation, reject nonunitary/nonclosed input, and reduce to the original seed for identity-only symmetry.
 
 **Step 2: Verify RED**
 
@@ -111,11 +111,11 @@ Run both MPI fixtures.  Expected: compile failure for the missing graph/orbit AP
 
 **Step 3: Implement graph and orbit construction**
 
-Use local support products plus `MPI_Allreduce`; store only `(first, second)` integer pairs.  Build pair orbits using the exact Wannier permutation/representation evidence already generated from full-system instantaneous symmetry.  Never restore a parent operation absent from the instantaneous catalog.
+Use local support products plus `MPI_Allreduce`; store only `(first, second)` integer pairs.  Build each symmetry-compatible generator using the exact dense Wannier representation from the instantaneous full-system symmetry.  Validate anti-Hermiticity and commutators with every retained `D(g)`.  Restrict exponentiation to the generator's connected support block.  Never restore a parent operation absent from the instantaneous catalog.
 
 **Step 4: Focused verification and reviews**
 
-Run both fixtures on 1/2/4/8 ranks.  Review pair canonicalization, deterministic ordering, collective consistency, and linear-memory behavior.  Resolve Critical/Important findings and rerun.
+Run both fixtures on 1/2/4/8 ranks.  Review pair canonicalization, dense orbital mixing, anti-Hermiticity, commutator residuals, deterministic ordering, collective consistency, and linear-memory behavior.  Resolve Critical/Important findings and rerun.
 
 **Step 5: Commit**
 
@@ -124,7 +124,7 @@ git add src/gs/dc/dg_overlapping_wannier_localization.f90 \
   src/gs/dc/dg_overlapping_wannier_symmetry.f90 \
   tests/dg/test_dg_overlapping_wannier_localization_mpi.f90 \
   tests/dg/test_dg_overlapping_wannier_fragment_symmetry_mpi.f90
-git commit -m "feat(dg): orbit sparse Wannier localization pairs"
+git commit -m "feat(dg): constrain local generators by dense symmetry"
 ```
 
 ### Task 4: Implement symmetry-tied monotone localization sweeps
@@ -143,7 +143,7 @@ Run the fixture.  Expected: compile failure for the missing sweep API.
 
 **Step 3: Implement the minimum sweep driver**
 
-For each pair-orbit representative, compute one accepted rotation and transport it with `D(g) U D(g)^dagger` to related pairs.  Apply a complete orbit transactionally; roll it back if total spread rises or symmetry/orthogonality exceeds tolerance.  Stop only on the gradient tolerance or maximum iterations.
+For each sparse pair seed, build `K_sym`, exponentiate its connected block, and apply the complete symmetry-compatible update transactionally.  Roll it back if total spread rises or symmetry/orthogonality exceeds tolerance.  Stop only on the gradient tolerance or maximum iterations.
 
 **Step 4: Focused verification and reviews**
 
