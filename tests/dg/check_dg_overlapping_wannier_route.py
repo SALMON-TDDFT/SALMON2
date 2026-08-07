@@ -14,6 +14,7 @@ for retained_contract_path in (
     "docs/plans/2026-07-31-obsolete-dg-route-inventory.md",
     "src/gs/dc/dg_overlapping_wannier_checkpoint.f90",
     "src/gs/dc/dg_overlapping_wannier_construction.f90",
+    "src/gs/dc/dg_overlapping_wannier_localization.f90",
     "src/rt/dg/rt_dg_overlapping_wannier.f90",
     "src/gs/dc/lcfo.f90",
     "src/gs/eigen_subdiag_eigenexa.f90",
@@ -618,10 +619,10 @@ assert re.search(
     re.I | re.S,
 ), "periodic buffer tails must be measured but not rejected as exterior-zero tails"
 assert re.search(
-    r"call\s+replicate_dg_fragment_wannier_representative",
+    r"call\s+replicate_ow_global_symmetry_orbit",
     adapter_body,
     re.I,
-), "production must materialize every translated fragment from one symmetry representative"
+), "production must materialize each fragment from one full-system symmetry representative"
 assert not re.search(
     r"call\s+align_dg_fragment_wannier_gauge",
     adapter_body,
