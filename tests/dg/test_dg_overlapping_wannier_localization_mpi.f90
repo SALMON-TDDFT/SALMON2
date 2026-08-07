@@ -4,12 +4,19 @@ program test_dg_overlapping_wannier_localization_mpi
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   use dg_overlapping_wannier_localization,only:evaluate_dg_periodic_localization,&
     optimize_dg_wannier_pair,build_dg_overlapping_pair_graph
+  use dg_overlapping_wannier_localization,only:localize_dg_overlapping_wannier_basis
   implicit none
   complex(8)::values(2,4),phases(3,4),shifted_phases(3,4),moment(3,2),shifted_moment(3,2)
   complex(8)::gradients(3,2,4),rotation(2,2),identity(2,2)
   complex(8)::graph_values(4,4)
+  complex(8)::sweep_values(4,4),sweep_gradients(3,4,4),sweep_representation(4,4,2)
+  complex(8)::sweep_identity(4,4)
+  complex(8),allocatable::sweep_transform(:,:)
   integer,allocatable::pair_first(:),pair_second(:)
+  integer::sweep_product(2,2),sweep_iterations
   real(8),allocatable::pair_support(:)
+  real(8)::initial_spread,final_spread,maximum_pair_gradient
+  logical::converged
   real(8)::weights(4),norm(2),shifted_norm(2),spread,shifted_spread,nan_value,&
     before,after,pair_gradient,density_before(4),gradient_norm_before
   logical::ok,accepted
@@ -73,6 +80,60 @@ program test_dg_overlapping_wannier_localization_mpi
     'pair graph retains only shared buffered support')
   call require(all(pair_support>0.8d0).and.all(pair_support<=1d0),&
     'pair support is rank-independent and normalized')
+
+  sweep_values=(0d0,0d0);sweep_gradients=(0d0,0d0)
+  sweep_values(1,1)=cos(0.3d0);sweep_values(1,3)=sin(0.3d0)
+  sweep_values(3,1)=-sin(0.3d0);sweep_values(3,3)=cos(0.3d0)
+  sweep_values(2,2)=cos(0.3d0);sweep_values(2,4)=sin(0.3d0)
+  sweep_values(4,2)=-sin(0.3d0);sweep_values(4,4)=cos(0.3d0)
+  sweep_gradients(1,:,:)=sweep_values
+  sweep_representation=(0d0,0d0)
+  do point=1,4;sweep_representation(point,point,1)=1d0;end do
+  sweep_representation(2,1,2)=1d0;sweep_representation(1,2,2)=1d0
+  sweep_representation(4,3,2)=1d0;sweep_representation(3,4,2)=1d0
+  sweep_product=reshape([1,2,2,1],[2,2])
+  call localize_dg_overlapping_wannier_basis(MPI_COMM_WORLD,sweep_values,sweep_gradients,&
+    weights,phases,sweep_representation,sweep_product,0.1d0,1d-16,1d-7,1d-12,32,&
+    initial_spread,final_spread,maximum_pair_gradient,sweep_iterations,converged,&
+    sweep_transform,ok,message)
+  if(rank==0.and..not.ok)write(*,'(2a,3(a,es12.4),a,i0)')'SWEEP-DIAGNOSTIC ',trim(message),&
+    ' initial=',initial_spread,' final=',final_spread,' gradient=',maximum_pair_gradient,&
+    ' iterations=',sweep_iterations
+  call require(ok.and.converged,'symmetry-constrained localization sweep converges')
+  call require(final_spread<initial_spread-1d-8,'localization sweep lowers total spread')
+  sweep_identity=matmul(conjg(transpose(sweep_transform)),sweep_transform)
+  do point=1,4;sweep_identity(point,point)=sweep_identity(point,point)-1d0;end do
+  call require(maxval(abs(sweep_identity))<1d-11,'sweep transform is unitary')
+  call require(maxval(abs(matmul(sweep_transform,sweep_representation(:,:,2))-&
+    matmul(sweep_representation(:,:,2),sweep_transform)))<1d-11,&
+    'accepted sweep transform commutes with exact symmetry')
+  call require(maximum_pair_gradient<1d-7,'published localization gradient is converged')
+
+  sweep_values=(0d0,0d0);sweep_gradients=(0d0,0d0)
+  sweep_values(1,1)=cos(0.3d0);sweep_values(1,3)=sin(0.3d0)
+  sweep_values(3,1)=-sin(0.3d0);sweep_values(3,3)=cos(0.3d0)
+  sweep_values(2,2)=cos(0.3d0);sweep_values(2,4)=sin(0.3d0)
+  sweep_values(4,2)=-sin(0.3d0);sweep_values(4,4)=cos(0.3d0)
+  sweep_gradients(1,:,:)=sweep_values
+  call localize_dg_overlapping_wannier_basis(MPI_COMM_WORLD,sweep_values,sweep_gradients,&
+    weights,phases,sweep_representation,sweep_product,0.1d0,1d-16,1d-14,1d-12,1,&
+    initial_spread,final_spread,maximum_pair_gradient,sweep_iterations,converged,&
+    sweep_transform,ok,message)
+  call require(.not.ok.and..not.converged.and.index(message,'converge')>0,&
+    'nonconverged localization sweep rejects publication')
+
+  sweep_values=(0d0,0d0);sweep_gradients=(0d0,0d0)
+  sweep_values(1,1)=cos(0.3d0);sweep_values(1,3)=sin(0.3d0)
+  sweep_values(3,1)=-sin(0.3d0);sweep_values(3,3)=cos(0.3d0)
+  sweep_values(2,2)=cos(0.3d0);sweep_values(2,4)=sin(0.3d0)
+  sweep_values(4,2)=-sin(0.3d0);sweep_values(4,4)=cos(0.3d0)
+  sweep_gradients(1,:,:)=sweep_values
+  call localize_dg_overlapping_wannier_basis(MPI_COMM_WORLD,sweep_values,sweep_gradients,&
+    weights,phases,sweep_representation(:,:,1:1),reshape([1],[1,1]),&
+    0.1d0,1d-16,1d-7,1d-12,32,initial_spread,final_spread,maximum_pair_gradient,&
+    sweep_iterations,converged,sweep_transform,ok,message)
+  call require(ok.and.converged.and.final_spread<initial_spread,&
+    'identity-only symmetry permits independent local localization')
 
   nan_value=ieee_value(0d0,ieee_quiet_nan);weights(2)=nan_value
   call evaluate_dg_periodic_localization(values,weights,phases,norm,moment,spread,ok,message)

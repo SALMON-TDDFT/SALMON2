@@ -16,8 +16,10 @@ with tempfile.TemporaryDirectory(prefix="ow-localization-") as name:
     compile_result = subprocess.run([
         shutil.which("mpifort"), "-cpp", "-DUSE_MPI", "-I", str(build), "-J", str(build),
         "-fcheck=all", "-ffpe-trap=invalid,zero,overflow",
+        str(ROOT / "src/gs/dc/dg_overlapping_wannier_symmetry.f90"),
         str(ROOT / "src/gs/dc/dg_overlapping_wannier_localization.f90"),
         str(ROOT / "tests/dg/test_dg_overlapping_wannier_localization_mpi.f90"),
+        "-llapack", "-lblas",
         "-o", str(executable),
     ], capture_output=True, text=True)
     if compile_result.returncode:
