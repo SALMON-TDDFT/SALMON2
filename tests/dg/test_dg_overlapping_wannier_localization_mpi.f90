@@ -2,11 +2,14 @@
 program test_dg_overlapping_wannier_localization_mpi
   use mpi
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
-  use dg_overlapping_wannier_localization,only:evaluate_dg_periodic_localization
+  use dg_overlapping_wannier_localization,only:evaluate_dg_periodic_localization,&
+    optimize_dg_wannier_pair
   implicit none
   complex(8)::values(2,4),phases(3,4),shifted_phases(3,4),moment(3,2),shifted_moment(3,2)
-  real(8)::weights(4),norm(2),shifted_norm(2),spread,shifted_spread,nan_value
-  logical::ok
+  complex(8)::gradients(3,2,4),rotation(2,2),identity(2,2)
+  real(8)::weights(4),norm(2),shifted_norm(2),spread,shifted_spread,nan_value,&
+    before,after,pair_gradient,density_before(4),gradient_norm_before
+  logical::ok,accepted
   character(256)::message
   integer::ierr,rank,nproc,point
 
@@ -32,6 +35,30 @@ program test_dg_overlapping_wannier_localization_mpi
   call evaluate_dg_periodic_localization(values,weights,shifted_phases,shifted_norm,&
     shifted_moment,shifted_spread,ok,message)
   call require(ok.and.abs(shifted_spread-spread)<1d-14,'periodic spread is origin invariant')
+
+  values=(0d0,0d0);gradients=(0d0,0d0)
+  values(1,1)=cos(0.3d0);values(1,3)=sin(0.3d0)
+  values(2,1)=-sin(0.3d0);values(2,3)=cos(0.3d0)
+  gradients(1,1,1)=cos(0.3d0);gradients(1,1,3)=sin(0.3d0)
+  gradients(1,2,1)=-sin(0.3d0);gradients(1,2,3)=cos(0.3d0)
+  density_before=sum(abs(values)**2,dim=1)
+  gradient_norm_before=sum(abs(gradients)**2)
+  call optimize_dg_wannier_pair(values,gradients,weights,phases,1,2,1d-13,&
+    rotation,before,after,pair_gradient,accepted,ok,message)
+  call require(ok.and.accepted,'mixed pair accepts localization rotation')
+  call require(after<before-1d-10,'pair rotation strictly lowers spread')
+  call require(pair_gradient>1d-10,'mixed pair has nonzero localization gradient')
+  identity=matmul(conjg(transpose(rotation)),rotation)
+  identity(1,1)=identity(1,1)-1d0;identity(2,2)=identity(2,2)-1d0
+  call require(maxval(abs(identity))<1d-12,'accepted pair rotation is unitary')
+  call require(maxval(abs(sum(abs(values)**2,dim=1)-density_before))<1d-12,&
+    'pair rotation preserves pointwise density')
+  call require(abs(sum(abs(gradients)**2)-gradient_norm_before)<1d-12,&
+    'pair rotation transforms all gradients unitarily')
+  call optimize_dg_wannier_pair(values,gradients,weights,phases,1,2,1d-13,&
+    rotation,before,after,pair_gradient,accepted,ok,message)
+  call require(ok.and..not.accepted.and.abs(after-before)<1d-13,&
+    'stationary localized pair remains unchanged')
 
   nan_value=ieee_value(0d0,ieee_quiet_nan);weights(2)=nan_value
   call evaluate_dg_periodic_localization(values,weights,phases,norm,moment,spread,ok,message)
