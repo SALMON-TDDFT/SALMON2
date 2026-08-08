@@ -11,10 +11,10 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 with tempfile.TemporaryDirectory(prefix="ow-localization-") as name:
     build = Path(name)
-    (build / "config.h").write_text("")
+    (build / "config.h").write_text("#define USE_MPI\n")
     executable = build / "localization"
     compile_result = subprocess.run([
-        shutil.which("mpifort"), "-cpp", "-DUSE_MPI", "-I", str(build), "-J", str(build),
+        shutil.which("mpifort"), "-cpp", "-I", str(build), "-J", str(build),
         "-fcheck=all", "-ffpe-trap=invalid,zero,overflow",
         str(ROOT / "src/gs/dc/dg_overlapping_wannier_symmetry.f90"),
         str(ROOT / "src/gs/dc/dg_overlapping_wannier_localization.f90"),

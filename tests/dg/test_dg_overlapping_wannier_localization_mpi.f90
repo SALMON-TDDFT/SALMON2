@@ -9,11 +9,13 @@ program test_dg_overlapping_wannier_localization_mpi
   complex(8)::values(2,4),phases(3,4),shifted_phases(3,4),moment(3,2),shifted_moment(3,2)
   complex(8)::gradients(3,2,4),rotation(2,2),identity(2,2)
   complex(8)::graph_values(4,4)
+  complex(8)::dense_graph_values(20,4)
   complex(8)::sweep_values(4,4),sweep_gradients(3,4,4),sweep_representation(4,4,2)
+  complex(8)::bad_sweep_values(4,4),bad_sweep_gradients(3,4,4)
   complex(8)::sweep_identity(4,4)
   complex(8),allocatable::sweep_transform(:,:)
   integer,allocatable::pair_first(:),pair_second(:)
-  integer::sweep_product(2,2),sweep_iterations
+  integer::sweep_product(2,2),sweep_iterations,spread_evaluations
   real(8),allocatable::pair_support(:)
   real(8)::initial_spread,final_spread,maximum_pair_gradient
   logical::converged
@@ -81,6 +83,33 @@ program test_dg_overlapping_wannier_localization_mpi
   call require(all(pair_support>0.8d0).and.all(pair_support<=1d0),&
     'pair support is rank-independent and normalized')
 
+  dense_graph_values=(1d0,0d0)
+  call build_dg_overlapping_pair_graph(MPI_COMM_WORLD,dense_graph_values,weights,0d0,&
+    pair_first,pair_second,pair_support,ok,message)
+  call require(ok.and.size(pair_first)<=160.and.size(pair_first)<190,&
+    'dense support graph has bounded symmetric neighbor storage')
+
+  graph_values=(0d0,0d0)
+  if(rank==0)then
+    do point=1,4;graph_values(point,point)=1d0;end do
+    graph_values(2,1)=1d0
+  end if
+  if(rank==1)then
+    graph_values(3,3)=1d0;graph_values(4,4)=1d0;graph_values(4,3)=1d0
+  end if
+  call build_dg_overlapping_pair_graph(MPI_COMM_WORLD,graph_values,weights,0.2d0,&
+    pair_first,pair_second,pair_support,ok,message)
+  if(nproc==1)then
+    call require(ok.and.size(pair_first)==1,'single-rank pair graph size')
+    if(size(pair_first)==1)call require(pair_first(1)==1.and.pair_second(1)==2,&
+      'single-rank pair graph uses local support')
+  else
+    call require(ok.and.size(pair_first)==2,&
+      'pair graph combines rank-dependent support collectively')
+    if(size(pair_first)==2)call require(all(pair_first==[1,3]).and.all(pair_second==[2,4]),&
+      'collective pair graph has the expected rank-dependent edges')
+  end if
+
   sweep_values=(0d0,0d0);sweep_gradients=(0d0,0d0)
   sweep_values(1,1)=cos(0.3d0);sweep_values(1,3)=sin(0.3d0)
   sweep_values(3,1)=-sin(0.3d0);sweep_values(3,3)=cos(0.3d0)
@@ -92,10 +121,17 @@ program test_dg_overlapping_wannier_localization_mpi
   sweep_representation(2,1,2)=1d0;sweep_representation(1,2,2)=1d0
   sweep_representation(4,3,2)=1d0;sweep_representation(3,4,2)=1d0
   sweep_product=reshape([1,2,2,1],[2,2])
+  bad_sweep_values=sweep_values;bad_sweep_gradients=sweep_gradients
+  call localize_dg_overlapping_wannier_basis(MPI_COMM_WORLD,bad_sweep_values,bad_sweep_gradients,&
+    weights,phases,sweep_representation,reshape([1,1,1,1],[2,2]),&
+    0.1d0,1d-16,1d-7,1d-12,32,initial_spread,final_spread,maximum_pair_gradient,&
+    sweep_iterations,converged,sweep_transform,ok,message)
+  call require(.not.ok.and.index(message,'group')>0,&
+    'localization transaction rejects a nonclosed symmetry representation')
   call localize_dg_overlapping_wannier_basis(MPI_COMM_WORLD,sweep_values,sweep_gradients,&
     weights,phases,sweep_representation,sweep_product,0.1d0,1d-16,1d-7,1d-12,32,&
     initial_spread,final_spread,maximum_pair_gradient,sweep_iterations,converged,&
-    sweep_transform,ok,message)
+    sweep_transform,ok,message,spread_evaluations)
   if(rank==0.and..not.ok)write(*,'(2a,3(a,es12.4),a,i0)')'SWEEP-DIAGNOSTIC ',trim(message),&
     ' initial=',initial_spread,' final=',final_spread,' gradient=',maximum_pair_gradient,&
     ' iterations=',sweep_iterations
@@ -108,6 +144,8 @@ program test_dg_overlapping_wannier_localization_mpi
     matmul(sweep_representation(:,:,2),sweep_transform)))<1d-11,&
     'accepted sweep transform commutes with exact symmetry')
   call require(maximum_pair_gradient<1d-7,'published localization gradient is converged')
+  call require(spread_evaluations<=1+40*32,&
+    'spread evaluation count is bounded by sweeps rather than graph edges')
 
   sweep_values=(0d0,0d0);sweep_gradients=(0d0,0d0)
   sweep_values(1,1)=cos(0.3d0);sweep_values(1,3)=sin(0.3d0)
@@ -131,9 +169,11 @@ program test_dg_overlapping_wannier_localization_mpi
   call localize_dg_overlapping_wannier_basis(MPI_COMM_WORLD,sweep_values,sweep_gradients,&
     weights,phases,sweep_representation(:,:,1:1),reshape([1],[1,1]),&
     0.1d0,1d-16,1d-7,1d-12,32,initial_spread,final_spread,maximum_pair_gradient,&
-    sweep_iterations,converged,sweep_transform,ok,message)
+    sweep_iterations,converged,sweep_transform,ok,message,spread_evaluations)
   call require(ok.and.converged.and.final_spread<initial_spread,&
     'identity-only symmetry permits independent local localization')
+  call require(spread_evaluations<=1+40*sweep_iterations,&
+    'spread line-search budget is independent of graph edge count')
 
   sweep_values=(0d0,0d0);sweep_gradients=(0d0,0d0)
   do point=1,4;sweep_values(point,point)=1d0;end do

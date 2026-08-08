@@ -1,10 +1,10 @@
+#include "config.h"
 module dg_overlapping_wannier_localization
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
   use,intrinsic::iso_fortran_env,only:real64
 #ifdef USE_MPI
   use mpi
 #endif
-  use dg_overlapping_wannier_symmetry,only:build_dg_symmetry_constrained_pair_generator
   implicit none
   private
   public::evaluate_dg_periodic_localization
@@ -15,7 +15,7 @@ contains
   subroutine localize_dg_overlapping_wannier_basis(comm,values,gradients,weights,phases,&
       representation,product_table,support_tolerance,spread_tolerance,gradient_tolerance,&
       symmetry_tolerance,maximum_iterations,initial_spread,final_spread,maximum_pair_gradient,&
-      iterations,converged,total_transform,ok,message)
+      iterations,converged,total_transform,ok,message,spread_evaluations)
     integer,intent(in)::comm,product_table(:,:),maximum_iterations
     complex(real64),intent(inout)::values(:,:),gradients(:,:,:)
     real(real64),intent(in)::weights(:),support_tolerance,spread_tolerance,&
@@ -26,18 +26,24 @@ contains
     logical,intent(out)::converged,ok
     complex(real64),allocatable,intent(out)::total_transform(:,:)
     character(*),intent(out)::message
-    integer,allocatable::pair_first(:),pair_second(:),active_indices(:)
+    integer,optional,intent(out)::spread_evaluations
+    integer,allocatable::pair_first(:),pair_second(:)
     real(real64),allocatable::pair_support(:)
-    complex(real64),allocatable::generator(:,:),block_rotation(:,:),backup_values(:,:),&
-      backup_gradients(:,:,:),transform_rows(:,:)
+    complex(real64),allocatable::raw_generator(:,:),sweep_generator(:,:),scaled_generator(:,:),&
+      projection_work(:,:),search_generator(:,:),previous_gradient(:,:),previous_direction(:,:),&
+      transported_gradient(:,:),transported_direction(:,:),transport_rotation(:,:),&
+      block_rotation(:,:),backup_values(:,:),backup_gradients(:,:,:)
     real(real64)::gradient_real,gradient_imag,current_gradient,theta,phi,trial_spread,&
-      antihermiticity_defect,commutator_defect
+      antihermiticity_defect,commutator_defect,generator_scale,descent_measure,beta,numerator,denominator
+    real(real64)::best_rejected_spread,representation_unitarity_defect,representation_closure_defect
     complex(real64)::amplitude
-    integer::nwannier,edge,line_search,axis,i
-    logical::step_ok
+    integer::nwannier,first,second,left,right,product,line_search,attempt,maximum_attempts,axis,i,&
+      operation,rank,ierr,evaluation_count
+    logical::step_ok,line_accepted,have_previous,used_conjugate
     character(256)::detail
 
-    ok=.false.;converged=.false.;message='';iterations=0
+    ok=.false.;converged=.false.;message='';iterations=0;evaluation_count=0
+    if(present(spread_evaluations))spread_evaluations=0
     initial_spread=huge(1d0);final_spread=huge(1d0);maximum_pair_gradient=huge(1d0)
     nwannier=size(values,1)
     if(nwannier<2.or.size(values,2)<1.or.any(shape(gradients)/=[3,nwannier,size(values,2)]).or.&
@@ -49,91 +55,155 @@ contains
         gradient_tolerance<=0d0.or.symmetry_tolerance<=0d0)then
       message='invalid symmetry-constrained localization sweep contract';return
     end if
+    if(any(product_table<1).or.any(product_table>size(representation,3)))then
+      message='localization group product table is invalid';return
+    end if
+    allocate(raw_generator(nwannier,nwannier),sweep_generator(nwannier,nwannier),&
+      scaled_generator(nwannier,nwannier),projection_work(nwannier,nwannier),&
+      search_generator(nwannier,nwannier),previous_gradient(nwannier,nwannier),&
+      previous_direction(nwannier,nwannier),transported_gradient(nwannier,nwannier),&
+      transported_direction(nwannier,nwannier),transport_rotation(nwannier,nwannier))
+    raw_generator=(0d0,0d0);do i=1,nwannier;raw_generator(i,i)=1d0;end do
+    representation_unitarity_defect=0d0
+    do operation=1,size(representation,3)
+      projection_work=matmul(conjg(transpose(representation(:,:,operation))),&
+        representation(:,:,operation))-raw_generator
+      representation_unitarity_defect=max(representation_unitarity_defect,maxval(abs(projection_work)))
+    end do
+    representation_closure_defect=0d0
+    do left=1,size(representation,3);do right=1,size(representation,3)
+      product=product_table(left,right)
+      projection_work=matmul(representation(:,:,left),representation(:,:,right))-&
+        representation(:,:,product)
+      representation_closure_defect=max(representation_closure_defect,maxval(abs(projection_work)))
+    end do;end do
+    if(representation_unitarity_defect>symmetry_tolerance.or.&
+        representation_closure_defect>symmetry_tolerance)then
+      message='localization group representation is not exact';return
+    end if
     call build_dg_overlapping_pair_graph(comm,values,weights,support_tolerance,&
       pair_first,pair_second,pair_support,step_ok,detail)
     if(.not.step_ok)then;message=trim(detail);return;end if
+#ifdef USE_MPI
+    call MPI_Comm_rank(comm,rank,ierr)
+#else
+    rank=0
+#endif
+    if(rank==0)write(*,'(a,i0,a,es12.4)')'[OW-GS-DIAGNOSTIC] localization_pair_count=',&
+      size(pair_first),' support_tolerance=',support_tolerance
     allocate(total_transform(nwannier,nwannier));total_transform=(0d0,0d0)
     do i=1,nwannier;total_transform(i,i)=1d0;end do
     call collective_periodic_spread(comm,values,weights,phases,initial_spread,step_ok,detail)
+    call record_spread_evaluation()
     if(.not.step_ok)then;message=trim(detail);return;end if
     final_spread=initial_spread
     if(size(pair_first)<1)then
       maximum_pair_gradient=0d0;iterations=0;converged=.true.;ok=.true.;return
     end if
+    have_previous=.false.
     do iterations=1,maximum_iterations
-      maximum_pair_gradient=0d0
-      do edge=1,size(pair_first)
-        call collective_pair_gradient(comm,values([pair_first(edge),pair_second(edge)],:),&
+      raw_generator=(0d0,0d0)
+      do first=1,nwannier-1;do second=first+1,nwannier
+        call collective_pair_gradient(comm,values([first,second],:),&
           weights,phases,0d0,gradient_real,step_ok,detail)
         if(.not.step_ok)then;message=trim(detail);return;end if
-        call collective_pair_gradient(comm,values([pair_first(edge),pair_second(edge)],:),&
+        call collective_pair_gradient(comm,values([first,second],:),&
           weights,phases,0.5d0*acos(-1d0),gradient_imag,step_ok,detail)
         if(.not.step_ok)then;message=trim(detail);return;end if
         current_gradient=sqrt(gradient_real**2+gradient_imag**2)
-        maximum_pair_gradient=max(maximum_pair_gradient,current_gradient)
-        if(current_gradient<=gradient_tolerance)cycle
+        if(current_gradient<=tiny(1d0))cycle
         phi=atan2(gradient_imag,gradient_real)+acos(-1d0)
+        amplitude=current_gradient*exp(cmplx(0d0,phi,real64))
+        raw_generator(first,second)=amplitude
+        raw_generator(second,first)=-conjg(amplitude)
+      end do;end do
+      sweep_generator=(0d0,0d0)
+      do operation=1,size(representation,3)
+        projection_work=matmul(representation(:,:,operation),raw_generator)
+        sweep_generator=sweep_generator+matmul(projection_work,&
+          conjg(transpose(representation(:,:,operation))))
+      end do
+      sweep_generator=sweep_generator/real(size(representation,3),real64)
+      generator_scale=maxval(abs(sweep_generator));maximum_pair_gradient=generator_scale
+      if(maximum_pair_gradient<=gradient_tolerance)then;converged=.true.;exit;end if
+      antihermiticity_defect=maxval(abs(sweep_generator+conjg(transpose(sweep_generator))))/&
+        max(1d0,generator_scale)
+      commutator_defect=0d0
+      do operation=1,size(representation,3)
+        scaled_generator=matmul(sweep_generator,representation(:,:,operation))-&
+          matmul(representation(:,:,operation),sweep_generator)
+        commutator_defect=max(commutator_defect,maxval(abs(scaled_generator))/max(1d0,generator_scale))
+      end do
+      if(antihermiticity_defect>symmetry_tolerance.or.commutator_defect>symmetry_tolerance)then
+        message='batched localization generator violates exact symmetry';return
+      end if
+      search_generator=sweep_generator;used_conjugate=.false.
+      if(have_previous)then
+        projection_work=matmul(transport_rotation,previous_gradient)
+        transported_gradient=matmul(projection_work,conjg(transpose(transport_rotation)))
+        projection_work=matmul(transport_rotation,previous_direction)
+        transported_direction=matmul(projection_work,conjg(transpose(transport_rotation)))
+        numerator=real(sum(conjg(sweep_generator)*(sweep_generator-transported_gradient)),real64)
+        denominator=sum(abs(transported_gradient)**2)
+        beta=max(0d0,numerator/max(tiny(1d0),denominator))
+        search_generator=sweep_generator+beta*transported_direction
+        descent_measure=real(sum(conjg(sweep_generator)*search_generator),real64)
+        if(beta>0d0.and.descent_measure>tiny(1d0))then
+          used_conjugate=.true.
+        else
+          search_generator=sweep_generator
+        end if
+      end if
+      backup_values=values;backup_gradients=gradients
+      line_accepted=.false.;best_rejected_spread=huge(1d0)
+      maximum_attempts=merge(2,1,used_conjugate)
+      do attempt=1,maximum_attempts
+        if(attempt==2)search_generator=sweep_generator
+        generator_scale=maxval(abs(search_generator))
+        descent_measure=real(sum(conjg(sweep_generator)*search_generator),real64)
+        if(generator_scale<=tiny(1d0).or.descent_measure<=tiny(1d0))cycle
         theta=0.25d0*acos(-1d0)
         do line_search=1,40
-          amplitude=theta*exp(cmplx(0d0,phi,real64))
-          call build_dg_symmetry_constrained_pair_generator(pair_first(edge),pair_second(edge),&
-            amplitude,representation,product_table,symmetry_tolerance,generator,&
-            antihermiticity_defect,commutator_defect,active_indices,step_ok,detail)
+          scaled_generator=(theta/generator_scale)*search_generator
+          call exponentiate_antihermitian_block(scaled_generator,block_rotation,step_ok,detail)
           if(.not.step_ok)then;message=trim(detail);return;end if
-          call exponentiate_antihermitian_block(generator,block_rotation,step_ok,detail)
-          if(.not.step_ok)then;message=trim(detail);return;end if
-          backup_values=values(active_indices,:);backup_gradients=gradients(:,active_indices,:)
-          values(active_indices,:)=matmul(block_rotation,backup_values)
+          values=matmul(block_rotation,backup_values)
           do axis=1,3
-            gradients(axis,active_indices,:)=matmul(block_rotation,backup_gradients(axis,:,:))
+            gradients(axis,:,:)=matmul(block_rotation,backup_gradients(axis,:,:))
           end do
           call collective_periodic_spread(comm,values,weights,phases,trial_spread,step_ok,detail)
+          call record_spread_evaluation()
           if(.not.step_ok)then;message=trim(detail);return;end if
+          best_rejected_spread=min(best_rejected_spread,trial_spread)
           if(trial_spread<=final_spread-max(spread_tolerance,&
-              1d-4*theta*current_gradient))then
-            transform_rows=matmul(block_rotation,total_transform(active_indices,:))
-            total_transform(active_indices,:)=transform_rows
-            final_spread=trial_spread;exit
+              1d-4*theta*descent_measure/generator_scale))then
+            total_transform=matmul(block_rotation,total_transform)
+            final_spread=trial_spread;line_accepted=.true.;exit
           end if
-          values(active_indices,:)=backup_values;gradients(:,active_indices,:)=backup_gradients
-          theta=0.5d0*theta
+          values=backup_values;gradients=backup_gradients;theta=0.5d0*theta
         end do
+        if(line_accepted)exit
       end do
-      call maximum_graph_gradient(comm,values,weights,phases,pair_first,pair_second,&
-        maximum_pair_gradient,step_ok,detail)
-      if(.not.step_ok)then;message=trim(detail);return;end if
-      if(maximum_pair_gradient<=gradient_tolerance)then;converged=.true.;exit;end if
+      if(.not.line_accepted)then
+        if(rank==0)write(*,'(a,3(a,es24.16))')'[OW-GS-DIAGNOSTIC] localization_line_search_rejected',&
+          ' current_spread=',final_spread,' best_trial_spread=',best_rejected_spread,&
+          ' projected_gradient=',maximum_pair_gradient
+        message='batched symmetry-constrained localization line search failed';return
+      end if
+      previous_gradient=sweep_generator;previous_direction=search_generator
+      transport_rotation=block_rotation;have_previous=.true.
     end do
     if(.not.converged)then
       iterations=maximum_iterations
       message='symmetry-constrained localization did not converge';return
     end if
     ok=.true.
+  contains
+    subroutine record_spread_evaluation()
+      evaluation_count=evaluation_count+1
+      if(present(spread_evaluations))spread_evaluations=evaluation_count
+    end subroutine record_spread_evaluation
   end subroutine localize_dg_overlapping_wannier_basis
-
-  subroutine maximum_graph_gradient(comm,values,weights,phases,pair_first,pair_second,&
-      maximum_gradient,ok,message)
-    integer,intent(in)::comm,pair_first(:),pair_second(:)
-    complex(real64),intent(in)::values(:,:),phases(:,:)
-    real(real64),intent(in)::weights(:)
-    real(real64),intent(out)::maximum_gradient
-    logical,intent(out)::ok
-    character(*),intent(out)::message
-    real(real64)::g0,g1
-    integer::edge
-    character(256)::detail
-    maximum_gradient=0d0;ok=.false.;message=''
-    do edge=1,size(pair_first)
-      call collective_pair_gradient(comm,values([pair_first(edge),pair_second(edge)],:),&
-        weights,phases,0d0,g0,ok,detail)
-      if(.not.ok)then;message=trim(detail);return;end if
-      call collective_pair_gradient(comm,values([pair_first(edge),pair_second(edge)],:),&
-        weights,phases,0.5d0*acos(-1d0),g1,ok,detail)
-      if(.not.ok)then;message=trim(detail);return;end if
-      maximum_gradient=max(maximum_gradient,sqrt(g0**2+g1**2))
-    end do
-    ok=.true.
-  end subroutine maximum_graph_gradient
 
   subroutine collective_periodic_spread(comm,values,weights,phases,spread,ok,message)
     integer,intent(in)::comm
@@ -276,9 +346,13 @@ contains
     real(real64),allocatable,intent(out)::pair_support(:)
     logical,intent(out)::ok
     character(*),intent(out)::message
-    real(real64),allocatable::local_diagonal(:),global_diagonal(:),local_row(:),global_row(:)
+    integer,parameter::maximum_neighbors_per_wannier=8
+    real(real64),allocatable::local_diagonal(:),global_diagonal(:),local_row(:),global_row(:),&
+      temporary_support(:)
+    integer,allocatable::temporary_first(:),temporary_second(:)
+    logical,allocatable::selected(:)
     real(real64)::score
-    integer::nwannier,npoint,first,second,point,npair,index,ierr
+    integer::nwannier,npoint,first,second,point,npair,ierr,neighbor,best
 
     ok=.false.;message='';nwannier=size(values,1);npoint=size(values,2)
     if(nwannier<1.or.npoint<1.or.size(weights)/=npoint.or.support_tolerance<0d0.or.&
@@ -302,8 +376,11 @@ contains
     if(any(global_diagonal<=tiny(1d0)))then
       message='pair-graph Wannier support norm is zero';return
     end if
+    allocate(selected(nwannier),temporary_first(maximum_neighbors_per_wannier*nwannier),&
+      temporary_second(maximum_neighbors_per_wannier*nwannier),&
+      temporary_support(maximum_neighbors_per_wannier*nwannier))
     npair=0
-    do first=1,nwannier-1
+    do first=1,nwannier
       call pair_support_row(first,local_row)
 #ifdef USE_MPI
       call MPI_Allreduce(local_row,global_row,nwannier,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
@@ -311,29 +388,42 @@ contains
 #else
       global_row=local_row
 #endif
-      do second=first+1,nwannier
-        score=global_row(second)/sqrt(global_diagonal(first)*global_diagonal(second))
-        if(score>support_tolerance)npair=npair+1
+      selected=.false.
+      do neighbor=1,min(maximum_neighbors_per_wannier,nwannier-1)
+        best=0;score=support_tolerance
+        do second=1,nwannier
+          if(second==first.or.selected(second))cycle
+          if(global_row(second)/sqrt(global_diagonal(first)*global_diagonal(second))>score)then
+            best=second
+            score=global_row(second)/sqrt(global_diagonal(first)*global_diagonal(second))
+          end if
+        end do
+        if(best==0)exit
+        selected(best)=.true.
+        call append_symmetric_edge(first,best,score)
       end do
     end do
-    allocate(pair_first(npair),pair_second(npair),pair_support(npair));index=0
-    do first=1,nwannier-1
-      call pair_support_row(first,local_row)
-#ifdef USE_MPI
-      call MPI_Allreduce(local_row,global_row,nwannier,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
-      if(ierr/=MPI_SUCCESS)then;message='pair-graph row collective failed';return;end if
-#else
-      global_row=local_row
-#endif
-      do second=first+1,nwannier
-        score=global_row(second)/sqrt(global_diagonal(first)*global_diagonal(second))
-        if(score<=support_tolerance)cycle
-        index=index+1;pair_first(index)=first;pair_second(index)=second
-        pair_support(index)=min(1d0,max(0d0,score))
-      end do
-    end do
+    allocate(pair_first(npair),pair_second(npair),pair_support(npair))
+    pair_first=temporary_first(:npair);pair_second=temporary_second(:npair)
+    pair_support=temporary_support(:npair)
     ok=.true.
   contains
+    subroutine append_symmetric_edge(source,target,edge_support)
+      integer,intent(in)::source,target
+      real(real64),intent(in)::edge_support
+      integer::low,high,edge
+      low=min(source,target);high=max(source,target)
+      do edge=1,npair
+        if(temporary_first(edge)==low.and.temporary_second(edge)==high)then
+          temporary_support(edge)=max(temporary_support(edge),min(1d0,max(0d0,edge_support)))
+          return
+        end if
+      end do
+      npair=npair+1
+      temporary_first(npair)=low;temporary_second(npair)=high
+      temporary_support(npair)=min(1d0,max(0d0,edge_support))
+    end subroutine append_symmetric_edge
+
     subroutine pair_support_row(source,row)
       integer,intent(in)::source
       real(real64),intent(out)::row(:)

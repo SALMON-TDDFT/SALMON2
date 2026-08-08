@@ -1172,10 +1172,10 @@ contains
     dg_ow_boundary_value_tolerance = 1d-6
     dg_ow_boundary_gradient_tolerance = 1d-6
     dg_ow_symmetry_tolerance = 1d-10
-    dg_ow_localization_support_tolerance = 1d-8
-    dg_ow_localization_spread_tolerance = 1d-12
+    dg_ow_localization_support_tolerance = 1d-3
+    dg_ow_localization_spread_tolerance = 1d-14
     dg_ow_localization_gradient_tolerance = 1d-6
-    dg_ow_localization_max_iterations = 32
+    dg_ow_localization_max_iterations = 1024
     dg_ow_candidate_states_per_fragment = 0
     dg_ow_target_wanniers_per_fragment = 0
     dg_dc_gs_electron_count_tolerance = 1d-8

@@ -243,6 +243,15 @@ for tolerance in (
 ):
     assert tolerance in global_source
     assert tolerance in input_source
+assert re.search(r"dg_ow_localization_support_tolerance\s*=\s*1d-3", input_source, re.I), (
+    "default localization graph must remain sparse for production-sized retained blocks"
+)
+assert re.search(r"dg_ow_localization_spread_tolerance\s*=\s*1d-14", input_source, re.I), (
+    "localization spread resolution must retain resolvable double-precision descent"
+)
+assert re.search(r"dg_ow_localization_max_iterations\s*=\s*1024", input_source, re.I), (
+    "localization iteration budget must cover the genuine-Si64 RCG convergence envelope"
+)
 assert "dg_ow_localization_max_iterations" in global_source
 assert "dg_ow_localization_max_iterations" in input_source
 for window in (
@@ -633,6 +642,9 @@ localize_position = adapter_body.lower().index("call localize_dg_overlapping_wan
 metric_position = adapter_body.lower().index("call assemble_dg_overlapping_wannier_metric_rows")
 assert materialize_position < localize_position < metric_position, (
     "localization must use materialized tails and finish before metric/SCF publication"
+)
+assert "localization_spread_evaluations" in adapter_body, (
+    "production must publish the batched localization spread-evaluation count"
 )
 for evidence in (
     "localization_initial_spread",

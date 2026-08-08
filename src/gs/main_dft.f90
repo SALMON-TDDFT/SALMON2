@@ -557,7 +557,7 @@ contains
     real(8)::localization_initial_spread,localization_final_spread,localization_maximum_gradient,&
       retained_raw_unitarity_defect,retained_unitarity_defect,retained_group_closure_defect,&
       retained_closure_search_tolerance
-    integer::localization_iterations
+    integer::localization_iterations,localization_spread_evaluations
     character(256)::message,prefix
 
     call MPI_Comm_rank(dc%icomm_tot,rank,ierr);call MPI_Comm_size(dc%icomm_tot,nproc,ierr)
@@ -801,8 +801,13 @@ contains
       dg_ow_localization_gradient_tolerance,dg_ow_symmetry_tolerance,&
       dg_ow_localization_max_iterations,localization_initial_spread,localization_final_spread,&
       localization_maximum_gradient,localization_iterations,localization_converged,&
-      localization_transform,ok,message)
+      localization_transform,ok,message,localization_spread_evaluations)
     if(.not.localization_converged)then
+      if(rank==0)write(0,'(a,3(a,es12.4),2(a,i0))')&
+        '[OW-GS-DIAGNOSTIC] localization_rejected',&
+        ' initial_spread=',localization_initial_spread,' final_spread=',localization_final_spread,&
+        ' maximum_gradient=',localization_maximum_gradient,' iterations=',localization_iterations,&
+        ' spread_evaluations=',localization_spread_evaluations
       write(0,'(a)')trim(message)
       error stop 'overlapping-Wannier localization convergence gate failed'
     end if
@@ -817,10 +822,11 @@ contains
           ow_box_gradients(ix,io*local_target_count+1:(io+1)*local_target_count,:))
       end do
     end do
-    if(rank==0)write(*,'(a,3(a,es12.4),a,i0)')&
+    if(rank==0)write(*,'(a,3(a,es12.4),2(a,i0))')&
       '[OW-GS-DIAGNOSTIC] localization_converged',&
       ' initial_spread=',localization_initial_spread,' final_spread=',localization_final_spread,&
-      ' maximum_gradient=',localization_maximum_gradient,' iterations=',localization_iterations
+      ' maximum_gradient=',localization_maximum_gradient,' iterations=',localization_iterations,&
+      ' spread_evaluations=',localization_spread_evaluations
     call verify_dg_fragment_wannier_streaming_closure(dc%icomm_tot,dc%i_frag,local_target_count,&
       box_ids,symmetry_map,ow_box_values,ow_box_gradients,retained_closure_search_tolerance,&
       closure_residual,ow_symmetry_fingerprint,ok,message)
