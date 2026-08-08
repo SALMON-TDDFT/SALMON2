@@ -8,6 +8,7 @@ import re
 ROOT = Path(__file__).resolve().parents[2]
 MAIN = (ROOT / "src/gs/main_dft.f90").read_text().lower()
 SYMMETRY = (ROOT / "src/gs/dc/dg_overlapping_wannier_symmetry.f90").read_text().lower()
+CONSTRUCTION = (ROOT / "src/gs/dc/dg_overlapping_wannier_construction.f90").read_text().lower()
 
 
 def require(condition: bool, message: str) -> None:
@@ -49,6 +50,19 @@ require("global_inversion_promoted" in MAIN,
         "V3 publication must report whether exact global inversion was promoted")
 require("project_ow_exact_global_group" in MAIN,
         "fragment-spanning symmetries must be projected as one exact global group")
+require("assemble_dg_distributed_basis_symmetry_overlap" in MAIN,
+        "global checkpoint representation must be measured from the actual distributed Wannier gauge")
+exact_global_body = re.search(
+    r"subroutine\s+project_ow_exact_global_group(.*?)end\s+subroutine", MAIN, re.S)
+require(exact_global_body is not None and
+        "matmul(metric_inverse,symmetry_overlap" in exact_global_body.group(1),
+        "global Wannier action must solve S D = <g phi|phi> before group synchronization")
+require("mpi_allgather(ow_core_ids" in exact_global_body.group(1) and
+        "call build_dg_pointwise_affine_owner_map" in exact_global_body.group(1) and
+        "findloc(all_physical_ids" in CONSTRUCTION,
+        "full-system operations must resolve every mapped global grid point to its owner")
+require("validate_sawf_fragment_symmetry_map" not in exact_global_body.group(1),
+        "fragment permutation must not be required by an exact full-system operation")
 translation_builder = re.search(
     r"subroutine\s+build_ow_fragment_permutation_representation(.*?)end\s+subroutine",
     MAIN, re.S)

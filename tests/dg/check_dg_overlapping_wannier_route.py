@@ -374,8 +374,11 @@ assert re.search(
 ), (
     "only the focused replicated-input path may gather candidate boxes"
 )
-assert "materialize_ow_global_tails" in adapter_body.lower(), (
-    "production must gather only retained fragment Wannier tails"
+assert "materialize_ow_distributed_core_to_buffer" in adapter_body.lower(), (
+    "production must stream the symmetry-closed core into local buffers"
+)
+assert "materialize_ow_global_tails" not in adapter_body.lower(), (
+    "production must not all-gather full-system real-space Wannier tails"
 )
 assert not re.search(
     r"allocate\s*\(\s*candidate\s*\(\s*ncandidate\s*,\s*nbox",
@@ -384,8 +387,11 @@ assert not re.search(
 ), (
     "production must not zero-pad every fragment candidate onto every rank"
 )
-assert "build_dc_translation_symmetry_map" in adapter_body.lower(), (
-    "production symmetry must be derived from DC fragment geometry"
+assert "prepare_ow_global_point_action" in adapter_body.lower(), (
+    "production symmetry must be derived from the full-system crystallographic catalog"
+)
+assert "prepare_ow_exact_fragment_symmetry" not in adapter_body.lower(), (
+    "fragment site symmetry must not be a production prerequisite"
 )
 canonical_index_body = re.search(
     r"integer\s+function\s+dc_to_canonical_index(?P<body>.*?)end\s+function",
@@ -632,26 +638,66 @@ assert re.search(
     construction_source,
     re.I | re.S,
 ), "periodic buffer tails must be measured but not rejected as exterior-zero tails"
-assert re.search(
-    r"call\s+replicate_ow_global_symmetry_orbit",
-    adapter_body,
-    re.I,
-), "production must materialize each fragment from one full-system symmetry representative"
-materialize_position = adapter_body.lower().index("call materialize_ow_global_tails")
+assert not re.search(r"call\s+replicate_ow_global_symmetry_orbit", adapter_body, re.I), (
+    "production must not copy a representative-fragment gauge across the full system"
+)
+materialize_position = adapter_body.lower().index("call materialize_ow_distributed_core_to_buffer")
 localize_position = adapter_body.lower().index("call localize_dg_overlapping_wannier_basis")
 metric_position = adapter_body.lower().index("call assemble_dg_overlapping_wannier_metric_rows")
 assert materialize_position < localize_position < metric_position, (
-    "localization must use materialized tails and finish before metric/SCF publication"
+    "localization must use streamed local buffers and finish before metric/SCF publication"
 )
 assert "localization_spread_evaluations" in adapter_body, (
     "production must publish the batched localization spread-evaluation count"
 )
+closure_call = adapter_body.find("call build_dg_distributed_symmetry_closed_basis")
+localization_call = adapter_body.find("call localize_dg_overlapping_wannier_basis")
+assert closure_call >= 0, (
+    "production OW GS must construct the fixed-rank full-system symmetry-closed basis"
+)
+point_action_body = re.search(
+    r"subroutine\s+prepare_ow_global_point_action\b(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+)
+assert point_action_body and "duplicate_rotation" in point_action_body.group("body").lower(), (
+    "global point action must retain one affine representative per point-group rotation"
+)
+assert localization_call > closure_call, (
+    "full-system symmetry closure must precede Wannier localization"
+)
+assert re.search(
+    r"call\s+localize_dg_overlapping_wannier_basis\s*\(.*?"
+    r"global_retained_representation\s*,\s*global_point_product",
+    adapter_body,
+    re.I | re.S,
+), "localization must consume the one full-system representation and product table"
+assert "replicate_ow_global_symmetry_orbit" not in adapter_body, (
+    "production must not replicate a representative fragment after local construction"
+)
 assert re.search(
     r"call\s+run_dg_overlapping_wannier_scf\s*\(.*?occupations\s*,\s*"
-    r"retained_group_closure_defect\s*,\s*dg_ow_symmetry_tolerance",
+    r"global_retained_group_closure_defect\s*,\s*dg_ow_symmetry_tolerance",
     adapter_body,
     re.I | re.S,
 ), "SCF must receive exact group-algebra closure, not streaming density covariance"
+assert re.search(
+    r"build_dg_fragment_group_representation\s*\(.*?"
+    r"global_retained_group_closure_defect",
+    adapter_body,
+    re.I | re.S,
+), "SCF closure must come directly from the collectively measured global representation"
+assert re.search(
+    r"call\s+populate_ow_checkpoint\s*\(\s*occupations\s*,\s*condition_number\s*,\s*"
+    r"global_retained_group_closure_defect",
+    main_source,
+    re.I | re.S,
+), "V3 checkpoint caller must pass the rank-consistent exact group-algebra closure"
+assert re.search(
+    r"ow_checkpoint%symmetry_closure_residual\s*=\s*closure_residual",
+    main_source,
+    re.I,
+), "V3 checkpoint writer must publish its explicit closure contract"
 for evidence in (
     "localization_initial_spread",
     "localization_final_spread",
@@ -670,31 +716,20 @@ assert not re.search(
     adapter_body,
     re.I,
 ), "production must not assume independently selected retained spaces differ only by gauge"
-assert re.search(
-    r"call\s+verify_dg_fragment_wannier_streaming_closure",
-    adapter_body,
-    re.I,
-), "production must verify authoritative retained tails with bounded streaming"
-assert re.search(
-    r"MPI_Allgather\s*\(\s*dc\s*%\s*i_frag.*?rank_fragment.*?"
-    r"center_owner_fragment.*?rank_fragment\s*\(\s*source\s*\)",
-    main_source,
-    re.I | re.S,
-), "materialized Wannier fragment IDs must be independent of MPI rank order"
+assert "assemble_dg_distributed_basis_symmetry_overlap" in adapter_body, (
+    "production must measure the authoritative global action from distributed core restrictions"
+)
 materialize_body = re.search(
-    r"subroutine\s+materialize_ow_global_tails\b(?P<body>.*?)end\s+subroutine",
+    r"subroutine\s+materialize_ow_distributed_core_to_buffer\b(?P<body>.*?)end\s+subroutine",
     main_source,
     re.I | re.S,
 )
 assert materialize_body
-assert "source_position" in materialize_body.group("body").lower()
+assert "mpi_bcast(owner_values" in materialize_body.group("body").lower()
+assert "mpi_allgather" not in materialize_body.group("body").lower()
 assert "sort_ow_id_positions" in materialize_body.group("body").lower()
+assert "find_sorted_ow_id" in materialize_body.group("body").lower()
 assert "findloc" not in materialize_body.group("body").lower()
-assert not re.search(
-    r"do\s+point\s*=\s*1\s*,\s*nbox.*?count\s*\(",
-    materialize_body.group("body"),
-    re.I | re.S,
-), "tail materialization must not perform quadratic physical-ID lookup"
 assert re.search(
     r"call\s+build_dg_core_owned_occupied_subspace",
     adapter_body,
