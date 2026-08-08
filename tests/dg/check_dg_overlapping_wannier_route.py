@@ -36,6 +36,7 @@ scf_source = source("src/gs/scf_iteration_dft.f90")
 dcdft_source = source("src/gs/dc/dcdft.f90")
 types_source = source("src/gs/dc/dg_overlapping_wannier_types.f90")
 construction_source = source("src/gs/dc/dg_overlapping_wannier_construction.f90")
+localization_source = source("src/gs/dc/dg_overlapping_wannier_localization.f90")
 projection_source = source("src/gs/dc/dg_overlapping_wannier_projection.f90")
 operators_source = source("src/gs/dc/dg_overlapping_wannier_operators.f90")
 ow_scf_source = source("src/gs/dc/dg_overlapping_wannier_scf.f90")
@@ -650,6 +651,13 @@ assert materialize_position < localize_position < metric_position, (
 assert "localization_spread_evaluations" in adapter_body, (
     "production must publish the batched localization spread-evaluation count"
 )
+assert re.search(
+    r"do\s+edge\s*=\s*1\s*,\s*size\s*\(\s*pair_first\s*\).*?"
+    r"first\s*=\s*pair_first\s*\(\s*edge\s*\).*?"
+    r"second\s*=\s*pair_second\s*\(\s*edge\s*\)",
+    localization_source,
+    re.I | re.S,
+), "localization gradient assembly must scale with the bounded overlap graph"
 closure_call = adapter_body.find("call build_dg_distributed_symmetry_closed_basis")
 localization_call = adapter_body.find("call localize_dg_overlapping_wannier_basis")
 assert closure_call >= 0, (

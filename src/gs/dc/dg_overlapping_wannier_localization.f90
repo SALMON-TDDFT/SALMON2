@@ -74,7 +74,7 @@ contains
       antihermiticity_defect,commutator_defect,generator_scale,descent_measure,beta,numerator,denominator
     real(real64)::best_rejected_spread,representation_unitarity_defect,representation_closure_defect
     complex(real64)::amplitude
-    integer::nwannier,first,second,left,right,product,line_search,attempt,maximum_attempts,axis,i,&
+    integer::nwannier,first,second,left,right,product,line_search,attempt,maximum_attempts,axis,i,edge,&
       operation,rank,ierr,evaluation_count
     logical::step_ok,line_accepted,have_previous,used_conjugate
     character(256)::detail
@@ -142,7 +142,8 @@ contains
     have_previous=.false.
     do iterations=1,maximum_iterations
       raw_generator=(0d0,0d0)
-      do first=1,nwannier-1;do second=first+1,nwannier
+      do edge=1,size(pair_first)
+        first=pair_first(edge);second=pair_second(edge)
         call collective_pair_gradient(comm,values([first,second],:),&
           weights,phases,0d0,gradient_real,step_ok,detail)
         if(.not.step_ok)then;message=trim(detail);return;end if
@@ -155,7 +156,7 @@ contains
         amplitude=current_gradient*exp(cmplx(0d0,phi,real64))
         raw_generator(first,second)=amplitude
         raw_generator(second,first)=-conjg(amplitude)
-      end do;end do
+      end do
       sweep_generator=(0d0,0d0)
       do operation=1,size(representation,3)
         projection_work=matmul(representation(:,:,operation),raw_generator)
