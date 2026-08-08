@@ -47,7 +47,11 @@ Run the focused fixture and retain the expected counter failure.
 
 **Step 2: Accumulate the batched generator**
 
-For each graph edge, compute both collective gradient components, construct the exact-group projected anti-Hermitian direction, embed it into the retained block, and add the support-weighted gradient direction.  Reject nonfinite, non-anti-Hermitian, or noncommuting sums.
+For every pair in the local retained block, compute both collective gradient components and assemble
+the full anti-Hermitian negative gradient.  Reynolds-project that matrix through the exact group
+once per sweep.  The bounded support graph remains diagnostic only because an arbitrary sparse
+graph is not invariant under a dense representation.  Reject nonfinite, non-anti-Hermitian, or
+noncommuting projected gradients.
 
 **Step 3: Apply one transactional line search per sweep**
 
@@ -81,4 +85,3 @@ Create a new clean source/build root from HEAD.  Configure MPI, ScaLAPACK, Eigen
 **Step 4: Review and commit**
 
 Repeat specification and code-quality reviews, resolve all Critical/Important findings, run `git diff --check`, then commit only the localization/MPI changes.
-
