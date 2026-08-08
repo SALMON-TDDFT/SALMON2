@@ -5,15 +5,18 @@ program test_dg_overlapping_wannier_localization_mpi
   use dg_overlapping_wannier_localization,only:evaluate_dg_periodic_localization,&
     optimize_dg_wannier_pair,build_dg_overlapping_pair_graph
   use dg_overlapping_wannier_localization,only:localize_dg_overlapping_wannier_basis
+  use dg_overlapping_wannier_localization,only:validate_dg_global_covariant_gauge
   implicit none
   complex(8)::values(2,4),phases(3,4),shifted_phases(3,4),moment(3,2),shifted_moment(3,2)
   complex(8)::gradients(3,2,4),rotation(2,2),identity(2,2)
   complex(8)::graph_values(4,4)
   complex(8)::dense_graph_values(20,4)
   complex(8)::sweep_values(4,4),sweep_gradients(3,4,4),sweep_representation(4,4,2)
+  complex(8)::dense_global_representation(4,4,2)
   complex(8)::bad_sweep_values(4,4),bad_sweep_gradients(3,4,4)
   complex(8)::sweep_identity(4,4)
   complex(8),allocatable::sweep_transform(:,:)
+  complex(8)::unconstrained_transform(4,4)
   integer,allocatable::pair_first(:),pair_second(:)
   integer::sweep_product(2,2),sweep_iterations,spread_evaluations
   real(8),allocatable::pair_support(:)
@@ -146,6 +149,52 @@ program test_dg_overlapping_wannier_localization_mpi
   call require(maximum_pair_gradient<1d-7,'published localization gradient is converged')
   call require(spread_evaluations<=1+40*32,&
     'spread evaluation count is bounded by sweeps rather than graph edges')
+
+  unconstrained_transform=(0d0,0d0)
+  do point=1,4;unconstrained_transform(point,point)=1d0;end do
+  unconstrained_transform(1,1)=cos(0.3d0);unconstrained_transform(1,3)=sin(0.3d0)
+  unconstrained_transform(3,1)=-sin(0.3d0);unconstrained_transform(3,3)=cos(0.3d0)
+  call validate_dg_global_covariant_gauge(unconstrained_transform,sweep_representation,&
+    1d-12,ok,message)
+  call require(.not.ok.and.index(message,'global')>0,&
+    'lower-spread fragment-local gauge is rejected when it breaks global inversion')
+
+  sweep_values=(0d0,0d0);sweep_gradients=(0d0,0d0)
+  sweep_values(1,1)=cos(0.3d0);sweep_values(1,3)=sin(0.3d0)
+  sweep_values(3,1)=-sin(0.3d0);sweep_values(3,3)=cos(0.3d0)
+  sweep_values(2,2)=cos(0.3d0);sweep_values(2,4)=sin(0.3d0)
+  sweep_values(4,2)=-sin(0.3d0);sweep_values(4,4)=cos(0.3d0)
+  sweep_gradients(1,:,:)=sweep_values
+  dense_global_representation=(0d0,0d0)
+  do point=1,4;dense_global_representation(point,point,1)=1d0;end do
+  dense_global_representation(1,1,2)=1d0/sqrt(2d0)
+  dense_global_representation(1,2,2)=1d0/sqrt(2d0)
+  dense_global_representation(2,1,2)=1d0/sqrt(2d0)
+  dense_global_representation(2,2,2)=-1d0/sqrt(2d0)
+  dense_global_representation(3,3,2)=1d0/sqrt(2d0)
+  dense_global_representation(3,4,2)=1d0/sqrt(2d0)
+  dense_global_representation(4,3,2)=1d0/sqrt(2d0)
+  dense_global_representation(4,4,2)=-1d0/sqrt(2d0)
+  call localize_dg_overlapping_wannier_basis(MPI_COMM_WORLD,sweep_values,sweep_gradients,&
+    weights,phases,dense_global_representation,sweep_product,0.1d0,1d-16,1d-7,1d-12,64,&
+    initial_spread,final_spread,maximum_pair_gradient,sweep_iterations,converged,&
+    sweep_transform,ok,message)
+  call require(ok.and.converged.and.final_spread<initial_spread-1d-8,&
+    'dense global inversion that splits fragments permits covariant localization')
+  call validate_dg_global_covariant_gauge(sweep_transform,dense_global_representation,&
+    1d-11,ok,message)
+  call require(ok,'dense global localization gauge remains exactly covariant')
+  dense_global_representation(1,1,2)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,8)
+  call validate_dg_global_covariant_gauge(sweep_transform,dense_global_representation,&
+    1d-11,ok,message)
+  call require(.not.ok.and.index(message,'invalid')>0,&
+    'nonfinite global representation is rejected before gauge publication')
+  call localize_dg_overlapping_wannier_basis(MPI_COMM_WORLD,sweep_values,sweep_gradients,&
+    weights,phases,dense_global_representation,sweep_product,0.1d0,1d-16,1d-7,1d-12,64,&
+    initial_spread,final_spread,maximum_pair_gradient,sweep_iterations,converged,&
+    sweep_transform,ok,message)
+  call require(.not.ok.and.index(message,'contract')>0,&
+    'nonfinite global representation is rejected at localization entry')
 
   sweep_values=(0d0,0d0);sweep_gradients=(0d0,0d0)
   sweep_values(1,1)=cos(0.3d0);sweep_values(1,3)=sin(0.3d0)

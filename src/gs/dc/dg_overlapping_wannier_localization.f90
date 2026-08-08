@@ -11,7 +11,44 @@ module dg_overlapping_wannier_localization
   public::optimize_dg_wannier_pair
   public::build_dg_overlapping_pair_graph
   public::localize_dg_overlapping_wannier_basis
+  public::validate_dg_global_covariant_gauge
 contains
+  subroutine validate_dg_global_covariant_gauge(transform,representation,tolerance,ok,message)
+    complex(real64),intent(in)::transform(:,:),representation(:,:,:)
+    real(real64),intent(in)::tolerance
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(real64),allocatable::work(:,:),identity(:,:)
+    real(real64)::defect
+    integer::i,operation,n
+
+    ok=.false.;message='';n=size(transform,1)
+    if(n<1.or.size(transform,2)/=n.or.size(representation,1)/=n.or.&
+        size(representation,2)/=n.or.size(representation,3)<1.or.tolerance<=0d0.or.&
+        .not.all(ieee_is_finite(real(transform))).or.&
+        .not.all(ieee_is_finite(aimag(transform))).or.&
+        .not.all(ieee_is_finite(real(representation))).or.&
+        .not.all(ieee_is_finite(aimag(representation))))then
+      message='invalid global-covariant gauge contract';return
+    end if
+    allocate(work(n,n),identity(n,n));identity=(0d0,0d0)
+    do i=1,n;identity(i,i)=1d0;end do
+    work=matmul(conjg(transpose(transform)),transform)-identity
+    defect=maxval(abs(work))
+    if(defect>tolerance)then
+      message='global-covariant gauge is not unitary';return
+    end if
+    do operation=1,size(representation,3)
+      work=matmul(transform,representation(:,:,operation))-&
+        matmul(representation(:,:,operation),transform)
+      defect=maxval(abs(work))
+      if(defect>tolerance)then
+        message='global-covariant gauge breaks full-system symmetry';return
+      end if
+    end do
+    ok=.true.
+  end subroutine validate_dg_global_covariant_gauge
+
   subroutine localize_dg_overlapping_wannier_basis(comm,values,gradients,weights,phases,&
       representation,product_table,support_tolerance,spread_tolerance,gradient_tolerance,&
       symmetry_tolerance,maximum_iterations,initial_spread,final_spread,maximum_pair_gradient,&
@@ -52,7 +89,9 @@ contains
         size(representation,3)<1.or.any(shape(product_table)/=&
         [size(representation,3),size(representation,3)]).or.maximum_iterations<1.or.&
         support_tolerance<0d0.or.support_tolerance>1d0.or.spread_tolerance<0d0.or.&
-        gradient_tolerance<=0d0.or.symmetry_tolerance<=0d0)then
+        gradient_tolerance<=0d0.or.symmetry_tolerance<=0d0.or.&
+        .not.all(ieee_is_finite(real(representation))).or.&
+        .not.all(ieee_is_finite(aimag(representation))))then
       message='invalid symmetry-constrained localization sweep contract';return
     end if
     if(any(product_table<1).or.any(product_table>size(representation,3)))then
@@ -177,8 +216,13 @@ contains
           best_rejected_spread=min(best_rejected_spread,trial_spread)
           if(trial_spread<=final_spread-max(spread_tolerance,&
               1d-4*theta*descent_measure/generator_scale))then
-            total_transform=matmul(block_rotation,total_transform)
-            final_spread=trial_spread;line_accepted=.true.;exit
+            projection_work=matmul(block_rotation,total_transform)
+            call validate_dg_global_covariant_gauge(projection_work,representation,&
+              symmetry_tolerance,step_ok,detail)
+            if(step_ok)then
+              total_transform=projection_work
+              final_spread=trial_spread;line_accepted=.true.;exit
+            end if
           end if
           values=backup_values;gradients=backup_gradients;theta=0.5d0*theta
         end do
