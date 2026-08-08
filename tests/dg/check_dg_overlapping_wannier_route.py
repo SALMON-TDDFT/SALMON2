@@ -663,6 +663,9 @@ point_action_body = re.search(
 assert point_action_body and "duplicate_rotation" in point_action_body.group("body").lower(), (
     "global point action must retain one affine representative per point-group rotation"
 )
+assert "common_center" in point_action_body.group("body").lower(), (
+    "affine representatives must belong to one full-system common-center stabilizer"
+)
 assert localization_call > closure_call, (
     "full-system symmetry closure must precede Wannier localization"
 )

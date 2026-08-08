@@ -2215,11 +2215,11 @@ contains
     real(8),allocatable::fractional_positions(:,:)
     integer,allocatable::species(:),selected(:),mapped_owner(:),mapped_local(:),mapped_wrap(:,:)
     integer(8),allocatable::all_ids(:,:),mapped_ids(:),all_maps(:,:,:)
-    real(8)::lattice_inverse(3,3),determinant
+    real(8)::lattice_inverse(3,3),determinant,common_center(3),fixed_residual(3)
     integer::rank,nproc,ierr,nlocal,atom,operation,axis,translation_grid(3),nselected,&
       g,h,k,source,point,middle_owner,middle_point
     integer(8)::middle_target,final_target
-    logical::inverse_ok,map_ok,matched,duplicate_rotation
+    logical::inverse_ok,map_ok,matched,duplicate_rotation,have_common_center
     character(256)::detail
 
     ok=.false.;inversion_present=.false.;message=''
@@ -2237,6 +2237,13 @@ contains
       species,dg_ow_symmetry_tolerance,catalog,map_ok,detail)
     if(.not.map_ok)then;message='global point-action catalog: '//trim(detail);return;end if
     allocate(selected(size(catalog%operations)));nselected=0
+    have_common_center=.false.;common_center=0d0
+    do operation=1,size(catalog%operations)
+      if(.not.all(catalog%integer_rotation(:,:,operation)==&
+          reshape([-1,0,0,0,-1,0,0,0,-1],[3,3])))cycle
+      common_center=0.5d0*catalog%fractional_translation(:,operation)
+      common_center=modulo(common_center,1d0);have_common_center=.true.;exit
+    end do
     do operation=1,size(catalog%operations)
       do axis=1,3
         translation_grid(axis)=nint(catalog%fractional_translation(axis,operation)*&
@@ -2246,6 +2253,12 @@ contains
           catalog%fractional_translation(:,operation)-anint(real(translation_grid,8)/&
           real(dc%lg_tot%num,8)-catalog%fractional_translation(:,operation))))>&
           dg_ow_symmetry_tolerance)cycle
+      if(have_common_center)then
+        fixed_residual=catalog%fractional_translation(:,operation)-common_center+&
+          matmul(real(catalog%integer_rotation(:,:,operation),8),common_center)
+        fixed_residual=fixed_residual-anint(fixed_residual)
+        if(maxval(abs(fixed_residual))>dg_ow_symmetry_tolerance)cycle
+      end if
       duplicate_rotation=.false.
       do g=1,nselected
         if(all(catalog%integer_rotation(:,:,selected(g))==&
@@ -2259,6 +2272,8 @@ contains
           reshape([-1,0,0,0,-1,0,0,0,-1],[3,3])))inversion_present=.true.
     end do
     if(nselected<1)then;message='global point-action catalog has no grid-commensurate operation';return;end if
+    if(rank==0)write(*,'(a,i0,a,l1)')'[OW-GS-DIAGNOSTIC] global_point_group_order=',nselected,&
+      ' inversion=',inversion_present
     allocate(all_ids(nlocal,nproc),target_ids(nlocal,nselected),integer_rotations(3,3,nselected),&
       rotations(3,3,nselected))
     call MPI_Allgather(local_ids,nlocal,MPI_INTEGER8,all_ids,nlocal,MPI_INTEGER8,&
