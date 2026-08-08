@@ -360,6 +360,9 @@ program test_dg_overlapping_wannier_construction_mpi
   call require(ok,trim(message));call local_projector(result%value,direct_projector)
   call require(result%target_rank==3.and.result%projection_inclusion_residual<1d-9,&
     'raw complete-shell direct sum is retained exactly')
+  call require(allocated(result%center_box_point_ids).and.&
+    size(result%center_box_point_ids)==result%target_rank,&
+    'symmetry-free local construction still publishes Wannier centers')
   call release_dg_overlapping_wannier_construction(result)
   allocate(seed_values(3,nlocal))
   allocate(occupied_seed_values(2,nlocal))

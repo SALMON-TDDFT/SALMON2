@@ -1717,7 +1717,7 @@ contains
         .not.all(ieee_is_finite(aimag(result%gradient))))then
       ok=.false.;message='nonfinite periodic-box Wannier value or gradient tails';return
     endif
-    if(nsym>0)then
+    block
       if(distributed_candidates)then
         allocate(result%center_box_point_ids(selected_target),center_max_local(selected_target),&
           center_max_global(selected_target),center_id_local(selected_target),&
@@ -1746,17 +1746,32 @@ contains
           endif
         enddo
       else
-      all_wannier=matmul(transpose(transform),all_candidate)
+      if(nsym>0)then
+        all_wannier=matmul(transpose(transform),all_candidate)
+      else
+        allocate(all_wannier(selected_target,nlocal));all_wannier=result%value
+      endif
       if(.not.finite_complex_matrix(all_wannier))then
         ok=.false.;message='nonfinite periodic-box Wannier tails';return
       endif
       allocate(result%center_box_point_ids(selected_target))
       do j=1,selected_target
-        largest=maxval(abs(all_wannier(j,:))**2);center_index=0
+        if(nsym==0.and..not.present(center_representative_box_ids))then
+          largest=0d0
+          do p=1,nlocal
+            if(integration_core(p))largest=max(largest,abs(all_wannier(j,p))**2)
+          end do
+        else
+          largest=maxval(abs(all_wannier(j,:))**2)
+        endif
+        center_index=0
         if(largest<=0d0.or..not.ieee_is_finite(largest))then
           ok=.false.;message='periodic-box Wannier has no finite nonzero center density';return
         endif
-        do source=1,total_box
+        do source=1,size(all_wannier,2)
+          if(nsym==0.and..not.present(center_representative_box_ids))then
+            if(.not.integration_core(source))cycle
+          endif
           if(largest-abs(all_wannier(j,source))**2<=&
               active_symmetry_tolerance*largest)then
             center_index=source;exit
@@ -1768,16 +1783,24 @@ contains
         if(center_index==0)then
           ok=.false.;message='periodic-box Wannier center is not owned by the fragment core';return
         endif
-        if(.not.canonical_core(center_index))then
-          ok=.false.;message='periodic-box Wannier center representative is not core owned';return
+        if(nsym>0)then
+          if(.not.canonical_core(center_index))then
+            ok=.false.;message='periodic-box Wannier center representative is not core owned';return
+          endif
+        else
+          if(.not.integration_core(center_index))then
+            ok=.false.;message='local periodic-box Wannier center representative is not core owned';return
+          endif
         endif
         result%center_box_point_ids(j)=int(center_index,int64)
       enddo
-      call verify_dg_fragment_subspace_density_covariance(all_wannier,canonical_target_ids,&
-        active_symmetry_tolerance,ok,message)
-      if(.not.ok)return
+      if(nsym>0)then
+        call verify_dg_fragment_subspace_density_covariance(all_wannier,canonical_target_ids,&
+          active_symmetry_tolerance,ok,message)
+        if(.not.ok)return
       endif
-    endif
+      endif
+    end block
 
     final_metric=matmul(conjg(transpose(transform)),matmul(s,transform))
     final_metric=0.5d0*(final_metric+conjg(transpose(final_metric)))
