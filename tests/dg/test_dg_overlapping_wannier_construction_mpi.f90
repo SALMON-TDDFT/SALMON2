@@ -4,6 +4,8 @@ program test_dg_overlapping_wannier_construction_mpi
   use dg_overlapping_wannier_construction,only:s_dg_overlapping_wannier_construction,&
     construct_dg_overlapping_wannier_basis,release_dg_overlapping_wannier_construction,&
     verify_dg_overlapping_wannier_periodic_closure,assemble_dg_distributed_candidate_symmetry,&
+    assemble_dg_distributed_basis_symmetry_overlap,&
+    build_dg_pointwise_affine_owner_map,&
     align_dg_fragment_wannier_gauge,replicate_dg_fragment_wannier_representative,&
     verify_dg_fragment_wannier_streaming_closure,verify_dg_fragment_center_orbit,&
     verify_dg_uniform_fragment_target_rank,assign_dg_overlapping_wannier_occupations,&
@@ -22,8 +24,15 @@ program test_dg_overlapping_wannier_construction_mpi
   complex(8),allocatable::mismatch_values(:,:),mismatch_gradients(:,:,:)
   complex(8)::gauge(4,4)
   complex(8),allocatable::reference_projector(:,:),projector(:,:),seed_projector(:,:)
-  complex(8),allocatable::distributed_candidate(:,:),distributed_overlap(:,:,:)
+  complex(8),allocatable::distributed_candidate(:,:),distributed_overlap(:,:,:),&
+    distributed_basis(:,:),distributed_basis_overlap(:,:,:)
   integer(8),allocatable::distributed_map(:,:)
+  integer(8),allocatable::affine_local_ids(:),affine_all_ids(:,:),affine_target_ids(:),&
+    affine_second_ids(:)
+  integer,allocatable::affine_target_owner(:),affine_target_local(:),affine_wrap(:,:),&
+    affine_second_owner(:),affine_second_local(:),affine_second_wrap(:,:)
+  integer::affine_rotation(3,3)
+  real(8)::affine_translation(3)
   real(8),allocatable::distributed_weight(:)
   real(8),allocatable::seed_values(:,:)
   real(8),allocatable::occupied_seed_values(:,:)
@@ -146,6 +155,52 @@ program test_dg_overlapping_wannier_construction_mpi
     'symmetry fingerprint ignores sub-tolerance floating-point roundoff')
   deallocate(stream_values,stream_gradients,stream_ids,stream_map)
   if(nproc==2)then
+    allocate(affine_local_ids(2),affine_all_ids(2,2))
+    affine_local_ids=[int(2*rank+1,8),int(2*rank+2,8)]
+    affine_all_ids=reshape([1_8,2_8,3_8,4_8],[2,2])
+    affine_rotation=0
+    affine_rotation(1,1)=-1;affine_rotation(2,2)=1;affine_rotation(3,3)=1
+    affine_translation=[0.5d0,0d0,0d0]
+    call build_dg_pointwise_affine_owner_map([4,1,1],affine_local_ids,affine_all_ids,&
+      affine_rotation,affine_translation,1d-12,affine_target_ids,affine_target_owner,&
+      affine_target_local,affine_wrap,ok,message)
+    call require(ok,trim(message))
+    call build_dg_pointwise_affine_owner_map([4,1,1],affine_target_ids,affine_all_ids,&
+      affine_rotation,affine_translation,1d-12,affine_second_ids,affine_second_owner,&
+      affine_second_local,affine_second_wrap,ok,message)
+    call require(ok.and.all(affine_second_ids==affine_local_ids),&
+      'pointwise affine inversion closes on global physical IDs')
+    do i=1,2
+      call require(all(matmul(affine_rotation,affine_wrap(:,i))+affine_second_wrap(:,i)==0),&
+        'lattice-wrap cocycle makes inversion phase square to identity')
+    enddo
+    affine_rotation=0
+    call build_dg_pointwise_affine_owner_map([4,1,1],affine_local_ids,affine_all_ids,&
+      affine_rotation,affine_translation,1d-12,affine_second_ids,affine_second_owner,&
+      affine_second_local,affine_second_wrap,ok,message)
+    call require(.not.ok.and.trim(message)=='affine rotation must be unimodular',&
+      'noninvertible affine rotation is rejected before owner mapping')
+    if(rank==0)then
+      call require(all(affine_target_ids==[3_8,2_8]),&
+        'external-center inversion splits one source core across owners')
+      call require(all(affine_target_owner==[1,0]).and.all(affine_target_local==[1,2]),&
+        'split inversion resolves each target owner and local index')
+      call require(all(affine_wrap==0),'rank-zero inversion images require no lattice wrap')
+    else
+      call require(all(affine_target_ids==[1_8,4_8]),&
+        'pointwise inversion preserves global owner IDs independently of fragments')
+      call require(all(affine_target_owner==[0,1]).and.all(affine_target_local==[1,2]),&
+        'pointwise inversion owner resolution is rank independent')
+      call require(affine_wrap(1,1)==0.and.affine_wrap(1,2)==-1,&
+        'pointwise inversion records the negative periodic lattice wrap')
+    endif
+    deallocate(affine_local_ids,affine_all_ids,affine_target_ids,affine_target_owner,&
+      affine_target_local,affine_wrap)
+    if(allocated(affine_second_ids))deallocate(affine_second_ids)
+    if(allocated(affine_second_owner))deallocate(affine_second_owner)
+    if(allocated(affine_second_local))deallocate(affine_second_local)
+    if(allocated(affine_second_wrap))deallocate(affine_second_wrap)
+
     allocate(distributed_candidate(1,2),distributed_weight(2),distributed_map(2,2))
     distributed_candidate(1,:)=[cmplx(1+2*rank,0d0,8),cmplx(2+2*rank,0d0,8)]
     distributed_weight=1d0
@@ -161,6 +216,27 @@ program test_dg_overlapping_wannier_construction_mpi
       dot_product(distributed_candidate(1,:),[cmplx(3-2*rank,0d0,8),cmplx(4-2*rank,0d0,8)]))<1d-12,&
       'distributed translated symmetry block')
     deallocate(distributed_candidate,distributed_weight,distributed_map,distributed_overlap)
+
+    allocate(distributed_basis(2,2),distributed_weight(2),distributed_map(2,3))
+    distributed_basis=(0d0,0d0)
+    distributed_basis(rank+1,:)=[(1d0,0d0),(2d0,0d0)]
+    distributed_weight=1d0
+    distributed_map(:,1)=[int(2*rank+1,8),int(2*rank+2,8)]
+    distributed_map(:,2)=[int(2*(1-rank)+1,8),int(2*(1-rank)+2,8)]
+    distributed_map(:,3)=[int(2*rank+1,8),int(2*(1-rank)+2,8)]
+    call assemble_dg_distributed_basis_symmetry_overlap(comm,distributed_basis,distributed_weight,&
+      distributed_map,distributed_basis_overlap,ok,message)
+    call require(ok,trim(message))
+    call require(maxval(abs(distributed_basis_overlap(:,:,1)-&
+      reshape([(5d0,0d0),(0d0,0d0),(0d0,0d0),(5d0,0d0)],[2,2])))<1d-12,&
+      'distributed full-basis identity overlap')
+    call require(maxval(abs(distributed_basis_overlap(:,:,2)-&
+      reshape([(0d0,0d0),(5d0,0d0),(5d0,0d0),(0d0,0d0)],[2,2])))<1d-12,&
+      'distributed full-basis fragment-swap overlap')
+    call require(maxval(abs(distributed_basis_overlap(:,:,3)-&
+      reshape([(1d0,0d0),(4d0,0d0),(4d0,0d0),(1d0,0d0)],[2,2])))<1d-12,&
+      'distributed full-basis operation may split one core across owners')
+    deallocate(distributed_basis,distributed_weight,distributed_map,distributed_basis_overlap)
   endif
   nlocal=count([(mod(p-1,nproc)==rank,p=1,12)])
   allocate(ids(nlocal),box_ids(nlocal),symmetry_map(nlocal,2),broken_symmetry_map(nlocal,2),&

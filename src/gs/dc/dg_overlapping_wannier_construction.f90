@@ -23,6 +23,8 @@ module dg_overlapping_wannier_construction
   public::construct_dg_overlapping_wannier_basis,release_dg_overlapping_wannier_construction
   public::verify_dg_overlapping_wannier_periodic_closure
   public::assemble_dg_distributed_candidate_symmetry
+  public::assemble_dg_distributed_basis_symmetry_overlap
+  public::build_dg_pointwise_affine_owner_map
   public::align_dg_fragment_wannier_gauge
   public::replicate_dg_fragment_wannier_representative
   public::verify_dg_fragment_center_orbit
@@ -32,6 +34,86 @@ module dg_overlapping_wannier_construction
   public::verify_dg_uniform_fragment_target_rank
   public::assign_dg_overlapping_wannier_occupations
 contains
+
+  subroutine build_dg_pointwise_affine_owner_map(global_grid,local_physical_ids,all_physical_ids,&
+      integer_rotation,fractional_translation,tolerance,target_physical_ids,target_owner,&
+      target_local_index,lattice_wrap,ok,message)
+    integer,intent(in)::global_grid(3),integer_rotation(3,3)
+    integer(int64),intent(in)::local_physical_ids(:),all_physical_ids(:,:)
+    real(real64),intent(in)::fractional_translation(3),tolerance
+    integer(int64),allocatable,intent(out)::target_physical_ids(:)
+    integer,allocatable,intent(out)::target_owner(:),target_local_index(:),lattice_wrap(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer(int64)::global_count,source_id,target_id,rotation_determinant
+    integer::nlocal,nowner,point,axis,input_axis,source_grid(3),mapped_grid(3),location(2)
+    real(real64)::translation_grid(3),mapped_coordinate,nearest
+
+    ok=.false.;message='';nlocal=size(local_physical_ids);nowner=size(all_physical_ids,2)
+    if(any(global_grid<1).or.nlocal<1.or.nowner<1.or.size(all_physical_ids,1)<1.or.&
+        tolerance<=0d0.or..not.ieee_is_finite(tolerance).or.&
+        .not.all(ieee_is_finite(fractional_translation)))then
+      message='invalid pointwise affine owner-map contract';return
+    end if
+    rotation_determinant=int(integer_rotation(1,1),int64)*(&
+      int(integer_rotation(2,2),int64)*int(integer_rotation(3,3),int64)-&
+      int(integer_rotation(2,3),int64)*int(integer_rotation(3,2),int64))-&
+      int(integer_rotation(1,2),int64)*(&
+      int(integer_rotation(2,1),int64)*int(integer_rotation(3,3),int64)-&
+      int(integer_rotation(2,3),int64)*int(integer_rotation(3,1),int64))+&
+      int(integer_rotation(1,3),int64)*(&
+      int(integer_rotation(2,1),int64)*int(integer_rotation(3,2),int64)-&
+      int(integer_rotation(2,2),int64)*int(integer_rotation(3,1),int64))
+    if(abs(rotation_determinant)/=1_int64)then
+      message='affine rotation must be unimodular';return
+    end if
+    global_count=int(global_grid(1),int64)*int(global_grid(2),int64)*int(global_grid(3),int64)
+    if(global_count<1_int64.or.any(local_physical_ids<1_int64).or.&
+        any(local_physical_ids>global_count).or.any(all_physical_ids<1_int64).or.&
+        any(all_physical_ids>global_count))then
+      message='pointwise affine owner-map physical ID is outside the global grid';return
+    end if
+    if(size(all_physical_ids)/=int(global_count))then
+      message='pointwise affine owner table does not cover the global grid';return
+    end if
+    do axis=1,3
+      translation_grid(axis)=fractional_translation(axis)*real(global_grid(axis),real64)
+      if(abs(translation_grid(axis)-anint(translation_grid(axis)))>tolerance)then
+        message='affine translation is incommensurate with the global grid';return
+      end if
+    end do
+    allocate(target_physical_ids(nlocal),target_owner(nlocal),target_local_index(nlocal),&
+      lattice_wrap(3,nlocal))
+    do point=1,nlocal
+      source_id=local_physical_ids(point)-1_int64
+      source_grid(1)=int(modulo(source_id,int(global_grid(1),int64)))
+      source_grid(2)=int(modulo(source_id/int(global_grid(1),int64),int(global_grid(2),int64)))
+      source_grid(3)=int(source_id/(int(global_grid(1),int64)*int(global_grid(2),int64)))
+      do axis=1,3
+        mapped_coordinate=translation_grid(axis)
+        do input_axis=1,3
+          mapped_coordinate=mapped_coordinate+real(integer_rotation(axis,input_axis),real64)*&
+            real(source_grid(input_axis),real64)*real(global_grid(axis),real64)/&
+            real(global_grid(input_axis),real64)
+        end do
+        nearest=anint(mapped_coordinate)
+        if(abs(mapped_coordinate-nearest)>tolerance)then
+          message='affine rotation is incommensurate with the global grid';return
+        end if
+        lattice_wrap(axis,point)=floor(nearest/real(global_grid(axis),real64))
+        mapped_grid(axis)=modulo(int(nearest),global_grid(axis))
+      end do
+      target_id=int(mapped_grid(1),int64)+int(global_grid(1),int64)*(&
+        int(mapped_grid(2),int64)+int(global_grid(2),int64)*int(mapped_grid(3),int64))+1_int64
+      if(count(all_physical_ids==target_id)/=1)then
+        message='mapped global grid point does not have exactly one owner';return
+      end if
+      location=findloc(all_physical_ids,target_id)
+      target_physical_ids(point)=target_id
+      target_local_index(point)=location(1);target_owner(point)=location(2)-1
+    end do
+    ok=.true.
+  end subroutine
   subroutine verify_dg_fragment_subspace_density_covariance(values,target_ids,tolerance,ok,message)
     complex(real64),intent(in)::values(:,:)
     integer(int64),intent(in)::target_ids(:,:)
@@ -473,6 +555,65 @@ contains
     ok=.true.
 #else
     ok=.false.;message='distributed candidate symmetry requires MPI'
+#endif
+  end subroutine
+
+  subroutine assemble_dg_distributed_basis_symmetry_overlap(comm,local_basis,weights,&
+      symmetry_target_box_ids,symmetry_overlap,ok,message)
+    integer,intent(in)::comm
+    complex(real64),intent(in)::local_basis(:,:)
+    real(real64),intent(in)::weights(:)
+    integer(int64),intent(in)::symmetry_target_box_ids(:,:)
+    complex(real64),allocatable,intent(out)::symmetry_overlap(:,:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    complex(real64),allocatable::target_basis(:,:),mapped_basis(:,:),local_overlap(:,:)
+    integer::rank,nproc,ierr,nbasis,nlocal,nsym,isym,p,owner,target_rank,target_point,&
+      local_bad,global_bad,allocation_status
+
+    ok=.false.;message=''
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    nbasis=size(local_basis,1);nlocal=size(local_basis,2);nsym=size(symmetry_target_box_ids,2)
+    local_bad=merge(0,1,nbasis>0.and.nlocal>0.and.size(weights)==nlocal.and.&
+      size(symmetry_target_box_ids,1)==nlocal.and.nsym>0.and.&
+      all(ieee_is_finite(weights)).and.all(weights>=0d0).and.&
+      all(ieee_is_finite(real(local_basis))).and.all(ieee_is_finite(aimag(local_basis))))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then;message='invalid distributed full-basis symmetry-overlap contract';return;endif
+    allocate(symmetry_overlap(nbasis,nbasis,nsym),target_basis(nbasis,nlocal),&
+      mapped_basis(nlocal,nbasis),local_overlap(nbasis,nbasis),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then;message='cannot allocate distributed full-basis symmetry-overlap workspace';return;endif
+    do isym=1,nsym
+      local_bad=0
+      do p=1,nlocal
+        target_rank=int((symmetry_target_box_ids(p,isym)-1_int64)/int(nlocal,int64))
+        target_point=int(modulo(symmetry_target_box_ids(p,isym)-1_int64,int(nlocal,int64)))+1
+        if(target_rank<0.or.target_rank>=nproc.or.target_point<1.or.target_point>nlocal)local_bad=1
+      enddo
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(global_bad/=0)then;message='symmetry core-point owner map is invalid';return;endif
+      mapped_basis=(0d0,0d0)
+      do owner=0,nproc-1
+        if(rank==owner)target_basis=local_basis
+        call MPI_Bcast(target_basis,size(target_basis),MPI_DOUBLE_COMPLEX,owner,comm,ierr)
+        do p=1,nlocal
+          target_rank=int((symmetry_target_box_ids(p,isym)-1_int64)/int(nlocal,int64))
+          if(target_rank/=owner)cycle
+          target_point=int(modulo(symmetry_target_box_ids(p,isym)-1_int64,int(nlocal,int64)))+1
+          mapped_basis(p,:)=weights(p)*target_basis(:,target_point)
+        enddo
+      enddo
+      call zgemm('C','T',nbasis,nbasis,nlocal,(1d0,0d0),mapped_basis,nlocal,local_basis,nbasis,&
+        (0d0,0d0),local_overlap,nbasis)
+      call MPI_Allreduce(local_overlap,symmetry_overlap(:,:,isym),nbasis*nbasis,&
+        MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    enddo
+    ok=.true.
+#else
+    ok=.false.;message='distributed full-basis symmetry overlap requires MPI'
 #endif
   end subroutine
 
