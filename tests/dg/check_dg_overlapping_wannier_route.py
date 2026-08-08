@@ -646,6 +646,12 @@ assert materialize_position < localize_position < metric_position, (
 assert "localization_spread_evaluations" in adapter_body, (
     "production must publish the batched localization spread-evaluation count"
 )
+assert re.search(
+    r"call\s+run_dg_overlapping_wannier_scf\s*\(.*?occupations\s*,\s*"
+    r"retained_group_closure_defect\s*,\s*dg_ow_symmetry_tolerance",
+    adapter_body,
+    re.I | re.S,
+), "SCF must receive exact group-algebra closure, not streaming density covariance"
 for evidence in (
     "localization_initial_spread",
     "localization_final_spread",

@@ -920,7 +920,7 @@ contains
     ow_state%operator_fingerprint=operator_fingerprint
     call run_dg_overlapping_wannier_scf(dc%icomm_tot,ow_row_ids,ow_srows,ow_core_ids,&
       ow_core_weights,ow_core_values,ow_tail_generation,ow_basis%generation,1,basis_fingerprint,&
-      occupations,closure_residual,dg_ow_symmetry_tolerance,ow_symmetry_fingerprint,&
+      occupations,retained_group_closure_defect,dg_ow_symmetry_tolerance,ow_symmetry_fingerprint,&
       expected_core_count,dg_dc_gs_density_mix_rate,dg_dc_gs_maximum_scf_iterations,&
       dg_dc_gs_maximum_eigensolver_iterations,dg_dc_gs_final_density_tolerance,&
       dg_dc_gs_final_orbital_tolerance,ow_build_hamiltonian,ow_mix_density,ow_transaction,&
