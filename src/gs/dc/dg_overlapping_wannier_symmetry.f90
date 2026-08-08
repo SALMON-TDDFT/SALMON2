@@ -543,10 +543,12 @@ contains
     character(*),intent(out)::message
     real(8),intent(in),optional::maximum_raw_unitarity_defect
     complex(8),allocatable::metric_sqrt(:,:),metric_inverse_sqrt(:,:),gram_inverse_sqrt(:,:), &
-      transformed(:,:),unitary(:,:),difference(:,:)
-    real(8)::metric_scale,representation_scale,correction_limit
-    integer::n,nop,iop,jop,kop
-    logical::power_ok
+      transformed(:,:),unitary(:,:),difference(:,:),orthogonal_representation(:,:,:),&
+      synchronized_representation(:,:,:),initial_orthogonal_representation(:,:,:)
+    real(8)::metric_scale,representation_scale,correction_limit,synchronization_change,&
+      synchronization_correction
+    integer::n,nop,iop,jop,kop,iteration
+    logical::power_ok,synchronization_converged
     ok=.false.;message='';raw_unitarity_defect=huge(1d0);unitarity_defect=huge(1d0)
     closure_defect=huge(1d0);n=size(metric,1);nop=size(raw,3)
     if(n<1.or.size(metric,2)/=n.or.size(raw,1)/=n.or.size(raw,2)/=n.or.nop<1.or. &
@@ -567,7 +569,9 @@ contains
     if(.not.power_ok)then;message='fragment group representation metric is not positive definite';return;end if
     call hermitian_matrix_power(metric,-0.5d0,tolerance,metric_inverse_sqrt,power_ok)
     if(.not.power_ok)then;message='fragment group representation metric inverse failed';return;end if
-    allocate(representation(n,n,nop),transformed(n,n),unitary(n,n),difference(n,n))
+    allocate(representation(n,n,nop),transformed(n,n),unitary(n,n),difference(n,n),&
+      orthogonal_representation(n,n,nop),synchronized_representation(n,n,nop),&
+      initial_orthogonal_representation(n,n,nop))
     raw_unitarity_defect=0d0
     do iop=1,nop
       difference=matmul(conjg(transpose(raw(:,:,iop))),matmul(metric,raw(:,:,iop)))-metric
@@ -577,7 +581,7 @@ contains
         tolerance,gram_inverse_sqrt,power_ok)
       if(.not.power_ok)then;message='fragment group representation polar correction is singular';return;end if
       unitary=matmul(transformed,gram_inverse_sqrt)
-      representation(:,:,iop)=matmul(metric_inverse_sqrt,matmul(unitary,metric_sqrt))
+      orthogonal_representation(:,:,iop)=unitary
     end do
     correction_limit=sqrt(tolerance)
     if(present(maximum_raw_unitarity_defect))correction_limit=maximum_raw_unitarity_defect
@@ -587,6 +591,43 @@ contains
     if(raw_unitarity_defect>correction_limit)then
       message='fragment group representation raw unitarity defect exceeds correction limit';return
     end if
+    initial_orthogonal_representation=orthogonal_representation
+    synchronization_converged=.false.
+    do iteration=1,64
+      synchronized_representation=(0d0,0d0)
+      do iop=1,nop;do jop=1,nop
+        kop=product_table(iop,jop)
+        synchronized_representation(:,:,iop)=synchronized_representation(:,:,iop)+&
+          matmul(orthogonal_representation(:,:,kop),&
+          conjg(transpose(orthogonal_representation(:,:,jop))))/real(nop,8)
+      end do;end do
+      do iop=1,nop
+        call hermitian_matrix_power(matmul(conjg(transpose(synchronized_representation(:,:,iop))),&
+          synchronized_representation(:,:,iop)),-0.5d0,tolerance,gram_inverse_sqrt,power_ok)
+        if(.not.power_ok)then;message='fragment group synchronization polar factor is singular';return;end if
+        synchronized_representation(:,:,iop)=matmul(synchronized_representation(:,:,iop),gram_inverse_sqrt)
+        if(.not.all(ieee_is_finite(real(synchronized_representation(:,:,iop)))).or.&
+            .not.all(ieee_is_finite(aimag(synchronized_representation(:,:,iop)))))then
+          message='fragment group synchronization produced a nonfinite representation';return
+        end if
+      end do
+      synchronization_change=maxval(abs(synchronized_representation-orthogonal_representation))
+      orthogonal_representation=synchronized_representation
+      if(synchronization_change<=0.1d0*tolerance)then
+        synchronization_converged=.true.;exit
+      end if
+    end do
+    if(.not.synchronization_converged)then
+      message='fragment group synchronization did not converge';return
+    end if
+    synchronization_correction=maxval(abs(orthogonal_representation-initial_orthogonal_representation))
+    if(synchronization_correction>correction_limit)then
+      message='fragment group synchronization correction exceeds correction limit';return
+    end if
+    do iop=1,nop
+      representation(:,:,iop)=matmul(metric_inverse_sqrt,&
+        matmul(orthogonal_representation(:,:,iop),metric_sqrt))
+    end do
     unitarity_defect=0d0
     do iop=1,nop
       difference=matmul(conjg(transpose(representation(:,:,iop))), &

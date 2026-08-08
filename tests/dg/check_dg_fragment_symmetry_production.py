@@ -34,8 +34,11 @@ require("dc%system_tot%rion" in MAIN and "dc%system_tot%kion" in MAIN,
         "fragment symmetry discovery must use instantaneous coordinates and species")
 require(re.search(r"fragment.*atom.*(mask|index)", MAIN) is not None,
         "production must construct a separate buffered-fragment atom set")
-require(re.search(r"local_symmetry_map\s*\([^)]*,[^)]*\)", MAIN) is not None,
-        "production must pass nontrivial local point maps into Wannier construction")
+construction_call = re.search(
+    r"call\s+construct_dg_overlapping_wannier_basis\s*\((.*?)\)\s*\n",
+    MAIN, re.S)
+require(construction_call is not None and "local_symmetry_map" not in construction_call.group(1),
+        "fragment-local Wannier generation must not impose a fragment-only point group")
 require("point_group_symbol" in MAIN and "space_group_number" in MAIN,
         "production diagnostics must identify each exact fragment group")
 require("pre_projection_defect" in MAIN and "post_projection_defect" in MAIN,
@@ -46,6 +49,13 @@ require("global_inversion_promoted" in MAIN,
         "V3 publication must report whether exact global inversion was promoted")
 require("project_ow_exact_global_group" in MAIN,
         "fragment-spanning symmetries must be projected as one exact global group")
+translation_builder = re.search(
+    r"subroutine\s+build_ow_fragment_permutation_representation(.*?)end\s+subroutine",
+    MAIN, re.S)
+require(translation_builder is not None and
+        translation_builder.group(1).index("call mpi_allgather(target_fragment_local") <
+        translation_builder.group(1).index("allocate(product_table"),
+        "translation product table must be built after its global fragment map is collected")
 require("global_exact_group_promoted" in MAIN and "global_exact_group_order" in MAIN,
         "V3 publication must report the simultaneously promoted exact global group")
 require("selected_operations" in MAIN and "fixed_residual" in MAIN,

@@ -535,6 +535,7 @@ contains
       local_point_rotations(:,:,:)
     real(8),allocatable::manifest_values(:,:),initial_density_local(:),initial_density_global(:)
     type(t_dg_projection_channel),allocatable::manifest_channels(:)
+    type(s_dg_overlapping_wannier_construction)::symmetry_basis
     integer(8),allocatable::physical_ids(:),box_ids(:),symmetry_map(:,:),local_box_ids(:),&
       local_symmetry_map(:,:),center_representatives(:),&
       exact_fragment_symmetry_fingerprints(:)
@@ -551,8 +552,11 @@ contains
     real(8)::minimum_eigenvalue,condition_number,closure_residual,spread_max,gauge_correction,&
       core_electron_count
     logical::ok,reusable,localization_converged
-    complex(8),allocatable::core_periodic_phase(:,:),localization_transform(:,:)
-    real(8)::localization_initial_spread,localization_final_spread,localization_maximum_gradient
+    complex(8),allocatable::core_periodic_phase(:,:),localization_transform(:,:),retained_identity(:,:)
+    complex(8),allocatable::synchronized_local_representation(:,:,:)
+    real(8)::localization_initial_spread,localization_final_spread,localization_maximum_gradient,&
+      retained_raw_unitarity_defect,retained_unitarity_defect,retained_group_closure_defect,&
+      retained_closure_search_tolerance
     integer::localization_iterations
     character(256)::message,prefix
 
@@ -702,13 +706,42 @@ contains
       noccupied,physical_ids,&
       fragments,weights,coordinate,boundary,augmented_candidate,augmented_gradient,augmented_occupied,&
       ncore8,1,dg_ow_boundary_value_tolerance,dg_ow_boundary_gradient_tolerance,&
-      dg_dc_metric_rank_tolerance,ow_basis,ok,message,core_mask,local_box_ids,local_symmetry_map,&
-      nbox8,dg_ow_symmetry_tolerance,periodic_phase,&
+      dg_dc_metric_rank_tolerance,ow_basis,ok,message,core_mask=core_mask,&
+      periodic_localization_phase=periodic_phase,&
       center_representative_box_ids=center_representatives,&
       projection_seed_values=manifest_values)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'overlapping-Wannier construction gate failed';endif
-    allocate(local_retained_representation,source=ow_basis%symmetry_representation)
     local_target_count=ow_basis%target_rank
+    allocate(retained_identity(local_target_count,local_target_count));retained_identity=(0d0,0d0)
+    do io=1,local_target_count;retained_identity(io,io)=1d0;end do
+    retained_closure_search_tolerance=sqrt(sqrt(dg_ow_symmetry_tolerance))
+    call construct_dg_overlapping_wannier_basis(MPI_COMM_SELF,local_target_count,local_target_count,&
+      local_target_count,physical_ids,fragments,weights,coordinate,boundary,ow_basis%value,&
+      ow_basis%gradient,retained_identity,ncore8,1,dg_ow_boundary_value_tolerance,&
+      dg_ow_boundary_gradient_tolerance,dg_dc_metric_rank_tolerance,symmetry_basis,ok,message,&
+      core_mask,local_box_ids,local_symmetry_map,nbox8,retained_closure_search_tolerance,periodic_phase,&
+      center_representative_box_ids=center_representatives)
+    if(.not.ok)then
+      write(0,'(a)')trim(message)
+      error stop 'retained overlapping-Wannier point-group closure gate failed'
+    end if
+    ow_basis=symmetry_basis
+    call build_dg_fragment_group_representation(retained_identity,ow_basis%symmetry_representation,&
+      local_point_product,dg_ow_symmetry_tolerance,synchronized_local_representation,&
+      retained_raw_unitarity_defect,retained_unitarity_defect,retained_group_closure_defect,ok,message,&
+      retained_closure_search_tolerance)
+    if(.not.ok)then
+      write(0,'(a)')trim(message)
+      error stop 'retained overlapping-Wannier exact group synchronization gate failed'
+    end if
+    ow_basis%symmetry_representation=synchronized_local_representation
+    ow_basis%symmetry_closure_residual=retained_group_closure_defect
+    if(rank==0)write(*,'(a,3(a,es12.4))')&
+      '[OW-GS-DIAGNOSTIC] retained_exact_group_synchronization',&
+      ' raw_unitarity_defect=',retained_raw_unitarity_defect,&
+      ' unitarity_defect=',retained_unitarity_defect,&
+      ' closure_defect=',retained_group_closure_defect
+    allocate(local_retained_representation,source=ow_basis%symmetry_representation)
     call verify_dg_uniform_fragment_target_rank(dc%icomm_tot,local_target_count,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'nonuniform overlapping-Wannier target rank';endif
     if(local_target_count>huge(ntarget)/nproc)error stop 'overlapping-Wannier target extent overflow'
@@ -745,13 +778,14 @@ contains
     call build_ow_fragment_permutation_representation(local_target_count,nbox,symmetry_map,&
       translation_product,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'overlapping-Wannier global symmetry failed';endif
-    allocate(ow_core_values(ntarget,ncore),ow_core_gradients(3,ntarget,ncore),&
+    allocate(ow_core_values(local_target_count,ncore),ow_core_gradients(3,local_target_count,ncore),&
       ow_core_weights(ncore),ow_core_ids(ncore),ow_core_box_positions(ncore),&
       core_periodic_phase(3,ncore));core_index=0
     do p=1,nbox
       if(.not.core_mask(p))cycle
-      core_index=core_index+1;ow_core_values(:,core_index)=ow_box_values(:,p)
-      ow_core_gradients(:,:,core_index)=ow_box_gradients(:,:,p)
+      core_index=core_index+1
+      ow_core_values(:,core_index)=ow_box_values(1:local_target_count,p)
+      ow_core_gradients(:,:,core_index)=ow_box_gradients(:,1:local_target_count,p)
       ow_core_weights(core_index)=weights(p);ow_core_ids(core_index)=physical_ids(p)
       ow_core_box_positions(core_index)=p
       core_periodic_phase(1,core_index)=exp(cmplx(0d0,2d0*pi*real(modulo(physical_ids(p)-1_8,&
@@ -762,7 +796,7 @@ contains
         nxy8,8)/real(dc%lg_tot%num(3),8),8))
     enddo
     call localize_dg_overlapping_wannier_basis(dc%icomm_tot,ow_core_values,ow_core_gradients,&
-      ow_core_weights,core_periodic_phase,ow_basis%symmetry_representation,translation_product,&
+      ow_core_weights,core_periodic_phase,local_retained_representation,local_point_product,&
       dg_ow_localization_support_tolerance,dg_ow_localization_spread_tolerance,&
       dg_ow_localization_gradient_tolerance,dg_ow_symmetry_tolerance,&
       dg_ow_localization_max_iterations,localization_initial_spread,localization_final_spread,&
@@ -773,16 +807,22 @@ contains
       error stop 'overlapping-Wannier localization convergence gate failed'
     end if
     if(.not.ok)error stop 'overlapping-Wannier localization transaction failed'
-    ow_box_values=matmul(localization_transform,ow_box_values)
-    do ix=1,3
-      ow_box_gradients(ix,:,:)=matmul(localization_transform,ow_box_gradients(ix,:,:))
+    do io=0,nproc-1
+      ow_box_values(io*local_target_count+1:(io+1)*local_target_count,:)=&
+        matmul(localization_transform,&
+        ow_box_values(io*local_target_count+1:(io+1)*local_target_count,:))
+      do ix=1,3
+        ow_box_gradients(ix,io*local_target_count+1:(io+1)*local_target_count,:)=&
+          matmul(localization_transform,&
+          ow_box_gradients(ix,io*local_target_count+1:(io+1)*local_target_count,:))
+      end do
     end do
     if(rank==0)write(*,'(a,3(a,es12.4),a,i0)')&
       '[OW-GS-DIAGNOSTIC] localization_converged',&
       ' initial_spread=',localization_initial_spread,' final_spread=',localization_final_spread,&
       ' maximum_gradient=',localization_maximum_gradient,' iterations=',localization_iterations
     call verify_dg_fragment_wannier_streaming_closure(dc%icomm_tot,dc%i_frag,local_target_count,&
-      box_ids,symmetry_map,ow_box_values,ow_box_gradients,dg_ow_symmetry_tolerance,&
+      box_ids,symmetry_map,ow_box_values,ow_box_gradients,retained_closure_search_tolerance,&
       closure_residual,ow_symmetry_fingerprint,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'overlapping-Wannier symmetry gate failed';endif
     local_exact_symmetry_fingerprint=fingerprint_dg_exact_fragment_symmetry(&
@@ -797,6 +837,13 @@ contains
         ieor(exact_fragment_symmetry_fingerprints(p),int(p,8)),modulo(13*p,63)))
     end do
     deallocate(exact_fragment_symmetry_fingerprints)
+    deallocate(ow_core_values,ow_core_gradients)
+    allocate(ow_core_values(ntarget,ncore),ow_core_gradients(3,ntarget,ncore))
+    do core_index=1,ncore
+      p=ow_core_box_positions(core_index)
+      ow_core_values(:,core_index)=ow_box_values(:,p)
+      ow_core_gradients(:,:,core_index)=ow_box_gradients(:,:,p)
+    end do
     deallocate(ow_box_gradients)
     allocate(pairs(ntarget,ncore));pairs=.true.
     allocate(ow_row_ids(count(ow_basis%center_owner_rank==rank)))
@@ -1010,6 +1057,9 @@ contains
     do operation=1,nproc
       target_fragment_local(operation)=int((symmetry_map(1,operation)-1_8)/int(nbox,8))+1
     enddo
+    call MPI_Allgather(target_fragment_local,nproc,MPI_INTEGER,target_fragment_all,nproc,&
+      MPI_INTEGER,dc%icomm_tot,ierr)
+    ok=ok.and.ierr==MPI_SUCCESS
     allocate(product_table(nproc,nproc));product_table=0
     do left=1,nproc;do right=1,nproc
       do product=1,nproc
@@ -1024,9 +1074,6 @@ contains
       end do
       if(product_table(left,right)==0)ok=.false.
     end do;end do
-    call MPI_Allgather(target_fragment_local,nproc,MPI_INTEGER,target_fragment_all,nproc,&
-      MPI_INTEGER,dc%icomm_tot,ierr)
-    ok=ok.and.ierr==MPI_SUCCESS
     if(allocated(ow_basis%symmetry_representation))deallocate(ow_basis%symmetry_representation)
     allocate(ow_basis%symmetry_representation(local_target_count*nproc,local_target_count*nproc,nproc))
     ow_basis%symmetry_representation=(0d0,0d0)

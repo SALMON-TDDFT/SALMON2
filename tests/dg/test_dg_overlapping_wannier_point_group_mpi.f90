@@ -5,7 +5,9 @@ program test_dg_overlapping_wannier_point_group_mpi
   implicit none
   integer::ierr,rank,nproc
   integer::product_table(2,2)
+  integer::product_table3(3,3)
   complex(8)::metric(2,2),raw(2,2,2)
+  complex(8)::metric1(1,1),raw3(1,1,3)
   complex(8),allocatable::representation(:,:,:)
   real(8)::raw_defect,unitarity_defect,closure_defect
   logical::ok
@@ -25,13 +27,24 @@ program test_dg_overlapping_wannier_point_group_mpi
   call require(closure_defect<1d-12,'C2 multiplication closure')
   call require(maxval(abs(representation(:,:,1)-identity2()))<1d-12,'identity representation')
 
+  product_table3=reshape([1,2,3,2,3,1,3,1,2],[3,3])
+  metric1(1,1)=1d0
+  raw3(1,1,1)=exp(cmplx(0d0,2d-6,8))
+  raw3(1,1,2)=exp(cmplx(0d0,2d0*acos(-1d0)/3d0-3d-6,8))
+  raw3(1,1,3)=exp(cmplx(0d0,4d0*acos(-1d0)/3d0+1d-6,8))
+  call build_dg_fragment_group_representation(metric1,raw3,product_table3,1d-10,representation,&
+    raw_defect,unitarity_defect,closure_defect,ok,message,1d-4)
+  call require(ok,trim(message))
+  call require(closure_defect<1d-12,'noisy C3 representation synchronized to exact closure')
+
   metric=identity2()
   raw(:,:,1)=identity2()
   raw(:,:,2)=reshape([cmplx(0d0,0d0,8),cmplx(1d0,0d0,8), &
                       cmplx(-1d0,0d0,8),cmplx(0d0,0d0,8)],[2,2])
   call build_dg_fragment_group_representation(metric,raw,product_table,1d-10,representation, &
     raw_defect,unitarity_defect,closure_defect,ok,message)
-  call require(.not.ok.and.index(message,'closure')>0,'nonrepresentation must fail closure')
+  call require(.not.ok.and.(index(message,'closure')>0.or.index(message,'synchronization')>0),&
+    'nonrepresentation must fail closure or bounded synchronization')
   if(rank==0)write(*,'(a,i0,a)')'PASS overlapping-Wannier point group on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
