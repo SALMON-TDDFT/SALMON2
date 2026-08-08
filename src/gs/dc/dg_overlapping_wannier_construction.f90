@@ -25,6 +25,7 @@ module dg_overlapping_wannier_construction
   public::assemble_dg_distributed_candidate_symmetry
   public::assemble_dg_distributed_basis_symmetry_overlap
   public::build_dg_pointwise_affine_owner_map
+  public::select_dg_fixed_rank_symmetry_closed_subspace
   public::align_dg_fragment_wannier_gauge
   public::replicate_dg_fragment_wannier_representative
   public::verify_dg_fragment_center_orbit
@@ -34,6 +35,143 @@ module dg_overlapping_wannier_construction
   public::verify_dg_uniform_fragment_target_rank
   public::assign_dg_overlapping_wannier_occupations
 contains
+
+  subroutine select_dg_fixed_rank_symmetry_closed_subspace(metric,occupied,localizer,&
+      representation,product_table,target_rank,tolerance,transform,occupied_inclusion,&
+      subspace_leakage,ok,message)
+    complex(real64),intent(in)::metric(:,:),occupied(:,:),localizer(:,:),representation(:,:,:)
+    integer,intent(in)::product_table(:,:),target_rank
+    real(real64),intent(in)::tolerance
+    complex(real64),allocatable,intent(out)::transform(:,:)
+    real(real64),intent(out)::occupied_inclusion,subspace_leakage
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(real64),allocatable::metric_vectors(:,:),metric_sqrt(:,:),metric_inverse_sqrt(:,:),&
+      orthogonal_representation(:,:,:),orthogonal_occupied(:,:),occupied_projector(:,:),&
+      identity(:,:),difference(:,:),orthogonal_localizer(:,:),averaged_localizer(:,:),&
+      complement_projector(:,:),complement_vectors(:,:),complement_basis(:,:),&
+      complement_localizer(:,:),complement_eigenvectors(:,:),selected_orthogonal(:,:),&
+      selected_projector(:,:),work(:,:)
+    real(real64),allocatable::metric_spectrum(:),complement_projector_spectrum(:),&
+      complement_spectrum(:)
+    real(real64)::scale,defect,boundary_scale
+    integer::n,noccupied,noperation,ncomplement,nselect,i,j,operation,left,right,product,column
+    logical::eigen_ok
+    character(256)::detail
+
+    ok=.false.;message='';occupied_inclusion=huge(1d0);subspace_leakage=huge(1d0)
+    n=size(metric,1);noccupied=size(occupied,2);noperation=size(representation,3)
+    if(n<1.or.size(metric,2)/=n.or.size(localizer,1)/=n.or.size(localizer,2)/=n.or.&
+        size(occupied,1)/=n.or.noccupied<1.or.target_rank<noccupied.or.target_rank>n.or.&
+        size(representation,1)/=n.or.size(representation,2)/=n.or.noperation<1.or.&
+        any(shape(product_table)/=[noperation,noperation]).or.tolerance<=0d0.or.&
+        .not.ieee_is_finite(tolerance))then
+      message='invalid fixed-rank symmetry-closed subspace contract';return
+    end if
+    if(.not.all(ieee_is_finite(real(metric))).or..not.all(ieee_is_finite(aimag(metric))).or.&
+        .not.all(ieee_is_finite(real(occupied))).or..not.all(ieee_is_finite(aimag(occupied))).or.&
+        .not.all(ieee_is_finite(real(localizer))).or..not.all(ieee_is_finite(aimag(localizer))).or.&
+        .not.all(ieee_is_finite(real(representation))).or.&
+        .not.all(ieee_is_finite(aimag(representation))))then
+      message='nonfinite fixed-rank symmetry-closed subspace input';return
+    end if
+    scale=max(1d0,maxval(abs(metric)))
+    if(maxval(abs(metric-conjg(transpose(metric))))>tolerance*scale.or.&
+        maxval(abs(localizer-conjg(transpose(localizer))))>&
+        tolerance*max(1d0,maxval(abs(localizer))))then
+      message='fixed-rank metric/localizer is not Hermitian';return
+    end if
+    call hermitian_eigensystem(metric,metric_spectrum,metric_vectors,eigen_ok,detail)
+    if(.not.eigen_ok.or.minval(metric_spectrum)<=tolerance*maxval(metric_spectrum))then
+      message='fixed-rank candidate metric is not positive definite';return
+    end if
+    allocate(metric_sqrt(n,n),metric_inverse_sqrt(n,n),identity(n,n),difference(n,n),&
+      orthogonal_representation(n,n,noperation),orthogonal_occupied(n,noccupied),&
+      occupied_projector(n,n),orthogonal_localizer(n,n),averaged_localizer(n,n),&
+      complement_projector(n,n),selected_projector(n,n),work(n,n))
+    metric_sqrt=metric_vectors;metric_inverse_sqrt=metric_vectors
+    do i=1,n
+      metric_sqrt(:,i)=sqrt(metric_spectrum(i))*metric_sqrt(:,i)
+      metric_inverse_sqrt(:,i)=metric_inverse_sqrt(:,i)/sqrt(metric_spectrum(i))
+    end do
+    metric_sqrt=matmul(metric_sqrt,conjg(transpose(metric_vectors)))
+    metric_inverse_sqrt=matmul(metric_inverse_sqrt,conjg(transpose(metric_vectors)))
+    identity=(0d0,0d0);do i=1,n;identity(i,i)=1d0;end do
+    orthogonal_occupied=matmul(metric_sqrt,occupied)
+    difference(1:noccupied,1:noccupied)=&
+      matmul(conjg(transpose(orthogonal_occupied)),orthogonal_occupied)
+    do i=1,noccupied;difference(i,i)=difference(i,i)-1d0;end do
+    if(maxval(abs(difference(1:noccupied,1:noccupied)))>tolerance)then
+      message='fixed-rank occupied coefficients are not metric orthonormal';return
+    end if
+    occupied_projector=matmul(orthogonal_occupied,conjg(transpose(orthogonal_occupied)))
+    do operation=1,noperation
+      orthogonal_representation(:,:,operation)=matmul(metric_sqrt,&
+        matmul(representation(:,:,operation),metric_inverse_sqrt))
+      defect=maxval(abs(matmul(conjg(transpose(orthogonal_representation(:,:,operation))),&
+        orthogonal_representation(:,:,operation))-identity))
+      if(defect>tolerance)then;message='fixed-rank symmetry representation is not metric unitary';return;end if
+      defect=maxval(abs(matmul(orthogonal_representation(:,:,operation),occupied_projector)-&
+        matmul(occupied_projector,orthogonal_representation(:,:,operation))))
+      if(defect>tolerance)then;message='occupied subspace is not closed under full-system symmetry';return;end if
+    end do
+    do left=1,noperation;do right=1,noperation
+      product=product_table(left,right)
+      if(product<1.or.product>noperation)then;message='fixed-rank symmetry product is invalid';return;end if
+      defect=maxval(abs(matmul(orthogonal_representation(:,:,left),&
+        orthogonal_representation(:,:,right))-orthogonal_representation(:,:,product)))
+      if(defect>tolerance)then;message='fixed-rank symmetry representation is not group closed';return;end if
+    end do;end do
+    orthogonal_localizer=matmul(metric_inverse_sqrt,matmul(localizer,metric_inverse_sqrt))
+    averaged_localizer=(0d0,0d0)
+    do operation=1,noperation
+      averaged_localizer=averaged_localizer+matmul(orthogonal_representation(:,:,operation),&
+        matmul(orthogonal_localizer,conjg(transpose(orthogonal_representation(:,:,operation)))))
+    end do
+    averaged_localizer=averaged_localizer/real(noperation,real64)
+    averaged_localizer=0.5d0*(averaged_localizer+conjg(transpose(averaged_localizer)))
+    complement_projector=identity-occupied_projector
+    call hermitian_eigensystem(complement_projector,complement_projector_spectrum,&
+      complement_vectors,eigen_ok,detail)
+    if(.not.eigen_ok)then;message='fixed-rank occupied complement diagonalization failed';return;end if
+    ncomplement=n-noccupied
+    if(count(complement_projector_spectrum>0.5d0)/=ncomplement)then
+      message='fixed-rank occupied complement has inconsistent dimension';return
+    end if
+    allocate(complement_basis(n,ncomplement))
+    column=0
+    do i=1,n
+      if(complement_projector_spectrum(i)<=0.5d0)cycle
+      column=column+1;complement_basis(:,column)=complement_vectors(:,i)
+    end do
+    complement_localizer=matmul(conjg(transpose(complement_basis)),&
+      matmul(averaged_localizer,complement_basis))
+    call hermitian_eigensystem(complement_localizer,complement_spectrum,&
+      complement_eigenvectors,eigen_ok,detail)
+    if(.not.eigen_ok)then;message='fixed-rank complement localizer diagonalization failed';return;end if
+    nselect=target_rank-noccupied
+    if(nselect>0.and.nselect<ncomplement)then
+      boundary_scale=max(1d0,maxval(abs(complement_spectrum)))
+      if(abs(complement_spectrum(nselect+1)-complement_spectrum(nselect))<=tolerance*boundary_scale)then
+        message='target rank cuts a symmetry-degenerate block';return
+      end if
+    end if
+    allocate(selected_orthogonal(n,target_rank));selected_orthogonal(:,1:noccupied)=orthogonal_occupied
+    if(nselect>0)selected_orthogonal(:,noccupied+1:target_rank)=matmul(complement_basis,&
+      complement_eigenvectors(:,1:nselect))
+    allocate(transform(n,target_rank));transform=matmul(metric_inverse_sqrt,selected_orthogonal)
+    selected_projector=matmul(selected_orthogonal,conjg(transpose(selected_orthogonal)))
+    occupied_inclusion=maxval(abs(matmul(identity-selected_projector,orthogonal_occupied)))
+    subspace_leakage=0d0
+    do operation=1,noperation
+      work=matmul(identity-selected_projector,&
+        matmul(orthogonal_representation(:,:,operation),selected_projector))
+      subspace_leakage=max(subspace_leakage,maxval(abs(work)))
+    end do
+    if(occupied_inclusion>tolerance)then;message='selected subspace lost occupied inclusion';return;end if
+    if(subspace_leakage>tolerance)then;message='selected subspace is not symmetry closed';return;end if
+    ok=.true.
+  end subroutine
 
   subroutine build_dg_pointwise_affine_owner_map(global_grid,local_physical_ids,all_physical_ids,&
       integer_rotation,fractional_translation,tolerance,target_physical_ids,target_owner,&

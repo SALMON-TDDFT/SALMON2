@@ -6,6 +6,7 @@ program test_dg_overlapping_wannier_construction_mpi
     verify_dg_overlapping_wannier_periodic_closure,assemble_dg_distributed_candidate_symmetry,&
     assemble_dg_distributed_basis_symmetry_overlap,&
     build_dg_pointwise_affine_owner_map,&
+    select_dg_fixed_rank_symmetry_closed_subspace,&
     align_dg_fragment_wannier_gauge,replicate_dg_fragment_wannier_representative,&
     verify_dg_fragment_wannier_streaming_closure,verify_dg_fragment_center_orbit,&
     verify_dg_uniform_fragment_target_rank,assign_dg_overlapping_wannier_occupations,&
@@ -52,6 +53,11 @@ program test_dg_overlapping_wannier_construction_mpi
   real(8)::gauge_residual,gauge_correction,theta
   complex(8)::gauge_values(2,2),gauge_gradients(3,2,2)
   complex(8)::mixed_wannier(2,2)
+  complex(8)::closure_metric(6,6),closure_localizer(6,6),closure_group(6,6,2),&
+    closure_occupied(6,2)
+  complex(8),allocatable::closure_transform(:,:)
+  integer::closure_product(2,2)
+  real(8)::subspace_leakage,occupied_inclusion
   complex(8)::fractional_core_candidates(2,2)
   complex(8),allocatable::core_occupied_coefficients(:,:)
   integer(8)::mixed_map(2,1)
@@ -62,6 +68,33 @@ program test_dg_overlapping_wannier_construction_mpi
 
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+  closure_metric=(0d0,0d0);closure_localizer=(0d0,0d0);closure_group=(0d0,0d0)
+  closure_occupied=(0d0,0d0)
+  do i=1,6
+    closure_metric(i,i)=1d0;closure_group(i,i,1)=1d0
+  enddo
+  closure_group(2,1,2)=1d0;closure_group(1,2,2)=1d0
+  closure_group(4,3,2)=1d0;closure_group(3,4,2)=1d0
+  closure_group(6,5,2)=1d0;closure_group(5,6,2)=1d0
+  closure_localizer(1,1)=0d0;closure_localizer(2,2)=0d0
+  closure_localizer(3,3)=1d0;closure_localizer(4,4)=1d0
+  closure_localizer(5,5)=2d0;closure_localizer(6,6)=2d0
+  closure_occupied(1,1)=1d0;closure_occupied(2,2)=1d0
+  closure_product=reshape([1,2,2,1],[2,2])
+  call select_dg_fixed_rank_symmetry_closed_subspace(closure_metric,closure_occupied,&
+    closure_localizer,closure_group,closure_product,4,1d-12,closure_transform,&
+    occupied_inclusion,subspace_leakage,ok,message)
+  call require(ok.and.all(shape(closure_transform)==[6,4]),trim(message))
+  projector=matmul(closure_transform,conjg(transpose(closure_transform)))
+  call require(maxval(abs(projector(1:4,1:4)-closure_metric(1:4,1:4)))<1d-12.and.&
+    maxval(abs(projector(5:6,:)))<1d-12,'fixed-rank selector keeps complete symmetry blocks')
+  call require(occupied_inclusion<1d-12.and.subspace_leakage<1d-12,&
+    'fixed-rank selector contains occupied space and closes under the group')
+  call select_dg_fixed_rank_symmetry_closed_subspace(closure_metric,closure_occupied,&
+    closure_localizer,closure_group,closure_product,3,1d-12,closure_transform,&
+    occupied_inclusion,subspace_leakage,ok,message)
+  call require(.not.ok.and.trim(message)=='target rank cuts a symmetry-degenerate block',&
+    'fixed-rank selector rejects an incomplete symmetry block')
   call assign_dg_overlapping_wannier_occupations(5d0,occupations,ok,message)
   call require(ok.and.maxval(abs(occupations-[2d0,2d0,1d0]))<1d-14,&
     'overlapping-Wannier fractional occupation assignment')
