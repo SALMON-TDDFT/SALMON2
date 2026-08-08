@@ -66,6 +66,7 @@ contains
     integer,optional,intent(out)::spread_evaluations
     integer,allocatable::pair_first(:),pair_second(:)
     real(real64),allocatable::pair_support(:)
+    real(real64),allocatable::graph_gradient_real(:),graph_gradient_imag(:)
     complex(real64),allocatable::raw_generator(:,:),sweep_generator(:,:),scaled_generator(:,:),&
       projection_work(:,:),search_generator(:,:),previous_gradient(:,:),previous_direction(:,:),&
       transported_gradient(:,:),transported_direction(:,:),transport_rotation(:,:),&
@@ -142,14 +143,12 @@ contains
     have_previous=.false.
     do iterations=1,maximum_iterations
       raw_generator=(0d0,0d0)
+      call collective_graph_gradients(comm,values,weights,phases,pair_first,pair_second,&
+        graph_gradient_real,graph_gradient_imag,step_ok,detail)
+      if(.not.step_ok)then;message=trim(detail);return;end if
       do edge=1,size(pair_first)
         first=pair_first(edge);second=pair_second(edge)
-        call collective_pair_gradient(comm,values([first,second],:),&
-          weights,phases,0d0,gradient_real,step_ok,detail)
-        if(.not.step_ok)then;message=trim(detail);return;end if
-        call collective_pair_gradient(comm,values([first,second],:),&
-          weights,phases,0.5d0*acos(-1d0),gradient_imag,step_ok,detail)
-        if(.not.step_ok)then;message=trim(detail);return;end if
+        gradient_real=graph_gradient_real(edge);gradient_imag=graph_gradient_imag(edge)
         current_gradient=sqrt(gradient_real**2+gradient_imag**2)
         if(current_gradient<=tiny(1d0))cycle
         phi=atan2(gradient_imag,gradient_real)+acos(-1d0)
@@ -293,6 +292,91 @@ contains
     ok=ieee_is_finite(spread)
     if(.not.ok)message='collective periodic spread is not finite'
   end subroutine collective_periodic_spread
+
+  subroutine collective_graph_gradients(comm,values,weights,phases,pair_first,pair_second,&
+      gradient_real,gradient_imag,ok,message)
+    integer,intent(in)::comm,pair_first(:),pair_second(:)
+    complex(real64),intent(in)::values(:,:),phases(:,:)
+    real(real64),intent(in)::weights(:)
+    real(real64),allocatable,intent(out)::gradient_real(:),gradient_imag(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    real(real64),allocatable::local_norm(:,:,:),global_norm(:,:,:),&
+      local_norm_derivative(:,:,:),global_norm_derivative(:,:,:)
+    complex(real64),allocatable::local_moment(:,:,:,:),global_moment(:,:,:,:),&
+      local_moment_derivative(:,:,:,:),global_moment_derivative(:,:,:,:)
+    complex(real64)::a,b,direction,phase_factor,quotient,quotient_derivative
+    real(real64)::density,density_derivative,derivative,phi
+    integer::nedge,naxis,edge,point,wannier,axis,component,first,second,ierr
+
+    ok=.false.;message='';nedge=size(pair_first);naxis=size(phases,1)
+    if(nedge<1.or.size(pair_second)/=nedge.or.size(values,2)/=size(weights).or.&
+        size(phases,2)/=size(weights).or.any(pair_first<1).or.any(pair_second>size(values,1)))then
+      message='invalid collective graph-gradient contract';return
+    end if
+    allocate(local_norm(2,nedge,2),global_norm(2,nedge,2),&
+      local_norm_derivative(2,nedge,2),global_norm_derivative(2,nedge,2),&
+      local_moment(naxis,2,nedge,2),global_moment(naxis,2,nedge,2),&
+      local_moment_derivative(naxis,2,nedge,2),global_moment_derivative(naxis,2,nedge,2),&
+      gradient_real(nedge),gradient_imag(nedge))
+    local_norm=0d0;local_norm_derivative=0d0;local_moment=(0d0,0d0)
+    local_moment_derivative=(0d0,0d0)
+    do component=1,2
+      phi=merge(0d0,0.5d0*acos(-1d0),component==1)
+      phase_factor=exp(cmplx(0d0,phi,real64))
+      do edge=1,nedge
+        first=pair_first(edge);second=pair_second(edge)
+        do point=1,size(values,2)
+          a=values(first,point);b=values(second,point)
+          do wannier=1,2
+            if(wannier==1)then
+              direction=phase_factor*b;density=weights(point)*abs(a)**2
+              density_derivative=2d0*weights(point)*real(conjg(a)*direction,real64)
+            else
+              direction=-conjg(phase_factor)*a;density=weights(point)*abs(b)**2
+              density_derivative=2d0*weights(point)*real(conjg(b)*direction,real64)
+            end if
+            local_norm(wannier,edge,component)=local_norm(wannier,edge,component)+density
+            local_norm_derivative(wannier,edge,component)=&
+              local_norm_derivative(wannier,edge,component)+density_derivative
+            do axis=1,naxis
+              local_moment(axis,wannier,edge,component)=&
+                local_moment(axis,wannier,edge,component)+density*phases(axis,point)
+              local_moment_derivative(axis,wannier,edge,component)=&
+                local_moment_derivative(axis,wannier,edge,component)+&
+                density_derivative*phases(axis,point)
+            end do
+          end do
+        end do
+      end do
+    end do
+#ifdef USE_MPI
+    call MPI_Allreduce(local_norm,global_norm,size(local_norm),MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+    call MPI_Allreduce(local_norm_derivative,global_norm_derivative,size(local_norm_derivative),&
+      MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+    call MPI_Allreduce(local_moment,global_moment,size(local_moment),MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    call MPI_Allreduce(local_moment_derivative,global_moment_derivative,size(local_moment_derivative),&
+      MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='collective graph-gradient reduction failed';return;end if
+#else
+    global_norm=local_norm;global_norm_derivative=local_norm_derivative
+    global_moment=local_moment;global_moment_derivative=local_moment_derivative
+#endif
+    if(any(global_norm<=tiny(1d0)))then;message='collective graph-gradient norm is zero';return;end if
+    do component=1,2;do edge=1,nedge
+      derivative=0d0
+      do wannier=1,2;do axis=1,naxis
+        quotient=global_moment(axis,wannier,edge,component)/global_norm(wannier,edge,component)
+        quotient_derivative=(global_moment_derivative(axis,wannier,edge,component)*&
+          global_norm(wannier,edge,component)-global_moment(axis,wannier,edge,component)*&
+          global_norm_derivative(wannier,edge,component))/global_norm(wannier,edge,component)**2
+        derivative=derivative-2d0*real(conjg(quotient)*quotient_derivative,real64)
+      end do;end do
+      if(component==1)then;gradient_real(edge)=derivative;else;gradient_imag(edge)=derivative;end if
+    end do;end do
+    ok=all(ieee_is_finite(gradient_real)).and.all(ieee_is_finite(gradient_imag))
+    if(.not.ok)message='collective graph gradient is not finite'
+  end subroutine collective_graph_gradients
 
   subroutine collective_pair_gradient(comm,pair,weights,phases,phi,derivative,ok,message)
     integer,intent(in)::comm

@@ -658,6 +658,9 @@ assert re.search(
     localization_source,
     re.I | re.S,
 ), "localization gradient assembly must scale with the bounded overlap graph"
+assert "call collective_graph_gradients" in localization_source.lower(), (
+    "all overlap-graph gradients must share one batched collective reduction"
+)
 closure_call = adapter_body.find("call build_dg_distributed_symmetry_closed_basis")
 localization_call = adapter_body.find("call localize_dg_overlapping_wannier_basis")
 assert closure_call >= 0, (
