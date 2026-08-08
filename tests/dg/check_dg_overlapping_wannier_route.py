@@ -661,6 +661,14 @@ assert re.search(
 assert "call collective_graph_gradients" in localization_source.lower(), (
     "all overlap-graph gradients must share one batched collective reduction"
 )
+exponential_body = re.search(
+    r"subroutine\s+exponentiate_antihermitian_block\b(?P<body>.*?)end\s+subroutine",
+    localization_source,
+    re.I | re.S,
+)
+assert exponential_body and "zheev" in exponential_body.group("body").lower(), (
+    "dense global gauge exponential must use one Hermitian eigensolve, not a Taylor matmul series"
+)
 closure_call = adapter_body.find("call build_dg_distributed_symmetry_closed_basis")
 localization_call = adapter_body.find("call localize_dg_overlapping_wannier_basis")
 assert closure_call >= 0, (

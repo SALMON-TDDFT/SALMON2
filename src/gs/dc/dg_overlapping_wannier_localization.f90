@@ -1,6 +1,9 @@
 #include "config.h"
 module dg_overlapping_wannier_localization
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+  use,intrinsic::ieee_exceptions,only:ieee_get_halting_mode,ieee_set_halting_mode,&
+    ieee_set_flag,ieee_invalid
+  use,intrinsic::ieee_exceptions,only:ieee_divide_by_zero,ieee_overflow
   use,intrinsic::iso_fortran_env,only:real64
 #ifdef USE_MPI
   use mpi
@@ -440,26 +443,58 @@ contains
     complex(real64),allocatable,intent(out)::rotation(:,:)
     logical,intent(out)::ok
     character(*),intent(out)::message
-    complex(real64),allocatable::scaled(:,:),term(:,:),identity(:,:)
-    real(real64)::matrix_norm,term_norm
-    integer::n,i,k,scaling_steps
+    complex(real64),allocatable::hermitian(:,:),scaled_vectors(:,:),work(:),identity(:,:)
+    complex(real64)::work_query(1)
+    real(real64),allocatable::eigenvalues(:),rwork(:)
+    integer::n,i,lwork,info
+    logical::invalid_halting,zero_halting,overflow_halting
+    interface
+      subroutine zheev(jobz,uplo,n,a,lda,w,work,lwork,rwork,info)
+        character(1),intent(in)::jobz,uplo
+        integer,intent(in)::n,lda,lwork
+        complex(8),intent(inout)::a(lda,*),work(*)
+        real(8),intent(out)::w(*),rwork(*)
+        integer,intent(out)::info
+      end subroutine zheev
+    end interface
     n=size(generator,1);ok=.false.;message=''
-    if(n<1.or.size(generator,2)/=n.or.&
+    if(n<1.or.size(generator,2)/=n.or..not.all(ieee_is_finite(real(generator))).or.&
+        .not.all(ieee_is_finite(aimag(generator))).or.&
         maxval(abs(generator+conjg(transpose(generator))))>1d-10*max(1d0,maxval(abs(generator))))then
       message='invalid anti-Hermitian localization block';return
     end if
-    allocate(scaled(n,n),term(n,n),identity(n,n),rotation(n,n))
+    allocate(hermitian(n,n),identity(n,n),rotation(n,n),eigenvalues(n),rwork(max(1,3*n-2)))
     identity=(0d0,0d0);do i=1,n;identity(i,i)=1d0;end do
-    matrix_norm=maxval(sum(abs(generator),dim=2));scaling_steps=0
-    if(matrix_norm>0.25d0)scaling_steps=max(0,ceiling(log(matrix_norm/0.25d0)/log(2d0)))
-    scaled=generator/(2d0**scaling_steps);rotation=identity;term=identity
-    do k=1,64
-      term=matmul(term,scaled)/real(k,8);rotation=rotation+term
-      term_norm=maxval(abs(term))
-      if(term_norm<=epsilon(1d0)*max(1d0,maxval(abs(rotation))))exit
+    hermitian=cmplx(0d0,1d0,real64)*generator
+    call ieee_get_halting_mode(ieee_invalid,invalid_halting)
+    call ieee_get_halting_mode(ieee_divide_by_zero,zero_halting)
+    call ieee_get_halting_mode(ieee_overflow,overflow_halting)
+    call ieee_set_halting_mode(ieee_invalid,.false.)
+    call ieee_set_halting_mode(ieee_divide_by_zero,.false.)
+    call ieee_set_halting_mode(ieee_overflow,.false.)
+    lwork=-1
+    call zheev('V','U',n,hermitian,n,eigenvalues,work_query,lwork,rwork,info)
+    if(info/=0)then
+      call ieee_set_flag(ieee_invalid,.false.)
+      call ieee_set_flag(ieee_divide_by_zero,.false.);call ieee_set_flag(ieee_overflow,.false.)
+      call ieee_set_halting_mode(ieee_invalid,invalid_halting)
+      call ieee_set_halting_mode(ieee_divide_by_zero,zero_halting)
+      call ieee_set_halting_mode(ieee_overflow,overflow_halting)
+      message='anti-Hermitian exponential workspace query failed';return
+    end if
+    lwork=max(2*n-1,nint(real(work_query(1),real64)));allocate(work(lwork))
+    call zheev('V','U',n,hermitian,n,eigenvalues,work,lwork,rwork,info)
+    call ieee_set_flag(ieee_invalid,.false.)
+    call ieee_set_flag(ieee_divide_by_zero,.false.);call ieee_set_flag(ieee_overflow,.false.)
+    call ieee_set_halting_mode(ieee_invalid,invalid_halting)
+    call ieee_set_halting_mode(ieee_divide_by_zero,zero_halting)
+    call ieee_set_halting_mode(ieee_overflow,overflow_halting)
+    if(info/=0)then;message='anti-Hermitian exponential eigensolve failed';return;end if
+    allocate(scaled_vectors(n,n));scaled_vectors=hermitian
+    do i=1,n
+      scaled_vectors(:,i)=scaled_vectors(:,i)*exp(cmplx(0d0,-eigenvalues(i),real64))
     end do
-    if(k>64)then;message='anti-Hermitian block exponential series did not converge';return;end if
-    do k=1,scaling_steps;rotation=matmul(rotation,rotation);end do
+    rotation=matmul(scaled_vectors,conjg(transpose(hermitian)))
     identity=matmul(conjg(transpose(rotation)),rotation)
     do i=1,n;identity(i,i)=identity(i,i)-1d0;end do
     if(maxval(abs(identity))>1d-10)then;message='localization block exponential is not unitary';return;end if
