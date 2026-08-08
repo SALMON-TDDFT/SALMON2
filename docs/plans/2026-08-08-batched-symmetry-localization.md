@@ -57,6 +57,11 @@ noncommuting projected gradients.
 
 Normalize the accumulated generator, exponentiate once per trial, update the full values and gradients, evaluate collective spread, and either publish the transform or restore the backup.  Reject a nonstationary sweep when all 40 trials fail.
 
+After an accepted step, transport the projected gradient and accepted direction by unitary
+conjugation.  Form a nonnegative Polak--Ribiere coefficient on the next sweep.  Reset to steepest
+descent if the conjugate direction is not a descent direction or if its line search fails, and reject
+only if the reset direction also fails.
+
 **Step 4: Verify GREEN and invariants**
 
 Run MPI 1/2/4/8.  Require convergence, strict spread reduction, unitary transform, exact group commutation, identical rank result, and bounded spread-evaluation count.

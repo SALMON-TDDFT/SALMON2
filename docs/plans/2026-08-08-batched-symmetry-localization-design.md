@@ -27,6 +27,13 @@ periodic spread.  On rejection, restore the complete backup and halve the step. 
 gradient below tolerance converges without applying a transform.  A nonzero gradient for which no
 line-search step is accepted is a hard failure rather than false convergence.
 
+Use Riemannian Polak--Ribiere conjugate directions after the first accepted step.  Transport the
+previous projected gradient and search generator into the new Wannier gauge by conjugation with the
+accepted unitary.  Clamp the Polak--Ribiere coefficient to be nonnegative.  Reset to the current
+projected steepest direction whenever the proposed direction has a nonpositive gradient inner
+product or its Armijo search fails.  This preserves monotonicity and exact commutation while avoiding
+the empirically inadequate convergence rate of normalized steepest descent.
+
 The quadratic pair work and matrices remain local to 48 orbitals rather than the 384-orbital full
 system.  All fragment ranks participate in the same collective gradient and spread objective and therefore
 apply the identical transform.  This preserves full-system operations that permute fragments while
