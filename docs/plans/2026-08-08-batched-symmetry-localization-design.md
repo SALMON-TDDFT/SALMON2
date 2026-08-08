@@ -34,6 +34,12 @@ projected steepest direction whenever the proposed direction has a nonpositive g
 product or its Armijo search fails.  This preserves monotonicity and exact commutation while avoiding
 the empirically inadequate convergence rate of normalized steepest descent.
 
+Set the spread-decrease resolution to `1e-14` while retaining the independent projected-gradient
+gate at `1e-6`.  Genuine Si64 reached a projected gradient of `4.284e-6` and produced a reproducible
+best trial decrease of `8.95e-13`; the previous `1e-12` spread floor incorrectly rejected that
+resolvable double-precision decrease.  This change permits continued descent and does not relax the
+gradient convergence requirement.
+
 The quadratic pair work and matrices remain local to 48 orbitals rather than the 384-orbital full
 system.  All fragment ranks participate in the same collective gradient and spread objective and therefore
 apply the identical transform.  This preserves full-system operations that permute fragments while
