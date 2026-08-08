@@ -7,6 +7,7 @@ program test_dg_overlapping_wannier_construction_mpi
     assemble_dg_distributed_basis_symmetry_overlap,&
     build_dg_pointwise_affine_owner_map,&
     select_dg_fixed_rank_symmetry_closed_subspace,&
+    build_dg_distributed_symmetry_closed_basis,&
     align_dg_fragment_wannier_gauge,replicate_dg_fragment_wannier_representative,&
     verify_dg_fragment_wannier_streaming_closure,verify_dg_fragment_center_orbit,&
     verify_dg_uniform_fragment_target_rank,assign_dg_overlapping_wannier_occupations,&
@@ -26,8 +27,10 @@ program test_dg_overlapping_wannier_construction_mpi
   complex(8)::gauge(4,4)
   complex(8),allocatable::reference_projector(:,:),projector(:,:),seed_projector(:,:)
   complex(8),allocatable::distributed_candidate(:,:),distributed_overlap(:,:,:),&
-    distributed_basis(:,:),distributed_basis_overlap(:,:,:)
-  integer(8),allocatable::distributed_map(:,:)
+    distributed_basis(:,:),distributed_basis_overlap(:,:,:),orbit_seed(:,:),orbit_basis(:,:),&
+    orbit_gram(:,:)
+  integer::orbit_rank
+  integer(8),allocatable::distributed_map(:,:),invalid_orbit_map(:,:)
   integer(8),allocatable::affine_local_ids(:),affine_all_ids(:,:),affine_target_ids(:),&
     affine_second_ids(:)
   integer,allocatable::affine_target_owner(:),affine_target_local(:),affine_wrap(:,:),&
@@ -269,6 +272,30 @@ program test_dg_overlapping_wannier_construction_mpi
     call require(maxval(abs(distributed_basis_overlap(:,:,3)-&
       reshape([(1d0,0d0),(4d0,0d0),(4d0,0d0),(1d0,0d0)],[2,2])))<1d-12,&
       'distributed full-basis operation may split one core across owners')
+
+    allocate(orbit_seed(1,2));orbit_seed=(0d0,0d0)
+    if(rank==0)orbit_seed(1,1)=1d0
+    call build_dg_distributed_symmetry_closed_basis(comm,orbit_seed,distributed_weight,&
+      distributed_map(:,1:2),closure_product,1,2,1d-12,orbit_basis,orbit_rank,ok,message)
+    call require(ok.and.orbit_rank==2.and.all(shape(orbit_basis)==[2,2]),trim(message))
+    orbit_gram=matmul(orbit_basis,conjg(transpose(orbit_basis)))
+    call MPI_Allreduce(MPI_IN_PLACE,orbit_gram,4,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    call require(maxval(abs(orbit_gram-reshape([(1d0,0d0),(0d0,0d0),&
+      (0d0,0d0),(1d0,0d0)],[2,2])))<1d-12,&
+      'streamed symmetry orbit is globally orthonormal')
+    call build_dg_distributed_symmetry_closed_basis(comm,orbit_seed,distributed_weight,&
+      distributed_map(:,1:2),closure_product,1,1,1d-12,orbit_basis,orbit_rank,ok,message)
+    call require(.not.ok.and.trim(message)=='required symmetry orbit exceeds target rank',&
+      'required occupied orbit cannot be truncated to the target rank')
+    allocate(invalid_orbit_map,source=distributed_map(:,1:2))
+    if(rank==0)invalid_orbit_map(:,2)=[3_8,3_8]
+    call build_dg_distributed_symmetry_closed_basis(comm,orbit_seed,distributed_weight,&
+      invalid_orbit_map,closure_product,1,2,1d-12,orbit_basis,orbit_rank,ok,message)
+    call require(.not.ok.and.trim(message)=='point maps are not a closed permutation group',&
+      'streamed symmetry closure rejects a nonbijective global point action')
+    deallocate(invalid_orbit_map)
+    deallocate(orbit_seed,orbit_gram)
+    if(allocated(orbit_basis))deallocate(orbit_basis)
     deallocate(distributed_basis,distributed_weight,distributed_map,distributed_basis_overlap)
   endif
   nlocal=count([(mod(p-1,nproc)==rank,p=1,12)])

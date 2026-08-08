@@ -26,6 +26,7 @@ module dg_overlapping_wannier_construction
   public::assemble_dg_distributed_basis_symmetry_overlap
   public::build_dg_pointwise_affine_owner_map
   public::select_dg_fixed_rank_symmetry_closed_subspace
+  public::build_dg_distributed_symmetry_closed_basis
   public::align_dg_fragment_wannier_gauge
   public::replicate_dg_fragment_wannier_representative
   public::verify_dg_fragment_center_orbit
@@ -35,6 +36,128 @@ module dg_overlapping_wannier_construction
   public::verify_dg_uniform_fragment_target_rank
   public::assign_dg_overlapping_wannier_occupations
 contains
+
+  subroutine build_dg_distributed_symmetry_closed_basis(comm,seed_values,weights,&
+      symmetry_target_box_ids,product_table,required_seed_count,target_rank,tolerance,basis,retained_rank,&
+      ok,message)
+    integer,intent(in)::comm,required_seed_count,target_rank
+    complex(real64),intent(in)::seed_values(:,:)
+    real(real64),intent(in)::weights(:),tolerance
+    integer(int64),intent(in)::symmetry_target_box_ids(:,:)
+    integer,intent(in)::product_table(:,:)
+    complex(real64),allocatable,intent(out)::basis(:,:)
+    integer,intent(out)::retained_rank
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    complex(real64),allocatable::owner_seed(:),image(:),local_overlap(:),global_overlap(:)
+    integer(int64),allocatable::all_maps(:,:,:)
+    logical,allocatable::seen(:)
+    real(real64)::local_norm,global_norm
+    integer::rank,nproc,ierr,nseed,nlocal,noperation,seed,operation,owner,point,&
+      target_owner,target_point,pass,iw,rank_before,local_bad,global_bad,left,right,product,&
+      source_owner,source_point,middle_owner,middle_point
+    integer(int64)::middle_target,final_target
+    logical::orbit_exceeds
+
+    ok=.false.;message='';retained_rank=0
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    nseed=size(seed_values,1);nlocal=size(seed_values,2);noperation=size(symmetry_target_box_ids,2)
+    local_bad=merge(0,1,nseed>0.and.nlocal>0.and.noperation>0.and.size(weights)==nlocal.and.&
+      size(symmetry_target_box_ids,1)==nlocal.and.required_seed_count>=0.and.&
+      required_seed_count<=nseed.and.target_rank>0.and.tolerance>0d0.and.&
+      all(shape(product_table)==[noperation,noperation]).and.&
+      all(ieee_is_finite(weights)).and.all(weights>=0d0).and.&
+      all(ieee_is_finite(real(seed_values))).and.all(ieee_is_finite(aimag(seed_values))))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then;message='invalid distributed symmetry-closed basis contract';return;end if
+    do operation=1,noperation;do point=1,nlocal
+      target_owner=int((symmetry_target_box_ids(point,operation)-1_int64)/int(nlocal,int64))
+      target_point=int(modulo(symmetry_target_box_ids(point,operation)-1_int64,int(nlocal,int64)))+1
+      if(target_owner<0.or.target_owner>=nproc.or.target_point<1.or.target_point>nlocal)local_bad=1
+    end do;end do
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then;message='distributed symmetry-closed basis point map is invalid';return;end if
+    allocate(all_maps(nlocal,noperation,nproc),seen(nlocal*nproc))
+    call MPI_Allgather(symmetry_target_box_ids,nlocal*noperation,MPI_INTEGER8,all_maps,&
+      nlocal*noperation,MPI_INTEGER8,comm,ierr)
+    local_bad=0
+    do operation=1,noperation
+      seen=.false.
+      do source_owner=1,nproc;do source_point=1,nlocal
+        final_target=all_maps(source_point,operation,source_owner)
+        if(final_target<1_int64.or.final_target>int(nlocal*nproc,int64))then
+          local_bad=1
+        elseif(seen(int(final_target)))then
+          local_bad=1
+        else
+          seen(int(final_target))=.true.
+        end if
+      end do;end do
+      if(.not.all(seen))local_bad=1
+    end do
+    if(any(product_table<1).or.any(product_table>noperation))local_bad=1
+    do left=1,noperation;do right=1,noperation
+      product=product_table(left,right)
+      if(product<1.or.product>noperation)cycle
+      do source_owner=1,nproc;do source_point=1,nlocal
+        middle_target=all_maps(source_point,right,source_owner)
+        middle_owner=int((middle_target-1_int64)/int(nlocal,int64))+1
+        middle_point=int(modulo(middle_target-1_int64,int(nlocal,int64)))+1
+        final_target=all_maps(middle_point,left,middle_owner)
+        if(final_target/=all_maps(source_point,product,source_owner))local_bad=1
+      end do;end do
+    end do;end do
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then;message='point maps are not a closed permutation group';return;end if
+    allocate(basis(target_rank,nlocal),owner_seed(nlocal),image(nlocal),&
+      local_overlap(target_rank),global_overlap(target_rank));basis=(0d0,0d0)
+    do seed=1,nseed
+      rank_before=retained_rank;orbit_exceeds=.false.
+      do operation=1,noperation
+        image=(0d0,0d0)
+        do owner=0,nproc-1
+          if(rank==owner)owner_seed=seed_values(seed,:)
+          call MPI_Bcast(owner_seed,nlocal,MPI_DOUBLE_COMPLEX,owner,comm,ierr)
+          do point=1,nlocal
+            target_owner=int((symmetry_target_box_ids(point,operation)-1_int64)/int(nlocal,int64))
+            if(target_owner/=owner)cycle
+            target_point=int(modulo(symmetry_target_box_ids(point,operation)-1_int64,&
+              int(nlocal,int64)))+1
+            image(point)=owner_seed(target_point)
+          end do
+        end do
+        do pass=1,2
+          local_overlap=(0d0,0d0)
+          do iw=1,retained_rank
+            local_overlap(iw)=sum(weights*conjg(basis(iw,:))*image)
+          end do
+          call MPI_Allreduce(local_overlap,global_overlap,target_rank,MPI_DOUBLE_COMPLEX,&
+            MPI_SUM,comm,ierr)
+          do iw=1,retained_rank
+            image=image-global_overlap(iw)*basis(iw,:)
+          end do
+        end do
+        local_norm=sum(weights*abs(image)**2)
+        call MPI_Allreduce(local_norm,global_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+        if(global_norm<=tolerance**2)cycle
+        if(retained_rank==target_rank)then;orbit_exceeds=.true.;exit;end if
+        retained_rank=retained_rank+1;basis(retained_rank,:)=image/sqrt(global_norm)
+      end do
+      if(orbit_exceeds)then
+        basis(rank_before+1:retained_rank,:)=(0d0,0d0);retained_rank=rank_before
+        if(seed<=required_seed_count)then
+          message='required symmetry orbit exceeds target rank';return
+        end if
+      end if
+      if(retained_rank==target_rank)exit
+    end do
+    if(retained_rank/=target_rank)then;message='symmetry-closed seeds do not fill target rank';return;end if
+    ok=.true.
+#else
+    retained_rank=0;ok=.false.;message='distributed symmetry-closed basis requires MPI'
+#endif
+  end subroutine
 
   subroutine select_dg_fixed_rank_symmetry_closed_subspace(metric,occupied,localizer,&
       representation,product_table,target_rank,tolerance,transform,occupied_inclusion,&
