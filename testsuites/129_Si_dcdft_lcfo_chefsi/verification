@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+
+import pathlib
+import re
+import sys
+
+eigen_file = pathlib.Path("data_dcdft/total/Si_eigen.data")
+output_file = pathlib.Path("outputfile")
+if not eigen_file.exists() or not output_file.exists():
+    print("CheFSI output files were not created")
+    sys.exit(1)
+
+values = []
+for line in eigen_file.read_text().splitlines():
+    if line.startswith("#") or not line.strip():
+        continue
+    values.append(float(line.split()[1]))
+
+references = {
+    1: 0.1188965147061483,
+    33: 0.7334642415599671,
+    66: 1.536012514823663,
+}
+for index, reference in references.items():
+    error = abs(values[index - 1] - reference)
+    print("eigenvalue %d error = %.6e" % (index, error))
+    if error > 1.0e-7:
+        sys.exit(1)
+
+residuals = []
+subspace = None
+degree = None
+chunk_width = None
+chunk_count = None
+pattern = re.compile(r"CheFSI cycle:\s+\d+\s+maximum residual:\s+(\S+)")
+for line in output_file.read_text().splitlines():
+    subspace_match = re.search(r"CheFSI subspace:\s+(\d+)\s+target:\s+(\d+)", line)
+    if subspace_match:
+        subspace = tuple(map(int, subspace_match.groups()))
+    degree_match = re.search(r"CheFSI polynomial degree:\s+(\d+)", line)
+    if degree_match:
+        degree = int(degree_match.group(1))
+    chunk_width_match = re.search(r"CheFSI filter chunk width:\s+(\d+)", line)
+    if chunk_width_match:
+        chunk_width = int(chunk_width_match.group(1))
+    chunk_count_match = re.search(r"CheFSI filter chunk count:\s+(\d+)", line)
+    if chunk_count_match:
+        chunk_count = int(chunk_count_match.group(1))
+    match = pattern.search(line)
+    if match:
+        residuals.append(float(match.group(1)))
+
+if not residuals or residuals[-1] > 1.0e-7:
+    print("CheFSI did not reach the requested residual tolerance")
+    sys.exit(1)
+
+if subspace != (70, 66):
+    print("unexpected CheFSI subspace: %s" % (subspace,))
+    sys.exit(1)
+if degree != 60:
+    print("unexpected CheFSI polynomial degree: %s" % degree)
+    sys.exit(1)
+if chunk_width != 17 or chunk_count != 5:
+    print("unexpected CheFSI filter chunks: width=%s count=%s" %
+          (chunk_width, chunk_count))
+    sys.exit(1)
+
+print("final CheFSI residual = %.6e" % residuals[-1])
