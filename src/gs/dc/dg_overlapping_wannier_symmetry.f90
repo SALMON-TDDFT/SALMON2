@@ -217,9 +217,11 @@ contains
     ok=.true.
   end subroutine build_dg_fragment_permuted_representation
 
-  integer(int64) function fingerprint_dg_exact_fragment_symmetry(rotations,product_table,tolerance)
+  integer(int64) function fingerprint_dg_exact_fragment_symmetry(rotations,product_table,tolerance,&
+      fractional_translations)
     integer,intent(in)::rotations(:,:,:),product_table(:,:)
     real(8),intent(in)::tolerance
+    real(8),intent(in),optional::fractional_translations(:,:)
     integer(int64)::word
     integer::i,j,k,shift,nop
     nop=size(rotations,3)
@@ -227,6 +229,11 @@ contains
         size(product_table,1)/=nop.or.size(product_table,2)/=nop.or. &
         .not.ieee_is_finite(tolerance).or.tolerance<=0d0)then
       fingerprint_dg_exact_fragment_symmetry=0_int64;return
+    end if
+    if(present(fractional_translations))then
+      if(any(shape(fractional_translations)/=[3,nop]))then
+        fingerprint_dg_exact_fragment_symmetry=0_int64;return
+      end if
     end if
     fingerprint_dg_exact_fragment_symmetry=ieor(int(nop,int64),int(z'243F6A8885A308D3',int64))
     do k=1,nop;do j=1,3;do i=1,3
@@ -244,6 +251,17 @@ contains
       fingerprint_dg_exact_fragment_symmetry=ieor(fingerprint_dg_exact_fragment_symmetry, &
         ishftc(ieor(word,int(521*i+1031*j,int64)),shift))
     end do;end do
+    if(present(fractional_translations))then
+      if(.not.all(ieee_is_finite(fractional_translations)))then
+        fingerprint_dg_exact_fragment_symmetry=0_int64;return
+      end if
+      do k=1,nop;do i=1,3
+        shift=modulo(19*i+31*k,63)
+        word=transfer(modulo(fractional_translations(i,k),1d0),word)
+        fingerprint_dg_exact_fragment_symmetry=ieor(fingerprint_dg_exact_fragment_symmetry,&
+          ishftc(ieor(word,int(2053*i+4099*k,int64)),shift))
+      end do;end do
+    end if
     word=transfer(tolerance,word)
     fingerprint_dg_exact_fragment_symmetry=ieor(fingerprint_dg_exact_fragment_symmetry,ishftc(word,37))
     if(fingerprint_dg_exact_fragment_symmetry==0_int64)&

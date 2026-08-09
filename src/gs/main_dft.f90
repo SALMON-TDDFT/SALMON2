@@ -48,9 +48,16 @@ use dg_overlapping_wannier_construction, only: s_dg_overlapping_wannier_construc
   verify_dg_fragment_center_orbit,verify_dg_uniform_fragment_target_rank
 use dg_overlapping_wannier_construction, only: build_dg_core_owned_occupied_subspace
 use dg_overlapping_wannier_construction, only: build_dg_distributed_symmetry_closed_basis
+use dg_overlapping_wannier_construction, only: accumulate_dg_lcfo_buffer_contributions_to_core
+use dg_overlapping_wannier_construction, only: measure_dg_rank_fixed_symmetry_residuals
+use dg_overlapping_wannier_construction, only: select_dg_fixed_rank_symmetry_closed_subspace
+use dg_overlapping_wannier_construction, only: find_dg_group_identity
 use dg_overlapping_wannier_construction, only: assemble_dg_distributed_basis_symmetry_overlap
 use dg_overlapping_wannier_construction, only: build_dg_pointwise_affine_owner_map
 use dg_overlapping_wannier_construction, only: assign_dg_overlapping_wannier_occupations
+use dg_overlapping_wannier_construction, only: solve_dg_affine_common_fixed_point
+use dg_overlapping_wannier_construction, only: compute_dg_periodic_wannier_centers
+use dg_overlapping_wannier_construction, only: verify_dg_wannier_center_affine_orbits
 use dg_overlapping_wannier_projection, only: t_dg_projection_channel,&
   build_dg_complete_sp_manifest,evaluate_dg_periodic_sp_projectors,&
   dg_periodic_grid_point_owned,select_dg_sp_atomic_orbital_ordinals
@@ -531,34 +538,51 @@ contains
   end subroutine
 
   subroutine run_dg_overlapping_wannier_ground_state_for_main()
-    complex(8),allocatable::candidate(:,:),occupied_coefficients(:,:),augmented_candidate(:,:),&
-      augmented_gradient(:,:,:),augmented_occupied(:,:),periodic_phase(:,:),&
-      fragment_wannier(:,:),fragment_wannier_gradient(:,:,:),local_retained_representation(:,:,:),&
+    complex(8),allocatable::periodic_phase(:,:),&
       global_seed_values(:,:),global_closed_core(:,:),global_symmetry_overlap(:,:,:),&
-      global_retained_representation(:,:,:),global_identity(:,:)
-    real(8),allocatable::weights(:),coordinate(:),spectrum(:),occupations(:),gradient_rotation(:,:,:),&
+      global_retained_representation(:,:,:),global_candidate_representation(:,:,:),&
+      global_identity(:,:),local_occupied_values(:,:),global_candidate_metric(:,:),&
+      global_candidate_localizer(:,:),global_candidate_occupied(:,:),global_subspace_transform(:,:),&
+      selected_global_closed_core(:,:),local_seed_overlap(:,:),global_seed_overlap(:,:),&
+      global_candidate_metric_inverse(:,:),global_candidate_raw(:,:,:),global_candidate_defect_work(:,:)
+    complex(8),allocatable::lcfo_fragment_contribution(:,:),lcfo_occupied_core(:,:)
+    complex(8),allocatable::lcfo_occupied_representation(:,:,:)
+    real(8),allocatable::weights(:),coordinate(:),spectrum(:),occupations(:),lcfo_retained_occupations(:),&
+      gradient_rotation(:,:,:),&
       local_point_rotations(:,:,:)
     real(8),allocatable::manifest_values(:,:),initial_density_local(:),initial_density_global(:)
+    real(8),allocatable::localized_centers(:,:),localized_center_magnitudes(:,:)
     type(t_dg_projection_channel),allocatable::manifest_channels(:)
     type(s_dg_overlapping_wannier_construction)::symmetry_basis
     integer(8),allocatable::physical_ids(:),box_ids(:),symmetry_map(:,:),local_box_ids(:),&
       local_symmetry_map(:,:),center_representatives(:),&
       exact_fragment_symmetry_fingerprints(:),global_symmetry_map(:,:)
+    integer(8),allocatable::lcfo_core_ids(:)
     integer(8),allocatable::all_local_centers(:,:)
     integer,allocatable::fragments(:),local_point_product(:,:),local_point_integer_rotations(:,:,:),&
       translation_product(:,:),global_point_product(:,:),global_point_integer_rotations(:,:,:)
     integer,allocatable::rank_fragments(:)
+    integer,allocatable::center_owner_candidate(:),center_box_candidate(:),center_fragment_candidate(:)
     logical,allocatable::boundary(:),core_mask(:),pairs(:,:)
-    integer::ix,iy,iz,io,p,nbox,ncore,ncandidate,noccupied,nstate,ntarget,nsym,rank,nproc,&
+    logical,allocatable::lcfo_boundary_mask(:)
+    integer::ix,iy,iz,io,p,nbox,ncore,noccupied,nstate,ntarget,nsym,rank,nproc,&
       raw_ix,raw_iy,raw_iz,core_index,rejected_rank,ownership_count,ierr,allocation_status,&
-      local_candidate_count,local_occupied_count,local_target_count,owned_valence_electron_count
-    integer::global_seed_count,global_retained_rank
+      local_target_count
+    integer::global_seed_count,global_retained_rank,global_occupied_count,global_projection_count,&
+      global_candidate_capacity,&
+      global_required_retained_rank
+    integer::global_identity_operation
+    real(8)::global_occupied_inclusion,global_subspace_leakage,global_candidate_operation_defect,&
+      global_candidate_maximum_defect
+    real(8),allocatable::lcfo_total_symmetry_residual(:),lcfo_boundary_symmetry_residual(:),&
+      lcfo_interior_symmetry_residual(:)
+    integer::global_candidate_worst_operation
     integer::representative_pair(2),local_pair(2)
     integer::complete_sp_core_atom_count
     integer(8)::expected_core_count,expected_box_count,basis_fingerprint,operator_fingerprint,&
       pseudopotential_fingerprint,nbox8,ncore8,product8,nxy8,local_exact_symmetry_fingerprint
-    real(8)::minimum_eigenvalue,condition_number,closure_residual,spread_max,gauge_correction,&
-      core_electron_count
+    integer(8)::center_physical_id
+    real(8)::minimum_eigenvalue,condition_number,closure_residual,spread_max,gauge_correction
     logical::ok,reusable,localization_converged,global_inversion_present
     complex(8),allocatable::core_periodic_phase(:,:),localization_transform(:,:),retained_identity(:,:)
     complex(8),allocatable::synchronized_local_representation(:,:,:)
@@ -566,6 +590,7 @@ contains
       retained_raw_unitarity_defect,retained_unitarity_defect,retained_group_closure_defect,&
       global_retained_group_closure_defect,retained_closure_search_tolerance
     real(8),allocatable::global_point_rotations(:,:,:)
+    real(8),allocatable::global_point_fractional_translations(:,:)
     integer::localization_iterations,localization_spread_evaluations
     character(256)::message,prefix
 
@@ -597,17 +622,9 @@ contains
     if(.not.ok.or.nbox8>int(huge(nbox),8).or.ncore8>int(huge(ncore),8))&
       error stop 'overlapping-Wannier grid extent overflow'
     nbox=int(nbox8);ncore=int(ncore8)
-    local_candidate_count=merge(dg_ow_candidate_states_per_fragment,system%no,&
-      dg_ow_candidate_states_per_fragment>0)
-    if(local_candidate_count>system%no)&
-      error stop 'invalid overlapping-Wannier production window'
     nstate=ceiling(0.5d0*dc%elec_num_tot)
-    ncandidate=local_candidate_count
-    if(nbox8>huge(product8)/int(local_candidate_count,8))&
-      error stop 'overlapping-Wannier candidate payload overflow'
-    product8=int(local_candidate_count,8)*nbox8
-    if(product8>int(huge(nbox),8)/3_8)&
-      error stop 'overlapping-Wannier candidate payload exceeds collective count'
+    if(mod(nstate,nproc)/=0)error stop 'LCFO occupied rank is not rank balanced'
+    noccupied=nstate/nproc
     nsym=nproc
     call checked_ow_extent_product(dc%lg_tot%num,expected_core_count,ok)
     if(.not.ok.or.expected_core_count>int(huge(nbox),8))&
@@ -617,14 +634,14 @@ contains
     if(.not.ok.or.nbox8>huge(expected_box_count)/int(nproc,8))&
       error stop 'overlapping-Wannier global extent overflow'
     expected_box_count=nbox8*int(nproc,8)
-    allocate(candidate(local_candidate_count,nbox),weights(nbox),&
+    allocate(weights(nbox),&
       coordinate(nbox),periodic_phase(3,nbox),physical_ids(nbox),box_ids(nbox),&
       symmetry_map(nbox,nsym),local_box_ids(nbox),&
       center_representatives(nbox),fragments(nbox),boundary(nbox),core_mask(nbox),&
       gradient_rotation(3,3,nsym),stat=allocation_status)
     call comm_logical_and(allocation_status==0,reusable,dc%icomm_tot)
     if(.not.reusable)error stop 'overlapping-Wannier production allocation failed'
-    candidate=(0d0,0d0);weights=system%hvol
+    weights=system%hvol
     gradient_rotation=0d0
     do io=1,nsym;do ix=1,3;gradient_rotation(ix,ix,io)=1d0;enddo;enddo
     p=0;core_index=0
@@ -642,9 +659,6 @@ contains
       raw_ix=canonical_to_dc_index(ix,ow_core_size(1),ow_buffer(1))
       raw_iy=canonical_to_dc_index(iy,ow_core_size(2),ow_buffer(2))
       raw_iz=canonical_to_dc_index(iz,ow_core_size(3),ow_buffer(3))
-      do io=1,local_candidate_count
-        candidate(io,p)=cmplx(spsi%rwf(raw_ix,raw_iy,raw_iz,1,io,1,1),0d0,8)
-      enddo
       physical_ids(p)=1_8+int(modulo(dc%ixyz_frag(1,dc%i_frag)-1+ix-ow_buffer(1)-1,dc%lg_tot%num(1)),8)+&
         int(dc%lg_tot%num(1),8)*(int(modulo(dc%ixyz_frag(2,dc%i_frag)-1+iy-ow_buffer(2)-1,&
         dc%lg_tot%num(2)),8)+int(dc%lg_tot%num(2),8)*int(modulo(dc%ixyz_frag(3,dc%i_frag)-1+&
@@ -661,6 +675,20 @@ contains
       endif
     enddo;enddo;enddo
     pseudopotential_fingerprint=ow_collective_operator_fingerprint(dc%icomm_tot)
+    allocate(lcfo_core_ids(ncore),lcfo_boundary_mask(ncore));core_index=0
+    do p=1,nbox
+      if(.not.core_mask(p))cycle
+      core_index=core_index+1;lcfo_core_ids(core_index)=physical_ids(p)
+      ix=modulo(p-1,ow_box_size(1))+1
+      iy=modulo((p-1)/ow_box_size(1),ow_box_size(2))+1
+      iz=(p-1)/(ow_box_size(1)*ow_box_size(2))+1
+      lcfo_boundary_mask(core_index)=ix-ow_buffer(1)<=size(stencil%coef_nab,1).or.&
+        ix-ow_buffer(1)>ow_core_size(1)-size(stencil%coef_nab,1).or.&
+        iy-ow_buffer(2)<=size(stencil%coef_nab,1).or.&
+        iy-ow_buffer(2)>ow_core_size(2)-size(stencil%coef_nab,1).or.&
+        iz-ow_buffer(3)<=size(stencil%coef_nab,1).or.&
+        iz-ow_buffer(3)>ow_core_size(3)-size(stencil%coef_nab,1)
+    end do
     call build_ow_complete_sp_projectors(physical_ids,pseudopotential_fingerprint,&
       manifest_channels,manifest_values,ok,message)
     if(.not.ok)then
@@ -668,114 +696,193 @@ contains
       error stop 'overlapping-Wannier complete-s+p projector construction failed'
     endif
     local_target_count=size(manifest_channels)
+    call MPI_Allreduce(local_target_count,global_projection_count,1,MPI_INTEGER,MPI_SUM,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS)error stop 'global atomic projection count reduction failed'
+    if(nstate>huge(ntarget)-global_projection_count)error stop 'LCFO Wannier target rank overflow'
+    ntarget=nstate+global_projection_count
+    if(ntarget<1.or.mod(ntarget,nproc)/=0)error stop 'LCFO Wannier target is not rank balanced'
+    call dc_lcfo(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc,&
+      retained_count=ntarget,retained_box_contribution=lcfo_fragment_contribution,&
+      retained_occupations=lcfo_retained_occupations,write_files=.false.)
+    if(size(lcfo_retained_occupations)/=ntarget.or.&
+        abs(sum(lcfo_retained_occupations)-dc%elec_num_tot)>&
+        1d3*epsilon(1d0)*max(1d0,dc%elec_num_tot)) &
+      error stop 'LCFO retained occupations do not match the target space'
+    allocate(lcfo_occupied_core(ntarget,ncore))
+    call accumulate_dg_lcfo_buffer_contributions_to_core(dc%icomm_tot,physical_ids,&
+      lcfo_fragment_contribution,lcfo_core_ids,lcfo_occupied_core,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'LCFO target core reconstruction failed';end if
+    deallocate(lcfo_fragment_contribution)
     complete_sp_core_atom_count=count(manifest_channels%l==0)
-    owned_valence_electron_count=0
-    do io=1,size(manifest_channels)
-      if(manifest_channels(io)%l==0)owned_valence_electron_count=owned_valence_electron_count+&
-        pp%zps(dc%system_tot%kion(manifest_channels(io)%atom))
-    end do
     if(complete_sp_core_atom_count<1.or.&
         local_target_count/=4*complete_sp_core_atom_count)&
       error stop 'complete-s+p target is not four channels per core-owned atom'
-    if(local_target_count>local_candidate_count)&
-      error stop 'complete-s+p target exceeds overlapping-Wannier candidate window'
     if(rank==0)write(*,'(a,i0,a,i0)')&
       '[OW-GS-DIAGNOSTIC] complete_sp_core_atom_count=',complete_sp_core_atom_count,&
       ' complete_sp_shell_channels=',local_target_count
-    call build_dg_core_owned_occupied_subspace(candidate,core_mask,weights,&
-      system%rocc(1:local_candidate_count,info%ik_s,1),real(owned_valence_electron_count,8),occupied_coefficients,&
-      core_electron_count,ok,message)
-    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'invalid DC core-owned occupied subspace';endif
-    noccupied=size(occupied_coefficients,2);local_occupied_count=noccupied
-    if(noccupied>local_candidate_count)error stop 'core-owned occupied rank exceeds candidate window'
-    if(rank==0)write(*,'(a,es24.16,a,i0)')&
-      '[OW-GS-DIAGNOSTIC] fragment_core_electrons=',core_electron_count,' occupied_rank=',noccupied
-    if(local_candidate_count>huge(ncandidate)-local_target_count)&
-      error stop 'augmented overlapping-Wannier candidate rank overflow'
-    ncandidate=local_candidate_count+local_target_count
-    allocate(augmented_candidate(ncandidate,nbox),augmented_gradient(3,ncandidate,nbox),&
-      augmented_occupied(ncandidate,noccupied),stat=allocation_status)
-    call comm_logical_and(allocation_status==0,reusable,dc%icomm_tot)
-    if(.not.reusable)error stop 'augmented overlapping-Wannier candidate allocation failed'
-    augmented_candidate(1:local_candidate_count,:)=candidate
-    augmented_candidate(local_candidate_count+1:local_candidate_count+local_target_count,:)=manifest_values
-    augmented_occupied=(0d0,0d0)
-    augmented_occupied(1:local_candidate_count,:)=occupied_coefficients
-    deallocate(candidate,occupied_coefficients)
-    call periodic_box_gradients(augmented_candidate,ow_box_size,stencil%coef_nab,augmented_gradient)
-    call construct_dg_overlapping_wannier_basis(MPI_COMM_SELF,ncandidate,local_target_count,&
-      noccupied,physical_ids,&
-      fragments,weights,coordinate,boundary,augmented_candidate,augmented_gradient,augmented_occupied,&
-      ncore8,1,dg_ow_boundary_value_tolerance,dg_ow_boundary_gradient_tolerance,&
-      dg_dc_metric_rank_tolerance,ow_basis,ok,message,core_mask=core_mask,&
-      periodic_localization_phase=periodic_phase,&
-      center_representative_box_ids=center_representatives,&
-      projection_seed_values=manifest_values)
-    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'overlapping-Wannier construction gate failed';endif
-    local_target_count=ow_basis%target_rank
+    global_occupied_count=nstate
+    local_target_count=ntarget/nproc
     retained_closure_search_tolerance=sqrt(sqrt(dg_ow_symmetry_tolerance))
-    call verify_dg_uniform_fragment_target_rank(dc%icomm_tot,local_target_count,ok,message)
-    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'nonuniform overlapping-Wannier target rank';endif
-    if(local_target_count>huge(ntarget)/nproc)error stop 'overlapping-Wannier target extent overflow'
-    ntarget=local_target_count*nproc
-    if(nstate<1.or.nstate>ntarget)error stop 'invalid overlapping-Wannier occupied window'
-    if(nstate>local_candidate_count)&
-      error stop 'global occupied seed window exceeds available KS candidates'
     if(rank==0)write(*,'(a,i0,a,i0,a,i0)')&
-      '[OW-GS-DIAGNOSTIC] complete_sp_residual_rank=',local_target_count-noccupied,&
-      ' direct_sum_local_target=',local_target_count,' direct_sum_global_target=',ntarget
-    fragment_wannier=ow_basis%value;fragment_wannier_gradient=ow_basis%gradient
-    allocate(all_local_centers(local_target_count,nproc))
+      '[OW-GS-DIAGNOSTIC] lcfo_occupied_rank=',nstate,&
+      ' lcfo_projection_localizer_rank=',global_projection_count,' lcfo_target_rank=',ntarget
+    allocate(all_local_centers(local_target_count,nproc));all_local_centers=0_8
     allocate(rank_fragments(nproc))
-    call MPI_Allgather(ow_basis%center_box_point_ids,local_target_count,MPI_INTEGER8,&
-      all_local_centers,local_target_count,MPI_INTEGER8,dc%icomm_tot,ierr)
+    do io=1,local_target_count
+      all_local_centers(io,rank+1)=center_representatives(1+modulo(io-1,nbox))
+    end do
+    call MPI_Allreduce(MPI_IN_PLACE,all_local_centers,size(all_local_centers),MPI_INTEGER8,&
+      MPI_SUM,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS)error stop 'LCFO provisional center reduction failed'
     call MPI_Allgather(dc%i_frag,1,MPI_INTEGER,rank_fragments,1,MPI_INTEGER,dc%icomm_tot,ierr)
-    if(allocated(ow_basis%center_box_point_ids))deallocate(ow_basis%center_box_point_ids)
-    if(allocated(ow_basis%center_owner_rank))deallocate(ow_basis%center_owner_rank)
-    if(allocated(ow_basis%center_owner_fragment))deallocate(ow_basis%center_owner_fragment)
     allocate(ow_basis%center_box_point_ids(ntarget),ow_basis%center_owner_rank(ntarget),&
       ow_basis%center_owner_fragment(ntarget))
     do io=0,nproc-1
       ow_basis%center_box_point_ids(io*local_target_count+1:(io+1)*local_target_count)=&
         int(io,8)*int(nbox,8)+all_local_centers(:,io+1)
       ow_basis%center_owner_rank(io*local_target_count+1:(io+1)*local_target_count)=io
-      ow_basis%center_owner_fragment(io*local_target_count+1:(io+1)*local_target_count)=&
-        rank_fragments(io+1)
+      ow_basis%center_owner_fragment(io*local_target_count+1:(io+1)*local_target_count)=rank_fragments(io+1)
     end do
     deallocate(all_local_centers,rank_fragments)
-    global_seed_count=nstate+ntarget
+    global_seed_count=ntarget
     allocate(global_seed_values(global_seed_count,ncore),ow_core_weights(ncore),ow_core_ids(ncore),&
       ow_core_box_positions(ncore),core_periodic_phase(3,ncore));global_seed_values=(0d0,0d0);core_index=0
     do p=1,nbox
       if(.not.core_mask(p))cycle
       core_index=core_index+1
-      global_seed_values(1:nstate,core_index)=augmented_candidate(1:nstate,p)
-      global_seed_values(nstate+rank*local_target_count+1:&
-        nstate+(rank+1)*local_target_count,core_index)=fragment_wannier(:,p)
+      global_seed_values(:,core_index)=lcfo_occupied_core(:,core_index)
       ow_core_weights(core_index)=weights(p);ow_core_ids(core_index)=physical_ids(p)
-      ow_core_box_positions(core_index)=p
-      core_periodic_phase(:,core_index)=periodic_phase(:,p)
+      ow_core_box_positions(core_index)=p;core_periodic_phase(:,core_index)=periodic_phase(:,p)
     end do
     call prepare_ow_global_point_action(ow_core_ids,global_symmetry_map,global_point_integer_rotations,&
-      global_point_rotations,global_point_product,global_inversion_present,ok,message)
+      global_point_rotations,global_point_fractional_translations,global_point_product,&
+      global_inversion_present,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global point-action construction failed';end if
+    call find_dg_group_identity(global_point_product,global_identity_operation,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global group identity construction failed';end if
+    allocate(lcfo_occupied_representation(ntarget,ntarget,&
+      size(global_point_product,1)),lcfo_total_symmetry_residual(size(global_point_product,1)),&
+      lcfo_boundary_symmetry_residual(size(global_point_product,1)),&
+      lcfo_interior_symmetry_residual(size(global_point_product,1)))
+    call measure_dg_rank_fixed_symmetry_residuals(dc%icomm_tot,lcfo_occupied_core,ow_core_weights,&
+      global_symmetry_map,lcfo_boundary_mask,lcfo_occupied_representation,&
+      lcfo_total_symmetry_residual,lcfo_boundary_symmetry_residual,lcfo_interior_symmetry_residual,&
+      ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'LCFO occupied symmetry measurement failed';end if
+    if(rank==0)then
+      do io=1,size(global_point_product,1)
+        write(*,'(a,i0,3(a,es16.8))')'[OW-GS-DIAGNOSTIC] LCFO_symmetry_operation=',io,&
+          ' total_residual=',lcfo_total_symmetry_residual(io),&
+          ' boundary_residual=',lcfo_boundary_symmetry_residual(io),&
+          ' interior_residual=',lcfo_interior_symmetry_residual(io)
+      end do
+    end if
+    if(ntarget>huge(global_candidate_capacity)-size(global_point_product,1)+1)&
+      error stop 'global symmetry-closed candidate capacity overflow'
+    global_candidate_capacity=ntarget+size(global_point_product,1)-1
     call build_dg_distributed_symmetry_closed_basis(dc%icomm_tot,global_seed_values,ow_core_weights,&
-      global_symmetry_map,global_point_product,nstate,ntarget,dg_dc_metric_rank_tolerance,&
-      global_closed_core,global_retained_rank,ok,message)
-    if(.not.ok.or.global_retained_rank/=ntarget)then
+      global_symmetry_map,global_point_product,ntarget,global_candidate_capacity,&
+      dg_dc_metric_rank_tolerance,global_closed_core,global_retained_rank,ok,message,&
+      minimum_rank=ntarget,required_retained_rank=global_required_retained_rank)
+    if(rank==0)write(*,'(a,3(a,i0))')'[OW-GS-DIAGNOSTIC] LCFO_occupied_closure',&
+      ' input_rank=',ntarget,' closure_rank=',global_required_retained_rank,&
+      ' candidate_rank=',global_retained_rank
+    if(.not.ok.or.global_retained_rank<ntarget.or.&
+        global_required_retained_rank/=ntarget)then
       write(0,'(a)')trim(message);error stop 'global symmetry-closed Wannier construction failed'
     end if
-    deallocate(global_seed_values,augmented_candidate,augmented_gradient,augmented_occupied)
-    allocate(global_identity(ntarget,ntarget));global_identity=(0d0,0d0)
-    do io=1,ntarget;global_identity(io,io)=1d0;end do
-    call assemble_dg_distributed_basis_symmetry_overlap(dc%icomm_tot,global_closed_core,&
+    allocate(local_seed_overlap(global_retained_rank,global_projection_count),&
+      global_seed_overlap(global_retained_rank,global_projection_count));local_seed_overlap=(0d0,0d0)
+    do io=1,global_retained_rank;do p=1,size(manifest_channels)
+      local_seed_overlap(io,rank*size(manifest_channels)+p)=sum(ow_core_weights*&
+        conjg(global_closed_core(io,:))*manifest_values(p,ow_core_box_positions))
+    end do;end do
+    call MPI_Allreduce(local_seed_overlap,global_seed_overlap,size(local_seed_overlap),&
+      MPI_DOUBLE_COMPLEX,MPI_SUM,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS)error stop 'global projection-seed overlap reduction failed'
+    deallocate(local_seed_overlap)
+    deallocate(global_seed_values,lcfo_occupied_core,lcfo_core_ids)
+    call assemble_dg_distributed_basis_symmetry_overlap(dc%icomm_tot,&
+      global_closed_core(1:global_retained_rank,:),&
       ow_core_weights,global_symmetry_map,global_symmetry_overlap,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global representation measurement failed';end if
-    call build_dg_fragment_group_representation(global_identity,global_symmetry_overlap,&
+    allocate(global_candidate_metric(global_retained_rank,global_retained_rank))
+    global_candidate_metric=global_symmetry_overlap(:,:,global_identity_operation)
+    allocate(global_identity(global_retained_rank,global_retained_rank));global_identity=(0d0,0d0)
+    do io=1,global_retained_rank;global_identity(io,io)=1d0;end do
+    if(rank==0)then
+      write(*,'(a,3(a,i0),a,es16.8)')'[OW-GS-DIAGNOSTIC] global_candidate_space',&
+        ' rank=',global_retained_rank,' required_rank=',global_required_retained_rank,&
+        ' identity_operation=',global_identity_operation,' metric_identity_defect=',&
+        maxval(abs(global_candidate_metric-global_identity))
+    end if
+    call invert_ow_metric(global_candidate_metric,global_candidate_metric_inverse,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global candidate metric inverse failed';end if
+    allocate(global_candidate_raw(global_retained_rank,global_retained_rank,&
+      size(global_symmetry_overlap,3)))
+    do io=1,size(global_symmetry_overlap,3)
+      global_candidate_raw(:,:,io)=matmul(global_candidate_metric_inverse,global_symmetry_overlap(:,:,io))
+    end do
+    allocate(global_candidate_defect_work(global_retained_rank,global_retained_rank))
+    global_candidate_maximum_defect=0d0;global_candidate_worst_operation=0
+    do io=1,size(global_candidate_raw,3)
+      global_candidate_defect_work=matmul(conjg(transpose(global_candidate_raw(:,:,io))),&
+        matmul(global_candidate_metric,global_candidate_raw(:,:,io)))-global_candidate_metric
+      global_candidate_operation_defect=maxval(abs(global_candidate_defect_work))
+      if(global_candidate_operation_defect>global_candidate_maximum_defect)then
+        global_candidate_maximum_defect=global_candidate_operation_defect
+        global_candidate_worst_operation=io
+      end if
+    end do
+    if(rank==0)write(*,'(a,i0,a,es16.8)')'[OW-GS-DIAGNOSTIC] candidate_worst_operation=',&
+      global_candidate_worst_operation,' metric_unitarity_defect=',global_candidate_maximum_defect
+    deallocate(global_candidate_defect_work)
+    call build_dg_fragment_group_representation(global_candidate_metric,global_candidate_raw,&
+      global_point_product,dg_ow_symmetry_tolerance,global_candidate_representation,&
+      retained_raw_unitarity_defect,retained_unitarity_defect,global_retained_group_closure_defect,&
+      ok,message,retained_closure_search_tolerance)
+    if(.not.ok)then
+      if(rank==0)write(0,'(a,3(a,es16.8))')'[OW-GS-DIAGNOSTIC] candidate_representation_rejected',&
+        ' raw_unitarity=',retained_raw_unitarity_defect,' corrected_unitarity=',retained_unitarity_defect,&
+        ' closure=',global_retained_group_closure_defect
+      write(0,'(a)')trim(message);error stop 'global representation synchronization failed'
+    end if
+    allocate(global_candidate_localizer(global_retained_rank,global_retained_rank),&
+      global_candidate_occupied(global_retained_rank,global_required_retained_rank))
+    global_candidate_localizer=-matmul(global_seed_overlap,conjg(transpose(global_seed_overlap)))
+    global_candidate_occupied=(0d0,0d0)
+    deallocate(global_seed_overlap)
+    do io=1,global_required_retained_rank;global_candidate_occupied(io,io)=1d0;end do
+    call select_dg_fixed_rank_symmetry_closed_subspace(global_candidate_metric,&
+      global_candidate_occupied,global_candidate_localizer,global_candidate_representation,&
+      global_point_product,ntarget,dg_ow_symmetry_tolerance,global_subspace_transform,&
+      global_occupied_inclusion,global_subspace_leakage,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global fixed-rank Wannier selection failed';end if
+    allocate(selected_global_closed_core(ntarget,ncore))
+    selected_global_closed_core=matmul(transpose(global_subspace_transform),&
+      global_closed_core(1:global_retained_rank,:))
+    call move_alloc(selected_global_closed_core,global_closed_core)
+    deallocate(global_identity,global_candidate_metric,global_candidate_metric_inverse,global_candidate_raw,&
+      global_candidate_localizer,global_candidate_occupied,global_subspace_transform,&
+      global_candidate_representation)
+    global_retained_rank=ntarget
+    allocate(global_identity(ntarget,ntarget));global_identity=(0d0,0d0)
+    call assemble_dg_distributed_basis_symmetry_overlap(dc%icomm_tot,global_closed_core,&
+      ow_core_weights,global_symmetry_map,global_symmetry_overlap,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'selected global representation measurement failed';end if
+    global_identity=global_symmetry_overlap(:,:,global_identity_operation)
+    call invert_ow_metric(global_identity,global_candidate_metric_inverse,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'selected global metric inverse failed';end if
+    allocate(global_candidate_raw(ntarget,ntarget,size(global_symmetry_overlap,3)))
+    do io=1,size(global_symmetry_overlap,3)
+      global_candidate_raw(:,:,io)=matmul(global_candidate_metric_inverse,global_symmetry_overlap(:,:,io))
+    end do
+    call build_dg_fragment_group_representation(global_identity,global_candidate_raw,&
       global_point_product,dg_ow_symmetry_tolerance,global_retained_representation,&
       retained_raw_unitarity_defect,retained_unitarity_defect,global_retained_group_closure_defect,&
       ok,message,retained_closure_search_tolerance)
-    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global representation synchronization failed';end if
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'selected global representation synchronization failed';end if
+    deallocate(global_candidate_metric_inverse,global_candidate_raw)
     call materialize_ow_distributed_core_to_buffer(dc%icomm_tot,global_closed_core,ow_core_ids,&
       physical_ids,ow_box_values,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global core-to-buffer streaming failed';end if
@@ -826,7 +933,8 @@ contains
       ' spread_evaluations=',localization_spread_evaluations
     closure_residual=global_retained_group_closure_defect
     local_exact_symmetry_fingerprint=fingerprint_dg_exact_fragment_symmetry(&
-      global_point_integer_rotations,global_point_product,dg_ow_symmetry_tolerance)
+      global_point_integer_rotations,global_point_product,dg_ow_symmetry_tolerance,&
+      global_point_fractional_translations)
     if(local_exact_symmetry_fingerprint==0_8)&
       error stop 'invalid exact fragment symmetry checkpoint evidence'
     allocate(exact_fragment_symmetry_fingerprints(nproc))
@@ -844,6 +952,43 @@ contains
       ow_core_values(:,core_index)=ow_box_values(:,p)
       ow_core_gradients(:,:,core_index)=ow_box_gradients(:,:,p)
     end do
+    allocate(localized_centers(3,ntarget),localized_center_magnitudes(3,ntarget))
+    call compute_dg_periodic_wannier_centers(dc%icomm_tot,ow_core_values,ow_core_weights,&
+      core_periodic_phase,localized_centers,localized_center_magnitudes,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'localized Wannier center measurement failed';end if
+    call verify_dg_wannier_center_affine_orbits(localized_centers,global_point_integer_rotations,&
+      global_point_fractional_translations,retained_closure_search_tolerance,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'localized Wannier center orbit failed';end if
+    allocate(center_owner_candidate(ntarget),center_box_candidate(ntarget),&
+      center_fragment_candidate(ntarget))
+    center_owner_candidate=huge(rank);center_box_candidate=huge(p);center_fragment_candidate=huge(p)
+    do io=1,ntarget
+      ix=modulo(nint(localized_centers(1,io)*real(dc%lg_tot%num(1),8)),dc%lg_tot%num(1))
+      iy=modulo(nint(localized_centers(2,io)*real(dc%lg_tot%num(2),8)),dc%lg_tot%num(2))
+      iz=modulo(nint(localized_centers(3,io)*real(dc%lg_tot%num(3),8)),dc%lg_tot%num(3))
+      center_physical_id=1_8+int(ix,8)+int(dc%lg_tot%num(1),8)*&
+        (int(iy,8)+int(dc%lg_tot%num(2),8)*int(iz,8))
+      p=findloc(ow_core_ids,center_physical_id,dim=1)
+      if(p<1)cycle
+      center_owner_candidate(io)=rank
+      center_box_candidate(io)=ow_core_box_positions(p)
+      center_fragment_candidate(io)=dc%i_frag
+    end do
+    call MPI_Allreduce(MPI_IN_PLACE,center_owner_candidate,ntarget,MPI_INTEGER,MPI_MIN,dc%icomm_tot,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,center_box_candidate,ntarget,MPI_INTEGER,MPI_MIN,dc%icomm_tot,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,center_fragment_candidate,ntarget,MPI_INTEGER,MPI_MIN,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(center_owner_candidate>=huge(rank)).or.&
+        any(center_box_candidate>=huge(p)))error stop 'localized Wannier center ownership failed'
+    ow_basis%center_owner_rank=center_owner_candidate
+    ow_basis%center_owner_fragment=center_fragment_candidate
+    do io=1,ntarget
+      ow_basis%center_box_point_ids(io)=int(center_owner_candidate(io),8)*int(nbox,8)+&
+        int(center_box_candidate(io),8)
+    end do
+    if(rank==0)write(*,'(a,2(es12.4,1x))')'[OW-GS-DIAGNOSTIC] localized_center_moment_minmax=',&
+      minval(localized_center_magnitudes),maxval(localized_center_magnitudes)
+    deallocate(localized_centers,localized_center_magnitudes,center_owner_candidate,&
+      center_box_candidate,center_fragment_candidate)
     deallocate(ow_box_gradients)
     allocate(pairs(ntarget,ncore));pairs=.true.
     allocate(ow_row_ids(count(ow_basis%center_owner_rank==rank)))
@@ -2202,12 +2347,13 @@ contains
     end do
   end subroutine promote_and_project_ow_matrices
 
-  subroutine prepare_ow_global_point_action(local_ids,target_ids,integer_rotations,rotations,product_table,&
-      inversion_present,ok,message)
+  subroutine prepare_ow_global_point_action(local_ids,target_ids,integer_rotations,rotations,&
+      fractional_translations,product_table,inversion_present,ok,message)
     integer(8),intent(in)::local_ids(:)
     integer(8),allocatable,intent(out)::target_ids(:,:)
     integer,allocatable,intent(out)::integer_rotations(:,:,:)
     real(8),allocatable,intent(out)::rotations(:,:,:)
+    real(8),allocatable,intent(out)::fractional_translations(:,:)
     integer,allocatable,intent(out)::product_table(:,:)
     logical,intent(out)::inversion_present,ok
     character(*),intent(out)::message
@@ -2215,11 +2361,11 @@ contains
     real(8),allocatable::fractional_positions(:,:)
     integer,allocatable::species(:),selected(:),mapped_owner(:),mapped_local(:),mapped_wrap(:,:)
     integer(8),allocatable::all_ids(:,:),mapped_ids(:),all_maps(:,:,:)
-    real(8)::lattice_inverse(3,3),determinant,common_center(3),fixed_residual(3)
+    real(8)::lattice_inverse(3,3),determinant,common_center(3),common_center_residual
     integer::rank,nproc,ierr,nlocal,atom,operation,axis,translation_grid(3),nselected,&
       g,h,k,source,point,middle_owner,middle_point
     integer(8)::middle_target,final_target
-    logical::inverse_ok,map_ok,matched,duplicate_rotation,have_common_center
+    logical::inverse_ok,map_ok,matched,duplicate_operation,have_common_center,center_solver_ok
     character(256)::detail
 
     ok=.false.;inversion_present=.false.;message=''
@@ -2237,13 +2383,6 @@ contains
       species,dg_ow_symmetry_tolerance,catalog,map_ok,detail)
     if(.not.map_ok)then;message='global point-action catalog: '//trim(detail);return;end if
     allocate(selected(size(catalog%operations)));nselected=0
-    have_common_center=.false.;common_center=0d0
-    do operation=1,size(catalog%operations)
-      if(.not.all(catalog%integer_rotation(:,:,operation)==&
-          reshape([-1,0,0,0,-1,0,0,0,-1],[3,3])))cycle
-      common_center=0.5d0*catalog%fractional_translation(:,operation)
-      common_center=modulo(common_center,1d0);have_common_center=.true.;exit
-    end do
     do operation=1,size(catalog%operations)
       do axis=1,3
         translation_grid(axis)=nint(catalog%fractional_translation(axis,operation)*&
@@ -2253,35 +2392,39 @@ contains
           catalog%fractional_translation(:,operation)-anint(real(translation_grid,8)/&
           real(dc%lg_tot%num,8)-catalog%fractional_translation(:,operation))))>&
           dg_ow_symmetry_tolerance)cycle
-      if(have_common_center)then
-        fixed_residual=catalog%fractional_translation(:,operation)-common_center+&
-          matmul(real(catalog%integer_rotation(:,:,operation),8),common_center)
-        fixed_residual=fixed_residual-anint(fixed_residual)
-        if(maxval(abs(fixed_residual))>dg_ow_symmetry_tolerance)cycle
-      end if
-      duplicate_rotation=.false.
+      duplicate_operation=.false.
       do g=1,nselected
         if(all(catalog%integer_rotation(:,:,selected(g))==&
-            catalog%integer_rotation(:,:,operation)))then
-          duplicate_rotation=.true.;exit
+            catalog%integer_rotation(:,:,operation)).and.maxval(abs(&
+            catalog%fractional_translation(:,selected(g))-catalog%fractional_translation(:,operation)-&
+            anint(catalog%fractional_translation(:,selected(g))-&
+            catalog%fractional_translation(:,operation))))<=dg_ow_symmetry_tolerance)then
+          duplicate_operation=.true.;exit
         end if
       end do
-      if(duplicate_rotation)cycle
+      if(duplicate_operation)cycle
       nselected=nselected+1;selected(nselected)=operation
       if(all(catalog%integer_rotation(:,:,operation)==&
           reshape([-1,0,0,0,-1,0,0,0,-1],[3,3])))inversion_present=.true.
     end do
     if(nselected<1)then;message='global point-action catalog has no grid-commensurate operation';return;end if
-    if(rank==0)write(*,'(a,i0,a,l1)')'[OW-GS-DIAGNOSTIC] global_point_group_order=',nselected,&
-      ' inversion=',inversion_present
+    call solve_dg_affine_common_fixed_point(catalog%integer_rotation(:,:,selected(1:nselected)),&
+      catalog%fractional_translation(:,selected(1:nselected)),dg_ow_symmetry_tolerance,&
+      have_common_center,common_center,common_center_residual,center_solver_ok,detail)
+    if(.not.center_solver_ok)then;message='global affine center solve: '//trim(detail);return;end if
+    if(rank==0)write(*,'(a,i0,2(a,l1),a,3(es12.4,1x),a,es12.4)')&
+      '[OW-GS-DIAGNOSTIC] global_affine_group_order=',nselected,&
+      ' inversion=',inversion_present,' common_center=',have_common_center,&
+      ' center_fractional=',common_center,' center_residual=',common_center_residual
     allocate(all_ids(nlocal,nproc),target_ids(nlocal,nselected),integer_rotations(3,3,nselected),&
-      rotations(3,3,nselected))
+      rotations(3,3,nselected),fractional_translations(3,nselected))
     call MPI_Allgather(local_ids,nlocal,MPI_INTEGER8,all_ids,nlocal,MPI_INTEGER8,&
       dc%icomm_tot,ierr)
     if(ierr/=MPI_SUCCESS)then;message='global point-action owner gather failed';return;end if
     do g=1,nselected
       operation=selected(g);integer_rotations(:,:,g)=catalog%integer_rotation(:,:,operation)
       rotations(:,:,g)=catalog%operations(operation)%R
+      fractional_translations(:,g)=catalog%fractional_translation(:,operation)
       call build_dg_pointwise_affine_owner_map(dc%lg_tot%num,local_ids,all_ids,&
         catalog%integer_rotation(:,:,operation),catalog%fractional_translation(:,operation),&
         dg_ow_symmetry_tolerance,mapped_ids,mapped_owner,mapped_local,mapped_wrap,map_ok,detail)

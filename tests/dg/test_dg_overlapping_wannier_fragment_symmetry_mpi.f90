@@ -8,7 +8,7 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
   use iso_fortran_env,only:int64
   implicit none
   integer :: ierr,rank,nproc,i,j
-  integer(int64) :: c4_fingerprint,c1_fingerprint,tolerance_fingerprint
+  integer(int64) :: c4_fingerprint,c1_fingerprint,tolerance_fingerprint,translation_fingerprint
   integer :: product_table(4,4)
   integer :: invalid_product_table(4,4)
   integer :: affine_rotation(3,3,6)
@@ -109,9 +109,12 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
   c1_fingerprint=fingerprint_dg_exact_fragment_symmetry(affine_rotation(:,:,1:1),reshape([1],[1,1]),1d-10)
   tolerance_fingerprint=fingerprint_dg_exact_fragment_symmetry(&
     affine_rotation(:,:,1:4),product_table,2d-10)
+  translation_fingerprint=fingerprint_dg_exact_fragment_symmetry(&
+    affine_rotation(:,:,1:4),product_table,1d-10,affine_translation(:,1:4)+0.125d0)
   call require(c4_fingerprint/=0_int64,'exact fragment symmetry fingerprint is nonzero')
   call require(c4_fingerprint/=c1_fingerprint,'C4 and displaced C1 checkpoint evidence differ')
   call require(c4_fingerprint/=tolerance_fingerprint,'symmetry tolerance is checkpoint evidence')
+  call require(c4_fingerprint/=translation_fingerprint,'affine translation is checkpoint evidence')
   pair_centers=reshape([0.25d0,0.5d0,0.5d0,0.75d0,0.5d0,0.5d0],[3,2])
   inversion_cartesian(:,:,1)=0d0
   inversion_cartesian(1,1,1)=-1d0;inversion_cartesian(2,2,1)=1d0

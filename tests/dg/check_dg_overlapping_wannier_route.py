@@ -37,6 +37,7 @@ dcdft_source = source("src/gs/dc/dcdft.f90")
 types_source = source("src/gs/dc/dg_overlapping_wannier_types.f90")
 construction_source = source("src/gs/dc/dg_overlapping_wannier_construction.f90")
 localization_source = source("src/gs/dc/dg_overlapping_wannier_localization.f90")
+lcfo_source = source("src/gs/dc/lcfo.f90")
 projection_source = source("src/gs/dc/dg_overlapping_wannier_projection.f90")
 operators_source = source("src/gs/dc/dg_overlapping_wannier_operators.f90")
 ow_scf_source = source("src/gs/dc/dg_overlapping_wannier_scf.f90")
@@ -255,6 +256,10 @@ assert re.search(r"dg_ow_localization_max_iterations\s*=\s*1024", input_source, 
 )
 assert "dg_ow_localization_max_iterations" in global_source
 assert "dg_ow_localization_max_iterations" in input_source
+si64_gs_input = (ROOT / "tests/dg/data/si64_overlapping_wannier_rt/input_gs.in").read_text()
+assert re.search(r"dg_ow_localization_gradient_tolerance\s*=\s*2d-2", si64_gs_input, re.I), (
+    "qualitative Si64 evidence must use the reviewed 0.02 absolute spread-gradient gate"
+)
 for window in (
     "dg_ow_candidate_states_per_fragment",
     "dg_ow_target_wanniers_per_fragment",
@@ -274,7 +279,6 @@ route_checks = [
     ),
     (r"trim\s*\(\s*xc\s*\)\s*/=\s*'pz'", "PZ LDA only"),
     (r"\byn_dc_lcfo\s*==\s*'y'", "LCFO forbidden"),
-    (r"\byn_eigenexa\s*==\s*'y'", "EigenExa forbidden"),
     (r"\byn_self_checkpoint\s*==\s*'y'", "normal checkpoint forbidden"),
     (r"\bcheckpoint_interval\s*>=\s*1", "periodic checkpoint forbidden"),
 ]
@@ -284,6 +288,15 @@ for condition, requirement in route_checks:
         input_source,
         re.I | re.S,
     ), f"overlapping-Wannier validation must enforce: {requirement}"
+
+assert not re.search(
+    rf"if\s*\(\s*{flag}\s*==\s*'y'.*?\byn_eigenexa\s*==\s*'y'.*?forbids EigenExa",
+    input_source,
+    re.I | re.S,
+), "the internal LCFO coefficient path must permit EigenExa"
+assert re.search(r"yn_eigenexa\s*=\s*'y'", si64_gs_input, re.I), (
+    "strict Si64 must exercise the LCFO EigenExa coefficient path"
+)
 
 assert re.search(
     rf"if\s*\(\s*{flag}\s*==\s*'y'\s*\)\s*then.*?"
@@ -305,7 +318,7 @@ assert "register_dg_overlapping_wannier_route_driver" not in ow_scf_source
 assert "execute_registered_dg_overlapping_wannier_ground_state" not in ow_scf_source
 assert re.search(
     r"subroutine\s+run_dg_overlapping_wannier_ground_state_for_main.*?"
-    r"construct_dg_overlapping_wannier_basis.*?"
+    r"call\s+dc_lcfo.*?"
     r"run_dg_overlapping_wannier_scf.*?"
     r"write_dg_overlapping_wannier_checkpoint",
     main_source,
@@ -335,11 +348,26 @@ assert not re.search(
 assert "checkpoint read rejected:" in adapter_body.lower(), (
     "a rejected route checkpoint must report its exact read/provenance reason"
 )
+assert not re.search(r"build_dg_core_owned_occupied_subspace\s*\(", adapter_body, re.I), (
+    "the production route must not construct a fragment-local occupied direct sum"
+)
+assert not re.search(
+    r"construct_dg_overlapping_wannier_basis\s*\(\s*MPI_COMM_SELF",
+    adapter_body,
+    re.I,
+), "the production route must not construct a fragment-local complement"
 assert re.search(
-    r"build_dg_core_owned_occupied_subspace\s*\(.*?system%rocc",
+    r"call\s+dc_lcfo\s*\(.*?retained_count\s*=\s*ntarget\s*,\s*&?\s*"
+    r"retained_box_contribution\s*=\s*lcfo_fragment_contribution\s*,\s*&?\s*"
+    r"retained_occupations\s*=\s*lcfo_retained_occupations",
     adapter_body,
     re.I | re.S,
-), "Wannier occupied inclusion must use the DC core-weighted chemical-potential subspace"
+), "all target Wanniers must come from the requested global LCFO coefficient columns"
+assert re.search(
+    r"coefficient_count\s*=\s*max\s*\(\s*dc%nstate_tot\s*,\s*retained_count\s*\)",
+    lcfo_source,
+    re.I,
+), "the in-memory LCFO path must retain requested columns beyond normal nstate_tot"
 assert re.search(
     r"assign_dg_overlapping_wannier_occupations\s*\(\s*dc%elec_num_tot\s*,\s*occupations",
     adapter_body,
@@ -350,18 +378,9 @@ assert re.search(
     construction_source,
     re.I,
 ), "retained occupation assignment must live in the overlapping-Wannier namespace"
-assert re.search(
-    r"allocate\s*\(\s*candidate\s*\(\s*local_candidate_count\s*,\s*nbox",
-    adapter_body,
-    re.I,
-), (
-    "production candidates must remain fragment-local before tail materialization"
+assert not re.search(r"allocate\s*\(\s*candidate\s*\(",adapter_body,re.I), (
+    "production must not materialize a separate fragment-eigenstate candidate window"
 )
-assert re.search(
-    r"call\s+construct_dg_overlapping_wannier_basis\s*\(\s*mpi_comm_self",
-    adapter_body,
-    re.I | re.S,
-), "production must close Wannier construction inside each periodic buffer fragment"
 assert re.search(
     r"subroutine\s+assemble_dg_distributed_candidate_symmetry",
     construction_source,
@@ -562,14 +581,14 @@ assert re.search(
     r"local_target_count\s*=\s*size\s*\(\s*manifest_channels\s*\)",
     adapter_body,
     re.I,
-), "complete-s+p manifest count must be recorded before direct-sum selection"
+), "complete-s+p manifest count must be recorded before LCFO target selection"
 assert re.search(
-    r"construct_dg_overlapping_wannier_basis\s*\(.*?"
-    r"projection_seed_values\s*=\s*manifest_values.*?"
-    r"local_target_count\s*=\s*ow_basis\s*%\s*target_rank",
+    r"ntarget\s*=\s*nstate\s*\+\s*global_projection_count.*?"
+    r"call\s+dc_lcfo\s*\(.*?retained_count\s*=\s*ntarget.*?"
+    r"retained_box_contribution\s*=\s*lcfo_fragment_contribution",
     adapter_body,
     re.I | re.S,
-), "measured occupied plus complete-shell direct-sum rank must become the production target"
+), "occupied plus complete-shell count must request the global LCFO target rank"
 assert re.search(
     r"complete_sp_core_atom_count\s*=\s*count\s*\(\s*manifest_channels\s*%\s*l\s*==\s*0\s*\).*?"
     r"local_target_count\s*/=\s*4\s*\*\s*complete_sp_core_atom_count",
@@ -577,33 +596,14 @@ assert re.search(
     re.I | re.S,
 ), "production must enforce four complete s+p channels per core-owned atom"
 assert re.search(
-    r"construct_dg_overlapping_wannier_basis\s*\(.*?"
-    r"projection_seed_values\s*=\s*manifest_values",
+    r"local_seed_overlap.*?manifest_values\s*\(",
     adapter_body,
     re.I | re.S,
-), "production target selection must consume the complete-s+p projector values"
-assert re.search(
-    r"augmented_candidate\s*\(\s*1\s*:\s*local_candidate_count\s*,\s*:\s*\)"
-    r"\s*=\s*candidate.*?"
-    r"augmented_candidate\s*\(\s*local_candidate_count\s*\+\s*1\s*:"
-    r"\s*local_candidate_count\s*\+\s*local_target_count\s*,\s*:\s*\)"
-    r"\s*=\s*manifest_values",
-    adapter_body,
-    re.I | re.S,
-), "raw complete-s+p orbitals must be appended to the fragment eigenstate candidates"
-assert re.search(
-    r"periodic_box_gradients\s*\(\s*augmented_candidate.*?"
-    r"augmented_gradient",
-    adapter_body,
-    re.I | re.S,
-), "the appended raw s+p orbitals need buffer-periodic finite-difference gradients"
-assert re.search(
-    r"augmented_occupied\s*=\s*\(\s*0d0\s*,\s*0d0\s*\).*?"
-    r"augmented_occupied\s*\(\s*1\s*:\s*local_candidate_count\s*,\s*:\s*\)"
-    r"\s*=\s*occupied_coefficients",
-    adapter_body,
-    re.I | re.S,
-), "occupied coefficients must be zero-extended over the appended s+p shell"
+), "complete-s+p projectors must act only as a localizer inside the LCFO space"
+for forbidden in ("augmented_candidate", "augmented_occupied", "occupied_coefficients"):
+    assert forbidden not in adapter_body.lower(), (
+        f"production must not retain fragment-local complement data: {forbidden}"
+    )
 assert not re.search(
     r"local_target_count\s*=\s*(?:merge\s*\(\s*)?dg_ow_target_wanniers_per_fragment",
     adapter_body,
@@ -648,18 +648,36 @@ metric_position = adapter_body.lower().index("call assemble_dg_overlapping_wanni
 assert materialize_position < localize_position < metric_position, (
     "localization must use streamed local buffers and finish before metric/SCF publication"
 )
+assert not re.search(
+    r"global_seed_values\s*\(\s*1\s*:\s*nstate.*?=\s*augmented_candidate\s*\(\s*1\s*:\s*nstate",
+    adapter_body,
+    re.I | re.S,
+), "fragment eigenstate indices must not be spliced into fictitious full-system KS seeds"
+assert re.search(
+    r"global_seed_values\s*\(\s*:\s*,\s*core_index\s*\)\s*=\s*"
+    r"lcfo_occupied_core\s*\(\s*:\s*,\s*core_index\s*\)",
+    adapter_body,
+    re.I,
+), "every fixed-rank seed must be a global LCFO coefficient state restricted to the unique core"
+assert re.search(
+    r"global_candidate_localizer\s*=\s*-\s*matmul\s*\(\s*global_seed_overlap\s*,\s*conjg\s*\(\s*transpose",
+    adapter_body,
+    re.I | re.S,
+), "fixed-rank selection must use measured projection-seed overlap, not MGS row order"
 assert "localization_spread_evaluations" in adapter_body, (
     "production must publish the batched localization spread-evaluation count"
 )
-assert re.search(
-    r"do\s+edge\s*=\s*1\s*,\s*size\s*\(\s*pair_first\s*\).*?"
-    r"first\s*=\s*pair_first\s*\(\s*edge\s*\).*?"
-    r"second\s*=\s*pair_second\s*\(\s*edge\s*\)",
-    localization_source,
-    re.I | re.S,
-), "localization gradient assembly must scale with the bounded overlap graph"
-assert "call collective_graph_gradients" in localization_source.lower(), (
-    "all overlap-graph gradients must share one batched collective reduction"
+assert "subroutine assemble_dg_periodic_spread_gradient" in localization_source.lower(), (
+    "localization must differentiate the same complete periodic spread used by its line search"
+)
+assert re.search(r"maximum_point_block\s*=\s*4096", localization_source, re.I), (
+    "complete spread-gradient assembly must bound its local-grid temporary storage"
+)
+assert re.search(r"local_action\s*=\s*local_action\s*\+\s*matmul", localization_source, re.I), (
+    "complete spread-gradient actions must use blocked dense matrix products"
+)
+assert not re.search(r"density_potential\s*\(\s*nwannier\s*,\s*npoint\s*\)", localization_source, re.I), (
+    "complete spread-gradient assembly must not duplicate the whole local buffer"
 )
 exponential_body = re.search(
     r"subroutine\s+exponentiate_antihermitian_block\b(?P<body>.*?)end\s+subroutine",
@@ -679,11 +697,14 @@ point_action_body = re.search(
     main_source,
     re.I | re.S,
 )
-assert point_action_body and "duplicate_rotation" in point_action_body.group("body").lower(), (
-    "global point action must retain one affine representative per point-group rotation"
+assert point_action_body and "duplicate_operation" in point_action_body.group("body").lower(), (
+    "global point action must deduplicate only identical affine operations"
 )
-assert "common_center" in point_action_body.group("body").lower(), (
-    "affine representatives must belong to one full-system common-center stabilizer"
+assert "solve_dg_affine_common_fixed_point" in point_action_body.group("body").lower(), (
+    "global affine action must report common-center availability without requiring it"
+)
+assert not re.search(r"if\s*\(\s*have_common_center\s*\).*?cycle",point_action_body.group("body"),re.I | re.S), (
+    "valid screw/glide operations must not be discarded for lacking a common fixed point"
 )
 assert localization_call > closure_call, (
     "full-system symmetry closure must precede Wannier localization"
@@ -753,10 +774,10 @@ assert "sort_ow_id_positions" in materialize_body.group("body").lower()
 assert "find_sorted_ow_id" in materialize_body.group("body").lower()
 assert "findloc" not in materialize_body.group("body").lower()
 assert re.search(
-    r"call\s+build_dg_core_owned_occupied_subspace",
+    r"nstate\s*=\s*ceiling\s*\(\s*0\.5d0\s*\*\s*dc%elec_num_tot\s*\)",
     adapter_body,
     re.I,
-), "production occupied rank must come from the DC core-weighted subspace"
+), "production occupied rank must come from the total electron count in the global LCFO ordering"
 assert not re.search(
     r"do\s+source\s*=\s*1\s*,\s*total_box.*?"
     r"do\s+j\s*=\s*1\s*,\s*ncandidate\s*;\s*do\s+i\s*=\s*1\s*,\s*ncandidate.*?"

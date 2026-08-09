@@ -6,8 +6,15 @@ program test_dg_overlapping_wannier_construction_mpi
     verify_dg_overlapping_wannier_periodic_closure,assemble_dg_distributed_candidate_symmetry,&
     assemble_dg_distributed_basis_symmetry_overlap,&
     build_dg_pointwise_affine_owner_map,&
+    find_dg_group_identity,&
     select_dg_fixed_rank_symmetry_closed_subspace,&
     build_dg_distributed_symmetry_closed_basis,&
+    accumulate_dg_lcfo_buffer_contributions_to_core,&
+    measure_dg_rank_fixed_symmetry_residuals,&
+    accept_dg_boundary_calibrated_symmetry,&
+    solve_dg_affine_common_fixed_point,&
+    compute_dg_periodic_wannier_centers,&
+    verify_dg_wannier_center_affine_orbits,&
     align_dg_fragment_wannier_gauge,replicate_dg_fragment_wannier_representative,&
     verify_dg_fragment_wannier_streaming_closure,verify_dg_fragment_center_orbit,&
     verify_dg_uniform_fragment_target_rank,assign_dg_overlapping_wannier_occupations,&
@@ -27,9 +34,12 @@ program test_dg_overlapping_wannier_construction_mpi
   complex(8)::gauge(4,4)
   complex(8),allocatable::reference_projector(:,:),projector(:,:),seed_projector(:,:)
   complex(8),allocatable::distributed_candidate(:,:),distributed_overlap(:,:,:),&
-    distributed_basis(:,:),distributed_basis_overlap(:,:,:),orbit_seed(:,:),orbit_basis(:,:),&
+    distributed_basis(:,:),distributed_basis_overlap(:,:,:),orbit_seed(:,:),required_orbit_seed(:,:),&
+    orbit_basis(:,:),&
     orbit_gram(:,:)
-  integer::orbit_rank
+  complex(8)::lcfo_buffer_contribution(2,2),lcfo_core_value(2,1)
+  integer(8)::lcfo_buffer_ids(2),lcfo_core_ids(1)
+  integer::orbit_rank,required_orbit_rank,identity_operation
   integer(8),allocatable::distributed_map(:,:),invalid_orbit_map(:,:)
   integer(8),allocatable::affine_local_ids(:),affine_all_ids(:,:),affine_target_ids(:),&
     affine_second_ids(:)
@@ -57,10 +67,21 @@ program test_dg_overlapping_wannier_construction_mpi
   complex(8)::gauge_values(2,2),gauge_gradients(3,2,2)
   complex(8)::mixed_wannier(2,2)
   complex(8)::closure_metric(6,6),closure_localizer(6,6),closure_group(6,6,2),&
-    closure_occupied(6,2)
+    closure_occupied(6,2),scaled_closure_metric(6,6)
   complex(8),allocatable::closure_transform(:,:)
   integer::closure_product(2,2)
   real(8)::subspace_leakage,occupied_inclusion
+  complex(8)::calibrated_basis(1,4),calibrated_representation(1,1,2)
+  integer(8)::calibrated_map(4,2)
+  logical::calibrated_boundary(4)
+  real(8)::calibrated_total(2),calibrated_boundary_residual(2),calibrated_interior_residual(2)
+  real(8)::calibrated_allowance,calibrated_strict_tolerance
+  integer::affine_rotations(3,3,2)
+  real(8)::affine_translations(3,2),affine_center(3),affine_residual
+  logical::has_affine_center
+  complex(8)::periodic_center_values(1,2),periodic_center_phases(3,2)
+  real(8)::periodic_centers(3,1),periodic_center_magnitudes(3,1)
+  real(8)::orbit_centers(3,2)
   complex(8)::fractional_core_candidates(2,2)
   complex(8),allocatable::core_occupied_coefficients(:,:)
   integer(8)::mixed_map(2,1)
@@ -71,6 +92,79 @@ program test_dg_overlapping_wannier_construction_mpi
 
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+  affine_rotations=0
+  affine_rotations(:,:,1)=reshape([1,0,0,0,1,0,0,0,1],[3,3])
+  affine_rotations(:,:,2)=reshape([-1,0,0,0,-1,0,0,0,1],[3,3])
+  affine_translations=0d0;affine_translations(:,2)=[0.5d0,0.25d0,0d0]
+  call solve_dg_affine_common_fixed_point(affine_rotations,affine_translations,1d-12,&
+    has_affine_center,affine_center,affine_residual,ok,message)
+  call require(ok.and.has_affine_center.and.affine_residual<1d-12.and.&
+    maxval(abs(modulo(affine_center(1:2)-[0.25d0,0.125d0]+0.5d0,1d0)-0.5d0))<1d-12,&
+    'non-origin noncentrosymmetric rotation center is solved from full affine operations')
+  affine_translations(:,2)=[0d0,0d0,0.5d0]
+  call solve_dg_affine_common_fixed_point(affine_rotations,affine_translations,1d-12,&
+    has_affine_center,affine_center,affine_residual,ok,message)
+  call require(ok.and..not.has_affine_center,&
+    'valid screw affine action does not invent a common fixed point')
+  call solve_dg_affine_common_fixed_point(affine_rotations(:,:,1:1),affine_translations(:,1:1),1d-12,&
+    has_affine_center,affine_center,affine_residual,ok,message)
+  call require(ok.and.has_affine_center.and.maxval(abs(affine_center))<1d-12,&
+    'C1 has a deterministic canonical center without restricting its affine action')
+  periodic_center_values=1d0
+  periodic_center_phases(:,1)=exp(cmplx(0d0,2d0*acos(-1d0)*0.9d0,8))
+  periodic_center_phases(:,2)=exp(cmplx(0d0,2d0*acos(-1d0)*0.1d0,8))
+  call compute_dg_periodic_wannier_centers(comm,periodic_center_values,[0.5d0,0.5d0],&
+    periodic_center_phases,periodic_centers,periodic_center_magnitudes,ok,message)
+  call require(ok.and.maxval(min(periodic_centers,1d0-periodic_centers))<1d-12.and.&
+    minval(periodic_center_magnitudes)>0.8d0,'periodic Wannier center crosses a cell face continuously')
+  orbit_centers(:,1)=[0.1d0,0.2d0,0.3d0];orbit_centers(:,2)=[0.4d0,0.2d0,0.3d0]
+  affine_translations=0d0;affine_translations(:,2)=[0.5d0,0.4d0,0d0]
+  call verify_dg_wannier_center_affine_orbits(orbit_centers,affine_rotations,&
+    affine_translations,1d-12,ok,message)
+  call require(ok,'Wannier centers form a closed full affine orbit independently of owner fragment')
+  orbit_centers(1,2)=0.45d0
+  call verify_dg_wannier_center_affine_orbits(orbit_centers,affine_rotations,&
+    affine_translations,1d-12,ok,message)
+  call require(.not.ok,'broken full affine Wannier center orbit is rejected')
+  calibrated_map(:,1)=int(rank*4,8)+[1_8,2_8,3_8,4_8]
+  calibrated_map(:,2)=int(rank*4,8)+[2_8,1_8,4_8,3_8]
+  calibrated_boundary=[.true.,.true.,.false.,.false.]
+  calibrated_basis=1d0;calibrated_basis(1,1)=1.1d0
+  call measure_dg_rank_fixed_symmetry_residuals(comm,calibrated_basis,[1d0,1d0,1d0,1d0],&
+    calibrated_map,calibrated_boundary,calibrated_representation,calibrated_total,&
+    calibrated_boundary_residual,calibrated_interior_residual,ok,message)
+  call require(ok.and.calibrated_boundary_residual(2)>10d0*calibrated_interior_residual(2),&
+    'rank-fixed residual identifies boundary stitching error')
+  calibrated_allowance=1.01d0*calibrated_boundary_residual(2)
+  calibrated_strict_tolerance=max(1d-12,2d0*calibrated_interior_residual(2))
+  call accept_dg_boundary_calibrated_symmetry(calibrated_boundary_residual,&
+    calibrated_interior_residual,calibrated_allowance,calibrated_strict_tolerance,ok,message)
+  call require(ok,'measured stitching baseline accepts boundary-localized residual')
+  calibrated_basis=1d0;calibrated_basis(1,3)=1.1d0
+  call measure_dg_rank_fixed_symmetry_residuals(comm,calibrated_basis,[1d0,1d0,1d0,1d0],&
+    calibrated_map,calibrated_boundary,calibrated_representation,calibrated_total,&
+    calibrated_boundary_residual,calibrated_interior_residual,ok,message)
+  call require(ok.and.calibrated_interior_residual(2)>10d0*calibrated_boundary_residual(2),&
+    'rank-fixed residual rejects equivalent interior breaking')
+  call accept_dg_boundary_calibrated_symmetry(calibrated_boundary_residual,&
+    calibrated_interior_residual,calibrated_allowance,calibrated_strict_tolerance,ok,message)
+  call require(.not.ok,'boundary allowance cannot excuse interior symmetry breaking')
+  lcfo_core_ids(1)=int(rank+1,8)
+  lcfo_buffer_ids=[int(rank+1,8),int(modulo(rank+1,nproc)+1,8)]
+  lcfo_buffer_contribution(:,1)=[cmplx(rank+1d0,0d0,8),cmplx(10d0*(rank+1),0d0,8)]
+  lcfo_buffer_contribution(:,2)=[cmplx(100d0*(rank+1),0d0,8),cmplx(1000d0*(rank+1),0d0,8)]
+  call accumulate_dg_lcfo_buffer_contributions_to_core(comm,lcfo_buffer_ids,&
+    lcfo_buffer_contribution,lcfo_core_ids,lcfo_core_value,ok,message)
+  call require(ok,trim(message))
+  if(nproc==1)then
+    call require(maxval(abs(lcfo_core_value(:,1)-[cmplx(101d0,0d0,8),cmplx(1010d0,0d0,8)]))<1d-12,&
+      'LCFO contributions sharing one physical point are accumulated once per basis fragment')
+  else
+    i=modulo(rank-1,nproc)
+    call require(maxval(abs(lcfo_core_value(:,1)-[cmplx(rank+1d0+100d0*(i+1),0d0,8),&
+      cmplx(10d0*(rank+1)+1000d0*(i+1),0d0,8)]))<1d-12,&
+      'LCFO buffer tails from every covering fragment accumulate on the unique core owner')
+  endif
   closure_metric=(0d0,0d0);closure_localizer=(0d0,0d0);closure_group=(0d0,0d0)
   closure_occupied=(0d0,0d0)
   do i=1,6
@@ -84,6 +178,8 @@ program test_dg_overlapping_wannier_construction_mpi
   closure_localizer(5,5)=2d0;closure_localizer(6,6)=2d0
   closure_occupied(1,1)=1d0;closure_occupied(2,2)=1d0
   closure_product=reshape([1,2,2,1],[2,2])
+  call find_dg_group_identity(reshape([2,1,1,2],[2,2]),identity_operation,ok,message)
+  call require(ok.and.identity_operation==2,'group identity is derived from the product table')
   call select_dg_fixed_rank_symmetry_closed_subspace(closure_metric,closure_occupied,&
     closure_localizer,closure_group,closure_product,4,1d-12,closure_transform,&
     occupied_inclusion,subspace_leakage,ok,message)
@@ -93,6 +189,12 @@ program test_dg_overlapping_wannier_construction_mpi
     maxval(abs(projector(5:6,:)))<1d-12,'fixed-rank selector keeps complete symmetry blocks')
   call require(occupied_inclusion<1d-12.and.subspace_leakage<1d-12,&
     'fixed-rank selector contains occupied space and closes under the group')
+  scaled_closure_metric=2d0*closure_metric
+  call select_dg_fixed_rank_symmetry_closed_subspace(scaled_closure_metric,closure_occupied,&
+    closure_localizer,closure_group,closure_product,4,1d-12,closure_transform,&
+    occupied_inclusion,subspace_leakage,ok,message)
+  call require(ok.and.occupied_inclusion<1d-12.and.subspace_leakage<1d-12,&
+    'fixed-rank selector metric-orthonormalizes the occupied coefficient block')
   call select_dg_fixed_rank_symmetry_closed_subspace(closure_metric,closure_occupied,&
     closure_localizer,closure_group,closure_product,3,1d-12,closure_transform,&
     occupied_inclusion,subspace_leakage,ok,message)
@@ -287,6 +389,22 @@ program test_dg_overlapping_wannier_construction_mpi
       distributed_map(:,1:2),closure_product,1,1,1d-12,orbit_basis,orbit_rank,ok,message)
     call require(.not.ok.and.trim(message)=='required symmetry orbit exceeds target rank',&
       'required occupied orbit cannot be truncated to the target rank')
+    call build_dg_distributed_symmetry_closed_basis(comm,orbit_seed,distributed_weight,&
+      distributed_map(:,1:2),closure_product,1,2,1d-12,orbit_basis,orbit_rank,ok,message,&
+      minimum_rank=1,required_retained_rank=required_orbit_rank)
+    call require(ok.and.orbit_rank==2.and.required_orbit_rank==2,&
+      'candidate builder may cross a minimum rank only after completing the symmetry orbit')
+    allocate(required_orbit_seed(2,2));required_orbit_seed=(0d0,0d0)
+    if(rank==0)then
+      required_orbit_seed(1,1)=1d0
+      required_orbit_seed(2,2)=1d0
+    end if
+    call build_dg_distributed_symmetry_closed_basis(comm,required_orbit_seed,distributed_weight,&
+      distributed_map(:,1:2),closure_product,2,4,1d-12,orbit_basis,orbit_rank,ok,message,&
+      minimum_rank=1,required_retained_rank=required_orbit_rank)
+    call require(ok.and.orbit_rank==4.and.required_orbit_rank==4,&
+      'minimum-rank candidate construction still processes every required seed')
+    deallocate(required_orbit_seed)
     allocate(invalid_orbit_map,source=distributed_map(:,1:2))
     if(rank==0)invalid_orbit_map(:,2)=[3_8,3_8]
     call build_dg_distributed_symmetry_closed_basis(comm,orbit_seed,distributed_weight,&

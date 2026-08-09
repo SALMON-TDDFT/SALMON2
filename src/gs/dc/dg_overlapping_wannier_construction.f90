@@ -35,11 +35,373 @@ module dg_overlapping_wannier_construction
   public::build_dg_core_owned_occupied_subspace
   public::verify_dg_uniform_fragment_target_rank
   public::assign_dg_overlapping_wannier_occupations
+  public::find_dg_group_identity
+  public::accumulate_dg_lcfo_buffer_contributions_to_core
+  public::measure_dg_rank_fixed_symmetry_residuals
+  public::accept_dg_boundary_calibrated_symmetry
+  public::solve_dg_affine_common_fixed_point
+  public::compute_dg_periodic_wannier_centers
+  public::verify_dg_wannier_center_affine_orbits
 contains
+
+  subroutine verify_dg_wannier_center_affine_orbits(centers,integer_rotations,&
+      fractional_translations,tolerance,ok,message)
+    real(real64),intent(in)::centers(:,:),fractional_translations(:,:),tolerance
+    integer,intent(in)::integer_rotations(:,:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    real(real64),allocatable::mapped_centers(:,:)
+    integer,allocatable::matched_target(:)
+    logical,allocatable::seen(:)
+    integer::nwann,noperation,operation,source
+
+    nwann=size(centers,2);noperation=size(integer_rotations,3)
+    ok=nwann>0.and.size(centers,1)==3.and.noperation>0.and.size(integer_rotations,1)==3.and.&
+      size(integer_rotations,2)==3.and.all(shape(fractional_translations)==[3,noperation]).and.&
+      tolerance>0d0.and.all(ieee_is_finite(centers)).and.&
+      all(ieee_is_finite(fractional_translations))
+    if(.not.ok)then;message='invalid Wannier center affine-orbit contract';return;end if
+    allocate(mapped_centers(3,nwann),matched_target(nwann),seen(nwann))
+    do operation=1,noperation
+      mapped_centers=modulo(matmul(real(integer_rotations(:,:,operation),real64),centers)+&
+        spread(fractional_translations(:,operation),2,nwann),1d0)
+      matched_target=0
+      do source=1,nwann
+        seen=.false.
+        if(.not.augment_center_match(source))then
+          ok=.false.;message='localized Wannier centers are not closed under full affine symmetry';return
+        end if
+      end do
+    end do
+    ok=.true.;message=''
+  contains
+    recursive logical function augment_center_match(source_index) result(found)
+      integer,intent(in)::source_index
+      integer::target,previous_source
+      real(real64)::difference(3)
+      found=.false.
+      do target=1,nwann
+        if(seen(target))cycle
+        difference=mapped_centers(:,source_index)-centers(:,target)
+        difference=difference-anint(difference)
+        if(maxval(abs(difference))>tolerance)cycle
+        seen(target)=.true.;previous_source=matched_target(target)
+        if(previous_source==0)then
+          matched_target(target)=source_index;found=.true.;return
+        end if
+        if(augment_center_match(previous_source))then
+          matched_target(target)=source_index;found=.true.;return
+        end if
+      end do
+    end function augment_center_match
+  end subroutine verify_dg_wannier_center_affine_orbits
+
+  subroutine compute_dg_periodic_wannier_centers(comm,values,weights,periodic_phases,centers,&
+      moment_magnitudes,ok,message)
+    integer,intent(in)::comm
+    complex(real64),intent(in)::values(:,:),periodic_phases(:,:)
+    real(real64),intent(in)::weights(:)
+    real(real64),intent(out)::centers(:,:),moment_magnitudes(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    complex(real64),allocatable::local_moments(:,:),global_moments(:,:)
+    real(real64),allocatable::local_norm(:),global_norm(:)
+    integer::nwann,npoint,iw,axis,ierr
+    real(real64),parameter::two_pi=2d0*acos(-1d0)
+    nwann=size(values,1);npoint=size(values,2)
+    ok=nwann>0.and.npoint>0.and.size(weights)==npoint.and.all(shape(periodic_phases)==[3,npoint]).and.&
+      all(shape(centers)==[3,nwann]).and.all(shape(moment_magnitudes)==[3,nwann]).and.&
+      all(weights>=0d0).and.all(ieee_is_finite(weights))
+    if(.not.ok)then;message='invalid periodic Wannier center contract';return;end if
+    allocate(local_moments(3,nwann),global_moments(3,nwann),local_norm(nwann),global_norm(nwann))
+    do iw=1,nwann
+      local_norm(iw)=sum(weights*abs(values(iw,:))**2)
+      do axis=1,3
+        local_moments(axis,iw)=sum(weights*abs(values(iw,:))**2*periodic_phases(axis,:))
+      end do
+    end do
+    call MPI_Allreduce(local_norm,global_norm,nwann,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+    call MPI_Allreduce(local_moments,global_moments,3*nwann,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(global_norm<=epsilon(1d0)))then
+      ok=.false.;message='periodic Wannier center normalization failed';return
+    end if
+    do iw=1,nwann;do axis=1,3
+      moment_magnitudes(axis,iw)=abs(global_moments(axis,iw))/global_norm(iw)
+      centers(axis,iw)=modulo(atan2(aimag(global_moments(axis,iw)),&
+        real(global_moments(axis,iw)))/two_pi,1d0)
+    end do;end do
+    ok=all(ieee_is_finite(centers)).and.all(ieee_is_finite(moment_magnitudes))
+    if(ok)then;message='';else;message='periodic Wannier center is not finite';end if
+#else
+    ok=.false.;message='periodic Wannier center measurement requires MPI'
+#endif
+  end subroutine compute_dg_periodic_wannier_centers
+
+  subroutine solve_dg_affine_common_fixed_point(integer_rotations,fractional_translations,tolerance,&
+      has_common_center,center,maximum_residual,ok,message)
+    integer,intent(in)::integer_rotations(:,:,:)
+    real(real64),intent(in)::fractional_translations(:,:),tolerance
+    logical,intent(out)::has_common_center,ok
+    real(real64),intent(out)::center(3),maximum_residual
+    character(*),intent(out)::message
+    complex(real64)::normal_complex(3,3)
+    complex(real64),allocatable::eigenvectors(:,:)
+    real(real64),allocatable::eigenvalues(:)
+    real(real64)::normal(3,3),rhs(3),trial(3),updated(3),a(3,3),delta(3),residual,&
+      best_residual,best_norm,trial_norm,best_lex,trial_lex
+    integer::sx,sy,sz,iteration,operation,i,j,k,noperation
+    logical::eigen_ok
+    character(256)::detail
+
+    noperation=size(integer_rotations,3);center=0d0;maximum_residual=huge(1d0)
+    has_common_center=.false.;ok=noperation>0.and.size(integer_rotations,1)==3.and.&
+      size(integer_rotations,2)==3.and.all(shape(fractional_translations)==[3,noperation]).and.&
+      tolerance>0d0.and.ieee_is_finite(tolerance).and.&
+      all(ieee_is_finite(fractional_translations))
+    if(.not.ok)then;message='invalid affine common-center contract';return;end if
+    best_residual=huge(1d0);best_norm=huge(1d0);best_lex=huge(1d0)
+    do sx=0,3;do sy=0,3;do sz=0,3
+      trial=0.25d0*[real(sx,real64),real(sy,real64),real(sz,real64)]
+      do iteration=1,16
+        normal=0d0;rhs=0d0
+        do operation=1,noperation
+          a=0d0;do i=1,3;a(i,i)=1d0;end do
+          a=a-real(integer_rotations(:,:,operation),real64)
+          delta=matmul(a,trial)-fractional_translations(:,operation)
+          normal=normal+matmul(transpose(a),a)
+          rhs=rhs+matmul(transpose(a),fractional_translations(:,operation)+anint(delta))
+        end do
+        normal_complex=cmplx(normal,0d0,real64)
+        call hermitian_eigensystem(normal_complex,eigenvalues,eigenvectors,eigen_ok,detail)
+        if(.not.eigen_ok)then;ok=.false.;message='affine common-center normal solve failed';return;end if
+        updated=0d0
+        do k=1,3
+          if(eigenvalues(k)<=tolerance*max(1d0,maxval(eigenvalues)))cycle
+          updated=updated+real(eigenvectors(:,k),real64)*&
+            dot_product(real(eigenvectors(:,k),real64),rhs)/eigenvalues(k)
+        end do
+        updated=modulo(updated,1d0)
+        if(maxval(abs(modulo(updated-trial+0.5d0,1d0)-0.5d0))<=tolerance)exit
+        trial=updated
+      end do
+      residual=0d0
+      do operation=1,noperation
+        a=0d0;do i=1,3;a(i,i)=1d0;end do
+        a=a-real(integer_rotations(:,:,operation),real64)
+        delta=matmul(a,updated)-fractional_translations(:,operation)
+        residual=max(residual,maxval(abs(delta-anint(delta))))
+      end do
+      trial_norm=sum(min(updated,1d0-updated)**2)
+      trial_lex=updated(1)+1d-3*updated(2)+1d-6*updated(3)
+      if(residual<best_residual-tolerance.or.&
+          (abs(residual-best_residual)<=tolerance.and.(trial_norm<best_norm-tolerance.or.&
+          (abs(trial_norm-best_norm)<=tolerance.and.trial_lex<best_lex))))then
+        best_residual=residual;best_norm=trial_norm;best_lex=trial_lex;center=updated
+      end if
+    end do;end do;end do
+    maximum_residual=best_residual;has_common_center=best_residual<=tolerance
+    ok=.true.;message=''
+  end subroutine solve_dg_affine_common_fixed_point
+
+  subroutine accept_dg_boundary_calibrated_symmetry(boundary_residual,interior_residual,&
+      boundary_allowance,interior_tolerance,ok,message)
+    real(real64),intent(in)::boundary_residual(:),interior_residual(:),boundary_allowance,interior_tolerance
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    ok=size(boundary_residual)>0.and.size(interior_residual)==size(boundary_residual).and.&
+      boundary_allowance>=0d0.and.interior_tolerance>0d0.and.ieee_is_finite(boundary_allowance).and.&
+      ieee_is_finite(interior_tolerance).and.all(ieee_is_finite(boundary_residual)).and.&
+      all(ieee_is_finite(interior_residual)).and.all(boundary_residual>=0d0).and.&
+      all(interior_residual>=0d0)
+    if(.not.ok)then;message='invalid boundary-calibrated symmetry gate';return;end if
+    if(maxval(interior_residual)>interior_tolerance)then
+      ok=.false.;message='LCFO interior symmetry residual exceeds strict tolerance';return
+    end if
+    if(maxval(boundary_residual)>boundary_allowance)then
+      ok=.false.;message='LCFO boundary symmetry residual exceeds measured stitching allowance';return
+    end if
+    message=''
+  end subroutine accept_dg_boundary_calibrated_symmetry
+
+  subroutine measure_dg_rank_fixed_symmetry_residuals(comm,basis,weights,symmetry_target_box_ids,&
+      boundary_mask,representation,total_residual,boundary_residual,interior_residual,ok,message)
+    integer,intent(in)::comm
+    complex(real64),intent(in)::basis(:,:)
+    real(real64),intent(in)::weights(:)
+    integer(int64),intent(in)::symmetry_target_box_ids(:,:)
+    logical,intent(in)::boundary_mask(:)
+    complex(real64),intent(out)::representation(:,:,:)
+    real(real64),intent(out)::total_residual(:),boundary_residual(:),interior_residual(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    complex(real64),allocatable::local_metric(:,:),metric(:,:),metric_vectors(:,:),metric_inverse_sqrt(:,:),&
+      orthonormal_basis(:,:),owner_basis(:,:),image(:,:),local_overlap(:,:),global_overlap(:,:),residual(:,:)
+    real(real64),allocatable::metric_spectrum(:),local_norms(:),global_norms(:)
+    integer::rank,nproc,ierr,nstate,nlocal,noperation,operation,owner,point,target_owner,target_point,i
+    logical::eigen_ok
+    character(256)::detail
+
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    nstate=size(basis,1);nlocal=size(basis,2);noperation=size(symmetry_target_box_ids,2)
+    ok=nstate>0.and.nlocal>0.and.noperation>0.and.size(weights)==nlocal.and.&
+      size(symmetry_target_box_ids,1)==nlocal.and.size(boundary_mask)==nlocal.and.&
+      all(shape(representation)==[nstate,nstate,noperation]).and.&
+      size(total_residual)==noperation.and.size(boundary_residual)==noperation.and.&
+      size(interior_residual)==noperation.and.all(weights>=0d0)
+    if(.not.ok)then;message='invalid rank-fixed symmetry residual contract';return;end if
+    allocate(local_metric(nstate,nstate),metric(nstate,nstate),metric_inverse_sqrt(nstate,nstate),&
+      orthonormal_basis(nstate,nlocal),owner_basis(nstate,nlocal),image(nstate,nlocal),&
+      local_overlap(nstate,nstate),global_overlap(nstate,nstate),residual(nstate,nlocal),&
+      local_norms(3),global_norms(3))
+    do i=1,nstate
+      local_metric(i,:)=matmul(conjg(basis(i,:))*weights,transpose(basis))
+    end do
+    call MPI_Allreduce(local_metric,metric,nstate*nstate,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    call hermitian_eigensystem(metric,metric_spectrum,metric_vectors,eigen_ok,detail)
+    if(.not.eigen_ok.or.minval(metric_spectrum)<=epsilon(1d0)*maxval(metric_spectrum))then
+      ok=.false.;message='rank-fixed occupied metric is singular';return
+    end if
+    metric_inverse_sqrt=metric_vectors
+    do i=1,nstate;metric_inverse_sqrt(:,i)=metric_inverse_sqrt(:,i)/sqrt(metric_spectrum(i));end do
+    metric_inverse_sqrt=matmul(metric_inverse_sqrt,conjg(transpose(metric_vectors)))
+    orthonormal_basis=matmul(metric_inverse_sqrt,basis)
+    do operation=1,noperation
+      image=(0d0,0d0)
+      do owner=0,nproc-1
+        if(rank==owner)owner_basis=orthonormal_basis
+        call MPI_Bcast(owner_basis,nstate*nlocal,MPI_DOUBLE_COMPLEX,owner,comm,ierr)
+        do point=1,nlocal
+          target_owner=int((symmetry_target_box_ids(point,operation)-1_int64)/int(nlocal,int64))
+          if(target_owner/=owner)cycle
+          target_point=int(modulo(symmetry_target_box_ids(point,operation)-1_int64,int(nlocal,int64)))+1
+          if(target_point<1.or.target_point>nlocal)then
+            ok=.false.;message='rank-fixed symmetry point map is invalid';return
+          end if
+          image(:,point)=owner_basis(:,target_point)
+        end do
+      end do
+      do i=1,nstate
+        local_overlap(i,:)=matmul(conjg(orthonormal_basis(i,:))*weights,transpose(image))
+      end do
+      call MPI_Allreduce(local_overlap,global_overlap,nstate*nstate,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      representation(:,:,operation)=global_overlap
+      residual=image-matmul(transpose(global_overlap),orthonormal_basis)
+      local_norms(1)=sum(spread(weights,1,nstate)*abs(residual)**2)
+      local_norms(2)=sum(spread(weights*merge(1d0,0d0,boundary_mask),1,nstate)*abs(residual)**2)
+      local_norms(3)=sum(spread(weights*merge(0d0,1d0,boundary_mask),1,nstate)*abs(residual)**2)
+      call MPI_Allreduce(local_norms,global_norms,3,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+      total_residual(operation)=sqrt(max(0d0,global_norms(1)))
+      boundary_residual(operation)=sqrt(max(0d0,global_norms(2)))
+      interior_residual(operation)=sqrt(max(0d0,global_norms(3)))
+    end do
+    ok=all(ieee_is_finite(total_residual)).and.all(ieee_is_finite(boundary_residual)).and.&
+      all(ieee_is_finite(interior_residual))
+    if(ok)then;message='';else;message='rank-fixed symmetry residual is not finite';end if
+#else
+    ok=.false.;message='rank-fixed symmetry residual measurement requires MPI'
+#endif
+  end subroutine measure_dg_rank_fixed_symmetry_residuals
+
+  subroutine accumulate_dg_lcfo_buffer_contributions_to_core(comm,buffer_ids,buffer_contributions,&
+      core_ids,core_values,ok,message)
+    integer,intent(in)::comm
+    integer(int64),intent(in)::buffer_ids(:),core_ids(:)
+    complex(real64),intent(in)::buffer_contributions(:,:)
+    complex(real64),intent(out)::core_values(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer(int64),allocatable::source_ids(:),sorted_core_ids(:)
+    integer,allocatable::sorted_core_positions(:)
+    complex(real64),allocatable::source_values(:,:)
+    integer::rank,nproc,ierr,source,point,position,nstate,nbox,ncore,i,j,key_position
+    integer::local_shape(3),minimum_shape(3),maximum_shape(3)
+    integer(int64)::key_id
+
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    nstate=size(buffer_contributions,1);nbox=size(buffer_ids);ncore=size(core_ids)
+    local_shape=[nstate,nbox,ncore]
+    call MPI_Allreduce(local_shape,minimum_shape,3,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(local_shape,maximum_shape,3,MPI_INTEGER,MPI_MAX,comm,ierr)
+    ok=ierr==MPI_SUCCESS.and.all(minimum_shape==maximum_shape).and.nstate>0.and.nbox>0.and.ncore>0.and.&
+      size(buffer_contributions,2)==nbox.and.all(shape(core_values)==[nstate,ncore])
+    if(.not.ok)then;message='invalid or rank-inconsistent LCFO contribution shape';return;end if
+    allocate(source_ids(nbox),source_values(nstate,nbox),sorted_core_ids(ncore),&
+      sorted_core_positions(ncore))
+    sorted_core_ids=core_ids;sorted_core_positions=[(i,i=1,ncore)]
+    do i=2,ncore
+      key_id=sorted_core_ids(i);key_position=sorted_core_positions(i);j=i-1
+      do while(j>=1)
+        if(sorted_core_ids(j)<=key_id)exit
+        sorted_core_ids(j+1)=sorted_core_ids(j);sorted_core_positions(j+1)=sorted_core_positions(j);j=j-1
+      end do
+      sorted_core_ids(j+1)=key_id;sorted_core_positions(j+1)=key_position
+    end do
+    if(any(sorted_core_ids(2:ncore)==sorted_core_ids(1:ncore-1)))then
+      ok=.false.;message='LCFO core physical IDs are not uniquely owned';return
+    end if
+    core_values=(0d0,0d0)
+    do source=0,nproc-1
+      if(rank==source)then;source_ids=buffer_ids;source_values=buffer_contributions;end if
+      call MPI_Bcast(source_ids,nbox,MPI_INTEGER8,source,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;ok=.false.;message='LCFO contribution ID stream failed';return;end if
+      call MPI_Bcast(source_values,nstate*nbox,MPI_DOUBLE_COMPLEX,source,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;ok=.false.;message='LCFO contribution value stream failed';return;end if
+      do point=1,nbox
+        position=find_core_position(source_ids(point),sorted_core_ids,sorted_core_positions)
+        if(position>0)core_values(:,position)=core_values(:,position)+source_values(:,point)
+      end do
+    end do
+    ok=all(ieee_is_finite(real(core_values))).and.all(ieee_is_finite(aimag(core_values)))
+    if(ok)then;message='';else;message='LCFO accumulated core values are not finite';end if
+#else
+    ok=.false.;message='LCFO distributed contribution accumulation requires MPI'
+#endif
+  contains
+    integer function find_core_position(id,sorted_ids,sorted_positions) result(position)
+      integer(int64),intent(in)::id,sorted_ids(:)
+      integer,intent(in)::sorted_positions(:)
+      integer::left,right,middle
+      position=0;left=1;right=size(sorted_ids)
+      do while(left<=right)
+        middle=(left+right)/2
+        if(sorted_ids(middle)==id)then;position=sorted_positions(middle);return;end if
+        if(sorted_ids(middle)<id)then;left=middle+1;else;right=middle-1;end if
+      end do
+    end function find_core_position
+  end subroutine accumulate_dg_lcfo_buffer_contributions_to_core
+
+  subroutine find_dg_group_identity(product_table,identity_operation,ok,message)
+    integer,intent(in)::product_table(:,:)
+    integer,intent(out)::identity_operation
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::candidate,operation,n,match_count
+    logical::is_identity
+    ok=.false.;message='';identity_operation=0;n=size(product_table,1)
+    if(n<1.or.size(product_table,2)/=n.or.any(product_table<1).or.any(product_table>n))then
+      message='invalid group product table';return
+    end if
+    match_count=0
+    do candidate=1,n
+      is_identity=.true.
+      do operation=1,n
+        if(product_table(candidate,operation)/=operation.or.&
+            product_table(operation,candidate)/=operation)is_identity=.false.
+      end do
+      if(is_identity)then
+        match_count=match_count+1;identity_operation=candidate
+      end if
+    end do
+    if(match_count/=1)then;message='group product table has no unique identity';return;end if
+    ok=.true.
+  end subroutine find_dg_group_identity
 
   subroutine build_dg_distributed_symmetry_closed_basis(comm,seed_values,weights,&
       symmetry_target_box_ids,product_table,required_seed_count,target_rank,tolerance,basis,retained_rank,&
-      ok,message)
+      ok,message,minimum_rank,required_retained_rank)
     integer,intent(in)::comm,required_seed_count,target_rank
     complex(real64),intent(in)::seed_values(:,:)
     real(real64),intent(in)::weights(:),tolerance
@@ -49,6 +411,8 @@ contains
     integer,intent(out)::retained_rank
     logical,intent(out)::ok
     character(*),intent(out)::message
+    integer,intent(in),optional::minimum_rank
+    integer,intent(out),optional::required_retained_rank
 #ifdef USE_MPI
     complex(real64),allocatable::owner_seed(:),image(:),local_overlap(:),global_overlap(:)
     integer(int64),allocatable::all_maps(:,:,:)
@@ -56,16 +420,18 @@ contains
     real(real64)::local_norm,global_norm
     integer::rank,nproc,ierr,nseed,nlocal,noperation,seed,operation,owner,point,&
       target_owner,target_point,pass,iw,rank_before,local_bad,global_bad,left,right,product,&
-      source_owner,source_point,middle_owner,middle_point
+      source_owner,source_point,middle_owner,middle_point,effective_minimum_rank
     integer(int64)::middle_target,final_target
     logical::orbit_exceeds
 
-    ok=.false.;message='';retained_rank=0
+    ok=.false.;message='';retained_rank=0;if(present(required_retained_rank))required_retained_rank=0
     call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
     nseed=size(seed_values,1);nlocal=size(seed_values,2);noperation=size(symmetry_target_box_ids,2)
+    effective_minimum_rank=target_rank;if(present(minimum_rank))effective_minimum_rank=minimum_rank
     local_bad=merge(0,1,nseed>0.and.nlocal>0.and.noperation>0.and.size(weights)==nlocal.and.&
       size(symmetry_target_box_ids,1)==nlocal.and.required_seed_count>=0.and.&
-      required_seed_count<=nseed.and.target_rank>0.and.tolerance>0d0.and.&
+      required_seed_count<=nseed.and.target_rank>0.and.effective_minimum_rank>0.and.&
+      effective_minimum_rank<=target_rank.and.tolerance>0d0.and.&
       all(shape(product_table)==[noperation,noperation]).and.&
       all(ieee_is_finite(weights)).and.all(weights>=0d0).and.&
       all(ieee_is_finite(real(seed_values))).and.all(ieee_is_finite(aimag(seed_values))))
@@ -150,9 +516,16 @@ contains
           message='required symmetry orbit exceeds target rank';return
         end if
       end if
-      if(retained_rank==target_rank)exit
+      if(seed==required_seed_count.and.present(required_retained_rank))required_retained_rank=retained_rank
+      if(seed>=required_seed_count.and.retained_rank>=effective_minimum_rank)exit
     end do
-    if(retained_rank/=target_rank)then;message='symmetry-closed seeds do not fill target rank';return;end if
+    if(required_seed_count==0.and.present(required_retained_rank))required_retained_rank=0
+    if(required_seed_count>0.and.present(required_retained_rank))then
+      if(required_retained_rank<1)then;message='required seed closure was not completed';return;end if
+    end if
+    if(retained_rank<effective_minimum_rank)then
+      message='symmetry-closed seeds do not fill minimum rank';return
+    end if
     ok=.true.
 #else
     retained_rank=0;ok=.false.;message='distributed symmetry-closed basis requires MPI'
@@ -176,7 +549,8 @@ contains
       complement_localizer(:,:),complement_eigenvectors(:,:),selected_orthogonal(:,:),&
       selected_projector(:,:),work(:,:)
     real(real64),allocatable::metric_spectrum(:),complement_projector_spectrum(:),&
-      complement_spectrum(:)
+      complement_spectrum(:),occupied_spectrum(:)
+    complex(real64),allocatable::occupied_vectors(:,:),occupied_inverse_sqrt(:,:)
     real(real64)::scale,defect,boundary_scale
     integer::n,noccupied,noperation,ncomplement,nselect,i,j,operation,left,right,product,column
     logical::eigen_ok
@@ -223,10 +597,17 @@ contains
     orthogonal_occupied=matmul(metric_sqrt,occupied)
     difference(1:noccupied,1:noccupied)=&
       matmul(conjg(transpose(orthogonal_occupied)),orthogonal_occupied)
-    do i=1,noccupied;difference(i,i)=difference(i,i)-1d0;end do
-    if(maxval(abs(difference(1:noccupied,1:noccupied)))>tolerance)then
-      message='fixed-rank occupied coefficients are not metric orthonormal';return
+    call hermitian_eigensystem(difference(1:noccupied,1:noccupied),occupied_spectrum,&
+      occupied_vectors,eigen_ok,detail)
+    if(.not.eigen_ok.or.minval(occupied_spectrum)<=tolerance*maxval(occupied_spectrum))then
+      message='fixed-rank occupied coefficients are metric rank deficient';return
     end if
+    occupied_inverse_sqrt=occupied_vectors
+    do i=1,noccupied
+      occupied_inverse_sqrt(:,i)=occupied_inverse_sqrt(:,i)/sqrt(occupied_spectrum(i))
+    end do
+    occupied_inverse_sqrt=matmul(occupied_inverse_sqrt,conjg(transpose(occupied_vectors)))
+    orthogonal_occupied=matmul(orthogonal_occupied,occupied_inverse_sqrt)
     occupied_projector=matmul(orthogonal_occupied,conjg(transpose(orthogonal_occupied)))
     do operation=1,noperation
       orthogonal_representation(:,:,operation)=matmul(metric_sqrt,&

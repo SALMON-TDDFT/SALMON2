@@ -15,7 +15,86 @@ module dg_overlapping_wannier_localization
   public::build_dg_overlapping_pair_graph
   public::localize_dg_overlapping_wannier_basis
   public::validate_dg_global_covariant_gauge
+  public::assemble_dg_periodic_spread_gradient
 contains
+  subroutine assemble_dg_periodic_spread_gradient(comm,values,weights,phases,gradient,ok,message)
+    integer,intent(in)::comm
+    complex(real64),intent(in)::values(:,:),phases(:,:)
+    real(real64),intent(in)::weights(:)
+    complex(real64),allocatable,intent(out)::gradient(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer,parameter::maximum_point_block=4096
+    real(real64),allocatable::local_norm(:),global_norm(:),density_potential(:,:)
+    complex(real64),allocatable::local_moment(:,:),global_moment(:,:),local_action(:,:),global_action(:,:),&
+      weighted_action_values(:,:)
+    complex(real64)::quotient
+    real(real64)::real_derivative,imaginary_derivative
+    integer::nwannier,npoint,naxis,wannier,other,point,axis,ierr,block_first,block_last,block_count
+
+    ok=.false.;message='';nwannier=size(values,1);npoint=size(values,2);naxis=size(phases,1)
+    if(nwannier<1.or.npoint<1.or.naxis<1.or.size(weights)/=npoint.or.&
+        size(phases,2)/=npoint.or.any(weights<=0d0).or.&
+        .not.all(ieee_is_finite(weights)).or..not.all(ieee_is_finite(real(values))).or.&
+        .not.all(ieee_is_finite(aimag(values))).or..not.all(ieee_is_finite(real(phases))).or.&
+        .not.all(ieee_is_finite(aimag(phases))))then
+      message='invalid periodic-spread gradient contract';return
+    end if
+    allocate(local_norm(nwannier),global_norm(nwannier),local_moment(naxis,nwannier),&
+      global_moment(naxis,nwannier),density_potential(nwannier,min(maximum_point_block,npoint)),&
+      local_action(nwannier,nwannier),global_action(nwannier,nwannier),gradient(nwannier,nwannier),&
+      weighted_action_values(nwannier,min(maximum_point_block,npoint)))
+    local_norm=0d0;local_moment=(0d0,0d0)
+    do point=1,npoint
+      local_norm=local_norm+weights(point)*abs(values(:,point))**2
+      do axis=1,naxis
+        local_moment(axis,:)=local_moment(axis,:)+weights(point)*abs(values(:,point))**2*phases(axis,point)
+      end do
+    end do
+#ifdef USE_MPI
+    call MPI_Allreduce(local_norm,global_norm,nwannier,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(local_moment,global_moment,size(local_moment),&
+      MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='periodic-spread gradient moment reduction failed';return;end if
+#else
+    global_norm=local_norm;global_moment=local_moment
+#endif
+    if(any(global_norm<=tiny(1d0)))then;message='periodic-spread gradient norm is zero';return;end if
+    local_action=(0d0,0d0)
+    do block_first=1,npoint,maximum_point_block
+      block_last=min(npoint,block_first+maximum_point_block-1);block_count=block_last-block_first+1
+      density_potential(:,1:block_count)=0d0
+      do wannier=1,nwannier;do axis=1,naxis
+        quotient=global_moment(axis,wannier)/global_norm(wannier)
+        do point=1,block_count
+          density_potential(wannier,point)=density_potential(wannier,point)-2d0*&
+            real(conjg(quotient)*(phases(axis,block_first+point-1)-quotient),real64)/global_norm(wannier)
+        end do
+      end do;end do
+      do point=1,block_count
+        weighted_action_values(:,point)=weights(block_first+point-1)*density_potential(:,point)*&
+          conjg(values(:,block_first+point-1))
+      end do
+      local_action=local_action+matmul(weighted_action_values(:,1:block_count),&
+        transpose(values(:,block_first:block_last)))
+    end do
+#ifdef USE_MPI
+    call MPI_Allreduce(local_action,global_action,size(local_action),MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='periodic-spread gradient action reduction failed';return;end if
+#else
+    global_action=local_action
+#endif
+    gradient=(0d0,0d0)
+    do wannier=1,nwannier-1;do other=wannier+1,nwannier
+      real_derivative=2d0*real(global_action(wannier,other)-global_action(other,wannier),real64)
+      imaginary_derivative=-2d0*aimag(global_action(wannier,other)+global_action(other,wannier))
+      gradient(wannier,other)=-cmplx(real_derivative,imaginary_derivative,real64)
+      gradient(other,wannier)=-conjg(gradient(wannier,other))
+    end do;end do
+    ok=all(ieee_is_finite(real(gradient))).and.all(ieee_is_finite(aimag(gradient)))
+    if(.not.ok)message='periodic-spread gradient is not finite'
+  end subroutine assemble_dg_periodic_spread_gradient
+
   subroutine validate_dg_global_covariant_gauge(transform,representation,tolerance,ok,message)
     complex(real64),intent(in)::transform(:,:),representation(:,:,:)
     real(real64),intent(in)::tolerance
@@ -69,11 +148,10 @@ contains
     integer,optional,intent(out)::spread_evaluations
     integer,allocatable::pair_first(:),pair_second(:)
     real(real64),allocatable::pair_support(:)
-    real(real64),allocatable::graph_gradient_real(:),graph_gradient_imag(:)
     complex(real64),allocatable::raw_generator(:,:),sweep_generator(:,:),scaled_generator(:,:),&
       projection_work(:,:),search_generator(:,:),previous_gradient(:,:),previous_direction(:,:),&
       transported_gradient(:,:),transported_direction(:,:),transport_rotation(:,:),&
-      block_rotation(:,:),backup_values(:,:),backup_gradients(:,:,:)
+      block_rotation(:,:),backup_values(:,:),backup_gradients(:,:,:),full_spread_gradient(:,:)
     real(real64)::gradient_real,gradient_imag,current_gradient,theta,phi,trial_spread,&
       antihermiticity_defect,commutator_defect,generator_scale,descent_measure,beta,numerator,denominator
     real(real64)::best_rejected_spread,representation_unitarity_defect,representation_closure_defect
@@ -140,25 +218,12 @@ contains
     call record_spread_evaluation()
     if(.not.step_ok)then;message=trim(detail);return;end if
     final_spread=initial_spread
-    if(size(pair_first)<1)then
-      maximum_pair_gradient=0d0;iterations=0;converged=.true.;ok=.true.;return
-    end if
     have_previous=.false.
     do iterations=1,maximum_iterations
-      raw_generator=(0d0,0d0)
-      call collective_graph_gradients(comm,values,weights,phases,pair_first,pair_second,&
-        graph_gradient_real,graph_gradient_imag,step_ok,detail)
+      call assemble_dg_periodic_spread_gradient(comm,values,weights,phases,&
+        full_spread_gradient,step_ok,detail)
       if(.not.step_ok)then;message=trim(detail);return;end if
-      do edge=1,size(pair_first)
-        first=pair_first(edge);second=pair_second(edge)
-        gradient_real=graph_gradient_real(edge);gradient_imag=graph_gradient_imag(edge)
-        current_gradient=sqrt(gradient_real**2+gradient_imag**2)
-        if(current_gradient<=tiny(1d0))cycle
-        phi=atan2(gradient_imag,gradient_real)+acos(-1d0)
-        amplitude=current_gradient*exp(cmplx(0d0,phi,real64))
-        raw_generator(first,second)=amplitude
-        raw_generator(second,first)=-conjg(amplitude)
-      end do
+      raw_generator=full_spread_gradient
       sweep_generator=(0d0,0d0)
       do operation=1,size(representation,3)
         projection_work=matmul(representation(:,:,operation),raw_generator)
@@ -237,6 +302,9 @@ contains
           ' projected_gradient=',maximum_pair_gradient
         message='batched symmetry-constrained localization line search failed';return
       end if
+      if(rank==0)write(*,'(a,i0,2(a,es16.8))')&
+        '[OW-GS-DIAGNOSTIC] localization_accepted_iteration=',iterations,&
+        ' spread=',final_spread,' projected_gradient=',maximum_pair_gradient
       previous_gradient=sweep_generator;previous_direction=search_generator
       transport_rotation=block_rotation;have_previous=.true.
     end do

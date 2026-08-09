@@ -6,6 +6,7 @@ program test_dg_overlapping_wannier_localization_mpi
     optimize_dg_wannier_pair,build_dg_overlapping_pair_graph
   use dg_overlapping_wannier_localization,only:localize_dg_overlapping_wannier_basis
   use dg_overlapping_wannier_localization,only:validate_dg_global_covariant_gauge
+  use dg_overlapping_wannier_localization,only:assemble_dg_periodic_spread_gradient
   implicit none
   complex(8)::values(2,4),phases(3,4),shifted_phases(3,4),moment(3,2),shifted_moment(3,2)
   complex(8)::gradients(3,2,4),rotation(2,2),identity(2,2)
@@ -16,6 +17,7 @@ program test_dg_overlapping_wannier_localization_mpi
   complex(8)::bad_sweep_values(4,4),bad_sweep_gradients(3,4,4)
   complex(8)::sweep_identity(4,4)
   complex(8),allocatable::sweep_transform(:,:)
+  complex(8),allocatable::full_spread_gradient(:,:)
   complex(8)::unconstrained_transform(4,4)
   integer,allocatable::pair_first(:),pair_second(:)
   integer::sweep_product(2,2),sweep_iterations,spread_evaluations
@@ -26,6 +28,7 @@ program test_dg_overlapping_wannier_localization_mpi
     before,after,pair_gradient,density_before(4),gradient_norm_before
   logical::ok,accepted
   character(256)::message
+  real(8)::finite_difference_real,finite_difference_imag,epsilon_fd,spread_plus,spread_minus
   integer::ierr,rank,nproc,point
 
   call MPI_Init(ierr)
@@ -124,6 +127,31 @@ program test_dg_overlapping_wannier_localization_mpi
   sweep_representation(2,1,2)=1d0;sweep_representation(1,2,2)=1d0
   sweep_representation(4,3,2)=1d0;sweep_representation(3,4,2)=1d0
   sweep_product=reshape([1,2,2,1],[2,2])
+  call assemble_dg_periodic_spread_gradient(MPI_COMM_WORLD,sweep_values,weights,phases,&
+    full_spread_gradient,ok,message)
+  call require(ok,'full periodic-spread gradient assembles without a pair list')
+  epsilon_fd=1d-6
+  values=sweep_values([1,3],:)
+  values(1,:)=cos(epsilon_fd)*sweep_values(1,:)+sin(epsilon_fd)*sweep_values(3,:)
+  values(2,:)=-sin(epsilon_fd)*sweep_values(1,:)+cos(epsilon_fd)*sweep_values(3,:)
+  call evaluate_dg_periodic_localization(values,weights,phases,norm,moment,spread_plus,ok,message)
+  values=sweep_values([1,3],:)
+  values(1,:)=cos(epsilon_fd)*sweep_values(1,:)-sin(epsilon_fd)*sweep_values(3,:)
+  values(2,:)=sin(epsilon_fd)*sweep_values(1,:)+cos(epsilon_fd)*sweep_values(3,:)
+  call evaluate_dg_periodic_localization(values,weights,phases,norm,moment,spread_minus,ok,message)
+  finite_difference_real=(spread_plus-spread_minus)/(2d0*epsilon_fd)
+  values=sweep_values([1,3],:)
+  values(1,:)=cos(epsilon_fd)*sweep_values(1,:)+cmplx(0d0,1d0,8)*sin(epsilon_fd)*sweep_values(3,:)
+  values(2,:)=cmplx(0d0,1d0,8)*sin(epsilon_fd)*sweep_values(1,:)+cos(epsilon_fd)*sweep_values(3,:)
+  call evaluate_dg_periodic_localization(values,weights,phases,norm,moment,spread_plus,ok,message)
+  values=sweep_values([1,3],:)
+  values(1,:)=cos(epsilon_fd)*sweep_values(1,:)-cmplx(0d0,1d0,8)*sin(epsilon_fd)*sweep_values(3,:)
+  values(2,:)=-cmplx(0d0,1d0,8)*sin(epsilon_fd)*sweep_values(1,:)+cos(epsilon_fd)*sweep_values(3,:)
+  call evaluate_dg_periodic_localization(values,weights,phases,norm,moment,spread_minus,ok,message)
+  finite_difference_imag=(spread_plus-spread_minus)/(2d0*epsilon_fd)
+  call require(abs(real(full_spread_gradient(1,3),8)+finite_difference_real)<1d-8.and.&
+    abs(aimag(full_spread_gradient(1,3))+finite_difference_imag)<1d-8,&
+    'dense periodic-spread gradient matches real and imaginary finite differences')
   bad_sweep_values=sweep_values;bad_sweep_gradients=sweep_gradients
   call localize_dg_overlapping_wannier_basis(MPI_COMM_WORLD,bad_sweep_values,bad_sweep_gradients,&
     weights,phases,sweep_representation,reshape([1,1,1,1],[2,2]),&
@@ -225,14 +253,27 @@ program test_dg_overlapping_wannier_localization_mpi
     'spread line-search budget is independent of graph edge count')
 
   sweep_values=(0d0,0d0);sweep_gradients=(0d0,0d0)
+  sweep_values(1,1)=cos(0.3d0);sweep_values(1,3)=sin(0.3d0)
+  sweep_values(3,1)=-sin(0.3d0);sweep_values(3,3)=cos(0.3d0)
+  sweep_values(2,2)=cos(0.3d0);sweep_values(2,4)=sin(0.3d0)
+  sweep_values(4,2)=-sin(0.3d0);sweep_values(4,4)=cos(0.3d0)
+  sweep_gradients(1,:,:)=sweep_values
+  call localize_dg_overlapping_wannier_basis(MPI_COMM_WORLD,sweep_values,sweep_gradients,&
+    weights,phases,sweep_representation(:,:,1:1),reshape([1],[1,1]),&
+    1d0,1d-16,1d-7,1d-12,32,initial_spread,final_spread,maximum_pair_gradient,&
+    sweep_iterations,converged,sweep_transform,ok,message)
+  call require(ok.and.converged.and.sweep_iterations>0.and.final_spread<initial_spread,&
+    'complete periodic-spread gradient converges even when the diagnostic pair graph is empty')
+
+  sweep_values=(0d0,0d0);sweep_gradients=(0d0,0d0)
   do point=1,4;sweep_values(point,point)=1d0;end do
   sweep_gradients(1,:,:)=sweep_values
   call localize_dg_overlapping_wannier_basis(MPI_COMM_WORLD,sweep_values,sweep_gradients,&
     weights,phases,sweep_representation(:,:,1:1),reshape([1],[1,1]),&
     0.99d0,1d-16,1d-7,1d-12,32,initial_spread,final_spread,maximum_pair_gradient,&
     sweep_iterations,converged,sweep_transform,ok,message)
-  call require(ok.and.converged.and.sweep_iterations==0.and.maximum_pair_gradient==0d0,&
-    'empty overlap graph is an already localized zero-iteration result')
+  call require(ok.and.converged.and.sweep_iterations==1.and.maximum_pair_gradient==0d0,&
+    'already localized basis still verifies the complete gradient when the pair graph is empty')
 
   nan_value=ieee_value(0d0,ieee_quiet_nan);weights(2)=nan_value
   call evaluate_dg_periodic_localization(values,weights,phases,norm,moment,spread,ok,message)
