@@ -18,9 +18,12 @@ program test_dg_overlapping_wannier_construction_mpi
     align_dg_fragment_wannier_gauge,replicate_dg_fragment_wannier_representative,&
     verify_dg_fragment_wannier_streaming_closure,verify_dg_fragment_center_orbit,&
     verify_dg_uniform_fragment_target_rank,assign_dg_overlapping_wannier_occupations,&
+    build_dg_balanced_orbital_ownership,transpose_dg_spatial_cores_to_orbital_owners,&
+    redistribute_dg_owned_orbitals_to_center_fragments,&
+    assign_dg_periodic_centers_to_fragments,&
     verify_dg_fragment_subspace_density_covariance,build_dg_core_owned_occupied_subspace
   implicit none
-  integer::comm,rank,nproc,ierr,i,p,nlocal,nclosure,index,ncore,fragment_id
+  integer::comm,rank,nproc,ierr,i,p,point,nlocal,nclosure,index,ncore,fragment_id
   integer(8),allocatable::ids(:),box_ids(:),symmetry_map(:,:),broken_symmetry_map(:,:)
   integer,allocatable::fragment(:)
   real(8),allocatable::weight(:),coordinate(:)
@@ -81,13 +84,26 @@ program test_dg_overlapping_wannier_construction_mpi
   logical::has_affine_center
   complex(8)::periodic_center_values(1,2),periodic_center_phases(3,2)
   real(8)::periodic_centers(3,1),periodic_center_magnitudes(3,1)
+  complex(8),allocatable::transpose_local(:,:),transpose_owned(:,:)
+  complex(8),allocatable::mismatched_owned(:,:)
+  complex(8),allocatable::center_local_values(:,:)
+  integer(8),allocatable::transpose_local_ids(:),transpose_global_ids(:)
+  integer(8),allocatable::mismatched_global_ids(:)
+  integer(8),allocatable::redistribution_buffer_ids(:)
+  integer(8),allocatable::center_all_core_ids(:,:),assigned_center_ids(:)
+  integer,allocatable::orbital_counts(:),orbital_displacements(:),orbital_owners(:),owned_orbitals(:)
+  integer,allocatable::invalid_owned_orbitals(:)
+  integer,allocatable::mismatched_owned_orbitals(:)
+  integer,allocatable::center_owners(:),center_local_orbitals(:)
+  integer,allocatable::center_fragments(:),assigned_center_owners(:),assigned_center_fragments(:)
+  real(8)::assignment_centers(3,4)
   real(8)::orbit_centers(3,2)
   complex(8)::fractional_core_candidates(2,2)
   complex(8),allocatable::core_occupied_coefficients(:,:)
   integer(8)::mixed_map(2,1)
   real(8)::fractional_core_electrons
   real(8)::gauge_weights(2)
-  logical::ok
+  logical::ok,transpose_values_ok
   character(256)::message
 
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
@@ -117,6 +133,97 @@ program test_dg_overlapping_wannier_construction_mpi
     periodic_center_phases,periodic_centers,periodic_center_magnitudes,ok,message)
   call require(ok.and.maxval(min(periodic_centers,1d0-periodic_centers))<1d-12.and.&
     minval(periodic_center_magnitudes)>0.8d0,'periodic Wannier center crosses a cell face continuously')
+
+  call build_dg_balanced_orbital_ownership(2*nproc+1,nproc,orbital_counts,&
+    orbital_displacements,orbital_owners,ok,message)
+  call require(ok.and.maxval(orbital_counts)-minval(orbital_counts)<=1,&
+    'non-divisible orbital ownership is balanced')
+  call require(sum(orbital_counts)==2*nproc+1.and.all(orbital_owners>=0).and.&
+    all(orbital_owners<nproc),'balanced ownership covers every orbital exactly once')
+  if(nproc>1)call require(maxval(orbital_counts)<2*nproc+1,&
+    'no distributed orbital owner holds the complete full-system orbital set')
+  allocate(transpose_local(2*nproc+1,2),transpose_local_ids(2))
+  transpose_local_ids=[2_8*rank+1_8,2_8*rank+2_8]
+  do point=1,2
+    do i=1,2*nproc+1
+      transpose_local(i,point)=cmplx(1000*i+transpose_local_ids(point),0d0,8)
+    end do
+  end do
+  call transpose_dg_spatial_cores_to_orbital_owners(comm,transpose_local,transpose_local_ids,2,&
+    owned_orbitals,transpose_global_ids,transpose_owned,ok,message)
+  call require(ok.and.size(owned_orbitals)==orbital_counts(rank+1),&
+    'spatial-to-orbital transpose returns only balanced owned orbitals')
+  call require(size(transpose_global_ids)==2*nproc.and.&
+    all(transpose_global_ids==[(int(i,8),i=1,2*nproc)]),&
+    'orbital owner receives the complete unique-core physical grid')
+  transpose_values_ok=.true.
+  do point=1,size(transpose_global_ids)
+    do i=1,size(owned_orbitals)
+      transpose_values_ok=transpose_values_ok.and.abs(transpose_owned(i,point)-cmplx(&
+        1000*owned_orbitals(i)+transpose_global_ids(point),0d0,8))<1d-14
+    end do
+  end do
+  call require(transpose_values_ok,'MPI Alltoallv preserves orbital/core values')
+  allocate(center_owners(2*nproc+1))
+  do i=1,size(center_owners);center_owners(i)=modulo(i-1,nproc);end do
+  allocate(redistribution_buffer_ids(3))
+  redistribution_buffer_ids=[transpose_local_ids,1_8]
+  call redistribute_dg_owned_orbitals_to_center_fragments(comm,owned_orbitals,transpose_global_ids,&
+    transpose_owned,center_owners,redistribution_buffer_ids,center_local_orbitals,&
+    center_local_values,ok,message)
+  call require(ok.and.all(center_local_orbitals==pack([(i,i=1,2*nproc+1)],center_owners==rank)),&
+    'center-fragment redistribution receives exactly its centered orbitals')
+  transpose_values_ok=size(center_local_values,2)==size(redistribution_buffer_ids)
+  do point=1,size(redistribution_buffer_ids);do i=1,size(center_local_orbitals)
+    transpose_values_ok=transpose_values_ok.and.abs(center_local_values(i,point)-cmplx(&
+      1000*center_local_orbitals(i)+redistribution_buffer_ids(point),0d0,8))<1d-14
+  end do;end do
+  call require(transpose_values_ok,'center-fragment redistribution preserves core-buffer values')
+  transpose_global_ids(size(transpose_global_ids))=transpose_global_ids(1)
+  call redistribute_dg_owned_orbitals_to_center_fragments(comm,owned_orbitals,transpose_global_ids,&
+    transpose_owned,center_owners,redistribution_buffer_ids,center_local_orbitals,&
+    center_local_values,ok,message)
+  call require(.not.ok,'center-fragment redistribution rejects duplicate global core IDs')
+  transpose_global_ids=[(int(i,8),i=1,2*nproc)]
+  call redistribute_dg_owned_orbitals_to_center_fragments(comm,owned_orbitals,transpose_global_ids,&
+    transpose_owned,center_owners,redistribution_buffer_ids,center_local_orbitals,&
+    center_local_values,ok,message)
+  call require(ok,'valid core IDs remain accepted after duplicate-ID rejection')
+  invalid_owned_orbitals=owned_orbitals
+  if(rank==0.and.size(invalid_owned_orbitals)>0)invalid_owned_orbitals(1)=0
+  call redistribute_dg_owned_orbitals_to_center_fragments(comm,invalid_owned_orbitals,&
+    transpose_global_ids,transpose_owned,center_owners,redistribution_buffer_ids,&
+    mismatched_owned_orbitals,mismatched_owned,ok,message)
+  call require(.not.ok,'center-fragment redistribution rejects out-of-range owned orbital IDs')
+  allocate(center_all_core_ids(8,nproc),center_fragments(nproc))
+  center_all_core_ids=reshape([(int(i,8),i=1,8*nproc)],[8,nproc])
+  center_fragments=[(i,i=1,nproc)]
+  assignment_centers=0d0
+  assignment_centers(1,1)=0.5d0/real(2*nproc,8)
+  assignment_centers(1:2,2)=[0.5d0/real(2*nproc,8),0.25d0]
+  assignment_centers(:,3)=[0.5d0/real(2*nproc,8),0.25d0,0.25d0]
+  assignment_centers(:,4)=[real(2*nproc-1,8)/real(2*nproc,8),0.5d0,0.5d0]
+  call assign_dg_periodic_centers_to_fragments([2*nproc,2,2],assignment_centers,&
+    center_all_core_ids,center_fragments,1d-12,assigned_center_ids,assigned_center_owners,&
+    assigned_center_fragments,ok,message)
+  call require(ok.and.all(assigned_center_ids(1:3)==1_8).and.&
+    all(assigned_center_owners(1:3)==0).and.assigned_center_ids(4)==int(8*nproc,8).and.&
+    assigned_center_owners(4)==nproc-1,&
+    'periodic face, edge, and corner ownership has deterministic lower-ID tie-breaking')
+  if(nproc>1)then
+    if(rank==nproc-1)then
+      call transpose_dg_spatial_cores_to_orbital_owners(comm,transpose_local(1:2*nproc,:),&
+        transpose_local_ids,2,mismatched_owned_orbitals,mismatched_global_ids,mismatched_owned,ok,message)
+    else
+      call transpose_dg_spatial_cores_to_orbital_owners(comm,transpose_local,transpose_local_ids,2,&
+        mismatched_owned_orbitals,mismatched_global_ids,mismatched_owned,ok,message)
+    end if
+    call require(.not.ok,'spatial-to-orbital transpose rejects rank-dependent orbital counts')
+  end if
+  deallocate(transpose_local,transpose_local_ids,transpose_global_ids,transpose_owned,&
+    owned_orbitals,orbital_counts,orbital_displacements,orbital_owners,center_owners,&
+    center_local_orbitals,center_local_values,center_all_core_ids,center_fragments,&
+    assigned_center_ids,assigned_center_owners,assigned_center_fragments,redistribution_buffer_ids)
   orbit_centers(:,1)=[0.1d0,0.2d0,0.3d0];orbit_centers(:,2)=[0.4d0,0.2d0,0.3d0]
   affine_translations=0d0;affine_translations(:,2)=[0.5d0,0.4d0,0d0]
   call verify_dg_wannier_center_affine_orbits(orbit_centers,affine_rotations,&

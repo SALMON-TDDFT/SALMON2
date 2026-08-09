@@ -42,7 +42,358 @@ module dg_overlapping_wannier_construction
   public::solve_dg_affine_common_fixed_point
   public::compute_dg_periodic_wannier_centers
   public::verify_dg_wannier_center_affine_orbits
+  public::build_dg_balanced_orbital_ownership
+  public::transpose_dg_spatial_cores_to_orbital_owners
+  public::redistribute_dg_owned_orbitals_to_center_fragments
+  public::assign_dg_periodic_centers_to_fragments
 contains
+
+  subroutine build_checked_mpi_displacements(counts,displacements,total_count,ok)
+    integer,intent(in)::counts(:)
+    integer,intent(out)::displacements(:),total_count
+    logical,intent(out)::ok
+    integer(int64)::running
+    integer::i
+    ok=size(counts)>0.and.size(displacements)==size(counts).and.all(counts>=0)
+    running=0_int64;total_count=0
+    if(.not.ok)return
+    do i=1,size(counts)
+      if(running>int(huge(total_count),int64))then;ok=.false.;return;end if
+      displacements(i)=int(running)
+      running=running+int(counts(i),int64)
+    end do
+    if(running>int(huge(total_count),int64))then;ok=.false.;return;end if
+    total_count=int(running)
+  end subroutine build_checked_mpi_displacements
+
+  subroutine assign_dg_periodic_centers_to_fragments(global_grid,centers,all_core_ids,fragment_ids,&
+      tolerance,center_ids,center_owners,center_fragments,ok,message)
+    integer,intent(in)::global_grid(3),fragment_ids(:)
+    real(real64),intent(in)::centers(:,:),tolerance
+    integer(int64),intent(in)::all_core_ids(:,:)
+    integer(int64),allocatable,intent(out)::center_ids(:)
+    integer,allocatable,intent(out)::center_owners(:),center_fragments(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::ncenter,center,axis,owner,location(2),grid_index(3)
+    real(real64)::scaled,boundary_distance
+    integer(int64)::global_count
+
+    ncenter=size(centers,2);global_count=int(global_grid(1),int64)*int(global_grid(2),int64)*&
+      int(global_grid(3),int64)
+    ok=all(global_grid>0).and.ncenter>0.and.size(centers,1)==3.and.&
+      size(all_core_ids,2)==size(fragment_ids).and.size(all_core_ids)==int(global_count).and.&
+      tolerance>0d0.and.all(ieee_is_finite(centers)).and.all(fragment_ids>0)
+    if(.not.ok)then;message='invalid periodic center-to-fragment ownership contract';return;end if
+    if(any(all_core_ids<1_int64).or.any(all_core_ids>global_count))then
+      ok=.false.;message='center ownership core ID is outside the global grid';return
+    end if
+    allocate(center_ids(ncenter),center_owners(ncenter),center_fragments(ncenter))
+    do center=1,ncenter
+      do axis=1,3
+        scaled=modulo(centers(axis,center),1d0)*real(global_grid(axis),real64)
+        boundary_distance=abs(scaled+0.5d0-anint(scaled+0.5d0))
+        if(boundary_distance<=tolerance*real(global_grid(axis),real64))then
+          grid_index(axis)=modulo(ceiling(scaled-0.5d0),global_grid(axis))
+        else
+          grid_index(axis)=modulo(floor(scaled+0.5d0),global_grid(axis))
+        end if
+      end do
+      center_ids(center)=1_int64+int(grid_index(1),int64)+int(global_grid(1),int64)*(&
+        int(grid_index(2),int64)+int(global_grid(2),int64)*int(grid_index(3),int64))
+      location=findloc(all_core_ids,center_ids(center))
+      if(any(location<1))then
+        ok=.false.;message='periodic center is not covered by a unique fragment core';return
+      end if
+      if(count(all_core_ids==center_ids(center))/=1)then
+        ok=.false.;message='periodic center core ownership is not unique';return
+      end if
+      owner=location(2)-1;center_owners(center)=owner;center_fragments(center)=fragment_ids(owner+1)
+    end do
+    ok=.true.;message=''
+  end subroutine assign_dg_periodic_centers_to_fragments
+
+
+  subroutine redistribute_dg_owned_orbitals_to_center_fragments(comm,owned_orbitals,global_ids,&
+      owned_values,center_owners,local_buffer_ids,local_orbitals,local_values,ok,message)
+    integer,intent(in)::comm,owned_orbitals(:),center_owners(:)
+    integer(int64),intent(in)::global_ids(:),local_buffer_ids(:)
+    complex(real64),intent(in)::owned_values(:,:)
+    integer,allocatable,intent(out)::local_orbitals(:)
+    complex(real64),allocatable,intent(out)::local_values(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer,allocatable::orbital_counts(:),orbital_displacements(:),orbital_owners(:),buffer_counts(:),&
+      buffer_displacements(:),send_counts(:),receive_counts(:),send_displacements(:),&
+      receive_displacements(:),position_by_id(:),source_orbitals(:)
+    integer(int64),allocatable::all_buffer_ids(:)
+    complex(real64),allocatable::send_values(:),receive_values(:)
+    integer::rank,nproc,ierr,norbital,nglobal,destination,source,orbital,point,position,local_row,&
+      local_bad,global_bad,total_send,total_receive,total_buffer,min_norbital,max_norbital
+    integer(int64)::count64
+
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    norbital=size(center_owners);nglobal=size(global_ids);local_bad=0
+    if(norbital<1.or.nglobal<1.or.size(owned_values,1)/=size(owned_orbitals).or.&
+        size(owned_values,2)/=nglobal.or.size(local_buffer_ids)<1.or.&
+        any(center_owners<0).or.any(center_owners>=nproc))local_bad=1
+    call MPI_Allreduce(norbital,min_norbital,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(norbital,max_norbital,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(min_norbital/=max_norbital.or.ierr/=MPI_SUCCESS)local_bad=1
+    call build_dg_balanced_orbital_ownership(norbital,nproc,orbital_counts,orbital_displacements,&
+      orbital_owners,ok,message)
+    if(.not.ok)local_bad=1
+    if(ok)then
+      if(size(owned_orbitals)/=orbital_counts(rank+1))local_bad=1
+      if(size(owned_orbitals)>0)then
+        if(any(owned_orbitals<1).or.any(owned_orbitals>norbital))then
+          local_bad=1
+        else if(any(orbital_owners(owned_orbitals)/=rank))then
+          local_bad=1
+        end if
+      end if
+    end if
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      ok=.false.;message='invalid orbital-to-center-fragment redistribution contract';return
+    end if
+    allocate(buffer_counts(nproc),buffer_displacements(nproc),send_counts(nproc),receive_counts(nproc),&
+      send_displacements(nproc),receive_displacements(nproc),position_by_id(nglobal))
+    call MPI_Allgather(size(local_buffer_ids),1,MPI_INTEGER,buffer_counts,1,MPI_INTEGER,comm,ierr)
+    call build_checked_mpi_displacements(buffer_counts,buffer_displacements,total_buffer,ok)
+    if(.not.ok)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      ok=.false.;message='orbital redistribution buffer displacement overflow';return
+    end if
+    allocate(all_buffer_ids(total_buffer))
+    call MPI_Allgatherv(local_buffer_ids,size(local_buffer_ids),MPI_INTEGER8,all_buffer_ids,&
+      buffer_counts,buffer_displacements,MPI_INTEGER8,comm,ierr)
+    position_by_id=0
+    do point=1,nglobal
+      if(global_ids(point)<1_int64.or.global_ids(point)>int(nglobal,int64))then;local_bad=1;cycle;end if
+      if(position_by_id(int(global_ids(point)))/=0)then;local_bad=1;cycle;end if
+      position_by_id(int(global_ids(point)))=point
+    end do
+    if(any(position_by_id==0))local_bad=1
+    do destination=0,nproc-1
+      count64=int(count(center_owners(owned_orbitals)==destination),int64)*&
+        int(buffer_counts(destination+1),int64)
+      if(count64>int(huge(1),int64))then
+        local_bad=1;send_counts(destination+1)=0
+      else
+        send_counts(destination+1)=int(count64)
+      end if
+      source_orbitals=pack([(orbital,orbital=1,norbital)],&
+        orbital_owners==destination.and.center_owners==rank)
+      count64=int(size(source_orbitals),int64)*int(size(local_buffer_ids),int64)
+      if(count64>int(huge(1),int64))then
+        local_bad=1;receive_counts(destination+1)=0
+      else
+        receive_counts(destination+1)=int(count64)
+      end if
+    end do
+    if(any(all_buffer_ids<1_int64).or.any(all_buffer_ids>int(nglobal,int64)))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      ok=.false.;message='orbital-to-fragment MPI count or physical ID is invalid';return
+    end if
+    call build_checked_mpi_displacements(send_counts,send_displacements,total_send,ok)
+    if(.not.ok)local_bad=1
+    call build_checked_mpi_displacements(receive_counts,receive_displacements,total_receive,ok)
+    if(.not.ok)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      ok=.false.;message='orbital redistribution MPI displacement overflow';return
+    end if
+    allocate(send_values(total_send),receive_values(total_receive))
+    position=0
+    do destination=0,nproc-1
+      do local_row=1,size(owned_orbitals)
+        orbital=owned_orbitals(local_row)
+        if(center_owners(orbital)/=destination)cycle
+        do point=1,buffer_counts(destination+1)
+          position=position+1
+          send_values(position)=owned_values(local_row,position_by_id(int(all_buffer_ids(&
+            buffer_displacements(destination+1)+point))))
+        end do
+      end do
+    end do
+    call MPI_Alltoallv(send_values,send_counts,send_displacements,MPI_DOUBLE_COMPLEX,&
+      receive_values,receive_counts,receive_displacements,MPI_DOUBLE_COMPLEX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='orbital-to-center-fragment MPI Alltoallv failed';return;end if
+    local_orbitals=pack([(orbital,orbital=1,norbital)],center_owners==rank)
+    allocate(local_values(size(local_orbitals),size(local_buffer_ids)));local_values=(0d0,0d0)
+    position=0
+    do source=0,nproc-1
+      source_orbitals=pack([(orbital,orbital=1,norbital)],&
+        orbital_owners==source.and.center_owners==rank)
+      do orbital=1,size(source_orbitals)
+        local_row=findloc(local_orbitals,source_orbitals(orbital),dim=1)
+        do point=1,size(local_buffer_ids)
+          position=position+1;local_values(local_row,point)=receive_values(position)
+        end do
+      end do
+    end do
+    ok=all(ieee_is_finite(real(local_values))).and.all(ieee_is_finite(aimag(local_values)))
+    if(ok)then;message='';else;message='orbital-to-fragment redistribution produced nonfinite values';end if
+#else
+    ok=.false.;message='orbital-to-center-fragment redistribution requires MPI'
+#endif
+  end subroutine redistribute_dg_owned_orbitals_to_center_fragments
+
+
+  subroutine build_dg_balanced_orbital_ownership(norbital,nproc,counts,displacements,owners,ok,message)
+    integer,intent(in)::norbital,nproc
+    integer,allocatable,intent(out)::counts(:),displacements(:),owners(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::rank,first,last
+    ok=norbital>0.and.nproc>0
+    if(.not.ok)then;message='invalid balanced orbital ownership contract';return;end if
+    allocate(counts(nproc),displacements(nproc),owners(norbital))
+    counts=norbital/nproc
+    counts(1:modulo(norbital,nproc))=counts(1:modulo(norbital,nproc))+1
+    displacements(1)=0
+    do rank=2,nproc;displacements(rank)=displacements(rank-1)+counts(rank-1);end do
+    owners=-1
+    do rank=0,nproc-1
+      first=displacements(rank+1)+1;last=first+counts(rank+1)-1
+      if(last>=first)owners(first:last)=rank
+    end do
+    ok=sum(counts)==norbital.and.maxval(counts)-minval(counts)<=1.and.all(owners>=0)
+    if(ok)then;message='';else;message='balanced orbital ownership construction failed';end if
+  end subroutine build_dg_balanced_orbital_ownership
+
+  subroutine transpose_dg_spatial_cores_to_orbital_owners(comm,local_values,local_ids,batch_size,&
+      owned_orbitals,global_ids,owned_values,ok,message)
+    integer,intent(in)::comm,batch_size
+    complex(real64),intent(in)::local_values(:,:)
+    integer(int64),intent(in)::local_ids(:)
+    integer,allocatable,intent(out)::owned_orbitals(:)
+    integer(int64),allocatable,intent(out)::global_ids(:)
+    complex(real64),allocatable,intent(out)::owned_values(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer,allocatable::orbital_counts(:),orbital_displacements(:),orbital_owners(:),core_counts(:),&
+      core_displacements(:),send_counts(:),receive_counts(:),send_displacements(:),receive_displacements(:),&
+      batch_orbitals(:),local_batch_orbitals(:)
+    complex(real64),allocatable::send_values(:),receive_values(:)
+    integer::rank,nproc,ierr,norbital,nlocal,nglobal,batch_first,batch_last,destination,source,&
+      orbital,point,position,local_row,global_point,local_bad,global_bad,total_core,total_send,total_receive,&
+      min_norbital,max_norbital
+    integer(int64)::count64
+
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    norbital=size(local_values,1);nlocal=size(local_ids);local_bad=0
+    if(norbital<1.or.nlocal<1.or.size(local_values,2)/=nlocal.or.batch_size<1.or.&
+        any(local_ids<1_int64))local_bad=1
+    call MPI_Allreduce(norbital,min_norbital,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(norbital,max_norbital,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(min_norbital/=max_norbital.or.ierr/=MPI_SUCCESS)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      ok=.false.;message='invalid spatial-to-orbital transpose contract';return
+    end if
+    call build_dg_balanced_orbital_ownership(norbital,nproc,orbital_counts,orbital_displacements,&
+      orbital_owners,ok,message)
+    if(.not.ok)return
+    allocate(core_counts(nproc),core_displacements(nproc),send_counts(nproc),receive_counts(nproc),&
+      send_displacements(nproc),receive_displacements(nproc))
+    call MPI_Allgather(nlocal,1,MPI_INTEGER,core_counts,1,MPI_INTEGER,comm,ierr)
+    call build_checked_mpi_displacements(core_counts,core_displacements,total_core,ok)
+    if(.not.ok)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      ok=.false.;message='spatial core MPI displacement overflow';return
+    end if
+    nglobal=total_core;allocate(global_ids(nglobal))
+    call MPI_Allgatherv(local_ids,nlocal,MPI_INTEGER8,global_ids,core_counts,core_displacements,&
+      MPI_INTEGER8,comm,ierr)
+    local_bad=merge(0,1,ierr==MPI_SUCCESS.and.ids_cover_unique_range(global_ids,nglobal))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      ok=.false.;message='spatial core IDs are not globally unique';return
+    end if
+    owned_orbitals=[(orbital,orbital=orbital_displacements(rank+1)+1,&
+      orbital_displacements(rank+1)+orbital_counts(rank+1))]
+    allocate(owned_values(size(owned_orbitals),nglobal));owned_values=(0d0,0d0)
+    do batch_first=1,norbital,batch_size
+      batch_last=min(norbital,batch_first+batch_size-1)
+      batch_orbitals=[(orbital,orbital=batch_first,batch_last)]
+      local_batch_orbitals=pack(batch_orbitals,orbital_owners(batch_orbitals)==rank)
+      do destination=0,nproc-1
+        count64=int(count(orbital_owners(batch_orbitals)==destination),int64)*int(nlocal,int64)
+        if(count64>int(huge(1),int64))then
+          local_bad=1;send_counts(destination+1)=0
+        else
+          send_counts(destination+1)=int(count64)
+        end if
+        count64=int(size(local_batch_orbitals),int64)*int(core_counts(destination+1),int64)
+        if(count64>int(huge(1),int64))then
+          local_bad=1;receive_counts(destination+1)=0
+        else
+          receive_counts(destination+1)=int(count64)
+        end if
+      end do
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+        ok=.false.;message='spatial-to-orbital MPI count overflow';return
+      end if
+      call build_checked_mpi_displacements(send_counts,send_displacements,total_send,ok)
+      if(.not.ok)local_bad=1
+      call build_checked_mpi_displacements(receive_counts,receive_displacements,total_receive,ok)
+      if(.not.ok)local_bad=1
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+        ok=.false.;message='spatial-to-orbital MPI displacement overflow';return
+      end if
+      allocate(send_values(total_send),receive_values(total_receive))
+      position=0
+      do destination=0,nproc-1;do point=1,nlocal
+        do orbital=batch_first,batch_last
+          if(orbital_owners(orbital)/=destination)cycle
+          position=position+1;send_values(position)=local_values(orbital,point)
+        end do
+      end do;end do
+      call MPI_Alltoallv(send_values,send_counts,send_displacements,MPI_DOUBLE_COMPLEX,&
+        receive_values,receive_counts,receive_displacements,MPI_DOUBLE_COMPLEX,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;ok=.false.;message='spatial-to-orbital MPI Alltoallv failed';return;end if
+      position=0
+      do source=0,nproc-1;do point=1,core_counts(source+1)
+        global_point=core_displacements(source+1)+point
+        do orbital=1,size(local_batch_orbitals)
+          position=position+1
+          local_row=findloc(owned_orbitals,local_batch_orbitals(orbital),dim=1)
+          owned_values(local_row,global_point)=receive_values(position)
+        end do
+      end do;end do
+      deallocate(send_values,receive_values,batch_orbitals,local_batch_orbitals)
+    end do
+    ok=all(ieee_is_finite(real(owned_values))).and.all(ieee_is_finite(aimag(owned_values)))
+    if(ok)then;message='';else;message='spatial-to-orbital transpose produced nonfinite values';end if
+#else
+    ok=.false.;message='spatial-to-orbital transpose requires MPI'
+#endif
+  contains
+    logical function ids_cover_unique_range(ids,extent) result(valid)
+      integer(int64),intent(in)::ids(:)
+      integer,intent(in)::extent
+      logical,allocatable::seen(:)
+      integer::i
+      valid=size(ids)==extent
+      if(.not.valid)return
+      if(any(ids<1_int64).or.any(ids>int(extent,int64)))then;valid=.false.;return;end if
+      allocate(seen(extent));seen=.false.
+      do i=1,size(ids)
+        if(seen(int(ids(i))))then;valid=.false.;return;end if
+        seen(int(ids(i)))=.true.
+      end do
+      valid=all(seen)
+    end function ids_cover_unique_range
+  end subroutine transpose_dg_spatial_cores_to_orbital_owners
 
   subroutine verify_dg_wannier_center_affine_orbits(centers,integer_rotations,&
       fractional_translations,tolerance,ok,message)

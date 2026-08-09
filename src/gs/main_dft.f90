@@ -58,6 +58,8 @@ use dg_overlapping_wannier_construction, only: assign_dg_overlapping_wannier_occ
 use dg_overlapping_wannier_construction, only: solve_dg_affine_common_fixed_point
 use dg_overlapping_wannier_construction, only: compute_dg_periodic_wannier_centers
 use dg_overlapping_wannier_construction, only: verify_dg_wannier_center_affine_orbits
+use dg_overlapping_wannier_construction, only: transpose_dg_spatial_cores_to_orbital_owners,&
+  redistribute_dg_owned_orbitals_to_center_fragments,assign_dg_periodic_centers_to_fragments
 use dg_overlapping_wannier_projection, only: t_dg_projection_channel,&
   build_dg_complete_sp_manifest,evaluate_dg_periodic_sp_projectors,&
   dg_periodic_grid_point_owned,select_dg_sp_atomic_orbital_ordinals
@@ -544,7 +546,8 @@ contains
       global_identity(:,:),local_occupied_values(:,:),global_candidate_metric(:,:),&
       global_candidate_localizer(:,:),global_candidate_occupied(:,:),global_subspace_transform(:,:),&
       selected_global_closed_core(:,:),local_seed_overlap(:,:),global_seed_overlap(:,:),&
-      global_candidate_metric_inverse(:,:),global_candidate_raw(:,:,:),global_candidate_defect_work(:,:)
+      global_candidate_metric_inverse(:,:),global_candidate_raw(:,:,:),global_candidate_defect_work(:,:),&
+      orbital_owned_full_values(:,:),center_local_buffer_values(:,:)
     complex(8),allocatable::lcfo_fragment_contribution(:,:),lcfo_occupied_core(:,:)
     complex(8),allocatable::lcfo_occupied_representation(:,:,:)
     real(8),allocatable::weights(:),coordinate(:),spectrum(:),occupations(:),lcfo_retained_occupations(:),&
@@ -558,11 +561,12 @@ contains
       local_symmetry_map(:,:),center_representatives(:),&
       exact_fragment_symmetry_fingerprints(:),global_symmetry_map(:,:)
     integer(8),allocatable::lcfo_core_ids(:)
-    integer(8),allocatable::all_local_centers(:,:)
+    integer(8),allocatable::all_core_ids(:,:),localized_center_ids(:),orbital_owned_full_ids(:)
     integer,allocatable::fragments(:),local_point_product(:,:),local_point_integer_rotations(:,:,:),&
       translation_product(:,:),global_point_product(:,:),global_point_integer_rotations(:,:,:)
     integer,allocatable::rank_fragments(:)
     integer,allocatable::center_owner_candidate(:),center_box_candidate(:),center_fragment_candidate(:)
+    integer,allocatable::orbital_owned_ids(:),center_local_orbital_ids(:)
     logical,allocatable::boundary(:),core_mask(:),pairs(:,:)
     logical,allocatable::lcfo_boundary_mask(:)
     integer::ix,iy,iz,io,p,nbox,ncore,noccupied,nstate,ntarget,nsym,rank,nproc,&
@@ -581,7 +585,6 @@ contains
     integer::complete_sp_core_atom_count
     integer(8)::expected_core_count,expected_box_count,basis_fingerprint,operator_fingerprint,&
       pseudopotential_fingerprint,nbox8,ncore8,product8,nxy8,local_exact_symmetry_fingerprint
-    integer(8)::center_physical_id
     real(8)::minimum_eigenvalue,condition_number,closure_residual,spread_max,gauge_correction
     logical::ok,reusable,localization_converged,global_inversion_present
     complex(8),allocatable::core_periodic_phase(:,:),localization_transform(:,:),retained_identity(:,:)
@@ -700,7 +703,7 @@ contains
     if(ierr/=MPI_SUCCESS)error stop 'global atomic projection count reduction failed'
     if(nstate>huge(ntarget)-global_projection_count)error stop 'LCFO Wannier target rank overflow'
     ntarget=nstate+global_projection_count
-    if(ntarget<1.or.mod(ntarget,nproc)/=0)error stop 'LCFO Wannier target is not rank balanced'
+    if(ntarget<1)error stop 'LCFO Wannier target rank is invalid'
     call dc_lcfo(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc,&
       retained_count=ntarget,retained_box_contribution=lcfo_fragment_contribution,&
       retained_occupations=lcfo_retained_occupations,write_files=.false.)
@@ -721,29 +724,14 @@ contains
       '[OW-GS-DIAGNOSTIC] complete_sp_core_atom_count=',complete_sp_core_atom_count,&
       ' complete_sp_shell_channels=',local_target_count
     global_occupied_count=nstate
-    local_target_count=ntarget/nproc
     retained_closure_search_tolerance=sqrt(sqrt(dg_ow_symmetry_tolerance))
     if(rank==0)write(*,'(a,i0,a,i0,a,i0)')&
       '[OW-GS-DIAGNOSTIC] lcfo_occupied_rank=',nstate,&
       ' lcfo_projection_localizer_rank=',global_projection_count,' lcfo_target_rank=',ntarget
-    allocate(all_local_centers(local_target_count,nproc));all_local_centers=0_8
-    allocate(rank_fragments(nproc))
-    do io=1,local_target_count
-      all_local_centers(io,rank+1)=center_representatives(1+modulo(io-1,nbox))
-    end do
-    call MPI_Allreduce(MPI_IN_PLACE,all_local_centers,size(all_local_centers),MPI_INTEGER8,&
-      MPI_SUM,dc%icomm_tot,ierr)
-    if(ierr/=MPI_SUCCESS)error stop 'LCFO provisional center reduction failed'
-    call MPI_Allgather(dc%i_frag,1,MPI_INTEGER,rank_fragments,1,MPI_INTEGER,dc%icomm_tot,ierr)
     allocate(ow_basis%center_box_point_ids(ntarget),ow_basis%center_owner_rank(ntarget),&
       ow_basis%center_owner_fragment(ntarget))
-    do io=0,nproc-1
-      ow_basis%center_box_point_ids(io*local_target_count+1:(io+1)*local_target_count)=&
-        int(io,8)*int(nbox,8)+all_local_centers(:,io+1)
-      ow_basis%center_owner_rank(io*local_target_count+1:(io+1)*local_target_count)=io
-      ow_basis%center_owner_fragment(io*local_target_count+1:(io+1)*local_target_count)=rank_fragments(io+1)
-    end do
-    deallocate(all_local_centers,rank_fragments)
+    ow_basis%center_box_point_ids=0_8;ow_basis%center_owner_rank=-1
+    ow_basis%center_owner_fragment=-1
     global_seed_count=ntarget
     allocate(global_seed_values(global_seed_count,ncore),ow_core_weights(ncore),ow_core_ids(ncore),&
       ow_core_box_positions(ncore),core_periodic_phase(3,ncore));global_seed_values=(0d0,0d0);core_index=0
@@ -960,32 +948,43 @@ contains
     call verify_dg_wannier_center_affine_orbits(localized_centers,global_point_integer_rotations,&
       global_point_fractional_translations,retained_closure_search_tolerance,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'localized Wannier center orbit failed';end if
-    allocate(center_owner_candidate(ntarget),center_box_candidate(ntarget),&
-      center_fragment_candidate(ntarget))
-    center_owner_candidate=huge(rank);center_box_candidate=huge(p);center_fragment_candidate=huge(p)
+    allocate(all_core_ids(ncore,nproc),rank_fragments(nproc))
+    call MPI_Allgather(ow_core_ids,ncore,MPI_INTEGER8,all_core_ids,ncore,MPI_INTEGER8,dc%icomm_tot,ierr)
+    call MPI_Allgather(dc%i_frag,1,MPI_INTEGER,rank_fragments,1,MPI_INTEGER,dc%icomm_tot,ierr)
+    call assign_dg_periodic_centers_to_fragments(dc%lg_tot%num,localized_centers,all_core_ids,&
+      rank_fragments,retained_closure_search_tolerance,localized_center_ids,center_owner_candidate,&
+      center_fragment_candidate,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'localized Wannier center ownership failed';end if
+    allocate(center_box_candidate(ntarget))
     do io=1,ntarget
-      ix=modulo(nint(localized_centers(1,io)*real(dc%lg_tot%num(1),8)),dc%lg_tot%num(1))
-      iy=modulo(nint(localized_centers(2,io)*real(dc%lg_tot%num(2),8)),dc%lg_tot%num(2))
-      iz=modulo(nint(localized_centers(3,io)*real(dc%lg_tot%num(3),8)),dc%lg_tot%num(3))
-      center_physical_id=1_8+int(ix,8)+int(dc%lg_tot%num(1),8)*&
-        (int(iy,8)+int(dc%lg_tot%num(2),8)*int(iz,8))
-      p=findloc(ow_core_ids,center_physical_id,dim=1)
-      if(p<1)cycle
-      center_owner_candidate(io)=rank
-      center_box_candidate(io)=ow_core_box_positions(p)
-      center_fragment_candidate(io)=dc%i_frag
+      if(center_owner_candidate(io)==rank)then
+        p=findloc(ow_core_ids,localized_center_ids(io),dim=1)
+        if(p<1)error stop 'localized center owner does not contain its core ID'
+        center_box_candidate(io)=ow_core_box_positions(p)
+      else
+        center_box_candidate(io)=0
+      end if
     end do
-    call MPI_Allreduce(MPI_IN_PLACE,center_owner_candidate,ntarget,MPI_INTEGER,MPI_MIN,dc%icomm_tot,ierr)
-    call MPI_Allreduce(MPI_IN_PLACE,center_box_candidate,ntarget,MPI_INTEGER,MPI_MIN,dc%icomm_tot,ierr)
-    call MPI_Allreduce(MPI_IN_PLACE,center_fragment_candidate,ntarget,MPI_INTEGER,MPI_MIN,dc%icomm_tot,ierr)
-    if(ierr/=MPI_SUCCESS.or.any(center_owner_candidate>=huge(rank)).or.&
-        any(center_box_candidate>=huge(p)))error stop 'localized Wannier center ownership failed'
+    call MPI_Allreduce(MPI_IN_PLACE,center_box_candidate,ntarget,MPI_INTEGER,MPI_SUM,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(center_box_candidate<1))error stop 'localized center box reduction failed'
     ow_basis%center_owner_rank=center_owner_candidate
     ow_basis%center_owner_fragment=center_fragment_candidate
     do io=1,ntarget
       ow_basis%center_box_point_ids(io)=int(center_owner_candidate(io),8)*int(nbox,8)+&
         int(center_box_candidate(io),8)
     end do
+    call transpose_dg_spatial_cores_to_orbital_owners(dc%icomm_tot,ow_core_values,ow_core_ids,32,&
+      orbital_owned_ids,orbital_owned_full_ids,orbital_owned_full_values,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'localized orbital ownership transpose failed';end if
+    call redistribute_dg_owned_orbitals_to_center_fragments(dc%icomm_tot,orbital_owned_ids,&
+      orbital_owned_full_ids,orbital_owned_full_values,center_owner_candidate,physical_ids,&
+      center_local_orbital_ids,center_local_buffer_values,ok,message)
+    if(.not.ok.or.any(center_local_orbital_ids/=&
+        pack([(io,io=1,ntarget)],center_owner_candidate==rank)))then
+      write(0,'(a)')trim(message);error stop 'localized center-fragment redistribution failed'
+    end if
+    deallocate(orbital_owned_ids,orbital_owned_full_ids,orbital_owned_full_values,&
+      center_local_orbital_ids,center_local_buffer_values,all_core_ids,rank_fragments,localized_center_ids)
     if(rank==0)write(*,'(a,2(es12.4,1x))')'[OW-GS-DIAGNOSTIC] localized_center_moment_minmax=',&
       minval(localized_center_magnitudes),maxval(localized_center_magnitudes)
     deallocate(localized_centers,localized_center_magnitudes,center_owner_candidate,&

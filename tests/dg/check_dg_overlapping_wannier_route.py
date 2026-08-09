@@ -784,6 +784,24 @@ assert "mpi_allgather" not in materialize_body.group("body").lower()
 assert "sort_ow_id_positions" in materialize_body.group("body").lower()
 assert "find_sorted_ow_id" in materialize_body.group("body").lower()
 assert "findloc" not in materialize_body.group("body").lower()
+for required in (
+    "build_dg_balanced_orbital_ownership",
+    "transpose_dg_spatial_cores_to_orbital_owners",
+    "redistribute_dg_owned_orbitals_to_center_fragments",
+    "assign_dg_periodic_centers_to_fragments",
+):
+    assert required in construction_source.lower(), f"missing orbital redistribution primitive: {required}"
+assert construction_source.lower().count("mpi_alltoallv") >= 2, (
+    "both spatial-to-orbital and orbital-to-center-fragment transposes must use MPI_Alltoallv"
+)
+assert not re.search(r"mod\s*\(\s*ntarget\s*,\s*nproc\s*\)\s*/=\s*0", adapter_body, re.I), (
+    "production orbital ownership must support target ranks not divisible by MPI size"
+)
+assert re.search(
+    r"redistribute_dg_owned_orbitals_to_center_fragments\s*\(.*?physical_ids",
+    adapter_body,
+    re.I | re.S,
+), "center-fragment redistribution must send the complete periodic core+buffer box"
 assert re.search(
     r"nstate\s*=\s*ceiling\s*\(\s*0\.5d0\s*\*\s*dc%elec_num_tot\s*\)",
     adapter_body,
