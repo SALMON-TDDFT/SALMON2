@@ -53,6 +53,25 @@ xc_source = source("src/xc/salmon_xc.f90")
 si64_runner_source = source("tests/dg/run_si64_overlapping_wannier_gate.py")
 si64_checker_source = source("tests/dg/check_si64_overlapping_wannier_gate.py")
 
+ow_ground_state = re.search(
+    r"subroutine\s+run_dg_overlapping_wannier_ground_state_for_main(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+)
+assert ow_ground_state
+ow_ground_state_body = ow_ground_state.group("body").lower()
+for mlwf_call in (
+    "assemble_dg_w90_gamma_matrices",
+    "run_dg_w90_gamma_library",
+    "apply_dg_w90_gamma_transform",
+):
+    assert re.search(rf"call\s+{mlwf_call}\b", ow_ground_state_body), (
+        f"production overlapping-Wannier route must call {mlwf_call}"
+    )
+assert "call localize_dg_occupation_blocks" not in ow_ground_state_body, (
+    "production overlapping-Wannier V3 route must not call the custom localizer"
+)
+
 assert re.search(r"call\s+zheev\s*\(\s*'v'\s*,\s*'u'", ow_solver_source, re.I), (
     "the bounded reduced Hermitian Ritz problem must use the existing LAPACK path"
 )
@@ -392,11 +411,12 @@ assert re.search(
     adapter_body,
     re.I,
 ), "fixed-rank selection must protect only the physical occupied LCFO projector"
-assert re.search(
-    r"call\s+localize_dg_occupation_blocks\s*\(.*?lcfo_retained_occupations",
-    adapter_body,
-    re.I | re.S,
-), "global localization must be block diagonal in the LCFO occupations"
+assert "w90_anchors=global_seed_values" in re.sub(r"\s+", "", adapter_body.lower()), (
+    "Wannier90 projections must use the complete LCFO core-plus-buffer seed basis"
+)
+assert re.search(r"call\s+apply_dg_w90_gamma_transform", adapter_body, re.I), (
+    "the MLWF transform must be applied in the global LCFO space"
+)
 assert not re.search(r"allocate\s*\(\s*candidate\s*\(",adapter_body,re.I), (
     "production must not materialize a separate fragment-eigenstate candidate window"
 )
@@ -675,7 +695,7 @@ assert not re.search(r"call\s+replicate_ow_global_symmetry_orbit", adapter_body,
     "production must not copy a representative-fragment gauge across the full system"
 )
 materialize_position = adapter_body.lower().index("call materialize_ow_distributed_core_to_buffer")
-localize_position = adapter_body.lower().index("call localize_dg_occupation_blocks")
+localize_position = adapter_body.lower().index("call run_dg_w90_gamma_library")
 metric_position = adapter_body.lower().index("call assemble_dg_overlapping_wannier_metric_rows")
 assert materialize_position < localize_position < metric_position, (
     "localization must use streamed local buffers and finish before metric/SCF publication"
@@ -696,8 +716,8 @@ assert re.search(
     adapter_body,
     re.I | re.S,
 ), "fixed-rank selection must use measured projection-seed overlap, not MGS row order"
-assert "localization_spread_evaluations" in adapter_body, (
-    "production must publish the batched localization spread-evaluation count"
+assert "w90_workspace_peak" in adapter_body and "w90_coordinator_bytes" in adapter_body, (
+    "production must publish Wannier90 coordinator and assembly memory receipts"
 )
 assert "subroutine assemble_dg_periodic_spread_gradient" in localization_source.lower(), (
     "localization must differentiate the same complete periodic spread used by its line search"
@@ -720,7 +740,7 @@ assert exponential_body and "zheev" in exponential_body.group("body").lower(), (
     "dense global gauge exponential must use one Hermitian eigensolve, not a Taylor matmul series"
 )
 closure_call = adapter_body.find("call build_dg_distributed_symmetry_closed_basis")
-localization_call = adapter_body.find("call localize_dg_occupation_blocks")
+localization_call = adapter_body.find("call run_dg_w90_gamma_library")
 assert closure_call >= 0, (
     "production OW GS must construct the fixed-rank full-system symmetry-closed basis"
 )
@@ -741,13 +761,9 @@ assert not re.search(r"if\s*\(\s*have_common_center\s*\).*?cycle",point_action_b
 assert localization_call > closure_call, (
     "full-system symmetry closure must precede Wannier localization"
 )
-assert re.search(
-    r"call\s+localize_dg_occupation_blocks\s*\(.*?"
-    r"global_retained_representation\s*,\s*global_point_product\s*,\s*&?\s*"
-    r"lcfo_retained_occupations",
-    adapter_body,
-    re.I | re.S,
-), "localization must consume the one full-system representation and product table"
+assert re.search(r"call\s+apply_dg_w90_gamma_transform", adapter_body, re.I), (
+    "Wannier90 localization must finish with SALMON canonical Gamma gauge application"
+)
 assert "replicate_ow_global_symmetry_orbit" not in adapter_body, (
     "production must not replicate a representative fragment after local construction"
 )
@@ -783,10 +799,10 @@ for evidence in (
 ):
     assert evidence in ow_checkpoint_source, f"V3 checkpoint misses {evidence}"
 assert re.search(
-    r"if\s*\(\s*\.not\.\s*localization_converged\s*\).*?error\s+stop",
+    r"call\s+run_dg_w90_gamma_library.*?if\s*\(\s*\.not\.\s*ok\s*\).*?error\s+stop",
     adapter_body,
     re.I | re.S,
-), "nonconverged localized gauges must not reach V3 publication"
+), "rejected Wannier90 MLWF gauges must not reach V3 publication"
 assert not re.search(
     r"call\s+align_dg_fragment_wannier_gauge",
     adapter_body,

@@ -56,6 +56,8 @@ use dg_overlapping_wannier_construction, only: measure_dg_rank_fixed_symmetry_re
 use dg_overlapping_wannier_construction, only: select_dg_fixed_rank_symmetry_closed_subspace
 use dg_overlapping_wannier_construction, only: find_dg_group_identity
 use dg_overlapping_wannier_construction, only: assemble_dg_distributed_basis_symmetry_overlap
+use dg_overlapping_wannier_construction, only: assemble_dg_distributed_basis_symmetry_overlap_rows,&
+  validate_dg_row_owned_group_representation
 use dg_overlapping_wannier_construction, only: build_dg_pointwise_affine_owner_map
 use dg_overlapping_wannier_construction, only: solve_dg_affine_common_fixed_point
 use dg_overlapping_wannier_construction, only: compute_dg_periodic_wannier_centers
@@ -85,7 +87,8 @@ use dg_overlapping_wannier_symmetry, only: select_dg_exact_fragment_subgroup,&
   evaluate_dg_covariance_residuals_by_operation,fingerprint_dg_exact_fragment_symmetry
 use dg_overlapping_wannier_symmetry, only: build_dg_fragment_permuted_representation,&
   build_dg_fragment_symmetry_orbits,factor_dg_affine_translation_cocycle
-use dg_overlapping_wannier_localization,only:localize_dg_occupation_blocks
+use dg_overlapping_wannier_w90,only:setup_dg_w90_gamma_library,&
+  assemble_dg_w90_gamma_matrices,run_dg_w90_gamma_library,apply_dg_w90_gamma_transform
 use lcfo_wannier_sawf, only: t_sawf_crystallographic_catalog,&
   load_sawf_crystallographic_catalog_auto
 use lcfo_wannier_sawf_band, only: validate_sawf_fragment_symmetry_map,&
@@ -550,12 +553,14 @@ contains
       selected_global_closed_core(:,:),local_seed_overlap(:,:),global_seed_overlap(:,:),&
       global_candidate_metric_inverse(:,:),global_candidate_raw(:,:,:),global_candidate_defect_work(:,:),&
       orbital_owned_full_values(:,:),center_local_buffer_values(:,:)
+    complex(8),allocatable::w90_anchors(:,:),w90_m_matrix(:,:,:),w90_a_matrix(:,:),w90_transform(:,:)
     complex(8),allocatable::lcfo_fragment_contribution(:,:),lcfo_occupied_core(:,:)
     real(8),allocatable::weights(:),coordinate(:),spectrum(:),occupations(:),lcfo_retained_occupations(:),&
       gradient_rotation(:,:,:),&
       local_point_rotations(:,:,:)
     real(8),allocatable::manifest_values(:,:),initial_density_local(:),initial_density_global(:)
     real(8),allocatable::localized_centers(:,:),localized_center_magnitudes(:,:)
+    real(8),allocatable::w90_fractional(:,:),w90_spreads(:),w90_eigenvalues(:),w90_atoms_cart(:,:)
     type(t_dg_projection_channel),allocatable::manifest_channels(:)
     type(s_dg_overlapping_wannier_construction)::symmetry_basis
     integer(8),allocatable::physical_ids(:),box_ids(:),symmetry_map(:,:),local_box_ids(:),&
@@ -563,16 +568,18 @@ contains
       exact_fragment_symmetry_fingerprints(:),global_symmetry_map(:,:)
     integer(8),allocatable::lcfo_core_ids(:)
     integer(8),allocatable::all_core_ids(:,:),localized_center_ids(:),orbital_owned_full_ids(:)
+    integer(8),allocatable::w90_symmetry_row_ids(:)
     integer,allocatable::fragments(:),local_point_product(:,:),local_point_integer_rotations(:,:,:),&
       translation_product(:,:),global_point_product(:,:),global_point_integer_rotations(:,:,:)
     integer,allocatable::rank_fragments(:)
     integer,allocatable::center_owner_candidate(:),center_box_candidate(:),center_fragment_candidate(:)
     integer,allocatable::orbital_owned_ids(:),center_local_orbital_ids(:)
+    integer,allocatable::w90_nncell(:,:)
     logical,allocatable::boundary(:),core_mask(:),pairs(:,:)
     logical,allocatable::lcfo_boundary_mask(:)
     integer::ix,iy,iz,io,p,nbox,ncore,noccupied,nstate,ntarget,nsym,rank,nproc,&
       raw_ix,raw_iy,raw_iz,core_index,rejected_rank,ownership_count,ierr,allocation_status,&
-      local_target_count
+      local_target_count,w90_nntot
     integer::global_seed_count,global_retained_rank,global_occupied_count,global_projection_count,&
       global_candidate_capacity,&
       global_required_retained_rank
@@ -587,6 +594,8 @@ contains
     integer(8)::expected_core_count,expected_box_count,basis_fingerprint,operator_fingerprint,&
       pseudopotential_fingerprint,nbox8,ncore8,product8,nxy8,local_exact_symmetry_fingerprint,&
       lcfo_symmetry_workspace_peak
+    integer(8)::w90_coordinator_bytes,w90_workspace_peak
+    integer(8)::w90_symmetry_workspace_peak
     real(8)::minimum_eigenvalue,condition_number,closure_residual,spread_max,gauge_correction
     logical::ok,reusable,localization_converged,global_inversion_present
     complex(8),allocatable::core_periodic_phase(:,:),localization_transform(:,:),retained_identity(:,:)
@@ -596,9 +605,13 @@ contains
       global_retained_group_closure_defect,retained_closure_search_tolerance
     real(8),allocatable::global_point_rotations(:,:,:)
     real(8),allocatable::global_point_fractional_translations(:,:)
+    real(8)::w90_reciprocal_lattice(3,3),w90_lattice_inverse(3,3),w90_determinant,w90_spread(3)
+    real(8)::w90_identity_defect,w90_unitarity_defect,w90_closure_defect
     integer::localization_iterations,localization_spread_evaluations
     integer::ow_saved_eigenexa_comm
     character(256)::message,prefix
+    character(8),allocatable::w90_atom_symbols(:)
+    complex(8),allocatable::w90_symmetry_rows(:,:,:)
 
     call MPI_Comm_rank(dc%icomm_tot,rank,ierr);call MPI_Comm_size(dc%icomm_tot,nproc,ierr)
     ok=system%nspin==1.and.system%if_real_orbital.and.allocated(spsi%rwf)
@@ -805,7 +818,7 @@ contains
       MPI_DOUBLE_COMPLEX,MPI_SUM,dc%icomm_tot,ierr)
     if(ierr/=MPI_SUCCESS)error stop 'global projection-seed overlap reduction failed'
     deallocate(local_seed_overlap)
-    deallocate(global_seed_values,lcfo_occupied_core,lcfo_core_ids)
+    deallocate(lcfo_occupied_core,lcfo_core_ids)
     call assemble_dg_distributed_basis_symmetry_overlap(dc%icomm_tot,&
       global_closed_core(1:global_retained_rank,:),&
       ow_core_weights,global_symmetry_map,global_symmetry_overlap,ok,message)
@@ -909,33 +922,71 @@ contains
       core_periodic_phase(3,core_index)=exp(cmplx(0d0,2d0*pi*real((physical_ids(p)-1_8)/&
         nxy8,8)/real(dc%lg_tot%num(3),8),8))
     enddo
-    call localize_dg_occupation_blocks(dc%icomm_tot,ow_core_values,ow_core_gradients,&
-      ow_core_weights,core_periodic_phase,global_retained_representation,global_point_product,&
-      lcfo_retained_occupations,dg_ow_symmetry_tolerance,&
-      dg_ow_localization_support_tolerance,dg_ow_localization_spread_tolerance,&
-      dg_ow_localization_gradient_tolerance,dg_ow_symmetry_tolerance,&
-      dg_ow_localization_max_iterations,localization_initial_spread,localization_final_spread,&
-      localization_maximum_gradient,localization_iterations,localization_converged,&
-      localization_transform,ok,message,localization_spread_evaluations)
-    if(.not.localization_converged)then
-      if(rank==0)write(0,'(a,3(a,es12.4),2(a,i0))')&
-        '[OW-GS-DIAGNOSTIC] localization_rejected',&
-        ' initial_spread=',localization_initial_spread,' final_spread=',localization_final_spread,&
-        ' maximum_gradient=',localization_maximum_gradient,' iterations=',localization_iterations,&
-        ' spread_evaluations=',localization_spread_evaluations
-      write(0,'(a)')trim(message)
-      error stop 'overlapping-Wannier localization convergence gate failed'
-    end if
-    if(.not.ok)error stop 'overlapping-Wannier localization transaction failed'
-    ow_box_values=matmul(localization_transform,ow_box_values)
+    call invert_ow_lattice(dc%system_tot%primitive_a,w90_lattice_inverse,w90_determinant,ok)
+    if(.not.ok)error stop 'Wannier90 lattice is singular'
+    w90_reciprocal_lattice=2d0*pi*transpose(w90_lattice_inverse)
+    allocate(w90_atom_symbols(dc%system_tot%nion),w90_atoms_cart(3,dc%system_tot%nion))
+    w90_atoms_cart=dc%system_tot%Rion
+    do io=1,dc%system_tot%nion
+      if(dc%system_tot%kion(io)<1.or.dc%system_tot%kion(io)>size(pp%atom_symbol))&
+        error stop 'Wannier90 atom species is outside the pseudopotential table'
+      w90_atom_symbols(io)=pp%atom_symbol(dc%system_tot%kion(io))
+    enddo
+    call setup_dg_w90_gamma_library(dc%icomm_tot,'overlapping_wannier_mlwf',&
+      dc%system_tot%primitive_a,w90_reciprocal_lattice,w90_atom_symbols,w90_atoms_cart,&
+      ntarget,ntarget,w90_nntot,w90_nncell,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 Gamma setup failed';endif
+    allocate(w90_fractional(3,ncore),w90_anchors(ntarget,ncore),w90_eigenvalues(ntarget))
+    do p=1,ncore
+      w90_fractional(:,p)=[real(modulo(ow_core_ids(p)-1_8,int(dc%lg_tot%num(1),8)),8)/&
+        real(dc%lg_tot%num(1),8),real(modulo((ow_core_ids(p)-1_8)/int(dc%lg_tot%num(1),8),&
+        int(dc%lg_tot%num(2),8)),8)/real(dc%lg_tot%num(2),8),real((ow_core_ids(p)-1_8)/nxy8,8)/&
+        real(dc%lg_tot%num(3),8)]
+    enddo
+    w90_anchors=global_seed_values;w90_eigenvalues=0d0
+    call assemble_dg_w90_gamma_matrices(dc%icomm_tot,global_closed_core,w90_anchors,&
+      ow_core_weights,w90_fractional,w90_nncell,huge(0_8),w90_m_matrix,w90_a_matrix,&
+      w90_coordinator_bytes,w90_workspace_peak,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 M/A assembly failed';endif
+    call run_dg_w90_gamma_library(dc%icomm_tot,'overlapping_wannier_mlwf',&
+      dc%system_tot%primitive_a,w90_reciprocal_lattice,w90_atom_symbols,w90_atoms_cart,&
+      w90_m_matrix,w90_a_matrix,w90_eigenvalues,huge(1d0)/4d0,dg_ow_symmetry_tolerance,&
+      w90_transform,localized_centers,w90_spreads,w90_spread,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 MLWF optimization failed';endif
+    localized_centers=matmul(w90_lattice_inverse,localized_centers)
+    call apply_dg_w90_gamma_transform(dc%icomm_tot,ow_core_ids,ow_core_values,ow_core_gradients,&
+      w90_transform,localized_centers,dg_ow_symmetry_tolerance,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 MLWF gauge canonicalization failed';endif
+    call assemble_dg_distributed_basis_symmetry_overlap_rows(dc%icomm_tot,ow_core_values,&
+      ow_core_weights,global_symmetry_map,w90_symmetry_row_ids,w90_symmetry_rows,&
+      w90_symmetry_workspace_peak,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'post-MLWF row-owned symmetry measurement failed';endif
+    call validate_dg_row_owned_group_representation(dc%icomm_tot,w90_symmetry_row_ids,&
+      w90_symmetry_rows,global_point_product,global_identity_operation,dg_ow_symmetry_tolerance,&
+      w90_identity_defect,w90_unitarity_defect,w90_closure_defect,w90_symmetry_workspace_peak,&
+      ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'post-MLWF row-owned group validation failed';endif
+    global_retained_group_closure_defect=w90_closure_defect
+    localization_initial_spread=w90_spread(1);localization_final_spread=w90_spread(1)
+    localization_maximum_gradient=0d0;localization_iterations=0
+    localization_spread_evaluations=0;localization_converged=.true.
+    do io=1,size(global_retained_representation,3)
+      global_retained_representation(:,:,io)=matmul(transpose(w90_transform),&
+        matmul(global_retained_representation(:,:,io),conjg(w90_transform)))
+    enddo
+    deallocate(w90_symmetry_row_ids,w90_symmetry_rows)
+    ow_box_values=matmul(transpose(w90_transform),ow_box_values)
     do ix=1,3
-      ow_box_gradients(ix,:,:)=matmul(localization_transform,ow_box_gradients(ix,:,:))
+      ow_box_gradients(ix,:,:)=matmul(transpose(w90_transform),ow_box_gradients(ix,:,:))
     end do
-    if(rank==0)write(*,'(a,3(a,es12.4),2(a,i0))')&
-      '[OW-GS-DIAGNOSTIC] localization_converged',&
-      ' initial_spread=',localization_initial_spread,' final_spread=',localization_final_spread,&
-      ' maximum_gradient=',localization_maximum_gradient,' iterations=',localization_iterations,&
-      ' spread_evaluations=',localization_spread_evaluations
+    deallocate(global_seed_values,w90_anchors,w90_fractional,w90_eigenvalues,w90_atom_symbols,&
+      w90_atoms_cart,w90_nncell,w90_m_matrix,w90_a_matrix,w90_spreads,localized_centers,w90_transform)
+    if(rank==0)write(*,'(a,5(a,es12.4),3(a,i0))')'[OW-GS-DIAGNOSTIC] Wannier90_MLWF',&
+      ' gauge_spread=',w90_spread(3),' total_spread=',w90_spread(1),&
+      ' identity_defect=',w90_identity_defect,' unitarity_defect=',w90_unitarity_defect,&
+      ' closure_defect=',w90_closure_defect,' coordinator_bytes=',w90_coordinator_bytes,&
+      ' workspace_peak_bytes=',w90_workspace_peak,&
+      ' symmetry_workspace_peak_bytes=',w90_symmetry_workspace_peak
     closure_residual=global_retained_group_closure_defect
     local_exact_symmetry_fingerprint=fingerprint_dg_exact_fragment_symmetry(&
       global_point_integer_rotations,global_point_product,dg_ow_symmetry_tolerance,&

@@ -9,7 +9,118 @@ module dg_overlapping_wannier_w90
   public::estimate_dg_w90_coordinator_bytes,validate_dg_w90_result
   public::setup_dg_w90_gamma_library,run_dg_w90_gamma_library
   public::assemble_dg_w90_gamma_matrices
+  public::apply_dg_w90_gamma_transform
 contains
+  subroutine apply_dg_w90_gamma_transform(comm,physical_ids,values,gradients,transform,centers,&
+      tolerance,ok,message)
+    integer,intent(in)::comm
+    integer(int64),intent(in)::physical_ids(:)
+    complex(real64),intent(inout)::values(:,:),gradients(:,:,:),transform(:,:)
+    real(real64),intent(inout)::centers(:,:)
+    real(real64),intent(in)::tolerance
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nstate,npoint,i,j,k,axis,ierr,status
+    integer,allocatable::order(:)
+    logical,allocatable::used(:)
+    complex(real64),allocatable::ordered_transform(:,:),new_values(:,:),new_gradients(:,:,:),gram(:,:)
+    real(real64),allocatable::ordered_centers(:,:),local_maximum(:),global_maximum(:)
+    integer(int64),allocatable::local_id(:),global_id(:)
+    complex(real64),allocatable::local_pivot(:),global_pivot(:)
+    real(real64)::scale
+    logical::precedes
+    ok=.false.;message='';status=0;nstate=size(values,1);npoint=size(values,2)
+    if(nstate<=0.or.size(values,2)/=size(physical_ids).or.&
+        any(shape(gradients)/=[3,nstate,npoint]).or.any(shape(transform)/=[nstate,nstate]).or.&
+        any(shape(centers)/=[3,nstate]).or.tolerance<=0d0.or..not.ieee_is_finite(tolerance).or.&
+        .not.all(ieee_is_finite(real(values))).or..not.all(ieee_is_finite(aimag(values))).or.&
+        .not.all(ieee_is_finite(real(gradients))).or..not.all(ieee_is_finite(aimag(gradients))).or.&
+        .not.all(ieee_is_finite(real(transform))).or..not.all(ieee_is_finite(aimag(transform))).or.&
+        .not.all(ieee_is_finite(centers)).or.any(physical_ids<=0_int64))status=1
+    if(maxval(abs(aimag(transform)))>tolerance*max(1d0,maxval(abs(transform))))status=1
+    call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(status/=0.or.ierr/=MPI_SUCCESS)then;message='invalid Gamma MLWF transform contract';return;endif
+    allocate(gram(nstate,nstate));gram=matmul(conjg(transpose(transform)),transform)
+    do i=1,nstate;gram(i,i)=gram(i,i)-1d0;enddo
+    if(maxval(abs(gram))>tolerance*max(1d0,real(nstate,real64)))status=2
+    call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(status/=0.or.ierr/=MPI_SUCCESS)then;message='Gamma MLWF transform is not unitary';return;endif
+    allocate(order(nstate),used(nstate));used=.false.
+    do i=1,nstate
+      order(i)=0
+      do j=1,nstate
+        if(used(j))cycle
+        if(order(i)==0)then
+          order(i)=j
+        else
+          precedes=.false.
+          do axis=1,3
+            if(modulo(centers(axis,j),1d0)<modulo(centers(axis,order(i)),1d0)-tolerance)then
+              precedes=.true.;exit
+            else if(modulo(centers(axis,j),1d0)>modulo(centers(axis,order(i)),1d0)+tolerance)then
+              exit
+            endif
+          enddo
+          if(.not.precedes.and.all(abs(modulo(centers(:,j),1d0)-&
+              modulo(centers(:,order(i)),1d0))<=tolerance))then
+            do k=1,nstate
+              if(abs(transform(k,j))>abs(transform(k,order(i)))+tolerance)then
+                precedes=.true.;exit
+              else if(abs(transform(k,j))<abs(transform(k,order(i)))-tolerance)then
+                exit
+              endif
+            enddo
+          endif
+          if(precedes)order(i)=j
+        endif
+      enddo
+      used(order(i))=.true.
+    enddo
+    allocate(ordered_transform(nstate,nstate),ordered_centers(3,nstate))
+    ordered_transform=transform(:,order);ordered_centers=centers(:,order)
+    allocate(new_values(nstate,npoint),new_gradients(3,nstate,npoint))
+    new_values=matmul(transpose(ordered_transform),values)
+    do axis=1,3;new_gradients(axis,:,:)=matmul(transpose(ordered_transform),gradients(axis,:,:));enddo
+    allocate(local_maximum(nstate),global_maximum(nstate),local_id(nstate),global_id(nstate),&
+      local_pivot(nstate),global_pivot(nstate))
+    do i=1,nstate
+      if(npoint>0)then
+        j=maxloc(abs(new_values(i,:)),dim=1);local_maximum(i)=abs(new_values(i,j))
+      else
+        local_maximum(i)=-1d0
+      endif
+    enddo
+    call MPI_Allreduce(local_maximum,global_maximum,nstate,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    local_id=huge(0_int64)
+    do i=1,nstate;do j=1,npoint
+      scale=max(1d0,global_maximum(i))
+      if(abs(abs(new_values(i,j))-global_maximum(i))<=tolerance*scale)&
+        local_id(i)=min(local_id(i),physical_ids(j))
+    enddo;enddo
+    call MPI_Allreduce(local_id,global_id,nstate,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    local_pivot=(0d0,0d0)
+    do i=1,nstate;do j=1,npoint
+      if(physical_ids(j)==global_id(i))local_pivot(i)=new_values(i,j)
+    enddo;enddo
+    call MPI_Allreduce(local_pivot,global_pivot,nstate,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(global_maximum<=tolerance).or.&
+        maxval(abs(aimag(global_pivot)))>tolerance*max(1d0,maxval(abs(global_pivot))))then
+      message='cannot determine canonical Gamma MLWF signs';return
+    endif
+    do i=1,nstate
+      if(real(global_pivot(i),real64)<0d0)then
+        ordered_transform(:,i)=-ordered_transform(:,i);new_values(i,:)=-new_values(i,:)
+        new_gradients(:,i,:)=-new_gradients(:,i,:)
+      endif
+    enddo
+    transform=ordered_transform;centers=ordered_centers;values=new_values;gradients=new_gradients
+    ok=.true.
+#else
+    ok=.false.;message='Gamma MLWF transform application requires MPI'
+#endif
+  end subroutine apply_dg_w90_gamma_transform
+
   subroutine assemble_dg_w90_gamma_matrices(comm,values,anchors,weights,fractional,nncell,&
       coordinator_byte_limit,m_matrix,a_matrix,coordinator_bytes,workspace_peak_bytes,ok,message)
     integer,intent(in)::comm,nncell(:,:)
@@ -237,7 +348,7 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #if defined(USE_MPI) && defined(USE_WANNIER90)
-    integer::rank,ierr,nband,nwann,nntot,status,mp_grid(3)
+    integer::rank,ierr,nband,nwann,nntot,status,mp_grid(3),matrix_dimensions(3)
     real(real64)::kpoint(3,1)
     complex(real64),allocatable::u(:,:,:),uopt(:,:,:),m4(:,:,:,:),a3(:,:,:)
     real(real64),allocatable::e2(:,:)
@@ -266,14 +377,21 @@ contains
     end interface
     ok=.false.;message='';spread=0d0;status=0
     call MPI_Comm_rank(comm,rank,ierr)
-    nband=size(m_matrix,1);nwann=size(a_matrix,2);nntot=size(m_matrix,3)
-    if(ierr/=MPI_SUCCESS.or.nband<=0.or.size(m_matrix,2)/=nband.or.nwann/=nband.or.&
-        size(a_matrix,1)/=nband.or.size(eigenvalues)/=nband.or.nntot<=0.or.&
+    matrix_dimensions=0
+    if(rank==0)matrix_dimensions=[size(m_matrix,1),size(a_matrix,2),size(m_matrix,3)]
+    call MPI_Bcast(matrix_dimensions,3,MPI_INTEGER,0,comm,ierr)
+    nband=matrix_dimensions(1);nwann=matrix_dimensions(2);nntot=matrix_dimensions(3)
+    if(ierr/=MPI_SUCCESS.or.nband<=0.or.nwann/=nband.or.size(eigenvalues)/=nband.or.nntot<=0.or.&
         any(shape(atoms_cart)/=[3,size(atom_symbols)]).or.&
-        .not.all(ieee_is_finite(real(m_matrix))).or..not.all(ieee_is_finite(aimag(m_matrix))).or.&
-        .not.all(ieee_is_finite(real(a_matrix))).or..not.all(ieee_is_finite(aimag(a_matrix))).or.&
         .not.all(ieee_is_finite(eigenvalues)).or..not.all(ieee_is_finite(real_lattice)).or.&
         .not.all(ieee_is_finite(reciprocal_lattice)).or..not.all(ieee_is_finite(atoms_cart)))status=1
+    if(rank==0)then
+      if(size(m_matrix,2)/=nband.or.size(a_matrix,1)/=nband.or.&
+          .not.all(ieee_is_finite(real(m_matrix))).or..not.all(ieee_is_finite(aimag(m_matrix))).or.&
+          .not.all(ieee_is_finite(real(a_matrix))).or..not.all(ieee_is_finite(aimag(a_matrix))))status=1
+    else if(size(m_matrix)/=0.or.size(a_matrix)/=0)then
+      status=1
+    endif
     call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(status/=0.or.ierr/=MPI_SUCCESS)then;message='invalid Gamma Wannier90 run contract';return;endif
     allocate(transform(nwann,nwann),centers(3,nwann),spreads(nwann));transform=(0d0,0d0)
@@ -285,7 +403,7 @@ contains
       call wannier_run(trim(seed),mp_grid,1,real_lattice,reciprocal_lattice,kpoint,nband,nwann,&
         nntot,size(atom_symbols),atom_symbols,atoms_cart,.true.,m4,a3,e2,u,uopt,lwindow,&
         centers,spreads,spread)
-      transform=u(:,:,1)
+      transform=matmul(uopt(:,:,1),u(:,:,1))
       call validate_dg_w90_result(transform,centers,spreads,spread,initial_gauge_spread,&
         tolerance,ok,message)
       status=merge(0,2,ok)

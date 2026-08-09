@@ -9,6 +9,7 @@ program test_dg_overlapping_wannier_construction_mpi
     verify_dg_overlapping_wannier_periodic_closure,assemble_dg_distributed_candidate_symmetry,&
     assemble_dg_distributed_basis_symmetry_overlap,&
     assemble_dg_distributed_basis_symmetry_overlap_rows,&
+    validate_dg_row_owned_group_representation,&
     build_dg_pointwise_affine_owner_map,&
     find_dg_group_identity,&
     select_dg_fixed_rank_symmetry_closed_subspace,&
@@ -68,6 +69,7 @@ program test_dg_overlapping_wannier_construction_mpi
   integer(8)::reference_fingerprint
   integer(8)::symmetry_workspace_peak
   integer(8)::row_overlap_workspace_peak
+  real(8)::row_identity_defect,row_unitarity_defect,row_closure_defect
   integer(8),allocatable::distributed_overlap_row_ids(:)
   integer(8)::closure_fingerprint,rounded_closure_fingerprint
   integer(8),allocatable::closure_ids(:),closure_map(:,:)
@@ -556,6 +558,12 @@ program test_dg_overlapping_wannier_construction_mpi
       'row-owned symmetry overlaps match the dense reference')
     call require(size(distributed_basis_overlap_rows,1)==1,&
       'two-rank symmetry overlap owns only one global basis row per rank')
+    distributed_basis_overlap_rows(:,:,1:2)=distributed_basis_overlap_rows(:,:,1:2)/5d0
+    call validate_dg_row_owned_group_representation(comm,distributed_overlap_row_ids,&
+      distributed_basis_overlap_rows(:,:,1:2),closure_product,1,1d-12,row_identity_defect,&
+      row_unitarity_defect,row_closure_defect,row_overlap_workspace_peak,ok,message)
+    call require(ok.and.max(row_identity_defect,max(row_unitarity_defect,row_closure_defect))<1d-12,&
+      trim(message))
 
     allocate(orbit_seed(1,2));orbit_seed=(0d0,0d0)
     if(rank==0)orbit_seed(1,1)=1d0

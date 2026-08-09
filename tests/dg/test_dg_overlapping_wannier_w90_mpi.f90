@@ -3,7 +3,7 @@ program test_dg_overlapping_wannier_w90_mpi
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   use dg_overlapping_wannier_w90,only:estimate_dg_w90_coordinator_bytes,&
     validate_dg_w90_result,setup_dg_w90_gamma_library,run_dg_w90_gamma_library,&
-    assemble_dg_w90_gamma_matrices
+    assemble_dg_w90_gamma_matrices,apply_dg_w90_gamma_transform
   implicit none
   integer::ierr,rank,nproc,b,m,n,p,nlocal
   complex(8)::transform(2,2)
@@ -18,6 +18,10 @@ program test_dg_overlapping_wannier_w90_mpi
   integer(8)::matrix_peak,matrix_estimate
   complex(8)::local_m_reference(2,2,2),local_a_reference(2,2),m_reference(2,2,2),a_reference(2,2),phase
   real(8)::angle
+  complex(8),allocatable::gauge_values(:,:),gauge_gradients(:,:,:)
+  complex(8)::gauge_transform(2,2)
+  real(8)::gauge_centers(3,2)
+  integer(8),allocatable::gauge_ids(:)
 #ifdef USE_WANNIER90
   integer::nntot
   integer,allocatable::nncell(:,:)
@@ -91,6 +95,19 @@ program test_dg_overlapping_wannier_w90_mpi
     local_fractional,test_nncell,merge(1_8,huge(0_8),rank==0),assembled_m,assembled_a,&
     matrix_estimate,matrix_peak,ok,message)
   call require(.not.ok,'Wannier90 matrix assembly rejects rank-inconsistent byte limits')
+  allocate(gauge_values,source=local_values)
+  allocate(gauge_gradients(3,2,nlocal));gauge_gradients=(0d0,0d0)
+  allocate(gauge_ids(nlocal));gauge_ids=[(int(rank*nlocal+p,8),p=1,nlocal)]
+  gauge_transform=reshape([cmplx(0d0,0d0,8),cmplx(-1d0,0d0,8),&
+    cmplx(1d0,0d0,8),cmplx(0d0,0d0,8)],[2,2])
+  gauge_centers=reshape([0.2d0,0d0,0d0,0.2d0,0d0,0d0],[3,2])
+  call apply_dg_w90_gamma_transform(MPI_COMM_WORLD,gauge_ids,gauge_values,gauge_gradients,&
+    gauge_transform,gauge_centers,1d-12,ok,message)
+  call require(ok.and.maxval(abs(gauge_values(1,:)-local_values(1,:)))<1d-12.and.&
+    maxval(abs(gauge_values(2,:)+local_values(2,:)))<1d-12.and.&
+    abs(gauge_transform(1,1)-1d0)<1d-12.and.abs(gauge_transform(2,2)+1d0)<1d-12.and.&
+    maxval(abs(gauge_transform-reshape([cmplx(1d0,0d0,8),cmplx(0d0,0d0,8),&
+      cmplx(0d0,0d0,8),cmplx(-1d0,0d0,8)],[2,2])))<1d-12,trim(message))
   transform(1,1)=2d0
   call validate_dg_w90_result(transform,centers,spreads,spread,0.8d0,1d-12,ok,message)
   call require(.not.ok,'nonunitary Wannier90 transform rejection')
@@ -112,14 +129,18 @@ program test_dg_overlapping_wannier_w90_mpi
   call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
     atom_symbols,atoms_cart,1,1,nntot,nncell,ok,message)
   call require(ok.and.nntot>0,trim(message))
-  allocate(m_matrix(1,1,nntot),a_matrix(1,1));m_matrix=(1d0,0d0);a_matrix=(1d0,0d0)
+  if(rank==0)then
+    allocate(m_matrix(1,1,nntot),a_matrix(1,1));m_matrix=(1d0,0d0);a_matrix=(1d0,0d0)
+  else
+    allocate(m_matrix(0,0,0),a_matrix(0,0))
+  endif
   call run_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
     atom_symbols,atoms_cart,m_matrix,a_matrix,eigenvalues,1d6,1d-10,library_transform,&
     library_centers,library_spreads,library_spread,ok,message)
   call require(ok,trim(message))
   call require(abs(abs(library_transform(1,1))-1d0)<1d-10,&
     'one-band Wannier90 library returns a unitary Gamma transform')
-  m_matrix(1,1,1)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,8)
+  if(rank==0)m_matrix(1,1,1)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,8)
   call run_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
     atom_symbols,atoms_cart,m_matrix,a_matrix,eigenvalues,1d6,1d-10,library_transform,&
     library_centers,library_spreads,library_spread,ok,message)

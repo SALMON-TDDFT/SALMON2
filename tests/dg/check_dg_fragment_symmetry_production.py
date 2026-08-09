@@ -38,7 +38,8 @@ require(re.search(r"fragment.*atom.*(mask|index)", MAIN) is not None,
 construction_call = re.search(
     r"call\s+construct_dg_overlapping_wannier_basis\s*\((.*?)\)\s*\n",
     MAIN, re.S)
-require((construction_call is None and "call localize_dg_occupation_blocks" in MAIN) or
+require((construction_call is None and "call run_dg_w90_gamma_library" in MAIN and
+         "call localize_dg_occupation_blocks" not in MAIN) or
         (construction_call is not None and "local_symmetry_map" not in construction_call.group(1)),
         "fragment-local Wannier generation must not impose a fragment-only point group")
 require("point_group_symbol" in MAIN and "space_group_number" in MAIN,
@@ -53,6 +54,9 @@ require("project_ow_exact_global_group" in MAIN,
         "fragment-spanning symmetries must be projected as one exact global group")
 require("assemble_dg_distributed_basis_symmetry_overlap" in MAIN,
         "global checkpoint representation must be measured from the actual distributed Wannier gauge")
+require("assemble_dg_distributed_basis_symmetry_overlap_rows" in MAIN and
+        "validate_dg_row_owned_group_representation" in MAIN,
+        "post-MLWF symmetry validation must remain row-owned and memory bounded")
 exact_global_body = re.search(
     r"subroutine\s+project_ow_exact_global_group(.*?)end\s+subroutine", MAIN, re.S)
 require(exact_global_body is not None and

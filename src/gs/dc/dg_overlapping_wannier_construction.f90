@@ -30,6 +30,7 @@ module dg_overlapping_wannier_construction
   public::assemble_dg_distributed_candidate_symmetry
   public::assemble_dg_distributed_basis_symmetry_overlap
   public::assemble_dg_distributed_basis_symmetry_overlap_rows
+  public::validate_dg_row_owned_group_representation
   public::build_dg_pointwise_affine_owner_map
   public::select_dg_fixed_rank_symmetry_closed_subspace
   public::build_dg_distributed_symmetry_closed_basis
@@ -1959,6 +1960,89 @@ contains
     ok=.false.;message='row-owned symmetry overlap requires MPI';workspace_peak_bytes=0_int64
 #endif
   end subroutine assemble_dg_distributed_basis_symmetry_overlap_rows
+
+  subroutine validate_dg_row_owned_group_representation(comm,row_ids,representation_rows,&
+      product_table,identity_operation,tolerance,identity_defect,unitarity_defect,closure_defect,&
+      workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,product_table(:,:),identity_operation
+    integer(int64),intent(in)::row_ids(:)
+    complex(real64),intent(in)::representation_rows(:,:,:)
+    real(real64),intent(in)::tolerance
+    real(real64),intent(out)::identity_defect,unitarity_defect,closure_defect
+    integer(int64),intent(out)::workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,nproc,ierr,nstate,nlocal,nsym,base,remainder,owner,owner_first,owner_count,&
+      operation,left,right,product,i,j,local_bad,global_bad
+    complex(real64),allocatable::remote_rows(:,:),unitarity_tile(:,:),product_rows(:,:)
+    real(real64)::local_identity,local_unitarity,local_closure,expected
+    integer(int64)::complex_bytes
+    ok=.false.;message='';identity_defect=huge(1d0);unitarity_defect=huge(1d0)
+    closure_defect=huge(1d0);workspace_peak_bytes=0_int64
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    nlocal=size(row_ids);nstate=size(representation_rows,2);nsym=size(representation_rows,3)
+    local_bad=0
+    if(ierr/=MPI_SUCCESS.or.nstate<=0.or.nlocal/=size(representation_rows,1).or.nsym<=0.or.&
+        any(shape(product_table)/=[nsym,nsym]).or.identity_operation<1.or.identity_operation>nsym.or.&
+        tolerance<=0d0.or..not.ieee_is_finite(tolerance).or.any(product_table<1).or.&
+        any(product_table>nsym).or..not.all(ieee_is_finite(real(representation_rows))).or.&
+        .not.all(ieee_is_finite(aimag(representation_rows))))local_bad=1
+    base=nstate/nproc;remainder=mod(nstate,nproc)
+    owner_count=base+merge(1,0,rank<remainder);owner_first=rank*base+min(rank,remainder)+1
+    if(nlocal/=owner_count)local_bad=1
+    do i=1,nlocal
+      if(row_ids(i)/=int(owner_first+i-1,int64))local_bad=1
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then;message='invalid row-owned group contract';return;endif
+    local_identity=0d0
+    do i=1,nlocal;do j=1,nstate
+      expected=merge(1d0,0d0,int(row_ids(i))==j)
+      local_identity=max(local_identity,abs(representation_rows(i,j,identity_operation)-expected))
+    enddo;enddo
+    local_unitarity=0d0;local_closure=0d0;complex_bytes=int(storage_size((0d0,0d0))/8,int64)
+    allocate(product_rows(nlocal,nstate));workspace_peak_bytes=complex_bytes*int(size(product_rows),int64)
+    do operation=1,nsym
+      do owner=0,nproc-1
+        owner_count=base+merge(1,0,owner<remainder);owner_first=owner*base+min(owner,remainder)+1
+        allocate(remote_rows(owner_count,nstate),unitarity_tile(nlocal,owner_count))
+        if(rank==owner)remote_rows=representation_rows(:,:,operation)
+        call MPI_Bcast(remote_rows,size(remote_rows),MPI_DOUBLE_COMPLEX,owner,comm,ierr)
+        unitarity_tile=matmul(representation_rows(:,:,operation),conjg(transpose(remote_rows)))
+        do j=1,owner_count;do i=1,nlocal
+          expected=merge(1d0,0d0,int(row_ids(i))==owner_first+j-1)
+          local_unitarity=max(local_unitarity,abs(unitarity_tile(i,j)-expected))
+        enddo;enddo
+        workspace_peak_bytes=max(workspace_peak_bytes,complex_bytes*&
+          int(size(product_rows)+size(remote_rows)+size(unitarity_tile),int64))
+        deallocate(remote_rows,unitarity_tile)
+      enddo
+    enddo
+    do left=1,nsym;do right=1,nsym
+      product=product_table(left,right);product_rows=(0d0,0d0)
+      do owner=0,nproc-1
+        owner_count=base+merge(1,0,owner<remainder);owner_first=owner*base+min(owner,remainder)+1
+        allocate(remote_rows(owner_count,nstate))
+        if(rank==owner)remote_rows=representation_rows(:,:,right)
+        call MPI_Bcast(remote_rows,size(remote_rows),MPI_DOUBLE_COMPLEX,owner,comm,ierr)
+        product_rows=product_rows+matmul(representation_rows(:,owner_first:owner_first+owner_count-1,left),&
+          remote_rows)
+        workspace_peak_bytes=max(workspace_peak_bytes,complex_bytes*&
+          int(size(product_rows)+size(remote_rows),int64));deallocate(remote_rows)
+      enddo
+      local_closure=max(local_closure,maxval(abs(product_rows-representation_rows(:,:,product))))
+    enddo;enddo
+    call MPI_Allreduce(local_identity,identity_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_unitarity,unitarity_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_closure,closure_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    ok=ierr==MPI_SUCCESS.and.max(identity_defect,max(unitarity_defect,closure_defect))<=tolerance
+    if(ok)then;message='';else;message='row-owned group representation violates identity, unitarity, or closure';endif
+#else
+    ok=.false.;message='row-owned group validation requires MPI';identity_defect=huge(1d0)
+    unitarity_defect=huge(1d0);closure_defect=huge(1d0);workspace_peak_bytes=0_int64
+#endif
+  end subroutine validate_dg_row_owned_group_representation
 
   subroutine verify_dg_overlapping_wannier_periodic_closure(comm,box_ids,symmetry_target_box_ids,&
       values,gradients,symmetry_representation,gradient_transform,expected_box_count,tolerance,&
