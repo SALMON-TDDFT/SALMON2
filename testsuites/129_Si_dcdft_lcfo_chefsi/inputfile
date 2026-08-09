@@ -10,7 +10,7 @@
   lambda_cut=1d-7
   energy_cut=100d0
   lcfo_eigensolver='chefsi'
-  chefsi_filter_degree=20
+  lcfo_diag_chefsi_filter_degree=60
 /
 &parallel
   nproc_k=1
