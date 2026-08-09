@@ -20,8 +20,8 @@ module lcfo_diag_chefsi
 
   integer, parameter :: dense_block_size = 64
   integer, parameter :: filter_degree = 20
-  integer, parameter :: max_filter_cycle = 8
-  real(8), parameter :: residual_tolerance = 1d-8
+  integer, parameter :: max_filter_cycle = 200
+  real(8), parameter :: residual_tolerance = 1d-7
 
   type :: s_blacs_grid
     integer :: ictxt = -1

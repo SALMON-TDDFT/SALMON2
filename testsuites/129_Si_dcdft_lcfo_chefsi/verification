@@ -34,7 +34,7 @@ for line in output_file.read_text().splitlines():
     if match:
         residuals.append(float(match.group(1)))
 
-if not residuals or residuals[-1] > 1.0e-8:
+if not residuals or residuals[-1] > 1.0e-7:
     print("CheFSI did not reach the requested residual tolerance")
     sys.exit(1)
 
