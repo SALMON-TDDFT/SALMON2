@@ -6,7 +6,4 @@
 # if required, this script file can utilized for the preparation of 
 # the input data for the following calculations.
 
-wget --no-check-certificate https://www.abinit.org/ATOMICDATA/LDA_FHI.zip
-#wget --no-check-certificate https://abinit.github.io/abinit_web/ATOMICDATA/LDA_FHI.zip
-unzip LDA_FHI.zip
-cp LDA_FHI/14-Si.LDA.fhi .
+wget --no-check-certificate https://www.abinit.org/atomic_data/psps/miscellaneous/ATOMICDATA/LDA_FHI/14-Si.LDA.fhi
