@@ -14,6 +14,7 @@ with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
         [
             shutil.which("mpifort"),
             "-cpp",
+            "-DUSE_MPI",
             "-I",
             str(build),
             "-J",
@@ -29,6 +30,7 @@ with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
     )
     env = os.environ.copy()
     env.setdefault("OMPI_MCA_rmaps_base_oversubscribe", "1")
+    fingerprints = []
     for ranks in (1, 2, 4, 8):
         result = subprocess.run(
             [shutil.which("mpiexec"), "-n", str(ranks), str(exe)],
@@ -38,6 +40,9 @@ with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
         )
         assert result.returncode == 0, (ranks, result.stdout, result.stderr)
         assert "PASS Wannier90 MLWF adapter validation" in result.stdout
+        line = next(line for line in result.stdout.splitlines() if line.startswith("W90_MATRIX_FINGERPRINT"))
+        fingerprints.append(float(line.split()[1]))
+    assert max(fingerprints) - min(fingerprints) < 1.0e-12, fingerprints
     library = os.environ.get("SALMON_WANNIER90_LIB")
     if library:
         actual = build / "w90_library"
@@ -61,6 +66,7 @@ with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
             ],
             check=True,
         )
+        library_fingerprints = []
         for ranks in (1, 2, 4, 8):
             result = subprocess.run(
                 [shutil.which("mpiexec"), "-n", str(ranks), str(actual)],
@@ -71,4 +77,7 @@ with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
             )
             assert result.returncode == 0, (ranks, result.stdout, result.stderr)
             assert "PASS Wannier90 MLWF adapter validation" in result.stdout
+            line = next(line for line in result.stdout.splitlines() if line.startswith("W90_MATRIX_FINGERPRINT"))
+            library_fingerprints.append(float(line.split()[1]))
+        assert max(library_fingerprints) - min(library_fingerprints) < 1.0e-12, library_fingerprints
 print("PASS Wannier90 MLWF adapter validation on 1, 2, 4, and 8 ranks")

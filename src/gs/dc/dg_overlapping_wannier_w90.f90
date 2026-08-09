@@ -8,7 +8,131 @@ module dg_overlapping_wannier_w90
   private
   public::estimate_dg_w90_coordinator_bytes,validate_dg_w90_result
   public::setup_dg_w90_gamma_library,run_dg_w90_gamma_library
+  public::assemble_dg_w90_gamma_matrices
 contains
+  subroutine assemble_dg_w90_gamma_matrices(comm,values,anchors,weights,fractional,nncell,&
+      coordinator_byte_limit,m_matrix,a_matrix,coordinator_bytes,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,nncell(:,:)
+    complex(real64),intent(in)::values(:,:),anchors(:,:)
+    real(real64),intent(in)::weights(:),fractional(:,:)
+    integer(int64),intent(in)::coordinator_byte_limit
+    complex(real64),allocatable,intent(out)::m_matrix(:,:,:),a_matrix(:,:)
+    integer(int64),intent(out)::coordinator_bytes,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer,parameter::tile_size=32
+    integer::rank,ierr,status,nband,nwann,npoint,nntot,m0,m1,n0,n1,b,p,m,n,count,allocation_status
+    integer::local_dimensions(3),minimum_dimensions(3),maximum_dimensions(3)
+    integer(int64)::output_elements,output_bytes,tile_bytes,complex_bytes,peak
+    integer(int64)::minimum_limit,maximum_limit
+    real(real64)::angle
+    complex(real64)::phase
+    complex(real64),allocatable::local_tile(:,:),reduced_tile(:,:)
+    logical::arithmetic_ok
+    ok=.false.;message='';coordinator_bytes=0_int64;workspace_peak_bytes=0_int64;status=0
+    call MPI_Comm_rank(comm,rank,ierr)
+    nband=size(values,1);npoint=size(values,2);nwann=size(anchors,1);nntot=size(nncell,2)
+    if(ierr/=MPI_SUCCESS.or.nband<=0.or.nwann/=nband.or.npoint<0.or.&
+        size(anchors,2)/=npoint.or.size(weights)/=npoint.or.&
+        any(shape(fractional)/=[3,npoint]).or.size(nncell,1)/=3.or.nntot<=0.or.&
+        coordinator_byte_limit<0_int64.or..not.all(ieee_is_finite(real(values))).or.&
+        .not.all(ieee_is_finite(aimag(values))).or..not.all(ieee_is_finite(real(anchors))).or.&
+        .not.all(ieee_is_finite(aimag(anchors))).or..not.all(ieee_is_finite(weights)).or.&
+        .not.all(ieee_is_finite(fractional)).or.any(weights<0d0))status=1
+    call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(status/=0.or.ierr/=MPI_SUCCESS)then
+      allocate(m_matrix(0,0,0),a_matrix(0,0));message='invalid distributed Wannier90 matrix contract';return
+    endif
+    local_dimensions=[nband,nwann,nntot]
+    call MPI_Allreduce(local_dimensions,minimum_dimensions,3,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(local_dimensions,maximum_dimensions,3,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(coordinator_byte_limit,minimum_limit,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(coordinator_byte_limit,maximum_limit,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(minimum_dimensions/=maximum_dimensions).or.minimum_limit/=maximum_limit)status=1
+    call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(status/=0.or.ierr/=MPI_SUCCESS)then
+      allocate(m_matrix(0,0,0),a_matrix(0,0));message='rank-inconsistent Wannier90 matrix contract';return
+    endif
+    call estimate_dg_w90_coordinator_bytes(nband,nwann,nntot,1,coordinator_bytes,&
+      arithmetic_ok,message)
+    if(.not.arithmetic_ok)status=2
+    if(arithmetic_ok.and.coordinator_bytes>coordinator_byte_limit)status=3
+    complex_bytes=int(storage_size((0d0,0d0))/8,int64)
+    call checked_product([int(nband,int64),int(nband,int64),int(nntot,int64)],&
+      output_elements,arithmetic_ok)
+    if(arithmetic_ok)call checked_add(output_elements,int(nband,int64)*int(nwann,int64),arithmetic_ok)
+    if(arithmetic_ok)call checked_product([output_elements,complex_bytes],output_bytes,arithmetic_ok)
+    if(.not.arithmetic_ok)status=2
+    call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(status/=0.or.ierr/=MPI_SUCCESS)then
+      allocate(m_matrix(0,0,0),a_matrix(0,0));workspace_peak_bytes=0_int64
+      if(status==3)message='Wannier90 coordinator byte limit exceeded'
+      if(status==2)message='Wannier90 matrix byte estimate overflow'
+      return
+    endif
+    allocation_status=0
+    if(rank==0)then
+      allocate(m_matrix(nband,nband,nntot),a_matrix(nband,nwann),stat=allocation_status)
+      if(allocation_status==0)then;m_matrix=(0d0,0d0);a_matrix=(0d0,0d0);endif
+    else
+      allocate(m_matrix(0,0,0),a_matrix(0,0),stat=allocation_status)
+    endif
+    call MPI_Allreduce(MPI_IN_PLACE,allocation_status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(allocation_status/=0.or.ierr/=MPI_SUCCESS)then
+      if(.not.allocated(m_matrix))allocate(m_matrix(0,0,0))
+      if(.not.allocated(a_matrix))allocate(a_matrix(0,0))
+      message='cannot allocate Wannier90 coordinator matrices';return
+    endif
+    peak=merge(output_bytes,0_int64,rank==0)
+    do b=1,nntot
+      do n0=1,nband,tile_size
+        n1=min(n0+tile_size-1,nband)
+        do m0=1,nband,tile_size
+          m1=min(m0+tile_size-1,nband);allocate(local_tile(m1-m0+1,n1-n0+1));local_tile=(0d0,0d0)
+          do p=1,npoint
+            angle=-2d0*acos(-1d0)*dot_product(real(nncell(:,b),real64),fractional(:,p))
+            phase=cmplx(cos(angle),sin(angle),real64)
+            do n=n0,n1;do m=m0,m1
+              local_tile(m-m0+1,n-n0+1)=local_tile(m-m0+1,n-n0+1)+&
+                weights(p)*conjg(values(m,p))*phase*values(n,p)
+            enddo;enddo
+          enddo
+          count=size(local_tile);allocate(reduced_tile(size(local_tile,1),size(local_tile,2)))
+          call MPI_Reduce(local_tile,reduced_tile,count,MPI_DOUBLE_COMPLEX,MPI_SUM,0,comm,ierr)
+          call checked_product([2_int64,int(count,int64),complex_bytes],tile_bytes,arithmetic_ok)
+          if(arithmetic_ok)peak=max(peak,merge(output_bytes,0_int64,rank==0)+tile_bytes)
+          if(rank==0.and.ierr==MPI_SUCCESS)m_matrix(m0:m1,n0:n1,b)=reduced_tile
+          deallocate(local_tile,reduced_tile);if(ierr/=MPI_SUCCESS)status=4
+        enddo
+      enddo
+    enddo
+    do n0=1,nwann,tile_size
+      n1=min(n0+tile_size-1,nwann)
+      do m0=1,nband,tile_size
+        m1=min(m0+tile_size-1,nband);allocate(local_tile(m1-m0+1,n1-n0+1));local_tile=(0d0,0d0)
+        do p=1,npoint;do n=n0,n1;do m=m0,m1
+          local_tile(m-m0+1,n-n0+1)=local_tile(m-m0+1,n-n0+1)+&
+            weights(p)*conjg(values(m,p))*anchors(n,p)
+        enddo;enddo;enddo
+        count=size(local_tile);allocate(reduced_tile(size(local_tile,1),size(local_tile,2)))
+        call MPI_Reduce(local_tile,reduced_tile,count,MPI_DOUBLE_COMPLEX,MPI_SUM,0,comm,ierr)
+        call checked_product([2_int64,int(count,int64),complex_bytes],tile_bytes,arithmetic_ok)
+        if(arithmetic_ok)peak=max(peak,merge(output_bytes,0_int64,rank==0)+tile_bytes)
+        if(rank==0.and.ierr==MPI_SUCCESS)a_matrix(m0:m1,n0:n1)=reduced_tile
+        deallocate(local_tile,reduced_tile);if(ierr/=MPI_SUCCESS)status=4
+      enddo
+    enddo
+    workspace_peak_bytes=peak
+    call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    ok=status==0.and.ierr==MPI_SUCCESS
+    if(.not.ok)message='Wannier90 distributed matrix reduction failed'
+#else
+    ok=.false.;message='Wannier90 matrix assembly requires MPI';coordinator_bytes=0_int64
+    workspace_peak_bytes=0_int64;allocate(m_matrix(0,0,0),a_matrix(0,0))
+#endif
+  end subroutine assemble_dg_w90_gamma_matrices
+
   subroutine setup_dg_w90_gamma_library(comm,seed,real_lattice,reciprocal_lattice,atom_symbols,&
       atoms_cart,nband,nwann,nntot,nncell,ok,message)
     integer,intent(in)::comm,nband,nwann
