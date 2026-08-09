@@ -21,19 +21,23 @@ module eigenexa_module
 private
 
 contains
-  subroutine init_eigenexa(info,n)
+  subroutine init_eigenexa(info,n,direct_block_only)
     use structures, only: s_parallel_info
     use communication, only: comm_summation
     use eigen_libs_mod
     implicit none
     type(s_parallel_info),intent(inout) :: info
     integer,intent(in) :: n
+    logical,intent(in),optional :: direct_block_only
 
     integer :: npo, i, j, ip
     integer,allocatable :: icount(:)
     integer :: i_loc,j_loc,prow,pcol
+    logical :: skip_orbital_redistribution
 
     if (info%flag_eigenexa_init) return
+    skip_orbital_redistribution=.false.
+    if(present(direct_block_only))skip_orbital_redistribution=direct_block_only
 
     info%icomm_sl = info%icomm_o
 
@@ -44,6 +48,7 @@ contains
     call eigen_get_matdims(n, info%nrow_local, info%ncol_local)
 
     info%flag_eigenexa_init = .true.
+    if(skip_orbital_redistribution)return
 
     ! --- for reduce memory
     ! MEMO: ScaLAPACK is block-cyclic distribution of matrix

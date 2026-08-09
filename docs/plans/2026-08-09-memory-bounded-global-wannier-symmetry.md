@@ -100,6 +100,14 @@ inverse-square-root, overlap, and representation matrices genuine block-cyclic
 ownership from their first allocation; wrappers that first replicate a dense
 input do not satisfy Task 3B.  Do not begin Task 4 until both commits pass.
 
+Task 3B itself is delivered as two reviewed prerequisite commits.  Task 3B1
+adds OW-sized direct-block EigenExa initialization, cyclic metric and streamed
+inverse-square-root residuals, and the row-owned symmetry-overlap producer.
+Task 3B2 migrates group closure, metric unitarity, fixed-rank selection, and all
+production consumers to those distributed rows and removes the replicated
+producer from `main_dft`.  Passing 3B1 alone does not complete Task 3B and does
+not permit Task 4 or Wannier90 implementation to begin.
+
 **Files:**
 - Modify: `src/gs/dc/dg_overlapping_wannier_metric.f90`
 - Modify: `src/gs/dc/dg_overlapping_wannier_construction.f90`

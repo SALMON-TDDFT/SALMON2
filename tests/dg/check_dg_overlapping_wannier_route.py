@@ -548,10 +548,13 @@ for token in (
     assert token.lower() in types_source.lower(), f"missing Task 2 metadata contract: {token}"
 
 assert "dg_overlapping_wannier_construction.f90" in dc_cmake
-for forbidden in ("dc_lcfo", "eigenexa", "dg_wpw", "direct_sipg"):
+for forbidden in ("dc_lcfo", "dg_wpw", "direct_sipg"):
     assert forbidden not in construction_source.lower(), (
         f"construction path must not call forbidden stage: {forbidden}"
     )
+assert construction_source.lower().count("eigen_pdsyevd_ex_distributed_blocks") == 2, (
+    "EigenExa may enter construction only through one import and one OW-distributed call"
+)
 assert re.search(
     r"call\s+zgemm\s*\(\s*'c'\s*,\s*'t'",
     construction_source,
@@ -902,6 +905,77 @@ assert not re.search(r"\bh\s*\(\s*:\s*,\s*:\s*\)", direct_eigenexa.group("body")
 assert "work_matrix" not in direct_eigenexa.group("body").lower(), (
     "distributed-block EigenExa adapter must consume its local block without a duplicate"
 )
+eigenexa_initializer = re.search(
+    r"subroutine\s+init_eigenexa\b(?P<body>.*?)end\s+subroutine",
+    source("src/gs/eigenexa_module.f90"),
+    re.I | re.S,
+)
+assert eigenexa_initializer and "direct_block_only" in eigenexa_initializer.group("body").lower(), (
+    "OW-sized EigenExa initialization must bypass GS orbital redistribution metadata"
+)
+assert re.search(
+    r"call\s+init_eigenexa_mod\s*\([^\n]*direct_block_only\s*=\s*\.true\.",
+    adapter_body,
+    re.I,
+), "production OW must request direct-block-only EigenExa initialization"
+rank_fixed_residuals = re.search(
+    r"subroutine\s+measure_dg_rank_fixed_symmetry_residuals_eigenexa\b(?P<body>.*?)end\s+subroutine",
+    construction_source,
+    re.I | re.S,
+)
+assert rank_fixed_residuals, "missing production distributed rank-fixed affine residual implementation"
+assert re.search(
+    r"call\s+measure_dg_rank_fixed_symmetry_residuals_eigenexa\s*\(",
+    adapter_body,
+    re.I,
+), "production OW construction must use the EigenExa-distributed residual path"
+assert not re.search(
+    r"call\s+measure_dg_rank_fixed_symmetry_residuals\s*\(",
+    adapter_body,
+    re.I,
+), "production OW construction must not call the dense-reference residual path"
+for replicated_name in (
+    "local_metric",
+    "metric",
+    "metric_vectors",
+    "metric_inverse_sqrt",
+    "local_overlap",
+    "global_overlap",
+):
+    assert not re.search(
+        rf"allocate\s*\([^)]*\b{replicated_name}\s*\(\s*nstate\s*,\s*nstate\s*\)",
+        rank_fixed_residuals.group("body"),
+        re.I | re.S,
+    ), f"Task 3B forbids replicated nstate-square {replicated_name} storage"
+assert "assemble_dg_eigenexa_cyclic_metric_block" in rank_fixed_residuals.group("body"), (
+    "Task 3B must assemble the rank-fixed metric directly in cyclic EigenExa ownership"
+)
+assert "eigen_pdsyevd_ex_distributed_blocks" in rank_fixed_residuals.group("body"), (
+    "Task 3B must diagonalize the cyclic metric without a replicated dense input"
+)
+assert not re.search(
+    r"MPI_Allreduce\s*\([^\n]*nstate\s*\*\s*nstate",
+    rank_fixed_residuals.group("body"),
+    re.I,
+), "Task 3B forbids all-replicating dense metric or overlap blocks"
+row_owned_overlap = re.search(
+    r"subroutine\s+assemble_dg_distributed_basis_symmetry_overlap_rows\b"
+    r"(?P<body>.*?)end\s+subroutine",
+    construction_source,
+    re.I | re.S,
+)
+assert row_owned_overlap, "missing row-owned all-operation symmetry overlap assembly"
+assert "exchange_dg_point_permuted_orbital_rows" in row_owned_overlap.group("body"), (
+    "row-owned symmetry overlaps must use sparse point exchange"
+)
+assert not re.search(r"MPI_Bcast\s*\(", row_owned_overlap.group("body"), re.I), (
+    "row-owned symmetry overlap assembly must not broadcast a complete basis"
+)
+assert not re.search(
+    r"allocate\s*\([^)]*\(\s*nbasis\s*,\s*nbasis\s*,\s*nsym",
+    row_owned_overlap.group("body"),
+    re.I | re.S,
+), "row-owned symmetry overlap assembly must not allocate replicated Nsym*Norb**2"
 for provenance in (
     "global_lcfo_fingerprint",
     "occupation_block_fingerprint",

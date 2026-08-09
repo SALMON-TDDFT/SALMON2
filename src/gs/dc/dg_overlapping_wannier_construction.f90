@@ -5,6 +5,11 @@ module dg_overlapping_wannier_construction
 #ifdef USE_MPI
   use mpi
 #endif
+#ifdef USE_EIGENEXA
+  use structures,only:s_parallel_info
+  use dg_overlapping_wannier_metric,only:assemble_dg_eigenexa_cyclic_metric_block
+  use eigen_eigenexa,only:eigen_pdsyevd_ex_distributed_blocks
+#endif
   implicit none
   private
   type,public::s_dg_overlapping_wannier_construction
@@ -24,6 +29,7 @@ module dg_overlapping_wannier_construction
   public::verify_dg_overlapping_wannier_periodic_closure
   public::assemble_dg_distributed_candidate_symmetry
   public::assemble_dg_distributed_basis_symmetry_overlap
+  public::assemble_dg_distributed_basis_symmetry_overlap_rows
   public::build_dg_pointwise_affine_owner_map
   public::select_dg_fixed_rank_symmetry_closed_subspace
   public::build_dg_distributed_symmetry_closed_basis
@@ -38,6 +44,9 @@ module dg_overlapping_wannier_construction
   public::find_dg_group_identity
   public::accumulate_dg_lcfo_buffer_contributions_to_core
   public::measure_dg_rank_fixed_symmetry_residuals
+#ifdef USE_EIGENEXA
+  public::measure_dg_rank_fixed_symmetry_residuals_eigenexa
+#endif
   public::exchange_dg_point_permuted_orbital_rows
   public::accept_dg_boundary_calibrated_symmetry
   public::solve_dg_affine_common_fixed_point
@@ -48,6 +57,143 @@ module dg_overlapping_wannier_construction
   public::redistribute_dg_owned_orbitals_to_center_fragments
   public::assign_dg_periodic_centers_to_fragments
 contains
+
+#ifdef USE_EIGENEXA
+  subroutine measure_dg_rank_fixed_symmetry_residuals_eigenexa(info,comm,basis,weights,&
+      symmetry_target_box_ids,boundary_mask,total_residual,boundary_residual,interior_residual,&
+      ok,message,workspace_peak_bytes)
+    type(s_parallel_info),intent(in)::info
+    integer,intent(in)::comm
+    complex(real64),intent(in)::basis(:,:)
+    real(real64),intent(in)::weights(:)
+    integer(int64),intent(in)::symmetry_target_box_ids(:,:)
+    logical,intent(in)::boundary_mask(:)
+    real(real64),intent(out)::total_residual(:),boundary_residual(:),interior_residual(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer(int64),intent(out),optional::workspace_peak_bytes
+    integer,parameter::orbital_tile_size=32
+    real(real64),allocatable::local_cyclic_metric(:,:),local_cyclic_vectors(:,:),metric_spectrum(:),&
+      eigenvector_tile(:,:),eigenvector_row(:),inverse_root_tile(:,:),local_norms(:),global_norms(:)
+    complex(real64),allocatable::orthonormal_basis(:,:),image_tile(:,:),overlap_tile(:,:),&
+      reduced_overlap_tile(:,:)
+    integer(int64)::metric_peak,peak_bytes,current_bytes,real_bytes,complex_bytes
+    integer::nstate,nlocal,noperation,tile_first,tile_count,i,j,operation,ierr
+    logical::eigen_ok
+    character(256)::detail
+
+    ok=.false.;message='';metric_peak=0_int64;peak_bytes=0_int64;current_bytes=0_int64
+    if(present(workspace_peak_bytes))workspace_peak_bytes=0_int64
+    if(.not.info%flag_eigenexa_init.or.size(basis,1)<=0)then
+      message='OW-sized EigenExa descriptor is not initialized';return
+    endif
+    call assemble_dg_eigenexa_cyclic_metric_block(comm,info%nprow,info%npcol,info%myrow,info%mycol,&
+      basis,weights,local_cyclic_metric,metric_peak,ok,detail)
+    if(.not.ok)then;message='distributed rank-fixed metric: '//trim(detail);return;endif
+    allocate(local_cyclic_vectors(info%nrow_local,info%ncol_local),metric_spectrum(size(basis,1)))
+    call eigen_pdsyevd_ex_distributed_blocks(info,size(basis,1),local_cyclic_metric,metric_spectrum,&
+      local_cyclic_vectors,eigen_ok,detail)
+    if(.not.eigen_ok)then;message='distributed rank-fixed eigensystem: '//trim(detail);return;endif
+    if(minval(metric_spectrum)<=epsilon(1d0)*max(1d0,maxval(metric_spectrum)))then
+      message='distributed rank-fixed occupied metric is singular';return
+    endif
+    nstate=size(basis,1);nlocal=size(basis,2);noperation=size(symmetry_target_box_ids,2)
+    ok=nlocal>0.and.noperation>0.and.size(weights)==nlocal.and.&
+      size(symmetry_target_box_ids,1)==nlocal.and.size(boundary_mask)==nlocal.and.&
+      size(total_residual)==noperation.and.size(boundary_residual)==noperation.and.&
+      size(interior_residual)==noperation.and.all(weights>=0d0)
+    if(.not.ok)then;message='invalid distributed rank-fixed residual contract';return;endif
+    real_bytes=int(storage_size(0d0)/8,int64);complex_bytes=int(storage_size((0d0,0d0))/8,int64)
+    allocate(orthonormal_basis(nstate,nlocal),eigenvector_row(nstate),local_norms(3),global_norms(3))
+    current_bytes=real_bytes*int(size(local_cyclic_metric)+size(local_cyclic_vectors)+&
+      size(metric_spectrum)+size(eigenvector_row)+size(local_norms)+size(global_norms),int64)+&
+      complex_bytes*int(size(orthonormal_basis),int64)
+    peak_bytes=max(metric_peak*real_bytes,current_bytes)
+    do tile_first=1,nstate,orbital_tile_size
+      tile_count=min(orbital_tile_size,nstate-tile_first+1)
+      allocate(eigenvector_tile(tile_count,nstate),inverse_root_tile(tile_count,nstate))
+      call gather_cyclic_eigenvector_rows(tile_first,tile_count,eigenvector_tile,ok,detail)
+      if(.not.ok)then;message=trim(detail);return;endif
+      do j=1,nstate
+        call gather_cyclic_eigenvector_rows(j,1,eigenvector_row,ok,detail)
+        if(.not.ok)then;message=trim(detail);return;endif
+        do i=1,tile_count
+          inverse_root_tile(i,j)=sum(eigenvector_tile(i,:)*eigenvector_row/sqrt(metric_spectrum))
+        enddo
+      enddo
+      orthonormal_basis(tile_first:tile_first+tile_count-1,:)=matmul(inverse_root_tile,basis)
+      peak_bytes=max(peak_bytes,current_bytes+real_bytes*&
+        int(size(eigenvector_tile)+size(inverse_root_tile),int64))
+      deallocate(eigenvector_tile,inverse_root_tile)
+    enddo
+    total_residual=0d0;boundary_residual=0d0;interior_residual=0d0
+    do operation=1,noperation
+      local_norms=0d0
+      do tile_first=1,nstate,orbital_tile_size
+        tile_count=min(orbital_tile_size,nstate-tile_first+1)
+        allocate(image_tile(tile_count,nlocal),overlap_tile(nstate,tile_count),&
+          reduced_overlap_tile(nstate,tile_count));overlap_tile=(0d0,0d0)
+        call exchange_dg_point_permuted_orbital_rows(comm,&
+          orthonormal_basis(tile_first:tile_first+tile_count-1,:),&
+          symmetry_target_box_ids(:,operation),image_tile,ok,detail)
+        if(.not.ok)then;message=trim(detail);return;endif
+        do i=1,nstate
+          overlap_tile(i,:)=matmul(conjg(orthonormal_basis(i,:))*weights,transpose(image_tile))
+        enddo
+        call MPI_Allreduce(overlap_tile,reduced_overlap_tile,nstate*tile_count,&
+          MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then;ok=.false.;message='distributed affine overlap reduction failed';return;endif
+        image_tile=image_tile-matmul(transpose(reduced_overlap_tile),orthonormal_basis)
+        local_norms(1)=local_norms(1)+sum(spread(weights,1,tile_count)*abs(image_tile)**2)
+        local_norms(2)=local_norms(2)+sum(spread(weights*merge(1d0,0d0,boundary_mask),1,tile_count)*&
+          abs(image_tile)**2)
+        local_norms(3)=local_norms(3)+sum(spread(weights*merge(0d0,1d0,boundary_mask),1,tile_count)*&
+          abs(image_tile)**2)
+        peak_bytes=max(peak_bytes,current_bytes+complex_bytes*&
+          int(size(image_tile)+size(overlap_tile)+size(reduced_overlap_tile),int64))
+        deallocate(image_tile,overlap_tile,reduced_overlap_tile)
+      enddo
+      call MPI_Allreduce(local_norms,global_norms,3,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;ok=.false.;message='distributed affine norm reduction failed';return;endif
+      total_residual(operation)=sqrt(max(0d0,global_norms(1)))
+      boundary_residual(operation)=sqrt(max(0d0,global_norms(2)))
+      interior_residual(operation)=sqrt(max(0d0,global_norms(3)))
+    enddo
+    ok=all(ieee_is_finite(total_residual)).and.all(ieee_is_finite(boundary_residual)).and.&
+      all(ieee_is_finite(interior_residual))
+    if(.not.ok)then;message='distributed affine residual is nonfinite';return;endif
+    if(present(workspace_peak_bytes))workspace_peak_bytes=peak_bytes
+    message=''
+  contains
+    subroutine gather_cyclic_eigenvector_rows(first_row,row_count,rows,rows_ok,rows_message)
+      integer,intent(in)::first_row,row_count
+      real(real64),intent(out)::rows(..)
+      logical,intent(out)::rows_ok
+      character(*),intent(out)::rows_message
+      real(real64),allocatable::local_rows(:,:)
+      integer::global_row,global_col,local_row,local_col,row_offset,collective_error
+      allocate(local_rows(row_count,nstate));local_rows=0d0
+      do row_offset=1,row_count
+        global_row=first_row+row_offset-1
+        if(mod(global_row-1,info%nprow)/=info%myrow)cycle
+        local_row=(global_row-1)/info%nprow+1
+        do global_col=1,nstate
+          if(mod(global_col-1,info%npcol)/=info%mycol)cycle
+          local_col=(global_col-1)/info%npcol+1
+          local_rows(row_offset,global_col)=local_cyclic_vectors(local_row,local_col)
+        enddo
+      enddo
+      select rank(rows)
+      rank(1)
+        call MPI_Allreduce(local_rows(1,:),rows,nstate,MPI_DOUBLE_PRECISION,MPI_SUM,comm,collective_error)
+      rank(2)
+        call MPI_Allreduce(local_rows,rows,row_count*nstate,MPI_DOUBLE_PRECISION,MPI_SUM,comm,collective_error)
+      end select
+      rows_ok=collective_error==MPI_SUCCESS
+      if(rows_ok)then;rows_message='';else;rows_message='cyclic eigenvector row gather failed';endif
+    end subroutine gather_cyclic_eigenvector_rows
+  end subroutine measure_dg_rank_fixed_symmetry_residuals_eigenexa
+#endif
 
   subroutine build_checked_mpi_displacements(counts,displacements,total_count,ok)
     integer,intent(in)::counts(:)
@@ -1738,6 +1884,81 @@ contains
     ok=.false.;message='distributed full-basis symmetry overlap requires MPI'
 #endif
   end subroutine
+
+  subroutine assemble_dg_distributed_basis_symmetry_overlap_rows(comm,local_basis,weights,&
+      symmetry_target_box_ids,row_ids,symmetry_overlap_rows,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm
+    complex(real64),intent(in)::local_basis(:,:)
+    real(real64),intent(in)::weights(:)
+    integer(int64),intent(in)::symmetry_target_box_ids(:,:)
+    integer(int64),allocatable,intent(out)::row_ids(:)
+    complex(real64),allocatable,intent(out)::symmetry_overlap_rows(:,:,:)
+    integer(int64),intent(out)::workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer,parameter::orbital_tile_size=32
+    integer::rank,nproc,ierr,nbasis,nlocal,nsym,isym,tile_first,tile_count,owner,&
+      owner_first,owner_count,base,remainder,i,j,local_bad,global_bad
+    integer(int64)::persistent_bytes,tile_bytes,complex_bytes
+    complex(real64),allocatable::image_tile(:,:),partial_rows(:,:),reduced_rows(:,:)
+
+    ok=.false.;message='';workspace_peak_bytes=0_int64
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    nbasis=size(local_basis,1);nlocal=size(local_basis,2);nsym=size(symmetry_target_box_ids,2)
+    local_bad=merge(0,1,nbasis>0.and.nlocal>0.and.nsym>0.and.size(weights)==nlocal.and.&
+      size(symmetry_target_box_ids,1)==nlocal.and.all(weights>=0d0).and.&
+      all(ieee_is_finite(weights)).and.all(ieee_is_finite(real(local_basis))).and.&
+      all(ieee_is_finite(aimag(local_basis))))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='invalid row-owned symmetry-overlap contract';return
+    endif
+    base=nbasis/nproc;remainder=mod(nbasis,nproc)
+    owner_count=base+merge(1,0,rank<remainder)
+    owner_first=rank*base+min(rank,remainder)+1
+    allocate(row_ids(owner_count),symmetry_overlap_rows(owner_count,nbasis,nsym))
+    symmetry_overlap_rows=(0d0,0d0)
+    do i=1,owner_count;row_ids(i)=int(owner_first+i-1,int64);enddo
+    complex_bytes=int(storage_size((0d0,0d0))/8,int64)
+    persistent_bytes=complex_bytes*int(size(symmetry_overlap_rows),int64)
+    workspace_peak_bytes=persistent_bytes
+    do isym=1,nsym
+      do tile_first=1,nbasis,orbital_tile_size
+        tile_count=min(orbital_tile_size,nbasis-tile_first+1)
+        allocate(image_tile(tile_count,nlocal))
+        call exchange_dg_point_permuted_orbital_rows(comm,&
+          local_basis(tile_first:tile_first+tile_count-1,:),&
+          symmetry_target_box_ids(:,isym),image_tile,ok,message)
+        if(.not.ok)return
+        do owner=0,nproc-1
+          owner_count=base+merge(1,0,owner<remainder)
+          owner_first=owner*base+min(owner,remainder)+1
+          allocate(partial_rows(owner_count,tile_count),reduced_rows(owner_count,tile_count))
+          partial_rows=(0d0,0d0);reduced_rows=(0d0,0d0)
+          do j=1,tile_count;do i=1,owner_count
+            partial_rows(i,j)=sum(weights*conjg(local_basis(owner_first+i-1,:))*image_tile(j,:))
+          enddo;enddo
+          call MPI_Reduce(partial_rows,reduced_rows,owner_count*tile_count,MPI_DOUBLE_COMPLEX,&
+            MPI_SUM,owner,comm,ierr)
+          if(ierr/=MPI_SUCCESS)then
+            ok=.false.;message='row-owned symmetry-overlap reduction failed';return
+          endif
+          if(rank==owner)symmetry_overlap_rows(:,tile_first:tile_first+tile_count-1,isym)=reduced_rows
+          tile_bytes=complex_bytes*int(size(image_tile)+size(partial_rows)+size(reduced_rows),int64)
+          workspace_peak_bytes=max(workspace_peak_bytes,persistent_bytes+tile_bytes)
+          deallocate(partial_rows,reduced_rows)
+        enddo
+        deallocate(image_tile)
+      enddo
+    enddo
+    ok=all(ieee_is_finite(real(symmetry_overlap_rows))).and.&
+      all(ieee_is_finite(aimag(symmetry_overlap_rows)))
+    if(ok)then;message='';else;message='row-owned symmetry overlap is nonfinite';endif
+#else
+    ok=.false.;message='row-owned symmetry overlap requires MPI';workspace_peak_bytes=0_int64
+#endif
+  end subroutine assemble_dg_distributed_basis_symmetry_overlap_rows
 
   subroutine verify_dg_overlapping_wannier_periodic_closure(comm,box_ids,symmetry_target_box_ids,&
       values,gradients,symmetry_representation,gradient_transform,expected_box_count,tolerance,&

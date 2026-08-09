@@ -50,6 +50,9 @@ use dg_overlapping_wannier_construction, only: build_dg_core_owned_occupied_subs
 use dg_overlapping_wannier_construction, only: build_dg_distributed_symmetry_closed_basis
 use dg_overlapping_wannier_construction, only: accumulate_dg_lcfo_buffer_contributions_to_core
 use dg_overlapping_wannier_construction, only: measure_dg_rank_fixed_symmetry_residuals
+#ifdef USE_EIGENEXA
+use dg_overlapping_wannier_construction, only: measure_dg_rank_fixed_symmetry_residuals_eigenexa
+#endif
 use dg_overlapping_wannier_construction, only: select_dg_fixed_rank_symmetry_closed_subspace
 use dg_overlapping_wannier_construction, only: find_dg_group_identity
 use dg_overlapping_wannier_construction, only: assemble_dg_distributed_basis_symmetry_overlap
@@ -88,7 +91,7 @@ use lcfo_wannier_sawf, only: t_sawf_crystallographic_catalog,&
 use lcfo_wannier_sawf_band, only: validate_sawf_fragment_symmetry_map,&
   build_sawf_fragment_buffer_point_map
 #ifdef USE_EIGENEXA
-use eigenexa_module, only: finalize_eigenexa
+use eigenexa_module, only: init_eigenexa_mod=>init_eigenexa,finalize_eigenexa
 #endif
 use parallelization, only: nproc_id_global,nproc_group_global,adjust_elapse_time,nproc_size_global
 use communication, only: comm_is_root, comm_summation, comm_bcast, comm_sync_all, comm_get_max, comm_logical_and
@@ -594,6 +597,7 @@ contains
     real(8),allocatable::global_point_rotations(:,:,:)
     real(8),allocatable::global_point_fractional_translations(:,:)
     integer::localization_iterations,localization_spread_evaluations
+    integer::ow_saved_eigenexa_comm
     character(256)::message,prefix
 
     call MPI_Comm_rank(dc%icomm_tot,rank,ierr);call MPI_Comm_size(dc%icomm_tot,nproc,ierr)
@@ -750,11 +754,22 @@ contains
     allocate(lcfo_total_symmetry_residual(size(global_point_product,1)),&
       lcfo_boundary_symmetry_residual(size(global_point_product,1)),&
       lcfo_interior_symmetry_residual(size(global_point_product,1)))
-    call measure_dg_rank_fixed_symmetry_residuals(dc%icomm_tot,lcfo_occupied_core,ow_core_weights,&
+#ifdef USE_EIGENEXA
+    ow_saved_eigenexa_comm=info%icomm_o
+    call finalize_eigenexa(info)
+    info%icomm_o=dc%icomm_tot
+    call init_eigenexa_mod(info,size(lcfo_occupied_core,1),direct_block_only=.true.)
+    call measure_dg_rank_fixed_symmetry_residuals_eigenexa(info,dc%icomm_tot,lcfo_occupied_core,ow_core_weights,&
       global_symmetry_map,lcfo_boundary_mask,total_residual=lcfo_total_symmetry_residual,&
       boundary_residual=lcfo_boundary_symmetry_residual,&
       interior_residual=lcfo_interior_symmetry_residual,ok=ok,message=message,&
       workspace_peak_bytes=lcfo_symmetry_workspace_peak)
+    call finalize_eigenexa(info)
+    info%icomm_o=ow_saved_eigenexa_comm
+    call init_eigenexa_mod(info,system%no)
+#else
+    ok=.false.;message='production overlapping-Wannier symmetry requires EigenExa'
+#endif
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'LCFO occupied symmetry measurement failed';end if
     if(rank==0)write(*,'(a,i0)')'[OW-GS-DIAGNOSTIC] lcfo_symmetry_workspace_peak_bytes=',&
       lcfo_symmetry_workspace_peak

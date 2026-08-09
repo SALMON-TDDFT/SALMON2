@@ -8,6 +8,7 @@ program test_dg_overlapping_wannier_construction_mpi
     construct_dg_overlapping_wannier_basis,release_dg_overlapping_wannier_construction,&
     verify_dg_overlapping_wannier_periodic_closure,assemble_dg_distributed_candidate_symmetry,&
     assemble_dg_distributed_basis_symmetry_overlap,&
+    assemble_dg_distributed_basis_symmetry_overlap_rows,&
     build_dg_pointwise_affine_owner_map,&
     find_dg_group_identity,&
     select_dg_fixed_rank_symmetry_closed_subspace,&
@@ -44,6 +45,7 @@ program test_dg_overlapping_wannier_construction_mpi
     distributed_basis(:,:),distributed_basis_overlap(:,:,:),orbit_seed(:,:),required_orbit_seed(:,:),&
     orbit_basis(:,:),&
     orbit_gram(:,:)
+  complex(8),allocatable::distributed_basis_overlap_rows(:,:,:)
   complex(8)::lcfo_buffer_contribution(2,2),lcfo_core_value(2,1)
   integer(8)::lcfo_buffer_ids(2),lcfo_core_ids(1)
   integer::orbit_rank,required_orbit_rank,identity_operation
@@ -65,6 +67,8 @@ program test_dg_overlapping_wannier_construction_mpi
   integer(8),allocatable::reference_center_box_ids(:)
   integer(8)::reference_fingerprint
   integer(8)::symmetry_workspace_peak
+  integer(8)::row_overlap_workspace_peak
+  integer(8),allocatable::distributed_overlap_row_ids(:)
   integer(8)::closure_fingerprint,rounded_closure_fingerprint
   integer(8),allocatable::closure_ids(:),closure_map(:,:)
   integer(8),allocatable::stream_ids(:),stream_map(:,:)
@@ -543,6 +547,15 @@ program test_dg_overlapping_wannier_construction_mpi
     call require(maxval(abs(distributed_basis_overlap(:,:,3)-&
       reshape([(1d0,0d0),(4d0,0d0),(4d0,0d0),(1d0,0d0)],[2,2])))<1d-12,&
       'distributed full-basis operation may split one core across owners')
+    call assemble_dg_distributed_basis_symmetry_overlap_rows(comm,distributed_basis,distributed_weight,&
+      distributed_map,distributed_overlap_row_ids,distributed_basis_overlap_rows,&
+      row_overlap_workspace_peak,ok,message)
+    call require(ok.and.row_overlap_workspace_peak>0_8,trim(message))
+    call require(maxval(abs(distributed_basis_overlap_rows-&
+      distributed_basis_overlap(int(distributed_overlap_row_ids),:,:)))<1d-12,&
+      'row-owned symmetry overlaps match the dense reference')
+    call require(size(distributed_basis_overlap_rows,1)==1,&
+      'two-rank symmetry overlap owns only one global basis row per rank')
 
     allocate(orbit_seed(1,2));orbit_seed=(0d0,0d0)
     if(rank==0)orbit_seed(1,1)=1d0
