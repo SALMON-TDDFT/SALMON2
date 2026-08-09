@@ -30,12 +30,132 @@ module dg_overlapping_wannier_types
     type(s_dg_wannier_tail),allocatable :: tail(:)
   end type
 
+  type,public :: s_dg_ow_distributed_layout
+#ifdef USE_MPI
+    integer :: orbital_comm=MPI_COMM_NULL
+    integer :: spatial_comm=MPI_COMM_NULL
+#else
+    integer :: orbital_comm=0
+    integer :: spatial_comm=0
+#endif
+    integer :: global_orbital_count=0
+    integer :: global_core_point_count=0
+    integer :: owned_orbital_first=1
+    integer :: owned_orbital_count=0
+    integer :: owned_core_point_first=1
+    integer :: owned_core_point_count=0
+    integer,allocatable :: orbital_owner(:)
+    integer,allocatable :: core_point_owner(:)
+    integer(int64) :: current_workspace_bytes=0_int64
+    integer(int64) :: peak_workspace_bytes=0_int64
+  end type
+
   public :: initialize_dg_wannier_tail
   public :: validate_dg_overlapping_wannier_basis
   public :: checked_dg_wannier_extent_product
   public :: release_dg_overlapping_wannier_basis
+  public :: initialize_dg_ow_distributed_layout
+  public :: reserve_dg_ow_workspace
+  public :: release_dg_ow_workspace
+  public :: release_dg_ow_distributed_layout
 
 contains
+
+  subroutine initialize_dg_ow_distributed_layout(comm,norbital,ncore,layout,ok,message)
+    integer,intent(in) :: comm,norbital,ncore
+    type(s_dg_ow_distributed_layout),intent(out) :: layout
+    logical,intent(out) :: ok
+    character(*),intent(out) :: message
+#ifdef USE_MPI
+    integer :: rank,nproc,ierr,i,base,remainder
+    ok=.false.;message=''
+    if(comm==MPI_COMM_NULL.or.norbital<=0.or.ncore<=0)then
+      message='invalid distributed orbital/core layout extent';return
+    endif
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)then
+      message='distributed layout rank query failed';return
+    endif
+    call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS.or.nproc<=0)then
+      message='distributed layout size query failed';return
+    endif
+    call MPI_Comm_dup(comm,layout%orbital_comm,ierr);if(ierr/=MPI_SUCCESS)then
+      message='orbital communicator duplication failed';return
+    endif
+    call MPI_Comm_dup(comm,layout%spatial_comm,ierr);if(ierr/=MPI_SUCCESS)then
+      call MPI_Comm_free(layout%orbital_comm,ierr)
+      message='spatial communicator duplication failed';return
+    endif
+    layout%global_orbital_count=norbital;layout%global_core_point_count=ncore
+    allocate(layout%orbital_owner(norbital),layout%core_point_owner(ncore))
+    base=norbital/nproc;remainder=mod(norbital,nproc)
+    layout%owned_orbital_count=base+merge(1,0,rank<remainder)
+    layout%owned_orbital_first=rank*base+min(rank,remainder)+1
+    do i=1,norbital
+      if(i<=remainder*(base+1))then
+        layout%orbital_owner(i)=(i-1)/(base+1)
+      else if(base>0)then
+        layout%orbital_owner(i)=remainder+(i-remainder*(base+1)-1)/base
+      endif
+    enddo
+    base=ncore/nproc;remainder=mod(ncore,nproc)
+    layout%owned_core_point_count=base+merge(1,0,rank<remainder)
+    layout%owned_core_point_first=rank*base+min(rank,remainder)+1
+    do i=1,ncore
+      if(i<=remainder*(base+1))then
+        layout%core_point_owner(i)=(i-1)/(base+1)
+      else if(base>0)then
+        layout%core_point_owner(i)=remainder+(i-remainder*(base+1)-1)/base
+      endif
+    enddo
+    layout%current_workspace_bytes=0_int64;layout%peak_workspace_bytes=0_int64
+    ok=.true.
+#else
+    ok=.false.;message='distributed orbital/core layout requires MPI'
+#endif
+  end subroutine initialize_dg_ow_distributed_layout
+
+  subroutine reserve_dg_ow_workspace(layout,nbytes,ok,message)
+    type(s_dg_ow_distributed_layout),intent(inout) :: layout
+    integer(int64),intent(in) :: nbytes
+    logical,intent(out) :: ok
+    character(*),intent(out) :: message
+    ok=.false.;message=''
+    if(nbytes<0_int64.or.layout%current_workspace_bytes<0_int64.or.&
+       nbytes>huge(nbytes)-layout%current_workspace_bytes)then
+      message='distributed workspace byte extent overflow';return
+    endif
+    layout%current_workspace_bytes=layout%current_workspace_bytes+nbytes
+    layout%peak_workspace_bytes=max(layout%peak_workspace_bytes,layout%current_workspace_bytes)
+    ok=.true.
+  end subroutine reserve_dg_ow_workspace
+
+  subroutine release_dg_ow_workspace(layout,nbytes,ok,message)
+    type(s_dg_ow_distributed_layout),intent(inout) :: layout
+    integer(int64),intent(in) :: nbytes
+    logical,intent(out) :: ok
+    character(*),intent(out) :: message
+    ok=.false.;message=''
+    if(nbytes<0_int64.or.nbytes>layout%current_workspace_bytes)then
+      message='distributed workspace release exceeds reservation';return
+    endif
+    layout%current_workspace_bytes=layout%current_workspace_bytes-nbytes
+    ok=.true.
+  end subroutine release_dg_ow_workspace
+
+  subroutine release_dg_ow_distributed_layout(layout)
+    type(s_dg_ow_distributed_layout),intent(inout) :: layout
+#ifdef USE_MPI
+    integer :: ierr
+    if(layout%orbital_comm/=MPI_COMM_NULL)call MPI_Comm_free(layout%orbital_comm,ierr)
+    if(layout%spatial_comm/=MPI_COMM_NULL)call MPI_Comm_free(layout%spatial_comm,ierr)
+#endif
+    if(allocated(layout%orbital_owner))deallocate(layout%orbital_owner)
+    if(allocated(layout%core_point_owner))deallocate(layout%core_point_owner)
+    layout%global_orbital_count=0;layout%global_core_point_count=0
+    layout%owned_orbital_first=1;layout%owned_orbital_count=0
+    layout%owned_core_point_first=1;layout%owned_core_point_count=0
+    layout%current_workspace_bytes=0_int64;layout%peak_workspace_bytes=0_int64
+  end subroutine release_dg_ow_distributed_layout
 
   subroutine checked_dg_wannier_extent_product(extents,product_value,ok)
     integer(int64),intent(in) :: extents(:)

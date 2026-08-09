@@ -1,6 +1,9 @@
 #include "config.h"
 program test_dg_overlapping_wannier_construction_mpi
   use mpi
+  use dg_overlapping_wannier_types,only:s_dg_ow_distributed_layout,&
+    initialize_dg_ow_distributed_layout,reserve_dg_ow_workspace,&
+    release_dg_ow_workspace,release_dg_ow_distributed_layout
   use dg_overlapping_wannier_construction,only:s_dg_overlapping_wannier_construction,&
     construct_dg_overlapping_wannier_basis,release_dg_overlapping_wannier_construction,&
     verify_dg_overlapping_wannier_periodic_closure,assemble_dg_distributed_candidate_symmetry,&
@@ -56,6 +59,7 @@ program test_dg_overlapping_wannier_construction_mpi
   real(8),allocatable::raw_seed_values(:,:)
   real(8)::occupations(3)
   type(s_dg_overlapping_wannier_construction)::result
+  type(s_dg_ow_distributed_layout)::distributed_layout
   integer,allocatable::reference_owner(:),reference_center_fragment(:)
   integer(8),allocatable::reference_center_box_ids(:)
   integer(8)::reference_fingerprint
@@ -108,6 +112,39 @@ program test_dg_overlapping_wannier_construction_mpi
 
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+  call initialize_dg_ow_distributed_layout(comm,0,2*nproc,distributed_layout,ok,message)
+  call require(.not.ok,'distributed layout rejects an empty global orbital space')
+  call initialize_dg_ow_distributed_layout(comm,2*nproc+1,2*nproc,&
+    distributed_layout,ok,message)
+  call require(ok.and.distributed_layout%global_orbital_count==2*nproc+1.and.&
+    distributed_layout%global_core_point_count==2*nproc.and.&
+    distributed_layout%owned_orbital_count<=2*nproc+1.and.&
+    distributed_layout%owned_core_point_count==2,&
+    'two-dimensional orbital/core layout has bounded unique ownership')
+  call require(count(distributed_layout%orbital_owner==rank)==&
+    distributed_layout%owned_orbital_count.and.&
+    count(distributed_layout%core_point_owner==rank)==&
+    distributed_layout%owned_core_point_count.and.&
+    all(distributed_layout%orbital_owner>=0).and.&
+    all(distributed_layout%orbital_owner<nproc).and.&
+    all(distributed_layout%core_point_owner>=0).and.&
+    all(distributed_layout%core_point_owner<nproc),&
+    'distributed layout assigns every orbital and core point exactly once')
+  if(nproc>1)call require(distributed_layout%owned_orbital_count<2*nproc+1,&
+    'distributed layout does not replicate every orbital')
+  call reserve_dg_ow_workspace(distributed_layout,4096_8,ok,message)
+  call require(ok.and.distributed_layout%current_workspace_bytes==4096_8.and.&
+    distributed_layout%peak_workspace_bytes==4096_8,&
+    'workspace accounting records current and peak bytes')
+  call release_dg_ow_workspace(distributed_layout,4096_8,ok,message)
+  call require(ok.and.distributed_layout%current_workspace_bytes==0_8.and.&
+    distributed_layout%peak_workspace_bytes==4096_8,&
+    'operation-local workspace release preserves peak receipt')
+  call reserve_dg_ow_workspace(distributed_layout,huge(0_8),ok,message)
+  call require(ok,'workspace accounting accepts the largest representable extent')
+  call reserve_dg_ow_workspace(distributed_layout,1_8,ok,message)
+  call require(.not.ok,'workspace accounting rejects extent overflow')
+  call release_dg_ow_distributed_layout(distributed_layout)
   affine_rotations=0
   affine_rotations(:,:,1)=reshape([1,0,0,0,1,0,0,0,1],[3,3])
   affine_rotations(:,:,2)=reshape([-1,0,0,0,-1,0,0,0,1],[3,3])
