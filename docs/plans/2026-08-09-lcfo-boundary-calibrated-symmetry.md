@@ -39,7 +39,22 @@
 4. Gate strict interior leakage, calibrated boundary leakage, density covariance, and inversion-odd density separately.
 5. Report every raw diagnostic and run focused construction/route tests.
 
-### Task 3: Correct within rank 384
+### Task 3: Generalize the full-system affine action
+
+**Files:**
+- Modify: `src/gs/dc/dg_overlapping_wannier_construction.f90`
+- Modify: `src/gs/main_dft.f90`
+- Modify: `tests/dg/test_dg_overlapping_wannier_construction_mpi.f90`
+- Modify: `tests/dg/check_dg_overlapping_wannier_route.py`
+
+1. Add RED cases for inversion, a non-origin rotation center, a noncentrosymmetric common center, no common fixed point for screw/glide, and `C1`.
+2. Solve all affine fixed-point congruences with bounded lattice shifts and verify the complete operation set.
+3. Return `has_common_center` separately from affine-map validity; never discard a valid operation because no common center exists.
+4. Use full-system fractional translations in every Gamma physical-grid map and reject noncommensurate maps.
+5. Add RED/GREEN evidence that a small atomic displacement reduces the detected group rather than being repaired by tolerance inflation.
+6. Run point-group, symmetry, construction, and route fixtures on 1/2/4/8 ranks.
+
+### Task 4: Correct within rank 384
 
 **Files:**
 - Modify: `src/gs/dc/dg_overlapping_wannier_construction.f90`
@@ -53,7 +68,20 @@
 5. Use atomic projection overlap only as a symmetry-averaged localizer inside rank 384; never add projector or fragment-local rows.
 6. Run construction, symmetry, metric, projection, and route fixtures on 1/2/4/8 ranks.
 
-### Task 4: Genuine evidence and reviews
+### Task 5: Recompute and verify Wannier centers
+
+**Files:**
+- Modify: `src/gs/main_dft.f90`
+- Modify: `src/gs/dc/dg_overlapping_wannier_checkpoint.f90`
+- Modify: `tests/dg/test_dg_overlapping_wannier_construction_mpi.f90`
+
+1. Add RED cases for periodic centers crossing a cell face and centers outside their owner fragment.
+2. Compute final centers from the localized periodic position moments.
+3. Match full affine center orbits globally and separate geometric center from computational owner.
+4. Store common-center availability and final center-orbit evidence in V3.
+5. Run checkpoint and 1/2/4/8 construction fixtures.
+
+### Task 6: Genuine evidence and reviews
 
 **Files:**
 - Modify: `tests/dg/run_si64_overlapping_wannier_response_hhg.py`

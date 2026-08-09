@@ -12,6 +12,14 @@ The grid is partitioned into an interior and a boundary layer.  The boundary lay
 
 ## Measurements and gates
 
+## General affine symmetry
+
+The authoritative symmetry object is the complete set of affine operations `r -> R r + t` derived from the full instantaneous atomic configuration.  A common fixed point is metadata, not a prerequisite.  The implementation solves `(I-R)c = t (mod Z^3)` for all selected operations using bounded integer lattice shifts and verifies every residual.  If solutions exist, a deterministic periodic representative is recorded.  If no common solution exists, as for a nonsymmorphic screw or glide set, the full affine maps remain valid and no artificial center is introduced.
+
+The Gamma route applies both rotation and fractional translation to physical grid IDs.  Noncommensurate maps and non-Gamma Bloch phases are rejected explicitly.  Instantaneous lattice displacement may reduce the detected group, including to `C1`; symmetry is never restored by increasing the atomic matching tolerance after detection.
+
+After localization, Wannier centers are recomputed from periodic position moments.  Their affine orbits are matched globally and recorded independently of computational row ownership.  A Wannier center may lie outside its owner fragment.
+
 LCFO/EigenExa returns at least 384 eigenvector coefficient columns even when the conventional DFT state count is smaller.  The complete retained candidate is reconstructed from the same expression on every fragment,
 
 `fragment LCFO basis(core+buffer) * global LCFO coefficients`,
@@ -36,4 +44,4 @@ Atomic projectors may be used only as a localizer inside the LCFO rank-384 space
 
 ## Evidence
 
-Synthetic MPI tests place identical perturbations either in the boundary layer or interior.  Boundary-calibrated perturbations pass; interior perturbations fail.  Genuine ideal-Si64 evidence reports raw and corrected total/interior/boundary leakage, face value and gradient mismatch, density inversion-odd norms, occupied rank, correction norm, and energy change.  Subsequent V3, field-off, linear-response, and long-pulse HHG calculations continue to use polarization as the primary observable.
+Synthetic tests cover inversion, a non-origin rotation center, a noncentrosymmetric common center, screw/glide operations without a common fixed point, `C1`, and symmetry reduction under atomic displacement.  MPI tests place identical perturbations either in the boundary layer or interior.  Boundary-calibrated perturbations pass; interior perturbations fail.  Genuine ideal-Si64 evidence reports raw and corrected total/interior/boundary leakage, face value and gradient mismatch, density inversion-odd norms, occupied rank, correction norm, and energy change.  Subsequent V3, field-off, linear-response, and long-pulse HHG calculations continue to use polarization as the primary observable.
