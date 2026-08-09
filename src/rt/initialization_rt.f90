@@ -272,8 +272,15 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   rho%f = 0d0
   do jspin=1,system%nspin
      rho%f = rho%f + rho_s(jspin)%f
-     rt%rho0_s(jspin)%f = rho_s(jspin)%f ! electron density @ t=0 (GS)
+     ! rt%rho0_s is the t=0 (GS) density used as the difference-density reference.
+     ! On restart it is restored from the GS reference in restart_rt; only rebuild
+     ! it from the current density here when it was not loaded (fresh run, or older
+     ! restart data without rho0_s.bin).
+     if(.not. rt%rho0_loaded) rt%rho0_s(jspin)%f = rho_s(jspin)%f
   end do
+  if(yn_restart=='y' .and. .not.rt%rho0_loaded .and. comm_is_root(nproc_id_global)) &
+    write(*,*) "warning: rho0_s not found in restart data; using the restart-time "// &
+               "density as the difference-density reference."
   if(yn_restart=='y')then
     Vh%f = 2.d0*Vh_stock1%f - Vh_stock2%f
     Vh_stock2%f = Vh_stock1%f
