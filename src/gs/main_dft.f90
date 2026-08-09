@@ -54,7 +54,6 @@ use dg_overlapping_wannier_construction, only: select_dg_fixed_rank_symmetry_clo
 use dg_overlapping_wannier_construction, only: find_dg_group_identity
 use dg_overlapping_wannier_construction, only: assemble_dg_distributed_basis_symmetry_overlap
 use dg_overlapping_wannier_construction, only: build_dg_pointwise_affine_owner_map
-use dg_overlapping_wannier_construction, only: assign_dg_overlapping_wannier_occupations
 use dg_overlapping_wannier_construction, only: solve_dg_affine_common_fixed_point
 use dg_overlapping_wannier_construction, only: compute_dg_periodic_wannier_centers
 use dg_overlapping_wannier_construction, only: verify_dg_wannier_center_affine_orbits
@@ -1029,8 +1028,10 @@ contains
         ow_checkpoint%operator_fingerprint,operator_fingerprint
     endif
     allocate(occupations(nstate))
-    call assign_dg_overlapping_wannier_occupations(dc%elec_num_tot,occupations,ok,message)
-    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'overlapping-Wannier occupation initialization failed';endif
+    occupations=lcfo_retained_occupations(1:nstate)
+    if(any(occupations<0d0).or.any(occupations>2d0).or.&
+        abs(sum(occupations)-dc%elec_num_tot)>dg_dc_gs_electron_count_tolerance)&
+      error stop 'retained LCFO occupation spectrum violates the electron-count gate'
     allocate(ow_state%density(ncore),ow_state%potential(ncore),ow_state%coefficients(ntarget,nstate),&
       ow_state%eigenvalues(nstate),ow_state%density_history(ncore,2))
     allocate(initial_density_local(int(ow_global_grid_count)),&
@@ -2684,7 +2685,7 @@ contains
     integer,intent(in)::localization_iterations
     logical,intent(in)::localization_converged
     integer::rank,i,j,nowned,nbox,nproc,ierr,axis,point,ownership_count
-    integer(8)::tail_count8
+    integer(8)::tail_count8,occupation_hash,redistribution_local_hash,redistribution_global_hash,word
     integer(8),allocatable::all_tail_ids(:)
     complex(8),allocatable::hrows(:,:),metric(:,:),hamiltonian(:,:),metric_inverse(:,:),zero_hamiltonian(:,:),&
       hamiltonian_components(:,:,:),position(:,:,:),derivative(:,:,:),canonical_momentum(:,:,:),&
@@ -2847,6 +2848,37 @@ contains
     ow_checkpoint%basis_generation=ow_basis%generation;ow_checkpoint%geometry_generation=1
     ow_checkpoint%basis_fingerprint=ow_state%basis_fingerprint
     ow_checkpoint%operator_fingerprint=operator_fingerprint
+    ow_checkpoint%global_lcfo_fingerprint=ieor(ow_state%basis_fingerprint,&
+      ishftc(int(ow_basis%retained_rank,8),17))
+    if(ow_checkpoint%global_lcfo_fingerprint==0_8)ow_checkpoint%global_lcfo_fingerprint=1_8
+    occupation_hash=int(z'6A09E667F3BCC909',8)
+    do i=1,size(occupations)
+      word=transfer(occupations(i),word)
+      occupation_hash=ieor(ishftc(occupation_hash,7),ieor(word,int(i,8)))
+    end do
+    ow_checkpoint%occupation_block_fingerprint=occupation_hash
+    if(ow_checkpoint%occupation_block_fingerprint==0_8)ow_checkpoint%occupation_block_fingerprint=1_8
+    ow_checkpoint%affine_cocycle_fingerprint=ow_symmetry_fingerprint
+    if(ow_checkpoint%affine_cocycle_fingerprint==0_8)&
+      error stop 'missing affine-cocycle checkpoint provenance'
+    redistribution_local_hash=ieor(int(z'BB67AE8584CAA73B',8),int(rank+1,8))
+    if(rank==0)then
+      do i=1,size(ow_basis%center_owner_rank)
+        redistribution_local_hash=ieor(ishftc(redistribution_local_hash,11),&
+          int(ow_basis%center_owner_rank(i)+1,8))
+      end do
+    end if
+    do i=1,size(ow_core_ids)
+      redistribution_local_hash=ieor(ishftc(redistribution_local_hash,13),ow_core_ids(i))
+    end do
+    do i=1,size(all_tail_ids)
+      redistribution_local_hash=ieor(ishftc(redistribution_local_hash,17),all_tail_ids(i))
+    end do
+    call MPI_Allreduce(redistribution_local_hash,redistribution_global_hash,1,MPI_INTEGER8,&
+      MPI_BXOR,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS)error stop 'redistribution checkpoint provenance reduction failed'
+    ow_checkpoint%redistribution_fingerprint=redistribution_global_hash
+    if(ow_checkpoint%redistribution_fingerprint==0_8)ow_checkpoint%redistribution_fingerprint=1_8
     call compute_dg_overlapping_wannier_matrix_fingerprints(dc%icomm_tot,ow_row_ids,hrows,&
       position(:,ow_row_ids,:),velocity(:,ow_row_ids,:),ow_checkpoint%hamiltonian_fingerprint,&
       ow_checkpoint%observable_fingerprint,ok)
@@ -2889,6 +2921,16 @@ contains
     ow_checkpoint%localization_maximum_gradient=localization_maximum_gradient
     ow_checkpoint%localization_iterations=localization_iterations
     ow_checkpoint%localization_converged=localization_converged
+    ow_checkpoint%gs_acceptance_receipts=[0d0,0d0,&
+      abs(sum(occupations)-dc%elec_num_tot)/dg_dc_gs_electron_count_tolerance,&
+      refined_residual/dg_dc_gs_final_orbital_tolerance,&
+      ow_result%density_residual/dg_dc_gs_final_density_tolerance,&
+      refined_residual/dg_dc_gs_final_orbital_tolerance,&
+      merge(inversion_post_defect/dg_ow_symmetry_tolerance,0d0,global_inversion_promoted),&
+      0d0,0d0,max(post_projection_defect,&
+        merge(inversion_post_defect,0d0,global_inversion_promoted))/dg_ow_symmetry_tolerance,&
+      published_coefficient_residual/dg_dc_gs_final_orbital_tolerance]
+    ow_checkpoint%gs_acceptance_tolerance=1d0
     ow_checkpoint%accepted=ow_result%converged.and.localization_converged
   end subroutine
 

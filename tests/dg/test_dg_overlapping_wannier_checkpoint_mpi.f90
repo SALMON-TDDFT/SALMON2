@@ -22,6 +22,8 @@ program test_dg_overlapping_wannier_checkpoint_mpi
   a%basis_generation=7;a%geometry_generation=3
   a%basis_fingerprint=700_int64;a%operator_fingerprint=900_int64
   a%hamiltonian_fingerprint=1100_int64;a%observable_fingerprint=1300_int64
+  a%global_lcfo_fingerprint=1700_int64;a%occupation_block_fingerprint=1900_int64
+  a%affine_cocycle_fingerprint=2300_int64;a%redistribution_fingerprint=2900_int64
   a%field_coupling_convention='cell_wrapped_length_velocity'
   a%density_residual=1d-12;a%coefficient_residual=2d-12;a%charge_error=3d-13;a%accepted=.true.
   a%unmixed_density_residual=4d-12;a%orthogonality_defect=5d-12;a%metric_condition=2d0
@@ -31,6 +33,7 @@ program test_dg_overlapping_wannier_checkpoint_mpi
   a%localization_initial_spread=2d0;a%localization_final_spread=1d0
   a%localization_maximum_gradient=1d-7;a%localization_iterations=6
   a%localization_converged=.true.
+  a%gs_acceptance_receipts=0d0;a%gs_acceptance_tolerance=1d-9
   allocate(a%center_owner(2),a%core_physical_ids(nlocal),a%coefficients(2,1),&
     a%occupations(1),a%density(nlocal))
   a%center_owner=[0,mod(1,nproc)]
@@ -80,15 +83,31 @@ program test_dg_overlapping_wannier_checkpoint_mpi
     'checkpoint ownership round trip')
   call require(all(b%overlap==a%overlap).and.all(b%coefficients==a%coefficients).and.all(b%density==a%density),&
     'checkpoint payload round trip')
+  call require(b%global_lcfo_fingerprint==a%global_lcfo_fingerprint.and.&
+    b%occupation_block_fingerprint==a%occupation_block_fingerprint.and.&
+    b%affine_cocycle_fingerprint==a%affine_cocycle_fingerprint.and.&
+    b%redistribution_fingerprint==a%redistribution_fingerprint,&
+    'mandatory global-LCFO V3 provenance round trip')
   call require(b%localization_converged.and.b%localization_iterations==a%localization_iterations.and.&
     b%localization_initial_spread==a%localization_initial_spread.and.&
     b%localization_final_spread==a%localization_final_spread.and.&
     b%localization_maximum_gradient==a%localization_maximum_gradient,&
     'checkpoint localization evidence round trip')
+  call require(all(b%gs_acceptance_receipts==a%gs_acceptance_receipts).and.&
+    b%gs_acceptance_tolerance==a%gs_acceptance_tolerance,&
+    'mandatory reconstructed-GS acceptance receipts round trip')
   a%localization_converged=.false.
   call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
   call require(.not.ok,'nonconverged localization evidence rejected')
-  a%localization_converged=.true.;a%localization_final_spread=3d0
+  a%localization_converged=.true.;a%affine_cocycle_fingerprint=0_int64
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'legacy V3 missing affine-cocycle provenance rejected')
+  a%affine_cocycle_fingerprint=2300_int64
+  a%gs_acceptance_receipts(11)=2d-9
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'out-of-tolerance reconstructed-GS receipt rejected')
+  a%gs_acceptance_receipts(11)=0d0
+  a%localization_final_spread=3d0
   call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
   call require(.not.ok,'nonmonotone localization evidence rejected')
   a%localization_final_spread=1d0

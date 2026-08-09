@@ -369,10 +369,15 @@ assert re.search(
     re.I,
 ), "the in-memory LCFO path must retain requested columns beyond normal nstate_tot"
 assert re.search(
-    r"assign_dg_overlapping_wannier_occupations\s*\(\s*dc%elec_num_tot\s*,\s*occupations",
+    r"occupations\s*=\s*lcfo_retained_occupations\s*\(\s*1\s*:\s*nstate\s*\)",
     adapter_body,
     re.I,
-), "Galerkin occupations must use the DC total core electron count"
+), "Galerkin occupations must preserve the authoritative LCFO occupation spectrum"
+assert re.search(
+    r"abs\s*\(\s*sum\s*\(\s*occupations\s*\)\s*-\s*dc%elec_num_tot\s*\)",
+    adapter_body,
+    re.I,
+), "retained LCFO occupations must be rechecked against the total electron count"
 assert re.search(
     r"subroutine\s+assign_dg_overlapping_wannier_occupations\b",
     construction_source,
@@ -840,13 +845,20 @@ for required in (
     "unmixed_density_residual",
     "orthogonality_defect",
     "metric_condition",
+    "global_lcfo_fingerprint",
+    "occupation_block_fingerprint",
+    "affine_cocycle_fingerprint",
+    "redistribution_fingerprint",
+    "gs_acceptance_receipts",
+    "gs_acceptance_tolerance",
 ):
     assert required.lower() in ow_checkpoint_source.lower(), (
         f"missing Task 8 route-checkpoint contract: {required}"
     )
 for forbidden in ("direct_sipg", "lcfo", "eigenexa", "dg_wpw", "checkpoint_gs", "main_tddft"):
     assert forbidden not in ow_scf_source.lower()
-    assert forbidden not in ow_checkpoint_source.lower()
+    if forbidden != "lcfo":
+        assert forbidden not in ow_checkpoint_source.lower()
 
 checkpoint_population = re.search(
     r"subroutine\s+populate_ow_checkpoint\b(?P<body>.*?)end\s+subroutine",
@@ -854,6 +866,20 @@ checkpoint_population = re.search(
     re.I | re.S,
 )
 assert checkpoint_population
+for provenance in (
+    "global_lcfo_fingerprint",
+    "occupation_block_fingerprint",
+    "affine_cocycle_fingerprint",
+    "redistribution_fingerprint",
+):
+    assert re.search(
+        rf"ow_checkpoint\s*%\s*{provenance}\s*=",
+        checkpoint_population.group("body"),
+        re.I,
+    ), f"production V3 population omits {provenance}"
+assert "ow_checkpoint%gs_acceptance_receipts=" in checkpoint_population.group("body").lower(), (
+    "production V3 population omits reconstructed-GS acceptance receipts"
+)
 assert re.search(
     r"ow_checkpoint\s*%\s*operator_fingerprint\s*=\s*operator_fingerprint\b",
     checkpoint_population.group("body"),
