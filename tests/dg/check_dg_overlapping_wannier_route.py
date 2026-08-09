@@ -15,6 +15,7 @@ for retained_contract_path in (
     "src/gs/dc/dg_overlapping_wannier_checkpoint.f90",
     "src/gs/dc/dg_overlapping_wannier_construction.f90",
     "src/gs/dc/dg_overlapping_wannier_localization.f90",
+    "src/gs/dc/dg_overlapping_wannier_w90.f90",
     "src/rt/dg/rt_dg_overlapping_wannier.f90",
     "src/gs/dc/lcfo.f90",
     "src/gs/eigen_subdiag_eigenexa.f90",
@@ -38,6 +39,7 @@ dcdft_source = source("src/gs/dc/dcdft.f90")
 types_source = source("src/gs/dc/dg_overlapping_wannier_types.f90")
 construction_source = source("src/gs/dc/dg_overlapping_wannier_construction.f90")
 localization_source = source("src/gs/dc/dg_overlapping_wannier_localization.f90")
+w90_source = source("src/gs/dc/dg_overlapping_wannier_w90.f90")
 lcfo_source = source("src/gs/dc/lcfo.f90")
 projection_source = source("src/gs/dc/dg_overlapping_wannier_projection.f90")
 operators_source = source("src/gs/dc/dg_overlapping_wannier_operators.f90")
@@ -46,6 +48,7 @@ ow_solver_source = source("src/gs/dc/dg_overlapping_wannier_solver.f90")
 ow_checkpoint_source = source("src/gs/dc/dg_overlapping_wannier_checkpoint.f90")
 ow_rt_source = source("src/rt/dg/rt_dg_overlapping_wannier.f90")
 dc_cmake = source("src/gs/dc/CMakeLists.txt")
+w90_builder_source = source("cmakefiles/Builder/build_wannier90.cmake")
 xc_source = source("src/xc/salmon_xc.f90")
 si64_runner_source = source("tests/dg/run_si64_overlapping_wannier_gate.py")
 si64_checker_source = source("tests/dg/check_si64_overlapping_wannier_gate.py")
@@ -532,6 +535,16 @@ for workspace in (
     ), f"PZ workspace {workspace} must resize after buffer-local XC evaluation"
 
 assert "dg_overlapping_wannier_types.f90" in dc_cmake
+assert "dg_overlapping_wannier_w90.f90" in dc_cmake
+assert re.search(r'set\s*\(\s*WANNIER90_COMMS\s+"serial"', w90_builder_source, re.I), (
+    "rank-zero Wannier90 library mode requires a serial bundled library"
+)
+assert re.search(r'set\s*\(\s*WANNIER90_BUILD_TARGETS\s+wannier\s+lib', w90_builder_source, re.I), (
+    "bundled serial build must retain both normal-DC executable and OW library"
+)
+assert not re.search(r'set\s*\(\s*WANNIER90_COMMS\s+"mpi"', w90_builder_source, re.I), (
+    "bundled library must not switch to MPI COMMS when SALMON itself uses MPI"
+)
 for token in (
     "type,public :: s_dg_wannier_tail",
     "type,public :: s_dg_overlapping_wannier_basis",

@@ -5,6 +5,7 @@ set(SOURCES
     dg_overlapping_wannier_localization.f90
     dg_overlapping_wannier_projection.f90
     dg_overlapping_wannier_metric.f90
+    dg_overlapping_wannier_w90.f90
     dg_overlapping_wannier_construction.f90
     dg_overlapping_wannier_operators.f90
     dg_overlapping_wannier_nonlocal.f90
