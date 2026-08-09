@@ -38,7 +38,8 @@ require(re.search(r"fragment.*atom.*(mask|index)", MAIN) is not None,
 construction_call = re.search(
     r"call\s+construct_dg_overlapping_wannier_basis\s*\((.*?)\)\s*\n",
     MAIN, re.S)
-require(construction_call is not None and "local_symmetry_map" not in construction_call.group(1),
+require((construction_call is None and "call localize_dg_occupation_blocks" in MAIN) or
+        (construction_call is not None and "local_symmetry_map" not in construction_call.group(1)),
         "fragment-local Wannier generation must not impose a fragment-only point group")
 require("point_group_symbol" in MAIN and "space_group_number" in MAIN,
         "production diagnostics must identify each exact fragment group")

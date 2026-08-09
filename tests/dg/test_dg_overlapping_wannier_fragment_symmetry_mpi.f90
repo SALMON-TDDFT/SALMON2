@@ -4,7 +4,8 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
   use dg_overlapping_wannier_symmetry, only: select_dg_exact_fragment_subgroup, &
     promote_dg_exact_global_subgroup,build_dg_fragment_site_stabilizer, &
     fingerprint_dg_exact_fragment_symmetry,build_dg_fragment_permuted_representation, &
-    build_dg_fragment_symmetry_orbits,build_dg_symmetry_constrained_pair_generator
+    build_dg_fragment_symmetry_orbits,build_dg_symmetry_constrained_pair_generator, &
+    factor_dg_affine_translation_cocycle,measure_dg_hamiltonian_density_commutators
   use iso_fortran_env,only:int64
   implicit none
   integer :: ierr,rank,nproc,i,j
@@ -13,6 +14,8 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
   integer :: invalid_product_table(4,4)
   integer :: affine_rotation(3,3,6)
   integer,allocatable :: affine_product(:,:)
+  integer,allocatable :: translation_subgroup(:),point_representatives(:),point_product(:,:),&
+    translation_cocycle(:,:)
   integer,allocatable :: subgroup(:)
   logical :: fragment_exact(2,4)
   logical :: affine_allowed(6)
@@ -22,10 +25,12 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
   complex(8) :: local_pair_representation(1,1,1)
   complex(8),allocatable :: global_pair_representation(:,:,:)
   complex(8) :: dense_representation(4,4,2),broken_representation(4,4,2)
+  complex(8) :: gate_representation(2,2,2),gate_hamiltonian(2,2),gate_density(2,2)
   complex(8),allocatable :: constrained_generator(:,:)
   integer,allocatable :: generator_active_indices(:)
   integer :: generator_product(2,2)
   real(8) :: antihermiticity_defect,commutator_defect
+  real(8),allocatable :: hamiltonian_commutator(:),density_commutator(:)
   integer,allocatable :: fragment_permutation(:,:)
   integer :: multi_orbit_map(4,2),identity_orbit_map(4,1),invalid_orbit_map(4,2)
   integer,allocatable :: fragment_orbit(:),orbit_representative(:)
@@ -104,6 +109,43 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
     affine_allowed,1d-10,subgroup,affine_product,site_residual,ok,message)
   call require(ok.and.all(subgroup==[1,6]),'fractional-center inversion site stabilizer')
   call require(all(affine_product==reshape([1,2,2,1],[2,2])),'inversion affine closure')
+
+  affine_rotation=0;affine_translation=0d0
+  affine_rotation(:,:,1)=reshape([1,0,0,0,1,0,0,0,1],[3,3])
+  affine_rotation(:,:,2)=affine_rotation(:,:,1);affine_translation(3,2)=0.5d0
+  affine_rotation(:,:,3)=reshape([-1,0,0,0,-1,0,0,0,1],[3,3])
+  affine_translation(3,3)=0.25d0
+  affine_rotation(:,:,4)=affine_rotation(:,:,3);affine_translation(3,4)=0.75d0
+  product_table=reshape([1,2,3,4,2,1,4,3,3,4,2,1,4,3,1,2],[4,4])
+  call factor_dg_affine_translation_cocycle(affine_rotation(:,:,1:4),&
+    affine_translation(:,1:4),product_table,1d-12,translation_subgroup,&
+    point_representatives,point_product,translation_cocycle,ok,message)
+  call require(ok.and.all(translation_subgroup==[1,2]).and.&
+    all(point_representatives==[1,3]),'screw group factors into translations and point co-group')
+  call require(point_product(2,2)==1.and.translation_cocycle(2,2)==2,&
+    'screw-square translation is retained as a nontrivial cocycle')
+  affine_rotation(:,:,3)=reshape([1,0,0,0,-1,0,0,0,1],[3,3])
+  affine_rotation(:,:,4)=affine_rotation(:,:,3)
+  call factor_dg_affine_translation_cocycle(affine_rotation(:,:,1:4),&
+    affine_translation(:,1:4),product_table,1d-12,translation_subgroup,&
+    point_representatives,point_product,translation_cocycle,ok,message)
+  call require(ok.and.translation_cocycle(2,2)==2,&
+    'glide-square translation is retained as a nontrivial cocycle')
+
+  gate_representation=(0d0,0d0);gate_representation(1,1,1)=1d0
+  gate_representation(2,2,1)=1d0;gate_representation(1,1,2)=1d0
+  gate_representation(2,2,2)=-1d0
+  gate_hamiltonian=(0d0,0d0);gate_hamiltonian(1,1)=-1d0;gate_hamiltonian(2,2)=2d0
+  gate_density=(0d0,0d0);gate_density(1,1)=1d0
+  call measure_dg_hamiltonian_density_commutators(gate_representation,gate_hamiltonian,&
+    gate_density,1d-12,hamiltonian_commutator,density_commutator,ok,message)
+  call require(ok.and.maxval(hamiltonian_commutator)<1d-14.and.&
+    maxval(density_commutator)<1d-14,'H and density projector commute with inversion')
+  gate_density(1,2)=0.1d0;gate_density(2,1)=0.1d0
+  call measure_dg_hamiltonian_density_commutators(gate_representation,gate_hamiltonian,&
+    gate_density,1d-12,hamiltonian_commutator,density_commutator,ok,message)
+  call require(ok.and.maxval(hamiltonian_commutator)<1d-14.and.&
+    density_commutator(2)>0.1d0,'density-projector symmetry breaking is measured independently of H')
 
   c4_fingerprint=fingerprint_dg_exact_fragment_symmetry(affine_rotation(:,:,1:4),product_table,1d-10)
   c1_fingerprint=fingerprint_dg_exact_fragment_symmetry(affine_rotation(:,:,1:1),reshape([1],[1,1]),1d-10)

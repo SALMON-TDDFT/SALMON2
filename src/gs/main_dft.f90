@@ -82,7 +82,7 @@ use dg_overlapping_wannier_symmetry, only: select_dg_exact_fragment_subgroup,&
   promote_dg_exact_global_subgroup,project_dg_fragment_covariant_operators,&
   evaluate_dg_covariance_residuals_by_operation,fingerprint_dg_exact_fragment_symmetry
 use dg_overlapping_wannier_symmetry, only: build_dg_fragment_permuted_representation,&
-  build_dg_fragment_symmetry_orbits
+  build_dg_fragment_symmetry_orbits,factor_dg_affine_translation_cocycle
 use dg_overlapping_wannier_localization,only:localize_dg_occupation_blocks
 use lcfo_wannier_sawf, only: t_sawf_crystallographic_catalog,&
   load_sawf_crystallographic_catalog_auto
@@ -2359,7 +2359,8 @@ contains
     character(*),intent(out)::message
     type(t_sawf_crystallographic_catalog)::catalog
     real(8),allocatable::fractional_positions(:,:)
-    integer,allocatable::species(:),selected(:),mapped_owner(:),mapped_local(:),mapped_wrap(:,:)
+    integer,allocatable::species(:),selected(:),mapped_owner(:),mapped_local(:),mapped_wrap(:,:),&
+      translation_subgroup(:),point_representatives(:),point_product(:,:),translation_cocycle(:,:)
     integer(8),allocatable::all_ids(:,:),mapped_ids(:),all_maps(:,:,:)
     real(8)::lattice_inverse(3,3),determinant,common_center(3),common_center_residual
     integer::rank,nproc,ierr,nlocal,atom,operation,axis,translation_grid(3),nselected,&
@@ -2455,6 +2456,12 @@ contains
         message='global affine point actions are not closed';return
       end if
     end do;end do
+    call factor_dg_affine_translation_cocycle(integer_rotations,fractional_translations,&
+      product_table,dg_ow_symmetry_tolerance,translation_subgroup,point_representatives,&
+      point_product,translation_cocycle,map_ok,detail)
+    if(.not.map_ok)then;message='global affine factorization: '//trim(detail);return;end if
+    if(rank==0)write(*,'(2(a,i0))')'[OW-GS-DIAGNOSTIC] translation_subgroup_order=',&
+      size(translation_subgroup),' point_cogroup_order=',size(point_representatives)
     ok=.true.
   end subroutine prepare_ow_global_point_action
 

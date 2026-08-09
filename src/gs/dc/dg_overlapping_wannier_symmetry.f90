@@ -15,7 +15,155 @@ module dg_overlapping_wannier_symmetry
   public::build_dg_fragment_permuted_representation
   public::build_dg_fragment_symmetry_orbits
   public::build_dg_symmetry_constrained_pair_generator
+  public::factor_dg_affine_translation_cocycle
+  public::measure_dg_hamiltonian_density_commutators
 contains
+  subroutine measure_dg_hamiltonian_density_commutators(representation,hamiltonian,density_projector,&
+      tolerance,hamiltonian_residual,density_residual,ok,message)
+    complex(8),intent(in)::representation(:,:,:),hamiltonian(:,:),density_projector(:,:)
+    real(8),intent(in)::tolerance
+    real(8),allocatable,intent(out)::hamiltonian_residual(:),density_residual(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(8),allocatable::work(:,:),identity(:,:)
+    real(8)::hamiltonian_scale,density_scale,unitarity_defect
+    integer::n,noperation,operation,i
+
+    ok=.false.;message='';n=size(representation,1);noperation=size(representation,3)
+    if(n<1.or.size(representation,2)/=n.or.noperation<1.or.&
+        any(shape(hamiltonian)/=[n,n]).or.any(shape(density_projector)/=[n,n]).or.&
+        tolerance<=0d0.or..not.ieee_is_finite(tolerance).or.&
+        .not.all(ieee_is_finite(real(representation))).or.&
+        .not.all(ieee_is_finite(aimag(representation))).or.&
+        .not.all(ieee_is_finite(real(hamiltonian))).or.&
+        .not.all(ieee_is_finite(aimag(hamiltonian))).or.&
+        .not.all(ieee_is_finite(real(density_projector))).or.&
+        .not.all(ieee_is_finite(aimag(density_projector))))then
+      message='invalid Hamiltonian-density commutator contract';return
+    end if
+    allocate(work(n,n),identity(n,n),hamiltonian_residual(noperation),density_residual(noperation))
+    identity=(0d0,0d0);do i=1,n;identity(i,i)=1d0;end do
+    unitarity_defect=0d0
+    do operation=1,noperation
+      work=matmul(conjg(transpose(representation(:,:,operation))),representation(:,:,operation))-identity
+      unitarity_defect=max(unitarity_defect,maxval(abs(work)))
+    end do
+    if(unitarity_defect>tolerance)then
+      message='Hamiltonian-density symmetry representation is not unitary';return
+    end if
+    hamiltonian_scale=max(1d0,maxval(abs(hamiltonian)))
+    density_scale=max(1d0,maxval(abs(density_projector)))
+    do operation=1,noperation
+      work=matmul(hamiltonian,representation(:,:,operation))-&
+        matmul(representation(:,:,operation),hamiltonian)
+      hamiltonian_residual(operation)=maxval(abs(work))/hamiltonian_scale
+      work=matmul(density_projector,representation(:,:,operation))-&
+        matmul(representation(:,:,operation),density_projector)
+      density_residual(operation)=maxval(abs(work))/density_scale
+    end do
+    ok=.true.
+  end subroutine measure_dg_hamiltonian_density_commutators
+
+  subroutine factor_dg_affine_translation_cocycle(rotations,translations,product_table,tolerance,&
+      translation_subgroup,point_representatives,point_product,translation_cocycle,ok,message)
+    integer,intent(in)::rotations(:,:,:),product_table(:,:)
+    real(8),intent(in)::translations(:,:),tolerance
+    integer,allocatable,intent(out)::translation_subgroup(:),point_representatives(:),&
+      point_product(:,:),translation_cocycle(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer,allocatable::operation_class(:),inverse(:),work_representatives(:),work_translations(:)
+    integer::nop,operation,left,right,product,identity,npoint,ntranslation,point_left,point_right,&
+      point_target,cocycle_operation,cocycle_position,i,j,k
+    integer::identity_rotation(3,3)
+    real(8)::composed_translation(3),difference(3)
+
+    ok=.false.;message='';nop=size(rotations,3)
+    identity_rotation=reshape([1,0,0,0,1,0,0,0,1],[3,3])
+    if(nop<1.or.size(rotations,1)/=3.or.size(rotations,2)/=3.or.&
+        any(shape(translations)/=[3,nop]).or.any(shape(product_table)/=[nop,nop]).or.&
+        tolerance<=0d0.or..not.ieee_is_finite(tolerance).or.&
+        .not.all(ieee_is_finite(translations)).or.any(product_table<1).or.&
+        any(product_table>nop))then
+      message='invalid affine translation-cocycle contract';return
+    end if
+    identity=0
+    do operation=1,nop
+      if(all(product_table(operation,:)==[(i,i=1,nop)]).and.&
+          all(product_table(:,operation)==[(i,i=1,nop)]))then
+        identity=operation;exit
+      end if
+    end do
+    if(identity==0.or.any(rotations(:,:,identity)/=identity_rotation).or.&
+        maxval(abs(translations(:,identity)-anint(translations(:,identity))))>tolerance)then
+      message='affine group has no valid identity';return
+    end if
+    allocate(inverse(nop));inverse=0
+    do left=1,nop
+      do right=1,nop
+        if(product_table(left,right)==identity.and.product_table(right,left)==identity)then
+          inverse(left)=right;exit
+        end if
+      end do
+      if(inverse(left)==0)then;message='affine product table has no inverse';return;end if
+    end do
+    do i=1,nop;do j=1,nop;do k=1,nop
+      if(product_table(product_table(i,j),k)/=product_table(i,product_table(j,k)))then
+        message='affine product table is not associative';return
+      end if
+    end do;end do;end do
+    do left=1,nop;do right=1,nop
+      product=product_table(left,right)
+      if(any(matmul(rotations(:,:,left),rotations(:,:,right))/=rotations(:,:,product)))then
+        message='affine rotations disagree with the product table';return
+      end if
+      composed_translation=translations(:,left)+matmul(real(rotations(:,:,left),8),translations(:,right))
+      difference=composed_translation-translations(:,product)
+      if(maxval(abs(difference-anint(difference)))>tolerance)then
+        message='affine translations disagree with the product table';return
+      end if
+    end do;end do
+    allocate(work_translations(nop),work_representatives(nop),operation_class(nop))
+    ntranslation=0
+    do operation=1,nop
+      if(all(rotations(:,:,operation)==identity_rotation))then
+        ntranslation=ntranslation+1;work_translations(ntranslation)=operation
+      end if
+    end do
+    if(ntranslation<1)then;message='affine group has no pure-translation subgroup';return;end if
+    npoint=0;operation_class=0
+    do operation=1,nop
+      do point_target=1,npoint
+        if(all(rotations(:,:,operation)==rotations(:,:,work_representatives(point_target))))then
+          operation_class(operation)=point_target;exit
+        end if
+      end do
+      if(operation_class(operation)==0)then
+        npoint=npoint+1;work_representatives(npoint)=operation;operation_class(operation)=npoint
+      end if
+    end do
+    do point_target=1,npoint
+      if(count(operation_class==point_target)/=ntranslation)then
+        message='affine rotation classes are not complete translation cosets';return
+      end if
+    end do
+    allocate(translation_subgroup(ntranslation),point_representatives(npoint),&
+      point_product(npoint,npoint),translation_cocycle(npoint,npoint))
+    translation_subgroup=work_translations(1:ntranslation)
+    point_representatives=work_representatives(1:npoint)
+    do point_left=1,npoint;do point_right=1,npoint
+      product=product_table(point_representatives(point_left),point_representatives(point_right))
+      point_target=operation_class(product);point_product(point_left,point_right)=point_target
+      cocycle_operation=product_table(product,inverse(point_representatives(point_target)))
+      cocycle_position=findloc(translation_subgroup,cocycle_operation,dim=1)
+      if(cocycle_position==0)then
+        message='affine representative product does not yield a pure-translation cocycle';return
+      end if
+      translation_cocycle(point_left,point_right)=cocycle_position
+    end do;end do
+    ok=.true.
+  end subroutine factor_dg_affine_translation_cocycle
+
   subroutine build_dg_symmetry_constrained_pair_generator(first,second,amplitude,representation,&
       product_table,tolerance,generator,antihermiticity_defect,commutator_defect,&
       active_indices,ok,message)

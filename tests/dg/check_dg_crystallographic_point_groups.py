@@ -42,4 +42,12 @@ for token in ("point_group_symbol", "space_group_number", "hall_number",
 require("load_sawf_crystallographic_catalog_auto" in fortran_source,
         "missing automatic crystallographic catalog loader")
 
+symmetry_source = (ROOT / "src/gs/dc/dg_overlapping_wannier_symmetry.f90").read_text().lower()
+for token in ("factor_dg_affine_translation_cocycle",
+              "measure_dg_hamiltonian_density_commutators"):
+    require(token in symmetry_source, f"global affine symmetry contract omits {token}")
+main_source = (ROOT / "src/gs/main_dft.f90").read_text().lower()
+require(re.search(r"call\s+factor_dg_affine_translation_cocycle\s*\(", main_source) is not None,
+        "production global affine route does not validate translation cocycle closure")
+
 print("PASS complete 32-point-group crystallographic catalog contract")
