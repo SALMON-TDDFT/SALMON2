@@ -81,7 +81,7 @@ use dg_overlapping_wannier_symmetry, only: select_dg_exact_fragment_subgroup,&
   evaluate_dg_covariance_residuals_by_operation,fingerprint_dg_exact_fragment_symmetry
 use dg_overlapping_wannier_symmetry, only: build_dg_fragment_permuted_representation,&
   build_dg_fragment_symmetry_orbits
-use dg_overlapping_wannier_localization,only:localize_dg_overlapping_wannier_basis
+use dg_overlapping_wannier_localization,only:localize_dg_occupation_blocks
 use lcfo_wannier_sawf, only: t_sawf_crystallographic_catalog,&
   load_sawf_crystallographic_catalog_auto
 use lcfo_wannier_sawf_band, only: validate_sawf_fragment_symmetry_map,&
@@ -848,11 +848,11 @@ contains
       write(0,'(a)')trim(message);error stop 'global representation synchronization failed'
     end if
     allocate(global_candidate_localizer(global_retained_rank,global_retained_rank),&
-      global_candidate_occupied(global_retained_rank,global_required_retained_rank))
+      global_candidate_occupied(global_retained_rank,global_occupied_count))
     global_candidate_localizer=-matmul(global_seed_overlap,conjg(transpose(global_seed_overlap)))
     global_candidate_occupied=(0d0,0d0)
     deallocate(global_seed_overlap)
-    do io=1,global_required_retained_rank;global_candidate_occupied(io,io)=1d0;end do
+    do io=1,global_occupied_count;global_candidate_occupied(io,io)=1d0;end do
     call select_dg_fixed_rank_symmetry_closed_subspace(global_candidate_metric,&
       global_candidate_occupied,global_candidate_localizer,global_candidate_representation,&
       global_point_product,ntarget,dg_ow_symmetry_tolerance,global_subspace_transform,&
@@ -905,8 +905,9 @@ contains
       core_periodic_phase(3,core_index)=exp(cmplx(0d0,2d0*pi*real((physical_ids(p)-1_8)/&
         nxy8,8)/real(dc%lg_tot%num(3),8),8))
     enddo
-    call localize_dg_overlapping_wannier_basis(dc%icomm_tot,ow_core_values,ow_core_gradients,&
+    call localize_dg_occupation_blocks(dc%icomm_tot,ow_core_values,ow_core_gradients,&
       ow_core_weights,core_periodic_phase,global_retained_representation,global_point_product,&
+      lcfo_retained_occupations,dg_ow_symmetry_tolerance,&
       dg_ow_localization_support_tolerance,dg_ow_localization_spread_tolerance,&
       dg_ow_localization_gradient_tolerance,dg_ow_symmetry_tolerance,&
       dg_ow_localization_max_iterations,localization_initial_spread,localization_final_spread,&

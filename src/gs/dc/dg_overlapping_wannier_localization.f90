@@ -16,7 +16,102 @@ module dg_overlapping_wannier_localization
   public::localize_dg_overlapping_wannier_basis
   public::validate_dg_global_covariant_gauge
   public::assemble_dg_periodic_spread_gradient
+  public::localize_dg_occupation_blocks
 contains
+  subroutine localize_dg_occupation_blocks(comm,values,gradients,weights,phases,representation,&
+      product_table,occupations,occupation_tolerance,support_tolerance,spread_tolerance,&
+      gradient_tolerance,symmetry_tolerance,maximum_iterations,initial_spread,final_spread,&
+      maximum_pair_gradient,iterations,converged,total_transform,ok,message,spread_evaluations)
+    integer,intent(in)::comm,product_table(:,:),maximum_iterations
+    complex(real64),intent(inout)::values(:,:),gradients(:,:,:)
+    real(real64),intent(in)::weights(:),occupations(:),occupation_tolerance,support_tolerance,&
+      spread_tolerance,gradient_tolerance,symmetry_tolerance
+    complex(real64),intent(in)::phases(:,:),representation(:,:,:)
+    real(real64),intent(out)::initial_spread,final_spread,maximum_pair_gradient
+    integer,intent(out)::iterations
+    logical,intent(out)::converged,ok
+    complex(real64),allocatable,intent(out)::total_transform(:,:)
+    character(*),intent(out)::message
+    integer,optional,intent(out)::spread_evaluations
+    logical,allocatable::assigned(:),in_block(:)
+    integer,allocatable::indices(:),outside(:)
+    complex(real64),allocatable::block_values(:,:),block_gradients(:,:,:),block_representation(:,:,:),&
+      block_transform(:,:),trial_values(:,:),trial_gradients(:,:,:)
+    real(real64)::block_initial,block_final,block_gradient,scale
+    integer::nstate,first,nblock,operation,block_iterations,block_evaluations,i,j
+    integer::total_evaluations
+    logical::block_converged,block_ok,spread_ok
+    character(256)::detail
+
+    ok=.false.;converged=.false.;message='';iterations=0;total_evaluations=0
+    initial_spread=huge(1d0);final_spread=huge(1d0);maximum_pair_gradient=0d0
+    if(present(spread_evaluations))spread_evaluations=0
+    nstate=size(values,1)
+    if(nstate<1.or.size(occupations)/=nstate.or.size(values,2)<1.or.&
+        any(shape(gradients)/=[3,nstate,size(values,2)]).or.&
+        size(representation,1)/=nstate.or.size(representation,2)/=nstate.or.&
+        occupation_tolerance<=0d0.or..not.all(ieee_is_finite(occupations)).or.&
+        any(occupations<0d0))then
+      message='invalid occupation-block localization contract';return
+    end if
+    call collective_periodic_spread(comm,values,weights,phases,initial_spread,spread_ok,detail)
+    if(.not.spread_ok)then;message=trim(detail);return;end if
+    allocate(total_transform(nstate,nstate),assigned(nstate),in_block(nstate))
+    allocate(trial_values,source=values);allocate(trial_gradients,source=gradients)
+    total_transform=(0d0,0d0);assigned=.false.
+    do i=1,nstate;total_transform(i,i)=1d0;end do
+    do while(any(.not.assigned))
+      first=findloc(.not.assigned,.true.,dim=1)
+      in_block=.not.assigned.and.abs(occupations-occupations(first))<=occupation_tolerance
+      indices=pack([(i,i=1,nstate)],in_block);outside=pack([(i,i=1,nstate)],.not.in_block)
+      nblock=size(indices)
+      do operation=1,size(representation,3)
+        if(size(outside)>0)then
+          scale=max(1d0,maxval(abs(representation(:,:,operation))))
+          if(max(maxval(abs(representation(indices,outside,operation))),&
+              maxval(abs(representation(outside,indices,operation))))>&
+              symmetry_tolerance*scale)then
+            message='symmetry representation mixes unequal occupation blocks';return
+          end if
+        end if
+      end do
+      if(nblock>1)then
+        allocate(block_values(nblock,size(values,2)),block_gradients(3,nblock,size(values,2)),&
+          block_representation(nblock,nblock,size(representation,3)))
+        block_values=trial_values(indices,:);block_gradients=trial_gradients(:,indices,:)
+        do operation=1,size(representation,3)
+          block_representation(:,:,operation)=representation(indices,indices,operation)
+        end do
+        call localize_dg_overlapping_wannier_basis(comm,block_values,block_gradients,weights,phases,&
+          block_representation,product_table,support_tolerance,spread_tolerance,gradient_tolerance,&
+          symmetry_tolerance,maximum_iterations,block_initial,block_final,block_gradient,&
+          block_iterations,block_converged,block_transform,block_ok,detail,block_evaluations)
+        if(.not.block_ok.or..not.block_converged)then
+          message='occupation block: '//trim(detail);return
+        end if
+        if(maxval(abs(aimag(block_transform)))>symmetry_tolerance)then
+          message='occupation-block localization produced a non-real Gamma gauge';return
+        end if
+        trial_values(indices,:)=block_values;trial_gradients(:,indices,:)=block_gradients
+        do i=1,nblock;do j=1,nblock
+          total_transform(indices(i),indices(j))=block_transform(i,j)
+        end do;end do
+        maximum_pair_gradient=max(maximum_pair_gradient,block_gradient)
+        iterations=max(iterations,block_iterations);total_evaluations=total_evaluations+block_evaluations
+        deallocate(block_values,block_gradients,block_representation,block_transform)
+      end if
+      assigned(indices)=.true.
+    end do
+    call collective_periodic_spread(comm,trial_values,weights,phases,final_spread,spread_ok,detail)
+    if(.not.spread_ok)then;message=trim(detail);return;end if
+    if(final_spread>initial_spread+spread_tolerance)then
+      message='occupation-block localization increased the complete periodic spread';return
+    end if
+    values=trial_values;gradients=trial_gradients
+    if(present(spread_evaluations))spread_evaluations=total_evaluations+2
+    converged=.true.;ok=.true.
+  end subroutine localize_dg_occupation_blocks
+
   subroutine assemble_dg_periodic_spread_gradient(comm,values,weights,phases,gradient,ok,message)
     integer,intent(in)::comm
     complex(real64),intent(in)::values(:,:),phases(:,:)
@@ -223,7 +318,7 @@ contains
       call assemble_dg_periodic_spread_gradient(comm,values,weights,phases,&
         full_spread_gradient,step_ok,detail)
       if(.not.step_ok)then;message=trim(detail);return;end if
-      raw_generator=full_spread_gradient
+      raw_generator=cmplx(real(full_spread_gradient,real64),0d0,real64)
       sweep_generator=(0d0,0d0)
       do operation=1,size(representation,3)
         projection_work=matmul(representation(:,:,operation),raw_generator)

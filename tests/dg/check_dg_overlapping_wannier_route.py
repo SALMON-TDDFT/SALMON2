@@ -378,6 +378,16 @@ assert re.search(
     construction_source,
     re.I,
 ), "retained occupation assignment must live in the overlapping-Wannier namespace"
+assert re.search(
+    r"global_candidate_occupied\s*\(\s*global_retained_rank\s*,\s*global_occupied_count\s*\)",
+    adapter_body,
+    re.I,
+), "fixed-rank selection must protect only the physical occupied LCFO projector"
+assert re.search(
+    r"call\s+localize_dg_occupation_blocks\s*\(.*?lcfo_retained_occupations",
+    adapter_body,
+    re.I | re.S,
+), "global localization must be block diagonal in the LCFO occupations"
 assert not re.search(r"allocate\s*\(\s*candidate\s*\(",adapter_body,re.I), (
     "production must not materialize a separate fragment-eigenstate candidate window"
 )
@@ -643,7 +653,7 @@ assert not re.search(r"call\s+replicate_ow_global_symmetry_orbit", adapter_body,
     "production must not copy a representative-fragment gauge across the full system"
 )
 materialize_position = adapter_body.lower().index("call materialize_ow_distributed_core_to_buffer")
-localize_position = adapter_body.lower().index("call localize_dg_overlapping_wannier_basis")
+localize_position = adapter_body.lower().index("call localize_dg_occupation_blocks")
 metric_position = adapter_body.lower().index("call assemble_dg_overlapping_wannier_metric_rows")
 assert materialize_position < localize_position < metric_position, (
     "localization must use streamed local buffers and finish before metric/SCF publication"
@@ -688,7 +698,7 @@ assert exponential_body and "zheev" in exponential_body.group("body").lower(), (
     "dense global gauge exponential must use one Hermitian eigensolve, not a Taylor matmul series"
 )
 closure_call = adapter_body.find("call build_dg_distributed_symmetry_closed_basis")
-localization_call = adapter_body.find("call localize_dg_overlapping_wannier_basis")
+localization_call = adapter_body.find("call localize_dg_occupation_blocks")
 assert closure_call >= 0, (
     "production OW GS must construct the fixed-rank full-system symmetry-closed basis"
 )
@@ -710,8 +720,9 @@ assert localization_call > closure_call, (
     "full-system symmetry closure must precede Wannier localization"
 )
 assert re.search(
-    r"call\s+localize_dg_overlapping_wannier_basis\s*\(.*?"
-    r"global_retained_representation\s*,\s*global_point_product",
+    r"call\s+localize_dg_occupation_blocks\s*\(.*?"
+    r"global_retained_representation\s*,\s*global_point_product\s*,\s*&?\s*"
+    r"lcfo_retained_occupations",
     adapter_body,
     re.I | re.S,
 ), "localization must consume the one full-system representation and product table"

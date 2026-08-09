@@ -7,6 +7,7 @@ program test_dg_overlapping_wannier_localization_mpi
   use dg_overlapping_wannier_localization,only:localize_dg_overlapping_wannier_basis
   use dg_overlapping_wannier_localization,only:validate_dg_global_covariant_gauge
   use dg_overlapping_wannier_localization,only:assemble_dg_periodic_spread_gradient
+  use dg_overlapping_wannier_localization,only:localize_dg_occupation_blocks
   implicit none
   complex(8)::values(2,4),phases(3,4),shifted_phases(3,4),moment(3,2),shifted_moment(3,2)
   complex(8)::gradients(3,2,4),rotation(2,2),identity(2,2)
@@ -19,6 +20,8 @@ program test_dg_overlapping_wannier_localization_mpi
   complex(8),allocatable::sweep_transform(:,:)
   complex(8),allocatable::full_spread_gradient(:,:)
   complex(8)::unconstrained_transform(4,4)
+  complex(8)::block_values(4,4),block_gradients(3,4,4),block_representation(4,4,1)
+  complex(8)::block_density_matrix_before(4,4),block_density_matrix_after(4,4)
   integer,allocatable::pair_first(:),pair_second(:)
   integer::sweep_product(2,2),sweep_iterations,spread_evaluations
   real(8),allocatable::pair_support(:)
@@ -29,6 +32,7 @@ program test_dg_overlapping_wannier_localization_mpi
   logical::ok,accepted
   character(256)::message
   real(8)::finite_difference_real,finite_difference_imag,epsilon_fd,spread_plus,spread_minus
+  real(8)::block_occupations(4),block_density_before(4),block_density_after(4)
   integer::ierr,rank,nproc,point
 
   call MPI_Init(ierr)
@@ -274,6 +278,65 @@ program test_dg_overlapping_wannier_localization_mpi
     sweep_iterations,converged,sweep_transform,ok,message)
   call require(ok.and.converged.and.sweep_iterations==1.and.maximum_pair_gradient==0d0,&
     'already localized basis still verifies the complete gradient when the pair graph is empty')
+
+  block_values=(0d0,0d0);block_gradients=(0d0,0d0);block_representation=(0d0,0d0)
+  block_values(1,1)=cos(0.3d0);block_values(1,2)=sin(0.3d0)
+  block_values(2,1)=-sin(0.3d0);block_values(2,2)=cos(0.3d0)
+  block_values(3,3)=cos(0.2d0);block_values(3,4)=sin(0.2d0)
+  block_values(4,3)=-sin(0.2d0);block_values(4,4)=cos(0.2d0)
+  block_gradients(1,:,:)=block_values
+  do point=1,4;block_representation(point,point,1)=1d0;end do
+  block_occupations=[2d0,2d0,0d0,0d0]
+  do point=1,4
+    block_density_before(point)=sum(block_occupations*abs(block_values(:,point))**2)
+  end do
+  block_density_matrix_before=(0d0,0d0)
+  do point=1,4
+    block_density_matrix_before=block_density_matrix_before+block_occupations(point)*&
+      matmul(reshape(conjg(block_values(point,:)),[4,1]),reshape(block_values(point,:),[1,4]))
+  end do
+  call localize_dg_occupation_blocks(MPI_COMM_WORLD,block_values,block_gradients,weights,phases,&
+    block_representation,reshape([1],[1,1]),block_occupations,1d-12,0.1d0,1d-16,1d-7,1d-12,32,&
+    initial_spread,final_spread,maximum_pair_gradient,sweep_iterations,converged,&
+    sweep_transform,ok,message,spread_evaluations)
+  do point=1,4
+    block_density_after(point)=sum(block_occupations*abs(block_values(:,point))**2)
+  end do
+  block_density_matrix_after=(0d0,0d0)
+  do point=1,4
+    block_density_matrix_after=block_density_matrix_after+block_occupations(point)*&
+      matmul(reshape(conjg(block_values(point,:)),[4,1]),reshape(block_values(point,:),[1,4]))
+  end do
+  call require(ok.and.converged,'equal-occupation blocks localize independently')
+  call require(maxval(abs(block_density_after-block_density_before))<1d-12,&
+    'block localization preserves C f C^T density diagonal')
+  call require(maxval(abs(block_density_matrix_after-block_density_matrix_before))<1d-12,&
+    'block localization preserves the complete one-particle density matrix')
+  call require(maxval(abs(sweep_transform(1:2,3:4)))<1d-14.and.&
+    maxval(abs(sweep_transform(3:4,1:2)))<1d-14,&
+    'localization transform never mixes unequal occupations')
+
+  block_values=(0d0,0d0);block_gradients=(0d0,0d0)
+  do point=1,4;block_values(point,point)=1d0;end do
+  block_gradients(1,:,:)=block_values
+  block_occupations=[2d0,1.5d0,0.5d0,0d0]
+  call localize_dg_occupation_blocks(MPI_COMM_WORLD,block_values,block_gradients,weights,phases,&
+    block_representation,reshape([1],[1,1]),block_occupations,1d-12,0.1d0,1d-16,1d-7,1d-12,32,&
+    initial_spread,final_spread,maximum_pair_gradient,sweep_iterations,converged,&
+    sweep_transform,ok,message)
+  call require(ok.and.converged.and.maxval(abs(sweep_transform-block_representation(:,:,1)))<1d-14,&
+    'unequal fractional occupations form deterministic singleton blocks')
+
+  block_representation=(0d0,0d0)
+  block_representation(2,1,1)=1d0;block_representation(1,2,1)=1d0
+  block_representation(4,3,1)=1d0;block_representation(3,4,1)=1d0
+  block_occupations=[2d0,0d0,2d0,0d0]
+  call localize_dg_occupation_blocks(MPI_COMM_WORLD,block_values,block_gradients,weights,phases,&
+    block_representation,reshape([1],[1,1]),block_occupations,1d-12,0.1d0,1d-16,1d-7,1d-12,32,&
+    initial_spread,final_spread,maximum_pair_gradient,sweep_iterations,converged,&
+    sweep_transform,ok,message)
+  call require(.not.ok.and.index(message,'occupation')>0,&
+    'symmetry that mixes unequal occupations is rejected')
 
   nan_value=ieee_value(0d0,ieee_quiet_nan);weights(2)=nan_value
   call evaluate_dg_periodic_localization(values,weights,phases,norm,moment,spread,ok,message)
