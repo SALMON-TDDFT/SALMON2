@@ -871,6 +871,21 @@ assert not re.search(
     construction_source,
     re.I,
 ), "production symmetry action must not broadcast every owner's complete basis"
+assert not re.search(
+    r"allocate\s*\([^)]*lcfo_occupied_representation\s*\(",
+    adapter_body,
+    re.I | re.S,
+), "production must not retain the unused LCFO representation for every point operation"
+assert not re.search(
+    r"allocate\s*\([^)]*image\s*\(\s*nstate\s*,\s*nlocal\s*\)",
+    construction_source,
+    re.I | re.S,
+), "symmetry residual measurement must tile its image workspace"
+assert not re.search(
+    r"allocate\s*\([^)]*residual\s*\(\s*nstate\s*,\s*nlocal\s*\)",
+    construction_source,
+    re.I | re.S,
+), "symmetry residual measurement must tile its residual workspace"
 for provenance in (
     "global_lcfo_fingerprint",
     "occupation_block_fingerprint",

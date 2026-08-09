@@ -94,6 +94,12 @@ Run both reviews and the clean-first overlay, then commit the two files as `feat
 
 ### Task 3: Stream metric representations and residual receipts
 
+Execute this task in two reviewed commits.  Task 3A removes unused all-operation
+storage and tiles operation-local images/residuals.  Task 3B then gives metric,
+inverse-square-root, overlap, and representation matrices genuine block-cyclic
+ownership from their first allocation; wrappers that first replicate a dense
+input do not satisfy Task 3B.  Do not begin Task 4 until both commits pass.
+
 **Files:**
 - Modify: `src/gs/dc/dg_overlapping_wannier_metric.f90`
 - Modify: `src/gs/dc/dg_overlapping_wannier_construction.f90`
@@ -111,7 +117,17 @@ Run metric and construction fixtures on 1/2/4/8 ranks.  Expected: FAIL because a
 
 **Step 3: Implement distributed dense blocks**
 
-Use the existing ScaLAPACK descriptors for metric and overlap blocks.  Process one point representative and one point tile at a time; update squared residual norms directly and release the image tile before the next tile.  Validate each representation, update only the cocycle fingerprint and maximum receipts, and discard the dense operation block after its required products are checked.  Represent pure translations through point permutations and the Gamma phase rule rather than stored dense matrices.
+For Task 3A, process one point representative and one orbital tile at a time;
+update squared residual norms directly, release the image tile before the next
+tile, and do not retain the unused occupied-LCFO representations.  Publish an
+honest byte receipt for every explicit workspace allocation.
+
+For Task 3B, use ScaLAPACK descriptors for metric and overlap blocks from their
+first allocation.  Do not call a wrapper that accepts a replicated dense input.
+Validate each streamed representation, update only the cocycle fingerprint and
+maximum receipts, and discard the operation block after its required products
+are checked.  Represent pure translations through point permutations and the
+Gamma phase rule rather than stored dense matrices.
 
 **Step 4: Focused verification**
 

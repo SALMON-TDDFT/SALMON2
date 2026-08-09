@@ -548,7 +548,6 @@ contains
       global_candidate_metric_inverse(:,:),global_candidate_raw(:,:,:),global_candidate_defect_work(:,:),&
       orbital_owned_full_values(:,:),center_local_buffer_values(:,:)
     complex(8),allocatable::lcfo_fragment_contribution(:,:),lcfo_occupied_core(:,:)
-    complex(8),allocatable::lcfo_occupied_representation(:,:,:)
     real(8),allocatable::weights(:),coordinate(:),spectrum(:),occupations(:),lcfo_retained_occupations(:),&
       gradient_rotation(:,:,:),&
       local_point_rotations(:,:,:)
@@ -583,7 +582,8 @@ contains
     integer::representative_pair(2),local_pair(2)
     integer::complete_sp_core_atom_count
     integer(8)::expected_core_count,expected_box_count,basis_fingerprint,operator_fingerprint,&
-      pseudopotential_fingerprint,nbox8,ncore8,product8,nxy8,local_exact_symmetry_fingerprint
+      pseudopotential_fingerprint,nbox8,ncore8,product8,nxy8,local_exact_symmetry_fingerprint,&
+      lcfo_symmetry_workspace_peak
     real(8)::minimum_eigenvalue,condition_number,closure_residual,spread_max,gauge_correction
     logical::ok,reusable,localization_converged,global_inversion_present
     complex(8),allocatable::core_periodic_phase(:,:),localization_transform(:,:),retained_identity(:,:)
@@ -747,15 +747,17 @@ contains
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global point-action construction failed';end if
     call find_dg_group_identity(global_point_product,global_identity_operation,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global group identity construction failed';end if
-    allocate(lcfo_occupied_representation(ntarget,ntarget,&
-      size(global_point_product,1)),lcfo_total_symmetry_residual(size(global_point_product,1)),&
+    allocate(lcfo_total_symmetry_residual(size(global_point_product,1)),&
       lcfo_boundary_symmetry_residual(size(global_point_product,1)),&
       lcfo_interior_symmetry_residual(size(global_point_product,1)))
     call measure_dg_rank_fixed_symmetry_residuals(dc%icomm_tot,lcfo_occupied_core,ow_core_weights,&
-      global_symmetry_map,lcfo_boundary_mask,lcfo_occupied_representation,&
-      lcfo_total_symmetry_residual,lcfo_boundary_symmetry_residual,lcfo_interior_symmetry_residual,&
-      ok,message)
+      global_symmetry_map,lcfo_boundary_mask,total_residual=lcfo_total_symmetry_residual,&
+      boundary_residual=lcfo_boundary_symmetry_residual,&
+      interior_residual=lcfo_interior_symmetry_residual,ok=ok,message=message,&
+      workspace_peak_bytes=lcfo_symmetry_workspace_peak)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'LCFO occupied symmetry measurement failed';end if
+    if(rank==0)write(*,'(a,i0)')'[OW-GS-DIAGNOSTIC] lcfo_symmetry_workspace_peak_bytes=',&
+      lcfo_symmetry_workspace_peak
     if(rank==0)then
       do io=1,size(global_point_product,1)
         write(*,'(a,i0,3(a,es16.8))')'[OW-GS-DIAGNOSTIC] LCFO_symmetry_operation=',io,&

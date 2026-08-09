@@ -577,35 +577,40 @@ contains
   end subroutine accept_dg_boundary_calibrated_symmetry
 
   subroutine measure_dg_rank_fixed_symmetry_residuals(comm,basis,weights,symmetry_target_box_ids,&
-      boundary_mask,representation,total_residual,boundary_residual,interior_residual,ok,message)
+      boundary_mask,representation,total_residual,boundary_residual,interior_residual,ok,message,&
+      workspace_peak_bytes)
     integer,intent(in)::comm
     complex(real64),intent(in)::basis(:,:)
     real(real64),intent(in)::weights(:)
     integer(int64),intent(in)::symmetry_target_box_ids(:,:)
     logical,intent(in)::boundary_mask(:)
-    complex(real64),intent(out)::representation(:,:,:)
+    complex(real64),intent(out),optional::representation(:,:,:)
     real(real64),intent(out)::total_residual(:),boundary_residual(:),interior_residual(:)
     logical,intent(out)::ok
     character(*),intent(out)::message
+    integer(int64),intent(out),optional::workspace_peak_bytes
 #ifdef USE_MPI
+    integer,parameter::orbital_tile_size=32
     complex(real64),allocatable::local_metric(:,:),metric(:,:),metric_vectors(:,:),metric_inverse_sqrt(:,:),&
-      orthonormal_basis(:,:),image(:,:),local_overlap(:,:),global_overlap(:,:),residual(:,:)
+      orthonormal_basis(:,:),image_tile(:,:),local_overlap(:,:),global_overlap(:,:)
     real(real64),allocatable::metric_spectrum(:),local_norms(:),global_norms(:)
-    integer::rank,nproc,ierr,nstate,nlocal,noperation,operation,i
-    logical::eigen_ok
+    integer::ierr,nstate,nlocal,noperation,operation,i,tile_first,tile_count
+    integer(int64)::tile_bytes,peak_bytes,base_workspace_bytes,complex_bytes,real_bytes
+    logical::eigen_ok,representation_shape_ok
     character(256)::detail
 
-    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
     nstate=size(basis,1);nlocal=size(basis,2);noperation=size(symmetry_target_box_ids,2)
+    representation_shape_ok=.true.
+    if(present(representation))representation_shape_ok=all(shape(representation)==[nstate,nstate,noperation])
     ok=nstate>0.and.nlocal>0.and.noperation>0.and.size(weights)==nlocal.and.&
       size(symmetry_target_box_ids,1)==nlocal.and.size(boundary_mask)==nlocal.and.&
-      all(shape(representation)==[nstate,nstate,noperation]).and.&
+      representation_shape_ok.and.&
       size(total_residual)==noperation.and.size(boundary_residual)==noperation.and.&
       size(interior_residual)==noperation.and.all(weights>=0d0)
+    peak_bytes=0_int64;if(present(workspace_peak_bytes))workspace_peak_bytes=0_int64
     if(.not.ok)then;message='invalid rank-fixed symmetry residual contract';return;end if
     allocate(local_metric(nstate,nstate),metric(nstate,nstate),metric_inverse_sqrt(nstate,nstate),&
-      orthonormal_basis(nstate,nlocal),image(nstate,nlocal),&
-      local_overlap(nstate,nstate),global_overlap(nstate,nstate),residual(nstate,nlocal),&
+      orthonormal_basis(nstate,nlocal),local_overlap(nstate,nstate),global_overlap(nstate,nstate),&
       local_norms(3),global_norms(3))
     do i=1,nstate
       local_metric(i,:)=matmul(conjg(basis(i,:))*weights,transpose(basis))
@@ -619,19 +624,50 @@ contains
     do i=1,nstate;metric_inverse_sqrt(:,i)=metric_inverse_sqrt(:,i)/sqrt(metric_spectrum(i));end do
     metric_inverse_sqrt=matmul(metric_inverse_sqrt,conjg(transpose(metric_vectors)))
     orthonormal_basis=matmul(metric_inverse_sqrt,basis)
+    complex_bytes=int(storage_size((0d0,0d0))/8,int64)
+    real_bytes=int(storage_size(0d0)/8,int64)
+    base_workspace_bytes=complex_bytes*int(size(local_metric)+size(metric)+size(metric_vectors)+&
+      size(metric_inverse_sqrt)+size(orthonormal_basis)+size(local_overlap)+size(global_overlap),int64)+&
+      real_bytes*int(size(metric_spectrum)+size(local_norms)+size(global_norms),int64)
+    peak_bytes=base_workspace_bytes
     do operation=1,noperation
-      call exchange_dg_point_permuted_orbital_rows(comm,orthonormal_basis,&
-        symmetry_target_box_ids(:,operation),image,ok,message)
-      if(.not.ok)return
-      do i=1,nstate
-        local_overlap(i,:)=matmul(conjg(orthonormal_basis(i,:))*weights,transpose(image))
-      end do
+      local_overlap=(0d0,0d0)
+      do tile_first=1,nstate,orbital_tile_size
+        tile_count=min(orbital_tile_size,nstate-tile_first+1)
+        allocate(image_tile(tile_count,nlocal))
+        tile_bytes=int(storage_size((0d0,0d0))/8,int64)*int(size(image_tile),int64)
+        peak_bytes=max(peak_bytes,base_workspace_bytes+tile_bytes)
+        call exchange_dg_point_permuted_orbital_rows(comm,&
+          orthonormal_basis(tile_first:tile_first+tile_count-1,:),&
+          symmetry_target_box_ids(:,operation),image_tile,ok,message)
+        if(.not.ok)return
+        do i=1,nstate
+          local_overlap(i,tile_first:tile_first+tile_count-1)=&
+            matmul(conjg(orthonormal_basis(i,:))*weights,transpose(image_tile))
+        enddo
+        deallocate(image_tile)
+      enddo
       call MPI_Allreduce(local_overlap,global_overlap,nstate*nstate,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
-      representation(:,:,operation)=global_overlap
-      residual=image-matmul(transpose(global_overlap),orthonormal_basis)
-      local_norms(1)=sum(spread(weights,1,nstate)*abs(residual)**2)
-      local_norms(2)=sum(spread(weights*merge(1d0,0d0,boundary_mask),1,nstate)*abs(residual)**2)
-      local_norms(3)=sum(spread(weights*merge(0d0,1d0,boundary_mask),1,nstate)*abs(residual)**2)
+      if(present(representation))representation(:,:,operation)=global_overlap
+      local_norms=0d0
+      do tile_first=1,nstate,orbital_tile_size
+        tile_count=min(orbital_tile_size,nstate-tile_first+1)
+        allocate(image_tile(tile_count,nlocal))
+        tile_bytes=int(storage_size((0d0,0d0))/8,int64)*int(size(image_tile),int64)
+        peak_bytes=max(peak_bytes,base_workspace_bytes+tile_bytes)
+        call exchange_dg_point_permuted_orbital_rows(comm,&
+          orthonormal_basis(tile_first:tile_first+tile_count-1,:),&
+          symmetry_target_box_ids(:,operation),image_tile,ok,message)
+        if(.not.ok)return
+        image_tile=image_tile-matmul(transpose(global_overlap(:,tile_first:tile_first+tile_count-1)),&
+          orthonormal_basis)
+        local_norms(1)=local_norms(1)+sum(spread(weights,1,tile_count)*abs(image_tile)**2)
+        local_norms(2)=local_norms(2)+sum(spread(weights*merge(1d0,0d0,boundary_mask),1,tile_count)*&
+          abs(image_tile)**2)
+        local_norms(3)=local_norms(3)+sum(spread(weights*merge(0d0,1d0,boundary_mask),1,tile_count)*&
+          abs(image_tile)**2)
+        deallocate(image_tile)
+      enddo
       call MPI_Allreduce(local_norms,global_norms,3,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
       total_residual(operation)=sqrt(max(0d0,global_norms(1)))
       boundary_residual(operation)=sqrt(max(0d0,global_norms(2)))
@@ -639,9 +675,11 @@ contains
     end do
     ok=all(ieee_is_finite(total_residual)).and.all(ieee_is_finite(boundary_residual)).and.&
       all(ieee_is_finite(interior_residual))
+    if(present(workspace_peak_bytes))workspace_peak_bytes=peak_bytes
     if(ok)then;message='';else;message='rank-fixed symmetry residual is not finite';end if
 #else
     ok=.false.;message='rank-fixed symmetry residual measurement requires MPI'
+    if(present(workspace_peak_bytes))workspace_peak_bytes=0_int64
 #endif
   end subroutine measure_dg_rank_fixed_symmetry_residuals
 

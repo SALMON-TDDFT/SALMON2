@@ -64,6 +64,7 @@ program test_dg_overlapping_wannier_construction_mpi
   integer,allocatable::reference_owner(:),reference_center_fragment(:)
   integer(8),allocatable::reference_center_box_ids(:)
   integer(8)::reference_fingerprint
+  integer(8)::symmetry_workspace_peak
   integer(8)::closure_fingerprint,rounded_closure_fingerprint
   integer(8),allocatable::closure_ids(:),closure_map(:,:)
   integer(8),allocatable::stream_ids(:),stream_map(:,:)
@@ -297,7 +298,10 @@ program test_dg_overlapping_wannier_construction_mpi
   calibrated_basis=1d0;calibrated_basis(1,1)=1.1d0
   call measure_dg_rank_fixed_symmetry_residuals(comm,calibrated_basis,[1d0,1d0,1d0,1d0],&
     calibrated_map,calibrated_boundary,calibrated_representation,calibrated_total,&
-    calibrated_boundary_residual,calibrated_interior_residual,ok,message)
+    calibrated_boundary_residual,calibrated_interior_residual,ok,message,&
+    workspace_peak_bytes=symmetry_workspace_peak)
+  call require(symmetry_workspace_peak>0_8,&
+    'streamed symmetry residual measurement publishes a workspace receipt')
   call require(ok.and.calibrated_boundary_residual(2)>10d0*calibrated_interior_residual(2),&
     'rank-fixed residual identifies boundary stitching error')
   calibrated_allowance=1.01d0*calibrated_boundary_residual(2)
