@@ -28,14 +28,29 @@ for index, reference in references.items():
         sys.exit(1)
 
 residuals = []
+subspace = None
+degree = None
 pattern = re.compile(r"CheFSI cycle:\s+\d+\s+maximum residual:\s+(\S+)")
 for line in output_file.read_text().splitlines():
+    subspace_match = re.search(r"CheFSI subspace:\s+(\d+)\s+target:\s+(\d+)", line)
+    if subspace_match:
+        subspace = tuple(map(int, subspace_match.groups()))
+    degree_match = re.search(r"CheFSI polynomial degree:\s+(\d+)", line)
+    if degree_match:
+        degree = int(degree_match.group(1))
     match = pattern.search(line)
     if match:
         residuals.append(float(match.group(1)))
 
 if not residuals or residuals[-1] > 1.0e-7:
     print("CheFSI did not reach the requested residual tolerance")
+    sys.exit(1)
+
+if subspace != (70, 66):
+    print("unexpected CheFSI subspace: %s" % (subspace,))
+    sys.exit(1)
+if degree != 20:
+    print("unexpected CheFSI polynomial degree: %s" % degree)
     sys.exit(1)
 
 print("final CheFSI residual = %.6e" % residuals[-1])

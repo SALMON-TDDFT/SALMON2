@@ -19,7 +19,6 @@ module lcfo_diag_chefsi
   private
 
   integer, parameter :: dense_block_size = 64
-  integer, parameter :: filter_degree = 20
   integer, parameter :: max_filter_cycle = 200
   integer, parameter :: lanczos_max_steps = 30
   real(8), parameter :: residual_tolerance = 1d-7
@@ -62,7 +61,7 @@ module lcfo_diag_chefsi
 
 contains
 
-  subroutine diag_chefsi(dc,nspin,n_basis,n_mat,n_halo,halo_src, &
+  subroutine diag_chefsi(dc,nspin,filter_degree,n_basis,n_mat,n_halo,halo_src, &
   & halo_dst,halo_root_src,halo_dvec,h_diag,h_halo,esp_tot,coef_wf)
     use communication, only: comm_bcast, comm_create_group, &
     & comm_free_group, comm_get_max, comm_isend, comm_irecv, &
@@ -73,7 +72,7 @@ contains
     & timer_begin,timer_end
     implicit none
     type(s_dcdft), intent(in) :: dc
-    integer, intent(in) :: nspin,n_basis(:,:),n_mat(:),n_halo
+    integer, intent(in) :: nspin,filter_degree,n_basis(:,:),n_mat(:),n_halo
     integer, intent(in) :: halo_src(:),halo_dst(:),halo_root_src(:)
     integer, intent(in) :: halo_dvec(:,:)
     real(8), intent(in) :: h_diag(:,:,:),h_halo(:,:,:,:)
@@ -88,7 +87,7 @@ contains
     call timer_begin(LOG_CHEFSI_SETUP)
     max_basis = size(h_diag,1)
     npadded = max_basis*dc%n_frag
-    nbuffer = min(256,max(8,dc%nstate_tot/100))
+    nbuffer = ceiling(0.05d0*real(dc%nstate_tot,8))
     nbuffer = min(nbuffer,minval(n_mat)-dc%nstate_tot)
     nbuffer = max(0,nbuffer)
     nsub = dc%nstate_tot+nbuffer
