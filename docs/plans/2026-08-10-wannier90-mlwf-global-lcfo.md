@@ -21,10 +21,13 @@ For every task below:
 5. build from a clean `git archive HEAD` overlay plus only the task diff and explicit parent-prerequisite commits; and
 6. commit only reviewed task files, leaving the existing Si64/HHG worktree changes unstaged until the final acceptance task.
 
-This plan is a prerequisite inserted between Task 3B and Task 4 of
-`docs/plans/2026-08-09-memory-bounded-global-wannier-symmetry.md`.  Complete
-that plan's Task 3B first.  Its Tasks 4--6 then use the MLWF implementation and
-must not restore `localize_dg_occupation_blocks` as the OW V3 acceptance path.
+This plan begins after memory Task 3B1 has provided cyclic metric/residual and
+row-owned symmetry-overlap producers.  Tasks W1--W2 consume those producers.
+Task W3 removes the replicated custom-localizer consumer and completes memory
+Task 3B2 by adding row-owned post-MLWF group validation.  Only then is memory
+Task 3B complete and its Tasks 4--6 may proceed.  This ordering avoids creating
+a temporary full-representation adapter solely for a localization path that is
+being removed; it does not waive any Task 3B receipt or review.
 
 ### Task W1: Add a strict Wannier90 library adapter
 

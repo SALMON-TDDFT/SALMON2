@@ -105,8 +105,10 @@ adds OW-sized direct-block EigenExa initialization, cyclic metric and streamed
 inverse-square-root residuals, and the row-owned symmetry-overlap producer.
 Task 3B2 migrates group closure, metric unitarity, fixed-rank selection, and all
 production consumers to those distributed rows and removes the replicated
-producer from `main_dft`.  Passing 3B1 alone does not complete Task 3B and does
-not permit Task 4 or Wannier90 implementation to begin.
+producer from `main_dft`.  Because the approved Wannier90 path removes the one
+remaining custom-localizer consumer that requires a replicated representation,
+Wannier90 Tasks W1--W2 may follow 3B1 and W3 completes 3B2.  Passing 3B1 alone
+does not complete Task 3B and still does not permit Task 4.
 
 **Files:**
 - Modify: `src/gs/dc/dg_overlapping_wannier_metric.f90`
