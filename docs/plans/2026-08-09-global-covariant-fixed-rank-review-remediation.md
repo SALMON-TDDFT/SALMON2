@@ -13,17 +13,20 @@
 ### Task 1: Repair candidate closure semantics
 
 **Files:**
+- Modify: `src/gs/dc/lcfo.f90`
 - Modify: `src/gs/dc/dg_overlapping_wannier_construction.f90`
 - Modify: `src/gs/main_dft.f90`
 - Modify: `tests/dg/test_dg_overlapping_wannier_construction_mpi.f90`
 
-1. Add RED cases for a non-first identity operation, mandatory processing of every required seed, minimum-rank orbit crossing, measured projector leakage, metric unitarity, and group closure.
+1. Add RED cases showing that independently rotated fragment eigenstates enlarge the occupied closure, while LCFO coefficient reconstruction gives the same full-system occupied projector and preserves its exact rank.  Also cover a non-first identity operation, mandatory processing of every required seed, minimum-rank orbit crossing, measured projector leakage, metric unitarity, and group closure.
 2. Run the construction fixture and confirm the intended failures.
-3. Find the identity from both sides of the product table; reject missing or duplicate identities.
-4. Prevent minimum-rank exit until all required seeds have been processed and publish a valid required retained rank.
-5. Carry point-action phases into each streamed symmetry image.
-6. Measure and reject candidate leakage before representation synchronization.
-7. Run construction on 1/2/4/8 ranks and `git diff --check`.
+3. Expose an in-memory LCFO occupied contribution path that reuses the normal DC-LCFO Hamiltonian and LAPACK/EigenExa coefficient construction.  Evaluate each fragment contribution on its buffered box, accumulate matching physical IDs onto unique owner cores, and never gather full-system real-space states.
+4. Require the coherent occupied seed to close under the full atomic group without rank increase before optional localization seeds are admitted.
+5. Find the identity from both sides of the product table; reject missing or duplicate identities.
+6. Prevent minimum-rank exit until all required seeds have been processed and publish a valid required retained rank.
+7. Carry point-action phases into each streamed symmetry image.
+8. Measure and reject candidate leakage before representation synchronization.
+9. Run construction on 1/2/4/8 ranks and `git diff --check`.
 
 ### Task 2: Select exact rank with measured algebra
 
