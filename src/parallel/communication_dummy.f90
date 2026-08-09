@@ -40,6 +40,7 @@ module communication
   public :: comm_irecv
   public :: comm_wait
   public :: comm_wait_all
+  public :: comm_wait_some
 
   ! p2p persistent communication
   ! application stops when a following routines is called in no-mpi environment
@@ -615,6 +616,19 @@ contains
     integer, intent(in) :: reqs(:)
     UNUSED_VARIABLE(reqs)
     ! do nothing
+  end subroutine
+
+  subroutine comm_wait_some(reqs,indices,ncompleted)
+    implicit none
+    integer, intent(inout) :: reqs(:)
+    integer, intent(out) :: indices(:),ncompleted
+    integer :: i
+
+    UNUSED_VARIABLE(reqs)
+    ncompleted = size(reqs)
+    do i=1,ncompleted
+      indices(i) = i
+    end do
   end subroutine
 
   function comm_send_init_array3d_double(invalue, ndest, ntag, ngroup) result(req)
