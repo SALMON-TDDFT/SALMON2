@@ -459,7 +459,8 @@ contains
 #ifdef USE_SCALAPACK
     subroutine diag_chefsi_driver
       use lcfo_diag_chefsi, only: diag_chefsi
-      use salmon_global, only: lcfo_diag_chefsi_filter_degree
+      use salmon_global, only: lcfo_diag_chefsi_filter_degree, &
+      & lcfo_diag_chefsi_filter_chunk_size
       implicit none
       integer :: h,frag
       integer, allocatable :: halo_src(:),halo_dst(:)
@@ -482,8 +483,8 @@ contains
         if(dc%id_frag==0) h_halo(:,:,:,h) = halo(h)%mat_H_local
       end do
 
-      call diag_chefsi(dc,nspin,lcfo_diag_chefsi_filter_degree,n_basis,n_mat, &
-      & n_halo,halo_src, &
+      call diag_chefsi(dc,nspin,lcfo_diag_chefsi_filter_degree, &
+      & lcfo_diag_chefsi_filter_chunk_size,n_basis,n_mat,n_halo,halo_src, &
       & halo_dst,halo_root_src,halo_dvec,mat_H_local,h_halo, &
       & esp_tot,coef_wf)
 

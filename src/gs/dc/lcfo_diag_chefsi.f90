@@ -21,6 +21,8 @@ module lcfo_diag_chefsi
   integer, parameter :: dense_block_size = 64
   integer, parameter :: max_filter_cycle = 200
   integer, parameter :: lanczos_max_steps = 30
+  integer(8), parameter :: filter_workspace_target_bytes = &
+  & 64_8*1024_8*1024_8
   real(8), parameter :: residual_tolerance = 1d-7
   real(8), parameter :: lanczos_residual_factor = 10d0
   real(8), parameter :: lanczos_relative_margin = 0.1d0
@@ -49,6 +51,9 @@ module lcfo_diag_chefsi
 
   type :: s_chefsi_workspace
     type(s_hamiltonian_workspace) :: hamiltonian
+    integer :: filter_chunk_width = 1
+    integer :: filter_chunk_count = 1
+    real(8) :: filter_workspace_mib = 0d0
     real(8), allocatable :: q0(:,:),q1(:,:),q2(:,:),hx(:,:)
     real(8), allocatable :: xd(:,:),hxd(:,:),xrot(:,:)
     real(8), allocatable :: projected(:,:),ritz_vector(:,:)
@@ -61,7 +66,8 @@ module lcfo_diag_chefsi
 
 contains
 
-  subroutine diag_chefsi(dc,nspin,filter_degree,n_basis,n_mat,n_halo,halo_src, &
+  subroutine diag_chefsi(dc,nspin,filter_degree,filter_chunk_size,n_basis, &
+  & n_mat,n_halo,halo_src, &
   & halo_dst,halo_root_src,halo_dvec,h_diag,h_halo,esp_tot,coef_wf)
     use communication, only: comm_bcast, comm_create_group, &
     & comm_free_group, comm_get_max, comm_isend, comm_irecv, &
@@ -72,7 +78,8 @@ contains
     & timer_begin,timer_end
     implicit none
     type(s_dcdft), intent(in) :: dc
-    integer, intent(in) :: nspin,filter_degree,n_basis(:,:),n_mat(:),n_halo
+    integer, intent(in) :: nspin,filter_degree,filter_chunk_size
+    integer, intent(in) :: n_basis(:,:),n_mat(:),n_halo
     integer, intent(in) :: halo_src(:),halo_dst(:),halo_root_src(:)
     integer, intent(in) :: halo_dvec(:,:)
     real(8), intent(in) :: h_diag(:,:,:),h_halo(:,:,:,:)
@@ -191,6 +198,15 @@ contains
       & layout_small,nstate,eigenvalue,workspace)
       x = 0d0
 
+      if(dc%id_tot==0) then
+        write(*,*) "CheFSI filter chunk width:", &
+        & workspace%filter_chunk_width
+        write(*,*) "CheFSI filter chunk count:", &
+        & workspace%filter_chunk_count
+        write(*,*) "CheFSI filter workspace per process [MiB]:", &
+        & workspace%filter_workspace_mib
+      end if
+
       call initialize_subspace(s,layout_natural,x)
       call rayleigh_ritz(s,layout_natural,layout_dense,layout_small, &
       & x,eigenvalue,workspace)
@@ -215,8 +231,9 @@ contains
         if(max_residual <= residual_tolerance) exit
         if(nsub==n_mat(s)) exit
         lambda_cut = eigenvalue(nsub)
-        call chebyshev_filter(s,layout_natural,x,eigenvalue(1), &
-        & lambda_cut,lambda_upper,gershgorin_upper,workspace)
+        call chebyshev_filter(s,layout_natural,layout_dense,x, &
+        & eigenvalue(1),lambda_cut,lambda_upper,gershgorin_upper, &
+        & workspace)
         call orthonormalize(layout_natural,layout_dense, &
         & layout_small,x,workspace)
         call rayleigh_ritz(s,layout_natural,layout_dense, &
@@ -249,17 +266,36 @@ contains
       integer, intent(in) :: nstate
       real(8), intent(inout) :: eigenvalue(:)
       type(s_chefsi_workspace), intent(out) :: workspace
-      integer :: info,liwork,lwork,lwork_min,ncol
+      integer :: info,liwork,lwork,lwork_min,ncol,max_ncol
+      integer(8) :: bytes_per_column,estimated_bytes
       real(8) :: work_query(1)
 
       call timer_begin(LOG_CHEFSI_SETUP)
       ncol = max(1,layout_n%ncol_local)
+      max_ncol = natural_column_block(nsub,grid_natural%npcol)
+      bytes_per_column = 8_8*(3_8*int(layout_n%lda,8) &
+      & +int(max_basis,8)*int(max(1,n_halo),8))
+      if(filter_chunk_size>0) then
+        workspace%filter_chunk_width = min(max_ncol,filter_chunk_size)
+      else
+        workspace%filter_chunk_width = int(max(1_8, &
+        & filter_workspace_target_bytes/max(1_8,bytes_per_column)))
+        workspace%filter_chunk_width = min(max_ncol, &
+        & workspace%filter_chunk_width)
+      end if
+      workspace%filter_chunk_count = (max_ncol &
+      & +workspace%filter_chunk_width-1)/workspace%filter_chunk_width
+      estimated_bytes = bytes_per_column &
+      & *int(workspace%filter_chunk_width,8)
+      workspace%filter_workspace_mib = real(estimated_bytes,8) &
+      & /real(1024_8*1024_8,8)
       allocate(workspace%hamiltonian%request_send(max(1,n_halo)))
       allocate(workspace%hamiltonian%request_recv(max(1,n_halo)))
-      allocate(workspace%hamiltonian%x_halo(max_basis,ncol,max(1,n_halo)))
-      allocate(workspace%q0(layout_n%lda,ncol))
-      allocate(workspace%q1(layout_n%lda,ncol))
-      allocate(workspace%q2(layout_n%lda,ncol))
+      allocate(workspace%hamiltonian%x_halo(max_basis, &
+      & workspace%filter_chunk_width,max(1,n_halo)))
+      allocate(workspace%q0(layout_n%lda,workspace%filter_chunk_width))
+      allocate(workspace%q1(layout_n%lda,workspace%filter_chunk_width))
+      allocate(workspace%q2(layout_n%lda,workspace%filter_chunk_width))
       allocate(workspace%hx(layout_n%lda,ncol))
       allocate(workspace%xd(layout_d%lda,max(1,layout_d%ncol_local)))
       allocate(workspace%hxd(layout_d%lda,max(1,layout_d%ncol_local)))
@@ -410,23 +446,53 @@ contains
       call timer_end(LOG_CHEFSI_H_APPLY)
     end subroutine apply_hamiltonian
 
-    subroutine chebyshev_filter(s,layout,x,lower,cutoff,upper, &
+    subroutine apply_hamiltonian_full(s,layout,x,y,workspace)
+      implicit none
+      integer, intent(in) :: s
+      type(s_matrix_layout), intent(in) :: layout
+      real(8), intent(in) :: x(:,:)
+      real(8), intent(out) :: y(:,:)
+      type(s_chefsi_workspace), intent(inout) :: workspace
+      type(s_matrix_layout) :: chunk_layout
+      integer :: first,last
+
+      y = 0d0
+      first = 1
+      do while(first<=layout%ncol_local)
+        last = min(layout%ncol_local, &
+        & first+workspace%filter_chunk_width-1)
+        chunk_layout = layout
+        chunk_layout%ncol_local = last-first+1
+        call apply_hamiltonian(s,chunk_layout,x(:,first:last), &
+        & y(:,first:last),workspace%hamiltonian)
+        first = last+1
+      end do
+    end subroutine apply_hamiltonian_full
+
+    subroutine chebyshev_filter(s,layout_n,layout_d,x,lower,cutoff,upper, &
     & fallback_upper,workspace)
       use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
       use timer, only: LOG_CHEFSI_FILTER,timer_begin,timer_end
       implicit none
       integer, intent(in) :: s
-      type(s_matrix_layout), intent(in) :: layout
+      type(s_matrix_layout), intent(in) :: layout_n,layout_d
       real(8), intent(inout) :: x(:,:)
       real(8), intent(in) :: lower,cutoff,fallback_upper
       real(8), intent(inout) :: upper
       type(s_chefsi_workspace), intent(inout) :: workspace
-      integer :: attempt,degree,ncol,unstable
+      type(s_matrix_layout) :: chunk_layout
+      integer :: attempt,degree,first,ichunk,last,nchunk,ncol,unstable
+      integer :: unstable_chunk
       real(8) :: center,log_limit,max_amplitude,radius,scaled_lower
+      logical :: can_retry
 
-      ncol = layout%ncol_local
-      if(ncol==0) return
+      ncol = layout_n%ncol_local
       call timer_begin(LOG_CHEFSI_FILTER)
+      can_retry = upper<fallback_upper*(1d0-10d0*epsilon(1d0))
+      if(can_retry) then
+        workspace%xrot = 0d0
+        call redistribute_to_dense(layout_n,x,layout_d,workspace%xrot)
+      end if
       do attempt=1,2
         center = 0.5d0*(upper+cutoff)
         radius = 0.5d0*(upper-cutoff)
@@ -434,47 +500,67 @@ contains
           stop "DC-LCFO CheFSI: invalid filter interval."
         end if
 
-        workspace%q0(:,1:ncol) = x(:,1:ncol)
-        call apply_hamiltonian(s,layout,workspace%q0,workspace%hx, &
-        & workspace%hamiltonian)
-        workspace%q1(:,1:ncol) = (workspace%hx(:,1:ncol) &
-        & -center*workspace%q0(:,1:ncol))/radius
-        do degree=2,filter_degree
-          call apply_hamiltonian(s,layout,workspace%q1,workspace%hx, &
-          & workspace%hamiltonian)
-          workspace%q2(:,1:ncol) = 2d0*(workspace%hx(:,1:ncol) &
-          & -center*workspace%q1(:,1:ncol))/radius &
-          & -workspace%q0(:,1:ncol)
-          workspace%q0(:,1:ncol) = workspace%q1(:,1:ncol)
-          workspace%q1(:,1:ncol) = workspace%q2(:,1:ncol)
-        end do
-
         unstable = 0
-        if(any(.not.ieee_is_finite(workspace%q1(:,1:ncol)))) then
-          unstable = 1
-        else
-          max_amplitude = maxval(abs(workspace%q1(:,1:ncol)))
-          scaled_lower = abs((lower-center)/radius)
-          log_limit = log(filter_growth_margin)
-          if(scaled_lower>1d0) then
-            log_limit = log_limit+real(filter_degree,8)* &
-            & log(scaled_lower+sqrt(scaled_lower**2-1d0))
+        do ichunk=1,workspace%filter_chunk_count
+          first = (ichunk-1)*workspace%filter_chunk_width+1
+          last = min(ncol,first+workspace%filter_chunk_width-1)
+          nchunk = max(0,last-first+1)
+          unstable_chunk = 0
+          if(nchunk>0) then
+            chunk_layout = layout_n
+            chunk_layout%ncol_local = nchunk
+            workspace%q0(:,1:nchunk) = x(:,first:last)
+            call apply_hamiltonian(s,chunk_layout, &
+            & workspace%q0(:,1:nchunk),workspace%q1(:,1:nchunk), &
+            & workspace%hamiltonian)
+            workspace%q1(:,1:nchunk) = (workspace%q1(:,1:nchunk) &
+            & -center*workspace%q0(:,1:nchunk))/radius
+            do degree=2,filter_degree
+              call apply_hamiltonian(s,chunk_layout, &
+              & workspace%q1(:,1:nchunk),workspace%q2(:,1:nchunk), &
+              & workspace%hamiltonian)
+              workspace%q2(:,1:nchunk) = 2d0*( &
+              & workspace%q2(:,1:nchunk) &
+              & -center*workspace%q1(:,1:nchunk))/radius &
+              & -workspace%q0(:,1:nchunk)
+              workspace%q0(:,1:nchunk) = workspace%q1(:,1:nchunk)
+              workspace%q1(:,1:nchunk) = workspace%q2(:,1:nchunk)
+            end do
+
+            if(any(.not.ieee_is_finite( &
+            & workspace%q1(:,1:nchunk)))) then
+              unstable_chunk = 1
+            else
+              max_amplitude = maxval(abs(workspace%q1(:,1:nchunk)))
+              scaled_lower = abs((lower-center)/radius)
+              log_limit = log(filter_growth_margin)
+              if(scaled_lower>1d0) then
+                log_limit = log_limit+real(filter_degree,8)* &
+                & log(scaled_lower+sqrt(scaled_lower**2-1d0))
+              end if
+              log_limit = min(log(huge(1d0))-log(10d0),log_limit)
+              if(max_amplitude>0d0) then
+                if(log(max_amplitude)>log_limit) unstable_chunk = 1
+              end if
+            end if
           end if
-          log_limit = min(log(huge(1d0))-log(10d0),log_limit)
-          if(max_amplitude>0d0) then
-            if(log(max_amplitude)>log_limit) unstable = 1
+          call comm_get_max(unstable_chunk,dc%icomm_tot)
+          if(unstable_chunk/=0) then
+            unstable = 1
+            exit
           end if
-        end if
-        call comm_get_max(unstable,dc%icomm_tot)
+          if(nchunk>0) x(:,first:last) = workspace%q1(:,1:nchunk)
+        end do
         if(unstable==0) exit
-        if(upper>=fallback_upper*(1d0-10d0*epsilon(1d0))) then
+        if(.not.can_retry) then
           stop "DC-LCFO CheFSI: unstable Chebyshev recurrence."
         end if
         upper = fallback_upper
+        call redistribute_to_natural(layout_d,workspace%xrot,layout_n,x)
+        can_retry = .false.
         if(dc%id_tot==0) write(*,*) &
         & "CheFSI filter fallback to Gershgorin upper bound:",upper
       end do
-      x(:,1:ncol) = workspace%q1(:,1:ncol)
       call timer_end(LOG_CHEFSI_FILTER)
     end subroutine chebyshev_filter
 
@@ -551,8 +637,7 @@ contains
       type(s_chefsi_workspace), intent(inout) :: workspace
 
       call timer_begin(LOG_CHEFSI_RAYLEIGH_RITZ)
-      call apply_hamiltonian(s,layout_n,x,workspace%hx, &
-      & workspace%hamiltonian)
+      call apply_hamiltonian_full(s,layout_n,x,workspace%hx,workspace)
       workspace%xd = 0d0
       workspace%hxd = 0d0
       call redistribute_to_dense(layout_n,x,layout_d,workspace%xd)
@@ -611,8 +696,7 @@ contains
       integer :: global_column,local_column,nb
 
       call timer_begin(LOG_CHEFSI_RESIDUAL)
-      call apply_hamiltonian(s,layout,x,workspace%hx, &
-      & workspace%hamiltonian)
+      call apply_hamiltonian_full(s,layout,x,workspace%hx,workspace)
       workspace%residual_local = 0d0
       nb = n_basis(dc%i_frag,s)
       do local_column=1,layout%ncol_local

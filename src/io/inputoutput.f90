@@ -602,6 +602,7 @@ contains
       & yn_dc_lcfo_diag, &
       & lcfo_eigensolver, &
       & lcfo_diag_chefsi_filter_degree, &
+      & lcfo_diag_chefsi_filter_chunk_size, &
       & nstate_frag, &
       & energy_cut, &
       & lambda_cut
@@ -1032,6 +1033,7 @@ contains
     lcfo_eigensolver = 'lapack'
 #endif
     lcfo_diag_chefsi_filter_degree = 60
+    lcfo_diag_chefsi_filter_chunk_size = 0
     nstate_frag = 0
     energy_cut = 0d0
     lambda_cut = 1d-3
@@ -1663,6 +1665,7 @@ contains
     call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
     call comm_bcast(lcfo_eigensolver, nproc_group_global)
     call comm_bcast(lcfo_diag_chefsi_filter_degree, nproc_group_global)
+    call comm_bcast(lcfo_diag_chefsi_filter_chunk_size, nproc_group_global)
     call comm_bcast(nstate_frag, nproc_group_global)
     call comm_bcast(energy_cut, nproc_group_global)
     energy_cut = energy_cut * uenergy_to_au
@@ -2629,6 +2632,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') "lcfo_eigensolver",trim(lcfo_eigensolver)
       write(fh_variables_log, '("#",4X,A,"=",I6)') &
       & "lcfo_diag_chefsi_filter_degree",lcfo_diag_chefsi_filter_degree
+      write(fh_variables_log, '("#",4X,A,"=",I6)') &
+      & "lcfo_diag_chefsi_filter_chunk_size", &
+      & lcfo_diag_chefsi_filter_chunk_size
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
@@ -2749,6 +2755,9 @@ contains
 #ifdef USE_SCALAPACK
       if(lcfo_diag_chefsi_filter_degree<1) then
         stop 'lcfo_diag_chefsi_filter_degree must be a positive integer.'
+      end if
+      if(lcfo_diag_chefsi_filter_chunk_size<0) then
+        stop 'lcfo_diag_chefsi_filter_chunk_size must be nonnegative.'
       end if
 #else
       stop 'lcfo_eigensolver=chefsi requires a build with ScaLAPACK support.'

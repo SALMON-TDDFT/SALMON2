@@ -30,6 +30,8 @@ for index, reference in references.items():
 residuals = []
 subspace = None
 degree = None
+chunk_width = None
+chunk_count = None
 pattern = re.compile(r"CheFSI cycle:\s+\d+\s+maximum residual:\s+(\S+)")
 for line in output_file.read_text().splitlines():
     subspace_match = re.search(r"CheFSI subspace:\s+(\d+)\s+target:\s+(\d+)", line)
@@ -38,6 +40,12 @@ for line in output_file.read_text().splitlines():
     degree_match = re.search(r"CheFSI polynomial degree:\s+(\d+)", line)
     if degree_match:
         degree = int(degree_match.group(1))
+    chunk_width_match = re.search(r"CheFSI filter chunk width:\s+(\d+)", line)
+    if chunk_width_match:
+        chunk_width = int(chunk_width_match.group(1))
+    chunk_count_match = re.search(r"CheFSI filter chunk count:\s+(\d+)", line)
+    if chunk_count_match:
+        chunk_count = int(chunk_count_match.group(1))
     match = pattern.search(line)
     if match:
         residuals.append(float(match.group(1)))
@@ -51,6 +59,10 @@ if subspace != (70, 66):
     sys.exit(1)
 if degree != 60:
     print("unexpected CheFSI polynomial degree: %s" % degree)
+    sys.exit(1)
+if chunk_width != 17 or chunk_count != 5:
+    print("unexpected CheFSI filter chunks: width=%s count=%s" %
+          (chunk_width, chunk_count))
     sys.exit(1)
 
 print("final CheFSI residual = %.6e" % residuals[-1])

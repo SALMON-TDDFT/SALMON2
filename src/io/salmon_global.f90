@@ -448,6 +448,7 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_dc_lcfo_diag
   character(16)  :: lcfo_eigensolver
   integer        :: lcfo_diag_chefsi_filter_degree
+  integer        :: lcfo_diag_chefsi_filter_chunk_size
   integer        :: nstate_frag
   real(8)        :: energy_cut
   real(8)        :: lambda_cut
