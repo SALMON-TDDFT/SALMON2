@@ -31,6 +31,7 @@ def source(path: str) -> str:
 global_source = source("src/io/salmon_global.f90")
 input_source = source("src/io/inputoutput.f90")
 main_source = source("src/gs/main_dft.f90")
+eigenexa_source = source("src/gs/eigen_subdiag_eigenexa.f90")
 rt_main_source = source("src/rt/main_tddft.f90")
 scf_source = source("src/gs/scf_iteration_dft.f90")
 dcdft_source = source("src/gs/dc/dcdft.f90")
@@ -886,6 +887,21 @@ assert not re.search(
     construction_source,
     re.I | re.S,
 ), "symmetry residual measurement must tile its residual workspace"
+direct_eigenexa = re.search(
+    r"subroutine\s+eigen_pdsyevd_ex_distributed_blocks\b(?P<body>.*?)end\s+subroutine",
+    eigenexa_source,
+    re.I | re.S,
+)
+assert direct_eigenexa, "missing direct distributed-block EigenExa adapter"
+assert re.search(r"call\s+eigen_sx\s*\(", direct_eigenexa.group("body"), re.I), (
+    "distributed-block EigenExa adapter must diagonalize its local cyclic block directly"
+)
+assert not re.search(r"\bh\s*\(\s*:\s*,\s*:\s*\)", direct_eigenexa.group("body"), re.I), (
+    "distributed-block EigenExa adapter must not accept a replicated dense input"
+)
+assert "work_matrix" not in direct_eigenexa.group("body").lower(), (
+    "distributed-block EigenExa adapter must consume its local block without a duplicate"
+)
 for provenance in (
     "global_lcfo_fingerprint",
     "occupation_block_fingerprint",
