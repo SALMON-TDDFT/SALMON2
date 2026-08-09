@@ -8,7 +8,94 @@ module dg_overlapping_wannier_metric
   implicit none
   private
   public::assemble_dg_overlapping_wannier_metric,assemble_dg_overlapping_wannier_metric_rows
+  public::assemble_dg_eigenexa_cyclic_metric_block
 contains
+  subroutine assemble_dg_eigenexa_cyclic_metric_block(comm,nprow,npcol,myrow,mycol,values,weights,&
+      local_metric,peak_elements,ok,message)
+    integer,intent(in)::comm,nprow,npcol,myrow,mycol
+    complex(real64),intent(in)::values(:,:)
+    real(real64),intent(in)::weights(:)
+    real(real64),allocatable,intent(out)::local_metric(:,:)
+    integer(int64),intent(out)::peak_elements
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,nproc,ierr,norbital,norbital_min,norbital_max,nlocal,nrowlocal,ncollocal,&
+      i,j,ilocal,jlocal,owner,r
+    integer::local_bad,global_bad
+    integer,allocatable::rows(:),cols(:),coordinate_owner(:,:)
+    real(real64)::local_value,global_value,scale,local_scale,imaginary_max,local_imaginary_max,gamma_tolerance
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    norbital=size(values,1);nlocal=size(values,2);ok=.false.;message='';peak_elements=0_int64
+    local_scale=1d0;local_imaginary_max=0d0
+    if(size(values)>0)then
+      local_scale=max(1d0,maxval(abs(real(values))))
+      local_imaginary_max=maxval(abs(aimag(values)))
+    endif
+    call MPI_Allreduce(local_scale,scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_imaginary_max,imaginary_max,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(norbital,norbital_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(norbital,norbital_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    gamma_tolerance=1024d0*epsilon(1d0)*scale
+    local_bad=0
+    if(norbital<=0.or.norbital_min/=norbital_max.or.size(weights)/=nlocal.or.&
+       nprow<=0.or.npcol<=0)then
+      local_bad=1
+    else
+      if(nprow>huge(nprow)/npcol.or.nprow*npcol/=nproc)local_bad=1
+    endif
+    if(myrow<0.or.myrow>=nprow.or.mycol<0.or.mycol>=npcol.or.any(weights<0d0).or.&
+       .not.all(ieee_is_finite(weights)).or..not.all(ieee_is_finite(real(values))).or.&
+       .not.all(ieee_is_finite(aimag(values))).or.imaginary_max>gamma_tolerance)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then
+      message='invalid Gamma-real EigenExa cyclic metric contract';return
+    endif
+    allocate(rows(nproc),cols(nproc),coordinate_owner(nprow,npcol));coordinate_owner=-1
+    call MPI_Allgather(myrow,1,MPI_INTEGER,rows,1,MPI_INTEGER,comm,ierr)
+    call MPI_Allgather(mycol,1,MPI_INTEGER,cols,1,MPI_INTEGER,comm,ierr)
+    local_bad=0
+    do r=1,nproc
+      if(rows(r)<0.or.rows(r)>=nprow.or.cols(r)<0.or.cols(r)>=npcol)then
+        local_bad=1
+      else if(coordinate_owner(rows(r)+1,cols(r)+1)/=-1)then
+        local_bad=1
+      else
+        coordinate_owner(rows(r)+1,cols(r)+1)=r-1
+      endif
+    enddo
+    if(any(coordinate_owner<0))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then
+      message='duplicate or missing EigenExa cyclic process coordinate';return
+    endif
+    nrowlocal=count([(mod(i-1,nprow)==myrow,i=1,norbital)])
+    ncollocal=count([(mod(i-1,npcol)==mycol,i=1,norbital)])
+    allocate(local_metric(nrowlocal,ncollocal));local_metric=0d0
+    peak_elements=int(size(local_metric),int64)
+    do j=1,norbital
+      do i=1,norbital
+        local_value=sum(weights*real(conjg(values(i,:))*values(j,:)))
+        owner=coordinate_owner(mod(i-1,nprow)+1,mod(j-1,npcol)+1)
+        global_value=0d0
+        call MPI_Reduce(local_value,global_value,1,MPI_DOUBLE_PRECISION,MPI_SUM,owner,comm,ierr)
+        if(ierr/=MPI_SUCCESS)local_bad=1
+        if(rank==owner)then
+          ilocal=(i-1)/nprow+1;jlocal=(j-1)/npcol+1
+          local_metric(ilocal,jlocal)=global_value
+        endif
+      enddo
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or..not.all(ieee_is_finite(local_metric)))then
+      message='EigenExa cyclic metric scalar reduction failed';return
+    endif
+    ok=.true.
+#else
+    ok=.false.;message='EigenExa cyclic metric assembly requires MPI';peak_elements=0_int64
+#endif
+  end subroutine assemble_dg_eigenexa_cyclic_metric_block
+
   subroutine assemble_dg_overlapping_wannier_metric_rows(comm,nwann,row_ids,core_ids,weights,values,&
       pairs,expected_core_count,relative_threshold,metric_rows,retained_spectrum,minimum_eigenvalue,&
       condition_number,rejected_rank,ownership_count,ok,message)

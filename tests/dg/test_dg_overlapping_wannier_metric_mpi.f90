@@ -3,18 +3,22 @@ program test_dg_overlapping_wannier_metric_mpi
   use mpi
   use,intrinsic::ieee_arithmetic,only:ieee_get_halting_mode,ieee_set_halting_mode,ieee_overflow
   use dg_overlapping_wannier_metric,only:assemble_dg_overlapping_wannier_metric,&
-    assemble_dg_overlapping_wannier_metric_rows
+    assemble_dg_overlapping_wannier_metric_rows,assemble_dg_eigenexa_cyclic_metric_block
   implicit none
-  integer::comm,rank,nproc,ierr,i,nlocal,owned,rejected,reference_owned
+  integer::comm,rank,nproc,ierr,i,j,nlocal,owned,rejected,reference_owned
+  integer::nprow,npcol,myrow,mycol,nrowlocal,ncollocal,ilocal,jlocal
   integer(8),allocatable::ids(:),row_ids(:)
   real(8),allocatable::weights(:)
   complex(8),allocatable::values(:,:),metric(:,:),vectors(:,:)
   complex(8),allocatable::base_values(:,:),reference_metric(:,:),metric_rows(:,:)
+  complex(8),allocatable::gamma_values(:,:)
+  real(8),allocatable::cyclic_metric(:,:),gamma_local_metric(:,:),gamma_metric(:,:)
   real(8),allocatable::spectrum(:),reference_spectrum(:)
   complex(8)::rotation(3,3)
   logical,allocatable::pairs(:,:)
   real(8)::minimum,condition,reference_minimum,reference_condition
   integer::reference_rejected
+  integer(8)::cyclic_peak_elements
   logical::ok,overflow_halting
   character(256)::message
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
@@ -37,6 +41,29 @@ program test_dg_overlapping_wannier_metric_mpi
   call require(minimum>0d0.and.condition>=1d0.and.rejected==0,'positive rank revelation')
   call require_same_matrix(metric)
   reference_spectrum=spectrum;base_values=values;reference_metric=metric;reference_owned=owned
+  nprow=int(sqrt(real(nproc,8)))
+  do while(nprow>1.and.mod(nproc,nprow)/=0);nprow=nprow-1;enddo
+  npcol=nproc/nprow;myrow=mod(rank,nprow);mycol=rank/nprow
+  nrowlocal=count([(mod(i-1,nprow)==myrow,i=1,3)])
+  ncollocal=count([(mod(i-1,npcol)==mycol,i=1,3)])
+  gamma_values=cmplx(real(base_values),0d0,8)
+  allocate(gamma_local_metric(3,3),gamma_metric(3,3));gamma_local_metric=0d0
+  do j=1,3;do i=1,3
+    gamma_local_metric(i,j)=sum(weights*real(conjg(gamma_values(i,:))*gamma_values(j,:)))
+  enddo;enddo
+  call MPI_Allreduce(gamma_local_metric,gamma_metric,9,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+  call assemble_dg_eigenexa_cyclic_metric_block(comm,nprow,npcol,myrow,mycol,&
+    gamma_values,weights,cyclic_metric,cyclic_peak_elements,ok,message)
+  call require(ok.and.all(shape(cyclic_metric)==[nrowlocal,ncollocal]),trim(message))
+  minimum=0d0
+  do jlocal=1,ncollocal;do ilocal=1,nrowlocal
+    i=myrow+1+(ilocal-1)*nprow;j=mycol+1+(jlocal-1)*npcol
+    minimum=max(minimum,abs(cyclic_metric(ilocal,jlocal)-gamma_metric(i,j)))
+  enddo;enddo
+  call require(minimum<1d-13,'direct cyclic metric block matches dense Gamma reference')
+  call require(cyclic_peak_elements<=int(max(1,nrowlocal*ncollocal),8).and.&
+    (nproc==1.or.cyclic_peak_elements<9_8),&
+    'cyclic metric peak storage is bounded by the owned block')
   allocate(row_ids(count([(mod(i-1,nproc)==rank,i=1,3)])))
   nlocal=0
   do i=1,3
