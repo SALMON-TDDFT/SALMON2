@@ -24,6 +24,8 @@ module lcfo_diag_chefsi
   integer(8), parameter :: filter_workspace_target_bytes = &
   & 64_8*1024_8*1024_8
   real(8), parameter :: residual_tolerance = 1d-7
+  real(8), parameter :: lock_activation_tolerance = 1d-3
+  real(8), parameter :: lock_gap_relative_tolerance = 1d-6
   real(8), parameter :: lanczos_residual_factor = 10d0
   real(8), parameter :: lanczos_relative_margin = 0.1d0
   real(8), parameter :: filter_growth_margin = 1d6
@@ -183,12 +185,13 @@ contains
       integer, intent(in) :: s
       type(s_matrix_layout) :: layout_natural,layout_dense,layout_small
       type(s_chefsi_workspace) :: workspace
-      integer :: cycle,lanczos_steps,ncol,nstate
+      integer :: cycle,lanczos_steps,ncol,nlocked,nlocked_old,nstate
       real(8) :: gershgorin_upper,lambda_upper,lambda_cut,max_residual
       real(8) :: lanczos_residual,lanczos_ritz
       real(8), allocatable :: x(:,:),eigenvalue(:)
 
       nstate = dc%nstate_tot
+      nlocked = 0
       call initialize_layouts(npadded,nsub,max_basis,grid_natural, &
       & grid_dense,layout_natural,layout_dense,layout_small)
       ncol = layout_natural%ncol_local
@@ -209,9 +212,15 @@ contains
 
       call initialize_subspace(s,layout_natural,x)
       call rayleigh_ritz(s,layout_natural,layout_dense,layout_small, &
-      & x,eigenvalue,workspace)
+      & x,eigenvalue,nlocked,workspace)
       call calculate_residual(s,layout_natural,x,eigenvalue, &
-      & nstate,max_residual,workspace)
+      & nstate,nlocked,max_residual,workspace)
+      if(max_residual<=lock_activation_tolerance) then
+        call update_locked_count(eigenvalue,nstate,workspace%residual, &
+        & nlocked)
+      end if
+      if(dc%id_tot==0 .and. nlocked>0) write(*,*) &
+      & "CheFSI locked eigenpairs:",nlocked
       lambda_cut = eigenvalue(nsub)
       call estimate_upper_bound(s,layout_natural,workspace, &
       & eigenvalue(1),lambda_cut,gershgorin_upper,lambda_upper, &
@@ -232,17 +241,24 @@ contains
         if(nsub==n_mat(s)) exit
         lambda_cut = eigenvalue(nsub)
         call chebyshev_filter(s,layout_natural,layout_dense,x, &
-        & eigenvalue(1),lambda_cut,lambda_upper,gershgorin_upper, &
-        & workspace)
+        & eigenvalue(1),lambda_cut,lambda_upper, &
+        & gershgorin_upper,nlocked,workspace)
         call orthonormalize(layout_natural,layout_dense, &
-        & layout_small,x,workspace)
+        & layout_small,x,nlocked,workspace)
         call rayleigh_ritz(s,layout_natural,layout_dense, &
-        & layout_small,x,eigenvalue,workspace)
+        & layout_small,x,eigenvalue,nlocked,workspace)
         call calculate_residual(s,layout_natural,x,eigenvalue, &
-        & nstate,max_residual,workspace)
+        & nstate,nlocked,max_residual,workspace)
+        nlocked_old = nlocked
+        if(max_residual<=lock_activation_tolerance) then
+          call update_locked_count(eigenvalue,nstate,workspace%residual, &
+          & nlocked)
+        end if
         if(dc%id_tot==0) then
           write(*,*) "CheFSI cycle:",cycle," maximum residual:", &
           & max_residual
+          if(nlocked>nlocked_old) write(*,*) &
+          & "CheFSI locked eigenpairs:",nlocked
         end if
       end do
 
@@ -469,24 +485,54 @@ contains
       end do
     end subroutine apply_hamiltonian_full
 
+    subroutine apply_hamiltonian_active(s,layout,x,y,nlocked,workspace)
+      implicit none
+      integer, intent(in) :: s,nlocked
+      type(s_matrix_layout), intent(in) :: layout
+      real(8), intent(in) :: x(:,:)
+      real(8), intent(out) :: y(:,:)
+      type(s_chefsi_workspace), intent(inout) :: workspace
+      type(s_matrix_layout) :: chunk_layout
+      integer :: active_count,active_first,first,last
+
+      y = 0d0
+      call natural_active_range(layout,nlocked,active_first,active_count)
+      first = active_first
+      do while(first<active_first+active_count)
+        last = min(active_first+active_count-1, &
+        & first+workspace%filter_chunk_width-1)
+        chunk_layout = layout
+        chunk_layout%ncol_local = last-first+1
+        call apply_hamiltonian(s,chunk_layout,x(:,first:last), &
+        & y(:,first:last),workspace%hamiltonian)
+        first = last+1
+      end do
+    end subroutine apply_hamiltonian_active
+
     subroutine chebyshev_filter(s,layout_n,layout_d,x,lower,cutoff,upper, &
-    & fallback_upper,workspace)
+    & fallback_upper,nlocked,workspace)
       use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
       use timer, only: LOG_CHEFSI_FILTER,timer_begin,timer_end
       implicit none
-      integer, intent(in) :: s
+      integer, intent(in) :: s,nlocked
       type(s_matrix_layout), intent(in) :: layout_n,layout_d
       real(8), intent(inout) :: x(:,:)
       real(8), intent(in) :: lower,cutoff,fallback_upper
       real(8), intent(inout) :: upper
       type(s_chefsi_workspace), intent(inout) :: workspace
       type(s_matrix_layout) :: chunk_layout
-      integer :: attempt,degree,first,ichunk,last,nchunk,ncol,unstable
+      integer :: active_count,active_first,attempt,degree
+      integer :: first,ichunk
+      integer :: last,max_active,nchunk,nfilter_chunks,unstable
       integer :: unstable_chunk
       real(8) :: center,log_limit,max_amplitude,radius,scaled_lower
       logical :: can_retry
 
-      ncol = layout_n%ncol_local
+      call natural_active_range(layout_n,nlocked,active_first,active_count)
+      max_active = min(nsub-nlocked, &
+      & natural_column_block(nsub,grid_natural%npcol))
+      nfilter_chunks = (max_active+workspace%filter_chunk_width-1) &
+      & /workspace%filter_chunk_width
       call timer_begin(LOG_CHEFSI_FILTER)
       can_retry = upper<fallback_upper*(1d0-10d0*epsilon(1d0))
       if(can_retry) then
@@ -501,9 +547,10 @@ contains
         end if
 
         unstable = 0
-        do ichunk=1,workspace%filter_chunk_count
-          first = (ichunk-1)*workspace%filter_chunk_width+1
-          last = min(ncol,first+workspace%filter_chunk_width-1)
+        do ichunk=1,nfilter_chunks
+          first = active_first+(ichunk-1)*workspace%filter_chunk_width
+          last = min(active_first+active_count-1, &
+          & first+workspace%filter_chunk_width-1)
           nchunk = max(0,last-first+1)
           unstable_chunk = 0
           if(nchunk>0) then
@@ -564,131 +611,197 @@ contains
       call timer_end(LOG_CHEFSI_FILTER)
     end subroutine chebyshev_filter
 
-    subroutine orthonormalize(layout_n,layout_d,layout_g,x,workspace)
+    subroutine orthonormalize(layout_n,layout_d,layout_g,x,nlocked, &
+    & workspace)
       use timer, only: LOG_CHEFSI_ORTHO,timer_begin,timer_end
       implicit none
       type(s_matrix_layout), intent(in) :: layout_n,layout_d,layout_g
+      integer, intent(in) :: nlocked
       real(8), intent(inout) :: x(:,:)
       type(s_chefsi_workspace), intent(inout) :: workspace
-      integer :: info,pass
+      type(s_matrix_layout) :: layout_active,layout_active_small
+      integer :: info,nactive,pass
 
       call timer_begin(LOG_CHEFSI_ORTHO)
+      nactive = nsub-nlocked
+      call initialize_active_layouts(nactive,layout_d,layout_g, &
+      & layout_active,layout_active_small)
       workspace%xd = 0d0
-      call redistribute_to_dense(layout_n,x,layout_d,workspace%xd)
+      workspace%xrot = 0d0
+      if(nlocked>0) then
+        call redistribute_to_dense(layout_n,x,layout_d,workspace%xd)
+      end if
+      call redistribute_active_to_dense(layout_n,x,layout_active, &
+      & workspace%xrot,nlocked,nactive)
       do pass=1,2
+        if(nlocked>0) then
+          workspace%projected = 0d0
+          call pdgemm('T','N',nlocked,nactive,npadded,1d0, &
+          & workspace%xd,1,1,layout_d%desc,workspace%xrot,1,1, &
+          & layout_active%desc,0d0,workspace%projected,1,1,layout_g%desc)
+          call pdgemm('N','N',npadded,nactive,nlocked,-1d0, &
+          & workspace%xd,1,1,layout_d%desc,workspace%projected,1,1, &
+          & layout_g%desc,1d0,workspace%xrot,1,1,layout_active%desc)
+        end if
         workspace%projected = 0d0
-        call pdsyrk('L','T',nsub,npadded,1d0,workspace%xd,1,1, &
-        & layout_d%desc,0d0,workspace%projected,1,1,layout_g%desc)
-        call pdpotrf('L',nsub,workspace%projected,1,1, &
-        & layout_g%desc,info)
+        call pdsyrk('L','T',nactive,npadded,1d0,workspace%xrot,1,1, &
+        & layout_active%desc,0d0,workspace%projected,1,1, &
+        & layout_active_small%desc)
+        call pdpotrf('L',nactive,workspace%projected,1,1, &
+        & layout_active_small%desc,info)
         if(info/=0) then
-          call distributed_qr(layout_d,workspace%xd)
+          call distributed_qr(layout_active,workspace%xrot,nactive)
           exit
         end if
-        call pdtrsm('R','L','T','N',npadded,nsub,1d0, &
-        & workspace%projected,1,1,layout_g%desc,workspace%xd, &
-        & 1,1,layout_d%desc)
+        call pdtrsm('R','L','T','N',npadded,nactive,1d0, &
+        & workspace%projected,1,1,layout_active_small%desc, &
+        & workspace%xrot,1,1,layout_active%desc)
       end do
-      call redistribute_to_natural(layout_d,workspace%xd,layout_n,x)
+      call redistribute_active_to_natural(layout_active,workspace%xrot, &
+      & layout_n,x,nlocked,nactive)
       call timer_end(LOG_CHEFSI_ORTHO)
     end subroutine orthonormalize
 
-    subroutine distributed_qr(layout,xd)
+    subroutine distributed_qr(layout,xd,nactive)
       implicit none
       type(s_matrix_layout), intent(in) :: layout
+      integer, intent(in) :: nactive
       real(8), intent(inout) :: xd(:,:)
       integer :: info,lwork
       real(8) :: work_query(1)
       real(8), allocatable :: tau(:),work(:)
 
       allocate(tau(max(1,layout%ncol_local+dense_block_size)))
-      call pdgeqrf(npadded,nsub,xd,1,1,layout%desc,tau, &
+      call pdgeqrf(npadded,nactive,xd,1,1,layout%desc,tau, &
       & work_query,-1,info)
       if(info/=0) stop "DC-LCFO CheFSI: PDGEQRF workspace query failed."
       lwork = max(1,nint(work_query(1)))
       deallocate(tau)
       allocate(tau(max(1,layout%ncol_local+dense_block_size)))
       allocate(work(lwork))
-      call pdgeqrf(npadded,nsub,xd,1,1,layout%desc,tau, &
+      call pdgeqrf(npadded,nactive,xd,1,1,layout%desc,tau, &
       & work,lwork,info)
       if(info/=0) stop "DC-LCFO CheFSI: PDGEQRF failed."
       deallocate(work)
 
-      call pdorgqr(npadded,nsub,nsub,xd,1,1,layout%desc,tau, &
+      call pdorgqr(npadded,nactive,nactive,xd,1,1,layout%desc,tau, &
       & work_query,-1,info)
       if(info/=0) stop "DC-LCFO CheFSI: PDORGQR workspace query failed."
       lwork = max(1,nint(work_query(1)))
       allocate(work(lwork))
-      call pdorgqr(npadded,nsub,nsub,xd,1,1,layout%desc,tau, &
+      call pdorgqr(npadded,nactive,nactive,xd,1,1,layout%desc,tau, &
       & work,lwork,info)
       if(info/=0) stop "DC-LCFO CheFSI: PDORGQR failed."
       deallocate(work,tau)
     end subroutine distributed_qr
 
     subroutine rayleigh_ritz(s,layout_n,layout_d,layout_g,x,eigenvalue, &
-    & workspace)
+    & nlocked,workspace)
       use timer, only: LOG_CHEFSI_PROJECT,LOG_CHEFSI_RAYLEIGH_RITZ, &
       & LOG_CHEFSI_ROTATE,timer_begin,timer_end
       implicit none
-      integer, intent(in) :: s
+      integer, intent(in) :: s,nlocked
       type(s_matrix_layout), intent(in) :: layout_n,layout_d,layout_g
       real(8), intent(inout) :: x(:,:)
-      real(8), intent(out) :: eigenvalue(:)
+      real(8), intent(inout) :: eigenvalue(:)
       type(s_chefsi_workspace), intent(inout) :: workspace
+      type(s_matrix_layout) :: layout_active,layout_active_small
+      integer :: nactive
 
       call timer_begin(LOG_CHEFSI_RAYLEIGH_RITZ)
-      call apply_hamiltonian_full(s,layout_n,x,workspace%hx,workspace)
+      nactive = nsub-nlocked
+      call initialize_active_layouts(nactive,layout_d,layout_g, &
+      & layout_active,layout_active_small)
+      call apply_hamiltonian_active(s,layout_n,x,workspace%hx,nlocked, &
+      & workspace)
       workspace%xd = 0d0
       workspace%hxd = 0d0
-      call redistribute_to_dense(layout_n,x,layout_d,workspace%xd)
-      call redistribute_to_dense(layout_n,workspace%hx,layout_d, &
-      & workspace%hxd)
+      call redistribute_active_to_dense(layout_n,x,layout_active, &
+      & workspace%xd,nlocked,nactive)
+      call redistribute_active_to_dense(layout_n,workspace%hx, &
+      & layout_active, &
+      & workspace%hxd,nlocked,nactive)
       workspace%projected = 0d0
       call timer_begin(LOG_CHEFSI_PROJECT)
-      call pdgemm('T','N',nsub,nsub,npadded,1d0,workspace%xd,1,1, &
-      & layout_d%desc,workspace%hxd,1,1,layout_d%desc,0d0, &
-      & workspace%projected,1,1,layout_g%desc)
+      call pdgemm('T','N',nactive,nactive,npadded,1d0,workspace%xd,1,1, &
+      & layout_active%desc,workspace%hxd,1,1,layout_active%desc,0d0, &
+      & workspace%projected,1,1,layout_active_small%desc)
       call timer_end(LOG_CHEFSI_PROJECT)
-      call diagonalize_projected(layout_g,workspace%projected, &
-      & eigenvalue,workspace%ritz_vector,workspace%eigen_work, &
-      & workspace%eigen_iwork)
+      call diagonalize_projected(layout_active_small, &
+      & workspace%projected,nactive, &
+      & eigenvalue(nlocked+1:nsub),workspace%ritz_vector, &
+      & workspace%eigen_work,workspace%eigen_iwork)
       workspace%xrot = 0d0
       call timer_begin(LOG_CHEFSI_ROTATE)
-      call pdgemm('N','N',npadded,nsub,nsub,1d0,workspace%xd,1,1, &
-      & layout_d%desc,workspace%ritz_vector,1,1,layout_g%desc,0d0, &
-      & workspace%xrot,1,1,layout_d%desc)
+      call pdgemm('N','N',npadded,nactive,nactive,1d0, &
+      & workspace%xd,1,1,layout_active%desc, &
+      & workspace%ritz_vector,1,1,layout_active_small%desc,0d0, &
+      & workspace%xrot,1,1,layout_active%desc)
       call timer_end(LOG_CHEFSI_ROTATE)
-      call redistribute_to_natural(layout_d,workspace%xrot,layout_n,x)
+      call redistribute_active_to_natural(layout_active,workspace%xrot, &
+      & layout_n,x,nlocked,nactive)
       call timer_end(LOG_CHEFSI_RAYLEIGH_RITZ)
     end subroutine rayleigh_ritz
 
-    subroutine diagonalize_projected(layout,projected,eigenvalue, &
+    subroutine diagonalize_projected(layout,projected,nactive,eigenvalue, &
     & vector,work,iwork)
       use timer, only: LOG_CHEFSI_PROJECT_EIGEN,timer_begin,timer_end
       implicit none
       type(s_matrix_layout), intent(in) :: layout
+      integer, intent(in) :: nactive
       real(8), intent(inout) :: projected(:,:)
       real(8), intent(out) :: eigenvalue(:),vector(:,:)
-      real(8), intent(inout) :: work(:)
+      real(8), allocatable, intent(inout) :: work(:)
       integer, intent(inout) :: iwork(:)
       integer :: info
 
       call timer_begin(LOG_CHEFSI_PROJECT_EIGEN)
-      call pdsyevd('V','L',nsub,projected,1,1,layout%desc, &
-      & eigenvalue,vector,1,1,layout%desc,work,size(work), &
-      & iwork,size(iwork),info)
+      if(nactive==nsub) then
+        call pdsyevd('V','L',nactive,projected,1,1,layout%desc, &
+        & eigenvalue,vector,1,1,layout%desc,work,size(work), &
+        & iwork,size(iwork),info)
+      else
+        ! Some ScaLAPACK implementations do not handle repeatedly
+        ! shrinking PDSYEVD descriptors reliably after locking.
+        call diagonalize_projected_active(layout,projected,nactive, &
+        & eigenvalue,vector,work,info)
+      end if
       if(info/=0) then
-        if(dc%id_tot==0) write(*,*) "PDSYEVD error:",info
+        if(dc%id_tot==0) write(*,*) "ScaLAPACK eigensolver error:",info
         stop "DC-LCFO CheFSI: projected eigensolver failed."
       end if
       call timer_end(LOG_CHEFSI_PROJECT_EIGEN)
     end subroutine diagonalize_projected
 
+    subroutine diagonalize_projected_active(layout,projected,nactive, &
+    & eigenvalue,vector,work,info)
+      implicit none
+      type(s_matrix_layout), intent(in) :: layout
+      integer, intent(in) :: nactive
+      real(8), intent(inout) :: projected(:,:)
+      real(8), intent(out) :: eigenvalue(:),vector(:,:)
+      real(8), allocatable, intent(inout) :: work(:)
+      integer, intent(out) :: info
+      integer :: lwork
+      real(8) :: work_query(1)
+
+      call pdsyev('V','L',nactive,projected,1,1,layout%desc, &
+      & eigenvalue,vector,1,1,layout%desc,work_query,-1,info)
+      if(info/=0) return
+      lwork = max(1,nint(work_query(1)))
+      if(size(work)<lwork) then
+        deallocate(work)
+        allocate(work(lwork))
+      end if
+      call pdsyev('V','L',nactive,projected,1,1,layout%desc, &
+      & eigenvalue,vector,1,1,layout%desc,work,size(work),info)
+    end subroutine diagonalize_projected_active
+
     subroutine calculate_residual(s,layout,x,eigenvalue,nstate, &
-    & max_residual,workspace)
+    & nlocked,max_residual,workspace)
       use timer, only: LOG_CHEFSI_RESIDUAL,timer_begin,timer_end
       implicit none
-      integer, intent(in) :: s,nstate
+      integer, intent(in) :: s,nstate,nlocked
       type(s_matrix_layout), intent(in) :: layout
       real(8), intent(in) :: x(:,:),eigenvalue(:)
       real(8), intent(out) :: max_residual
@@ -696,27 +809,56 @@ contains
       integer :: global_column,local_column,nb
 
       call timer_begin(LOG_CHEFSI_RESIDUAL)
-      call apply_hamiltonian_full(s,layout,x,workspace%hx,workspace)
+      call apply_hamiltonian_active(s,layout,x,workspace%hx,nlocked, &
+      & workspace)
       workspace%residual_local = 0d0
       nb = n_basis(dc%i_frag,s)
       do local_column=1,layout%ncol_local
         global_column = natural_global_column(local_column, &
         & grid_natural%mycol,nsub,grid_natural%npcol)
-        if(global_column>nstate) cycle
+        if(global_column<=nlocked .or. global_column>nstate) cycle
         workspace%residual_local(global_column) = sum(( &
         & workspace%hx(1:nb,local_column) &
         & -eigenvalue(global_column)*x(1:nb,local_column))**2)
       end do
       call comm_summation(workspace%residual_local,workspace%residual, &
       & nstate,dc%icomm_tot)
-      do global_column=1,nstate
+      do global_column=nlocked+1,nstate
         workspace%residual(global_column) = sqrt(max(0d0, &
         & workspace%residual(global_column))) &
         & /max(1d0,abs(eigenvalue(global_column)))
       end do
-      max_residual = maxval(workspace%residual)
+      if(nlocked<nstate) then
+        max_residual = maxval(workspace%residual(nlocked+1:nstate))
+      else
+        max_residual = 0d0
+      end if
       call timer_end(LOG_CHEFSI_RESIDUAL)
     end subroutine calculate_residual
+
+    subroutine update_locked_count(eigenvalue,nstate,residual,nlocked)
+      implicit none
+      integer, intent(in) :: nstate
+      real(8), intent(in) :: eigenvalue(:),residual(:)
+      integer, intent(inout) :: nlocked
+      integer :: candidate,i
+      real(8) :: gap_scale
+
+      candidate = nlocked
+      do i=nlocked+1,nstate
+        if(residual(i)>residual_tolerance) exit
+        candidate = i
+      end do
+
+      do while(candidate>nlocked .and. candidate<nsub)
+        gap_scale = max(1d0,abs(eigenvalue(candidate)), &
+        & abs(eigenvalue(candidate+1)))
+        if(abs(eigenvalue(candidate+1)-eigenvalue(candidate)) &
+        & >lock_gap_relative_tolerance*gap_scale) exit
+        candidate = candidate-1
+      end do
+      nlocked = candidate
+    end subroutine update_locked_count
 
     subroutine estimate_upper_bound(s,layout,workspace,lower,cutoff, &
     & gershgorin_upper,upper,lanczos_ritz,lanczos_residual,nsteps)
@@ -942,6 +1084,78 @@ contains
       & layout_n%desc,grid_natural%ictxt)
       call timer_end(LOG_CHEFSI_REDISTRIBUTE)
     end subroutine redistribute_to_natural
+
+    subroutine redistribute_active_to_dense(layout_n,xn,layout_d,xd, &
+    & nlocked,nactive)
+      use timer, only: LOG_CHEFSI_REDISTRIBUTE,timer_begin,timer_end
+      implicit none
+      type(s_matrix_layout), intent(in) :: layout_n,layout_d
+      integer, intent(in) :: nlocked,nactive
+      real(8), intent(in) :: xn(:,:)
+      real(8), intent(inout) :: xd(:,:)
+
+      call timer_begin(LOG_CHEFSI_REDISTRIBUTE)
+      call pdgemr2d(npadded,nactive,xn,1,nlocked+1,layout_n%desc, &
+      & xd,1,1,layout_d%desc,grid_natural%ictxt)
+      call timer_end(LOG_CHEFSI_REDISTRIBUTE)
+    end subroutine redistribute_active_to_dense
+
+    subroutine redistribute_active_to_natural(layout_d,xd,layout_n,xn, &
+    & nlocked,nactive)
+      use timer, only: LOG_CHEFSI_REDISTRIBUTE,timer_begin,timer_end
+      implicit none
+      type(s_matrix_layout), intent(in) :: layout_d,layout_n
+      integer, intent(in) :: nlocked,nactive
+      real(8), intent(in) :: xd(:,:)
+      real(8), intent(inout) :: xn(:,:)
+
+      call timer_begin(LOG_CHEFSI_REDISTRIBUTE)
+      call pdgemr2d(npadded,nactive,xd,1,1,layout_d%desc, &
+      & xn,1,nlocked+1,layout_n%desc,grid_natural%ictxt)
+      call timer_end(LOG_CHEFSI_REDISTRIBUTE)
+    end subroutine redistribute_active_to_natural
+
+    subroutine initialize_active_layouts(nactive,layout_d,layout_g, &
+    & layout_active,layout_active_small)
+      implicit none
+      integer, intent(in) :: nactive
+      type(s_matrix_layout), intent(in) :: layout_d,layout_g
+      type(s_matrix_layout), intent(out) :: layout_active
+      type(s_matrix_layout), intent(out) :: layout_active_small
+      integer :: info
+      integer :: numroc
+
+      layout_active = layout_d
+      layout_active%ncol_local = numroc(nactive,dense_block_size, &
+      & grid_dense%mycol,0,grid_dense%npcol)
+      call descinit(layout_active%desc,npadded,nactive,dense_block_size, &
+      & dense_block_size,0,0,grid_dense%ictxt,layout_active%lda,info)
+      if(info/=0) stop "DC-LCFO CheFSI: active DESCINIT failed."
+
+      layout_active_small = layout_g
+      layout_active_small%nrow_local = numroc(nactive,dense_block_size, &
+      & grid_dense%myrow,0,grid_dense%nprow)
+      layout_active_small%ncol_local = numroc(nactive,dense_block_size, &
+      & grid_dense%mycol,0,grid_dense%npcol)
+      call descinit(layout_active_small%desc,nactive,nactive, &
+      & dense_block_size,dense_block_size,0,0,grid_dense%ictxt, &
+      & layout_active_small%lda,info)
+      if(info/=0) stop "DC-LCFO CheFSI: active projected DESCINIT failed."
+    end subroutine initialize_active_layouts
+
+    subroutine natural_active_range(layout,nlocked,first,count)
+      implicit none
+      type(s_matrix_layout), intent(in) :: layout
+      integer, intent(in) :: nlocked
+      integer, intent(out) :: first,count
+      integer :: global_first
+
+      global_first = grid_natural%mycol* &
+      & natural_column_block(nsub,grid_natural%npcol)+1
+      first = max(1,nlocked-global_first+2)
+      first = min(first,layout%ncol_local+1)
+      count = max(0,layout%ncol_local-first+1)
+    end subroutine natural_active_range
 
   end subroutine diag_chefsi
 
