@@ -174,6 +174,7 @@ module timer
   integer,public,parameter :: LOG_CHEFSI_PROJECT_EIGEN  = 288
   integer,public,parameter :: LOG_CHEFSI_ROTATE         = 289
   integer,public,parameter :: LOG_CHEFSI_SETUP          = 290
+  integer,public,parameter :: LOG_CHEFSI_LANCZOS        = 291
 
   ! FIXME: modify later
   ! hamiltonian module

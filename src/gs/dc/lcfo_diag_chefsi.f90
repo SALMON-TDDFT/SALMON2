@@ -21,7 +21,11 @@ module lcfo_diag_chefsi
   integer, parameter :: dense_block_size = 64
   integer, parameter :: filter_degree = 20
   integer, parameter :: max_filter_cycle = 200
+  integer, parameter :: lanczos_max_steps = 30
   real(8), parameter :: residual_tolerance = 1d-7
+  real(8), parameter :: lanczos_residual_factor = 10d0
+  real(8), parameter :: lanczos_relative_margin = 0.1d0
+  real(8), parameter :: filter_growth_margin = 1d6
 
   type :: s_blacs_grid
     integer :: ictxt = -1
@@ -173,8 +177,9 @@ contains
       integer, intent(in) :: s
       type(s_matrix_layout) :: layout_natural,layout_dense,layout_small
       type(s_chefsi_workspace) :: workspace
-      integer :: cycle,ncol,nstate
-      real(8) :: lambda_upper,lambda_cut,max_residual
+      integer :: cycle,lanczos_steps,ncol,nstate
+      real(8) :: gershgorin_upper,lambda_upper,lambda_cut,max_residual
+      real(8) :: lanczos_residual,lanczos_ritz
       real(8), allocatable :: x(:,:),eigenvalue(:)
 
       nstate = dc%nstate_tot
@@ -192,11 +197,18 @@ contains
       & x,eigenvalue,workspace)
       call calculate_residual(s,layout_natural,x,eigenvalue, &
       & nstate,max_residual,workspace)
-      lambda_upper = estimate_upper_bound(s)
+      lambda_cut = eigenvalue(nsub)
+      call estimate_upper_bound(s,layout_natural,workspace, &
+      & eigenvalue(1),lambda_cut,gershgorin_upper,lambda_upper, &
+      & lanczos_ritz,lanczos_residual,lanczos_steps)
 
       if(dc%id_tot==0) then
         write(*,*) "CheFSI diag, #dim=",n_mat(s)
-        write(*,*) "CheFSI upper spectral bound:",lambda_upper
+        write(*,*) "CheFSI Gershgorin upper bound:",gershgorin_upper
+        write(*,*) "CheFSI Lanczos largest Ritz value:",lanczos_ritz
+        write(*,*) "CheFSI Lanczos residual estimate:",lanczos_residual
+        write(*,*) "CheFSI Lanczos steps:",lanczos_steps
+        write(*,*) "CheFSI selected upper spectral bound:",lambda_upper
         write(*,*) "CheFSI initial maximum residual:",max_residual
       end if
 
@@ -204,8 +216,8 @@ contains
         if(max_residual <= residual_tolerance) exit
         if(nsub==n_mat(s)) exit
         lambda_cut = eigenvalue(nsub)
-        call chebyshev_filter(s,layout_natural,x,lambda_cut, &
-        & lambda_upper,workspace)
+        call chebyshev_filter(s,layout_natural,x,eigenvalue(1), &
+        & lambda_cut,lambda_upper,gershgorin_upper,workspace)
         call orthonormalize(layout_natural,layout_dense, &
         & layout_small,x,workspace)
         call rayleigh_ritz(s,layout_natural,layout_dense, &
@@ -399,39 +411,69 @@ contains
       call timer_end(LOG_CHEFSI_H_APPLY)
     end subroutine apply_hamiltonian
 
-    subroutine chebyshev_filter(s,layout,x,cutoff,upper,workspace)
+    subroutine chebyshev_filter(s,layout,x,lower,cutoff,upper, &
+    & fallback_upper,workspace)
+      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
       use timer, only: LOG_CHEFSI_FILTER,timer_begin,timer_end
       implicit none
       integer, intent(in) :: s
       type(s_matrix_layout), intent(in) :: layout
       real(8), intent(inout) :: x(:,:)
-      real(8), intent(in) :: cutoff,upper
+      real(8), intent(in) :: lower,cutoff,fallback_upper
+      real(8), intent(inout) :: upper
       type(s_chefsi_workspace), intent(inout) :: workspace
-      integer :: degree,ncol
-      real(8) :: center,radius
+      integer :: attempt,degree,ncol,unstable
+      real(8) :: center,log_limit,max_amplitude,radius,scaled_lower
 
       ncol = layout%ncol_local
       if(ncol==0) return
       call timer_begin(LOG_CHEFSI_FILTER)
-      center = 0.5d0*(upper+cutoff)
-      radius = 0.5d0*(upper-cutoff)
-      if(radius<=epsilon(1d0)*max(1d0,abs(center))) then
-        stop "DC-LCFO CheFSI: invalid filter interval."
-      end if
+      do attempt=1,2
+        center = 0.5d0*(upper+cutoff)
+        radius = 0.5d0*(upper-cutoff)
+        if(radius<=epsilon(1d0)*max(1d0,abs(center))) then
+          stop "DC-LCFO CheFSI: invalid filter interval."
+        end if
 
-      workspace%q0(:,1:ncol) = x(:,1:ncol)
-      call apply_hamiltonian(s,layout,workspace%q0,workspace%hx, &
-      & workspace%hamiltonian)
-      workspace%q1(:,1:ncol) = (workspace%hx(:,1:ncol) &
-      & -center*workspace%q0(:,1:ncol))/radius
-      do degree=2,filter_degree
-        call apply_hamiltonian(s,layout,workspace%q1,workspace%hx, &
+        workspace%q0(:,1:ncol) = x(:,1:ncol)
+        call apply_hamiltonian(s,layout,workspace%q0,workspace%hx, &
         & workspace%hamiltonian)
-        workspace%q2(:,1:ncol) = 2d0*(workspace%hx(:,1:ncol) &
-        & -center*workspace%q1(:,1:ncol))/radius &
-        & -workspace%q0(:,1:ncol)
-        workspace%q0(:,1:ncol) = workspace%q1(:,1:ncol)
-        workspace%q1(:,1:ncol) = workspace%q2(:,1:ncol)
+        workspace%q1(:,1:ncol) = (workspace%hx(:,1:ncol) &
+        & -center*workspace%q0(:,1:ncol))/radius
+        do degree=2,filter_degree
+          call apply_hamiltonian(s,layout,workspace%q1,workspace%hx, &
+          & workspace%hamiltonian)
+          workspace%q2(:,1:ncol) = 2d0*(workspace%hx(:,1:ncol) &
+          & -center*workspace%q1(:,1:ncol))/radius &
+          & -workspace%q0(:,1:ncol)
+          workspace%q0(:,1:ncol) = workspace%q1(:,1:ncol)
+          workspace%q1(:,1:ncol) = workspace%q2(:,1:ncol)
+        end do
+
+        unstable = 0
+        if(any(.not.ieee_is_finite(workspace%q1(:,1:ncol)))) then
+          unstable = 1
+        else
+          max_amplitude = maxval(abs(workspace%q1(:,1:ncol)))
+          scaled_lower = abs((lower-center)/radius)
+          log_limit = log(filter_growth_margin)
+          if(scaled_lower>1d0) then
+            log_limit = log_limit+real(filter_degree,8)* &
+            & log(scaled_lower+sqrt(scaled_lower**2-1d0))
+          end if
+          log_limit = min(log(huge(1d0))-log(10d0),log_limit)
+          if(max_amplitude>0d0) then
+            if(log(max_amplitude)>log_limit) unstable = 1
+          end if
+        end if
+        call comm_get_max(unstable,dc%icomm_tot)
+        if(unstable==0) exit
+        if(upper>=fallback_upper*(1d0-10d0*epsilon(1d0))) then
+          stop "DC-LCFO CheFSI: unstable Chebyshev recurrence."
+        end if
+        upper = fallback_upper
+        if(dc%id_tot==0) write(*,*) &
+        & "CheFSI filter fallback to Gershgorin upper bound:",upper
       end do
       x(:,1:ncol) = workspace%q1(:,1:ncol)
       call timer_end(LOG_CHEFSI_FILTER)
@@ -593,7 +635,46 @@ contains
       call timer_end(LOG_CHEFSI_RESIDUAL)
     end subroutine calculate_residual
 
-    function estimate_upper_bound(s) result(upper)
+    subroutine estimate_upper_bound(s,layout,workspace,lower,cutoff, &
+    & gershgorin_upper,upper,lanczos_ritz,lanczos_residual,nsteps)
+      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+      use timer, only: LOG_CHEFSI_LANCZOS,timer_begin,timer_end
+      implicit none
+      integer, intent(in) :: s
+      type(s_matrix_layout), intent(in) :: layout
+      type(s_chefsi_workspace), intent(inout) :: workspace
+      real(8), intent(in) :: lower,cutoff
+      real(8), intent(out) :: gershgorin_upper,upper
+      real(8), intent(out) :: lanczos_ritz,lanczos_residual
+      integer, intent(out) :: nsteps
+      real(8) :: candidate
+
+      call timer_begin(LOG_CHEFSI_LANCZOS)
+      gershgorin_upper = gershgorin_upper_bound(s)
+      if(nsub==n_mat(s)) then
+        lanczos_ritz = gershgorin_upper
+        lanczos_residual = 0d0
+        nsteps = 0
+        upper = gershgorin_upper
+        call timer_end(LOG_CHEFSI_LANCZOS)
+        return
+      end if
+
+      call lanczos_upper_bound(s,layout,workspace,lanczos_ritz, &
+      & lanczos_residual,nsteps)
+      candidate = lanczos_ritz+max( &
+      & lanczos_residual_factor*lanczos_residual, &
+      & lanczos_relative_margin*max(1d0,lanczos_ritz-lower))
+      if(.not.ieee_is_finite(candidate) .or. &
+      & candidate<=cutoff+epsilon(1d0)*max(1d0,abs(cutoff))) then
+        upper = gershgorin_upper
+      else
+        upper = min(gershgorin_upper,candidate)
+      end if
+      call timer_end(LOG_CHEFSI_LANCZOS)
+    end subroutine estimate_upper_bound
+
+    function gershgorin_upper_bound(s) result(upper)
       implicit none
       integer, intent(in) :: s
       integer :: h,i,nb
@@ -615,7 +696,119 @@ contains
       send_value(1) = local_upper
       call comm_get_max(send_value,recv_value,1,dc%icomm_tot)
       upper = recv_value(1)+max(1d-10,1d-8*abs(recv_value(1)))
-    end function estimate_upper_bound
+    end function gershgorin_upper_bound
+
+    subroutine lanczos_upper_bound(s,layout,workspace,ritz,residual, &
+    & nsteps)
+      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+      implicit none
+      integer, intent(in) :: s
+      type(s_matrix_layout), intent(in) :: layout
+      type(s_chefsi_workspace), intent(inout) :: workspace
+      real(8), intent(out) :: ritz,residual
+      integer, intent(out) :: nsteps
+      type(s_matrix_layout) :: vector_layout
+      integer :: global_row,i,j,k,nb,offset,pass
+      integer(8) :: hash_value
+      real(8) :: beta,global_value,local_value
+      real(8) :: send_value(2),recv_value(2)
+      real(8), allocatable :: alpha(:),beta_value(:),basis(:,:)
+      real(8), allocatable :: eigenvalue(:)
+      real(8), allocatable :: overlap_global(:),overlap_local(:)
+      real(8), allocatable :: tridiagonal(:,:),vector(:,:)
+
+      nb = n_basis(dc%i_frag,s)
+      offset = sum(n_basis(1:dc%i_frag-1,s))
+      vector_layout = layout
+      vector_layout%ncol_local = 1
+      allocate(alpha(lanczos_max_steps))
+      allocate(beta_value(lanczos_max_steps))
+      allocate(basis(layout%lda,lanczos_max_steps))
+      allocate(overlap_local(lanczos_max_steps))
+      allocate(overlap_global(lanczos_max_steps))
+      alpha = 0d0
+      beta_value = 0d0
+      basis = 0d0
+      do i=1,nb
+        global_row = offset+i
+        hash_value = modulo(int(global_row,8)+ &
+        & int(grid_natural%mycol,8)*int(n_mat(s),8)+12345_8,1048573_8)
+        hash_value = modulo(104729_8*hash_value**2+12345_8,1048573_8)
+        basis(i,1) = real(hash_value,8)/1048573d0-0.5d0
+      end do
+      local_value = sum(basis(1:nb,1)**2)
+      call comm_summation(local_value,global_value,icomm_row)
+      if(global_value<=tiny(1d0)) then
+        basis = 0d0
+        if(offset==0) basis(1,1) = 1d0
+        global_value = 1d0
+      end if
+      basis(1:nb,1) = basis(1:nb,1)/sqrt(global_value)
+
+      beta = 0d0
+      nsteps = lanczos_max_steps
+      do k=1,lanczos_max_steps
+        call apply_hamiltonian(s,vector_layout,basis(:,k:k), &
+        & workspace%hx(:,1:1),workspace%hamiltonian)
+        if(k>1) then
+          workspace%hx(1:nb,1) = workspace%hx(1:nb,1) &
+          & -beta*basis(1:nb,k-1)
+        end if
+        local_value = dot_product(basis(1:nb,k), &
+        & workspace%hx(1:nb,1))
+        call comm_summation(local_value,alpha(k),icomm_row)
+        workspace%hx(1:nb,1) = workspace%hx(1:nb,1) &
+        & -alpha(k)*basis(1:nb,k)
+
+        do pass=1,2
+          overlap_local = 0d0
+          do j=1,k
+            overlap_local(j) = dot_product(basis(1:nb,j), &
+            & workspace%hx(1:nb,1))
+          end do
+          call comm_summation(overlap_local(1:k), &
+          & overlap_global(1:k),k,icomm_row)
+          do j=1,k
+            workspace%hx(1:nb,1) = workspace%hx(1:nb,1) &
+            & -overlap_global(j)*basis(1:nb,j)
+          end do
+        end do
+        local_value = sum(workspace%hx(1:nb,1)**2)
+        call comm_summation(local_value,global_value,icomm_row)
+        beta = sqrt(max(0d0,global_value))
+        beta_value(k) = beta
+        if(k==lanczos_max_steps .or. beta<=100d0*epsilon(1d0)) then
+          nsteps = k
+          exit
+        end if
+        basis(1:nb,k+1) = workspace%hx(1:nb,1)/beta
+      end do
+
+      allocate(tridiagonal(nsteps,nsteps),eigenvalue(nsteps))
+      allocate(vector(nsteps,nsteps))
+      tridiagonal = 0d0
+      do k=1,nsteps
+        tridiagonal(k,k) = alpha(k)
+      end do
+      do k=1,nsteps-1
+        tridiagonal(k,k+1) = beta_value(k)
+        tridiagonal(k+1,k) = beta_value(k)
+      end do
+      call eigen_dsyev(tridiagonal,eigenvalue,vector)
+      ritz = eigenvalue(nsteps)
+      residual = beta*abs(vector(nsteps,nsteps))
+      if(.not.ieee_is_finite(ritz) .or. &
+      & .not.ieee_is_finite(residual)) then
+        ritz = -huge(1d0)
+        residual = huge(1d0)
+      end if
+      send_value = [ritz,residual]
+      call comm_get_max(send_value,recv_value,2,dc%icomm_tot)
+      ritz = recv_value(1)
+      residual = recv_value(2)
+      deallocate(vector,eigenvalue,tridiagonal)
+      deallocate(overlap_global,overlap_local,basis,beta_value,alpha)
+    end subroutine lanczos_upper_bound
 
     subroutine export_coefficients(s,layout,x,nstate)
       use timer, only: LOG_CHEFSI_EXPORT,timer_begin,timer_end
