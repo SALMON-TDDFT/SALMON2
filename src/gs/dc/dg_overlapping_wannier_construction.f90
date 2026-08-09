@@ -38,6 +38,7 @@ module dg_overlapping_wannier_construction
   public::find_dg_group_identity
   public::accumulate_dg_lcfo_buffer_contributions_to_core
   public::measure_dg_rank_fixed_symmetry_residuals
+  public::exchange_dg_point_permuted_orbital_rows
   public::accept_dg_boundary_calibrated_symmetry
   public::solve_dg_affine_common_fixed_point
   public::compute_dg_periodic_wannier_centers
@@ -588,9 +589,9 @@ contains
     character(*),intent(out)::message
 #ifdef USE_MPI
     complex(real64),allocatable::local_metric(:,:),metric(:,:),metric_vectors(:,:),metric_inverse_sqrt(:,:),&
-      orthonormal_basis(:,:),owner_basis(:,:),image(:,:),local_overlap(:,:),global_overlap(:,:),residual(:,:)
+      orthonormal_basis(:,:),image(:,:),local_overlap(:,:),global_overlap(:,:),residual(:,:)
     real(real64),allocatable::metric_spectrum(:),local_norms(:),global_norms(:)
-    integer::rank,nproc,ierr,nstate,nlocal,noperation,operation,owner,point,target_owner,target_point,i
+    integer::rank,nproc,ierr,nstate,nlocal,noperation,operation,i
     logical::eigen_ok
     character(256)::detail
 
@@ -603,7 +604,7 @@ contains
       size(interior_residual)==noperation.and.all(weights>=0d0)
     if(.not.ok)then;message='invalid rank-fixed symmetry residual contract';return;end if
     allocate(local_metric(nstate,nstate),metric(nstate,nstate),metric_inverse_sqrt(nstate,nstate),&
-      orthonormal_basis(nstate,nlocal),owner_basis(nstate,nlocal),image(nstate,nlocal),&
+      orthonormal_basis(nstate,nlocal),image(nstate,nlocal),&
       local_overlap(nstate,nstate),global_overlap(nstate,nstate),residual(nstate,nlocal),&
       local_norms(3),global_norms(3))
     do i=1,nstate
@@ -619,20 +620,9 @@ contains
     metric_inverse_sqrt=matmul(metric_inverse_sqrt,conjg(transpose(metric_vectors)))
     orthonormal_basis=matmul(metric_inverse_sqrt,basis)
     do operation=1,noperation
-      image=(0d0,0d0)
-      do owner=0,nproc-1
-        if(rank==owner)owner_basis=orthonormal_basis
-        call MPI_Bcast(owner_basis,nstate*nlocal,MPI_DOUBLE_COMPLEX,owner,comm,ierr)
-        do point=1,nlocal
-          target_owner=int((symmetry_target_box_ids(point,operation)-1_int64)/int(nlocal,int64))
-          if(target_owner/=owner)cycle
-          target_point=int(modulo(symmetry_target_box_ids(point,operation)-1_int64,int(nlocal,int64)))+1
-          if(target_point<1.or.target_point>nlocal)then
-            ok=.false.;message='rank-fixed symmetry point map is invalid';return
-          end if
-          image(:,point)=owner_basis(:,target_point)
-        end do
-      end do
+      call exchange_dg_point_permuted_orbital_rows(comm,orthonormal_basis,&
+        symmetry_target_box_ids(:,operation),image,ok,message)
+      if(.not.ok)return
       do i=1,nstate
         local_overlap(i,:)=matmul(conjg(orthonormal_basis(i,:))*weights,transpose(image))
       end do
@@ -654,6 +644,107 @@ contains
     ok=.false.;message='rank-fixed symmetry residual measurement requires MPI'
 #endif
   end subroutine measure_dg_rank_fixed_symmetry_residuals
+
+  subroutine exchange_dg_point_permuted_orbital_rows(comm,basis,target_global_ids,image,ok,message)
+    integer,intent(in)::comm
+    complex(real64),intent(in)::basis(:,:)
+    integer(int64),intent(in)::target_global_ids(:)
+    complex(real64),intent(out)::image(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,nproc,ierr,nstate,nlocal,nlocal_min,nlocal_max,local_bad,global_bad
+    integer::point,owner,index,cursor,total_send,total_recv
+    integer(int64)::scaled_count
+    logical::counts_ok
+    integer,allocatable::send_counts(:),recv_counts(:),send_displs(:),recv_displs(:),fill(:)
+    integer,allocatable::request_indices(:),request_destinations(:),received_requests(:)
+    integer,allocatable::target_hits(:)
+    integer,allocatable::value_send_counts(:),value_recv_counts(:),value_send_displs(:),value_recv_displs(:)
+    complex(real64),allocatable::response_send(:,:),response_recv(:,:)
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    nstate=size(basis,1);nlocal=size(basis,2);ok=.false.;message=''
+    call MPI_Allreduce(nlocal,nlocal_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(nlocal,nlocal_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    local_bad=merge(0,1,nstate>0.and.nlocal>0.and.nlocal_min==nlocal_max.and.&
+      size(target_global_ids)==nlocal.and.all(shape(image)==[nstate,nlocal]).and.&
+      all(target_global_ids>=1_int64).and.&
+      all(target_global_ids<=int(nproc,int64)*int(nlocal,int64)))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then
+      message='invalid distributed symmetry point target';return
+    endif
+    allocate(send_counts(nproc),recv_counts(nproc),send_displs(nproc),recv_displs(nproc),fill(nproc))
+    send_counts=0
+    do point=1,nlocal
+      owner=int((target_global_ids(point)-1_int64)/int(nlocal,int64))
+      send_counts(owner+1)=send_counts(owner+1)+1
+    enddo
+    call MPI_Alltoall(send_counts,1,MPI_INTEGER,recv_counts,1,MPI_INTEGER,comm,ierr)
+    call build_checked_mpi_displacements(send_counts,send_displs,total_send,counts_ok)
+    if(counts_ok)call build_checked_mpi_displacements(recv_counts,recv_displs,total_recv,counts_ok)
+    local_bad=merge(0,1,counts_ok)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then
+      message='distributed symmetry request count overflow';return
+    endif
+    allocate(request_indices(total_send),request_destinations(total_send),received_requests(total_recv))
+    fill=send_displs
+    do point=1,nlocal
+      owner=int((target_global_ids(point)-1_int64)/int(nlocal,int64))+1
+      cursor=fill(owner)+1;fill(owner)=cursor
+      request_indices(cursor)=int(modulo(target_global_ids(point)-1_int64,int(nlocal,int64)))+1
+      request_destinations(cursor)=point
+    enddo
+    call MPI_Alltoallv(request_indices,send_counts,send_displs,MPI_INTEGER,&
+      received_requests,recv_counts,recv_displs,MPI_INTEGER,comm,ierr)
+    allocate(target_hits(nlocal));target_hits=0
+    do index=1,total_recv
+      if(received_requests(index)>=1.and.received_requests(index)<=nlocal)&
+        target_hits(received_requests(index))=target_hits(received_requests(index))+1
+    enddo
+    local_bad=merge(0,1,all(received_requests>=1).and.all(received_requests<=nlocal).and.&
+      all(target_hits==1))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then
+      message='distributed symmetry targets are not a complete point permutation';return
+    endif
+    allocate(response_send(nstate,total_recv),response_recv(nstate,total_send))
+    do index=1,total_recv
+      response_send(:,index)=basis(:,received_requests(index))
+    enddo
+    allocate(value_send_counts(nproc),value_recv_counts(nproc),value_send_displs(nproc),value_recv_displs(nproc))
+    local_bad=0
+    do owner=1,nproc
+      scaled_count=int(nstate,int64)*int(recv_counts(owner),int64)
+      if(scaled_count>int(huge(0),int64))local_bad=1
+      value_send_counts(owner)=int(min(scaled_count,int(huge(0),int64)))
+      scaled_count=int(nstate,int64)*int(send_counts(owner),int64)
+      if(scaled_count>int(huge(0),int64))local_bad=1
+      value_recv_counts(owner)=int(min(scaled_count,int(huge(0),int64)))
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then
+      message='distributed symmetry value count overflow';return
+    endif
+    call build_checked_mpi_displacements(value_send_counts,value_send_displs,cursor,counts_ok)
+    if(counts_ok)call build_checked_mpi_displacements(value_recv_counts,value_recv_displs,cursor,counts_ok)
+    local_bad=merge(0,1,counts_ok)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then
+      message='distributed symmetry value displacement overflow';return
+    endif
+    call MPI_Alltoallv(response_send,value_send_counts,value_send_displs,MPI_DOUBLE_COMPLEX,&
+      response_recv,value_recv_counts,value_recv_displs,MPI_DOUBLE_COMPLEX,comm,ierr)
+    image=(0d0,0d0)
+    do index=1,total_send
+      image(:,request_destinations(index))=response_recv(:,index)
+    enddo
+    ok=.true.
+#else
+    ok=.false.;message='distributed symmetry point exchange requires MPI'
+#endif
+  end subroutine exchange_dg_point_permuted_orbital_rows
 
   subroutine accumulate_dg_lcfo_buffer_contributions_to_core(comm,buffer_ids,buffer_contributions,&
       core_ids,core_values,ok,message)

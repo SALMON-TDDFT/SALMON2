@@ -22,6 +22,7 @@ program test_dg_overlapping_wannier_construction_mpi
     verify_dg_fragment_wannier_streaming_closure,verify_dg_fragment_center_orbit,&
     verify_dg_uniform_fragment_target_rank,assign_dg_overlapping_wannier_occupations,&
     build_dg_balanced_orbital_ownership,transpose_dg_spatial_cores_to_orbital_owners,&
+    exchange_dg_point_permuted_orbital_rows,&
     redistribute_dg_owned_orbitals_to_center_fragments,&
     assign_dg_periodic_centers_to_fragments,&
     verify_dg_fragment_subspace_density_covariance,build_dg_core_owned_occupied_subspace
@@ -89,6 +90,7 @@ program test_dg_overlapping_wannier_construction_mpi
   complex(8)::periodic_center_values(1,2),periodic_center_phases(3,2)
   real(8)::periodic_centers(3,1),periodic_center_magnitudes(3,1)
   complex(8),allocatable::transpose_local(:,:),transpose_owned(:,:)
+  complex(8),allocatable::permuted_image(:,:)
   complex(8),allocatable::mismatched_owned(:,:)
   complex(8),allocatable::center_local_values(:,:)
   integer(8),allocatable::transpose_local_ids(:),transpose_global_ids(:)
@@ -201,6 +203,25 @@ program test_dg_overlapping_wannier_construction_mpi
     end do
   end do
   call require(transpose_values_ok,'MPI Alltoallv preserves orbital/core values')
+  allocate(distributed_map(2,1),permuted_image(2*nproc+1,2))
+  distributed_map(1,1)=int(2*modulo(rank+1,nproc)+1,8)
+  distributed_map(2,1)=int(2*modulo(rank-1+nproc,nproc)+2,8)
+  call exchange_dg_point_permuted_orbital_rows(comm,transpose_local,distributed_map(:,1),&
+    permuted_image,ok,message)
+  call require(ok.and.all(permuted_image(:,1)==cmplx(&
+    [(1000*i+distributed_map(1,1),i=1,2*nproc+1)],0d0,8)).and.&
+    all(permuted_image(:,2)==cmplx(&
+    [(1000*i+distributed_map(2,1),i=1,2*nproc+1)],0d0,8)),&
+    'sparse point exchange applies a cross-rank symmetry permutation exactly')
+  distributed_map(1,1)=int(2*nproc+1,8)
+  call exchange_dg_point_permuted_orbital_rows(comm,transpose_local,distributed_map(:,1),&
+    permuted_image,ok,message)
+  call require(.not.ok,'sparse point exchange collectively rejects a missing target')
+  distributed_map(:,1)=int(2*rank+1,8)
+  call exchange_dg_point_permuted_orbital_rows(comm,transpose_local,distributed_map(:,1),&
+    permuted_image,ok,message)
+  call require(.not.ok,'sparse point exchange collectively rejects duplicate targets')
+  deallocate(distributed_map,permuted_image)
   allocate(center_owners(2*nproc+1))
   do i=1,size(center_owners);center_owners(i)=modulo(i-1,nproc);end do
   allocate(redistribution_buffer_ids(3))

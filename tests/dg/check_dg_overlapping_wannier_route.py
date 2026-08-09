@@ -866,6 +866,11 @@ checkpoint_population = re.search(
     re.I | re.S,
 )
 assert checkpoint_population
+assert not re.search(
+    r"MPI_Bcast\s*\(\s*owner_basis\s*,\s*nstate\s*\*\s*nlocal",
+    construction_source,
+    re.I,
+), "production symmetry action must not broadcast every owner's complete basis"
 for provenance in (
     "global_lcfo_fingerprint",
     "occupation_block_fingerprint",
