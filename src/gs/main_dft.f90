@@ -70,8 +70,7 @@ use dg_overlapping_wannier_projection, only: t_dg_projection_channel,&
   build_dg_complete_sp_manifest,evaluate_dg_periodic_sp_projectors,&
   dg_periodic_grid_point_owned,select_dg_sp_atomic_orbital_ordinals
 use dg_overlapping_wannier_metric, only: assemble_dg_stitched_overlap_density_rows
-use dg_overlapping_wannier_operators, only: assemble_dg_overlapping_wannier_weak_operators,&
-  assemble_dg_overlapping_wannier_weak_operator_rows
+use dg_overlapping_wannier_operators, only: assemble_dg_stitched_weak_operator_rows
 use dg_overlapping_wannier_nonlocal, only: assemble_dg_overlapping_wannier_nonlocal,&
   assemble_dg_overlapping_wannier_nonlocal_rows,collect_dg_overlapping_wannier_projector_overlaps
 use dg_overlapping_wannier_scf, only: s_dg_overlapping_wannier_scf_state, &
@@ -176,9 +175,11 @@ complex(8),allocatable :: ow_srows(:,:),ow_rhorows(:,:),ow_core_values(:,:),ow_c
   ow_box_values(:,:),ow_box_gradients(:,:,:),ow_last_kinetic_rows(:,:),&
   ow_last_local_rows(:,:),ow_last_nonlocal_rows(:,:)
 integer(8),allocatable :: ow_core_ids(:),ow_row_ids(:)
+integer(8),allocatable :: ow_box_physical_ids(:)
 integer,allocatable :: ow_tail_generation(:,:)
 integer,allocatable :: ow_core_box_positions(:)
 real(8),allocatable :: ow_core_weights(:)
+real(8),allocatable :: ow_partition_weight(:),ow_partition_gradient(:,:)
 integer :: ow_box_size(3),ow_core_size(3),ow_buffer(3)
 integer(8) :: ow_symmetry_fingerprint
 integer(8) :: ow_potential_epoch_snapshot
@@ -560,7 +561,7 @@ contains
       local_point_rotations(:,:,:)
     real(8),allocatable::manifest_values(:,:),initial_density_local(:),initial_density_global(:)
     real(8),allocatable::ow_raw_partition_weight(:),ow_raw_partition_gradient(:,:),&
-      ow_partition_weight(:),ow_partition_gradient(:,:),ow_box_density(:)
+      ow_box_density(:)
     real(8),allocatable::localized_centers(:,:),localized_center_magnitudes(:,:)
     real(8),allocatable::w90_fractional(:,:),w90_spreads(:),w90_eigenvalues(:),w90_atoms_cart(:,:),&
       fixed_center_eigenvalues(:)
@@ -708,6 +709,7 @@ contains
         core_index=core_index+1
       endif
     enddo;enddo;enddo
+    allocate(ow_box_physical_ids,source=physical_ids)
     allocate(ow_raw_partition_weight(nbox),ow_raw_partition_gradient(3,nbox),&
       ow_partition_weight(nbox),ow_partition_gradient(3,nbox))
     do p=1,nbox
@@ -1075,7 +1077,6 @@ contains
       minval(localized_center_magnitudes),maxval(localized_center_magnitudes)
     deallocate(localized_centers,localized_center_magnitudes,center_owner_candidate,&
       center_box_candidate,center_fragment_candidate)
-    deallocate(ow_box_gradients)
     allocate(ow_row_ids(count(ow_basis%center_owner_rank==rank)))
     io=0
     do p=1,ntarget
@@ -1174,6 +1175,7 @@ contains
     call compute_ow_periodic_spread(dc%icomm_tot,spread_max)
     call write_ow_ground_state_evidence(spectrum,noccupied,nproc,rank,spread_max,&
       size(manifest_channels),complete_sp_core_atom_count)
+    deallocate(ow_box_gradients)
   end subroutine
 
   subroutine build_ow_complete_sp_projectors(physical_ids,pseudopotential_fingerprint,&
@@ -1835,11 +1837,15 @@ contains
     integer(8),intent(out)::fingerprint
     logical,intent(out)::ok
     character(*),intent(out)::message
-    real(8),allocatable::global_density(:),summed_density(:),core_potential(:)
-    complex(8),allocatable::kinetic_rows(:,:),local_rows(:,:),nonlocal_rows(:,:)
-    real(8)::kinetic_scale,local_scale,nonlocal_scale,hamiltonian_scale
+    real(8),allocatable::global_density(:),summed_density(:),core_potential(:),box_potential(:)
+    complex(8),allocatable::kinetic_rows(:,:),local_rows(:,:),nonlocal_rows(:,:),&
+      core_potential_values(:,:),box_potential_values(:,:)
+    real(8)::kinetic_scale,local_scale,nonlocal_scale,hamiltonian_scale,&
+      stitched_t_hermiticity,stitched_v_hermiticity,weight_gradient_trace
     logical::finite_t,finite_local,finite_nonlocal,finite_h
-    integer::p,ix,iy,iz,nwann,owned_core,owned_projectors
+    integer::p,ix,iy,iz,nwann,owned_projectors,rank,ierr
+    integer(8)::stitched_operator_peak_elements
+    call MPI_Comm_rank(comm,rank,ierr)
     allocate(global_density(int(ow_global_grid_count)),summed_density(int(ow_global_grid_count)))
     global_density=0d0
     do p=1,size(ow_core_ids);global_density(int(ow_core_ids(p)))=density(p);enddo
@@ -1854,10 +1860,21 @@ contains
     do iz=1,ow_core_size(3);do iy=1,ow_core_size(2);do ix=1,ow_core_size(1)
       p=p+1;core_potential(p)=v_local(1)%f(ix,iy,iz)
     enddo;enddo;enddo
-    call assemble_dg_overlapping_wannier_weak_operator_rows(comm,nwann,ow_row_ids,ow_core_ids,&
-      ow_core_weights,ow_core_values,ow_core_gradients,core_potential,ow_global_grid_count,&
-      kinetic_rows,local_rows,owned_core,ok,message)
+    allocate(core_potential_values(1,size(core_potential)))
+    core_potential_values(1,:)=cmplx(core_potential,0d0,8)
+    call materialize_ow_distributed_core_to_buffer(comm,core_potential_values,ow_core_ids,&
+      ow_box_physical_ids,box_potential_values,ok,message)
     if(.not.ok)return
+    allocate(box_potential(size(ow_box_physical_ids)));box_potential=real(box_potential_values(1,:))
+    call assemble_dg_stitched_weak_operator_rows(comm,nwann,ow_row_ids,ow_box_physical_ids,&
+      ow_partition_weight,ow_partition_gradient,ow_box_values,ow_box_gradients,box_potential,&
+      system%hvol,kinetic_rows,local_rows,stitched_t_hermiticity,stitched_v_hermiticity,&
+      weight_gradient_trace,stitched_operator_peak_elements,ok,message)
+    if(.not.ok)return
+    if(rank==0)write(*,'(a,3(a,es16.8),a,i0)')&
+      '[OW-GS-DIAGNOSTIC] stitched_weak_operator',' weight_gradient_trace=',weight_gradient_trace,&
+      ' t_hermiticity=',stitched_t_hermiticity,' vlocal_hermiticity=',stitched_v_hermiticity,&
+      ' workspace_peak_elements=',stitched_operator_peak_elements
     call assemble_ow_nonlocal_rows(comm,nonlocal_rows,owned_projectors,ok,message)
     if(.not.ok)return
     hrows=kinetic_rows+local_rows+nonlocal_rows
@@ -2130,7 +2147,8 @@ contains
         endif
         p=canonical_index(1)+ow_box_size(1)*((canonical_index(2)-1)+&
           ow_box_size(2)*(canonical_index(3)-1))
-        local_overlap(:,ilma)=local_overlap(:,ilma)+ppg%uV(j,ilma)*ow_box_values(:,p)
+        local_overlap(:,ilma)=local_overlap(:,ilma)+ppg%uV(j,ilma)*&
+          sqrt(ow_partition_weight(p))*ow_box_values(:,p)
       enddo
     enddo
     call comm_logical_and(ok,global_ok,comm);ok=global_ok

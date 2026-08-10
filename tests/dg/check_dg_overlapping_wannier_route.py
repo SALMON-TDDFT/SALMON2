@@ -415,6 +415,12 @@ assert "call build_dg_smooth_partition_of_unity(" in adapter_body.lower(), (
 assert "call assemble_dg_stitched_overlap_density_rows(" in adapter_body.lower(), (
     "production must assemble row-owned overlap and density tiles from normalized buffer coverage"
 )
+assert "call assemble_dg_stitched_weak_operator_rows(" in source("src/gs/main_dft.f90").lower(), (
+    "production Hamiltonian must use partition-gradient-corrected row-owned weak operators"
+)
+assert "sqrt(ow_partition_weight(p))*ow_box_values(:,p)" in re.sub(
+    r"\s+", "", source("src/gs/main_dft.f90").lower()
+), "nonlocal projector overlaps must use the same square-root partition weighting"
 assert re.search(
     r"prefix\s*=\s*['\"]\./overlapping_wannier_gs['\"]",
     adapter_body,
@@ -557,8 +563,8 @@ assert "gaussian" not in re.search(
 assert not re.search(r"modulo\s*\(\s*rank\s*\+\s*isym", adapter_body, re.I), (
     "communicator-rank arithmetic is not a physical fragment symmetry"
 )
-assert "assemble_dg_overlapping_wannier_weak_operators" in main_source.lower(), (
-    "production Hamiltonian must use the Task 5 weak unique-core assembly"
+assert "assemble_dg_stitched_weak_operator_rows" in main_source.lower(), (
+    "production Hamiltonian must use the boundary-correct stitched weak assembly"
 )
 hamiltonian_adapter = re.search(
     r"subroutine\s+ow_build_hamiltonian(?P<body>.*?)end\s+subroutine",

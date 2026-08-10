@@ -2,7 +2,7 @@
 program test_dg_overlapping_wannier_operators_mpi
   use mpi
   use dg_overlapping_wannier_operators,only:assemble_dg_overlapping_wannier_weak_operators,&
-    assemble_dg_overlapping_wannier_weak_operator_rows
+    assemble_dg_overlapping_wannier_weak_operator_rows,assemble_dg_stitched_weak_operator_rows
   implicit none
   integer::comm,rank,nproc,ierr,p,i,j,nlocal,index,owned
   integer(8),allocatable::ids(:),row_ids(:)
@@ -11,6 +11,12 @@ program test_dg_overlapping_wannier_operators_mpi
     reference_kinetic(:,:),reference_potential(:,:),rotated_values(:,:),rotated_gradients(:,:,:),&
     kinetic_rows(:,:),potential_rows(:,:)
   complex(8)::gauge(3,3)
+  integer(8)::stitched_ids(2),stitched_peak_elements
+  integer(8),allocatable::stitched_row_ids(:)
+  real(8)::stitched_weights(2),stitched_weight_gradient(3,2),stitched_potential(2)
+  complex(8)::stitched_values(1,2),stitched_gradients(3,1,2)
+  complex(8),allocatable::stitched_kinetic_rows(:,:),stitched_potential_rows(:,:)
+  real(8)::stitched_t_hermiticity,stitched_v_hermiticity,stitched_weight_gradient_energy
   logical::ok
   character(256)::message
   real(8)::x,k,row_error
@@ -56,6 +62,35 @@ program test_dg_overlapping_wannier_operators_mpi
   row_error=0d0
   if(size(row_ids)>0)row_error=maxval(abs(potential_rows-reference_potential(int(row_ids),:)))
   call require(row_error<1d-13,'row-owned potential reference')
+  stitched_ids=[1_8,2_8];stitched_weights=1d0/real(nproc,8)
+  stitched_weight_gradient=0d0
+  stitched_weight_gradient(1,:)=[0.2d0,-0.2d0]/real(nproc,8)
+  stitched_potential=[-0.3d0,0.4d0];stitched_values=(1d0,0d0);stitched_gradients=(0d0,0d0)
+  allocate(stitched_row_ids(merge(1,0,rank==0)))
+  if(rank==0)stitched_row_ids=1_8
+  call assemble_dg_stitched_weak_operator_rows(comm,1,stitched_row_ids,stitched_ids,stitched_weights,&
+    stitched_weight_gradient,stitched_values,stitched_gradients,stitched_potential,1d0,&
+    stitched_kinetic_rows,stitched_potential_rows,stitched_t_hermiticity,stitched_v_hermiticity,&
+    stitched_weight_gradient_energy,stitched_peak_elements,ok,message)
+  call require(ok,trim(message))
+  row_error=0d0
+  if(rank==0)row_error=abs(stitched_kinetic_rows(1,1)-cmplx(0.01d0,0d0,8))
+  call require(row_error<1d-13,'weight-gradient kinetic term matches dense weak-form reference')
+  row_error=0d0
+  if(rank==0)row_error=abs(stitched_potential_rows(1,1)-cmplx(0.1d0,0d0,8))
+  call require(row_error<1d-13,'stitched local potential matches dense reference')
+  call require(stitched_t_hermiticity<1d-13.and.stitched_v_hermiticity<1d-13.and.&
+    abs(stitched_weight_gradient_energy-0.01d0)<1d-13.and.stitched_peak_elements>0_8,&
+    'stitched operator receipts are finite and measured')
+  stitched_weights(1)=0d0;stitched_weight_gradient(:,1)=0d0
+  call assemble_dg_stitched_weak_operator_rows(comm,1,stitched_row_ids,stitched_ids,stitched_weights,&
+    stitched_weight_gradient,stitched_values,stitched_gradients,stitched_potential,1d0,&
+    stitched_kinetic_rows,stitched_potential_rows,stitched_t_hermiticity,stitched_v_hermiticity,&
+    stitched_weight_gradient_energy,stitched_peak_elements,ok,message)
+  call require(ok,trim(message));row_error=0d0
+  if(rank==0)row_error=max(abs(stitched_kinetic_rows(1,1)-cmplx(0.005d0,0d0,8)),&
+    abs(stitched_potential_rows(1,1)-cmplx(0.4d0,0d0,8)))
+  call require(row_error<1d-13,'zero outer-buffer weight cuts off value and gradient without a singularity')
 
   gauge=(0d0,0d0);gauge(1,2)=1d0;gauge(2,1)=-1d0;gauge(3,3)=1d0
   rotated_values=matmul(gauge,values);allocate(rotated_gradients(3,3,nlocal))

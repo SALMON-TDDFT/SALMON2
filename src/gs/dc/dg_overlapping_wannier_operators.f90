@@ -8,8 +8,160 @@ module dg_overlapping_wannier_operators
   implicit none
   private
   public::assemble_dg_overlapping_wannier_weak_operators,&
-    assemble_dg_overlapping_wannier_weak_operator_rows
+    assemble_dg_overlapping_wannier_weak_operator_rows,assemble_dg_stitched_weak_operator_rows
 contains
+  subroutine assemble_dg_stitched_weak_operator_rows(comm,nbasis,row_ids,physical_ids,&
+      partition_weight,partition_gradient,basis_values,basis_gradients,local_potential,cell_volume,&
+      kinetic_rows,potential_rows,kinetic_hermiticity,potential_hermiticity,&
+      weight_gradient_trace,peak_elements,ok,message)
+    integer,intent(in)::comm,nbasis
+    integer(int64),intent(in)::row_ids(:),physical_ids(:)
+    real(real64),intent(in)::partition_weight(:),partition_gradient(:,:),local_potential(:),cell_volume
+    complex(real64),intent(in)::basis_values(:,:),basis_gradients(:,:,:)
+    complex(real64),allocatable,intent(out)::kinetic_rows(:,:),potential_rows(:,:)
+    real(real64),intent(out)::kinetic_hermiticity,potential_hermiticity
+    real(real64),intent(out)::weight_gradient_trace
+    integer(int64),intent(out)::peak_elements
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer,parameter::row_batch_size=32
+    integer::rank,nproc,ierr,local_bad,global_bad,total_rows,r,nrows,batch_first,batch_count,&
+      i,j,p,row_index
+    integer,allocatable::row_counts(:),row_displs(:)
+    integer(int64),allocatable::all_row_ids(:),sorted_row_ids(:)
+    complex(real64),allocatable::partial_t(:,:),partial_v(:,:),reduced_t(:,:),reduced_v(:,:),&
+      block_t(:,:),block_v(:,:)
+    complex(real64)::weighted_value_i,weighted_value_j,weighted_gradient_i(3),weighted_gradient_j(3)
+    real(real64)::sqrt_weight,local_t_defect,local_v_defect,t_scale,v_scale,local_weight_gradient_energy
+    ok=.false.;message='';kinetic_hermiticity=huge(1d0);potential_hermiticity=huge(1d0)
+    peak_elements=0_int64;local_bad=0
+    weight_gradient_trace=huge(1d0)
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    if(ierr/=MPI_SUCCESS.or.nbasis<1.or.cell_volume<=0d0.or.&
+        size(partition_weight)/=size(physical_ids).or.size(local_potential)/=size(physical_ids).or.&
+        any(shape(partition_gradient)/=[3,size(physical_ids)]).or.&
+        any(shape(basis_values)/=[nbasis,size(physical_ids)]).or.&
+        any(shape(basis_gradients)/=[3,nbasis,size(physical_ids)]).or.&
+        any(row_ids<1_int64).or.any(row_ids>int(nbasis,int64)).or.any(physical_ids<1_int64).or.&
+        any(partition_weight<0d0).or.any(partition_weight==0d0.and.&
+        maxval(abs(partition_gradient),dim=1)>0d0))local_bad=1
+    if(.not.all(ieee_is_finite(partition_weight)).or..not.all(ieee_is_finite(partition_gradient)).or.&
+        .not.all(ieee_is_finite(local_potential)).or..not.all(ieee_is_finite(real(basis_values))).or.&
+        .not.all(ieee_is_finite(aimag(basis_values))).or.&
+        .not.all(ieee_is_finite(real(basis_gradients))).or.&
+        .not.all(ieee_is_finite(aimag(basis_gradients))))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then;message='invalid stitched weak-operator contract';return;endif
+    allocate(row_counts(nproc),row_displs(nproc))
+    call MPI_Allgather(size(row_ids),1,MPI_INTEGER,row_counts,1,MPI_INTEGER,comm,ierr)
+    total_rows=0
+    do r=1,nproc;row_displs(r)=total_rows;total_rows=total_rows+row_counts(r);enddo
+    if(total_rows/=nbasis)local_bad=1
+    allocate(all_row_ids(total_rows),sorted_row_ids(total_rows))
+    call MPI_Allgatherv(row_ids,size(row_ids),MPI_INTEGER8,all_row_ids,row_counts,row_displs,&
+      MPI_INTEGER8,comm,ierr)
+    sorted_row_ids=all_row_ids;call sort_ids(sorted_row_ids)
+    do i=1,total_rows;if(sorted_row_ids(i)/=int(i,int64))local_bad=1;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,local_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(local_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='duplicate or missing stitched weak-operator row owner';return
+    endif
+    local_weight_gradient_energy=0d0
+    do p=1,size(physical_ids)
+      if(partition_weight(p)==0d0)cycle
+      sqrt_weight=sqrt(partition_weight(p))
+      do i=1,nbasis
+        weighted_gradient_i=sqrt_weight*basis_gradients(:,i,p)+&
+          0.5d0*partition_gradient(:,p)*basis_values(i,p)/sqrt_weight
+        local_weight_gradient_energy=local_weight_gradient_energy+0.5d0*cell_volume*&
+          (sum(abs(weighted_gradient_i)**2)-partition_weight(p)*sum(abs(basis_gradients(:,i,p))**2))
+      enddo
+    enddo
+    call MPI_Allreduce(local_weight_gradient_energy,weight_gradient_trace,1,MPI_DOUBLE_PRECISION,&
+      MPI_SUM,comm,ierr)
+    allocate(kinetic_rows(size(row_ids),nbasis),potential_rows(size(row_ids),nbasis))
+    kinetic_rows=0d0;potential_rows=0d0
+    peak_elements=int(size(kinetic_rows)+size(potential_rows)+2*nproc+2*nbasis+8,int64)
+    do r=0,nproc-1
+      nrows=row_counts(r+1)
+      do batch_first=1,nrows,row_batch_size
+        batch_count=min(row_batch_size,nrows-batch_first+1)
+        allocate(partial_t(batch_count,nbasis),partial_v(batch_count,nbasis),&
+          reduced_t(batch_count,nbasis),reduced_v(batch_count,nbasis))
+        partial_t=0d0;partial_v=0d0
+        do p=1,size(physical_ids)
+          if(partition_weight(p)==0d0)cycle
+          sqrt_weight=sqrt(partition_weight(p))
+          do j=1,nbasis
+            weighted_value_j=sqrt_weight*basis_values(j,p)
+            weighted_gradient_j=sqrt_weight*basis_gradients(:,j,p)+&
+              0.5d0*partition_gradient(:,p)*basis_values(j,p)/sqrt_weight
+            do i=1,batch_count
+          row_index=int(all_row_ids(row_displs(r+1)+batch_first+i-1))
+          weighted_value_i=sqrt_weight*basis_values(row_index,p)
+          weighted_gradient_i=sqrt_weight*basis_gradients(:,row_index,p)+&
+            0.5d0*partition_gradient(:,p)*basis_values(row_index,p)/sqrt_weight
+          partial_t(i,j)=partial_t(i,j)+0.5d0*cell_volume*&
+            sum(conjg(weighted_gradient_i)*weighted_gradient_j)
+          partial_v(i,j)=partial_v(i,j)+cell_volume*local_potential(p)*&
+            conjg(weighted_value_i)*weighted_value_j
+            enddo
+          enddo
+        enddo
+        call MPI_Reduce(partial_t,reduced_t,batch_count*nbasis,MPI_DOUBLE_COMPLEX,MPI_SUM,r,comm,ierr)
+        call MPI_Reduce(partial_v,reduced_v,batch_count*nbasis,MPI_DOUBLE_COMPLEX,MPI_SUM,r,comm,ierr)
+        if(rank==r)then
+          kinetic_rows(batch_first:batch_first+batch_count-1,:)=reduced_t
+          potential_rows(batch_first:batch_first+batch_count-1,:)=reduced_v
+        endif
+        peak_elements=max(peak_elements,int(size(kinetic_rows)+size(potential_rows)+&
+          2*size(partial_t)+2*size(reduced_t)+&
+          2*nproc+2*nbasis,int64))
+        deallocate(partial_t,partial_v,reduced_t,reduced_v)
+      enddo
+    enddo
+    local_t_defect=0d0;local_v_defect=0d0;t_scale=1d0;v_scale=1d0
+    if(size(kinetic_rows)>0)then
+      t_scale=max(1d0,maxval(abs(kinetic_rows)));v_scale=max(1d0,maxval(abs(potential_rows)))
+    endif
+    do r=0,nproc-1
+      nrows=row_counts(r+1)
+      do batch_first=1,nrows,row_batch_size
+        batch_count=min(row_batch_size,nrows-batch_first+1)
+        allocate(block_t(batch_count,nbasis),block_v(batch_count,nbasis))
+        if(rank==r)then
+          block_t=kinetic_rows(batch_first:batch_first+batch_count-1,:)
+          block_v=potential_rows(batch_first:batch_first+batch_count-1,:)
+        endif
+        call MPI_Bcast(block_t,batch_count*nbasis,MPI_DOUBLE_COMPLEX,r,comm,ierr)
+        call MPI_Bcast(block_v,batch_count*nbasis,MPI_DOUBLE_COMPLEX,r,comm,ierr)
+        do j=1,size(row_ids);do i=1,batch_count
+          row_index=int(all_row_ids(row_displs(r+1)+batch_first+i-1))
+          local_t_defect=max(local_t_defect,&
+            abs(kinetic_rows(j,row_index)-conjg(block_t(i,int(row_ids(j))))))
+          local_v_defect=max(local_v_defect,&
+            abs(potential_rows(j,row_index)-conjg(block_v(i,int(row_ids(j))))))
+        enddo;enddo
+        deallocate(block_t,block_v)
+      enddo
+    enddo
+    call MPI_Allreduce(local_t_defect,kinetic_hermiticity,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_v_defect,potential_hermiticity,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,t_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,v_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,peak_elements,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.kinetic_hermiticity>1d-12*t_scale.or.&
+        potential_hermiticity>1d-12*v_scale)then
+      message='stitched weak operator is not Hermitian';return
+    endif
+    ok=.true.
+#else
+    ok=.false.;message='stitched weak operators require MPI';kinetic_hermiticity=huge(1d0)
+    potential_hermiticity=huge(1d0);weight_gradient_trace=huge(1d0);peak_elements=0_int64
+#endif
+  end subroutine assemble_dg_stitched_weak_operator_rows
+
   subroutine assemble_dg_overlapping_wannier_weak_operator_rows(comm,nwann,row_ids,core_ids,weights,&
       values,gradients,local_potential,expected_core_count,kinetic_rows,potential_rows,&
       ownership_count,ok,message)
