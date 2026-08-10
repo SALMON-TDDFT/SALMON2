@@ -24,7 +24,7 @@ function(create_test)
 
   add_custom_command(OUTPUT  ${TEST_EXEC}
                      COMMAND echo '\#! /bin/sh'                                         >  ${TEST_EXEC}
-                     COMMAND echo "${TEST_COMMAND}" '< ./inputfile |& tee ./outputfile' >> ${TEST_EXEC}
+                     COMMAND echo "${TEST_COMMAND}" '< ./inputfile 2>&1 | tee ./outputfile' >> ${TEST_EXEC}
                      COMMAND chmod +x ${TEST_EXEC})
 
   add_custom_target("gen_${TEST_NAME}" ALL DEPENDS ${TEST_PREP} ${TEST_EXEC} WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})

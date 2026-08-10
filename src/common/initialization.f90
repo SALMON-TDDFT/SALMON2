@@ -33,7 +33,7 @@ subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofi
   use init_poisson_sub
   use checkpoint_restart_sub, only: init_dir_out_restart
   use sym_rho_sub, only: init_sym_rho
-  use nvtx
+  use nvtx_wrapper
   implicit none
   integer      ,intent(in) :: comm
   type(s_parallel_info)    :: info
@@ -55,7 +55,7 @@ subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofi
   info%npk       = nproc_k
   info%nporbital = nproc_ob
   info%nprgrid   = nproc_rgrid
-  call init_process_distribution(system,comm,info)
+  call init_process_distribution(system,stencil%if_orthogonal,comm,info)
   call init_communicator_dft(comm,info)
 
 ! parallelization
@@ -102,7 +102,7 @@ subroutine init_dft_system(lg,system,stencil)
   use structures
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,spin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
-  & nproc_rgrid,Rion,Rion_red,kion,nelec,calc_mode,temperature,nelec_spin,yn_spinorbit, &
+  & Rion,Rion_red,kion,nelec,calc_mode,temperature,nelec_spin,yn_spinorbit, &
   & iflag_atom_coor,ntype_atom_coor_reduced,quiet
   use sym_sub, only: init_sym_sub
   use communication, only: comm_is_root
@@ -248,8 +248,9 @@ subroutine init_dft_system(lg,system,stencil)
   if(stencil%if_orthogonal) then
     stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
   else
-    if(nproc_rgrid(1)*nproc_rgrid(2)*nproc_rgrid(3)/=1) &
-      stop "error: nonorthogonal lattice and r-space parallelization"
+    ! The "non-orthogonal lattice + r-space parallelization" check is enforced in
+    ! init_process_distribution against the actual process distribution (info%nprgrid),
+    ! not the raw input here, so that fully-automatic runs are not rejected.
     stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*  &
                       & ( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
   end if
@@ -263,8 +264,6 @@ subroutine init_dft_system(lg,system,stencil)
   if(stencil%if_orthogonal) then
     stencil%coef_lap0_nd1 = -0.5d0*cNmat(0,1)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
   else
-    if(nproc_rgrid(1)*nproc_rgrid(2)*nproc_rgrid(3)/=1) &
-      stop "error: nonorthogonal lattice and r-space parallelization"
     stencil%coef_lap0_nd1 = -0.5d0*cNmat(0,1)*  &
                       & ( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
   end if
@@ -286,7 +285,7 @@ end subroutine init_dft_system
 
 !===================================================================================================================================
 
-subroutine init_process_distribution(system,icomm1,info)
+subroutine init_process_distribution(system,if_orthogonal,icomm1,info)
   use structures, only: s_parallel_info,s_dft_system
   use parallelization, only: nproc_id_global, nproc_group_global
   use salmon_global, only: theory
@@ -294,26 +293,43 @@ subroutine init_process_distribution(system,icomm1,info)
   use set_numcpu
   implicit none
   type(s_dft_system),intent(in)       :: system
+  logical, intent(in)                 :: if_orthogonal
   integer, intent(in)                 :: icomm1 ! Communicator for single DFT system.
   type(s_parallel_info),intent(inout) :: info
   logical :: if_stop
+  integer :: ip
 
   if((info%nporbital + sum(info%nprgrid)) == 0) then
     ! Process distribution is automatically decided by SALMON.
-    if (system%ngrid > 16**3) then
+    if (if_orthogonal .and. system%ngrid > 16**3) then
+      ! large orthogonal cell: prefer real-space domain decomposition
       call set_numcpu_general(iprefer_domain_distribution,system%nk,system%no,icomm1,info)
     else
+      ! small cells, or any non-orthogonal cell: distribute over k-points /
+      ! orbitals only. Non-orthogonal lattices do not support real-space
+      ! parallelization, so rspace_allowed is tied to if_orthogonal.
       select case(theory)
       case('dft','dft_band','dft_md','dft2tddft')
-        call set_numcpu_general(iprefer_k_distribution,system%nk,system%no,icomm1,info)
+        ip = iprefer_k_distribution
       case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
-        call set_numcpu_general(iprefer_orbital_distribution,system%nk,system%no,icomm1,info)
+        ip = iprefer_orbital_distribution
       case default
         stop 'invalid theory @ initialization'
       end select
+      call set_numcpu_general(ip,system%nk,system%no,icomm1,info,rspace_allowed=if_orthogonal)
     end if
   else
     ! Process distribution is explicitly specified by user.
+  end if
+
+  ! r-space (spatial) parallelization is not supported for non-orthogonal lattices,
+  ! whether reached via the automatic distribution above or specified explicitly.
+  if ((.not. if_orthogonal) .and. product(info%nprgrid) > 1) then
+    if (comm_is_root(nproc_id_global)) then
+      write(*,*) "error: r-space parallelization is not supported for a non-orthogonal lattice."
+      write(*,*) "       leave nproc_rgrid unset, or set nproc_rgrid = 1 1 1, for this cell."
+    end if
+    stop "error: nonorthogonal lattice and r-space parallelization"
   end if
 
   if (comm_is_root(nproc_id_global)) then

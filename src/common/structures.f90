@@ -30,6 +30,10 @@ module structures
     use xc_f90_lib_m
 #endif
 
+#ifdef USE_OPENACC
+  use cudafor
+#endif
+
   implicit none
 
 ! scalar field
@@ -96,8 +100,13 @@ module structures
 
 ! for persistent communication
   type s_pcomm_cache
+#ifdef USE_OPENACC
+    real(8), allocatable, device :: dbuf(:, :, :, :)
+    complex(8), allocatable, device :: zbuf(:, :, :, :)
+#else
     real(8), allocatable :: dbuf(:, :, :, :)
     complex(8), allocatable :: zbuf(:, :, :, :)
+#endif
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: dbuf, zbuf
 #endif
@@ -520,6 +529,7 @@ module structures
     type(s_orbital) :: tpsi0,ttpsi0,htpsi0
     type(s_cg) :: cg
     real(8) :: E_old
+    logical :: rho0_loaded = .false. ! rho0_s restored from restart data (t=0 GS density)
   end type s_rt
 
 ! single-scale Maxwell-TDDFT method

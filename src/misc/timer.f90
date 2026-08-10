@@ -156,6 +156,26 @@ module timer
   integer,public,parameter :: LOG_INIT_PS_CALC_VPSL   = 271
   integer,public,parameter :: LOG_INIT_PS_UVPSI       = 272
 
+  ! DC-LCFO CheFSI
+  integer,public,parameter :: LOG_CHEFSI_TOTAL          = 274
+  integer,public,parameter :: LOG_CHEFSI_FILTER         = 275
+  integer,public,parameter :: LOG_CHEFSI_ORTHO          = 276
+  integer,public,parameter :: LOG_CHEFSI_RAYLEIGH_RITZ  = 277
+  integer,public,parameter :: LOG_CHEFSI_RESIDUAL       = 278
+  integer,public,parameter :: LOG_CHEFSI_EXPORT         = 279
+  integer,public,parameter :: LOG_CHEFSI_H_APPLY        = 280
+  integer,public,parameter :: LOG_CHEFSI_H_DIAG         = 281
+  integer,public,parameter :: LOG_CHEFSI_H_COMM_POST    = 282
+  integer,public,parameter :: LOG_CHEFSI_H_RECV_WAIT    = 283
+  integer,public,parameter :: LOG_CHEFSI_H_HALO         = 284
+  integer,public,parameter :: LOG_CHEFSI_H_SEND_WAIT    = 285
+  integer,public,parameter :: LOG_CHEFSI_REDISTRIBUTE   = 286
+  integer,public,parameter :: LOG_CHEFSI_PROJECT        = 287
+  integer,public,parameter :: LOG_CHEFSI_PROJECT_EIGEN  = 288
+  integer,public,parameter :: LOG_CHEFSI_ROTATE         = 289
+  integer,public,parameter :: LOG_CHEFSI_SETUP          = 290
+  integer,public,parameter :: LOG_CHEFSI_LANCZOS        = 291
+
   ! FIXME: modify later
   ! hamiltonian module
   integer,public,parameter :: LOG_ALLGATHERV_VLOCAL_CALC      = 240

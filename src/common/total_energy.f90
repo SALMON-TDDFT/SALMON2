@@ -280,7 +280,7 @@ CONTAINS
     use salmon_global, only: kion,aEwald, cutoff_r, yn_jm, yn_fix_func, theory
     use communication, only: comm_summation,comm_is_root
     use timer
-    use nvtx
+    use nvtx_wrapper
     implicit none
     type(s_rgrid)           ,intent(in) :: mg
     type(s_ewald_ion_ion)   ,intent(in) :: ewald
@@ -525,7 +525,7 @@ CONTAINS
     use pseudo_pt_so_sub, only: pseudo_so
     use salmon_global, only: yn_spinorbit
     use timer
-    use nvtx
+    use nvtx_wrapper
     implicit none
     type(s_dft_energy)                     :: energy
     type(s_orbital)                        :: tpsi,htpsi,ttpsi
