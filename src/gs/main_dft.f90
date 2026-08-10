@@ -47,7 +47,7 @@ use dg_overlapping_wannier_construction, only: s_dg_overlapping_wannier_construc
   replicate_dg_fragment_wannier_representative,verify_dg_fragment_wannier_streaming_closure,&
   verify_dg_fragment_center_orbit,verify_dg_uniform_fragment_target_rank
 use dg_overlapping_wannier_construction, only: build_dg_core_owned_occupied_subspace
-use dg_overlapping_wannier_construction, only: build_dg_distributed_symmetry_closed_basis
+use dg_overlapping_wannier_construction, only: orthonormalize_dg_distributed_seed_space
 use dg_overlapping_wannier_construction, only: accumulate_dg_lcfo_buffer_contributions_to_core
 use dg_overlapping_wannier_construction, only: measure_dg_rank_fixed_symmetry_residuals
 #ifdef USE_EIGENEXA
@@ -581,9 +581,9 @@ contains
       raw_ix,raw_iy,raw_iz,core_index,rejected_rank,ownership_count,ierr,allocation_status,&
       local_target_count,w90_nntot
     integer::global_seed_count,global_retained_rank,global_occupied_count,global_projection_count,&
-      global_candidate_capacity,&
       global_required_retained_rank
     integer::global_identity_operation
+    integer::lcfo_symmetry_worst_operation
     real(8)::global_occupied_inclusion,global_subspace_leakage,global_candidate_operation_defect,&
       global_candidate_maximum_defect
     real(8),allocatable::lcfo_total_symmetry_residual(:),lcfo_boundary_symmetry_residual(:),&
@@ -786,21 +786,17 @@ contains
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'LCFO occupied symmetry measurement failed';end if
     if(rank==0)write(*,'(a,i0)')'[OW-GS-DIAGNOSTIC] lcfo_symmetry_workspace_peak_bytes=',&
       lcfo_symmetry_workspace_peak
-    if(rank==0)then
-      do io=1,size(global_point_product,1)
-        write(*,'(a,i0,3(a,es16.8))')'[OW-GS-DIAGNOSTIC] LCFO_symmetry_operation=',io,&
-          ' total_residual=',lcfo_total_symmetry_residual(io),&
-          ' boundary_residual=',lcfo_boundary_symmetry_residual(io),&
-          ' interior_residual=',lcfo_interior_symmetry_residual(io)
-      end do
-    end if
-    if(ntarget>huge(global_candidate_capacity)-size(global_point_product,1)+1)&
-      error stop 'global symmetry-closed candidate capacity overflow'
-    global_candidate_capacity=ntarget+size(global_point_product,1)-1
-    call build_dg_distributed_symmetry_closed_basis(dc%icomm_tot,global_seed_values,ow_core_weights,&
-      global_symmetry_map,global_point_product,ntarget,global_candidate_capacity,&
-      dg_dc_metric_rank_tolerance,global_closed_core,global_retained_rank,ok,message,&
-      minimum_rank=ntarget,required_retained_rank=global_required_retained_rank)
+    lcfo_symmetry_worst_operation=maxloc(lcfo_total_symmetry_residual,dim=1)
+    if(rank==0)write(*,'(a,i0,3(a,es16.8))')&
+      '[OW-GS-DIAGNOSTIC] lcfo_symmetry_worst_operation=',lcfo_symmetry_worst_operation,&
+      ' total_residual=',lcfo_total_symmetry_residual(lcfo_symmetry_worst_operation),&
+      ' boundary_residual=',lcfo_boundary_symmetry_residual(lcfo_symmetry_worst_operation),&
+      ' interior_residual=',lcfo_interior_symmetry_residual(lcfo_symmetry_worst_operation)
+    if(maxval(lcfo_total_symmetry_residual)>dg_ow_symmetry_tolerance)&
+      error stop 'LCFO seed space is not closed under the full affine action'
+    call orthonormalize_dg_distributed_seed_space(dc%icomm_tot,global_seed_values,ow_core_weights,&
+      dg_dc_metric_rank_tolerance,global_closed_core,global_retained_rank,ok,message)
+    global_required_retained_rank=global_retained_rank
     if(rank==0)write(*,'(a,3(a,i0))')'[OW-GS-DIAGNOSTIC] LCFO_occupied_closure',&
       ' input_rank=',ntarget,' closure_rank=',global_required_retained_rank,&
       ' candidate_rank=',global_retained_rank

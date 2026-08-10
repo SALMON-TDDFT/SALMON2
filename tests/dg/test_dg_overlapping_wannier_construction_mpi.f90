@@ -14,6 +14,7 @@ program test_dg_overlapping_wannier_construction_mpi
     find_dg_group_identity,&
     select_dg_fixed_rank_symmetry_closed_subspace,&
     build_dg_distributed_symmetry_closed_basis,&
+    orthonormalize_dg_distributed_seed_space,&
     accumulate_dg_lcfo_buffer_contributions_to_core,&
     measure_dg_rank_fixed_symmetry_residuals,&
     accept_dg_boundary_calibrated_symmetry,&
@@ -44,7 +45,7 @@ program test_dg_overlapping_wannier_construction_mpi
   complex(8),allocatable::reference_projector(:,:),projector(:,:),seed_projector(:,:)
   complex(8),allocatable::distributed_candidate(:,:),distributed_overlap(:,:,:),&
     distributed_basis(:,:),distributed_basis_overlap(:,:,:),orbit_seed(:,:),required_orbit_seed(:,:),&
-    orbit_basis(:,:),&
+    orbit_basis(:,:),orthonormal_seed_basis(:,:),&
     orbit_gram(:,:)
   complex(8),allocatable::distributed_basis_overlap_rows(:,:,:)
   complex(8)::lcfo_buffer_contribution(2,2),lcfo_core_value(2,1)
@@ -589,6 +590,15 @@ program test_dg_overlapping_wannier_construction_mpi
       required_orbit_seed(1,1)=1d0
       required_orbit_seed(2,2)=1d0
     end if
+    call orthonormalize_dg_distributed_seed_space(comm,required_orbit_seed,distributed_weight,1d-12,&
+      orthonormal_seed_basis,required_orbit_rank,ok,message)
+    call require(ok.and.required_orbit_rank==2,trim(message))
+    orbit_gram=matmul(orthonormal_seed_basis,conjg(transpose(orthonormal_seed_basis)))
+    call MPI_Allreduce(MPI_IN_PLACE,orbit_gram,4,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    call require(maxval(abs(orbit_gram-reshape([(1d0,0d0),(0d0,0d0),&
+      (0d0,0d0),(1d0,0d0)],[2,2])))<1d-12,&
+      'already affine-closed seeds are orthonormalized without orbit expansion')
+    deallocate(orthonormal_seed_basis)
     call build_dg_distributed_symmetry_closed_basis(comm,required_orbit_seed,distributed_weight,&
       distributed_map(:,1:2),closure_product,2,4,1d-12,orbit_basis,orbit_rank,ok,message,&
       minimum_rank=1,required_retained_rank=required_orbit_rank)

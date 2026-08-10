@@ -43,9 +43,9 @@ program test_dg_overlapping_wannier_metric_mpi
   reference_spectrum=spectrum;base_values=values;reference_metric=metric;reference_owned=owned
   nprow=int(sqrt(real(nproc,8)))
   do while(nprow>1.and.mod(nproc,nprow)/=0);nprow=nprow-1;enddo
-  npcol=nproc/nprow;myrow=mod(rank,nprow);mycol=rank/nprow
-  nrowlocal=count([(mod(i-1,nprow)==myrow,i=1,3)])
-  ncollocal=count([(mod(i-1,npcol)==mycol,i=1,3)])
+  npcol=nproc/nprow;myrow=mod(rank,nprow)+1;mycol=rank/nprow+1
+  nrowlocal=count([(mod(i-1,nprow)==myrow-1,i=1,3)])
+  ncollocal=count([(mod(i-1,npcol)==mycol-1,i=1,3)])
   gamma_values=cmplx(real(base_values),0d0,8)
   allocate(gamma_local_metric(3,3),gamma_metric(3,3));gamma_local_metric=0d0
   do j=1,3;do i=1,3
@@ -57,7 +57,7 @@ program test_dg_overlapping_wannier_metric_mpi
   call require(ok.and.all(shape(cyclic_metric)==[nrowlocal,ncollocal]),trim(message))
   minimum=0d0
   do jlocal=1,ncollocal;do ilocal=1,nrowlocal
-    i=myrow+1+(ilocal-1)*nprow;j=mycol+1+(jlocal-1)*npcol
+    i=myrow+(ilocal-1)*nprow;j=mycol+(jlocal-1)*npcol
     minimum=max(minimum,abs(cyclic_metric(ilocal,jlocal)-gamma_metric(i,j)))
   enddo;enddo
   call require(minimum<1d-13,'direct cyclic metric block matches dense Gamma reference')

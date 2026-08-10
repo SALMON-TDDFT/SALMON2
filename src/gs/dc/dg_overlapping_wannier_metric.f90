@@ -44,7 +44,7 @@ contains
     else
       if(nprow>huge(nprow)/npcol.or.nprow*npcol/=nproc)local_bad=1
     endif
-    if(myrow<0.or.myrow>=nprow.or.mycol<0.or.mycol>=npcol.or.any(weights<0d0).or.&
+    if(myrow<1.or.myrow>nprow.or.mycol<1.or.mycol>npcol.or.any(weights<0d0).or.&
        .not.all(ieee_is_finite(weights)).or..not.all(ieee_is_finite(real(values))).or.&
        .not.all(ieee_is_finite(aimag(values))).or.imaginary_max>gamma_tolerance)local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -56,12 +56,12 @@ contains
     call MPI_Allgather(mycol,1,MPI_INTEGER,cols,1,MPI_INTEGER,comm,ierr)
     local_bad=0
     do r=1,nproc
-      if(rows(r)<0.or.rows(r)>=nprow.or.cols(r)<0.or.cols(r)>=npcol)then
+      if(rows(r)<1.or.rows(r)>nprow.or.cols(r)<1.or.cols(r)>npcol)then
         local_bad=1
-      else if(coordinate_owner(rows(r)+1,cols(r)+1)/=-1)then
+      else if(coordinate_owner(rows(r),cols(r))/=-1)then
         local_bad=1
       else
-        coordinate_owner(rows(r)+1,cols(r)+1)=r-1
+        coordinate_owner(rows(r),cols(r))=r-1
       endif
     enddo
     if(any(coordinate_owner<0))local_bad=1
@@ -69,8 +69,8 @@ contains
     if(global_bad/=0)then
       message='duplicate or missing EigenExa cyclic process coordinate';return
     endif
-    nrowlocal=count([(mod(i-1,nprow)==myrow,i=1,norbital)])
-    ncollocal=count([(mod(i-1,npcol)==mycol,i=1,norbital)])
+    nrowlocal=count([(mod(i-1,nprow)==myrow-1,i=1,norbital)])
+    ncollocal=count([(mod(i-1,npcol)==mycol-1,i=1,norbital)])
     allocate(local_metric(nrowlocal,ncollocal));local_metric=0d0
     peak_elements=int(size(local_metric),int64)
     do j=1,norbital

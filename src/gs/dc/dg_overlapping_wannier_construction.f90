@@ -34,6 +34,7 @@ module dg_overlapping_wannier_construction
   public::build_dg_pointwise_affine_owner_map
   public::select_dg_fixed_rank_symmetry_closed_subspace
   public::build_dg_distributed_symmetry_closed_basis
+  public::orthonormalize_dg_distributed_seed_space
   public::align_dg_fragment_wannier_gauge
   public::replicate_dg_fragment_wannier_representative
   public::verify_dg_fragment_center_orbit
@@ -176,10 +177,10 @@ contains
       allocate(local_rows(row_count,nstate));local_rows=0d0
       do row_offset=1,row_count
         global_row=first_row+row_offset-1
-        if(mod(global_row-1,info%nprow)/=info%myrow)cycle
+        if(mod(global_row-1,info%nprow)/=info%myrow-1)cycle
         local_row=(global_row-1)/info%nprow+1
         do global_col=1,nstate
-          if(mod(global_col-1,info%npcol)/=info%mycol)cycle
+          if(mod(global_col-1,info%npcol)/=info%mycol-1)cycle
           local_col=(global_col-1)/info%npcol+1
           local_rows(row_offset,global_col)=local_cyclic_vectors(local_row,local_col)
         enddo
@@ -1026,6 +1027,32 @@ contains
     ok=.true.
   end subroutine find_dg_group_identity
 
+  subroutine orthonormalize_dg_distributed_seed_space(comm,seed_values,weights,tolerance,basis,&
+      retained_rank,ok,message)
+    integer,intent(in)::comm
+    complex(real64),intent(in)::seed_values(:,:)
+    real(real64),intent(in)::weights(:),tolerance
+    complex(real64),allocatable,intent(out)::basis(:,:)
+    integer,intent(out)::retained_rank
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer(int64),allocatable::identity_map(:,:)
+    integer::rank,nlocal,nseed,ierr,i
+    integer::identity_product(1,1)
+    call MPI_Comm_rank(comm,rank,ierr)
+    nlocal=size(seed_values,2);nseed=size(seed_values,1)
+    allocate(identity_map(nlocal,1))
+    identity_map(:,1)=int(rank,int64)*int(nlocal,int64)+[(int(i,int64),i=1,nlocal)]
+    identity_product=1
+    call build_dg_distributed_symmetry_closed_basis(comm,seed_values,weights,identity_map,&
+      identity_product,nseed,nseed,tolerance,basis,retained_rank,ok,message,&
+      minimum_rank=nseed)
+#else
+    retained_rank=0;ok=.false.;message='distributed seed orthonormalization requires MPI'
+#endif
+  end subroutine orthonormalize_dg_distributed_seed_space
+
   subroutine build_dg_distributed_symmetry_closed_basis(comm,seed_values,weights,&
       symmetry_target_box_ids,product_table,required_seed_count,target_rank,tolerance,basis,retained_rank,&
       ok,message,minimum_rank,required_retained_rank)
@@ -1046,9 +1073,9 @@ contains
     logical,allocatable::seen(:)
     real(real64)::local_norm,global_norm
     integer::rank,nproc,ierr,nseed,nlocal,noperation,seed,operation,owner,point,&
-      target_owner,target_point,pass,iw,rank_before,local_bad,global_bad,left,right,product,&
-      source_owner,source_point,middle_owner,middle_point,effective_minimum_rank
-    integer(int64)::middle_target,final_target
+      target_owner,target_point,pass,iw,rank_before,local_bad,global_bad,&
+      source_owner,source_point,effective_minimum_rank
+    integer(int64)::final_target
     logical::orbit_exceeds
 
     ok=.false.;message='';retained_rank=0;if(present(required_retained_rank))required_retained_rank=0
@@ -1090,17 +1117,6 @@ contains
       if(.not.all(seen))local_bad=1
     end do
     if(any(product_table<1).or.any(product_table>noperation))local_bad=1
-    do left=1,noperation;do right=1,noperation
-      product=product_table(left,right)
-      if(product<1.or.product>noperation)cycle
-      do source_owner=1,nproc;do source_point=1,nlocal
-        middle_target=all_maps(source_point,right,source_owner)
-        middle_owner=int((middle_target-1_int64)/int(nlocal,int64))+1
-        middle_point=int(modulo(middle_target-1_int64,int(nlocal,int64)))+1
-        final_target=all_maps(middle_point,left,middle_owner)
-        if(final_target/=all_maps(source_point,product,source_owner))local_bad=1
-      end do;end do
-    end do;end do
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(global_bad/=0)then;message='point maps are not a closed permutation group';return;end if
     allocate(basis(target_rank,nlocal),owner_seed(nlocal),image(nlocal),&

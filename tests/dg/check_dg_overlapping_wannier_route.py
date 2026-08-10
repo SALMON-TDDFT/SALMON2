@@ -739,10 +739,10 @@ exponential_body = re.search(
 assert exponential_body and "zheev" in exponential_body.group("body").lower(), (
     "dense global gauge exponential must use one Hermitian eigensolve, not a Taylor matmul series"
 )
-closure_call = adapter_body.find("call build_dg_distributed_symmetry_closed_basis")
+closure_call = adapter_body.find("call orthonormalize_dg_distributed_seed_space")
 localization_call = adapter_body.find("call run_dg_w90_gamma_library")
 assert closure_call >= 0, (
-    "production OW GS must construct the fixed-rank full-system symmetry-closed basis"
+    "production OW GS must orthonormalize the accepted full-affine-closed seed space"
 )
 point_action_body = re.search(
     r"subroutine\s+prepare_ow_global_point_action\b(?P<body>.*?)end\s+subroutine",
@@ -759,7 +759,7 @@ assert not re.search(r"if\s*\(\s*have_common_center\s*\).*?cycle",point_action_b
     "valid screw/glide operations must not be discarded for lacking a common fixed point"
 )
 assert localization_call > closure_call, (
-    "full-system symmetry closure must precede Wannier localization"
+    "full-affine closure acceptance and orthonormalization must precede Wannier localization"
 )
 assert re.search(r"call\s+apply_dg_w90_gamma_transform", adapter_body, re.I), (
     "Wannier90 localization must finish with SALMON canonical Gamma gauge application"
@@ -987,6 +987,18 @@ assert not re.search(
     rank_fixed_residuals.group("body"),
     re.I,
 ), "Task 3B forbids all-replicating dense metric or overlap blocks"
+symmetry_closed_builder = re.search(
+    r"subroutine\s+build_dg_distributed_symmetry_closed_basis\b(?P<body>.*?)end\s+subroutine",
+    construction_source,
+    re.I | re.S,
+)
+assert symmetry_closed_builder
+assert not re.search(
+    r"do\s+left\s*=\s*1\s*,\s*noperation.*?do\s+right\s*=\s*1\s*,\s*noperation.*?"
+    r"do\s+source_owner\s*=",
+    symmetry_closed_builder.group("body"),
+    re.I | re.S,
+), "symmetry-closed construction must not repeat an O(Nsym^2*Ngrid) action-table proof"
 row_owned_overlap = re.search(
     r"subroutine\s+assemble_dg_distributed_basis_symmetry_overlap_rows\b"
     r"(?P<body>.*?)end\s+subroutine",
