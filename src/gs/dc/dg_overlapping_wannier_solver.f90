@@ -5,10 +5,348 @@ module dg_overlapping_wannier_solver
 #ifdef USE_MPI
   use mpi
 #endif
+#ifdef USE_EIGENEXA
+  use structures,only:s_parallel_info
+  use eigen_eigenexa,only:eigen_pdsyevd_ex_distributed_blocks
+  use eigen_libs_mod,only:eigen_owner_node,eigen_translate_g2l,eigen_translate_l2g,&
+    eigen_loop_start,eigen_loop_end
+#endif
   implicit none
   private
-  public::solve_dg_overlapping_wannier_coefficients
+  public::solve_dg_overlapping_wannier_coefficients,select_dg_symmetry_complete_occupied_states
+#ifdef USE_EIGENEXA
+  public::solve_dg_overlapping_wannier_generalized_eigenexa
+#endif
 contains
+  subroutine select_dg_symmetry_complete_occupied_states(eigenvalues,generator_representation,target_count,&
+      degeneracy_tolerance,gamma_real_tolerance,coefficients,canonical_coefficients,selected_count,&
+      gamma_real_defect,ok,message)
+    real(8),intent(in)::eigenvalues(:),degeneracy_tolerance,gamma_real_tolerance
+    integer,intent(in)::target_count
+    complex(8),intent(in)::generator_representation(:,:,:),coefficients(:,:)
+    complex(8),intent(out)::canonical_coefficients(:,:)
+    integer,intent(out)::selected_count
+    real(8),intent(out)::gamma_real_defect
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::i,j,g,pivot,n
+    real(8)::scale,imaginary_defect,spectral_scale
+    complex(8)::phase
+    complex(8),allocatable::identity(:,:),energy_commutator(:,:)
+
+    ok=.false.;message='';selected_count=0;gamma_real_defect=huge(1d0)
+    canonical_coefficients=(0d0,0d0);n=size(eigenvalues)
+    if(n<1.or.size(coefficients,1)/=n.or.size(coefficients,2)/=n.or.&
+        any(shape(canonical_coefficients)/=shape(coefficients)).or.&
+        size(generator_representation,1)/=n.or.size(generator_representation,2)/=n.or.&
+        size(generator_representation,3)<1.or.target_count<1.or.&
+        target_count>size(eigenvalues).or.degeneracy_tolerance<=0d0.or.&
+        gamma_real_tolerance<=0d0.or..not.all(ieee_is_finite(eigenvalues)).or.&
+        .not.finite_matrix(coefficients).or..not.finite_matrix(&
+        reshape(generator_representation,[n,n*size(generator_representation,3)])))then
+      message='invalid symmetry-complete occupied selection contract';return
+    endif
+    allocate(identity(n,n),energy_commutator(n,n));identity=(0d0,0d0)
+    do i=1,n;identity(i,i)=1d0;enddo
+    spectral_scale=max(1d0,maxval(abs(eigenvalues)))
+    do g=1,size(generator_representation,3)
+      if(maxval(abs(matmul(conjg(transpose(generator_representation(:,:,g))),&
+          generator_representation(:,:,g))-identity))>degeneracy_tolerance)then
+        message='occupied symmetry generator is not unitary';return
+      endif
+      do j=1,n;do i=1,n
+        energy_commutator(i,j)=(eigenvalues(i)-eigenvalues(j))*generator_representation(i,j,g)
+      enddo;enddo
+      if(maxval(abs(energy_commutator))>degeneracy_tolerance*spectral_scale)then
+        message='occupied symmetry generator does not preserve generalized eigenspaces';return
+      endif
+      if(target_count<n)then
+        if(maxval(abs(generator_representation(1:target_count,target_count+1:n,g)))>&
+            degeneracy_tolerance.or.maxval(abs(generator_representation(target_count+1:n,&
+            1:target_count,g)))>degeneracy_tolerance)then
+          message='occupied boundary splits a generator-connected symmetry block';return
+        endif
+      endif
+    enddo
+    do i=2,size(eigenvalues)
+      if(eigenvalues(i)<eigenvalues(i-1)-degeneracy_tolerance)then
+        message='generalized eigenvalues are not ordered';return
+      endif
+    enddo
+    if(target_count<size(eigenvalues))then
+      if(abs(eigenvalues(target_count+1)-eigenvalues(target_count))<=degeneracy_tolerance)then
+        message='occupied boundary splits a degenerate cluster';return
+      endif
+    endif
+    canonical_coefficients=coefficients;gamma_real_defect=0d0
+    do j=1,target_count
+      pivot=maxloc(abs(coefficients(:,j)),dim=1)
+      scale=maxval(abs(coefficients(:,j)))
+      if(scale<=0d0)then;message='zero occupied generalized eigenvector';return;endif
+      phase=conjg(coefficients(pivot,j))/abs(coefficients(pivot,j))
+      imaginary_defect=maxval(abs(aimag(phase*coefficients(:,j))))/scale
+      gamma_real_defect=max(gamma_real_defect,imaginary_defect)
+      if(imaginary_defect>gamma_real_tolerance)then
+        message='non-real Gamma occupied coefficient';return
+      endif
+      canonical_coefficients(:,j)=phase*coefficients(:,j)
+      canonical_coefficients(:,j)=cmplx(real(canonical_coefficients(:,j),8),0d0,8)
+    enddo
+    selected_count=target_count;ok=.true.
+  end subroutine
+
+#if defined(USE_MPI) && defined(USE_EIGENEXA)
+  subroutine solve_dg_overlapping_wannier_generalized_eigenexa(info,comm,row_ids,hrows,srows,nstate,&
+      tolerance,metric_tolerance,gamma_real_tolerance,coefficients,eigenvalues,maximum_residual,&
+      orthogonality_defect,metric_condition,gamma_real_defect,workspace_peak_bytes,ok,message)
+    type(s_parallel_info),intent(in)::info
+    integer,intent(in)::comm,nstate
+    integer(8),intent(in)::row_ids(:)
+    complex(8),intent(in)::hrows(:,:),srows(:,:)
+    real(8),intent(in)::tolerance,metric_tolerance,gamma_real_tolerance
+    complex(8),intent(out)::coefficients(:,:)
+    real(8),intent(out)::eigenvalues(:),maximum_residual,orthogonality_defect,metric_condition,&
+      gamma_real_defect
+    integer(8),intent(out)::workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer,parameter::column_tile=32
+    real(8),allocatable::cyclic_h(:,:),cyclic_vectors(:,:),all_values(:),&
+      local_metric_vectors(:,:),eigenvector_row(:),eigenvector_column(:),&
+      h_times_columns(:,:),local_transformed(:,:),global_transformed(:,:),transformed_rows(:,:)
+    real(8)::matrix_scale,imaginary_scale,local_scale,global_scale,local_trace,global_trace,&
+      pivot,minimum_pivot,maximum_pivot
+    integer,allocatable::ownership(:)
+    integer::n,nlocal,i,j,k,grow,gcol,lrow,lcol,first,count,ierr,rank,pivot_owner,pivot_local
+    logical::eigen_ok
+    character(256)::detail
+
+    ok=.false.;message='';workspace_peak_bytes=0_8;maximum_residual=huge(1d0)
+    orthogonality_defect=huge(1d0);metric_condition=huge(1d0);gamma_real_defect=huge(1d0)
+    coefficients=(0d0,0d0);eigenvalues=0d0;n=size(hrows,2);nlocal=size(row_ids)
+    if(.not.info%flag_eigenexa_init.or.n<1.or.nstate<1.or.nstate>n.or.&
+        size(hrows,1)/=nlocal.or.any(shape(srows)/=shape(hrows)).or.&
+        any(shape(coefficients)/=[n,nstate]).or.size(eigenvalues)/=nstate.or.&
+        any(row_ids<1_8).or.any(row_ids>int(n,8)).or.tolerance<=0d0.or.&
+        metric_tolerance<=0d0.or.gamma_real_tolerance<=0d0.or.&
+        .not.finite_matrix(hrows).or..not.finite_matrix(srows))then
+      message='invalid distributed EigenExa generalized solve contract';return
+    endif
+    matrix_scale=max(1d0,maxval(abs(srows)))
+    imaginary_scale=max(maxval(abs(aimag(hrows))),maxval(abs(aimag(srows))))
+    call MPI_Allreduce(MPI_IN_PLACE,matrix_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,imaginary_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    imaginary_scale=imaginary_scale/matrix_scale
+    if(imaginary_scale>gamma_real_tolerance)then
+      message='non-real Gamma stitched generalized pencil';return
+    endif
+    call distributed_hermiticity(comm,row_ids,hrows,tolerance,i)
+    call distributed_hermiticity(comm,row_ids,srows,metric_tolerance,j)
+    if(i/=0.or.j/=0)then;message='non-Hermitian distributed EigenExa generalized pencil';return;endif
+    allocate(ownership(n));ownership=0
+    do i=1,nlocal;ownership(int(row_ids(i)))=ownership(int(row_ids(i)))+1;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,ownership,n,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(ownership/=1))then
+      message='EigenExa coefficient rows do not form a unique global partition';return
+    endif
+    call MPI_Comm_rank(comm,rank,ierr)
+    allocate(cyclic_h(info%nrow_local,info%ncol_local),&
+      cyclic_vectors(info%nrow_local,info%ncol_local),all_values(n))
+    cyclic_h=0d0
+    allocate(eigenvector_row(n),eigenvector_column(n))
+    allocate(local_metric_vectors(nlocal,n));local_metric_vectors=0d0
+    minimum_pivot=huge(1d0);maximum_pivot=0d0
+    do k=1,n
+      pivot_owner=-1;pivot_local=0
+      do i=1,nlocal
+        if(int(row_ids(i))==k)then;pivot_owner=rank;pivot_local=i;endif
+      enddo
+      call MPI_Allreduce(MPI_IN_PLACE,pivot_owner,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      eigenvector_row=0d0;pivot=-huge(1d0)
+      if(rank==pivot_owner)then
+        if(k>1)eigenvector_row(1:k-1)=local_metric_vectors(pivot_local,1:k-1)
+        pivot=real(srows(pivot_local,k),8)-sum(eigenvector_row(1:k-1)**2)
+        if(pivot>0d0)then
+          pivot=sqrt(pivot);eigenvector_row(k)=pivot;local_metric_vectors(pivot_local,k)=pivot
+        endif
+      endif
+      call MPI_Bcast(pivot,1,MPI_DOUBLE_PRECISION,pivot_owner,comm,ierr)
+      call MPI_Bcast(eigenvector_row,n,MPI_DOUBLE_PRECISION,pivot_owner,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.pivot<=sqrt(metric_tolerance*matrix_scale).or..not.ieee_is_finite(pivot))then
+        message='distributed overlap Cholesky rank or conditioning gate failed';return
+      endif
+      minimum_pivot=min(minimum_pivot,pivot);maximum_pivot=max(maximum_pivot,pivot)
+      do i=1,nlocal
+        if(row_ids(i)<=int(k,8))cycle
+        local_metric_vectors(i,k)=(real(srows(i,k),8)-&
+          sum(local_metric_vectors(i,1:k-1)*eigenvector_row(1:k-1)))/pivot
+      enddo
+    enddo
+    metric_condition=(maximum_pivot/minimum_pivot)**2
+    allocate(h_times_columns(nlocal,n),transformed_rows(nlocal,n));h_times_columns=0d0;transformed_rows=0d0
+    ! Y=L^{-1}H.
+    do first=1,n,column_tile
+      count=min(column_tile,n-first+1)
+      allocate(global_transformed(n,count));global_transformed=0d0
+      do i=1,nlocal;global_transformed(int(row_ids(i)),:)=real(hrows(i,first:first+count-1),8);enddo
+      call MPI_Allreduce(MPI_IN_PLACE,global_transformed,n*count,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+      call solve_lower_tile(global_transformed,count,ok,detail)
+      if(.not.ok)then;message=trim(detail);return;endif
+      do i=1,nlocal;h_times_columns(i,first:first+count-1)=global_transformed(int(row_ids(i)),:);enddo
+      deallocate(global_transformed)
+    enddo
+    ! B=Y L^{-T}; solve L B^T=Y^T.
+    do first=1,n,column_tile
+      count=min(column_tile,n-first+1)
+      allocate(global_transformed(n,count));global_transformed=0d0
+      do j=1,count
+        grow=first+j-1;eigenvector_row=0d0
+        do i=1,nlocal
+          if(int(row_ids(i))==grow)eigenvector_row=h_times_columns(i,:)
+        enddo
+        call MPI_Allreduce(MPI_IN_PLACE,eigenvector_row,n,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+        global_transformed(:,j)=eigenvector_row
+      enddo
+      call solve_lower_tile(global_transformed,count,ok,detail)
+      if(.not.ok)then;message=trim(detail);return;endif
+      do i=1,nlocal;transformed_rows(i,first:first+count-1)=global_transformed(int(row_ids(i)),:);enddo
+      deallocate(global_transformed)
+    enddo
+    cyclic_h=0d0
+    do grow=1,n
+      eigenvector_row=0d0
+      do i=1,nlocal
+        if(int(row_ids(i))==grow)eigenvector_row=transformed_rows(i,:)
+      enddo
+      call MPI_Allreduce(MPI_IN_PLACE,eigenvector_row,n,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+      if(eigen_owner_node(grow,info%nprow,info%myrow)/=info%myrow)cycle
+      lrow=eigen_translate_g2l(grow,info%nprow,info%myrow)
+      do gcol=1,n
+        if(eigen_owner_node(gcol,info%npcol,info%mycol)/=info%mycol)cycle
+        lcol=eigen_translate_g2l(gcol,info%npcol,info%mycol)
+        cyclic_h(lrow,lcol)=eigenvector_row(gcol)
+      enddo
+    enddo
+    local_scale=maxval(abs(cyclic_h))
+    call MPI_Allreduce(local_scale,global_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(global_scale<=0d0)then;message='EigenExa transformed Hamiltonian is zero';return;endif
+    local_trace=0d0
+    do grow=1,n
+      if(eigen_owner_node(grow,info%nprow,info%myrow)/=info%myrow.or.&
+          eigen_owner_node(grow,info%npcol,info%mycol)/=info%mycol)cycle
+      lrow=eigen_translate_g2l(grow,info%nprow,info%myrow)
+      lcol=eigen_translate_g2l(grow,info%npcol,info%mycol)
+      local_trace=local_trace+abs(cyclic_h(lrow,lcol))
+    enddo
+    call MPI_Allreduce(local_trace,global_trace,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+    if(global_trace<=0d0)then;message='EigenExa transformed Hamiltonian active diagonal is zero';return;endif
+    ok=.false.
+    call eigen_pdsyevd_ex_distributed_blocks(info,n,cyclic_h,all_values,cyclic_vectors,eigen_ok,detail)
+    if(.not.eigen_ok)then;message='EigenExa transformed-H diagonalization: '//trim(detail);return;endif
+    if(nstate<n)then
+      if(abs(all_values(nstate+1)-all_values(nstate))<=tolerance*max(1d0,maxval(abs(all_values))))then
+        message='occupied boundary splits a symmetry-degenerate generalized eigenspace';return
+      endif
+    endif
+    allocate(global_transformed(n,nstate))
+    do j=1,nstate
+      call gather_cyclic_column(j,cyclic_vectors,eigenvector_column,ok,detail)
+      if(.not.ok)then;message=trim(detail);return;endif
+      global_transformed(:,j)=eigenvector_column
+    enddo
+    coefficients=(0d0,0d0)
+    do grow=n,1,-1
+      allocate(local_transformed(1,nstate));local_transformed=0d0
+      do i=1,nlocal
+        if(row_ids(i)<=int(grow,8))cycle
+        local_transformed(1,:)=local_transformed(1,:)+&
+          local_metric_vectors(i,grow)*real(coefficients(int(row_ids(i)),:),8)
+      enddo
+      call MPI_Allreduce(MPI_IN_PLACE,local_transformed,nstate,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+      pivot=0d0
+      do i=1,nlocal
+        if(int(row_ids(i))==grow)pivot=local_metric_vectors(i,grow)
+      enddo
+      call MPI_Allreduce(MPI_IN_PLACE,pivot,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+      coefficients(grow,:)=cmplx((global_transformed(grow,:)-local_transformed(1,:))/pivot,0d0,8)
+      deallocate(local_transformed)
+    enddo
+    eigenvalues=all_values(1:nstate);gamma_real_defect=0d0
+    call canonicalize_real_columns(coefficients)
+    call coefficient_diagnostics(comm,row_ids,hrows,srows,coefficients,eigenvalues,&
+      maximum_residual,orthogonality_defect)
+    if(maximum_residual>10d0*tolerance.or.orthogonality_defect>10d0*tolerance)then
+      ok=.false.
+      message='EigenExa generalized residual or S-orthonormality gate failed';return
+    endif
+    workspace_peak_bytes=8_8*int(size(cyclic_h)+size(cyclic_vectors)+size(all_values)+&
+      size(local_metric_vectors)+size(h_times_columns)+size(transformed_rows)+n*(2+column_tile),8)+&
+      16_8*int(size(coefficients),8)
+    ok=.true.;message=''
+  contains
+    subroutine solve_lower_tile(rhs,tile_count,tile_ok,tile_message)
+      real(8),intent(inout)::rhs(:,:)
+      integer,intent(in)::tile_count
+      logical,intent(out)::tile_ok
+      character(*),intent(out)::tile_message
+      integer::row,ii,error
+      real(8)::diagonal
+      tile_ok=.false.;tile_message=''
+      if(size(rhs,1)/=n.or.size(rhs,2)/=tile_count)then
+        tile_message='invalid distributed lower-triangular tile';return
+      endif
+      do row=1,n
+        eigenvector_row=0d0;diagonal=0d0
+        do ii=1,nlocal
+          if(int(row_ids(ii))/=row)cycle
+          eigenvector_row=local_metric_vectors(ii,:);diagonal=local_metric_vectors(ii,row)
+        enddo
+        call MPI_Allreduce(MPI_IN_PLACE,eigenvector_row,n,MPI_DOUBLE_PRECISION,MPI_SUM,comm,error)
+        call MPI_Allreduce(MPI_IN_PLACE,diagonal,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,error)
+        if(error/=MPI_SUCCESS.or.diagonal<=0d0)then
+          tile_message='distributed lower-triangular solve failed';return
+        endif
+        if(row>1)rhs(row,:)=(rhs(row,:)-matmul(eigenvector_row(1:row-1),rhs(1:row-1,:)))/diagonal
+        if(row==1)rhs(row,:)=rhs(row,:)/diagonal
+      enddo
+      tile_ok=.true.
+    end subroutine
+
+    subroutine gather_cyclic_column(column,cyclic,values,column_ok,column_message)
+      integer,intent(in)::column
+      real(8),intent(in)::cyclic(:,:)
+      real(8),intent(out)::values(:)
+      logical,intent(out)::column_ok
+      character(*),intent(out)::column_message
+      integer::row,global_row,global_column,lr,lc,error,row_start,row_end,column_start,column_end
+      values=0d0
+      row_start=eigen_loop_start(1,info%nprow,info%myrow)
+      row_end=eigen_loop_end(n,info%nprow,info%myrow)
+      column_start=eigen_loop_start(1,info%npcol,info%mycol)
+      column_end=eigen_loop_end(n,info%npcol,info%mycol)
+      do lc=column_start,column_end
+        global_column=eigen_translate_l2g(lc,info%npcol,info%mycol)
+        if(global_column/=column)cycle
+        do lr=row_start,row_end
+          global_row=eigen_translate_l2g(lr,info%nprow,info%myrow)
+          values(global_row)=cyclic(lr,lc)
+        enddo
+      enddo
+      call MPI_Allreduce(MPI_IN_PLACE,values,n,MPI_DOUBLE_PRECISION,MPI_SUM,comm,error)
+      column_ok=error==MPI_SUCCESS
+      if(column_ok)then;column_message='';else;column_message='cyclic column gather failed';endif
+    end subroutine
+    subroutine canonicalize_real_columns(matrix)
+      complex(8),intent(inout)::matrix(:,:)
+      integer::column,p
+      do column=1,size(matrix,2)
+        p=maxloc(abs(matrix(:,column)),dim=1)
+        if(real(matrix(p,column),8)<0d0)matrix(:,column)=-matrix(:,column)
+      enddo
+    end subroutine
+  end subroutine
+#endif
+
   subroutine solve_dg_overlapping_wannier_coefficients(comm,row_ids,hrows,srows,nstate,max_iterations,&
       tolerance,metric_tolerance,coefficients,eigenvalues,maximum_residual,orthogonality_defect,&
       metric_condition,ok,message,initial_coefficients)

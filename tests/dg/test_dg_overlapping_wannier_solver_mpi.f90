@@ -1,7 +1,8 @@
 #include "config.h"
 program test_dg_overlapping_wannier_solver_mpi
   use mpi
-  use dg_overlapping_wannier_solver,only:solve_dg_overlapping_wannier_coefficients
+  use dg_overlapping_wannier_solver,only:solve_dg_overlapping_wannier_coefficients,&
+    select_dg_symmetry_complete_occupied_states
   use dg_overlapping_wannier_density,only:reconstruct_dg_overlapping_wannier_density
   implicit none
   integer::comm,rank,nproc,ierr,nlocal,i,j,p,index,lapack_info
@@ -16,10 +17,41 @@ program test_dg_overlapping_wannier_solver_mpi
   integer(8)::signature
   logical::ok
   character(256)::message
+  integer::selected_count
+  complex(8)::selection_coefficients(4,4),canonical_coefficients(4,4),generator_representation(4,4,1)
+  complex(8),allocatable::empty_coefficients(:,:),empty_canonical(:,:)
+  real(8)::gamma_real_defect
 
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
   pi=acos(-1d0)
+
+  selection_coefficients=(0d0,0d0)
+  do i=1,4;selection_coefficients(i,i)=1d0;enddo
+  generator_representation=(0d0,0d0);generator_representation(1,1,1)=1d0
+  generator_representation(2,3,1)=1d0;generator_representation(3,2,1)=1d0
+  generator_representation(4,4,1)=1d0
+  call select_dg_symmetry_complete_occupied_states([0d0,1d0,1d0,3d0],generator_representation,2,&
+    1d-10,1d-12,selection_coefficients,canonical_coefficients,selected_count,gamma_real_defect,ok,message)
+  call require(.not.ok,'occupied boundary must not split a degenerate symmetry block')
+  call select_dg_symmetry_complete_occupied_states([0d0,1d0,1d0,3d0],generator_representation,3,&
+    1d-10,1d-12,selection_coefficients,canonical_coefficients,selected_count,gamma_real_defect,ok,message)
+  call require(ok.and.selected_count==3.and.gamma_real_defect==0d0,'complete occupied symmetry block selection')
+  selection_coefficients(1,1)=cmplx(1d0,1d-6,8)
+  selection_coefficients(2,1)=0.5d0
+  call select_dg_symmetry_complete_occupied_states([0d0,1d0,1d0,3d0],generator_representation,3,&
+    1d-10,1d-12,selection_coefficients,canonical_coefficients,selected_count,gamma_real_defect,ok,message)
+  call require(.not.ok,'non-real Gamma occupied coefficient rejection')
+  selection_coefficients(1,1)=1d0;selection_coefficients(2,1)=0d0
+  selection_coefficients(:,1)=cmplx(0d0,1d0,8)*selection_coefficients(:,1)
+  call select_dg_symmetry_complete_occupied_states([0d0,1d0,1d0,3d0],generator_representation,3,&
+    1d-10,1d-12,selection_coefficients,canonical_coefficients,selected_count,gamma_real_defect,ok,message)
+  call require(ok.and.maxval(abs(aimag(canonical_coefficients(:,1:3))))==0d0,&
+    'deterministic Gamma phase is applied to selected coefficients')
+  allocate(empty_coefficients(0,4),empty_canonical(0,4))
+  call select_dg_symmetry_complete_occupied_states([0d0,1d0,1d0,3d0],generator_representation,3,&
+    1d-10,1d-12,empty_coefficients,empty_canonical,selected_count,gamma_real_defect,ok,message)
+  call require(.not.ok,'empty coefficient row rejection')
 
   nlocal=count([(mod(i-1,nproc)==rank,i=1,4)])
   allocate(row_ids(nlocal),hrows(nlocal,4),srows(nlocal,4))

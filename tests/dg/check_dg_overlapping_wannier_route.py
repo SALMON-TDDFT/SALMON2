@@ -396,11 +396,11 @@ assert "execute_registered_dg_overlapping_wannier_ground_state" not in ow_scf_so
 assert re.search(
     r"subroutine\s+run_dg_overlapping_wannier_ground_state_for_main.*?"
     r"call\s+dc_lcfo.*?"
-    r"run_dg_overlapping_wannier_scf.*?"
+    r"solve_dg_overlapping_wannier_generalized_eigenexa.*?"
     r"write_dg_overlapping_wannier_checkpoint",
     main_source,
     re.I | re.S,
-), "main_dft needs a concrete construction-to-SCF-to-checkpoint production adapter"
+), "main_dft needs a concrete construction-to-one-shot-EigenExa-to-checkpoint production adapter"
 production_adapter = re.search(
     r"subroutine\s+run_dg_overlapping_wannier_ground_state_for_main(?P<body>.*?)"
     r"end\s+subroutine",
@@ -852,12 +852,57 @@ assert re.search(r"call\s+apply_dg_w90_gamma_transform", adapter_body, re.I), (
 assert "replicate_ow_global_symmetry_orbit" not in adapter_body, (
     "production must not replicate a representative fragment after local construction"
 )
+assert "call run_dg_overlapping_wannier_scf(" not in adapter_body.lower(), (
+    "the stitched pencil is a one-shot post-DC solve; repeated OW-SCF would repeatedly "
+    "symmetrize H/S/rho and feed its reconstructed density back into the operator"
+)
+assert adapter_body.lower().count("call solve_dg_overlapping_wannier_generalized_eigenexa(") == 1, (
+    "production must solve the symmetrized stitched generalized pencil exactly once with EigenExa"
+)
+assert "one_shot_operator_fingerprint" in adapter_body.lower(), (
+    "one-shot assembly must return a separate fingerprint instead of overwriting the expected operator identity"
+)
 assert re.search(
-    r"call\s+run_dg_overlapping_wannier_scf\s*\(.*?occupations\s*,\s*"
-    r"global_retained_group_closure_defect\s*,\s*dg_ow_symmetry_tolerance",
+    r"one_shot_operator_fingerprint\s*/=\s*operator_fingerprint.*?error\s+stop",
     adapter_body,
     re.I | re.S,
-), "SCF must receive exact group-algebra closure, not streaming density covariance"
+), "one-shot assembly must reject an operator fingerprint mismatch"
+adapter_lower = adapter_body.lower()
+build_position = adapter_lower.find("call ow_build_hamiltonian(")
+solve_position = adapter_lower.find("call solve_dg_overlapping_wannier_generalized_eigenexa(")
+density_position = adapter_lower.find("call reconstruct_dg_overlapping_wannier_density(")
+checkpoint_position = adapter_lower.find("call write_dg_overlapping_wannier_checkpoint(")
+assert 0 <= build_position < solve_position < density_position < checkpoint_position, (
+    "production order must be build symmetrized H/S/rho, one-shot EigenExa solve, "
+    "density reconstruction, then checkpoint publication"
+)
+checkpoint_body = re.search(
+    r"subroutine\s+populate_ow_checkpoint(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+).group("body")
+for stale_refinement_receipt in (
+    "refined_residual",
+    "refined_orthogonality",
+    "refined_condition",
+    "refined_coefficients",
+    "refined_eigenvalues",
+):
+    assert stale_refinement_receipt not in checkpoint_body.lower(), (
+        f"one-shot checkpoint must not publish stale refinement receipt {stale_refinement_receipt}"
+    )
+hamiltonian_builder = re.search(
+    r"subroutine\s+ow_build_hamiltonian(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+)
+assert hamiltonian_builder
+builder_lower = hamiltonian_builder.group("body").lower()
+assemble_position = builder_lower.find("call assemble_dg_stitched_weak_operator_rows(")
+symmetrize_position = builder_lower.find("call symmetrize_dg_distributed_pencil_rows(")
+assert 0 <= assemble_position < symmetrize_position, (
+    "the Hamiltonian builder must symmetrize the assembled stitched pencil before returning it"
+)
 assert re.search(
     r"inherit_dg_w90_affine_receipts\s*\(.*?w90_closure_defect.*?"
     r"global_retained_group_closure_defect\s*=\s*w90_closure_defect",

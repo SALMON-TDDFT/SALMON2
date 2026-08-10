@@ -74,9 +74,13 @@ use dg_overlapping_wannier_operators, only: assemble_dg_stitched_weak_operator_r
 use dg_overlapping_wannier_nonlocal, only: assemble_dg_overlapping_wannier_nonlocal,&
   assemble_dg_overlapping_wannier_nonlocal_rows,collect_dg_overlapping_wannier_projector_overlaps
 use dg_overlapping_wannier_scf, only: s_dg_overlapping_wannier_scf_state, &
-  s_dg_overlapping_wannier_scf_result,run_dg_overlapping_wannier_scf, &
+  s_dg_overlapping_wannier_scf_result, &
   compute_dg_overlapping_wannier_scf_fingerprint,mix_dg_overlapping_wannier_density_history
 use dg_overlapping_wannier_solver, only: solve_dg_overlapping_wannier_coefficients
+#ifdef USE_EIGENEXA
+use dg_overlapping_wannier_solver, only: solve_dg_overlapping_wannier_generalized_eigenexa
+#endif
+use dg_overlapping_wannier_density,only:reconstruct_dg_overlapping_wannier_density
 use dg_overlapping_wannier_checkpoint, only: s_dg_overlapping_wannier_checkpoint, &
   write_dg_overlapping_wannier_checkpoint,read_dg_overlapping_wannier_checkpoint,&
   compute_dg_overlapping_wannier_matrix_fingerprints
@@ -174,7 +178,7 @@ type(s_dg_overlapping_wannier_scf_result) :: ow_result
 type(s_dg_overlapping_wannier_checkpoint) :: ow_checkpoint
 complex(8),allocatable :: ow_srows(:,:),ow_rhorows(:,:),ow_core_values(:,:),ow_core_gradients(:,:,:),&
   ow_box_values(:,:),ow_box_gradients(:,:,:),ow_last_kinetic_rows(:,:),&
-  ow_last_local_rows(:,:),ow_last_nonlocal_rows(:,:)
+  ow_last_local_rows(:,:),ow_last_nonlocal_rows(:,:),ow_published_hrows(:,:)
 integer(8),allocatable :: ow_core_ids(:),ow_row_ids(:)
 integer(8),allocatable :: ow_box_physical_ids(:)
 integer,allocatable :: ow_tail_generation(:,:)
@@ -560,10 +564,12 @@ contains
     complex(8),allocatable::w90_anchors(:,:),w90_m_matrix(:,:,:),w90_a_matrix(:,:),w90_transform(:,:)
     complex(8),allocatable::fixed_center_rows(:,:,:),fixed_center_representation(:,:),fixed_center_identity(:,:)
     complex(8),allocatable::lcfo_fragment_contribution(:,:),lcfo_occupied_core(:,:)
+    complex(8),allocatable::one_shot_hrows(:,:)
     real(8),allocatable::weights(:),coordinate(:),spectrum(:),occupations(:),lcfo_retained_occupations(:),&
       gradient_rotation(:,:,:),&
       local_point_rotations(:,:,:)
     real(8),allocatable::manifest_values(:,:),initial_density_local(:),initial_density_global(:)
+    real(8),allocatable::one_shot_density(:),one_shot_potential(:)
     real(8),allocatable::ow_raw_partition_weight(:),ow_raw_partition_gradient(:,:),&
       ow_box_density(:)
     real(8),allocatable::localized_centers(:,:),localized_center_magnitudes(:,:)
@@ -607,6 +613,7 @@ contains
       pseudopotential_fingerprint,nbox8,ncore8,product8,nxy8,local_exact_symmetry_fingerprint,&
       lcfo_symmetry_workspace_peak
     integer(8)::w90_coordinator_bytes,w90_workspace_peak,w90_byte_limit
+    integer(8)::one_shot_workspace_peak,one_shot_operator_fingerprint
     integer(8)::w90_symmetry_workspace_peak
     integer(8)::fixed_center_group_fingerprint,fixed_center_operation_workspace,&
       fixed_center_dmn_workspace_peak
@@ -617,6 +624,9 @@ contains
       window_axis_derivative(3),window_coordinate
     real(8)::ow_stitched_electron_count,ow_stitched_s_hermiticity,ow_stitched_rho_hermiticity
     real(8)::ow_stitched_minimum_pivot,ow_stitched_pivot_condition
+    real(8)::one_shot_residual,one_shot_orthogonality,one_shot_condition,&
+      one_shot_gamma_defect,one_shot_charge,one_shot_trace_charge,&
+      one_shot_local_difference,one_shot_global_difference,one_shot_local_norm,one_shot_global_norm
     logical::ok,reusable,localization_converged,global_inversion_present
     logical::fixed_center_inversion_present,writer_ok
     real(8)::fixed_center_fractional(3)
@@ -1166,17 +1176,55 @@ contains
     ow_state%basis_generation=ow_basis%generation;ow_state%geometry_generation=1
     ow_state%basis_fingerprint=basis_fingerprint
     ow_state%operator_fingerprint=operator_fingerprint
-    call run_dg_overlapping_wannier_scf(dc%icomm_tot,ow_row_ids,ow_srows,ow_core_ids,&
-      ow_core_weights,ow_core_values,ow_tail_generation,ow_basis%generation,1,basis_fingerprint,&
-      occupations,global_retained_group_closure_defect,dg_ow_symmetry_tolerance,ow_symmetry_fingerprint,&
-      expected_core_count,dg_dc_gs_density_mix_rate,dg_dc_gs_maximum_scf_iterations,&
-      dg_dc_gs_maximum_eigensolver_iterations,dg_dc_gs_final_density_tolerance,&
-      dg_dc_gs_final_orbital_tolerance,ow_build_hamiltonian,ow_mix_density,ow_transaction,&
-      ow_commit_transaction,ow_state,ow_result,ok,message)
-    if(.not.ok)then
-      if(rank==0)then;write(*,'(2a)')'[OW-GS-DIAGNOSTIC] SCF rejection: ',trim(message);flush(6);end if
-      error stop 'overlapping-Wannier SCF gate failed'
-    endif
+    allocate(one_shot_hrows(size(ow_row_ids),ntarget),one_shot_potential(ncore),one_shot_density(ncore))
+    call ow_build_hamiltonian(dc%icomm_tot,ow_state%density,ow_state%potential,one_shot_hrows,&
+      one_shot_potential,one_shot_operator_fingerprint,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'one-shot stitched Hamiltonian build failed';endif
+    if(one_shot_operator_fingerprint/=operator_fingerprint)&
+      error stop 'one-shot stitched Hamiltonian operator fingerprint mismatch'
+#ifdef USE_EIGENEXA
+    ow_saved_eigenexa_comm=info%icomm_o
+    call finalize_eigenexa(info);info%icomm_o=dc%icomm_tot
+    call init_eigenexa_mod(info,ntarget,direct_block_only=.true.)
+    call solve_dg_overlapping_wannier_generalized_eigenexa(info,dc%icomm_tot,ow_row_ids,&
+      one_shot_hrows,ow_srows,nstate,dg_dc_gs_final_orbital_tolerance,dg_dc_metric_rank_tolerance,&
+      dg_dc_gs_final_orbital_tolerance,ow_state%coefficients,ow_state%eigenvalues,&
+      one_shot_residual,one_shot_orthogonality,one_shot_condition,one_shot_gamma_defect,&
+      one_shot_workspace_peak,ok,message)
+    call finalize_eigenexa(info);info%icomm_o=ow_saved_eigenexa_comm
+    call init_eigenexa_mod(info,system%no)
+#else
+    ok=.false.;message='one-shot overlapping-Wannier generalized solve requires EigenExa'
+#endif
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'one-shot generalized EigenExa solve failed';endif
+    call reconstruct_dg_overlapping_wannier_density(dc%icomm_tot,ow_core_ids,ow_core_weights,&
+      ow_core_values,ow_tail_generation,ow_basis%generation,ow_state%coefficients,occupations,&
+      expected_core_count,ow_row_ids,ow_srows,dg_dc_gs_final_density_tolerance,one_shot_density,&
+      one_shot_charge,one_shot_trace_charge,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'one-shot occupied density reconstruction failed';endif
+    one_shot_local_difference=sum((one_shot_density-ow_state%density)**2)
+    one_shot_local_norm=sum(ow_state%density**2)
+    call MPI_Allreduce(one_shot_local_difference,one_shot_global_difference,1,MPI_DOUBLE_PRECISION,&
+      MPI_SUM,dc%icomm_tot,ierr)
+    call MPI_Allreduce(one_shot_local_norm,one_shot_global_norm,1,MPI_DOUBLE_PRECISION,&
+      MPI_SUM,dc%icomm_tot,ierr)
+    ow_state%density=one_shot_density;ow_state%potential=one_shot_potential
+    ow_state%operator_fingerprint=operator_fingerprint;ow_state%accepted=.true.
+    ow_result=s_dg_overlapping_wannier_scf_result();ow_result%converged=.true.
+    ow_result%iterations=1;ow_result%hamiltonian_rebuilds=1
+    ow_result%density_residual=sqrt(one_shot_global_difference/max(tiny(1d0),one_shot_global_norm))
+    ow_result%unmixed_density_residual=ow_result%density_residual
+    ow_result%coefficient_residual=one_shot_residual
+    ow_result%orthogonality_defect=one_shot_orthogonality
+    ow_result%integrated_charge=one_shot_charge;ow_result%trace_charge=one_shot_trace_charge
+    ow_result%symmetry_closure_residual=global_retained_group_closure_defect
+    condition_number=one_shot_condition
+    if(allocated(ow_published_hrows))deallocate(ow_published_hrows)
+    allocate(ow_published_hrows,source=one_shot_hrows)
+    if(rank==0)write(*,'(a,5(a,es16.8),a,i0)')'[OW-GS-DIAGNOSTIC] one_shot_generalized_eigenexa',&
+      ' density_change=',ow_result%density_residual,' residual=',one_shot_residual,&
+      ' s_orthogonality=',one_shot_orthogonality,' metric_condition=',one_shot_condition,&
+      ' gamma_real_defect=',one_shot_gamma_defect,' workspace_peak_bytes=',one_shot_workspace_peak
     call populate_ow_checkpoint(occupations,condition_number,global_retained_group_closure_defect,&
       operator_fingerprint,&
       localization_initial_spread,localization_final_spread,&
@@ -2977,18 +3025,15 @@ contains
     complex(8),allocatable::hrows(:,:),metric(:,:),hamiltonian(:,:),metric_inverse(:,:),zero_hamiltonian(:,:),&
       position(:,:,:),derivative(:,:,:),canonical_momentum(:,:,:),&
       velocity(:,:,:),nonlocal_velocity(:,:,:),&
-      residual_rows(:,:),refined_coefficients(:,:)
-    real(8),allocatable::refined_eigenvalues(:)
-    real(8),allocatable::new_potential(:),coordinates(:,:)
+      residual_rows(:,:)
+    real(8),allocatable::coordinates(:,:)
     real(8)::origin(3),cell_length(3),local_residual_norm,global_residual_norm,&
-      local_h_norm,global_h_norm,local_s_norm,global_s_norm,published_coefficient_residual,&
-      refined_residual,refined_orthogonality,refined_condition
+      local_h_norm,global_h_norm,local_s_norm,global_s_norm,published_coefficient_residual
     real(8)::pre_projection_defect,post_projection_defect,inversion_pre_defect,inversion_post_defect
     real(8)::fixed_center_fractional(3)
     integer::promoted_group_order,global_exact_group_order
     logical::ok,global_inversion_promoted,global_exact_group_promoted
     character(256)::message
-    integer(8)::final_operator_fingerprint
     call MPI_Comm_rank(dc%icomm_tot,rank,i)
     call MPI_Comm_size(dc%icomm_tot,nproc,ierr)
     nowned=count(ow_basis%center_owner_rank==rank)
@@ -3000,21 +3045,8 @@ contains
     allocate(all_tail_ids(nbox))
     call MPI_Allgather(ow_basis%physical_grid_ids,size(ow_basis%physical_grid_ids),MPI_INTEGER8,&
       all_tail_ids,size(ow_basis%physical_grid_ids),MPI_INTEGER8,dc%icomm_tot,ierr)
-    allocate(hrows(size(ow_row_ids),size(ow_srows,2)),new_potential(size(ow_state%potential)))
-    call ow_build_hamiltonian(dc%icomm_tot,ow_state%density,ow_state%potential,hrows,new_potential,&
-      final_operator_fingerprint,ok,message)
-    if(.not.ok.or.final_operator_fingerprint/=operator_fingerprint)then
-      write(0,'(a)')trim(message)
-      error stop 'overlapping-Wannier final Hamiltonian publication gate failed'
-    endif
-    allocate(refined_coefficients(size(ow_state%coefficients,1),size(ow_state%coefficients,2)),&
-      refined_eigenvalues(size(ow_state%eigenvalues)))
-    call solve_dg_overlapping_wannier_coefficients(dc%icomm_tot,ow_row_ids,hrows,ow_srows,&
-      size(refined_eigenvalues),1,dg_dc_gs_final_orbital_tolerance,dg_dc_metric_rank_tolerance,&
-      refined_coefficients,refined_eigenvalues,refined_residual,refined_orthogonality,&
-      refined_condition,ok,message)
-    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'published H0 coefficient refinement failed';end if
-    ow_state%coefficients=refined_coefficients;ow_state%eigenvalues=refined_eigenvalues
+    if(.not.allocated(ow_published_hrows))error stop 'one-shot published Hamiltonian is unavailable'
+    allocate(hrows,source=ow_published_hrows)
     allocate(residual_rows(size(hrows,1),size(ow_state%coefficients,2)))
     residual_rows=matmul(hrows,ow_state%coefficients)
     do j=1,size(residual_rows,2)
@@ -3082,36 +3114,8 @@ contains
     if(rank==0)write(*,'(a,l1,a,i0)')&
       '[OW-GS-DIAGNOSTIC] global_exact_group_promoted=',global_exact_group_promoted,&
       ' global_exact_group_order=',global_exact_group_order
-    call invert_ow_metric(metric,metric_inverse,ok,message)
-    if(.not.ok)error stop 'projected overlapping-Wannier metric inverse failed'
-    do i=1,size(ow_row_ids)
-      ow_srows(i,:)=metric(int(ow_row_ids(i)),:)
-      hrows(i,:)=hamiltonian(int(ow_row_ids(i)),:)
-    end do
-    call solve_dg_overlapping_wannier_coefficients(dc%icomm_tot,ow_row_ids,hrows,ow_srows,&
-      size(refined_eigenvalues),1,dg_dc_gs_final_orbital_tolerance,dg_dc_metric_rank_tolerance,&
-      refined_coefficients,refined_eigenvalues,refined_residual,refined_orthogonality,&
-      refined_condition,ok,message)
-    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'projected H0 coefficient refinement failed';end if
-    ow_state%coefficients=refined_coefficients;ow_state%eigenvalues=refined_eigenvalues
-    residual_rows=matmul(hrows,ow_state%coefficients)
-    published_coefficient_residual=0d0
-    do j=1,size(residual_rows,2)
-      residual_rows(:,j)=residual_rows(:,j)-&
-        ow_state%eigenvalues(j)*matmul(ow_srows,ow_state%coefficients(:,j))
-      local_residual_norm=sum(abs(residual_rows(:,j))**2)
-      local_h_norm=sum(abs(matmul(hrows,ow_state%coefficients(:,j)))**2)
-      local_s_norm=sum(abs(matmul(ow_srows,ow_state%coefficients(:,j)))**2)
-      call MPI_Allreduce(local_residual_norm,global_residual_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,&
-        dc%icomm_tot,ierr)
-      call MPI_Allreduce(local_h_norm,global_h_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr)
-      call MPI_Allreduce(local_s_norm,global_s_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr)
-      published_coefficient_residual=max(published_coefficient_residual,&
-        sqrt(max(0d0,global_residual_norm))/max(tiny(1d0),sqrt(max(0d0,global_h_norm))+&
-        abs(ow_state%eigenvalues(j))*sqrt(max(0d0,global_s_norm))))
-    end do
-    if(published_coefficient_residual>dg_dc_gs_final_orbital_tolerance)&
-      error stop 'symmetry-projected H0 is inconsistent with accepted GS coefficients'
+    ! GP4 already symmetrized the published row-owned pencil.  The dense exact-group
+    ! projection above is diagnostic only; do not replace or re-solve the accepted H/S/C.
     write(*,'(a,i0,a,es12.4,a,es12.4)')'[OW-GS-DIAGNOSTIC] promoted_point_group_order=',&
       promoted_group_order,' pre_projection_defect=',pre_projection_defect,&
       ' post_projection_defect=',post_projection_defect
@@ -3202,8 +3206,8 @@ contains
     enddo
     ow_checkpoint%density_residual=ow_result%density_residual
     ow_checkpoint%unmixed_density_residual=ow_result%unmixed_density_residual
-    ow_checkpoint%coefficient_residual=refined_residual
-    ow_checkpoint%orthogonality_defect=refined_orthogonality
+    ow_checkpoint%coefficient_residual=ow_result%coefficient_residual
+    ow_checkpoint%orthogonality_defect=ow_result%orthogonality_defect
     ow_checkpoint%metric_condition=condition_number
     ow_checkpoint%charge_error=ow_result%integrated_charge-ow_result%trace_charge
     ow_checkpoint%density_tolerance=dg_dc_gs_final_density_tolerance
@@ -3220,9 +3224,9 @@ contains
     ow_checkpoint%localization_converged=localization_converged
     ow_checkpoint%gs_acceptance_receipts=[0d0,0d0,&
       abs(sum(occupations)-dc%elec_num_tot)/dg_dc_gs_electron_count_tolerance,&
-      refined_residual/dg_dc_gs_final_orbital_tolerance,&
+      ow_result%coefficient_residual/dg_dc_gs_final_orbital_tolerance,&
       ow_result%density_residual/dg_dc_gs_final_density_tolerance,&
-      refined_residual/dg_dc_gs_final_orbital_tolerance,&
+      ow_result%coefficient_residual/dg_dc_gs_final_orbital_tolerance,&
       merge(inversion_post_defect/dg_ow_symmetry_tolerance,0d0,global_inversion_promoted),&
       0d0,0d0,max(post_projection_defect,&
         merge(inversion_post_defect,0d0,global_inversion_promoted))/dg_ow_symmetry_tolerance,&
