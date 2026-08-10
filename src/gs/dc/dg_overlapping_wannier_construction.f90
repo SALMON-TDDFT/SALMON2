@@ -9,6 +9,8 @@ module dg_overlapping_wannier_construction
   use structures,only:s_parallel_info
   use dg_overlapping_wannier_metric,only:assemble_dg_eigenexa_cyclic_metric_block
   use eigen_eigenexa,only:eigen_pdsyevd_ex_distributed_blocks
+  use eigen_libs_mod,only:eigen_owner_node,eigen_translate_g2l,eigen_translate_l2g,&
+    eigen_loop_start,eigen_loop_end
 #endif
   implicit none
   private
@@ -36,6 +38,7 @@ module dg_overlapping_wannier_construction
   public::build_dg_pointwise_affine_owner_map
   public::select_dg_fixed_rank_symmetry_closed_subspace
   public::build_dg_distributed_symmetry_closed_basis
+  public::build_dg_group_averaged_occupied_candidates_reference
   public::orthonormalize_dg_distributed_seed_space
   public::align_dg_fragment_wannier_gauge
   public::replicate_dg_fragment_wannier_representative
@@ -52,6 +55,7 @@ module dg_overlapping_wannier_construction
   public::measure_dg_rank_fixed_symmetry_residuals
 #ifdef USE_EIGENEXA
   public::measure_dg_rank_fixed_symmetry_residuals_eigenexa
+  public::build_dg_group_averaged_occupied_candidates_eigenexa
 #endif
   public::exchange_dg_point_permuted_orbital_rows
   public::accept_dg_boundary_calibrated_symmetry
@@ -1379,6 +1383,346 @@ contains
     retained_rank=0;ok=.false.;message='distributed symmetry-closed basis requires MPI'
 #endif
   end subroutine
+
+  subroutine build_dg_group_averaged_occupied_candidates_reference(comm,occupied,weights,&
+      symmetry_target_box_ids,product_table,identity_operation,tolerance,candidates,spectrum,&
+      candidate_rank,projector_trace,closure_residual,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,product_table(:,:),identity_operation
+    complex(real64),intent(in)::occupied(:,:)
+    real(real64),intent(in)::weights(:),tolerance
+    integer(int64),intent(in)::symmetry_target_box_ids(:,:)
+    complex(real64),allocatable,intent(out)::candidates(:,:)
+    real(real64),allocatable,intent(out)::spectrum(:)
+    integer,intent(out)::candidate_rank
+    real(real64),intent(out)::projector_trace,closure_residual
+    integer(int64),intent(out)::workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    complex(real64),allocatable::left_image(:,:),right_image(:,:),local_block(:,:),global_block(:,:),&
+      orbit_gram(:,:),orbit_vectors(:,:),label(:,:),composed_label(:,:),expected_label(:,:)
+    real(real64),allocatable::all_spectrum(:),total_residual(:),boundary_residual(:),&
+      interior_residual(:)
+    logical,allocatable::no_boundary(:)
+    integer::noccupied,nlocal,noperation,orbit_rank,left_operation,right_operation,&
+      left_first,right_first,i,j,k,ierr,rank
+    real(real64)::local_group_defect,global_group_defect
+    integer(int64)::complex_bytes,real_bytes
+    logical::eigen_ok
+    character(256)::detail
+
+    ok=.false.;message='';candidate_rank=0;projector_trace=huge(1d0)
+    closure_residual=huge(1d0);workspace_peak_bytes=0_int64
+    noccupied=size(occupied,1);nlocal=size(occupied,2)
+    noperation=size(symmetry_target_box_ids,2)
+    if(noccupied<1.or.nlocal<1.or.noperation<1.or.size(weights)/=nlocal.or.&
+        size(symmetry_target_box_ids,1)/=nlocal.or.&
+        any(shape(product_table)/=[noperation,noperation]).or.&
+        identity_operation<1.or.identity_operation>noperation.or.tolerance<=0d0.or.&
+        .not.all(ieee_is_finite(weights)).or.any(weights<0d0).or.&
+        .not.all(ieee_is_finite(real(occupied))).or.&
+        .not.all(ieee_is_finite(aimag(occupied))))then
+      message='invalid group-averaged occupied-projector contract';return
+    endif
+    if(noccupied>huge(orbit_rank)/noperation)then
+      message='group-averaged occupied orbit rank overflow';return
+    endif
+    if(any(product_table<1).or.any(product_table>noperation))then
+      message='group-averaged occupied product table is invalid';return
+    endif
+    call MPI_Comm_rank(comm,rank,ierr)
+    allocate(label(1,nlocal),composed_label(1,nlocal),expected_label(1,nlocal))
+    do i=1,nlocal;label(1,i)=cmplx(real(rank*nlocal+i,real64),0d0,real64);enddo
+    do left_operation=1,noperation;do right_operation=1,noperation
+      call exchange_dg_point_permuted_orbital_rows(comm,label,&
+        symmetry_target_box_ids(:,right_operation),expected_label,ok,detail)
+      if(.not.ok)then;message='group-averaged right point action: '//trim(detail);return;endif
+      call exchange_dg_point_permuted_orbital_rows(comm,expected_label,&
+        symmetry_target_box_ids(:,left_operation),composed_label,ok,detail)
+      if(.not.ok)then;message='group-averaged composed point action: '//trim(detail);return;endif
+      call exchange_dg_point_permuted_orbital_rows(comm,label,&
+        symmetry_target_box_ids(:,product_table(left_operation,right_operation)),expected_label,ok,detail)
+      if(.not.ok)then;message='group-averaged product point action: '//trim(detail);return;endif
+      local_group_defect=maxval(abs(composed_label-expected_label))
+      call MPI_Allreduce(local_group_defect,global_group_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_group_defect>0d0)then
+        ok=.false.;message='group-averaged point actions do not realize the product table';return
+      endif
+    enddo;enddo
+    call exchange_dg_point_permuted_orbital_rows(comm,label,&
+      symmetry_target_box_ids(:,identity_operation),expected_label,ok,detail)
+    if(.not.ok.or.maxval(abs(expected_label-label))>0d0)then
+      ok=.false.;message='group-averaged identity point action is invalid';return
+    endif
+    deallocate(label,composed_label,expected_label)
+    orbit_rank=noccupied*noperation
+    allocate(orbit_gram(orbit_rank,orbit_rank),left_image(noccupied,nlocal),&
+      right_image(noccupied,nlocal),local_block(noccupied,noccupied),&
+      global_block(noccupied,noccupied));orbit_gram=(0d0,0d0)
+    do left_operation=1,noperation
+      call exchange_dg_point_permuted_orbital_rows(comm,occupied,&
+        symmetry_target_box_ids(:,left_operation),left_image,ok,detail)
+      if(.not.ok)then;message='group-averaged occupied left image: '//trim(detail);return;endif
+      left_first=(left_operation-1)*noccupied+1
+      do right_operation=1,noperation
+        call exchange_dg_point_permuted_orbital_rows(comm,occupied,&
+          symmetry_target_box_ids(:,right_operation),right_image,ok,detail)
+        if(.not.ok)then;message='group-averaged occupied right image: '//trim(detail);return;endif
+        do j=1,noccupied;do i=1,noccupied
+          local_block(i,j)=sum(weights*conjg(left_image(i,:))*right_image(j,:))/&
+            real(noperation,real64)
+        enddo;enddo
+        call MPI_Allreduce(local_block,global_block,noccupied*noccupied,MPI_DOUBLE_COMPLEX,&
+          MPI_SUM,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then;ok=.false.;message='group-averaged orbit-Gram reduction failed';return;endif
+        right_first=(right_operation-1)*noccupied+1
+        orbit_gram(left_first:left_first+noccupied-1,right_first:right_first+noccupied-1)=global_block
+      enddo
+    enddo
+    orbit_gram=0.5d0*(orbit_gram+conjg(transpose(orbit_gram)))
+    call hermitian_eigensystem(orbit_gram,all_spectrum,orbit_vectors,eigen_ok,detail)
+    if(.not.eigen_ok)then;ok=.false.;message='group-averaged occupied eigensystem: '//trim(detail);return;endif
+    projector_trace=sum(all_spectrum)
+    candidate_rank=count(all_spectrum>tolerance*max(1d0,maxval(abs(all_spectrum))))
+    if(candidate_rank<1)then;ok=.false.;message='group-averaged occupied projector has zero rank';return;endif
+    allocate(candidates(candidate_rank,nlocal),spectrum(candidate_rank));candidates=(0d0,0d0)
+    do i=1,candidate_rank
+      j=orbit_rank-i+1
+      spectrum(i)=all_spectrum(j)
+    enddo
+    do left_operation=1,noperation
+      call exchange_dg_point_permuted_orbital_rows(comm,occupied,&
+        symmetry_target_box_ids(:,left_operation),left_image,ok,detail)
+      if(.not.ok)then;message='group-averaged occupied reconstruction image: '//trim(detail);return;endif
+      left_first=(left_operation-1)*noccupied+1
+      do i=1,candidate_rank
+        j=orbit_rank-i+1
+        do k=1,noccupied
+          candidates(i,:)=candidates(i,:)+orbit_vectors(left_first+k-1,j)*left_image(k,:)/&
+            sqrt(real(noperation,real64)*spectrum(i))
+        enddo
+      enddo
+    enddo
+    allocate(total_residual(noperation),boundary_residual(noperation),&
+      interior_residual(noperation),no_boundary(nlocal));no_boundary=.false.
+    call measure_dg_rank_fixed_symmetry_residuals(comm,candidates,weights,&
+      symmetry_target_box_ids,no_boundary,total_residual=total_residual,&
+      boundary_residual=boundary_residual,interior_residual=interior_residual,&
+      ok=ok,message=detail)
+    if(.not.ok)then;message='group-averaged occupied closure: '//trim(detail);return;endif
+    closure_residual=maxval(total_residual)
+    complex_bytes=int(storage_size((0d0,0d0))/8,int64)
+    real_bytes=int(storage_size(0d0)/8,int64)
+    workspace_peak_bytes=complex_bytes*int(size(left_image)+size(right_image)+size(local_block)+&
+      size(global_block)+size(orbit_gram)+size(orbit_vectors)+size(candidates),int64)+&
+      real_bytes*int(size(all_spectrum)+size(spectrum)+size(total_residual)+&
+      size(boundary_residual)+size(interior_residual),int64)
+    ok=ieee_is_finite(projector_trace).and.ieee_is_finite(closure_residual).and.&
+      workspace_peak_bytes>0_int64
+    if(ok)then;message='';else;message='nonfinite group-averaged occupied-projector receipt';endif
+#else
+    candidate_rank=0;projector_trace=huge(1d0);closure_residual=huge(1d0)
+    workspace_peak_bytes=0_int64;ok=.false.
+    message='group-averaged occupied projector requires MPI'
+#endif
+  end subroutine
+
+#if defined(USE_MPI) && defined(USE_EIGENEXA)
+  subroutine build_dg_group_averaged_occupied_candidates_eigenexa(info,comm,occupied,weights,&
+      symmetry_target_box_ids,product_table,identity_operation,requested_count,tolerance,&
+      candidates,spectrum,candidate_rank,projector_trace,closure_residual,gamma_real_defect,&
+      workspace_peak_bytes,ok,message)
+    type(s_parallel_info),intent(in)::info
+    integer,intent(in)::comm,product_table(:,:),identity_operation,requested_count
+    complex(real64),intent(in)::occupied(:,:)
+    real(real64),intent(in)::weights(:),tolerance
+    integer(int64),intent(in)::symmetry_target_box_ids(:,:)
+    complex(real64),allocatable,intent(out)::candidates(:,:)
+    real(real64),allocatable,intent(out)::spectrum(:)
+    integer,intent(out)::candidate_rank
+    real(real64),intent(out)::projector_trace,closure_residual,gamma_real_defect
+    integer(int64),intent(out)::workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(real64),allocatable::left_image(:,:),right_image(:,:),local_block(:,:),global_block(:,:),&
+      label(:,:),composed_label(:,:),expected_label(:,:)
+    real(real64),allocatable::cyclic_gram(:,:),cyclic_vectors(:,:),all_spectrum(:),&
+      eigenvector(:),total_residual(:),boundary_residual(:),interior_residual(:)
+    logical,allocatable::no_boundary(:)
+    integer::noccupied,nlocal,noperation,orbit_rank,left_operation,right_operation,&
+      left_first,right_first,i,j,k,global_row,global_column,local_row,local_column,ierr,rank
+    real(real64)::local_imaginary,global_imaginary,scale,local_group_defect,global_group_defect
+    integer(int64)::complex_bytes,real_bytes
+    logical::eigen_ok
+    character(256)::detail
+
+    ok=.false.;message='';candidate_rank=0;projector_trace=huge(1d0)
+    closure_residual=huge(1d0);gamma_real_defect=huge(1d0);workspace_peak_bytes=0_int64
+    noccupied=size(occupied,1);nlocal=size(occupied,2);noperation=size(symmetry_target_box_ids,2)
+    if(.not.info%flag_eigenexa_init.or.noccupied<1.or.nlocal<1.or.noperation<1.or.&
+        size(weights)/=nlocal.or.size(symmetry_target_box_ids,1)/=nlocal.or.&
+        any(shape(product_table)/=[noperation,noperation]).or.any(product_table<1).or.&
+        any(product_table>noperation).or.identity_operation<1.or.identity_operation>noperation.or.&
+        requested_count<1.or.tolerance<=0d0.or..not.all(ieee_is_finite(weights)).or.&
+        any(weights<0d0).or..not.all(ieee_is_finite(real(occupied))).or.&
+        .not.all(ieee_is_finite(aimag(occupied))))then
+      message='invalid distributed group-averaged occupied-projector contract';return
+    endif
+    if(noccupied>huge(orbit_rank)/noperation)then
+      message='distributed group-averaged occupied orbit rank overflow';return
+    endif
+    orbit_rank=noccupied*noperation
+    if(requested_count>orbit_rank.or.info%nrow_local<1.or.info%ncol_local<1)then
+      message='invalid distributed group-averaged requested rank or EigenExa layout';return
+    endif
+    call MPI_Comm_rank(comm,rank,ierr)
+    allocate(label(1,nlocal),composed_label(1,nlocal),expected_label(1,nlocal))
+    do i=1,nlocal;label(1,i)=cmplx(real(rank*nlocal+i,real64),0d0,real64);enddo
+    do left_operation=1,noperation;do right_operation=1,noperation
+      call exchange_dg_point_permuted_orbital_rows(comm,label,&
+        symmetry_target_box_ids(:,right_operation),expected_label,ok,detail)
+      if(.not.ok)then;message='distributed group-average right point action: '//trim(detail);return;endif
+      call exchange_dg_point_permuted_orbital_rows(comm,expected_label,&
+        symmetry_target_box_ids(:,left_operation),composed_label,ok,detail)
+      if(.not.ok)then;message='distributed group-average composed point action: '//trim(detail);return;endif
+      call exchange_dg_point_permuted_orbital_rows(comm,label,&
+        symmetry_target_box_ids(:,product_table(left_operation,right_operation)),expected_label,ok,detail)
+      if(.not.ok)then;message='distributed group-average product point action: '//trim(detail);return;endif
+      local_group_defect=maxval(abs(composed_label-expected_label))
+      call MPI_Allreduce(local_group_defect,global_group_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_group_defect>0d0)then
+        ok=.false.;message='distributed group-average point actions do not realize product table';return
+      endif
+    enddo;enddo
+    call exchange_dg_point_permuted_orbital_rows(comm,label,&
+      symmetry_target_box_ids(:,identity_operation),expected_label,ok,detail)
+    if(.not.ok.or.maxval(abs(expected_label-label))>0d0)then
+      ok=.false.;message='distributed group-average identity point action is invalid';return
+    endif
+    deallocate(label,composed_label,expected_label)
+    allocate(left_image(noccupied,nlocal),right_image(noccupied,nlocal),&
+      local_block(noccupied,noccupied),global_block(noccupied,noccupied),&
+      cyclic_gram(info%nrow_local,info%ncol_local),&
+      cyclic_vectors(info%nrow_local,info%ncol_local),all_spectrum(orbit_rank))
+    cyclic_gram=0d0;local_imaginary=0d0;scale=0d0
+    do left_operation=1,noperation
+      call exchange_dg_point_permuted_orbital_rows(comm,occupied,&
+        symmetry_target_box_ids(:,left_operation),left_image,ok,detail)
+      if(.not.ok)then;message='distributed group-average left image: '//trim(detail);return;endif
+      left_first=(left_operation-1)*noccupied+1
+      do right_operation=left_operation,noperation
+        call exchange_dg_point_permuted_orbital_rows(comm,occupied,&
+          symmetry_target_box_ids(:,right_operation),right_image,ok,detail)
+        if(.not.ok)then;message='distributed group-average right image: '//trim(detail);return;endif
+        do j=1,noccupied;do i=1,noccupied
+          local_block(i,j)=sum(weights*conjg(left_image(i,:))*right_image(j,:))/&
+            real(noperation,real64)
+        enddo;enddo
+        call MPI_Allreduce(local_block,global_block,noccupied*noccupied,MPI_DOUBLE_COMPLEX,&
+          MPI_SUM,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then;ok=.false.;message='distributed group-average block reduction failed';return;endif
+        local_imaginary=max(local_imaginary,maxval(abs(aimag(global_block))))
+        scale=max(scale,maxval(abs(global_block)))
+        right_first=(right_operation-1)*noccupied+1
+        do j=1,noccupied
+          global_column=right_first+j-1
+          if(eigen_owner_node(global_column,info%npcol,info%mycol)/=info%mycol)cycle
+          local_column=eigen_translate_g2l(global_column,info%npcol,info%mycol)
+          do i=1,noccupied
+            global_row=left_first+i-1
+            if(eigen_owner_node(global_row,info%nprow,info%myrow)/=info%myrow)cycle
+            local_row=eigen_translate_g2l(global_row,info%nprow,info%myrow)
+            if(left_operation==right_operation)then
+              cyclic_gram(local_row,local_column)=0.5d0*&
+                (real(global_block(i,j),real64)+real(global_block(j,i),real64))
+            else
+              cyclic_gram(local_row,local_column)=real(global_block(i,j),real64)
+            endif
+          enddo
+        enddo
+        if(left_operation/=right_operation)then
+          do j=1,noccupied
+            global_column=left_first+j-1
+            if(eigen_owner_node(global_column,info%npcol,info%mycol)/=info%mycol)cycle
+            local_column=eigen_translate_g2l(global_column,info%npcol,info%mycol)
+            do i=1,noccupied
+              global_row=right_first+i-1
+              if(eigen_owner_node(global_row,info%nprow,info%myrow)/=info%myrow)cycle
+              local_row=eigen_translate_g2l(global_row,info%nprow,info%myrow)
+              cyclic_gram(local_row,local_column)=real(global_block(j,i),real64)
+            enddo
+          enddo
+        endif
+      enddo
+    enddo
+    call MPI_Allreduce(local_imaginary,global_imaginary,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    gamma_real_defect=global_imaginary/max(1d0,scale)
+    if(ierr/=MPI_SUCCESS.or.gamma_real_defect>tolerance)then
+      ok=.false.;message='distributed group-average is not Gamma real';return
+    endif
+    call eigen_pdsyevd_ex_distributed_blocks(info,orbit_rank,cyclic_gram,all_spectrum,&
+      cyclic_vectors,eigen_ok,detail)
+    if(.not.eigen_ok)then;ok=.false.;message='distributed group-average eigensystem: '//trim(detail);return;endif
+    projector_trace=sum(all_spectrum);candidate_rank=requested_count
+    allocate(candidates(candidate_rank,nlocal),spectrum(candidate_rank),eigenvector(orbit_rank))
+    candidates=(0d0,0d0)
+    do i=1,candidate_rank
+      j=orbit_rank-i+1;spectrum(i)=all_spectrum(j)
+      if(spectrum(i)<=tolerance*max(1d0,maxval(abs(all_spectrum))))then
+        ok=.false.;message='distributed group-average requested candidate has zero weight';return
+      endif
+      call gather_eigenvector(j,eigenvector,ok,detail)
+      if(.not.ok)then;message=trim(detail);return;endif
+      do left_operation=1,noperation
+        call exchange_dg_point_permuted_orbital_rows(comm,occupied,&
+          symmetry_target_box_ids(:,left_operation),left_image,ok,detail)
+        if(.not.ok)then;message='distributed group-average reconstruction: '//trim(detail);return;endif
+        left_first=(left_operation-1)*noccupied+1
+        do k=1,noccupied
+          candidates(i,:)=candidates(i,:)+eigenvector(left_first+k-1)*left_image(k,:)/&
+            sqrt(real(noperation,real64)*spectrum(i))
+        enddo
+      enddo
+    enddo
+    allocate(total_residual(noperation),boundary_residual(noperation),interior_residual(noperation),&
+      no_boundary(nlocal));no_boundary=.false.
+    call measure_dg_rank_fixed_symmetry_residuals(comm,candidates,weights,symmetry_target_box_ids,&
+      no_boundary,total_residual=total_residual,boundary_residual=boundary_residual,&
+      interior_residual=interior_residual,ok=ok,message=detail)
+    if(.not.ok)then;message='distributed group-average closure: '//trim(detail);return;endif
+    closure_residual=maxval(total_residual)
+    complex_bytes=int(storage_size((0d0,0d0))/8,int64);real_bytes=int(storage_size(0d0)/8,int64)
+    workspace_peak_bytes=complex_bytes*int(size(left_image)+size(right_image)+size(local_block)+&
+      size(global_block)+size(candidates),int64)+real_bytes*int(size(cyclic_gram)+&
+      size(cyclic_vectors)+size(all_spectrum)+size(eigenvector)+size(spectrum)+&
+      size(total_residual)+size(boundary_residual)+size(interior_residual),int64)
+    ok=ieee_is_finite(projector_trace).and.ieee_is_finite(closure_residual).and.&
+      workspace_peak_bytes>0_int64
+    if(ok)then;message='';else;message='nonfinite distributed group-average receipt';endif
+  contains
+    subroutine gather_eigenvector(column,values,gather_ok,gather_message)
+      integer,intent(in)::column
+      real(real64),intent(out)::values(:)
+      logical,intent(out)::gather_ok
+      character(*),intent(out)::gather_message
+      integer::lr,lc,gr,gc,error,row_start,row_end,column_start,column_end
+      values=0d0;row_start=eigen_loop_start(1,info%nprow,info%myrow)
+      row_end=eigen_loop_end(orbit_rank,info%nprow,info%myrow)
+      column_start=eigen_loop_start(1,info%npcol,info%mycol)
+      column_end=eigen_loop_end(orbit_rank,info%npcol,info%mycol)
+      do lc=column_start,column_end
+        gc=eigen_translate_l2g(lc,info%npcol,info%mycol);if(gc/=column)cycle
+        do lr=row_start,row_end
+          gr=eigen_translate_l2g(lr,info%nprow,info%myrow);values(gr)=cyclic_vectors(lr,lc)
+        enddo
+      enddo
+      call MPI_Allreduce(MPI_IN_PLACE,values,orbit_rank,MPI_DOUBLE_PRECISION,MPI_SUM,comm,error)
+      gather_ok=error==MPI_SUCCESS
+      if(gather_ok)then;gather_message='';else;gather_message='distributed group-average vector gather failed';endif
+    end subroutine
+  end subroutine
+#endif
 
   subroutine select_dg_fixed_rank_symmetry_closed_subspace(metric,occupied,localizer,&
       representation,product_table,target_rank,tolerance,transform,occupied_inclusion,&

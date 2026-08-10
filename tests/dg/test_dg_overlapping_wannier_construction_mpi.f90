@@ -18,6 +18,7 @@ program test_dg_overlapping_wannier_construction_mpi
     find_dg_group_identity,&
     select_dg_fixed_rank_symmetry_closed_subspace,&
     build_dg_distributed_symmetry_closed_basis,&
+    build_dg_group_averaged_occupied_candidates_reference,&
     orthonormalize_dg_distributed_seed_space,&
     accumulate_dg_lcfo_buffer_contributions_to_core,&
     measure_dg_rank_fixed_symmetry_residuals,&
@@ -50,13 +51,13 @@ program test_dg_overlapping_wannier_construction_mpi
   complex(8),allocatable::reference_projector(:,:),projector(:,:),seed_projector(:,:)
   complex(8),allocatable::distributed_candidate(:,:),distributed_overlap(:,:,:),&
     distributed_basis(:,:),distributed_basis_overlap(:,:,:),orbit_seed(:,:),required_orbit_seed(:,:),&
-    orbit_basis(:,:),orthonormal_seed_basis(:,:),&
+    orbit_basis(:,:),orthonormal_seed_basis(:,:),averaged_candidates(:,:),&
     orbit_gram(:,:)
   complex(8),allocatable::distributed_basis_overlap_rows(:,:,:)
   complex(8),allocatable::single_symmetry_representation(:,:)
   complex(8)::lcfo_buffer_contribution(2,2),lcfo_core_value(2,1)
   integer(8)::lcfo_buffer_ids(2),lcfo_core_ids(1)
-  integer::orbit_rank,required_orbit_rank,identity_operation
+  integer::orbit_rank,required_orbit_rank,averaged_rank,identity_operation
   integer(8),allocatable::distributed_map(:,:),invalid_orbit_map(:,:)
   integer(8),allocatable::affine_local_ids(:),affine_all_ids(:,:),affine_target_ids(:),&
     affine_second_ids(:)
@@ -65,6 +66,7 @@ program test_dg_overlapping_wannier_construction_mpi
   integer::affine_rotation(3,3)
   real(8)::affine_translation(3)
   real(8),allocatable::distributed_weight(:)
+  real(8),allocatable::averaged_spectrum(:)
   real(8),allocatable::seed_values(:,:)
   real(8),allocatable::occupied_seed_values(:,:)
   real(8),allocatable::raw_seed_values(:,:)
@@ -96,6 +98,8 @@ program test_dg_overlapping_wannier_construction_mpi
   integer::cyclic_product(4,4)
   integer,allocatable::group_generators(:)
   real(8)::subspace_leakage,occupied_inclusion
+  real(8)::averaged_trace,averaged_closure
+  integer(8)::averaged_workspace_peak
   integer(8)::partition_ids(2)
   real(8)::raw_partition_weight(2),raw_partition_gradient(3,2),partition_weight(2),&
     partition_gradient(3,2),partition_sum_defect,partition_gradient_defect
@@ -677,6 +681,33 @@ program test_dg_overlapping_wannier_construction_mpi
 
     allocate(orbit_seed(1,2));orbit_seed=(0d0,0d0)
     if(rank==0)orbit_seed(1,1)=1d0
+    call build_dg_group_averaged_occupied_candidates_reference(comm,orbit_seed,distributed_weight,&
+      distributed_map(:,1:1),reshape([1],[1,1]),1,1d-12,averaged_candidates,averaged_spectrum,&
+      averaged_rank,averaged_trace,averaged_closure,averaged_workspace_peak,ok,message)
+    call require(ok.and.averaged_rank==1.and.abs(averaged_spectrum(1)-1d0)<1d-12.and.&
+      abs(averaged_trace-1d0)<1d-12.and.averaged_closure<1d-12,&
+      'identity-only group average preserves the occupied projector')
+    deallocate(averaged_candidates,averaged_spectrum)
+    call build_dg_group_averaged_occupied_candidates_reference(comm,orbit_seed,distributed_weight,&
+      distributed_map(:,1:2),closure_product,1,1d-12,averaged_candidates,averaged_spectrum,&
+      averaged_rank,averaged_trace,averaged_closure,averaged_workspace_peak,ok,message)
+    call require(ok.and.averaged_rank==2.and.abs(averaged_trace-1d0)<1d-12,trim(message))
+    call require(maxval(abs(averaged_spectrum-[0.5d0,0.5d0]))<1d-12.and.&
+      averaged_closure<1d-12.and.averaged_workspace_peak>0_8,&
+      'streamed group-averaged occupied projector matches dense two-point reference')
+    orbit_gram=matmul(averaged_candidates,conjg(transpose(averaged_candidates)))
+    call MPI_Allreduce(MPI_IN_PLACE,orbit_gram,4,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    call require(maxval(abs(orbit_gram-reshape([(1d0,0d0),(0d0,0d0),&
+      (0d0,0d0),(1d0,0d0)],[2,2])))<1d-12,&
+      'group-averaged occupied candidates are globally orthonormal')
+    deallocate(averaged_candidates,averaged_spectrum)
+    allocate(invalid_orbit_map,source=distributed_map(:,1:2))
+    if(rank==0)invalid_orbit_map(:,2)=[3_8,3_8]
+    call build_dg_group_averaged_occupied_candidates_reference(comm,orbit_seed,distributed_weight,&
+      invalid_orbit_map,closure_product,1,1d-12,averaged_candidates,averaged_spectrum,&
+      averaged_rank,averaged_trace,averaged_closure,averaged_workspace_peak,ok,message)
+    call require(.not.ok,'group-averaged occupied projector rejects a non-group point action')
+    deallocate(invalid_orbit_map)
     call build_dg_distributed_symmetry_closed_basis(comm,orbit_seed,distributed_weight,&
       distributed_map(:,1:2),closure_product,1,2,1d-12,orbit_basis,orbit_rank,ok,message)
     call require(ok.and.orbit_rank==2.and.all(shape(orbit_basis)==[2,2]),trim(message))

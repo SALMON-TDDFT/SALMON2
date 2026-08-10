@@ -657,9 +657,22 @@ for forbidden in ("dc_lcfo", "dg_wpw", "direct_sipg"):
     assert forbidden not in construction_source.lower(), (
         f"construction path must not call forbidden stage: {forbidden}"
     )
-assert construction_source.lower().count("eigen_pdsyevd_ex_distributed_blocks") == 2, (
-    "EigenExa may enter construction only through one import and one OW-distributed call"
+assert construction_source.lower().count("eigen_pdsyevd_ex_distributed_blocks") == 3, (
+    "EigenExa may enter construction only through one import and the two OW-distributed eigensystems"
 )
+averaged_projector_body = re.search(
+    r"subroutine\s+build_dg_group_averaged_occupied_candidates_eigenexa(?P<body>.*?)end\s+subroutine",
+    construction_source,
+    re.I | re.S,
+)
+assert averaged_projector_body
+averaged_projector_lower = averaged_projector_body.group("body").lower()
+assert "orbit_basis" not in averaged_projector_lower, (
+    "group averaging must stream occupied images instead of retaining the real-space orbit tensor"
+)
+assert "cyclic_gram(info%nrow_local,info%ncol_local)" in re.sub(
+    r"\s+", "", averaged_projector_lower
+), "production orbit Gram must use the EigenExa cyclic distributed layout"
 assert re.search(
     r"call\s+zgemm\s*\(\s*'c'\s*,\s*'t'",
     construction_source,
