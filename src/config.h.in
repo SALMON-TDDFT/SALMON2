@@ -17,7 +17,6 @@
 #cmakedefine USE_MPI
 #cmakedefine USE_SCALAPACK
 #cmakedefine USE_EIGENEXA
-#cmakedefine USE_SLEPC
 #cmakedefine USE_LIBXC
 #cmakedefine USE_FFTW
 

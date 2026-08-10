@@ -13,10 +13,6 @@ else ()
   include(${CMAKE_SOURCE_DIR}/cmakefiles/Builder/build_lapack.cmake)
 endif ()
 
-if (USE_SLEPC)
-  include(${CMAKE_SOURCE_DIR}/cmakefiles/Builder/build_slepc.cmake)
-endif ()
-
 if (USE_LIBXC)
   if (LIBXC_INSTALLDIR)
     set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} ${LIBXC_INSTALLDIR})
