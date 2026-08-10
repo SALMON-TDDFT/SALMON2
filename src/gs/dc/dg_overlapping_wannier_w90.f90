@@ -12,7 +12,45 @@ module dg_overlapping_wannier_w90
   public::assemble_dg_w90_gamma_matrices
   public::apply_dg_w90_gamma_transform
   public::inherit_dg_w90_affine_receipts
+  public::validate_dg_w90_convergence_log
 contains
+  subroutine validate_dg_w90_convergence_log(path,maximum_iterations,iterations,ok,message)
+    character(*),intent(in)::path
+    integer,intent(in)::maximum_iterations
+    integer,intent(out)::iterations
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::unit,io,parsed_iteration
+    character(1024)::line
+    logical::exists,have_final,have_convergence
+    iterations=-1;ok=.false.;message='';have_final=.false.;have_convergence=.false.
+    if(len_trim(path)==0.or.maximum_iterations<1)then
+      message='invalid Wannier90 convergence-log contract';return
+    endif
+    inquire(file=trim(path),exist=exists)
+    if(.not.exists)then;message='Wannier90 convergence log is missing';return;endif
+    open(newunit=unit,file=trim(path),status='old',action='read',iostat=io)
+    if(io/=0)then;message='Wannier90 convergence log cannot be opened';return;endif
+    do
+      read(unit,'(a)',iostat=io)line
+      if(io/=0)exit
+      if(index(line,'<-- CONV')>0)then
+        read(line,*,iostat=io)parsed_iteration
+        if(io==0)iterations=max(iterations,parsed_iteration)
+        io=0
+      endif
+      if(index(line,'Wannierisation convergence criteria satisfied')>0)have_convergence=.true.
+      if(index(adjustl(line),'Final State')==1)have_final=.true.
+    enddo
+    close(unit)
+    if(.not.have_final)then;message='Wannier90 convergence log has no final state';return;endif
+    if(.not.have_convergence)then;message='Wannier90 did not report convergence';return;endif
+    if(iterations<0.or.iterations>=maximum_iterations)then
+      message='Wannier90 exhausted its iteration limit';return
+    endif
+    ok=.true.;message=''
+  end subroutine validate_dg_w90_convergence_log
+
   subroutine inherit_dg_w90_affine_receipts(transform,affine_subspace_defect,tolerance,&
       identity_defect,unitarity_defect,closure_defect,workspace_peak_bytes,ok,message)
     complex(real64),intent(in)::transform(:,:)
@@ -287,6 +325,7 @@ contains
 #if defined(USE_MPI) && defined(USE_WANNIER90)
     integer,parameter::num_nnmax=12
     integer::rank,ierr,unit,io,axis,atom,num_bands_out,num_wann_out,status
+    logical::dmn_exists
     integer::mp_grid(3),nnlist(1,num_nnmax),nncell_max(3,1,num_nnmax),exclude_bands(max(1,nband))
     integer::proj_l(max(1,nband)),proj_m(max(1,nband)),proj_radial(max(1,nband))
     integer::proj_s(max(1,nband))
@@ -323,6 +362,10 @@ contains
     if(status/=0.or.ierr/=MPI_SUCCESS)then;message='invalid Gamma Wannier90 setup contract';return;endif
     mp_grid=[1,1,1];kpoint=0d0
     if(rank==0)then
+      inquire(file=trim(seed)//'.dmn',exist=dmn_exists)
+      if(.not.dmn_exists)status=4
+    endif
+    if(rank==0.and.status==0)then
       open(newunit=unit,file=trim(seed)//'.win',status='replace',action='write',iostat=io)
       if(io/=0)then
         status=2
@@ -333,6 +376,8 @@ contains
         write(unit,'(a)')'conv_tol = 1.d-12'
         write(unit,'(a)')'conv_window = 5'
         write(unit,'(a)')'gamma_only = true'
+        write(unit,'(a)')'site_symmetry = .true.'
+        write(unit,'(a)')'symmetrize_eps = 1.d-10'
         write(unit,'(a)')'begin unit_cell_cart';write(unit,'(a)')'bohr'
         do axis=1,3;write(unit,'(3(es24.16,1x))')real_lattice(:,axis);enddo
         write(unit,'(a)')'end unit_cell_cart'
@@ -365,7 +410,7 @@ contains
 
   subroutine run_dg_w90_gamma_library(comm,seed,real_lattice,reciprocal_lattice,atom_symbols,&
       atoms_cart,m_matrix,a_matrix,eigenvalues,initial_gauge_spread,tolerance,transform,centers,&
-      spreads,spread,ok,message)
+      spreads,spread,ok,message,convergence_iterations_out)
     integer,intent(in)::comm
     character(*),intent(in)::seed
     real(real64),intent(in)::real_lattice(3,3),reciprocal_lattice(3,3),atoms_cart(:,:),&
@@ -377,8 +422,9 @@ contains
     real(real64),intent(out)::spread(3)
     logical,intent(out)::ok
     character(*),intent(out)::message
+    integer,intent(out),optional::convergence_iterations_out
 #if defined(USE_MPI) && defined(USE_WANNIER90)
-    integer::rank,ierr,nband,nwann,nntot,status,mp_grid(3),matrix_dimensions(3)
+    integer::rank,ierr,nband,nwann,nntot,status,mp_grid(3),matrix_dimensions(3),convergence_iterations
     real(real64)::kpoint(3,1)
     complex(real64),allocatable::u(:,:,:),uopt(:,:,:),m4(:,:,:,:),a3(:,:,:)
     real(real64),allocatable::e2(:,:)
@@ -405,7 +451,8 @@ contains
         real(real64),intent(out)::wann_centres_loc(3,num_wann_loc),wann_spreads_loc(num_wann_loc),spread_loc(3)
       end subroutine wannier_run
     end interface
-    ok=.false.;message='';spread=0d0;status=0
+    ok=.false.;message='';spread=0d0;status=0;convergence_iterations=-1
+    if(present(convergence_iterations_out))convergence_iterations_out=-1
     call MPI_Comm_rank(comm,rank,ierr)
     matrix_dimensions=0
     if(rank==0)matrix_dimensions=[size(m_matrix,1),size(a_matrix,2),size(m_matrix,3)]
@@ -434,19 +481,23 @@ contains
         nntot,size(atom_symbols),atom_symbols,atoms_cart,.true.,m4,a3,e2,u,uopt,lwindow,&
         centers,spreads,spread)
       transform=matmul(uopt(:,:,1),u(:,:,1))
-      call validate_dg_w90_result(transform,centers,spreads,spread,initial_gauge_spread,&
+      call validate_dg_w90_convergence_log(trim(seed)//'.wout',200,convergence_iterations,ok,message)
+      if(ok)call validate_dg_w90_result(transform,centers,spreads,spread,initial_gauge_spread,&
         tolerance,ok,message)
       status=merge(0,2,ok)
     endif
     call MPI_Bcast(status,1,MPI_INTEGER,0,comm,ierr)
+    call MPI_Bcast(convergence_iterations,1,MPI_INTEGER,0,comm,ierr)
     call MPI_Bcast(transform,size(transform),MPI_DOUBLE_COMPLEX,0,comm,ierr)
     call MPI_Bcast(centers,size(centers),MPI_DOUBLE_PRECISION,0,comm,ierr)
     call MPI_Bcast(spreads,size(spreads),MPI_DOUBLE_PRECISION,0,comm,ierr)
     call MPI_Bcast(spread,3,MPI_DOUBLE_PRECISION,0,comm,ierr)
     ok=status==0.and.ierr==MPI_SUCCESS
+    if(present(convergence_iterations_out))convergence_iterations_out=convergence_iterations
     if(ok)then;message='';else;message='Wannier90 Gamma library run failed validation';endif
 #else
     ok=.false.;message='Wannier90 Gamma run requires MPI and USE_WANNIER90';spread=0d0
+    if(present(convergence_iterations_out))convergence_iterations_out=-1
 #endif
   end subroutine run_dg_w90_gamma_library
 

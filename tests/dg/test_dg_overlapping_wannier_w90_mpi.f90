@@ -3,10 +3,12 @@ program test_dg_overlapping_wannier_w90_mpi
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   use dg_overlapping_wannier_w90,only:estimate_dg_w90_coordinator_bytes,&
     validate_dg_w90_result,setup_dg_w90_gamma_library,run_dg_w90_gamma_library,&
-    assemble_dg_w90_gamma_matrices,apply_dg_w90_gamma_transform
+    assemble_dg_w90_gamma_matrices,apply_dg_w90_gamma_transform,&
+    validate_dg_w90_convergence_log
   use dg_overlapping_wannier_w90,only:inherit_dg_w90_affine_receipts
   implicit none
   integer::ierr,rank,nproc,b,m,n,p,nlocal
+  integer::convergence_iterations,log_unit
   complex(8)::transform(2,2)
   real(8)::centers(3,2),spreads(2),spread(3)
   integer(8)::bytes
@@ -46,6 +48,26 @@ program test_dg_overlapping_wannier_w90_mpi
   call require(ok.and.bytes>0_8,'finite Si64 Wannier90 byte estimate')
   call estimate_dg_w90_coordinator_bytes(huge(0),huge(0),12,1,bytes,ok,message)
   call require(.not.ok,'Wannier90 byte estimate rejects integer overflow')
+  if(rank==0)then
+    open(newunit=log_unit,file='w90_converged_fixture.wout',status='replace')
+    write(log_unit,'(a)')'      7  -0.100E-13  0.0  1.0  0.0 <-- CONV'
+    write(log_unit,'(a)')'             <<< Wannierisation convergence criteria satisfied >>>'
+    write(log_unit,'(a)')' Final State';close(log_unit)
+    call validate_dg_w90_convergence_log('w90_converged_fixture.wout',200,&
+      convergence_iterations,ok,message)
+  endif
+  call MPI_Bcast(ok,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call MPI_Bcast(convergence_iterations,1,MPI_INTEGER,0,MPI_COMM_WORLD,ierr)
+  call require(ok.and.convergence_iterations==7,trim(message))
+  if(rank==0)then
+    open(newunit=log_unit,file='w90_exhausted_fixture.wout',status='replace')
+    write(log_unit,'(a)')'    200  -0.100E-02  0.1  1.0  0.0 <-- CONV'
+    write(log_unit,'(a)')' Final State';close(log_unit)
+    call validate_dg_w90_convergence_log('w90_exhausted_fixture.wout',200,&
+      convergence_iterations,ok,message)
+  endif
+  call MPI_Bcast(ok,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call require(.not.ok,'Wannier90 iteration-limit exhaustion rejected')
   nlocal=8/nproc
   allocate(local_values(2,nlocal),local_anchors(2,nlocal),local_weights(nlocal),local_fractional(3,nlocal))
   do p=1,nlocal
@@ -132,6 +154,24 @@ program test_dg_overlapping_wannier_w90_mpi
   reciprocal(1,1)=2d0*acos(-1d0)/10d0
   reciprocal(2,2)=reciprocal(1,1);reciprocal(3,3)=reciprocal(1,1)
   atoms_cart=0d0;atom_symbols(1)='H ';eigenvalues=0d0
+  if(rank==0)then
+    open(newunit=log_unit,file='ow_w90_one_band.dmn',status='old',iostat=p)
+    if(p==0)close(log_unit,status='delete')
+  endif
+  call MPI_Barrier(MPI_COMM_WORLD,ierr)
+  call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
+    atom_symbols,atoms_cart,1,1,nntot,nncell,ok,message)
+  call require(.not.ok,'Wannier90 setup rejects missing DMN')
+  if(rank==0)then
+    open(newunit=log_unit,file='ow_w90_one_band.dmn',status='replace')
+    write(log_unit,'(a)')'SALMON SAWF Gamma-only symmetry data'
+    write(log_unit,'(4i9)')1,1,1,1
+    write(log_unit,*);write(log_unit,*)1;write(log_unit,*);write(log_unit,*)1
+    write(log_unit,*);write(log_unit,*)1;write(log_unit,*)
+    write(log_unit,*)cmplx(1d0,0d0,8);write(log_unit,*);write(log_unit,*)cmplx(1d0,0d0,8)
+    close(log_unit)
+  endif
+  call MPI_Barrier(MPI_COMM_WORLD,ierr)
   call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
     atom_symbols,atoms_cart,1,1,nntot,nncell,ok,message)
   call require(ok.and.nntot>0,trim(message))

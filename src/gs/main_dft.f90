@@ -916,7 +916,7 @@ contains
     call run_dg_w90_gamma_library(dc%icomm_tot,'overlapping_wannier_mlwf',&
       dc%system_tot%primitive_a,w90_reciprocal_lattice,w90_atom_symbols,w90_atoms_cart,&
       w90_m_matrix,w90_a_matrix,w90_eigenvalues,huge(1d0)/4d0,dg_ow_symmetry_tolerance,&
-      w90_transform,localized_centers,w90_spreads,w90_spread,ok,message)
+      w90_transform,localized_centers,w90_spreads,w90_spread,ok,message,localization_iterations)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 MLWF optimization failed';endif
     localized_centers=matmul(w90_lattice_inverse,localized_centers)
     call apply_dg_w90_gamma_transform(dc%icomm_tot,ow_core_ids,ow_core_values,ow_core_gradients,&
@@ -931,7 +931,7 @@ contains
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'post-MLWF row-owned group validation failed';endif
     global_retained_group_closure_defect=w90_closure_defect
     localization_initial_spread=w90_spread(1);localization_final_spread=w90_spread(1)
-    localization_maximum_gradient=0d0;localization_iterations=0
+    localization_maximum_gradient=0d0
     localization_spread_evaluations=0;localization_converged=.true.
     ow_box_values=matmul(transpose(w90_transform),ow_box_values)
     do ix=1,3

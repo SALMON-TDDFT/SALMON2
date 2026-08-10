@@ -1098,6 +1098,18 @@ assert min(dmn_begin, dmn_append, dmn_finish, w90_setup) >= 0, (
 assert dmn_begin < dmn_append < dmn_finish < w90_setup, (
     "fixed-center DMN transaction must complete before Wannier90 setup"
 )
+assert "site_symmetry = .true." in w90_source.lower(), (
+    "Wannier90 setup must enable site_symmetry"
+)
+assert "symmetrize_eps" in w90_source.lower(), (
+    "Wannier90 setup must set an explicit strict symmetrize_eps"
+)
+assert "inquire(file=trim(seed)//'.dmn'" in w90_source.replace(" ", "").lower(), (
+    "Wannier90 setup must reject a missing DMN before library entry"
+)
+assert re.search(r"call\s+validate_dg_w90_convergence_log\s*\(", w90_source, re.I), (
+    "Wannier90 run must validate the final convergence receipt"
+)
 assert re.search(
     r"call\s+gather_dg_single_symmetry_representation\s*\(", adapter_body, re.I
 ), "production fixed-center DMN must gather one representation operation at a time"
