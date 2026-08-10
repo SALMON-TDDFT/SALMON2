@@ -5,7 +5,8 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
     promote_dg_exact_global_subgroup,build_dg_fragment_site_stabilizer, &
     fingerprint_dg_exact_fragment_symmetry,build_dg_fragment_permuted_representation, &
     build_dg_fragment_symmetry_orbits,build_dg_symmetry_constrained_pair_generator, &
-    factor_dg_affine_translation_cocycle,measure_dg_hamiltonian_density_commutators
+    factor_dg_affine_translation_cocycle,measure_dg_hamiltonian_density_commutators,&
+    symmetrize_dg_distributed_pencil_rows
   use iso_fortran_env,only:int64
   implicit none
   integer :: ierr,rank,nproc,i,j
@@ -26,11 +27,20 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
   complex(8),allocatable :: global_pair_representation(:,:,:)
   complex(8) :: dense_representation(4,4,2),broken_representation(4,4,2)
   complex(8) :: gate_representation(2,2,2),gate_hamiltonian(2,2),gate_density(2,2)
+  complex(8) :: gate_overlap(2,2)
   complex(8),allocatable :: constrained_generator(:,:)
   integer,allocatable :: generator_active_indices(:)
   integer :: generator_product(2,2)
   real(8) :: antihermiticity_defect,commutator_defect
   real(8),allocatable :: hamiltonian_commutator(:),density_commutator(:)
+  integer(int64),allocatable :: pencil_row_ids(:)
+  complex(8),allocatable :: pencil_h_rows(:,:),pencil_s_rows(:,:),pencil_rho_rows(:,:),&
+    pencil_artifact_rows(:,:),sym_h_rows(:,:),sym_s_rows(:,:),sym_rho_rows(:,:)
+  complex(8) :: inversion_generator(2,2,1)
+  integer :: inversion_product(2,2),inversion_generators(1)
+  real(8) :: pencil_before(3),pencil_after(3),artifact_change,artifact_magnitude
+  real(8) :: pencil_dense_error
+  integer(int64) :: pencil_workspace_peak
   integer,allocatable :: fragment_permutation(:,:)
   integer :: multi_orbit_map(4,2),identity_orbit_map(4,1),invalid_orbit_map(4,2)
   integer,allocatable :: fragment_orbit(:),orbit_representative(:)
@@ -146,6 +156,58 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
     gate_density,1d-12,hamiltonian_commutator,density_commutator,ok,message)
   call require(ok.and.maxval(hamiltonian_commutator)<1d-14.and.&
     density_commutator(2)>0.1d0,'density-projector symmetry breaking is measured independently of H')
+
+  allocate(pencil_row_ids(count([(mod(i-1,nproc)==rank,i=1,2)])))
+  j=0
+  do i=1,2
+    if(mod(i-1,nproc)/=rank)cycle
+    j=j+1;pencil_row_ids(j)=i
+  enddo
+  allocate(pencil_h_rows(size(pencil_row_ids),2),pencil_s_rows(size(pencil_row_ids),2),&
+    pencil_rho_rows(size(pencil_row_ids),2),pencil_artifact_rows(size(pencil_row_ids),2))
+  gate_hamiltonian=reshape([cmplx(-1d0,0d0,8),cmplx(0.2d0,0d0,8),&
+    cmplx(0.2d0,0d0,8),cmplx(2d0,0d0,8)],[2,2])
+  gate_density=reshape([cmplx(1d0,0d0,8),cmplx(-0.15d0,0d0,8),&
+    cmplx(-0.15d0,0d0,8),cmplx(0.4d0,0d0,8)],[2,2])
+  pencil_h_rows=gate_hamiltonian(int(pencil_row_ids),:)
+  gate_overlap=reshape([cmplx(1d0,0d0,8),cmplx(0.1d0,0d0,8),&
+    cmplx(0.1d0,0d0,8),cmplx(1.5d0,0d0,8)],[2,2])
+  pencil_s_rows=gate_overlap(int(pencil_row_ids),:)
+  pencil_rho_rows=gate_density(int(pencil_row_ids),:)
+  pencil_artifact_rows=0d0
+  do i=1,size(pencil_row_ids)
+    if(pencil_row_ids(i)==1)pencil_artifact_rows(i,1)=0.3d0
+    if(pencil_row_ids(i)==2)pencil_artifact_rows(i,2)=-0.3d0
+  enddo
+  inversion_generator=0d0;inversion_generator(1,1,1)=1d0;inversion_generator(2,2,1)=-1d0
+  inversion_product=reshape([1,2,2,1],[2,2]);inversion_generators=2
+  call symmetrize_dg_distributed_pencil_rows(MPI_COMM_WORLD,pencil_row_ids,pencil_h_rows,&
+    pencil_s_rows,pencil_rho_rows,pencil_artifact_rows,inversion_generator,inversion_generators,&
+    inversion_product,[1],[1,2],1d-12,sym_h_rows,sym_s_rows,sym_rho_rows,pencil_before,pencil_after,&
+    artifact_change,artifact_magnitude,pencil_workspace_peak,ok,message)
+  call require(ok,trim(message))
+  call require(maxval(pencil_before)>0.1d0.and.maxval(pencil_after)<1d-12,&
+    'full-group average removes nonsymmetric pencil error')
+  pencil_dense_error=0d0
+  do i=1,size(pencil_row_ids)
+    if(pencil_row_ids(i)==1)then
+      pencil_dense_error=max(pencil_dense_error,abs(sym_h_rows(i,1)+1d0),abs(sym_s_rows(i,1)-1d0),&
+        abs(sym_rho_rows(i,1)-1d0),abs(sym_h_rows(i,2)),abs(sym_s_rows(i,2)),abs(sym_rho_rows(i,2)))
+    else
+      pencil_dense_error=max(pencil_dense_error,abs(sym_h_rows(i,2)-2d0),abs(sym_s_rows(i,2)-1.5d0),&
+        abs(sym_rho_rows(i,2)-0.4d0),abs(sym_h_rows(i,1)),abs(sym_s_rows(i,1)),abs(sym_rho_rows(i,1)))
+    endif
+  enddo
+  call require(pencil_dense_error<1d-12,'factorized affine average matches the full dense reference')
+  call require(artifact_change<1d-12.and.artifact_magnitude>0.29d0,&
+    'symmetric fragment artifact survives and is reported independently')
+  call require(pencil_workspace_peak>0_int64,'pencil symmetry workspace is measured')
+  inversion_generator(2,2,1)=cmplx(0d0,1d0,8)
+  call symmetrize_dg_distributed_pencil_rows(MPI_COMM_WORLD,pencil_row_ids,pencil_h_rows,&
+    pencil_s_rows,pencil_rho_rows,pencil_artifact_rows,inversion_generator,inversion_generators,&
+    inversion_product,[1],[1,2],1d-12,sym_h_rows,sym_s_rows,sym_rho_rows,pencil_before,pencil_after,&
+    artifact_change,artifact_magnitude,pencil_workspace_peak,ok,message)
+  call require(.not.ok,'generator representation inconsistent with the affine product is rejected')
 
   c4_fingerprint=fingerprint_dg_exact_fragment_symmetry(affine_rotation(:,:,1:4),product_table,1d-10)
   c1_fingerprint=fingerprint_dg_exact_fragment_symmetry(affine_rotation(:,:,1:1),reshape([1],[1,1]),1d-10)

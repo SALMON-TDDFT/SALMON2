@@ -421,6 +421,12 @@ assert "call assemble_dg_stitched_weak_operator_rows(" in source("src/gs/main_df
 assert "sqrt(ow_partition_weight(p))*ow_box_values(:,p)" in re.sub(
     r"\s+", "", source("src/gs/main_dft.f90").lower()
 ), "nonlocal projector overlaps must use the same square-root partition weighting"
+assert "call symmetrize_dg_distributed_pencil_rows(" in source("src/gs/main_dft.f90").lower(), (
+    "production must symmetrize stitched H/S/rho row tiles under the atomic affine action"
+)
+assert "ow_pencil_translation_subgroup" in source("src/gs/main_dft.f90").lower() and (
+    "ow_pencil_coset_representatives" in source("src/gs/main_dft.f90").lower()
+), "full affine averaging must use the proven translation-coset factorization"
 assert re.search(
     r"prefix\s*=\s*['\"]\./overlapping_wannier_gs['\"]",
     adapter_body,

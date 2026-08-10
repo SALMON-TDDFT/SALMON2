@@ -86,7 +86,8 @@ use dg_overlapping_wannier_symmetry, only: select_dg_exact_fragment_subgroup,&
   promote_dg_exact_global_subgroup,project_dg_fragment_covariant_operators,&
   evaluate_dg_covariance_residuals_by_operation,fingerprint_dg_exact_fragment_symmetry
 use dg_overlapping_wannier_symmetry, only: build_dg_fragment_permuted_representation,&
-  build_dg_fragment_symmetry_orbits,factor_dg_affine_translation_cocycle
+  build_dg_fragment_symmetry_orbits,factor_dg_affine_translation_cocycle,&
+  symmetrize_dg_distributed_pencil_rows
 use dg_overlapping_wannier_w90,only:setup_dg_w90_gamma_library,&
   assemble_dg_w90_gamma_matrices,run_dg_w90_gamma_library,apply_dg_w90_gamma_transform,&
   inherit_dg_w90_affine_receipts
@@ -180,6 +181,9 @@ integer,allocatable :: ow_tail_generation(:,:)
 integer,allocatable :: ow_core_box_positions(:)
 real(8),allocatable :: ow_core_weights(:)
 real(8),allocatable :: ow_partition_weight(:),ow_partition_gradient(:,:)
+complex(8),allocatable :: ow_pencil_generator_representation(:,:,:)
+integer,allocatable :: ow_pencil_generator_operations(:),ow_pencil_affine_product(:,:),&
+  ow_pencil_translation_subgroup(:),ow_pencil_coset_representatives(:)
 integer :: ow_box_size(3),ow_core_size(3),ow_buffer(3)
 integer(8) :: ow_symmetry_fingerprint
 integer(8) :: ow_potential_epoch_snapshot
@@ -574,7 +578,9 @@ contains
     integer(8),allocatable::all_core_ids(:,:),localized_center_ids(:),orbital_owned_full_ids(:)
     integer(8),allocatable::fixed_center_symmetry_map(:,:),fixed_center_row_ids(:)
     integer,allocatable::fragments(:),local_point_product(:,:),local_point_integer_rotations(:,:,:),&
-      translation_product(:,:),global_point_product(:,:),global_point_integer_rotations(:,:,:)
+      translation_product(:,:),global_point_product(:,:),global_point_integer_rotations(:,:,:),&
+      global_translation_subgroup(:),global_point_representatives(:),global_point_cogroup_product(:,:),&
+      global_translation_cocycle(:,:)
     integer,allocatable::rank_fragments(:)
     integer,allocatable::fixed_center_product(:,:)
     integer,allocatable::global_affine_generators(:)
@@ -818,6 +824,8 @@ contains
     end do
     call prepare_ow_global_point_action(ow_core_ids,global_symmetry_map,global_point_integer_rotations,&
       global_point_rotations,global_point_fractional_translations,global_point_product,&
+      global_translation_subgroup,global_point_representatives,global_point_cogroup_product,&
+      global_translation_cocycle,&
       global_inversion_present,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global point-action construction failed';end if
     call prepare_ow_fixed_center_group(ow_core_ids,fixed_center_operations,&
@@ -1029,6 +1037,13 @@ contains
       ow_core_values(:,core_index)=ow_box_values(:,p)
       ow_core_gradients(:,:,core_index)=ow_box_gradients(:,:,p)
     end do
+    call assemble_dg_distributed_basis_symmetry_overlap(dc%icomm_tot,ow_core_values,ow_core_weights,&
+      global_symmetry_map(:,global_affine_generators),ow_pencil_generator_representation,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'pencil generator representation failed';endif
+    allocate(ow_pencil_generator_operations,source=global_affine_generators)
+    allocate(ow_pencil_affine_product,source=global_point_product)
+    allocate(ow_pencil_translation_subgroup,source=global_translation_subgroup)
+    allocate(ow_pencil_coset_representatives,source=global_point_representatives)
     allocate(localized_centers(3,ntarget),localized_center_magnitudes(3,ntarget))
     call compute_dg_periodic_wannier_centers(dc%icomm_tot,ow_core_values,ow_core_weights,&
       core_periodic_phase,localized_centers,localized_center_magnitudes,ok,message)
@@ -1838,13 +1853,15 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     real(8),allocatable::global_density(:),summed_density(:),core_potential(:),box_potential(:)
-    complex(8),allocatable::kinetic_rows(:,:),local_rows(:,:),nonlocal_rows(:,:),&
-      core_potential_values(:,:),box_potential_values(:,:)
+    complex(8),allocatable::kinetic_rows(:,:),local_rows(:,:),nonlocal_rows(:,:),boundary_rows(:,:),&
+      core_potential_values(:,:),box_potential_values(:,:),sym_h_rows(:,:),sym_s_rows(:,:),sym_rho_rows(:,:)
     real(8)::kinetic_scale,local_scale,nonlocal_scale,hamiltonian_scale,&
       stitched_t_hermiticity,stitched_v_hermiticity,weight_gradient_trace
+    real(8)::pencil_before(3),pencil_after(3),boundary_artifact_change,boundary_artifact_magnitude
     logical::finite_t,finite_local,finite_nonlocal,finite_h
     integer::p,ix,iy,iz,nwann,owned_projectors,rank,ierr
     integer(8)::stitched_operator_peak_elements
+    integer(8)::pencil_symmetry_workspace_peak
     call MPI_Comm_rank(comm,rank,ierr)
     allocate(global_density(int(ow_global_grid_count)),summed_density(int(ow_global_grid_count)))
     global_density=0d0
@@ -1868,7 +1885,7 @@ contains
     allocate(box_potential(size(ow_box_physical_ids)));box_potential=real(box_potential_values(1,:))
     call assemble_dg_stitched_weak_operator_rows(comm,nwann,ow_row_ids,ow_box_physical_ids,&
       ow_partition_weight,ow_partition_gradient,ow_box_values,ow_box_gradients,box_potential,&
-      system%hvol,kinetic_rows,local_rows,stitched_t_hermiticity,stitched_v_hermiticity,&
+      system%hvol,kinetic_rows,local_rows,boundary_rows,stitched_t_hermiticity,stitched_v_hermiticity,&
       weight_gradient_trace,stitched_operator_peak_elements,ok,message)
     if(.not.ok)return
     if(rank==0)write(*,'(a,3(a,es16.8),a,i0)')&
@@ -1878,6 +1895,18 @@ contains
     call assemble_ow_nonlocal_rows(comm,nonlocal_rows,owned_projectors,ok,message)
     if(.not.ok)return
     hrows=kinetic_rows+local_rows+nonlocal_rows
+    call symmetrize_dg_distributed_pencil_rows(comm,ow_row_ids,hrows,ow_srows,ow_rhorows,&
+      boundary_rows,ow_pencil_generator_representation,ow_pencil_generator_operations,&
+      ow_pencil_affine_product,ow_pencil_translation_subgroup,ow_pencil_coset_representatives,&
+      dg_ow_symmetry_tolerance,sym_h_rows,sym_s_rows,sym_rho_rows,pencil_before,pencil_after,&
+      boundary_artifact_change,boundary_artifact_magnitude,pencil_symmetry_workspace_peak,ok,message)
+    if(.not.ok)return
+    hrows=sym_h_rows;ow_srows=sym_s_rows;ow_rhorows=sym_rho_rows
+    if(rank==0)write(*,'(a,8(a,es16.8),a,i0)')'[OW-GS-DIAGNOSTIC] stitched_pencil_symmetry',&
+      ' h_before=',pencil_before(1),' s_before=',pencil_before(2),' rho_before=',pencil_before(3),&
+      ' h_after=',pencil_after(1),' s_after=',pencil_after(2),' rho_after=',pencil_after(3),&
+      ' artifact_change=',boundary_artifact_change,' artifact_magnitude=',boundary_artifact_magnitude,&
+      ' workspace_peak_elements=',pencil_symmetry_workspace_peak
     ow_diag_h_local_bytes=max(ow_diag_h_local_bytes,int(size(hrows),8)*16_8)
     call ow_distributed_hermiticity(comm,ow_row_ids,kinetic_rows,ow_diag_t_hermiticity,&
       kinetic_scale,finite_t)
@@ -2462,21 +2491,23 @@ contains
   end subroutine promote_and_project_ow_matrices
 
   subroutine prepare_ow_global_point_action(local_ids,target_ids,integer_rotations,rotations,&
-      fractional_translations,product_table,inversion_present,ok,message)
+      fractional_translations,product_table,translation_subgroup,point_representatives,&
+      point_product,translation_cocycle,inversion_present,ok,message)
     integer(8),intent(in)::local_ids(:)
     integer(8),allocatable,intent(out)::target_ids(:,:)
     integer,allocatable,intent(out)::integer_rotations(:,:,:)
     real(8),allocatable,intent(out)::rotations(:,:,:)
     real(8),allocatable,intent(out)::fractional_translations(:,:)
     integer,allocatable,intent(out)::product_table(:,:)
+    integer,allocatable,intent(out)::translation_subgroup(:),point_representatives(:),&
+      point_product(:,:),translation_cocycle(:,:)
     logical,intent(out)::inversion_present,ok
     character(*),intent(out)::message
     type(t_sawf_crystallographic_catalog)::catalog
     type(t_sawf_operation_index)::operation_index
     type(t_sawf_symop),allocatable::selected_catalog_operations(:)
     real(8),allocatable::fractional_positions(:,:)
-    integer,allocatable::species(:),selected(:),mapped_owner(:),mapped_local(:),mapped_wrap(:,:),&
-      translation_subgroup(:),point_representatives(:),point_product(:,:),translation_cocycle(:,:)
+    integer,allocatable::species(:),selected(:),mapped_owner(:),mapped_local(:),mapped_wrap(:,:)
     integer(8),allocatable::all_ids(:,:),mapped_ids(:)
     real(8)::lattice_inverse(3,3),determinant,common_center(3),common_center_residual
     integer::rank,nproc,ierr,nlocal,atom,operation,axis,translation_grid(3),nselected,&

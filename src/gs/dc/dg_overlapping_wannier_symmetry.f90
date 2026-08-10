@@ -17,7 +17,231 @@ module dg_overlapping_wannier_symmetry
   public::build_dg_symmetry_constrained_pair_generator
   public::factor_dg_affine_translation_cocycle
   public::measure_dg_hamiltonian_density_commutators
+  public::symmetrize_dg_distributed_pencil_rows
 contains
+  subroutine symmetrize_dg_distributed_pencil_rows(comm,row_ids,h_rows,s_rows,rho_rows,artifact_rows,&
+      generator_representation,generator_operations,product_table,translation_operations,&
+      coset_representatives,tolerance,sym_h_rows,sym_s_rows,&
+      sym_rho_rows,before_residual,after_residual,artifact_change,artifact_magnitude,&
+      workspace_peak_elements,ok,message)
+    use mpi
+    integer,intent(in)::comm,generator_operations(:),product_table(:,:),translation_operations(:),&
+      coset_representatives(:)
+    integer(int64),intent(in)::row_ids(:)
+    complex(8),intent(in)::h_rows(:,:),s_rows(:,:),rho_rows(:,:),artifact_rows(:,:),&
+      generator_representation(:,:,:)
+    real(8),intent(in)::tolerance
+    complex(8),allocatable,intent(out)::sym_h_rows(:,:),sym_s_rows(:,:),sym_rho_rows(:,:)
+    real(8),intent(out)::before_residual(3),after_residual(3),artifact_change,artifact_magnitude
+    integer(int64),intent(out)::workspace_peak_elements
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::rank,nproc,ierr,n,noperation,ngenerator,identity,total_rows,r,i,j,operation,&
+      generator,parent_operation,path_length,local_bad,global_bad
+    integer,allocatable::row_counts(:),row_displs(:),parent(:),parent_generator(:),queue(:),path(:),&
+      seen(:),group_seen(:)
+    integer(int64),allocatable::all_row_ids(:)
+    complex(8),allocatable::representation(:,:),identity_matrix(:,:),transformed(:,:),&
+      sym_artifact_rows(:,:),check_rows(:,:),translation_h_rows(:,:),translation_s_rows(:,:),&
+      translation_rho_rows(:,:),translation_artifact_rows(:,:)
+    real(8)::local_change,local_magnitude,scale(3)
+    ok=.false.;message='';before_residual=huge(1d0);after_residual=huge(1d0)
+    artifact_change=huge(1d0);artifact_magnitude=huge(1d0);workspace_peak_elements=0_int64
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    n=size(h_rows,2);noperation=size(product_table,1);ngenerator=size(generator_operations)
+    local_bad=0
+    if(ierr/=MPI_SUCCESS.or.n<1.or.noperation<1.or.ngenerator<1.or.&
+        size(s_rows,2)/=n.or.size(rho_rows,2)/=n.or.size(artifact_rows,2)/=n.or.&
+        size(h_rows,1)/=size(row_ids).or.size(s_rows,1)/=size(row_ids).or.&
+        size(rho_rows,1)/=size(row_ids).or.size(artifact_rows,1)/=size(row_ids).or.&
+        any(shape(product_table)/=[noperation,noperation]).or.&
+        any(shape(generator_representation)/=[n,n,ngenerator]).or.&
+        any(generator_operations<1).or.any(generator_operations>noperation).or.&
+        size(translation_operations)<1.or.size(coset_representatives)<1.or.&
+        any(translation_operations<1).or.any(translation_operations>noperation).or.&
+        any(coset_representatives<1).or.any(coset_representatives>noperation).or.&
+        any(product_table<1).or.any(product_table>noperation).or.tolerance<=0d0.or.&
+        any(row_ids<1_int64).or.any(row_ids>int(n,int64)))local_bad=1
+    if(.not.all(ieee_is_finite(real(h_rows))).or..not.all(ieee_is_finite(aimag(h_rows))).or.&
+        .not.all(ieee_is_finite(real(s_rows))).or..not.all(ieee_is_finite(aimag(s_rows))).or.&
+        .not.all(ieee_is_finite(real(rho_rows))).or..not.all(ieee_is_finite(aimag(rho_rows))).or.&
+        .not.all(ieee_is_finite(real(artifact_rows))).or.&
+        .not.all(ieee_is_finite(aimag(artifact_rows))).or.&
+        .not.all(ieee_is_finite(real(generator_representation))).or.&
+        .not.all(ieee_is_finite(aimag(generator_representation))))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then;message='invalid distributed pencil symmetry contract';return;endif
+    identity=0
+    do operation=1,noperation
+      if(all(product_table(operation,:)==[(i,i=1,noperation)]).and.&
+          all(product_table(:,operation)==[(i,i=1,noperation)]))then
+        identity=operation;exit
+      endif
+    enddo
+    if(identity==0)then;message='pencil symmetry product table has no identity';return;endif
+    allocate(group_seen(noperation));group_seen=0
+    do i=1,size(translation_operations);do j=1,size(coset_representatives)
+      operation=product_table(translation_operations(i),coset_representatives(j))
+      group_seen(operation)=group_seen(operation)+1
+    enddo;enddo
+    if(any(group_seen/=1))then
+      message='translation-coset factorization does not cover the affine group exactly once';return
+    endif
+    allocate(row_counts(nproc),row_displs(nproc))
+    call MPI_Allgather(size(row_ids),1,MPI_INTEGER,row_counts,1,MPI_INTEGER,comm,ierr)
+    total_rows=0
+    do r=1,nproc;row_displs(r)=total_rows;total_rows=total_rows+row_counts(r);enddo
+    if(total_rows/=n)local_bad=1
+    allocate(all_row_ids(total_rows),seen(n));seen=0
+    call MPI_Allgatherv(row_ids,size(row_ids),MPI_INTEGER8,all_row_ids,row_counts,row_displs,&
+      MPI_INTEGER8,comm,ierr)
+    do i=1,total_rows
+      if(all_row_ids(i)<1_int64.or.all_row_ids(i)>int(n,int64))then
+        local_bad=1
+      else
+        seen(int(all_row_ids(i)))=seen(int(all_row_ids(i)))+1
+      endif
+    enddo
+    if(any(seen/=1))local_bad=1
+    call MPI_Allreduce(MPI_IN_PLACE,local_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(local_bad/=0.or.ierr/=MPI_SUCCESS)then;message='duplicate or missing pencil row owner';return;endif
+    allocate(parent(noperation),parent_generator(noperation),queue(noperation),path(noperation))
+    parent=0;parent_generator=0;parent(identity)=identity;queue(1)=identity;i=1;j=1
+    do while(i<=j)
+      parent_operation=queue(i);i=i+1
+      do generator=1,ngenerator
+        operation=product_table(parent_operation,generator_operations(generator))
+        if(parent(operation)/=0)cycle
+        parent(operation)=parent_operation;parent_generator(operation)=generator
+        j=j+1;queue(j)=operation
+      enddo
+    enddo
+    if(any(parent==0))then;message='pencil symmetry generators do not close the full affine group';return;endif
+    allocate(identity_matrix(n,n),representation(n,n),sym_h_rows(size(row_ids),n),&
+      sym_s_rows(size(row_ids),n),sym_rho_rows(size(row_ids),n),sym_artifact_rows(size(row_ids),n))
+    identity_matrix=0d0;do i=1,n;identity_matrix(i,i)=1d0;enddo
+    do generator=1,ngenerator
+      transformed=matmul(conjg(transpose(generator_representation(:,:,generator))),&
+        generator_representation(:,:,generator))-identity_matrix
+      if(maxval(abs(transformed))>tolerance)then
+        message='pencil symmetry generator representation is not unitary';return
+      endif
+    enddo
+    allocate(translation_h_rows(size(row_ids),n),translation_s_rows(size(row_ids),n),&
+      translation_rho_rows(size(row_ids),n),translation_artifact_rows(size(row_ids),n))
+    translation_h_rows=0d0;translation_s_rows=0d0;translation_rho_rows=0d0
+    translation_artifact_rows=0d0
+    do j=1,size(translation_operations)
+      call build_representation(translation_operations(j),representation)
+      call transform_rows(h_rows,representation,transformed);translation_h_rows=translation_h_rows+transformed
+      call transform_rows(s_rows,representation,transformed);translation_s_rows=translation_s_rows+transformed
+      call transform_rows(rho_rows,representation,transformed)
+      translation_rho_rows=translation_rho_rows+transformed
+      call transform_rows(artifact_rows,representation,transformed)
+      translation_artifact_rows=translation_artifact_rows+transformed
+    enddo
+    translation_h_rows=translation_h_rows/real(size(translation_operations),8)
+    translation_s_rows=translation_s_rows/real(size(translation_operations),8)
+    translation_rho_rows=translation_rho_rows/real(size(translation_operations),8)
+    translation_artifact_rows=translation_artifact_rows/real(size(translation_operations),8)
+    sym_h_rows=0d0;sym_s_rows=0d0;sym_rho_rows=0d0;sym_artifact_rows=0d0
+    do j=1,size(coset_representatives)
+      call build_representation(coset_representatives(j),representation)
+      call transform_rows(translation_h_rows,representation,transformed);sym_h_rows=sym_h_rows+transformed
+      call transform_rows(translation_s_rows,representation,transformed);sym_s_rows=sym_s_rows+transformed
+      call transform_rows(translation_rho_rows,representation,transformed)
+      sym_rho_rows=sym_rho_rows+transformed
+      call transform_rows(translation_artifact_rows,representation,transformed)
+      sym_artifact_rows=sym_artifact_rows+transformed
+    enddo
+    sym_h_rows=sym_h_rows/real(size(coset_representatives),8)
+    sym_s_rows=sym_s_rows/real(size(coset_representatives),8)
+    sym_rho_rows=sym_rho_rows/real(size(coset_representatives),8)
+    sym_artifact_rows=sym_artifact_rows/real(size(coset_representatives),8)
+    scale=[global_scale(h_rows),global_scale(s_rows),global_scale(rho_rows)]
+    before_residual=0d0;after_residual=0d0
+    do generator=1,ngenerator
+      call transform_rows(h_rows,generator_representation(:,:,generator),check_rows)
+      before_residual(1)=max(before_residual(1),global_difference(check_rows,h_rows)/scale(1))
+      call transform_rows(s_rows,generator_representation(:,:,generator),check_rows)
+      before_residual(2)=max(before_residual(2),global_difference(check_rows,s_rows)/scale(2))
+      call transform_rows(rho_rows,generator_representation(:,:,generator),check_rows)
+      before_residual(3)=max(before_residual(3),global_difference(check_rows,rho_rows)/scale(3))
+      call transform_rows(sym_h_rows,generator_representation(:,:,generator),check_rows)
+      after_residual(1)=max(after_residual(1),global_difference(check_rows,sym_h_rows)/scale(1))
+      call transform_rows(sym_s_rows,generator_representation(:,:,generator),check_rows)
+      after_residual(2)=max(after_residual(2),global_difference(check_rows,sym_s_rows)/scale(2))
+      call transform_rows(sym_rho_rows,generator_representation(:,:,generator),check_rows)
+      after_residual(3)=max(after_residual(3),global_difference(check_rows,sym_rho_rows)/scale(3))
+    enddo
+    local_change=0d0;local_magnitude=0d0
+    if(size(artifact_rows)>0)then
+      local_change=maxval(abs(sym_artifact_rows-artifact_rows))
+      local_magnitude=maxval(abs(artifact_rows))
+    endif
+    call MPI_Allreduce(local_change,artifact_change,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_magnitude,artifact_magnitude,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,workspace_peak_elements,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.maxval(after_residual)>tolerance)then
+      message='full-group pencil average is not generator invariant';return
+    endif
+    ok=.true.
+  contains
+    subroutine build_representation(target,d)
+      integer,intent(in)::target
+      complex(8),intent(out)::d(:,:)
+      integer::step
+      d=identity_matrix;path_length=0;parent_operation=target
+      do while(parent_operation/=identity)
+        path_length=path_length+1;path(path_length)=parent_generator(parent_operation)
+        parent_operation=parent(parent_operation)
+      enddo
+      do step=path_length,1,-1
+        d=matmul(d,generator_representation(:,:,path(step)))
+      enddo
+    end subroutine build_representation
+    subroutine transform_rows(input_rows,d,output_rows)
+      complex(8),intent(in)::input_rows(:,:),d(:,:)
+      complex(8),allocatable,intent(out)::output_rows(:,:)
+      complex(8),allocatable::right_rows(:,:),partial(:,:),reduced(:,:)
+      integer,parameter::batch_size=32
+      integer::owner_rank,owner_rows,first,count_rows,a,b
+      allocate(output_rows(size(row_ids),n),right_rows(size(row_ids),n));output_rows=0d0
+      right_rows=matmul(input_rows,d)
+      do owner_rank=0,nproc-1
+        owner_rows=row_counts(owner_rank+1)
+        do first=1,owner_rows,batch_size
+          count_rows=min(batch_size,owner_rows-first+1)
+          allocate(partial(count_rows,n),reduced(count_rows,n));partial=0d0
+          do b=1,n;do a=1,count_rows
+            partial(a,b)=sum(conjg(d(int(row_ids),int(all_row_ids(&
+              row_displs(owner_rank+1)+first+a-1))))*right_rows(:,b))
+          enddo;enddo
+          call MPI_Reduce(partial,reduced,count_rows*n,MPI_DOUBLE_COMPLEX,MPI_SUM,owner_rank,comm,ierr)
+          if(rank==owner_rank)output_rows(first:first+count_rows-1,:)=reduced
+          workspace_peak_elements=max(workspace_peak_elements,int(n*n+size(right_rows)+&
+            size(output_rows)+size(partial)+size(reduced)+size(sym_h_rows)+size(sym_s_rows)+&
+            size(sym_rho_rows)+size(sym_artifact_rows)+size(translation_h_rows)+&
+            size(translation_s_rows)+size(translation_rho_rows)+size(translation_artifact_rows),int64))
+          deallocate(partial,reduced)
+        enddo
+      enddo
+    end subroutine transform_rows
+    real(8) function global_scale(rows)
+      complex(8),intent(in)::rows(:,:)
+      real(8)::local
+      local=0d0;if(size(rows)>0)local=maxval(abs(rows))
+      call MPI_Allreduce(local,global_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      global_scale=max(1d0,global_scale)
+    end function global_scale
+    real(8) function global_difference(left,right)
+      complex(8),intent(in)::left(:,:),right(:,:)
+      real(8)::local
+      local=0d0;if(size(left)>0)local=maxval(abs(left-right))
+      call MPI_Allreduce(local,global_difference,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    end function global_difference
+  end subroutine symmetrize_dg_distributed_pencil_rows
+
   subroutine measure_dg_hamiltonian_density_commutators(representation,hamiltonian,density_projector,&
       tolerance,hamiltonian_residual,density_residual,ok,message)
     complex(8),intent(in)::representation(:,:,:),hamiltonian(:,:),density_projector(:,:)

@@ -15,7 +15,8 @@ program test_dg_overlapping_wannier_operators_mpi
   integer(8),allocatable::stitched_row_ids(:)
   real(8)::stitched_weights(2),stitched_weight_gradient(3,2),stitched_potential(2)
   complex(8)::stitched_values(1,2),stitched_gradients(3,1,2)
-  complex(8),allocatable::stitched_kinetic_rows(:,:),stitched_potential_rows(:,:)
+  complex(8),allocatable::stitched_kinetic_rows(:,:),stitched_potential_rows(:,:),&
+    stitched_weight_gradient_rows(:,:)
   real(8)::stitched_t_hermiticity,stitched_v_hermiticity,stitched_weight_gradient_energy
   logical::ok
   character(256)::message
@@ -70,12 +71,15 @@ program test_dg_overlapping_wannier_operators_mpi
   if(rank==0)stitched_row_ids=1_8
   call assemble_dg_stitched_weak_operator_rows(comm,1,stitched_row_ids,stitched_ids,stitched_weights,&
     stitched_weight_gradient,stitched_values,stitched_gradients,stitched_potential,1d0,&
-    stitched_kinetic_rows,stitched_potential_rows,stitched_t_hermiticity,stitched_v_hermiticity,&
+    stitched_kinetic_rows,stitched_potential_rows,stitched_weight_gradient_rows,&
+    stitched_t_hermiticity,stitched_v_hermiticity,&
     stitched_weight_gradient_energy,stitched_peak_elements,ok,message)
   call require(ok,trim(message))
   row_error=0d0
   if(rank==0)row_error=abs(stitched_kinetic_rows(1,1)-cmplx(0.01d0,0d0,8))
   call require(row_error<1d-13,'weight-gradient kinetic term matches dense weak-form reference')
+  if(rank==0)row_error=abs(stitched_weight_gradient_rows(1,1)-cmplx(0.01d0,0d0,8))
+  call require(row_error<1d-13,'weight-gradient boundary matrix matches the corrected-minus-raw reference')
   row_error=0d0
   if(rank==0)row_error=abs(stitched_potential_rows(1,1)-cmplx(0.1d0,0d0,8))
   call require(row_error<1d-13,'stitched local potential matches dense reference')
@@ -85,7 +89,8 @@ program test_dg_overlapping_wannier_operators_mpi
   stitched_weights(1)=0d0;stitched_weight_gradient(:,1)=0d0
   call assemble_dg_stitched_weak_operator_rows(comm,1,stitched_row_ids,stitched_ids,stitched_weights,&
     stitched_weight_gradient,stitched_values,stitched_gradients,stitched_potential,1d0,&
-    stitched_kinetic_rows,stitched_potential_rows,stitched_t_hermiticity,stitched_v_hermiticity,&
+    stitched_kinetic_rows,stitched_potential_rows,stitched_weight_gradient_rows,&
+    stitched_t_hermiticity,stitched_v_hermiticity,&
     stitched_weight_gradient_energy,stitched_peak_elements,ok,message)
   call require(ok,trim(message));row_error=0d0
   if(rank==0)row_error=max(abs(stitched_kinetic_rows(1,1)-cmplx(0.005d0,0d0,8)),&

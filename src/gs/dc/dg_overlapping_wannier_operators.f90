@@ -12,13 +12,13 @@ module dg_overlapping_wannier_operators
 contains
   subroutine assemble_dg_stitched_weak_operator_rows(comm,nbasis,row_ids,physical_ids,&
       partition_weight,partition_gradient,basis_values,basis_gradients,local_potential,cell_volume,&
-      kinetic_rows,potential_rows,kinetic_hermiticity,potential_hermiticity,&
+      kinetic_rows,potential_rows,weight_gradient_rows,kinetic_hermiticity,potential_hermiticity,&
       weight_gradient_trace,peak_elements,ok,message)
     integer,intent(in)::comm,nbasis
     integer(int64),intent(in)::row_ids(:),physical_ids(:)
     real(real64),intent(in)::partition_weight(:),partition_gradient(:,:),local_potential(:),cell_volume
     complex(real64),intent(in)::basis_values(:,:),basis_gradients(:,:,:)
-    complex(real64),allocatable,intent(out)::kinetic_rows(:,:),potential_rows(:,:)
+    complex(real64),allocatable,intent(out)::kinetic_rows(:,:),potential_rows(:,:),weight_gradient_rows(:,:)
     real(real64),intent(out)::kinetic_hermiticity,potential_hermiticity
     real(real64),intent(out)::weight_gradient_trace
     integer(int64),intent(out)::peak_elements
@@ -30,8 +30,8 @@ contains
       i,j,p,row_index
     integer,allocatable::row_counts(:),row_displs(:)
     integer(int64),allocatable::all_row_ids(:),sorted_row_ids(:)
-    complex(real64),allocatable::partial_t(:,:),partial_v(:,:),reduced_t(:,:),reduced_v(:,:),&
-      block_t(:,:),block_v(:,:)
+    complex(real64),allocatable::partial_t(:,:),partial_v(:,:),partial_w(:,:),reduced_t(:,:),&
+      reduced_v(:,:),reduced_w(:,:),block_t(:,:),block_v(:,:)
     complex(real64)::weighted_value_i,weighted_value_j,weighted_gradient_i(3),weighted_gradient_j(3)
     real(real64)::sqrt_weight,local_t_defect,local_v_defect,t_scale,v_scale,local_weight_gradient_energy
     ok=.false.;message='';kinetic_hermiticity=huge(1d0);potential_hermiticity=huge(1d0)
@@ -80,16 +80,19 @@ contains
     enddo
     call MPI_Allreduce(local_weight_gradient_energy,weight_gradient_trace,1,MPI_DOUBLE_PRECISION,&
       MPI_SUM,comm,ierr)
-    allocate(kinetic_rows(size(row_ids),nbasis),potential_rows(size(row_ids),nbasis))
-    kinetic_rows=0d0;potential_rows=0d0
-    peak_elements=int(size(kinetic_rows)+size(potential_rows)+2*nproc+2*nbasis+8,int64)
+    allocate(kinetic_rows(size(row_ids),nbasis),potential_rows(size(row_ids),nbasis),&
+      weight_gradient_rows(size(row_ids),nbasis))
+    kinetic_rows=0d0;potential_rows=0d0;weight_gradient_rows=0d0
+    peak_elements=int(size(kinetic_rows)+size(potential_rows)+size(weight_gradient_rows)+&
+      2*nproc+2*nbasis+8,int64)
     do r=0,nproc-1
       nrows=row_counts(r+1)
       do batch_first=1,nrows,row_batch_size
         batch_count=min(row_batch_size,nrows-batch_first+1)
         allocate(partial_t(batch_count,nbasis),partial_v(batch_count,nbasis),&
-          reduced_t(batch_count,nbasis),reduced_v(batch_count,nbasis))
-        partial_t=0d0;partial_v=0d0
+          partial_w(batch_count,nbasis),reduced_t(batch_count,nbasis),&
+          reduced_v(batch_count,nbasis),reduced_w(batch_count,nbasis))
+        partial_t=0d0;partial_v=0d0;partial_w=0d0
         do p=1,size(physical_ids)
           if(partition_weight(p)==0d0)cycle
           sqrt_weight=sqrt(partition_weight(p))
@@ -104,6 +107,9 @@ contains
             0.5d0*partition_gradient(:,p)*basis_values(row_index,p)/sqrt_weight
           partial_t(i,j)=partial_t(i,j)+0.5d0*cell_volume*&
             sum(conjg(weighted_gradient_i)*weighted_gradient_j)
+          partial_w(i,j)=partial_w(i,j)+0.5d0*cell_volume*&
+            (sum(conjg(weighted_gradient_i)*weighted_gradient_j)-partition_weight(p)*&
+            sum(conjg(basis_gradients(:,row_index,p))*basis_gradients(:,j,p)))
           partial_v(i,j)=partial_v(i,j)+cell_volume*local_potential(p)*&
             conjg(weighted_value_i)*weighted_value_j
             enddo
@@ -111,14 +117,16 @@ contains
         enddo
         call MPI_Reduce(partial_t,reduced_t,batch_count*nbasis,MPI_DOUBLE_COMPLEX,MPI_SUM,r,comm,ierr)
         call MPI_Reduce(partial_v,reduced_v,batch_count*nbasis,MPI_DOUBLE_COMPLEX,MPI_SUM,r,comm,ierr)
+        call MPI_Reduce(partial_w,reduced_w,batch_count*nbasis,MPI_DOUBLE_COMPLEX,MPI_SUM,r,comm,ierr)
         if(rank==r)then
           kinetic_rows(batch_first:batch_first+batch_count-1,:)=reduced_t
           potential_rows(batch_first:batch_first+batch_count-1,:)=reduced_v
+          weight_gradient_rows(batch_first:batch_first+batch_count-1,:)=reduced_w
         endif
         peak_elements=max(peak_elements,int(size(kinetic_rows)+size(potential_rows)+&
-          2*size(partial_t)+2*size(reduced_t)+&
+          size(weight_gradient_rows)+3*size(partial_t)+3*size(reduced_t)+&
           2*nproc+2*nbasis,int64))
-        deallocate(partial_t,partial_v,reduced_t,reduced_v)
+        deallocate(partial_t,partial_v,partial_w,reduced_t,reduced_v,reduced_w)
       enddo
     enddo
     local_t_defect=0d0;local_v_defect=0d0;t_scale=1d0;v_scale=1d0
