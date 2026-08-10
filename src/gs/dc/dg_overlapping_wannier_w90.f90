@@ -1,3 +1,4 @@
+#include "config.h"
 module dg_overlapping_wannier_w90
   use,intrinsic::iso_fortran_env,only:int64,real64
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
@@ -10,7 +11,36 @@ module dg_overlapping_wannier_w90
   public::setup_dg_w90_gamma_library,run_dg_w90_gamma_library
   public::assemble_dg_w90_gamma_matrices
   public::apply_dg_w90_gamma_transform
+  public::inherit_dg_w90_affine_receipts
 contains
+  subroutine inherit_dg_w90_affine_receipts(transform,affine_subspace_defect,tolerance,&
+      identity_defect,unitarity_defect,closure_defect,workspace_peak_bytes,ok,message)
+    complex(real64),intent(in)::transform(:,:)
+    real(real64),intent(in)::affine_subspace_defect,tolerance
+    real(real64),intent(out)::identity_defect,unitarity_defect,closure_defect
+    integer(int64),intent(out)::workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(real64),allocatable::gram(:,:)
+    integer::nstate,i
+    ok=.false.;message='';identity_defect=huge(1d0);unitarity_defect=huge(1d0)
+    closure_defect=huge(1d0);workspace_peak_bytes=0_int64;nstate=size(transform,1)
+    if(nstate<1.or.size(transform,2)/=nstate.or.tolerance<=0d0.or.&
+       affine_subspace_defect<0d0.or..not.ieee_is_finite(tolerance).or.&
+       .not.ieee_is_finite(affine_subspace_defect).or.&
+       .not.all(ieee_is_finite(real(transform))).or.&
+       .not.all(ieee_is_finite(aimag(transform))))then
+      message='invalid MLWF affine-receipt inheritance contract';return
+    endif
+    allocate(gram(nstate,nstate));gram=matmul(conjg(transpose(transform)),transform)
+    do i=1,nstate;gram(i,i)=gram(i,i)-1d0;enddo
+    unitarity_defect=maxval(abs(gram))
+    identity_defect=affine_subspace_defect;closure_defect=affine_subspace_defect
+    workspace_peak_bytes=int(storage_size((0d0,0d0))/8,int64)*int(size(gram),int64)
+    ok=max(identity_defect,max(unitarity_defect,closure_defect))<=tolerance
+    if(.not.ok)message='MLWF gauge cannot inherit the accepted affine proof'
+  end subroutine inherit_dg_w90_affine_receipts
+
   subroutine apply_dg_w90_gamma_transform(comm,physical_ids,values,gradients,transform,centers,&
       tolerance,ok,message)
     integer,intent(in)::comm

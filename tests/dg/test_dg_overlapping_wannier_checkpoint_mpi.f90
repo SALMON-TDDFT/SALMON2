@@ -24,6 +24,18 @@ program test_dg_overlapping_wannier_checkpoint_mpi
   a%hamiltonian_fingerprint=1100_int64;a%observable_fingerprint=1300_int64
   a%global_lcfo_fingerprint=1700_int64;a%occupation_block_fingerprint=1900_int64
   a%affine_cocycle_fingerprint=2300_int64;a%redistribution_fingerprint=2900_int64
+  a%mlwf_backend='wannier90';a%mlwf_version='3.1.0'
+  a%mlwf_input_fingerprint=3100_int64;a%mlwf_transform_fingerprint=3700_int64
+  a%mlwf_spreads=[1.5d0,0.5d0,1d0]
+  a%mlwf_coordinator_bytes=4096_int64;a%mlwf_workspace_peak_bytes=2048_int64
+  a%mlwf_coordinator_byte_limit=8192_int64
+  a%mlwf_symmetry_receipts=[1d-13,2d-13,3d-13];a%mlwf_canonical=.true.
+  a%affine_group_order=96;a%translation_subgroup_order=4;a%point_cogroup_order=24
+  a%fixed_center_group_order=24;a%fixed_center_group_fingerprint=4100_int64
+  a%fixed_center_fractional=[0.25d0,0.5d0,0.75d0]
+  a%fixed_center_inversion_present=.true.
+  a%affine_proof_workspace_peak_bytes=1024_int64
+  a%point_projection_workspace_peak_bytes=1536_int64
   a%field_coupling_convention='cell_wrapped_length_velocity'
   a%density_residual=1d-12;a%coefficient_residual=2d-12;a%charge_error=3d-13;a%accepted=.true.
   a%unmixed_density_residual=4d-12;a%orthogonality_defect=5d-12;a%metric_condition=2d0
@@ -88,6 +100,25 @@ program test_dg_overlapping_wannier_checkpoint_mpi
     b%affine_cocycle_fingerprint==a%affine_cocycle_fingerprint.and.&
     b%redistribution_fingerprint==a%redistribution_fingerprint,&
     'mandatory global-LCFO V3 provenance round trip')
+  call require(b%mlwf_backend==a%mlwf_backend.and.b%mlwf_version==a%mlwf_version.and.&
+    b%mlwf_input_fingerprint==a%mlwf_input_fingerprint.and.&
+    b%mlwf_transform_fingerprint==a%mlwf_transform_fingerprint.and.&
+    all(b%mlwf_spreads==a%mlwf_spreads).and.&
+    b%mlwf_coordinator_bytes==a%mlwf_coordinator_bytes.and.&
+    b%mlwf_workspace_peak_bytes==a%mlwf_workspace_peak_bytes.and.&
+    b%mlwf_coordinator_byte_limit==a%mlwf_coordinator_byte_limit.and.&
+    all(b%mlwf_symmetry_receipts==a%mlwf_symmetry_receipts).and.b%mlwf_canonical,&
+    'mandatory Wannier90 MLWF V3 provenance round trip')
+  call require(b%affine_group_order==a%affine_group_order.and.&
+    b%translation_subgroup_order==a%translation_subgroup_order.and.&
+    b%point_cogroup_order==a%point_cogroup_order.and.&
+    b%fixed_center_group_order==a%fixed_center_group_order.and.&
+    b%fixed_center_group_fingerprint==a%fixed_center_group_fingerprint.and.&
+    all(b%fixed_center_fractional==a%fixed_center_fractional).and.&
+    b%fixed_center_inversion_present.and.&
+    b%affine_proof_workspace_peak_bytes==a%affine_proof_workspace_peak_bytes.and.&
+    b%point_projection_workspace_peak_bytes==a%point_projection_workspace_peak_bytes,&
+    'two-layer affine proof and fixed-center projection provenance round trip')
   call require(b%localization_converged.and.b%localization_iterations==a%localization_iterations.and.&
     b%localization_initial_spread==a%localization_initial_spread.and.&
     b%localization_final_spread==a%localization_final_spread.and.&
@@ -103,6 +134,30 @@ program test_dg_overlapping_wannier_checkpoint_mpi
   call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
   call require(.not.ok,'legacy V3 missing affine-cocycle provenance rejected')
   a%affine_cocycle_fingerprint=2300_int64
+  a%mlwf_transform_fingerprint=0_int64
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'V3 missing canonical MLWF transform provenance rejected')
+  a%mlwf_transform_fingerprint=3700_int64
+  a%mlwf_canonical=.false.
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'noncanonical MLWF transform rejected')
+  a%mlwf_canonical=.true.;a%mlwf_coordinator_byte_limit=1024_int64
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'over-limit MLWF coordinator allocation rejected')
+  a%mlwf_coordinator_byte_limit=8192_int64;a%mlwf_spreads(1)=2d0
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'inconsistent MLWF spread decomposition rejected')
+  a%mlwf_spreads(1)=1.5d0;a%mlwf_symmetry_receipts(2)=2d-9
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'post-MLWF symmetry receipt outside tolerance rejected')
+  a%mlwf_symmetry_receipts(2)=2d-13
+  a%fixed_center_inversion_present=.false.
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'centrosymmetric V3 missing fixed-center inversion rejected')
+  a%fixed_center_inversion_present=.true.;a%affine_group_order=95
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'inconsistent affine factor orders rejected')
+  a%affine_group_order=96
   a%gs_acceptance_receipts(11)=2d-9
   call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
   call require(.not.ok,'out-of-tolerance reconstructed-GS receipt rejected')

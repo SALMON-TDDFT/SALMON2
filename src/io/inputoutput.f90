@@ -3108,8 +3108,6 @@ contains
        (yn_dc_lcfo=='y' .or. yn_dc_lcfo_flux=='y' .or. yn_dc_lcfo_wannier=='y' .or. &
         yn_dc_lcfo_local_wannier=='y' .or. yn_dc_lcfo_wannier_pw=='y')) &
       call sawf_input_fatal("overlapping Wannier route forbids LCFO")
-    if(yn_dg_dc_overlapping_wannier=='y' .and. yn_eigenexa=='y') &
-      call sawf_input_fatal("overlapping Wannier route forbids EigenExa")
     if(yn_dg_dc_overlapping_wannier=='y' .and. yn_self_checkpoint=='y') &
       call sawf_input_fatal("overlapping Wannier route forbids normal checkpoint publication")
     if(yn_dg_dc_overlapping_wannier=='y' .and. checkpoint_interval>=1) &

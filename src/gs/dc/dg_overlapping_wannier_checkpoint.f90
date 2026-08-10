@@ -15,8 +15,15 @@ module dg_overlapping_wannier_checkpoint
     integer(int64)::hamiltonian_fingerprint=0_int64,observable_fingerprint=0_int64
     integer(int64)::global_lcfo_fingerprint=0_int64,occupation_block_fingerprint=0_int64
     integer(int64)::affine_cocycle_fingerprint=0_int64,redistribution_fingerprint=0_int64
+    integer(int64)::mlwf_input_fingerprint=0_int64,mlwf_transform_fingerprint=0_int64
+    integer(int64)::mlwf_coordinator_bytes=0_int64,mlwf_workspace_peak_bytes=0_int64
+    integer(int64)::mlwf_coordinator_byte_limit=0_int64
+    integer(int64)::fixed_center_group_fingerprint=0_int64
+    integer(int64)::affine_proof_workspace_peak_bytes=0_int64
+    integer(int64)::point_projection_workspace_peak_bytes=0_int64
     integer(int64)::publication_id=0_int64
     character(64)::field_coupling_convention=''
+    character(32)::mlwf_backend='',mlwf_version=''
     integer,allocatable::center_owner(:),tail_center(:),tail_generation(:),tail_offsets(:)
     integer(int64),allocatable::tail_physical_ids(:),core_physical_ids(:),overlap_row_ids(:)
     complex(8),allocatable::overlap(:,:),hamiltonian0(:,:),position(:,:,:),velocity(:,:,:),coefficients(:,:)
@@ -29,11 +36,17 @@ module dg_overlapping_wannier_checkpoint
     real(8)::symmetry_closure_residual=huge(1d0),symmetry_tolerance=0d0
     real(8)::localization_initial_spread=huge(1d0),localization_final_spread=huge(1d0)
     real(8)::localization_maximum_gradient=huge(1d0)
+    real(8)::mlwf_spreads(3)=huge(1d0),mlwf_symmetry_receipts(3)=huge(1d0)
+    real(8)::fixed_center_fractional(3)=huge(1d0)
     ! rank, occupation, electrons, LCFO projector, LCFO density, occupied energy,
     ! inversion-odd density, center ownership, buffer coverage, operator covariance, stationarity
     real(8)::gs_acceptance_receipts(11)=huge(1d0),gs_acceptance_tolerance=0d0
     integer::localization_iterations=0
+    integer::affine_group_order=0,translation_subgroup_order=0,point_cogroup_order=0
+    integer::fixed_center_group_order=0
     logical::localization_converged=.false.
+    logical::mlwf_canonical=.false.
+    logical::fixed_center_inversion_present=.false.
     logical::accepted=.false.
   end type
   public::write_dg_overlapping_wannier_checkpoint,read_dg_overlapping_wannier_checkpoint
@@ -175,7 +188,14 @@ contains
           checkpoint%hamiltonian_fingerprint,checkpoint%observable_fingerprint,&
           checkpoint%global_lcfo_fingerprint,checkpoint%occupation_block_fingerprint,&
           checkpoint%affine_cocycle_fingerprint,checkpoint%redistribution_fingerprint,&
-          checkpoint%field_coupling_convention,transaction_id,manifest_size,manifest_digest,dims,&
+          checkpoint%mlwf_input_fingerprint,checkpoint%mlwf_transform_fingerprint,&
+          checkpoint%mlwf_coordinator_bytes,checkpoint%mlwf_workspace_peak_bytes,&
+          checkpoint%mlwf_coordinator_byte_limit,checkpoint%fixed_center_group_fingerprint,&
+          checkpoint%affine_proof_workspace_peak_bytes,checkpoint%point_projection_workspace_peak_bytes,&
+          checkpoint%affine_group_order,checkpoint%translation_subgroup_order,&
+          checkpoint%point_cogroup_order,checkpoint%fixed_center_group_order,&
+          checkpoint%field_coupling_convention,&
+          checkpoint%mlwf_backend,checkpoint%mlwf_version,transaction_id,manifest_size,manifest_digest,dims,&
           checkpoint%density_residual,&
           checkpoint%coefficient_residual,checkpoint%charge_error,&
           checkpoint%unmixed_density_residual,checkpoint%orthogonality_defect,checkpoint%metric_condition,&
@@ -184,8 +204,10 @@ contains
           checkpoint%symmetry_closure_residual,checkpoint%symmetry_tolerance,&
           checkpoint%localization_initial_spread,checkpoint%localization_final_spread,&
           checkpoint%localization_maximum_gradient,checkpoint%localization_iterations,&
+          checkpoint%mlwf_spreads,checkpoint%mlwf_symmetry_receipts,checkpoint%fixed_center_fractional,&
           checkpoint%gs_acceptance_receipts,checkpoint%gs_acceptance_tolerance,&
-          checkpoint%localization_converged,checkpoint%accepted
+          checkpoint%localization_converged,checkpoint%mlwf_canonical,&
+          checkpoint%fixed_center_inversion_present,checkpoint%accepted
         if(ios==0)write(unit,iostat=ios,iomsg=iomsg)checkpoint%center_owner,&
           checkpoint%coefficients,checkpoint%occupations
         flush_ios=0;close_ios=0
@@ -222,13 +244,13 @@ contains
 #ifdef USE_MPI
     integer::rank,nproc,ierr,unit,ios,file_nproc,dims(4),local_bad,global_bad,shard_rank,shard_nproc,&
       gate_bad,allocation_status
-    integer::integer_metadata(4)
+    integer::integer_metadata(8)
     integer::expected_integers(2),expected_integer_min(2),expected_integer_max(2)
-    integer(int64)::fingerprint_metadata(8),count64,file_bytes,transaction_id,shard_transaction_id,&
+    integer(int64)::fingerprint_metadata(16),count64,file_bytes,transaction_id,shard_transaction_id,&
       stored_size,stored_digest,&
       expected_fingerprints(2),&
       expected_fingerprint_min(2),expected_fingerprint_max(2)
-    real(8)::acceptance_metadata(28),gate_min(6),gate_max(6)
+    real(8)::acceptance_metadata(37),gate_min(6),gate_max(6)
     integer::nbasis_gen,ngeometry_gen,ntail_record,ntail_id,ncore,noverlap_row
     integer(int64)::basis_fp,operator_fp,computed_hamiltonian_fingerprint,computed_observable_fingerprint
     character(32)::magic
@@ -264,7 +286,14 @@ contains
           checkpoint%hamiltonian_fingerprint,checkpoint%observable_fingerprint,&
           checkpoint%global_lcfo_fingerprint,checkpoint%occupation_block_fingerprint,&
           checkpoint%affine_cocycle_fingerprint,checkpoint%redistribution_fingerprint,&
-          checkpoint%field_coupling_convention,transaction_id,stored_size,stored_digest,dims,&
+          checkpoint%mlwf_input_fingerprint,checkpoint%mlwf_transform_fingerprint,&
+          checkpoint%mlwf_coordinator_bytes,checkpoint%mlwf_workspace_peak_bytes,&
+          checkpoint%mlwf_coordinator_byte_limit,checkpoint%fixed_center_group_fingerprint,&
+          checkpoint%affine_proof_workspace_peak_bytes,checkpoint%point_projection_workspace_peak_bytes,&
+          checkpoint%affine_group_order,checkpoint%translation_subgroup_order,&
+          checkpoint%point_cogroup_order,checkpoint%fixed_center_group_order,&
+          checkpoint%field_coupling_convention,&
+          checkpoint%mlwf_backend,checkpoint%mlwf_version,transaction_id,stored_size,stored_digest,dims,&
           checkpoint%density_residual,&
           checkpoint%coefficient_residual,checkpoint%charge_error,&
           checkpoint%unmixed_density_residual,checkpoint%orthogonality_defect,checkpoint%metric_condition,&
@@ -273,8 +302,10 @@ contains
           checkpoint%symmetry_closure_residual,checkpoint%symmetry_tolerance,&
           checkpoint%localization_initial_spread,checkpoint%localization_final_spread,&
           checkpoint%localization_maximum_gradient,checkpoint%localization_iterations,&
+          checkpoint%mlwf_spreads,checkpoint%mlwf_symmetry_receipts,checkpoint%fixed_center_fractional,&
           checkpoint%gs_acceptance_receipts,checkpoint%gs_acceptance_tolerance,&
-          checkpoint%localization_converged,checkpoint%accepted
+          checkpoint%localization_converged,checkpoint%mlwf_canonical,&
+          checkpoint%fixed_center_inversion_present,checkpoint%accepted
         if(ios==0)then
           if(magic/=manifest_magic.or.file_nproc/=nproc.or.dims(1)<=0.or.dims(2)<=0.or.dims(3)<=0.or.&
              dims(4)/=dims(3).or.any(dims>1000000))ios=1
@@ -313,11 +344,17 @@ contains
     endif
     if(rank==0)then
       integer_metadata=[checkpoint%basis_generation,checkpoint%geometry_generation,file_nproc,&
-        checkpoint%localization_iterations]
+        checkpoint%localization_iterations,checkpoint%affine_group_order,&
+        checkpoint%translation_subgroup_order,checkpoint%point_cogroup_order,&
+        checkpoint%fixed_center_group_order]
       fingerprint_metadata=[checkpoint%basis_fingerprint,checkpoint%operator_fingerprint,&
         checkpoint%hamiltonian_fingerprint,checkpoint%observable_fingerprint,&
         checkpoint%global_lcfo_fingerprint,checkpoint%occupation_block_fingerprint,&
-        checkpoint%affine_cocycle_fingerprint,checkpoint%redistribution_fingerprint]
+        checkpoint%affine_cocycle_fingerprint,checkpoint%redistribution_fingerprint,&
+        checkpoint%mlwf_input_fingerprint,checkpoint%mlwf_transform_fingerprint,&
+        checkpoint%mlwf_coordinator_bytes,checkpoint%mlwf_workspace_peak_bytes,&
+        checkpoint%mlwf_coordinator_byte_limit,checkpoint%fixed_center_group_fingerprint,&
+        checkpoint%affine_proof_workspace_peak_bytes,checkpoint%point_projection_workspace_peak_bytes]
       acceptance_metadata(1:6)=[checkpoint%density_residual,checkpoint%coefficient_residual,checkpoint%charge_error,&
         checkpoint%unmixed_density_residual,checkpoint%orthogonality_defect,checkpoint%metric_condition]
       acceptance_metadata(7:11)=[checkpoint%density_tolerance,checkpoint%coefficient_tolerance,&
@@ -325,15 +362,20 @@ contains
       acceptance_metadata(12:13)=[checkpoint%symmetry_closure_residual,checkpoint%symmetry_tolerance]
       acceptance_metadata(14:16)=[checkpoint%localization_initial_spread,&
         checkpoint%localization_final_spread,checkpoint%localization_maximum_gradient]
-      acceptance_metadata(17:27)=checkpoint%gs_acceptance_receipts
-      acceptance_metadata(28)=checkpoint%gs_acceptance_tolerance
+      acceptance_metadata(17:19)=checkpoint%mlwf_spreads
+      acceptance_metadata(20:22)=checkpoint%mlwf_symmetry_receipts
+      acceptance_metadata(23:33)=checkpoint%gs_acceptance_receipts
+      acceptance_metadata(34)=checkpoint%gs_acceptance_tolerance
+      acceptance_metadata(35:37)=checkpoint%fixed_center_fractional
     endif
-    call MPI_Bcast(integer_metadata,4,MPI_INTEGER,0,comm,ierr)
-    call MPI_Bcast(fingerprint_metadata,8,MPI_INTEGER8,0,comm,ierr)
+    call MPI_Bcast(integer_metadata,8,MPI_INTEGER,0,comm,ierr)
+    call MPI_Bcast(fingerprint_metadata,16,MPI_INTEGER8,0,comm,ierr)
     call MPI_Bcast(checkpoint%field_coupling_convention,len(checkpoint%field_coupling_convention),MPI_CHARACTER,0,comm,ierr)
+    call MPI_Bcast(checkpoint%mlwf_backend,len(checkpoint%mlwf_backend),MPI_CHARACTER,0,comm,ierr)
+    call MPI_Bcast(checkpoint%mlwf_version,len(checkpoint%mlwf_version),MPI_CHARACTER,0,comm,ierr)
     call MPI_Bcast(transaction_id,1,MPI_INTEGER8,0,comm,ierr)
     checkpoint%publication_id=transaction_id
-    call MPI_Bcast(acceptance_metadata,28,MPI_DOUBLE_PRECISION,0,comm,ierr)
+    call MPI_Bcast(acceptance_metadata,37,MPI_DOUBLE_PRECISION,0,comm,ierr)
     checkpoint%basis_generation=integer_metadata(1);checkpoint%geometry_generation=integer_metadata(2)
     checkpoint%basis_fingerprint=fingerprint_metadata(1);checkpoint%operator_fingerprint=fingerprint_metadata(2)
     checkpoint%hamiltonian_fingerprint=fingerprint_metadata(3)
@@ -342,6 +384,14 @@ contains
     checkpoint%occupation_block_fingerprint=fingerprint_metadata(6)
     checkpoint%affine_cocycle_fingerprint=fingerprint_metadata(7)
     checkpoint%redistribution_fingerprint=fingerprint_metadata(8)
+    checkpoint%mlwf_input_fingerprint=fingerprint_metadata(9)
+    checkpoint%mlwf_transform_fingerprint=fingerprint_metadata(10)
+    checkpoint%mlwf_coordinator_bytes=fingerprint_metadata(11)
+    checkpoint%mlwf_workspace_peak_bytes=fingerprint_metadata(12)
+    checkpoint%mlwf_coordinator_byte_limit=fingerprint_metadata(13)
+    checkpoint%fixed_center_group_fingerprint=fingerprint_metadata(14)
+    checkpoint%affine_proof_workspace_peak_bytes=fingerprint_metadata(15)
+    checkpoint%point_projection_workspace_peak_bytes=fingerprint_metadata(16)
     checkpoint%density_residual=acceptance_metadata(1);checkpoint%coefficient_residual=acceptance_metadata(2)
     checkpoint%charge_error=acceptance_metadata(3);checkpoint%unmixed_density_residual=acceptance_metadata(4)
     checkpoint%orthogonality_defect=acceptance_metadata(5);checkpoint%metric_condition=acceptance_metadata(6)
@@ -352,10 +402,19 @@ contains
     checkpoint%localization_initial_spread=acceptance_metadata(14)
     checkpoint%localization_final_spread=acceptance_metadata(15)
     checkpoint%localization_maximum_gradient=acceptance_metadata(16)
-    checkpoint%gs_acceptance_receipts=acceptance_metadata(17:27)
-    checkpoint%gs_acceptance_tolerance=acceptance_metadata(28)
+    checkpoint%mlwf_spreads=acceptance_metadata(17:19)
+    checkpoint%mlwf_symmetry_receipts=acceptance_metadata(20:22)
+    checkpoint%gs_acceptance_receipts=acceptance_metadata(23:33)
+    checkpoint%gs_acceptance_tolerance=acceptance_metadata(34)
+    checkpoint%fixed_center_fractional=acceptance_metadata(35:37)
     checkpoint%localization_iterations=integer_metadata(4)
+    checkpoint%affine_group_order=integer_metadata(5)
+    checkpoint%translation_subgroup_order=integer_metadata(6)
+    checkpoint%point_cogroup_order=integer_metadata(7)
+    checkpoint%fixed_center_group_order=integer_metadata(8)
     call MPI_Bcast(checkpoint%localization_converged,1,MPI_LOGICAL,0,comm,ierr)
+    call MPI_Bcast(checkpoint%mlwf_canonical,1,MPI_LOGICAL,0,comm,ierr)
+    call MPI_Bcast(checkpoint%fixed_center_inversion_present,1,MPI_LOGICAL,0,comm,ierr)
     call MPI_Bcast(checkpoint%accepted,1,MPI_LOGICAL,0,comm,ierr)
     call MPI_Bcast(checkpoint%center_owner,dims(1),MPI_INTEGER,0,comm,ierr)
     call MPI_Bcast(checkpoint%coefficients,dims(2)*dims(3),MPI_DOUBLE_COMPLEX,0,comm,ierr)
@@ -490,9 +549,11 @@ contains
     real_bytes=storage_size(0d0)/8;complex_bytes=storage_size((0d0,0d0))/8
     logical_bytes=storage_size(.false.)/8
     expected_manifest_size=int(storage_size(manifest_magic)/8,int64)+&
-      integer_bytes*int(8+size(checkpoint%center_owner),int64)+integer8_bytes*11_int64+&
+      integer_bytes*int(12+size(checkpoint%center_owner),int64)+integer8_bytes*19_int64+&
       int(storage_size(checkpoint%field_coupling_convention)/8,int64)+&
-      real_bytes*int(28+size(checkpoint%occupations),int64)+2_int64*logical_bytes+&
+      int(storage_size(checkpoint%mlwf_backend)/8,int64)+&
+      int(storage_size(checkpoint%mlwf_version)/8,int64)+&
+      real_bytes*int(37+size(checkpoint%occupations),int64)+4_int64*logical_bytes+&
       complex_bytes*int(size(checkpoint%coefficients),int64)
   end function
 
@@ -525,8 +586,26 @@ contains
     call digest_integer(hash,checkpoint%occupation_block_fingerprint,position)
     call digest_integer(hash,checkpoint%affine_cocycle_fingerprint,position)
     call digest_integer(hash,checkpoint%redistribution_fingerprint,position)
+    call digest_integer(hash,checkpoint%mlwf_input_fingerprint,position)
+    call digest_integer(hash,checkpoint%mlwf_transform_fingerprint,position)
+    call digest_integer(hash,checkpoint%mlwf_coordinator_bytes,position)
+    call digest_integer(hash,checkpoint%mlwf_workspace_peak_bytes,position)
+    call digest_integer(hash,checkpoint%mlwf_coordinator_byte_limit,position)
+    call digest_integer(hash,checkpoint%fixed_center_group_fingerprint,position)
+    call digest_integer(hash,checkpoint%affine_proof_workspace_peak_bytes,position)
+    call digest_integer(hash,checkpoint%point_projection_workspace_peak_bytes,position)
+    call digest_integer(hash,int(checkpoint%affine_group_order,int64),position)
+    call digest_integer(hash,int(checkpoint%translation_subgroup_order,int64),position)
+    call digest_integer(hash,int(checkpoint%point_cogroup_order,int64),position)
+    call digest_integer(hash,int(checkpoint%fixed_center_group_order,int64),position)
     do i=1,len(checkpoint%field_coupling_convention)
       call digest_integer(hash,int(iachar(checkpoint%field_coupling_convention(i:i)),int64),position)
+    enddo
+    do i=1,len(checkpoint%mlwf_backend)
+      call digest_integer(hash,int(iachar(checkpoint%mlwf_backend(i:i)),int64),position)
+    enddo
+    do i=1,len(checkpoint%mlwf_version)
+      call digest_integer(hash,int(iachar(checkpoint%mlwf_version(i:i)),int64),position)
     enddo
     call digest_integer(hash,transaction_id,position)
     do i=1,size(checkpoint%center_owner);call digest_integer(hash,int(checkpoint%center_owner(i),int64),position);enddo
@@ -550,12 +629,17 @@ contains
     call digest_real(hash,checkpoint%localization_initial_spread,position)
     call digest_real(hash,checkpoint%localization_final_spread,position)
     call digest_real(hash,checkpoint%localization_maximum_gradient,position)
+    do i=1,3;call digest_real(hash,checkpoint%mlwf_spreads(i),position);enddo
+    do i=1,3;call digest_real(hash,checkpoint%mlwf_symmetry_receipts(i),position);enddo
+    do i=1,3;call digest_real(hash,checkpoint%fixed_center_fractional(i),position);enddo
     do i=1,size(checkpoint%gs_acceptance_receipts)
       call digest_real(hash,checkpoint%gs_acceptance_receipts(i),position)
     end do
     call digest_real(hash,checkpoint%gs_acceptance_tolerance,position)
     call digest_integer(hash,int(checkpoint%localization_iterations,int64),position)
     call digest_integer(hash,int(merge(1,0,checkpoint%localization_converged),int64),position)
+    call digest_integer(hash,int(merge(1,0,checkpoint%mlwf_canonical),int64),position)
+    call digest_integer(hash,int(merge(1,0,checkpoint%fixed_center_inversion_present),int64),position)
     call digest_integer(hash,int(merge(1,0,checkpoint%accepted),int64),position)
     digest_manifest=hash
   end function
@@ -874,37 +958,46 @@ contains
     integer,intent(in)::comm
     type(s_dg_overlapping_wannier_checkpoint),intent(in)::checkpoint
     integer,intent(out)::bad
-    integer::ierr,dims(4),dims_min(4),dims_max(4),integer_values(5),integer_min(5),integer_max(5)
-    integer(int64)::fingerprints(8),fingerprints_min(8),fingerprints_max(8)
+    integer::ierr,dims(4),dims_min(4),dims_max(4),integer_values(11),integer_min(11),integer_max(11)
+    integer(int64)::fingerprints(16),fingerprints_min(16),fingerprints_max(16)
     character(64)::convention_reference
+    character(32)::backend_reference,version_reference
     integer,allocatable::owner_reference(:)
     complex(8),allocatable::coefficients_reference(:,:)
     real(8),allocatable::occupations_reference(:)
-    real(8)::local_defect,global_defect,metrics(28),metrics_min(28),metrics_max(28)
+    real(8)::local_defect,global_defect,metrics(37),metrics_min(37),metrics_max(37)
     dims=[size(checkpoint%center_owner),size(checkpoint%coefficients,1),size(checkpoint%coefficients,2),&
       size(checkpoint%occupations)]
     integer_values=[checkpoint%basis_generation,checkpoint%geometry_generation,&
       checkpoint%localization_iterations,merge(1,0,checkpoint%localization_converged),&
-      merge(1,0,checkpoint%accepted)]
+      merge(1,0,checkpoint%mlwf_canonical),merge(1,0,checkpoint%fixed_center_inversion_present),&
+      merge(1,0,checkpoint%accepted),checkpoint%affine_group_order,checkpoint%translation_subgroup_order,&
+      checkpoint%point_cogroup_order,checkpoint%fixed_center_group_order]
     fingerprints=[checkpoint%basis_fingerprint,checkpoint%operator_fingerprint,&
       checkpoint%hamiltonian_fingerprint,checkpoint%observable_fingerprint,&
       checkpoint%global_lcfo_fingerprint,checkpoint%occupation_block_fingerprint,&
-      checkpoint%affine_cocycle_fingerprint,checkpoint%redistribution_fingerprint]
+      checkpoint%affine_cocycle_fingerprint,checkpoint%redistribution_fingerprint,&
+      checkpoint%mlwf_input_fingerprint,checkpoint%mlwf_transform_fingerprint,&
+      checkpoint%mlwf_coordinator_bytes,checkpoint%mlwf_workspace_peak_bytes,&
+      checkpoint%mlwf_coordinator_byte_limit,checkpoint%fixed_center_group_fingerprint,&
+      checkpoint%affine_proof_workspace_peak_bytes,checkpoint%point_projection_workspace_peak_bytes]
     metrics(1:16)=[checkpoint%density_residual,checkpoint%coefficient_residual,checkpoint%charge_error,&
       checkpoint%unmixed_density_residual,checkpoint%orthogonality_defect,checkpoint%metric_condition,&
       checkpoint%density_tolerance,checkpoint%coefficient_tolerance,checkpoint%orthogonality_tolerance,&
       checkpoint%charge_tolerance,checkpoint%condition_limit,checkpoint%symmetry_closure_residual,&
       checkpoint%symmetry_tolerance,checkpoint%localization_initial_spread,&
       checkpoint%localization_final_spread,checkpoint%localization_maximum_gradient]
-    metrics(17:27)=checkpoint%gs_acceptance_receipts;metrics(28)=checkpoint%gs_acceptance_tolerance
+    metrics(17:19)=checkpoint%mlwf_spreads;metrics(20:22)=checkpoint%mlwf_symmetry_receipts
+    metrics(23:33)=checkpoint%gs_acceptance_receipts;metrics(34)=checkpoint%gs_acceptance_tolerance
+    metrics(35:37)=checkpoint%fixed_center_fractional
     call MPI_Allreduce(dims,dims_min,4,MPI_INTEGER,MPI_MIN,comm,ierr)
     call MPI_Allreduce(dims,dims_max,4,MPI_INTEGER,MPI_MAX,comm,ierr)
-    call MPI_Allreduce(integer_values,integer_min,5,MPI_INTEGER,MPI_MIN,comm,ierr)
-    call MPI_Allreduce(integer_values,integer_max,5,MPI_INTEGER,MPI_MAX,comm,ierr)
-    call MPI_Allreduce(fingerprints,fingerprints_min,8,MPI_INTEGER8,MPI_MIN,comm,ierr)
-    call MPI_Allreduce(fingerprints,fingerprints_max,8,MPI_INTEGER8,MPI_MAX,comm,ierr)
-    call MPI_Allreduce(metrics,metrics_min,28,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
-    call MPI_Allreduce(metrics,metrics_max,28,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(integer_values,integer_min,11,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(integer_values,integer_max,11,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(fingerprints,fingerprints_min,16,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(fingerprints,fingerprints_max,16,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(metrics,metrics_min,37,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(metrics,metrics_max,37,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     bad=0
     if(any(dims_min/=dims_max).or.any(integer_min/=integer_max).or.any(fingerprints_min/=fingerprints_max).or.&
        any(metrics_min/=metrics_max))bad=1
@@ -912,6 +1005,12 @@ contains
     convention_reference=checkpoint%field_coupling_convention
     call MPI_Bcast(convention_reference,len(convention_reference),MPI_CHARACTER,0,comm,ierr)
     if(checkpoint%field_coupling_convention/=convention_reference)then;bad=1;return;endif
+    backend_reference=checkpoint%mlwf_backend;version_reference=checkpoint%mlwf_version
+    call MPI_Bcast(backend_reference,len(backend_reference),MPI_CHARACTER,0,comm,ierr)
+    call MPI_Bcast(version_reference,len(version_reference),MPI_CHARACTER,0,comm,ierr)
+    if(checkpoint%mlwf_backend/=backend_reference.or.checkpoint%mlwf_version/=version_reference)then
+      bad=1;return
+    endif
     allocate(owner_reference(dims(1)),coefficients_reference(dims(2),dims(3)),&
       occupations_reference(dims(4)))
     owner_reference=checkpoint%center_owner
@@ -937,6 +1036,9 @@ contains
        checkpoint%hamiltonian_fingerprint==0_int64.or.checkpoint%observable_fingerprint==0_int64.or.&
        checkpoint%global_lcfo_fingerprint==0_int64.or.checkpoint%occupation_block_fingerprint==0_int64.or.&
        checkpoint%affine_cocycle_fingerprint==0_int64.or.checkpoint%redistribution_fingerprint==0_int64.or.&
+       checkpoint%mlwf_input_fingerprint==0_int64.or.checkpoint%mlwf_transform_fingerprint==0_int64.or.&
+       checkpoint%fixed_center_group_fingerprint==0_int64.or.&
+       trim(checkpoint%mlwf_backend)/='wannier90'.or.len_trim(checkpoint%mlwf_version)==0.or.&
        trim(checkpoint%field_coupling_convention)/='cell_wrapped_length_velocity')bad=ibset(bad,1)
     if(.not.allocated(checkpoint%center_owner).or..not.allocated(checkpoint%tail_center).or.&
        .not.allocated(checkpoint%tail_generation).or..not.allocated(checkpoint%tail_offsets).or.&
@@ -973,6 +1075,9 @@ contains
       bad=ibset(bad,10)
     if(.not.all(ieee_is_finite([checkpoint%localization_initial_spread,&
        checkpoint%localization_final_spread,checkpoint%localization_maximum_gradient])))bad=ibset(bad,10)
+    if(.not.all(ieee_is_finite(checkpoint%mlwf_spreads)).or.&
+       .not.all(ieee_is_finite(checkpoint%mlwf_symmetry_receipts)))bad=ibset(bad,10)
+    if(.not.all(ieee_is_finite(checkpoint%fixed_center_fractional)))bad=ibset(bad,10)
     if(.not.all(ieee_is_finite(checkpoint%gs_acceptance_receipts)).or.&
        .not.ieee_is_finite(checkpoint%gs_acceptance_tolerance).or.&
        checkpoint%gs_acceptance_tolerance<=0d0.or.minval(checkpoint%gs_acceptance_receipts)<0d0.or.&
@@ -994,6 +1099,20 @@ contains
        checkpoint%localization_maximum_gradient<0d0.or.&
        checkpoint%localization_final_spread>checkpoint%localization_initial_spread+&
        64d0*epsilon(1d0)*max(1d0,checkpoint%localization_initial_spread))bad=ibset(bad,14)
+    if(.not.checkpoint%mlwf_canonical.or.any(checkpoint%mlwf_spreads<0d0).or.&
+       abs(checkpoint%mlwf_spreads(1)-sum(checkpoint%mlwf_spreads(2:3)))>&
+       1d-10*max(1d0,checkpoint%mlwf_spreads(1)).or.any(checkpoint%mlwf_symmetry_receipts<0d0).or.&
+       maxval(checkpoint%mlwf_symmetry_receipts)>checkpoint%symmetry_tolerance.or.&
+       checkpoint%mlwf_workspace_peak_bytes<=0_int64.or.checkpoint%mlwf_coordinator_bytes<=0_int64.or.&
+       checkpoint%mlwf_coordinator_byte_limit<=0_int64.or.&
+       checkpoint%mlwf_workspace_peak_bytes>checkpoint%mlwf_coordinator_bytes.or.&
+       checkpoint%mlwf_coordinator_bytes>checkpoint%mlwf_coordinator_byte_limit)bad=ibset(bad,14)
+    if(checkpoint%affine_group_order<=0.or.checkpoint%translation_subgroup_order<=0.or.&
+       checkpoint%point_cogroup_order<=0.or.checkpoint%fixed_center_group_order<=0.or.&
+       checkpoint%affine_group_order/=checkpoint%translation_subgroup_order*checkpoint%point_cogroup_order.or.&
+       checkpoint%fixed_center_group_order>48.or..not.checkpoint%fixed_center_inversion_present.or.&
+       checkpoint%affine_proof_workspace_peak_bytes<=0_int64.or.&
+       checkpoint%point_projection_workspace_peak_bytes<=0_int64)bad=ibset(bad,14)
     if(.not.finite_complex(checkpoint%overlap).or..not.finite_complex(checkpoint%hamiltonian0).or.&
        .not.finite_complex3(checkpoint%position).or..not.finite_complex3(checkpoint%velocity).or.&
        .not.finite_complex(checkpoint%coefficients))bad=ibset(bad,15)
@@ -1009,6 +1128,9 @@ contains
        checkpoint%hamiltonian_fingerprint==0_int64.or.checkpoint%observable_fingerprint==0_int64.or.&
        checkpoint%global_lcfo_fingerprint==0_int64.or.checkpoint%occupation_block_fingerprint==0_int64.or.&
        checkpoint%affine_cocycle_fingerprint==0_int64.or.checkpoint%redistribution_fingerprint==0_int64.or.&
+       checkpoint%mlwf_input_fingerprint==0_int64.or.checkpoint%mlwf_transform_fingerprint==0_int64.or.&
+       checkpoint%fixed_center_group_fingerprint==0_int64.or.&
+       trim(checkpoint%mlwf_backend)/='wannier90'.or.len_trim(checkpoint%mlwf_version)==0.or.&
        trim(checkpoint%field_coupling_convention)/='cell_wrapped_length_velocity')code=ibset(code,2)
     if(.not.allocated(checkpoint%center_owner).or..not.allocated(checkpoint%tail_center).or.&
        .not.allocated(checkpoint%tail_generation).or..not.allocated(checkpoint%tail_offsets).or.&
@@ -1046,6 +1168,22 @@ contains
        checkpoint%localization_maximum_gradient<0d0.or.&
        checkpoint%localization_final_spread>checkpoint%localization_initial_spread+&
        64d0*epsilon(1d0)*max(1d0,checkpoint%localization_initial_spread))code=ibset(code,12)
+    if(.not.checkpoint%mlwf_canonical.or..not.all(ieee_is_finite(checkpoint%mlwf_spreads)).or.&
+       .not.all(ieee_is_finite(checkpoint%mlwf_symmetry_receipts)).or.any(checkpoint%mlwf_spreads<0d0).or.&
+       abs(checkpoint%mlwf_spreads(1)-sum(checkpoint%mlwf_spreads(2:3)))>&
+       1d-10*max(1d0,checkpoint%mlwf_spreads(1)).or.any(checkpoint%mlwf_symmetry_receipts<0d0).or.&
+       maxval(checkpoint%mlwf_symmetry_receipts)>checkpoint%symmetry_tolerance.or.&
+       checkpoint%mlwf_workspace_peak_bytes<=0_int64.or.checkpoint%mlwf_coordinator_bytes<=0_int64.or.&
+       checkpoint%mlwf_coordinator_byte_limit<=0_int64.or.&
+       checkpoint%mlwf_workspace_peak_bytes>checkpoint%mlwf_coordinator_bytes.or.&
+       checkpoint%mlwf_coordinator_bytes>checkpoint%mlwf_coordinator_byte_limit)code=ibset(code,12)
+    if(.not.all(ieee_is_finite(checkpoint%fixed_center_fractional)).or.&
+       checkpoint%affine_group_order<=0.or.checkpoint%translation_subgroup_order<=0.or.&
+       checkpoint%point_cogroup_order<=0.or.checkpoint%fixed_center_group_order<=0.or.&
+       checkpoint%affine_group_order/=checkpoint%translation_subgroup_order*checkpoint%point_cogroup_order.or.&
+       checkpoint%fixed_center_group_order>48.or..not.checkpoint%fixed_center_inversion_present.or.&
+       checkpoint%affine_proof_workspace_peak_bytes<=0_int64.or.&
+       checkpoint%point_projection_workspace_peak_bytes<=0_int64)code=ibset(code,12)
     if(.not.all(ieee_is_finite(checkpoint%gs_acceptance_receipts)).or.&
        .not.ieee_is_finite(checkpoint%gs_acceptance_tolerance).or.&
        checkpoint%gs_acceptance_tolerance<=0d0.or.minval(checkpoint%gs_acceptance_receipts)<0d0.or.&

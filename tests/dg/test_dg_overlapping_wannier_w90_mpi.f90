@@ -4,6 +4,7 @@ program test_dg_overlapping_wannier_w90_mpi
   use dg_overlapping_wannier_w90,only:estimate_dg_w90_coordinator_bytes,&
     validate_dg_w90_result,setup_dg_w90_gamma_library,run_dg_w90_gamma_library,&
     assemble_dg_w90_gamma_matrices,apply_dg_w90_gamma_transform
+  use dg_overlapping_wannier_w90,only:inherit_dg_w90_affine_receipts
   implicit none
   integer::ierr,rank,nproc,b,m,n,p,nlocal
   complex(8)::transform(2,2)
@@ -18,6 +19,7 @@ program test_dg_overlapping_wannier_w90_mpi
   integer(8)::matrix_peak,matrix_estimate
   complex(8)::local_m_reference(2,2,2),local_a_reference(2,2),m_reference(2,2,2),a_reference(2,2),phase
   real(8)::angle
+  real(8)::inherited_identity,inherited_unitarity,inherited_closure
   complex(8),allocatable::gauge_values(:,:),gauge_gradients(:,:,:)
   complex(8)::gauge_transform(2,2)
   real(8)::gauge_centers(3,2)
@@ -36,6 +38,10 @@ program test_dg_overlapping_wannier_w90_mpi
   spreads=[0.4d0,0.5d0];spread=[0.9d0,0.2d0,0.7d0]
   call validate_dg_w90_result(transform,centers,spreads,spread,0.8d0,1d-12,ok,message)
   call require(ok,trim(message))
+  call inherit_dg_w90_affine_receipts(transform,3d-13,1d-12,inherited_identity,&
+    inherited_unitarity,inherited_closure,bytes,ok,message)
+  call require(ok.and.inherited_identity<=3d-13.and.inherited_unitarity<1d-12.and.&
+    inherited_closure<=3d-13.and.bytes>0_8,trim(message))
   call estimate_dg_w90_coordinator_bytes(384,384,12,1,bytes,ok,message)
   call require(ok.and.bytes>0_8,'finite Si64 Wannier90 byte estimate')
   call estimate_dg_w90_coordinator_bytes(huge(0),huge(0),12,1,bytes,ok,message)

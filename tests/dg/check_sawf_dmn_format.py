@@ -214,7 +214,7 @@ with tempfile.TemporaryDirectory(prefix='sawf-dmn-') as td:
     (src/'CMakeLists.txt').write_text(f"""cmake_minimum_required(VERSION 3.18)
 project(sawf_dmn LANGUAGES Fortran)
 find_package(LAPACK REQUIRED)
-add_library(sawf {src/'sym_stub.f90'} {ROOT/'src/gs/dc/lcfo_wannier_sawf.f90'} {ROOT/'src/gs/dc/lcfo_wannier_sawf_band.f90'} {ROOT/'src/gs/dc/lcfo_wannier_sawf_dmn.f90'})
+add_library(sawf {src/'sym_stub.f90'} {ROOT/'src/gs/dc/dg_overlapping_wannier_projection.f90'} {ROOT/'src/gs/dc/lcfo_wannier_sawf.f90'} {ROOT/'src/gs/dc/lcfo_wannier_sawf_band.f90'} {ROOT/'src/gs/dc/lcfo_wannier_sawf_dmn.f90'})
 target_include_directories(sawf PRIVATE {src})
 target_link_libraries(sawf PUBLIC LAPACK::LAPACK)
 add_executable(check_dmn {src/'driver.f90'})

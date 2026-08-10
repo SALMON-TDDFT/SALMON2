@@ -1088,6 +1088,25 @@ assert re.search(
     construction_source,
     re.I,
 ), "missing one-operation fixed-center representation gather"
+dmn_begin = adapter_body.lower().find("call begin_sawf_dmn(")
+dmn_append = adapter_body.lower().find("call append_sawf_dmn_operation(")
+dmn_finish = adapter_body.lower().find("call finish_sawf_dmn(")
+w90_setup = adapter_body.lower().find("call setup_dg_w90_gamma_library(")
+assert min(dmn_begin, dmn_append, dmn_finish, w90_setup) >= 0, (
+    "production must publish a streamed fixed-center DMN before Wannier90 setup"
+)
+assert dmn_begin < dmn_append < dmn_finish < w90_setup, (
+    "fixed-center DMN transaction must complete before Wannier90 setup"
+)
+assert re.search(
+    r"call\s+gather_dg_single_symmetry_representation\s*\(", adapter_body, re.I
+), "production fixed-center DMN must gather one representation operation at a time"
+assert "fixed_center_group_order>48" in adapter_body.replace(" ", "").lower(), (
+    "production must reject a fixed-center subgroup above crystallographic order 48"
+)
+assert re.search(r"fixed_center.*inversion", adapter_body, re.I | re.S), (
+    "production must require inversion in the fixed-center subgroup"
+)
 assert re.search(
     r"call\s+inherit_dg_w90_affine_receipts\s*\(",
     adapter_body,
@@ -1100,10 +1119,10 @@ assert not re.search(r"w90_symmetry_rows\s*\(", adapter_body, re.I), (
     "production must not retain Nsym row-owned representation matrices"
 )
 assert not re.search(
-    r"assemble_dg_distributed_basis_symmetry_overlap_rows\s*\(",
+    r"assemble_dg_distributed_basis_symmetry_overlap_rows\s*\([^;]*global_symmetry_map",
     adapter_body,
-    re.I,
-), "production must not assemble the all-operation row tensor"
+    re.I | re.S,
+), "production must not assemble the full-affine all-operation row tensor"
 for provenance in (
     "global_lcfo_fingerprint",
     "occupation_block_fingerprint",
