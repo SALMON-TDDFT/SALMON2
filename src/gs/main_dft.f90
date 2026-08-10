@@ -55,6 +55,7 @@ use dg_overlapping_wannier_construction, only: measure_dg_rank_fixed_symmetry_re
 #endif
 use dg_overlapping_wannier_construction, only: select_dg_fixed_rank_symmetry_closed_subspace
 use dg_overlapping_wannier_construction, only: find_dg_group_identity
+use dg_overlapping_wannier_construction, only: select_dg_group_generators
 use dg_overlapping_wannier_construction, only: assemble_dg_distributed_basis_symmetry_overlap
 use dg_overlapping_wannier_construction, only: assemble_dg_distributed_basis_symmetry_overlap_rows,&
   gather_dg_single_symmetry_representation
@@ -573,6 +574,7 @@ contains
       translation_product(:,:),global_point_product(:,:),global_point_integer_rotations(:,:,:)
     integer,allocatable::rank_fragments(:)
     integer,allocatable::fixed_center_product(:,:)
+    integer,allocatable::global_affine_generators(:)
     type(t_sawf_symop),allocatable::fixed_center_operations(:)
     type(t_sawf_dmn_writer)::fixed_center_dmn_writer
     integer,allocatable::center_owner_candidate(:),center_box_candidate(:),center_fragment_candidate(:)
@@ -587,7 +589,7 @@ contains
       global_required_retained_rank
     integer::global_identity_operation
     integer::fixed_center_group_order,fixed_center_operation
-    integer::lcfo_symmetry_worst_operation
+    integer::lcfo_symmetry_worst_operation,lcfo_symmetry_worst_generator_index
     real(8),allocatable::lcfo_total_symmetry_residual(:),lcfo_boundary_symmetry_residual(:),&
       lcfo_interior_symmetry_residual(:)
     integer::representative_pair(2),local_pair(2)
@@ -759,7 +761,11 @@ contains
     do p=1,nbox
       if(.not.core_mask(p))cycle
       core_index=core_index+1
-      global_seed_values(:,core_index)=lcfo_occupied_core(:,core_index)
+      global_seed_values(1:global_occupied_count,core_index)=&
+        lcfo_occupied_core(1:global_occupied_count,core_index)
+      global_seed_values(global_occupied_count+rank*local_target_count+1:&
+        global_occupied_count+(rank+1)*local_target_count,core_index)=&
+        cmplx(manifest_values(:,p),0d0,8)
       ow_core_weights(core_index)=weights(p);ow_core_ids(core_index)=physical_ids(p)
       ow_core_box_positions(core_index)=p;core_periodic_phase(:,core_index)=periodic_phase(:,p)
     end do
@@ -776,16 +782,22 @@ contains
     if(.not.fixed_center_inversion_present)error stop 'fixed-center point group lacks inversion'
     call find_dg_group_identity(global_point_product,global_identity_operation,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global group identity construction failed';end if
-    allocate(lcfo_total_symmetry_residual(size(global_point_product,1)),&
-      lcfo_boundary_symmetry_residual(size(global_point_product,1)),&
-      lcfo_interior_symmetry_residual(size(global_point_product,1)))
+    call select_dg_group_generators(global_point_product,global_identity_operation,&
+      global_affine_generators,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global affine generator selection failed';end if
+    if(rank==0)write(*,'(a,2(a,i0))')'[OW-GS-DIAGNOSTIC] affine_generator_proof',&
+      ' group_order=',size(global_point_product,1),' generator_count=',size(global_affine_generators)
+    allocate(lcfo_total_symmetry_residual(size(global_affine_generators)),&
+      lcfo_boundary_symmetry_residual(size(global_affine_generators)),&
+      lcfo_interior_symmetry_residual(size(global_affine_generators)))
 #ifdef USE_EIGENEXA
     ow_saved_eigenexa_comm=info%icomm_o
     call finalize_eigenexa(info)
     info%icomm_o=dc%icomm_tot
-    call init_eigenexa_mod(info,size(lcfo_occupied_core,1),direct_block_only=.true.)
-    call measure_dg_rank_fixed_symmetry_residuals_eigenexa(info,dc%icomm_tot,lcfo_occupied_core,ow_core_weights,&
-      global_symmetry_map,lcfo_boundary_mask,total_residual=lcfo_total_symmetry_residual,&
+    call init_eigenexa_mod(info,size(global_seed_values,1),direct_block_only=.true.)
+    call measure_dg_rank_fixed_symmetry_residuals_eigenexa(info,dc%icomm_tot,global_seed_values,ow_core_weights,&
+      global_symmetry_map(:,global_affine_generators),lcfo_boundary_mask,&
+      total_residual=lcfo_total_symmetry_residual,&
       boundary_residual=lcfo_boundary_symmetry_residual,&
       interior_residual=lcfo_interior_symmetry_residual,ok=ok,message=message,&
       workspace_peak_bytes=lcfo_symmetry_workspace_peak)
@@ -798,12 +810,13 @@ contains
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'LCFO occupied symmetry measurement failed';end if
     if(rank==0)write(*,'(a,i0)')'[OW-GS-DIAGNOSTIC] lcfo_symmetry_workspace_peak_bytes=',&
       lcfo_symmetry_workspace_peak
-    lcfo_symmetry_worst_operation=maxloc(lcfo_total_symmetry_residual,dim=1)
+    lcfo_symmetry_worst_generator_index=maxloc(lcfo_total_symmetry_residual,dim=1)
+    lcfo_symmetry_worst_operation=global_affine_generators(lcfo_symmetry_worst_generator_index)
     if(rank==0)write(*,'(a,i0,3(a,es16.8))')&
       '[OW-GS-DIAGNOSTIC] lcfo_symmetry_worst_operation=',lcfo_symmetry_worst_operation,&
-      ' total_residual=',lcfo_total_symmetry_residual(lcfo_symmetry_worst_operation),&
-      ' boundary_residual=',lcfo_boundary_symmetry_residual(lcfo_symmetry_worst_operation),&
-      ' interior_residual=',lcfo_interior_symmetry_residual(lcfo_symmetry_worst_operation)
+      ' total_residual=',lcfo_total_symmetry_residual(lcfo_symmetry_worst_generator_index),&
+      ' boundary_residual=',lcfo_boundary_symmetry_residual(lcfo_symmetry_worst_generator_index),&
+      ' interior_residual=',lcfo_interior_symmetry_residual(lcfo_symmetry_worst_generator_index)
     if(maxval(lcfo_total_symmetry_residual)>dg_ow_symmetry_tolerance)&
       error stop 'LCFO seed space is not closed under the full affine action'
     call orthonormalize_dg_distributed_seed_space(dc%icomm_tot,global_seed_values,ow_core_weights,&
@@ -846,6 +859,9 @@ contains
       if(rank==0)call append_sawf_dmn_operation(fixed_center_dmn_writer,fixed_center_operation,&
         fixed_center_representation,fixed_center_representation,fixed_center_eigenvalues,&
         fixed_center_identity,fixed_center_operation==1,writer_ok,message)
+      if(rank==0.and..not.writer_ok)write(0,'(a,i0,2a)')&
+        '[OW-GS-DIAGNOSTIC] fixed-center DMN append operation=',fixed_center_operation,&
+        ' rejected: ',trim(message)
       call MPI_Bcast(writer_ok,1,MPI_LOGICAL,0,dc%icomm_tot,ierr)
       if(.not.writer_ok)then
         if(rank==0)call abort_sawf_dmn(fixed_center_dmn_writer)
@@ -2496,11 +2512,13 @@ contains
     type(t_sawf_crystallographic_catalog)::catalog
     type(t_sawf_operation_index)::operation_index
     real(8),allocatable::fractional_positions(:,:)
-    integer,allocatable::species(:),selected(:),mapped_owner(:),mapped_local(:),mapped_wrap(:,:)
+    integer,allocatable::species(:),selected(:),candidate_selected(:),mapped_owner(:),mapped_local(:),mapped_wrap(:,:)
     integer(8),allocatable::all_ids(:,:),mapped_ids(:)
-    real(8)::lattice_inverse(3,3),determinant,fixed_residual(3),center_min(3),center_max(3)
+    real(8)::lattice_inverse(3,3),determinant,fixed_residual(3),center_min(3),center_max(3),&
+      candidate_center(3),best_norm,candidate_norm,best_lex,candidate_lex
     integer::rank,nproc,ierr,nlocal,atom,operation,inversion_operation,identity_operation,&
-      selected_count,selected_count_min,selected_count_max,g,h,axis,translation_grid(3)
+      selected_count,selected_count_min,selected_count_max,candidate_count,best_count,g,h,axis,&
+      candidate_operation,sx,sy,sz,translation_grid(3)
     integer(8)::fingerprint_min,fingerprint_max
     logical::inverse_ok,map_ok,duplicate_rotation
     character(256)::detail
@@ -2533,13 +2551,64 @@ contains
           maxval(abs(catalog%fractional_translation(:,operation)-&
           anint(catalog%fractional_translation(:,operation))))<=dg_ow_symmetry_tolerance)&
         identity_operation=operation
-      if(inversion_operation==0.and.all(catalog%integer_rotation(:,:,operation)==&
-          reshape([-1,0,0,0,-1,0,0,0,-1],[3,3])))inversion_operation=operation
     enddo
-    if(identity_operation==0.or.inversion_operation==0)then
+    if(identity_operation==0)then
       message='fixed-center group requires grid-commensurate identity and inversion';return
     endif
-    fixed_center=modulo(0.5d0*catalog%fractional_translation(:,inversion_operation),1d0)
+    allocate(candidate_selected(size(catalog%operations)))
+    best_count=0;best_norm=huge(1d0);best_lex=huge(1d0)
+    do candidate_operation=1,size(catalog%operations)
+      if(any(catalog%integer_rotation(:,:,candidate_operation)/=&
+          reshape([-1,0,0,0,-1,0,0,0,-1],[3,3])))cycle
+      do axis=1,3
+        translation_grid(axis)=nint(catalog%fractional_translation(axis,candidate_operation)*&
+          real(dc%lg_tot%num(axis),8))
+      enddo
+      if(maxval(abs(real(translation_grid,8)/real(dc%lg_tot%num,8)-&
+          catalog%fractional_translation(:,candidate_operation)-anint(real(translation_grid,8)/&
+          real(dc%lg_tot%num,8)-catalog%fractional_translation(:,candidate_operation))))>&
+          dg_ow_symmetry_tolerance)cycle
+      do sx=0,1;do sy=0,1;do sz=0,1
+      candidate_center=modulo(0.5d0*catalog%fractional_translation(:,candidate_operation)+&
+        0.5d0*[real(sx,8),real(sy,8),real(sz,8)],1d0)
+      candidate_count=0
+      do operation=1,size(catalog%operations)
+        do axis=1,3
+          translation_grid(axis)=nint(catalog%fractional_translation(axis,operation)*&
+            real(dc%lg_tot%num(axis),8))
+        enddo
+        if(maxval(abs(real(translation_grid,8)/real(dc%lg_tot%num,8)-&
+            catalog%fractional_translation(:,operation)-anint(real(translation_grid,8)/&
+            real(dc%lg_tot%num,8)-catalog%fractional_translation(:,operation))))>&
+            dg_ow_symmetry_tolerance)cycle
+        fixed_residual=catalog%fractional_translation(:,operation)-candidate_center+&
+          matmul(real(catalog%integer_rotation(:,:,operation),8),candidate_center)
+        fixed_residual=fixed_residual-anint(fixed_residual)
+        if(maxval(abs(fixed_residual))>dg_ow_symmetry_tolerance)cycle
+        duplicate_rotation=.false.
+        do g=1,candidate_count
+          if(all(catalog%integer_rotation(:,:,candidate_selected(g))==&
+              catalog%integer_rotation(:,:,operation)))then
+            duplicate_rotation=.true.;exit
+          endif
+        enddo
+        if(duplicate_rotation)cycle
+        candidate_count=candidate_count+1;candidate_selected(candidate_count)=operation
+      enddo
+      candidate_norm=sum(min(candidate_center,1d0-candidate_center)**2)
+      candidate_lex=candidate_center(1)+1d-3*candidate_center(2)+1d-6*candidate_center(3)
+      if(candidate_count>best_count.or.(candidate_count==best_count.and.&
+          (candidate_norm<best_norm-dg_ow_symmetry_tolerance.or.&
+          (abs(candidate_norm-best_norm)<=dg_ow_symmetry_tolerance.and.candidate_lex<best_lex))))then
+        best_count=candidate_count;best_norm=candidate_norm;best_lex=candidate_lex
+        inversion_operation=candidate_operation;fixed_center=candidate_center
+      endif
+      enddo;enddo;enddo
+    enddo
+    deallocate(candidate_selected)
+    if(inversion_operation==0)then
+      message='fixed-center group requires grid-commensurate identity and inversion';return
+    endif
     allocate(selected(size(catalog%operations)));selected_count=1;selected(1)=identity_operation
     do operation=1,size(catalog%operations)
       if(operation==identity_operation)cycle

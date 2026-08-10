@@ -46,6 +46,7 @@ module dg_overlapping_wannier_construction
   public::verify_dg_uniform_fragment_target_rank
   public::assign_dg_overlapping_wannier_occupations
   public::find_dg_group_identity
+  public::select_dg_group_generators
   public::accumulate_dg_lcfo_buffer_contributions_to_core
   public::measure_dg_rank_fixed_symmetry_residuals
 #ifdef USE_EIGENEXA
@@ -61,6 +62,57 @@ module dg_overlapping_wannier_construction
   public::redistribute_dg_owned_orbitals_to_center_fragments
   public::assign_dg_periodic_centers_to_fragments
 contains
+
+  subroutine select_dg_group_generators(product_table,identity_operation,generators,ok,message)
+    integer,intent(in)::product_table(:,:),identity_operation
+    integer,allocatable,intent(out)::generators(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    logical,allocatable::reached(:)
+    integer,allocatable::work_generators(:)
+    integer::n,operation,generator_index,ngenerator
+    logical::changed,has_inverse
+
+    ok=.false.;message='';n=size(product_table,1)
+    if(n<1.or.size(product_table,2)/=n.or.identity_operation<1.or.identity_operation>n.or.&
+        any(product_table<1).or.any(product_table>n))then
+      message='invalid group-generator product table';return
+    endif
+    do operation=1,n
+      if(product_table(identity_operation,operation)/=operation.or.&
+          product_table(operation,identity_operation)/=operation)then
+        message='group-generator identity operation is invalid';return
+      endif
+      has_inverse=any(product_table(operation,:)==identity_operation.and.&
+        product_table(:,operation)==identity_operation)
+      if(.not.has_inverse)then;message='group-generator product table lacks an inverse';return;endif
+    enddo
+    allocate(reached(n),work_generators(max(0,n-1)))
+    reached=.false.;reached(identity_operation)=.true.;ngenerator=0
+    do while(.not.all(reached))
+      do operation=1,n
+        if(.not.reached(operation))exit
+      enddo
+      ngenerator=ngenerator+1;work_generators(ngenerator)=operation;reached(operation)=.true.
+      changed=.true.
+      do while(changed)
+        changed=.false.
+        do operation=1,n
+          if(.not.reached(operation))cycle
+          do generator_index=1,ngenerator
+            if(.not.reached(product_table(operation,work_generators(generator_index))))then
+              reached(product_table(operation,work_generators(generator_index)))=.true.;changed=.true.
+            endif
+            if(.not.reached(product_table(work_generators(generator_index),operation)))then
+              reached(product_table(work_generators(generator_index),operation))=.true.;changed=.true.
+            endif
+          enddo
+        enddo
+      enddo
+    enddo
+    allocate(generators(ngenerator));generators=work_generators(1:ngenerator)
+    ok=.true.
+  end subroutine select_dg_group_generators
 
 #ifdef USE_EIGENEXA
   subroutine measure_dg_rank_fixed_symmetry_residuals_eigenexa(info,comm,basis,weights,&
@@ -92,13 +144,19 @@ contains
       message='OW-sized EigenExa descriptor is not initialized';return
     endif
     call assemble_dg_eigenexa_cyclic_metric_block(comm,info%nprow,info%npcol,info%myrow,info%mycol,&
-      basis,weights,local_cyclic_metric,metric_peak,ok,detail)
+      info%nrow_local,info%ncol_local,basis,weights,local_cyclic_metric,metric_peak,ok,detail)
     if(.not.ok)then;message='distributed rank-fixed metric: '//trim(detail);return;endif
     allocate(local_cyclic_vectors(info%nrow_local,info%ncol_local),metric_spectrum(size(basis,1)))
     call eigen_pdsyevd_ex_distributed_blocks(info,size(basis,1),local_cyclic_metric,metric_spectrum,&
       local_cyclic_vectors,eigen_ok,detail)
-    if(.not.eigen_ok)then;message='distributed rank-fixed eigensystem: '//trim(detail);return;endif
+    if(.not.eigen_ok)then
+      ok=.false.;peak_bytes=metric_peak*int(storage_size(0d0)/8,int64)
+      if(present(workspace_peak_bytes))workspace_peak_bytes=peak_bytes
+      message='distributed rank-fixed eigensystem: '//trim(detail);return
+    endif
     if(minval(metric_spectrum)<=epsilon(1d0)*max(1d0,maxval(metric_spectrum)))then
+      ok=.false.;peak_bytes=metric_peak*int(storage_size(0d0)/8,int64)
+      if(present(workspace_peak_bytes))workspace_peak_bytes=peak_bytes
       message='distributed rank-fixed occupied metric is singular';return
     endif
     nstate=size(basis,1);nlocal=size(basis,2);noperation=size(symmetry_target_box_ids,2)

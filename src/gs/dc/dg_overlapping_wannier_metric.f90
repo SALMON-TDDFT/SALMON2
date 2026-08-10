@@ -10,9 +10,10 @@ module dg_overlapping_wannier_metric
   public::assemble_dg_overlapping_wannier_metric,assemble_dg_overlapping_wannier_metric_rows
   public::assemble_dg_eigenexa_cyclic_metric_block
 contains
-  subroutine assemble_dg_eigenexa_cyclic_metric_block(comm,nprow,npcol,myrow,mycol,values,weights,&
+  subroutine assemble_dg_eigenexa_cyclic_metric_block(comm,nprow,npcol,myrow,mycol,&
+      local_row_capacity,local_col_capacity,values,weights,&
       local_metric,peak_elements,ok,message)
-    integer,intent(in)::comm,nprow,npcol,myrow,mycol
+    integer,intent(in)::comm,nprow,npcol,myrow,mycol,local_row_capacity,local_col_capacity
     complex(real64),intent(in)::values(:,:)
     real(real64),intent(in)::weights(:)
     real(real64),allocatable,intent(out)::local_metric(:,:)
@@ -20,11 +21,13 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
+    integer,parameter::row_batch_size=32
     integer::rank,nproc,ierr,norbital,norbital_min,norbital_max,nlocal,nrowlocal,ncollocal,&
-      i,j,ilocal,jlocal,owner,r
+      i,j,ilocal,jlocal,r,batch_first,batch_count
     integer::local_bad,global_bad
     integer,allocatable::rows(:),cols(:),coordinate_owner(:,:)
-    real(real64)::local_value,global_value,scale,local_scale,imaginary_max,local_imaginary_max,gamma_tolerance
+    real(real64)::scale,local_scale,imaginary_max,local_imaginary_max,gamma_tolerance
+    real(real64),allocatable::local_block(:,:),global_block(:,:)
     call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
     norbital=size(values,1);nlocal=size(values,2);ok=.false.;message='';peak_elements=0_int64
     local_scale=1d0;local_imaginary_max=0d0
@@ -39,7 +42,7 @@ contains
     gamma_tolerance=1024d0*epsilon(1d0)*scale
     local_bad=0
     if(norbital<=0.or.norbital_min/=norbital_max.or.size(weights)/=nlocal.or.&
-       nprow<=0.or.npcol<=0)then
+       nprow<=0.or.npcol<=0.or.local_row_capacity<=0.or.local_col_capacity<=0)then
       local_bad=1
     else
       if(nprow>huge(nprow)/npcol.or.nprow*npcol/=nproc)local_bad=1
@@ -71,24 +74,36 @@ contains
     endif
     nrowlocal=count([(mod(i-1,nprow)==myrow-1,i=1,norbital)])
     ncollocal=count([(mod(i-1,npcol)==mycol-1,i=1,norbital)])
-    allocate(local_metric(nrowlocal,ncollocal));local_metric=0d0
+    if(local_row_capacity<nrowlocal.or.local_col_capacity<ncollocal)local_bad=1
+    call MPI_Allreduce(MPI_IN_PLACE,local_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(local_bad/=0)then
+      message='EigenExa local cyclic capacity is smaller than owned metric block';return
+    endif
+    allocate(local_metric(local_row_capacity,local_col_capacity));local_metric=0d0
     peak_elements=int(size(local_metric),int64)
-    do j=1,norbital
-      do i=1,norbital
-        local_value=sum(weights*real(conjg(values(i,:))*values(j,:)))
-        owner=coordinate_owner(mod(i-1,nprow)+1,mod(j-1,npcol)+1)
-        global_value=0d0
-        call MPI_Reduce(local_value,global_value,1,MPI_DOUBLE_PRECISION,MPI_SUM,owner,comm,ierr)
-        if(ierr/=MPI_SUCCESS)local_bad=1
-        if(rank==owner)then
-          ilocal=(i-1)/nprow+1;jlocal=(j-1)/npcol+1
-          local_metric(ilocal,jlocal)=global_value
-        endif
+    do batch_first=1,norbital,row_batch_size
+      batch_count=min(row_batch_size,norbital-batch_first+1)
+      allocate(local_block(batch_count,norbital),global_block(batch_count,norbital))
+      do i=1,batch_count
+        local_block(i,:)=real(matmul(conjg(values(batch_first+i-1,:))*weights,transpose(values)))
       enddo
+      call MPI_Allreduce(local_block,global_block,batch_count*norbital,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)local_bad=1
+      do i=1,batch_count
+        if(mod(batch_first+i-2,nprow)/=myrow-1)cycle
+        ilocal=(batch_first+i-2)/nprow+1
+        do j=1,norbital
+          if(mod(j-1,npcol)/=mycol-1)cycle
+          jlocal=(j-1)/npcol+1
+          local_metric(ilocal,jlocal)=global_block(i,j)
+        enddo
+      enddo
+      peak_elements=max(peak_elements,int(size(local_metric)+size(local_block)+size(global_block),int64))
+      deallocate(local_block,global_block)
     enddo
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(global_bad/=0.or..not.all(ieee_is_finite(local_metric)))then
-      message='EigenExa cyclic metric scalar reduction failed';return
+      message='EigenExa cyclic metric tiled reduction failed';return
     endif
     ok=.true.
 #else

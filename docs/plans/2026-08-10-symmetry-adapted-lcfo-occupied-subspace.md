@@ -49,10 +49,15 @@ workspace for the perturbed seed.
 
 **Step 3: Implement streamed residual**
 
-For each operation and orbital tile, apply the real-space pullback to the
+Select a deterministic generating set from the complete affine product table.
+For each generator and orbital tile, apply the real-space pullback to the
 actual production seed, assemble `Q^dagger U_g Q`, and measure the orthogonal
-residual without storing all transformed orbitals.  Accumulate real allocation
-high-water marks.  Use stable reductions and deterministic operation order.
+residual without storing all transformed orbitals.  Assemble the EigenExa
+metric in row tiles using its padded local dimensions, never scalar
+collectives.  Accumulate real allocation high-water marks.  Use stable
+reductions and deterministic operation order.  Retain all-operation atomic
+and cocycle provenance because generator invariance proves closure of the
+generated full affine group.
 
 **Step 4: Verify, review, overlay, commit**
 

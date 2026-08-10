@@ -758,11 +758,16 @@ assert not re.search(
     re.I | re.S,
 ), "fragment eigenstate indices must not be spliced into fictitious full-system KS seeds"
 assert re.search(
-    r"global_seed_values\s*\(\s*:\s*,\s*core_index\s*\)\s*=\s*"
-    r"lcfo_occupied_core\s*\(\s*:\s*,\s*core_index\s*\)",
+    r"global_seed_values\s*\(\s*1\s*:\s*global_occupied_count\s*,\s*core_index\s*\)\s*=.*?"
+    r"lcfo_occupied_core\s*\(\s*1\s*:\s*global_occupied_count\s*,\s*core_index\s*\)",
     adapter_body,
-    re.I,
-), "every fixed-rank seed must be a global LCFO coefficient state restricted to the unique core"
+    re.I | re.S,
+), "the density-carrying occupied block must come from global LCFO coefficients on the unique core"
+assert "global_occupied_count+rank*local_target_count+1:" in adapter_body.replace(" ", "") and re.search(
+    r"global_seed_values\s*\(.*?cmplx\s*\(\s*manifest_values",
+    adapter_body,
+    re.I | re.S,
+), "the unoccupied complement must be the explicit all-atom complete-s+p projector block"
 assert "global_candidate_localizer" not in adapter_body.lower(), (
     "accepted affine-closed seeds must not re-enter the removed dense fixed-rank selector"
 )
@@ -1008,6 +1013,15 @@ assert re.search(
     adapter_body,
     re.I,
 ), "production OW must request direct-block-only EigenExa initialization"
+assert re.search(
+    r"call\s+init_eigenexa_mod\s*\(\s*info\s*,\s*size\s*\(\s*global_seed_values\s*,\s*1\s*\)\s*,"
+    r"[^\n]*direct_block_only\s*=\s*\.true\.",
+    adapter_body,
+    re.I,
+), (
+    "the affine residual EigenExa descriptor must use the measured production-seed rank; "
+    "initializing it with the smaller occupied rank can return false zero closure/workspace"
+)
 rank_fixed_residuals = re.search(
     r"subroutine\s+measure_dg_rank_fixed_symmetry_residuals_eigenexa\b(?P<body>.*?)end\s+subroutine",
     construction_source,
@@ -1015,10 +1029,36 @@ rank_fixed_residuals = re.search(
 )
 assert rank_fixed_residuals, "missing production distributed rank-fixed affine residual implementation"
 assert re.search(
+    r"assemble_dg_eigenexa_cyclic_metric_block\s*\([^)]*?info%nrow_local\s*,\s*info%ncol_local",
+    rank_fixed_residuals.group("body"),
+    re.I | re.S,
+), (
+    "cyclic metric assembly must allocate EigenExa's padded local matrix shape, "
+    "not the smaller unpadded cyclic ownership count"
+)
+for failure_text in (
+    "distributed rank-fixed eigensystem",
+    "distributed rank-fixed occupied metric is singular",
+):
+    failure_branch = re.search(
+        rf"if\s*\([^\n]*\)\s*then(?P<body>.*?)message\s*=\s*'{re.escape(failure_text)}",
+        rank_fixed_residuals.group("body"),
+        re.I | re.S,
+    )
+    assert failure_branch and "ok=.false." in re.sub(r"\s+", "", failure_branch.group("body")).lower(), (
+        f"{failure_text} must not inherit a successful metric-assembly status"
+    )
+    assert "workspace_peak_bytes" in failure_branch.group("body").lower(), (
+        f"{failure_text} must publish the workspace measured before rejection"
+    )
+assert re.search(
     r"call\s+measure_dg_rank_fixed_symmetry_residuals_eigenexa\s*\(",
     adapter_body,
     re.I,
 ), "production OW construction must use the EigenExa-distributed residual path"
+assert "call select_dg_group_generators(" in adapter_body.lower(), (
+    "production must prove full affine closure through a deterministic generating set"
+)
 assert not re.search(
     r"call\s+measure_dg_rank_fixed_symmetry_residuals\s*\(",
     adapter_body,

@@ -108,9 +108,13 @@ small-cell acceptance checks, not claims of bulk quantitative accuracy.
 ## Repairing the affine proof
 
 Replace the false-zero proof path with a streamed residual calculation on the
-actual selected production seed.  For every required operation it must
+actual selected production seed.  Select a deterministic generating set from
+the complete affine product table; invariance under those generators proves
+invariance under every generated affine operation, while avoiding a redundant
+1536-operation orbital sweep.  For every selected generator it must
 measure `||(I-QQ^dagger)U_g Q||`, singular-value bounds of `Q^dagger U_g Q`,
-and real allocated workspace.  A fixture that perturbs one operation outside
+and real allocated workspace.  Full atomic/cocycle provenance still covers
+all affine operations.  A fixture that perturbs one generator outside
 the seed space must fail.  The proof cannot infer closure merely from atom or
 projector permutations.
 

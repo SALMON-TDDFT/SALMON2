@@ -12,6 +12,7 @@ program test_dg_overlapping_wannier_construction_mpi
     assemble_dg_distributed_basis_symmetry_overlap_rows,&
     validate_dg_row_owned_group_representation,&
     validate_dg_streamed_affine_representation,&
+    select_dg_group_generators,&
     gather_dg_single_symmetry_representation,&
     build_dg_pointwise_affine_owner_map,&
     find_dg_group_identity,&
@@ -33,7 +34,7 @@ program test_dg_overlapping_wannier_construction_mpi
     assign_dg_periodic_centers_to_fragments,&
     verify_dg_fragment_subspace_density_covariance,build_dg_core_owned_occupied_subspace
   implicit none
-  integer::comm,rank,nproc,ierr,i,p,point,nlocal,nclosure,index,ncore,fragment_id
+  integer::comm,rank,nproc,ierr,i,j,p,point,nlocal,nclosure,index,ncore,fragment_id
   integer(8),allocatable::ids(:),box_ids(:),symmetry_map(:,:),broken_symmetry_map(:,:)
   integer,allocatable::fragment(:)
   real(8),allocatable::weight(:),coordinate(:)
@@ -91,6 +92,8 @@ program test_dg_overlapping_wannier_construction_mpi
     closure_occupied(6,2),scaled_closure_metric(6,6)
   complex(8),allocatable::closure_transform(:,:)
   integer::closure_product(2,2)
+  integer::cyclic_product(4,4)
+  integer,allocatable::group_generators(:)
   real(8)::subspace_leakage,occupied_inclusion
   complex(8)::calibrated_basis(1,4),calibrated_representation(1,1,2)
   integer(8)::calibrated_map(4,2)
@@ -359,6 +362,16 @@ program test_dg_overlapping_wannier_construction_mpi
   closure_localizer(5,5)=2d0;closure_localizer(6,6)=2d0
   closure_occupied(1,1)=1d0;closure_occupied(2,2)=1d0
   closure_product=reshape([1,2,2,1],[2,2])
+  do j=1,4;do i=1,4
+    cyclic_product(i,j)=mod(i+j-2,4)+1
+  enddo;enddo
+  call select_dg_group_generators(cyclic_product,1,group_generators,ok,message)
+  call require(ok.and.size(group_generators)==1.and.group_generators(1)==2,&
+    'deterministic generator selection closes the complete cyclic group')
+  cyclic_product(4,4)=5
+  call select_dg_group_generators(cyclic_product,1,group_generators,ok,message)
+  call require(.not.ok,'generator selection rejects an invalid product table')
+  cyclic_product(4,4)=3
   call find_dg_group_identity(reshape([2,1,1,2],[2,2]),identity_operation,ok,message)
   call require(ok.and.identity_operation==2,'group identity is derived from the product table')
   call select_dg_fixed_rank_symmetry_closed_subspace(closure_metric,closure_occupied,&

@@ -53,17 +53,19 @@ program test_dg_overlapping_wannier_metric_mpi
   enddo;enddo
   call MPI_Allreduce(gamma_local_metric,gamma_metric,9,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
   call assemble_dg_eigenexa_cyclic_metric_block(comm,nprow,npcol,myrow,mycol,&
-    gamma_values,weights,cyclic_metric,cyclic_peak_elements,ok,message)
-  call require(ok.and.all(shape(cyclic_metric)==[nrowlocal,ncollocal]),trim(message))
+    nrowlocal+2,ncollocal+1,gamma_values,weights,cyclic_metric,cyclic_peak_elements,ok,message)
+  call require(ok.and.all(shape(cyclic_metric)==[nrowlocal+2,ncollocal+1]),trim(message))
+  call require(all(cyclic_metric(nrowlocal+1:,:)==0d0).and.&
+    all(cyclic_metric(:,ncollocal+1:)==0d0),'EigenExa padding remains zero')
   minimum=0d0
   do jlocal=1,ncollocal;do ilocal=1,nrowlocal
     i=myrow+(ilocal-1)*nprow;j=mycol+(jlocal-1)*npcol
     minimum=max(minimum,abs(cyclic_metric(ilocal,jlocal)-gamma_metric(i,j)))
   enddo;enddo
   call require(minimum<1d-13,'direct cyclic metric block matches dense Gamma reference')
-  call require(cyclic_peak_elements<=int(max(1,nrowlocal*ncollocal),8).and.&
-    (nproc==1.or.cyclic_peak_elements<9_8),&
-    'cyclic metric peak storage is bounded by the owned block')
+  call require(cyclic_peak_elements>=int((nrowlocal+2)*(ncollocal+1),8).and.&
+    cyclic_peak_elements<=int((nrowlocal+2)*(ncollocal+1)+18,8),&
+    'cyclic metric peak storage includes padding and one bounded row tile')
   allocate(row_ids(count([(mod(i-1,nproc)==rank,i=1,3)])))
   nlocal=0
   do i=1,3
