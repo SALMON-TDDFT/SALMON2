@@ -9,7 +9,228 @@ module dg_overlapping_wannier_metric
   private
   public::assemble_dg_overlapping_wannier_metric,assemble_dg_overlapping_wannier_metric_rows
   public::assemble_dg_eigenexa_cyclic_metric_block
+  public::assemble_dg_stitched_overlap_density_rows
 contains
+  subroutine assemble_dg_stitched_overlap_density_rows(comm,nbasis,row_ids,physical_ids,&
+      partition_weight,basis_values,density_values,cell_volume,expected_physical_count,&
+      expected_electrons,tolerance,srows,rhorows,electron_count,s_hermiticity,rho_hermiticity,&
+      minimum_cholesky_pivot,pivot_condition,peak_elements,ok,message)
+    integer,intent(in)::comm,nbasis
+    integer(int64),intent(in)::row_ids(:),physical_ids(:),expected_physical_count
+    real(real64),intent(in)::partition_weight(:),density_values(:),cell_volume,expected_electrons,tolerance
+    complex(real64),intent(in)::basis_values(:,:)
+    complex(real64),allocatable,intent(out)::srows(:,:),rhorows(:,:)
+    real(real64),intent(out)::electron_count,s_hermiticity,rho_hermiticity
+    real(real64),intent(out)::minimum_cholesky_pivot,pivot_condition
+    integer(int64),intent(out)::peak_elements
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer,parameter::row_batch_size=32
+    integer::rank,nproc,ierr,local_bad,global_bad,r,total_rows,nrows,batch_first,batch_count,&
+      i,j,k,p,local_row,pivot_owner,pivot_local,owner,total_send,total_recv,slot,nowned
+    integer,allocatable::row_counts(:),row_displs(:),send_counts(:),recv_counts(:),&
+      send_displs(:),recv_displs(:),send_cursor(:)
+    integer(int64),allocatable::all_row_ids(:),sorted_row_ids(:),send_ids(:),recv_ids(:)
+    complex(real64),allocatable::partial_s(:,:),reduced_s(:,:),partial_rho(:,:),reduced_rho(:,:),&
+      block_s(:,:),block_rho(:,:)
+    complex(real64),allocatable::cholesky_rows(:,:),pivot_row(:)
+    real(real64),allocatable::send_weights(:),recv_weights(:),owned_coverage(:)
+    real(real64)::local_electrons,local_moments(3),global_moments(3),expected_moments(3),&
+      local_s_defect,local_rho_defect,scale_s,scale_rho,pivot_value,maximum_cholesky_pivot
+    ok=.false.;message='';electron_count=huge(1d0);s_hermiticity=huge(1d0)
+    rho_hermiticity=huge(1d0);peak_elements=0_int64;local_bad=0
+    minimum_cholesky_pivot=0d0;pivot_condition=huge(1d0)
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    if(ierr/=MPI_SUCCESS.or.nbasis<1.or.expected_physical_count<1_int64.or.cell_volume<=0d0.or.&
+        tolerance<=0d0.or.size(partition_weight)/=size(physical_ids).or.&
+        size(density_values)/=size(physical_ids).or.size(basis_values,1)/=nbasis.or.&
+        size(basis_values,2)/=size(physical_ids).or.any(physical_ids<1_int64).or.&
+        any(physical_ids>expected_physical_count).or.any(partition_weight<0d0).or.&
+        any(row_ids<1_int64).or.any(row_ids>int(nbasis,int64)))local_bad=1
+    if(.not.all(ieee_is_finite(partition_weight)).or..not.all(ieee_is_finite(density_values)).or.&
+        .not.all(ieee_is_finite(real(basis_values))).or..not.all(ieee_is_finite(aimag(basis_values))).or.&
+        .not.ieee_is_finite(expected_electrons))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='invalid stitched overlap-density contract';return
+    endif
+    allocate(row_counts(nproc),row_displs(nproc))
+    call MPI_Allgather(size(row_ids),1,MPI_INTEGER,row_counts,1,MPI_INTEGER,comm,ierr)
+    total_rows=0
+    do r=1,nproc;row_displs(r)=total_rows;total_rows=total_rows+row_counts(r);enddo
+    if(total_rows/=nbasis)local_bad=1
+    allocate(all_row_ids(total_rows),sorted_row_ids(total_rows))
+    call MPI_Allgatherv(row_ids,size(row_ids),MPI_INTEGER8,all_row_ids,row_counts,row_displs,&
+      MPI_INTEGER8,comm,ierr)
+    sorted_row_ids=all_row_ids;call sort_ids(sorted_row_ids)
+    do i=1,total_rows;if(sorted_row_ids(i)/=int(i,int64))local_bad=1;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,local_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(local_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='duplicate or missing stitched matrix row owner';return
+    endif
+    allocate(send_counts(nproc),recv_counts(nproc),send_displs(nproc),recv_displs(nproc),&
+      send_cursor(nproc));send_counts=0
+    do p=1,size(physical_ids)
+      owner=int(modulo(physical_ids(p)-1_int64,int(nproc,int64)))+1
+      send_counts(owner)=send_counts(owner)+1
+    enddo
+    call MPI_Alltoall(send_counts,1,MPI_INTEGER,recv_counts,1,MPI_INTEGER,comm,ierr)
+    total_send=0;total_recv=0
+    do r=1,nproc
+      send_displs(r)=total_send;recv_displs(r)=total_recv
+      total_send=total_send+send_counts(r);total_recv=total_recv+recv_counts(r)
+    enddo
+    allocate(send_ids(total_send),recv_ids(total_recv),send_weights(total_send),recv_weights(total_recv))
+    send_cursor=send_displs
+    do p=1,size(physical_ids)
+      owner=int(modulo(physical_ids(p)-1_int64,int(nproc,int64)))+1
+      send_cursor(owner)=send_cursor(owner)+1
+      send_ids(send_cursor(owner))=physical_ids(p);send_weights(send_cursor(owner))=partition_weight(p)
+    enddo
+    call MPI_Alltoallv(send_ids,send_counts,send_displs,MPI_INTEGER8,recv_ids,recv_counts,recv_displs,&
+      MPI_INTEGER8,comm,ierr)
+    call MPI_Alltoallv(send_weights,send_counts,send_displs,MPI_DOUBLE_PRECISION,recv_weights,&
+      recv_counts,recv_displs,MPI_DOUBLE_PRECISION,comm,ierr)
+    nowned=int((expected_physical_count-int(rank,int64)+int(nproc,int64)-1_int64)/int(nproc,int64))
+    allocate(owned_coverage(nowned));owned_coverage=0d0
+    do p=1,total_recv
+      if(modulo(recv_ids(p)-1_int64,int(nproc,int64))/=int(rank,int64))then
+        local_bad=1;cycle
+      endif
+      slot=int((recv_ids(p)-1_int64)/int(nproc,int64))+1
+      if(slot<1.or.slot>nowned)then;local_bad=1;cycle;endif
+      owned_coverage(slot)=owned_coverage(slot)+recv_weights(p)
+    enddo
+    if(any(abs(owned_coverage-1d0)>tolerance))local_bad=1
+    call MPI_Allreduce(MPI_IN_PLACE,local_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(local_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='stitched partition has missing, excess, or nonunit physical-grid coverage';return
+    endif
+    peak_elements=max(peak_elements,int(7*nproc+2*nbasis+2*total_send+2*total_recv+nowned,int64))
+    deallocate(send_counts,recv_counts,send_displs,recv_displs,send_cursor,send_ids,recv_ids,&
+      send_weights,recv_weights,owned_coverage)
+    local_moments=0d0
+    do p=1,size(physical_ids)
+      local_moments(1)=local_moments(1)+partition_weight(p)
+      local_moments(2)=local_moments(2)+partition_weight(p)*real(physical_ids(p),real64)
+      local_moments(3)=local_moments(3)+partition_weight(p)*real(physical_ids(p),real64)**2
+    enddo
+    call MPI_Allreduce(local_moments,global_moments,3,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+    expected_moments=[real(expected_physical_count,real64),&
+      0.5d0*real(expected_physical_count,real64)*real(expected_physical_count+1_int64,real64),&
+      real(expected_physical_count,real64)*real(expected_physical_count+1_int64,real64)*&
+      real(2_int64*expected_physical_count+1_int64,real64)/6d0]
+    if(maxval(abs(global_moments-expected_moments))>tolerance*max(1d0,maxval(expected_moments)))then
+      message='stitched partition has missing or excess physical-grid coverage';return
+    endif
+    local_electrons=cell_volume*sum(partition_weight*density_values)
+    call MPI_Allreduce(local_electrons,electron_count,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.abs(electron_count-expected_electrons)>tolerance*max(1d0,abs(expected_electrons)))then
+      message='stitched density does not preserve electron count';return
+    endif
+    allocate(srows(size(row_ids),nbasis),rhorows(size(row_ids),nbasis));srows=0d0;rhorows=0d0
+    do r=0,nproc-1
+      nrows=row_counts(r+1)
+      do batch_first=1,nrows,row_batch_size
+        batch_count=min(row_batch_size,nrows-batch_first+1)
+        allocate(partial_s(batch_count,nbasis),reduced_s(batch_count,nbasis),&
+          partial_rho(batch_count,nbasis),reduced_rho(batch_count,nbasis))
+        partial_s=0d0;partial_rho=0d0
+        do p=1,size(physical_ids);do j=1,nbasis;do i=1,batch_count
+          local_row=int(all_row_ids(row_displs(r+1)+batch_first+i-1))
+          partial_s(i,j)=partial_s(i,j)+cell_volume*partition_weight(p)*&
+            conjg(basis_values(local_row,p))*basis_values(j,p)
+          partial_rho(i,j)=partial_rho(i,j)+cell_volume*partition_weight(p)*density_values(p)*&
+            conjg(basis_values(local_row,p))*basis_values(j,p)
+        enddo;enddo;enddo
+        call MPI_Reduce(partial_s,reduced_s,batch_count*nbasis,MPI_DOUBLE_COMPLEX,MPI_SUM,r,comm,ierr)
+        call MPI_Reduce(partial_rho,reduced_rho,batch_count*nbasis,MPI_DOUBLE_COMPLEX,MPI_SUM,r,comm,ierr)
+        if(rank==r)then
+          srows(batch_first:batch_first+batch_count-1,:)=reduced_s
+          rhorows(batch_first:batch_first+batch_count-1,:)=reduced_rho
+        endif
+        peak_elements=max(peak_elements,int(2*size(srows)+2*size(partial_s)+2*size(reduced_s)+&
+          2*nproc+2*nbasis,int64))
+        deallocate(partial_s,reduced_s,partial_rho,reduced_rho)
+      enddo
+    enddo
+    local_s_defect=0d0;local_rho_defect=0d0;scale_s=1d0;scale_rho=1d0
+    if(size(srows)>0)then;scale_s=max(1d0,maxval(abs(srows)));scale_rho=max(1d0,maxval(abs(rhorows)));endif
+    do r=0,nproc-1
+      nrows=row_counts(r+1)
+      do batch_first=1,nrows,row_batch_size
+        batch_count=min(row_batch_size,nrows-batch_first+1)
+        allocate(block_s(batch_count,nbasis),block_rho(batch_count,nbasis))
+        if(rank==r)then
+          block_s=srows(batch_first:batch_first+batch_count-1,:)
+          block_rho=rhorows(batch_first:batch_first+batch_count-1,:)
+        endif
+        call MPI_Bcast(block_s,batch_count*nbasis,MPI_DOUBLE_COMPLEX,r,comm,ierr)
+        call MPI_Bcast(block_rho,batch_count*nbasis,MPI_DOUBLE_COMPLEX,r,comm,ierr)
+        do local_row=1,size(row_ids);do i=1,batch_count
+          j=int(all_row_ids(row_displs(r+1)+batch_first+i-1))
+          local_s_defect=max(local_s_defect,abs(srows(local_row,j)-conjg(block_s(i,int(row_ids(local_row))))))
+          local_rho_defect=max(local_rho_defect,&
+            abs(rhorows(local_row,j)-conjg(block_rho(i,int(row_ids(local_row))))))
+        enddo;enddo
+        deallocate(block_s,block_rho)
+      enddo
+    enddo
+    call MPI_Allreduce(local_s_defect,s_hermiticity,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_rho_defect,rho_hermiticity,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,scale_s,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,scale_rho,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.s_hermiticity>tolerance*scale_s.or.rho_hermiticity>tolerance*scale_rho)then
+      message='stitched overlap or density tile is not Hermitian';return
+    endif
+    allocate(cholesky_rows(size(row_ids),nbasis),pivot_row(nbasis));cholesky_rows=0d0
+    minimum_cholesky_pivot=huge(1d0);maximum_cholesky_pivot=0d0
+    do k=1,nbasis
+      pivot_owner=-1;pivot_local=0
+      do r=0,nproc-1
+        do i=1,row_counts(r+1)
+          if(all_row_ids(row_displs(r+1)+i)==int(k,int64))then
+            pivot_owner=r
+            if(rank==r)pivot_local=i
+          endif
+        enddo
+      enddo
+      pivot_row=0d0;pivot_value=-huge(1d0)
+      if(rank==pivot_owner)then
+        if(k>1)pivot_row(1:k-1)=cholesky_rows(pivot_local,1:k-1)
+        pivot_value=real(srows(pivot_local,k)-sum(pivot_row(1:k-1)*conjg(pivot_row(1:k-1))),real64)
+        if(pivot_value>0d0)then
+          pivot_value=sqrt(pivot_value);pivot_row(k)=cmplx(pivot_value,0d0,real64)
+          cholesky_rows(pivot_local,k)=pivot_row(k)
+        endif
+      endif
+      call MPI_Bcast(pivot_value,1,MPI_DOUBLE_PRECISION,pivot_owner,comm,ierr)
+      call MPI_Bcast(pivot_row,nbasis,MPI_DOUBLE_COMPLEX,pivot_owner,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.pivot_value<=sqrt(tolerance*scale_s).or..not.ieee_is_finite(pivot_value))then
+        message='stitched overlap lost positive-definite rank';return
+      endif
+      minimum_cholesky_pivot=min(minimum_cholesky_pivot,pivot_value)
+      maximum_cholesky_pivot=max(maximum_cholesky_pivot,pivot_value)
+      do local_row=1,size(row_ids)
+        if(row_ids(local_row)<=int(k,int64))cycle
+        cholesky_rows(local_row,k)=(srows(local_row,k)-&
+          sum(cholesky_rows(local_row,1:k-1)*conjg(pivot_row(1:k-1))))/pivot_value
+      enddo
+    enddo
+    pivot_condition=maximum_cholesky_pivot/minimum_cholesky_pivot
+    peak_elements=max(peak_elements,int(2*size(srows)+size(cholesky_rows)+size(pivot_row)+&
+      2*nproc+2*nbasis,int64))
+    call MPI_Allreduce(MPI_IN_PLACE,peak_elements,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='stitched workspace receipt reduction failed';return;endif
+    ok=.true.
+#else
+    ok=.false.;message='stitched overlap-density assembly requires MPI'
+    electron_count=huge(1d0);s_hermiticity=huge(1d0);rho_hermiticity=huge(1d0)
+    minimum_cholesky_pivot=0d0;pivot_condition=huge(1d0);peak_elements=0_int64
+#endif
+  end subroutine assemble_dg_stitched_overlap_density_rows
+
   subroutine assemble_dg_eigenexa_cyclic_metric_block(comm,nprow,npcol,myrow,mycol,&
       local_row_capacity,local_col_capacity,values,weights,&
       local_metric,peak_elements,ok,message)

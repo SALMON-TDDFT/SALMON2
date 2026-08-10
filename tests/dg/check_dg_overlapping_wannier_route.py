@@ -412,6 +412,9 @@ adapter_body = production_adapter.group("body")
 assert "call build_dg_smooth_partition_of_unity(" in adapter_body.lower(), (
     "production must normalize overlapping core-buffer windows before assembling the global pencil"
 )
+assert "call assemble_dg_stitched_overlap_density_rows(" in adapter_body.lower(), (
+    "production must assemble row-owned overlap and density tiles from normalized buffer coverage"
+)
 assert re.search(
     r"prefix\s*=\s*['\"]\./overlapping_wannier_gs['\"]",
     adapter_body,
@@ -658,7 +661,10 @@ assert "replicate_dg_fragment_wannier_representative" in construction_source.low
 assert "verify_dg_fragment_wannier_streaming_closure" in construction_source.lower()
 assert "build_dg_core_owned_occupied_subspace" in construction_source.lower()
 assert "periodic_buffer_boundary_value_norm" in construction_source.lower()
-assert "global_metric_rejected_rank" in adapter_body.lower()
+assert "minimum_pivot=" in adapter_body.lower()
+assert "stitched overlap lost positive-definite rank" in source(
+    "src/gs/dc/dg_overlapping_wannier_metric.f90"
+).lower()
 assert "ow_collective_operator_fingerprint" in adapter_body.lower()
 assert "comm_is_root(nproc_id_global)" not in adapter_body.lower(), (
     "the route communicator root must use its MPI rank, not mutable global rank state"
@@ -735,11 +741,9 @@ for token in ("pp%rad", "pp%upptbl_ao", "pp%nrps_ao"):
 assert "gaussian" not in projection_source.lower(), (
     "periodic complete-s+p projectors must not silently fall back to Gaussian seeds"
 )
-assert re.search(
-    r"allocate\s*\(\s*pairs\s*\(\s*ntarget\s*,\s*ncore\s*\)\s*\)",
-    adapter_body,
-    re.I,
-), "metric ownership mask must cover every local unique-core quadrature point"
+assert "expected_core_count" in adapter_body.lower() and "ow_partition_weight" in adapter_body.lower(), (
+    "stitched metric coverage must be checked against every global physical-grid point"
+)
 assert re.search(
     r"if\s*\(\s*\.not\.\s*present\s*\(\s*center_representative_box_ids\s*\)\s*\)\s*then.*?"
     r"boundary_value_max\s*>\s*boundary_value_tolerance",
@@ -751,7 +755,7 @@ assert not re.search(r"call\s+replicate_ow_global_symmetry_orbit", adapter_body,
 )
 materialize_position = adapter_body.lower().index("call materialize_ow_distributed_core_to_buffer")
 localize_position = adapter_body.lower().index("call run_dg_w90_gamma_library")
-metric_position = adapter_body.lower().index("call assemble_dg_overlapping_wannier_metric_rows")
+metric_position = adapter_body.lower().index("call assemble_dg_stitched_overlap_density_rows")
 assert materialize_position < localize_position < metric_position, (
     "localization must use streamed local buffers and finish before metric/SCF publication"
 )

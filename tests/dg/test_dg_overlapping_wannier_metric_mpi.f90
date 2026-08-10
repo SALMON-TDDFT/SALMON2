@@ -3,15 +3,21 @@ program test_dg_overlapping_wannier_metric_mpi
   use mpi
   use,intrinsic::ieee_arithmetic,only:ieee_get_halting_mode,ieee_set_halting_mode,ieee_overflow
   use dg_overlapping_wannier_metric,only:assemble_dg_overlapping_wannier_metric,&
-    assemble_dg_overlapping_wannier_metric_rows,assemble_dg_eigenexa_cyclic_metric_block
+    assemble_dg_overlapping_wannier_metric_rows,assemble_dg_eigenexa_cyclic_metric_block,&
+    assemble_dg_stitched_overlap_density_rows
   implicit none
   integer::comm,rank,nproc,ierr,i,j,nlocal,owned,rejected,reference_owned
   integer::nprow,npcol,myrow,mycol,nrowlocal,ncollocal,ilocal,jlocal
-  integer(8),allocatable::ids(:),row_ids(:)
+  integer(8),allocatable::ids(:),row_ids(:),stitched_row_ids(:)
   real(8),allocatable::weights(:)
   complex(8),allocatable::values(:,:),metric(:,:),vectors(:,:)
   complex(8),allocatable::base_values(:,:),reference_metric(:,:),metric_rows(:,:)
   complex(8),allocatable::gamma_values(:,:)
+  complex(8),allocatable::stitched_values(:,:),stitched_srows(:,:),stitched_rhorows(:,:)
+  complex(8)::stitched_s_reference(2,2),stitched_rho_reference(2,2)
+  integer(8)::stitched_ids(4),stitched_peak_elements
+  real(8)::stitched_weights(4),stitched_density(4),stitched_electron_count,&
+    stitched_s_hermiticity,stitched_rho_hermiticity,stitched_minimum_pivot,stitched_pivot_condition
   real(8),allocatable::cyclic_metric(:,:),gamma_local_metric(:,:),gamma_metric(:,:)
   real(8),allocatable::spectrum(:),reference_spectrum(:)
   complex(8)::rotation(3,3)
@@ -79,6 +85,53 @@ program test_dg_overlapping_wannier_metric_mpi
   if(size(row_ids)>0)minimum=maxval(abs(metric_rows-reference_metric(int(row_ids),:)))
   call require(minimum<1d-13,'row-owned metric reference')
   call require(maxval(abs(spectrum-reference_spectrum))<1d-12,'row-owned metric spectrum')
+
+  stitched_ids=[1_8,2_8,3_8,4_8];stitched_weights=1d0/real(nproc,8)
+  stitched_density=[1d0,2d0,3d0,4d0]
+  allocate(stitched_values(2,4));stitched_values(1,:)=1d0
+  stitched_values(2,:)=[1d0,-1d0,2d0,-2d0]
+  stitched_s_reference=(0d0,0d0);stitched_rho_reference=(0d0,0d0)
+  do i=1,4
+    do j=1,2
+      stitched_s_reference(:,j)=stitched_s_reference(:,j)+&
+        conjg(stitched_values(:,i))*stitched_values(j,i)
+      stitched_rho_reference(:,j)=stitched_rho_reference(:,j)+stitched_density(i)*&
+        conjg(stitched_values(:,i))*stitched_values(j,i)
+    enddo
+  enddo
+  stitched_row_ids=pack(row_ids,row_ids<=2_8)
+  call assemble_dg_stitched_overlap_density_rows(comm,2,stitched_row_ids,stitched_ids,&
+    stitched_weights,stitched_values,stitched_density,1d0,4_8,10d0,1d-12,stitched_srows,&
+    stitched_rhorows,stitched_electron_count,stitched_s_hermiticity,stitched_rho_hermiticity,&
+    stitched_minimum_pivot,stitched_pivot_condition,stitched_peak_elements,ok,message)
+  call require(ok,trim(message))
+  minimum=0d0
+  if(size(stitched_srows,1)>0)minimum=maxval(abs(stitched_srows-&
+    stitched_s_reference(int(stitched_row_ids),:)))
+  call require(minimum<1d-12,'stitched overlap matches duplicate-buffer dense reference')
+  minimum=0d0
+  if(size(stitched_rhorows,1)>0)minimum=maxval(abs(stitched_rhorows-&
+    stitched_rho_reference(int(stitched_row_ids),:)))
+  call require(minimum<1d-12,'stitched density matches duplicate-buffer dense reference')
+  call require(abs(stitched_electron_count-10d0)<1d-12.and.stitched_s_hermiticity<1d-12.and.&
+    stitched_rho_hermiticity<1d-12.and.stitched_minimum_pivot>0d0.and.&
+    stitched_pivot_condition>=1d0,'stitched charge, Hermiticity, and positive-rank receipts')
+  call require(stitched_peak_elements>0_8.and.stitched_peak_elements<=int(128+4*size(stitched_row_ids),8),&
+    'stitched assembly storage is row-tiled and affine-order independent')
+  stitched_values(2,:)=stitched_values(1,:)
+  call assemble_dg_stitched_overlap_density_rows(comm,2,stitched_row_ids,stitched_ids,&
+    stitched_weights,stitched_values,stitched_density,1d0,4_8,10d0,1d-12,stitched_srows,&
+    stitched_rhorows,stitched_electron_count,stitched_s_hermiticity,stitched_rho_hermiticity,&
+    stitched_minimum_pivot,stitched_pivot_condition,stitched_peak_elements,ok,message)
+  call require(.not.ok,'stitched overlap rejects rank loss')
+  stitched_values(2,:)=[1d0,-1d0,2d0,-2d0]
+  if(rank==0)stitched_weights(1)=stitched_weights(1)+0.25d0
+  call assemble_dg_stitched_overlap_density_rows(comm,2,stitched_row_ids,stitched_ids,&
+    stitched_weights,stitched_values,stitched_density,1d0,4_8,10d0,1d-12,stitched_srows,&
+    stitched_rhorows,stitched_electron_count,stitched_s_hermiticity,stitched_rho_hermiticity,&
+    stitched_minimum_pivot,stitched_pivot_condition,stitched_peak_elements,ok,message)
+  call require(.not.ok.and.index(message,'coverage')>0,'stitched assembly rejects nonunit point coverage')
+  stitched_weights=1d0/real(nproc,8)
 
   values=base_values;values(2,:)=-values(2,:)
   call check_invariant('sign invariance')

@@ -69,8 +69,7 @@ use dg_overlapping_wannier_construction, only: transpose_dg_spatial_cores_to_orb
 use dg_overlapping_wannier_projection, only: t_dg_projection_channel,&
   build_dg_complete_sp_manifest,evaluate_dg_periodic_sp_projectors,&
   dg_periodic_grid_point_owned,select_dg_sp_atomic_orbital_ordinals
-use dg_overlapping_wannier_metric, only: assemble_dg_overlapping_wannier_metric,&
-  assemble_dg_overlapping_wannier_metric_rows
+use dg_overlapping_wannier_metric, only: assemble_dg_stitched_overlap_density_rows
 use dg_overlapping_wannier_operators, only: assemble_dg_overlapping_wannier_weak_operators,&
   assemble_dg_overlapping_wannier_weak_operator_rows
 use dg_overlapping_wannier_nonlocal, only: assemble_dg_overlapping_wannier_nonlocal,&
@@ -173,7 +172,7 @@ type(s_dg_overlapping_wannier_construction) :: ow_basis
 type(s_dg_overlapping_wannier_scf_state) :: ow_state
 type(s_dg_overlapping_wannier_scf_result) :: ow_result
 type(s_dg_overlapping_wannier_checkpoint) :: ow_checkpoint
-complex(8),allocatable :: ow_srows(:,:),ow_core_values(:,:),ow_core_gradients(:,:,:),&
+complex(8),allocatable :: ow_srows(:,:),ow_rhorows(:,:),ow_core_values(:,:),ow_core_gradients(:,:,:),&
   ow_box_values(:,:),ow_box_gradients(:,:,:),ow_last_kinetic_rows(:,:),&
   ow_last_local_rows(:,:),ow_last_nonlocal_rows(:,:)
 integer(8),allocatable :: ow_core_ids(:),ow_row_ids(:)
@@ -561,7 +560,7 @@ contains
       local_point_rotations(:,:,:)
     real(8),allocatable::manifest_values(:,:),initial_density_local(:),initial_density_global(:)
     real(8),allocatable::ow_raw_partition_weight(:),ow_raw_partition_gradient(:,:),&
-      ow_partition_weight(:),ow_partition_gradient(:,:)
+      ow_partition_weight(:),ow_partition_gradient(:,:),ow_box_density(:)
     real(8),allocatable::localized_centers(:,:),localized_center_magnitudes(:,:)
     real(8),allocatable::w90_fractional(:,:),w90_spreads(:),w90_eigenvalues(:),w90_atoms_cart(:,:),&
       fixed_center_eigenvalues(:)
@@ -583,10 +582,10 @@ contains
     integer,allocatable::center_owner_candidate(:),center_box_candidate(:),center_fragment_candidate(:)
     integer,allocatable::orbital_owned_ids(:),center_local_orbital_ids(:)
     integer,allocatable::w90_nncell(:,:)
-    logical,allocatable::boundary(:),core_mask(:),pairs(:,:)
+    logical,allocatable::boundary(:),core_mask(:)
     logical,allocatable::lcfo_boundary_mask(:)
     integer::ix,iy,iz,io,p,nbox,ncore,noccupied,nstate,ntarget,nsym,rank,nproc,&
-      raw_ix,raw_iy,raw_iz,core_index,rejected_rank,ownership_count,ierr,allocation_status,&
+      raw_ix,raw_iy,raw_iz,core_index,ierr,allocation_status,&
       local_target_count,w90_nntot
     integer::global_seed_count,global_retained_rank,global_occupied_count,global_projection_count,&
       global_required_retained_rank
@@ -605,9 +604,12 @@ contains
     integer(8)::fixed_center_group_fingerprint,fixed_center_operation_workspace,&
       fixed_center_dmn_workspace_peak
     integer(8)::w90_input_fingerprint,w90_transform_fingerprint
-    real(8)::minimum_eigenvalue,condition_number,closure_residual,spread_max,gauge_correction
+    integer(8)::ow_stitched_peak_elements
+    real(8)::condition_number,closure_residual,spread_max,gauge_correction
     real(8)::ow_partition_sum_defect,ow_partition_gradient_defect,window_axis(3),&
       window_axis_derivative(3),window_coordinate
+    real(8)::ow_stitched_electron_count,ow_stitched_s_hermiticity,ow_stitched_rho_hermiticity
+    real(8)::ow_stitched_minimum_pivot,ow_stitched_pivot_condition
     logical::ok,reusable,localization_converged,global_inversion_present
     logical::fixed_center_inversion_present,writer_ok
     real(8)::fixed_center_fractional(3)
@@ -665,7 +667,7 @@ contains
     if(.not.ok.or.nbox8>huge(expected_box_count)/int(nproc,8))&
       error stop 'overlapping-Wannier global extent overflow'
     expected_box_count=nbox8*int(nproc,8)
-    allocate(weights(nbox),&
+    allocate(weights(nbox),ow_box_density(nbox),&
       coordinate(nbox),periodic_phase(3,nbox),physical_ids(nbox),box_ids(nbox),&
       symmetry_map(nbox,nsym),local_box_ids(nbox),&
       center_representatives(nbox),fragments(nbox),boundary(nbox),core_mask(nbox),&
@@ -690,6 +692,7 @@ contains
       raw_ix=canonical_to_dc_index(ix,ow_core_size(1),ow_buffer(1))
       raw_iy=canonical_to_dc_index(iy,ow_core_size(2),ow_buffer(2))
       raw_iz=canonical_to_dc_index(iz,ow_core_size(3),ow_buffer(3))
+      ow_box_density(p)=dc%rho_tot_s(1)%f(raw_ix,raw_iy,raw_iz)
       physical_ids(p)=1_8+int(modulo(dc%ixyz_frag(1,dc%i_frag)-1+ix-ow_buffer(1)-1,dc%lg_tot%num(1)),8)+&
         int(dc%lg_tot%num(1),8)*(int(modulo(dc%ixyz_frag(2,dc%i_frag)-1+iy-ow_buffer(2)-1,&
         dc%lg_tot%num(2)),8)+int(dc%lg_tot%num(2),8)*int(modulo(dc%ixyz_frag(3,dc%i_frag)-1+&
@@ -1073,20 +1076,25 @@ contains
     deallocate(localized_centers,localized_center_magnitudes,center_owner_candidate,&
       center_box_candidate,center_fragment_candidate)
     deallocate(ow_box_gradients)
-    allocate(pairs(ntarget,ncore));pairs=.true.
     allocate(ow_row_ids(count(ow_basis%center_owner_rank==rank)))
     io=0
     do p=1,ntarget
       if(ow_basis%center_owner_rank(p)/=rank)cycle
       io=io+1;ow_row_ids(io)=p
     enddo
-    call assemble_dg_overlapping_wannier_metric_rows(dc%icomm_tot,ntarget,ow_row_ids,ow_core_ids,&
-      ow_core_weights,ow_core_values,pairs,expected_core_count,dg_dc_metric_rank_tolerance,ow_srows,&
-      spectrum,minimum_eigenvalue,condition_number,rejected_rank,ownership_count,ok,message)
-    if(rank==0)write(*,'(a,i0,a,es24.16,a,es24.16)')&
-      '[OW-GS-DIAGNOSTIC] global_metric_rejected_rank=',rejected_rank,&
-      ' minimum_eigenvalue=',minimum_eigenvalue,' condition_number=',condition_number
-    if(.not.ok.or.rejected_rank/=0)error stop 'overlapping-Wannier metric gate failed'
+    call assemble_dg_stitched_overlap_density_rows(dc%icomm_tot,ntarget,ow_row_ids,physical_ids,&
+      ow_partition_weight,ow_box_values,ow_box_density,system%hvol,expected_core_count,&
+      dc%elec_num_tot,dg_dc_metric_rank_tolerance,ow_srows,ow_rhorows,ow_stitched_electron_count,&
+      ow_stitched_s_hermiticity,ow_stitched_rho_hermiticity,ow_stitched_minimum_pivot,&
+      ow_stitched_pivot_condition,ow_stitched_peak_elements,ok,message)
+    if(rank==0)write(*,'(a,5(a,es16.8),a,i0)')'[OW-GS-DIAGNOSTIC] stitched_overlap_density',&
+      ' electrons=',ow_stitched_electron_count,' s_hermiticity=',ow_stitched_s_hermiticity,&
+      ' rho_hermiticity=',ow_stitched_rho_hermiticity,' minimum_pivot=',ow_stitched_minimum_pivot,&
+      ' pivot_condition=',ow_stitched_pivot_condition,' workspace_peak_elements=',ow_stitched_peak_elements
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'stitched overlap-density gate failed';endif
+    condition_number=ow_stitched_pivot_condition
+    allocate(spectrum(2));spectrum=[ow_stitched_minimum_pivot,&
+      ow_stitched_minimum_pivot*ow_stitched_pivot_condition]
     allocate(ow_tail_generation(ntarget,ncore));ow_tail_generation=ow_basis%generation
     call compute_dg_overlapping_wannier_scf_fingerprint(dc%icomm_tot,ow_row_ids,&
       ow_srows,ow_core_ids,ow_core_weights,ow_core_values,ow_tail_generation,&
@@ -2062,9 +2070,9 @@ contains
     write(*,'(a,i0)')'[OW-GS-EVIDENCE] bond_center_orbit_closed=',1
     write(*,'(a,i0)')'[OW-GS-EVIDENCE] occupied_included=',occupied_required
     write(*,'(a,i0)')'[OW-GS-EVIDENCE] occupied_required=',occupied_required
-    write(*,'(a,es24.16)')'[OW-GS-EVIDENCE] metric_min=',minval(metric_spectrum)
-    write(*,'(a,es24.16)')'[OW-GS-EVIDENCE] metric_max=',maxval(metric_spectrum)
-    write(*,'(a,es24.16)')'[OW-GS-EVIDENCE] metric_condition=',ow_checkpoint%metric_condition
+    write(*,'(a,es24.16)')'[OW-GS-EVIDENCE] metric_cholesky_pivot_min=',minval(metric_spectrum)
+    write(*,'(a,es24.16)')'[OW-GS-EVIDENCE] metric_cholesky_pivot_max=',maxval(metric_spectrum)
+    write(*,'(a,es24.16)')'[OW-GS-EVIDENCE] metric_pivot_condition=',ow_checkpoint%metric_condition
     write(*,'(a,es24.16)')'[OW-GS-EVIDENCE] occupied_inclusion_residual=',&
       ow_basis%occupied_inclusion_residual
     write(*,'(a,es24.16)')'[OW-GS-EVIDENCE] complete_shell_inclusion_residual=',&
