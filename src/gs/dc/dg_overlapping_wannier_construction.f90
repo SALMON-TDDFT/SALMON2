@@ -47,6 +47,7 @@ module dg_overlapping_wannier_construction
   public::assign_dg_overlapping_wannier_occupations
   public::find_dg_group_identity
   public::select_dg_group_generators
+  public::build_dg_smooth_partition_of_unity
   public::accumulate_dg_lcfo_buffer_contributions_to_core
   public::measure_dg_rank_fixed_symmetry_residuals
 #ifdef USE_EIGENEXA
@@ -62,6 +63,150 @@ module dg_overlapping_wannier_construction
   public::redistribute_dg_owned_orbitals_to_center_fragments
   public::assign_dg_periodic_centers_to_fragments
 contains
+
+  subroutine build_dg_smooth_partition_of_unity(comm,physical_ids,raw_weight,raw_gradient,&
+      partition_weight,partition_gradient,sum_defect,gradient_defect,ok,message)
+    integer,intent(in)::comm
+    integer(int64),intent(in)::physical_ids(:)
+    real(real64),intent(in)::raw_weight(:),raw_gradient(:,:)
+    real(real64),intent(out)::partition_weight(:),partition_gradient(:,:)
+    real(real64),intent(out)::sum_defect,gradient_defect
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,nproc,nlocal,nlocal_max,source,source_count,p,q,ierr,local_bad,global_bad
+    integer(int64),allocatable::source_ids(:)
+    integer,allocatable::local_order(:)
+    real(real64),allocatable::source_weight(:),source_gradient(:,:),denominator(:),&
+      denominator_gradient(:,:),check_sum(:),check_gradient(:,:)
+    real(real64)::local_sum_defect,local_gradient_defect
+    ok=.false.;message='';sum_defect=huge(1d0);gradient_defect=huge(1d0)
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    nlocal=size(physical_ids)
+    call MPI_Allreduce(nlocal,nlocal_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    local_bad=merge(0,1,ierr==MPI_SUCCESS.and.nlocal>0.and.&
+      size(raw_weight)==nlocal.and.all(shape(raw_gradient)==[3,nlocal]).and.&
+      size(partition_weight)==nlocal.and.all(shape(partition_gradient)==[3,nlocal]).and.&
+      all(physical_ids>0_int64).and.all(raw_weight>=0d0).and.&
+      all(ieee_is_finite(raw_weight)).and.all(ieee_is_finite(raw_gradient)))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='invalid smooth partition-of-unity contract';return
+    endif
+    allocate(source_ids(nlocal_max),source_weight(nlocal_max),source_gradient(3,nlocal_max),&
+      denominator(nlocal),denominator_gradient(3,nlocal),check_sum(nlocal),check_gradient(3,nlocal),&
+      local_order(nlocal))
+    call sort_dg_int64_index(physical_ids,local_order)
+    local_bad=0
+    do p=2,nlocal
+      if(physical_ids(local_order(p))==physical_ids(local_order(p-1)))local_bad=1
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='smooth partition requires unique physical-grid ids within each fragment';return
+    endif
+    denominator=0d0;denominator_gradient=0d0
+    do source=0,nproc-1
+      source_count=nlocal
+      call MPI_Bcast(source_count,1,MPI_INTEGER,source,comm,ierr)
+      if(rank==source)then
+        source_ids(1:source_count)=physical_ids
+        source_weight(1:source_count)=raw_weight
+        source_gradient(:,1:source_count)=raw_gradient
+      endif
+      call MPI_Bcast(source_ids,source_count,MPI_INTEGER8,source,comm,ierr)
+      call MPI_Bcast(source_weight,source_count,MPI_DOUBLE_PRECISION,source,comm,ierr)
+      call MPI_Bcast(source_gradient,3*source_count,MPI_DOUBLE_PRECISION,source,comm,ierr)
+      do q=1,source_count
+        p=find_dg_int64_index(physical_ids,local_order,source_ids(q))
+        if(p==0)cycle
+        denominator(p)=denominator(p)+source_weight(q)
+        denominator_gradient(:,p)=denominator_gradient(:,p)+source_gradient(:,q)
+      enddo
+    enddo
+    local_bad=merge(0,1,all(denominator>tiny(1d0)).and.all(ieee_is_finite(denominator)).and.&
+      all(ieee_is_finite(denominator_gradient)))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='smooth partition has missing or nonfinite physical-grid coverage';return
+    endif
+    partition_weight=raw_weight/denominator
+    do p=1,nlocal
+      partition_gradient(:,p)=(raw_gradient(:,p)*denominator(p)-&
+        raw_weight(p)*denominator_gradient(:,p))/denominator(p)**2
+    enddo
+    check_sum=0d0;check_gradient=0d0
+    do source=0,nproc-1
+      source_count=nlocal
+      call MPI_Bcast(source_count,1,MPI_INTEGER,source,comm,ierr)
+      if(rank==source)then
+        source_ids(1:source_count)=physical_ids
+        source_weight(1:source_count)=partition_weight
+        source_gradient(:,1:source_count)=partition_gradient
+      endif
+      call MPI_Bcast(source_ids,source_count,MPI_INTEGER8,source,comm,ierr)
+      call MPI_Bcast(source_weight,source_count,MPI_DOUBLE_PRECISION,source,comm,ierr)
+      call MPI_Bcast(source_gradient,3*source_count,MPI_DOUBLE_PRECISION,source,comm,ierr)
+      do q=1,source_count
+        p=find_dg_int64_index(physical_ids,local_order,source_ids(q))
+        if(p==0)cycle
+        check_sum(p)=check_sum(p)+source_weight(q)
+        check_gradient(:,p)=check_gradient(:,p)+source_gradient(:,q)
+      enddo
+    enddo
+    local_sum_defect=maxval(abs(check_sum-1d0));local_gradient_defect=maxval(abs(check_gradient))
+    call MPI_Allreduce(local_sum_defect,sum_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_gradient_defect,gradient_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    ok=ierr==MPI_SUCCESS.and.ieee_is_finite(sum_defect).and.ieee_is_finite(gradient_defect)
+    if(ok)then;message='';else;message='smooth partition normalization receipt is nonfinite';endif
+#else
+    ok=.false.;message='smooth partition-of-unity construction requires MPI'
+    sum_defect=huge(1d0);gradient_defect=huge(1d0)
+#endif
+  end subroutine build_dg_smooth_partition_of_unity
+
+  subroutine sort_dg_int64_index(values,order)
+    integer(int64),intent(in)::values(:)
+    integer,intent(out)::order(:)
+    integer::i
+    order=[(i,i=1,size(values))]
+    call sort_range(1,size(order))
+  contains
+    recursive subroutine sort_range(left,right)
+      integer,intent(in)::left,right
+      integer::i,j,temporary
+      integer(int64)::pivot
+      if(left>=right)return
+      i=left;j=right;pivot=values(order((left+right)/2))
+      do
+        do while(values(order(i))<pivot);i=i+1;enddo
+        do while(values(order(j))>pivot);j=j-1;enddo
+        if(i>j)exit
+        temporary=order(i);order(i)=order(j);order(j)=temporary
+        i=i+1;j=j-1
+        if(i>j)exit
+      enddo
+      if(left<j)call sort_range(left,j)
+      if(i<right)call sort_range(i,right)
+    end subroutine sort_range
+  end subroutine sort_dg_int64_index
+
+  integer function find_dg_int64_index(values,order,target) result(location)
+    integer(int64),intent(in)::values(:),target
+    integer,intent(in)::order(:)
+    integer::left,right,middle
+    location=0;left=1;right=size(order)
+    do while(left<=right)
+      middle=(left+right)/2
+      if(values(order(middle))<target)then
+        left=middle+1
+      elseif(values(order(middle))>target)then
+        right=middle-1
+      else
+        location=order(middle);return
+      endif
+    enddo
+  end function find_dg_int64_index
 
   subroutine select_dg_group_generators(product_table,identity_operation,generators,ok,message)
     integer,intent(in)::product_table(:,:),identity_operation

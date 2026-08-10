@@ -409,6 +409,9 @@ production_adapter = re.search(
 )
 assert production_adapter
 adapter_body = production_adapter.group("body")
+assert "call build_dg_smooth_partition_of_unity(" in adapter_body.lower(), (
+    "production must normalize overlapping core-buffer windows before assembling the global pencil"
+)
 assert re.search(
     r"prefix\s*=\s*['\"]\./overlapping_wannier_gs['\"]",
     adapter_body,

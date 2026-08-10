@@ -56,6 +56,7 @@ use dg_overlapping_wannier_construction, only: measure_dg_rank_fixed_symmetry_re
 use dg_overlapping_wannier_construction, only: select_dg_fixed_rank_symmetry_closed_subspace
 use dg_overlapping_wannier_construction, only: find_dg_group_identity
 use dg_overlapping_wannier_construction, only: select_dg_group_generators
+use dg_overlapping_wannier_construction, only: build_dg_smooth_partition_of_unity
 use dg_overlapping_wannier_construction, only: assemble_dg_distributed_basis_symmetry_overlap
 use dg_overlapping_wannier_construction, only: assemble_dg_distributed_basis_symmetry_overlap_rows,&
   gather_dg_single_symmetry_representation
@@ -559,6 +560,8 @@ contains
       gradient_rotation(:,:,:),&
       local_point_rotations(:,:,:)
     real(8),allocatable::manifest_values(:,:),initial_density_local(:),initial_density_global(:)
+    real(8),allocatable::ow_raw_partition_weight(:),ow_raw_partition_gradient(:,:),&
+      ow_partition_weight(:),ow_partition_gradient(:,:)
     real(8),allocatable::localized_centers(:,:),localized_center_magnitudes(:,:)
     real(8),allocatable::w90_fractional(:,:),w90_spreads(:),w90_eigenvalues(:),w90_atoms_cart(:,:),&
       fixed_center_eigenvalues(:)
@@ -603,6 +606,8 @@ contains
       fixed_center_dmn_workspace_peak
     integer(8)::w90_input_fingerprint,w90_transform_fingerprint
     real(8)::minimum_eigenvalue,condition_number,closure_residual,spread_max,gauge_correction
+    real(8)::ow_partition_sum_defect,ow_partition_gradient_defect,window_axis(3),&
+      window_axis_derivative(3),window_coordinate
     logical::ok,reusable,localization_converged,global_inversion_present
     logical::fixed_center_inversion_present,writer_ok
     real(8)::fixed_center_fractional(3)
@@ -700,6 +705,43 @@ contains
         core_index=core_index+1
       endif
     enddo;enddo;enddo
+    allocate(ow_raw_partition_weight(nbox),ow_raw_partition_gradient(3,nbox),&
+      ow_partition_weight(nbox),ow_partition_gradient(3,nbox))
+    do p=1,nbox
+      raw_ix=modulo(p-1,ow_box_size(1))+1
+      raw_iy=modulo((p-1)/ow_box_size(1),ow_box_size(2))+1
+      raw_iz=(p-1)/(ow_box_size(1)*ow_box_size(2))+1
+      do ix=1,3
+        select case(ix)
+        case(1);iy=raw_ix
+        case(2);iy=raw_iy
+        case default;iy=raw_iz
+        end select
+        if(ow_buffer(ix)==0.or.(iy>ow_buffer(ix).and.iy<=ow_buffer(ix)+ow_core_size(ix)))then
+          window_axis(ix)=1d0;window_axis_derivative(ix)=0d0
+        elseif(iy<=ow_buffer(ix))then
+          window_coordinate=real(iy,8)/real(ow_buffer(ix)+1,8)
+          window_axis(ix)=window_coordinate**2*(3d0-2d0*window_coordinate)
+          window_axis_derivative(ix)=6d0*window_coordinate*(1d0-window_coordinate)/&
+            (real(ow_buffer(ix)+1,8)*system%hgs(ix))
+        else
+          window_coordinate=real(ow_box_size(ix)+1-iy,8)/real(ow_buffer(ix)+1,8)
+          window_axis(ix)=window_coordinate**2*(3d0-2d0*window_coordinate)
+          window_axis_derivative(ix)=-6d0*window_coordinate*(1d0-window_coordinate)/&
+            (real(ow_buffer(ix)+1,8)*system%hgs(ix))
+        endif
+      enddo
+      ow_raw_partition_weight(p)=product(window_axis)
+      ow_raw_partition_gradient(1,p)=window_axis_derivative(1)*window_axis(2)*window_axis(3)
+      ow_raw_partition_gradient(2,p)=window_axis(1)*window_axis_derivative(2)*window_axis(3)
+      ow_raw_partition_gradient(3,p)=window_axis(1)*window_axis(2)*window_axis_derivative(3)
+    enddo
+    call build_dg_smooth_partition_of_unity(dc%icomm_tot,physical_ids,ow_raw_partition_weight,&
+      ow_raw_partition_gradient,ow_partition_weight,ow_partition_gradient,ow_partition_sum_defect,&
+      ow_partition_gradient_defect,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'overlapping-Wannier smooth partition failed';endif
+    if(rank==0)write(*,'(a,2(a,es16.8))')'[OW-GS-DIAGNOSTIC] smooth_partition',&
+      ' sum_defect=',ow_partition_sum_defect,' gradient_defect=',ow_partition_gradient_defect
     pseudopotential_fingerprint=ow_collective_operator_fingerprint(dc%icomm_tot)
     allocate(lcfo_core_ids(ncore),lcfo_boundary_mask(ncore));core_index=0
     do p=1,nbox

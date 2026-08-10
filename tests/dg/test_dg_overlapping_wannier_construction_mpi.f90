@@ -32,7 +32,8 @@ program test_dg_overlapping_wannier_construction_mpi
     exchange_dg_point_permuted_orbital_rows,&
     redistribute_dg_owned_orbitals_to_center_fragments,&
     assign_dg_periodic_centers_to_fragments,&
-    verify_dg_fragment_subspace_density_covariance,build_dg_core_owned_occupied_subspace
+    verify_dg_fragment_subspace_density_covariance,build_dg_core_owned_occupied_subspace,&
+    build_dg_smooth_partition_of_unity
   implicit none
   integer::comm,rank,nproc,ierr,i,j,p,point,nlocal,nclosure,index,ncore,fragment_id
   integer(8),allocatable::ids(:),box_ids(:),symmetry_map(:,:),broken_symmetry_map(:,:)
@@ -95,6 +96,12 @@ program test_dg_overlapping_wannier_construction_mpi
   integer::cyclic_product(4,4)
   integer,allocatable::group_generators(:)
   real(8)::subspace_leakage,occupied_inclusion
+  integer(8)::partition_ids(2)
+  real(8)::raw_partition_weight(2),raw_partition_gradient(3,2),partition_weight(2),&
+    partition_gradient(3,2),partition_sum_defect,partition_gradient_defect
+  integer(8),allocatable::variable_partition_ids(:)
+  real(8),allocatable::variable_raw_partition_weight(:),variable_raw_partition_gradient(:,:),&
+    variable_partition_weight(:),variable_partition_gradient(:,:)
   complex(8)::calibrated_basis(1,4),calibrated_representation(1,1,2)
   integer(8)::calibrated_map(4,2)
   logical::calibrated_boundary(4)
@@ -362,6 +369,44 @@ program test_dg_overlapping_wannier_construction_mpi
   closure_localizer(5,5)=2d0;closure_localizer(6,6)=2d0
   closure_occupied(1,1)=1d0;closure_occupied(2,2)=1d0
   closure_product=reshape([1,2,2,1],[2,2])
+  partition_ids=[int(rank+1,8),int(modulo(rank+1,nproc)+1,8)]
+  if(nproc==1)partition_ids=[1_8,2_8]
+  raw_partition_weight=[1d0,0.5d0]
+  raw_partition_gradient=0d0;raw_partition_gradient(1,:)=[0.2d0,-0.2d0]
+  call build_dg_smooth_partition_of_unity(comm,partition_ids,raw_partition_weight,&
+    raw_partition_gradient,partition_weight,partition_gradient,partition_sum_defect,&
+    partition_gradient_defect,ok,message)
+  call require(ok.and.partition_sum_defect<1d-12.and.partition_gradient_defect<1d-12,trim(message))
+  if(nproc==1)then
+    call require(maxval(abs(partition_weight-1d0))<1d-12,'unique partition points retain unit weight')
+  else
+    call require(maxval(abs(partition_weight-[2d0/3d0,1d0/3d0]))<1d-12,&
+      'partition normalization is independent of fragment rank')
+  endif
+  raw_partition_weight(2)=-0.5d0
+  call build_dg_smooth_partition_of_unity(comm,partition_ids,raw_partition_weight,&
+    raw_partition_gradient,partition_weight,partition_gradient,partition_sum_defect,&
+    partition_gradient_defect,ok,message)
+  call require(.not.ok,'smooth partition rejects a negative fragment window')
+  allocate(variable_partition_ids(rank+2),variable_raw_partition_weight(rank+2),&
+    variable_raw_partition_gradient(3,rank+2),variable_partition_weight(rank+2),&
+    variable_partition_gradient(3,rank+2))
+  variable_partition_ids(1)=1_8
+  do i=2,rank+2
+    variable_partition_ids(i)=1000_8*int(rank+1,8)+int(i,8)
+  enddo
+  variable_raw_partition_weight=1d0;variable_raw_partition_weight(1)=real(rank+1,8)
+  variable_raw_partition_gradient=0d0;variable_raw_partition_gradient(1,1)=real(rank,8)-0.5d0
+  call build_dg_smooth_partition_of_unity(comm,variable_partition_ids,variable_raw_partition_weight,&
+    variable_raw_partition_gradient,variable_partition_weight,variable_partition_gradient,&
+    partition_sum_defect,partition_gradient_defect,ok,message)
+  call require(ok.and.partition_sum_defect<1d-12.and.partition_gradient_defect<1d-12,trim(message))
+  call require(abs(variable_partition_weight(1)-real(rank+1,8)/&
+    real(nproc*(nproc+1)/2,8))<1d-12,'partition supports unequal fragment coverage sizes')
+  call require(all(abs(variable_partition_weight(2:)-1d0)<1d-12),&
+    'unique points retain unit partition weight')
+  deallocate(variable_partition_ids,variable_raw_partition_weight,variable_raw_partition_gradient,&
+    variable_partition_weight,variable_partition_gradient)
   do j=1,4;do i=1,4
     cyclic_product(i,j)=mod(i+j-2,4)+1
   enddo;enddo
