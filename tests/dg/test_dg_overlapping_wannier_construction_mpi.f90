@@ -1,5 +1,6 @@
 #include "config.h"
 program test_dg_overlapping_wannier_construction_mpi
+  use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   use mpi
   use dg_overlapping_wannier_types,only:s_dg_ow_distributed_layout,&
     initialize_dg_ow_distributed_layout,reserve_dg_ow_workspace,&
@@ -10,6 +11,8 @@ program test_dg_overlapping_wannier_construction_mpi
     assemble_dg_distributed_basis_symmetry_overlap,&
     assemble_dg_distributed_basis_symmetry_overlap_rows,&
     validate_dg_row_owned_group_representation,&
+    validate_dg_streamed_affine_representation,&
+    gather_dg_single_symmetry_representation,&
     build_dg_pointwise_affine_owner_map,&
     find_dg_group_identity,&
     select_dg_fixed_rank_symmetry_closed_subspace,&
@@ -48,6 +51,7 @@ program test_dg_overlapping_wannier_construction_mpi
     orbit_basis(:,:),orthonormal_seed_basis(:,:),&
     orbit_gram(:,:)
   complex(8),allocatable::distributed_basis_overlap_rows(:,:,:)
+  complex(8),allocatable::single_symmetry_representation(:,:)
   complex(8)::lcfo_buffer_contribution(2,2),lcfo_core_value(2,1)
   integer(8)::lcfo_buffer_ids(2),lcfo_core_ids(1)
   integer::orbit_rank,required_orbit_rank,identity_operation
@@ -71,6 +75,7 @@ program test_dg_overlapping_wannier_construction_mpi
   integer(8)::symmetry_workspace_peak
   integer(8)::row_overlap_workspace_peak
   real(8)::row_identity_defect,row_unitarity_defect,row_closure_defect
+  real(8)::dense_identity_defect,dense_unitarity_defect,dense_closure_defect
   integer(8),allocatable::distributed_overlap_row_ids(:)
   integer(8)::closure_fingerprint,rounded_closure_fingerprint
   integer(8),allocatable::closure_ids(:),closure_map(:,:)
@@ -559,12 +564,58 @@ program test_dg_overlapping_wannier_construction_mpi
       'row-owned symmetry overlaps match the dense reference')
     call require(size(distributed_basis_overlap_rows,1)==1,&
       'two-rank symmetry overlap owns only one global basis row per rank')
+    call gather_dg_single_symmetry_representation(comm,distributed_overlap_row_ids,&
+      distributed_basis_overlap_rows,2,0,single_symmetry_representation,&
+      row_overlap_workspace_peak,ok,message)
+    call require(ok.and.row_overlap_workspace_peak>0_8,trim(message))
+    if(rank==0)then
+      call require(maxval(abs(single_symmetry_representation-distributed_basis_overlap(:,:,2)))<1d-12,&
+        'one-operation writer gather matches the dense affine reference')
+    else
+      call require(size(single_symmetry_representation)==0,&
+        'nonwriter ranks retain no dense fixed-center representation')
+    endif
+    call gather_dg_single_symmetry_representation(comm,distributed_overlap_row_ids,&
+      distributed_basis_overlap_rows,0,0,single_symmetry_representation,&
+      row_overlap_workspace_peak,ok,message)
+    call require(.not.ok,'invalid streamed symmetry operation index rejected collectively')
+    call gather_dg_single_symmetry_representation(comm,distributed_overlap_row_ids,&
+      distributed_basis_overlap_rows,2,nproc,single_symmetry_representation,&
+      row_overlap_workspace_peak,ok,message)
+    call require(.not.ok,'invalid streamed symmetry writer rank rejected collectively')
+    distributed_overlap_row_ids(1)=distributed_overlap_row_ids(1)+1_8
+    call gather_dg_single_symmetry_representation(comm,distributed_overlap_row_ids,&
+      distributed_basis_overlap_rows,2,0,single_symmetry_representation,&
+      row_overlap_workspace_peak,ok,message)
+    call require(.not.ok,'noncontiguous streamed symmetry row ownership rejected collectively')
+    distributed_overlap_row_ids(1)=distributed_overlap_row_ids(1)-1_8
+    if(rank==0)distributed_basis_overlap_rows(1,1,2)=&
+      cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,8)
+    call gather_dg_single_symmetry_representation(comm,distributed_overlap_row_ids,&
+      distributed_basis_overlap_rows,2,0,single_symmetry_representation,&
+      row_overlap_workspace_peak,ok,message)
+    call require(.not.ok,'nonfinite streamed symmetry input rejected collectively')
+    if(rank==0)distributed_basis_overlap_rows(1,1,2)=distributed_basis_overlap(1,1,2)
+    call gather_dg_single_symmetry_representation(comm,distributed_overlap_row_ids,&
+      distributed_basis_overlap_rows(:,:,1:merge(2,3,rank==0)),2,0,&
+      single_symmetry_representation,row_overlap_workspace_peak,ok,message)
+    call require(.not.ok,'rank-inconsistent streamed symmetry operation count rejected collectively')
     distributed_basis_overlap_rows(:,:,1:2)=distributed_basis_overlap_rows(:,:,1:2)/5d0
     call validate_dg_row_owned_group_representation(comm,distributed_overlap_row_ids,&
       distributed_basis_overlap_rows(:,:,1:2),closure_product,1,1d-12,row_identity_defect,&
       row_unitarity_defect,row_closure_defect,row_overlap_workspace_peak,ok,message)
     call require(ok.and.max(row_identity_defect,max(row_unitarity_defect,row_closure_defect))<1d-12,&
       trim(message))
+    dense_identity_defect=row_identity_defect;dense_unitarity_defect=row_unitarity_defect
+    dense_closure_defect=row_closure_defect
+    call validate_dg_streamed_affine_representation(comm,distributed_basis/sqrt(5d0),&
+      distributed_weight,distributed_map(:,1:2),1,0d0,1d-12,row_identity_defect,&
+      row_unitarity_defect,row_closure_defect,row_overlap_workspace_peak,ok,message)
+    call require(ok,trim(message))
+    call require(abs(row_identity_defect-dense_identity_defect)<1d-12.and.&
+      abs(row_unitarity_defect-dense_unitarity_defect)<1d-12.and.&
+      abs(row_closure_defect-dense_closure_defect)<1d-12,&
+      'streamed affine proof matches the dense two-operation reference')
 
     allocate(orbit_seed(1,2));orbit_seed=(0d0,0d0)
     if(rank==0)orbit_seed(1,1)=1d0

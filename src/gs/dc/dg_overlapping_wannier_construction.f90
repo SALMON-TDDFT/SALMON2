@@ -30,7 +30,9 @@ module dg_overlapping_wannier_construction
   public::assemble_dg_distributed_candidate_symmetry
   public::assemble_dg_distributed_basis_symmetry_overlap
   public::assemble_dg_distributed_basis_symmetry_overlap_rows
+  public::gather_dg_single_symmetry_representation
   public::validate_dg_row_owned_group_representation
+  public::validate_dg_streamed_affine_representation
   public::build_dg_pointwise_affine_owner_map
   public::select_dg_fixed_rank_symmetry_closed_subspace
   public::build_dg_distributed_symmetry_closed_basis
@@ -1977,6 +1979,104 @@ contains
 #endif
   end subroutine assemble_dg_distributed_basis_symmetry_overlap_rows
 
+  subroutine gather_dg_single_symmetry_representation(comm,row_ids,row_values,operation,writer_rank,&
+      representation,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,operation,writer_rank
+    integer(int64),intent(in)::row_ids(:)
+    complex(real64),intent(in)::row_values(:,:,:)
+    complex(real64),allocatable,intent(out)::representation(:,:)
+    integer(int64),intent(out)::workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    complex(real64),allocatable::send_buffer(:),receive_buffer(:)
+    integer,allocatable::receive_counts(:),receive_displacements(:)
+    integer::rank,nproc,ierr,nstate,nstate_min,nstate_max,noperation,noperation_min,noperation_max,&
+      operation_min,operation_max,writer_min,writer_max,local_rows,expected_rows,first_row
+    integer::i,j,position,local_valid,global_valid,gather_error
+    integer(int64)::element_count,local_workspace,global_workspace,complex_bytes,integer_bytes
+
+    workspace_peak_bytes=0_int64;ok=.false.;message=''
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    nstate=size(row_values,2);noperation=size(row_values,3);local_rows=size(row_values,1)
+    local_valid=1
+    if(writer_rank<0.or.writer_rank>=nproc.or.size(row_ids)/=local_rows.or.nstate<=0.or.&
+        operation<1.or.operation>noperation) local_valid=0
+    if(local_valid==1)then
+      expected_rows=nstate/nproc+merge(1,0,rank<mod(nstate,nproc))
+      first_row=rank*(nstate/nproc)+min(rank,mod(nstate,nproc))+1
+      if(local_rows/=expected_rows) local_valid=0
+      if(local_rows>0)then
+        if(any(row_ids/=[(int(first_row+i-1,int64),i=1,local_rows)])) local_valid=0
+      end if
+      if(operation>=1.and.operation<=noperation)then
+        if(.not.all(ieee_is_finite(real(row_values(:,:,operation)))).or.&
+            .not.all(ieee_is_finite(aimag(row_values(:,:,operation))))) local_valid=0
+      end if
+    end if
+    call MPI_Allreduce(nstate,nstate_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(nstate,nstate_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(noperation,noperation_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(noperation,noperation_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(operation,operation_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(operation,operation_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(writer_rank,writer_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(writer_rank,writer_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.nstate_min/=nstate_max.or.noperation_min/=noperation_max.or.&
+        operation_min/=operation_max.or.writer_min/=writer_max) local_valid=0
+    element_count=int(nstate,int64)*int(nstate,int64)
+    if(element_count>int(huge(0),int64)) local_valid=0
+    call MPI_Allreduce(local_valid,global_valid,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_valid/=1)then
+      allocate(representation(0,0));message='invalid one-operation symmetry gather contract';return
+    end if
+
+    allocate(receive_counts(nproc),receive_displacements(nproc))
+    do i=0,nproc-1
+      expected_rows=nstate/nproc+merge(1,0,i<mod(nstate,nproc))
+      first_row=i*(nstate/nproc)+min(i,mod(nstate,nproc))
+      receive_counts(i+1)=expected_rows*nstate
+      receive_displacements(i+1)=first_row*nstate
+    end do
+    allocate(send_buffer(local_rows*nstate));position=0
+    do i=1,local_rows;do j=1,nstate
+      position=position+1;send_buffer(position)=row_values(i,j,operation)
+    end do;end do
+    if(rank==writer_rank)then
+      allocate(receive_buffer(nstate*nstate),representation(nstate,nstate))
+    else
+      allocate(receive_buffer(0),representation(0,0))
+    end if
+    call MPI_Gatherv(send_buffer,size(send_buffer),MPI_DOUBLE_COMPLEX,receive_buffer,receive_counts,&
+      receive_displacements,MPI_DOUBLE_COMPLEX,writer_rank,comm,ierr)
+    gather_error=merge(0,1,ierr==MPI_SUCCESS)
+    call MPI_Allreduce(MPI_IN_PLACE,gather_error,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gather_error/=0)then
+      ok=.false.;message='one-operation symmetry gather failed';return
+    end if
+    if(rank==writer_rank)then
+      position=0
+      do i=1,nstate;do j=1,nstate
+        position=position+1;representation(i,j)=receive_buffer(position)
+      end do;end do
+    end if
+    complex_bytes=int(storage_size((0d0,0d0))/8,int64)
+    integer_bytes=int(storage_size(0)/8,int64)
+    local_workspace=complex_bytes*int(size(send_buffer)+size(receive_buffer)+size(representation),int64)+&
+      integer_bytes*int(size(receive_counts)+size(receive_displacements),int64)
+    call MPI_Allreduce(local_workspace,global_workspace,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    ok=ierr==MPI_SUCCESS
+    if(ok)then
+      workspace_peak_bytes=global_workspace;message=''
+    else
+      workspace_peak_bytes=0_int64;message='one-operation symmetry workspace reduction failed'
+    end if
+#else
+    allocate(representation(0,0));workspace_peak_bytes=0_int64
+    ok=.false.;message='one-operation symmetry gather requires MPI'
+#endif
+  end subroutine gather_dg_single_symmetry_representation
+
   subroutine validate_dg_row_owned_group_representation(comm,row_ids,representation_rows,&
       product_table,identity_operation,tolerance,identity_defect,unitarity_defect,closure_defect,&
       workspace_peak_bytes,ok,message)
@@ -2059,6 +2159,77 @@ contains
     unitarity_defect=huge(1d0);closure_defect=huge(1d0);workspace_peak_bytes=0_int64
 #endif
   end subroutine validate_dg_row_owned_group_representation
+
+  subroutine validate_dg_streamed_affine_representation(comm,local_basis,weights,&
+      symmetry_target_box_ids,identity_operation,subspace_defect,tolerance,identity_defect,&
+      unitarity_defect,closure_defect,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,identity_operation
+    complex(real64),intent(in)::local_basis(:,:)
+    real(real64),intent(in)::weights(:),subspace_defect,tolerance
+    integer(int64),intent(in)::symmetry_target_box_ids(:,:)
+    real(real64),intent(out)::identity_defect,unitarity_defect,closure_defect
+    integer(int64),intent(out)::workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,nproc,ierr,nstate,nlocal,nsym,operation,owner,base,remainder,&
+      owner_first,owner_count,i,j,local_bad,global_bad
+    integer(int64),allocatable::row_ids(:)
+    complex(real64),allocatable::rows(:,:,:),remote_rows(:,:),unitarity_tile(:,:)
+    real(real64)::local_identity,local_unitarity,expected
+    integer(int64)::operation_peak,complex_bytes,persistent_bytes
+    ok=.false.;message='';identity_defect=huge(1d0);unitarity_defect=huge(1d0)
+    closure_defect=huge(1d0);workspace_peak_bytes=0_int64
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    nstate=size(local_basis,1);nlocal=size(local_basis,2);nsym=size(symmetry_target_box_ids,2)
+    local_bad=merge(0,1,ierr==MPI_SUCCESS.and.nstate>0.and.nlocal>0.and.nsym>0.and.&
+      identity_operation>=1.and.identity_operation<=nsym.and.tolerance>0d0.and.&
+      subspace_defect>=0d0.and.ieee_is_finite(tolerance).and.ieee_is_finite(subspace_defect))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then;message='invalid streamed affine proof contract';return;endif
+    local_identity=0d0;local_unitarity=0d0
+    complex_bytes=int(storage_size((0d0,0d0))/8,int64)
+    base=nstate/nproc;remainder=mod(nstate,nproc)
+    do operation=1,nsym
+      call assemble_dg_distributed_basis_symmetry_overlap_rows(comm,local_basis,weights,&
+        symmetry_target_box_ids(:,operation:operation),row_ids,rows,operation_peak,ok,message)
+      if(.not.ok)return
+      persistent_bytes=complex_bytes*int(size(rows),int64)
+      workspace_peak_bytes=max(workspace_peak_bytes,operation_peak)
+      if(operation==identity_operation)then
+        do i=1,size(row_ids);do j=1,nstate
+          expected=merge(1d0,0d0,int(row_ids(i))==j)
+          local_identity=max(local_identity,abs(rows(i,j,1)-expected))
+        enddo;enddo
+      endif
+      do owner=0,nproc-1
+        owner_count=base+merge(1,0,owner<remainder)
+        owner_first=owner*base+min(owner,remainder)+1
+        allocate(remote_rows(owner_count,nstate),unitarity_tile(size(row_ids),owner_count))
+        if(rank==owner)remote_rows=rows(:,:,1)
+        call MPI_Bcast(remote_rows,size(remote_rows),MPI_DOUBLE_COMPLEX,owner,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then;message='streamed affine row broadcast failed';return;endif
+        unitarity_tile=matmul(rows(:,:,1),conjg(transpose(remote_rows)))
+        do j=1,owner_count;do i=1,size(row_ids)
+          expected=merge(1d0,0d0,int(row_ids(i))==owner_first+j-1)
+          local_unitarity=max(local_unitarity,abs(unitarity_tile(i,j)-expected))
+        enddo;enddo
+        workspace_peak_bytes=max(workspace_peak_bytes,persistent_bytes+complex_bytes*&
+          int(size(remote_rows)+size(unitarity_tile),int64))
+        deallocate(remote_rows,unitarity_tile)
+      enddo
+      deallocate(row_ids,rows)
+    enddo
+    call MPI_Allreduce(local_identity,identity_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_unitarity,unitarity_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    closure_defect=max(subspace_defect,2d0*subspace_defect+unitarity_defect)
+    ok=ierr==MPI_SUCCESS.and.max(identity_defect,max(unitarity_defect,closure_defect))<=tolerance
+    if(ok)then;message='';else;message='streamed affine representation violates proof tolerance';endif
+#else
+    ok=.false.;message='streamed affine proof requires MPI';identity_defect=huge(1d0)
+    unitarity_defect=huge(1d0);closure_defect=huge(1d0);workspace_peak_bytes=0_int64
+#endif
+  end subroutine validate_dg_streamed_affine_representation
 
   subroutine verify_dg_overlapping_wannier_periodic_closure(comm,box_ids,symmetry_target_box_ids,&
       values,gradients,symmetry_representation,gradient_transform,expected_box_count,tolerance,&

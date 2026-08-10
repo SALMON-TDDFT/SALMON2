@@ -40,6 +40,9 @@ types_source = source("src/gs/dc/dg_overlapping_wannier_types.f90")
 construction_source = source("src/gs/dc/dg_overlapping_wannier_construction.f90")
 localization_source = source("src/gs/dc/dg_overlapping_wannier_localization.f90")
 w90_source = source("src/gs/dc/dg_overlapping_wannier_w90.f90")
+assert re.match(r"\s*#include\s+[\"<]config\.h[\">]", w90_source), (
+    "Wannier90 adapter must import CMake feature macros before conditional compilation"
+)
 lcfo_source = source("src/gs/dc/lcfo.f90")
 projection_source = source("src/gs/dc/dg_overlapping_wannier_projection.f90")
 operators_source = source("src/gs/dc/dg_overlapping_wannier_operators.f90")
@@ -71,6 +74,57 @@ for mlwf_call in (
 assert "call localize_dg_occupation_blocks" not in ow_ground_state_body, (
     "production overlapping-Wannier V3 route must not call the custom localizer"
 )
+for provenance_field in (
+    "mlwf_backend",
+    "mlwf_version",
+    "mlwf_input_fingerprint",
+    "mlwf_transform_fingerprint",
+    "mlwf_spreads",
+    "mlwf_coordinator_bytes",
+    "mlwf_workspace_peak_bytes",
+    "mlwf_coordinator_byte_limit",
+    "mlwf_symmetry_receipts",
+    "mlwf_canonical",
+    "affine_group_order",
+    "translation_subgroup_order",
+    "point_cogroup_order",
+    "fixed_center_group_order",
+    "fixed_center_group_fingerprint",
+    "fixed_center_fractional",
+    "fixed_center_inversion_present",
+    "affine_proof_workspace_peak_bytes",
+    "point_projection_workspace_peak_bytes",
+):
+    assert provenance_field in ow_checkpoint_source.lower(), (
+        f"V3 checkpoint must serialize and validate {provenance_field}"
+    )
+    assert re.search(
+        rf"ow_checkpoint%{provenance_field}\s*=", main_source, re.I
+    ), f"production publication must bind {provenance_field}"
+assert "fingerprint_ow_w90_matrices" in ow_ground_state_body
+assert "fingerprint_ow_w90_transform" in ow_ground_state_body
+assert re.search(
+    r"call\s+orthonormalize_dg_distributed_seed_space\b", ow_ground_state_body
+), "affine-closed LCFO seeds must be orthonormalized without full-orbit regeneration"
+assert not re.search(
+    r"call\s+build_dg_distributed_symmetry_closed_basis\b", ow_ground_state_body
+), "production must not regenerate every affine image after its closure receipt passes"
+for forbidden_dense_affine in (
+    "global_symmetry_overlap",
+    "global_candidate_raw",
+    "global_candidate_representation",
+    "global_retained_representation",
+):
+    assert forbidden_dense_affine not in ow_ground_state_body, (
+        f"production must not retain full-affine dense tensor {forbidden_dense_affine}"
+    )
+assert "lcfo_symmetry_worst_operation" in ow_ground_state_body
+assert not re.search(
+    r"do\s+io\s*=\s*1\s*,\s*size\s*\(\s*global_point_product.*?"
+    r"LCFO_symmetry_operation=",
+    ow_ground_state_body,
+    re.I | re.S,
+), "production must summarize full-affine residuals instead of logging every operation"
 
 assert re.search(r"call\s+zheev\s*\(\s*'v'\s*,\s*'u'", ow_solver_source, re.I), (
     "the bounded reduced Hermitian Ritz problem must use the existing LAPACK path"
@@ -407,10 +461,10 @@ assert re.search(
     re.I,
 ), "retained occupation assignment must live in the overlapping-Wannier namespace"
 assert re.search(
-    r"global_candidate_occupied\s*\(\s*global_retained_rank\s*,\s*global_occupied_count\s*\)",
+    r"maxval\s*\(\s*lcfo_total_symmetry_residual\s*\)\s*>\s*dg_ow_symmetry_tolerance",
     adapter_body,
     re.I,
-), "fixed-rank selection must protect only the physical occupied LCFO projector"
+), "full-affine closure must be accepted before the LCFO seed space is orthonormalized"
 assert "w90_anchors=global_seed_values" in re.sub(r"\s+", "", adapter_body.lower()), (
     "Wannier90 projections must use the complete LCFO core-plus-buffer seed basis"
 )
@@ -647,11 +701,9 @@ assert re.search(
     adapter_body,
     re.I | re.S,
 ), "production must enforce four complete s+p channels per core-owned atom"
-assert re.search(
-    r"local_seed_overlap.*?manifest_values\s*\(",
-    adapter_body,
-    re.I | re.S,
-), "complete-s+p projectors must act only as a localizer inside the LCFO space"
+assert "local_seed_overlap" not in adapter_body.lower(), (
+    "complete-s+p rank selection must not allocate a replicated dense pre-Wannier localizer"
+)
 for forbidden in ("augmented_candidate", "augmented_occupied", "occupied_coefficients"):
     assert forbidden not in adapter_body.lower(), (
         f"production must not retain fragment-local complement data: {forbidden}"
@@ -711,11 +763,9 @@ assert re.search(
     adapter_body,
     re.I,
 ), "every fixed-rank seed must be a global LCFO coefficient state restricted to the unique core"
-assert re.search(
-    r"global_candidate_localizer\s*=\s*-\s*matmul\s*\(\s*global_seed_overlap\s*,\s*conjg\s*\(\s*transpose",
-    adapter_body,
-    re.I | re.S,
-), "fixed-rank selection must use measured projection-seed overlap, not MGS row order"
+assert "global_candidate_localizer" not in adapter_body.lower(), (
+    "accepted affine-closed seeds must not re-enter the removed dense fixed-rank selector"
+)
 assert "w90_workspace_peak" in adapter_body and "w90_coordinator_bytes" in adapter_body, (
     "production must publish Wannier90 coordinator and assembly memory receipts"
 )
@@ -755,6 +805,17 @@ assert point_action_body and "duplicate_operation" in point_action_body.group("b
 assert "solve_dg_affine_common_fixed_point" in point_action_body.group("body").lower(), (
     "global affine action must report common-center availability without requiring it"
 )
+assert "build_sawf_operation_index" in point_action_body.group("body").lower(), (
+    "full affine product metadata must use the bounded SAWF operation hash index"
+)
+assert "lookup_sawf_operation_product" in point_action_body.group("body").lower(), (
+    "each affine product must be resolved directly from its full normalized key"
+)
+assert not re.search(
+    r"do\s+g\s*=.*?do\s+h\s*=.*?do\s+k\s*=.*?all_maps",
+    point_action_body.group("body"),
+    re.I | re.S,
+), "production must not discover affine products by Nsym-candidate grid-map search"
 assert not re.search(r"if\s*\(\s*have_common_center\s*\).*?cycle",point_action_body.group("body"),re.I | re.S), (
     "valid screw/glide operations must not be discarded for lacking a common fixed point"
 )
@@ -774,11 +835,11 @@ assert re.search(
     re.I | re.S,
 ), "SCF must receive exact group-algebra closure, not streaming density covariance"
 assert re.search(
-    r"build_dg_fragment_group_representation\s*\(.*?"
-    r"global_retained_group_closure_defect",
+    r"inherit_dg_w90_affine_receipts\s*\(.*?w90_closure_defect.*?"
+    r"global_retained_group_closure_defect\s*=\s*w90_closure_defect",
     adapter_body,
     re.I | re.S,
-), "SCF closure must come directly from the collectively measured global representation"
+), "SCF closure must inherit the accepted full-affine proof through the unitary MLWF gauge"
 assert re.search(
     r"call\s+populate_ow_checkpoint\s*\(\s*occupations\s*,\s*condition_number\s*,\s*"
     r"global_retained_group_closure_defect",
@@ -808,8 +869,8 @@ assert not re.search(
     adapter_body,
     re.I,
 ), "production must not assume independently selected retained spaces differ only by gauge"
-assert "assemble_dg_distributed_basis_symmetry_overlap" in adapter_body, (
-    "production must measure the authoritative global action from distributed core restrictions"
+assert "inherit_dg_w90_affine_receipts" in adapter_body, (
+    "production must preserve the authoritative global action under MLWF gauge rotation"
 )
 materialize_body = re.search(
     r"subroutine\s+materialize_ow_distributed_core_to_buffer\b(?P<body>.*?)end\s+subroutine",
@@ -1017,6 +1078,32 @@ assert not re.search(
     row_owned_overlap.group("body"),
     re.I | re.S,
 ), "row-owned symmetry overlap assembly must not allocate replicated Nsym*Norb**2"
+assert re.search(
+    r"subroutine\s+validate_dg_streamed_affine_representation\b",
+    construction_source,
+    re.I,
+), "missing bounded-memory one-operation-at-a-time affine validator"
+assert re.search(
+    r"subroutine\s+gather_dg_single_symmetry_representation\b",
+    construction_source,
+    re.I,
+), "missing one-operation fixed-center representation gather"
+assert re.search(
+    r"call\s+inherit_dg_w90_affine_receipts\s*\(",
+    adapter_body,
+    re.I,
+), "production must inherit the accepted full-affine proof through the unitary MLWF gauge"
+assert not re.search(
+    r"call\s+validate_dg_streamed_affine_representation\s*\(", adapter_body, re.I
+), "production must not rebuild all 1536 post-MLWF representation matrices"
+assert not re.search(r"w90_symmetry_rows\s*\(", adapter_body, re.I), (
+    "production must not retain Nsym row-owned representation matrices"
+)
+assert not re.search(
+    r"assemble_dg_distributed_basis_symmetry_overlap_rows\s*\(",
+    adapter_body,
+    re.I,
+), "production must not assemble the all-operation row tensor"
 for provenance in (
     "global_lcfo_fingerprint",
     "occupation_block_fingerprint",
