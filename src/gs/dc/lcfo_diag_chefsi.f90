@@ -48,7 +48,6 @@ module lcfo_diag_chefsi
   type :: s_hamiltonian_workspace
     integer, allocatable :: request_send(:)
     integer, allocatable :: request_recv(:)
-    real(8), allocatable :: halo_product(:,:)
     real(8), allocatable :: x_halo(:,:,:)
   end type s_hamiltonian_workspace
 
@@ -74,7 +73,7 @@ contains
   & halo_dst,halo_root_src,halo_dvec,h_diag,h_halo,esp_tot,coef_wf)
     use communication, only: comm_bcast, comm_create_group, &
     & comm_free_group, comm_get_max, comm_isend, comm_irecv, &
-    & comm_summation, comm_wait_all, comm_wait_some
+    & comm_summation, comm_wait_all
     use eigen_subdiag_sub, only: eigen_dsyev
     use structures, only: s_dcdft
     use timer, only: LOG_CHEFSI_SETUP,LOG_CHEFSI_TOTAL, &
@@ -291,7 +290,7 @@ contains
       ncol = max(1,layout_n%ncol_local)
       max_ncol = natural_column_block(nsub,grid_natural%npcol)
       bytes_per_column = 8_8*(3_8*int(layout_n%lda,8) &
-      & +int(max_basis,8)*int(max(1,n_halo)+1,8))
+      & +int(max_basis,8)*int(max(1,n_halo),8))
       if(filter_chunk_size>0) then
         workspace%filter_chunk_width = min(max_ncol,filter_chunk_size)
       else
@@ -308,8 +307,6 @@ contains
       & /real(1024_8*1024_8,8)
       allocate(workspace%hamiltonian%request_send(max(1,n_halo)))
       allocate(workspace%hamiltonian%request_recv(max(1,n_halo)))
-      allocate(workspace%hamiltonian%halo_product(max_basis, &
-      & workspace%filter_chunk_width))
       allocate(workspace%hamiltonian%x_halo(max_basis, &
       & workspace%filter_chunk_width,max(1,n_halo)))
       allocate(workspace%q0(layout_n%lda,workspace%filter_chunk_width))
@@ -353,7 +350,6 @@ contains
       deallocate(workspace%xrot,workspace%hxd,workspace%xd)
       deallocate(workspace%hx,workspace%q2,workspace%q1,workspace%q0)
       deallocate(workspace%hamiltonian%x_halo)
-      deallocate(workspace%hamiltonian%halo_product)
       deallocate(workspace%hamiltonian%request_recv)
       deallocate(workspace%hamiltonian%request_send)
       call timer_end(LOG_CHEFSI_SETUP)
@@ -418,9 +414,7 @@ contains
       real(8), intent(in) :: x(:,:)
       real(8), intent(out) :: y(:,:)
       type(s_hamiltonian_workspace), intent(inout) :: workspace
-      integer :: h,i,nb,ncol,ncompleted,nreceived
-      integer :: source_rank,destination_rank
-      integer :: completed_halo(max(1,n_halo))
+      integer :: h,nb,ncol,source_rank,destination_rank
 
       call timer_begin(LOG_CHEFSI_H_APPLY)
       nb = n_basis(dc%i_frag,s)
@@ -448,31 +442,16 @@ contains
       call dgemm('N','N',nb,ncol,nb,1d0,h_diag_sym(:,:,s), &
       & max_basis,x,layout%lda,0d0,y,layout%lda)
       call timer_end(LOG_CHEFSI_H_DIAG)
-      nreceived = 0
-      do while(nreceived<n_halo)
+      if(n_halo>0) then
         call timer_begin(LOG_CHEFSI_H_RECV_WAIT)
-        call comm_wait_some(workspace%request_recv(1:n_halo), &
-        & completed_halo,ncompleted)
+        call comm_wait_all(workspace%request_recv(1:n_halo))
         call timer_end(LOG_CHEFSI_H_RECV_WAIT)
-        if(ncompleted<1) then
-          stop "DC-LCFO CheFSI: invalid completed halo count."
-        end if
-        call timer_begin(LOG_CHEFSI_H_HALO)
-        do i=1,ncompleted
-          h = completed_halo(i)
-          call dgemm('N','N',nb,ncol,n_basis(halo_src(h),s),1d0, &
-          & h_row(:,:,s,h),max_basis,workspace%x_halo(:,:,h), &
-          & max_basis,0d0,workspace%halo_product,max_basis)
-          workspace%x_halo(1:nb,1:ncol,h) = &
-          & workspace%halo_product(1:nb,1:ncol)
-        end do
-        call timer_end(LOG_CHEFSI_H_HALO)
-        nreceived = nreceived+ncompleted
-      end do
+      end if
       call timer_begin(LOG_CHEFSI_H_HALO)
       do h=1,n_halo
-        y(1:nb,1:ncol) = y(1:nb,1:ncol) &
-        & +workspace%x_halo(1:nb,1:ncol,h)
+        call dgemm('N','N',nb,ncol,n_basis(halo_src(h),s),1d0, &
+        & h_row(:,:,s,h),max_basis,workspace%x_halo(:,:,h),max_basis, &
+        & 1d0,y,layout%lda)
       end do
       call timer_end(LOG_CHEFSI_H_HALO)
       if(n_halo>0) then

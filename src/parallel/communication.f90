@@ -38,7 +38,6 @@ module communication
   public :: comm_irecv
   public :: comm_wait
   public :: comm_wait_all
-  public :: comm_wait_some
 
   ! p2p persistent communication
   ! application stops when a following routines is called in no-mpi environment
@@ -563,13 +562,14 @@ contains
   end function
 
   function comm_irecv_array2d_double(outvalue, nsrc, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_PRECISION
+    use mpi, only: MPI_DOUBLE_PRECISION, MPI_STATUS_IGNORE
     implicit none
     real(8), intent(out) :: outvalue(:,:)
     integer, intent(in)  :: nsrc, ntag, ngroup
     integer :: ierr, req
-    ! Leave the request active so comm_wait_some can return its index.
+    logical :: flag
     MPI_ERROR_CHECK(call MPI_Irecv(outvalue, size(outvalue), MPI_DOUBLE_PRECISION, nsrc, ntag, ngroup, req, ierr))
+    MPI_ERROR_CHECK(call MPI_Test(req, flag, MPI_STATUS_IGNORE, ierr))
   end function
 
   function comm_irecv_array3d_double(outvalue, nsrc, ntag, ngroup) result(req)
@@ -631,17 +631,6 @@ contains
     integer, intent(in) :: reqs(:)
     integer :: ierr
     MPI_ERROR_CHECK(call MPI_Waitall(size(reqs), reqs, MPI_STATUSES_IGNORE, ierr))
-  end subroutine
-
-  subroutine comm_wait_some(reqs,indices,ncompleted)
-    use mpi, only: MPI_STATUSES_IGNORE,MPI_UNDEFINED
-    implicit none
-    integer, intent(inout) :: reqs(:)
-    integer, intent(out) :: indices(:),ncompleted
-    integer :: ierr
-
-    MPI_ERROR_CHECK(call MPI_Waitsome(size(reqs),reqs,ncompleted,indices,MPI_STATUSES_IGNORE,ierr))
-    if(ncompleted==MPI_UNDEFINED) ncompleted = 0
   end subroutine
 
   function comm_send_init_array3d_double(invalue, ndest, ntag, ngroup) result(req)
