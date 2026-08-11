@@ -885,7 +885,7 @@ contains
       projector_composition_peak=max(projector_composition_peak,composition_workspace_peak)
       projector_composition_fingerprint=ieor(projector_composition_fingerprint,&
         ishftc(composition_fingerprint,mod(projector_tile_first,63)))
-      deallocate(lcfo_core_ids,composed_tile_values)
+      deallocate(composed_tile_values)
     enddo
     do p=1,ncore
       raw_ix=int(modulo(ow_core_ids(p)-1_8,int(dc%lg_tot%num(1),8)))+1

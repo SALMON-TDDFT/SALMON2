@@ -565,6 +565,16 @@ assert re.search(
     adapter_body,
     re.I | re.S,
 ), "production point-cogroup adaptation must consume the proven affine factorization"
+projector_tile_loop = re.search(
+    r"do\s+projector_tile_first\s*=.*?enddo",
+    adapter_body,
+    re.I | re.S,
+)
+assert projector_tile_loop and not re.search(
+    r"deallocate\s*\([^)]*lcfo_core_ids",
+    projector_tile_loop.group(0),
+    re.I,
+), "the final composed physical-grid ownership IDs must survive the projector tile loop"
 assert re.search(
     r"nstate\s*>\s*huge\s*\(\s*nstate\s*\)\s*/\s*size\s*\(\s*global_translation_subgroup\s*\)",
     adapter_body,
