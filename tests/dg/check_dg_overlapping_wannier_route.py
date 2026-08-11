@@ -539,6 +539,26 @@ affine_measurement_call = adapter_body.lower().find(
 assert 0 <= composition_call < fixed_center_call < affine_measurement_call, (
     "buffer composition must precede fixed-center adaptation and every full-affine proof"
 )
+translation_adaptation_call = adapter_body.lower().find(
+    "call build_dg_group_averaged_occupied_candidates_eigenexa", fixed_center_call
+)
+fixed_center_adaptation_call = adapter_body.lower().find(
+    "call build_dg_group_averaged_occupied_candidates_eigenexa", translation_adaptation_call + 1
+)
+post_adaptation_affine_measurement_call = adapter_body.lower().find(
+    "call measure_dg_rank_fixed_symmetry_residuals_eigenexa", fixed_center_adaptation_call
+)
+assert 0 <= translation_adaptation_call < fixed_center_adaptation_call < post_adaptation_affine_measurement_call, (
+    "occupied adaptation must close the translation subgroup before the fixed-center group"
+)
+assert "translation_adapted_occupied" in adapter_body.lower(), (
+    "production must publish a separate translation-subgroup adaptation receipt"
+)
+assert re.search(
+    r"nstate\s*>\s*huge\s*\(\s*nstate\s*\)\s*/\s*size\s*\(\s*global_translation_subgroup\s*\)",
+    adapter_body,
+    re.I,
+), "translation-orbit dimension must be overflow-checked before EigenExa initialization"
 assert "call accumulate_dg_lcfo_buffer_contributions_to_core" not in adapter_body.lower(), (
     "fragment-core truncation must not define the support of a pre-Wannier symmetry proof"
 )
