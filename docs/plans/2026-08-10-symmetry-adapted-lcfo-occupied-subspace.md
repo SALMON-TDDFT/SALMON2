@@ -174,34 +174,151 @@ normalization, restart compatibility, atomic publication, and normal-route
 isolation.  Resolve all Critical/Important findings, run the clean-first
 full-feature overlay, and commit OA4.
 
-### Task OA5: Genuine Si64 GS, MLWF, and V3 acceptance
+### Task OA5a: Reproduce and lock the core-first affine failure
+
+**Files:**
+- Modify: `tests/dg/test_dg_overlapping_wannier_construction_mpi.f90`
+- Modify: `tests/dg/run_dg_overlapping_wannier_construction_mpi.py`
+- Modify: `tests/dg/check_dg_overlapping_wannier_route.py`
+- Modify: `src/gs/main_dft.f90` only for bounded diagnostic publication
+
+**Step 1: Write the failing regression**
+
+Construct two translated fragments with overlapping buffers.  Put one smooth
+orbital and one complete atomic projector across their shared face.  Assert
+that the existing core-first restriction gives a nonzero translation residual
+while partition composition gives the exact reference function.  Require
+separate occupied, projector, and direct-sum residual labels so the genuine
+Si64 failure cannot again be misattributed to only the occupied block.
+
+**Step 2: Verify genuine RED**
+
+Run `python3 tests/dg/run_dg_overlapping_wannier_construction_mpi.py` on MPI
+1/2/4/8 and `python3 tests/dg/check_dg_overlapping_wannier_route.py`.  Expect
+the new composition assertion to fail because no buffer-first composer exists.
+Retain the fresh ideal-Si64 evidence values `4.93771`, `8.10362`, and
+`10.0621` in the design/results record, not as fixture golden tolerances.
+
+**Step 3: Review, overlay, and commit**
+
+Review that the RED fails for fragment-face truncation rather than MPI order,
+floating-point noise, or a relaxed threshold.  Resolve every
+Critical/Important test finding, run `git diff --check`, perform a clean-first
+full-feature build from committed parent `5c1d0f5d`, and commit the regression.
+
+### Task OA5b: Stream buffer-composed physical-grid orbital tiles
+
+**Files:**
+- Modify: `src/gs/dc/dg_overlapping_wannier_construction.f90`
+- Modify: `tests/dg/test_dg_overlapping_wannier_construction_mpi.f90`
+- Modify: `tests/dg/run_dg_overlapping_wannier_construction_mpi.py`
+- Modify: `tests/dg/check_dg_overlapping_wannier_route.py`
+
+**Step 1: Extend RED contracts**
+
+Require a composer whose inputs are fragment-plus-buffer physical IDs,
+partition weights, and an orbital tile.  It must route equal physical IDs to
+a deterministic owner, sum `sqrt(partition_weight)*orbital_value`, reject
+missing/excess partition coverage, duplicate output ownership, nonfinite
+values, rank-inconsistent tile shapes, and integer/count overflow.  Require a
+measured nonzero workspace receipt and rank-independent output fingerprint.
+
+**Step 2: Implement the minimal streamed composer**
+
+Add `compose_dg_buffered_orbital_tile_to_physical_grid`.  Use bounded orbital
+tiles and MPI count/displacement helpers; do not broadcast a complete orbital,
+replicate the global grid, or retain all fragment buffers.  Return sorted
+owned physical IDs and values so the existing point-action exchange can act
+without fragment semantics.  Keep normal DC LCFO+EigenExa untouched.
+
+**Step 3: Focused verification**
+
+Run the construction fixture on MPI 1/2/4/8, including reversed rank order,
+uneven physical-grid ownership, a translation crossing the fragment face,
+and adverse partition/shape/nonfinite cases.  Run the route and obsolete-route
+contracts and `git diff --check`.
+
+**Step 4: Specification review, quality review, overlay, commit**
+
+Review physical normalization (`sqrt(w)` for wavefunctions), deterministic
+ownership, collective error agreement, 64-bit counts, memory scaling, and
+cleanup on every failure.  Resolve every Critical/Important finding with a
+new RED.  Build the committed-parent prerequisite with SPGLIB, EigenExa,
+ScaLAPACK, MPI, and Wannier90 using `cmake --build <overlay> --clean-first -j1`,
+rerun MPI 1/2/4/8 focused verification, and commit OA5b.
+
+### Task OA5c: Move symmetry adaptation and affine proof onto composed seeds
+
+**Files:**
+- Modify: `src/gs/main_dft.f90`
+- Modify: `src/gs/dc/dg_overlapping_wannier_construction.f90`
+- Modify: `tests/dg/test_dg_overlapping_wannier_eigenexa_mpi.f90`
+- Modify: `tests/dg/test_dg_overlapping_wannier_construction_mpi.f90`
+- Modify: `tests/dg/check_dg_overlapping_wannier_route.py`
+
+**Step 1: Write production-order RED**
+
+Require LCFO and complete `s+p` values to remain on fragment-plus-buffer slabs
+until composed.  Assert that composition precedes fixed-center averaging,
+rank-384 orthonormalization, full-affine generator residuals, DMN creation, and
+Wannier90.  Forbid `accumulate_*_to_core` or `core_mask` as the support of any
+pre-Wannier symmetry proof.
+
+**Step 2: Integrate buffer-first data flow**
+
+Compose occupied and projector orbital tiles to distributed physical-grid
+owners, then run the existing fixed-center group average and complete-cluster
+selection on that representation.  Form and orthonormalize the 128+256 direct
+sum there.  Measure the complete affine generator residuals on the same
+selected physical-grid seed.  Only after accepted Wannier90 localization may
+the existing center-based core-to-buffer materialization redistribute MLWFs.
+
+**Step 3: Preserve receipts and memory bounds**
+
+Publish composition workspace/fingerprint and keep all OA4 occupied receipts.
+Density comparisons must use the smoothly composed pre/post occupied
+projectors, with strict interior and separately declared boundary tolerances.
+Reject rank loss, incomplete coverage, zero workspace after nonidentity work,
+non-real Gamma data, or any over-tolerance affine generator.
+
+**Step 4: Focused verification and reviews**
+
+Run EigenExa, construction, checkpoint, DMN/Wannier90, route, obsolete-route,
+and Exp-only RT fixtures on MPI 1/2/4/8.  Perform specification and code-quality
+reviews for ordering, normalization, buffer lifetime, peak-memory accounting,
+MPI determinism, and normal-route isolation.  Resolve every
+Critical/Important finding via RED, run `git diff --check`, then run the
+clean-first full-feature committed-parent overlay and commit OA5c.
+
+### Task OA5d: Genuine ideal-Si64 GS, MLWF, and V3 acceptance
 
 **Files:**
 - Modify: `docs/plans/2026-08-01-overlapping-wannier-polarization-hhg-results.md`
-- Modify tests or production files only for defects exposed by this acceptance
+- Modify tests or production files only for defects exposed by acceptance
 
-**Step 1: Establish acceptance RED**
+**Step 1: Run immutable genuine Si64**
 
-Run the ideal undisplaced Si64 GS with the current committed prerequisite and
-capture the existing operation-4 closure rejection as RED.  The run must use
-the genuine pseudopotential, 8 MPI ranks, one OpenMP thread, and the clean
-full-feature overlay.
+Use `tests/dg/data/si64_overlapping_wannier_rt/input_gs.in`, its tracked
+ideal 64-Si coordinates, and
+`samples/exercise_04_bulkSi_gs/Si_rps.dat`.  Run 8 MPI ranks and one OpenMP
+thread from a fresh directory with the clean full-feature overlay.  Reject any
+run using the older carbon pseudopotential/cell fixture.
 
-**Step 2: Run the adapted production route**
+**Step 2: Require complete production acceptance**
 
-Require normal DC-SCF/LCFO+EigenExa, occupied rank 128, complete `s+p` rank
-256, final rank 384, affine orders 1536/32/48, inversion-containing
-fixed-center group, strict post-adaptation closure, bounded nonzero workspace,
-converged symmetry-adapted Wannier90, center-orbit closure, accepted V3, and
-restart reuse.
+Require normal DC-SCF/LCFO+EigenExa, occupied rank 128, smoothly composed
+complete `s+p` rank 256, final rank 384, affine orders 1536/32/48,
+inversion-containing fixed-center group, strict full-affine generator closure,
+bounded nonzero workspace, converged symmetry-adapted Wannier90, center-orbit
+closure, accepted V3, and bitwise-unchanged checkpoint restart reuse.
 
-**Step 3: Review and commit**
+**Step 3: Review, overlay, and commit**
 
-Record exact commands, hashes, residuals, density receipts, memory peaks,
-Wannier90 iterations/spreads, and restart evidence.  Perform specification and
-code-quality reviews, resolve every Critical/Important issue through a fresh
-RED task, rerun the clean committed-parent overlay, and commit acceptance
-results.
+Record exact commands, input/pseudopotential/binary/checkpoint hashes,
+residuals, density receipts, memory peaks, Wannier90 iterations/spreads, and
+restart evidence.  Perform specification and code-quality reviews, resolve
+every Critical/Important issue through a fresh RED task, rerun focused MPI
+1/2/4/8 and the clean committed-parent overlay, then commit acceptance results.
 
 ### Task OA6: Resume polarization-primary LR and long-pulse HHG
 
