@@ -64,6 +64,7 @@ module dg_overlapping_wannier_construction
   public::solve_dg_affine_common_fixed_point
   public::compute_dg_periodic_wannier_centers
   public::verify_dg_wannier_center_affine_orbits
+  public::build_dg_finite_abelian_character_table
   public::build_dg_balanced_orbital_ownership
   public::transpose_dg_spatial_cores_to_orbital_owners
   public::redistribute_dg_owned_orbitals_to_center_fragments
@@ -957,6 +958,270 @@ contains
       end do
     end function augment_center_match
   end subroutine verify_dg_wannier_center_affine_orbits
+
+  subroutine build_dg_finite_abelian_character_table(translations,product_table,identity_operation,&
+      tolerance,canonical_operations,inverse_operations,generator_count,generators,element_words,&
+      characters,conjugate_characters,fingerprint,ok,message)
+    real(real64),intent(in)::translations(:,:),tolerance
+    integer,intent(in)::product_table(:,:),identity_operation
+    integer,intent(out)::canonical_operations(:),inverse_operations(:),generator_count
+    integer,allocatable,intent(out)::generators(:),element_words(:,:)
+    complex(real64),intent(out)::characters(:,:)
+    integer,intent(out)::conjugate_characters(:)
+    integer(int64),intent(out)::fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::n,i,j,k,g,candidate,changed,target,head,tail,character_count,allocation_status,&
+      greedy_count,desired_count
+    integer,allocatable::input_to_canonical(:),generator_buffer(:),generator_trial(:),&
+      generator_best(:),generator_orders(:),&
+      phase_index(:),queue(:)
+    integer(int64),allocatable::translation_key(:,:)
+    logical,allocatable::reached(:),word_known(:)
+    logical::generator_subset_found
+    complex(real64),allocatable::trial_character(:)
+    real(real64)::delta(3),angle,quantum
+    integer(int64),parameter::generator_subset_search_budget=10000000_int64
+    integer(int64)::quantized,extent64,combination_count,generator_subset_trials
+
+    ok=.false.;message='';fingerprint=0_int64;generator_count=0
+    n=size(translations,2)
+    if(n<=0)then;message='finite translation group is empty';return;endif
+    if(tolerance<16d0*acos(-1d0)/real(huge(0_int64),real64))then
+      message='finite translation tolerance is too small for canonical int64 keys';return
+    endif
+    if(size(translations,1)/=3.or.any(shape(product_table)/=[n,n]).or.&
+        size(canonical_operations)/=n.or.size(inverse_operations)/=n.or.&
+        any(shape(characters)/=[n,n]).or.size(conjugate_characters)/=n.or.&
+        identity_operation<1.or.identity_operation>n.or.&
+        tolerance<=0d0.or..not.ieee_is_finite(tolerance).or.&
+        .not.all(ieee_is_finite(translations)).or.any(product_table<1).or.any(product_table>n))then
+      message='invalid finite-abelian character-table contract';return
+    endif
+    characters=(0d0,0d0);inverse_operations=0;conjugate_characters=0
+    quantum=tolerance/4d0
+    allocate(input_to_canonical(n),generator_buffer(n),generator_trial(n),generator_best(n),&
+      reached(n),translation_key(3,n),stat=allocation_status)
+    if(allocation_status/=0)then;message='finite-group canonical metadata allocation failed';return;endif
+    do i=1,n;do j=1,3
+      delta(j)=modulo(translations(j,i),1d0)
+      if(abs(delta(j)-1d0)<=tolerance.or.abs(delta(j))<=tolerance)delta(j)=0d0
+      translation_key(j,i)=nint(delta(j)/quantum,int64)
+    enddo;enddo
+    canonical_operations=[(i,i=1,n)]
+    do i=1,n-1;do j=i+1,n
+      if(key_less(canonical_operations(j),canonical_operations(i)))then
+        k=canonical_operations(i);canonical_operations(i)=canonical_operations(j);canonical_operations(j)=k
+      endif
+    enddo;enddo
+    do i=1,n;input_to_canonical(canonical_operations(i))=i;enddo
+    if(canonical_operations(1)/=identity_operation)then
+      message='designated identity is not the zero translation';return
+    endif
+    do i=1,n-1;do j=i+1,n
+      delta=translations(:,i)-translations(:,j);delta=delta-anint(delta)
+      if(maxval(abs(delta))<=tolerance)then;message='finite translation catalog is nonfaithful';return;endif
+    enddo;enddo
+    do i=1,n
+      if(canonical_product(1,i)/=i.or.canonical_product(i,1)/=i)then
+        message='designated translation identity violates the product table';return
+      endif
+      do j=1,n
+        if(canonical_product(i,j)/=canonical_product(j,i))then
+          message='finite translation group is nonabelian';return
+        endif
+        delta=translations(:,canonical_operations(i))+translations(:,canonical_operations(j))-&
+          translations(:,canonical_operations(canonical_product(i,j)))
+        delta=delta-anint(delta)
+        if(maxval(abs(delta))>tolerance)then
+          message='translation product table disagrees with geometry';return
+        endif
+        do k=1,n
+          if(canonical_product(canonical_product(i,j),k)/=&
+              canonical_product(i,canonical_product(j,k)))then
+            message='finite translation product table is nonassociative';return
+          endif
+        enddo
+      enddo
+      do j=1,n
+        if(canonical_product(i,j)==1.and.canonical_product(j,i)==1)inverse_operations(i)=j
+      enddo
+      if(inverse_operations(i)==0)then;message='finite translation element has no inverse';return;endif
+    enddo
+    reached=.false.;reached(1)=.true.;generator_count=0
+    do candidate=2,n
+      if(reached(candidate))cycle
+      generator_count=generator_count+1;generator_buffer(generator_count)=candidate
+      changed=1
+      do while(changed/=0)
+        changed=0
+        do i=1,n
+          if(.not.reached(i))cycle
+          target=canonical_product(i,candidate)
+          if(.not.reached(target))then;reached(target)=.true.;changed=1;endif
+        enddo
+      enddo
+    enddo
+    greedy_count=generator_count;generator_subset_found=.false.;generator_subset_trials=0_int64
+    do desired_count=1,greedy_count
+      call search_generator_subsets(1,2,desired_count)
+      if(generator_subset_found)then;generator_count=desired_count;generator_buffer(:generator_count)=&
+        generator_best(:generator_count);exit;endif
+      if(generator_subset_trials>=generator_subset_search_budget)then
+        message='minimum generator subset search exceeds supported deterministic budget';return
+      endif
+    enddo
+    reached=.false.;reached(1)=.true.;changed=1
+    do while(changed/=0)
+      changed=0
+      do i=1,n
+        if(.not.reached(i))cycle
+        do g=1,generator_count
+          target=canonical_product(i,generator_buffer(g))
+          if(.not.reached(target))then;reached(target)=.true.;changed=1;endif
+        enddo
+      enddo
+    enddo
+    if(.not.all(reached))then;message='canonical generators do not span translation group';return;endif
+    extent64=int(n,int64)*int(generator_count,int64)
+    if(extent64>int(huge(0),int64))then;message='finite-group word extent overflows';return;endif
+    allocate(generators(generator_count),element_words(n,generator_count),generator_orders(generator_count),&
+      phase_index(generator_count),queue(n),word_known(n),&
+      trial_character(n),stat=allocation_status)
+    if(allocation_status/=0)then;message='finite-group word allocation failed';return;endif
+    generators=generator_buffer(:generator_count);element_words=0
+    word_known=.false.;word_known(1)=.true.;head=1;tail=1;queue(1)=1
+    do while(head<=tail)
+      i=queue(head);head=head+1
+      do g=1,generator_count
+        target=canonical_product(i,generators(g))
+        if(.not.word_known(target))then
+          element_words(target,:)=element_words(i,:)
+          if(element_words(target,g)==huge(0))then;message='generator word exponent overflows';return;endif
+          element_words(target,g)=element_words(target,g)+1
+          word_known(target)=.true.;tail=tail+1;queue(tail)=target
+        endif
+      enddo
+    enddo
+    if(.not.all(word_known))then;message='generator words do not cover translation group';return;endif
+    combination_count=1_int64
+    do g=1,generator_count
+      generator_orders(g)=1;target=generators(g)
+      do while(target/=1.and.generator_orders(g)<n)
+        target=canonical_product(target,generators(g));generator_orders(g)=generator_orders(g)+1
+      enddo
+      if(target/=1)then;message='generator order exceeds finite group';return;endif
+      if(combination_count>huge(combination_count)/int(generator_orders(g),int64))then
+        message='character phase enumeration count overflows';return
+      endif
+      combination_count=combination_count*int(generator_orders(g),int64)
+    enddo
+    phase_index=0;character_count=0
+    call enumerate_phases(1)
+    if(character_count/=n)then;message='finite-group character enumeration is incomplete';return;endif
+    do i=1,n
+      do j=1,n
+        if(maxval(abs(characters(j,:)-conjg(characters(i,:))))<=100d0*tolerance)&
+          conjugate_characters(i)=j
+      enddo
+      if(conjugate_characters(i)==0)then;message='character has no conjugate partner';return;endif
+    enddo
+    fingerprint=int(z'6A09E667F3BCC909',int64)
+    do i=1,n;do j=1,3
+      fingerprint=ieor(fingerprint,ishftc(translation_key(j,canonical_operations(i)),mod(5*i+7*j,63)))
+    enddo;enddo
+    do i=1,n;do j=1,n
+      angle=modulo(atan2(aimag(characters(i,j)),real(characters(i,j))),2d0*acos(-1d0))
+      quantized=nint(angle/quantum,int64)
+      fingerprint=ieor(fingerprint,ishftc(quantized,mod(11*i+13*j,63)))
+    enddo;enddo
+    if(fingerprint==0_int64)fingerprint=1_int64
+    ok=.true.;message=''
+  contains
+    integer function canonical_product(left,right) result(product)
+      integer,intent(in)::left,right
+      product=input_to_canonical(product_table(canonical_operations(left),canonical_operations(right)))
+    end function
+    logical function key_less(left,right) result(less)
+      integer,intent(in)::left,right
+      integer::axis
+      less=.false.
+      do axis=1,3
+        if(translation_key(axis,left)<translation_key(axis,right))then;less=.true.;return;endif
+        if(translation_key(axis,left)>translation_key(axis,right))return
+      enddo
+      less=left<right
+    end function
+    recursive subroutine enumerate_phases(level)
+      integer,intent(in)::level
+      integer::choice,element,relation_left,relation_right,relation_product,existing
+      complex(real64)::value,root
+      logical::valid,duplicate
+      if(character_count>=n)return
+      if(level<=generator_count)then
+        do choice=0,generator_orders(level)-1
+          phase_index(level)=choice;call enumerate_phases(level+1)
+        enddo
+        return
+      endif
+      do element=1,n
+        value=(1d0,0d0)
+        do g=1,generator_count
+          root=exp(cmplx(0d0,2d0*acos(-1d0)*real(phase_index(g),real64)/&
+            real(generator_orders(g),real64),real64))
+          value=value*root**element_words(element,g)
+        enddo
+        trial_character(element)=value
+      enddo
+      valid=.true.
+      do relation_left=1,n;do relation_right=1,n
+        relation_product=canonical_product(relation_left,relation_right)
+        if(abs(trial_character(relation_product)-trial_character(relation_left)*&
+            trial_character(relation_right))>100d0*tolerance)valid=.false.
+      enddo;enddo
+      if(.not.valid)return
+      duplicate=.false.
+      do existing=1,character_count
+        if(maxval(abs(characters(existing,:)-trial_character))<=100d0*tolerance)duplicate=.true.
+      enddo
+      if(duplicate)return
+      character_count=character_count+1;characters(character_count,:)=trial_character
+    end subroutine
+    recursive subroutine search_generator_subsets(level,start,needed)
+      integer,intent(in)::level,start,needed
+      integer::choice
+      if(generator_subset_found.or.generator_subset_trials>=generator_subset_search_budget)return
+      if(level>needed)then
+        if(generator_subset_trials>=generator_subset_search_budget)return
+        generator_subset_trials=generator_subset_trials+1_int64
+        if(subset_spans(needed))then
+          generator_best(:needed)=generator_trial(:needed);generator_subset_found=.true.
+        endif
+        return
+      endif
+      do choice=start,n-(needed-level)
+        generator_trial(level)=choice
+        call search_generator_subsets(level+1,choice+1,needed)
+        if(generator_subset_found.or.generator_subset_trials>=generator_subset_search_budget)return
+      enddo
+    end subroutine
+    logical function subset_spans(count) result(spans)
+      integer,intent(in)::count
+      integer::element,igen,mapped,progress
+      reached=.false.;reached(1)=.true.;progress=1
+      do while(progress/=0)
+        progress=0
+        do element=1,n
+          if(.not.reached(element))cycle
+          do igen=1,count
+            mapped=canonical_product(element,generator_trial(igen))
+            if(.not.reached(mapped))then;reached(mapped)=.true.;progress=1;endif
+          enddo
+        enddo
+      enddo
+      spans=all(reached)
+    end function
+  end subroutine build_dg_finite_abelian_character_table
 
   subroutine compute_dg_periodic_wannier_centers(comm,values,weights,periodic_phases,centers,&
       moment_magnitudes,ok,message)

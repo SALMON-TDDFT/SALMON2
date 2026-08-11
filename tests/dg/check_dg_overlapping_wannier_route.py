@@ -1305,6 +1305,18 @@ assert re.search(
     construction_source,
     re.I,
 ), "missing bounded-memory one-operation-at-a-time affine validator"
+character_builder = re.search(
+    r"subroutine\s+build_dg_finite_abelian_character_table\b(?P<body>.*?)end\s+subroutine",
+    construction_source,
+    re.I | re.S,
+)
+assert character_builder, "missing canonical finite-translation character construction"
+assert "element_words" in character_builder.group("body").lower(), (
+    "translation characters must expose canonical generator words"
+)
+assert not re.search(r"\bzgeev\b|\bzheev\b", character_builder.group("body"), re.I), (
+    "finite-group characters must not depend on a potentially degenerate eigensolver"
+)
 assert re.search(
     r"subroutine\s+gather_dg_single_symmetry_representation\b",
     construction_source,

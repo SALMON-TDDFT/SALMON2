@@ -26,6 +26,7 @@ program test_dg_overlapping_wannier_construction_mpi
     solve_dg_affine_common_fixed_point,&
     compute_dg_periodic_wannier_centers,&
     verify_dg_wannier_center_affine_orbits,&
+    build_dg_finite_abelian_character_table,&
     align_dg_fragment_wannier_gauge,replicate_dg_fragment_wannier_representative,&
     verify_dg_fragment_wannier_streaming_closure,verify_dg_fragment_center_orbit,&
     verify_dg_uniform_fragment_target_rank,assign_dg_overlapping_wannier_occupations,&
@@ -96,6 +97,23 @@ program test_dg_overlapping_wannier_construction_mpi
   complex(8),allocatable::closure_transform(:,:)
   integer::closure_product(2,2)
   integer::cyclic_product(4,4)
+  integer::character_canonical_operations(4),character_inverses(4),character_conjugates(4),&
+    character_generator_count
+  integer,allocatable::character_generators(:),character_words(:,:)
+  integer::character_product(4,4)
+  integer::character_permutation(4),character_inverse_permutation(4),character_permuted_product(4,4)
+  real(8)::character_translations(3,4),character_permuted_translations(3,4)
+  complex(8)::character_table(4,4),character_gram(4,4)
+  integer(8)::character_fingerprint,character_reference_fingerprint
+  integer::z6_product(6,6),z6_operations(6),z6_inverses(6),z6_conjugates(6),z6_exponent(6),&
+    z6_exponent_to_operation(0:5),z6_generator_count
+  integer,allocatable::z6_generators(:),z6_words(:,:)
+  real(8)::z6_translations(3,6)
+  complex(8)::z6_characters(6,6)
+  integer::z2_product(2,2),z2_operations(2),z2_inverses(2),z2_conjugates(2),z2_generator_count
+  integer,allocatable::z2_generators(:),z2_words(:,:)
+  real(8)::z2_translations(3,2)
+  complex(8)::z2_characters(2,2)
   integer,allocatable::group_generators(:)
   real(8)::subspace_leakage,occupied_inclusion
   real(8)::averaged_trace,averaged_closure
@@ -144,6 +162,104 @@ program test_dg_overlapping_wannier_construction_mpi
 
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+  character_translations=0d0;character_translations(1,:)=[0d0,0.5d0,0.25d0,0.75d0]
+  character_product=reshape([1,2,3,4,2,1,4,3,3,4,2,1,4,3,1,2],[4,4])
+  call build_dg_finite_abelian_character_table(character_translations,character_product,1,1d-12,&
+    character_canonical_operations,character_inverses,character_generator_count,character_generators,&
+    character_words,character_table,character_conjugates,character_fingerprint,ok,message)
+  call require(ok,trim(message))
+  character_gram=matmul(character_table,conjg(transpose(character_table)))
+  call require(character_generator_count==1.and.size(character_generators)==1.and.&
+    all(character_canonical_operations==[1,3,2,4]).and.all(character_inverses==[1,4,3,2]).and.&
+    all(character_conjugates==[1,4,3,2]).and.all(character_words(:,1)==[0,1,2,3]).and.&
+    maxval(abs(character_gram-&
+    4d0*reshape([(1d0,0d0),(0d0,0d0),(0d0,0d0),(0d0,0d0),&
+      (0d0,0d0),(1d0,0d0),(0d0,0d0),(0d0,0d0),&
+      (0d0,0d0),(0d0,0d0),(1d0,0d0),(0d0,0d0),&
+      (0d0,0d0),(0d0,0d0),(0d0,0d0),(1d0,0d0)],[4,4])))<1d-12,&
+    'canonical Z4 generators, words, and characters are exact')
+  character_reference_fingerprint=character_fingerprint
+  character_permutation=[3,1,4,2]
+  do i=1,4;character_inverse_permutation(character_permutation(i))=i;enddo
+  character_permuted_translations=character_translations(:,character_permutation)
+  do i=1,4;do j=1,4
+    character_permuted_product(i,j)=character_inverse_permutation(&
+      character_product(character_permutation(i),character_permutation(j)))
+  enddo;enddo
+  call build_dg_finite_abelian_character_table(character_permuted_translations,&
+    character_permuted_product,character_inverse_permutation(1),1d-12,&
+    character_canonical_operations,character_inverses,character_generator_count,character_generators,&
+    character_words,character_table,character_conjugates,character_fingerprint,ok,message)
+  call require(ok.and.character_fingerprint==character_reference_fingerprint,&
+    'character table fingerprint is invariant under operation numbering')
+  character_translations=0d0
+  character_translations(1,:)=[0d0,0d0,0.5d0,0.5d0]
+  character_translations(2,:)=[0d0,0.5d0,0d0,0.5d0]
+  character_product=reshape([1,2,3,4,2,1,4,3,3,4,1,2,4,3,2,1],[4,4])
+  call build_dg_finite_abelian_character_table(character_translations,character_product,1,1d-12,&
+    character_canonical_operations,character_inverses,character_generator_count,character_generators,&
+    character_words,character_table,character_conjugates,character_fingerprint,ok,message)
+  character_gram=matmul(character_table,conjg(transpose(character_table)))
+  call require(ok.and.character_generator_count==2.and.&
+    maxval(abs(character_gram-4d0*reshape([(1d0,0d0),(0d0,0d0),(0d0,0d0),(0d0,0d0),&
+      (0d0,0d0),(1d0,0d0),(0d0,0d0),(0d0,0d0),(0d0,0d0),(0d0,0d0),&
+      (1d0,0d0),(0d0,0d0),(0d0,0d0),(0d0,0d0),(0d0,0d0),(1d0,0d0)],[4,4])))<1d-12,&
+    'Z2xZ2 character table has two generators and four orthogonal characters')
+  character_product(2,3)=2
+  call build_dg_finite_abelian_character_table(character_translations,character_product,1,1d-12,&
+    character_canonical_operations,character_inverses,character_generator_count,character_generators,&
+    character_words,character_table,character_conjugates,character_fingerprint,ok,message)
+  call require(.not.ok,'corrupt translation product table is rejected')
+  character_product=reshape([1,2,3,4,2,1,4,3,3,4,1,2,4,3,2,1],[4,4])
+  character_translations(:,4)=character_translations(:,1)
+  character_translations(1,4)=-0.5d-12
+  call build_dg_finite_abelian_character_table(character_translations,character_product,1,1d-12,&
+    character_canonical_operations,character_inverses,character_generator_count,character_generators,&
+    character_words,character_table,character_conjugates,character_fingerprint,ok,message)
+  call require(.not.ok.and.trim(message)=='finite translation catalog is nonfaithful',&
+    'periodically coincident translations are rejected across the zero boundary')
+  character_translations=0d0
+  character_translations(1,:)=[0d0,0d0,0.5d0,0.5d0]
+  character_translations(2,:)=[0d0,0.5d0,0d0,0.5d0]
+  call build_dg_finite_abelian_character_table(character_translations,character_product,2,1d-12,&
+    character_canonical_operations,character_inverses,character_generator_count,character_generators,&
+    character_words,character_table,character_conjugates,character_fingerprint,ok,message)
+  call require(.not.ok.and.trim(message)=='designated identity is not the zero translation',&
+    'incorrect designated identity is rejected explicitly')
+  z6_exponent=[0,4,2,3,1,5]
+  do i=1,6;z6_exponent_to_operation(z6_exponent(i))=i;enddo
+  z6_translations=0d0
+  do i=1,6
+    z6_translations(1,i)=modulo(0.5d0*real(z6_exponent(i),8),1d0)
+    z6_translations(2,i)=modulo(real(z6_exponent(i),8)/3d0,1d0)
+    do j=1,6
+      z6_product(i,j)=z6_exponent_to_operation(modulo(z6_exponent(i)+z6_exponent(j),6))
+    enddo
+  enddo
+  call build_dg_finite_abelian_character_table(z6_translations,z6_product,1,1d-12,z6_operations,&
+    z6_inverses,z6_generator_count,z6_generators,z6_words,z6_characters,z6_conjugates,&
+    character_fingerprint,ok,message)
+  call require(ok.and.z6_generator_count==1,&
+    'Z6 uses the minimum one generator instead of irredundant order-two/order-three generators')
+  z2_translations=0d0;z2_translations(1,2)=0.5d0
+  z2_product=reshape([1,2,2,1],[2,2])
+  call build_dg_finite_abelian_character_table(z2_translations,z2_product,1,1d-12,z2_operations,&
+    z2_inverses,z2_generator_count,z2_generators,z2_words,z2_characters,z2_conjugates,&
+    character_fingerprint,ok,message)
+  call require(ok.and.z2_generator_count==1.and.all(z2_inverses==[1,2]).and.&
+    all(z2_conjugates==[1,2]),'Z2 characters are self-conjugate with exact inverses')
+  call build_dg_finite_abelian_character_table(z2_translations,z2_product,1,&
+    8d0*acos(-1d0)/real(huge(0_8),8),z2_operations,z2_inverses,z2_generator_count,&
+    z2_generators,z2_words,z2_characters,z2_conjugates,character_fingerprint,ok,message)
+  call require(.not.ok.and.trim(message)==&
+    'finite translation tolerance is too small for canonical int64 keys',&
+    'phase fingerprint int64 overflow is rejected before quantization')
+  character_translations=ieee_value(0d0,ieee_quiet_nan)
+  call build_dg_finite_abelian_character_table(character_translations,character_product,1,1d-12,&
+    character_canonical_operations,character_inverses,character_generator_count,character_generators,&
+    character_words,character_table,character_conjugates,character_fingerprint,ok,message)
+  call require(.not.ok.and.trim(message)=='invalid finite-abelian character-table contract',&
+    'nonfinite translation catalog is rejected')
   call initialize_dg_ow_distributed_layout(comm,0,2*nproc,distributed_layout,ok,message)
   call require(.not.ok,'distributed layout rejects an empty global orbital space')
   call initialize_dg_ow_distributed_layout(comm,2*nproc+1,2*nproc,&
