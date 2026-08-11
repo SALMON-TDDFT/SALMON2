@@ -93,6 +93,49 @@ Both are derived from the full atomic coordinates.  Fragment membership is
 used only for distributed storage, buffer support, and returning each MLWF to
 the fragment containing its center `R`; it never defines the symmetry group.
 
+## Cocycle-aware point-cogroup correction
+
+A fresh ideal-Si64 run of the first translation-first implementation disproved
+the assumption that the 12-operation fixed-center group completes the affine
+adaptation.  The translation average was closed to `1.01211720e-13` and the
+subsequent fixed-center average was closed to `8.92736449e-13`, but the final
+occupied block still had full-affine residual `3.88036128`.  The reason is
+group-theoretic: the fixed-center group contains only 12 of the 48 point
+cogroup operations, so translations times that group cover at most 384 of the
+1536 affine operations.
+
+The corrected adaptation has three distinct layers:
+
+1. average the smoothly composed occupied projector over the 32-operation
+   translation subgroup;
+2. average that translation-invariant projector over the 48 affine coset
+   representatives; and
+3. use the 12-operation inversion-containing fixed-center group only for the
+   finite DMN representation, Wannier90 constraint, and inversion receipts.
+
+Coset representatives do not form an exact permutation group: their product
+differs from the selected representative by the recorded pure-translation
+`global_translation_cocycle`.  Validation must therefore compare a composed
+representative action with the point-product representative followed by the
+cocycle translation.  It must reject an invalid cocycle, a representative
+outside the affine catalog, or a cocycle action inconsistent with the
+full-affine product table.  It may not pretend that the 48 representative maps
+realize the point-product table exactly.
+
+Because the input projector is already translation invariant, averaging over
+one representative from every coset is mathematically identical to averaging
+over all 1536 affine operations.  The orbit dimension is therefore
+`128*48=6144`, rather than `128*1536`.  The Gram construction should exploit
+relative cosets and their translation cocycle so that only 48 distinct
+occupied-overlap blocks are evaluated and routed.  Dense EigenExa storage
+remains distributed, integer products are overflow-checked before allocation,
+and the implementation records separate translation, point-cogroup, and final
+full-affine workspace/closure receipts.
+
+Acceptance requires the selected rank-128 projector to pass the existing
+strict full-affine generator residual without tolerance relaxation.  A
+fixed-center-only closure is diagnostic evidence, not sufficient acceptance.
+
 ## Distributed memory procedure
 
 Spatial ranks keep their existing fragment-plus-buffer slabs as input.  A

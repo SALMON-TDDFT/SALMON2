@@ -297,6 +297,82 @@ clean-first full-feature committed-parent overlay and commit OA5c.
 - Modify: `docs/plans/2026-08-01-overlapping-wannier-polarization-hhg-results.md`
 - Modify tests or production files only for defects exposed by acceptance
 
+#### Task OA5d.1: Replace fixed-center adaptation with cocycle-aware point-cogroup adaptation
+
+**Files:**
+- Modify: `src/gs/dc/dg_overlapping_wannier_construction.f90`
+- Modify: `src/gs/main_dft.f90`
+- Modify: `tests/dg/test_dg_overlapping_wannier_eigenexa_mpi.f90`
+- Modify: `tests/dg/test_dg_overlapping_wannier_fragment_symmetry_mpi.f90`
+- Modify: `tests/dg/check_dg_overlapping_wannier_route.py`
+
+**Step 1: Write the cocycle RED**
+
+Build a finite affine fixture with a nontrivial translation cocycle.  Start
+from a translation-invariant occupied projector and require averaging over one
+representative per point coset to produce the same projector as explicit
+full-affine averaging.  Require exact rejection when a cocycle entry or
+representative product is corrupted.  Extend the route contract so production
+must call translation adaptation before point-cogroup adaptation, must pass
+`global_point_representatives`, `global_point_cogroup_product`, and
+`global_translation_cocycle`, and may use the fixed-center group only after
+full-affine acceptance.
+
+Run:
+
+```sh
+python3 tests/dg/run_dg_overlapping_wannier_fragment_symmetry_mpi.py
+python3 tests/dg/run_dg_overlapping_wannier_eigenexa_mpi.py
+python3 tests/dg/check_dg_overlapping_wannier_route.py
+```
+
+Expected: FAIL on MPI 1/2/4/8 because the current second average uses only the
+12 fixed-center operations and the group-average API cannot validate a
+translation cocycle.
+
+**Step 2: Implement the minimal cocycle-aware average**
+
+Add a dedicated EigenExa entry point taking translation maps, coset
+representative maps, point product, and translation cocycle.  Validate every
+representative product against the corresponding representative-plus-
+translation action.  Construct the rank-128 averaged projector using the 48
+representatives only.  Fill its distributed real Gram matrix from relative
+coset/cocycle overlap blocks without retaining transformed real-space orbits.
+Reject rank loss, split eigenvalue clusters, non-real Gamma data, zero measured
+workspace, overflow, and nonfinite inputs.
+
+In `main_dft.f90`, retain the first translation adaptation, replace the second
+fixed-center average by the new point-cogroup average, and publish
+`point_cogroup_adapted_occupied`.  Keep the fixed-center group for DMN and
+Wannier90 representation generation only.  Do not relax
+`dg_ow_symmetry_tolerance` or the final affine-generator gate.
+
+**Step 3: Focused verification**
+
+Run the fragment-symmetry, construction, EigenExa, checkpoint, Wannier90,
+route, obsolete-route, and Exp-only RT fixtures on MPI 1/2/4/8.  Require
+rank-independent spectra/fingerprints, nonzero bounded workspace, exact
+cocycle adverse-case rejection, Gamma-real output, and `git diff --check`.
+
+**Step 4: Specification and code-quality reviews**
+
+Review group multiplication order, pullback action order, cocycle orientation,
+normalization by 48 rather than 1536, complete-cluster selection, integer and
+MPI-count overflow, error agreement across ranks, memory scaling, and normal
+DC isolation.  Resolve every Critical/Important finding with a new RED.
+
+**Step 5: Clean overlay and commit**
+
+Commit the implementation, checkout that commit in the full-feature overlay,
+and run:
+
+```sh
+cmake --build /tmp/salmon-oa5b-overlay/build --clean-first -j1
+```
+
+Rerun focused MPI 1/2/4/8 verification with the clean binary and commit any
+review correction separately.
+
 **Step 1: Run immutable genuine Si64**
 
 Use `tests/dg/data/si64_overlapping_wannier_rt/input_gs.in`, its tracked
