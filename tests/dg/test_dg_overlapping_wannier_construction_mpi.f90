@@ -34,7 +34,7 @@ program test_dg_overlapping_wannier_construction_mpi
     redistribute_dg_owned_orbitals_to_center_fragments,&
     assign_dg_periodic_centers_to_fragments,&
     verify_dg_fragment_subspace_density_covariance,build_dg_core_owned_occupied_subspace,&
-    build_dg_smooth_partition_of_unity
+    build_dg_smooth_partition_of_unity,compose_dg_buffered_orbital_tile_to_physical_grid
   implicit none
   integer::comm,rank,nproc,ierr,i,j,p,point,nlocal,nclosure,index,ncore,fragment_id
   integer(8),allocatable::ids(:),box_ids(:),symmetry_map(:,:),broken_symmetry_map(:,:)
@@ -120,9 +120,11 @@ program test_dg_overlapping_wannier_construction_mpi
   complex(8),allocatable::permuted_image(:,:)
   complex(8),allocatable::mismatched_owned(:,:)
   complex(8),allocatable::center_local_values(:,:)
+  complex(8),allocatable::composed_buffer_values(:,:),composed_owned_values(:,:)
   integer(8),allocatable::transpose_local_ids(:),transpose_global_ids(:)
   integer(8),allocatable::mismatched_global_ids(:)
   integer(8),allocatable::redistribution_buffer_ids(:)
+  integer(8),allocatable::composed_owned_ids(:)
   integer(8),allocatable::center_all_core_ids(:,:),assigned_center_ids(:)
   integer,allocatable::orbital_counts(:),orbital_displacements(:),orbital_owners(:),owned_orbitals(:)
   integer,allocatable::invalid_owned_orbitals(:)
@@ -134,6 +136,7 @@ program test_dg_overlapping_wannier_construction_mpi
   complex(8)::fractional_core_candidates(2,2)
   complex(8),allocatable::core_occupied_coefficients(:,:)
   integer(8)::mixed_map(2,1)
+  integer(8)::composition_fingerprint,composition_workspace_peak
   real(8)::fractional_core_electrons
   real(8)::gauge_weights(2)
   logical::ok,transpose_values_ok
@@ -387,6 +390,26 @@ program test_dg_overlapping_wannier_construction_mpi
     call require(maxval(abs(partition_weight-[2d0/3d0,1d0/3d0]))<1d-12,&
       'partition normalization is independent of fragment rank')
   endif
+  allocate(composed_buffer_values(2,2))
+  do p=1,2
+    composed_buffer_values(1,p)=cmplx(real(partition_ids(p),8),0d0,8)
+    composed_buffer_values(2,p)=cmplx(0d0,-real(partition_ids(p),8),8)
+  enddo
+  call compose_dg_buffered_orbital_tile_to_physical_grid(comm,partition_ids,partition_weight,&
+    composed_buffer_values,composed_owned_ids,composed_owned_values,composition_fingerprint,&
+    composition_workspace_peak,ok,message)
+  call require(ok,trim(message))
+  call require(composition_workspace_peak>0_8,'buffer composition publishes nonzero measured workspace')
+  call require(size(composed_owned_ids)==size(composed_owned_values,2),&
+    'buffer composition returns one value column per owned physical-grid ID')
+  do p=1,size(composed_owned_ids)
+    call require(maxval(abs(composed_owned_values(:,p)-sum(partition_weight,&
+      mask=partition_ids==composed_owned_ids(p))*&
+      [cmplx(real(composed_owned_ids(p),8),0d0,8),&
+       cmplx(0d0,-real(composed_owned_ids(p),8),8)]))<1d-12,&
+      'buffer-first composition recovers the smooth full-system orbital across a fragment face')
+  enddo
+  deallocate(composed_buffer_values,composed_owned_ids,composed_owned_values)
   raw_partition_weight(2)=-0.5d0
   call build_dg_smooth_partition_of_unity(comm,partition_ids,raw_partition_weight,&
     raw_partition_gradient,partition_weight,partition_gradient,partition_sum_defect,&
