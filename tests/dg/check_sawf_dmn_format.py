@@ -48,6 +48,7 @@ program check_sawf_dmn
   type(t_sawf_symop) :: map_ops(4)
   complex(8) :: dw2(2,2),db2(2,2),amn2(2,2),bad(2,2)
   complex(8) :: dw3(3,3),db3(3,3),amn3(3,3)
+  complex(8) :: pullback3(3,3),expected3(3,3),phase3(3)
   real(8) :: eig2(2),eig3(3),hres1,hres2,hres3
   logical :: ok
   character(512) :: msg
@@ -125,6 +126,27 @@ program check_sawf_dmn
     call require(ok,'S3 append: '//trim(msg))
   enddo
   call finish_sawf_dmn(writer,ops6,ok,msg); call require(ok,'noncommuting S3 finish: '//trim(msg))
+
+  ! The production grid overlap is the pullback anti-representation.  A
+  ! non-real diagonal gauge makes this test fail if conversion uses transpose
+  ! instead of the required adjoint, then finish checks the actual S3 products.
+  phase3=[cmplx(1d0,0d0,8),cmplx(0d0,1d0,8),cmplx(sqrt(0.5d0),sqrt(0.5d0),8)]
+  call begin_sawf_dmn(writer,'s3_pullback.dmn',3,3,6,1d-10,ok,msg)
+  call require(ok,'pullback S3 begin')
+  do i=1,6
+    do j=1,3
+      pullback3(:,j)=conjg(phase3(:))*cmplx(real(ops6(i)%W(j,:),8),0d0,8)*phase3(j)
+      expected3(:,j)=conjg(phase3(:))*cmplx(real(ops6(i)%W(:,j),8),0d0,8)*phase3(j)
+    enddo
+    call convert_sawf_pullback_to_active_representation(pullback3,ok,msg)
+    call require(ok,'pullback S3 conversion: '//trim(msg))
+    call require(maxval(abs(pullback3-expected3))<1d-12,&
+      'pullback S3 conversion must preserve the complex gauge through an adjoint')
+    call append_sawf_dmn_operation(writer,i,pullback3,pullback3,eig3,amn3,i==1,ok,msg)
+    call require(ok,'pullback S3 append: '//trim(msg))
+  enddo
+  call finish_sawf_dmn(writer,ops6,ok,msg)
+  call require(ok,'converted pullback noncommuting S3 finish: '//trim(msg))
 
   do i=1,4
     call identity_op(map_ops(i)); allocate(map_ops(i)%atom_map(2)); map_ops(i)%atom_map=[1,2]

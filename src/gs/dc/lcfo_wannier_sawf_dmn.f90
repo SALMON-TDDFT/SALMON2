@@ -31,6 +31,7 @@ module lcfo_wannier_sawf_dmn
   integer(int64), parameter :: hash_factor=65599_int64
 
   public :: begin_sawf_dmn, append_sawf_dmn_operation, finish_sawf_dmn, abort_sawf_dmn
+  public :: convert_sawf_pullback_to_active_representation
   public :: validate_sawf_dmn_covariances
   public :: build_sawf_operation_index, lookup_sawf_operation_product
 
@@ -46,6 +47,34 @@ module lcfo_wannier_sawf_dmn
   end interface
 
 contains
+
+  subroutine convert_sawf_pullback_to_active_representation(representation,ok,message)
+    complex(8),intent(inout)::representation(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(8)::entry
+    integer::i,j
+
+    ok=.false.;message=''
+    if(size(representation,1)<=0.or.size(representation,2)/=size(representation,1))then
+      message='SAWF pullback representation must be a nonempty square matrix';return
+    endif
+    if(.not.all(ieee_is_finite(real(representation))).or.&
+        .not.all(ieee_is_finite(aimag(representation))))then
+      message='SAWF pullback representation is nonfinite';return
+    endif
+    ! Grid images psi(g r) compose in reverse order.  Their adjoints obey the
+    ! active D(g h)=D(g)D(h) convention consumed by the DMN group validator.
+    do i=1,size(representation,1)
+      representation(i,i)=conjg(representation(i,i))
+      do j=i+1,size(representation,2)
+        entry=representation(i,j)
+        representation(i,j)=conjg(representation(j,i))
+        representation(j,i)=conjg(entry)
+      enddo
+    enddo
+    ok=.true.
+  end subroutine convert_sawf_pullback_to_active_representation
 
   subroutine begin_sawf_dmn(writer,final_path,num_bands,num_wann,num_symmetry,tolerance,ok,message, &
       temp_nonce,hamiltonian_tolerance)

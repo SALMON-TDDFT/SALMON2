@@ -1341,6 +1341,15 @@ assert re.search(r"call\s+validate_dg_w90_convergence_log\s*\(", w90_source, re.
 assert re.search(
     r"call\s+gather_dg_single_symmetry_representation\s*\(", adapter_body, re.I
 ), "production fixed-center DMN must gather one representation operation at a time"
+assert re.search(
+    r"call\s+convert_sawf_pullback_to_active_representation\s*\(", adapter_body, re.I
+), "fixed-center DMN must convert grid pullbacks to the active group representation convention"
+gather_pos = adapter_body.lower().find("call gather_dg_single_symmetry_representation(")
+convert_pos = adapter_body.lower().find("call convert_sawf_pullback_to_active_representation(", gather_pos)
+append_pos = adapter_body.lower().find("call append_sawf_dmn_operation(", convert_pos)
+assert gather_pos < convert_pos < append_pos, (
+    "fixed-center DMN must gather, convert, then append each streamed representation"
+)
 assert "fixed_center_group_order>48" in adapter_body.replace(" ", "").lower(), (
     "production must reject a fixed-center subgroup above crystallographic order 48"
 )

@@ -101,7 +101,8 @@ use lcfo_wannier_sawf, only: t_sawf_crystallographic_catalog,t_sawf_symop,&
   load_sawf_crystallographic_catalog_auto
 use lcfo_wannier_sawf_dmn,only:t_sawf_dmn_writer,t_sawf_operation_index,&
   begin_sawf_dmn,append_sawf_dmn_operation,finish_sawf_dmn,abort_sawf_dmn,&
-  build_sawf_operation_index,lookup_sawf_operation_product
+  build_sawf_operation_index,lookup_sawf_operation_product,&
+  convert_sawf_pullback_to_active_representation
 use lcfo_wannier_sawf_band, only: validate_sawf_fragment_symmetry_map,&
   build_sawf_fragment_buffer_point_map
 #ifdef USE_EIGENEXA
@@ -1149,6 +1150,14 @@ contains
         write(0,'(a)')trim(message);error stop 'fixed-center representation gather failed'
       endif
       fixed_center_dmn_workspace_peak=max(fixed_center_dmn_workspace_peak,fixed_center_operation_workspace)
+      if(rank==0)call convert_sawf_pullback_to_active_representation(&
+        fixed_center_representation,ok,message)
+      call MPI_Bcast(ok,1,MPI_LOGICAL,0,dc%icomm_tot,ierr)
+      if(.not.ok)then
+        if(rank==0)write(0,'(a)')trim(message)
+        if(rank==0)call abort_sawf_dmn(fixed_center_dmn_writer)
+        error stop 'fixed-center pullback representation conversion failed'
+      endif
       writer_ok=.true.
       if(rank==0)call append_sawf_dmn_operation(fixed_center_dmn_writer,fixed_center_operation,&
         fixed_center_representation,fixed_center_representation,fixed_center_eigenvalues,&
