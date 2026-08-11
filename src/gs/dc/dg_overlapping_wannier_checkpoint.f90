@@ -21,6 +21,7 @@ module dg_overlapping_wannier_checkpoint
     integer(int64)::fixed_center_group_fingerprint=0_int64
     integer(int64)::affine_proof_workspace_peak_bytes=0_int64
     integer(int64)::point_projection_workspace_peak_bytes=0_int64
+    integer(int64)::occupied_adaptation_workspace_peak_bytes=0_int64
     integer(int64)::publication_id=0_int64
     character(64)::field_coupling_convention=''
     character(32)::mlwf_backend='',mlwf_version=''
@@ -38,12 +39,21 @@ module dg_overlapping_wannier_checkpoint
     real(8)::localization_maximum_gradient=huge(1d0)
     real(8)::mlwf_spreads(3)=huge(1d0),mlwf_symmetry_receipts(3)=huge(1d0)
     real(8)::fixed_center_fractional(3)=huge(1d0)
+    real(8)::occupied_subspace_distance=huge(1d0)
+    real(8)::occupied_electron_count_drift=huge(1d0)
+    real(8)::occupied_density_interior_difference=huge(1d0)
+    real(8)::occupied_density_boundary_difference=huge(1d0)
+    real(8)::occupied_density_interior_tolerance=0d0,occupied_density_boundary_tolerance=0d0
+    real(8)::occupied_closure_before=huge(1d0),occupied_closure_after=huge(1d0)
+    real(8)::occupied_selected_edge=huge(1d0),occupied_rejected_edge=huge(1d0)
+    real(8)::occupied_cluster_gap=huge(1d0)
     ! rank, occupation, electrons, LCFO projector, LCFO density, occupied energy,
     ! inversion-odd density, center ownership, buffer coverage, operator covariance, stationarity
     real(8)::gs_acceptance_receipts(11)=huge(1d0),gs_acceptance_tolerance=0d0
     integer::localization_iterations=0
     integer::affine_group_order=0,translation_subgroup_order=0,point_cogroup_order=0
     integer::fixed_center_group_order=0
+    integer::occupied_selected_block_dimension=0
     logical::localization_converged=.false.
     logical::mlwf_canonical=.false.
     logical::fixed_center_inversion_present=.false.
@@ -192,8 +202,10 @@ contains
           checkpoint%mlwf_coordinator_bytes,checkpoint%mlwf_workspace_peak_bytes,&
           checkpoint%mlwf_coordinator_byte_limit,checkpoint%fixed_center_group_fingerprint,&
           checkpoint%affine_proof_workspace_peak_bytes,checkpoint%point_projection_workspace_peak_bytes,&
+          checkpoint%occupied_adaptation_workspace_peak_bytes,&
           checkpoint%affine_group_order,checkpoint%translation_subgroup_order,&
           checkpoint%point_cogroup_order,checkpoint%fixed_center_group_order,&
+          checkpoint%occupied_selected_block_dimension,&
           checkpoint%field_coupling_convention,&
           checkpoint%mlwf_backend,checkpoint%mlwf_version,transaction_id,manifest_size,manifest_digest,dims,&
           checkpoint%density_residual,&
@@ -205,6 +217,11 @@ contains
           checkpoint%localization_initial_spread,checkpoint%localization_final_spread,&
           checkpoint%localization_maximum_gradient,checkpoint%localization_iterations,&
           checkpoint%mlwf_spreads,checkpoint%mlwf_symmetry_receipts,checkpoint%fixed_center_fractional,&
+          checkpoint%occupied_subspace_distance,checkpoint%occupied_electron_count_drift,&
+          checkpoint%occupied_density_interior_difference,checkpoint%occupied_density_boundary_difference,&
+          checkpoint%occupied_density_interior_tolerance,checkpoint%occupied_density_boundary_tolerance,&
+          checkpoint%occupied_closure_before,checkpoint%occupied_closure_after,&
+          checkpoint%occupied_selected_edge,checkpoint%occupied_rejected_edge,checkpoint%occupied_cluster_gap,&
           checkpoint%gs_acceptance_receipts,checkpoint%gs_acceptance_tolerance,&
           checkpoint%localization_converged,checkpoint%mlwf_canonical,&
           checkpoint%fixed_center_inversion_present,checkpoint%accepted
@@ -244,13 +261,13 @@ contains
 #ifdef USE_MPI
     integer::rank,nproc,ierr,unit,ios,file_nproc,dims(4),local_bad,global_bad,shard_rank,shard_nproc,&
       gate_bad,allocation_status
-    integer::integer_metadata(8)
+    integer::integer_metadata(9)
     integer::expected_integers(2),expected_integer_min(2),expected_integer_max(2)
-    integer(int64)::fingerprint_metadata(16),count64,file_bytes,transaction_id,shard_transaction_id,&
+    integer(int64)::fingerprint_metadata(17),count64,file_bytes,transaction_id,shard_transaction_id,&
       stored_size,stored_digest,&
       expected_fingerprints(2),&
       expected_fingerprint_min(2),expected_fingerprint_max(2)
-    real(8)::acceptance_metadata(37),gate_min(6),gate_max(6)
+    real(8)::acceptance_metadata(48),gate_min(6),gate_max(6)
     integer::nbasis_gen,ngeometry_gen,ntail_record,ntail_id,ncore,noverlap_row
     integer(int64)::basis_fp,operator_fp,computed_hamiltonian_fingerprint,computed_observable_fingerprint
     character(32)::magic
@@ -290,8 +307,10 @@ contains
           checkpoint%mlwf_coordinator_bytes,checkpoint%mlwf_workspace_peak_bytes,&
           checkpoint%mlwf_coordinator_byte_limit,checkpoint%fixed_center_group_fingerprint,&
           checkpoint%affine_proof_workspace_peak_bytes,checkpoint%point_projection_workspace_peak_bytes,&
+          checkpoint%occupied_adaptation_workspace_peak_bytes,&
           checkpoint%affine_group_order,checkpoint%translation_subgroup_order,&
           checkpoint%point_cogroup_order,checkpoint%fixed_center_group_order,&
+          checkpoint%occupied_selected_block_dimension,&
           checkpoint%field_coupling_convention,&
           checkpoint%mlwf_backend,checkpoint%mlwf_version,transaction_id,stored_size,stored_digest,dims,&
           checkpoint%density_residual,&
@@ -303,6 +322,11 @@ contains
           checkpoint%localization_initial_spread,checkpoint%localization_final_spread,&
           checkpoint%localization_maximum_gradient,checkpoint%localization_iterations,&
           checkpoint%mlwf_spreads,checkpoint%mlwf_symmetry_receipts,checkpoint%fixed_center_fractional,&
+          checkpoint%occupied_subspace_distance,checkpoint%occupied_electron_count_drift,&
+          checkpoint%occupied_density_interior_difference,checkpoint%occupied_density_boundary_difference,&
+          checkpoint%occupied_density_interior_tolerance,checkpoint%occupied_density_boundary_tolerance,&
+          checkpoint%occupied_closure_before,checkpoint%occupied_closure_after,&
+          checkpoint%occupied_selected_edge,checkpoint%occupied_rejected_edge,checkpoint%occupied_cluster_gap,&
           checkpoint%gs_acceptance_receipts,checkpoint%gs_acceptance_tolerance,&
           checkpoint%localization_converged,checkpoint%mlwf_canonical,&
           checkpoint%fixed_center_inversion_present,checkpoint%accepted
@@ -346,7 +370,7 @@ contains
       integer_metadata=[checkpoint%basis_generation,checkpoint%geometry_generation,file_nproc,&
         checkpoint%localization_iterations,checkpoint%affine_group_order,&
         checkpoint%translation_subgroup_order,checkpoint%point_cogroup_order,&
-        checkpoint%fixed_center_group_order]
+        checkpoint%fixed_center_group_order,checkpoint%occupied_selected_block_dimension]
       fingerprint_metadata=[checkpoint%basis_fingerprint,checkpoint%operator_fingerprint,&
         checkpoint%hamiltonian_fingerprint,checkpoint%observable_fingerprint,&
         checkpoint%global_lcfo_fingerprint,checkpoint%occupation_block_fingerprint,&
@@ -354,7 +378,8 @@ contains
         checkpoint%mlwf_input_fingerprint,checkpoint%mlwf_transform_fingerprint,&
         checkpoint%mlwf_coordinator_bytes,checkpoint%mlwf_workspace_peak_bytes,&
         checkpoint%mlwf_coordinator_byte_limit,checkpoint%fixed_center_group_fingerprint,&
-        checkpoint%affine_proof_workspace_peak_bytes,checkpoint%point_projection_workspace_peak_bytes]
+        checkpoint%affine_proof_workspace_peak_bytes,checkpoint%point_projection_workspace_peak_bytes,&
+        checkpoint%occupied_adaptation_workspace_peak_bytes]
       acceptance_metadata(1:6)=[checkpoint%density_residual,checkpoint%coefficient_residual,checkpoint%charge_error,&
         checkpoint%unmixed_density_residual,checkpoint%orthogonality_defect,checkpoint%metric_condition]
       acceptance_metadata(7:11)=[checkpoint%density_tolerance,checkpoint%coefficient_tolerance,&
@@ -367,15 +392,21 @@ contains
       acceptance_metadata(23:33)=checkpoint%gs_acceptance_receipts
       acceptance_metadata(34)=checkpoint%gs_acceptance_tolerance
       acceptance_metadata(35:37)=checkpoint%fixed_center_fractional
+      acceptance_metadata(38:48)=[checkpoint%occupied_subspace_distance,&
+        checkpoint%occupied_electron_count_drift,checkpoint%occupied_density_interior_difference,&
+        checkpoint%occupied_density_boundary_difference,checkpoint%occupied_density_interior_tolerance,&
+        checkpoint%occupied_density_boundary_tolerance,checkpoint%occupied_closure_before,&
+        checkpoint%occupied_closure_after,checkpoint%occupied_selected_edge,&
+        checkpoint%occupied_rejected_edge,checkpoint%occupied_cluster_gap]
     endif
-    call MPI_Bcast(integer_metadata,8,MPI_INTEGER,0,comm,ierr)
-    call MPI_Bcast(fingerprint_metadata,16,MPI_INTEGER8,0,comm,ierr)
+    call MPI_Bcast(integer_metadata,9,MPI_INTEGER,0,comm,ierr)
+    call MPI_Bcast(fingerprint_metadata,17,MPI_INTEGER8,0,comm,ierr)
     call MPI_Bcast(checkpoint%field_coupling_convention,len(checkpoint%field_coupling_convention),MPI_CHARACTER,0,comm,ierr)
     call MPI_Bcast(checkpoint%mlwf_backend,len(checkpoint%mlwf_backend),MPI_CHARACTER,0,comm,ierr)
     call MPI_Bcast(checkpoint%mlwf_version,len(checkpoint%mlwf_version),MPI_CHARACTER,0,comm,ierr)
     call MPI_Bcast(transaction_id,1,MPI_INTEGER8,0,comm,ierr)
     checkpoint%publication_id=transaction_id
-    call MPI_Bcast(acceptance_metadata,37,MPI_DOUBLE_PRECISION,0,comm,ierr)
+    call MPI_Bcast(acceptance_metadata,48,MPI_DOUBLE_PRECISION,0,comm,ierr)
     checkpoint%basis_generation=integer_metadata(1);checkpoint%geometry_generation=integer_metadata(2)
     checkpoint%basis_fingerprint=fingerprint_metadata(1);checkpoint%operator_fingerprint=fingerprint_metadata(2)
     checkpoint%hamiltonian_fingerprint=fingerprint_metadata(3)
@@ -392,6 +423,7 @@ contains
     checkpoint%fixed_center_group_fingerprint=fingerprint_metadata(14)
     checkpoint%affine_proof_workspace_peak_bytes=fingerprint_metadata(15)
     checkpoint%point_projection_workspace_peak_bytes=fingerprint_metadata(16)
+    checkpoint%occupied_adaptation_workspace_peak_bytes=fingerprint_metadata(17)
     checkpoint%density_residual=acceptance_metadata(1);checkpoint%coefficient_residual=acceptance_metadata(2)
     checkpoint%charge_error=acceptance_metadata(3);checkpoint%unmixed_density_residual=acceptance_metadata(4)
     checkpoint%orthogonality_defect=acceptance_metadata(5);checkpoint%metric_condition=acceptance_metadata(6)
@@ -407,11 +439,23 @@ contains
     checkpoint%gs_acceptance_receipts=acceptance_metadata(23:33)
     checkpoint%gs_acceptance_tolerance=acceptance_metadata(34)
     checkpoint%fixed_center_fractional=acceptance_metadata(35:37)
+    checkpoint%occupied_subspace_distance=acceptance_metadata(38)
+    checkpoint%occupied_electron_count_drift=acceptance_metadata(39)
+    checkpoint%occupied_density_interior_difference=acceptance_metadata(40)
+    checkpoint%occupied_density_boundary_difference=acceptance_metadata(41)
+    checkpoint%occupied_density_interior_tolerance=acceptance_metadata(42)
+    checkpoint%occupied_density_boundary_tolerance=acceptance_metadata(43)
+    checkpoint%occupied_closure_before=acceptance_metadata(44)
+    checkpoint%occupied_closure_after=acceptance_metadata(45)
+    checkpoint%occupied_selected_edge=acceptance_metadata(46)
+    checkpoint%occupied_rejected_edge=acceptance_metadata(47)
+    checkpoint%occupied_cluster_gap=acceptance_metadata(48)
     checkpoint%localization_iterations=integer_metadata(4)
     checkpoint%affine_group_order=integer_metadata(5)
     checkpoint%translation_subgroup_order=integer_metadata(6)
     checkpoint%point_cogroup_order=integer_metadata(7)
     checkpoint%fixed_center_group_order=integer_metadata(8)
+    checkpoint%occupied_selected_block_dimension=integer_metadata(9)
     call MPI_Bcast(checkpoint%localization_converged,1,MPI_LOGICAL,0,comm,ierr)
     call MPI_Bcast(checkpoint%mlwf_canonical,1,MPI_LOGICAL,0,comm,ierr)
     call MPI_Bcast(checkpoint%fixed_center_inversion_present,1,MPI_LOGICAL,0,comm,ierr)
@@ -549,11 +593,11 @@ contains
     real_bytes=storage_size(0d0)/8;complex_bytes=storage_size((0d0,0d0))/8
     logical_bytes=storage_size(.false.)/8
     expected_manifest_size=int(storage_size(manifest_magic)/8,int64)+&
-      integer_bytes*int(12+size(checkpoint%center_owner),int64)+integer8_bytes*19_int64+&
+      integer_bytes*int(13+size(checkpoint%center_owner),int64)+integer8_bytes*20_int64+&
       int(storage_size(checkpoint%field_coupling_convention)/8,int64)+&
       int(storage_size(checkpoint%mlwf_backend)/8,int64)+&
       int(storage_size(checkpoint%mlwf_version)/8,int64)+&
-      real_bytes*int(37+size(checkpoint%occupations),int64)+4_int64*logical_bytes+&
+      real_bytes*int(48+size(checkpoint%occupations),int64)+4_int64*logical_bytes+&
       complex_bytes*int(size(checkpoint%coefficients),int64)
   end function
 
@@ -594,10 +638,12 @@ contains
     call digest_integer(hash,checkpoint%fixed_center_group_fingerprint,position)
     call digest_integer(hash,checkpoint%affine_proof_workspace_peak_bytes,position)
     call digest_integer(hash,checkpoint%point_projection_workspace_peak_bytes,position)
+    call digest_integer(hash,checkpoint%occupied_adaptation_workspace_peak_bytes,position)
     call digest_integer(hash,int(checkpoint%affine_group_order,int64),position)
     call digest_integer(hash,int(checkpoint%translation_subgroup_order,int64),position)
     call digest_integer(hash,int(checkpoint%point_cogroup_order,int64),position)
     call digest_integer(hash,int(checkpoint%fixed_center_group_order,int64),position)
+    call digest_integer(hash,int(checkpoint%occupied_selected_block_dimension,int64),position)
     do i=1,len(checkpoint%field_coupling_convention)
       call digest_integer(hash,int(iachar(checkpoint%field_coupling_convention(i:i)),int64),position)
     enddo
@@ -632,6 +678,17 @@ contains
     do i=1,3;call digest_real(hash,checkpoint%mlwf_spreads(i),position);enddo
     do i=1,3;call digest_real(hash,checkpoint%mlwf_symmetry_receipts(i),position);enddo
     do i=1,3;call digest_real(hash,checkpoint%fixed_center_fractional(i),position);enddo
+    call digest_real(hash,checkpoint%occupied_subspace_distance,position)
+    call digest_real(hash,checkpoint%occupied_electron_count_drift,position)
+    call digest_real(hash,checkpoint%occupied_density_interior_difference,position)
+    call digest_real(hash,checkpoint%occupied_density_boundary_difference,position)
+    call digest_real(hash,checkpoint%occupied_density_interior_tolerance,position)
+    call digest_real(hash,checkpoint%occupied_density_boundary_tolerance,position)
+    call digest_real(hash,checkpoint%occupied_closure_before,position)
+    call digest_real(hash,checkpoint%occupied_closure_after,position)
+    call digest_real(hash,checkpoint%occupied_selected_edge,position)
+    call digest_real(hash,checkpoint%occupied_rejected_edge,position)
+    call digest_real(hash,checkpoint%occupied_cluster_gap,position)
     do i=1,size(checkpoint%gs_acceptance_receipts)
       call digest_real(hash,checkpoint%gs_acceptance_receipts(i),position)
     end do
@@ -958,21 +1015,22 @@ contains
     integer,intent(in)::comm
     type(s_dg_overlapping_wannier_checkpoint),intent(in)::checkpoint
     integer,intent(out)::bad
-    integer::ierr,dims(4),dims_min(4),dims_max(4),integer_values(11),integer_min(11),integer_max(11)
-    integer(int64)::fingerprints(16),fingerprints_min(16),fingerprints_max(16)
+    integer::ierr,dims(4),dims_min(4),dims_max(4),integer_values(12),integer_min(12),integer_max(12)
+    integer(int64)::fingerprints(17),fingerprints_min(17),fingerprints_max(17)
     character(64)::convention_reference
     character(32)::backend_reference,version_reference
     integer,allocatable::owner_reference(:)
     complex(8),allocatable::coefficients_reference(:,:)
     real(8),allocatable::occupations_reference(:)
-    real(8)::local_defect,global_defect,metrics(37),metrics_min(37),metrics_max(37)
+    real(8)::local_defect,global_defect,metrics(48),metrics_min(48),metrics_max(48)
     dims=[size(checkpoint%center_owner),size(checkpoint%coefficients,1),size(checkpoint%coefficients,2),&
       size(checkpoint%occupations)]
     integer_values=[checkpoint%basis_generation,checkpoint%geometry_generation,&
       checkpoint%localization_iterations,merge(1,0,checkpoint%localization_converged),&
       merge(1,0,checkpoint%mlwf_canonical),merge(1,0,checkpoint%fixed_center_inversion_present),&
       merge(1,0,checkpoint%accepted),checkpoint%affine_group_order,checkpoint%translation_subgroup_order,&
-      checkpoint%point_cogroup_order,checkpoint%fixed_center_group_order]
+      checkpoint%point_cogroup_order,checkpoint%fixed_center_group_order,&
+      checkpoint%occupied_selected_block_dimension]
     fingerprints=[checkpoint%basis_fingerprint,checkpoint%operator_fingerprint,&
       checkpoint%hamiltonian_fingerprint,checkpoint%observable_fingerprint,&
       checkpoint%global_lcfo_fingerprint,checkpoint%occupation_block_fingerprint,&
@@ -980,7 +1038,8 @@ contains
       checkpoint%mlwf_input_fingerprint,checkpoint%mlwf_transform_fingerprint,&
       checkpoint%mlwf_coordinator_bytes,checkpoint%mlwf_workspace_peak_bytes,&
       checkpoint%mlwf_coordinator_byte_limit,checkpoint%fixed_center_group_fingerprint,&
-      checkpoint%affine_proof_workspace_peak_bytes,checkpoint%point_projection_workspace_peak_bytes]
+      checkpoint%affine_proof_workspace_peak_bytes,checkpoint%point_projection_workspace_peak_bytes,&
+      checkpoint%occupied_adaptation_workspace_peak_bytes]
     metrics(1:16)=[checkpoint%density_residual,checkpoint%coefficient_residual,checkpoint%charge_error,&
       checkpoint%unmixed_density_residual,checkpoint%orthogonality_defect,checkpoint%metric_condition,&
       checkpoint%density_tolerance,checkpoint%coefficient_tolerance,checkpoint%orthogonality_tolerance,&
@@ -990,14 +1049,19 @@ contains
     metrics(17:19)=checkpoint%mlwf_spreads;metrics(20:22)=checkpoint%mlwf_symmetry_receipts
     metrics(23:33)=checkpoint%gs_acceptance_receipts;metrics(34)=checkpoint%gs_acceptance_tolerance
     metrics(35:37)=checkpoint%fixed_center_fractional
+    metrics(38:48)=[checkpoint%occupied_subspace_distance,checkpoint%occupied_electron_count_drift,&
+      checkpoint%occupied_density_interior_difference,checkpoint%occupied_density_boundary_difference,&
+      checkpoint%occupied_density_interior_tolerance,checkpoint%occupied_density_boundary_tolerance,&
+      checkpoint%occupied_closure_before,checkpoint%occupied_closure_after,&
+      checkpoint%occupied_selected_edge,checkpoint%occupied_rejected_edge,checkpoint%occupied_cluster_gap]
     call MPI_Allreduce(dims,dims_min,4,MPI_INTEGER,MPI_MIN,comm,ierr)
     call MPI_Allreduce(dims,dims_max,4,MPI_INTEGER,MPI_MAX,comm,ierr)
-    call MPI_Allreduce(integer_values,integer_min,11,MPI_INTEGER,MPI_MIN,comm,ierr)
-    call MPI_Allreduce(integer_values,integer_max,11,MPI_INTEGER,MPI_MAX,comm,ierr)
-    call MPI_Allreduce(fingerprints,fingerprints_min,16,MPI_INTEGER8,MPI_MIN,comm,ierr)
-    call MPI_Allreduce(fingerprints,fingerprints_max,16,MPI_INTEGER8,MPI_MAX,comm,ierr)
-    call MPI_Allreduce(metrics,metrics_min,37,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
-    call MPI_Allreduce(metrics,metrics_max,37,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(integer_values,integer_min,12,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(integer_values,integer_max,12,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(fingerprints,fingerprints_min,17,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(fingerprints,fingerprints_max,17,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(metrics,metrics_min,48,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(metrics,metrics_max,48,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     bad=0
     if(any(dims_min/=dims_max).or.any(integer_min/=integer_max).or.any(fingerprints_min/=fingerprints_max).or.&
        any(metrics_min/=metrics_max))bad=1
@@ -1078,6 +1142,12 @@ contains
     if(.not.all(ieee_is_finite(checkpoint%mlwf_spreads)).or.&
        .not.all(ieee_is_finite(checkpoint%mlwf_symmetry_receipts)))bad=ibset(bad,10)
     if(.not.all(ieee_is_finite(checkpoint%fixed_center_fractional)))bad=ibset(bad,10)
+    if(.not.all(ieee_is_finite([checkpoint%occupied_subspace_distance,&
+       checkpoint%occupied_electron_count_drift,checkpoint%occupied_density_interior_difference,&
+       checkpoint%occupied_density_boundary_difference,checkpoint%occupied_closure_before,&
+       checkpoint%occupied_density_interior_tolerance,checkpoint%occupied_density_boundary_tolerance,&
+       checkpoint%occupied_closure_after,checkpoint%occupied_selected_edge,&
+       checkpoint%occupied_rejected_edge,checkpoint%occupied_cluster_gap])))bad=ibset(bad,10)
     if(.not.all(ieee_is_finite(checkpoint%gs_acceptance_receipts)).or.&
        .not.ieee_is_finite(checkpoint%gs_acceptance_tolerance).or.&
        checkpoint%gs_acceptance_tolerance<=0d0.or.minval(checkpoint%gs_acceptance_receipts)<0d0.or.&
@@ -1113,6 +1183,25 @@ contains
        checkpoint%fixed_center_group_order>48.or..not.checkpoint%fixed_center_inversion_present.or.&
        checkpoint%affine_proof_workspace_peak_bytes<=0_int64.or.&
        checkpoint%point_projection_workspace_peak_bytes<=0_int64)bad=ibset(bad,14)
+    if(checkpoint%occupied_adaptation_workspace_peak_bytes<=0_int64.or.&
+       checkpoint%occupied_selected_block_dimension<=0.or.checkpoint%occupied_subspace_distance<0d0.or.&
+       checkpoint%occupied_electron_count_drift<0d0.or.&
+       checkpoint%occupied_density_interior_difference<0d0.or.&
+       checkpoint%occupied_density_boundary_difference<0d0.or.&
+       checkpoint%occupied_closure_before<0d0.or.checkpoint%occupied_closure_after<0d0.or.&
+       checkpoint%occupied_closure_after>checkpoint%symmetry_tolerance.or.&
+       checkpoint%occupied_closure_after>checkpoint%occupied_closure_before.or.&
+       checkpoint%occupied_electron_count_drift>checkpoint%charge_tolerance.or.&
+       checkpoint%occupied_density_interior_tolerance<=0d0.or.&
+       checkpoint%occupied_density_boundary_tolerance<=0d0.or.&
+       checkpoint%occupied_density_interior_difference>checkpoint%occupied_density_interior_tolerance.or.&
+       checkpoint%occupied_density_boundary_difference>checkpoint%occupied_density_boundary_tolerance.or.&
+       checkpoint%occupied_selected_edge<checkpoint%occupied_rejected_edge.or.&
+       checkpoint%occupied_cluster_gap<=checkpoint%symmetry_tolerance*max(1d0,&
+         abs(checkpoint%occupied_selected_edge),abs(checkpoint%occupied_rejected_edge)).or.&
+       abs(checkpoint%occupied_cluster_gap-(checkpoint%occupied_selected_edge-&
+         checkpoint%occupied_rejected_edge))>64d0*epsilon(1d0)*max(1d0,&
+         abs(checkpoint%occupied_cluster_gap)))bad=ibset(bad,14)
     if(.not.finite_complex(checkpoint%overlap).or..not.finite_complex(checkpoint%hamiltonian0).or.&
        .not.finite_complex3(checkpoint%position).or..not.finite_complex3(checkpoint%velocity).or.&
        .not.finite_complex(checkpoint%coefficients))bad=ibset(bad,15)
@@ -1184,6 +1273,31 @@ contains
        checkpoint%fixed_center_group_order>48.or..not.checkpoint%fixed_center_inversion_present.or.&
        checkpoint%affine_proof_workspace_peak_bytes<=0_int64.or.&
        checkpoint%point_projection_workspace_peak_bytes<=0_int64)code=ibset(code,12)
+    if(.not.all(ieee_is_finite([checkpoint%occupied_subspace_distance,&
+       checkpoint%occupied_electron_count_drift,checkpoint%occupied_density_interior_difference,&
+       checkpoint%occupied_density_boundary_difference,checkpoint%occupied_closure_before,&
+       checkpoint%occupied_density_interior_tolerance,checkpoint%occupied_density_boundary_tolerance,&
+       checkpoint%occupied_closure_after,checkpoint%occupied_selected_edge,&
+       checkpoint%occupied_rejected_edge,checkpoint%occupied_cluster_gap])).or.&
+       checkpoint%occupied_adaptation_workspace_peak_bytes<=0_int64.or.&
+       checkpoint%occupied_selected_block_dimension<=0.or.checkpoint%occupied_subspace_distance<0d0.or.&
+       checkpoint%occupied_electron_count_drift<0d0.or.&
+       checkpoint%occupied_density_interior_difference<0d0.or.&
+       checkpoint%occupied_density_boundary_difference<0d0.or.&
+       checkpoint%occupied_closure_before<0d0.or.checkpoint%occupied_closure_after<0d0.or.&
+       checkpoint%occupied_closure_after>checkpoint%symmetry_tolerance.or.&
+       checkpoint%occupied_closure_after>checkpoint%occupied_closure_before.or.&
+       checkpoint%occupied_electron_count_drift>checkpoint%charge_tolerance.or.&
+       checkpoint%occupied_density_interior_tolerance<=0d0.or.&
+       checkpoint%occupied_density_boundary_tolerance<=0d0.or.&
+       checkpoint%occupied_density_interior_difference>checkpoint%occupied_density_interior_tolerance.or.&
+       checkpoint%occupied_density_boundary_difference>checkpoint%occupied_density_boundary_tolerance.or.&
+       checkpoint%occupied_selected_edge<checkpoint%occupied_rejected_edge.or.&
+       checkpoint%occupied_cluster_gap<=checkpoint%symmetry_tolerance*max(1d0,&
+         abs(checkpoint%occupied_selected_edge),abs(checkpoint%occupied_rejected_edge)).or.&
+       abs(checkpoint%occupied_cluster_gap-(checkpoint%occupied_selected_edge-&
+         checkpoint%occupied_rejected_edge))>64d0*epsilon(1d0)*max(1d0,&
+         abs(checkpoint%occupied_cluster_gap)))code=ibset(code,12)
     if(.not.all(ieee_is_finite(checkpoint%gs_acceptance_receipts)).or.&
        .not.ieee_is_finite(checkpoint%gs_acceptance_tolerance).or.&
        checkpoint%gs_acceptance_tolerance<=0d0.or.minval(checkpoint%gs_acceptance_receipts)<0d0.or.&

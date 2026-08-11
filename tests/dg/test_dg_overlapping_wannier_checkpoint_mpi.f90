@@ -36,6 +36,15 @@ program test_dg_overlapping_wannier_checkpoint_mpi
   a%fixed_center_inversion_present=.true.
   a%affine_proof_workspace_peak_bytes=1024_int64
   a%point_projection_workspace_peak_bytes=1536_int64
+  a%occupied_adaptation_workspace_peak_bytes=3072_int64
+  a%occupied_subspace_distance=0.25d0
+  a%occupied_electron_count_drift=2d-13
+  a%occupied_density_interior_difference=3d-12
+  a%occupied_density_boundary_difference=4d-11
+  a%occupied_density_interior_tolerance=1d-9;a%occupied_density_boundary_tolerance=2d-9
+  a%occupied_closure_before=0.5d0;a%occupied_closure_after=5d-13
+  a%occupied_selected_edge=0.75d0;a%occupied_rejected_edge=0.25d0
+  a%occupied_cluster_gap=0.5d0;a%occupied_selected_block_dimension=2
   a%field_coupling_convention='cell_wrapped_length_velocity'
   a%density_residual=1d-12;a%coefficient_residual=2d-12;a%charge_error=3d-13;a%accepted=.true.
   a%unmixed_density_residual=4d-12;a%orthogonality_defect=5d-12;a%metric_condition=2d0
@@ -119,6 +128,20 @@ program test_dg_overlapping_wannier_checkpoint_mpi
     b%affine_proof_workspace_peak_bytes==a%affine_proof_workspace_peak_bytes.and.&
     b%point_projection_workspace_peak_bytes==a%point_projection_workspace_peak_bytes,&
     'two-layer affine proof and fixed-center projection provenance round trip')
+  call require(b%occupied_adaptation_workspace_peak_bytes==a%occupied_adaptation_workspace_peak_bytes.and.&
+    b%occupied_selected_block_dimension==a%occupied_selected_block_dimension.and.&
+    b%occupied_subspace_distance==a%occupied_subspace_distance.and.&
+    b%occupied_electron_count_drift==a%occupied_electron_count_drift.and.&
+    b%occupied_density_interior_difference==a%occupied_density_interior_difference.and.&
+    b%occupied_density_boundary_difference==a%occupied_density_boundary_difference.and.&
+    b%occupied_density_interior_tolerance==a%occupied_density_interior_tolerance.and.&
+    b%occupied_density_boundary_tolerance==a%occupied_density_boundary_tolerance.and.&
+    b%occupied_closure_before==a%occupied_closure_before.and.&
+    b%occupied_closure_after==a%occupied_closure_after.and.&
+    b%occupied_selected_edge==a%occupied_selected_edge.and.&
+    b%occupied_rejected_edge==a%occupied_rejected_edge.and.&
+    b%occupied_cluster_gap==a%occupied_cluster_gap,&
+    'symmetry-adapted occupied evidence round trip')
   call require(b%localization_converged.and.b%localization_iterations==a%localization_iterations.and.&
     b%localization_initial_spread==a%localization_initial_spread.and.&
     b%localization_final_spread==a%localization_final_spread.and.&
@@ -158,6 +181,26 @@ program test_dg_overlapping_wannier_checkpoint_mpi
   call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
   call require(.not.ok,'inconsistent affine factor orders rejected')
   a%affine_group_order=96
+  a%occupied_adaptation_workspace_peak_bytes=0_int64
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'zero occupied-adaptation workspace rejected')
+  a%occupied_adaptation_workspace_peak_bytes=3072_int64
+  a%occupied_cluster_gap=0.4d0
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'inconsistent occupied cluster edges and gap rejected')
+  a%occupied_cluster_gap=0.5d0
+  a%occupied_density_interior_difference=2d-9
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'occupied interior density difference outside named tolerance rejected')
+  a%occupied_density_interior_difference=3d-12
+  a%occupied_density_boundary_difference=3d-9
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'occupied boundary density difference outside named tolerance rejected')
+  a%occupied_density_boundary_difference=4d-11
+  a%occupied_subspace_distance=ieee_value(0d0,ieee_positive_inf)
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'nonfinite occupied-subspace evidence rejected')
+  a%occupied_subspace_distance=0.25d0
   a%gs_acceptance_receipts(11)=2d-9
   call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
   call require(.not.ok,'out-of-tolerance reconstructed-GS receipt rejected')

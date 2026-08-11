@@ -563,6 +563,7 @@ contains
     complex(8),allocatable::periodic_phase(:,:),global_seed_values(:,:),global_closed_core(:,:),&
       local_occupied_values(:,:),orbital_owned_full_values(:,:),center_local_buffer_values(:,:),&
       adapted_occupied_candidates(:,:)
+    complex(8),allocatable::occupied_overlap_local(:,:),occupied_overlap_global(:,:)
     complex(8),allocatable::w90_anchors(:,:),w90_m_matrix(:,:,:),w90_a_matrix(:,:),w90_transform(:,:)
     complex(8),allocatable::fixed_center_rows(:,:,:),fixed_center_representation(:,:),fixed_center_identity(:,:)
     complex(8),allocatable::lcfo_fragment_contribution(:,:),lcfo_occupied_core(:,:)
@@ -577,6 +578,8 @@ contains
     real(8),allocatable::localized_centers(:,:),localized_center_magnitudes(:,:)
     real(8),allocatable::w90_fractional(:,:),w90_spreads(:),w90_eigenvalues(:),w90_atoms_cart(:,:),&
       fixed_center_eigenvalues(:),adapted_occupied_spectrum(:)
+    real(8),allocatable::occupied_density_before(:),occupied_density_after(:),occupied_density_difference(:),&
+      occupied_pre_total_residual(:),occupied_pre_boundary_residual(:),occupied_pre_interior_residual(:)
     type(t_dg_projection_channel),allocatable::manifest_channels(:)
     type(s_dg_overlapping_wannier_construction)::symmetry_basis
     integer(8),allocatable::physical_ids(:),box_ids(:),symmetry_map(:,:),local_box_ids(:),&
@@ -606,7 +609,7 @@ contains
       global_required_retained_rank
     integer::global_identity_operation
     integer::fixed_center_group_order,fixed_center_operation,fixed_center_identity_operation,&
-      adapted_occupied_rank
+      adapted_occupied_rank,adapted_occupied_selected_block_dimension
     integer::lcfo_symmetry_worst_operation,lcfo_symmetry_worst_generator_index
     real(8),allocatable::lcfo_total_symmetry_residual(:),lcfo_boundary_symmetry_residual(:),&
       lcfo_interior_symmetry_residual(:)
@@ -614,7 +617,7 @@ contains
     integer::complete_sp_core_atom_count
     integer(8)::expected_core_count,expected_box_count,basis_fingerprint,operator_fingerprint,&
       pseudopotential_fingerprint,nbox8,ncore8,product8,nxy8,local_exact_symmetry_fingerprint,&
-      lcfo_symmetry_workspace_peak,adapted_occupied_workspace_peak
+      lcfo_symmetry_workspace_peak,adapted_occupied_workspace_peak,occupied_pre_closure_workspace_peak
     integer(8)::w90_coordinator_bytes,w90_workspace_peak,w90_byte_limit
     integer(8)::one_shot_workspace_peak,one_shot_operator_fingerprint
     integer(8)::w90_symmetry_workspace_peak
@@ -625,6 +628,11 @@ contains
     real(8)::condition_number,closure_residual,spread_max,gauge_correction
     real(8)::adapted_occupied_trace,adapted_occupied_closure,adapted_occupied_gamma_defect,&
       adapted_occupied_selected_edge,adapted_occupied_rejected_edge,adapted_occupied_cluster_gap
+    real(8)::adapted_occupied_subspace_distance,adapted_occupied_density_interior_difference,&
+      adapted_occupied_density_boundary_difference,local_occupied_density_interior_difference,&
+      local_occupied_density_boundary_difference,adapted_occupied_closure_before,&
+      local_occupied_density_interior_norm,local_occupied_density_boundary_norm,&
+      global_occupied_density_interior_norm,global_occupied_density_boundary_norm
     real(8)::ow_partition_sum_defect,ow_partition_gradient_defect,window_axis(3),&
       window_axis_derivative(3),window_coordinate
     real(8)::ow_stitched_electron_count,ow_stitched_s_hermiticity,ow_stitched_rho_hermiticity
@@ -866,6 +874,19 @@ contains
     ow_saved_eigenexa_comm=info%icomm_o
     call finalize_eigenexa(info)
     info%icomm_o=dc%icomm_tot
+    call init_eigenexa_mod(info,nstate,direct_block_only=.true.)
+    allocate(occupied_pre_total_residual(fixed_center_group_order),&
+      occupied_pre_boundary_residual(fixed_center_group_order),&
+      occupied_pre_interior_residual(fixed_center_group_order))
+    call measure_dg_rank_fixed_symmetry_residuals_eigenexa(info,dc%icomm_tot,lcfo_occupied_core(1:nstate,:),&
+      ow_core_weights,fixed_center_symmetry_map,lcfo_boundary_mask,&
+      total_residual=occupied_pre_total_residual,boundary_residual=occupied_pre_boundary_residual,&
+      interior_residual=occupied_pre_interior_residual,ok=ok,message=message,&
+      workspace_peak_bytes=occupied_pre_closure_workspace_peak)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'pre-adaptation occupied closure measurement failed';endif
+    adapted_occupied_closure_before=maxval(occupied_pre_total_residual)
+    deallocate(occupied_pre_total_residual,occupied_pre_boundary_residual,occupied_pre_interior_residual)
+    call finalize_eigenexa(info)
     call init_eigenexa_mod(info,nstate*fixed_center_group_order,direct_block_only=.true.)
     call build_dg_group_averaged_occupied_candidates_eigenexa(info,dc%icomm_tot,&
       lcfo_occupied_core(1:nstate,:),ow_core_weights,fixed_center_symmetry_map,&
@@ -878,6 +899,47 @@ contains
     if(.not.ok.or.adapted_occupied_rank/=nstate)then
       write(0,'(a)')trim(message);error stop 'fixed-center occupied-subspace adaptation failed'
     endif
+    adapted_occupied_workspace_peak=max(adapted_occupied_workspace_peak,&
+      occupied_pre_closure_workspace_peak)
+    allocate(occupied_overlap_local(nstate,nstate),occupied_overlap_global(nstate,nstate))
+    do io=1,nstate;do i=1,nstate
+      occupied_overlap_local(i,io)=sum(ow_core_weights*conjg(lcfo_occupied_core(i,:))*&
+        adapted_occupied_candidates(io,:))
+    enddo;enddo
+    call MPI_Allreduce(occupied_overlap_local,occupied_overlap_global,nstate*nstate,&
+      MPI_DOUBLE_COMPLEX,MPI_SUM,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS)error stop 'occupied subspace-distance reduction failed'
+    adapted_occupied_subspace_distance=sqrt(max(0d0,1d0-sum(abs(occupied_overlap_global)**2)/real(nstate,8)))
+    deallocate(occupied_overlap_local,occupied_overlap_global)
+    allocate(occupied_density_before(ncore),occupied_density_after(ncore),occupied_density_difference(ncore))
+    occupied_density_before=sum(abs(lcfo_occupied_core(1:nstate,:))**2,dim=1)
+    occupied_density_after=sum(abs(adapted_occupied_candidates)**2,dim=1)
+    occupied_density_difference=abs(occupied_density_after-occupied_density_before)
+    local_occupied_density_interior_difference=sum(ow_core_weights*occupied_density_difference**2,&
+      mask=.not.lcfo_boundary_mask)
+    local_occupied_density_boundary_difference=sum(ow_core_weights*occupied_density_difference**2,&
+      mask=lcfo_boundary_mask)
+    local_occupied_density_interior_norm=sum(ow_core_weights*occupied_density_before**2,&
+      mask=.not.lcfo_boundary_mask)
+    local_occupied_density_boundary_norm=sum(ow_core_weights*occupied_density_before**2,&
+      mask=lcfo_boundary_mask)
+    call MPI_Allreduce(local_occupied_density_interior_difference,&
+      adapted_occupied_density_interior_difference,1,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr)
+    call MPI_Allreduce(local_occupied_density_boundary_difference,&
+      adapted_occupied_density_boundary_difference,1,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr)
+    call MPI_Allreduce(local_occupied_density_interior_norm,global_occupied_density_interior_norm,&
+      1,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr)
+    call MPI_Allreduce(local_occupied_density_boundary_norm,global_occupied_density_boundary_norm,&
+      1,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS)error stop 'occupied density-difference reduction failed'
+    adapted_occupied_density_interior_difference=sqrt(adapted_occupied_density_interior_difference/&
+      max(tiny(1d0),global_occupied_density_interior_norm))
+    adapted_occupied_density_boundary_difference=sqrt(adapted_occupied_density_boundary_difference/&
+      max(tiny(1d0),global_occupied_density_boundary_norm))
+    deallocate(occupied_density_before,occupied_density_after,occupied_density_difference)
+    adapted_occupied_selected_block_dimension=count(&
+      abs(adapted_occupied_spectrum-adapted_occupied_selected_edge)<=&
+      dg_ow_symmetry_tolerance*max(1d0,abs(adapted_occupied_selected_edge)))
     global_seed_values(1:nstate,:)=adapted_occupied_candidates
     deallocate(adapted_occupied_candidates,adapted_occupied_spectrum)
     if(rank==0)write(*,'(a,2(a,i0),7(a,es16.8),a,i0)')&
@@ -1266,7 +1328,12 @@ contains
       w90_input_fingerprint,w90_transform_fingerprint,w90_spread,w90_coordinator_bytes,&
       w90_workspace_peak,w90_byte_limit,[w90_identity_defect,w90_unitarity_defect,w90_closure_defect],&
       .true.,w90_symmetry_workspace_peak,global_point_integer_rotations,&
-      global_point_fractional_translations)
+      global_point_fractional_translations,adapted_occupied_subspace_distance,&
+      abs(adapted_occupied_trace-real(nstate,8)),adapted_occupied_density_interior_difference,&
+      adapted_occupied_density_boundary_difference,adapted_occupied_closure_before,&
+      adapted_occupied_closure,adapted_occupied_selected_edge,adapted_occupied_rejected_edge,&
+      adapted_occupied_cluster_gap,adapted_occupied_selected_block_dimension,&
+      adapted_occupied_workspace_peak)
     call write_dg_overlapping_wannier_checkpoint(dc%icomm_tot,trim(prefix),ow_checkpoint,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'overlapping-Wannier checkpoint publication failed';endif
     call compute_ow_periodic_spread(dc%icomm_tot,spread_max)
@@ -3038,7 +3105,11 @@ contains
       localization_iterations,localization_converged,mlwf_input_fingerprint,&
       mlwf_transform_fingerprint,mlwf_spreads,mlwf_coordinator_bytes,mlwf_workspace_peak_bytes,&
       mlwf_coordinator_byte_limit,mlwf_symmetry_receipts,mlwf_canonical,affine_workspace_peak_bytes,&
-      affine_integer_rotations,affine_fractional_translations)
+      affine_integer_rotations,affine_fractional_translations,occupied_subspace_distance,&
+      occupied_electron_count_drift,occupied_density_interior_difference,&
+      occupied_density_boundary_difference,occupied_closure_before,occupied_closure_after,&
+      occupied_selected_edge,occupied_rejected_edge,occupied_cluster_gap,&
+      occupied_selected_block_dimension,occupied_adaptation_workspace_peak_bytes)
     real(8),intent(in)::occupations(:),condition_number,closure_residual
     integer(8),intent(in)::operator_fingerprint
     real(8),intent(in)::localization_initial_spread,localization_final_spread,&
@@ -3052,6 +3123,12 @@ contains
     integer(8),intent(in)::affine_workspace_peak_bytes
     integer,intent(in)::affine_integer_rotations(:,:,:)
     real(8),intent(in)::affine_fractional_translations(:,:)
+    real(8),intent(in)::occupied_subspace_distance,occupied_electron_count_drift,&
+      occupied_density_interior_difference,occupied_density_boundary_difference,&
+      occupied_closure_before,occupied_closure_after,occupied_selected_edge,&
+      occupied_rejected_edge,occupied_cluster_gap
+    integer,intent(in)::occupied_selected_block_dimension
+    integer(8),intent(in)::occupied_adaptation_workspace_peak_bytes
     integer::rank,i,j,nowned,nbox,nproc,ierr,axis,point,ownership_count,operation
     integer(8)::tail_count8,occupation_hash,redistribution_local_hash,redistribution_global_hash,word
     integer(8)::fixed_center_group_fingerprint,point_projection_workspace_peak_bytes
@@ -3219,6 +3296,19 @@ contains
     ow_checkpoint%fixed_center_group_fingerprint=fixed_center_group_fingerprint
     ow_checkpoint%affine_proof_workspace_peak_bytes=affine_workspace_peak_bytes
     ow_checkpoint%point_projection_workspace_peak_bytes=point_projection_workspace_peak_bytes
+    ow_checkpoint%occupied_subspace_distance=occupied_subspace_distance
+    ow_checkpoint%occupied_electron_count_drift=occupied_electron_count_drift
+    ow_checkpoint%occupied_density_interior_difference=occupied_density_interior_difference
+    ow_checkpoint%occupied_density_boundary_difference=occupied_density_boundary_difference
+    ow_checkpoint%occupied_density_interior_tolerance=dg_dc_gs_final_density_tolerance
+    ow_checkpoint%occupied_density_boundary_tolerance=10d0*dg_dc_gs_final_density_tolerance
+    ow_checkpoint%occupied_closure_before=occupied_closure_before
+    ow_checkpoint%occupied_closure_after=occupied_closure_after
+    ow_checkpoint%occupied_selected_edge=occupied_selected_edge
+    ow_checkpoint%occupied_rejected_edge=occupied_rejected_edge
+    ow_checkpoint%occupied_cluster_gap=occupied_cluster_gap
+    ow_checkpoint%occupied_selected_block_dimension=occupied_selected_block_dimension
+    ow_checkpoint%occupied_adaptation_workspace_peak_bytes=occupied_adaptation_workspace_peak_bytes
     allocate(ow_checkpoint%center_owner,source=ow_basis%center_owner_rank)
     allocate(ow_checkpoint%overlap,source=ow_srows)
     allocate(ow_checkpoint%hamiltonian0,source=hrows)

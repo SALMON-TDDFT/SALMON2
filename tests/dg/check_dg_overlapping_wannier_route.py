@@ -94,6 +94,19 @@ for provenance_field in (
     "fixed_center_inversion_present",
     "affine_proof_workspace_peak_bytes",
     "point_projection_workspace_peak_bytes",
+    "occupied_subspace_distance",
+    "occupied_electron_count_drift",
+    "occupied_density_interior_difference",
+    "occupied_density_boundary_difference",
+    "occupied_density_interior_tolerance",
+    "occupied_density_boundary_tolerance",
+    "occupied_closure_before",
+    "occupied_closure_after",
+    "occupied_selected_edge",
+    "occupied_rejected_edge",
+    "occupied_cluster_gap",
+    "occupied_selected_block_dimension",
+    "occupied_adaptation_workspace_peak_bytes",
 ):
     assert provenance_field in ow_checkpoint_source.lower(), (
         f"V3 checkpoint must serialize and validate {provenance_field}"
@@ -109,7 +122,7 @@ assert re.search(
 adaptation_call = ow_ground_state_body.find(
     "call build_dg_group_averaged_occupied_candidates_eigenexa"
 )
-affine_measurement_call = ow_ground_state_body.find(
+affine_measurement_call = ow_ground_state_body.rfind(
     "call measure_dg_rank_fixed_symmetry_residuals_eigenexa"
 )
 dmn_begin_call = ow_ground_state_body.find("call begin_sawf_dmn")
