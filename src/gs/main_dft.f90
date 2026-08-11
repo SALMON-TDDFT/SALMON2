@@ -1167,6 +1167,7 @@ contains
     if(rank==0)call finish_sawf_dmn(fixed_center_dmn_writer,fixed_center_operations,writer_ok,message)
     call MPI_Bcast(writer_ok,1,MPI_LOGICAL,0,dc%icomm_tot,ierr)
     if(.not.writer_ok)then
+      if(rank==0)write(0,'(a)')trim(message)
       if(rank==0)call abort_sawf_dmn(fixed_center_dmn_writer)
       error stop 'fixed-center DMN transaction could not finish'
     endif

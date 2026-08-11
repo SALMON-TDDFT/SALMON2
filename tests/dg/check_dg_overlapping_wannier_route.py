@@ -1320,6 +1320,12 @@ assert min(dmn_begin, dmn_append, dmn_finish, w90_setup) >= 0, (
 assert dmn_begin < dmn_append < dmn_finish < w90_setup, (
     "fixed-center DMN transaction must complete before Wannier90 setup"
 )
+assert re.search(
+    r"if\s*\(\s*\.not\.\s*writer_ok\s*\)\s*then\s*.*?write\s*\(\s*0\s*,\s*['\"]\(a\)['\"]\s*\)\s*"
+    r"trim\s*\(\s*message\s*\).*?fixed-center\s+DMN\s+transaction\s+could\s+not\s+finish",
+    adapter_body,
+    re.I | re.S,
+), "a rejected fixed-center DMN finish must publish its exact validation reason"
 assert "site_symmetry = .true." in w90_source.lower(), (
     "Wannier90 setup must enable site_symmetry"
 )
