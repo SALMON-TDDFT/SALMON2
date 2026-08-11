@@ -52,6 +52,7 @@ use dg_overlapping_wannier_construction, only: accumulate_dg_lcfo_buffer_contrib
 use dg_overlapping_wannier_construction, only: measure_dg_rank_fixed_symmetry_residuals
 #ifdef USE_EIGENEXA
 use dg_overlapping_wannier_construction, only: measure_dg_rank_fixed_symmetry_residuals_eigenexa
+use dg_overlapping_wannier_construction, only: build_dg_group_averaged_occupied_candidates_eigenexa
 #endif
 use dg_overlapping_wannier_construction, only: select_dg_fixed_rank_symmetry_closed_subspace
 use dg_overlapping_wannier_construction, only: find_dg_group_identity
@@ -560,7 +561,8 @@ contains
 
   subroutine run_dg_overlapping_wannier_ground_state_for_main()
     complex(8),allocatable::periodic_phase(:,:),global_seed_values(:,:),global_closed_core(:,:),&
-      local_occupied_values(:,:),orbital_owned_full_values(:,:),center_local_buffer_values(:,:)
+      local_occupied_values(:,:),orbital_owned_full_values(:,:),center_local_buffer_values(:,:),&
+      adapted_occupied_candidates(:,:)
     complex(8),allocatable::w90_anchors(:,:),w90_m_matrix(:,:,:),w90_a_matrix(:,:),w90_transform(:,:)
     complex(8),allocatable::fixed_center_rows(:,:,:),fixed_center_representation(:,:),fixed_center_identity(:,:)
     complex(8),allocatable::lcfo_fragment_contribution(:,:),lcfo_occupied_core(:,:)
@@ -574,7 +576,7 @@ contains
       ow_box_density(:)
     real(8),allocatable::localized_centers(:,:),localized_center_magnitudes(:,:)
     real(8),allocatable::w90_fractional(:,:),w90_spreads(:),w90_eigenvalues(:),w90_atoms_cart(:,:),&
-      fixed_center_eigenvalues(:)
+      fixed_center_eigenvalues(:),adapted_occupied_spectrum(:)
     type(t_dg_projection_channel),allocatable::manifest_channels(:)
     type(s_dg_overlapping_wannier_construction)::symmetry_basis
     integer(8),allocatable::physical_ids(:),box_ids(:),symmetry_map(:,:),local_box_ids(:),&
@@ -603,7 +605,8 @@ contains
     integer::global_seed_count,global_retained_rank,global_occupied_count,global_projection_count,&
       global_required_retained_rank
     integer::global_identity_operation
-    integer::fixed_center_group_order,fixed_center_operation
+    integer::fixed_center_group_order,fixed_center_operation,fixed_center_identity_operation,&
+      adapted_occupied_rank
     integer::lcfo_symmetry_worst_operation,lcfo_symmetry_worst_generator_index
     real(8),allocatable::lcfo_total_symmetry_residual(:),lcfo_boundary_symmetry_residual(:),&
       lcfo_interior_symmetry_residual(:)
@@ -611,7 +614,7 @@ contains
     integer::complete_sp_core_atom_count
     integer(8)::expected_core_count,expected_box_count,basis_fingerprint,operator_fingerprint,&
       pseudopotential_fingerprint,nbox8,ncore8,product8,nxy8,local_exact_symmetry_fingerprint,&
-      lcfo_symmetry_workspace_peak
+      lcfo_symmetry_workspace_peak,adapted_occupied_workspace_peak
     integer(8)::w90_coordinator_bytes,w90_workspace_peak,w90_byte_limit
     integer(8)::one_shot_workspace_peak,one_shot_operator_fingerprint
     integer(8)::w90_symmetry_workspace_peak
@@ -620,6 +623,8 @@ contains
     integer(8)::w90_input_fingerprint,w90_transform_fingerprint
     integer(8)::ow_stitched_peak_elements
     real(8)::condition_number,closure_residual,spread_max,gauge_correction
+    real(8)::adapted_occupied_trace,adapted_occupied_closure,adapted_occupied_gamma_defect,&
+      adapted_occupied_selected_edge,adapted_occupied_rejected_edge,adapted_occupied_cluster_gap
     real(8)::ow_partition_sum_defect,ow_partition_gradient_defect,window_axis(3),&
       window_axis_derivative(3),window_coordinate
     real(8)::ow_stitched_electron_count,ow_stitched_s_hermiticity,ow_stitched_rho_hermiticity
@@ -845,6 +850,8 @@ contains
     fixed_center_group_order=size(fixed_center_operations)
     if(fixed_center_group_order>48)error stop 'fixed_center_group_order>48'
     if(.not.fixed_center_inversion_present)error stop 'fixed-center point group lacks inversion'
+    call find_dg_group_identity(fixed_center_product,fixed_center_identity_operation,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'fixed-center group identity construction failed';end if
     call find_dg_group_identity(global_point_product,global_identity_operation,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global group identity construction failed';end if
     call select_dg_group_generators(global_point_product,global_identity_operation,&
@@ -859,8 +866,38 @@ contains
     ow_saved_eigenexa_comm=info%icomm_o
     call finalize_eigenexa(info)
     info%icomm_o=dc%icomm_tot
+    call init_eigenexa_mod(info,nstate*fixed_center_group_order,direct_block_only=.true.)
+    call build_dg_group_averaged_occupied_candidates_eigenexa(info,dc%icomm_tot,&
+      lcfo_occupied_core(1:nstate,:),ow_core_weights,fixed_center_symmetry_map,&
+      fixed_center_product,fixed_center_identity_operation,nstate,dg_ow_symmetry_tolerance,&
+      adapted_occupied_candidates,adapted_occupied_spectrum,adapted_occupied_rank,&
+      adapted_occupied_trace,adapted_occupied_closure,adapted_occupied_gamma_defect,&
+      adapted_occupied_workspace_peak,ok,message,adapted_occupied_selected_edge,&
+      adapted_occupied_rejected_edge,adapted_occupied_cluster_gap)
+    call finalize_eigenexa(info)
+    if(.not.ok.or.adapted_occupied_rank/=nstate)then
+      write(0,'(a)')trim(message);error stop 'fixed-center occupied-subspace adaptation failed'
+    endif
+    global_seed_values(1:nstate,:)=adapted_occupied_candidates
+    deallocate(adapted_occupied_candidates,adapted_occupied_spectrum)
+    if(rank==0)write(*,'(a,2(a,i0),7(a,es16.8),a,i0)')&
+      '[OW-GS-DIAGNOSTIC] symmetry_adapted_occupied',&
+      ' input_rank=',nstate,' selected_rank=',adapted_occupied_rank,&
+      ' trace=',adapted_occupied_trace,' closure=',adapted_occupied_closure,&
+      ' gamma_defect=',adapted_occupied_gamma_defect,&
+      ' electron_count_drift=',abs(adapted_occupied_trace-real(nstate,8)),&
+      ' selected_edge=',adapted_occupied_selected_edge,&
+      ' rejected_edge=',adapted_occupied_rejected_edge,&
+      ' cluster_gap=',adapted_occupied_cluster_gap,&
+      ' workspace_peak_bytes=',adapted_occupied_workspace_peak
+    call orthonormalize_dg_distributed_seed_space(dc%icomm_tot,global_seed_values,ow_core_weights,&
+      dg_dc_metric_rank_tolerance,global_closed_core,global_retained_rank,ok,message)
+    global_required_retained_rank=global_retained_rank
+    if(.not.ok.or.global_retained_rank/=ntarget)then
+      write(0,'(a)')trim(message);error stop 'adapted occupied plus complete-s+p seed lost target rank'
+    endif
     call init_eigenexa_mod(info,size(global_seed_values,1),direct_block_only=.true.)
-    call measure_dg_rank_fixed_symmetry_residuals_eigenexa(info,dc%icomm_tot,global_seed_values,ow_core_weights,&
+    call measure_dg_rank_fixed_symmetry_residuals_eigenexa(info,dc%icomm_tot,global_closed_core,ow_core_weights,&
       global_symmetry_map(:,global_affine_generators),lcfo_boundary_mask,&
       total_residual=lcfo_total_symmetry_residual,&
       boundary_residual=lcfo_boundary_symmetry_residual,&
@@ -884,9 +921,6 @@ contains
       ' interior_residual=',lcfo_interior_symmetry_residual(lcfo_symmetry_worst_generator_index)
     if(maxval(lcfo_total_symmetry_residual)>dg_ow_symmetry_tolerance)&
       error stop 'LCFO seed space is not closed under the full affine action'
-    call orthonormalize_dg_distributed_seed_space(dc%icomm_tot,global_seed_values,ow_core_weights,&
-      dg_dc_metric_rank_tolerance,global_closed_core,global_retained_rank,ok,message)
-    global_required_retained_rank=global_retained_rank
     if(rank==0)write(*,'(a,3(a,i0))')'[OW-GS-DIAGNOSTIC] LCFO_occupied_closure',&
       ' input_rank=',ntarget,' closure_rank=',global_required_retained_rank,&
       ' candidate_rank=',global_retained_rank

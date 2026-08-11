@@ -106,6 +106,21 @@ assert "fingerprint_ow_w90_transform" in ow_ground_state_body
 assert re.search(
     r"call\s+orthonormalize_dg_distributed_seed_space\b", ow_ground_state_body
 ), "affine-closed LCFO seeds must be orthonormalized without full-orbit regeneration"
+adaptation_call = ow_ground_state_body.find(
+    "call build_dg_group_averaged_occupied_candidates_eigenexa"
+)
+affine_measurement_call = ow_ground_state_body.find(
+    "call measure_dg_rank_fixed_symmetry_residuals_eigenexa"
+)
+dmn_begin_call = ow_ground_state_body.find("call begin_sawf_dmn")
+assert 0 <= adaptation_call < affine_measurement_call < dmn_begin_call, (
+    "fixed-center group-averaged occupied selection must precede full-affine proof and DMN"
+)
+assert re.search(
+    r"global_seed_values\s*\(\s*1\s*:\s*nstate\s*,\s*:\s*\)\s*=\s*"
+    r"(?:adapted_)?occupied_candidates",
+    ow_ground_state_body,
+), "production must replace only the occupied seed block by symmetry-adapted candidates"
 assert not re.search(
     r"call\s+build_dg_distributed_symmetry_closed_basis\b", ow_ground_state_body
 ), "production must not regenerate every affine image after its closure receipt passes"

@@ -20,7 +20,7 @@ program test_dg_overlapping_wannier_eigenexa_mpi
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
   case_name='normal';if(command_argument_count()>=1)call get_command_argument(1,case_name)
-  if(trim(case_name)=='average')then;call run_average_case();call MPI_Finalize(ierr);stop;endif
+  if(index(trim(case_name),'average')==1)then;call run_average_case();call MPI_Finalize(ierr);stop;endif
   call eigen_init(comm);call eigen_get_procs(p,info%nprow,info%npcol)
   call eigen_get_id(p,info%myrow,info%mycol);call eigen_get_matdims(4,info%nrow_local,info%ncol_local)
   info%flag_eigenexa_init=.true.
@@ -72,8 +72,9 @@ contains
     real(8),allocatable::average_spectrum(:)
     real(8),allocatable::average_weights(:)
     integer(8),allocatable::average_maps(:,:)
-    integer::average_product(2,2),ii,global_point,global_count,average_rank
-    real(8)::average_trace,average_closure,average_gamma
+    integer::average_product(2,2),ii,global_point,global_count,average_rank,average_requested
+    real(8)::average_trace,average_closure,average_gamma,average_selected_edge,&
+      average_rejected_edge,average_cluster_gap
     integer(8)::average_workspace,average_signature
     logical::average_ok
     character(256)::average_message
@@ -85,13 +86,37 @@ contains
       average_maps(ii,2)=modulo(global_point-1+global_count/2,global_count)+1
       if(global_point==1)average_occupied(1,ii)=1d0
     enddo
+    if(trim(case_name)=='average_unique')average_occupied=1d0/sqrt(real(global_count,8))
+    if(trim(case_name)=='average_nonorthogonal')average_occupied=2d0/sqrt(real(global_count,8))
     average_product=reshape([1,2,2,1],[2,2])
+    average_requested=merge(2,1,trim(case_name)=='average')
     call eigen_init(comm);call eigen_get_procs(p,info%nprow,info%npcol)
     call eigen_get_id(p,info%myrow,info%mycol);call eigen_get_matdims(2,info%nrow_local,info%ncol_local)
     info%flag_eigenexa_init=.true.
     call build_dg_group_averaged_occupied_candidates_eigenexa(info,comm,average_occupied,&
-      average_weights,average_maps,average_product,1,2,1d-12,average_candidates,average_spectrum,&
-      average_rank,average_trace,average_closure,average_gamma,average_workspace,average_ok,average_message)
+      average_weights,average_maps,average_product,1,average_requested,1d-12,average_candidates,average_spectrum,&
+      average_rank,average_trace,average_closure,average_gamma,average_workspace,average_ok,average_message,&
+      average_selected_edge,average_rejected_edge,average_cluster_gap)
+    if(trim(case_name)=='average_split')then
+      call require(.not.average_ok,'group-average selection must reject a split degenerate block')
+      if(rank==0)write(*,'(a,i0)')'REJECT average_split ranks=',nproc
+      call eigen_free();return
+    endif
+    if(trim(case_name)=='average_nonorthogonal')then
+      call require(.not.average_ok,'group-average input occupied space must be metric orthonormal')
+      if(rank==0)write(*,'(a,i0)')'REJECT average_nonorthogonal ranks=',nproc
+      call eigen_free();return
+    endif
+    if(trim(case_name)=='average_unique')then
+      call require(average_ok.and.average_rank==1.and.abs(average_spectrum(1)-1d0)<1d-12.and.&
+        abs(average_trace-1d0)<1d-12.and.average_closure<1d-12.and.&
+        abs(average_selected_edge-1d0)<1d-12.and.abs(average_rejected_edge)<1d-12.and.&
+        abs(average_cluster_gap-1d0)<1d-12,&
+        'unique invariant group-average rank is accepted')
+      average_signature=nint(average_spectrum(1)*1d12,8)
+      if(rank==0)write(*,'(a,i0,a,i0)')'AVERAGE_UNIQUE ranks=',nproc,' signature=',average_signature
+      call eigen_free();return
+    endif
     call require(average_ok,trim(average_message))
     call require(average_rank==2.and.maxval(abs(average_spectrum-[0.5d0,0.5d0]))<1d-12,&
       'distributed group-average spectrum')

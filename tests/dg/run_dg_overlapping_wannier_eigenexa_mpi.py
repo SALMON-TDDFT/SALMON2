@@ -35,6 +35,24 @@ with tempfile.TemporaryDirectory(prefix="ow-eigenexa-") as name:
       match=re.search(r"AVERAGE ranks=\d+ signature=(-?\d+)",result.stdout);assert match,result.stdout
       averaged_signatures.append(int(match.group(1)))
     assert len(set(averaged_signatures))==1,averaged_signatures
+    unique_signatures=[]
+    for nproc in (1,2,4,8):
+      result=subprocess.run([shutil.which("mpiexec"),"-n",str(nproc),str(exe),"average_unique"],
+        capture_output=True,text=True,env=env,timeout=60)
+      assert result.returncode==0,("average_unique",nproc,result.stdout,result.stderr)
+      match=re.search(r"AVERAGE_UNIQUE ranks=\d+ signature=(-?\d+)",result.stdout);assert match,result.stdout
+      unique_signatures.append(int(match.group(1)))
+    assert len(set(unique_signatures))==1,unique_signatures
+    for nproc in (1,2,4,8):
+      result=subprocess.run([shutil.which("mpiexec"),"-n",str(nproc),str(exe),"average_split"],
+        capture_output=True,text=True,env=env,timeout=60)
+      assert result.returncode==0,("average_split",nproc,result.stdout,result.stderr)
+      assert f"REJECT average_split ranks={nproc}" in result.stdout,result.stdout
+    for nproc in (1,2,4,8):
+      result=subprocess.run([shutil.which("mpiexec"),"-n",str(nproc),str(exe),"average_nonorthogonal"],
+        capture_output=True,text=True,env=env,timeout=60)
+      assert result.returncode==0,("average_nonorthogonal",nproc,result.stdout,result.stderr)
+      assert f"REJECT average_nonorthogonal ranks={nproc}" in result.stdout,result.stdout
     for case_name in ("degenerate","nonreal","illmetric","residual"):
       for nproc in (1,2,4,8):
         result=subprocess.run([shutil.which("mpiexec"),"-n",str(nproc),str(exe),case_name],

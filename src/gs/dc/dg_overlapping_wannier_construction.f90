@@ -1400,13 +1400,14 @@ contains
     character(*),intent(out)::message
 #ifdef USE_MPI
     complex(real64),allocatable::left_image(:,:),right_image(:,:),local_block(:,:),global_block(:,:),&
+      local_occupied_metric(:,:),occupied_metric(:,:),&
       orbit_gram(:,:),orbit_vectors(:,:),label(:,:),composed_label(:,:),expected_label(:,:)
     real(real64),allocatable::all_spectrum(:),total_residual(:),boundary_residual(:),&
       interior_residual(:)
     logical,allocatable::no_boundary(:)
     integer::noccupied,nlocal,noperation,orbit_rank,left_operation,right_operation,&
       left_first,right_first,i,j,k,ierr,rank
-    real(real64)::local_group_defect,global_group_defect
+    real(real64)::local_group_defect,global_group_defect,occupied_metric_defect,occupied_metric_scale
     integer(int64)::complex_bytes,real_bytes
     logical::eigen_ok
     character(256)::detail
@@ -1430,6 +1431,22 @@ contains
     if(any(product_table<1).or.any(product_table>noperation))then
       message='group-averaged occupied product table is invalid';return
     endif
+    allocate(local_occupied_metric(noccupied,noccupied),occupied_metric(noccupied,noccupied))
+    do j=1,noccupied;do i=1,noccupied
+      local_occupied_metric(i,j)=sum(weights*conjg(occupied(i,:))*occupied(j,:))
+    enddo;enddo
+    call MPI_Allreduce(local_occupied_metric,occupied_metric,noccupied*noccupied,&
+      MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then
+      message='group-averaged occupied metric reduction failed';return
+    endif
+    occupied_metric_scale=max(1d0,maxval(abs(occupied_metric)))
+    do i=1,noccupied;occupied_metric(i,i)=occupied_metric(i,i)-1d0;enddo
+    occupied_metric_defect=maxval(abs(occupied_metric))/occupied_metric_scale
+    if(occupied_metric_defect>tolerance)then
+      message='group-averaged occupied input is not metric orthonormal';return
+    endif
+    deallocate(local_occupied_metric,occupied_metric)
     call MPI_Comm_rank(comm,rank,ierr)
     allocate(label(1,nlocal),composed_label(1,nlocal),expected_label(1,nlocal))
     do i=1,nlocal;label(1,i)=cmplx(real(rank*nlocal+i,real64),0d0,real64);enddo
@@ -1531,7 +1548,7 @@ contains
   subroutine build_dg_group_averaged_occupied_candidates_eigenexa(info,comm,occupied,weights,&
       symmetry_target_box_ids,product_table,identity_operation,requested_count,tolerance,&
       candidates,spectrum,candidate_rank,projector_trace,closure_residual,gamma_real_defect,&
-      workspace_peak_bytes,ok,message)
+      workspace_peak_bytes,ok,message,selected_edge,rejected_edge,cluster_gap)
     type(s_parallel_info),intent(in)::info
     integer,intent(in)::comm,product_table(:,:),identity_operation,requested_count
     complex(real64),intent(in)::occupied(:,:)
@@ -1544,20 +1561,26 @@ contains
     integer(int64),intent(out)::workspace_peak_bytes
     logical,intent(out)::ok
     character(*),intent(out)::message
+    real(real64),intent(out),optional::selected_edge,rejected_edge,cluster_gap
     complex(real64),allocatable::left_image(:,:),right_image(:,:),local_block(:,:),global_block(:,:),&
+      local_occupied_metric(:,:),occupied_metric(:,:),&
       label(:,:),composed_label(:,:),expected_label(:,:)
     real(real64),allocatable::cyclic_gram(:,:),cyclic_vectors(:,:),all_spectrum(:),&
       eigenvector(:),total_residual(:),boundary_residual(:),interior_residual(:)
     logical,allocatable::no_boundary(:)
     integer::noccupied,nlocal,noperation,orbit_rank,left_operation,right_operation,&
       left_first,right_first,i,j,k,global_row,global_column,local_row,local_column,ierr,rank
-    real(real64)::local_imaginary,global_imaginary,scale,local_group_defect,global_group_defect
+    real(real64)::local_imaginary,global_imaginary,scale,local_group_defect,global_group_defect,&
+      occupied_metric_defect,occupied_metric_scale
     integer(int64)::complex_bytes,real_bytes
     logical::eigen_ok
     character(256)::detail
 
     ok=.false.;message='';candidate_rank=0;projector_trace=huge(1d0)
     closure_residual=huge(1d0);gamma_real_defect=huge(1d0);workspace_peak_bytes=0_int64
+    if(present(selected_edge))selected_edge=huge(1d0)
+    if(present(rejected_edge))rejected_edge=huge(1d0)
+    if(present(cluster_gap))cluster_gap=huge(1d0)
     noccupied=size(occupied,1);nlocal=size(occupied,2);noperation=size(symmetry_target_box_ids,2)
     if(.not.info%flag_eigenexa_init.or.noccupied<1.or.nlocal<1.or.noperation<1.or.&
         size(weights)/=nlocal.or.size(symmetry_target_box_ids,1)/=nlocal.or.&
@@ -1575,6 +1598,22 @@ contains
     if(requested_count>orbit_rank.or.info%nrow_local<1.or.info%ncol_local<1)then
       message='invalid distributed group-averaged requested rank or EigenExa layout';return
     endif
+    allocate(local_occupied_metric(noccupied,noccupied),occupied_metric(noccupied,noccupied))
+    do j=1,noccupied;do i=1,noccupied
+      local_occupied_metric(i,j)=sum(weights*conjg(occupied(i,:))*occupied(j,:))
+    enddo;enddo
+    call MPI_Allreduce(local_occupied_metric,occupied_metric,noccupied*noccupied,&
+      MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then
+      message='distributed group-average occupied metric reduction failed';return
+    endif
+    occupied_metric_scale=max(1d0,maxval(abs(occupied_metric)))
+    do i=1,noccupied;occupied_metric(i,i)=occupied_metric(i,i)-1d0;enddo
+    occupied_metric_defect=maxval(abs(occupied_metric))/occupied_metric_scale
+    if(occupied_metric_defect>tolerance)then
+      message='distributed group-average occupied input is not metric orthonormal';return
+    endif
+    deallocate(local_occupied_metric,occupied_metric)
     call MPI_Comm_rank(comm,rank,ierr)
     allocate(label(1,nlocal),composed_label(1,nlocal),expected_label(1,nlocal))
     do i=1,nlocal;label(1,i)=cmplx(real(rank*nlocal+i,real64),0d0,real64);enddo
@@ -1664,6 +1703,21 @@ contains
     call eigen_pdsyevd_ex_distributed_blocks(info,orbit_rank,cyclic_gram,all_spectrum,&
       cyclic_vectors,eigen_ok,detail)
     if(.not.eigen_ok)then;ok=.false.;message='distributed group-average eigensystem: '//trim(detail);return;endif
+    if(present(selected_edge))selected_edge=all_spectrum(orbit_rank-requested_count+1)
+    if(requested_count<orbit_rank)then
+      if(present(rejected_edge))rejected_edge=all_spectrum(orbit_rank-requested_count)
+      if(present(cluster_gap))cluster_gap=&
+        all_spectrum(orbit_rank-requested_count+1)-all_spectrum(orbit_rank-requested_count)
+    else
+      if(present(rejected_edge))rejected_edge=0d0
+      if(present(cluster_gap))cluster_gap=all_spectrum(1)
+    endif
+    if(requested_count<orbit_rank)then
+      if(abs(all_spectrum(orbit_rank-requested_count+1)-all_spectrum(orbit_rank-requested_count))<=&
+          tolerance*max(1d0,maxval(abs(all_spectrum))))then
+        ok=.false.;message='requested occupied rank cuts a group-averaged degenerate block';return
+      endif
+    endif
     projector_trace=sum(all_spectrum);candidate_rank=requested_count
     allocate(candidates(candidate_rank,nlocal),spectrum(candidate_rank),eigenvector(orbit_rank))
     candidates=(0d0,0d0)
