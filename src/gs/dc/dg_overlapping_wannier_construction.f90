@@ -57,6 +57,7 @@ module dg_overlapping_wannier_construction
 #ifdef USE_EIGENEXA
   public::measure_dg_rank_fixed_symmetry_residuals_eigenexa
   public::build_dg_group_averaged_occupied_candidates_eigenexa
+  public::build_dg_cocycle_averaged_occupied_candidates_eigenexa
 #endif
   public::exchange_dg_point_permuted_orbital_rows
   public::accept_dg_boundary_calibrated_symmetry
@@ -1700,7 +1701,8 @@ contains
   subroutine build_dg_group_averaged_occupied_candidates_eigenexa(info,comm,occupied,weights,&
       symmetry_target_box_ids,product_table,identity_operation,requested_count,tolerance,&
       candidates,spectrum,candidate_rank,projector_trace,closure_residual,gamma_real_defect,&
-      workspace_peak_bytes,ok,message,selected_edge,rejected_edge,cluster_gap)
+      workspace_peak_bytes,ok,message,selected_edge,rejected_edge,cluster_gap,&
+      cocycle_translation_target_box_ids,translation_cocycle)
     type(s_parallel_info),intent(in)::info
     integer,intent(in)::comm,product_table(:,:),identity_operation,requested_count
     complex(real64),intent(in)::occupied(:,:)
@@ -1714,9 +1716,11 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     real(real64),intent(out),optional::selected_edge,rejected_edge,cluster_gap
+    integer(int64),intent(in),optional::cocycle_translation_target_box_ids(:,:)
+    integer,intent(in),optional::translation_cocycle(:,:)
     complex(real64),allocatable::left_image(:,:),right_image(:,:),local_block(:,:),global_block(:,:),&
       local_occupied_metric(:,:),occupied_metric(:,:),&
-      label(:,:),composed_label(:,:),expected_label(:,:)
+      label(:,:),composed_label(:,:),expected_label(:,:),cocycle_label(:,:)
     real(real64),allocatable::cyclic_gram(:,:),cyclic_vectors(:,:),all_spectrum(:),&
       eigenvector(:),total_residual(:),boundary_residual(:),interior_residual(:)
     logical,allocatable::no_boundary(:)
@@ -1734,6 +1738,9 @@ contains
     if(present(rejected_edge))rejected_edge=huge(1d0)
     if(present(cluster_gap))cluster_gap=huge(1d0)
     noccupied=size(occupied,1);nlocal=size(occupied,2);noperation=size(symmetry_target_box_ids,2)
+    if(present(cocycle_translation_target_box_ids).neqv.present(translation_cocycle))then
+      message='distributed group-average cocycle inputs must be requested together';return
+    endif
     if(.not.info%flag_eigenexa_init.or.noccupied<1.or.nlocal<1.or.noperation<1.or.&
         size(weights)/=nlocal.or.size(symmetry_target_box_ids,1)/=nlocal.or.&
         any(shape(product_table)/=[noperation,noperation]).or.any(product_table<1).or.&
@@ -1742,6 +1749,15 @@ contains
         any(weights<0d0).or..not.all(ieee_is_finite(real(occupied))).or.&
         .not.all(ieee_is_finite(aimag(occupied))))then
       message='invalid distributed group-averaged occupied-projector contract';return
+    endif
+    if(present(translation_cocycle))then
+      if(size(cocycle_translation_target_box_ids,1)/=nlocal.or.&
+          size(cocycle_translation_target_box_ids,2)<1.or.&
+          any(shape(translation_cocycle)/=[noperation,noperation]).or.&
+          any(translation_cocycle<1).or.&
+          any(translation_cocycle>size(cocycle_translation_target_box_ids,2)))then
+        message='invalid distributed group-average translation cocycle';return
+      endif
     endif
     if(noccupied>huge(orbit_rank)/noperation)then
       message='distributed group-averaged occupied orbit rank overflow';return
@@ -1767,7 +1783,7 @@ contains
     endif
     deallocate(local_occupied_metric,occupied_metric)
     call MPI_Comm_rank(comm,rank,ierr)
-    allocate(label(1,nlocal),composed_label(1,nlocal),expected_label(1,nlocal))
+    allocate(label(1,nlocal),composed_label(1,nlocal),expected_label(1,nlocal),cocycle_label(1,nlocal))
     do i=1,nlocal;label(1,i)=cmplx(real(rank*nlocal+i,real64),0d0,real64);enddo
     do left_operation=1,noperation;do right_operation=1,noperation
       call exchange_dg_point_permuted_orbital_rows(comm,label,&
@@ -1776,9 +1792,19 @@ contains
       call exchange_dg_point_permuted_orbital_rows(comm,expected_label,&
         symmetry_target_box_ids(:,left_operation),composed_label,ok,detail)
       if(.not.ok)then;message='distributed group-average composed point action: '//trim(detail);return;endif
-      call exchange_dg_point_permuted_orbital_rows(comm,label,&
-        symmetry_target_box_ids(:,product_table(right_operation,left_operation)),expected_label,ok,detail)
-      if(.not.ok)then;message='distributed group-average product point action: '//trim(detail);return;endif
+      if(present(translation_cocycle))then
+        call exchange_dg_point_permuted_orbital_rows(comm,label,&
+          cocycle_translation_target_box_ids(:,translation_cocycle(right_operation,left_operation)),&
+          cocycle_label,ok,detail)
+        if(.not.ok)then;message='distributed group-average cocycle translation: '//trim(detail);return;endif
+        call exchange_dg_point_permuted_orbital_rows(comm,cocycle_label,&
+          symmetry_target_box_ids(:,product_table(right_operation,left_operation)),expected_label,ok,detail)
+        if(.not.ok)then;message='distributed group-average cocycle representative: '//trim(detail);return;endif
+      else
+        call exchange_dg_point_permuted_orbital_rows(comm,label,&
+          symmetry_target_box_ids(:,product_table(right_operation,left_operation)),expected_label,ok,detail)
+        if(.not.ok)then;message='distributed group-average product point action: '//trim(detail);return;endif
+      endif
       local_group_defect=maxval(abs(composed_label-expected_label))
       call MPI_Allreduce(local_group_defect,global_group_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
       if(ierr/=MPI_SUCCESS.or.global_group_defect>0d0)then
@@ -1790,7 +1816,7 @@ contains
     if(.not.ok.or.maxval(abs(expected_label-label))>0d0)then
       ok=.false.;message='distributed group-average identity point action is invalid';return
     endif
-    deallocate(label,composed_label,expected_label)
+    deallocate(label,composed_label,expected_label,cocycle_label)
     allocate(left_image(noccupied,nlocal),right_image(noccupied,nlocal),&
       local_block(noccupied,noccupied),global_block(noccupied,noccupied),&
       cyclic_gram(info%nrow_local,info%ncol_local),&
@@ -1927,6 +1953,31 @@ contains
       gather_ok=error==MPI_SUCCESS
       if(gather_ok)then;gather_message='';else;gather_message='distributed group-average vector gather failed';endif
     end subroutine
+  end subroutine
+
+  subroutine build_dg_cocycle_averaged_occupied_candidates_eigenexa(info,comm,occupied,weights,&
+      translation_target_box_ids,representative_target_box_ids,point_product,translation_cocycle,&
+      identity_operation,requested_count,tolerance,candidates,spectrum,candidate_rank,projector_trace,&
+      closure_residual,gamma_real_defect,workspace_peak_bytes,ok,message,selected_edge,rejected_edge,cluster_gap)
+    type(s_parallel_info),intent(in)::info
+    integer,intent(in)::comm,point_product(:,:),translation_cocycle(:,:),identity_operation,requested_count
+    complex(real64),intent(in)::occupied(:,:)
+    real(real64),intent(in)::weights(:),tolerance
+    integer(int64),intent(in)::translation_target_box_ids(:,:),representative_target_box_ids(:,:)
+    complex(real64),allocatable,intent(out)::candidates(:,:)
+    real(real64),allocatable,intent(out)::spectrum(:)
+    integer,intent(out)::candidate_rank
+    real(real64),intent(out)::projector_trace,closure_residual,gamma_real_defect
+    integer(int64),intent(out)::workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    real(real64),intent(out),optional::selected_edge,rejected_edge,cluster_gap
+
+    call build_dg_group_averaged_occupied_candidates_eigenexa(info,comm,occupied,weights,&
+      representative_target_box_ids,point_product,identity_operation,requested_count,tolerance,&
+      candidates,spectrum,candidate_rank,projector_trace,closure_residual,gamma_real_defect,&
+      workspace_peak_bytes,ok,message,selected_edge,rejected_edge,cluster_gap,&
+      translation_target_box_ids,translation_cocycle)
   end subroutine
 #endif
 

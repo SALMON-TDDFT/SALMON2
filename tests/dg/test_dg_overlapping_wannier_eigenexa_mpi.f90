@@ -3,7 +3,8 @@ program test_dg_overlapping_wannier_eigenexa_mpi
   use structures,only:s_parallel_info
   use eigen_libs_mod
   use dg_overlapping_wannier_solver,only:solve_dg_overlapping_wannier_generalized_eigenexa
-  use dg_overlapping_wannier_construction,only:build_dg_group_averaged_occupied_candidates_eigenexa
+  use dg_overlapping_wannier_construction,only:build_dg_group_averaged_occupied_candidates_eigenexa,&
+    build_dg_cocycle_averaged_occupied_candidates_eigenexa,measure_dg_rank_fixed_symmetry_residuals
   implicit none
   type(s_parallel_info)::info
   integer::comm,rank,nproc,ierr,i,p,nlocal
@@ -21,6 +22,7 @@ program test_dg_overlapping_wannier_eigenexa_mpi
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
   case_name='normal';if(command_argument_count()>=1)call get_command_argument(1,case_name)
   if(index(trim(case_name),'average')==1)then;call run_average_case();call MPI_Finalize(ierr);stop;endif
+  if(trim(case_name)=='cocycle')then;call run_cocycle_case();call MPI_Finalize(ierr);stop;endif
   call eigen_init(comm);call eigen_get_procs(p,info%nprow,info%npcol)
   call eigen_get_id(p,info%myrow,info%mycol);call eigen_get_matdims(4,info%nrow_local,info%ncol_local)
   info%flag_eigenexa_init=.true.
@@ -129,6 +131,63 @@ contains
       average_weights,average_maps,average_product,1,2,1d-12,average_candidates,average_spectrum,&
       average_rank,average_trace,average_closure,average_gamma,average_workspace,average_ok,average_message)
     call require(.not.average_ok,'distributed group-average rejects a non-group point action')
+    call eigen_free()
+  end subroutine
+
+  subroutine run_cocycle_case()
+    complex(8),allocatable::occupied(:,:),candidates(:,:)
+    real(8),allocatable::weights(:),candidate_spectrum(:)
+    integer(8),allocatable::translation_maps(:,:),representative_maps(:,:)
+    integer(8),allocatable::full_maps(:,:)
+    real(8),allocatable::full_total(:),full_boundary(:),full_interior(:)
+    logical,allocatable::no_boundary(:)
+    integer::point_product(2,2),cocycle(2,2),ii,global_point,global_count,candidate_rank
+    real(8)::projector_trace,closure,gamma
+    integer(8)::workspace,cocycle_signature
+    logical::cocycle_ok
+    character(256)::cocycle_message
+
+    global_count=4*nproc
+    allocate(occupied(1,4),weights(4),translation_maps(4,2),representative_maps(4,2),&
+      full_maps(4,4),full_total(4),full_boundary(4),full_interior(4),no_boundary(4))
+    occupied=(0d0,0d0);weights=1d0
+    do ii=1,4
+      global_point=4*rank+ii
+      translation_maps(ii,1)=global_point
+      translation_maps(ii,2)=modulo(global_point-1+global_count/2,global_count)+1
+      representative_maps(ii,1)=global_point
+      representative_maps(ii,2)=modulo(global_point-1+global_count/4,global_count)+1
+      do p=1,4
+        full_maps(ii,p)=modulo(global_point-1+(p-1)*global_count/4,global_count)+1
+      enddo
+      if(global_point==1.or.global_point==1+global_count/2)occupied(1,ii)=1d0/sqrt(2d0)
+    enddo
+    point_product=reshape([1,2,2,1],[2,2])
+    cocycle=reshape([1,1,1,2],[2,2])
+    call eigen_init(comm);call eigen_get_procs(p,info%nprow,info%npcol)
+    call eigen_get_id(p,info%myrow,info%mycol);call eigen_get_matdims(2,info%nrow_local,info%ncol_local)
+    info%flag_eigenexa_init=.true.
+    call build_dg_cocycle_averaged_occupied_candidates_eigenexa(info,comm,occupied,weights,&
+      translation_maps,representative_maps,point_product,cocycle,1,2,1d-12,candidates,&
+      candidate_spectrum,candidate_rank,projector_trace,closure,gamma,workspace,cocycle_ok,cocycle_message)
+    call require(cocycle_ok,trim(cocycle_message))
+    call require(candidate_rank==2.and.maxval(abs(candidate_spectrum-[0.5d0,0.5d0]))<1d-12,&
+      'cocycle representative average matches the explicit affine orbit spectrum')
+    call require(abs(projector_trace-1d0)<1d-12.and.closure<1d-12.and.gamma==0d0.and.workspace>0_8,&
+      'cocycle representative average receipts')
+    no_boundary=.false.
+    call measure_dg_rank_fixed_symmetry_residuals(comm,candidates,weights,full_maps,no_boundary,&
+      total_residual=full_total,boundary_residual=full_boundary,interior_residual=full_interior,&
+      ok=cocycle_ok,message=cocycle_message)
+    call require(cocycle_ok.and.maxval(full_total)<1d-12,&
+      'cocycle representative average equals the explicit full-affine projector')
+    cocycle_signature=nint(sum(candidate_spectrum*[1d0,3d0])*1d12,8)
+    if(rank==0)write(*,'(a,i0,a,i0)')'COCYCLE ranks=',nproc,' signature=',cocycle_signature
+    cocycle(2,2)=1
+    call build_dg_cocycle_averaged_occupied_candidates_eigenexa(info,comm,occupied,weights,&
+      translation_maps,representative_maps,point_product,cocycle,1,2,1d-12,candidates,&
+      candidate_spectrum,candidate_rank,projector_trace,closure,gamma,workspace,cocycle_ok,cocycle_message)
+    call require(.not.cocycle_ok,'corrupt representative cocycle must reject')
     call eigen_free()
   end subroutine
 

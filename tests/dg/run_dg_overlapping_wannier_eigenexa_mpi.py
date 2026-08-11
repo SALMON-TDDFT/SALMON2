@@ -43,6 +43,14 @@ with tempfile.TemporaryDirectory(prefix="ow-eigenexa-") as name:
       match=re.search(r"AVERAGE_UNIQUE ranks=\d+ signature=(-?\d+)",result.stdout);assert match,result.stdout
       unique_signatures.append(int(match.group(1)))
     assert len(set(unique_signatures))==1,unique_signatures
+    cocycle_signatures=[]
+    for nproc in (1,2,4,8):
+      result=subprocess.run([shutil.which("mpiexec"),"-n",str(nproc),str(exe),"cocycle"],
+        capture_output=True,text=True,env=env,timeout=60)
+      assert result.returncode==0,("cocycle",nproc,result.stdout,result.stderr)
+      match=re.search(r"COCYCLE ranks=\d+ signature=(-?\d+)",result.stdout);assert match,result.stdout
+      cocycle_signatures.append(int(match.group(1)))
+    assert len(set(cocycle_signatures))==1,cocycle_signatures
     for nproc in (1,2,4,8):
       result=subprocess.run([shutil.which("mpiexec"),"-n",str(nproc),str(exe),"average_split"],
         capture_output=True,text=True,env=env,timeout=60)

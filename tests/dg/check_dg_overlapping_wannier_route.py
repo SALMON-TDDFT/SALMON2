@@ -542,18 +542,29 @@ assert 0 <= composition_call < fixed_center_call < affine_measurement_call, (
 translation_adaptation_call = adapter_body.lower().find(
     "call build_dg_group_averaged_occupied_candidates_eigenexa", fixed_center_call
 )
-fixed_center_adaptation_call = adapter_body.lower().find(
-    "call build_dg_group_averaged_occupied_candidates_eigenexa", translation_adaptation_call + 1
+point_cogroup_adaptation_call = adapter_body.lower().find(
+    "call build_dg_cocycle_averaged_occupied_candidates_eigenexa", translation_adaptation_call + 1
 )
 post_adaptation_affine_measurement_call = adapter_body.lower().find(
-    "call measure_dg_rank_fixed_symmetry_residuals_eigenexa", fixed_center_adaptation_call
+    "call measure_dg_rank_fixed_symmetry_residuals_eigenexa", point_cogroup_adaptation_call
 )
-assert 0 <= translation_adaptation_call < fixed_center_adaptation_call < post_adaptation_affine_measurement_call, (
-    "occupied adaptation must close the translation subgroup before the fixed-center group"
+assert 0 <= translation_adaptation_call < point_cogroup_adaptation_call < post_adaptation_affine_measurement_call, (
+    "occupied adaptation must close translations before the cocycle-aware point cogroup"
 )
 assert "translation_adapted_occupied" in adapter_body.lower(), (
     "production must publish a separate translation-subgroup adaptation receipt"
 )
+assert "point_cogroup_adapted_occupied" in adapter_body.lower(), (
+    "production must publish a separate cocycle-aware point-cogroup adaptation receipt"
+)
+assert re.search(
+    r"build_dg_cocycle_averaged_occupied_candidates_eigenexa\s*\(.*?"
+    r"global_symmetry_map\s*\(\s*:\s*,\s*global_translation_subgroup\s*\).*?"
+    r"global_symmetry_map\s*\(\s*:\s*,\s*global_point_representatives\s*\).*?"
+    r"global_point_cogroup_product.*?global_translation_cocycle",
+    adapter_body,
+    re.I | re.S,
+), "production point-cogroup adaptation must consume the proven affine factorization"
 assert re.search(
     r"nstate\s*>\s*huge\s*\(\s*nstate\s*\)\s*/\s*size\s*\(\s*global_translation_subgroup\s*\)",
     adapter_body,

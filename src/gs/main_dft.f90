@@ -53,6 +53,7 @@ use dg_overlapping_wannier_construction, only: measure_dg_rank_fixed_symmetry_re
 #ifdef USE_EIGENEXA
 use dg_overlapping_wannier_construction, only: measure_dg_rank_fixed_symmetry_residuals_eigenexa
 use dg_overlapping_wannier_construction, only: build_dg_group_averaged_occupied_candidates_eigenexa
+use dg_overlapping_wannier_construction, only: build_dg_cocycle_averaged_occupied_candidates_eigenexa
 #endif
 use dg_overlapping_wannier_construction, only: select_dg_fixed_rank_symmetry_closed_subspace
 use dg_overlapping_wannier_construction, only: find_dg_group_identity
@@ -617,6 +618,7 @@ contains
     integer::fixed_center_group_order,fixed_center_operation,fixed_center_identity_operation,&
       adapted_occupied_rank,adapted_occupied_selected_block_dimension,orthonormal_lcfo_rank,&
       translation_identity_operation,translation_adapted_rank
+    integer::global_point_cogroup_identity_operation
     integer::lcfo_symmetry_worst_operation,lcfo_symmetry_worst_generator_index
     real(8),allocatable::lcfo_total_symmetry_residual(:),lcfo_boundary_symmetry_residual(:),&
       lcfo_interior_symmetry_residual(:)
@@ -919,6 +921,8 @@ contains
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'fixed-center group identity construction failed';end if
     call find_dg_group_identity(global_point_product,global_identity_operation,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global group identity construction failed';end if
+    call find_dg_group_identity(global_point_cogroup_product,global_point_cogroup_identity_operation,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'point cogroup identity construction failed';end if
     allocate(translation_product(size(global_translation_subgroup),size(global_translation_subgroup)))
     do io=1,size(global_translation_subgroup);do i=1,size(global_translation_subgroup)
       translation_product(i,io)=findloc(global_translation_subgroup,&
@@ -979,17 +983,21 @@ contains
       ' gamma_defect=',translation_adapted_gamma_defect,&
       ' electron_count_drift=',abs(translation_adapted_trace-real(nstate,8)),&
       ' workspace_peak_bytes=',translation_adapted_workspace_peak
-    call init_eigenexa_mod(info,nstate*fixed_center_group_order,direct_block_only=.true.)
-    call build_dg_group_averaged_occupied_candidates_eigenexa(info,dc%icomm_tot,&
-      translation_adapted_occupied,ow_core_weights,fixed_center_symmetry_map,&
-      fixed_center_product,fixed_center_identity_operation,nstate,dg_ow_symmetry_tolerance,&
+    if(nstate>huge(nstate)/size(global_point_representatives))&
+      error stop 'point-cogroup occupied orbit rank overflow'
+    call init_eigenexa_mod(info,nstate*size(global_point_representatives),direct_block_only=.true.)
+    call build_dg_cocycle_averaged_occupied_candidates_eigenexa(info,dc%icomm_tot,&
+      translation_adapted_occupied,ow_core_weights,&
+      global_symmetry_map(:,global_translation_subgroup),&
+      global_symmetry_map(:,global_point_representatives),global_point_cogroup_product,&
+      global_translation_cocycle,global_point_cogroup_identity_operation,nstate,dg_ow_symmetry_tolerance,&
       adapted_occupied_candidates,adapted_occupied_spectrum,adapted_occupied_rank,&
       adapted_occupied_trace,adapted_occupied_closure,adapted_occupied_gamma_defect,&
       adapted_occupied_workspace_peak,ok,message,adapted_occupied_selected_edge,&
       adapted_occupied_rejected_edge,adapted_occupied_cluster_gap)
     call finalize_eigenexa(info)
     if(.not.ok.or.adapted_occupied_rank/=nstate)then
-      write(0,'(a)')trim(message);error stop 'fixed-center occupied-subspace adaptation failed'
+      write(0,'(a)')trim(message);error stop 'point-cogroup occupied-subspace adaptation failed'
     endif
     adapted_occupied_workspace_peak=max(adapted_occupied_workspace_peak,translation_adapted_workspace_peak,&
       occupied_pre_closure_workspace_peak,occupied_composition_peak,projector_composition_peak)
@@ -1036,7 +1044,7 @@ contains
     deallocate(adapted_occupied_candidates,adapted_occupied_spectrum,translation_adapted_occupied,&
       translation_adapted_spectrum,orthonormal_lcfo_occupied,translation_product)
     if(rank==0)write(*,'(a,2(a,i0),7(a,es16.8),a,i0)')&
-      '[OW-GS-DIAGNOSTIC] symmetry_adapted_occupied',&
+      '[OW-GS-DIAGNOSTIC] point_cogroup_adapted_occupied',&
       ' input_rank=',nstate,' selected_rank=',adapted_occupied_rank,&
       ' trace=',adapted_occupied_trace,' closure=',adapted_occupied_closure,&
       ' gamma_defect=',adapted_occupied_gamma_defect,&
