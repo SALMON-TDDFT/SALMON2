@@ -815,9 +815,10 @@ contains
     ntarget=nstate+global_projection_count
     if(ntarget<1)error stop 'LCFO Wannier target rank is invalid'
     call dc_lcfo(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc,&
-      retained_count=nstate,retained_box_contribution=lcfo_fragment_contribution,&
+      retained_count=ntarget,retained_box_count=nstate,&
+      retained_box_contribution=lcfo_fragment_contribution,&
       retained_occupations=lcfo_retained_occupations,write_files=.false.)
-    if(size(lcfo_retained_occupations)/=nstate.or.&
+    if(size(lcfo_retained_occupations)/=ntarget.or.&
         abs(sum(lcfo_retained_occupations)-dc%elec_num_tot)>&
         1d3*epsilon(1d0)*max(1d0,dc%elec_num_tot)) &
       error stop 'LCFO retained occupations do not match the target space'

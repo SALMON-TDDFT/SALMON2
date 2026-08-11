@@ -483,17 +483,32 @@ assert not re.search(
     re.I,
 ), "the production route must not construct a fragment-local complement"
 assert re.search(
-    r"call\s+dc_lcfo\s*\(.*?retained_count\s*=\s*nstate\s*,\s*&?\s*"
+    r"call\s+dc_lcfo\s*\(.*?retained_count\s*=\s*ntarget\s*,\s*&?\s*"
+    r"retained_box_count\s*=\s*nstate\s*,\s*&?\s*"
     r"retained_box_contribution\s*=\s*lcfo_fragment_contribution\s*,\s*&?\s*"
     r"retained_occupations\s*=\s*lcfo_retained_occupations",
     adapter_body,
     re.I | re.S,
-), "only the occupied block may come from LCFO before complete-s+p buffer composition"
+), "LCFO must retain the finite-temperature window but materialize only occupied buffer rows"
 assert re.search(
     r"coefficient_count\s*=\s*max\s*\(\s*dc%nstate_tot\s*,\s*retained_count\s*\)",
     lcfo_source,
     re.I,
 ), "the in-memory LCFO path must retain requested columns beyond normal nstate_tot"
+assert re.search(
+    r"subroutine\s+dc_lcfo\s*\(.*?retained_count\s*,\s*"
+    r"retained_box_contribution\s*,\s*retained_occupations\s*,\s*write_files\s*,\s*&?\s*"
+    r"retained_box_count\s*\)",
+    lcfo_source,
+    re.I | re.S,
+), "the new optional buffer-row count must be appended to preserve positional-call compatibility"
+assert re.search(
+    r"box_count\s*=\s*retained_count.*?present\s*\(\s*retained_box_count\s*\).*?"
+    r"box_count\s*=\s*retained_box_count.*?"
+    r"retained_box_contribution\s*\(\s*box_count\s*,\s*product\s*\(\s*nxyz_box\s*\)\s*\)",
+    lcfo_source,
+    re.I | re.S,
+), "LCFO must allocate buffered rows independently of its larger diagonalization window"
 assert re.search(
     r"occupations\s*=\s*lcfo_retained_occupations\s*\(\s*1\s*:\s*nstate\s*\)",
     adapter_body,
@@ -769,11 +784,12 @@ assert re.search(
 ), "global complete-s+p catalog must be rank balanced before LCFO selection"
 assert re.search(
     r"ntarget\s*=\s*nstate\s*\+\s*global_projection_count.*?"
-    r"call\s+dc_lcfo\s*\(.*?retained_count\s*=\s*nstate.*?"
+    r"call\s+dc_lcfo\s*\(.*?retained_count\s*=\s*ntarget.*?"
+    r"retained_box_count\s*=\s*nstate.*?"
     r"retained_box_contribution\s*=\s*lcfo_fragment_contribution",
     adapter_body,
     re.I | re.S,
-), "LCFO must retain only occupied states before the complete-s+p direct sum"
+), "LCFO must separate the finite-temperature occupation window from occupied buffer materialization"
 assert re.search(
     r"complete_sp_core_atom_count\s*=\s*dc%system_tot%nion\s*/\s*nproc.*?"
     r"local_target_count\s*/=\s*4\s*\*\s*complete_sp_core_atom_count",

@@ -36,7 +36,7 @@ module lcfo
 contains
 
   subroutine dc_lcfo(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc,&
-      retained_count,retained_box_contribution,retained_occupations,write_files)
+      retained_count,retained_box_contribution,retained_occupations,write_files,retained_box_count)
     use communication, only: comm_summation,comm_bcast
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use salmon_global, only: yn_dc_lcfo_diag, yn_eigenexa, temperature
@@ -57,6 +57,7 @@ contains
     complex(8), allocatable, intent(out), optional :: retained_box_contribution(:,:)
     real(8), allocatable, intent(out), optional :: retained_occupations(:)
     logical, intent(in), optional :: write_files
+    integer, intent(in), optional :: retained_box_count
     !
     type halo_info
       integer :: id_src,id_dst,ifrag_src,dvec(3),length(3),dsp_send(3),dsp_recv(3)
@@ -86,9 +87,15 @@ contains
     if((present(retained_count).neqv.present(retained_box_contribution)).or.&
         (present(retained_count).neqv.present(retained_occupations))) &
       error stop 'DC-LCFO: retained count, contribution, and occupations must be requested together'
+    if(present(retained_box_count).and..not.present(retained_count))&
+      error stop 'DC-LCFO: retained buffer count requires retained outputs'
     if(present(retained_count))then
       if(retained_count<1) &
         error stop 'DC-LCFO: invalid retained contribution count'
+      if(present(retained_box_count))then
+        if(retained_box_count<1.or.retained_box_count>retained_count)&
+          error stop 'DC-LCFO: retained buffer count is outside the retained window'
+      endif
     end if
     call init_lcfo
     call calc_basis
@@ -635,7 +642,7 @@ contains
     subroutine build_retained_box_contribution
       implicit none
       integer :: nxyz_domain(3),nxyz_box(3),lb_rwf(3),ub_rwf(3),io_lb,io_ub
-      integer :: ibx,iby,ibz,sx,sy,sz,raw_io,ibasis,istate,point
+      integer :: ibx,iby,ibz,sx,sy,sz,raw_io,ibasis,istate,point,box_count
       real(8),allocatable :: effective_coefficient(:,:)
       complex(8),allocatable :: contribution_local(:,:)
 
@@ -644,12 +651,14 @@ contains
       lb_rwf=[lbound(spsi%rwf,1),lbound(spsi%rwf,2),lbound(spsi%rwf,3)]
       ub_rwf=[ubound(spsi%rwf,1),ubound(spsi%rwf,2),ubound(spsi%rwf,3)]
       io_lb=lbound(spsi%rwf,5);io_ub=ubound(spsi%rwf,5)
-      allocate(effective_coefficient(dc%nstate_frag,retained_count),&
-        contribution_local(retained_count,product(nxyz_box)),&
-        retained_box_contribution(retained_count,product(nxyz_box)))
+      box_count=retained_count
+      if(present(retained_box_count))box_count=retained_box_count
+      allocate(effective_coefficient(dc%nstate_frag,box_count),&
+        contribution_local(box_count,product(nxyz_box)),&
+        retained_box_contribution(box_count,product(nxyz_box)))
       effective_coefficient=0d0;contribution_local=(0d0,0d0)
       if(dc%id_frag==0)then
-        do istate=1,retained_count
+        do istate=1,box_count
           do ibasis=1,n_basis(dc%i_frag,1)
             effective_coefficient(:,istate)=effective_coefficient(:,istate)+&
               basis_transform(:,ibasis,1)*coef_wf(ibasis,istate,1)
