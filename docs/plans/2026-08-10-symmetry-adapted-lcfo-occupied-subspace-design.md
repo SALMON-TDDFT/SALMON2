@@ -18,20 +18,41 @@ failure which the earlier affine proof failed to detect:
   projector set improves the residual to `6.65699e-1`, but does not close the
   space.
 
-The remaining leakage is therefore in the 128 occupied LCFO states.  The
-previous proof's exactly zero residuals and zero measured workspace are false
-evidence and must not be used for publication.
+The first fixed-center adaptation repaired that finite-group defect, but a
+fresh ideal-Si64 run exposed a second, more fundamental error.  The code
+discarded the buffer and restricted every seed to its uniquely owned fragment
+core before applying the full affine generators.  Measured full-affine
+residuals were
+
+- adapted occupied rank 128: total `4.93771`, boundary `4.64122`, interior
+  `1.72063`;
+- complete `s+p` rank 256: total `8.10362`, boundary `7.82957`, interior
+  `3.08775`; and
+- their orthonormal rank-384 direct sum: total `10.0621`, boundary `9.32013`,
+  interior `3.79228`.
+
+The boundary-dominated failure of both independent blocks disproves the
+assumption that a core-truncated complete atomic projector space is already
+closed under translations.  Fixed-center adaptation cannot repair a
+translation that crosses an artificial fragment face.  The previous proof's
+exactly zero residuals and zero measured workspace are false evidence, and a
+core-first full-affine proof is physically invalid even when it reports a
+finite residual.
 
 ## Decision
 
-Construct a symmetry-adapted occupied subspace once after normal DC
-LCFO+EigenExa and before Wannier90.  The construction uses the full-system
-atomic symmetry, but stores and transforms spatially distributed fragment
-data.  It does not construct or retain the complete full-system orbital
-tensor.
+Construct a smooth full-system distributed seed once after normal DC
+LCFO+EigenExa and before Wannier90.  Buffer composition must precede every
+full-affine action: multiply each fragment-plus-buffer contribution by the
+existing smooth partition of unity, sum equal physical-grid IDs, and retain
+one distributed owner for each physical grid point.  Fragment cores may not
+be used as hard orbital support during symmetry adaptation or its proof.
+This constructs the mathematical full-system functions without constructing
+or retaining a replicated full-system orbital tensor.
 
 For the selected inversion-containing fixed-center group `G`, generate the
-orbit of the 128 occupied LCFO orbitals in bounded orbital tiles.  Define the
+orbit of the smoothly composed 128 occupied LCFO orbitals in bounded orbital
+tiles.  Define the
 group-averaged occupied projector
 
 `Pbar = |G|^-1 sum_g U_g P_occ U_g^dagger`.
@@ -42,10 +63,11 @@ split a numerically degenerate cluster or an irreducible block.  If no unique
 128-dimensional invariant selection exists within the declared tolerances,
 reject the checkpoint instead of choosing an MPI-order-dependent basis.
 
+Apply the same smooth composition to all 256 complete buffer `s+p` projectors.
 The final 384-dimensional seed is the direct sum of:
 
 1. the symmetry-adapted occupied space of rank 128; and
-2. the complete buffer-composed local `s+p` projector space of rank 256.
+2. the smoothly composed complete buffer `s+p` projector space of rank 256.
 
 Orthonormalize the direct sum with the existing generalized algebra.  Reject
 rank loss, occupied/projector overlap that prevents rank 384, a non-real
@@ -63,6 +85,9 @@ The full affine group and the fixed-center group have different jobs.
 - The maximal inversion-containing fixed-center group defines the finite
   representation used to adapt the occupied space, write the DMN, constrain
   Wannier90, project operators, and test inversion selection rules.
+- The complete affine generating set acts only after buffer composition and
+  proves that the physical rank-384 space, including translations between
+  fragment owners, is closed.
 
 Both are derived from the full atomic coordinates.  Fragment membership is
 used only for distributed storage, buffer support, and returning each MLWF to
@@ -70,10 +95,18 @@ the fragment containing its center `R`; it never defines the symmetry group.
 
 ## Distributed memory procedure
 
-Spatial-core ranks keep their existing fragment-plus-buffer grid slabs.  For
-one group operation and one orbital tile at a time they:
+Spatial ranks keep their existing fragment-plus-buffer slabs as input.  A
+streamed composition stage routes `(physical_grid_id, weighted orbital tile)`
+records to deterministic physical-grid owners.  Contributions from every
+overlapping buffer are summed there.  It stores only one orbital tile on the
+owned physical grid plus bounded exchange buffers; neither the complete
+fragment overlap tensor nor a replicated global grid is retained.
 
-1. pull back the local grid values with the full-system affine operation;
+For one group operation and one orbital tile at a time the physical-grid
+owners then:
+
+1. pull back the smoothly composed values with the full-system affine
+   operation;
 2. exchange only the remote rows required by that pullback;
 3. accumulate local contributions to the orbit Gram matrix and to the
    action of `Pbar`;
@@ -85,6 +118,11 @@ with the orbit rank, not the real-space grid.  Production must never retain
 wavefunction array.  Measured current and peak bytes are reduced across MPI
 ranks and recorded; zero measured workspace is invalid when nonidentity
 operations are processed.
+
+Only after Wannier90 has produced the global MLWF gauge are orbitals
+materialized back onto fragment-plus-buffer slabs.  Each MLWF is assigned by
+its center `R` to the fragment containing that center, while neighboring
+buffers receive the values required by derivatives and stitched operators.
 
 ## Density and boundary receipts
 
@@ -107,8 +145,9 @@ small-cell acceptance checks, not claims of bulk quantitative accuracy.
 
 ## Repairing the affine proof
 
-Replace the false-zero proof path with a streamed residual calculation on the
-actual selected production seed.  Select a deterministic generating set from
+Replace the false-zero and core-first proof paths with a streamed residual
+calculation on the smoothly composed physical-grid seed.  Select a
+deterministic generating set from
 the complete affine product table; invariance under those generators proves
 invariance under every generated affine operation, while avoiding a redundant
 1536-operation orbital sweep.  For every selected generator it must
@@ -116,7 +155,8 @@ measure `||(I-QQ^dagger)U_g Q||`, singular-value bounds of `Q^dagger U_g Q`,
 and real allocated workspace.  Full atomic/cocycle provenance still covers
 all affine operations.  A fixture that perturbs one generator outside
 the seed space must fail.  The proof cannot infer closure merely from atom or
-projector permutations.
+projector permutations, and it cannot use fragment-core truncation as the
+support of an orbital.
 
 ## Wannier90 and publication
 
