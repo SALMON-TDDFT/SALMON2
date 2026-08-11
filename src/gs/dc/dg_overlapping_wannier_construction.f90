@@ -51,6 +51,7 @@ module dg_overlapping_wannier_construction
   public::find_dg_group_identity
   public::select_dg_group_generators
   public::build_dg_smooth_partition_of_unity
+  public::compose_dg_buffered_orbital_tile_to_physical_grid
   public::accumulate_dg_lcfo_buffer_contributions_to_core
   public::measure_dg_rank_fixed_symmetry_residuals
 #ifdef USE_EIGENEXA
@@ -168,6 +169,157 @@ contains
     sum_defect=huge(1d0);gradient_defect=huge(1d0)
 #endif
   end subroutine build_dg_smooth_partition_of_unity
+
+  subroutine compose_dg_buffered_orbital_tile_to_physical_grid(comm,physical_ids,partition_weight,&
+      buffer_values,owned_ids,owned_values,fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm
+    integer(int64),intent(in)::physical_ids(:)
+    real(real64),intent(in)::partition_weight(:)
+    complex(real64),intent(in)::buffer_values(:,:)
+    integer(int64),allocatable,intent(out)::owned_ids(:)
+    complex(real64),allocatable,intent(out)::owned_values(:,:)
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,nproc,ierr,norb,norb_min,norb_max,nlocal,local_bad,global_bad
+    integer::p,owner,cursor,total_send,total_recv,nowned,i,j
+    integer(int64)::scaled_count,local_hash,bits,real_bytes,complex_bytes,int_bytes,&
+      local_max_id,global_point_count,points_per_owner
+    integer,allocatable::send_counts(:),recv_counts(:),send_displs(:),recv_displs(:),fill(:),order(:),&
+      value_send_counts(:),value_recv_counts(:),value_send_displs(:),value_recv_displs(:)
+    integer(int64),allocatable::send_ids(:),recv_ids(:)
+    real(real64),allocatable::send_weights(:),recv_weights(:),owned_weight_sum(:)
+    complex(real64),allocatable::send_values(:,:),recv_values(:,:)
+    logical::counts_ok
+
+    ok=.false.;message='';fingerprint=0_int64;workspace_peak_bytes=0_int64
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    norb=size(buffer_values,1);nlocal=size(physical_ids)
+    call MPI_Allreduce(norb,norb_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(norb,norb_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    local_bad=merge(0,1,ierr==MPI_SUCCESS.and.nproc>0.and.norb>0.and.norb_min==norb_max.and.nlocal>0.and.&
+      size(partition_weight)==nlocal.and.size(buffer_values,2)==nlocal.and.all(physical_ids>0_int64).and.&
+      all(partition_weight>=0d0).and.all(ieee_is_finite(partition_weight)).and.&
+      all(ieee_is_finite(real(buffer_values))).and.all(ieee_is_finite(aimag(buffer_values))))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='invalid buffer-composed orbital tile contract';return
+    endif
+    allocate(order(nlocal));call sort_dg_int64_index(physical_ids,order);local_bad=0
+    do p=2,nlocal
+      if(physical_ids(order(p))==physical_ids(order(p-1)))local_bad=1
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr);deallocate(order)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='buffer composition requires unique physical-grid ids within each fragment';return
+    endif
+    local_max_id=maxval(physical_ids)
+    call MPI_Allreduce(local_max_id,global_point_count,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    local_bad=merge(0,1,ierr==MPI_SUCCESS.and.global_point_count>0_int64.and.&
+      modulo(global_point_count,int(nproc,int64))==0_int64)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='buffer composition physical-grid ownership is not rank balanced';return
+    endif
+    points_per_owner=global_point_count/int(nproc,int64)
+    allocate(send_counts(nproc),recv_counts(nproc),send_displs(nproc),recv_displs(nproc),fill(nproc))
+    send_counts=0
+    do p=1,nlocal
+      owner=int((physical_ids(p)-1_int64)/points_per_owner)+1
+      if(send_counts(owner)==huge(send_counts(owner)))then;local_bad=1;exit;endif
+      send_counts(owner)=send_counts(owner)+1
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then;message='buffer composition send count overflow';return;endif
+    call MPI_Alltoall(send_counts,1,MPI_INTEGER,recv_counts,1,MPI_INTEGER,comm,ierr)
+    call build_checked_mpi_displacements(send_counts,send_displs,total_send,counts_ok)
+    if(counts_ok)call build_checked_mpi_displacements(recv_counts,recv_displs,total_recv,counts_ok)
+    local_bad=merge(0,1,ierr==MPI_SUCCESS.and.counts_ok.and.total_send==nlocal)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then;message='buffer composition displacement overflow';return;endif
+    allocate(send_ids(total_send),recv_ids(total_recv),send_weights(total_send),recv_weights(total_recv),&
+      send_values(norb,total_send),recv_values(norb,total_recv));fill=send_displs
+    do p=1,nlocal
+      owner=int((physical_ids(p)-1_int64)/points_per_owner)+1
+      cursor=fill(owner)+1;fill(owner)=cursor
+      send_ids(cursor)=physical_ids(p);send_weights(cursor)=partition_weight(p)
+      send_values(:,cursor)=buffer_values(:,p)
+    enddo
+    call MPI_Alltoallv(send_ids,send_counts,send_displs,MPI_INTEGER8,&
+      recv_ids,recv_counts,recv_displs,MPI_INTEGER8,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='buffer composition ID exchange failed';return;endif
+    call MPI_Alltoallv(send_weights,send_counts,send_displs,MPI_DOUBLE_PRECISION,&
+      recv_weights,recv_counts,recv_displs,MPI_DOUBLE_PRECISION,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='buffer composition weight exchange failed';return;endif
+    allocate(value_send_counts(nproc),value_recv_counts(nproc),value_send_displs(nproc),value_recv_displs(nproc))
+    local_bad=0
+    do owner=1,nproc
+      scaled_count=int(norb,int64)*int(send_counts(owner),int64)
+      if(scaled_count>int(huge(0),int64))local_bad=1
+      value_send_counts(owner)=int(min(scaled_count,int(huge(0),int64)))
+      scaled_count=int(norb,int64)*int(recv_counts(owner),int64)
+      if(scaled_count>int(huge(0),int64))local_bad=1
+      value_recv_counts(owner)=int(min(scaled_count,int(huge(0),int64)))
+    enddo
+    call build_checked_mpi_displacements(value_send_counts,value_send_displs,cursor,counts_ok)
+    if(counts_ok)call build_checked_mpi_displacements(value_recv_counts,value_recv_displs,cursor,counts_ok)
+    call MPI_Allreduce(local_bad+merge(0,1,counts_ok),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then;message='buffer composition value count overflow';return;endif
+    call MPI_Alltoallv(send_values,value_send_counts,value_send_displs,MPI_DOUBLE_COMPLEX,&
+      recv_values,value_recv_counts,value_recv_displs,MPI_DOUBLE_COMPLEX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='buffer composition exchange failed';return;endif
+    allocate(order(total_recv));call sort_dg_int64_index(recv_ids,order)
+    nowned=1
+    do i=2,total_recv
+      if(recv_ids(order(i))/=recv_ids(order(i-1)))nowned=nowned+1
+    enddo
+    allocate(owned_ids(nowned),owned_values(norb,nowned),owned_weight_sum(nowned))
+    owned_values=(0d0,0d0);owned_weight_sum=0d0;j=0
+    do i=1,total_recv
+      if(i==1)then
+        j=1;owned_ids(j)=recv_ids(order(i))
+      elseif(recv_ids(order(i))/=recv_ids(order(i-1)))then
+        j=j+1;owned_ids(j)=recv_ids(order(i))
+      endif
+      owned_values(:,j)=owned_values(:,j)+recv_weights(order(i))*recv_values(:,order(i))
+      owned_weight_sum(j)=owned_weight_sum(j)+recv_weights(order(i))
+    enddo
+    local_bad=merge(0,1,nowned>0.and.all(abs(owned_weight_sum-1d0)<=1d3*epsilon(1d0)).and.&
+      all(ieee_is_finite(real(owned_values))).and.all(ieee_is_finite(aimag(owned_values))))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='buffer composition has missing, excess, or nonfinite physical-grid coverage';return
+    endif
+    local_hash=0_int64
+    do p=1,nowned
+      local_hash=ieor(local_hash,ishftc(owned_ids(p),int(modulo(owned_ids(p),63_int64))))
+      do i=1,norb
+        bits=transfer(real(owned_values(i,p)),bits)
+        local_hash=ieor(local_hash,ishftc(bits,mod(7*i+11*int(modulo(owned_ids(p),63_int64)),63)))
+        bits=transfer(aimag(owned_values(i,p)),bits)
+        local_hash=ieor(local_hash,ishftc(bits,mod(13*i+17*int(modulo(owned_ids(p),63_int64)),63)))
+      enddo
+    enddo
+    call MPI_Allreduce(local_hash,fingerprint,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
+    fingerprint=ieor(fingerprint,int(z'3C6EF372FE94F82B',int64))
+    if(fingerprint==0_int64)fingerprint=1_int64
+    real_bytes=int(storage_size(0d0)/8,int64);complex_bytes=int(storage_size((0d0,0d0))/8,int64)
+    int_bytes=int(storage_size(0_int64)/8,int64)
+    workspace_peak_bytes=int_bytes*int(size(send_ids)+size(recv_ids)+size(owned_ids),int64)+&
+      real_bytes*int(size(send_weights)+size(recv_weights)+size(owned_weight_sum),int64)+&
+      complex_bytes*int(size(send_values)+size(recv_values)+size(owned_values),int64)+&
+      int(storage_size(0)/8,int64)*int(size(send_counts)+size(recv_counts)+size(send_displs)+&
+      size(recv_displs)+size(fill)+size(order)+size(value_send_counts)+size(value_recv_counts)+&
+      size(value_send_displs)+size(value_recv_displs),int64)
+    call MPI_Allreduce(MPI_IN_PLACE,workspace_peak_bytes,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    ok=ierr==MPI_SUCCESS.and.workspace_peak_bytes>0_int64
+    if(ok)then;message='';else;message='buffer composition workspace receipt reduction failed';endif
+#else
+    ok=.false.;message='buffer-composed orbital tiles require MPI'
+    fingerprint=0_int64;workspace_peak_bytes=0_int64
+#endif
+  end subroutine compose_dg_buffered_orbital_tile_to_physical_grid
 
   subroutine sort_dg_int64_index(values,order)
     integer(int64),intent(in)::values(:)
@@ -1458,7 +1610,7 @@ contains
         symmetry_target_box_ids(:,left_operation),composed_label,ok,detail)
       if(.not.ok)then;message='group-averaged composed point action: '//trim(detail);return;endif
       call exchange_dg_point_permuted_orbital_rows(comm,label,&
-        symmetry_target_box_ids(:,product_table(left_operation,right_operation)),expected_label,ok,detail)
+        symmetry_target_box_ids(:,product_table(right_operation,left_operation)),expected_label,ok,detail)
       if(.not.ok)then;message='group-averaged product point action: '//trim(detail);return;endif
       local_group_defect=maxval(abs(composed_label-expected_label))
       call MPI_Allreduce(local_group_defect,global_group_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
@@ -1625,7 +1777,7 @@ contains
         symmetry_target_box_ids(:,left_operation),composed_label,ok,detail)
       if(.not.ok)then;message='distributed group-average composed point action: '//trim(detail);return;endif
       call exchange_dg_point_permuted_orbital_rows(comm,label,&
-        symmetry_target_box_ids(:,product_table(left_operation,right_operation)),expected_label,ok,detail)
+        symmetry_target_box_ids(:,product_table(right_operation,left_operation)),expected_label,ok,detail)
       if(.not.ok)then;message='distributed group-average product point action: '//trim(detail);return;endif
       local_group_defect=maxval(abs(composed_label-expected_label))
       call MPI_Allreduce(local_group_defect,global_group_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)

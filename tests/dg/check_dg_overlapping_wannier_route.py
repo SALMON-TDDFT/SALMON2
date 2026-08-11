@@ -38,6 +38,9 @@ scf_source = source("src/gs/scf_iteration_dft.f90")
 dcdft_source = source("src/gs/dc/dcdft.f90")
 types_source = source("src/gs/dc/dg_overlapping_wannier_types.f90")
 construction_source = source("src/gs/dc/dg_overlapping_wannier_construction.f90")
+assert construction_source.lower().count(
+    "product_table(right_operation,left_operation)"
+) >= 2, "point pullback composition must use the reversed geometric product order"
 localization_source = source("src/gs/dc/dg_overlapping_wannier_localization.f90")
 w90_source = source("src/gs/dc/dg_overlapping_wannier_w90.f90")
 assert re.match(r"\s*#include\s+[\"<]config\.h[\">]", w90_source), (

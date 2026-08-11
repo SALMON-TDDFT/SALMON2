@@ -403,13 +403,53 @@ program test_dg_overlapping_wannier_construction_mpi
   call require(size(composed_owned_ids)==size(composed_owned_values,2),&
     'buffer composition returns one value column per owned physical-grid ID')
   do p=1,size(composed_owned_ids)
-    call require(maxval(abs(composed_owned_values(:,p)-sum(partition_weight,&
-      mask=partition_ids==composed_owned_ids(p))*&
+    call require(maxval(abs(composed_owned_values(:,p)-&
       [cmplx(real(composed_owned_ids(p),8),0d0,8),&
        cmplx(0d0,-real(composed_owned_ids(p),8),8)]))<1d-12,&
       'buffer-first composition recovers the smooth full-system orbital across a fragment face')
   enddo
   deallocate(composed_buffer_values,composed_owned_ids,composed_owned_values)
+  partition_ids=[int(rank+1,8),int(rank+nproc+1,8)]
+  partition_weight=1d0
+  allocate(composed_buffer_values(1,2));composed_buffer_values(1,:)=cmplx(real(partition_ids,8),0d0,8)
+  call compose_dg_buffered_orbital_tile_to_physical_grid(comm,partition_ids,partition_weight,&
+    composed_buffer_values,composed_owned_ids,composed_owned_values,composition_fingerprint,&
+    composition_workspace_peak,ok,message)
+  call require(ok,trim(message))
+  call require(all(composed_owned_ids==[int(2*rank+1,8),int(2*rank+2,8)]),&
+    'buffer composition uses contiguous physical-ID owners required by affine point exchange')
+  deallocate(composed_buffer_values,composed_owned_ids,composed_owned_values)
+  partition_ids=[int(rank+1,8),int(modulo(rank+1,nproc)+1,8)]
+  if(nproc==1)partition_ids=[1_8,2_8]
+  if(nproc==1)then
+    partition_weight=1d0
+  else
+    partition_weight=[2d0/3d0,1d0/3d0]
+  endif
+  partition_weight(1)=0.5d0*partition_weight(1)
+  allocate(composed_buffer_values(2,2));composed_buffer_values=(1d0,0d0)
+  call compose_dg_buffered_orbital_tile_to_physical_grid(comm,partition_ids,partition_weight,&
+    composed_buffer_values,composed_owned_ids,composed_owned_values,composition_fingerprint,&
+    composition_workspace_peak,ok,message)
+  call require(.not.ok,'buffer composition rejects incomplete partition coverage')
+  if(allocated(composed_owned_ids))deallocate(composed_owned_ids)
+  if(allocated(composed_owned_values))deallocate(composed_owned_values)
+  partition_weight(1)=2d0*partition_weight(1)
+  composed_buffer_values(1,1)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,8)
+  call compose_dg_buffered_orbital_tile_to_physical_grid(comm,partition_ids,partition_weight,&
+    composed_buffer_values,composed_owned_ids,composed_owned_values,composition_fingerprint,&
+    composition_workspace_peak,ok,message)
+  call require(.not.ok,'buffer composition rejects nonfinite orbital values')
+  deallocate(composed_buffer_values)
+  allocate(composed_buffer_values(2,2));composed_buffer_values=(1d0,0d0)
+  partition_ids(2)=partition_ids(1)
+  call compose_dg_buffered_orbital_tile_to_physical_grid(comm,partition_ids,partition_weight,&
+    composed_buffer_values,composed_owned_ids,composed_owned_values,composition_fingerprint,&
+    composition_workspace_peak,ok,message)
+  call require(.not.ok,'buffer composition rejects duplicate physical IDs within one fragment')
+  deallocate(composed_buffer_values)
+  partition_ids=[int(rank+1,8),int(modulo(rank+1,nproc)+1,8)]
+  if(nproc==1)partition_ids=[1_8,2_8]
   raw_partition_weight(2)=-0.5d0
   call build_dg_smooth_partition_of_unity(comm,partition_ids,raw_partition_weight,&
     raw_partition_gradient,partition_weight,partition_gradient,partition_sum_defect,&
