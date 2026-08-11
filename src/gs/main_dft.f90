@@ -48,7 +48,7 @@ use dg_overlapping_wannier_construction, only: s_dg_overlapping_wannier_construc
   verify_dg_fragment_center_orbit,verify_dg_uniform_fragment_target_rank
 use dg_overlapping_wannier_construction, only: build_dg_core_owned_occupied_subspace
 use dg_overlapping_wannier_construction, only: orthonormalize_dg_distributed_seed_space
-use dg_overlapping_wannier_construction, only: accumulate_dg_lcfo_buffer_contributions_to_core
+use dg_overlapping_wannier_construction, only: compose_dg_buffered_orbital_tile_to_physical_grid
 use dg_overlapping_wannier_construction, only: measure_dg_rank_fixed_symmetry_residuals
 #ifdef USE_EIGENEXA
 use dg_overlapping_wannier_construction, only: measure_dg_rank_fixed_symmetry_residuals_eigenexa
@@ -563,15 +563,18 @@ contains
     complex(8),allocatable::periodic_phase(:,:),global_seed_values(:,:),global_closed_core(:,:),&
       local_occupied_values(:,:),orbital_owned_full_values(:,:),center_local_buffer_values(:,:),&
       adapted_occupied_candidates(:,:)
+    complex(8),allocatable::orthonormal_lcfo_occupied(:,:)
     complex(8),allocatable::occupied_overlap_local(:,:),occupied_overlap_global(:,:)
     complex(8),allocatable::w90_anchors(:,:),w90_m_matrix(:,:,:),w90_a_matrix(:,:),w90_transform(:,:)
     complex(8),allocatable::fixed_center_rows(:,:,:),fixed_center_representation(:,:),fixed_center_identity(:,:)
     complex(8),allocatable::lcfo_fragment_contribution(:,:),lcfo_occupied_core(:,:)
+    complex(8),allocatable::composed_tile_values(:,:),projector_buffer_tile(:,:)
     complex(8),allocatable::one_shot_hrows(:,:)
     real(8),allocatable::weights(:),coordinate(:),spectrum(:),occupations(:),lcfo_retained_occupations(:),&
       gradient_rotation(:,:,:),&
       local_point_rotations(:,:,:)
-    real(8),allocatable::manifest_values(:,:),initial_density_local(:),initial_density_global(:)
+    real(8),allocatable::initial_density_local(:),initial_density_global(:)
+    real(8),allocatable::projector_buffer_real(:,:)
     real(8),allocatable::one_shot_density(:),one_shot_potential(:)
     real(8),allocatable::ow_raw_partition_weight(:),ow_raw_partition_gradient(:,:),&
       ow_box_density(:)
@@ -581,6 +584,7 @@ contains
     real(8),allocatable::occupied_density_before(:),occupied_density_after(:),occupied_density_difference(:),&
       occupied_pre_total_residual(:),occupied_pre_boundary_residual(:),occupied_pre_interior_residual(:)
     type(t_dg_projection_channel),allocatable::manifest_channels(:)
+    type(t_dg_projection_channel),allocatable::projector_tile_channels(:)
     type(s_dg_overlapping_wannier_construction)::symmetry_basis
     integer(8),allocatable::physical_ids(:),box_ids(:),symmetry_map(:,:),local_box_ids(:),&
       local_symmetry_map(:,:),center_representatives(:),&
@@ -593,6 +597,7 @@ contains
       global_translation_subgroup(:),global_point_representatives(:),global_point_cogroup_product(:,:),&
       global_translation_cocycle(:,:)
     integer,allocatable::rank_fragments(:)
+    integer,allocatable::projector_atom_ids(:)
     integer,allocatable::fixed_center_product(:,:)
     integer,allocatable::global_affine_generators(:)
     type(t_sawf_symop),allocatable::fixed_center_operations(:)
@@ -604,22 +609,28 @@ contains
     logical,allocatable::lcfo_boundary_mask(:)
     integer::ix,iy,iz,io,p,nbox,ncore,noccupied,nstate,ntarget,nsym,rank,nproc,&
       raw_ix,raw_iy,raw_iz,core_index,ierr,allocation_status,&
-      local_target_count,w90_nntot
+      local_target_count,w90_nntot,projector_tile_first,projector_tile_last,projector_tile_count
     integer::global_seed_count,global_retained_rank,global_occupied_count,global_projection_count,&
       global_required_retained_rank
     integer::global_identity_operation
     integer::fixed_center_group_order,fixed_center_operation,fixed_center_identity_operation,&
-      adapted_occupied_rank,adapted_occupied_selected_block_dimension
+      adapted_occupied_rank,adapted_occupied_selected_block_dimension,orthonormal_lcfo_rank
     integer::lcfo_symmetry_worst_operation,lcfo_symmetry_worst_generator_index
     real(8),allocatable::lcfo_total_symmetry_residual(:),lcfo_boundary_symmetry_residual(:),&
       lcfo_interior_symmetry_residual(:)
+    real(8),allocatable::occupied_affine_total_residual(:),occupied_affine_boundary_residual(:),&
+      occupied_affine_interior_residual(:),projection_affine_total_residual(:),&
+      projection_affine_boundary_residual(:),projection_affine_interior_residual(:)
     integer::representative_pair(2),local_pair(2)
     integer::complete_sp_core_atom_count
     integer(8)::expected_core_count,expected_box_count,basis_fingerprint,operator_fingerprint,&
       pseudopotential_fingerprint,nbox8,ncore8,product8,nxy8,local_exact_symmetry_fingerprint,&
       lcfo_symmetry_workspace_peak,adapted_occupied_workspace_peak,occupied_pre_closure_workspace_peak
+    integer(8)::composition_fingerprint,composition_workspace_peak,occupied_composition_peak,&
+      occupied_composition_fingerprint,projector_composition_peak,projector_composition_fingerprint
     integer(8)::w90_coordinator_bytes,w90_workspace_peak,w90_byte_limit
     integer(8)::one_shot_workspace_peak,one_shot_operator_fingerprint
+    integer(8)::occupied_affine_workspace_peak,projection_affine_workspace_peak
     integer(8)::w90_symmetry_workspace_peak
     integer(8)::fixed_center_group_fingerprint,fixed_center_operation_workspace,&
       fixed_center_dmn_workspace_peak
@@ -791,31 +802,37 @@ contains
         iz-ow_buffer(3)<=size(stencil%coef_nab,1).or.&
         iz-ow_buffer(3)>ow_core_size(3)-size(stencil%coef_nab,1)
     end do
-    call build_ow_complete_sp_projectors(physical_ids,pseudopotential_fingerprint,&
-      manifest_channels,manifest_values,ok,message)
-    if(.not.ok)then
-      write(0,'(a)')trim(message)
-      error stop 'overlapping-Wannier complete-s+p projector construction failed'
-    endif
-    local_target_count=size(manifest_channels)
-    call MPI_Allreduce(local_target_count,global_projection_count,1,MPI_INTEGER,MPI_SUM,dc%icomm_tot,ierr)
-    if(ierr/=MPI_SUCCESS)error stop 'global atomic projection count reduction failed'
+    allocate(projector_atom_ids(dc%system_tot%nion));projector_atom_ids=[(i,i=1,dc%system_tot%nion)]
+    call build_dg_complete_sp_manifest(projector_atom_ids,manifest_channels,ok,message)
+    deallocate(projector_atom_ids)
+    if(.not.ok)then;write(0,'(a)')trim(message)
+      error stop 'overlapping-Wannier complete-s+p projector catalog failed';endif
+    global_projection_count=size(manifest_channels)
+    if(mod(global_projection_count,nproc)/=0.or.mod(dc%system_tot%nion,nproc)/=0)&
+      error stop 'global complete-s+p projector catalog is not rank balanced'
+    local_target_count=global_projection_count/nproc
     if(nstate>huge(ntarget)-global_projection_count)error stop 'LCFO Wannier target rank overflow'
     ntarget=nstate+global_projection_count
     if(ntarget<1)error stop 'LCFO Wannier target rank is invalid'
     call dc_lcfo(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc,&
-      retained_count=ntarget,retained_box_contribution=lcfo_fragment_contribution,&
+      retained_count=nstate,retained_box_contribution=lcfo_fragment_contribution,&
       retained_occupations=lcfo_retained_occupations,write_files=.false.)
-    if(size(lcfo_retained_occupations)/=ntarget.or.&
+    if(size(lcfo_retained_occupations)/=nstate.or.&
         abs(sum(lcfo_retained_occupations)-dc%elec_num_tot)>&
         1d3*epsilon(1d0)*max(1d0,dc%elec_num_tot)) &
       error stop 'LCFO retained occupations do not match the target space'
-    allocate(lcfo_occupied_core(ntarget,ncore))
-    call accumulate_dg_lcfo_buffer_contributions_to_core(dc%icomm_tot,physical_ids,&
-      lcfo_fragment_contribution,lcfo_core_ids,lcfo_occupied_core,ok,message)
-    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'LCFO target core reconstruction failed';end if
+    call compose_dg_buffered_orbital_tile_to_physical_grid(dc%icomm_tot,physical_ids,&
+      ow_partition_weight,lcfo_fragment_contribution,ow_core_ids,global_seed_values,&
+      composition_fingerprint,composition_workspace_peak,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message)
+      error stop 'LCFO occupied buffer composition failed';endif
+    occupied_composition_peak=composition_workspace_peak
+    occupied_composition_fingerprint=composition_fingerprint
     deallocate(lcfo_fragment_contribution)
-    complete_sp_core_atom_count=count(manifest_channels%l==0)
+    if(size(ow_core_ids)/=ncore.or.any(shape(global_seed_values)/=[nstate,ncore]))&
+      error stop 'LCFO occupied buffer composition has unexpected ownership shape'
+    allocate(lcfo_occupied_core(nstate,ncore),source=global_seed_values)
+    complete_sp_core_atom_count=dc%system_tot%nion/nproc
     if(complete_sp_core_atom_count<1.or.&
         local_target_count/=4*complete_sp_core_atom_count)&
       error stop 'complete-s+p target is not four channels per core-owned atom'
@@ -832,19 +849,54 @@ contains
     ow_basis%center_box_point_ids=0_8;ow_basis%center_owner_rank=-1
     ow_basis%center_owner_fragment=-1
     global_seed_count=ntarget
-    allocate(global_seed_values(global_seed_count,ncore),ow_core_weights(ncore),ow_core_ids(ncore),&
-      ow_core_box_positions(ncore),core_periodic_phase(3,ncore));global_seed_values=(0d0,0d0);core_index=0
-    do p=1,nbox
-      if(.not.core_mask(p))cycle
-      core_index=core_index+1
-      global_seed_values(1:global_occupied_count,core_index)=&
-        lcfo_occupied_core(1:global_occupied_count,core_index)
-      global_seed_values(global_occupied_count+rank*local_target_count+1:&
-        global_occupied_count+(rank+1)*local_target_count,core_index)=&
-        cmplx(manifest_values(:,p),0d0,8)
-      ow_core_weights(core_index)=weights(p);ow_core_ids(core_index)=physical_ids(p)
-      ow_core_box_positions(core_index)=p;core_periodic_phase(:,core_index)=periodic_phase(:,p)
-    end do
+    call move_alloc(global_seed_values,composed_tile_values)
+    allocate(global_seed_values(global_seed_count,ncore),ow_core_weights(ncore),&
+      ow_core_box_positions(ncore),core_periodic_phase(3,ncore));global_seed_values=(0d0,0d0)
+    global_seed_values(1:nstate,:)=composed_tile_values;deallocate(composed_tile_values)
+    ow_core_weights=system%hvol;ow_core_box_positions=0;core_periodic_phase=(0d0,0d0)
+    projector_composition_peak=0_8;projector_composition_fingerprint=0_8
+    do projector_tile_first=1,global_projection_count,32
+      projector_tile_last=min(global_projection_count,projector_tile_first+31)
+      projector_tile_count=projector_tile_last-projector_tile_first+1
+      call build_ow_complete_sp_projectors(physical_ids,pseudopotential_fingerprint,&
+        projector_tile_channels,projector_buffer_real,ok,message,&
+        manifest_channels(projector_tile_first:projector_tile_last))
+      if(.not.ok)then;write(0,'(a)')trim(message)
+        error stop 'overlapping-Wannier complete-s+p projector tile failed';endif
+      allocate(projector_buffer_tile(projector_tile_count,nbox))
+      projector_buffer_tile=cmplx(projector_buffer_real,0d0,8)
+      deallocate(projector_buffer_real,projector_tile_channels)
+      call compose_dg_buffered_orbital_tile_to_physical_grid(dc%icomm_tot,physical_ids,&
+        ow_partition_weight,projector_buffer_tile,lcfo_core_ids,composed_tile_values,&
+        composition_fingerprint,composition_workspace_peak,ok,message)
+      deallocate(projector_buffer_tile)
+      if(.not.ok.or.any(lcfo_core_ids/=ow_core_ids).or.&
+          any(shape(composed_tile_values)/=[projector_tile_count,ncore]))then
+        write(0,'(a)')trim(message);error stop 'complete-s+p buffer composition failed'
+      endif
+      global_seed_values(nstate+projector_tile_first:nstate+projector_tile_last,:)=composed_tile_values
+      projector_composition_peak=max(projector_composition_peak,composition_workspace_peak)
+      projector_composition_fingerprint=ieor(projector_composition_fingerprint,&
+        ishftc(composition_fingerprint,mod(projector_tile_first,63)))
+      deallocate(lcfo_core_ids,composed_tile_values)
+    enddo
+    do p=1,ncore
+      raw_ix=int(modulo(ow_core_ids(p)-1_8,int(dc%lg_tot%num(1),8)))+1
+      raw_iy=int(modulo((ow_core_ids(p)-1_8)/int(dc%lg_tot%num(1),8),&
+        int(dc%lg_tot%num(2),8)))+1
+      raw_iz=int((ow_core_ids(p)-1_8)/nxy8)+1
+      lcfo_boundary_mask(p)=modulo(raw_ix-1,ow_core_size(1))<size(stencil%coef_nab,1).or.&
+        modulo(raw_ix-1,ow_core_size(1))>=ow_core_size(1)-size(stencil%coef_nab,1).or.&
+        modulo(raw_iy-1,ow_core_size(2))<size(stencil%coef_nab,1).or.&
+        modulo(raw_iy-1,ow_core_size(2))>=ow_core_size(2)-size(stencil%coef_nab,1).or.&
+        modulo(raw_iz-1,ow_core_size(3))<size(stencil%coef_nab,1).or.&
+        modulo(raw_iz-1,ow_core_size(3))>=ow_core_size(3)-size(stencil%coef_nab,1)
+    enddo
+    if(rank==0)write(*,'(a,4(a,i0))')'[OW-GS-DIAGNOSTIC] buffer_composition',&
+      ' occupied_workspace_peak_bytes=',occupied_composition_peak,&
+      ' projector_workspace_peak_bytes=',projector_composition_peak,&
+      ' occupied_fingerprint=',occupied_composition_fingerprint,&
+      ' projector_fingerprint=',projector_composition_fingerprint
     call prepare_ow_global_point_action(ow_core_ids,global_symmetry_map,global_point_integer_rotations,&
       global_point_rotations,global_point_fractional_translations,global_point_product,&
       global_translation_subgroup,global_point_representatives,global_point_cogroup_product,&
@@ -871,6 +923,12 @@ contains
       lcfo_boundary_symmetry_residual(size(global_affine_generators)),&
       lcfo_interior_symmetry_residual(size(global_affine_generators)))
 #ifdef USE_EIGENEXA
+    call orthonormalize_dg_distributed_seed_space(dc%icomm_tot,lcfo_occupied_core(1:nstate,:),&
+      ow_core_weights,dg_dc_metric_rank_tolerance,orthonormal_lcfo_occupied,&
+      orthonormal_lcfo_rank,ok,message)
+    if(.not.ok.or.orthonormal_lcfo_rank/=nstate)then
+      write(0,'(a)')trim(message);error stop 'LCFO occupied subspace lost rank before symmetry adaptation'
+    endif
     ow_saved_eigenexa_comm=info%icomm_o
     call finalize_eigenexa(info)
     info%icomm_o=dc%icomm_tot
@@ -878,7 +936,7 @@ contains
     allocate(occupied_pre_total_residual(fixed_center_group_order),&
       occupied_pre_boundary_residual(fixed_center_group_order),&
       occupied_pre_interior_residual(fixed_center_group_order))
-    call measure_dg_rank_fixed_symmetry_residuals_eigenexa(info,dc%icomm_tot,lcfo_occupied_core(1:nstate,:),&
+    call measure_dg_rank_fixed_symmetry_residuals_eigenexa(info,dc%icomm_tot,orthonormal_lcfo_occupied,&
       ow_core_weights,fixed_center_symmetry_map,lcfo_boundary_mask,&
       total_residual=occupied_pre_total_residual,boundary_residual=occupied_pre_boundary_residual,&
       interior_residual=occupied_pre_interior_residual,ok=ok,message=message,&
@@ -889,7 +947,7 @@ contains
     call finalize_eigenexa(info)
     call init_eigenexa_mod(info,nstate*fixed_center_group_order,direct_block_only=.true.)
     call build_dg_group_averaged_occupied_candidates_eigenexa(info,dc%icomm_tot,&
-      lcfo_occupied_core(1:nstate,:),ow_core_weights,fixed_center_symmetry_map,&
+      orthonormal_lcfo_occupied,ow_core_weights,fixed_center_symmetry_map,&
       fixed_center_product,fixed_center_identity_operation,nstate,dg_ow_symmetry_tolerance,&
       adapted_occupied_candidates,adapted_occupied_spectrum,adapted_occupied_rank,&
       adapted_occupied_trace,adapted_occupied_closure,adapted_occupied_gamma_defect,&
@@ -900,10 +958,10 @@ contains
       write(0,'(a)')trim(message);error stop 'fixed-center occupied-subspace adaptation failed'
     endif
     adapted_occupied_workspace_peak=max(adapted_occupied_workspace_peak,&
-      occupied_pre_closure_workspace_peak)
+      occupied_pre_closure_workspace_peak,occupied_composition_peak,projector_composition_peak)
     allocate(occupied_overlap_local(nstate,nstate),occupied_overlap_global(nstate,nstate))
     do io=1,nstate;do i=1,nstate
-      occupied_overlap_local(i,io)=sum(ow_core_weights*conjg(lcfo_occupied_core(i,:))*&
+      occupied_overlap_local(i,io)=sum(ow_core_weights*conjg(orthonormal_lcfo_occupied(i,:))*&
         adapted_occupied_candidates(io,:))
     enddo;enddo
     call MPI_Allreduce(occupied_overlap_local,occupied_overlap_global,nstate*nstate,&
@@ -941,7 +999,7 @@ contains
       abs(adapted_occupied_spectrum-adapted_occupied_selected_edge)<=&
       dg_ow_symmetry_tolerance*max(1d0,abs(adapted_occupied_selected_edge)))
     global_seed_values(1:nstate,:)=adapted_occupied_candidates
-    deallocate(adapted_occupied_candidates,adapted_occupied_spectrum)
+    deallocate(adapted_occupied_candidates,adapted_occupied_spectrum,orthonormal_lcfo_occupied)
     if(rank==0)write(*,'(a,2(a,i0),7(a,es16.8),a,i0)')&
       '[OW-GS-DIAGNOSTIC] symmetry_adapted_occupied',&
       ' input_rank=',nstate,' selected_rank=',adapted_occupied_rank,&
@@ -952,6 +1010,38 @@ contains
       ' rejected_edge=',adapted_occupied_rejected_edge,&
       ' cluster_gap=',adapted_occupied_cluster_gap,&
       ' workspace_peak_bytes=',adapted_occupied_workspace_peak
+    allocate(occupied_affine_total_residual(size(global_affine_generators)),&
+      occupied_affine_boundary_residual(size(global_affine_generators)),&
+      occupied_affine_interior_residual(size(global_affine_generators)),&
+      projection_affine_total_residual(size(global_affine_generators)),&
+      projection_affine_boundary_residual(size(global_affine_generators)),&
+      projection_affine_interior_residual(size(global_affine_generators)))
+    call init_eigenexa_mod(info,nstate,direct_block_only=.true.)
+    call measure_dg_rank_fixed_symmetry_residuals_eigenexa(info,dc%icomm_tot,&
+      global_seed_values(1:nstate,:),ow_core_weights,&
+      global_symmetry_map(:,global_affine_generators),lcfo_boundary_mask,&
+      occupied_affine_total_residual,occupied_affine_boundary_residual,&
+      occupied_affine_interior_residual,ok,message,occupied_affine_workspace_peak)
+    call finalize_eigenexa(info)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'occupied affine diagnostic failed';endif
+    call init_eigenexa_mod(info,global_projection_count,direct_block_only=.true.)
+    call measure_dg_rank_fixed_symmetry_residuals_eigenexa(info,dc%icomm_tot,&
+      global_seed_values(nstate+1:ntarget,:),ow_core_weights,&
+      global_symmetry_map(:,global_affine_generators),lcfo_boundary_mask,&
+      projection_affine_total_residual,projection_affine_boundary_residual,&
+      projection_affine_interior_residual,ok,message,projection_affine_workspace_peak)
+    call finalize_eigenexa(info)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'projection affine diagnostic failed';endif
+    if(rank==0)write(*,'(a,6(a,es16.8))')'[OW-GS-DIAGNOSTIC] affine_block_closure',&
+      ' occupied_total=',maxval(occupied_affine_total_residual),&
+      ' occupied_boundary=',maxval(occupied_affine_boundary_residual),&
+      ' occupied_interior=',maxval(occupied_affine_interior_residual),&
+      ' projection_total=',maxval(projection_affine_total_residual),&
+      ' projection_boundary=',maxval(projection_affine_boundary_residual),&
+      ' projection_interior=',maxval(projection_affine_interior_residual)
+    deallocate(occupied_affine_total_residual,occupied_affine_boundary_residual,&
+      occupied_affine_interior_residual,projection_affine_total_residual,&
+      projection_affine_boundary_residual,projection_affine_interior_residual)
     call orthonormalize_dg_distributed_seed_space(dc%icomm_tot,global_seed_values,ow_core_weights,&
       dg_dc_metric_rank_tolerance,global_closed_core,global_retained_rank,ok,message)
     global_required_retained_rank=global_retained_rank
@@ -1338,17 +1428,18 @@ contains
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'overlapping-Wannier checkpoint publication failed';endif
     call compute_ow_periodic_spread(dc%icomm_tot,spread_max)
     call write_ow_ground_state_evidence(spectrum,noccupied,nproc,rank,spread_max,&
-      size(manifest_channels),complete_sp_core_atom_count)
+      local_target_count,complete_sp_core_atom_count)
     deallocate(ow_box_gradients)
   end subroutine
 
   subroutine build_ow_complete_sp_projectors(physical_ids,pseudopotential_fingerprint,&
-      channels,values,ok,message)
+      channels,values,ok,message,requested_channels)
     integer(8),intent(in)::physical_ids(:),pseudopotential_fingerprint
     type(t_dg_projection_channel),allocatable,intent(out)::channels(:)
     real(8),allocatable,intent(out)::values(:,:)
     logical,intent(out)::ok
     character(*),intent(out)::message
+    type(t_dg_projection_channel),intent(in),optional::requested_channels(:)
     integer,allocatable::core_atom_ids(:),radial_count(:,:),atomic_orbital_ordinals(:,:)
     real(8),allocatable::positions(:,:),radial_grid(:,:,:),radial_projector(:,:,:)
     real(8)::lattice_inverse(3,3),fractional(3),determinant
@@ -1366,18 +1457,23 @@ contains
     call invert_ow_lattice(dc%system_tot%primitive_a,lattice_inverse,determinant,ok)
     if(.not.ok)then;message='complete-s+p projector lattice is singular';return;endif
 
-    allocate(core_atom_ids(dc%system_tot%nion));core_atom_count=0
-    do atom=1,dc%system_tot%nion
-      fractional=modulo(matmul(lattice_inverse,dc%system_tot%Rion(:,atom)),1d0)
-      grid_index=modulo(floor(fractional*real(dc%lg_tot%num,8)),dc%lg_tot%num)
-      if(dg_periodic_grid_point_owned(grid_index,dc%ixyz_frag(:,dc%i_frag),&
-          dc%nxyz_domain_frag(:,dc%i_frag),dc%lg_tot%num))then
-        core_atom_count=core_atom_count+1;core_atom_ids(core_atom_count)=atom
-      endif
-    enddo
-    if(core_atom_count<1)then;message='complete-s+p fragment owns no core atom';return;endif
-    call build_dg_complete_sp_manifest(core_atom_ids(1:core_atom_count),channels,ok,message)
-    if(.not.ok)return
+    if(present(requested_channels))then
+      if(size(requested_channels)<1)then;message='empty complete-s+p requested channel tile';return;endif
+      allocate(channels,source=requested_channels)
+    else
+      allocate(core_atom_ids(dc%system_tot%nion));core_atom_count=0
+      do atom=1,dc%system_tot%nion
+        fractional=modulo(matmul(lattice_inverse,dc%system_tot%Rion(:,atom)),1d0)
+        grid_index=modulo(floor(fractional*real(dc%lg_tot%num,8)),dc%lg_tot%num)
+        if(dg_periodic_grid_point_owned(grid_index,dc%ixyz_frag(:,dc%i_frag),&
+            dc%nxyz_domain_frag(:,dc%i_frag),dc%lg_tot%num))then
+          core_atom_count=core_atom_count+1;core_atom_ids(core_atom_count)=atom
+        endif
+      enddo
+      if(core_atom_count<1)then;message='complete-s+p fragment owns no core atom';return;endif
+      call build_dg_complete_sp_manifest(core_atom_ids(1:core_atom_count),channels,ok,message)
+      if(.not.ok)return
+    endif
 
     allocate(positions(3,size(physical_ids)),radial_grid(pp%nrmax,2,dc%system_tot%nion),&
       radial_projector(pp%nrmax,2,dc%system_tot%nion),radial_count(2,dc%system_tot%nion),&

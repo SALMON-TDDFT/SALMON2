@@ -483,12 +483,12 @@ assert not re.search(
     re.I,
 ), "the production route must not construct a fragment-local complement"
 assert re.search(
-    r"call\s+dc_lcfo\s*\(.*?retained_count\s*=\s*ntarget\s*,\s*&?\s*"
+    r"call\s+dc_lcfo\s*\(.*?retained_count\s*=\s*nstate\s*,\s*&?\s*"
     r"retained_box_contribution\s*=\s*lcfo_fragment_contribution\s*,\s*&?\s*"
     r"retained_occupations\s*=\s*lcfo_retained_occupations",
     adapter_body,
     re.I | re.S,
-), "all target Wanniers must come from the requested global LCFO coefficient columns"
+), "only the occupied block may come from LCFO before complete-s+p buffer composition"
 assert re.search(
     r"coefficient_count\s*=\s*max\s*\(\s*dc%nstate_tot\s*,\s*retained_count\s*\)",
     lcfo_source,
@@ -514,6 +514,19 @@ assert re.search(
     adapter_body,
     re.I,
 ), "full-affine closure must be accepted before the LCFO seed space is orthonormalized"
+composition_call = adapter_body.lower().find(
+    "call compose_dg_buffered_orbital_tile_to_physical_grid"
+)
+fixed_center_call = adapter_body.lower().find("call prepare_ow_fixed_center_group")
+affine_measurement_call = adapter_body.lower().find(
+    "call measure_dg_rank_fixed_symmetry_residuals_eigenexa"
+)
+assert 0 <= composition_call < fixed_center_call < affine_measurement_call, (
+    "buffer composition must precede fixed-center adaptation and every full-affine proof"
+)
+assert "call accumulate_dg_lcfo_buffer_contributions_to_core" not in adapter_body.lower(), (
+    "fragment-core truncation must not define the support of a pre-Wannier symmetry proof"
+)
 assert "w90_anchors=global_seed_values" in re.sub(r"\s+", "", adapter_body.lower()), (
     "Wannier90 projections must use the complete LCFO core-plus-buffer seed basis"
 )
@@ -749,19 +762,20 @@ assert all(token in potential_update.group("body").lower() for token in (
 )), "DC potential validation must cover exactly the owned total-system slab"
 assert "call build_ow_complete_sp_projectors" in adapter_body.lower()
 assert re.search(
-    r"local_target_count\s*=\s*size\s*\(\s*manifest_channels\s*\)",
+    r"global_projection_count\s*=\s*size\s*\(\s*manifest_channels\s*\).*?"
+    r"local_target_count\s*=\s*global_projection_count\s*/\s*nproc",
     adapter_body,
-    re.I,
-), "complete-s+p manifest count must be recorded before LCFO target selection"
+    re.I | re.S,
+), "global complete-s+p catalog must be rank balanced before LCFO selection"
 assert re.search(
     r"ntarget\s*=\s*nstate\s*\+\s*global_projection_count.*?"
-    r"call\s+dc_lcfo\s*\(.*?retained_count\s*=\s*ntarget.*?"
+    r"call\s+dc_lcfo\s*\(.*?retained_count\s*=\s*nstate.*?"
     r"retained_box_contribution\s*=\s*lcfo_fragment_contribution",
     adapter_body,
     re.I | re.S,
-), "occupied plus complete-shell count must request the global LCFO target rank"
+), "LCFO must retain only occupied states before the complete-s+p direct sum"
 assert re.search(
-    r"complete_sp_core_atom_count\s*=\s*count\s*\(\s*manifest_channels\s*%\s*l\s*==\s*0\s*\).*?"
+    r"complete_sp_core_atom_count\s*=\s*dc%system_tot%nion\s*/\s*nproc.*?"
     r"local_target_count\s*/=\s*4\s*\*\s*complete_sp_core_atom_count",
     adapter_body,
     re.I | re.S,
@@ -821,16 +835,19 @@ assert not re.search(
     re.I | re.S,
 ), "fragment eigenstate indices must not be spliced into fictitious full-system KS seeds"
 assert re.search(
-    r"global_seed_values\s*\(\s*1\s*:\s*global_occupied_count\s*,\s*core_index\s*\)\s*=.*?"
-    r"lcfo_occupied_core\s*\(\s*1\s*:\s*global_occupied_count\s*,\s*core_index\s*\)",
+    r"compose_dg_buffered_orbital_tile_to_physical_grid\s*\(.*?"
+    r"lcfo_fragment_contribution\s*,\s*ow_core_ids\s*,\s*global_seed_values",
     adapter_body,
     re.I | re.S,
-), "the density-carrying occupied block must come from global LCFO coefficients on the unique core"
-assert "global_occupied_count+rank*local_target_count+1:" in adapter_body.replace(" ", "") and re.search(
-    r"global_seed_values\s*\(.*?cmplx\s*\(\s*manifest_values",
+), "the occupied block must be composed from LCFO fragment-plus-buffer values"
+assert re.search(
+    r"do\s+projector_tile_first\s*=.*?"
+    r"manifest_channels\s*\(\s*projector_tile_first\s*:\s*projector_tile_last\s*\).*?"
+    r"compose_dg_buffered_orbital_tile_to_physical_grid.*?"
+    r"global_seed_values\s*\(\s*nstate\s*\+\s*projector_tile_first",
     adapter_body,
     re.I | re.S,
-), "the unoccupied complement must be the explicit all-atom complete-s+p projector block"
+), "the complete-s+p complement must be evaluated and buffer-composed in bounded global-channel tiles"
 assert "global_candidate_localizer" not in adapter_body.lower(), (
     "accepted affine-closed seeds must not re-enter the removed dense fixed-rank selector"
 )
