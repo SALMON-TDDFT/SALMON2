@@ -218,7 +218,7 @@ full-feature build from committed parent `5c1d0f5d`, and commit the regression.
 
 Require a composer whose inputs are fragment-plus-buffer physical IDs,
 partition weights, and an orbital tile.  It must route equal physical IDs to
-a deterministic owner, sum `sqrt(partition_weight)*orbital_value`, reject
+a deterministic owner, sum `partition_weight*orbital_value`, reject
 missing/excess partition coverage, duplicate output ownership, nonfinite
 values, rank-inconsistent tile shapes, and integer/count overflow.  Require a
 measured nonzero workspace receipt and rank-independent output fingerprint.
@@ -240,8 +240,9 @@ contracts and `git diff --check`.
 
 **Step 4: Specification review, quality review, overlay, commit**
 
-Review physical normalization (`sqrt(w)` for wavefunctions), deterministic
-ownership, collective error agreement, 64-bit counts, memory scaling, and
+Review physical normalization (`sum_f w_f psi_f` for composition, while
+`sqrt(w_f)` is only the equivalent replicated-slab inner-product form),
+deterministic ownership, collective error agreement, 64-bit counts, memory scaling, and
 cleanup on every failure.  Resolve every Critical/Important finding with a
 new RED.  Build the committed-parent prerequisite with SPGLIB, EigenExa,
 ScaLAPACK, MPI, and Wannier90 using `cmake --build <overlay> --clean-first -j1`,
