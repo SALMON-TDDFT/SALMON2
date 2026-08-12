@@ -13,7 +13,7 @@ with tempfile.TemporaryDirectory(prefix="ow-construction-") as name:
       str(root/"tests/dg/test_dg_overlapping_wannier_construction_mpi.f90"),
       "-llapack","-lblas","-o",str(exe)],check=True)
     env=os.environ.copy();env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")
-    signatures=[]
+    signatures=[];inverse_fingerprints=[]
     for n in (1,2,4,8):
       p=subprocess.run([shutil.which("mpiexec"),"-n",str(n),str(exe)],capture_output=True,text=True,env=env)
       assert p.returncode==0,(n,p.stdout,p.stderr)
@@ -21,5 +21,9 @@ with tempfile.TemporaryDirectory(prefix="ow-construction-") as name:
       match=re.search(r"CONSTRUCTION ranks=\d+ fingerprint=(-?\d+) centers=([^\n]+)",p.stdout)
       assert match,p.stdout
       signatures.append((int(match.group(1)),tuple(int(x) for x in match.group(2).split())))
+      inverse_match=re.search(r"INVERSE_CHARACTER_FINGERPRINT\s+(-?\d+)",p.stdout)
+      assert inverse_match,p.stdout
+      inverse_fingerprints.append(int(inverse_match.group(1)))
     assert len(set(signatures))==1,signatures
+    assert len(set(inverse_fingerprints))==1,inverse_fingerprints
 print("PASS overlapping-Wannier construction fixture on 1, 2, 4, and 8 ranks")

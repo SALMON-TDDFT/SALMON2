@@ -27,6 +27,7 @@ program test_dg_overlapping_wannier_construction_mpi
     compute_dg_periodic_wannier_centers,&
     verify_dg_wannier_center_affine_orbits,&
     build_dg_finite_abelian_character_table,&
+    inverse_dg_translation_character_orbits,&
     align_dg_fragment_wannier_gauge,replicate_dg_fragment_wannier_representative,&
     verify_dg_fragment_wannier_streaming_closure,verify_dg_fragment_center_orbit,&
     verify_dg_uniform_fragment_target_rank,assign_dg_overlapping_wannier_occupations,&
@@ -37,7 +38,7 @@ program test_dg_overlapping_wannier_construction_mpi
     verify_dg_fragment_subspace_density_covariance,build_dg_core_owned_occupied_subspace,&
     build_dg_smooth_partition_of_unity,compose_dg_buffered_orbital_tile_to_physical_grid
   implicit none
-  integer::comm,rank,nproc,ierr,i,j,p,point,nlocal,nclosure,index,ncore,fragment_id
+  integer::comm,rank,nproc,ierr,i,j,b,p,point,nlocal,nclosure,index,ncore,fragment_id
   integer(8),allocatable::ids(:),box_ids(:),symmetry_map(:,:),broken_symmetry_map(:,:)
   integer,allocatable::fragment(:)
   real(8),allocatable::weight(:),coordinate(:)
@@ -156,6 +157,15 @@ program test_dg_overlapping_wannier_construction_mpi
   integer(8)::mixed_map(2,1)
   integer(8)::composition_fingerprint,composition_workspace_peak
   real(8)::fractional_core_electrons
+  complex(8),allocatable::inverse_sector_values(:,:,:),inverse_sector_gradients(:,:,:,:),&
+    inverse_orbit_values(:,:,:),inverse_orbit_gradients(:,:,:,:),inverse_rotated_values(:,:,:),&
+    inverse_rotated_gradients(:,:,:,:),inverse_translated_values(:,:,:),inverse_translated_gradients(:,:,:,:)
+  real(8),allocatable::inverse_density(:),inverse_rotated_density(:)
+  complex(8)::inverse_internal_gauge(2,2)
+  real(8)::inverse_density_defect,inverse_orthogonality_defect,inverse_gamma_defect
+  integer(8)::inverse_fingerprint,inverse_workspace
+  integer(8)::inverse_reference_fingerprint
+  integer(8),allocatable::inverse_row_ids(:)
   real(8)::gauge_weights(2)
   logical::ok,transpose_values_ok
   character(256)::message
@@ -1194,7 +1204,195 @@ program test_dg_overlapping_wannier_construction_mpi
     box_ids,symmetry_map,12_8,1d-9,periodic_phase)
   call require(.not.ok,'occupied rank-loss gate')
 
+  character_translations=0d0
+  character_translations(1,:)=[0d0,0d0,0.5d0,0.5d0]
+  character_translations(2,:)=[0d0,0.5d0,0d0,0.5d0]
+  character_product=reshape([1,2,3,4,2,1,4,3,3,4,1,2,4,3,2,1],[4,4])
+  call build_dg_finite_abelian_character_table(character_translations,character_product,1,1d-12,&
+    character_canonical_operations,character_inverses,character_generator_count,character_generators,&
+    character_words,character_table,character_conjugates,character_fingerprint,ok,message)
+  call require(ok,trim(message))
+  allocate(inverse_sector_values(nlocal,2,4),inverse_sector_gradients(3,nlocal,2,4))
+  inverse_sector_values=(0d0,0d0);inverse_sector_gradients=(0d0,0d0)
+  do p=1,nlocal
+    do j=1,4;do i=1,2
+      if(box_ids(p)==int(2*(j-1)+i,8))inverse_sector_values(p,i,j)=1d0
+      inverse_sector_gradients(:,p,i,j)=real(i+2*j,8)*inverse_sector_values(p,i,j)
+    enddo;enddo
+  enddo
+  call inverse_dg_translation_character_orbits(comm,box_ids,12,character_table,character_product,1,&
+    character_fingerprint,&
+    inverse_sector_values,inverse_sector_gradients,1d-12,inverse_orbit_values,inverse_orbit_gradients,&
+    inverse_density_defect,inverse_orthogonality_defect,inverse_gamma_defect,inverse_fingerprint,&
+    inverse_workspace,ok,message)
+  call require(ok.and.inverse_density_defect<1d-12.and.inverse_orthogonality_defect<1d-12.and.&
+    inverse_gamma_defect<1d-12.and.inverse_workspace>0_8,trim(message))
+  if(nproc>1)then
+    call inverse_dg_translation_character_orbits(comm,box_ids,12,character_table,character_product,1,&
+      character_fingerprint,inverse_sector_values,inverse_sector_gradients,merge(1d-11,1d-12,rank==0),&
+      inverse_translated_values,inverse_translated_gradients,inverse_density_defect,inverse_orthogonality_defect,&
+      inverse_gamma_defect,inverse_fingerprint,inverse_workspace,ok,message)
+    call require(.not.ok,&
+      'inverse character transform rejects rank-disagreeing metadata collectively')
+  endif
+  allocate(inverse_row_ids,source=box_ids)
+  if(rank==0.and.size(inverse_row_ids)>1)inverse_row_ids(1)=inverse_row_ids(2)
+  call inverse_dg_translation_character_orbits(comm,inverse_row_ids,12,character_table,character_product,1,&
+    character_fingerprint,inverse_sector_values,inverse_sector_gradients,1d-12,inverse_translated_values,&
+    inverse_translated_gradients,inverse_density_defect,inverse_orthogonality_defect,inverse_gamma_defect,&
+    inverse_fingerprint,inverse_workspace,ok,message)
+  call require(.not.ok,&
+    'inverse character transform rejects duplicate or missing row ownership')
+  inverse_reference_fingerprint=inverse_fingerprint
+  allocate(inverse_density(nlocal),inverse_rotated_density(nlocal))
+  inverse_density=sum(sum(abs(inverse_orbit_values)**2,dim=3),dim=2)
+  inverse_internal_gauge=reshape([cmplx(cos(0.37d0),0d0,8),cmplx(-sin(0.37d0),0d0,8),&
+    cmplx(sin(0.37d0),0d0,8),cmplx(cos(0.37d0),0d0,8)],[2,2])
+  allocate(inverse_rotated_values(nlocal,2,4),inverse_rotated_gradients(3,nlocal,2,4))
+  do j=1,4
+    inverse_rotated_values(:,:,j)=matmul(inverse_sector_values(:,:,j),inverse_internal_gauge)
+    do i=1,3
+      inverse_rotated_gradients(i,:,:,j)=matmul(inverse_sector_gradients(i,:,:,j),inverse_internal_gauge)
+    enddo
+  enddo
+  call inverse_dg_translation_character_orbits(comm,box_ids,12,character_table,character_product,1,&
+    character_fingerprint,&
+    inverse_rotated_values,inverse_rotated_gradients,1d-12,inverse_translated_values,&
+    inverse_translated_gradients,inverse_density_defect,inverse_orthogonality_defect,inverse_gamma_defect,&
+    inverse_fingerprint,inverse_workspace,ok,message)
+  inverse_rotated_density=sum(sum(abs(inverse_translated_values)**2,dim=3),dim=2)
+  call require(ok.and.maxval(abs(inverse_rotated_density-inverse_density))<1d-12,&
+    'inverse character orbit density is invariant under internal-channel gauge rotation')
+  do j=1,4
+    inverse_rotated_values(:,:,j)=character_table(j,2)*inverse_sector_values(:,:,j)
+    inverse_rotated_gradients(:,:,:,j)=character_table(j,2)*inverse_sector_gradients(:,:,:,j)
+  enddo
+  call inverse_dg_translation_character_orbits(comm,box_ids,12,character_table,character_product,1,&
+    character_fingerprint,&
+    inverse_rotated_values,inverse_rotated_gradients,1d-12,inverse_translated_values,&
+    inverse_translated_gradients,inverse_density_defect,inverse_orthogonality_defect,inverse_gamma_defect,&
+    inverse_fingerprint,inverse_workspace,ok,message)
+  do j=1,4
+    i=character_product(j,2)
+    call require(maxval(abs(inverse_translated_values(:,:,j)-inverse_orbit_values(:,:,i)))<1d-12.and.&
+      maxval(abs(inverse_translated_gradients(:,:,:,j)-inverse_orbit_gradients(:,:,:,i)))<1d-12,&
+      'inverse character transform gives the known Z2xZ2 translation permutation')
+  enddo
+  call require(ok,'translation permutation preserves the inverse-character orbit contracts')
+  character_table(2,2)=character_table(2,2)*exp(cmplx(0d0,0.1d0,8))
+  call inverse_dg_translation_character_orbits(comm,box_ids,12,character_table,character_product,1,&
+    character_fingerprint,&
+    inverse_sector_values,inverse_sector_gradients,1d-12,inverse_translated_values,&
+    inverse_translated_gradients,inverse_density_defect,inverse_orthogonality_defect,inverse_gamma_defect,&
+    inverse_fingerprint,inverse_workspace,ok,message)
+  call require(.not.ok,'inverse character transform rejects a corrupt character phase')
+  character_table(2,2)=cmplx(1d300,0d0,8)
+  call inverse_dg_translation_character_orbits(comm,box_ids,12,character_table,character_product,1,&
+    character_fingerprint,inverse_sector_values,inverse_sector_gradients,1d-12,inverse_translated_values,&
+    inverse_translated_gradients,inverse_density_defect,inverse_orthogonality_defect,inverse_gamma_defect,&
+    inverse_fingerprint,inverse_workspace,ok,message)
+  call require(.not.ok,'inverse character transform rejects a finite huge character collectively')
+  character_product(2,2)=5
+  call inverse_dg_translation_character_orbits(comm,box_ids,12,character_table,character_product,1,&
+    character_fingerprint,inverse_sector_values,inverse_sector_gradients,1d-12,inverse_translated_values,&
+    inverse_translated_gradients,inverse_density_defect,inverse_orthogonality_defect,inverse_gamma_defect,&
+    inverse_fingerprint,inverse_workspace,ok,message)
+  call require(.not.ok,'inverse character transform safely rejects an out-of-range product entry')
+  character_product=reshape([1,2,3,4,2,1,4,3,3,4,1,2,4,3,2,1],[4,4])
+  call build_dg_finite_abelian_character_table(character_translations,character_product,1,1d-12,&
+    character_canonical_operations,character_inverses,character_generator_count,character_generators,&
+    character_words,character_table,character_conjugates,character_fingerprint,ok,message)
+  inverse_sector_gradients(1,1,1,1)=cmplx(1d300,0d0,8)
+  call inverse_dg_translation_character_orbits(comm,box_ids,12,character_table,character_product,1,&
+    character_fingerprint,inverse_sector_values,inverse_sector_gradients,1d-12,inverse_translated_values,&
+    inverse_translated_gradients,inverse_density_defect,inverse_orthogonality_defect,inverse_gamma_defect,&
+    inverse_fingerprint,inverse_workspace,ok,message)
+  call require(.not.ok,'inverse character transform rejects a finite huge sector gradient before squaring')
+
+  character_translations=0d0;character_translations(1,:)=[0d0,0.5d0,0.25d0,0.75d0]
+  character_product=reshape([1,2,3,4,2,1,4,3,3,4,2,1,4,3,1,2],[4,4])
+  call build_dg_finite_abelian_character_table(character_translations,character_product,1,1d-12,&
+    character_canonical_operations,character_inverses,character_generator_count,character_generators,&
+    character_words,character_table,character_conjugates,character_fingerprint,ok,message)
+  call require(ok,trim(message))
+  do i=1,4;character_inverse_permutation(character_canonical_operations(i))=i;enddo
+  do i=1,4;do j=1,4
+    character_permuted_product(i,j)=character_inverse_permutation(&
+      character_product(character_canonical_operations(i),character_canonical_operations(j)))
+  enddo;enddo
+  inverse_sector_values=(0d0,0d0);inverse_sector_gradients=(0d0,0d0)
+  do p=1,nlocal
+    if(box_ids(p)==1_8)inverse_sector_values(p,1,1)=1d0
+    if(box_ids(p)==2_8)inverse_sector_values(p,1,3)=1d0
+    if(box_ids(p)==3_8)then
+      inverse_sector_values(p,1,2)=sqrt(0.5d0);inverse_sector_values(p,1,4)=sqrt(0.5d0)
+    endif
+    if(box_ids(p)==4_8)then
+      inverse_sector_values(p,1,2)=cmplx(0d0,sqrt(0.5d0),8)
+      inverse_sector_values(p,1,4)=cmplx(0d0,-sqrt(0.5d0),8)
+    endif
+    do j=1,4;do i=1,3
+      inverse_sector_gradients(i,p,1,j)=real(i,8)*inverse_sector_values(p,1,j)
+    enddo;enddo
+  enddo
+  call inverse_dg_translation_character_orbits(comm,box_ids,12,character_table,character_permuted_product,1,&
+    character_fingerprint,&
+    inverse_sector_values(:,1:1,:),inverse_sector_gradients(:,:,1:1,:),1d-12,inverse_translated_values,&
+    inverse_translated_gradients,inverse_density_defect,inverse_orthogonality_defect,inverse_gamma_defect,&
+    inverse_fingerprint,inverse_workspace,ok,message)
+  call require(ok.and.inverse_gamma_defect<1d-12.and.inverse_orthogonality_defect<1d-12,&
+    'Z4 inverse character transform produces real orthonormal Gamma orbits')
+  inverse_reference_fingerprint=inverse_fingerprint
+  inverse_orbit_values=inverse_translated_values;inverse_orbit_gradients=inverse_translated_gradients
+  do j=1,4
+    inverse_rotated_values(:,1,j)=character_table(j,2)*inverse_sector_values(:,1,j)
+    inverse_rotated_gradients(:,:,1,j)=character_table(j,2)*inverse_sector_gradients(:,:,1,j)
+  enddo
+  call inverse_dg_translation_character_orbits(comm,box_ids,12,character_table,character_permuted_product,1,&
+    character_fingerprint,inverse_rotated_values(:,1:1,:),inverse_rotated_gradients(:,:,1:1,:),1d-12,&
+    inverse_translated_values,inverse_translated_gradients,inverse_density_defect,inverse_orthogonality_defect,&
+    inverse_gamma_defect,inverse_fingerprint,inverse_workspace,ok,message)
+  do j=1,4
+    i=character_permuted_product(j,character_inverses(2))
+    call require(maxval(abs(inverse_translated_values(:,:,j)-inverse_orbit_values(:,:,i)))<1d-12.and.&
+      maxval(abs(inverse_translated_gradients(:,:,:,j)-inverse_orbit_gradients(:,:,:,i)))<1d-12,&
+      'Z4 generator acts by the documented inverse translation permutation')
+  enddo
+  inverse_internal_gauge=reshape([cmplx(sqrt(0.5d0),0d0,8),cmplx(0d0,sqrt(0.5d0),8),&
+    cmplx(0d0,sqrt(0.5d0),8),cmplx(sqrt(0.5d0),0d0,8)],[2,2])
+  inverse_sector_values=(0d0,0d0);inverse_sector_gradients=(0d0,0d0)
+  do p=1,nlocal
+    if(box_ids(p)<=8_8)then
+      j=(int(box_ids(p))-1)/2+1;i=mod(int(box_ids(p))-1,2)+1
+      do b=1,4
+        inverse_sector_values(p,i,b)=0.5d0*character_table(b,j)
+        inverse_sector_gradients(:,p,i,b)=real(i+j,8)*inverse_sector_values(p,i,b)
+      enddo
+    endif
+  enddo
+  call inverse_dg_translation_character_orbits(comm,box_ids,12,character_table,character_permuted_product,1,&
+    character_fingerprint,inverse_sector_values,inverse_sector_gradients,1d-12,inverse_translated_values,&
+    inverse_translated_gradients,inverse_density_defect,inverse_orthogonality_defect,inverse_gamma_defect,&
+    inverse_reference_fingerprint,inverse_workspace,ok,message)
+  call require(ok,'ungauged Z4 repeated-channel inverse transform')
+  inverse_rotated_values=inverse_sector_values;inverse_rotated_gradients=inverse_sector_gradients
+  inverse_rotated_values(:,:,2)=matmul(inverse_sector_values(:,:,2),inverse_internal_gauge)
+  inverse_rotated_values(:,:,4)=matmul(inverse_sector_values(:,:,4),conjg(inverse_internal_gauge))
+  do i=1,3
+    inverse_rotated_gradients(i,:,:,2)=matmul(inverse_sector_gradients(i,:,:,2),inverse_internal_gauge)
+    inverse_rotated_gradients(i,:,:,4)=matmul(inverse_sector_gradients(i,:,:,4),conjg(inverse_internal_gauge))
+  enddo
+  call inverse_dg_translation_character_orbits(comm,box_ids,12,character_table,character_permuted_product,1,&
+    character_fingerprint,inverse_rotated_values,inverse_rotated_gradients,1d-12,inverse_translated_values,&
+    inverse_translated_gradients,inverse_density_defect,inverse_orthogonality_defect,inverse_gamma_defect,&
+    inverse_fingerprint,inverse_workspace,ok,message)
+  call require(ok.and.inverse_gamma_defect<1d-12.and.inverse_density_defect<1d-12,&
+    'Z4 conjugate sectors preserve Gamma reality under a complex internal gauge')
+  call require(inverse_fingerprint==inverse_reference_fingerprint,&
+    'inverse character fingerprint is invariant under conjugate complex internal gauges')
+
   if(rank==0)then
+    write(*,'(a,i0)')'INVERSE_CHARACTER_FINGERPRINT ',inverse_fingerprint
     write(*,'(a,i0,a,i0,a,*(i0,1x))')'CONSTRUCTION ranks=',nproc,' fingerprint=',&
       reference_fingerprint,' centers=',reference_center_box_ids
     write(*,'(a,i0,a)')'PASS overlapping-Wannier construction on ',nproc,' ranks'

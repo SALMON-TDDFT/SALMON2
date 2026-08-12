@@ -66,6 +66,7 @@ module dg_overlapping_wannier_construction
   public::compute_dg_periodic_wannier_centers
   public::verify_dg_wannier_center_affine_orbits
   public::build_dg_finite_abelian_character_table
+  public::inverse_dg_translation_character_orbits
   public::validate_dg_translation_sector_cluster
   public::build_dg_balanced_orbital_ownership
   public::transpose_dg_spatial_cores_to_orbital_owners
@@ -2253,6 +2254,222 @@ contains
     end subroutine
   end subroutine
 
+#endif
+
+  subroutine inverse_dg_translation_character_orbits(comm,row_ids,global_row_count,characters,product_table,&
+      identity_operation,catalog_fingerprint,sector_values,sector_gradients,tolerance,orbit_values,orbit_gradients,density_defect,&
+      orthogonality_defect,gamma_real_defect,fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,global_row_count,product_table(:,:),identity_operation
+    integer(int64),intent(in)::row_ids(:),catalog_fingerprint
+    complex(real64),intent(in)::characters(:,:),sector_values(:,:,:),sector_gradients(:,:,:,:)
+    real(real64),intent(in)::tolerance
+    complex(real64),allocatable,intent(out)::orbit_values(:,:,:),orbit_gradients(:,:,:,:)
+    real(real64),intent(out)::density_defect,orthogonality_defect,gamma_real_defect
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nlocal,ninternal,ntranslation,i,j,a,b,t,c,ierr,local_bad,global_bad,allocation_status
+    integer::minimum_integer,maximum_integer
+    integer,allocatable::ownership_count(:)
+    real(real64)::normalization,local_value,global_value,sector_density,orbit_density,scale
+    complex(real64)::overlap,local_overlap,expected
+    integer(int64)::local_fingerprint,metadata_fingerprint,minimum_fingerprint,maximum_fingerprint,&
+      output_elements,gradient_elements,total_elements,byte_count,quantized,element_hash,raw_bits
+    complex(real64)::bilinear
+    real(real64)::minimum_tolerance,maximum_tolerance,safe_input_magnitude
+    ok=.false.;message='';density_defect=huge(1d0);orthogonality_defect=huge(1d0)
+    gamma_real_defect=huge(1d0);fingerprint=0_int64;workspace_peak_bytes=0_int64
+    nlocal=size(row_ids);ninternal=size(sector_values,2);ntranslation=size(characters,1)
+    local_bad=0
+    if(global_row_count<1.or.ntranslation<1.or.size(characters,2)/=ntranslation.or.ninternal<1.or.&
+        size(sector_values,1)/=nlocal.or.size(sector_values,3)/=ntranslation)then
+      local_bad=1
+    elseif(any(shape(product_table)/=[ntranslation,ntranslation]).or.&
+        identity_operation<1.or.identity_operation>ntranslation)then
+      local_bad=1
+    elseif(any(shape(sector_gradients)/=[3,nlocal,ninternal,ntranslation]).or.&
+        tolerance<16d0*acos(-1d0)/real(huge(0_int64),real64).or.tolerance>1d-2.or.&
+        .not.ieee_is_finite(tolerance))then
+      local_bad=1
+    elseif(.not.all(ieee_is_finite(real(characters))).or.&
+        .not.all(ieee_is_finite(aimag(characters))).or.&
+        .not.all(ieee_is_finite(real(sector_values))).or.&
+        .not.all(ieee_is_finite(aimag(sector_values))).or.&
+        .not.all(ieee_is_finite(real(sector_gradients))).or.&
+        .not.all(ieee_is_finite(aimag(sector_gradients))).or.any(row_ids<1_int64).or.&
+        any(row_ids>int(global_row_count,int64)).or.catalog_fingerprint==0_int64)then
+      local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='invalid inverse translation-character transform contract';return
+    endif
+    call agree_integer(ntranslation);if(global_bad/=0)return
+    call agree_integer(ninternal);if(global_bad/=0)return
+    call agree_integer(global_row_count);if(global_bad/=0)return
+    call agree_integer(identity_operation);if(global_bad/=0)return
+    call MPI_Allreduce(tolerance,minimum_tolerance,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='inverse character metadata reduction failed';return;endif
+    call MPI_Allreduce(tolerance,maximum_tolerance,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_tolerance/=maximum_tolerance)then
+      message='inverse character metadata disagree across ranks';return
+    endif
+    ! Parseval preserves the all-orbit norm; the quarter-range margin keeps its
+    ! tolerance-quantized density/gradient receipt inside signed int64.
+    safe_input_magnitude=sqrt(0.25d0*real(huge(0_int64),real64)*100d0*tolerance/&
+      (real(ntranslation,real64)*real(ninternal,real64)))
+    local_bad=merge(1,0,maxval(abs(sector_values))>safe_input_magnitude.or.&
+      maxval(abs(sector_gradients))>safe_input_magnitude)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='inverse character sector magnitude exceeds safe receipt range';return
+    endif
+    metadata_fingerprint=catalog_fingerprint
+    do i=1,ntranslation;do j=1,ntranslation
+      metadata_fingerprint=ieor(ishftc(metadata_fingerprint,7),int(product_table(i,j),int64))
+      raw_bits=transfer(real(characters(i,j),real64),raw_bits)
+      metadata_fingerprint=ieor(ishftc(metadata_fingerprint,7),raw_bits)
+      raw_bits=transfer(aimag(characters(i,j)),raw_bits)
+      metadata_fingerprint=ieor(ishftc(metadata_fingerprint,7),raw_bits)
+    enddo;enddo
+    call MPI_Allreduce(metadata_fingerprint,minimum_fingerprint,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='inverse character metadata reduction failed';return;endif
+    call MPI_Allreduce(metadata_fingerprint,maximum_fingerprint,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_fingerprint/=maximum_fingerprint)then
+      message='inverse character catalogs disagree across ranks';return
+    endif
+    allocate(ownership_count(global_row_count),stat=allocation_status)
+    call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='inverse character ownership allocation failed';return;endif
+    ownership_count=0
+    do i=1,nlocal;ownership_count(int(row_ids(i)))=ownership_count(int(row_ids(i)))+1;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,ownership_count,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(ownership_count/=1))then
+      message='inverse character rows are not uniquely and completely owned';return
+    endif
+    local_bad=merge(1,0,any(product_table<1).or.any(product_table>ntranslation))
+    do c=1,ntranslation
+      if(abs(characters(c,identity_operation)-1d0)>10d0*tolerance.or.&
+          maxval(abs(abs(characters(c,:))-1d0))>10d0*tolerance)local_bad=1
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='inverse character catalog fails collective range or unit validation';return
+    endif
+    local_bad=0
+    if(local_bad==0)then;do i=1,ntranslation
+      if(product_table(identity_operation,i)/=i.or.product_table(i,identity_operation)/=i)then
+        local_bad=1
+      endif
+      do j=1,ntranslation
+        do c=1,ntranslation
+          expected=characters(c,i)*characters(c,j)
+          if(abs(characters(c,product_table(i,j))-expected)>10d0*tolerance)then
+            local_bad=1
+          endif
+        enddo
+      enddo
+    enddo;endif
+    do c=1,ntranslation
+      do j=1,ntranslation
+        overlap=sum(characters(c,:)*conjg(characters(j,:)))
+        expected=merge(cmplx(real(ntranslation,real64),0d0,real64),(0d0,0d0),c==j)
+        if(abs(overlap-expected)>10d0*tolerance*real(ntranslation,real64))then
+          local_bad=1
+        endif
+      enddo
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='inverse character catalog fails collective algebra validation';return
+    endif
+    allocate(orbit_values(nlocal,ninternal,ntranslation),&
+      orbit_gradients(3,nlocal,ninternal,ntranslation),stat=allocation_status)
+    call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='inverse character orbit allocation failed';return
+    endif
+    normalization=1d0/sqrt(real(ntranslation,real64));orbit_values=(0d0,0d0)
+    orbit_gradients=(0d0,0d0)
+    do t=1,ntranslation;do c=1,ntranslation
+      orbit_values(:,:,t)=orbit_values(:,:,t)+normalization*conjg(characters(c,t))*sector_values(:,:,c)
+      orbit_gradients(:,:,:,t)=orbit_gradients(:,:,:,t)+&
+        normalization*conjg(characters(c,t))*sector_gradients(:,:,:,c)
+    enddo;enddo
+    local_value=0d0
+    do i=1,nlocal
+      sector_density=sum(abs(sector_values(i,:,:))**2);orbit_density=sum(abs(orbit_values(i,:,:))**2)
+      local_value=max(local_value,abs(orbit_density-sector_density))
+    enddo
+    call MPI_Allreduce(local_value,density_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='inverse character density reduction failed';return;endif
+    orthogonality_defect=0d0
+    do t=1,ntranslation;do a=1,ninternal;do j=1,ntranslation;do b=1,ninternal
+      local_overlap=sum(conjg(orbit_values(:,a,t))*orbit_values(:,b,j))
+      call MPI_Allreduce(local_overlap,overlap,1,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='inverse character Gram reduction failed';return;endif
+      expected=merge((1d0,0d0),(0d0,0d0),t==j.and.a==b)
+      orthogonality_defect=max(orthogonality_defect,abs(overlap-expected))
+    enddo;enddo;enddo;enddo
+    local_value=max(maxval(abs(aimag(orbit_values))),maxval(abs(aimag(orbit_gradients))))
+    call MPI_Allreduce(local_value,gamma_real_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='inverse character Gamma-real reduction failed';return;endif
+    scale=max(1d0,real(ntranslation,real64)*real(ninternal,real64))
+    if(density_defect>10d0*tolerance*scale.or.orthogonality_defect>10d0*tolerance*scale.or.&
+        gamma_real_defect>10d0*tolerance*scale)then
+      message='inverse character orbit validation failed';return
+    endif
+    ! Physical invariant fingerprint: density and three gradient norms, not raw coefficients.
+    local_fingerprint=0_int64
+    do i=1,nlocal
+      element_hash=row_ids(i)
+      bilinear=sum(orbit_values(i,:,:)*conjg(orbit_values(i,:,:)))
+      quantized=nint(real(bilinear,real64)/(100d0*tolerance),int64)
+      element_hash=ieor(ishftc(element_hash,9),quantized)
+      do j=1,3
+        bilinear=sum(orbit_gradients(j,i,:,:)*conjg(orbit_gradients(j,i,:,:)))
+        quantized=nint(real(bilinear,real64)/(100d0*tolerance),int64)
+        element_hash=ieor(ishftc(element_hash,9),quantized)
+      enddo
+      local_fingerprint=ieor(local_fingerprint,element_hash)
+    enddo
+    call MPI_Allreduce(local_fingerprint,fingerprint,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='inverse character fingerprint reduction failed';return;endif
+    fingerprint=ieor(fingerprint,metadata_fingerprint)
+    output_elements=size(orbit_values,kind=int64);gradient_elements=size(orbit_gradients,kind=int64)
+    if(output_elements>huge(0_int64)-gradient_elements)then
+      message='inverse character workspace receipt overflows';return
+    endif
+    total_elements=output_elements+gradient_elements
+    if(total_elements>huge(0_int64)/16_int64)then
+      message='inverse character workspace receipt overflows';return
+    endif
+    ! Accounted output allocation; this is not allocator/RSS telemetry.
+    byte_count=16_int64*total_elements;workspace_peak_bytes=byte_count
+    ok=workspace_peak_bytes>0_int64
+    if(ok)then;message='';else;message='inverse character workspace receipt overflows';endif
+#else
+    ok=.false.;message='inverse character transform requires MPI';density_defect=huge(1d0)
+    orthogonality_defect=huge(1d0);gamma_real_defect=huge(1d0);fingerprint=0_int64;workspace_peak_bytes=0_int64
+    allocate(orbit_values(0,0,0),orbit_gradients(0,0,0,0))
+#endif
+  contains
+#ifdef USE_MPI
+    subroutine agree_integer(value)
+      integer,intent(in)::value
+      call MPI_Allreduce(value,minimum_integer,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then
+        global_bad=1;message='inverse character metadata reduction failed';return
+      endif
+      call MPI_Allreduce(value,maximum_integer,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      global_bad=merge(1,0,ierr/=MPI_SUCCESS.or.minimum_integer/=maximum_integer)
+      if(global_bad/=0)message='inverse character metadata disagree across ranks'
+    end subroutine agree_integer
+#endif
+  end subroutine inverse_dg_translation_character_orbits
+
+#if defined(USE_MPI) && defined(USE_EIGENEXA)
   subroutine split_dg_translation_character_sector_eigenexa(info,comm,row_ids,generator_rows,gamma_rows,&
       characters,generator_orders,element_words,character_conjugates,requested_character,tolerance,&
       catalog_fingerprint,sector_vectors,sector_rank,&
