@@ -10,7 +10,7 @@ module dg_overlapping_wannier_construction
   use dg_overlapping_wannier_metric,only:assemble_dg_eigenexa_cyclic_metric_block
   use eigen_eigenexa,only:eigen_pdsyevd_ex_distributed_blocks
   use eigen_libs_mod,only:eigen_owner_node,eigen_translate_g2l,eigen_translate_l2g,&
-    eigen_loop_start,eigen_loop_end
+    eigen_loop_start,eigen_loop_end,eigen_get_matdims
 #endif
   implicit none
   private
@@ -58,6 +58,7 @@ module dg_overlapping_wannier_construction
   public::measure_dg_rank_fixed_symmetry_residuals_eigenexa
   public::build_dg_group_averaged_occupied_candidates_eigenexa
   public::build_dg_cocycle_averaged_occupied_candidates_eigenexa
+  public::split_dg_translation_character_sector_eigenexa
 #endif
   public::exchange_dg_point_permuted_orbital_rows
   public::accept_dg_boundary_calibrated_symmetry
@@ -65,11 +66,43 @@ module dg_overlapping_wannier_construction
   public::compute_dg_periodic_wannier_centers
   public::verify_dg_wannier_center_affine_orbits
   public::build_dg_finite_abelian_character_table
+  public::validate_dg_translation_sector_cluster
   public::build_dg_balanced_orbital_ownership
   public::transpose_dg_spatial_cores_to_orbital_owners
   public::redistribute_dg_owned_orbitals_to_center_fragments
   public::assign_dg_periodic_centers_to_fragments
 contains
+
+  subroutine validate_dg_translation_sector_cluster(eigenvalues,sector_real_dimension,tolerance,ok,message)
+    ! EigenExa supplies eigenvalues in ascending order; reject unsorted external callers explicitly.
+    real(real64),intent(in)::eigenvalues(:),tolerance
+    integer,intent(in)::sector_real_dimension
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    real(real64)::scale
+    integer::i
+    ok=.false.;message=''
+    if(size(eigenvalues)<1.or.sector_real_dimension<1.or.sector_real_dimension>size(eigenvalues).or.&
+        tolerance<=0d0.or..not.ieee_is_finite(tolerance).or.&
+        .not.all(ieee_is_finite(eigenvalues)))then
+      message='invalid translation-sector cluster contract';return
+    endif
+    scale=max(1d0,maxval(abs(eigenvalues)))
+    do i=2,size(eigenvalues)
+      if(eigenvalues(i)<eigenvalues(i-1))then
+        message='translation-sector eigenvalues are not ordered';return
+      endif
+    enddo
+    if(maxval(abs(eigenvalues(1:sector_real_dimension)))>10d0*tolerance*scale)then
+      message='translation-sector selected cluster is rank losing';return
+    endif
+    if(sector_real_dimension<size(eigenvalues))then
+      if(eigenvalues(sector_real_dimension+1)<=100d0*tolerance*scale)then
+        message='translation-sector boundary splits a spectral cluster';return
+      endif
+    endif
+    ok=.true.
+  end subroutine validate_dg_translation_sector_cluster
 
   subroutine build_dg_smooth_partition_of_unity(comm,physical_ids,raw_weight,raw_gradient,&
       partition_weight,partition_gradient,sum_defect,gradient_defect,ok,message)
@@ -2219,6 +2252,498 @@ contains
       if(gather_ok)then;gather_message='';else;gather_message='distributed group-average vector gather failed';endif
     end subroutine
   end subroutine
+
+  subroutine split_dg_translation_character_sector_eigenexa(info,comm,row_ids,generator_rows,gamma_rows,&
+      characters,generator_orders,element_words,character_conjugates,requested_character,tolerance,&
+      catalog_fingerprint,sector_vectors,sector_rank,&
+      identity_defect,unitarity_defect,commutator_defect,order_defect,gamma_pairing_defect,&
+      fingerprint,workspace_peak_bytes,ok,message)
+    type(s_parallel_info),intent(in)::info
+    integer,intent(in)::comm,generator_orders(:),element_words(:,:),character_conjugates(:),requested_character
+    integer(int64),intent(in)::row_ids(:)
+    ! Opaque provenance label produced and validated by the canonical Task1 catalog builder.
+    integer(int64),intent(in)::catalog_fingerprint
+    complex(real64),intent(in)::generator_rows(:,:,:),gamma_rows(:,:),characters(:,:)
+    real(real64),intent(in)::tolerance
+    complex(real64),allocatable,intent(out)::sector_vectors(:,:)
+    integer,intent(out)::sector_rank
+    real(real64),intent(out)::identity_defect,unitarity_defect,commutator_defect,order_defect,&
+      gamma_pairing_defect
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    type(s_parallel_info)::real_info
+    complex(real64),allocatable::discriminator_rows(:,:),adjoint_rows(:,:),product_rows(:,:),&
+      left_product_rows(:,:),power_rows(:,:),identity_rows(:,:),trial(:),candidate_rows(:,:),&
+      gram(:,:),gamma_projector_rows(:,:),sector_projector_rows(:,:),stream_row(:),remote_sector(:)
+    complex(real64),allocatable::sector_multiplicities(:)
+    real(real64),allocatable::real_matrix(:,:),real_vectors(:,:),eigenvalues(:),real_column(:)
+    integer,allocatable::ownership(:),row_owner(:),row_position(:)
+    integer::n,nlocal,ngenerator,ncharacter,multiplicity,i,j,g,h,k,ierr,rank,lr,lc,gr,gc,&
+      real_n,accepted,local_bad,global_bad,allocation_status
+    real(real64)::scale,norm_value,local_defect
+    complex(real64)::overlap,phase
+    logical::eigen_ok,receipt_ok
+    character(256)::detail
+
+    ok=.false.;message='';sector_rank=0;identity_defect=huge(1d0);unitarity_defect=huge(1d0)
+    commutator_defect=huge(1d0);order_defect=huge(1d0);gamma_pairing_defect=huge(1d0)
+    fingerprint=0_int64;workspace_peak_bytes=0_int64
+    n=size(generator_rows,2);nlocal=size(row_ids);ngenerator=size(generator_rows,3)
+    ncharacter=size(characters,1)
+    local_bad=merge(0,1,info%flag_eigenexa_init.and.n>=1.and.nlocal>=0.and.&
+        (ngenerator>=1.or.ncharacter==1).and.&
+        ncharacter>=1.and.size(generator_rows,1)==nlocal.and.all(shape(gamma_rows)==[nlocal,n]).and.&
+        size(characters,2)==ngenerator.and.size(generator_orders)==ngenerator.and.&
+        all(shape(element_words)==[ncharacter,ngenerator]).and.&
+        size(character_conjugates)==ncharacter.and.requested_character>=1.and.&
+        requested_character<=ncharacter.and.catalog_fingerprint/=0_int64.and.&
+        ieee_is_finite(tolerance).and.tolerance<=1d-2.and.&
+        tolerance>=16d0*acos(-1d0)/real(huge(0_int64),real64).and.&
+        all(row_ids>=1_int64).and.all(row_ids<=int(n,int64)).and.all(generator_orders>=1).and.&
+        all(element_words>=0).and.&
+        all(ieee_is_finite(real(generator_rows))).and.&
+        all(ieee_is_finite(aimag(generator_rows))).and.&
+        all(ieee_is_finite(real(gamma_rows))).and.all(ieee_is_finite(aimag(gamma_rows))).and.&
+        all(ieee_is_finite(real(characters))).and.&
+        all(ieee_is_finite(aimag(characters))))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='invalid translation-character sector contract';return
+    endif
+    local_bad=merge(0,1,mod(n,ncharacter)==0.and.(ngenerator>=1.or.&
+      (ncharacter==1.and.ngenerator==0)).and.all(character_conjugates>=1).and.&
+      all(character_conjugates<=ncharacter))
+    do g=1,ngenerator
+      if(any(element_words(:,g)>=generator_orders(g)))local_bad=1
+      if(maxval(abs(abs(characters(:,g))-1d0))>tolerance)local_bad=1
+      if(maxval(abs(characters(:,g)**generator_orders(g)-1d0))>10d0*tolerance)local_bad=1
+    enddo
+    if(local_bad==0)then
+      do i=1,ncharacter
+        if(maxval(abs(characters(character_conjugates(i),:)-conjg(characters(i,:))))>10d0*tolerance)&
+          local_bad=1
+        if(character_conjugates(character_conjugates(i))/=i)local_bad=1
+      enddo
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='translation characters violate finite-order conjugate pairing';return
+    endif
+    if(n>huge(0)/2)then;message='translation-sector realification extent overflows';return;endif
+    call MPI_Comm_rank(comm,rank,ierr)
+    allocate(ownership(n),row_owner(n),row_position(n),stat=allocation_status)
+    call allocation_consensus(allocation_status,global_bad)
+    if(global_bad/=0)then;message='translation-sector ownership allocation failed';return;endif
+    ownership=0;row_owner=0;row_position=0
+    do i=1,nlocal
+      ownership(int(row_ids(i)))=ownership(int(row_ids(i)))+1
+      row_owner(int(row_ids(i)))=rank+1;row_position(int(row_ids(i)))=i
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,ownership,n,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='translation ownership count reduction failed';return;endif
+    call MPI_Allreduce(MPI_IN_PLACE,row_owner,n,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='translation ownership rank reduction failed';return;endif
+    call MPI_Allreduce(MPI_IN_PLACE,row_position,n,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(ownership/=1))then
+      message='translation generator rows do not uniquely partition the global matrix';return
+    endif
+    multiplicity=n/ncharacter
+    allocate(identity_rows(nlocal,n),power_rows(nlocal,n),product_rows(nlocal,n),&
+      left_product_rows(nlocal,n),adjoint_rows(nlocal,n),discriminator_rows(nlocal,n),stream_row(n),&
+      stat=allocation_status)
+    call allocation_consensus(allocation_status,global_bad)
+    if(global_bad/=0)then;message='translation-sector row workspace allocation failed';return;endif
+    identity_rows=(0d0,0d0)
+    do i=1,nlocal;identity_rows(i,int(row_ids(i)))=1d0;enddo
+    identity_defect=0d0;unitarity_defect=0d0;commutator_defect=0d0;order_defect=0d0
+    if(ncharacter==1.and.ngenerator==0)then
+      call distributed_adjoint(gamma_rows,adjoint_rows,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='trivial Gamma adjoint stream failed';return;endif
+      call distributed_product(adjoint_rows,gamma_rows,product_rows,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='trivial Gamma unitarity stream failed';return;endif
+      local_defect=maxval(abs(product_rows-identity_rows))
+      call MPI_Allreduce(local_defect,gamma_pairing_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='trivial Gamma unitarity reduction failed';return;endif
+      call distributed_product(gamma_rows,conjg(gamma_rows),product_rows,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='trivial Gamma involution stream failed';return;endif
+      local_defect=maxval(abs(product_rows-identity_rows))
+      call MPI_Allreduce(local_defect,norm_value,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='trivial Gamma involution reduction failed';return;endif
+      gamma_pairing_defect=max(gamma_pairing_defect,norm_value)
+      if(gamma_pairing_defect>10d0*tolerance)then
+        message='trivial translation Gamma sewing is not unitary involutory';return
+      endif
+      allocate(sector_vectors(nlocal,n),stat=allocation_status)
+      call allocation_consensus(allocation_status,global_bad)
+      if(global_bad/=0)then;message='trivial translation-sector allocation failed';return;endif
+      sector_vectors=identity_rows;sector_rank=n
+      fingerprint=ieor(ieor(1469598103934665603_int64,catalog_fingerprint),int(n,int64))
+      call compute_workspace_receipt(receipt_ok)
+      if(.not.receipt_ok)then;message='trivial translation-sector workspace receipt overflows';return;endif
+      ok=.true.;message='';return
+    endif
+    discriminator_rows=(0d0,0d0);scale=max(1d0,maxval(abs(generator_rows)))
+    call MPI_Allreduce(MPI_IN_PLACE,scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='translation generator scale reduction failed';return;endif
+    do g=1,ngenerator
+      call distributed_adjoint(generator_rows(:,:,g),adjoint_rows,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='translation generator adjoint stream failed';return;endif
+      call distributed_product(adjoint_rows,generator_rows(:,:,g),product_rows,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='translation generator unitarity stream failed';return;endif
+      local_defect=maxval(abs(product_rows-identity_rows))
+      call MPI_Allreduce(local_defect,norm_value,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='translation unitarity defect reduction failed';return;endif
+      unitarity_defect=max(unitarity_defect,norm_value)
+      power_rows=identity_rows
+      do k=1,generator_orders(g)
+        call distributed_product(power_rows,generator_rows(:,:,g),product_rows,ierr)
+        if(ierr/=MPI_SUCCESS)then;message='translation generator order stream failed';return;endif
+        power_rows=product_rows
+      enddo
+      local_defect=maxval(abs(power_rows-identity_rows))
+      call MPI_Allreduce(local_defect,norm_value,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='translation order defect reduction failed';return;endif
+      order_defect=max(order_defect,norm_value)
+      phase=characters(requested_character,g)
+      discriminator_rows=discriminator_rows+2d0*identity_rows-conjg(phase)*generator_rows(:,:,g)-&
+        phase*adjoint_rows
+      do h=1,g-1
+        call distributed_product(generator_rows(:,:,g),generator_rows(:,:,h),product_rows,ierr)
+        if(ierr/=MPI_SUCCESS)then;message='translation left commutator stream failed';return;endif
+        call distributed_product(generator_rows(:,:,h),generator_rows(:,:,g),left_product_rows,ierr)
+        if(ierr/=MPI_SUCCESS)then;message='translation generator commutator stream failed';return;endif
+        local_defect=maxval(abs(product_rows-left_product_rows))
+        call MPI_Allreduce(local_defect,norm_value,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then;message='translation commutator defect reduction failed';return;endif
+        commutator_defect=max(commutator_defect,norm_value)
+      enddo
+    enddo
+    if(max(unitarity_defect,commutator_defect,order_defect)>tolerance*scale)then
+      message='translation generators fail unitary commuting finite-order gates';return
+    endif
+    gamma_pairing_defect=0d0
+    call distributed_adjoint(gamma_rows,adjoint_rows,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Gamma sewing adjoint stream failed';return;endif
+    call distributed_product(adjoint_rows,gamma_rows,product_rows,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Gamma sewing unitarity stream failed';return;endif
+    local_defect=maxval(abs(product_rows-identity_rows))
+    call MPI_Allreduce(local_defect,norm_value,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Gamma sewing unitarity reduction failed';return;endif
+    gamma_pairing_defect=max(gamma_pairing_defect,norm_value)
+    call distributed_product(gamma_rows,conjg(gamma_rows),product_rows,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Gamma sewing involution stream failed';return;endif
+    local_defect=maxval(abs(product_rows-identity_rows))
+    call MPI_Allreduce(local_defect,norm_value,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Gamma sewing involution reduction failed';return;endif
+    gamma_pairing_defect=max(gamma_pairing_defect,norm_value)
+    do g=1,ngenerator
+      call distributed_product(gamma_rows,conjg(generator_rows(:,:,g)),product_rows,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='Gamma left covariance stream failed';return;endif
+      call distributed_product(product_rows,adjoint_rows,left_product_rows,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='Gamma right covariance stream failed';return;endif
+      local_defect=maxval(abs(left_product_rows-generator_rows(:,:,g)))
+      call MPI_Allreduce(local_defect,norm_value,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='Gamma covariance defect reduction failed';return;endif
+      gamma_pairing_defect=max(gamma_pairing_defect,norm_value)
+    enddo
+    if(gamma_pairing_defect>10d0*tolerance*scale)then
+      message='Gamma sewing does not pair conjugate translation characters';return
+    endif
+    allocate(sector_multiplicities(ncharacter),stat=allocation_status)
+    call allocation_consensus(allocation_status,global_bad)
+    if(global_bad/=0)then;message='translation multiplicity allocation failed';return;endif
+    sector_multiplicities=(0d0,0d0)
+    do h=1,ncharacter
+      power_rows=identity_rows
+      do g=1,ngenerator
+        do k=1,element_words(h,g)
+          call distributed_product(power_rows,generator_rows(:,:,g),product_rows,ierr)
+          if(ierr/=MPI_SUCCESS)then;message='translation element-word stream failed';return;endif
+          power_rows=product_rows
+        enddo
+      enddo
+      overlap=(0d0,0d0)
+      do i=1,nlocal;overlap=overlap+power_rows(i,int(row_ids(i)));enddo
+      call MPI_Allreduce(MPI_IN_PLACE,overlap,1,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='translation element trace reduction failed';return;endif
+      if(all(element_words(h,:)==0))then
+        local_defect=maxval(abs(power_rows-identity_rows))
+        call MPI_Allreduce(local_defect,norm_value,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then;message='translation identity defect reduction failed';return;endif
+        identity_defect=max(identity_defect,norm_value)
+      endif
+      do i=1,ncharacter
+        phase=(1d0,0d0)
+        do g=1,ngenerator;phase=phase*characters(i,g)**element_words(h,g);enddo
+        sector_multiplicities(i)=sector_multiplicities(i)+conjg(phase)*overlap/real(ncharacter,real64)
+      enddo
+    enddo
+    if(maxval(abs(real(sector_multiplicities,real64)-real(multiplicity,real64)))>10d0*tolerance*scale.or.&
+        maxval(abs(aimag(sector_multiplicities)))>10d0*tolerance*scale)then
+      message='translation characters do not have equal complete multiplicity';return
+    endif
+    real_n=2*n;real_info=info
+    call eigen_get_matdims(real_n,real_info%nrow_local,real_info%ncol_local)
+    allocate(real_matrix(real_info%nrow_local,real_info%ncol_local),&
+      real_vectors(real_info%nrow_local,real_info%ncol_local),eigenvalues(real_n),stat=allocation_status)
+    call allocation_consensus(allocation_status,global_bad)
+    if(global_bad/=0)then;message='translation-sector EigenExa allocation failed';return;endif
+    real_matrix=0d0
+    do i=1,n
+      call broadcast_row(discriminator_rows,i,stream_row,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='translation discriminator row stream failed';return;endif
+      do j=1,n
+        call put_realified_entry(i,j,real(stream_row(j),real64))
+        call put_realified_entry(i,n+j,-aimag(stream_row(j)))
+        call put_realified_entry(n+i,j,aimag(stream_row(j)))
+        call put_realified_entry(n+i,n+j,real(stream_row(j),real64))
+      enddo
+    enddo
+    call eigen_pdsyevd_ex_distributed_blocks(real_info,real_n,real_matrix,eigenvalues,&
+      real_vectors,eigen_ok,detail)
+    if(.not.eigen_ok)then;message='translation-sector EigenExa solve: '//trim(detail);return;endif
+    call validate_dg_translation_sector_cluster(eigenvalues,2*multiplicity,tolerance,eigen_ok,detail)
+    if(.not.eigen_ok)then;message=trim(detail);return;endif
+    allocate(candidate_rows(nlocal,2*multiplicity),real_column(real_n),stat=allocation_status)
+    call allocation_consensus(allocation_status,global_bad)
+    if(global_bad/=0)then;message='translation-sector candidate allocation failed';return;endif
+    candidate_rows=(0d0,0d0)
+    do j=1,2*multiplicity
+      real_column=0d0
+      do lc=eigen_loop_start(1,real_info%npcol,real_info%mycol),&
+          eigen_loop_end(real_n,real_info%npcol,real_info%mycol)
+        gc=eigen_translate_l2g(lc,real_info%npcol,real_info%mycol);if(gc/=j)cycle
+        do lr=eigen_loop_start(1,real_info%nprow,real_info%myrow),&
+            eigen_loop_end(real_n,real_info%nprow,real_info%myrow)
+          gr=eigen_translate_l2g(lr,real_info%nprow,real_info%myrow)
+          real_column(gr)=real_vectors(lr,lc)
+        enddo
+      enddo
+      call MPI_Allreduce(MPI_IN_PLACE,real_column,real_n,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='translation-sector eigenvector gather failed';return;endif
+      do i=1,nlocal
+        candidate_rows(i,j)=cmplx(real_column(int(row_ids(i))),real_column(n+int(row_ids(i))),real64)
+      enddo
+    enddo
+    allocate(sector_vectors(nlocal,multiplicity),stat=allocation_status)
+    call allocation_consensus(allocation_status,global_bad)
+    if(global_bad/=0)then;message='translation-sector vector allocation failed';return;endif
+    sector_vectors=(0d0,0d0);accepted=0
+    do j=1,2*multiplicity
+      trial=candidate_rows(:,j)
+      do k=1,accepted
+        overlap=sum(conjg(sector_vectors(:,k))*trial)
+        call MPI_Allreduce(MPI_IN_PLACE,overlap,1,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then;message='translation-sector orthogonalization reduction failed';return;endif
+        trial=trial-overlap*sector_vectors(:,k)
+      enddo
+      norm_value=sum(abs(trial)**2)
+      call MPI_Allreduce(MPI_IN_PLACE,norm_value,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='translation-sector norm reduction failed';return;endif
+      norm_value=sqrt(norm_value);if(norm_value<=100d0*tolerance)cycle
+      accepted=accepted+1;sector_vectors(:,accepted)=trial/norm_value
+      if(accepted==multiplicity)exit
+    enddo
+    if(accepted/=multiplicity)then;message='translation-sector complex reconstruction lost rank';return;endif
+    sector_rank=multiplicity
+    if(multiplicity>0.and.multiplicity>huge(0)/multiplicity)then
+      message='translation-sector Gram MPI count overflows';return
+    endif
+    allocate(gram(multiplicity,multiplicity),stat=allocation_status)
+    call allocation_consensus(allocation_status,global_bad)
+    if(global_bad/=0)then;message='translation-sector Gram allocation failed';return;endif
+    gram=matmul(conjg(transpose(sector_vectors)),sector_vectors)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,multiplicity*multiplicity,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='translation-sector Gram reduction failed';return;endif
+    local_defect=0d0
+    do j=1,multiplicity;do i=1,multiplicity
+      local_defect=max(local_defect,abs(gram(i,j)-merge(1d0,0d0,i==j)))
+    enddo;enddo
+    unitarity_defect=max(unitarity_defect,local_defect)
+    if(local_defect>10d0*tolerance)then
+      message='translation-sector frame is not orthonormal';return
+    endif
+    allocate(sector_projector_rows(nlocal,n),gamma_projector_rows(nlocal,n),remote_sector(multiplicity),&
+      stat=allocation_status)
+    call allocation_consensus(allocation_status,global_bad)
+    if(global_bad/=0)then;message='translation-sector projector allocation failed';return;endif
+    do j=1,n
+      call broadcast_sector_row(j,remote_sector,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='translation sector projector stream failed';return;endif
+      do i=1,nlocal
+        sector_projector_rows(i,j)=sum(sector_vectors(i,:)*conjg(remote_sector))
+      enddo
+    enddo
+    call distributed_product(gamma_rows,conjg(sector_projector_rows),product_rows,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Gamma projector left stream failed';return;endif
+    call distributed_adjoint(gamma_rows,adjoint_rows,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Gamma projector adjoint stream failed';return;endif
+    call distributed_product(product_rows,adjoint_rows,gamma_projector_rows,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Gamma projector right stream failed';return;endif
+    if(character_conjugates(requested_character)==requested_character)then
+      local_defect=maxval(abs(gamma_projector_rows-sector_projector_rows))
+      call MPI_Allreduce(local_defect,norm_value,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='Gamma projector defect reduction failed';return;endif
+      gamma_pairing_defect=max(gamma_pairing_defect,norm_value)
+    endif
+    if(gamma_pairing_defect>10d0*tolerance)then
+      message='translation-sector Gamma projector is not self-conjugate';return
+    endif
+    fingerprint=ieor(1469598103934665603_int64,catalog_fingerprint)
+    fingerprint=ieor(ishftc(fingerprint,13),int(requested_character,int64))
+    call MPI_Comm_rank(comm,rank,ierr)
+    do i=1,n
+      call broadcast_row(sector_projector_rows,i,stream_row,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='translation-sector fingerprint row stream failed';return;endif
+      if(rank==0)then
+        do j=1,n
+          fingerprint=ieor(fingerprint,nint(real(stream_row(j),real64)/(100d0*tolerance),int64))
+          fingerprint=ishftc(fingerprint,13)
+          fingerprint=ieor(fingerprint,nint(aimag(stream_row(j))/(100d0*tolerance),int64))
+          fingerprint=ishftc(fingerprint,13)
+        enddo
+      endif
+    enddo
+    call MPI_Bcast(fingerprint,1,MPI_INTEGER8,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='translation-sector fingerprint broadcast failed';return;endif
+    call compute_workspace_receipt(receipt_ok)
+    if(.not.receipt_ok)then;message='translation-sector workspace receipt overflows';return;endif
+    ok=.true.;message=''
+  contains
+    subroutine broadcast_row(rows,global_row,values,error)
+      complex(real64),intent(in)::rows(:,:)
+      integer,intent(in)::global_row
+      complex(real64),intent(out)::values(:)
+      integer,intent(out)::error
+      values=(0d0,0d0)
+      if(rank==row_owner(global_row)-1)values=rows(row_position(global_row),:)
+      call MPI_Bcast(values,size(values),MPI_DOUBLE_COMPLEX,row_owner(global_row)-1,comm,error)
+    end subroutine
+
+    subroutine distributed_adjoint(rows,adjoint,error)
+      complex(real64),intent(in)::rows(:,:)
+      complex(real64),intent(out)::adjoint(:,:)
+      integer,intent(out)::error
+      complex(real64),allocatable::local_column(:)
+      integer::ii,jj,global_target
+      allocate(local_column(n),stat=allocation_status)
+      call allocation_consensus(allocation_status,global_bad)
+      if(global_bad/=0)then;error=1;return;endif
+      error=MPI_SUCCESS
+      do global_target=1,n
+        local_column=(0d0,0d0)
+        do jj=1,nlocal;local_column(int(row_ids(jj)))=conjg(rows(jj,global_target));enddo
+        call MPI_Allreduce(MPI_IN_PLACE,local_column,n,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,error)
+        if(error/=MPI_SUCCESS)return
+        if(rank==row_owner(global_target)-1)then
+          ii=row_position(global_target);adjoint(ii,:)=local_column
+        endif
+      enddo
+    end subroutine
+
+    subroutine distributed_product(left_rows,right_rows,result_rows,error)
+      complex(real64),intent(in)::left_rows(:,:),right_rows(:,:)
+      complex(real64),intent(out)::result_rows(:,:)
+      integer,intent(out)::error
+      integer::ii,kk
+      result_rows=(0d0,0d0);error=MPI_SUCCESS
+      do kk=1,n
+        call broadcast_row(right_rows,kk,stream_row,error);if(error/=MPI_SUCCESS)return
+        do ii=1,nlocal;result_rows(ii,:)=result_rows(ii,:)+left_rows(ii,kk)*stream_row;enddo
+      enddo
+    end subroutine
+
+    subroutine put_realified_entry(global_row,global_column,value)
+      integer,intent(in)::global_row,global_column
+      real(real64),intent(in)::value
+      integer::local_row,local_column
+      if(eigen_owner_node(global_row,real_info%nprow,real_info%myrow)/=real_info%myrow)return
+      if(eigen_owner_node(global_column,real_info%npcol,real_info%mycol)/=real_info%mycol)return
+      local_row=eigen_translate_g2l(global_row,real_info%nprow,real_info%myrow)
+      local_column=eigen_translate_g2l(global_column,real_info%npcol,real_info%mycol)
+      real_matrix(local_row,local_column)=value
+    end subroutine
+
+    subroutine broadcast_sector_row(global_row,values,error)
+      integer,intent(in)::global_row
+      complex(real64),intent(out)::values(:)
+      integer,intent(out)::error
+      values=(0d0,0d0)
+      if(rank==row_owner(global_row)-1)values=sector_vectors(row_position(global_row),:)
+      call MPI_Bcast(values,size(values),MPI_DOUBLE_COMPLEX,row_owner(global_row)-1,comm,error)
+    end subroutine
+
+    subroutine allocation_consensus(local_status,global_status)
+      integer,intent(in)::local_status
+      integer,intent(out)::global_status
+      integer::error
+      call MPI_Allreduce(local_status,global_status,1,MPI_INTEGER,MPI_MAX,comm,error)
+      if(error/=MPI_SUCCESS)global_status=max(1,global_status)
+    end subroutine
+
+    subroutine compute_workspace_receipt(receipt_valid)
+      logical,intent(out)::receipt_valid
+      integer(int64)::complex_elements,real_elements,integer_elements,complex_bytes,real_bytes,integer_bytes
+      complex_elements=0_int64;real_elements=0_int64;integer_elements=0_int64
+      receipt_valid=.true.
+      call add_count(complex_elements,size(generator_rows,kind=int64),receipt_valid)
+      call add_count(complex_elements,size(gamma_rows,kind=int64),receipt_valid)
+      call add_count(complex_elements,size(characters,kind=int64),receipt_valid)
+      if(allocated(identity_rows))call add_count(complex_elements,size(identity_rows,kind=int64),receipt_valid)
+      if(allocated(power_rows))call add_count(complex_elements,size(power_rows,kind=int64),receipt_valid)
+      if(allocated(product_rows))call add_count(complex_elements,size(product_rows,kind=int64),receipt_valid)
+      if(allocated(left_product_rows))call add_count(complex_elements,size(left_product_rows,kind=int64),receipt_valid)
+      if(allocated(adjoint_rows))call add_count(complex_elements,size(adjoint_rows,kind=int64),receipt_valid)
+      if(allocated(discriminator_rows))call add_count(complex_elements,size(discriminator_rows,kind=int64),receipt_valid)
+      if(allocated(candidate_rows))call add_count(complex_elements,size(candidate_rows,kind=int64),receipt_valid)
+      if(allocated(sector_vectors))call add_count(complex_elements,size(sector_vectors,kind=int64),receipt_valid)
+      if(allocated(sector_projector_rows))call add_count(complex_elements,size(sector_projector_rows,kind=int64),receipt_valid)
+      if(allocated(gamma_projector_rows))call add_count(complex_elements,size(gamma_projector_rows,kind=int64),receipt_valid)
+      if(allocated(gram))call add_count(complex_elements,size(gram,kind=int64),receipt_valid)
+      if(allocated(sector_multiplicities))&
+        call add_count(complex_elements,size(sector_multiplicities,kind=int64),receipt_valid)
+      if(allocated(stream_row))call add_count(complex_elements,size(stream_row,kind=int64),receipt_valid)
+      if(allocated(remote_sector))call add_count(complex_elements,size(remote_sector,kind=int64),receipt_valid)
+      ! One N-element column is allocated transiently inside distributed_adjoint.
+      call add_count(complex_elements,int(n,int64),receipt_valid)
+      if(allocated(real_matrix))then
+        call add_count(real_elements,size(real_matrix,kind=int64),receipt_valid)
+        ! Conservative allowance for two same-sized EigenExa internal distributed blocks.
+        call add_count(real_elements,size(real_matrix,kind=int64),receipt_valid)
+        call add_count(real_elements,size(real_matrix,kind=int64),receipt_valid)
+      endif
+      if(allocated(real_vectors))call add_count(real_elements,size(real_vectors,kind=int64),receipt_valid)
+      if(allocated(eigenvalues))call add_count(real_elements,size(eigenvalues,kind=int64),receipt_valid)
+      if(allocated(real_column))call add_count(real_elements,size(real_column,kind=int64),receipt_valid)
+      call add_count(integer_elements,size(row_ids,kind=int64),receipt_valid)
+      call add_count(integer_elements,size(generator_orders,kind=int64),receipt_valid)
+      call add_count(integer_elements,size(element_words,kind=int64),receipt_valid)
+      call add_count(integer_elements,size(character_conjugates,kind=int64),receipt_valid)
+      if(allocated(ownership))call add_count(integer_elements,size(ownership,kind=int64),receipt_valid)
+      if(allocated(row_owner))call add_count(integer_elements,size(row_owner,kind=int64),receipt_valid)
+      if(allocated(row_position))call add_count(integer_elements,size(row_position,kind=int64),receipt_valid)
+      if(.not.receipt_valid)return
+      if(complex_elements>huge(0_int64)/16_int64.or.real_elements>huge(0_int64)/8_int64.or.&
+          integer_elements>huge(0_int64)/8_int64)then;receipt_valid=.false.;return;endif
+      complex_bytes=16_int64*complex_elements;real_bytes=8_int64*real_elements
+      integer_bytes=8_int64*integer_elements
+      if(complex_bytes>huge(0_int64)-real_bytes)then;receipt_valid=.false.;return;endif
+      workspace_peak_bytes=complex_bytes+real_bytes
+      if(workspace_peak_bytes>huge(0_int64)-integer_bytes)then;receipt_valid=.false.;return;endif
+      workspace_peak_bytes=workspace_peak_bytes+integer_bytes
+      receipt_valid=workspace_peak_bytes>0_int64
+    end subroutine
+
+    subroutine add_count(total,count,valid)
+      integer(int64),intent(inout)::total
+      integer(int64),intent(in)::count
+      logical,intent(inout)::valid
+      if(.not.valid)return
+      if(count<0_int64.or.total>huge(0_int64)-count)then;valid=.false.;return;endif
+      total=total+count
+    end subroutine
+  end subroutine split_dg_translation_character_sector_eigenexa
 
   subroutine build_dg_cocycle_averaged_occupied_candidates_eigenexa(info,comm,occupied,weights,&
       translation_target_box_ids,representative_target_box_ids,point_product,translation_cocycle,&

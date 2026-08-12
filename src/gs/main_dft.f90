@@ -54,10 +54,12 @@ use dg_overlapping_wannier_construction, only: measure_dg_rank_fixed_symmetry_re
 use dg_overlapping_wannier_construction, only: measure_dg_rank_fixed_symmetry_residuals_eigenexa
 use dg_overlapping_wannier_construction, only: build_dg_group_averaged_occupied_candidates_eigenexa
 use dg_overlapping_wannier_construction, only: build_dg_cocycle_averaged_occupied_candidates_eigenexa
+use dg_overlapping_wannier_construction, only: split_dg_translation_character_sector_eigenexa
 #endif
 use dg_overlapping_wannier_construction, only: select_dg_fixed_rank_symmetry_closed_subspace
 use dg_overlapping_wannier_construction, only: find_dg_group_identity
 use dg_overlapping_wannier_construction, only: select_dg_group_generators
+use dg_overlapping_wannier_construction, only: build_dg_finite_abelian_character_table
 use dg_overlapping_wannier_construction, only: build_dg_smooth_partition_of_unity
 use dg_overlapping_wannier_construction, only: assemble_dg_distributed_basis_symmetry_overlap
 use dg_overlapping_wannier_construction, only: assemble_dg_distributed_basis_symmetry_overlap_rows,&
@@ -569,6 +571,9 @@ contains
     complex(8),allocatable::occupied_overlap_local(:,:),occupied_overlap_global(:,:)
     complex(8),allocatable::w90_anchors(:,:),w90_m_matrix(:,:,:),w90_a_matrix(:,:),w90_transform(:,:)
     complex(8),allocatable::fixed_center_rows(:,:,:),fixed_center_representation(:,:),fixed_center_identity(:,:)
+    complex(8),allocatable::translation_generator_rows(:,:,:),translation_gamma_rows(:,:),&
+      translation_sector_rows(:,:),translation_characters(:,:),translation_generator_characters(:,:),&
+      translation_gamma_local_row(:),translation_gamma_global_row(:)
     complex(8),allocatable::lcfo_fragment_contribution(:,:),lcfo_occupied_core(:,:)
     complex(8),allocatable::composed_tile_values(:,:),projector_buffer_tile(:,:)
     complex(8),allocatable::one_shot_hrows(:,:)
@@ -595,6 +600,7 @@ contains
     integer(8),allocatable::lcfo_core_ids(:)
     integer(8),allocatable::all_core_ids(:,:),localized_center_ids(:),orbital_owned_full_ids(:)
     integer(8),allocatable::fixed_center_symmetry_map(:,:),fixed_center_row_ids(:)
+    integer(8),allocatable::translation_row_ids(:),translation_stream_row_ids(:)
     integer,allocatable::fragments(:),local_point_product(:,:),local_point_integer_rotations(:,:,:),&
       translation_product(:,:),global_point_product(:,:),global_point_integer_rotations(:,:,:),&
       global_translation_subgroup(:),global_point_representatives(:),global_point_cogroup_product(:,:),&
@@ -603,6 +609,9 @@ contains
     integer,allocatable::projector_atom_ids(:)
     integer,allocatable::fixed_center_product(:,:)
     integer,allocatable::global_affine_generators(:)
+    integer,allocatable::translation_canonical_operations(:),translation_inverse_operations(:),&
+      translation_character_generators(:),translation_element_words(:,:),translation_character_conjugates(:),&
+      translation_generator_orders(:)
     type(t_sawf_symop),allocatable::fixed_center_operations(:)
     type(t_sawf_dmn_writer)::fixed_center_dmn_writer
     integer,allocatable::center_owner_candidate(:),center_box_candidate(:),center_fragment_candidate(:)
@@ -613,6 +622,7 @@ contains
     integer::ix,iy,iz,io,p,nbox,ncore,noccupied,nstate,ntarget,nsym,rank,nproc,&
       raw_ix,raw_iy,raw_iz,core_index,ierr,allocation_status,&
       local_target_count,w90_nntot,projector_tile_first,projector_tile_last,projector_tile_count
+    integer::translation_allocation_status
     integer::global_seed_count,global_retained_rank,global_occupied_count,global_projection_count,&
       global_required_retained_rank
     integer::global_identity_operation
@@ -620,6 +630,7 @@ contains
       adapted_occupied_rank,adapted_occupied_selected_block_dimension,orthonormal_lcfo_rank,&
       translation_identity_operation,translation_adapted_rank
     integer::global_point_cogroup_identity_operation
+    integer::translation_character_generator_count,translation_sector_rank
     integer::lcfo_symmetry_worst_operation,lcfo_symmetry_worst_generator_index
     real(8),allocatable::lcfo_total_symmetry_residual(:),lcfo_boundary_symmetry_residual(:),&
       lcfo_interior_symmetry_residual(:)
@@ -632,6 +643,8 @@ contains
       pseudopotential_fingerprint,nbox8,ncore8,product8,nxy8,local_exact_symmetry_fingerprint,&
       lcfo_symmetry_workspace_peak,adapted_occupied_workspace_peak,occupied_pre_closure_workspace_peak
     integer(8)::translation_adapted_workspace_peak
+    integer(8)::translation_character_fingerprint,translation_sector_fingerprint,&
+      translation_sector_workspace_peak
     integer(8)::composition_fingerprint,composition_workspace_peak,occupied_composition_peak,&
       occupied_composition_fingerprint,projector_composition_peak,projector_composition_fingerprint
     integer(8)::w90_coordinator_bytes,w90_workspace_peak,w90_byte_limit
@@ -670,6 +683,8 @@ contains
     real(8),allocatable::global_point_fractional_translations(:,:)
     real(8)::w90_reciprocal_lattice(3,3),w90_lattice_inverse(3,3),w90_determinant,w90_spread(3)
     real(8)::w90_identity_defect,w90_unitarity_defect,w90_closure_defect
+    real(8)::translation_identity_defect,translation_unitarity_defect,translation_commutator_defect,&
+      translation_order_defect,translation_gamma_pairing_defect
     integer::localization_iterations,localization_spread_evaluations
     integer::ow_saved_eigenexa_comm
     character(256)::message,prefix
@@ -932,6 +947,34 @@ contains
     if(any(translation_product<1))error stop 'translation subgroup product is not closed'
     translation_identity_operation=findloc(global_translation_subgroup,global_identity_operation,dim=1)
     if(translation_identity_operation<1)error stop 'translation subgroup lacks the affine identity'
+    allocate(translation_canonical_operations(size(global_translation_subgroup)),&
+      translation_inverse_operations(size(global_translation_subgroup)),&
+      translation_characters(size(global_translation_subgroup),size(global_translation_subgroup)),&
+      translation_character_conjugates(size(global_translation_subgroup)))
+    call build_dg_finite_abelian_character_table(&
+      global_point_fractional_translations(:,global_translation_subgroup),translation_product,&
+      translation_identity_operation,dg_ow_symmetry_tolerance,translation_canonical_operations,&
+      translation_inverse_operations,translation_character_generator_count,&
+      translation_character_generators,translation_element_words,translation_characters,&
+      translation_character_conjugates,translation_character_fingerprint,ok,message)
+    if(.not.ok)then
+      write(0,'(a)')trim(message);error stop 'translation character catalog construction failed'
+    endif
+    allocate(translation_generator_orders(translation_character_generator_count),&
+      translation_generator_characters(size(global_translation_subgroup),&
+      translation_character_generator_count))
+    do i=1,translation_character_generator_count
+      translation_generator_orders(i)=1
+      do while(translation_generator_orders(i)<=size(global_translation_subgroup))
+        if(maxval(abs(translation_characters(:,translation_character_generators(i))**&
+            translation_generator_orders(i)-1d0))<=100d0*dg_ow_symmetry_tolerance)exit
+        translation_generator_orders(i)=translation_generator_orders(i)+1
+      enddo
+      if(translation_generator_orders(i)>size(global_translation_subgroup))&
+        error stop 'translation character generator order is not finite'
+      translation_generator_characters(:,i)=&
+        translation_characters(:,translation_character_generators(i))
+    enddo
     call select_dg_group_generators(global_point_product,global_identity_operation,&
       global_affine_generators,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global affine generator selection failed';end if
@@ -1124,6 +1167,96 @@ contains
         global_required_retained_rank/=ntarget)then
       write(0,'(a)')trim(message);error stop 'global symmetry-closed Wannier construction failed'
     end if
+#ifdef USE_EIGENEXA
+    if(translation_character_generator_count==0)then
+      call assemble_dg_distributed_basis_symmetry_overlap_rows(dc%icomm_tot,global_closed_core,&
+        ow_core_weights,global_symmetry_map(:,global_identity_operation:global_identity_operation),&
+        translation_row_ids,fixed_center_rows,fixed_center_operation_workspace,ok,message)
+      if(.not.ok)then
+        write(0,'(a)')trim(message);error stop 'trivial translation identity row assembly failed'
+      endif
+      allocate(translation_generator_rows(size(translation_row_ids),ntarget,0),&
+        translation_gamma_rows(size(translation_row_ids),ntarget),stat=allocation_status)
+      call MPI_Allreduce(allocation_status,translation_allocation_status,1,MPI_INTEGER,MPI_MAX,&
+        dc%icomm_tot,ierr)
+      if(ierr/=MPI_SUCCESS.or.translation_allocation_status/=0)&
+        error stop 'trivial translation row allocation failed collectively'
+      deallocate(fixed_center_rows)
+    endif
+    do i=1,translation_character_generator_count
+      io=translation_canonical_operations(translation_character_generators(i))
+      io=global_translation_subgroup(io)
+      call assemble_dg_distributed_basis_symmetry_overlap_rows(dc%icomm_tot,global_closed_core,&
+        ow_core_weights,global_symmetry_map(:,io:io),translation_stream_row_ids,fixed_center_rows,&
+        fixed_center_operation_workspace,ok,message)
+      if(.not.ok)then
+        write(0,'(a)')trim(message);error stop 'translation generator row assembly failed'
+      endif
+      if(i==1)then
+        allocate(translation_row_ids(size(translation_stream_row_ids)),source=translation_stream_row_ids,&
+          stat=allocation_status)
+        call MPI_Allreduce(allocation_status,translation_allocation_status,1,MPI_INTEGER,MPI_MAX,&
+          dc%icomm_tot,ierr)
+        if(ierr/=MPI_SUCCESS.or.translation_allocation_status/=0)&
+          error stop 'translation row ownership allocation failed collectively'
+        allocate(translation_generator_rows(size(translation_row_ids),ntarget,&
+          translation_character_generator_count),translation_gamma_rows(size(translation_row_ids),ntarget),&
+          stat=allocation_status)
+        call MPI_Allreduce(allocation_status,translation_allocation_status,1,MPI_INTEGER,MPI_MAX,&
+          dc%icomm_tot,ierr)
+        if(ierr/=MPI_SUCCESS.or.translation_allocation_status/=0)&
+          error stop 'translation generator allocation failed collectively'
+      elseif(any(translation_stream_row_ids/=translation_row_ids))then
+        error stop 'translation generator row ownership changed during streaming'
+      endif
+      translation_generator_rows(:,:,i)=fixed_center_rows(:,:,1)
+      deallocate(translation_stream_row_ids,fixed_center_rows)
+    enddo
+    allocate(translation_gamma_local_row(ntarget),translation_gamma_global_row(ntarget),stat=allocation_status)
+    call MPI_Allreduce(allocation_status,translation_allocation_status,1,MPI_INTEGER,MPI_MAX,&
+      dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.translation_allocation_status/=0)&
+      error stop 'translation Gamma row allocation failed collectively'
+    translation_gamma_rows=(0d0,0d0)
+    do io=1,ntarget
+      do i=1,ntarget
+        translation_gamma_local_row(i)=sum(ow_core_weights*conjg(global_closed_core(io,:))*&
+          conjg(global_closed_core(i,:)))
+      enddo
+      call MPI_Allreduce(translation_gamma_local_row,translation_gamma_global_row,ntarget,&
+        MPI_DOUBLE_COMPLEX,MPI_SUM,dc%icomm_tot,ierr)
+      if(ierr/=MPI_SUCCESS)error stop 'translation Gamma row reduction failed'
+      p=findloc(translation_row_ids,int(io,8),dim=1)
+      if(p>0)translation_gamma_rows(p,:)=translation_gamma_global_row
+    enddo
+    deallocate(translation_gamma_local_row,translation_gamma_global_row)
+    ow_saved_eigenexa_comm=info%icomm_o
+    call finalize_eigenexa(info)
+    if(ntarget>huge(ntarget)/2)error stop 'translation-sector EigenExa extent overflow'
+    info%icomm_o=dc%icomm_tot
+    call init_eigenexa_mod(info,2*ntarget,direct_block_only=.true.)
+    call split_dg_translation_character_sector_eigenexa(info,dc%icomm_tot,translation_row_ids,&
+      translation_generator_rows,translation_gamma_rows,translation_generator_characters,&
+      translation_generator_orders,translation_element_words,translation_character_conjugates,1,&
+      dg_ow_symmetry_tolerance,translation_character_fingerprint,translation_sector_rows,translation_sector_rank,&
+      translation_identity_defect,translation_unitarity_defect,translation_commutator_defect,&
+      translation_order_defect,translation_gamma_pairing_defect,translation_sector_fingerprint,&
+      translation_sector_workspace_peak,ok,message)
+    call finalize_eigenexa(info)
+    info%icomm_o=ow_saved_eigenexa_comm
+    call init_eigenexa_mod(info,system%no)
+    if(.not.ok)then
+      write(0,'(a)')trim(message);error stop 'translation character-sector split failed'
+    endif
+    if(rank==0)write(*,'(a,2(a,i0),5(a,es16.8),a,i0)')&
+      '[OW-GS-DIAGNOSTIC] translation_character_sector',&
+      ' character_count=',size(translation_characters,1),' multiplicity=',translation_sector_rank,&
+      ' identity_defect=',translation_identity_defect,' unitarity_defect=',translation_unitarity_defect,&
+      ' commutator_defect=',translation_commutator_defect,' order_defect=',translation_order_defect,&
+      ' gamma_pairing_defect=',translation_gamma_pairing_defect,&
+      ' workspace_peak_bytes=',translation_sector_workspace_peak
+    deallocate(translation_generator_rows,translation_gamma_rows,translation_sector_rows,translation_row_ids)
+#endif
     deallocate(lcfo_occupied_core,lcfo_core_ids)
     global_retained_rank=ntarget
     allocate(fixed_center_identity(ntarget,ntarget),fixed_center_eigenvalues(ntarget))

@@ -757,8 +757,9 @@ for forbidden in ("dc_lcfo", "dg_wpw", "direct_sipg"):
     assert forbidden not in construction_source.lower(), (
         f"construction path must not call forbidden stage: {forbidden}"
     )
-assert construction_source.lower().count("eigen_pdsyevd_ex_distributed_blocks") == 3, (
-    "EigenExa may enter construction only through one import and the two OW-distributed eigensystems"
+assert construction_source.lower().count("eigen_pdsyevd_ex_distributed_blocks") == 4, (
+    "EigenExa may enter construction only through one import, the two OW-distributed eigensystems, "
+    "and the streamed translation-sector splitter"
 )
 averaged_projector_body = re.search(
     r"subroutine\s+build_dg_group_averaged_occupied_candidates_eigenexa(?P<body>.*?)end\s+subroutine",
@@ -1380,10 +1381,15 @@ assert not re.search(r"w90_symmetry_rows\s*\(", adapter_body, re.I), (
     "production must not retain Nsym row-owned representation matrices"
 )
 assert not re.search(
-    r"assemble_dg_distributed_basis_symmetry_overlap_rows\s*\([^;]*global_symmetry_map",
+    r"assemble_dg_distributed_basis_symmetry_overlap_rows\s*\([^;]*global_symmetry_map\s*(?:,|\))",
     adapter_body,
     re.I | re.S,
 ), "production must not assemble the full-affine all-operation row tensor"
+assert re.search(
+    r"assemble_dg_distributed_basis_symmetry_overlap_rows\s*\([^;]*global_symmetry_map\s*\(\s*:\s*,\s*io\s*:\s*io\s*\)",
+    adapter_body,
+    re.I | re.S,
+), "production must stream one canonical minimal translation generator at a time"
 for provenance in (
     "global_lcfo_fingerprint",
     "occupation_block_fingerprint",

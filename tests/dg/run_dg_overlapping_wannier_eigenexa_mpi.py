@@ -51,6 +51,30 @@ with tempfile.TemporaryDirectory(prefix="ow-eigenexa-") as name:
       match=re.search(r"COCYCLE ranks=\d+ signature=(-?\d+)",result.stdout);assert match,result.stdout
       cocycle_signatures.append(int(match.group(1)))
     assert len(set(cocycle_signatures))==1,cocycle_signatures
+    sector_signatures=[]
+    for nproc in (1,2,4,8):
+      result=subprocess.run([shutil.which("mpiexec"),"-n",str(nproc),str(exe),"sector"],
+        capture_output=True,text=True,env=env,timeout=60)
+      assert result.returncode==0,("sector",nproc,result.stdout,result.stderr)
+      match=re.search(r"SECTOR ranks=\d+ signature=(-?\d+)",result.stdout);assert match,result.stdout
+      sector_signatures.append(int(match.group(1)))
+    assert len(set(sector_signatures))==1,sector_signatures
+    trivial_signatures=[]
+    for nproc in (1,2,4,8):
+      result=subprocess.run([shutil.which("mpiexec"),"-n",str(nproc),str(exe),"sector_trivial"],
+        capture_output=True,text=True,env=env,timeout=60)
+      assert result.returncode==0,("sector_trivial",nproc,result.stdout,result.stderr)
+      match=re.search(r"SECTOR_TRIVIAL ranks=\d+ signature=(-?\d+)",result.stdout);assert match,result.stdout
+      trivial_signatures.append(int(match.group(1)))
+    assert len(set(trivial_signatures))==1,trivial_signatures
+    for case_name in ("sector_noncommuting","sector_nonunitary","sector_wrong_order",
+                      "sector_rank_losing","sector_split_cluster","sector_nonfinite",
+                      "sector_gamma_nonunitary","sector_gamma_noninvolutory","sector_gamma_covariance"):
+      for nproc in (1,2,4,8):
+        result=subprocess.run([shutil.which("mpiexec"),"-n",str(nproc),str(exe),case_name],
+          capture_output=True,text=True,env=env,timeout=60)
+        assert result.returncode==0,(case_name,nproc,result.stdout,result.stderr)
+        assert f"REJECT {case_name} ranks={nproc}" in result.stdout,result.stdout
     for nproc in (1,2,4,8):
       result=subprocess.run([shutil.which("mpiexec"),"-n",str(nproc),str(exe),"average_split"],
         capture_output=True,text=True,env=env,timeout=60)

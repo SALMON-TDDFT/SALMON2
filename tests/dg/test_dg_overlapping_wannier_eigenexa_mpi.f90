@@ -2,9 +2,11 @@ program test_dg_overlapping_wannier_eigenexa_mpi
   use mpi
   use structures,only:s_parallel_info
   use eigen_libs_mod
+  use eigen_eigenexa,only:eigen_pdsyevd_ex_distributed_blocks
   use dg_overlapping_wannier_solver,only:solve_dg_overlapping_wannier_generalized_eigenexa
   use dg_overlapping_wannier_construction,only:build_dg_group_averaged_occupied_candidates_eigenexa,&
-    build_dg_cocycle_averaged_occupied_candidates_eigenexa,measure_dg_rank_fixed_symmetry_residuals
+    build_dg_cocycle_averaged_occupied_candidates_eigenexa,measure_dg_rank_fixed_symmetry_residuals,&
+    split_dg_translation_character_sector_eigenexa,validate_dg_translation_sector_cluster
   implicit none
   type(s_parallel_info)::info
   integer::comm,rank,nproc,ierr,i,p,nlocal
@@ -21,6 +23,7 @@ program test_dg_overlapping_wannier_eigenexa_mpi
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
   case_name='normal';if(command_argument_count()>=1)call get_command_argument(1,case_name)
+  if(index(trim(case_name),'sector')==1)then;call run_sector_case();call MPI_Finalize(ierr);stop;endif
   if(index(trim(case_name),'average')==1)then;call run_average_case();call MPI_Finalize(ierr);stop;endif
   if(trim(case_name)=='cocycle')then;call run_cocycle_case();call MPI_Finalize(ierr);stop;endif
   call eigen_init(comm);call eigen_get_procs(p,info%nprow,info%npcol)
@@ -69,6 +72,175 @@ program test_dg_overlapping_wannier_eigenexa_mpi
   if(rank==0)write(*,'(a,i0,a,i0)')'EIGENEXA ranks=',nproc,' signature=',signature
   call eigen_free();call MPI_Finalize(ierr)
 contains
+  subroutine run_sector_case()
+    use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
+    integer,parameter::n=8,ncharacter=4,ngenerator=2,multiplicity=2
+    integer::ii,jj,kk,local_row,sector,sector_rank,generator_orders(ngenerator)
+    integer(8),allocatable::sector_row_ids(:)
+    complex(8),allocatable::generator_rows(:,:,:),gamma_rows(:,:),sector_rows(:,:),full_sector(:,:),&
+      gauge(:,:),dense_generator(:,:,:),gamma_sewing(:,:),trivial_generators(:,:,:),&
+      trivial_gamma(:,:),trivial_characters(:,:)
+    complex(8)::characters(ncharacter,ngenerator),phase
+    real(8)::identity_defect,unitarity_defect,commutator_defect,order_defect,gamma_pairing_defect
+    real(8)::projector_defect,local_projector_defect
+    real(8)::cluster_fixture(6)
+    real(8),allocatable::cluster_matrix(:,:),cluster_vectors(:,:)
+    integer::character_conjugates(ncharacter),element_words(ncharacter,ngenerator)
+    integer,allocatable::trivial_orders(:),trivial_words(:,:),trivial_conjugates(:)
+    integer(8)::sector_fingerprint,sector_workspace,sector_signature
+    logical::sector_ok
+    character(256)::sector_message
+
+    nlocal=count([(mod(ii-1,nproc)==rank,ii=1,n)])
+    allocate(sector_row_ids(nlocal),generator_rows(nlocal,n,ngenerator),gamma_rows(nlocal,n),&
+      gauge(n,n),dense_generator(n,n,ngenerator),gamma_sewing(n,n))
+    characters(:,1)=[(1d0,0d0),(1d0,0d0),(-1d0,0d0),(-1d0,0d0)]
+    characters(:,2)=[(1d0,0d0),(-1d0,0d0),(1d0,0d0),(-1d0,0d0)]
+    generator_orders=2;character_conjugates=[1,2,3,4];gauge=(0d0,0d0)
+    element_words=reshape([0,0,1,1,0,1,0,1],[ncharacter,ngenerator])
+    if(trim(case_name)=='sector_split_cluster')then
+      cluster_fixture=[0d0,0d0,0d0,0d0,5d-11,1d0]
+      call eigen_init(comm);call eigen_get_procs(p,info%nprow,info%npcol)
+      call eigen_get_id(p,info%myrow,info%mycol);call eigen_get_matdims(6,info%nrow_local,info%ncol_local)
+      info%flag_eigenexa_init=.true.
+      allocate(cluster_matrix(info%nrow_local,info%ncol_local),&
+        cluster_vectors(info%nrow_local,info%ncol_local));cluster_matrix=0d0
+      do ii=1,6
+        if(eigen_owner_node(ii,info%nprow,info%myrow)==info%myrow.and.&
+            eigen_owner_node(ii,info%npcol,info%mycol)==info%mycol)&
+          cluster_matrix(eigen_translate_g2l(ii,info%nprow,info%myrow),&
+            eigen_translate_g2l(ii,info%npcol,info%mycol))=cluster_fixture(ii)
+      enddo
+      call eigen_pdsyevd_ex_distributed_blocks(info,6,cluster_matrix,cluster_fixture,cluster_vectors,&
+        sector_ok,sector_message)
+      call require(sector_ok,'split-cluster distributed EigenExa solve')
+      call validate_dg_translation_sector_cluster(cluster_fixture,4,1d-10,sector_ok,sector_message)
+      call require(.not.sector_ok.and.index(trim(sector_message),'boundary splits')>0,&
+        'split-cluster fixture reaches the spectral boundary gate')
+      if(rank==0)write(*,'(a,i0)')'REJECT sector_split_cluster ranks=',nproc
+      call eigen_free()
+      return
+    endif
+    do jj=1,n
+      do ii=1,n
+        phase=exp(cmplx(0d0,2d0*acos(-1d0)*real((ii-1)*(jj-1),8)/real(n,8),8))
+        gauge(ii,jj)=phase/sqrt(real(n,8))*exp(cmplx(0d0,0.071d0*real(ii,8),8))
+      enddo
+    enddo
+    gamma_sewing=matmul(gauge,transpose(gauge))
+    dense_generator=(0d0,0d0)
+    do kk=1,ngenerator
+      do jj=1,n
+        sector=(jj-1)/multiplicity+1
+        dense_generator(:,:,kk)=dense_generator(:,:,kk)+characters(sector,kk)*&
+          spread(gauge(:,jj),2,n)*spread(conjg(gauge(:,jj)),1,n)
+      enddo
+    enddo
+    local_row=0
+    do ii=1,n
+      if(mod(ii-1,nproc)/=rank)cycle
+      local_row=local_row+1;sector_row_ids(local_row)=ii
+      generator_rows(local_row,:,:)=dense_generator(ii,:,:)
+      gamma_rows(local_row,:)=gamma_sewing(ii,:)
+    enddo
+    select case(trim(case_name))
+    case('sector_noncommuting')
+      do local_row=1,nlocal
+        ii=int(sector_row_ids(local_row))
+        generator_rows(local_row,:,2)=generator_rows(local_row,:,2)+&
+          (cos(0.4d0)-1d0)*gauge(ii,1)*conjg(gauge(:,1))+&
+          (1d0-cos(0.4d0))*gauge(ii,7)*conjg(gauge(:,7))-&
+          sin(0.4d0)*(gauge(ii,1)*conjg(gauge(:,7))+gauge(ii,7)*conjg(gauge(:,1)))
+      enddo
+    case('sector_nonunitary')
+      generator_rows(:,:,1)=1.01d0*generator_rows(:,:,1)
+    case('sector_wrong_order')
+      generator_rows(:,:,1)=exp(cmplx(0d0,0.2d0,8))*generator_rows(:,:,1)
+    case('sector_rank_losing')
+      generator_rows(:,:,2)=generator_rows(:,:,1)
+    case('sector_nonfinite')
+      if(rank==0)generator_rows(1,1,1)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,8)
+    case('sector_gamma_nonunitary')
+      gamma_rows=1.01d0*gamma_rows
+    case('sector_gamma_noninvolutory')
+      gamma_rows=(0d0,0d0)
+      do local_row=1,nlocal
+        ii=int(sector_row_ids(local_row))
+        if(ii==1)then;gamma_rows(local_row,1)=cos(0.2d0);gamma_rows(local_row,2)=-sin(0.2d0)
+        elseif(ii==2)then;gamma_rows(local_row,1)=sin(0.2d0);gamma_rows(local_row,2)=cos(0.2d0)
+        else;gamma_rows(local_row,ii)=1d0
+        endif
+      enddo
+    case('sector_gamma_covariance')
+      gamma_rows=(0d0,0d0)
+      do local_row=1,nlocal;gamma_rows(local_row,int(sector_row_ids(local_row)))=1d0;enddo
+    end select
+    call eigen_init(comm);call eigen_get_procs(p,info%nprow,info%npcol)
+    call eigen_get_id(p,info%myrow,info%mycol);call eigen_get_matdims(n,info%nrow_local,info%ncol_local)
+    info%flag_eigenexa_init=.true.
+    if(trim(case_name)=='sector_trivial')then
+      allocate(trivial_generators(nlocal,n,0),trivial_gamma(nlocal,n),trivial_characters(1,0),&
+        trivial_orders(0),trivial_words(1,0),trivial_conjugates(1))
+      trivial_gamma=(0d0,0d0);trivial_conjugates=1
+      do local_row=1,nlocal;trivial_gamma(local_row,int(sector_row_ids(local_row)))=1d0;enddo
+      call split_dg_translation_character_sector_eigenexa(info,comm,sector_row_ids,trivial_generators,&
+        trivial_gamma,trivial_characters,trivial_orders,trivial_words,trivial_conjugates,1,1d-10,81231_8,&
+        sector_rows,sector_rank,identity_defect,unitarity_defect,commutator_defect,order_defect,&
+        gamma_pairing_defect,sector_fingerprint,sector_workspace,sector_ok,sector_message)
+      call require(sector_ok.and.sector_rank==n.and.all(shape(sector_rows)==[nlocal,n]).and.&
+        gamma_pairing_defect<1d-12,'trivial translation group returns the full row-owned sector')
+      if(rank==0)write(*,'(a,i0,a,i0)')'SECTOR_TRIVIAL ranks=',nproc,' signature=',sector_fingerprint
+      call eigen_free();return
+    endif
+    call split_dg_translation_character_sector_eigenexa(info,comm,sector_row_ids,generator_rows,gamma_rows,&
+      characters,generator_orders,element_words,character_conjugates,4,1d-10,77123_8,sector_rows,sector_rank,&
+      identity_defect,unitarity_defect,&
+      commutator_defect,order_defect,gamma_pairing_defect,sector_fingerprint,sector_workspace,&
+      sector_ok,sector_message)
+    if(trim(case_name)/='sector')then
+      call require(.not.sector_ok,'adverse translation-sector generator case must reject')
+      select case(trim(case_name))
+      case('sector_noncommuting')
+        call require(commutator_defect>1d-10.and.unitarity_defect<1d-10.and.order_defect<1d-10,&
+          'noncommuting fixture reaches only the commutator gate')
+      case('sector_nonunitary')
+        call require(unitarity_defect>1d-10,'nonunitary fixture reaches the unitarity gate')
+      case('sector_wrong_order')
+        call require(order_defect>1d-10,'wrong-order fixture reaches the finite-order gate')
+      case('sector_rank_losing')
+        call require(index(trim(sector_message),'multiplicity')>0,&
+          'rank-losing and split-cluster fixtures reach multiplicity gates')
+      case('sector_nonfinite')
+        call require(index(trim(sector_message),'invalid')>0,'nonfinite fixture reaches contract gate')
+      case('sector_gamma_nonunitary','sector_gamma_noninvolutory','sector_gamma_covariance')
+        call require(index(trim(sector_message),'Gamma')>0,'invalid Gamma sewing reaches a Gamma gate')
+      end select
+      if(rank==0)write(*,'(3a,i0)')'REJECT ',trim(case_name),' ranks=',nproc
+      call eigen_free();return
+    endif
+    call require(sector_ok,trim(sector_message))
+    call require(sector_rank==multiplicity.and.size(sector_rows,1)==nlocal.and.&
+      size(sector_rows,2)==multiplicity,'known equal translation-character multiplicity')
+    allocate(full_sector(n,multiplicity));full_sector=(0d0,0d0)
+    do local_row=1,nlocal;full_sector(int(sector_row_ids(local_row)),:)=sector_rows(local_row,:);enddo
+    call MPI_Allreduce(MPI_IN_PLACE,full_sector,n*multiplicity,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    local_projector_defect=0d0
+    do ii=1,n
+      do jj=1,n
+        projector_defect=abs(sum(full_sector(ii,:)*conjg(full_sector(jj,:)))-&
+          sum(gauge(ii,7:8)*conjg(gauge(jj,7:8))))
+        local_projector_defect=max(local_projector_defect,projector_defect)
+      enddo
+    enddo
+    call MPI_Allreduce(local_projector_defect,projector_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call require(projector_defect<1d-8.and.identity_defect<1d-10.and.unitarity_defect<1d-10.and.&
+      commutator_defect<1d-10.and.order_defect<1d-10.and.gamma_pairing_defect<1d-10.and.&
+      sector_workspace>0_8,'translation-sector projector and quality receipts')
+    sector_signature=sector_fingerprint+int(sector_rank,8)
+    if(rank==0)write(*,'(a,i0,a,i0)')'SECTOR ranks=',nproc,' signature=',sector_signature
+    call eigen_free()
+  end subroutine run_sector_case
+
   subroutine run_average_case()
     complex(8),allocatable::average_occupied(:,:),average_candidates(:,:)
     real(8),allocatable::average_spectrum(:)
