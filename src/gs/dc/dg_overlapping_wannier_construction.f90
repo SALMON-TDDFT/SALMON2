@@ -27,6 +27,12 @@ module dg_overlapping_wannier_construction
     real(real64)::boundary_value_max=huge(1d0),boundary_gradient_max=huge(1d0)
     real(real64)::metric_minimum_eigenvalue=0d0,metric_condition_number=huge(1d0)
   end type
+  type,public::s_dg_translation_orbit_accumulator
+    logical::initialized=.false.
+    logical,allocatable::visited(:)
+    integer(int64)::catalog_fingerprint=0_int64
+    integer(int64)::table_fingerprint=0_int64
+  end type
   public::construct_dg_overlapping_wannier_basis,release_dg_overlapping_wannier_construction
   public::verify_dg_overlapping_wannier_periodic_closure
   public::assemble_dg_distributed_candidate_symmetry
@@ -67,12 +73,1007 @@ module dg_overlapping_wannier_construction
   public::verify_dg_wannier_center_affine_orbits
   public::build_dg_finite_abelian_character_table
   public::inverse_dg_translation_character_orbits
+  public::accumulate_dg_translation_character_orbit_sector
+  public::accumulate_dg_translation_character_orbit_sector_values
+  public::apply_dg_row_owned_orbital_transform_streamed
+  public::validate_dg_factored_point_cogroup_gauge
+  public::build_dg_translation_character_intertwining_phase
+  public::materialize_dg_row_owned_sector_on_spatial_grid
   public::validate_dg_translation_sector_cluster
   public::build_dg_balanced_orbital_ownership
   public::transpose_dg_spatial_cores_to_orbital_owners
   public::redistribute_dg_owned_orbitals_to_center_fragments
   public::assign_dg_periodic_centers_to_fragments
 contains
+
+  subroutine materialize_dg_row_owned_sector_on_spatial_grid(comm,row_ids,global_state_count,&
+      sector_rows,local_basis,basis_fingerprint,spatial_sector,output_fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,global_state_count
+    integer(int64),intent(in)::row_ids(:)
+    integer(int64),intent(in)::basis_fingerprint
+    complex(real64),intent(in)::sector_rows(:,:),local_basis(:,:)
+    complex(real64),allocatable,intent(out)::spatial_sector(:,:)
+    integer(int64),intent(out)::output_fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nrow,m,npoint,i,p,rank,ierr,local_bad,global_bad,status,minint,maxint
+    integer,allocatable::owner(:),position(:),ownership_count(:)
+    complex(real64),allocatable::stream_row(:)
+    integer(int64)::elements,bytes,term,minhash,maxhash,bits
+    real(real64)::local_magnitude,global_magnitude,safe_magnitude
+    logical::receipt_valid
+    nrow=size(row_ids);m=size(sector_rows,2);npoint=size(local_basis,2)
+    ok=.false.;message='';output_fingerprint=0_int64;workspace_peak_bytes=0_int64
+    local_bad=merge(0,1,global_state_count>=1.and.m>=1.and.npoint>=0.and.&
+      all(shape(sector_rows)==[nrow,m]).and.size(local_basis,1)==global_state_count.and.&
+      basis_fingerprint/=0_int64.and.&
+      all(row_ids>=1_int64).and.all(row_ids<=int(global_state_count,int64)).and.&
+      all(ieee_is_finite(real(sector_rows))).and.all(ieee_is_finite(aimag(sector_rows))).and.&
+      all(ieee_is_finite(real(local_basis))).and.all(ieee_is_finite(aimag(local_basis))))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid row-owned spatial sector contract';return;endif
+    call MPI_Allreduce(global_state_count,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(global_state_count,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='spatial sector state extent disagrees';return;endif
+    call MPI_Allreduce(m,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(m,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='spatial sector rank disagrees';return;endif
+    call MPI_Allreduce(basis_fingerprint,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(basis_fingerprint,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)then;message='spatial sector basis provenance disagrees';return;endif
+    local_bad=merge(1,0,int(npoint,int64)>huge(0_int64)/int(m,int64))
+    elements=0_int64;bytes=0_int64;receipt_valid=local_bad==0
+    if(receipt_valid)then
+      elements=int(npoint,int64)*int(m,int64)
+      if(elements>huge(0_int64)-int(m,int64))then
+        receipt_valid=.false.
+      else
+        elements=elements+int(m,int64)
+      endif
+      if(elements>huge(0_int64)/16_int64)receipt_valid=.false.
+      if(receipt_valid)bytes=16_int64*elements
+      if(int(global_state_count,int64)>huge(0_int64)/12_int64)receipt_valid=.false.
+      if(receipt_valid)then
+        term=12_int64*int(global_state_count,int64)
+        if(bytes>huge(0_int64)-term)then
+          receipt_valid=.false.
+        else
+          bytes=bytes+term
+        endif
+      endif
+    endif
+    local_bad=merge(0,1,receipt_valid)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='spatial sector workspace overflows';return;endif
+    workspace_peak_bytes=bytes
+    local_magnitude=maxval(abs(local_basis))
+    if(nrow>0)local_magnitude=max(local_magnitude,maxval(abs(sector_rows)))
+    call MPI_Allreduce(local_magnitude,global_magnitude,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    safe_magnitude=sqrt(huge(1d0))/(4d0*real(global_state_count,real64))
+    local_bad=merge(0,1,ierr==MPI_SUCCESS.and.global_magnitude<=safe_magnitude)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='spatial sector input magnitude is unsafe';return;endif
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
+    allocate(spatial_sector(npoint,m),stream_row(m),owner(global_state_count),position(global_state_count),&
+      ownership_count(global_state_count),stat=status)
+    call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(spatial_sector))deallocate(spatial_sector)
+      message='spatial sector allocation failed';return
+    endif
+    owner=0;position=0;ownership_count=0
+    do i=1,nrow
+      owner(int(row_ids(i)))=rank+1;position(int(row_ids(i)))=i;ownership_count(int(row_ids(i)))=1
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,owner,global_state_count,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(MPI_IN_PLACE,position,global_state_count,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(MPI_IN_PLACE,ownership_count,global_state_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(ownership_count/=1))then;message='spatial sector coefficient rows are not uniquely owned';return;endif
+    spatial_sector=(0d0,0d0)
+    do i=1,global_state_count
+      stream_row=(0d0,0d0)
+      if(rank==owner(i)-1)stream_row=sector_rows(position(i),:)
+      call MPI_Bcast(stream_row,m,MPI_DOUBLE_COMPLEX,owner(i)-1,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      do p=1,npoint;spatial_sector(p,:)=spatial_sector(p,:)+local_basis(i,p)*stream_row;enddo
+    enddo
+    local_bad=merge(0,1,all(ieee_is_finite(real(spatial_sector))).and.all(ieee_is_finite(aimag(spatial_sector))))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='materialized spatial sector is nonfinite';return;endif
+    output_fingerprint=ieor(basis_fingerprint,int(global_state_count,int64))
+    do i=1,global_state_count
+      stream_row=(0d0,0d0)
+      if(rank==owner(i)-1)stream_row=sector_rows(position(i),:)
+      call MPI_Bcast(stream_row,m,MPI_DOUBLE_COMPLEX,owner(i)-1,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      output_fingerprint=ieor(ishftc(output_fingerprint,9),int(i,int64))
+      do p=1,m
+        bits=transfer(real(stream_row(p),real64),bits);output_fingerprint=ieor(ishftc(output_fingerprint,9),bits)
+        bits=transfer(aimag(stream_row(p)),bits);output_fingerprint=ieor(ishftc(output_fingerprint,9),bits)
+      enddo
+    enddo
+    if(output_fingerprint==0_int64)output_fingerprint=1_int64
+    ok=.true.
+#else
+    ok=.false.;message='row-owned spatial sector materialization requires MPI';output_fingerprint=0_int64
+    workspace_peak_bytes=0_int64
+#endif
+  end subroutine materialize_dg_row_owned_sector_on_spatial_grid
+
+  subroutine build_dg_translation_character_intertwining_phase(comm,row_ids,global_row_count,&
+      generator_maps,generator_orders,element_words,product_table,identity_operation,reference_character,target_character,&
+      catalog_fingerprint,tolerance,&
+      local_phase,fingerprint,phase_payload_fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,global_row_count,generator_orders(:),element_words(:,:),product_table(:,:),identity_operation
+    integer(int64),intent(in)::row_ids(:),generator_maps(:,:)
+    complex(real64),intent(in)::reference_character(:),target_character(:)
+    integer(int64),intent(in)::catalog_fingerprint
+    real(real64),intent(in)::tolerance
+    complex(real64),allocatable,intent(out)::local_phase(:)
+    integer(int64),intent(out)::fingerprint,phase_payload_fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nt,ng,nlocal,x,g,h,target,ierr,local_bad,global_bad,allocation_status,minint,maxint
+    integer,allocatable::permutation_count(:),ownership_count(:),generator_map(:),element_map(:),right_map(:),product_map(:)
+    complex(real64),allocatable::global_phase(:),ratio(:)
+    logical,allocatable::assigned(:)
+    integer(int64)::bits,metadata_hash,minhash,maxhash,elements
+    real(real64)::mintol,maxtol
+    nt=size(reference_character);ng=size(generator_maps,2);nlocal=size(row_ids);ok=.false.;message=''
+    fingerprint=0_int64;phase_payload_fingerprint=0_int64;workspace_peak_bytes=0_int64
+    local_bad=merge(0,1,global_row_count>=1.and.nt>=1.and.size(target_character)==nt.and.&
+      ng>=1.and.size(generator_orders)==ng.and.all(generator_orders>=1).and.&
+      all(generator_orders<=nt).and.all(mod(nt,generator_orders)==0).and.&
+      size(generator_maps,1)==nlocal.and.all(shape(element_words)==[nt,ng]).and.&
+      all(shape(product_table)==[nt,nt]).and.all(element_words>=0).and.&
+      identity_operation>=1.and.identity_operation<=nt.and.&
+      all(generator_maps>=1_int64).and.all(generator_maps<=int(global_row_count,int64)).and.&
+      all(row_ids>=1_int64).and.all(row_ids<=int(global_row_count,int64)).and.catalog_fingerprint/=0_int64.and.&
+      tolerance>=1d-15.and.tolerance<=1d-2.and.ieee_is_finite(tolerance).and.&
+      all(ieee_is_finite(real(reference_character))).and.all(ieee_is_finite(aimag(reference_character))).and.&
+      all(ieee_is_finite(real(target_character))).and.all(ieee_is_finite(aimag(target_character))).and.&
+      maxval(abs(abs(reference_character)-1d0))<=10d0*tolerance.and.&
+      maxval(abs(abs(target_character)-1d0))<=10d0*tolerance)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid translation intertwining-phase contract';return;endif
+    call MPI_Allreduce(global_row_count,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(global_row_count,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='translation phase row extent disagrees';return;endif
+    call MPI_Allreduce(nt,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(nt,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='translation phase order disagrees';return;endif
+    call MPI_Allreduce(tolerance,mintol,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tolerance,maxtol,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.mintol/=maxtol)then;message='translation phase tolerance disagrees';return;endif
+    do h=1,ng
+      local_bad=merge(1,0,any(element_words(:,h)>=generator_orders(h)))
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='translation generator words exceed their orders';return;endif
+    enddo
+    do h=1,ng;call agree_integer(generator_orders(h));if(global_bad/=0)return;enddo
+    do g=1,nt
+      do h=1,ng;call agree_integer(element_words(g,h));if(global_bad/=0)return;enddo
+      do h=1,nt;call agree_integer(product_table(h,g));if(global_bad/=0)return;enddo
+      call agree_complex(reference_character(g));if(global_bad/=0)return
+      call agree_complex(target_character(g));if(global_bad/=0)return
+    enddo
+    metadata_hash=catalog_fingerprint
+    metadata_hash=ieor(ishftc(metadata_hash,7),int(identity_operation,int64))
+    do g=1,ng
+      metadata_hash=ieor(ishftc(metadata_hash,7),int(generator_orders(g),int64))
+    enddo
+    do g=1,nt
+      bits=transfer(real(reference_character(g),real64),bits);metadata_hash=ieor(ishftc(metadata_hash,7),bits)
+      bits=transfer(aimag(reference_character(g)),bits);metadata_hash=ieor(ishftc(metadata_hash,7),bits)
+      bits=transfer(real(target_character(g),real64),bits);metadata_hash=ieor(ishftc(metadata_hash,7),bits)
+      bits=transfer(aimag(target_character(g)),bits);metadata_hash=ieor(ishftc(metadata_hash,7),bits)
+      do h=1,ng;metadata_hash=ieor(ishftc(metadata_hash,7),int(element_words(g,h),int64));enddo
+      do h=1,nt;metadata_hash=ieor(ishftc(metadata_hash,7),int(product_table(h,g),int64));enddo
+    enddo
+    allocate(generator_map(global_row_count),element_map(global_row_count),right_map(global_row_count),&
+      product_map(global_row_count),stat=allocation_status)
+    call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='translation map streaming allocation failed';return;endif
+    do g=1,ng
+      call gather_generator_map(g,generator_map);if(global_bad/=0)return
+      do x=1,global_row_count;metadata_hash=ieor(ishftc(metadata_hash,7),int(generator_map(x),int64));enddo
+    enddo
+    call MPI_Allreduce(metadata_hash,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(metadata_hash,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)then;message='translation phase metadata disagree';return;endif
+    local_bad=merge(1,0,int(global_row_count,int64)>huge(0_int64)/64_int64.or.&
+        int(nlocal,int64)>huge(0_int64)/16_int64.or.int(nt,int64)>huge(0_int64)/16_int64)
+    if(local_bad==0)then
+      elements=64_int64*int(global_row_count,int64)
+      if(elements>huge(0_int64)-16_int64*int(nlocal,int64)-16_int64*int(nt,int64))local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='translation phase workspace receipt overflows';return
+    endif
+    workspace_peak_bytes=elements+16_int64*int(nlocal,int64)+16_int64*int(nt,int64)
+    allocate(global_phase(global_row_count),ratio(nt),assigned(global_row_count),local_phase(nlocal),&
+      permutation_count(global_row_count),ownership_count(global_row_count),&
+      stat=allocation_status)
+    call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(local_phase))deallocate(local_phase)
+      message='translation intertwining-phase allocation failed';return
+    endif
+    ownership_count=0;do x=1,nlocal;ownership_count(int(row_ids(x)))=ownership_count(int(row_ids(x)))+1;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,ownership_count,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(ownership_count/=1))then;message='translation phase rows are not uniquely owned';return;endif
+    local_bad=merge(1,0,any(product_table<1).or.any(product_table>nt))
+    if(local_bad==0)then
+      do g=1,nt
+        permutation_count=0
+        call build_element_map(g,element_map);call build_element_map(identity_operation,product_map)
+        do x=1,global_row_count
+          target=element_map(x);permutation_count(target)=permutation_count(target)+1
+          if(product_map(x)/=x)local_bad=1
+        enddo
+        if(any(permutation_count/=1))local_bad=1
+      enddo
+      do g=1,nt;do h=1,nt
+        call build_element_map(g,element_map);call build_element_map(h,right_map)
+        call build_element_map(product_table(h,g),product_map)
+        do x=1,global_row_count
+          if(element_map(right_map(x))/=product_map(x))local_bad=1
+        enddo
+      enddo;enddo
+      do g=1,ng
+        call gather_generator_map(g,generator_map)
+        do x=1,global_row_count
+          target=x
+          do h=1,generator_orders(g);target=generator_map(target);enddo
+          if(target/=x)local_bad=1
+        enddo
+      enddo
+      do g=1,nt
+        call build_element_map(g,element_map)
+        call build_element_map(identity_operation,product_map)
+        if(g/=identity_operation.and.any(element_map==product_map))local_bad=1
+      enddo
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='translation maps do not realize the supplied finite-group action';return
+    endif
+    ratio=target_character*conjg(reference_character);global_phase=(0d0,0d0);assigned=.false.
+    do x=1,global_row_count;permutation_count(x)=x;enddo
+    do g=1,nt
+      call build_element_map(g,element_map)
+      permutation_count=min(permutation_count,element_map)
+    enddo
+    do x=1,global_row_count
+      if(permutation_count(x)/=x)cycle
+      do g=1,nt
+        call build_element_map(g,element_map);target=element_map(x)
+        if(assigned(target))then
+          if(abs(global_phase(target)-ratio(g))>10d0*tolerance)local_bad=1
+        else
+          global_phase(target)=ratio(g);assigned(target)=.true.
+        endif
+      enddo
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='translation phase orbit is inconsistent with character ratio';return
+    endif
+    local_bad=0
+    do x=1,global_row_count;do g=1,nt
+      call build_element_map(g,element_map);target=element_map(x)
+      if(abs(global_phase(target)-ratio(g)*global_phase(x))>10d0*tolerance)local_bad=1
+    enddo;enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='translation phase fails the complete character covariance action';return
+    endif
+    do x=1,nlocal;local_phase(x)=global_phase(int(row_ids(x)));enddo
+    fingerprint=metadata_hash;phase_payload_fingerprint=int(z'243F6A8885A308D3',int64)
+    do x=1,global_row_count
+      bits=transfer(real(global_phase(x),real64),bits);fingerprint=ieor(ishftc(fingerprint,11),bits)
+      phase_payload_fingerprint=ieor(ishftc(phase_payload_fingerprint,11),bits)
+      bits=transfer(aimag(global_phase(x)),bits);fingerprint=ieor(ishftc(fingerprint,11),bits)
+      phase_payload_fingerprint=ieor(ishftc(phase_payload_fingerprint,11),bits)
+    enddo
+    if(fingerprint==0_int64)fingerprint=1_int64
+    if(phase_payload_fingerprint==0_int64)phase_payload_fingerprint=1_int64
+    ok=.true.
+#else
+    ok=.false.;message='translation intertwining phase requires MPI';fingerprint=0_int64
+    phase_payload_fingerprint=0_int64;workspace_peak_bytes=0_int64
+#endif
+  contains
+#ifdef USE_MPI
+    subroutine agree_integer(value)
+      integer,intent(in)::value
+      call MPI_Allreduce(value,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)then;global_bad=1;return;endif
+      call MPI_Allreduce(value,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      global_bad=merge(1,0,ierr/=MPI_SUCCESS.or.minint/=maxint)
+      if(global_bad/=0)message='translation phase integer metadata disagree'
+    end subroutine
+    subroutine agree_int64(value)
+      integer(int64),intent(in)::value
+      call MPI_Allreduce(value,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)then;global_bad=1;return;endif
+      call MPI_Allreduce(value,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+      global_bad=merge(1,0,ierr/=MPI_SUCCESS.or.minhash/=maxhash)
+      if(global_bad/=0)message='translation phase map metadata disagree'
+    end subroutine
+    subroutine agree_complex(value)
+      complex(real64),intent(in)::value
+      bits=transfer(real(value,real64),bits);call agree_int64(bits);if(global_bad/=0)return
+      bits=transfer(aimag(value),bits);call agree_int64(bits)
+    end subroutine
+    subroutine gather_generator_map(generator,map)
+      integer,intent(in)::generator
+      integer,intent(out)::map(:)
+      integer::index
+      map=0
+      do index=1,nlocal;map(int(row_ids(index)))=int(generator_maps(index,generator));enddo
+      call MPI_Allreduce(MPI_IN_PLACE,map,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+      global_bad=merge(1,0,ierr/=MPI_SUCCESS.or.any(map<1).or.any(map>global_row_count))
+      if(global_bad/=0)message='translation generator map stream is invalid'
+    end subroutine
+    subroutine build_element_map(element,map)
+      integer,intent(in)::element
+      integer,intent(out)::map(:)
+      integer::generator,power,index
+      do index=1,global_row_count;map(index)=index;enddo
+      do generator=1,ng
+        call gather_generator_map(generator,generator_map);if(global_bad/=0)return
+        do power=1,element_words(element,generator);map=generator_map(map);enddo
+      enddo
+    end subroutine
+#endif
+  end subroutine build_dg_translation_character_intertwining_phase
+
+  subroutine validate_dg_factored_point_cogroup_gauge(comm,local_basis,weights,point_maps,translation_maps,&
+      point_product,point_identity,translation_cocycle,ntranslation,subspace_defect,tolerance,identity_defect,&
+      unitarity_defect,closure_defect,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,point_product(:,:),point_identity,translation_cocycle(:,:),ntranslation
+    complex(real64),intent(in)::local_basis(:,:)
+    real(real64),intent(in)::weights(:),subspace_defect,tolerance
+    integer(int64),intent(in)::point_maps(:,:),translation_maps(:,:)
+    real(real64),intent(out)::identity_defect,unitarity_defect,closure_defect
+    integer(int64),intent(out)::workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::npoint,nstate,nlocal,left,right,product,cocycle,rank,nproc,owner,base,remainder,first,count,&
+      local_bad,global_bad,ierr,status,minvalue,maxvalue,operation,index
+    integer(int64),allocatable::global_left(:),global_right(:),global_product(:),global_translation(:),expected_map(:,:)
+    integer(int64),allocatable::row_ids(:),right_row_ids(:),expected_row_ids(:)
+    complex(real64),allocatable::left_rows(:,:,:),right_rows(:,:,:),expected_rows(:,:,:),product_rows(:,:),remote_rows(:,:)
+    real(real64)::local_closure,global_closure
+    integer(int64)::operation_workspace,left_workspace,right_workspace,expected_workspace,global_extent,&
+      product_elements,persistent_bytes,term_bytes,live_bytes,maximum_remote_bytes,global_workspace_peak
+    npoint=size(point_maps,2)
+    nstate=size(local_basis,1);nlocal=size(local_basis,2)
+    ok=.false.;message='';identity_defect=huge(1d0);unitarity_defect=huge(1d0)
+    closure_defect=huge(1d0);workspace_peak_bytes=0_int64
+    local_bad=merge(0,1,npoint>=1.and.npoint<=48.and.nstate>=1.and.nlocal>=1.and.&
+      point_identity>=1.and.point_identity<=npoint.and.&
+      ntranslation>=1.and.all(shape(translation_cocycle)==[npoint,npoint]).and.&
+      all(shape(point_product)==[npoint,npoint]).and.all(point_product>=1).and.all(point_product<=npoint).and.&
+      size(point_maps,1)==nlocal.and.all(shape(translation_maps)==[nlocal,ntranslation]).and.&
+      size(weights)==nlocal.and.all(translation_cocycle>=1).and.all(translation_cocycle<=ntranslation))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      ok=.false.;message='invalid factored point-cogroup/cocycle contract'
+      return
+    endif
+    call agree_integer(npoint);if(global_bad/=0)return
+    call agree_integer(ntranslation);if(global_bad/=0)return
+    call agree_integer(nstate);if(global_bad/=0)return
+    call agree_integer(nlocal);if(global_bad/=0)return
+    call agree_integer(point_identity);if(global_bad/=0)return
+    do right=1,npoint;do left=1,npoint
+      call agree_integer(point_product(left,right));if(global_bad/=0)return
+      call agree_integer(translation_cocycle(left,right));if(global_bad/=0)return
+    enddo;enddo
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)then;message='factored proof rank query failed';return;endif
+    call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)then;message='factored proof size query failed';return;endif
+    local_bad=0
+    if(int(nlocal,int64)>huge(0_int64)/int(nproc,int64))local_bad=1
+    if(local_bad==0)then
+      global_extent=int(nlocal,int64)*int(nproc,int64)
+      if(global_extent>int(huge(0),int64))local_bad=1
+    endif
+    if(int(max(1,nstate/nproc+1),int64)>huge(0_int64)/int(nstate,int64))local_bad=1
+    if(local_bad==0)then
+      product_elements=int(max(1,nstate/nproc+1),int64)*int(nstate,int64)
+      if(product_elements>int(huge(0),int64))local_bad=1
+      if(global_extent>huge(0_int64)/40_int64)then
+        local_bad=1
+      else
+        persistent_bytes=40_int64*global_extent
+        if(product_elements>huge(0_int64)/16_int64)then
+          local_bad=1
+        else
+          term_bytes=16_int64*product_elements
+          if(persistent_bytes>huge(0_int64)-term_bytes)local_bad=1
+        endif
+      endif
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='factored cocycle proof extent overflows';return;endif
+    allocate(global_left(int(global_extent)),global_right(int(global_extent)),global_product(int(global_extent)),&
+      global_translation(int(global_extent)),expected_map(nlocal,1),&
+      product_rows(max(1,nstate/nproc+1),nstate),stat=status)
+    local_bad=merge(0,1,status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      call cleanup_factored_workspace();message='factored cocycle proof allocation failed';return
+    endif
+    ! Every spatial action column must be a permutation before any value is used as an index.
+    do operation=1,npoint
+      call MPI_Allgather(point_maps(:,operation),nlocal,MPI_INTEGER8,global_left,nlocal,MPI_INTEGER8,comm,ierr)
+      local_bad=merge(0,1,ierr==MPI_SUCCESS)
+      if(local_bad==0)local_bad=merge(0,1,all(global_left>=1_int64).and.all(global_left<=global_extent))
+      if(local_bad==0)then
+        global_right=0_int64
+        do index=1,int(global_extent);global_right(int(global_left(index)))=global_right(int(global_left(index)))+1_int64;enddo
+        local_bad=merge(0,1,all(global_right==1_int64))
+      endif
+      call MPI_Allreduce(MPI_IN_PLACE,local_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.local_bad/=0)then
+        call cleanup_factored_workspace();message='point representative map is not a global permutation';return
+      endif
+    enddo
+    do operation=1,ntranslation
+      call MPI_Allgather(translation_maps(:,operation),nlocal,MPI_INTEGER8,global_left,nlocal,MPI_INTEGER8,comm,ierr)
+      local_bad=merge(0,1,ierr==MPI_SUCCESS)
+      if(local_bad==0)local_bad=merge(0,1,all(global_left>=1_int64).and.all(global_left<=global_extent))
+      if(local_bad==0)then
+        global_right=0_int64
+        do index=1,int(global_extent);global_right(int(global_left(index)))=global_right(int(global_left(index)))+1_int64;enddo
+        local_bad=merge(0,1,all(global_right==1_int64))
+      endif
+      call MPI_Allreduce(MPI_IN_PLACE,local_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.local_bad/=0)then
+        call cleanup_factored_workspace();message='translation cocycle map is not a global permutation';return
+      endif
+    enddo
+    call validate_dg_streamed_affine_representation(comm,local_basis,weights,point_maps,&
+      point_identity,subspace_defect,tolerance,identity_defect,unitarity_defect,closure_defect,&
+      workspace_peak_bytes,ok,message)
+    if(.not.ok)then;call cleanup_factored_workspace();return;endif
+    persistent_bytes=persistent_bytes+term_bytes
+    workspace_peak_bytes=max(workspace_peak_bytes,persistent_bytes)
+    base=nstate/nproc;remainder=mod(nstate,nproc);local_closure=0d0
+    maximum_remote_bytes=0_int64
+    do owner=0,nproc-1
+      count=base+merge(1,0,owner<remainder)
+      if(int(count,int64)>huge(0_int64)/int(nstate,int64))then
+        local_bad=1
+      else
+        term_bytes=int(count,int64)*int(nstate,int64)
+        if(term_bytes>huge(0_int64)/16_int64)then
+          local_bad=1
+        else
+          maximum_remote_bytes=max(maximum_remote_bytes,16_int64*term_bytes)
+        endif
+      endif
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='factored remote tile preallocation receipt overflows';call cleanup_factored_workspace();return
+    endif
+    do left=1,npoint;do right=1,npoint
+      product=point_product(right,left);cocycle=translation_cocycle(right,left)
+      call MPI_Allgather(point_maps(:,left),nlocal,MPI_INTEGER8,global_left,nlocal,MPI_INTEGER8,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='factored left map gather failed';call cleanup_factored_workspace();return;endif
+      call MPI_Allgather(point_maps(:,right),nlocal,MPI_INTEGER8,global_right,nlocal,MPI_INTEGER8,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='factored right map gather failed';call cleanup_factored_workspace();return;endif
+      call MPI_Allgather(point_maps(:,product),nlocal,MPI_INTEGER8,global_product,nlocal,MPI_INTEGER8,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='factored product map gather failed';call cleanup_factored_workspace();return;endif
+      call MPI_Allgather(translation_maps(:,cocycle),nlocal,MPI_INTEGER8,global_translation,nlocal,MPI_INTEGER8,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='factored translation map gather failed';call cleanup_factored_workspace();return;endif
+      local_bad=0
+      do owner=1,nlocal
+        expected_map(owner,1)=global_product(int(global_translation(rank*nlocal+owner)))
+        if(global_left(int(global_right(rank*nlocal+owner)))/=expected_map(owner,1))local_bad=1
+      enddo
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+        ok=.false.;message='point representatives do not realize the supplied translation cocycle';&
+        call cleanup_factored_workspace();return
+      endif
+      call assemble_dg_distributed_basis_symmetry_overlap_rows(comm,local_basis,weights,&
+        point_maps(:,left:left),row_ids,left_rows,left_workspace,ok,message)
+      if(.not.ok)then;call cleanup_factored_workspace();return;endif
+      call assemble_dg_distributed_basis_symmetry_overlap_rows(comm,local_basis,weights,&
+        point_maps(:,right:right),right_row_ids,right_rows,right_workspace,ok,message)
+      if(.not.ok)then;call cleanup_factored_workspace();return;endif
+      if(any(row_ids/=right_row_ids))then
+        ok=.false.;message='factored representation row ownership changed';call cleanup_factored_workspace();return
+      endif
+      product_rows=(0d0,0d0)
+      live_bytes=persistent_bytes;local_bad=0
+      if(left_workspace>huge(0_int64)-live_bytes)then
+        local_bad=1
+      else
+        live_bytes=live_bytes+left_workspace
+      endif
+      if(local_bad==0)then
+        if(right_workspace>huge(0_int64)-live_bytes)then;local_bad=1;else;live_bytes=live_bytes+right_workspace;endif
+      endif
+      if(local_bad==0)then
+        if(maximum_remote_bytes>huge(0_int64)-live_bytes)then
+          local_bad=1
+        else
+          live_bytes=live_bytes+maximum_remote_bytes
+        endif
+      endif
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+        ok=.false.;message='factored cocycle live workspace preallocation receipt overflows';&
+        call cleanup_factored_workspace();return
+      endif
+      workspace_peak_bytes=max(workspace_peak_bytes,live_bytes)
+      do owner=0,nproc-1
+        count=base+merge(1,0,owner<remainder);first=owner*base+min(owner,remainder)+1
+        allocate(remote_rows(count,nstate),stat=status)
+        call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+        if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+          ok=.false.;message='cocycle product tile allocation failed';call cleanup_factored_workspace();return
+        endif
+        if(rank==owner)remote_rows=right_rows(:,:,1)
+        call MPI_Bcast(remote_rows,count*nstate,MPI_DOUBLE_COMPLEX,owner,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then;call cleanup_factored_workspace();message='cocycle product tile broadcast failed';return;endif
+        product_rows(1:size(row_ids),:)=product_rows(1:size(row_ids),:)+&
+          matmul(left_rows(:,first:first+count-1,1),remote_rows)
+        deallocate(remote_rows)
+      enddo
+      deallocate(right_row_ids,right_rows)
+      call assemble_dg_distributed_basis_symmetry_overlap_rows(comm,local_basis,weights,&
+        expected_map,expected_row_ids,expected_rows,expected_workspace,ok,message)
+      if(.not.ok)then;call cleanup_factored_workspace();return;endif
+      if(any(row_ids/=expected_row_ids))then
+        ok=.false.;message='factored expected row ownership changed';call cleanup_factored_workspace();return
+      endif
+      local_closure=max(local_closure,maxval(abs(product_rows(1:size(row_ids),:)-expected_rows(:,:,1))))
+      live_bytes=persistent_bytes;local_bad=0
+      if(left_workspace>huge(0_int64)-live_bytes)then
+        local_bad=1
+      else
+        live_bytes=live_bytes+left_workspace
+      endif
+      if(local_bad==0.and.expected_workspace>huge(0_int64)-live_bytes)then
+        local_bad=1
+      endif
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+        ok=.false.;message='factored expected-action workspace receipt overflows';call cleanup_factored_workspace();return
+      endif
+      workspace_peak_bytes=max(workspace_peak_bytes,live_bytes+expected_workspace)
+      deallocate(row_ids,left_rows,expected_row_ids,expected_rows)
+    enddo;enddo
+    call MPI_Allreduce(local_closure,global_closure,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(workspace_peak_bytes,global_workspace_peak,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr==MPI_SUCCESS)workspace_peak_bytes=global_workspace_peak
+    closure_defect=max(closure_defect,global_closure)
+    ok=ierr==MPI_SUCCESS.and.closure_defect<=tolerance
+    if(ok)then;message='';else;message='factored point-cogroup internal action violates cocycle closure';endif
+    call cleanup_factored_workspace()
+  contains
+    subroutine agree_integer(value)
+      integer,intent(in)::value
+      call MPI_Allreduce(value,minvalue,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;global_bad=1;message='factored point-cogroup metadata reduction failed';return;endif
+      call MPI_Allreduce(value,maxvalue,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      global_bad=merge(1,0,ierr/=MPI_SUCCESS.or.minvalue/=maxvalue)
+      if(global_bad/=0)message='factored point-cogroup metadata disagree across ranks'
+    end subroutine
+    subroutine cleanup_factored_workspace()
+      if(allocated(global_left))deallocate(global_left)
+      if(allocated(global_right))deallocate(global_right)
+      if(allocated(global_product))deallocate(global_product)
+      if(allocated(global_translation))deallocate(global_translation)
+      if(allocated(expected_map))deallocate(expected_map)
+      if(allocated(product_rows))deallocate(product_rows)
+      if(allocated(remote_rows))deallocate(remote_rows)
+      if(allocated(row_ids))deallocate(row_ids)
+      if(allocated(right_row_ids))deallocate(right_row_ids)
+      if(allocated(expected_row_ids))deallocate(expected_row_ids)
+      if(allocated(left_rows))deallocate(left_rows)
+      if(allocated(right_rows))deallocate(right_rows)
+      if(allocated(expected_rows))deallocate(expected_rows)
+    end subroutine
+#else
+    ok=.false.;message='factored point-cogroup validation requires MPI'
+    identity_defect=huge(1d0);unitarity_defect=huge(1d0);closure_defect=huge(1d0);workspace_peak_bytes=0_int64
+#endif
+  end subroutine validate_dg_factored_point_cogroup_gauge
+
+  subroutine accumulate_dg_translation_character_orbit_sector(comm,state,character_index,characters,&
+      catalog_fingerprint,sector_values,sector_gradients,initialize,finalize,tolerance,&
+      orbit_values,orbit_gradients,workspace_bytes,ok,message)
+    integer,intent(in)::comm,character_index
+    type(s_dg_translation_orbit_accumulator),intent(inout)::state
+    complex(real64),intent(in)::characters(:,:),sector_values(:,:),sector_gradients(:,:,:)
+    integer(int64),intent(in)::catalog_fingerprint
+    logical,intent(in)::initialize,finalize
+    real(real64),intent(in)::tolerance
+    complex(real64),allocatable,intent(inout)::orbit_values(:,:,:),orbit_gradients(:,:,:,:)
+    integer(int64),intent(out)::workspace_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::ntranslation,nlocal,ninternal,t,c,ierr,local_bad,global_bad,allocation_status
+    integer::minimum_integer,maximum_integer,initialize_integer,finalize_integer
+    integer(int64)::minimum_fingerprint,maximum_fingerprint,elements,gradient_elements,&
+      table_fingerprint,raw_bits,state_signature,minimum_state_signature,maximum_state_signature
+    real(real64)::normalization,safe_magnitude
+    workspace_bytes=0_int64
+    ntranslation=size(characters,1);nlocal=size(sector_values,1);ninternal=size(sector_values,2)
+    local_bad=merge(0,1,ntranslation>=1.and.ninternal>=1.and.size(characters,2)==ntranslation.and.&
+      character_index>=1.and.character_index<=ntranslation.and.&
+      catalog_fingerprint/=0_int64.and.tolerance>0d0.and.ieee_is_finite(tolerance).and.&
+      all(ieee_is_finite(real(characters))).and.all(ieee_is_finite(aimag(characters))).and.&
+      maxval(abs(abs(characters)-1d0))<=10d0*tolerance.and.&
+      all(shape(sector_gradients)==[3,nlocal,ninternal]).and.&
+      all(ieee_is_finite(real(sector_values))).and.all(ieee_is_finite(aimag(sector_values))).and.&
+      all(ieee_is_finite(real(sector_gradients))).and.all(ieee_is_finite(aimag(sector_gradients))))
+    if(.not.initialize)then
+      if(.not.allocated(orbit_values).or..not.allocated(orbit_gradients))then
+        local_bad=1
+      elseif(any(shape(orbit_values)/=[nlocal,ninternal,ntranslation]).or.&
+          any(shape(orbit_gradients)/=[3,nlocal,ninternal,ntranslation]))then
+        local_bad=1
+      endif
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      ok=.false.;message='invalid streamed inverse-character accumulation contract';return
+    endif
+    safe_magnitude=sqrt(huge(1d0))/max(4d0,4d0*real(ntranslation,real64))
+    local_bad=merge(0,1,maxval(abs(sector_values))<=safe_magnitude.and.&
+      maxval(abs(sector_gradients))<=safe_magnitude)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      ok=.false.;message='streamed inverse sector magnitude is unsafe';return
+    endif
+    call agree_integer(character_index);if(global_bad/=0)return
+    call agree_integer(ntranslation);if(global_bad/=0)return
+    call agree_integer(ninternal);if(global_bad/=0)return
+    initialize_integer=merge(1,0,initialize);call agree_integer(initialize_integer);if(global_bad/=0)return
+    finalize_integer=merge(1,0,finalize);call agree_integer(finalize_integer);if(global_bad/=0)return
+    call MPI_Allreduce(catalog_fingerprint,minimum_fingerprint,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='streamed inverse catalog reduction failed';return;endif
+    call MPI_Allreduce(catalog_fingerprint,maximum_fingerprint,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_fingerprint/=maximum_fingerprint)then
+      ok=.false.;message='streamed inverse catalogs disagree across ranks';return
+    endif
+    table_fingerprint=catalog_fingerprint
+    do c=1,ntranslation;do t=1,ntranslation
+      raw_bits=transfer(real(characters(c,t),real64),raw_bits)
+      table_fingerprint=ieor(ishftc(table_fingerprint,11),raw_bits)
+      raw_bits=transfer(aimag(characters(c,t)),raw_bits)
+      table_fingerprint=ieor(ishftc(table_fingerprint,11),raw_bits)
+    enddo;enddo
+    call MPI_Allreduce(table_fingerprint,minimum_fingerprint,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='streamed inverse table reduction failed';return;endif
+    call MPI_Allreduce(table_fingerprint,maximum_fingerprint,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_fingerprint/=maximum_fingerprint)then
+      ok=.false.;message='streamed inverse character tables disagree across ranks';return
+    endif
+    state_signature=merge(1_int64,0_int64,state%initialized)
+    state_signature=ieor(ishftc(state_signature,7),state%catalog_fingerprint)
+    state_signature=ieor(ishftc(state_signature,7),state%table_fingerprint)
+    if(allocated(state%visited))then
+      state_signature=ieor(ishftc(state_signature,7),int(size(state%visited),int64))
+      do t=1,size(state%visited)
+        state_signature=ieor(ishftc(state_signature,7),merge(int(t,int64),0_int64,state%visited(t)))
+      enddo
+    endif
+    call MPI_Allreduce(state_signature,minimum_state_signature,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='streamed inverse state reduction failed';return;endif
+    call MPI_Allreduce(state_signature,maximum_state_signature,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_state_signature/=maximum_state_signature)then
+      ok=.false.;message='streamed inverse state disagrees across ranks';return
+    endif
+    local_bad=0
+    if(state%initialized.neqv.allocated(state%visited))local_bad=1
+    if(state%initialized)then
+      if(allocated(state%visited))then
+        if(size(state%visited)/=ntranslation)local_bad=1
+      endif
+      if(state%catalog_fingerprint==0_int64.or.state%table_fingerprint==0_int64)local_bad=1
+    elseif(state%catalog_fingerprint/=0_int64.or.state%table_fingerprint/=0_int64)then
+      local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      ok=.false.;message='streamed inverse state contract is invalid';return
+    endif
+    local_bad=0
+    if(int(nlocal,int64)>huge(0_int64)/int(ninternal,int64))then
+      local_bad=1
+      elements=0_int64
+    else
+      elements=int(nlocal,int64)*int(ninternal,int64)
+    endif
+    if(local_bad==0.and.elements>huge(0_int64)/int(ntranslation,int64))then
+      local_bad=1
+    else if(local_bad==0)then
+      elements=elements*int(ntranslation,int64)
+    endif
+    if(local_bad==0.and.elements>huge(0_int64)/3_int64)then
+      local_bad=1
+    else if(local_bad==0)then
+      gradient_elements=3_int64*elements
+    endif
+    if(local_bad==0)then
+      if(elements>huge(0_int64)-gradient_elements)then
+        local_bad=1
+      elseif(elements+gradient_elements>(huge(0_int64)-int(ntranslation,int64))/16_int64)then
+        local_bad=1
+      endif
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      ok=.false.;message='streamed inverse output extent or receipt overflows';return
+    endif
+    workspace_bytes=16_int64*(elements+gradient_elements)+int(ntranslation,int64)
+    if(initialize)then
+      local_bad=merge(1,0,state%initialized.or.allocated(state%visited))
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+        ok=.false.;message='streamed inverse cannot reinitialize an active sequence';return
+      endif
+      if(allocated(orbit_values))deallocate(orbit_values)
+      if(allocated(orbit_gradients))deallocate(orbit_gradients)
+      allocate(orbit_values(nlocal,ninternal,ntranslation),&
+        orbit_gradients(3,nlocal,ninternal,ntranslation),stat=allocation_status)
+      call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+        if(allocated(orbit_values))deallocate(orbit_values)
+        if(allocated(orbit_gradients))deallocate(orbit_gradients)
+        ok=.false.;message='streamed inverse-character output allocation failed';return
+      endif
+      orbit_values=(0d0,0d0);orbit_gradients=(0d0,0d0)
+      allocate(state%visited(ntranslation),stat=allocation_status)
+      call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+        if(allocated(state%visited))deallocate(state%visited)
+        if(allocated(orbit_values))deallocate(orbit_values)
+        if(allocated(orbit_gradients))deallocate(orbit_gradients)
+        ok=.false.;message='streamed inverse state allocation failed';return
+      endif
+      state%visited=.false.;state%initialized=.true.;state%catalog_fingerprint=catalog_fingerprint
+      state%table_fingerprint=table_fingerprint
+    elseif(.not.state%initialized.or.state%catalog_fingerprint/=catalog_fingerprint.or.&
+        state%table_fingerprint/=table_fingerprint)then
+      ok=.false.;message='streamed inverse sequence is not initialized or catalog-bound';return
+    endif
+    local_bad=merge(1,0,state%visited(character_index))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      ok=.false.;message='streamed inverse character sector is duplicated';return
+    endif
+    normalization=1d0/sqrt(real(ntranslation,real64))
+    do t=1,ntranslation
+      orbit_values(:,:,t)=orbit_values(:,:,t)+normalization*&
+        conjg(characters(character_index,t))*sector_values
+      orbit_gradients(:,:,:,t)=orbit_gradients(:,:,:,t)+normalization*&
+        conjg(characters(character_index,t))*sector_gradients
+    enddo
+    state%visited(character_index)=.true.
+    if(finalize)then
+      local_bad=merge(1,0,.not.all(state%visited))
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+        ok=.false.;message='streamed inverse character sequence is incomplete';return
+      endif
+      state%initialized=.false.;state%catalog_fingerprint=0_int64;state%table_fingerprint=0_int64
+      deallocate(state%visited)
+    endif
+    ok=.true.;message=''
+#else
+    ok=.false.;message='streamed inverse-character accumulation requires MPI'
+#endif
+  contains
+#ifdef USE_MPI
+    subroutine agree_integer(value)
+      integer,intent(in)::value
+      call MPI_Allreduce(value,minimum_integer,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;global_bad=1;ok=.false.;message='streamed inverse metadata reduction failed';return;endif
+      call MPI_Allreduce(value,maximum_integer,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      global_bad=merge(1,0,ierr/=MPI_SUCCESS.or.minimum_integer/=maximum_integer)
+      if(global_bad/=0)then;ok=.false.;message='streamed inverse metadata disagree across ranks';endif
+    end subroutine agree_integer
+#endif
+  end subroutine accumulate_dg_translation_character_orbit_sector
+
+  subroutine accumulate_dg_translation_character_orbit_sector_values(comm,state,character_index,characters,&
+      catalog_fingerprint,sector_values,initialize,finalize,tolerance,orbit_values,workspace_bytes,ok,message)
+    integer,intent(in)::comm,character_index
+    type(s_dg_translation_orbit_accumulator),intent(inout)::state
+    complex(real64),intent(in)::characters(:,:),sector_values(:,:)
+    integer(int64),intent(in)::catalog_fingerprint
+    logical,intent(in)::initialize,finalize
+    real(real64),intent(in)::tolerance
+    complex(real64),allocatable,intent(inout)::orbit_values(:,:)
+    integer(int64),intent(out)::workspace_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nt,nlocal,m,t,c,ierr,local_bad,global_bad,allocation_status,flag,minflag,maxflag,minnt,maxnt,minm,maxm
+    integer(int64)::elements,raw_bits,table_hash,minhash,maxhash,state_hash,minstate,maxstate
+    real(real64)::normalization,safe_magnitude
+    nt=size(characters,1);nlocal=size(sector_values,1);m=size(sector_values,2)
+    ok=.false.;message='';workspace_bytes=0_int64
+    local_bad=merge(0,1,nt>=1.and.m>=1.and.size(characters,2)==nt.and.character_index>=1.and.&
+      character_index<=nt.and.catalog_fingerprint/=0_int64.and.tolerance>0d0.and.ieee_is_finite(tolerance).and.&
+      all(ieee_is_finite(real(characters))).and.all(ieee_is_finite(aimag(characters))).and.&
+      maxval(abs(abs(characters)-1d0))<=10d0*tolerance.and.&
+      all(ieee_is_finite(real(sector_values))).and.all(ieee_is_finite(aimag(sector_values))))
+    if(.not.initialize.and.allocated(orbit_values))then
+      if(size(orbit_values,2)/=nlocal.or.&
+          int(size(orbit_values,1),int64)/=int(m,int64)*int(nt,int64))local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid values-only streamed inverse contract';return;endif
+    call MPI_Allreduce(nt,minnt,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(nt,maxnt,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minnt/=maxnt)then;message='values-only streamed translation extent disagrees';return;endif
+    call MPI_Allreduce(m,minm,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(m,maxm,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minm/=maxm)then;message='values-only streamed internal extent disagrees';return;endif
+    safe_magnitude=sqrt(huge(1d0))/(4d0*sqrt(real(nt,real64)))
+    local_bad=merge(0,1,maxval(abs(sector_values))<=safe_magnitude)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='values-only streamed sector magnitude is unsafe';return;endif
+    flag=character_index;call MPI_Allreduce(flag,minflag,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(flag,maxflag,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minflag/=maxflag)then;message='values-only streamed index disagrees';return;endif
+    flag=merge(1,0,initialize);call MPI_Allreduce(flag,minflag,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(flag,maxflag,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minflag/=maxflag)then;message='values-only streamed initialize disagrees';return;endif
+    flag=merge(1,0,finalize);call MPI_Allreduce(flag,minflag,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(flag,maxflag,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minflag/=maxflag)then;message='values-only streamed finalize disagrees';return;endif
+    table_hash=catalog_fingerprint
+    do c=1,nt;do t=1,nt
+      raw_bits=transfer(real(characters(c,t),real64),raw_bits);table_hash=ieor(ishftc(table_hash,11),raw_bits)
+      raw_bits=transfer(aimag(characters(c,t)),raw_bits);table_hash=ieor(ishftc(table_hash,11),raw_bits)
+    enddo;enddo
+    call MPI_Allreduce(table_hash,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(table_hash,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)then;message='values-only streamed catalog disagrees';return;endif
+    state_hash=merge(1_int64,0_int64,state%initialized)
+    state_hash=ieor(ishftc(state_hash,7),state%catalog_fingerprint)
+    state_hash=ieor(ishftc(state_hash,7),state%table_fingerprint)
+    if(allocated(state%visited))then
+      state_hash=ieor(ishftc(state_hash,7),int(size(state%visited),int64))
+      do t=1,size(state%visited);state_hash=ieor(ishftc(state_hash,7),merge(int(t,int64),0_int64,state%visited(t)));enddo
+    endif
+    call MPI_Allreduce(state_hash,minstate,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(state_hash,maxstate,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minstate/=maxstate)then;message='values-only streamed state disagrees';return;endif
+    local_bad=0
+    if(state%initialized.neqv.allocated(state%visited))local_bad=1
+    if(state%initialized.and.allocated(state%visited))then;if(size(state%visited)/=nt)local_bad=1;endif
+    if(int(m,int64)*int(nt,int64)>int(huge(0),int64))local_bad=1
+    if(int(nlocal,int64)>huge(0_int64)/int(m,int64))local_bad=1
+    if(local_bad==0)then;elements=int(nlocal,int64)*int(m,int64);else;elements=0_int64;endif
+    if(local_bad==0.and.elements>huge(0_int64)/int(nt,int64))local_bad=1
+    if(local_bad==0)elements=elements*int(nt,int64)
+    if(local_bad==0.and.elements>(huge(0_int64)-int(nt,int64))/16_int64)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='values-only streamed extent/state invalid';return;endif
+    workspace_bytes=16_int64*elements+int(nt,int64)
+    if(initialize)then
+      local_bad=merge(1,0,state%initialized.or.allocated(state%visited))
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='values-only streamed reinitialize rejected';return;endif
+      if(allocated(orbit_values))deallocate(orbit_values)
+      allocate(orbit_values(m*nt,nlocal),state%visited(nt),stat=allocation_status)
+      call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+        if(allocated(orbit_values))deallocate(orbit_values);if(allocated(state%visited))deallocate(state%visited)
+        message='values-only streamed allocation failed';return
+      endif
+      orbit_values=(0d0,0d0);state%visited=.false.;state%initialized=.true.
+      state%catalog_fingerprint=catalog_fingerprint;state%table_fingerprint=table_hash
+    elseif(.not.state%initialized.or.state%catalog_fingerprint/=catalog_fingerprint.or.&
+        state%table_fingerprint/=table_hash)then
+      message='values-only streamed sequence is not catalog-bound';return
+    endif
+    local_bad=merge(1,0,state%visited(character_index))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='values-only streamed duplicate sector';return;endif
+    normalization=1d0/sqrt(real(nt,real64))
+    do t=1,nt
+      orbit_values((t-1)*m+1:t*m,:)=orbit_values((t-1)*m+1:t*m,:)+&
+        normalization*conjg(characters(character_index,t))*transpose(sector_values)
+    enddo
+    local_bad=merge(0,1,all(ieee_is_finite(real(orbit_values))).and.all(ieee_is_finite(aimag(orbit_values))))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='values-only streamed inverse accumulation became nonfinite';return
+    endif
+    state%visited(character_index)=.true.
+    if(finalize)then
+      local_bad=merge(1,0,.not.all(state%visited));call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='values-only streamed sequence incomplete';return;endif
+      state%initialized=.false.;state%catalog_fingerprint=0_int64;state%table_fingerprint=0_int64
+      deallocate(state%visited)
+    endif
+    ok=.true.
+#else
+    ok=.false.;message='values-only streamed inverse requires MPI';workspace_bytes=0_int64
+#endif
+  end subroutine accumulate_dg_translation_character_orbit_sector_values
+
+  subroutine apply_dg_row_owned_orbital_transform_streamed(comm,row_ids,global_row_count,transform_rows,&
+      input_values,input_gradients,output_values,output_gradients,workspace_bytes,ok,message)
+    integer,intent(in)::comm,global_row_count
+    integer(int64),intent(in)::row_ids(:)
+    complex(real64),intent(in)::transform_rows(:,:),input_values(:,:),input_gradients(:,:,:)
+    complex(real64),allocatable,intent(out)::output_values(:,:),output_gradients(:,:,:)
+    integer(int64),intent(out)::workspace_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nlocal,nout,npoint,i,j,p,rank,ierr,local_bad,global_bad,allocation_status
+    integer,allocatable::owner(:),position(:),count(:)
+    complex(real64),allocatable::stream_row(:)
+    integer(int64)::elements
+    nlocal=size(row_ids);nout=size(transform_rows,2);npoint=size(input_values,2)
+    ok=.false.;message='';workspace_bytes=0_int64
+    local_bad=merge(0,1,global_row_count>=1.and.nout>=1.and.npoint>=0.and.&
+      all(shape(transform_rows)==[nlocal,nout]).and.size(input_values,1)==global_row_count.and.&
+      all(shape(input_gradients)==[3,global_row_count,npoint]).and.&
+      all(row_ids>=1_int64).and.all(row_ids<=int(global_row_count,int64)).and.&
+      all(ieee_is_finite(real(transform_rows))).and.all(ieee_is_finite(aimag(transform_rows))).and.&
+      all(ieee_is_finite(real(input_values))).and.all(ieee_is_finite(aimag(input_values))).and.&
+      all(ieee_is_finite(real(input_gradients))).and.all(ieee_is_finite(aimag(input_gradients))))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid row-streamed orbital transform contract';return;endif
+    if(int(nout,int64)>huge(0_int64)/max(1_int64,int(npoint,int64)))then
+      local_bad=1;elements=0_int64
+    else
+      local_bad=0;elements=int(nout,int64)*int(npoint,int64)
+    endif
+    if(local_bad==0.and.elements>(huge(0_int64)-int(nout,int64))/64_int64)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='row-streamed orbital transform extent overflows';return;endif
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
+    allocate(owner(global_row_count),position(global_row_count),count(global_row_count),stream_row(nout),&
+      output_values(nout,npoint),output_gradients(3,nout,npoint),stat=allocation_status)
+    call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='row-streamed orbital transform allocation failed';return;endif
+    owner=0;position=0;count=0
+    do i=1,nlocal
+      owner(int(row_ids(i)))=rank+1;position(int(row_ids(i)))=i;count(int(row_ids(i)))=1
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,owner,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(MPI_IN_PLACE,position,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(MPI_IN_PLACE,count,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(count/=1))then;message='row-streamed transform rows are not uniquely owned';return;endif
+    output_values=(0d0,0d0);output_gradients=(0d0,0d0)
+    do i=1,global_row_count
+      stream_row=(0d0,0d0)
+      if(rank==owner(i)-1)stream_row=transform_rows(position(i),:)
+      call MPI_Bcast(stream_row,nout,MPI_DOUBLE_COMPLEX,owner(i)-1,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='row-streamed transform broadcast failed';return;endif
+      do p=1,npoint
+        output_values(:,p)=output_values(:,p)+stream_row*input_values(i,p)
+        do j=1,3;output_gradients(j,:,p)=output_gradients(j,:,p)+stream_row*input_gradients(j,i,p);enddo
+      enddo
+    enddo
+    workspace_bytes=64_int64*elements+16_int64*int(nout,int64)
+    ok=.true.
+#else
+    ok=.false.;message='row-streamed orbital transform requires MPI';workspace_bytes=0_int64
+#endif
+  end subroutine apply_dg_row_owned_orbital_transform_streamed
 
   subroutine validate_dg_translation_sector_cluster(eigenvalues,sector_real_dimension,tolerance,ok,message)
     ! EigenExa supplies eigenvalues in ascending order; reject unsorted external callers explicitly.

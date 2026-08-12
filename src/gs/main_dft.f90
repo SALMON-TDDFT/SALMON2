@@ -60,6 +60,12 @@ use dg_overlapping_wannier_construction, only: select_dg_fixed_rank_symmetry_clo
 use dg_overlapping_wannier_construction, only: find_dg_group_identity
 use dg_overlapping_wannier_construction, only: select_dg_group_generators
 use dg_overlapping_wannier_construction, only: build_dg_finite_abelian_character_table
+use dg_overlapping_wannier_construction, only: s_dg_translation_orbit_accumulator,&
+  build_dg_translation_character_intertwining_phase,&
+  materialize_dg_row_owned_sector_on_spatial_grid,&
+  accumulate_dg_translation_character_orbit_sector_values,&
+  apply_dg_row_owned_orbital_transform_streamed,&
+  validate_dg_factored_point_cogroup_gauge
 use dg_overlapping_wannier_construction, only: build_dg_smooth_partition_of_unity
 use dg_overlapping_wannier_construction, only: assemble_dg_distributed_basis_symmetry_overlap
 use dg_overlapping_wannier_construction, only: assemble_dg_distributed_basis_symmetry_overlap_rows,&
@@ -98,7 +104,9 @@ use dg_overlapping_wannier_symmetry, only: build_dg_fragment_permuted_representa
   symmetrize_dg_distributed_pencil_rows
 use dg_overlapping_wannier_w90,only:setup_dg_w90_gamma_library,&
   assemble_dg_w90_gamma_matrices,run_dg_w90_gamma_library,apply_dg_w90_gamma_transform,&
-  inherit_dg_w90_affine_receipts
+  inherit_dg_w90_affine_receipts,project_dg_w90_reference_sector_operators,&
+  anchor_dg_w90_reference_character_sector,align_dg_w90_character_sector_gauge,&
+  align_dg_w90_character_sectors_by_periodic_phase,sew_dg_w90_periodic_phase_conjugate_sector
 use lcfo_wannier_sawf, only: t_sawf_crystallographic_catalog,t_sawf_symop,&
   load_sawf_crystallographic_catalog_auto
 use lcfo_wannier_sawf_dmn,only:t_sawf_dmn_writer,t_sawf_operation_index,&
@@ -572,12 +580,20 @@ contains
     complex(8),allocatable::w90_anchors(:,:),w90_m_matrix(:,:,:),w90_a_matrix(:,:),w90_transform(:,:)
     complex(8),allocatable::fixed_center_rows(:,:,:),fixed_center_representation(:,:),fixed_center_identity(:,:)
     complex(8),allocatable::translation_generator_rows(:,:,:),translation_gamma_rows(:,:),&
+      translation_spatial_gamma_rows(:,:),&
       translation_sector_rows(:,:),translation_characters(:,:),translation_generator_characters(:,:),&
-      translation_gamma_local_row(:),translation_gamma_global_row(:)
-    complex(8),allocatable::lcfo_fragment_contribution(:,:),lcfo_occupied_core(:,:)
+      translation_gamma_local_row(:),translation_gamma_global_row(:),&
+      translation_lcfo_local_row(:),translation_lcfo_global_row(:)
+    complex(8),allocatable::translation_w90_rows(:,:),translation_lcfo_rows(:,:),translation_w90_operator(:,:),&
+      translation_lcfo_operator(:,:),translation_reference_rows(:,:),translation_reference_spatial(:,:),&
+      translation_target_spatial(:,:),translation_aligned_spatial(:,:),translation_conjugate_spatial(:,:),&
+      translation_phase(:),translation_orbit_rows(:,:),translation_transform_rows(:,:),&
+      transformed_box_values(:,:),transformed_box_gradients(:,:,:)
+    complex(8),allocatable::lcfo_fragment_contribution(:,:),lcfo_occupied_core(:,:),lcfo_reference_core(:,:)
     complex(8),allocatable::composed_tile_values(:,:),projector_buffer_tile(:,:)
     complex(8),allocatable::one_shot_hrows(:,:)
     real(8),allocatable::weights(:),coordinate(:),spectrum(:),occupations(:),lcfo_retained_occupations(:),&
+      lcfo_retained_eigenvalues(:),&
       gradient_rotation(:,:,:),&
       local_point_rotations(:,:,:)
     real(8),allocatable::initial_density_local(:),initial_density_global(:)
@@ -588,6 +604,7 @@ contains
     real(8),allocatable::localized_centers(:,:),localized_center_magnitudes(:,:)
     real(8),allocatable::w90_fractional(:,:),w90_spreads(:),w90_eigenvalues(:),w90_atoms_cart(:,:),&
       fixed_center_eigenvalues(:),adapted_occupied_spectrum(:)
+    real(8),allocatable::translation_w90_values(:),translation_lcfo_values(:),translation_singular_values(:)
     real(8),allocatable::translation_adapted_spectrum(:)
     real(8),allocatable::occupied_density_before(:),occupied_density_after(:),occupied_density_difference(:),&
       occupied_pre_total_residual(:),occupied_pre_boundary_residual(:),occupied_pre_interior_residual(:)
@@ -601,10 +618,11 @@ contains
     integer(8),allocatable::all_core_ids(:,:),localized_center_ids(:),orbital_owned_full_ids(:)
     integer(8),allocatable::fixed_center_symmetry_map(:,:),fixed_center_row_ids(:)
     integer(8),allocatable::translation_row_ids(:),translation_stream_row_ids(:)
+    integer(8),allocatable::translation_spatial_ids(:),translation_generator_maps(:,:)
     integer,allocatable::fragments(:),local_point_product(:,:),local_point_integer_rotations(:,:,:),&
       translation_product(:,:),global_point_product(:,:),global_point_integer_rotations(:,:,:),&
       global_translation_subgroup(:),global_point_representatives(:),global_point_cogroup_product(:,:),&
-      global_translation_cocycle(:,:)
+      global_translation_cocycle(:,:),translation_canonical_product(:,:)
     integer,allocatable::rank_fragments(:)
     integer,allocatable::projector_atom_ids(:)
     integer,allocatable::fixed_center_product(:,:)
@@ -618,6 +636,7 @@ contains
     integer,allocatable::orbital_owned_ids(:),center_local_orbital_ids(:)
     integer,allocatable::w90_nncell(:,:)
     logical,allocatable::boundary(:),core_mask(:)
+    logical,allocatable::translation_character_done(:)
     logical,allocatable::lcfo_boundary_mask(:)
     integer::ix,iy,iz,io,p,nbox,ncore,noccupied,nstate,ntarget,nsym,rank,nproc,&
       raw_ix,raw_iy,raw_iz,core_index,ierr,allocation_status,&
@@ -631,6 +650,7 @@ contains
       translation_identity_operation,translation_adapted_rank
     integer::global_point_cogroup_identity_operation
     integer::translation_character_generator_count,translation_sector_rank
+    integer::translation_character,translation_partner,translation_global_core_count,translation_processed_count
     integer::lcfo_symmetry_worst_operation,lcfo_symmetry_worst_generator_index
     real(8),allocatable::lcfo_total_symmetry_residual(:),lcfo_boundary_symmetry_residual(:),&
       lcfo_interior_symmetry_residual(:)
@@ -645,6 +665,13 @@ contains
     integer(8)::translation_adapted_workspace_peak
     integer(8)::translation_character_fingerprint,translation_sector_fingerprint,&
       translation_sector_workspace_peak
+    integer(8)::translation_phase_fingerprint,translation_phase_payload_fingerprint,&
+      translation_phase_workspace,translation_materialize_fingerprint,translation_materialize_workspace,&
+      translation_anchor_fingerprint,translation_anchor_workspace,translation_alignment_fingerprint,&
+      translation_alignment_workspace,translation_gamma_fingerprint,translation_gamma_workspace,&
+      translation_inverse_workspace,translation_transform_workspace,translation_operator_fingerprint,&
+      translation_operator_workspace
+    integer(8)::translation_lcfo_fingerprint,translation_post_gauge_fingerprint,translation_global_core_count8
     integer(8)::composition_fingerprint,composition_workspace_peak,occupied_composition_peak,&
       occupied_composition_fingerprint,projector_composition_peak,projector_composition_fingerprint
     integer(8)::w90_coordinator_bytes,w90_workspace_peak,w90_byte_limit
@@ -673,6 +700,7 @@ contains
       one_shot_local_difference,one_shot_global_difference,one_shot_local_norm,one_shot_global_norm
     logical::ok,reusable,localization_converged,global_inversion_present
     logical::fixed_center_inversion_present,writer_ok
+    logical::translation_self_conjugate
     real(8)::fixed_center_fractional(3)
     complex(8),allocatable::core_periodic_phase(:,:),localization_transform(:,:),retained_identity(:,:)
     complex(8),allocatable::synchronized_local_representation(:,:,:)
@@ -685,6 +713,10 @@ contains
     real(8)::w90_identity_defect,w90_unitarity_defect,w90_closure_defect
     real(8)::translation_identity_defect,translation_unitarity_defect,translation_commutator_defect,&
       translation_order_defect,translation_gamma_pairing_defect
+    real(8)::translation_operator_defect,translation_anchor_defect,translation_alignment_defect,&
+      translation_gamma_defect,translation_closure_defect
+    real(8)::translation_alignment_max_defect,translation_gamma_max_defect
+    type(s_dg_translation_orbit_accumulator)::translation_inverse_state
     integer::localization_iterations,localization_spread_evaluations
     integer::ow_saved_eigenexa_comm
     character(256)::message,prefix
@@ -839,7 +871,8 @@ contains
     call dc_lcfo(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc,&
       retained_count=ntarget,retained_box_count=nstate,&
       retained_box_contribution=lcfo_fragment_contribution,&
-      retained_occupations=lcfo_retained_occupations,write_files=.false.)
+      retained_occupations=lcfo_retained_occupations,retained_eigenvalues=lcfo_retained_eigenvalues,&
+      write_files=.false.)
     if(size(lcfo_retained_occupations)/=ntarget.or.&
         abs(sum(lcfo_retained_occupations)-dc%elec_num_tot)>&
         1d3*epsilon(1d0)*max(1d0,dc%elec_num_tot)) &
@@ -875,7 +908,7 @@ contains
     call move_alloc(global_seed_values,composed_tile_values)
     allocate(global_seed_values(global_seed_count,ncore),ow_core_weights(ncore),&
       ow_core_box_positions(ncore),core_periodic_phase(3,ncore));global_seed_values=(0d0,0d0)
-    global_seed_values(1:nstate,:)=composed_tile_values;deallocate(composed_tile_values)
+    global_seed_values(1:nstate,:)=composed_tile_values(1:nstate,:);deallocate(composed_tile_values)
     ow_core_weights=system%hvol;ow_core_box_positions=0;core_periodic_phase=(0d0,0d0)
     projector_composition_peak=0_8;projector_composition_fingerprint=0_8
     do projector_tile_first=1,global_projection_count,32
@@ -903,6 +936,13 @@ contains
         ishftc(composition_fingerprint,mod(projector_tile_first,63)))
       deallocate(composed_tile_values)
     enddo
+    ! This is the physical source frame for the LCFO discriminator: actual retained
+    ! LCFO eigenfunctions for the occupied block and the actual radial manifest
+    ! projectors for the complement.  It need not be orthonormal; projecting the
+    ! weighted rank-one sum is the operator definition.
+    allocate(lcfo_reference_core(ntarget,ncore))
+    lcfo_reference_core(1:nstate,:)=lcfo_occupied_core
+    lcfo_reference_core(nstate+1:ntarget,:)=global_seed_values(nstate+1:ntarget,:)
     do p=1,ncore
       raw_ix=int(modulo(ow_core_ids(p)-1_8,int(dc%lg_tot%num(1),8)))+1
       raw_iy=int(modulo((ow_core_ids(p)-1_8)/int(dc%lg_tot%num(1),8),&
@@ -960,6 +1000,12 @@ contains
     if(.not.ok)then
       write(0,'(a)')trim(message);error stop 'translation character catalog construction failed'
     endif
+    allocate(translation_canonical_product(size(translation_product,1),size(translation_product,2)))
+    do io=1,size(translation_product,1);do i=1,size(translation_product,2)
+      translation_canonical_product(i,io)=findloc(translation_canonical_operations,&
+        translation_product(translation_canonical_operations(i),translation_canonical_operations(io)),dim=1)
+    enddo;enddo
+    if(any(translation_canonical_product<1))error stop 'canonical translation product is not closed'
     allocate(translation_generator_orders(translation_character_generator_count),&
       translation_generator_characters(size(global_translation_subgroup),&
       translation_character_generator_count))
@@ -1086,7 +1132,7 @@ contains
       dg_ow_symmetry_tolerance*max(1d0,abs(adapted_occupied_selected_edge)))
     global_seed_values(1:nstate,:)=adapted_occupied_candidates
     deallocate(adapted_occupied_candidates,adapted_occupied_spectrum,translation_adapted_occupied,&
-      translation_adapted_spectrum,orthonormal_lcfo_occupied,translation_product)
+      translation_adapted_spectrum,orthonormal_lcfo_occupied)
     if(rank==0)write(*,'(a,2(a,i0),7(a,es16.8),a,i0)')&
       '[OW-GS-DIAGNOSTIC] point_cogroup_adapted_occupied',&
       ' input_rank=',nstate,' selected_rank=',adapted_occupied_rank,&
@@ -1255,9 +1301,9 @@ contains
       ' commutator_defect=',translation_commutator_defect,' order_defect=',translation_order_defect,&
       ' gamma_pairing_defect=',translation_gamma_pairing_defect,&
       ' workspace_peak_bytes=',translation_sector_workspace_peak
-    deallocate(translation_generator_rows,translation_gamma_rows,translation_sector_rows,translation_row_ids)
+    deallocate(translation_sector_rows)
 #endif
-    deallocate(lcfo_occupied_core,lcfo_core_ids)
+    deallocate(lcfo_core_ids)
     global_retained_rank=ntarget
     allocate(fixed_center_identity(ntarget,ntarget),fixed_center_eigenvalues(ntarget))
     fixed_center_identity=(0d0,0d0);fixed_center_eigenvalues=0d0
@@ -1373,7 +1419,7 @@ contains
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 MLWF optimization failed';endif
     localized_centers=matmul(w90_lattice_inverse,localized_centers)
     call apply_dg_w90_gamma_transform(dc%icomm_tot,ow_core_ids,ow_core_values,ow_core_gradients,&
-      w90_transform,localized_centers,dg_ow_symmetry_tolerance,ok,message)
+      w90_transform,localized_centers,dg_ow_symmetry_tolerance,ok,message,w90_spreads)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 MLWF gauge canonicalization failed';endif
     call fingerprint_ow_w90_transform(dc%icomm_tot,w90_transform,w90_transform_fingerprint,ok)
     if(.not.ok)error stop 'Wannier90 canonical transform fingerprint failed'
@@ -1386,11 +1432,209 @@ contains
     localization_initial_spread=w90_spread(1);localization_final_spread=w90_spread(1)
     localization_maximum_gradient=0d0
     localization_spread_evaluations=0;localization_converged=.true.
-    ow_box_values=matmul(transpose(w90_transform),ow_box_values)
-    do ix=1,3
-      ow_box_gradients(ix,:,:)=matmul(transpose(w90_transform),ow_box_gradients(ix,:,:))
-    end do
-    deallocate(global_seed_values,w90_anchors,w90_fractional,w90_eigenvalues,w90_atom_symbols,&
+
+#ifdef USE_EIGENEXA
+    allocate(translation_w90_rows(size(translation_row_ids),ntarget),&
+      translation_lcfo_rows(size(translation_row_ids),ntarget),&
+      translation_w90_values(ntarget),translation_lcfo_values(ntarget),stat=allocation_status)
+    call MPI_Allreduce(allocation_status,translation_allocation_status,1,MPI_INTEGER,MPI_MAX,&
+      dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.translation_allocation_status/=0)&
+      error stop 'translation reference operator allocation failed collectively'
+    do p=1,size(translation_row_ids)
+      translation_w90_rows(p,:)=w90_transform(int(translation_row_ids(p)),:)
+    enddo
+    translation_lcfo_rows=(0d0,0d0)
+    allocate(translation_lcfo_local_row(ntarget),translation_lcfo_global_row(ntarget))
+    do i=1,ntarget
+      do io=1,ntarget
+        translation_lcfo_local_row(io)=sum(ow_core_weights*&
+          conjg(global_closed_core(i,:))*lcfo_reference_core(io,:))
+      enddo
+      call MPI_Allreduce(translation_lcfo_local_row,translation_lcfo_global_row,ntarget,&
+        MPI_DOUBLE_COMPLEX,MPI_SUM,dc%icomm_tot,ierr)
+      if(ierr/=MPI_SUCCESS)error stop 'LCFO source overlap reduction failed'
+      p=findloc(translation_row_ids,int(i,8),dim=1)
+      if(p>0)translation_lcfo_rows(p,:)=translation_lcfo_global_row
+    enddo
+    deallocate(translation_lcfo_local_row,translation_lcfo_global_row)
+    translation_lcfo_fingerprint=ieor(occupied_composition_fingerprint,projector_composition_fingerprint)
+    if(translation_lcfo_fingerprint==0_8)translation_lcfo_fingerprint=1_8
+    do io=1,ntarget
+      translation_w90_values(io)=modulo(localized_centers(1,io),1d0)+&
+        sqrt(2d0)*modulo(localized_centers(2,io),1d0)+sqrt(3d0)*modulo(localized_centers(3,io),1d0)
+      if(io<=nstate)then
+        translation_lcfo_values(io)=lcfo_retained_eigenvalues(io)
+      else
+        i=io-nstate
+        translation_lcfo_values(io)=modulo(dot_product(matmul(w90_lattice_inverse,&
+          dc%system_tot%Rion(:,manifest_channels(i)%atom)),[1d0,sqrt(2d0),sqrt(3d0)]),1d0)+&
+          0.01d0*real(manifest_channels(i)%l,8)+0.001d0*real(manifest_channels(i)%m,8)+&
+          0.0001d0*real(manifest_channels(i)%radial,8)
+      endif
+    enddo
+    ow_saved_eigenexa_comm=info%icomm_o
+    call finalize_eigenexa(info);info%icomm_o=dc%icomm_tot
+    call init_eigenexa_mod(info,2*ntarget,direct_block_only=.true.)
+    call split_dg_translation_character_sector_eigenexa(info,dc%icomm_tot,translation_row_ids,&
+      translation_generator_rows,translation_gamma_rows,translation_generator_characters,&
+      translation_generator_orders,translation_element_words,translation_character_conjugates,1,&
+      dg_ow_symmetry_tolerance,translation_character_fingerprint,translation_sector_rows,translation_sector_rank,&
+      translation_identity_defect,translation_unitarity_defect,translation_commutator_defect,&
+      translation_order_defect,translation_gamma_pairing_defect,translation_sector_fingerprint,&
+      translation_sector_workspace_peak,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'post-W90 reference character split failed';endif
+    call project_dg_w90_reference_sector_operators(dc%icomm_tot,translation_row_ids,translation_sector_rows,&
+      translation_w90_rows,translation_w90_values,translation_lcfo_rows,translation_lcfo_values,ntarget,&
+      w90_transform_fingerprint,translation_lcfo_fingerprint,w90_unitarity_defect,0d0,&
+      dg_ow_symmetry_tolerance,translation_w90_operator,translation_lcfo_operator,translation_operator_defect,&
+      translation_operator_fingerprint,translation_operator_workspace,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'reference-sector physical operator projection failed';endif
+    call anchor_dg_w90_reference_character_sector(dc%icomm_tot,translation_row_ids,translation_sector_rows,&
+      translation_w90_operator,translation_lcfo_operator,ntarget,w90_transform_fingerprint,translation_lcfo_fingerprint,&
+      w90_unitarity_defect,translation_operator_defect,dg_ow_symmetry_tolerance,translation_reference_rows,&
+      translation_anchor_defect,translation_anchor_fingerprint,translation_anchor_workspace,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'reference translation character W90 anchor failed';endif
+    call materialize_dg_row_owned_sector_on_spatial_grid(dc%icomm_tot,translation_row_ids,ntarget,&
+      translation_reference_rows,global_closed_core,w90_input_fingerprint,translation_reference_spatial,&
+      translation_materialize_fingerprint,translation_materialize_workspace,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'reference character spatial materialization failed';endif
+    deallocate(translation_sector_rows,translation_w90_operator,translation_lcfo_operator)
+
+    if(int(ncore,8)>huge(0_8)/int(nproc,8))error stop 'translation global core extent overflows int64'
+    translation_global_core_count8=int(ncore,8)*int(nproc,8)
+    if(translation_global_core_count8>int(huge(0),8))error stop 'translation global core extent exceeds default integer'
+    translation_global_core_count=int(translation_global_core_count8)
+    allocate(translation_spatial_ids(ncore),translation_generator_maps(ncore,&
+      translation_character_generator_count),translation_character_done(size(translation_characters,1)),stat=allocation_status)
+    call MPI_Allreduce(allocation_status,translation_allocation_status,1,MPI_INTEGER,MPI_MAX,&
+      dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.translation_allocation_status/=0)&
+      error stop 'translation spatial action allocation failed collectively'
+    do p=1,ncore;translation_spatial_ids(p)=int(rank*ncore+p,8);enddo
+    do i=1,translation_character_generator_count
+      io=global_translation_subgroup(translation_canonical_operations(translation_character_generators(i)))
+      translation_generator_maps(:,i)=global_symmetry_map(:,io)
+    enddo
+    translation_gamma_fingerprint=int(z'6A09E667F3BCC909',8)
+    translation_gamma_fingerprint=ieor(ishftc(translation_gamma_fingerprint,9),translation_global_core_count8)
+    if(translation_gamma_fingerprint==0_8)translation_gamma_fingerprint=1_8
+    translation_character_done=.false.;translation_processed_count=0
+    translation_alignment_max_defect=0d0;translation_gamma_max_defect=0d0
+    translation_post_gauge_fingerprint=ieor(translation_operator_fingerprint,translation_anchor_fingerprint)
+    translation_post_gauge_fingerprint=ieor(ishftc(translation_post_gauge_fingerprint,11),&
+      translation_materialize_fingerprint)
+    do translation_character=1,size(translation_characters,1)
+      if(translation_character_done(translation_character))cycle
+      if(translation_character==1)then
+        allocate(translation_aligned_spatial,source=translation_reference_spatial)
+      else
+        call split_dg_translation_character_sector_eigenexa(info,dc%icomm_tot,translation_row_ids,&
+          translation_generator_rows,translation_gamma_rows,translation_generator_characters,&
+          translation_generator_orders,translation_element_words,translation_character_conjugates,&
+          translation_character,dg_ow_symmetry_tolerance,translation_character_fingerprint,&
+          translation_sector_rows,translation_sector_rank,translation_identity_defect,translation_unitarity_defect,&
+          translation_commutator_defect,translation_order_defect,translation_gamma_pairing_defect,&
+          translation_sector_fingerprint,translation_sector_workspace_peak,ok,message)
+        if(.not.ok)then;write(0,'(a)')trim(message);error stop 'target translation character split failed';endif
+        call materialize_dg_row_owned_sector_on_spatial_grid(dc%icomm_tot,translation_row_ids,ntarget,&
+          translation_sector_rows,global_closed_core,w90_input_fingerprint,translation_target_spatial,&
+          translation_materialize_fingerprint,translation_materialize_workspace,ok,message)
+        deallocate(translation_sector_rows)
+        if(.not.ok)then;write(0,'(a)')trim(message);error stop 'target character spatial materialization failed';endif
+        call build_dg_translation_character_intertwining_phase(dc%icomm_tot,translation_spatial_ids,&
+          translation_global_core_count,translation_generator_maps,translation_generator_orders,&
+          translation_element_words,translation_canonical_product,1,translation_characters(1,:),&
+          translation_characters(translation_character,:),translation_character_fingerprint,&
+          dg_ow_symmetry_tolerance,translation_phase,translation_phase_fingerprint,&
+          translation_phase_payload_fingerprint,translation_phase_workspace,ok,message)
+        if(.not.ok)then;write(0,'(a)')trim(message);error stop 'translation character intertwining phase failed';endif
+        call align_dg_w90_character_sectors_by_periodic_phase(dc%icomm_tot,translation_spatial_ids,&
+          translation_reference_spatial,translation_target_spatial,translation_phase,translation_global_core_count,&
+          translation_phase_fingerprint,translation_phase_payload_fingerprint,dg_ow_symmetry_tolerance,&
+          translation_aligned_spatial,translation_singular_values,translation_alignment_defect,&
+          translation_alignment_fingerprint,translation_alignment_workspace,ok,message)
+        deallocate(translation_target_spatial,translation_phase,translation_singular_values)
+        if(.not.ok)then;write(0,'(a)')trim(message);error stop 'periodic-phase character alignment failed';endif
+        translation_alignment_max_defect=max(translation_alignment_max_defect,translation_alignment_defect)
+        translation_post_gauge_fingerprint=ieor(ishftc(translation_post_gauge_fingerprint,11),&
+          translation_alignment_fingerprint)
+      endif
+      translation_partner=translation_character_conjugates(translation_character)
+      translation_self_conjugate=translation_partner==translation_character
+      if(translation_self_conjugate)then
+        allocate(translation_conjugate_spatial,source=translation_aligned_spatial)
+      else
+        call split_dg_translation_character_sector_eigenexa(info,dc%icomm_tot,translation_row_ids,&
+          translation_generator_rows,translation_gamma_rows,translation_generator_characters,&
+          translation_generator_orders,translation_element_words,translation_character_conjugates,&
+          translation_partner,dg_ow_symmetry_tolerance,translation_character_fingerprint,&
+          translation_sector_rows,translation_sector_rank,translation_identity_defect,translation_unitarity_defect,&
+          translation_commutator_defect,translation_order_defect,translation_gamma_pairing_defect,&
+          translation_sector_fingerprint,translation_sector_workspace_peak,ok,message)
+        if(.not.ok)then;write(0,'(a)')trim(message);error stop 'conjugate translation character split failed';endif
+        call materialize_dg_row_owned_sector_on_spatial_grid(dc%icomm_tot,translation_row_ids,ntarget,&
+          translation_sector_rows,global_closed_core,w90_input_fingerprint,translation_conjugate_spatial,&
+          translation_materialize_fingerprint,translation_materialize_workspace,ok,message)
+        deallocate(translation_sector_rows)
+        if(.not.ok)then;write(0,'(a)')trim(message);error stop 'conjugate character spatial materialization failed';endif
+      endif
+      allocate(translation_spatial_gamma_rows(ncore,0),stat=allocation_status)
+      call MPI_Allreduce(allocation_status,translation_allocation_status,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+      if(ierr/=MPI_SUCCESS.or.translation_allocation_status/=0)error stop 'implicit spatial Gamma allocation failed'
+      call sew_dg_w90_periodic_phase_conjugate_sector(dc%icomm_tot,translation_spatial_ids,&
+        translation_aligned_spatial,translation_spatial_gamma_rows,translation_conjugate_spatial,&
+        translation_global_core_count,translation_gamma_fingerprint,translation_self_conjugate,0d0,&
+        dg_ow_symmetry_tolerance,translation_target_spatial,translation_gamma_defect,&
+        translation_gamma_workspace,ok,message,.true.)
+      deallocate(translation_spatial_gamma_rows,translation_conjugate_spatial)
+      if(.not.ok)then;write(0,'(a)')trim(message);error stop 'spatial Gamma character sewing failed';endif
+      translation_gamma_max_defect=max(translation_gamma_max_defect,translation_gamma_defect)
+      translation_post_gauge_fingerprint=ieor(ishftc(translation_post_gauge_fingerprint,11),&
+        ieor(translation_gamma_fingerprint,int(translation_character,8)))
+      if(translation_self_conjugate)then
+        deallocate(translation_aligned_spatial);call move_alloc(translation_target_spatial,translation_aligned_spatial)
+      endif
+      call accumulate_dg_translation_character_orbit_sector_values(dc%icomm_tot,translation_inverse_state,&
+        translation_character,translation_characters,translation_character_fingerprint,translation_aligned_spatial,&
+        translation_processed_count==0,translation_processed_count+1==size(translation_characters,1),&
+        dg_ow_symmetry_tolerance,translation_orbit_rows,translation_inverse_workspace,ok,message)
+      if(.not.ok)then;write(0,'(a)')trim(message);error stop 'translation inverse accumulation failed';endif
+      translation_character_done(translation_character)=.true.;translation_processed_count=translation_processed_count+1
+      deallocate(translation_aligned_spatial)
+      if(.not.translation_self_conjugate)then
+        call accumulate_dg_translation_character_orbit_sector_values(dc%icomm_tot,translation_inverse_state,&
+          translation_partner,translation_characters,translation_character_fingerprint,translation_target_spatial,&
+          .false.,translation_processed_count+1==size(translation_characters,1),dg_ow_symmetry_tolerance,&
+          translation_orbit_rows,translation_inverse_workspace,ok,message)
+        if(.not.ok)then;write(0,'(a)')trim(message);error stop 'conjugate inverse accumulation failed';endif
+        translation_character_done(translation_partner)=.true.;translation_processed_count=translation_processed_count+1
+        deallocate(translation_target_spatial)
+      endif
+    enddo
+    call finalize_eigenexa(info);info%icomm_o=ow_saved_eigenexa_comm;call init_eigenexa_mod(info,system%no)
+    if(translation_processed_count/=size(translation_characters,1))error stop 'translation character schedule incomplete'
+    deallocate(ow_core_values);call move_alloc(translation_orbit_rows,ow_core_values)
+    call validate_dg_factored_point_cogroup_gauge(dc%icomm_tot,ow_core_values,ow_core_weights,&
+      global_symmetry_map(:,global_point_representatives),global_symmetry_map(:,global_translation_subgroup),&
+      global_point_cogroup_product,global_point_cogroup_identity_operation,&
+      global_translation_cocycle,size(translation_characters,1),max(translation_alignment_max_defect,&
+      translation_gamma_max_defect),dg_ow_symmetry_tolerance,translation_identity_defect,&
+      translation_unitarity_defect,translation_closure_defect,translation_transform_workspace,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'post-character point-cogroup cocycle proof failed';endif
+    global_retained_group_closure_defect=max(global_retained_group_closure_defect,translation_closure_defect)
+    deallocate(ow_box_values,ow_box_gradients)
+    call materialize_ow_distributed_core_to_buffer(dc%icomm_tot,ow_core_values,ow_core_ids,&
+      physical_ids,ow_box_values,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'post-character core-to-buffer streaming failed';endif
+    allocate(ow_box_gradients(3,ntarget,nbox));call periodic_box_gradients(ow_box_values,ow_box_size,&
+      stencil%coef_nab,ow_box_gradients)
+    deallocate(translation_reference_rows,translation_reference_spatial,translation_w90_rows,&
+      translation_lcfo_rows,translation_w90_values,translation_lcfo_values,translation_generator_maps,&
+      translation_spatial_ids,translation_character_done,translation_generator_rows,translation_row_ids,&
+      translation_gamma_rows,translation_canonical_product,translation_product)
+#endif
+    deallocate(global_seed_values,lcfo_reference_core,lcfo_occupied_core,w90_anchors,w90_fractional,w90_eigenvalues,w90_atom_symbols,&
       w90_atoms_cart,w90_nncell,w90_m_matrix,w90_a_matrix,w90_spreads,localized_centers,w90_transform)
     if(rank==0)write(*,'(a,5(a,es12.4),3(a,i0))')'[OW-GS-DIAGNOSTIC] Wannier90_MLWF',&
       ' gauge_spread=',w90_spread(3),' total_spread=',w90_spread(1),&
@@ -1412,6 +1656,7 @@ contains
         ieor(exact_fragment_symmetry_fingerprints(p),int(p,8)),modulo(13*p,63)))
     end do
     deallocate(exact_fragment_symmetry_fingerprints)
+    ow_symmetry_fingerprint=ieor(ishftc(ow_symmetry_fingerprint,17),translation_post_gauge_fingerprint)
     deallocate(ow_core_values,ow_core_gradients)
     allocate(ow_core_values(ntarget,ncore),ow_core_gradients(3,ntarget,ncore))
     do core_index=1,ncore

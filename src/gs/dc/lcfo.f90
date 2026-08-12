@@ -36,7 +36,8 @@ module lcfo
 contains
 
   subroutine dc_lcfo(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc,&
-      retained_count,retained_box_contribution,retained_occupations,write_files,retained_box_count)
+      retained_count,retained_box_contribution,retained_occupations,write_files,retained_box_count,&
+      retained_eigenvalues)
     use communication, only: comm_summation,comm_bcast
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use salmon_global, only: yn_dc_lcfo_diag, yn_eigenexa, temperature
@@ -56,6 +57,7 @@ contains
     integer, intent(in), optional :: retained_count
     complex(8), allocatable, intent(out), optional :: retained_box_contribution(:,:)
     real(8), allocatable, intent(out), optional :: retained_occupations(:)
+    real(8), allocatable, intent(out), optional :: retained_eigenvalues(:)
     logical, intent(in), optional :: write_files
     integer, intent(in), optional :: retained_box_count
     !
@@ -79,7 +81,7 @@ contains
     if(dc%id_tot==0) write(*,*) "start DC-LCFO"
     hvol = system%hvol
     nspin = system%nspin
-    build_coefficients = yn_dc_lcfo_diag=='y' .or. present(retained_box_contribution)
+    build_coefficients = yn_dc_lcfo_diag=='y' .or. present(retained_box_contribution).or.present(retained_eigenvalues)
     coefficient_count=dc%nstate_tot
     if(present(retained_count))coefficient_count=max(dc%nstate_tot,retained_count)
     emit_files = .true.
@@ -89,6 +91,8 @@ contains
       error stop 'DC-LCFO: retained count, contribution, and occupations must be requested together'
     if(present(retained_box_count).and..not.present(retained_count))&
       error stop 'DC-LCFO: retained buffer count requires retained outputs'
+    if(present(retained_eigenvalues).and..not.present(retained_count))&
+      error stop 'DC-LCFO: retained eigenvalues require retained count'
     if(present(retained_count))then
       if(retained_count<1) &
         error stop 'DC-LCFO: invalid retained contribution count'
@@ -125,6 +129,12 @@ contains
 !      call test_write_psi
     end if
     if(present(retained_occupations)) call build_retained_occupations
+    if(present(retained_eigenvalues))then
+      allocate(retained_eigenvalues(retained_count))
+      retained_eigenvalues=esp_tot(1:retained_count,1)
+      if(.not.all(ieee_is_finite(retained_eigenvalues)))&
+        error stop 'DC-LCFO: retained eigenvalues are not finite'
+    endif
     if(present(retained_box_contribution)) call build_retained_box_contribution
     if(emit_files) call output
 

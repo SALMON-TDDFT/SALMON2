@@ -70,10 +70,64 @@ for mlwf_call in (
     "assemble_dg_w90_gamma_matrices",
     "run_dg_w90_gamma_library",
     "apply_dg_w90_gamma_transform",
+    "project_dg_w90_reference_sector_operators",
+    "anchor_dg_w90_reference_character_sector",
+    "materialize_dg_row_owned_sector_on_spatial_grid",
+    "build_dg_translation_character_intertwining_phase",
+    "align_dg_w90_character_sectors_by_periodic_phase",
+    "sew_dg_w90_periodic_phase_conjugate_sector",
+    "accumulate_dg_translation_character_orbit_sector_values",
 ):
     assert re.search(rf"call\s+{mlwf_call}\b", ow_ground_state_body), (
         f"production overlapping-Wannier route must call {mlwf_call}"
     )
+w90_position = ow_ground_state_body.find("call run_dg_w90_gamma_library")
+production_order = [
+    ow_ground_state_body.find("call measure_dg_rank_fixed_symmetry_residuals_eigenexa"),
+    ow_ground_state_body.find("call begin_sawf_dmn"),
+    w90_position,
+    ow_ground_state_body.find("call split_dg_translation_character_sector_eigenexa", w90_position),
+    ow_ground_state_body.find("call project_dg_w90_reference_sector_operators"),
+    ow_ground_state_body.find("call anchor_dg_w90_reference_character_sector"),
+    ow_ground_state_body.find("call build_dg_translation_character_intertwining_phase"),
+    ow_ground_state_body.find("call align_dg_w90_character_sectors_by_periodic_phase"),
+    ow_ground_state_body.find("call sew_dg_w90_periodic_phase_conjugate_sector"),
+    ow_ground_state_body.find("call accumulate_dg_translation_character_orbit_sector_values"),
+    ow_ground_state_body.find("call redistribute_dg_owned_orbitals_to_center_fragments"),
+    ow_ground_state_body.find("call write_dg_overlapping_wannier_checkpoint"),
+]
+assert all(position >= 0 for position in production_order) and production_order == sorted(production_order), (
+    "production order must be affine proof -> DMN -> W90 -> sectors -> alignment -> inverse transform -> "
+    "redistribution -> V3"
+)
+assert "call align_dg_w90_cross_character_sector_gauge" not in ow_ground_state_body, (
+    "production must not use spread-weighted cross-character links, which vanish for exact translation orbits"
+)
+for forbidden_translation_dense in (
+    "all_translation_representations",
+    "all_translation_projectors",
+    "all_affine_representations",
+    "translation_all_sector_rows",
+    "translation_all_sector_gradients",
+    "local_transform(nstate,nstate)",
+    "transform(nstate,nstate)",
+):
+    assert forbidden_translation_dense not in ow_ground_state_body, (
+        f"production must not retain dense {forbidden_translation_dense}"
+    )
+inverse_position = ow_ground_state_body.find("call accumulate_dg_translation_character_orbit_sector_values")
+post_gauge_affine_proof = ow_ground_state_body.find(
+    "call validate_dg_factored_point_cogroup_gauge", inverse_position
+)
+redistribution_position = ow_ground_state_body.find(
+    "call redistribute_dg_owned_orbitals_to_center_fragments"
+)
+assert inverse_position < post_gauge_affine_proof < redistribution_position, (
+    "the final character gauge needs a streamed post-gauge affine/cocycle proof before redistribution"
+)
+assert "global_translation_cocycle" in ow_ground_state_body[inverse_position:redistribution_position], (
+    "post-gauge point-cogroup proof must consume the factored translation cocycle"
+)
 assert "call localize_dg_occupation_blocks" not in ow_ground_state_body, (
     "production overlapping-Wannier V3 route must not call the custom localizer"
 )
@@ -489,7 +543,7 @@ assert re.search(
     r"retained_occupations\s*=\s*lcfo_retained_occupations",
     adapter_body,
     re.I | re.S,
-), "LCFO must retain the finite-temperature window but materialize only occupied buffer rows"
+), "LCFO must retain the spectrum but materialize occupied eigenfunction rows"
 assert re.search(
     r"coefficient_count\s*=\s*max\s*\(\s*dc%nstate_tot\s*,\s*retained_count\s*\)",
     lcfo_source,
@@ -498,10 +552,15 @@ assert re.search(
 assert re.search(
     r"subroutine\s+dc_lcfo\s*\(.*?retained_count\s*,\s*"
     r"retained_box_contribution\s*,\s*retained_occupations\s*,\s*write_files\s*,\s*&?\s*"
-    r"retained_box_count\s*\)",
+    r"retained_box_count\s*,\s*&?\s*retained_eigenvalues\s*\)",
     lcfo_source,
     re.I | re.S,
-), "the new optional buffer-row count must be appended to preserve positional-call compatibility"
+), "optional LCFO spectrum output must follow the appended buffer-row count"
+assert re.search(
+    r"translation_lcfo_values\s*\(\s*io\s*\)\s*=\s*lcfo_retained_eigenvalues\s*\(\s*io\s*\)",
+    adapter_body,
+    re.I,
+), "the LCFO anchor must use the retained Hamiltonian spectrum, not occupations"
 assert re.search(
     r"box_count\s*=\s*retained_count.*?present\s*\(\s*retained_box_count\s*\).*?"
     r"box_count\s*=\s*retained_box_count.*?"
@@ -831,7 +890,7 @@ assert re.search(
     r"retained_box_contribution\s*=\s*lcfo_fragment_contribution",
     adapter_body,
     re.I | re.S,
-), "LCFO must separate the finite-temperature occupation window from occupied buffer materialization"
+), "LCFO must separate retained spectrum from occupied eigenfunction materialization"
 assert re.search(
     r"complete_sp_core_atom_count\s*=\s*dc%system_tot%nion\s*/\s*nproc.*?"
     r"local_target_count\s*/=\s*4\s*\*\s*complete_sp_core_atom_count",
@@ -1375,8 +1434,8 @@ assert re.search(
     re.I,
 ), "production must inherit the accepted full-affine proof through the unitary MLWF gauge"
 assert not re.search(
-    r"call\s+validate_dg_streamed_affine_representation\s*\(", adapter_body, re.I
-), "production must not rebuild all 1536 post-MLWF representation matrices"
+    r"call\s+validate_dg_streamed_affine_representation\s*\([^;]*global_symmetry_map", adapter_body, re.I | re.S
+), "production must not restream all 1536 post-MLWF affine operations"
 assert not re.search(r"w90_symmetry_rows\s*\(", adapter_body, re.I), (
     "production must not retain Nsym row-owned representation matrices"
 )

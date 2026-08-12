@@ -7,9 +7,14 @@ program test_dg_overlapping_wannier_w90_mpi
     validate_dg_w90_convergence_log
   use dg_overlapping_wannier_w90,only:align_dg_w90_character_sector_gauge
   use dg_overlapping_wannier_w90,only:validate_dg_w90_localization_cluster
+  use dg_overlapping_wannier_w90,only:align_dg_w90_cross_character_sector_gauge
+  use dg_overlapping_wannier_w90,only:align_dg_w90_character_sectors_by_periodic_phase
+  use dg_overlapping_wannier_w90,only:sew_dg_w90_periodic_phase_conjugate_sector
+  use dg_overlapping_wannier_w90,only:anchor_dg_w90_reference_character_sector
+  use dg_overlapping_wannier_w90,only:project_dg_w90_reference_sector_operators
   use dg_overlapping_wannier_w90,only:inherit_dg_w90_affine_receipts
   implicit none
-  integer::ierr,rank,nproc,b,m,n,p,nlocal
+  integer::ierr,rank,nproc,b,i,m,n,p,nlocal
   integer::convergence_iterations,log_unit
   complex(8)::transform(2,2)
   real(8)::centers(3,2),spreads(2),spread(3)
@@ -27,13 +32,32 @@ program test_dg_overlapping_wannier_w90_mpi
   complex(8),allocatable::gauge_values(:,:),gauge_gradients(:,:,:)
   complex(8)::gauge_transform(2,2)
   real(8)::gauge_centers(3,2)
+  real(8)::gauge_spreads(2)
   integer(8),allocatable::gauge_ids(:)
-  integer(8),allocatable::sector_ids(:)
+  integer(8),allocatable::sector_ids(:),anchor_duplicate_ids(:)
   complex(8),allocatable::sector_frame(:,:),sector_reference(:,:),sector_gamma(:,:),&
     sector_conjugate(:,:),sector_aligned(:,:),sector_conjugate_aligned(:,:)
   complex(8),allocatable::sector_rotated(:,:),sector_reference_permuted(:,:),sector_trial_aligned(:,:),&
     sector_trial_conjugate(:,:)
   complex(8),allocatable::sector_gamma_trial(:,:)
+  complex(8),allocatable::cross_reference_sector(:,:),cross_target_sector(:,:),cross_w90_reference(:,:),&
+    cross_aligned_target(:,:),cross_rotated_target(:,:)
+  complex(8),allocatable::cross_periodic_phase(:)
+  complex(8),allocatable::anchor_sector(:,:),anchor_w90(:,:),anchor_lcfo(:,:),anchor_result(:,:),anchor_trial(:,:)
+  complex(8)::anchor_w90_operator(2,2),anchor_lcfo_operator(2,2),anchor_rotation(2,2)
+  real(8)::anchor_defect
+  integer(8)::anchor_fingerprint,anchor_trial_fingerprint,anchor_workspace
+  complex(8),allocatable::anchor_projected_w90(:,:),anchor_projected_lcfo(:,:)
+  complex(8),allocatable::cross_gamma_rows(:,:),cross_conjugate_sector(:,:),cross_aligned_conjugate(:,:)
+  complex(8),allocatable::implicit_gamma_rows(:,:)
+  real(8)::cross_localization_weights(4)
+  real(8),allocatable::cross_singular_values(:)
+  real(8)::cross_polar_defect
+  real(8)::cross_gamma_defect
+  integer(8)::cross_fingerprint,cross_workspace
+  integer(8)::cross_phase_payload_fingerprint,cross_phase_bits
+  integer(8)::cross_gamma_fingerprint
+  integer(8)::implicit_gamma_fingerprint
   real(8),allocatable::sector_singular_values(:)
   real(8)::sector_polar_defect,sector_gamma_defect
   real(8)::sector_local_cost,sector_global_cost,sector_swapped_local_cost,sector_swapped_global_cost
@@ -247,6 +271,238 @@ program test_dg_overlapping_wannier_w90_mpi
     abs(sector_singular_values(2)-cos(0.4d0))<1d-10.and.&
     abs(sector_global_cost-(4d0-2d0*sum(sector_singular_values)))<1d-10,&
     'Wannier90 SVD returns the closest polar frame for a nonunitary full-rank link')
+  allocate(cross_reference_sector(nlocal,2),cross_target_sector(nlocal,2),cross_w90_reference(nlocal,4),&
+    cross_rotated_target(nlocal,2))
+  do p=1,nlocal
+    global_point=rank*nlocal+p
+    cross_reference_sector(p,1)=exp(cmplx(0d0,2d0*acos(-1d0)*real(global_point-1,8)/8d0,8))/sqrt(8d0)
+    cross_reference_sector(p,2)=exp(cmplx(0d0,6d0*acos(-1d0)*real(global_point-1,8)/8d0,8))/sqrt(8d0)
+    cross_target_sector(p,1)=exp(cmplx(0d0,4d0*acos(-1d0)*real(global_point-1,8)/8d0,8))/sqrt(8d0)
+    cross_target_sector(p,2)=exp(cmplx(0d0,8d0*acos(-1d0)*real(global_point-1,8)/8d0,8))/sqrt(8d0)
+  enddo
+  cross_w90_reference(:,1)=(cross_reference_sector(:,1)+exp(cmplx(0d0,0.4d0,8))*&
+    cross_target_sector(:,1))/sqrt(2d0)
+  cross_w90_reference(:,2)=(cross_reference_sector(:,2)+exp(cmplx(0d0,-0.7d0,8))*&
+    cross_target_sector(:,2))/sqrt(2d0)
+  cross_w90_reference(:,3)=(cross_reference_sector(:,1)-exp(cmplx(0d0,0.4d0,8))*&
+    cross_target_sector(:,1))/sqrt(2d0)
+  cross_w90_reference(:,4)=(cross_reference_sector(:,2)-exp(cmplx(0d0,-0.7d0,8))*&
+    cross_target_sector(:,2))/sqrt(2d0)
+  cross_localization_weights=[1d0,2d0,-1d0,-2d0]
+  cross_rotated_target(:,1)=(cross_target_sector(:,1)+cmplx(0d0,1d0,8)*cross_target_sector(:,2))/sqrt(2d0)
+  cross_rotated_target(:,2)=(cmplx(0d0,1d0,8)*cross_target_sector(:,1)+cross_target_sector(:,2))/sqrt(2d0)
+  allocate(cross_periodic_phase(nlocal))
+  do p=1,nlocal
+    global_point=rank*nlocal+p
+    cross_periodic_phase(p)=exp(cmplx(0d0,2d0*acos(-1d0)*real(global_point-1,8)/8d0,8))
+  enddo
+  cross_phase_payload_fingerprint=int(z'243F6A8885A308D3',8)
+  do global_point=1,8
+    phase=exp(cmplx(0d0,2d0*acos(-1d0)*real(global_point-1,8)/8d0,8))
+    cross_phase_bits=transfer(real(phase,8),cross_phase_bits)
+    cross_phase_payload_fingerprint=ieor(ishftc(cross_phase_payload_fingerprint,11),cross_phase_bits)
+    cross_phase_bits=transfer(aimag(phase),cross_phase_bits)
+    cross_phase_payload_fingerprint=ieor(ishftc(cross_phase_payload_fingerprint,11),cross_phase_bits)
+  enddo
+  if(cross_phase_payload_fingerprint==0_8)cross_phase_payload_fingerprint=1_8
+  call align_dg_w90_character_sectors_by_periodic_phase(MPI_COMM_WORLD,sector_ids,&
+    cross_reference_sector,cross_target_sector,cross_periodic_phase,8,777_8,cross_phase_payload_fingerprint,1d-12,&
+    cross_aligned_target,cross_singular_values,cross_polar_defect,cross_fingerprint,&
+    cross_workspace,ok,message)
+  call require(ok.and.maxval(abs(cross_aligned_target(:,1)-cross_target_sector(:,1)))<1d-10.and.&
+    maxval(abs(cross_aligned_target(:,2)-cross_target_sector(:,2)))<1d-10,&
+    'periodic spatial phase maps the reference character sector into the target sector')
+  call align_dg_w90_character_sectors_by_periodic_phase(MPI_COMM_WORLD,sector_ids,&
+    cross_reference_sector,cross_rotated_target,cross_periodic_phase,8,777_8,cross_phase_payload_fingerprint,1d-12,&
+    sector_trial_aligned,cross_singular_values,cross_polar_defect,sector_trial_fingerprint,&
+    cross_workspace,ok,message)
+  call require(ok.and.maxval(abs(sector_trial_aligned-cross_aligned_target))<1d-10,&
+    'periodic-phase alignment is invariant under target-sector unitary rotations')
+  call require(sector_trial_fingerprint==cross_fingerprint,&
+    'periodic-phase projector fingerprint is invariant under target-sector rotations')
+  allocate(anchor_sector(nlocal,2),anchor_w90(nlocal,4),anchor_lcfo(nlocal,4))
+  anchor_sector=(0d0,0d0);anchor_w90=(0d0,0d0);anchor_lcfo=(0d0,0d0)
+  do p=1,nlocal
+    global_point=rank*nlocal+p
+    if(global_point<=4)then
+      anchor_w90(p,global_point)=1d0;anchor_lcfo(p,global_point)=1d0
+      if(global_point<=2)anchor_sector(p,global_point)=1d0
+    endif
+  enddo
+  anchor_w90_operator=(0d0,0d0);anchor_lcfo_operator=(0d0,0d0);anchor_rotation=(0d0,0d0)
+  anchor_w90_operator(1,1)=1d0;anchor_w90_operator(2,2)=1d0
+  anchor_lcfo_operator(1,1)=1d0;anchor_lcfo_operator(2,2)=2d0
+  anchor_rotation=reshape([cmplx(sqrt(0.5d0),0d0,8),cmplx(0d0,sqrt(0.5d0),8),&
+    cmplx(0d0,sqrt(0.5d0),8),cmplx(sqrt(0.5d0),0d0,8)],[2,2])
+  call project_dg_w90_reference_sector_operators(MPI_COMM_WORLD,sector_ids,anchor_sector,anchor_w90,&
+    [1d0,1d0,3d0,4d0],anchor_lcfo,[1d0,2d0,3d0,4d0],8,321_8,654_8,0d0,0d0,1d-12,&
+    anchor_projected_w90,anchor_projected_lcfo,anchor_defect,anchor_fingerprint,anchor_workspace,ok,message)
+  call require(ok.and.maxval(abs(anchor_projected_w90-anchor_w90_operator))<1d-10.and.&
+    maxval(abs(anchor_projected_lcfo-anchor_lcfo_operator))<1d-10,&
+    'full W90 and LCFO physical operators stream-project into the reference sector')
+  call anchor_dg_w90_reference_character_sector(MPI_COMM_WORLD,sector_ids,anchor_sector,&
+    anchor_w90_operator,anchor_lcfo_operator,8,321_8,654_8,0d0,0d0,1d-12,anchor_result,&
+    anchor_defect,anchor_fingerprint,anchor_workspace,ok,message)
+  call require(ok.and.anchor_defect<1d-10,'W90 reference sector resolves repeated-center channels with LCFO anchors')
+  anchor_w90(:,1)=(anchor_lcfo(:,1)+cmplx(0d0,1d0,8)*anchor_lcfo(:,2))/sqrt(2d0)
+  anchor_w90(:,2)=(cmplx(0d0,1d0,8)*anchor_lcfo(:,1)+anchor_lcfo(:,2))/sqrt(2d0)
+  call anchor_dg_w90_reference_character_sector(MPI_COMM_WORLD,sector_ids,matmul(anchor_sector,anchor_rotation),&
+    matmul(conjg(transpose(anchor_rotation)),matmul(anchor_w90_operator,anchor_rotation)),&
+    matmul(conjg(transpose(anchor_rotation)),matmul(anchor_lcfo_operator,anchor_rotation)),&
+    8,321_8,654_8,0d0,0d0,1d-12,anchor_trial,&
+    anchor_defect,anchor_trial_fingerprint,anchor_workspace,ok,message)
+  call require(ok.and.anchor_trial_fingerprint==anchor_fingerprint.and.&
+    maxval(abs(matmul(anchor_trial,conjg(transpose(anchor_trial)))-&
+      matmul(anchor_result,conjg(transpose(anchor_result)))))<1d-10,&
+    'reference-sector anchor is invariant under W90 rotations inside a repeated-center block')
+  anchor_w90_operator=(0d0,0d0);anchor_lcfo_operator=(0d0,0d0)
+  anchor_w90_operator(1,1)=1d0;anchor_w90_operator(2,2)=1d0
+  anchor_lcfo_operator(1,1)=2d0;anchor_lcfo_operator(2,2)=2d0
+  call anchor_dg_w90_reference_character_sector(MPI_COMM_WORLD,sector_ids,anchor_sector,&
+    anchor_w90_operator,anchor_lcfo_operator,8,321_8,654_8,0d0,0d0,1d-12,anchor_result,&
+    anchor_defect,anchor_fingerprint,anchor_workspace,ok,message)
+  call require(ok.and.anchor_defect<1d-10,&
+    'symmetry-enforced occupied multiplet remains a complete unresolved internal block')
+  call anchor_dg_w90_reference_character_sector(MPI_COMM_WORLD,sector_ids,matmul(anchor_sector,anchor_rotation),&
+    anchor_w90_operator,anchor_lcfo_operator,8,321_8,654_8,0d0,0d0,1d-12,anchor_trial,&
+    anchor_defect,anchor_trial_fingerprint,anchor_workspace,ok,message)
+  call require(ok.and.anchor_trial_fingerprint==anchor_fingerprint.and.&
+    maxval(abs(matmul(anchor_trial,conjg(transpose(anchor_trial)))-&
+      matmul(anchor_result,conjg(transpose(anchor_result)))))<1d-10,&
+    'unresolved symmetry multiplet receipt is internal-gauge invariant')
+  if(nlocal>1)then
+    allocate(anchor_duplicate_ids,source=sector_ids)
+    if(rank==0)anchor_duplicate_ids(1)=anchor_duplicate_ids(2)
+    call anchor_dg_w90_reference_character_sector(MPI_COMM_WORLD,anchor_duplicate_ids,anchor_sector,&
+      anchor_w90_operator,anchor_lcfo_operator,8,321_8,654_8,0d0,0d0,1d-12,anchor_trial,&
+      anchor_defect,anchor_trial_fingerprint,anchor_workspace,ok,message)
+    call require(.not.ok,'reference-sector anchor rejects same-rank duplicate row ownership')
+    deallocate(anchor_duplicate_ids)
+  endif
+  allocate(cross_gamma_rows(nlocal,8),cross_conjugate_sector(nlocal,2))
+  cross_gamma_rows=(0d0,0d0)
+  do p=1,nlocal;cross_gamma_rows(p,rank*nlocal+p)=1d0;enddo
+  cross_gamma_fingerprint=int(z'6A09E667F3BCC909',8)
+  do global_point=1,8
+    do p=1,8
+      phase=merge((1d0,0d0),(0d0,0d0),p==global_point)
+      cross_phase_bits=transfer(real(phase,8),cross_phase_bits)
+      cross_gamma_fingerprint=ieor(ishftc(cross_gamma_fingerprint,9),cross_phase_bits)
+      cross_phase_bits=transfer(aimag(phase),cross_phase_bits)
+      cross_gamma_fingerprint=ieor(ishftc(cross_gamma_fingerprint,9),cross_phase_bits)
+    enddo
+  enddo
+  if(cross_gamma_fingerprint==0_8)cross_gamma_fingerprint=1_8
+  cross_conjugate_sector=conjg(cross_target_sector)
+  call sew_dg_w90_periodic_phase_conjugate_sector(MPI_COMM_WORLD,sector_ids,cross_aligned_target,&
+    cross_gamma_rows,cross_conjugate_sector,8,cross_gamma_fingerprint,.false.,0d0,1d-12,&
+    cross_aligned_conjugate,cross_gamma_defect,&
+    cross_workspace,ok,message)
+  call require(ok.and.cross_gamma_defect<1d-10.and.&
+    maxval(abs(cross_aligned_conjugate-conjg(cross_aligned_target)))<1d-10,&
+    'periodic-phase target and conjugate sectors share one Gamma sewing gauge')
+  cross_conjugate_sector=2d0*cross_conjugate_sector
+  call sew_dg_w90_periodic_phase_conjugate_sector(MPI_COMM_WORLD,sector_ids,cross_aligned_target,&
+    cross_gamma_rows,cross_conjugate_sector,8,cross_gamma_fingerprint,.false.,0d0,1d-12,&
+    sector_trial_conjugate,cross_gamma_defect,&
+    cross_workspace,ok,message)
+  call require(.not.ok,'periodic-phase Gamma sewing rejects a nonunitary conjugate sector')
+  cross_conjugate_sector=0.5d0*cross_conjugate_sector
+  sector_trial_aligned=(0d0,0d0)
+  do p=1,nlocal
+    global_point=rank*nlocal+p
+    if(global_point==1)sector_trial_aligned(p,:)=[cmplx(1d0,0d0,8),cmplx(0d0,1d0,8)]/sqrt(2d0)
+    if(global_point==2)sector_trial_aligned(p,:)=[cmplx(0d0,1d0,8),cmplx(1d0,0d0,8)]/sqrt(2d0)
+  enddo
+  call sew_dg_w90_periodic_phase_conjugate_sector(MPI_COMM_WORLD,sector_ids,sector_trial_aligned,&
+    cross_gamma_rows,sector_trial_aligned,8,cross_gamma_fingerprint,.true.,0d0,1d-12,&
+    cross_aligned_conjugate,cross_gamma_defect,cross_workspace,ok,message)
+  call require(ok.and.cross_gamma_defect<1d-10.and.maxval(abs(aimag(cross_aligned_conjugate)))<1d-10,&
+    'self-conjugate periodic-phase sector is fixed to one Gamma-real frame')
+  cross_conjugate_sector(:,1)=sector_trial_aligned(:,2)
+  cross_conjugate_sector(:,2)=sector_trial_aligned(:,1)
+  call sew_dg_w90_periodic_phase_conjugate_sector(MPI_COMM_WORLD,sector_ids,sector_trial_aligned,&
+    cross_gamma_rows,cross_conjugate_sector,8,cross_gamma_fingerprint,.true.,0d0,1d-12,&
+    cross_aligned_conjugate,cross_gamma_defect,cross_workspace,ok,message)
+  call require(ok.and.maxval(abs(aimag(cross_aligned_conjugate)))<1d-10,&
+    'self-conjugate Gamma fixing is invariant to the validation-frame gauge')
+  allocate(implicit_gamma_rows(nlocal,0))
+  implicit_gamma_fingerprint=ieor(ishftc(int(z'6A09E667F3BCC909',8),9),8_8)
+  call sew_dg_w90_periodic_phase_conjugate_sector(MPI_COMM_WORLD,sector_ids,sector_trial_aligned,&
+    implicit_gamma_rows,cross_conjugate_sector,8,implicit_gamma_fingerprint,.true.,0d0,1d-12,&
+    cross_aligned_conjugate,cross_gamma_defect,cross_workspace,ok,message,.true.)
+  call require(ok.and.cross_gamma_defect<1d-10.and.maxval(abs(aimag(cross_aligned_conjugate)))<1d-10,&
+    'implicit identity Gamma fixes a self-conjugate spatial sector without a dense grid operator')
+  if(nproc>1)then
+    call sew_dg_w90_periodic_phase_conjugate_sector(MPI_COMM_WORLD,sector_ids,sector_trial_aligned,&
+      cross_gamma_rows,cross_conjugate_sector,8,implicit_gamma_fingerprint,.true.,0d0,1d-12,&
+      cross_aligned_conjugate,cross_gamma_defect,cross_workspace,ok,message,rank==0)
+    call require(.not.ok,'implicit identity Gamma rejects a rank-disagreeing operator branch')
+  endif
+  deallocate(implicit_gamma_rows)
+  if(nlocal>1)then
+    global_point=int(sector_ids(2));sector_ids(2)=sector_ids(1)
+  endif
+  call sew_dg_w90_periodic_phase_conjugate_sector(MPI_COMM_WORLD,sector_ids,sector_trial_aligned,&
+    cross_gamma_rows,cross_conjugate_sector,8,cross_gamma_fingerprint,.true.,0d0,1d-12,&
+    cross_aligned_conjugate,cross_gamma_defect,cross_workspace,ok,message)
+  call require(merge(.not.ok,ok,nlocal>1),'Gamma sewing rejects duplicate rows owned by one rank')
+  if(nlocal>1)sector_ids(2)=int(global_point,8)
+  if(nproc>1)then
+    call sew_dg_w90_periodic_phase_conjugate_sector(MPI_COMM_WORLD,sector_ids,sector_trial_aligned,&
+      cross_gamma_rows,cross_conjugate_sector,8,cross_gamma_fingerprint,rank==0,0d0,1d-12,&
+      cross_aligned_conjugate,cross_gamma_defect,cross_workspace,ok,message)
+    call require(.not.ok,'Gamma sewing rejects rank-disagreeing self-conjugacy metadata')
+  endif
+  cross_conjugate_sector=conjg(cross_target_sector)
+  call align_dg_w90_cross_character_sector_gauge(MPI_COMM_WORLD,sector_ids,cross_reference_sector,&
+    cross_target_sector,cross_w90_reference,cross_localization_weights,8,4,0_8,0d0,1d-12,&
+    sector_trial_aligned,cross_singular_values,cross_polar_defect,sector_trial_fingerprint,&
+    cross_workspace,ok,message)
+  call require(.not.ok,'cross-character alignment rejects a zero W90 frame receipt')
+  sector_ids(1)=9_8
+  call align_dg_w90_cross_character_sector_gauge(MPI_COMM_WORLD,sector_ids,cross_reference_sector,&
+    cross_target_sector,cross_w90_reference,cross_localization_weights,8,4,123_8,0d0,1d-12,&
+    sector_trial_aligned,cross_singular_values,cross_polar_defect,sector_trial_fingerprint,&
+    cross_workspace,ok,message)
+  call require(.not.ok,'cross-character alignment rejects a row outside the global extent')
+  sector_ids(1)=int(rank*nlocal+1,8)
+  call align_dg_w90_cross_character_sector_gauge(MPI_COMM_WORLD,sector_ids,cross_reference_sector,&
+    cross_target_sector,cross_w90_reference,cross_localization_weights,8,4,123_8,0d0,1d-12,&
+    cross_aligned_target,cross_singular_values,&
+    cross_polar_defect,cross_fingerprint,cross_workspace,ok,message)
+  call require(ok.and.cross_polar_defect<1d-10.and.minval(cross_singular_values)>0.4d0.and.&
+    maxval(abs(cross_aligned_target(:,1)-exp(cmplx(0d0,0.4d0,8))*cross_target_sector(:,1)))<1d-10.and.&
+    maxval(abs(cross_aligned_target(:,2)-exp(cmplx(0d0,-0.7d0,8))*cross_target_sector(:,2)))<1d-10,&
+    'Wannier90 reference links orthogonal character sectors without center matching')
+  call align_dg_w90_cross_character_sector_gauge(MPI_COMM_WORLD,sector_ids,cross_reference_sector,&
+    cross_rotated_target,cross_w90_reference,cross_localization_weights,8,4,123_8,0d0,1d-12,&
+    sector_trial_aligned,cross_singular_values,&
+    cross_polar_defect,sector_trial_fingerprint,cross_workspace,ok,message)
+  call require(ok.and.sector_trial_fingerprint==cross_fingerprint.and.&
+    maxval(abs(sector_trial_aligned-cross_aligned_target))<1d-10,&
+    'cross-character gauge is invariant under target-sector frame rotation')
+  cross_localization_weights=0d0
+  call align_dg_w90_cross_character_sector_gauge(MPI_COMM_WORLD,sector_ids,cross_reference_sector,&
+    cross_target_sector,cross_w90_reference,cross_localization_weights,8,4,123_8,0d0,1d-12,&
+    sector_trial_aligned,cross_singular_values,cross_polar_defect,sector_trial_fingerprint,&
+    cross_workspace,ok,message)
+  call require(.not.ok,'cross-character alignment rejects a singular weighted localization link')
+  cross_localization_weights=[1d0,2d0,-1d0,-2d0]
+  if(rank==0.and.nproc>1)cross_localization_weights(1)=1.5d0
+  call align_dg_w90_cross_character_sector_gauge(MPI_COMM_WORLD,sector_ids,cross_reference_sector,&
+    cross_target_sector,cross_w90_reference,cross_localization_weights,8,4,123_8,0d0,1d-12,&
+    sector_trial_aligned,cross_singular_values,cross_polar_defect,sector_trial_fingerprint,&
+    cross_workspace,ok,message)
+  call require(nproc==1.or..not.ok,'cross-character alignment rejects rank-disagreeing localization weights')
+  cross_localization_weights=[1d0,2d0,-1d0,-2d0]
+  cross_localization_weights(1)=1d300
+  call align_dg_w90_cross_character_sector_gauge(MPI_COMM_WORLD,sector_ids,cross_reference_sector,&
+    cross_target_sector,cross_w90_reference,cross_localization_weights,8,4,123_8,0d0,1d-12,&
+    sector_trial_aligned,cross_singular_values,cross_polar_defect,sector_trial_fingerprint,&
+    cross_workspace,ok,message)
+  call require(.not.ok,'cross-character alignment rejects finite-huge localization weights before multiplication')
+  cross_localization_weights=[1d0,2d0,-1d0,-2d0]
   localization_cluster_spectrum=[0d0,1d0,1d0,2d0]
   call validate_dg_w90_localization_cluster(localization_cluster_spectrum,2,1d-12,ok,message)
   call require(.not.ok.and.index(trim(message),'splits')>0,&
@@ -272,13 +528,15 @@ program test_dg_overlapping_wannier_w90_mpi
   gauge_transform=reshape([cmplx(0d0,0d0,8),cmplx(-1d0,0d0,8),&
     cmplx(1d0,0d0,8),cmplx(0d0,0d0,8)],[2,2])
   gauge_centers=reshape([0.2d0,0d0,0d0,0.2d0,0d0,0d0],[3,2])
+  gauge_spreads=[20d0,10d0]
   call apply_dg_w90_gamma_transform(MPI_COMM_WORLD,gauge_ids,gauge_values,gauge_gradients,&
-    gauge_transform,gauge_centers,1d-12,ok,message)
+    gauge_transform,gauge_centers,1d-12,ok,message,gauge_spreads)
   call require(ok.and.maxval(abs(gauge_values(1,:)-local_values(1,:)))<1d-12.and.&
     maxval(abs(gauge_values(2,:)+local_values(2,:)))<1d-12.and.&
     abs(gauge_transform(1,1)-1d0)<1d-12.and.abs(gauge_transform(2,2)+1d0)<1d-12.and.&
     maxval(abs(gauge_transform-reshape([cmplx(1d0,0d0,8),cmplx(0d0,0d0,8),&
-      cmplx(0d0,0d0,8),cmplx(-1d0,0d0,8)],[2,2])))<1d-12,trim(message))
+      cmplx(0d0,0d0,8),cmplx(-1d0,0d0,8)],[2,2])))<1d-12.and.&
+    maxval(abs(gauge_spreads-[10d0,20d0]))<1d-12,trim(message))
   transform(1,1)=2d0
   call validate_dg_w90_result(transform,centers,spreads,spread,0.8d0,1d-12,ok,message)
   call require(.not.ok,'nonunitary Wannier90 transform rejection')

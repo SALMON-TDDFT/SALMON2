@@ -14,8 +14,387 @@ module dg_overlapping_wannier_w90
   public::inherit_dg_w90_affine_receipts
   public::validate_dg_w90_convergence_log
   public::align_dg_w90_character_sector_gauge
+  public::align_dg_w90_cross_character_sector_gauge
+  public::align_dg_w90_character_sectors_by_periodic_phase
+  public::sew_dg_w90_periodic_phase_conjugate_sector
+  public::anchor_dg_w90_reference_character_sector
+  public::project_dg_w90_reference_sector_operators
   public::validate_dg_w90_localization_cluster
 contains
+
+  subroutine project_dg_w90_reference_sector_operators(comm,row_ids,sector_rows,w90_rows,w90_values,&
+      lcfo_rows,lcfo_values,global_row_count,w90_fingerprint,lcfo_fingerprint,w90_frame_defect,lcfo_source_defect,tolerance,&
+      w90_operator,lcfo_operator,projection_defect,fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,global_row_count
+    integer(int64),intent(in)::row_ids(:),w90_fingerprint,lcfo_fingerprint
+    complex(real64),intent(in)::sector_rows(:,:),w90_rows(:,:),lcfo_rows(:,:)
+    real(real64),intent(in)::w90_values(:),lcfo_values(:),w90_frame_defect,lcfo_source_defect,tolerance
+    complex(real64),allocatable,intent(out)::w90_operator(:,:),lcfo_operator(:,:)
+    real(real64),intent(out)::projection_defect
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(real64),allocatable::wp(:,:),lp(:,:),gram(:,:),stream_w(:),stream_l(:)
+    integer,allocatable::owner(:),position(:),count(:)
+    integer::nlocal,m,nw,i,j,rank,ierr,bad,gbad,status,minint,maxint
+    integer(int64)::bits,minhash,maxhash,elements,term,bytes,frame_hash
+    real(real64)::mintol,maxtol,scale,local_scale,global_scale,sector_scale,w90_scale,lcfo_scale,safe_limit,bound
+    logical::receipt_valid
+    nlocal=size(row_ids);m=size(sector_rows,2);nw=size(w90_rows,2)
+    ok=.false.;message='';projection_defect=huge(1d0);fingerprint=0_int64;workspace_peak_bytes=0_int64
+    bad=merge(0,1,global_row_count>=1.and.m>=1.and.nw>=m.and.size(sector_rows,1)==nlocal.and.&
+      all(shape(w90_rows)==[nlocal,nw]).and.all(shape(lcfo_rows)==[nlocal,nw]).and.&
+      size(w90_values)==nw.and.size(lcfo_values)==nw.and.w90_fingerprint/=0_int64.and.lcfo_fingerprint/=0_int64.and.&
+      w90_frame_defect>=0d0.and.w90_frame_defect<=tolerance.and.&
+      lcfo_source_defect>=0d0.and.lcfo_source_defect<=tolerance.and.&
+      all(row_ids>=1_int64).and.all(row_ids<=int(global_row_count,int64)).and.&
+      tolerance>=1d-15.and.tolerance<=1d-2.and.ieee_is_finite(tolerance).and.&
+      all(ieee_is_finite(w90_values)).and.all(ieee_is_finite(lcfo_values)).and.&
+      all(ieee_is_finite(real(sector_rows))).and.all(ieee_is_finite(aimag(sector_rows))).and.&
+      all(ieee_is_finite(real(w90_rows))).and.all(ieee_is_finite(aimag(w90_rows))).and.&
+      all(ieee_is_finite(real(lcfo_rows))).and.all(ieee_is_finite(aimag(lcfo_rows))))
+    call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='invalid reference-sector operator projection contract';return;endif
+    do i=1,3
+      if(i==1)j=global_row_count;if(i==2)j=m;if(i==3)j=nw
+      call MPI_Allreduce(j,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(j,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='reference operator dimensions disagree';return;endif
+    enddo
+    call MPI_Allreduce(tolerance,mintol,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tolerance,maxtol,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.mintol/=maxtol)then;message='reference operator tolerance disagrees';return;endif
+    do i=1,2
+      scale=merge(w90_frame_defect,lcfo_source_defect,i==1)
+      call MPI_Allreduce(scale,mintol,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(scale,maxtol,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.mintol/=maxtol)then;message='reference frame defects disagree';return;endif
+      bits=merge(w90_fingerprint,lcfo_fingerprint,i==1)
+      call MPI_Allreduce(bits,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(bits,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)then;message='reference frame fingerprints disagree';return;endif
+    enddo
+    do i=1,nw
+      bits=transfer(w90_values(i),bits);call MPI_Allreduce(bits,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+      if(ierr/=MPI_SUCCESS)return;call MPI_Allreduce(bits,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)then;message='W90 physical operator values disagree';return;endif
+      bits=transfer(lcfo_values(i),bits);call MPI_Allreduce(bits,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+      if(ierr/=MPI_SUCCESS)return;call MPI_Allreduce(bits,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)then;message='LCFO physical operator values disagree';return;endif
+    enddo
+    sector_scale=0d0;w90_scale=0d0;lcfo_scale=0d0
+    if(nlocal>0)then
+      sector_scale=maxval(abs(sector_rows));w90_scale=maxval(abs(w90_rows));lcfo_scale=maxval(abs(lcfo_rows))
+    endif
+    call MPI_Allreduce(MPI_IN_PLACE,sector_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(MPI_IN_PLACE,w90_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(MPI_IN_PLACE,lcfo_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    scale=max(maxval(abs(w90_values)),maxval(abs(lcfo_values)))
+    safe_limit=huge(1d0)/64d0;bad=0
+    do i=1,2
+      local_scale=merge(w90_scale,lcfo_scale,i==1);global_scale=merge(maxval(abs(w90_values)),maxval(abs(lcfo_values)),i==1)
+      if(global_scale>0d0)then
+        bound=sqrt((safe_limit/real(nw,real64))/global_scale)/real(global_row_count,real64)
+      else
+        bound=huge(1d0)
+      endif
+      if(local_scale>0d0)then
+        if(sector_scale>bound/local_scale)bad=1
+      endif
+    enddo
+    if(m>huge(0)/m.or.m>huge(0)/nw)bad=1
+    call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='reference operator projection magnitude or extent overflows';return;endif
+    elements=0_int64;bytes=0_int64;receipt_valid=.true.
+    call checked_product([2_int64,int(m,int64),int(nw,int64)],term,receipt_valid);call checked_add(elements,term,receipt_valid)
+    call checked_product([3_int64,int(m,int64),int(m,int64)],term,receipt_valid);call checked_add(elements,term,receipt_valid)
+    call checked_product([2_int64,int(nw,int64)],term,receipt_valid);call checked_add(elements,term,receipt_valid)
+    call checked_product([elements,16_int64],bytes,receipt_valid)
+    call checked_product([3_int64,int(global_row_count,int64),4_int64],term,receipt_valid);call checked_add(bytes,term,receipt_valid)
+    bad=merge(0,1,receipt_valid);call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='reference operator workspace overflows';return;endif
+    workspace_peak_bytes=bytes;call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
+    allocate(wp(m,nw),lp(m,nw),gram(m,m),stream_w(nw),stream_l(nw),w90_operator(m,m),lcfo_operator(m,m),&
+      owner(global_row_count),position(global_row_count),count(global_row_count),stat=status)
+    call MPI_Allreduce(status,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then
+      if(allocated(w90_operator))deallocate(w90_operator);if(allocated(lcfo_operator))deallocate(lcfo_operator)
+      message='reference operator projection allocation failed';return
+    endif
+    owner=0;position=0;count=0
+    do i=1,nlocal
+      owner(int(row_ids(i)))=rank+1;position(int(row_ids(i)))=i;count(int(row_ids(i)))=count(int(row_ids(i)))+1
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,owner,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(MPI_IN_PLACE,position,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(MPI_IN_PLACE,count,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(count/=1))then;message='reference operator rows are not uniquely owned';return;endif
+    frame_hash=int(z'510E527FADE682D1',int64)
+    do i=1,global_row_count
+      stream_w=(0d0,0d0);stream_l=(0d0,0d0)
+      if(rank==owner(i)-1)then;stream_w=w90_rows(position(i),:);stream_l=lcfo_rows(position(i),:);endif
+      call MPI_Bcast(stream_w,nw,MPI_DOUBLE_COMPLEX,owner(i)-1,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Bcast(stream_l,nw,MPI_DOUBLE_COMPLEX,owner(i)-1,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      frame_hash=ieor(ishftc(frame_hash,7),int(i,int64))
+      do j=1,nw
+        bits=transfer(real(stream_w(j),real64),bits);frame_hash=ieor(ishftc(frame_hash,7),bits)
+        bits=transfer(aimag(stream_w(j)),bits);frame_hash=ieor(ishftc(frame_hash,7),bits)
+        bits=transfer(real(stream_l(j),real64),bits);frame_hash=ieor(ishftc(frame_hash,7),bits)
+        bits=transfer(aimag(stream_l(j)),bits);frame_hash=ieor(ishftc(frame_hash,7),bits)
+      enddo
+    enddo
+    if(frame_hash==0_int64)frame_hash=1_int64
+    gram=matmul(conjg(transpose(sector_rows)),sector_rows)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo;projection_defect=maxval(abs(gram))
+    wp=matmul(conjg(transpose(sector_rows)),w90_rows);lp=matmul(conjg(transpose(sector_rows)),lcfo_rows)
+    call MPI_Allreduce(MPI_IN_PLACE,wp,m*nw,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(MPI_IN_PLACE,lp,m*nw,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    w90_operator=matmul(wp*spread(w90_values,1,m),conjg(transpose(wp)))
+    lcfo_operator=matmul(lp*spread(lcfo_values,1,m),conjg(transpose(lp)))
+    bad=merge(0,1,all(ieee_is_finite(real(w90_operator))).and.all(ieee_is_finite(aimag(w90_operator))).and.&
+      all(ieee_is_finite(real(lcfo_operator))).and.all(ieee_is_finite(aimag(lcfo_operator))))
+    call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='projected reference operators are nonfinite';return;endif
+    projection_defect=max(projection_defect,maxval(abs(w90_operator-conjg(transpose(w90_operator)))),&
+      maxval(abs(lcfo_operator-conjg(transpose(lcfo_operator)))))
+    call MPI_Allreduce(MPI_IN_PLACE,projection_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.projection_defect>10d0*tolerance)then;message='reference operator projection defect too large';return;endif
+    fingerprint=ieor(ieor(w90_fingerprint,lcfo_fingerprint),frame_hash)
+    do i=1,m;do j=1,m
+      if(max(abs(real(w90_operator(i,j),real64)),abs(aimag(w90_operator(i,j))),&
+          abs(real(lcfo_operator(i,j),real64)),abs(aimag(lcfo_operator(i,j))))/(100d0*tolerance)>&
+          0.25d0*real(huge(0_int64),real64))then;message='reference operator fingerprint overflows';return;endif
+      bits=nint(real(w90_operator(i,j),real64)/(100d0*tolerance),int64);fingerprint=ieor(ishftc(fingerprint,7),bits)
+      bits=nint(aimag(w90_operator(i,j))/(100d0*tolerance),int64);fingerprint=ieor(ishftc(fingerprint,7),bits)
+      bits=nint(real(lcfo_operator(i,j),real64)/(100d0*tolerance),int64);fingerprint=ieor(ishftc(fingerprint,7),bits)
+      bits=nint(aimag(lcfo_operator(i,j))/(100d0*tolerance),int64);fingerprint=ieor(ishftc(fingerprint,7),bits)
+    enddo;enddo
+    if(fingerprint==0_int64)fingerprint=1_int64;ok=.true.
+  end subroutine project_dg_w90_reference_sector_operators
+
+  subroutine anchor_dg_w90_reference_character_sector(comm,row_ids,sector_rows,w90_operator,lcfo_operator,&
+      global_row_count,w90_fingerprint,lcfo_fingerprint,w90_frame_defect,lcfo_source_defect,tolerance,&
+      anchored_rows,anchor_defect,fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,global_row_count
+    integer(int64),intent(in)::row_ids(:),w90_fingerprint,lcfo_fingerprint
+    complex(real64),intent(in)::sector_rows(:,:)
+    complex(real64),intent(in)::w90_operator(:,:),lcfo_operator(:,:)
+    real(real64),intent(in)::tolerance
+    complex(real64),allocatable,intent(out)::anchored_rows(:,:)
+    real(real64),intent(out)::anchor_defect
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(real64),allocatable::hmat(:,:),kmat(:,:),unitary(:,:),block(:,:),work(:),stream(:),remote_stream(:),gram(:,:)
+    real(real64),allocatable::eval(:),block_eval(:),rwork(:)
+    integer,allocatable::owner(:),position(:),count(:),same_cluster(:)
+    integer::nlocal,m,i,j,k,l,r,rank,ierr,bad,gbad,status,lwork,info,minint,maxint
+    integer(int64)::bits,minhash,maxhash,complex_elements,real_elements,integer_elements,byte_term,operator_hash
+    real(real64),intent(in)::w90_frame_defect,lcfo_source_defect
+    real(real64)::mintol,maxtol,pivot,scale,operator_scale,local_defect,global_defect
+    complex(real64)::projector_value
+    logical::receipt_valid
+    interface
+      subroutine zheev(jobz,uplo,n,a,lda,w,work,lwork,rwork,info)
+        character,intent(in)::jobz,uplo;integer,intent(in)::n,lda,lwork
+        complex(8),intent(inout)::a(lda,*),work(*);real(8),intent(out)::w(*),rwork(*)
+        integer,intent(out)::info
+      end subroutine
+    end interface
+    nlocal=size(row_ids);m=size(sector_rows,2)
+    ok=.false.;message='';anchor_defect=huge(1d0);fingerprint=0_int64;workspace_peak_bytes=0_int64
+    bad=merge(0,1,global_row_count>=1.and.m>=1.and.size(sector_rows,1)==nlocal.and.&
+      all(shape(w90_operator)==[m,m]).and.all(shape(lcfo_operator)==[m,m]).and.&
+      w90_fingerprint/=0_int64.and.lcfo_fingerprint/=0_int64.and.&
+      w90_frame_defect>=0d0.and.w90_frame_defect<=tolerance.and.&
+      lcfo_source_defect>=0d0.and.lcfo_source_defect<=tolerance.and.&
+      all(row_ids>=1_int64).and.all(row_ids<=int(global_row_count,int64)).and.&
+      tolerance>=1d-15.and.tolerance<=1d-2.and.ieee_is_finite(tolerance).and.&
+      all(ieee_is_finite(real(w90_operator))).and.all(ieee_is_finite(aimag(w90_operator))).and.&
+      all(ieee_is_finite(real(lcfo_operator))).and.all(ieee_is_finite(aimag(lcfo_operator))).and.&
+      all(ieee_is_finite(real(sector_rows))).and.all(ieee_is_finite(aimag(sector_rows))).and.&
+      maxval(abs(w90_operator-conjg(transpose(w90_operator))))<=10d0*tolerance.and.&
+      maxval(abs(lcfo_operator-conjg(transpose(lcfo_operator))))<=10d0*tolerance)
+    call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='invalid W90 reference-sector anchor contract';return;endif
+    do i=1,2
+      select case(i);case(1);j=global_row_count;case default;j=m;endselect
+      call MPI_Allreduce(j,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(j,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='W90 anchor metadata disagree';return;endif
+    enddo
+    call MPI_Allreduce(tolerance,mintol,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tolerance,maxtol,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.mintol/=maxtol)then;message='W90 anchor tolerance disagrees';return;endif
+    do k=1,2
+      bits=merge(w90_fingerprint,lcfo_fingerprint,k==1)
+      call MPI_Allreduce(bits,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(bits,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)then;message='W90 anchor provenance disagrees';return;endif
+    enddo
+    do k=1,2
+      pivot=merge(w90_frame_defect,lcfo_source_defect,k==1)
+      call MPI_Allreduce(pivot,mintol,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(pivot,maxtol,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.mintol/=maxtol)then;message='W90 anchor frame receipts disagree';return;endif
+    enddo
+    do j=1,m;do i=1,m
+      bits=transfer(real(w90_operator(i,j),real64),bits)
+      call MPI_Allreduce(bits,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(bits,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)return
+      bits=transfer(aimag(w90_operator(i,j)),bits)
+      call MPI_Allreduce(bits,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(bits,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)return
+      bits=transfer(real(lcfo_operator(i,j),real64),bits)
+      call MPI_Allreduce(bits,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(bits,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)return
+      bits=transfer(aimag(lcfo_operator(i,j)),bits)
+      call MPI_Allreduce(bits,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(bits,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)then;message='W90 anchor operator payloads disagree';return;endif
+    enddo;enddo
+    operator_scale=max(maxval(abs(w90_operator)),maxval(abs(lcfo_operator)))
+    bad=merge(0,1,operator_scale<=sqrt(huge(1d0))/(16d0*real(max(1,m),real64)))
+    if(m>huge(0)/m.or.m>huge(0)/5)bad=1
+    complex_elements=0_int64;real_elements=0_int64;integer_elements=0_int64;receipt_valid=bad==0
+    if(receipt_valid)then
+      call checked_product([int(m,int64),int(m,int64),5_int64],byte_term,receipt_valid)
+      call checked_add(complex_elements,byte_term,receipt_valid)
+      call checked_product([int(nlocal,int64),int(m,int64)],byte_term,receipt_valid)
+      call checked_add(complex_elements,byte_term,receipt_valid)
+      call checked_product([4_int64,int(m,int64)],byte_term,receipt_valid)
+      call checked_add(complex_elements,byte_term,receipt_valid)
+      call checked_product([7_int64,int(m,int64)],byte_term,receipt_valid)
+      call checked_add(real_elements,byte_term,receipt_valid)
+      call checked_product([3_int64,int(global_row_count,int64)],byte_term,receipt_valid)
+      call checked_add(integer_elements,byte_term,receipt_valid)
+      call checked_product([complex_elements,16_int64],workspace_peak_bytes,receipt_valid)
+      call checked_product([real_elements,8_int64],byte_term,receipt_valid)
+      call checked_add(workspace_peak_bytes,byte_term,receipt_valid)
+      call checked_product([integer_elements,4_int64],byte_term,receipt_valid)
+      call checked_add(workspace_peak_bytes,byte_term,receipt_valid)
+    endif
+    bad=merge(0,1,receipt_valid)
+    call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='W90 anchor extent, magnitude, or workspace overflows';return;endif
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
+    allocate(hmat(m,m),kmat(m,m),unitary(m,m),gram(m,m),eval(m),block_eval(m),block(m,m),&
+      rwork(max(1,3*m)),work(max(1,2*m)),anchored_rows(nlocal,m),owner(global_row_count),&
+      position(global_row_count),count(global_row_count),same_cluster(max(1,m-1)),stream(m),remote_stream(m),stat=status)
+    call MPI_Allreduce(status,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then
+      if(allocated(anchored_rows))deallocate(anchored_rows)
+      message='W90 anchor allocation failed';return
+    endif
+    owner=0;position=0;count=0
+    do i=1,nlocal
+      owner(int(row_ids(i)))=rank+1;position(int(row_ids(i)))=i
+      count(int(row_ids(i)))=count(int(row_ids(i)))+1
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,owner,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(MPI_IN_PLACE,position,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(MPI_IN_PLACE,count,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(count/=1))then;message='W90 anchor rows are not uniquely owned';return;endif
+    gram=matmul(conjg(transpose(sector_rows)),sector_rows)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+    bad=merge(0,1,maxval(abs(gram))<=10d0*tolerance)
+    call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='W90 anchor sector frame is not orthonormal';return;endif
+    hmat=w90_operator;kmat=lcfo_operator
+    unitary=hmat;lwork=size(work);call zheev('V','U',m,unitary,m,eval,work,lwork,rwork,info)
+    bad=merge(0,1,info==0.and.all(ieee_is_finite(eval)))
+    call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='W90 anchor position diagonalization failed';return;endif
+    local_defect=maxval(abs(matmul(hmat,unitary)-unitary*spread(eval,1,m)))
+    same_cluster=0
+    do i=1,m-1
+      bad=merge(1,0,abs(eval(i+1)-eval(i))<=10d0*tolerance*max(1d0,maxval(abs(eval))))
+      call MPI_Allreduce(bad,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(bad,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='W90 anchor H cluster boundaries disagree';return;endif
+      same_cluster(i)=minint
+    enddo
+    l=1
+    do while(l<=m)
+      r=l
+      do while(r<m)
+        if(same_cluster(r)==0)exit
+        r=r+1
+      enddo
+      if(r>l)then
+        block(1:r-l+1,1:r-l+1)=matmul(conjg(transpose(unitary(:,l:r))),matmul(kmat,unitary(:,l:r)))
+        call zheev('V','U',r-l+1,block,r-l+1,block_eval,work,lwork,rwork,info)
+        bad=merge(0,1,info==0.and.all(ieee_is_finite(block_eval(1:r-l+1))))
+        call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+        if(ierr/=MPI_SUCCESS.or.gbad/=0)then
+          message='LCFO anchor block diagonalization failed';return
+        endif
+        scale=max(1d0,maxval(abs(block_eval(1:r-l+1))))
+        ! Exact repeated eigenvalues are complete symmetry multiplets, not a
+        ! numerical rank cut.  ZHEEV resolves every nondegenerate direction and
+        ! leaves only an arbitrary unitary gauge inside each exact multiplet;
+        ! downstream character alignment transports that whole block gauge.
+        unitary(:,l:r)=matmul(unitary(:,l:r),block(1:r-l+1,1:r-l+1))
+        hmat(:,1:r-l+1)=matmul(kmat,unitary(:,l:r))
+        hmat(:,1:r-l+1)=matmul(unitary(:,l:r),matmul(conjg(transpose(unitary(:,l:r))),hmat(:,1:r-l+1)))
+        local_defect=max(local_defect,maxval(abs(hmat(:,1:r-l+1)-&
+          unitary(:,l:r)*spread(block_eval(1:r-l+1),1,m))))
+      endif
+      l=r+1
+    enddo
+    anchored_rows=matmul(sector_rows,unitary)
+    gram=matmul(conjg(transpose(anchored_rows)),anchored_rows)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+    local_defect=max(local_defect,maxval(abs(gram)))
+    call MPI_Allreduce(local_defect,global_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    anchor_defect=global_defect
+    if(anchor_defect>10d0*tolerance)then;message='anchored W90 reference sector is not orthonormal';return;endif
+    do j=1,m
+      pivot=maxval(abs(anchored_rows(:,j)));call MPI_Allreduce(MPI_IN_PLACE,pivot,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      do k=1,global_row_count
+        stream=(0d0,0d0);if(rank==owner(k)-1)stream(1)=anchored_rows(position(k),j)
+        call MPI_Bcast(stream,1,MPI_DOUBLE_COMPLEX,owner(k)-1,comm,ierr);if(ierr/=MPI_SUCCESS)return
+        if(abs(stream(1))>=pivot-10d0*tolerance)then
+          if(abs(stream(1))>tolerance)anchored_rows(:,j)=anchored_rows(:,j)*conjg(stream(1))/abs(stream(1))
+          exit
+        endif
+      enddo
+    enddo
+    operator_hash=ieor(w90_fingerprint,lcfo_fingerprint)
+    bits=transfer(w90_frame_defect,bits);operator_hash=ieor(ishftc(operator_hash,7),bits)
+    bits=transfer(lcfo_source_defect,bits);operator_hash=ieor(ishftc(operator_hash,7),bits)
+    do i=1,m
+      if(abs(eval(i))/(100d0*tolerance)>0.25d0*real(huge(0_int64),real64))then
+        message='W90 anchor eigenvalue quantization overflows';return
+      endif
+      bits=nint(eval(i)/(100d0*tolerance),int64);operator_hash=ieor(ishftc(operator_hash,7),bits)
+    enddo
+    fingerprint=operator_hash
+    do k=1,global_row_count
+      stream=(0d0,0d0);if(rank==owner(k)-1)stream=anchored_rows(position(k),:)
+      call MPI_Bcast(stream,m,MPI_DOUBLE_COMPLEX,owner(k)-1,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      fingerprint=ieor(ishftc(fingerprint,11),int(k,int64))
+      do i=1,global_row_count
+        remote_stream=(0d0,0d0)
+        if(rank==owner(i)-1)remote_stream=anchored_rows(position(i),:)
+        call MPI_Bcast(remote_stream,m,MPI_DOUBLE_COMPLEX,owner(i)-1,comm,ierr);if(ierr/=MPI_SUCCESS)return
+        projector_value=sum(stream*conjg(remote_stream))
+        if(max(abs(real(projector_value,real64)),abs(aimag(projector_value)))/(100d0*tolerance)>&
+            0.25d0*real(huge(0_int64),real64))then
+          message='W90 anchor projector fingerprint quantization overflows';return
+        endif
+        bits=nint(real(projector_value,real64)/(100d0*tolerance),int64)
+        fingerprint=ieor(ishftc(fingerprint,11),ieor(int(i,int64),bits))
+        bits=nint(aimag(projector_value)/(100d0*tolerance),int64)
+        fingerprint=ieor(ishftc(fingerprint,11),bits)
+      enddo
+    enddo
+    if(fingerprint==0_int64)fingerprint=1_int64
+    ok=.true.
+  end subroutine anchor_dg_w90_reference_character_sector
   subroutine validate_dg_w90_localization_cluster(eigenvalues,selected_count,tolerance,ok,message)
     ! The localization eigensolver must supply this spectrum in ascending order.
     real(real64),intent(in)::eigenvalues(:),tolerance
@@ -42,6 +421,683 @@ contains
   end subroutine validate_dg_w90_localization_cluster
 
 #ifdef USE_MPI
+  subroutine align_dg_w90_character_sectors_by_periodic_phase(comm,row_ids,reference_rows,target_rows,&
+      periodic_phase,global_row_count,phase_fingerprint,phase_payload_fingerprint,tolerance,&
+      aligned_rows,singular_values,polar_defect,fingerprint,&
+      workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,global_row_count
+    integer(int64),intent(in)::phase_fingerprint,phase_payload_fingerprint
+    integer(int64),intent(in)::row_ids(:)
+    complex(real64),intent(in)::reference_rows(:,:),target_rows(:,:),periodic_phase(:)
+    real(real64),intent(in)::tolerance
+    complex(real64),allocatable,intent(out)::aligned_rows(:,:)
+    real(real64),allocatable,intent(out)::singular_values(:)
+    real(real64),intent(out)::polar_defect
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(real64),allocatable::link(:,:),left(:,:),right(:,:),polar(:,:),gram(:,:),work(:),remote_row(:),projector_row(:)
+    real(real64),allocatable::rwork(:)
+    integer,allocatable::owner(:),position(:),ownership_count(:)
+    integer::nlocal,m,i,j,k,rank,ierr,local_bad,global_bad,allocation_status,lwork,info
+    integer::minint,maxint
+    real(real64)::mintol,maxtol,scale,global_defect
+    integer(int64)::phase_bits,elements,term,min_fingerprint,max_fingerprint,recomputed_phase_fingerprint
+    interface
+      subroutine zgesvd(jobu,jobvt,m,n,a,lda,s,u,ldu,vt,ldvt,work,lwork,rwork,info)
+        character,intent(in)::jobu,jobvt
+        integer,intent(in)::m,n,lda,ldu,ldvt,lwork
+        complex(8),intent(inout)::a(lda,*),work(*)
+        real(8),intent(out)::s(*),rwork(*)
+        complex(8),intent(out)::u(ldu,*),vt(ldvt,*)
+        integer,intent(out)::info
+      end subroutine
+    end interface
+    nlocal=size(row_ids);m=size(reference_rows,2);ok=.false.;message=''
+    polar_defect=huge(1d0);fingerprint=0_int64;workspace_peak_bytes=0_int64
+    local_bad=merge(0,1,global_row_count>=1.and.m>=1.and.size(reference_rows,1)==nlocal.and.&
+      all(shape(target_rows)==[nlocal,m]).and.size(periodic_phase)==nlocal.and.&
+      all(row_ids>=1_int64).and.all(row_ids<=int(global_row_count,int64)).and.&
+      phase_fingerprint/=0_int64.and.phase_payload_fingerprint/=0_int64.and.&
+      tolerance>=1d-15.and.tolerance<=1d-2.and.ieee_is_finite(tolerance).and.&
+      all(ieee_is_finite(real(reference_rows))).and.all(ieee_is_finite(aimag(reference_rows))).and.&
+      all(ieee_is_finite(real(target_rows))).and.all(ieee_is_finite(aimag(target_rows))).and.&
+      all(ieee_is_finite(real(periodic_phase))).and.all(ieee_is_finite(aimag(periodic_phase))).and.&
+      maxval(abs(abs(periodic_phase)-1d0))<=10d0*tolerance)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid periodic-phase sector alignment contract';return;endif
+    call MPI_Allreduce(global_row_count,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(global_row_count,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='periodic-phase row extent disagrees';return;endif
+    call MPI_Allreduce(m,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(m,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='periodic-phase sector rank disagrees';return;endif
+    call MPI_Allreduce(tolerance,mintol,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tolerance,maxtol,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.mintol/=maxtol)then;message='periodic-phase tolerance disagrees';return;endif
+    call MPI_Allreduce(phase_fingerprint,min_fingerprint,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(phase_fingerprint,max_fingerprint,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.min_fingerprint/=max_fingerprint)then;message='periodic-phase provenance disagrees';return;endif
+    call MPI_Allreduce(phase_payload_fingerprint,min_fingerprint,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(phase_payload_fingerprint,max_fingerprint,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.min_fingerprint/=max_fingerprint)then;message='periodic-phase payload receipt disagrees';return;endif
+    local_bad=merge(1,0,m>huge(0)/m.or.m>huge(0)/5)
+    if(local_bad==0)then
+      if(int(nlocal,int64)>huge(0_int64)/int(m,int64).or.&
+          int(m,int64)>huge(0_int64)/int(m,int64))local_bad=1
+    endif
+    if(local_bad==0)then
+      elements=int(nlocal,int64)*int(m,int64);term=int(m,int64)*int(m,int64)
+      if(term>huge(0_int64)/5_int64)then
+        local_bad=1
+      elseif(elements>huge(0_int64)-5_int64*term-int(m,int64)-int(global_row_count,int64))then
+        local_bad=1
+      endif
+    endif
+    if(local_bad==0)then
+      elements=elements+5_int64*term+int(m,int64)+int(global_row_count,int64)
+      if(elements>huge(0_int64)/16_int64)then
+        local_bad=1
+      else
+        workspace_peak_bytes=16_int64*elements
+      endif
+    endif
+    if(local_bad==0)then
+      term=6_int64*int(m,int64)
+      if(term>huge(0_int64)/8_int64.or.workspace_peak_bytes>huge(0_int64)-8_int64*term)then
+        local_bad=1
+      else
+        workspace_peak_bytes=workspace_peak_bytes+8_int64*term
+      endif
+    endif
+    if(local_bad==0)then
+      term=3_int64*int(global_row_count,int64)
+      if(term>huge(0_int64)/4_int64.or.workspace_peak_bytes>huge(0_int64)-4_int64*term)then
+        local_bad=1
+      else
+        workspace_peak_bytes=workspace_peak_bytes+4_int64*term
+      endif
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='periodic-phase workspace overflows';return;endif
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
+    allocate(link(m,m),left(m,m),right(m,m),polar(m,m),gram(m,m),singular_values(m),&
+      aligned_rows(nlocal,m),rwork(max(1,5*m)),work(1),owner(global_row_count),position(global_row_count),&
+      ownership_count(global_row_count),remote_row(m),projector_row(global_row_count),stat=allocation_status)
+    call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(aligned_rows))deallocate(aligned_rows)
+      if(allocated(singular_values))deallocate(singular_values)
+      message='periodic-phase alignment allocation failed';return
+    endif
+    owner=0;position=0;ownership_count=0
+    do i=1,nlocal
+      owner(int(row_ids(i)))=rank+1;position(int(row_ids(i)))=i;ownership_count(int(row_ids(i)))=1
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,owner,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(MPI_IN_PLACE,position,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(MPI_IN_PLACE,ownership_count,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(ownership_count/=1))then;message='periodic-phase rows are not uniquely owned';return;endif
+    recomputed_phase_fingerprint=int(z'243F6A8885A308D3',int64)
+    do k=1,global_row_count
+      phase_bits=0_int64;if(rank==owner(k)-1)phase_bits=transfer(real(periodic_phase(position(k)),real64),phase_bits)
+      call MPI_Bcast(phase_bits,1,MPI_INTEGER8,owner(k)-1,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      recomputed_phase_fingerprint=ieor(ishftc(recomputed_phase_fingerprint,11),phase_bits)
+      if(rank==owner(k)-1)phase_bits=transfer(aimag(periodic_phase(position(k))),phase_bits)
+      call MPI_Bcast(phase_bits,1,MPI_INTEGER8,owner(k)-1,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      recomputed_phase_fingerprint=ieor(ishftc(recomputed_phase_fingerprint,11),phase_bits)
+    enddo
+    if(recomputed_phase_fingerprint==0_int64)recomputed_phase_fingerprint=1_int64
+    local_bad=merge(0,1,recomputed_phase_fingerprint==phase_payload_fingerprint)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='periodic-phase payload does not match its receipt';return;endif
+    gram=matmul(conjg(transpose(reference_rows)),reference_rows)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+    local_bad=merge(0,1,maxval(abs(gram))<=10d0*tolerance)
+    gram=matmul(conjg(transpose(target_rows)),target_rows)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+    if(maxval(abs(gram))>10d0*tolerance)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='periodic-phase sector frames are not orthonormal';return;endif
+    link=matmul(conjg(transpose(target_rows)),spread(periodic_phase,2,m)*reference_rows)
+    call MPI_Allreduce(MPI_IN_PLACE,link,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='periodic-phase localization link reduction failed';return;endif
+    left=link;lwork=-1
+    call zgesvd('A','A',m,m,left,m,singular_values,polar,m,right,m,work,lwork,rwork,info)
+    local_bad=merge(0,1,info==0.and.ieee_is_finite(real(work(1))))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='periodic-phase SVD query failed';return;endif
+    local_bad=merge(0,1,real(work(1),real64)<=real(huge(0),real64))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='periodic-phase SVD workspace overflows';return;endif
+    lwork=max(1,ceiling(real(work(1),real64)))
+    term=16_int64*(int(lwork,int64)-1_int64)
+    local_bad=merge(0,1,term>=0_int64.and.workspace_peak_bytes<=huge(0_int64)-term)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='periodic-phase workspace receipt overflows';return;endif
+    workspace_peak_bytes=workspace_peak_bytes+term
+    deallocate(work);allocate(work(lwork),stat=allocation_status)
+    call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(aligned_rows))deallocate(aligned_rows)
+      if(allocated(singular_values))deallocate(singular_values)
+      message='periodic-phase SVD allocation failed';return
+    endif
+    left=link;call zgesvd('A','A',m,m,left,m,singular_values,polar,m,right,m,work,lwork,rwork,info)
+    local_bad=merge(0,1,info==0.and.all(ieee_is_finite(singular_values)))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='periodic-phase SVD failed';return;endif
+    scale=max(1d0,maxval(singular_values))
+    local_bad=merge(0,1,minval(singular_values)>tolerance*scale)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='singular periodic-phase sector link';return;endif
+    polar=matmul(polar,right);aligned_rows=matmul(target_rows,polar)
+    gram=matmul(conjg(transpose(polar)),polar);do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+    polar_defect=maxval(abs(gram));call MPI_Allreduce(polar_defect,global_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    polar_defect=global_defect
+    if(ierr/=MPI_SUCCESS.or.polar_defect>10d0*tolerance)then;message='periodic-phase polar is not unitary';return;endif
+    fingerprint=ieor(int(z'A54FF53A5F1D36F1',int64),phase_fingerprint)
+    do k=1,global_row_count
+      remote_row=(0d0,0d0)
+      if(rank==owner(k)-1)then
+        remote_row=aligned_rows(position(k),:)
+      endif
+      call MPI_Bcast(remote_row,m,MPI_DOUBLE_COMPLEX,owner(k)-1,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      projector_row=(0d0,0d0)
+      do i=1,nlocal
+        projector_row(int(row_ids(i)))=sum(remote_row*conjg(aligned_rows(i,:)))
+      enddo
+      call MPI_Allreduce(MPI_IN_PLACE,projector_row,global_row_count,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)return
+      do j=1,global_row_count
+        phase_bits=nint(real(projector_row(j),real64)/(100d0*tolerance),int64)
+        fingerprint=ieor(ishftc(fingerprint,13),phase_bits)
+        phase_bits=nint(aimag(projector_row(j))/(100d0*tolerance),int64)
+        fingerprint=ieor(ishftc(fingerprint,13),phase_bits)
+      enddo
+    enddo
+    ok=.true.
+  end subroutine align_dg_w90_character_sectors_by_periodic_phase
+
+  subroutine sew_dg_w90_periodic_phase_conjugate_sector(comm,row_ids,aligned_rows,gamma_rows,&
+      conjugate_rows,global_row_count,gamma_fingerprint,self_conjugate,gamma_sewing_defect,tolerance,aligned_conjugate_rows,&
+      gamma_defect,workspace_peak_bytes,ok,message,implicit_identity)
+    integer,intent(in)::comm,global_row_count
+    integer(int64),intent(in)::gamma_fingerprint
+    logical,intent(in)::self_conjugate
+    logical,intent(in),optional::implicit_identity
+    integer(int64),intent(in)::row_ids(:)
+    complex(real64),intent(in)::aligned_rows(:,:),gamma_rows(:,:),conjugate_rows(:,:)
+    real(real64),intent(in)::gamma_sewing_defect,tolerance
+    complex(real64),allocatable,intent(out)::aligned_conjugate_rows(:,:)
+    real(real64),intent(out)::gamma_defect
+    integer(int64),intent(out)::workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(real64),allocatable::generated(:,:),remote_row(:),remote_gamma(:),local_operator_vector(:),&
+      gram(:,:),sewing(:,:),candidates(:,:),gauge(:,:)
+    integer,allocatable::owner(:),position(:),ownership_count(:)
+    integer::nlocal,m,i,j,k,nfixed,rank,ierr,local_bad,global_bad,status,minint,maxint,flagint,identity_flag
+    real(real64)::minimum,maximum,norm_value,operator_defect,local_operator_defect
+    complex(real64)::overlap_value
+    integer(int64)::elements,bits,recomputed_gamma_fingerprint,minhash,maxhash,term
+    logical::receipt_valid
+    logical::use_identity
+    nlocal=size(row_ids);m=size(aligned_rows,2);use_identity=.false.
+    if(present(implicit_identity))use_identity=implicit_identity
+    ok=.false.;message=''
+    gamma_defect=huge(1d0);workspace_peak_bytes=0_int64
+    local_bad=merge(0,1,global_row_count>=1.and.m>=1.and.size(aligned_rows,1)==nlocal.and.&
+      all(shape(conjugate_rows)==[nlocal,m]).and.&
+      (use_identity.or.all(shape(gamma_rows)==[nlocal,global_row_count])).and.&
+      all(row_ids>=1_int64).and.all(row_ids<=int(global_row_count,int64)).and.&
+      gamma_fingerprint/=0_int64.and.gamma_sewing_defect>=0d0.and.gamma_sewing_defect<=tolerance.and.&
+      ieee_is_finite(gamma_sewing_defect).and.&
+      tolerance>=1d-15.and.tolerance<=1d-2.and.ieee_is_finite(tolerance).and.&
+      all(ieee_is_finite(real(aligned_rows))).and.all(ieee_is_finite(aimag(aligned_rows))).and.&
+      (use_identity.or.(all(ieee_is_finite(real(gamma_rows))).and.all(ieee_is_finite(aimag(gamma_rows))))) .and.&
+      all(ieee_is_finite(real(conjugate_rows))).and.all(ieee_is_finite(aimag(conjugate_rows))))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid periodic-phase Gamma sewing contract';return;endif
+    call MPI_Allreduce(global_row_count,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(global_row_count,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='Gamma sewing row extent disagrees';return;endif
+    call MPI_Allreduce(m,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(m,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='Gamma sewing sector rank disagrees';return;endif
+    call MPI_Allreduce(tolerance,minimum,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tolerance,maximum,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum/=maximum)then;message='Gamma sewing tolerance disagrees';return;endif
+    call MPI_Allreduce(gamma_sewing_defect,minimum,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(gamma_sewing_defect,maximum,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum/=maximum)then;message='Gamma sewing receipt disagrees';return;endif
+    call MPI_Allreduce(gamma_fingerprint,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(gamma_fingerprint,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)then;message='Gamma sewing fingerprint disagrees';return;endif
+    flagint=merge(1,0,self_conjugate)
+    call MPI_Allreduce(flagint,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(flagint,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='Gamma conjugacy branch disagrees';return;endif
+    identity_flag=merge(1,0,use_identity)
+    call MPI_Allreduce(identity_flag,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(identity_flag,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='Gamma operator representation branch disagrees';return;endif
+    local_bad=merge(1,0,int(nlocal,int64)>huge(0_int64)/int(m,int64).or.&
+      int(m,int64)>huge(0_int64)/int(m,int64))
+    if(local_bad==0)then
+      if(int(nlocal,int64)>huge(0_int64)/(2_int64*int(m,int64)))local_bad=1
+      if(int(m,int64)>huge(0_int64)/(4_int64*int(m,int64)))local_bad=1
+    endif
+    elements=0_int64;receipt_valid=local_bad==0
+    if(receipt_valid)then
+      term=2_int64*int(nlocal,int64)*int(m,int64);call checked_add(elements,term,receipt_valid)
+      term=4_int64*int(m,int64)*int(m,int64);call checked_add(elements,term,receipt_valid)
+      call checked_add(elements,int(m,int64),receipt_valid)
+      call checked_add(elements,int(nlocal,int64),receipt_valid)
+      call checked_add(elements,int(global_row_count,int64),receipt_valid)
+      if(elements>huge(0_int64)/16_int64)receipt_valid=.false.
+      if(int(global_row_count,int64)>huge(0_int64)/12_int64)receipt_valid=.false.
+      if(receipt_valid)then
+        term=16_int64*elements
+        if(term>huge(0_int64)-12_int64*int(global_row_count,int64))receipt_valid=.false.
+      endif
+    endif
+    local_bad=merge(0,1,receipt_valid)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='Gamma sewing workspace overflows';return;endif
+    workspace_peak_bytes=16_int64*elements+12_int64*int(global_row_count,int64)
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
+    allocate(aligned_conjugate_rows(nlocal,m),generated(nlocal,m),remote_row(m),&
+      remote_gamma(merge(0,global_row_count,use_identity)),&
+      local_operator_vector(nlocal),gram(m,m),sewing(m,m),candidates(m,2*m),gauge(m,m),&
+      owner(merge(0,global_row_count,use_identity)),position(merge(0,global_row_count,use_identity)),&
+      ownership_count(merge(0,global_row_count,use_identity)),stat=status)
+    call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(aligned_conjugate_rows))deallocate(aligned_conjugate_rows)
+      message='Gamma sewing allocation failed';return
+    endif
+    if(.not.use_identity)then
+      owner=0;position=0;ownership_count=0
+      do i=1,nlocal
+        owner(int(row_ids(i)))=rank+1;position(int(row_ids(i)))=i
+        ownership_count(int(row_ids(i)))=ownership_count(int(row_ids(i)))+1
+      enddo
+      call MPI_Allreduce(MPI_IN_PLACE,owner,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(MPI_IN_PLACE,position,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(MPI_IN_PLACE,ownership_count,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.any(ownership_count/=1))then;message='Gamma sewing rows are not uniquely owned';return;endif
+    endif
+    recomputed_gamma_fingerprint=int(z'6A09E667F3BCC909',int64)
+    if(use_identity)then
+      recomputed_gamma_fingerprint=ieor(ishftc(recomputed_gamma_fingerprint,9),int(global_row_count,int64))
+    else;do k=1,global_row_count
+      remote_gamma=(0d0,0d0)
+      if(use_identity)then
+        remote_gamma(k)=1d0
+      else
+        if(rank==owner(k)-1)remote_gamma=gamma_rows(position(k),:)
+        call MPI_Bcast(remote_gamma,global_row_count,MPI_DOUBLE_COMPLEX,owner(k)-1,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      endif
+      do j=1,global_row_count
+        bits=transfer(real(remote_gamma(j),real64),bits)
+        recomputed_gamma_fingerprint=ieor(ishftc(recomputed_gamma_fingerprint,9),bits)
+        bits=transfer(aimag(remote_gamma(j)),bits)
+        recomputed_gamma_fingerprint=ieor(ishftc(recomputed_gamma_fingerprint,9),bits)
+      enddo
+    enddo;endif
+    if(recomputed_gamma_fingerprint==0_int64)recomputed_gamma_fingerprint=1_int64
+    local_bad=merge(0,1,recomputed_gamma_fingerprint==gamma_fingerprint)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='Gamma sewing payload does not match its receipt';return;endif
+    local_operator_defect=0d0
+    if(.not.use_identity)then
+    do j=1,global_row_count;do k=1,global_row_count
+      overlap_value=sum(conjg(gamma_rows(:,j))*gamma_rows(:,k))
+      call MPI_Allreduce(MPI_IN_PLACE,overlap_value,1,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(j==k)overlap_value=overlap_value-1d0
+      local_operator_defect=max(local_operator_defect,abs(overlap_value))
+    enddo;enddo
+    do j=1,global_row_count
+      local_operator_vector=(0d0,0d0)
+      do k=1,global_row_count
+        overlap_value=(0d0,0d0)
+        if(rank==owner(k)-1)overlap_value=gamma_rows(position(k),j)
+        call MPI_Bcast(overlap_value,1,MPI_DOUBLE_COMPLEX,owner(k)-1,comm,ierr);if(ierr/=MPI_SUCCESS)return
+        local_operator_vector=local_operator_vector+gamma_rows(:,k)*conjg(overlap_value)
+      enddo
+      do i=1,nlocal
+        overlap_value=local_operator_vector(i)
+        if(int(row_ids(i))==j)overlap_value=overlap_value-1d0
+        local_operator_defect=max(local_operator_defect,abs(overlap_value))
+      enddo
+    enddo
+    endif
+    call MPI_Allreduce(local_operator_defect,operator_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.operator_defect>10d0*tolerance.or.operator_defect>10d0*gamma_sewing_defect+tolerance)then
+      message='Gamma sewing operator is not unitary and involutory';return
+    endif
+    if(use_identity)then
+      generated=conjg(aligned_rows)
+    else
+      generated=(0d0,0d0)
+      do k=1,global_row_count
+        remote_row=(0d0,0d0)
+        if(rank==owner(k)-1)remote_row=conjg(aligned_rows(position(k),:))
+        call MPI_Bcast(remote_row,m,MPI_DOUBLE_COMPLEX,owner(k)-1,comm,ierr);if(ierr/=MPI_SUCCESS)return
+        do i=1,nlocal;generated(i,:)=generated(i,:)+gamma_rows(i,k)*remote_row;enddo
+      enddo
+    endif
+    gram=matmul(conjg(transpose(conjugate_rows)),conjugate_rows)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+    local_bad=merge(0,1,maxval(abs(gram))<=10d0*tolerance)
+    gram=matmul(conjg(transpose(generated)),generated)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+    if(maxval(abs(gram))>10d0*tolerance)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='periodic-phase Gamma frames are not orthonormal';return;endif
+    gram=matmul(conjg(transpose(conjugate_rows)),generated)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    sewing=gram;gram=matmul(conjg(transpose(gram)),gram)
+    do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+    gamma_defect=maxval(abs(gram))
+    call MPI_Allreduce(gamma_defect,maximum,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr);gamma_defect=maximum
+    if(ierr/=MPI_SUCCESS.or.gamma_defect>10d0*tolerance)then
+      message='periodic-phase sectors violate Gamma conjugate pairing';return
+    endif
+    if(self_conjugate)then
+      sewing=matmul(conjg(transpose(aligned_rows)),generated)
+      call MPI_Allreduce(MPI_IN_PLACE,sewing,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      candidates=(0d0,0d0)
+      do j=1,m
+        candidates(j,j)=1d0;candidates(:,j)=candidates(:,j)+sewing(:,j)
+        candidates(j,m+j)=cmplx(0d0,1d0,real64)
+        candidates(:,m+j)=candidates(:,m+j)-cmplx(0d0,1d0,real64)*sewing(:,j)
+      enddo
+      gauge=(0d0,0d0);nfixed=0
+      do j=1,2*m
+        remote_row=candidates(:,j)
+        do k=1,nfixed;remote_row=remote_row-gauge(:,k)*dot_product(gauge(:,k),remote_row);enddo
+        norm_value=sqrt(max(0d0,real(dot_product(remote_row,remote_row),real64)))
+        if(norm_value<=10d0*tolerance)cycle
+        nfixed=nfixed+1;gauge(:,nfixed)=remote_row/norm_value
+        if(nfixed==m)exit
+      enddo
+      if(nfixed/=m)then;message='self-conjugate Gamma fixed space is rank deficient';return;endif
+      aligned_conjugate_rows=matmul(aligned_rows,gauge)
+      generated=matmul(generated,conjg(gauge))
+      gamma_defect=maxval(abs(aligned_conjugate_rows-generated))
+      call MPI_Allreduce(gamma_defect,maximum,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr);gamma_defect=maximum
+      if(ierr/=MPI_SUCCESS.or.gamma_defect>10d0*tolerance)then
+        message='self-conjugate sector cannot be fixed to a Gamma-real gauge';return
+      endif
+    else
+      aligned_conjugate_rows=generated
+    endif
+    ok=.true.
+  end subroutine sew_dg_w90_periodic_phase_conjugate_sector
+
+
+  subroutine align_dg_w90_cross_character_sector_gauge(comm,row_ids,reference_sector_rows,&
+      target_sector_rows,w90_reference_rows,localization_weights,global_row_count,retained_state_count,&
+      w90_frame_fingerprint,w90_unitarity_defect,tolerance,&
+      aligned_target_rows,singular_values,&
+      polar_defect,fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm
+    integer(int64),intent(in)::row_ids(:)
+    complex(real64),intent(in)::reference_sector_rows(:,:),target_sector_rows(:,:),w90_reference_rows(:,:)
+    real(real64),intent(in)::localization_weights(:),w90_unitarity_defect,tolerance
+    integer,intent(in)::global_row_count,retained_state_count
+    integer(int64),intent(in)::w90_frame_fingerprint
+    complex(real64),allocatable,intent(out)::aligned_target_rows(:,:)
+    real(real64),allocatable,intent(out)::singular_values(:)
+    real(real64),intent(out)::polar_defect
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(real64),allocatable::reference_projection(:,:),target_projection(:,:),link(:,:),&
+      svd_left(:,:),svd_right(:,:),polar(:,:),gram(:,:),svd_work(:),remote_row(:),projector_row(:)
+    real(real64),allocatable::svd_rwork(:)
+    integer,allocatable::owner(:),position(:),ownership_count(:)
+    integer::nlocal,n,m,nw,i,j,k,rank,ierr,local_bad,global_bad,allocation_status
+    integer::minimum_n,maximum_n,minimum_m,maximum_m,minimum_nw,maximum_nw,svd_info,svd_lwork
+    integer::retained_singular_count
+    real(real64)::minimum_tolerance,maximum_tolerance,singular_scale,safe_weight,&
+      minimum_w90_defect,maximum_w90_defect
+    integer(int64)::weight_bits,minimum_weight_bits,maximum_weight_bits,&
+      minimum_frame_fingerprint,maximum_frame_fingerprint
+    complex(real64)::projector_value
+    integer(int64)::complex_elements,real_elements,integer_elements,byte_term
+    logical::receipt_valid
+    interface
+      subroutine zgesvd(jobu,jobvt,m,n,a,lda,s,u,ldu,vt,ldvt,work,lwork,rwork,info)
+        character,intent(in)::jobu,jobvt
+        integer,intent(in)::m,n,lda,ldu,ldvt,lwork
+        complex(8),intent(inout)::a(lda,*),work(*)
+        real(8),intent(out)::s(*),rwork(*)
+        complex(8),intent(out)::u(ldu,*),vt(ldvt,*)
+        integer,intent(out)::info
+      end subroutine
+    end interface
+    ok=.false.;message='';polar_defect=huge(1d0);fingerprint=0_int64;workspace_peak_bytes=0_int64
+    nlocal=size(row_ids);m=size(reference_sector_rows,2);nw=size(w90_reference_rows,2);n=global_row_count
+    local_bad=merge(0,1,n>=1.and.m>=1.and.int(nw,int64)>=2_int64*int(m,int64).and.&
+      nw==retained_state_count.and.w90_frame_fingerprint/=0_int64.and.size(localization_weights)==nw.and.&
+      size(reference_sector_rows,1)==nlocal.and.&
+      all(shape(target_sector_rows)==[nlocal,m]).and.size(w90_reference_rows,1)==nlocal.and.&
+      tolerance>=1d-15.and.tolerance<=1d-2.and.ieee_is_finite(tolerance).and.&
+      w90_unitarity_defect>=0d0.and.w90_unitarity_defect<=tolerance.and.ieee_is_finite(w90_unitarity_defect).and.&
+      all(row_ids>=1_int64).and.all(row_ids<=int(n,int64)).and.&
+      all(ieee_is_finite(localization_weights)).and.&
+      all(ieee_is_finite(real(reference_sector_rows))).and.all(ieee_is_finite(aimag(reference_sector_rows))).and.&
+      all(ieee_is_finite(real(target_sector_rows))).and.all(ieee_is_finite(aimag(target_sector_rows))).and.&
+      all(ieee_is_finite(real(w90_reference_rows))).and.all(ieee_is_finite(aimag(w90_reference_rows))))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='invalid Wannier90 cross-character alignment contract';return
+    endif
+    safe_weight=sqrt(huge(1d0))/max(1d0,16d0*real(n,real64)*real(nw,real64))
+    local_bad=merge(0,1,maxval(abs(reference_sector_rows))<=1d0+tolerance.and.&
+      maxval(abs(target_sector_rows))<=1d0+tolerance.and.maxval(abs(w90_reference_rows))<=1d0+tolerance.and.&
+      maxval(abs(localization_weights))<=safe_weight)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='Wannier90 cross-character input magnitude is unsafe';return
+    endif
+    call MPI_Allreduce(n,minimum_n,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character metadata reduction failed';return;endif
+    call MPI_Allreduce(n,maximum_n,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character metadata reduction failed';return;endif
+    call MPI_Allreduce(m,minimum_m,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character metadata reduction failed';return;endif
+    call MPI_Allreduce(m,maximum_m,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character metadata reduction failed';return;endif
+    call MPI_Allreduce(nw,minimum_nw,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character metadata reduction failed';return;endif
+    call MPI_Allreduce(nw,maximum_nw,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character metadata reduction failed';return;endif
+    call MPI_Allreduce(tolerance,minimum_tolerance,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character metadata reduction failed';return;endif
+    call MPI_Allreduce(tolerance,maximum_tolerance,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character metadata reduction failed';return;endif
+    call MPI_Allreduce(w90_unitarity_defect,minimum_w90_defect,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character metadata reduction failed';return;endif
+    call MPI_Allreduce(w90_unitarity_defect,maximum_w90_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character metadata reduction failed';return;endif
+    do i=1,nw
+      weight_bits=transfer(localization_weights(i),weight_bits)
+      call MPI_Allreduce(weight_bits,minimum_weight_bits,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='Wannier90 localization-weight agreement reduction failed';return;endif
+      call MPI_Allreduce(weight_bits,maximum_weight_bits,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.minimum_weight_bits/=maximum_weight_bits)then
+        message='Wannier90 localization weights disagree across ranks';return
+      endif
+    enddo
+    if(minimum_n/=maximum_n.or.minimum_m/=maximum_m.or.minimum_nw/=maximum_nw.or.&
+      minimum_tolerance/=maximum_tolerance)then
+      message='Wannier90 cross-character metadata disagree across ranks';return
+    endif
+    if(minimum_w90_defect/=maximum_w90_defect)then
+      message='Wannier90 localization metadata disagree across ranks';return
+    endif
+    call MPI_Allreduce(w90_frame_fingerprint,minimum_frame_fingerprint,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 frame provenance reduction failed';return;endif
+    call MPI_Allreduce(w90_frame_fingerprint,maximum_frame_fingerprint,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_frame_fingerprint/=maximum_frame_fingerprint)then
+      message='Wannier90 frame provenance disagrees across ranks';return
+    endif
+    if(m>huge(0)/m.or.m>huge(0)/5.or.m>huge(0)/nw.or.&
+      (nlocal>0.and.m>huge(0)/nlocal))then
+      message='Wannier90 cross-character extent overflows';return
+    endif
+    call MPI_Comm_rank(comm,rank,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character rank query failed';return;endif
+    allocate(owner(n),position(n),ownership_count(n),stat=allocation_status)
+    call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character ownership allocation failed';return;endif
+    owner=0;position=0;ownership_count=0
+    do i=1,nlocal
+      if(row_ids(i)<=int(n,int64))then
+        owner(int(row_ids(i)))=rank+1;position(int(row_ids(i)))=i;ownership_count(int(row_ids(i)))=1
+      endif
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,owner,n,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character ownership reduction failed';return;endif
+    call MPI_Allreduce(MPI_IN_PLACE,position,n,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character ownership reduction failed';return;endif
+    call MPI_Allreduce(MPI_IN_PLACE,ownership_count,n,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(ownership_count/=1))then
+      message='Wannier90 cross-character rows are not uniquely owned';return
+    endif
+    allocate(reference_projection(m,nw),target_projection(m,nw),link(m,m),svd_left(m,m),&
+      svd_right(m,m),polar(m,m),gram(m,m),singular_values(m),aligned_target_rows(nlocal,m),&
+      remote_row(m),projector_row(n),stat=allocation_status)
+    call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character workspace allocation failed';return;endif
+    gram=matmul(conjg(transpose(reference_sector_rows)),reference_sector_rows)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 reference-sector Gram reduction failed';return;endif
+    do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+    if(maxval(abs(gram))>10d0*tolerance)then;message='Wannier90 reference sector is not orthonormal';return;endif
+    gram=matmul(conjg(transpose(target_sector_rows)),target_sector_rows)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 target-sector Gram reduction failed';return;endif
+    do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+    if(maxval(abs(gram))>10d0*tolerance)then;message='Wannier90 target sector is not orthonormal';return;endif
+    reference_projection=matmul(conjg(transpose(reference_sector_rows)),w90_reference_rows)
+    target_projection=matmul(conjg(transpose(target_sector_rows)),w90_reference_rows)
+    call MPI_Allreduce(MPI_IN_PLACE,reference_projection,m*nw,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 reference projection reduction failed';return;endif
+    call MPI_Allreduce(MPI_IN_PLACE,target_projection,m*nw,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 target projection reduction failed';return;endif
+    ! The left target projection makes the polar transform contragredient under
+    ! a target-frame rotation: target*R, link -> R^H*link.
+    do j=1,nw;target_projection(:,j)=target_projection(:,j)*localization_weights(j);enddo
+    link=matmul(target_projection,conjg(transpose(reference_projection)))
+    allocate(svd_rwork(max(1,5*m)),svd_work(1),stat=allocation_status)
+    call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character SVD allocation failed';return;endif
+    svd_left=link;svd_lwork=-1
+    call zgesvd('A','A',m,m,svd_left,m,singular_values,polar,m,svd_right,m,svd_work,svd_lwork,svd_rwork,svd_info)
+    local_bad=merge(0,1,svd_info==0.and.ieee_is_finite(real(svd_work(1))))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='Wannier90 cross-character SVD workspace query failed';return
+    endif
+    if(real(svd_work(1),real64)>real(huge(0),real64))then
+      message='Wannier90 cross-character SVD workspace overflows';return
+    endif
+    svd_lwork=max(1,ceiling(real(svd_work(1),real64)));deallocate(svd_work)
+    allocate(svd_work(svd_lwork),stat=allocation_status)
+    call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character SVD allocation failed';return;endif
+    svd_left=link
+    call zgesvd('A','A',m,m,svd_left,m,singular_values,polar,m,svd_right,m,svd_work,svd_lwork,svd_rwork,svd_info)
+    local_bad=merge(0,1,svd_info==0.and.all(ieee_is_finite(singular_values)))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='Wannier90 cross-character localization-link SVD failed';return
+    endif
+    singular_scale=max(1d0,maxval(singular_values))
+    retained_singular_count=count(singular_values>tolerance*singular_scale)
+    if(retained_singular_count>0.and.retained_singular_count<m)then
+      if(abs(singular_values(retained_singular_count)-singular_values(retained_singular_count+1))<=&
+        10d0*tolerance*singular_scale)then
+        message='Wannier90 cross-character rank threshold splits a degenerate cluster';return
+      endif
+    endif
+    local_bad=merge(0,1,minval(singular_values)>tolerance*singular_scale)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='singular Wannier90 cross-character localization link';return
+    endif
+    polar=matmul(polar,svd_right)
+    gram=matmul(conjg(transpose(polar)),polar)
+    do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+    polar_defect=maxval(abs(gram))
+    local_bad=merge(0,1,polar_defect<=10d0*tolerance)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character polar is not unitary';return;endif
+    aligned_target_rows=matmul(target_sector_rows,polar)
+    fingerprint=ieor(int(z'3C6EF372FE94F82B',int64),w90_frame_fingerprint)
+    do k=1,n
+      remote_row=(0d0,0d0)
+      if(rank==owner(k)-1)remote_row=aligned_target_rows(position(k),:)
+      call MPI_Bcast(remote_row,m,MPI_DOUBLE_COMPLEX,owner(k)-1,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character projector stream failed';return;endif
+      projector_row=(0d0,0d0)
+      do i=1,nlocal
+        projector_row(int(row_ids(i)))=sum(remote_row*conjg(aligned_target_rows(i,:)))
+      enddo
+      call MPI_Allreduce(MPI_IN_PLACE,projector_row,n,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character fingerprint reduction failed';return;endif
+      if(rank==0)then
+        do j=1,n
+          projector_value=projector_row(j)
+          fingerprint=ieor(ishftc(fingerprint,13),nint(real(projector_value)/(100d0*tolerance),int64))
+          fingerprint=ieor(ishftc(fingerprint,13),nint(aimag(projector_value)/(100d0*tolerance),int64))
+        enddo
+      endif
+    enddo
+    call MPI_Bcast(fingerprint,1,MPI_INTEGER8,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 cross-character fingerprint broadcast failed';return;endif
+    complex_elements=0_int64;real_elements=0_int64;integer_elements=0_int64;receipt_valid=.true.
+    call checked_add(complex_elements,size(reference_sector_rows,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(target_sector_rows,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(w90_reference_rows,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(reference_projection,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(target_projection,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(link,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(svd_left,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(svd_right,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(polar,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(gram,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(aligned_target_rows,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(svd_work,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(remote_row,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(projector_row,kind=int64),receipt_valid)
+    call checked_add(complex_elements,max(int(m,int64)*int(m,int64),int(nlocal,int64)*int(m,int64)),receipt_valid)
+    call checked_add(real_elements,size(singular_values,kind=int64),receipt_valid)
+    call checked_add(real_elements,size(svd_rwork,kind=int64),receipt_valid)
+    call checked_add(integer_elements,size(row_ids,kind=int64),receipt_valid)
+    call checked_add(integer_elements,size(owner,kind=int64),receipt_valid)
+    call checked_add(integer_elements,size(position,kind=int64),receipt_valid)
+    call checked_add(integer_elements,size(ownership_count,kind=int64),receipt_valid)
+    if(receipt_valid)call checked_product([complex_elements,16_int64],workspace_peak_bytes,receipt_valid)
+    if(receipt_valid)call checked_product([real_elements,8_int64],byte_term,receipt_valid)
+    if(receipt_valid)call checked_add(workspace_peak_bytes,byte_term,receipt_valid)
+    if(receipt_valid)call checked_product([integer_elements,8_int64],byte_term,receipt_valid)
+    if(receipt_valid)call checked_add(workspace_peak_bytes,byte_term,receipt_valid)
+    if(.not.receipt_valid.or.workspace_peak_bytes<=0_int64)then
+      workspace_peak_bytes=0_int64;message='Wannier90 cross-character workspace receipt overflows';return
+    endif
+    ok=.true.
+  end subroutine align_dg_w90_cross_character_sector_gauge
+
   subroutine align_dg_w90_character_sector_gauge(comm,row_ids,sector_rows,reference_rows,&
       gamma_rows,conjugate_rows,gamma_sewing_defect,tolerance,&
       aligned_rows,aligned_conjugate_rows,singular_values,&
@@ -406,11 +1462,12 @@ contains
   end subroutine inherit_dg_w90_affine_receipts
 
   subroutine apply_dg_w90_gamma_transform(comm,physical_ids,values,gradients,transform,centers,&
-      tolerance,ok,message)
+      tolerance,ok,message,spreads)
     integer,intent(in)::comm
     integer(int64),intent(in)::physical_ids(:)
     complex(real64),intent(inout)::values(:,:),gradients(:,:,:),transform(:,:)
     real(real64),intent(inout)::centers(:,:)
+    real(real64),intent(inout),optional::spreads(:)
     real(real64),intent(in)::tolerance
     logical,intent(out)::ok
     character(*),intent(out)::message
@@ -419,7 +1476,7 @@ contains
     integer,allocatable::order(:)
     logical,allocatable::used(:)
     complex(real64),allocatable::ordered_transform(:,:),new_values(:,:),new_gradients(:,:,:),gram(:,:)
-    real(real64),allocatable::ordered_centers(:,:),local_maximum(:),global_maximum(:)
+    real(real64),allocatable::ordered_centers(:,:),ordered_spreads(:),local_maximum(:),global_maximum(:)
     integer(int64),allocatable::local_id(:),global_id(:)
     complex(real64),allocatable::local_pivot(:),global_pivot(:)
     real(real64)::scale
@@ -432,6 +1489,9 @@ contains
         .not.all(ieee_is_finite(real(gradients))).or..not.all(ieee_is_finite(aimag(gradients))).or.&
         .not.all(ieee_is_finite(real(transform))).or..not.all(ieee_is_finite(aimag(transform))).or.&
         .not.all(ieee_is_finite(centers)).or.any(physical_ids<=0_int64))status=1
+    if(present(spreads))then
+      if(size(spreads)/=nstate.or..not.all(ieee_is_finite(spreads)))status=1
+    endif
     if(maxval(abs(aimag(transform)))>tolerance*max(1d0,maxval(abs(transform))))status=1
     call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(status/=0.or.ierr/=MPI_SUCCESS)then;message='invalid Gamma MLWF transform contract';return;endif
@@ -473,6 +1533,9 @@ contains
     enddo
     allocate(ordered_transform(nstate,nstate),ordered_centers(3,nstate))
     ordered_transform=transform(:,order);ordered_centers=centers(:,order)
+    if(present(spreads))then
+      allocate(ordered_spreads(nstate));ordered_spreads=spreads(order)
+    endif
     allocate(new_values(nstate,npoint),new_gradients(3,nstate,npoint))
     new_values=matmul(transpose(ordered_transform),values)
     do axis=1,3;new_gradients(axis,:,:)=matmul(transpose(ordered_transform),gradients(axis,:,:));enddo
@@ -509,6 +1572,7 @@ contains
       endif
     enddo
     transform=ordered_transform;centers=ordered_centers;values=new_values;gradients=new_gradients
+    if(present(spreads))spreads=ordered_spreads
     ok=.true.
 #else
     ok=.false.;message='Gamma MLWF transform application requires MPI'

@@ -8,6 +8,7 @@ module dg_overlapping_wannier_projection
     integer::atom=0
     integer::l=-1
     integer::m=0
+    integer::radial=1
   end type
 
   public::build_dg_complete_sp_manifest,dg_complete_sp_target_count,&
@@ -189,7 +190,7 @@ contains
     endif
     do i=1,size(expected)
       if(channels(i)%atom/=expected(i)%atom.or.channels(i)%l/=expected(i)%l.or.&
-          channels(i)%m/=expected(i)%m)then
+          channels(i)%m/=expected(i)%m.or.channels(i)%radial/=expected(i)%radial)then
         ok=.false.;message='complete shell manifest ordering or member is invalid';return
       endif
     enddo

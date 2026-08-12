@@ -6,6 +6,7 @@ program test_dg_overlapping_wannier_construction_mpi
     initialize_dg_ow_distributed_layout,reserve_dg_ow_workspace,&
     release_dg_ow_workspace,release_dg_ow_distributed_layout
   use dg_overlapping_wannier_construction,only:s_dg_overlapping_wannier_construction,&
+    s_dg_translation_orbit_accumulator,&
     construct_dg_overlapping_wannier_basis,release_dg_overlapping_wannier_construction,&
     verify_dg_overlapping_wannier_periodic_closure,assemble_dg_distributed_candidate_symmetry,&
     assemble_dg_distributed_basis_symmetry_overlap,&
@@ -28,6 +29,12 @@ program test_dg_overlapping_wannier_construction_mpi
     verify_dg_wannier_center_affine_orbits,&
     build_dg_finite_abelian_character_table,&
     inverse_dg_translation_character_orbits,&
+    accumulate_dg_translation_character_orbit_sector,&
+    accumulate_dg_translation_character_orbit_sector_values,&
+    apply_dg_row_owned_orbital_transform_streamed,&
+    materialize_dg_row_owned_sector_on_spatial_grid,&
+    build_dg_translation_character_intertwining_phase,&
+    validate_dg_factored_point_cogroup_gauge,&
     align_dg_fragment_wannier_gauge,replicate_dg_fragment_wannier_representative,&
     verify_dg_fragment_wannier_streaming_closure,verify_dg_fragment_center_orbit,&
     verify_dg_uniform_fragment_target_rank,assign_dg_overlapping_wannier_occupations,&
@@ -38,6 +45,7 @@ program test_dg_overlapping_wannier_construction_mpi
     verify_dg_fragment_subspace_density_covariance,build_dg_core_owned_occupied_subspace,&
     build_dg_smooth_partition_of_unity,compose_dg_buffered_orbital_tile_to_physical_grid
   implicit none
+  type(s_dg_translation_orbit_accumulator)::inverse_accumulator
   integer::comm,rank,nproc,ierr,i,j,b,p,point,nlocal,nclosure,index,ncore,fragment_id
   integer(8),allocatable::ids(:),box_ids(:),symmetry_map(:,:),broken_symmetry_map(:,:)
   integer,allocatable::fragment(:)
@@ -48,6 +56,8 @@ program test_dg_overlapping_wannier_construction_mpi
   complex(8),allocatable::direct_small(:,:),direct_small_gradient(:,:,:),&
     direct_small_occupied(:,:),direct_projector(:,:)
   complex(8),allocatable::stream_values(:,:),stream_gradients(:,:,:)
+  complex(8),allocatable::spatial_basis(:,:),sector_coefficients(:,:),materialized_sector(:,:)
+  integer(8),allocatable::sector_coefficient_ids(:)
   complex(8),allocatable::mismatch_values(:,:),mismatch_gradients(:,:,:)
   complex(8)::gauge(4,4)
   complex(8),allocatable::reference_projector(:,:),projector(:,:),seed_projector(:,:)
@@ -106,6 +116,7 @@ program test_dg_overlapping_wannier_construction_mpi
   real(8)::character_translations(3,4),character_permuted_translations(3,4)
   complex(8)::character_table(4,4),character_gram(4,4)
   integer(8)::character_fingerprint,character_reference_fingerprint
+  integer(8)::spatial_sector_fingerprint
   integer::z6_product(6,6),z6_operations(6),z6_inverses(6),z6_conjugates(6),z6_exponent(6),&
     z6_exponent_to_operation(0:5),z6_generator_count
   integer,allocatable::z6_generators(:),z6_words(:,:)
@@ -158,14 +169,22 @@ program test_dg_overlapping_wannier_construction_mpi
   integer(8)::composition_fingerprint,composition_workspace_peak
   real(8)::fractional_core_electrons
   complex(8),allocatable::inverse_sector_values(:,:,:),inverse_sector_gradients(:,:,:,:),&
-    inverse_orbit_values(:,:,:),inverse_orbit_gradients(:,:,:,:),inverse_rotated_values(:,:,:),&
-    inverse_rotated_gradients(:,:,:,:),inverse_translated_values(:,:,:),inverse_translated_gradients(:,:,:,:)
+    inverse_orbit_values(:,:,:),inverse_orbit_gradients(:,:,:,:),inverse_streamed_values(:,:,:),&
+    inverse_streamed_gradients(:,:,:,:),inverse_values_only(:,:),inverse_rotated_values(:,:,:),&
+    inverse_rotated_gradients(:,:,:,:),inverse_translated_values(:,:,:),inverse_translated_gradients(:,:,:,:),&
+    streamed_transform_rows(:,:),streamed_input_values(:,:),streamed_input_gradients(:,:,:),&
+    streamed_output_values(:,:),streamed_output_gradients(:,:,:),intertwining_phase(:),inverse_saved_sector(:,:)
   real(8),allocatable::inverse_density(:),inverse_rotated_density(:)
   complex(8)::inverse_internal_gauge(2,2)
   real(8)::inverse_density_defect,inverse_orthogonality_defect,inverse_gamma_defect
-  integer(8)::inverse_fingerprint,inverse_workspace
+  integer(8)::inverse_fingerprint,inverse_workspace,intertwining_payload_fingerprint
   integer(8)::inverse_reference_fingerprint
   integer(8),allocatable::inverse_row_ids(:)
+  integer(8)::intertwining_maps(12,4),intertwining_generator_maps(12,2)
+  integer(8),allocatable::factored_point_maps(:,:),factored_translation_maps(:,:)
+  integer::factored_point_product(2,2),factored_cocycle(2,2),factored_global_index
+  real(8),allocatable::factored_weights(:)
+  real(8)::factored_identity_defect,factored_unitarity_defect,factored_closure_defect
   real(8)::gauge_weights(2)
   logical::ok,transpose_values_ok
   character(256)::message
@@ -1212,6 +1231,22 @@ program test_dg_overlapping_wannier_construction_mpi
     character_canonical_operations,character_inverses,character_generator_count,character_generators,&
     character_words,character_table,character_conjugates,character_fingerprint,ok,message)
   call require(ok,trim(message))
+  do i=1,12
+    do j=1,4
+      intertwining_maps(i,j)=int(4*((i-1)/4)+ieor(mod(i-1,4),j-1)+1,8)
+    enddo
+  enddo
+  intertwining_generator_maps=intertwining_maps(:,character_generators)
+  call build_dg_translation_character_intertwining_phase(comm,box_ids,12,intertwining_generator_maps(int(box_ids),:),&
+    [2,2],character_words,character_product,1,character_table(1,:),character_table(2,:),character_fingerprint,1d-12,&
+    intertwining_phase,inverse_fingerprint,intertwining_payload_fingerprint,inverse_workspace,ok,message)
+  call require(ok.and.maxval(abs(abs(intertwining_phase)-1d0))<1d-12,&
+    'finite translation action builds a unit-modulus character intertwining phase')
+  intertwining_generator_maps(1,1)=intertwining_generator_maps(1,2)
+  call build_dg_translation_character_intertwining_phase(comm,box_ids,12,intertwining_generator_maps(int(box_ids),:),&
+    [2,2],character_words,character_product,1,character_table(1,:),character_table(2,:),character_fingerprint,1d-12,&
+    intertwining_phase,inverse_fingerprint,intertwining_payload_fingerprint,inverse_workspace,ok,message)
+  call require(.not.ok,'intertwining phase rejects a non-permutation translation action')
   allocate(inverse_sector_values(nlocal,2,4),inverse_sector_gradients(3,nlocal,2,4))
   inverse_sector_values=(0d0,0d0);inverse_sector_gradients=(0d0,0d0)
   do p=1,nlocal
@@ -1227,6 +1262,107 @@ program test_dg_overlapping_wannier_construction_mpi
     inverse_workspace,ok,message)
   call require(ok.and.inverse_density_defect<1d-12.and.inverse_orthogonality_defect<1d-12.and.&
     inverse_gamma_defect<1d-12.and.inverse_workspace>0_8,trim(message))
+  do j=1,4
+    call accumulate_dg_translation_character_orbit_sector(comm,inverse_accumulator,j,character_table,&
+      character_fingerprint,inverse_sector_values(:,:,j),inverse_sector_gradients(:,:,:,j),j==1,j==4,1d-12,&
+      inverse_streamed_values,inverse_streamed_gradients,inverse_workspace,ok,message)
+    call require(ok,trim(message))
+  enddo
+  call require(maxval(abs(inverse_streamed_values-inverse_orbit_values))<1d-12.and.&
+    maxval(abs(inverse_streamed_gradients-inverse_orbit_gradients))<1d-12,&
+    'streamed character accumulation matches the complete inverse transform')
+  if(nproc>1)then
+    call accumulate_dg_translation_character_orbit_sector(comm,inverse_accumulator,1,character_table,&
+      character_fingerprint,inverse_sector_values(:,:,1),inverse_sector_gradients(:,:,:,1),rank==0,.false.,1d-12,&
+      inverse_streamed_values,inverse_streamed_gradients,inverse_workspace,ok,message)
+    call require(.not.ok,'streamed inverse rejects rank-disagreeing initialization')
+  endif
+  call accumulate_dg_translation_character_orbit_sector(comm,inverse_accumulator,2,character_table,&
+    character_fingerprint,inverse_sector_values(:,:,2),inverse_sector_gradients(:,:,:,2),.true.,.false.,1d-12,&
+    inverse_streamed_values,inverse_streamed_gradients,inverse_workspace,ok,message)
+  call require(ok,trim(message))
+  call accumulate_dg_translation_character_orbit_sector(comm,inverse_accumulator,2,character_table,&
+    character_fingerprint,inverse_sector_values(:,:,2),inverse_sector_gradients(:,:,:,2),.false.,.false.,1d-12,&
+    inverse_streamed_values,inverse_streamed_gradients,inverse_workspace,ok,message)
+  call require(.not.ok,'streamed inverse rejects a duplicate character sector')
+  call accumulate_dg_translation_character_orbit_sector(comm,inverse_accumulator,3,character_table,&
+    character_fingerprint,inverse_sector_values(:,:,3),inverse_sector_gradients(:,:,:,3),.false.,.true.,1d-12,&
+    inverse_streamed_values,inverse_streamed_gradients,inverse_workspace,ok,message)
+  call require(.not.ok,'streamed inverse finalize rejects missing character sectors')
+  call accumulate_dg_translation_character_orbit_sector(comm,inverse_accumulator,1,character_table,&
+    character_fingerprint,inverse_sector_values(:,:,1),inverse_sector_gradients(:,:,:,1),.false.,.false.,1d-12,&
+    inverse_streamed_values,inverse_streamed_gradients,inverse_workspace,ok,message)
+  call require(ok,trim(message))
+  call accumulate_dg_translation_character_orbit_sector(comm,inverse_accumulator,4,character_table,&
+    character_fingerprint,inverse_sector_values(:,:,4),inverse_sector_gradients(:,:,:,4),.false.,.true.,1d-12,&
+    inverse_streamed_values,inverse_streamed_gradients,inverse_workspace,ok,message)
+  call require(ok,'streamed inverse completes an out-of-order exactly-once sequence')
+  do j=4,1,-1
+    call accumulate_dg_translation_character_orbit_sector_values(comm,inverse_accumulator,j,character_table,&
+      character_fingerprint,inverse_sector_values(:,:,j),j==4,j==1,1d-12,inverse_values_only,&
+      inverse_workspace,ok,message)
+    call require(ok,trim(message))
+  enddo
+  call require(maxval(abs(inverse_values_only-transpose(reshape(inverse_orbit_values,&
+    [size(inverse_orbit_values,1),size(inverse_orbit_values,2)*size(inverse_orbit_values,3)]))))<1d-12,&
+    'values-only streamed inverse matches the complete transform without dummy gradients')
+  allocate(inverse_saved_sector,source=inverse_sector_values(:,:,1))
+  inverse_sector_values(:,:,1)=cmplx(0.5d0*huge(1d0),0d0,8)
+  call accumulate_dg_translation_character_orbit_sector_values(comm,inverse_accumulator,1,character_table,&
+    character_fingerprint,inverse_sector_values(:,:,1),.true.,.false.,1d-12,inverse_values_only,&
+    inverse_workspace,ok,message)
+  call require(.not.ok,'values-only streamed inverse rejects finite-huge sector values before accumulation')
+  inverse_sector_values(:,:,1)=inverse_saved_sector;deallocate(inverse_saved_sector)
+  allocate(streamed_transform_rows(nlocal,12),streamed_input_values(12,2),streamed_input_gradients(3,12,2))
+  streamed_transform_rows=(0d0,0d0)
+  do p=1,nlocal;streamed_transform_rows(p,int(box_ids(p)))=1d0;enddo
+  streamed_input_values=reshape([(cmplx(i,0d0,8),i=1,24)],[12,2])
+  do i=1,3;streamed_input_gradients(i,:,:)=real(i,8)*streamed_input_values;enddo
+  call apply_dg_row_owned_orbital_transform_streamed(comm,box_ids,12,streamed_transform_rows,&
+    streamed_input_values,streamed_input_gradients,streamed_output_values,streamed_output_gradients,&
+    inverse_workspace,ok,message)
+  call require(ok.and.inverse_workspace>0_8.and.maxval(abs(streamed_output_values-streamed_input_values))<1d-12.and.&
+    maxval(abs(streamed_output_gradients-streamed_input_gradients))<1d-12,&
+    'row-owned transform streams values and gradients without a dense replicated matrix')
+  if(mod(12,nproc)==0)then
+    allocate(factored_point_maps(nlocal,2),factored_translation_maps(nlocal,2),factored_weights(nlocal))
+    do p=1,nlocal
+      factored_global_index=rank*nlocal+p
+      factored_point_maps(p,1)=int(factored_global_index,8)
+      factored_point_maps(p,2)=int(4*((factored_global_index-1)/4)+mod(factored_global_index,4)+1,8)
+      factored_translation_maps(p,1)=factored_point_maps(p,1)
+      factored_translation_maps(p,2)=int(4*((factored_global_index-1)/4)+mod(factored_global_index+1,4)+1,8)
+    enddo
+    factored_point_product=reshape([1,2,2,1],[2,2]);factored_cocycle=1
+    factored_cocycle(2,2)=2;factored_weights=1d0
+    call validate_dg_factored_point_cogroup_gauge(comm,transpose(streamed_transform_rows),factored_weights,&
+      factored_point_maps,factored_translation_maps,factored_point_product,1,factored_cocycle,2,0d0,1d-12,&
+      factored_identity_defect,factored_unitarity_defect,factored_closure_defect,inverse_workspace,ok,message)
+    call require(ok.and.factored_closure_defect<1d-12,&
+      'nontrivial factored point-cogroup cocycle proof: '//trim(message))
+    factored_cocycle(2,2)=1
+    call validate_dg_factored_point_cogroup_gauge(comm,transpose(streamed_transform_rows),factored_weights,&
+      factored_point_maps,factored_translation_maps,factored_point_product,1,factored_cocycle,2,0d0,1d-12,&
+      factored_identity_defect,factored_unitarity_defect,factored_closure_defect,inverse_workspace,ok,message)
+    call require(.not.ok,'factored point-cogroup proof rejects an in-range corrupt translation cocycle')
+    factored_cocycle(2,2)=2
+    factored_point_maps(1,2)=factored_point_maps(2,2)
+    call validate_dg_factored_point_cogroup_gauge(comm,transpose(streamed_transform_rows),factored_weights,&
+      factored_point_maps,factored_translation_maps,factored_point_product,1,factored_cocycle,2,0d0,1d-12,&
+      factored_identity_defect,factored_unitarity_defect,factored_closure_defect,inverse_workspace,ok,message)
+    call require(.not.ok,'factored point-cogroup proof rejects a non-permutation point map')
+    factored_global_index=rank*nlocal+1
+    factored_point_maps(1,2)=int(4*((factored_global_index-1)/4)+mod(factored_global_index,4)+1,8)
+    if(nproc>1)then
+      if(rank==0)factored_point_product(2,2)=2
+      call validate_dg_factored_point_cogroup_gauge(comm,transpose(streamed_transform_rows),factored_weights,&
+        factored_point_maps,factored_translation_maps,factored_point_product,1,factored_cocycle,2,0d0,1d-12,&
+        factored_identity_defect,factored_unitarity_defect,factored_closure_defect,inverse_workspace,ok,message)
+      call require(.not.ok,'factored point-cogroup proof rejects rank-disagreeing product metadata')
+      if(rank==0)factored_point_product(2,2)=1
+    endif
+    deallocate(factored_point_maps,factored_translation_maps,factored_weights)
+  endif
   if(nproc>1)then
     call inverse_dg_translation_character_orbits(comm,box_ids,12,character_table,character_product,1,&
       character_fingerprint,inverse_sector_values,inverse_sector_gradients,merge(1d-11,1d-12,rank==0),&
@@ -1391,8 +1527,28 @@ program test_dg_overlapping_wannier_construction_mpi
   call require(inverse_fingerprint==inverse_reference_fingerprint,&
     'inverse character fingerprint is invariant under conjugate complex internal gauges')
 
+  b=count([(mod(i-1,nproc)==rank,i=1,4)])
+  allocate(spatial_basis(4,nlocal),sector_coefficient_ids(b),sector_coefficients(b,2))
+  do p=1,nlocal
+    do i=1,4;spatial_basis(i,p)=cmplx(real(10*i+p,8),real(i-p,8),8);enddo
+  enddo
+  b=0
+  do i=1,4
+    if(mod(i-1,nproc)/=rank)cycle
+    b=b+1;sector_coefficient_ids(b)=i
+    sector_coefficients(b,:)=[cmplx(real(i,8),0d0,8),cmplx(0d0,real(i,8),8)]
+  enddo
+  call materialize_dg_row_owned_sector_on_spatial_grid(comm,sector_coefficient_ids,4,&
+    sector_coefficients,spatial_basis,987_8,materialized_sector,spatial_sector_fingerprint,inverse_workspace,ok,message)
+  call require(ok.and.maxval(abs(materialized_sector(:,1)-sum(spatial_basis*&
+    spread([(real(i,8),i=1,4)],2,nlocal),dim=1)))<1d-12.and.&
+    maxval(abs(materialized_sector(:,2)-cmplx(0d0,1d0,8)*sum(spatial_basis*&
+    spread([(real(i,8),i=1,4)],2,nlocal),dim=1)))<1d-12,&
+    'row-owned character sector materializes on the local spatial grid without dense coefficient replication')
+
   if(rank==0)then
     write(*,'(a,i0)')'INVERSE_CHARACTER_FINGERPRINT ',inverse_fingerprint
+    write(*,'(a,i0)')'SPATIAL_SECTOR_FINGERPRINT ',spatial_sector_fingerprint
     write(*,'(a,i0,a,i0,a,*(i0,1x))')'CONSTRUCTION ranks=',nproc,' fingerprint=',&
       reference_fingerprint,' centers=',reference_center_box_ids
     write(*,'(a,i0,a)')'PASS overlapping-Wannier construction on ',nproc,' ranks'

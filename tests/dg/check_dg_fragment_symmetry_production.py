@@ -55,7 +55,7 @@ require("project_ow_exact_global_group" in MAIN,
 require("assemble_dg_distributed_basis_symmetry_overlap" in MAIN,
         "global checkpoint representation must be measured from the actual distributed Wannier gauge")
 require("assemble_dg_distributed_basis_symmetry_overlap_rows" in MAIN and
-        "validate_dg_row_owned_group_representation" in MAIN,
+        "validate_dg_factored_point_cogroup_gauge" in MAIN,
         "post-MLWF symmetry validation must remain row-owned and memory bounded")
 exact_global_body = re.search(
     r"subroutine\s+project_ow_exact_global_group(.*?)end\s+subroutine", MAIN, re.S)
