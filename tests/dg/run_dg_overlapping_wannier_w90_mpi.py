@@ -1,11 +1,36 @@
 #!/usr/bin/env python3
 from pathlib import Path
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
+if os.environ.get("SALMON_LAPACK_LIBS"):
+    lapack_libs = shlex.split(os.environ["SALMON_LAPACK_LIBS"])
+elif shutil.which("pkg-config") and subprocess.run(
+    ["pkg-config", "--exists", "openblas"], check=False
+).returncode == 0:
+    lapack_libs = shlex.split(
+        subprocess.check_output(["pkg-config", "--libs", "openblas"], text=True)
+    )
+else:
+    generic_lapack = None
+    if shutil.which("pkg-config"):
+        probe = subprocess.run(["pkg-config", "--libs", "lapack"], capture_output=True, text=True)
+        if probe.returncode == 0:
+            generic_lapack = shlex.split(probe.stdout)
+    if generic_lapack:
+        lapack_libs = generic_lapack
+    elif shutil.which("brew"):
+        probe = subprocess.run(["brew", "--prefix", "openblas"], capture_output=True, text=True)
+        if probe.returncode == 0:
+            lapack_libs = [f"-L{probe.stdout.strip()}/lib", "-lopenblas"]
+        else:
+            lapack_libs = ["-llapack", "-lblas"]
+    else:
+        lapack_libs = ["-llapack", "-lblas"]
 with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
     build = Path(name)
     (build / "config.h").write_text("")
@@ -23,6 +48,7 @@ with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
             "-ffpe-trap=invalid,zero,overflow",
             str(ROOT / "src/gs/dc/dg_overlapping_wannier_w90.f90"),
             str(ROOT / "tests/dg/test_dg_overlapping_wannier_w90_mpi.f90"),
+            *lapack_libs,
             "-o",
             str(exe),
         ],
@@ -31,6 +57,7 @@ with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
     env = os.environ.copy()
     env.setdefault("OMPI_MCA_rmaps_base_oversubscribe", "1")
     fingerprints = []
+    sector_fingerprints = []
     for ranks in (1, 2, 4, 8):
         result = subprocess.run(
             [shutil.which("mpiexec"), "-n", str(ranks), str(exe)],
@@ -42,7 +69,10 @@ with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
         assert "PASS Wannier90 MLWF adapter validation" in result.stdout
         line = next(line for line in result.stdout.splitlines() if line.startswith("W90_MATRIX_FINGERPRINT"))
         fingerprints.append(float(line.split()[1]))
+        sector_line = next(line for line in result.stdout.splitlines() if line.startswith("W90_SECTOR_FINGERPRINT"))
+        sector_fingerprints.append(int(sector_line.split()[1]))
     assert max(fingerprints) - min(fingerprints) < 1.0e-12, fingerprints
+    assert len(set(sector_fingerprints)) == 1, sector_fingerprints
     library = os.environ.get("SALMON_WANNIER90_LIB")
     if library:
         actual = build / "w90_library"
@@ -59,8 +89,7 @@ with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
                 str(ROOT / "src/gs/dc/dg_overlapping_wannier_w90.f90"),
                 str(ROOT / "tests/dg/test_dg_overlapping_wannier_w90_mpi.f90"),
                 library,
-                "-framework",
-                "Accelerate",
+                *lapack_libs,
                 "-o",
                 str(actual),
             ],

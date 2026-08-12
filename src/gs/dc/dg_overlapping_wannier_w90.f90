@@ -13,7 +13,333 @@ module dg_overlapping_wannier_w90
   public::apply_dg_w90_gamma_transform
   public::inherit_dg_w90_affine_receipts
   public::validate_dg_w90_convergence_log
+  public::align_dg_w90_character_sector_gauge
+  public::validate_dg_w90_localization_cluster
 contains
+  subroutine validate_dg_w90_localization_cluster(eigenvalues,selected_count,tolerance,ok,message)
+    ! The localization eigensolver must supply this spectrum in ascending order.
+    real(real64),intent(in)::eigenvalues(:),tolerance
+    integer,intent(in)::selected_count
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::i
+    real(real64)::scale
+    ok=.false.;message=''
+    if(size(eigenvalues)<1.or.selected_count<1.or.selected_count>size(eigenvalues).or.&
+        tolerance<=0d0.or..not.ieee_is_finite(tolerance).or..not.all(ieee_is_finite(eigenvalues)))then
+      message='invalid Wannier90 localization-cluster contract';return
+    endif
+    do i=2,size(eigenvalues)
+      if(eigenvalues(i)<eigenvalues(i-1))then;message='Wannier90 localization spectrum is not ordered';return;endif
+    enddo
+    if(selected_count<size(eigenvalues))then
+      scale=max(1d0,maxval(abs(eigenvalues)))
+      if(abs(eigenvalues(selected_count+1)-eigenvalues(selected_count))<=tolerance*scale)then
+        message='Wannier90 selection splits a degenerate localization cluster';return
+      endif
+    endif
+    ok=.true.
+  end subroutine validate_dg_w90_localization_cluster
+
+#ifdef USE_MPI
+  subroutine align_dg_w90_character_sector_gauge(comm,row_ids,sector_rows,reference_rows,&
+      gamma_rows,conjugate_rows,gamma_sewing_defect,tolerance,&
+      aligned_rows,aligned_conjugate_rows,singular_values,&
+      canonical_channel_keys,polar_defect,gamma_defect,fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm
+    integer(int64),intent(in)::row_ids(:)
+    complex(real64),intent(in)::sector_rows(:,:),reference_rows(:,:),gamma_rows(:,:),conjugate_rows(:,:)
+    real(real64),intent(in)::gamma_sewing_defect,tolerance
+    complex(real64),allocatable,intent(out)::aligned_rows(:,:),aligned_conjugate_rows(:,:)
+    real(real64),allocatable,intent(out)::singular_values(:)
+    integer(int64),allocatable,intent(out)::canonical_channel_keys(:)
+    real(real64),intent(out)::polar_defect,gamma_defect
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(real64),allocatable::link(:,:),polar(:,:),svd_left(:,:),svd_right(:,:),gram(:,:),&
+      remote_row(:),generated(:,:),svd_work(:)
+    complex(real64),allocatable::projector_row(:)
+    complex(real64),allocatable::ordered_reference(:,:)
+    real(real64),allocatable::svd_rwork(:)
+    integer,allocatable::owner(:),position(:),ownership_count(:)
+    integer,allocatable::channel_order(:)
+    integer::nlocal,n,m,i,j,k,rank,ierr,svd_info,svd_lwork,local_bad,global_bad,allocation_status
+    integer::minimum_n,maximum_n,minimum_m,maximum_m,retained_singular_count
+    integer(int64)::complex_elements,real_elements,integer_elements,byte_term
+    real(real64)::minimum_tolerance,maximum_tolerance,minimum_gamma_receipt,maximum_gamma_receipt,&
+      singular_scale,pivot_magnitude,candidate_magnitude
+    complex(real64)::pivot_value,stream_value,phase_factor
+    logical::receipt_valid
+    complex(real64)::projector_value
+    interface
+      subroutine zgesvd(jobu,jobvt,m,n,a,lda,s,u,ldu,vt,ldvt,work,lwork,rwork,info)
+        character,intent(in)::jobu,jobvt
+        integer,intent(in)::m,n,lda,ldu,ldvt,lwork
+        complex(8),intent(inout)::a(lda,*),work(*)
+        real(8),intent(out)::s(*),rwork(*)
+        complex(8),intent(out)::u(ldu,*),vt(ldvt,*)
+        integer,intent(out)::info
+      end subroutine
+    end interface
+    ok=.false.;message='';polar_defect=huge(1d0);gamma_defect=huge(1d0)
+    fingerprint=0_int64;workspace_peak_bytes=0_int64
+    nlocal=size(row_ids);m=size(sector_rows,2);n=size(gamma_rows,2)
+    local_bad=merge(0,1,n>=1.and.m>=1.and.nlocal>=0.and.size(sector_rows,1)==nlocal.and.&
+        all(shape(reference_rows)==[nlocal,m]).and.all(shape(conjugate_rows)==[nlocal,m]).and.&
+        gamma_sewing_defect>=0d0.and.gamma_sewing_defect<=tolerance.and.&
+        ieee_is_finite(gamma_sewing_defect).and.&
+        size(gamma_rows,1)==nlocal.and.tolerance>=1d-15.and.tolerance<=1d-2.and.&
+        ieee_is_finite(tolerance).and.all(row_ids>=1_int64).and.all(row_ids<=int(n,int64)).and.&
+        all(ieee_is_finite(real(sector_rows))).and.all(ieee_is_finite(aimag(sector_rows))).and.&
+        all(ieee_is_finite(real(reference_rows))).and.all(ieee_is_finite(aimag(reference_rows))).and.&
+        all(ieee_is_finite(real(gamma_rows))).and.all(ieee_is_finite(aimag(gamma_rows))).and.&
+        all(ieee_is_finite(real(conjugate_rows))).and.all(ieee_is_finite(aimag(conjugate_rows))))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='invalid Wannier90 character-sector alignment contract';return
+    endif
+    call MPI_Allreduce(n,minimum_n,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 metadata agreement reduction failed';return;endif
+    call MPI_Allreduce(n,maximum_n,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 metadata agreement reduction failed';return;endif
+    call MPI_Allreduce(m,minimum_m,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 metadata agreement reduction failed';return;endif
+    call MPI_Allreduce(m,maximum_m,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_n/=maximum_n.or.minimum_m/=maximum_m)then
+      message='Wannier90 alignment metadata disagree across ranks';return
+    endif
+    call MPI_Allreduce(tolerance,minimum_tolerance,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 metadata agreement reduction failed';return;endif
+    call MPI_Allreduce(tolerance,maximum_tolerance,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 metadata agreement reduction failed';return;endif
+    call MPI_Allreduce(gamma_sewing_defect,minimum_gamma_receipt,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 metadata agreement reduction failed';return;endif
+    call MPI_Allreduce(gamma_sewing_defect,maximum_gamma_receipt,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_tolerance/=maximum_tolerance.or.&
+        minimum_gamma_receipt/=maximum_gamma_receipt)then
+      message='Wannier90 alignment metadata disagree across ranks';return
+    endif
+    if(m>0.and.m>huge(0)/m)then;message='Wannier90 sector-link MPI count overflows';return;endif
+    if(m>huge(0)/5)then;message='Wannier90 SVD workspace extent overflows';return;endif
+    call MPI_Comm_rank(comm,rank,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 communicator rank query failed';return;endif
+    allocate(owner(n),position(n),ownership_count(n),stat=allocation_status)
+    call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then;message='Wannier90 ownership allocation failed';return;endif
+    owner=0;position=0;ownership_count=0
+    do i=1,nlocal
+      owner(int(row_ids(i)))=rank+1;position(int(row_ids(i)))=i;ownership_count(int(row_ids(i)))=1
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,owner,n,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 ownership rank reduction failed';return;endif
+    call MPI_Allreduce(MPI_IN_PLACE,position,n,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 ownership position reduction failed';return;endif
+    call MPI_Allreduce(MPI_IN_PLACE,ownership_count,n,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(ownership_count/=1))then
+      message='Wannier90 sector rows are not uniquely owned';return
+    endif
+    allocate(link(m,m),polar(m,m),svd_left(m,m),svd_right(m,m),gram(m,m),singular_values(m),&
+      ordered_reference(nlocal,m),channel_order(m),canonical_channel_keys(m),&
+      aligned_rows(nlocal,m),aligned_conjugate_rows(nlocal,m),generated(nlocal,m),remote_row(m),&
+      projector_row(n),&
+      stat=allocation_status)
+    call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then;message='Wannier90 sector workspace allocation failed';return;endif
+    ordered_reference=reference_rows
+    do j=1,m
+      candidate_magnitude=maxval(abs(ordered_reference(:,j)))
+      call MPI_Allreduce(candidate_magnitude,pivot_magnitude,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='Wannier90 reference pivot reduction failed';return;endif
+      pivot_value=(0d0,0d0)
+      do k=1,n
+        stream_value=(0d0,0d0)
+        if(rank==owner(k)-1)stream_value=ordered_reference(position(k),j)
+        call MPI_Bcast(stream_value,1,MPI_DOUBLE_COMPLEX,owner(k)-1,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then;message='Wannier90 reference phase stream failed';return;endif
+        if(abs(stream_value)>=pivot_magnitude-10d0*tolerance*max(1d0,pivot_magnitude))then
+          pivot_value=stream_value;exit
+        endif
+      enddo
+      pivot_magnitude=abs(pivot_value)
+      if(pivot_magnitude<=tolerance)then;message='singular Wannier90 reference channel';return;endif
+      phase_factor=conjg(pivot_value)/pivot_magnitude
+      ordered_reference(:,j)=ordered_reference(:,j)*phase_factor
+      canonical_channel_keys(j)=int(z'BB67AE8584CAA73B',int64)
+      do k=1,n
+        stream_value=(0d0,0d0)
+        if(rank==owner(k)-1)stream_value=ordered_reference(position(k),j)
+        call MPI_Bcast(stream_value,1,MPI_DOUBLE_COMPLEX,owner(k)-1,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then;message='Wannier90 reference key stream failed';return;endif
+        canonical_channel_keys(j)=ieor(ishftc(canonical_channel_keys(j),11),&
+          nint(real(stream_value,real64)/(1000d0*tolerance),int64))
+        canonical_channel_keys(j)=ieor(ishftc(canonical_channel_keys(j),11),&
+          nint(aimag(stream_value)/(1000d0*tolerance),int64))
+      enddo
+    enddo
+    channel_order=[(i,i=1,m)]
+    do i=2,m
+      k=channel_order(i);j=i-1
+      do while(j>=1)
+        if(canonical_channel_keys(channel_order(j))<=canonical_channel_keys(k))exit
+        channel_order(j+1)=channel_order(j);j=j-1
+      enddo
+      channel_order(j+1)=k
+    enddo
+    do i=2,m
+      if(canonical_channel_keys(channel_order(i))==canonical_channel_keys(channel_order(i-1)))then
+        message='Wannier90 canonical reference-channel fingerprints collide';return
+      endif
+    enddo
+    ordered_reference=ordered_reference(:,channel_order)
+    canonical_channel_keys=canonical_channel_keys(channel_order)
+    gram=matmul(conjg(transpose(sector_rows)),sector_rows)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+    if(ierr/=MPI_SUCCESS.or.maxval(abs(gram))>10d0*tolerance)then
+      message='Wannier90 input sector frame is not orthonormal';return
+    endif
+    gram=matmul(conjg(transpose(ordered_reference)),ordered_reference)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+    if(ierr/=MPI_SUCCESS.or.maxval(abs(gram))>10d0*tolerance)then
+      message='Wannier90 reference frame is not orthonormal';return
+    endif
+    gram=matmul(conjg(transpose(conjugate_rows)),conjugate_rows)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+    if(ierr/=MPI_SUCCESS.or.maxval(abs(gram))>10d0*tolerance)then
+      message='Wannier90 conjugate sector frame is not orthonormal';return
+    endif
+    link=matmul(conjg(transpose(sector_rows)),ordered_reference)
+    call MPI_Allreduce(MPI_IN_PLACE,link,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 localization-link reduction failed';return;endif
+    allocate(svd_rwork(max(1,5*m)),svd_work(1),stat=allocation_status)
+    call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then;message='Wannier90 SVD query allocation failed';return;endif
+    svd_left=link
+    svd_lwork=-1
+    call zgesvd('A','A',m,m,svd_left,m,singular_values,polar,m,svd_right,m,svd_work,&
+      svd_lwork,svd_rwork,svd_info)
+    if(svd_info/=0.or..not.ieee_is_finite(real(svd_work(1))))then
+      message='Wannier90 localization-link SVD workspace query failed';return
+    endif
+    if(real(svd_work(1),real64)>real(huge(0),real64))then
+      message='Wannier90 SVD workspace extent overflows';return
+    endif
+    svd_lwork=max(1,ceiling(real(svd_work(1),real64)));deallocate(svd_work)
+    allocate(svd_work(svd_lwork),stat=allocation_status)
+    call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then;message='Wannier90 SVD workspace allocation failed';return;endif
+    svd_left=link
+    call zgesvd('A','A',m,m,svd_left,m,singular_values,polar,m,svd_right,m,svd_work,&
+      svd_lwork,svd_rwork,svd_info)
+    if(svd_info/=0.or..not.all(ieee_is_finite(singular_values)))then
+      message='Wannier90 localization-link SVD failed';return
+    endif
+    singular_scale=max(1d0,maxval(singular_values))
+    retained_singular_count=count(singular_values>tolerance*singular_scale)
+    if(retained_singular_count>0.and.retained_singular_count<m)then
+      if(abs(singular_values(retained_singular_count)-singular_values(retained_singular_count+1))<=&
+          10d0*tolerance*singular_scale)then
+        message='Wannier90 rank threshold splits a degenerate singular-value cluster';return
+      endif
+    endif
+    if(minval(singular_values)<=tolerance*singular_scale)then
+      message='singular Wannier90 localization link';return
+    endif
+    polar=matmul(polar,svd_right)
+    gram=matmul(conjg(transpose(polar)),polar)
+    do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+    polar_defect=maxval(abs(gram));if(polar_defect>10d0*tolerance)then
+      message='Wannier90 localization-link polar factor is not unitary';return
+    endif
+    aligned_rows=matmul(sector_rows,polar)
+    generated=(0d0,0d0)
+    do k=1,n
+      remote_row=(0d0,0d0)
+      if(rank==owner(k)-1)remote_row=conjg(aligned_rows(position(k),:))
+      call MPI_Bcast(remote_row,m,MPI_DOUBLE_COMPLEX,owner(k)-1,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='Wannier90 Gamma row stream failed';return;endif
+      do i=1,nlocal;generated(i,:)=generated(i,:)+gamma_rows(i,k)*remote_row;enddo
+    enddo
+    aligned_conjugate_rows=generated
+    gram=matmul(conjg(transpose(generated)),generated)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+    if(ierr/=MPI_SUCCESS.or.maxval(abs(gram))>10d0*tolerance)then
+      message='Wannier90 Gamma image leaks outside a unitary conjugate-sector frame';return
+    endif
+    gram=matmul(conjg(transpose(conjugate_rows)),generated)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 Gamma overlap reduction failed';return;endif
+    gram=matmul(conjg(transpose(gram)),gram)
+    do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+    gamma_defect=maxval(abs(gram));if(gamma_defect>10d0*tolerance)then
+      message='Wannier90 aligned sectors violate Gamma conjugate pairing';return
+    endif
+    fingerprint=int(z'6A09E667F3BCC909',int64)
+    do k=1,n
+      remote_row=(0d0,0d0)
+      if(rank==owner(k)-1)remote_row=aligned_rows(position(k),:)
+      call MPI_Bcast(remote_row,m,MPI_DOUBLE_COMPLEX,owner(k)-1,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='Wannier90 aligned-projector row stream failed';return;endif
+      projector_row=(0d0,0d0)
+      do i=1,nlocal
+        projector_row(int(row_ids(i)))=sum(remote_row*conjg(aligned_rows(i,:)))
+      enddo
+      call MPI_Allreduce(MPI_IN_PLACE,projector_row,n,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='Wannier90 aligned-projector fingerprint reduction failed';return;endif
+      if(rank==0)then
+        do j=1,n
+          projector_value=projector_row(j)
+          fingerprint=ieor(ishftc(fingerprint,13),&
+            nint(real(projector_value,real64)/(100d0*tolerance),int64))
+          fingerprint=ieor(ishftc(fingerprint,13),nint(aimag(projector_value)/(100d0*tolerance),int64))
+        enddo
+      endif
+    enddo
+    call MPI_Bcast(fingerprint,1,MPI_INTEGER8,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier90 alignment fingerprint broadcast failed';return;endif
+    complex_elements=0_int64;real_elements=0_int64;integer_elements=0_int64;receipt_valid=.true.
+    call checked_add(complex_elements,size(sector_rows,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(reference_rows,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(gamma_rows,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(conjugate_rows,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(link,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(polar,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(svd_left,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(svd_right,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(svd_work,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(gram,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(ordered_reference,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(aligned_rows,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(aligned_conjugate_rows,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(generated,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(remote_row,kind=int64),receipt_valid)
+    call checked_add(complex_elements,size(projector_row,kind=int64),receipt_valid)
+    ! Conservative allowance for the largest MATMUL/LAPACK temporary owned by this routine.
+    call checked_add(complex_elements,max(int(m,int64)*int(m,int64),int(nlocal,int64)*int(m,int64)),receipt_valid)
+    call checked_add(real_elements,size(singular_values,kind=int64),receipt_valid)
+    call checked_add(real_elements,size(svd_rwork,kind=int64),receipt_valid)
+    call checked_add(integer_elements,size(row_ids,kind=int64),receipt_valid)
+    call checked_add(integer_elements,size(canonical_channel_keys,kind=int64),receipt_valid)
+    call checked_add(integer_elements,size(owner,kind=int64),receipt_valid)
+    call checked_add(integer_elements,size(position,kind=int64),receipt_valid)
+    call checked_add(integer_elements,size(ownership_count,kind=int64),receipt_valid)
+    call checked_add(integer_elements,size(channel_order,kind=int64),receipt_valid)
+    if(receipt_valid)call checked_product([complex_elements,16_int64],workspace_peak_bytes,receipt_valid)
+    if(receipt_valid)call checked_product([real_elements,8_int64],byte_term,receipt_valid)
+    if(receipt_valid)call checked_add(workspace_peak_bytes,byte_term,receipt_valid)
+    if(receipt_valid)call checked_product([integer_elements,8_int64],byte_term,receipt_valid)
+    if(receipt_valid)call checked_add(workspace_peak_bytes,byte_term,receipt_valid)
+    if(.not.receipt_valid.or.workspace_peak_bytes<=0_int64)then
+      workspace_peak_bytes=0_int64;message='Wannier90 alignment workspace receipt overflows';return
+    endif
+    ok=.true.;message=''
+  end subroutine align_dg_w90_character_sector_gauge
+#endif
+
   subroutine validate_dg_w90_convergence_log(path,maximum_iterations,iterations,ok,message)
     character(*),intent(in)::path
     integer,intent(in)::maximum_iterations
@@ -598,7 +924,8 @@ contains
   subroutine checked_add(value,increment,ok)
     integer(int64),intent(inout)::value
     integer(int64),intent(in)::increment
-    logical,intent(out)::ok
+    logical,intent(inout)::ok
+    if(.not.ok)return
     ok=value>=0_int64.and.increment>=0_int64.and.value<=huge(value)-increment
     if(ok)value=value+increment
   end subroutine checked_add

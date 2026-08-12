@@ -5,6 +5,8 @@ program test_dg_overlapping_wannier_w90_mpi
     validate_dg_w90_result,setup_dg_w90_gamma_library,run_dg_w90_gamma_library,&
     assemble_dg_w90_gamma_matrices,apply_dg_w90_gamma_transform,&
     validate_dg_w90_convergence_log
+  use dg_overlapping_wannier_w90,only:align_dg_w90_character_sector_gauge
+  use dg_overlapping_wannier_w90,only:validate_dg_w90_localization_cluster
   use dg_overlapping_wannier_w90,only:inherit_dg_w90_affine_receipts
   implicit none
   integer::ierr,rank,nproc,b,m,n,p,nlocal
@@ -26,6 +28,19 @@ program test_dg_overlapping_wannier_w90_mpi
   complex(8)::gauge_transform(2,2)
   real(8)::gauge_centers(3,2)
   integer(8),allocatable::gauge_ids(:)
+  integer(8),allocatable::sector_ids(:)
+  complex(8),allocatable::sector_frame(:,:),sector_reference(:,:),sector_gamma(:,:),&
+    sector_conjugate(:,:),sector_aligned(:,:),sector_conjugate_aligned(:,:)
+  complex(8),allocatable::sector_rotated(:,:),sector_reference_permuted(:,:),sector_trial_aligned(:,:),&
+    sector_trial_conjugate(:,:)
+  complex(8),allocatable::sector_gamma_trial(:,:)
+  real(8),allocatable::sector_singular_values(:)
+  real(8)::sector_polar_defect,sector_gamma_defect
+  real(8)::sector_local_cost,sector_global_cost,sector_swapped_local_cost,sector_swapped_global_cost
+  real(8)::localization_cluster_spectrum(4)
+  integer(8)::sector_alignment_fingerprint,sector_alignment_workspace
+  integer(8)::sector_trial_fingerprint,sector_trial_workspace
+  integer(8),allocatable::sector_reference_keys(:),sector_permuted_keys(:)
 #ifdef USE_WANNIER90
   integer::nntot
   integer,allocatable::nncell(:,:)
@@ -110,6 +125,134 @@ program test_dg_overlapping_wannier_w90_mpi
     matrix_matches=.true.
   endif
   call require(matrix_matches,'distributed Wannier90 M/A match dense references')
+  allocate(sector_ids(nlocal),sector_frame(nlocal,2),sector_reference(nlocal,2),sector_gamma(nlocal,8),&
+    sector_conjugate(nlocal,2))
+  do p=1,nlocal
+    global_point=rank*nlocal+p
+    sector_ids(p)=global_point
+    sector_frame(p,1)=exp(cmplx(0d0,2d0*acos(-1d0)*real(global_point-1,8)/8d0,8))/sqrt(8d0)
+    sector_frame(p,2)=exp(cmplx(0d0,6d0*acos(-1d0)*real(global_point-1,8)/8d0,8))/sqrt(8d0)
+  enddo
+  sector_reference(:,1)=(sector_frame(:,1)+cmplx(0.3d0,0.4d0,8)*sector_frame(:,2))/sqrt(1.25d0)
+  sector_reference(:,2)=(-cmplx(0.3d0,-0.4d0,8)*sector_frame(:,1)+sector_frame(:,2))/sqrt(1.25d0)
+  sector_gamma=(0d0,0d0)
+  do p=1,nlocal;sector_gamma(p,rank*nlocal+p)=1d0;enddo
+  sector_conjugate=conjg(sector_frame)
+  call align_dg_w90_character_sector_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,sector_reference,&
+    sector_gamma,sector_conjugate,0d0,1d-12,sector_aligned,sector_conjugate_aligned,&
+    sector_singular_values,sector_reference_keys,sector_polar_defect,sector_gamma_defect,sector_alignment_fingerprint,&
+    sector_alignment_workspace,ok,message)
+  call require(ok.and.minval(sector_singular_values)>0.9d0.and.sector_polar_defect<1d-10.and.&
+    sector_gamma_defect<1d-10.and.sector_alignment_workspace>0_8.and.&
+    maxval(abs(sector_conjugate_aligned-conjg(sector_aligned)))<1d-10,trim(message))
+  if(rank==0)write(*,'(a,1x,i0)')'W90_SECTOR_FINGERPRINT',sector_alignment_fingerprint
+  if(nproc>1)then
+    call align_dg_w90_character_sector_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,sector_reference,&
+      sector_gamma,sector_conjugate,0d0,merge(1d-11,1d-12,rank==0),sector_trial_aligned,&
+      sector_trial_conjugate,sector_singular_values,sector_permuted_keys,sector_polar_defect,sector_gamma_defect,&
+      sector_trial_fingerprint,sector_trial_workspace,ok,message)
+    call require(.not.ok.and.index(trim(message),'metadata')>0,&
+      'Wannier90 alignment rejects rank-inconsistent canonical metadata')
+  endif
+  allocate(sector_gamma_trial(nlocal,8));sector_gamma_trial=sector_gamma
+  do p=1,nlocal
+    global_point=rank*nlocal+p
+    do n=1,8
+      sector_gamma_trial(p,n)=sector_gamma_trial(p,n)+0.1d0*&
+        exp(cmplx(0d0,4d0*acos(-1d0)*real(global_point-1,8)/8d0,8))/sqrt(8d0)*&
+        (exp(cmplx(0d0,2d0*acos(-1d0)*real(n-1,8)/8d0,8))/sqrt(8d0)+&
+        cmplx(0.3d0,0.4d0,8)*exp(cmplx(0d0,6d0*acos(-1d0)*real(n-1,8)/8d0,8))/sqrt(8d0))/sqrt(1.25d0)
+    enddo
+  enddo
+  call align_dg_w90_character_sector_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,sector_reference,&
+    sector_gamma_trial,sector_conjugate,0d0,1d-12,sector_trial_aligned,&
+    sector_trial_conjugate,sector_singular_values,sector_permuted_keys,sector_polar_defect,sector_gamma_defect,&
+    sector_trial_fingerprint,sector_trial_workspace,ok,message)
+  call require(.not.ok.and.index(trim(message),'Gamma')>0,&
+    'Wannier90 alignment rejects Gamma leakage outside the conjugate sector')
+  call align_dg_w90_character_sector_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,sector_reference,&
+    sector_gamma,sector_conjugate,1d-4,1d-12,sector_trial_aligned,&
+    sector_trial_conjugate,sector_singular_values,sector_permuted_keys,sector_polar_defect,sector_gamma_defect,&
+    sector_trial_fingerprint,sector_trial_workspace,ok,message)
+  call require(.not.ok,'Wannier90 alignment rejects an unaccepted Gamma sewing receipt')
+  sector_conjugate=2d0*sector_conjugate
+  call align_dg_w90_character_sector_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,sector_reference,&
+    sector_gamma,sector_conjugate,0d0,1d-12,sector_trial_aligned,&
+    sector_trial_conjugate,sector_singular_values,sector_permuted_keys,sector_polar_defect,sector_gamma_defect,&
+    sector_trial_fingerprint,sector_trial_workspace,ok,message)
+  call require(.not.ok.and.index(trim(message),'conjugate sector frame')>0,&
+    'Wannier90 alignment rejects a nonorthonormal conjugate sector')
+  sector_conjugate=0.5d0*sector_conjugate
+  allocate(sector_rotated(nlocal,2),sector_reference_permuted(nlocal,2))
+  sector_rotated(:,1)=(sector_frame(:,1)+cmplx(0d0,1d0,8)*sector_frame(:,2))/sqrt(2d0)
+  sector_rotated(:,2)=(cmplx(0d0,1d0,8)*sector_frame(:,1)+sector_frame(:,2))/sqrt(2d0)
+  call align_dg_w90_character_sector_gauge(MPI_COMM_WORLD,sector_ids,sector_rotated,sector_reference,&
+    sector_gamma,sector_conjugate,0d0,1d-12,sector_trial_aligned,sector_trial_conjugate,&
+    sector_singular_values,sector_permuted_keys,sector_polar_defect,sector_gamma_defect,sector_trial_fingerprint,&
+    sector_trial_workspace,ok,message)
+  call require(ok.and.sector_trial_fingerprint==sector_alignment_fingerprint.and.&
+    maxval(abs(sector_trial_aligned-sector_aligned))<1d-10,&
+    'Wannier90 sector alignment is invariant under input sector-frame rotation')
+  sector_reference_permuted(:,1)=exp(cmplx(0d0,0.7d0,8))*sector_reference(:,2)
+  sector_reference_permuted(:,2)=exp(cmplx(0d0,-0.4d0,8))*sector_reference(:,1)
+  call align_dg_w90_character_sector_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,&
+    sector_reference_permuted,sector_gamma,sector_conjugate,0d0,1d-12,sector_trial_aligned,&
+    sector_trial_conjugate,sector_singular_values,sector_permuted_keys,sector_polar_defect,sector_gamma_defect,&
+    sector_trial_fingerprint,sector_trial_workspace,ok,message)
+  call require(ok.and.sector_trial_fingerprint==sector_alignment_fingerprint.and.&
+    maxval(abs(sector_trial_aligned-sector_aligned))<1d-10.and.&
+    maxval(abs(sector_trial_conjugate-sector_conjugate_aligned))<1d-10,&
+    'Wannier90 sector alignment is invariant under reference phases and Wannier numbering')
+  do p=1,nlocal
+    global_point=rank*nlocal+p
+    sector_reference_permuted(p,2)=exp(cmplx(0d0,4d0*acos(-1d0)*real(global_point-1,8)/8d0,8))/sqrt(8d0)
+  enddo
+  call align_dg_w90_character_sector_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,&
+    sector_reference_permuted,sector_gamma,sector_conjugate,0d0,1d-12,sector_trial_aligned,&
+    sector_trial_conjugate,sector_singular_values,sector_permuted_keys,sector_polar_defect,sector_gamma_defect,&
+    sector_trial_fingerprint,sector_trial_workspace,ok,message)
+  call require(.not.ok.and.index(trim(message),'singular')>0,&
+    'Wannier90 sector alignment rejects a singular localization link')
+  do p=1,nlocal
+    global_point=rank*nlocal+p
+    sector_reference_permuted(p,1)=1.5d-12*sector_frame(p,1)+sqrt(1d0-(1.5d-12)**2)*&
+      exp(cmplx(0d0,4d0*acos(-1d0)*real(global_point-1,8)/8d0,8))/sqrt(8d0)
+    sector_reference_permuted(p,2)=0.5d-12*sector_frame(p,2)+sqrt(1d0-(0.5d-12)**2)*&
+      exp(cmplx(0d0,10d0*acos(-1d0)*real(global_point-1,8)/8d0,8))/sqrt(8d0)
+  enddo
+  call align_dg_w90_character_sector_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,&
+    sector_reference_permuted,sector_gamma,sector_conjugate,0d0,1d-12,sector_trial_aligned,&
+    sector_trial_conjugate,sector_singular_values,sector_permuted_keys,sector_polar_defect,sector_gamma_defect,&
+    sector_trial_fingerprint,sector_trial_workspace,ok,message)
+  call require(.not.ok.and.index(trim(message),'splits')>0,&
+    'Wannier90 alignment rejects a threshold that splits a singular-value cluster')
+  do p=1,nlocal
+    global_point=rank*nlocal+p
+    sector_reference_permuted(p,1)=cos(0.4d0)*sector_frame(p,1)+sin(0.4d0)*&
+      exp(cmplx(0d0,4d0*acos(-1d0)*real(global_point-1,8)/8d0,8))/sqrt(8d0)
+    sector_reference_permuted(p,2)=sector_frame(p,2)
+  enddo
+  call align_dg_w90_character_sector_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,&
+    sector_reference_permuted,sector_gamma,sector_conjugate,0d0,1d-12,sector_trial_aligned,&
+    sector_trial_conjugate,sector_singular_values,sector_permuted_keys,sector_polar_defect,sector_gamma_defect,&
+    sector_trial_fingerprint,sector_trial_workspace,ok,message)
+  sector_local_cost=sum(abs(sector_trial_aligned-sector_reference_permuted)**2)
+  sector_swapped_local_cost=sum(abs(sector_trial_aligned(:,1)-sector_reference_permuted(:,2))**2)+&
+    sum(abs(sector_trial_aligned(:,2)-sector_reference_permuted(:,1))**2)
+  call MPI_Allreduce(sector_local_cost,sector_global_cost,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+  call MPI_Allreduce(sector_swapped_local_cost,sector_swapped_global_cost,1,MPI_DOUBLE_PRECISION,MPI_SUM,&
+    MPI_COMM_WORLD,ierr)
+  sector_global_cost=min(sector_global_cost,sector_swapped_global_cost)
+  call require(ok.and.abs(sector_singular_values(1)-1d0)<1d-10.and.&
+    abs(sector_singular_values(2)-cos(0.4d0))<1d-10.and.&
+    abs(sector_global_cost-(4d0-2d0*sum(sector_singular_values)))<1d-10,&
+    'Wannier90 SVD returns the closest polar frame for a nonunitary full-rank link')
+  localization_cluster_spectrum=[0d0,1d0,1d0,2d0]
+  call validate_dg_w90_localization_cluster(localization_cluster_spectrum,2,1d-12,ok,message)
+  call require(.not.ok.and.index(trim(message),'splits')>0,&
+    'Wannier90 alignment rejects a split degenerate localization cluster')
+  call validate_dg_w90_localization_cluster(localization_cluster_spectrum,3,1d-12,ok,message)
+  call require(ok,'Wannier90 alignment retains a complete degenerate localization cluster')
   p=merge(nlocal,max(0,nlocal-1),rank==0)
   call assemble_dg_w90_gamma_matrices(MPI_COMM_WORLD,local_values(:,1:p),local_anchors(:,1:p),&
     local_weights(1:p),local_fractional(:,1:p),test_nncell,huge(0_8),assembled_m,assembled_a,&
