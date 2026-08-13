@@ -183,6 +183,12 @@ program test_dg_overlapping_wannier_construction_mpi
   integer(8)::intertwining_maps(12,4),intertwining_generator_maps(12,2)
   integer(8),allocatable::factored_point_maps(:,:),factored_translation_maps(:,:)
   integer::factored_point_product(2,2),factored_cocycle(2,2),factored_global_index
+  integer(8),allocatable::semidirect_point_maps(:,:),semidirect_translation_maps(:,:)
+  integer,allocatable::semidirect_product(:,:),semidirect_cocycle(:,:)
+  integer::semidirect_units(4),semidirect_offsets(4),semidirect_left,semidirect_right,&
+    semidirect_product_unit,semidirect_product_index,semidirect_shift
+  integer::factored_generator_count,factored_checked_pair_count
+  integer::factored_receipt_min,factored_receipt_max
   real(8),allocatable::factored_weights(:)
   real(8)::factored_identity_defect,factored_unitarity_defect,factored_closure_defect
   real(8)::gauge_weights(2)
@@ -1361,6 +1367,53 @@ program test_dg_overlapping_wannier_construction_mpi
       call require(.not.ok,'factored point-cogroup proof rejects rank-disagreeing product metadata')
       if(rank==0)factored_point_product(2,2)=1
     endif
+    semidirect_units=[1,5,7,11];semidirect_offsets=[0,1,0,0]
+    allocate(semidirect_point_maps(nlocal,4),semidirect_translation_maps(nlocal,12),&
+      semidirect_product(4,4),semidirect_cocycle(4,4))
+    do p=1,nlocal
+      factored_global_index=rank*nlocal+p-1
+      do i=1,4
+        semidirect_point_maps(p,i)=int(mod(semidirect_units(i)*factored_global_index+semidirect_offsets(i),12)+1,8)
+      enddo
+      do i=1,12
+        semidirect_translation_maps(p,i)=int(mod(factored_global_index+i-1,12)+1,8)
+      enddo
+    enddo
+    do semidirect_left=1,4;do semidirect_right=1,4
+      semidirect_product_unit=mod(semidirect_units(semidirect_left)*semidirect_units(semidirect_right),12)
+      semidirect_product_index=findloc(semidirect_units,semidirect_product_unit,dim=1)
+      semidirect_product(semidirect_right,semidirect_left)=semidirect_product_index
+      semidirect_shift=modulo(semidirect_offsets(semidirect_right)+semidirect_units(semidirect_right)*&
+        semidirect_offsets(semidirect_left)-semidirect_offsets(semidirect_product_index),12)
+      semidirect_cocycle(semidirect_right,semidirect_left)=semidirect_shift+1
+    enddo;enddo
+    call validate_dg_factored_point_cogroup_gauge(comm,transpose(streamed_transform_rows),factored_weights,&
+      semidirect_point_maps,semidirect_translation_maps,semidirect_product,1,semidirect_cocycle,12,0d0,1d-12,&
+      factored_identity_defect,factored_unitarity_defect,factored_closure_defect,inverse_workspace,ok,message,&
+      factored_generator_count,factored_checked_pair_count)
+    call require(ok.and.factored_generator_count==2.and.factored_checked_pair_count<16,&
+      'factored cocycle uses a complete generator proof in a noncommuting affine action: '//trim(message))
+    call MPI_Allreduce(factored_checked_pair_count,factored_receipt_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(factored_checked_pair_count,factored_receipt_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call require(factored_receipt_min==12.and.factored_receipt_max==12,&
+      'generator dense-pair receipt is rank independent and equals 2*g*n-g^2')
+    semidirect_product(2,3)=2
+    call validate_dg_factored_point_cogroup_gauge(comm,transpose(streamed_transform_rows),factored_weights,&
+      semidirect_point_maps,semidirect_translation_maps,semidirect_product,1,semidirect_cocycle,12,0d0,1d-12,&
+      factored_identity_defect,factored_unitarity_defect,factored_closure_defect,inverse_workspace,ok,message,&
+      factored_generator_count,factored_checked_pair_count)
+    call require(.not.ok,'generator proof rejects a nonassociative point product before dense work')
+    semidirect_product(2,3)=findloc(semidirect_units,&
+      mod(semidirect_units(3)*semidirect_units(2),12),dim=1)
+    do p=1,nlocal
+      semidirect_point_maps(p,4)=int(mod(int(semidirect_point_maps(p,4)),12)+1,8)
+    enddo
+    call validate_dg_factored_point_cogroup_gauge(comm,transpose(streamed_transform_rows),factored_weights,&
+      semidirect_point_maps,semidirect_translation_maps,semidirect_product,1,semidirect_cocycle,12,0d0,1d-12,&
+      factored_identity_defect,factored_unitarity_defect,factored_closure_defect,inverse_workspace,ok,message,&
+      factored_generator_count,factored_checked_pair_count)
+    call require(.not.ok,'all-pair integer gate rejects a corrupt non-generator representative')
+    deallocate(semidirect_point_maps,semidirect_translation_maps,semidirect_product,semidirect_cocycle)
     deallocate(factored_point_maps,factored_translation_maps,factored_weights)
   endif
   if(nproc>1)then

@@ -424,12 +424,13 @@ contains
   subroutine align_dg_w90_character_sectors_by_periodic_phase(comm,row_ids,reference_rows,target_rows,&
       periodic_phase,global_row_count,phase_fingerprint,phase_payload_fingerprint,tolerance,&
       aligned_rows,singular_values,polar_defect,fingerprint,&
-      workspace_peak_bytes,ok,message)
+      workspace_peak_bytes,ok,message,integration_weights)
     integer,intent(in)::comm,global_row_count
     integer(int64),intent(in)::phase_fingerprint,phase_payload_fingerprint
     integer(int64),intent(in)::row_ids(:)
     complex(real64),intent(in)::reference_rows(:,:),target_rows(:,:),periodic_phase(:)
     real(real64),intent(in)::tolerance
+    real(real64),intent(in),optional::integration_weights(:)
     complex(real64),allocatable,intent(out)::aligned_rows(:,:)
     real(real64),allocatable,intent(out)::singular_values(:)
     real(real64),intent(out)::polar_defect
@@ -437,7 +438,7 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     complex(real64),allocatable::link(:,:),left(:,:),right(:,:),polar(:,:),gram(:,:),work(:),remote_row(:),projector_row(:)
-    real(real64),allocatable::rwork(:)
+    real(real64),allocatable::rwork(:),metric_weights(:)
     integer,allocatable::owner(:),position(:),ownership_count(:)
     integer::nlocal,m,i,j,k,rank,ierr,local_bad,global_bad,allocation_status,lwork,info
     integer::minint,maxint
@@ -464,6 +465,12 @@ contains
       all(ieee_is_finite(real(target_rows))).and.all(ieee_is_finite(aimag(target_rows))).and.&
       all(ieee_is_finite(real(periodic_phase))).and.all(ieee_is_finite(aimag(periodic_phase))).and.&
       maxval(abs(abs(periodic_phase)-1d0))<=10d0*tolerance)
+    if(present(integration_weights))then
+      if(size(integration_weights)/=nlocal)local_bad=1
+      if(local_bad==0)then
+        if(.not.all(ieee_is_finite(integration_weights)).or.any(integration_weights<=0d0))local_bad=1
+      endif
+    endif
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid periodic-phase sector alignment contract';return;endif
     call MPI_Allreduce(global_row_count,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
@@ -522,7 +529,7 @@ contains
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='periodic-phase workspace overflows';return;endif
     call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
     allocate(link(m,m),left(m,m),right(m,m),polar(m,m),gram(m,m),singular_values(m),&
-      aligned_rows(nlocal,m),rwork(max(1,5*m)),work(1),owner(global_row_count),position(global_row_count),&
+      aligned_rows(nlocal,m),rwork(max(1,5*m)),metric_weights(nlocal),work(1),owner(global_row_count),position(global_row_count),&
       ownership_count(global_row_count),remote_row(m),projector_row(global_row_count),stat=allocation_status)
     call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
@@ -530,6 +537,8 @@ contains
       if(allocated(singular_values))deallocate(singular_values)
       message='periodic-phase alignment allocation failed';return
     endif
+    metric_weights=1d0
+    if(present(integration_weights))metric_weights=integration_weights
     owner=0;position=0;ownership_count=0
     do i=1,nlocal
       owner(int(row_ids(i)))=rank+1;position(int(row_ids(i)))=i;ownership_count(int(row_ids(i)))=1
@@ -551,17 +560,17 @@ contains
     local_bad=merge(0,1,recomputed_phase_fingerprint==phase_payload_fingerprint)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='periodic-phase payload does not match its receipt';return;endif
-    gram=matmul(conjg(transpose(reference_rows)),reference_rows)
+    gram=matmul(conjg(transpose(reference_rows)),spread(metric_weights,2,m)*reference_rows)
     call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
     do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
     local_bad=merge(0,1,maxval(abs(gram))<=10d0*tolerance)
-    gram=matmul(conjg(transpose(target_rows)),target_rows)
+    gram=matmul(conjg(transpose(target_rows)),spread(metric_weights,2,m)*target_rows)
     call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
     do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
     if(maxval(abs(gram))>10d0*tolerance)local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='periodic-phase sector frames are not orthonormal';return;endif
-    link=matmul(conjg(transpose(target_rows)),spread(periodic_phase,2,m)*reference_rows)
+    link=matmul(conjg(transpose(target_rows)),spread(metric_weights*periodic_phase,2,m)*reference_rows)
     call MPI_Allreduce(MPI_IN_PLACE,link,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='periodic-phase localization link reduction failed';return;endif
     left=link;lwork=-1
@@ -602,12 +611,12 @@ contains
     do k=1,global_row_count
       remote_row=(0d0,0d0)
       if(rank==owner(k)-1)then
-        remote_row=aligned_rows(position(k),:)
+        remote_row=sqrt(metric_weights(position(k)))*aligned_rows(position(k),:)
       endif
       call MPI_Bcast(remote_row,m,MPI_DOUBLE_COMPLEX,owner(k)-1,comm,ierr);if(ierr/=MPI_SUCCESS)return
       projector_row=(0d0,0d0)
       do i=1,nlocal
-        projector_row(int(row_ids(i)))=sum(remote_row*conjg(aligned_rows(i,:)))
+        projector_row(int(row_ids(i)))=sqrt(metric_weights(i))*sum(remote_row*conjg(aligned_rows(i,:)))
       enddo
       call MPI_Allreduce(MPI_IN_PLACE,projector_row,global_row_count,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
       if(ierr/=MPI_SUCCESS)return
@@ -623,7 +632,7 @@ contains
 
   subroutine sew_dg_w90_periodic_phase_conjugate_sector(comm,row_ids,aligned_rows,gamma_rows,&
       conjugate_rows,global_row_count,gamma_fingerprint,self_conjugate,gamma_sewing_defect,tolerance,aligned_conjugate_rows,&
-      gamma_defect,workspace_peak_bytes,ok,message,implicit_identity)
+      gamma_defect,workspace_peak_bytes,ok,message,implicit_identity,integration_weights)
     integer,intent(in)::comm,global_row_count
     integer(int64),intent(in)::gamma_fingerprint
     logical,intent(in)::self_conjugate
@@ -631,6 +640,7 @@ contains
     integer(int64),intent(in)::row_ids(:)
     complex(real64),intent(in)::aligned_rows(:,:),gamma_rows(:,:),conjugate_rows(:,:)
     real(real64),intent(in)::gamma_sewing_defect,tolerance
+    real(real64),intent(in),optional::integration_weights(:)
     complex(real64),allocatable,intent(out)::aligned_conjugate_rows(:,:)
     real(real64),intent(out)::gamma_defect
     integer(int64),intent(out)::workspace_peak_bytes
@@ -641,6 +651,7 @@ contains
     integer,allocatable::owner(:),position(:),ownership_count(:)
     integer::nlocal,m,i,j,k,nfixed,rank,ierr,local_bad,global_bad,status,minint,maxint,flagint,identity_flag
     real(real64)::minimum,maximum,norm_value,operator_defect,local_operator_defect
+    real(real64),allocatable::metric_weights(:)
     complex(real64)::overlap_value
     integer(int64)::elements,bits,recomputed_gamma_fingerprint,minhash,maxhash,term
     logical::receipt_valid
@@ -659,6 +670,12 @@ contains
       all(ieee_is_finite(real(aligned_rows))).and.all(ieee_is_finite(aimag(aligned_rows))).and.&
       (use_identity.or.(all(ieee_is_finite(real(gamma_rows))).and.all(ieee_is_finite(aimag(gamma_rows))))) .and.&
       all(ieee_is_finite(real(conjugate_rows))).and.all(ieee_is_finite(aimag(conjugate_rows))))
+    if(present(integration_weights))then
+      if(size(integration_weights)/=nlocal)local_bad=1
+      if(local_bad==0)then
+        if(.not.all(ieee_is_finite(integration_weights)).or.any(integration_weights<=0d0))local_bad=1
+      endif
+    endif
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid periodic-phase Gamma sewing contract';return;endif
     call MPI_Allreduce(global_row_count,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
@@ -711,7 +728,7 @@ contains
     call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
     allocate(aligned_conjugate_rows(nlocal,m),generated(nlocal,m),remote_row(m),&
       remote_gamma(merge(0,global_row_count,use_identity)),&
-      local_operator_vector(nlocal),gram(m,m),sewing(m,m),candidates(m,2*m),gauge(m,m),&
+      local_operator_vector(nlocal),gram(m,m),sewing(m,m),candidates(m,2*m),gauge(m,m),metric_weights(nlocal),&
       owner(merge(0,global_row_count,use_identity)),position(merge(0,global_row_count,use_identity)),&
       ownership_count(merge(0,global_row_count,use_identity)),stat=status)
     call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -719,6 +736,8 @@ contains
       if(allocated(aligned_conjugate_rows))deallocate(aligned_conjugate_rows)
       message='Gamma sewing allocation failed';return
     endif
+    metric_weights=1d0
+    if(present(integration_weights))metric_weights=integration_weights
     if(.not.use_identity)then
       owner=0;position=0;ownership_count=0
       do i=1,nlocal
@@ -790,17 +809,17 @@ contains
         do i=1,nlocal;generated(i,:)=generated(i,:)+gamma_rows(i,k)*remote_row;enddo
       enddo
     endif
-    gram=matmul(conjg(transpose(conjugate_rows)),conjugate_rows)
+    gram=matmul(conjg(transpose(conjugate_rows)),spread(metric_weights,2,m)*conjugate_rows)
     call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
     do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
     local_bad=merge(0,1,maxval(abs(gram))<=10d0*tolerance)
-    gram=matmul(conjg(transpose(generated)),generated)
+    gram=matmul(conjg(transpose(generated)),spread(metric_weights,2,m)*generated)
     call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
     do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
     if(maxval(abs(gram))>10d0*tolerance)local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='periodic-phase Gamma frames are not orthonormal';return;endif
-    gram=matmul(conjg(transpose(conjugate_rows)),generated)
+    gram=matmul(conjg(transpose(conjugate_rows)),spread(metric_weights,2,m)*generated)
     call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
     sewing=gram;gram=matmul(conjg(transpose(gram)),gram)
     do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
@@ -810,7 +829,7 @@ contains
       message='periodic-phase sectors violate Gamma conjugate pairing';return
     endif
     if(self_conjugate)then
-      sewing=matmul(conjg(transpose(aligned_rows)),generated)
+      sewing=matmul(conjg(transpose(aligned_rows)),spread(metric_weights,2,m)*generated)
       call MPI_Allreduce(MPI_IN_PLACE,sewing,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
       candidates=(0d0,0d0)
       do j=1,m

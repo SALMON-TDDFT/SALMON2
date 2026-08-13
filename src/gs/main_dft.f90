@@ -651,6 +651,7 @@ contains
     integer::global_point_cogroup_identity_operation
     integer::translation_character_generator_count,translation_sector_rank
     integer::translation_character,translation_partner,translation_global_core_count,translation_processed_count
+    integer::translation_point_generator_count,translation_point_checked_pair_count
     integer::lcfo_symmetry_worst_operation,lcfo_symmetry_worst_generator_index
     real(8),allocatable::lcfo_total_symmetry_residual(:),lcfo_boundary_symmetry_residual(:),&
       lcfo_interior_symmetry_residual(:)
@@ -1553,7 +1554,7 @@ contains
           translation_reference_spatial,translation_target_spatial,translation_phase,translation_global_core_count,&
           translation_phase_fingerprint,translation_phase_payload_fingerprint,dg_ow_symmetry_tolerance,&
           translation_aligned_spatial,translation_singular_values,translation_alignment_defect,&
-          translation_alignment_fingerprint,translation_alignment_workspace,ok,message)
+          translation_alignment_fingerprint,translation_alignment_workspace,ok,message,ow_core_weights)
         deallocate(translation_target_spatial,translation_phase,translation_singular_values)
         if(.not.ok)then;write(0,'(a)')trim(message);error stop 'periodic-phase character alignment failed';endif
         translation_alignment_max_defect=max(translation_alignment_max_defect,translation_alignment_defect)
@@ -1586,7 +1587,7 @@ contains
         translation_aligned_spatial,translation_spatial_gamma_rows,translation_conjugate_spatial,&
         translation_global_core_count,translation_gamma_fingerprint,translation_self_conjugate,0d0,&
         dg_ow_symmetry_tolerance,translation_target_spatial,translation_gamma_defect,&
-        translation_gamma_workspace,ok,message,.true.)
+        translation_gamma_workspace,ok,message,.true.,ow_core_weights)
       deallocate(translation_spatial_gamma_rows,translation_conjugate_spatial)
       if(.not.ok)then;write(0,'(a)')trim(message);error stop 'spatial Gamma character sewing failed';endif
       translation_gamma_max_defect=max(translation_gamma_max_defect,translation_gamma_defect)
@@ -1620,8 +1621,13 @@ contains
       global_point_cogroup_product,global_point_cogroup_identity_operation,&
       global_translation_cocycle,size(translation_characters,1),max(translation_alignment_max_defect,&
       translation_gamma_max_defect),dg_ow_symmetry_tolerance,translation_identity_defect,&
-      translation_unitarity_defect,translation_closure_defect,translation_transform_workspace,ok,message)
+      translation_unitarity_defect,translation_closure_defect,translation_transform_workspace,ok,message,&
+      translation_point_generator_count,translation_point_checked_pair_count)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'post-character point-cogroup cocycle proof failed';endif
+    if(rank==0)write(*,'(a,2(a,i0),2(a,es16.8),a,i0)')'[OW-GS-DIAGNOSTIC] factored_point_cogroup_proof',&
+      ' generator_count=',translation_point_generator_count,' checked_dense_pairs=',translation_point_checked_pair_count,&
+      ' identity_defect=',translation_identity_defect,' closure_defect=',translation_closure_defect,&
+      ' workspace_peak_bytes=',translation_transform_workspace
     global_retained_group_closure_defect=max(global_retained_group_closure_defect,translation_closure_defect)
     deallocate(ow_box_values,ow_box_gradients)
     call materialize_ow_distributed_core_to_buffer(dc%icomm_tot,ow_core_values,ow_core_ids,&

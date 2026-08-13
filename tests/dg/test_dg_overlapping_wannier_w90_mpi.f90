@@ -50,6 +50,8 @@ program test_dg_overlapping_wannier_w90_mpi
   complex(8),allocatable::anchor_projected_w90(:,:),anchor_projected_lcfo(:,:)
   complex(8),allocatable::cross_gamma_rows(:,:),cross_conjugate_sector(:,:),cross_aligned_conjugate(:,:)
   complex(8),allocatable::implicit_gamma_rows(:,:)
+  complex(8),allocatable::weighted_spatial_sector(:,:)
+  real(8),allocatable::spatial_integration_weights(:)
   real(8)::cross_localization_weights(4)
   real(8),allocatable::cross_singular_values(:)
   real(8)::cross_polar_defect
@@ -318,6 +320,16 @@ program test_dg_overlapping_wannier_w90_mpi
     cross_workspace,ok,message)
   call require(ok.and.maxval(abs(sector_trial_aligned-cross_aligned_target))<1d-10,&
     'periodic-phase alignment is invariant under target-sector unitary rotations')
+  allocate(weighted_spatial_sector(nlocal,2),spatial_integration_weights(nlocal))
+  weighted_spatial_sector=2d0*cross_reference_sector
+  spatial_integration_weights=0.25d0
+  call align_dg_w90_character_sectors_by_periodic_phase(MPI_COMM_WORLD,sector_ids,&
+    weighted_spatial_sector,2d0*cross_target_sector,cross_periodic_phase,8,777_8,cross_phase_payload_fingerprint,1d-12,&
+    sector_trial_aligned,cross_singular_values,cross_polar_defect,sector_trial_fingerprint,&
+    cross_workspace,ok,message,spatial_integration_weights)
+  call require(ok.and.maxval(abs(sector_trial_aligned-2d0*cross_target_sector))<1d-10,&
+    'periodic-phase alignment uses the real-space integration measure')
+  deallocate(weighted_spatial_sector,spatial_integration_weights)
   call require(sector_trial_fingerprint==cross_fingerprint,&
     'periodic-phase projector fingerprint is invariant under target-sector rotations')
   allocate(anchor_sector(nlocal,2),anchor_w90(nlocal,4),anchor_lcfo(nlocal,4))
@@ -433,6 +445,15 @@ program test_dg_overlapping_wannier_w90_mpi
     cross_aligned_conjugate,cross_gamma_defect,cross_workspace,ok,message,.true.)
   call require(ok.and.cross_gamma_defect<1d-10.and.maxval(abs(aimag(cross_aligned_conjugate)))<1d-10,&
     'implicit identity Gamma fixes a self-conjugate spatial sector without a dense grid operator')
+  allocate(weighted_spatial_sector(nlocal,2),spatial_integration_weights(nlocal))
+  weighted_spatial_sector=2d0*sector_trial_aligned
+  spatial_integration_weights=0.25d0
+  call sew_dg_w90_periodic_phase_conjugate_sector(MPI_COMM_WORLD,sector_ids,weighted_spatial_sector,&
+    implicit_gamma_rows,weighted_spatial_sector,8,implicit_gamma_fingerprint,.true.,0d0,1d-12,&
+    cross_aligned_conjugate,cross_gamma_defect,cross_workspace,ok,message,.true.,spatial_integration_weights)
+  call require(ok.and.cross_gamma_defect<1d-10,&
+    'Gamma sewing uses the real-space integration measure for materialized sectors')
+  deallocate(weighted_spatial_sector,spatial_integration_weights)
   if(nproc>1)then
     call sew_dg_w90_periodic_phase_conjugate_sector(MPI_COMM_WORLD,sector_ids,sector_trial_aligned,&
       cross_gamma_rows,cross_conjugate_sector,8,implicit_gamma_fingerprint,.true.,0d0,1d-12,&

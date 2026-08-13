@@ -430,7 +430,7 @@ contains
 
   subroutine validate_dg_factored_point_cogroup_gauge(comm,local_basis,weights,point_maps,translation_maps,&
       point_product,point_identity,translation_cocycle,ntranslation,subspace_defect,tolerance,identity_defect,&
-      unitarity_defect,closure_defect,workspace_peak_bytes,ok,message)
+      unitarity_defect,closure_defect,workspace_peak_bytes,ok,message,generator_count,checked_pair_count)
     integer,intent(in)::comm,point_product(:,:),point_identity,translation_cocycle(:,:),ntranslation
     complex(real64),intent(in)::local_basis(:,:)
     real(real64),intent(in)::weights(:),subspace_defect,tolerance
@@ -439,19 +439,25 @@ contains
     integer(int64),intent(out)::workspace_peak_bytes
     logical,intent(out)::ok
     character(*),intent(out)::message
+    integer,intent(out),optional::generator_count,checked_pair_count
 #ifdef USE_MPI
     integer::npoint,nstate,nlocal,left,right,product,cocycle,rank,nproc,owner,base,remainder,first,count,&
-      local_bad,global_bad,ierr,status,minvalue,maxvalue,operation,index
+      local_bad,global_bad,ierr,status,minvalue,maxvalue,operation,index,nchecked,a,b,c,step
+    integer,allocatable::point_generators(:)
+    logical,allocatable::generator_mask(:)
+    logical::generator_ok
     integer(int64),allocatable::global_left(:),global_right(:),global_product(:),global_translation(:),expected_map(:,:)
     integer(int64),allocatable::row_ids(:),right_row_ids(:),expected_row_ids(:)
     complex(real64),allocatable::left_rows(:,:,:),right_rows(:,:,:),expected_rows(:,:,:),product_rows(:,:),remote_rows(:,:)
-    real(real64)::local_closure,global_closure
+    real(real64)::local_closure,global_closure,norm_bound,propagation_factor,propagated_closure
     integer(int64)::operation_workspace,left_workspace,right_workspace,expected_workspace,global_extent,&
       product_elements,persistent_bytes,term_bytes,live_bytes,maximum_remote_bytes,global_workspace_peak
     npoint=size(point_maps,2)
     nstate=size(local_basis,1);nlocal=size(local_basis,2)
     ok=.false.;message='';identity_defect=huge(1d0);unitarity_defect=huge(1d0)
     closure_defect=huge(1d0);workspace_peak_bytes=0_int64
+    if(present(generator_count))generator_count=0
+    if(present(checked_pair_count))checked_pair_count=0
     local_bad=merge(0,1,npoint>=1.and.npoint<=48.and.nstate>=1.and.nlocal>=1.and.&
       point_identity>=1.and.point_identity<=npoint.and.&
       ntranslation>=1.and.all(shape(translation_cocycle)==[npoint,npoint]).and.&
@@ -472,6 +478,30 @@ contains
       call agree_integer(point_product(left,right));if(global_bad/=0)return
       call agree_integer(translation_cocycle(left,right));if(global_bad/=0)return
     enddo;enddo
+    local_bad=0
+    do a=1,npoint;do b=1,npoint;do c=1,npoint
+      if(point_product(point_product(a,b),c)/=point_product(a,point_product(b,c)))local_bad=1
+    enddo;enddo;enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='point-cogroup product is not associative';return
+    endif
+    call select_dg_group_generators(point_product,point_identity,point_generators,generator_ok,message)
+    local_bad=merge(0,1,generator_ok)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      ok=.false.;message='point-cogroup generator selection failed collectively';return
+    endif
+    allocate(generator_mask(npoint),stat=status)
+    local_bad=merge(0,1,status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(generator_mask))deallocate(generator_mask)
+      message='point-cogroup generator mask allocation failed';return
+    endif
+    generator_mask=.false.
+    if(size(point_generators)>0)generator_mask(point_generators)=.true.
+    if(present(generator_count))generator_count=size(point_generators)
     call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)then;message='factored proof rank query failed';return;endif
     call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)then;message='factored proof size query failed';return;endif
     local_bad=0
@@ -560,6 +590,7 @@ contains
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
       message='factored remote tile preallocation receipt overflows';call cleanup_factored_workspace();return
     endif
+    nchecked=0
     do left=1,npoint;do right=1,npoint
       product=point_product(right,left);cocycle=translation_cocycle(right,left)
       call MPI_Allgather(point_maps(:,left),nlocal,MPI_INTEGER8,global_left,nlocal,MPI_INTEGER8,comm,ierr)
@@ -572,14 +603,17 @@ contains
       if(ierr/=MPI_SUCCESS)then;message='factored translation map gather failed';call cleanup_factored_workspace();return;endif
       local_bad=0
       do owner=1,nlocal
-        expected_map(owner,1)=global_product(int(global_translation(rank*nlocal+owner)))
-        if(global_left(int(global_right(rank*nlocal+owner)))/=expected_map(owner,1))local_bad=1
+        ! factor_dg_affine_translation_cocycle defines r_left r_right = t_cocycle r_product.
+        expected_map(owner,1)=global_translation(int(global_product(rank*nlocal+owner)))
+        if(global_right(int(global_left(rank*nlocal+owner)))/=expected_map(owner,1))local_bad=1
       enddo
       call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
       if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
         ok=.false.;message='point representatives do not realize the supplied translation cocycle';&
         call cleanup_factored_workspace();return
       endif
+      if(.not.generator_mask(left).and..not.generator_mask(right))cycle
+      nchecked=nchecked+1
       call assemble_dg_distributed_basis_symmetry_overlap_rows(comm,local_basis,weights,&
         point_maps(:,left:left),row_ids,left_rows,left_workspace,ok,message)
       if(.not.ok)then;call cleanup_factored_workspace();return;endif
@@ -653,7 +687,36 @@ contains
     call MPI_Allreduce(local_closure,global_closure,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     call MPI_Allreduce(workspace_peak_bytes,global_workspace_peak,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
     if(ierr==MPI_SUCCESS)workspace_peak_bytes=global_workspace_peak
-    closure_defect=max(closure_defect,global_closure)
+    ! Convert the measured max-entry unitarity defect into an operator-norm
+    ! bound, then propagate generator residuals over both word directions.
+    if(unitarity_defect>(huge(1d0)-1d0)/real(nstate,real64))then
+      propagated_closure=huge(1d0)
+    else
+      norm_bound=sqrt(1d0+real(nstate,real64)*unitarity_defect)
+      propagation_factor=0d0
+      do step=1,2*npoint
+        if(propagation_factor>(huge(1d0)-1d0)/max(1d0,norm_bound))then
+          propagation_factor=huge(1d0);exit
+        endif
+        propagation_factor=1d0+norm_bound*propagation_factor
+      enddo
+      if(global_closure>0d0)then
+        if(propagation_factor>huge(1d0)/global_closure)then
+          propagated_closure=huge(1d0)
+        else
+          propagated_closure=propagation_factor*global_closure
+        endif
+      else
+        propagated_closure=0d0
+      endif
+      if(propagated_closure>huge(1d0)/2d0)then
+        propagated_closure=huge(1d0)
+      else
+        propagated_closure=2d0*propagated_closure
+      endif
+    endif
+    closure_defect=max(closure_defect,propagated_closure)
+    if(present(checked_pair_count))checked_pair_count=nchecked
     ok=ierr==MPI_SUCCESS.and.closure_defect<=tolerance
     if(ok)then;message='';else;message='factored point-cogroup internal action violates cocycle closure';endif
     call cleanup_factored_workspace()
@@ -680,6 +743,8 @@ contains
       if(allocated(left_rows))deallocate(left_rows)
       if(allocated(right_rows))deallocate(right_rows)
       if(allocated(expected_rows))deallocate(expected_rows)
+      if(allocated(point_generators))deallocate(point_generators)
+      if(allocated(generator_mask))deallocate(generator_mask)
     end subroutine
 #else
     ok=.false.;message='factored point-cogroup validation requires MPI'
@@ -1408,7 +1473,7 @@ contains
     character(*),intent(out)::message
     logical,allocatable::reached(:)
     integer,allocatable::work_generators(:)
-    integer::n,operation,generator_index,ngenerator
+    integer::n,operation,generator_index,ngenerator,status
     logical::changed,has_inverse
 
     ok=.false.;message='';n=size(product_table,1)
@@ -1425,7 +1490,8 @@ contains
         product_table(:,operation)==identity_operation)
       if(.not.has_inverse)then;message='group-generator product table lacks an inverse';return;endif
     enddo
-    allocate(reached(n),work_generators(max(0,n-1)))
+    allocate(reached(n),work_generators(max(0,n-1)),stat=status)
+    if(status/=0)then;message='group-generator workspace allocation failed';return;endif
     reached=.false.;reached(identity_operation)=.true.;ngenerator=0
     do while(.not.all(reached))
       do operation=1,n
@@ -1448,7 +1514,9 @@ contains
         enddo
       enddo
     enddo
-    allocate(generators(ngenerator));generators=work_generators(1:ngenerator)
+    allocate(generators(ngenerator),stat=status)
+    if(status/=0)then;message='group-generator result allocation failed';return;endif
+    generators=work_generators(1:ngenerator)
     ok=.true.
   end subroutine select_dg_group_generators
 
