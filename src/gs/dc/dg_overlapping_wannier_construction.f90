@@ -83,6 +83,7 @@ module dg_overlapping_wannier_construction
   public::build_dg_balanced_orbital_ownership
   public::transpose_dg_spatial_cores_to_orbital_owners
   public::redistribute_dg_owned_orbitals_to_center_fragments
+  public::redistribute_dg_buffer_orbitals_to_center_fragments
   public::assign_dg_periodic_centers_to_fragments
 contains
 
@@ -1728,6 +1729,119 @@ contains
     ok=.true.;message=''
   end subroutine assign_dg_periodic_centers_to_fragments
 
+
+  subroutine redistribute_dg_buffer_orbitals_to_center_fragments(comm,buffer_values,core_positions,&
+      core_ids,center_owners,buffer_ids,local_orbitals,local_values,ok,message)
+    integer,intent(in)::comm,core_positions(:),center_owners(:)
+    complex(real64),intent(in)::buffer_values(:,:)
+    integer(int64),intent(in)::core_ids(:),buffer_ids(:)
+    integer,allocatable,intent(out)::local_orbitals(:)
+    complex(real64),allocatable,intent(out)::local_values(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,nproc,ierr,norbital,ncore,nbuffer,nglobal,source,destination,orbital,point,&
+      source_position,position,total_send,total_receive,local_bad,global_bad,status,minval_i,maxval_i
+    integer,allocatable::send_counts(:),receive_counts(:),send_displacements(:),receive_displacements(:),&
+      buffer_owner(:),occurrence(:)
+    integer(int64),allocatable::all_core_ids(:,:),all_buffer_ids(:,:)
+    complex(real64),allocatable::send_values(:),receive_values(:)
+    integer(int64)::count64
+
+    ok=.false.;message='';local_bad=0
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
+    norbital=size(center_owners);ncore=size(core_ids);nbuffer=size(buffer_ids)
+    if(norbital<1.or.ncore<1.or.nbuffer<1.or.size(core_positions)/=ncore.or.&
+        size(buffer_values,1)/=norbital.or.any(core_positions<1).or.&
+        any(core_positions>size(buffer_values,2)).or.any(center_owners<0).or.&
+        any(center_owners>=nproc).or.any(core_ids<1_int64).or.any(buffer_ids<1_int64).or.&
+        .not.all(ieee_is_finite(real(buffer_values))).or.&
+        .not.all(ieee_is_finite(aimag(buffer_values))))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid direct buffer redistribution contract';return;endif
+    call MPI_Allreduce(norbital,minval_i,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(norbital,maxval_i,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(minval_i/=maxval_i)then;message='direct redistribution orbital extent disagrees';return;endif
+    call MPI_Allreduce(ncore,minval_i,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(ncore,maxval_i,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(minval_i/=maxval_i)then;message='direct redistribution core extent disagrees';return;endif
+    call MPI_Allreduce(nbuffer,minval_i,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(nbuffer,maxval_i,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(minval_i/=maxval_i.or.int(ncore,int64)>int(huge(1),int64)/int(nproc,int64))then
+      message='direct redistribution buffer extent disagrees or overflows';return
+    endif
+    nglobal=ncore*nproc
+    allocate(all_core_ids(ncore,nproc),all_buffer_ids(nbuffer,nproc),send_counts(nproc),&
+      receive_counts(nproc),send_displacements(nproc),receive_displacements(nproc),&
+      buffer_owner(nbuffer),occurrence(nglobal),stat=status)
+    call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='direct redistribution metadata allocation failed';return;endif
+    call MPI_Allgather(core_ids,ncore,MPI_INTEGER8,all_core_ids,ncore,MPI_INTEGER8,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allgather(buffer_ids,nbuffer,MPI_INTEGER8,all_buffer_ids,nbuffer,MPI_INTEGER8,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    occurrence=0
+    do source=1,nproc;do point=1,ncore
+      if(all_core_ids(point,source)<1_int64.or.all_core_ids(point,source)>int(nglobal,int64))then
+        local_bad=1
+      else
+        occurrence(int(all_core_ids(point,source)))=occurrence(int(all_core_ids(point,source)))+1
+      endif
+    enddo;enddo
+    if(any(occurrence/=1))local_bad=1
+    do point=1,nbuffer
+      buffer_owner(point)=0
+      do source=1,nproc
+        if(any(all_core_ids(:,source)==buffer_ids(point)))then;buffer_owner(point)=source;exit;endif
+      enddo
+      if(buffer_owner(point)==0)local_bad=1
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='direct redistribution physical IDs are incomplete';return;endif
+    do destination=0,nproc-1
+      count64=int(count(center_owners==destination),int64)*int(count([(any(core_ids==&
+        all_buffer_ids(point,destination+1)),point=1,nbuffer)]),int64)
+      if(count64>int(huge(1),int64))then;local_bad=1;send_counts(destination+1)=0
+      else;send_counts(destination+1)=int(count64);endif
+      count64=int(count(center_owners==rank),int64)*int(count(buffer_owner==destination+1),int64)
+      if(count64>int(huge(1),int64))then;local_bad=1;receive_counts(destination+1)=0
+      else;receive_counts(destination+1)=int(count64);endif
+    enddo
+    call build_checked_mpi_displacements(send_counts,send_displacements,total_send,ok);if(.not.ok)local_bad=1
+    call build_checked_mpi_displacements(receive_counts,receive_displacements,total_receive,ok);if(.not.ok)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='direct redistribution MPI counts overflow';return;endif
+    allocate(send_values(total_send),receive_values(total_receive),stat=status)
+    call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='direct redistribution value allocation failed';return;endif
+    position=0
+    do destination=0,nproc-1;do orbital=1,norbital
+      if(center_owners(orbital)/=destination)cycle
+      do point=1,nbuffer
+        source_position=findloc(core_ids,all_buffer_ids(point,destination+1),dim=1)
+        if(source_position<1)cycle
+        position=position+1;send_values(position)=buffer_values(orbital,core_positions(source_position))
+      enddo
+    enddo;enddo
+    if(position/=total_send)then;message='direct redistribution send packing is incomplete';return;endif
+    call MPI_Alltoallv(send_values,send_counts,send_displacements,MPI_DOUBLE_COMPLEX,&
+      receive_values,receive_counts,receive_displacements,MPI_DOUBLE_COMPLEX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='direct redistribution MPI Alltoallv failed';return;endif
+    local_orbitals=pack([(orbital,orbital=1,norbital)],center_owners==rank)
+    allocate(local_values(size(local_orbitals),nbuffer),stat=status)
+    call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='direct redistribution output allocation failed';return;endif
+    local_values=(0d0,0d0);position=0
+    do source=1,nproc;do orbital=1,size(local_orbitals);do point=1,nbuffer
+      if(buffer_owner(point)/=source)cycle
+      position=position+1;local_values(orbital,point)=receive_values(position)
+    enddo;enddo;enddo
+    ok=position==total_receive.and.all(ieee_is_finite(real(local_values))).and.&
+      all(ieee_is_finite(aimag(local_values)))
+    if(.not.ok)message='direct redistribution produced incomplete or nonfinite values'
+#else
+    ok=.false.;message='direct buffer redistribution requires MPI'
+#endif
+  end subroutine redistribute_dg_buffer_orbitals_to_center_fragments
 
   subroutine redistribute_dg_owned_orbitals_to_center_fragments(comm,owned_orbitals,global_ids,&
       owned_values,center_owners,local_buffer_ids,local_orbitals,local_values,ok,message)

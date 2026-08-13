@@ -40,6 +40,7 @@ program test_dg_overlapping_wannier_construction_mpi
     verify_dg_uniform_fragment_target_rank,assign_dg_overlapping_wannier_occupations,&
     build_dg_balanced_orbital_ownership,transpose_dg_spatial_cores_to_orbital_owners,&
     exchange_dg_point_permuted_orbital_rows,&
+    redistribute_dg_buffer_orbitals_to_center_fragments,&
     redistribute_dg_owned_orbitals_to_center_fragments,&
     assign_dg_periodic_centers_to_fragments,&
     verify_dg_fragment_subspace_density_covariance,build_dg_core_owned_occupied_subspace,&
@@ -418,6 +419,12 @@ program test_dg_overlapping_wannier_construction_mpi
       1000*center_local_orbitals(i)+redistribution_buffer_ids(point),0d0,8))<1d-14
   end do;end do
   call require(transpose_values_ok,'center-fragment redistribution preserves core-buffer values')
+  call redistribute_dg_buffer_orbitals_to_center_fragments(comm,transpose_local,[1,2],&
+    transpose_local_ids,center_owners,redistribution_buffer_ids,mismatched_owned_orbitals,&
+    mismatched_owned,ok,message)
+  call require(ok.and.all(mismatched_owned_orbitals==center_local_orbitals).and.&
+    all(abs(mismatched_owned-center_local_values)<1d-14),&
+    'direct buffer redistribution matches the established two-stage result')
   transpose_global_ids(size(transpose_global_ids))=transpose_global_ids(1)
   call redistribute_dg_owned_orbitals_to_center_fragments(comm,owned_orbitals,transpose_global_ids,&
     transpose_owned,center_owners,redistribution_buffer_ids,center_local_orbitals,&
