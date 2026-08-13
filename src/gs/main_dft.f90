@@ -1643,6 +1643,7 @@ contains
     call materialize_ow_distributed_core_to_buffer(dc%icomm_tot,ow_core_values,ow_core_ids,&
       physical_ids,ow_box_values,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'post-character core-to-buffer streaming failed';endif
+    deallocate(ow_core_values)
     allocate(ow_box_gradients(3,ntarget,nbox));call periodic_box_gradients(ow_box_values,ow_box_size,&
       stencil%coef_nab,ow_box_gradients)
 #endif
@@ -1671,7 +1672,7 @@ contains
     end do
     deallocate(exact_fragment_symmetry_fingerprints)
     ow_symmetry_fingerprint=ieor(ishftc(ow_symmetry_fingerprint,17),translation_post_gauge_fingerprint)
-    deallocate(ow_core_values)
+    if(allocated(ow_core_values))deallocate(ow_core_values)
     allocate(ow_core_values(ntarget,ncore),ow_core_gradients(3,ntarget,ncore))
     do core_index=1,ncore
       p=ow_core_box_positions(core_index)

@@ -79,4 +79,9 @@ for token in (
     if position < 0 or position > final_buffer:
         raise AssertionError(f"{token} must precede final full-buffer allocation")
 
+final_gradient = SOURCE.index("allocate(ow_box_gradients(3,ntarget,nbox))", final_buffer)
+core_release = SOURCE.find("deallocate(ow_core_values)", final_buffer, final_gradient)
+if core_release < 0:
+    raise AssertionError("final core values must be released before allocating full-buffer gradients")
+
 print("PASS overlapping-Wannier production array lifetimes are bounded")
