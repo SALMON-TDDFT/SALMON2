@@ -1419,11 +1419,13 @@ contains
       w90_transform,localized_centers,w90_spreads,w90_spread,ok,message,localization_iterations)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 MLWF optimization failed';endif
     deallocate(w90_m_matrix,w90_a_matrix,w90_eigenvalues)
+    deallocate(w90_atom_symbols,w90_atoms_cart,w90_nncell)
     localized_centers=matmul(w90_lattice_inverse,localized_centers)
     call apply_dg_w90_gamma_transform(dc%icomm_tot,ow_core_ids,ow_core_values,&
       transform=w90_transform,centers=localized_centers,tolerance=dg_ow_symmetry_tolerance,&
       ok=ok,message=message,spreads=w90_spreads)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 MLWF gauge canonicalization failed';endif
+    deallocate(w90_spreads)
     call fingerprint_ow_w90_transform(dc%icomm_tot,w90_transform,w90_transform_fingerprint,ok)
     if(.not.ok)error stop 'Wannier90 canonical transform fingerprint failed'
     call inherit_dg_w90_affine_receipts(w90_transform,maxval(lcfo_total_symmetry_residual),&
@@ -1447,6 +1449,7 @@ contains
     do p=1,size(translation_row_ids)
       translation_w90_rows(p,:)=w90_transform(int(translation_row_ids(p)),:)
     enddo
+    deallocate(w90_transform)
     translation_lcfo_rows=(0d0,0d0)
     allocate(translation_lcfo_local_row(ntarget),translation_lcfo_global_row(ntarget))
     do i=1,ntarget
@@ -1460,7 +1463,7 @@ contains
       p=findloc(translation_row_ids,int(i,8),dim=1)
       if(p>0)translation_lcfo_rows(p,:)=translation_lcfo_global_row
     enddo
-    deallocate(translation_lcfo_local_row,translation_lcfo_global_row)
+    deallocate(translation_lcfo_local_row,translation_lcfo_global_row,lcfo_reference_core)
     translation_lcfo_fingerprint=ieor(occupied_composition_fingerprint,projector_composition_fingerprint)
     if(translation_lcfo_fingerprint==0_8)translation_lcfo_fingerprint=1_8
     do io=1,ntarget
@@ -1476,6 +1479,7 @@ contains
           0.0001d0*real(manifest_channels(i)%radial,8)
       endif
     enddo
+    deallocate(localized_centers)
     ow_saved_eigenexa_comm=info%icomm_o
     call finalize_eigenexa(info);info%icomm_o=dc%icomm_tot
     call init_eigenexa_mod(info,2*ntarget,direct_block_only=.true.)
@@ -1493,6 +1497,7 @@ contains
       dg_ow_symmetry_tolerance,translation_w90_operator,translation_lcfo_operator,translation_operator_defect,&
       translation_operator_fingerprint,translation_operator_workspace,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'reference-sector physical operator projection failed';endif
+    deallocate(translation_w90_rows,translation_lcfo_rows,translation_w90_values,translation_lcfo_values)
     call anchor_dg_w90_reference_character_sector(dc%icomm_tot,translation_row_ids,translation_sector_rows,&
       translation_w90_operator,translation_lcfo_operator,ntarget,w90_transform_fingerprint,translation_lcfo_fingerprint,&
       w90_unitarity_defect,translation_operator_defect,dg_ow_symmetry_tolerance,translation_reference_rows,&
@@ -1502,7 +1507,7 @@ contains
       translation_reference_rows,global_closed_core,w90_input_fingerprint,translation_reference_spatial,&
       translation_materialize_fingerprint,translation_materialize_workspace,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'reference character spatial materialization failed';endif
-    deallocate(translation_sector_rows,translation_w90_operator,translation_lcfo_operator)
+    deallocate(translation_sector_rows,translation_w90_operator,translation_lcfo_operator,translation_reference_rows)
 
     if(int(ncore,8)>huge(0_8)/int(nproc,8))error stop 'translation global core extent overflows int64'
     translation_global_core_count8=int(ncore,8)*int(nproc,8)
@@ -1618,6 +1623,10 @@ contains
     call finalize_eigenexa(info);info%icomm_o=ow_saved_eigenexa_comm;call init_eigenexa_mod(info,system%no)
     if(translation_processed_count/=size(translation_characters,1))error stop 'translation character schedule incomplete'
     deallocate(ow_core_values);call move_alloc(translation_orbit_rows,ow_core_values)
+    deallocate(global_closed_core)
+    deallocate(translation_reference_spatial,translation_generator_maps,translation_spatial_ids,&
+      translation_character_done,translation_generator_rows,translation_row_ids,translation_gamma_rows,&
+      translation_canonical_product,translation_product)
     call validate_dg_factored_point_cogroup_gauge(dc%icomm_tot,ow_core_values,ow_core_weights,&
       global_symmetry_map(:,global_point_representatives),global_symmetry_map(:,global_translation_subgroup),&
       global_point_cogroup_product,global_point_cogroup_identity_operation,&
@@ -1636,12 +1645,11 @@ contains
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'post-character core-to-buffer streaming failed';endif
     allocate(ow_box_gradients(3,ntarget,nbox));call periodic_box_gradients(ow_box_values,ow_box_size,&
       stencil%coef_nab,ow_box_gradients)
-    deallocate(translation_reference_rows,translation_reference_spatial,translation_w90_rows,&
-      translation_lcfo_rows,translation_w90_values,translation_lcfo_values,translation_generator_maps,&
-      translation_spatial_ids,translation_character_done,translation_generator_rows,translation_row_ids,&
-      translation_gamma_rows,translation_canonical_product,translation_product)
 #endif
-    deallocate(lcfo_reference_core,w90_atom_symbols,w90_atoms_cart,w90_nncell,w90_spreads,localized_centers,w90_transform)
+    if(allocated(global_closed_core))deallocate(global_closed_core)
+    if(allocated(lcfo_reference_core))deallocate(lcfo_reference_core)
+    if(allocated(localized_centers))deallocate(localized_centers)
+    if(allocated(w90_transform))deallocate(w90_transform)
     if(rank==0)write(*,'(a,5(a,es12.4),3(a,i0))')'[OW-GS-DIAGNOSTIC] Wannier90_MLWF',&
       ' gauge_spread=',w90_spread(3),' total_spread=',w90_spread(1),&
       ' identity_defect=',w90_identity_defect,' unitarity_defect=',w90_unitarity_defect,&

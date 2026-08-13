@@ -67,4 +67,16 @@ if "optional::gradients(:,:,:)" not in gamma_transform.replace(" ", ""):
 if "allocate(initial_core_ids,source=ow_core_ids)" not in SOURCE.replace(" ", ""):
     raise AssertionError("direct core extraction must preserve arbitrary physical-ID ordering")
 
+final_buffer = SOURCE.index(
+    "call materialize_ow_distributed_core_to_buffer",
+    SOURCE.index("call validate_dg_factored_point_cogroup_gauge"),
+)
+for token in (
+    "deallocate(global_closed_core)",
+    "deallocate(translation_reference_spatial,translation_generator_maps",
+):
+    position = SOURCE.find(token)
+    if position < 0 or position > final_buffer:
+        raise AssertionError(f"{token} must precede final full-buffer allocation")
+
 print("PASS overlapping-Wannier production array lifetimes are bounded")
