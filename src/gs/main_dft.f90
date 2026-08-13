@@ -614,7 +614,7 @@ contains
     integer(8),allocatable::physical_ids(:),box_ids(:),symmetry_map(:,:),local_box_ids(:),&
       local_symmetry_map(:,:),center_representatives(:),&
       exact_fragment_symmetry_fingerprints(:),global_symmetry_map(:,:)
-    integer(8),allocatable::lcfo_core_ids(:)
+    integer(8),allocatable::lcfo_core_ids(:),initial_core_ids(:)
     integer(8),allocatable::all_core_ids(:,:),localized_center_ids(:),orbital_owned_full_ids(:)
     integer(8),allocatable::fixed_center_symmetry_map(:,:),fixed_center_row_ids(:)
     integer(8),allocatable::translation_row_ids(:),translation_stream_row_ids(:)
@@ -639,7 +639,7 @@ contains
     logical,allocatable::translation_character_done(:)
     logical,allocatable::lcfo_boundary_mask(:)
     integer::ix,iy,iz,io,p,nbox,ncore,noccupied,nstate,ntarget,nsym,rank,nproc,&
-      raw_ix,raw_iy,raw_iz,core_index,ierr,allocation_status,&
+      raw_ix,raw_iy,raw_iz,core_index,source_core_index,ierr,allocation_status,&
       local_target_count,w90_nntot,projector_tile_first,projector_tile_last,projector_tile_count
     integer::translation_allocation_status
     integer::global_seed_count,global_retained_rank,global_occupied_count,global_projection_count,&
@@ -1362,15 +1362,15 @@ contains
       error stop 'fixed-center DMN transaction could not finish'
     endif
     deallocate(fixed_center_identity,fixed_center_eigenvalues)
-    call materialize_ow_distributed_core_to_buffer(dc%icomm_tot,global_closed_core,ow_core_ids,&
-      physical_ids,ow_box_values,ok,message)
-    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global core-to-buffer streaming failed';end if
+    allocate(initial_core_ids,source=ow_core_ids)
     allocate(ow_core_values(ntarget,ncore));ow_core_values=(0d0,0d0)
     core_index=0
     do p=1,nbox
       if(.not.core_mask(p))cycle
       core_index=core_index+1
-      ow_core_values(:,core_index)=ow_box_values(:,p)
+      source_core_index=findloc(initial_core_ids,physical_ids(p),dim=1)
+      if(source_core_index<1)error stop 'initial retained core ownership is incomplete'
+      ow_core_values(:,core_index)=global_closed_core(:,source_core_index)
       ow_core_weights(core_index)=weights(p);ow_core_ids(core_index)=physical_ids(p)
       ow_core_box_positions(core_index)=p
       core_periodic_phase(1,core_index)=exp(cmplx(0d0,2d0*pi*real(modulo(physical_ids(p)-1_8,&
@@ -1380,7 +1380,8 @@ contains
       core_periodic_phase(3,core_index)=exp(cmplx(0d0,2d0*pi*real((physical_ids(p)-1_8)/&
         nxy8,8)/real(dc%lg_tot%num(3),8),8))
     enddo
-    deallocate(ow_box_values)
+    if(core_index/=ncore)error stop 'initial retained core extent is incomplete'
+    deallocate(initial_core_ids)
     call invert_ow_lattice(dc%system_tot%primitive_a,w90_lattice_inverse,w90_determinant,ok)
     if(.not.ok)error stop 'Wannier90 lattice is singular'
     w90_reciprocal_lattice=2d0*pi*transpose(w90_lattice_inverse)

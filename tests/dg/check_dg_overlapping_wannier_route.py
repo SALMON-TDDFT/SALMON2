@@ -941,10 +941,11 @@ assert not re.search(r"call\s+replicate_ow_global_symmetry_orbit", adapter_body,
     "production must not copy a representative-fragment gauge across the full system"
 )
 materialize_position = adapter_body.lower().index("call materialize_ow_distributed_core_to_buffer")
+direct_core_position = adapter_body.lower().index("allocate(initial_core_ids,source=ow_core_ids)")
 localize_position = adapter_body.lower().index("call run_dg_w90_gamma_library")
 metric_position = adapter_body.lower().index("call assemble_dg_stitched_overlap_density_rows")
-assert materialize_position < localize_position < metric_position, (
-    "localization must use streamed local buffers and finish before metric/SCF publication"
+assert direct_core_position < localize_position < materialize_position < metric_position, (
+    "localization must use the retained core directly and materialize only the final-gauge buffer"
 )
 assert not re.search(
     r"global_seed_values\s*\(\s*1\s*:\s*nstate.*?=\s*augmented_candidate\s*\(\s*1\s*:\s*nstate",

@@ -15,13 +15,6 @@ def require_between(token: str, start: str, end: str, message: str) -> None:
         raise AssertionError(message)
 
 
-require_between(
-    "deallocate(ow_box_values)",
-    "ow_core_values(:,core_index)=ow_box_values(:,p)",
-    "call invert_ow_lattice",
-    "the initial full buffer must be released immediately after core extraction",
-)
-
 if "w90_anchors=global_seed_values" in SOURCE:
     raise AssertionError("the retained seed frame must not be copied into a duplicate anchor frame")
 if "call move_alloc(global_seed_values,w90_anchors)" not in SOURCE:
@@ -58,9 +51,11 @@ if "new_values(:,:)" in gamma_transform or "new_gradients(:,:,:)" in gamma_trans
 if "point_values(:)" not in gamma_transform or "point_gradients(:,:)" not in gamma_transform:
     raise AssertionError("the Gamma transform must use bounded one-point work vectors")
 
-adapter_start = SOURCE.index("call materialize_ow_distributed_core_to_buffer")
+adapter_start = SOURCE.index("deallocate(fixed_center_identity,fixed_center_eigenvalues)")
 adapter_end = SOURCE.index("call validate_dg_factored_point_cogroup_gauge", adapter_start)
 pre_final_gauge = SOURCE[adapter_start:adapter_end]
+if pre_final_gauge.count("call materialize_ow_distributed_core_to_buffer") != 0:
+    raise AssertionError("production must not round-trip the initial core through a full buffer")
 if "call periodic_box_gradients" in pre_final_gauge:
     raise AssertionError("production must not form gradients before the final character gauge")
 if "ow_core_gradients(3,ntarget,ncore)" in pre_final_gauge:
@@ -69,5 +64,7 @@ if "transform=w90_transform" not in pre_final_gauge:
     raise AssertionError("production must invoke the Gamma transform through its values-only contract")
 if "optional::gradients(:,:,:)" not in gamma_transform.replace(" ", ""):
     raise AssertionError("the Gamma transform gradient payload must be optional")
+if "allocate(initial_core_ids,source=ow_core_ids)" not in SOURCE.replace(" ", ""):
+    raise AssertionError("direct core extraction must preserve arbitrary physical-ID ordering")
 
 print("PASS overlapping-Wannier production array lifetimes are bounded")
