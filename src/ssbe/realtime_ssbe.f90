@@ -78,7 +78,10 @@ subroutine main_realtime_ssbe(icomm)
         t = dt * it
         E(:) = -(Ac_ext_t(:, it + 1) - Ac_ext_t(:, it - 1)) / (2 * dt)
         if (trim(gauge_sbe) == "velocity_gauge") then
-            call dt_evolve_bloch(sbe, gs, Ac_ext_t(:, it), dt)
+            ! Propagate over [t_(it-1), t_it] using the vector potential at
+            ! the midpoint of the interval.
+            call dt_evolve_bloch(sbe, gs, &
+                0.5d0 * (Ac_ext_t(:, it-1) + Ac_ext_t(:, it)), dt)
             call calc_current_bloch(sbe, gs, Ac_ext_t(:, it), Jmat, icomm)
         else ! trim(gauge_sbe) == "length_gauge")
             call dt_evolve_bloch_lg(sbe, gs, E(:), bj_am, dt, icomm)
