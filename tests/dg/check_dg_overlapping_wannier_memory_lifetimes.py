@@ -107,4 +107,12 @@ if "owner_values(nwann,ncore)" in SOURCE:
 if "owner_values(nwann,min(ncore,core_stream_tile))" not in SOURCE:
     raise AssertionError("core-to-buffer materialization must use a bounded state-by-point tile")
 
+compact_maps = SOURCE.find("allocate(ow_pencil_generator_maps,source=global_symmetry_map(:,global_affine_generators)")
+final_materialization = SOURCE.find("call materialize_ow_distributed_core_to_buffer", compact_maps)
+full_map_release = SOURCE.find("deallocate(global_symmetry_map)", compact_maps, final_materialization)
+if compact_maps < 0 or final_materialization < 0 or full_map_release < 0:
+    raise AssertionError("full symmetry maps must be compacted and released before final buffer materialization")
+if "global_symmetry_map(:,global_affine_generators),ow_pencil_generator_representation" in SOURCE:
+    raise AssertionError("final overlap assembly must use compact generator maps")
+
 print("PASS overlapping-Wannier production array lifetimes are bounded")

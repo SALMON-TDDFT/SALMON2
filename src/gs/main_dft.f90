@@ -609,7 +609,7 @@ contains
     type(t_dg_projection_channel),allocatable::manifest_channels(:)
     type(t_dg_projection_channel),allocatable::projector_tile_channels(:)
     type(s_dg_overlapping_wannier_construction)::symmetry_basis
-    integer(8),allocatable::physical_ids(:),local_symmetry_map(:,:),&
+    integer(8),allocatable::physical_ids(:),local_symmetry_map(:,:),ow_pencil_generator_maps(:,:),&
       exact_fragment_symmetry_fingerprints(:),global_symmetry_map(:,:)
     integer(8),allocatable::lcfo_core_ids(:),initial_core_ids(:)
     integer(8),allocatable::all_core_ids(:,:),localized_center_ids(:),orbital_owned_full_ids(:)
@@ -1617,6 +1617,11 @@ contains
       ' identity_defect=',translation_identity_defect,' closure_defect=',translation_closure_defect,&
       ' workspace_peak_bytes=',translation_transform_workspace
     global_retained_group_closure_defect=max(global_retained_group_closure_defect,translation_closure_defect)
+    allocate(ow_pencil_generator_maps,source=global_symmetry_map(:,global_affine_generators),&
+      stat=allocation_status)
+    call comm_logical_and(allocation_status==0,reusable,dc%icomm_tot)
+    if(.not.reusable)error stop 'compact pencil-generator map allocation failed'
+    deallocate(global_symmetry_map)
     call materialize_ow_distributed_core_to_buffer(dc%icomm_tot,ow_core_values,ow_core_ids,&
       physical_ids,ow_box_values,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'post-character core-to-buffer streaming failed';endif
@@ -1624,6 +1629,13 @@ contains
     allocate(ow_box_gradients(3,ntarget,nbox));call periodic_box_gradients(ow_box_values,ow_box_size,&
       stencil%coef_nab,ow_box_gradients)
 #endif
+    if(.not.allocated(ow_pencil_generator_maps))then
+      allocate(ow_pencil_generator_maps,source=global_symmetry_map(:,global_affine_generators),&
+        stat=allocation_status)
+      call comm_logical_and(allocation_status==0,reusable,dc%icomm_tot)
+      if(.not.reusable)error stop 'compact pencil-generator map allocation failed'
+      deallocate(global_symmetry_map)
+    endif
     if(allocated(global_closed_core))deallocate(global_closed_core)
     if(allocated(lcfo_reference_core))deallocate(lcfo_reference_core)
     if(allocated(localized_centers))deallocate(localized_centers)
@@ -1657,7 +1669,8 @@ contains
       ow_core_gradients(:,:,core_index)=ow_box_gradients(:,:,p)
     end do
     call assemble_dg_distributed_basis_symmetry_overlap(dc%icomm_tot,ow_core_values,ow_core_weights,&
-      global_symmetry_map(:,global_affine_generators),ow_pencil_generator_representation,ok,message)
+      ow_pencil_generator_maps,ow_pencil_generator_representation,ok,message)
+    deallocate(ow_pencil_generator_maps)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'pencil generator representation failed';endif
     allocate(ow_pencil_generator_operations,source=global_affine_generators)
     allocate(ow_pencil_affine_product,source=global_point_product)
