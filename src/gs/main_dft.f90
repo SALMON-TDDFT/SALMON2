@@ -75,7 +75,8 @@ use dg_overlapping_wannier_construction, only: solve_dg_affine_common_fixed_poin
 use dg_overlapping_wannier_construction, only: compute_dg_periodic_wannier_centers
 use dg_overlapping_wannier_construction, only: verify_dg_wannier_center_affine_orbits
 use dg_overlapping_wannier_construction, only: transpose_dg_spatial_cores_to_orbital_owners,&
-  redistribute_dg_owned_orbitals_to_center_fragments,assign_dg_periodic_centers_to_fragments
+  exchange_dg_point_permuted_orbital_rows,redistribute_dg_owned_orbitals_to_center_fragments,&
+  assign_dg_periodic_centers_to_fragments
 use dg_overlapping_wannier_projection, only: t_dg_projection_channel,&
   build_dg_complete_sp_manifest,evaluate_dg_periodic_sp_projectors,&
   dg_periodic_grid_point_owned,select_dg_sp_atomic_orbital_ordinals
@@ -636,7 +637,7 @@ contains
     logical,allocatable::translation_character_done(:)
     logical,allocatable::lcfo_boundary_mask(:)
     integer::ix,iy,iz,io,p,nbox,ncore,noccupied,nstate,ntarget,rank,nproc,&
-      raw_ix,raw_iy,raw_iz,core_index,source_core_index,ierr,allocation_status,&
+      raw_ix,raw_iy,raw_iz,core_index,ierr,allocation_status,&
       local_target_count,w90_nntot,projector_tile_first,projector_tile_last,projector_tile_count
     integer::translation_allocation_status
     integer::global_seed_count,global_retained_rank,global_occupied_count,global_projection_count,&
@@ -1339,16 +1340,13 @@ contains
       error stop 'fixed-center DMN transaction could not finish'
     endif
     deallocate(fixed_center_identity,fixed_center_eigenvalues)
-    allocate(initial_core_ids,source=ow_core_ids)
-    allocate(ow_core_values(ntarget,ncore));ow_core_values=(0d0,0d0)
+    allocate(initial_core_ids(ncore))
     core_index=0
     do p=1,nbox
       if(.not.core_mask(p))cycle
       core_index=core_index+1
-      source_core_index=findloc(initial_core_ids,physical_ids(p),dim=1)
-      if(source_core_index<1)error stop 'initial retained core ownership is incomplete'
-      ow_core_values(:,core_index)=global_closed_core(:,source_core_index)
-      ow_core_weights(core_index)=weights(p);ow_core_ids(core_index)=physical_ids(p)
+      initial_core_ids(core_index)=physical_ids(p)
+      ow_core_weights(core_index)=weights(p)
       ow_core_box_positions(core_index)=p
       core_periodic_phase(1,core_index)=exp(cmplx(0d0,2d0*pi*real(modulo(physical_ids(p)-1_8,&
         int(dc%lg_tot%num(1),8)),8)/real(dc%lg_tot%num(1),8),8))
@@ -1358,6 +1356,13 @@ contains
         nxy8,8)/real(dc%lg_tot%num(3),8),8))
     enddo
     if(core_index/=ncore)error stop 'initial retained core extent is incomplete'
+    call exchange_dg_point_permuted_orbital_rows(dc%icomm_tot,global_closed_core,&
+      initial_core_ids,ow_core_values,ok,message)
+    if(.not.ok)then
+      write(0,'(a)')trim(message)
+      error stop 'initial retained core redistribution failed'
+    endif
+    ow_core_ids=initial_core_ids
     deallocate(initial_core_ids)
     call invert_ow_lattice(dc%system_tot%primitive_a,w90_lattice_inverse,w90_determinant,ok)
     if(.not.ok)error stop 'Wannier90 lattice is singular'

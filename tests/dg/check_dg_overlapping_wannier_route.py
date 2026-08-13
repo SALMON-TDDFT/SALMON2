@@ -103,6 +103,16 @@ assert all(position >= 0 for position in production_order) and production_order 
 assert "call align_dg_w90_cross_character_sector_gauge" not in ow_ground_state_body, (
     "production must not use spread-weighted cross-character links, which vanish for exact translation orbits"
 )
+assert re.search(
+    r"call\s+exchange_dg_point_permuted_orbital_rows\s*\(\s*dc%icomm_tot\s*,\s*"
+    r"global_closed_core\s*,\s*&?\s*initial_core_ids\s*,\s*ow_core_values",
+    ow_ground_state_body,
+), (
+    "the balanced retained-core rows must be redistributed to the original DC core ownership"
+)
+assert "findloc(initial_core_ids,physical_ids(p)" not in re.sub(r"\s+", "", ow_ground_state_body), (
+    "production must not assume balanced retained-core ownership equals DC fragment ownership"
+)
 for forbidden_translation_dense in (
     "all_translation_representations",
     "all_translation_projectors",
@@ -941,7 +951,7 @@ assert not re.search(r"call\s+replicate_ow_global_symmetry_orbit", adapter_body,
     "production must not copy a representative-fragment gauge across the full system"
 )
 materialize_position = adapter_body.lower().index("call materialize_ow_distributed_core_to_buffer")
-direct_core_position = adapter_body.lower().index("allocate(initial_core_ids,source=ow_core_ids)")
+direct_core_position = adapter_body.lower().index("call exchange_dg_point_permuted_orbital_rows")
 localize_position = adapter_body.lower().index("call run_dg_w90_gamma_library")
 metric_position = adapter_body.lower().index("call assemble_dg_stitched_overlap_density_rows")
 assert direct_core_position < localize_position < materialize_position < metric_position, (
