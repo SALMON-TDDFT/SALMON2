@@ -102,4 +102,9 @@ for dead_extent in (
     if dead_extent in ADAPTER:
         raise AssertionError(f"dead initialization storage remains allocated: {dead_extent}")
 
+if "owner_values(nwann,ncore)" in SOURCE:
+    raise AssertionError("core-to-buffer materialization must not replicate a full core value slab")
+if "owner_values(nwann,min(ncore,core_stream_tile))" not in SOURCE:
+    raise AssertionError("core-to-buffer materialization must use a bounded state-by-point tile")
+
 print("PASS overlapping-Wannier production array lifetimes are bounded")

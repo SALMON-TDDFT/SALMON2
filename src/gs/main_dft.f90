@@ -2028,30 +2028,42 @@ contains
     character(*),intent(out)::message
     complex(8),allocatable::owner_values(:,:)
     integer(8),allocatable::owner_ids(:),sorted_ids(:)
-    integer,allocatable::sorted_positions(:)
+    integer,allocatable::sorted_positions(:),buffer_source(:)
     logical,allocatable::filled(:)
-    integer::rank,nproc,ierr,owner,point,source_point,nwann,ncore
+    integer,parameter::core_stream_tile=64
+    integer::rank,nproc,ierr,owner,point,source_point,nwann,ncore,tile_first,tile_count
 
     call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
     nwann=size(core_values,1);ncore=size(core_ids)
     ok=nwann>0.and.ncore>0.and.size(core_values,2)==ncore.and.size(buffer_ids)>0
     if(.not.ok)then;message='invalid distributed core-to-buffer contract';return;end if
-    allocate(buffer_values(nwann,size(buffer_ids)),owner_values(nwann,ncore),owner_ids(ncore),&
-      sorted_ids(ncore),sorted_positions(ncore),filled(size(buffer_ids)))
+    allocate(buffer_values(nwann,size(buffer_ids)),&
+      owner_values(nwann,min(ncore,core_stream_tile)),owner_ids(ncore),&
+      sorted_ids(ncore),sorted_positions(ncore),buffer_source(size(buffer_ids)),filled(size(buffer_ids)))
     buffer_values=(0d0,0d0);filled=.false.
     do owner=0,nproc-1
-      if(rank==owner)then;owner_values=core_values;owner_ids=core_ids;end if
+      if(rank==owner)owner_ids=core_ids
       call MPI_Bcast(owner_ids,ncore,MPI_INTEGER8,owner,comm,ierr)
       if(ierr/=MPI_SUCCESS)then;ok=.false.;message='core ID stream failed';return;end if
-      call MPI_Bcast(owner_values,nwann*ncore,MPI_DOUBLE_COMPLEX,owner,comm,ierr)
-      if(ierr/=MPI_SUCCESS)then;ok=.false.;message='core value stream failed';return;end if
       sorted_ids=owner_ids;sorted_positions=[(point,point=1,ncore)]
       call sort_ow_id_positions(sorted_ids,sorted_positions)
       do point=1,size(buffer_ids)
-        if(filled(point))cycle
-        source_point=find_sorted_ow_id(sorted_ids,sorted_positions,buffer_ids(point))
-        if(source_point<1)cycle
-        buffer_values(:,point)=owner_values(:,source_point);filled(point)=.true.
+        if(filled(point))then
+          buffer_source(point)=0
+        else
+          buffer_source(point)=find_sorted_ow_id(sorted_ids,sorted_positions,buffer_ids(point))
+        endif
+      end do
+      do tile_first=1,ncore,core_stream_tile
+        tile_count=min(core_stream_tile,ncore-tile_first+1)
+        if(rank==owner)owner_values(:,1:tile_count)=core_values(:,tile_first:tile_first+tile_count-1)
+        call MPI_Bcast(owner_values,nwann*tile_count,MPI_DOUBLE_COMPLEX,owner,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then;ok=.false.;message='core value stream failed';return;end if
+        do point=1,size(buffer_ids)
+          source_point=buffer_source(point)
+          if(source_point<tile_first.or.source_point>=tile_first+tile_count)cycle
+          buffer_values(:,point)=owner_values(:,source_point-tile_first+1);filled(point)=.true.
+        end do
       end do
     end do
     ok=all(filled).and.all(ieee_is_finite(real(buffer_values))).and.&
