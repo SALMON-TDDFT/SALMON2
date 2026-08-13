@@ -29,7 +29,7 @@ def main() -> int:
     require(r"\bnum_rgrid\s*\(\s*1\s*:\s*3\s*\)\s*=\s*16\s*,\s*16\s*,\s*16", text, "16-cubed grid")
     require(r"\bnum_fragment\s*\(\s*1\s*:\s*3\s*\)\s*=\s*2\s*,\s*2\s*,\s*2", text, "2x2x2 fragments")
     require(r"\bnproc_rgrid_tot\s*\(\s*1\s*:\s*3\s*\)\s*=\s*2\s*,\s*2\s*,\s*2", text, "2x2x2 rank grid")
-    require(r"\bnum_rgrid_buffer\s*\(\s*1\s*:\s*3\s*\)\s*=\s*6\s*,\s*6\s*,\s*6", text, "six-point gradient-safe buffer")
+    require(r"\bnum_rgrid_buffer\s*\(\s*1\s*:\s*3\s*\)\s*=\s*4\s*,\s*4\s*,\s*4", text, "gradient-safe periodic buffer")
     require(r"\byn_dg_dc_overlapping_wannier\s*=\s*['\"]y['\"]", text, "overlapping-Wannier route")
     require(r"\bfile_pseudo\s*\(\s*1\s*\)\s*=\s*['\"]Si_rps\.dat['\"]", text, "Si pseudopotential")
     if len(atoms) != 8 or any(not line.lstrip().startswith("'Si'") for line in atoms):
