@@ -1494,7 +1494,7 @@ contains
     integer::nstate,npoint,i,j,k,axis,ierr,status
     integer,allocatable::order(:)
     logical,allocatable::used(:)
-    complex(real64),allocatable::ordered_transform(:,:),new_values(:,:),new_gradients(:,:,:),gram(:,:)
+    complex(real64),allocatable::ordered_transform(:,:),point_values(:),point_gradients(:,:),gram(:,:)
     real(real64),allocatable::ordered_centers(:,:),ordered_spreads(:),local_maximum(:),global_maximum(:)
     integer(int64),allocatable::local_id(:),global_id(:)
     complex(real64),allocatable::local_pivot(:),global_pivot(:)
@@ -1555,14 +1555,19 @@ contains
     if(present(spreads))then
       allocate(ordered_spreads(nstate));ordered_spreads=spreads(order)
     endif
-    allocate(new_values(nstate,npoint),new_gradients(3,nstate,npoint))
-    new_values=matmul(transpose(ordered_transform),values)
-    do axis=1,3;new_gradients(axis,:,:)=matmul(transpose(ordered_transform),gradients(axis,:,:));enddo
+    allocate(point_values(nstate),point_gradients(3,nstate))
+    do j=1,npoint
+      point_values=matmul(transpose(ordered_transform),values(:,j))
+      do axis=1,3
+        point_gradients(axis,:)=matmul(transpose(ordered_transform),gradients(axis,:,j))
+      enddo
+      values(:,j)=point_values;gradients(:,:,j)=point_gradients
+    enddo
     allocate(local_maximum(nstate),global_maximum(nstate),local_id(nstate),global_id(nstate),&
       local_pivot(nstate),global_pivot(nstate))
     do i=1,nstate
       if(npoint>0)then
-        j=maxloc(abs(new_values(i,:)),dim=1);local_maximum(i)=abs(new_values(i,j))
+        j=maxloc(abs(values(i,:)),dim=1);local_maximum(i)=abs(values(i,j))
       else
         local_maximum(i)=-1d0
       endif
@@ -1571,13 +1576,13 @@ contains
     local_id=huge(0_int64)
     do i=1,nstate;do j=1,npoint
       scale=max(1d0,global_maximum(i))
-      if(abs(abs(new_values(i,j))-global_maximum(i))<=tolerance*scale)&
+      if(abs(abs(values(i,j))-global_maximum(i))<=tolerance*scale)&
         local_id(i)=min(local_id(i),physical_ids(j))
     enddo;enddo
     call MPI_Allreduce(local_id,global_id,nstate,MPI_INTEGER8,MPI_MIN,comm,ierr)
     local_pivot=(0d0,0d0)
     do i=1,nstate;do j=1,npoint
-      if(physical_ids(j)==global_id(i))local_pivot(i)=new_values(i,j)
+      if(physical_ids(j)==global_id(i))local_pivot(i)=values(i,j)
     enddo;enddo
     call MPI_Allreduce(local_pivot,global_pivot,nstate,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.any(global_maximum<=tolerance).or.&
@@ -1586,11 +1591,11 @@ contains
     endif
     do i=1,nstate
       if(real(global_pivot(i),real64)<0d0)then
-        ordered_transform(:,i)=-ordered_transform(:,i);new_values(i,:)=-new_values(i,:)
-        new_gradients(:,i,:)=-new_gradients(:,i,:)
+        ordered_transform(:,i)=-ordered_transform(:,i);values(i,:)=-values(i,:)
+        gradients(:,i,:)=-gradients(:,i,:)
       endif
     enddo
-    transform=ordered_transform;centers=ordered_centers;values=new_values;gradients=new_gradients
+    transform=ordered_transform;centers=ordered_centers
     if(present(spreads))spreads=ordered_spreads
     ok=.true.
 #else

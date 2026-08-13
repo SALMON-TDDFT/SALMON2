@@ -48,4 +48,14 @@ require_between(
     "the occupied LCFO source must be released after its final density receipt",
 )
 
+w90_source = (ROOT / "src/gs/dc/dg_overlapping_wannier_w90.f90").read_text()
+gamma_transform = w90_source[
+    w90_source.index("subroutine apply_dg_w90_gamma_transform") :
+    w90_source.index("end subroutine apply_dg_w90_gamma_transform")
+]
+if "new_values(:,:)" in gamma_transform or "new_gradients(:,:,:)" in gamma_transform:
+    raise AssertionError("the Gamma transform must not allocate full output-sized temporaries")
+if "point_values(:)" not in gamma_transform or "point_gradients(:,:)" not in gamma_transform:
+    raise AssertionError("the Gamma transform must use bounded one-point work vectors")
+
 print("PASS overlapping-Wannier production array lifetimes are bounded")
