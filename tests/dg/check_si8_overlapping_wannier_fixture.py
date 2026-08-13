@@ -26,7 +26,7 @@ def main() -> int:
     require(r"\bizatom\s*\(\s*1\s*\)\s*=\s*14\b", text, "silicon atomic number")
     require(r"\bnatom\s*=\s*8\b", text, "eight atoms")
     require(r"\bnelec\s*=\s*32\b", text, "32 electrons")
-    require(r"\bnum_rgrid\s*\(\s*1\s*:\s*3\s*\)\s*=\s*16\s*,\s*16\s*,\s*16", text, "16-cubed grid")
+    require(r"\bnum_rgrid\s*\(\s*1\s*:\s*3\s*\)\s*=\s*24\s*,\s*24\s*,\s*24", text, "24-cubed grid")
     require(r"\bnum_fragment\s*\(\s*1\s*:\s*3\s*\)\s*=\s*2\s*,\s*2\s*,\s*2", text, "2x2x2 fragments")
     require(r"\bnproc_rgrid_tot\s*\(\s*1\s*:\s*3\s*\)\s*=\s*2\s*,\s*2\s*,\s*2", text, "2x2x2 rank grid")
     require(r"\bnum_rgrid_buffer\s*\(\s*1\s*:\s*3\s*\)\s*=\s*4\s*,\s*4\s*,\s*4", text, "gradient-safe periodic buffer")
