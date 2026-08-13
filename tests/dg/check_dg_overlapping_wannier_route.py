@@ -952,8 +952,12 @@ assert not re.search(r"call\s+replicate_ow_global_symmetry_orbit", adapter_body,
 )
 materialize_position = adapter_body.lower().index("call materialize_ow_distributed_core_to_buffer")
 direct_core_position = adapter_body.lower().index("call exchange_dg_point_permuted_orbital_rows")
+direct_core_allocation_position = adapter_body.lower().index("allocate(ow_core_values(ntarget,ncore))")
 localize_position = adapter_body.lower().index("call run_dg_w90_gamma_library")
 metric_position = adapter_body.lower().index("call assemble_dg_stitched_overlap_density_rows")
+assert direct_core_allocation_position < direct_core_position, (
+    "the retained-core redistribution output must be allocated before the MPI exchange"
+)
 assert direct_core_position < localize_position < materialize_position < metric_position, (
     "localization must use the retained core directly and materialize only the final-gauge buffer"
 )

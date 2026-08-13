@@ -1341,6 +1341,7 @@ contains
     endif
     deallocate(fixed_center_identity,fixed_center_eigenvalues)
     allocate(initial_core_ids(ncore))
+    allocate(ow_core_values(ntarget,ncore))
     core_index=0
     do p=1,nbox
       if(.not.core_mask(p))cycle
