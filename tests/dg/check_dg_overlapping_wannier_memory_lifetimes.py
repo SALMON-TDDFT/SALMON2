@@ -6,6 +6,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = (ROOT / "src/gs/main_dft.f90").read_text()
+ADAPTER = SOURCE[
+    SOURCE.index("subroutine run_dg_overlapping_wannier_ground_state_for_main") :
+    SOURCE.index("\n  end subroutine", SOURCE.index("subroutine run_dg_overlapping_wannier_ground_state_for_main"))
+]
 
 
 def require_between(token: str, start: str, end: str, message: str) -> None:
@@ -83,5 +87,19 @@ final_gradient = SOURCE.index("allocate(ow_box_gradients(3,ntarget,nbox))", fina
 core_release = SOURCE.find("deallocate(ow_core_values)", final_buffer, final_gradient)
 if core_release < 0:
     raise AssertionError("final core values must be released before allocating full-buffer gradients")
+
+for dead_extent in (
+    "coordinate(nbox)",
+    "periodic_phase(3,nbox)",
+    "box_ids(nbox)",
+    "symmetry_map(nbox,nsym)",
+    "local_box_ids(nbox)",
+    "center_representatives(nbox)",
+    "fragments(nbox)",
+    "boundary(nbox)",
+    "gradient_rotation(3,3,nsym)",
+):
+    if dead_extent in ADAPTER:
+        raise AssertionError(f"dead initialization storage remains allocated: {dead_extent}")
 
 print("PASS overlapping-Wannier production array lifetimes are bounded")

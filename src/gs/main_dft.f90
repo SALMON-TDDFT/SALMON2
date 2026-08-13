@@ -572,7 +572,7 @@ contains
   end subroutine
 
   subroutine run_dg_overlapping_wannier_ground_state_for_main()
-    complex(8),allocatable::periodic_phase(:,:),global_seed_values(:,:),global_closed_core(:,:),&
+    complex(8),allocatable::global_seed_values(:,:),global_closed_core(:,:),&
       local_occupied_values(:,:),orbital_owned_full_values(:,:),center_local_buffer_values(:,:),&
       adapted_occupied_candidates(:,:),translation_adapted_occupied(:,:)
     complex(8),allocatable::orthonormal_lcfo_occupied(:,:)
@@ -592,10 +592,8 @@ contains
     complex(8),allocatable::lcfo_fragment_contribution(:,:),lcfo_occupied_core(:,:),lcfo_reference_core(:,:)
     complex(8),allocatable::composed_tile_values(:,:),projector_buffer_tile(:,:)
     complex(8),allocatable::one_shot_hrows(:,:)
-    real(8),allocatable::weights(:),coordinate(:),spectrum(:),occupations(:),lcfo_retained_occupations(:),&
-      lcfo_retained_eigenvalues(:),&
-      gradient_rotation(:,:,:),&
-      local_point_rotations(:,:,:)
+    real(8),allocatable::weights(:),spectrum(:),occupations(:),lcfo_retained_occupations(:),&
+      lcfo_retained_eigenvalues(:),local_point_rotations(:,:,:)
     real(8),allocatable::initial_density_local(:),initial_density_global(:)
     real(8),allocatable::projector_buffer_real(:,:)
     real(8),allocatable::one_shot_density(:),one_shot_potential(:)
@@ -611,15 +609,14 @@ contains
     type(t_dg_projection_channel),allocatable::manifest_channels(:)
     type(t_dg_projection_channel),allocatable::projector_tile_channels(:)
     type(s_dg_overlapping_wannier_construction)::symmetry_basis
-    integer(8),allocatable::physical_ids(:),box_ids(:),symmetry_map(:,:),local_box_ids(:),&
-      local_symmetry_map(:,:),center_representatives(:),&
+    integer(8),allocatable::physical_ids(:),local_symmetry_map(:,:),&
       exact_fragment_symmetry_fingerprints(:),global_symmetry_map(:,:)
     integer(8),allocatable::lcfo_core_ids(:),initial_core_ids(:)
     integer(8),allocatable::all_core_ids(:,:),localized_center_ids(:),orbital_owned_full_ids(:)
     integer(8),allocatable::fixed_center_symmetry_map(:,:),fixed_center_row_ids(:)
     integer(8),allocatable::translation_row_ids(:),translation_stream_row_ids(:)
     integer(8),allocatable::translation_spatial_ids(:),translation_generator_maps(:,:)
-    integer,allocatable::fragments(:),local_point_product(:,:),local_point_integer_rotations(:,:,:),&
+    integer,allocatable::local_point_product(:,:),local_point_integer_rotations(:,:,:),&
       translation_product(:,:),global_point_product(:,:),global_point_integer_rotations(:,:,:),&
       global_translation_subgroup(:),global_point_representatives(:),global_point_cogroup_product(:,:),&
       global_translation_cocycle(:,:),translation_canonical_product(:,:)
@@ -635,10 +632,10 @@ contains
     integer,allocatable::center_owner_candidate(:),center_box_candidate(:),center_fragment_candidate(:)
     integer,allocatable::orbital_owned_ids(:),center_local_orbital_ids(:)
     integer,allocatable::w90_nncell(:,:)
-    logical,allocatable::boundary(:),core_mask(:)
+    logical,allocatable::core_mask(:)
     logical,allocatable::translation_character_done(:)
     logical,allocatable::lcfo_boundary_mask(:)
-    integer::ix,iy,iz,io,p,nbox,ncore,noccupied,nstate,ntarget,nsym,rank,nproc,&
+    integer::ix,iy,iz,io,p,nbox,ncore,noccupied,nstate,ntarget,rank,nproc,&
       raw_ix,raw_iy,raw_iz,core_index,source_core_index,ierr,allocation_status,&
       local_target_count,w90_nntot,projector_tile_first,projector_tile_last,projector_tile_count
     integer::translation_allocation_status
@@ -754,7 +751,6 @@ contains
     nstate=ceiling(0.5d0*dc%elec_num_tot)
     if(mod(nstate,nproc)/=0)error stop 'LCFO occupied rank is not rank balanced'
     noccupied=nstate/nproc
-    nsym=nproc
     call checked_ow_extent_product(dc%lg_tot%num,expected_core_count,ok)
     if(.not.ok.or.expected_core_count>int(huge(nbox),8))&
       error stop 'overlapping-Wannier global grid exceeds addressable extent'
@@ -763,28 +759,16 @@ contains
     if(.not.ok.or.nbox8>huge(expected_box_count)/int(nproc,8))&
       error stop 'overlapping-Wannier global extent overflow'
     expected_box_count=nbox8*int(nproc,8)
-    allocate(weights(nbox),ow_box_density(nbox),&
-      coordinate(nbox),periodic_phase(3,nbox),physical_ids(nbox),box_ids(nbox),&
-      symmetry_map(nbox,nsym),local_box_ids(nbox),&
-      center_representatives(nbox),fragments(nbox),boundary(nbox),core_mask(nbox),&
-      gradient_rotation(3,3,nsym),stat=allocation_status)
+    allocate(weights(nbox),ow_box_density(nbox),physical_ids(nbox),core_mask(nbox),stat=allocation_status)
     call comm_logical_and(allocation_status==0,reusable,dc%icomm_tot)
     if(.not.reusable)error stop 'overlapping-Wannier production allocation failed'
     weights=system%hvol
-    gradient_rotation=0d0
-    do io=1,nsym;do ix=1,3;gradient_rotation(ix,ix,io)=1d0;enddo;enddo
     p=0;core_index=0
     do iz=1,ow_box_size(3);do iy=1,ow_box_size(2);do ix=1,ow_box_size(1)
-      p=p+1;box_ids(p)=int(dc%i_frag-1,8)*nbox8+int(p,8)
-      local_box_ids(p)=int(p,8);fragments(p)=dc%i_frag
-      center_representatives(p)=int(ow_buffer(1)+1+modulo(ix-ow_buffer(1)-1,ow_core_size(1)),8)+&
-        int(ow_box_size(1),8)*(int(ow_buffer(2)+modulo(iy-ow_buffer(2)-1,ow_core_size(2)),8)+&
-        int(ow_box_size(2),8)*int(ow_buffer(3)+modulo(iz-ow_buffer(3)-1,ow_core_size(3)),8))
+      p=p+1
       core_mask(p)=ix>ow_buffer(1).and.ix<=ow_buffer(1)+ow_core_size(1).and.&
         iy>ow_buffer(2).and.iy<=ow_buffer(2)+ow_core_size(2).and.&
         iz>ow_buffer(3).and.iz<=ow_buffer(3)+ow_core_size(3)
-      boundary(p)=ix==1.or.ix==ow_box_size(1).or.iy==1.or.iy==ow_box_size(2).or.&
-        iz==1.or.iz==ow_box_size(3)
       raw_ix=canonical_to_dc_index(ix,ow_core_size(1),ow_buffer(1))
       raw_iy=canonical_to_dc_index(iy,ow_core_size(2),ow_buffer(2))
       raw_iz=canonical_to_dc_index(iz,ow_core_size(3),ow_buffer(3))
@@ -793,13 +777,6 @@ contains
         int(dc%lg_tot%num(1),8)*(int(modulo(dc%ixyz_frag(2,dc%i_frag)-1+iy-ow_buffer(2)-1,&
         dc%lg_tot%num(2)),8)+int(dc%lg_tot%num(2),8)*int(modulo(dc%ixyz_frag(3,dc%i_frag)-1+&
         iz-ow_buffer(3)-1,dc%lg_tot%num(3)),8))
-      coordinate(p)=real(physical_ids(p),8)
-      periodic_phase(1,p)=exp(cmplx(0d0,2d0*pi*real(modulo(physical_ids(p)-1_8,&
-        int(dc%lg_tot%num(1),8)),8)/real(dc%lg_tot%num(1),8),8))
-      periodic_phase(2,p)=exp(cmplx(0d0,2d0*pi*real(modulo((physical_ids(p)-1_8)/&
-        int(dc%lg_tot%num(1),8),int(dc%lg_tot%num(2),8)),8)/real(dc%lg_tot%num(2),8),8))
-      periodic_phase(3,p)=exp(cmplx(0d0,2d0*pi*real((physical_ids(p)-1_8)/&
-        nxy8,8)/real(dc%lg_tot%num(3),8),8))
       if(core_mask(p))then
         core_index=core_index+1
       endif
