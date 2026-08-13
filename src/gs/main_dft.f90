@@ -1365,16 +1365,12 @@ contains
     call materialize_ow_distributed_core_to_buffer(dc%icomm_tot,global_closed_core,ow_core_ids,&
       physical_ids,ow_box_values,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global core-to-buffer streaming failed';end if
-    allocate(ow_box_gradients(3,ntarget,nbox))
-    call periodic_box_gradients(ow_box_values,ow_box_size,stencil%coef_nab,ow_box_gradients)
-    allocate(ow_core_values(ntarget,ncore),ow_core_gradients(3,ntarget,ncore))
-    ow_core_values=(0d0,0d0);ow_core_gradients=(0d0,0d0)
+    allocate(ow_core_values(ntarget,ncore));ow_core_values=(0d0,0d0)
     core_index=0
     do p=1,nbox
       if(.not.core_mask(p))cycle
       core_index=core_index+1
       ow_core_values(:,core_index)=ow_box_values(:,p)
-      ow_core_gradients(:,:,core_index)=ow_box_gradients(:,:,p)
       ow_core_weights(core_index)=weights(p);ow_core_ids(core_index)=physical_ids(p)
       ow_core_box_positions(core_index)=p
       core_periodic_phase(1,core_index)=exp(cmplx(0d0,2d0*pi*real(modulo(physical_ids(p)-1_8,&
@@ -1384,7 +1380,7 @@ contains
       core_periodic_phase(3,core_index)=exp(cmplx(0d0,2d0*pi*real((physical_ids(p)-1_8)/&
         nxy8,8)/real(dc%lg_tot%num(3),8),8))
     enddo
-    deallocate(ow_box_values,ow_box_gradients)
+    deallocate(ow_box_values)
     call invert_ow_lattice(dc%system_tot%primitive_a,w90_lattice_inverse,w90_determinant,ok)
     if(.not.ok)error stop 'Wannier90 lattice is singular'
     w90_reciprocal_lattice=2d0*pi*transpose(w90_lattice_inverse)
@@ -1423,8 +1419,9 @@ contains
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 MLWF optimization failed';endif
     deallocate(w90_m_matrix,w90_a_matrix,w90_eigenvalues)
     localized_centers=matmul(w90_lattice_inverse,localized_centers)
-    call apply_dg_w90_gamma_transform(dc%icomm_tot,ow_core_ids,ow_core_values,ow_core_gradients,&
-      w90_transform,localized_centers,dg_ow_symmetry_tolerance,ok,message,w90_spreads)
+    call apply_dg_w90_gamma_transform(dc%icomm_tot,ow_core_ids,ow_core_values,&
+      transform=w90_transform,centers=localized_centers,tolerance=dg_ow_symmetry_tolerance,&
+      ok=ok,message=message,spreads=w90_spreads)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 MLWF gauge canonicalization failed';endif
     call fingerprint_ow_w90_transform(dc%icomm_tot,w90_transform,w90_transform_fingerprint,ok)
     if(.not.ok)error stop 'Wannier90 canonical transform fingerprint failed'
@@ -1665,7 +1662,7 @@ contains
     end do
     deallocate(exact_fragment_symmetry_fingerprints)
     ow_symmetry_fingerprint=ieor(ishftc(ow_symmetry_fingerprint,17),translation_post_gauge_fingerprint)
-    deallocate(ow_core_values,ow_core_gradients)
+    deallocate(ow_core_values)
     allocate(ow_core_values(ntarget,ncore),ow_core_gradients(3,ntarget,ncore))
     do core_index=1,ncore
       p=ow_core_box_positions(core_index)

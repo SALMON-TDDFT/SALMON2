@@ -16,8 +16,8 @@ def require_between(token: str, start: str, end: str, message: str) -> None:
 
 
 require_between(
-    "deallocate(ow_box_values,ow_box_gradients)",
-    "ow_core_gradients(:,:,core_index)=ow_box_gradients(:,:,p)",
+    "deallocate(ow_box_values)",
+    "ow_core_values(:,core_index)=ow_box_values(:,p)",
     "call invert_ow_lattice",
     "the initial full buffer must be released immediately after core extraction",
 )
@@ -57,5 +57,17 @@ if "new_values(:,:)" in gamma_transform or "new_gradients(:,:,:)" in gamma_trans
     raise AssertionError("the Gamma transform must not allocate full output-sized temporaries")
 if "point_values(:)" not in gamma_transform or "point_gradients(:,:)" not in gamma_transform:
     raise AssertionError("the Gamma transform must use bounded one-point work vectors")
+
+adapter_start = SOURCE.index("call materialize_ow_distributed_core_to_buffer")
+adapter_end = SOURCE.index("call validate_dg_factored_point_cogroup_gauge", adapter_start)
+pre_final_gauge = SOURCE[adapter_start:adapter_end]
+if "call periodic_box_gradients" in pre_final_gauge:
+    raise AssertionError("production must not form gradients before the final character gauge")
+if "ow_core_gradients(3,ntarget,ncore)" in pre_final_gauge:
+    raise AssertionError("production must not retain a pre-final-gauge core gradient tensor")
+if "transform=w90_transform" not in pre_final_gauge:
+    raise AssertionError("production must invoke the Gamma transform through its values-only contract")
+if "optional::gradients(:,:,:)" not in gamma_transform.replace(" ", ""):
+    raise AssertionError("the Gamma transform gradient payload must be optional")
 
 print("PASS overlapping-Wannier production array lifetimes are bounded")

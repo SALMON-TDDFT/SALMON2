@@ -1484,7 +1484,8 @@ contains
       tolerance,ok,message,spreads)
     integer,intent(in)::comm
     integer(int64),intent(in)::physical_ids(:)
-    complex(real64),intent(inout)::values(:,:),gradients(:,:,:),transform(:,:)
+    complex(real64),intent(inout)::values(:,:),transform(:,:)
+    complex(real64),intent(inout),optional::gradients(:,:,:)
     real(real64),intent(inout)::centers(:,:)
     real(real64),intent(inout),optional::spreads(:)
     real(real64),intent(in)::tolerance
@@ -1501,13 +1502,18 @@ contains
     real(real64)::scale
     logical::precedes
     ok=.false.;message='';status=0;nstate=size(values,1);npoint=size(values,2)
-    if(nstate<=0.or.size(values,2)/=size(physical_ids).or.&
-        any(shape(gradients)/=[3,nstate,npoint]).or.any(shape(transform)/=[nstate,nstate]).or.&
+    if(nstate<=0.or.size(values,2)/=size(physical_ids).or.any(shape(transform)/=[nstate,nstate]).or.&
         any(shape(centers)/=[3,nstate]).or.tolerance<=0d0.or..not.ieee_is_finite(tolerance).or.&
         .not.all(ieee_is_finite(real(values))).or..not.all(ieee_is_finite(aimag(values))).or.&
-        .not.all(ieee_is_finite(real(gradients))).or..not.all(ieee_is_finite(aimag(gradients))).or.&
         .not.all(ieee_is_finite(real(transform))).or..not.all(ieee_is_finite(aimag(transform))).or.&
         .not.all(ieee_is_finite(centers)).or.any(physical_ids<=0_int64))status=1
+    if(present(gradients))then
+      if(any(shape(gradients)/=[3,nstate,npoint]))status=1
+      if(status==0)then
+        if(.not.all(ieee_is_finite(real(gradients))).or.&
+            .not.all(ieee_is_finite(aimag(gradients))))status=1
+      endif
+    endif
     if(present(spreads))then
       if(size(spreads)/=nstate.or..not.all(ieee_is_finite(spreads)))status=1
     endif
@@ -1555,13 +1561,17 @@ contains
     if(present(spreads))then
       allocate(ordered_spreads(nstate));ordered_spreads=spreads(order)
     endif
-    allocate(point_values(nstate),point_gradients(3,nstate))
+    allocate(point_values(nstate))
+    if(present(gradients))allocate(point_gradients(3,nstate))
     do j=1,npoint
       point_values=matmul(transpose(ordered_transform),values(:,j))
-      do axis=1,3
-        point_gradients(axis,:)=matmul(transpose(ordered_transform),gradients(axis,:,j))
-      enddo
-      values(:,j)=point_values;gradients(:,:,j)=point_gradients
+      if(present(gradients))then
+        do axis=1,3
+          point_gradients(axis,:)=matmul(transpose(ordered_transform),gradients(axis,:,j))
+        enddo
+        gradients(:,:,j)=point_gradients
+      endif
+      values(:,j)=point_values
     enddo
     allocate(local_maximum(nstate),global_maximum(nstate),local_id(nstate),global_id(nstate),&
       local_pivot(nstate),global_pivot(nstate))
@@ -1592,7 +1602,7 @@ contains
     do i=1,nstate
       if(real(global_pivot(i),real64)<0d0)then
         ordered_transform(:,i)=-ordered_transform(:,i);values(i,:)=-values(i,:)
-        gradients(:,i,:)=-gradients(:,i,:)
+        if(present(gradients))gradients(:,i,:)=-gradients(:,i,:)
       endif
     enddo
     transform=ordered_transform;centers=ordered_centers
