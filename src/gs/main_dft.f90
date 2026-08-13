@@ -1128,6 +1128,7 @@ contains
     adapted_occupied_density_boundary_difference=sqrt(adapted_occupied_density_boundary_difference/&
       max(tiny(1d0),global_occupied_density_boundary_norm))
     deallocate(occupied_density_before,occupied_density_after,occupied_density_difference)
+    deallocate(lcfo_occupied_core)
     adapted_occupied_selected_block_dimension=count(&
       abs(adapted_occupied_spectrum-adapted_occupied_selected_edge)<=&
       dg_ow_symmetry_tolerance*max(1d0,abs(adapted_occupied_selected_edge)))
@@ -1383,6 +1384,7 @@ contains
       core_periodic_phase(3,core_index)=exp(cmplx(0d0,2d0*pi*real((physical_ids(p)-1_8)/&
         nxy8,8)/real(dc%lg_tot%num(3),8),8))
     enddo
+    deallocate(ow_box_values,ow_box_gradients)
     call invert_ow_lattice(dc%system_tot%primitive_a,w90_lattice_inverse,w90_determinant,ok)
     if(.not.ok)error stop 'Wannier90 lattice is singular'
     w90_reciprocal_lattice=2d0*pi*transpose(w90_lattice_inverse)
@@ -1397,14 +1399,14 @@ contains
       dc%system_tot%primitive_a,w90_reciprocal_lattice,w90_atom_symbols,w90_atoms_cart,&
       ntarget,ntarget,w90_nntot,w90_nncell,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 Gamma setup failed';endif
-    allocate(w90_fractional(3,ncore),w90_anchors(ntarget,ncore),w90_eigenvalues(ntarget))
+    allocate(w90_fractional(3,ncore),w90_eigenvalues(ntarget))
     do p=1,ncore
       w90_fractional(:,p)=[real(modulo(ow_core_ids(p)-1_8,int(dc%lg_tot%num(1),8)),8)/&
         real(dc%lg_tot%num(1),8),real(modulo((ow_core_ids(p)-1_8)/int(dc%lg_tot%num(1),8),&
         int(dc%lg_tot%num(2),8)),8)/real(dc%lg_tot%num(2),8),real((ow_core_ids(p)-1_8)/nxy8,8)/&
         real(dc%lg_tot%num(3),8)]
     enddo
-    w90_anchors=global_seed_values;w90_eigenvalues=0d0
+    call move_alloc(global_seed_values,w90_anchors);w90_eigenvalues=0d0
     w90_byte_limit=8_8*1024_8*1024_8*1024_8
     call assemble_dg_w90_gamma_matrices(dc%icomm_tot,global_closed_core,w90_anchors,&
       ow_core_weights,w90_fractional,w90_nncell,w90_byte_limit,w90_m_matrix,w90_a_matrix,&
@@ -1413,11 +1415,13 @@ contains
     call fingerprint_ow_w90_matrices(dc%icomm_tot,w90_m_matrix,w90_a_matrix,&
       w90_input_fingerprint,ok)
     if(.not.ok)error stop 'Wannier90 M/A fingerprint failed'
+    deallocate(w90_anchors,w90_fractional)
     call run_dg_w90_gamma_library(dc%icomm_tot,'overlapping_wannier_mlwf',&
       dc%system_tot%primitive_a,w90_reciprocal_lattice,w90_atom_symbols,w90_atoms_cart,&
       w90_m_matrix,w90_a_matrix,w90_eigenvalues,huge(1d0)/4d0,dg_ow_symmetry_tolerance,&
       w90_transform,localized_centers,w90_spreads,w90_spread,ok,message,localization_iterations)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 MLWF optimization failed';endif
+    deallocate(w90_m_matrix,w90_a_matrix,w90_eigenvalues)
     localized_centers=matmul(w90_lattice_inverse,localized_centers)
     call apply_dg_w90_gamma_transform(dc%icomm_tot,ow_core_ids,ow_core_values,ow_core_gradients,&
       w90_transform,localized_centers,dg_ow_symmetry_tolerance,ok,message,w90_spreads)
@@ -1629,7 +1633,6 @@ contains
       ' identity_defect=',translation_identity_defect,' closure_defect=',translation_closure_defect,&
       ' workspace_peak_bytes=',translation_transform_workspace
     global_retained_group_closure_defect=max(global_retained_group_closure_defect,translation_closure_defect)
-    deallocate(ow_box_values,ow_box_gradients)
     call materialize_ow_distributed_core_to_buffer(dc%icomm_tot,ow_core_values,ow_core_ids,&
       physical_ids,ow_box_values,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'post-character core-to-buffer streaming failed';endif
@@ -1640,8 +1643,7 @@ contains
       translation_spatial_ids,translation_character_done,translation_generator_rows,translation_row_ids,&
       translation_gamma_rows,translation_canonical_product,translation_product)
 #endif
-    deallocate(global_seed_values,lcfo_reference_core,lcfo_occupied_core,w90_anchors,w90_fractional,w90_eigenvalues,w90_atom_symbols,&
-      w90_atoms_cart,w90_nncell,w90_m_matrix,w90_a_matrix,w90_spreads,localized_centers,w90_transform)
+    deallocate(lcfo_reference_core,w90_atom_symbols,w90_atoms_cart,w90_nncell,w90_spreads,localized_centers,w90_transform)
     if(rank==0)write(*,'(a,5(a,es12.4),3(a,i0))')'[OW-GS-DIAGNOSTIC] Wannier90_MLWF',&
       ' gauge_spread=',w90_spread(3),' total_spread=',w90_spread(1),&
       ' identity_defect=',w90_identity_defect,' unitarity_defect=',w90_unitarity_defect,&

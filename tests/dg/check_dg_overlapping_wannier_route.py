@@ -642,8 +642,8 @@ assert re.search(
 assert "call accumulate_dg_lcfo_buffer_contributions_to_core" not in adapter_body.lower(), (
     "fragment-core truncation must not define the support of a pre-Wannier symmetry proof"
 )
-assert "w90_anchors=global_seed_values" in re.sub(r"\s+", "", adapter_body.lower()), (
-    "Wannier90 projections must use the complete LCFO core-plus-buffer seed basis"
+assert "callmove_alloc(global_seed_values,w90_anchors)" in re.sub(r"\s+", "", adapter_body.lower()), (
+    "Wannier90 projections must take ownership of the complete LCFO core-plus-buffer seed basis"
 )
 assert re.search(r"call\s+apply_dg_w90_gamma_transform", adapter_body, re.I), (
     "the MLWF transform must be applied in the global LCFO space"
