@@ -40,6 +40,12 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(runner.safety_reason(20 << 30, {1: 4 << 20}, 8 << 30, 3 << 20), "rank_rss")
         self.assertIsNone(runner.safety_reason(20 << 30, {1: 2 << 20}, 8 << 30, 3 << 20))
 
+    def test_launch_command_falls_back_when_taskpolicy_is_absent(self):
+        runner = load_runner()
+        command = runner.build_launch_command(Path("/tmp/salmon"), lambda name: None)
+        self.assertEqual(command[:4], ["/usr/bin/nice", "-n", "15", "mpirun"])
+        self.assertEqual(command[-2:], ["8", "/tmp/salmon"])
+
     def test_runner_never_cycles_stop_continue(self):
         text = RUNNER.read_text()
         self.assertNotIn("SIGSTOP", text)

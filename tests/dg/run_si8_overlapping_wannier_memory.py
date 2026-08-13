@@ -75,6 +75,12 @@ def safety_reason(
     return None
 
 
+def build_launch_command(binary: Path, which=shutil.which) -> list[str]:
+    command = ["/usr/bin/nice", "-n", "15", "mpirun", "-np", "8", str(binary)]
+    taskpolicy = which("taskpolicy")
+    return [taskpolicy, "-b", *command] if taskpolicy else command
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -136,10 +142,7 @@ def main() -> int:
         "MKL_NUM_THREADS": "1",
         "GFORTRAN_UNBUFFERED_ALL": "1",
     }
-    command = [
-        "/usr/bin/taskpolicy", "-b", "/usr/bin/nice", "-n", "15",
-        "mpirun", "-np", "8", str(binary),
-    ]
+    command = build_launch_command(binary)
     available_floor = int(args.available_floor_gib * (1 << 30))
     rank_ceiling = int(args.rank_ceiling_gib * (1 << 20))
     stopped_reason = ""
