@@ -110,3 +110,19 @@ Compare phase-aligned total and per-rank RSS against
 Require a bounded peak reduction consistent with removing at least the old
 buffer retention. Only then consider more invasive buffer tiling.
 
+### Task 4: Remove the pre-final-gauge spatial round trip
+
+**Files:**
+- Modify: `src/gs/main_dft.f90`
+- Modify: `src/gs/dc/dg_overlapping_wannier_w90.f90`
+- Modify: `tests/dg/check_dg_overlapping_wannier_memory_lifetimes.py`
+- Modify: `tests/dg/check_dg_overlapping_wannier_route.py`
+
+**Steps:**
+
+1. Add RED checks forbidding initial full-buffer materialization and gradients.
+2. Reorder the retained core by physical ID directly from `global_closed_core`.
+3. Make the Gamma gradient payload optional and use the values-only production call.
+4. Release closed-core/sector inputs before final buffer and gradient allocation.
+5. Compile `main_dft.f90` against the updated W90 module.
+6. Run the focused W90 MPI 1/2/4/8 fixture and route/lifetime checks.

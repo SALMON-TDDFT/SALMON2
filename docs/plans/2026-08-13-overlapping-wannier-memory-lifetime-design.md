@@ -40,6 +40,20 @@ canonical ordering/sign selection and all MPI receipts.
 Stage 2 is kept separate because it changes the implementation of a numerical
 transform, even though the intended result is identical.
 
+### Stage 3: eliminate pre-final-gauge spatial round trips
+
+The retained closed core already contains the values needed by Wannier90.
+Map those columns into production core order by physical ID instead of first
+materializing a full buffered grid and copying its core back.  Do not form
+spatial gradients before the final character gauge: those gradients were
+transformed and then discarded without a read.  The Gamma transform therefore
+accepts an optional gradient payload, while its existing value-plus-gradient
+contract remains covered by the focused fixture.  Release row-owned sector and
+closed-core inputs before allocating the final buffered values and gradients.
+
+For Si64 this removes another 128.6 MiB initial value buffer, 385.9 MiB initial
+gradient buffer, and 72 MiB initial core-gradient tensor per rank.
+
 ## Safety and verification
 
 A static lifetime checker fixes the ordering requirements and rejects renewed
@@ -47,4 +61,3 @@ full-buffer retention or duplicate seed/anchor allocation.  Existing focused
 MPI fixtures compare values, gradients, fingerprints, and rank independence on
 1/2/4/8 ranks.  The monitored Si64 MPI8 run supplies process RSS evidence.  No
 build or additional MPI test is run concurrently with the active Si64 job.
-
