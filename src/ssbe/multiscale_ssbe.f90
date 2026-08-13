@@ -25,7 +25,7 @@ subroutine main_multiscale_ssbe(icomm)
     real(8), allocatable :: Ac_ext_t(:, :)
     integer :: it, i
     integer :: nproc, irank, icomm_macro, nproc_macro, irank_macro
-    real(8), allocatable :: Ac_macro(:, :), E_macro(:, :)
+    real(8), allocatable :: Ac_macro(:, :), Ac_macro_old(:, :), E_macro(:, :)
     real(8), allocatable :: Jmat_macro_tmp(:, :), Jmat_macro(:, :)
     integer, allocatable :: itbl_macro_coord(:, :)
     integer, allocatable :: itbl_macro_itype_sbe(:)
@@ -110,6 +110,7 @@ subroutine main_multiscale_ssbe(icomm)
         icomm_macro = comm_create_group(icomm, imacro_min, 0)
         call comm_get_groupinfo(icomm_macro, irank_macro, nproc_macro)
         allocate(Ac_macro(1:3, nmacro))
+        allocate(Ac_macro_old(1:3, nmacro))
         allocate(E_macro(1:3, nmacro))
         allocate(Jmat_macro_tmp(1:3, nmacro))
         allocate(Jmat_macro(1:3, nmacro))
@@ -186,17 +187,22 @@ subroutine main_multiscale_ssbe(icomm)
                     iy = itbl_macro_coord(2, imacro)
                     iz = itbl_macro_coord(3, imacro)
                     Ac_macro(1:3, imacro) = fw%vec_Ac_new%v(1:3, ix, iy, iz)
+                    Ac_macro_old(1:3, imacro) = fw%vec_Ac%v(1:3, ix, iy, iz)
                     E_macro(1:3, imacro) = fw%vec_E%v(1:3, ix, iy, iz)
                 end do
             end if
             call comm_bcast(Ac_macro, icomm, 0)
+            call comm_bcast(Ac_macro_old, icomm, 0)
             call comm_bcast(E_macro, icomm, 0)
 
             Jmat_macro_tmp = 0.0d0
             do imacro = imacro_min, imacro_max
                 if (trim(gauge_sbe) == "velocity_gauge") then
+                    ! At loop entry, vec_Ac and vec_Ac_new hold the two
+                    ! endpoints of the current material-propagation interval.
                     call dt_evolve_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), &
-                                         Ac_macro(1:3, imacro), dt)
+                                         0.5d0 * (Ac_macro_old(1:3, imacro) &
+                                                + Ac_macro(1:3, imacro)), dt)
                     call calc_current_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), &
                                             Ac_macro(1:3, imacro), jmat, icomm_macro)
                 else ! trim(gauge_sbe) == "length_gauge"
