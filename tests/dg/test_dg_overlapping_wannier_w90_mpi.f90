@@ -15,6 +15,7 @@ program test_dg_overlapping_wannier_w90_mpi
   use dg_overlapping_wannier_w90,only:inherit_dg_w90_affine_receipts
   use dg_overlapping_wannier_w90,only:build_dg_sector_periodic_position_tuple
   use dg_overlapping_wannier_w90,only:canonicalize_dg_sector_periodic_position_gauge
+  use dg_overlapping_wannier_w90,only:jointly_canonicalize_dg_sector_periodic_position_gauge
   implicit none
   integer::ierr,rank,nproc,b,i,m,n,p,nlocal
   integer::convergence_iterations,log_unit
@@ -79,6 +80,12 @@ program test_dg_overlapping_wannier_w90_mpi
   real(8)::position_canonical_defect,position_trial_defect
   integer(8)::position_canonical_fingerprint,position_trial_canonical_fingerprint,&
     position_canonical_workspace,position_trial_position_fingerprint
+  complex(8),allocatable::joint_canonical_rows(:,:),joint_trial_rows(:,:)
+  complex(8)::joint_rotation(2,2),joint_trial_rotation(2,2)
+  real(8),allocatable::joint_centers(:,:),joint_trial_centers(:,:)
+  real(8)::joint_objective,joint_trial_objective,joint_update,joint_trial_update,joint_defect,joint_trial_defect
+  integer::joint_sweeps,joint_trial_sweeps
+  integer(8)::joint_fingerprint,joint_trial_fingerprint,joint_workspace
   integer(8)::sector_trial_fingerprint,sector_trial_workspace
   integer(8),allocatable::sector_reference_keys(:),sector_permuted_keys(:)
 #ifdef USE_WANNIER90
@@ -256,6 +263,28 @@ program test_dg_overlapping_wannier_w90_mpi
     position_trial_canonical_fingerprint,position_canonical_workspace,ok,message)
   call require(ok.and.position_trial_canonical_fingerprint==position_canonical_fingerprint,&
     'an exact internal multiplet preserves one common projector fingerprint')
+  sector_position_tuple=(0d0,0d0)
+  sector_position_tuple(1,1,1)=exp(cmplx(0d0,0.3d0,8))
+  sector_position_tuple(2,2,1)=exp(cmplx(0d0,1.1d0,8))
+  sector_position_tuple(1,1,2)=exp(cmplx(0d0,0.5d0,8))
+  sector_position_tuple(2,2,2)=exp(cmplx(0d0,1.4d0,8))
+  sector_position_tuple(1,1,3)=exp(cmplx(0d0,0.7d0,8))
+  sector_position_tuple(2,2,3)=exp(cmplx(0d0,1.8d0,8))
+  do b=1,3
+    position_trial_tuple(:,:,b)=matmul(conjg(transpose(position_input_rotation)),&
+      matmul(sector_position_tuple(:,:,b),position_input_rotation))
+  enddo
+  call jointly_canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,&
+    sector_position_tuple,position_lcfo_operator,1d-12,901_8,joint_canonical_rows,joint_rotation,&
+    joint_centers,joint_objective,joint_update,joint_sweeps,joint_defect,joint_fingerprint,joint_workspace,ok,message)
+  call require(ok.and.joint_objective<1d-20.and.joint_defect<1d-10,'joint center gauge resolves distinct centers')
+  call jointly_canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,position_rotated_sector,&
+    position_trial_tuple,position_trial_operator,1d-12,907_8,joint_trial_rows,joint_trial_rotation,&
+    joint_trial_centers,joint_trial_objective,joint_trial_update,joint_trial_sweeps,joint_trial_defect,&
+    joint_trial_fingerprint,joint_workspace,ok,message)
+  call require(ok.and.maxval(abs(joint_trial_rows-joint_canonical_rows))<1d-10.and.&
+    maxval(abs(joint_trial_centers-joint_centers))<1d-10.and.joint_trial_fingerprint==joint_fingerprint,&
+    'joint center gauge is invariant under an input-sector unitary rotation')
   sector_reference(:,1)=(sector_frame(:,1)+cmplx(0.3d0,0.4d0,8)*sector_frame(:,2))/sqrt(1.25d0)
   sector_reference(:,2)=(-cmplx(0.3d0,-0.4d0,8)*sector_frame(:,1)+sector_frame(:,2))/sqrt(1.25d0)
   sector_gamma=(0d0,0d0)
