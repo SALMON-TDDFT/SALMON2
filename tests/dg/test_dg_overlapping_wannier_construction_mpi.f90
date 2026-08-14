@@ -196,7 +196,7 @@ program test_dg_overlapping_wannier_construction_mpi
   integer,allocatable::semidirect_product(:,:),semidirect_cocycle(:,:)
   integer::semidirect_units(4),semidirect_offsets(4),semidirect_left,semidirect_right,&
     semidirect_product_unit,semidirect_product_index,semidirect_shift
-  integer::factored_generator_count,factored_checked_pair_count
+  integer::factored_generator_count,factored_checked_pair_count,factored_prepared_operation_count
   integer::factored_receipt_min,factored_receipt_max
   real(8),allocatable::factored_weights(:)
   real(8)::factored_identity_defect,factored_unitarity_defect,factored_closure_defect
@@ -1418,8 +1418,9 @@ program test_dg_overlapping_wannier_construction_mpi
     call validate_dg_factored_point_cogroup_gauge(comm,transpose(streamed_transform_rows),factored_weights,&
       semidirect_point_maps,semidirect_translation_maps,semidirect_product,1,semidirect_cocycle,12,0d0,1d-12,&
       factored_identity_defect,factored_unitarity_defect,factored_closure_defect,inverse_workspace,ok,message,&
-      factored_generator_count,factored_checked_pair_count)
-    call require(ok.and.factored_generator_count==2.and.factored_checked_pair_count<16,&
+      factored_generator_count,factored_checked_pair_count,factored_prepared_operation_count)
+    call require(ok.and.factored_generator_count==2.and.factored_checked_pair_count<16.and.&
+      factored_prepared_operation_count==4,&
       'factored cocycle uses a complete generator proof in a noncommuting affine action: '//trim(message))
     call MPI_Allreduce(factored_checked_pair_count,factored_receipt_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
     call MPI_Allreduce(factored_checked_pair_count,factored_receipt_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)

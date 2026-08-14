@@ -662,7 +662,8 @@ contains
 
   subroutine validate_dg_factored_point_cogroup_gauge(comm,local_basis,weights,point_maps,translation_maps,&
       point_product,point_identity,translation_cocycle,ntranslation,subspace_defect,tolerance,identity_defect,&
-      unitarity_defect,closure_defect,workspace_peak_bytes,ok,message,generator_count,checked_pair_count)
+      unitarity_defect,closure_defect,workspace_peak_bytes,ok,message,generator_count,checked_pair_count,&
+      prepared_operation_count)
     integer,intent(in)::comm,point_product(:,:),point_identity,translation_cocycle(:,:),ntranslation
     complex(real64),intent(in)::local_basis(:,:)
     real(real64),intent(in)::weights(:),subspace_defect,tolerance
@@ -671,7 +672,7 @@ contains
     integer(int64),intent(out)::workspace_peak_bytes
     logical,intent(out)::ok
     character(*),intent(out)::message
-    integer,intent(out),optional::generator_count,checked_pair_count
+    integer,intent(out),optional::generator_count,checked_pair_count,prepared_operation_count
 #ifdef USE_MPI
     integer::npoint,nstate,nlocal,left,right,product,cocycle,rank,nproc,owner,base,remainder,first,count,&
       local_bad,global_bad,ierr,status,minvalue,maxvalue,operation,index,nchecked,a,b,c,step
@@ -679,17 +680,18 @@ contains
     logical,allocatable::generator_mask(:)
     logical::generator_ok
     integer(int64),allocatable::global_left(:),global_right(:),global_product(:),global_translation(:),expected_map(:,:)
-    integer(int64),allocatable::row_ids(:),right_row_ids(:),expected_row_ids(:)
-    complex(real64),allocatable::left_rows(:,:,:),right_rows(:,:,:),expected_rows(:,:,:),product_rows(:,:),remote_rows(:,:)
+    integer(int64),allocatable::row_ids(:),expected_row_ids(:)
+    complex(real64),allocatable::point_rows(:,:,:),expected_rows(:,:,:),product_rows(:,:),remote_rows(:,:)
     real(real64)::local_closure,global_closure,norm_bound,propagation_factor,propagated_closure
-    integer(int64)::operation_workspace,left_workspace,right_workspace,expected_workspace,global_extent,&
-      product_elements,persistent_bytes,term_bytes,live_bytes,maximum_remote_bytes,global_workspace_peak
+    integer(int64)::expected_workspace,global_extent,product_elements,persistent_bytes,term_bytes,&
+      cache_bytes,live_bytes,maximum_remote_bytes,global_workspace_peak
     npoint=size(point_maps,2)
     nstate=size(local_basis,1);nlocal=size(local_basis,2)
     ok=.false.;message='';identity_defect=huge(1d0);unitarity_defect=huge(1d0)
     closure_defect=huge(1d0);workspace_peak_bytes=0_int64
     if(present(generator_count))generator_count=0
     if(present(checked_pair_count))checked_pair_count=0
+    if(present(prepared_operation_count))prepared_operation_count=0
     local_bad=merge(0,1,npoint>=1.and.npoint<=48.and.nstate>=1.and.nlocal>=1.and.&
       point_identity>=1.and.point_identity<=npoint.and.&
       ntranslation>=1.and.all(shape(translation_cocycle)==[npoint,npoint]).and.&
@@ -799,12 +801,24 @@ contains
     enddo
     call validate_dg_streamed_affine_representation(comm,local_basis,weights,point_maps,&
       point_identity,subspace_defect,tolerance,identity_defect,unitarity_defect,closure_defect,&
-      workspace_peak_bytes,ok,message)
+      workspace_peak_bytes,ok,message,row_ids,point_rows)
     if(.not.ok)then;call cleanup_factored_workspace();return;endif
+    if(present(prepared_operation_count))prepared_operation_count=npoint
+    if(persistent_bytes>huge(0_int64)-term_bytes)then
+      message='factored persistent workspace peak overflows';call cleanup_factored_workspace();return
+    endif
     persistent_bytes=persistent_bytes+term_bytes
+    if(int(size(point_rows),int64)>huge(0_int64)/16_int64)then
+      message='prepared point representation receipt overflows';call cleanup_factored_workspace();return
+    endif
+    cache_bytes=16_int64*int(size(point_rows),int64)
+    if(persistent_bytes>huge(0_int64)-cache_bytes)then
+      message='prepared point representation peak overflows';call cleanup_factored_workspace();return
+    endif
+    persistent_bytes=persistent_bytes+cache_bytes
     workspace_peak_bytes=max(workspace_peak_bytes,persistent_bytes)
     base=nstate/nproc;remainder=mod(nstate,nproc);local_closure=0d0
-    maximum_remote_bytes=0_int64
+    maximum_remote_bytes=0_int64;local_bad=0
     do owner=0,nproc-1
       count=base+merge(1,0,owner<remainder)
       if(int(count,int64)>huge(0_int64)/int(nstate,int64))then
@@ -846,25 +860,8 @@ contains
       endif
       if(.not.generator_mask(left).and..not.generator_mask(right))cycle
       nchecked=nchecked+1
-      call assemble_dg_distributed_basis_symmetry_overlap_rows(comm,local_basis,weights,&
-        point_maps(:,left:left),row_ids,left_rows,left_workspace,ok,message)
-      if(.not.ok)then;call cleanup_factored_workspace();return;endif
-      call assemble_dg_distributed_basis_symmetry_overlap_rows(comm,local_basis,weights,&
-        point_maps(:,right:right),right_row_ids,right_rows,right_workspace,ok,message)
-      if(.not.ok)then;call cleanup_factored_workspace();return;endif
-      if(any(row_ids/=right_row_ids))then
-        ok=.false.;message='factored representation row ownership changed';call cleanup_factored_workspace();return
-      endif
       product_rows=(0d0,0d0)
       live_bytes=persistent_bytes;local_bad=0
-      if(left_workspace>huge(0_int64)-live_bytes)then
-        local_bad=1
-      else
-        live_bytes=live_bytes+left_workspace
-      endif
-      if(local_bad==0)then
-        if(right_workspace>huge(0_int64)-live_bytes)then;local_bad=1;else;live_bytes=live_bytes+right_workspace;endif
-      endif
       if(local_bad==0)then
         if(maximum_remote_bytes>huge(0_int64)-live_bytes)then
           local_bad=1
@@ -885,14 +882,13 @@ contains
         if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
           ok=.false.;message='cocycle product tile allocation failed';call cleanup_factored_workspace();return
         endif
-        if(rank==owner)remote_rows=right_rows(:,:,1)
+        if(rank==owner)remote_rows=point_rows(:,:,right)
         call MPI_Bcast(remote_rows,count*nstate,MPI_DOUBLE_COMPLEX,owner,comm,ierr)
         if(ierr/=MPI_SUCCESS)then;call cleanup_factored_workspace();message='cocycle product tile broadcast failed';return;endif
         product_rows(1:size(row_ids),:)=product_rows(1:size(row_ids),:)+&
-          matmul(left_rows(:,first:first+count-1,1),remote_rows)
+          matmul(point_rows(:,first:first+count-1,left),remote_rows)
         deallocate(remote_rows)
       enddo
-      deallocate(right_row_ids,right_rows)
       call assemble_dg_distributed_basis_symmetry_overlap_rows(comm,local_basis,weights,&
         expected_map,expected_row_ids,expected_rows,expected_workspace,ok,message)
       if(.not.ok)then;call cleanup_factored_workspace();return;endif
@@ -901,11 +897,6 @@ contains
       endif
       local_closure=max(local_closure,maxval(abs(product_rows(1:size(row_ids),:)-expected_rows(:,:,1))))
       live_bytes=persistent_bytes;local_bad=0
-      if(left_workspace>huge(0_int64)-live_bytes)then
-        local_bad=1
-      else
-        live_bytes=live_bytes+left_workspace
-      endif
       if(local_bad==0.and.expected_workspace>huge(0_int64)-live_bytes)then
         local_bad=1
       endif
@@ -914,7 +905,7 @@ contains
         ok=.false.;message='factored expected-action workspace receipt overflows';call cleanup_factored_workspace();return
       endif
       workspace_peak_bytes=max(workspace_peak_bytes,live_bytes+expected_workspace)
-      deallocate(row_ids,left_rows,expected_row_ids,expected_rows)
+      deallocate(expected_row_ids,expected_rows)
     enddo;enddo
     call MPI_Allreduce(local_closure,global_closure,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     call MPI_Allreduce(workspace_peak_bytes,global_workspace_peak,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
@@ -970,10 +961,8 @@ contains
       if(allocated(product_rows))deallocate(product_rows)
       if(allocated(remote_rows))deallocate(remote_rows)
       if(allocated(row_ids))deallocate(row_ids)
-      if(allocated(right_row_ids))deallocate(right_row_ids)
       if(allocated(expected_row_ids))deallocate(expected_row_ids)
-      if(allocated(left_rows))deallocate(left_rows)
-      if(allocated(right_rows))deallocate(right_rows)
+      if(allocated(point_rows))deallocate(point_rows)
       if(allocated(expected_rows))deallocate(expected_rows)
       if(allocated(point_generators))deallocate(point_generators)
       if(allocated(generator_mask))deallocate(generator_mask)
@@ -5142,10 +5131,11 @@ contains
     character(*),intent(out)::message
 #ifdef USE_MPI
     integer,parameter::orbital_tile_size=32
-    integer::rank,nproc,ierr,nbasis,nlocal,nsym,isym,tile_first,tile_count,owner,&
-      owner_first,owner_count,base,remainder,i,j,local_bad,global_bad
+    integer::rank,nproc,ierr,nbasis,nlocal,nsym,isym,tile_first,tile_count,&
+      owner_first,owner_count,base,remainder,i,local_bad,global_bad,status
     integer(int64)::persistent_bytes,tile_bytes,complex_bytes
-    complex(real64),allocatable::image_tile(:,:),partial_rows(:,:),reduced_rows(:,:)
+    integer,allocatable::receive_counts(:)
+    complex(real64),allocatable::image_tile(:,:),local_tile(:,:),packed_tile(:,:),reduced_tile(:,:)
 
     ok=.false.;message='';workspace_peak_bytes=0_int64
     call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
@@ -5161,7 +5151,14 @@ contains
     base=nbasis/nproc;remainder=mod(nbasis,nproc)
     owner_count=base+merge(1,0,rank<remainder)
     owner_first=rank*base+min(rank,remainder)+1
-    allocate(row_ids(owner_count),symmetry_overlap_rows(owner_count,nbasis,nsym))
+    allocate(row_ids(owner_count),symmetry_overlap_rows(owner_count,nbasis,nsym),receive_counts(nproc),stat=status)
+    call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(row_ids))deallocate(row_ids)
+      if(allocated(symmetry_overlap_rows))deallocate(symmetry_overlap_rows)
+      if(allocated(receive_counts))deallocate(receive_counts)
+      message='row-owned symmetry-overlap persistent allocation failed';return
+    endif
     symmetry_overlap_rows=(0d0,0d0)
     do i=1,owner_count;row_ids(i)=int(owner_first+i-1,int64);enddo
     complex_bytes=int(storage_size((0d0,0d0))/8,int64)
@@ -5170,30 +5167,32 @@ contains
     do isym=1,nsym
       do tile_first=1,nbasis,orbital_tile_size
         tile_count=min(orbital_tile_size,nbasis-tile_first+1)
-        allocate(image_tile(tile_count,nlocal))
+        do i=1,nproc
+          receive_counts(i)=(base+merge(1,0,i-1<remainder))*tile_count
+        enddo
+        allocate(image_tile(tile_count,nlocal),local_tile(nbasis,tile_count),&
+          packed_tile(tile_count,nbasis),reduced_tile(tile_count,owner_count),stat=status)
+        call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+        if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+          message='row-owned symmetry-overlap tile allocation failed';return
+        endif
         call exchange_dg_point_permuted_orbital_rows(comm,&
           local_basis(tile_first:tile_first+tile_count-1,:),&
           symmetry_target_box_ids(:,isym),image_tile,ok,message)
         if(.not.ok)return
-        do owner=0,nproc-1
-          owner_count=base+merge(1,0,owner<remainder)
-          owner_first=owner*base+min(owner,remainder)+1
-          allocate(partial_rows(owner_count,tile_count),reduced_rows(owner_count,tile_count))
-          partial_rows=(0d0,0d0);reduced_rows=(0d0,0d0)
-          do j=1,tile_count;do i=1,owner_count
-            partial_rows(i,j)=sum(weights*conjg(local_basis(owner_first+i-1,:))*image_tile(j,:))
-          enddo;enddo
-          call MPI_Reduce(partial_rows,reduced_rows,owner_count*tile_count,MPI_DOUBLE_COMPLEX,&
-            MPI_SUM,owner,comm,ierr)
-          if(ierr/=MPI_SUCCESS)then
-            ok=.false.;message='row-owned symmetry-overlap reduction failed';return
-          endif
-          if(rank==owner)symmetry_overlap_rows(:,tile_first:tile_first+tile_count-1,isym)=reduced_rows
-          tile_bytes=complex_bytes*int(size(image_tile)+size(partial_rows)+size(reduced_rows),int64)
-          workspace_peak_bytes=max(workspace_peak_bytes,persistent_bytes+tile_bytes)
-          deallocate(partial_rows,reduced_rows)
+        do i=1,nlocal
+          image_tile(:,i)=weights(i)*conjg(image_tile(:,i))
         enddo
-        deallocate(image_tile)
+        local_tile=conjg(matmul(local_basis,transpose(image_tile)))
+        packed_tile=transpose(local_tile)
+        call MPI_Reduce_scatter(packed_tile,reduced_tile,receive_counts,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then
+          ok=.false.;message='row-owned symmetry-overlap reduce-scatter failed';return
+        endif
+        symmetry_overlap_rows(:,tile_first:tile_first+tile_count-1,isym)=transpose(reduced_tile)
+        tile_bytes=complex_bytes*int(size(image_tile)+size(local_tile)+size(packed_tile)+size(reduced_tile),int64)
+        workspace_peak_bytes=max(workspace_peak_bytes,persistent_bytes+tile_bytes)
+        deallocate(image_tile,local_tile,packed_tile,reduced_tile)
       enddo
     enddo
     ok=all(ieee_is_finite(real(symmetry_overlap_rows))).and.&
@@ -5387,7 +5386,7 @@ contains
 
   subroutine validate_dg_streamed_affine_representation(comm,local_basis,weights,&
       symmetry_target_box_ids,identity_operation,subspace_defect,tolerance,identity_defect,&
-      unitarity_defect,closure_defect,workspace_peak_bytes,ok,message)
+      unitarity_defect,closure_defect,workspace_peak_bytes,ok,message,prepared_row_ids,prepared_rows)
     integer,intent(in)::comm,identity_operation
     complex(real64),intent(in)::local_basis(:,:)
     real(real64),intent(in)::weights(:),subspace_defect,tolerance
@@ -5396,9 +5395,11 @@ contains
     integer(int64),intent(out)::workspace_peak_bytes
     logical,intent(out)::ok
     character(*),intent(out)::message
+    integer(int64),allocatable,intent(out),optional::prepared_row_ids(:)
+    complex(real64),allocatable,intent(out),optional::prepared_rows(:,:,:)
 #ifdef USE_MPI
     integer::rank,nproc,ierr,nstate,nlocal,nsym,operation,owner,base,remainder,&
-      owner_first,owner_count,i,j,local_bad,global_bad
+      owner_first,owner_count,i,j,local_bad,global_bad,status
     integer(int64),allocatable::row_ids(:)
     complex(real64),allocatable::rows(:,:,:),remote_rows(:,:),unitarity_tile(:,:)
     real(real64)::local_identity,local_unitarity,expected
@@ -5415,12 +5416,33 @@ contains
     local_identity=0d0;local_unitarity=0d0
     complex_bytes=int(storage_size((0d0,0d0))/8,int64)
     base=nstate/nproc;remainder=mod(nstate,nproc)
+    owner_count=base+merge(1,0,rank<remainder)
+    if(present(prepared_row_ids).neqv.present(prepared_rows))then
+      message='prepared affine representation outputs must be paired';return
+    endif
+    if(present(prepared_rows))then
+      allocate(prepared_row_ids(owner_count),prepared_rows(owner_count,nstate,nsym),stat=status)
+      call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+        if(allocated(prepared_row_ids))deallocate(prepared_row_ids)
+        if(allocated(prepared_rows))deallocate(prepared_rows)
+        message='prepared affine representation allocation failed';return
+      endif
+    endif
     do operation=1,nsym
       call assemble_dg_distributed_basis_symmetry_overlap_rows(comm,local_basis,weights,&
         symmetry_target_box_ids(:,operation:operation),row_ids,rows,operation_peak,ok,message)
       if(.not.ok)return
       persistent_bytes=complex_bytes*int(size(rows),int64)
       workspace_peak_bytes=max(workspace_peak_bytes,operation_peak)
+      if(present(prepared_rows))then
+        if(operation==1)prepared_row_ids=row_ids
+        if(any(prepared_row_ids/=row_ids))then
+          message='prepared affine representation ownership changed';return
+        endif
+        prepared_rows(:,:,operation)=rows(:,:,1)
+        workspace_peak_bytes=max(workspace_peak_bytes,operation_peak+complex_bytes*int(size(prepared_rows),int64))
+      endif
       if(operation==identity_operation)then
         do i=1,size(row_ids);do j=1,nstate
           expected=merge(1d0,0d0,int(row_ids(i))==j)
