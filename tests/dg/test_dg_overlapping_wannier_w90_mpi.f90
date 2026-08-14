@@ -14,6 +14,7 @@ program test_dg_overlapping_wannier_w90_mpi
   use dg_overlapping_wannier_w90,only:project_dg_w90_reference_sector_operators
   use dg_overlapping_wannier_w90,only:inherit_dg_w90_affine_receipts
   use dg_overlapping_wannier_w90,only:build_dg_sector_periodic_position_tuple
+  use dg_overlapping_wannier_w90,only:canonicalize_dg_sector_periodic_position_gauge
   implicit none
   integer::ierr,rank,nproc,b,i,m,n,p,nlocal
   integer::convergence_iterations,log_unit
@@ -70,6 +71,13 @@ program test_dg_overlapping_wannier_w90_mpi
   complex(8)::sector_position_reference(2,2,3),sector_position_local(2,2,3)
   integer(8)::sector_position_fingerprint,sector_position_workspace
   real(8)::sector_position_gram_defect
+  complex(8),allocatable::position_canonical_rows(:,:),position_trial_rows(:,:),position_trial_tuple(:,:,:),&
+    position_rotated_sector(:,:)
+  complex(8)::position_lcfo_operator(2,2),position_trial_operator(2,2),position_input_rotation(2,2),&
+    position_canonical_rotation(2,2),position_trial_rotation(2,2)
+  real(8)::position_canonical_defect,position_trial_defect
+  integer(8)::position_canonical_fingerprint,position_trial_canonical_fingerprint,&
+    position_canonical_workspace,position_trial_position_fingerprint
   integer(8)::sector_trial_fingerprint,sector_trial_workspace
   integer(8),allocatable::sector_reference_keys(:),sector_permuted_keys(:)
 #ifdef USE_WANNIER90
@@ -186,6 +194,29 @@ program test_dg_overlapping_wannier_w90_mpi
     sector_position_gram_defect<1d-12.and.sector_position_fingerprint/=0_8.and.&
     sector_position_workspace>0_8,'distributed sector periodic-position tuple matches direct sum')
   if(rank==0)write(*,'(a,1x,i0)')'W90_POSITION_TUPLE_FINGERPRINT',sector_position_fingerprint
+  position_lcfo_operator=(0d0,0d0);position_lcfo_operator(1,1)=0.2d0;position_lcfo_operator(2,2)=0.7d0
+  position_input_rotation=reshape([cmplx(1d0,0d0,8),cmplx(0d0,1d0,8),&
+    cmplx(0d0,1d0,8),cmplx(1d0,0d0,8)],[2,2])/sqrt(2d0)
+  call canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,&
+    sector_position_tuple,position_lcfo_operator,1d-12,sector_position_fingerprint,&
+    position_canonical_rows,position_canonical_rotation,position_canonical_defect,&
+    position_canonical_fingerprint,position_canonical_workspace,ok,message)
+  call require(ok.and.position_canonical_defect<1d-10.and.position_canonical_workspace>0_8,&
+    'periodic-position tuple defines a canonical internal frame')
+  allocate(position_rotated_sector(nlocal,2))
+  position_rotated_sector=matmul(sector_frame,position_input_rotation)
+  call build_dg_sector_periodic_position_tuple(MPI_COMM_WORLD,sector_ids,8,position_rotated_sector,&
+    sector_position_phases,1d-12,7781_8,position_trial_tuple,sector_position_gram_defect,&
+    position_trial_position_fingerprint,sector_position_workspace,ok,message)
+  position_trial_operator=matmul(conjg(transpose(position_input_rotation)),&
+    matmul(position_lcfo_operator,position_input_rotation))
+  call canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,position_rotated_sector,&
+    position_trial_tuple,position_trial_operator,1d-12,position_trial_position_fingerprint,&
+    position_trial_rows,position_trial_rotation,position_trial_defect,&
+    position_trial_canonical_fingerprint,position_canonical_workspace,ok,message)
+  call require(ok.and.position_trial_canonical_fingerprint==position_canonical_fingerprint.and.&
+    maxval(abs(position_trial_rows-position_canonical_rows))<1d-10,&
+    'canonical periodic-position gauge is invariant under input sector rotation')
   sector_reference(:,1)=(sector_frame(:,1)+cmplx(0.3d0,0.4d0,8)*sector_frame(:,2))/sqrt(1.25d0)
   sector_reference(:,2)=(-cmplx(0.3d0,-0.4d0,8)*sector_frame(:,1)+sector_frame(:,2))/sqrt(1.25d0)
   sector_gamma=(0d0,0d0)
