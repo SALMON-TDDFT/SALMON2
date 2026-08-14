@@ -7,6 +7,7 @@ program test_dg_overlapping_wannier_construction_mpi
     release_dg_ow_workspace,release_dg_ow_distributed_layout
   use dg_overlapping_wannier_construction,only:s_dg_overlapping_wannier_construction,&
     s_dg_translation_orbit_accumulator,&
+    s_dg_prepared_translation_action,&
     construct_dg_overlapping_wannier_basis,release_dg_overlapping_wannier_construction,&
     verify_dg_overlapping_wannier_periodic_closure,assemble_dg_distributed_candidate_symmetry,&
     assemble_dg_distributed_basis_symmetry_overlap,&
@@ -34,6 +35,9 @@ program test_dg_overlapping_wannier_construction_mpi
     apply_dg_row_owned_orbital_transform_streamed,&
     materialize_dg_row_owned_sector_on_spatial_grid,&
     build_dg_translation_character_intertwining_phase,&
+    prepare_dg_translation_character_action,&
+    build_dg_translation_character_intertwining_phase_prepared,&
+    release_dg_prepared_translation_action,&
     validate_dg_factored_point_cogroup_gauge,&
     align_dg_fragment_wannier_gauge,replicate_dg_fragment_wannier_representative,&
     verify_dg_fragment_wannier_streaming_closure,verify_dg_fragment_center_orbit,&
@@ -47,6 +51,7 @@ program test_dg_overlapping_wannier_construction_mpi
     build_dg_smooth_partition_of_unity,compose_dg_buffered_orbital_tile_to_physical_grid
   implicit none
   type(s_dg_translation_orbit_accumulator)::inverse_accumulator
+  type(s_dg_prepared_translation_action)::prepared_translation_action
   integer::comm,rank,nproc,ierr,i,j,b,p,point,nlocal,nclosure,index,ncore,fragment_id
   integer(8),allocatable::ids(:),box_ids(:),symmetry_map(:,:),broken_symmetry_map(:,:)
   integer,allocatable::fragment(:)
@@ -175,10 +180,13 @@ program test_dg_overlapping_wannier_construction_mpi
     inverse_rotated_gradients(:,:,:,:),inverse_translated_values(:,:,:),inverse_translated_gradients(:,:,:,:),&
     streamed_transform_rows(:,:),streamed_input_values(:,:),streamed_input_gradients(:,:,:),&
     streamed_output_values(:,:),streamed_output_gradients(:,:,:),intertwining_phase(:),inverse_saved_sector(:,:)
+  complex(8),allocatable::prepared_intertwining_phase(:)
   real(8),allocatable::inverse_density(:),inverse_rotated_density(:)
   complex(8)::inverse_internal_gauge(2,2)
   real(8)::inverse_density_defect,inverse_orthogonality_defect,inverse_gamma_defect
   integer(8)::inverse_fingerprint,inverse_workspace,intertwining_payload_fingerprint
+  integer(8)::prepared_intertwining_fingerprint,prepared_intertwining_payload_fingerprint,&
+    prepared_intertwining_workspace
   integer(8)::inverse_reference_fingerprint
   integer(8),allocatable::inverse_row_ids(:)
   integer(8)::intertwining_maps(12,4),intertwining_generator_maps(12,2)
@@ -1255,6 +1263,19 @@ program test_dg_overlapping_wannier_construction_mpi
     intertwining_phase,inverse_fingerprint,intertwining_payload_fingerprint,inverse_workspace,ok,message)
   call require(ok.and.maxval(abs(abs(intertwining_phase)-1d0))<1d-12,&
     'finite translation action builds a unit-modulus character intertwining phase')
+  call prepare_dg_translation_character_action(comm,box_ids,12,intertwining_generator_maps(int(box_ids),:),&
+    [2,2],character_words,character_product,1,character_fingerprint,1d-12,prepared_translation_action,ok,message)
+  call require(ok.and.prepared_translation_action%workspace_peak_bytes>0_8.and.&
+    prepared_translation_action%construction_collective_count>0,&
+    'finite translation action is prepared once with memory and collective receipts')
+  call build_dg_translation_character_intertwining_phase_prepared(comm,prepared_translation_action,&
+    character_table(1,:),character_table(2,:),1d-12,prepared_intertwining_phase,&
+    prepared_intertwining_fingerprint,prepared_intertwining_payload_fingerprint,prepared_intertwining_workspace,ok,message)
+  call require(ok.and.maxval(abs(prepared_intertwining_phase-intertwining_phase))<1d-12.and.&
+    prepared_intertwining_fingerprint==inverse_fingerprint.and.&
+    prepared_intertwining_payload_fingerprint==intertwining_payload_fingerprint,&
+    'prepared translation action reproduces the one-shot phase and provenance exactly')
+  call release_dg_prepared_translation_action(prepared_translation_action)
   intertwining_generator_maps(1,1)=intertwining_generator_maps(1,2)
   call build_dg_translation_character_intertwining_phase(comm,box_ids,12,intertwining_generator_maps(int(box_ids),:),&
     [2,2],character_words,character_product,1,character_table(1,:),character_table(2,:),character_fingerprint,1d-12,&

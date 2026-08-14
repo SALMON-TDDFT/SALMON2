@@ -73,7 +73,8 @@ for mlwf_call in (
     "project_dg_w90_reference_sector_operators",
     "anchor_dg_w90_reference_character_sector",
     "materialize_dg_row_owned_sector_on_spatial_grid",
-    "build_dg_translation_character_intertwining_phase",
+    "prepare_dg_translation_character_action",
+    "build_dg_translation_character_intertwining_phase_prepared",
     "align_dg_w90_character_sectors_by_periodic_phase",
     "sew_dg_w90_periodic_phase_conjugate_sector",
     "accumulate_dg_translation_character_orbit_sector_values",
@@ -89,7 +90,8 @@ production_order = [
     ow_ground_state_body.find("call split_dg_translation_character_sector_eigenexa", w90_position),
     ow_ground_state_body.find("call project_dg_w90_reference_sector_operators"),
     ow_ground_state_body.find("call anchor_dg_w90_reference_character_sector"),
-    ow_ground_state_body.find("call build_dg_translation_character_intertwining_phase"),
+    ow_ground_state_body.find("call prepare_dg_translation_character_action"),
+    ow_ground_state_body.find("call build_dg_translation_character_intertwining_phase_prepared"),
     ow_ground_state_body.find("call align_dg_w90_character_sectors_by_periodic_phase"),
     ow_ground_state_body.find("call sew_dg_w90_periodic_phase_conjugate_sector"),
     ow_ground_state_body.find("call accumulate_dg_translation_character_orbit_sector_values"),
@@ -99,6 +101,17 @@ production_order = [
 assert all(position >= 0 for position in production_order) and production_order == sorted(production_order), (
     "production order must be affine proof -> DMN -> W90 -> sectors -> alignment -> inverse transform -> "
     "redistribution -> V3"
+)
+character_loop_position = ow_ground_state_body.find("do translation_character=1")
+prepare_position = ow_ground_state_body.find("call prepare_dg_translation_character_action")
+prepared_apply_position = ow_ground_state_body.find(
+    "call build_dg_translation_character_intertwining_phase_prepared"
+)
+assert 0 <= prepare_position < character_loop_position < prepared_apply_position, (
+    "translation action must be prepared once before the character loop and reused inside it"
+)
+assert "call build_dg_translation_character_intertwining_phase(" not in ow_ground_state_body, (
+    "production must not rebuild the finite translation action for every character"
 )
 assert "call align_dg_w90_cross_character_sector_gauge" not in ow_ground_state_body, (
     "production must not use spread-weighted cross-character links, which vanish for exact translation orbits"

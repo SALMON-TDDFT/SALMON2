@@ -33,6 +33,14 @@ module dg_overlapping_wannier_construction
     integer(int64)::catalog_fingerprint=0_int64
     integer(int64)::table_fingerprint=0_int64
   end type
+  type,public::s_dg_prepared_translation_action
+    integer::global_row_count=0,ntranslation=0,ngenerator=0,identity_operation=0
+    integer::construction_collective_count=0
+    integer(int64)::catalog_fingerprint=0_int64,workspace_peak_bytes=0_int64
+    integer(int64),allocatable::row_ids(:)
+    integer,allocatable::generator_orders(:),element_words(:,:),product_table(:,:),&
+      generator_maps(:,:),element_maps(:,:)
+  end type
   public::construct_dg_overlapping_wannier_basis,release_dg_overlapping_wannier_construction
   public::verify_dg_overlapping_wannier_periodic_closure
   public::assemble_dg_distributed_candidate_symmetry
@@ -78,6 +86,9 @@ module dg_overlapping_wannier_construction
   public::apply_dg_row_owned_orbital_transform_streamed
   public::validate_dg_factored_point_cogroup_gauge
   public::build_dg_translation_character_intertwining_phase
+  public::prepare_dg_translation_character_action
+  public::build_dg_translation_character_intertwining_phase_prepared
+  public::release_dg_prepared_translation_action
   public::materialize_dg_row_owned_sector_on_spatial_grid
   public::validate_dg_translation_sector_cluster
   public::build_dg_balanced_orbital_ownership
@@ -428,6 +439,226 @@ contains
     end subroutine
 #endif
   end subroutine build_dg_translation_character_intertwining_phase
+
+  subroutine release_dg_prepared_translation_action(action)
+    type(s_dg_prepared_translation_action),intent(inout)::action
+    if(allocated(action%row_ids))deallocate(action%row_ids)
+    if(allocated(action%generator_orders))deallocate(action%generator_orders)
+    if(allocated(action%element_words))deallocate(action%element_words)
+    if(allocated(action%product_table))deallocate(action%product_table)
+    if(allocated(action%generator_maps))deallocate(action%generator_maps)
+    if(allocated(action%element_maps))deallocate(action%element_maps)
+    action%global_row_count=0;action%ntranslation=0;action%ngenerator=0;action%identity_operation=0
+    action%construction_collective_count=0;action%catalog_fingerprint=0_int64
+    action%workspace_peak_bytes=0_int64
+  end subroutine release_dg_prepared_translation_action
+
+  subroutine prepare_dg_translation_character_action(comm,row_ids,global_row_count,generator_maps,&
+      generator_orders,element_words,product_table,identity_operation,catalog_fingerprint,tolerance,action,ok,message)
+    integer,intent(in)::comm,global_row_count,generator_orders(:),element_words(:,:),product_table(:,:),identity_operation
+    integer(int64),intent(in)::row_ids(:),generator_maps(:,:)
+    integer(int64),intent(in)::catalog_fingerprint
+    real(real64),intent(in)::tolerance
+    type(s_dg_prepared_translation_action),intent(inout)::action
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nt,ng,nlocal,status,ierr,local_bad,global_bad,g,x,p,power
+    integer(int64)::integer_elements,term
+    complex(real64),allocatable::unit_character(:),discarded_phase(:)
+    integer(int64)::discarded_fingerprint,discarded_payload,discarded_workspace
+    call release_dg_prepared_translation_action(action)
+    nt=size(element_words,1);ng=size(generator_maps,2);nlocal=size(row_ids)
+    ok=.false.;message=''
+    allocate(unit_character(nt),stat=status)
+    call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(unit_character))deallocate(unit_character)
+      message='prepared translation validation allocation failed';return
+    endif
+    unit_character=(1d0,0d0)
+    call build_dg_translation_character_intertwining_phase(comm,row_ids,global_row_count,generator_maps,&
+      generator_orders,element_words,product_table,identity_operation,unit_character,unit_character,&
+      catalog_fingerprint,tolerance,discarded_phase,discarded_fingerprint,discarded_payload,discarded_workspace,ok,message)
+    if(allocated(unit_character))deallocate(unit_character)
+    if(allocated(discarded_phase))deallocate(discarded_phase)
+    if(.not.ok)return
+    local_bad=0;integer_elements=0_int64
+    if(int(global_row_count,int64)>huge(0_int64)/int(nt+ng,int64))local_bad=1
+    if(local_bad==0)integer_elements=int(global_row_count,int64)*int(nt+ng,int64)
+    term=int(nlocal+ng+nt*ng+nt*nt,int64)
+    if(integer_elements>huge(0_int64)-term)local_bad=1
+    if(local_bad==0.and.integer_elements+term>huge(0_int64)/4_int64)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='prepared translation action workspace overflows';ok=.false.;return;endif
+    allocate(action%row_ids(nlocal),action%generator_orders(ng),action%element_words(nt,ng),&
+      action%product_table(nt,nt),action%generator_maps(global_row_count,ng),&
+      action%element_maps(global_row_count,nt),stat=status)
+    call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      call release_dg_prepared_translation_action(action)
+      message='prepared translation action allocation failed';ok=.false.;return
+    endif
+    action%row_ids=row_ids;action%generator_orders=generator_orders
+    action%element_words=element_words;action%product_table=product_table
+    action%global_row_count=global_row_count;action%ntranslation=nt;action%ngenerator=ng
+    action%identity_operation=identity_operation;action%catalog_fingerprint=catalog_fingerprint
+    do g=1,ng
+      action%generator_maps(:,g)=0
+      do x=1,nlocal
+        action%generator_maps(int(row_ids(x)),g)=int(generator_maps(x,g))
+      enddo
+      call MPI_Allreduce(MPI_IN_PLACE,action%generator_maps(:,g),global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then
+        call release_dg_prepared_translation_action(action)
+        message='prepared translation generator gather failed';ok=.false.;return
+      endif
+    enddo
+    do g=1,nt
+      do x=1,global_row_count;action%element_maps(x,g)=x;enddo
+      do p=1,ng
+        do power=1,element_words(g,p)
+          action%element_maps(:,g)=action%generator_maps(action%element_maps(:,g),p)
+        enddo
+      enddo
+    enddo
+    action%workspace_peak_bytes=4_int64*(integer_elements+term)
+    action%construction_collective_count=ng+1
+    ok=.true.
+#else
+    call release_dg_prepared_translation_action(action)
+    ok=.false.;message='prepared translation action requires MPI'
+#endif
+  end subroutine prepare_dg_translation_character_action
+
+  subroutine build_dg_translation_character_intertwining_phase_prepared(comm,action,reference_character,&
+      target_character,tolerance,local_phase,fingerprint,phase_payload_fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm
+    type(s_dg_prepared_translation_action),intent(in)::action
+    complex(real64),intent(in)::reference_character(:),target_character(:)
+    real(real64),intent(in)::tolerance
+    complex(real64),allocatable,intent(out)::local_phase(:)
+    integer(int64),intent(out)::fingerprint,phase_payload_fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nt,ng,nlocal,status,ierr,local_bad,global_bad,minint,maxint,g,h,x,target
+    integer,allocatable::orbit_representative(:)
+    complex(real64),allocatable::global_phase(:),ratio(:)
+    logical,allocatable::assigned(:)
+    integer(int64)::bits,metadata_hash,minhash,maxhash,elements
+    real(real64)::mintol,maxtol
+    nt=action%ntranslation;ng=action%ngenerator
+    if(allocated(action%row_ids))then;nlocal=size(action%row_ids);else;nlocal=0;endif
+    ok=.false.;message='';fingerprint=0_int64;phase_payload_fingerprint=0_int64;workspace_peak_bytes=0_int64
+    local_bad=merge(0,1,action%global_row_count>=1.and.nt>=1.and.ng>=1.and.nlocal>=1.and.&
+      action%catalog_fingerprint/=0_int64.and.size(reference_character)==nt.and.size(target_character)==nt.and.&
+      allocated(action%generator_orders).and.allocated(action%element_words).and.allocated(action%product_table).and.&
+      allocated(action%generator_maps).and.allocated(action%element_maps).and.&
+      all(shape(action%element_maps)==[action%global_row_count,nt]).and.&
+      tolerance>=1d-15.and.tolerance<=1d-2.and.ieee_is_finite(tolerance).and.&
+      all(ieee_is_finite(real(reference_character))).and.all(ieee_is_finite(aimag(reference_character))).and.&
+      all(ieee_is_finite(real(target_character))).and.all(ieee_is_finite(aimag(target_character))).and.&
+      maxval(abs(abs(reference_character)-1d0))<=10d0*tolerance.and.&
+      maxval(abs(abs(target_character)-1d0))<=10d0*tolerance)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid prepared translation phase contract';return;endif
+    call MPI_Allreduce(nt,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(nt,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='prepared translation order disagrees';return;endif
+    call MPI_Allreduce(tolerance,mintol,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tolerance,maxtol,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.mintol/=maxtol)then;message='prepared translation tolerance disagrees';return;endif
+    metadata_hash=action%catalog_fingerprint
+    metadata_hash=ieor(ishftc(metadata_hash,7),int(action%identity_operation,int64))
+    do g=1,ng;metadata_hash=ieor(ishftc(metadata_hash,7),int(action%generator_orders(g),int64));enddo
+    do g=1,nt
+      call agree_complex(reference_character(g));if(global_bad/=0)return
+      call agree_complex(target_character(g));if(global_bad/=0)return
+      bits=transfer(real(reference_character(g),real64),bits);metadata_hash=ieor(ishftc(metadata_hash,7),bits)
+      bits=transfer(aimag(reference_character(g)),bits);metadata_hash=ieor(ishftc(metadata_hash,7),bits)
+      bits=transfer(real(target_character(g),real64),bits);metadata_hash=ieor(ishftc(metadata_hash,7),bits)
+      bits=transfer(aimag(target_character(g)),bits);metadata_hash=ieor(ishftc(metadata_hash,7),bits)
+      do h=1,ng;metadata_hash=ieor(ishftc(metadata_hash,7),int(action%element_words(g,h),int64));enddo
+      do h=1,nt;metadata_hash=ieor(ishftc(metadata_hash,7),int(action%product_table(h,g),int64));enddo
+    enddo
+    do g=1,ng;do x=1,action%global_row_count
+      metadata_hash=ieor(ishftc(metadata_hash,7),int(action%generator_maps(x,g),int64))
+    enddo;enddo
+    call MPI_Allreduce(metadata_hash,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(metadata_hash,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)then;message='prepared translation metadata disagree';return;endif
+    local_bad=merge(1,0,int(action%global_row_count,int64)>huge(0_int64)/29_int64.or.&
+      int(nlocal+nt,int64)>huge(0_int64)/16_int64)
+    if(local_bad==0)then
+      elements=29_int64*int(action%global_row_count,int64)
+      if(elements>huge(0_int64)-16_int64*int(nlocal+nt,int64))local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='prepared translation phase workspace overflows';return;endif
+    workspace_peak_bytes=elements+16_int64*int(nlocal+nt,int64)
+    allocate(global_phase(action%global_row_count),ratio(nt),assigned(action%global_row_count),&
+      orbit_representative(action%global_row_count),local_phase(nlocal),stat=status)
+    call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(local_phase))deallocate(local_phase)
+      message='prepared translation phase allocation failed';return
+    endif
+    ratio=target_character*conjg(reference_character);global_phase=(0d0,0d0);assigned=.false.
+    do x=1,action%global_row_count;orbit_representative(x)=x;enddo
+    do g=1,nt;orbit_representative=min(orbit_representative,action%element_maps(:,g));enddo
+    local_bad=0
+    do x=1,action%global_row_count
+      if(orbit_representative(x)/=x)cycle
+      do g=1,nt
+        target=action%element_maps(x,g)
+        if(assigned(target))then
+          if(abs(global_phase(target)-ratio(g))>10d0*tolerance)local_bad=1
+        else
+          global_phase(target)=ratio(g);assigned(target)=.true.
+        endif
+      enddo
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='prepared translation phase orbit is inconsistent';return;endif
+    local_bad=0
+    do x=1,action%global_row_count;do g=1,nt
+      target=action%element_maps(x,g)
+      if(abs(global_phase(target)-ratio(g)*global_phase(x))>10d0*tolerance)local_bad=1
+    enddo;enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='prepared translation phase fails covariance';return;endif
+    do x=1,nlocal;local_phase(x)=global_phase(int(action%row_ids(x)));enddo
+    fingerprint=metadata_hash;phase_payload_fingerprint=int(z'243F6A8885A308D3',int64)
+    do x=1,action%global_row_count
+      bits=transfer(real(global_phase(x),real64),bits);fingerprint=ieor(ishftc(fingerprint,11),bits)
+      phase_payload_fingerprint=ieor(ishftc(phase_payload_fingerprint,11),bits)
+      bits=transfer(aimag(global_phase(x)),bits);fingerprint=ieor(ishftc(fingerprint,11),bits)
+      phase_payload_fingerprint=ieor(ishftc(phase_payload_fingerprint,11),bits)
+    enddo
+    if(fingerprint==0_int64)fingerprint=1_int64
+    if(phase_payload_fingerprint==0_int64)phase_payload_fingerprint=1_int64
+    ok=.true.
+#else
+    ok=.false.;message='prepared translation phase requires MPI';fingerprint=0_int64
+    phase_payload_fingerprint=0_int64;workspace_peak_bytes=0_int64
+#endif
+  contains
+#ifdef USE_MPI
+    subroutine agree_complex(value)
+      complex(real64),intent(in)::value
+      bits=transfer(real(value,real64),bits)
+      call MPI_Allreduce(bits,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)then;global_bad=1;return;endif
+      call MPI_Allreduce(bits,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)then;global_bad=1;message='prepared character metadata disagree';return;endif
+      bits=transfer(aimag(value),bits)
+      call MPI_Allreduce(bits,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)then;global_bad=1;return;endif
+      call MPI_Allreduce(bits,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+      global_bad=merge(1,0,ierr/=MPI_SUCCESS.or.minhash/=maxhash)
+      if(global_bad/=0)message='prepared character metadata disagree'
+    end subroutine agree_complex
+#endif
+  end subroutine build_dg_translation_character_intertwining_phase_prepared
 
   subroutine validate_dg_factored_point_cogroup_gauge(comm,local_basis,weights,point_maps,translation_maps,&
       point_product,point_identity,translation_cocycle,ntranslation,subspace_defect,tolerance,identity_defect,&

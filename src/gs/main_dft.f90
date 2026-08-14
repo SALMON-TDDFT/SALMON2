@@ -61,7 +61,8 @@ use dg_overlapping_wannier_construction, only: find_dg_group_identity
 use dg_overlapping_wannier_construction, only: select_dg_group_generators
 use dg_overlapping_wannier_construction, only: build_dg_finite_abelian_character_table
 use dg_overlapping_wannier_construction, only: s_dg_translation_orbit_accumulator,&
-  build_dg_translation_character_intertwining_phase,&
+  s_dg_prepared_translation_action,prepare_dg_translation_character_action,&
+  build_dg_translation_character_intertwining_phase_prepared,release_dg_prepared_translation_action,&
   materialize_dg_row_owned_sector_on_spatial_grid,&
   accumulate_dg_translation_character_orbit_sector_values,&
   apply_dg_row_owned_orbital_transform_streamed,&
@@ -610,6 +611,7 @@ contains
     type(t_dg_projection_channel),allocatable::manifest_channels(:)
     type(t_dg_projection_channel),allocatable::projector_tile_channels(:)
     type(s_dg_overlapping_wannier_construction)::symmetry_basis
+    type(s_dg_prepared_translation_action)::translation_prepared_action
     integer(8),allocatable::physical_ids(:),local_symmetry_map(:,:),ow_pencil_generator_maps(:,:),&
       exact_fragment_symmetry_fingerprints(:),global_symmetry_map(:,:)
     integer(8),allocatable::lcfo_core_ids(:),initial_core_ids(:)
@@ -1507,6 +1509,11 @@ contains
       io=global_translation_subgroup(translation_canonical_operations(translation_character_generators(i)))
       translation_generator_maps(:,i)=global_symmetry_map(:,io)
     enddo
+    call prepare_dg_translation_character_action(dc%icomm_tot,translation_spatial_ids,&
+      translation_global_core_count,translation_generator_maps,translation_generator_orders,&
+      translation_element_words,translation_canonical_product,1,translation_character_fingerprint,&
+      dg_ow_symmetry_tolerance,translation_prepared_action,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'translation action preparation failed';endif
     translation_gamma_fingerprint=int(z'6A09E667F3BCC909',8)
     translation_gamma_fingerprint=ieor(ishftc(translation_gamma_fingerprint,9),translation_global_core_count8)
     if(translation_gamma_fingerprint==0_8)translation_gamma_fingerprint=1_8
@@ -1533,11 +1540,9 @@ contains
           translation_materialize_fingerprint,translation_materialize_workspace,ok,message)
         deallocate(translation_sector_rows)
         if(.not.ok)then;write(0,'(a)')trim(message);error stop 'target character spatial materialization failed';endif
-        call build_dg_translation_character_intertwining_phase(dc%icomm_tot,translation_spatial_ids,&
-          translation_global_core_count,translation_generator_maps,translation_generator_orders,&
-          translation_element_words,translation_canonical_product,1,translation_characters(1,:),&
-          translation_characters(translation_character,:),translation_character_fingerprint,&
-          dg_ow_symmetry_tolerance,translation_phase,translation_phase_fingerprint,&
+        call build_dg_translation_character_intertwining_phase_prepared(dc%icomm_tot,translation_prepared_action,&
+          translation_characters(1,:),&
+          translation_characters(translation_character,:),dg_ow_symmetry_tolerance,translation_phase,translation_phase_fingerprint,&
           translation_phase_payload_fingerprint,translation_phase_workspace,ok,message)
         if(.not.ok)then;write(0,'(a)')trim(message);error stop 'translation character intertwining phase failed';endif
         call align_dg_w90_character_sectors_by_periodic_phase(dc%icomm_tot,translation_spatial_ids,&
@@ -1603,6 +1608,7 @@ contains
         deallocate(translation_target_spatial)
       endif
     enddo
+    call release_dg_prepared_translation_action(translation_prepared_action)
     call finalize_eigenexa(info);info%icomm_o=ow_saved_eigenexa_comm;call init_eigenexa_mod(info,system%no)
     if(translation_processed_count/=size(translation_characters,1))error stop 'translation character schedule incomplete'
     deallocate(ow_core_values);call move_alloc(translation_orbit_rows,ow_core_values)
