@@ -26,11 +26,12 @@ contains
 
   subroutine build_dg_sector_periodic_position_tuple(comm,row_ids,global_row_count,sector_rows,&
       periodic_phases,tolerance,provenance_fingerprint,position_tuple,gram_defect,fingerprint,&
-      workspace_peak_bytes,ok,message)
+      workspace_peak_bytes,ok,message,integration_weights)
     integer,intent(in)::comm,global_row_count
     integer(int64),intent(in)::row_ids(:),provenance_fingerprint
     complex(real64),intent(in)::sector_rows(:,:),periodic_phases(:,:)
     real(real64),intent(in)::tolerance
+    real(real64),intent(in),optional::integration_weights(:)
     complex(real64),allocatable,intent(out)::position_tuple(:,:,:)
     real(real64),intent(out)::gram_defect
     integer(int64),intent(out)::fingerprint,workspace_peak_bytes
@@ -40,18 +41,24 @@ contains
     integer::nlocal,m,i,j,axis,rank,ierr,bad,gbad,status,minint,maxint
     integer,allocatable::owner(:),position(:),count(:)
     complex(real64),allocatable::local_tuple(:,:,:),gram(:,:),phased(:,:)
-    real(real64)::mintol,maxtol,local_scale,global_scale,safe_scale,quantum,value
+    real(real64)::mintol,maxtol,local_scale,global_scale,safe_scale,quantum,value,local_weight,global_weight
     integer(int64)::minhash,maxhash,elements,term,bytes,bits,quantized
     logical::receipt_valid
     nlocal=size(row_ids);m=size(sector_rows,2)
     ok=.false.;message='';gram_defect=huge(1d0);fingerprint=0_int64;workspace_peak_bytes=0_int64
-    bad=merge(0,1,global_row_count>=1.and.m>=1.and.size(sector_rows,1)==nlocal.and.&
+    bad=merge(0,1,global_row_count>=1.and.nlocal>=1.and.m>=1.and.size(sector_rows,1)==nlocal.and.&
       all(shape(periodic_phases)==[nlocal,3]).and.provenance_fingerprint/=0_int64.and.&
       tolerance>=1d-15.and.tolerance<=1d-2.and.ieee_is_finite(tolerance).and.&
       all(row_ids>=1_int64).and.all(row_ids<=int(global_row_count,int64)).and.&
       all(ieee_is_finite(real(sector_rows))).and.all(ieee_is_finite(aimag(sector_rows))).and.&
       all(ieee_is_finite(real(periodic_phases))).and.all(ieee_is_finite(aimag(periodic_phases))).and.&
       maxval(abs(abs(periodic_phases)-1d0))<=10d0*tolerance)
+    if(present(integration_weights))then
+      if(size(integration_weights)/=nlocal)bad=1
+      if(size(integration_weights)==nlocal)then
+        if(.not.all(ieee_is_finite(integration_weights)).or.any(integration_weights<=0d0))bad=1
+      endif
+    endif
     call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='invalid sector periodic-position tuple contract';return;endif
     do i=1,2
@@ -66,9 +73,12 @@ contains
     call MPI_Allreduce(provenance_fingerprint,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
     call MPI_Allreduce(provenance_fingerprint,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)then;message='periodic-position provenance disagrees';return;endif
-    local_scale=0d0;if(nlocal>0)local_scale=maxval(abs(sector_rows))
+    local_scale=maxval(abs(sector_rows));local_weight=1d0
+    if(present(integration_weights))local_weight=maxval(integration_weights)
     call MPI_Allreduce(local_scale,global_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
-    safe_scale=sqrt(huge(1d0)/real(global_row_count,real64))/4d0
+    if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(local_weight,global_weight,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    safe_scale=sqrt((huge(1d0)/real(global_row_count,real64))/global_weight)/4d0
     bad=merge(0,1,ierr==MPI_SUCCESS.and.global_scale<=safe_scale)
     elements=0_int64;bytes=0_int64;receipt_valid=.true.
     call checked_product([7_int64,int(m,int64),int(m,int64)],term,receipt_valid);call checked_add(elements,term,receipt_valid)
@@ -97,7 +107,11 @@ contains
     bad=merge(0,1,ierr==MPI_SUCCESS.and.all(count==1))
     call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.gbad/=0)then;call cleanup();message='sector periodic-position row ownership is incomplete';return;endif
-    gram=matmul(conjg(transpose(sector_rows)),sector_rows)
+    if(present(integration_weights))then
+      gram=matmul(conjg(transpose(sector_rows)),spread(integration_weights,2,m)*sector_rows)
+    else
+      gram=matmul(conjg(transpose(sector_rows)),sector_rows)
+    endif
     call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
     gram_defect=0d0
     do j=1,m;do i=1,m
@@ -106,7 +120,10 @@ contains
     call MPI_Allreduce(MPI_IN_PLACE,gram_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.gram_defect>10d0*tolerance)then;call cleanup();message='sector periodic-position frame is not orthonormal';return;endif
     do axis=1,3
-      do j=1,m;phased(:,j)=periodic_phases(:,axis)*sector_rows(:,j);enddo
+      do j=1,m
+        phased(:,j)=periodic_phases(:,axis)*sector_rows(:,j)
+        if(present(integration_weights))phased(:,j)=integration_weights*phased(:,j)
+      enddo
       local_tuple(:,:,axis)=matmul(conjg(transpose(sector_rows)),phased)
     enddo
     call MPI_Allreduce(local_tuple,position_tuple,3*m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
