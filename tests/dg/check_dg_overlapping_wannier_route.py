@@ -61,6 +61,15 @@ assert 0 <= tile_allocation_position < tile_loop_position, (
 )
 localization_source = source("src/gs/dc/dg_overlapping_wannier_localization.f90")
 w90_source = source("src/gs/dc/dg_overlapping_wannier_w90.f90")
+position_canonicalizer = re.search(
+    r"subroutine\s+canonicalize_dg_sector_periodic_position_gauge(?P<body>.*?)end\s+subroutine",
+    w90_source,
+    re.I | re.S,
+)
+assert position_canonicalizer
+assert "projector_diagonal_only=.true." in position_canonicalizer.group("body").lower(), (
+    "spatial periodic-position canonicalization must not stream an O(N^2) full projector fingerprint"
+)
 assert re.match(r"\s*#include\s+[\"<]config\.h[\">]", w90_source), (
     "Wannier90 adapter must import CMake feature macros before conditional compilation"
 )
@@ -139,6 +148,14 @@ assert "call build_dg_translation_character_intertwining_phase(" not in ow_groun
 assert "call align_dg_w90_cross_character_sector_gauge" not in ow_ground_state_body, (
     "production must not use spread-weighted cross-character links, which vanish for exact translation orbits"
 )
+for forbidden_position_extent in (
+    "translation_anchor_rotation(ntarget,ntarget)",
+    "translation_position_lcfo_operator(ntarget,ntarget)",
+    "translation_weighted_reference(ncore,ntarget)",
+):
+    assert forbidden_position_extent not in re.sub(r"\s+", "", ow_ground_state_body), (
+        "periodic-position internal workspace must use translation_sector_rank, not the full retained rank"
+    )
 assert re.search(
     r"call\s+exchange_dg_point_permuted_orbital_rows\s*\(\s*dc%icomm_tot\s*,\s*"
     r"global_closed_core\s*,\s*&?\s*initial_core_ids\s*,\s*ow_core_values",
