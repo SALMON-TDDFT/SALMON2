@@ -28,6 +28,7 @@ program test_dg_overlapping_wannier_construction_mpi
     solve_dg_affine_common_fixed_point,&
     compute_dg_periodic_wannier_centers,&
     verify_dg_wannier_center_affine_orbits,&
+    diagnose_dg_point_center_gauge,&
     build_dg_finite_abelian_character_table,&
     inverse_dg_translation_character_orbits,&
     accumulate_dg_translation_character_orbit_sector,&
@@ -169,6 +170,7 @@ program test_dg_overlapping_wannier_construction_mpi
   integer,allocatable::center_fragments(:),assigned_center_owners(:),assigned_center_fragments(:)
   real(8)::assignment_centers(3,4)
   real(8)::orbit_centers(3,2),orbit_center_magnitudes(3,2)
+  integer::failed_center_operation
   complex(8)::fractional_core_candidates(2,2)
   complex(8),allocatable::core_occupied_coefficients(:,:)
   integer(8)::mixed_map(2,1)
@@ -486,9 +488,10 @@ program test_dg_overlapping_wannier_construction_mpi
   orbit_centers(1,2)=0.45d0
   orbit_center_magnitudes=0.9d0;orbit_center_magnitudes(:,2)=[0.8d0,0.7d0,0.6d0]
   call verify_dg_wannier_center_affine_orbits(orbit_centers,affine_rotations,&
-    affine_translations,1d-12,ok,message,moment_magnitudes=orbit_center_magnitudes)
+    affine_translations,1d-12,ok,message,moment_magnitudes=orbit_center_magnitudes,&
+    failed_operation=failed_center_operation)
   call require(.not.ok.and.has_text(message,'operation=').and.has_text(message,'source=').and.&
-    has_text(message,'nearest_residual=').and.has_text(message,'moment_min='),&
+    has_text(message,'nearest_residual=').and.has_text(message,'moment_min=').and.failed_center_operation==2,&
     'broken full affine Wannier center orbit reports actionable mismatch diagnostics')
   calibrated_map(:,1)=int(rank*4,8)+[1_8,2_8,3_8,4_8]
   calibrated_map(:,2)=int(rank*4,8)+[2_8,1_8,4_8,3_8]
