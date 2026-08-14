@@ -22,6 +22,7 @@ module dg_overlapping_wannier_w90
   public::validate_dg_w90_localization_cluster
   public::build_dg_sector_periodic_position_tuple
   public::canonicalize_dg_sector_periodic_position_gauge
+  public::jointly_canonicalize_dg_sector_periodic_position_gauge
 contains
 
   subroutine build_dg_sector_periodic_position_tuple(comm,row_ids,global_row_count,sector_rows,&
@@ -267,6 +268,212 @@ contains
     fingerprint=0_int64;workspace_peak_bytes=0_int64;rotation=(0d0,0d0)
 #endif
   end subroutine canonicalize_dg_sector_periodic_position_gauge
+
+  subroutine jointly_canonicalize_dg_sector_periodic_position_gauge(comm,row_ids,sector_rows,position_tuple,&
+      lcfo_operator,tolerance,tuple_fingerprint,aligned_rows,rotation,centers,final_objective,maximum_update,&
+      sweep_count,canonical_defect,fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm
+    integer(int64),intent(in)::row_ids(:),tuple_fingerprint
+    complex(real64),intent(in)::sector_rows(:,:),position_tuple(:,:,:),lcfo_operator(:,:)
+    real(real64),intent(in)::tolerance
+    complex(real64),allocatable,intent(out)::aligned_rows(:,:)
+    complex(real64),intent(out)::rotation(:,:)
+    real(real64),allocatable,intent(out)::centers(:,:)
+    real(real64),intent(out)::final_objective,maximum_update,canonical_defect
+    integer,intent(out)::sweep_count
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    complex(real64),allocatable::hmats(:,:,:),unitary(:,:),gram(:,:),stream(:)
+    integer,allocatable::owner(:),position(:),count(:),order(:)
+    real(real64)::gmat(3,3),geval(3),gwork(9),gvec(3),two_theta,c,sabs,phase_angle,pivot,&
+      local_objective,global_objective,local_update,global_update,quantum,value
+    complex(real64)::sphase,jacobi(2,2),left_pair(2),right_pair(2),tmp,phase_fix
+    integer::nlocal,m,global_count,local_count,rank,ierr,bad,gbad,status,axis,q,pair_i,pair_j,&
+      i,j,k,sweep,info,minint,maxint
+    integer(int64)::bits,quantized,term,elements,bytes,peak
+    logical::receipt_valid,swapped
+    interface
+      subroutine dsyev(jobz,uplo,n,a,lda,w,work,lwork,info)
+        character,intent(in)::jobz,uplo
+        integer,intent(in)::n,lda,lwork
+        real(8),intent(inout)::a(lda,*),work(*)
+        real(8),intent(out)::w(*)
+        integer,intent(out)::info
+      end subroutine
+    end interface
+    nlocal=size(row_ids);m=size(sector_rows,2)
+    ok=.false.;message='';final_objective=huge(1d0);maximum_update=huge(1d0);canonical_defect=huge(1d0)
+    fingerprint=0_int64;workspace_peak_bytes=0_int64;sweep_count=0;rotation=(0d0,0d0)
+    bad=merge(0,1,nlocal>=1.and.m>=1.and.size(sector_rows,1)==nlocal.and.&
+      all(shape(position_tuple)==[m,m,3]).and.all(shape(lcfo_operator)==[m,m]).and.&
+      all(shape(rotation)==[m,m]).and.tuple_fingerprint/=0_int64.and.&
+      tolerance>=1d-15.and.tolerance<=1d-2.and.ieee_is_finite(tolerance).and.&
+      all(row_ids>=1_int64).and.all(ieee_is_finite(real(sector_rows))).and.&
+      all(ieee_is_finite(aimag(sector_rows))).and.all(ieee_is_finite(real(position_tuple))).and.&
+      all(ieee_is_finite(aimag(position_tuple))).and.all(ieee_is_finite(real(lcfo_operator))).and.&
+      all(ieee_is_finite(aimag(lcfo_operator))))
+    call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='invalid joint periodic-center gauge contract';return;endif
+    call MPI_Allreduce(m,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(m,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='joint periodic-center rank disagrees';return;endif
+    local_count=int(maxval(row_ids));call MPI_Allreduce(local_count,global_count,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    elements=0_int64;bytes=0_int64;receipt_valid=ierr==MPI_SUCCESS
+    call checked_product([8_int64,int(m,int64),int(m,int64)],term,receipt_valid);call checked_add(elements,term,receipt_valid)
+    call checked_product([int(nlocal,int64),int(m,int64)],term,receipt_valid);call checked_add(elements,term,receipt_valid)
+    call checked_add(elements,int(m,int64),receipt_valid);call checked_product([elements,16_int64],bytes,receipt_valid)
+    call checked_product([4_int64,int(global_count,int64),4_int64],term,receipt_valid);call checked_add(bytes,term,receipt_valid)
+    bad=merge(0,1,receipt_valid)
+    call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='joint periodic-center workspace overflows';return;endif
+    workspace_peak_bytes=bytes
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
+    allocate(hmats(m,m,6),unitary(m,m),gram(m,m),stream(m),aligned_rows(nlocal,m),centers(3,m),&
+      owner(global_count),position(global_count),count(global_count),order(m),stat=status)
+    call MPI_Allreduce(status,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then;call cleanup();message='joint periodic-center allocation failed';return;endif
+    owner=0;position=0;count=0
+    do i=1,nlocal
+      if(row_ids(i)>int(global_count,int64))then;bad=1;cycle;endif
+      owner(int(row_ids(i)))=rank+1;position(int(row_ids(i)))=i;count(int(row_ids(i)))=count(int(row_ids(i)))+1
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,owner,global_count,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)then;call cleanup();return;endif
+    call MPI_Allreduce(MPI_IN_PLACE,position,global_count,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)then;call cleanup();return;endif
+    call MPI_Allreduce(MPI_IN_PLACE,count,global_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(count/=1))then;call cleanup();message='joint periodic-center rows are not uniquely owned';return;endif
+    do axis=1,3
+      hmats(:,:,2*axis-1)=0.5d0*(position_tuple(:,:,axis)+conjg(transpose(position_tuple(:,:,axis))))
+      hmats(:,:,2*axis)=cmplx(0d0,-0.5d0,real64)*(position_tuple(:,:,axis)-&
+        conjg(transpose(position_tuple(:,:,axis))))
+    enddo
+    unitary=(0d0,0d0);do i=1,m;unitary(i,i)=1d0;enddo
+    maximum_update=0d0
+    do sweep=1,100
+      local_update=0d0
+      do pair_j=2,m;do pair_i=1,pair_j-1
+        gmat=0d0
+        do q=1,6
+          gvec=[real(hmats(pair_i,pair_i,q)-hmats(pair_j,pair_j,q),real64),&
+            2d0*real(hmats(pair_i,pair_j,q),real64),-2d0*aimag(hmats(pair_i,pair_j,q))]
+          do j=1,3;do i=1,3;gmat(i,j)=gmat(i,j)+gvec(i)*gvec(j);enddo;enddo
+        enddo
+        call dsyev('V','U',3,gmat,3,geval,gwork,9,info)
+        bad=merge(0,1,info==0.and.all(ieee_is_finite(geval)))
+        call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+        if(ierr/=MPI_SUCCESS.or.gbad/=0)then;call cleanup();message='joint periodic-center local diagonalization failed';return;endif
+        gvec=gmat(:,3);if(gvec(1)<0d0)gvec=-gvec
+        c=sqrt(max(0d0,0.5d0*(1d0+min(1d0,gvec(1)))))
+        if(c<=epsilon(1d0))cycle
+        sphase=cmplx(gvec(2),-gvec(3),real64)/(2d0*c)
+        sabs=abs(sphase);if(sabs<=10d0*tolerance)cycle
+        jacobi=reshape([cmplx(c,0d0,real64),sphase,-conjg(sphase),cmplx(c,0d0,real64)],[2,2])
+        local_update=max(local_update,sabs)
+        do q=1,6
+          do k=1,m
+            left_pair=[hmats(k,pair_i,q),hmats(k,pair_j,q)]
+            hmats(k,pair_i,q)=left_pair(1)*jacobi(1,1)+left_pair(2)*jacobi(2,1)
+            hmats(k,pair_j,q)=left_pair(1)*jacobi(1,2)+left_pair(2)*jacobi(2,2)
+          enddo
+          do k=1,m
+            right_pair=[hmats(pair_i,k,q),hmats(pair_j,k,q)]
+            hmats(pair_i,k,q)=conjg(jacobi(1,1))*right_pair(1)+conjg(jacobi(2,1))*right_pair(2)
+            hmats(pair_j,k,q)=conjg(jacobi(1,2))*right_pair(1)+conjg(jacobi(2,2))*right_pair(2)
+          enddo
+        enddo
+        do k=1,m
+          left_pair=[unitary(k,pair_i),unitary(k,pair_j)]
+          unitary(k,pair_i)=left_pair(1)*jacobi(1,1)+left_pair(2)*jacobi(2,1)
+          unitary(k,pair_j)=left_pair(1)*jacobi(1,2)+left_pair(2)*jacobi(2,2)
+        enddo
+      enddo;enddo
+      call MPI_Allreduce(local_update,global_update,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      maximum_update=global_update;sweep_count=sweep
+      if(global_update<=10d0*tolerance)exit
+    enddo
+    local_objective=0d0
+    do q=1,6;do j=1,m;do i=1,m;if(i/=j)local_objective=local_objective+abs(hmats(i,j,q))**2;enddo;enddo;enddo
+    call MPI_Allreduce(local_objective,global_objective,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    final_objective=global_objective
+    if(ierr/=MPI_SUCCESS.or.maximum_update>10d0*tolerance)then;call cleanup();message='joint periodic-center sweeps did not converge';return;endif
+    do j=1,m;do axis=1,3
+      phase_angle=atan2(real(hmats(j,j,2*axis),real64),real(hmats(j,j,2*axis-1),real64))
+      centers(axis,j)=modulo(phase_angle/(2d0*acos(-1d0)),1d0)
+    enddo;enddo
+    order=[(i,i=1,m)]
+    do i=2,m;k=i
+      do while(k>1)
+        swapped=.false.
+        do axis=1,3
+          if(centers(axis,order(k))<centers(axis,order(k-1))-10d0*tolerance)then;swapped=.true.;exit;endif
+          if(centers(axis,order(k))>centers(axis,order(k-1))+10d0*tolerance)exit
+        enddo
+        if(.not.swapped)exit
+        j=order(k);order(k)=order(k-1);order(k-1)=j;k=k-1
+      enddo
+    enddo
+    gram=unitary;do j=1,m;unitary(:,j)=gram(:,order(j));enddo
+    centers=centers(:,order)
+    aligned_rows=matmul(sector_rows,unitary)
+    do j=1,m
+      pivot=maxval(abs(aligned_rows(:,j)));call MPI_Allreduce(MPI_IN_PLACE,pivot,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      do k=1,global_count
+        tmp=(0d0,0d0);if(rank==owner(k)-1)tmp=aligned_rows(position(k),j)
+        call MPI_Bcast(tmp,1,MPI_DOUBLE_COMPLEX,owner(k)-1,comm,ierr);if(ierr/=MPI_SUCCESS)then;call cleanup();return;endif
+        if(abs(tmp)>=pivot-10d0*tolerance)then
+          if(abs(tmp)>tolerance)then
+            phase_fix=conjg(tmp)/abs(tmp);aligned_rows(:,j)=aligned_rows(:,j)*phase_fix;unitary(:,j)=unitary(:,j)*phase_fix
+          endif
+          exit
+        endif
+      enddo
+    enddo
+    rotation=unitary
+    gram=matmul(conjg(transpose(aligned_rows)),aligned_rows)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+    canonical_defect=maxval(abs(gram));call MPI_Allreduce(MPI_IN_PLACE,canonical_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.canonical_defect>10d0*tolerance)then;call cleanup();message='joint periodic-center frame is not orthonormal';return;endif
+    quantum=100d0*tolerance;fingerprint=int(z'510E527FADE682D1',int64)
+    do j=1,m;do axis=1,3
+      value=centers(axis,j);quantized=nint(value/quantum,int64);fingerprint=ieor(ishftc(fingerprint,9),quantized)
+    enddo;enddo
+    do k=1,global_count
+      stream=(0d0,0d0);if(rank==owner(k)-1)stream=aligned_rows(position(k),:)
+      call MPI_Bcast(stream,m,MPI_DOUBLE_COMPLEX,owner(k)-1,comm,ierr);if(ierr/=MPI_SUCCESS)then;call cleanup();return;endif
+      do j=1,m
+        quantized=nint(real(stream(j),real64)/quantum,int64);fingerprint=ieor(ishftc(fingerprint,9),quantized)
+        quantized=nint(aimag(stream(j))/quantum,int64);fingerprint=ieor(ishftc(fingerprint,9),quantized)
+      enddo
+    enddo
+    if(fingerprint==0_int64)fingerprint=1_int64
+    call MPI_Allreduce(workspace_peak_bytes,peak,1,MPI_INTEGER8,MPI_MAX,comm,ierr);workspace_peak_bytes=peak
+    ok=ierr==MPI_SUCCESS
+    if(ok)message=''
+    call cleanup(.false.)
+  contains
+    subroutine cleanup(drop_outputs)
+      logical,intent(in),optional::drop_outputs
+      logical::drop
+      drop=.true.;if(present(drop_outputs))drop=drop_outputs
+      if(drop.and.allocated(aligned_rows))deallocate(aligned_rows)
+      if(drop.and.allocated(centers))deallocate(centers)
+      if(allocated(hmats))deallocate(hmats)
+      if(allocated(unitary))deallocate(unitary)
+      if(allocated(gram))deallocate(gram)
+      if(allocated(stream))deallocate(stream)
+      if(allocated(owner))deallocate(owner)
+      if(allocated(position))deallocate(position)
+      if(allocated(count))deallocate(count)
+      if(allocated(order))deallocate(order)
+    end subroutine
+#else
+    ok=.false.;message='joint periodic-center gauge requires MPI';final_objective=huge(1d0)
+    maximum_update=huge(1d0);canonical_defect=huge(1d0);fingerprint=0_int64;workspace_peak_bytes=0_int64
+    sweep_count=0;rotation=(0d0,0d0)
+#endif
+  end subroutine jointly_canonicalize_dg_sector_periodic_position_gauge
 
   subroutine project_dg_w90_reference_sector_operators(comm,row_ids,sector_rows,w90_rows,w90_values,&
       lcfo_rows,lcfo_values,global_row_count,w90_fingerprint,lcfo_fingerprint,w90_frame_defect,lcfo_source_defect,tolerance,&
