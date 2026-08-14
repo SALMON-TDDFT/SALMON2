@@ -13,7 +13,7 @@ with tempfile.TemporaryDirectory(prefix="ow-construction-") as name:
       str(root/"tests/dg/test_dg_overlapping_wannier_construction_mpi.f90"),
       "-llapack","-lblas","-o",str(exe)],check=True)
     env=os.environ.copy();env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")
-    signatures=[];inverse_fingerprints=[];spatial_sector_fingerprints=[]
+    signatures=[];inverse_fingerprints=[];spatial_sector_fingerprints=[];center_gauge_receipts=[]
     for n in (1,2,4,8):
       p=subprocess.run([shutil.which("mpiexec"),"-n",str(n),str(exe)],capture_output=True,text=True,env=env)
       assert p.returncode==0,(n,p.stdout,p.stderr)
@@ -27,7 +27,12 @@ with tempfile.TemporaryDirectory(prefix="ow-construction-") as name:
       spatial_match=re.search(r"SPATIAL_SECTOR_FINGERPRINT\s+(-?\d+)",p.stdout)
       assert spatial_match,p.stdout
       spatial_sector_fingerprints.append(int(spatial_match.group(1)))
+      gauge_match=re.search(r"POINT_CENTER_GAUGE\s+([^\n]+)",p.stdout)
+      assert gauge_match,p.stdout
+      center_gauge_receipts.append(gauge_match.group(1).split())
     assert len(set(signatures))==1,signatures
     assert len(set(inverse_fingerprints))==1,inverse_fingerprints
     assert len(set(spatial_sector_fingerprints))==1,spatial_sector_fingerprints
+    assert len({tuple(x[:3]) for x in center_gauge_receipts})==1,center_gauge_receipts
+    assert all(int(x[3])>0 for x in center_gauge_receipts),center_gauge_receipts
 print("PASS overlapping-Wannier construction fixture on 1, 2, 4, and 8 ranks")

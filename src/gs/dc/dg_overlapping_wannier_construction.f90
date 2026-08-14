@@ -79,6 +79,7 @@ module dg_overlapping_wannier_construction
   public::solve_dg_affine_common_fixed_point
   public::compute_dg_periodic_wannier_centers
   public::verify_dg_wannier_center_affine_orbits
+  public::diagnose_dg_point_center_gauge
   public::build_dg_finite_abelian_character_table
   public::inverse_dg_translation_character_orbits
   public::accumulate_dg_translation_character_orbit_sector
@@ -2420,6 +2421,136 @@ contains
       end do
     end function augment_center_match
   end subroutine verify_dg_wannier_center_affine_orbits
+
+  subroutine diagnose_dg_point_center_gauge(comm,local_basis,weights,point_map,&
+      integer_rotation,fractional_translation,centers,tolerance,monomial_defect,&
+      center_block_leakage,unitarity_defect,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,integer_rotation(:,:)
+    complex(real64),intent(in)::local_basis(:,:)
+    real(real64),intent(in)::weights(:),fractional_translation(:),centers(:,:),tolerance
+    integer(int64),intent(in)::point_map(:)
+    real(real64),intent(out)::monomial_defect,center_block_leakage,unitarity_defect
+    integer(int64),intent(out)::workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,nproc,ierr,nstate,nlocal,local_bad,global_bad,status,i,j,owner,base,remainder,&
+      owner_count,owner_first,target,source
+    integer(int64),allocatable::row_ids(:),map_rows(:,:),global_map(:)
+    complex(real64),allocatable::rows(:,:,:),remote_rows(:,:),unitarity_tile(:,:)
+    real(real64),allocatable::column_max(:),global_column_max(:),local_leakage(:),global_leakage(:)
+    integer,allocatable::map_count(:)
+    real(real64)::mapped(3),difference(3),row_max,local_monomial,local_unitarity,expected
+    integer(int64)::overlap_workspace,complex_bytes,real_bytes,integer_bytes,extra_bytes,term
+    nstate=size(local_basis,1);nlocal=size(local_basis,2)
+    ok=.false.;message='';monomial_defect=huge(1d0);center_block_leakage=huge(1d0)
+    unitarity_defect=huge(1d0);workspace_peak_bytes=0_int64
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    local_bad=merge(0,1,ierr==MPI_SUCCESS.and.nstate>0.and.nlocal>0.and.size(weights)==nlocal.and.&
+      size(point_map)==nlocal.and.all(shape(integer_rotation)==[3,3]).and.&
+      size(fractional_translation)==3.and.all(shape(centers)==[3,nstate]).and.&
+      tolerance>0d0.and.ieee_is_finite(tolerance).and.all(ieee_is_finite(weights)).and.&
+      all(weights>=0d0).and.all(ieee_is_finite(real(local_basis))).and.&
+      all(ieee_is_finite(aimag(local_basis))).and.all(ieee_is_finite(fractional_translation)).and.&
+      all(ieee_is_finite(centers)))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid point center-gauge diagnostic contract';return;endif
+    call agree_integer(nstate);if(global_bad/=0)return
+    call agree_integer(nlocal);if(global_bad/=0)return
+    do i=1,3;do j=1,3;call agree_integer(integer_rotation(i,j));if(global_bad/=0)return;enddo;enddo
+    allocate(global_map(nlocal*nproc),map_count(nlocal*nproc),map_rows(nlocal,1),stat=status)
+    call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;call cleanup();message='point center-gauge map allocation failed';return;endif
+    call MPI_Allgather(point_map,nlocal,MPI_INTEGER8,global_map,nlocal,MPI_INTEGER8,comm,ierr)
+    local_bad=merge(0,1,ierr==MPI_SUCCESS.and.all(global_map>=1_int64).and.&
+      all(global_map<=int(nlocal*nproc,int64)))
+    map_count=0
+    if(local_bad==0)then
+      do i=1,size(global_map);map_count(int(global_map(i)))=map_count(int(global_map(i)))+1;enddo
+      if(any(map_count/=1))local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;call cleanup();message='point center-gauge map is not a permutation';return;endif
+    map_rows(:,1)=point_map
+    call assemble_dg_distributed_basis_symmetry_overlap_rows(comm,local_basis,weights,map_rows,&
+      row_ids,rows,overlap_workspace,ok,message)
+    if(.not.ok)then;call cleanup();return;endif
+    allocate(column_max(nstate),global_column_max(nstate),local_leakage(nstate),global_leakage(nstate),stat=status)
+    call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;call cleanup();message='point center-gauge receipt allocation failed';return;endif
+    column_max=0d0;local_leakage=0d0;local_monomial=0d0
+    do i=1,size(row_ids)
+      target=int(row_ids(i));row_max=0d0
+      do source=1,nstate
+        row_max=max(row_max,abs(rows(i,source,1))**2)
+        column_max(source)=max(column_max(source),abs(rows(i,source,1))**2)
+        mapped=modulo(matmul(real(integer_rotation,real64),centers(:,source))+fractional_translation,1d0)
+        difference=mapped-centers(:,target);difference=difference-anint(difference)
+        if(maxval(abs(difference))>tolerance)&
+          local_leakage(source)=local_leakage(source)+abs(rows(i,source,1))**2
+      enddo
+      local_monomial=max(local_monomial,abs(1d0-row_max))
+    enddo
+    call MPI_Allreduce(column_max,global_column_max,nstate,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_leakage,global_leakage,nstate,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+    monomial_defect=max(local_monomial,maxval(abs(1d0-global_column_max)))
+    call MPI_Allreduce(MPI_IN_PLACE,monomial_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    center_block_leakage=maxval(global_leakage)
+    base=nstate/nproc;remainder=mod(nstate,nproc);local_unitarity=0d0
+    do owner=0,nproc-1
+      owner_count=base+merge(1,0,owner<remainder);owner_first=owner*base+min(owner,remainder)+1
+      allocate(remote_rows(owner_count,nstate),unitarity_tile(size(row_ids),owner_count),stat=status)
+      call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;call cleanup();message='point center-gauge unitarity allocation failed';return;endif
+      if(rank==owner)remote_rows=rows(:,:,1)
+      call MPI_Bcast(remote_rows,size(remote_rows),MPI_DOUBLE_COMPLEX,owner,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;call cleanup();message='point center-gauge row broadcast failed';return;endif
+      unitarity_tile=matmul(rows(:,:,1),conjg(transpose(remote_rows)))
+      do j=1,owner_count;do i=1,size(row_ids)
+        expected=merge(1d0,0d0,int(row_ids(i))==owner_first+j-1)
+        local_unitarity=max(local_unitarity,abs(unitarity_tile(i,j)-expected))
+      enddo;enddo
+      deallocate(remote_rows,unitarity_tile)
+    enddo
+    call MPI_Allreduce(local_unitarity,unitarity_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    complex_bytes=16_int64;real_bytes=8_int64;integer_bytes=8_int64
+    extra_bytes=integer_bytes*int(size(global_map)+size(row_ids),int64)
+    term=4_int64*real_bytes*int(nstate,int64)
+    if(extra_bytes>huge(0_int64)-term)then;call cleanup();message='point center-gauge receipt overflows';return;endif
+    workspace_peak_bytes=max(overlap_workspace,extra_bytes+term+complex_bytes*int(size(rows),int64))
+    call MPI_Allreduce(MPI_IN_PLACE,workspace_peak_bytes,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    ok=ierr==MPI_SUCCESS.and.unitarity_defect<=tolerance
+    if(ok)then;message='';else;message='point center-gauge representation is not unitary';endif
+    call cleanup()
+  contains
+    subroutine agree_integer(value)
+      integer,intent(in)::value
+      integer::minimum,maximum
+      call MPI_Allreduce(value,minimum,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;global_bad=1;message='point center-gauge metadata reduction failed';return;endif
+      call MPI_Allreduce(value,maximum,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      global_bad=merge(1,0,ierr/=MPI_SUCCESS.or.minimum/=maximum)
+      if(global_bad/=0)message='point center-gauge metadata disagree across ranks'
+    end subroutine
+    subroutine cleanup()
+      if(allocated(row_ids))deallocate(row_ids)
+      if(allocated(map_rows))deallocate(map_rows)
+      if(allocated(global_map))deallocate(global_map)
+      if(allocated(map_count))deallocate(map_count)
+      if(allocated(rows))deallocate(rows)
+      if(allocated(remote_rows))deallocate(remote_rows)
+      if(allocated(unitarity_tile))deallocate(unitarity_tile)
+      if(allocated(column_max))deallocate(column_max)
+      if(allocated(global_column_max))deallocate(global_column_max)
+      if(allocated(local_leakage))deallocate(local_leakage)
+      if(allocated(global_leakage))deallocate(global_leakage)
+    end subroutine
+#else
+    ok=.false.;message='point center-gauge diagnostic requires MPI'
+    monomial_defect=huge(1d0);center_block_leakage=huge(1d0);unitarity_defect=huge(1d0)
+    workspace_peak_bytes=0_int64
+#endif
+  end subroutine diagnose_dg_point_center_gauge
 
   subroutine build_dg_finite_abelian_character_table(translations,product_table,identity_operation,&
       tolerance,canonical_operations,inverse_operations,generator_count,generators,element_words,&

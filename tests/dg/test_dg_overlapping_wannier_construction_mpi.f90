@@ -171,6 +171,11 @@ program test_dg_overlapping_wannier_construction_mpi
   real(8)::assignment_centers(3,4)
   real(8)::orbit_centers(3,2),orbit_center_magnitudes(3,2)
   integer::failed_center_operation
+  complex(8)::center_gauge_basis(2,2)
+  real(8)::center_gauge_weights(2),center_gauge_centers(3,2),center_gauge_tau(3)
+  integer::center_gauge_rotation(3,3)
+  integer(8)::center_gauge_map(2),center_gauge_workspace
+  real(8)::center_gauge_monomial,center_gauge_leakage,center_gauge_unitarity
   complex(8)::fractional_core_candidates(2,2)
   complex(8),allocatable::core_occupied_coefficients(:,:)
   integer(8)::mixed_map(2,1)
@@ -493,6 +498,40 @@ program test_dg_overlapping_wannier_construction_mpi
   call require(.not.ok.and.has_text(message,'operation=').and.has_text(message,'source=').and.&
     has_text(message,'nearest_residual=').and.has_text(message,'moment_min=').and.failed_center_operation==2,&
     'broken full affine Wannier center orbit reports actionable mismatch diagnostics')
+  center_gauge_basis=(0d0,0d0);center_gauge_weights=1d0
+  if(rank==0)then
+    center_gauge_basis(1,1)=(1d0,0d0);center_gauge_basis(2,2)=(1d0,0d0)
+  endif
+  center_gauge_map=int(rank*2,8)+[1_8,2_8]
+  if(rank==0)center_gauge_map=[2_8,1_8]
+  center_gauge_rotation=0
+  do i=1,3;center_gauge_rotation(i,i)=1;enddo
+  center_gauge_tau=[0.5d0,0d0,0d0]
+  center_gauge_centers=0d0;center_gauge_centers(1,:)=[0.25d0,0.75d0]
+  call diagnose_dg_point_center_gauge(comm,center_gauge_basis,center_gauge_weights,center_gauge_map,&
+    center_gauge_rotation,center_gauge_tau,center_gauge_centers,1d-12,center_gauge_monomial,&
+    center_gauge_leakage,center_gauge_unitarity,center_gauge_workspace,ok,message)
+  call require(ok.and.center_gauge_monomial<1d-12.and.center_gauge_leakage<1d-12.and.&
+    center_gauge_unitarity<1d-12.and.center_gauge_workspace>0_8,&
+    'exact center permutation has zero center-gauge leakage')
+  if(rank==0)then
+    theta=acos(-1d0)/8d0
+    center_gauge_basis(:,1)=[cmplx(cos(theta),0d0,8),cmplx(-sin(theta),0d0,8)]
+    center_gauge_basis(:,2)=[cmplx(sin(theta),0d0,8),cmplx(cos(theta),0d0,8)]
+  endif
+  call diagnose_dg_point_center_gauge(comm,center_gauge_basis,center_gauge_weights,center_gauge_map,&
+    center_gauge_rotation,center_gauge_tau,center_gauge_centers,1d-12,center_gauge_monomial,&
+    center_gauge_leakage,center_gauge_unitarity,center_gauge_workspace,ok,message)
+  call require(ok.and.center_gauge_monomial>1d-3.and.center_gauge_leakage>1d-3.and.&
+    center_gauge_unitarity<1d-12,'cross-center unitary mixing is diagnosed as leakage')
+  center_gauge_tau=0d0;center_gauge_centers=0.25d0
+  call diagnose_dg_point_center_gauge(comm,center_gauge_basis,center_gauge_weights,center_gauge_map,&
+    center_gauge_rotation,center_gauge_tau,center_gauge_centers,1d-12,center_gauge_monomial,&
+    center_gauge_leakage,center_gauge_unitarity,center_gauge_workspace,ok,message)
+  call require(ok.and.center_gauge_monomial>1d-3.and.center_gauge_leakage<1d-12,&
+    'repeated-center internal rotation is not center-block leakage')
+  if(rank==0)write(*,'(a,3(es16.8,1x),i0)')'POINT_CENTER_GAUGE ',center_gauge_monomial,&
+    center_gauge_leakage,center_gauge_unitarity,center_gauge_workspace
   calibrated_map(:,1)=int(rank*4,8)+[1_8,2_8,3_8,4_8]
   calibrated_map(:,2)=int(rank*4,8)+[2_8,1_8,4_8,3_8]
   calibrated_boundary=[.true.,.true.,.false.,.false.]
