@@ -1633,6 +1633,33 @@ contains
       ' identity_defect=',translation_identity_defect,' closure_defect=',translation_closure_defect,&
       ' workspace_peak_bytes=',translation_transform_workspace
     global_retained_group_closure_defect=max(global_retained_group_closure_defect,translation_closure_defect)
+    allocate(localized_centers(3,ntarget),localized_center_magnitudes(3,ntarget))
+    call compute_dg_periodic_wannier_centers(dc%icomm_tot,ow_core_values,ow_core_weights,&
+      core_periodic_phase,localized_centers,localized_center_magnitudes,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'localized Wannier center measurement failed';end if
+    if(rank==0)write(*,'(a,2(a,es12.4))')'[OW-GS-DIAGNOSTIC] periodic_center_magnitude',&
+      ' minimum=',minval(localized_center_magnitudes),' maximum=',maxval(localized_center_magnitudes)
+    call verify_dg_wannier_center_affine_orbits(localized_centers,global_point_integer_rotations,&
+      global_point_fractional_translations,retained_closure_search_tolerance,ok,message,&
+      moment_magnitudes=localized_center_magnitudes,failed_operation=failed_operation)
+    if(.not.ok)then
+      center_failure_message=message
+      call diagnose_dg_point_center_gauge(dc%icomm_tot,ow_core_values,ow_core_weights,&
+        global_symmetry_map(:,failed_operation),global_point_integer_rotations(:,:,failed_operation),&
+        global_point_fractional_translations(:,failed_operation),localized_centers,&
+        retained_closure_search_tolerance,monomial_defect,center_block_leakage,&
+        center_representation_unitarity_defect,center_gauge_workspace_peak,center_diagnostic_ok,&
+        center_diagnostic_message)
+      if(rank==0.and.center_diagnostic_ok)write(*,'(a,i0,3(a,es16.8),a,i0)')&
+        '[OW-GS-DIAGNOSTIC] point_center_gauge failed_operation=',failed_operation,&
+        ' monomial_defect=',monomial_defect,' center_block_leakage=',center_block_leakage,&
+        ' representation_unitarity_defect=',center_representation_unitarity_defect,&
+        ' workspace_peak_bytes=',center_gauge_workspace_peak
+      if(rank==0.and..not.center_diagnostic_ok)&
+        write(0,'(2a)')'point center-gauge diagnostic failed: ',trim(center_diagnostic_message)
+      write(0,'(a)')trim(center_failure_message)
+      error stop 'localized Wannier center orbit failed'
+    end if
     allocate(ow_pencil_generator_maps,source=global_symmetry_map(:,global_affine_generators),&
       stat=allocation_status)
     call comm_logical_and(allocation_status==0,reusable,dc%icomm_tot)
@@ -1654,7 +1681,6 @@ contains
     endif
     if(allocated(global_closed_core))deallocate(global_closed_core)
     if(allocated(lcfo_reference_core))deallocate(lcfo_reference_core)
-    if(allocated(localized_centers))deallocate(localized_centers)
     if(allocated(w90_transform))deallocate(w90_transform)
     if(rank==0)write(*,'(a,5(a,es12.4),3(a,i0))')'[OW-GS-DIAGNOSTIC] Wannier90_MLWF',&
       ' gauge_spread=',w90_spread(3),' total_spread=',w90_spread(1),&
@@ -1692,33 +1718,6 @@ contains
     allocate(ow_pencil_affine_product,source=global_point_product)
     allocate(ow_pencil_translation_subgroup,source=global_translation_subgroup)
     allocate(ow_pencil_coset_representatives,source=global_point_representatives)
-    allocate(localized_centers(3,ntarget),localized_center_magnitudes(3,ntarget))
-    call compute_dg_periodic_wannier_centers(dc%icomm_tot,ow_core_values,ow_core_weights,&
-      core_periodic_phase,localized_centers,localized_center_magnitudes,ok,message)
-    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'localized Wannier center measurement failed';end if
-    if(rank==0)write(*,'(a,2(a,es12.4))')'[OW-GS-DIAGNOSTIC] periodic_center_magnitude',&
-      ' minimum=',minval(localized_center_magnitudes),' maximum=',maxval(localized_center_magnitudes)
-    call verify_dg_wannier_center_affine_orbits(localized_centers,global_point_integer_rotations,&
-      global_point_fractional_translations,retained_closure_search_tolerance,ok,message,&
-      moment_magnitudes=localized_center_magnitudes,failed_operation=failed_operation)
-    if(.not.ok)then
-      center_failure_message=message
-      call diagnose_dg_point_center_gauge(dc%icomm_tot,ow_core_values,ow_core_weights,&
-        global_symmetry_map(:,failed_operation),global_point_integer_rotations(:,:,failed_operation),&
-        global_point_fractional_translations(:,failed_operation),localized_centers,&
-        retained_closure_search_tolerance,monomial_defect,center_block_leakage,&
-        center_representation_unitarity_defect,center_gauge_workspace_peak,center_diagnostic_ok,&
-        center_diagnostic_message)
-      if(rank==0.and.center_diagnostic_ok)write(*,'(a,i0,3(a,es16.8),a,i0)')&
-        '[OW-GS-DIAGNOSTIC] point_center_gauge failed_operation=',failed_operation,&
-        ' monomial_defect=',monomial_defect,' center_block_leakage=',center_block_leakage,&
-        ' representation_unitarity_defect=',center_representation_unitarity_defect,&
-        ' workspace_peak_bytes=',center_gauge_workspace_peak
-      if(rank==0.and..not.center_diagnostic_ok)&
-        write(0,'(2a)')'point center-gauge diagnostic failed: ',trim(center_diagnostic_message)
-      write(0,'(a)')trim(center_failure_message)
-      error stop 'localized Wannier center orbit failed'
-    end if
     allocate(all_core_ids(ncore,nproc),rank_fragments(nproc))
     call MPI_Allgather(ow_core_ids,ncore,MPI_INTEGER8,all_core_ids,ncore,MPI_INTEGER8,dc%icomm_tot,ierr)
     call MPI_Allgather(dc%i_frag,1,MPI_INTEGER,rank_fragments,1,MPI_INTEGER,dc%icomm_tot,ierr)

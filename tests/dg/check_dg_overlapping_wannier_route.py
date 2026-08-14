@@ -172,8 +172,12 @@ assert "global_translation_cocycle" in ow_ground_state_body[inverse_position:red
 center_gate_position = ow_ground_state_body.find("call verify_dg_wannier_center_affine_orbits")
 center_diagnostic_position = ow_ground_state_body.find("call diagnose_dg_point_center_gauge")
 center_stop_position = ow_ground_state_body.find("localized wannier center orbit failed")
+global_map_release_position = ow_ground_state_body.find("deallocate(global_symmetry_map)")
 assert 0 <= center_gate_position < center_diagnostic_position < center_stop_position, (
     "the first failed center operation must emit point center-gauge leakage before the authoritative stop"
+)
+assert center_stop_position < global_map_release_position, (
+    "center diagnostics must finish before releasing the full affine spatial maps they consume"
 )
 for center_receipt in ("failed_operation", "monomial_defect", "center_block_leakage"):
     assert center_receipt in ow_ground_state_body[center_gate_position:center_stop_position], (
