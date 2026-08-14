@@ -285,13 +285,14 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    complex(real64),allocatable::hmats(:,:,:),unitary(:,:),gram(:,:),stream(:)
+    complex(real64),allocatable::hmats(:,:,:),unitary(:,:),gram(:,:),stream(:),block(:,:),zwork(:)
     integer,allocatable::owner(:),position(:),count(:),order(:)
+    real(real64),allocatable::block_eval(:),zrwork(:)
     real(real64)::gmat(3,3),geval(3),gwork(9),gvec(3),two_theta,c,sabs,phase_angle,pivot,&
       local_objective,global_objective,local_update,global_update,quantum,value
     complex(real64)::sphase,jacobi(2,2),left_pair(2),right_pair(2),tmp,phase_fix
     integer::nlocal,m,global_count,local_count,rank,ierr,bad,gbad,status,axis,q,pair_i,pair_j,&
-      i,j,k,sweep,info,minint,maxint
+      i,j,k,l,r,block_size,sweep,info,minint,maxint
     integer(int64)::bits,quantized,term,elements,bytes,peak
     logical::receipt_valid,swapped
     interface
@@ -300,6 +301,13 @@ contains
         integer,intent(in)::n,lda,lwork
         real(8),intent(inout)::a(lda,*),work(*)
         real(8),intent(out)::w(*)
+        integer,intent(out)::info
+      end subroutine
+      subroutine zheev(jobz,uplo,n,a,lda,w,work,lwork,rwork,info)
+        character,intent(in)::jobz,uplo
+        integer,intent(in)::n,lda,lwork
+        complex(8),intent(inout)::a(lda,*),work(*)
+        real(8),intent(out)::w(*),rwork(*)
         integer,intent(out)::info
       end subroutine
     end interface
@@ -321,16 +329,19 @@ contains
     if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='joint periodic-center rank disagrees';return;endif
     local_count=int(maxval(row_ids));call MPI_Allreduce(local_count,global_count,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     elements=0_int64;bytes=0_int64;receipt_valid=ierr==MPI_SUCCESS
-    call checked_product([8_int64,int(m,int64),int(m,int64)],term,receipt_valid);call checked_add(elements,term,receipt_valid)
+    call checked_product([9_int64,int(m,int64),int(m,int64)],term,receipt_valid);call checked_add(elements,term,receipt_valid)
     call checked_product([int(nlocal,int64),int(m,int64)],term,receipt_valid);call checked_add(elements,term,receipt_valid)
-    call checked_add(elements,int(m,int64),receipt_valid);call checked_product([elements,16_int64],bytes,receipt_valid)
+    call checked_product([3_int64,int(m,int64)],term,receipt_valid);call checked_add(elements,term,receipt_valid)
+    call checked_product([elements,16_int64],bytes,receipt_valid)
+    call checked_product([7_int64,int(m,int64),8_int64],term,receipt_valid);call checked_add(bytes,term,receipt_valid)
     call checked_product([4_int64,int(global_count,int64),4_int64],term,receipt_valid);call checked_add(bytes,term,receipt_valid)
     bad=merge(0,1,receipt_valid)
     call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='joint periodic-center workspace overflows';return;endif
     workspace_peak_bytes=bytes
     call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
-    allocate(hmats(m,m,6),unitary(m,m),gram(m,m),stream(m),aligned_rows(nlocal,m),centers(3,m),&
+    allocate(hmats(m,m,6),unitary(m,m),gram(m,m),stream(m),block(m,m),zwork(max(1,2*m)),&
+      block_eval(m),zrwork(max(1,3*m)),aligned_rows(nlocal,m),centers(3,m),&
       owner(global_count),position(global_count),count(global_count),order(m),stat=status)
     call MPI_Allreduce(status,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.gbad/=0)then;call cleanup();message='joint periodic-center allocation failed';return;endif
@@ -359,6 +370,7 @@ contains
             2d0*real(hmats(pair_i,pair_j,q),real64),-2d0*aimag(hmats(pair_i,pair_j,q))]
           do j=1,3;do i=1,3;gmat(i,j)=gmat(i,j)+gvec(i)*gvec(j);enddo;enddo
         enddo
+        if(maxval(abs(gmat))<=100d0*tolerance*tolerance)cycle
         call dsyev('V','U',3,gmat,3,geval,gwork,9,info)
         bad=merge(0,1,info==0.and.all(ieee_is_finite(geval)))
         call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -415,6 +427,30 @@ contains
     enddo
     gram=unitary;do j=1,m;unitary(:,j)=gram(:,order(j));enddo
     centers=centers(:,order)
+    l=1
+    do while(l<=m)
+      r=l
+      do while(r<m)
+        if(any(min(abs(centers(:,r+1)-centers(:,l)),&
+          1d0-abs(centers(:,r+1)-centers(:,l)))>10d0*tolerance))exit
+        r=r+1
+      enddo
+      block_size=r-l+1
+      if(block_size>1)then
+        block=(0d0,0d0)
+        block(1:block_size,1:block_size)=matmul(conjg(transpose(unitary(:,l:r))),&
+          matmul(lcfo_operator,unitary(:,l:r)))
+        call zheev('V','U',block_size,block,m,block_eval,zwork,max(1,2*m),zrwork,info)
+        bad=merge(0,1,info==0.and.all(ieee_is_finite(block_eval(1:block_size))))
+        call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+        if(ierr/=MPI_SUCCESS.or.gbad/=0)then
+          call cleanup();message='joint periodic-center LCFO block diagonalization failed';return
+        endif
+        gram(:,1:block_size)=matmul(unitary(:,l:r),block(1:block_size,1:block_size))
+        unitary(:,l:r)=gram(:,1:block_size)
+      endif
+      l=r+1
+    enddo
     aligned_rows=matmul(sector_rows,unitary)
     do j=1,m
       pivot=maxval(abs(aligned_rows(:,j)));call MPI_Allreduce(MPI_IN_PLACE,pivot,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
@@ -463,6 +499,10 @@ contains
       if(allocated(unitary))deallocate(unitary)
       if(allocated(gram))deallocate(gram)
       if(allocated(stream))deallocate(stream)
+      if(allocated(block))deallocate(block)
+      if(allocated(zwork))deallocate(zwork)
+      if(allocated(block_eval))deallocate(block_eval)
+      if(allocated(zrwork))deallocate(zrwork)
       if(allocated(owner))deallocate(owner)
       if(allocated(position))deallocate(position)
       if(allocated(count))deallocate(count)

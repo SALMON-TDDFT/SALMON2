@@ -285,6 +285,28 @@ program test_dg_overlapping_wannier_w90_mpi
   call require(ok.and.maxval(abs(joint_trial_rows-joint_canonical_rows))<1d-10.and.&
     maxval(abs(joint_trial_centers-joint_centers))<1d-10.and.joint_trial_fingerprint==joint_fingerprint,&
     'joint center gauge is invariant under an input-sector unitary rotation')
+  do b=1,3
+    sector_position_tuple(:,:,b)=(0d0,0d0)
+    sector_position_tuple(1,1,b)=exp(cmplx(0d0,0.4d0*real(b,8),8))
+    sector_position_tuple(2,2,b)=sector_position_tuple(1,1,b)
+    position_trial_tuple(:,:,b)=matmul(conjg(transpose(position_input_rotation)),&
+      matmul(sector_position_tuple(:,:,b),position_input_rotation))
+  enddo
+  position_lcfo_operator=(0d0,0d0);position_lcfo_operator(1,1)=0.2d0;position_lcfo_operator(2,2)=0.7d0
+  position_trial_operator=matmul(conjg(transpose(position_input_rotation)),&
+    matmul(position_lcfo_operator,position_input_rotation))
+  call jointly_canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,&
+    sector_position_tuple,position_lcfo_operator,1d-12,911_8,joint_canonical_rows,joint_rotation,&
+    joint_centers,joint_objective,joint_update,joint_sweeps,joint_defect,joint_fingerprint,joint_workspace,ok,message)
+  call require(ok,trim(message))
+  call jointly_canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,position_rotated_sector,&
+    position_trial_tuple,position_trial_operator,1d-12,919_8,joint_trial_rows,joint_trial_rotation,&
+    joint_trial_centers,joint_trial_objective,joint_trial_update,joint_trial_sweeps,joint_trial_defect,&
+    joint_trial_fingerprint,joint_workspace,ok,message)
+  call require(ok,trim(message))
+  call require(ok.and.maxval(abs(joint_trial_rows-joint_canonical_rows))<1d-10.and.&
+    joint_trial_fingerprint==joint_fingerprint,&
+    'LCFO operator resolves a repeated-center block in the joint gauge')
   sector_reference(:,1)=(sector_frame(:,1)+cmplx(0.3d0,0.4d0,8)*sector_frame(:,2))/sqrt(1.25d0)
   sector_reference(:,2)=(-cmplx(0.3d0,-0.4d0,8)*sector_frame(:,1)+sector_frame(:,2))/sqrt(1.25d0)
   sector_gamma=(0d0,0d0)
