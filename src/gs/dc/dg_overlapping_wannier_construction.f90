@@ -2345,18 +2345,20 @@ contains
   end subroutine transpose_dg_spatial_cores_to_orbital_owners
 
   subroutine verify_dg_wannier_center_affine_orbits(centers,integer_rotations,&
-      fractional_translations,tolerance,ok,message,moment_magnitudes)
+      fractional_translations,tolerance,ok,message,moment_magnitudes,failed_operation)
     real(real64),intent(in)::centers(:,:),fractional_translations(:,:),tolerance
     integer,intent(in)::integer_rotations(:,:,:)
     logical,intent(out)::ok
     character(*),intent(out)::message
     real(real64),intent(in),optional::moment_magnitudes(:,:)
+    integer,intent(out),optional::failed_operation
     real(real64),allocatable::mapped_centers(:,:)
     integer,allocatable::matched_target(:)
     logical,allocatable::seen(:)
     integer::nwann,noperation,operation,source,target
     real(real64)::difference(3),nearest_residual,moment_min,moment_max
 
+    if(present(failed_operation))failed_operation=0
     nwann=size(centers,2);noperation=size(integer_rotations,3)
     ok=nwann>0.and.size(centers,1)==3.and.noperation>0.and.size(integer_rotations,1)==3.and.&
       size(integer_rotations,2)==3.and.all(shape(fractional_translations)==[3,noperation]).and.&
@@ -2388,6 +2390,7 @@ contains
             moment_min=-1d0;moment_max=-1d0
           endif
           ok=.false.
+          if(present(failed_operation))failed_operation=operation
           write(message,'(a,i0,a,i0,4(a,es12.4))')'localized Wannier center orbit mismatch operation=',&
             operation,' source=',source,' nearest_residual=',nearest_residual,' tolerance=',tolerance,&
             ' moment_min=',moment_min,' moment_max=',moment_max
