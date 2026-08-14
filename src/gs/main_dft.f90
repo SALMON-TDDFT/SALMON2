@@ -74,7 +74,8 @@ use dg_overlapping_wannier_construction, only: assemble_dg_distributed_basis_sym
 use dg_overlapping_wannier_construction, only: build_dg_pointwise_affine_owner_map
 use dg_overlapping_wannier_construction, only: solve_dg_affine_common_fixed_point
 use dg_overlapping_wannier_construction, only: compute_dg_periodic_wannier_centers
-use dg_overlapping_wannier_construction, only: verify_dg_wannier_center_affine_orbits
+use dg_overlapping_wannier_construction, only: verify_dg_wannier_center_affine_orbits,&
+  diagnose_dg_point_center_gauge
 use dg_overlapping_wannier_construction, only: transpose_dg_spatial_cores_to_orbital_owners,&
   exchange_dg_point_permuted_orbital_rows,redistribute_dg_owned_orbitals_to_center_fragments,&
   assign_dg_periodic_centers_to_fragments
@@ -652,6 +653,7 @@ contains
     integer::translation_character_generator_count,translation_sector_rank
     integer::translation_character,translation_partner,translation_global_core_count,translation_processed_count
     integer::translation_point_generator_count,translation_point_checked_pair_count
+    integer::failed_operation
     integer::lcfo_symmetry_worst_operation,lcfo_symmetry_worst_generator_index
     real(8),allocatable::lcfo_total_symmetry_residual(:),lcfo_boundary_symmetry_residual(:),&
       lcfo_interior_symmetry_residual(:)
@@ -679,6 +681,7 @@ contains
     integer(8)::one_shot_workspace_peak,one_shot_operator_fingerprint
     integer(8)::occupied_affine_workspace_peak,projection_affine_workspace_peak
     integer(8)::w90_symmetry_workspace_peak
+    integer(8)::center_gauge_workspace_peak
     integer(8)::fixed_center_group_fingerprint,fixed_center_operation_workspace,&
       fixed_center_dmn_workspace_peak
     integer(8)::w90_input_fingerprint,w90_transform_fingerprint
@@ -699,7 +702,7 @@ contains
     real(8)::one_shot_residual,one_shot_orthogonality,one_shot_condition,&
       one_shot_gamma_defect,one_shot_charge,one_shot_trace_charge,&
       one_shot_local_difference,one_shot_global_difference,one_shot_local_norm,one_shot_global_norm
-    logical::ok,reusable,localization_converged,global_inversion_present
+    logical::ok,reusable,localization_converged,global_inversion_present,center_diagnostic_ok
     logical::fixed_center_inversion_present,writer_ok
     logical::translation_self_conjugate
     real(8)::fixed_center_fractional(3)
@@ -717,10 +720,11 @@ contains
     real(8)::translation_operator_defect,translation_anchor_defect,translation_alignment_defect,&
       translation_gamma_defect,translation_closure_defect
     real(8)::translation_alignment_max_defect,translation_gamma_max_defect
+    real(8)::monomial_defect,center_block_leakage,center_representation_unitarity_defect
     type(s_dg_translation_orbit_accumulator)::translation_inverse_state
     integer::localization_iterations,localization_spread_evaluations
     integer::ow_saved_eigenexa_comm
-    character(256)::message,prefix
+    character(256)::message,prefix,center_failure_message,center_diagnostic_message
     character(8),allocatable::w90_atom_symbols(:)
 
     call MPI_Comm_rank(dc%icomm_tot,rank,ierr);call MPI_Comm_size(dc%icomm_tot,nproc,ierr)
@@ -1696,8 +1700,25 @@ contains
       ' minimum=',minval(localized_center_magnitudes),' maximum=',maxval(localized_center_magnitudes)
     call verify_dg_wannier_center_affine_orbits(localized_centers,global_point_integer_rotations,&
       global_point_fractional_translations,retained_closure_search_tolerance,ok,message,&
-      moment_magnitudes=localized_center_magnitudes)
-    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'localized Wannier center orbit failed';end if
+      moment_magnitudes=localized_center_magnitudes,failed_operation=failed_operation)
+    if(.not.ok)then
+      center_failure_message=message
+      call diagnose_dg_point_center_gauge(dc%icomm_tot,ow_core_values,ow_core_weights,&
+        global_symmetry_map(:,failed_operation),global_point_integer_rotations(:,:,failed_operation),&
+        global_point_fractional_translations(:,failed_operation),localized_centers,&
+        retained_closure_search_tolerance,monomial_defect,center_block_leakage,&
+        center_representation_unitarity_defect,center_gauge_workspace_peak,center_diagnostic_ok,&
+        center_diagnostic_message)
+      if(rank==0.and.center_diagnostic_ok)write(*,'(a,i0,3(a,es16.8),a,i0)')&
+        '[OW-GS-DIAGNOSTIC] point_center_gauge failed_operation=',failed_operation,&
+        ' monomial_defect=',monomial_defect,' center_block_leakage=',center_block_leakage,&
+        ' representation_unitarity_defect=',center_representation_unitarity_defect,&
+        ' workspace_peak_bytes=',center_gauge_workspace_peak
+      if(rank==0.and..not.center_diagnostic_ok)&
+        write(0,'(2a)')'point center-gauge diagnostic failed: ',trim(center_diagnostic_message)
+      write(0,'(a)')trim(center_failure_message)
+      error stop 'localized Wannier center orbit failed'
+    end if
     allocate(all_core_ids(ncore,nproc),rank_fragments(nproc))
     call MPI_Allgather(ow_core_ids,ncore,MPI_INTEGER8,all_core_ids,ncore,MPI_INTEGER8,dc%icomm_tot,ierr)
     call MPI_Allgather(dc%i_frag,1,MPI_INTEGER,rank_fragments,1,MPI_INTEGER,dc%icomm_tot,ierr)

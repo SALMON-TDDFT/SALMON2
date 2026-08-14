@@ -169,6 +169,16 @@ assert inverse_position < post_gauge_affine_proof < redistribution_position, (
 assert "global_translation_cocycle" in ow_ground_state_body[inverse_position:redistribution_position], (
     "post-gauge point-cogroup proof must consume the factored translation cocycle"
 )
+center_gate_position = ow_ground_state_body.find("call verify_dg_wannier_center_affine_orbits")
+center_diagnostic_position = ow_ground_state_body.find("call diagnose_dg_point_center_gauge")
+center_stop_position = ow_ground_state_body.find("localized wannier center orbit failed")
+assert 0 <= center_gate_position < center_diagnostic_position < center_stop_position, (
+    "the first failed center operation must emit point center-gauge leakage before the authoritative stop"
+)
+for center_receipt in ("failed_operation", "monomial_defect", "center_block_leakage"):
+    assert center_receipt in ow_ground_state_body[center_gate_position:center_stop_position], (
+        f"production center failure diagnostics must publish {center_receipt}"
+    )
 assert "call localize_dg_occupation_blocks" not in ow_ground_state_body, (
     "production overlapping-Wannier V3 route must not call the custom localizer"
 )
