@@ -59,6 +59,7 @@ with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
     fingerprints = []
     sector_fingerprints = []
     position_tuple_fingerprints = []
+    joint_center_fingerprints = []
     for ranks in (1, 2, 4, 8):
         result = subprocess.run(
             [shutil.which("mpiexec"), "-n", str(ranks), str(exe)],
@@ -76,9 +77,14 @@ with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
             line for line in result.stdout.splitlines() if line.startswith("W90_POSITION_TUPLE_FINGERPRINT")
         )
         position_tuple_fingerprints.append(int(position_line.split()[1]))
+        joint_line = next(
+            line for line in result.stdout.splitlines() if line.startswith("W90_JOINT_CENTER_FINGERPRINT")
+        )
+        joint_center_fingerprints.append(int(joint_line.split()[1]))
     assert max(fingerprints) - min(fingerprints) < 1.0e-12, fingerprints
     assert len(set(sector_fingerprints)) == 1, sector_fingerprints
     assert len(set(position_tuple_fingerprints)) == 1, position_tuple_fingerprints
+    assert len(set(joint_center_fingerprints)) == 1, joint_center_fingerprints
     library = os.environ.get("SALMON_WANNIER90_LIB")
     if library:
         actual = build / "w90_library"

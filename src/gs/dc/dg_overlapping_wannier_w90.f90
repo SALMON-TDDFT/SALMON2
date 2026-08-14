@@ -289,8 +289,8 @@ contains
     integer,allocatable::owner(:),position(:),count(:),order(:)
     real(real64),allocatable::block_eval(:),zrwork(:)
     real(real64)::gmat(3,3),geval(3),gwork(9),gvec(3),two_theta,c,sabs,phase_angle,pivot,&
-      local_objective,global_objective,local_update,global_update,quantum,value
-    complex(real64)::sphase,jacobi(2,2),left_pair(2),right_pair(2),tmp,phase_fix
+      local_objective,global_objective,local_update,global_update,quantum
+    complex(real64)::sphase,jacobi(2,2),left_pair(2),right_pair(2),tmp,phase_fix,probe
     integer::nlocal,m,global_count,local_count,rank,ierr,bad,gbad,status,axis,q,pair_i,pair_j,&
       i,j,k,l,r,block_size,sweep,info,minint,maxint
     integer(int64)::bits,quantized,term,elements,bytes,peak
@@ -472,15 +472,25 @@ contains
     canonical_defect=maxval(abs(gram));call MPI_Allreduce(MPI_IN_PLACE,canonical_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.canonical_defect>10d0*tolerance)then;call cleanup();message='joint periodic-center frame is not orthonormal';return;endif
     quantum=100d0*tolerance;fingerprint=int(z'510E527FADE682D1',int64)
-    do j=1,m;do axis=1,3
-      value=centers(axis,j);quantized=nint(value/quantum,int64);fingerprint=ieor(ishftc(fingerprint,9),quantized)
-    enddo;enddo
-    do k=1,global_count
-      stream=(0d0,0d0);if(rank==owner(k)-1)stream=aligned_rows(position(k),:)
-      call MPI_Bcast(stream,m,MPI_DOUBLE_COMPLEX,owner(k)-1,comm,ierr);if(ierr/=MPI_SUCCESS)then;call cleanup();return;endif
-      do j=1,m
-        quantized=nint(real(stream(j),real64)/quantum,int64);fingerprint=ieor(ishftc(fingerprint,9),quantized)
-        quantized=nint(aimag(stream(j))/quantum,int64);fingerprint=ieor(ishftc(fingerprint,9),quantized)
+    fingerprint=ieor(ishftc(fingerprint,9),int(global_count,int64))
+    fingerprint=ieor(ishftc(fingerprint,9),int(m,int64))
+    do q=1,2
+      stream=(0d0,0d0)
+      do i=1,nlocal
+        phase_angle=2d0*acos(-1d0)*modulo(real(row_ids(i),real64)*&
+          merge(0.6180339887498948482d0,0.4142135623730950488d0,q==1),1d0)
+        probe=cmplx(cos(phase_angle),sin(phase_angle),real64)/sqrt(real(global_count,real64))
+        stream=stream+conjg(aligned_rows(i,:))*probe
+      enddo
+      call MPI_Allreduce(MPI_IN_PLACE,stream,m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;call cleanup();return;endif
+      do k=1,global_count
+        tmp=(0d0,0d0)
+        if(rank==owner(k)-1)tmp=sum(aligned_rows(position(k),:)*stream)
+        call MPI_Bcast(tmp,1,MPI_DOUBLE_COMPLEX,owner(k)-1,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then;call cleanup();return;endif
+        quantized=nint(real(tmp,real64)/quantum,int64);fingerprint=ieor(ishftc(fingerprint,9),quantized)
+        quantized=nint(aimag(tmp)/quantum,int64);fingerprint=ieor(ishftc(fingerprint,9),quantized)
       enddo
     enddo
     if(fingerprint==0_int64)fingerprint=1_int64
