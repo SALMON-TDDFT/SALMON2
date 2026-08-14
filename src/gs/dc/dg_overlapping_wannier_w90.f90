@@ -287,14 +287,16 @@ contains
 #ifdef USE_MPI
     complex(real64),allocatable::hmats(:,:,:),unitary(:,:),gram(:,:),stream(:),block(:,:),zwork(:)
     integer,allocatable::owner(:),position(:),count(:),order(:)
+    integer(int64),allocatable::payload_bits(:),payload_minimum(:),payload_maximum(:)
     real(real64),allocatable::block_eval(:),zrwork(:)
     real(real64)::gmat(3,3),geval(3),gwork(9),gvec(3),two_theta,c,sabs,phase_angle,pivot,&
       local_objective,global_objective,local_update,global_update,quantum
     complex(real64)::sphase,jacobi(2,2),left_pair(2),right_pair(2),tmp,phase_fix,probe
     integer::nlocal,m,global_count,local_count,rank,ierr,bad,gbad,status,axis,q,pair_i,pair_j,&
-      i,j,k,l,r,block_size,sweep,info,minint,maxint
+      i,j,k,l,r,block_size,sweep,info,minint,maxint,payload_count
     real(real64)::minimum_tolerance,maximum_tolerance,safe_position_magnitude,safe_lcfo_magnitude
-    integer(int64)::bits,quantized,term,elements,bytes,peak,minimum_fingerprint,maximum_fingerprint
+    integer(int64)::bits,quantized,term,elements,bytes,peak,minimum_fingerprint,maximum_fingerprint,&
+      payload_elements
     logical::receipt_valid,swapped
     interface
       subroutine dsyev(jobz,uplo,n,a,lda,w,work,lwork,info)
@@ -350,20 +352,31 @@ contains
     endif
     local_count=int(maxval(row_ids));call MPI_Allreduce(local_count,global_count,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     elements=0_int64;bytes=0_int64;receipt_valid=ierr==MPI_SUCCESS
-    call checked_product([9_int64,int(m,int64),int(m,int64)],term,receipt_valid);call checked_add(elements,term,receipt_valid)
-    call checked_product([int(nlocal,int64),int(m,int64)],term,receipt_valid);call checked_add(elements,term,receipt_valid)
-    call checked_product([3_int64,int(m,int64)],term,receipt_valid);call checked_add(elements,term,receipt_valid)
-    call checked_product([elements,16_int64],bytes,receipt_valid)
-    call checked_product([7_int64,int(m,int64),8_int64],term,receipt_valid);call checked_add(bytes,term,receipt_valid)
-    call checked_product([4_int64,int(global_count,int64),4_int64],term,receipt_valid);call checked_add(bytes,term,receipt_valid)
+    if(receipt_valid)call checked_product([8_int64,int(m,int64),int(m,int64)],payload_elements,receipt_valid)
+    if(receipt_valid)receipt_valid=payload_elements<=int(huge(0),int64)
+    if(receipt_valid)call checked_product([9_int64,int(m,int64),int(m,int64)],term,receipt_valid)
+    call checked_add(elements,term,receipt_valid)
+    if(receipt_valid)call checked_product([int(nlocal,int64),int(m,int64)],term,receipt_valid)
+    call checked_add(elements,term,receipt_valid)
+    if(receipt_valid)call checked_product([3_int64,int(m,int64)],term,receipt_valid)
+    call checked_add(elements,term,receipt_valid)
+    if(receipt_valid)call checked_product([elements,16_int64],bytes,receipt_valid)
+    if(receipt_valid)call checked_product([7_int64,int(m,int64),8_int64],term,receipt_valid)
+    call checked_add(bytes,term,receipt_valid)
+    if(receipt_valid)call checked_product([4_int64,int(global_count,int64),4_int64],term,receipt_valid)
+    call checked_add(bytes,term,receipt_valid)
+    if(receipt_valid)call checked_product([3_int64,payload_elements,8_int64],term,receipt_valid)
+    call checked_add(bytes,term,receipt_valid)
     bad=merge(0,1,receipt_valid)
     call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='joint periodic-center workspace overflows';return;endif
     workspace_peak_bytes=bytes
+    payload_count=int(payload_elements)
     call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
     allocate(hmats(m,m,6),unitary(m,m),gram(m,m),stream(m),block(m,m),zwork(max(1,2*m)),&
       block_eval(m),zrwork(max(1,3*m)),aligned_rows(nlocal,m),centers(3,m),&
-      owner(global_count),position(global_count),count(global_count),order(m),stat=status)
+      owner(global_count),position(global_count),count(global_count),order(m),payload_bits(payload_count),&
+      payload_minimum(payload_count),payload_maximum(payload_count),stat=status)
     call MPI_Allreduce(status,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.gbad/=0)then;call cleanup();message='joint periodic-center allocation failed';return;endif
     owner=0;position=0;count=0
@@ -375,6 +388,21 @@ contains
     call MPI_Allreduce(MPI_IN_PLACE,position,global_count,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)then;call cleanup();return;endif
     call MPI_Allreduce(MPI_IN_PLACE,count,global_count,MPI_INTEGER,MPI_SUM,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.any(count/=1))then;call cleanup();message='joint periodic-center rows are not uniquely owned';return;endif
+    k=0
+    do axis=1,3;do j=1,m;do i=1,m
+      k=k+1;payload_bits(k)=transfer(real(position_tuple(i,j,axis),real64),bits)
+      k=k+1;payload_bits(k)=transfer(aimag(position_tuple(i,j,axis)),bits)
+    enddo;enddo;enddo
+    do j=1,m;do i=1,m
+      k=k+1;payload_bits(k)=transfer(real(lcfo_operator(i,j),real64),bits)
+      k=k+1;payload_bits(k)=transfer(aimag(lcfo_operator(i,j)),bits)
+    enddo;enddo
+    call MPI_Allreduce(payload_bits,payload_minimum,payload_count,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;call cleanup();return;endif
+    call MPI_Allreduce(payload_bits,payload_maximum,payload_count,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(payload_minimum/=payload_maximum))then
+      call cleanup();message='joint periodic-center payload disagrees';return
+    endif
     do axis=1,3
       hmats(:,:,2*axis-1)=0.5d0*(position_tuple(:,:,axis)+conjg(transpose(position_tuple(:,:,axis))))
       hmats(:,:,2*axis)=cmplx(0d0,-0.5d0,real64)*(position_tuple(:,:,axis)-&
@@ -538,6 +566,9 @@ contains
       if(allocated(position))deallocate(position)
       if(allocated(count))deallocate(count)
       if(allocated(order))deallocate(order)
+      if(allocated(payload_bits))deallocate(payload_bits)
+      if(allocated(payload_minimum))deallocate(payload_minimum)
+      if(allocated(payload_maximum))deallocate(payload_maximum)
     end subroutine
 #else
     ok=.false.;message='joint periodic-center gauge requires MPI';final_objective=huge(1d0)
