@@ -20,7 +20,132 @@ module dg_overlapping_wannier_w90
   public::anchor_dg_w90_reference_character_sector
   public::project_dg_w90_reference_sector_operators
   public::validate_dg_w90_localization_cluster
+  public::build_dg_sector_periodic_position_tuple
 contains
+
+  subroutine build_dg_sector_periodic_position_tuple(comm,row_ids,global_row_count,sector_rows,&
+      periodic_phases,tolerance,provenance_fingerprint,position_tuple,gram_defect,fingerprint,&
+      workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,global_row_count
+    integer(int64),intent(in)::row_ids(:),provenance_fingerprint
+    complex(real64),intent(in)::sector_rows(:,:),periodic_phases(:,:)
+    real(real64),intent(in)::tolerance
+    complex(real64),allocatable,intent(out)::position_tuple(:,:,:)
+    real(real64),intent(out)::gram_defect
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nlocal,m,i,j,axis,rank,ierr,bad,gbad,status,minint,maxint
+    integer,allocatable::owner(:),position(:),count(:)
+    complex(real64),allocatable::local_tuple(:,:,:),gram(:,:),phased(:,:)
+    real(real64)::mintol,maxtol,local_scale,global_scale,safe_scale,quantum,value
+    integer(int64)::minhash,maxhash,elements,term,bytes,bits,quantized
+    logical::receipt_valid
+    nlocal=size(row_ids);m=size(sector_rows,2)
+    ok=.false.;message='';gram_defect=huge(1d0);fingerprint=0_int64;workspace_peak_bytes=0_int64
+    bad=merge(0,1,global_row_count>=1.and.m>=1.and.size(sector_rows,1)==nlocal.and.&
+      all(shape(periodic_phases)==[nlocal,3]).and.provenance_fingerprint/=0_int64.and.&
+      tolerance>=1d-15.and.tolerance<=1d-2.and.ieee_is_finite(tolerance).and.&
+      all(row_ids>=1_int64).and.all(row_ids<=int(global_row_count,int64)).and.&
+      all(ieee_is_finite(real(sector_rows))).and.all(ieee_is_finite(aimag(sector_rows))).and.&
+      all(ieee_is_finite(real(periodic_phases))).and.all(ieee_is_finite(aimag(periodic_phases))).and.&
+      maxval(abs(abs(periodic_phases)-1d0))<=10d0*tolerance)
+    call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='invalid sector periodic-position tuple contract';return;endif
+    do i=1,2
+      j=merge(global_row_count,m,i==1)
+      call MPI_Allreduce(j,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(j,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='periodic-position tuple dimensions disagree';return;endif
+    enddo
+    call MPI_Allreduce(tolerance,mintol,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tolerance,maxtol,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.mintol/=maxtol)then;message='periodic-position tuple tolerance disagrees';return;endif
+    call MPI_Allreduce(provenance_fingerprint,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(provenance_fingerprint,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)then;message='periodic-position provenance disagrees';return;endif
+    local_scale=0d0;if(nlocal>0)local_scale=maxval(abs(sector_rows))
+    call MPI_Allreduce(local_scale,global_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    safe_scale=sqrt(huge(1d0)/real(global_row_count,real64))/4d0
+    bad=merge(0,1,ierr==MPI_SUCCESS.and.global_scale<=safe_scale)
+    elements=0_int64;bytes=0_int64;receipt_valid=.true.
+    call checked_product([7_int64,int(m,int64),int(m,int64)],term,receipt_valid);call checked_add(elements,term,receipt_valid)
+    call checked_product([int(nlocal,int64),int(m,int64)],term,receipt_valid);call checked_add(elements,term,receipt_valid)
+    call checked_product([elements,16_int64],bytes,receipt_valid)
+    call checked_product([3_int64,int(global_row_count,int64),4_int64],term,receipt_valid);call checked_add(bytes,term,receipt_valid)
+    if(.not.receipt_valid)bad=1
+    call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='sector periodic-position magnitude or workspace overflows';return;endif
+    workspace_peak_bytes=bytes
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
+    allocate(position_tuple(m,m,3),local_tuple(m,m,3),gram(m,m),phased(nlocal,m),&
+      owner(global_row_count),position(global_row_count),count(global_row_count),stat=status)
+    call MPI_Allreduce(status,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then
+      call cleanup();message='sector periodic-position allocation failed';return
+    endif
+    owner=0;position=0;count=0
+    do i=1,nlocal
+      owner(int(row_ids(i)))=rank+1;position(int(row_ids(i)))=i
+      count(int(row_ids(i)))=count(int(row_ids(i)))+1
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,owner,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)then;call cleanup();return;endif
+    call MPI_Allreduce(MPI_IN_PLACE,position,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)then;call cleanup();return;endif
+    call MPI_Allreduce(MPI_IN_PLACE,count,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    bad=merge(0,1,ierr==MPI_SUCCESS.and.all(count==1))
+    call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then;call cleanup();message='sector periodic-position row ownership is incomplete';return;endif
+    gram=matmul(conjg(transpose(sector_rows)),sector_rows)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    gram_defect=0d0
+    do j=1,m;do i=1,m
+      gram_defect=max(gram_defect,abs(gram(i,j)-merge((1d0,0d0),(0d0,0d0),i==j)))
+    enddo;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,gram_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gram_defect>10d0*tolerance)then;call cleanup();message='sector periodic-position frame is not orthonormal';return;endif
+    do axis=1,3
+      do j=1,m;phased(:,j)=periodic_phases(:,axis)*sector_rows(:,j);enddo
+      local_tuple(:,:,axis)=matmul(conjg(transpose(sector_rows)),phased)
+    enddo
+    call MPI_Allreduce(local_tuple,position_tuple,3*m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or..not.all(ieee_is_finite(real(position_tuple))).or.&
+        .not.all(ieee_is_finite(aimag(position_tuple))))then
+      call cleanup();message='sector periodic-position tuple is nonfinite';return
+    endif
+    fingerprint=ieor(provenance_fingerprint,int(m,int64));quantum=100d0*tolerance
+    do axis=1,3;do j=1,m;do i=1,m
+      value=real(position_tuple(i,j,axis),real64)
+      if(abs(value)/quantum>0.25d0*real(huge(0_int64),real64))then;call cleanup();message='periodic-position fingerprint range overflows';return;endif
+      quantized=nint(value/quantum,int64);fingerprint=ieor(ishftc(fingerprint,11),quantized)
+      value=aimag(position_tuple(i,j,axis))
+      if(abs(value)/quantum>0.25d0*real(huge(0_int64),real64))then;call cleanup();message='periodic-position fingerprint range overflows';return;endif
+      quantized=nint(value/quantum,int64);fingerprint=ieor(ishftc(fingerprint,7),quantized)
+    enddo;enddo;enddo
+    if(fingerprint==0_int64)fingerprint=ieor(provenance_fingerprint,7919_int64)
+    call MPI_Allreduce(workspace_peak_bytes,term,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr==MPI_SUCCESS)workspace_peak_bytes=term
+    ok=ierr==MPI_SUCCESS
+    if(ok)message=''
+    call cleanup(.false.)
+  contains
+    subroutine cleanup(remove_output)
+      logical,intent(in),optional::remove_output
+      logical::drop
+      drop=.true.;if(present(remove_output))drop=remove_output
+      if(drop.and.allocated(position_tuple))deallocate(position_tuple)
+      if(allocated(local_tuple))deallocate(local_tuple)
+      if(allocated(gram))deallocate(gram)
+      if(allocated(phased))deallocate(phased)
+      if(allocated(owner))deallocate(owner)
+      if(allocated(position))deallocate(position)
+      if(allocated(count))deallocate(count)
+    end subroutine
+#else
+    ok=.false.;message='sector periodic-position tuple requires MPI';gram_defect=huge(1d0)
+    fingerprint=0_int64;workspace_peak_bytes=0_int64
+#endif
+  end subroutine build_dg_sector_periodic_position_tuple
 
   subroutine project_dg_w90_reference_sector_operators(comm,row_ids,sector_rows,w90_rows,w90_values,&
       lcfo_rows,lcfo_values,global_row_count,w90_fingerprint,lcfo_fingerprint,w90_frame_defect,lcfo_source_defect,tolerance,&
