@@ -464,41 +464,83 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer::nt,ng,nlocal,status,ierr,local_bad,global_bad,g,x,p,power
-    integer(int64)::integer_elements,term
-    complex(real64),allocatable::unit_character(:),discarded_phase(:)
-    integer(int64)::discarded_fingerprint,discarded_payload,discarded_workspace
+    integer::nt,ng,nlocal,status,ierr,local_bad,global_bad,g,h,k,x,p,power,target,metadata_count,index,&
+      minint,maxint
+    integer,allocatable::ownership_count(:),permutation_count(:),metadata(:),metadata_minimum(:),metadata_maximum(:)
+    integer(int64)::integer_elements,term,minhash,maxhash
+    real(real64)::mintol,maxtol
     call release_dg_prepared_translation_action(action)
     nt=size(element_words,1);ng=size(generator_maps,2);nlocal=size(row_ids)
     ok=.false.;message=''
-    allocate(unit_character(nt),stat=status)
-    call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
-      if(allocated(unit_character))deallocate(unit_character)
-      message='prepared translation validation allocation failed';return
+    local_bad=merge(0,1,global_row_count>=1.and.nt>=1.and.ng>=1.and.nlocal>=1.and.&
+      size(generator_maps,1)==nlocal.and.size(generator_orders)==ng.and.&
+      size(element_words,2)==ng.and.all(shape(product_table)==[nt,nt]).and.&
+      identity_operation>=1.and.identity_operation<=nt.and.catalog_fingerprint/=0_int64.and.&
+      tolerance>=1d-15.and.tolerance<=1d-2.and.ieee_is_finite(tolerance).and.&
+      all(row_ids>=1_int64).and.all(row_ids<=int(global_row_count,int64)).and.&
+      all(generator_maps>=1_int64).and.all(generator_maps<=int(global_row_count,int64)).and.&
+      all(generator_orders>=1).and.all(generator_orders<=nt).and.all(mod(nt,generator_orders)==0).and.&
+      all(element_words>=0).and.all(product_table>=1).and.all(product_table<=nt))
+    if(local_bad==0)then
+      do g=1,ng;if(any(element_words(:,g)>=generator_orders(g)))local_bad=1;enddo
     endif
-    unit_character=(1d0,0d0)
-    call build_dg_translation_character_intertwining_phase(comm,row_ids,global_row_count,generator_maps,&
-      generator_orders,element_words,product_table,identity_operation,unit_character,unit_character,&
-      catalog_fingerprint,tolerance,discarded_phase,discarded_fingerprint,discarded_payload,discarded_workspace,ok,message)
-    if(allocated(unit_character))deallocate(unit_character)
-    if(allocated(discarded_phase))deallocate(discarded_phase)
-    if(.not.ok)return
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid prepared translation action contract';return;endif
+    call agree_integer(global_row_count);if(global_bad/=0)return
+    call agree_integer(nt);if(global_bad/=0)return
+    call agree_integer(ng);if(global_bad/=0)return
+    call MPI_Allreduce(tolerance,mintol,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tolerance,maxtol,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.mintol/=maxtol)then;message='prepared translation tolerance disagrees';return;endif
+    call MPI_Allreduce(catalog_fingerprint,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(catalog_fingerprint,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)then;message='prepared translation catalog disagrees';return;endif
     local_bad=0;integer_elements=0_int64
-    if(int(global_row_count,int64)>huge(0_int64)/int(nt+ng,int64))local_bad=1
-    if(local_bad==0)integer_elements=int(global_row_count,int64)*int(nt+ng,int64)
-    term=int(nlocal+ng+nt*ng+nt*nt,int64)
-    if(integer_elements>huge(0_int64)-term)local_bad=1
+    if(int(nt,int64)>huge(0_int64)/(int(ng,int64)+int(nt,int64)))local_bad=1
+    if(local_bad==0)then
+      term=int(ng,int64)+int(nt,int64)*int(ng+nt,int64)+1_int64
+      if(term>int(huge(0),int64))local_bad=1
+    endif
+    if(local_bad==0)then
+      metadata_count=int(term)
+      if(int(global_row_count,int64)>huge(0_int64)/(int(nt,int64)+int(ng,int64)+2_int64))local_bad=1
+    endif
+    if(local_bad==0)integer_elements=int(global_row_count,int64)*(int(nt,int64)+int(ng,int64)+2_int64)
+    if(local_bad==0)then
+      term=int(nlocal,int64)+int(ng,int64)+int(nt,int64)*int(ng,int64)+&
+        int(nt,int64)*int(nt,int64)+3_int64*int(metadata_count,int64)
+      if(integer_elements>huge(0_int64)-term)local_bad=1
+    endif
     if(local_bad==0.and.integer_elements+term>huge(0_int64)/4_int64)local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='prepared translation action workspace overflows';ok=.false.;return;endif
     allocate(action%row_ids(nlocal),action%generator_orders(ng),action%element_words(nt,ng),&
       action%product_table(nt,nt),action%generator_maps(global_row_count,ng),&
-      action%element_maps(global_row_count,nt),stat=status)
+      action%element_maps(global_row_count,nt),ownership_count(global_row_count),&
+      permutation_count(global_row_count),metadata(metadata_count),metadata_minimum(metadata_count),&
+      metadata_maximum(metadata_count),stat=status)
     call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
-      call release_dg_prepared_translation_action(action)
+      call release_dg_prepared_translation_action(action);call cleanup_temporary()
       message='prepared translation action allocation failed';ok=.false.;return
+    endif
+    ownership_count=0
+    do x=1,nlocal;ownership_count(int(row_ids(x)))=ownership_count(int(row_ids(x)))+1;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,ownership_count,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(ownership_count/=1))then
+      call release_dg_prepared_translation_action(action);call cleanup_temporary()
+      message='prepared translation rows are not uniquely owned';return
+    endif
+    index=1;metadata(index)=identity_operation
+    do g=1,ng;index=index+1;metadata(index)=generator_orders(g);enddo
+    do g=1,ng;do h=1,nt;index=index+1;metadata(index)=element_words(h,g);enddo;enddo
+    do g=1,nt;do h=1,nt;index=index+1;metadata(index)=product_table(h,g);enddo;enddo
+    call MPI_Allreduce(metadata,metadata_minimum,metadata_count,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;call release_dg_prepared_translation_action(action);call cleanup_temporary();return;endif
+    call MPI_Allreduce(metadata,metadata_maximum,metadata_count,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(metadata_minimum/=metadata_maximum))then
+      call release_dg_prepared_translation_action(action);call cleanup_temporary()
+      message='prepared translation integer metadata disagree';return
     endif
     action%row_ids=row_ids;action%generator_orders=generator_orders
     action%element_words=element_words;action%product_table=product_table
@@ -511,7 +553,7 @@ contains
       enddo
       call MPI_Allreduce(MPI_IN_PLACE,action%generator_maps(:,g),global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr)
       if(ierr/=MPI_SUCCESS)then
-        call release_dg_prepared_translation_action(action)
+        call release_dg_prepared_translation_action(action);call cleanup_temporary()
         message='prepared translation generator gather failed';ok=.false.;return
       endif
     enddo
@@ -523,12 +565,71 @@ contains
         enddo
       enddo
     enddo
+    local_bad=0
+    do g=1,ng
+      permutation_count=0
+      do x=1,global_row_count
+        target=action%generator_maps(x,g)
+        if(target<1.or.target>global_row_count)then;local_bad=1;cycle;endif
+        permutation_count(target)=permutation_count(target)+1
+      enddo
+      if(any(permutation_count/=1))local_bad=1
+      do x=1,global_row_count;target=x
+        do power=1,generator_orders(g);target=action%generator_maps(target,g);enddo
+        if(target/=x)local_bad=1
+      enddo
+    enddo
+    do g=1,nt
+      permutation_count=0
+      do x=1,global_row_count
+        target=action%element_maps(x,g);permutation_count(target)=permutation_count(target)+1
+      enddo
+      if(any(permutation_count/=1))local_bad=1
+      if(g==identity_operation)then
+        do x=1,global_row_count;if(action%element_maps(x,g)/=x)local_bad=1;enddo
+      else
+        do x=1,global_row_count;if(action%element_maps(x,g)==x)local_bad=1;enddo
+      endif
+    enddo
+    do g=1,nt;do h=1,nt
+      k=product_table(h,g)
+      do x=1,global_row_count
+        if(action%element_maps(action%element_maps(x,h),g)/=action%element_maps(x,k))local_bad=1
+      enddo
+    enddo;enddo
+    do g=1,nt;do h=1,nt;do k=1,nt
+      if(product_table(product_table(g,h),k)/=product_table(g,product_table(h,k)))local_bad=1
+    enddo;enddo;enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call cleanup_temporary()
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      call release_dg_prepared_translation_action(action)
+      message='prepared translation maps do not realize the supplied free group action';return
+    endif
     action%workspace_peak_bytes=4_int64*(integer_elements+term)
-    action%construction_collective_count=ng+1
+    action%construction_collective_count=ng+10
     ok=.true.
 #else
     call release_dg_prepared_translation_action(action)
     ok=.false.;message='prepared translation action requires MPI'
+#endif
+  contains
+#ifdef USE_MPI
+    subroutine agree_integer(value)
+      integer,intent(in)::value
+      call MPI_Allreduce(value,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;global_bad=1;return;endif
+      call MPI_Allreduce(value,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      global_bad=merge(1,0,ierr/=MPI_SUCCESS.or.minint/=maxint)
+      if(global_bad/=0)message='prepared translation dimensions disagree'
+    end subroutine
+    subroutine cleanup_temporary()
+      if(allocated(ownership_count))deallocate(ownership_count)
+      if(allocated(permutation_count))deallocate(permutation_count)
+      if(allocated(metadata))deallocate(metadata)
+      if(allocated(metadata_minimum))deallocate(metadata_minimum)
+      if(allocated(metadata_maximum))deallocate(metadata_maximum)
+    end subroutine
 #endif
   end subroutine prepare_dg_translation_character_action
 

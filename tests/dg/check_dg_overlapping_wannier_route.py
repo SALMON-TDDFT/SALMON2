@@ -38,6 +38,17 @@ scf_source = source("src/gs/scf_iteration_dft.f90")
 dcdft_source = source("src/gs/dc/dcdft.f90")
 types_source = source("src/gs/dc/dg_overlapping_wannier_types.f90")
 construction_source = source("src/gs/dc/dg_overlapping_wannier_construction.f90")
+prepared_action = re.search(
+    r"subroutine\s+prepare_dg_translation_character_action(?P<body>.*?)end\s+subroutine",
+    construction_source,
+    re.I | re.S,
+)
+assert prepared_action
+assert not re.search(
+    r"call\s+build_dg_translation_character_intertwining_phase\b",
+    prepared_action.group("body"),
+    re.I,
+), "prepared translation action must not repeat the full one-shot action validation"
 assert construction_source.lower().count(
     "product_table(right_operation,left_operation)"
 ) >= 2, "point pullback composition must use the reversed geometric product order"
