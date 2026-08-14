@@ -110,7 +110,7 @@ use dg_overlapping_wannier_w90,only:setup_dg_w90_gamma_library,&
   inherit_dg_w90_affine_receipts,project_dg_w90_reference_sector_operators,&
   anchor_dg_w90_reference_character_sector,align_dg_w90_character_sector_gauge,&
   align_dg_w90_character_sectors_by_periodic_phase,sew_dg_w90_periodic_phase_conjugate_sector,&
-  build_dg_sector_periodic_position_tuple,canonicalize_dg_sector_periodic_position_gauge
+  build_dg_sector_periodic_position_tuple,jointly_canonicalize_dg_sector_periodic_position_gauge
 use lcfo_wannier_sawf, only: t_sawf_crystallographic_catalog,t_sawf_symop,&
   load_sawf_crystallographic_catalog_auto
 use lcfo_wannier_sawf_dmn,only:t_sawf_dmn_writer,t_sawf_operation_index,&
@@ -654,7 +654,8 @@ contains
       translation_identity_operation,translation_adapted_rank
     integer::global_point_cogroup_identity_operation
     integer::translation_character_generator_count,translation_sector_rank
-    integer::translation_character,translation_partner,translation_global_core_count,translation_processed_count
+    integer::translation_character,translation_partner,translation_global_core_count,translation_processed_count,&
+      translation_joint_sweeps
     integer::translation_point_generator_count,translation_point_checked_pair_count
     integer::failed_operation
     integer::lcfo_symmetry_worst_operation,lcfo_symmetry_worst_generator_index
@@ -716,7 +717,7 @@ contains
     real(8)::localization_initial_spread,localization_final_spread,localization_maximum_gradient,&
       retained_raw_unitarity_defect,retained_unitarity_defect,retained_group_closure_defect,&
       global_retained_group_closure_defect,retained_closure_search_tolerance
-    real(8),allocatable::global_point_rotations(:,:,:)
+    real(8),allocatable::global_point_rotations(:,:,:),translation_joint_centers(:,:)
     real(8),allocatable::global_point_fractional_translations(:,:)
     real(8)::w90_reciprocal_lattice(3,3),w90_lattice_inverse(3,3),w90_determinant,w90_spread(3)
     real(8)::w90_identity_defect,w90_unitarity_defect,w90_closure_defect
@@ -724,7 +725,8 @@ contains
       translation_order_defect,translation_gamma_pairing_defect
     real(8)::translation_operator_defect,translation_anchor_defect,translation_alignment_defect,&
       translation_gamma_defect,translation_closure_defect
-    real(8)::translation_position_gram_defect,translation_canonical_position_defect
+    real(8)::translation_position_gram_defect,translation_canonical_position_defect,&
+      translation_joint_objective,translation_joint_update
     real(8)::translation_alignment_max_defect,translation_gamma_max_defect
     real(8)::monomial_defect,center_block_leakage,center_representation_unitarity_defect
     type(s_dg_translation_orbit_accumulator)::translation_inverse_state
@@ -1543,16 +1545,18 @@ contains
       error stop 'weighted reference-sector allocation failed collectively'
     translation_weighted_reference=spread(sqrt(ow_core_weights),2,translation_sector_rank)*&
       translation_reference_spatial
-    call canonicalize_dg_sector_periodic_position_gauge(dc%icomm_tot,translation_spatial_ids,&
+    call jointly_canonicalize_dg_sector_periodic_position_gauge(dc%icomm_tot,translation_spatial_ids,&
       translation_weighted_reference,translation_position_tuple,translation_position_lcfo_operator,&
       dg_ow_symmetry_tolerance,translation_position_fingerprint,translation_canonical_weighted,&
-      translation_anchor_rotation,translation_canonical_position_defect,translation_canonical_position_fingerprint,&
+      translation_anchor_rotation,translation_joint_centers,translation_joint_objective,translation_joint_update,&
+      translation_joint_sweeps,translation_canonical_position_defect,translation_canonical_position_fingerprint,&
       translation_canonical_position_workspace,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'reference periodic-position gauge failed';endif
     translation_reference_spatial=translation_canonical_weighted/&
       spread(sqrt(ow_core_weights),2,translation_sector_rank)
     deallocate(translation_canonical_weighted,translation_weighted_reference,translation_position_tuple,&
       translation_position_phases,translation_anchor_rotation,translation_position_lcfo_operator)
+    deallocate(translation_joint_centers)
     deallocate(translation_sector_rows,translation_w90_operator,translation_lcfo_operator,translation_reference_rows)
 
     allocate(translation_generator_maps(ncore,&
@@ -1578,6 +1582,8 @@ contains
     translation_post_gauge_fingerprint=ieor(translation_operator_fingerprint,translation_anchor_fingerprint)
     translation_post_gauge_fingerprint=ieor(ishftc(translation_post_gauge_fingerprint,11),&
       translation_materialize_fingerprint)
+    translation_post_gauge_fingerprint=ieor(ishftc(translation_post_gauge_fingerprint,11),&
+      translation_canonical_position_fingerprint)
     do translation_character=1,size(translation_characters,1)
       if(translation_character_done(translation_character))cycle
       if(translation_character==1)then

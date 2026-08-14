@@ -101,7 +101,7 @@ for mlwf_call in (
     "anchor_dg_w90_reference_character_sector",
     "materialize_dg_row_owned_sector_on_spatial_grid",
     "build_dg_sector_periodic_position_tuple",
-    "canonicalize_dg_sector_periodic_position_gauge",
+    "jointly_canonicalize_dg_sector_periodic_position_gauge",
     "prepare_dg_translation_character_action",
     "build_dg_translation_character_intertwining_phase_prepared",
     "align_dg_w90_character_sectors_by_periodic_phase",
@@ -121,7 +121,7 @@ production_order = [
     ow_ground_state_body.find("call anchor_dg_w90_reference_character_sector"),
     ow_ground_state_body.find("call materialize_dg_row_owned_sector_on_spatial_grid"),
     ow_ground_state_body.find("call build_dg_sector_periodic_position_tuple"),
-    ow_ground_state_body.find("call canonicalize_dg_sector_periodic_position_gauge"),
+    ow_ground_state_body.find("call jointly_canonicalize_dg_sector_periodic_position_gauge"),
     ow_ground_state_body.find("call prepare_dg_translation_character_action"),
     ow_ground_state_body.find("call build_dg_translation_character_intertwining_phase_prepared"),
     ow_ground_state_body.find("call align_dg_w90_character_sectors_by_periodic_phase"),
@@ -133,6 +133,9 @@ production_order = [
 assert all(position >= 0 for position in production_order) and production_order == sorted(production_order), (
     "production order must be affine proof -> DMN -> W90 -> sectors -> alignment -> inverse transform -> "
     "redistribution -> V3"
+)
+assert not re.search(r"call\s+canonicalize_dg_sector_periodic_position_gauge\b", ow_ground_state_body), (
+    "production must not use the noncovariant fixed-direction periodic-position gauge"
 )
 character_loop_position = ow_ground_state_body.find("do translation_character=1")
 prepare_position = ow_ground_state_body.find("call prepare_dg_translation_character_action")
