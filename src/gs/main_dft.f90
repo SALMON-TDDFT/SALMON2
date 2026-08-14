@@ -1692,8 +1692,11 @@ contains
     call compute_dg_periodic_wannier_centers(dc%icomm_tot,ow_core_values,ow_core_weights,&
       core_periodic_phase,localized_centers,localized_center_magnitudes,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'localized Wannier center measurement failed';end if
+    if(rank==0)write(*,'(a,2(a,es12.4))')'[OW-GS-DIAGNOSTIC] periodic_center_magnitude',&
+      ' minimum=',minval(localized_center_magnitudes),' maximum=',maxval(localized_center_magnitudes)
     call verify_dg_wannier_center_affine_orbits(localized_centers,global_point_integer_rotations,&
-      global_point_fractional_translations,retained_closure_search_tolerance,ok,message)
+      global_point_fractional_translations,retained_closure_search_tolerance,ok,message,&
+      moment_magnitudes=localized_center_magnitudes)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'localized Wannier center orbit failed';end if
     allocate(all_core_ids(ncore,nproc),rank_fragments(nproc))
     call MPI_Allgather(ow_core_ids,ncore,MPI_INTEGER8,all_core_ids,ncore,MPI_INTEGER8,dc%icomm_tot,ierr)

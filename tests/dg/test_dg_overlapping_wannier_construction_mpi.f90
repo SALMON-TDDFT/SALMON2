@@ -168,7 +168,7 @@ program test_dg_overlapping_wannier_construction_mpi
   integer,allocatable::center_owners(:),center_local_orbitals(:)
   integer,allocatable::center_fragments(:),assigned_center_owners(:),assigned_center_fragments(:)
   real(8)::assignment_centers(3,4)
-  real(8)::orbit_centers(3,2)
+  real(8)::orbit_centers(3,2),orbit_center_magnitudes(3,2)
   complex(8)::fractional_core_candidates(2,2)
   complex(8),allocatable::core_occupied_coefficients(:,:)
   integer(8)::mixed_map(2,1)
@@ -484,9 +484,12 @@ program test_dg_overlapping_wannier_construction_mpi
     affine_translations,1d-12,ok,message)
   call require(ok,'Wannier centers form a closed full affine orbit independently of owner fragment')
   orbit_centers(1,2)=0.45d0
+  orbit_center_magnitudes=0.9d0;orbit_center_magnitudes(:,2)=[0.8d0,0.7d0,0.6d0]
   call verify_dg_wannier_center_affine_orbits(orbit_centers,affine_rotations,&
-    affine_translations,1d-12,ok,message)
-  call require(.not.ok,'broken full affine Wannier center orbit is rejected')
+    affine_translations,1d-12,ok,message,moment_magnitudes=orbit_center_magnitudes)
+  call require(.not.ok.and.has_text(message,'operation=').and.has_text(message,'source=').and.&
+    has_text(message,'nearest_residual=').and.has_text(message,'moment_min='),&
+    'broken full affine Wannier center orbit reports actionable mismatch diagnostics')
   calibrated_map(:,1)=int(rank*4,8)+[1_8,2_8,3_8,4_8]
   calibrated_map(:,2)=int(rank*4,8)+[2_8,1_8,4_8,3_8]
   calibrated_boundary=[.true.,.true.,.false.,.false.]
@@ -1637,6 +1640,11 @@ program test_dg_overlapping_wannier_construction_mpi
   endif
   call MPI_Finalize(ierr)
 contains
+  logical function has_text(text,pattern) result(found)
+    intrinsic::index
+    character(*),intent(in)::text,pattern
+    found=index(text,pattern)>0
+  end function
   subroutine local_projector(values,projection)
     complex(8),intent(in)::values(:,:)
     complex(8),allocatable,intent(out)::projection(:,:)

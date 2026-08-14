@@ -2345,21 +2345,27 @@ contains
   end subroutine transpose_dg_spatial_cores_to_orbital_owners
 
   subroutine verify_dg_wannier_center_affine_orbits(centers,integer_rotations,&
-      fractional_translations,tolerance,ok,message)
+      fractional_translations,tolerance,ok,message,moment_magnitudes)
     real(real64),intent(in)::centers(:,:),fractional_translations(:,:),tolerance
     integer,intent(in)::integer_rotations(:,:,:)
     logical,intent(out)::ok
     character(*),intent(out)::message
+    real(real64),intent(in),optional::moment_magnitudes(:,:)
     real(real64),allocatable::mapped_centers(:,:)
     integer,allocatable::matched_target(:)
     logical,allocatable::seen(:)
-    integer::nwann,noperation,operation,source
+    integer::nwann,noperation,operation,source,target
+    real(real64)::difference(3),nearest_residual,moment_min,moment_max
 
     nwann=size(centers,2);noperation=size(integer_rotations,3)
     ok=nwann>0.and.size(centers,1)==3.and.noperation>0.and.size(integer_rotations,1)==3.and.&
       size(integer_rotations,2)==3.and.all(shape(fractional_translations)==[3,noperation]).and.&
       tolerance>0d0.and.all(ieee_is_finite(centers)).and.&
       all(ieee_is_finite(fractional_translations))
+    if(ok.and.present(moment_magnitudes))then
+      ok=all(shape(moment_magnitudes)==[3,nwann]).and.all(moment_magnitudes>=0d0).and.&
+        all(ieee_is_finite(moment_magnitudes))
+    endif
     if(.not.ok)then;message='invalid Wannier center affine-orbit contract';return;end if
     allocate(mapped_centers(3,nwann),matched_target(nwann),seen(nwann))
     do operation=1,noperation
@@ -2369,7 +2375,23 @@ contains
       do source=1,nwann
         seen=.false.
         if(.not.augment_center_match(source))then
-          ok=.false.;message='localized Wannier centers are not closed under full affine symmetry';return
+          nearest_residual=huge(1d0)
+          do target=1,nwann
+            difference=mapped_centers(:,source)-centers(:,target)
+            difference=difference-anint(difference)
+            nearest_residual=min(nearest_residual,maxval(abs(difference)))
+          enddo
+          if(present(moment_magnitudes))then
+            moment_min=minval(moment_magnitudes(:,source))
+            moment_max=maxval(moment_magnitudes(:,source))
+          else
+            moment_min=-1d0;moment_max=-1d0
+          endif
+          ok=.false.
+          write(message,'(a,i0,a,i0,4(a,es12.4))')'localized Wannier center orbit mismatch operation=',&
+            operation,' source=',source,' nearest_residual=',nearest_residual,' tolerance=',tolerance,&
+            ' moment_min=',moment_min,' moment_max=',moment_max
+          return
         end if
       end do
     end do
