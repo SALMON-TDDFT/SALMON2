@@ -21,6 +21,7 @@ module dg_overlapping_wannier_w90
   public::project_dg_w90_reference_sector_operators
   public::validate_dg_w90_localization_cluster
   public::build_dg_sector_periodic_position_tuple
+  public::canonicalize_dg_sector_periodic_position_gauge
 contains
 
   subroutine build_dg_sector_periodic_position_tuple(comm,row_ids,global_row_count,sector_rows,&
@@ -146,6 +147,109 @@ contains
     fingerprint=0_int64;workspace_peak_bytes=0_int64
 #endif
   end subroutine build_dg_sector_periodic_position_tuple
+
+  subroutine canonicalize_dg_sector_periodic_position_gauge(comm,row_ids,sector_rows,position_tuple,&
+      lcfo_operator,tolerance,tuple_fingerprint,aligned_rows,rotation,canonical_defect,fingerprint,&
+      workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm
+    integer(int64),intent(in)::row_ids(:),tuple_fingerprint
+    complex(real64),intent(in)::sector_rows(:,:),position_tuple(:,:,:),lcfo_operator(:,:)
+    real(real64),intent(in)::tolerance
+    complex(real64),allocatable,intent(out)::aligned_rows(:,:)
+    complex(real64),intent(out)::rotation(:,:)
+    real(real64),intent(out)::canonical_defect
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    complex(real64),allocatable::discriminator(:,:),local_rotation(:,:)
+    real(real64),parameter::alpha(3)=[sqrt(2d0),sqrt(3d0),sqrt(5d0)]
+    real(real64),parameter::beta(3)=[sqrt(7d0),sqrt(11d0),sqrt(13d0)]
+    real(real64)::mintol,maxtol,invariant,quantum
+    integer::nlocal,m,axis,i,j,ierr,bad,gbad,status,local_count,global_count,minint,maxint
+    integer(int64)::minhash,maxhash,invariant_hash,bits,extra_bytes,peak
+    logical::receipt_valid
+    nlocal=size(row_ids);m=size(sector_rows,2)
+    ok=.false.;message='';canonical_defect=huge(1d0);fingerprint=0_int64;workspace_peak_bytes=0_int64
+    rotation=(0d0,0d0)
+    bad=merge(0,1,m>=1.and.size(sector_rows,1)==nlocal.and.all(shape(position_tuple)==[m,m,3]).and.&
+      all(shape(lcfo_operator)==[m,m]).and.all(shape(rotation)==[m,m]).and.tuple_fingerprint/=0_int64.and.&
+      tolerance>=1d-15.and.tolerance<=1d-2.and.ieee_is_finite(tolerance).and.&
+      all(row_ids>=1_int64).and.all(ieee_is_finite(real(sector_rows))).and.&
+      all(ieee_is_finite(aimag(sector_rows))).and.all(ieee_is_finite(real(position_tuple))).and.&
+      all(ieee_is_finite(aimag(position_tuple))).and.all(ieee_is_finite(real(lcfo_operator))).and.&
+      all(ieee_is_finite(aimag(lcfo_operator))).and.&
+      maxval(abs(lcfo_operator-conjg(transpose(lcfo_operator))))<=10d0*tolerance)
+    call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='invalid periodic-position canonical gauge contract';return;endif
+    call MPI_Allreduce(m,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(m,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='periodic-position canonical rank disagrees';return;endif
+    call MPI_Allreduce(tolerance,mintol,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tolerance,maxtol,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.mintol/=maxtol)then;message='periodic-position canonical tolerance disagrees';return;endif
+    call MPI_Allreduce(tuple_fingerprint,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tuple_fingerprint,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)then;message='periodic-position tuple receipt disagrees';return;endif
+    do axis=1,3;do j=1,m;do i=1,m
+      bits=transfer(real(position_tuple(i,j,axis),real64),bits)
+      call MPI_Allreduce(bits,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(bits,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)return
+      bits=transfer(aimag(position_tuple(i,j,axis)),bits)
+      call MPI_Allreduce(bits,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(bits,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)return
+    enddo;enddo;enddo
+    local_count=0;if(nlocal>0)local_count=int(maxval(row_ids))
+    call MPI_Allreduce(local_count,global_count,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_count<1)then;message='periodic-position canonical rows are empty';return;endif
+    allocate(discriminator(m,m),local_rotation(m,m),stat=status)
+    call MPI_Allreduce(status,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then
+      if(allocated(discriminator))deallocate(discriminator)
+      if(allocated(local_rotation))deallocate(local_rotation)
+      message='periodic-position canonical allocation failed';return
+    endif
+    discriminator=(0d0,0d0)
+    do axis=1,3
+      discriminator=discriminator+0.5d0*alpha(axis)*(position_tuple(:,:,axis)+&
+        conjg(transpose(position_tuple(:,:,axis))))+cmplx(0d0,-0.5d0*beta(axis),real64)*&
+        (position_tuple(:,:,axis)-conjg(transpose(position_tuple(:,:,axis))))
+    enddo
+    quantum=100d0*tolerance;invariant_hash=ieor(int(z'6A09E667F3BCC909',int64),int(m,int64))
+    do axis=1,3
+      invariant=real(sum([(position_tuple(i,i,axis),i=1,m)]),real64)
+      if(abs(invariant)/quantum>0.25d0*real(huge(0_int64),real64))then
+        deallocate(discriminator,local_rotation);message='periodic-position invariant quantization overflows';return
+      endif
+      bits=nint(invariant/quantum,int64);invariant_hash=ieor(ishftc(invariant_hash,11),bits)
+      invariant=sum(abs(position_tuple(:,:,axis))**2)
+      if(abs(invariant)/quantum>0.25d0*real(huge(0_int64),real64))then
+        deallocate(discriminator,local_rotation);message='periodic-position invariant quantization overflows';return
+      endif
+      bits=nint(invariant/quantum,int64);invariant_hash=ieor(ishftc(invariant_hash,11),bits)
+    enddo
+    if(invariant_hash==0_int64)invariant_hash=1_int64
+    call anchor_dg_w90_reference_character_sector(comm,row_ids,sector_rows,discriminator,lcfo_operator,&
+      global_count,invariant_hash,invariant_hash,0d0,0d0,tolerance,aligned_rows,canonical_defect,&
+      fingerprint,workspace_peak_bytes,ok,message)
+    if(ok)then
+      local_rotation=matmul(conjg(transpose(sector_rows)),aligned_rows)
+      call MPI_Allreduce(local_rotation,rotation,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      ok=ierr==MPI_SUCCESS
+      if(.not.ok)message='periodic-position canonical rotation reduction failed'
+    endif
+    receipt_valid=.true.;call checked_product([2_int64,int(m,int64),int(m,int64),16_int64],extra_bytes,receipt_valid)
+    if(receipt_valid.and.ok)then
+      if(workspace_peak_bytes<=huge(0_int64)-extra_bytes)workspace_peak_bytes=workspace_peak_bytes+extra_bytes
+      call MPI_Allreduce(workspace_peak_bytes,peak,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+      if(ierr==MPI_SUCCESS)workspace_peak_bytes=peak
+    endif
+    deallocate(discriminator,local_rotation)
+#else
+    ok=.false.;message='periodic-position canonical gauge requires MPI';canonical_defect=huge(1d0)
+    fingerprint=0_int64;workspace_peak_bytes=0_int64;rotation=(0d0,0d0)
+#endif
+  end subroutine canonicalize_dg_sector_periodic_position_gauge
 
   subroutine project_dg_w90_reference_sector_operators(comm,row_ids,sector_rows,w90_rows,w90_values,&
       lcfo_rows,lcfo_values,global_row_count,w90_fingerprint,lcfo_fingerprint,w90_frame_defect,lcfo_source_defect,tolerance,&
