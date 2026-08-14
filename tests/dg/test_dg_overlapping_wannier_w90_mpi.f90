@@ -13,6 +13,7 @@ program test_dg_overlapping_wannier_w90_mpi
   use dg_overlapping_wannier_w90,only:anchor_dg_w90_reference_character_sector
   use dg_overlapping_wannier_w90,only:project_dg_w90_reference_sector_operators
   use dg_overlapping_wannier_w90,only:inherit_dg_w90_affine_receipts
+  use dg_overlapping_wannier_w90,only:build_dg_sector_periodic_position_tuple
   implicit none
   integer::ierr,rank,nproc,b,i,m,n,p,nlocal
   integer::convergence_iterations,log_unit
@@ -65,6 +66,10 @@ program test_dg_overlapping_wannier_w90_mpi
   real(8)::sector_local_cost,sector_global_cost,sector_swapped_local_cost,sector_swapped_global_cost
   real(8)::localization_cluster_spectrum(4)
   integer(8)::sector_alignment_fingerprint,sector_alignment_workspace
+  complex(8),allocatable::sector_position_phases(:,:),sector_position_tuple(:,:,:)
+  complex(8)::sector_position_reference(2,2,3),sector_position_local(2,2,3)
+  integer(8)::sector_position_fingerprint,sector_position_workspace
+  real(8)::sector_position_gram_defect
   integer(8)::sector_trial_fingerprint,sector_trial_workspace
   integer(8),allocatable::sector_reference_keys(:),sector_permuted_keys(:)
 #ifdef USE_WANNIER90
@@ -117,6 +122,28 @@ program test_dg_overlapping_wannier_w90_mpi
     local_anchors(:,p)=[cmplx(1d0,0d0,8),cmplx(global_point,0d0,8)]
     local_fractional(:,p)=[real(global_point-1,8)/8d0,0.25d0*mod(global_point-1,4),0d0]
   enddo
+  allocate(sector_position_phases(nlocal,3))
+  sector_position_local=(0d0,0d0)
+  do p=1,nlocal
+    global_point=rank*nlocal+p
+    do b=1,3
+      angle=2d0*acos(-1d0)*real(b*global_point,8)/17d0
+      sector_position_phases(p,b)=cmplx(cos(angle),sin(angle),8)
+      do i=1,2;do m=1,2
+        sector_position_local(i,m,b)=sector_position_local(i,m,b)+&
+          conjg(sector_frame(p,i))*sector_position_phases(p,b)*sector_frame(p,m)
+      enddo;enddo
+    enddo
+  enddo
+  call MPI_Allreduce(sector_position_local,sector_position_reference,size(sector_position_reference),&
+    MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_COMM_WORLD,ierr)
+  call build_dg_sector_periodic_position_tuple(MPI_COMM_WORLD,sector_ids,8,sector_frame,&
+    sector_position_phases,1d-12,7781_8,sector_position_tuple,sector_position_gram_defect,&
+    sector_position_fingerprint,sector_position_workspace,ok,message)
+  call require(ok.and.maxval(abs(sector_position_tuple-sector_position_reference))<1d-12.and.&
+    sector_position_gram_defect<1d-12.and.sector_position_fingerprint/=0_8.and.&
+    sector_position_workspace>0_8,'distributed sector periodic-position tuple matches direct sum')
+  if(rank==0)write(*,'(a,1x,i0)')'W90_POSITION_TUPLE_FINGERPRINT',sector_position_fingerprint
   local_weights=0.125d0;test_nncell=reshape([1,0,0,0,1,0],[3,2])
   local_m_reference=(0d0,0d0);local_a_reference=(0d0,0d0)
   do b=1,2;do p=1,nlocal
