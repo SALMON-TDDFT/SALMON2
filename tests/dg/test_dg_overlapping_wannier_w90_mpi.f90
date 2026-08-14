@@ -334,6 +334,37 @@ program test_dg_overlapping_wannier_w90_mpi
     joint_trial_fingerprint==joint_fingerprint,&
     'an exact repeated-center multiplet preserves its projector receipt')
   if(rank==0)write(*,'(a,1x,i0)')'W90_JOINT_CENTER_FINGERPRINT',joint_fingerprint
+  if(nlocal>1)then
+    allocate(anchor_duplicate_ids,source=sector_ids)
+    if(rank==0)anchor_duplicate_ids(1)=anchor_duplicate_ids(2)
+    call jointly_canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,anchor_duplicate_ids,sector_frame,&
+      sector_position_tuple,position_lcfo_operator,1d-12,937_8,joint_trial_rows,joint_trial_rotation,&
+      joint_trial_centers,joint_trial_objective,joint_trial_update,joint_trial_sweeps,joint_trial_defect,&
+      joint_trial_fingerprint,joint_workspace,ok,message)
+    call require(.not.ok,'joint center gauge rejects duplicate row ownership')
+    deallocate(anchor_duplicate_ids)
+  endif
+  position_trial_tuple=sector_position_tuple
+  if(rank==0)position_trial_tuple(1,1,1)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,8)
+  call jointly_canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,&
+    position_trial_tuple,position_lcfo_operator,1d-12,941_8,joint_trial_rows,joint_trial_rotation,&
+    joint_trial_centers,joint_trial_objective,joint_trial_update,joint_trial_sweeps,joint_trial_defect,&
+    joint_trial_fingerprint,joint_workspace,ok,message)
+  call require(.not.ok,'joint center gauge rejects a nonfinite tuple collectively')
+  position_trial_tuple=sector_position_tuple
+  position_trial_tuple(1,1,1)=cmplx(0.25d0*huge(1d0),0d0,8)
+  call jointly_canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,&
+    position_trial_tuple,position_lcfo_operator,1d-12,943_8,joint_trial_rows,joint_trial_rotation,&
+    joint_trial_centers,joint_trial_objective,joint_trial_update,joint_trial_sweeps,joint_trial_defect,&
+    joint_trial_fingerprint,joint_workspace,ok,message)
+  call require(.not.ok,'joint center gauge rejects finite-huge tuple entries before squaring')
+  if(nproc>1)then
+    call jointly_canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,&
+      sector_position_tuple,position_lcfo_operator,merge(1d-11,1d-12,rank==0),947_8,&
+      joint_trial_rows,joint_trial_rotation,joint_trial_centers,joint_trial_objective,joint_trial_update,&
+      joint_trial_sweeps,joint_trial_defect,joint_trial_fingerprint,joint_workspace,ok,message)
+    call require(.not.ok,'joint center gauge rejects rank-disagreeing tolerance')
+  endif
   sector_reference(:,1)=(sector_frame(:,1)+cmplx(0.3d0,0.4d0,8)*sector_frame(:,2))/sqrt(1.25d0)
   sector_reference(:,2)=(-cmplx(0.3d0,-0.4d0,8)*sector_frame(:,1)+sector_frame(:,2))/sqrt(1.25d0)
   sector_gamma=(0d0,0d0)

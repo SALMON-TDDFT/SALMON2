@@ -293,7 +293,8 @@ contains
     complex(real64)::sphase,jacobi(2,2),left_pair(2),right_pair(2),tmp,phase_fix,probe
     integer::nlocal,m,global_count,local_count,rank,ierr,bad,gbad,status,axis,q,pair_i,pair_j,&
       i,j,k,l,r,block_size,sweep,info,minint,maxint
-    integer(int64)::bits,quantized,term,elements,bytes,peak
+    real(real64)::minimum_tolerance,maximum_tolerance,safe_position_magnitude,safe_lcfo_magnitude
+    integer(int64)::bits,quantized,term,elements,bytes,peak,minimum_fingerprint,maximum_fingerprint
     logical::receipt_valid,swapped
     interface
       subroutine dsyev(jobz,uplo,n,a,lda,w,work,lwork,info)
@@ -327,6 +328,26 @@ contains
     call MPI_Allreduce(m,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
     call MPI_Allreduce(m,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='joint periodic-center rank disagrees';return;endif
+    call MPI_Allreduce(tolerance,minimum_tolerance,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tolerance,maximum_tolerance,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_tolerance/=maximum_tolerance)then
+      message='joint periodic-center tolerance disagrees';return
+    endif
+    call MPI_Allreduce(tuple_fingerprint,minimum_fingerprint,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tuple_fingerprint,maximum_fingerprint,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_fingerprint/=maximum_fingerprint)then
+      message='joint periodic-center provenance disagrees';return
+    endif
+    safe_position_magnitude=sqrt(huge(1d0))/32d0
+    safe_lcfo_magnitude=(huge(1d0)/32d0)/real(m,real64)
+    bad=merge(0,1,maxval(abs(position_tuple))<=safe_position_magnitude.and.&
+      maxval(abs(lcfo_operator))<=safe_lcfo_magnitude)
+    call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then
+      message='joint periodic-center input magnitude is unsafe';return
+    endif
     local_count=int(maxval(row_ids));call MPI_Allreduce(local_count,global_count,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     elements=0_int64;bytes=0_int64;receipt_valid=ierr==MPI_SUCCESS
     call checked_product([9_int64,int(m,int64),int(m,int64)],term,receipt_valid);call checked_add(elements,term,receipt_valid)
