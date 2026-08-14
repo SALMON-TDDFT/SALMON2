@@ -41,6 +41,24 @@ construction_source = source("src/gs/dc/dg_overlapping_wannier_construction.f90"
 assert construction_source.lower().count(
     "product_table(right_operation,left_operation)"
 ) >= 2, "point pullback composition must use the reversed geometric product order"
+overlap_assembler = re.search(
+    r"subroutine\s+assemble_dg_distributed_basis_symmetry_overlap_rows(?P<body>.*?)end\s+subroutine",
+    construction_source,
+    re.I | re.S,
+)
+assert overlap_assembler
+overlap_assembler_body = overlap_assembler.group("body").lower()
+assert "local_tile" not in overlap_assembler_body, (
+    "the overlap assembler must form the reduce-scatter tile directly without a full transpose copy"
+)
+assert re.search(r"call\s+zgemm\s*\(\s*'n'\s*,\s*'c'", overlap_assembler_body), (
+    "the overlap assembler must use BLAS conjugate-transpose flags instead of materializing transpose(local_basis)"
+)
+tile_loop_position = overlap_assembler_body.find("do isym=1,nsym")
+tile_allocation_position = overlap_assembler_body.find("allocate(image_tile")
+assert 0 <= tile_allocation_position < tile_loop_position, (
+    "overlap tile buffers must be allocated once and reused across all symmetry operations"
+)
 localization_source = source("src/gs/dc/dg_overlapping_wannier_localization.f90")
 w90_source = source("src/gs/dc/dg_overlapping_wannier_w90.f90")
 assert re.match(r"\s*#include\s+[\"<]config\.h[\">]", w90_source), (

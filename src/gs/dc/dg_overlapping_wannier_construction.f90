@@ -5130,12 +5130,12 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer,parameter::orbital_tile_size=32
+    integer,parameter::orbital_tile_size=64
     integer::rank,nproc,ierr,nbasis,nlocal,nsym,isym,tile_first,tile_count,&
       owner_first,owner_count,base,remainder,i,local_bad,global_bad,status
     integer(int64)::persistent_bytes,tile_bytes,complex_bytes
     integer,allocatable::receive_counts(:)
-    complex(real64),allocatable::image_tile(:,:),local_tile(:,:),packed_tile(:,:),reduced_tile(:,:)
+    complex(real64),allocatable::image_tile(:,:),packed_tile(:,:),reduced_tile(:,:)
 
     ok=.false.;message='';workspace_peak_bytes=0_int64
     call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
@@ -5151,7 +5151,8 @@ contains
     base=nbasis/nproc;remainder=mod(nbasis,nproc)
     owner_count=base+merge(1,0,rank<remainder)
     owner_first=rank*base+min(rank,remainder)+1
-    allocate(row_ids(owner_count),symmetry_overlap_rows(owner_count,nbasis,nsym),receive_counts(nproc),stat=status)
+    allocate(row_ids(owner_count),symmetry_overlap_rows(owner_count,nbasis,nsym),&
+      receive_counts(nproc),stat=status)
     call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
       if(allocated(row_ids))deallocate(row_ids)
@@ -5163,36 +5164,38 @@ contains
     do i=1,owner_count;row_ids(i)=int(owner_first+i-1,int64);enddo
     complex_bytes=int(storage_size((0d0,0d0))/8,int64)
     persistent_bytes=complex_bytes*int(size(symmetry_overlap_rows),int64)
-    workspace_peak_bytes=persistent_bytes
+    tile_count=min(orbital_tile_size,nbasis)
+    do i=1,nproc
+      receive_counts(i)=(base+merge(1,0,i-1<remainder))*tile_count
+    enddo
+    allocate(image_tile(tile_count,nlocal),packed_tile(tile_count,nbasis),&
+      reduced_tile(tile_count,owner_count),stat=status)
+    call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='row-owned symmetry-overlap tile allocation failed';return
+    endif
+    tile_bytes=complex_bytes*int(size(image_tile)+size(packed_tile)+size(reduced_tile),int64)
+    workspace_peak_bytes=persistent_bytes+tile_bytes
     do isym=1,nsym
       do tile_first=1,nbasis,orbital_tile_size
         tile_count=min(orbital_tile_size,nbasis-tile_first+1)
-        do i=1,nproc
-          receive_counts(i)=(base+merge(1,0,i-1<remainder))*tile_count
-        enddo
-        allocate(image_tile(tile_count,nlocal),local_tile(nbasis,tile_count),&
-          packed_tile(tile_count,nbasis),reduced_tile(tile_count,owner_count),stat=status)
-        call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-        if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
-          message='row-owned symmetry-overlap tile allocation failed';return
-        endif
         call exchange_dg_point_permuted_orbital_rows(comm,&
           local_basis(tile_first:tile_first+tile_count-1,:),&
-          symmetry_target_box_ids(:,isym),image_tile,ok,message)
+          symmetry_target_box_ids(:,isym),image_tile(1:tile_count,:),ok,message)
         if(.not.ok)return
         do i=1,nlocal
-          image_tile(:,i)=weights(i)*conjg(image_tile(:,i))
+          image_tile(1:tile_count,i)=weights(i)*image_tile(1:tile_count,i)
         enddo
-        local_tile=conjg(matmul(local_basis,transpose(image_tile)))
-        packed_tile=transpose(local_tile)
-        call MPI_Reduce_scatter(packed_tile,reduced_tile,receive_counts,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+        call zgemm('N','C',tile_count,nbasis,nlocal,(1d0,0d0),image_tile,size(image_tile,1),&
+          local_basis,nbasis,(0d0,0d0),packed_tile,size(packed_tile,1))
+        if(tile_count<size(packed_tile,1))packed_tile(tile_count+1:,:)=(0d0,0d0)
+        call MPI_Reduce_scatter(packed_tile,reduced_tile,receive_counts,&
+          MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
         if(ierr/=MPI_SUCCESS)then
           ok=.false.;message='row-owned symmetry-overlap reduce-scatter failed';return
         endif
-        symmetry_overlap_rows(:,tile_first:tile_first+tile_count-1,isym)=transpose(reduced_tile)
-        tile_bytes=complex_bytes*int(size(image_tile)+size(local_tile)+size(packed_tile)+size(reduced_tile),int64)
-        workspace_peak_bytes=max(workspace_peak_bytes,persistent_bytes+tile_bytes)
-        deallocate(image_tile,local_tile,packed_tile,reduced_tile)
+        symmetry_overlap_rows(:,tile_first:tile_first+tile_count-1,isym)=&
+          transpose(reduced_tile(1:tile_count,:))
       enddo
     enddo
     ok=all(ieee_is_finite(real(symmetry_overlap_rows))).and.&
