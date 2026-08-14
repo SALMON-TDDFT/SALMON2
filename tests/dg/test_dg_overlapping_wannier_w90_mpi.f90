@@ -217,6 +217,30 @@ program test_dg_overlapping_wannier_w90_mpi
   call require(ok.and.position_trial_canonical_fingerprint==position_canonical_fingerprint.and.&
     maxval(abs(position_trial_rows-position_canonical_rows))<1d-10,&
     'canonical periodic-position gauge is invariant under input sector rotation')
+  sector_position_tuple=(0d0,0d0)
+  position_trial_tuple=(0d0,0d0)
+  call canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,&
+    sector_position_tuple,position_lcfo_operator,1d-12,811_8,&
+    position_canonical_rows,position_canonical_rotation,position_canonical_defect,&
+    position_canonical_fingerprint,position_canonical_workspace,ok,message)
+  call canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,position_rotated_sector,&
+    position_trial_tuple,position_trial_operator,1d-12,823_8,&
+    position_trial_rows,position_trial_rotation,position_trial_defect,&
+    position_trial_canonical_fingerprint,position_canonical_workspace,ok,message)
+  call require(ok.and.maxval(abs(position_trial_rows-position_canonical_rows))<1d-10.and.&
+    position_trial_canonical_fingerprint==position_canonical_fingerprint,&
+    'LCFO operator resolves a periodic-position-degenerate internal block')
+  position_lcfo_operator=(0d0,0d0);position_trial_operator=(0d0,0d0)
+  call canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,&
+    sector_position_tuple,position_lcfo_operator,1d-12,827_8,&
+    position_canonical_rows,position_canonical_rotation,position_canonical_defect,&
+    position_canonical_fingerprint,position_canonical_workspace,ok,message)
+  call canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,position_rotated_sector,&
+    position_trial_tuple,position_trial_operator,1d-12,829_8,&
+    position_trial_rows,position_trial_rotation,position_trial_defect,&
+    position_trial_canonical_fingerprint,position_canonical_workspace,ok,message)
+  call require(ok.and.position_trial_canonical_fingerprint==position_canonical_fingerprint,&
+    'an exact internal multiplet preserves one common projector fingerprint')
   sector_reference(:,1)=(sector_frame(:,1)+cmplx(0.3d0,0.4d0,8)*sector_frame(:,2))/sqrt(1.25d0)
   sector_reference(:,2)=(-cmplx(0.3d0,-0.4d0,8)*sector_frame(:,1)+sector_frame(:,2))/sqrt(1.25d0)
   sector_gamma=(0d0,0d0)
