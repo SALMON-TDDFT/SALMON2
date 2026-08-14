@@ -1503,7 +1503,8 @@ contains
     if(translation_global_core_count8>int(huge(0),8))error stop 'translation global core extent exceeds default integer'
     translation_global_core_count=int(translation_global_core_count8)
     allocate(translation_spatial_ids(ncore),translation_position_phases(ncore,3),&
-      translation_anchor_rotation(ntarget,ntarget),translation_position_lcfo_operator(ntarget,ntarget),&
+      translation_anchor_rotation(translation_sector_rank,translation_sector_rank),&
+      translation_position_lcfo_operator(translation_sector_rank,translation_sector_rank),&
       stat=allocation_status)
     call MPI_Allreduce(allocation_status,translation_allocation_status,1,MPI_INTEGER,MPI_MAX,&
       dc%icomm_tot,ierr)
@@ -1519,7 +1520,8 @@ contains
         real(dc%lg_tot%num(3),8),8))
     enddo
     translation_anchor_rotation=matmul(conjg(transpose(translation_sector_rows)),translation_reference_rows)
-    call MPI_Allreduce(MPI_IN_PLACE,translation_anchor_rotation,ntarget*ntarget,MPI_DOUBLE_COMPLEX,&
+    call MPI_Allreduce(MPI_IN_PLACE,translation_anchor_rotation,translation_sector_rank*translation_sector_rank,&
+      MPI_DOUBLE_COMPLEX,&
       MPI_SUM,dc%icomm_tot,ierr)
     if(ierr/=MPI_SUCCESS)error stop 'translation anchor rotation reduction failed'
     translation_position_lcfo_operator=matmul(conjg(transpose(translation_anchor_rotation)),&
@@ -1534,19 +1536,21 @@ contains
       translation_position_gram_defect,translation_position_fingerprint,translation_position_workspace,&
       ok,message,ow_core_weights)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'reference periodic-position tuple failed';endif
-    allocate(translation_weighted_reference(ncore,ntarget),stat=allocation_status)
+    allocate(translation_weighted_reference(ncore,translation_sector_rank),stat=allocation_status)
     call MPI_Allreduce(allocation_status,translation_allocation_status,1,MPI_INTEGER,MPI_MAX,&
       dc%icomm_tot,ierr)
     if(ierr/=MPI_SUCCESS.or.translation_allocation_status/=0)&
       error stop 'weighted reference-sector allocation failed collectively'
-    translation_weighted_reference=spread(sqrt(ow_core_weights),2,ntarget)*translation_reference_spatial
+    translation_weighted_reference=spread(sqrt(ow_core_weights),2,translation_sector_rank)*&
+      translation_reference_spatial
     call canonicalize_dg_sector_periodic_position_gauge(dc%icomm_tot,translation_spatial_ids,&
       translation_weighted_reference,translation_position_tuple,translation_position_lcfo_operator,&
       dg_ow_symmetry_tolerance,translation_position_fingerprint,translation_canonical_weighted,&
       translation_anchor_rotation,translation_canonical_position_defect,translation_canonical_position_fingerprint,&
       translation_canonical_position_workspace,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'reference periodic-position gauge failed';endif
-    translation_reference_spatial=translation_canonical_weighted/spread(sqrt(ow_core_weights),2,ntarget)
+    translation_reference_spatial=translation_canonical_weighted/&
+      spread(sqrt(ow_core_weights),2,translation_sector_rank)
     deallocate(translation_canonical_weighted,translation_weighted_reference,translation_position_tuple,&
       translation_position_phases,translation_anchor_rotation,translation_position_lcfo_operator)
     deallocate(translation_sector_rows,translation_w90_operator,translation_lcfo_operator,translation_reference_rows)

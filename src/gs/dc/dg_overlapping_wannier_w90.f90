@@ -248,7 +248,7 @@ contains
     if(invariant_hash==0_int64)invariant_hash=1_int64
     call anchor_dg_w90_reference_character_sector(comm,row_ids,sector_rows,discriminator,lcfo_operator,&
       global_count,invariant_hash,invariant_hash,0d0,0d0,tolerance,aligned_rows,canonical_defect,&
-      fingerprint,workspace_peak_bytes,ok,message)
+      fingerprint,workspace_peak_bytes,ok,message,projector_diagonal_only=.true.)
     if(ok)then
       local_rotation=matmul(conjg(transpose(sector_rows)),aligned_rows)
       call MPI_Allreduce(local_rotation,rotation,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
@@ -421,7 +421,7 @@ contains
 
   subroutine anchor_dg_w90_reference_character_sector(comm,row_ids,sector_rows,w90_operator,lcfo_operator,&
       global_row_count,w90_fingerprint,lcfo_fingerprint,w90_frame_defect,lcfo_source_defect,tolerance,&
-      anchored_rows,anchor_defect,fingerprint,workspace_peak_bytes,ok,message)
+      anchored_rows,anchor_defect,fingerprint,workspace_peak_bytes,ok,message,projector_diagonal_only)
     integer,intent(in)::comm,global_row_count
     integer(int64),intent(in)::row_ids(:),w90_fingerprint,lcfo_fingerprint
     complex(real64),intent(in)::sector_rows(:,:)
@@ -432,10 +432,11 @@ contains
     integer(int64),intent(out)::fingerprint,workspace_peak_bytes
     logical,intent(out)::ok
     character(*),intent(out)::message
+    logical,intent(in),optional::projector_diagonal_only
     complex(real64),allocatable::hmat(:,:),kmat(:,:),unitary(:,:),block(:,:),work(:),stream(:),remote_stream(:),gram(:,:)
     real(real64),allocatable::eval(:),block_eval(:),rwork(:)
     integer,allocatable::owner(:),position(:),count(:),same_cluster(:)
-    integer::nlocal,m,i,j,k,l,r,rank,ierr,bad,gbad,status,lwork,info,minint,maxint
+    integer::nlocal,m,i,j,k,l,r,rank,ierr,bad,gbad,status,lwork,info,minint,maxint,diagonal_flag
     integer(int64)::bits,minhash,maxhash,complex_elements,real_elements,integer_elements,byte_term,operator_hash
     real(real64),intent(in)::w90_frame_defect,lcfo_source_defect
     real(real64)::mintol,maxtol,pivot,scale,operator_scale,local_defect,global_defect
@@ -473,6 +474,10 @@ contains
     call MPI_Allreduce(tolerance,mintol,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
     call MPI_Allreduce(tolerance,maxtol,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.mintol/=maxtol)then;message='W90 anchor tolerance disagrees';return;endif
+    diagonal_flag=0;if(present(projector_diagonal_only))diagonal_flag=merge(1,0,projector_diagonal_only)
+    call MPI_Allreduce(diagonal_flag,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(diagonal_flag,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='W90 anchor fingerprint mode disagrees';return;endif
     do k=1,2
       bits=merge(w90_fingerprint,lcfo_fingerprint,k==1)
       call MPI_Allreduce(bits,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
@@ -623,20 +628,30 @@ contains
       stream=(0d0,0d0);if(rank==owner(k)-1)stream=anchored_rows(position(k),:)
       call MPI_Bcast(stream,m,MPI_DOUBLE_COMPLEX,owner(k)-1,comm,ierr);if(ierr/=MPI_SUCCESS)return
       fingerprint=ieor(ishftc(fingerprint,11),int(k,int64))
-      do i=1,global_row_count
-        remote_stream=(0d0,0d0)
-        if(rank==owner(i)-1)remote_stream=anchored_rows(position(i),:)
-        call MPI_Bcast(remote_stream,m,MPI_DOUBLE_COMPLEX,owner(i)-1,comm,ierr);if(ierr/=MPI_SUCCESS)return
-        projector_value=sum(stream*conjg(remote_stream))
-        if(max(abs(real(projector_value,real64)),abs(aimag(projector_value)))/(100d0*tolerance)>&
+      if(diagonal_flag==1)then
+        projector_value=cmplx(sum(abs(stream)**2),0d0,real64)
+        if(abs(real(projector_value,real64))/(100d0*tolerance)>&
             0.25d0*real(huge(0_int64),real64))then
-          message='W90 anchor projector fingerprint quantization overflows';return
+          message='W90 anchor diagonal fingerprint quantization overflows';return
         endif
         bits=nint(real(projector_value,real64)/(100d0*tolerance),int64)
-        fingerprint=ieor(ishftc(fingerprint,11),ieor(int(i,int64),bits))
-        bits=nint(aimag(projector_value)/(100d0*tolerance),int64)
         fingerprint=ieor(ishftc(fingerprint,11),bits)
-      enddo
+      else
+        do i=1,global_row_count
+          remote_stream=(0d0,0d0)
+          if(rank==owner(i)-1)remote_stream=anchored_rows(position(i),:)
+          call MPI_Bcast(remote_stream,m,MPI_DOUBLE_COMPLEX,owner(i)-1,comm,ierr);if(ierr/=MPI_SUCCESS)return
+          projector_value=sum(stream*conjg(remote_stream))
+          if(max(abs(real(projector_value,real64)),abs(aimag(projector_value)))/(100d0*tolerance)>&
+              0.25d0*real(huge(0_int64),real64))then
+            message='W90 anchor projector fingerprint quantization overflows';return
+          endif
+          bits=nint(real(projector_value,real64)/(100d0*tolerance),int64)
+          fingerprint=ieor(ishftc(fingerprint,11),ieor(int(i,int64),bits))
+          bits=nint(aimag(projector_value)/(100d0*tolerance),int64)
+          fingerprint=ieor(ishftc(fingerprint,11),bits)
+        enddo
+      endif
     enddo
     if(fingerprint==0_int64)fingerprint=1_int64
     ok=.true.
