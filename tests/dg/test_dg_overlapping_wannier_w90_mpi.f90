@@ -72,7 +72,8 @@ program test_dg_overlapping_wannier_w90_mpi
   integer(8)::sector_position_fingerprint,sector_position_workspace
   real(8)::sector_position_gram_defect
   complex(8),allocatable::position_canonical_rows(:,:),position_trial_rows(:,:),position_trial_tuple(:,:,:),&
-    position_rotated_sector(:,:)
+    position_rotated_sector(:,:),position_weighted_sector(:,:)
+  real(8),allocatable::position_weights(:)
   complex(8)::position_lcfo_operator(2,2),position_trial_operator(2,2),position_input_rotation(2,2),&
     position_canonical_rotation(2,2),position_trial_rotation(2,2)
   real(8)::position_canonical_defect,position_trial_defect
@@ -193,6 +194,20 @@ program test_dg_overlapping_wannier_w90_mpi
   call require(ok.and.maxval(abs(sector_position_tuple-sector_position_reference))<1d-12.and.&
     sector_position_gram_defect<1d-12.and.sector_position_fingerprint/=0_8.and.&
     sector_position_workspace>0_8,'distributed sector periodic-position tuple matches direct sum')
+  allocate(position_weighted_sector(nlocal,2),position_weights(nlocal))
+  position_weights=2d0;position_weighted_sector=sector_frame/sqrt(2d0)
+  sector_position_local=(0d0,0d0)
+  do p=1,nlocal;do b=1,3;do i=1,2;do m=1,2
+    sector_position_local(i,m,b)=sector_position_local(i,m,b)+position_weights(p)*&
+      conjg(position_weighted_sector(p,i))*sector_position_phases(p,b)*position_weighted_sector(p,m)
+  enddo;enddo;enddo;enddo
+  call MPI_Allreduce(sector_position_local,sector_position_reference,size(sector_position_reference),&
+    MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_COMM_WORLD,ierr)
+  call build_dg_sector_periodic_position_tuple(MPI_COMM_WORLD,sector_ids,8,position_weighted_sector,&
+    sector_position_phases,1d-12,7781_8,position_trial_tuple,sector_position_gram_defect,&
+    position_trial_position_fingerprint,sector_position_workspace,ok,message,position_weights)
+  call require(ok.and.maxval(abs(position_trial_tuple-sector_position_reference))<1d-12.and.&
+    sector_position_gram_defect<1d-12,'sector periodic-position tuple uses the spatial integration measure')
   if(rank==0)write(*,'(a,1x,i0)')'W90_POSITION_TUPLE_FINGERPRINT',sector_position_fingerprint
   position_lcfo_operator=(0d0,0d0);position_lcfo_operator(1,1)=0.2d0;position_lcfo_operator(2,2)=0.7d0
   position_input_rotation=reshape([cmplx(1d0,0d0,8),cmplx(0d0,1d0,8),&
