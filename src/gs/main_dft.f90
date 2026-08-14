@@ -109,7 +109,8 @@ use dg_overlapping_wannier_w90,only:setup_dg_w90_gamma_library,&
   assemble_dg_w90_gamma_matrices,run_dg_w90_gamma_library,apply_dg_w90_gamma_transform,&
   inherit_dg_w90_affine_receipts,project_dg_w90_reference_sector_operators,&
   anchor_dg_w90_reference_character_sector,align_dg_w90_character_sector_gauge,&
-  align_dg_w90_character_sectors_by_periodic_phase,sew_dg_w90_periodic_phase_conjugate_sector
+  align_dg_w90_character_sectors_by_periodic_phase,sew_dg_w90_periodic_phase_conjugate_sector,&
+  build_dg_sector_periodic_position_tuple,canonicalize_dg_sector_periodic_position_gauge
 use lcfo_wannier_sawf, only: t_sawf_crystallographic_catalog,t_sawf_symop,&
   load_sawf_crystallographic_catalog_auto
 use lcfo_wannier_sawf_dmn,only:t_sawf_dmn_writer,t_sawf_operation_index,&
@@ -590,6 +591,8 @@ contains
     complex(8),allocatable::translation_w90_rows(:,:),translation_lcfo_rows(:,:),translation_w90_operator(:,:),&
       translation_lcfo_operator(:,:),translation_reference_rows(:,:),translation_reference_spatial(:,:),&
       translation_target_spatial(:,:),translation_aligned_spatial(:,:),translation_conjugate_spatial(:,:),&
+      translation_position_phases(:,:),translation_position_tuple(:,:,:),translation_weighted_reference(:,:),&
+      translation_canonical_weighted(:,:),translation_anchor_rotation(:,:),translation_position_lcfo_operator(:,:),&
       translation_phase(:),translation_orbit_rows(:,:),translation_transform_rows(:,:),&
       transformed_box_values(:,:),transformed_box_gradients(:,:,:)
     complex(8),allocatable::lcfo_fragment_contribution(:,:),lcfo_occupied_core(:,:),lcfo_reference_core(:,:)
@@ -674,6 +677,8 @@ contains
       translation_alignment_workspace,translation_gamma_fingerprint,translation_gamma_workspace,&
       translation_inverse_workspace,translation_transform_workspace,translation_operator_fingerprint,&
       translation_operator_workspace
+    integer(8)::translation_position_fingerprint,translation_position_workspace,&
+      translation_canonical_position_fingerprint,translation_canonical_position_workspace
     integer(8)::translation_lcfo_fingerprint,translation_post_gauge_fingerprint,translation_global_core_count8
     integer(8)::composition_fingerprint,composition_workspace_peak,occupied_composition_peak,&
       occupied_composition_fingerprint,projector_composition_peak,projector_composition_fingerprint
@@ -719,6 +724,7 @@ contains
       translation_order_defect,translation_gamma_pairing_defect
     real(8)::translation_operator_defect,translation_anchor_defect,translation_alignment_defect,&
       translation_gamma_defect,translation_closure_defect
+    real(8)::translation_position_gram_defect,translation_canonical_position_defect
     real(8)::translation_alignment_max_defect,translation_gamma_max_defect
     real(8)::monomial_defect,center_block_leakage,center_representation_unitarity_defect
     type(s_dg_translation_orbit_accumulator)::translation_inverse_state
@@ -1492,23 +1498,65 @@ contains
       w90_unitarity_defect,translation_operator_defect,dg_ow_symmetry_tolerance,translation_reference_rows,&
       translation_anchor_defect,translation_anchor_fingerprint,translation_anchor_workspace,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'reference translation character W90 anchor failed';endif
-    call materialize_dg_row_owned_sector_on_spatial_grid(dc%icomm_tot,translation_row_ids,ntarget,&
-      translation_reference_rows,global_closed_core,w90_input_fingerprint,translation_reference_spatial,&
-      translation_materialize_fingerprint,translation_materialize_workspace,ok,message)
-    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'reference character spatial materialization failed';endif
-    deallocate(translation_sector_rows,translation_w90_operator,translation_lcfo_operator,translation_reference_rows)
-
     if(int(ncore,8)>huge(0_8)/int(nproc,8))error stop 'translation global core extent overflows int64'
     translation_global_core_count8=int(ncore,8)*int(nproc,8)
     if(translation_global_core_count8>int(huge(0),8))error stop 'translation global core extent exceeds default integer'
     translation_global_core_count=int(translation_global_core_count8)
-    allocate(translation_spatial_ids(ncore),translation_generator_maps(ncore,&
+    allocate(translation_spatial_ids(ncore),translation_position_phases(ncore,3),&
+      translation_anchor_rotation(ntarget,ntarget),translation_position_lcfo_operator(ntarget,ntarget),&
+      stat=allocation_status)
+    call MPI_Allreduce(allocation_status,translation_allocation_status,1,MPI_INTEGER,MPI_MAX,&
+      dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.translation_allocation_status/=0)&
+      error stop 'translation periodic-position allocation failed collectively'
+    do p=1,ncore
+      translation_spatial_ids(p)=int(rank*ncore+p,8)
+      translation_position_phases(p,1)=exp(cmplx(0d0,2d0*pi*real(modulo(ow_core_ids(p)-1_8,&
+        int(dc%lg_tot%num(1),8)),8)/real(dc%lg_tot%num(1),8),8))
+      translation_position_phases(p,2)=exp(cmplx(0d0,2d0*pi*real(modulo((ow_core_ids(p)-1_8)/&
+        int(dc%lg_tot%num(1),8),int(dc%lg_tot%num(2),8)),8)/real(dc%lg_tot%num(2),8),8))
+      translation_position_phases(p,3)=exp(cmplx(0d0,2d0*pi*real((ow_core_ids(p)-1_8)/nxy8,8)/&
+        real(dc%lg_tot%num(3),8),8))
+    enddo
+    translation_anchor_rotation=matmul(conjg(transpose(translation_sector_rows)),translation_reference_rows)
+    call MPI_Allreduce(MPI_IN_PLACE,translation_anchor_rotation,ntarget*ntarget,MPI_DOUBLE_COMPLEX,&
+      MPI_SUM,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS)error stop 'translation anchor rotation reduction failed'
+    translation_position_lcfo_operator=matmul(conjg(transpose(translation_anchor_rotation)),&
+      matmul(translation_lcfo_operator,translation_anchor_rotation))
+    call materialize_dg_row_owned_sector_on_spatial_grid(dc%icomm_tot,translation_row_ids,ntarget,&
+      translation_reference_rows,global_closed_core,w90_input_fingerprint,translation_reference_spatial,&
+      translation_materialize_fingerprint,translation_materialize_workspace,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'reference character spatial materialization failed';endif
+    call build_dg_sector_periodic_position_tuple(dc%icomm_tot,translation_spatial_ids,&
+      translation_global_core_count,translation_reference_spatial,translation_position_phases,&
+      dg_ow_symmetry_tolerance,translation_materialize_fingerprint,translation_position_tuple,&
+      translation_position_gram_defect,translation_position_fingerprint,translation_position_workspace,&
+      ok,message,ow_core_weights)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'reference periodic-position tuple failed';endif
+    allocate(translation_weighted_reference(ncore,ntarget),stat=allocation_status)
+    call MPI_Allreduce(allocation_status,translation_allocation_status,1,MPI_INTEGER,MPI_MAX,&
+      dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.translation_allocation_status/=0)&
+      error stop 'weighted reference-sector allocation failed collectively'
+    translation_weighted_reference=spread(sqrt(ow_core_weights),2,ntarget)*translation_reference_spatial
+    call canonicalize_dg_sector_periodic_position_gauge(dc%icomm_tot,translation_spatial_ids,&
+      translation_weighted_reference,translation_position_tuple,translation_position_lcfo_operator,&
+      dg_ow_symmetry_tolerance,translation_position_fingerprint,translation_canonical_weighted,&
+      translation_anchor_rotation,translation_canonical_position_defect,translation_canonical_position_fingerprint,&
+      translation_canonical_position_workspace,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'reference periodic-position gauge failed';endif
+    translation_reference_spatial=translation_canonical_weighted/spread(sqrt(ow_core_weights),2,ntarget)
+    deallocate(translation_canonical_weighted,translation_weighted_reference,translation_position_tuple,&
+      translation_position_phases,translation_anchor_rotation,translation_position_lcfo_operator)
+    deallocate(translation_sector_rows,translation_w90_operator,translation_lcfo_operator,translation_reference_rows)
+
+    allocate(translation_generator_maps(ncore,&
       translation_character_generator_count),translation_character_done(size(translation_characters,1)),stat=allocation_status)
     call MPI_Allreduce(allocation_status,translation_allocation_status,1,MPI_INTEGER,MPI_MAX,&
       dc%icomm_tot,ierr)
     if(ierr/=MPI_SUCCESS.or.translation_allocation_status/=0)&
       error stop 'translation spatial action allocation failed collectively'
-    do p=1,ncore;translation_spatial_ids(p)=int(rank*ncore+p,8);enddo
     do i=1,translation_character_generator_count
       io=global_translation_subgroup(translation_canonical_operations(translation_character_generators(i)))
       translation_generator_maps(:,i)=global_symmetry_map(:,io)
