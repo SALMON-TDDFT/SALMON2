@@ -51,6 +51,7 @@ module inputoutput
   integer :: inml_singlescale
   integer :: inml_multiscale
   integer :: inml_maxwell
+  integer :: inml_ttm
   integer :: inml_analysis
   integer :: inml_poisson
   integer :: inml_ewald
@@ -431,6 +432,7 @@ contains
       & yn_obs_plane_em,          &
       & yn_obs_plane_integral_em, &
       & yn_wf_em,                 &
+      & yn_em_envelope,           &
       & film_thickness,           &
       & media_id_pml,             &
       & media_id_source1,         &
@@ -465,6 +467,12 @@ contains
       & inf_s,                    &
       & ori_s,                    &
       & rot_s
+
+    namelist/ttm/ &
+      & ttm_egap, ttm_mu_e, ttm_mu_h, ttm_auger_e, ttm_auger_h, &
+      & ttm_tau, ttm_cl, ttm_tini, ttm_eps_bg, ttm_n0, ttm_beta2, &
+      & ttm_ddiff, ttm_kappa_e, ttm_kappa_l, ttm_dgap, &
+      & ttm_mob_e, ttm_mob_h, ttm_sig_cold, ttm_coupling
 
     namelist/analysis/ &
       & projection_option, &
@@ -644,6 +652,26 @@ contains
 
 !! == default for &calculation
     theory              = 'tddft'
+    ttm_egap     = 1.16d0
+    ttm_mu_e     = 0.36d0
+    ttm_mu_h     = 0.81d0
+    ttm_auger_e  = 2.3d-31
+    ttm_auger_h  = 7.8d-32
+    ttm_tau      = 240.0d0
+    ttm_cl       = 1.66d6
+    ttm_tini     = 300.0d0
+    ttm_eps_bg   = 13.55d0
+    ttm_n0       = 2.0d23
+    ttm_beta2    = 0.0d0
+    ttm_ddiff    = 0.0d0
+    ttm_kappa_e  = 0.0d0
+    ttm_kappa_l  = 0.0d0
+    ttm_dgap     = 0.10417d0  ! BGN 1.5 eV*A*Ne^(1/3) in a.u.: 1.5/(0.529177*27.2114)
+    ttm_mob_e    = 0.0d0
+    ttm_mob_h    = 0.0d0
+    ttm_sig_cold = 0.0d0
+    ttm_coupling = 3          ! exact-exponential JE: unconditionally stable incl. metallization
+    yn_use_ttm3  = .false.
     yn_md               = 'n'
     yn_opt              = 'n'
     yn_dc               = 'n'
@@ -861,6 +889,7 @@ contains
     yn_obs_plane_em(:)          = 'n'
     yn_obs_plane_integral_em(:) = 'n'
     yn_wf_em                    = 'y'
+    yn_em_envelope              = 'n'
     film_thickness              = 0d0
     media_id_pml(:,:)           = 0
     media_id_source1            = 0
@@ -1087,6 +1116,9 @@ contains
       read(fh_namelist, nml=maxwell, iostat=inml_maxwell)
       rewind(fh_namelist)
 
+      read(fh_namelist, nml=ttm, iostat=inml_ttm)
+      rewind(fh_namelist)
+
       read(fh_namelist, nml=analysis, iostat=inml_analysis)
       rewind(fh_namelist)
 
@@ -1154,6 +1186,7 @@ contains
     call string_lowercase(bloch_real_imag_em(1))
     call string_lowercase(bloch_real_imag_em(2))
     call string_lowercase(bloch_real_imag_em(3))
+    call string_lowercase(yn_em_envelope)
     if(n_s>0) then
       do ii = 1,n_s
         call string_lowercase(typ_s(ii))
@@ -1441,6 +1474,25 @@ contains
     call comm_bcast(gamma_ld                 ,nproc_group_global)
     gamma_ld = gamma_ld * uenergy_to_au
     call comm_bcast(omega_ld                 ,nproc_group_global)
+    call comm_bcast(ttm_egap                 ,nproc_group_global)
+    call comm_bcast(ttm_mu_e                 ,nproc_group_global)
+    call comm_bcast(ttm_mu_h                 ,nproc_group_global)
+    call comm_bcast(ttm_auger_e              ,nproc_group_global)
+    call comm_bcast(ttm_auger_h              ,nproc_group_global)
+    call comm_bcast(ttm_tau                  ,nproc_group_global)
+    call comm_bcast(ttm_cl                   ,nproc_group_global)
+    call comm_bcast(ttm_tini                 ,nproc_group_global)
+    call comm_bcast(ttm_eps_bg               ,nproc_group_global)
+    call comm_bcast(ttm_n0                   ,nproc_group_global)
+    call comm_bcast(ttm_beta2                ,nproc_group_global)
+    call comm_bcast(ttm_ddiff                ,nproc_group_global)
+    call comm_bcast(ttm_kappa_e              ,nproc_group_global)
+    call comm_bcast(ttm_kappa_l              ,nproc_group_global)
+    call comm_bcast(ttm_dgap                 ,nproc_group_global)
+    call comm_bcast(ttm_mob_e                ,nproc_group_global)
+    call comm_bcast(ttm_mob_h                ,nproc_group_global)
+    call comm_bcast(ttm_sig_cold             ,nproc_group_global)
+    call comm_bcast(ttm_coupling             ,nproc_group_global)
     omega_ld = omega_ld * uenergy_to_au
     call comm_bcast(wave_input,nproc_group_global)
     call comm_bcast(ek_dir1                  ,nproc_group_global)
@@ -1466,6 +1518,7 @@ contains
     call comm_bcast(yn_obs_plane_em          ,nproc_group_global)
     call comm_bcast(yn_obs_plane_integral_em ,nproc_group_global)
     call comm_bcast(yn_wf_em                 ,nproc_group_global)
+    call comm_bcast(yn_em_envelope           ,nproc_group_global)
     call comm_bcast(film_thickness           ,nproc_group_global)
     film_thickness = film_thickness * ulength_to_au
     call comm_bcast(media_id_pml             ,nproc_group_global)
@@ -2379,6 +2432,7 @@ contains
         end do
       end if
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_wf_em', yn_wf_em
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_em_envelope', yn_em_envelope
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'film_thickness', film_thickness
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(1,1)', media_id_pml(1,1)
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(1,2)', media_id_pml(1,2)
@@ -2638,7 +2692,29 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
-      
+
+      if(inml_ttm >0)ierr_nml = ierr_nml +1
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'ttm', inml_ttm
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_egap', ttm_egap
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_mu_e', ttm_mu_e
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_mu_h', ttm_mu_h
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_auger_e', ttm_auger_e
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_auger_h', ttm_auger_h
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_tau', ttm_tau
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_cl', ttm_cl
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_tini', ttm_tini
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_eps_bg', ttm_eps_bg
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_n0', ttm_n0
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_beta2', ttm_beta2
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_ddiff', ttm_ddiff
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_kappa_e', ttm_kappa_e
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_kappa_l', ttm_kappa_l
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_dgap', ttm_dgap
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_mob_e', ttm_mob_e
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_mob_h', ttm_mob_h
+      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'ttm_sig_cold', ttm_sig_cold
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'ttm_coupling', ttm_coupling
+
       close(fh_variables_log)
     end if
 
@@ -2724,6 +2800,7 @@ contains
       end do
     end if
     call yn_argument_check(yn_wf_em)
+    call yn_argument_check(yn_em_envelope)
     call yn_argument_check(yn_make_shape)
     call yn_argument_check(yn_output_shape)
     call yn_argument_check(yn_copy_x)
@@ -2984,6 +3061,11 @@ contains
         end if
         write_gs_restart_data = 'no'
       end if
+    end if
+
+    if(yn_em_envelope=='y')then
+      if(omega1<=0d0) stop "yn_em_envelope=y requires a single carrier omega1>0"
+      if(omega2/=0d0) stop "yn_em_envelope=y supports a single carrier only (unset omega2)"
     end if
 
 #ifdef USE_FFTW

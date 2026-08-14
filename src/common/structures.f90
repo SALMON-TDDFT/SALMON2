@@ -398,6 +398,7 @@ module structures
     real(8) :: origin(3)                  ! Coordinate of Origin Point (TBA)
     character(8)  :: a_bc(3,2)            ! Boundary Condition for 1:x, 2:y, 3:z and 1:bottom and 2:top
     integer, allocatable :: imedia(:,:,:) ! Material information
+    integer :: icomm_x = 0, id_x = 0, isize_x = 1   ! x-axis sub-comm (ttm3 space-charge x-decomp)
   end type s_fdtd_system
 
   type s_opt

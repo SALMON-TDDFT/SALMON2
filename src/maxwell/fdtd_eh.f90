@@ -87,11 +87,20 @@ module fdtd_eh
     real(8),allocatable :: hx_y(:,:,:),c1_hx_y(:,:,:),c2_hx_y(:,:,:),hx_z(:,:,:),c1_hx_z(:,:,:),c2_hx_z(:,:,:) !h
     real(8),allocatable :: hy_z(:,:,:),c1_hy_z(:,:,:),c2_hy_z(:,:,:),hy_x(:,:,:),c1_hy_x(:,:,:),c2_hy_x(:,:,:) !h
     real(8),allocatable :: hz_x(:,:,:),c1_hz_x(:,:,:),c2_hz_x(:,:,:),hz_y(:,:,:),c1_hz_y(:,:,:),c2_hz_y(:,:,:) !h
+    !ghost (quadrature) EM field state arrays — allocated only when yn_em_envelope='y'
+    real(8),allocatable :: ex_y_g(:,:,:),ex_z_g(:,:,:)  !ghost e-field split-Yee state
+    real(8),allocatable :: ey_z_g(:,:,:),ey_x_g(:,:,:)  !ghost e-field split-Yee state
+    real(8),allocatable :: ez_x_g(:,:,:),ez_y_g(:,:,:)  !ghost e-field split-Yee state
+    real(8),allocatable :: hx_y_g(:,:,:),hx_z_g(:,:,:)  !ghost h-field split-Yee state
+    real(8),allocatable :: hy_z_g(:,:,:),hy_x_g(:,:,:)  !ghost h-field split-Yee state
+    real(8),allocatable :: hz_x_g(:,:,:),hz_y_g(:,:,:)  !ghost h-field split-Yee state
     integer             :: ihx_y_is(3),ihx_y_ie(3),ihx_z_is(3),ihx_z_ie(3)                                     !h
     integer             :: ihy_z_is(3),ihy_z_ie(3),ihy_x_is(3),ihy_x_ie(3)                                     !h
     integer             :: ihz_x_is(3),ihz_x_ie(3),ihz_y_is(3),ihz_y_ie(3)                                     !h
     real(8),allocatable :: ex_s(:,:,:),ey_s(:,:,:),ez_s(:,:,:)     !e for save
     real(8),allocatable :: hx_s(:,:,:),hy_s(:,:,:),hz_s(:,:,:)     !h for save
+    real(8),allocatable :: ex_s_g(:,:,:),ey_s_g(:,:,:),ez_s_g(:,:,:) !ghost e for envelope poynting
+    real(8),allocatable :: hx_s_g(:,:,:),hy_s_g(:,:,:),hz_s_g(:,:,:) !ghost h for envelope poynting
     real(8),allocatable :: c2_jx(:,:,:),c2_jy(:,:,:),c2_jz(:,:,:)  !coeff. for general curr. dens.
     integer             :: num_ld                                  !LD: number of LD media
     integer             :: max_pole_num_ld                         !LD: maximum of pole_num_ld
@@ -117,6 +126,19 @@ module fdtd_eh
     real(8),allocatable :: ex_old_ld(:,:,:),&                      !LD: old E
                            ey_old_ld(:,:,:),&                      !    (x,y,z)
                            ez_old_ld(:,:,:)                        !
+    !ghost LD state arrays — allocated only when yn_em_envelope='y' and flag_ld=.true.
+    real(8),allocatable :: rjx_ld_g(:,:,:,:),rjx_old_ld_g(:,:,:,:),& !ghost LD J and stock
+                           rjy_ld_g(:,:,:,:),rjy_old_ld_g(:,:,:,:),& !
+                           rjz_ld_g(:,:,:,:),rjz_old_ld_g(:,:,:,:)   !
+    real(8),allocatable ::  px_ld_g(:,:,:,:),&                        !ghost LD P vector
+                            py_ld_g(:,:,:,:),&                        !
+                            pz_ld_g(:,:,:,:)                          !
+    real(8),allocatable :: rjx_fdtd_ld_g(:,:,:),&                    !ghost LD J into FDTD
+                           rjy_fdtd_ld_g(:,:,:),&                    !
+                           rjz_fdtd_ld_g(:,:,:)                      !
+    real(8),allocatable :: ex_old_ld_g(:,:,:),&                      !ghost LD old E
+                           ey_old_ld_g(:,:,:),&                      !
+                           ez_old_ld_g(:,:,:)                        !
     real(8),allocatable :: rmedia(:,:,:)                           !Material information for tmp.
     real(8),allocatable :: time_lr(:)                              !LR: time
     real(8),allocatable :: fr_lr(:,:)                              !LR: Re[f]
@@ -188,6 +210,13 @@ module fdtd_eh
   private :: calc_poynting_vector_div
   integer,      private, parameter :: unit2=3000
   character(11),private, parameter :: file_unit2='ttm_rt.data'
+  ! three-temperature time-series output cadence (steps).  Set in eh_init so the
+  ! single 3tm_rt.data file stays bounded: at least every obs_samp_em steps, but
+  ! coarsened so the total row count never exceeds n_3tm_out_max (a long run with a
+  ! small obs_samp_em therefore cannot blow the file up).  open/append/close each
+  ! write keeps it to one descriptor (no per-cell unit, unlike the legacy TTM path).
+  integer,      private            :: i_3tm_out=1
+  integer,      private, parameter :: n_3tm_out_max=20000
 
 contains
   
@@ -209,7 +238,7 @@ contains
                                ase_smedia_id_em,ase_box_cent_em,ase_box_size_em,                           &
                                art_num_em,art_ene_min_em,art_ene_max_em,art_wav_min_em,art_wav_max_em,     &
                                art_smedia_id_em,art_plane_bot_em,art_plane_top_em,                         &
-                               yn_restart,directory_read_data,checkpoint_interval
+                               yn_restart,directory_read_data,checkpoint_interval,yn_em_envelope
     use inputoutput,     only: utime_from_au,ulength_from_au,uenergy_from_au,unit_system,&
                                uenergy_to_au,ulength_to_au,ucharge_to_au
     use parallelization, only: nproc_id_global,nproc_group_global,nproc_size_global
@@ -223,6 +252,7 @@ contains
                                input_i3d_em,output_i3d_em,stop_em,input_r_txt_em,output_r_txt_em,input_r_bin_em, &
                                txtfile_copy_em
     use ttm,             only: use_ttm, init_ttm_parameters, init_ttm_grid, init_ttm_alloc
+    use ttm3,            only: use_ttm3, init_ttm3_parameters, ttm3_set_dt, init_ttm3_grid, init_ttm3_alloc, ttm3_set_xcomm
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
@@ -293,8 +323,25 @@ contains
       fe%flag_art = .false.
     end if
     
+    !three-temperature model parameters (read early so its need for the cell-centred
+    ! fields can be folded into flag_save below)
+    call init_ttm3_parameters( dt_em )
+
+    !ttm3 state (Te/Th/Tl/Ne/Nh + carrier Drude currents) is NOT in the checkpoint set:
+    !a restart would silently resume with a cold, carrier-free slab mid-pulse -> refuse
+    !up front (before any restart data is touched).  Checkpoints may still be written,
+    !but they cannot seed a maxwell-3tm restart -- warn.
+    if( use_ttm3 )then
+      if(yn_restart=='y') &
+        call stop_em('theory=maxwell-3tm does not support yn_restart=y (ttm3 state is not checkpointed).')
+      if(checkpoint_interval>0 .and. comm_is_root(nproc_id_global)) then
+        write(*,'(A)') " WARNING: checkpoint data will NOT include the ttm3 state;"
+        write(*,'(A)') "          it cannot be used to restart a maxwell-3tm run."
+      end if
+    end if
+
     !save option: calculate variables used for save(typically, ex-z_s and hx-z_s)
-    if(fe%flag_obs .or. fe%flag_ase .or. fe%flag_art) then
+    if(fe%flag_obs .or. fe%flag_ase .or. fe%flag_art .or. use_ttm3) then
       fe%flag_save = .true.
     else
       fe%flag_save = .false.
@@ -766,7 +813,50 @@ contains
       call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%ey_old_ld  )
       call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%ez_old_ld  )
     end if
-    
+
+    !*** allocate ghost (quadrature) EM field state arrays when envelope feature is enabled *******************!
+    if(yn_em_envelope=='y') then
+      !ghost split-Yee E field state
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ex_y_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ex_z_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ey_z_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ey_x_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ez_x_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ez_y_g)
+      !ghost split-Yee H field state
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hx_y_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hx_z_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hy_z_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hy_x_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hz_x_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hz_y_g)
+      !ghost cell-centered fields for envelope Poynting (cycle-averaged TTM source)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ex_s_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ey_s_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ez_s_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hx_s_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hy_s_g)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hz_s_g)
+      !ghost LD state (only when LD media are present)
+      if(fe%flag_ld) then
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjx_ld_g    )
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjy_ld_g    )
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjz_ld_g    )
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjx_old_ld_g)
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjy_old_ld_g)
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjz_old_ld_g)
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%px_ld_g     )
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%py_ld_g     )
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%pz_ld_g     )
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%rjx_fdtd_ld_g)
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%rjy_fdtd_ld_g)
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%rjz_fdtd_ld_g)
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%ex_old_ld_g  )
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%ey_old_ld_g  )
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%ez_old_ld_g  )
+      end if
+    end if
+
     !*** set fdtd coeffient and light speed for media ID = 0 **************************************************!
     allocate(fe%rep(0:media_num),fe%rmu(0:media_num),fe%sig(0:media_num))
     fe%rep(:)=1.0d0; fe%rmu(:)=1.0d0; fe%sig(:)=0.0d0;
@@ -794,6 +884,25 @@ contains
           close(unit2)
        end if
     end if !use_ttm
+
+    !--- three-temperature + carrier model (ttm3) grid/allocation (parameters read earlier) ------!
+    if( use_ttm3 )then
+       call ttm3_set_dt( dt_em )   ! dt_em is finalised (CFL) by here; the early init captured 0
+       call init_ttm3_grid( fs%hgs, fs%mg%is_array, fs%mg%is, fs%mg%ie, fs%imedia )
+       call init_ttm3_alloc( fs%srg_ng, fs%mg )
+       call ttm3_set_xcomm( fs%icomm_x, fs%id_x, fs%isize_x )
+       ! bound the time-series file: emit at most n_3tm_out_max rows, never finer than obs_samp_em
+       i_3tm_out = max( obs_samp_em, (nt_em + n_3tm_out_max - 1)/n_3tm_out_max )
+       if( comm_is_root(nproc_id_global) )then
+          open(unit2,file='3tm_rt.data')
+          write(unit2,'("#",99(1X,I0,":",A))') &
+               1, "Time[fs]", &
+               2, "Te_front[K]", 3, "Th_front[K]", 4, "Tl_front[K]", 5, "Ne_front[cm-3]", 6, "Nh_front[cm-3]", &
+               7, "Te_max[K]",   8, "Th_max[K]",   9, "Tl_max[K]",  10, "Ne_max[cm-3]",  11, "Nh_max[cm-3]", &
+              12, "env_front[au]", 13, "power_front[au]", 14, "gen_front[au]"
+          close(unit2)
+       end if
+    end if !use_ttm3
 
     !*** write media information ******************************************************************************!
     if(comm_is_root(nproc_id_global)) then
@@ -3103,13 +3212,13 @@ contains
       
       !check ae_shape
       select case(ae_shape)
-      case('Ecos2','Acos2')
+      case('Ecos2','Acos2','Agauss','Adgauss')
         continue
       case default
         if     (ipulse==1) then
-          call stop_em('set ae_shape1 to "Ecos2" or "Acos2".')
+          call stop_em('set ae_shape1 to "Ecos2", "Acos2", "Agauss" or "Adgauss".')
         elseif (ipulse==2) then
-          call stop_em('set ae_shape2 to "Ecos2" or "Acos2".')
+          call stop_em('set ae_shape2 to "Ecos2", "Acos2", "Agauss" or "Adgauss".')
         end if
       end select
       
@@ -3207,7 +3316,7 @@ contains
                                base_directory,nt_em,yn_periodic,ek_dir1,t1_t2,t1_start,              &
                                E_amplitude1,tw1,omega1,phi_cep1,epdir_re1,epdir_im1,ae_shape1,       &
                                E_amplitude2,tw2,omega2,phi_cep2,epdir_re2,epdir_im2,ae_shape2,       &
-                               checkpoint_interval,ase_num_em,art_num_em
+                               checkpoint_interval,ase_num_em,art_num_em,yn_em_envelope
     use inputoutput,     only: utime_from_au,uenergy_from_au
     use parallelization, only: nproc_id_global,nproc_size_global,nproc_group_global
     use communication,   only: comm_is_root,comm_summation
@@ -3215,6 +3324,11 @@ contains
     use misc_routines,   only: get_wtime
     use common_maxwell,  only: output_r_txt_em,output_r_bin_em,txtfile_copy_em
     use ttm,             only: use_ttm,ttm_penetration,ttm_main,ttm_get_temperatures
+    use ttm3,            only: use_ttm3,ttm3_main,ttm3_generation,ttm3_get_max,ttm3_get_front,ttm3_eps_sig,&
+                               ttm3_ninterior,ttm3_interior_cell,ttm3_linear_gen,ttm3_write_profile,&
+                               ttm3_drude_coef_cell,ttm3_coupling_mode,ttm3_drude_osc_cell
+    use phys_constants,  only: cspeed_au
+    use math_constants,  only: pi
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
@@ -3225,6 +3339,20 @@ contains
     !for ttm
     integer             :: jx,jy,jz,unit1=4000
     real(8),allocatable :: Spoynting(:,:,:,:), divS(:,:,:)
+    real(8),allocatable :: Spoynting_g(:,:,:,:), divS_g(:,:,:)
+    real(8),allocatable :: t3_S(:,:,:,:), t3_divS(:,:,:), t3_S_g(:,:,:,:), t3_divS_g(:,:,:)
+    real(8),allocatable :: t3_power(:,:,:), t3_gen(:,:,:), t3_env(:,:,:)
+    real(8),allocatable :: t3_jx(:,:,:),t3_jy(:,:,:),t3_jz(:,:,:)        ! carrier Drude ADE current J
+    real(8),allocatable :: t3_rjfx(:,:,:),t3_rjfy(:,:,:),t3_rjfz(:,:,:) ! J injected via eh_add_curr
+    real(8),allocatable :: t3_jx_g(:,:,:),t3_jy_g(:,:,:),t3_jz_g(:,:,:)        ! ghost (quadrature) carrier current
+    real(8),allocatable :: t3_rjfx_g(:,:,:),t3_rjfy_g(:,:,:),t3_rjfz_g(:,:,:) ! ghost J injected via eh_add_curr_g
+    real(8) :: t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh
+    real(8) :: t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf
+    real(8) :: t3_envf,t3_powf,t3_genf
+    integer :: t3_gjx,t3_gjy,t3_gjz
+    real(8) :: t3_eps,t3_sig,t3_de,t3_c1,t3_cx,t3_cy,t3_cz,t3_cj,t3_gtpa
+    real(8) :: t3_ge,t3_wp2,t3_a,t3_b,t3_d2,t3_p,t3_dd,t3_cc,t3_ss,t3_m11,t3_m12,t3_m21,t3_m22,t3_estar,t3_enew,t3_dfld
+    integer :: t3_im
     real(8),allocatable :: u_energy(:,:,:), u_energy_p(:,:,:)
     real(8),allocatable :: work(:,:,:), work1(:,:,:), work2(:,:,:)
     real(8)             :: dV, tmp(4)
@@ -3265,6 +3393,8 @@ contains
                                                  fe%gbeam_width_x2 ,fe%gbeam_width_y2 ,fe%gbeam_width_z2 )
       end if
       if(fe%flag_ld) call eh_add_curr(fe%rjx_fdtd_ld(:,:,:),fe%rjy_fdtd_ld(:,:,:),fe%rjz_fdtd_ld(:,:,:))
+      if(use_ttm3 .and. allocated(t3_rjfx) .and. ( ttm3_coupling_mode()==0 .or. ttm3_coupling_mode()==2 )) &
+        call eh_add_curr(t3_rjfx,t3_rjfy,t3_rjfz)  ! carrier Drude current (J-update only)
       call eh_sendrecv(fs,fe,'e')
       
       !update lorentz-drude
@@ -3304,18 +3434,85 @@ contains
       call eh_fd(fe%ihz_y_is,fe%ihz_y_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
                  fe%c1_hz_y,fe%c2_hz_y,fe%hz_y,fe%ex_y,fe%ex_z,'h','y',cb_y = fe%c_ebloch_y) !hz_y
       call eh_sendrecv(fs,fe,'h')
-      
+
+      !--- ghost (quadrature) field propagation — lockstep with real field -------------------!
+      if(yn_em_envelope=='y') then
+        !store ghost LD old values
+        if(fe%flag_ld) call eh_store_old_g
+
+        !update ghost E
+        call eh_fd(fe%iex_y_is,fe%iex_y_ie, fs%mg%is,fs%mg%ie,fe%Nd,&
+                   fe%c1_ex_y,fe%c2_ex_y,fe%ex_y_g,fe%hz_x_g,fe%hz_y_g,'e','y',cb_y=fe%c_hbloch_y) !ex_y_g
+        call eh_fd(fe%iex_z_is,fe%iex_z_ie, fs%mg%is,fs%mg%ie,fe%Nd,&
+                   fe%c1_ex_z,fe%c2_ex_z,fe%ex_z_g,fe%hy_z_g,fe%hy_x_g,'e','z',cb_z=fe%c_hbloch_z) !ex_z_g
+        call eh_fd(fe%iey_z_is,fe%iey_z_ie, fs%mg%is,fs%mg%ie,fe%Nd,&
+                   fe%c1_ey_z,fe%c2_ey_z,fe%ey_z_g,fe%hx_y_g,fe%hx_z_g,'e','z',cb_z=fe%c_hbloch_z) !ey_z_g
+        call eh_fd(fe%iey_x_is,fe%iey_x_ie, fs%mg%is,fs%mg%ie,fe%Nd,&
+                   fe%c1_ey_x,fe%c2_ey_x,fe%ey_x_g,fe%hz_x_g,fe%hz_y_g,'e','x',cb_x=fe%c_hbloch_x) !ey_x_g
+        call eh_fd(fe%iez_x_is,fe%iez_x_ie, fs%mg%is,fs%mg%ie,fe%Nd,&
+                   fe%c1_ez_x,fe%c2_ez_x,fe%ez_x_g,fe%hy_z_g,fe%hy_x_g,'e','x',cb_x=fe%c_hbloch_x) !ez_x_g
+        call eh_fd(fe%iez_y_is,fe%iez_y_ie, fs%mg%is,fs%mg%ie,fe%Nd,&
+                   fe%c1_ez_y,fe%c2_ez_y,fe%ez_y_g,fe%hx_y_g,fe%hx_z_g,'e','y',cb_y=fe%c_hbloch_y) !ez_y_g
+        !ghost incident source: same parameters but carrier phase shifted -pi/2 (cep -= 0.25)
+        if(fe%inc_num>0) then
+          if(fe%inc_dist1/='none' .and. ae_shape1/='impulse') &
+            call eh_add_inc_g(1,E_amplitude1,tw1,omega1,phi_cep1-0.25d0,               &
+                              epdir_re1,epdir_im1,fe%c2_inc1_xyz,ae_shape1,fe%inc_dist1,&
+                              fe%gbeam_width_xy1,fe%gbeam_width_yz1,fe%gbeam_width_xz1, &
+                              fe%gbeam_width_x1 ,fe%gbeam_width_y1 ,fe%gbeam_width_z1 )
+          if(fe%inc_dist2/='none' .and. ae_shape2/='impulse') &
+            call eh_add_inc_g(2,E_amplitude2,tw2,omega2,phi_cep2-0.25d0,               &
+                              epdir_re2,epdir_im2,fe%c2_inc2_xyz,ae_shape2,fe%inc_dist2,&
+                              fe%gbeam_width_xy2,fe%gbeam_width_yz2,fe%gbeam_width_xz2, &
+                              fe%gbeam_width_x2 ,fe%gbeam_width_y2 ,fe%gbeam_width_z2 )
+        end if
+        !ghost LD current
+        if(fe%flag_ld) call eh_add_curr_g(fe%rjx_fdtd_ld_g,fe%rjy_fdtd_ld_g,fe%rjz_fdtd_ld_g)
+        if(use_ttm3 .and. allocated(t3_rjfx_g) .and. ( ttm3_coupling_mode()==0 .or. ttm3_coupling_mode()==2 )) &
+          call eh_add_curr_g(t3_rjfx_g,t3_rjfy_g,t3_rjfz_g)  ! ghost carrier Drude (J-update only)
+        call eh_sendrecv(fs,fe,'e_g')
+
+        !update ghost LD
+        if(fe%flag_ld) call eh_update_ld_g
+
+        !update ghost H
+        call eh_fd(fe%ihx_y_is,fe%ihx_y_ie, fs%mg%is,fs%mg%ie,fe%Nd,&
+                   fe%c1_hx_y,fe%c2_hx_y,fe%hx_y_g,fe%ez_x_g,fe%ez_y_g,'h','y',cb_y=fe%c_ebloch_y) !hx_y_g
+        call eh_fd(fe%ihx_z_is,fe%ihx_z_ie, fs%mg%is,fs%mg%ie,fe%Nd,&
+                   fe%c1_hx_z,fe%c2_hx_z,fe%hx_z_g,fe%ey_z_g,fe%ey_x_g,'h','z',cb_z=fe%c_ebloch_z) !hx_z_g
+        call eh_fd(fe%ihy_z_is,fe%ihy_z_ie, fs%mg%is,fs%mg%ie,fe%Nd,&
+                   fe%c1_hy_z,fe%c2_hy_z,fe%hy_z_g,fe%ex_y_g,fe%ex_z_g,'h','z',cb_z=fe%c_ebloch_z) !hy_z_g
+        call eh_fd(fe%ihy_x_is,fe%ihy_x_ie, fs%mg%is,fs%mg%ie,fe%Nd,&
+                   fe%c1_hy_x,fe%c2_hy_x,fe%hy_x_g,fe%ez_x_g,fe%ez_y_g,'h','x',cb_x=fe%c_ebloch_x) !hy_x_g
+        call eh_fd(fe%ihz_x_is,fe%ihz_x_ie, fs%mg%is,fs%mg%ie,fe%Nd,&
+                   fe%c1_hz_x,fe%c2_hz_x,fe%hz_x_g,fe%ey_z_g,fe%ey_x_g,'h','x',cb_x=fe%c_ebloch_x) !hz_x_g
+        call eh_fd(fe%ihz_y_is,fe%ihz_y_ie, fs%mg%is,fs%mg%ie,fe%Nd,&
+                   fe%c1_hz_y,fe%c2_hz_y,fe%hz_y_g,fe%ex_y_g,fe%ex_z_g,'h','y',cb_y=fe%c_ebloch_y) !hz_y_g
+        call eh_sendrecv(fs,fe,'h_g')
+      end if !yn_em_envelope
+      !--- end ghost field propagation -------------------------------------------------------!
+
       !ttm
       if( use_ttm )then
         !Poynting vector
         if ( .not.allocated(Spoynting) ) then
           call allocate_poynting(fs, Spoynting, divS, u_energy)
           call allocate_poynting(fs, u=u_energy_p)
+          if(yn_em_envelope=='y') call allocate_poynting(fs, Spoynting_g, divS_g)
         end if
         call calc_es_and_hs(fs, fe)
         call calc_poynting_vector(fs, fe, Spoynting)
         call calc_poynting_vector_div(fs, Spoynting, divS)
-        u_energy(:,:,:) = u_energy(:,:,:) - divS(:,:,:)*dt_em
+        if(yn_em_envelope=='y') then
+          !--- cycle-averaged (envelope) absorbed power via ghost Poynting:        ---!
+          !--- <-divS> = 0.5*( -divS[real] - divS[ghost] ) removes the 2*omega ripple ---!
+          call calc_es_and_hs_g(fs, fe)
+          call calc_poynting_vector_g(fs, fe, Spoynting_g)
+          call calc_poynting_vector_div(fs, Spoynting_g, divS_g)
+          u_energy(:,:,:) = u_energy(:,:,:) - 0.5d0*( divS(:,:,:) + divS_g(:,:,:) )*dt_em
+        else
+          u_energy(:,:,:) = u_energy(:,:,:) - divS(:,:,:)*dt_em
+        end if
         
         u_energy_p = u_energy
         call ttm_penetration( fs%mg%is, u_energy_p )
@@ -3361,6 +3558,206 @@ contains
         end if
       end if !use_ttm
 
+      !--- three-temperature + carrier model (ttm3): laser -> carrier generation + heating -----!
+      !  forward coupling (field -> carriers): absorbed-power heating + intensity-envelope-driven
+      !  carrier generation drive the ttm3 state.  (Single-domain, like the two-temperature path;
+      !  the carrier -> permittivity back-action via ttm3_permittivity is the next integration.)
+      if( use_ttm3 )then
+        if( .not.allocated(t3_power) )then
+          call allocate_poynting(fs, t3_S, t3_divS)
+          call allocate_poynting(fs, u=t3_power)
+          call allocate_poynting(fs, u=t3_gen)
+          allocate( t3_env(fs%mg%is_array(1):fs%mg%ie_array(1), &
+                           fs%mg%is_array(2):fs%mg%ie_array(2), &
+                           fs%mg%is_array(3):fs%mg%ie_array(3)) ); t3_env=0.0d0
+          !carrier-current arrays: eh_add_curr/_g declare their dummies explicit-shape with
+          !HALO bounds (is_array:ie_array), so these must be allocated with the same bounds
+          !(allocate_poynting's u= is halo-less is:ie and would sequence-associate with an
+          !index skew = scrambled injection + out-of-bounds reads; found 2026-07-05 review).
+          ix=fs%mg%is_array(1); jx=fs%mg%ie_array(1)
+          iy=fs%mg%is_array(2); jy=fs%mg%ie_array(2)
+          iz=fs%mg%is_array(3); jz=fs%mg%ie_array(3)
+          allocate( t3_jx  (ix:jx,iy:jy,iz:jz), t3_jy  (ix:jx,iy:jy,iz:jz), t3_jz  (ix:jx,iy:jy,iz:jz), &
+                    t3_rjfx(ix:jx,iy:jy,iz:jz), t3_rjfy(ix:jx,iy:jy,iz:jz), t3_rjfz(ix:jx,iy:jy,iz:jz) )
+          t3_jx=0d0; t3_jy=0d0; t3_jz=0d0; t3_rjfx=0d0; t3_rjfy=0d0; t3_rjfz=0d0
+          if(yn_em_envelope=='y')then
+            call allocate_poynting(fs, t3_S_g, t3_divS_g)
+            !ghost (quadrature) carrier current: the envelope generation/heating use
+            !env = |E|^2 + |E_g|^2 and -0.5*(divS+divS_g), so the ghost field must be damped
+            !by the same carrier Drude as the real field, else |E_g|^2 stays undamped -> runaway.
+            allocate( t3_jx_g  (ix:jx,iy:jy,iz:jz), t3_jy_g  (ix:jx,iy:jy,iz:jz), t3_jz_g  (ix:jx,iy:jy,iz:jz), &
+                      t3_rjfx_g(ix:jx,iy:jy,iz:jz), t3_rjfy_g(ix:jx,iy:jy,iz:jz), t3_rjfz_g(ix:jx,iy:jy,iz:jz) )
+            t3_jx_g=0d0; t3_jy_g=0d0; t3_jz_g=0d0; t3_rjfx_g=0d0; t3_rjfy_g=0d0; t3_rjfz_g=0d0
+          end if
+        end if
+        call calc_es_and_hs(fs, fe)
+        call calc_poynting_vector(fs, fe, t3_S)
+        call calc_poynting_vector_div(fs, t3_S, t3_divS)
+        if(yn_em_envelope=='y')then
+          call calc_es_and_hs_g(fs, fe)
+          call calc_poynting_vector_g(fs, fe, t3_S_g)
+          call calc_poynting_vector_div(fs, t3_S_g, t3_divS_g)
+          t3_power(:,:,:) = -0.5d0*( t3_divS(:,:,:) + t3_divS_g(:,:,:) )
+          call eh_get_field_envelope(fs, fe, t3_env)
+        else
+          t3_power(:,:,:) = -t3_divS(:,:,:)
+        end if
+        ! Carrier generation channels (reference Se):
+        !  - linear (1 pair / absorbed photon): gen = max(-divS,0)/(hbar*omega), tied to the
+        !    SAME absorbed power that heats, so the gap cost is a bounded fraction of it;
+        !  - two-photon (TPA): gen_tpa = beta2*I_env^2 (ttm3_generation), 2 photons per pair.
+        !    Its absorbed power 2*hbar*omega*gen_tpa is added to the heating source so the
+        !    energy book-keeping stays consistent.  beta2=0 (physical at 1.55 eV, below the
+        !    TPA threshold) leaves the validated linear result unchanged; beta2>0 activates
+        !    the channel for higher photon energy / intensity.  hbar*omega = omega1 (hbar=1).
+        do iz=fs%mg%is(3),fs%mg%ie(3)
+        do iy=fs%mg%is(2),fs%mg%ie(2)
+        do ix=fs%mg%is(1),fs%mg%ie(1)
+          t3_gtpa = ttm3_generation( t3_env(ix,iy,iz) )                       ! beta2 * I_env^2
+          ! linear generation = BOUND-absorption fraction of the absorbed power (Layer C-a);
+          ! reduces to max(power,0)/omega1 when sig_cold<=0 (split disabled).
+          t3_gen(ix,iy,iz)   = ttm3_linear_gen( ix,iy,iz, omega1, t3_power(ix,iy,iz) ) + t3_gtpa
+          t3_power(ix,iy,iz) = t3_power(ix,iy,iz) + 2.0d0*omega1*t3_gtpa      ! TPA: 2 hbar w per pair
+        end do
+        end do
+        end do
+        call ttm3_main( fs%srg_ng, fs%mg, t3_power, t3_gen )
+
+        !--- carrier-Drude back-action via the STABLE current-source coupling (SALMON-native):
+        !    each medium cell carries an auxiliary Drude polarization current J evolved by the
+        !    ADE  J_new = c1*J + c2*E  (c1,c2 from the carrier plasma frequency/collision rate),
+        !    and injected into the FDTD E-update next step through the existing eh_add_curr
+        !    interface (same scheme as the validated Lorentz-Drude media).  The media
+        !    coefficients (c1_ex_*, c2_jx) are NOT touched -- they keep the fixed cold-bound
+        !    optics (eps_bg + sig_cold) from init.  This replaces the old eps/sigma coefficient
+        !    back-action, which is numerically unstable in the real-field FDTD when sigma grows
+        !    fast (abrupt coefficient change -> front/antinode runaway).
+        if( ( ttm3_coupling_mode()==0 .or. ttm3_coupling_mode()==2 ) )then
+        do t3_im=1,ttm3_ninterior()
+          call ttm3_interior_cell( t3_im, ix,iy,iz )
+            call ttm3_drude_coef_cell( ix,iy,iz, omega1, dt_em, t3_c1, t3_cj )   ! c1, c2 (ADE)
+            t3_jx(ix,iy,iz) = t3_c1*t3_jx(ix,iy,iz) + t3_cj*( fe%ex_y(ix,iy,iz)+fe%ex_z(ix,iy,iz) )
+            t3_jy(ix,iy,iz) = t3_c1*t3_jy(ix,iy,iz) + t3_cj*( fe%ey_z(ix,iy,iz)+fe%ey_x(ix,iy,iz) )
+            t3_jz(ix,iy,iz) = t3_c1*t3_jz(ix,iy,iz) + t3_cj*( fe%ez_x(ix,iy,iz)+fe%ez_y(ix,iy,iz) )
+            t3_rjfx(ix,iy,iz) = 0.5d0*(1.0d0+t3_c1)*t3_jx(ix,iy,iz)
+            t3_rjfy(ix,iy,iz) = 0.5d0*(1.0d0+t3_c1)*t3_jy(ix,iy,iz)
+            t3_rjfz(ix,iy,iz) = 0.5d0*(1.0d0+t3_c1)*t3_jz(ix,iy,iz)
+            if(yn_em_envelope=='y')then   ! same carrier Drude on the ghost (quadrature) field
+              t3_jx_g(ix,iy,iz) = t3_c1*t3_jx_g(ix,iy,iz) + t3_cj*( fe%ex_y_g(ix,iy,iz)+fe%ex_z_g(ix,iy,iz) )
+              t3_jy_g(ix,iy,iz) = t3_c1*t3_jy_g(ix,iy,iz) + t3_cj*( fe%ey_z_g(ix,iy,iz)+fe%ey_x_g(ix,iy,iz) )
+              t3_jz_g(ix,iy,iz) = t3_c1*t3_jz_g(ix,iy,iz) + t3_cj*( fe%ez_x_g(ix,iy,iz)+fe%ez_y_g(ix,iy,iz) )
+              t3_rjfx_g(ix,iy,iz) = 0.5d0*(1.0d0+t3_c1)*t3_jx_g(ix,iy,iz)
+              t3_rjfy_g(ix,iy,iz) = 0.5d0*(1.0d0+t3_c1)*t3_jy_g(ix,iy,iz)
+              t3_rjfz_g(ix,iy,iz) = 0.5d0*(1.0d0+t3_c1)*t3_jz_g(ix,iy,iz)
+            end if
+        end do
+        else if( ttm3_coupling_mode()==3 )then
+          !--- mode 3: exact local Drude-oscillator exponential sub-step (semi-implicit JE).
+          !    After the lossless E-update, advance each interior cell (E_a,J_a) under the local
+          !    Drude oscillator d/dt[E;J]=[[0,-4pi/eps],[wp2/4pi,-gamma]][E;J] by the exact 2x2
+          !    matrix exponential, then redistribute dE equally to the split-Yee components.
+          !    Unconditionally stable, energy-conserving, broadband.  No eh_add_curr injection.
+          do t3_im=1,ttm3_ninterior()
+            call ttm3_interior_cell( t3_im, ix,iy,iz )
+            call ttm3_drude_osc_cell( ix,iy,iz, t3_eps, t3_ge, t3_wp2 )
+            t3_b  = 4.0d0*pi/t3_eps ; t3_a = t3_wp2/(4.0d0*pi)
+            t3_d2 = (0.5d0*t3_ge)**2 - t3_a*t3_b
+            t3_p  = exp( -0.5d0*t3_ge*dt_em )
+            if( t3_d2 > 1.0d-30 )then
+              t3_dd = sqrt(t3_d2) ; t3_cc = cosh(t3_dd*dt_em) ; t3_ss = sinh(t3_dd*dt_em)/t3_dd
+            else if( t3_d2 < -1.0d-30 )then
+              t3_dd = sqrt(-t3_d2) ; t3_cc = cos(t3_dd*dt_em) ; t3_ss = sin(t3_dd*dt_em)/t3_dd
+            else
+              t3_cc = 1.0d0 ; t3_ss = dt_em
+            end if
+            t3_m11 = t3_p*( t3_cc + 0.5d0*t3_ge*t3_ss )
+            t3_m12 = t3_p*( -t3_b*t3_ss )
+            t3_m21 = t3_p*(  t3_a*t3_ss )
+            t3_m22 = t3_p*( t3_cc - 0.5d0*t3_ge*t3_ss )
+            t3_estar = fe%ex_y(ix,iy,iz)+fe%ex_z(ix,iy,iz)
+            t3_enew  = t3_m11*t3_estar + t3_m12*t3_jx(ix,iy,iz)
+            t3_jx(ix,iy,iz) = t3_m21*t3_estar + t3_m22*t3_jx(ix,iy,iz)
+            t3_dfld = 0.5d0*( t3_enew - t3_estar )
+            fe%ex_y(ix,iy,iz)=fe%ex_y(ix,iy,iz)+t3_dfld ; fe%ex_z(ix,iy,iz)=fe%ex_z(ix,iy,iz)+t3_dfld
+            t3_estar = fe%ey_z(ix,iy,iz)+fe%ey_x(ix,iy,iz)
+            t3_enew  = t3_m11*t3_estar + t3_m12*t3_jy(ix,iy,iz)
+            t3_jy(ix,iy,iz) = t3_m21*t3_estar + t3_m22*t3_jy(ix,iy,iz)
+            t3_dfld = 0.5d0*( t3_enew - t3_estar )
+            fe%ey_z(ix,iy,iz)=fe%ey_z(ix,iy,iz)+t3_dfld ; fe%ey_x(ix,iy,iz)=fe%ey_x(ix,iy,iz)+t3_dfld
+            t3_estar = fe%ez_x(ix,iy,iz)+fe%ez_y(ix,iy,iz)
+            t3_enew  = t3_m11*t3_estar + t3_m12*t3_jz(ix,iy,iz)
+            t3_jz(ix,iy,iz) = t3_m21*t3_estar + t3_m22*t3_jz(ix,iy,iz)
+            t3_dfld = 0.5d0*( t3_enew - t3_estar )
+            fe%ez_x(ix,iy,iz)=fe%ez_x(ix,iy,iz)+t3_dfld ; fe%ez_y(ix,iy,iz)=fe%ez_y(ix,iy,iz)+t3_dfld
+            if(yn_em_envelope=="y")then
+              t3_estar = fe%ex_y_g(ix,iy,iz)+fe%ex_z_g(ix,iy,iz)
+              t3_enew  = t3_m11*t3_estar + t3_m12*t3_jx_g(ix,iy,iz)
+              t3_jx_g(ix,iy,iz) = t3_m21*t3_estar + t3_m22*t3_jx_g(ix,iy,iz)
+              t3_dfld = 0.5d0*( t3_enew - t3_estar )
+              fe%ex_y_g(ix,iy,iz)=fe%ex_y_g(ix,iy,iz)+t3_dfld ; fe%ex_z_g(ix,iy,iz)=fe%ex_z_g(ix,iy,iz)+t3_dfld
+              t3_estar = fe%ey_z_g(ix,iy,iz)+fe%ey_x_g(ix,iy,iz)
+              t3_enew  = t3_m11*t3_estar + t3_m12*t3_jy_g(ix,iy,iz)
+              t3_jy_g(ix,iy,iz) = t3_m21*t3_estar + t3_m22*t3_jy_g(ix,iy,iz)
+              t3_dfld = 0.5d0*( t3_enew - t3_estar )
+              fe%ey_z_g(ix,iy,iz)=fe%ey_z_g(ix,iy,iz)+t3_dfld ; fe%ey_x_g(ix,iy,iz)=fe%ey_x_g(ix,iy,iz)+t3_dfld
+              t3_estar = fe%ez_x_g(ix,iy,iz)+fe%ez_y_g(ix,iy,iz)
+              t3_enew  = t3_m11*t3_estar + t3_m12*t3_jz_g(ix,iy,iz)
+              t3_jz_g(ix,iy,iz) = t3_m21*t3_estar + t3_m22*t3_jz_g(ix,iy,iz)
+              t3_dfld = 0.5d0*( t3_enew - t3_estar )
+              fe%ez_x_g(ix,iy,iz)=fe%ez_x_g(ix,iy,iz)+t3_dfld ; fe%ez_y_g(ix,iy,iz)=fe%ez_y_g(ix,iy,iz)+t3_dfld
+            end if
+          end do
+        else
+          !--- eps-update coupling (reference 3D3TM style): fold the carrier eps/sigma into the
+          !    FDTD media coefficients each step (same dielectric formula as init), instead of a
+          !    current source.  Isolates the Maxwell-coupling METHOD on an identical run.
+          do t3_im=1,ttm3_ninterior()
+            call ttm3_interior_cell( t3_im, ix,iy,iz )
+            call ttm3_eps_sig( ix,iy,iz, omega1, t3_eps, t3_sig )
+            t3_de = 1.0d0 + 2.0d0*pi*t3_sig/t3_eps*dt_em
+            t3_c1 = ( 1.0d0 - 2.0d0*pi*t3_sig/t3_eps*dt_em )/t3_de
+            t3_cx = cspeed_au/t3_eps*dt_em/t3_de/fs%hgs(1)
+            t3_cy = cspeed_au/t3_eps*dt_em/t3_de/fs%hgs(2)
+            t3_cz = cspeed_au/t3_eps*dt_em/t3_de/fs%hgs(3)
+            t3_cj = ( 4.0d0*pi/t3_eps*dt_em )/t3_de
+            fe%c1_ex_y(ix,iy,iz)= t3_c1; fe%c2_ex_y(ix,iy,iz)= t3_cy; fe%c1_ex_z(ix,iy,iz)= t3_c1; fe%c2_ex_z(ix,iy,iz)=-t3_cz
+            fe%c1_ey_z(ix,iy,iz)= t3_c1; fe%c2_ey_z(ix,iy,iz)= t3_cz; fe%c1_ey_x(ix,iy,iz)= t3_c1; fe%c2_ey_x(ix,iy,iz)=-t3_cx
+            fe%c1_ez_x(ix,iy,iz)= t3_c1; fe%c2_ez_x(ix,iy,iz)= t3_cx; fe%c1_ez_y(ix,iy,iz)= t3_c1; fe%c2_ez_y(ix,iy,iz)=-t3_cy
+            fe%c2_jx(ix,iy,iz)  =-t3_cj; fe%c2_jy(ix,iy,iz)  =-t3_cj; fe%c2_jz(ix,iy,iz)  =-t3_cj
+          end do
+        end if
+
+        if( mod(iter,i_3tm_out)==0 )then
+          !report the front cell (illuminated face, the reference's x=0 surface analogue) and
+          !the global peak over medium cells (sits at internal Fabry-Perot antinodes, reads
+          !high in a finite slab).  Both written so the two can be compared.
+          !i_3tm_out (>= obs_samp_em) bounds 3tm_rt.data to <= n_3tm_out_max rows.
+          !ttm3_get_front/ttm3_write_profile are COLLECTIVE (called by every rank): the front
+          !cell is selected globally, so cols 2-6 and 12-14 all come from the same cell for
+          !any MPI decomposition (rank 0 no longer reads its possibly-vacuum local cell).
+          call ttm3_get_front( t3_env, t3_power, t3_gen, &
+                               t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf, &
+                               t3_envf,t3_powf,t3_genf, t3_gjx,t3_gjy,t3_gjz )
+          call ttm3_get_max  ( t3_Te ,t3_Th ,t3_Tl ,t3_Ne ,t3_Nh  )
+          if( comm_is_root(nproc_id_global) )then
+            open(unit2,file='3tm_rt.data',status='old',position='append')
+            ! col 12 = front-cell field-intensity envelope |E|^2+|E_g|^2 [a.u.];
+            ! col 13 = front-cell heating source -divS [a.u. power/vol]; col 14 = front-cell
+            ! generation rate [a.u.].  With Te/Ne/Tl these reconstruct the full dTe balance
+            ! externally (Ce, e-phonon, dilution, Col, gap cost) -> localize what sets Te.
+            write(unit2,"(F16.8,99(1X,E23.15E3))") &
+                 dble(iter)*dt_em*utime_from_au, &
+                 t3_Tef,t3_Thf,t3_Tlf,t3_Nef,t3_Nhf, t3_Te,t3_Th,t3_Tl,t3_Ne,t3_Nh, &
+                 t3_envf, t3_powf, t3_genf
+            close(unit2)
+          end if
+          ! depth profile (time, ix, Te[K], Ne[cm-3], Tl[K], |E|^2[a.u.]) along the global
+          ! front-cell line; collective (gathers x-slices), root does the writing inside
+          call ttm3_write_profile( '3tm_prof.data', dble(iter)*dt_em*utime_from_au, unit2, t3_env, &
+                                   t3_gjy, t3_gjz )
+        end if
+      end if !use_ttm3
+
       !output
       if( fe%flag_save .and. mod(iter,obs_samp_em)==0 )then
         !prepare e and h for save
@@ -3399,6 +3796,21 @@ contains
                     fe%hy_s(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3))*fe%uAperm_from_au, &
                     fe%hz_s(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3))*fe%uAperm_from_au
               close(fe%ifn)
+              !ghost (quadrature) field diagnostic output
+              if(yn_em_envelope=='y') then
+                write(save_name,*) ii
+                save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//'_at_point_ghost_rt.data'
+                open(fe%ifn,file=save_name,status='unknown',position='append')
+                write(fe%ifn,"(F16.8,3(1X,E23.15E3))",advance='no')                                                    &
+                      dble(iter)*dt_em*utime_from_au,                                                                  &
+                      (fe%ex_y_g(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3))                         &
+                      +fe%ex_z_g(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3)))*fe%uVperm_from_au,     &
+                      (fe%ey_z_g(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3))                         &
+                      +fe%ey_x_g(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3)))*fe%uVperm_from_au,     &
+                      (fe%ez_x_g(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3))                         &
+                      +fe%ez_y_g(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3)))*fe%uVperm_from_au
+                close(fe%ifn)
+              end if !yn_em_envelope
             end if
             
             !plane
@@ -4633,7 +5045,376 @@ contains
       
       return
     end subroutine eh_update_max
-    
+
+    !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    !+ store ghost LD old values +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    subroutine eh_store_old_g
+      implicit none
+
+!$omp parallel
+!$omp do private(ii,ix,iy,iz) collapse(3)
+      do ii=1,fe%max_pole_num_ld
+      do iz=fs%mg%is(3),fs%mg%ie(3)
+      do iy=fs%mg%is(2),fs%mg%ie(2)
+      do ix=fs%mg%is(1),fs%mg%ie(1)
+        fe%rjx_old_ld_g(ix,iy,iz,ii) = fe%rjx_ld_g(ix,iy,iz,ii)
+        fe%rjy_old_ld_g(ix,iy,iz,ii) = fe%rjy_ld_g(ix,iy,iz,ii)
+        fe%rjz_old_ld_g(ix,iy,iz,ii) = fe%rjz_ld_g(ix,iy,iz,ii)
+      end do
+      end do
+      end do
+      end do
+!$omp end do
+!$omp end parallel
+!$omp parallel
+!$omp do private(ix,iy,iz) collapse(2)
+      do iz=fs%mg%is(3),fs%mg%ie(3)
+      do iy=fs%mg%is(2),fs%mg%ie(2)
+      do ix=fs%mg%is(1),fs%mg%ie(1)
+        fe%ex_old_ld_g(ix,iy,iz) = fe%ex_y_g(ix,iy,iz) + fe%ex_z_g(ix,iy,iz)
+        fe%ey_old_ld_g(ix,iy,iz) = fe%ey_z_g(ix,iy,iz) + fe%ey_x_g(ix,iy,iz)
+        fe%ez_old_ld_g(ix,iy,iz) = fe%ez_x_g(ix,iy,iz) + fe%ez_y_g(ix,iy,iz)
+      end do
+      end do
+      end do
+!$omp end do
+!$omp end parallel
+
+      return
+    end subroutine eh_store_old_g
+
+    !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    !+ update ghost Lorentz-Drude ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    subroutine eh_update_ld_g
+      implicit none
+
+      !initialize
+!$omp parallel
+!$omp do private(ix,iy,iz) collapse(2)
+      do iz=fs%mg%is(3),fs%mg%ie(3)
+      do iy=fs%mg%is(2),fs%mg%ie(2)
+      do ix=fs%mg%is(1),fs%mg%ie(1)
+        fe%rjx_fdtd_ld_g(ix,iy,iz)=0.0d0
+        fe%rjy_fdtd_ld_g(ix,iy,iz)=0.0d0
+        fe%rjz_fdtd_ld_g(ix,iy,iz)=0.0d0
+      end do
+      end do
+      end do
+!$omp end do
+!$omp end parallel
+
+      !update ghost LD polarization current & vector and FDTD current
+      do ii=1,fe%max_pole_num_ld
+!$omp parallel
+!$omp do private(ix,iy,iz) collapse(2)
+        do iz=fs%mg%is(3),fs%mg%ie(3)
+        do iy=fs%mg%is(2),fs%mg%ie(2)
+        do ix=fs%mg%is(1),fs%mg%ie(1)
+          fe%rjx_ld_g(ix,iy,iz,ii) = fe%c1_jx_ld(ix,iy,iz,ii)*fe%rjx_old_ld_g(ix,iy,iz,ii)              &
+                                    +fe%c2_jx_ld(ix,iy,iz,ii)*( fe%ex_y_g(ix,iy,iz)+fe%ex_z_g(ix,iy,iz)  &
+                                                               +fe%ex_old_ld_g(ix,iy,iz) )                &
+                                    -fe%c3_jx_ld(ix,iy,iz,ii)*fe%px_ld_g(ix,iy,iz,ii)
+          fe%rjy_ld_g(ix,iy,iz,ii) = fe%c1_jy_ld(ix,iy,iz,ii)*fe%rjy_old_ld_g(ix,iy,iz,ii)              &
+                                    +fe%c2_jy_ld(ix,iy,iz,ii)*( fe%ey_z_g(ix,iy,iz)+fe%ey_x_g(ix,iy,iz)  &
+                                                               +fe%ey_old_ld_g(ix,iy,iz) )                &
+                                    -fe%c3_jy_ld(ix,iy,iz,ii)*fe%py_ld_g(ix,iy,iz,ii)
+          fe%rjz_ld_g(ix,iy,iz,ii) = fe%c1_jz_ld(ix,iy,iz,ii)*fe%rjz_old_ld_g(ix,iy,iz,ii)              &
+                                    +fe%c2_jz_ld(ix,iy,iz,ii)*( fe%ez_x_g(ix,iy,iz)+fe%ez_y_g(ix,iy,iz)  &
+                                                               +fe%ez_old_ld_g(ix,iy,iz) )                &
+                                    -fe%c3_jz_ld(ix,iy,iz,ii)*fe%pz_ld_g(ix,iy,iz,ii)
+          fe%px_ld_g(ix,iy,iz,ii)  = fe%px_ld_g(ix,iy,iz,ii) &
+                                    +0.5d0*dt_em*( fe%rjx_ld_g(ix,iy,iz,ii) + fe%rjx_old_ld_g(ix,iy,iz,ii) )
+          fe%py_ld_g(ix,iy,iz,ii)  = fe%py_ld_g(ix,iy,iz,ii) &
+                                    +0.5d0*dt_em*( fe%rjy_ld_g(ix,iy,iz,ii) + fe%rjy_old_ld_g(ix,iy,iz,ii) )
+          fe%pz_ld_g(ix,iy,iz,ii)  = fe%pz_ld_g(ix,iy,iz,ii) &
+                                    +0.5d0*dt_em*( fe%rjz_ld_g(ix,iy,iz,ii) + fe%rjz_old_ld_g(ix,iy,iz,ii) )
+          fe%rjx_fdtd_ld_g(ix,iy,iz)  = fe%rjx_fdtd_ld_g(ix,iy,iz)                                           &
+                                       +0.5d0*( (1.0d0+fe%c1_jx_ld(ix,iy,iz,ii)) * fe%rjx_ld_g(ix,iy,iz,ii)  &
+                                                      -fe%c3_jx_ld(ix,iy,iz,ii)  * fe%px_ld_g(ix,iy,iz,ii) )
+          fe%rjy_fdtd_ld_g(ix,iy,iz)  = fe%rjy_fdtd_ld_g(ix,iy,iz)                                           &
+                                       +0.5d0*( (1.0d0+fe%c1_jy_ld(ix,iy,iz,ii)) * fe%rjy_ld_g(ix,iy,iz,ii)  &
+                                                      -fe%c3_jy_ld(ix,iy,iz,ii)  * fe%py_ld_g(ix,iy,iz,ii) )
+          fe%rjz_fdtd_ld_g(ix,iy,iz)  = fe%rjz_fdtd_ld_g(ix,iy,iz)                                           &
+                                       +0.5d0*( (1.0d0+fe%c1_jz_ld(ix,iy,iz,ii)) * fe%rjz_ld_g(ix,iy,iz,ii)  &
+                                                      -fe%c3_jz_ld(ix,iy,iz,ii)  * fe%pz_ld_g(ix,iy,iz,ii) )
+        end do
+        end do
+        end do
+!$omp end do
+!$omp end parallel
+      end do
+
+      return
+    end subroutine eh_update_ld_g
+
+    !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    !+ add ghost incident current source (quadrature: carrier phase shifted -pi/2) ++++++++++++
+    subroutine eh_add_inc_g(iord,amp,tw,omega,cep,ep_r,ep_i,c2_inc_xyz,aes,typ,&
+                            g_xy,g_yz,g_xz,g_x,g_y,g_z)
+      implicit none
+      integer,      intent(in) :: iord
+      real(8),      intent(in) :: amp,tw,omega,cep
+      real(8),      intent(in) :: ep_r(3),ep_i(3),c2_inc_xyz(3)
+      character(16),intent(in) :: aes,typ
+      real(8),      intent(in) :: g_xy(fs%mg%is_array(1):fs%mg%ie_array(1),fs%mg%is_array(2):fs%mg%ie_array(2)),&
+                                  g_yz(fs%mg%is_array(2):fs%mg%ie_array(2),fs%mg%is_array(3):fs%mg%ie_array(3)),&
+                                  g_xz(fs%mg%is_array(1):fs%mg%ie_array(1),fs%mg%is_array(3):fs%mg%ie_array(3))
+      real(8),      intent(in) :: g_x( fs%mg%is_array(1):fs%mg%ie_array(1) ),&
+                                  g_y( fs%mg%is_array(2):fs%mg%ie_array(2) ),&
+                                  g_z( fs%mg%is_array(3):fs%mg%ie_array(3) )
+      real(8)                  :: t_sta,t,e_inc_r,e_inc_i
+      real(8)                  :: add_inc(3)
+
+      !calculate incident pulse (with carrier phase already shifted by caller)
+      if(iord==1) then
+        t_sta = t1_start
+      elseif(iord==2) then
+        t_sta = t1_start + t1_t2
+      end if
+      t = (dble(iter)-0.5d0)*dt_em - t_sta
+      call eh_calc_e_inc(amp,t,tw,omega,cep,aes,e_inc_r,e_inc_i)
+      add_inc(:) = e_inc_r*ep_r(:) + e_inc_i*ep_i(:)
+
+      if(typ=='point_hs') then
+        if(fe%inc_po_pe(iord)==1) then
+          ix=fe%inc_po_id(iord,1); iy=fe%inc_po_id(iord,2); iz=fe%inc_po_id(iord,3)
+          fe%ex_y_g(ix,iy,iz)=add_inc(1)/2.0d0
+          fe%ex_z_g(ix,iy,iz)=add_inc(1)/2.0d0
+          fe%ey_z_g(ix,iy,iz)=add_inc(2)/2.0d0
+          fe%ey_x_g(ix,iy,iz)=add_inc(2)/2.0d0
+          fe%ez_x_g(ix,iy,iz)=add_inc(3)/2.0d0
+          fe%ez_y_g(ix,iy,iz)=add_inc(3)/2.0d0
+        end if
+      elseif(typ=='point_ss') then
+        if(fe%inc_po_pe(iord)==1) then
+          ix=fe%inc_po_id(iord,1); iy=fe%inc_po_id(iord,2); iz=fe%inc_po_id(iord,3)
+          fe%ex_y_g(ix,iy,iz)=fe%ex_y_g(ix,iy,iz)+add_inc(1)/2.0d0
+          fe%ex_z_g(ix,iy,iz)=fe%ex_z_g(ix,iy,iz)+add_inc(1)/2.0d0
+          fe%ey_z_g(ix,iy,iz)=fe%ey_z_g(ix,iy,iz)+add_inc(2)/2.0d0
+          fe%ey_x_g(ix,iy,iz)=fe%ey_x_g(ix,iy,iz)+add_inc(2)/2.0d0
+          fe%ez_x_g(ix,iy,iz)=fe%ez_x_g(ix,iy,iz)+add_inc(3)/2.0d0
+          fe%ez_y_g(ix,iy,iz)=fe%ez_y_g(ix,iy,iz)+add_inc(3)/2.0d0
+        end if
+      elseif(typ=='x-line_hs') then
+        if(fe%inc_li_pe(iord,1)==1) then
+          iy=fe%inc_po_id(iord,2); iz=fe%inc_po_id(iord,3)
+          fe%ex_y_g(fe%iex_y_is(1):fe%iex_y_ie(1),iy,iz)=add_inc(1)/2.0d0
+          fe%ex_z_g(fe%iex_z_is(1):fe%iex_z_ie(1),iy,iz)=add_inc(1)/2.0d0
+          fe%ey_z_g(fe%iey_z_is(1):fe%iey_z_ie(1),iy,iz)=add_inc(2)/2.0d0
+          fe%ey_x_g(fe%iey_x_is(1):fe%iey_x_ie(1),iy,iz)=add_inc(2)/2.0d0
+          fe%ez_x_g(fe%iez_x_is(1):fe%iez_x_ie(1),iy,iz)=add_inc(3)/2.0d0
+          fe%ez_y_g(fe%iez_y_is(1):fe%iez_y_ie(1),iy,iz)=add_inc(3)/2.0d0
+        end if
+      elseif(typ=='x-line_ss') then
+        if(fe%inc_li_pe(iord,1)==1) then
+          iy=fe%inc_po_id(iord,2); iz=fe%inc_po_id(iord,3)
+          fe%ex_y_g(fe%iex_y_is(1):fe%iex_y_ie(1),iy,iz)=fe%ex_y_g(fe%iex_y_is(1):fe%iex_y_ie(1),iy,iz)+add_inc(1)/2.0d0
+          fe%ex_z_g(fe%iex_z_is(1):fe%iex_z_ie(1),iy,iz)=fe%ex_z_g(fe%iex_z_is(1):fe%iex_z_ie(1),iy,iz)+add_inc(1)/2.0d0
+          fe%ey_z_g(fe%iey_z_is(1):fe%iey_z_ie(1),iy,iz)=fe%ey_z_g(fe%iey_z_is(1):fe%iey_z_ie(1),iy,iz)+add_inc(2)/2.0d0
+          fe%ey_x_g(fe%iey_x_is(1):fe%iey_x_ie(1),iy,iz)=fe%ey_x_g(fe%iey_x_is(1):fe%iey_x_ie(1),iy,iz)+add_inc(2)/2.0d0
+          fe%ez_x_g(fe%iez_x_is(1):fe%iez_x_ie(1),iy,iz)=fe%ez_x_g(fe%iez_x_is(1):fe%iez_x_ie(1),iy,iz)+add_inc(3)/2.0d0
+          fe%ez_y_g(fe%iez_y_is(1):fe%iez_y_ie(1),iy,iz)=fe%ez_y_g(fe%iez_y_is(1):fe%iez_y_ie(1),iy,iz)+add_inc(3)/2.0d0
+        end if
+      elseif(typ=='y-line_hs') then
+        if(fe%inc_li_pe(iord,2)==1) then
+          ix=fe%inc_po_id(iord,1); iz=fe%inc_po_id(iord,3)
+          fe%ex_y_g(ix,fe%iex_y_is(2):fe%iex_y_ie(2),iz)=add_inc(1)/2.0d0
+          fe%ex_z_g(ix,fe%iex_z_is(2):fe%iex_z_ie(2),iz)=add_inc(1)/2.0d0
+          fe%ey_z_g(ix,fe%iey_z_is(2):fe%iey_z_ie(2),iz)=add_inc(2)/2.0d0
+          fe%ey_x_g(ix,fe%iey_x_is(2):fe%iey_x_ie(2),iz)=add_inc(2)/2.0d0
+          fe%ez_x_g(ix,fe%iez_x_is(2):fe%iez_x_ie(2),iz)=add_inc(3)/2.0d0
+          fe%ez_y_g(ix,fe%iez_y_is(2):fe%iez_y_ie(2),iz)=add_inc(3)/2.0d0
+        end if
+      elseif(typ=='y-line_ss') then
+        if(fe%inc_li_pe(iord,2)==1) then
+          ix=fe%inc_po_id(iord,1); iz=fe%inc_po_id(iord,3)
+          fe%ex_y_g(ix,fe%iex_y_is(2):fe%iex_y_ie(2),iz)=fe%ex_y_g(ix,fe%iex_y_is(2):fe%iex_y_ie(2),iz)+add_inc(1)/2.0d0
+          fe%ex_z_g(ix,fe%iex_z_is(2):fe%iex_z_ie(2),iz)=fe%ex_z_g(ix,fe%iex_z_is(2):fe%iex_z_ie(2),iz)+add_inc(1)/2.0d0
+          fe%ey_z_g(ix,fe%iey_z_is(2):fe%iey_z_ie(2),iz)=fe%ey_z_g(ix,fe%iey_z_is(2):fe%iey_z_ie(2),iz)+add_inc(2)/2.0d0
+          fe%ey_x_g(ix,fe%iey_x_is(2):fe%iey_x_ie(2),iz)=fe%ey_x_g(ix,fe%iey_x_is(2):fe%iey_x_ie(2),iz)+add_inc(2)/2.0d0
+          fe%ez_x_g(ix,fe%iez_x_is(2):fe%iez_x_ie(2),iz)=fe%ez_x_g(ix,fe%iez_x_is(2):fe%iez_x_ie(2),iz)+add_inc(3)/2.0d0
+          fe%ez_y_g(ix,fe%iez_y_is(2):fe%iez_y_ie(2),iz)=fe%ez_y_g(ix,fe%iez_y_is(2):fe%iez_y_ie(2),iz)+add_inc(3)/2.0d0
+        end if
+      elseif(typ=='z-line_hs') then
+        if(fe%inc_li_pe(iord,3)==1) then
+          ix=fe%inc_po_id(iord,1); iy=fe%inc_po_id(iord,2)
+          fe%ex_y_g(ix,iy,fe%iex_y_is(3):fe%iex_y_ie(3))=add_inc(1)/2.0d0
+          fe%ex_z_g(ix,iy,fe%iex_z_is(3):fe%iex_z_ie(3))=add_inc(1)/2.0d0
+          fe%ey_z_g(ix,iy,fe%iey_z_is(3):fe%iey_z_ie(3))=add_inc(2)/2.0d0
+          fe%ey_x_g(ix,iy,fe%iey_x_is(3):fe%iey_x_ie(3))=add_inc(2)/2.0d0
+          fe%ez_x_g(ix,iy,fe%iez_x_is(3):fe%iez_x_ie(3))=add_inc(3)/2.0d0
+          fe%ez_y_g(ix,iy,fe%iez_y_is(3):fe%iez_y_ie(3))=add_inc(3)/2.0d0
+        end if
+      elseif(typ=='z-line_ss') then
+        if(fe%inc_li_pe(iord,3)==1) then
+          ix=fe%inc_po_id(iord,1); iy=fe%inc_po_id(iord,2)
+          fe%ex_y_g(ix,iy,fe%iex_y_is(3):fe%iex_y_ie(3))=fe%ex_y_g(ix,iy,fe%iex_y_is(3):fe%iex_y_ie(3))+add_inc(1)/2.0d0
+          fe%ex_z_g(ix,iy,fe%iex_z_is(3):fe%iex_z_ie(3))=fe%ex_z_g(ix,iy,fe%iex_z_is(3):fe%iex_z_ie(3))+add_inc(1)/2.0d0
+          fe%ey_z_g(ix,iy,fe%iey_z_is(3):fe%iey_z_ie(3))=fe%ey_z_g(ix,iy,fe%iey_z_is(3):fe%iey_z_ie(3))+add_inc(2)/2.0d0
+          fe%ey_x_g(ix,iy,fe%iey_x_is(3):fe%iey_x_ie(3))=fe%ey_x_g(ix,iy,fe%iey_x_is(3):fe%iey_x_ie(3))+add_inc(2)/2.0d0
+          fe%ez_x_g(ix,iy,fe%iez_x_is(3):fe%iez_x_ie(3))=fe%ez_x_g(ix,iy,fe%iez_x_is(3):fe%iez_x_ie(3))+add_inc(3)/2.0d0
+          fe%ez_y_g(ix,iy,fe%iez_y_is(3):fe%iez_y_ie(3))=fe%ez_y_g(ix,iy,fe%iez_y_is(3):fe%iez_y_ie(3))+add_inc(3)/2.0d0
+        end if
+      elseif(typ=='xy-plane') then
+        if(fe%inc_pl_pe(iord,1)==1) then
+          iz=fe%inc_po_id(iord,3)
+!$omp parallel
+!$omp do private(ix,iy)
+          do iy=fe%iex_z_is(2),fe%iex_z_ie(2)
+          do ix=fe%iex_z_is(1),fe%iex_z_ie(1)
+            fe%ex_z_g(ix,iy,iz)=fe%ex_z_g(ix,iy,iz)+c2_inc_xyz(3)*add_inc(1)*g_xy(ix,iy)*g_x(ix)*g_y(iy)
+          end do
+          end do
+!$omp end do
+!$omp end parallel
+!$omp parallel
+!$omp do private(ix,iy)
+          do iy=fe%iey_z_is(2),fe%iey_z_ie(2)
+          do ix=fe%iey_z_is(1),fe%iey_z_ie(1)
+            fe%ey_z_g(ix,iy,iz)=fe%ey_z_g(ix,iy,iz)+c2_inc_xyz(3)*add_inc(2)*g_xy(ix,iy)*g_x(ix)*g_y(iy)
+          end do
+          end do
+!$omp end do
+!$omp end parallel
+        end if
+      elseif(typ=='yz-plane') then
+        if(fe%inc_pl_pe(iord,2)==1) then
+          ix=fe%inc_po_id(iord,1)
+!$omp parallel
+!$omp do private(iy,iz)
+          do iz=fe%iey_x_is(3),fe%iey_x_ie(3)
+          do iy=fe%iey_x_is(2),fe%iey_x_ie(2)
+            fe%ey_x_g(ix,iy,iz)=fe%ey_x_g(ix,iy,iz)+c2_inc_xyz(1)*add_inc(2)*g_yz(iy,iz)*g_y(iy)*g_z(iz)
+          end do
+          end do
+!$omp end do
+!$omp end parallel
+!$omp parallel
+!$omp do private(iy,iz)
+          do iz=fe%iez_x_is(3),fe%iez_x_ie(3)
+          do iy=fe%iez_x_is(2),fe%iez_x_ie(2)
+            fe%ez_x_g(ix,iy,iz)=fe%ez_x_g(ix,iy,iz)+c2_inc_xyz(1)*add_inc(3)*g_yz(iy,iz)*g_y(iy)*g_z(iz)
+          end do
+          end do
+!$omp end do
+!$omp end parallel
+        end if
+      elseif(typ=='xz-plane') then
+        if(fe%inc_pl_pe(iord,3)==1) then
+          iy=fe%inc_po_id(iord,2)
+!$omp parallel
+!$omp do private(ix,iz)
+          do iz=fe%iex_y_is(3),fe%iex_y_ie(3)
+          do ix=fe%iex_y_is(1),fe%iex_y_ie(1)
+            fe%ex_y_g(ix,iy,iz)=fe%ex_y_g(ix,iy,iz)+c2_inc_xyz(2)*add_inc(1)*g_xz(ix,iz)*g_x(ix)*g_z(iz)
+          end do
+          end do
+!$omp end do
+!$omp end parallel
+!$omp parallel
+!$omp do private(ix,iz)
+          do iz=fe%iez_y_is(3),fe%iez_y_ie(3)
+          do ix=fe%iez_y_is(1),fe%iez_y_ie(1)
+            fe%ez_y_g(ix,iy,iz)=fe%ez_y_g(ix,iy,iz)+c2_inc_xyz(2)*add_inc(3)*g_xz(ix,iz)*g_x(ix)*g_z(iz)
+          end do
+          end do
+!$omp end do
+!$omp end parallel
+        end if
+      end if
+
+      return
+    end subroutine eh_add_inc_g
+
+    !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    !+ add ghost LD current to ghost E field ++++++++++++++++++++++++++++++++++++++++++++++++
+    subroutine eh_add_curr_g(rjx,rjy,rjz)
+      implicit none
+      real(8),intent(in) :: rjx(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                                fs%mg%is_array(2):fs%mg%ie_array(2),&
+                                fs%mg%is_array(3):fs%mg%ie_array(3)),&
+                            rjy(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                                fs%mg%is_array(2):fs%mg%ie_array(2),&
+                                fs%mg%is_array(3):fs%mg%ie_array(3)),&
+                            rjz(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                                fs%mg%is_array(2):fs%mg%ie_array(2),&
+                                fs%mg%is_array(3):fs%mg%ie_array(3))
+
+      !ex_g
+!$omp parallel
+!$omp do private(ix,iy,iz) collapse(2)
+      do iz=fe%iex_y_is(3),fe%iex_y_ie(3)
+      do iy=fe%iex_y_is(2),fe%iex_y_ie(2)
+      do ix=fe%iex_y_is(1),fe%iex_y_ie(1)
+        fe%ex_y_g(ix,iy,iz)=fe%ex_y_g(ix,iy,iz)+fe%c2_jx(ix,iy,iz)*rjx(ix,iy,iz)/2.0d0
+      end do
+      end do
+      end do
+!$omp end do
+!$omp end parallel
+!$omp parallel
+!$omp do private(ix,iy,iz) collapse(2)
+      do iz=fe%iex_z_is(3),fe%iex_z_ie(3)
+      do iy=fe%iex_z_is(2),fe%iex_z_ie(2)
+      do ix=fe%iex_z_is(1),fe%iex_z_ie(1)
+        fe%ex_z_g(ix,iy,iz)=fe%ex_z_g(ix,iy,iz)+fe%c2_jx(ix,iy,iz)*rjx(ix,iy,iz)/2.0d0
+      end do
+      end do
+      end do
+!$omp end do
+!$omp end parallel
+
+      !ey_g
+!$omp parallel
+!$omp do private(ix,iy,iz) collapse(2)
+      do iz=fe%iey_z_is(3),fe%iey_z_ie(3)
+      do iy=fe%iey_z_is(2),fe%iey_z_ie(2)
+      do ix=fe%iey_z_is(1),fe%iey_z_ie(1)
+        fe%ey_z_g(ix,iy,iz)=fe%ey_z_g(ix,iy,iz)+fe%c2_jy(ix,iy,iz)*rjy(ix,iy,iz)/2.0d0
+      end do
+      end do
+      end do
+!$omp end do
+!$omp end parallel
+!$omp parallel
+!$omp do private(ix,iy,iz) collapse(2)
+      do iz=fe%iey_x_is(3),fe%iey_x_ie(3)
+      do iy=fe%iey_x_is(2),fe%iey_x_ie(2)
+      do ix=fe%iey_x_is(1),fe%iey_x_ie(1)
+        fe%ey_x_g(ix,iy,iz)=fe%ey_x_g(ix,iy,iz)+fe%c2_jy(ix,iy,iz)*rjy(ix,iy,iz)/2.0d0
+      end do
+      end do
+      end do
+!$omp end do
+!$omp end parallel
+
+      !ez_g
+!$omp parallel
+!$omp do private(ix,iy,iz) collapse(2)
+      do iz=fe%iez_x_is(3),fe%iez_x_ie(3)
+      do iy=fe%iez_x_is(2),fe%iez_x_ie(2)
+      do ix=fe%iez_x_is(1),fe%iez_x_ie(1)
+        fe%ez_x_g(ix,iy,iz)=fe%ez_x_g(ix,iy,iz)+fe%c2_jz(ix,iy,iz)*rjz(ix,iy,iz)/2.0d0
+      end do
+      end do
+      end do
+!$omp end do
+!$omp end parallel
+!$omp parallel
+!$omp do private(ix,iy,iz) collapse(2)
+      do iz=fe%iez_y_is(3),fe%iez_y_ie(3)
+      do iy=fe%iez_y_is(2),fe%iez_y_ie(2)
+      do ix=fe%iez_y_is(1),fe%iez_y_ie(1)
+        fe%ez_y_g(ix,iy,iz)=fe%ez_y_g(ix,iy,iz)+fe%c2_jz(ix,iy,iz)*rjz(ix,iy,iz)/2.0d0
+      end do
+      end do
+      end do
+!$omp end do
+!$omp end parallel
+
+      return
+    end subroutine eh_add_curr_g
+
   end subroutine eh_calc
   
   !===========================================================================================
@@ -5624,6 +6405,7 @@ contains
       write(*,*) "**************************"
     end if
     call init_communicator_dft(nproc_group_global,info)
+    fs%icomm_x = info%icomm_x; fs%id_x = info%id_x; fs%isize_x = info%isize_x
     
     !initialize r-grid
     call init_grid_whole(fs%rlsize,fs%hgs,fs%lg)
@@ -5670,11 +6452,11 @@ contains
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh), intent(inout)   :: fe
-    character(1),intent(in)           :: var
+    character(*),intent(in)            :: var
     integer                           :: ix,iy,iz
     real(8),allocatable               :: f1(:,:,:),f2(:,:,:),f3(:,:,:)
-    
-    if(var=='e') then
+
+    if(trim(var)=='e') then
       call update_overlap_real8(fs%srg_ng,fs%mg,fe%ex_y)
       call update_overlap_real8(fs%srg_ng,fs%mg,fe%ex_z)
       call update_overlap_real8(fs%srg_ng,fs%mg,fe%ey_z)
@@ -5688,6 +6470,20 @@ contains
       call update_overlap_real8(fs%srg_ng,fs%mg,fe%hy_x)
       call update_overlap_real8(fs%srg_ng,fs%mg,fe%hz_x)
       call update_overlap_real8(fs%srg_ng,fs%mg,fe%hz_y)
+    elseif(var=='e_g') then
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%ex_y_g)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%ex_z_g)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%ey_z_g)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%ey_x_g)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%ez_x_g)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%ez_y_g)
+    elseif(var=='h_g') then
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hx_y_g)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hx_z_g)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hy_z_g)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hy_x_g)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hz_x_g)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hz_y_g)
     elseif(var=='r') then
       call update_overlap_real8(fs%srg_ng,fs%mg,fe%rmedia)
     elseif(var=='s') then
@@ -5763,6 +6559,69 @@ contains
       end if
       end if
       
+      !deallocate temporary variable
+      deallocate(f1,f2,f3)
+    elseif(var=='s_g') then
+      !ghost cell-centered collocation, mirror of 's' on the ghost (_g) fields
+      allocate(f1(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                  fs%mg%is_array(2):fs%mg%ie_array(2),&
+                  fs%mg%is_array(3):fs%mg%ie_array(3)),&
+               f2(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                  fs%mg%is_array(2):fs%mg%ie_array(2),&
+                  fs%mg%is_array(3):fs%mg%ie_array(3)),&
+               f3(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                  fs%mg%is_array(2):fs%mg%ie_array(2),&
+                  fs%mg%is_array(3):fs%mg%ie_array(3)))
+      f1(:,:,:)=0.0d0; f2(:,:,:)=0.0d0; f3(:,:,:)=0.0d0;
+      !spatially adjust ghost e
+!$omp parallel
+!$omp do private(ix,iy,iz) collapse(2)
+      do iz=fs%mg%is(3),fs%mg%ie(3)
+      do iy=fs%mg%is(2),fs%mg%ie(2)
+      do ix=fs%mg%is(1),fs%mg%ie(1)
+        f1(ix,iy,iz)=( fe%ex_s_g(ix,iy,iz)+fe%ex_s_g(ix-1,iy,iz) )/2.0d0
+        f2(ix,iy,iz)=( fe%ey_s_g(ix,iy,iz)+fe%ey_s_g(ix,iy-1,iz) )/2.0d0
+        f3(ix,iy,iz)=( fe%ez_s_g(ix,iy,iz)+fe%ez_s_g(ix,iy,iz-1) )/2.0d0
+      end do
+      end do
+      end do
+!$omp end do
+!$omp end parallel
+      fe%ex_s_g(:,:,:)=f1(:,:,:); fe%ey_s_g(:,:,:)=f2(:,:,:); fe%ez_s_g(:,:,:)=f3(:,:,:);
+      f1(:,:,:)=0.0d0; f2(:,:,:)=0.0d0; f3(:,:,:)=0.0d0;
+      !spatially adjust ghost h
+!$omp parallel
+!$omp do private(ix,iy,iz) collapse(2)
+      do iz=fs%mg%is(3),fs%mg%ie(3)
+      do iy=fs%mg%is(2),fs%mg%ie(2)
+      do ix=fs%mg%is(1),fs%mg%ie(1)
+        f1(ix,iy,iz)=( fe%hx_s_g(ix,iy,iz)+fe%hx_s_g(ix,iy-1,iz) )/2.0d0
+        f2(ix,iy,iz)=( fe%hy_s_g(ix,iy,iz)+fe%hy_s_g(ix,iy,iz-1) )/2.0d0
+        f3(ix,iy,iz)=( fe%hz_s_g(ix,iy,iz)+fe%hz_s_g(ix-1,iy,iz) )/2.0d0
+      end do
+      end do
+      end do
+!$omp end do
+!$omp end parallel
+      fe%hx_s_g(:,:,:)=f1(:,:,:); fe%hy_s_g(:,:,:)=f2(:,:,:); fe%hz_s_g(:,:,:)=f3(:,:,:);
+      f1(:,:,:)=0.0d0; f2(:,:,:)=0.0d0; f3(:,:,:)=0.0d0;
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hx_s_g)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hy_s_g)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hz_s_g)
+!$omp parallel
+!$omp do private(ix,iy,iz) collapse(2)
+      do iz=fs%mg%is(3),fs%mg%ie(3)
+      do iy=fs%mg%is(2),fs%mg%ie(2)
+      do ix=fs%mg%is(1),fs%mg%ie(1)
+        f1(ix,iy,iz)=( fe%hx_s_g(ix,iy,iz)+fe%hx_s_g(ix,iy,iz-1) )/2.0d0
+        f2(ix,iy,iz)=( fe%hy_s_g(ix,iy,iz)+fe%hy_s_g(ix-1,iy,iz) )/2.0d0
+        f3(ix,iy,iz)=( fe%hz_s_g(ix,iy,iz)+fe%hz_s_g(ix,iy-1,iz) )/2.0d0
+      end do
+      end do
+      end do
+!$omp end do
+!$omp end parallel
+      fe%hx_s_g(:,:,:)=f1(:,:,:); fe%hy_s_g(:,:,:)=f2(:,:,:); fe%hz_s_g(:,:,:)=f3(:,:,:);
       !deallocate temporary variable
       deallocate(f1,f2,f3)
     end if
@@ -5919,6 +6778,36 @@ contains
                       -beta*cos(theta1)**2*sin(theta2_r))/beta*gamma
       e_inc_i = -amp*(-alpha*sin(2.d0*theta1)*cos(theta2_i) &
                       -beta*cos(theta1)**2*sin(theta2_i))/beta*gamma
+    elseif(aes=='Agauss') then
+      ! Gaussian-envelope pulse centred at 4*tw (field ~0 at t=0, rises smoothly), width
+      ! tw, matching the standalone 3D3TM reference Ac ~ exp(-(t-4*tpulse)^2/tpulse^2).
+      ! The Gaussian is applied to the VECTOR POTENTIAL A and the field is E = -dA/dt
+      ! (normalised by omega so amp is the peak E amplitude).  Putting the envelope on A,
+      ! not on E, guarantees \int E dt = -[A] = 0 (A->0 at both ends), so the pulse leaves
+      ! no residual vector potential -- no spurious DC field / net momentum kick.  The
+      ! cos(theta) term is the envelope-derivative correction that enforces this.
+      ! e_inc_i is the pi/2 quadrature partner.  Gaussian decays itself (no 0<=t<=tw cut).
+      gamma    = t - 4.0d0*tw                        ! time from the Gaussian centre
+      alpha    = exp( -gamma*gamma/(tw*tw) )         ! Gaussian envelope of A
+      beta     = 2.0d0*gamma/(tw*tw)                 ! -d(ln env)/dt: envelope-derivative term
+      theta2_r = omega*gamma + cep*2d0*pi
+      theta2_i = omega*gamma + cep*2d0*pi + 1.5d0*pi
+      e_inc_r  = amp*alpha*( sin(theta2_r) + beta/omega*cos(theta2_r) )
+      e_inc_i  = amp*alpha*( sin(theta2_i) + beta/omega*cos(theta2_i) )
+    elseif(aes=='Adgauss') then
+      ! Gaussian-DERIVATIVE field envelope (peak at the rising/falling inflection
+      ! t=4tw-+tw/sqrt2, zero at the centre 4tw).  This reproduces the standalone 3D3TM
+      ! reference's effective surface drive (its complex-envelope solver yields a field
+      ! intensity following |d(Gaussian)/dt|^2 rather than the Gaussian itself).  The
+      ! envelope is odd about the centre, so the carrier oscillation already gives
+      ! \int E dt = 0.  Used for faithful numerical comparison against the reference;
+      ! the physically standard envelope is 'Agauss'.
+      gamma    = t - 4.0d0*tw                                 ! time from the Gaussian centre
+      alpha    = 2.3315d0*gamma/tw*exp( -gamma*gamma/(tw*tw) ) ! Gaussian-derivative envelope, peak ~amp
+      theta2_r = omega*gamma + cep*2d0*pi
+      theta2_i = omega*gamma + cep*2d0*pi + 1.5d0*pi
+      e_inc_r  = amp*alpha*sin(theta2_r)
+      e_inc_i  = amp*alpha*sin(theta2_i)
     else
       e_inc_r=0.0d0; e_inc_i=0.0d0;
     end if
@@ -6423,6 +7312,40 @@ contains
   end subroutine calc_es_and_hs
 
   !===========================================================================================
+  != cell-centered ghost fields for envelope Poynting (mirror of calc_es_and_hs) =============
+  subroutine calc_es_and_hs_g(fs, fe)
+    use structures, only: s_fdtd_system
+    use sendrecv_grid, only: update_overlap_real8
+    implicit none
+    type(s_fdtd_system),intent(inout) :: fs
+    type(ls_fdtd_eh), intent(inout)   :: fe
+    integer :: ix,iy,iz
+!$omp parallel
+!$omp do private(ix,iy,iz)
+    do iz=(fs%mg%is_array(3)),(fs%mg%ie_array(3))
+    do iy=(fs%mg%is_array(2)),(fs%mg%ie_array(2))
+    do ix=(fs%mg%is_array(1)),(fs%mg%ie_array(1))
+       fe%ex_s_g(ix,iy,iz)=fe%ex_y_g(ix,iy,iz)+fe%ex_z_g(ix,iy,iz)
+       fe%ey_s_g(ix,iy,iz)=fe%ey_z_g(ix,iy,iz)+fe%ey_x_g(ix,iy,iz)
+       fe%ez_s_g(ix,iy,iz)=fe%ez_x_g(ix,iy,iz)+fe%ez_y_g(ix,iy,iz)
+       fe%hx_s_g(ix,iy,iz)=( fe%hx_s_g(ix,iy,iz)+(fe%hx_y_g(ix,iy,iz)+fe%hx_z_g(ix,iy,iz)) )*0.5d0
+       fe%hy_s_g(ix,iy,iz)=( fe%hy_s_g(ix,iy,iz)+(fe%hy_z_g(ix,iy,iz)+fe%hy_x_g(ix,iy,iz)) )*0.5d0
+       fe%hz_s_g(ix,iy,iz)=( fe%hz_s_g(ix,iy,iz)+(fe%hz_x_g(ix,iy,iz)+fe%hz_y_g(ix,iy,iz)) )*0.5d0
+    end do
+    end do
+    end do
+!$omp end do
+!$omp end parallel
+    call eh_sendrecv(fs,fe,'s_g')
+    call update_overlap_real8( fs%srg_ng, fs%mg, fe%ex_s_g )
+    call update_overlap_real8( fs%srg_ng, fs%mg, fe%ey_s_g )
+    call update_overlap_real8( fs%srg_ng, fs%mg, fe%ez_s_g )
+    call update_overlap_real8( fs%srg_ng, fs%mg, fe%hx_s_g )
+    call update_overlap_real8( fs%srg_ng, fs%mg, fe%hy_s_g )
+    call update_overlap_real8( fs%srg_ng, fs%mg, fe%hz_s_g )
+  end subroutine calc_es_and_hs_g
+
+  !===========================================================================================
   != For ttm =================================================================================
   subroutine allocate_poynting(fs, S, divS, u)
     use structures, only: s_fdtd_system
@@ -6485,6 +7408,81 @@ contains
 !$omp end do
 !$omp end parallel
   end subroutine calc_poynting_vector
+
+  !===========================================================================================
+  != ghost Poynting vector for envelope (mirror of calc_poynting_vector on _g fields) ========
+  subroutine calc_poynting_vector_g(fs, fe, Spoynting)
+    use structures, only: s_fdtd_system
+    implicit none
+    type(s_fdtd_system),intent(inout) :: fs
+    type(ls_fdtd_eh), intent(inout)   :: fe
+    real(8), intent(inout) :: Spoynting(:,:,:,:)
+    integer :: ix,iy,iz,jx,jy,jz,ix0,iy0,iz0,ix1,iy1,iz1
+    ix0=fs%mg%is_array(1)
+    iy0=fs%mg%is_array(2)
+    iz0=fs%mg%is_array(3)
+    ix1=fs%mg%ie_array(1)
+    iy1=fs%mg%ie_array(2)
+    iz1=fs%mg%ie_array(3)
+!$omp parallel
+!$omp do private(ix,iy,iz,jx,jy,jz)
+    do iz = iz0, iz1
+       jz=iz-iz0+1
+    do iy = iy0, iy1
+       jy=iy-iy0+1
+    do ix = ix0, ix1
+       jx=ix-ix0+1
+       Spoynting(jx,jy,jz,1) = fe%ey_s_g(ix,iy,iz)*fe%hz_s_g(ix,iy,iz) - fe%ez_s_g(ix,iy,iz)*fe%hy_s_g(ix,iy,iz)
+       Spoynting(jx,jy,jz,2) = fe%ez_s_g(ix,iy,iz)*fe%hx_s_g(ix,iy,iz) - fe%ex_s_g(ix,iy,iz)*fe%hz_s_g(ix,iy,iz)
+       Spoynting(jx,jy,jz,3) = fe%ex_s_g(ix,iy,iz)*fe%hy_s_g(ix,iy,iz) - fe%ey_s_g(ix,iy,iz)*fe%hx_s_g(ix,iy,iz)
+    end do
+    end do
+    end do
+!$omp end do
+!$omp end parallel
+  end subroutine calc_poynting_vector_g
+
+  !===========================================================================================
+  != per-cell field-intensity envelope E^2 + E_g^2 (reuse hook) ==============================
+  != Returns the cycle-averaged field intensity |E|^2 + |E_g|^2 per cell, where E_g is the   =
+  != pi/2 quadrature (ghost) field. This is the smooth (2*omega-free) intensity envelope,    =
+  != the natural EM input for envelope-level models such as 3TM photo-ionization /            =
+  != carrier generation (distinct from the absorbed-power envelope used by the TTM source).   =
+  != Self-contained: built from the always-current split-Yee E components, independent of     =
+  != use_ttm / calc_es_and_hs. Valid only when yn_em_envelope=='y' (else returns 0).          =
+  subroutine eh_get_field_envelope(fs, fe, env)
+    use structures,    only: s_fdtd_system
+    use salmon_global, only: yn_em_envelope
+    implicit none
+    type(s_fdtd_system),intent(in) :: fs
+    type(ls_fdtd_eh),   intent(in) :: fe
+    real(8),intent(out) :: env(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                               fs%mg%is_array(2):fs%mg%ie_array(2),&
+                               fs%mg%is_array(3):fs%mg%ie_array(3))
+    integer :: ix,iy,iz
+    real(8) :: ex,ey,ez,exg,eyg,ezg
+    if(yn_em_envelope/='y') then
+      env(:,:,:)=0.0d0
+      return
+    end if
+!$omp parallel
+!$omp do private(ix,iy,iz,ex,ey,ez,exg,eyg,ezg)
+    do iz=fs%mg%is_array(3),fs%mg%ie_array(3)
+    do iy=fs%mg%is_array(2),fs%mg%ie_array(2)
+    do ix=fs%mg%is_array(1),fs%mg%ie_array(1)
+      ex =fe%ex_y(ix,iy,iz)+fe%ex_z(ix,iy,iz)
+      ey =fe%ey_z(ix,iy,iz)+fe%ey_x(ix,iy,iz)
+      ez =fe%ez_x(ix,iy,iz)+fe%ez_y(ix,iy,iz)
+      exg=fe%ex_y_g(ix,iy,iz)+fe%ex_z_g(ix,iy,iz)
+      eyg=fe%ey_z_g(ix,iy,iz)+fe%ey_x_g(ix,iy,iz)
+      ezg=fe%ez_x_g(ix,iy,iz)+fe%ez_y_g(ix,iy,iz)
+      env(ix,iy,iz)=ex*ex+ey*ey+ez*ez+exg*exg+eyg*eyg+ezg*ezg
+    end do
+    end do
+    end do
+!$omp end do
+!$omp end parallel
+  end subroutine eh_get_field_envelope
 
   !===========================================================================================
   != For ttm =================================================================================
