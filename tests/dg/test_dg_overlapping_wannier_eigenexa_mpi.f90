@@ -10,6 +10,7 @@ program test_dg_overlapping_wannier_eigenexa_mpi
     diagonalize_dg_spectral_basin_operator,select_dg_spectral_basin_channel_ranks
   use dg_overlapping_wannier_construction,only:propagate_dg_spectral_basin_orbit_channels
   use dg_overlapping_wannier_construction,only:build_dg_spectral_channel_generator_actions
+  use dg_overlapping_wannier_construction,only:compose_dg_occupied_complement_trial_rows
   implicit none
   type(s_parallel_info)::info
   integer::comm,rank,nproc,ierr,i,p,nlocal
@@ -88,7 +89,8 @@ contains
     logical::block_ends(4,2)
     integer(8),allocatable::propagation_row_ids(:)
     complex(8),allocatable::propagation_generators(:,:,:),representative_vectors(:,:),trial_rows(:,:)
-    complex(8),allocatable::target_action_rows(:,:,:)
+    complex(8),allocatable::target_action_rows(:,:,:),full_trial_rows(:,:),complement_rows(:,:)
+    integer(8),allocatable::full_row_ids(:),complement_row_ids(:)
     real(8)::trial_gram_defect,trial_frame_defect,target_action_unitarity,target_action_block_defect
     real(8)::residual,rotated_residual,angle
     integer(8)::fingerprint,rotated_fingerprint,workspace
@@ -108,6 +110,37 @@ contains
         block_offsets,residual,fingerprint,workspace,basin_ok,basin_message)
       call require(.not.basin_ok,'non-Hermitian spectral basin operator is rejected')
       if(rank==0)write(*,'(a,i0)')'REJECT spectral_basin_nonhermitian ranks=',nproc
+      return
+    endif
+    if(trim(case_name)=='spectral_basin_complement')then
+      nlocal=count([(mod(ii-1,nproc)==rank,ii=1,6)])
+      allocate(full_row_ids(nlocal));local_row=0
+      do ii=1,6
+        if(mod(ii-1,nproc)/=rank)cycle
+        local_row=local_row+1;full_row_ids(local_row)=ii
+      enddo
+      allocate(complement_row_ids(count(full_row_ids>2_8)),&
+        complement_rows(count(full_row_ids>2_8),4));local_row=0
+      do ii=1,size(full_row_ids)
+        if(full_row_ids(ii)<=2_8)cycle
+        local_row=local_row+1;complement_row_ids(local_row)=full_row_ids(ii)-2_8
+        complement_rows(local_row,:)=0d0
+        complement_rows(local_row,int(complement_row_ids(local_row)))=1d0
+      enddo
+      call compose_dg_occupied_complement_trial_rows(comm,full_row_ids,2,complement_row_ids,&
+        complement_rows,1d-10,full_trial_rows,trial_gram_defect,fingerprint,workspace,basin_ok,basin_message)
+      call require(basin_ok.and.trial_gram_defect<1d-12.and.size(full_trial_rows,2)==6,&
+        'occupied identity and localized complement compose one complete trial frame')
+      trial_frame_defect=0d0
+      do local_row=1,size(full_row_ids)
+        ii=int(full_row_ids(local_row))
+        do jj=1,6
+          trial_frame_defect=max(trial_frame_defect,abs(full_trial_rows(local_row,jj)-&
+            merge((1d0,0d0),(0d0,0d0),ii==jj)))
+        enddo
+      enddo
+      call require(trial_frame_defect<1d-12,'occupied/complement composition preserves canonical rows')
+      if(rank==0)write(*,'(a,i0,a,i0)')'SPECTRAL_COMPLEMENT ranks=',nproc,' signature=',fingerprint
       return
     endif
     call diagonalize_dg_spectral_basin_operator(comm,operator,9901_8,1d-10,spectrum,&

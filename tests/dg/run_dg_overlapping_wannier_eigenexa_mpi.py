@@ -75,6 +75,14 @@ with tempfile.TemporaryDirectory(prefix="ow-eigenexa-") as name:
       match=re.search(r"SPECTRAL_BASIN_EIGEN ranks=\d+ signature=(-?\d+)",result.stdout);assert match,result.stdout
       basin_signatures.append(int(match.group(1)))
     assert len(set(basin_signatures))==1,basin_signatures
+    complement_signatures=[]
+    for nproc in (1,2,4,8):
+      result=subprocess.run([shutil.which("mpiexec"),"-n",str(nproc),str(exe),"spectral_basin_complement"],
+        capture_output=True,text=True,env=env,timeout=60)
+      assert result.returncode==0,("spectral_basin_complement",nproc,result.stdout,result.stderr)
+      match=re.search(r"SPECTRAL_COMPLEMENT ranks=\d+ signature=(-?\d+)",result.stdout);assert match,result.stdout
+      complement_signatures.append(int(match.group(1)))
+    assert len(set(complement_signatures))==1,complement_signatures
     for case_name in ("spectral_basin_split","spectral_basin_nonhermitian"):
       for nproc in (1,2,4,8):
         result=subprocess.run([shutil.which("mpiexec"),"-n",str(nproc),str(exe),case_name],
