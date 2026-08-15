@@ -80,7 +80,7 @@ contains
     complex(8)::operator(4,4),rotation(4,4),rotated_operator(4,4)
     real(8),allocatable::spectrum(:),rotated_spectrum(:)
     integer,allocatable::block_offsets(:),rotated_offsets(:)
-    integer::orbit_map(2,1),selected_ranks(2)
+    integer::orbit_map(2,1),selected_ranks(2),payload_collectives
     real(8)::catalog_spectra(4,2)
     logical::block_ends(4,2)
     real(8)::residual,rotated_residual,angle
@@ -118,8 +118,8 @@ contains
     block_ends=.false.;block_ends(1,:)=.true.;block_ends(2,:)=.true.;block_ends(4,:)=.true.
     orbit_map(:,1)=[2,1]
     call select_dg_spectral_basin_channel_ranks(comm,catalog_spectra,block_ends,orbit_map,4,1d-10,&
-      selected_ranks,fingerprint,workspace,basin_ok,basin_message)
-    call require(basin_ok.and.all(selected_ranks==[2,2]),&
+      selected_ranks,fingerprint,workspace,basin_ok,basin_message,payload_collectives)
+    call require(basin_ok.and.all(selected_ranks==[2,2]).and.payload_collectives==6,&
       'spectral basin catalog spans retained rank with equal orbit ranks')
     if(trim(case_name)=='spectral_basin_split')then
       catalog_spectra(:,1)=[1d0,0.6d0,0.6d0,0d0];catalog_spectra(:,2)=catalog_spectra(:,1)

@@ -117,7 +117,8 @@ module dg_overlapping_wannier_construction
 contains
 
   subroutine select_dg_spectral_basin_channel_ranks(comm,spectra,block_ends,basin_generator_maps,&
-      retained_rank,tolerance,selected_ranks,fingerprint,workspace_peak_bytes,ok,message)
+      retained_rank,tolerance,selected_ranks,fingerprint,workspace_peak_bytes,ok,message,&
+      metadata_payload_collective_count)
     integer,intent(in)::comm,basin_generator_maps(:,:),retained_rank
     real(real64),intent(in)::spectra(:,:),tolerance
     logical,intent(in)::block_ends(:,:)
@@ -125,15 +126,20 @@ contains
     integer(int64),intent(out)::fingerprint,workspace_peak_bytes
     logical,intent(out)::ok
     character(*),intent(out)::message
+    integer,intent(out),optional::metadata_payload_collective_count
 #ifdef USE_MPI
+    integer,parameter::metadata_chunk_size=4096
     integer::nstate,nbasin,ngenerator,i,j,g,b,target,head,tail,norbit,o,r,total,new_total,status
-    integer::ierr,local_bad,global_bad,minint,maxint
+    integer::ierr,local_bad,global_bad,minint,maxint,payload_first,payload_count,payload_index
     integer,allocatable::orbit_id(:),queue(:),orbit_size(:),representative(:),choice(:,:),prior(:,:)
     real(real64),allocatable::score(:),next_score(:)
     integer(int64)::elements,bytes,minhash,maxhash,hash_value,quantized
+    integer(int64)::payload(metadata_chunk_size),minimum_payload(metadata_chunk_size),&
+      maximum_payload(metadata_chunk_size)
     real(real64)::minreal,maxreal,scale,candidate,quantum
 
     ok=.false.;message='';fingerprint=0_int64;workspace_peak_bytes=0_int64
+    if(present(metadata_payload_collective_count))metadata_payload_collective_count=0
     selected_ranks=0;nstate=size(spectra,1);nbasin=size(spectra,2);ngenerator=size(basin_generator_maps,2)
     local_bad=0
     if(nstate<1.or.nbasin<1.or.retained_rank/=nstate.or.size(selected_ranks)/=nbasin.or.&
@@ -162,28 +168,66 @@ contains
     if(transfer(minreal,0_int64)/=transfer(maxreal,0_int64))then
       message='spectral basin channel catalog tolerance disagrees';return
     endif
-    do b=1,nbasin
-      do i=1,nstate
-        call MPI_Allreduce(spectra(i,b),minreal,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
-        if(ierr/=MPI_SUCCESS)return
-        call MPI_Allreduce(spectra(i,b),maxreal,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
-        if(ierr/=MPI_SUCCESS)return
-        if(transfer(minreal,0_int64)/=transfer(maxreal,0_int64))then
-          message='spectral basin spectra disagree across ranks';return
-        endif
-        local_bad=merge(1,0,block_ends(i,b))
-        call MPI_Allreduce(local_bad,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
-        call MPI_Allreduce(local_bad,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
-        if(minint/=maxint)then;message='spectral basin block boundaries disagree across ranks';return;endif
+    local_bad=0
+    if(nstate>=huge(0))then
+      local_bad=1
+    elseif(int(nstate,int64)>int(huge(0),int64)/int(nbasin,int64))then
+      local_bad=1
+    elseif((int(nstate,int64)+1_int64)*int(nbasin,int64)>int(huge(0),int64))then
+      local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='spectral basin channel catalog metadata extent overflow';return
+    endif
+    do payload_first=1,nstate*nbasin,metadata_chunk_size
+      payload_count=min(metadata_chunk_size,nstate*nbasin-payload_first+1)
+      do j=1,payload_count
+        payload_index=payload_first+j-1;i=mod(payload_index-1,nstate)+1;b=(payload_index-1)/nstate+1
+        payload(j)=transfer(spectra(i,b),0_int64)
       enddo
+      call MPI_Allreduce(payload,minimum_payload,payload_count,MPI_INTEGER8,MPI_MIN,comm,ierr)
+      if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(payload,maximum_payload,payload_count,MPI_INTEGER8,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS)return
+      if(present(metadata_payload_collective_count))metadata_payload_collective_count=&
+        metadata_payload_collective_count+2
+      if(any(minimum_payload(1:payload_count)/=maximum_payload(1:payload_count)))then
+        message='spectral basin spectra disagree across ranks';return
+      endif
     enddo
-    do g=1,ngenerator;do b=1,nbasin
-      call MPI_Allreduce(basin_generator_maps(b,g),minint,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    do payload_first=1,nstate*nbasin,metadata_chunk_size
+      payload_count=min(metadata_chunk_size,nstate*nbasin-payload_first+1)
+      do j=1,payload_count
+        payload_index=payload_first+j-1;i=mod(payload_index-1,nstate)+1;b=(payload_index-1)/nstate+1
+        payload(j)=merge(1_int64,0_int64,block_ends(i,b))
+      enddo
+      call MPI_Allreduce(payload,minimum_payload,payload_count,MPI_INTEGER8,MPI_MIN,comm,ierr)
       if(ierr/=MPI_SUCCESS)return
-      call MPI_Allreduce(basin_generator_maps(b,g),maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      call MPI_Allreduce(payload,maximum_payload,payload_count,MPI_INTEGER8,MPI_MAX,comm,ierr)
       if(ierr/=MPI_SUCCESS)return
-      if(minint/=maxint)then;message='spectral basin orbit maps disagree across ranks';return;endif
-    enddo;enddo
+      if(present(metadata_payload_collective_count))metadata_payload_collective_count=&
+        metadata_payload_collective_count+2
+      if(any(minimum_payload(1:payload_count)/=maximum_payload(1:payload_count)))then
+        message='spectral basin block boundaries disagree across ranks';return
+      endif
+    enddo
+    do payload_first=1,nbasin*ngenerator,metadata_chunk_size
+      payload_count=min(metadata_chunk_size,nbasin*ngenerator-payload_first+1)
+      do j=1,payload_count
+        payload_index=payload_first+j-1;b=mod(payload_index-1,nbasin)+1;g=(payload_index-1)/nbasin+1
+        payload(j)=int(basin_generator_maps(b,g),int64)
+      enddo
+      call MPI_Allreduce(payload,minimum_payload,payload_count,MPI_INTEGER8,MPI_MIN,comm,ierr)
+      if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(payload,maximum_payload,payload_count,MPI_INTEGER8,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS)return
+      if(present(metadata_payload_collective_count))metadata_payload_collective_count=&
+        metadata_payload_collective_count+2
+      if(any(minimum_payload(1:payload_count)/=maximum_payload(1:payload_count)))then
+        message='spectral basin orbit maps disagree across ranks';return
+      endif
+    enddo
     local_bad=0
     do b=1,nbasin
       scale=max(1d0,maxval(abs(spectra(:,b))))
@@ -195,13 +239,6 @@ contains
         if(count(basin_generator_maps(:,g)==b)/=1)local_bad=1
       enddo
     enddo
-    if(nstate>=huge(0))then
-      local_bad=1
-    elseif(int(nstate,int64)>huge(0_int64)/int(nbasin,int64))then
-      local_bad=1
-    elseif((int(nstate,int64)+1_int64)*int(nbasin,int64)>int(huge(0),int64))then
-      local_bad=1
-    endif
     scale=huge(1d0)/16d0/real(nbasin,real64)/real(nstate,real64)
     if(maxval(abs(spectra))>scale)local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -307,6 +344,7 @@ contains
 #else
     ok=.false.;message='spectral basin channel catalog requires MPI';fingerprint=0_int64
     workspace_peak_bytes=0_int64;selected_ranks=0
+    if(present(metadata_payload_collective_count))metadata_payload_collective_count=0
 #endif
   end subroutine select_dg_spectral_basin_channel_ranks
 
