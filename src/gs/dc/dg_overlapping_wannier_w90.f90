@@ -296,6 +296,7 @@ contains
     complex(real64)::sphase,jacobi(2,2),left_pair(2),right_pair(2),tmp,phase_fix,probe
     integer::nlocal,m,global_count,local_count,rank,ierr,bad,gbad,status,axis,q,pair_i,pair_j,&
       i,j,k,l,r,block_size,sweep,info,minint,maxint,payload_count,npoint,point,hmatrix_count
+    integer::worst_point,worst_column
     real(real64)::minimum_tolerance,maximum_tolerance,safe_position_magnitude,safe_lcfo_magnitude
     real(real64)::gram_defect,point_leakage
     integer(int64)::bits,quantized,term,elements,bytes,peak,minimum_fingerprint,maximum_fingerprint,&
@@ -601,7 +602,7 @@ contains
     gram=matmul(conjg(transpose(aligned_rows)),aligned_rows)
     call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
     do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
-    gram_defect=maxval(abs(gram));point_leakage=0d0
+    gram_defect=maxval(abs(gram));point_leakage=0d0;worst_point=0;worst_column=0
     if(present(point_representations))then
       do point=1,npoint
         block=matmul(conjg(transpose(unitary)),matmul(point_representations(:,:,point),unitary))
@@ -616,7 +617,9 @@ contains
             enddo
             local_update=max(local_update,sum(abs(block(l:r,j))**2));l=r+1
           enddo
-          point_leakage=max(point_leakage,max(0d0,1d0-local_update))
+          if(max(0d0,1d0-local_update)>point_leakage)then
+            point_leakage=max(0d0,1d0-local_update);worst_point=point;worst_column=j
+          endif
         enddo
       enddo
     endif
@@ -628,7 +631,10 @@ contains
       call cleanup();message='joint periodic-center frame is not orthonormal';return
     endif
     if(point_leakage>tolerance**0.25d0)then
-      call cleanup();message='joint periodic-center point action leaks between center blocks';return
+      write(message,'(a,es12.4,a,i0,a,i0,a,es12.4,a,es12.4,a,i0)')&
+        'joint periodic-center point action leakage=',point_leakage,' point=',worst_point,&
+        ' column=',worst_column,' objective=',final_objective,' update=',maximum_update,' sweeps=',sweep_count
+      call cleanup();return
     endif
     quantum=100d0*tolerance;fingerprint=int(z'510E527FADE682D1',int64)
     fingerprint=ieor(ishftc(fingerprint,9),int(global_count,int64))
