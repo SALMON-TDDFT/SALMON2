@@ -1531,6 +1531,9 @@ assert "site_symmetry = .true." in w90_source.lower(), (
 assert "symmetrize_eps" in w90_source.lower(), (
     "Wannier90 setup must set an explicit strict symmetrize_eps"
 )
+assert not re.search(r"write\s*\([^\n]*\)\s*['\"]random['\"]", w90_source, re.I), (
+    "externally supplied spectral trial A matrices must not be replaced by random Wannier90 projections"
+)
 assert "inquire(file=trim(seed)//'.dmn'" in w90_source.replace(" ", "").lower(), (
     "Wannier90 setup must reject a missing DMN before library entry"
 )

@@ -2684,8 +2684,9 @@ contains
           write(unit,'(a,1x,3(es24.16,1x))')trim(atom_symbols(atom)),atoms_cart(:,atom)
         enddo
         write(unit,'(a)')'end atoms_cart'
-        write(unit,'(a)')'begin projections';write(unit,'(a)')'random'
-        write(unit,'(a)')'end projections'
+        ! Library mode receives the deterministic spectral trial overlap as A_matrix_loc.
+        ! Omitting the projections block prevents setup from generating an unrelated
+        ! random trial gauge; Wannier90 permits this and initializes num_proj=num_wann.
         write(unit,'(a)')'mp_grid = 1 1 1'
         write(unit,'(a)')'begin kpoints';write(unit,'(a)')'0.0 0.0 0.0'
         write(unit,'(a)')'end kpoints';close(unit)

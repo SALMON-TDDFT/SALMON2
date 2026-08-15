@@ -18,12 +18,12 @@ program test_dg_overlapping_wannier_w90_mpi
   use dg_overlapping_wannier_w90,only:jointly_canonicalize_dg_sector_periodic_position_gauge
   implicit none
   integer::ierr,rank,nproc,b,i,m,n,p,nlocal
-  integer::convergence_iterations,log_unit
+  integer::convergence_iterations,log_unit,win_unit,win_io
   complex(8)::transform(2,2)
   real(8)::centers(3,2),spreads(2),spread(3)
   integer(8)::bytes
-  logical::ok,matrix_matches
-  character(256)::message
+  logical::ok,matrix_matches,win_has_random_projection
+  character(256)::message,win_line
   complex(8),allocatable::local_values(:,:),local_anchors(:,:)
   complex(8),allocatable::assembled_m(:,:,:),assembled_a(:,:)
   real(8),allocatable::local_weights(:),local_fractional(:,:)
@@ -892,6 +892,20 @@ program test_dg_overlapping_wannier_w90_mpi
   call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
     atom_symbols,atoms_cart,1,1,nntot,nncell,ok,message)
   call require(ok.and.nntot>0,trim(message))
+  win_has_random_projection=.false.
+  if(rank==0)then
+    open(newunit=win_unit,file='ow_w90_one_band.win',status='old',action='read',iostat=win_io)
+    call require(win_io==0,'Wannier90 setup writes its input file')
+    do
+      read(win_unit,'(a)',iostat=win_io)win_line
+      if(win_io/=0)exit
+      if(index(adjustl(win_line),'random')==1)win_has_random_projection=.true.
+    enddo
+    close(win_unit)
+  endif
+  call MPI_Bcast(win_has_random_projection,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call require(.not.win_has_random_projection,&
+    'externally supplied Wannier90 A matrices must not retain random projections')
   if(rank==0)then
     allocate(m_matrix(1,1,nntot),a_matrix(1,1));m_matrix=(1d0,0d0);a_matrix=(1d0,0d0)
   else
