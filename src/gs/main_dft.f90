@@ -73,7 +73,8 @@ use dg_overlapping_wannier_construction, only: build_dg_occupied_empty_moment_de
   build_dg_periodic_spectral_basins,prepare_dg_spectral_basin_operators,&
   project_dg_prepared_spectral_basin_operator,release_dg_prepared_spectral_basins,&
   diagonalize_dg_spectral_basin_operator,select_dg_spectral_basin_channel_ranks,&
-  propagate_dg_spectral_basin_orbit_channels,build_dg_spectral_channel_generator_actions
+  propagate_dg_spectral_basin_orbit_channels,build_dg_spectral_channel_generator_actions,&
+  compose_dg_occupied_complement_trial_rows
 use dg_overlapping_wannier_construction, only: build_dg_smooth_partition_of_unity
 use dg_overlapping_wannier_construction, only: assemble_dg_distributed_basis_symmetry_overlap
 use dg_overlapping_wannier_construction, only: assemble_dg_distributed_basis_symmetry_overlap_rows,&
@@ -607,7 +608,8 @@ contains
       transformed_box_values(:,:),transformed_box_gradients(:,:,:)
     complex(8),allocatable::lcfo_fragment_contribution(:,:),lcfo_occupied_core(:,:),lcfo_reference_core(:,:)
     complex(8),allocatable::composed_tile_values(:,:),projector_buffer_tile(:,:)
-    complex(8),allocatable::spectral_generator_rows(:,:,:),spectral_trial_rows(:,:),&
+    complex(8),allocatable::spectral_complement_generator_rows(:,:,:),spectral_complement_trial_rows(:,:),&
+      spectral_trial_rows(:,:),&
       spectral_representative_vectors(:,:),spectral_basin_operator(:,:),spectral_wannier_action_rows(:,:,:),&
       spectral_wannier_representation(:,:),spectral_spatial_trials(:,:),spectral_amn(:,:)
     complex(8),allocatable::one_shot_hrows(:,:)
@@ -640,7 +642,7 @@ contains
     integer(8),allocatable::fixed_center_symmetry_map(:,:),fixed_center_row_ids(:)
     integer(8),allocatable::translation_row_ids(:),translation_stream_row_ids(:),translation_point_overlap_row_ids(:)
     integer(8),allocatable::translation_spatial_ids(:),translation_generator_maps(:,:)
-    integer(8),allocatable::spectral_row_ids(:),spectral_stream_row_ids(:)
+    integer(8),allocatable::spectral_row_ids(:),spectral_stream_row_ids(:),spectral_complement_row_ids(:)
     integer,allocatable::local_point_product(:,:),local_point_integer_rotations(:,:,:),&
       translation_product(:,:),global_point_product(:,:),global_point_integer_rotations(:,:,:),&
       global_translation_subgroup(:),global_point_representatives(:),global_point_cogroup_product(:,:),&
@@ -680,7 +682,8 @@ contains
       translation_joint_sweeps
     integer::translation_point_generator_count,translation_point_checked_pair_count
     integer::spectral_basin_count,spectral_orbit_count,spectral_representative_count,&
-      spectral_representative_column,spectral_basin,spectral_orbit,spectral_target_basin
+      spectral_representative_column,spectral_basin,spectral_orbit,spectral_target_basin,&
+      spectral_complement_rank,spectral_complement_local_row
     integer::failed_operation
     integer::lcfo_symmetry_worst_operation,lcfo_symmetry_worst_generator_index
     real(8),allocatable::lcfo_total_symmetry_residual(:),lcfo_boundary_symmetry_residual(:),&
@@ -719,7 +722,8 @@ contains
     integer(8)::w90_input_fingerprint,w90_transform_fingerprint
     integer(8)::spectral_frame_fingerprint,spectral_density_fingerprint,spectral_basin_fingerprint,&
       spectral_operator_fingerprint,spectral_eigensystem_fingerprint,spectral_catalog_fingerprint,&
-      spectral_channel_fingerprint,spectral_action_fingerprint,spectral_action_aggregate_fingerprint,&
+      spectral_channel_fingerprint,spectral_complement_channel_fingerprint,&
+      spectral_action_fingerprint,spectral_action_aggregate_fingerprint,&
       spectral_workspace_peak,&
       spectral_operation_workspace
     integer(8)::ow_stitched_peak_elements
@@ -1326,6 +1330,8 @@ contains
       spectral_workspace_peak,ok,message)
     deallocate(spectral_descriptor_eigenvalues,spectral_descriptor_occupations)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'spectral density descriptor construction failed';endif
+    spectral_complement_rank=ntarget-nstate
+    if(spectral_complement_rank<1)error stop 'spectral localization complement is empty'
     call build_dg_periodic_spectral_basins(dc%icomm_tot,ow_core_ids,dc%lg_tot%num,&
       spectral_occupied_density,spectral_empty_moments,spectral_shared_density,&
       int(global_symmetry_map(:,global_affine_generators)),dg_ow_symmetry_tolerance,&
@@ -1335,14 +1341,14 @@ contains
     deallocate(spectral_occupied_density,spectral_empty_moments,spectral_shared_density)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'periodic spectral basin construction failed';endif
     call prepare_dg_spectral_basin_operators(dc%icomm_tot,ow_core_ids,translation_global_core_count,&
-      global_closed_core,ow_core_weights,spectral_basin_labels,spectral_basin_count,&
+      global_closed_core(nstate+1:ntarget,:),ow_core_weights,spectral_basin_labels,spectral_basin_count,&
       spectral_frame_fingerprint,spectral_frame_defect,spectral_basin_fingerprint,&
       dg_ow_symmetry_tolerance,spectral_prepared_basins,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'spectral basin operator preparation failed';endif
     spectral_workspace_peak=max(spectral_workspace_peak,spectral_prepared_basins%workspace_peak_bytes)
     allocate(spectral_orbit_id(spectral_basin_count),spectral_orbit_representatives(spectral_basin_count),&
-      spectral_basin_spectra(ntarget,spectral_basin_count),&
-      spectral_block_ends(ntarget,spectral_basin_count),stat=allocation_status)
+      spectral_basin_spectra(spectral_complement_rank,spectral_basin_count),&
+      spectral_block_ends(spectral_complement_rank,spectral_basin_count),stat=allocation_status)
     call MPI_Allreduce(allocation_status,translation_allocation_status,1,MPI_INTEGER,MPI_MAX,&
       dc%icomm_tot,ierr)
     if(ierr/=MPI_SUCCESS.or.translation_allocation_status/=0)&
@@ -1370,7 +1376,7 @@ contains
     do spectral_orbit=1,spectral_orbit_count
       spectral_basin=spectral_orbit_representatives(spectral_orbit)
       call project_dg_prepared_spectral_basin_operator(dc%icomm_tot,spectral_prepared_basins,&
-        global_closed_core,ow_core_weights,spectral_basin,spectral_basin_operator,&
+        global_closed_core(nstate+1:ntarget,:),ow_core_weights,spectral_basin,spectral_basin_operator,&
         spectral_operator_hermiticity,spectral_operator_trace,spectral_operator_fingerprint,&
         spectral_operation_workspace,ok,message)
       spectral_workspace_peak=max(spectral_workspace_peak,spectral_operation_workspace)
@@ -1395,10 +1401,13 @@ contains
     if(ierr/=MPI_SUCCESS.or.translation_allocation_status/=0)&
       error stop 'spectral selected-rank allocation failed collectively'
     call select_dg_spectral_basin_channel_ranks(dc%icomm_tot,spectral_basin_spectra,&
-      spectral_block_ends,spectral_basin_generator_maps,ntarget,dg_ow_symmetry_tolerance,&
+      spectral_block_ends,spectral_basin_generator_maps,spectral_complement_rank,dg_ow_symmetry_tolerance,&
       spectral_selected_ranks,spectral_catalog_fingerprint,spectral_operation_workspace,ok,message)
     spectral_workspace_peak=max(spectral_workspace_peak,spectral_operation_workspace)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'spectral basin channel rank selection failed';endif
+    if(rank==0)write(*,'(a,4(a,i0))')'[OW-GS-DIAGNOSTIC] spectral_basin_rank_selection',&
+      ' basin_count=',spectral_basin_count,' orbit_count=',spectral_orbit_count,&
+      ' occupied_rank=',nstate,' complement_rank=',sum(spectral_selected_ranks)
     spectral_catalog_fingerprint=ieor(spectral_catalog_fingerprint,&
       ieor(ishftc(spectral_basin_fingerprint,11),ishftc(spectral_density_fingerprint,23)))
     if(spectral_catalog_fingerprint==0_8)spectral_catalog_fingerprint=1_8
@@ -1407,7 +1416,8 @@ contains
       spectral_representative_count=spectral_representative_count+&
         spectral_selected_ranks(spectral_orbit_representatives(spectral_orbit))
     enddo
-    allocate(spectral_representative_vectors(ntarget,spectral_representative_count),stat=allocation_status)
+    allocate(spectral_representative_vectors(spectral_complement_rank,spectral_representative_count),&
+      stat=allocation_status)
     call MPI_Allreduce(allocation_status,translation_allocation_status,1,MPI_INTEGER,MPI_MAX,&
       dc%icomm_tot,ierr)
     if(ierr/=MPI_SUCCESS.or.translation_allocation_status/=0)&
@@ -1417,7 +1427,7 @@ contains
       spectral_basin=spectral_orbit_representatives(spectral_orbit)
       i=spectral_selected_ranks(spectral_basin);if(i==0)cycle
       call project_dg_prepared_spectral_basin_operator(dc%icomm_tot,spectral_prepared_basins,&
-        global_closed_core,ow_core_weights,spectral_basin,spectral_basin_operator,&
+        global_closed_core(nstate+1:ntarget,:),ow_core_weights,spectral_basin,spectral_basin_operator,&
         spectral_operator_hermiticity,spectral_operator_trace,spectral_operator_fingerprint,&
         spectral_operation_workspace,ok,message)
       if(.not.ok)then;write(0,'(a)')trim(message);error stop 'spectral representative operator projection failed';endif
@@ -1440,8 +1450,9 @@ contains
       if(io==1)then
         allocate(spectral_row_ids(size(spectral_stream_row_ids)),source=spectral_stream_row_ids,&
           stat=allocation_status)
-        allocate(spectral_generator_rows(size(spectral_stream_row_ids),ntarget,&
-          size(global_affine_generators)),stat=translation_allocation_status)
+        allocate(spectral_complement_row_ids(count(spectral_stream_row_ids>int(nstate,8))),&
+          spectral_complement_generator_rows(count(spectral_stream_row_ids>int(nstate,8)),&
+          spectral_complement_rank,size(global_affine_generators)),stat=translation_allocation_status)
         allocation_status=max(allocation_status,translation_allocation_status)
         call MPI_Allreduce(MPI_IN_PLACE,allocation_status,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
         if(ierr/=MPI_SUCCESS.or.allocation_status/=0)&
@@ -1449,22 +1460,44 @@ contains
       elseif(any(spectral_stream_row_ids/=spectral_row_ids))then
         error stop 'spectral generator row ownership changed during streaming'
       endif
-      spectral_generator_rows(:,:,io)=fixed_center_rows(:,:,1)
+      spectral_complement_local_row=0
+      do i=1,size(spectral_stream_row_ids)
+        if(spectral_stream_row_ids(i)<=int(nstate,8))cycle
+        spectral_complement_local_row=spectral_complement_local_row+1
+        spectral_complement_row_ids(spectral_complement_local_row)=spectral_stream_row_ids(i)-int(nstate,8)
+        spectral_complement_generator_rows(spectral_complement_local_row,:,io)=&
+          fixed_center_rows(i,nstate+1:ntarget,1)
+      enddo
       deallocate(spectral_stream_row_ids,fixed_center_rows)
     enddo
-    call propagate_dg_spectral_basin_orbit_channels(dc%icomm_tot,spectral_row_ids,&
-      spectral_generator_rows,spectral_basin_generator_maps,spectral_selected_ranks,&
+    call propagate_dg_spectral_basin_orbit_channels(dc%icomm_tot,spectral_complement_row_ids,&
+      spectral_complement_generator_rows,spectral_basin_generator_maps,spectral_selected_ranks,&
       spectral_representative_vectors,spectral_frame_fingerprint,spectral_catalog_fingerprint,&
-      dg_ow_symmetry_tolerance,spectral_trial_rows,spectral_channel_gram_defect,&
-      spectral_channel_fingerprint,spectral_operation_workspace,ok,message)
-    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'spectral basin channel propagation failed';endif
-    call build_dg_spectral_channel_generator_actions(dc%icomm_tot,spectral_row_ids,&
-      spectral_generator_rows,spectral_trial_rows,spectral_basin_generator_maps,spectral_selected_ranks,&
-      spectral_frame_fingerprint,spectral_channel_fingerprint,dg_ow_symmetry_tolerance,&
+      dg_ow_symmetry_tolerance,spectral_complement_trial_rows,spectral_channel_gram_defect,&
+      spectral_complement_channel_fingerprint,spectral_operation_workspace,ok,message)
+    if(.not.ok)then
+      if(rank==0)write(*,'(a,es16.8)')'[OW-GS-DIAGNOSTIC] spectral_basin_failed_gram_defect=',&
+        spectral_channel_gram_defect
+      write(0,'(a)')trim(message);error stop 'spectral basin channel propagation failed'
+    endif
+    call build_dg_spectral_channel_generator_actions(dc%icomm_tot,spectral_complement_row_ids,&
+      spectral_complement_generator_rows,spectral_complement_trial_rows,&
+      spectral_basin_generator_maps,spectral_selected_ranks,&
+      spectral_frame_fingerprint,spectral_complement_channel_fingerprint,dg_ow_symmetry_tolerance,&
       spectral_wannier_action_rows,spectral_action_unitarity,spectral_action_block_defect,&
       spectral_action_fingerprint,spectral_operation_workspace,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'spectral channel target-action construction failed';endif
-    deallocate(spectral_wannier_action_rows,spectral_representative_vectors)
+    deallocate(spectral_wannier_action_rows,spectral_representative_vectors,&
+      spectral_complement_generator_rows)
+    call compose_dg_occupied_complement_trial_rows(dc%icomm_tot,spectral_row_ids,nstate,&
+      spectral_complement_row_ids,spectral_complement_trial_rows,dg_ow_symmetry_tolerance,&
+      spectral_trial_rows,spectral_channel_gram_defect,spectral_channel_fingerprint,&
+      spectral_operation_workspace,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'occupied/complement trial composition failed';endif
+    spectral_channel_fingerprint=ieor(spectral_channel_fingerprint,&
+      ishftc(spectral_complement_channel_fingerprint,13))
+    if(spectral_channel_fingerprint==0_8)spectral_channel_fingerprint=1_8
+    deallocate(spectral_complement_row_ids,spectral_complement_trial_rows)
     if(rank==0)write(*,'(a,3(a,i0),3(a,es16.8),a,i0)')'[OW-GS-DIAGNOSTIC] spectral_basin_channels',&
       ' basin_count=',spectral_basin_count,' orbit_count=',spectral_orbit_count,&
       ' fingerprint=',spectral_channel_fingerprint,' frame_defect=',spectral_frame_defect,&
@@ -1633,7 +1666,7 @@ contains
         fixed_center_rows,spectral_trial_rows,spectral_single_basin_map,spectral_selected_ranks,&
         spectral_frame_fingerprint,spectral_channel_fingerprint,dg_ow_symmetry_tolerance,&
         spectral_wannier_action_rows,spectral_action_unitarity,spectral_action_block_defect,&
-        spectral_action_fingerprint,spectral_operation_workspace,ok,message)
+        spectral_action_fingerprint,spectral_operation_workspace,ok,message,preserved_prefix=nstate)
       if(.not.ok)then
         if(rank==0)call abort_sawf_dmn(fixed_center_dmn_writer)
         write(0,'(a)')trim(message);error stop 'spectral Wannier target action construction failed'
@@ -1684,7 +1717,7 @@ contains
       spectral_basin_generator_maps,spectral_selected_ranks)
     if(allocated(spectral_wannier_action_rows))deallocate(spectral_wannier_action_rows)
     if(allocated(spectral_amn))deallocate(spectral_amn)
-    deallocate(spectral_generator_rows,spectral_trial_rows,spectral_row_ids)
+    deallocate(spectral_trial_rows,spectral_row_ids)
     allocate(initial_core_ids(ncore))
     allocate(ow_core_values(ntarget,ncore))
     core_index=0

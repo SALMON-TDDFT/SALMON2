@@ -258,7 +258,7 @@ contains
 
   subroutine build_dg_spectral_channel_generator_actions(comm,row_ids,generator_rows,trial_rows,&
       basin_generator_maps,selected_ranks,representation_fingerprint,channel_fingerprint,tolerance,&
-      action_rows,unitarity_defect,block_defect,fingerprint,workspace_peak_bytes,ok,message)
+      action_rows,unitarity_defect,block_defect,fingerprint,workspace_peak_bytes,ok,message,preserved_prefix)
     integer,intent(in)::comm,basin_generator_maps(:,:),selected_ranks(:)
     integer(int64),intent(in)::row_ids(:),representation_fingerprint,channel_fingerprint
     complex(real64),intent(in)::generator_rows(:,:,:),trial_rows(:,:)
@@ -268,10 +268,11 @@ contains
     integer(int64),intent(out)::fingerprint,workspace_peak_bytes
     logical,intent(out)::ok
     character(*),intent(out)::message
+    integer,intent(in),optional::preserved_prefix
 #ifdef USE_MPI
     integer,parameter::channel_tile_size=32
     integer::nlocal,nstate,ngenerator,nbasin,nproc,rank,i,j,g,b,p,q,t,owner,tile_first,tile_count,&
-      row_basin,column_basin,target_basin,status,ierr,local_bad,global_bad,minint,maxint
+      row_basin,column_basin,target_basin,status,ierr,local_bad,global_bad,minint,maxint,prefix
     integer,allocatable::ownership(:),position(:),owner_counts(:),receive_counts(:),displacements(:),&
       column_offsets(:)
     complex(real64),allocatable::local_pack(:),full_pack(:),image(:,:),local_action(:,:),&
@@ -283,10 +284,12 @@ contains
     ok=.false.;message='';unitarity_defect=huge(1d0);block_defect=huge(1d0)
     fingerprint=0_int64;workspace_peak_bytes=0_int64
     nlocal=size(row_ids);nstate=size(trial_rows,2);ngenerator=size(generator_rows,3);nbasin=size(selected_ranks)
+    prefix=0;if(present(preserved_prefix))prefix=preserved_prefix
     local_bad=0
     if(nstate<1.or.nbasin<1.or.size(trial_rows,1)/=nlocal.or.size(generator_rows,1)/=nlocal.or.&
         size(generator_rows,2)/=nstate.or.size(basin_generator_maps,1)/=nbasin.or.&
-        size(basin_generator_maps,2)/=ngenerator.or.sum(selected_ranks)/=nstate.or.any(selected_ranks<0).or.&
+        size(basin_generator_maps,2)/=ngenerator.or.prefix<0.or.prefix>nstate.or.&
+        sum(selected_ranks)/=nstate-prefix.or.any(selected_ranks<0).or.&
         representation_fingerprint==0_int64.or.channel_fingerprint==0_int64.or.&
         .not.ieee_is_finite(tolerance).or.tolerance<=0d0.or.tolerance>huge(1d0)/100d0)then
       local_bad=1
@@ -358,7 +361,7 @@ contains
     enddo;enddo
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid spectral channel ownership or block action';return;endif
-    column_offsets(1)=1
+    column_offsets(1)=prefix+1
     do b=1,nbasin;column_offsets(b+1)=column_offsets(b)+selected_ranks(b);enddo
     allocate(action_rows(nlocal,nstate,ngenerator),&
       local_pack(max(1,nlocal*channel_tile_size)),full_pack(nstate*channel_tile_size),&
@@ -411,13 +414,25 @@ contains
     enddo
     block_defect=0d0
     do g=1,ngenerator;do p=1,nlocal
-      row_basin=1
-      do while(int(row_ids(p))>=column_offsets(row_basin+1));row_basin=row_basin+1;enddo
+      row_basin=0
+      if(int(row_ids(p))>prefix)then
+        row_basin=1
+        do while(int(row_ids(p))>=column_offsets(row_basin+1));row_basin=row_basin+1;enddo
+      endif
       do j=1,nstate
-        column_basin=1
-        do while(j>=column_offsets(column_basin+1));column_basin=column_basin+1;enddo
-        target_basin=basin_generator_maps(column_basin,g)
-        if(row_basin/=target_basin)block_defect=max(block_defect,abs(action_rows(p,j,g)))
+        column_basin=0
+        if(j>prefix)then
+          column_basin=1
+          do while(j>=column_offsets(column_basin+1));column_basin=column_basin+1;enddo
+        endif
+        if(column_basin==0)then
+          if(row_basin/=0)block_defect=max(block_defect,abs(action_rows(p,j,g)))
+        elseif(row_basin==0)then
+          block_defect=max(block_defect,abs(action_rows(p,j,g)))
+        else
+          target_basin=basin_generator_maps(column_basin,g)
+          if(row_basin/=target_basin)block_defect=max(block_defect,abs(action_rows(p,j,g)))
+        endif
       enddo
     enddo;enddo
     call MPI_Allreduce(MPI_IN_PLACE,block_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)

@@ -230,6 +230,25 @@ assert re.search(
     ow_ground_state_body,
     re.S,
 ), "the spectral channel catalog must bind the density-derived basin provenance"
+assert "spectral_complement_rank=ntarget-nstate" in re.sub(r"\s+", "", ow_ground_state_body), (
+    "production must derive the localization complement from material-dependent retained and occupied ranks"
+)
+assert re.search(
+    r"prepare_dg_spectral_basin_operators\s*\(.*?global_closed_core\s*\(\s*nstate\s*\+\s*1\s*:\s*ntarget\s*,\s*:\s*\)",
+    ow_ground_state_body,
+    re.S,
+), "spectral basin operators must be projected only in the complete-s+p-derived complement"
+assert re.search(
+    r"select_dg_spectral_basin_channel_ranks\s*\(.*?spectral_complement_rank",
+    ow_ground_state_body,
+    re.S,
+), "spectral basin rank selection must request only the complement rank"
+assert "compose_dg_occupied_complement_trial_rows" in ow_ground_state_body, (
+    "production must concatenate the preserved occupied block with localized complement rows"
+)
+assert len(re.findall(r"call\s+run_dg_w90_gamma_library", ow_ground_state_body)) == 1, (
+    "occupied/complement trial construction must still invoke Wannier90 exactly once"
+)
 assert re.search(
     r"fixed_center_dmn_workspace_peak\s*=\s*spectral_operation_workspace",
     ow_ground_state_body,

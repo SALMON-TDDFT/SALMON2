@@ -140,6 +140,22 @@ contains
         enddo
       enddo
       call require(trial_frame_defect<1d-12,'occupied/complement composition preserves canonical rows')
+      allocate(propagation_generators(nlocal,6,1));propagation_generators=0d0
+      do local_row=1,nlocal
+        ii=int(full_row_ids(local_row))
+        select case(ii)
+        case(1,2);propagation_generators(local_row,ii,1)=1d0
+        case(3,4);propagation_generators(local_row,ii+2,1)=1d0
+        case(5,6);propagation_generators(local_row,ii-2,1)=1d0
+        end select
+      enddo
+      orbit_map(:,1)=[2,1];selected_ranks=[2,2]
+      call build_dg_spectral_channel_generator_actions(comm,full_row_ids,propagation_generators,&
+        full_trial_rows,orbit_map,selected_ranks,8801_8,fingerprint,1d-10,target_action_rows,&
+        target_action_unitarity,target_action_block_defect,rotated_fingerprint,workspace,basin_ok,&
+        basin_message,preserved_prefix=2)
+      call require(basin_ok.and.target_action_unitarity<1d-12.and.target_action_block_defect<1d-12,&
+        'target action preserves occupied prefix and permutes only complement basin blocks')
       if(rank==0)write(*,'(a,i0,a,i0)')'SPECTRAL_COMPLEMENT ranks=',nproc,' signature=',fingerprint
       return
     endif
