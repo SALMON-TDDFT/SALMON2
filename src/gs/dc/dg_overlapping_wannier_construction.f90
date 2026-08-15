@@ -5423,7 +5423,7 @@ contains
 #else
     retained_rank=0;ok=.false.;message='distributed symmetry-closed basis requires MPI'
 #endif
-  end subroutine
+  end subroutine build_dg_distributed_symmetry_closed_basis
 
   subroutine build_dg_group_averaged_occupied_candidates_reference(comm,occupied,weights,&
       symmetry_target_box_ids,product_table,identity_operation,tolerance,candidates,spectrum,&
@@ -5856,6 +5856,12 @@ contains
     boundary_size=boundary_last-boundary_first+1
     boundary_needed=boundary_last-cutoff+1
     if(present(primary_boundary_dimension))primary_boundary_dimension=boundary_size
+    if(present(occupied_hamiltonian).and..not.(boundary_size>1.and.boundary_needed<boundary_size))then
+      if(present(secondary_selected_edge))secondary_selected_edge=0d0
+      if(present(secondary_rejected_edge))secondary_rejected_edge=0d0
+      if(present(secondary_cluster_gap))secondary_cluster_gap=0d0
+      if(present(secondary_eigensystem_residual))secondary_eigensystem_residual=0d0
+    endif
     if(boundary_size>1.and.boundary_needed<boundary_size)then
       if(boundary_size>(huge(boundary_size)-2)/3)then
         message='occupied Hamiltonian tiebreak workspace extent overflows';return
@@ -6090,7 +6096,7 @@ contains
       gather_ok=error==MPI_SUCCESS
       if(gather_ok)then;gather_message='';else;gather_message='distributed group-average vector gather failed';endif
     end subroutine
-  end subroutine
+  end subroutine build_dg_group_averaged_occupied_candidates_eigenexa
 
 #endif
 

@@ -18,6 +18,7 @@
 #include "config.h"
 
 subroutine main_dft
+use,intrinsic::ieee_arithmetic,only:ieee_is_finite
 use math_constants, only: pi, zi
 #ifdef USE_MPI
 use mpi, only: MPI_Allreduce,MPI_Allgather,MPI_Allgatherv,MPI_Bcast,MPI_IN_PLACE,MPI_INTEGER8,&
@@ -587,6 +588,8 @@ contains
       adapted_occupied_candidates(:,:),translation_adapted_occupied(:,:)
     complex(8),allocatable::orthonormal_lcfo_occupied(:,:)
     complex(8),allocatable::occupied_overlap_local(:,:),occupied_overlap_global(:,:)
+    complex(8),allocatable::translation_hamiltonian_overlap_local(:,:),&
+      translation_hamiltonian_overlap(:,:),translation_occupied_hamiltonian(:,:)
     complex(8),allocatable::w90_anchors(:,:),w90_m_matrix(:,:,:),w90_a_matrix(:,:),w90_transform(:,:)
     complex(8),allocatable::fixed_center_rows(:,:,:),fixed_center_representation(:,:),fixed_center_identity(:,:)
     complex(8),allocatable::translation_generator_rows(:,:,:),translation_gamma_rows(:,:),&
@@ -691,6 +694,7 @@ contains
       pseudopotential_fingerprint,nbox8,ncore8,product8,nxy8,local_exact_symmetry_fingerprint,&
       lcfo_symmetry_workspace_peak,adapted_occupied_workspace_peak,occupied_pre_closure_workspace_peak
     integer(8)::translation_adapted_workspace_peak
+    integer(8)::adapted_occupied_hamiltonian_fingerprint
     integer(8)::translation_character_fingerprint,translation_sector_fingerprint,&
       translation_sector_workspace_peak
     integer(8)::translation_phase_fingerprint,translation_phase_payload_fingerprint,&
@@ -723,6 +727,8 @@ contains
     real(8)::adapted_occupied_trace,adapted_occupied_closure,adapted_occupied_gamma_defect,&
       translation_adapted_trace,translation_adapted_closure,translation_adapted_gamma_defect,&
       adapted_occupied_selected_edge,adapted_occupied_rejected_edge,adapted_occupied_cluster_gap
+    real(8)::adapted_occupied_secondary_selected_edge,adapted_occupied_secondary_rejected_edge,&
+      adapted_occupied_secondary_cluster_gap,adapted_occupied_secondary_residual
     real(8)::adapted_occupied_subspace_distance,adapted_occupied_density_interior_difference,&
       adapted_occupied_density_boundary_difference,local_occupied_density_interior_difference,&
       local_occupied_density_boundary_difference,adapted_occupied_closure_before,&
@@ -1101,6 +1107,34 @@ contains
       ' gamma_defect=',translation_adapted_gamma_defect,&
       ' electron_count_drift=',abs(translation_adapted_trace-real(nstate,8)),&
       ' workspace_peak_bytes=',translation_adapted_workspace_peak
+    if(nstate>huge(nstate)/nstate)error stop 'occupied Hamiltonian MPI count overflow'
+    allocate(translation_hamiltonian_overlap_local(nstate,nstate),&
+      translation_hamiltonian_overlap(nstate,nstate),translation_occupied_hamiltonian(nstate,nstate),&
+      stat=allocation_status)
+    call MPI_Allreduce(allocation_status,translation_allocation_status,1,MPI_INTEGER,MPI_MAX,&
+      dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.translation_allocation_status/=0)&
+      error stop 'occupied Hamiltonian workspace allocation failed collectively'
+    translation_hamiltonian_overlap_local=(0d0,0d0)
+    do io=1,nstate;do i=1,nstate
+      translation_hamiltonian_overlap_local(i,io)=sum(ow_core_weights*&
+        conjg(lcfo_occupied_core(i,:))*translation_adapted_occupied(io,:))
+    enddo;enddo
+    call MPI_Allreduce(translation_hamiltonian_overlap_local,translation_hamiltonian_overlap,&
+      nstate*nstate,MPI_DOUBLE_COMPLEX,MPI_SUM,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS)error stop 'occupied Hamiltonian overlap reduction failed'
+    translation_occupied_hamiltonian=(0d0,0d0)
+    do io=1,nstate;do i=1,nstate
+      translation_occupied_hamiltonian(i,io)=sum(conjg(translation_hamiltonian_overlap(:,i))*&
+        lcfo_retained_eigenvalues(1:nstate)*translation_hamiltonian_overlap(:,io))
+    enddo;enddo
+    if(.not.all(ieee_is_finite(real(translation_occupied_hamiltonian))).or.&
+        .not.all(ieee_is_finite(aimag(translation_occupied_hamiltonian))))&
+      error stop 'occupied Hamiltonian projection is nonfinite'
+    if(maxval(abs(translation_occupied_hamiltonian-&
+        conjg(transpose(translation_occupied_hamiltonian))))>&
+        dg_ow_symmetry_tolerance*max(1d0,maxval(abs(translation_occupied_hamiltonian))))&
+      error stop 'occupied Hamiltonian projection is not Hermitian'
     if(nstate>huge(nstate)/size(global_point_representatives))&
       error stop 'point-cogroup occupied orbit rank overflow'
     call init_eigenexa_mod(info,nstate*size(global_point_representatives),direct_block_only=.true.)
@@ -1112,7 +1146,14 @@ contains
       adapted_occupied_candidates,adapted_occupied_spectrum,adapted_occupied_rank,&
       adapted_occupied_trace,adapted_occupied_closure,adapted_occupied_gamma_defect,&
       adapted_occupied_workspace_peak,ok,message,adapted_occupied_selected_edge,&
-      adapted_occupied_rejected_edge,adapted_occupied_cluster_gap)
+      adapted_occupied_rejected_edge,adapted_occupied_cluster_gap,&
+      occupied_hamiltonian=translation_occupied_hamiltonian,&
+      secondary_selected_edge=adapted_occupied_secondary_selected_edge,&
+      secondary_rejected_edge=adapted_occupied_secondary_rejected_edge,&
+      secondary_cluster_gap=adapted_occupied_secondary_cluster_gap,&
+      primary_boundary_dimension=adapted_occupied_selected_block_dimension,&
+      hamiltonian_fingerprint=adapted_occupied_hamiltonian_fingerprint,&
+      secondary_eigensystem_residual=adapted_occupied_secondary_residual)
     call finalize_eigenexa(info)
     if(.not.ok.or.adapted_occupied_rank/=nstate)then
       if(rank==0)write(0,'(a,3(a,es24.16))')&
@@ -1122,6 +1163,18 @@ contains
         ' cluster_gap=',adapted_occupied_cluster_gap
       write(0,'(a)')trim(message);error stop 'point-cogroup occupied-subspace adaptation failed'
     endif
+    if(rank==0)write(*,'(a,a,i0,4(a,es24.16),a,i0)')&
+      '[OW-GS-DIAGNOSTIC] point_cogroup_hamiltonian_tiebreak',&
+      ' primary_boundary_dimension=',adapted_occupied_selected_block_dimension,&
+      ' selected_edge=',adapted_occupied_secondary_selected_edge,&
+      ' rejected_edge=',adapted_occupied_secondary_rejected_edge,&
+      ' cluster_gap=',adapted_occupied_secondary_cluster_gap,&
+      ' residual=',adapted_occupied_secondary_residual,&
+      ' fingerprint=',adapted_occupied_hamiltonian_fingerprint
+    occupied_composition_fingerprint=ieor(ishftc(occupied_composition_fingerprint,11),&
+      adapted_occupied_hamiltonian_fingerprint)
+    deallocate(translation_hamiltonian_overlap_local,translation_hamiltonian_overlap,&
+      translation_occupied_hamiltonian)
     adapted_occupied_workspace_peak=max(adapted_occupied_workspace_peak,translation_adapted_workspace_peak,&
       occupied_pre_closure_workspace_peak,occupied_composition_peak,projector_composition_peak)
     allocate(occupied_overlap_local(nstate,nstate),occupied_overlap_global(nstate,nstate))

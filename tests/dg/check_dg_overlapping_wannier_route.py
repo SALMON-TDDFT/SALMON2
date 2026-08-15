@@ -206,6 +206,22 @@ assert point_adaptation_failure and all(
         "adapted_occupied_cluster_gap",
     )
 ), "point-cogroup rank rejection must print the actual spectral boundary before stopping"
+assert "translation_occupied_hamiltonian" in ow_ground_state_body, (
+    "production must construct the occupied Hamiltonian in the translation-adapted frame"
+)
+assert re.search(
+    r"conjg\s*\(\s*lcfo_occupied_core\s*\(.*?\)\s*\).*?translation_adapted_occupied",
+    ow_ground_state_body,
+    re.S,
+), "production Hamiltonian must stream the LCFO-to-translation-adapted overlap"
+point_adaptation_call = re.search(
+    r"call\s+build_dg_cocycle_averaged_occupied_candidates_eigenexa\s*\((?P<body>.*?)\)\s*\n",
+    ow_ground_state_body,
+    re.S,
+)
+assert point_adaptation_call and "occupied_hamiltonian=translation_occupied_hamiltonian" in point_adaptation_call.group("body"), (
+    "point-cogroup adaptation must consume the transformed occupied Hamiltonian"
+)
 assert "spectral dmn operation workspace reallocation failed collectively" not in ow_ground_state_body, (
     "the DMN loop must consume the builder's allocatable output directly, not reallocate it between operations"
 )
@@ -978,7 +994,8 @@ assert construction_source.lower().count("eigen_pdsyevd_ex_distributed_blocks") 
     "and the streamed translation-sector splitter"
 )
 averaged_projector_body = re.search(
-    r"subroutine\s+build_dg_group_averaged_occupied_candidates_eigenexa(?P<body>.*?)end\s+subroutine",
+    r"subroutine\s+build_dg_group_averaged_occupied_candidates_eigenexa(?P<body>.*?)"
+    r"end\s+subroutine\s+build_dg_group_averaged_occupied_candidates_eigenexa",
     construction_source,
     re.I | re.S,
 )
