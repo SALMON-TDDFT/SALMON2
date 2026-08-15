@@ -283,6 +283,13 @@ program test_dg_overlapping_wannier_w90_mpi
     joint_centers,joint_objective,joint_update,joint_sweeps,joint_defect,joint_fingerprint,joint_workspace,ok,message,&
     point_representations=joint_point_representations)
   call require(ok.and.joint_objective<1d-20.and.joint_defect<1d-10,'joint center gauge resolves distinct centers')
+  call jointly_canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,&
+    sector_position_tuple,position_lcfo_operator,1d-12,897_8,joint_trial_rows,joint_trial_rotation,&
+    joint_trial_centers,joint_trial_objective,joint_trial_update,joint_trial_sweeps,joint_trial_defect,&
+    joint_trial_fingerprint,joint_workspace,ok,message,&
+    point_representations=joint_point_representations(:,:,1:1))
+  call require(ok.and.joint_trial_defect<1d-10,&
+    'multiple seeds complete an internal space for the trivial point group')
   sector_position_tuple=(0d0,0d0)
   sector_position_tuple(1,1,1)=exp(cmplx(0d0,0.4d0*acos(-1d0),8))
   sector_position_tuple(2,2,1)=exp(cmplx(0d0,1.4d0*acos(-1d0),8))
@@ -295,12 +302,6 @@ program test_dg_overlapping_wannier_w90_mpi
     joint_trial_fingerprint,joint_workspace,ok,message,point_representations=joint_point_representations)
   call require(ok.and.joint_trial_defect<1d-10,&
     'point-orbit blocks close a noncommuting projected-position tuple')
-  joint_point_representations(:,:,2)=joint_point_representations(:,:,1)
-  call jointly_canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,&
-    sector_position_tuple,position_lcfo_operator,1d-12,898_8,joint_trial_rows,joint_trial_rotation,&
-    joint_trial_centers,joint_trial_objective,joint_trial_update,joint_trial_sweeps,joint_trial_defect,&
-    joint_trial_fingerprint,joint_workspace,ok,message,point_representations=joint_point_representations)
-  call require(.not.ok,'point-orbit blocks reject rank-deficient orbit coverage')
   joint_point_representations=(0d0,0d0)
   joint_point_representations(1,1,1)=1d0;joint_point_representations(2,2,1)=1d0
   joint_point_representations(1,2,2)=1d0;joint_point_representations(2,1,2)=1d0

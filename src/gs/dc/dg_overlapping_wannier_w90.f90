@@ -287,8 +287,8 @@ contains
     character(*),intent(out)::message
 #ifdef USE_MPI
     complex(real64),allocatable::hmats(:,:,:),unitary(:,:),gram(:,:),stream(:),block(:,:),zwork(:),&
-      orbit_vectors(:,:),orbit_basis(:,:),orbit_residual(:)
-    integer,allocatable::owner(:),position(:),count(:),order(:),orbit_labels(:),cluster_sequence(:)
+      orbit_vectors(:,:),orbit_basis(:,:),orbit_residual(:),cover_basis(:,:)
+    integer,allocatable::owner(:),position(:),count(:),order(:),orbit_labels(:),cluster_sequence(:),basis_labels(:)
     integer(int64),allocatable::payload_bits(:),payload_minimum(:),payload_maximum(:)
     real(real64),allocatable::block_eval(:),zrwork(:),orbit_centers(:,:),cluster_centers(:,:),inverse_sqrt(:)
     real(real64)::gmat(3,3),geval(3),gwork(9),gvec(3),two_theta,c,sabs,phase_angle,pivot,&
@@ -340,6 +340,9 @@ contains
       endif
     endif
     if(npoint>huge(0)/6)bad=1
+    if(npoint>0)then
+      if(m>huge(0)/npoint)bad=1
+    endif
     call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='invalid joint periodic-center gauge contract';return;endif
     call MPI_Allreduce(m,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
@@ -380,6 +383,8 @@ contains
     call checked_add(elements,term,receipt_valid)
     if(receipt_valid)call checked_product([int(m,int64),int(m,int64)],term,receipt_valid)
     call checked_add(elements,term,receipt_valid)
+    if(receipt_valid)call checked_product([int(m,int64),int(m,int64)],term,receipt_valid)
+    call checked_add(elements,term,receipt_valid)
     call checked_add(elements,int(m,int64),receipt_valid)
     if(receipt_valid)call checked_product([int(nlocal,int64),int(m,int64)],term,receipt_valid)
     call checked_add(elements,term,receipt_valid)
@@ -388,13 +393,15 @@ contains
     if(receipt_valid)call checked_product([elements,16_int64],bytes,receipt_valid)
     if(receipt_valid)call checked_product([7_int64,int(m,int64),8_int64],term,receipt_valid)
     call checked_add(bytes,term,receipt_valid)
-    if(receipt_valid)call checked_product([6_int64,int(npoint,int64),8_int64],term,receipt_valid)
+    if(receipt_valid)call checked_product([3_int64,1_int64+int(m,int64),int(npoint,int64),8_int64],term,receipt_valid)
     call checked_add(bytes,term,receipt_valid)
     if(receipt_valid)call checked_product([int(m,int64),8_int64],term,receipt_valid)
     call checked_add(bytes,term,receipt_valid)
     if(receipt_valid)call checked_product([4_int64,int(global_count,int64),4_int64],term,receipt_valid)
     call checked_add(bytes,term,receipt_valid)
-    if(receipt_valid)call checked_product([2_int64,int(npoint,int64),4_int64],term,receipt_valid)
+    if(receipt_valid)call checked_product([1_int64+int(m,int64),int(npoint,int64),4_int64],term,receipt_valid)
+    call checked_add(bytes,term,receipt_valid)
+    if(receipt_valid)call checked_product([int(m,int64),4_int64],term,receipt_valid)
     call checked_add(bytes,term,receipt_valid)
     if(receipt_valid)call checked_product([3_int64,payload_elements,8_int64],term,receipt_valid)
     call checked_add(bytes,term,receipt_valid)
@@ -409,8 +416,8 @@ contains
       block_eval(m),zrwork(max(1,3*m)),aligned_rows(nlocal,m),centers(3,m),&
       owner(global_count),position(global_count),count(global_count),order(m),payload_bits(payload_count),&
       payload_minimum(payload_count),payload_maximum(payload_count),orbit_vectors(m,npoint),orbit_basis(m,m),&
-      orbit_residual(m),orbit_centers(3,npoint),cluster_centers(3,npoint),inverse_sqrt(m),&
-      orbit_labels(npoint),cluster_sequence(npoint),stat=status)
+      orbit_residual(m),cover_basis(m,m),orbit_centers(3,npoint),cluster_centers(3,m*npoint),inverse_sqrt(m),&
+      orbit_labels(npoint),cluster_sequence(m*npoint),basis_labels(m),stat=status)
     call MPI_Allreduce(status,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.gbad/=0)then;call cleanup();message='joint periodic-center allocation failed';return;endif
     owner=0;position=0;count=0
@@ -688,17 +695,24 @@ contains
   contains
     subroutine build_point_orbit_blocks(built)
       logical,intent(out)::built
-      integer::seed,pidx,cidx,ncluster,ncandidate,first_column,last_column,destination,&
+      integer::seed,pidx,cidx,ncluster,ncandidate,ncovered,first_column,last_column,destination,&
         source_start,source_end,norm_info
-      real(real64)::center_tolerance,rank_tolerance,residual_norm,&
+      real(real64)::center_tolerance,rank_tolerance,residual_norm,cover_norm,&
         block_weight,best_weight,leakage
       complex(real64)::expectation
       logical::insert_before
       built=.false.;center_tolerance=tolerance**0.25d0;rank_tolerance=sqrt(tolerance)
+      ncluster=0;ncandidate=0;ncovered=0;norm_info=0;orbit_labels=0;basis_labels=0
+      cluster_centers=0d0;orbit_basis=(0d0,0d0);cover_basis=(0d0,0d0);centers=0d0
       do seed=1,m
-        ncluster=0;orbit_labels=0;cluster_centers=0d0
+        orbit_residual=unitary(:,seed)
+        if(ncovered>0)orbit_residual=orbit_residual-matmul(cover_basis(:,1:ncovered),&
+          matmul(conjg(transpose(cover_basis(:,1:ncovered))),orbit_residual))
+        residual_norm=sqrt(max(0d0,real(dot_product(orbit_residual,orbit_residual),real64)))
+        if(residual_norm<=rank_tolerance)cycle
+        orbit_residual=orbit_residual/residual_norm
         do pidx=1,npoint
-          orbit_vectors(:,pidx)=matmul(point_representations(:,:,pidx),unitary(:,seed))
+          orbit_vectors(:,pidx)=matmul(point_representations(:,:,pidx),orbit_residual)
           do axis=1,3
             expectation=dot_product(orbit_vectors(:,pidx),&
               matmul(position_tuple(:,:,axis),orbit_vectors(:,pidx)))
@@ -709,6 +723,7 @@ contains
               orbit_centers(axis,pidx)=0d0
             endif
           enddo
+          orbit_labels(pidx)=0
           do cidx=1,ncluster
             if(all(min(abs(orbit_centers(:,pidx)-cluster_centers(:,cidx)),&
                 1d0-abs(orbit_centers(:,pidx)-cluster_centers(:,cidx)))<=center_tolerance))then
@@ -719,85 +734,88 @@ contains
             ncluster=ncluster+1;orbit_labels(pidx)=ncluster
             cluster_centers(:,ncluster)=orbit_centers(:,pidx)
           endif
-        enddo
-        cluster_sequence(1:ncluster)=[(cidx,cidx=1,ncluster)]
-        do cidx=2,ncluster
-          destination=cidx
-          do while(destination>1)
-            insert_before=.false.
-            do axis=1,3
-              if(cluster_centers(axis,cluster_sequence(destination))<&
-                  cluster_centers(axis,cluster_sequence(destination-1))-center_tolerance)then
-                insert_before=.true.;exit
-              endif
-              if(cluster_centers(axis,cluster_sequence(destination))>&
-                  cluster_centers(axis,cluster_sequence(destination-1))+center_tolerance)exit
-            enddo
-            if(.not.insert_before)exit
-            pidx=cluster_sequence(destination);cluster_sequence(destination)=cluster_sequence(destination-1)
-            cluster_sequence(destination-1)=pidx;destination=destination-1
+          orbit_residual=orbit_vectors(:,pidx)
+          do cidx=1,ncandidate
+            if(basis_labels(cidx)==orbit_labels(pidx))orbit_residual=orbit_residual-&
+              orbit_basis(:,cidx)*dot_product(orbit_basis(:,cidx),orbit_residual)
           enddo
+          residual_norm=sqrt(max(0d0,real(dot_product(orbit_residual,orbit_residual),real64)))
+          if(residual_norm<=rank_tolerance)cycle
+          stream=orbit_residual/residual_norm
+          orbit_residual=stream
+          if(ncovered>0)orbit_residual=orbit_residual-matmul(cover_basis(:,1:ncovered),&
+            matmul(conjg(transpose(cover_basis(:,1:ncovered))),orbit_residual))
+          cover_norm=sqrt(max(0d0,real(dot_product(orbit_residual,orbit_residual),real64)))
+          if(cover_norm<=rank_tolerance)cycle
+          if(ncandidate>=m.or.ncovered>=m)then;norm_info=1;exit;endif
+          ncandidate=ncandidate+1;orbit_basis(:,ncandidate)=stream;basis_labels(ncandidate)=orbit_labels(pidx)
+          ncovered=ncovered+1;cover_basis(:,ncovered)=orbit_residual/cover_norm
         enddo
-        orbit_basis=(0d0,0d0);centers=0d0;ncandidate=0;norm_info=0
-        do cidx=1,ncluster
-          first_column=ncandidate+1
-          do pidx=1,npoint
-            if(orbit_labels(pidx)/=cluster_sequence(cidx))cycle
-            orbit_residual=orbit_vectors(:,pidx)
-            if(ncandidate>=first_column)orbit_residual=orbit_residual-&
-              matmul(orbit_basis(:,first_column:ncandidate),&
-                matmul(conjg(transpose(orbit_basis(:,first_column:ncandidate))),orbit_residual))
-            residual_norm=sqrt(max(0d0,real(dot_product(orbit_residual,orbit_residual),real64)))
-            if(residual_norm<=rank_tolerance)cycle
-            if(ncandidate>=m)then;norm_info=1;exit;endif
-            ncandidate=ncandidate+1;orbit_basis(:,ncandidate)=orbit_residual/residual_norm
-            centers(:,ncandidate)=cluster_centers(:,cluster_sequence(cidx))
-          enddo
-          if(ncandidate<first_column)norm_info=1
-          if(norm_info/=0)exit
-        enddo
-        if(norm_info/=0.or.ncandidate/=m)cycle
-        gram=matmul(conjg(transpose(orbit_basis)),orbit_basis)
-        block=gram
-        call zheev('V','U',m,block,m,block_eval,zwork,max(1,2*m),zrwork,norm_info)
-        bad=merge(0,1,norm_info==0.and.all(ieee_is_finite(block_eval)).and.&
-          minval(block_eval)>rank_tolerance*rank_tolerance)
-        call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-        if(ierr/=MPI_SUCCESS)return
-        if(gbad/=0)cycle
-        inverse_sqrt=1d0/sqrt(block_eval)
-        gram=matmul(block*spread(inverse_sqrt,1,m),conjg(transpose(block)))
-        orbit_basis=matmul(orbit_basis,gram)
-        leakage=0d0
-        do point=1,npoint
-          block=matmul(conjg(transpose(orbit_basis)),&
-            matmul(point_representations(:,:,point),orbit_basis))
-          source_start=1
-          do while(source_start<=m)
-            source_end=source_start
-            do while(source_end<m)
-              if(any(min(abs(centers(:,source_end+1)-centers(:,source_start)),&
-                  1d0-abs(centers(:,source_end+1)-centers(:,source_start)))>center_tolerance))exit
-              source_end=source_end+1
-            enddo
-            best_weight=0d0;first_column=1
-            do while(first_column<=m)
-              last_column=first_column
-              do while(last_column<m)
-                if(any(min(abs(centers(:,last_column+1)-centers(:,first_column)),&
-                    1d0-abs(centers(:,last_column+1)-centers(:,first_column)))>center_tolerance))exit
-                last_column=last_column+1
-              enddo
-              block_weight=sum(abs(block(first_column:last_column,source_start:source_end))**2)
-              best_weight=max(best_weight,block_weight);first_column=last_column+1
-            enddo
-            leakage=max(leakage,max(0d0,1d0-best_weight/real(source_end-source_start+1,real64)))
-            source_start=source_end+1
-          enddo
-        enddo
-        if(leakage>center_tolerance)cycle
-        unitary=orbit_basis;built=.true.;return
+        if(norm_info/=0.or.ncovered>=m)exit
       enddo
+      if(norm_info/=0.or.ncandidate/=m.or.ncovered/=m)return
+      cluster_sequence(1:ncluster)=[(cidx,cidx=1,ncluster)]
+      do cidx=2,ncluster
+        destination=cidx
+        do while(destination>1)
+          insert_before=.false.
+          do axis=1,3
+            if(cluster_centers(axis,cluster_sequence(destination))<&
+                cluster_centers(axis,cluster_sequence(destination-1))-center_tolerance)then
+              insert_before=.true.;exit
+            endif
+            if(cluster_centers(axis,cluster_sequence(destination))>&
+                cluster_centers(axis,cluster_sequence(destination-1))+center_tolerance)exit
+          enddo
+          if(.not.insert_before)exit
+          pidx=cluster_sequence(destination);cluster_sequence(destination)=cluster_sequence(destination-1)
+          cluster_sequence(destination-1)=pidx;destination=destination-1
+        enddo
+      enddo
+      gram=orbit_basis;destination=0
+      do cidx=1,ncluster
+        do pidx=1,m
+          if(basis_labels(pidx)/=cluster_sequence(cidx))cycle
+          destination=destination+1;orbit_basis(:,destination)=gram(:,pidx)
+          centers(:,destination)=cluster_centers(:,cluster_sequence(cidx))
+        enddo
+      enddo
+      gram=matmul(conjg(transpose(orbit_basis)),orbit_basis);block=gram
+      call zheev('V','U',m,block,m,block_eval,zwork,max(1,2*m),zrwork,norm_info)
+      bad=merge(0,1,norm_info==0.and.all(ieee_is_finite(block_eval)).and.&
+        minval(block_eval)>rank_tolerance*rank_tolerance)
+      call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.gbad/=0)return
+      inverse_sqrt=1d0/sqrt(block_eval)
+      gram=matmul(block*spread(inverse_sqrt,1,m),conjg(transpose(block)))
+      orbit_basis=matmul(orbit_basis,gram);leakage=0d0
+      do point=1,npoint
+        block=matmul(conjg(transpose(orbit_basis)),matmul(point_representations(:,:,point),orbit_basis))
+        source_start=1
+        do while(source_start<=m)
+          source_end=source_start
+          do while(source_end<m)
+            if(any(min(abs(centers(:,source_end+1)-centers(:,source_start)),&
+                1d0-abs(centers(:,source_end+1)-centers(:,source_start)))>center_tolerance))exit
+            source_end=source_end+1
+          enddo
+          best_weight=0d0;first_column=1
+          do while(first_column<=m)
+            last_column=first_column
+            do while(last_column<m)
+              if(any(min(abs(centers(:,last_column+1)-centers(:,first_column)),&
+                  1d0-abs(centers(:,last_column+1)-centers(:,first_column)))>center_tolerance))exit
+              last_column=last_column+1
+            enddo
+            block_weight=sum(abs(block(first_column:last_column,source_start:source_end))**2)
+            best_weight=max(best_weight,block_weight);first_column=last_column+1
+          enddo
+          leakage=max(leakage,max(0d0,1d0-best_weight/real(source_end-source_start+1,real64)))
+          source_start=source_end+1
+        enddo
+      enddo
+      if(leakage>center_tolerance)return
+      unitary=orbit_basis;built=.true.
     end subroutine build_point_orbit_blocks
 
     subroutine cleanup(drop_outputs)
@@ -824,11 +842,13 @@ contains
       if(allocated(orbit_vectors))deallocate(orbit_vectors)
       if(allocated(orbit_basis))deallocate(orbit_basis)
       if(allocated(orbit_residual))deallocate(orbit_residual)
+      if(allocated(cover_basis))deallocate(cover_basis)
       if(allocated(orbit_centers))deallocate(orbit_centers)
       if(allocated(cluster_centers))deallocate(cluster_centers)
       if(allocated(inverse_sqrt))deallocate(inverse_sqrt)
       if(allocated(orbit_labels))deallocate(orbit_labels)
       if(allocated(cluster_sequence))deallocate(cluster_sequence)
+      if(allocated(basis_labels))deallocate(basis_labels)
     end subroutine
 #else
     ok=.false.;message='joint periodic-center gauge requires MPI';final_objective=huge(1d0)
