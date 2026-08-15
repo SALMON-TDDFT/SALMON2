@@ -116,7 +116,145 @@ module dg_overlapping_wannier_construction
   public::select_dg_spectral_basin_channel_ranks
   public::propagate_dg_spectral_basin_orbit_channels
   public::build_dg_spectral_channel_generator_actions
+  public::compose_dg_occupied_complement_trial_rows
 contains
+
+  subroutine compose_dg_occupied_complement_trial_rows(comm,full_row_ids,noccupied,complement_row_ids,&
+      complement_rows,tolerance,trial_rows,gram_defect,fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,noccupied
+    integer(int64),intent(in)::full_row_ids(:),complement_row_ids(:)
+    complex(real64),intent(in)::complement_rows(:,:)
+    real(real64),intent(in)::tolerance
+    complex(real64),allocatable,intent(out)::trial_rows(:,:)
+    real(real64),intent(out)::gram_defect
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nlocal,ncomplement,nstate,i,j,p,q,status,ierr,local_bad,global_bad,minint,maxint
+    integer,allocatable::full_count(:),complement_count(:),complement_position(:)
+    complex(real64),allocatable::gram(:,:)
+    integer(int64)::local_max_id,global_max_id,local_hash,global_hash,quantized,complex_elements,integer_elements
+    real(real64)::minreal,maxreal,quantum,local_max,global_max
+
+    ok=.false.;message='';gram_defect=huge(1d0);fingerprint=0_int64;workspace_peak_bytes=0_int64
+    nlocal=size(full_row_ids);ncomplement=size(complement_rows,2);local_bad=0
+    if(noccupied<0.or.ncomplement<0.or.size(complement_rows,1)/=size(complement_row_ids).or.&
+        .not.ieee_is_finite(tolerance).or.tolerance<=0d0.or.tolerance>huge(1d0)/100d0.or.&
+        .not.all(ieee_is_finite(real(complement_rows))).or.&
+        .not.all(ieee_is_finite(aimag(complement_rows))))local_bad=1
+    local_max_id=0_int64;if(nlocal>0)local_max_id=maxval(full_row_ids)
+    call MPI_Allreduce(local_max_id,global_max_id,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    if(global_max_id<1_int64.or.global_max_id>int(huge(0),int64))local_bad=1
+    nstate=int(global_max_id)
+    if(noccupied>nstate.or.ncomplement/=nstate-noccupied) local_bad=1
+    if(any(full_row_ids<1_int64).or.any(full_row_ids>global_max_id).or.&
+        any(complement_row_ids<1_int64).or.any(complement_row_ids>int(max(0,ncomplement),int64)))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='invalid occupied/complement trial-frame contract';return
+    endif
+    call MPI_Allreduce(noccupied,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(noccupied,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(minint/=maxint)then;message='occupied trial-frame rank disagrees';return;endif
+    call MPI_Allreduce(tolerance,minreal,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tolerance,maxreal,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(transfer(minreal,0_int64)/=transfer(maxreal,0_int64))then
+      message='occupied/complement trial-frame tolerance disagrees';return
+    endif
+    if(int(nstate,int64)>huge(0_int64)/max(1_int64,int(nlocal,int64)).or.&
+        int(ncomplement,int64)>huge(0_int64)/max(1_int64,int(ncomplement,int64)))then
+      message='occupied/complement trial-frame extent overflows';return
+    endif
+    allocate(full_count(nstate),complement_count(max(1,ncomplement)),&
+      complement_position(max(1,ncomplement)),gram(max(1,ncomplement),max(1,ncomplement)),stat=status)
+    call MPI_Allreduce(merge(0,1,status==0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='occupied/complement trial-frame metadata allocation failed';return
+    endif
+    full_count=0;complement_count=0;complement_position=0
+    do p=1,nlocal;full_count(int(full_row_ids(p)))=full_count(int(full_row_ids(p)))+1;enddo
+    do p=1,size(complement_row_ids)
+      q=int(complement_row_ids(p));complement_count(q)=complement_count(q)+1;complement_position(q)=p
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,full_count,nstate,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(ncomplement>0)then
+      call MPI_Allreduce(MPI_IN_PLACE,complement_count,ncomplement,MPI_INTEGER,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)return
+    endif
+    local_bad=merge(0,1,all(full_count==1).and.(ncomplement==0.or.all(complement_count(1:ncomplement)==1)))
+    do p=1,size(complement_row_ids)
+      q=findloc(full_row_ids,int(noccupied,int64)+complement_row_ids(p),dim=1)
+      if(q==0)local_bad=1
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='occupied/complement trial-frame rows are not owned exactly once';return
+    endif
+    allocate(trial_rows(nlocal,nstate),stat=status)
+    call MPI_Allreduce(merge(0,1,status==0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(trial_rows))deallocate(trial_rows)
+      message='occupied/complement trial-frame output allocation failed';return
+    endif
+    trial_rows=(0d0,0d0)
+    do p=1,nlocal
+      i=int(full_row_ids(p))
+      if(i<=noccupied)then
+        trial_rows(p,i)=1d0
+      else
+        q=findloc(complement_row_ids,int(i-noccupied,int64),dim=1)
+        if(q>0)trial_rows(p,noccupied+1:nstate)=complement_rows(q,:)
+      endif
+    enddo
+    gram=(0d0,0d0)
+    if(ncomplement>0.and.size(complement_row_ids)>0)call zgemm('C','N',ncomplement,ncomplement,&
+      size(complement_row_ids),(1d0,0d0),complement_rows,max(1,size(complement_row_ids)),&
+      complement_rows,max(1,size(complement_row_ids)),(0d0,0d0),gram,max(1,ncomplement))
+    if(ncomplement>0)then
+      call MPI_Allreduce(MPI_IN_PLACE,gram,ncomplement*ncomplement,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)return
+    endif
+    gram_defect=0d0
+    do j=1,ncomplement;do i=1,ncomplement
+      if(i==j)then
+        gram_defect=max(gram_defect,abs(gram(i,j)-1d0))
+      else
+        gram_defect=max(gram_defect,abs(gram(i,j)))
+      endif
+    enddo;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,gram_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gram_defect>10d0*tolerance)then
+      message='occupied/complement trial frame is not orthonormal';return
+    endif
+    quantum=100d0*tolerance;local_max=0d0;if(nlocal>0)local_max=maxval(abs(trial_rows))
+    call MPI_Allreduce(local_max,global_max,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_max>0.25d0*real(huge(0_int64),real64)*quantum)then
+      message='occupied/complement trial-frame fingerprint range is unsafe';return
+    endif
+    local_hash=0_int64
+    do p=1,nlocal;do j=1,nstate
+      quantized=nint(real(trial_rows(p,j))/quantum,int64)
+      local_hash=ieor(local_hash,ieor(ishftc(full_row_ids(p),7),ieor(ishftc(int(j,int64),17),quantized)))
+      quantized=nint(aimag(trial_rows(p,j))/quantum,int64)
+      local_hash=ieor(local_hash,ieor(ishftc(full_row_ids(p),11),ieor(ishftc(int(j,int64),23),quantized)))
+    enddo;enddo
+    call MPI_Allreduce(local_hash,global_hash,1,MPI_INTEGER8,MPI_BXOR,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(global_hash==0_int64)global_hash=1_int64
+    complex_elements=int(nlocal,int64)*int(nstate,int64)+int(max(1,ncomplement),int64)**2
+    integer_elements=int(nstate,int64)+2_int64*int(max(1,ncomplement),int64)
+    if(complex_elements>huge(0_int64)/16_int64.or.integer_elements>huge(0_int64)/4_int64.or.&
+        16_int64*complex_elements>huge(0_int64)-4_int64*integer_elements)then
+      message='occupied/complement trial-frame workspace receipt overflows';return
+    endif
+    workspace_peak_bytes=16_int64*complex_elements+4_int64*integer_elements
+    fingerprint=global_hash;ok=.true.
+#else
+    ok=.false.;message='occupied/complement trial-frame composition requires MPI'
+    gram_defect=huge(1d0);fingerprint=0_int64;workspace_peak_bytes=0_int64
+#endif
+  end subroutine compose_dg_occupied_complement_trial_rows
 
   subroutine build_dg_spectral_channel_generator_actions(comm,row_ids,generator_rows,trial_rows,&
       basin_generator_maps,selected_ranks,representation_fingerprint,channel_fingerprint,tolerance,&
