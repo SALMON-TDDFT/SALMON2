@@ -420,9 +420,9 @@ contains
       integer(8),allocatable::hamiltonian_maps(:,:)
       real(8)::hamiltonian_trace,hamiltonian_closure,hamiltonian_gamma,&
         primary_selected,primary_rejected,primary_gap,secondary_selected,&
-        secondary_rejected,secondary_gap,local_defect,global_defect
+        secondary_rejected,secondary_gap,secondary_residual,local_defect,global_defect
       integer::hamiltonian_product(2,2),hamiltonian_rank,boundary_dimension,local_index,global_point
-      integer(8)::hamiltonian_workspace,hamiltonian_signature
+      integer(8)::hamiltonian_workspace,hamiltonian_signature,hamiltonian_fingerprint
       logical::average_ok
       character(256)::average_message
 
@@ -456,7 +456,9 @@ contains
         hamiltonian_closure,hamiltonian_gamma,hamiltonian_workspace,average_ok,average_message,&
         primary_selected,primary_rejected,primary_gap,occupied_hamiltonian=occupied_hamiltonian,&
         secondary_selected_edge=secondary_selected,secondary_rejected_edge=secondary_rejected,&
-        secondary_cluster_gap=secondary_gap,primary_boundary_dimension=boundary_dimension)
+        secondary_cluster_gap=secondary_gap,primary_boundary_dimension=boundary_dimension,&
+        hamiltonian_fingerprint=hamiltonian_fingerprint,&
+        secondary_eigensystem_residual=secondary_residual)
       if(trim(case_name)/='average_hamiltonian')then
         call require(.not.average_ok,'invalid occupied Hamiltonian tiebreak must reject collectively')
         if(rank==0)write(*,'(3a,i0)')'REJECT ',trim(case_name),' ranks=',nproc
@@ -466,7 +468,8 @@ contains
       call require(hamiltonian_rank==1.and.boundary_dimension==2.and.&
         abs(primary_selected-1d0)<1d-12.and.abs(primary_rejected-1d0)<1d-12.and.&
         abs(secondary_selected)<1d-12.and.abs(secondary_rejected-2d0)<1d-12.and.&
-        abs(secondary_gap-2d0)<1d-12,&
+        abs(secondary_gap-2d0)<1d-12.and.secondary_residual<1d-12.and.&
+        hamiltonian_fingerprint/=0_8.and.hamiltonian_workspace>0_8,&
         'occupied Hamiltonian resolves only the primary boundary-degenerate block')
       local_defect=0d0
       do local_index=1,2
@@ -480,6 +483,7 @@ contains
       hamiltonian_signature=nint(1d12*sum(abs(hamiltonian_candidates)),8)
       call MPI_Allreduce(MPI_IN_PLACE,hamiltonian_signature,1,MPI_INTEGER8,MPI_SUM,comm,ierr)
       hamiltonian_signature=hamiltonian_signature+int(boundary_dimension,8)
+      hamiltonian_signature=ieor(hamiltonian_signature,hamiltonian_fingerprint)
       if(rank==0)write(*,'(a,i0,a,i0)')'AVERAGE_HAMILTONIAN ranks=',nproc,&
         ' signature=',hamiltonian_signature
       call eigen_free()

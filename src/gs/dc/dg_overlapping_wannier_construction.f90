@@ -5592,7 +5592,7 @@ contains
       workspace_peak_bytes,ok,message,selected_edge,rejected_edge,cluster_gap,&
       cocycle_translation_target_box_ids,translation_cocycle,occupied_hamiltonian,&
       secondary_selected_edge,secondary_rejected_edge,secondary_cluster_gap,&
-      primary_boundary_dimension)
+      primary_boundary_dimension,hamiltonian_fingerprint,secondary_eigensystem_residual)
     type(s_parallel_info),intent(in)::info
     integer,intent(in)::comm,product_table(:,:),identity_operation,requested_count
     complex(real64),intent(in)::occupied(:,:)
@@ -5612,22 +5612,26 @@ contains
     real(real64),intent(out),optional::secondary_selected_edge,secondary_rejected_edge,&
       secondary_cluster_gap
     integer,intent(out),optional::primary_boundary_dimension
+    integer(int64),intent(out),optional::hamiltonian_fingerprint
+    real(real64),intent(out),optional::secondary_eigensystem_residual
     complex(real64),allocatable::left_image(:,:),right_image(:,:),local_block(:,:),global_block(:,:),&
       local_occupied_metric(:,:),occupied_metric(:,:),&
       label(:,:),composed_label(:,:),expected_label(:,:),cocycle_label(:,:)
     real(real64),allocatable::cyclic_gram(:,:),cyclic_vectors(:,:),all_spectrum(:),&
       eigenvector(:),primary_block_vectors(:,:),secondary_spectrum(:),secondary_rwork(:),&
       total_residual(:),boundary_residual(:),interior_residual(:)
-    complex(real64),allocatable::secondary_matrix(:,:),secondary_work(:),orbit_vector(:)
+    complex(real64),allocatable::secondary_matrix(:,:),secondary_original(:,:),secondary_work(:),orbit_vector(:)
     logical,allocatable::no_boundary(:)
     integer::noccupied,nlocal,noperation,orbit_rank,left_operation,right_operation,&
       left_first,right_first,i,j,k,global_row,global_column,local_row,local_column,ierr,rank,&
       boundary_first,boundary_last,boundary_size,boundary_needed,cutoff,output_index,&
-      primary_index,secondary_index,lapack_info,lwork,local_bad,global_bad
+      primary_index,secondary_index,lapack_info,lwork,local_bad,global_bad,allocation_status
     real(real64)::local_imaginary,global_imaginary,scale,local_group_defect,global_group_defect,&
       occupied_metric_defect,occupied_metric_scale
-    integer(int64)::complex_bytes,real_bytes
-    logical::eigen_ok
+    integer(int64)::complex_bytes,real_bytes,logical_bytes,workspace_total,global_workspace,&
+      fingerprint_value,raw_bits
+    real(real64)::secondary_residual_value,residual_value
+    logical::eigen_ok,workspace_valid
     character(256)::detail
     interface
       subroutine zheev(jobz,uplo,n,a,lda,w,work,lwork,rwork,info)
@@ -5649,6 +5653,8 @@ contains
     if(present(secondary_rejected_edge))secondary_rejected_edge=huge(1d0)
     if(present(secondary_cluster_gap))secondary_cluster_gap=huge(1d0)
     if(present(primary_boundary_dimension))primary_boundary_dimension=0
+    if(present(hamiltonian_fingerprint))hamiltonian_fingerprint=0_int64
+    if(present(secondary_eigensystem_residual))secondary_eigensystem_residual=huge(1d0)
     noccupied=size(occupied,1);nlocal=size(occupied,2);noperation=size(symmetry_target_box_ids,2)
     if(present(cocycle_translation_target_box_ids).neqv.present(translation_cocycle))then
       message='distributed group-average cocycle inputs must be requested together';return
@@ -5689,6 +5695,15 @@ contains
           message='occupied Hamiltonian tiebreak disagrees across ranks';return
         endif
       enddo;enddo
+      fingerprint_value=1469598103934665603_int64
+      do j=1,noccupied;do i=1,noccupied
+        raw_bits=transfer(real(occupied_hamiltonian(i,j),real64),raw_bits)
+        fingerprint_value=ieor(ishftc(fingerprint_value,11),raw_bits)
+        raw_bits=transfer(aimag(occupied_hamiltonian(i,j)),raw_bits)
+        fingerprint_value=ieor(ishftc(fingerprint_value,11),raw_bits)
+      enddo;enddo
+      if(fingerprint_value==0_int64)fingerprint_value=1_int64
+      if(present(hamiltonian_fingerprint))hamiltonian_fingerprint=fingerprint_value
     endif
     if(noccupied>huge(orbit_rank)/noperation)then
       message='distributed group-averaged occupied orbit rank overflow';return
@@ -5842,8 +5857,16 @@ contains
     boundary_needed=boundary_last-cutoff+1
     if(present(primary_boundary_dimension))primary_boundary_dimension=boundary_size
     if(boundary_size>1.and.boundary_needed<boundary_size)then
+      if(boundary_size>(huge(boundary_size)-2)/3)then
+        message='occupied Hamiltonian tiebreak workspace extent overflows';return
+      endif
       allocate(primary_block_vectors(orbit_rank,boundary_size),secondary_matrix(boundary_size,boundary_size),&
-        secondary_spectrum(boundary_size),secondary_rwork(max(1,3*boundary_size-2)))
+        secondary_original(boundary_size,boundary_size),secondary_spectrum(boundary_size),&
+        secondary_rwork(max(1,3*boundary_size-2)),stat=allocation_status)
+      call MPI_Allreduce(merge(1,0,allocation_status/=0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+        message='occupied Hamiltonian tiebreak allocation failed';return
+      endif
       do i=1,boundary_size
         call gather_eigenvector(boundary_first+i-1,primary_block_vectors(:,i),ok,detail)
         if(.not.ok)then;message=trim(detail);return;endif
@@ -5861,7 +5884,13 @@ contains
           enddo;enddo
         enddo
       enddo;enddo
-      allocate(secondary_work(1));lwork=-1
+      secondary_original=secondary_matrix
+      allocate(secondary_work(1),stat=allocation_status)
+      call MPI_Allreduce(merge(1,0,allocation_status/=0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+        message='occupied Hamiltonian tiebreak query allocation failed';return
+      endif
+      lwork=-1
       call zheev('V','U',boundary_size,secondary_matrix,boundary_size,secondary_spectrum,&
         secondary_work,lwork,secondary_rwork,lapack_info)
       local_bad=merge(1,0,lapack_info/=0.or..not.ieee_is_finite(real(secondary_work(1))))
@@ -5869,7 +5898,15 @@ contains
       if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
         message='occupied Hamiltonian tiebreak workspace query failed';return
       endif
-      lwork=max(1,ceiling(real(secondary_work(1),real64)));deallocate(secondary_work);allocate(secondary_work(lwork))
+      if(real(secondary_work(1),real64)>real(huge(lwork),real64))then
+        message='occupied Hamiltonian tiebreak workspace query overflows';return
+      endif
+      lwork=max(1,ceiling(real(secondary_work(1),real64)));deallocate(secondary_work)
+      allocate(secondary_work(lwork),stat=allocation_status)
+      call MPI_Allreduce(merge(1,0,allocation_status/=0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+        message='occupied Hamiltonian tiebreak workspace allocation failed';return
+      endif
       call zheev('V','U',boundary_size,secondary_matrix,boundary_size,secondary_spectrum,&
         secondary_work,lwork,secondary_rwork,lapack_info)
       local_bad=merge(1,0,lapack_info/=0.or..not.all(ieee_is_finite(secondary_spectrum)).or.&
@@ -5877,6 +5914,25 @@ contains
       call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
       if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
         message='occupied Hamiltonian tiebreak eigensystem failed';return
+      endif
+      secondary_residual_value=0d0
+      do j=1,boundary_size;do i=1,boundary_size
+        residual_value=abs(sum(secondary_original(i,:)*secondary_matrix(:,j))-&
+          secondary_matrix(i,j)*secondary_spectrum(j))
+        secondary_residual_value=max(secondary_residual_value,residual_value)
+      enddo;enddo
+      call MPI_Allreduce(MPI_IN_PLACE,secondary_residual_value,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or..not.ieee_is_finite(secondary_residual_value).or.&
+          secondary_residual_value>10d0*tolerance*max(1d0,maxval(abs(secondary_spectrum))))then
+        message='occupied Hamiltonian tiebreak eigensystem residual is too large';return
+      endif
+      if(present(secondary_eigensystem_residual))secondary_eigensystem_residual=secondary_residual_value
+      if(present(hamiltonian_fingerprint))then
+        do i=1,boundary_size
+          raw_bits=transfer(secondary_spectrum(i),raw_bits)
+          hamiltonian_fingerprint=ieor(ishftc(hamiltonian_fingerprint,11),raw_bits)
+        enddo
+        if(hamiltonian_fingerprint==0_int64)hamiltonian_fingerprint=1_int64
       endif
       if(abs(secondary_spectrum(boundary_needed+1)-secondary_spectrum(boundary_needed))<=&
           tolerance*max(1d0,maxval(abs(secondary_spectrum))))then
@@ -5930,14 +5986,56 @@ contains
     if(.not.ok)then;message='distributed group-average closure: '//trim(detail);return;endif
     closure_residual=maxval(total_residual)
     complex_bytes=int(storage_size((0d0,0d0))/8,int64);real_bytes=int(storage_size(0d0)/8,int64)
-    workspace_peak_bytes=complex_bytes*int(size(left_image)+size(right_image)+size(local_block)+&
-      size(global_block)+size(candidates),int64)+real_bytes*int(size(cyclic_gram)+&
-      size(cyclic_vectors)+size(all_spectrum)+size(eigenvector)+size(spectrum)+&
-      size(total_residual)+size(boundary_residual)+size(interior_residual),int64)
+    logical_bytes=int(storage_size(.false.)/8,int64);workspace_total=0_int64;workspace_valid=.true.
+    call add_workspace(size(left_image,kind=int64),complex_bytes)
+    call add_workspace(size(right_image,kind=int64),complex_bytes)
+    call add_workspace(size(local_block,kind=int64),complex_bytes)
+    call add_workspace(size(global_block,kind=int64),complex_bytes)
+    call add_workspace(size(candidates,kind=int64),complex_bytes)
+    call add_workspace(size(cyclic_gram,kind=int64),real_bytes)
+    call add_workspace(size(cyclic_vectors,kind=int64),real_bytes)
+    call add_workspace(size(all_spectrum,kind=int64),real_bytes)
+    call add_workspace(size(eigenvector,kind=int64),real_bytes)
+    call add_workspace(size(orbit_vector,kind=int64),complex_bytes)
+    call add_workspace(size(spectrum,kind=int64),real_bytes)
+    call add_workspace(size(total_residual,kind=int64),real_bytes)
+    call add_workspace(size(boundary_residual,kind=int64),real_bytes)
+    call add_workspace(size(interior_residual,kind=int64),real_bytes)
+    call add_workspace(size(no_boundary,kind=int64),logical_bytes)
+    if(allocated(primary_block_vectors))call add_workspace(size(primary_block_vectors,kind=int64),real_bytes)
+    if(allocated(secondary_matrix))call add_workspace(size(secondary_matrix,kind=int64),complex_bytes)
+    if(allocated(secondary_original))call add_workspace(size(secondary_original,kind=int64),complex_bytes)
+    if(allocated(secondary_spectrum))call add_workspace(size(secondary_spectrum,kind=int64),real_bytes)
+    if(allocated(secondary_rwork))call add_workspace(size(secondary_rwork,kind=int64),real_bytes)
+    if(allocated(secondary_work))call add_workspace(size(secondary_work,kind=int64),complex_bytes)
+    call MPI_Allreduce(merge(0,1,workspace_valid),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='distributed group-average workspace receipt overflows';return
+    endif
+    call MPI_Allreduce(workspace_total,global_workspace,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed group-average workspace receipt reduction failed';return;endif
+    workspace_peak_bytes=global_workspace
     ok=ieee_is_finite(projector_trace).and.ieee_is_finite(closure_residual).and.&
       workspace_peak_bytes>0_int64
     if(ok)then;message='';else;message='nonfinite distributed group-average receipt';endif
   contains
+    subroutine add_workspace(count,bytes_per_element)
+      integer(int64),intent(in)::count,bytes_per_element
+      integer(int64)::bytes
+      if(.not.workspace_valid)return
+      if(count<0_int64.or.bytes_per_element<0_int64)then
+        workspace_valid=.false.;return
+      endif
+      if(bytes_per_element>0_int64)then
+        if(count>huge(bytes)/bytes_per_element)then;workspace_valid=.false.;return;endif
+      endif
+      bytes=count*bytes_per_element
+      if(workspace_total>huge(workspace_total)-bytes)then
+        workspace_valid=.false.;return
+      endif
+      workspace_total=workspace_total+bytes
+    end subroutine add_workspace
+
     subroutine reconstruct_candidate(candidate_index,coefficients)
       integer,intent(in)::candidate_index
       complex(real64),intent(in)::coefficients(:)
@@ -6707,7 +6805,7 @@ contains
       identity_operation,requested_count,tolerance,candidates,spectrum,candidate_rank,projector_trace,&
       closure_residual,gamma_real_defect,workspace_peak_bytes,ok,message,selected_edge,rejected_edge,cluster_gap,&
       occupied_hamiltonian,secondary_selected_edge,secondary_rejected_edge,secondary_cluster_gap,&
-      primary_boundary_dimension)
+      primary_boundary_dimension,hamiltonian_fingerprint,secondary_eigensystem_residual)
     type(s_parallel_info),intent(in)::info
     integer,intent(in)::comm,point_product(:,:),translation_cocycle(:,:),identity_operation,requested_count
     complex(real64),intent(in)::occupied(:,:)
@@ -6725,6 +6823,8 @@ contains
     real(real64),intent(out),optional::secondary_selected_edge,secondary_rejected_edge,&
       secondary_cluster_gap
     integer,intent(out),optional::primary_boundary_dimension
+    integer(int64),intent(out),optional::hamiltonian_fingerprint
+    real(real64),intent(out),optional::secondary_eigensystem_residual
 
     call build_dg_group_averaged_occupied_candidates_eigenexa(info,comm,occupied,weights,&
       representative_target_box_ids,point_product,identity_operation,requested_count,tolerance,&
@@ -6732,7 +6832,7 @@ contains
       workspace_peak_bytes,ok,message,selected_edge,rejected_edge,cluster_gap,&
       translation_target_box_ids,translation_cocycle,occupied_hamiltonian,&
       secondary_selected_edge,secondary_rejected_edge,secondary_cluster_gap,&
-      primary_boundary_dimension)
+      primary_boundary_dimension,hamiltonian_fingerprint,secondary_eigensystem_residual)
   end subroutine
 #endif
 
