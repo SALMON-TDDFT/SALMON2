@@ -41,6 +41,14 @@ module dg_overlapping_wannier_construction
     integer,allocatable::generator_orders(:),element_words(:,:),product_table(:,:),&
       generator_maps(:,:),element_maps(:,:)
   end type
+  type,public::s_dg_prepared_spectral_basins
+    logical::initialized=.false.
+    integer::global_row_count=0,nlocal=0,nstate=0,basin_count=0
+    integer(int64)::state_frame_fingerprint=0_int64,basin_fingerprint=0_int64
+    integer(int64)::workspace_peak_bytes=0_int64
+    real(real64)::state_frame_defect=huge(1d0),tolerance=0d0
+    integer,allocatable::basin_offsets(:),point_indices(:)
+  end type
   public::construct_dg_overlapping_wannier_basis,release_dg_overlapping_wannier_construction
   public::verify_dg_overlapping_wannier_periodic_closure
   public::assemble_dg_distributed_candidate_symmetry
@@ -102,7 +110,224 @@ module dg_overlapping_wannier_construction
   public::build_dg_occupied_empty_moment_descriptors
   public::build_dg_periodic_spectral_basins
   public::project_dg_single_spectral_basin_operator
+  public::prepare_dg_spectral_basin_operators,project_dg_prepared_spectral_basin_operator,&
+    release_dg_prepared_spectral_basins
 contains
+
+  subroutine release_dg_prepared_spectral_basins(prepared)
+    type(s_dg_prepared_spectral_basins),intent(inout)::prepared
+    if(allocated(prepared%basin_offsets))deallocate(prepared%basin_offsets)
+    if(allocated(prepared%point_indices))deallocate(prepared%point_indices)
+    prepared%initialized=.false.;prepared%global_row_count=0;prepared%nlocal=0;prepared%nstate=0
+    prepared%basin_count=0;prepared%state_frame_fingerprint=0_int64;prepared%basin_fingerprint=0_int64
+    prepared%workspace_peak_bytes=0_int64;prepared%state_frame_defect=huge(1d0);prepared%tolerance=0d0
+  end subroutine release_dg_prepared_spectral_basins
+
+  subroutine prepare_dg_spectral_basin_operators(comm,row_ids,global_row_count,state_values,point_weights,&
+      basin_labels,basin_count,state_frame_fingerprint,state_frame_defect,basin_fingerprint,tolerance,&
+      prepared,ok,message)
+    integer,intent(in)::comm,global_row_count,basin_labels(:),basin_count
+    integer(int64),intent(in)::row_ids(:),state_frame_fingerprint,basin_fingerprint
+    complex(real64),intent(in)::state_values(:,:)
+    real(real64),intent(in)::point_weights(:),state_frame_defect,tolerance
+    type(s_dg_prepared_spectral_basins),intent(inout)::prepared
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nlocal,nstate,i,b,p,ierr,local_bad,global_bad,minint,maxint,status
+    integer,allocatable::ownership(:),counts(:),cursor(:)
+    integer(int64)::minhash,maxhash,bytes
+    real(real64)::minreal,maxreal,local_max,global_max,local_weight_max,global_weight_max,safe_coefficient
+    nlocal=size(row_ids);nstate=size(state_values,1);ok=.false.;message=''
+    call release_dg_prepared_spectral_basins(prepared)
+    local_bad=0
+    if(global_row_count<1.or.nstate<1.or.basin_count<1.or.size(state_values,2)/=nlocal.or.&
+        size(point_weights)/=nlocal.or.size(basin_labels)/=nlocal)then
+      local_bad=1
+    elseif(state_frame_fingerprint==0_int64.or.basin_fingerprint==0_int64)then
+      local_bad=1
+    elseif(.not.ieee_is_finite(tolerance).or.tolerance<=0d0.or.tolerance>huge(1d0)/100d0.or.&
+        .not.ieee_is_finite(state_frame_defect).or.state_frame_defect<0d0.or.state_frame_defect>tolerance)then
+      local_bad=1
+    elseif(.not.all(ieee_is_finite(real(state_values))).or..not.all(ieee_is_finite(aimag(state_values))).or.&
+        .not.all(ieee_is_finite(point_weights)))then
+      local_bad=1
+    elseif(any(row_ids<1_int64).or.any(row_ids>int(global_row_count,int64)).or.any(point_weights<0d0).or.&
+        any(basin_labels<1).or.any(basin_labels>basin_count))then
+      local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid prepared spectral basin contract';return;endif
+    do i=1,3
+      if(i==1)then;local_bad=global_row_count;elseif(i==2)then;local_bad=nstate;else;local_bad=basin_count;endif
+      call MPI_Allreduce(local_bad,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(local_bad,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(minint/=maxint)then;message='prepared spectral basin metadata disagrees';return;endif
+    enddo
+    do i=1,2
+      if(i==1)then;bytes=state_frame_fingerprint;else;bytes=basin_fingerprint;endif
+      call MPI_Allreduce(bytes,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(bytes,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(minhash/=maxhash)then;message='prepared spectral basin provenance disagrees';return;endif
+    enddo
+    do i=1,2
+      if(i==1)then;local_max=tolerance;else;local_max=state_frame_defect;endif
+      call MPI_Allreduce(local_max,minreal,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(local_max,maxreal,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(transfer(minreal,0_int64)/=transfer(maxreal,0_int64))then
+        message='prepared spectral basin receipts disagree';return
+      endif
+    enddo
+    local_bad=0
+    if(int(nstate,int64)>huge(0_int64)/int(nstate,int64).or.&
+        int(nstate,int64)*int(nstate,int64)>int(huge(0),int64))local_bad=1
+    if(int(global_row_count,int64)>huge(0_int64)/4_int64.or.&
+        int(nlocal,int64)>huge(0_int64)/4_int64.or.&
+        int(basin_count,int64)+1_int64>huge(0_int64)/4_int64)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='prepared spectral basin extent overflow';return;endif
+    allocate(ownership(global_row_count),counts(basin_count),cursor(basin_count),&
+      prepared%basin_offsets(basin_count+1),prepared%point_indices(nlocal),stat=status)
+    call MPI_Allreduce(merge(0,1,status==0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(ownership))deallocate(ownership)
+      if(allocated(counts))deallocate(counts)
+      if(allocated(cursor))deallocate(cursor)
+      call release_dg_prepared_spectral_basins(prepared)
+      message='prepared spectral basin allocation failed';return
+    endif
+    ownership=0
+    do p=1,nlocal;ownership(int(row_ids(p)))=ownership(int(row_ids(p)))+1;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,ownership,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(ownership/=1))then
+      deallocate(ownership,counts,cursor);call release_dg_prepared_spectral_basins(prepared)
+      message='prepared spectral basin rows are not owned exactly once';return
+    endif
+    local_max=0d0;local_weight_max=0d0
+    if(nlocal>0)then;local_max=maxval(abs(state_values));local_weight_max=maxval(point_weights);endif
+    call MPI_Allreduce(local_max,global_max,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(local_weight_max,global_weight_max,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    if(global_weight_max>0d0)then
+      safe_coefficient=sqrt((huge(1d0)/16d0/real(global_row_count,real64))/global_weight_max)
+      local_bad=merge(0,1,global_max<=safe_coefficient)
+    else
+      local_bad=0
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      deallocate(ownership,counts,cursor);call release_dg_prepared_spectral_basins(prepared)
+      message='prepared spectral basin input magnitude is unsafe';return
+    endif
+    counts=0
+    do p=1,nlocal;counts(basin_labels(p))=counts(basin_labels(p))+1;enddo
+    prepared%basin_offsets(1)=1
+    do b=1,basin_count;prepared%basin_offsets(b+1)=prepared%basin_offsets(b)+counts(b);enddo
+    cursor=prepared%basin_offsets(1:basin_count)
+    do p=1,nlocal
+      b=basin_labels(p);prepared%point_indices(cursor(b))=p;cursor(b)=cursor(b)+1
+    enddo
+    prepared%initialized=.true.;prepared%global_row_count=global_row_count;prepared%nlocal=nlocal
+    prepared%nstate=nstate;prepared%basin_count=basin_count
+    prepared%state_frame_fingerprint=state_frame_fingerprint;prepared%basin_fingerprint=basin_fingerprint
+    prepared%state_frame_defect=state_frame_defect;prepared%tolerance=tolerance
+    bytes=int(global_row_count,int64)+2_int64*int(basin_count,int64)+1_int64+int(nlocal,int64)
+    bytes=4_int64*bytes
+    prepared%workspace_peak_bytes=bytes
+    deallocate(ownership,counts,cursor);ok=.true.
+#else
+    call release_dg_prepared_spectral_basins(prepared);ok=.false.
+    message='prepared spectral basins require MPI'
+#endif
+  end subroutine prepare_dg_spectral_basin_operators
+
+  subroutine project_dg_prepared_spectral_basin_operator(comm,prepared,state_values,point_weights,&
+      basin_index,basin_operator,hermiticity_defect,operator_trace,fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,basin_index
+    type(s_dg_prepared_spectral_basins),intent(in)::prepared
+    complex(real64),intent(in)::state_values(:,:)
+    real(real64),intent(in)::point_weights(:)
+    complex(real64),allocatable,intent(inout)::basin_operator(:,:)
+    real(real64),intent(out)::hermiticity_defect,operator_trace
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::i,j,q,p,ierr,local_bad,global_bad,minint,maxint,status
+    integer(int64)::hash_value,quantized,operator_bytes
+    real(real64)::quantum
+    ok=.false.;message='';fingerprint=0_int64;workspace_peak_bytes=0_int64
+    hermiticity_defect=huge(1d0);operator_trace=0d0
+    local_bad=0
+    if(.not.prepared%initialized.or.prepared%nstate<1.or.prepared%basin_count<1.or.&
+        prepared%nlocal/=size(point_weights).or.&
+        .not.all(shape(state_values)==[prepared%nstate,prepared%nlocal]))local_bad=1
+    if(.not.allocated(prepared%basin_offsets).or..not.allocated(prepared%point_indices))then
+      local_bad=1
+    else
+      if(size(prepared%basin_offsets)/=prepared%basin_count+1.or.&
+          size(prepared%point_indices)/=prepared%nlocal)local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid prepared spectral basin state';return;endif
+    call MPI_Allreduce(basin_index,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(basin_index,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minint/=maxint.or.basin_index<1.or.basin_index>prepared%basin_count)then
+      message='prepared spectral basin index disagrees';return
+    endif
+    local_bad=0
+    if(allocated(basin_operator))then
+      if(any(shape(basin_operator)/=[prepared%nstate,prepared%nstate]))local_bad=1
+    else
+      allocate(basin_operator(prepared%nstate,prepared%nstate),stat=status);if(status/=0)local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(basin_operator))deallocate(basin_operator)
+      message='prepared spectral basin operator allocation failed';return
+    endif
+    basin_operator=(0d0,0d0)
+    do q=prepared%basin_offsets(basin_index),prepared%basin_offsets(basin_index+1)-1
+      p=prepared%point_indices(q)
+      do j=1,prepared%nstate;do i=1,prepared%nstate
+        basin_operator(i,j)=basin_operator(i,j)+point_weights(p)*conjg(state_values(i,p))*state_values(j,p)
+      enddo;enddo
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,basin_operator,prepared%nstate*prepared%nstate,&
+      MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    local_bad=merge(0,1,all(ieee_is_finite(real(basin_operator))).and.all(ieee_is_finite(aimag(basin_operator))))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='prepared spectral basin operator is nonfinite';return;endif
+    hermiticity_defect=maxval(abs(basin_operator-conjg(transpose(basin_operator))))
+    operator_trace=0d0
+    do i=1,prepared%nstate;operator_trace=operator_trace+real(basin_operator(i,i),real64);enddo
+    if(hermiticity_defect>10d0*prepared%tolerance.or.operator_trace< -10d0*prepared%tolerance)then
+      message='prepared spectral basin operator failed Hermiticity';return
+    endif
+    basin_operator=0.5d0*(basin_operator+conjg(transpose(basin_operator)))
+    quantum=100d0*prepared%tolerance;local_bad=0
+    if(maxval(abs(real(basin_operator)))>0.25d0*real(huge(0_int64),real64)*quantum.or.&
+        maxval(abs(aimag(basin_operator)))>0.25d0*real(huge(0_int64),real64)*quantum)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='prepared spectral basin fingerprint range is unsafe';return;endif
+    hash_value=ieor(prepared%state_frame_fingerprint,ishftc(prepared%basin_fingerprint,13))
+    hash_value=ieor(hash_value,int(basin_index,int64))
+    do j=1,prepared%nstate;do i=1,prepared%nstate
+      quantized=nint(real(basin_operator(i,j))/quantum,int64);hash_value=ieor(ishftc(hash_value,7),quantized)
+      quantized=nint(aimag(basin_operator(i,j))/quantum,int64);hash_value=ieor(ishftc(hash_value,11),quantized)
+    enddo;enddo
+    if(hash_value==0_int64)hash_value=1_int64
+    operator_bytes=16_int64*int(prepared%nstate,int64)*int(prepared%nstate,int64)
+    if(prepared%workspace_peak_bytes>huge(0_int64)-operator_bytes)then
+      message='prepared spectral basin workspace receipt overflow';return
+    endif
+    fingerprint=hash_value;workspace_peak_bytes=prepared%workspace_peak_bytes+operator_bytes;ok=.true.
+#else
+    ok=.false.;message='prepared spectral basin operator requires MPI';fingerprint=0_int64
+    workspace_peak_bytes=0_int64;hermiticity_defect=huge(1d0);operator_trace=0d0
+#endif
+  end subroutine project_dg_prepared_spectral_basin_operator
 
   subroutine project_dg_single_spectral_basin_operator(comm,row_ids,global_row_count,state_values,&
       point_weights,basin_labels,basin_count,basin_index,state_frame_fingerprint,state_frame_defect,&

@@ -8,6 +8,7 @@ program test_dg_overlapping_wannier_construction_mpi
   use dg_overlapping_wannier_construction,only:s_dg_overlapping_wannier_construction,&
     s_dg_translation_orbit_accumulator,&
     s_dg_prepared_translation_action,&
+    s_dg_prepared_spectral_basins,&
     construct_dg_overlapping_wannier_basis,release_dg_overlapping_wannier_construction,&
     verify_dg_overlapping_wannier_periodic_closure,assemble_dg_distributed_candidate_symmetry,&
     assemble_dg_distributed_basis_symmetry_overlap,&
@@ -52,10 +53,12 @@ program test_dg_overlapping_wannier_construction_mpi
     build_dg_smooth_partition_of_unity,compose_dg_buffered_orbital_tile_to_physical_grid,&
     build_dg_equal_count_spectral_windows,build_dg_spectral_density_descriptors,&
     build_dg_occupied_empty_moment_descriptors,build_dg_periodic_spectral_basins,&
-    project_dg_single_spectral_basin_operator
+    project_dg_single_spectral_basin_operator,prepare_dg_spectral_basin_operators,&
+    project_dg_prepared_spectral_basin_operator,release_dg_prepared_spectral_basins
   implicit none
   type(s_dg_translation_orbit_accumulator)::inverse_accumulator
   type(s_dg_prepared_translation_action)::prepared_translation_action
+  type(s_dg_prepared_spectral_basins)::prepared_spectral_basins
   integer::comm,rank,nproc,ierr,i,j,b,p,point,nlocal,nclosure,index,ncore,fragment_id
   integer(8),allocatable::ids(:),box_ids(:),symmetry_map(:,:),broken_symmetry_map(:,:)
   integer,allocatable::fragment(:)
@@ -1787,6 +1790,15 @@ program test_dg_overlapping_wannier_construction_mpi
   call require(ok.and.spectral_operator_defect<1d-12.and.abs(spectral_operator_trace-3d0)<1d-12,&
     'single spectral basin operator is Hermitian and has the basin population trace')
   allocate(spectral_basin_operator_one,source=spectral_basin_operator)
+  call prepare_dg_spectral_basin_operators(comm,spectral_row_ids,4,spectral_state_values,spectral_point_weights,&
+    spectral_basin_labels,spectral_basin_count,12345_8,1d-12,spectral_basin_reference_fingerprint,1d-12,&
+    prepared_spectral_basins,ok,message)
+  call require(ok,'spectral basin operator metadata are prepared once')
+  call project_dg_prepared_spectral_basin_operator(comm,prepared_spectral_basins,spectral_state_values,&
+    spectral_point_weights,1,spectral_basin_operator,spectral_operator_defect,spectral_operator_trace,&
+    spectral_operator_fingerprint,spectral_operator_workspace,ok,message)
+  call require(ok.and.maxval(abs(spectral_basin_operator-spectral_basin_operator_one))<1d-12,&
+    'prepared and standalone spectral basin operators agree')
   call project_dg_single_spectral_basin_operator(comm,spectral_row_ids,4,spectral_state_values,&
     spectral_point_weights,spectral_basin_labels,spectral_basin_count,2,12345_8,1d-12,&
     spectral_basin_reference_fingerprint,1d-12,spectral_basin_operator,spectral_operator_defect,&
@@ -1796,6 +1808,7 @@ program test_dg_overlapping_wannier_construction_mpi
   call require(ok.and.abs(spectral_operator_trace-1d0)<1d-12.and.&
     maxval(abs(spectral_basin_operator_one))<1d-12,&
     'streamed basin operators partition the complete retained frame')
+  call release_dg_prepared_spectral_basins(prepared_spectral_basins)
   spectral_generator_maps(1,1)=5
   call build_dg_periodic_spectral_basins(comm,spectral_row_ids,[4,1,1],spectral_occupied_density,&
     spectral_empty_moment_density,spectral_shared_density,spectral_generator_maps,1d-12,&
