@@ -1772,12 +1772,19 @@ program test_dg_overlapping_wannier_construction_mpi
     if(spectral_row_ids(p)==1)spectral_occupied_density(p)=1d0
     if(spectral_row_ids(p)==3)spectral_empty_moment_density(p,1)=1d0
   enddo
-  allocate(spectral_generator_maps(4,1))
-  spectral_generator_maps(:,1)=[1,4,3,2]
+  ! Generator maps are row-owned, just like the spectral densities.  This
+  ! exercises the production layout where the global grid is larger than the
+  ! local slab on every multi-rank run.
+  allocate(spectral_generator_maps(size(spectral_row_ids),1))
+  do p=1,size(spectral_row_ids)
+    spectral_generator_maps(p,1)=merge(int(spectral_row_ids(p)),6-int(spectral_row_ids(p)),&
+      mod(int(spectral_row_ids(p)),2)==1)
+  enddo
   call build_dg_periodic_spectral_basins(comm,spectral_row_ids,[4,1,1],spectral_occupied_density,&
     spectral_empty_moment_density,spectral_shared_density,spectral_generator_maps,1d-12,&
     spectral_basin_labels,spectral_basin_count,spectral_basin_orbit_map,spectral_basin_fingerprint,&
     spectral_basin_workspace,ok,message)
+  if(.not.ok.and.rank==0)write(*,'(a)')'SPECTRAL_BASIN_ERROR '//trim(message)
   call require(ok,'periodic six-neighbour watershed succeeds')
   call require(spectral_basin_count==2.and.all(spectral_basin_orbit_map(:,1)==[1,2]),&
     'periodic six-neighbour watershed closes separated hole/electron basins under a generator')
@@ -1811,7 +1818,7 @@ program test_dg_overlapping_wannier_construction_mpi
     maxval(abs(spectral_basin_operator_one))<1d-12,&
     'streamed basin operators partition the complete retained frame')
   call release_dg_prepared_spectral_basins(prepared_spectral_basins)
-  spectral_generator_maps(1,1)=5
+  if(size(spectral_generator_maps,1)>0)spectral_generator_maps(1,1)=5
   call build_dg_periodic_spectral_basins(comm,spectral_row_ids,[4,1,1],spectral_occupied_density,&
     spectral_empty_moment_density,spectral_shared_density,spectral_generator_maps,1d-12,&
     spectral_basin_labels,spectral_basin_count,spectral_basin_orbit_map,spectral_basin_fingerprint,&

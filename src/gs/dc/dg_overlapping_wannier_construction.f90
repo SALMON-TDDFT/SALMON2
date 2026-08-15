@@ -1414,7 +1414,7 @@ contains
     if(any(grid_shape<1).or.size(occupied_density)/=nlocal.or.&
         size(empty_moment_density,1)/=nlocal.or.size(shared_density,1)/=nlocal)then
       local_bad=1
-    elseif(size(generator_maps,1)<1.or.nfeature<1)then
+    elseif(size(generator_maps,1)/=nlocal.or.nfeature<1)then
       local_bad=1
     elseif(.not.ieee_is_finite(tolerance).or.tolerance<=0d0.or.tolerance>1d0)then
       local_bad=1
@@ -1432,7 +1432,7 @@ contains
     if(npoint8>int(huge(0),int64))local_bad=1
     if(local_bad==0)then
       npoint=int(npoint8)
-      if(size(generator_maps,1)/=npoint.or.any(row_ids<1_int64).or.any(row_ids>npoint8))local_bad=1
+      if(any(row_ids<1_int64).or.any(row_ids>npoint8))local_bad=1
     else
       npoint=1
     endif
@@ -1456,23 +1456,18 @@ contains
     call MPI_Allreduce(bits,minbits,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
     call MPI_Allreduce(bits,maxbits,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
     if(minbits/=maxbits)then;message='spectral basin tolerance disagrees across ranks';return;endif
-    do g=1,ngenerator;do i=1,npoint
-      call MPI_Allreduce(generator_maps(i,g),minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
-      call MPI_Allreduce(generator_maps(i,g),maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
-      if(minint/=maxint)then;message='spectral basin generator maps disagree across ranks';return;endif
-    enddo;enddo
     local_bad=merge(0,1,all(generator_maps>=1).and.all(generator_maps<=npoint))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='spectral basin generator map is out of range';return;endif
     receipt_valid=npoint8<=huge(0_int64)/56_int64
     if(receipt_valid)then;bytes=56_int64*npoint8;else;bytes=0_int64;endif
     if(receipt_valid.and.ngenerator>0)then
-      if(npoint8>huge(0_int64)/(4_int64*int(ngenerator,int64)))then
+      if(int(nlocal,int64)>huge(0_int64)/(4_int64*int(ngenerator,int64)))then
         receipt_valid=.false.
-      elseif(bytes>huge(0_int64)-4_int64*npoint8*int(ngenerator,int64))then
+      elseif(bytes>huge(0_int64)-4_int64*int(nlocal,int64)*int(ngenerator,int64))then
         receipt_valid=.false.
       else
-        bytes=bytes+4_int64*npoint8*int(ngenerator,int64)
+        bytes=bytes+4_int64*int(nlocal,int64)*int(ngenerator,int64)
       endif
     endif
     call MPI_Allreduce(merge(0,1,receipt_valid),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -1579,12 +1574,21 @@ contains
     endif
     do p=1,nlocal;basin_labels(p)=global_labels(int(row_ids(p)));enddo
     do g=1,ngenerator
-      basin_orbit_map(:,g)=0
-      do i=1,npoint
-        target_basin=global_labels(generator_maps(i,g));j=global_labels(i)
-        if(basin_orbit_map(j,g)==0)basin_orbit_map(j,g)=target_basin
-        if(basin_orbit_map(j,g)/=target_basin)local_bad=1
+      ! The point action is row-owned.  Reduce the minimum and maximum target
+      ! basin observed for every source basin; equality proves that the local
+      ! map fragments define one global basin permutation without replicating
+      ! the Npoint-by-Ngenerator action on every rank.
+      basin_orbit_map(:,g)=basin_count+1;target_counts=0
+      do p=1,nlocal
+        target_basin=global_labels(generator_maps(p,g));j=global_labels(int(row_ids(p)))
+        basin_orbit_map(j,g)=min(basin_orbit_map(j,g),target_basin)
+        target_counts(j)=max(target_counts(j),target_basin)
       enddo
+      call MPI_Allreduce(MPI_IN_PLACE,basin_orbit_map(1,g),basin_count,MPI_INTEGER,MPI_MIN,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;local_bad=1;exit;endif
+      call MPI_Allreduce(MPI_IN_PLACE,target_counts,basin_count,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;local_bad=1;exit;endif
+      if(any(basin_orbit_map(:,g)>basin_count).or.any(basin_orbit_map(:,g)/=target_counts))local_bad=1
       target_counts=0
       do j=1,basin_count
         if(basin_orbit_map(j,g)>=1.and.basin_orbit_map(j,g)<=basin_count)&
@@ -1603,7 +1607,12 @@ contains
       hash_value=ieor(ishftc(hash_value,9),int(basin_orbit_map(j,g),int64))
     enddo;enddo
     if(hash_value==0_int64)hash_value=1_int64
-    fingerprint=hash_value;workspace_peak_bytes=bytes
+    fingerprint=hash_value
+    call MPI_Allreduce(bytes,workspace_peak_bytes,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then
+      deallocate(target_counts,ownership,parent,roots,global_labels,root_ids,local_score,global_score)
+      message='spectral basin workspace receipt reduction failed';return
+    endif
     deallocate(target_counts,ownership,parent,roots,global_labels,root_ids,local_score,global_score);ok=.true.
 #else
     ok=.false.;message='periodic spectral basins require MPI';basin_count=0
