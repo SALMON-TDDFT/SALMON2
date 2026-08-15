@@ -115,7 +115,238 @@ module dg_overlapping_wannier_construction
   public::diagonalize_dg_spectral_basin_operator
   public::select_dg_spectral_basin_channel_ranks
   public::propagate_dg_spectral_basin_orbit_channels
+  public::build_dg_spectral_channel_generator_actions
 contains
+
+  subroutine build_dg_spectral_channel_generator_actions(comm,row_ids,generator_rows,trial_rows,&
+      basin_generator_maps,selected_ranks,representation_fingerprint,channel_fingerprint,tolerance,&
+      action_rows,unitarity_defect,block_defect,fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,basin_generator_maps(:,:),selected_ranks(:)
+    integer(int64),intent(in)::row_ids(:),representation_fingerprint,channel_fingerprint
+    complex(real64),intent(in)::generator_rows(:,:,:),trial_rows(:,:)
+    real(real64),intent(in)::tolerance
+    complex(real64),allocatable,intent(out)::action_rows(:,:,:)
+    real(real64),intent(out)::unitarity_defect,block_defect
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer,parameter::channel_tile_size=32
+    integer::nlocal,nstate,ngenerator,nbasin,nproc,rank,i,j,g,b,p,q,t,owner,tile_first,tile_count,&
+      row_basin,column_basin,target_basin,status,ierr,local_bad,global_bad,minint,maxint
+    integer,allocatable::ownership(:),position(:),owner_counts(:),receive_counts(:),displacements(:),&
+      column_offsets(:)
+    complex(real64),allocatable::local_pack(:),full_pack(:),image(:,:),local_action(:,:),&
+      packed_action(:),received_action(:),gram_tile(:,:)
+    integer(int64)::local_hash,global_hash,minhash,maxhash,quantized,complex_elements,integer_elements,&
+      local_workspace
+    real(real64)::quantum,local_max,global_max,minreal,maxreal
+
+    ok=.false.;message='';unitarity_defect=huge(1d0);block_defect=huge(1d0)
+    fingerprint=0_int64;workspace_peak_bytes=0_int64
+    nlocal=size(row_ids);nstate=size(trial_rows,2);ngenerator=size(generator_rows,3);nbasin=size(selected_ranks)
+    local_bad=0
+    if(nstate<1.or.nbasin<1.or.size(trial_rows,1)/=nlocal.or.size(generator_rows,1)/=nlocal.or.&
+        size(generator_rows,2)/=nstate.or.size(basin_generator_maps,1)/=nbasin.or.&
+        size(basin_generator_maps,2)/=ngenerator.or.sum(selected_ranks)/=nstate.or.any(selected_ranks<0).or.&
+        representation_fingerprint==0_int64.or.channel_fingerprint==0_int64.or.&
+        .not.ieee_is_finite(tolerance).or.tolerance<=0d0.or.tolerance>huge(1d0)/100d0)then
+      local_bad=1
+    elseif(any(row_ids<1_int64).or.any(row_ids>int(nstate,int64)).or.&
+        any(basin_generator_maps<1).or.any(basin_generator_maps>nbasin).or.&
+        .not.all(ieee_is_finite(real(generator_rows))).or.&
+        .not.all(ieee_is_finite(aimag(generator_rows))).or.&
+        .not.all(ieee_is_finite(real(trial_rows))).or..not.all(ieee_is_finite(aimag(trial_rows))))then
+      local_bad=1
+    endif
+    if(int(nstate,int64)>int(huge(0),int64)/int(nstate,int64))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid spectral channel target-action contract';return;endif
+    do i=1,3
+      if(i==1)then;local_bad=nstate;elseif(i==2)then;local_bad=nbasin;else;local_bad=ngenerator;endif
+      call MPI_Allreduce(local_bad,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(local_bad,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(minint/=maxint)then;message='spectral channel target-action dimensions disagree';return;endif
+    enddo
+    do i=1,2
+      if(i==1)then;local_hash=representation_fingerprint;else;local_hash=channel_fingerprint;endif
+      call MPI_Allreduce(local_hash,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(local_hash,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(minhash/=maxhash)then;message='spectral channel target-action provenance disagrees';return;endif
+    enddo
+    call MPI_Allreduce(tolerance,minreal,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tolerance,maxreal,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(transfer(minreal,0_int64)/=transfer(maxreal,0_int64))then
+      message='spectral channel target-action tolerance disagrees';return
+    endif
+    local_bad=0
+    do b=1,nbasin
+      call MPI_Allreduce(selected_ranks(b),minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(selected_ranks(b),maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(minint/=maxint)local_bad=1
+    enddo
+    do g=1,ngenerator;do b=1,nbasin
+      call MPI_Allreduce(basin_generator_maps(b,g),minint,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+      if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(basin_generator_maps(b,g),maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS)return
+      if(minint/=maxint)local_bad=1
+    enddo;enddo
+    if(int(nstate,int64)*int(nstate,int64)>huge(0_int64)/max(1_int64,int(ngenerator,int64)))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='spectral channel target-action metadata or extent disagrees';return
+    endif
+    call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
+    allocate(ownership(nstate),position(nstate),owner_counts(nproc),receive_counts(nproc),&
+      displacements(nproc),column_offsets(nbasin+1),stat=status)
+    call MPI_Allreduce(merge(0,1,status==0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='spectral channel ownership allocation failed';return;endif
+    ownership=0;position=0;owner_counts=0
+    do p=1,nlocal
+      ownership(int(row_ids(p)))=rank+1;position(int(row_ids(p)))=p;owner_counts(rank+1)=owner_counts(rank+1)+1
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,ownership,nstate,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(MPI_IN_PLACE,position,nstate,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(MPI_IN_PLACE,owner_counts,nproc,MPI_INTEGER,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    local_bad=merge(0,1,all(ownership>=1).and.all(ownership<=nproc).and.sum(owner_counts)==nstate)
+    do i=1,nstate
+      if(position(i)<1.or.position(i)>owner_counts(ownership(i)))local_bad=1
+    enddo
+    do g=1,ngenerator;do b=1,nbasin
+      if(count(basin_generator_maps(:,g)==b)/=1.or.&
+          selected_ranks(basin_generator_maps(b,g))/=selected_ranks(b))local_bad=1
+    enddo;enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid spectral channel ownership or block action';return;endif
+    column_offsets(1)=1
+    do b=1,nbasin;column_offsets(b+1)=column_offsets(b)+selected_ranks(b);enddo
+    allocate(action_rows(nlocal,nstate,ngenerator),&
+      local_pack(max(1,nlocal*channel_tile_size)),full_pack(nstate*channel_tile_size),&
+      image(max(1,nlocal),channel_tile_size),local_action(nstate,channel_tile_size),&
+      packed_action(nstate*channel_tile_size),received_action(max(1,nlocal*channel_tile_size)),&
+      gram_tile(channel_tile_size,channel_tile_size),stat=status)
+    call MPI_Allreduce(merge(0,1,status==0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(action_rows))deallocate(action_rows)
+      message='spectral channel target-action workspace allocation failed';return
+    endif
+    action_rows=(0d0,0d0)
+    do g=1,ngenerator
+      do tile_first=1,nstate,channel_tile_size
+        tile_count=min(channel_tile_size,nstate-tile_first+1)
+        do p=1,nlocal;do t=1,tile_count
+          local_pack((p-1)*tile_count+t)=trial_rows(p,tile_first+t-1)
+        enddo;enddo
+        displacements(1)=0
+        do owner=1,nproc
+          receive_counts(owner)=owner_counts(owner)*tile_count
+          if(owner>1)displacements(owner)=displacements(owner-1)+receive_counts(owner-1)
+        enddo
+        call MPI_Allgatherv(local_pack,nlocal*tile_count,MPI_DOUBLE_COMPLEX,full_pack,&
+          receive_counts,displacements,MPI_DOUBLE_COMPLEX,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then;message='spectral channel tile gather failed';return;endif
+        do i=1,nstate;do t=1,tile_count
+          owner=ownership(i);j=displacements(owner)+(position(i)-1)*tile_count+t
+          packed_action((t-1)*nstate+i)=full_pack(j)
+        enddo;enddo
+        if(nlocal>0)then
+          call zgemm('N','N',nlocal,tile_count,nstate,(1d0,0d0),generator_rows(:,:,g),nlocal,&
+            packed_action,nstate,(0d0,0d0),image,nlocal)
+          call zgemm('C','N',nstate,tile_count,nlocal,(1d0,0d0),trial_rows,nlocal,image,nlocal,&
+            (0d0,0d0),local_action,nstate)
+        else
+          local_action(:,1:tile_count)=(0d0,0d0)
+        endif
+        do i=1,nstate;do t=1,tile_count
+          owner=ownership(i);j=displacements(owner)+(position(i)-1)*tile_count+t
+          packed_action(j)=local_action(i,t)
+        enddo;enddo
+        call MPI_Reduce_scatter(packed_action,received_action,receive_counts,&
+          MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then;message='spectral channel target-action reduce-scatter failed';return;endif
+        do p=1,nlocal;do t=1,tile_count
+          action_rows(p,tile_first+t-1,g)=received_action((p-1)*tile_count+t)
+        enddo;enddo
+      enddo
+    enddo
+    block_defect=0d0
+    do g=1,ngenerator;do p=1,nlocal
+      row_basin=1
+      do while(int(row_ids(p))>=column_offsets(row_basin+1));row_basin=row_basin+1;enddo
+      do j=1,nstate
+        column_basin=1
+        do while(j>=column_offsets(column_basin+1));column_basin=column_basin+1;enddo
+        target_basin=basin_generator_maps(column_basin,g)
+        if(row_basin/=target_basin)block_defect=max(block_defect,abs(action_rows(p,j,g)))
+      enddo
+    enddo;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,block_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    unitarity_defect=0d0
+    do g=1,ngenerator
+      do i=1,nstate,channel_tile_size;do j=1,nstate,channel_tile_size
+        tile_count=min(channel_tile_size,nstate-i+1);t=min(channel_tile_size,nstate-j+1)
+        gram_tile(1:tile_count,1:t)=(0d0,0d0)
+        if(nlocal>0)call zgemm('C','N',tile_count,t,nlocal,(1d0,0d0),&
+          action_rows(:,i:i+tile_count-1,g),nlocal,action_rows(:,j:j+t-1,g),nlocal,&
+          (0d0,0d0),gram_tile,channel_tile_size)
+        q=0
+        do b=1,t;do owner=1,tile_count
+          q=q+1;packed_action(q)=gram_tile(owner,b)
+        enddo;enddo
+        call MPI_Allreduce(MPI_IN_PLACE,packed_action,tile_count*t,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+        if(ierr/=MPI_SUCCESS)return
+        q=0
+        do b=1,t;do owner=1,tile_count
+          q=q+1;gram_tile(owner,b)=packed_action(q)
+        enddo;enddo
+        do b=1,t;do owner=1,tile_count
+          if(i+owner-1==j+b-1)then
+            unitarity_defect=max(unitarity_defect,abs(gram_tile(owner,b)-1d0))
+          else
+            unitarity_defect=max(unitarity_defect,abs(gram_tile(owner,b)))
+          endif
+        enddo;enddo
+      enddo;enddo
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,unitarity_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.unitarity_defect>10d0*tolerance.or.block_defect>10d0*tolerance)then
+      message='spectral channel target action failed unitarity or block closure';return
+    endif
+    quantum=100d0*tolerance;local_max=0d0
+    if(nlocal>0)local_max=maxval(abs(action_rows))
+    call MPI_Allreduce(local_max,global_max,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_max>0.25d0*real(huge(0_int64),real64)*quantum)then
+      message='spectral channel target-action fingerprint range is unsafe';return
+    endif
+    local_hash=0_int64
+    do g=1,ngenerator;do p=1,nlocal;do j=1,nstate
+      quantized=nint(real(action_rows(p,j,g))/quantum,int64)
+      local_hash=ieor(local_hash,ieor(ishftc(row_ids(p),7),ieor(ishftc(int(j+31*g,int64),17),quantized)))
+      quantized=nint(aimag(action_rows(p,j,g))/quantum,int64)
+      local_hash=ieor(local_hash,ieor(ishftc(row_ids(p),11),ieor(ishftc(int(j+37*g,int64),23),quantized)))
+    enddo;enddo;enddo
+    call MPI_Allreduce(local_hash,global_hash,1,MPI_INTEGER8,MPI_BXOR,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    global_hash=ieor(global_hash,ieor(representation_fingerprint,ishftc(channel_fingerprint,13)))
+    if(global_hash==0_int64)global_hash=1_int64
+    complex_elements=int(nlocal,int64)*int(nstate,int64)*int(ngenerator,int64)+&
+      int(channel_tile_size,int64)*(2_int64*int(nstate,int64)+2_int64*int(max(1,nlocal),int64)+&
+      int(channel_tile_size,int64))+int(nstate,int64)*int(channel_tile_size,int64)+&
+      int(max(1,nlocal),int64)*int(channel_tile_size,int64)
+    integer_elements=3_int64*int(nstate,int64)+3_int64*int(nproc,int64)+int(nbasin+1,int64)
+    if(complex_elements>huge(0_int64)/16_int64.or.integer_elements>huge(0_int64)/4_int64.or.&
+        16_int64*complex_elements>huge(0_int64)-4_int64*integer_elements)return
+    local_workspace=16_int64*complex_elements+4_int64*integer_elements
+    call MPI_Allreduce(local_workspace,workspace_peak_bytes,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    fingerprint=global_hash;ok=.true.
+#else
+    ok=.false.;message='spectral channel target actions require MPI'
+    unitarity_defect=huge(1d0);block_defect=huge(1d0);fingerprint=0_int64;workspace_peak_bytes=0_int64
+#endif
+  end subroutine build_dg_spectral_channel_generator_actions
 
   subroutine propagate_dg_spectral_basin_orbit_channels(comm,row_ids,generator_rows,basin_generator_maps,&
       selected_ranks,representative_vectors,representation_fingerprint,catalog_fingerprint,tolerance,&

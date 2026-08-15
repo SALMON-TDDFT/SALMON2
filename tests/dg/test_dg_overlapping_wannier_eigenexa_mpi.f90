@@ -9,6 +9,7 @@ program test_dg_overlapping_wannier_eigenexa_mpi
     split_dg_translation_character_sector_eigenexa,validate_dg_translation_sector_cluster,&
     diagonalize_dg_spectral_basin_operator,select_dg_spectral_basin_channel_ranks
   use dg_overlapping_wannier_construction,only:propagate_dg_spectral_basin_orbit_channels
+  use dg_overlapping_wannier_construction,only:build_dg_spectral_channel_generator_actions
   implicit none
   type(s_parallel_info)::info
   integer::comm,rank,nproc,ierr,i,p,nlocal
@@ -87,7 +88,8 @@ contains
     logical::block_ends(4,2)
     integer(8),allocatable::propagation_row_ids(:)
     complex(8),allocatable::propagation_generators(:,:,:),representative_vectors(:,:),trial_rows(:,:)
-    real(8)::trial_gram_defect,trial_frame_defect
+    complex(8),allocatable::target_action_rows(:,:,:)
+    real(8)::trial_gram_defect,trial_frame_defect,target_action_unitarity,target_action_block_defect
     real(8)::residual,rotated_residual,angle
     integer(8)::fingerprint,rotated_fingerprint,workspace
     logical::basin_ok
@@ -153,7 +155,12 @@ contains
     enddo
     call require(trial_frame_defect<1d-12,&
       'propagated spectral basin trial frame has canonical basin-column order')
-    fingerprint=rotated_fingerprint
+    call build_dg_spectral_channel_generator_actions(comm,propagation_row_ids,propagation_generators,&
+      trial_rows,orbit_map,selected_ranks,8801_8,rotated_fingerprint,1d-10,target_action_rows,&
+      target_action_unitarity,target_action_block_defect,fingerprint,workspace,basin_ok,basin_message)
+    call require(basin_ok.and.target_action_unitarity<1d-12.and.target_action_block_defect<1d-12.and.&
+      maxval(abs(target_action_rows-propagation_generators))<1d-12,&
+      'streamed target action has the known basin permutation and no off-block leakage')
     if(trim(case_name)=='spectral_basin_split')then
       catalog_spectra(:,1)=[1d0,0.6d0,0.6d0,0d0];catalog_spectra(:,2)=catalog_spectra(:,1)
       block_ends=.false.;block_ends(1,:)=.true.;block_ends(3,:)=.true.;block_ends(4,:)=.true.
