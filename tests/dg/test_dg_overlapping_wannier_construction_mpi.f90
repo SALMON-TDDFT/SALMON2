@@ -120,7 +120,7 @@ program test_dg_overlapping_wannier_construction_mpi
   integer(8)::spectral_window_fingerprint,spectral_window_workspace
   integer(8)::spectral_density_fingerprint,spectral_density_workspace
   integer(8)::spectral_basin_fingerprint,spectral_basin_reference_fingerprint,spectral_basin_workspace
-  integer(8)::spectral_operator_fingerprint,spectral_operator_workspace
+  integer(8)::spectral_operator_fingerprint,spectral_operator_workspace,spectral_operator_reduced_elements
   integer::spectral_basin_count
   real(8)::spectral_operator_defect,spectral_operator_trace
   integer(8),allocatable::closure_ids(:),closure_map(:,:)
@@ -1796,9 +1796,11 @@ program test_dg_overlapping_wannier_construction_mpi
   call require(ok,'spectral basin operator metadata are prepared once')
   call project_dg_prepared_spectral_basin_operator(comm,prepared_spectral_basins,spectral_state_values,&
     spectral_point_weights,1,spectral_basin_operator,spectral_operator_defect,spectral_operator_trace,&
-    spectral_operator_fingerprint,spectral_operator_workspace,ok,message)
+    spectral_operator_fingerprint,spectral_operator_workspace,ok,message,spectral_operator_reduced_elements)
   call require(ok.and.maxval(abs(spectral_basin_operator-spectral_basin_operator_one))<1d-12,&
     'prepared and standalone spectral basin operators agree')
+  call require(spectral_operator_reduced_elements==10_8,&
+    'prepared spectral basin communication reduces only the Hermitian triangle')
   call project_dg_single_spectral_basin_operator(comm,spectral_row_ids,4,spectral_state_values,&
     spectral_point_weights,spectral_basin_labels,spectral_basin_count,2,12345_8,1d-12,&
     spectral_basin_reference_fingerprint,1d-12,spectral_basin_operator,spectral_operator_defect,&

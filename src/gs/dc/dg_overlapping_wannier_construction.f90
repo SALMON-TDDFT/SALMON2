@@ -609,7 +609,8 @@ contains
   end subroutine prepare_dg_spectral_basin_operators
 
   subroutine project_dg_prepared_spectral_basin_operator(comm,prepared,state_values,point_weights,&
-      basin_index,basin_operator,hermiticity_defect,operator_trace,fingerprint,workspace_peak_bytes,ok,message)
+      basin_index,basin_operator,hermiticity_defect,operator_trace,fingerprint,workspace_peak_bytes,ok,message,&
+      reduced_element_count)
     integer,intent(in)::comm,basin_index
     type(s_dg_prepared_spectral_basins),intent(in)::prepared
     complex(real64),intent(in)::state_values(:,:)
@@ -617,13 +618,28 @@ contains
     complex(real64),allocatable,intent(inout)::basin_operator(:,:)
     real(real64),intent(out)::hermiticity_defect,operator_trace
     integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    integer(int64),intent(out),optional::reduced_element_count
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer::i,j,q,p,ierr,local_bad,global_bad,minint,maxint,status
-    integer(int64)::hash_value,quantized,operator_bytes
-    real(real64)::quantum
+    integer,parameter::spectral_basin_tile_size=64
+    integer::i,j,q,p,t,tile_first,tile_count,tile_capacity,basin_point_count,ierr,&
+      local_bad,global_bad,minint,maxint,status,packed_count
+    integer(int64)::hash_value,quantized,operator_bytes,extra_bytes,packed_elements,tile_elements,&
+      local_workspace
+    complex(real64),allocatable::tile(:,:),packed_triangle(:)
+    real(real64)::quantum,weight_scale
+    interface
+      subroutine zherk(uplo,trans,n,k,alpha,a,lda,beta,c,ldc)
+        character(1),intent(in)::uplo,trans
+        integer,intent(in)::n,k,lda,ldc
+        real(8),intent(in)::alpha,beta
+        complex(8),intent(in)::a(lda,*)
+        complex(8),intent(inout)::c(ldc,*)
+      end subroutine zherk
+    end interface
     ok=.false.;message='';fingerprint=0_int64;workspace_peak_bytes=0_int64
+    if(present(reduced_element_count))reduced_element_count=0_int64
     hermiticity_defect=huge(1d0);operator_trace=0d0
     local_bad=0
     if(.not.prepared%initialized.or.prepared%nstate<1.or.prepared%basin_count<1.or.&
@@ -653,16 +669,47 @@ contains
       if(allocated(basin_operator))deallocate(basin_operator)
       message='prepared spectral basin operator allocation failed';return
     endif
+    packed_elements=int(prepared%nstate,int64)*(int(prepared%nstate,int64)+1_int64)/2_int64
+    if(packed_elements>int(huge(0),int64))then
+      message='prepared spectral basin triangular reduction count overflow';return
+    endif
+    packed_count=int(packed_elements)
+    basin_point_count=prepared%basin_offsets(basin_index+1)-prepared%basin_offsets(basin_index)
+    tile_capacity=max(1,min(spectral_basin_tile_size,basin_point_count))
+    tile_elements=int(tile_capacity,int64)*int(prepared%nstate,int64)
+    allocate(tile(prepared%nstate,tile_capacity),packed_triangle(packed_count),stat=status)
+    call MPI_Allreduce(merge(0,1,status==0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(tile))deallocate(tile)
+      if(allocated(packed_triangle))deallocate(packed_triangle)
+      message='prepared spectral basin tile allocation failed';return
+    endif
     basin_operator=(0d0,0d0)
-    do q=prepared%basin_offsets(basin_index),prepared%basin_offsets(basin_index+1)-1
-      p=prepared%point_indices(q)
-      do j=1,prepared%nstate;do i=1,prepared%nstate
-        basin_operator(i,j)=basin_operator(i,j)+point_weights(p)*conjg(state_values(i,p))*state_values(j,p)
-      enddo;enddo
+    do tile_first=prepared%basin_offsets(basin_index),prepared%basin_offsets(basin_index+1)-1,&
+        spectral_basin_tile_size
+      tile_count=min(spectral_basin_tile_size,prepared%basin_offsets(basin_index+1)-tile_first)
+      do t=1,tile_count
+        q=tile_first+t-1;p=prepared%point_indices(q);weight_scale=sqrt(point_weights(p))
+        do i=1,prepared%nstate;tile(i,t)=weight_scale*conjg(state_values(i,p));enddo
+      enddo
+      call zherk('U','N',prepared%nstate,tile_count,1d0,tile,prepared%nstate,1d0,&
+        basin_operator,prepared%nstate)
     enddo
-    call MPI_Allreduce(MPI_IN_PLACE,basin_operator,prepared%nstate*prepared%nstate,&
-      MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    q=0
+    do j=1,prepared%nstate;do i=1,j
+      q=q+1;packed_triangle(q)=basin_operator(i,j)
+    enddo;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,packed_triangle,packed_count,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
     if(ierr/=MPI_SUCCESS)return
+    q=0
+    do j=1,prepared%nstate;do i=1,j
+      q=q+1;basin_operator(i,j)=packed_triangle(q)
+      if(i==j)then
+        basin_operator(i,i)=cmplx(real(basin_operator(i,i),real64),0d0,real64)
+      else
+        basin_operator(j,i)=conjg(basin_operator(i,j))
+      endif
+    enddo;enddo
     local_bad=merge(0,1,all(ieee_is_finite(real(basin_operator))).and.all(ieee_is_finite(aimag(basin_operator))))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='prepared spectral basin operator is nonfinite';return;endif
@@ -686,13 +733,24 @@ contains
     enddo;enddo
     if(hash_value==0_int64)hash_value=1_int64
     operator_bytes=16_int64*int(prepared%nstate,int64)*int(prepared%nstate,int64)
-    if(prepared%workspace_peak_bytes>huge(0_int64)-operator_bytes)then
+    if(packed_elements>huge(0_int64)/16_int64.or.tile_elements>huge(0_int64)/16_int64)then
+      message='prepared spectral basin tile receipt overflow';return
+    endif
+    extra_bytes=16_int64*(packed_elements+tile_elements)
+    if(prepared%workspace_peak_bytes>huge(0_int64)-operator_bytes.or.&
+        prepared%workspace_peak_bytes+operator_bytes>huge(0_int64)-extra_bytes)then
       message='prepared spectral basin workspace receipt overflow';return
     endif
-    fingerprint=hash_value;workspace_peak_bytes=prepared%workspace_peak_bytes+operator_bytes;ok=.true.
+    fingerprint=hash_value
+    local_workspace=prepared%workspace_peak_bytes+operator_bytes+extra_bytes
+    call MPI_Allreduce(local_workspace,workspace_peak_bytes,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='prepared spectral basin workspace reduction failed';return;endif
+    if(present(reduced_element_count))reduced_element_count=packed_elements
+    ok=.true.;deallocate(tile,packed_triangle)
 #else
     ok=.false.;message='prepared spectral basin operator requires MPI';fingerprint=0_int64
     workspace_peak_bytes=0_int64;hermiticity_defect=huge(1d0);operator_trace=0d0
+    if(present(reduced_element_count))reduced_element_count=0_int64
 #endif
   end subroutine project_dg_prepared_spectral_basin_operator
 
