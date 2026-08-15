@@ -225,29 +225,24 @@ assert point_adaptation_call and "occupied_hamiltonian=translation_occupied_hami
 assert "spectral dmn operation workspace reallocation failed collectively" not in ow_ground_state_body, (
     "the DMN loop must consume the builder's allocatable output directly, not reallocate it between operations"
 )
-assert re.search(
-    r"spectral_catalog_fingerprint\s*=\s*ieor\s*\(.{0,200}spectral_basin_fingerprint",
-    ow_ground_state_body,
-    re.S,
-), "the spectral channel catalog must bind the density-derived basin provenance"
-assert "spectral_complement_rank=ntarget-nstate" in re.sub(r"\s+", "", ow_ground_state_body), (
-    "production must derive the localization complement from material-dependent retained and occupied ranks"
-)
-assert re.search(
-    r"prepare_dg_spectral_basin_operators\s*\(.*?global_closed_core\s*\(\s*nstate\s*\+\s*1\s*:\s*ntarget\s*,\s*:\s*\)",
-    ow_ground_state_body,
-    re.S,
-), "spectral basin operators must be projected only in the complete-s+p-derived complement"
-assert re.search(
-    r"select_dg_spectral_basin_channel_ranks\s*\(.*?spectral_complement_rank",
-    ow_ground_state_body,
-    re.S,
-), "spectral basin rank selection must request only the complement rank"
-assert "compose_dg_occupied_complement_trial_rows" in ow_ground_state_body, (
-    "production must concatenate the preserved occupied block with localized complement rows"
+for obsolete_call in (
+    "build_dg_periodic_spectral_basins",
+    "prepare_dg_spectral_basin_operators",
+    "project_dg_prepared_spectral_basin_operator",
+    "diagonalize_dg_spectral_basin_operator",
+    "select_dg_spectral_basin_channel_ranks",
+    "propagate_dg_spectral_basin_orbit_channels",
+    "build_dg_spectral_channel_generator_actions",
+    "compose_dg_occupied_complement_trial_rows",
+):
+    assert not re.search(rf"call\s+{obsolete_call}\b", ow_ground_state_body), (
+        f"production must not call obsolete spectral-basin step {obsolete_call}"
+    )
+assert "call prepare_dg_direct_retained_wannier_frame" in ow_ground_state_body, (
+    "production must prepare the complete retained frame directly"
 )
 assert len(re.findall(r"call\s+run_dg_w90_gamma_library", ow_ground_state_body)) == 1, (
-    "occupied/complement trial construction must still invoke Wannier90 exactly once"
+    "direct retained-frame construction must invoke Wannier90 exactly once"
 )
 assert re.search(
     r"fixed_center_dmn_workspace_peak\s*=\s*spectral_operation_workspace",
@@ -257,7 +252,7 @@ assert re.search(
     r"w90_input_fingerprint\s*=\s*ieor\s*\(\s*w90_input_fingerprint\s*,\s*"
     r"spectral_action_aggregate_fingerprint\s*\)",
     ow_ground_state_body,
-), "the W90/checkpoint provenance must bind every spectral target action written to DMN"
+), "the W90/checkpoint provenance must bind every direct target action written to DMN"
 for forbidden_position_extent in (
     "translation_anchor_rotation(ntarget,ntarget)",
     "translation_position_lcfo_operator(ntarget,ntarget)",
@@ -830,12 +825,12 @@ assert "call accumulate_dg_lcfo_buffer_contributions_to_core" not in adapter_bod
     "fragment-core truncation must not define the support of a pre-Wannier symmetry proof"
 )
 assert re.search(
-    r"call\s+materialize_dg_row_owned_sector_on_spatial_grid\s*\([^;]*spectral_trial_rows",
+    r"call\s+prepare_dg_direct_retained_wannier_frame\b",
     adapter_body,
-    re.I | re.S,
-), "Wannier90 projections must materialize the deterministic spectral channel frame"
-assert re.search(r"w90_anchors\s*=\s*transpose\s*\(\s*spectral_spatial_trials\s*\)", adapter_body, re.I), (
-    "Wannier90 A matrices must use the materialized spectral channel orientation"
+    re.I,
+), "Wannier90 projections must prepare the direct retained frame"
+assert re.search(r"w90_anchors\s*=\s*transpose\s*\(\s*global_closed_core\s*\)", adapter_body, re.I), (
+    "Wannier90 A matrices must use the retained spatial frame directly"
 )
 assert re.search(r"call\s+apply_dg_w90_gamma_transform", adapter_body, re.I), (
     "the MLWF transform must be applied in the global LCFO space"
@@ -1630,11 +1625,10 @@ assert re.search(
     re.I | re.S,
 ), "DMN must publish distinct spectral d_matrix_wann, retained d_matrix_band, and their shared AMN"
 assert re.search(
-    r"call\s+build_dg_spectral_channel_generator_actions\s*\([^;]*?fixed_center_rows[^;]*?"
-    r"spectral_trial_rows",
+    r"spectral_wannier_representation\s*=\s*fixed_center_representation",
     adapter_body,
-    re.I | re.S,
-), "each streamed fixed-center operation must be projected into the spectral channel frame"
+    re.I,
+), "each DMN target action must equal the retained band action"
 assert "fixed_center_group_order>48" in adapter_body.replace(" ", "").lower(), (
     "production must reject a fixed-center subgroup above crystallographic order 48"
 )
