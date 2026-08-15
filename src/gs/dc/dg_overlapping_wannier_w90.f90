@@ -493,7 +493,7 @@ contains
         gvec=gmat(:,3);if(gvec(1)<0d0)gvec=-gvec
         c=sqrt(max(0d0,0.5d0*(1d0+min(1d0,gvec(1)))))
         if(c<=epsilon(1d0))cycle
-        sphase=cmplx(gvec(2),-gvec(3),real64)/(2d0*c)
+        sphase=cmplx(gvec(2),gvec(3),real64)/(2d0*c)
         sabs=abs(sphase);if(sabs<=10d0*tolerance)cycle
         jacobi=reshape([cmplx(c,0d0,real64),sphase,-conjg(sphase),cmplx(c,0d0,real64)],[2,2])
         local_update=max(local_update,sabs)
