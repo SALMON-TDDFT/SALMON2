@@ -117,7 +117,123 @@ module dg_overlapping_wannier_construction
   public::propagate_dg_spectral_basin_orbit_channels
   public::build_dg_spectral_channel_generator_actions
   public::compose_dg_occupied_complement_trial_rows
+  public::prepare_dg_direct_retained_wannier_frame
 contains
+
+  subroutine prepare_dg_direct_retained_wannier_frame(comm,row_ids,global_row_count,band_action_rows,&
+      retained_fingerprint,operation_fingerprint,tolerance,trial_rows,wannier_action_rows,&
+      frame_defect,action_defect,frame_fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,global_row_count
+    integer(int64),intent(in)::row_ids(:),retained_fingerprint,operation_fingerprint
+    complex(real64),intent(in)::band_action_rows(:,:,:)
+    real(real64),intent(in)::tolerance
+    complex(real64),allocatable,intent(out)::trial_rows(:,:),wannier_action_rows(:,:,:)
+    real(real64),intent(out)::frame_defect,action_defect
+    integer(int64),intent(out)::frame_fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nlocal,noperation,i,p,j,g,status,ierr,local_bad,global_bad,minint,maxint
+    integer,allocatable::ownership(:)
+    integer(int64)::minhash,maxhash,local_hash,global_hash,bits,complex_elements,integer_elements
+    real(real64)::minreal,maxreal
+
+    ok=.false.;message='';frame_defect=huge(1d0);action_defect=huge(1d0)
+    frame_fingerprint=0_int64;workspace_peak_bytes=0_int64
+    nlocal=size(row_ids);noperation=size(band_action_rows,3)
+    local_bad=0
+    if(global_row_count<1.or.noperation<1.or.size(band_action_rows,1)/=nlocal.or.&
+        size(band_action_rows,2)/=global_row_count.or.retained_fingerprint==0_int64.or.&
+        operation_fingerprint==0_int64.or..not.ieee_is_finite(tolerance).or.tolerance<=0d0.or.&
+        .not.all(ieee_is_finite(real(band_action_rows,real64))).or.&
+        .not.all(ieee_is_finite(aimag(band_action_rows))))local_bad=1
+    if(nlocal>0)then
+      if(any(row_ids<1_int64).or.any(row_ids>int(global_row_count,int64)))local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='invalid direct retained Wannier frame contract';return
+    endif
+    do i=1,2
+      if(i==1)then;local_bad=global_row_count;else;local_bad=noperation;endif
+      call MPI_Allreduce(local_bad,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='direct frame dimension agreement failed';return;endif
+      call MPI_Allreduce(local_bad,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='direct frame dimensions disagree';return;endif
+    enddo
+    do i=1,2
+      if(i==1)then;local_hash=retained_fingerprint;else;local_hash=operation_fingerprint;endif
+      call MPI_Allreduce(local_hash,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='direct frame provenance agreement failed';return;endif
+      call MPI_Allreduce(local_hash,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)then;message='direct frame provenance disagrees';return;endif
+    enddo
+    call MPI_Allreduce(tolerance,minreal,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='direct frame tolerance agreement failed';return;endif
+    call MPI_Allreduce(tolerance,maxreal,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minreal/=maxreal)then;message='direct frame tolerance disagrees';return;endif
+    local_bad=0
+    if(int(nlocal,int64)>int(huge(0),int64)/int(global_row_count,int64))local_bad=1
+    if(local_bad==0)then
+      if(int(nlocal,int64)*int(global_row_count,int64)>int(huge(0),int64)/int(noperation,int64))local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='direct frame extent overflow';return;endif
+    allocate(ownership(global_row_count),stat=status);local_bad=merge(0,1,status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(ownership))deallocate(ownership)
+      message='direct frame ownership allocation failed';return
+    endif
+    ownership=0
+    do p=1,nlocal;ownership(int(row_ids(p)))=ownership(int(row_ids(p)))+1;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,ownership,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(ownership/=1))then
+      deallocate(ownership);message='direct retained rows are not owned exactly once';return
+    endif
+    allocate(trial_rows(nlocal,global_row_count),wannier_action_rows(nlocal,global_row_count,noperation),&
+      stat=status);local_bad=merge(0,1,status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(trial_rows))deallocate(trial_rows)
+      if(allocated(wannier_action_rows))deallocate(wannier_action_rows)
+      deallocate(ownership);message='direct frame output allocation failed';return
+    endif
+    trial_rows=(0d0,0d0)
+    do p=1,nlocal;trial_rows(p,int(row_ids(p)))=1d0;enddo
+    wannier_action_rows=band_action_rows
+    frame_defect=0d0;action_defect=0d0
+    if(nlocal>0)action_defect=maxval(abs(wannier_action_rows-band_action_rows))
+    local_hash=0_int64
+    do p=1,nlocal
+      global_hash=ieor(int(row_ids(p),int64),retained_fingerprint)
+      global_hash=ieor(global_hash,ishftc(operation_fingerprint,17))
+      do g=1,noperation;do j=1,global_row_count
+        bits=transfer(real(wannier_action_rows(p,j,g),real64),bits)
+        global_hash=ieor(ishftc(global_hash,11),bits)
+        bits=transfer(aimag(wannier_action_rows(p,j,g)),bits)
+        global_hash=ieor(ishftc(global_hash,13),bits)
+      enddo;enddo
+      local_hash=ieor(local_hash,global_hash)
+    enddo
+    call MPI_Allreduce(local_hash,frame_fingerprint,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then
+      deallocate(trial_rows,wannier_action_rows,ownership);message='direct frame fingerprint reduction failed';return
+    endif
+    frame_fingerprint=ieor(frame_fingerprint,retained_fingerprint)
+    frame_fingerprint=ieor(frame_fingerprint,ishftc(operation_fingerprint,17))
+    complex_elements=int(nlocal,int64)*int(global_row_count,int64)*(1_int64+int(noperation,int64))
+    integer_elements=int(global_row_count,int64)
+    if(complex_elements>(huge(0_int64)-4_int64*integer_elements)/16_int64)then
+      deallocate(trial_rows,wannier_action_rows,ownership);message='direct frame workspace receipt overflow';return
+    endif
+    workspace_peak_bytes=16_int64*complex_elements+4_int64*integer_elements
+    deallocate(ownership);ok=.true.
+#else
+    ok=.false.;message='direct retained Wannier frame requires MPI';frame_defect=huge(1d0)
+    action_defect=huge(1d0);frame_fingerprint=0_int64;workspace_peak_bytes=0_int64
+#endif
+  end subroutine prepare_dg_direct_retained_wannier_frame
 
   subroutine compose_dg_occupied_complement_trial_rows(comm,full_row_ids,noccupied,complement_row_ids,&
       complement_rows,tolerance,trial_rows,gram_defect,fingerprint,workspace_peak_bytes,ok,message)

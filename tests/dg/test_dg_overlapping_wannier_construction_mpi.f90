@@ -54,12 +54,14 @@ program test_dg_overlapping_wannier_construction_mpi
     build_dg_equal_count_spectral_windows,build_dg_spectral_density_descriptors,&
     build_dg_occupied_empty_moment_descriptors,build_dg_periodic_spectral_basins,&
     project_dg_single_spectral_basin_operator,prepare_dg_spectral_basin_operators,&
-    project_dg_prepared_spectral_basin_operator,release_dg_prepared_spectral_basins
+    project_dg_prepared_spectral_basin_operator,release_dg_prepared_spectral_basins,&
+    prepare_dg_direct_retained_wannier_frame
   implicit none
   type(s_dg_translation_orbit_accumulator)::inverse_accumulator
   type(s_dg_prepared_translation_action)::prepared_translation_action
   type(s_dg_prepared_spectral_basins)::prepared_spectral_basins
   integer::comm,rank,nproc,ierr,i,j,b,p,point,nlocal,nclosure,index,ncore,fragment_id
+  logical::direct_rows_valid
   integer(8),allocatable::ids(:),box_ids(:),symmetry_map(:,:),broken_symmetry_map(:,:)
   integer,allocatable::fragment(:)
   real(8),allocatable::weight(:),coordinate(:)
@@ -121,6 +123,10 @@ program test_dg_overlapping_wannier_construction_mpi
   integer(8)::spectral_density_fingerprint,spectral_density_workspace
   integer(8)::spectral_basin_fingerprint,spectral_basin_reference_fingerprint,spectral_basin_workspace
   integer(8)::spectral_operator_fingerprint,spectral_operator_workspace,spectral_operator_reduced_elements
+  integer(8)::direct_frame_fingerprint,direct_frame_workspace
+  integer(8),allocatable::direct_frame_row_ids(:)
+  complex(8),allocatable::direct_band_actions(:,:,:),direct_trial_rows(:,:),direct_wannier_actions(:,:,:)
+  real(8)::direct_frame_defect,direct_action_defect
   integer::spectral_basin_count
   real(8)::spectral_operator_defect,spectral_operator_trace
   integer(8),allocatable::closure_ids(:),closure_map(:,:)
@@ -1837,6 +1843,30 @@ program test_dg_overlapping_wannier_construction_mpi
     spectral_basin_workspace,ok,message)
   call require(.not.ok,'out-of-range spectral basin generator map is rejected before indexing')
 
+  b=count([(mod(i-1,nproc)==rank,i=1,6)])
+  allocate(direct_frame_row_ids(b),direct_band_actions(b,6,2))
+  b=0;direct_band_actions=(0d0,0d0)
+  do i=1,6
+    if(mod(i-1,nproc)/=rank)cycle
+    b=b+1;direct_frame_row_ids(b)=i
+    direct_band_actions(b,i,1)=1d0
+    direct_band_actions(b,i,2)=merge((1d0,0d0),(-1d0,0d0),i<=2.or.i>=5)
+  enddo
+  call prepare_dg_direct_retained_wannier_frame(comm,direct_frame_row_ids,6,direct_band_actions,&
+    731_8,991_8,1d-12,direct_trial_rows,direct_wannier_actions,direct_frame_defect,&
+    direct_action_defect,direct_frame_fingerprint,direct_frame_workspace,ok,message)
+  call require(ok.and.direct_frame_defect<1d-12.and.direct_action_defect<1d-12,&
+    'direct retained frame is orthonormal and copies the band action')
+  call require(maxval(abs(direct_wannier_actions-direct_band_actions))<1d-14,&
+    'direct retained target and band actions are identical')
+  direct_rows_valid=.true.
+  do p=1,size(direct_frame_row_ids)
+    direct_rows_valid=direct_rows_valid.and.&
+      abs(direct_trial_rows(p,int(direct_frame_row_ids(p)))-1d0)<1d-14.and.&
+      count(abs(direct_trial_rows(p,:))>1d-14)==1
+  enddo
+  call require(direct_rows_valid,'direct retained trial rows are row-owned identity')
+
   if(rank==0)then
     write(*,'(a,i0)')'INVERSE_CHARACTER_FINGERPRINT ',inverse_fingerprint
     write(*,'(a,i0)')'SPATIAL_SECTOR_FINGERPRINT ',spatial_sector_fingerprint
@@ -1844,6 +1874,7 @@ program test_dg_overlapping_wannier_construction_mpi
     write(*,'(a,i0)')'SPECTRAL_DENSITY_FINGERPRINT ',spectral_density_fingerprint
     write(*,'(a,i0)')'SPECTRAL_BASIN_FINGERPRINT ',spectral_basin_reference_fingerprint
     write(*,'(a,i0)')'SPECTRAL_OPERATOR_FINGERPRINT ',spectral_operator_fingerprint
+    write(*,'(a,i0)')'DIRECT_FRAME_FINGERPRINT ',direct_frame_fingerprint
     write(*,'(a,i0,a,i0,a,*(i0,1x))')'CONSTRUCTION ranks=',nproc,' fingerprint=',&
       reference_fingerprint,' centers=',reference_center_box_ids
     write(*,'(a,i0,a)')'PASS overlapping-Wannier construction on ',nproc,' ranks'

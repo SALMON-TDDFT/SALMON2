@@ -13,7 +13,7 @@ with tempfile.TemporaryDirectory(prefix="ow-construction-") as name:
       str(root/"tests/dg/test_dg_overlapping_wannier_construction_mpi.f90"),
       "-llapack","-lblas","-o",str(exe)],check=True)
     env=os.environ.copy();env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")
-    signatures=[];inverse_fingerprints=[];spatial_sector_fingerprints=[];spectral_window_fingerprints=[];spectral_density_fingerprints=[];spectral_basin_fingerprints=[];spectral_operator_fingerprints=[];center_gauge_receipts=[]
+    signatures=[];inverse_fingerprints=[];spatial_sector_fingerprints=[];spectral_window_fingerprints=[];spectral_density_fingerprints=[];spectral_basin_fingerprints=[];spectral_operator_fingerprints=[];direct_frame_fingerprints=[];center_gauge_receipts=[]
     for n in (1,2,4,8):
       p=subprocess.run([shutil.which("mpiexec"),"-n",str(n),str(exe)],capture_output=True,text=True,env=env)
       assert p.returncode==0,(n,p.stdout,p.stderr)
@@ -39,6 +39,9 @@ with tempfile.TemporaryDirectory(prefix="ow-construction-") as name:
       operator_match=re.search(r"SPECTRAL_OPERATOR_FINGERPRINT\s+(-?\d+)",p.stdout)
       assert operator_match,p.stdout
       spectral_operator_fingerprints.append(int(operator_match.group(1)))
+      direct_match=re.search(r"DIRECT_FRAME_FINGERPRINT\s+(-?\d+)",p.stdout)
+      assert direct_match,p.stdout
+      direct_frame_fingerprints.append(int(direct_match.group(1)))
       gauge_match=re.search(r"POINT_CENTER_GAUGE\s+([^\n]+)",p.stdout)
       assert gauge_match,p.stdout
       center_gauge_receipts.append(gauge_match.group(1).split())
@@ -49,6 +52,7 @@ with tempfile.TemporaryDirectory(prefix="ow-construction-") as name:
     assert len(set(spectral_density_fingerprints))==1,spectral_density_fingerprints
     assert len(set(spectral_basin_fingerprints))==1,spectral_basin_fingerprints
     assert len(set(spectral_operator_fingerprints))==1,spectral_operator_fingerprints
+    assert len(set(direct_frame_fingerprints))==1,direct_frame_fingerprints
     assert len({tuple(x[:3]) for x in center_gauge_receipts})==1,center_gauge_receipts
     assert all(int(x[3])>0 for x in center_gauge_receipts),center_gauge_receipts
 print("PASS overlapping-Wannier construction fixture on 1, 2, 4, and 8 ranks")
