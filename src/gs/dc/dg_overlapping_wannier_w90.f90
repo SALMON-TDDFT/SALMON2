@@ -1007,13 +1007,15 @@ contains
     integer(int64),intent(out)::fingerprint,workspace_peak_bytes
     logical,intent(out)::ok
     character(*),intent(out)::message
-    complex(real64),allocatable::link(:,:),left(:,:),right(:,:),polar(:,:),gram(:,:),work(:),remote_row(:),projector_row(:)
+    complex(real64),allocatable::link(:,:),left(:,:),right(:,:),polar(:,:),gram(:,:),work(:),sketch(:)
     real(real64),allocatable::rwork(:),metric_weights(:)
     integer,allocatable::owner(:),position(:),ownership_count(:)
-    integer::nlocal,m,i,j,k,rank,ierr,local_bad,global_bad,allocation_status,lwork,info
+    integer::nlocal,m,i,k,q,rank,ierr,local_bad,global_bad,allocation_status,lwork,info
     integer::minint,maxint
-    real(real64)::mintol,maxtol,scale,global_defect
-    integer(int64)::phase_bits,elements,term,min_fingerprint,max_fingerprint,recomputed_phase_fingerprint
+    real(real64)::mintol,maxtol,scale,global_defect,phase_angle,quantum,safe_quantized
+    complex(real64)::probe,projector_value
+    integer(int64)::phase_bits,elements,term,min_fingerprint,max_fingerprint,recomputed_phase_fingerprint,&
+      row_hash,local_sketch_hash,global_sketch_hash
     interface
       subroutine zgesvd(jobu,jobvt,m,n,a,lda,s,u,ldu,vt,ldvt,work,lwork,rwork,info)
         character,intent(in)::jobu,jobvt
@@ -1067,12 +1069,12 @@ contains
       elements=int(nlocal,int64)*int(m,int64);term=int(m,int64)*int(m,int64)
       if(term>huge(0_int64)/5_int64)then
         local_bad=1
-      elseif(elements>huge(0_int64)-5_int64*term-int(m,int64)-int(global_row_count,int64))then
+      elseif(elements>huge(0_int64)-5_int64*term-int(m,int64))then
         local_bad=1
       endif
     endif
     if(local_bad==0)then
-      elements=elements+5_int64*term+int(m,int64)+int(global_row_count,int64)
+      elements=elements+5_int64*term+int(m,int64)
       if(elements>huge(0_int64)/16_int64)then
         local_bad=1
       else
@@ -1100,7 +1102,7 @@ contains
     call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
     allocate(link(m,m),left(m,m),right(m,m),polar(m,m),gram(m,m),singular_values(m),&
       aligned_rows(nlocal,m),rwork(max(1,5*m)),metric_weights(nlocal),work(1),owner(global_row_count),position(global_row_count),&
-      ownership_count(global_row_count),remote_row(m),projector_row(global_row_count),stat=allocation_status)
+      ownership_count(global_row_count),sketch(m),stat=allocation_status)
     call MPI_Allreduce(allocation_status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
       if(allocated(aligned_rows))deallocate(aligned_rows)
@@ -1178,24 +1180,46 @@ contains
     polar_defect=global_defect
     if(ierr/=MPI_SUCCESS.or.polar_defect>10d0*tolerance)then;message='periodic-phase polar is not unitary';return;endif
     fingerprint=ieor(int(z'A54FF53A5F1D36F1',int64),phase_fingerprint)
-    do k=1,global_row_count
-      remote_row=(0d0,0d0)
-      if(rank==owner(k)-1)then
-        remote_row=sqrt(metric_weights(position(k)))*aligned_rows(position(k),:)
-      endif
-      call MPI_Bcast(remote_row,m,MPI_DOUBLE_COMPLEX,owner(k)-1,comm,ierr);if(ierr/=MPI_SUCCESS)return
-      projector_row=(0d0,0d0)
+    fingerprint=ieor(ishftc(fingerprint,13),int(global_row_count,int64))
+    fingerprint=ieor(ishftc(fingerprint,13),int(m,int64))
+    quantum=100d0*tolerance;safe_quantized=0.25d0*real(huge(0_int64),real64)
+    do q=1,2
+      sketch=(0d0,0d0)
       do i=1,nlocal
-        projector_row(int(row_ids(i)))=sqrt(metric_weights(i))*sum(remote_row*conjg(aligned_rows(i,:)))
+        phase_angle=2d0*acos(-1d0)*modulo(real(row_ids(i),real64)*&
+          merge(0.6180339887498948482d0,0.4142135623730950488d0,q==1),1d0)
+        probe=cmplx(cos(phase_angle),sin(phase_angle),real64)/sqrt(real(global_row_count,real64))
+        sketch=sketch+conjg(sqrt(metric_weights(i))*aligned_rows(i,:))*probe
       enddo
-      call MPI_Allreduce(MPI_IN_PLACE,projector_row,global_row_count,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      call MPI_Allreduce(MPI_IN_PLACE,sketch,m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
       if(ierr/=MPI_SUCCESS)return
-      do j=1,global_row_count
-        phase_bits=nint(real(projector_row(j),real64)/(100d0*tolerance),int64)
-        fingerprint=ieor(ishftc(fingerprint,13),phase_bits)
-        phase_bits=nint(aimag(projector_row(j))/(100d0*tolerance),int64)
-        fingerprint=ieor(ishftc(fingerprint,13),phase_bits)
+      local_bad=0
+      do i=1,nlocal
+        projector_value=sqrt(metric_weights(i))*sum(aligned_rows(i,:)*sketch)
+        if(.not.ieee_is_finite(real(projector_value)).or..not.ieee_is_finite(aimag(projector_value)).or.&
+            abs(real(projector_value,real64)/quantum)>safe_quantized.or.&
+            abs(aimag(projector_value)/quantum)>safe_quantized)then
+          local_bad=1
+        endif
       enddo
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+        message='periodic-phase projector sketch is not quantizable';return
+      endif
+      local_sketch_hash=0_int64
+      do i=1,nlocal
+        projector_value=sqrt(metric_weights(i))*sum(aligned_rows(i,:)*sketch)
+        row_hash=ieor(int(z'9E3779B97F4A7C15',int64),row_ids(i))
+        row_hash=ieor(ishftc(row_hash,13),int(q,int64))
+        phase_bits=nint(real(projector_value,real64)/quantum,int64)
+        row_hash=ieor(ishftc(row_hash,13),phase_bits)
+        phase_bits=nint(aimag(projector_value)/quantum,int64)
+        row_hash=ieor(ishftc(row_hash,13),phase_bits)
+        local_sketch_hash=ieor(local_sketch_hash,row_hash)
+      enddo
+      call MPI_Allreduce(local_sketch_hash,global_sketch_hash,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
+      if(ierr/=MPI_SUCCESS)return
+      fingerprint=ieor(ishftc(fingerprint,13),global_sketch_hash)
     enddo
     ok=.true.
   end subroutine align_dg_w90_character_sectors_by_periodic_phase

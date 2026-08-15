@@ -72,6 +72,24 @@ assert 0 <= tile_allocation_position < tile_loop_position, (
 )
 localization_source = source("src/gs/dc/dg_overlapping_wannier_localization.f90")
 w90_source = source("src/gs/dc/dg_overlapping_wannier_w90.f90")
+periodic_phase_aligner = re.search(
+    r"subroutine\s+align_dg_w90_character_sectors_by_periodic_phase(?P<body>.*?)"
+    r"end\s+subroutine\s+align_dg_w90_character_sectors_by_periodic_phase",
+    w90_source,
+    re.I | re.S,
+)
+assert periodic_phase_aligner
+periodic_phase_aligner_body = periodic_phase_aligner.group("body").lower()
+assert "projector_row(global_row_count)" not in re.sub(
+    r"\s+", "", periodic_phase_aligner_body
+), "periodic-phase alignment must not allocate a global projector row"
+assert not re.search(
+    r"mpi_allreduce\s*\([^\n]*projector_row[^\n]*global_row_count",
+    periodic_phase_aligner_body,
+), "periodic-phase alignment must not communicate the full O(N^2) projector"
+assert "mpi_bcast(projector_value" not in re.sub(
+    r"\s+", "", periodic_phase_aligner_body
+), "periodic-phase projector sketches must not issue one collective per global row"
 position_canonicalizer = re.search(
     r"subroutine\s+canonicalize_dg_sector_periodic_position_gauge(?P<body>.*?)end\s+subroutine",
     w90_source,
