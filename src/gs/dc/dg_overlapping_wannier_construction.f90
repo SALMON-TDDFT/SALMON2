@@ -97,7 +97,135 @@ module dg_overlapping_wannier_construction
   public::redistribute_dg_owned_orbitals_to_center_fragments
   public::redistribute_dg_buffer_orbitals_to_center_fragments
   public::assign_dg_periodic_centers_to_fragments
+  public::build_dg_equal_count_spectral_windows
 contains
+
+  subroutine build_dg_equal_count_spectral_windows(comm,eigenvalues,occupations,nwindow,tolerance,&
+      window_weights,fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,nwindow
+    real(real64),intent(in)::eigenvalues(:),occupations(:),tolerance
+    real(real64),allocatable,intent(out)::window_weights(:,:)
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nstate,nunoccupied,first_unoccupied,i,j,k,cluster_last,cluster_size,window,&
+      ierr,local_bad,global_bad,status,minint,maxint
+    integer(int64)::local_bits,minbits,maxbits,nelement,hash_value
+    real(real64)::scale,minreal,maxreal,cluster_coordinate,window_coordinate,fraction
+    nstate=size(eigenvalues);ok=.false.;message='';fingerprint=0_int64;workspace_peak_bytes=0_int64
+    local_bad=0
+    if(nstate<1.or.size(occupations)/=nstate.or.nwindow<1)then
+      local_bad=1
+    elseif(.not.ieee_is_finite(tolerance).or.tolerance<=0d0)then
+      local_bad=1
+    elseif(.not.all(ieee_is_finite(eigenvalues)).or..not.all(ieee_is_finite(occupations)))then
+      local_bad=1
+    elseif(any(occupations<0d0))then
+      local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid spectral-window contract';return;endif
+    call MPI_Allreduce(nstate,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(nstate,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(minint/=maxint)then;message='spectral state count disagrees across ranks';return;endif
+    call MPI_Allreduce(nwindow,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(nwindow,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(minint/=maxint)then;message='spectral window count disagrees across ranks';return;endif
+    call MPI_Allreduce(tolerance,minreal,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tolerance,maxreal,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(transfer(minreal,0_int64)/=transfer(maxreal,0_int64))then
+      message='spectral tolerance disagrees across ranks';return
+    endif
+    do i=1,nstate
+      local_bits=transfer(eigenvalues(i),0_int64)
+      call MPI_Allreduce(local_bits,minbits,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(local_bits,maxbits,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(minbits/=maxbits)then;message='spectral eigenvalues disagree across ranks';return;endif
+      local_bits=transfer(occupations(i),0_int64)
+      call MPI_Allreduce(local_bits,minbits,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(local_bits,maxbits,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(minbits/=maxbits)then;message='spectral occupations disagree across ranks';return;endif
+    enddo
+    local_bad=0
+    do i=2,nstate
+      scale=max(1d0,abs(eigenvalues(i-1)),abs(eigenvalues(i)))
+      if(eigenvalues(i)<eigenvalues(i-1)-tolerance*scale)local_bad=1
+    enddo
+    first_unoccupied=0
+    do i=1,nstate
+      if(occupations(i)<=tolerance)then;first_unoccupied=i;exit;endif
+    enddo
+    if(first_unoccupied==0)local_bad=1
+    if(first_unoccupied>0)then
+      if(any(occupations(first_unoccupied:nstate)>tolerance))local_bad=1
+      nunoccupied=nstate-first_unoccupied+1
+      if(nwindow>nunoccupied)local_bad=1
+    else
+      nunoccupied=0
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid ordered occupied/unoccupied spectrum';return;endif
+    if(int(nstate,int64)>huge(0_int64)/int(nwindow,int64))then
+      local_bad=1;nelement=0_int64
+    else
+      local_bad=0;nelement=int(nstate,int64)*int(nwindow,int64)
+      if(nelement>huge(0_int64)/8_int64)local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='spectral-window extent overflow';return;endif
+    allocate(window_weights(nstate,nwindow),stat=status)
+    call MPI_Allreduce(merge(0,1,status==0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(window_weights))deallocate(window_weights)
+      message='spectral-window allocation failed';return
+    endif
+    window_weights=0d0;i=first_unoccupied
+    do while(i<=nstate)
+      cluster_last=i
+      do while(cluster_last<nstate)
+        scale=max(1d0,abs(eigenvalues(cluster_last)),abs(eigenvalues(cluster_last+1)))
+        if(abs(eigenvalues(cluster_last+1)-eigenvalues(cluster_last))>tolerance*scale)exit
+        cluster_last=cluster_last+1
+      enddo
+      cluster_size=cluster_last-i+1
+      j=i-first_unoccupied
+      cluster_coordinate=(real(j,real64)+0.5d0*real(cluster_size,real64))/real(nunoccupied,real64)
+      window_coordinate=cluster_coordinate*real(nwindow,real64)+0.5d0
+      if(window_coordinate<=1d0)then
+        window_weights(i:cluster_last,1)=1d0
+      elseif(window_coordinate>=real(nwindow,real64))then
+        window_weights(i:cluster_last,nwindow)=1d0
+      else
+        window=int(floor(window_coordinate));fraction=window_coordinate-real(window,real64)
+        ! Smoothstep keeps a tolerance-degenerate cluster intact while avoiding
+        ! a discontinuous transfer at an equal-count window boundary.
+        fraction=fraction*fraction*(3d0-2d0*fraction)
+        window_weights(i:cluster_last,window)=1d0-fraction
+        window_weights(i:cluster_last,window+1)=fraction
+      endif
+      i=cluster_last+1
+    enddo
+    local_bad=merge(0,1,all(ieee_is_finite(window_weights)).and.all(window_weights>=0d0).and.&
+      maxval(abs(sum(window_weights(first_unoccupied:nstate,:),dim=2)-1d0))<=10d0*tolerance)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      deallocate(window_weights);message='spectral-window partition failed';return
+    endif
+    hash_value=ieor(int(nstate,int64),ishftc(int(nwindow,int64),17))
+    do i=1,nstate
+      hash_value=ieor(ishftc(hash_value,7),transfer(eigenvalues(i),0_int64))
+      hash_value=ieor(ishftc(hash_value,11),transfer(occupations(i),0_int64))
+      do k=1,nwindow
+        hash_value=ieor(ishftc(hash_value,5),int(nint(window_weights(i,k)*1024d0),int64))
+      enddo
+    enddo
+    if(hash_value==0_int64)hash_value=1_int64
+    fingerprint=hash_value;workspace_peak_bytes=8_int64*nelement;ok=.true.
+#else
+    ok=.false.;message='spectral windows require MPI';fingerprint=0_int64;workspace_peak_bytes=0_int64
+#endif
+  end subroutine build_dg_equal_count_spectral_windows
 
   subroutine materialize_dg_row_owned_sector_on_spatial_grid(comm,row_ids,global_state_count,&
       sector_rows,local_basis,basis_fingerprint,spatial_sector,output_fingerprint,workspace_peak_bytes,ok,message)

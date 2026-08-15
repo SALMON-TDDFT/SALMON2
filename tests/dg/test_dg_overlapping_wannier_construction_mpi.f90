@@ -49,7 +49,8 @@ program test_dg_overlapping_wannier_construction_mpi
     redistribute_dg_owned_orbitals_to_center_fragments,&
     assign_dg_periodic_centers_to_fragments,&
     verify_dg_fragment_subspace_density_covariance,build_dg_core_owned_occupied_subspace,&
-    build_dg_smooth_partition_of_unity,compose_dg_buffered_orbital_tile_to_physical_grid
+    build_dg_smooth_partition_of_unity,compose_dg_buffered_orbital_tile_to_physical_grid,&
+    build_dg_equal_count_spectral_windows
   implicit none
   type(s_dg_translation_orbit_accumulator)::inverse_accumulator
   type(s_dg_prepared_translation_action)::prepared_translation_action
@@ -89,6 +90,8 @@ program test_dg_overlapping_wannier_construction_mpi
   real(8),allocatable::seed_values(:,:)
   real(8),allocatable::occupied_seed_values(:,:)
   real(8),allocatable::raw_seed_values(:,:)
+  real(8),allocatable::spectral_window_weights(:,:)
+  real(8)::spectral_eigenvalues(10),spectral_occupations(10)
   real(8)::occupations(3)
   type(s_dg_overlapping_wannier_construction)::result
   type(s_dg_ow_distributed_layout)::distributed_layout
@@ -101,6 +104,7 @@ program test_dg_overlapping_wannier_construction_mpi
   real(8)::dense_identity_defect,dense_unitarity_defect,dense_closure_defect
   integer(8),allocatable::distributed_overlap_row_ids(:)
   integer(8)::closure_fingerprint,rounded_closure_fingerprint
+  integer(8)::spectral_window_fingerprint,spectral_window_workspace
   integer(8),allocatable::closure_ids(:),closure_map(:,:)
   integer(8),allocatable::stream_ids(:),stream_map(:,:)
   integer(8)::local_centers(2),global_centers(2,2),center_orbit_map(4,2)
@@ -1673,9 +1677,37 @@ program test_dg_overlapping_wannier_construction_mpi
     spread([(real(i,8),i=1,4)],2,nlocal),dim=1)))<1d-12,&
     'row-owned character sector materializes on the local spatial grid without dense coefficient replication')
 
+  spectral_eigenvalues=[-2d0,-1d0,0.1d0,0.2d0,0.2d0,0.2d0,0.8d0,1.0d0,1.2d0,1.4d0]
+  spectral_occupations=[2d0,2d0,0d0,0d0,0d0,0d0,0d0,0d0,0d0,0d0]
+  call build_dg_equal_count_spectral_windows(comm,spectral_eigenvalues,spectral_occupations,3,1d-10,&
+    spectral_window_weights,spectral_window_fingerprint,spectral_window_workspace,ok,message)
+  call require(ok.and.all(spectral_window_weights>=0d0).and.&
+    maxval(abs(sum(spectral_window_weights(3:,:),dim=2)-1d0))<1d-12.and.&
+    any(spectral_window_weights(3:,:)>0d0.and.spectral_window_weights(3:,:)<1d0).and.&
+    maxval(abs(spectral_window_weights(4,:)-spectral_window_weights(5,:)))<1d-14.and.&
+    maxval(abs(spectral_window_weights(5,:)-spectral_window_weights(6,:)))<1d-14,&
+    'equal-count spectral windows preserve a boundary degeneracy and partition unoccupied states')
+  if(nproc>1)then
+    spectral_eigenvalues(6)=merge(0.2d0,0.21d0,rank==0)
+    call build_dg_equal_count_spectral_windows(comm,spectral_eigenvalues,spectral_occupations,3,1d-10,&
+      spectral_window_weights,spectral_window_fingerprint,spectral_window_workspace,ok,message)
+    call require(.not.ok,'rank-disagreeing spectral eigenvalues are collectively rejected')
+  endif
+  spectral_eigenvalues(6)=0.2d0
+  spectral_eigenvalues(5)=ieee_value(0d0,ieee_quiet_nan)
+  call build_dg_equal_count_spectral_windows(comm,spectral_eigenvalues,spectral_occupations,3,1d-10,&
+    spectral_window_weights,spectral_window_fingerprint,spectral_window_workspace,ok,message)
+  call require(.not.ok,'nonfinite spectral eigenvalues are collectively rejected')
+  spectral_eigenvalues(5)=0.2d0;spectral_eigenvalues(7)=0.15d0
+  call build_dg_equal_count_spectral_windows(comm,spectral_eigenvalues,spectral_occupations,3,1d-10,&
+    spectral_window_weights,spectral_window_fingerprint,spectral_window_workspace,ok,message)
+  call require(.not.ok,'unsorted spectral eigenvalues are collectively rejected')
+  spectral_eigenvalues(7)=0.8d0
+
   if(rank==0)then
     write(*,'(a,i0)')'INVERSE_CHARACTER_FINGERPRINT ',inverse_fingerprint
     write(*,'(a,i0)')'SPATIAL_SECTOR_FINGERPRINT ',spatial_sector_fingerprint
+    write(*,'(a,i0)')'SPECTRAL_WINDOW_FINGERPRINT ',spectral_window_fingerprint
     write(*,'(a,i0,a,i0,a,*(i0,1x))')'CONSTRUCTION ranks=',nproc,' fingerprint=',&
       reference_fingerprint,' centers=',reference_center_box_ids
     write(*,'(a,i0,a)')'PASS overlapping-Wannier construction on ',nproc,' ranks'
