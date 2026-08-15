@@ -112,7 +112,179 @@ module dg_overlapping_wannier_construction
   public::project_dg_single_spectral_basin_operator
   public::prepare_dg_spectral_basin_operators,project_dg_prepared_spectral_basin_operator,&
     release_dg_prepared_spectral_basins
+  public::diagonalize_dg_spectral_basin_operator
 contains
+
+  subroutine diagonalize_dg_spectral_basin_operator(comm,basin_operator,operator_fingerprint,tolerance,&
+      spectrum,block_offsets,eigensystem_residual,fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm
+    complex(real64),intent(inout)::basin_operator(:,:)
+    integer(int64),intent(in)::operator_fingerprint
+    real(real64),intent(in)::tolerance
+    real(real64),allocatable,intent(out)::spectrum(:)
+    integer,allocatable,intent(out)::block_offsets(:)
+    real(real64),intent(out)::eigensystem_residual
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    complex(real64),allocatable::original_operator(:,:),eigenvectors(:,:),work(:),residual_matrix(:,:),column(:)
+    real(real64),allocatable::rwork(:)
+    integer,allocatable::offset_workspace(:)
+    complex(real64)::work_query(1)
+    integer::n,rank,i,j,lwork,lapack_info,ierr,status,local_bad,global_bad,minint,maxint,nblock
+    integer(int64)::minhash,maxhash,elements,bytes,root_bytes,hash_value,quantized
+    real(real64)::minreal,maxreal,scale,quantum
+    interface
+      subroutine zheev(jobz,uplo,n,a,lda,w,work,lwork,rwork,info)
+        character(1),intent(in)::jobz,uplo
+        integer,intent(in)::n,lda,lwork
+        complex(8),intent(inout)::a(lda,*),work(*)
+        real(8),intent(out)::w(*),rwork(*)
+        integer,intent(out)::info
+      end subroutine zheev
+    end interface
+
+    ok=.false.;message='';fingerprint=0_int64;workspace_peak_bytes=0_int64
+    eigensystem_residual=huge(1d0);n=size(basin_operator,1)
+    local_bad=0
+    if(n<1.or.size(basin_operator,2)/=n.or.operator_fingerprint==0_int64.or.&
+        .not.ieee_is_finite(tolerance).or.tolerance<=0d0.or.tolerance>huge(1d0)/100d0)then
+      local_bad=1
+    elseif(.not.all(ieee_is_finite(real(basin_operator))).or.&
+        .not.all(ieee_is_finite(aimag(basin_operator))))then
+      local_bad=1
+    elseif(maxval(abs(basin_operator-conjg(transpose(basin_operator))))>10d0*tolerance)then
+      local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid spectral basin eigensystem contract';return;endif
+    call MPI_Allreduce(n,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(n,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(minint/=maxint)then;message='spectral basin eigensystem dimension disagrees';return;endif
+    call MPI_Allreduce(operator_fingerprint,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(operator_fingerprint,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(minhash/=maxhash)then;message='spectral basin operator provenance disagrees';return;endif
+    call MPI_Allreduce(tolerance,minreal,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tolerance,maxreal,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(transfer(minreal,0_int64)/=transfer(maxreal,0_int64))then
+      message='spectral basin eigensystem tolerance disagrees';return
+    endif
+    local_bad=0
+    if(int(n,int64)>huge(0_int64)/int(n,int64))then
+      local_bad=1
+    else
+      elements=int(n,int64)*int(n,int64)
+      if(elements>int(huge(0),int64).or.int(n,int64)>int(huge(0),int64)/5_int64)local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='spectral basin eigensystem extent overflow';return;endif
+    allocate(spectrum(n),offset_workspace(n+1),column(n),stat=status)
+    local_bad=merge(0,1,status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(spectrum))deallocate(spectrum)
+      if(allocated(offset_workspace))deallocate(offset_workspace)
+      if(allocated(column))deallocate(column)
+      message='spectral basin eigensystem output allocation failed';return
+    endif
+    call MPI_Comm_rank(comm,rank,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='spectral basin eigensystem communicator query failed';return;endif
+    lapack_info=0;lwork=1
+    if(rank==0)then
+      allocate(original_operator(n,n),eigenvectors(n,n),rwork(max(1,3*n-2)),stat=status)
+      if(status==0)then
+        original_operator=basin_operator;eigenvectors=basin_operator
+        call zheev('V','U',n,eigenvectors,n,spectrum,work_query,-1,rwork,lapack_info)
+        if(lapack_info==0.and.ieee_is_finite(real(work_query(1))).and.real(work_query(1))>=1d0.and.&
+            real(work_query(1))<=real(huge(0),real64))then
+          lwork=ceiling(real(work_query(1)))
+          allocate(work(lwork),residual_matrix(n,n),stat=status)
+        else
+          status=1
+        endif
+      endif
+    else
+      status=0
+    endif
+    call MPI_Bcast(status,1,MPI_INTEGER,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.status/=0)then
+      if(allocated(spectrum))deallocate(spectrum)
+      if(allocated(offset_workspace))deallocate(offset_workspace)
+      if(allocated(column))deallocate(column)
+      if(allocated(original_operator))deallocate(original_operator)
+      if(allocated(eigenvectors))deallocate(eigenvectors)
+      if(allocated(rwork))deallocate(rwork)
+      if(allocated(work))deallocate(work)
+      if(allocated(residual_matrix))deallocate(residual_matrix)
+      message='spectral basin eigensystem workspace allocation failed';return
+    endif
+    if(rank==0)then
+      call zheev('V','U',n,eigenvectors,n,spectrum,work,lwork,rwork,lapack_info)
+      if(lapack_info==0)then
+        residual_matrix=matmul(original_operator,eigenvectors)
+        do j=1,n;residual_matrix(:,j)=residual_matrix(:,j)-spectrum(j)*eigenvectors(:,j);enddo
+        eigensystem_residual=maxval(abs(residual_matrix))/max(1d0,maxval(abs(original_operator)))
+        do j=1,n/2
+          column=eigenvectors(:,j);eigenvectors(:,j)=eigenvectors(:,n-j+1);eigenvectors(:,n-j+1)=column
+          scale=spectrum(j);spectrum(j)=spectrum(n-j+1);spectrum(n-j+1)=scale
+        enddo
+        basin_operator=eigenvectors
+      endif
+    endif
+    call MPI_Bcast(lapack_info,1,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(lapack_info/=0)then;message='spectral basin Hermitian eigensystem failed';return;endif
+    call MPI_Bcast(spectrum,n,MPI_DOUBLE_PRECISION,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Bcast(basin_operator,n*n,MPI_DOUBLE_COMPLEX,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Bcast(eigensystem_residual,1,MPI_DOUBLE_PRECISION,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    local_bad=merge(0,1,all(ieee_is_finite(spectrum)).and.&
+      all(ieee_is_finite(real(basin_operator))).and.all(ieee_is_finite(aimag(basin_operator))).and.&
+      ieee_is_finite(eigensystem_residual).and.eigensystem_residual<=10d0*tolerance)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='spectral basin eigensystem residual failed';return;endif
+    scale=max(1d0,maxval(abs(spectrum)));nblock=1;offset_workspace(1)=1
+    do i=2,n
+      if(abs(spectrum(i)-spectrum(i-1))>tolerance*scale)then
+        nblock=nblock+1;offset_workspace(nblock)=i
+      endif
+    enddo
+    nblock=nblock+1;offset_workspace(nblock)=n+1
+    allocate(block_offsets(nblock),stat=status)
+    call MPI_Allreduce(merge(0,1,status==0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(block_offsets))deallocate(block_offsets)
+      message='spectral basin block allocation failed';return
+    endif
+    block_offsets=offset_workspace(1:nblock)
+    quantum=100d0*tolerance;local_bad=0
+    if(maxval(abs(spectrum))>0.25d0*real(huge(0_int64),real64)*quantum)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='spectral basin spectrum fingerprint range is unsafe';return;endif
+    hash_value=operator_fingerprint
+    do i=1,n
+      quantized=nint(spectrum(i)/quantum,int64);hash_value=ieor(ishftc(hash_value,7),quantized)
+    enddo
+    do i=1,nblock;hash_value=ieor(ishftc(hash_value,11),int(block_offsets(i),int64));enddo
+    if(hash_value==0_int64)hash_value=1_int64
+    root_bytes=48_int64*elements+16_int64*int(max(1,lwork),int64)+&
+      8_int64*int(max(1,3*n-2),int64)+16_int64*int(n,int64)+&
+      8_int64*int(n,int64)+8_int64*int(n+1,int64)
+    bytes=16_int64*int(n,int64)+8_int64*int(n,int64)+8_int64*int(n+1,int64)
+    call MPI_Allreduce(root_bytes,workspace_peak_bytes,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    workspace_peak_bytes=max(workspace_peak_bytes,bytes)
+    fingerprint=hash_value;ok=.true.
+    if(allocated(original_operator))deallocate(original_operator)
+    if(allocated(eigenvectors))deallocate(eigenvectors)
+    if(allocated(work))deallocate(work)
+    if(allocated(rwork))deallocate(rwork)
+    if(allocated(residual_matrix))deallocate(residual_matrix)
+    deallocate(offset_workspace,column)
+#else
+    ok=.false.;message='spectral basin eigensystem requires MPI';fingerprint=0_int64
+    workspace_peak_bytes=0_int64;eigensystem_residual=huge(1d0)
+#endif
+  end subroutine diagonalize_dg_spectral_basin_operator
 
   subroutine release_dg_prepared_spectral_basins(prepared)
     type(s_dg_prepared_spectral_basins),intent(inout)::prepared

@@ -51,6 +51,14 @@ with tempfile.TemporaryDirectory(prefix="ow-eigenexa-") as name:
       match=re.search(r"COCYCLE ranks=\d+ signature=(-?\d+)",result.stdout);assert match,result.stdout
       cocycle_signatures.append(int(match.group(1)))
     assert len(set(cocycle_signatures))==1,cocycle_signatures
+    basin_signatures=[]
+    for nproc in (1,2,4,8):
+      result=subprocess.run([shutil.which("mpiexec"),"-n",str(nproc),str(exe),"spectral_basin"],
+        capture_output=True,text=True,env=env,timeout=60)
+      assert result.returncode==0,("spectral_basin",nproc,result.stdout,result.stderr)
+      match=re.search(r"SPECTRAL_BASIN_EIGEN ranks=\d+ signature=(-?\d+)",result.stdout);assert match,result.stdout
+      basin_signatures.append(int(match.group(1)))
+    assert len(set(basin_signatures))==1,basin_signatures
     sector_signatures=[]
     for nproc in (1,2,4,8):
       result=subprocess.run([shutil.which("mpiexec"),"-n",str(nproc),str(exe),"sector"],

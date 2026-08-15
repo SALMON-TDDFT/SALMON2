@@ -6,7 +6,8 @@ program test_dg_overlapping_wannier_eigenexa_mpi
   use dg_overlapping_wannier_solver,only:solve_dg_overlapping_wannier_generalized_eigenexa
   use dg_overlapping_wannier_construction,only:build_dg_group_averaged_occupied_candidates_eigenexa,&
     build_dg_cocycle_averaged_occupied_candidates_eigenexa,measure_dg_rank_fixed_symmetry_residuals,&
-    split_dg_translation_character_sector_eigenexa,validate_dg_translation_sector_cluster
+    split_dg_translation_character_sector_eigenexa,validate_dg_translation_sector_cluster,&
+    diagonalize_dg_spectral_basin_operator
   implicit none
   type(s_parallel_info)::info
   integer::comm,rank,nproc,ierr,i,p,nlocal
@@ -26,6 +27,9 @@ program test_dg_overlapping_wannier_eigenexa_mpi
   if(index(trim(case_name),'sector')==1)then;call run_sector_case();call MPI_Finalize(ierr);stop;endif
   if(index(trim(case_name),'average')==1)then;call run_average_case();call MPI_Finalize(ierr);stop;endif
   if(trim(case_name)=='cocycle')then;call run_cocycle_case();call MPI_Finalize(ierr);stop;endif
+  if(index(trim(case_name),'spectral_basin')==1)then
+    call run_spectral_basin_case();call MPI_Finalize(ierr);stop
+  endif
   call eigen_init(comm);call eigen_get_procs(p,info%nprow,info%npcol)
   call eigen_get_id(p,info%myrow,info%mycol);call eigen_get_matdims(4,info%nrow_local,info%ncol_local)
   info%flag_eigenexa_init=.true.
@@ -72,6 +76,36 @@ program test_dg_overlapping_wannier_eigenexa_mpi
   if(rank==0)write(*,'(a,i0,a,i0)')'EIGENEXA ranks=',nproc,' signature=',signature
   call eigen_free();call MPI_Finalize(ierr)
 contains
+  subroutine run_spectral_basin_case()
+    complex(8)::operator(4,4),rotation(4,4),rotated_operator(4,4)
+    real(8),allocatable::spectrum(:),rotated_spectrum(:)
+    integer,allocatable::block_offsets(:),rotated_offsets(:)
+    real(8)::residual,rotated_residual,angle
+    integer(8)::fingerprint,rotated_fingerprint,workspace
+    logical::basin_ok
+    character(256)::basin_message
+
+    operator=(0d0,0d0);operator(1,1)=1d0;operator(2,2)=0.6d0
+    operator(3,3)=0.6d0;operator(4,4)=0d0
+    angle=0.37d0;rotation=(0d0,0d0)
+    rotation(1,1)=1d0;rotation(4,4)=1d0
+    rotation(2,2)=cos(angle);rotation(2,3)=sin(angle)
+    rotation(3,2)=-sin(angle);rotation(3,3)=cos(angle)
+    rotated_operator=matmul(conjg(transpose(rotation)),matmul(operator,rotation))
+    call diagonalize_dg_spectral_basin_operator(comm,operator,9901_8,1d-10,spectrum,&
+      block_offsets,residual,fingerprint,workspace,basin_ok,basin_message)
+    call require(basin_ok,trim(basin_message))
+    call require(maxval(abs(spectrum-[1d0,0.6d0,0.6d0,0d0]))<1d-12.and.&
+      all(block_offsets==[1,2,4,5]).and.residual<1d-12,&
+      'spectral basin eigensystem preserves complete unresolved blocks')
+    call diagonalize_dg_spectral_basin_operator(comm,rotated_operator,9901_8,1d-10,rotated_spectrum,&
+      rotated_offsets,rotated_residual,rotated_fingerprint,workspace,basin_ok,basin_message)
+    call require(basin_ok.and.maxval(abs(rotated_spectrum-spectrum))<1d-12.and.&
+      all(rotated_offsets==block_offsets),'spectral basin blocks are retained-frame gauge covariant')
+    fingerprint=ieor(fingerprint,int(size(block_offsets),8))
+    if(rank==0)write(*,'(a,i0,a,i0)')'SPECTRAL_BASIN_EIGEN ranks=',nproc,' signature=',fingerprint
+  end subroutine run_spectral_basin_case
+
   subroutine run_sector_case()
     use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
     integer,parameter::n=8,ncharacter=4,ngenerator=2,multiplicity=2
