@@ -829,7 +829,7 @@ assert re.search(
     adapter_body,
     re.I,
 ), "Wannier90 projections must prepare the direct retained frame"
-assert re.search(r"w90_anchors\s*=\s*transpose\s*\(\s*global_closed_core\s*\)", adapter_body, re.I), (
+assert re.search(r"w90_anchors\s*=\s*global_closed_core", adapter_body, re.I), (
     "Wannier90 A matrices must use the retained spatial frame directly"
 )
 assert re.search(r"call\s+apply_dg_w90_gamma_transform", adapter_body, re.I), (
@@ -1625,7 +1625,7 @@ assert re.search(
     re.I | re.S,
 ), "DMN must publish distinct spectral d_matrix_wann, retained d_matrix_band, and their shared AMN"
 assert re.search(
-    r"spectral_wannier_representation\s*=\s*fixed_center_representation",
+    r"allocate\s*\(\s*spectral_wannier_representation\s*,\s*source\s*=\s*fixed_center_representation",
     adapter_body,
     re.I,
 ), "each DMN target action must equal the retained band action"
