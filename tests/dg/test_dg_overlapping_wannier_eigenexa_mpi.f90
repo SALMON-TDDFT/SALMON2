@@ -7,7 +7,7 @@ program test_dg_overlapping_wannier_eigenexa_mpi
   use dg_overlapping_wannier_construction,only:build_dg_group_averaged_occupied_candidates_eigenexa,&
     build_dg_cocycle_averaged_occupied_candidates_eigenexa,measure_dg_rank_fixed_symmetry_residuals,&
     split_dg_translation_character_sector_eigenexa,validate_dg_translation_sector_cluster,&
-    diagonalize_dg_spectral_basin_operator
+    diagonalize_dg_spectral_basin_operator,select_dg_spectral_basin_channel_ranks
   implicit none
   type(s_parallel_info)::info
   integer::comm,rank,nproc,ierr,i,p,nlocal
@@ -80,6 +80,9 @@ contains
     complex(8)::operator(4,4),rotation(4,4),rotated_operator(4,4)
     real(8),allocatable::spectrum(:),rotated_spectrum(:)
     integer,allocatable::block_offsets(:),rotated_offsets(:)
+    integer::orbit_map(2,1),selected_ranks(2)
+    real(8)::catalog_spectra(4,2)
+    logical::block_ends(4,2)
     real(8)::residual,rotated_residual,angle
     integer(8)::fingerprint,rotated_fingerprint,workspace
     logical::basin_ok
@@ -88,10 +91,18 @@ contains
     operator=(0d0,0d0);operator(1,1)=1d0;operator(2,2)=0.6d0
     operator(3,3)=0.6d0;operator(4,4)=0d0
     angle=0.37d0;rotation=(0d0,0d0)
-    rotation(1,1)=1d0;rotation(4,4)=1d0
-    rotation(2,2)=cos(angle);rotation(2,3)=sin(angle)
-    rotation(3,2)=-sin(angle);rotation(3,3)=cos(angle)
+    rotation(1,1)=cos(angle);rotation(1,2)=sin(angle)
+    rotation(2,1)=-sin(angle);rotation(2,2)=cos(angle)
+    rotation(3,3)=1d0;rotation(4,4)=1d0
     rotated_operator=matmul(conjg(transpose(rotation)),matmul(operator,rotation))
+    if(trim(case_name)=='spectral_basin_nonhermitian')then
+      operator(1,2)=cmplx(0.1d0,0.2d0,8)
+      call diagonalize_dg_spectral_basin_operator(comm,operator,9901_8,1d-10,spectrum,&
+        block_offsets,residual,fingerprint,workspace,basin_ok,basin_message)
+      call require(.not.basin_ok,'non-Hermitian spectral basin operator is rejected')
+      if(rank==0)write(*,'(a,i0)')'REJECT spectral_basin_nonhermitian ranks=',nproc
+      return
+    endif
     call diagonalize_dg_spectral_basin_operator(comm,operator,9901_8,1d-10,spectrum,&
       block_offsets,residual,fingerprint,workspace,basin_ok,basin_message)
     call require(basin_ok,trim(basin_message))
@@ -101,7 +112,24 @@ contains
     call diagonalize_dg_spectral_basin_operator(comm,rotated_operator,9901_8,1d-10,rotated_spectrum,&
       rotated_offsets,rotated_residual,rotated_fingerprint,workspace,basin_ok,basin_message)
     call require(basin_ok.and.maxval(abs(rotated_spectrum-spectrum))<1d-12.and.&
-      all(rotated_offsets==block_offsets),'spectral basin blocks are retained-frame gauge covariant')
+      all(rotated_offsets==block_offsets).and.rotated_fingerprint==fingerprint,&
+      'spectral basin blocks are retained-frame gauge covariant')
+    catalog_spectra(:,1)=[1d0,0.6d0,0d0,0d0];catalog_spectra(:,2)=catalog_spectra(:,1)
+    block_ends=.false.;block_ends(1,:)=.true.;block_ends(2,:)=.true.;block_ends(4,:)=.true.
+    orbit_map(:,1)=[2,1]
+    call select_dg_spectral_basin_channel_ranks(comm,catalog_spectra,block_ends,orbit_map,4,1d-10,&
+      selected_ranks,fingerprint,workspace,basin_ok,basin_message)
+    call require(basin_ok.and.all(selected_ranks==[2,2]),&
+      'spectral basin catalog spans retained rank with equal orbit ranks')
+    if(trim(case_name)=='spectral_basin_split')then
+      catalog_spectra(:,1)=[1d0,0.6d0,0.6d0,0d0];catalog_spectra(:,2)=catalog_spectra(:,1)
+      block_ends=.false.;block_ends(1,:)=.true.;block_ends(3,:)=.true.;block_ends(4,:)=.true.
+      call select_dg_spectral_basin_channel_ranks(comm,catalog_spectra,block_ends,orbit_map,4,1d-10,&
+        selected_ranks,fingerprint,workspace,basin_ok,basin_message)
+      call require(.not.basin_ok,'spectral basin catalog never splits an unresolved local block')
+      if(rank==0)write(*,'(a,i0)')'REJECT spectral_basin_split ranks=',nproc
+      return
+    endif
     fingerprint=ieor(fingerprint,int(size(block_offsets),8))
     if(rank==0)write(*,'(a,i0,a,i0)')'SPECTRAL_BASIN_EIGEN ranks=',nproc,' signature=',fingerprint
   end subroutine run_spectral_basin_case

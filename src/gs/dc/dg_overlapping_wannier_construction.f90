@@ -113,7 +113,202 @@ module dg_overlapping_wannier_construction
   public::prepare_dg_spectral_basin_operators,project_dg_prepared_spectral_basin_operator,&
     release_dg_prepared_spectral_basins
   public::diagonalize_dg_spectral_basin_operator
+  public::select_dg_spectral_basin_channel_ranks
 contains
+
+  subroutine select_dg_spectral_basin_channel_ranks(comm,spectra,block_ends,basin_generator_maps,&
+      retained_rank,tolerance,selected_ranks,fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,basin_generator_maps(:,:),retained_rank
+    real(real64),intent(in)::spectra(:,:),tolerance
+    logical,intent(in)::block_ends(:,:)
+    integer,intent(out)::selected_ranks(:)
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nstate,nbasin,ngenerator,i,j,g,b,target,head,tail,norbit,o,r,total,new_total,status
+    integer::ierr,local_bad,global_bad,minint,maxint
+    integer,allocatable::orbit_id(:),queue(:),orbit_size(:),representative(:),choice(:,:),prior(:,:)
+    real(real64),allocatable::score(:),next_score(:)
+    integer(int64)::elements,bytes,minhash,maxhash,hash_value,quantized
+    real(real64)::minreal,maxreal,scale,candidate,quantum
+
+    ok=.false.;message='';fingerprint=0_int64;workspace_peak_bytes=0_int64
+    selected_ranks=0;nstate=size(spectra,1);nbasin=size(spectra,2);ngenerator=size(basin_generator_maps,2)
+    local_bad=0
+    if(nstate<1.or.nbasin<1.or.retained_rank/=nstate.or.size(selected_ranks)/=nbasin.or.&
+        any(shape(block_ends)/=shape(spectra)).or.size(basin_generator_maps,1)/=nbasin.or.&
+        .not.ieee_is_finite(tolerance).or.tolerance<=0d0.or.tolerance>huge(1d0)/100d0)then
+      local_bad=1
+    elseif(.not.all(ieee_is_finite(spectra)).or.any(basin_generator_maps<1).or.&
+        any(basin_generator_maps>nbasin))then
+      local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid spectral basin channel catalog contract';return;endif
+    do i=1,4
+      select case(i)
+      case(1);local_bad=nstate
+      case(2);local_bad=nbasin
+      case(3);local_bad=ngenerator
+      case default;local_bad=retained_rank
+      end select
+      call MPI_Allreduce(local_bad,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(local_bad,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(minint/=maxint)then;message='spectral basin channel catalog dimensions disagree';return;endif
+    enddo
+    call MPI_Allreduce(tolerance,minreal,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tolerance,maxreal,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(transfer(minreal,0_int64)/=transfer(maxreal,0_int64))then
+      message='spectral basin channel catalog tolerance disagrees';return
+    endif
+    do b=1,nbasin
+      do i=1,nstate
+        call MPI_Allreduce(spectra(i,b),minreal,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+        if(ierr/=MPI_SUCCESS)return
+        call MPI_Allreduce(spectra(i,b),maxreal,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+        if(ierr/=MPI_SUCCESS)return
+        if(transfer(minreal,0_int64)/=transfer(maxreal,0_int64))then
+          message='spectral basin spectra disagree across ranks';return
+        endif
+        local_bad=merge(1,0,block_ends(i,b))
+        call MPI_Allreduce(local_bad,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+        call MPI_Allreduce(local_bad,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+        if(minint/=maxint)then;message='spectral basin block boundaries disagree across ranks';return;endif
+      enddo
+    enddo
+    do g=1,ngenerator;do b=1,nbasin
+      call MPI_Allreduce(basin_generator_maps(b,g),minint,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+      if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(basin_generator_maps(b,g),maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS)return
+      if(minint/=maxint)then;message='spectral basin orbit maps disagree across ranks';return;endif
+    enddo;enddo
+    local_bad=0
+    do b=1,nbasin
+      scale=max(1d0,maxval(abs(spectra(:,b))))
+      if(.not.block_ends(nstate,b).or.any(spectra(2:nstate,b)>spectra(1:nstate-1,b)+tolerance*scale).or.&
+          minval(spectra(:,b))< -10d0*tolerance*scale)local_bad=1
+    enddo
+    do g=1,ngenerator
+      do b=1,nbasin
+        if(count(basin_generator_maps(:,g)==b)/=1)local_bad=1
+      enddo
+    enddo
+    if(nstate>=huge(0))then
+      local_bad=1
+    elseif(int(nstate,int64)>huge(0_int64)/int(nbasin,int64))then
+      local_bad=1
+    elseif((int(nstate,int64)+1_int64)*int(nbasin,int64)>int(huge(0),int64))then
+      local_bad=1
+    endif
+    scale=huge(1d0)/16d0/real(nbasin,real64)/real(nstate,real64)
+    if(maxval(abs(spectra))>scale)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid spectral basin spectra or orbit action';return;endif
+    elements=int(nstate,int64)*int(nbasin,int64)
+    allocate(orbit_id(nbasin),queue(nbasin),orbit_size(nbasin),representative(nbasin),&
+      choice(nbasin,0:nstate),prior(nbasin,0:nstate),score(0:nstate),next_score(0:nstate),stat=status)
+    call MPI_Allreduce(merge(0,1,status==0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(orbit_id))deallocate(orbit_id)
+      if(allocated(queue))deallocate(queue)
+      if(allocated(orbit_size))deallocate(orbit_size)
+      if(allocated(representative))deallocate(representative)
+      if(allocated(choice))deallocate(choice)
+      if(allocated(prior))deallocate(prior)
+      if(allocated(score))deallocate(score)
+      if(allocated(next_score))deallocate(next_score)
+      message='spectral basin channel catalog workspace allocation failed';return
+    endif
+    orbit_id=0;orbit_size=0;representative=0;norbit=0;local_bad=0
+    do b=1,nbasin
+      if(orbit_id(b)/=0)cycle
+      norbit=norbit+1;representative(norbit)=b;head=1;tail=1;queue(1)=b;orbit_id(b)=norbit
+      do while(head<=tail)
+        target=queue(head);head=head+1
+        do g=1,ngenerator
+          i=basin_generator_maps(target,g)
+          if(orbit_id(i)==0)then
+            tail=tail+1;queue(tail)=i;orbit_id(i)=norbit
+          elseif(orbit_id(i)/=norbit)then
+            local_bad=1
+          endif
+        enddo
+      enddo
+      orbit_size(norbit)=tail
+    enddo
+    do o=1,norbit
+      b=representative(o);scale=max(1d0,maxval(abs(spectra(:,b))))
+      do j=1,nbasin
+        if(orbit_id(j)/=o)cycle
+        if(any(block_ends(:,j).neqv.block_ends(:,b)).or.&
+            maxval(abs(spectra(:,j)-spectra(:,b)))>10d0*tolerance*scale)local_bad=1
+      enddo
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='symmetry-related spectral basins have inconsistent eigenspaces';return
+    endif
+    score=-huge(1d0);score(0)=0d0;choice=-1;prior=-1
+    do o=1,norbit
+      next_score=-huge(1d0);b=representative(o);scale=max(1d0,maxval(abs(spectra(:,b))))
+      do total=0,nstate
+        if(score(total)<=-0.5d0*huge(1d0))cycle
+        do r=0,nstate
+          if(r>0)then
+            if(.not.block_ends(r,b).or.spectra(r,b)<=tolerance*scale)cycle
+          endif
+          new_total=total+orbit_size(o)*r;if(new_total>nstate)cycle
+          candidate=score(total)+real(orbit_size(o),real64)*sum(spectra(1:r,b))
+          if(candidate>next_score(new_total)+tolerance*max(1d0,abs(candidate)))then
+            next_score(new_total)=candidate;choice(o,new_total)=r;prior(o,new_total)=total
+          endif
+        enddo
+      enddo
+      score=next_score
+    enddo
+    local_bad=merge(0,1,choice(norbit,nstate)>=0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='spectral basin channel catalog cannot span the retained rank without splitting a block';return
+    endif
+    total=nstate
+    do o=norbit,1,-1
+      r=choice(o,total)
+      do b=1,nbasin;if(orbit_id(b)==o)selected_ranks(b)=r;enddo
+      total=prior(o,total)
+    enddo
+    if(total/=0.or.sum(selected_ranks)/=nstate)then
+      message='spectral basin channel catalog rank reconstruction failed';return
+    endif
+    quantum=100d0*tolerance;hash_value=int(nstate,int64)
+    do b=1,nbasin
+      hash_value=ieor(ishftc(hash_value,7),int(selected_ranks(b),int64))
+      do i=1,nstate
+        if(abs(spectra(i,b))>0.25d0*real(huge(0_int64),real64)*quantum)then
+          message='spectral basin channel catalog fingerprint range is unsafe';return
+        endif
+        quantized=nint(spectra(i,b)/quantum,int64);hash_value=ieor(ishftc(hash_value,11),quantized)
+        hash_value=ieor(ishftc(hash_value,5),merge(1_int64,0_int64,block_ends(i,b)))
+      enddo
+    enddo
+    do g=1,ngenerator;do b=1,nbasin
+      hash_value=ieor(ishftc(hash_value,3),int(basin_generator_maps(b,g),int64))
+    enddo;enddo
+    if(hash_value==0_int64)hash_value=1_int64
+    bytes=4_int64*(4_int64*int(nbasin,int64)+2_int64*int(nbasin,int64)*int(nstate+1,int64))+&
+      16_int64*int(nstate+1,int64)
+    call MPI_Allreduce(bytes,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(bytes,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(minhash/=maxhash)then;message='spectral basin channel catalog workspace disagrees';return;endif
+    fingerprint=hash_value;workspace_peak_bytes=maxhash;ok=.true.
+    deallocate(orbit_id,queue,orbit_size,representative,choice,prior,score,next_score)
+#else
+    ok=.false.;message='spectral basin channel catalog requires MPI';fingerprint=0_int64
+    workspace_peak_bytes=0_int64;selected_ranks=0
+#endif
+  end subroutine select_dg_spectral_basin_channel_ranks
 
   subroutine diagonalize_dg_spectral_basin_operator(comm,basin_operator,operator_fingerprint,tolerance,&
       spectrum,block_offsets,eigensystem_residual,fingerprint,workspace_peak_bytes,ok,message)
