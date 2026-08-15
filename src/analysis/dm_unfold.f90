@@ -293,7 +293,8 @@ contains
     do ir2_pr = 1, ie_pr(2)
     do ir3_pr = 1, ie_pr(3)
       zsum = zsum + unfold%psi_pr(ir1_pr,ir2_pr,ir3_pr,ispin,io_pr,isk,1) &
-      & * exp( -2*pi*zI*((ig1_pr-1)*(ir1_pr-1)/dble(ie_pr(1))+(ig2_pr-1)*(ir2_pr-1)/dble(ie_pr(2))+(ig3_pr-1)*(ir3_pr-1)/dble(ie_pr(3))) )
+      & * exp( -2*pi*zI*((ig1_pr-1)*(ir1_pr-1)/dble(ie_pr(1))+(ig2_pr-1)*(ir2_pr-1)/dble(ie_pr(2)) &
+      &                 +(ig3_pr-1)*(ir3_pr-1)/dble(ie_pr(3))) )
     end do
     end do
     end do
@@ -686,7 +687,8 @@ contains
   zj2_l(1:3) = 0d0
   zj3_l(1:3) = 0d0
   zj4_l(1:3) = 0d0
-!$omp parallel do private(ilk,ihk,isk,ig1_pr,ig2_pr,ig3_pr,ig1,ig2,ig3,gx,gy,gz) reduction(+:zsum_l,zj1_l,zj2_l,zj3_l,zj4_l) collapse(2)
+!$omp parallel do private(ilk,ihk,isk,ig1_pr,ig2_pr,ig3_pr,ig1,ig2,ig3,gx,gy,gz) &
+!$omp reduction(+:zsum_l,zj1_l,zj2_l,zj3_l,zj4_l) collapse(2)
   do ilk = info%ik_s, info%ik_e
   do ihk = 1, unfold%nhk
     isk = unfold%isk_tbl(ilk,ihk)
@@ -886,7 +888,8 @@ contains
     write(ofl%fh_dm_unfold,'(55f17.12)') itt*dt, system%vec_Ac(1:3)*t_unit_ac%conv, &
     & real(zsum),real(zj1(1:3))*t_unit_current%conv,real(zj2(1:3))*t_unit_current%conv,real(zj3(1:3))*t_unit_current%conv, &
     & real(zj4(1:3))*t_unit_current%conv,real(zj5(1:3))*t_unit_current%conv,real(zj6(1:3)*t_unit_current%conv), &
-    & real(zj1(1:3)+zj3(1:3)+zj5(1:3)+zj6(1:3))*t_unit_current%conv,real(zj1(1:3)+zj2(1:3)+zj3(1:3)+zj4(1:3)+zj5(1:3)+zj6(1:3))*t_unit_current%conv, &
+    & real(zj1(1:3)+zj3(1:3)+zj5(1:3)+zj6(1:3))*t_unit_current%conv, &
+    & real(zj1(1:3)+zj2(1:3)+zj3(1:3)+zj4(1:3)+zj5(1:3)+zj6(1:3))*t_unit_current%conv, &
     & real(zsum_uu),real(zj1_uu(1:3))*t_unit_current%conv,real(zj2_uu(1:3))*t_unit_current%conv, &
     & real(zj3_uu(1:3))*t_unit_current%conv,real(zj4_uu(1:3))*t_unit_current%conv, &
     & real(zj1_uu(1:3)+zj2_uu(1:3)+zj3_uu(1:3)+zj4_uu(1:3))*t_unit_current%conv, &
