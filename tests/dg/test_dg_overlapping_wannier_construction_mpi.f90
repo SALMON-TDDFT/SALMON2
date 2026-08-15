@@ -1818,6 +1818,18 @@ program test_dg_overlapping_wannier_construction_mpi
     maxval(abs(spectral_basin_operator_one))<1d-12,&
     'streamed basin operators partition the complete retained frame')
   call release_dg_prepared_spectral_basins(prepared_spectral_basins)
+  spectral_occupied_density=0d0;spectral_empty_moment_density=0d0;spectral_shared_density=0d0
+  do p=1,size(spectral_row_ids)
+    if(spectral_row_ids(p)==1.or.spectral_row_ids(p)==3)spectral_occupied_density(p)=1d0
+    spectral_generator_maps(p,1)=mod(int(spectral_row_ids(p))+1,4)+1
+  enddo
+  call build_dg_periodic_spectral_basins(comm,spectral_row_ids,[4,1,1],spectral_occupied_density,&
+    spectral_empty_moment_density,spectral_shared_density,spectral_generator_maps,1d-12,&
+    spectral_basin_labels,spectral_basin_count,spectral_basin_orbit_map,spectral_basin_fingerprint,&
+    spectral_basin_workspace,ok,message)
+  call require(ok,'flat symmetric watershed is accepted after symmetry closure')
+  if(ok)call require(spectral_basin_count==1.and.all(spectral_basin_orbit_map==1),&
+    'flat symmetric watershed is minimally coarsened to a closed basin partition')
   if(size(spectral_generator_maps,1)>0)spectral_generator_maps(1,1)=5
   call build_dg_periodic_spectral_basins(comm,spectral_row_ids,[4,1,1],spectral_occupied_density,&
     spectral_empty_moment_density,spectral_shared_density,spectral_generator_maps,1d-12,&

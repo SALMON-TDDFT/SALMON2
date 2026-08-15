@@ -1402,7 +1402,8 @@ contains
     character(*),intent(out)::message
 #ifdef USE_MPI
     integer::nlocal,nfeature,nempty,nshared,ngenerator,npoint,i,j,g,p,x,y,z,neighbor,choice,root,&
-      ierr,local_bad,global_bad,minint,maxint,status,target,target_basin
+      ierr,local_bad,global_bad,minint,maxint,status,target,target_basin,preliminary_basin_count,&
+      source_basin,source_root,target_root,min_target,max_target,changed,iteration,merge_count
     integer,allocatable::ownership(:),parent(:),roots(:),global_labels(:),root_ids(:),target_counts(:)
     integer(int64)::npoint8,bits,minbits,maxbits,bytes,hash_value
     real(real64),allocatable::local_score(:),global_score(:)
@@ -1492,6 +1493,15 @@ contains
       deallocate(ownership,parent,roots,global_labels,root_ids,local_score,global_score)
       message='spectral basin rows are not owned exactly once';return
     endif
+    do g=1,ngenerator
+      ownership=0
+      do p=1,nlocal;ownership(generator_maps(p,g))=ownership(generator_maps(p,g))+1;enddo
+      call MPI_Allreduce(MPI_IN_PLACE,ownership,npoint,MPI_INTEGER,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.any(ownership/=1))then
+        deallocate(ownership,parent,roots,global_labels,root_ids,local_score,global_score)
+        message='spectral basin generator map is not a permutation';return
+      endif
+    enddo
     local_score=0d0
     local_max=0d0;if(nlocal>0)local_max=maxval(occupied_density)
     call MPI_Allreduce(local_max,global_max,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
@@ -1562,6 +1572,75 @@ contains
       do j=1,basin_count
         if(roots(i)==root_ids(j))then;global_labels(i)=j;exit;endif
       enddo
+    enddo
+    ! Form the smallest coarsening of the watershed partition that is
+    ! invariant under every supplied generator.  parent(1:basin_count) is a
+    ! basin-level union-find; roots/root_ids are reused as distributed
+    ! max/min target-class scratch, so no Npoint-by-Ngenerator map is formed.
+    preliminary_basin_count=basin_count
+    do j=1,preliminary_basin_count;parent(j)=j;enddo
+    merge_count=0;changed=0
+    do iteration=1,npoint
+      do j=1,preliminary_basin_count
+        root=j
+        do while(parent(root)/=root);root=parent(root);enddo
+        parent(j)=root
+      enddo
+      changed=0
+      do g=1,ngenerator
+        root_ids(1:preliminary_basin_count)=preliminary_basin_count+1
+        roots(1:preliminary_basin_count)=0
+        do p=1,nlocal
+          source_basin=global_labels(int(row_ids(p)));source_root=source_basin
+          do while(parent(source_root)/=source_root);source_root=parent(source_root);enddo
+          target_root=global_labels(generator_maps(p,g))
+          do while(parent(target_root)/=target_root);target_root=parent(target_root);enddo
+          root_ids(source_root)=min(root_ids(source_root),target_root)
+          roots(source_root)=max(roots(source_root),target_root)
+        enddo
+        call MPI_Allreduce(MPI_IN_PLACE,root_ids,preliminary_basin_count,MPI_INTEGER,MPI_MIN,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then;local_bad=1;exit;endif
+        call MPI_Allreduce(MPI_IN_PLACE,roots,preliminary_basin_count,MPI_INTEGER,MPI_MAX,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then;local_bad=1;exit;endif
+        do j=1,preliminary_basin_count
+          if(root_ids(j)>preliminary_basin_count.or.roots(j)<1)cycle
+          min_target=root_ids(j)
+          do while(parent(min_target)/=min_target);min_target=parent(min_target);enddo
+          max_target=roots(j)
+          do while(parent(max_target)/=max_target);max_target=parent(max_target);enddo
+          if(min_target==max_target)cycle
+          if(min_target<max_target)then
+            parent(max_target)=min_target
+          else
+            parent(min_target)=max_target
+          endif
+          merge_count=merge_count+1;changed=1
+        enddo
+      enddo
+      call MPI_Allreduce(changed,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;local_bad=1;exit;endif
+      changed=global_bad
+      if(merge_count>preliminary_basin_count-1)then;local_bad=1;exit;endif
+      if(changed==0)exit
+    enddo
+    if(changed/=0)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      deallocate(ownership,parent,roots,global_labels,root_ids,local_score,global_score)
+      message='spectral basin symmetry closure did not converge';return
+    endif
+    do j=1,preliminary_basin_count
+      root=j
+      do while(parent(root)/=root);root=parent(root);enddo
+      parent(j)=root
+    enddo
+    root_ids(1:preliminary_basin_count)=0;basin_count=0
+    do j=1,preliminary_basin_count
+      if(parent(j)/=j)cycle
+      basin_count=basin_count+1;root_ids(j)=basin_count
+    enddo
+    do i=1,npoint
+      global_labels(i)=root_ids(parent(global_labels(i)))
     enddo
     allocate(basin_labels(nlocal),basin_orbit_map(basin_count,ngenerator),target_counts(basin_count),stat=status)
     call MPI_Allreduce(merge(0,1,status==0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
