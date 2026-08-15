@@ -148,7 +148,7 @@ production_order = [
     ow_ground_state_body.find("call split_dg_translation_character_sector_eigenexa", w90_position),
     ow_ground_state_body.find("call project_dg_w90_reference_sector_operators"),
     ow_ground_state_body.find("call anchor_dg_w90_reference_character_sector"),
-    ow_ground_state_body.find("call materialize_dg_row_owned_sector_on_spatial_grid"),
+    ow_ground_state_body.find("call materialize_dg_row_owned_sector_on_spatial_grid", w90_position),
     ow_ground_state_body.find("call build_dg_sector_periodic_position_tuple"),
     ow_ground_state_body.find("call jointly_canonicalize_dg_sector_periodic_position_gauge"),
     ow_ground_state_body.find("call prepare_dg_translation_character_action"),
@@ -193,6 +193,23 @@ assert "call build_dg_translation_character_intertwining_phase(" not in ow_groun
 assert "call align_dg_w90_cross_character_sector_gauge" not in ow_ground_state_body, (
     "production must not use spread-weighted cross-character links, which vanish for exact translation orbits"
 )
+assert "spectral dmn operation workspace reallocation failed collectively" not in ow_ground_state_body, (
+    "the DMN loop must consume the builder's allocatable output directly, not reallocate it between operations"
+)
+assert re.search(
+    r"spectral_catalog_fingerprint\s*=\s*ieor\s*\(.{0,200}spectral_basin_fingerprint",
+    ow_ground_state_body,
+    re.S,
+), "the spectral channel catalog must bind the density-derived basin provenance"
+assert re.search(
+    r"fixed_center_dmn_workspace_peak\s*=\s*spectral_operation_workspace",
+    ow_ground_state_body,
+), "the DMN workspace receipt must include the initial spectral AMN gather"
+assert re.search(
+    r"w90_input_fingerprint\s*=\s*ieor\s*\(\s*w90_input_fingerprint\s*,\s*"
+    r"spectral_action_aggregate_fingerprint\s*\)",
+    ow_ground_state_body,
+), "the W90/checkpoint provenance must bind every spectral target action written to DMN"
 for forbidden_position_extent in (
     "translation_anchor_rotation(ntarget,ntarget)",
     "translation_position_lcfo_operator(ntarget,ntarget)",
@@ -764,8 +781,13 @@ assert re.search(
 assert "call accumulate_dg_lcfo_buffer_contributions_to_core" not in adapter_body.lower(), (
     "fragment-core truncation must not define the support of a pre-Wannier symmetry proof"
 )
-assert "callmove_alloc(global_seed_values,w90_anchors)" in re.sub(r"\s+", "", adapter_body.lower()), (
-    "Wannier90 projections must take ownership of the complete LCFO core-plus-buffer seed basis"
+assert re.search(
+    r"call\s+materialize_dg_row_owned_sector_on_spatial_grid\s*\([^;]*spectral_trial_rows",
+    adapter_body,
+    re.I | re.S,
+), "Wannier90 projections must materialize the deterministic spectral channel frame"
+assert re.search(r"w90_anchors\s*=\s*transpose\s*\(\s*spectral_spatial_trials\s*\)", adapter_body, re.I), (
+    "Wannier90 A matrices must use the materialized spectral channel orientation"
 )
 assert re.search(r"call\s+apply_dg_w90_gamma_transform", adapter_body, re.I), (
     "the MLWF transform must be applied in the global LCFO space"
@@ -1552,6 +1574,18 @@ append_pos = adapter_body.lower().find("call append_sawf_dmn_operation(", conver
 assert gather_pos < convert_pos < append_pos, (
     "fixed-center DMN must gather, convert, then append each streamed representation"
 )
+assert re.search(
+    r"call\s+append_sawf_dmn_operation\s*\([^;]*?spectral_wannier_representation\s*,\s*"
+    r"fixed_center_representation\s*,[^;]*?spectral_amn",
+    adapter_body,
+    re.I | re.S,
+), "DMN must publish distinct spectral d_matrix_wann, retained d_matrix_band, and their shared AMN"
+assert re.search(
+    r"call\s+build_dg_spectral_channel_generator_actions\s*\([^;]*?fixed_center_rows[^;]*?"
+    r"spectral_trial_rows",
+    adapter_body,
+    re.I | re.S,
+), "each streamed fixed-center operation must be projected into the spectral channel frame"
 assert "fixed_center_group_order>48" in adapter_body.replace(" ", "").lower(), (
     "production must reject a fixed-center subgroup above crystallographic order 48"
 )
