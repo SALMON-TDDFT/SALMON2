@@ -51,7 +51,8 @@ program test_dg_overlapping_wannier_construction_mpi
     verify_dg_fragment_subspace_density_covariance,build_dg_core_owned_occupied_subspace,&
     build_dg_smooth_partition_of_unity,compose_dg_buffered_orbital_tile_to_physical_grid,&
     build_dg_equal_count_spectral_windows,build_dg_spectral_density_descriptors,&
-    build_dg_occupied_empty_moment_descriptors,build_dg_periodic_spectral_basins
+    build_dg_occupied_empty_moment_descriptors,build_dg_periodic_spectral_basins,&
+    project_dg_single_spectral_basin_operator
   implicit none
   type(s_dg_translation_orbit_accumulator)::inverse_accumulator
   type(s_dg_prepared_translation_action)::prepared_translation_action
@@ -95,7 +96,9 @@ program test_dg_overlapping_wannier_construction_mpi
   real(8),allocatable::spectral_occupied_density(:),spectral_unoccupied_density(:,:),&
     spectral_total_unoccupied_density(:),spectral_shared_density(:,:),spectral_reference_descriptors(:,:),&
     spectral_empty_moment_density(:,:)
+  real(8),allocatable::spectral_point_weights(:)
   complex(8),allocatable::spectral_state_values(:,:)
+  complex(8),allocatable::spectral_basin_operator(:,:),spectral_basin_operator_one(:,:)
   integer(8),allocatable::spectral_row_ids(:)
   integer,allocatable::spectral_basin_labels(:),spectral_basin_orbit_map(:,:),spectral_generator_maps(:,:)
   real(8)::spectral_eigenvalues(10),spectral_occupations(10)
@@ -114,7 +117,9 @@ program test_dg_overlapping_wannier_construction_mpi
   integer(8)::spectral_window_fingerprint,spectral_window_workspace
   integer(8)::spectral_density_fingerprint,spectral_density_workspace
   integer(8)::spectral_basin_fingerprint,spectral_basin_reference_fingerprint,spectral_basin_workspace
+  integer(8)::spectral_operator_fingerprint,spectral_operator_workspace
   integer::spectral_basin_count
+  real(8)::spectral_operator_defect,spectral_operator_trace
   integer(8),allocatable::closure_ids(:),closure_map(:,:)
   integer(8),allocatable::stream_ids(:),stream_map(:,:)
   integer(8)::local_centers(2),global_centers(2,2),center_orbit_map(4,2)
@@ -1774,6 +1779,23 @@ program test_dg_overlapping_wannier_construction_mpi
   call require(spectral_basin_count==2.and.all(spectral_basin_orbit_map(:,1)==[1,2]),&
     'periodic six-neighbour watershed closes separated hole/electron basins under a generator')
   spectral_basin_reference_fingerprint=spectral_basin_fingerprint
+  allocate(spectral_point_weights(size(spectral_row_ids)));spectral_point_weights=1d0
+  call project_dg_single_spectral_basin_operator(comm,spectral_row_ids,4,spectral_state_values,&
+    spectral_point_weights,spectral_basin_labels,spectral_basin_count,1,12345_8,1d-12,&
+    spectral_basin_reference_fingerprint,1d-12,spectral_basin_operator,spectral_operator_defect,&
+    spectral_operator_trace,spectral_operator_fingerprint,spectral_operator_workspace,ok,message)
+  call require(ok.and.spectral_operator_defect<1d-12.and.abs(spectral_operator_trace-3d0)<1d-12,&
+    'single spectral basin operator is Hermitian and has the basin population trace')
+  allocate(spectral_basin_operator_one,source=spectral_basin_operator)
+  call project_dg_single_spectral_basin_operator(comm,spectral_row_ids,4,spectral_state_values,&
+    spectral_point_weights,spectral_basin_labels,spectral_basin_count,2,12345_8,1d-12,&
+    spectral_basin_reference_fingerprint,1d-12,spectral_basin_operator,spectral_operator_defect,&
+    spectral_operator_trace,spectral_operator_fingerprint,spectral_operator_workspace,ok,message)
+  spectral_basin_operator_one=spectral_basin_operator_one+spectral_basin_operator
+  do i=1,4;spectral_basin_operator_one(i,i)=spectral_basin_operator_one(i,i)-1d0;enddo
+  call require(ok.and.abs(spectral_operator_trace-1d0)<1d-12.and.&
+    maxval(abs(spectral_basin_operator_one))<1d-12,&
+    'streamed basin operators partition the complete retained frame')
   spectral_generator_maps(1,1)=5
   call build_dg_periodic_spectral_basins(comm,spectral_row_ids,[4,1,1],spectral_occupied_density,&
     spectral_empty_moment_density,spectral_shared_density,spectral_generator_maps,1d-12,&
@@ -1787,6 +1809,7 @@ program test_dg_overlapping_wannier_construction_mpi
     write(*,'(a,i0)')'SPECTRAL_WINDOW_FINGERPRINT ',spectral_window_fingerprint
     write(*,'(a,i0)')'SPECTRAL_DENSITY_FINGERPRINT ',spectral_density_fingerprint
     write(*,'(a,i0)')'SPECTRAL_BASIN_FINGERPRINT ',spectral_basin_reference_fingerprint
+    write(*,'(a,i0)')'SPECTRAL_OPERATOR_FINGERPRINT ',spectral_operator_fingerprint
     write(*,'(a,i0,a,i0,a,*(i0,1x))')'CONSTRUCTION ranks=',nproc,' fingerprint=',&
       reference_fingerprint,' centers=',reference_center_box_ids
     write(*,'(a,i0,a)')'PASS overlapping-Wannier construction on ',nproc,' ranks'
