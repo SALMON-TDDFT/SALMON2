@@ -593,6 +593,7 @@ contains
       translation_target_spatial(:,:),translation_aligned_spatial(:,:),translation_conjugate_spatial(:,:),&
       translation_position_phases(:,:),translation_position_tuple(:,:,:),translation_weighted_reference(:,:),&
       translation_canonical_weighted(:,:),translation_anchor_rotation(:,:),translation_position_lcfo_operator(:,:),&
+      translation_point_overlap_basis(:,:),translation_point_overlap_rows(:,:,:),translation_point_representations(:,:,:),&
       translation_phase(:),translation_orbit_rows(:,:),translation_transform_rows(:,:),&
       transformed_box_values(:,:),transformed_box_gradients(:,:,:)
     complex(8),allocatable::lcfo_fragment_contribution(:,:),lcfo_occupied_core(:,:),lcfo_reference_core(:,:)
@@ -621,7 +622,7 @@ contains
     integer(8),allocatable::lcfo_core_ids(:),initial_core_ids(:)
     integer(8),allocatable::all_core_ids(:,:),localized_center_ids(:),orbital_owned_full_ids(:)
     integer(8),allocatable::fixed_center_symmetry_map(:,:),fixed_center_row_ids(:)
-    integer(8),allocatable::translation_row_ids(:),translation_stream_row_ids(:)
+    integer(8),allocatable::translation_row_ids(:),translation_stream_row_ids(:),translation_point_overlap_row_ids(:)
     integer(8),allocatable::translation_spatial_ids(:),translation_generator_maps(:,:)
     integer,allocatable::local_point_product(:,:),local_point_integer_rotations(:,:,:),&
       translation_product(:,:),global_point_product(:,:),global_point_integer_rotations(:,:,:),&
@@ -680,6 +681,7 @@ contains
       translation_operator_workspace
     integer(8)::translation_position_fingerprint,translation_position_workspace,&
       translation_canonical_position_fingerprint,translation_canonical_position_workspace
+    integer(8)::translation_point_overlap_workspace
     integer(8)::translation_lcfo_fingerprint,translation_post_gauge_fingerprint,translation_global_core_count8
     integer(8)::composition_fingerprint,composition_workspace_peak,occupied_composition_peak,&
       occupied_composition_fingerprint,projector_composition_peak,projector_composition_fingerprint
@@ -1532,6 +1534,46 @@ contains
       translation_reference_rows,global_closed_core,w90_input_fingerprint,translation_reference_spatial,&
       translation_materialize_fingerprint,translation_materialize_workspace,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'reference character spatial materialization failed';endif
+    allocate(translation_point_overlap_basis(translation_sector_rank,ncore),stat=allocation_status)
+    call MPI_Allreduce(allocation_status,translation_allocation_status,1,MPI_INTEGER,MPI_MAX,&
+      dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.translation_allocation_status/=0)&
+      error stop 'reference point-overlap basis allocation failed collectively'
+    translation_point_overlap_basis=transpose(translation_reference_spatial)
+    call assemble_dg_distributed_basis_symmetry_overlap_rows(dc%icomm_tot,translation_point_overlap_basis,&
+      ow_core_weights,global_symmetry_map(:,global_point_representatives),translation_point_overlap_row_ids,&
+      translation_point_overlap_rows,translation_point_overlap_workspace,ok,message)
+    deallocate(translation_point_overlap_basis)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'reference point representation assembly failed';endif
+    product8=int(translation_sector_rank,8)
+    if(product8>huge(product8)/int(translation_sector_rank,8))&
+      error stop 'reference point representation square extent overflows'
+    product8=product8*int(translation_sector_rank,8)
+    if(product8>huge(product8)/int(size(global_point_representatives),8))&
+      error stop 'reference point representation extent overflows'
+    product8=product8*int(size(global_point_representatives),8)
+    if(product8>int(huge(0),8))error stop 'reference point representation MPI count overflows'
+    allocate(translation_point_representations(translation_sector_rank,translation_sector_rank,&
+      size(global_point_representatives)),stat=allocation_status)
+    call MPI_Allreduce(allocation_status,translation_allocation_status,1,MPI_INTEGER,MPI_MAX,&
+      dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.translation_allocation_status/=0)&
+      error stop 'reference point representation allocation failed collectively'
+    translation_point_representations=(0d0,0d0)
+    do p=1,size(translation_point_overlap_row_ids)
+      translation_point_representations(int(translation_point_overlap_row_ids(p)),:,:)=&
+        translation_point_overlap_rows(p,:,:)
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,translation_point_representations,size(translation_point_representations),&
+      MPI_DOUBLE_COMPLEX,MPI_SUM,dc%icomm_tot,ierr)
+    deallocate(translation_point_overlap_row_ids,translation_point_overlap_rows)
+    if(ierr/=MPI_SUCCESS)error stop 'reference point representation gather failed'
+    if(global_point_cogroup_identity_operation/=1)then
+      translation_anchor_rotation=translation_point_representations(:,:,1)
+      translation_point_representations(:,:,1)=&
+        translation_point_representations(:,:,global_point_cogroup_identity_operation)
+      translation_point_representations(:,:,global_point_cogroup_identity_operation)=translation_anchor_rotation
+    endif
     call build_dg_sector_periodic_position_tuple(dc%icomm_tot,translation_spatial_ids,&
       translation_global_core_count,translation_reference_spatial,translation_position_phases,&
       dg_ow_symmetry_tolerance,translation_materialize_fingerprint,translation_position_tuple,&
@@ -1550,12 +1592,15 @@ contains
       dg_ow_symmetry_tolerance,translation_position_fingerprint,translation_canonical_weighted,&
       translation_anchor_rotation,translation_joint_centers,translation_joint_objective,translation_joint_update,&
       translation_joint_sweeps,translation_canonical_position_defect,translation_canonical_position_fingerprint,&
-      translation_canonical_position_workspace,ok,message)
+      translation_canonical_position_workspace,ok,message,point_representations=translation_point_representations)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'reference periodic-position gauge failed';endif
+    translation_canonical_position_workspace=max(translation_canonical_position_workspace,&
+      translation_point_overlap_workspace)
     translation_reference_spatial=translation_canonical_weighted/&
       spread(sqrt(ow_core_weights),2,translation_sector_rank)
     deallocate(translation_canonical_weighted,translation_weighted_reference,translation_position_tuple,&
-      translation_position_phases,translation_anchor_rotation,translation_position_lcfo_operator)
+      translation_position_phases,translation_anchor_rotation,translation_position_lcfo_operator,&
+      translation_point_representations)
     deallocate(translation_joint_centers)
     deallocate(translation_sector_rows,translation_w90_operator,translation_lcfo_operator,translation_reference_rows)
 

@@ -82,6 +82,7 @@ program test_dg_overlapping_wannier_w90_mpi
     position_canonical_workspace,position_trial_position_fingerprint
   complex(8),allocatable::joint_canonical_rows(:,:),joint_trial_rows(:,:)
   complex(8)::joint_rotation(2,2),joint_trial_rotation(2,2)
+  complex(8)::joint_point_representations(2,2,2)
   real(8),allocatable::joint_centers(:,:),joint_trial_centers(:,:)
   real(8)::joint_objective,joint_trial_objective,joint_update,joint_trial_update,joint_defect,joint_trial_defect
   integer::joint_sweeps,joint_trial_sweeps
@@ -270,14 +271,34 @@ program test_dg_overlapping_wannier_w90_mpi
   sector_position_tuple(2,2,2)=exp(cmplx(0d0,1.4d0,8))
   sector_position_tuple(1,1,3)=exp(cmplx(0d0,0.7d0,8))
   sector_position_tuple(2,2,3)=exp(cmplx(0d0,1.8d0,8))
+  joint_point_representations=(0d0,0d0)
+  joint_point_representations(1,1,1)=1d0;joint_point_representations(2,2,1)=1d0
+  joint_point_representations(1,2,2)=1d0;joint_point_representations(2,1,2)=1d0
   do b=1,3
     position_trial_tuple(:,:,b)=matmul(conjg(transpose(position_input_rotation)),&
       matmul(sector_position_tuple(:,:,b),position_input_rotation))
   enddo
   call jointly_canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,&
     sector_position_tuple,position_lcfo_operator,1d-12,901_8,joint_canonical_rows,joint_rotation,&
-    joint_centers,joint_objective,joint_update,joint_sweeps,joint_defect,joint_fingerprint,joint_workspace,ok,message)
+    joint_centers,joint_objective,joint_update,joint_sweeps,joint_defect,joint_fingerprint,joint_workspace,ok,message,&
+    point_representations=joint_point_representations)
   call require(ok.and.joint_objective<1d-20.and.joint_defect<1d-10,'joint center gauge resolves distinct centers')
+  joint_point_representations(1,2,2)=2d0
+  call jointly_canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,&
+    sector_position_tuple,position_lcfo_operator,1d-12,903_8,joint_trial_rows,joint_trial_rotation,&
+    joint_trial_centers,joint_trial_objective,joint_trial_update,joint_trial_sweeps,joint_trial_defect,&
+    joint_trial_fingerprint,joint_workspace,ok,message,point_representations=joint_point_representations)
+  call require(.not.ok,'joint center gauge rejects a nonunitary point representation')
+  joint_point_representations(1,2,2)=1d0
+  if(nproc>1)then
+    if(rank==0)joint_point_representations(1,2,2)=-1d0
+    call jointly_canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,&
+      sector_position_tuple,position_lcfo_operator,1d-12,905_8,joint_trial_rows,joint_trial_rotation,&
+      joint_trial_centers,joint_trial_objective,joint_trial_update,joint_trial_sweeps,joint_trial_defect,&
+      joint_trial_fingerprint,joint_workspace,ok,message,point_representations=joint_point_representations)
+    call require(.not.ok,'joint center gauge rejects rank-disagreeing point representations')
+    if(rank==0)joint_point_representations(1,2,2)=1d0
+  endif
   call jointly_canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,position_rotated_sector,&
     position_trial_tuple,position_trial_operator,1d-12,907_8,joint_trial_rows,joint_trial_rotation,&
     joint_trial_centers,joint_trial_objective,joint_trial_update,joint_trial_sweeps,joint_trial_defect,&

@@ -271,10 +271,11 @@ contains
 
   subroutine jointly_canonicalize_dg_sector_periodic_position_gauge(comm,row_ids,sector_rows,position_tuple,&
       lcfo_operator,tolerance,tuple_fingerprint,aligned_rows,rotation,centers,final_objective,maximum_update,&
-      sweep_count,canonical_defect,fingerprint,workspace_peak_bytes,ok,message)
+      sweep_count,canonical_defect,fingerprint,workspace_peak_bytes,ok,message,point_representations)
     integer,intent(in)::comm
     integer(int64),intent(in)::row_ids(:),tuple_fingerprint
     complex(real64),intent(in)::sector_rows(:,:),position_tuple(:,:,:),lcfo_operator(:,:)
+    complex(real64),intent(in),optional::point_representations(:,:,:)
     real(real64),intent(in)::tolerance
     complex(real64),allocatable,intent(out)::aligned_rows(:,:)
     complex(real64),intent(out)::rotation(:,:)
@@ -293,8 +294,9 @@ contains
       local_objective,global_objective,local_update,global_update,quantum
     complex(real64)::sphase,jacobi(2,2),left_pair(2),right_pair(2),tmp,phase_fix,probe
     integer::nlocal,m,global_count,local_count,rank,ierr,bad,gbad,status,axis,q,pair_i,pair_j,&
-      i,j,k,l,r,block_size,sweep,info,minint,maxint,payload_count
+      i,j,k,l,r,block_size,sweep,info,minint,maxint,payload_count,npoint,point,hmatrix_count
     real(real64)::minimum_tolerance,maximum_tolerance,safe_position_magnitude,safe_lcfo_magnitude
+    real(real64)::gram_defect,point_leakage
     integer(int64)::bits,quantized,term,elements,bytes,peak,minimum_fingerprint,maximum_fingerprint,&
       payload_elements
     logical::receipt_valid,swapped
@@ -314,7 +316,8 @@ contains
         integer,intent(out)::info
       end subroutine
     end interface
-    nlocal=size(row_ids);m=size(sector_rows,2)
+    nlocal=size(row_ids);m=size(sector_rows,2);npoint=1
+    if(present(point_representations))npoint=size(point_representations,3)
     ok=.false.;message='';final_objective=huge(1d0);maximum_update=huge(1d0);canonical_defect=huge(1d0)
     fingerprint=0_int64;workspace_peak_bytes=0_int64;sweep_count=0;rotation=(0d0,0d0)
     bad=merge(0,1,nlocal>=1.and.m>=1.and.size(sector_rows,1)==nlocal.and.&
@@ -325,11 +328,23 @@ contains
       all(ieee_is_finite(aimag(sector_rows))).and.all(ieee_is_finite(real(position_tuple))).and.&
       all(ieee_is_finite(aimag(position_tuple))).and.all(ieee_is_finite(real(lcfo_operator))).and.&
       all(ieee_is_finite(aimag(lcfo_operator))))
+    if(present(point_representations))then
+      if(any(shape(point_representations,kind=int64)/=[int(m,int64),int(m,int64),int(npoint,int64)]).or.npoint<1)bad=1
+      if(bad==0)then
+        if(.not.all(ieee_is_finite(real(point_representations))).or.&
+            .not.all(ieee_is_finite(aimag(point_representations))))bad=1
+        if(maxval(abs(point_representations))>2d0)bad=1
+      endif
+    endif
+    if(npoint>huge(0)/6)bad=1
     call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='invalid joint periodic-center gauge contract';return;endif
     call MPI_Allreduce(m,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
     call MPI_Allreduce(m,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='joint periodic-center rank disagrees';return;endif
+    call MPI_Allreduce(npoint,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(npoint,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minint/=maxint)then;message='joint periodic-center point count disagrees';return;endif
     call MPI_Allreduce(tolerance,minimum_tolerance,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
     if(ierr/=MPI_SUCCESS)return
     call MPI_Allreduce(tolerance,maximum_tolerance,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
@@ -352,9 +367,11 @@ contains
     endif
     local_count=int(maxval(row_ids));call MPI_Allreduce(local_count,global_count,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     elements=0_int64;bytes=0_int64;receipt_valid=ierr==MPI_SUCCESS
-    if(receipt_valid)call checked_product([8_int64,int(m,int64),int(m,int64)],payload_elements,receipt_valid)
+    if(receipt_valid)call checked_product([8_int64+2_int64*int(npoint,int64),int(m,int64),int(m,int64)],&
+      payload_elements,receipt_valid)
     if(receipt_valid)receipt_valid=payload_elements<=int(huge(0),int64)
-    if(receipt_valid)call checked_product([9_int64,int(m,int64),int(m,int64)],term,receipt_valid)
+    if(receipt_valid)call checked_product([3_int64+6_int64*int(npoint,int64),int(m,int64),int(m,int64)],&
+      term,receipt_valid)
     call checked_add(elements,term,receipt_valid)
     if(receipt_valid)call checked_product([int(nlocal,int64),int(m,int64)],term,receipt_valid)
     call checked_add(elements,term,receipt_valid)
@@ -373,7 +390,8 @@ contains
     workspace_peak_bytes=bytes
     payload_count=int(payload_elements)
     call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
-    allocate(hmats(m,m,6),unitary(m,m),gram(m,m),stream(m),block(m,m),zwork(max(1,2*m)),&
+    hmatrix_count=6*npoint
+    allocate(hmats(m,m,hmatrix_count),unitary(m,m),gram(m,m),stream(m),block(m,m),zwork(max(1,2*m)),&
       block_eval(m),zrwork(max(1,3*m)),aligned_rows(nlocal,m),centers(3,m),&
       owner(global_count),position(global_count),count(global_count),order(m),payload_bits(payload_count),&
       payload_minimum(payload_count),payload_maximum(payload_count),stat=status)
@@ -397,6 +415,17 @@ contains
       k=k+1;payload_bits(k)=transfer(real(lcfo_operator(i,j),real64),bits)
       k=k+1;payload_bits(k)=transfer(aimag(lcfo_operator(i,j)),bits)
     enddo;enddo
+    if(present(point_representations))then
+      do point=1,npoint;do j=1,m;do i=1,m
+        k=k+1;payload_bits(k)=transfer(real(point_representations(i,j,point),real64),bits)
+        k=k+1;payload_bits(k)=transfer(aimag(point_representations(i,j,point)),bits)
+      enddo;enddo;enddo
+    else
+      do j=1,m;do i=1,m
+        k=k+1;payload_bits(k)=transfer(merge(1d0,0d0,i==j),bits)
+        k=k+1;payload_bits(k)=transfer(0d0,bits)
+      enddo;enddo
+    endif
     call MPI_Allreduce(payload_bits,payload_minimum,payload_count,MPI_INTEGER8,MPI_MIN,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;call cleanup();return;endif
     call MPI_Allreduce(payload_bits,payload_maximum,payload_count,MPI_INTEGER8,MPI_MAX,comm,ierr)
@@ -404,17 +433,47 @@ contains
       call cleanup();message='joint periodic-center payload disagrees';return
     endif
     do axis=1,3
-      hmats(:,:,2*axis-1)=0.5d0*(position_tuple(:,:,axis)+conjg(transpose(position_tuple(:,:,axis))))
-      hmats(:,:,2*axis)=cmplx(0d0,-0.5d0,real64)*(position_tuple(:,:,axis)-&
-        conjg(transpose(position_tuple(:,:,axis))))
+      gram=0.5d0*(position_tuple(:,:,axis)+conjg(transpose(position_tuple(:,:,axis))))
+      do point=1,npoint
+        q=6*(point-1)+2*axis-1
+        if(present(point_representations))then
+          hmats(:,:,q)=matmul(conjg(transpose(point_representations(:,:,point))),&
+            matmul(gram,point_representations(:,:,point)))
+        else
+          hmats(:,:,q)=gram
+        endif
+      enddo
+      gram=cmplx(0d0,-0.5d0,real64)*(position_tuple(:,:,axis)-conjg(transpose(position_tuple(:,:,axis))))
+      do point=1,npoint
+        q=6*(point-1)+2*axis
+        if(present(point_representations))then
+          hmats(:,:,q)=matmul(conjg(transpose(point_representations(:,:,point))),&
+            matmul(gram,point_representations(:,:,point)))
+        else
+          hmats(:,:,q)=gram
+        endif
+      enddo
     enddo
+    if(present(point_representations))then
+      do point=1,npoint
+        gram=matmul(conjg(transpose(point_representations(:,:,point))),point_representations(:,:,point))
+        do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+        if(maxval(abs(gram))>10d0*tolerance)bad=1
+      enddo
+      gram=point_representations(:,:,1);do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
+      if(maxval(abs(gram))>10d0*tolerance)bad=1
+      call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.gbad/=0)then
+        call cleanup();message='joint periodic-center point representations are not unitary with identity first';return
+      endif
+    endif
     unitary=(0d0,0d0);do i=1,m;unitary(i,i)=1d0;enddo
     maximum_update=0d0
     do sweep=1,100
       local_update=0d0
       do pair_j=2,m;do pair_i=1,pair_j-1
         gmat=0d0
-        do q=1,6
+        do q=1,hmatrix_count
           gvec=[real(hmats(pair_i,pair_i,q)-hmats(pair_j,pair_j,q),real64),&
             2d0*real(hmats(pair_i,pair_j,q),real64),-2d0*aimag(hmats(pair_i,pair_j,q))]
           do j=1,3;do i=1,3;gmat(i,j)=gmat(i,j)+gvec(i)*gvec(j);enddo;enddo
@@ -431,7 +490,7 @@ contains
         sabs=abs(sphase);if(sabs<=10d0*tolerance)cycle
         jacobi=reshape([cmplx(c,0d0,real64),sphase,-conjg(sphase),cmplx(c,0d0,real64)],[2,2])
         local_update=max(local_update,sabs)
-        do q=1,6
+        do q=1,hmatrix_count
           do k=1,m
             left_pair=[hmats(k,pair_i,q),hmats(k,pair_j,q)]
             hmats(k,pair_i,q)=left_pair(1)*jacobi(1,1)+left_pair(2)*jacobi(2,1)
@@ -454,7 +513,9 @@ contains
       if(global_update<=10d0*tolerance)exit
     enddo
     local_objective=0d0
-    do q=1,6;do j=1,m;do i=1,m;if(i/=j)local_objective=local_objective+abs(hmats(i,j,q))**2;enddo;enddo;enddo
+    do q=1,hmatrix_count;do j=1,m;do i=1,m
+      if(i/=j)local_objective=local_objective+abs(hmats(i,j,q))**2
+    enddo;enddo;enddo
     call MPI_Allreduce(local_objective,global_objective,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     final_objective=global_objective
     if(ierr/=MPI_SUCCESS.or.maximum_update>10d0*tolerance)then;call cleanup();message='joint periodic-center sweeps did not converge';return;endif
@@ -518,8 +579,35 @@ contains
     gram=matmul(conjg(transpose(aligned_rows)),aligned_rows)
     call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
     do i=1,m;gram(i,i)=gram(i,i)-1d0;enddo
-    canonical_defect=maxval(abs(gram));call MPI_Allreduce(MPI_IN_PLACE,canonical_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.canonical_defect>10d0*tolerance)then;call cleanup();message='joint periodic-center frame is not orthonormal';return;endif
+    gram_defect=maxval(abs(gram));point_leakage=0d0
+    if(present(point_representations))then
+      do point=1,npoint
+        block=matmul(conjg(transpose(unitary)),matmul(point_representations(:,:,point),unitary))
+        do j=1,m
+          local_update=0d0;l=1
+          do while(l<=m)
+            r=l
+            do while(r<m)
+              if(any(min(abs(centers(:,r+1)-centers(:,l)),1d0-abs(centers(:,r+1)-centers(:,l)))>&
+                  tolerance**0.25d0))exit
+              r=r+1
+            enddo
+            local_update=max(local_update,sum(abs(block(l:r,j))**2));l=r+1
+          enddo
+          point_leakage=max(point_leakage,max(0d0,1d0-local_update))
+        enddo
+      enddo
+    endif
+    call MPI_Allreduce(MPI_IN_PLACE,gram_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(MPI_IN_PLACE,point_leakage,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    canonical_defect=max(gram_defect,point_leakage)
+    if(ierr/=MPI_SUCCESS.or.gram_defect>10d0*tolerance)then
+      call cleanup();message='joint periodic-center frame is not orthonormal';return
+    endif
+    if(point_leakage>tolerance**0.25d0)then
+      call cleanup();message='joint periodic-center point action leaks between center blocks';return
+    endif
     quantum=100d0*tolerance;fingerprint=int(z'510E527FADE682D1',int64)
     fingerprint=ieor(ishftc(fingerprint,9),int(global_count,int64))
     fingerprint=ieor(ishftc(fingerprint,9),int(m,int64))

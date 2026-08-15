@@ -174,6 +174,19 @@ prepared_apply_position = ow_ground_state_body.find(
 assert 0 <= prepare_position < character_loop_position < prepared_apply_position, (
     "translation action must be prepared once before the character loop and reused inside it"
 )
+reference_materialize_position = ow_ground_state_body.find(
+    "call materialize_dg_row_owned_sector_on_spatial_grid"
+)
+joint_center_position = ow_ground_state_body.find(
+    "call jointly_canonicalize_dg_sector_periodic_position_gauge"
+)
+point_overlap_position = ow_ground_state_body.find(
+    "call assemble_dg_distributed_basis_symmetry_overlap_rows",
+    reference_materialize_position,
+)
+assert reference_materialize_position < point_overlap_position < joint_center_position, (
+    "the reference periodic-center objective must consume compact point-cogroup overlaps"
+)
 assert "call build_dg_translation_character_intertwining_phase(" not in ow_ground_state_body, (
     "production must not rebuild the finite translation action for every character"
 )
