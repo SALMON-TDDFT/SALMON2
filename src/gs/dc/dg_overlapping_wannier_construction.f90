@@ -114,7 +114,211 @@ module dg_overlapping_wannier_construction
     release_dg_prepared_spectral_basins
   public::diagonalize_dg_spectral_basin_operator
   public::select_dg_spectral_basin_channel_ranks
+  public::propagate_dg_spectral_basin_orbit_channels
 contains
+
+  subroutine propagate_dg_spectral_basin_orbit_channels(comm,row_ids,generator_rows,basin_generator_maps,&
+      selected_ranks,representative_vectors,representation_fingerprint,catalog_fingerprint,tolerance,&
+      trial_rows,gram_defect,fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,basin_generator_maps(:,:),selected_ranks(:)
+    integer(int64),intent(in)::row_ids(:),representation_fingerprint,catalog_fingerprint
+    complex(real64),intent(in)::generator_rows(:,:,:),representative_vectors(:,:)
+    real(real64),intent(in)::tolerance
+    complex(real64),allocatable,intent(out)::trial_rows(:,:)
+    real(real64),intent(out)::gram_defect
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nlocal,nstate,ngenerator,nbasin,i,j,g,b,o,norbit,head,tail,target,r,rmax,&
+      current_basin,path_length,column_first,representative_columns,status,ierr,local_bad,global_bad,&
+      minint,maxint,p
+    integer,allocatable::ownership(:),orbit_id(:),parent(:),parent_generator(:),queue(:),path(:),&
+      representative(:),representative_offset(:),column_offset(:)
+    complex(real64),allocatable::current(:,:),next(:,:),gram(:,:)
+    integer(int64)::minhash,maxhash,local_hash,global_hash,quantized,integer_elements,complex_elements,&
+      local_workspace
+    real(real64)::minreal,maxreal,quantum,local_max,global_max
+
+    ok=.false.;message='';gram_defect=huge(1d0);fingerprint=0_int64;workspace_peak_bytes=0_int64
+    nlocal=size(row_ids);nstate=size(generator_rows,2);ngenerator=size(generator_rows,3)
+    nbasin=size(selected_ranks)
+    local_bad=0
+    if(nstate<1.or.nbasin<1.or.ngenerator<0.or.size(generator_rows,1)/=nlocal.or.&
+        size(basin_generator_maps,1)/=nbasin.or.size(basin_generator_maps,2)/=ngenerator.or.&
+        size(representative_vectors,1)/=nstate.or.any(selected_ranks<0).or.sum(selected_ranks)/=nstate.or.&
+        representation_fingerprint==0_int64.or.catalog_fingerprint==0_int64.or.&
+        .not.ieee_is_finite(tolerance).or.tolerance<=0d0.or.tolerance>huge(1d0)/100d0)then
+      local_bad=1
+    elseif(any(row_ids<1_int64).or.any(row_ids>int(nstate,int64)).or.&
+        any(basin_generator_maps<1).or.any(basin_generator_maps>nbasin).or.&
+        .not.all(ieee_is_finite(real(generator_rows))).or.&
+        .not.all(ieee_is_finite(aimag(generator_rows))).or.&
+        .not.all(ieee_is_finite(real(representative_vectors))).or.&
+        .not.all(ieee_is_finite(aimag(representative_vectors))))then
+      local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid spectral basin orbit propagation contract';return;endif
+    do i=1,4
+      select case(i)
+      case(1);local_bad=nstate
+      case(2);local_bad=nbasin
+      case(3);local_bad=ngenerator
+      case default;local_bad=size(representative_vectors,2)
+      end select
+      call MPI_Allreduce(local_bad,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(local_bad,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(minint/=maxint)then;message='spectral basin orbit propagation dimensions disagree';return;endif
+    enddo
+    do i=1,2
+      if(i==1)then;local_hash=representation_fingerprint;else;local_hash=catalog_fingerprint;endif
+      call MPI_Allreduce(local_hash,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(local_hash,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(minhash/=maxhash)then;message='spectral basin orbit propagation provenance disagrees';return;endif
+    enddo
+    call MPI_Allreduce(tolerance,minreal,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tolerance,maxreal,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(transfer(minreal,0_int64)/=transfer(maxreal,0_int64))then
+      message='spectral basin orbit propagation tolerance disagrees';return
+    endif
+    local_bad=0
+    do b=1,nbasin
+      call MPI_Allreduce(selected_ranks(b),minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(selected_ranks(b),maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(minint/=maxint)local_bad=1
+    enddo
+    do g=1,ngenerator;do b=1,nbasin
+      call MPI_Allreduce(basin_generator_maps(b,g),minint,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+      if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(basin_generator_maps(b,g),maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS)return
+      if(minint/=maxint)local_bad=1
+    enddo;enddo
+    do g=1,ngenerator;do b=1,nbasin
+      if(count(basin_generator_maps(:,g)==b)/=1)local_bad=1
+    enddo;enddo
+    if(int(nstate,int64)>int(huge(0),int64)/int(nstate,int64))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='spectral basin orbit propagation metadata or extent is invalid';return
+    endif
+    allocate(ownership(nstate),orbit_id(nbasin),parent(nbasin),parent_generator(nbasin),queue(nbasin),&
+      path(nbasin),representative(nbasin),representative_offset(nbasin+1),column_offset(nbasin+1),stat=status)
+    call MPI_Allreduce(merge(0,1,status==0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='spectral basin orbit metadata allocation failed';return
+    endif
+    ownership=0
+    do p=1,nlocal;ownership(int(row_ids(p)))=ownership(int(row_ids(p)))+1;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,ownership,nstate,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(ownership/=1))then
+      message='spectral basin orbit state rows are not owned exactly once';return
+    endif
+    orbit_id=0;parent=0;parent_generator=0;representative=0;norbit=0;local_bad=0
+    do b=1,nbasin
+      if(orbit_id(b)/=0)cycle
+      norbit=norbit+1;representative(norbit)=b;head=1;tail=1;queue(1)=b;orbit_id(b)=norbit;parent(b)=b
+      do while(head<=tail)
+        target=queue(head);head=head+1
+        do g=1,ngenerator
+          i=basin_generator_maps(target,g)
+          if(selected_ranks(i)/=selected_ranks(target))local_bad=1
+          if(orbit_id(i)==0)then
+            tail=tail+1;queue(tail)=i;orbit_id(i)=norbit;parent(i)=target;parent_generator(i)=g
+          elseif(orbit_id(i)/=norbit)then
+            local_bad=1
+          endif
+        enddo
+      enddo
+    enddo
+    representative_offset(1)=1
+    do o=1,norbit
+      representative_offset(o+1)=representative_offset(o)+selected_ranks(representative(o))
+    enddo
+    representative_columns=representative_offset(norbit+1)-1
+    if(representative_columns/=size(representative_vectors,2))local_bad=1
+    column_offset(1)=1
+    do b=1,nbasin;column_offset(b+1)=column_offset(b)+selected_ranks(b);enddo
+    rmax=max(1,maxval(selected_ranks))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='spectral basin orbit ranks or representatives are incomplete';return
+    endif
+    allocate(trial_rows(nlocal,nstate),current(nstate,rmax),next(nstate,rmax),gram(nstate,nstate),stat=status)
+    call MPI_Allreduce(merge(0,1,status==0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(trial_rows))deallocate(trial_rows)
+      message='spectral basin orbit channel allocation failed';return
+    endif
+    trial_rows=(0d0,0d0)
+    do b=1,nbasin
+      o=orbit_id(b);r=selected_ranks(b);if(r==0)cycle
+      current(:,1:r)=representative_vectors(:,representative_offset(o):representative_offset(o+1)-1)
+      path_length=0;current_basin=b
+      do while(current_basin/=representative(o))
+        path_length=path_length+1;path(path_length)=parent_generator(current_basin)
+        current_basin=parent(current_basin)
+      enddo
+      do i=path_length,1,-1
+        g=path(i);next(:,1:r)=(0d0,0d0)
+        do p=1,nlocal
+          next(int(row_ids(p)),1:r)=matmul(generator_rows(p,:,g),current(:,1:r))
+        enddo
+        call MPI_Allreduce(MPI_IN_PLACE,next,nstate*r,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then;message='spectral basin orbit block propagation failed';return;endif
+        current(:,1:r)=next(:,1:r)
+      enddo
+      column_first=column_offset(b)
+      do p=1,nlocal
+        trial_rows(p,column_first:column_first+r-1)=current(int(row_ids(p)),1:r)
+      enddo
+    enddo
+    gram=(0d0,0d0)
+    if(nlocal>0)call zgemm('C','N',nstate,nstate,nlocal,(1d0,0d0),trial_rows,nlocal,trial_rows,nlocal,&
+      (0d0,0d0),gram,nstate)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,nstate*nstate,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='spectral basin orbit Gram reduction failed';return;endif
+    gram_defect=0d0
+    do j=1,nstate;do i=1,nstate
+      if(i==j)then;gram_defect=max(gram_defect,abs(gram(i,j)-1d0));else;gram_defect=max(gram_defect,abs(gram(i,j)));endif
+    enddo;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,gram_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or..not.ieee_is_finite(gram_defect).or.gram_defect>10d0*tolerance)then
+      message='spectral basin orbit channels do not span an orthonormal retained frame';return
+    endif
+    quantum=100d0*tolerance;local_max=maxval(abs(trial_rows))
+    call MPI_Allreduce(local_max,global_max,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_max>0.25d0*real(huge(0_int64),real64)*quantum)then
+      message='spectral basin orbit channel fingerprint range is unsafe';return
+    endif
+    local_hash=0_int64
+    do p=1,nlocal;do j=1,nstate
+      quantized=nint(real(trial_rows(p,j))/quantum,int64)
+      local_hash=ieor(local_hash,ieor(ishftc(row_ids(p),7),ieor(ishftc(int(j,int64),17),quantized)))
+      quantized=nint(aimag(trial_rows(p,j))/quantum,int64)
+      local_hash=ieor(local_hash,ieor(ishftc(row_ids(p),11),ieor(ishftc(int(j,int64),23),quantized)))
+    enddo;enddo
+    call MPI_Allreduce(local_hash,global_hash,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    global_hash=ieor(global_hash,ieor(representation_fingerprint,ishftc(catalog_fingerprint,13)))
+    if(global_hash==0_int64)global_hash=1_int64
+    integer_elements=int(nstate,int64)+8_int64*int(nbasin,int64)+3_int64
+    complex_elements=int(nlocal,int64)*int(nstate,int64)+2_int64*int(nstate,int64)*int(rmax,int64)+&
+      int(nstate,int64)*int(nstate,int64)
+    if(complex_elements>huge(0_int64)/16_int64.or.integer_elements>huge(0_int64)/4_int64.or.&
+        16_int64*complex_elements>huge(0_int64)-4_int64*integer_elements)then
+      message='spectral basin orbit workspace receipt overflow';return
+    endif
+    local_workspace=16_int64*complex_elements+4_int64*integer_elements
+    call MPI_Allreduce(local_workspace,workspace_peak_bytes,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    fingerprint=global_hash;ok=.true.
+#else
+    ok=.false.;message='spectral basin orbit propagation requires MPI';gram_defect=huge(1d0)
+    fingerprint=0_int64;workspace_peak_bytes=0_int64
+#endif
+  end subroutine propagate_dg_spectral_basin_orbit_channels
 
   subroutine select_dg_spectral_basin_channel_ranks(comm,spectra,block_ends,basin_generator_maps,&
       retained_rank,tolerance,selected_ranks,fingerprint,workspace_peak_bytes,ok,message,&

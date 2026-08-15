@@ -8,6 +8,7 @@ program test_dg_overlapping_wannier_eigenexa_mpi
     build_dg_cocycle_averaged_occupied_candidates_eigenexa,measure_dg_rank_fixed_symmetry_residuals,&
     split_dg_translation_character_sector_eigenexa,validate_dg_translation_sector_cluster,&
     diagonalize_dg_spectral_basin_operator,select_dg_spectral_basin_channel_ranks
+  use dg_overlapping_wannier_construction,only:propagate_dg_spectral_basin_orbit_channels
   implicit none
   type(s_parallel_info)::info
   integer::comm,rank,nproc,ierr,i,p,nlocal
@@ -81,8 +82,12 @@ contains
     real(8),allocatable::spectrum(:),rotated_spectrum(:)
     integer,allocatable::block_offsets(:),rotated_offsets(:)
     integer::orbit_map(2,1),selected_ranks(2),payload_collectives
+    integer::ii,jj,local_row
     real(8)::catalog_spectra(4,2)
     logical::block_ends(4,2)
+    integer(8),allocatable::propagation_row_ids(:)
+    complex(8),allocatable::propagation_generators(:,:,:),representative_vectors(:,:),trial_rows(:,:)
+    real(8)::trial_gram_defect,trial_frame_defect
     real(8)::residual,rotated_residual,angle
     integer(8)::fingerprint,rotated_fingerprint,workspace
     logical::basin_ok
@@ -121,6 +126,34 @@ contains
       selected_ranks,fingerprint,workspace,basin_ok,basin_message,payload_collectives)
     call require(basin_ok.and.all(selected_ranks==[2,2]).and.payload_collectives==6,&
       'spectral basin catalog spans retained rank with equal orbit ranks')
+    nlocal=count([(mod(ii-1,nproc)==rank,ii=1,4)])
+    allocate(propagation_row_ids(nlocal),propagation_generators(nlocal,4,1),representative_vectors(4,2))
+    propagation_generators=(0d0,0d0);representative_vectors=(0d0,0d0)
+    representative_vectors(1,1)=1d0;representative_vectors(2,2)=1d0;local_row=0
+    do ii=1,4
+      if(mod(ii-1,nproc)/=rank)cycle
+      local_row=local_row+1;propagation_row_ids(local_row)=ii
+      select case(ii)
+      case(1);propagation_generators(local_row,3,1)=1d0
+      case(2);propagation_generators(local_row,4,1)=1d0
+      case(3);propagation_generators(local_row,1,1)=1d0
+      case(4);propagation_generators(local_row,2,1)=1d0
+      end select
+    enddo
+    call propagate_dg_spectral_basin_orbit_channels(comm,propagation_row_ids,propagation_generators,&
+      orbit_map,selected_ranks,representative_vectors,8801_8,fingerprint,1d-10,trial_rows,&
+      trial_gram_defect,rotated_fingerprint,workspace,basin_ok,basin_message)
+    call require(basin_ok.and.trial_gram_defect<1d-12,&
+      'one representative eigenspace propagates to a complete row-owned trial frame')
+    trial_frame_defect=0d0
+    do local_row=1,nlocal
+      ii=int(propagation_row_ids(local_row))
+      trial_frame_defect=max(trial_frame_defect,&
+        maxval(abs(trial_rows(local_row,:)-[(merge((1d0,0d0),(0d0,0d0),jj==ii),jj=1,4)])))
+    enddo
+    call require(trial_frame_defect<1d-12,&
+      'propagated spectral basin trial frame has canonical basin-column order')
+    fingerprint=rotated_fingerprint
     if(trim(case_name)=='spectral_basin_split')then
       catalog_spectra(:,1)=[1d0,0.6d0,0.6d0,0d0];catalog_spectra(:,2)=catalog_spectra(:,1)
       block_ends=.false.;block_ends(1,:)=.true.;block_ends(3,:)=.true.;block_ends(4,:)=.true.
