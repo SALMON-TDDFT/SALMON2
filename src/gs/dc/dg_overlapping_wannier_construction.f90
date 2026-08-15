@@ -5590,7 +5590,9 @@ contains
       symmetry_target_box_ids,product_table,identity_operation,requested_count,tolerance,&
       candidates,spectrum,candidate_rank,projector_trace,closure_residual,gamma_real_defect,&
       workspace_peak_bytes,ok,message,selected_edge,rejected_edge,cluster_gap,&
-      cocycle_translation_target_box_ids,translation_cocycle)
+      cocycle_translation_target_box_ids,translation_cocycle,occupied_hamiltonian,&
+      secondary_selected_edge,secondary_rejected_edge,secondary_cluster_gap,&
+      primary_boundary_dimension)
     type(s_parallel_info),intent(in)::info
     integer,intent(in)::comm,product_table(:,:),identity_operation,requested_count
     complex(real64),intent(in)::occupied(:,:)
@@ -5606,25 +5608,47 @@ contains
     real(real64),intent(out),optional::selected_edge,rejected_edge,cluster_gap
     integer(int64),intent(in),optional::cocycle_translation_target_box_ids(:,:)
     integer,intent(in),optional::translation_cocycle(:,:)
+    complex(real64),intent(in),optional::occupied_hamiltonian(:,:)
+    real(real64),intent(out),optional::secondary_selected_edge,secondary_rejected_edge,&
+      secondary_cluster_gap
+    integer,intent(out),optional::primary_boundary_dimension
     complex(real64),allocatable::left_image(:,:),right_image(:,:),local_block(:,:),global_block(:,:),&
       local_occupied_metric(:,:),occupied_metric(:,:),&
       label(:,:),composed_label(:,:),expected_label(:,:),cocycle_label(:,:)
     real(real64),allocatable::cyclic_gram(:,:),cyclic_vectors(:,:),all_spectrum(:),&
-      eigenvector(:),total_residual(:),boundary_residual(:),interior_residual(:)
+      eigenvector(:),primary_block_vectors(:,:),secondary_spectrum(:),secondary_rwork(:),&
+      total_residual(:),boundary_residual(:),interior_residual(:)
+    complex(real64),allocatable::secondary_matrix(:,:),secondary_work(:),orbit_vector(:)
     logical,allocatable::no_boundary(:)
     integer::noccupied,nlocal,noperation,orbit_rank,left_operation,right_operation,&
-      left_first,right_first,i,j,k,global_row,global_column,local_row,local_column,ierr,rank
+      left_first,right_first,i,j,k,global_row,global_column,local_row,local_column,ierr,rank,&
+      boundary_first,boundary_last,boundary_size,boundary_needed,cutoff,output_index,&
+      primary_index,secondary_index,lapack_info,lwork,local_bad,global_bad
     real(real64)::local_imaginary,global_imaginary,scale,local_group_defect,global_group_defect,&
       occupied_metric_defect,occupied_metric_scale
     integer(int64)::complex_bytes,real_bytes
     logical::eigen_ok
     character(256)::detail
+    interface
+      subroutine zheev(jobz,uplo,n,a,lda,w,work,lwork,rwork,info)
+        import::real64
+        character,intent(in)::jobz,uplo
+        integer,intent(in)::n,lda,lwork
+        complex(real64),intent(inout)::a(lda,*),work(*)
+        real(real64),intent(out)::w(*),rwork(*)
+        integer,intent(out)::info
+      end subroutine zheev
+    end interface
 
     ok=.false.;message='';candidate_rank=0;projector_trace=huge(1d0)
     closure_residual=huge(1d0);gamma_real_defect=huge(1d0);workspace_peak_bytes=0_int64
     if(present(selected_edge))selected_edge=huge(1d0)
     if(present(rejected_edge))rejected_edge=huge(1d0)
     if(present(cluster_gap))cluster_gap=huge(1d0)
+    if(present(secondary_selected_edge))secondary_selected_edge=huge(1d0)
+    if(present(secondary_rejected_edge))secondary_rejected_edge=huge(1d0)
+    if(present(secondary_cluster_gap))secondary_cluster_gap=huge(1d0)
+    if(present(primary_boundary_dimension))primary_boundary_dimension=0
     noccupied=size(occupied,1);nlocal=size(occupied,2);noperation=size(symmetry_target_box_ids,2)
     if(present(cocycle_translation_target_box_ids).neqv.present(translation_cocycle))then
       message='distributed group-average cocycle inputs must be requested together';return
@@ -5646,6 +5670,25 @@ contains
           any(translation_cocycle>size(cocycle_translation_target_box_ids,2)))then
         message='invalid distributed group-average translation cocycle';return
       endif
+    endif
+    if(present(occupied_hamiltonian))then
+      local_bad=merge(1,0,any(shape(occupied_hamiltonian)/=[noccupied,noccupied]).or.&
+        .not.all(ieee_is_finite(real(occupied_hamiltonian))).or.&
+        .not.all(ieee_is_finite(aimag(occupied_hamiltonian))))
+      if(local_bad==0)then
+        if(maxval(abs(occupied_hamiltonian-conjg(transpose(occupied_hamiltonian))))>&
+            tolerance*max(1d0,maxval(abs(occupied_hamiltonian))))local_bad=1
+      endif
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+        message='invalid occupied Hamiltonian tiebreak contract';return
+      endif
+      do j=1,noccupied;do i=1,noccupied
+        call agree_complex_scalar(occupied_hamiltonian(i,j),local_bad)
+        if(local_bad/=0)then
+          message='occupied Hamiltonian tiebreak disagrees across ranks';return
+        endif
+      enddo;enddo
     endif
     if(noccupied>huge(orbit_rank)/noperation)then
       message='distributed group-averaged occupied orbit rank overflow';return
@@ -5778,33 +5821,107 @@ contains
       if(present(rejected_edge))rejected_edge=0d0
       if(present(cluster_gap))cluster_gap=all_spectrum(1)
     endif
-    if(requested_count<orbit_rank)then
-      if(abs(all_spectrum(orbit_rank-requested_count+1)-all_spectrum(orbit_rank-requested_count))<=&
-          tolerance*max(1d0,maxval(abs(all_spectrum))))then
+    cutoff=orbit_rank-requested_count+1;boundary_first=cutoff;boundary_last=cutoff
+    if(requested_count<orbit_rank.and.abs(all_spectrum(cutoff)-all_spectrum(cutoff-1))<=&
+        tolerance*max(1d0,maxval(abs(all_spectrum))))then
+      do while(boundary_first>1)
+        if(abs(all_spectrum(boundary_first)-all_spectrum(boundary_first-1))>&
+            tolerance*max(1d0,maxval(abs(all_spectrum))))exit
+        boundary_first=boundary_first-1
+      enddo
+      do while(boundary_last<orbit_rank)
+        if(abs(all_spectrum(boundary_last+1)-all_spectrum(boundary_last))>&
+            tolerance*max(1d0,maxval(abs(all_spectrum))))exit
+        boundary_last=boundary_last+1
+      enddo
+      if(.not.present(occupied_hamiltonian))then
         ok=.false.;message='requested occupied rank cuts a group-averaged degenerate block';return
       endif
     endif
-    projector_trace=sum(all_spectrum);candidate_rank=requested_count
-    allocate(candidates(candidate_rank,nlocal),spectrum(candidate_rank),eigenvector(orbit_rank))
-    candidates=(0d0,0d0)
-    do i=1,candidate_rank
-      j=orbit_rank-i+1;spectrum(i)=all_spectrum(j)
-      if(spectrum(i)<=tolerance*max(1d0,maxval(abs(all_spectrum))))then
-        ok=.false.;message='distributed group-average requested candidate has zero weight';return
-      endif
-      call gather_eigenvector(j,eigenvector,ok,detail)
-      if(.not.ok)then;message=trim(detail);return;endif
-      do left_operation=1,noperation
-        call exchange_dg_point_permuted_orbital_rows(comm,occupied,&
-          symmetry_target_box_ids(:,left_operation),left_image,ok,detail)
-        if(.not.ok)then;message='distributed group-average reconstruction: '//trim(detail);return;endif
-        left_first=(left_operation-1)*noccupied+1
-        do k=1,noccupied
-          candidates(i,:)=candidates(i,:)+eigenvector(left_first+k-1)*left_image(k,:)/&
-            sqrt(real(noperation,real64)*spectrum(i))
-        enddo
+    boundary_size=boundary_last-boundary_first+1
+    boundary_needed=boundary_last-cutoff+1
+    if(present(primary_boundary_dimension))primary_boundary_dimension=boundary_size
+    if(boundary_size>1.and.boundary_needed<boundary_size)then
+      allocate(primary_block_vectors(orbit_rank,boundary_size),secondary_matrix(boundary_size,boundary_size),&
+        secondary_spectrum(boundary_size),secondary_rwork(max(1,3*boundary_size-2)))
+      do i=1,boundary_size
+        call gather_eigenvector(boundary_first+i-1,primary_block_vectors(:,i),ok,detail)
+        if(.not.ok)then;message=trim(detail);return;endif
       enddo
-    enddo
+      secondary_matrix=(0d0,0d0)
+      do j=1,boundary_size;do i=1,boundary_size
+        do left_operation=1,noperation
+          left_first=(left_operation-1)*noccupied
+          do k=1,noccupied;do local_column=1,noccupied
+            secondary_matrix(i,j)=secondary_matrix(i,j)+&
+              primary_block_vectors(left_first+k,i)*occupied_hamiltonian(k,local_column)*&
+              primary_block_vectors(left_first+local_column,j)*&
+              sqrt(max(0d0,all_spectrum(boundary_first+i-1))*&
+                   max(0d0,all_spectrum(boundary_first+j-1)))
+          enddo;enddo
+        enddo
+      enddo;enddo
+      allocate(secondary_work(1));lwork=-1
+      call zheev('V','U',boundary_size,secondary_matrix,boundary_size,secondary_spectrum,&
+        secondary_work,lwork,secondary_rwork,lapack_info)
+      local_bad=merge(1,0,lapack_info/=0.or..not.ieee_is_finite(real(secondary_work(1))))
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+        message='occupied Hamiltonian tiebreak workspace query failed';return
+      endif
+      lwork=max(1,ceiling(real(secondary_work(1),real64)));deallocate(secondary_work);allocate(secondary_work(lwork))
+      call zheev('V','U',boundary_size,secondary_matrix,boundary_size,secondary_spectrum,&
+        secondary_work,lwork,secondary_rwork,lapack_info)
+      local_bad=merge(1,0,lapack_info/=0.or..not.all(ieee_is_finite(secondary_spectrum)).or.&
+        .not.all(ieee_is_finite(real(secondary_matrix))).or..not.all(ieee_is_finite(aimag(secondary_matrix))))
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+        message='occupied Hamiltonian tiebreak eigensystem failed';return
+      endif
+      if(abs(secondary_spectrum(boundary_needed+1)-secondary_spectrum(boundary_needed))<=&
+          tolerance*max(1d0,maxval(abs(secondary_spectrum))))then
+        ok=.false.;message='occupied Hamiltonian does not resolve the group-average boundary multiplet';return
+      endif
+      if(present(secondary_selected_edge))secondary_selected_edge=secondary_spectrum(boundary_needed)
+      if(present(secondary_rejected_edge))secondary_rejected_edge=secondary_spectrum(boundary_needed+1)
+      if(present(secondary_cluster_gap))secondary_cluster_gap=&
+        secondary_spectrum(boundary_needed+1)-secondary_spectrum(boundary_needed)
+    endif
+    projector_trace=sum(all_spectrum);candidate_rank=requested_count
+    allocate(candidates(candidate_rank,nlocal),spectrum(candidate_rank),eigenvector(orbit_rank),orbit_vector(orbit_rank))
+    candidates=(0d0,0d0)
+    output_index=0
+    if(boundary_size>1.and.boundary_needed<boundary_size)then
+      do primary_index=orbit_rank,boundary_last+1,-1
+        output_index=output_index+1;j=primary_index;spectrum(output_index)=all_spectrum(j)
+        call gather_eigenvector(j,eigenvector,ok,detail)
+        if(.not.ok)then;message=trim(detail);return;endif
+        orbit_vector=cmplx(eigenvector,0d0,real64)
+        call reconstruct_candidate(output_index,orbit_vector)
+        if(.not.ok)return
+      enddo
+      do secondary_index=1,boundary_needed
+        output_index=output_index+1;spectrum(output_index)=all_spectrum(cutoff)
+        orbit_vector=matmul(cmplx(primary_block_vectors,0d0,real64),secondary_matrix(:,secondary_index))
+        call reconstruct_candidate(output_index,orbit_vector)
+        if(.not.ok)return
+      enddo
+    else
+      do primary_index=orbit_rank,cutoff,-1
+        output_index=output_index+1;j=primary_index;spectrum(output_index)=all_spectrum(j)
+        call gather_eigenvector(j,eigenvector,ok,detail)
+        if(.not.ok)then;message=trim(detail);return;endif
+        orbit_vector=cmplx(eigenvector,0d0,real64)
+        call reconstruct_candidate(output_index,orbit_vector)
+        if(.not.ok)return
+      enddo
+    endif
+    if(any(spectrum<=tolerance*max(1d0,maxval(abs(all_spectrum)))))then
+      ok=.false.;message='distributed group-average requested candidate has zero weight';return
+    endif
+    if(output_index/=candidate_rank)then
+      ok=.false.;message='occupied Hamiltonian tiebreak selected the wrong candidate count';return
+    endif
     allocate(total_residual(noperation),boundary_residual(noperation),interior_residual(noperation),&
       no_boundary(nlocal));no_boundary=.false.
     call measure_dg_rank_fixed_symmetry_residuals(comm,candidates,weights,symmetry_target_box_ids,&
@@ -5821,6 +5938,40 @@ contains
       workspace_peak_bytes>0_int64
     if(ok)then;message='';else;message='nonfinite distributed group-average receipt';endif
   contains
+    subroutine reconstruct_candidate(candidate_index,coefficients)
+      integer,intent(in)::candidate_index
+      complex(real64),intent(in)::coefficients(:)
+      do left_operation=1,noperation
+        call exchange_dg_point_permuted_orbital_rows(comm,occupied,&
+          symmetry_target_box_ids(:,left_operation),left_image,ok,detail)
+        if(.not.ok)then;message='distributed group-average reconstruction: '//trim(detail);return;endif
+        left_first=(left_operation-1)*noccupied+1
+        do k=1,noccupied
+          candidates(candidate_index,:)=candidates(candidate_index,:)+&
+            coefficients(left_first+k-1)*left_image(k,:)/&
+            sqrt(real(noperation,real64)*spectrum(candidate_index))
+        enddo
+      enddo
+    end subroutine reconstruct_candidate
+
+    subroutine agree_complex_scalar(value,bad)
+      complex(real64),intent(in)::value
+      integer,intent(out)::bad
+      integer(int64)::bits,minimum_bits,maximum_bits
+      integer::error
+      bad=0
+      bits=transfer(real(value,real64),bits)
+      call MPI_Allreduce(bits,minimum_bits,1,MPI_INTEGER8,MPI_MIN,comm,error)
+      if(error/=MPI_SUCCESS)then;bad=1;return;endif
+      call MPI_Allreduce(bits,maximum_bits,1,MPI_INTEGER8,MPI_MAX,comm,error)
+      if(error/=MPI_SUCCESS.or.minimum_bits/=maximum_bits)then;bad=1;return;endif
+      bits=transfer(aimag(value),bits)
+      call MPI_Allreduce(bits,minimum_bits,1,MPI_INTEGER8,MPI_MIN,comm,error)
+      if(error/=MPI_SUCCESS)then;bad=1;return;endif
+      call MPI_Allreduce(bits,maximum_bits,1,MPI_INTEGER8,MPI_MAX,comm,error)
+      if(error/=MPI_SUCCESS.or.minimum_bits/=maximum_bits)bad=1
+    end subroutine agree_complex_scalar
+
     subroutine gather_eigenvector(column,values,gather_ok,gather_message)
       integer,intent(in)::column
       real(real64),intent(out)::values(:)
@@ -6554,7 +6705,9 @@ contains
   subroutine build_dg_cocycle_averaged_occupied_candidates_eigenexa(info,comm,occupied,weights,&
       translation_target_box_ids,representative_target_box_ids,point_product,translation_cocycle,&
       identity_operation,requested_count,tolerance,candidates,spectrum,candidate_rank,projector_trace,&
-      closure_residual,gamma_real_defect,workspace_peak_bytes,ok,message,selected_edge,rejected_edge,cluster_gap)
+      closure_residual,gamma_real_defect,workspace_peak_bytes,ok,message,selected_edge,rejected_edge,cluster_gap,&
+      occupied_hamiltonian,secondary_selected_edge,secondary_rejected_edge,secondary_cluster_gap,&
+      primary_boundary_dimension)
     type(s_parallel_info),intent(in)::info
     integer,intent(in)::comm,point_product(:,:),translation_cocycle(:,:),identity_operation,requested_count
     complex(real64),intent(in)::occupied(:,:)
@@ -6568,12 +6721,18 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     real(real64),intent(out),optional::selected_edge,rejected_edge,cluster_gap
+    complex(real64),intent(in),optional::occupied_hamiltonian(:,:)
+    real(real64),intent(out),optional::secondary_selected_edge,secondary_rejected_edge,&
+      secondary_cluster_gap
+    integer,intent(out),optional::primary_boundary_dimension
 
     call build_dg_group_averaged_occupied_candidates_eigenexa(info,comm,occupied,weights,&
       representative_target_box_ids,point_product,identity_operation,requested_count,tolerance,&
       candidates,spectrum,candidate_rank,projector_trace,closure_residual,gamma_real_defect,&
       workspace_peak_bytes,ok,message,selected_edge,rejected_edge,cluster_gap,&
-      translation_target_box_ids,translation_cocycle)
+      translation_target_box_ids,translation_cocycle,occupied_hamiltonian,&
+      secondary_selected_edge,secondary_rejected_edge,secondary_cluster_gap,&
+      primary_boundary_dimension)
   end subroutine
 #endif
 

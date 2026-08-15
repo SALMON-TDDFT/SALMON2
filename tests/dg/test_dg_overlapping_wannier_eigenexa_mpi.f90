@@ -354,6 +354,10 @@ contains
     integer(8)::average_workspace,average_signature
     logical::average_ok
     character(256)::average_message
+    if(index(trim(case_name),'average_hamiltonian')==1)then
+      call run_average_hamiltonian_case()
+      return
+    endif
     allocate(average_occupied(1,2),average_weights(2),average_maps(2,2))
     average_occupied=(0d0,0d0);average_weights=1d0;global_count=2*nproc
     do ii=1,2
@@ -406,7 +410,80 @@ contains
       average_rank,average_trace,average_closure,average_gamma,average_workspace,average_ok,average_message)
     call require(.not.average_ok,'distributed group-average rejects a non-group point action')
     call eigen_free()
-  end subroutine
+  end subroutine run_average_case
+
+  subroutine run_average_hamiltonian_case()
+      use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
+      complex(8)::occupied_hamiltonian(2,2)
+      complex(8),allocatable::hamiltonian_occupied(:,:),hamiltonian_candidates(:,:)
+      real(8),allocatable::hamiltonian_weights(:),hamiltonian_spectrum(:)
+      integer(8),allocatable::hamiltonian_maps(:,:)
+      real(8)::hamiltonian_trace,hamiltonian_closure,hamiltonian_gamma,&
+        primary_selected,primary_rejected,primary_gap,secondary_selected,&
+        secondary_rejected,secondary_gap,local_defect,global_defect
+      integer::hamiltonian_product(2,2),hamiltonian_rank,boundary_dimension,local_index,global_point
+      integer(8)::hamiltonian_workspace,hamiltonian_signature
+      logical::average_ok
+      character(256)::average_message
+
+      allocate(hamiltonian_occupied(2,2),hamiltonian_weights(2),hamiltonian_maps(2,2))
+      hamiltonian_occupied=(0d0,0d0);hamiltonian_weights=1d0
+      do local_index=1,2
+        global_point=2*rank+local_index
+        hamiltonian_maps(local_index,:)=global_point
+        if(global_point==1)hamiltonian_occupied(1,local_index)=1d0
+        if(global_point==2)hamiltonian_occupied(2,local_index)=1d0
+      enddo
+      occupied_hamiltonian=(0d0,0d0)
+      occupied_hamiltonian(1,1)=0d0;occupied_hamiltonian(2,2)=2d0
+      select case(trim(case_name))
+      case('average_hamiltonian_nonhermitian')
+        occupied_hamiltonian(1,2)=cmplx(0.2d0,0.1d0,8)
+      case('average_hamiltonian_nonfinite')
+        occupied_hamiltonian(2,2)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,8)
+      case('average_hamiltonian_disagree')
+        if(rank==0)occupied_hamiltonian(2,2)=3d0
+      case('average_hamiltonian_degenerate')
+        occupied_hamiltonian=0d0
+      end select
+      hamiltonian_product=reshape([1,2,2,1],[2,2])
+      call eigen_init(comm);call eigen_get_procs(p,info%nprow,info%npcol)
+      call eigen_get_id(p,info%myrow,info%mycol);call eigen_get_matdims(4,info%nrow_local,info%ncol_local)
+      info%flag_eigenexa_init=.true.
+      call build_dg_group_averaged_occupied_candidates_eigenexa(info,comm,hamiltonian_occupied,&
+        hamiltonian_weights,hamiltonian_maps,hamiltonian_product,1,1,1d-12,&
+        hamiltonian_candidates,hamiltonian_spectrum,hamiltonian_rank,hamiltonian_trace,&
+        hamiltonian_closure,hamiltonian_gamma,hamiltonian_workspace,average_ok,average_message,&
+        primary_selected,primary_rejected,primary_gap,occupied_hamiltonian=occupied_hamiltonian,&
+        secondary_selected_edge=secondary_selected,secondary_rejected_edge=secondary_rejected,&
+        secondary_cluster_gap=secondary_gap,primary_boundary_dimension=boundary_dimension)
+      if(trim(case_name)/='average_hamiltonian')then
+        call require(.not.average_ok,'invalid occupied Hamiltonian tiebreak must reject collectively')
+        if(rank==0)write(*,'(3a,i0)')'REJECT ',trim(case_name),' ranks=',nproc
+        call eigen_free();return
+      endif
+      call require(average_ok,trim(average_message))
+      call require(hamiltonian_rank==1.and.boundary_dimension==2.and.&
+        abs(primary_selected-1d0)<1d-12.and.abs(primary_rejected-1d0)<1d-12.and.&
+        abs(secondary_selected)<1d-12.and.abs(secondary_rejected-2d0)<1d-12.and.&
+        abs(secondary_gap-2d0)<1d-12,&
+        'occupied Hamiltonian resolves only the primary boundary-degenerate block')
+      local_defect=0d0
+      do local_index=1,2
+        global_point=2*rank+local_index
+        local_defect=max(local_defect,abs(hamiltonian_candidates(1,local_index)-&
+          merge((1d0,0d0),(0d0,0d0),global_point==1)))
+      enddo
+      call MPI_Allreduce(local_defect,global_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      call require(ierr==MPI_SUCCESS.and.global_defect<1d-12,&
+        'occupied Hamiltonian selects the known low-energy candidate')
+      hamiltonian_signature=nint(1d12*sum(abs(hamiltonian_candidates)),8)
+      call MPI_Allreduce(MPI_IN_PLACE,hamiltonian_signature,1,MPI_INTEGER8,MPI_SUM,comm,ierr)
+      hamiltonian_signature=hamiltonian_signature+int(boundary_dimension,8)
+      if(rank==0)write(*,'(a,i0,a,i0)')'AVERAGE_HAMILTONIAN ranks=',nproc,&
+        ' signature=',hamiltonian_signature
+      call eigen_free()
+  end subroutine run_average_hamiltonian_case
 
   subroutine run_cocycle_case()
     complex(8),allocatable::occupied(:,:),candidates(:,:)

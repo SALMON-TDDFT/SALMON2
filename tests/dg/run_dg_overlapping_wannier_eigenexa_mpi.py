@@ -35,6 +35,22 @@ with tempfile.TemporaryDirectory(prefix="ow-eigenexa-") as name:
       match=re.search(r"AVERAGE ranks=\d+ signature=(-?\d+)",result.stdout);assert match,result.stdout
       averaged_signatures.append(int(match.group(1)))
     assert len(set(averaged_signatures))==1,averaged_signatures
+    hamiltonian_signatures=[]
+    for nproc in (1,2,4,8):
+      result=subprocess.run([shutil.which("mpiexec"),"-n",str(nproc),str(exe),"average_hamiltonian"],
+        capture_output=True,text=True,env=env,timeout=60)
+      assert result.returncode==0,("average_hamiltonian",nproc,result.stdout,result.stderr)
+      match=re.search(r"AVERAGE_HAMILTONIAN ranks=\d+ signature=(-?\d+)",result.stdout);assert match,result.stdout
+      hamiltonian_signatures.append(int(match.group(1)))
+    assert len(set(hamiltonian_signatures))==1,hamiltonian_signatures
+    for case_name in ("average_hamiltonian_nonhermitian","average_hamiltonian_nonfinite",
+                      "average_hamiltonian_disagree","average_hamiltonian_degenerate"):
+      adverse_ranks=(2,4,8) if case_name=="average_hamiltonian_disagree" else (1,2,4,8)
+      for nproc in adverse_ranks:
+        result=subprocess.run([shutil.which("mpiexec"),"-n",str(nproc),str(exe),case_name],
+          capture_output=True,text=True,env=env,timeout=60)
+        assert result.returncode==0,(case_name,nproc,result.stdout,result.stderr)
+        assert f"REJECT {case_name} ranks={nproc}" in result.stdout,result.stdout
     unique_signatures=[]
     for nproc in (1,2,4,8):
       result=subprocess.run([shutil.which("mpiexec"),"-n",str(nproc),str(exe),"average_unique"],
