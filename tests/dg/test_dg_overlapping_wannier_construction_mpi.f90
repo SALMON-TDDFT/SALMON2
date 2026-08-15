@@ -50,7 +50,7 @@ program test_dg_overlapping_wannier_construction_mpi
     assign_dg_periodic_centers_to_fragments,&
     verify_dg_fragment_subspace_density_covariance,build_dg_core_owned_occupied_subspace,&
     build_dg_smooth_partition_of_unity,compose_dg_buffered_orbital_tile_to_physical_grid,&
-    build_dg_equal_count_spectral_windows
+    build_dg_equal_count_spectral_windows,build_dg_spectral_density_descriptors
   implicit none
   type(s_dg_translation_orbit_accumulator)::inverse_accumulator
   type(s_dg_prepared_translation_action)::prepared_translation_action
@@ -91,6 +91,10 @@ program test_dg_overlapping_wannier_construction_mpi
   real(8),allocatable::occupied_seed_values(:,:)
   real(8),allocatable::raw_seed_values(:,:)
   real(8),allocatable::spectral_window_weights(:,:)
+  real(8),allocatable::spectral_occupied_density(:),spectral_unoccupied_density(:,:),&
+    spectral_shared_density(:,:),spectral_reference_descriptors(:,:)
+  complex(8),allocatable::spectral_state_values(:,:)
+  integer(8),allocatable::spectral_row_ids(:)
   real(8)::spectral_eigenvalues(10),spectral_occupations(10)
   real(8)::occupations(3)
   type(s_dg_overlapping_wannier_construction)::result
@@ -105,6 +109,7 @@ program test_dg_overlapping_wannier_construction_mpi
   integer(8),allocatable::distributed_overlap_row_ids(:)
   integer(8)::closure_fingerprint,rounded_closure_fingerprint
   integer(8)::spectral_window_fingerprint,spectral_window_workspace
+  integer(8)::spectral_density_fingerprint,spectral_density_workspace
   integer(8),allocatable::closure_ids(:),closure_map(:,:)
   integer(8),allocatable::stream_ids(:),stream_map(:,:)
   integer(8)::local_centers(2),global_centers(2,2),center_orbit_map(4,2)
@@ -1703,11 +1708,47 @@ program test_dg_overlapping_wannier_construction_mpi
     spectral_window_weights,spectral_window_fingerprint,spectral_window_workspace,ok,message)
   call require(.not.ok,'unsorted spectral eigenvalues are collectively rejected')
   spectral_eigenvalues(7)=0.8d0
+  b=count([(mod(i-1,nproc)==rank,i=1,4)])
+  if(allocated(spectral_window_weights))deallocate(spectral_window_weights)
+  allocate(spectral_row_ids(b),spectral_state_values(4,b),spectral_window_weights(4,1))
+  b=0
+  do i=1,4
+    if(mod(i-1,nproc)/=rank)cycle
+    b=b+1;spectral_row_ids(b)=i;spectral_state_values(:,b)=(0d0,0d0)
+    spectral_state_values(1,b)=merge((1d0,0d0),(0d0,0d0),i==1)
+    spectral_state_values(2,b)=merge((1d0,0d0),(0d0,0d0),i==2)
+    spectral_state_values(3,b)=merge((1d0,0d0),(0d0,0d0),i==3)
+    spectral_state_values(4,b)=merge((1d0,0d0),(0d0,0d0),i==4)
+  enddo
+  spectral_occupations(1:4)=[1d0,1d0,0d0,0d0];spectral_window_weights=0d0
+  spectral_window_weights(3:4,1)=1d0
+  call build_dg_spectral_density_descriptors(comm,spectral_row_ids,4,spectral_state_values,&
+    spectral_occupations(1:4),spectral_window_weights,1d-12,spectral_occupied_density,&
+    spectral_unoccupied_density,spectral_shared_density,spectral_density_fingerprint,&
+    spectral_density_workspace,ok,message)
+  call require(ok.and.maxloc(spectral_occupied_density,dim=1)<=size(spectral_occupied_density).and.&
+    maxval(spectral_shared_density)<1d-12,'ionic occupied and electron descriptors remain spatially separated')
+  allocate(spectral_reference_descriptors(size(spectral_occupied_density),3))
+  spectral_reference_descriptors(:,1)=spectral_occupied_density
+  spectral_reference_descriptors(:,2)=spectral_unoccupied_density(:,1)
+  spectral_reference_descriptors(:,3)=spectral_shared_density(:,1)
+  spectral_state_values(1:2,:)=matmul(reshape([cmplx(sqrt(0.5d0),0d0,8),cmplx(0d0,sqrt(0.5d0),8),&
+    cmplx(0d0,sqrt(0.5d0),8),cmplx(sqrt(0.5d0),0d0,8)],[2,2]),spectral_state_values(1:2,:))
+  spectral_state_values(3:4,:)=matmul(reshape([cmplx(sqrt(0.5d0),0d0,8),cmplx(0d0,sqrt(0.5d0),8),&
+    cmplx(0d0,sqrt(0.5d0),8),cmplx(sqrt(0.5d0),0d0,8)],[2,2]),spectral_state_values(3:4,:))
+  call build_dg_spectral_density_descriptors(comm,spectral_row_ids,4,spectral_state_values,&
+    spectral_occupations(1:4),spectral_window_weights,1d-12,spectral_occupied_density,&
+    spectral_unoccupied_density,spectral_shared_density,spectral_density_fingerprint,&
+    spectral_density_workspace,ok,message)
+  call require(ok.and.maxval(abs(spectral_occupied_density-spectral_reference_descriptors(:,1)))<1d-12.and.&
+    maxval(abs(spectral_unoccupied_density(:,1)-spectral_reference_descriptors(:,2)))<1d-12,&
+    'spectral densities are invariant under unitary rotations inside equal-weight state blocks')
 
   if(rank==0)then
     write(*,'(a,i0)')'INVERSE_CHARACTER_FINGERPRINT ',inverse_fingerprint
     write(*,'(a,i0)')'SPATIAL_SECTOR_FINGERPRINT ',spatial_sector_fingerprint
     write(*,'(a,i0)')'SPECTRAL_WINDOW_FINGERPRINT ',spectral_window_fingerprint
+    write(*,'(a,i0)')'SPECTRAL_DENSITY_FINGERPRINT ',spectral_density_fingerprint
     write(*,'(a,i0,a,i0,a,*(i0,1x))')'CONSTRUCTION ranks=',nproc,' fingerprint=',&
       reference_fingerprint,' centers=',reference_center_box_ids
     write(*,'(a,i0,a)')'PASS overlapping-Wannier construction on ',nproc,' ranks'

@@ -98,7 +98,176 @@ module dg_overlapping_wannier_construction
   public::redistribute_dg_buffer_orbitals_to_center_fragments
   public::assign_dg_periodic_centers_to_fragments
   public::build_dg_equal_count_spectral_windows
+  public::build_dg_spectral_density_descriptors
 contains
+
+  subroutine build_dg_spectral_density_descriptors(comm,row_ids,global_row_count,state_values,&
+      occupations,window_weights,tolerance,occupied_density,unoccupied_density,shared_density,&
+      fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,global_row_count
+    integer(int64),intent(in)::row_ids(:)
+    complex(real64),intent(in)::state_values(:,:)
+    real(real64),intent(in)::occupations(:),window_weights(:,:),tolerance
+    real(real64),allocatable,intent(out)::occupied_density(:),unoccupied_density(:,:),shared_density(:,:)
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nstate,nlocal,nwindow,i,j,p,ierr,local_bad,global_bad,minint,maxint,status
+    integer,allocatable::ownership_count(:)
+    integer(int64)::bits,minbits,maxbits,elements,local_hash,global_hash,row_hash,quantized
+    real(real64)::minreal,maxreal,maxcoefficient,global_maxcoefficient,safe_coefficient,denominator
+    logical::receipt_valid
+    nstate=size(state_values,1);nlocal=size(state_values,2);nwindow=size(window_weights,2)
+    ok=.false.;message='';fingerprint=0_int64;workspace_peak_bytes=0_int64
+    local_bad=0
+    if(global_row_count<1.or.nstate<1.or.nwindow<1.or.size(row_ids)/=nlocal)then
+      local_bad=1
+    elseif(size(occupations)/=nstate.or.size(window_weights,1)/=nstate)then
+      local_bad=1
+    elseif(.not.ieee_is_finite(tolerance).or.tolerance<=0d0)then
+      local_bad=1
+    elseif(.not.all(ieee_is_finite(real(state_values))).or..not.all(ieee_is_finite(aimag(state_values))))then
+      local_bad=1
+    elseif(.not.all(ieee_is_finite(occupations)).or..not.all(ieee_is_finite(window_weights)))then
+      local_bad=1
+    elseif(any(row_ids<1_int64).or.any(row_ids>int(global_row_count,int64)).or.&
+        any(occupations<0d0).or.any(window_weights<0d0))then
+      local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid spectral-density contract';return;endif
+    do i=1,3
+      select case(i)
+      case(1);local_bad=global_row_count
+      case(2);local_bad=nstate
+      case default;local_bad=nwindow
+      end select
+      call MPI_Allreduce(local_bad,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(local_bad,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(minint/=maxint)then;message='spectral-density metadata disagrees across ranks';return;endif
+    enddo
+    call MPI_Allreduce(tolerance,minreal,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tolerance,maxreal,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(transfer(minreal,0_int64)/=transfer(maxreal,0_int64))then
+      message='spectral-density tolerance disagrees across ranks';return
+    endif
+    do i=1,nstate
+      bits=transfer(occupations(i),0_int64)
+      call MPI_Allreduce(bits,minbits,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(bits,maxbits,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(minbits/=maxbits)then;message='spectral occupations disagree across ranks';return;endif
+      do j=1,nwindow
+        bits=transfer(window_weights(i,j),0_int64)
+        call MPI_Allreduce(bits,minbits,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+        call MPI_Allreduce(bits,maxbits,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+        if(minbits/=maxbits)then;message='spectral weights disagree across ranks';return;endif
+      enddo
+    enddo
+    local_bad=merge(0,1,maxval(abs(sum(window_weights,dim=2)-merge(0d0,1d0,occupations>tolerance)))<=&
+      10d0*tolerance)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='spectral weights do not cover the unoccupied states';return;endif
+    allocate(ownership_count(global_row_count),stat=status)
+    call MPI_Allreduce(merge(0,1,status==0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(ownership_count))deallocate(ownership_count)
+      message='spectral-density ownership allocation failed';return
+    endif
+    ownership_count=0
+    do p=1,nlocal;ownership_count(int(row_ids(p)))=ownership_count(int(row_ids(p)))+1;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,ownership_count,global_row_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(ownership_count/=1))then
+      deallocate(ownership_count);message='spectral-density rows are not owned exactly once';return
+    endif
+    maxcoefficient=0d0
+    if(nlocal>0)maxcoefficient=maxval(abs(state_values))
+    call MPI_Allreduce(maxcoefficient,global_maxcoefficient,1,&
+      MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    denominator=max(1d0,sum(occupations)+sum(window_weights))
+    safe_coefficient=sqrt(huge(1d0)/(16d0*denominator))
+    local_bad=merge(0,1,global_maxcoefficient<=safe_coefficient)
+    receipt_valid=int(nlocal,int64)<=huge(0_int64)/int(1+2*nwindow,int64)
+    if(receipt_valid)then
+      elements=int(nlocal,int64)*int(1+2*nwindow,int64)
+      receipt_valid=elements<=huge(0_int64)/8_int64
+    else
+      elements=0_int64
+    endif
+    if(.not.receipt_valid)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      deallocate(ownership_count);message='spectral-density magnitude or extent is unsafe';return
+    endif
+    allocate(occupied_density(nlocal),unoccupied_density(nlocal,nwindow),&
+      shared_density(nlocal,nwindow),stat=status)
+    call MPI_Allreduce(merge(0,1,status==0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(occupied_density))deallocate(occupied_density)
+      if(allocated(unoccupied_density))deallocate(unoccupied_density)
+      if(allocated(shared_density))deallocate(shared_density)
+      deallocate(ownership_count);message='spectral-density allocation failed';return
+    endif
+    occupied_density=0d0;unoccupied_density=0d0
+    do p=1,nlocal
+      do i=1,nstate
+        occupied_density(p)=occupied_density(p)+occupations(i)*abs(state_values(i,p))**2
+        do j=1,nwindow
+          unoccupied_density(p,j)=unoccupied_density(p,j)+window_weights(i,j)*abs(state_values(i,p))**2
+        enddo
+      enddo
+    enddo
+    do j=1,nwindow
+      do p=1,nlocal
+        denominator=occupied_density(p)+unoccupied_density(p,j)
+        if(denominator>tiny(1d0))then
+          shared_density(p,j)=2d0*sqrt(occupied_density(p)*unoccupied_density(p,j))/denominator
+        else
+          shared_density(p,j)=0d0
+        endif
+      enddo
+    enddo
+    local_bad=merge(0,1,all(ieee_is_finite(occupied_density)).and.&
+      all(ieee_is_finite(unoccupied_density)).and.all(ieee_is_finite(shared_density)))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      deallocate(occupied_density,unoccupied_density,shared_density,ownership_count)
+      message='spectral-density accumulation is nonfinite';return
+    endif
+    local_hash=0_int64;local_bad=0
+    do p=1,nlocal
+      row_hash=ieor(row_ids(p),ishftc(row_ids(p),23))
+      denominator=100d0*tolerance
+      if(occupied_density(p)>0.25d0*real(huge(0_int64),real64)*denominator)local_bad=1
+      if(local_bad==0)then
+        quantized=nint(occupied_density(p)/denominator,int64);row_hash=ieor(ishftc(row_hash,7),quantized)
+        do j=1,nwindow
+          if(unoccupied_density(p,j)>0.25d0*real(huge(0_int64),real64)*denominator)then
+            local_bad=1;exit
+          endif
+          quantized=nint(unoccupied_density(p,j)/denominator,int64)
+          row_hash=ieor(ishftc(row_hash,7),quantized)
+          quantized=nint(shared_density(p,j)/denominator,int64)
+          row_hash=ieor(ishftc(row_hash,7),quantized)
+        enddo
+      endif
+      local_hash=ieor(local_hash,row_hash)
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      deallocate(occupied_density,unoccupied_density,shared_density,ownership_count)
+      message='spectral-density fingerprint range is unsafe';return
+    endif
+    call MPI_Allreduce(local_hash,global_hash,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;deallocate(occupied_density,unoccupied_density,shared_density,ownership_count);return;endif
+    if(global_hash==0_int64)global_hash=1_int64
+    fingerprint=global_hash;workspace_peak_bytes=8_int64*elements+4_int64*int(global_row_count,int64)
+    deallocate(ownership_count);ok=.true.
+#else
+    ok=.false.;message='spectral density descriptors require MPI';fingerprint=0_int64;workspace_peak_bytes=0_int64
+#endif
+  end subroutine build_dg_spectral_density_descriptors
 
   subroutine build_dg_equal_count_spectral_windows(comm,eigenvalues,occupations,nwindow,tolerance,&
       window_weights,fingerprint,workspace_peak_bytes,ok,message)
