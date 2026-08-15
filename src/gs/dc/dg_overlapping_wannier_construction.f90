@@ -100,7 +100,230 @@ module dg_overlapping_wannier_construction
   public::build_dg_equal_count_spectral_windows
   public::build_dg_spectral_density_descriptors
   public::build_dg_occupied_empty_moment_descriptors
+  public::build_dg_periodic_spectral_basins
 contains
+
+  subroutine build_dg_periodic_spectral_basins(comm,row_ids,grid_shape,occupied_density,&
+      empty_moment_density,shared_density,generator_maps,tolerance,basin_labels,basin_count,&
+      basin_orbit_map,fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,grid_shape(3),generator_maps(:,:)
+    integer(int64),intent(in)::row_ids(:)
+    real(real64),intent(in)::occupied_density(:),empty_moment_density(:,:),shared_density(:,:),tolerance
+    integer,allocatable,intent(out)::basin_labels(:),basin_orbit_map(:,:)
+    integer,intent(out)::basin_count
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nlocal,nfeature,nempty,nshared,ngenerator,npoint,i,j,g,p,x,y,z,neighbor,choice,root,&
+      ierr,local_bad,global_bad,minint,maxint,status,target,target_basin
+    integer,allocatable::ownership(:),parent(:),roots(:),global_labels(:),root_ids(:),target_counts(:)
+    integer(int64)::npoint8,bits,minbits,maxbits,bytes,hash_value
+    real(real64),allocatable::local_score(:),global_score(:)
+    real(real64)::local_max,global_max,candidate,comparison_scale
+    logical::receipt_valid
+    nlocal=size(row_ids);nempty=size(empty_moment_density,2);nshared=size(shared_density,2);nfeature=nempty+nshared
+    ngenerator=size(generator_maps,2);ok=.false.;message='';basin_count=0
+    fingerprint=0_int64;workspace_peak_bytes=0_int64;local_bad=0
+    if(any(grid_shape<1).or.size(occupied_density)/=nlocal.or.&
+        size(empty_moment_density,1)/=nlocal.or.size(shared_density,1)/=nlocal)then
+      local_bad=1
+    elseif(size(generator_maps,1)<1.or.nfeature<1)then
+      local_bad=1
+    elseif(.not.ieee_is_finite(tolerance).or.tolerance<=0d0.or.tolerance>1d0)then
+      local_bad=1
+    elseif(.not.all(ieee_is_finite(occupied_density)).or.&
+        .not.all(ieee_is_finite(empty_moment_density)).or..not.all(ieee_is_finite(shared_density)))then
+      local_bad=1
+    elseif(any(occupied_density<0d0).or.any(empty_moment_density<0d0).or.any(shared_density<0d0))then
+      local_bad=1
+    endif
+    npoint8=1_int64
+    do i=1,3
+      if(int(grid_shape(i),int64)>huge(0_int64)/npoint8)then;local_bad=1;exit;endif
+      npoint8=npoint8*int(grid_shape(i),int64)
+    enddo
+    if(npoint8>int(huge(0),int64))local_bad=1
+    if(local_bad==0)then
+      npoint=int(npoint8)
+      if(size(generator_maps,1)/=npoint.or.any(row_ids<1_int64).or.any(row_ids>npoint8))local_bad=1
+    else
+      npoint=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid periodic spectral basin contract';return;endif
+    do i=1,3
+      call MPI_Allreduce(grid_shape(i),minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(grid_shape(i),maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(minint/=maxint)then;message='spectral basin grid shape disagrees across ranks';return;endif
+    enddo
+    call MPI_Allreduce(ngenerator,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(ngenerator,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(minint/=maxint)then;message='spectral basin generator count disagrees across ranks';return;endif
+    do i=1,2
+      if(i==1)then;local_bad=nempty;else;local_bad=nshared;endif
+      call MPI_Allreduce(local_bad,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(local_bad,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(minint/=maxint)then;message='spectral basin feature count disagrees across ranks';return;endif
+    enddo
+    bits=transfer(tolerance,0_int64)
+    call MPI_Allreduce(bits,minbits,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(bits,maxbits,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(minbits/=maxbits)then;message='spectral basin tolerance disagrees across ranks';return;endif
+    do g=1,ngenerator;do i=1,npoint
+      call MPI_Allreduce(generator_maps(i,g),minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(generator_maps(i,g),maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(minint/=maxint)then;message='spectral basin generator maps disagree across ranks';return;endif
+    enddo;enddo
+    local_bad=merge(0,1,all(generator_maps>=1).and.all(generator_maps<=npoint))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='spectral basin generator map is out of range';return;endif
+    receipt_valid=npoint8<=huge(0_int64)/56_int64
+    if(receipt_valid)then;bytes=56_int64*npoint8;else;bytes=0_int64;endif
+    if(receipt_valid.and.ngenerator>0)then
+      if(npoint8>huge(0_int64)/(4_int64*int(ngenerator,int64)))then
+        receipt_valid=.false.
+      elseif(bytes>huge(0_int64)-4_int64*npoint8*int(ngenerator,int64))then
+        receipt_valid=.false.
+      else
+        bytes=bytes+4_int64*npoint8*int(ngenerator,int64)
+      endif
+    endif
+    call MPI_Allreduce(merge(0,1,receipt_valid),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='spectral basin workspace extent overflow';return;endif
+    allocate(ownership(npoint),parent(npoint),roots(npoint),global_labels(npoint),root_ids(npoint),&
+      local_score(npoint),global_score(npoint),stat=status)
+    call MPI_Allreduce(merge(0,1,status==0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(ownership))deallocate(ownership)
+      if(allocated(parent))deallocate(parent)
+      if(allocated(roots))deallocate(roots)
+      if(allocated(global_labels))deallocate(global_labels)
+      if(allocated(root_ids))deallocate(root_ids)
+      if(allocated(local_score))deallocate(local_score)
+      if(allocated(global_score))deallocate(global_score)
+      message='spectral basin workspace allocation failed';return
+    endif
+    ownership=0
+    do p=1,nlocal;ownership(int(row_ids(p)))=ownership(int(row_ids(p)))+1;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,ownership,npoint,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(ownership/=1))then
+      deallocate(ownership,parent,roots,global_labels,root_ids,local_score,global_score)
+      message='spectral basin rows are not owned exactly once';return
+    endif
+    local_score=0d0
+    local_max=0d0;if(nlocal>0)local_max=maxval(occupied_density)
+    call MPI_Allreduce(local_max,global_max,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(global_max>0d0)then
+      do p=1,nlocal;local_score(int(row_ids(p)))=occupied_density(p)/global_max;enddo
+    endif
+    do j=1,size(empty_moment_density,2)
+      local_max=0d0;if(nlocal>0)local_max=maxval(empty_moment_density(:,j))
+      call MPI_Allreduce(local_max,global_max,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(global_max>0d0)then
+        do p=1,nlocal
+          local_score(int(row_ids(p)))=max(local_score(int(row_ids(p))),empty_moment_density(p,j)/global_max)
+        enddo
+      endif
+    enddo
+    do j=1,size(shared_density,2)
+      local_max=0d0;if(nlocal>0)local_max=maxval(shared_density(:,j))
+      call MPI_Allreduce(local_max,global_max,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(global_max>0d0)then
+        do p=1,nlocal
+          local_score(int(row_ids(p)))=max(local_score(int(row_ids(p))),shared_density(p,j)/global_max)
+        enddo
+      endif
+    enddo
+    call MPI_Allreduce(local_score,global_score,npoint,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or..not.all(ieee_is_finite(global_score)).or.maxval(global_score)<=0d0)then
+      deallocate(ownership,parent,roots,global_labels,root_ids,local_score,global_score)
+      message='spectral basin score is invalid';return
+    endif
+    do i=1,npoint
+      x=modulo(i-1,grid_shape(1))+1
+      y=modulo((i-1)/grid_shape(1),grid_shape(2))+1
+      z=(i-1)/(grid_shape(1)*grid_shape(2))+1
+      choice=i
+      do j=1,6
+        select case(j)
+        case(1);neighbor=modulo(x,grid_shape(1))+1+grid_shape(1)*(y-1+grid_shape(2)*(z-1))
+        case(2);neighbor=modulo(x-2,grid_shape(1))+1+grid_shape(1)*(y-1+grid_shape(2)*(z-1))
+        case(3);neighbor=x+grid_shape(1)*(modulo(y,grid_shape(2))+grid_shape(2)*(z-1))
+        case(4);neighbor=x+grid_shape(1)*(modulo(y-2,grid_shape(2))+grid_shape(2)*(z-1))
+        case(5);neighbor=x+grid_shape(1)*(y-1+grid_shape(2)*modulo(z,grid_shape(3)))
+        case default;neighbor=x+grid_shape(1)*(y-1+grid_shape(2)*modulo(z-2,grid_shape(3)))
+        end select
+        comparison_scale=max(1d0,abs(global_score(choice)),abs(global_score(neighbor)))
+        if(global_score(neighbor)>global_score(choice)+tolerance*comparison_scale.or.&
+            (abs(global_score(neighbor)-global_score(choice))<=tolerance*comparison_scale.and.neighbor<choice))choice=neighbor
+      enddo
+      parent(i)=choice
+    enddo
+    do i=1,npoint
+      root=i
+      do j=1,npoint
+        if(parent(root)==root)exit
+        root=parent(root)
+      enddo
+      if(parent(root)/=root)then
+        deallocate(ownership,parent,roots,global_labels,root_ids,local_score,global_score)
+        message='spectral basin watershed did not terminate';return
+      endif
+      roots(i)=root
+    enddo
+    basin_count=0;global_labels=0
+    do i=1,npoint
+      if(roots(i)/=i)cycle
+      basin_count=basin_count+1;root_ids(basin_count)=i
+    enddo
+    do i=1,npoint
+      do j=1,basin_count
+        if(roots(i)==root_ids(j))then;global_labels(i)=j;exit;endif
+      enddo
+    enddo
+    allocate(basin_labels(nlocal),basin_orbit_map(basin_count,ngenerator),target_counts(basin_count),stat=status)
+    call MPI_Allreduce(merge(0,1,status==0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(basin_labels))deallocate(basin_labels)
+      if(allocated(basin_orbit_map))deallocate(basin_orbit_map)
+      if(allocated(target_counts))deallocate(target_counts)
+      deallocate(ownership,parent,roots,global_labels,root_ids,local_score,global_score)
+      message='spectral basin output allocation failed';return
+    endif
+    do p=1,nlocal;basin_labels(p)=global_labels(int(row_ids(p)));enddo
+    do g=1,ngenerator
+      basin_orbit_map(:,g)=0
+      do i=1,npoint
+        target_basin=global_labels(generator_maps(i,g));j=global_labels(i)
+        if(basin_orbit_map(j,g)==0)basin_orbit_map(j,g)=target_basin
+        if(basin_orbit_map(j,g)/=target_basin)local_bad=1
+      enddo
+      target_counts=0
+      do j=1,basin_count
+        if(basin_orbit_map(j,g)>=1.and.basin_orbit_map(j,g)<=basin_count)&
+          target_counts(basin_orbit_map(j,g))=target_counts(basin_orbit_map(j,g))+1
+      enddo
+      if(any(target_counts/=1))local_bad=1
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      deallocate(basin_labels,basin_orbit_map,target_counts,ownership,parent,roots,global_labels,root_ids,&
+        local_score,global_score);message='spectral basins are not closed under the generators';return
+    endif
+    hash_value=ieor(int(npoint,int64),ishftc(int(basin_count,int64),19))
+    do i=1,npoint;hash_value=ieor(ishftc(hash_value,7),int(global_labels(i),int64));enddo
+    do g=1,ngenerator;do j=1,basin_count
+      hash_value=ieor(ishftc(hash_value,9),int(basin_orbit_map(j,g),int64))
+    enddo;enddo
+    if(hash_value==0_int64)hash_value=1_int64
+    fingerprint=hash_value;workspace_peak_bytes=bytes
+    deallocate(target_counts,ownership,parent,roots,global_labels,root_ids,local_score,global_score);ok=.true.
+#else
+    ok=.false.;message='periodic spectral basins require MPI';basin_count=0
+    fingerprint=0_int64;workspace_peak_bytes=0_int64
+#endif
+  end subroutine build_dg_periodic_spectral_basins
 
   subroutine build_dg_occupied_empty_moment_descriptors(comm,row_ids,global_row_count,state_values,&
       eigenvalues,occupations,maximum_moment,tolerance,occupied_density,empty_moment_density,&

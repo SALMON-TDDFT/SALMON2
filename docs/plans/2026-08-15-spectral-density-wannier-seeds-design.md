@@ -77,6 +77,12 @@ unitary block inside an unresolved local eigenspace.  This block action, rather
 than a forced atom-centred monomial action, becomes Wannier90's
 `d_matrix_wann`.
 
+The initial hard-label watershed stores only one normalized scalar score per
+global grid point.  It rejects a basin partition if a validated generator does
+not map every source basin into exactly one target basin.  Such a rejection is
+not repaired with a row-number-dependent reassignment; a later soft-mask stage
+must resolve a genuinely symmetry-ambiguous watershed boundary.
+
 ## Data flow
 
 The retained LCFO eigenvalues, occupations, and row-distributed physical-grid

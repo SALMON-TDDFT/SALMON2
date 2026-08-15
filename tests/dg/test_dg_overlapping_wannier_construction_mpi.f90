@@ -51,7 +51,7 @@ program test_dg_overlapping_wannier_construction_mpi
     verify_dg_fragment_subspace_density_covariance,build_dg_core_owned_occupied_subspace,&
     build_dg_smooth_partition_of_unity,compose_dg_buffered_orbital_tile_to_physical_grid,&
     build_dg_equal_count_spectral_windows,build_dg_spectral_density_descriptors,&
-    build_dg_occupied_empty_moment_descriptors
+    build_dg_occupied_empty_moment_descriptors,build_dg_periodic_spectral_basins
   implicit none
   type(s_dg_translation_orbit_accumulator)::inverse_accumulator
   type(s_dg_prepared_translation_action)::prepared_translation_action
@@ -97,6 +97,7 @@ program test_dg_overlapping_wannier_construction_mpi
     spectral_empty_moment_density(:,:)
   complex(8),allocatable::spectral_state_values(:,:)
   integer(8),allocatable::spectral_row_ids(:)
+  integer,allocatable::spectral_basin_labels(:),spectral_basin_orbit_map(:,:),spectral_generator_maps(:,:)
   real(8)::spectral_eigenvalues(10),spectral_occupations(10)
   real(8)::occupations(3)
   type(s_dg_overlapping_wannier_construction)::result
@@ -112,6 +113,8 @@ program test_dg_overlapping_wannier_construction_mpi
   integer(8)::closure_fingerprint,rounded_closure_fingerprint
   integer(8)::spectral_window_fingerprint,spectral_window_workspace
   integer(8)::spectral_density_fingerprint,spectral_density_workspace
+  integer(8)::spectral_basin_fingerprint,spectral_basin_reference_fingerprint,spectral_basin_workspace
+  integer::spectral_basin_count
   integer(8),allocatable::closure_ids(:),closure_map(:,:)
   integer(8),allocatable::stream_ids(:),stream_map(:,:)
   integer(8)::local_centers(2),global_centers(2,2),center_orbit_map(4,2)
@@ -1756,12 +1759,34 @@ program test_dg_overlapping_wannier_construction_mpi
     maxval(abs(spectral_empty_moment_density(:,1)-spectral_total_unoccupied_density))<1d-12.and.&
     all(spectral_empty_moment_density>=0d0),&
     'occupied/empty moment descriptors preserve every empty state without energy-window cuts')
+  spectral_occupied_density=0d0;spectral_empty_moment_density=0d0;spectral_shared_density=0d0
+  do p=1,size(spectral_row_ids)
+    if(spectral_row_ids(p)==1)spectral_occupied_density(p)=1d0
+    if(spectral_row_ids(p)==3)spectral_empty_moment_density(p,1)=1d0
+  enddo
+  allocate(spectral_generator_maps(4,1))
+  spectral_generator_maps(:,1)=[1,4,3,2]
+  call build_dg_periodic_spectral_basins(comm,spectral_row_ids,[4,1,1],spectral_occupied_density,&
+    spectral_empty_moment_density,spectral_shared_density,spectral_generator_maps,1d-12,&
+    spectral_basin_labels,spectral_basin_count,spectral_basin_orbit_map,spectral_basin_fingerprint,&
+    spectral_basin_workspace,ok,message)
+  call require(ok,'periodic six-neighbour watershed succeeds')
+  call require(spectral_basin_count==2.and.all(spectral_basin_orbit_map(:,1)==[1,2]),&
+    'periodic six-neighbour watershed closes separated hole/electron basins under a generator')
+  spectral_basin_reference_fingerprint=spectral_basin_fingerprint
+  spectral_generator_maps(1,1)=5
+  call build_dg_periodic_spectral_basins(comm,spectral_row_ids,[4,1,1],spectral_occupied_density,&
+    spectral_empty_moment_density,spectral_shared_density,spectral_generator_maps,1d-12,&
+    spectral_basin_labels,spectral_basin_count,spectral_basin_orbit_map,spectral_basin_fingerprint,&
+    spectral_basin_workspace,ok,message)
+  call require(.not.ok,'out-of-range spectral basin generator map is rejected before indexing')
 
   if(rank==0)then
     write(*,'(a,i0)')'INVERSE_CHARACTER_FINGERPRINT ',inverse_fingerprint
     write(*,'(a,i0)')'SPATIAL_SECTOR_FINGERPRINT ',spatial_sector_fingerprint
     write(*,'(a,i0)')'SPECTRAL_WINDOW_FINGERPRINT ',spectral_window_fingerprint
     write(*,'(a,i0)')'SPECTRAL_DENSITY_FINGERPRINT ',spectral_density_fingerprint
+    write(*,'(a,i0)')'SPECTRAL_BASIN_FINGERPRINT ',spectral_basin_reference_fingerprint
     write(*,'(a,i0,a,i0,a,*(i0,1x))')'CONSTRUCTION ranks=',nproc,' fingerprint=',&
       reference_fingerprint,' centers=',reference_center_box_ids
     write(*,'(a,i0,a)')'PASS overlapping-Wannier construction on ',nproc,' ranks'
