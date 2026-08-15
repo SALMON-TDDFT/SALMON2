@@ -292,6 +292,7 @@ contains
     real(real64),allocatable::block_eval(:),zrwork(:)
     real(real64)::gmat(3,3),geval(3),gwork(9),gvec(3),two_theta,c,sabs,phase_angle,pivot,&
       local_objective,global_objective,local_update,global_update,quantum
+    real(real64)::previous_objective,objective_scale,objective_threshold,objective_change
     complex(real64)::sphase,jacobi(2,2),left_pair(2),right_pair(2),tmp,phase_fix,probe
     integer::nlocal,m,global_count,local_count,rank,ierr,bad,gbad,status,axis,q,pair_i,pair_j,&
       i,j,k,l,r,block_size,sweep,info,minint,maxint,payload_count,npoint,point,hmatrix_count
@@ -468,6 +469,12 @@ contains
       endif
     endif
     unitary=(0d0,0d0);do i=1,m;unitary(i,i)=1d0;enddo
+    objective_scale=sum(abs(hmats)**2)
+    previous_objective=0d0
+    do q=1,hmatrix_count;do j=1,m;do i=1,m
+      if(i/=j)previous_objective=previous_objective+abs(hmats(i,j,q))**2
+    enddo;enddo;enddo
+    objective_threshold=max(100d0*epsilon(1d0),tolerance*tolerance)*max(1d0,objective_scale)
     maximum_update=0d0
     do sweep=1,100
       local_update=0d0
@@ -510,7 +517,19 @@ contains
       enddo;enddo
       call MPI_Allreduce(local_update,global_update,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
       maximum_update=global_update;sweep_count=sweep
-      if(global_update<=10d0*tolerance)exit
+      local_objective=0d0
+      do q=1,hmatrix_count;do j=1,m;do i=1,m
+        if(i/=j)local_objective=local_objective+abs(hmats(i,j,q))**2
+      enddo;enddo;enddo
+      objective_change=previous_objective-local_objective
+      bad=merge(0,1,ieee_is_finite(local_objective).and.&
+        objective_change>=-objective_threshold)
+      call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.gbad/=0)then
+        call cleanup();message='joint periodic-center objective became unstable';return
+      endif
+      if(global_update<=10d0*tolerance.or.abs(objective_change)<=objective_threshold)exit
+      previous_objective=local_objective
     enddo
     local_objective=0d0
     do q=1,hmatrix_count;do j=1,m;do i=1,m
@@ -518,7 +537,10 @@ contains
     enddo;enddo;enddo
     call MPI_Allreduce(local_objective,global_objective,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     final_objective=global_objective
-    if(ierr/=MPI_SUCCESS.or.maximum_update>10d0*tolerance)then;call cleanup();message='joint periodic-center sweeps did not converge';return;endif
+    if(ierr/=MPI_SUCCESS.or.sweep_count>=100.and.maximum_update>10d0*tolerance.and.&
+        abs(objective_change)>objective_threshold)then
+      call cleanup();message='joint periodic-center sweeps did not converge';return
+    endif
     do j=1,m;do axis=1,3
       phase_angle=atan2(real(hmats(j,j,2*axis),real64),real(hmats(j,j,2*axis-1),real64))
       centers(axis,j)=modulo(phase_angle/(2d0*acos(-1d0)),1d0)

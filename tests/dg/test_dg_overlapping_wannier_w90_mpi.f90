@@ -283,6 +283,28 @@ program test_dg_overlapping_wannier_w90_mpi
     joint_centers,joint_objective,joint_update,joint_sweeps,joint_defect,joint_fingerprint,joint_workspace,ok,message,&
     point_representations=joint_point_representations)
   call require(ok.and.joint_objective<1d-20.and.joint_defect<1d-10,'joint center gauge resolves distinct centers')
+  ! Projected periodic-position components need not commute exactly.  For an
+  ! isotropic Pauli triple the joint objective is stationary under every
+  ! two-column rotation, so convergence must be based on objective progress
+  ! rather than requiring the (non-unique) Jacobi angle to vanish.
+  sector_position_tuple=(0d0,0d0)
+  sector_position_tuple(1,2,1)=1d0;sector_position_tuple(2,1,1)=1d0
+  sector_position_tuple(1,2,2)=cmplx(0d0,-1d0,8)
+  sector_position_tuple(2,1,2)=cmplx(0d0,1d0,8)
+  sector_position_tuple(1,1,3)=1d0;sector_position_tuple(2,2,3)=-1d0
+  call jointly_canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,&
+    sector_position_tuple,position_lcfo_operator,1d-12,902_8,joint_trial_rows,joint_trial_rotation,&
+    joint_trial_centers,joint_trial_objective,joint_trial_update,joint_trial_sweeps,joint_trial_defect,&
+    joint_trial_fingerprint,joint_workspace,ok,message)
+  call require(ok.and.joint_trial_objective<huge(1d0).and.joint_trial_sweeps<100,&
+    'stationary noncommuting periodic-position tuple terminates deterministically')
+  sector_position_tuple=(0d0,0d0)
+  sector_position_tuple(1,1,1)=exp(cmplx(0d0,0.3d0,8))
+  sector_position_tuple(2,2,1)=exp(cmplx(0d0,1.1d0,8))
+  sector_position_tuple(1,1,2)=exp(cmplx(0d0,0.5d0,8))
+  sector_position_tuple(2,2,2)=exp(cmplx(0d0,1.4d0,8))
+  sector_position_tuple(1,1,3)=exp(cmplx(0d0,0.7d0,8))
+  sector_position_tuple(2,2,3)=exp(cmplx(0d0,1.8d0,8))
   joint_point_representations(1,2,2)=2d0
   call jointly_canonicalize_dg_sector_periodic_position_gauge(MPI_COMM_WORLD,sector_ids,sector_frame,&
     sector_position_tuple,position_lcfo_operator,1d-12,903_8,joint_trial_rows,joint_trial_rotation,&
