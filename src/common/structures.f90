@@ -541,6 +541,7 @@ module structures
     type(s_orbital) :: tpsi0,ttpsi0,htpsi0
     type(s_cg) :: cg
     real(8) :: E_old
+    logical :: rho0_loaded = .false. ! rho0_s restored from restart data (t=0 GS density)
   end type s_rt
 
 ! single-scale Maxwell-TDDFT method

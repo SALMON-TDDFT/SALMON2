@@ -5,14 +5,6 @@ set(LAPACK_VENDOR_FLAGS         "-SSL2BLAMP")
 set(ScaLAPACK_VENDOR_FLAGS      "-SCALAPACK -SSL2BLAMP")
 set(Fortran_PP_FLAGS            "-Cpp")
 
-# The login nodes cross-compile for A64FX, so PETSc must not execute target
-# binaries while configuring.  Keep PETSc's own compilation flags separate
-# from SALMON's Fujitsu-specific reporting and standards-checking flags.
-set(SALMON_PETSC_CROSS_BUILD      ON)
-set(SALMON_PETSC_PLATFORM_OPTIONS "--with-batch")
-set(SALMON_PETSC_COPTFLAGS        "-O3")
-set(SALMON_PETSC_FOPTFLAGS        "-O3")
-
 set(CMAKE_Fortran_COMPILER      "mpifrtpx")
 set(CMAKE_C_COMPILER            "mpifccpx")
 
