@@ -193,6 +193,19 @@ assert "call build_dg_translation_character_intertwining_phase(" not in ow_groun
 assert "call align_dg_w90_cross_character_sector_gauge" not in ow_ground_state_body, (
     "production must not use spread-weighted cross-character links, which vanish for exact translation orbits"
 )
+point_adaptation_failure = re.search(
+    r"if\s*\(\s*\.not\.ok\.or\.adapted_occupied_rank\s*/=\s*nstate\s*\)\s*then(?P<body>.*?)endif",
+    ow_ground_state_body,
+    re.S,
+)
+assert point_adaptation_failure and all(
+    receipt in point_adaptation_failure.group("body")
+    for receipt in (
+        "adapted_occupied_selected_edge",
+        "adapted_occupied_rejected_edge",
+        "adapted_occupied_cluster_gap",
+    )
+), "point-cogroup rank rejection must print the actual spectral boundary before stopping"
 assert "spectral dmn operation workspace reallocation failed collectively" not in ow_ground_state_body, (
     "the DMN loop must consume the builder's allocatable output directly, not reallocate it between operations"
 )

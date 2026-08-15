@@ -1115,6 +1115,11 @@ contains
       adapted_occupied_rejected_edge,adapted_occupied_cluster_gap)
     call finalize_eigenexa(info)
     if(.not.ok.or.adapted_occupied_rank/=nstate)then
+      if(rank==0)write(0,'(a,3(a,es24.16))')&
+        '[OW-GS-DIAGNOSTIC] point_cogroup_adaptation_rejected',&
+        ' selected_edge=',adapted_occupied_selected_edge,&
+        ' rejected_edge=',adapted_occupied_rejected_edge,&
+        ' cluster_gap=',adapted_occupied_cluster_gap
       write(0,'(a)')trim(message);error stop 'point-cogroup occupied-subspace adaptation failed'
     endif
     adapted_occupied_workspace_peak=max(adapted_occupied_workspace_peak,translation_adapted_workspace_peak,&
