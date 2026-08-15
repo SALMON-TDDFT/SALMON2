@@ -31,10 +31,13 @@ Wannier functions.
 2. Keep the first `noccupied` columns of the already symmetry-adapted retained
    frame as the occupied trial block.  Do not copy or re-diagonalize them
    through every basin.
-3. Construct the empty-space coefficient frame as the orthogonal complement
-   of the occupied block in retained coordinates.  In the current ordered
-   adapted frame this is the trailing `nempty` coordinate block; the API must
-   nevertheless validate the occupied/complement Gram and cross-Gram defects.
+3. Construct the localization complement from the existing complete-s+p
+   projector seeds after their joint orthonormalization against the adapted
+   occupied LCFO block.  DC-LCFO diagonalizes `ntarget` states internally, but
+   production deliberately requests real-space buffered contributions for only
+   `nstate` states; it must not reintroduce all empty LCFO buffer wavefunctions.
+   The API validates the occupied/complement Gram and cross-Gram defects rather
+   than assuming that a trailing coordinate range proves the physical origin.
 4. Project each prepared spectral-basin operator directly into the `nempty`
    complement.  Store only one `nempty x nempty` operator and one eigensystem
    at a time.
@@ -80,8 +83,8 @@ frames, or a replicated `N x M` frame.
 - Replicated dimensions and tolerance agree collectively before any
   shape-dependent collective.
 - The occupied frame is orthonormal and symmetry closed within tolerance.
-- The complement frame is orthonormal, complete, and cross-orthogonal to the
-  occupied frame.
+- The complete-s+p-derived complement frame is orthonormal, complete, and
+  cross-orthogonal to the occupied LCFO frame.
 - Basin rank selection returns exactly `nempty`, not `ntarget`, channels.
 - The concatenated trial frame has Gram defect within tolerance.
 - All extent and workspace arithmetic is checked before allocation.
