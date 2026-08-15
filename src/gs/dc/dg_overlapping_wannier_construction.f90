@@ -102,13 +102,14 @@ module dg_overlapping_wannier_construction
 contains
 
   subroutine build_dg_spectral_density_descriptors(comm,row_ids,global_row_count,state_values,&
-      occupations,window_weights,tolerance,occupied_density,unoccupied_density,shared_density,&
+      occupations,window_weights,tolerance,occupied_density,unoccupied_density,total_unoccupied_density,shared_density,&
       fingerprint,workspace_peak_bytes,ok,message)
     integer,intent(in)::comm,global_row_count
     integer(int64),intent(in)::row_ids(:)
     complex(real64),intent(in)::state_values(:,:)
     real(real64),intent(in)::occupations(:),window_weights(:,:),tolerance
-    real(real64),allocatable,intent(out)::occupied_density(:),unoccupied_density(:,:),shared_density(:,:)
+    real(real64),allocatable,intent(out)::occupied_density(:),unoccupied_density(:,:),&
+      total_unoccupied_density(:),shared_density(:,:)
     integer(int64),intent(out)::fingerprint,workspace_peak_bytes
     logical,intent(out)::ok
     character(*),intent(out)::message
@@ -188,9 +189,9 @@ contains
     denominator=max(1d0,sum(occupations)+sum(window_weights))
     safe_coefficient=sqrt(huge(1d0)/(16d0*denominator))
     local_bad=merge(0,1,global_maxcoefficient<=safe_coefficient)
-    receipt_valid=int(nlocal,int64)<=huge(0_int64)/int(1+2*nwindow,int64)
+    receipt_valid=int(nlocal,int64)<=huge(0_int64)/int(2+2*nwindow,int64)
     if(receipt_valid)then
-      elements=int(nlocal,int64)*int(1+2*nwindow,int64)
+      elements=int(nlocal,int64)*int(2+2*nwindow,int64)
       receipt_valid=elements<=huge(0_int64)/8_int64
     else
       elements=0_int64
@@ -200,12 +201,13 @@ contains
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
       deallocate(ownership_count);message='spectral-density magnitude or extent is unsafe';return
     endif
-    allocate(occupied_density(nlocal),unoccupied_density(nlocal,nwindow),&
+    allocate(occupied_density(nlocal),unoccupied_density(nlocal,nwindow),total_unoccupied_density(nlocal),&
       shared_density(nlocal,nwindow),stat=status)
     call MPI_Allreduce(merge(0,1,status==0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
       if(allocated(occupied_density))deallocate(occupied_density)
       if(allocated(unoccupied_density))deallocate(unoccupied_density)
+      if(allocated(total_unoccupied_density))deallocate(total_unoccupied_density)
       if(allocated(shared_density))deallocate(shared_density)
       deallocate(ownership_count);message='spectral-density allocation failed';return
     endif
@@ -218,6 +220,7 @@ contains
         enddo
       enddo
     enddo
+    total_unoccupied_density=sum(unoccupied_density,dim=2)
     do j=1,nwindow
       do p=1,nlocal
         denominator=occupied_density(p)+unoccupied_density(p,j)
@@ -229,10 +232,11 @@ contains
       enddo
     enddo
     local_bad=merge(0,1,all(ieee_is_finite(occupied_density)).and.&
-      all(ieee_is_finite(unoccupied_density)).and.all(ieee_is_finite(shared_density)))
+      all(ieee_is_finite(unoccupied_density)).and.all(ieee_is_finite(total_unoccupied_density)).and.&
+      all(ieee_is_finite(shared_density)))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
-      deallocate(occupied_density,unoccupied_density,shared_density,ownership_count)
+      deallocate(occupied_density,unoccupied_density,total_unoccupied_density,shared_density,ownership_count)
       message='spectral-density accumulation is nonfinite';return
     endif
     local_hash=0_int64;local_bad=0
@@ -256,11 +260,13 @@ contains
     enddo
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
-      deallocate(occupied_density,unoccupied_density,shared_density,ownership_count)
+      deallocate(occupied_density,unoccupied_density,total_unoccupied_density,shared_density,ownership_count)
       message='spectral-density fingerprint range is unsafe';return
     endif
     call MPI_Allreduce(local_hash,global_hash,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
-    if(ierr/=MPI_SUCCESS)then;deallocate(occupied_density,unoccupied_density,shared_density,ownership_count);return;endif
+    if(ierr/=MPI_SUCCESS)then
+      deallocate(occupied_density,unoccupied_density,total_unoccupied_density,shared_density,ownership_count);return
+    endif
     if(global_hash==0_int64)global_hash=1_int64
     fingerprint=global_hash;workspace_peak_bytes=8_int64*elements+4_int64*int(global_row_count,int64)
     deallocate(ownership_count);ok=.true.

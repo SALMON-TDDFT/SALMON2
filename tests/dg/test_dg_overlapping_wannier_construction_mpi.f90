@@ -92,7 +92,7 @@ program test_dg_overlapping_wannier_construction_mpi
   real(8),allocatable::raw_seed_values(:,:)
   real(8),allocatable::spectral_window_weights(:,:)
   real(8),allocatable::spectral_occupied_density(:),spectral_unoccupied_density(:,:),&
-    spectral_shared_density(:,:),spectral_reference_descriptors(:,:)
+    spectral_total_unoccupied_density(:),spectral_shared_density(:,:),spectral_reference_descriptors(:,:)
   complex(8),allocatable::spectral_state_values(:,:)
   integer(8),allocatable::spectral_row_ids(:)
   real(8)::spectral_eigenvalues(10),spectral_occupations(10)
@@ -1724,10 +1724,12 @@ program test_dg_overlapping_wannier_construction_mpi
   spectral_window_weights(3:4,1)=1d0
   call build_dg_spectral_density_descriptors(comm,spectral_row_ids,4,spectral_state_values,&
     spectral_occupations(1:4),spectral_window_weights,1d-12,spectral_occupied_density,&
-    spectral_unoccupied_density,spectral_shared_density,spectral_density_fingerprint,&
+    spectral_unoccupied_density,spectral_total_unoccupied_density,spectral_shared_density,spectral_density_fingerprint,&
     spectral_density_workspace,ok,message)
   call require(ok.and.maxloc(spectral_occupied_density,dim=1)<=size(spectral_occupied_density).and.&
-    maxval(spectral_shared_density)<1d-12,'ionic occupied and electron descriptors remain spatially separated')
+    maxval(spectral_shared_density)<1d-12.and.&
+    maxval(abs(spectral_total_unoccupied_density-sum(spectral_unoccupied_density,dim=2)))<1d-12,&
+    'all spectral windows exactly preserve the complete unoccupied density')
   allocate(spectral_reference_descriptors(size(spectral_occupied_density),3))
   spectral_reference_descriptors(:,1)=spectral_occupied_density
   spectral_reference_descriptors(:,2)=spectral_unoccupied_density(:,1)
@@ -1738,7 +1740,7 @@ program test_dg_overlapping_wannier_construction_mpi
     cmplx(0d0,sqrt(0.5d0),8),cmplx(sqrt(0.5d0),0d0,8)],[2,2]),spectral_state_values(3:4,:))
   call build_dg_spectral_density_descriptors(comm,spectral_row_ids,4,spectral_state_values,&
     spectral_occupations(1:4),spectral_window_weights,1d-12,spectral_occupied_density,&
-    spectral_unoccupied_density,spectral_shared_density,spectral_density_fingerprint,&
+    spectral_unoccupied_density,spectral_total_unoccupied_density,spectral_shared_density,spectral_density_fingerprint,&
     spectral_density_workspace,ok,message)
   call require(ok.and.maxval(abs(spectral_occupied_density-spectral_reference_descriptors(:,1)))<1d-12.and.&
     maxval(abs(spectral_unoccupied_density(:,1)-spectral_reference_descriptors(:,2)))<1d-12,&

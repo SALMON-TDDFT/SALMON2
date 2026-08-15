@@ -49,6 +49,14 @@ The spatial feature field contains normalized occupied, unoccupied-window, and
 occupied/unoccupied-overlap components.  It therefore represents hole-like,
 electron-like, and shared regions without classifying them chemically.
 
+The window decomposition is descriptive, never selective.  The implementation
+also returns `rho_unocc_total = sum_q rho_q` and checks it against the complete
+unoccupied density.  Basin discovery consumes `rho_unocc_total` together with
+the complete vector of window features.  It may not allocate channel rank or
+discard retained states one window at a time.  Thus a chemically meaningful
+shell may cross a nominal energy boundary without being cut out of the final
+retained space; the windows only resolve its energy-dependent spatial motion.
+
 ## Basin and symmetry construction
 
 1. Find periodic local maxima of the normalized feature field.
@@ -58,7 +66,8 @@ electron-like, and shared regions without classifying them chemically.
 4. Apply every validated affine symmetry operation to each basin.
 5. Accept only complete symmetry orbits; symmetry-related basins share one rank
    and one unresolved internal-block structure.
-6. Form `K_b` one basin at a time and retain its separated eigenspaces.
+6. Form `K_b` one basin at a time from the full retained frame, not from an
+   individual energy window, and retain its separated eigenspaces.
 7. Allocate channel ranks orbit-by-orbit until the full retained rank is
    represented.  Failure to span the retained space is a hard rejection.
 
@@ -122,4 +131,3 @@ Integration tests then verify MPI 1/2/4/8 equality, complete symmetry orbits,
 AMN/DMN covariance, Wannier90 convergence, and Si64 point-cogroup closure.  The
 existing post-Wannier centre canonicalizer remains a validator during the
 transition and is removed only after the native symmetry-adapted path passes.
-

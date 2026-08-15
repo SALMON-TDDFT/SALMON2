@@ -81,8 +81,10 @@ Run the focused MPI fixture; expect the missing density-builder symbol.
 
 **Step 3: Implement**
 
-Accumulate `rho_occ` and one `rho_unocc(:,q)` at a time from row-distributed
-state values and spectral weights.  Normalize into hole/electron/shared feature
+Accumulate `rho_occ`, the complete `rho_unocc_total`, and one
+`rho_unocc(:,q)` at a time from row-distributed state values and spectral weights.
+Require `rho_unocc_total=sum_q rho_unocc(:,q)` so spectral windows can never
+discard part of a shell. Normalize into hole/electron/shared feature
 fields, use scaled norm accumulation, check finite magnitudes before squaring,
 bind row IDs and spectral-window provenance, and avoid a
 `grid x state x window` allocation.
@@ -108,7 +110,9 @@ git commit -am "feat(dg): stream spectral density descriptors"
 Test periodic maxima at a cell boundary, deterministic watershed ownership,
 ionic separated basins, covalent shared basins, and complete orbit generation
 under Z4 and Z2xZ2 actions.  Corrupt one symmetry map and require collective
-rejection before indexed access.
+rejection before indexed access. Require basin scores to consume the complete
+unoccupied density and all window components together; forbid per-window rank
+selection.
 
 **Step 2: Verify RED**
 
@@ -231,4 +235,3 @@ Run all focused MPI 1/2/4/8 suites, route and obsolete-route checks,
 Document measured acceptance receipts.  Do not add the user-owned modified
 Si64 experimental files or root-level W90 fixture outputs unless explicitly
 authorized.
-
