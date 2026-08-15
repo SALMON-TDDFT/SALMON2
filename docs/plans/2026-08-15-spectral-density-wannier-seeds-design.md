@@ -10,11 +10,10 @@ conduction states.
 
 ## Decision
 
-Use the occupied density and several energy-resolved unoccupied densities to
-discover spatial localization basins.  The unoccupied spectrum is divided into
-approximately equal-state-count windows.  A boundary is moved to the edge of a
-degenerate eigenvalue cluster rather than splitting that cluster.  Smooth
-spectral tapers replace hard membership at every boundary.
+Use the occupied density, the complete empty-state density, and continuous
+energy moments of the empty-state density to discover spatial localization
+basins.  Production seed generation has no internal empty-state window
+boundary.  Equal-count windows remain available only as a diagnostic view.
 
 The densities locate regions; they are not themselves used as orbitals.  For a
 basin mask `b(r)` and retained frame `Psi`, construct the small, gauge-covariant
@@ -38,24 +37,26 @@ rho_occ(r) = sum_n f_n |psi_n(r)|^2
 rho_q(r)   = sum_n w_q(epsilon_n) |psi_n(r)|^2
 ```
 
-for each unoccupied window `q`.  `w_q` is a partition of unity over the selected
-unoccupied states.  Window targets contain approximately equal numbers of
-states, but a tolerance-degenerate block is assigned as a whole.  Adjacent
-windows overlap through a compact smoothstep taper and their weights still sum
-to one.  Consequently small eigenvalue perturbations at a boundary do not move
-an entire state discontinuously between descriptors.
+For production define the complete empty density and normalized moments
+
+```
+rho_empty^(k)(r) = sum_empty ((epsilon_n-E_edge)/E_scale)^k |psi_n(r)|^2,
+k = 0, 1, 2.
+```
+
+`k=0` contains every empty retained state, while `k=1,2` distinguish the
+spatial migration of higher-energy states without a hard spectral cut.  A
+tolerance-degenerate block has one energy and therefore one moment weight, so
+the descriptors are invariant under its internal unitary gauge.
 
 The spatial feature field contains normalized occupied, unoccupied-window, and
 occupied/unoccupied-overlap components.  It therefore represents hole-like,
 electron-like, and shared regions without classifying them chemically.
 
-The window decomposition is descriptive, never selective.  The implementation
-also returns `rho_unocc_total = sum_q rho_q` and checks it against the complete
-unoccupied density.  Basin discovery consumes `rho_unocc_total` together with
-the complete vector of window features.  It may not allocate channel rank or
-discard retained states one window at a time.  Thus a chemically meaningful
-shell may cross a nominal energy boundary without being cut out of the final
-retained space; the windows only resolve its energy-dependent spatial motion.
+The diagnostic window decomposition is descriptive, never selective, and its
+sum is checked against `rho_empty^(0)`.  Basin discovery consumes the occupied
+density and all empty moments together.  It may not allocate channel rank or
+discard retained states by energy window.
 
 ## Basin and symmetry construction
 

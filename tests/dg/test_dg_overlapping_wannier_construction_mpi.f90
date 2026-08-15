@@ -50,7 +50,8 @@ program test_dg_overlapping_wannier_construction_mpi
     assign_dg_periodic_centers_to_fragments,&
     verify_dg_fragment_subspace_density_covariance,build_dg_core_owned_occupied_subspace,&
     build_dg_smooth_partition_of_unity,compose_dg_buffered_orbital_tile_to_physical_grid,&
-    build_dg_equal_count_spectral_windows,build_dg_spectral_density_descriptors
+    build_dg_equal_count_spectral_windows,build_dg_spectral_density_descriptors,&
+    build_dg_occupied_empty_moment_descriptors
   implicit none
   type(s_dg_translation_orbit_accumulator)::inverse_accumulator
   type(s_dg_prepared_translation_action)::prepared_translation_action
@@ -92,7 +93,8 @@ program test_dg_overlapping_wannier_construction_mpi
   real(8),allocatable::raw_seed_values(:,:)
   real(8),allocatable::spectral_window_weights(:,:)
   real(8),allocatable::spectral_occupied_density(:),spectral_unoccupied_density(:,:),&
-    spectral_total_unoccupied_density(:),spectral_shared_density(:,:),spectral_reference_descriptors(:,:)
+    spectral_total_unoccupied_density(:),spectral_shared_density(:,:),spectral_reference_descriptors(:,:),&
+    spectral_empty_moment_density(:,:)
   complex(8),allocatable::spectral_state_values(:,:)
   integer(8),allocatable::spectral_row_ids(:)
   real(8)::spectral_eigenvalues(10),spectral_occupations(10)
@@ -1745,6 +1747,15 @@ program test_dg_overlapping_wannier_construction_mpi
   call require(ok.and.maxval(abs(spectral_occupied_density-spectral_reference_descriptors(:,1)))<1d-12.and.&
     maxval(abs(spectral_unoccupied_density(:,1)-spectral_reference_descriptors(:,2)))<1d-12,&
     'spectral densities are invariant under unitary rotations inside equal-weight state blocks')
+  spectral_eigenvalues(1:4)=[-1d0,-0.5d0,0.1d0,0.4d0]
+  call build_dg_occupied_empty_moment_descriptors(comm,spectral_row_ids,4,spectral_state_values,&
+    spectral_eigenvalues(1:4),spectral_occupations(1:4),2,1d-12,spectral_occupied_density,&
+    spectral_empty_moment_density,spectral_shared_density,spectral_density_fingerprint,&
+    spectral_density_workspace,ok,message)
+  call require(ok.and.size(spectral_empty_moment_density,2)==3.and.&
+    maxval(abs(spectral_empty_moment_density(:,1)-spectral_total_unoccupied_density))<1d-12.and.&
+    all(spectral_empty_moment_density>=0d0),&
+    'occupied/empty moment descriptors preserve every empty state without energy-window cuts')
 
   if(rank==0)then
     write(*,'(a,i0)')'INVERSE_CHARACTER_FINGERPRINT ',inverse_fingerprint

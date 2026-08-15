@@ -10,7 +10,7 @@
 
 ---
 
-### Task 1: Degeneracy-safe equal-count spectral windows
+### Task 1: Degeneracy-safe diagnostic spectral windows
 
 **Files:**
 - Modify: `src/gs/dc/dg_overlapping_wannier_construction.f90`
@@ -61,7 +61,7 @@ git add src/gs/dc/dg_overlapping_wannier_construction.f90 \
 git commit -m "feat(dg): build equal-count spectral windows"
 ```
 
-### Task 2: Stream occupied and unoccupied density descriptors
+### Task 2: Stream occupied/empty density and continuous energy moments
 
 **Files:**
 - Modify: `src/gs/dc/dg_overlapping_wannier_construction.f90`
@@ -81,10 +81,10 @@ Run the focused MPI fixture; expect the missing density-builder symbol.
 
 **Step 3: Implement**
 
-Accumulate `rho_occ`, the complete `rho_unocc_total`, and one
-`rho_unocc(:,q)` at a time from row-distributed state values and spectral weights.
-Require `rho_unocc_total=sum_q rho_unocc(:,q)` so spectral windows can never
-discard part of a shell. Normalize into hole/electron/shared feature
+Accumulate `rho_occ`, complete `rho_empty`, and normalized empty-energy moments
+`k=1,2` from row-distributed state values.  Retain equal-count windows only for
+diagnostics and require their sum to reproduce `rho_empty`. Normalize into
+hole/electron/shared feature
 fields, use scaled norm accumulation, check finite magnitudes before squaring,
 bind row IDs and spectral-window provenance, and avoid a
 `grid x state x window` allocation.

@@ -99,7 +99,124 @@ module dg_overlapping_wannier_construction
   public::assign_dg_periodic_centers_to_fragments
   public::build_dg_equal_count_spectral_windows
   public::build_dg_spectral_density_descriptors
+  public::build_dg_occupied_empty_moment_descriptors
 contains
+
+  subroutine build_dg_occupied_empty_moment_descriptors(comm,row_ids,global_row_count,state_values,&
+      eigenvalues,occupations,maximum_moment,tolerance,occupied_density,empty_moment_density,&
+      shared_density,fingerprint,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm,global_row_count,maximum_moment
+    integer(int64),intent(in)::row_ids(:)
+    complex(real64),intent(in)::state_values(:,:)
+    real(real64),intent(in)::eigenvalues(:),occupations(:),tolerance
+    real(real64),allocatable,intent(out)::occupied_density(:),empty_moment_density(:,:),shared_density(:,:)
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nstate,nlocal,i,k,p,first_empty,ierr,local_bad,global_bad,minint,maxint,status
+    integer(int64)::bits,minbits,maxbits,base_fingerprint,base_workspace,elements
+    real(real64)::energy_origin,energy_scale,x
+    real(real64),allocatable::base_weights(:,:),base_empty(:,:),total_empty(:)
+    nstate=size(state_values,1);nlocal=size(state_values,2)
+    ok=.false.;message='';fingerprint=0_int64;workspace_peak_bytes=0_int64
+    local_bad=0
+    if(nstate<1.or.size(eigenvalues)/=nstate.or.size(occupations)/=nstate.or.&
+        maximum_moment<0.or.maximum_moment>8)then
+      local_bad=1
+    elseif(.not.ieee_is_finite(tolerance).or.tolerance<=0d0)then
+      local_bad=1
+    elseif(.not.all(ieee_is_finite(eigenvalues)).or..not.all(ieee_is_finite(occupations)))then
+      local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid occupied/empty moment contract';return;endif
+    call MPI_Allreduce(maximum_moment,minint,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(maximum_moment,maxint,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(minint/=maxint)then;message='empty moment order disagrees across ranks';return;endif
+    do i=1,nstate
+      bits=transfer(eigenvalues(i),0_int64)
+      call MPI_Allreduce(bits,minbits,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(bits,maxbits,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(minbits/=maxbits)then;message='moment eigenvalues disagree across ranks';return;endif
+    enddo
+    first_empty=0;local_bad=0
+    do i=2,nstate
+      if(eigenvalues(i)<eigenvalues(i-1)-tolerance*max(1d0,abs(eigenvalues(i)),abs(eigenvalues(i-1))))local_bad=1
+    enddo
+    do i=1,nstate
+      if(occupations(i)<=tolerance)then;first_empty=i;exit;endif
+    enddo
+    if(first_empty<=1)then
+      local_bad=1
+    elseif(any(occupations(first_empty:nstate)>tolerance))then
+      local_bad=1
+    elseif(maxval(abs(occupations(1:first_empty-1)-occupations(1)))>10d0*tolerance.or.&
+        occupations(1)<=tolerance)then
+      local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='occupied/empty moment descriptors require a sorted gapped integer-occupation spectrum';return
+    endif
+    if(int(nlocal,int64)>huge(0_int64)/int(maximum_moment+1,int64))then
+      local_bad=1;elements=0_int64
+    else
+      local_bad=0;elements=int(nlocal,int64)*int(maximum_moment+1,int64)
+      if(elements>huge(0_int64)/8_int64)local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='empty moment extent overflow';return;endif
+    allocate(base_weights(nstate,1),stat=status)
+    call MPI_Allreduce(merge(0,1,status==0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(base_weights))deallocate(base_weights)
+      message='empty moment weight allocation failed';return
+    endif
+    base_weights=0d0;base_weights(first_empty:nstate,1)=1d0
+    call build_dg_spectral_density_descriptors(comm,row_ids,global_row_count,state_values,occupations,&
+      base_weights,tolerance,occupied_density,base_empty,total_empty,shared_density,base_fingerprint,&
+      base_workspace,ok,message)
+    deallocate(base_weights)
+    if(.not.ok)return
+    allocate(empty_moment_density(nlocal,maximum_moment+1),stat=status)
+    call MPI_Allreduce(merge(0,1,status==0),global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(empty_moment_density))deallocate(empty_moment_density)
+      deallocate(occupied_density,base_empty,total_empty,shared_density)
+      message='empty moment density allocation failed';ok=.false.;return
+    endif
+    empty_moment_density=0d0;empty_moment_density(:,1)=total_empty
+    energy_origin=eigenvalues(first_empty);energy_scale=eigenvalues(nstate)-energy_origin
+    if(energy_scale>tolerance*max(1d0,abs(energy_origin),abs(eigenvalues(nstate))))then
+      do i=first_empty,nstate
+        x=max(0d0,min(1d0,(eigenvalues(i)-energy_origin)/energy_scale))
+        do k=1,maximum_moment
+          do p=1,nlocal
+            empty_moment_density(p,k+1)=empty_moment_density(p,k+1)+x**k*abs(state_values(i,p))**2
+          enddo
+        enddo
+      enddo
+    endif
+    local_bad=merge(0,1,all(ieee_is_finite(empty_moment_density)).and.all(empty_moment_density>=0d0))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      deallocate(occupied_density,base_empty,total_empty,shared_density,empty_moment_density)
+      message='empty moment density is nonfinite';ok=.false.;return
+    endif
+    fingerprint=base_fingerprint
+    do i=1,nstate;fingerprint=ieor(ishftc(fingerprint,9),transfer(eigenvalues(i),0_int64));enddo
+    fingerprint=ieor(fingerprint,int(maximum_moment,int64));if(fingerprint==0_int64)fingerprint=1_int64
+    if(base_workspace>huge(0_int64)-8_int64*elements)then
+      deallocate(occupied_density,base_empty,total_empty,shared_density,empty_moment_density)
+      message='empty moment workspace receipt overflow';ok=.false.;return
+    endif
+    workspace_peak_bytes=base_workspace+8_int64*elements
+    deallocate(base_empty,total_empty);ok=.true.
+#else
+    ok=.false.;message='occupied/empty moment descriptors require MPI';fingerprint=0_int64;workspace_peak_bytes=0_int64
+#endif
+  end subroutine build_dg_occupied_empty_moment_descriptors
 
   subroutine build_dg_spectral_density_descriptors(comm,row_ids,global_row_count,state_values,&
       occupations,window_weights,tolerance,occupied_density,unoccupied_density,total_unoccupied_density,shared_density,&
