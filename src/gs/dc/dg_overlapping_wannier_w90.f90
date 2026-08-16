@@ -2671,7 +2671,7 @@ contains
         write(unit,'(a,i0)')'num_bands = ',nband
         write(unit,'(a,i0)')'num_wann = ',nwann
         write(unit,'(a)')'num_iter = 200'
-        write(unit,'(a)')'conv_tol = 1.d-12'
+        write(unit,'(a)')'conv_tol = 1.d-10'
         write(unit,'(a)')'conv_window = 5'
         write(unit,'(a)')'gamma_only = true'
         write(unit,'(a)')'site_symmetry = .true.'
