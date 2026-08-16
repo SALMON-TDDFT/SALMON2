@@ -109,6 +109,14 @@ second_point_loop = point_orbit_body.find("do pidx=1,npoint", first_point_loop +
 assert 0 <= first_point_loop <= orbit_generation < second_point_loop, (
     "every point operation must act on the unchanged seed before orbit residual processing begins"
 )
+for point_orbit_receipt in (
+    "point-orbit cover is incomplete",
+    "point-orbit gram is rank deficient",
+    "point-orbit cluster leakage is excessive",
+):
+    assert point_orbit_receipt in point_orbit_body, (
+        f"joint periodic-center failures must report: {point_orbit_receipt}"
+    )
 position_canonicalizer = re.search(
     r"subroutine\s+canonicalize_dg_sector_periodic_position_gauge(?P<body>.*?)end\s+subroutine",
     w90_source,
