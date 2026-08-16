@@ -61,6 +61,7 @@ module inputoutput
   integer :: inml_band
   integer :: inml_sbe
   integer :: inml_dc
+  integer :: inml_unfolding
 
 !Input/Output units
   integer :: iflag_unit_time
@@ -293,7 +294,8 @@ contains
     namelist/kgrid/ &
       & num_kgrid, &
       & file_kw, &
-      & dk_shift
+      & dk_shift, &
+      & yn_gamma_centered
 
     namelist/tgrid/ &
       & nt, &
@@ -500,6 +502,7 @@ contains
       & yn_out_rvf_rt, &
       & out_rvf_rt_step, &
       & yn_out_tm, &
+      & yn_out_tm_bin, &
       & yn_out_gs_sgm_eps, &
       & out_gs_sgm_eps_mu_nu, &
       & out_gs_sgm_eps_width, &
@@ -606,6 +609,18 @@ contains
       & nstate_frag, &
       & energy_cut, &
       & lambda_cut
+
+    namelist/unfolding/ &
+      & dm_unfold_option, &
+      & num_lkgrid, &
+      & num_skgrid, &
+      & no_pr, &
+      & out_dm_unfold_step, &
+      & yn_out_mom_distr_gs, &
+      & yn_out_mom_distr_rt, &
+      & out_mom_distr_rt_step, &
+      & nq_mom, &
+      & dq_mom
 
 !! == default for &unit ==
     unit_system='au'
@@ -722,6 +737,7 @@ contains
     num_kgrid = 1
     file_kw   = 'none'
     dk_shift = 0d0
+    yn_gamma_centered = 'n'
 !! == default for &tgrid
     nt = 0
     dt = 0
@@ -931,6 +947,7 @@ contains
     yn_out_rvf_rt       = 'n'
     out_rvf_rt_step     = 10
     yn_out_tm           = 'n'
+    yn_out_tm_bin       = 'n'
     yn_out_gs_sgm_eps   = 'n'
     out_gs_sgm_eps_mu_nu(1) = 3
     out_gs_sgm_eps_mu_nu(2) = 3
@@ -1037,6 +1054,17 @@ contains
     nstate_frag = 0
     energy_cut = 0d0
     lambda_cut = 1d-3
+!! == default for &unfolding
+    dm_unfold_option = 'no'
+    num_lkgrid = 1
+    num_skgrid = 1
+    no_pr = 0
+    out_dm_unfold_step = 100
+    yn_out_mom_distr_gs = 'n'
+    yn_out_mom_distr_rt = 'n'
+    out_mom_distr_rt_step = 100
+    nq_mom = 0
+    dq_mom = 0.0d0
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1117,6 +1145,9 @@ contains
       read(fh_namelist, nml=dc, iostat=inml_dc)
       rewind(fh_namelist)
 
+      read(fh_namelist, nml=unfolding, iostat=inml_unfolding)
+      rewind(fh_namelist)
+
       close(fh_namelist)
     end if
 
@@ -1160,6 +1191,7 @@ contains
       end do
     end if
     call string_lowercase(lattice)
+    call string_lowercase(dm_unfold_option)
     call string_lowercase(lcfo_eigensolver)
 
 ! Broad cast
@@ -1270,6 +1302,7 @@ contains
     call comm_bcast(num_kgrid,nproc_group_global)
     call comm_bcast(file_kw  ,nproc_group_global)
     call comm_bcast(dk_shift ,nproc_group_global)
+    call comm_bcast(yn_gamma_centered,nproc_group_global)
 !! == bcast for &tgrid
     call comm_bcast(nt,nproc_group_global)
     call comm_bcast(dt,nproc_group_global)
@@ -1556,6 +1589,7 @@ contains
     call comm_bcast(yn_out_rvf_rt       ,nproc_group_global)
     call comm_bcast(out_rvf_rt_step     ,nproc_group_global)
     call comm_bcast(yn_out_tm           ,nproc_group_global)
+    call comm_bcast(yn_out_tm_bin       ,nproc_group_global)
     call comm_bcast(yn_out_gs_sgm_eps   ,nproc_group_global)
     call comm_bcast(out_gs_sgm_eps_mu_nu,nproc_group_global)
     call comm_bcast(out_gs_sgm_eps_width,nproc_group_global)
@@ -1670,6 +1704,17 @@ contains
     call comm_bcast(energy_cut, nproc_group_global)
     energy_cut = energy_cut * uenergy_to_au
     call comm_bcast(lambda_cut, nproc_group_global)
+!! == bcast for unfolding
+    call comm_bcast(dm_unfold_option, nproc_group_global)
+    call comm_bcast(num_lkgrid, nproc_group_global)
+    call comm_bcast(num_skgrid, nproc_group_global)
+    call comm_bcast(no_pr, nproc_group_global)
+    call comm_bcast(out_dm_unfold_step, nproc_group_global)
+    call comm_bcast(yn_out_mom_distr_gs, nproc_group_global)
+    call comm_bcast(yn_out_mom_distr_rt, nproc_group_global)
+    call comm_bcast(out_mom_distr_rt_step, nproc_group_global)
+    call comm_bcast(nq_mom, nproc_group_global)
+    call comm_bcast(dq_mom, nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -2167,6 +2212,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(1)', dk_shift(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(2)', dk_shift(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(3)', dk_shift(3)
+      write(fh_variables_log, '("#",4x,A,"=",A)') 'yn_gamma_centered', yn_gamma_centered
 
       if(inml_tgrid >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'tgrid', inml_tgrid
@@ -2476,6 +2522,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rvf_rt', yn_out_rvf_rt
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rvf_rt_step', out_rvf_rt_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm_bin', yn_out_tm_bin
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gs_sgm_eps', yn_out_gs_sgm_eps
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(1)', out_gs_sgm_eps_mu_nu(1)
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(2)', out_gs_sgm_eps_mu_nu(2)
@@ -2638,6 +2685,22 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
+
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'unfolding', inml_unfolding
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'dm_unfold_option', dm_unfold_option
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_lkgrid(1)', num_lkgrid(1)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_lkgrid(2)', num_lkgrid(2)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_lkgrid(3)', num_lkgrid(3)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(1)', num_skgrid(1)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(2)', num_skgrid(2)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(3)', num_skgrid(3)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'no_pr', no_pr
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dm_unfold_step', out_dm_unfold_step
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mom_distr_gs', yn_out_mom_distr_gs
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mom_distr_rt', yn_out_mom_distr_rt
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_mom_distr_rt_step', out_mom_distr_rt_step
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'nq_mom', nq_mom
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dq_mom', dq_mom
       
       close(fh_variables_log)
     end if
@@ -2702,6 +2765,7 @@ contains
     call yn_argument_check(yn_out_estatic_rt)
     call yn_argument_check(yn_out_rvf_rt)
     call yn_argument_check(yn_out_tm)
+    call yn_argument_check(yn_out_tm_bin)
     call yn_argument_check(yn_out_intraband_current)
     call yn_argument_check(yn_out_current_decomposed)
     call yn_argument_check(yn_out_spin_current_decomposed)
@@ -2732,6 +2796,8 @@ contains
     call yn_argument_check(yn_symmetrized_stencil)
     call yn_argument_check(yn_put_wall_z_boundary)
     call yn_argument_check(yn_spinorbit)
+    call yn_argument_check(yn_out_mom_distr_gs)
+    call yn_argument_check(yn_out_mom_distr_rt)
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)

@@ -69,6 +69,7 @@ type(s_singlescale) :: singlescale
 type(s_fdtd_system) :: fs
 type(ls_fdtd_weyl) :: fw
 type(s_multiscale) :: ms
+type(s_unfold) :: unfold
 
 
 integer :: Mit, itt
@@ -335,7 +336,7 @@ subroutine initialization_ms()
                                         srg, srg_scalar,  &
                                         spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s,  &
                                         V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
-                                        pp, ppg, ppn )
+                                        pp, ppg, ppn, unfold )
 
                 ! Override global variables (restore)
                 base_directory = trim(ms%base_directory)
@@ -439,11 +440,11 @@ subroutine time_evolution_step_ms
         if(mod(itt,2)==1)then
             call time_evolution_step(Mit,nt,itt,lg,mg,system,rt,info,stencil,xc_func &
             & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
-            & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale)
+            & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale,unfold)
         else
             call time_evolution_step(Mit,nt,itt,lg,mg,system,rt,info,stencil,xc_func &
             & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
-            & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale)
+            & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale,unfold)
         end if
     
         if (comm_is_root(ms%id_macropoint)) then

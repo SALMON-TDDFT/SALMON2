@@ -68,6 +68,7 @@ contains
       type(s_stencil) :: stencil_dummy
       type(s_sendrecv_grid) :: srg_dummy
       type(s_ofile) :: ofile_dummy
+      type(s_unfold) :: unfold_dummy
       
     ! MPI for the total system
       dc%icomm_tot = nproc_group_global
@@ -85,7 +86,7 @@ contains
      
     ! initialization for the total system
       call init_dft(dc%icomm_tot,dc%info_tot,dc%lg_tot,dc%mg_tot,dc%system_tot, &
-      & stencil_dummy,dc%fg_tot,dc%poisson_tot,srg_dummy,dc%srg_scalar_tot,ofile_dummy)
+      & stencil_dummy,dc%fg_tot,dc%poisson_tot,srg_dummy,dc%srg_scalar_tot,ofile_dummy,unfold_dummy)
       deallocate(dc%system_tot%rocc)
       call dealloc_cache(srg_dummy)
       
