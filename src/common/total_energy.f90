@@ -15,6 +15,39 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 MODULE Total_Energy
+
+! ---------------------------------------------------------------------------
+! nvfortran 26.5 OpenACC reduction workaround.
+!
+! Under nvhpc 26.5 the OpenACC reductions in init_ewald (reduction(max:)) and
+! calc_Total_Energy_periodic (reduction(+:)) silently return the reduction
+! IDENTITY (0) instead of the computed value. Verified by building the very
+! same loops as hand-written CUDA kernels on the same GPU with the same data:
+! CUDA gives 74 / 0.4478233939199485 (correct), OpenACC gives 0 / 0.
+! nvhpc 26.3 is unaffected. Both loops are one-time / per-ion-move setup, so
+! running them on the host costs essentially nothing.
+!
+! The book-keeping fill loop in init_ewald is affected the same way (its
+! per-atom counter comes back as 1 instead of ~74), so it is gated too.
+!
+! Unrelated to the compiler, that same fill loop also declared copyin(ewald)
+! -- host->device ONLY -- while writing ewald%bk / ewald%npair_bk inside the
+! region, so those device writes were semantically discarded. The wrong clause
+! is removed here so the GPU path is correct once the gate is relaxed. (That
+! fix on its own does not cure 26.5; the codegen bug above is the blocker.)
+!
+! When NVIDIA fixes this, drop the version test below (or raise the bound).
+! ---------------------------------------------------------------------------
+#if defined(USE_OPENACC)
+#  if defined(__NVCOMPILER_MAJOR__) && (__NVCOMPILER_MAJOR__ > 26 || (__NVCOMPILER_MAJOR__ == 26 && __NVCOMPILER_MINOR__ >= 5))
+#    define SALMON_ACC_REDUCTION_BROKEN 1
+#  endif
+#endif
+
+#if defined(USE_OPENACC) && !defined(SALMON_ACC_REDUCTION_BROKEN)
+#  define SALMON_EWALD_ACC 1
+#endif
+
 implicit none
 
 CONTAINS
@@ -325,7 +358,7 @@ CONTAINS
 
       if(ewald%yn_bookkeep=='y') then
 
-#ifdef USE_OPENACC
+#ifdef SALMON_EWALD_ACC
 !$acc kernels copyin(ewald)
 !$acc loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr) reduction(+:E_tmp)
 #else
@@ -358,7 +391,7 @@ CONTAINS
 
             end do  !ipair
          end do     !ia
-#ifdef USE_OPENACC
+#ifdef SALMON_EWALD_ACC
 !$acc end kernels
 #else
 !$omp end parallel do
@@ -850,7 +883,7 @@ CONTAINS
 
     !(check maximum number of pairs and allocate)
     npair_bk_max = 0
-#ifdef USE_OPENACC
+#ifdef SALMON_EWALD_ACC
 !$acc kernels loop private(iia,ia,ix,iy,iz,ib,r,rab,rr,npair_bk_loc) reduction(max:npair_bk_max)
 #else
 !$omp parallel do private(iia,ia,ix,iy,iz,ib,r,rab,rr,npair_bk_loc) &
@@ -887,7 +920,7 @@ CONTAINS
         end do
         npair_bk_max = max(npair_bk_max,npair_bk_loc)
       end do
-#ifdef USE_OPENACC
+#ifdef SALMON_EWALD_ACC
 !$acc end kernels
 #else
 !$omp end parallel do
@@ -904,8 +937,8 @@ CONTAINS
 820      format(a,i6)
       endif
 
-#ifdef USE_OPENACC
-!$acc kernels loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr) copyin(ewald)
+#ifdef SALMON_EWALD_ACC
+!$acc kernels loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
 #else
 !$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
 #endif
@@ -944,7 +977,7 @@ CONTAINS
         end do
         ewald%npair_bk(iia) = ipair
       end do
-#ifdef USE_OPENACC
+#ifdef SALMON_EWALD_ACC
 !$acc end kernels
 #else
 !$omp end parallel do
