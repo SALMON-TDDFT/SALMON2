@@ -713,6 +713,8 @@ contains
         orbit_residual=orbit_residual/residual_norm
         do pidx=1,npoint
           orbit_vectors(:,pidx)=matmul(point_representations(:,:,pidx),orbit_residual)
+        enddo
+        do pidx=1,npoint
           do axis=1,3
             expectation=dot_product(orbit_vectors(:,pidx),&
               matmul(position_tuple(:,:,axis),orbit_vectors(:,pidx)))
