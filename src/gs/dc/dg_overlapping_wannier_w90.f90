@@ -567,7 +567,9 @@ contains
     if(present(point_representations))then
       call build_point_orbit_blocks(point_orbit_built)
       if(.not.point_orbit_built)then
-        call cleanup();message='joint periodic-center could not construct complete point-orbit blocks';return
+        call cleanup()
+        if(len_trim(message)==0)message='joint periodic-center could not construct complete point-orbit blocks'
+        return
       endif
     else
       do j=1,m;do axis=1,3
@@ -755,7 +757,11 @@ contains
         enddo
         if(norm_info/=0.or.ncovered>=m)exit
       enddo
-      if(norm_info/=0.or.ncandidate/=m.or.ncovered/=m)return
+      if(norm_info/=0.or.ncandidate/=m.or.ncovered/=m)then
+        write(message,'(a,i0,a,i0,a,i0)')'point-orbit cover is incomplete: candidates=',ncandidate,&
+          ' covered=',ncovered,' required=',m
+        return
+      endif
       cluster_sequence(1:ncluster)=[(cidx,cidx=1,ncluster)]
       do cidx=2,ncluster
         destination=cidx
@@ -787,7 +793,12 @@ contains
       bad=merge(0,1,norm_info==0.and.all(ieee_is_finite(block_eval)).and.&
         minval(block_eval)>rank_tolerance*rank_tolerance)
       call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-      if(ierr/=MPI_SUCCESS.or.gbad/=0)return
+      if(ierr/=MPI_SUCCESS.or.gbad/=0)then
+        if(ierr==MPI_SUCCESS)write(message,'(a,es14.6,a,es14.6)')&
+          'point-orbit Gram is rank deficient: minimum_eigenvalue=',minval(block_eval),&
+          ' threshold=',rank_tolerance*rank_tolerance
+        return
+      endif
       inverse_sqrt=1d0/sqrt(block_eval)
       gram=matmul(block*spread(inverse_sqrt,1,m),conjg(transpose(block)))
       orbit_basis=matmul(orbit_basis,gram);leakage=0d0
@@ -816,7 +827,11 @@ contains
           source_start=source_end+1
         enddo
       enddo
-      if(leakage>center_tolerance)return
+      if(leakage>center_tolerance)then
+        write(message,'(a,es14.6,a,es14.6)')'point-orbit cluster leakage is excessive: leakage=',leakage,&
+          ' threshold=',center_tolerance
+        return
+      endif
       unitary=orbit_basis;built=.true.
     end subroutine build_point_orbit_blocks
 
