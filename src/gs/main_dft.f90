@@ -1323,7 +1323,7 @@ contains
     deallocate(fixed_center_rows,spectral_wannier_action_rows)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'direct retained Wannier frame preparation failed';endif
     spectral_workspace_peak=spectral_operation_workspace
-    if(rank==0)write(*,'(a,i0,3(a,es16.8),a,i0)')'[OW-GS-DIAGNOSTIC] direct_retained_wannier_frame',&
+    if(rank==0)write(*,'(a,a,i0,3(a,es16.8),a,i0)')'[OW-GS-DIAGNOSTIC] direct_retained_wannier_frame',&
       ' fingerprint=',spectral_channel_fingerprint,' frame_defect=',spectral_frame_defect,&
       ' gram_defect=',spectral_channel_gram_defect,' action_defect=',spectral_action_unitarity,&
       ' workspace_peak_bytes=',spectral_workspace_peak

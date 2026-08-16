@@ -241,6 +241,11 @@ for obsolete_call in (
 assert "call prepare_dg_direct_retained_wannier_frame" in ow_ground_state_body, (
     "production must prepare the complete retained frame directly"
 )
+assert re.search(
+    r"write\s*\(\s*\*\s*,\s*'\(a,a,i0,3\(a,es16\.8\),a,i0\)'\s*\)\s*"
+    r"'\[ow-gs-diagnostic\] direct_retained_wannier_frame'",
+    ow_ground_state_body,
+), "direct-frame diagnostic format must match its leading label and integer payload"
 assert len(re.findall(r"call\s+run_dg_w90_gamma_library", ow_ground_state_body)) == 1, (
     "direct retained-frame construction must invoke Wannier90 exactly once"
 )
