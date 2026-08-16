@@ -72,6 +72,12 @@ assert 0 <= tile_allocation_position < tile_loop_position, (
 )
 localization_source = source("src/gs/dc/dg_overlapping_wannier_localization.f90")
 w90_source = source("src/gs/dc/dg_overlapping_wannier_w90.f90")
+assert "conv_tol = 1.d-10" in w90_source, (
+    "Gamma Wannier90 input must use an attainable double-precision convergence tolerance"
+)
+assert "conv_tol = 1.d-12" not in w90_source, (
+    "obsolete over-strict Gamma Wannier90 convergence tolerance must be removed"
+)
 periodic_phase_aligner = re.search(
     r"subroutine\s+align_dg_w90_character_sectors_by_periodic_phase(?P<body>.*?)"
     r"end\s+subroutine\s+align_dg_w90_character_sectors_by_periodic_phase",
