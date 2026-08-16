@@ -96,6 +96,19 @@ assert not re.search(
 assert "mpi_bcast(projector_value" not in re.sub(
     r"\s+", "", periodic_phase_aligner_body
 ), "periodic-phase projector sketches must not issue one collective per global row"
+point_orbit_builder = re.search(
+    r"subroutine\s+build_point_orbit_blocks(?P<body>.*?)end\s+subroutine\s+build_point_orbit_blocks",
+    w90_source,
+    re.I | re.S,
+)
+assert point_orbit_builder
+point_orbit_body = point_orbit_builder.group("body").lower()
+orbit_generation = point_orbit_body.find("orbit_vectors(:,pidx)=matmul")
+first_point_loop = point_orbit_body.find("do pidx=1,npoint")
+second_point_loop = point_orbit_body.find("do pidx=1,npoint", first_point_loop + 1)
+assert 0 <= first_point_loop <= orbit_generation < second_point_loop, (
+    "every point operation must act on the unchanged seed before orbit residual processing begins"
+)
 position_canonicalizer = re.search(
     r"subroutine\s+canonicalize_dg_sector_periodic_position_gauge(?P<body>.*?)end\s+subroutine",
     w90_source,
