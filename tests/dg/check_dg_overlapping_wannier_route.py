@@ -156,8 +156,6 @@ for mlwf_call in (
     "project_dg_w90_reference_sector_operators",
     "anchor_dg_w90_reference_character_sector",
     "materialize_dg_row_owned_sector_on_spatial_grid",
-    "build_dg_sector_periodic_position_tuple",
-    "jointly_canonicalize_dg_sector_periodic_position_gauge",
     "prepare_dg_translation_character_action",
     "build_dg_translation_character_intertwining_phase_prepared",
     "align_dg_w90_character_sectors_by_periodic_phase",
@@ -176,8 +174,6 @@ production_order = [
     ow_ground_state_body.find("call project_dg_w90_reference_sector_operators"),
     ow_ground_state_body.find("call anchor_dg_w90_reference_character_sector"),
     ow_ground_state_body.find("call materialize_dg_row_owned_sector_on_spatial_grid", w90_position),
-    ow_ground_state_body.find("call build_dg_sector_periodic_position_tuple"),
-    ow_ground_state_body.find("call jointly_canonicalize_dg_sector_periodic_position_gauge"),
     ow_ground_state_body.find("call prepare_dg_translation_character_action"),
     ow_ground_state_body.find("call build_dg_translation_character_intertwining_phase_prepared"),
     ow_ground_state_body.find("call align_dg_w90_character_sectors_by_periodic_phase"),
@@ -192,6 +188,18 @@ assert all(position >= 0 for position in production_order) and production_order 
 )
 assert not re.search(r"call\s+canonicalize_dg_sector_periodic_position_gauge\b", ow_ground_state_body), (
     "production must not use the noncovariant fixed-direction periodic-position gauge"
+)
+assert not re.search(r"call\s+build_dg_sector_periodic_position_tuple\b", ow_ground_state_body), (
+    "production must not project a translation-changing position phase into one character sector"
+)
+assert not re.search(r"call\s+jointly_canonicalize_dg_sector_periodic_position_gauge\b", ow_ground_state_body), (
+    "production must defer periodic-center canonicalization until after character inversion"
+)
+inverse_position = ow_ground_state_body.find("call accumulate_dg_translation_character_orbit_sector_values")
+center_measure_position = ow_ground_state_body.find("call compute_dg_periodic_wannier_centers")
+center_orbit_position = ow_ground_state_body.find("call verify_dg_wannier_center_affine_orbits")
+assert 0 <= inverse_position < center_measure_position < center_orbit_position, (
+    "production must measure and validate periodic centers only after character inversion"
 )
 character_loop_position = ow_ground_state_body.find("do translation_character=1")
 prepare_position = ow_ground_state_body.find("call prepare_dg_translation_character_action")
