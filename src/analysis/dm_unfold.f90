@@ -226,7 +226,7 @@ contains
         & 8,  "Jz:<upu>-d", trim(t_unit_current%name), &
         & 9,  "Jx:<u[r,V]u>-d", trim(t_unit_current%name), &
         & 10, "Jy:<u[r,V]u>-d", trim(t_unit_current%name), &
-        & 11, "Jz:,u[r,V]u>-d", trim(t_unit_current%name), &
+        & 11, "Jz:<u[r,V]u>-d", trim(t_unit_current%name), &
         & 12, "Jx:<upu>-nd", trim(t_unit_current%name), &
         & 13, "Jy:<upu>-nd", trim(t_unit_current%name), &
         & 14, "Jz:<upu>-nd", trim(t_unit_current%name), &
@@ -887,7 +887,7 @@ contains
 
     write(ofl%fh_dm_unfold,'(55f17.12)') itt*dt, system%vec_Ac(1:3)*t_unit_ac%conv, &
     & real(zsum),real(zj1(1:3))*t_unit_current%conv,real(zj2(1:3))*t_unit_current%conv,real(zj3(1:3))*t_unit_current%conv, &
-    & real(zj4(1:3))*t_unit_current%conv,real(zj5(1:3))*t_unit_current%conv,real(zj6(1:3)*t_unit_current%conv), &
+    & real(zj4(1:3))*t_unit_current%conv,real(zj5(1:3))*t_unit_current%conv,real(zj6(1:3))*t_unit_current%conv, &
     & real(zj1(1:3)+zj3(1:3)+zj5(1:3)+zj6(1:3))*t_unit_current%conv, &
     & real(zj1(1:3)+zj2(1:3)+zj3(1:3)+zj4(1:3)+zj5(1:3)+zj6(1:3))*t_unit_current%conv, &
     & real(zsum_uu),real(zj1_uu(1:3))*t_unit_current%conv,real(zj2_uu(1:3))*t_unit_current%conv, &
