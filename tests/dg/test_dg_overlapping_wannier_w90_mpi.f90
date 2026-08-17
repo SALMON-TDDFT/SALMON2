@@ -20,6 +20,7 @@ program test_dg_overlapping_wannier_w90_mpi
   use dg_overlapping_wannier_w90,only:build_dg_orbital_major_periodic_position_tuple,&
     apply_dg_orbital_rotation_tiled
   use dg_overlapping_wannier_w90,only:export_dg_w90_replay_bundle
+  use dg_overlapping_wannier_w90,only:convert_dg_w90_library_geometry
   implicit none
   integer::ierr,rank,nproc,b,i,m,n,p,nlocal
   integer::convergence_iterations,log_unit,win_unit,win_io
@@ -35,6 +36,8 @@ program test_dg_overlapping_wannier_w90_mpi
   integer(8)::matrix_peak,matrix_estimate
   complex(8)::local_m_reference(2,2,2),local_a_reference(2,2),m_reference(2,2,2),a_reference(2,2),phase
   real(8)::angle
+  real(8)::test_atomic_lattice(3,3),test_atomic_reciprocal(3,3),test_atomic_atoms(3,1),&
+    library_lattice_units(3,3),library_reciprocal_units(3,3),library_atom_units(3,1)
   real(8)::inherited_identity,inherited_unitarity,inherited_closure
   complex(8)::covariance_band(2,2),covariance_wann(2,2),covariance_transform(2,2)
   real(8)::covariance_defect
@@ -133,6 +136,18 @@ program test_dg_overlapping_wannier_w90_mpi
   call require(ok.and.bytes>0_8,'finite Si64 Wannier90 byte estimate')
   call estimate_dg_w90_coordinator_bytes(huge(0),huge(0),12,1,bytes,ok,message)
   call require(.not.ok,'Wannier90 byte estimate rejects integer overflow')
+  test_atomic_lattice=0d0;test_atomic_reciprocal=0d0;test_atomic_atoms=0d0
+  test_atomic_lattice(1,1)=10d0;test_atomic_lattice(2,2)=10d0;test_atomic_lattice(3,3)=10d0
+  test_atomic_reciprocal(1,1)=2d0*acos(-1d0)/10d0
+  test_atomic_reciprocal(2,2)=test_atomic_reciprocal(1,1)
+  test_atomic_reciprocal(3,3)=test_atomic_reciprocal(1,1)
+  test_atomic_atoms(:,1)=[1d0,2d0,3d0]
+  call convert_dg_w90_library_geometry(test_atomic_lattice,test_atomic_reciprocal,test_atomic_atoms,&
+    library_lattice_units,library_reciprocal_units,library_atom_units,ok,message)
+  call require(ok.and.abs(library_lattice_units(1,1)-5.2917721067d0)<1d-12.and.&
+    abs(library_reciprocal_units(1,1)-test_atomic_reciprocal(1,1)/0.52917721067d0)<1d-12.and.&
+    maxval(abs(library_atom_units(:,1)-[0.52917721067d0,1.05835442134d0,1.58753163201d0]))<1d-12,&
+    'Wannier90 library geometry converts SALMON atomic units to Angstrom')
   replay_gvec=reshape([1,0,0,0,1,0],[3,2])
   if(rank==0)then
     allocate(replay_m(2,2,2),replay_a(2,2),replay_eigenvalues(2))

@@ -28,7 +28,35 @@ module dg_overlapping_wannier_w90
   public::build_dg_orbital_major_periodic_position_tuple
   public::apply_dg_orbital_rotation_tiled
   public::export_dg_w90_replay_bundle
+  public::convert_dg_w90_library_geometry
 contains
+
+  subroutine convert_dg_w90_library_geometry(real_lattice_au,reciprocal_lattice_au,atoms_cart_au,&
+      real_lattice_angstrom,reciprocal_lattice_inv_angstrom,atoms_cart_angstrom,ok,message)
+    real(real64),parameter::bohr_to_angstrom=0.52917721067_real64
+    real(real64),intent(in)::real_lattice_au(3,3),reciprocal_lattice_au(3,3),atoms_cart_au(:,:)
+    real(real64),intent(out)::real_lattice_angstrom(3,3),reciprocal_lattice_inv_angstrom(3,3),&
+      atoms_cart_angstrom(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    ok=.false.;message='';real_lattice_angstrom=0d0;reciprocal_lattice_inv_angstrom=0d0
+    atoms_cart_angstrom=0d0
+    if(any(shape(atoms_cart_au)/=shape(atoms_cart_angstrom)).or.size(atoms_cart_au,1)/=3.or.&
+        .not.all(ieee_is_finite(real_lattice_au)).or.&
+        .not.all(ieee_is_finite(reciprocal_lattice_au)).or.&
+        .not.all(ieee_is_finite(atoms_cart_au)))then
+      message='invalid atomic-unit Wannier90 library geometry';return
+    endif
+    real_lattice_angstrom=bohr_to_angstrom*real_lattice_au
+    reciprocal_lattice_inv_angstrom=reciprocal_lattice_au/bohr_to_angstrom
+    atoms_cart_angstrom=bohr_to_angstrom*atoms_cart_au
+    if(.not.all(ieee_is_finite(real_lattice_angstrom)).or.&
+        .not.all(ieee_is_finite(reciprocal_lattice_inv_angstrom)).or.&
+        .not.all(ieee_is_finite(atoms_cart_angstrom)))then
+      message='Wannier90 library geometry unit conversion overflowed';return
+    endif
+    ok=.true.
+  end subroutine convert_dg_w90_library_geometry
 
   subroutine export_dg_w90_replay_bundle(comm,source_directory,source_seed,output_directory,&
       output_seed,energy_ev,amn,mmn,neighbor_gvec,ok,message)
@@ -2971,6 +2999,10 @@ contains
     integer::proj_s(max(1,nband))
     real(real64)::kpoint(3,1),proj_site(3,max(1,nband)),proj_z(3,max(1,nband)),&
       proj_x(3,max(1,nband)),proj_zona(max(1,nband)),proj_s_qaxis(3,max(1,nband))
+    real(real64)::real_lattice_w90(3,3),reciprocal_lattice_w90(3,3),&
+      atoms_cart_w90(3,size(atom_symbols))
+    logical::geometry_ok
+    character(len(message))::geometry_message
     interface
       subroutine wannier_setup(seed_name,mp_grid_loc,num_kpts_loc,real_lattice_loc,&
           recip_lattice_loc,kpt_latt_loc,num_bands_tot,num_atoms_loc,atom_symbols_loc,&
@@ -3006,6 +3038,11 @@ contains
       if(.not.dmn_exists)status=4
     endif
     if(rank==0.and.status==0)then
+      call convert_dg_w90_library_geometry(real_lattice,reciprocal_lattice,atoms_cart,&
+        real_lattice_w90,reciprocal_lattice_w90,atoms_cart_w90,geometry_ok,geometry_message)
+      if(.not.geometry_ok)status=5
+    endif
+    if(rank==0.and.status==0)then
       open(newunit=unit,file=trim(seed)//'.win',status='replace',action='write',iostat=io)
       if(io/=0)then
         status=2
@@ -3032,8 +3069,8 @@ contains
         write(unit,'(a)')'mp_grid = 1 1 1'
         write(unit,'(a)')'begin kpoints';write(unit,'(a)')'0.0 0.0 0.0'
         write(unit,'(a)')'end kpoints';close(unit)
-        call wannier_setup(trim(seed),mp_grid,1,real_lattice,reciprocal_lattice,kpoint,nband,&
-          size(atom_symbols),atom_symbols,atoms_cart,.true.,.false.,nntot,nnlist,nncell_max,&
+        call wannier_setup(trim(seed),mp_grid,1,real_lattice_w90,reciprocal_lattice_w90,kpoint,nband,&
+          size(atom_symbols),atom_symbols,atoms_cart_w90,.true.,.false.,nntot,nnlist,nncell_max,&
           num_bands_out,num_wann_out,proj_site,proj_l,proj_m,proj_radial,proj_z,proj_x,&
           proj_zona,exclude_bands,proj_s,proj_s_qaxis)
         if(nntot<1.or.nntot>num_nnmax.or.num_bands_out/=nband.or.num_wann_out/=nwann)status=3
@@ -3067,9 +3104,14 @@ contains
 #if defined(USE_MPI) && defined(USE_WANNIER90)
     integer::rank,ierr,nband,nwann,nntot,status,mp_grid(3),matrix_dimensions(3),convergence_iterations
     real(real64)::kpoint(3,1)
+    real(real64),parameter::bohr_to_angstrom=0.52917721067_real64
+    real(real64)::real_lattice_w90(3,3),reciprocal_lattice_w90(3,3),&
+      atoms_cart_w90(3,size(atom_symbols))
     complex(real64),allocatable::u(:,:,:),uopt(:,:,:),m4(:,:,:,:),a3(:,:,:)
     real(real64),allocatable::e2(:,:)
     logical,allocatable::lwindow(:,:)
+    logical::geometry_ok
+    character(len(message))::geometry_message
     interface
       subroutine wannier_run(seed_name,mp_grid_loc,num_kpts_loc,real_lattice_loc,&
           recip_lattice_loc,kpt_latt_loc,num_bands_loc,num_wann_loc,nntot_loc,num_atoms_loc,&
@@ -3115,12 +3157,22 @@ contains
     allocate(transform(nwann,nwann),centers(3,nwann),spreads(nwann));transform=(0d0,0d0)
     centers=0d0;spreads=0d0;mp_grid=[1,1,1];kpoint=0d0
     if(rank==0)then
+      call convert_dg_w90_library_geometry(real_lattice,reciprocal_lattice,atoms_cart,&
+        real_lattice_w90,reciprocal_lattice_w90,atoms_cart_w90,geometry_ok,geometry_message)
+      if(.not.geometry_ok)then
+        message=geometry_message;status=3
+      endif
+    endif
+    if(rank==0.and.status==0)then
       allocate(u(nwann,nwann,1),uopt(nband,nwann,1),lwindow(nband,1),&
         m4(nband,nband,nntot,1),a3(nband,nwann,1),e2(nband,1))
       m4(:,:,:,1)=m_matrix;a3(:,:,1)=a_matrix;e2(:,1)=eigenvalues
-      call wannier_run(trim(seed),mp_grid,1,real_lattice,reciprocal_lattice,kpoint,nband,nwann,&
-        nntot,size(atom_symbols),atom_symbols,atoms_cart,.true.,m4,a3,e2,u,uopt,lwindow,&
+      call wannier_run(trim(seed),mp_grid,1,real_lattice_w90,reciprocal_lattice_w90,kpoint,nband,nwann,&
+        nntot,size(atom_symbols),atom_symbols,atoms_cart_w90,.true.,m4,a3,e2,u,uopt,lwindow,&
         centers,spreads,spread)
+      centers=centers/bohr_to_angstrom
+      spreads=spreads/(bohr_to_angstrom*bohr_to_angstrom)
+      spread=spread/(bohr_to_angstrom*bohr_to_angstrom)
       transform=matmul(uopt(:,:,1),u(:,:,1))
       call validate_dg_w90_convergence_log(trim(seed)//'.wout',400,convergence_iterations,ok,message)
       if(ok)call validate_dg_w90_result(transform,centers,spreads,spread,initial_gauge_spread,&

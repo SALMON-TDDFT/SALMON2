@@ -1260,6 +1260,24 @@ run_library_body = re.search(
     w90_source,
     re.I | re.S,
 )
+setup_library_body = re.search(
+    r"subroutine\s+setup_dg_w90_gamma_library\b(?P<body>.*?)end\s+subroutine\s+setup_dg_w90_gamma_library",
+    w90_source,
+    re.I | re.S,
+)
+assert setup_library_body and "call convert_dg_w90_library_geometry" in setup_library_body.group("body").lower() and all(
+    token in setup_library_body.group("body").lower().split("call wannier_setup", 1)[1]
+    for token in ("real_lattice_w90", "reciprocal_lattice_w90", "atoms_cart_w90")
+), "Wannier90 setup must receive Angstrom geometry through the library API"
+assert run_library_body and "call convert_dg_w90_library_geometry" in run_library_body.group("body").lower() and all(
+    token in run_library_body.group("body").lower().split("call wannier_run", 1)[1]
+    for token in ("real_lattice_w90", "reciprocal_lattice_w90", "atoms_cart_w90")
+), "Wannier90 run must receive Angstrom geometry through the library API"
+assert re.search(
+    r"centers\s*=\s*centers\s*/\s*bohr_to_angstrom.*?spreads\s*=\s*spreads\s*/\s*\(\s*bohr_to_angstrom\s*\*\s*bohr_to_angstrom\s*\)",
+    run_library_body.group("body"),
+    re.I | re.S,
+), "Wannier90 library centers and spreads must return to SALMON atomic units"
 assert run_library_body and re.search(
     r"MPI_Bcast\s*\(\s*message\s*,",
     run_library_body.group("body"),
