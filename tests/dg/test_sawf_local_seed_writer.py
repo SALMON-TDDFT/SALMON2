@@ -67,9 +67,14 @@ driver = r'''program check_local_seed_writer
   call build_sawf_local_seed_matrices(states,projections,phase,1d0,amn,mmn,ok,message)
   if(.not.ok.or.maxval(abs(amn-states))>1d-14)error stop 3
   if(maxval(abs(mmn(:,:,1)-states))>1d-14)error stop 4
-  amn=(0d0,0d0);amn(1,1)=1;amn(2,2)=1
-  mmn=(0d0,0d0)
-  do i=1,3;mmn(1,1,i)=1;mmn(2,2,i)=1;end do
+  amn(1,1)=cmplx(11d0,-11d0,8);amn(2,1)=cmplx(21d0,-21d0,8)
+  amn(1,2)=cmplx(12d0,-12d0,8);amn(2,2)=cmplx(22d0,-22d0,8)
+  do i=1,3
+    mmn(1,1,i)=cmplx(100*i+11d0,-100*i-11d0,8)
+    mmn(2,1,i)=cmplx(100*i+21d0,-100*i-21d0,8)
+    mmn(1,2,i)=cmplx(100*i+12d0,-100*i-12d0,8)
+    mmn(2,2,i)=cmplx(100*i+22d0,-100*i-22d0,8)
+  end do
   call write_sawf_local_eig_amn_mmn('.', 'local',energy,amn,mmn,neighbor_gvec,ok,message)
   if(.not.ok)then;write(*,'(a)')trim(message);error stop 1;end if
   mmn(1,1,1)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,kind=8)
@@ -101,5 +106,27 @@ with tempfile.TemporaryDirectory(prefix="sawf-local-seed-") as td:
     assert len(eig) == 2 and eig[0].split()[:2] == ["1", "1"]
     assert [int(x) for x in amn[1].split()] == [2, 1, 2]
     assert [int(x) for x in mmn[1].split()] == [2, 1, 3]
+    amn_records = [line.split() for line in amn[2:]]
+    assert [tuple(map(int, row[:3])) for row in amn_records] == [
+        (1, 1, 1), (2, 1, 1), (1, 2, 1), (2, 2, 1)
+    ]
+    assert [tuple(map(float, row[3:])) for row in amn_records] == [
+        (11.0, -11.0), (21.0, -21.0), (12.0, -12.0), (22.0, -22.0)
+    ]
+    mmn_blocks = []
+    cursor = 2
+    for neighbor, expected_gvec in enumerate(((1, 0, 0), (0, 1, 0), (0, 0, 1)), 1):
+        header = tuple(map(int, mmn[cursor].split()))
+        assert header == (1, 1, *expected_gvec)
+        cursor += 1
+        records = [tuple(map(float, mmn[cursor + offset].split())) for offset in range(4)]
+        assert records == [
+            (100.0 * neighbor + 11.0, -100.0 * neighbor - 11.0),
+            (100.0 * neighbor + 21.0, -100.0 * neighbor - 21.0),
+            (100.0 * neighbor + 12.0, -100.0 * neighbor - 12.0),
+            (100.0 * neighbor + 22.0, -100.0 * neighbor - 22.0),
+        ]
+        cursor += 4
+    assert cursor == len(mmn)
     assert "PASS local SAWF" in result.stdout
     print(result.stdout.strip())
