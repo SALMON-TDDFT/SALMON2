@@ -1,5 +1,13 @@
 # Wannier90 Symmetry-Adapted Coordinate Optimization Design
 
+> **Status: superseded on 2026-08-18.** The DMN already contains the complete
+> finite-group operation set, so upstream Wannier90's one-pass Reynolds
+> average is the exact gradient projector.  The observed cost came from a
+> SALMON patch that mistakenly replaced it with repeated averaging.  Commit
+> `c08e91f8` restores the simpler upstream algorithm; this decomposition design
+> must not be implemented unless a future case proves the complete-group
+> projector mathematically insufficient.
+
 ## Goal
 
 Minimize the Wannier spread while preserving the supplied finite-group DMN

@@ -1,5 +1,12 @@
 # Wannier90 Symmetry-Adapted Coordinate Optimization Implementation Plan
 
+> **Status: cancelled on 2026-08-18.** Investigation showed that `.dmn`
+> already supplies every group operation.  Wannier90's original one-pass
+> Reynolds projection is therefore sufficient, and the expensive iteration
+> was introduced by our patch.  Do not execute the tasks below unless new
+> evidence invalidates that premise.  The minimal correction is commit
+> `c08e91f8`.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Replace iterative dense symmetry projection in Wannier90 localization with direct optimization in the complete symmetry-allowed multiplicity space, while preserving exact DMN covariance and bounded memory.
