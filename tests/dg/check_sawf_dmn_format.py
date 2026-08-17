@@ -14,6 +14,37 @@ args = parser.parse_args()
 BUILD = args.build_dir.resolve()
 
 
+def check_wannier90_gradient_patch():
+    patch = (ROOT / "cmakefiles/Builder/patches/apply_wannier90_generator_symmetry.cmake").read_text()
+    if ".not. gamma_only .or. lsitesymmetry" not in patch:
+        raise AssertionError("Wannier90 site symmetry still selects the real-only Gamma initializer")
+    if patch.count("gamma_only .and. .not. lsitesymmetry") < 2:
+        raise AssertionError("Wannier90 library mode still dispatches site symmetry through Gamma-only routines")
+    if "if (lsitesymmetry) call sitesym_read()" not in patch:
+        raise AssertionError("Wannier90 library mode does not initialize DMN symmetry data")
+    if "abs(fac*wann_spread%om_tot) .gt. tiny(1.0_dp)" not in patch:
+        raise AssertionError("Wannier90 zero-spread line search can divide by zero")
+    if "integer, parameter :: niter = 1000" not in patch:
+        raise AssertionError("Wannier90 site-symmetry projection retains the insufficient 100-iteration cap")
+    markers = [
+        "call comms_gatherv(cdq_loc",
+        "call comms_bcast(cdq(1, 1, 1)",
+        "call sitesym_symmetrize_gradient(2, cdq)",
+        "cdq_loc(:, :, 1:counts(my_node_id)) = cdq(:, :, 1 + displs(my_node_id):",
+    ]
+    positions = []
+    start = 0
+    for marker in markers:
+        position = patch.find(marker, start)
+        positions.append(position)
+        start = max(start, position + len(marker))
+    if any(position < 0 for position in positions) or positions != sorted(positions):
+        raise AssertionError("Wannier90 gradient patch does not synchronize the projected search direction")
+
+
+check_wannier90_gradient_patch()
+
+
 def parse_dmn(path, nb, nw):
     text = Path(path).read_text()
     tokens = re.findall(r"\([^()]+,[^()]+\)|[-+]?\d+", text.splitlines()[1] + "\n" + "\n".join(text.splitlines()[2:]))
@@ -115,6 +146,16 @@ program check_sawf_dmn
   call require(ok,'cycle g2')
   call finish_sawf_dmn(writer,ops,ok,msg); call require(ok,'cycle finish: '//trim(msg))
   call read_dmn_with_sitesym_order('cycle.dmn',3,3,3)
+
+  call begin_sawf_dmn(writer,'generator_constraints.dmn',3,3,2,1d-10,ok,msg)
+  call require(ok,'generator constraint begin')
+  call append_sawf_dmn_operation(writer,1,amn3,amn3,eig3,amn3,.true.,ok,msg)
+  call require(ok,'generator constraint identity')
+  call append_sawf_dmn_operation(writer,2,dw3,db3,eig3,amn3,.false.,ok,msg)
+  call require(ok,'generator constraint generator')
+  call finish_sawf_dmn(writer,ops(1:2),ok,msg,require_closed_group=.false.)
+  call require(ok,'nonclosed generator constraint finish: '//trim(msg))
+  call read_dmn_with_sitesym_order('generator_constraints.dmn',3,3,2)
 
   ! Exact noncommuting S3 representation.  The six coordinate permutations
   ! force the generator traversal to validate both generator orders and cycles.

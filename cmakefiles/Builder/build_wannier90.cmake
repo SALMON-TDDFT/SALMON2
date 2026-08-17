@@ -46,6 +46,9 @@ ExternalProject_Add(wannier90-project
   URL               "https://github.com/wannier-developers/wannier90/archive/refs/tags/v${WANNIER90_VERSION}.tar.gz"
   PREFIX            ${WANNIER90_PREFIX}
   DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  PATCH_COMMAND     ${CMAKE_COMMAND}
+                    -D WANNIER90_SOURCE_DIR=<SOURCE_DIR>
+                    -P ${CMAKE_SOURCE_DIR}/cmakefiles/Builder/patches/apply_wannier90_generator_symmetry.cmake
   CONFIGURE_COMMAND ${CMAKE_COMMAND} -E copy ${WANNIER90_MAKE_INC} <SOURCE_DIR>/make.inc
   BUILD_COMMAND     ${WANNIER90_MAKE_EXECUTABLE} ${WANNIER90_BUILD_TARGETS}
   INSTALL_COMMAND   ""
