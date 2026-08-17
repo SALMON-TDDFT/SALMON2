@@ -26,6 +26,8 @@ def check_wannier90_gradient_patch():
         raise AssertionError("Wannier90 zero-spread line search can divide by zero")
     if "integer, parameter :: niter = 1000" not in patch:
         raise AssertionError("Wannier90 site-symmetry projection retains the insufficient 100-iteration cap")
+    if "diff = maxval(abs(cmat2))" not in patch:
+        raise AssertionError("Wannier90 site-symmetry tolerance still scales with the square of the band count")
     markers = [
         "call comms_gatherv(cdq_loc",
         "call comms_bcast(cdq(1, 1, 1)",
@@ -43,6 +45,12 @@ def check_wannier90_gradient_patch():
 
 
 check_wannier90_gradient_patch()
+
+dmn_writer_source = (ROOT / "src/gs/dc/lcfo_wannier_sawf_dmn.f90").read_text().lower()
+if "e26.17" not in dmn_writer_source:
+    raise AssertionError(
+        "formatted DMN matrices must retain full real64 precision for strict symmetry projection"
+    )
 
 
 def parse_dmn(path, nb, nw):

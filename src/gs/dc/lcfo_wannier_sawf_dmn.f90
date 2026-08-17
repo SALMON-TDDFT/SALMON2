@@ -230,7 +230,7 @@ contains
       return
     end if
     write(writer%text_unit,*,iostat=io_status,iomsg=io_message)
-    if(io_status==0) write(writer%text_unit,"(1p,(' (',e18.10,',',e18.10,')'))", &
+    if(io_status==0) write(writer%text_unit,"(1p,(' (',e26.17,',',e26.17,')'))", &
       iostat=io_status,iomsg=io_message) d_wann
     if(io_status==0) write(writer%wann_unit,iostat=io_status,iomsg=io_message) d_wann
     if(io_status==0) write(writer%band_unit,iostat=io_status,iomsg=io_message) d_band

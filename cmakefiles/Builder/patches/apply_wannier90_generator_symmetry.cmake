@@ -76,9 +76,17 @@ set(new_sitesym_iteration_cap "    integer, parameter :: niter = 1000\n")
 string(REPLACE "${old_sitesym_iteration_cap}" "${new_sitesym_iteration_cap}"
        contents "${contents}")
 
+# symmetrize_eps is an elementwise representation tolerance.  Summing the
+# whole residual matrix makes the acceptance threshold grow as num_wann**2
+# and rejects large, otherwise compatible retained spaces.
+string(REPLACE "      diff = sum(abs(cmat2))\n"
+               "      diff = maxval(abs(cmat2))\n"
+               contents "${contents}")
+
 if(contents MATCHES "integer :: ik, ir, isym, irk, ngk\\n" OR
    contents MATCHES "grad\\(:, :, ik\\) = grad_total/ngk" OR
-   contents MATCHES "integer, parameter :: niter = 100\\n")
+   contents MATCHES "integer, parameter :: niter = 100\\n" OR
+   contents MATCHES "diff = sum\\(abs\\(cmat2\\)\\)")
   message(FATAL_ERROR "Failed to patch Wannier90 generator symmetry projection")
 endif()
 
