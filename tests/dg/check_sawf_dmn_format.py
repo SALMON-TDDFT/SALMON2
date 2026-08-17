@@ -28,6 +28,8 @@ def check_wannier90_gradient_patch():
         raise AssertionError("Wannier90 site-symmetry projection retains the insufficient 100-iteration cap")
     if "diff = maxval(abs(cmat2))" not in patch:
         raise AssertionError("Wannier90 site-symmetry tolerance still scales with the square of the band count")
+    if "generator_projection_diff = maxval(abs(grad_total - grad_previous))" not in patch:
+        raise AssertionError("Wannier90 gradient symmetry tolerance still scales with the square of the band count")
     markers = [
         "call comms_gatherv(cdq_loc",
         "call comms_bcast(cdq(1, 1, 1)",

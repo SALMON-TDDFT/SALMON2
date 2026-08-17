@@ -53,7 +53,7 @@ set(new_loop [=[    do ir = 1, nkptirr
           grad_total = grad_total + cmat1
         enddo
         grad_total = grad_total/ngk
-        generator_projection_diff = sum(abs(grad_total - grad_previous))
+        generator_projection_diff = maxval(abs(grad_total - grad_previous))
         grad(:, :, ik) = grad_total
         if (generator_projection_diff .lt. symmetrize_eps) exit
       enddo
