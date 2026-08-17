@@ -18,8 +18,9 @@ def check_wannier90_gradient_patch():
     patch = (ROOT / "cmakefiles/Builder/patches/apply_wannier90_generator_symmetry.cmake").read_text()
     if ".not. gamma_only .or. lsitesymmetry" not in patch:
         raise AssertionError("Wannier90 site symmetry still selects the real-only Gamma initializer")
-    if patch.count("gamma_only .and. .not. lsitesymmetry") < 2:
-        raise AssertionError("Wannier90 library mode still dispatches site symmetry through Gamma-only routines")
+    if (patch.count("gamma_only .and. .not. lsitesymmetry") < 2 or
+            ".not. gamma_only .or. lsitesymmetry" not in patch):
+        raise AssertionError("Wannier90 executable or library mode still dispatches site symmetry through Gamma-only routines")
     if "if (lsitesymmetry) call sitesym_read()" not in patch:
         raise AssertionError("Wannier90 library mode does not initialize DMN symmetry data")
     if "abs(fac*wann_spread%om_tot) .gt. tiny(1.0_dp)" not in patch:
@@ -28,10 +29,17 @@ def check_wannier90_gradient_patch():
         raise AssertionError("Wannier90 site-symmetry projection retains the insufficient 100-iteration cap")
     if "diff = maxval(abs(cmat2))" not in patch:
         raise AssertionError("Wannier90 site-symmetry tolerance still scales with the square of the band count")
-    if "generator_projection_diff = maxval(abs(grad_total - grad_previous))" not in patch:
-        raise AssertionError("Wannier90 gradient symmetry tolerance still scales with the square of the band count")
-    if "generator_projection_iterations = 1000" not in patch:
-        raise AssertionError("Wannier90 gradient symmetry projection retains the insufficient 100-iteration cap")
+    if "one-pass Reynolds average" not in patch:
+        raise AssertionError("Wannier90 gradient symmetry is not the one-pass full-group Reynolds projection")
+    if "generator_projection_iterations" in patch or "grad_previous" in patch:
+        raise AssertionError("Wannier90 gradient symmetry still contains the unnecessary iterative projector")
+    dot_markers = [
+        "sum(conjg(cdodq_precond_loc(:, :, 1:counts(my_node_id)))",
+        "sum(abs(cdodq_loc(:, :, 1:counts(my_node_id)))**2)",
+        "sum(conjg(cdodq_loc(:, :, 1:counts(my_node_id)))",
+    ]
+    if any(marker not in patch for marker in dot_markers):
+        raise AssertionError("Wannier90 complex gradient inner products still depend on the unsafe zdotc ABI")
     markers = [
         "call comms_gatherv(cdq_loc",
         "call comms_bcast(cdq(1, 1, 1)",

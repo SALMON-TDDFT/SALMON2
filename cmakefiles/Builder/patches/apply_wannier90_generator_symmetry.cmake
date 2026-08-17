@@ -5,67 +5,12 @@ endif()
 set(source "${WANNIER90_SOURCE_DIR}/src/sitesym.F90")
 file(READ "${source}" contents)
 
-set(old_use "    use w90_parameters, only: num_wann, num_kpts\n")
-set(new_use "    use w90_parameters, only: num_wann, num_kpts, symmetrize_eps\n")
-string(REPLACE "${old_use}" "${new_use}" contents "${contents}")
-
-set(old_decl "    integer :: ik, ir, isym, irk, ngk\n\n    complex(kind=dp) :: grad_total(num_wann, num_wann)\n")
-set(new_decl "    integer :: ik, ir, isym, irk, ngk, iter\n    integer, parameter :: generator_projection_iterations = 1000\n    real(kind=dp) :: generator_projection_diff\n\n    complex(kind=dp) :: grad_total(num_wann, num_wann)\n    complex(kind=dp) :: grad_previous(num_wann, num_wann)\n")
-string(REPLACE "${old_decl}" "${new_decl}" contents "${contents}")
-
-set(old_loop [=[    do ir = 1, nkptirr
-      ik = ir2ik(ir)
-      ngk = count(kptsym(:, ir) .eq. ik)
-      if (ngk .eq. 1) cycle
-      grad_total = grad(:, :, ik)
-      do isym = 2, nsymmetry
-        if (kptsym(isym, ir) .ne. ik) cycle
-        !
-        ! calculate cmat1 = D^{+}(R,k) G(Rk) D(R,k)
-        !
-        ! step 1: cmat2 =  G(Rk) D(R,k)
-        call utility_zgemm(cmat2, grad(:, :, ik), 'N', &
-                           d_matrix_wann(:, :, isym, ir), 'N', num_wann)
-        ! step 2: cmat1 = D^{+}(R,k) * cmat2
-        call utility_zgemm(cmat1, d_matrix_wann(:, :, isym, ir), 'C', &
-                           cmat2, 'N', num_wann)
-        grad_total = grad_total + cmat1
-      enddo
-      grad(:, :, ik) = grad_total/ngk
-    enddo
-]=])
-set(new_loop [=[    do ir = 1, nkptirr
-      ik = ir2ik(ir)
-      ngk = count(kptsym(:, ir) .eq. ik)
-      if (ngk .eq. 1) cycle
-      do iter = 1, generator_projection_iterations
-        grad_previous = grad(:, :, ik)
-        grad_total = grad_previous
-        do isym = 2, nsymmetry
-          if (kptsym(isym, ir) .ne. ik) cycle
-          ! Repeated averaging over identity plus a generating set converges
-          ! to the same common fixed space as the full finite group Reynolds
-          ! projector, without retaining every group element.
-          call utility_zgemm(cmat2, grad_previous, 'N', &
-                             d_matrix_wann(:, :, isym, ir), 'N', num_wann)
-          call utility_zgemm(cmat1, d_matrix_wann(:, :, isym, ir), 'C', &
-                             cmat2, 'N', num_wann)
-          grad_total = grad_total + cmat1
-        enddo
-        grad_total = grad_total/ngk
-        generator_projection_diff = maxval(abs(grad_total - grad_previous))
-        grad(:, :, ik) = grad_total
-        if (generator_projection_diff .lt. symmetrize_eps) exit
-      enddo
-      if (iter .gt. generator_projection_iterations) then
-        write (stdout, "(a,2e20.10)") &
-          'generator symmetry gradient projection did not converge: diff,eps=', &
-          generator_projection_diff, symmetrize_eps
-        call io_error('sitesym_symmetrize_gradient: generator projection not converged')
-      endif
-    enddo
-]=])
-string(REPLACE "${old_loop}" "${new_loop}" contents "${contents}")
+# The DMN stream contains every stabilizer operation, including identity.
+# Keep Wannier90's exact one-pass Reynolds average.  Repeatedly applying this
+# already-idempotent full-group projector only adds dense GEMMs and roundoff.
+if(NOT contents MATCHES "grad\\(:, :, ik\\) = grad_total/ngk")
+  message(FATAL_ERROR "Wannier90 one-pass full-group gradient projection is missing")
+endif()
 
 # Large symmetry-adapted retained spaces can converge monotonically but need
 # more than the upstream fixed cap of 100 projection iterations.  Si64 reaches
@@ -83,9 +28,7 @@ string(REPLACE "      diff = sum(abs(cmat2))\n"
                "      diff = maxval(abs(cmat2))\n"
                contents "${contents}")
 
-if(contents MATCHES "integer :: ik, ir, isym, irk, ngk\\n" OR
-   contents MATCHES "grad\\(:, :, ik\\) = grad_total/ngk" OR
-   contents MATCHES "integer, parameter :: niter = 100\\n" OR
+if(contents MATCHES "integer, parameter :: niter = 100\\n" OR
    contents MATCHES "diff = sum\\(abs\\(cmat2\\)\\)")
   message(FATAL_ERROR "Failed to patch Wannier90 generator symmetry projection")
 endif()
@@ -110,6 +53,32 @@ set(new_gradient_projection [=[      if (lsitesymmetry) then
       endif
 ]=])
 string(REPLACE "${old_gradient_projection}" "${new_gradient_projection}"
+       wannierise_contents "${wannierise_contents}")
+
+# Accelerate's complex-return BLAS ABI is not compatible with gfortran's
+# external ZDOTC declaration on Apple Silicon.  These are simple local
+# Frobenius inner products, so express them directly and keep GEMM on BLAS.
+set(old_preconditioned_norm [=[        gcnorm1 = real(zdotc(counts(my_node_id)*num_wann*num_wann, cdodq_precond_loc, 1, cdodq_loc, 1), dp)
+]=])
+set(new_preconditioned_norm [=[        gcnorm1 = real(sum(conjg(cdodq_precond_loc(:, :, 1:counts(my_node_id)))* &
+                           cdodq_loc(:, :, 1:counts(my_node_id))), dp)
+]=])
+string(REPLACE "${old_preconditioned_norm}" "${new_preconditioned_norm}"
+       wannierise_contents "${wannierise_contents}")
+
+set(old_gradient_norm [=[        gcnorm1 = real(zdotc(counts(my_node_id)*num_wann*num_wann, cdodq_loc, 1, cdodq_loc, 1), dp)
+]=])
+set(new_gradient_norm [=[        gcnorm1 = sum(abs(cdodq_loc(:, :, 1:counts(my_node_id)))**2)
+]=])
+string(REPLACE "${old_gradient_norm}" "${new_gradient_norm}"
+       wannierise_contents "${wannierise_contents}")
+
+set(old_directional_derivative [=[      doda0 = -real(zdotc(counts(my_node_id)*num_wann*num_wann, cdodq_loc, 1, cdq_loc, 1), dp)
+]=])
+set(new_directional_derivative [=[      doda0 = -real(sum(conjg(cdodq_loc(:, :, 1:counts(my_node_id)))* &
+                         cdq_loc(:, :, 1:counts(my_node_id))), dp)
+]=])
+string(REPLACE "${old_directional_derivative}" "${new_directional_derivative}"
        wannierise_contents "${wannierise_contents}")
 
 set(old_optimal_step [=[      if (abs(eqa/(fac*wann_spread%om_tot)) .gt. epsilon(1.0_dp)) then
@@ -213,3 +182,17 @@ if(NOT library_contents MATCHES
 endif()
 
 file(WRITE "${library_source}" "${library_contents}")
+
+set(program_source "${WANNIER90_SOURCE_DIR}/src/wannier_prog.F90")
+file(READ "${program_source}" program_contents)
+
+set(old_program_optimizer "  if (.not. gamma_only) then\n")
+set(new_program_optimizer "  if (.not. gamma_only .or. lsitesymmetry) then\n")
+string(REPLACE "${old_program_optimizer}" "${new_program_optimizer}"
+       program_contents "${program_contents}")
+if(NOT program_contents MATCHES
+   "if \\(\\.not\\. gamma_only \\.or\\. lsitesymmetry\\) then")
+  message(FATAL_ERROR "Failed to patch Wannier90 executable Gamma symmetry dispatch")
+endif()
+
+file(WRITE "${program_source}" "${program_contents}")
