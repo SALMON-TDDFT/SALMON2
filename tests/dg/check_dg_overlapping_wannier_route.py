@@ -149,6 +149,21 @@ ow_ground_state = re.search(
 )
 assert ow_ground_state
 ow_ground_state_body = ow_ground_state.group("body").lower()
+assemble_position = ow_ground_state_body.find("call assemble_dg_w90_gamma_matrices")
+export_position = ow_ground_state_body.find("call export_dg_w90_replay_bundle")
+library_position = ow_ground_state_body.find("call run_dg_w90_gamma_library")
+assert 0 <= assemble_position < export_position < library_position, (
+    "opt-in replay export must use assembled matrices immediately before the Wannier90 library call"
+)
+assert "salmon_dg_w90_replay_directory" in ow_ground_state_body
+assert "w90_nncell" in ow_ground_state_body[export_position:library_position]
+ow_ground_state_body = ow_ground_state.group("body").lower()
+assert "ow_box_density(p)=rho_s(1)%f(raw_ix,raw_iy,raw_iz)" in re.sub(
+    r"\s+", "", ow_ground_state_body
+), "fragment-buffer indices must address the fragment density, not the distributed total density"
+assert "ow_box_density(p)=dc%rho_tot_s(1)%f(raw_ix,raw_iy,raw_iz)" not in re.sub(
+    r"\s+", "", ow_ground_state_body
+), "fragment-buffer indices must never address a rank-owned total-density slab"
 for mlwf_call in (
     "assemble_dg_w90_gamma_matrices",
     "run_dg_w90_gamma_library",
@@ -189,17 +204,15 @@ assert all(position >= 0 for position in production_order) and production_order 
 assert not re.search(r"call\s+canonicalize_dg_sector_periodic_position_gauge\b", ow_ground_state_body), (
     "production must not use the noncovariant fixed-direction periodic-position gauge"
 )
-assert not re.search(r"call\s+build_dg_sector_periodic_position_tuple\b", ow_ground_state_body), (
-    "production must not project a translation-changing position phase into one character sector"
-)
-assert not re.search(r"call\s+jointly_canonicalize_dg_sector_periodic_position_gauge\b", ow_ground_state_body), (
-    "production must defer periodic-center canonicalization until after character inversion"
-)
 inverse_position = ow_ground_state_body.find("call accumulate_dg_translation_character_orbit_sector_values")
-center_measure_position = ow_ground_state_body.find("call compute_dg_periodic_wannier_centers")
-center_orbit_position = ow_ground_state_body.find("call verify_dg_wannier_center_affine_orbits")
-assert 0 <= inverse_position < center_measure_position < center_orbit_position, (
-    "production must measure and validate periodic centers only after character inversion"
+orbital_tuple_position = ow_ground_state_body.find("call build_dg_orbital_major_periodic_position_tuple")
+joint_center_position = ow_ground_state_body.find(
+    "call jointly_canonicalize_dg_sector_periodic_position_gauge", orbital_tuple_position
+)
+center_measure_position = ow_ground_state_body.rfind("call compute_dg_periodic_wannier_centers")
+center_orbit_position = ow_ground_state_body.rfind("call verify_dg_wannier_center_affine_orbits")
+assert 0 <= inverse_position < orbital_tuple_position < joint_center_position < center_measure_position < center_orbit_position, (
+    "production must canonicalize, measure, and validate periodic centers only after character inversion"
 )
 character_loop_position = ow_ground_state_body.find("do translation_character=1")
 prepare_position = ow_ground_state_body.find("call prepare_dg_translation_character_action")
@@ -253,27 +266,23 @@ assert point_adaptation_call and "occupied_hamiltonian=translation_occupied_hami
 assert "spectral dmn operation workspace reallocation failed collectively" not in ow_ground_state_body, (
     "the DMN loop must consume the builder's allocatable output directly, not reallocate it between operations"
 )
-for obsolete_call in (
-    "build_dg_periodic_spectral_basins",
+for required_call in (
     "prepare_dg_spectral_basin_operators",
     "project_dg_prepared_spectral_basin_operator",
     "diagonalize_dg_spectral_basin_operator",
     "select_dg_spectral_basin_channel_ranks",
     "propagate_dg_spectral_basin_orbit_channels",
     "build_dg_spectral_channel_generator_actions",
-    "compose_dg_occupied_complement_trial_rows",
 ):
-    assert not re.search(rf"call\s+{obsolete_call}\b", ow_ground_state_body), (
-        f"production must not call obsolete spectral-basin step {obsolete_call}"
+    assert re.search(rf"call\s+{required_call}\b", ow_ground_state_body), (
+        f"production must construct the block-monomial trial frame through {required_call}"
     )
-assert "call prepare_dg_direct_retained_wannier_frame" in ow_ground_state_body, (
-    "production must prepare the complete retained frame directly"
+assert "call prepare_dg_direct_retained_wannier_frame" not in ow_ground_state_body, (
+    "production must not pass the delocalized retained identity frame to Wannier90"
 )
-assert re.search(
-    r"write\s*\(\s*\*\s*,\s*'\(a,a,i0,3\(a,es16\.8\),a,i0\)'\s*\)\s*"
-    r"'\[ow-gs-diagnostic\] direct_retained_wannier_frame'",
-    ow_ground_state_body,
-), "direct-frame diagnostic format must match its leading label and integer payload"
+assert "[ow-gs-diagnostic] spectral_wannier_frame" in ow_ground_state_body, (
+    "production must report the spectral block-monomial frame receipt"
+)
 assert len(re.findall(r"call\s+run_dg_w90_gamma_library", ow_ground_state_body)) == 1, (
     "direct retained-frame construction must invoke Wannier90 exactly once"
 )
@@ -329,9 +338,9 @@ assert inverse_position < post_gauge_affine_proof < redistribution_position, (
 assert "global_translation_cocycle" in ow_ground_state_body[inverse_position:redistribution_position], (
     "post-gauge point-cogroup proof must consume the factored translation cocycle"
 )
-center_gate_position = ow_ground_state_body.find("call verify_dg_wannier_center_affine_orbits")
-center_diagnostic_position = ow_ground_state_body.find("call diagnose_dg_point_center_gauge")
-center_stop_position = ow_ground_state_body.find("localized wannier center orbit failed")
+center_gate_position = ow_ground_state_body.rfind("call verify_dg_wannier_center_affine_orbits")
+center_diagnostic_position = ow_ground_state_body.rfind("call diagnose_dg_point_center_gauge")
+center_stop_position = ow_ground_state_body.rfind("localized wannier center orbit failed")
 global_map_release_position = ow_ground_state_body.find("deallocate(global_symmetry_map)")
 assert 0 <= center_gate_position < center_diagnostic_position < center_stop_position, (
     "the first failed center operation must emit point center-gauge leakage before the authoritative stop"
@@ -346,6 +355,21 @@ for center_receipt in ("failed_operation", "monomial_defect", "center_block_leak
 assert "call localize_dg_occupation_blocks" not in ow_ground_state_body, (
     "production overlapping-Wannier V3 route must not call the custom localizer"
 )
+pre_w90_center_measurement = ow_ground_state_body.find(
+    "call compute_dg_periodic_wannier_centers", 0, ow_ground_state_body.find("call begin_sawf_dmn")
+)
+pre_w90_basin_build = ow_ground_state_body.find(
+    "call build_dg_periodic_spectral_basins", 0, ow_ground_state_body.find("call begin_sawf_dmn")
+)
+pre_w90_block_gate = ow_ground_state_body.find(
+    "call diagnose_dg_point_center_gauge", 0, ow_ground_state_body.find("call begin_sawf_dmn")
+)
+assert pre_w90_basin_build >= 0 and pre_w90_center_measurement < 0 and pre_w90_block_gate < 0, (
+    "production must pass the spectral trial frame directly to Wannier90 without a duplicate pre-localizer"
+)
+assert "pre_wannier_spectral_basins" in ow_ground_state_body[
+    pre_w90_basin_build:ow_ground_state_body.find("call begin_sawf_dmn")
+], "occupied/empty spectral basins must be diagnosed before Wannier90"
 for provenance_field in (
     "mlwf_backend",
     "mlwf_version",
@@ -858,12 +882,21 @@ assert "call accumulate_dg_lcfo_buffer_contributions_to_core" not in adapter_bod
     "fragment-core truncation must not define the support of a pre-Wannier symmetry proof"
 )
 assert re.search(
-    r"call\s+prepare_dg_direct_retained_wannier_frame\b",
+    r"call\s+propagate_dg_spectral_basin_orbit_channels\b",
     adapter_body,
     re.I,
-), "Wannier90 projections must prepare the direct retained frame"
-assert re.search(r"w90_anchors\s*=\s*global_closed_core", adapter_body, re.I), (
-    "Wannier90 A matrices must use the retained spatial frame directly"
+), "Wannier90 projections must prepare a symmetry-propagated spectral trial frame"
+assert re.search(
+    r"call\s+materialize_dg_row_owned_sector_on_spatial_grid\s*\(.*?spectral_trial_rows.*?"
+    r"spectral_spatial_trials",
+    adapter_body,
+    re.I | re.S,
+), "Wannier90 A matrices must materialize the same spectral trial frame written to DMN"
+assert re.search(r"w90_anchors\s*=\s*transpose\s*\(\s*spectral_spatial_trials\s*\)", adapter_body, re.I), (
+    "Wannier90 A matrices and DMN AMN must use the identical spectral gauge"
+)
+assert "w90_a_matrix-spectral_amn" in re.sub(r"\s+", "", adapter_body), (
+    "production must measure the actual Wannier90 A matrix against the DMN spectral gauge"
 )
 assert re.search(r"call\s+apply_dg_w90_gamma_transform", adapter_body, re.I), (
     "the MLWF transform must be applied in the global LCFO space"
@@ -1221,6 +1254,36 @@ closure_call = adapter_body.find("call orthonormalize_dg_distributed_seed_space"
 localization_call = adapter_body.find("call run_dg_w90_gamma_library")
 assert closure_call >= 0, (
     "production OW GS must orthonormalize the accepted full-affine-closed seed space"
+)
+run_library_body = re.search(
+    r"subroutine\s+run_dg_w90_gamma_library\b(?P<body>.*?)end\s+subroutine\s+run_dg_w90_gamma_library",
+    w90_source,
+    re.I | re.S,
+)
+assert run_library_body and re.search(
+    r"MPI_Bcast\s*\(\s*message\s*,",
+    run_library_body.group("body"),
+    re.I,
+), "Wannier90 validation must broadcast and preserve the root-cause diagnostic"
+assert "message='Wannier90 Gamma library run failed validation'" not in run_library_body.group("body"), (
+    "Wannier90 validation must not overwrite its specific failure diagnostic"
+)
+assert "num_iter = 400" in w90_source, (
+    "production Wannier90 must allow the slow Si64 spread minimization to converge"
+)
+assert re.search(
+    r"validate_dg_w90_convergence_log\s*\([^\n]*\.wout'\s*,\s*400\s*,",
+    run_library_body.group("body"),
+    re.I,
+), "Wannier90 convergence validation must use the configured 400-iteration limit"
+post_w90_prefix = adapter_body[
+    localization_call:adapter_body.find("call split_dg_translation_character_sector_eigenexa", localization_call)
+]
+assert "call validate_dg_w90_generator_covariance" in post_w90_prefix, (
+    "converged Wannier90 output must be checked against each supplied affine-generator representation"
+)
+assert "call verify_dg_wannier_center_affine_orbits" not in post_w90_prefix, (
+    "dense internal symmetry blocks must not be rejected by a premature monomial centre-orbit gate"
 )
 point_action_body = re.search(
     r"subroutine\s+prepare_ow_global_point_action\b(?P<body>.*?)end\s+subroutine",
@@ -1657,11 +1720,14 @@ assert re.search(
     adapter_body,
     re.I | re.S,
 ), "DMN must publish distinct spectral d_matrix_wann, retained d_matrix_band, and their shared AMN"
-assert re.search(
-    r"allocate\s*\(\s*spectral_wannier_representation\s*,\s*source\s*=\s*fixed_center_representation",
-    adapter_body,
-    re.I,
-), "each DMN target action must equal the retained band action"
+normalized_adapter = re.sub(r"[\s&]+", "", adapter_body.lower())
+assert (
+    "spectral_wannier_representation=matmul(conjg(transpose(spectral_amn)),"
+    "matmul(fixed_center_representation,spectral_amn))" in normalized_adapter
+), "each DMN target action must be transformed into the localized trial basis"
+assert "require_closed_group=.false." in adapter_body.replace(" ", "").lower(), (
+    "affine-generator DMN must explicitly select the generator constraint contract"
+)
 assert "fixed_center_group_order>48" in adapter_body.replace(" ", "").lower(), (
     "production must reject a fixed-center subgroup above crystallographic order 48"
 )
