@@ -64,6 +64,7 @@ with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
     for ranks in (1, 2, 4, 8):
         result = subprocess.run(
             [shutil.which("mpiexec"), "-n", str(ranks), str(exe)],
+            cwd=build,
             capture_output=True,
             text=True,
             env=env,
