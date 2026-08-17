@@ -2,6 +2,7 @@
 module dg_overlapping_wannier_w90
   use,intrinsic::iso_fortran_env,only:int64,real64
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+  use lcfo_wannier_sawf_seed,only:write_sawf_local_eig_amn_mmn
 #ifdef USE_MPI
   use mpi
 #endif
@@ -12,6 +13,7 @@ module dg_overlapping_wannier_w90
   public::assemble_dg_w90_gamma_matrices
   public::apply_dg_w90_gamma_transform
   public::inherit_dg_w90_affine_receipts
+  public::validate_dg_w90_generator_covariance
   public::validate_dg_w90_convergence_log
   public::align_dg_w90_character_sector_gauge
   public::align_dg_w90_cross_character_sector_gauge
@@ -23,7 +25,320 @@ module dg_overlapping_wannier_w90
   public::build_dg_sector_periodic_position_tuple
   public::canonicalize_dg_sector_periodic_position_gauge
   public::jointly_canonicalize_dg_sector_periodic_position_gauge
+  public::build_dg_orbital_major_periodic_position_tuple
+  public::apply_dg_orbital_rotation_tiled
+  public::export_dg_w90_replay_bundle
 contains
+
+  subroutine export_dg_w90_replay_bundle(comm,source_directory,source_seed,output_directory,&
+      output_seed,energy_ev,amn,mmn,neighbor_gvec,ok,message)
+    integer,intent(in)::comm
+    character(*),intent(in)::source_directory,source_seed,output_directory,output_seed
+    real(real64),intent(in)::energy_ev(:)
+    complex(real64),intent(in)::amn(:,:),mmn(:,:,:)
+    integer,intent(in)::neighbor_gvec(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,ierr,bad,global_bad,nband,nproj,nneighbor
+    character(len(source_directory))::agreed_source_directory
+    character(len(source_seed))::agreed_source_seed
+    character(len(output_directory))::agreed_output_directory
+    character(len(output_seed))::agreed_output_seed
+    logical::writer_ok
+    character(len(message))::writer_message
+
+    ok=.false.;message='';bad=0
+    call MPI_Comm_rank(comm,rank,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier replay communicator query failed';return;endif
+    agreed_source_directory=source_directory;agreed_source_seed=source_seed
+    agreed_output_directory=output_directory;agreed_output_seed=output_seed
+    call MPI_Bcast(agreed_source_directory,len(agreed_source_directory),MPI_CHARACTER,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier replay source-directory agreement failed';return;endif
+    call MPI_Bcast(agreed_source_seed,len(agreed_source_seed),MPI_CHARACTER,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier replay source-seed agreement failed';return;endif
+    call MPI_Bcast(agreed_output_directory,len(agreed_output_directory),MPI_CHARACTER,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier replay output-directory agreement failed';return;endif
+    call MPI_Bcast(agreed_output_seed,len(agreed_output_seed),MPI_CHARACTER,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier replay output-seed agreement failed';return;endif
+    if(source_directory/=agreed_source_directory.or.source_seed/=agreed_source_seed.or.&
+        output_directory/=agreed_output_directory.or.output_seed/=agreed_output_seed.or.&
+        len_trim(source_directory)==0.or.len_trim(source_seed)==0.or.&
+        len_trim(output_directory)==0.or.len_trim(output_seed)==0)bad=1
+    nband=0;nproj=0;nneighbor=0
+    if(rank==0)then
+      nband=size(energy_ev);nproj=size(amn,2);nneighbor=size(mmn,3)
+      if(nband<1.or.size(amn,1)/=nband.or.nproj<1.or.size(mmn,1)/=nband.or.&
+          size(mmn,2)/=nband.or.nneighbor<1.or.any(shape(neighbor_gvec)/=[3,nneighbor]).or.&
+          .not.all(ieee_is_finite(energy_ev)).or..not.all(ieee_is_finite(real(amn))).or.&
+          .not.all(ieee_is_finite(aimag(amn))).or..not.all(ieee_is_finite(real(mmn))).or.&
+          .not.all(ieee_is_finite(aimag(mmn))))bad=1
+    endif
+    call MPI_Bcast(nband,1,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)bad=1
+    call MPI_Bcast(nproj,1,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)bad=1
+    call MPI_Bcast(nneighbor,1,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)bad=1
+    call MPI_Allreduce(bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid Wannier replay export contract';return;endif
+    writer_ok=.false.;writer_message=''
+    if(rank==0)then
+      call write_sawf_local_eig_amn_mmn(trim(output_directory),trim(output_seed),energy_ev,amn,mmn,&
+        neighbor_gvec,writer_ok,writer_message)
+      if(writer_ok)call copy_text_file(trim(source_directory)//'/'//trim(source_seed)//'.win',&
+        trim(output_directory)//'/'//trim(output_seed)//'.win',writer_ok,writer_message)
+      if(writer_ok)call copy_text_file(trim(source_directory)//'/'//trim(source_seed)//'.dmn',&
+        trim(output_directory)//'/'//trim(output_seed)//'.dmn',writer_ok,writer_message)
+    endif
+    call MPI_Bcast(writer_ok,1,MPI_LOGICAL,0,comm,ierr)
+    call MPI_Bcast(writer_message,len(writer_message),MPI_CHARACTER,0,comm,ierr)
+    ok=ierr==MPI_SUCCESS.and.writer_ok
+    if(.not.ok)then
+      if(len_trim(writer_message)>0)then;message=trim(writer_message)
+      else;message='Wannier replay export failed collectively';endif
+    endif
+#else
+    ok=.false.;message='Wannier replay export requires MPI'
+#endif
+  contains
+    subroutine copy_text_file(source,target,copy_ok,detail)
+      character(*),intent(in)::source,target
+      logical,intent(out)::copy_ok
+      character(*),intent(out)::detail
+      integer::input_unit,output_unit,ios,write_ios
+      character(4096)::line
+      copy_ok=.false.;detail=''
+      open(newunit=input_unit,file=source,status='old',action='read',iostat=ios)
+      if(ios/=0)then;detail='Wannier replay source file is unreadable: '//trim(source);return;endif
+      open(newunit=output_unit,file=target,status='replace',action='write',iostat=ios)
+      if(ios/=0)then;close(input_unit);detail='Wannier replay output file cannot be opened: '//trim(target);return;endif
+      do
+        read(input_unit,'(a)',iostat=ios)line
+        if(ios<0)exit
+        if(ios/=0)then;detail='Wannier replay source file read failed: '//trim(source);exit;endif
+        write(output_unit,'(a)',iostat=write_ios)trim(line)
+        if(write_ios/=0)then;detail='Wannier replay output file write failed: '//trim(target);ios=write_ios;exit;endif
+      enddo
+      close(input_unit)
+      close(output_unit,iostat=write_ios)
+      if(ios<0.and.write_ios==0)then;copy_ok=.true.;detail='';endif
+    end subroutine copy_text_file
+  end subroutine export_dg_w90_replay_bundle
+
+  subroutine validate_dg_w90_generator_covariance(comm,transform,d_band,d_wann,tolerance,&
+      covariance_defect,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm
+    complex(real64),intent(in)::transform(:,:),d_band(:,:),d_wann(:,:)
+    real(real64),intent(in)::tolerance
+    real(real64),intent(out)::covariance_defect
+    integer(int64),intent(out)::workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,ierr,status,nstate,allocation_status
+    integer(int64)::elements
+    real(real64)::minimum_tolerance,maximum_tolerance
+    complex(real64),allocatable::image(:,:),rotated(:,:)
+    ok=.false.;message='';covariance_defect=huge(1d0);workspace_peak_bytes=0_int64;status=0
+    call MPI_Comm_rank(comm,rank,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier covariance communicator query failed';return;endif
+    call MPI_Allreduce(tolerance,minimum_tolerance,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier covariance tolerance MIN reduction failed';return;endif
+    call MPI_Allreduce(tolerance,maximum_tolerance,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.transfer(minimum_tolerance,0_int64)/=transfer(maximum_tolerance,0_int64).or.&
+        .not.ieee_is_finite(tolerance).or.tolerance<=0d0)status=1
+    nstate=0
+    if(rank==0)then
+      nstate=size(transform,1)
+      if(nstate<1.or.size(transform,2)/=nstate.or.any(shape(d_band)/=[nstate,nstate]).or.&
+          any(shape(d_wann)/=[nstate,nstate]).or..not.all(ieee_is_finite(real(transform))).or.&
+          .not.all(ieee_is_finite(aimag(transform))).or..not.all(ieee_is_finite(real(d_band))).or.&
+          .not.all(ieee_is_finite(aimag(d_band))).or..not.all(ieee_is_finite(real(d_wann))).or.&
+          .not.all(ieee_is_finite(aimag(d_wann))))status=1
+    endif
+    call MPI_Bcast(nstate,1,MPI_INTEGER,0,comm,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.status/=0)then;message='invalid coordinator Wannier covariance contract';return;endif
+    if(int(nstate,int64)>huge(0_int64)/int(nstate,int64)/2_int64)status=1
+    elements=2_int64*int(nstate,int64)*int(nstate,int64)
+    if(elements>huge(0_int64)/16_int64)status=1
+    allocation_status=0
+    if(rank==0.and.status==0)allocate(image(nstate,nstate),rotated(nstate,nstate),stat=allocation_status)
+    call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,allocation_status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.status/=0.or.allocation_status/=0)then
+      if(allocated(image))deallocate(image)
+      if(allocated(rotated))deallocate(rotated)
+      message='Wannier covariance workspace allocation or extent failed';return
+    endif
+    if(rank==0)then
+      image=matmul(d_band,transform)
+      rotated=matmul(conjg(transpose(transform)),image)
+      covariance_defect=maxval(abs(rotated-d_wann))
+      workspace_peak_bytes=16_int64*elements
+      if(.not.ieee_is_finite(covariance_defect))status=1
+      deallocate(image,rotated)
+    endif
+    call MPI_Bcast(covariance_defect,1,MPI_DOUBLE_PRECISION,0,comm,ierr)
+    call MPI_Bcast(workspace_peak_bytes,1,MPI_INTEGER8,0,comm,ierr)
+    call MPI_Bcast(status,1,MPI_INTEGER,0,comm,ierr)
+    ok=ierr==MPI_SUCCESS.and.status==0.and.covariance_defect<=tolerance
+    if(.not.ok)message='Wannier transform violates the supplied generator covariance'
+#else
+    ok=.false.;message='Wannier covariance validation requires MPI'
+    covariance_defect=huge(1d0);workspace_peak_bytes=0_int64
+#endif
+  end subroutine validate_dg_w90_generator_covariance
+
+  subroutine build_dg_orbital_major_periodic_position_tuple(comm,orbital_values,weights,&
+      periodic_phases,tolerance,provenance_fingerprint,position_tuple,gram_defect,fingerprint,&
+      workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm
+    complex(real64),intent(in)::orbital_values(:,:),periodic_phases(:,:)
+    real(real64),intent(in)::weights(:),tolerance
+    integer(int64),intent(in)::provenance_fingerprint
+    complex(real64),allocatable,intent(out)::position_tuple(:,:,:)
+    real(real64),intent(out)::gram_defect
+    integer(int64),intent(out)::fingerprint,workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer,parameter::tile_size=256
+    integer::m,nlocal,first,count,i,j,axis,ierr,bad,gbad,status,minm,maxm
+    complex(real64),allocatable::local_tuple(:,:,:),gram(:,:),left_tile(:,:)
+    real(real64)::mintol,maxtol,scale,global_scale,local_weight,global_weight,safe_scale,quantum,value
+    integer(int64)::minhash,maxhash,global_points,local_points,elements,term,bytes,quantized
+    logical::receipt_valid
+    m=size(orbital_values,1);nlocal=size(orbital_values,2)
+    ok=.false.;message='';gram_defect=huge(1d0);fingerprint=0_int64;workspace_peak_bytes=0_int64
+    bad=merge(0,1,m>0.and.nlocal>0.and.size(weights)==nlocal.and.&
+      all(shape(periodic_phases)==[3,nlocal]).and.provenance_fingerprint/=0_int64.and.&
+      tolerance>=1d-15.and.tolerance<=1d-2.and.ieee_is_finite(tolerance).and.&
+      all(weights>0d0).and.all(ieee_is_finite(weights)).and.&
+      all(ieee_is_finite(real(orbital_values))).and.all(ieee_is_finite(aimag(orbital_values))).and.&
+      all(ieee_is_finite(real(periodic_phases))).and.all(ieee_is_finite(aimag(periodic_phases))).and.&
+      maxval(abs(abs(periodic_phases)-1d0))<=10d0*tolerance)
+    call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='invalid orbital-major periodic-position contract';return;endif
+    call MPI_Allreduce(m,minm,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(m,maxm,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minm/=maxm)then;message='orbital-major periodic-position rank disagrees';return;endif
+    call MPI_Allreduce(tolerance,mintol,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(tolerance,maxtol,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.mintol/=maxtol)then;message='orbital-major periodic-position tolerance disagrees';return;endif
+    call MPI_Allreduce(provenance_fingerprint,minhash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(provenance_fingerprint,maxhash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minhash/=maxhash)then;message='orbital-major periodic-position provenance disagrees';return;endif
+    local_points=int(nlocal,int64);call MPI_Allreduce(local_points,global_points,1,MPI_INTEGER8,MPI_SUM,comm,ierr)
+    scale=maxval(abs(orbital_values));local_weight=maxval(weights)
+    call MPI_Allreduce(scale,global_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_weight,global_weight,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    safe_scale=sqrt((huge(1d0)/real(max(1_int64,global_points),real64))/global_weight)/4d0
+    bad=merge(0,1,ierr==MPI_SUCCESS.and.global_scale<=safe_scale)
+    elements=0_int64;receipt_valid=.true.
+    call checked_product([5_int64,int(m,int64),int(m,int64)],term,receipt_valid);call checked_add(elements,term,receipt_valid)
+    call checked_product([int(m,int64),int(min(tile_size,nlocal),int64)],term,receipt_valid);call checked_add(elements,term,receipt_valid)
+    call checked_product([elements,16_int64],bytes,receipt_valid)
+    if(.not.receipt_valid)bad=1
+    call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='orbital-major periodic-position magnitude or workspace overflows';return;endif
+    workspace_peak_bytes=bytes
+    allocate(position_tuple(m,m,3),local_tuple(m,m,3),gram(m,m),left_tile(m,min(tile_size,nlocal)),stat=status)
+    call MPI_Allreduce(status,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then;call cleanup();message='orbital-major periodic-position allocation failed';return;endif
+    gram=(0d0,0d0);local_tuple=(0d0,0d0)
+    do first=1,nlocal,tile_size
+      count=min(tile_size,nlocal-first+1)
+      do j=1,count
+        left_tile(:,j)=weights(first+j-1)*conjg(orbital_values(:,first+j-1))
+      enddo
+      call zgemm('N','T',m,m,count,(1d0,0d0),left_tile,m,orbital_values(:,first:first+count-1),m,&
+        (1d0,0d0),gram,m)
+      do axis=1,3
+        do j=1,count
+          left_tile(:,j)=weights(first+j-1)*periodic_phases(axis,first+j-1)*&
+            conjg(orbital_values(:,first+j-1))
+        enddo
+        call zgemm('N','T',m,m,count,(1d0,0d0),left_tile,m,orbital_values(:,first:first+count-1),m,&
+          (1d0,0d0),local_tuple(:,:,axis),m)
+      enddo
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,gram,m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    call MPI_Allreduce(local_tuple,position_tuple,3*m*m,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    gram_defect=0d0
+    do j=1,m;do i=1,m
+      gram_defect=max(gram_defect,abs(gram(i,j)-merge((1d0,0d0),(0d0,0d0),i==j)))
+    enddo;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,gram_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gram_defect>10d0*tolerance.or.&
+        .not.all(ieee_is_finite(real(position_tuple))).or..not.all(ieee_is_finite(aimag(position_tuple))))then
+      call cleanup();message='orbital-major periodic-position tuple or Gram is invalid';return
+    endif
+    fingerprint=ieor(provenance_fingerprint,int(m,int64));quantum=100d0*tolerance
+    do axis=1,3;do j=1,m;do i=1,m
+      value=real(position_tuple(i,j,axis),real64)
+      if(abs(value)/quantum>0.25d0*real(huge(0_int64),real64))then;call cleanup();message='orbital-major tuple fingerprint overflows';return;endif
+      quantized=nint(value/quantum,int64);fingerprint=ieor(ishftc(fingerprint,11),quantized)
+      value=aimag(position_tuple(i,j,axis))
+      if(abs(value)/quantum>0.25d0*real(huge(0_int64),real64))then;call cleanup();message='orbital-major tuple fingerprint overflows';return;endif
+      quantized=nint(value/quantum,int64);fingerprint=ieor(ishftc(fingerprint,7),quantized)
+    enddo;enddo;enddo
+    if(fingerprint==0_int64)fingerprint=ieor(provenance_fingerprint,7927_int64)
+    ok=.true.;message='';call cleanup(.false.)
+  contains
+    subroutine cleanup(remove_output)
+      logical,intent(in),optional::remove_output
+      logical::drop
+      drop=.true.;if(present(remove_output))drop=remove_output
+      if(drop.and.allocated(position_tuple))deallocate(position_tuple)
+      if(allocated(local_tuple))deallocate(local_tuple)
+      if(allocated(gram))deallocate(gram)
+      if(allocated(left_tile))deallocate(left_tile)
+    end subroutine
+#else
+    ok=.false.;message='orbital-major periodic-position tuple requires MPI';gram_defect=huge(1d0)
+    fingerprint=0_int64;workspace_peak_bytes=0_int64
+#endif
+  end subroutine build_dg_orbital_major_periodic_position_tuple
+
+  subroutine apply_dg_orbital_rotation_tiled(comm,orbital_values,rotation,ok,message)
+    integer,intent(in)::comm
+    complex(real64),intent(inout)::orbital_values(:,:)
+    complex(real64),intent(in)::rotation(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer,parameter::tile_size=256
+    complex(real64),allocatable::tile(:,:)
+    integer::m,nlocal,first,count,status,ierr,bad,gbad
+    m=size(orbital_values,1);nlocal=size(orbital_values,2);ok=.false.;message=''
+    bad=merge(0,1,m>=1.and.nlocal>=1.and.all(shape(rotation)==[m,m]).and.&
+      all(ieee_is_finite(real(rotation))).and.all(ieee_is_finite(aimag(rotation))))
+#ifdef USE_MPI
+    call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then;message='invalid orbital rotation contract';return;endif
+#else
+    if(bad/=0)then;message='invalid orbital rotation contract';return;endif
+#endif
+    allocate(tile(m,min(tile_size,nlocal)),stat=status)
+#ifdef USE_MPI
+    call MPI_Allreduce(status,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.gbad/=0)then
+      if(allocated(tile))deallocate(tile);message='orbital rotation tile allocation failed';return
+    endif
+#else
+    if(status/=0)then;message='orbital rotation tile allocation failed';return;endif
+#endif
+    do first=1,nlocal,tile_size
+      count=min(tile_size,nlocal-first+1)
+      call zgemm('T','N',m,count,m,(1d0,0d0),rotation,m,orbital_values(:,first:first+count-1),m,&
+        (0d0,0d0),tile,m)
+      orbital_values(:,first:first+count-1)=tile(:,1:count)
+    enddo
+    ok=all(ieee_is_finite(real(orbital_values))).and.all(ieee_is_finite(aimag(orbital_values)))
+#ifdef USE_MPI
+    bad=merge(0,1,ok);call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr);ok=ierr==MPI_SUCCESS.and.gbad==0
+#endif
+    if(.not.ok)message='orbital rotation produced nonfinite values'
+    deallocate(tile)
+  end subroutine apply_dg_orbital_rotation_tiled
 
   subroutine build_dg_sector_periodic_position_tuple(comm,row_ids,global_row_count,sector_rows,&
       periodic_phases,tolerance,provenance_fingerprint,position_tuple,gram_defect,fingerprint,&
@@ -296,7 +611,8 @@ contains
     real(real64)::previous_objective,objective_scale,objective_threshold,objective_change
     complex(real64)::sphase,jacobi(2,2),left_pair(2),right_pair(2),tmp,phase_fix,probe
     integer::nlocal,m,global_count,local_count,rank,ierr,bad,gbad,status,axis,q,pair_i,pair_j,&
-      i,j,k,l,r,block_size,sweep,info,minint,maxint,payload_count,npoint,point,hmatrix_count
+      i,j,k,l,r,block_size,sweep,info,minint,maxint,payload_count,npoint,point,hmatrix_count,&
+      maximum_sweeps,sweep_bad
     integer::worst_point,worst_column
     real(real64)::minimum_tolerance,maximum_tolerance,safe_position_magnitude,safe_lcfo_magnitude
     real(real64)::gram_defect,point_leakage
@@ -498,8 +814,10 @@ contains
     enddo;enddo;enddo
     objective_threshold=max(100d0*epsilon(1d0),tolerance*tolerance)*max(1d0,objective_scale)
     maximum_update=0d0
-    do sweep=1,100
+    maximum_sweeps=max(100,m)
+    do sweep=1,maximum_sweeps
       local_update=0d0
+      sweep_bad=0
       do pair_j=2,m;do pair_i=1,pair_j-1
         gmat=0d0
         do q=1,hmatrix_count
@@ -509,9 +827,9 @@ contains
         enddo
         if(maxval(abs(gmat))<=100d0*tolerance*tolerance)cycle
         call dsyev('V','U',3,gmat,3,geval,gwork,9,info)
-        bad=merge(0,1,info==0.and.all(ieee_is_finite(geval)))
-        call MPI_Allreduce(bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-        if(ierr/=MPI_SUCCESS.or.gbad/=0)then;call cleanup();message='joint periodic-center local diagonalization failed';return;endif
+        if(info/=0.or..not.all(ieee_is_finite(geval)))then
+          sweep_bad=1;cycle
+        endif
         gvec=gmat(:,3);if(gvec(1)<0d0)gvec=-gvec
         c=sqrt(max(0d0,0.5d0*(1d0+min(1d0,gvec(1)))))
         if(c<=epsilon(1d0))cycle
@@ -537,6 +855,10 @@ contains
           unitary(k,pair_j)=left_pair(1)*jacobi(1,2)+left_pair(2)*jacobi(2,2)
         enddo
       enddo;enddo
+      call MPI_Allreduce(sweep_bad,gbad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.gbad/=0)then
+        call cleanup();message='joint periodic-center local diagonalization failed';return
+      endif
       call MPI_Allreduce(local_update,global_update,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
       maximum_update=global_update;sweep_count=sweep
       local_objective=0d0
@@ -559,9 +881,12 @@ contains
     enddo;enddo;enddo
     call MPI_Allreduce(local_objective,global_objective,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     final_objective=global_objective
-    if(ierr/=MPI_SUCCESS.or.sweep_count>=100.and.maximum_update>10d0*tolerance.and.&
+    if(ierr/=MPI_SUCCESS.or.sweep_count>=maximum_sweeps.and.maximum_update>10d0*tolerance.and.&
         abs(objective_change)>objective_threshold)then
-      call cleanup();message='joint periodic-center sweeps did not converge';return
+      write(message,'(a,i0,4(a,es16.8))')'joint periodic-center sweeps did not converge count=',sweep_count,&
+        ' objective=',final_objective,' objective_change=',objective_change,&
+        ' maximum_update=',maximum_update,' threshold=',objective_threshold
+      call cleanup();return
     endif
     point_orbit_built=.false.
     if(present(point_representations))then
@@ -2687,7 +3012,7 @@ contains
       else
         write(unit,'(a,i0)')'num_bands = ',nband
         write(unit,'(a,i0)')'num_wann = ',nwann
-        write(unit,'(a)')'num_iter = 200'
+        write(unit,'(a)')'num_iter = 400'
         write(unit,'(a)')'conv_tol = 1.d-10'
         write(unit,'(a)')'conv_window = 5'
         write(unit,'(a)')'gamma_only = true'
@@ -2797,20 +3122,21 @@ contains
         nntot,size(atom_symbols),atom_symbols,atoms_cart,.true.,m4,a3,e2,u,uopt,lwindow,&
         centers,spreads,spread)
       transform=matmul(uopt(:,:,1),u(:,:,1))
-      call validate_dg_w90_convergence_log(trim(seed)//'.wout',200,convergence_iterations,ok,message)
+      call validate_dg_w90_convergence_log(trim(seed)//'.wout',400,convergence_iterations,ok,message)
       if(ok)call validate_dg_w90_result(transform,centers,spreads,spread,initial_gauge_spread,&
         tolerance,ok,message)
       status=merge(0,2,ok)
     endif
     call MPI_Bcast(status,1,MPI_INTEGER,0,comm,ierr)
     call MPI_Bcast(convergence_iterations,1,MPI_INTEGER,0,comm,ierr)
+    call MPI_Bcast(message,len(message),MPI_CHARACTER,0,comm,ierr)
     call MPI_Bcast(transform,size(transform),MPI_DOUBLE_COMPLEX,0,comm,ierr)
     call MPI_Bcast(centers,size(centers),MPI_DOUBLE_PRECISION,0,comm,ierr)
     call MPI_Bcast(spreads,size(spreads),MPI_DOUBLE_PRECISION,0,comm,ierr)
     call MPI_Bcast(spread,3,MPI_DOUBLE_PRECISION,0,comm,ierr)
     ok=status==0.and.ierr==MPI_SUCCESS
     if(present(convergence_iterations_out))convergence_iterations_out=convergence_iterations
-    if(ok)then;message='';else;message='Wannier90 Gamma library run failed validation';endif
+    if(ok)message=''
 #else
     ok=.false.;message='Wannier90 Gamma run requires MPI and USE_WANNIER90';spread=0d0
     if(present(convergence_iterations_out))convergence_iterations_out=-1

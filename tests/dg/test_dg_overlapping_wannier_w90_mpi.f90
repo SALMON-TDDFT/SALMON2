@@ -5,6 +5,7 @@ program test_dg_overlapping_wannier_w90_mpi
     validate_dg_w90_result,setup_dg_w90_gamma_library,run_dg_w90_gamma_library,&
     assemble_dg_w90_gamma_matrices,apply_dg_w90_gamma_transform,&
     validate_dg_w90_convergence_log
+  use dg_overlapping_wannier_w90,only:validate_dg_w90_generator_covariance
   use dg_overlapping_wannier_w90,only:align_dg_w90_character_sector_gauge
   use dg_overlapping_wannier_w90,only:validate_dg_w90_localization_cluster
   use dg_overlapping_wannier_w90,only:align_dg_w90_cross_character_sector_gauge
@@ -16,13 +17,16 @@ program test_dg_overlapping_wannier_w90_mpi
   use dg_overlapping_wannier_w90,only:build_dg_sector_periodic_position_tuple
   use dg_overlapping_wannier_w90,only:canonicalize_dg_sector_periodic_position_gauge
   use dg_overlapping_wannier_w90,only:jointly_canonicalize_dg_sector_periodic_position_gauge
+  use dg_overlapping_wannier_w90,only:build_dg_orbital_major_periodic_position_tuple,&
+    apply_dg_orbital_rotation_tiled
+  use dg_overlapping_wannier_w90,only:export_dg_w90_replay_bundle
   implicit none
   integer::ierr,rank,nproc,b,i,m,n,p,nlocal
   integer::convergence_iterations,log_unit,win_unit,win_io
   complex(8)::transform(2,2)
   real(8)::centers(3,2),spreads(2),spread(3)
   integer(8)::bytes
-  logical::ok,matrix_matches,win_has_random_projection
+  logical::ok,matrix_matches,win_has_random_projection,replay_exists
   character(256)::message,win_line
   complex(8),allocatable::local_values(:,:),local_anchors(:,:)
   complex(8),allocatable::assembled_m(:,:,:),assembled_a(:,:)
@@ -32,6 +36,9 @@ program test_dg_overlapping_wannier_w90_mpi
   complex(8)::local_m_reference(2,2,2),local_a_reference(2,2),m_reference(2,2,2),a_reference(2,2),phase
   real(8)::angle
   real(8)::inherited_identity,inherited_unitarity,inherited_closure
+  complex(8)::covariance_band(2,2),covariance_wann(2,2),covariance_transform(2,2)
+  real(8)::covariance_defect
+  integer(8)::covariance_workspace
   complex(8),allocatable::gauge_values(:,:),gauge_gradients(:,:,:)
   complex(8)::gauge_transform(2,2)
   real(8)::gauge_centers(3,2)
@@ -69,6 +76,7 @@ program test_dg_overlapping_wannier_w90_mpi
   real(8)::localization_cluster_spectrum(4)
   integer(8)::sector_alignment_fingerprint,sector_alignment_workspace
   complex(8),allocatable::sector_position_phases(:,:),sector_position_tuple(:,:,:)
+  complex(8),allocatable::orbital_major_values(:,:),orbital_major_tuple(:,:,:)
   complex(8)::sector_position_reference(2,2,3),sector_position_local(2,2,3)
   integer(8)::sector_position_fingerprint,sector_position_workspace
   real(8)::sector_position_gram_defect
@@ -88,6 +96,9 @@ program test_dg_overlapping_wannier_w90_mpi
   integer::joint_sweeps,joint_trial_sweeps
   integer(8)::joint_fingerprint,joint_trial_fingerprint,joint_workspace
   integer(8)::sector_trial_fingerprint,sector_trial_workspace
+  complex(8),allocatable::replay_m(:,:,:),replay_a(:,:)
+  real(8),allocatable::replay_eigenvalues(:)
+  integer::replay_gvec(3,2),replay_unit,replay_ios
   integer(8),allocatable::sector_reference_keys(:),sector_permuted_keys(:)
 #ifdef USE_WANNIER90
   integer::nntot
@@ -107,10 +118,44 @@ program test_dg_overlapping_wannier_w90_mpi
     inherited_unitarity,inherited_closure,bytes,ok,message)
   call require(ok.and.inherited_identity<=3d-13.and.inherited_unitarity<1d-12.and.&
     inherited_closure<=3d-13.and.bytes>0_8,trim(message))
+  covariance_band=reshape([(0d0,0d0),(1d0,0d0),(1d0,0d0),(0d0,0d0)],[2,2])
+  covariance_wann=covariance_band;covariance_transform=covariance_band
+  call validate_dg_w90_generator_covariance(MPI_COMM_WORLD,covariance_transform,&
+    covariance_band,covariance_wann,1d-12,covariance_defect,covariance_workspace,ok,message)
+  call require(ok.and.covariance_defect<1d-12.and.covariance_workspace>0_8,&
+    'dense internal Wannier representation satisfies measured covariance')
+  covariance_transform=(0d0,0d0);covariance_transform(1,1)=1d0;covariance_transform(2,2)=-1d0
+  call validate_dg_w90_generator_covariance(MPI_COMM_WORLD,covariance_transform,&
+    covariance_band,covariance_wann,1d-12,covariance_defect,covariance_workspace,ok,message)
+  call require(.not.ok.and.covariance_defect>1d0,&
+    'noncommuting Wannier transform fails measured covariance')
   call estimate_dg_w90_coordinator_bytes(384,384,12,1,bytes,ok,message)
   call require(ok.and.bytes>0_8,'finite Si64 Wannier90 byte estimate')
   call estimate_dg_w90_coordinator_bytes(huge(0),huge(0),12,1,bytes,ok,message)
   call require(.not.ok,'Wannier90 byte estimate rejects integer overflow')
+  replay_gvec=reshape([1,0,0,0,1,0],[3,2])
+  if(rank==0)then
+    allocate(replay_m(2,2,2),replay_a(2,2),replay_eigenvalues(2))
+    replay_eigenvalues=[-1d0,2d0]
+    replay_a=reshape([cmplx(11d0,-11d0,8),cmplx(21d0,-21d0,8),&
+      cmplx(12d0,-12d0,8),cmplx(22d0,-22d0,8)],[2,2])
+    replay_m(:,:,1)=replay_a;replay_m(:,:,2)=2d0*replay_a
+    open(newunit=replay_unit,file='replay_source.win',status='replace',iostat=replay_ios)
+    if(replay_ios==0)write(replay_unit,'(a)')'num_wann = 2'
+    if(replay_ios==0)close(replay_unit)
+    open(newunit=replay_unit,file='replay_source.dmn',status='replace',iostat=replay_ios)
+    if(replay_ios==0)write(replay_unit,'(a)')'replay dmn fixture'
+    if(replay_ios==0)close(replay_unit)
+  else
+    allocate(replay_m(0,0,0),replay_a(0,0),replay_eigenvalues(0))
+  endif
+  call export_dg_w90_replay_bundle(MPI_COMM_WORLD,'.','replay_source','.',&
+    'replay_bundle',replay_eigenvalues,replay_a,replay_m,replay_gvec,ok,message)
+  call require(ok,trim(message))
+  replay_exists=.false.
+  if(rank==0)inquire(file='replay_bundle.win',exist=replay_exists)
+  call MPI_Bcast(replay_exists,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call require(replay_exists,'replay bundle contains .win')
   if(rank==0)then
     open(newunit=log_unit,file='w90_converged_fixture.wout',status='replace')
     write(log_unit,'(a)')'      7  -0.100E-13  0.0  1.0  0.0 <-- CONV'
@@ -202,6 +247,19 @@ program test_dg_overlapping_wannier_w90_mpi
   call require(ok.and.maxval(abs(sector_position_tuple-sector_position_reference))<1d-12.and.&
     sector_position_gram_defect<1d-12.and.sector_position_fingerprint/=0_8.and.&
     sector_position_workspace>0_8,'distributed sector periodic-position tuple matches direct sum')
+  allocate(orbital_major_values(2,nlocal),source=transpose(sector_frame))
+  call build_dg_orbital_major_periodic_position_tuple(MPI_COMM_WORLD,orbital_major_values,&
+    [(1d0,i=1,nlocal)],transpose(sector_position_phases),1d-12,7781_8,orbital_major_tuple,&
+    sector_position_gram_defect,position_trial_position_fingerprint,sector_position_workspace,ok,message)
+  call require(ok.and.maxval(abs(orbital_major_tuple-sector_position_reference))<1d-12.and.&
+    sector_position_gram_defect<1d-12.and.sector_position_workspace>0_8,&
+    'orbital-major periodic-position tuple matches row-major direct sum without a transpose copy')
+  position_input_rotation=reshape([cmplx(1d0,0d0,8),cmplx(0d0,1d0,8),&
+    cmplx(0d0,1d0,8),cmplx(1d0,0d0,8)],[2,2])/sqrt(2d0)
+  call apply_dg_orbital_rotation_tiled(MPI_COMM_WORLD,orbital_major_values,position_input_rotation,ok,message)
+  call require(ok.and.maxval(abs(orbital_major_values-transpose(matmul(sector_frame,position_input_rotation))))<1d-12,&
+    'tiled orbital-major rotation matches the row-major channel rotation')
+  deallocate(orbital_major_values,orbital_major_tuple)
   allocate(position_weighted_sector(nlocal,2),position_weights(nlocal))
   position_weights=2d0;position_weighted_sector=sector_frame/sqrt(2d0)
   sector_position_local=(0d0,0d0)
@@ -895,14 +953,17 @@ program test_dg_overlapping_wannier_w90_mpi
   win_has_random_projection=.false.
   if(rank==0)then
     open(newunit=win_unit,file='ow_w90_one_band.win',status='old',action='read',iostat=win_io)
-    call require(win_io==0,'Wannier90 setup writes its input file')
-    do
-      read(win_unit,'(a)',iostat=win_io)win_line
-      if(win_io/=0)exit
-      if(index(adjustl(win_line),'random')==1)win_has_random_projection=.true.
-    enddo
-    close(win_unit)
+    if(win_io==0)then
+      do
+        read(win_unit,'(a)',iostat=win_io)win_line
+        if(win_io/=0)exit
+        if(index(adjustl(win_line),'random')==1)win_has_random_projection=.true.
+      enddo
+      close(win_unit)
+    endif
   endif
+  call MPI_Bcast(win_io,1,MPI_INTEGER,0,MPI_COMM_WORLD,ierr)
+  call require(win_io==0.or.win_io<0,'Wannier90 setup writes its input file')
   call MPI_Bcast(win_has_random_projection,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
   call require(.not.win_has_random_projection,&
     'externally supplied Wannier90 A matrices must not retain random projections')
