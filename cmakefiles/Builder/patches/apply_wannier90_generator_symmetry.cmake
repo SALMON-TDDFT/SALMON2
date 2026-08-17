@@ -10,7 +10,7 @@ set(new_use "    use w90_parameters, only: num_wann, num_kpts, symmetrize_eps\n"
 string(REPLACE "${old_use}" "${new_use}" contents "${contents}")
 
 set(old_decl "    integer :: ik, ir, isym, irk, ngk\n\n    complex(kind=dp) :: grad_total(num_wann, num_wann)\n")
-set(new_decl "    integer :: ik, ir, isym, irk, ngk, iter\n    integer, parameter :: generator_projection_iterations = 100\n    real(kind=dp) :: generator_projection_diff\n\n    complex(kind=dp) :: grad_total(num_wann, num_wann)\n    complex(kind=dp) :: grad_previous(num_wann, num_wann)\n")
+set(new_decl "    integer :: ik, ir, isym, irk, ngk, iter\n    integer, parameter :: generator_projection_iterations = 1000\n    real(kind=dp) :: generator_projection_diff\n\n    complex(kind=dp) :: grad_total(num_wann, num_wann)\n    complex(kind=dp) :: grad_previous(num_wann, num_wann)\n")
 string(REPLACE "${old_decl}" "${new_decl}" contents "${contents}")
 
 set(old_loop [=[    do ir = 1, nkptirr
