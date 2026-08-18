@@ -126,8 +126,9 @@ contains
     integer :: i,j,ik,ib,ib1,ib2,ilma,nlma,ia,ix,iy,iz,NB,NK,im,ispin
     integer :: ik_s,ik_e,io_s,io_e,is(3),ie(3)
     integer :: icomm, iopen_flag, minfo, mfile, ierr, n_count, source_type, file_type
-    integer :: gsize(4), lsize(4), lstart(4)
-    integer(kind=MPI_OFFSET_KIND) :: disp, block_size, base_vnl
+    integer :: gsize(5), lsize(5), lstart(5)
+    integer(8) :: n_count8
+    integer(kind=MPI_OFFSET_KIND) :: block_size, base_vnl
     real(8) :: x,y,z
     complex(8),allocatable :: upu(:,:,:,:,:),upu_l(:,:,:,:,:)
     complex(8),allocatable :: upu_all(:,:,:,:,:),upu_all_l(:,:,:,:,:)
@@ -408,37 +409,30 @@ contains
       iofile = file_tm_data
       icomm = info%icomm_ko
 
-      gsize  = [3, system%nspin, NB             , NB]
-      lsize  = [3, system%nspin, io_e - io_s + 1, NB]
-      lstart = [1, 1,            io_s,            1 ] - 1
+      gsize  = [3, system%nspin, NB             , NB, NK             ]
+      lsize  = [3, system%nspin, io_e - io_s + 1, NB, ik_e - ik_s + 1]
+      lstart = [1, 1,            io_s,            1,  ik_s           ] - 1
 
-      n_count = lsize(1)*lsize(2)*lsize(3)*lsize(4)
+      n_count8 = int(lsize(1),8)*int(lsize(2),8)*int(lsize(3),8)*int(lsize(4),8)*int(lsize(5),8)
+      if ( n_count8 > int(huge(n_count),8) ) then
+        write(*,*) 'error: n_count exceeds 32-bit integer range in write_tm_data (tm.bin)'
+        call end_parallel
+        stop
+      end if
+      n_count = int(n_count8, kind(n_count))
 
-      call MPI_Type_create_subarray(4, gsize, lsize, lstart, MPI_ORDER_FORTRAN, source_type, file_type, ierr)
+      call MPI_Type_create_subarray(5, gsize, lsize, lstart, MPI_ORDER_FORTRAN, source_type, file_type, ierr)
       call MPI_Type_commit(file_type, ierr)
       call MPI_File_open(icomm, iofile, iopen_flag, minfo, mfile, ierr)
 
       block_size = int(3,8)*system%nspin*NB*NB*int(16,8)
-
-      do ik = ik_s, ik_e
-
-      disp = int(ik-1, MPI_OFFSET_KIND) * block_size
-
-      call MPI_File_set_view(mfile, disp, source_type, file_type, 'native', minfo, ierr)
-      call MPI_File_write_all(mfile, upu(1,1,io_s,1,ik), n_count, source_type, MPI_STATUS_IGNORE, ierr)
-
-      end do
-
       base_vnl = int(NK,8) * block_size
 
-      do ik = ik_s, ik_e
+      call MPI_File_set_view(mfile, 0_MPI_OFFSET_KIND, source_type, file_type, 'native', minfo, ierr)
+      call MPI_File_write_all(mfile, upu(1,1,io_s,1,ik_s), n_count, source_type, MPI_STATUS_IGNORE, ierr)
 
-      disp = base_vnl + int(ik-1, MPI_OFFSET_KIND) * block_size
-
-      call MPI_File_set_view(mfile, disp, source_type, file_type, 'native', minfo, ierr)
-      call MPI_File_write_all(mfile, u_rVnl_Vnlr_u(1,1,io_s,1,ik), n_count, source_type, MPI_STATUS_IGNORE, ierr)
-
-      end do 
+      call MPI_File_set_view(mfile, base_vnl, source_type, file_type, 'native', minfo, ierr)
+      call MPI_File_write_all(mfile, u_rVnl_Vnlr_u(1,1,io_s,1,ik_s), n_count, source_type, MPI_STATUS_IGNORE, ierr)
 
       call MPI_File_close(mfile, ierr) 
       call MPI_Type_free(file_type, ierr)
