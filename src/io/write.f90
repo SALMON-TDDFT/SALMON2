@@ -106,7 +106,7 @@ contains
     use salmon_global, only: yn_out_tm,yn_out_tm_bin,yn_out_gs_sgm_eps, &
                        out_gs_sgm_eps_mu_nu, out_gs_sgm_eps_width, &
                        base_directory,sysname, de,nenergy,nelec,xc
-    use parallelization, only: nproc_id_global
+    use parallelization, only: nproc_id_global, end_parallel
     use communication, only: comm_is_root,comm_summation,comm_sync_all
     use filesystem, only: open_filehandle
     use inputoutput, only: t_unit_energy
