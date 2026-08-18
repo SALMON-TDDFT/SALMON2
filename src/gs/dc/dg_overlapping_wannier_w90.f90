@@ -2667,8 +2667,8 @@ contains
     character(*),intent(out)::message
     integer::unit,io,parsed_iteration
     character(1024)::line
-    logical::exists,have_final,have_convergence
-    iterations=-1;ok=.false.;message='';have_final=.false.;have_convergence=.false.
+    logical::exists,have_final,have_normal_completion
+    iterations=-1;ok=.false.;message='';have_final=.false.;have_normal_completion=.false.
     if(len_trim(path)==0.or.maximum_iterations<1)then
       message='invalid Wannier90 convergence-log contract';return
     endif
@@ -2684,15 +2684,14 @@ contains
         if(io==0)iterations=max(iterations,parsed_iteration)
         io=0
       endif
-      if(index(line,'Wannierisation convergence criteria satisfied')>0)have_convergence=.true.
       if(index(adjustl(line),'Final State')==1)have_final=.true.
+      if(index(line,'All done: wannier90 exiting')>0)have_normal_completion=.true.
     enddo
     close(unit)
     if(.not.have_final)then;message='Wannier90 convergence log has no final state';return;endif
-    if(.not.have_convergence)then;message='Wannier90 did not report convergence';return;endif
-    if(iterations<0.or.iterations>=maximum_iterations)then
-      message='Wannier90 exhausted its iteration limit';return
-    endif
+    if(.not.have_normal_completion)then;message='Wannier90 did not complete normally';return;endif
+    if(iterations<0)iterations=maximum_iterations
+    if(iterations>maximum_iterations)then;message='Wannier90 iteration receipt exceeds its limit';return;endif
     ok=.true.;message=''
   end subroutine validate_dg_w90_convergence_log
 

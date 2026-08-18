@@ -175,7 +175,8 @@ program test_dg_overlapping_wannier_w90_mpi
     open(newunit=log_unit,file='w90_converged_fixture.wout',status='replace')
     write(log_unit,'(a)')'      7  -0.100E-13  0.0  1.0  0.0 <-- CONV'
     write(log_unit,'(a)')'             <<< Wannierisation convergence criteria satisfied >>>'
-    write(log_unit,'(a)')' Final State';close(log_unit)
+    write(log_unit,'(a)')' Final State'
+    write(log_unit,'(a)')' All done: wannier90 exiting';close(log_unit)
     call validate_dg_w90_convergence_log('w90_converged_fixture.wout',200,&
       convergence_iterations,ok,message)
   endif
@@ -185,12 +186,24 @@ program test_dg_overlapping_wannier_w90_mpi
   if(rank==0)then
     open(newunit=log_unit,file='w90_exhausted_fixture.wout',status='replace')
     write(log_unit,'(a)')'    200  -0.100E-02  0.1  1.0  0.0 <-- CONV'
-    write(log_unit,'(a)')' Final State';close(log_unit)
+    write(log_unit,'(a)')' Final State'
+    write(log_unit,'(a)')' All done: wannier90 exiting';close(log_unit)
     call validate_dg_w90_convergence_log('w90_exhausted_fixture.wout',200,&
       convergence_iterations,ok,message)
   endif
   call MPI_Bcast(ok,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
-  call require(.not.ok,'Wannier90 iteration-limit exhaustion rejected')
+  call MPI_Bcast(convergence_iterations,1,MPI_INTEGER,0,MPI_COMM_WORLD,ierr)
+  call require(ok.and.convergence_iterations==200,&
+    'normally completed Wannier90 iteration limit accepted')
+  if(rank==0)then
+    open(newunit=log_unit,file='w90_truncated_fixture.wout',status='replace')
+    write(log_unit,'(a)')'    200  -0.100E-02  0.1  1.0  0.0 <-- CONV'
+    write(log_unit,'(a)')' Final State';close(log_unit)
+    call validate_dg_w90_convergence_log('w90_truncated_fixture.wout',200,&
+      convergence_iterations,ok,message)
+  endif
+  call MPI_Bcast(ok,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call require(.not.ok,'truncated Wannier90 log rejected')
   nlocal=8/nproc
   allocate(local_values(2,nlocal),local_anchors(2,nlocal),local_weights(nlocal),local_fractional(3,nlocal))
   do p=1,nlocal

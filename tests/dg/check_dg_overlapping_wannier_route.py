@@ -1733,7 +1733,13 @@ assert "inquire(file=trim(seed)//'.dmn'" in w90_source.replace(" ", "").lower(),
     "Wannier90 setup must reject a missing DMN before library entry"
 )
 assert re.search(r"call\s+validate_dg_w90_convergence_log\s*\(", w90_source, re.I), (
-    "Wannier90 run must validate the final convergence receipt"
+    "Wannier90 run must validate its completion receipt"
+)
+assert "All done: wannier90 exiting" in w90_source, (
+    "Wannier90 completion validation must recognize the library's normal-exit banner"
+)
+assert "Wannier90 exhausted its iteration limit" not in w90_source, (
+    "normal Wannier90 completion at num_iter must not be treated as an execution failure"
 )
 assert re.search(
     r"call\s+gather_dg_single_symmetry_representation\s*\(", adapter_body, re.I
