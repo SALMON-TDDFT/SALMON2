@@ -1744,6 +1744,14 @@ assert "Wannier90 exhausted its iteration limit" not in w90_source, (
 assert "Wannier90 transform violates the Gamma-real gauge" not in w90_source, (
     "a complex unitary Wannier90 gauge must not be rejected for being non-real"
 )
+gamma_apply_body = re.search(
+    r"subroutine\s+apply_dg_w90_gamma_transform\b(?P<body>.*?)end\s+subroutine",
+    w90_source,
+    re.I | re.S,
+)
+assert gamma_apply_body and re.search(
+    r"MPI_Allreduce\s*\(\s*nstate\s*,[^\n]*MPI_MIN", gamma_apply_body.group("body"), re.I
+), "Gamma transform application must agree nstate before count-dependent collectives"
 assert re.search(
     r"call\s+gather_dg_single_symmetry_representation\s*\(", adapter_body, re.I
 ), "production fixed-center DMN must gather one representation operation at a time"

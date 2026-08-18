@@ -43,8 +43,11 @@ program test_dg_overlapping_wannier_w90_mpi
   real(8)::covariance_defect
   integer(8)::covariance_workspace
   complex(8),allocatable::gauge_values(:,:),gauge_gradients(:,:,:)
+  complex(8),allocatable::gauge_reference_values(:,:),gauge_reference_gradients(:,:,:)
   complex(8)::gauge_transform(2,2)
   complex(8)::dense_transform(2,2),dense_expected_transform(2,2),dense_pivot(2),dense_phase(2),dense_input(2)
+  complex(8)::gauge_reference_transform(2,2),physical_operator(2,2),wannier_operator(2,2),&
+    transition_operator(2,2),wannier_transition(2,2)
   real(8)::gauge_centers(3,2)
   real(8)::gauge_spreads(2)
   integer(8),allocatable::gauge_ids(:)
@@ -1002,6 +1005,49 @@ program test_dg_overlapping_wannier_w90_mpi
         'dense complex production Wannier gradients use the transpose convention')
     enddo
   enddo
+  dense_transform=reshape([cmplx(sqrt(0.5d0),0d0,8),cmplx(0d0,sqrt(0.5d0),8),&
+    cmplx(sqrt(0.5d0),0d0,8),cmplx(0d0,-sqrt(0.5d0),8)],[2,2])
+  do p=1,nlocal
+    global_point=rank*nlocal+p
+    gauge_values(:,p)=[cmplx(real(global_point,8),0d0,8),cmplx(2d0*real(global_point,8),0d0,8)]
+    do i=1,3
+      gauge_gradients(i,1,p)=cmplx(real(i*global_point,8),0d0,8)
+      gauge_gradients(i,2,p)=cmplx(2d0*real(i*global_point,8),-real(i*global_point,8),8)
+    enddo
+  enddo
+  gauge_transform=dense_transform;gauge_centers=0.2d0;gauge_spreads=[10d0,10d0]
+  call apply_dg_w90_gamma_transform(MPI_COMM_WORLD,gauge_ids,gauge_values,gauge_gradients,&
+    gauge_transform,gauge_centers,1d-12,ok,message,gauge_spreads)
+  call require(ok,'degenerate complex Wannier columns establish a canonical reference')
+  allocate(gauge_reference_values,source=gauge_values)
+  allocate(gauge_reference_gradients,source=gauge_gradients);gauge_reference_transform=gauge_transform
+  do p=1,nlocal
+    global_point=rank*nlocal+p
+    gauge_values(:,p)=[cmplx(real(global_point,8),0d0,8),cmplx(2d0*real(global_point,8),0d0,8)]
+    do i=1,3
+      gauge_gradients(i,1,p)=cmplx(real(i*global_point,8),0d0,8)
+      gauge_gradients(i,2,p)=cmplx(2d0*real(i*global_point,8),-real(i*global_point,8),8)
+    enddo
+  enddo
+  gauge_transform=dense_transform(:,[2,1]);gauge_centers=0.2d0;gauge_spreads=[10d0,10d0]
+  call apply_dg_w90_gamma_transform(MPI_COMM_WORLD,gauge_ids,gauge_values,gauge_gradients,&
+    gauge_transform,gauge_centers,1d-12,ok,message,gauge_spreads)
+  call require(ok.and.maxval(abs(gauge_transform-gauge_reference_transform))<1d-12.and.&
+    maxval(abs(gauge_values-gauge_reference_values))<1d-12.and.&
+    maxval(abs(gauge_gradients-gauge_reference_gradients))<1d-12,&
+    'degenerate complex Wannier ordering is invariant under input column permutation')
+  physical_operator=reshape([cmplx(1d0,0d0,8),cmplx(0d0,0d0,8),&
+    cmplx(0d0,0d0,8),cmplx(3d0,0d0,8)],[2,2])
+  transition_operator=reshape([cmplx(0d0,0d0,8),cmplx(1d0,-2d0,8),&
+    cmplx(1d0,2d0,8),cmplx(0d0,0d0,8)],[2,2])
+  wannier_operator=matmul(conjg(transpose(gauge_transform)),matmul(physical_operator,gauge_transform))
+  wannier_transition=matmul(conjg(transpose(gauge_transform)),matmul(transition_operator,gauge_transform))
+  call require(maxval(abs(matmul(physical_operator,gauge_transform)-&
+    matmul(gauge_transform,wannier_operator)))<1d-12.and.&
+    abs(real(wannier_operator(1,1)+wannier_operator(2,2),8)-4d0)<1d-12.and.&
+    maxval(abs(matmul(gauge_transform,matmul(wannier_transition,conjg(transpose(gauge_transform))))-&
+    transition_operator))<1d-12,'complex Wannier gauge preserves energy, covariance, and transition operators')
+  deallocate(gauge_reference_values,gauge_reference_gradients)
   transform(1,1)=2d0
   call validate_dg_w90_result(transform,centers,spreads,spread,0.8d0,1d-12,ok,message)
   call require(.not.ok,'nonunitary Wannier90 transform rejection')

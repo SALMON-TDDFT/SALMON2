@@ -2735,14 +2735,14 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer::nstate,npoint,i,j,k,axis,ierr,status
+    integer::nstate,npoint,i,j,k,axis,ierr,status,minimum_nstate,maximum_nstate
     integer,allocatable::order(:)
     logical,allocatable::used(:)
-    complex(real64),allocatable::ordered_transform(:,:),point_values(:),point_gradients(:,:),gram(:,:)
+    complex(real64),allocatable::ordered_transform(:,:),point_values(:),point_gradients(:,:),gram(:,:),column_phase(:)
     real(real64),allocatable::ordered_centers(:,:),ordered_spreads(:),local_maximum(:),global_maximum(:)
     integer(int64),allocatable::local_id(:),global_id(:)
     complex(real64),allocatable::local_pivot(:),global_pivot(:)
-    complex(real64)::pivot_phase
+    complex(real64)::pivot_phase,left_value,right_value
     real(real64)::scale
     logical::precedes
     ok=.false.;message='';status=0;nstate=size(values,1);npoint=size(values,2)
@@ -2763,12 +2763,25 @@ contains
     endif
     call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(status/=0.or.ierr/=MPI_SUCCESS)then;message='invalid Gamma MLWF transform contract';return;endif
+    call MPI_Allreduce(nstate,minimum_nstate,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Gamma MLWF state extent agreement failed';return;endif
+    call MPI_Allreduce(nstate,maximum_nstate,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_nstate/=maximum_nstate)then
+      message='Gamma MLWF state extent disagrees across ranks';return
+    endif
     allocate(gram(nstate,nstate));gram=matmul(conjg(transpose(transform)),transform)
     do i=1,nstate;gram(i,i)=gram(i,i)-1d0;enddo
     if(maxval(abs(gram))>tolerance*max(1d0,real(nstate,real64)))status=2
     call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(status/=0.or.ierr/=MPI_SUCCESS)then;message='Gamma MLWF transform is not unitary';return;endif
-    allocate(order(nstate),used(nstate));used=.false.
+    allocate(order(nstate),used(nstate),column_phase(nstate));used=.false.
+    do j=1,nstate
+      k=maxloc(abs(transform(:,j)),dim=1)
+      if(abs(transform(k,j))<=tolerance)then
+        message='cannot determine canonical Gamma MLWF coefficient phases';return
+      endif
+      column_phase(j)=conjg(transform(k,j))/abs(transform(k,j))
+    enddo
     do i=1,nstate
       order(i)=0
       do j=1,nstate
@@ -2793,6 +2806,22 @@ contains
                 exit
               endif
             enddo
+            if(k>nstate)then
+            do k=1,nstate
+              left_value=column_phase(j)*transform(k,j)
+              right_value=column_phase(order(i))*transform(k,order(i))
+              scale=max(1d0,abs(left_value),abs(right_value))
+              if(real(left_value,real64)<real(right_value,real64)-tolerance*scale)then
+                precedes=.true.;exit
+              else if(real(left_value,real64)>real(right_value,real64)+tolerance*scale)then
+                exit
+              else if(aimag(left_value)<aimag(right_value)-tolerance*scale)then
+                precedes=.true.;exit
+              else if(aimag(left_value)>aimag(right_value)+tolerance*scale)then
+                exit
+              endif
+            enddo
+            endif
           endif
           if(precedes)order(i)=j
         endif
