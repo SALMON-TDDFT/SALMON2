@@ -340,16 +340,23 @@ assert "global_translation_cocycle" in ow_ground_state_body[inverse_position:red
 )
 center_gate_position = ow_ground_state_body.rfind("call verify_dg_wannier_center_affine_orbits")
 center_diagnostic_position = ow_ground_state_body.rfind("call diagnose_dg_point_center_gauge")
-center_stop_position = ow_ground_state_body.rfind("localized wannier center orbit failed")
+center_owner_position = ow_ground_state_body.rfind("call assign_dg_periodic_centers_to_fragments")
 global_map_release_position = ow_ground_state_body.find("deallocate(global_symmetry_map)")
-assert 0 <= center_gate_position < center_diagnostic_position < center_stop_position, (
-    "the first failed center operation must emit point center-gauge leakage before the authoritative stop"
+assert 0 <= center_gate_position < center_diagnostic_position < center_owner_position, (
+    "a nonmonomial center action must be diagnosed before independent center ownership"
 )
-assert center_stop_position < global_map_release_position, (
+assert center_diagnostic_position < global_map_release_position, (
     "center diagnostics must finish before releasing the full affine spatial maps they consume"
 )
+center_diagnostic_block = ow_ground_state_body[center_gate_position:center_owner_position]
+assert "localized wannier center orbit failed" not in center_diagnostic_block, (
+    "a unitary dense point action must not be rejected solely for lacking monomial centers"
+)
+assert "point center-gauge diagnostic failed" in center_diagnostic_block, (
+    "an invalid or nonunitary center diagnostic must still fail closed"
+)
 for center_receipt in ("failed_operation", "monomial_defect", "center_block_leakage"):
-    assert center_receipt in ow_ground_state_body[center_gate_position:center_stop_position], (
+    assert center_receipt in center_diagnostic_block, (
         f"production center failure diagnostics must publish {center_receipt}"
     )
 assert "call localize_dg_occupation_blocks" not in ow_ground_state_body, (

@@ -2044,10 +2044,12 @@ contains
         ' monomial_defect=',monomial_defect,' center_block_leakage=',center_block_leakage,&
         ' representation_unitarity_defect=',center_representation_unitarity_defect,&
         ' workspace_peak_bytes=',center_gauge_workspace_peak
-      if(rank==0.and..not.center_diagnostic_ok)&
-        write(0,'(2a)')'point center-gauge diagnostic failed: ',trim(center_diagnostic_message)
-      write(0,'(a)')trim(center_failure_message)
-      error stop 'localized Wannier center orbit failed'
+      if(.not.center_diagnostic_ok)then
+        if(rank==0)write(0,'(2a)')'point center-gauge diagnostic failed: ',trim(center_diagnostic_message)
+        error stop 'point center-gauge diagnostic failed'
+      endif
+      if(rank==0)write(*,'(2a)')&
+        '[OW-GS-DIAGNOSTIC] nonmonomial center action retained: ',trim(center_failure_message)
     end if
     allocate(ow_pencil_generator_maps,source=global_symmetry_map(:,global_affine_generators),&
       stat=allocation_status)
