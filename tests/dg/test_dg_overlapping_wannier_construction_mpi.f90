@@ -55,7 +55,7 @@ program test_dg_overlapping_wannier_construction_mpi
     build_dg_occupied_empty_moment_descriptors,build_dg_periodic_spectral_basins,&
     project_dg_single_spectral_basin_operator,prepare_dg_spectral_basin_operators,&
     project_dg_prepared_spectral_basin_operator,release_dg_prepared_spectral_basins,&
-    prepare_dg_direct_retained_wannier_frame
+    prepare_dg_direct_retained_wannier_frame,redistribute_dg_row_owned_real_field_to_requests
   implicit none
   type(s_dg_translation_orbit_accumulator)::inverse_accumulator
   type(s_dg_prepared_translation_action)::prepared_translation_action
@@ -128,6 +128,9 @@ program test_dg_overlapping_wannier_construction_mpi
   complex(8),allocatable::direct_band_actions(:,:,:),direct_trial_rows(:,:),direct_wannier_actions(:,:,:)
   real(8)::direct_frame_defect,direct_action_defect
   integer::spectral_basin_count
+  integer(8),allocatable::density_source_ids(:),density_request_ids(:)
+  real(8),allocatable::density_source_values(:),density_request_values(:)
+  integer(8)::density_workspace_peak
   real(8)::spectral_operator_defect,spectral_operator_trace
   integer(8),allocatable::closure_ids(:),closure_map(:,:)
   integer(8),allocatable::stream_ids(:),stream_map(:,:)
@@ -524,7 +527,9 @@ program test_dg_overlapping_wannier_construction_mpi
     affine_translations,1d-12,ok,message,moment_magnitudes=orbit_center_magnitudes,&
     failed_operation=failed_center_operation)
   call require(.not.ok.and.has_text(message,'operation=').and.has_text(message,'source=').and.&
-    has_text(message,'nearest_residual=').and.has_text(message,'moment_min=').and.failed_center_operation==2,&
+    has_text(message,'forward_residual=').and.has_text(message,'inverse_residual=').and.&
+    has_text(message,'source_center=').and.has_text(message,'forward_center=').and.&
+    has_text(message,'moment_min=').and.failed_center_operation==2,&
     'broken full affine Wannier center orbit reports actionable mismatch diagnostics')
   center_gauge_basis=(0d0,0d0);center_gauge_weights=1d0
   if(rank==0)then
@@ -1866,6 +1871,52 @@ program test_dg_overlapping_wannier_construction_mpi
       count(abs(direct_trial_rows(p,:))>1d-14)==1
   enddo
   call require(direct_rows_valid,'direct retained trial rows are row-owned identity')
+
+  b=count([(mod(i-1,nproc)==rank,i=1,11)])
+  allocate(density_source_ids(b),density_source_values(b),density_request_ids(5))
+  b=0
+  do i=1,11
+    if(mod(i-1,nproc)/=rank)cycle
+    b=b+1;density_source_ids(b)=i;density_source_values(b)=0.25d0*real(i,8)
+  enddo
+  density_request_ids=[int(modulo(3*rank+4,11)+1,8),2_8,11_8,&
+    int(modulo(rank+7,11)+1,8),2_8]
+  call redistribute_dg_row_owned_real_field_to_requests(comm,11_8,density_source_ids,&
+    density_source_values,density_request_ids,density_request_values,density_workspace_peak,&
+    ok,message)
+  call require(ok.and.size(density_request_values)==size(density_request_ids),&
+    'row-owned real field is redistributed to every local request')
+  if(ok)call require(maxval(abs(density_request_values-&
+    0.25d0*real(density_request_ids,8)))<1d-14,&
+    'direct real-field redistribution preserves request order and duplicate requests')
+  call require(density_workspace_peak>0_8,&
+    'direct real-field redistribution publishes a workspace receipt')
+  if(rank==0)density_source_ids(2)=density_source_ids(1)
+  call redistribute_dg_row_owned_real_field_to_requests(comm,11_8,density_source_ids,&
+    density_source_values,density_request_ids,density_request_values,density_workspace_peak,&
+    ok,message)
+  call require(.not.ok.and.has_text(message,'duplicate or missing'),&
+    'direct real-field redistribution rejects duplicate and missing ownership')
+  if(rank==0)density_source_ids(2)=1_8+int(nproc,8)
+  if(rank==0)density_source_values(1)=ieee_value(0d0,ieee_quiet_nan)
+  call redistribute_dg_row_owned_real_field_to_requests(comm,11_8,density_source_ids,&
+    density_source_values,density_request_ids,density_request_values,density_workspace_peak,&
+    ok,message)
+  call require(.not.ok.and.has_text(message,'invalid'),&
+    'direct real-field redistribution rejects nonfinite source values')
+  if(rank==0)density_source_values(1)=0.25d0*real(density_source_ids(1),8)
+  density_request_ids(1)=12_8
+  call redistribute_dg_row_owned_real_field_to_requests(comm,11_8,density_source_ids,&
+    density_source_values,density_request_ids,density_request_values,density_workspace_peak,&
+    ok,message)
+  call require(.not.ok.and.has_text(message,'invalid'),&
+    'direct real-field redistribution rejects out-of-range requests')
+  density_request_ids(1)=int(modulo(3*rank+4,11)+1,8)
+  call redistribute_dg_row_owned_real_field_to_requests(comm,merge(12_8,11_8,rank==0),&
+    density_source_ids,density_source_values,density_request_ids,density_request_values,&
+    density_workspace_peak,ok,message)
+  call require(.not.ok,&
+    'direct real-field redistribution rejects rank-disagreeing global extent')
 
   if(rank==0)then
     write(*,'(a,i0)')'INVERSE_CHARACTER_FINGERPRINT ',inverse_fingerprint

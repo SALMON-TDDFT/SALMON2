@@ -73,6 +73,7 @@ module dg_overlapping_wannier_construction
   public::find_dg_group_identity
   public::select_dg_group_generators
   public::build_dg_smooth_partition_of_unity
+  public::redistribute_dg_row_owned_real_field_to_requests
   public::compose_dg_buffered_orbital_tile_to_physical_grid
   public::accumulate_dg_lcfo_buffer_contributions_to_core
   public::measure_dg_rank_fixed_symmetry_residuals
@@ -119,6 +120,147 @@ module dg_overlapping_wannier_construction
   public::compose_dg_occupied_complement_trial_rows
   public::prepare_dg_direct_retained_wannier_frame
 contains
+  subroutine redistribute_dg_row_owned_real_field_to_requests(comm,global_count,source_ids,&
+      source_values,request_ids,request_values,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm
+    integer(int64),intent(in)::global_count,source_ids(:),request_ids(:)
+    real(real64),intent(in)::source_values(:)
+    real(real64),allocatable,intent(out)::request_values(:)
+    integer(int64),intent(out)::workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,nproc,ierr,local_bad,global_bad,n,allocation_status,p,r,owner,slot,&
+      total_send,total_recv
+    integer(int64)::minimum_count,maximum_count,integer_elements,real_elements
+    integer,allocatable::ownership_count(:),ownership_rank(:),send_counts(:),recv_counts(:),&
+      send_displs(:),recv_displs(:),cursor(:),send_positions(:)
+    integer(int64),allocatable::send_ids(:),recv_ids(:)
+    real(real64),allocatable::reply_values(:),packed_values(:)
+
+    ok=.false.;message='';workspace_peak_bytes=0_int64;local_bad=0
+    call MPI_Comm_rank(comm,rank,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='real-field redistribution communicator rank failed';return;endif
+    call MPI_Comm_size(comm,nproc,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='real-field redistribution communicator size failed';return;endif
+    call MPI_Allreduce(global_count,minimum_count,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='real-field redistribution global extent MIN failed';return;endif
+    call MPI_Allreduce(global_count,maximum_count,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='real-field redistribution global extent MAX failed';return;endif
+    if(global_count<1_int64.or.global_count>int(huge(n),int64).or.minimum_count/=maximum_count.or.&
+        size(source_ids)/=size(source_values).or.any(source_ids<1_int64).or.&
+        any(source_ids>global_count).or.any(request_ids<1_int64).or.any(request_ids>global_count).or.&
+        .not.all(ieee_is_finite(source_values)))local_bad=1
+    call MPI_Allreduce(MPI_IN_PLACE,local_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.local_bad/=0)then
+      message='invalid row-owned real-field redistribution contract';return
+    endif
+    n=int(global_count)
+    integer_elements=2_int64*global_count+7_int64*int(nproc,int64)+int(size(request_ids),int64)
+    real_elements=int(size(request_ids),int64)+int(size(source_ids),int64)
+    if(integer_elements<0_int64.or.real_elements<0_int64.or.&
+        integer_elements>(huge(workspace_peak_bytes)-8_int64*real_elements)/8_int64)local_bad=1
+    call MPI_Allreduce(MPI_IN_PLACE,local_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.local_bad/=0)then
+      message='row-owned real-field redistribution workspace overflow';return
+    endif
+    workspace_peak_bytes=8_int64*(integer_elements+real_elements)
+    allocate(ownership_count(n),ownership_rank(n),send_counts(nproc),recv_counts(nproc),&
+      send_displs(nproc),recv_displs(nproc),cursor(nproc),send_positions(size(request_ids)),&
+      request_values(size(request_ids)),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(MPI_IN_PLACE,local_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.local_bad/=0)then
+      if(allocated(ownership_count))deallocate(ownership_count)
+      if(allocated(ownership_rank))deallocate(ownership_rank)
+      if(allocated(send_counts))deallocate(send_counts)
+      if(allocated(recv_counts))deallocate(recv_counts)
+      if(allocated(send_displs))deallocate(send_displs)
+      if(allocated(recv_displs))deallocate(recv_displs)
+      if(allocated(cursor))deallocate(cursor)
+      if(allocated(send_positions))deallocate(send_positions)
+      if(allocated(request_values))deallocate(request_values)
+      message='row-owned real-field redistribution allocation failed';return
+    endif
+    ownership_count=0;ownership_rank=0
+    do p=1,size(source_ids)
+      slot=int(source_ids(p));ownership_count(slot)=ownership_count(slot)+1
+      ownership_rank(slot)=rank+1
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,ownership_count,n,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='real-field ownership count reduction failed';goto 900;endif
+    call MPI_Allreduce(MPI_IN_PLACE,ownership_rank,n,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='real-field ownership rank reduction failed';goto 900;endif
+    local_bad=merge(0,1,all(ownership_count==1).and.all(ownership_rank>=1).and.&
+      all(ownership_rank<=nproc))
+    call MPI_Allreduce(MPI_IN_PLACE,local_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.local_bad/=0)then
+      message='row-owned real field has duplicate or missing global ownership';goto 900
+    endif
+    send_counts=0
+    do p=1,size(request_ids)
+      owner=ownership_rank(int(request_ids(p)));send_counts(owner)=send_counts(owner)+1
+    enddo
+    call MPI_Alltoall(send_counts,1,MPI_INTEGER,recv_counts,1,MPI_INTEGER,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='real-field request count exchange failed';goto 900;endif
+    total_send=0;total_recv=0
+    do r=1,nproc
+      send_displs(r)=total_send;recv_displs(r)=total_recv
+      total_send=total_send+send_counts(r);total_recv=total_recv+recv_counts(r)
+    enddo
+    allocate(send_ids(total_send),recv_ids(total_recv),reply_values(total_recv),&
+      packed_values(total_send),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(MPI_IN_PLACE,local_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.local_bad/=0)then
+      message='real-field request buffer allocation failed';goto 900
+    endif
+    cursor=send_displs
+    do p=1,size(request_ids)
+      owner=ownership_rank(int(request_ids(p)));cursor(owner)=cursor(owner)+1
+      send_ids(cursor(owner))=request_ids(p);send_positions(cursor(owner))=p
+    enddo
+    call MPI_Alltoallv(send_ids,send_counts,send_displs,MPI_INTEGER8,recv_ids,recv_counts,&
+      recv_displs,MPI_INTEGER8,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='real-field request ID exchange failed';goto 900;endif
+    local_bad=0
+    do p=1,total_recv
+      slot=findloc(source_ids,recv_ids(p),dim=1)
+      if(slot<1)then;local_bad=1;reply_values(p)=0d0;else;reply_values(p)=source_values(slot);endif
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,local_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.local_bad/=0)then
+      message='real-field request reached a nonowner';goto 900
+    endif
+    call MPI_Alltoallv(reply_values,recv_counts,recv_displs,MPI_DOUBLE_PRECISION,packed_values,&
+      send_counts,send_displs,MPI_DOUBLE_PRECISION,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='real-field value reply exchange failed';goto 900;endif
+    do p=1,total_send;request_values(send_positions(p))=packed_values(p);enddo
+    local_bad=merge(0,1,all(ieee_is_finite(request_values)))
+    call MPI_Allreduce(MPI_IN_PLACE,local_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.local_bad/=0)then
+      message='real-field redistribution returned nonfinite values';goto 900
+    endif
+    ok=.true.;message=''
+900 continue
+    if(allocated(ownership_count))deallocate(ownership_count)
+    if(allocated(ownership_rank))deallocate(ownership_rank)
+    if(allocated(send_counts))deallocate(send_counts)
+    if(allocated(recv_counts))deallocate(recv_counts)
+    if(allocated(send_displs))deallocate(send_displs)
+    if(allocated(recv_displs))deallocate(recv_displs)
+    if(allocated(cursor))deallocate(cursor)
+    if(allocated(send_positions))deallocate(send_positions)
+    if(allocated(send_ids))deallocate(send_ids)
+    if(allocated(recv_ids))deallocate(recv_ids)
+    if(allocated(reply_values))deallocate(reply_values)
+    if(allocated(packed_values))deallocate(packed_values)
+    if(.not.ok.and.allocated(request_values))deallocate(request_values)
+#else
+    ok=.false.;message='row-owned real-field redistribution requires MPI';workspace_peak_bytes=0_int64
+#endif
+  end subroutine redistribute_dg_row_owned_real_field_to_requests
+
 
   subroutine prepare_dg_direct_retained_wannier_frame(comm,row_ids,global_row_count,band_action_rows,&
       retained_fingerprint,operation_fingerprint,tolerance,trial_rows,wannier_action_rows,&
@@ -4743,8 +4885,8 @@ contains
     real(real64),allocatable::mapped_centers(:,:)
     integer,allocatable::matched_target(:)
     logical,allocatable::seen(:)
-    integer::nwann,noperation,operation,source,target
-    real(real64)::difference(3),nearest_residual,moment_min,moment_max
+    integer::nwann,noperation,operation,source,target,determinant,inverse_rotation(3,3)
+    real(real64)::difference(3),inverse_center(3),nearest_residual,inverse_residual,moment_min,moment_max
 
     if(present(failed_operation))failed_operation=0
     nwann=size(centers,2);noperation=size(integer_rotations,3)
@@ -4771,6 +4913,42 @@ contains
             difference=difference-anint(difference)
             nearest_residual=min(nearest_residual,maxval(abs(difference)))
           enddo
+          determinant=integer_rotations(1,1,operation)*(&
+            integer_rotations(2,2,operation)*integer_rotations(3,3,operation)-&
+            integer_rotations(2,3,operation)*integer_rotations(3,2,operation))-&
+            integer_rotations(1,2,operation)*(&
+            integer_rotations(2,1,operation)*integer_rotations(3,3,operation)-&
+            integer_rotations(2,3,operation)*integer_rotations(3,1,operation))+&
+            integer_rotations(1,3,operation)*(&
+            integer_rotations(2,1,operation)*integer_rotations(3,2,operation)-&
+            integer_rotations(2,2,operation)*integer_rotations(3,1,operation))
+          inverse_residual=huge(1d0);inverse_center=huge(1d0)
+          if(abs(determinant)==1)then
+            inverse_rotation(1,:)=[integer_rotations(2,2,operation)*integer_rotations(3,3,operation)-&
+              integer_rotations(2,3,operation)*integer_rotations(3,2,operation),&
+              integer_rotations(1,3,operation)*integer_rotations(3,2,operation)-&
+              integer_rotations(1,2,operation)*integer_rotations(3,3,operation),&
+              integer_rotations(1,2,operation)*integer_rotations(2,3,operation)-&
+              integer_rotations(1,3,operation)*integer_rotations(2,2,operation)]/determinant
+            inverse_rotation(2,:)=[integer_rotations(2,3,operation)*integer_rotations(3,1,operation)-&
+              integer_rotations(2,1,operation)*integer_rotations(3,3,operation),&
+              integer_rotations(1,1,operation)*integer_rotations(3,3,operation)-&
+              integer_rotations(1,3,operation)*integer_rotations(3,1,operation),&
+              integer_rotations(1,3,operation)*integer_rotations(2,1,operation)-&
+              integer_rotations(1,1,operation)*integer_rotations(2,3,operation)]/determinant
+            inverse_rotation(3,:)=[integer_rotations(2,1,operation)*integer_rotations(3,2,operation)-&
+              integer_rotations(2,2,operation)*integer_rotations(3,1,operation),&
+              integer_rotations(1,2,operation)*integer_rotations(3,1,operation)-&
+              integer_rotations(1,1,operation)*integer_rotations(3,2,operation),&
+              integer_rotations(1,1,operation)*integer_rotations(2,2,operation)-&
+              integer_rotations(1,2,operation)*integer_rotations(2,1,operation)]/determinant
+            inverse_center=modulo(matmul(real(inverse_rotation,real64),&
+              centers(:,source)-fractional_translations(:,operation)),1d0)
+            do target=1,nwann
+              difference=inverse_center-centers(:,target);difference=difference-anint(difference)
+              inverse_residual=min(inverse_residual,maxval(abs(difference)))
+            enddo
+          endif
           if(present(moment_magnitudes))then
             moment_min=minval(moment_magnitudes(:,source))
             moment_max=maxval(moment_magnitudes(:,source))
@@ -4779,9 +4957,11 @@ contains
           endif
           ok=.false.
           if(present(failed_operation))failed_operation=operation
-          write(message,'(a,i0,a,i0,4(a,es12.4))')'localized Wannier center orbit mismatch operation=',&
-            operation,' source=',source,' nearest_residual=',nearest_residual,' tolerance=',tolerance,&
-            ' moment_min=',moment_min,' moment_max=',moment_max
+          write(message,'(a,i0,a,i0,4(a,es10.3),2(a,3f8.4))')&
+            'center orbit mismatch operation=',operation,' source=',source,&
+            ' forward_residual=',nearest_residual,' inverse_residual=',inverse_residual,&
+            ' moment_min=',moment_min,' moment_max=',moment_max,' source_center=',centers(:,source),&
+            ' forward_center=',mapped_centers(:,source)
           return
         end if
       end do

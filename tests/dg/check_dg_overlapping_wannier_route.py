@@ -158,12 +158,15 @@ assert 0 <= assemble_position < export_position < library_position, (
 assert "salmon_dg_w90_replay_directory" in ow_ground_state_body
 assert "w90_nncell" in ow_ground_state_body[export_position:library_position]
 ow_ground_state_body = ow_ground_state.group("body").lower()
-assert "ow_box_density(p)=rho_s(1)%f(raw_ix,raw_iy,raw_iz)" in re.sub(
+assert "call redistribute_dg_row_owned_real_field_to_requests(" in ow_ground_state_body, (
+    "production must redistribute the conserved row-owned total density directly to fragment buffers"
+)
+assert "ow_box_density(p)=rho_s(1)%f(raw_ix,raw_iy,raw_iz)" not in re.sub(
     r"\s+", "", ow_ground_state_body
-), "fragment-buffer indices must address the fragment density, not the distributed total density"
+), "the stitched metric must not use independently solved fragment density"
 assert "ow_box_density(p)=dc%rho_tot_s(1)%f(raw_ix,raw_iy,raw_iz)" not in re.sub(
     r"\s+", "", ow_ground_state_body
-), "fragment-buffer indices must never address a rank-owned total-density slab"
+), "rank-owned total-density slabs must be redistributed by physical ID, not indexed as fragment buffers"
 for mlwf_call in (
     "assemble_dg_w90_gamma_matrices",
     "run_dg_w90_gamma_library",

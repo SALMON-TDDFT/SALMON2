@@ -75,7 +75,8 @@ use dg_overlapping_wannier_construction, only: build_dg_occupied_empty_moment_de
   diagonalize_dg_spectral_basin_operator,select_dg_spectral_basin_channel_ranks,&
   propagate_dg_spectral_basin_orbit_channels,build_dg_spectral_channel_generator_actions,&
   compose_dg_occupied_complement_trial_rows,prepare_dg_direct_retained_wannier_frame
-use dg_overlapping_wannier_construction, only: build_dg_smooth_partition_of_unity
+use dg_overlapping_wannier_construction, only: build_dg_smooth_partition_of_unity,&
+  redistribute_dg_row_owned_real_field_to_requests
 use dg_overlapping_wannier_construction, only: assemble_dg_distributed_basis_symmetry_overlap
 use dg_overlapping_wannier_construction, only: assemble_dg_distributed_basis_symmetry_overlap_rows,&
   gather_dg_single_symmetry_representation
@@ -616,7 +617,8 @@ contains
     complex(8),allocatable::one_shot_hrows(:,:)
     real(8),allocatable::weights(:),spectrum(:),occupations(:),lcfo_retained_occupations(:),&
       lcfo_retained_eigenvalues(:),local_point_rotations(:,:,:)
-    real(8),allocatable::initial_density_local(:),initial_density_global(:)
+    real(8),allocatable::initial_density_local(:),initial_density_global(:),&
+      ow_total_density_values(:)
     real(8),allocatable::projector_buffer_real(:,:)
     real(8),allocatable::one_shot_density(:),one_shot_potential(:)
     real(8),allocatable::spectral_occupied_density(:),spectral_empty_moments(:,:),&
@@ -638,7 +640,7 @@ contains
     type(s_dg_prepared_spectral_basins)::spectral_prepared_basins
     integer(8),allocatable::physical_ids(:),local_symmetry_map(:,:),ow_pencil_generator_maps(:,:),&
       exact_fragment_symmetry_fingerprints(:),global_symmetry_map(:,:)
-    integer(8),allocatable::lcfo_core_ids(:),initial_core_ids(:)
+    integer(8),allocatable::lcfo_core_ids(:),initial_core_ids(:),ow_total_density_ids(:)
     integer(8),allocatable::all_core_ids(:,:),localized_center_ids(:),orbital_owned_full_ids(:)
     integer(8),allocatable::fixed_center_symmetry_map(:,:),fixed_center_row_ids(:)
     integer(8),allocatable::translation_row_ids(:),translation_stream_row_ids(:)
@@ -730,7 +732,7 @@ contains
       spectral_action_fingerprint,spectral_action_aggregate_fingerprint,&
       spectral_workspace_peak,&
       spectral_operation_workspace
-    integer(8)::ow_stitched_peak_elements
+    integer(8)::ow_stitched_peak_elements,ow_density_redistribution_workspace
     real(8)::condition_number,closure_residual,spread_max,gauge_correction
     real(8)::adapted_occupied_trace,adapted_occupied_closure,adapted_occupied_gamma_defect,&
       translation_adapted_trace,translation_adapted_closure,translation_adapted_gamma_defect,&
@@ -835,10 +837,6 @@ contains
       core_mask(p)=ix>ow_buffer(1).and.ix<=ow_buffer(1)+ow_core_size(1).and.&
         iy>ow_buffer(2).and.iy<=ow_buffer(2)+ow_core_size(2).and.&
         iz>ow_buffer(3).and.iz<=ow_buffer(3)+ow_core_size(3)
-      raw_ix=canonical_to_dc_index(ix,ow_core_size(1),ow_buffer(1))
-      raw_iy=canonical_to_dc_index(iy,ow_core_size(2),ow_buffer(2))
-      raw_iz=canonical_to_dc_index(iz,ow_core_size(3),ow_buffer(3))
-      ow_box_density(p)=rho_s(1)%f(raw_ix,raw_iy,raw_iz)
       physical_ids(p)=1_8+int(modulo(dc%ixyz_frag(1,dc%i_frag)-1+ix-ow_buffer(1)-1,dc%lg_tot%num(1)),8)+&
         int(dc%lg_tot%num(1),8)*(int(modulo(dc%ixyz_frag(2,dc%i_frag)-1+iy-ow_buffer(2)-1,&
         dc%lg_tot%num(2)),8)+int(dc%lg_tot%num(2),8)*int(modulo(dc%ixyz_frag(3,dc%i_frag)-1+&
@@ -885,6 +883,34 @@ contains
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'overlapping-Wannier smooth partition failed';endif
     if(rank==0)write(*,'(a,2(a,es16.8))')'[OW-GS-DIAGNOSTIC] smooth_partition',&
       ' sum_defect=',ow_partition_sum_defect,' gradient_defect=',ow_partition_gradient_defect
+    ncore8=int(dc%mg_tot%ie(1)-dc%mg_tot%is(1)+1,8)*&
+      int(dc%mg_tot%ie(2)-dc%mg_tot%is(2)+1,8)*int(dc%mg_tot%ie(3)-dc%mg_tot%is(3)+1,8)
+    if(ncore8<1_8.or.ncore8>int(huge(ncore),8))&
+      error stop 'distributed total-density slab extent overflow'
+    allocate(ow_total_density_ids(int(ncore8)),ow_total_density_values(int(ncore8)),&
+      stat=allocation_status)
+    call comm_logical_and(allocation_status==0,reusable,dc%icomm_tot)
+    if(.not.reusable)error stop 'distributed total-density slab allocation failed'
+    core_index=0
+    do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
+    do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
+    do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
+      core_index=core_index+1
+      ow_total_density_ids(core_index)=int(ix,8)+int(dc%lg_tot%num(1),8)*&
+        (int(iy-1,8)+int(dc%lg_tot%num(2),8)*int(iz-1,8))
+      ow_total_density_values(core_index)=dc%rho_tot_s(1)%f(ix,iy,iz)
+    enddo
+    enddo
+    enddo
+    call redistribute_dg_row_owned_real_field_to_requests(dc%icomm_tot,expected_core_count,&
+      ow_total_density_ids,ow_total_density_values,physical_ids,ow_box_density,&
+      ow_density_redistribution_workspace,ok,message)
+    if(.not.ok)then
+      write(0,'(a)')trim(message);error stop 'distributed total-density buffer materialization failed'
+    endif
+    deallocate(ow_total_density_ids,ow_total_density_values)
+    if(rank==0)write(*,'(a,i0)')'[OW-GS-DIAGNOSTIC] total_density_buffer_workspace_peak_bytes=',&
+      ow_density_redistribution_workspace
     pseudopotential_fingerprint=ow_collective_operator_fingerprint(dc%icomm_tot)
     allocate(lcfo_core_ids(ncore),lcfo_boundary_mask(ncore));core_index=0
     do p=1,nbox
