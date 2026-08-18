@@ -939,6 +939,33 @@ program test_dg_overlapping_wannier_w90_mpi
     maxval(abs(gauge_transform-reshape([cmplx(1d0,0d0,8),cmplx(0d0,0d0,8),&
       cmplx(0d0,0d0,8),cmplx(-1d0,0d0,8)],[2,2])))<1d-12.and.&
     maxval(abs(gauge_spreads-[10d0,20d0]))<1d-12,trim(message))
+  do p=1,nlocal
+    global_point=rank*nlocal+p
+    gauge_values(1,p)=cmplx(real(global_point,8),0d0,8)
+    gauge_values(2,p)=cmplx(2d0*real(global_point,8),0d0,8)
+    do i=1,3
+      gauge_gradients(i,1,p)=cmplx(real(i*global_point,8),0d0,8)
+      gauge_gradients(i,2,p)=cmplx(2d0*real(i*global_point,8),-real(i*global_point,8),8)
+    enddo
+  enddo
+  gauge_transform=(0d0,0d0);gauge_transform(1,1)=1d0;gauge_transform(2,2)=cmplx(0d0,1d0,8)
+  gauge_centers=reshape([0.1d0,0d0,0d0,0.2d0,0d0,0d0],[3,2]);gauge_spreads=[10d0,20d0]
+  call apply_dg_w90_gamma_transform(MPI_COMM_WORLD,gauge_ids,gauge_values,gauge_gradients,&
+    gauge_transform,gauge_centers,1d-12,ok,message,gauge_spreads)
+  call require(ok.and.maxval(abs(gauge_transform-&
+    reshape([cmplx(1d0,0d0,8),cmplx(0d0,0d0,8),cmplx(0d0,0d0,8),cmplx(1d0,0d0,8)],[2,2])))<1d-12,&
+    'complex production Wannier gauge phase canonicalization')
+  do p=1,nlocal
+    global_point=rank*nlocal+p
+    call require(abs(gauge_values(1,p)-cmplx(real(global_point,8),0d0,8))<1d-12.and.&
+      abs(gauge_values(2,p)-cmplx(2d0*real(global_point,8),0d0,8))<1d-12,&
+      'complex production Wannier values preserve their physical columns')
+    do i=1,3
+      call require(abs(gauge_gradients(i,1,p)-cmplx(real(i*global_point,8),0d0,8))<1d-12.and.&
+        abs(gauge_gradients(i,2,p)-cmplx(2d0*real(i*global_point,8),-real(i*global_point,8),8))<1d-12,&
+        'complex production Wannier gradients receive the same pivot phase')
+    enddo
+  enddo
   transform(1,1)=2d0
   call validate_dg_w90_result(transform,centers,spreads,spread,0.8d0,1d-12,ok,message)
   call require(.not.ok,'nonunitary Wannier90 transform rejection')

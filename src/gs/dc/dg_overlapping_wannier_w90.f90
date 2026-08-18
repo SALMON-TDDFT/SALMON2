@@ -2742,6 +2742,7 @@ contains
     real(real64),allocatable::ordered_centers(:,:),ordered_spreads(:),local_maximum(:),global_maximum(:)
     integer(int64),allocatable::local_id(:),global_id(:)
     complex(real64),allocatable::local_pivot(:),global_pivot(:)
+    complex(real64)::pivot_phase
     real(real64)::scale
     logical::precedes
     ok=.false.;message='';status=0;nstate=size(values,1);npoint=size(values,2)
@@ -2760,7 +2761,6 @@ contains
     if(present(spreads))then
       if(size(spreads)/=nstate.or..not.all(ieee_is_finite(spreads)))status=1
     endif
-    if(maxval(abs(aimag(transform)))>tolerance*max(1d0,maxval(abs(transform))))status=1
     call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(status/=0.or.ierr/=MPI_SUCCESS)then;message='invalid Gamma MLWF transform contract';return;endif
     allocate(gram(nstate,nstate));gram=matmul(conjg(transpose(transform)),transform)
@@ -2838,15 +2838,14 @@ contains
       if(physical_ids(j)==global_id(i))local_pivot(i)=values(i,j)
     enddo;enddo
     call MPI_Allreduce(local_pivot,global_pivot,nstate,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.any(global_maximum<=tolerance).or.&
-        maxval(abs(aimag(global_pivot)))>tolerance*max(1d0,maxval(abs(global_pivot))))then
-      message='cannot determine canonical Gamma MLWF signs';return
+    if(ierr/=MPI_SUCCESS.or.any(global_maximum<=tolerance).or.any(abs(global_pivot)<=tolerance))then
+      message='cannot determine canonical Gamma MLWF phases';return
     endif
     do i=1,nstate
-      if(real(global_pivot(i),real64)<0d0)then
-        ordered_transform(:,i)=-ordered_transform(:,i);values(i,:)=-values(i,:)
-        if(present(gradients))gradients(:,i,:)=-gradients(:,i,:)
-      endif
+      pivot_phase=conjg(global_pivot(i))/abs(global_pivot(i))
+      ordered_transform(:,i)=pivot_phase*ordered_transform(:,i)
+      values(i,:)=pivot_phase*values(i,:)
+      if(present(gradients))gradients(:,i,:)=pivot_phase*gradients(:,i,:)
     enddo
     transform=ordered_transform;centers=ordered_centers
     if(present(spreads))spreads=ordered_spreads
