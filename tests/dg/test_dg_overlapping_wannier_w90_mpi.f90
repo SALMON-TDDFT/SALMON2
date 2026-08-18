@@ -950,7 +950,7 @@ program test_dg_overlapping_wannier_w90_mpi
   endif
   call MPI_Barrier(MPI_COMM_WORLD,ierr)
   call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
-    atom_symbols,atoms_cart,1,1,nntot,nncell,ok,message)
+    atom_symbols,atoms_cart,1,1,10,nntot,nncell,ok,message)
   call require(.not.ok,'Wannier90 setup rejects missing DMN')
   if(rank==0)then
     open(newunit=log_unit,file='ow_w90_one_band.dmn',status='replace')
@@ -963,7 +963,7 @@ program test_dg_overlapping_wannier_w90_mpi
   endif
   call MPI_Barrier(MPI_COMM_WORLD,ierr)
   call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
-    atom_symbols,atoms_cart,1,1,nntot,nncell,ok,message)
+    atom_symbols,atoms_cart,1,1,10,nntot,nncell,ok,message)
   call require(ok.and.nntot>0,trim(message))
   win_has_random_projection=.false.
   if(rank==0)then
@@ -988,14 +988,14 @@ program test_dg_overlapping_wannier_w90_mpi
     allocate(m_matrix(0,0,0),a_matrix(0,0))
   endif
   call run_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
-    atom_symbols,atoms_cart,m_matrix,a_matrix,eigenvalues,1d6,1d-10,library_transform,&
+    atom_symbols,atoms_cart,m_matrix,a_matrix,eigenvalues,1d6,1d-10,10,library_transform,&
     library_centers,library_spreads,library_spread,ok,message)
   call require(ok,trim(message))
   call require(abs(abs(library_transform(1,1))-1d0)<1d-10,&
     'one-band Wannier90 library returns a unitary Gamma transform')
   if(rank==0)m_matrix(1,1,1)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,8)
   call run_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
-    atom_symbols,atoms_cart,m_matrix,a_matrix,eigenvalues,1d6,1d-10,library_transform,&
+    atom_symbols,atoms_cart,m_matrix,a_matrix,eigenvalues,1d6,1d-10,10,library_transform,&
     library_centers,library_spreads,library_spread,ok,message)
   call require(.not.ok,'nonfinite Wannier90 M matrix is rejected before library entry')
 #endif

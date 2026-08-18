@@ -1286,14 +1286,29 @@ assert run_library_body and re.search(
 assert "message='Wannier90 Gamma library run failed validation'" not in run_library_body.group("body"), (
     "Wannier90 validation must not overwrite its specific failure diagnostic"
 )
-assert "num_iter = 400" in w90_source, (
-    "production Wannier90 must allow the slow Si64 spread minimization to converge"
+assert "num_iter = 400" not in w90_source, (
+    "production Wannier90 must not bypass the user-configurable iteration limit"
 )
 assert re.search(
-    r"validate_dg_w90_convergence_log\s*\([^\n]*\.wout'\s*,\s*400\s*,",
+    r"write\s*\(\s*unit\s*,\s*'\(a,i0\)'\s*\)\s*'num_iter\s*=\s*'\s*,\s*num_iter",
+    setup_library_body.group("body"),
+    re.I,
+), "Wannier90 setup must write its configured iteration limit"
+assert re.search(
+    r"validate_dg_w90_convergence_log\s*\([^\n]*\.wout'\s*,\s*num_iter\s*,",
     run_library_body.group("body"),
     re.I,
-), "Wannier90 convergence validation must use the configured 400-iteration limit"
+), "Wannier90 convergence validation must use the configured iteration limit"
+assert re.search(
+    r"call\s+setup_dg_w90_gamma_library\s*\(.*?wannier_num_iter",
+    ow_ground_state_body,
+    re.I | re.S,
+), "production setup must receive the existing wannier_num_iter setting"
+assert re.search(
+    r"call\s+run_dg_w90_gamma_library\s*\(.*?wannier_num_iter",
+    ow_ground_state_body,
+    re.I | re.S,
+), "production run must receive the existing wannier_num_iter setting"
 post_w90_prefix = adapter_body[
     localization_call:adapter_body.find("call split_dg_translation_character_sector_eigenexa", localization_call)
 ]

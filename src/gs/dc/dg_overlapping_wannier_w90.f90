@@ -2981,8 +2981,8 @@ contains
   end subroutine assemble_dg_w90_gamma_matrices
 
   subroutine setup_dg_w90_gamma_library(comm,seed,real_lattice,reciprocal_lattice,atom_symbols,&
-      atoms_cart,nband,nwann,nntot,nncell,ok,message)
-    integer,intent(in)::comm,nband,nwann
+      atoms_cart,nband,nwann,num_iter,nntot,nncell,ok,message)
+    integer,intent(in)::comm,nband,nwann,num_iter
     character(*),intent(in)::seed
     real(real64),intent(in)::real_lattice(3,3),reciprocal_lattice(3,3),atoms_cart(:,:)
     character(*),intent(in)::atom_symbols(:)
@@ -3027,7 +3027,7 @@ contains
     end interface
     ok=.false.;message='';nntot=0;status=0
     call MPI_Comm_rank(comm,rank,ierr)
-    if(ierr/=MPI_SUCCESS.or.nband<=0.or.nwann/=nband.or.size(atom_symbols)<=0.or.&
+    if(ierr/=MPI_SUCCESS.or.nband<=0.or.nwann/=nband.or.num_iter<=0.or.size(atom_symbols)<=0.or.&
         any(shape(atoms_cart)/=[3,size(atom_symbols)]).or..not.all(ieee_is_finite(real_lattice)).or.&
         .not.all(ieee_is_finite(reciprocal_lattice)).or..not.all(ieee_is_finite(atoms_cart)))status=1
     call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -3049,7 +3049,7 @@ contains
       else
         write(unit,'(a,i0)')'num_bands = ',nband
         write(unit,'(a,i0)')'num_wann = ',nwann
-        write(unit,'(a)')'num_iter = 400'
+        write(unit,'(a,i0)')'num_iter = ',num_iter
         write(unit,'(a)')'conv_tol = 1.d-10'
         write(unit,'(a)')'conv_window = 5'
         write(unit,'(a)')'gamma_only = true'
@@ -3087,9 +3087,9 @@ contains
   end subroutine setup_dg_w90_gamma_library
 
   subroutine run_dg_w90_gamma_library(comm,seed,real_lattice,reciprocal_lattice,atom_symbols,&
-      atoms_cart,m_matrix,a_matrix,eigenvalues,initial_gauge_spread,tolerance,transform,centers,&
+      atoms_cart,m_matrix,a_matrix,eigenvalues,initial_gauge_spread,tolerance,num_iter,transform,centers,&
       spreads,spread,ok,message,convergence_iterations_out)
-    integer,intent(in)::comm
+    integer,intent(in)::comm,num_iter
     character(*),intent(in)::seed
     real(real64),intent(in)::real_lattice(3,3),reciprocal_lattice(3,3),atoms_cart(:,:),&
       eigenvalues(:),initial_gauge_spread,tolerance
@@ -3141,7 +3141,7 @@ contains
     if(rank==0)matrix_dimensions=[size(m_matrix,1),size(a_matrix,2),size(m_matrix,3)]
     call MPI_Bcast(matrix_dimensions,3,MPI_INTEGER,0,comm,ierr)
     nband=matrix_dimensions(1);nwann=matrix_dimensions(2);nntot=matrix_dimensions(3)
-    if(ierr/=MPI_SUCCESS.or.nband<=0.or.nwann/=nband.or.size(eigenvalues)/=nband.or.nntot<=0.or.&
+    if(ierr/=MPI_SUCCESS.or.nband<=0.or.nwann/=nband.or.size(eigenvalues)/=nband.or.nntot<=0.or.num_iter<=0.or.&
         any(shape(atoms_cart)/=[3,size(atom_symbols)]).or.&
         .not.all(ieee_is_finite(eigenvalues)).or..not.all(ieee_is_finite(real_lattice)).or.&
         .not.all(ieee_is_finite(reciprocal_lattice)).or..not.all(ieee_is_finite(atoms_cart)))status=1
@@ -3174,7 +3174,7 @@ contains
       spreads=spreads/(bohr_to_angstrom*bohr_to_angstrom)
       spread=spread/(bohr_to_angstrom*bohr_to_angstrom)
       transform=matmul(uopt(:,:,1),u(:,:,1))
-      call validate_dg_w90_convergence_log(trim(seed)//'.wout',400,convergence_iterations,ok,message)
+      call validate_dg_w90_convergence_log(trim(seed)//'.wout',num_iter,convergence_iterations,ok,message)
       if(ok)call validate_dg_w90_result(transform,centers,spreads,spread,initial_gauge_spread,&
         tolerance,ok,message)
       status=merge(0,2,ok)

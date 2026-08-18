@@ -42,7 +42,7 @@ use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, &
   dg_ow_boundary_gradient_tolerance,dg_ow_symmetry_tolerance,&
   dg_ow_localization_support_tolerance,dg_ow_localization_spread_tolerance,&
   dg_ow_localization_gradient_tolerance,dg_ow_localization_max_iterations,&
-  dg_ow_candidate_states_per_fragment,dg_ow_target_wanniers_per_fragment
+  dg_ow_candidate_states_per_fragment,dg_ow_target_wanniers_per_fragment,wannier_num_iter
 use dg_overlapping_wannier_construction, only: s_dg_overlapping_wannier_construction, &
   construct_dg_overlapping_wannier_basis,verify_dg_overlapping_wannier_periodic_closure,&
   replicate_dg_fragment_wannier_representative,verify_dg_fragment_wannier_streaming_closure,&
@@ -1667,7 +1667,7 @@ contains
     enddo
     call setup_dg_w90_gamma_library(dc%icomm_tot,'overlapping_wannier_mlwf',&
       dc%system_tot%primitive_a,w90_reciprocal_lattice,w90_atom_symbols,w90_atoms_cart,&
-      ntarget,ntarget,w90_nntot,w90_nncell,ok,message)
+      ntarget,ntarget,wannier_num_iter,w90_nntot,w90_nncell,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 Gamma setup failed';endif
     allocate(w90_fractional(3,ncore),w90_eigenvalues(ntarget))
     do p=1,ncore
@@ -1722,7 +1722,8 @@ contains
     call run_dg_w90_gamma_library(dc%icomm_tot,'overlapping_wannier_mlwf',&
       dc%system_tot%primitive_a,w90_reciprocal_lattice,w90_atom_symbols,w90_atoms_cart,&
       w90_m_matrix,w90_a_matrix,w90_eigenvalues,huge(1d0)/4d0,dg_ow_symmetry_tolerance,&
-      w90_transform,localized_centers,w90_spreads,w90_spread,ok,message,localization_iterations)
+      wannier_num_iter,w90_transform,localized_centers,w90_spreads,w90_spread,ok,message,&
+      localization_iterations)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 MLWF optimization failed';endif
     deallocate(w90_m_matrix,w90_a_matrix,w90_eigenvalues)
     deallocate(w90_atom_symbols,w90_atoms_cart,w90_nncell)
