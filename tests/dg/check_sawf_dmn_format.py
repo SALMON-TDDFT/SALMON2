@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import cmath
 from pathlib import Path
 import re
 import shutil
@@ -12,6 +13,47 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--build-dir", type=Path, default=ROOT / "build-mpi-eigenexa-wannier-lib")
 args = parser.parse_args()
 BUILD = args.build_dir.resolve()
+
+
+def check_complete_group_reynolds_projection():
+    omega = cmath.exp(2j * cmath.pi / 3.0)
+    representation = (1.0 + 0.0j, omega)
+    gradient = [[0.0j, 1.0 + 0.0j], [1.0 + 0.0j, 0.0j]]
+
+    def conjugate_by_power(matrix, power):
+        phases = tuple(value**power for value in representation)
+        return [[phases[row].conjugate() * matrix[row][column] * phases[column]
+                 for column in range(2)] for row in range(2)]
+
+    def average(matrix, powers):
+        images = [conjugate_by_power(matrix, power) for power in powers]
+        return [[sum(image[row][column] for image in images) / len(images)
+                 for column in range(2)] for row in range(2)]
+
+    generator_average = average(gradient, (0, 1))
+    generator_invariance = max(
+        abs(conjugate_by_power(generator_average, 1)[row][column] -
+            generator_average[row][column])
+        for row in range(2) for column in range(2)
+    )
+    generator_idempotence = max(
+        abs(average(generator_average, (0, 1))[row][column] -
+            generator_average[row][column])
+        for row in range(2) for column in range(2)
+    )
+    complete_average = average(gradient, (0, 1, 2))
+    complete_invariance = max(
+        abs(conjugate_by_power(complete_average, 1)[row][column] -
+            complete_average[row][column])
+        for row in range(2) for column in range(2)
+    )
+    if generator_invariance < 0.5 or generator_idempotence < 0.25:
+        raise AssertionError("identity plus generators unexpectedly formed a Reynolds projector")
+    if complete_invariance > 1.0e-14:
+        raise AssertionError("complete finite-group average is not invariant")
+
+
+check_complete_group_reynolds_projection()
 
 
 def check_wannier90_gradient_patch():

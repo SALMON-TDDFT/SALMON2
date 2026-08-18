@@ -1714,6 +1714,20 @@ assert min(dmn_begin, dmn_append, dmn_finish, w90_setup) >= 0, (
 assert dmn_begin < dmn_append < dmn_finish < w90_setup, (
     "fixed-center DMN transaction must complete before Wannier90 setup"
 )
+dmn_transaction = adapter_body[dmn_begin:dmn_finish + 512].lower()
+assert "fixed_center_group_order" in dmn_transaction, (
+    "Wannier90 DMN must contain every operation of the closed fixed-center group"
+)
+assert re.search(
+    r"fixed_center_symmetry_map\s*\(\s*:\s*,\s*fixed_center_operation\s*:\s*"
+    r"fixed_center_operation\s*\)", dmn_transaction, re.S
+), "DMN representations must be assembled from the matching fixed-center operation map"
+assert "global_affine_generators" not in dmn_transaction, (
+    "identity plus affine generators is not a one-pass Reynolds projector"
+)
+assert "require_closed_group=.false." not in dmn_transaction.replace(" ", ""), (
+    "production DMN publication must validate fixed-center group closure"
+)
 assert re.search(
     r"if\s*\(\s*\.not\.\s*writer_ok\s*\)\s*then\s*.*?write\s*\(\s*0\s*,\s*['\"]\(a\)['\"]\s*\)\s*"
     r"trim\s*\(\s*message\s*\).*?fixed-center\s+DMN\s+transaction\s+could\s+not\s+finish",
@@ -1775,8 +1789,8 @@ assert (
     "spectral_wannier_representation=matmul(conjg(transpose(spectral_amn)),"
     "matmul(fixed_center_representation,spectral_amn))" in normalized_adapter
 ), "each DMN target action must be transformed into the localized trial basis"
-assert "require_closed_group=.false." in adapter_body.replace(" ", "").lower(), (
-    "affine-generator DMN must explicitly select the generator constraint contract"
+assert "require_closed_group=.false." not in dmn_transaction.replace(" ", ""), (
+    "fixed-center DMN must retain the writer's closed-group validation"
 )
 assert "fixed_center_group_order>48" in adapter_body.replace(" ", "").lower(), (
     "production must reject a fixed-center subgroup above crystallographic order 48"

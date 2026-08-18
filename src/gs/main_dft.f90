@@ -1556,24 +1556,17 @@ contains
     deallocate(spectral_wannier_action_rows)
     fixed_center_dmn_workspace_peak=spectral_operation_workspace
     spectral_action_aggregate_fingerprint=spectral_channel_fingerprint;writer_ok=.true.
-    if(size(global_affine_generators)+1>size(fixed_center_operations))&
-      error stop 'affine generator constraint metadata exceeds fixed operation buffer'
     if(rank==0)call begin_sawf_dmn(fixed_center_dmn_writer,'overlapping_wannier_mlwf.dmn',&
-      ntarget,ntarget,size(global_affine_generators)+1,dg_ow_symmetry_tolerance,writer_ok,message)
+      ntarget,ntarget,fixed_center_group_order,dg_ow_symmetry_tolerance,writer_ok,message)
     call MPI_Bcast(writer_ok,1,MPI_LOGICAL,0,dc%icomm_tot,ierr)
     if(.not.writer_ok)error stop 'fixed-center DMN transaction could not begin'
-    do fixed_center_operation=1,size(global_affine_generators)+1
-      if(fixed_center_operation==1)then
-        io=global_identity_operation
-      else
-        io=global_affine_generators(fixed_center_operation-1)
-      endif
+    do fixed_center_operation=1,fixed_center_group_order
       call assemble_dg_distributed_basis_symmetry_overlap_rows(dc%icomm_tot,global_closed_core,&
-        ow_core_weights,global_symmetry_map(:,io:io),&
+        ow_core_weights,fixed_center_symmetry_map(:,fixed_center_operation:fixed_center_operation),&
         fixed_center_row_ids,fixed_center_rows,fixed_center_operation_workspace,ok,message)
       if(.not.ok)then
         if(rank==0)call abort_sawf_dmn(fixed_center_dmn_writer)
-        write(0,'(a)')trim(message);error stop 'affine-generator row representation assembly failed'
+        write(0,'(a)')trim(message);error stop 'fixed-center row representation assembly failed'
       endif
       fixed_center_dmn_workspace_peak=max(fixed_center_dmn_workspace_peak,fixed_center_operation_workspace)
       call gather_dg_single_symmetry_representation(dc%icomm_tot,fixed_center_row_ids,&
@@ -1589,7 +1582,7 @@ contains
       if(.not.ok)then
         if(rank==0)write(0,'(a)')trim(message)
         if(rank==0)call abort_sawf_dmn(fixed_center_dmn_writer)
-        error stop 'affine-generator pullback representation conversion failed'
+        error stop 'fixed-center pullback representation conversion failed'
       endif
       if(rank==0)then
         allocate(spectral_wannier_representation(ntarget,ntarget),stat=allocation_status)
@@ -1599,16 +1592,16 @@ contains
       call MPI_Bcast(allocation_status,1,MPI_INTEGER,0,dc%icomm_tot,ierr)
       if(ierr/=MPI_SUCCESS.or.allocation_status/=0)then
         if(rank==0)call abort_sawf_dmn(fixed_center_dmn_writer)
-        error stop 'affine-generator Wannier representation allocation failed'
+        error stop 'fixed-center Wannier representation allocation failed'
       endif
       spectral_action_aggregate_fingerprint=ieor(spectral_action_aggregate_fingerprint,&
-        ishftc(int(io,8),modulo(fixed_center_operation,63)))
+        ishftc(int(fixed_center_operation,8),modulo(fixed_center_operation,63)))
       writer_ok=.true.
       if(rank==0)call append_sawf_dmn_operation(fixed_center_dmn_writer,fixed_center_operation,&
         spectral_wannier_representation,fixed_center_representation,fixed_center_eigenvalues,&
-        spectral_amn,fixed_center_operation==1,writer_ok,message)
+        spectral_amn,fixed_center_operation==fixed_center_identity_operation,writer_ok,message)
       if(rank==0.and..not.writer_ok)write(0,'(a,i0,2a)')&
-        '[OW-GS-DIAGNOSTIC] affine-generator DMN append operation=',fixed_center_operation,&
+        '[OW-GS-DIAGNOSTIC] fixed-center DMN append operation=',fixed_center_operation,&
         ' rejected: ',trim(message)
       call MPI_Bcast(writer_ok,1,MPI_LOGICAL,0,dc%icomm_tot,ierr)
       if(.not.writer_ok)then
@@ -1620,8 +1613,7 @@ contains
     enddo
     writer_ok=.true.
     if(rank==0)call finish_sawf_dmn(fixed_center_dmn_writer,&
-      fixed_center_operations(1:size(global_affine_generators)+1),writer_ok,message,&
-      require_closed_group=.false.)
+      fixed_center_operations,writer_ok,message)
     call MPI_Bcast(writer_ok,1,MPI_LOGICAL,0,dc%icomm_tot,ierr)
     if(.not.writer_ok)then
       if(rank==0)write(0,'(a)')trim(message)
