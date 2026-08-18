@@ -101,7 +101,7 @@ program test_dg_overlapping_wannier_metric_mpi
   enddo
   stitched_row_ids=pack(row_ids,row_ids<=2_8)
   call assemble_dg_stitched_overlap_density_rows(comm,2,stitched_row_ids,stitched_ids,&
-    stitched_weights,stitched_values,stitched_density,1d0,4_8,10d0,1d-12,stitched_srows,&
+    stitched_weights,stitched_values,stitched_density,1d0,4_8,10d0+5d-8,1d-12,1d-8,stitched_srows,&
     stitched_rhorows,stitched_electron_count,stitched_s_hermiticity,stitched_rho_hermiticity,&
     stitched_minimum_pivot,stitched_pivot_condition,stitched_peak_elements,ok,message)
   call require(ok,trim(message))
@@ -120,18 +120,24 @@ program test_dg_overlapping_wannier_metric_mpi
     'stitched assembly storage is row-tiled and affine-order independent')
   stitched_values(2,:)=stitched_values(1,:)
   call assemble_dg_stitched_overlap_density_rows(comm,2,stitched_row_ids,stitched_ids,&
-    stitched_weights,stitched_values,stitched_density,1d0,4_8,10d0,1d-12,stitched_srows,&
+    stitched_weights,stitched_values,stitched_density,1d0,4_8,10d0,1d-12,1d-8,stitched_srows,&
     stitched_rhorows,stitched_electron_count,stitched_s_hermiticity,stitched_rho_hermiticity,&
     stitched_minimum_pivot,stitched_pivot_condition,stitched_peak_elements,ok,message)
   call require(.not.ok,'stitched overlap rejects rank loss')
   stitched_values(2,:)=[1d0,-1d0,2d0,-2d0]
   if(rank==0)stitched_weights(1)=stitched_weights(1)+0.25d0
   call assemble_dg_stitched_overlap_density_rows(comm,2,stitched_row_ids,stitched_ids,&
-    stitched_weights,stitched_values,stitched_density,1d0,4_8,10d0,1d-12,stitched_srows,&
+    stitched_weights,stitched_values,stitched_density,1d0,4_8,10d0,1d-12,1d-8,stitched_srows,&
     stitched_rhorows,stitched_electron_count,stitched_s_hermiticity,stitched_rho_hermiticity,&
     stitched_minimum_pivot,stitched_pivot_condition,stitched_peak_elements,ok,message)
   call require(.not.ok.and.index(message,'coverage')>0,'stitched assembly rejects nonunit point coverage')
   stitched_weights=1d0/real(nproc,8)
+  call assemble_dg_stitched_overlap_density_rows(comm,2,stitched_row_ids,stitched_ids,&
+    stitched_weights,stitched_values,stitched_density,1d0,4_8,10d0+1d-4,1d-12,1d-8,stitched_srows,&
+    stitched_rhorows,stitched_electron_count,stitched_s_hermiticity,stitched_rho_hermiticity,&
+    stitched_minimum_pivot,stitched_pivot_condition,stitched_peak_elements,ok,message)
+  call require(.not.ok.and.index(message,'electron count')>0,&
+    'stitched assembly rejects charge drift above the dedicated electron tolerance')
 
   values=base_values;values(2,:)=-values(2,:)
   call check_invariant('sign invariance')

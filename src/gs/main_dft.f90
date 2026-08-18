@@ -2184,13 +2184,16 @@ contains
     enddo
     call assemble_dg_stitched_overlap_density_rows(dc%icomm_tot,ntarget,ow_row_ids,physical_ids,&
       ow_partition_weight,ow_box_values,ow_box_density,system%hvol,expected_core_count,&
-      dc%elec_num_tot,dg_dc_metric_rank_tolerance,ow_srows,ow_rhorows,ow_stitched_electron_count,&
+      dc%elec_num_tot,dg_dc_metric_rank_tolerance,dg_dc_gs_electron_count_tolerance,&
+      ow_srows,ow_rhorows,ow_stitched_electron_count,&
       ow_stitched_s_hermiticity,ow_stitched_rho_hermiticity,ow_stitched_minimum_pivot,&
       ow_stitched_pivot_condition,ow_stitched_peak_elements,ok,message)
-    if(rank==0)write(*,'(a,5(a,es16.8),a,i0)')'[OW-GS-DIAGNOSTIC] stitched_overlap_density',&
+    if(rank==0)write(*,'(a,7(a,es24.16),a,i0)')'[OW-GS-DIAGNOSTIC] stitched_overlap_density',&
       ' electrons=',ow_stitched_electron_count,' s_hermiticity=',ow_stitched_s_hermiticity,&
       ' rho_hermiticity=',ow_stitched_rho_hermiticity,' minimum_pivot=',ow_stitched_minimum_pivot,&
-      ' pivot_condition=',ow_stitched_pivot_condition,' workspace_peak_elements=',ow_stitched_peak_elements
+      ' pivot_condition=',ow_stitched_pivot_condition,' expected_electrons=',dc%elec_num_tot,&
+      ' electron_drift=',ow_stitched_electron_count-dc%elec_num_tot,&
+      ' workspace_peak_elements=',ow_stitched_peak_elements
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'stitched overlap-density gate failed';endif
     condition_number=ow_stitched_pivot_condition
     allocate(spectrum(2));spectrum=[ow_stitched_minimum_pivot,&

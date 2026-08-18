@@ -13,11 +13,13 @@ module dg_overlapping_wannier_metric
 contains
   subroutine assemble_dg_stitched_overlap_density_rows(comm,nbasis,row_ids,physical_ids,&
       partition_weight,basis_values,density_values,cell_volume,expected_physical_count,&
-      expected_electrons,tolerance,srows,rhorows,electron_count,s_hermiticity,rho_hermiticity,&
+      expected_electrons,tolerance,electron_count_tolerance,srows,rhorows,electron_count,&
+      s_hermiticity,rho_hermiticity,&
       minimum_cholesky_pivot,pivot_condition,peak_elements,ok,message)
     integer,intent(in)::comm,nbasis
     integer(int64),intent(in)::row_ids(:),physical_ids(:),expected_physical_count
-    real(real64),intent(in)::partition_weight(:),density_values(:),cell_volume,expected_electrons,tolerance
+    real(real64),intent(in)::partition_weight(:),density_values(:),cell_volume,expected_electrons,tolerance,&
+      electron_count_tolerance
     complex(real64),intent(in)::basis_values(:,:)
     complex(real64),allocatable,intent(out)::srows(:,:),rhorows(:,:)
     real(real64),intent(out)::electron_count,s_hermiticity,rho_hermiticity
@@ -43,7 +45,9 @@ contains
     minimum_cholesky_pivot=0d0;pivot_condition=huge(1d0)
     call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
     if(ierr/=MPI_SUCCESS.or.nbasis<1.or.expected_physical_count<1_int64.or.cell_volume<=0d0.or.&
-        tolerance<=0d0.or.size(partition_weight)/=size(physical_ids).or.&
+        tolerance<=0d0.or.electron_count_tolerance<=0d0.or.&
+        .not.ieee_is_finite(electron_count_tolerance).or.&
+        size(partition_weight)/=size(physical_ids).or.&
         size(density_values)/=size(physical_ids).or.size(basis_values,1)/=nbasis.or.&
         size(basis_values,2)/=size(physical_ids).or.any(physical_ids<1_int64).or.&
         any(physical_ids>expected_physical_count).or.any(partition_weight<0d0).or.&
@@ -126,7 +130,8 @@ contains
     endif
     local_electrons=cell_volume*sum(partition_weight*density_values)
     call MPI_Allreduce(local_electrons,electron_count,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.abs(electron_count-expected_electrons)>tolerance*max(1d0,abs(expected_electrons)))then
+    if(ierr/=MPI_SUCCESS.or.abs(electron_count-expected_electrons)>&
+        electron_count_tolerance*max(1d0,abs(expected_electrons)))then
       message='stitched density does not preserve electron count';return
     endif
     allocate(srows(size(row_ids),nbasis),rhorows(size(row_ids),nbasis));srows=0d0;rhorows=0d0
