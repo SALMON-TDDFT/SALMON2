@@ -18,6 +18,9 @@ subroutine zstencil_typical_gpu(io_s,io_e,Nspin,is_array,ie_array,is,ie,idx,idy,
                                ,tpsi,htpsi,V_local,lap0,lapt,nabt &
                                )
   use structures
+#ifdef USE_OPENACC
+  use cudafor, only: cudaGetDevice, cudaGetDeviceProperties, cudaDeviceProp
+#endif
   implicit none
 
 
@@ -43,6 +46,13 @@ subroutine zstencil_typical_gpu(io_s,io_e,Nspin,is_array,ie_array,is,ie,idx,idy,
   complex(8) :: t_0,t_1
   integer    :: i
 
+#ifdef USE_OPENACC
+  logical,save :: probed = .false.
+  logical,save :: io_restructure = .false.
+  type(cudaDeviceProp) :: prop
+  integer :: cuda_stat, cuda_dev
+#endif
+
 #ifdef __INTEL_COMPILER
 #if defined(__KNC__) || defined(__AVX512F__)
 #   define MEM_ALIGN   64
@@ -60,15 +70,77 @@ subroutine zstencil_typical_gpu(io_s,io_e,Nspin,is_array,ie_array,is,ie,idx,idy,
 #define DX(dt) idx(ix+(dt)),iy,iz
 #define DY(dt) ix,idy(iy+(dt)),iz
 #define DZ(dt) ix,iy,idz(iz+(dt))
+#ifdef USE_OPENACC
+  ! Pulling io out of the collapse is ~1.4x faster on Blackwell but ~1.6x slower on
+  ! Hopper, so choose per device. The binary is built for several architectures at
+  ! once (-gpu=cc80,cc90,...), so this cannot be decided at compile time. Only
+  ! Blackwell and newer are opted in; anything else keeps the original loop.
+  if (.not. probed) then
+    cuda_stat = cudaGetDevice(cuda_dev)
+    cuda_stat = cudaGetDeviceProperties(prop, cuda_dev)
+    io_restructure = (cuda_stat == 0 .and. prop%major >= 10)
+    probed = .true.
+  end if
+
+  if (io_restructure) then
+
+!$acc kernels copyin(V_local, tpsi) copy(htpsi)
+!$acc loop collapse(4)
+  do ispin=1,Nspin
+  do iz=igs(3),ige(3)
+  do iy=igs(2),ige(2)
+  do ix=igs(1),ige(1)
+  !$acc loop seq
+  do io=io_s,io_e
+    v = z0
+    w = z0
+    !$acc loop seq
+    do i = 1,4
+      t_0 = tpsi(DX( i), ispin, io)
+      t_1 = tpsi(DX(-i), ispin, io)
+      v=lapt(i)*(t_0+t_1) + v
+      w=nabt(i)*(t_0-t_1) + w
+    end do
+    htpsi(ix,iy,iz,ispin,io) = V_local(ispin)%f(ix,iy,iz)*tpsi(ix,iy,iz,ispin,io) &
+                    + lap0*tpsi(ix,iy,iz,ispin,io) &
+                    - 0.5d0 * v - zI * w
+  end do
+
+  !$acc loop seq
+  do io=io_s,io_e
+    v = z0
+    w = z0
+    !$acc loop seq
+    do i = 1,4
+      t_0 = tpsi(DY( i), ispin, io)
+      t_1 = tpsi(DY(-i), ispin, io)
+      v=lapt(i+4)*(t_0+t_1) + v
+      w=nabt(i+4)*(t_0-t_1) + w
+    end do
+    !$acc loop seq
+    do i = 1,4
+      t_0 = tpsi(DZ( i), ispin, io)
+      t_1 = tpsi(DZ(-i), ispin, io)
+      v=lapt(i+8)*(t_0+t_1) + v
+      w=nabt(i+8)*(t_0-t_1) + w
+    end do
+    htpsi(ix,iy,iz,ispin,io) = htpsi(ix,iy,iz,ispin,io) &
+                    - 0.5d0 * v - zI * w
+  end do
+  end do
+  end do
+  end do
+  end do
+!$acc end kernels
+
+  else
+
 !$acc kernels copyin(V_local, tpsi) copy(htpsi)
 !$acc loop collapse(5)
   do io=io_s,io_e
   do ispin=1,Nspin
   do iz=igs(3),ige(3)
   do iy=igs(2),ige(2)
-! !dir$ assume_aligned V_local(is(1),iy,iz):MEM_ALIGN
-! !dir$ assume_aligned tpsi(is_array(1),iy,iz)   :MEM_ALIGN
-! !dir$ assume_aligned htpsi(is_array(1),iy,iz)  :MEM_ALIGN
   do ix=igs(1),ige(1)
     v = z0
     w = z0
@@ -79,7 +151,6 @@ subroutine zstencil_typical_gpu(io_s,io_e,Nspin,is_array,ie_array,is,ie,idx,idy,
       v=lapt(i)*(t_0+t_1) + v
       w=nabt(i)*(t_0-t_1) + w
     end do
-#ifdef USE_OPENACC
     htpsi(ix,iy,iz,ispin,io) = V_local(ispin)%f(ix,iy,iz)*tpsi(ix,iy,iz,ispin,io) &
                     + lap0*tpsi(ix,iy,iz,ispin,io) &
                     - 0.5d0 * v - zI * w
@@ -97,7 +168,6 @@ subroutine zstencil_typical_gpu(io_s,io_e,Nspin,is_array,ie_array,is,ie,idx,idy,
   do ix=igs(1),ige(1)
     v = z0
     w = z0
-#endif
     !$acc loop seq
     do i = 1,4
       t_0 = tpsi(DY( i), ispin, io)
@@ -112,18 +182,52 @@ subroutine zstencil_typical_gpu(io_s,io_e,Nspin,is_array,ie_array,is,ie,idx,idy,
       v=lapt(i+8)*(t_0+t_1) + v
       w=nabt(i+8)*(t_0-t_1) + w
     end do
-#ifdef USE_OPENACC
     htpsi(ix,iy,iz,ispin,io) = htpsi(ix,iy,iz,ispin,io) &
                     - 0.5d0 * v - zI * w
-#else
-    htpsi(ix,iy,iz,ispin,io) = V_local(ispin)%f(ix,iy,iz)*tpsi(ix,iy,iz,ispin,io) &
-                    + lap0*tpsi(ix,iy,iz,ispin,io) &
-                    - 0.5d0 * v - zI * w
-#endif
   end do
   end do
   end do
   end do
   end do
 !$acc end kernels
+
+  end if
+#else
+  do io=io_s,io_e
+  do ispin=1,Nspin
+  do iz=igs(3),ige(3)
+  do iy=igs(2),ige(2)
+! !dir$ assume_aligned V_local(is(1),iy,iz):MEM_ALIGN
+! !dir$ assume_aligned tpsi(is_array(1),iy,iz)   :MEM_ALIGN
+! !dir$ assume_aligned htpsi(is_array(1),iy,iz)  :MEM_ALIGN
+  do ix=igs(1),ige(1)
+    v = z0
+    w = z0
+    do i = 1,4
+      t_0 = tpsi(DX( i), ispin, io)
+      t_1 = tpsi(DX(-i), ispin, io)
+      v=lapt(i)*(t_0+t_1) + v
+      w=nabt(i)*(t_0-t_1) + w
+    end do
+    do i = 1,4
+      t_0 = tpsi(DY( i), ispin, io)
+      t_1 = tpsi(DY(-i), ispin, io)
+      v=lapt(i+4)*(t_0+t_1) + v
+      w=nabt(i+4)*(t_0-t_1) + w
+    end do
+    do i = 1,4
+      t_0 = tpsi(DZ( i), ispin, io)
+      t_1 = tpsi(DZ(-i), ispin, io)
+      v=lapt(i+8)*(t_0+t_1) + v
+      w=nabt(i+8)*(t_0-t_1) + w
+    end do
+    htpsi(ix,iy,iz,ispin,io) = V_local(ispin)%f(ix,iy,iz)*tpsi(ix,iy,iz,ispin,io) &
+                    + lap0*tpsi(ix,iy,iz,ispin,io) &
+                    - 0.5d0 * v - zI * w
+  end do
+  end do
+  end do
+  end do
+  end do
+#endif
 end subroutine
