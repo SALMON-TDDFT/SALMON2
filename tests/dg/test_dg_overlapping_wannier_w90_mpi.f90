@@ -44,6 +44,7 @@ program test_dg_overlapping_wannier_w90_mpi
   integer(8)::covariance_workspace
   complex(8),allocatable::gauge_values(:,:),gauge_gradients(:,:,:)
   complex(8)::gauge_transform(2,2)
+  complex(8)::dense_transform(2,2),dense_expected_transform(2,2),dense_pivot(2),dense_phase(2),dense_input(2)
   real(8)::gauge_centers(3,2)
   real(8)::gauge_spreads(2)
   integer(8),allocatable::gauge_ids(:)
@@ -964,6 +965,41 @@ program test_dg_overlapping_wannier_w90_mpi
       call require(abs(gauge_gradients(i,1,p)-cmplx(real(i*global_point,8),0d0,8))<1d-12.and.&
         abs(gauge_gradients(i,2,p)-cmplx(2d0*real(i*global_point,8),-real(i*global_point,8),8))<1d-12,&
         'complex production Wannier gradients receive the same pivot phase')
+    enddo
+  enddo
+  dense_transform=reshape([cmplx(sqrt(0.5d0),0d0,8),cmplx(-0.5d0,0.5d0,8),&
+    cmplx(0.5d0,0.5d0,8),cmplx(sqrt(0.5d0),0d0,8)],[2,2])
+  dense_input=[cmplx(8d0,0d0,8),cmplx(16d0,0d0,8)]
+  dense_pivot=matmul(transpose(dense_transform),dense_input)
+  dense_phase=conjg(dense_pivot)/abs(dense_pivot)
+  dense_expected_transform=dense_transform
+  do i=1,2;dense_expected_transform(:,i)=dense_phase(i)*dense_expected_transform(:,i);enddo
+  do p=1,nlocal
+    global_point=rank*nlocal+p
+    gauge_values(:,p)=[cmplx(real(global_point,8),0d0,8),cmplx(2d0*real(global_point,8),0d0,8)]
+    do i=1,3
+      gauge_gradients(i,1,p)=cmplx(real(i*global_point,8),0d0,8)
+      gauge_gradients(i,2,p)=cmplx(2d0*real(i*global_point,8),-real(i*global_point,8),8)
+    enddo
+  enddo
+  gauge_transform=dense_transform
+  gauge_centers=reshape([0.1d0,0d0,0d0,0.2d0,0d0,0d0],[3,2]);gauge_spreads=[10d0,20d0]
+  call apply_dg_w90_gamma_transform(MPI_COMM_WORLD,gauge_ids,gauge_values,gauge_gradients,&
+    gauge_transform,gauge_centers,1d-12,ok,message,gauge_spreads)
+  call require(ok.and.maxval(abs(gauge_transform-dense_expected_transform))<1d-12,&
+    'dense complex production Wannier transform uses the transpose convention')
+  do p=1,nlocal
+    global_point=rank*nlocal+p
+    dense_input=[cmplx(real(global_point,8),0d0,8),cmplx(2d0*real(global_point,8),0d0,8)]
+    dense_input=dense_phase*matmul(transpose(dense_transform),dense_input)
+    call require(maxval(abs(gauge_values(:,p)-dense_input))<1d-12,&
+      'dense complex production Wannier values use the transpose convention')
+    do i=1,3
+      dense_input=[cmplx(real(i*global_point,8),0d0,8),&
+        cmplx(2d0*real(i*global_point,8),-real(i*global_point,8),8)]
+      dense_input=dense_phase*matmul(transpose(dense_transform),dense_input)
+      call require(maxval(abs(gauge_gradients(i,:,p)-dense_input))<1d-12,&
+        'dense complex production Wannier gradients use the transpose convention')
     enddo
   enddo
   transform(1,1)=2d0

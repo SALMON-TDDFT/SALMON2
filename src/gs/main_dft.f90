@@ -1771,6 +1771,11 @@ contains
     deallocate(w90_spreads)
     call fingerprint_ow_w90_transform(dc%icomm_tot,w90_transform,w90_transform_fingerprint,ok)
     if(.not.ok)error stop 'Wannier90 canonical transform fingerprint failed'
+    ! Column permutation and diagonal pivot phases are a unitary gauge P.  The
+    ! corresponding symmetry representation is P^H D P and its covariance
+    ! residual is R P, so the accepted max-entry defect above is unchanged.
+    ! Downstream character-sector construction rebuilds representations in the
+    ! canonicalized spatial basis rather than retaining the pre-gauge matrices.
     call inherit_dg_w90_affine_receipts(w90_transform,&
       max(maxval(lcfo_total_symmetry_residual),w90_covariance_defect),&
       dg_ow_symmetry_tolerance,&
