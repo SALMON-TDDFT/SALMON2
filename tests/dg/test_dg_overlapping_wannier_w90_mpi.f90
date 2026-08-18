@@ -942,9 +942,9 @@ program test_dg_overlapping_wannier_w90_mpi
   transform(1,1)=2d0
   call validate_dg_w90_result(transform,centers,spreads,spread,0.8d0,1d-12,ok,message)
   call require(.not.ok,'nonunitary Wannier90 transform rejection')
-  transform=(0d0,0d0);transform(1,1)=1d0;transform(2,2)=cmplx(1d0,1d-4,8)
+  transform=(0d0,0d0);transform(1,1)=1d0;transform(2,2)=cmplx(0d0,1d0,8)
   call validate_dg_w90_result(transform,centers,spreads,spread,0.8d0,1d-12,ok,message)
-  call require(.not.ok,'complex Gamma Wannier90 gauge rejection')
+  call require(ok,'complex unitary Wannier90 gauge acceptance')
   transform=(0d0,0d0);transform(1,1)=1d0;transform(2,2)=1d0;spread(3)=0.9d0
   call validate_dg_w90_result(transform,centers,spreads,spread,0.8d0,1d-12,ok,message)
   call require(.not.ok,'increased Wannier90 gauge-dependent spread rejection')

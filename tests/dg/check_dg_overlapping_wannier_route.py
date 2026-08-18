@@ -1741,6 +1741,9 @@ assert "All done: wannier90 exiting" in w90_source, (
 assert "Wannier90 exhausted its iteration limit" not in w90_source, (
     "normal Wannier90 completion at num_iter must not be treated as an execution failure"
 )
+assert "Wannier90 transform violates the Gamma-real gauge" not in w90_source, (
+    "a complex unitary Wannier90 gauge must not be rejected for being non-real"
+)
 assert re.search(
     r"call\s+gather_dg_single_symmetry_representation\s*\(", adapter_body, re.I
 ), "production fixed-center DMN must gather one representation operation at a time"

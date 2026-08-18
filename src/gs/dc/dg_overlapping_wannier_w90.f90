@@ -3239,7 +3239,7 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     complex(real64),allocatable::gram(:,:)
-    real(real64)::scale,defect,imaginary_defect
+    real(real64)::scale,defect
     integer::i,nwann
     ok=.false.;message='';nwann=size(transform,1)
     if(nwann<=0.or.size(transform,2)/=nwann.or.any(shape(centers)/=[3,nwann]).or.&
@@ -3256,11 +3256,6 @@ contains
     scale=max(1d0,max(maxval(abs(spreads)),maxval(abs(spread))))
     if(any(spreads < -tolerance*scale).or.any(spread < -tolerance*scale))then
       message='Wannier90 result has a physically negative spread';return
-    endif
-    scale=max(1d0,maxval(abs(transform)))
-    imaginary_defect=maxval(abs(aimag(transform)))
-    if(imaginary_defect>tolerance*scale)then
-      message='Wannier90 transform violates the Gamma-real gauge';return
     endif
     allocate(gram(nwann,nwann));gram=matmul(conjg(transpose(transform)),transform)
     do i=1,nwann;gram(i,i)=gram(i,i)-1d0;enddo
