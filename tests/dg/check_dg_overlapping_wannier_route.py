@@ -1728,6 +1728,23 @@ assert "global_affine_generators" not in dmn_transaction, (
 assert "require_closed_group=.false." not in dmn_transaction.replace(" ", ""), (
     "production DMN publication must validate fixed-center group closure"
 )
+post_w90_start = adapter_body.lower().find("call run_dg_w90_gamma_library(")
+post_w90_end = adapter_body.lower().find("wannier90 fixed-center covariance passed", post_w90_start)
+assert 0 <= post_w90_start < post_w90_end, "missing immediate post-Wannier covariance gate"
+post_w90_covariance = adapter_body[post_w90_start:post_w90_end].lower()
+assert "fixed_center_group_order" in post_w90_covariance, (
+    "post-Wannier covariance must validate the complete group supplied through DMN"
+)
+assert re.search(
+    r"fixed_center_symmetry_map\s*\(\s*:\s*,\s*fixed_center_operation\s*:\s*"
+    r"fixed_center_operation\s*\)", post_w90_covariance, re.S
+), "post-Wannier covariance must use the matching fixed-center operation map"
+assert "global_affine_generators" not in post_w90_covariance, (
+    "full-affine covariance is constructed only by the downstream character-sector gauge"
+)
+assert "global_symmetry_map" not in post_w90_covariance, (
+    "the immediate covariance gate must not substitute an operation absent from DMN"
+)
 assert re.search(
     r"if\s*\(\s*\.not\.\s*writer_ok\s*\)\s*then\s*.*?write\s*\(\s*0\s*,\s*['\"]\(a\)['\"]\s*\)\s*"
     r"trim\s*\(\s*message\s*\).*?fixed-center\s+DMN\s+transaction\s+could\s+not\s+finish",

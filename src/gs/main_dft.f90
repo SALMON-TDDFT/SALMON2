@@ -1720,16 +1720,14 @@ contains
     deallocate(w90_m_matrix,w90_a_matrix,w90_eigenvalues)
     deallocate(w90_atom_symbols,w90_atoms_cart,w90_nncell)
     w90_covariance_defect=0d0;w90_covariance_workspace=0_8
-    do fixed_center_operation=1,size(global_affine_generators)+1
-      if(fixed_center_operation==1)then
-        io=global_identity_operation
-      else
-        io=global_affine_generators(fixed_center_operation-1)
-      endif
+    do fixed_center_operation=1,fixed_center_group_order
       call assemble_dg_distributed_basis_symmetry_overlap_rows(dc%icomm_tot,global_closed_core,&
-        ow_core_weights,global_symmetry_map(:,io:io),fixed_center_row_ids,fixed_center_rows,&
+        ow_core_weights,fixed_center_symmetry_map(:,fixed_center_operation:fixed_center_operation),&
+        fixed_center_row_ids,fixed_center_rows,&
         fixed_center_operation_workspace,ok,message)
-      if(.not.ok)then;write(0,'(a)')trim(message);error stop 'post-Wannier generator assembly failed';endif
+      if(.not.ok)then
+        write(0,'(a)')trim(message);error stop 'post-Wannier fixed-center assembly failed'
+      endif
       call gather_dg_single_symmetry_representation(dc%icomm_tot,fixed_center_row_ids,fixed_center_rows,&
         1,0,fixed_center_representation,fixed_center_operation_workspace,ok,message)
       if(.not.ok)then;write(0,'(a)')trim(message);error stop 'post-Wannier generator gather failed';endif
@@ -1746,14 +1744,16 @@ contains
       call validate_dg_w90_generator_covariance(dc%icomm_tot,w90_transform,fixed_center_representation,&
         spectral_wannier_representation,dg_ow_symmetry_tolerance,w90_generator_covariance_defect,&
         fixed_center_operation_workspace,ok,message)
-      if(.not.ok)then;write(0,'(a)')trim(message);error stop 'post-Wannier generator covariance failed';endif
+      if(.not.ok)then
+        write(0,'(a)')trim(message);error stop 'post-Wannier fixed-center covariance failed'
+      endif
       w90_covariance_defect=max(w90_covariance_defect,w90_generator_covariance_defect)
       w90_covariance_workspace=max(w90_covariance_workspace,fixed_center_operation_workspace)
       deallocate(fixed_center_row_ids,fixed_center_rows,fixed_center_representation)
       if(rank==0)deallocate(spectral_wannier_representation)
     enddo
     deallocate(spectral_amn)
-    if(rank==0)write(*,'(a,a,es16.8,a,i0)')'[OW-GS-DIAGNOSTIC] Wannier90 generator covariance passed',&
+    if(rank==0)write(*,'(a,a,es16.8,a,i0)')'[OW-GS-DIAGNOSTIC] Wannier90 fixed-center covariance passed',&
       ' defect=',w90_covariance_defect,' workspace_peak_bytes=',w90_covariance_workspace
     localized_centers=matmul(w90_lattice_inverse,localized_centers)
     call apply_dg_w90_gamma_transform(dc%icomm_tot,ow_core_ids,ow_core_values,&
