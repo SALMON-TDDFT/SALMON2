@@ -181,7 +181,6 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   use cublas
   use openacc
   use cudafor
-  use communication, only: comm_summation
   use mpi, only: MPI_DOUBLE_COMPLEX, MPI_SUM, MPI_IN_PLACE
 #endif
   implicit none
@@ -274,9 +273,8 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   Nlma = ppg%Nlma
 
 #if defined(USE_OPENACC) && defined(USE_GEMM)
-  ! --- GEMM path: handles both domain and non-domain decomposition ---
-  ! Under domain decomposition, ppg%jxyz/mps are already local (built from mg%is/ie),
-  ! so the GEMM computes partial sums per atom; comm_summation combines them across rgrid ranks.
+  ! GEMM path, both domain and non-domain decomposition: ppg%jxyz/mps are already local,
+  ! so under domain decomposition the GEMM yields per-rank partial sums, reduced in phase 1.5.
 
   gemm_natom = size(ppg%mps)
 
@@ -292,13 +290,14 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
 
     allocate(gemm_l2g(gemm_max_nproj, gemm_natom))
     gemm_l2g = 0
-    gemm_nproj_atom = 0
+    gemm_nproj_atom = 0   ! reused as a per-atom fill cursor below
     do ilma=1,Nlma
       ia = ppg%ia_tbl(ilma)
       gemm_nproj_atom(ia) = gemm_nproj_atom(ia) + 1
       gemm_l2g(gemm_nproj_atom(ia), ia) = ilma
     end do
 
+    ! Kept 3D (no ik dimension): a slice through host_data/cublas triggers an nvfortran ICE.
     allocate(gemm_zekr_packed(ppg%nps, gemm_max_nproj, gemm_natom))
     allocate(gemm_rinv_packed(gemm_max_nproj, gemm_natom))
     gemm_zekr_packed = (0.d0,0.d0)
@@ -319,11 +318,14 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
     gemm_stat = cublasCreate(gemm_handle)
   end if
 
+  ! cublas must share OpenACC's stream, or the scatter kernel may read the GEMM output early.
   gemm_stat = cublasSetStream(gemm_handle, acc_get_cuda_stream(acc_async_sync))
 
   ! Phase 1: batched GEMM projection, blocked over bands to bound gemm_wf_packed's memory.
   do im=im_s,im_e
   do ik=ik_s,ik_e
+    ! Refresh per (call, k-point): zekr_uV carries the time-dependent A(t), so packing it
+    ! only at setup would freeze the t=0 phases and silently drift the physics.
 !$acc parallel loop collapse(3) present(ppg, gemm_zekr_packed, gemm_l2g, gemm_nproj_atom)
     do gemm_ia = 1, gemm_natom
     do gemm_p = 1, gemm_max_nproj
@@ -381,9 +383,8 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   end do
   end do
 
-  ! Phase 1.5: reduce partial sums across rgrid ranks (domain decomposition only).
-  ! Each rank computed partial uVpsi for atoms overlapping its local grid slab;
-  ! comm_summation combines them into the complete projection.
+  ! Phase 1.5: reduce each rank's partial uVpsi across rgrid ranks. Staged through a CUDA
+  ! Fortran device buffer so CUDA-aware MPI sees a real device pointer, not managed memory.
   if(info%if_divide_rspace) then
     call timer_end(LOG_UHPSI_PSEUDO)
     call timer_begin(LOG_UHPSI_PSEUDO_COMM)
