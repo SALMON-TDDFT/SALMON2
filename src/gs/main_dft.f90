@@ -785,7 +785,9 @@ contains
     real(8)::translation_alignment_max_defect,translation_gamma_max_defect
     real(8)::translation_position_gram_defect,translation_position_objective,&
       translation_position_update,translation_position_defect
-    real(8)::ow_gradient_path_local(2),ow_gradient_path_global(2)
+    real(8)::ow_gradient_path_local(2),ow_gradient_path_global(2),&
+      ow_spatial_covariance_relative,ow_spatial_covariance_absolute,&
+      ow_gradient_covariance_absolute,ow_gradient_stencil_norm_bound
     real(8),allocatable::translation_position_centers(:,:)
     real(8)::monomial_defect,center_block_leakage,center_representation_unitarity_defect
     type(s_dg_translation_orbit_accumulator)::translation_inverse_state
@@ -2196,8 +2198,9 @@ contains
     enddo
     call MPI_Allreduce(ow_gradient_path_local,ow_gradient_path_global,2,MPI_DOUBLE_PRECISION,&
       MPI_SUM,dc%icomm_tot,ierr)
-    if(rank==0)write(*,'(a,es16.8)')'[OW-GS-DIAGNOSTIC] buffer/direct gradient relative defect=',&
-      sqrt(max(0d0,ow_gradient_path_global(1))/max(tiny(1d0),ow_gradient_path_global(2)))
+    if(rank==0)write(*,'(2(a,es16.8))')'[OW-GS-DIAGNOSTIC] buffer/direct gradient relative defect=',&
+      sqrt(max(0d0,ow_gradient_path_global(1))/max(tiny(1d0),ow_gradient_path_global(2))),&
+      ' direct gradient norm=',sqrt(max(0d0,ow_gradient_path_global(2)))
     call assemble_dg_distributed_basis_symmetry_overlap(dc%icomm_tot,ow_core_values,ow_core_weights,&
       ow_pencil_generator_maps,ow_pencil_generator_representation,ok,message)
     if(ok)call measure_dg_spatial_basis_covariance(dc%icomm_tot,ow_core_values,ow_core_weights,&
@@ -2207,6 +2210,10 @@ contains
       '[OW-GS-DIAGNOSTIC] core spatial generator covariance max=',&
       maxval(ow_core_spatial_covariance_residual),' operation=',&
       maxloc(ow_core_spatial_covariance_residual,dim=1)
+    if(ok)then
+      ow_spatial_covariance_relative=maxval(ow_core_spatial_covariance_residual)
+      ow_spatial_covariance_absolute=ow_spatial_covariance_relative*sqrt(real(ntarget,8))
+    endif
     if(allocated(ow_core_spatial_covariance_residual))deallocate(ow_core_spatial_covariance_residual)
     if(ok)call measure_dg_spatial_gradient_covariance(dc%icomm_tot,ow_core_gradients,ow_core_weights,&
       ow_pencil_generator_maps,ow_pencil_generator_representation,&
@@ -2218,6 +2225,16 @@ contains
       ' operation=',maxloc(ow_gradient_covariance_left,dim=1),&
       ' RT max=',maxval(ow_gradient_covariance_transpose),&
       ' operation=',maxloc(ow_gradient_covariance_transpose,dim=1)
+    if(ok.and.rank==0)then
+      ow_gradient_stencil_norm_bound=2d0*maxval(sum(abs(stencil%coef_nab),dim=1))
+      ow_gradient_covariance_absolute=max(maxval(ow_gradient_covariance_left),&
+        maxval(ow_gradient_covariance_transpose))*sqrt(max(0d0,ow_gradient_path_global(2)))
+      write(*,'(4(a,es16.8))')'[OW-GS-DIAGNOSTIC] gradient covariance absolute=',&
+        ow_gradient_covariance_absolute,' differentiated basis-error bound=',&
+        ow_gradient_stencil_norm_bound*ow_spatial_covariance_absolute,&
+        ' stencil operator norm bound=',ow_gradient_stencil_norm_bound,&
+        ' spatial covariance absolute=',ow_spatial_covariance_absolute
+    endif
     if(ok.and.rank==0)then
       write(*,'(2(a,es16.8,a,i0))')'[OW-GS-DIAGNOSTIC] gradient C^T: R=',&
         maxval(ow_gradient_covariance_candidates(1,:)),' op=',&
