@@ -84,6 +84,7 @@ module dg_overlapping_wannier_construction
   public::split_dg_translation_character_sector_eigenexa
 #endif
   public::exchange_dg_point_permuted_orbital_rows
+  public::reindex_dg_point_maps_between_row_layouts
   public::measure_dg_spatial_basis_covariance
   public::measure_dg_spatial_gradient_covariance
   public::measure_dg_grid_map_stencil_defect
@@ -5620,6 +5621,135 @@ contains
     if(present(workspace_peak_bytes))workspace_peak_bytes=0_int64
 #endif
   end subroutine measure_dg_rank_fixed_symmetry_residuals
+
+  subroutine reindex_dg_point_maps_between_row_layouts(comm,old_local_ids,new_local_ids,&
+      old_target_rows,new_target_rows,ok,message)
+    integer,intent(in)::comm
+    integer(int64),intent(in)::old_local_ids(:),new_local_ids(:),old_target_rows(:,:)
+    integer(int64),allocatable,intent(out)::new_target_rows(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,nproc,ierr,noperation,noperation_min,noperation_max,old_nlocal,new_nlocal
+    integer::old_total,new_total,local_bad,global_bad,allocation_status,operation,row,physical_id
+    integer(int64)::target_row
+    logical::counts_ok
+    integer,allocatable::old_counts(:),new_counts(:),old_displs(:),new_displs(:),&
+      old_ownership(:),new_ownership(:),old_row_by_physical(:),new_row_by_physical(:)
+    integer(int64),allocatable::old_global_ids(:),new_global_ids(:),global_target_rows(:)
+    ok=.false.;message=''
+    call MPI_Comm_rank(comm,rank,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='row-layout reindex rank query failed';return;endif
+    call MPI_Comm_size(comm,nproc,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='row-layout reindex size query failed';return;endif
+    old_nlocal=size(old_local_ids);new_nlocal=size(new_local_ids);noperation=size(old_target_rows,2)
+    local_bad=merge(0,1,old_nlocal>0.and.new_nlocal>0.and.noperation>0.and.&
+      size(old_target_rows,1)==old_nlocal)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='invalid row-layout reindex contract';return
+    endif
+    call MPI_Allreduce(noperation,noperation_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='row-layout operation minimum failed';return;endif
+    call MPI_Allreduce(noperation,noperation_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.noperation_min/=noperation_max)then
+      message='row-layout operation count differs across ranks';return
+    endif
+    allocate(old_counts(nproc),new_counts(nproc),old_displs(nproc),new_displs(nproc),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(old_counts))deallocate(old_counts)
+      if(allocated(new_counts))deallocate(new_counts)
+      if(allocated(old_displs))deallocate(old_displs)
+      if(allocated(new_displs))deallocate(new_displs)
+      message='row-layout count allocation failed';return
+    endif
+    call MPI_Allgather(old_nlocal,1,MPI_INTEGER,old_counts,1,MPI_INTEGER,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='old row-layout count gather failed';goto 900;endif
+    call MPI_Allgather(new_nlocal,1,MPI_INTEGER,new_counts,1,MPI_INTEGER,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='new row-layout count gather failed';goto 900;endif
+    call build_checked_mpi_displacements(old_counts,old_displs,old_total,counts_ok)
+    if(counts_ok)call build_checked_mpi_displacements(new_counts,new_displs,new_total,counts_ok)
+    local_bad=merge(0,1,counts_ok.and.old_total==new_total.and.old_total>0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='row-layout global extent mismatch or overflow';goto 900
+    endif
+    allocate(old_global_ids(old_total),new_global_ids(new_total),global_target_rows(old_total),&
+      old_ownership(old_total),new_ownership(old_total),old_row_by_physical(old_total),&
+      new_row_by_physical(old_total),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='row-layout lookup allocation failed';goto 900
+    endif
+    call MPI_Allgatherv(old_local_ids,old_nlocal,MPI_INTEGER8,old_global_ids,old_counts,old_displs,&
+      MPI_INTEGER8,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='old row-layout ID gather failed';goto 900;endif
+    call MPI_Allgatherv(new_local_ids,new_nlocal,MPI_INTEGER8,new_global_ids,new_counts,new_displs,&
+      MPI_INTEGER8,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='new row-layout ID gather failed';goto 900;endif
+    old_ownership=0;new_ownership=0;old_row_by_physical=0;new_row_by_physical=0;local_bad=0
+    do row=1,old_total
+      if(old_global_ids(row)<1_int64.or.old_global_ids(row)>int(old_total,int64))then
+        local_bad=1
+      else
+        physical_id=int(old_global_ids(row));old_ownership(physical_id)=old_ownership(physical_id)+1
+        old_row_by_physical(physical_id)=row
+      endif
+      if(new_global_ids(row)<1_int64.or.new_global_ids(row)>int(old_total,int64))then
+        local_bad=1
+      else
+        physical_id=int(new_global_ids(row));new_ownership(physical_id)=new_ownership(physical_id)+1
+        new_row_by_physical(physical_id)=row
+      endif
+    enddo
+    if(local_bad==0)then
+      if(any(old_ownership/=1).or.any(new_ownership/=1))local_bad=1
+    endif
+    if(any(old_target_rows<1_int64).or.any(old_target_rows>int(old_total,int64)))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='row layouts or point targets are not complete permutations';goto 900
+    endif
+    allocate(new_target_rows(new_nlocal,noperation),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(new_target_rows))deallocate(new_target_rows)
+      message='reindexed point-map allocation failed';goto 900
+    endif
+    do operation=1,noperation
+      call MPI_Allgatherv(old_target_rows(:,operation),old_nlocal,MPI_INTEGER8,global_target_rows,&
+        old_counts,old_displs,MPI_INTEGER8,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then
+        if(allocated(new_target_rows))deallocate(new_target_rows)
+        message='old point-map gather failed';goto 900
+      endif
+      do row=1,new_nlocal
+        physical_id=int(new_local_ids(row))
+        target_row=global_target_rows(old_row_by_physical(physical_id))
+        new_target_rows(row,operation)=int(new_row_by_physical(int(old_global_ids(int(target_row)))),int64)
+      enddo
+    enddo
+    ok=.true.
+900 continue
+    if(allocated(old_counts))deallocate(old_counts)
+    if(allocated(new_counts))deallocate(new_counts)
+    if(allocated(old_displs))deallocate(old_displs)
+    if(allocated(new_displs))deallocate(new_displs)
+    if(allocated(old_global_ids))deallocate(old_global_ids)
+    if(allocated(new_global_ids))deallocate(new_global_ids)
+    if(allocated(global_target_rows))deallocate(global_target_rows)
+    if(allocated(old_ownership))deallocate(old_ownership)
+    if(allocated(new_ownership))deallocate(new_ownership)
+    if(allocated(old_row_by_physical))deallocate(old_row_by_physical)
+    if(allocated(new_row_by_physical))deallocate(new_row_by_physical)
+#else
+    ok=.false.;message='row-layout reindexing requires MPI'
+#endif
+  end subroutine reindex_dg_point_maps_between_row_layouts
 
   subroutine exchange_dg_point_permuted_orbital_rows(comm,basis,target_global_ids,image,ok,message)
     integer,intent(in)::comm
