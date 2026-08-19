@@ -236,6 +236,17 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
   call require(pencil_before(1)<1d-12.and.&
     maxval(abs(sym_h_rows-gate_hamiltonian(int(pencil_row_ids),:)))<1d-12,&
     'complex column-action representation preserves a covariant Hamiltonian')
+  pencil_h_rows=gate_hamiltonian(int(pencil_row_ids),:)
+  if(size(pencil_row_ids)>0)then
+    if(pencil_row_ids(1)==1)pencil_h_rows(1,1)=pencil_h_rows(1,1)+0.25d0
+  endif
+  call symmetrize_dg_distributed_pencil_rows(MPI_COMM_WORLD,pencil_row_ids,pencil_h_rows,&
+    pencil_s_rows,pencil_rho_rows,pencil_artifact_rows,inversion_generator,inversion_generators,&
+    inversion_product,[1],[1,2],1d-12,sym_h_rows,sym_s_rows,sym_rho_rows,pencil_before,pencil_after,&
+    artifact_change,artifact_magnitude,pencil_workspace_peak,ok,message,&
+    require_input_covariance=.true.)
+  call require(.not.ok.and.index(message,'input covariance')>0,&
+    'strict pencil publication rejects a grossly noncovariant Hamiltonian')
 
   c4_fingerprint=fingerprint_dg_exact_fragment_symmetry(affine_rotation(:,:,1:4),product_table,1d-10)
   c1_fingerprint=fingerprint_dg_exact_fragment_symmetry(affine_rotation(:,:,1:1),reshape([1],[1,1]),1d-10)
