@@ -98,7 +98,7 @@ program test_dg_overlapping_wannier_construction_mpi
   real(8),allocatable::spatial_covariance_residual(:)
   real(8),allocatable::gradient_covariance_left(:),gradient_covariance_transpose(:)
   complex(8),allocatable::distributed_gradient(:,:,:)
-  integer::distributed_rotations(3,3,2)
+  real(8)::distributed_rotations(3,3,2)
   real(8),allocatable::averaged_spectrum(:)
   real(8),allocatable::seed_values(:,:)
   real(8),allocatable::occupied_seed_values(:,:)

@@ -2143,7 +2143,7 @@ contains
     if(allocated(ow_core_spatial_covariance_residual))deallocate(ow_core_spatial_covariance_residual)
     if(ok)call measure_dg_spatial_gradient_covariance(dc%icomm_tot,ow_core_gradients,ow_core_weights,&
       ow_pencil_generator_maps,ow_pencil_generator_representation,&
-      global_point_integer_rotations(:,:,global_affine_generators),&
+      global_point_rotations(:,:,global_affine_generators),&
       ow_gradient_covariance_left,ow_gradient_covariance_transpose,ok,message)
     if(ok.and.rank==0)write(*,'(2(a,es16.8,a,i0))')&
       '[OW-GS-DIAGNOSTIC] core gradient covariance R max=',maxval(ow_gradient_covariance_left),&

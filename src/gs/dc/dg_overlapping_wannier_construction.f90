@@ -5780,7 +5780,8 @@ contains
 
   subroutine measure_dg_spatial_gradient_covariance(comm,gradient,weights,target_global_ids,&
       representation,rotations,left_residual,transpose_residual,ok,message)
-    integer,intent(in)::comm,rotations(:,:,:)
+    integer,intent(in)::comm
+    real(real64),intent(in)::rotations(:,:,:)
     complex(real64),intent(in)::gradient(:,:,:),representation(:,:,:)
     real(real64),intent(in)::weights(:)
     integer(int64),intent(in)::target_global_ids(:,:)
@@ -5823,8 +5824,8 @@ contains
         do i=1,3
           left_vector=(0d0,0d0);transpose_vector=(0d0,0d0)
           do j=1,3
-            left_vector=left_vector+real(rotations(i,j,operation),real64)*image(j,:,point)
-            transpose_vector=transpose_vector+real(rotations(j,i,operation),real64)*image(j,:,point)
+            left_vector=left_vector+rotations(i,j,operation)*image(j,:,point)
+            transpose_vector=transpose_vector+rotations(j,i,operation)*image(j,:,point)
           enddo
           local_norms(1)=local_norms(1)+weights(point)*sum(abs(left_vector-expected(i,:,point))**2)
           local_norms(2)=local_norms(2)+weights(point)*sum(abs(transpose_vector-expected(i,:,point))**2)
