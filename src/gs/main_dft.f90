@@ -124,8 +124,7 @@ use dg_overlapping_wannier_w90,only:setup_dg_w90_gamma_library,&
   project_dg_w90_reference_sector_operators,&
   anchor_dg_w90_reference_character_sector,align_dg_w90_character_sector_gauge,&
   align_dg_w90_character_sectors_by_periodic_phase,sew_dg_w90_periodic_phase_conjugate_sector,&
-  build_dg_orbital_major_periodic_position_tuple,jointly_canonicalize_dg_sector_periodic_position_gauge,&
-  apply_dg_orbital_rotation_tiled,export_dg_w90_replay_bundle
+  export_dg_w90_replay_bundle
 use lcfo_wannier_sawf, only: t_sawf_crystallographic_catalog,t_sawf_symop,&
   load_sawf_crystallographic_catalog_auto
 use lcfo_wannier_sawf_dmn,only:t_sawf_dmn_writer,t_sawf_operation_index,&
@@ -610,8 +609,6 @@ contains
       translation_target_spatial(:,:),translation_aligned_spatial(:,:),translation_conjugate_spatial(:,:),&
       translation_phase(:),translation_orbit_rows(:,:),translation_transform_rows(:,:),&
       transformed_box_values(:,:),transformed_box_gradients(:,:,:)
-    complex(8),allocatable::translation_position_tuple(:,:,:),translation_position_identity_rows(:,:),&
-      translation_position_aligned_rows(:,:),translation_position_rotation(:,:),translation_position_tiebreak(:,:)
     complex(8),allocatable::lcfo_fragment_contribution(:,:),lcfo_occupied_core(:,:),lcfo_reference_core(:,:)
     complex(8),allocatable::composed_tile_values(:,:),projector_buffer_tile(:,:)
     complex(8),allocatable::ow_direct_core_gradients(:,:,:),ow_neighbor_plus_values(:,:),&
@@ -657,7 +654,6 @@ contains
     integer(8),allocatable::reindexed_global_symmetry_map(:,:),reindexed_fixed_center_symmetry_map(:,:)
     integer(8),allocatable::translation_row_ids(:),translation_stream_row_ids(:)
     integer(8),allocatable::translation_spatial_ids(:),translation_generator_maps(:,:)
-    integer(8),allocatable::translation_position_row_ids(:)
     integer(8),allocatable::spectral_row_ids(:),spectral_stream_row_ids(:),spectral_complement_row_ids(:)
     integer,allocatable::local_point_product(:,:),local_point_integer_rotations(:,:,:),&
       translation_product(:,:),global_point_product(:,:),global_point_integer_rotations(:,:,:),&
@@ -696,7 +692,6 @@ contains
     integer::translation_character_generator_count,translation_sector_rank
     integer::translation_character,translation_partner,translation_global_core_count,translation_processed_count
     integer::translation_point_generator_count,translation_point_checked_pair_count
-    integer::translation_position_sweeps,translation_position_local_count,translation_position_first
     integer::spectral_basin_count,spectral_orbit_count,spectral_representative_count,&
       spectral_representative_column,spectral_basin,spectral_orbit,spectral_target_basin,&
       spectral_complement_rank,spectral_complement_local_row
@@ -726,8 +721,6 @@ contains
       translation_inverse_workspace,translation_transform_workspace,translation_operator_fingerprint,&
       translation_operator_workspace
     integer(8)::translation_lcfo_fingerprint,translation_post_gauge_fingerprint,translation_global_core_count8
-    integer(8)::translation_position_fingerprint,translation_position_canonical_fingerprint,&
-      translation_position_workspace
     integer(8)::composition_fingerprint,composition_workspace_peak,occupied_composition_peak,&
       occupied_composition_fingerprint,projector_composition_peak,projector_composition_fingerprint
     integer(8)::w90_coordinator_bytes,w90_workspace_peak,w90_byte_limit
@@ -786,13 +779,10 @@ contains
       spectral_eigensystem_residual,spectral_channel_gram_defect,spectral_action_unitarity,&
       spectral_action_block_defect
     real(8)::translation_alignment_max_defect,translation_gamma_max_defect
-    real(8)::translation_position_gram_defect,translation_position_objective,&
-      translation_position_update,translation_position_defect
     real(8)::ow_gradient_path_local(2),ow_gradient_path_global(2),&
       ow_spatial_covariance_relative,ow_spatial_covariance_absolute,&
       ow_gradient_covariance_absolute,ow_gradient_stencil_norm_bound,ow_stencil_axis_defect
     real(8)::ow_map_probe_angle,ow_map_probe_symbol
-    real(8),allocatable::translation_position_centers(:,:)
     real(8)::monomial_defect,center_block_leakage,center_representation_unitarity_defect
     type(s_dg_translation_orbit_accumulator)::translation_inverse_state
     integer::localization_iterations,localization_spread_evaluations
@@ -2096,40 +2086,6 @@ contains
       ' identity_defect=',translation_identity_defect,' closure_defect=',translation_closure_defect,&
       ' workspace_peak_bytes=',translation_transform_workspace
     global_retained_group_closure_defect=max(global_retained_group_closure_defect,translation_closure_defect)
-    call build_dg_orbital_major_periodic_position_tuple(dc%icomm_tot,ow_core_values,ow_core_weights,&
-      core_periodic_phase,dg_ow_symmetry_tolerance,translation_post_gauge_fingerprint,&
-      translation_position_tuple,translation_position_gram_defect,translation_position_fingerprint,&
-      translation_position_workspace,ok,message)
-    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'post-inverse periodic-position tuple failed';endif
-    translation_position_local_count=ntarget/nproc+merge(1,0,rank<mod(ntarget,nproc))
-    translation_position_first=rank*(ntarget/nproc)+min(rank,mod(ntarget,nproc))+1
-    allocate(translation_position_row_ids(translation_position_local_count),&
-      translation_position_identity_rows(translation_position_local_count,ntarget),&
-      translation_position_rotation(ntarget,ntarget),translation_position_tiebreak(ntarget,ntarget))
-    translation_position_identity_rows=(0d0,0d0);translation_position_tiebreak=(0d0,0d0)
-    do i=1,translation_position_local_count
-      translation_position_row_ids(i)=int(translation_position_first+i-1,8)
-      translation_position_identity_rows(i,translation_position_first+i-1)=(1d0,0d0)
-    enddo
-    call jointly_canonicalize_dg_sector_periodic_position_gauge(dc%icomm_tot,&
-      translation_position_row_ids,translation_position_identity_rows,translation_position_tuple,&
-      translation_position_tiebreak,dg_ow_symmetry_tolerance,translation_position_fingerprint,&
-      translation_position_aligned_rows,translation_position_rotation,translation_position_centers,&
-      translation_position_objective,translation_position_update,translation_position_sweeps,&
-      translation_position_defect,translation_position_canonical_fingerprint,&
-      translation_position_workspace,ok,message)
-    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'post-inverse periodic-position gauge failed';endif
-    call apply_dg_orbital_rotation_tiled(dc%icomm_tot,ow_core_values,translation_position_rotation,ok,message)
-    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'post-inverse orbital rotation failed';endif
-    translation_post_gauge_fingerprint=ieor(ishftc(translation_post_gauge_fingerprint,11),&
-      translation_position_canonical_fingerprint)
-    if(rank==0)write(*,'(a,3(a,es16.8),2(a,i0))')'[OW-GS-DIAGNOSTIC] post_inverse_periodic_position',&
-      ' gram_defect=',translation_position_gram_defect,' objective=',translation_position_objective,&
-      ' canonical_defect=',translation_position_defect,' sweeps=',translation_position_sweeps,&
-      ' workspace_peak_bytes=',translation_position_workspace
-    deallocate(translation_position_tuple,translation_position_row_ids,translation_position_identity_rows,&
-      translation_position_aligned_rows,translation_position_rotation,translation_position_tiebreak,&
-      translation_position_centers)
     allocate(localized_centers(3,ntarget),localized_center_magnitudes(3,ntarget))
     call compute_dg_periodic_wannier_centers(dc%icomm_tot,ow_core_values,ow_core_weights,&
       core_periodic_phase,localized_centers,localized_center_magnitudes,ok,message)

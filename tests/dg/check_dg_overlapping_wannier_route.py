@@ -208,15 +208,20 @@ assert not re.search(r"call\s+canonicalize_dg_sector_periodic_position_gauge\b",
     "production must not use the noncovariant fixed-direction periodic-position gauge"
 )
 inverse_position = ow_ground_state_body.find("call accumulate_dg_translation_character_orbit_sector_values")
-orbital_tuple_position = ow_ground_state_body.find("call build_dg_orbital_major_periodic_position_tuple")
-joint_center_position = ow_ground_state_body.find(
-    "call jointly_canonicalize_dg_sector_periodic_position_gauge", orbital_tuple_position
-)
 center_measure_position = ow_ground_state_body.rfind("call compute_dg_periodic_wannier_centers")
 center_orbit_position = ow_ground_state_body.rfind("call verify_dg_wannier_center_affine_orbits")
-assert 0 <= inverse_position < orbital_tuple_position < joint_center_position < center_measure_position < center_orbit_position, (
-    "production must canonicalize, measure, and validate periodic centers only after character inversion"
+assert 0 <= inverse_position < center_measure_position < center_orbit_position, (
+    "production must measure and validate periodic centers only after character inversion"
 )
+for redundant_post_inverse_call in (
+    "call build_dg_orbital_major_periodic_position_tuple",
+    "call jointly_canonicalize_dg_sector_periodic_position_gauge",
+    "call apply_dg_orbital_rotation_tiled",
+):
+    assert redundant_post_inverse_call not in ow_ground_state_body, (
+        "production must not relocalize the complete Wannier frame after character inversion: "
+        + redundant_post_inverse_call
+    )
 character_loop_position = ow_ground_state_body.find("do translation_character=1")
 prepare_position = ow_ground_state_body.find("call prepare_dg_translation_character_action")
 prepared_apply_position = ow_ground_state_body.find(
