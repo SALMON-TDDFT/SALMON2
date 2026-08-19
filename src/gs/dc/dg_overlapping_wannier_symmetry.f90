@@ -227,17 +227,17 @@ contains
       integer,parameter::batch_size=32
       integer::owner_rank,owner_rows,first,count_rows,a,b
       allocate(output_rows(size(row_ids),n),right_rows(size(row_ids),n));output_rows=0d0
-      ! Spatial basis rows obey G phi = d phi.  Operator matrix elements
-      ! therefore transform as conjg(d) A transpose(d), not d^H A d.
-      right_rows=matmul(input_rows,transpose(d))
+      ! d stores column-action coefficients G phi = phi d.  Matrix elements
+      ! therefore transform as d^H A d.
+      right_rows=matmul(input_rows,d)
       do owner_rank=0,nproc-1
         owner_rows=row_counts(owner_rank+1)
         do first=1,owner_rows,batch_size
           count_rows=min(batch_size,owner_rows-first+1)
           allocate(partial(count_rows,n),reduced(count_rows,n));partial=0d0
           do b=1,n;do a=1,count_rows
-            partial(a,b)=sum(conjg(d(int(all_row_ids(&
-              row_displs(owner_rank+1)+first+a-1)),int(row_ids)))*right_rows(:,b))
+            partial(a,b)=sum(conjg(d(int(row_ids),int(all_row_ids(&
+              row_displs(owner_rank+1)+first+a-1))))*right_rows(:,b))
           enddo;enddo
           call MPI_Reduce(partial,reduced,count_rows*n,MPI_DOUBLE_COMPLEX,MPI_SUM,owner_rank,comm,ierr)
           if(rank==owner_rank)output_rows(first:first+count_rows-1,:)=reduced

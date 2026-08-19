@@ -5760,7 +5760,9 @@ contains
       call exchange_dg_point_permuted_orbital_rows(comm,basis,target_global_ids(:,operation),&
         image,ok,message)
       if(.not.ok)return
-      expected=matmul(representation(:,:,operation),basis)
+      ! C stores the column action G phi = phi C.  With orbitals stored by
+      ! rows, the corresponding spatial image is C^T phi.
+      expected=matmul(transpose(representation(:,:,operation)),basis)
       local_norms=0d0
       do point=1,nlocal
         local_norms(1)=local_norms(1)+weights(point)*sum(abs(image(:,point)-expected(:,point))**2)
@@ -5818,7 +5820,7 @@ contains
         call exchange_dg_point_permuted_orbital_rows(comm,gradient(i,:,:),&
           target_global_ids(:,operation),image(i,:,:),ok,message)
         if(.not.ok)return
-        expected(i,:,:)=matmul(representation(:,:,operation),gradient(i,:,:))
+        expected(i,:,:)=matmul(transpose(representation(:,:,operation)),gradient(i,:,:))
       enddo
       local_norms=0d0
       do point=1,nlocal
@@ -8315,6 +8317,9 @@ contains
         (0d0,0d0),local_overlap,nbasis)
       call MPI_Allreduce(local_overlap,symmetry_overlap(:,:,isym),nbasis*nbasis,&
         MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      ! The contraction above is <G phi|phi> = C^H.  Publish the column-action
+      ! coefficients C defined by G phi = phi C, matching the row-owned API.
+      symmetry_overlap(:,:,isym)=conjg(transpose(symmetry_overlap(:,:,isym)))
     enddo
     ok=.true.
 #else

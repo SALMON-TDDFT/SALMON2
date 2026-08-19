@@ -221,8 +221,8 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
     cmplx(0d0,1d0/sqrt(2d0),8),cmplx(0d0,-1d0/sqrt(2d0),8),&
     cmplx(-1d0/sqrt(2d0),0d0,8)],[2,2])
   gate_hamiltonian=0d0;gate_hamiltonian(1,1)=1d0;gate_hamiltonian(2,2)=2d0
-  gate_hamiltonian=0.5d0*(gate_hamiltonian+matmul(conjg(inversion_generator(:,:,1)),&
-    matmul(gate_hamiltonian,transpose(inversion_generator(:,:,1)))))
+  gate_hamiltonian=0.5d0*(gate_hamiltonian+matmul(conjg(transpose(inversion_generator(:,:,1))),&
+    matmul(gate_hamiltonian,inversion_generator(:,:,1))))
   gate_overlap=0d0;gate_density=0d0
   do i=1,2;gate_overlap(i,i)=1d0;gate_density(i,i)=1d0;enddo
   pencil_h_rows=gate_hamiltonian(int(pencil_row_ids),:)
@@ -235,7 +235,7 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
   call require(ok,trim(message))
   call require(pencil_before(1)<1d-12.and.&
     maxval(abs(sym_h_rows-gate_hamiltonian(int(pencil_row_ids),:)))<1d-12,&
-    'complex row-action representation preserves a covariant Hamiltonian')
+    'complex column-action representation preserves a covariant Hamiltonian')
 
   c4_fingerprint=fingerprint_dg_exact_fragment_symmetry(affine_rotation(:,:,1:4),product_table,1d-10)
   c1_fingerprint=fingerprint_dg_exact_fragment_symmetry(affine_rotation(:,:,1:1),reshape([1],[1,1]),1d-10)
