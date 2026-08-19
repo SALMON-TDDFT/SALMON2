@@ -71,10 +71,8 @@ subroutine zstencil_typical_gpu(io_s,io_e,Nspin,is_array,ie_array,is,ie,idx,idy,
 #define DY(dt) ix,idy(iy+(dt)),iz
 #define DZ(dt) ix,iy,idz(iz+(dt))
 #ifdef USE_OPENACC
-  ! Pulling io out of the collapse is ~1.4x faster on Blackwell but ~1.6x slower on
-  ! Hopper, so choose per device. The binary is built for several architectures at
-  ! once (-gpu=cc80,cc90,...), so this cannot be decided at compile time. Only
-  ! Blackwell and newer are opted in; anything else keeps the original loop.
+  ! Pulling io out of the collapse is ~1.4x faster on Blackwell, ~1.6x slower on
+  ! Hopper; the binary is multi-architecture, so dispatch at runtime.
   if (.not. probed) then
     cuda_stat = cudaGetDevice(cuda_dev)
     cuda_stat = cudaGetDeviceProperties(prop, cuda_dev)

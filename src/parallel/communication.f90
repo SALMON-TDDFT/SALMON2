@@ -306,17 +306,9 @@ contains
     integer :: ierr
     integer :: iprovided
 #ifdef USE_OPENACC
-    ! Force CUDA context creation *before* MPI_Init_thread. Without this,
-    ! UCC's MPI_COMM_WORLD team bootstrap (inside MPI_Init) does CUDA-aware
-    ! UCX rendezvous-protocol probing (cuCtxGetDevice) with no CUDA context
-    ! yet established -- CUDA_ERROR_INVALID_CONTEXT, silently swallowed by
-    ! UCX, which appears to cache a broken protocol config for that team.
-    ! That cached config later fails for real ("cannot find remote protocol
-    ! for: UCC_UCP_CONTEXT inter-node cfg#N") on the first real collective
-    ! that needs it, hanging 2+ node runs. acc_init respects
-    ! CUDA_VISIBLE_DEVICES (already set per-rank by wrapper.sh before this
-    ! point), so this binds the correct GPU. See subwg2-benchmarks'
-    ! salmon-gpu-optimization-ideas skill for the full investigation.
+    ! Establish the CUDA context before MPI_Init_thread: UCC's team bootstrap
+    ! probes CUDA-aware UCX and caches a broken config if none exists yet,
+    ! which later hangs multi-node collectives.
     call acc_init(acc_device_nvidia)
 #endif
     MPI_ERROR_CHECK(call MPI_Init_thread(MPI_THREAD_FUNNELED, iprovided, ierr))

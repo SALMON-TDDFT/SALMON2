@@ -16,28 +16,12 @@
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 MODULE Total_Energy
 
-! ---------------------------------------------------------------------------
-! nvfortran 26.5 OpenACC reduction workaround.
-!
-! Under nvhpc 26.5 the OpenACC reductions in init_ewald (reduction(max:)) and
-! calc_Total_Energy_periodic (reduction(+:)) silently return the reduction
-! IDENTITY (0) instead of the computed value. Verified by building the very
-! same loops as hand-written CUDA kernels on the same GPU with the same data:
-! CUDA gives 74 / 0.4478233939199485 (correct), OpenACC gives 0 / 0.
-! nvhpc 26.3 is unaffected. Both loops are one-time / per-ion-move setup, so
-! running them on the host costs essentially nothing.
-!
-! The book-keeping fill loop in init_ewald is affected the same way (its
-! per-atom counter comes back as 1 instead of ~74), so it is gated too.
-!
-! Unrelated to the compiler, that same fill loop also declared copyin(ewald)
-! -- host->device ONLY -- while writing ewald%bk / ewald%npair_bk inside the
-! region, so those device writes were semantically discarded. The wrong clause
-! is removed here so the GPU path is correct once the gate is relaxed. (That
-! fix on its own does not cure 26.5; the codegen bug above is the blocker.)
-!
-! When NVIDIA fixes this, drop the version test below (or raise the bound).
-! ---------------------------------------------------------------------------
+! nvfortran >= 26.5 silently returns the identity from the OpenACC reductions
+! in init_ewald and calc_Total_Energy_periodic, so those loops run on the host
+! there; they are one-time setup, so the cost is negligible. 26.3 is fine.
+! Raise or drop the version test below once NVIDIA fixes this.
+! Separately, init_ewald's fill loop declared copyin(ewald) while writing
+! ewald%bk / ewald%npair_bk, discarding those device writes; clause removed.
 #if defined(USE_OPENACC)
 #  if defined(__NVCOMPILER_MAJOR__) && (__NVCOMPILER_MAJOR__ > 26 || (__NVCOMPILER_MAJOR__ == 26 && __NVCOMPILER_MINOR__ >= 5))
 #    define SALMON_ACC_REDUCTION_BROKEN 1
