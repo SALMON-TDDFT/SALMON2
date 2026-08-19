@@ -788,7 +788,7 @@ contains
       translation_position_update,translation_position_defect
     real(8)::ow_gradient_path_local(2),ow_gradient_path_global(2),&
       ow_spatial_covariance_relative,ow_spatial_covariance_absolute,&
-      ow_gradient_covariance_absolute,ow_gradient_stencil_norm_bound
+      ow_gradient_covariance_absolute,ow_gradient_stencil_norm_bound,ow_stencil_axis_defect
     real(8),allocatable::translation_position_centers(:,:)
     real(8)::monomial_defect,center_block_leakage,center_representation_unitarity_defect
     type(s_dg_translation_orbit_accumulator)::translation_inverse_state
@@ -1115,6 +1115,23 @@ contains
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global affine generator selection failed';end if
     if(rank==0)write(*,'(a,2(a,i0))')'[OW-GS-DIAGNOSTIC] affine_generator_proof',&
       ' group_order=',size(global_point_product,1),' generator_count=',size(global_affine_generators)
+    if(rank==0)then
+      do i=1,size(global_affine_generators)
+        ow_stencil_axis_defect=0d0
+        do ix=1,3
+          do gradient_distance=1,size(stencil%coef_nab,1)
+            ow_stencil_axis_defect=max(ow_stencil_axis_defect,abs(stencil%coef_nab(gradient_distance,ix)-&
+              sum(abs(global_point_rotations(:,ix,global_affine_generators(i)))*&
+              stencil%coef_nab(gradient_distance,:))))
+          enddo
+        enddo
+        write(*,'(2(a,i0),a,9(i3,1x),a,9(f7.3,1x),a,es16.8)')&
+          '[OW-GS-DIAGNOSTIC] affine_generator index=',i,' operation=',global_affine_generators(i),&
+          ' integer_R=',global_point_integer_rotations(:,:,global_affine_generators(i)),&
+          ' cartesian_R=',global_point_rotations(:,:,global_affine_generators(i)),&
+          ' stencil_axis_defect=',ow_stencil_axis_defect
+      enddo
+    endif
     call measure_dg_grid_map_stencil_defect(dc%icomm_tot,ow_core_ids,&
       global_symmetry_map(:,global_affine_generators),dc%lg_tot%num,system%hgs,&
       global_point_rotations(:,:,global_affine_generators),ow_grid_stencil_defect,ok,message)
