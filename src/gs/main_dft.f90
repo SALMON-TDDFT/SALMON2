@@ -613,6 +613,8 @@ contains
       translation_position_aligned_rows(:,:),translation_position_rotation(:,:),translation_position_tiebreak(:,:)
     complex(8),allocatable::lcfo_fragment_contribution(:,:),lcfo_occupied_core(:,:),lcfo_reference_core(:,:)
     complex(8),allocatable::composed_tile_values(:,:),projector_buffer_tile(:,:)
+    complex(8),allocatable::ow_direct_core_gradients(:,:,:),ow_neighbor_plus_values(:,:),&
+      ow_neighbor_minus_values(:,:)
     complex(8),allocatable::spectral_complement_generator_rows(:,:,:),spectral_complement_trial_rows(:,:),&
       spectral_trial_rows(:,:),&
       spectral_representative_vectors(:,:),spectral_basin_operator(:,:),spectral_wannier_action_rows(:,:,:),&
@@ -646,7 +648,8 @@ contains
     type(s_dg_prepared_spectral_basins)::spectral_prepared_basins
     integer(8),allocatable::physical_ids(:),local_symmetry_map(:,:),ow_pencil_generator_maps(:,:),&
       exact_fragment_symmetry_fingerprints(:),global_symmetry_map(:,:)
-    integer(8),allocatable::lcfo_core_ids(:),initial_core_ids(:),ow_total_density_ids(:)
+    integer(8),allocatable::lcfo_core_ids(:),initial_core_ids(:),ow_total_density_ids(:),&
+      ow_neighbor_plus_ids(:),ow_neighbor_minus_ids(:)
     integer(8),allocatable::all_core_ids(:,:),localized_center_ids(:),orbital_owned_full_ids(:)
     integer(8),allocatable::fixed_center_symmetry_map(:,:),fixed_center_row_ids(:)
     integer(8),allocatable::translation_row_ids(:),translation_stream_row_ids(:)
@@ -676,7 +679,7 @@ contains
     logical,allocatable::core_mask(:)
     logical,allocatable::translation_character_done(:)
     logical,allocatable::lcfo_boundary_mask(:)
-    integer::ix,iy,iz,io,p,nbox,ncore,noccupied,nstate,ntarget,rank,nproc,&
+    integer::ix,iy,iz,io,p,nbox,ncore,noccupied,nstate,ntarget,rank,nproc,gradient_distance,&
       raw_ix,raw_iy,raw_iz,core_index,ierr,allocation_status,&
       local_target_count,w90_nntot,projector_tile_first,projector_tile_last,projector_tile_count
     integer::translation_allocation_status
@@ -781,6 +784,7 @@ contains
     real(8)::translation_alignment_max_defect,translation_gamma_max_defect
     real(8)::translation_position_gram_defect,translation_position_objective,&
       translation_position_update,translation_position_defect
+    real(8)::ow_gradient_path_local(2),ow_gradient_path_global(2)
     real(8),allocatable::translation_position_centers(:,:)
     real(8)::monomial_defect,center_block_leakage,center_representation_unitarity_defect
     type(s_dg_translation_orbit_accumulator)::translation_inverse_state
@@ -2098,6 +2102,48 @@ contains
     call materialize_ow_distributed_core_to_buffer(dc%icomm_tot,ow_core_values,ow_core_ids,&
       physical_ids,ow_box_values,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'post-character core-to-buffer streaming failed';endif
+    allocate(ow_direct_core_gradients(3,ntarget,ncore),ow_neighbor_plus_ids(ncore),&
+      ow_neighbor_minus_ids(ncore));ow_direct_core_gradients=(0d0,0d0)
+    do ix=1,3
+      do gradient_distance=1,size(stencil%coef_nab,1)
+        do core_index=1,ncore
+          raw_ix=int(modulo(ow_core_ids(core_index)-1_8,int(dc%lg_tot%num(1),8)))
+          raw_iy=int(modulo((ow_core_ids(core_index)-1_8)/int(dc%lg_tot%num(1),8),&
+            int(dc%lg_tot%num(2),8)))
+          raw_iz=int((ow_core_ids(core_index)-1_8)/nxy8)
+          select case(ix)
+          case(1)
+            ow_neighbor_minus_ids(core_index)=1_8+int(modulo(raw_ix-gradient_distance,&
+              dc%lg_tot%num(1)),8)+int(dc%lg_tot%num(1),8)*(int(raw_iy,8)+int(dc%lg_tot%num(2),8)*int(raw_iz,8))
+            ow_neighbor_plus_ids(core_index)=1_8+int(modulo(raw_ix+gradient_distance,&
+              dc%lg_tot%num(1)),8)+int(dc%lg_tot%num(1),8)*(int(raw_iy,8)+int(dc%lg_tot%num(2),8)*int(raw_iz,8))
+          case(2)
+            ow_neighbor_minus_ids(core_index)=1_8+int(raw_ix,8)+int(dc%lg_tot%num(1),8)*(&
+              int(modulo(raw_iy-gradient_distance,dc%lg_tot%num(2)),8)+&
+              int(dc%lg_tot%num(2),8)*int(raw_iz,8))
+            ow_neighbor_plus_ids(core_index)=1_8+int(raw_ix,8)+int(dc%lg_tot%num(1),8)*(&
+              int(modulo(raw_iy+gradient_distance,dc%lg_tot%num(2)),8)+&
+              int(dc%lg_tot%num(2),8)*int(raw_iz,8))
+          case default
+            ow_neighbor_minus_ids(core_index)=1_8+int(raw_ix,8)+int(dc%lg_tot%num(1),8)*(&
+              int(raw_iy,8)+int(dc%lg_tot%num(2),8)*&
+              int(modulo(raw_iz-gradient_distance,dc%lg_tot%num(3)),8))
+            ow_neighbor_plus_ids(core_index)=1_8+int(raw_ix,8)+int(dc%lg_tot%num(1),8)*(&
+              int(raw_iy,8)+int(dc%lg_tot%num(2),8)*&
+              int(modulo(raw_iz+gradient_distance,dc%lg_tot%num(3)),8))
+          end select
+        enddo
+        call materialize_ow_distributed_core_to_buffer(dc%icomm_tot,ow_core_values,ow_core_ids,&
+          ow_neighbor_plus_ids,ow_neighbor_plus_values,ok,message)
+        if(ok)call materialize_ow_distributed_core_to_buffer(dc%icomm_tot,ow_core_values,ow_core_ids,&
+          ow_neighbor_minus_ids,ow_neighbor_minus_values,ok,message)
+        if(.not.ok)then;write(0,'(a)')trim(message);error stop 'direct core gradient neighbor stream failed';endif
+        ow_direct_core_gradients(ix,:,:)=ow_direct_core_gradients(ix,:,:)+&
+          stencil%coef_nab(gradient_distance,ix)*(ow_neighbor_plus_values-ow_neighbor_minus_values)
+        deallocate(ow_neighbor_plus_values,ow_neighbor_minus_values)
+      enddo
+    enddo
+    deallocate(ow_neighbor_plus_ids,ow_neighbor_minus_ids)
     deallocate(ow_core_values)
     allocate(ow_box_gradients(3,ntarget,nbox));call periodic_box_gradients(ow_box_values,ow_box_size,&
       stencil%coef_nab,ow_box_gradients)
@@ -2140,6 +2186,17 @@ contains
       ow_core_values(:,core_index)=ow_box_values(:,p)
       ow_core_gradients(:,:,core_index)=ow_box_gradients(:,:,p)
     end do
+    ow_gradient_path_local=0d0
+    do core_index=1,ncore
+      ow_gradient_path_local(1)=ow_gradient_path_local(1)+ow_core_weights(core_index)*&
+        sum(abs(ow_core_gradients(:,:,core_index)-ow_direct_core_gradients(:,:,core_index))**2)
+      ow_gradient_path_local(2)=ow_gradient_path_local(2)+ow_core_weights(core_index)*&
+        sum(abs(ow_direct_core_gradients(:,:,core_index))**2)
+    enddo
+    call MPI_Allreduce(ow_gradient_path_local,ow_gradient_path_global,2,MPI_DOUBLE_PRECISION,&
+      MPI_SUM,dc%icomm_tot,ierr)
+    if(rank==0)write(*,'(a,es16.8)')'[OW-GS-DIAGNOSTIC] buffer/direct gradient relative defect=',&
+      sqrt(max(0d0,ow_gradient_path_global(1))/max(tiny(1d0),ow_gradient_path_global(2)))
     call assemble_dg_distributed_basis_symmetry_overlap(dc%icomm_tot,ow_core_values,ow_core_weights,&
       ow_pencil_generator_maps,ow_pencil_generator_representation,ok,message)
     if(ok)call measure_dg_spatial_basis_covariance(dc%icomm_tot,ow_core_values,ow_core_weights,&
@@ -2161,6 +2218,18 @@ contains
       ' operation=',maxloc(ow_gradient_covariance_transpose,dim=1)
     if(allocated(ow_gradient_covariance_left))deallocate(ow_gradient_covariance_left)
     if(allocated(ow_gradient_covariance_transpose))deallocate(ow_gradient_covariance_transpose)
+    if(ok)call measure_dg_spatial_gradient_covariance(dc%icomm_tot,ow_direct_core_gradients,&
+      ow_core_weights,ow_pencil_generator_maps,ow_pencil_generator_representation,&
+      global_point_rotations(:,:,global_affine_generators),&
+      ow_gradient_covariance_left,ow_gradient_covariance_transpose,ok,message)
+    if(ok.and.rank==0)write(*,'(2(a,es16.8,a,i0))')&
+      '[OW-GS-DIAGNOSTIC] direct core gradient covariance R max=',maxval(ow_gradient_covariance_left),&
+      ' operation=',maxloc(ow_gradient_covariance_left,dim=1),&
+      ' RT max=',maxval(ow_gradient_covariance_transpose),&
+      ' operation=',maxloc(ow_gradient_covariance_transpose,dim=1)
+    if(allocated(ow_gradient_covariance_left))deallocate(ow_gradient_covariance_left)
+    if(allocated(ow_gradient_covariance_transpose))deallocate(ow_gradient_covariance_transpose)
+    deallocate(ow_direct_core_gradients)
     deallocate(ow_pencil_generator_maps)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'pencil generator representation failed';endif
     allocate(ow_pencil_generator_operations,source=global_affine_generators)
