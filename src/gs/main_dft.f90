@@ -1752,6 +1752,7 @@ contains
     endif
     call move_alloc(reindexed_global_symmetry_map,global_symmetry_map)
     call move_alloc(reindexed_fixed_center_symmetry_map,fixed_center_symmetry_map)
+    global_closed_core=ow_core_values
     ow_core_ids=initial_core_ids
     deallocate(initial_core_ids)
     call invert_ow_lattice(dc%system_tot%primitive_a,w90_lattice_inverse,w90_determinant,ok)

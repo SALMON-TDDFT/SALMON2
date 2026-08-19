@@ -311,12 +311,13 @@ layout_transition = re.search(
     r"global_closed_core\s*,\s*ow_core_ids\s*,\s*&?\s*initial_core_ids\s*,\s*ow_core_values.*?"
     r"call\s+reindex_dg_point_maps_between_row_layouts.*?global_symmetry_map.*?"
     r"call\s+reindex_dg_point_maps_between_row_layouts.*?fixed_center_symmetry_map.*?"
+    r"global_closed_core\s*=\s*ow_core_values.*?"
     r"ow_core_ids\s*=\s*initial_core_ids",
     ow_ground_state_body,
     re.I | re.S,
 )
 assert layout_transition, (
-    "the retained core and both point maps must move together into the physical-ID row layout"
+    "the retained basis and both point maps must move together into the physical-ID row layout"
 )
 assert not re.search(
     r"call\s+exchange_dg_point_permuted_orbital_rows\s*\(\s*dc%icomm_tot\s*,\s*"
