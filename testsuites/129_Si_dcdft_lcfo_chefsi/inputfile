@@ -12,6 +12,8 @@
   lcfo_eigensolver='chefsi'
   lcfo_diag_chefsi_filter_degree=60
   lcfo_diag_chefsi_filter_chunk_size=17
+  lcfo_diag_chefsi_max_cycle=200
+  lcfo_diag_chefsi_residual_tolerance=1d-7
 /
 &parallel
   nproc_k=1
