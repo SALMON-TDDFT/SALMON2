@@ -86,7 +86,8 @@ use dg_overlapping_wannier_construction, only: compute_dg_periodic_wannier_cente
 use dg_overlapping_wannier_construction, only: verify_dg_wannier_center_affine_orbits,&
   diagnose_dg_point_center_gauge
 use dg_overlapping_wannier_construction, only: transpose_dg_spatial_cores_to_orbital_owners,&
-  exchange_dg_point_permuted_orbital_rows,measure_dg_spatial_basis_covariance,&
+  exchange_dg_point_permuted_orbital_rows,reindex_dg_point_maps_between_row_layouts,&
+  measure_dg_spatial_basis_covariance,&
   measure_dg_spatial_gradient_covariance,&
   measure_dg_grid_map_stencil_defect,&
   redistribute_dg_owned_orbitals_to_center_fragments,&
@@ -653,6 +654,7 @@ contains
       ow_neighbor_plus_ids(:),ow_neighbor_minus_ids(:),ow_gradient_identity_map(:,:)
     integer(8),allocatable::all_core_ids(:,:),localized_center_ids(:),orbital_owned_full_ids(:)
     integer(8),allocatable::fixed_center_symmetry_map(:,:),fixed_center_row_ids(:)
+    integer(8),allocatable::reindexed_global_symmetry_map(:,:),reindexed_fixed_center_symmetry_map(:,:)
     integer(8),allocatable::translation_row_ids(:),translation_stream_row_ids(:)
     integer(8),allocatable::translation_spatial_ids(:),translation_generator_maps(:,:)
     integer(8),allocatable::translation_position_row_ids(:)
@@ -1715,7 +1717,6 @@ contains
     deallocate(fixed_center_identity,fixed_center_eigenvalues)
     if(allocated(spectral_wannier_action_rows))deallocate(spectral_wannier_action_rows)
     allocate(initial_core_ids(ncore))
-    allocate(ow_core_values(ntarget,ncore))
     core_index=0
     do p=1,nbox
       if(.not.core_mask(p))cycle
@@ -1731,12 +1732,26 @@ contains
         nxy8,8)/real(dc%lg_tot%num(3),8),8))
     enddo
     if(core_index/=ncore)error stop 'initial retained core extent is incomplete'
-    call exchange_dg_point_permuted_orbital_rows(dc%icomm_tot,global_closed_core,&
+    call materialize_ow_distributed_core_to_buffer(dc%icomm_tot,global_closed_core,ow_core_ids,&
       initial_core_ids,ow_core_values,ok,message)
     if(.not.ok)then
       write(0,'(a)')trim(message)
       error stop 'initial retained core redistribution failed'
     endif
+    call reindex_dg_point_maps_between_row_layouts(dc%icomm_tot,ow_core_ids,initial_core_ids,&
+      global_symmetry_map,reindexed_global_symmetry_map,ok,message)
+    if(.not.ok)then
+      write(0,'(a)')trim(message)
+      error stop 'global symmetry-map row-layout transition failed'
+    endif
+    call reindex_dg_point_maps_between_row_layouts(dc%icomm_tot,ow_core_ids,initial_core_ids,&
+      fixed_center_symmetry_map,reindexed_fixed_center_symmetry_map,ok,message)
+    if(.not.ok)then
+      write(0,'(a)')trim(message)
+      error stop 'fixed-center symmetry-map row-layout transition failed'
+    endif
+    call move_alloc(reindexed_global_symmetry_map,global_symmetry_map)
+    call move_alloc(reindexed_fixed_center_symmetry_map,fixed_center_symmetry_map)
     ow_core_ids=initial_core_ids
     deallocate(initial_core_ids)
     call invert_ow_lattice(dc%system_tot%primitive_a,w90_lattice_inverse,w90_determinant,ok)

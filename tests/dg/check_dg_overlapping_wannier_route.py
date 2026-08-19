@@ -306,13 +306,23 @@ for forbidden_position_extent in (
     assert forbidden_position_extent not in re.sub(r"\s+", "", ow_ground_state_body), (
         "periodic-position internal workspace must use translation_sector_rank, not the full retained rank"
     )
-assert re.search(
-    r"call\s+exchange_dg_point_permuted_orbital_rows\s*\(\s*dc%icomm_tot\s*,\s*"
-    r"global_closed_core\s*,\s*&?\s*initial_core_ids\s*,\s*ow_core_values",
+layout_transition = re.search(
+    r"call\s+materialize_ow_distributed_core_to_buffer\s*\(\s*dc%icomm_tot\s*,\s*"
+    r"global_closed_core\s*,\s*ow_core_ids\s*,\s*&?\s*initial_core_ids\s*,\s*ow_core_values.*?"
+    r"call\s+reindex_dg_point_maps_between_row_layouts.*?global_symmetry_map.*?"
+    r"call\s+reindex_dg_point_maps_between_row_layouts.*?fixed_center_symmetry_map.*?"
+    r"ow_core_ids\s*=\s*initial_core_ids",
     ow_ground_state_body,
-), (
-    "the balanced retained-core rows must be redistributed to the original DC core ownership"
+    re.I | re.S,
 )
+assert layout_transition, (
+    "the retained core and both point maps must move together into the physical-ID row layout"
+)
+assert not re.search(
+    r"call\s+exchange_dg_point_permuted_orbital_rows\s*\(\s*dc%icomm_tot\s*,\s*"
+    r"global_closed_core\s*,\s*&?\s*initial_core_ids",
+    ow_ground_state_body,
+), "physical IDs must not be passed to the global-row-index exchange primitive"
 assert "findloc(initial_core_ids,physical_ids(p)" not in re.sub(r"\s+", "", ow_ground_state_body), (
     "production must not assume balanced retained-core ownership equals DC fragment ownership"
 )
@@ -1204,14 +1214,12 @@ assert re.search(
 assert not re.search(r"call\s+replicate_ow_global_symmetry_orbit", adapter_body, re.I), (
     "production must not copy a representative-fragment gauge across the full system"
 )
-materialize_position = adapter_body.lower().index("call materialize_ow_distributed_core_to_buffer")
-direct_core_position = adapter_body.lower().index("call exchange_dg_point_permuted_orbital_rows")
-direct_core_allocation_position = adapter_body.lower().index("allocate(ow_core_values(ntarget,ncore))")
+direct_core_position = adapter_body.lower().index("call materialize_ow_distributed_core_to_buffer")
 localize_position = adapter_body.lower().index("call run_dg_w90_gamma_library")
-metric_position = adapter_body.lower().index("call assemble_dg_stitched_overlap_density_rows")
-assert direct_core_allocation_position < direct_core_position, (
-    "the retained-core redistribution output must be allocated before the MPI exchange"
+materialize_position = adapter_body.lower().index(
+    "call materialize_ow_distributed_core_to_buffer", direct_core_position + 1
 )
+metric_position = adapter_body.lower().index("call assemble_dg_stitched_overlap_density_rows")
 assert direct_core_position < localize_position < materialize_position < metric_position, (
     "localization must use the retained core directly and materialize only the final-gauge buffer"
 )
