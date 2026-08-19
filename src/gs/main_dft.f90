@@ -3003,9 +3003,11 @@ contains
     real(8),allocatable::global_density(:),summed_density(:),core_potential(:),box_potential(:)
     complex(8),allocatable::kinetic_rows(:,:),local_rows(:,:),nonlocal_rows(:,:),boundary_rows(:,:),&
       core_potential_values(:,:),box_potential_values(:,:),sym_h_rows(:,:),sym_s_rows(:,:),sym_rho_rows(:,:)
+    complex(8),allocatable::component_rows(:,:,:)
     real(8)::kinetic_scale,local_scale,nonlocal_scale,hamiltonian_scale,&
       stitched_t_hermiticity,stitched_v_hermiticity,weight_gradient_trace
     real(8)::pencil_before(3),pencil_after(3),boundary_artifact_change,boundary_artifact_magnitude
+    real(8)::component_covariance(3)
     logical::finite_t,finite_local,finite_nonlocal,finite_h
     integer::p,ix,iy,iz,nwann,owned_projectors,rank,ierr
     integer(8)::stitched_operator_peak_elements
@@ -3043,11 +3045,16 @@ contains
     call assemble_ow_nonlocal_rows(comm,nonlocal_rows,owned_projectors,ok,message)
     if(.not.ok)return
     hrows=kinetic_rows+local_rows+nonlocal_rows
+    allocate(component_rows(size(ow_row_ids),nwann,3))
+    component_rows(:,:,1)=kinetic_rows;component_rows(:,:,2)=local_rows
+    component_rows(:,:,3)=nonlocal_rows
     call symmetrize_dg_distributed_pencil_rows(comm,ow_row_ids,hrows,ow_srows,ow_rhorows,&
       boundary_rows,ow_pencil_generator_representation,ow_pencil_generator_operations,&
       ow_pencil_affine_product,ow_pencil_translation_subgroup,ow_pencil_coset_representatives,&
       dg_ow_symmetry_tolerance,sym_h_rows,sym_s_rows,sym_rho_rows,pencil_before,pencil_after,&
-      boundary_artifact_change,boundary_artifact_magnitude,pencil_symmetry_workspace_peak,ok,message)
+      boundary_artifact_change,boundary_artifact_magnitude,pencil_symmetry_workspace_peak,ok,message,&
+      component_rows,component_covariance)
+    deallocate(component_rows)
     if(.not.ok)return
     hrows=sym_h_rows;ow_srows=sym_s_rows;ow_rhorows=sym_rho_rows
     if(rank==0)write(*,'(a,8(a,es16.8),a,i0)')'[OW-GS-DIAGNOSTIC] stitched_pencil_symmetry',&
@@ -3055,6 +3062,9 @@ contains
       ' h_after=',pencil_after(1),' s_after=',pencil_after(2),' rho_after=',pencil_after(3),&
       ' artifact_change=',boundary_artifact_change,' artifact_magnitude=',boundary_artifact_magnitude,&
       ' workspace_peak_elements=',pencil_symmetry_workspace_peak
+    if(rank==0)write(*,'(a,3(a,es16.8))')'[OW-GS-DIAGNOSTIC] stitched_component_covariance',&
+      ' kinetic=',component_covariance(1),' local=',component_covariance(2),&
+      ' nonlocal=',component_covariance(3)
     ow_diag_h_local_bytes=max(ow_diag_h_local_bytes,int(size(hrows),8)*16_8)
     call ow_distributed_hermiticity(comm,ow_row_ids,kinetic_rows,ow_diag_t_hermiticity,&
       kinetic_scale,finite_t)

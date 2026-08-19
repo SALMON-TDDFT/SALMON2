@@ -35,10 +35,12 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
   real(8),allocatable :: hamiltonian_commutator(:),density_commutator(:)
   integer(int64),allocatable :: pencil_row_ids(:)
   complex(8),allocatable :: pencil_h_rows(:,:),pencil_s_rows(:,:),pencil_rho_rows(:,:),&
-    pencil_artifact_rows(:,:),sym_h_rows(:,:),sym_s_rows(:,:),sym_rho_rows(:,:)
+    pencil_artifact_rows(:,:),sym_h_rows(:,:),sym_s_rows(:,:),sym_rho_rows(:,:),&
+    pencil_component_rows(:,:,:)
   complex(8) :: inversion_generator(2,2,1)
   integer :: inversion_product(2,2),inversion_generators(1)
   real(8) :: pencil_before(3),pencil_after(3),artifact_change,artifact_magnitude
+  real(8) :: pencil_component_residual(2)
   real(8) :: pencil_dense_error
   integer(int64) :: pencil_workspace_peak
   integer,allocatable :: fragment_permutation(:,:)
@@ -181,13 +183,19 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
   enddo
   inversion_generator=0d0;inversion_generator(1,1,1)=1d0;inversion_generator(2,2,1)=-1d0
   inversion_product=reshape([1,2,2,1],[2,2]);inversion_generators=2
+  allocate(pencil_component_rows(size(pencil_row_ids),2,2))
+  pencil_component_rows(:,:,1)=pencil_h_rows;pencil_component_rows(:,:,2)=pencil_artifact_rows
   call symmetrize_dg_distributed_pencil_rows(MPI_COMM_WORLD,pencil_row_ids,pencil_h_rows,&
     pencil_s_rows,pencil_rho_rows,pencil_artifact_rows,inversion_generator,inversion_generators,&
     inversion_product,[1],[1,2],1d-12,sym_h_rows,sym_s_rows,sym_rho_rows,pencil_before,pencil_after,&
-    artifact_change,artifact_magnitude,pencil_workspace_peak,ok,message)
+    artifact_change,artifact_magnitude,pencil_workspace_peak,ok,message,&
+    pencil_component_rows,pencil_component_residual)
   call require(ok,trim(message))
   call require(maxval(pencil_before)>0.1d0.and.maxval(pencil_after)<1d-12,&
     'full-group average removes nonsymmetric pencil error')
+  call require(abs(pencil_component_residual(1)-pencil_before(1))<1d-14.and.&
+    pencil_component_residual(2)<1d-14,&
+    'component covariance diagnostic distinguishes broken and invariant operator terms')
   pencil_dense_error=0d0
   do i=1,size(pencil_row_ids)
     if(pencil_row_ids(i)==1)then

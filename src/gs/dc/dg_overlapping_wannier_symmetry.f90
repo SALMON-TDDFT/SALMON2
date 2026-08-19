@@ -23,7 +23,7 @@ contains
       generator_representation,generator_operations,product_table,translation_operations,&
       coset_representatives,tolerance,sym_h_rows,sym_s_rows,&
       sym_rho_rows,before_residual,after_residual,artifact_change,artifact_magnitude,&
-      workspace_peak_elements,ok,message)
+      workspace_peak_elements,ok,message,component_rows,component_residual)
     use mpi
     integer,intent(in)::comm,generator_operations(:),product_table(:,:),translation_operations(:),&
       coset_representatives(:)
@@ -36,7 +36,9 @@ contains
     integer(int64),intent(out)::workspace_peak_elements
     logical,intent(out)::ok
     character(*),intent(out)::message
-    integer::rank,nproc,ierr,n,noperation,ngenerator,identity,total_rows,r,i,j,operation,&
+    complex(8),intent(in),optional::component_rows(:,:,:)
+    real(8),intent(out),optional::component_residual(:)
+    integer::rank,nproc,ierr,n,noperation,ngenerator,identity,total_rows,r,i,j,operation,component,&
       generator,parent_operation,path_length,local_bad,global_bad
     integer,allocatable::row_counts(:),row_displs(:),parent(:),parent_generator(:),queue(:),path(:),&
       seen(:),group_seen(:)
@@ -47,6 +49,7 @@ contains
     real(8)::local_change,local_magnitude,scale(3)
     ok=.false.;message='';before_residual=huge(1d0);after_residual=huge(1d0)
     artifact_change=huge(1d0);artifact_magnitude=huge(1d0);workspace_peak_elements=0_int64
+    if(present(component_residual))component_residual=huge(1d0)
     call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
     n=size(h_rows,2);noperation=size(product_table,1);ngenerator=size(generator_operations)
     local_bad=0
@@ -62,6 +65,13 @@ contains
         any(coset_representatives<1).or.any(coset_representatives>noperation).or.&
         any(product_table<1).or.any(product_table>noperation).or.tolerance<=0d0.or.&
         any(row_ids<1_int64).or.any(row_ids>int(n,int64)))local_bad=1
+    if(present(component_rows).neqv.present(component_residual))local_bad=1
+    if(present(component_rows))then
+      if(size(component_rows,1)/=size(row_ids).or.size(component_rows,2)/=n.or.&
+          size(component_rows,3)/=size(component_residual))local_bad=1
+      if(.not.all(ieee_is_finite(real(component_rows))).or.&
+          .not.all(ieee_is_finite(aimag(component_rows))))local_bad=1
+    endif
     if(.not.all(ieee_is_finite(real(h_rows))).or..not.all(ieee_is_finite(aimag(h_rows))).or.&
         .not.all(ieee_is_finite(real(s_rows))).or..not.all(ieee_is_finite(aimag(s_rows))).or.&
         .not.all(ieee_is_finite(real(rho_rows))).or..not.all(ieee_is_finite(aimag(rho_rows))).or.&
@@ -160,6 +170,7 @@ contains
     sym_artifact_rows=sym_artifact_rows/real(size(coset_representatives),8)
     scale=[global_scale(h_rows),global_scale(s_rows),global_scale(rho_rows)]
     before_residual=0d0;after_residual=0d0
+    if(present(component_residual))component_residual=0d0
     do generator=1,ngenerator
       call transform_rows(h_rows,generator_representation(:,:,generator),check_rows)
       before_residual(1)=max(before_residual(1),global_difference(check_rows,h_rows)/scale(1))
@@ -167,6 +178,15 @@ contains
       before_residual(2)=max(before_residual(2),global_difference(check_rows,s_rows)/scale(2))
       call transform_rows(rho_rows,generator_representation(:,:,generator),check_rows)
       before_residual(3)=max(before_residual(3),global_difference(check_rows,rho_rows)/scale(3))
+      if(present(component_rows))then
+        do component=1,size(component_residual)
+          call transform_rows(component_rows(:,:,component),&
+            generator_representation(:,:,generator),check_rows)
+          component_residual(component)=max(component_residual(component),&
+            global_difference(check_rows,component_rows(:,:,component))/&
+            global_scale(component_rows(:,:,component)))
+        enddo
+      endif
       call transform_rows(sym_h_rows,generator_representation(:,:,generator),check_rows)
       after_residual(1)=max(after_residual(1),global_difference(check_rows,sym_h_rows)/scale(1))
       call transform_rows(sym_s_rows,generator_representation(:,:,generator),check_rows)
