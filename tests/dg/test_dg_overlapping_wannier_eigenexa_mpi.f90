@@ -68,6 +68,8 @@ program test_dg_overlapping_wannier_eigenexa_mpi
     workspace,ok,message)
   if(trim(case_name)/='normal')then
     call require(.not.ok,'negative generalized EigenExa case must reject')
+    if(trim(case_name)=='degenerate')call require(index(message,'gap=')>0.and.&
+      index(message,'threshold=')>0,'degenerate boundary rejection reports spectrum and threshold')
     if(rank==0)write(*,'(3a,i0)')'REJECT ',trim(case_name),' ranks=',nproc
     call eigen_free();call MPI_Finalize(ierr);stop
   endif

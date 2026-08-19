@@ -115,7 +115,7 @@ contains
       local_metric_vectors(:,:),eigenvector_row(:),eigenvector_column(:),&
       h_times_columns(:,:),local_transformed(:,:),global_transformed(:,:),transformed_rows(:,:)
     real(8)::matrix_scale,imaginary_scale,local_scale,global_scale,local_trace,global_trace,&
-      pivot,minimum_pivot,maximum_pivot
+      pivot,minimum_pivot,maximum_pivot,boundary_scale,boundary_gap,boundary_previous,boundary_next
     integer,allocatable::ownership(:)
     integer::n,nlocal,i,j,k,grow,gcol,lrow,lcol,first,count,ierr,rank,pivot_owner,pivot_local
     logical::eigen_ok
@@ -244,8 +244,19 @@ contains
     call eigen_pdsyevd_ex_distributed_blocks(info,n,cyclic_h,all_values,cyclic_vectors,eigen_ok,detail)
     if(.not.eigen_ok)then;message='EigenExa transformed-H diagonalization: '//trim(detail);return;endif
     if(nstate<n)then
-      if(abs(all_values(nstate+1)-all_values(nstate))<=tolerance*max(1d0,maxval(abs(all_values))))then
-        message='occupied boundary splits a symmetry-degenerate generalized eigenspace';return
+      boundary_scale=max(1d0,maxval(abs(all_values)))
+      boundary_gap=abs(all_values(nstate+1)-all_values(nstate))
+      boundary_previous=all_values(nstate)
+      if(nstate>1)boundary_previous=all_values(nstate-1)
+      boundary_next=all_values(nstate+1)
+      if(nstate+1<n)boundary_next=all_values(nstate+2)
+      if(boundary_gap<=tolerance*boundary_scale)then
+        write(message,'(a,7(a,es16.8))')&
+          'occupied boundary splits a symmetry-degenerate generalized eigenspace:',&
+          ' previous=',boundary_previous,' occupied=',all_values(nstate),&
+          ' unoccupied=',all_values(nstate+1),' next=',boundary_next,&
+          ' gap=',boundary_gap,' threshold=',tolerance*boundary_scale,' scale=',boundary_scale
+        return
       endif
     endif
     allocate(global_transformed(n,nstate))
