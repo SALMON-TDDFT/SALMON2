@@ -63,7 +63,7 @@ program test_dg_overlapping_wannier_construction_mpi
   type(s_dg_translation_orbit_accumulator)::inverse_accumulator
   type(s_dg_prepared_translation_action)::prepared_translation_action
   type(s_dg_prepared_spectral_basins)::prepared_spectral_basins
-  integer::comm,rank,nproc,ierr,i,j,b,p,point,nlocal,nclosure,index,ncore,fragment_id
+  integer::comm,rank,nproc,ierr,i,j,b,p,point,nlocal,nclosure,index,ncore,fragment_id,x,y
   logical::direct_rows_valid
   integer(8),allocatable::ids(:),box_ids(:),symmetry_map(:,:),broken_symmetry_map(:,:)
   integer,allocatable::fragment(:)
@@ -86,6 +86,9 @@ program test_dg_overlapping_wannier_construction_mpi
   complex(8),allocatable::distributed_basis_overlap_rows(:,:,:)
   complex(8),allocatable::single_symmetry_representation(:,:)
   complex(8),allocatable::convention_basis(:,:),convention_overlap(:,:,:),convention_gradient(:,:,:)
+  complex(8)::axis_swap_basis(2,16),axis_swap_gradient(3,2,16),axis_swap_representation(2,2,1)
+  integer(8)::axis_swap_map(16,1)
+  real(8)::axis_swap_weights(16),axis_swap_rotation(3,3,1)
   complex(8)::convention_expected(2,2),convention_mix(2,2),convention_diagonal(2,2),&
     convention_phase,convention_mode
   integer(8),allocatable::convention_map(:,:)
@@ -1020,6 +1023,32 @@ program test_dg_overlapping_wannier_construction_mpi
       gradient_covariance_left,gradient_covariance_transpose)
     deallocate(convention_basis,convention_weight,convention_map,convention_overlap,&
       convention_residual)
+
+    ! Exercise the complete finite-difference covariance identity with a
+    ! nontrivial Cartesian rotation.  The global grid is 4 x 4 x nproc and
+    ! each rank owns one z plane; the operation exchanges x and y.
+    axis_swap_basis=(0d0,0d0);axis_swap_gradient=(0d0,0d0)
+    axis_swap_weights=1d0;axis_swap_representation=(0d0,0d0)
+    axis_swap_representation(1,2,1)=1d0;axis_swap_representation(2,1,1)=1d0
+    axis_swap_rotation=0d0;axis_swap_rotation(1,2,1)=1d0
+    axis_swap_rotation(2,1,1)=1d0;axis_swap_rotation(3,3,1)=1d0
+    do p=1,16
+      x=modulo(p-1,4);y=(p-1)/4
+      axis_swap_basis(1,p)=sin(2d0*acos(-1d0)*real(x,8)/4d0)
+      axis_swap_basis(2,p)=sin(2d0*acos(-1d0)*real(y,8)/4d0)
+      axis_swap_gradient(1,1,p)=cos(2d0*acos(-1d0)*real(x,8)/4d0)
+      axis_swap_gradient(2,2,p)=cos(2d0*acos(-1d0)*real(y,8)/4d0)
+      axis_swap_map(p,1)=int(16*rank+1+y+4*x,8)
+    enddo
+    call measure_dg_spatial_gradient_covariance(comm,axis_swap_gradient,axis_swap_weights,&
+      axis_swap_map,axis_swap_representation,axis_swap_rotation,&
+      gradient_covariance_left,gradient_covariance_transpose,ok,message,&
+      orbital_action_residual=convention_gradient_candidates)
+    call require(ok,trim(message))
+    call require(gradient_covariance_transpose(1)<1d-12.and.&
+      convention_gradient_candidates(2,1)<1d-12,&
+      'gradient diagnostic commutes with a nontrivial axis-swap finite difference')
+    deallocate(convention_gradient_candidates,gradient_covariance_left,gradient_covariance_transpose)
     distributed_basis=distributed_basis*sqrt(5d0)
     distributed_basis_overlap=distributed_basis_overlap*5d0
     call assemble_dg_distributed_basis_symmetry_overlap_rows(comm,distributed_basis,distributed_weight,&

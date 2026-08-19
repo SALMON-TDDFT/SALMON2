@@ -640,7 +640,7 @@ contains
       occupied_pre_total_residual(:),occupied_pre_boundary_residual(:),occupied_pre_interior_residual(:)
     real(8),allocatable::ow_core_spatial_covariance_residual(:)
     real(8),allocatable::ow_gradient_covariance_left(:),ow_gradient_covariance_transpose(:),&
-      ow_gradient_covariance_candidates(:,:)
+      ow_gradient_covariance_candidates(:,:),ow_gradient_map_commutator(:)
     real(8),allocatable::ow_grid_stencil_defect(:)
     type(t_dg_projection_channel),allocatable::manifest_channels(:)
     type(t_dg_projection_channel),allocatable::projector_tile_channels(:)
@@ -2257,6 +2257,14 @@ contains
         maxval(ow_gradient_covariance_candidates(8,:)),' op=',&
         maxloc(ow_gradient_covariance_candidates(8,:),dim=1)
     endif
+    if(ok)call measure_ow_discrete_gradient_map_commutator(dc%icomm_tot,ow_core_values,&
+      ow_direct_core_gradients,ow_core_weights,ow_core_ids,ow_pencil_generator_maps,&
+      dc%lg_tot%num,stencil%coef_nab,global_point_rotations(:,:,global_affine_generators),&
+      ow_gradient_map_commutator,ok,message)
+    if(ok.and.rank==0)write(*,'(a,es16.8,a,i0)')&
+      '[OW-GS-DIAGNOSTIC] finite-difference/map commutator max=',&
+      maxval(ow_gradient_map_commutator),' operation=',maxloc(ow_gradient_map_commutator,dim=1)
+    if(allocated(ow_gradient_map_commutator))deallocate(ow_gradient_map_commutator)
     if(allocated(ow_gradient_covariance_left))deallocate(ow_gradient_covariance_left)
     if(allocated(ow_gradient_covariance_transpose))deallocate(ow_gradient_covariance_transpose)
     if(allocated(ow_gradient_covariance_candidates))deallocate(ow_gradient_covariance_candidates)
@@ -2888,6 +2896,92 @@ contains
       enddo
     enddo;enddo;enddo
   end subroutine
+
+  subroutine measure_ow_discrete_gradient_map_commutator(comm,values,gradients,weights,&
+      physical_ids,target_rows,grid_size,gradient_coefficients,rotations,residual,ok,message)
+    integer,intent(in)::comm,grid_size(3)
+    complex(8),intent(in)::values(:,:),gradients(:,:,:)
+    real(8),intent(in)::weights(:),gradient_coefficients(:,:),rotations(:,:,:)
+    integer(8),intent(in)::physical_ids(:),target_rows(:,:)
+    real(8),allocatable,intent(out)::residual(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(8),allocatable::image(:,:),mapped_gradient(:,:),expected(:,:),differentiated_image(:,:),&
+      plus_values(:,:),minus_values(:,:)
+    integer(8),allocatable::plus_ids(:),minus_ids(:)
+    real(8)::local_norms(2),global_norms(2)
+    integer::nstate,nlocal,noperation,operation,axis,source_axis,distance,point,status,ierr
+    integer::index(3)
+    logical::collective_ok
+
+    nstate=size(values,1);nlocal=size(values,2);noperation=size(target_rows,2)
+    ok=nstate>0.and.nlocal>0.and.noperation>0.and.size(gradients,1)==3.and.&
+      size(gradients,2)==nstate.and.size(gradients,3)==nlocal.and.size(weights)==nlocal.and.&
+      size(physical_ids)==nlocal.and.size(target_rows,1)==nlocal.and.&
+      all(shape(rotations)==[3,3,noperation]).and.size(gradient_coefficients,2)==3
+    call comm_logical_and(ok,collective_ok,comm)
+    if(.not.collective_ok)then;ok=.false.;message='invalid finite-difference/map commutator contract';return;endif
+    allocate(residual(noperation),image(nstate,nlocal),mapped_gradient(nstate,nlocal),&
+      expected(nstate,nlocal),differentiated_image(nstate,nlocal),plus_ids(nlocal),minus_ids(nlocal),&
+      stat=status)
+    call comm_logical_and(status==0,collective_ok,comm)
+    if(.not.collective_ok)then
+      if(allocated(residual))deallocate(residual)
+      if(allocated(image))deallocate(image)
+      if(allocated(mapped_gradient))deallocate(mapped_gradient)
+      if(allocated(expected))deallocate(expected)
+      if(allocated(differentiated_image))deallocate(differentiated_image)
+      if(allocated(plus_ids))deallocate(plus_ids)
+      if(allocated(minus_ids))deallocate(minus_ids)
+      ok=.false.;message='finite-difference/map commutator allocation failed';return
+    endif
+    do operation=1,noperation
+      call exchange_dg_point_permuted_orbital_rows(comm,values,target_rows(:,operation),image,ok,message)
+      if(.not.ok)return
+      local_norms=0d0
+      do axis=1,3
+        expected=(0d0,0d0)
+        do source_axis=1,3
+          call exchange_dg_point_permuted_orbital_rows(comm,gradients(source_axis,:,:),&
+            target_rows(:,operation),mapped_gradient,ok,message)
+          if(.not.ok)return
+          expected=expected+rotations(source_axis,axis,operation)*mapped_gradient
+        enddo
+        differentiated_image=(0d0,0d0)
+        do distance=1,size(gradient_coefficients,1)
+          do point=1,nlocal
+            index(1)=int(modulo(physical_ids(point)-1_8,int(grid_size(1),8)))
+            index(2)=int(modulo((physical_ids(point)-1_8)/int(grid_size(1),8),int(grid_size(2),8)))
+            index(3)=int((physical_ids(point)-1_8)/int(grid_size(1)*grid_size(2),8))
+            index(axis)=modulo(index(axis)+distance,grid_size(axis))
+            plus_ids(point)=1_8+int(index(1),8)+int(grid_size(1),8)*(&
+              int(index(2),8)+int(grid_size(2),8)*int(index(3),8))
+            index(axis)=modulo(index(axis)-2*distance,grid_size(axis))
+            minus_ids(point)=1_8+int(index(1),8)+int(grid_size(1),8)*(&
+              int(index(2),8)+int(grid_size(2),8)*int(index(3),8))
+          enddo
+          call materialize_ow_distributed_core_to_buffer(comm,image,physical_ids,plus_ids,&
+            plus_values,ok,message)
+          if(ok)call materialize_ow_distributed_core_to_buffer(comm,image,physical_ids,minus_ids,&
+            minus_values,ok,message)
+          if(.not.ok)return
+          differentiated_image=differentiated_image+gradient_coefficients(distance,axis)*&
+            (plus_values-minus_values)
+          deallocate(plus_values,minus_values)
+        enddo
+        do point=1,nlocal
+          local_norms(1)=local_norms(1)+weights(point)*&
+            sum(abs(differentiated_image(:,point)-expected(:,point))**2)
+          local_norms(2)=local_norms(2)+weights(point)*sum(abs(expected(:,point))**2)
+        enddo
+      enddo
+      call MPI_Allreduce(local_norms,global_norms,2,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;ok=.false.;message='finite-difference/map reduction failed';return;endif
+      residual(operation)=sqrt(max(0d0,global_norms(1))/max(tiny(1d0),global_norms(2)))
+    enddo
+    ok=all(residual>=0d0.and.residual<huge(1d0))
+    if(ok)then;message='';else;message='finite-difference/map residual is not finite';endif
+  end subroutine measure_ow_discrete_gradient_map_commutator
 
   subroutine build_dc_translation_symmetry_map(nbox,symmetry_map,ok,message)
     integer,intent(in)::nbox
