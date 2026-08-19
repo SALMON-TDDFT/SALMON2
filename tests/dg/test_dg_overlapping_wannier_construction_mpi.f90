@@ -45,7 +45,7 @@ program test_dg_overlapping_wannier_construction_mpi
     verify_dg_fragment_wannier_streaming_closure,verify_dg_fragment_center_orbit,&
     verify_dg_uniform_fragment_target_rank,assign_dg_overlapping_wannier_occupations,&
     build_dg_balanced_orbital_ownership,transpose_dg_spatial_cores_to_orbital_owners,&
-    exchange_dg_point_permuted_orbital_rows,&
+    exchange_dg_point_permuted_orbital_rows,reindex_dg_point_maps_between_row_layouts,&
     measure_dg_spatial_basis_covariance,&
     measure_dg_spatial_gradient_covariance,&
     measure_dg_grid_map_stencil_defect,&
@@ -98,6 +98,8 @@ program test_dg_overlapping_wannier_construction_mpi
   integer(8)::lcfo_buffer_ids(2),lcfo_core_ids(1)
   integer::orbit_rank,required_orbit_rank,averaged_rank,identity_operation
   integer(8),allocatable::distributed_map(:,:),invalid_orbit_map(:,:)
+  integer(8),allocatable::old_layout_ids(:),new_layout_ids(:),old_layout_map(:,:),&
+    new_layout_map(:,:)
   integer(8),allocatable::affine_local_ids(:),affine_all_ids(:,:),affine_target_ids(:),&
     affine_second_ids(:)
   integer,allocatable::affine_target_owner(:),affine_target_local(:),affine_wrap(:,:),&
@@ -467,6 +469,28 @@ program test_dg_overlapping_wannier_construction_mpi
     permuted_image,ok,message)
   call require(.not.ok,'sparse point exchange collectively rejects duplicate targets')
   deallocate(distributed_map,permuted_image)
+  allocate(old_layout_ids(2),new_layout_ids(2),old_layout_map(2,1))
+  old_layout_ids=[2_8*rank+1_8,2_8*rank+2_8]
+  new_layout_ids=[int(2*nproc-2*rank,8),int(2*nproc-2*rank-1,8)]
+  do point=1,2
+    old_layout_map(point,1)=modulo(old_layout_ids(point),int(2*nproc,8))+1_8
+  enddo
+  call reindex_dg_point_maps_between_row_layouts(comm,old_layout_ids,new_layout_ids,&
+    old_layout_map,new_layout_map,ok,message)
+  call require(ok.and.all(new_layout_map(:,1)==&
+    int(2*nproc,8)-modulo(new_layout_ids,int(2*nproc,8))),&
+    'row-layout reindexing preserves the physical point action')
+  old_layout_ids(2)=old_layout_ids(1)
+  call reindex_dg_point_maps_between_row_layouts(comm,old_layout_ids,new_layout_ids,&
+    old_layout_map,new_layout_map,ok,message)
+  call require(.not.ok,'row-layout reindexing rejects duplicate physical ownership')
+  old_layout_ids=[2_8*rank+1_8,2_8*rank+2_8]
+  old_layout_map(1,1)=int(2*nproc+1,8)
+  call reindex_dg_point_maps_between_row_layouts(comm,old_layout_ids,new_layout_ids,&
+    old_layout_map,new_layout_map,ok,message)
+  call require(.not.ok,'row-layout reindexing rejects an invalid target row')
+  deallocate(old_layout_ids,new_layout_ids,old_layout_map)
+  if(allocated(new_layout_map))deallocate(new_layout_map)
   allocate(center_owners(2*nproc+1))
   do i=1,size(center_owners);center_owners(i)=modulo(i-1,nproc);end do
   allocate(redistribution_buffer_ids(3))
