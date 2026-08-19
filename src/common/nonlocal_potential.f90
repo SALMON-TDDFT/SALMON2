@@ -182,6 +182,10 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   use openacc
   use cudafor
   use mpi, only: MPI_DOUBLE_COMPLEX, MPI_SUM, MPI_IN_PLACE
+#ifdef USE_NCCL
+  use nccl
+  use mpi, only: MPI_CHARACTER
+#endif
 #endif
   implicit none
   intrinsic :: aimag
@@ -197,8 +201,19 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   complex(8),allocatable :: uVpsibox (:,:,:,:,:)
   complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
 #if defined(USE_OPENACC) && defined(USE_GEMM)
-  complex(8), device, allocatable, save :: d_reduce(:,:,:,:,:)
+  complex(8), device, allocatable, save, target :: d_reduce(:,:,:,:,:)
   integer, save :: d_reduce_allocated = 0
+#ifdef USE_NCCL
+  ! NCCL reduces on the GPU; MPI_Allreduce does the arithmetic on the host,
+  ! which costs ~30x on this buffer even though both take a device pointer.
+  type(ncclComm), save :: nccl_comm
+  integer(cuda_stream_kind), save :: nccl_stream
+  logical, save :: nccl_ready = .false.
+  type(ncclUniqueId) :: nccl_uid
+  type(ncclResult) :: nccl_stat
+  real(8), device, pointer :: d_reduce_re(:)
+  integer :: nccl_rank, nccl_size, cuda_stat
+#endif
 #endif
 #ifdef USE_OPENACC
   real(8),allocatable,save :: htpsi_zwf_r(:,:,:,:,:,:,:), htpsi_zwf_i(:,:,:,:,:,:,:)
@@ -411,7 +426,24 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
     end do
     !$acc wait
 
+#ifdef USE_NCCL
+    if (.not. nccl_ready) then
+      call MPI_Comm_rank(info%icomm_r, nccl_rank, mpi_ierr)
+      call MPI_Comm_size(info%icomm_r, nccl_size, mpi_ierr)
+      if (nccl_rank == 0) nccl_stat = ncclGetUniqueId(nccl_uid)
+      call MPI_Bcast(nccl_uid%internal, 128, MPI_CHARACTER, 0, info%icomm_r, mpi_ierr)
+      nccl_stat = ncclCommInitRank(nccl_comm, nccl_size, nccl_uid, nccl_rank)
+      if (nccl_stat /= ncclSuccess) stop 'zpseudo: ncclCommInitRank failed'
+      cuda_stat = cudaStreamCreate(nccl_stream)
+      nccl_ready = .true.
+    end if
+    ! complex sum == double sum over twice as many elements
+    call c_f_pointer(c_devloc(d_reduce), d_reduce_re, [2*Nlma*norb])
+    nccl_stat = ncclAllReduce(d_reduce_re, d_reduce_re, 2*Nlma*norb, ncclDouble, ncclSum, nccl_comm, nccl_stream)
+    cuda_stat = cudaStreamSynchronize(nccl_stream)
+#else
     call MPI_Allreduce(MPI_IN_PLACE, d_reduce, int(Nlma*norb), MPI_DOUBLE_COMPLEX, MPI_SUM, info%icomm_r, mpi_ierr)
+#endif
 
     !$acc parallel loop collapse(5) deviceptr(d_reduce) present(ppg)
     do im=im_s,im_e
