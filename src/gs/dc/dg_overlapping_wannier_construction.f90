@@ -84,6 +84,8 @@ module dg_overlapping_wannier_construction
   public::split_dg_translation_character_sector_eigenexa
 #endif
   public::exchange_dg_point_permuted_orbital_rows
+  public::measure_dg_spatial_basis_covariance
+  public::measure_dg_spatial_gradient_covariance
   public::accept_dg_boundary_calibrated_symmetry
   public::solve_dg_affine_common_fixed_point
   public::compute_dg_periodic_wannier_centers
@@ -5718,6 +5720,130 @@ contains
     ok=.false.;message='distributed symmetry point exchange requires MPI'
 #endif
   end subroutine exchange_dg_point_permuted_orbital_rows
+
+  subroutine measure_dg_spatial_basis_covariance(comm,basis,weights,target_global_ids,&
+      representation,residual,ok,message)
+    integer,intent(in)::comm
+    complex(real64),intent(in)::basis(:,:),representation(:,:,:)
+    real(real64),intent(in)::weights(:)
+    integer(int64),intent(in)::target_global_ids(:,:)
+    real(real64),allocatable,intent(out)::residual(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    complex(real64),allocatable::image(:,:),expected(:,:)
+    real(real64)::local_norms(2),global_norms(2)
+    integer::ierr,nstate,nlocal,noperation,operation,point,status,local_bad,global_bad
+
+    ok=.false.;message=''
+    nstate=size(basis,1);nlocal=size(basis,2);noperation=size(target_global_ids,2)
+    local_bad=merge(0,1,nstate>0.and.nlocal>0.and.noperation>0.and.&
+      size(weights)==nlocal.and.size(target_global_ids,1)==nlocal.and.&
+      all(shape(representation)==[nstate,nstate,noperation]).and.&
+      all(ieee_is_finite(weights)).and.all(weights>=0d0).and.&
+      all(ieee_is_finite(real(basis))).and.all(ieee_is_finite(aimag(basis))).and.&
+      all(ieee_is_finite(real(representation))).and.all(ieee_is_finite(aimag(representation))))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='invalid spatial basis covariance contract';return
+    endif
+    allocate(residual(noperation),image(nstate,nlocal),expected(nstate,nlocal),stat=status)
+    call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(residual))deallocate(residual)
+      if(allocated(image))deallocate(image)
+      if(allocated(expected))deallocate(expected)
+      message='spatial basis covariance workspace allocation failed';return
+    endif
+    do operation=1,noperation
+      call exchange_dg_point_permuted_orbital_rows(comm,basis,target_global_ids(:,operation),&
+        image,ok,message)
+      if(.not.ok)return
+      expected=matmul(representation(:,:,operation),basis)
+      local_norms=0d0
+      do point=1,nlocal
+        local_norms(1)=local_norms(1)+weights(point)*sum(abs(image(:,point)-expected(:,point))**2)
+        local_norms(2)=local_norms(2)+weights(point)*sum(abs(image(:,point))**2)
+      enddo
+      call MPI_Allreduce(local_norms,global_norms,2,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then
+        ok=.false.;message='spatial basis covariance reduction failed';return
+      endif
+      residual(operation)=sqrt(max(0d0,global_norms(1))/max(tiny(1d0),global_norms(2)))
+    enddo
+    ok=all(ieee_is_finite(residual))
+    if(ok)then;message='';else;message='spatial basis covariance residual is not finite';endif
+#else
+    ok=.false.;message='spatial basis covariance measurement requires MPI'
+#endif
+  end subroutine measure_dg_spatial_basis_covariance
+
+  subroutine measure_dg_spatial_gradient_covariance(comm,gradient,weights,target_global_ids,&
+      representation,rotations,left_residual,transpose_residual,ok,message)
+    integer,intent(in)::comm,rotations(:,:,:)
+    complex(real64),intent(in)::gradient(:,:,:),representation(:,:,:)
+    real(real64),intent(in)::weights(:)
+    integer(int64),intent(in)::target_global_ids(:,:)
+    real(real64),allocatable,intent(out)::left_residual(:),transpose_residual(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    complex(real64),allocatable::image(:,:,:),expected(:,:,:),left_vector(:),transpose_vector(:)
+    real(real64)::local_norms(3),global_norms(3)
+    integer::ierr,nstate,nlocal,noperation,operation,point,i,j,status,local_bad,global_bad
+
+    ok=.false.;message='';nstate=size(gradient,2);nlocal=size(gradient,3)
+    noperation=size(target_global_ids,2)
+    local_bad=merge(0,1,size(gradient,1)==3.and.nstate>0.and.nlocal>0.and.noperation>0.and.&
+      size(weights)==nlocal.and.all(shape(target_global_ids)==[nlocal,noperation]).and.&
+      all(shape(representation)==[nstate,nstate,noperation]).and.&
+      all(shape(rotations)==[3,3,noperation]).and.all(weights>=0d0).and.&
+      all(ieee_is_finite(weights)).and.all(ieee_is_finite(real(gradient))).and.&
+      all(ieee_is_finite(aimag(gradient))))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='invalid spatial gradient covariance contract';return
+    endif
+    allocate(left_residual(noperation),transpose_residual(noperation),&
+      image(3,nstate,nlocal),expected(3,nstate,nlocal),left_vector(nstate),&
+      transpose_vector(nstate),stat=status)
+    call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='spatial gradient covariance workspace allocation failed';return
+    endif
+    do operation=1,noperation
+      do i=1,3
+        call exchange_dg_point_permuted_orbital_rows(comm,gradient(i,:,:),&
+          target_global_ids(:,operation),image(i,:,:),ok,message)
+        if(.not.ok)return
+        expected(i,:,:)=matmul(representation(:,:,operation),gradient(i,:,:))
+      enddo
+      local_norms=0d0
+      do point=1,nlocal
+        do i=1,3
+          left_vector=(0d0,0d0);transpose_vector=(0d0,0d0)
+          do j=1,3
+            left_vector=left_vector+real(rotations(i,j,operation),real64)*image(j,:,point)
+            transpose_vector=transpose_vector+real(rotations(j,i,operation),real64)*image(j,:,point)
+          enddo
+          local_norms(1)=local_norms(1)+weights(point)*sum(abs(left_vector-expected(i,:,point))**2)
+          local_norms(2)=local_norms(2)+weights(point)*sum(abs(transpose_vector-expected(i,:,point))**2)
+          local_norms(3)=local_norms(3)+weights(point)*sum(abs(expected(i,:,point))**2)
+        enddo
+      enddo
+      call MPI_Allreduce(local_norms,global_norms,3,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then
+        ok=.false.;message='spatial gradient covariance reduction failed';return
+      endif
+      left_residual(operation)=sqrt(max(0d0,global_norms(1))/max(tiny(1d0),global_norms(3)))
+      transpose_residual(operation)=sqrt(max(0d0,global_norms(2))/max(tiny(1d0),global_norms(3)))
+    enddo
+    ok=all(ieee_is_finite(left_residual)).and.all(ieee_is_finite(transpose_residual))
+    if(ok)then;message='';else;message='spatial gradient covariance residual is not finite';endif
+#else
+    ok=.false.;message='spatial gradient covariance measurement requires MPI'
+#endif
+  end subroutine measure_dg_spatial_gradient_covariance
 
   subroutine accumulate_dg_lcfo_buffer_contributions_to_core(comm,buffer_ids,buffer_contributions,&
       core_ids,core_values,ok,message)

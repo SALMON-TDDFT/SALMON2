@@ -46,6 +46,8 @@ program test_dg_overlapping_wannier_construction_mpi
     verify_dg_uniform_fragment_target_rank,assign_dg_overlapping_wannier_occupations,&
     build_dg_balanced_orbital_ownership,transpose_dg_spatial_cores_to_orbital_owners,&
     exchange_dg_point_permuted_orbital_rows,&
+    measure_dg_spatial_basis_covariance,&
+    measure_dg_spatial_gradient_covariance,&
     redistribute_dg_buffer_orbitals_to_center_fragments,&
     redistribute_dg_owned_orbitals_to_center_fragments,&
     assign_dg_periodic_centers_to_fragments,&
@@ -93,6 +95,10 @@ program test_dg_overlapping_wannier_construction_mpi
   integer::affine_rotation(3,3)
   real(8)::affine_translation(3)
   real(8),allocatable::distributed_weight(:)
+  real(8),allocatable::spatial_covariance_residual(:)
+  real(8),allocatable::gradient_covariance_left(:),gradient_covariance_transpose(:)
+  complex(8),allocatable::distributed_gradient(:,:,:)
+  integer::distributed_rotations(3,3,2)
   real(8),allocatable::averaged_spectrum(:)
   real(8),allocatable::seed_values(:,:)
   real(8),allocatable::occupied_seed_values(:,:)
@@ -924,6 +930,28 @@ program test_dg_overlapping_wannier_construction_mpi
     call require(maxval(abs(distributed_basis_overlap(:,:,3)-&
       reshape([(1d0,0d0),(4d0,0d0),(4d0,0d0),(1d0,0d0)],[2,2])))<1d-12,&
       'distributed full-basis operation may split one core across owners')
+    distributed_basis=distributed_basis/sqrt(5d0)
+    distributed_basis_overlap=distributed_basis_overlap/5d0
+    call measure_dg_spatial_basis_covariance(comm,distributed_basis,distributed_weight,&
+      distributed_map,distributed_basis_overlap,spatial_covariance_residual,ok,message)
+    call require(ok,trim(message))
+    call require(maxval(spatial_covariance_residual(1:2))<1d-12,&
+      'spatial covariance diagnostic accepts exact identity and fragment swap')
+    call require(spatial_covariance_residual(3)>1d-2,&
+      'spatial covariance diagnostic exposes a nonrepresentable split map')
+    allocate(distributed_gradient(3,2,2))
+    do i=1,3;distributed_gradient(i,:,:)=real(i,8)*distributed_basis;enddo
+    distributed_rotations=0
+    do i=1,3;distributed_rotations(i,i,:)=1;enddo
+    call measure_dg_spatial_gradient_covariance(comm,distributed_gradient,distributed_weight,&
+      distributed_map(:,1:2),distributed_basis_overlap(:,:,1:2),distributed_rotations,&
+      gradient_covariance_left,gradient_covariance_transpose,ok,message)
+    call require(ok,trim(message))
+    call require(maxval(gradient_covariance_left)<1d-12.and.&
+      maxval(gradient_covariance_transpose)<1d-12,&
+      'spatial gradient covariance diagnostic accepts exact identity rotations')
+    distributed_basis=distributed_basis*sqrt(5d0)
+    distributed_basis_overlap=distributed_basis_overlap*5d0
     call assemble_dg_distributed_basis_symmetry_overlap_rows(comm,distributed_basis,distributed_weight,&
       distributed_map,distributed_overlap_row_ids,distributed_basis_overlap_rows,&
       row_overlap_workspace_peak,ok,message)

@@ -86,7 +86,9 @@ use dg_overlapping_wannier_construction, only: compute_dg_periodic_wannier_cente
 use dg_overlapping_wannier_construction, only: verify_dg_wannier_center_affine_orbits,&
   diagnose_dg_point_center_gauge
 use dg_overlapping_wannier_construction, only: transpose_dg_spatial_cores_to_orbital_owners,&
-  exchange_dg_point_permuted_orbital_rows,redistribute_dg_owned_orbitals_to_center_fragments,&
+  exchange_dg_point_permuted_orbital_rows,measure_dg_spatial_basis_covariance,&
+  measure_dg_spatial_gradient_covariance,&
+  redistribute_dg_owned_orbitals_to_center_fragments,&
   assign_dg_periodic_centers_to_fragments
 use dg_overlapping_wannier_projection, only: t_dg_projection_channel,&
   build_dg_complete_sp_manifest,evaluate_dg_periodic_sp_projectors,&
@@ -633,6 +635,8 @@ contains
     real(8),allocatable::translation_adapted_spectrum(:)
     real(8),allocatable::occupied_density_before(:),occupied_density_after(:),occupied_density_difference(:),&
       occupied_pre_total_residual(:),occupied_pre_boundary_residual(:),occupied_pre_interior_residual(:)
+    real(8),allocatable::ow_core_spatial_covariance_residual(:)
+    real(8),allocatable::ow_gradient_covariance_left(:),ow_gradient_covariance_transpose(:)
     type(t_dg_projection_channel),allocatable::manifest_channels(:)
     type(t_dg_projection_channel),allocatable::projector_tile_channels(:)
     type(s_dg_overlapping_wannier_construction)::symmetry_basis
@@ -2129,6 +2133,25 @@ contains
     end do
     call assemble_dg_distributed_basis_symmetry_overlap(dc%icomm_tot,ow_core_values,ow_core_weights,&
       ow_pencil_generator_maps,ow_pencil_generator_representation,ok,message)
+    if(ok)call measure_dg_spatial_basis_covariance(dc%icomm_tot,ow_core_values,ow_core_weights,&
+      ow_pencil_generator_maps,ow_pencil_generator_representation,&
+      ow_core_spatial_covariance_residual,ok,message)
+    if(ok.and.rank==0)write(*,'(a,es16.8,a,i0)')&
+      '[OW-GS-DIAGNOSTIC] core spatial generator covariance max=',&
+      maxval(ow_core_spatial_covariance_residual),' operation=',&
+      maxloc(ow_core_spatial_covariance_residual,dim=1)
+    if(allocated(ow_core_spatial_covariance_residual))deallocate(ow_core_spatial_covariance_residual)
+    if(ok)call measure_dg_spatial_gradient_covariance(dc%icomm_tot,ow_core_gradients,ow_core_weights,&
+      ow_pencil_generator_maps,ow_pencil_generator_representation,&
+      global_point_integer_rotations(:,:,global_affine_generators),&
+      ow_gradient_covariance_left,ow_gradient_covariance_transpose,ok,message)
+    if(ok.and.rank==0)write(*,'(2(a,es16.8,a,i0))')&
+      '[OW-GS-DIAGNOSTIC] core gradient covariance R max=',maxval(ow_gradient_covariance_left),&
+      ' operation=',maxloc(ow_gradient_covariance_left,dim=1),&
+      ' RT max=',maxval(ow_gradient_covariance_transpose),&
+      ' operation=',maxloc(ow_gradient_covariance_transpose,dim=1)
+    if(allocated(ow_gradient_covariance_left))deallocate(ow_gradient_covariance_left)
+    if(allocated(ow_gradient_covariance_transpose))deallocate(ow_gradient_covariance_transpose)
     deallocate(ow_pencil_generator_maps)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'pencil generator representation failed';endif
     allocate(ow_pencil_generator_operations,source=global_affine_generators)
