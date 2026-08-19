@@ -85,11 +85,12 @@ program test_dg_overlapping_wannier_construction_mpi
     orbit_gram(:,:)
   complex(8),allocatable::distributed_basis_overlap_rows(:,:,:)
   complex(8),allocatable::single_symmetry_representation(:,:)
-  complex(8),allocatable::convention_basis(:,:),convention_overlap(:,:,:)
+  complex(8),allocatable::convention_basis(:,:),convention_overlap(:,:,:),convention_gradient(:,:,:)
   complex(8)::convention_expected(2,2),convention_mix(2,2),convention_diagonal(2,2),&
     convention_phase,convention_mode
   integer(8),allocatable::convention_map(:,:)
-  real(8),allocatable::convention_weight(:),convention_residual(:)
+  real(8),allocatable::convention_weight(:),convention_residual(:),&
+    convention_gradient_candidates(:,:)
   complex(8)::lcfo_buffer_contribution(2,2),lcfo_core_value(2,1)
   integer(8)::lcfo_buffer_ids(2),lcfo_core_ids(1)
   integer::orbit_rank,required_orbit_rank,averaged_rank,identity_operation
@@ -1002,6 +1003,21 @@ program test_dg_overlapping_wannier_construction_mpi
       convention_map,convention_overlap,convention_residual,ok,message)
     call require(ok.and.maxval(convention_residual)<1d-12,&
       'spatially derived complex representation reconstructs its point image')
+    allocate(convention_gradient(3,2,4))
+    do i=1,3
+      convention_gradient(i,:,:)=cmplx(real(i,8),real(4-i,8),8)*convention_basis
+    enddo
+    call measure_dg_spatial_gradient_covariance(comm,convention_gradient,convention_weight,&
+      convention_map,convention_overlap,distributed_rotations(:,:,1:1),&
+      gradient_covariance_left,gradient_covariance_transpose,ok,message,&
+      orbital_action_residual=convention_gradient_candidates)
+    call require(ok,trim(message))
+    call require(maxval(convention_gradient_candidates(1:2,:))<1d-12,&
+      'gradient diagnostic identifies transpose column action')
+    call require(minval(convention_gradient_candidates(3:8,:))>1d-2,&
+      'gradient diagnostic distinguishes C, conjugate C, and adjoint C actions')
+    deallocate(convention_gradient,convention_gradient_candidates,&
+      gradient_covariance_left,gradient_covariance_transpose)
     deallocate(convention_basis,convention_weight,convention_map,convention_overlap,&
       convention_residual)
     distributed_basis=distributed_basis*sqrt(5d0)

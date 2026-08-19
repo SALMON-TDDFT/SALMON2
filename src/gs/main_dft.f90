@@ -639,7 +639,8 @@ contains
     real(8),allocatable::occupied_density_before(:),occupied_density_after(:),occupied_density_difference(:),&
       occupied_pre_total_residual(:),occupied_pre_boundary_residual(:),occupied_pre_interior_residual(:)
     real(8),allocatable::ow_core_spatial_covariance_residual(:)
-    real(8),allocatable::ow_gradient_covariance_left(:),ow_gradient_covariance_transpose(:)
+    real(8),allocatable::ow_gradient_covariance_left(:),ow_gradient_covariance_transpose(:),&
+      ow_gradient_covariance_candidates(:,:)
     real(8),allocatable::ow_grid_stencil_defect(:)
     type(t_dg_projection_channel),allocatable::manifest_channels(:)
     type(t_dg_projection_channel),allocatable::projector_tile_channels(:)
@@ -2210,14 +2211,38 @@ contains
     if(ok)call measure_dg_spatial_gradient_covariance(dc%icomm_tot,ow_core_gradients,ow_core_weights,&
       ow_pencil_generator_maps,ow_pencil_generator_representation,&
       global_point_rotations(:,:,global_affine_generators),&
-      ow_gradient_covariance_left,ow_gradient_covariance_transpose,ok,message)
+      ow_gradient_covariance_left,ow_gradient_covariance_transpose,ok,message,&
+      orbital_action_residual=ow_gradient_covariance_candidates)
     if(ok.and.rank==0)write(*,'(2(a,es16.8,a,i0))')&
       '[OW-GS-DIAGNOSTIC] core gradient covariance R max=',maxval(ow_gradient_covariance_left),&
       ' operation=',maxloc(ow_gradient_covariance_left,dim=1),&
       ' RT max=',maxval(ow_gradient_covariance_transpose),&
       ' operation=',maxloc(ow_gradient_covariance_transpose,dim=1)
+    if(ok.and.rank==0)then
+      write(*,'(2(a,es16.8,a,i0))')'[OW-GS-DIAGNOSTIC] gradient C^T: R=',&
+        maxval(ow_gradient_covariance_candidates(1,:)),' op=',&
+        maxloc(ow_gradient_covariance_candidates(1,:),dim=1),' RT=',&
+        maxval(ow_gradient_covariance_candidates(2,:)),' op=',&
+        maxloc(ow_gradient_covariance_candidates(2,:),dim=1)
+      write(*,'(2(a,es16.8,a,i0))')'[OW-GS-DIAGNOSTIC] gradient C: R=',&
+        maxval(ow_gradient_covariance_candidates(3,:)),' op=',&
+        maxloc(ow_gradient_covariance_candidates(3,:),dim=1),' RT=',&
+        maxval(ow_gradient_covariance_candidates(4,:)),' op=',&
+        maxloc(ow_gradient_covariance_candidates(4,:),dim=1)
+      write(*,'(2(a,es16.8,a,i0))')'[OW-GS-DIAGNOSTIC] gradient C*: R=',&
+        maxval(ow_gradient_covariance_candidates(5,:)),' op=',&
+        maxloc(ow_gradient_covariance_candidates(5,:),dim=1),' RT=',&
+        maxval(ow_gradient_covariance_candidates(6,:)),' op=',&
+        maxloc(ow_gradient_covariance_candidates(6,:),dim=1)
+      write(*,'(2(a,es16.8,a,i0))')'[OW-GS-DIAGNOSTIC] gradient C^H: R=',&
+        maxval(ow_gradient_covariance_candidates(7,:)),' op=',&
+        maxloc(ow_gradient_covariance_candidates(7,:),dim=1),' RT=',&
+        maxval(ow_gradient_covariance_candidates(8,:)),' op=',&
+        maxloc(ow_gradient_covariance_candidates(8,:),dim=1)
+    endif
     if(allocated(ow_gradient_covariance_left))deallocate(ow_gradient_covariance_left)
     if(allocated(ow_gradient_covariance_transpose))deallocate(ow_gradient_covariance_transpose)
+    if(allocated(ow_gradient_covariance_candidates))deallocate(ow_gradient_covariance_candidates)
     if(ok)call measure_dg_spatial_gradient_covariance(dc%icomm_tot,ow_direct_core_gradients,&
       ow_core_weights,ow_pencil_generator_maps,ow_pencil_generator_representation,&
       global_point_rotations(:,:,global_affine_generators),&

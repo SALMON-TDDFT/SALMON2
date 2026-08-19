@@ -5782,7 +5782,7 @@ contains
   end subroutine measure_dg_spatial_basis_covariance
 
   subroutine measure_dg_spatial_gradient_covariance(comm,gradient,weights,target_global_ids,&
-      representation,rotations,left_residual,transpose_residual,ok,message)
+      representation,rotations,left_residual,transpose_residual,ok,message,orbital_action_residual)
     integer,intent(in)::comm
     real(real64),intent(in)::rotations(:,:,:)
     complex(real64),intent(in)::gradient(:,:,:),representation(:,:,:)
@@ -5791,10 +5791,11 @@ contains
     real(real64),allocatable,intent(out)::left_residual(:),transpose_residual(:)
     logical,intent(out)::ok
     character(*),intent(out)::message
+    real(real64),allocatable,intent(out),optional::orbital_action_residual(:,:)
 #ifdef USE_MPI
     complex(real64),allocatable::image(:,:,:),expected(:,:,:),left_vector(:),transpose_vector(:)
-    real(real64)::local_norms(3),global_norms(3)
-    integer::ierr,nstate,nlocal,noperation,operation,point,i,j,status,local_bad,global_bad
+    real(real64)::local_norms(3),global_norms(3),local_candidates(16),global_candidates(16)
+    integer::ierr,nstate,nlocal,noperation,operation,point,i,j,status,local_bad,global_bad,action
 
     ok=.false.;message='';nstate=size(gradient,2);nlocal=size(gradient,3)
     noperation=size(target_global_ids,2)
@@ -5814,6 +5815,14 @@ contains
     call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
       message='spatial gradient covariance workspace allocation failed';return
+    endif
+    if(present(orbital_action_residual))then
+      allocate(orbital_action_residual(8,noperation),stat=status)
+      call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+        if(allocated(orbital_action_residual))deallocate(orbital_action_residual)
+        message='spatial gradient covariance diagnostic allocation failed';return
+      endif
     endif
     do operation=1,noperation
       do i=1,3
@@ -5841,8 +5850,51 @@ contains
       endif
       left_residual(operation)=sqrt(max(0d0,global_norms(1))/max(tiny(1d0),global_norms(3)))
       transpose_residual(operation)=sqrt(max(0d0,global_norms(2))/max(tiny(1d0),global_norms(3)))
+      if(present(orbital_action_residual))then
+        local_candidates=0d0
+        do action=1,4
+          do i=1,3
+            select case(action)
+            case(1)
+              expected(i,:,:)=matmul(transpose(representation(:,:,operation)),gradient(i,:,:))
+            case(2)
+              expected(i,:,:)=matmul(representation(:,:,operation),gradient(i,:,:))
+            case(3)
+              expected(i,:,:)=matmul(conjg(representation(:,:,operation)),gradient(i,:,:))
+            case(4)
+              expected(i,:,:)=matmul(conjg(transpose(representation(:,:,operation))),gradient(i,:,:))
+            end select
+          enddo
+          do point=1,nlocal
+            do i=1,3
+              left_vector=(0d0,0d0);transpose_vector=(0d0,0d0)
+              do j=1,3
+                left_vector=left_vector+rotations(i,j,operation)*image(j,:,point)
+                transpose_vector=transpose_vector+rotations(j,i,operation)*image(j,:,point)
+              enddo
+              local_candidates(2*action-1)=local_candidates(2*action-1)+weights(point)*&
+                sum(abs(left_vector-expected(i,:,point))**2)
+              local_candidates(2*action)=local_candidates(2*action)+weights(point)*&
+                sum(abs(transpose_vector-expected(i,:,point))**2)
+              local_candidates(8+2*action-1)=local_candidates(8+2*action-1)+weights(point)*&
+                sum(abs(expected(i,:,point))**2)
+              local_candidates(8+2*action)=local_candidates(8+2*action)+weights(point)*&
+                sum(abs(expected(i,:,point))**2)
+            enddo
+          enddo
+        enddo
+        call MPI_Allreduce(local_candidates,global_candidates,16,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then
+          ok=.false.;message='spatial gradient covariance candidate reduction failed';return
+        endif
+        do action=1,8
+          orbital_action_residual(action,operation)=sqrt(max(0d0,global_candidates(action))/&
+            max(tiny(1d0),global_candidates(8+action)))
+        enddo
+      endif
     enddo
     ok=all(ieee_is_finite(left_residual)).and.all(ieee_is_finite(transpose_residual))
+    if(ok.and.present(orbital_action_residual))ok=all(ieee_is_finite(orbital_action_residual))
     if(ok)then;message='';else;message='spatial gradient covariance residual is not finite';endif
 #else
     ok=.false.;message='spatial gradient covariance measurement requires MPI'
