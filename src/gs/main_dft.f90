@@ -3154,7 +3154,7 @@ contains
       ow_pencil_affine_product,ow_pencil_translation_subgroup,ow_pencil_coset_representatives,&
       dg_ow_symmetry_tolerance,sym_h_rows,sym_s_rows,sym_rho_rows,pencil_before,pencil_after,&
       boundary_artifact_change,boundary_artifact_magnitude,pencil_symmetry_workspace_peak,ok,message,&
-      component_rows,component_covariance)
+      component_rows,component_covariance,.true.)
     deallocate(component_rows)
     if(.not.ok)return
     hrows=sym_h_rows;ow_srows=sym_s_rows;ow_rhorows=sym_rho_rows

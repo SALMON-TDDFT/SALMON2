@@ -23,7 +23,7 @@ contains
       generator_representation,generator_operations,product_table,translation_operations,&
       coset_representatives,tolerance,sym_h_rows,sym_s_rows,&
       sym_rho_rows,before_residual,after_residual,artifact_change,artifact_magnitude,&
-      workspace_peak_elements,ok,message,component_rows,component_residual)
+      workspace_peak_elements,ok,message,component_rows,component_residual,require_input_covariance)
     use mpi
     integer,intent(in)::comm,generator_operations(:),product_table(:,:),translation_operations(:),&
       coset_representatives(:)
@@ -38,8 +38,9 @@ contains
     character(*),intent(out)::message
     complex(8),intent(in),optional::component_rows(:,:,:)
     real(8),intent(out),optional::component_residual(:)
+    logical,intent(in),optional::require_input_covariance
     integer::rank,nproc,ierr,n,noperation,ngenerator,identity,total_rows,r,i,j,operation,component,&
-      generator,parent_operation,path_length,local_bad,global_bad
+      generator,parent_operation,path_length,local_bad,global_bad,strict_local,strict_min,strict_max
     integer,allocatable::row_counts(:),row_displs(:),parent(:),parent_generator(:),queue(:),path(:),&
       seen(:),group_seen(:)
     integer(int64),allocatable::all_row_ids(:)
@@ -51,6 +52,15 @@ contains
     artifact_change=huge(1d0);artifact_magnitude=huge(1d0);workspace_peak_elements=0_int64
     if(present(component_residual))component_residual=huge(1d0)
     call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    strict_local=0
+    if(present(require_input_covariance))then
+      if(require_input_covariance)strict_local=1
+    endif
+    call MPI_Allreduce(strict_local,strict_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(strict_local,strict_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.strict_min/=strict_max)then
+      message='inconsistent strict pencil covariance contract';return
+    endif
     n=size(h_rows,2);noperation=size(product_table,1);ngenerator=size(generator_operations)
     local_bad=0
     if(ierr/=MPI_SUCCESS.or.n<1.or.noperation<1.or.ngenerator<1.or.&
@@ -202,6 +212,15 @@ contains
     call MPI_Allreduce(local_change,artifact_change,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     call MPI_Allreduce(local_magnitude,artifact_magnitude,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     call MPI_Allreduce(MPI_IN_PLACE,workspace_peak_elements,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(strict_min==1)then
+      local_bad=merge(1,0,maxval(before_residual)>tolerance)
+      if(present(component_residual))then
+        if(maxval(component_residual)>tolerance)local_bad=1
+      endif
+      if(local_bad/=0)then
+        message='input covariance defect exceeds strict pencil publication tolerance';return
+      endif
+    endif
     if(ierr/=MPI_SUCCESS.or.maxval(after_residual)>tolerance)then
       message='full-group pencil average is not generator invariant';return
     endif
