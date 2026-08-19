@@ -614,7 +614,7 @@ contains
     complex(8),allocatable::lcfo_fragment_contribution(:,:),lcfo_occupied_core(:,:),lcfo_reference_core(:,:)
     complex(8),allocatable::composed_tile_values(:,:),projector_buffer_tile(:,:)
     complex(8),allocatable::ow_direct_core_gradients(:,:,:),ow_neighbor_plus_values(:,:),&
-      ow_neighbor_minus_values(:,:)
+      ow_neighbor_minus_values(:,:),ow_map_probe_values(:,:),ow_map_probe_gradients(:,:,:)
     complex(8),allocatable::spectral_complement_generator_rows(:,:,:),spectral_complement_trial_rows(:,:),&
       spectral_trial_rows(:,:),&
       spectral_representative_vectors(:,:),spectral_basin_operator(:,:),spectral_wannier_action_rows(:,:,:),&
@@ -789,6 +789,7 @@ contains
     real(8)::ow_gradient_path_local(2),ow_gradient_path_global(2),&
       ow_spatial_covariance_relative,ow_spatial_covariance_absolute,&
       ow_gradient_covariance_absolute,ow_gradient_stencil_norm_bound,ow_stencil_axis_defect
+    real(8)::ow_map_probe_angle,ow_map_probe_symbol
     real(8),allocatable::translation_position_centers(:,:)
     real(8)::monomial_defect,center_block_leakage,center_representation_unitarity_defect
     type(s_dg_translation_orbit_accumulator)::translation_inverse_state
@@ -1139,6 +1140,33 @@ contains
     if(rank==0)write(*,'(a,es16.8,a,i0)')'[OW-GS-DIAGNOSTIC] affine grid-stencil defect max=',&
       maxval(ow_grid_stencil_defect),' operation=',maxloc(ow_grid_stencil_defect,dim=1)
     deallocate(ow_grid_stencil_defect)
+    allocate(ow_map_probe_values(1,ncore),ow_map_probe_gradients(3,1,ncore))
+    do p=1,ncore
+      raw_ix=int(modulo(ow_core_ids(p)-1_8,int(dc%lg_tot%num(1),8)))
+      raw_iy=int(modulo((ow_core_ids(p)-1_8)/int(dc%lg_tot%num(1),8),&
+        int(dc%lg_tot%num(2),8)))
+      raw_iz=int((ow_core_ids(p)-1_8)/nxy8)
+      ow_map_probe_angle=2d0*acos(-1d0)*(real(raw_ix,8)/real(dc%lg_tot%num(1),8)+&
+        2d0*real(raw_iy,8)/real(dc%lg_tot%num(2),8)+&
+        3d0*real(raw_iz,8)/real(dc%lg_tot%num(3),8))
+      ow_map_probe_values(1,p)=exp(cmplx(0d0,ow_map_probe_angle,8))
+    enddo
+    do ix=1,3
+      ow_map_probe_symbol=0d0
+      do gradient_distance=1,size(stencil%coef_nab,1)
+        ow_map_probe_symbol=ow_map_probe_symbol+2d0*stencil%coef_nab(gradient_distance,ix)*&
+          sin(2d0*acos(-1d0)*real(ix*gradient_distance,8)/real(dc%lg_tot%num(ix),8))
+      enddo
+      ow_map_probe_gradients(ix,1,:)=cmplx(0d0,ow_map_probe_symbol,8)*ow_map_probe_values(1,:)
+    enddo
+    call measure_ow_discrete_gradient_map_commutator(dc%icomm_tot,ow_map_probe_values,&
+      ow_map_probe_gradients,ow_core_weights,ow_core_ids,&
+      global_symmetry_map(:,global_affine_generators),dc%lg_tot%num,stencil%coef_nab,&
+      global_point_rotations(:,:,global_affine_generators),ow_gradient_map_commutator,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'affine plane-wave commutator diagnostic failed';endif
+    if(rank==0)write(*,'(a,*(es16.8,1x))')&
+      '[OW-GS-DIAGNOSTIC] affine plane-wave commutator=',ow_gradient_map_commutator
+    deallocate(ow_map_probe_values,ow_map_probe_gradients,ow_gradient_map_commutator)
     allocate(lcfo_total_symmetry_residual(size(global_affine_generators)),&
       lcfo_boundary_symmetry_residual(size(global_affine_generators)),&
       lcfo_interior_symmetry_residual(size(global_affine_generators)))
