@@ -204,8 +204,8 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   complex(8), device, allocatable, save, target :: d_reduce(:,:,:,:,:)
   integer, save :: d_reduce_allocated = 0
 #ifdef USE_NCCL
-  ! NCCL reduces on the GPU; MPI_Allreduce does the arithmetic on the host,
-  ! which costs ~30x on this buffer even though both take a device pointer.
+  ! NCCL reduces on the GPU; MPI_Allreduce does the arithmetic on the host
+  ! even when handed a device pointer, so it leaves NVLink entirely.
   type(ncclComm), save :: nccl_comm
   integer(cuda_stream_kind), save :: nccl_stream
   logical, save :: nccl_ready = .false.
@@ -441,6 +441,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
     call c_f_pointer(c_devloc(d_reduce), d_reduce_re, [2*Nlma*norb])
     nccl_stat = ncclAllReduce(d_reduce_re, d_reduce_re, 2*Nlma*norb, ncclDouble, ncclSum, nccl_comm, nccl_stream)
     cuda_stat = cudaStreamSynchronize(nccl_stream)
+    if (nccl_stat /= ncclSuccess .or. cuda_stat /= 0) stop 'zpseudo: ncclAllReduce failed'
 #else
     call MPI_Allreduce(MPI_IN_PLACE, d_reduce, int(Nlma*norb), MPI_DOUBLE_COMPLEX, MPI_SUM, info%icomm_r, mpi_ierr)
 #endif
