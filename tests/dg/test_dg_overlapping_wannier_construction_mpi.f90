@@ -85,6 +85,11 @@ program test_dg_overlapping_wannier_construction_mpi
     orbit_gram(:,:)
   complex(8),allocatable::distributed_basis_overlap_rows(:,:,:)
   complex(8),allocatable::single_symmetry_representation(:,:)
+  complex(8),allocatable::convention_basis(:,:),convention_overlap(:,:,:)
+  complex(8)::convention_expected(2,2),convention_mix(2,2),convention_diagonal(2,2),&
+    convention_phase,convention_mode
+  integer(8),allocatable::convention_map(:,:)
+  real(8),allocatable::convention_weight(:),convention_residual(:)
   complex(8)::lcfo_buffer_contribution(2,2),lcfo_core_value(2,1)
   integer(8)::lcfo_buffer_ids(2),lcfo_core_ids(1)
   integer::orbit_rank,required_orbit_rank,averaged_rank,identity_operation
@@ -960,6 +965,45 @@ program test_dg_overlapping_wannier_construction_mpi
     call require(maxval(gradient_covariance_left)<1d-12.and.&
       maxval(gradient_covariance_transpose)<1d-12,&
       'spatial gradient covariance diagnostic accepts exact identity rotations')
+
+    ! A cyclic spatial shift acts diagonally on two Fourier modes.  Mixing the
+    ! modes by a complex unitary produces a representation which is neither
+    ! real, symmetric, nor Hermitian, so every transpose/conjugation choice is
+    ! independently visible.
+    allocate(convention_basis(2,4),convention_weight(4),convention_map(4,1))
+    convention_weight=1d0
+    convention_mix=reshape([cmplx(1d0,0d0,8),cmplx(0d0,1d0,8),&
+      cmplx(0d0,1d0,8),cmplx(1d0,0d0,8)],[2,2])/sqrt(2d0)
+    convention_phase=exp(cmplx(0d0,2d0*acos(-1d0)/real(4*nproc,8),8))
+    convention_diagonal=(0d0,0d0);convention_diagonal(1,1)=1d0
+    convention_diagonal(2,2)=convention_phase
+    convention_expected=transpose(matmul(convention_mix,matmul(convention_diagonal,&
+      conjg(transpose(convention_mix)))))
+    do p=1,4
+      point=4*rank+p
+      convention_mode=exp(cmplx(0d0,2d0*acos(-1d0)*real(point-1,8)/&
+        real(4*nproc,8),8))
+      convention_basis(:,p)=matmul(convention_mix,[cmplx(1d0,0d0,8),convention_mode])/&
+        sqrt(real(4*nproc,8))
+      convention_map(p,1)=int(modulo(point,4*nproc)+1,8)
+    enddo
+    call assemble_dg_distributed_basis_symmetry_overlap(comm,convention_basis,convention_weight,&
+      convention_map,convention_overlap,ok,message)
+    call require(ok,trim(message))
+    if(rank==0)write(*,'(a,4(es16.8,1x))')'SPATIAL_REPRESENTATION_CANDIDATES ',&
+      maxval(abs(convention_overlap(:,:,1)-convention_expected)),&
+      maxval(abs(convention_overlap(:,:,1)-transpose(convention_expected))),&
+      maxval(abs(convention_overlap(:,:,1)-conjg(convention_expected))),&
+      maxval(abs(convention_overlap(:,:,1)-conjg(transpose(convention_expected))))
+    if(rank==0)flush(6)
+    call require(maxval(abs(convention_overlap(:,:,1)-convention_expected))<1d-12,&
+      'spatially derived complex representation has the documented column action')
+    call measure_dg_spatial_basis_covariance(comm,convention_basis,convention_weight,&
+      convention_map,convention_overlap,convention_residual,ok,message)
+    call require(ok.and.maxval(convention_residual)<1d-12,&
+      'spatially derived complex representation reconstructs its point image')
+    deallocate(convention_basis,convention_weight,convention_map,convention_overlap,&
+      convention_residual)
     distributed_basis=distributed_basis*sqrt(5d0)
     distributed_basis_overlap=distributed_basis_overlap*5d0
     call assemble_dg_distributed_basis_symmetry_overlap_rows(comm,distributed_basis,distributed_weight,&
