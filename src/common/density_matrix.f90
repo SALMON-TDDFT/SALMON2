@@ -221,6 +221,10 @@ contains
     use timer
     use iso_c_binding
     use nvtx_wrapper
+#if defined(USE_OPENACC) && defined(USE_GEMM)
+    use cublas
+    use openacc
+#endif
     implicit none
 #if defined(USE_OPENACC)
     interface
@@ -277,6 +281,21 @@ contains
     integer    :: ix,iy,iz
     real(8)    :: rtmp
     complex(8) :: cpsi,xtmp,ytmp,ztmp
+#if defined(USE_OPENACC) && defined(USE_GEMM)
+    ! Batched-GEMM nonlocal current: zpseudo's phase-1 contraction, but four
+    ! projections per (ilma,io) -- zekr_uV plus x/y/z-weighted copies, stacked
+    ! into one packed matrix (4x zpseudo's) so a single GEMM returns all four.
+    integer, parameter :: cur_io_block = 64
+    integer,                     save :: cur_max_nproj = -1
+    integer,    allocatable,     save :: cur_nproj_atom(:), cur_l2g(:,:)
+    complex(8), allocatable,     save :: cur_zekr4(:,:,:), cur_wf(:,:,:), cur_out(:,:,:)
+    real(8),    allocatable,     save :: cur_rinv(:,:)
+    type(cublasHandle),          save :: cur_handle
+    integer    :: cur_ia,cur_p,cur_j,cur_b,cur_natom,cur_ilma,cur_stat
+    integer    :: cur_blk_s,cur_nb,cur_np4
+    complex(8) :: cur_uv,cur_z
+    real(8)    :: cur_w
+#endif
     call nvtxStartRange('calc_current', __LINE__)
     call timer_begin(LOG_CURRENT_CALC)
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
@@ -393,6 +412,101 @@ contains
 !$acc exit data copyout(jx,jy,jz)
           call timer_end(LOG_CURRENT_SO_NONLOCAL)
         else ! yn_spinorbit=='y'
+#if defined(USE_GEMM)
+          cur_natom = size(ppg%mps)
+          if (cur_max_nproj < 0) then
+            allocate(cur_nproj_atom(cur_natom))
+            cur_nproj_atom = 0
+            do cur_ilma=1,ppg%Nlma
+              cur_ia = ppg%ia_tbl(cur_ilma)
+              cur_nproj_atom(cur_ia) = cur_nproj_atom(cur_ia) + 1
+            end do
+            cur_max_nproj = maxval(cur_nproj_atom)
+            allocate(cur_l2g(cur_max_nproj, cur_natom))
+            allocate(cur_rinv(cur_max_nproj, cur_natom))
+            cur_l2g  = 0
+            cur_rinv = 0d0
+            cur_nproj_atom = 0   ! reused as a per-atom fill cursor
+            do cur_ilma=1,ppg%Nlma
+              cur_ia = ppg%ia_tbl(cur_ilma)
+              cur_nproj_atom(cur_ia) = cur_nproj_atom(cur_ia) + 1
+              cur_l2g (cur_nproj_atom(cur_ia), cur_ia) = cur_ilma
+              cur_rinv(cur_nproj_atom(cur_ia), cur_ia) = ppg%rinv_uvu(cur_ilma)
+            end do
+            allocate(cur_zekr4(ppg%nps, 4*cur_max_nproj, cur_natom))
+            allocate(cur_wf   (ppg%nps, cur_io_block,    cur_natom))
+            allocate(cur_out  (4*cur_max_nproj, cur_io_block, cur_natom))
+            cur_zekr4 = (0d0,0d0)
+            cur_wf    = (0d0,0d0)
+!$acc enter data copyin(cur_zekr4,cur_wf,cur_l2g,cur_nproj_atom,cur_rinv) create(cur_out)
+            cur_stat = cublasCreate(cur_handle)
+          end if
+          cur_np4 = 4*cur_max_nproj
+          ! cublas must share OpenACC's stream, or the reduction reads the GEMM early.
+          cur_stat = cublasSetStream(cur_handle, acc_get_cuda_stream(acc_async_sync))
+
+          do ik=info%ik_s,info%ik_e
+            ! Refresh per (call, k-point): zekr_uV carries the time-dependent A(t).
+!$acc parallel loop collapse(3) present(ppg,cur_zekr4,cur_l2g,cur_nproj_atom) private(cur_z)
+            do cur_ia=1,cur_natom
+            do cur_p=1,cur_max_nproj
+            do cur_j=1,ppg%nps
+              if (cur_p <= cur_nproj_atom(cur_ia) .and. cur_j <= ppg%mps(cur_ia)) then
+                cur_z = ppg%zekr_uV(cur_j, cur_l2g(cur_p,cur_ia), ik)
+                cur_zekr4(cur_j, cur_p,                   cur_ia) = cur_z
+                cur_zekr4(cur_j, cur_p +   cur_max_nproj, cur_ia) = cur_z * ppg%Rxyz(1,cur_j,cur_ia)
+                cur_zekr4(cur_j, cur_p + 2*cur_max_nproj, cur_ia) = cur_z * ppg%Rxyz(2,cur_j,cur_ia)
+                cur_zekr4(cur_j, cur_p + 3*cur_max_nproj, cur_ia) = cur_z * ppg%Rxyz(3,cur_j,cur_ia)
+              end if
+            end do
+            end do
+            end do
+
+            cur_blk_s = info%io_s
+            do while (cur_blk_s <= info%io_e)
+              cur_nb = min(cur_io_block, info%io_e - cur_blk_s + 1)
+!$acc parallel loop collapse(3) present(psi,ppg,cur_wf)
+              do cur_ia=1,cur_natom
+              do cur_b=1,cur_nb
+              do cur_j=1,ppg%nps
+                if (cur_j <= ppg%mps(cur_ia)) then
+                  cur_wf(cur_j,cur_b,cur_ia) = psi%zwf( &
+                      ppg%jxyz(1,cur_j,cur_ia), ppg%jxyz(2,cur_j,cur_ia), ppg%jxyz(3,cur_j,cur_ia), &
+                      ispin, cur_blk_s+cur_b-1, ik, im)
+                end if
+              end do
+              end do
+              end do
+
+!$acc host_data use_device(cur_zekr4,cur_wf,cur_out)
+              cur_stat = cublasZgemmStridedBatched(cur_handle, CUBLAS_OP_C, CUBLAS_OP_N, &
+                  cur_np4, cur_nb, ppg%nps, &
+                  (1d0,0d0), cur_zekr4, ppg%nps, int(ppg%nps,8)*int(cur_np4,8), &
+                  cur_wf, ppg%nps, int(ppg%nps,8)*int(cur_io_block,8), &
+                  (0d0,0d0), cur_out, cur_np4, int(cur_np4,8)*int(cur_io_block,8), &
+                  cur_natom)
+!$acc end host_data
+              if (cur_stat /= CUBLAS_STATUS_SUCCESS) stop 'calc_current: cublasZgemmStridedBatched failed'
+
+!$acc parallel loop collapse(2) present(cur_out,cur_rinv,cur_nproj_atom,system) &
+!$acc&              private(cur_uv,cur_w,cur_p) reduction(+:jx,jy,jz)
+              do cur_ia=1,cur_natom
+              do cur_b=1,cur_nb
+                cur_w = system%rocc(cur_blk_s+cur_b-1,ik,ispin) * system%wtk(ik)
+!$acc loop seq
+                do cur_p=1,cur_nproj_atom(cur_ia)
+                  cur_uv = cur_out(cur_p,cur_b,cur_ia) * cur_rinv(cur_p,cur_ia)
+                  jx = jx + 2d0*aimag(conjg(cur_out(cur_p +   cur_max_nproj,cur_b,cur_ia))*cur_uv)*cur_w
+                  jy = jy + 2d0*aimag(conjg(cur_out(cur_p + 2*cur_max_nproj,cur_b,cur_ia))*cur_uv)*cur_w
+                  jz = jz + 2d0*aimag(conjg(cur_out(cur_p + 3*cur_max_nproj,cur_b,cur_ia))*cur_uv)*cur_w
+                end do
+              end do
+              end do
+
+              cur_blk_s = cur_blk_s + cur_nb
+            end do
+          end do
+#else
 !$acc kernels copyin(ispin,im)
 !$acc loop gang private(ik,io,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) independent
           do ik=info%ik_s,info%ik_e
@@ -405,6 +519,7 @@ contains
           end do
           end do
 !$acc end kernels
+#endif
 !$acc exit data copyout(jx,jy,jz)
         end if ! yn_spinorbit=='y'
       else ! yn_jm == 'n'
