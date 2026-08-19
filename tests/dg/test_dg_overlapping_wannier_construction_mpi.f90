@@ -48,6 +48,7 @@ program test_dg_overlapping_wannier_construction_mpi
     exchange_dg_point_permuted_orbital_rows,&
     measure_dg_spatial_basis_covariance,&
     measure_dg_spatial_gradient_covariance,&
+    measure_dg_grid_map_stencil_defect,&
     redistribute_dg_buffer_orbitals_to_center_fragments,&
     redistribute_dg_owned_orbitals_to_center_fragments,&
     assign_dg_periodic_centers_to_fragments,&
@@ -97,6 +98,7 @@ program test_dg_overlapping_wannier_construction_mpi
   real(8),allocatable::distributed_weight(:)
   real(8),allocatable::spatial_covariance_residual(:)
   real(8),allocatable::gradient_covariance_left(:),gradient_covariance_transpose(:)
+  real(8),allocatable::grid_stencil_defect(:)
   complex(8),allocatable::distributed_gradient(:,:,:)
   real(8)::distributed_rotations(3,3,2)
   real(8),allocatable::averaged_spectrum(:)
@@ -939,10 +941,18 @@ program test_dg_overlapping_wannier_construction_mpi
       'spatial covariance diagnostic accepts exact identity and fragment swap')
     call require(spatial_covariance_residual(3)>1d-2,&
       'spatial covariance diagnostic exposes a nonrepresentable split map')
-    allocate(distributed_gradient(3,2,2))
-    do i=1,3;distributed_gradient(i,:,:)=real(i,8)*distributed_basis;enddo
     distributed_rotations=0
     do i=1,3;distributed_rotations(i,i,:)=1;enddo
+    call measure_dg_grid_map_stencil_defect(comm,&
+      [int(2*rank+1,8),int(2*rank+2,8)],distributed_map(:,2:3),[4,1,1],[1d0,1d0,1d0],&
+      distributed_rotations(:,:,1:2),grid_stencil_defect,ok,message)
+    call require(ok,trim(message))
+    call require(grid_stencil_defect(1)<1d-12,&
+      'grid stencil diagnostic accepts an exact periodic translation')
+    call require(grid_stencil_defect(2)>1d-2,&
+      'grid stencil diagnostic exposes a split nonisometric map')
+    allocate(distributed_gradient(3,2,2))
+    do i=1,3;distributed_gradient(i,:,:)=real(i,8)*distributed_basis;enddo
     call measure_dg_spatial_gradient_covariance(comm,distributed_gradient,distributed_weight,&
       distributed_map(:,1:2),distributed_basis_overlap(:,:,1:2),distributed_rotations,&
       gradient_covariance_left,gradient_covariance_transpose,ok,message)

@@ -86,6 +86,7 @@ module dg_overlapping_wannier_construction
   public::exchange_dg_point_permuted_orbital_rows
   public::measure_dg_spatial_basis_covariance
   public::measure_dg_spatial_gradient_covariance
+  public::measure_dg_grid_map_stencil_defect
   public::accept_dg_boundary_calibrated_symmetry
   public::solve_dg_affine_common_fixed_point
   public::compute_dg_periodic_wannier_centers
@@ -5845,6 +5846,94 @@ contains
     ok=.false.;message='spatial gradient covariance measurement requires MPI'
 #endif
   end subroutine measure_dg_spatial_gradient_covariance
+
+  subroutine measure_dg_grid_map_stencil_defect(comm,row_physical_ids,target_global_rows,&
+      grid_size,spacing,rotations,defect,ok,message)
+    integer,intent(in)::comm,grid_size(3)
+    integer(int64),intent(in)::row_physical_ids(:),target_global_rows(:,:)
+    real(real64),intent(in)::spacing(3),rotations(:,:,:)
+    real(real64),allocatable,intent(out)::defect(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer(int64),allocatable::all_ids(:,:),all_targets(:,:),flat_ids(:)
+    integer,allocatable::physical_to_row(:)
+    integer::rank,nproc,ierr,nlocal,noperation,nglobal,status,local_bad,global_bad
+    integer::operation,p,axis,neighbor_physical,neighbor_row,target0,target1
+    integer::source_index(3),neighbor_index(3),target0_index(3),target1_index(3),delta_index(3),i
+    real(real64)::expected_step(3),actual_step(3),local_defect
+
+    ok=.false.;message='';call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    nlocal=size(row_physical_ids);noperation=size(target_global_rows,2)
+    nglobal=product(grid_size)
+    local_bad=merge(0,1,nlocal>0.and.noperation>0.and.nglobal==nlocal*nproc.and.&
+      size(target_global_rows,1)==nlocal.and.all(shape(rotations)==[3,3,noperation]).and.&
+      all(grid_size>0).and.all(spacing>0d0).and.all(ieee_is_finite(spacing)).and.&
+      all(row_physical_ids>=1_int64).and.all(row_physical_ids<=int(nglobal,int64)).and.&
+      all(target_global_rows>=1_int64).and.all(target_global_rows<=int(nglobal,int64)))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='invalid grid-map stencil contract';return
+    endif
+    allocate(all_ids(nlocal,nproc),all_targets(nlocal*nproc,noperation),flat_ids(nglobal),&
+      physical_to_row(nglobal),defect(noperation),stat=status)
+    call MPI_Allreduce(status,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='grid-map stencil workspace allocation failed';return
+    endif
+    call MPI_Allgather(row_physical_ids,nlocal,MPI_INTEGER8,all_ids,nlocal,MPI_INTEGER8,comm,ierr)
+    do operation=1,noperation
+      call MPI_Allgather(target_global_rows(:,operation),nlocal,MPI_INTEGER8,&
+        all_targets(:,operation),nlocal,MPI_INTEGER8,comm,ierr)
+    enddo
+    if(ierr/=MPI_SUCCESS)then;message='grid-map stencil metadata gather failed';return;endif
+    flat_ids=reshape(all_ids,[nglobal]);physical_to_row=0
+    do p=1,nglobal
+      physical_to_row(int(flat_ids(p)))=p
+    enddo
+    local_bad=merge(0,1,all(physical_to_row>0))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='grid-map stencil physical rows are not exactly once';return
+    endif
+    do operation=1,noperation
+      local_defect=0d0
+      do p=1,nlocal
+        source_index(1)=int(modulo(row_physical_ids(p)-1_int64,int(grid_size(1),int64)))
+        source_index(2)=int(modulo((row_physical_ids(p)-1_int64)/int(grid_size(1),int64),&
+          int(grid_size(2),int64)))
+        source_index(3)=int((row_physical_ids(p)-1_int64)/int(grid_size(1)*grid_size(2),int64))
+        target0=int(target_global_rows(p,operation));target0_index(1)=int(modulo(flat_ids(target0)-1_int64,&
+          int(grid_size(1),int64)))
+        target0_index(2)=int(modulo((flat_ids(target0)-1_int64)/int(grid_size(1),int64),&
+          int(grid_size(2),int64)))
+        target0_index(3)=int((flat_ids(target0)-1_int64)/int(grid_size(1)*grid_size(2),int64))
+        do axis=1,3
+          if(grid_size(axis)==1)cycle
+          neighbor_index=source_index;neighbor_index(axis)=modulo(neighbor_index(axis)+1,grid_size(axis))
+          neighbor_physical=1+neighbor_index(1)+grid_size(1)*(neighbor_index(2)+grid_size(2)*neighbor_index(3))
+          neighbor_row=physical_to_row(neighbor_physical);target1=int(all_targets(neighbor_row,operation))
+          target1_index(1)=int(modulo(flat_ids(target1)-1_int64,int(grid_size(1),int64)))
+          target1_index(2)=int(modulo((flat_ids(target1)-1_int64)/int(grid_size(1),int64),&
+            int(grid_size(2),int64)))
+          target1_index(3)=int((flat_ids(target1)-1_int64)/int(grid_size(1)*grid_size(2),int64))
+          do i=1,3
+            delta_index(i)=modulo(target1_index(i)-target0_index(i)+grid_size(i)/2,grid_size(i))-grid_size(i)/2
+            actual_step(i)=real(delta_index(i),real64)*spacing(i)
+          enddo
+          expected_step=rotations(:,axis,operation)*spacing(axis)
+          local_defect=max(local_defect,sqrt(sum((actual_step-expected_step)**2)))
+        enddo
+      enddo
+      call MPI_Allreduce(local_defect,defect(operation),1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='grid-map stencil defect reduction failed';return;endif
+    enddo
+    ok=all(ieee_is_finite(defect))
+    if(ok)then;message='';else;message='grid-map stencil defect is not finite';endif
+#else
+    ok=.false.;message='grid-map stencil measurement requires MPI'
+#endif
+  end subroutine measure_dg_grid_map_stencil_defect
 
   subroutine accumulate_dg_lcfo_buffer_contributions_to_core(comm,buffer_ids,buffer_contributions,&
       core_ids,core_values,ok,message)

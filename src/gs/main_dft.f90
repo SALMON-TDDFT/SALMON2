@@ -88,6 +88,7 @@ use dg_overlapping_wannier_construction, only: verify_dg_wannier_center_affine_o
 use dg_overlapping_wannier_construction, only: transpose_dg_spatial_cores_to_orbital_owners,&
   exchange_dg_point_permuted_orbital_rows,measure_dg_spatial_basis_covariance,&
   measure_dg_spatial_gradient_covariance,&
+  measure_dg_grid_map_stencil_defect,&
   redistribute_dg_owned_orbitals_to_center_fragments,&
   assign_dg_periodic_centers_to_fragments
 use dg_overlapping_wannier_projection, only: t_dg_projection_channel,&
@@ -637,6 +638,7 @@ contains
       occupied_pre_total_residual(:),occupied_pre_boundary_residual(:),occupied_pre_interior_residual(:)
     real(8),allocatable::ow_core_spatial_covariance_residual(:)
     real(8),allocatable::ow_gradient_covariance_left(:),ow_gradient_covariance_transpose(:)
+    real(8),allocatable::ow_grid_stencil_defect(:)
     type(t_dg_projection_channel),allocatable::manifest_channels(:)
     type(t_dg_projection_channel),allocatable::projector_tile_channels(:)
     type(s_dg_overlapping_wannier_construction)::symmetry_basis
@@ -1105,6 +1107,13 @@ contains
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global affine generator selection failed';end if
     if(rank==0)write(*,'(a,2(a,i0))')'[OW-GS-DIAGNOSTIC] affine_generator_proof',&
       ' group_order=',size(global_point_product,1),' generator_count=',size(global_affine_generators)
+    call measure_dg_grid_map_stencil_defect(dc%icomm_tot,ow_core_ids,&
+      global_symmetry_map(:,global_affine_generators),dc%lg_tot%num,system%hgs,&
+      global_point_rotations(:,:,global_affine_generators),ow_grid_stencil_defect,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'affine grid-stencil diagnostic failed';endif
+    if(rank==0)write(*,'(a,es16.8,a,i0)')'[OW-GS-DIAGNOSTIC] affine grid-stencil defect max=',&
+      maxval(ow_grid_stencil_defect),' operation=',maxloc(ow_grid_stencil_defect,dim=1)
+    deallocate(ow_grid_stencil_defect)
     allocate(lcfo_total_symmetry_residual(size(global_affine_generators)),&
       lcfo_boundary_symmetry_residual(size(global_affine_generators)),&
       lcfo_interior_symmetry_residual(size(global_affine_generators)))
