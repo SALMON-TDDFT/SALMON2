@@ -650,7 +650,7 @@ contains
     integer(8),allocatable::physical_ids(:),local_symmetry_map(:,:),ow_pencil_generator_maps(:,:),&
       exact_fragment_symmetry_fingerprints(:),global_symmetry_map(:,:)
     integer(8),allocatable::lcfo_core_ids(:),initial_core_ids(:),ow_total_density_ids(:),&
-      ow_neighbor_plus_ids(:),ow_neighbor_minus_ids(:)
+      ow_neighbor_plus_ids(:),ow_neighbor_minus_ids(:),ow_gradient_identity_map(:,:)
     integer(8),allocatable::all_core_ids(:,:),localized_center_ids(:),orbital_owned_full_ids(:)
     integer(8),allocatable::fixed_center_symmetry_map(:,:),fixed_center_row_ids(:)
     integer(8),allocatable::translation_row_ids(:),translation_stream_row_ids(:)
@@ -771,6 +771,7 @@ contains
       retained_raw_unitarity_defect,retained_unitarity_defect,retained_group_closure_defect,&
       global_retained_group_closure_defect,retained_closure_search_tolerance
     real(8),allocatable::global_point_rotations(:,:,:)
+    real(8)::ow_gradient_identity_rotation(3,3,1)
     real(8),allocatable::global_point_fractional_translations(:,:)
     real(8)::w90_reciprocal_lattice(3,3),w90_lattice_inverse(3,3),w90_determinant,w90_spread(3)
     real(8)::w90_identity_defect,w90_unitarity_defect,w90_closure_defect,w90_covariance_defect,&
@@ -2257,6 +2258,19 @@ contains
         maxval(ow_gradient_covariance_candidates(8,:)),' op=',&
         maxloc(ow_gradient_covariance_candidates(8,:),dim=1)
     endif
+    allocate(ow_gradient_identity_map(ncore,1))
+    ow_gradient_identity_map(:,1)=[(int(rank,8)*int(ncore,8)+int(p,8),p=1,ncore)]
+    ow_gradient_identity_rotation=0d0
+    do i=1,3;ow_gradient_identity_rotation(i,i,1)=1d0;enddo
+    if(ok)call measure_ow_discrete_gradient_map_commutator(dc%icomm_tot,ow_core_values,&
+      ow_direct_core_gradients,ow_core_weights,ow_core_ids,ow_gradient_identity_map,&
+      dc%lg_tot%num,stencil%coef_nab,ow_gradient_identity_rotation,&
+      ow_gradient_map_commutator,ok,message)
+    if(ok.and.rank==0)write(*,'(a,es16.8)')&
+      '[OW-GS-DIAGNOSTIC] finite-difference/value reconstruction defect=',&
+      ow_gradient_map_commutator(1)
+    if(allocated(ow_gradient_map_commutator))deallocate(ow_gradient_map_commutator)
+    deallocate(ow_gradient_identity_map)
     if(ok)call measure_ow_discrete_gradient_map_commutator(dc%icomm_tot,ow_core_values,&
       ow_direct_core_gradients,ow_core_weights,ow_core_ids,ow_pencil_generator_maps,&
       dc%lg_tot%num,stencil%coef_nab,global_point_rotations(:,:,global_affine_generators),&
