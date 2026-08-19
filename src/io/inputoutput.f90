@@ -606,6 +606,8 @@ contains
       & lcfo_eigensolver, &
       & lcfo_diag_chefsi_filter_degree, &
       & lcfo_diag_chefsi_filter_chunk_size, &
+      & lcfo_diag_chefsi_max_cycle, &
+      & lcfo_diag_chefsi_residual_tolerance, &
       & nstate_frag, &
       & energy_cut, &
       & lambda_cut
@@ -1051,6 +1053,8 @@ contains
 #endif
     lcfo_diag_chefsi_filter_degree = 60
     lcfo_diag_chefsi_filter_chunk_size = 0
+    lcfo_diag_chefsi_max_cycle = 200
+    lcfo_diag_chefsi_residual_tolerance = 1d-7
     nstate_frag = 0
     energy_cut = 0d0
     lambda_cut = 1d-3
@@ -1700,6 +1704,8 @@ contains
     call comm_bcast(lcfo_eigensolver, nproc_group_global)
     call comm_bcast(lcfo_diag_chefsi_filter_degree, nproc_group_global)
     call comm_bcast(lcfo_diag_chefsi_filter_chunk_size, nproc_group_global)
+    call comm_bcast(lcfo_diag_chefsi_max_cycle, nproc_group_global)
+    call comm_bcast(lcfo_diag_chefsi_residual_tolerance, nproc_group_global)
     call comm_bcast(nstate_frag, nproc_group_global)
     call comm_bcast(energy_cut, nproc_group_global)
     energy_cut = energy_cut * uenergy_to_au
@@ -2682,6 +2688,11 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') &
       & "lcfo_diag_chefsi_filter_chunk_size", &
       & lcfo_diag_chefsi_filter_chunk_size
+      write(fh_variables_log, '("#",4X,A,"=",I6)') &
+      & "lcfo_diag_chefsi_max_cycle",lcfo_diag_chefsi_max_cycle
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+      & "lcfo_diag_chefsi_residual_tolerance", &
+      & lcfo_diag_chefsi_residual_tolerance
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
@@ -2818,6 +2829,13 @@ contains
       end if
       if(lcfo_diag_chefsi_filter_chunk_size<0) then
         stop 'lcfo_diag_chefsi_filter_chunk_size must be nonnegative.'
+      end if
+      if(lcfo_diag_chefsi_max_cycle<1) then
+        stop 'lcfo_diag_chefsi_max_cycle must be a positive integer.'
+      end if
+      if(lcfo_diag_chefsi_residual_tolerance<=0d0 .or. &
+      & lcfo_diag_chefsi_residual_tolerance>=1d0) then
+        stop 'lcfo_diag_chefsi_residual_tolerance must be between zero and one.'
       end if
 #else
       stop 'lcfo_eigensolver=chefsi requires a build with ScaLAPACK support.'
