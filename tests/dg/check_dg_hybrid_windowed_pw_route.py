@@ -11,6 +11,7 @@ TYPE_SOURCE = ROOT / "src/common/dg_hybrid_windowed_pw_types.f90"
 BASIS_SOURCE = ROOT / "src/common/dg_hybrid_windowed_pw_basis.f90"
 SELECTION_SOURCE = ROOT / "src/gs/dc/dg_hybrid_wannier_selection.f90"
 COMPLEMENT_SOURCE = ROOT / "src/common/dg_hybrid_wannier_complement.f90"
+METRIC_SOURCE = ROOT / "src/common/dg_hybrid_sparse_metric.f90"
 COMMON_CMAKE = ROOT / "src/common/CMakeLists.txt"
 DC_CMAKE = ROOT / "src/gs/dc/CMakeLists.txt"
 
@@ -18,6 +19,7 @@ assert TYPE_SOURCE.is_file(), "missing windowed-PW hybrid catalog types"
 assert BASIS_SOURCE.is_file(), "missing covariant windowed-PW basis primitive"
 assert SELECTION_SOURCE.is_file(), "missing Wannier symmetry-block selector"
 assert COMPLEMENT_SOURCE.is_file(), "missing local Wannier orthogonal-complement primitive"
+assert METRIC_SOURCE.is_file(), "missing row-owned sparse PW metric primitive"
 
 type_source = TYPE_SOURCE.read_text().lower()
 cmake_source = COMMON_CMAKE.read_text().lower()
@@ -43,6 +45,7 @@ assert "dg_hybrid_windowed_pw_types.f90" in cmake_source, (
 )
 assert "dg_hybrid_windowed_pw_basis.f90" in cmake_source
 assert "dg_hybrid_wannier_complement.f90" in cmake_source
+assert "dg_hybrid_sparse_metric.f90" in cmake_source
 assert "dg_hybrid_wannier_selection.f90" in dc_cmake_source
 
 production_source = "\n".join(
