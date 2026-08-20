@@ -6,6 +6,7 @@ set(SOURCES
     dg_hybrid_ground_state_types.f90
     dg_hybrid_generalized_eigensystem.f90
     dg_hybrid_density.f90
+    dg_hybrid_scf.f90
     dg_overlapping_wannier_symmetry.f90
     dg_overlapping_wannier_localization.f90
     dg_overlapping_wannier_projection.f90
