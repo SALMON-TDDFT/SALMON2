@@ -10,6 +10,7 @@ set(SOURCES
     dg_overlapping_wannier_operators.f90
     dg_overlapping_wannier_nonlocal.f90
     dg_overlapping_wannier_observables.f90
+    dg_overlapping_wannier_full_cell.f90
     dg_overlapping_wannier_solver.f90
     dg_overlapping_wannier_density.f90
     dg_overlapping_wannier_scf.f90
