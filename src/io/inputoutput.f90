@@ -1767,6 +1767,9 @@ contains
         iflag_atom_coor = ntype_atom_coor_reduced
       end if
 
+      if_error = yn_restart == 'y' .and. &
+                 (yn_md == 'y' .or. theory == 'dft_md') .and. icount > 0
+
       if(icount==0 .and. (yn_restart == 'y' .or. &
          index(theory,'tddft_')/=0 .or. index(theory,'_tddft')/=0 ) .and. yn_jm == 'n' ) then
 
@@ -1792,6 +1795,20 @@ contains
     call comm_bcast(icount,nproc_group_global)
     call comm_bcast(if_cartesian,nproc_group_global)
     call comm_bcast(iflag_atom_coor,nproc_group_global)
+    call comm_bcast(if_error,nproc_group_global)
+
+    if(if_error)then
+       if (comm_is_root(nproc_id_global))then
+         write(*,"(A)") 'Error in input: Explicit atomic coordinates cannot be specified when restarting an MD calculation.'
+         write(*,"(A)") 'Remove the following input(s); atomic coordinates are read from the restart data:'
+         if(file_atom_coor /= 'none') write(*,"(A)") '  file_atom_coor'
+         if(file_atom_red_coor /= 'none') write(*,"(A)") '  file_atom_red_coor'
+         if(if_nml_coor) write(*,"(A)") '  &atomic_coor'
+         if(if_nml_red_coor) write(*,"(A)") '  &atomic_red_coor'
+       end if
+       call end_parallel
+       stop
+    end if
 
     if(0 < natom .and. icount/=1 .and. yn_jm == 'n')then
        if (comm_is_root(nproc_id_global))then
