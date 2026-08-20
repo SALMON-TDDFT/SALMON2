@@ -11,6 +11,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-length-gauge-") as name:
   subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
     "-fcheck=all","-ffpe-trap=invalid,zero","-fbacktrace",
     str(root/"src/common/dg_hybrid_sparse_metric.f90"),str(root/"src/common/dg_hybrid_sparse_operators.f90"),
+    str(root/"src/rt/dg/rt_dg_hybrid_sparse_exchange.f90"),
     str(root/"src/rt/dg/rt_dg_hybrid_metric_solver.f90"),str(root/"src/rt/dg/rt_dg_hybrid_length_gauge.f90"),
     str(root/"tests/dg/test_rt_dg_hybrid_length_gauge_mpi.f90"),*libs,"-o",str(exe)],check=True)
   env=os.environ.copy();env["OMP_NUM_THREADS"]="1";env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1");fps=[]

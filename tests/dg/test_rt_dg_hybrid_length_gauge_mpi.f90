@@ -17,7 +17,7 @@ program test_rt_dg_hybrid_length_gauge_mpi
   type(s_dg_hybrid_sparse_operators)::operators
   real(real64)::norm_value,energy,polarization(3),previous(3),periods(3),defect,initial_norm,initial_energy,wrapped
   real(real64)::field(3)
-  integer(int64)::workspace,fingerprint,reference_fingerprint
+  integer(int64)::workspace,global_workspace,fingerprint,reference_fingerprint
   logical::ok
   character(256)::message
   external::zgesv
@@ -51,7 +51,9 @@ program test_rt_dg_hybrid_length_gauge_mpi
   call require(ok,trim(message));reference_fingerprint=fingerprint;initial_norm=norm_value;initial_energy=energy
   call dense_step(initial,field,0.01d0,reference)
   defect=owned_defect(next,reference);call require(defect<2d-10,'one-step generalized propagation differs from dense oracle')
-  call require(abs(norm_value-1d0)<2d-11.and.workspace>0_int64.and.iterations>0,'zero-field propagation receipts are invalid')
+  call MPI_Allreduce(workspace,global_workspace,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+  call require(abs(norm_value-1d0)<2d-11.and.global_workspace>0_int64.and.iterations>0,&
+    'zero-field propagation receipts are invalid')
 
   coeff=next
   do step=2,20
@@ -62,6 +64,35 @@ program test_rt_dg_hybrid_length_gauge_mpi
   enddo
   call require(abs(norm_value-initial_norm)<3d-10.and.abs(energy-initial_energy)<3d-10,&
     'zero-field metric norm or energy drifted')
+
+  ! Reject the third packet while retaining stored cross-packet S/H/Z edges.
+  ! Propagation and every observable must use the identical active subspace.
+  call distribute_system(original_s,original_h,original_z,metric,operators)
+  metric%active_rows=[.true.,.true.,.false.];metric%packet_ids=[1,1,2];metric%numerical_rank=2
+  initial=[(0.7d0,0.1d0),(-0.2d0,0.3d0),(0d0,0d0)]
+  dense_s=original_s;dense_h=original_h;dense_z=original_z
+  dense_s(3,:)=(0d0,0d0);dense_s(:,3)=(0d0,0d0)
+  dense_s(3,3)=(1d0,0d0)
+  dense_h(3,:)=(0d0,0d0);dense_h(:,3)=(0d0,0d0)
+  dense_z(:,3,:)=(0d0,0d0);dense_z(:,:,3)=(0d0,0d0)
+  initial=initial/sqrt(real(dot_product(initial,matmul(dense_s,initial))))
+  do i=1,nowned;coeff(i)=initial(int(metric%owned_row_ids(i)));enddo
+  do i=1,nowned;if(metric%owned_row_ids(i)==3_int64)coeff(i)=(5d-13,0d0);enddo
+  field=[0.1d0,-0.03d0,0.02d0];previous=0d0
+  call propagate_rt_dg_hybrid_length_gauge(comm,metric,operators,coeff,field,0.02d0,1d-12,24,previous,periods,&
+    next,norm_value,energy,polarization,iterations,workspace,fingerprint,ok,message)
+  call require(ok,trim(message));call dense_step(initial,field,0.02d0,reference)
+  defect=owned_defect(next,reference)
+  call require(defect<3d-10,'active-subspace length-gauge propagation differs from dense oracle')
+  defect=0d0
+  do i=1,nowned;if(metric%owned_row_ids(i)==3_int64)defect=max(defect,abs(next(i)));enddo
+  call MPI_Allreduce(MPI_IN_PLACE,defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+  call require(defect==0d0,'inactive coefficient was not canonicalized')
+
+  dense_s=original_s;dense_h=original_h;dense_z=original_z
+  call distribute_system(dense_s,dense_h,dense_z,metric,operators)
+  initial=[(0.7d0,0.1d0),(-0.2d0,0.3d0),(0.4d0,-0.1d0)]
+  initial=initial/sqrt(real(dot_product(initial,matmul(dense_s,initial))))
 
   do i=1,nowned;coeff(i)=initial(int(metric%owned_row_ids(i)));enddo
   field=[(0.15d0,0d0),(-0.04d0,0d0),(0.02d0,0d0)];previous=[10.1d0,0d0,0d0]

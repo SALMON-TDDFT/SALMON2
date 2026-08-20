@@ -16,6 +16,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-metric-solver-") as name:
   subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
     "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",
     str(root/"src/common/dg_hybrid_sparse_metric.f90"),
+    str(root/"src/rt/dg/rt_dg_hybrid_sparse_exchange.f90"),
     str(root/"src/rt/dg/rt_dg_hybrid_metric_solver.f90"),
     str(root/"tests/dg/test_rt_dg_hybrid_metric_solver_mpi.f90"),*lapack_libs,"-o",str(exe)],check=True)
   env=os.environ.copy();env["OMP_NUM_THREADS"]="1";env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1");fingerprints=[]
