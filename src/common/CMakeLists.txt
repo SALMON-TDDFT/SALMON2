@@ -18,6 +18,7 @@ set(SOURCES
    dg_buffer_window_projector.f90
    dg_hybrid_windowed_pw_types.f90
    dg_hybrid_windowed_pw_basis.f90
+   dg_hybrid_wannier_complement.f90
    )
 
 if (IS_FUJITSU_COMPILER)
