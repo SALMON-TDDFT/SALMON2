@@ -59,6 +59,10 @@ assert "procedure(dg_hybrid_basis_provider)::materialize_basis" in adapter_sourc
 assert "basis_values(:,:)" not in adapter_source, (
     "operator adapter must materialize bounded basis tiles, not retain the full basis"
 )
+assert "diagnostic full-cell oracle" in adapter_source
+assert "project_dg_hybrid_full_cell_sparse_operators" not in (
+    ROOT / "src/gs/main_dft.f90"
+).read_text().lower(), "the diagnostic full-cell oracle must not become the production assembler"
 
 production_source = "\n".join(
     path.read_text(errors="replace").lower()

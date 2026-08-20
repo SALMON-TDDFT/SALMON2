@@ -7,6 +7,7 @@ module dg_hybrid_sparse_operators
     integer::global_count=0
     integer(int64)::selection_fingerprint=0_int64,window_fingerprint=0_int64,&
       packet_fingerprint=0_int64,complement_fingerprint=0_int64,metric_fingerprint=0_int64,&
+      position_convention_fingerprint=0_int64,&
       fingerprint=0_int64,persistent_bytes=0_int64,transient_peak_bytes=0_int64
     integer(int64),allocatable::owned_row_ids(:)
     integer,allocatable::row_offsets(:),column_ids(:)

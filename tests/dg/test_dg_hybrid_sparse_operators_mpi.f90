@@ -7,6 +7,7 @@ program test_dg_hybrid_sparse_operators_mpi
   implicit none
   integer,parameter::ngrid=9,nbasis=4
   integer::comm,rank,nproc,ierr,nlocal,nowned,i,j,p,pos,k,max_materialized_width
+  integer::permutation(nbasis)
   integer(int64),allocatable::spatial_ids(:),row_ids(:)
   integer,allocatable::offsets(:),columns(:)
   real(real64),allocatable::weights(:),coordinates(:,:)
@@ -18,14 +19,15 @@ program test_dg_hybrid_sparse_operators_mpi
   integer(int64)::persistent_bytes,transient_bytes,fingerprint,reference_fingerprint
   real(real64)::x,pi,defect
   logical::ok
+  logical::force_provider_failure,force_callback_failure
   character(256)::message
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
-  max_materialized_width=0
+  max_materialized_width=0;force_provider_failure=.false.;force_callback_failure=.false.
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr);pi=acos(-1d0)
   nlocal=count([(mod(p-1,nproc)==rank,p=1,ngrid)])
   nowned=count([(mod(i-1,nproc)==rank,i=1,nbasis)])
   allocate(spatial_ids(nlocal),weights(nlocal),coordinates(3,nlocal),basis(nbasis,nlocal),&
-    row_ids(nowned),offsets(nowned+1),columns(nowned*nbasis),expected_metric(nowned*nbasis),&
+    row_ids(nowned),offsets(nowned+1),columns(2*nowned),expected_metric(2*nowned),&
     global_basis(nbasis,ngrid),global_hbasis(nbasis,ngrid))
   pos=0
   do p=1,ngrid
@@ -39,7 +41,11 @@ program test_dg_hybrid_sparse_operators_mpi
   do i=nbasis,1,-1
     if(mod(i-1,nproc)/=rank)cycle
     pos=pos+1;row_ids(pos)=i
-    do j=1,nbasis;k=k+1;columns(k)=j;enddo
+    if(mod(i,2)==1)then
+      k=k+1;columns(k)=1;k=k+1;columns(k)=3
+    else
+      k=k+1;columns(k)=2;k=k+1;columns(k)=4
+    endif
     offsets(pos+1)=k+1
   enddo
   call apply_reference(global_basis,global_hbasis)
@@ -54,7 +60,7 @@ program test_dg_hybrid_sparse_operators_mpi
     expected_metric(k)=reference_s(int(row_ids(i)),columns(k))
   enddo;enddo
   call project_dg_hybrid_full_cell_sparse_operators(comm,ngrid,nbasis,spatial_ids,weights,coordinates,materialize_basis_tile,&
-    row_ids,offsets,columns,expected_metric,2,apply_tile,11_int64,12_int64,13_int64,14_int64,15_int64,1d-11,&
+    row_ids,offsets,columns,expected_metric,2,apply_tile,11_int64,12_int64,13_int64,14_int64,15_int64,16_int64,1d-11,&
     operators,persistent_bytes,transient_bytes,fingerprint,ok,message)
   call require(ok,trim(message));reference_fingerprint=fingerprint;baseline=operators
   defect=0d0
@@ -80,7 +86,7 @@ program test_dg_hybrid_sparse_operators_mpi
     expected_metric(k)=conjg(phase(int(row_ids(i))))*phase(columns(k))*reference_s(int(row_ids(i)),columns(k))
   enddo;enddo
   call project_dg_hybrid_full_cell_sparse_operators(comm,ngrid,nbasis,spatial_ids,weights,coordinates,materialize_basis_tile,&
-    row_ids,offsets,columns,expected_metric,2,apply_tile,11_int64,12_int64,13_int64,14_int64,15_int64,1d-11,&
+    row_ids,offsets,columns,expected_metric,2,apply_tile,11_int64,12_int64,13_int64,14_int64,15_int64,16_int64,1d-11,&
     operators,persistent_bytes,transient_bytes,fingerprint,ok,message)
   call require(ok,trim(message));defect=0d0
   do i=1,nowned;do k=offsets(i),offsets(i+1)-1
@@ -90,6 +96,77 @@ program test_dg_hybrid_sparse_operators_mpi
     defect=max(defect,maxval(abs(operators%position_values(:,k)-expected*baseline%position_values(:,k))))
   enddo;enddo
   call require(defect<3d-12,'hybrid sparse operators are not gauge covariant')
+
+  permutation=[2,1,4,3]
+  do i=1,nbasis;basis(i,:)=global_basis(permutation(i),pack([(p,p=1,ngrid)],[(mod(p-1,nproc)==rank,p=1,ngrid)]));enddo
+  do i=1,nowned;do k=offsets(i),offsets(i+1)-1
+    expected_metric(k)=reference_s(permutation(int(row_ids(i))),permutation(columns(k)))
+  enddo;enddo
+  call project_dg_hybrid_full_cell_sparse_operators(comm,ngrid,nbasis,spatial_ids,weights,coordinates,materialize_basis_tile,&
+    row_ids,offsets,columns,expected_metric,2,apply_tile,11_int64,12_int64,13_int64,14_int64,15_int64,16_int64,1d-11,&
+    operators,persistent_bytes,transient_bytes,fingerprint,ok,message)
+  call require(ok,trim(message));defect=0d0
+  do i=1,nowned;do k=offsets(i),offsets(i+1)-1
+    j=columns(k)
+    defect=max(defect,abs(operators%hamiltonian_values(k)-reference_h(permutation(int(row_ids(i))),permutation(j))))
+    defect=max(defect,maxval(abs(operators%position_values(:,k)-&
+      reference_z(:,permutation(int(row_ids(i))),permutation(j)))))
+  enddo;enddo
+  call require(defect<3d-12,'hybrid sparse operators are not symmetry-permutation covariant')
+
+  do pos=1,nlocal;basis(:,pos)=global_basis(:,int(spatial_ids(pos)));enddo
+  coordinates(1,:)=coordinates(1,:)+0.31d0
+  do i=1,nowned;do k=offsets(i),offsets(i+1)-1
+    expected_metric(k)=reference_s(int(row_ids(i)),columns(k))
+  enddo;enddo
+  call project_dg_hybrid_full_cell_sparse_operators(comm,ngrid,nbasis,spatial_ids,weights,coordinates,materialize_basis_tile,&
+    row_ids,offsets,columns,expected_metric,2,apply_tile,11_int64,12_int64,13_int64,14_int64,15_int64,17_int64,1d-11,&
+    operators,persistent_bytes,transient_bytes,fingerprint,ok,message)
+  call require(ok,trim(message));defect=0d0
+  do i=1,nowned;do k=offsets(i),offsets(i+1)-1
+    j=columns(k)
+    defect=max(defect,abs(operators%position_values(1,k)-reference_z(1,int(row_ids(i)),j)-&
+      0.31d0*reference_s(int(row_ids(i)),j)))
+  enddo;enddo
+  call require(defect<3d-12,'position-origin covariance is incorrect')
+  coordinates(1,:)=coordinates(1,:)-0.31d0
+
+  if(size(expected_metric)>0)expected_metric(1)=expected_metric(1)+(0.1d0,0d0)
+  call project_dg_hybrid_full_cell_sparse_operators(comm,ngrid,nbasis,spatial_ids,weights,coordinates,materialize_basis_tile,&
+    row_ids,offsets,columns,expected_metric,2,apply_tile,11_int64,12_int64,13_int64,14_int64,15_int64,16_int64,1d-11,&
+    operators,persistent_bytes,transient_bytes,fingerprint,ok,message)
+  call require(.not.ok.and..not.allocated(operators%metric_values),'metric provenance mismatch did not cleanly reject')
+  if(size(expected_metric)>0)expected_metric(1)=expected_metric(1)-(0.1d0,0d0)
+  force_provider_failure=.true.
+  call project_dg_hybrid_full_cell_sparse_operators(comm,ngrid,nbasis,spatial_ids,weights,coordinates,materialize_basis_tile,&
+    row_ids,offsets,columns,expected_metric,2,apply_tile,11_int64,12_int64,13_int64,14_int64,15_int64,16_int64,1d-11,&
+    operators,persistent_bytes,transient_bytes,fingerprint,ok,message)
+  call require(.not.ok.and..not.allocated(operators%metric_values),'basis-provider failure did not cleanly reject')
+  force_provider_failure=.false.;force_callback_failure=.true.
+  call project_dg_hybrid_full_cell_sparse_operators(comm,ngrid,nbasis,spatial_ids,weights,coordinates,materialize_basis_tile,&
+    row_ids,offsets,columns,expected_metric,2,apply_tile,11_int64,12_int64,13_int64,14_int64,15_int64,16_int64,1d-11,&
+    operators,persistent_bytes,transient_bytes,fingerprint,ok,message)
+  call require(.not.ok.and..not.allocated(operators%metric_values),'Hamiltonian callback failure did not cleanly reject')
+  force_callback_failure=.false.
+  pos=findloc(row_ids,1_int64,dim=1)
+  if(pos>0)then
+    columns(offsets(pos)+1)=2
+    expected_metric(offsets(pos)+1)=reference_s(1,2)
+  endif
+  call project_dg_hybrid_full_cell_sparse_operators(comm,ngrid,nbasis,spatial_ids,weights,coordinates,materialize_basis_tile,&
+    row_ids,offsets,columns,expected_metric,2,apply_tile,11_int64,12_int64,13_int64,14_int64,15_int64,16_int64,1d-11,&
+    operators,persistent_bytes,transient_bytes,fingerprint,ok,message)
+  call require(.not.ok.and..not.allocated(operators%metric_values),'missing reverse sparse edge was accepted')
+  if(pos>0)then
+    columns(offsets(pos)+1)=3
+    expected_metric(offsets(pos)+1)=reference_s(1,3)
+  endif
+  if(nproc>1)then
+    call project_dg_hybrid_full_cell_sparse_operators(comm,ngrid,nbasis,spatial_ids,weights,coordinates,materialize_basis_tile,&
+      row_ids,offsets,columns,expected_metric,2,apply_tile,11_int64,12_int64,13_int64,14_int64,15_int64,&
+      merge(16_int64,17_int64,rank==0),1d-11,operators,persistent_bytes,transient_bytes,fingerprint,ok,message)
+    call require(.not.ok,'rank-disagreeing position convention receipt was accepted')
+  endif
   if(rank==0)then
     write(*,'(a,i0,a,i0)')'HYBRID_OPERATORS ranks=',nproc,' fingerprint=',reference_fingerprint
     write(*,'(a,i0,a)')'PASS hybrid sparse operators on ',nproc,' ranks'
@@ -103,6 +180,7 @@ contains
     tile_ok=first_column>=1.and.column_count>=1.and.first_column+column_count-1<=nbasis
     max_materialized_width=max(max_materialized_width,column_count)
     tile_ok=tile_ok.and.size(tile_values,1)==column_count.and.size(tile_values,2)==nlocal
+    tile_ok=tile_ok.and..not.force_provider_failure
     if(tile_ok)tile_values=basis(first_column:first_column+column_count-1,:)
   end subroutine materialize_basis_tile
   function coordinate_component(component) result(values)
@@ -132,7 +210,7 @@ contains
         tile_out(t,loc)=(0.4d0+0.1d0*cos(angle))*tile_in(t,loc)+0.17d0*u(q)*projection(t)
       enddo
     enddo
-    callback_ok=ierr==MPI_SUCCESS
+    callback_ok=ierr==MPI_SUCCESS.and..not.force_callback_failure
   end subroutine apply_tile
   subroutine apply_reference(input,output)
     complex(real64),intent(in)::input(:,:);complex(real64),intent(out)::output(:,:)

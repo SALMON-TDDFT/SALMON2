@@ -8,6 +8,9 @@ module dg_hybrid_full_cell_operator_adapter
 #endif
   implicit none
   private
+  ! Diagnostic full-cell oracle used before the scalable neighbor assembler is
+  ! enabled. It bounds memory by materializing basis tiles, but intentionally
+  ! performs global validation and is not a production sparse-assembly route.
   abstract interface
     subroutine dg_hybrid_basis_provider(first_column,column_count,tile_values,ok)
       import real64
@@ -26,7 +29,8 @@ module dg_hybrid_full_cell_operator_adapter
 contains
   subroutine project_dg_hybrid_full_cell_sparse_operators(comm,global_spatial_count,global_basis_count,spatial_ids,weights,&
       coordinates,materialize_basis,row_ids,row_offsets,column_ids,expected_metric_values,tile_width,apply_tile,selection_fingerprint,&
-      window_fingerprint,packet_fingerprint,complement_fingerprint,metric_fingerprint,tolerance,operators,&
+      window_fingerprint,packet_fingerprint,complement_fingerprint,metric_fingerprint,position_convention_fingerprint,&
+      tolerance,operators,&
       persistent_bytes,transient_peak_bytes,fingerprint,ok,message)
     integer,intent(in)::comm,global_spatial_count,global_basis_count,tile_width
     integer(int64),intent(in)::spatial_ids(:),row_ids(:)
@@ -37,6 +41,9 @@ contains
     procedure(dg_hybrid_tile_operator)::apply_tile
     integer(int64),intent(in)::selection_fingerprint,window_fingerprint,packet_fingerprint,&
       complement_fingerprint,metric_fingerprint
+    ! coordinates must already use the caller's chosen periodic branch and
+    ! local-origin convention; this opaque receipt binds that convention.
+    integer(int64),intent(in)::position_convention_fingerprint
     type(s_dg_hybrid_sparse_operators),intent(out)::operators
     integer(int64),intent(out)::persistent_bytes,transient_peak_bytes,fingerprint
     logical,intent(out)::ok
@@ -68,10 +75,14 @@ contains
     call agree_receipt(packet_fingerprint,'packet',local_bad)
     call agree_receipt(complement_fingerprint,'complement',local_bad)
     call agree_receipt(metric_fingerprint,'metric',local_bad)
+    call agree_receipt(position_convention_fingerprint,'position convention',local_bad)
     if(local_bad/=0)return
     if(global_spatial_count<1.or.nbasis<1.or.tile_width<1)local_bad=1
     if(size(weights)/=nlocal.or.any(shape(coordinates)/=[3,nlocal]))local_bad=1
-    if(size(row_offsets)/=nowned+1.or.size(row_offsets)<1)local_bad=1
+    if(nowned==huge(0).or.nnz==huge(0))local_bad=1
+    if(local_bad==0)then
+      if(size(row_offsets)/=nowned+1.or.size(row_offsets)<1)local_bad=1
+    endif
     if(size(expected_metric_values)/=nnz)local_bad=1
     if(any(spatial_ids<1_int64).or.any(spatial_ids>int(global_spatial_count,int64)))local_bad=1
     if(any(row_ids<1_int64).or.any(row_ids>int(nbasis,int64)))local_bad=1
@@ -147,8 +158,9 @@ contains
     safe_scale=sqrt(sqrt(huge(1d0)))/(16d0*real(max(global_spatial_count,nbasis),real64))
     if(ierr/=MPI_SUCCESS.or.global_scale>safe_scale)then;call cleanup();message='unsafe hybrid operator input magnitude';return;endif
     operators%metric_values=(0d0,0d0);operators%hamiltonian_values=(0d0,0d0);operators%position_values=(0d0,0d0)
-    do j0=1,nbasis,tile_width
-      j1=min(nbasis,j0+tile_width-1);width=j1-j0+1
+    j0=1
+    do
+      width=min(tile_width,nbasis-j0+1);j1=j0+width-1
       call materialize_basis(j0,width,tile_in(1:width,:),callback_ok)
       local_bad=merge(0,1,callback_ok.and.finite_matrix(tile_in(1:width,:)))
       call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -197,6 +209,8 @@ contains
           endif
         enddo
       enddo
+      if(j1==nbasis)exit
+      j0=j1+1
     enddo
     local_scale=0d0
     if(nnz>0)local_scale=maxval(abs(operators%metric_values-expected_metric_values))
@@ -236,6 +250,7 @@ contains
     fingerprint=ieor(ishftc(fingerprint,9),packet_fingerprint)
     fingerprint=ieor(ishftc(fingerprint,9),complement_fingerprint)
     fingerprint=ieor(ishftc(fingerprint,9),metric_fingerprint)
+    fingerprint=ieor(ishftc(fingerprint,9),position_convention_fingerprint)
     do row=1,nbasis
       call broadcast_operator_row(row,remote_metric,remote_hamiltonian,remote_position,ierr)
       if(ierr/=MPI_SUCCESS)then;call cleanup();message='hybrid operator fingerprint broadcast failed';return;endif
@@ -253,6 +268,7 @@ contains
     operators%selection_fingerprint=selection_fingerprint;operators%window_fingerprint=window_fingerprint
     operators%packet_fingerprint=packet_fingerprint;operators%complement_fingerprint=complement_fingerprint
     operators%metric_fingerprint=metric_fingerprint;operators%fingerprint=fingerprint
+    operators%position_convention_fingerprint=position_convention_fingerprint
     operators%persistent_bytes=persistent_bytes;operators%transient_peak_bytes=transient_peak_bytes;ok=.true.
 #else
     ok=.false.;message='hybrid full-cell sparse operator adapter requires MPI'
