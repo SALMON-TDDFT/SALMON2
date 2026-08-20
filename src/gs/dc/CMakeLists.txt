@@ -1,6 +1,7 @@
 set(SOURCES
     dc_fragment_geometry.f90
     dg_overlapping_wannier_types.f90
+    dg_hybrid_wannier_selection.f90
     dg_overlapping_wannier_symmetry.f90
     dg_overlapping_wannier_localization.f90
     dg_overlapping_wannier_projection.f90
