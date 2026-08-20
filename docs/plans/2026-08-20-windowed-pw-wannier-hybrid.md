@@ -356,6 +356,12 @@ Commit: `feat: checkpoint the windowed PW hybrid RT state`.
 
 ### Task 10: Connect A Diagnostic-Only GS Production Route
 
+> **Superseded on 2026-08-21:** The approved ground-state route is the Si64
+> self-consistent design in
+> `2026-08-21-si64-hybrid-self-consistent-ground-state-design.md`.  A Si8
+> one-shot generalized eigensolve remains useful only as an algebraic fixture;
+> it must not publish an RT initial state.
+
 **Files:**
 - Modify: `src/gs/main_dft.f90`
 - Modify: `src/io/salmon_global.f90`
@@ -380,16 +386,22 @@ The first production connection builds and validates the hybrid basis but does
 not replace the existing RT route. Default remains off. Add collective input
 validation and clear receipts.
 
-**Step 3: Run Si8 to the full-cell oracle**
+**Step 3: Retain Si8 only as a full-cell algebraic oracle**
 
 Use MPI=8, OMP=1. Compare static generalized spectrum and operator receipts with
-the current full-cell Wannier/reference calculation. Do not start a long RT run.
+the current full-cell Wannier/reference calculation. Do not treat this as a
+material acceptance test and do not publish an RT checkpoint.
 
 **Step 4: Verify and commit**
 
 Commit: `feat: connect diagnostic windowed PW hybrid construction`.
 
 ### Task 11: Connect Hybrid RT Behind An Explicit Flag
+
+> **Additional prerequisite:** RT connection is blocked until the Si64 hybrid
+> SCF has converged and the checkpoint stores the complete distributed occupied
+> manifold plus occupations.  The former single-vector checkpoint is only a
+> propagation primitive fixture.
 
 **Files:**
 - Modify: `src/rt/initialization_rt.f90`
