@@ -13,7 +13,7 @@ interact artificially.
 
 Use two solver stages with one common outer density loop.
 
-1. Establish a reference Si64 calculation with generalized EigenExa inside the
+1. Establish a reference Si64 calculation with complex ScaLAPACK inside the
    existing Pulay density-mixing loop.
 2. Replace only the inner eigensolver with an adaptive block-CG implementation
    and compare it to the converged reference.
@@ -47,9 +47,14 @@ distributed coefficient matrix `C_owned(nowned,noccupied)` plus occupations,
 not the single arbitrary coefficient vector used by the current primitive RT
 fixture.
 
-## Reference EigenExa Stage
+## Reference Complex ScaLAPACK Stage
 
-The first Si64 gate uses generalized EigenExa to remove inner-iteration ambiguity.
+The first Si64 gate uses a complex distributed ScaLAPACK eigensolve to remove
+inner-iteration ambiguity.  The complex overlap is Cholesky-factorized and the
+generalized Hermitian problem is transformed before `PZHEEVD`; the final vectors
+are back-transformed and validated in the original metric.  The real-only
+EigenExa adapter is not used because the accepted hybrid basis may carry a
+complex gauge.
 It records the generalized spectrum, occupied projector, density, total energy,
 electron count, raw and mixed density residuals, Hamiltonian symmetry residual,
 and memory receipts on every SCF iteration.  Degenerate eigenvector columns are
@@ -117,7 +122,7 @@ blocks, electron-count rejection, and MPI decomposition invariance.  A synthetic
 nonlinear Hamiltonian fixture separates inner-solver and outer-mixing failures.
 
 The material gate is then Si64 with the previously agreed MPI rank count and
-`OMP_NUM_THREADS=1`.  Run the EigenExa reference to convergence before enabling
+`OMP_NUM_THREADS=1`.  Run the ScaLAPACK reference to convergence before enabling
 block-CG.  Compare full convergence histories and memory receipts, not only the
 last eigenvalues.  Si8 may remain a fast algebraic test but is not the physical
 acceptance system.

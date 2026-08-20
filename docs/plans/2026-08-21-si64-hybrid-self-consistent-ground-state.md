@@ -2,11 +2,11 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Build and validate a self-consistent Si64 ground state in the fixed Wannier plus windowed-PW hybrid basis, first with generalized EigenExa and then with an adaptively stopped block-CG solver.
+**Goal:** Build and validate a self-consistent Si64 ground state in the fixed Wannier plus windowed-PW hybrid basis, first with complex ScaLAPACK and then with an adaptively stopped block-CG solver.
 
-**Architecture:** Keep the hybrid basis and metric immutable during an outer SALMON Pulay density loop.  Rebuild only the density-dependent sparse Hamiltonian, solve its occupied generalized eigenspace, reconstruct the full-cell density, and publish a multi-orbital checkpoint only after collective physical gates pass.  Use EigenExa as the Si64 reference before enabling the matrix-free block-CG replacement.
+**Architecture:** Keep the hybrid basis and metric immutable during an outer SALMON Pulay density loop.  Rebuild only the density-dependent sparse Hamiltonian, solve its occupied generalized eigenspace, reconstruct the full-cell density, and publish a multi-orbital checkpoint only after collective physical gates pass.  Use a complex Cholesky plus ScaLAPACK `PZHEEVD` path as the Si64 reference before enabling the matrix-free block-CG replacement.
 
-**Tech Stack:** Fortran 2008, MPI, EigenExa, LAPACK test oracles, SALMON density/potential and mixing modules, CMake, Python MPI runners.
+**Tech Stack:** Fortran 2008, MPI, ScaLAPACK/BLACS, LAPACK test oracles, SALMON density/potential and mixing modules, CMake, Python MPI runners.
 
 ---
 
@@ -88,7 +88,7 @@ git add src/gs/dc/dg_hybrid_ground_state_types.f90 \
 git commit -m "feat: define distributed hybrid occupied state"
 ```
 
-### Task 3: Implement generalized eigensystem validation
+### Task 3: Implement complex generalized eigensystem validation
 
 **Files:**
 - Create: `src/gs/dc/dg_hybrid_generalized_eigensystem.f90`
@@ -108,12 +108,13 @@ non-Hermitian, nonfinite, and stale-provenance REDs.
 
 Run: `python3 tests/dg/run_dg_hybrid_generalized_eigensystem_mpi.py`
 
-**Step 3: Implement the EigenExa reference adapter**
+**Step 3: Implement the complex ScaLAPACK reference adapter**
 
-Reuse the established direct distributed-block EigenExa initialization and
-generalized-solver conventions.  Do not replicate full matrices outside the
-explicit reference/diagnostic boundary.  Return occupied projector and residual
-receipts, not a gauge-dependent eigenvector comparison.
+Use distributed complex Cholesky reduction, `PZHEEVD`, and back transformation.
+Do not route the complex hybrid pencil through the real-only EigenExa adapter and
+do not replicate full matrices.  Return occupied projector and residual receipts,
+not a gauge-dependent eigenvector comparison.  Focused tests may use LAPACK
+`ZHEGV` only as an independent oracle.
 
 **Step 4: Run MPI 1/2/4/8 and commit**
 
@@ -226,7 +227,7 @@ git add src/gs/dc/dg_hybrid_block_cg.f90 tests/dg/test_dg_hybrid_block_cg_mpi.f9
 git commit -m "feat: solve hybrid occupied space with adaptive block CG"
 ```
 
-### Task 7: Compare EigenExa and block-CG inside the same SCF
+### Task 7: Compare ScaLAPACK and block-CG inside the same SCF
 
 **Files:**
 - Modify: `src/gs/dc/dg_hybrid_scf.f90`
@@ -235,7 +236,7 @@ git commit -m "feat: solve hybrid occupied space with adaptive block CG"
 
 **Step 1: Write a failing paired-solver test**
 
-Run the same nonlinear fixture with EigenExa and adaptive block-CG.  Compare the
+Run the same nonlinear fixture with complex ScaLAPACK and adaptive block-CG.  Compare the
 converged occupied projector, density, energy, electron count, and symmetry
 receipt.  Require fewer inner iterations after warm starts and verify that
 intentional over-solving is rejected by policy.
@@ -285,7 +286,7 @@ git add src/rt/dg/rt_dg_hybrid_checkpoint.f90 \
 git commit -m "feat: checkpoint hybrid occupied manifold"
 ```
 
-### Task 9: Connect the diagnostic Si64 EigenExa SCF route
+### Task 9: Connect the diagnostic Si64 complex ScaLAPACK SCF route
 
 **Files:**
 - Modify: `src/gs/main_dft.f90`
@@ -298,13 +299,14 @@ git commit -m "feat: checkpoint hybrid occupied manifold"
 **Step 1: Extend the route RED**
 
 Require an explicit default-off diagnostic flag, fixed basis receipts across
-iterations, existing Pulay initialization, EigenExa reference selection, and
+iterations, existing Pulay initialization, complex ScaLAPACK reference selection, and
 checkpoint publication only after all convergence gates.
 
 **Step 2: Implement the minimal production adapter**
 
 Use the converged DC+LCFO density as iteration zero.  Reuse SALMON potential
-updates and mixing.  Do not enter RT or block-CG in this task.
+updates and mixing.  Require a ScaLAPACK-enabled build; do not silently fall back
+to real EigenExa.  Do not enter RT or block-CG in this task.
 
 **Step 3: Run focused tests before the material job**
 
@@ -320,7 +322,7 @@ Expected: PASS.
 **Step 4: Run Si64 with agreed resources**
 
 Use the existing Si64 input, unchanged MPI rank count, and
-`OMP_NUM_THREADS=1`.  Record every outer density/energy residual, EigenExa
+`OMP_NUM_THREADS=1`.  Record every outer density/energy residual, ScaLAPACK
 residual, Pulay action, electron count, symmetry defect, elapsed time, and
 per-rank peak RSS.  Do not start RT.
 
@@ -355,7 +357,7 @@ reason, Pulay reset, and memory receipts.
 
 **Step 2: Connect block-CG behind an explicit solver option**
 
-Default remains EigenExa until the comparison passes.  Preserve the exact outer
+Default remains complex ScaLAPACK until the comparison passes.  Preserve the exact outer
 SCF and checkpoint gates.
 
 **Step 3: Run Si64 and compare physical results**
