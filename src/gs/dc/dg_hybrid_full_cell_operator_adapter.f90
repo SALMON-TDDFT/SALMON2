@@ -160,7 +160,7 @@ contains
     operators%metric_values=(0d0,0d0);operators%hamiltonian_values=(0d0,0d0);operators%position_values=(0d0,0d0)
     j0=1
     do
-      width=min(tile_width,nbasis-j0+1);j1=j0+width-1
+      width=min(tile_width,nbasis-j0+1);j1=j0+(width-1)
       call materialize_basis(j0,width,tile_in(1:width,:),callback_ok)
       local_bad=merge(0,1,callback_ok.and.finite_matrix(tile_in(1:width,:)))
       call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
