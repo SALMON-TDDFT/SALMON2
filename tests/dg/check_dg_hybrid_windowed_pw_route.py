@@ -18,6 +18,7 @@ COMMON_CMAKE = ROOT / "src/common/CMakeLists.txt"
 DC_CMAKE = ROOT / "src/gs/dc/CMakeLists.txt"
 RT_CMAKE = ROOT / "src/rt/CMakeLists.txt"
 METRIC_SOLVER_SOURCE = ROOT / "src/rt/dg/rt_dg_hybrid_metric_solver.f90"
+LENGTH_GAUGE_SOURCE = ROOT / "src/rt/dg/rt_dg_hybrid_length_gauge.f90"
 
 assert TYPE_SOURCE.is_file(), "missing windowed-PW hybrid catalog types"
 assert BASIS_SOURCE.is_file(), "missing covariant windowed-PW basis primitive"
@@ -27,6 +28,7 @@ assert METRIC_SOURCE.is_file(), "missing row-owned sparse PW metric primitive"
 assert OPERATORS_SOURCE.is_file(), "missing sparse hybrid operator receipt type"
 assert OPERATOR_ADAPTER_SOURCE.is_file(), "missing bounded full-cell operator adapter"
 assert METRIC_SOLVER_SOURCE.is_file(), "missing matrix-free hybrid metric solver"
+assert LENGTH_GAUGE_SOURCE.is_file(), "missing generalized hybrid length-gauge propagator"
 
 type_source = TYPE_SOURCE.read_text().lower()
 cmake_source = COMMON_CMAKE.read_text().lower()
@@ -58,6 +60,13 @@ assert "dg_hybrid_sparse_operators.f90" in cmake_source
 assert "dg_hybrid_wannier_selection.f90" in dc_cmake_source
 assert "dg_hybrid_full_cell_operator_adapter.f90" in dc_cmake_source
 assert "rt_dg_hybrid_metric_solver.f90" in rt_cmake_source
+assert "rt_dg_hybrid_length_gauge.f90" in rt_cmake_source
+
+length_gauge_source = LENGTH_GAUGE_SOURCE.read_text().lower()
+assert length_gauge_source.count("type(s_dg_hybrid_sparse_operators),intent(in)::operators") == 1
+assert "observable_operators" not in length_gauge_source, (
+    "propagation and observables must consume the identical sparse Z catalog"
+)
 
 metric_solver_source = METRIC_SOLVER_SOURCE.read_text().lower()
 for forbidden_dense_solver in ("s^-1/2", "a_owned_w_global_p", "zheev", "zgesv"):

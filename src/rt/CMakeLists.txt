@@ -6,6 +6,7 @@ set(SOURCES
     md.f90
     dg/rt_dg_overlapping_wannier.f90
     dg/rt_dg_hybrid_metric_solver.f90
+    dg/rt_dg_hybrid_length_gauge.f90
     rt_angular_momentum.f90
     rt_local_chern_marker.f90
     rt_local_chern_marker_soi.f90
