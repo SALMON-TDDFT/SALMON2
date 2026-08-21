@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import os,re,shlex,shutil,subprocess,tempfile
+import os,re,shlex,shutil,struct,subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
 if os.environ.get("SALMON_LAPACK_LIBS"):
   lapack_libs=shlex.split(os.environ["SALMON_LAPACK_LIBS"])
@@ -12,12 +12,17 @@ elif shutil.which("brew"):
 else:
   lapack_libs=["-llapack","-lblas"]
 with tempfile.TemporaryDirectory(prefix="hybrid-checkpoint-") as name:
-  build=Path(name);(build/"config.h").write_text("");exe=build/"hybrid_checkpoint";checkpoint=build/"state.chk"
+  build=Path(name);(build/"config.h").write_text("");exe=build/"hybrid_checkpoint";occupied_exe=build/"hybrid_occupied_checkpoint";checkpoint=build/"state.chk"
   subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
     "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",
     str(root/"src/common/dg_hybrid_sparse_metric.f90"),str(root/"src/common/dg_hybrid_sparse_operators.f90"),
     str(root/"src/rt/dg/rt_dg_hybrid_checkpoint.f90"),str(root/"tests/dg/test_rt_dg_hybrid_checkpoint_mpi.f90"),
     *lapack_libs,"-o",str(exe)],check=True)
+  subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
+    "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",
+    str(root/"src/common/dg_hybrid_sparse_metric.f90"),str(root/"src/common/dg_hybrid_sparse_operators.f90"),
+    str(root/"src/rt/dg/rt_dg_hybrid_checkpoint.f90"),str(root/"tests/dg/test_rt_dg_hybrid_occupied_checkpoint_mpi.f90"),
+    *lapack_libs,"-o",str(occupied_exe)],check=True)
   env=os.environ.copy();env["OMP_NUM_THREADS"]="1";env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")
   write=subprocess.run([shutil.which("mpiexec"),"-n","2",str(exe),"write",str(checkpoint)],capture_output=True,text=True,env=env)
   assert write.returncode==0,(write.stdout,write.stderr);fingerprints=[]
@@ -42,4 +47,23 @@ with tempfile.TemporaryDirectory(prefix="hybrid-checkpoint-") as name:
     broken=build/f"{label}.chk";broken.write_bytes(data)
     rejected=subprocess.run([shutil.which("mpiexec"),"-n","2",str(exe),"read_corrupt",str(broken)],capture_output=True,text=True,env=env)
     assert rejected.returncode==0,(label,rejected.stdout,rejected.stderr)
+  occupied=build/"occupied.chk"
+  write_occupied=subprocess.run([shutil.which("mpiexec"),"-n","2",str(occupied_exe),"write",str(occupied)],capture_output=True,text=True,env=env)
+  assert write_occupied.returncode==0,(write_occupied.stdout,write_occupied.stderr);occupied_fingerprints=[]
+  for nrank in (1,2,4,8):
+    read_occupied=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(occupied_exe),"read",str(occupied)],capture_output=True,text=True,env=env)
+    assert read_occupied.returncode==0,(nrank,read_occupied.stdout,read_occupied.stderr)
+    match=re.search(r"HYBRID_OCCUPIED_CHECKPOINT ranks=\d+ fingerprint=(-?\d+)",read_occupied.stdout);assert match,read_occupied.stdout
+    occupied_fingerprints.append(int(match.group(1)))
+  assert len(set(occupied_fingerprints))==1,occupied_fingerprints
+  for mode,target in (("stale",occupied),("stale_provenance",occupied),("changed_occupation",occupied),("old",checkpoint)):
+    rejected=subprocess.run([shutil.which("mpiexec"),"-n","2",str(occupied_exe),mode,str(target)],capture_output=True,text=True,env=env)
+    assert rejected.returncode==0,(mode,rejected.stdout,rejected.stderr)
+  for mode in ("write_incomplete","write_bad_occupation","write_stale_scf"):
+    rejected=subprocess.run([shutil.which("mpiexec"),"-n","2",str(occupied_exe),mode,str(build/f"{mode}.chk")],capture_output=True,text=True,env=env)
+    assert rejected.returncode==0,(mode,rejected.stdout,rejected.stderr)
+  hostile=build/"occupied_hostile_extent.chk";hostile_payload=bytearray(occupied.read_bytes())
+  struct.pack_into("=i",hostile_payload,24,1_000_000_000);hostile.write_bytes(hostile_payload[:128])
+  rejected=subprocess.run([shutil.which("mpiexec"),"-n","2",str(occupied_exe),"old",str(hostile)],capture_output=True,text=True,env=env)
+  assert rejected.returncode==0,(rejected.stdout,rejected.stderr)
 print("PASS hybrid checkpoint on 1, 2, 4, and 8 ranks")
