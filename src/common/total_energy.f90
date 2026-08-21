@@ -22,7 +22,9 @@ MODULE Total_Energy
 ! Raise or drop the version test below once NVIDIA fixes this.
 ! Separately, init_ewald's fill loop declared copyin(ewald) while writing
 ! ewald%bk / ewald%npair_bk, discarding those device writes; clause removed.
-#if defined(USE_OPENACC)
+! -DSALMON_NO_EWALD_WORKAROUND puts the reductions back on the GPU, for
+! re-testing whether a given compiler still has the bug.
+#if defined(USE_OPENACC) && !defined(SALMON_NO_EWALD_WORKAROUND)
 #  if defined(__NVCOMPILER_MAJOR__) && (__NVCOMPILER_MAJOR__ > 26 || (__NVCOMPILER_MAJOR__ == 26 && __NVCOMPILER_MINOR__ >= 5))
 #    define SALMON_ACC_REDUCTION_BROKEN 1
 #  endif
