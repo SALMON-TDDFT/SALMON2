@@ -8,6 +8,7 @@ set(SOURCES
     dg_hybrid_density.f90
     dg_hybrid_scf.f90
     dg_hybrid_fragment_basis.f90
+    dg_hybrid_divided_scf.f90
     dg_hybrid_block_cg.f90
     dg_overlapping_wannier_symmetry.f90
     dg_overlapping_wannier_localization.f90
