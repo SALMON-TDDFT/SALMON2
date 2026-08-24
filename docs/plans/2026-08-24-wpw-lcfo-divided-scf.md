@@ -10,13 +10,19 @@
 
 ---
 
-Implementation must preserve all pre-existing user changes in this dirty worktree.  Stage and commit only the files named by the current task.  Use `MPI=8` and `OMP_NUM_THREADS=1` for Si64; do not use a time-based cutoff.
+Implementation must preserve all pre-existing user changes in this dirty worktree.  The
+`tests/dg/run_*.py` and `tests/dg/check_*.py` programs in this worktree are
+standalone tests and are not registered with CMake/CTest; execute them directly
+and do not create a new test-registration layer.  Stage and commit only the
+current task's new hunks.  For every file that was already modified before this
+plan started, use `git add -p <file>` rather than `git add <file>`, then inspect
+`git diff --cached` and reject every unrelated hunk before committing.  Use
+`MPI=8` and `OMP_NUM_THREADS=1` for Si64; do not use a time-based cutoff.
 
 ### Task 1: Freeze the route contract
 
 **Files:**
 - Create: `tests/dg/check_dg_hybrid_divided_lcfo_route.py`
-- Modify: `tests/CMakeLists.txt`
 
 **Step 1: Write the failing source-contract test**
 
@@ -37,14 +43,15 @@ Run: `python3 tests/dg/check_dg_hybrid_divided_lcfo_route.py`
 
 Expected: FAIL because the divided branch and driver do not exist.
 
-**Step 3: Register the test only**
+**Step 3: Keep the standalone RED test**
 
-Add the Python check beside the existing Hybrid source-contract tests.  Do not add production stubs merely to turn it green.
+Keep the Python check beside the existing Hybrid source-contract tests.  Do not
+register it with CMake and do not add production stubs merely to turn it green.
 
 **Step 4: Commit the RED contract**
 
 ```bash
-git add tests/dg/check_dg_hybrid_divided_lcfo_route.py tests/CMakeLists.txt
+git add tests/dg/check_dg_hybrid_divided_lcfo_route.py
 git commit -m "test(dg): specify divided WF+PW LCFO route"
 ```
 
@@ -55,7 +62,6 @@ git commit -m "test(dg): specify divided WF+PW LCFO route"
 - Create: `tests/dg/test_dg_hybrid_fragment_basis_mpi.f90`
 - Create: `tests/dg/run_dg_hybrid_fragment_basis_mpi.py`
 - Modify: `src/gs/dc/CMakeLists.txt`
-- Modify: `tests/CMakeLists.txt`
 
 **Step 1: Write the failing MPI test**
 
@@ -94,7 +100,10 @@ Expected: PASS for 1, 2, and 4 ranks with identical fingerprints.
 **Step 5: Commit**
 
 ```bash
-git add src/gs/dc/dg_hybrid_fragment_basis.f90 src/gs/dc/CMakeLists.txt tests/dg/test_dg_hybrid_fragment_basis_mpi.f90 tests/dg/run_dg_hybrid_fragment_basis_mpi.py tests/CMakeLists.txt
+git add src/gs/dc/dg_hybrid_fragment_basis.f90 tests/dg/test_dg_hybrid_fragment_basis_mpi.f90 tests/dg/run_dg_hybrid_fragment_basis_mpi.py
+git add -p src/gs/dc/CMakeLists.txt
+git diff --cached --check
+git diff --cached
 git commit -m "feat(dg): catalog fragment WF+PW bases"
 ```
 
@@ -105,7 +114,6 @@ git commit -m "feat(dg): catalog fragment WF+PW bases"
 - Create: `tests/dg/test_dg_hybrid_divided_scf_mpi.f90`
 - Create: `tests/dg/run_dg_hybrid_divided_scf_mpi.py`
 - Modify: `src/gs/dc/CMakeLists.txt`
-- Modify: `tests/CMakeLists.txt`
 
 **Step 1: Write a failing two-fragment fixture**
 
@@ -141,7 +149,10 @@ Expected: PASS; the existing full-cell reference driver remains unchanged.
 **Step 5: Commit**
 
 ```bash
-git add src/gs/dc/dg_hybrid_divided_scf.f90 src/gs/dc/CMakeLists.txt tests/dg/test_dg_hybrid_divided_scf_mpi.f90 tests/dg/run_dg_hybrid_divided_scf_mpi.py tests/CMakeLists.txt
+git add src/gs/dc/dg_hybrid_divided_scf.f90 tests/dg/test_dg_hybrid_divided_scf_mpi.f90 tests/dg/run_dg_hybrid_divided_scf_mpi.py
+git add -p src/gs/dc/CMakeLists.txt
+git diff --cached --check
+git diff --cached
 git commit -m "feat(dg): add divided Hybrid SCF driver"
 ```
 
@@ -185,7 +196,10 @@ Expected: all PASS; old flags preserve old behavior.
 **Step 5: Commit**
 
 ```bash
-git add src/gs/main_dft.f90 src/gs/dc/dcdft.f90 src/io/salmon_global.f90 src/io/inputoutput.f90 tests/dg/check_dg_hybrid_divided_lcfo_route.py tests/dg/check_dg_hybrid_divided_dc_controls.py
+git add tests/dg/check_dg_hybrid_divided_lcfo_route.py tests/dg/check_dg_hybrid_divided_dc_controls.py
+git add -p src/gs/main_dft.f90 src/gs/dc/dcdft.f90 src/io/salmon_global.f90 src/io/inputoutput.f90
+git diff --cached --check
+git diff --cached
 git commit -m "feat(dg): connect divided Hybrid SCF to DC controls"
 ```
 
@@ -196,7 +210,6 @@ git commit -m "feat(dg): connect divided Hybrid SCF to DC controls"
 - Create: `tests/dg/test_dg_hybrid_lcfo_mpi.f90`
 - Create: `tests/dg/run_dg_hybrid_lcfo_mpi.py`
 - Modify: `src/gs/dc/CMakeLists.txt`
-- Modify: `tests/CMakeLists.txt`
 
 **Step 1: Write the failing MPI assembly test**
 
@@ -232,7 +245,10 @@ Expected: PASS and decomposition-independent fingerprints.
 **Step 5: Commit**
 
 ```bash
-git add src/gs/dc/dg_hybrid_lcfo.f90 src/gs/dc/CMakeLists.txt tests/dg/test_dg_hybrid_lcfo_mpi.f90 tests/dg/run_dg_hybrid_lcfo_mpi.py tests/CMakeLists.txt
+git add src/gs/dc/dg_hybrid_lcfo.f90 tests/dg/test_dg_hybrid_lcfo_mpi.f90 tests/dg/run_dg_hybrid_lcfo_mpi.py
+git add -p src/gs/dc/CMakeLists.txt
+git diff --cached --check
+git diff --cached
 git commit -m "feat(dg): assemble distributed WF+PW LCFO rows"
 ```
 
@@ -276,14 +292,16 @@ Expected: all PASS and the invocation count is one.
 **Step 5: Commit**
 
 ```bash
-git add src/gs/main_dft.f90 src/gs/dc/dg_hybrid_generalized_eigensystem.f90 src/gs/dc/dg_hybrid_ground_state_types.f90 tests/dg/test_dg_hybrid_generalized_eigensystem_mpi.f90 tests/dg/run_dg_hybrid_generalized_eigensystem_mpi.py tests/dg/check_dg_hybrid_divided_lcfo_route.py
+git add tests/dg/check_dg_hybrid_divided_lcfo_route.py
+git add -p src/gs/main_dft.f90 src/gs/dc/dg_hybrid_generalized_eigensystem.f90 src/gs/dc/dg_hybrid_ground_state_types.f90 tests/dg/test_dg_hybrid_generalized_eigensystem_mpi.f90 tests/dg/run_dg_hybrid_generalized_eigensystem_mpi.py
+git diff --cached --check
+git diff --cached
 git commit -m "feat(dg): finalize divided WF+PW LCFO state"
 ```
 
 ### Task 7: Si64 physical validation
 
 **Files:**
-- Modify: `tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_scf.in`
 - Create: `tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_divided_lcfo.in`
 - Create: `tests/dg/run_dg_hybrid_si64_divided_lcfo.py`
 - Modify: `docs/plans/2026-08-24-wpw-lcfo-divided-scf-design.md`
@@ -292,13 +310,18 @@ git commit -m "feat(dg): finalize divided WF+PW LCFO state"
 
 Run from an explicit input file, use eight MPI ranks and export `OMP_NUM_THREADS=1`.  Parse conventional DC convergence, Wannier90 acceptance, divided WF+PW convergence, exactly one final LCFO eigensolve, residuals, electron count, energy, gap, symmetry receipts, wall time, and peak memory.  Do not set `time_shutdown`, shell `timeout`, or an application time cutoff.
 
-**Step 2: Run the focused and full DG test set first**
+**Step 2: Run the focused standalone DG tests first**
 
 Run:
 
 ```bash
-ctest --test-dir build -R 'dg_hybrid_(fragment_basis|divided_scf|lcfo|generalized_eigensystem)' --output-on-failure
-ctest --test-dir build -R 'dg_.*(hybrid|overlapping_wannier)' --output-on-failure
+python3 tests/dg/run_dg_hybrid_fragment_basis_mpi.py
+python3 tests/dg/run_dg_hybrid_divided_scf_mpi.py
+python3 tests/dg/run_dg_hybrid_lcfo_mpi.py
+python3 tests/dg/run_dg_hybrid_generalized_eigensystem_mpi.py
+python3 tests/dg/check_dg_hybrid_divided_lcfo_route.py
+python3 tests/dg/check_dg_hybrid_self_consistent_route.py
+python3 tests/dg/check_dg_overlapping_wannier_route.py
 ```
 
 Expected: all selected tests PASS.
@@ -316,7 +339,10 @@ Compare total energy, gap, occupied projector, density diagnostic, symmetry, mem
 **Step 5: Update the design evidence and commit**
 
 ```bash
-git add tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_scf.in tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_divided_lcfo.in tests/dg/run_dg_hybrid_si64_divided_lcfo.py docs/plans/2026-08-24-wpw-lcfo-divided-scf-design.md
+git add tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_divided_lcfo.in tests/dg/run_dg_hybrid_si64_divided_lcfo.py
+git add -p docs/plans/2026-08-24-wpw-lcfo-divided-scf-design.md
+git diff --cached --check
+git diff --cached
 git commit -m "test(dg): validate divided WF+PW LCFO on Si64"
 ```
 
@@ -337,7 +363,14 @@ Confirm the conventional DC+LCFO/W90 seed route is unchanged, existing DC conver
 
 ```bash
 git diff --check
-ctest --test-dir build -R 'dg_.*(hybrid|overlapping_wannier|nonlocal_projector)' --output-on-failure
+python3 tests/dg/run_dg_hybrid_fragment_basis_mpi.py
+python3 tests/dg/run_dg_hybrid_divided_scf_mpi.py
+python3 tests/dg/run_dg_hybrid_lcfo_mpi.py
+python3 tests/dg/run_dg_hybrid_generalized_eigensystem_mpi.py
+python3 tests/dg/run_dg_nonlocal_projector_range_mpi.py
+python3 tests/dg/check_dg_hybrid_divided_lcfo_route.py
+python3 tests/dg/check_dg_hybrid_self_consistent_route.py
+python3 tests/dg/check_dg_overlapping_wannier_route.py
 OMP_NUM_THREADS=1 python3 tests/dg/run_dg_hybrid_si64_divided_lcfo.py --mpi-ranks 8
 ```
 
