@@ -2,13 +2,14 @@
 program test_dg_hybrid_wpw_projection_tile_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
-  use dg_hybrid_wannier_complement,only:compute_dg_hybrid_wannier_projection_tile
+  use dg_hybrid_wannier_complement,only:compute_dg_hybrid_wannier_projection_tile,&
+    materialize_dg_hybrid_projected_pw_tile
   implicit none
   integer,parameter::nglobal=6,nw=2,np=3
   integer::comm,rank,nproc,ierr,nlocal,p,j
   integer(int64),allocatable::row_ids(:)
   real(real64),allocatable::weights(:)
-  complex(real64),allocatable::wannier(:,:),pw(:,:),coefficients(:,:)
+  complex(real64),allocatable::wannier(:,:),pw(:,:),coefficients(:,:),projected(:,:)
   complex(real64)::wref(nw,nglobal),pref(np,nglobal),expected(nw,np)
   integer(int64)::workspace,fingerprint
   logical::ok
@@ -30,6 +31,9 @@ program test_dg_hybrid_wpw_projection_tile_mpi
     701_int64,709_int64,11,1d-12,coefficients,workspace,fingerprint,ok,message)
   call require(ok,trim(message));call require(all(shape(coefficients)==[nw,np]),'projection tile shape mismatch')
   call require(maxval(abs(coefficients-expected))<1d-14,'projection tile coefficient mismatch')
+  call materialize_dg_hybrid_projected_pw_tile(wref,pref,coefficients,projected,ok,message)
+  call require(ok,trim(message));call require(maxval(abs(matmul(conjg(wref),transpose(projected))))<1d-14,&
+    'materialized PW tile is not orthogonal to Wanniers')
   call require(workspace>0_int64.and.fingerprint/=0_int64,'projection tile receipts are empty')
   if(rank==0)write(*,'(a,i0,a,i0)')'HYBRID_WPW_PROJECTION_TILE ranks=',nproc,' fingerprint=',fingerprint
   if(rank==0)write(*,'(a,i0,a)')'PASS hybrid WPW projection tile on ',nproc,' ranks'

@@ -7,8 +7,33 @@ module dg_hybrid_wannier_complement
 #endif
   implicit none
   private
-  public::project_dg_hybrid_wannier_complement,compute_dg_hybrid_wannier_projection_tile
+  public::project_dg_hybrid_wannier_complement,compute_dg_hybrid_wannier_projection_tile,&
+    materialize_dg_hybrid_projected_pw_tile
 contains
+  subroutine materialize_dg_hybrid_projected_pw_tile(wannier_buffer,raw_pw_buffer,projection_coefficients,&
+      projected_pw_buffer,ok,message)
+    complex(real64),intent(in)::wannier_buffer(:,:),raw_pw_buffer(:,:),projection_coefficients(:,:)
+    complex(real64),allocatable,intent(out)::projected_pw_buffer(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::nw,width,npoint
+    ok=.false.;message='';nw=size(wannier_buffer,1);npoint=size(wannier_buffer,2);width=size(raw_pw_buffer,1)
+    if(nw<1.or.width<1.or.npoint<1.or.size(raw_pw_buffer,2)/=npoint.or.&
+        any(shape(projection_coefficients)/=[nw,width]))then
+      message='invalid projected PW buffer shape';return
+    endif
+    if(.not.finite_complex(wannier_buffer).or..not.finite_complex(raw_pw_buffer).or.&
+        .not.finite_complex(projection_coefficients))then
+      message='nonfinite projected PW buffer input';return
+    endif
+    allocate(projected_pw_buffer(width,npoint))
+    projected_pw_buffer=raw_pw_buffer-matmul(transpose(projection_coefficients),wannier_buffer)
+    if(.not.finite_complex(projected_pw_buffer))then
+      deallocate(projected_pw_buffer);message='nonfinite projected PW buffer output';return
+    endif
+    ok=.true.;message=''
+  end subroutine materialize_dg_hybrid_projected_pw_tile
+
   subroutine compute_dg_hybrid_wannier_projection_tile(comm,global_row_count,row_ids,weights,wannier_values,&
       pw_tile,wannier_fingerprint,packet_fingerprint,first_column,tolerance,coefficients,&
       workspace_peak_bytes,fingerprint,ok,message)
