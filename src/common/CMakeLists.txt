@@ -20,6 +20,7 @@ set(SOURCES
    dg_hybrid_reciprocal_catalog.f90
    dg_hybrid_window_distribution.f90
    dg_hybrid_windowed_pw_basis.f90
+   dg_hybrid_production_pw_basis.f90
    dg_hybrid_wannier_complement.f90
    dg_hybrid_sparse_metric.f90
    dg_hybrid_sparse_operators.f90
