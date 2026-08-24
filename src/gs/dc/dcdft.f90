@@ -966,5 +966,38 @@ contains
     base_directory = dir_tmp
     
   end subroutine write_total_dcdft
-  
+
+  subroutine prepare_dg_hybrid_divided_dc_controls(dc,convergence_mode,density_threshold,&
+      initial_total_density,ok,message)
+    use structures,only:s_dcdft
+    use salmon_global,only:convergence,threshold
+    use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+    implicit none
+    type(s_dcdft),intent(in)::dc
+    character(16),intent(out)::convergence_mode
+    real(8),intent(out)::density_threshold
+    real(8),allocatable,intent(out)::initial_total_density(:,:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::allocation_status
+
+    ok=.false.;message='';convergence_mode=convergence;density_threshold=threshold
+    if(trim(convergence_mode)/='rho_dne'.and.trim(convergence_mode)/='norm_rho'.and.&
+        trim(convergence_mode)/='norm_rho_dng')then
+      message='divided Hybrid SCF requires a density convergence quantity';return
+    endif
+    if(.not.ieee_is_finite(density_threshold).or.density_threshold<=0d0)then
+      message='divided Hybrid SCF requires the existing positive DC threshold';return
+    endif
+    allocate(initial_total_density,mold=dc%rho_tot%f,stat=allocation_status)
+    if(allocation_status/=0)then
+      message='divided Hybrid SCF could not snapshot dc%rho_tot';return
+    endif
+    initial_total_density=dc%rho_tot%f
+    if(.not.all(ieee_is_finite(initial_total_density)))then
+      message='divided Hybrid SCF received a non-finite dc%rho_tot';return
+    endif
+    ok=.true.
+  end subroutine prepare_dg_hybrid_divided_dc_controls
+
 end module dcdft

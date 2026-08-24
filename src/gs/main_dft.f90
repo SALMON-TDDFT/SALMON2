@@ -29,6 +29,7 @@ use omp_lib, only: omp_get_max_threads
 use structures
 use inputoutput
 use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_hybrid_scf, &
+  yn_dg_hybrid_divided_scf, &
   yn_dg_dc_overlapping_wannier, ncg, base_directory, num_fragment, &
   dg_dc_metric_rank_tolerance, &
   dg_dc_gs_intermediate_orbital_tolerance,dg_dc_gs_intermediate_density_tolerance, &
@@ -241,6 +242,9 @@ type(s_dg_hybrid_ground_state) :: ow_hybrid_ground_state
 complex(8),allocatable :: ow_hybrid_hrows(:,:),ow_hybrid_coefficients(:,:)
 real(8),allocatable :: ow_hybrid_occupations(:),ow_hybrid_eigenvalues(:),ow_hybrid_potential(:),ow_hybrid_density(:),&
   ow_hybrid_density_history(:,:),ow_hybrid_new_history(:,:)
+real(8),allocatable :: ow_hybrid_divided_total_density(:,:,:)
+character(16) :: ow_hybrid_divided_convergence
+real(8) :: ow_hybrid_divided_threshold
 integer(8) :: ow_hybrid_operator_fingerprint=0_8,ow_hybrid_metric_fingerprint=0_8
 integer :: ow_hybrid_history_count=0
 real(8) :: ow_hybrid_mixing_rate=0d0
@@ -2491,6 +2495,13 @@ contains
         abs(initial_occupied_charge-dc%elec_num_tot)>&
         dg_dc_gs_electron_count_tolerance*max(1d0,dc%elec_num_tot))&
       error stop 'converged DC+LCFO initial density violates electron-count contract'
+    if(yn_dg_hybrid_divided_scf=='y')then
+      call prepare_dg_hybrid_divided_dc_controls(dc,ow_hybrid_divided_convergence,&
+        ow_hybrid_divided_threshold,ow_hybrid_divided_total_density,ok,message)
+      if(.not.ok)then
+        write(0,'(a)')trim(message);error stop 'divided Hybrid DC control preparation failed'
+      endif
+    endif
     if(yn_dg_hybrid_scf=='y')then
       if(rank==0)write(*,'(a)')'[OW-GS] starting distributed fixed-basis complex ScaLAPACK SCF'
       if(dc%system_tot%nspin/=1)error stop 'distributed hybrid SCF currently requires nspin=1'

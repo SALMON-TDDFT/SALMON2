@@ -632,6 +632,7 @@ contains
       & yn_dc_lcfo_block_diag_h, &
       & yn_dg_dc_overlapping_wannier, &
       & yn_dg_hybrid_scf, &
+      & yn_dg_hybrid_divided_scf, &
       & dg_dc_handoff_min_iter, &
       & dg_dc_handoff_tolerance, &
       & dg_dc_candidate_orbitals_per_atom, &
@@ -1153,6 +1154,7 @@ contains
     yn_dc_lcfo_block_diag_h = 'n'
     yn_dg_dc_overlapping_wannier = 'n'
     yn_dg_hybrid_scf = 'n'
+    yn_dg_hybrid_divided_scf = 'n'
     dg_dc_handoff_min_iter = 3
     dg_dc_handoff_tolerance = 1d-3
     dg_dc_candidate_orbitals_per_atom = 40
@@ -1881,6 +1883,7 @@ contains
     call comm_bcast(yn_dc_lcfo_block_diag_h, nproc_group_global)
     call comm_bcast(yn_dg_dc_overlapping_wannier, nproc_group_global)
     call comm_bcast(yn_dg_hybrid_scf, nproc_group_global)
+    call comm_bcast(yn_dg_hybrid_divided_scf, nproc_group_global)
     call comm_bcast(dg_dc_handoff_min_iter, nproc_group_global)
     call comm_bcast(dg_dc_handoff_tolerance, nproc_group_global)
     call comm_bcast(dg_dc_candidate_orbitals_per_atom, nproc_group_global)
@@ -2941,6 +2944,8 @@ contains
         "yn_dg_dc_overlapping_wannier",yn_dg_dc_overlapping_wannier
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dg_hybrid_scf",yn_dg_hybrid_scf
       write(fh_variables_log, '("#",4X,A,"=",A)') &
+        "yn_dg_hybrid_divided_scf",yn_dg_hybrid_divided_scf
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
         "dg_ow_w90_initial_projection",trim(dg_ow_w90_initial_projection)
       write(fh_variables_log, '("#",4X,A,"=",A)') "wannier90_command",trim(wannier90_command)
       write(fh_variables_log, '("#",4X,A,"=",A)') "wannier_projection",trim(wannier_projection)
@@ -3101,6 +3106,11 @@ contains
     call yn_argument_check(yn_dc_lcfo_block_diag_h)
     call yn_argument_check(yn_dg_dc_overlapping_wannier)
     call yn_argument_check(yn_dg_hybrid_scf)
+    call yn_argument_check(yn_dg_hybrid_divided_scf)
+    if(yn_dg_hybrid_divided_scf=='y' .and. yn_dg_dc_overlapping_wannier/='y') &
+      call sawf_input_fatal("divided hybrid SCF requires yn_dg_dc_overlapping_wannier='y'")
+    if(yn_dg_hybrid_divided_scf=='y' .and. yn_scalapack/='y') &
+      call sawf_input_fatal("divided hybrid LCFO requires yn_scalapack='y'")
     if(yn_dg_hybrid_scf=='y' .and. yn_dg_dc_overlapping_wannier/='y') &
       call sawf_input_fatal("hybrid SCF requires yn_dg_dc_overlapping_wannier='y'")
     if(yn_dg_hybrid_scf=='y' .and. yn_scalapack/='y') &
