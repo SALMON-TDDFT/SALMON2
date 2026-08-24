@@ -40,8 +40,8 @@ contains
     local_bad=merge(0,1,noperation>0.and.cutoff>=0d0.and.tolerance>=1d-15.and.tolerance<=1d-2.and.&
       all(ieee_is_finite(reciprocal_lattice)).and.all(ieee_is_finite(reciprocal_rotation)).and.&
       ieee_is_finite(cutoff).and.ieee_is_finite(tolerance))
-    call agree_real_array(reciprocal_lattice,comm,local_bad,ierr)
-    call agree_real_array(reciprocal_rotation,comm,local_bad,ierr)
+    call agree_real_matrix(reciprocal_lattice,comm,local_bad,ierr)
+    call agree_real_cube(reciprocal_rotation,comm,local_bad,ierr)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
       message='invalid reciprocal catalog input';return
@@ -161,28 +161,33 @@ contains
     call MPI_Allreduce(value,maximum,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
   end subroutine agree_int64
 
-  subroutine agree_real_array(values,comm,bad,ierr)
-    real(real64),intent(in)::values(..)
+  subroutine agree_real_matrix(values,comm,bad,ierr)
+    real(real64),intent(in)::values(:,:)
+    integer,intent(in)::comm
+    integer,intent(inout)::bad
+    integer,intent(out)::ierr
+    integer::i,j
+    integer(int64)::bits,minimum,maximum
+    do j=1,size(values,2);do i=1,size(values,1)
+      bits=transfer(values(i,j),bits);call agree_int64(bits,minimum,maximum,comm,ierr)
+      if(ierr/=MPI_SUCCESS)return
+      if(minimum/=maximum)bad=1
+    enddo;enddo
+  end subroutine agree_real_matrix
+
+  subroutine agree_real_cube(values,comm,bad,ierr)
+    real(real64),intent(in)::values(:,:,:)
     integer,intent(in)::comm
     integer,intent(inout)::bad
     integer,intent(out)::ierr
     integer::i,j,k
     integer(int64)::bits,minimum,maximum
-    select rank(values)
-    rank(2)
-      do j=1,size(values,2);do i=1,size(values,1)
-        bits=transfer(values(i,j),bits);call agree_int64(bits,minimum,maximum,comm,ierr)
-        if(ierr/=MPI_SUCCESS)return
-        if(minimum/=maximum)bad=1
-      enddo;enddo
-    rank(3)
-      do k=1,size(values,3);do j=1,size(values,2);do i=1,size(values,1)
-        bits=transfer(values(i,j,k),bits);call agree_int64(bits,minimum,maximum,comm,ierr)
-        if(ierr/=MPI_SUCCESS)return
-        if(minimum/=maximum)bad=1
-      enddo;enddo;enddo
-    end select
-  end subroutine agree_real_array
+    do k=1,size(values,3);do j=1,size(values,2);do i=1,size(values,1)
+      bits=transfer(values(i,j,k),bits);call agree_int64(bits,minimum,maximum,comm,ierr)
+      if(ierr/=MPI_SUCCESS)return
+      if(minimum/=maximum)bad=1
+    enddo;enddo;enddo
+  end subroutine agree_real_cube
 
   subroutine invert_3x3(matrix,inverse,determinant)
     real(real64),intent(in)::matrix(3,3)

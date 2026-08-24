@@ -5,7 +5,7 @@ import os,re,shutil,subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
 with tempfile.TemporaryDirectory(prefix="hybrid-reciprocal-catalog-") as name:
     build=Path(name);(build/"config.h").write_text("");exe=build/"hybrid_reciprocal_catalog"
-    subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
+    subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-std=f2008","-I",str(build),"-J",str(build),
       "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",
       str(root/"src/common/dg_hybrid_reciprocal_catalog.f90"),
       str(root/"tests/dg/test_dg_hybrid_reciprocal_catalog_mpi.f90"),"-o",str(exe)],check=True)
