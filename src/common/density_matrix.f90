@@ -280,7 +280,7 @@ contains
     ! Locals for stencil_current inlined below (OpenACC, non-CUDA branch).
     integer    :: ix,iy,iz
     real(8)    :: rtmp
-    complex(8) :: cpsi,xtmp,ytmp,ztmp
+    complex(8) :: cpsi
 #if defined(USE_OPENACC) && defined(USE_GEMM)
     ! Batched-GEMM nonlocal current: zpseudo's phase-1 contraction, but four
     ! projections per (ilma,io) -- zekr_uV plus x/y/z-weighted copies, stacked
@@ -342,51 +342,44 @@ contains
 !$acc enter data copyin(jx,jy,jz)
 !$acc update device(system%vec_Ac)
 
+! Grid-parallel stencil: collapse (ik,io,grid) so gang count is
+! nk*numo*ngrid, not nk*numo; weighting is linear so it moves inside.
 !$acc kernels copyin(BT,ispin,im)
-!$acc loop gang private(ik,io,kAc,wrk1,wrk2,wrk3,wrk4,rtmp,xtmp,ytmp,ztmp,cpsi,ix,iy,iz) &
-!$acc&         reduction(+:jx,jy,jz) collapse(2) independent
+!$acc loop gang private(ik,io,ix,iy,iz,kAc,wrk1,wrk2,wrk3,wrk4,rtmp,cpsi) &
+!$acc&         reduction(+:jx,jy,jz) collapse(5) independent
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
         kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
-        ! Inlined stencil_current: removes a device-routine call boundary that cost register-spill overhead.
-        rtmp = 0d0
-        xtmp = 0d0
-        ytmp = 0d0
-        ztmp = 0d0
-!$acc loop vector collapse(3) private(iz,iy,ix,cpsi) reduction(+:rtmp,xtmp,ytmp,ztmp)
-        do iz=mg%is(3),mg%ie(3)
-        do iy=mg%is(2),mg%ie(2)
-        do ix=mg%is(1),mg%ie(1)
-          rtmp = rtmp + abs(psi%zwf(ix,iy,iz,ispin,io,ik,im))**2
-          cpsi = conjg(psi%zwf(ix,iy,iz,ispin,io,ik,im))
-          xtmp = xtmp + stencil%coef_nab(1,1) * cpsi * psi%zwf(mg%idx(ix+1),iy,iz,ispin,io,ik,im) &
-                      + stencil%coef_nab(2,1) * cpsi * psi%zwf(mg%idx(ix+2),iy,iz,ispin,io,ik,im) &
-                      + stencil%coef_nab(3,1) * cpsi * psi%zwf(mg%idx(ix+3),iy,iz,ispin,io,ik,im) &
-                      + stencil%coef_nab(4,1) * cpsi * psi%zwf(mg%idx(ix+4),iy,iz,ispin,io,ik,im)
-          ytmp = ytmp + stencil%coef_nab(1,2) * cpsi * psi%zwf(ix,mg%idy(iy+1),iz,ispin,io,ik,im) &
-                      + stencil%coef_nab(2,2) * cpsi * psi%zwf(ix,mg%idy(iy+2),iz,ispin,io,ik,im) &
-                      + stencil%coef_nab(3,2) * cpsi * psi%zwf(ix,mg%idy(iy+3),iz,ispin,io,ik,im) &
-                      + stencil%coef_nab(4,2) * cpsi * psi%zwf(ix,mg%idy(iy+4),iz,ispin,io,ik,im)
-          ztmp = ztmp + stencil%coef_nab(1,3) * cpsi * psi%zwf(ix,iy,mg%idz(iz+1),ispin,io,ik,im) &
-                      + stencil%coef_nab(2,3) * cpsi * psi%zwf(ix,iy,mg%idz(iz+2),ispin,io,ik,im) &
-                      + stencil%coef_nab(3,3) * cpsi * psi%zwf(ix,iy,mg%idz(iz+3),ispin,io,ik,im) &
-                      + stencil%coef_nab(4,3) * cpsi * psi%zwf(ix,iy,mg%idz(iz+4),ispin,io,ik,im)
-        end do
-        end do
-        end do
+        cpsi = conjg(psi%zwf(ix,iy,iz,ispin,io,ik,im))
+        rtmp = abs(psi%zwf(ix,iy,iz,ispin,io,ik,im))**2
         wrk1(1) = kAc(1)*rtmp
         wrk1(2) = kAc(2)*rtmp
         wrk1(3) = kAc(3)*rtmp
-        wrk2(1) = aimag(xtmp*2d0)
-        wrk2(2) = aimag(ytmp*2d0)
-        wrk2(3) = aimag(ztmp*2d0)
-        wrk3(1) = BT(1,1) * wrk2(1) + BT(1,2) * wrk2(2) + BT(1,3) * wrk2(3)
-        wrk3(2) = BT(2,1) * wrk2(1) + BT(2,2) * wrk2(2) + BT(2,3) * wrk2(3)
-        wrk3(3) = BT(3,1) * wrk2(1) + BT(3,2) * wrk2(2) + BT(3,3) * wrk2(3)
+        wrk2(1) = aimag(2d0 * ( stencil%coef_nab(1,1) * cpsi * psi%zwf(mg%idx(ix+1),iy,iz,ispin,io,ik,im) &
+                              + stencil%coef_nab(2,1) * cpsi * psi%zwf(mg%idx(ix+2),iy,iz,ispin,io,ik,im) &
+                              + stencil%coef_nab(3,1) * cpsi * psi%zwf(mg%idx(ix+3),iy,iz,ispin,io,ik,im) &
+                              + stencil%coef_nab(4,1) * cpsi * psi%zwf(mg%idx(ix+4),iy,iz,ispin,io,ik,im) ))
+        wrk2(2) = aimag(2d0 * ( stencil%coef_nab(1,2) * cpsi * psi%zwf(ix,mg%idy(iy+1),iz,ispin,io,ik,im) &
+                              + stencil%coef_nab(2,2) * cpsi * psi%zwf(ix,mg%idy(iy+2),iz,ispin,io,ik,im) &
+                              + stencil%coef_nab(3,2) * cpsi * psi%zwf(ix,mg%idy(iy+3),iz,ispin,io,ik,im) &
+                              + stencil%coef_nab(4,2) * cpsi * psi%zwf(ix,mg%idy(iy+4),iz,ispin,io,ik,im) ))
+        wrk2(3) = aimag(2d0 * ( stencil%coef_nab(1,3) * cpsi * psi%zwf(ix,iy,mg%idz(iz+1),ispin,io,ik,im) &
+                              + stencil%coef_nab(2,3) * cpsi * psi%zwf(ix,iy,mg%idz(iz+2),ispin,io,ik,im) &
+                              + stencil%coef_nab(3,3) * cpsi * psi%zwf(ix,iy,mg%idz(iz+3),ispin,io,ik,im) &
+                              + stencil%coef_nab(4,3) * cpsi * psi%zwf(ix,iy,mg%idz(iz+4),ispin,io,ik,im) ))
+        wrk3(1) = BT(1,1)*wrk2(1) + BT(1,2)*wrk2(2) + BT(1,3)*wrk2(3)
+        wrk3(2) = BT(2,1)*wrk2(1) + BT(2,2)*wrk2(2) + BT(2,3)*wrk2(3)
+        wrk3(3) = BT(3,1)*wrk2(1) + BT(3,2)*wrk2(2) + BT(3,3)*wrk2(3)
         wrk4 = (wrk1 + wrk3) * system%rocc(io,ik,ispin) * system%wtk(ik)
         jx = jx + wrk4(1)
         jy = jy + wrk4(2)
         jz = jz + wrk4(3)
+      end do
+      end do
+      end do
       end do
       end do
 !$acc end kernels
