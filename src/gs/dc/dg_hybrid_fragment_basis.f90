@@ -6,6 +6,7 @@ module dg_hybrid_fragment_basis
   type,public::s_dg_hybrid_fragment_basis
     integer::fragment_id=0,generation=0
     integer(int64),allocatable::global_ids(:)
+    integer(int64),allocatable::buffer_point_ids(:)
     integer,allocatable::sector(:)
     complex(real64),allocatable::buffer_values(:,:)
     integer(int64)::provenance_fingerprint=0_int64
@@ -61,9 +62,10 @@ contains
     enddo
 
     allocate(basis%global_ids(nlocal),basis%sector(nlocal),&
-      basis%buffer_values(size(wf_values,1),nlocal))
+      basis%buffer_values(size(wf_values,1),nlocal),basis%buffer_point_ids(size(wf_values,1)))
     basis%fragment_id=fragment_id;basis%generation=1;basis%global_ids=local_ids
     basis%sector=[(1,i=1,size(wf_ids)),(2,i=1,size(pw_ids))]
+    basis%buffer_point_ids=[(int(i,int64),i=1,size(wf_values,1))]
     if(size(wf_ids)>0)basis%buffer_values(:,:size(wf_ids))=wf_values
     if(size(pw_ids)>0)basis%buffer_values(:,size(wf_ids)+1:)=pw_values
 

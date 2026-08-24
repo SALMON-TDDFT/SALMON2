@@ -7,7 +7,7 @@ program test_dg_hybrid_production_fragment_basis_mpi
   implicit none
   integer,parameter::nglobal=4,nw=2,np=2
   integer::comm,rank,nproc,ierr,nlocal,p,j
-  integer(int64),allocatable::point_ids(:)
+  integer(int64),allocatable::point_ids(:),physical_point_ids(:)
   real(real64),allocatable::weights(:)
   complex(real64),allocatable::wannier(:,:),pw(:,:)
   type(s_dg_hybrid_fragment_basis)::basis
@@ -18,10 +18,10 @@ program test_dg_hybrid_production_fragment_basis_mpi
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
   nlocal=count([(mod(p-1,nproc)==rank,p=1,nglobal)])
-  allocate(point_ids(nlocal),weights(nlocal),wannier(nw,nlocal),pw(np,nlocal));j=0
+  allocate(point_ids(nlocal),physical_point_ids(nlocal),weights(nlocal),wannier(nw,nlocal),pw(np,nlocal));j=0
   do p=1,nglobal
     if(mod(p-1,nproc)/=rank)cycle
-    j=j+1;point_ids(j)=p;weights(j)=1d0;wannier(:,j)=(0d0,0d0);pw(:,j)=(0d0,0d0)
+    j=j+1;point_ids(j)=p;physical_point_ids(j)=10+p;weights(j)=1d0;wannier(:,j)=(0d0,0d0);pw(:,j)=(0d0,0d0)
     if(p==1)then;wannier(1,j)=1d0;pw(1,j)=1d0;endif
     if(p==2)then;wannier(2,j)=1d0;pw(2,j)=1d0;endif
     if(p==3)pw(1,j)=1d0
@@ -29,10 +29,13 @@ program test_dg_hybrid_production_fragment_basis_mpi
   enddo
   packet_ids=[1,2];near_offsets=[1,2,3];near_ids=[1,2]
   call build_dg_hybrid_production_fragment_basis(comm,nglobal,point_ids,weights,wannier,pw,&
-    packet_ids,near_offsets,near_ids,701_int64,709_int64,100_int64,1,1d-12,basis,workspace,fingerprint,ok,message)
+    packet_ids,near_offsets,near_ids,701_int64,709_int64,100_int64,1,1d-12,basis,workspace,fingerprint,ok,message,&
+    physical_point_ids)
   call require(ok,trim(message));call require(basis%generation==1.and.basis%fragment_id==1,'fragment receipt mismatch')
   call require(size(basis%global_ids)==count([(mod(p-1,nproc)==rank,p=1,nw+np)]),&
     'production basis is not column-owner distributed')
+  call require(all(basis%buffer_point_ids==[11_int64,12_int64,13_int64,14_int64]),&
+    'production physical support IDs were not preserved')
   do j=1,size(basis%global_ids)
     p=int(basis%global_ids(j)-100_int64)
     call require(basis%sector(j)==merge(1,2,p<=nw),'production WF/PW sector mismatch')
