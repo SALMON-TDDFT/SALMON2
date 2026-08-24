@@ -7,8 +7,92 @@ module dg_hybrid_wannier_complement
 #endif
   implicit none
   private
-  public::project_dg_hybrid_wannier_complement
+  public::project_dg_hybrid_wannier_complement,compute_dg_hybrid_wannier_projection_tile
 contains
+  subroutine compute_dg_hybrid_wannier_projection_tile(comm,global_row_count,row_ids,weights,wannier_values,&
+      pw_tile,wannier_fingerprint,packet_fingerprint,first_column,tolerance,coefficients,&
+      workspace_peak_bytes,fingerprint,ok,message)
+    integer,intent(in)::comm,global_row_count,first_column
+    integer(int64),intent(in)::row_ids(:),wannier_fingerprint,packet_fingerprint
+    real(real64),intent(in)::weights(:),tolerance
+    complex(real64),intent(in)::wannier_values(:,:),pw_tile(:,:)
+    complex(real64),allocatable,intent(out)::coefficients(:,:)
+    integer(int64),intent(out)::workspace_peak_bytes,fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nw,width,nlocal,i,j,k,ierr,local_bad,global_bad,minimum_integer,maximum_integer
+    integer,allocatable::ownership(:)
+    integer(int64)::minimum_bits,maximum_bits,bits
+    complex(real64),allocatable::local_coefficients(:,:),gram_local(:,:),gram_global(:,:)
+    real(real64)::gram_defect
+    ok=.false.;message='';workspace_peak_bytes=0_int64;fingerprint=0_int64;local_bad=0
+    nlocal=size(row_ids);nw=size(wannier_values,1);width=size(pw_tile,1)
+    call agree_integer(global_row_count,minimum_integer,maximum_integer,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_integer/=maximum_integer)then;message='inconsistent projection row extent';return;endif
+    call agree_integer(first_column,minimum_integer,maximum_integer,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_integer/=maximum_integer)then;message='inconsistent projection tile origin';return;endif
+    bits=transfer(tolerance,bits);call agree_int64(bits,minimum_bits,maximum_bits,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_bits/=maximum_bits)then;message='inconsistent projection tolerance';return;endif
+    call agree_int64(wannier_fingerprint,minimum_bits,maximum_bits,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_bits/=maximum_bits.or.wannier_fingerprint==0_int64)then
+      message='invalid projection Wannier provenance';return
+    endif
+    call agree_int64(packet_fingerprint,minimum_bits,maximum_bits,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_bits/=maximum_bits.or.packet_fingerprint==0_int64)then
+      message='invalid projection packet provenance';return
+    endif
+    if(global_row_count<1.or.first_column<1.or.nw<1.or.width<1.or.&
+        size(weights)/=nlocal.or.size(wannier_values,2)/=nlocal.or.size(pw_tile,2)/=nlocal)local_bad=1
+    if(any(row_ids<1_int64).or.any(row_ids>int(max(0,global_row_count),int64)))local_bad=1
+    if(.not.all(ieee_is_finite(weights)).or.any(weights<=0d0).or..not.ieee_is_finite(tolerance).or.&
+        tolerance<1d-15.or.tolerance>1d-2.or..not.finite_complex(wannier_values).or.&
+        .not.finite_complex(pw_tile))local_bad=1
+    allocate(ownership(max(1,global_row_count)));ownership=0
+    do i=1,nlocal
+      if(row_ids(i)>=1_int64.and.row_ids(i)<=int(max(0,global_row_count),int64))&
+        ownership(int(row_ids(i)))=ownership(int(row_ids(i)))+1
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,ownership,max(0,global_row_count),MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then
+      local_bad=1
+    elseif(global_row_count>0)then
+      if(any(ownership(:global_row_count)/=1))local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid projection tile contract';return;endif
+    allocate(local_coefficients(nw,width),coefficients(nw,width),gram_local(nw,nw),gram_global(nw,nw))
+    do j=1,width;do i=1,nw
+      local_coefficients(i,j)=sum(weights*conjg(wannier_values(i,:))*pw_tile(j,:))
+    enddo;enddo
+    do j=1,nw;do i=1,nw
+      gram_local(i,j)=sum(weights*conjg(wannier_values(i,:))*wannier_values(j,:))
+    enddo;enddo
+    call MPI_Allreduce(local_coefficients,coefficients,nw*width,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='projection coefficient reduction failed';return;endif
+    call MPI_Allreduce(gram_local,gram_global,nw*nw,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='projection Gram reduction failed';return;endif
+    gram_defect=0d0
+    do j=1,nw;do i=1,nw
+      if(i==j)then;gram_defect=max(gram_defect,abs(gram_global(i,j)-1d0))
+      else;gram_defect=max(gram_defect,abs(gram_global(i,j)));endif
+    enddo;enddo
+    if(gram_defect>100d0*tolerance)then;message='projection Wannier frame is not orthonormal';return;endif
+    workspace_peak_bytes=16_int64*int(2*nw*width+2*nw*nw,int64)+4_int64*int(global_row_count,int64)
+    fingerprint=ieor(wannier_fingerprint,ishftc(packet_fingerprint,13))
+    fingerprint=ieor(fingerprint,int(first_column,int64))
+    do j=1,width;do i=1,nw
+      bits=transfer(real(coefficients(i,j)),bits);fingerprint=ieor(ishftc(fingerprint,7),bits)
+      bits=transfer(aimag(coefficients(i,j)),bits);fingerprint=ieor(ishftc(fingerprint,11),bits)
+    enddo;enddo
+    if(fingerprint==0_int64)fingerprint=1877_int64
+    ok=.true.;message=''
+#else
+    ok=.false.;message='hybrid projection tile requires MPI';workspace_peak_bytes=0_int64;fingerprint=0_int64
+    allocate(coefficients(0,0))
+#endif
+  end subroutine compute_dg_hybrid_wannier_projection_tile
+
   subroutine project_dg_hybrid_wannier_complement(comm,global_row_count,row_ids,weights,wannier_values,&
       pw_values,wannier_fingerprint,packet_fingerprint,packet_ids,near_offsets,near_wannier_ids,&
       diagnose_full_tail,tolerance,projected_values,&
