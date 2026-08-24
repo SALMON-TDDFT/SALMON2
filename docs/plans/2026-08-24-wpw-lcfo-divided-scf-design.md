@@ -53,6 +53,21 @@ eigensolve is accepted, as it is in the existing real-space LCFO method.
 
 ## SCF Architecture
 
+The WF+PW basis is not available at the beginning of a fresh calculation.  The
+complete production sequence is therefore:
+
+1. run the existing conventional DC-SCF;
+2. run the existing conventional LCFO and Wannier90 route to generate the
+   symmetry-validated localized WF seed;
+3. construct the fixed windowed-PW orthogonal complement;
+4. run the divided WF+PW SCF described below, initialized by the converged
+   conventional DC density;
+5. run one final WF+PW LCFO diagonalization.
+
+The first DC+LCFO stage is a seed-construction prerequisite, not an additional
+WF+PW self-consistency loop.  Existing successful Wannier90 behavior and its
+symmetry checks remain unchanged.
+
 Each fragment communicator owns its existing real-space core and buffer.  The
 buffer must continue to cover the finite-difference stencil and pseudopotential
 projector support required by the DC calculation.  It is an operator halo, not
