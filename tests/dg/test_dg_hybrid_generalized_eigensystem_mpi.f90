@@ -4,15 +4,19 @@ program test_dg_hybrid_generalized_eigensystem_mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use,intrinsic::ieee_arithmetic,only:ieee_get_halting_mode,ieee_set_halting_mode,ieee_set_flag,&
     ieee_invalid,ieee_divide_by_zero,ieee_overflow
-  use dg_hybrid_generalized_eigensystem,only:solve_dg_hybrid_generalized_scalapack
+  use dg_hybrid_generalized_eigensystem,only:solve_dg_hybrid_generalized_scalapack,&
+    solve_dg_hybrid_generalized_once_and_publish
+  use dg_hybrid_ground_state_types,only:s_dg_hybrid_ground_state
   implicit none
   integer,parameter::n=4,nstate=2
   integer::comm,rank,nproc,ierr,nowned,row,i,j,position
   integer(int64),allocatable::row_ids(:)
-  complex(real64),allocatable::hrows(:,:),srows(:,:),coefficients(:,:)
+  complex(real64),allocatable::hrows(:,:),srows(:,:),coefficients(:,:),fixture_coefficients(:,:)
   complex(real64)::s(n,n),h(n,n),u(n,n),phase
   real(real64)::expected(n),eigenvalues(nstate),residual,orthogonality,projector_defect
-  integer(int64)::workspace,fingerprint,reference_fingerprint
+  integer(int64)::workspace,fingerprint,reference_fingerprint,state_workspace,state_fingerprint
+  integer::solve_invocations
+  type(s_dg_hybrid_ground_state)::published_state
   logical::ok
   character(256)::message
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
@@ -37,6 +41,20 @@ program test_dg_hybrid_generalized_eigensystem_mpi
   call require(maxval(abs(eigenvalues-expected(1:nstate)))<2d-11,'ScaLAPACK eigenvalues differ from ZHEGV')
   call require(residual<2d-10.and.orthogonality<2d-10.and.projector_defect<2d-10,&
     'generalized eigensystem receipts are invalid')
+  allocate(fixture_coefficients,source=coefficients);solve_invocations=0
+  call solve_dg_hybrid_generalized_once_and_publish(comm,n,nstate,row_ids,hrows,srows,1d-11,[1d0,1d0],2d0,&
+    101_int64,103_int64,107_int64,109_int64,fixture_solver,published_state,state_workspace,state_fingerprint,&
+    residual,orthogonality,projector_defect,workspace,fingerprint,ok,message)
+  call require(ok,trim(message));call require(solve_invocations==1,'final LCFO eigensolver was not invoked exactly once')
+  call require(published_state%valid.and.published_state%converged.and.&
+    published_state%final_eigensolve_count==1,'final LCFO state was not published')
+  solve_invocations=0
+  call solve_dg_hybrid_generalized_once_and_publish(comm,n,nstate,row_ids,hrows,srows,1d-11,[1d0,1d0],2d0,&
+    101_int64,103_int64,107_int64,109_int64,failing_fixture_solver,published_state,state_workspace,state_fingerprint,&
+    residual,orthogonality,projector_defect,workspace,fingerprint,ok,message)
+  call require(.not.ok.and.solve_invocations==1,'collective final LCFO failure was not reported exactly once')
+  call require(.not.published_state%valid.and.published_state%final_eigensolve_count==0,&
+    'failed final LCFO solve published a checkpoint state')
   if(nproc>1)then
     call solve_dg_hybrid_generalized_scalapack(comm,n,nstate,row_ids,hrows,srows,merge(2d-11,1d-11,rank==0),&
       coefficients,eigenvalues,residual,orthogonality,projector_defect,workspace,fingerprint,ok,message)
@@ -58,6 +76,37 @@ program test_dg_hybrid_generalized_eigensystem_mpi
   endif
   call MPI_Finalize(ierr)
 contains
+  subroutine fixture_solver(comm_arg,global_count_arg,nstate_arg,row_ids_arg,hrows_arg,srows_arg,tolerance_arg,&
+      coefficients_arg,eigenvalues_arg,maximum_residual_arg,orthogonality_defect_arg,projector_defect_arg,&
+      workspace_peak_bytes_arg,fingerprint_arg,callback_ok,callback_message)
+    integer,intent(in)::comm_arg,global_count_arg,nstate_arg
+    integer(int64),intent(in)::row_ids_arg(:)
+    complex(real64),intent(in)::hrows_arg(:,:),srows_arg(:,:)
+    real(real64),intent(in)::tolerance_arg
+    complex(real64),allocatable,intent(out)::coefficients_arg(:,:)
+    real(real64),intent(out)::eigenvalues_arg(:),maximum_residual_arg,orthogonality_defect_arg,projector_defect_arg
+    integer(int64),intent(out)::workspace_peak_bytes_arg,fingerprint_arg
+    logical,intent(out)::callback_ok;character(*),intent(out)::callback_message
+    solve_invocations=solve_invocations+1;allocate(coefficients_arg,source=fixture_coefficients)
+    eigenvalues_arg=expected(1:nstate_arg);maximum_residual_arg=1d-14;orthogonality_defect_arg=1d-14
+    projector_defect_arg=1d-14;workspace_peak_bytes_arg=64_int64;fingerprint_arg=113_int64
+    callback_ok=.true.;callback_message=''
+  end subroutine fixture_solver
+  subroutine failing_fixture_solver(comm_arg,global_count_arg,nstate_arg,row_ids_arg,hrows_arg,srows_arg,tolerance_arg,&
+      coefficients_arg,eigenvalues_arg,maximum_residual_arg,orthogonality_defect_arg,projector_defect_arg,&
+      workspace_peak_bytes_arg,fingerprint_arg,callback_ok,callback_message)
+    integer,intent(in)::comm_arg,global_count_arg,nstate_arg
+    integer(int64),intent(in)::row_ids_arg(:)
+    complex(real64),intent(in)::hrows_arg(:,:),srows_arg(:,:)
+    real(real64),intent(in)::tolerance_arg
+    complex(real64),allocatable,intent(out)::coefficients_arg(:,:)
+    real(real64),intent(out)::eigenvalues_arg(:),maximum_residual_arg,orthogonality_defect_arg,projector_defect_arg
+    integer(int64),intent(out)::workspace_peak_bytes_arg,fingerprint_arg
+    logical,intent(out)::callback_ok;character(*),intent(out)::callback_message
+    solve_invocations=solve_invocations+1;eigenvalues_arg=0d0;maximum_residual_arg=huge(1d0)
+    orthogonality_defect_arg=huge(1d0);projector_defect_arg=huge(1d0);workspace_peak_bytes_arg=0_int64
+    fingerprint_arg=0_int64;callback_ok=rank/=0;callback_message='fixture collective failure'
+  end subroutine failing_fixture_solver
   subroutine dense_oracle(a,b,w)
     complex(real64),intent(in)::a(:,:),b(:,:)
     real(real64),intent(out)::w(:)

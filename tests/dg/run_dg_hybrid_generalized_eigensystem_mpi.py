@@ -15,6 +15,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-generalized-") as name:
   build=Path(name);(build/"config.h").write_text("");exe=build/"hybrid_generalized"
   subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-DUSE_SCALAPACK","-I",str(build),"-J",str(build),
     "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",
+    str(root/"src/gs/dc/dg_hybrid_ground_state_types.f90"),
     str(root/"src/gs/dc/dg_hybrid_generalized_eigensystem.f90"),
     str(root/"tests/dg/test_dg_hybrid_generalized_eigensystem_mpi.f90"),*scalapack,*openblas,"-o",str(exe)],check=True)
   env=os.environ.copy();env["OMP_NUM_THREADS"]="1";env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")

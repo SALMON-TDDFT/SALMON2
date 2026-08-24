@@ -3,12 +3,28 @@ module dg_hybrid_generalized_eigensystem
   use,intrinsic::iso_fortran_env,only:int64,real64
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite,ieee_get_halting_mode,ieee_set_halting_mode,ieee_set_flag,&
     ieee_invalid,ieee_divide_by_zero,ieee_overflow
+  use dg_hybrid_ground_state_types,only:s_dg_hybrid_ground_state,validate_dg_hybrid_ground_state
 #ifdef USE_MPI
   use mpi
 #endif
   implicit none
   private
-  public::solve_dg_hybrid_generalized_scalapack
+  abstract interface
+    subroutine dg_hybrid_final_solver(comm,global_count,nstate,row_ids,hrows,srows,tolerance,&
+        coefficients,eigenvalues,maximum_residual,orthogonality_defect,projector_defect,&
+        workspace_peak_bytes,fingerprint,ok,message)
+      import int64,real64
+      integer,intent(in)::comm,global_count,nstate
+      integer(int64),intent(in)::row_ids(:)
+      complex(real64),intent(in)::hrows(:,:),srows(:,:)
+      real(real64),intent(in)::tolerance
+      complex(real64),allocatable,intent(out)::coefficients(:,:)
+      real(real64),intent(out)::eigenvalues(:),maximum_residual,orthogonality_defect,projector_defect
+      integer(int64),intent(out)::workspace_peak_bytes,fingerprint
+      logical,intent(out)::ok;character(*),intent(out)::message
+    end subroutine dg_hybrid_final_solver
+  end interface
+  public::solve_dg_hybrid_generalized_scalapack,solve_dg_hybrid_generalized_once_and_publish
 contains
   subroutine solve_dg_hybrid_generalized_scalapack(comm,global_count,nstate,row_ids,hrows,srows,tolerance,&
       coefficients,eigenvalues,maximum_residual,orthogonality_defect,projector_defect,workspace_peak_bytes,&
@@ -285,4 +301,45 @@ contains
     workspace_peak_bytes=0_int64;fingerprint=0_int64;eigenvalues=0d0
 #endif
   end subroutine solve_dg_hybrid_generalized_scalapack
+
+  subroutine solve_dg_hybrid_generalized_once_and_publish(comm,global_count,nstate,row_ids,hrows,srows,tolerance,&
+      occupations,expected_electron_count,hybrid_basis_fingerprint,metric_fingerprint,operator_fingerprint,&
+      position_fingerprint,solver,state,state_workspace_bytes,state_fingerprint,maximum_residual,&
+      orthogonality_defect,projector_defect,solver_workspace_bytes,solver_fingerprint,ok,message)
+    integer,intent(in)::comm,global_count,nstate
+    integer(int64),intent(in)::row_ids(:)
+    complex(real64),intent(in)::hrows(:,:),srows(:,:)
+    real(real64),intent(in)::tolerance,occupations(:),expected_electron_count
+    integer(int64),intent(in)::hybrid_basis_fingerprint,metric_fingerprint,operator_fingerprint,position_fingerprint
+    procedure(dg_hybrid_final_solver)::solver
+    type(s_dg_hybrid_ground_state),intent(out)::state
+    integer(int64),intent(out)::state_workspace_bytes,state_fingerprint,solver_workspace_bytes,solver_fingerprint
+    real(real64),intent(out)::maximum_residual,orthogonality_defect,projector_defect
+    logical,intent(out)::ok;character(*),intent(out)::message
+    complex(real64),allocatable::coefficients(:,:)
+    real(real64),allocatable::eigenvalues(:)
+    logical::solver_ok,collective_ok
+    integer::ierr
+
+    state=s_dg_hybrid_ground_state();ok=.false.;message='';state_workspace_bytes=0_int64;state_fingerprint=0_int64
+    solver_workspace_bytes=0_int64;solver_fingerprint=0_int64;maximum_residual=huge(1d0)
+    orthogonality_defect=huge(1d0);projector_defect=huge(1d0)
+    allocate(eigenvalues(nstate));eigenvalues=0d0
+    call solver(comm,global_count,nstate,row_ids,hrows,srows,tolerance,coefficients,eigenvalues,maximum_residual,&
+      orthogonality_defect,projector_defect,solver_workspace_bytes,solver_fingerprint,solver_ok,message)
+#ifdef USE_MPI
+    call MPI_Allreduce(solver_ok,collective_ok,1,MPI_LOGICAL,MPI_LAND,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or..not.collective_ok)then
+      message='final distributed LCFO eigensolve failed collectively';return
+    endif
+#else
+    collective_ok=solver_ok
+    if(.not.collective_ok)then;message='final distributed LCFO eigensolve failed';return;endif
+#endif
+    call validate_dg_hybrid_ground_state(comm,global_count,nstate,row_ids,coefficients,occupations,eigenvalues,&
+      expected_electron_count,hybrid_basis_fingerprint,metric_fingerprint,operator_fingerprint,&
+      position_fingerprint,tolerance,state,state_workspace_bytes,state_fingerprint,ok,message)
+    if(.not.ok)return
+    state%converged=.true.;state%final_eigensolve_count=1
+  end subroutine solve_dg_hybrid_generalized_once_and_publish
 end module dg_hybrid_generalized_eigensystem

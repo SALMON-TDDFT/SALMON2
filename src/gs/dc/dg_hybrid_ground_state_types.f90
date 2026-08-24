@@ -9,7 +9,7 @@ module dg_hybrid_ground_state_types
   private
   type,public::s_dg_hybrid_ground_state
     logical::valid=.false.,converged=.false.
-    integer::global_count=0,noccupied=0
+    integer::global_count=0,noccupied=0,final_eigensolve_count=0
     integer(int64)::hybrid_basis_fingerprint=0_int64,metric_fingerprint=0_int64
     integer(int64)::operator_fingerprint=0_int64,position_fingerprint=0_int64
     integer(int64)::fingerprint=0_int64,workspace_peak_bytes=0_int64
@@ -131,6 +131,7 @@ contains
     enddo
     if(fingerprint==0_int64)fingerprint=ieor(global_hash,719_int64)
     state%valid=.true.;state%converged=.false.;state%global_count=global_count;state%noccupied=noccupied
+    state%final_eigensolve_count=0
     state%hybrid_basis_fingerprint=hybrid_basis_fingerprint;state%metric_fingerprint=metric_fingerprint
     state%operator_fingerprint=operator_fingerprint;state%position_fingerprint=position_fingerprint
     state%fingerprint=fingerprint;state%workspace_peak_bytes=workspace_peak_bytes
@@ -172,7 +173,7 @@ contains
       if(allocated(state%coefficients))deallocate(state%coefficients)
       if(allocated(state%occupations))deallocate(state%occupations)
       if(allocated(state%eigenvalues))deallocate(state%eigenvalues)
-      state%valid=.false.;state%converged=.false.
+      state%valid=.false.;state%converged=.false.;state%final_eigensolve_count=0
     end subroutine cleanup
 #else
     ok=.false.;message='MPI is required for hybrid ground-state validation'
