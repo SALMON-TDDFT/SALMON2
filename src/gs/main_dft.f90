@@ -28,8 +28,8 @@ use omp_lib, only: omp_get_max_threads
 #endif
 use structures
 use inputoutput
-use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, &
-  yn_dg_dc_overlapping_wannier, ncg, base_directory, &
+use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_hybrid_scf, &
+  yn_dg_dc_overlapping_wannier, ncg, base_directory, num_fragment, &
   dg_dc_metric_rank_tolerance, &
   dg_dc_gs_intermediate_orbital_tolerance,dg_dc_gs_intermediate_density_tolerance, &
   dg_dc_gs_final_orbital_tolerance,dg_dc_gs_final_density_tolerance,dg_dc_gs_subspace_tolerance, &
@@ -42,7 +42,8 @@ use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, &
   dg_ow_boundary_gradient_tolerance,dg_ow_symmetry_tolerance,&
   dg_ow_localization_support_tolerance,dg_ow_localization_spread_tolerance,&
   dg_ow_localization_gradient_tolerance,dg_ow_localization_max_iterations,&
-  dg_ow_candidate_states_per_fragment,dg_ow_target_wanniers_per_fragment,wannier_num_iter
+  dg_ow_candidate_states_per_fragment,dg_ow_target_wanniers_per_fragment,wannier_num_iter,&
+  dg_ow_w90_initial_projection
 use dg_overlapping_wannier_construction, only: s_dg_overlapping_wannier_construction, &
   construct_dg_overlapping_wannier_basis,verify_dg_overlapping_wannier_periodic_closure,&
   replicate_dg_fragment_wannier_representative,verify_dg_fragment_wannier_streaming_closure,&
@@ -102,6 +103,12 @@ use dg_overlapping_wannier_nonlocal, only: assemble_dg_overlapping_wannier_nonlo
 use dg_overlapping_wannier_scf, only: s_dg_overlapping_wannier_scf_state, &
   s_dg_overlapping_wannier_scf_result, &
   compute_dg_overlapping_wannier_scf_fingerprint,mix_dg_overlapping_wannier_density_history
+use dg_hybrid_scf,only:run_dg_hybrid_self_consistent_ground_state
+use dg_nonlocal_projector_range,only:s_dg_nonlocal_range_receipt,analyze_dg_nonlocal_projector_range
+use dg_hybrid_generalized_eigensystem,only:solve_dg_hybrid_generalized_scalapack
+use dg_hybrid_density,only:reconstruct_dg_hybrid_density
+use dg_hybrid_ground_state_types,only:s_dg_hybrid_ground_state,validate_dg_hybrid_ground_state
+use rt_dg_hybrid_checkpoint,only:write_rt_dg_hybrid_occupied_checkpoint
 use dg_overlapping_wannier_solver, only: solve_dg_overlapping_wannier_coefficients
 #ifdef USE_EIGENEXA
 use dg_overlapping_wannier_solver, only: solve_dg_overlapping_wannier_generalized_eigenexa
@@ -111,6 +118,12 @@ use dg_overlapping_wannier_checkpoint, only: s_dg_overlapping_wannier_checkpoint
   write_dg_overlapping_wannier_checkpoint,read_dg_overlapping_wannier_checkpoint,&
   compute_dg_overlapping_wannier_matrix_fingerprints
 use dg_overlapping_wannier_observables, only: assemble_dg_overlapping_wannier_observables
+use dg_overlapping_wannier_full_cell, only: project_dg_full_cell_hamiltonian_tiles,&
+  s_dg_full_cell_redistribution_schedule,initialize_dg_full_cell_redistribution,&
+  apply_dg_full_cell_redistribution_forward,apply_dg_full_cell_redistribution_reverse
+use hamiltonian, only: hpsi
+use nonlocal_potential,only:calc_uVpsi_rdivided
+use sendrecv_grid, only: init_sendrecv_grid,dealloc_cache
 use dg_overlapping_wannier_symmetry, only: select_dg_exact_fragment_subgroup,&
   build_dg_fragment_site_stabilizer,build_dg_fragment_group_representation,&
   promote_dg_exact_global_subgroup,project_dg_fragment_covariant_operators,&
@@ -119,7 +132,8 @@ use dg_overlapping_wannier_symmetry, only: build_dg_fragment_permuted_representa
   build_dg_fragment_symmetry_orbits,factor_dg_affine_translation_cocycle,&
   symmetrize_dg_distributed_pencil_rows
 use dg_overlapping_wannier_w90,only:setup_dg_w90_gamma_library,&
-  assemble_dg_w90_gamma_matrices,run_dg_w90_gamma_library,apply_dg_w90_gamma_transform,&
+  assemble_dg_w90_gamma_a_matrix,assemble_dg_w90_gamma_matrices,run_dg_w90_gamma_library,&
+  apply_dg_w90_gamma_transform,&
   inherit_dg_w90_affine_receipts,validate_dg_w90_generator_covariance,&
   project_dg_w90_reference_sector_operators,&
   anchor_dg_w90_reference_character_sector,align_dg_w90_character_sector_gauge,&
@@ -209,7 +223,7 @@ type(s_dg_overlapping_wannier_scf_result) :: ow_result
 type(s_dg_overlapping_wannier_checkpoint) :: ow_checkpoint
 complex(8),allocatable :: ow_srows(:,:),ow_rhorows(:,:),ow_core_values(:,:),ow_core_gradients(:,:,:),&
   ow_box_values(:,:),ow_box_gradients(:,:,:),ow_last_kinetic_rows(:,:),&
-  ow_last_local_rows(:,:),ow_last_nonlocal_rows(:,:),ow_published_hrows(:,:)
+  ow_last_local_rows(:,:),ow_last_nonlocal_rows(:,:),ow_published_hrows(:,:),ow_direct_nonlocal_rows(:,:)
 integer(8),allocatable :: ow_core_ids(:),ow_row_ids(:)
 integer(8),allocatable :: ow_box_physical_ids(:)
 integer,allocatable :: ow_tail_generation(:,:)
@@ -223,12 +237,27 @@ integer :: ow_box_size(3),ow_core_size(3),ow_buffer(3)
 integer(8) :: ow_symmetry_fingerprint
 integer(8) :: ow_potential_epoch_snapshot
 integer(8) :: ow_global_grid_count
+type(s_dg_hybrid_ground_state) :: ow_hybrid_ground_state
+complex(8),allocatable :: ow_hybrid_hrows(:,:),ow_hybrid_coefficients(:,:)
+real(8),allocatable :: ow_hybrid_occupations(:),ow_hybrid_eigenvalues(:),ow_hybrid_potential(:),ow_hybrid_density(:),&
+  ow_hybrid_density_history(:,:),ow_hybrid_new_history(:,:)
+integer(8) :: ow_hybrid_operator_fingerprint=0_8,ow_hybrid_metric_fingerprint=0_8
+integer :: ow_hybrid_history_count=0
+real(8) :: ow_hybrid_mixing_rate=0d0
+real(8) :: ow_hybrid_eigensystem_residual=huge(1d0),ow_hybrid_orthogonality=huge(1d0),&
+  ow_hybrid_symmetry_defect=huge(1d0)
 integer(8) :: ow_diag_h_local_bytes=0_8
+integer :: ow_full_cell_component_mode=0
+type(s_dg_full_cell_redistribution_schedule) :: ow_hpsi_redistribution
+integer(8),allocatable :: ow_hpsi_grid_ids(:)
+integer(8) :: ow_hpsi_redistribution_workspace=0_8
 real(8),allocatable :: ow_density_snapshot(:,:,:,:)
 real(8),allocatable :: ow_work_density(:,:,:,:)
 real(8) :: ow_diag_t_hermiticity,ow_diag_vlocal_hermiticity,ow_diag_vnl_hermiticity,&
   ow_diag_h_hermiticity
 logical :: ow_transaction_active
+logical :: ow_direct_nonlocal_compared=.false.
+logical :: ow_projector_stage_diagnosed=.false.
 integer :: ilevel_print
 
 if(theory=='dft_band'.and.iperiodic/=3) return
@@ -597,7 +626,8 @@ contains
     complex(8),allocatable::occupied_overlap_local(:,:),occupied_overlap_global(:,:)
     complex(8),allocatable::translation_hamiltonian_overlap_local(:,:),&
       translation_hamiltonian_overlap(:,:),translation_occupied_hamiltonian(:,:)
-    complex(8),allocatable::w90_anchors(:,:),w90_m_matrix(:,:,:),w90_a_matrix(:,:),w90_transform(:,:)
+    complex(8),allocatable::w90_anchors(:,:),w90_m_matrix(:,:,:),w90_a_matrix(:,:),w90_seed_a_matrix(:,:),&
+      w90_seed_representation(:,:),w90_transform(:,:)
     complex(8),allocatable::fixed_center_rows(:,:,:),fixed_center_representation(:,:),fixed_center_identity(:,:)
     complex(8),allocatable::translation_generator_rows(:,:,:),translation_gamma_rows(:,:),&
       translation_spatial_gamma_rows(:,:),&
@@ -613,6 +643,7 @@ contains
     complex(8),allocatable::composed_tile_values(:,:),projector_buffer_tile(:,:)
     complex(8),allocatable::ow_direct_core_gradients(:,:,:),ow_neighbor_plus_values(:,:),&
       ow_neighbor_minus_values(:,:),ow_map_probe_values(:,:),ow_map_probe_gradients(:,:,:)
+    complex(8),allocatable::ow_scalar_probe(:,:),ow_vector_probe(:,:,:),ow_scalar_representation(:,:,:)
     complex(8),allocatable::spectral_complement_generator_rows(:,:,:),spectral_complement_trial_rows(:,:),&
       spectral_trial_rows(:,:),&
       spectral_representative_vectors(:,:),spectral_basin_operator(:,:),spectral_wannier_action_rows(:,:,:),&
@@ -620,10 +651,10 @@ contains
     complex(8),allocatable::one_shot_hrows(:,:)
     real(8),allocatable::weights(:),spectrum(:),occupations(:),lcfo_retained_occupations(:),&
       lcfo_retained_eigenvalues(:),local_point_rotations(:,:,:)
-    real(8),allocatable::initial_density_local(:),initial_density_global(:),&
-      ow_total_density_values(:)
+    real(8),allocatable::ow_total_density_values(:)
     real(8),allocatable::projector_buffer_real(:,:)
     real(8),allocatable::one_shot_density(:),one_shot_potential(:)
+    real(8),allocatable::hybrid_converged_density(:),ow_initial_occupied_density(:)
     real(8),allocatable::spectral_occupied_density(:),spectral_empty_moments(:,:),&
       spectral_shared_density(:,:),spectral_basin_spectra(:,:),spectral_descriptor_eigenvalues(:),&
       spectral_descriptor_occupations(:)
@@ -637,6 +668,7 @@ contains
     real(8),allocatable::occupied_density_before(:),occupied_density_after(:),occupied_density_difference(:),&
       occupied_pre_total_residual(:),occupied_pre_boundary_residual(:),occupied_pre_interior_residual(:)
     real(8),allocatable::ow_core_spatial_covariance_residual(:)
+    real(8),allocatable::ow_scalar_probe_weights(:),ow_scalar_probe_residual(:)
     real(8),allocatable::ow_gradient_covariance_left(:),ow_gradient_covariance_transpose(:),&
       ow_gradient_covariance_candidates(:,:),ow_gradient_map_commutator(:)
     real(8),allocatable::ow_grid_stencil_defect(:)
@@ -723,8 +755,10 @@ contains
     integer(8)::translation_lcfo_fingerprint,translation_post_gauge_fingerprint,translation_global_core_count8
     integer(8)::composition_fingerprint,composition_workspace_peak,occupied_composition_peak,&
       occupied_composition_fingerprint,projector_composition_peak,projector_composition_fingerprint
-    integer(8)::w90_coordinator_bytes,w90_workspace_peak,w90_byte_limit
+    integer(8)::w90_coordinator_bytes,w90_workspace_peak,w90_seed_a_workspace,w90_byte_limit
     integer(8)::one_shot_workspace_peak,one_shot_operator_fingerprint
+    integer(8)::hybrid_state_workspace,hybrid_state_fingerprint,hybrid_checkpoint_fingerprint,&
+      hybrid_scf_fingerprint,hybrid_provenance(6)
     integer(8)::occupied_affine_workspace_peak,projection_affine_workspace_peak
     integer(8)::w90_symmetry_workspace_peak,w90_covariance_workspace
     integer(8)::center_gauge_workspace_peak
@@ -756,7 +790,11 @@ contains
     real(8)::one_shot_residual,one_shot_orthogonality,one_shot_condition,&
       one_shot_gamma_defect,one_shot_charge,one_shot_trace_charge,&
       one_shot_local_difference,one_shot_global_difference,one_shot_local_norm,one_shot_global_norm
-    logical::ok,reusable,localization_converged,global_inversion_present,center_diagnostic_ok
+    real(8)::hybrid_density_residual,hybrid_energy_residual,hybrid_eigensystem_residual,&
+      hybrid_electron_defect,hybrid_symmetry_defect,hybrid_scf_receipts(5)
+    real(8)::initial_occupied_charge_local,initial_occupied_charge
+    integer::hybrid_iterations
+    logical::ok,reusable,localization_converged,global_inversion_present,center_diagnostic_ok,diagnostic_ok
     logical::fixed_center_inversion_present,writer_ok
     logical::translation_self_conjugate
     real(8)::fixed_center_fractional(3)
@@ -787,7 +825,7 @@ contains
     type(s_dg_translation_orbit_accumulator)::translation_inverse_state
     integer::localization_iterations,localization_spread_evaluations
     integer::ow_saved_eigenexa_comm
-    character(256)::message,prefix,center_failure_message,center_diagnostic_message
+    character(256)::message,prefix,center_failure_message,center_diagnostic_message,diagnostic_message
     character(8),allocatable::w90_atom_symbols(:)
 
     call MPI_Comm_rank(dc%icomm_tot,rank,ierr);call MPI_Comm_size(dc%icomm_tot,nproc,ierr)
@@ -915,7 +953,6 @@ contains
     if(.not.ok)then
       write(0,'(a)')trim(message);error stop 'distributed total-density buffer materialization failed'
     endif
-    deallocate(ow_total_density_ids,ow_total_density_values)
     if(rank==0)write(*,'(a,i0)')'[OW-GS-DIAGNOSTIC] total_density_buffer_workspace_peak_bytes=',&
       ow_density_redistribution_workspace
     pseudopotential_fingerprint=ow_collective_operator_fingerprint(dc%icomm_tot)
@@ -1420,6 +1457,15 @@ contains
       ' workspace_peak_bytes=',spectral_workspace_peak
     deallocate(spectral_basin_generator_maps,spectral_occupied_density,spectral_empty_moments,&
       spectral_shared_density)
+    allocate(w90_anchors(ntarget,ncore),source=global_seed_values,stat=allocation_status)
+    call MPI_Allreduce(MPI_IN_PLACE,allocation_status,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.allocation_status/=0)&
+      error stop 'established Wannier90 seed-anchor retention failed collectively'
+    w90_byte_limit=8_8*1024_8*1024_8*1024_8
+    call assemble_dg_w90_gamma_a_matrix(dc%icomm_tot,global_closed_core,w90_anchors,&
+      ow_core_weights,dg_ow_symmetry_tolerance,w90_byte_limit,w90_seed_a_matrix,&
+      w90_seed_a_workspace,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'pre-DMN Wannier90 A assembly failed';endif
     if(allocated(global_seed_values))deallocate(global_seed_values)
     ! Diagonalize the spatial-basin projectors in the retained frame.  Only
     ! spectra are retained for every basin; representative eigenvectors are
@@ -1629,17 +1675,8 @@ contains
     allocate(fixed_center_identity(ntarget,ntarget),fixed_center_eigenvalues(ntarget))
     fixed_center_identity=(0d0,0d0);fixed_center_eigenvalues=0d0
     do io=1,ntarget;fixed_center_identity(io,io)=1d0;enddo
-    allocate(spectral_wannier_action_rows(size(spectral_row_ids),ntarget,1),stat=allocation_status)
-    call MPI_Allreduce(MPI_IN_PLACE,allocation_status,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
-    if(ierr/=MPI_SUCCESS.or.allocation_status/=0)&
-      error stop 'direct AMN metadata allocation failed collectively'
-    spectral_wannier_action_rows(:,:,1)=spectral_trial_rows
-    call gather_dg_single_symmetry_representation(dc%icomm_tot,spectral_row_ids,&
-      spectral_wannier_action_rows,1,0,spectral_amn,spectral_operation_workspace,ok,message)
-    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'spectral AMN coefficient gather failed';endif
-    deallocate(spectral_wannier_action_rows)
-    fixed_center_dmn_workspace_peak=spectral_operation_workspace
-    spectral_action_aggregate_fingerprint=spectral_channel_fingerprint;writer_ok=.true.
+    fixed_center_dmn_workspace_peak=0_8
+    spectral_action_aggregate_fingerprint=fixed_center_group_fingerprint;writer_ok=.true.
     if(rank==0)call begin_sawf_dmn(fixed_center_dmn_writer,'overlapping_wannier_mlwf.dmn',&
       ntarget,ntarget,fixed_center_group_order,dg_ow_symmetry_tolerance,writer_ok,message)
     call MPI_Bcast(writer_ok,1,MPI_LOGICAL,0,dc%icomm_tot,ierr)
@@ -1668,22 +1705,23 @@ contains
         if(rank==0)call abort_sawf_dmn(fixed_center_dmn_writer)
         error stop 'fixed-center pullback representation conversion failed'
       endif
+      allocation_status=0
       if(rank==0)then
-        allocate(spectral_wannier_representation(ntarget,ntarget),stat=allocation_status)
-        if(allocation_status==0)spectral_wannier_representation=matmul(conjg(transpose(spectral_amn)),&
-          matmul(fixed_center_representation,spectral_amn))
+        allocate(w90_seed_representation(ntarget,ntarget),stat=allocation_status)
+        if(allocation_status==0)w90_seed_representation=matmul(conjg(transpose(w90_seed_a_matrix)),&
+          matmul(fixed_center_representation,w90_seed_a_matrix))
       endif
       call MPI_Bcast(allocation_status,1,MPI_INTEGER,0,dc%icomm_tot,ierr)
       if(ierr/=MPI_SUCCESS.or.allocation_status/=0)then
         if(rank==0)call abort_sawf_dmn(fixed_center_dmn_writer)
-        error stop 'fixed-center Wannier representation allocation failed'
+        error stop 'fixed-center seed representation allocation failed'
       endif
       spectral_action_aggregate_fingerprint=ieor(spectral_action_aggregate_fingerprint,&
         ishftc(int(fixed_center_operation,8),modulo(fixed_center_operation,63)))
       writer_ok=.true.
       if(rank==0)call append_sawf_dmn_operation(fixed_center_dmn_writer,fixed_center_operation,&
-        spectral_wannier_representation,fixed_center_representation,fixed_center_eigenvalues,&
-        spectral_amn,fixed_center_operation==fixed_center_identity_operation,writer_ok,message)
+        w90_seed_representation,fixed_center_representation,fixed_center_eigenvalues,&
+        w90_seed_a_matrix,fixed_center_operation==fixed_center_identity_operation,writer_ok,message)
       if(rank==0.and..not.writer_ok)write(0,'(a,i0,2a)')&
         '[OW-GS-DIAGNOSTIC] fixed-center DMN append operation=',fixed_center_operation,&
         ' rejected: ',trim(message)
@@ -1693,7 +1731,7 @@ contains
         error stop 'fixed-center DMN operation append failed'
       endif
       deallocate(fixed_center_row_ids,fixed_center_rows,fixed_center_representation)
-      if(rank==0)deallocate(spectral_wannier_representation)
+      if(rank==0)deallocate(w90_seed_representation)
     enddo
     writer_ok=.true.
     if(rank==0)call finish_sawf_dmn(fixed_center_dmn_writer,&
@@ -1705,6 +1743,7 @@ contains
       error stop 'fixed-center DMN transaction could not finish'
     endif
     deallocate(fixed_center_identity,fixed_center_eigenvalues)
+    deallocate(spectral_trial_rows,spectral_row_ids)
     if(allocated(spectral_wannier_action_rows))deallocate(spectral_wannier_action_rows)
     allocate(initial_core_ids(ncore))
     core_index=0
@@ -1757,7 +1796,7 @@ contains
     enddo
     call setup_dg_w90_gamma_library(dc%icomm_tot,'overlapping_wannier_mlwf',&
       dc%system_tot%primitive_a,w90_reciprocal_lattice,w90_atom_symbols,w90_atoms_cart,&
-      ntarget,ntarget,wannier_num_iter,w90_nntot,w90_nncell,ok,message)
+      ntarget,ntarget,wannier_num_iter,dg_ow_w90_initial_projection,w90_nntot,w90_nncell,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 Gamma setup failed';endif
     allocate(w90_fractional(3,ncore),w90_eigenvalues(ntarget))
     do p=1,ncore
@@ -1766,28 +1805,11 @@ contains
         int(dc%lg_tot%num(2),8)),8)/real(dc%lg_tot%num(2),8),real((ow_core_ids(p)-1_8)/nxy8,8)/&
         real(dc%lg_tot%num(3),8)]
     enddo
-    call materialize_dg_row_owned_sector_on_spatial_grid(dc%icomm_tot,spectral_row_ids,ntarget,&
-      spectral_trial_rows,global_closed_core,spectral_frame_fingerprint,spectral_spatial_trials,&
-      spectral_operator_fingerprint,spectral_operation_workspace,ok,message)
-    if(.not.ok)then
-      write(0,'(a)')trim(message);error stop 'Wannier90 spectral trial materialization failed'
-    endif
-    allocate(w90_anchors(ntarget,ncore),stat=allocation_status)
-    call MPI_Allreduce(MPI_IN_PLACE,allocation_status,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
-    if(ierr/=MPI_SUCCESS.or.allocation_status/=0)&
-      error stop 'spectral Wannier anchor allocation failed collectively'
-    w90_anchors=transpose(spectral_spatial_trials)
-    deallocate(spectral_spatial_trials,spectral_trial_rows,spectral_row_ids);w90_eigenvalues=0d0
-    w90_byte_limit=8_8*1024_8*1024_8*1024_8
+    w90_eigenvalues=0d0
     call assemble_dg_w90_gamma_matrices(dc%icomm_tot,global_closed_core,w90_anchors,&
       ow_core_weights,w90_fractional,w90_nncell,w90_byte_limit,w90_m_matrix,w90_a_matrix,&
-      w90_coordinator_bytes,w90_workspace_peak,ok,message)
+      w90_coordinator_bytes,w90_workspace_peak,ok,message,precomputed_a_matrix=w90_seed_a_matrix)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 M/A assembly failed';endif
-    spectral_action_block_defect=0d0
-    if(rank==0)spectral_action_block_defect=maxval(abs(w90_a_matrix-spectral_amn))
-    call MPI_Bcast(spectral_action_block_defect,1,MPI_DOUBLE_PRECISION,0,dc%icomm_tot,ierr)
-    if(ierr/=MPI_SUCCESS.or.spectral_action_block_defect>10d0*dg_ow_symmetry_tolerance)&
-      error stop 'Wannier90 A matrix disagrees with the DMN spectral gauge'
     call fingerprint_ow_w90_matrices(dc%icomm_tot,w90_m_matrix,w90_a_matrix,&
       w90_input_fingerprint,ok)
     if(.not.ok)error stop 'Wannier90 M/A fingerprint failed'
@@ -1829,18 +1851,19 @@ contains
       call gather_dg_single_symmetry_representation(dc%icomm_tot,fixed_center_row_ids,fixed_center_rows,&
         1,0,fixed_center_representation,fixed_center_operation_workspace,ok,message)
       if(.not.ok)then;write(0,'(a)')trim(message);error stop 'post-Wannier generator gather failed';endif
+      allocation_status=0
       if(rank==0)then
         call convert_sawf_pullback_to_active_representation(fixed_center_representation,ok,message)
-        allocate(spectral_wannier_representation(ntarget,ntarget),stat=allocation_status)
-        if(allocation_status==0.and.ok)spectral_wannier_representation=&
-          matmul(conjg(transpose(spectral_amn)),matmul(fixed_center_representation,spectral_amn))
+        allocate(w90_seed_representation(ntarget,ntarget),stat=allocation_status)
+        if(allocation_status==0.and.ok)w90_seed_representation=&
+          matmul(conjg(transpose(w90_seed_a_matrix)),matmul(fixed_center_representation,w90_seed_a_matrix))
       endif
       call MPI_Bcast(ok,1,MPI_LOGICAL,0,dc%icomm_tot,ierr)
       call MPI_Bcast(allocation_status,1,MPI_INTEGER,0,dc%icomm_tot,ierr)
       if(ierr/=MPI_SUCCESS.or..not.ok.or.allocation_status/=0)&
         error stop 'post-Wannier target representation construction failed'
       call validate_dg_w90_generator_covariance(dc%icomm_tot,w90_transform,fixed_center_representation,&
-        spectral_wannier_representation,dg_ow_symmetry_tolerance,w90_generator_covariance_defect,&
+        w90_seed_representation,dg_ow_symmetry_tolerance,w90_generator_covariance_defect,&
         fixed_center_operation_workspace,ok,message)
       if(.not.ok)then
         write(0,'(a)')trim(message);error stop 'post-Wannier fixed-center covariance failed'
@@ -1848,9 +1871,9 @@ contains
       w90_covariance_defect=max(w90_covariance_defect,w90_generator_covariance_defect)
       w90_covariance_workspace=max(w90_covariance_workspace,fixed_center_operation_workspace)
       deallocate(fixed_center_row_ids,fixed_center_rows,fixed_center_representation)
-      if(rank==0)deallocate(spectral_wannier_representation)
+      if(rank==0)deallocate(w90_seed_representation)
     enddo
-    deallocate(spectral_amn)
+    deallocate(w90_seed_a_matrix)
     if(rank==0)write(*,'(a,a,es16.8,a,i0)')'[OW-GS-DIAGNOSTIC] Wannier90 fixed-center covariance passed',&
       ' defect=',w90_covariance_defect,' workspace_peak_bytes=',w90_covariance_workspace
     localized_centers=matmul(w90_lattice_inverse,localized_centers)
@@ -2194,6 +2217,7 @@ contains
     allocate(exact_fragment_symmetry_fingerprints(nproc))
     call MPI_Allgather(local_exact_symmetry_fingerprint,1,MPI_INTEGER8,&
       exact_fragment_symmetry_fingerprints,1,MPI_INTEGER8,dc%icomm_tot,ierr)
+    ow_symmetry_fingerprint=0_8
     do p=1,nproc
       ow_symmetry_fingerprint=ieor(ow_symmetry_fingerprint,ishftc(&
         ieor(exact_fragment_symmetry_fingerprints(p),int(p,8)),modulo(13*p,63)))
@@ -2233,6 +2257,28 @@ contains
       ow_spatial_covariance_absolute=ow_spatial_covariance_relative*sqrt(real(ntarget,8))
     endif
     if(allocated(ow_core_spatial_covariance_residual))deallocate(ow_core_spatial_covariance_residual)
+    allocate(ow_scalar_probe(1,ncore),ow_vector_probe(3,1,ncore),&
+      ow_scalar_representation(1,1,size(ow_pencil_generator_maps,2)),ow_scalar_probe_weights(ncore))
+    ow_scalar_representation=(1d0,0d0);ow_scalar_probe_weights=1d0
+    ow_scalar_probe(1,:)=cmplx(ow_partition_weight(ow_core_box_positions),0d0,8)
+    call measure_dg_spatial_basis_covariance(dc%icomm_tot,ow_scalar_probe,ow_scalar_probe_weights,&
+      ow_pencil_generator_maps,ow_scalar_representation,ow_scalar_probe_residual,ok,message)
+    if(ok.and.rank==0)write(*,'(a,es16.8,a,i0)')&
+      '[OW-GS-DIAGNOSTIC] core partition-weight covariance max=',maxval(ow_scalar_probe_residual),&
+      ' operation=',maxloc(ow_scalar_probe_residual,dim=1)
+    if(allocated(ow_scalar_probe_residual))deallocate(ow_scalar_probe_residual)
+    ow_vector_probe(:,1,:)=cmplx(ow_partition_gradient(:,ow_core_box_positions),0d0,8)
+    call measure_dg_spatial_gradient_covariance(dc%icomm_tot,ow_vector_probe,ow_scalar_probe_weights,&
+      ow_pencil_generator_maps,ow_scalar_representation,&
+      global_point_rotations(:,:,global_affine_generators),&
+      ow_gradient_covariance_left,ow_gradient_covariance_transpose,ok,message)
+    if(ok.and.rank==0)write(*,'(2(a,es16.8,a,i0))')&
+      '[OW-GS-DIAGNOSTIC] core partition-gradient covariance R max=',&
+      maxval(ow_gradient_covariance_left),' operation=',maxloc(ow_gradient_covariance_left,dim=1),&
+      ' RT max=',maxval(ow_gradient_covariance_transpose),&
+      ' operation=',maxloc(ow_gradient_covariance_transpose,dim=1)
+    if(allocated(ow_gradient_covariance_left))deallocate(ow_gradient_covariance_left)
+    if(allocated(ow_gradient_covariance_transpose))deallocate(ow_gradient_covariance_transpose)
     if(ok)call measure_dg_spatial_gradient_covariance(dc%icomm_tot,ow_core_gradients,ow_core_weights,&
       ow_pencil_generator_maps,ow_pencil_generator_representation,&
       global_point_rotations(:,:,global_affine_generators),&
@@ -2279,6 +2325,14 @@ contains
     ow_gradient_identity_map(:,1)=[(int(rank,8)*int(ncore,8)+int(p,8),p=1,ncore)]
     ow_gradient_identity_rotation=0d0
     do i=1,3;ow_gradient_identity_rotation(i,i,1)=1d0;enddo
+    call measure_ow_discrete_gradient_map_commutator(dc%icomm_tot,ow_scalar_probe,&
+      ow_vector_probe,ow_scalar_probe_weights,ow_core_ids,ow_gradient_identity_map,&
+      dc%lg_tot%num,stencil%coef_nab,ow_gradient_identity_rotation,&
+      ow_gradient_map_commutator,ok,message)
+    if(ok.and.rank==0)write(*,'(a,es16.8)')&
+      '[OW-GS-DIAGNOSTIC] partition analytic/finite-difference gradient defect=',&
+      ow_gradient_map_commutator(1)
+    if(allocated(ow_gradient_map_commutator))deallocate(ow_gradient_map_commutator)
     if(ok)call measure_ow_discrete_gradient_map_commutator(dc%icomm_tot,ow_core_values,&
       ow_direct_core_gradients,ow_core_weights,ow_core_ids,ow_gradient_identity_map,&
       dc%lg_tot%num,stencil%coef_nab,ow_gradient_identity_rotation,&
@@ -2311,7 +2365,6 @@ contains
     if(allocated(ow_gradient_covariance_left))deallocate(ow_gradient_covariance_left)
     if(allocated(ow_gradient_covariance_transpose))deallocate(ow_gradient_covariance_transpose)
     deallocate(ow_direct_core_gradients)
-    deallocate(ow_pencil_generator_maps)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'pencil generator representation failed';endif
     allocate(ow_pencil_generator_operations,source=global_affine_generators)
     allocate(ow_pencil_affine_product,source=global_point_product)
@@ -2342,6 +2395,24 @@ contains
       ow_basis%center_box_point_ids(io)=int(center_owner_candidate(io),8)*int(nbox,8)+&
         int(center_box_candidate(io),8)
     end do
+    ow_basis%generation=1
+    allocate(ow_row_ids(count(ow_basis%center_owner_rank==rank)))
+    io=0
+    do p=1,ntarget
+      if(ow_basis%center_owner_rank(p)/=rank)cycle
+      io=io+1;ow_row_ids(io)=p
+    enddo
+    i=findloc(global_affine_generators,5,dim=1)
+    if(i>0)then
+      call diagnose_ow_total_nonlocal_projector_range(localized_centers,&
+        global_point_integer_rotations(:,:,5),global_point_rotations(:,:,5),&
+        global_point_fractional_translations(:,5),ow_pencil_generator_representation(:,:,i),&
+        num_fragment,ok,message)
+      if(.not.ok.and.rank==0)write(*,'(2a)')&
+        '[OW-GS-DIAGNOSTIC] total nonlocal projector range unavailable: ',trim(message)
+    else if(rank==0)then
+      write(*,'(a)')'[OW-GS-DIAGNOSTIC] operation 5 is not an affine generator; projector range unavailable'
+    endif
     call transpose_dg_spatial_cores_to_orbital_owners(dc%icomm_tot,ow_core_values,ow_core_ids,32,&
       orbital_owned_ids,orbital_owned_full_ids,orbital_owned_full_values,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'localized orbital ownership transpose failed';end if
@@ -2358,12 +2429,6 @@ contains
       minval(localized_center_magnitudes),maxval(localized_center_magnitudes)
     deallocate(localized_centers,localized_center_magnitudes,center_owner_candidate,&
       center_box_candidate,center_fragment_candidate)
-    allocate(ow_row_ids(count(ow_basis%center_owner_rank==rank)))
-    io=0
-    do p=1,ntarget
-      if(ow_basis%center_owner_rank(p)/=rank)cycle
-      io=io+1;ow_row_ids(io)=p
-    enddo
     call assemble_dg_stitched_overlap_density_rows(dc%icomm_tot,ntarget,ow_row_ids,physical_ids,&
       ow_partition_weight,ow_box_values,ow_box_density,system%hvol,expected_core_count,&
       dc%elec_num_tot,dg_dc_metric_rank_tolerance,dg_dc_gs_electron_count_tolerance,&
@@ -2391,7 +2456,7 @@ contains
       dg_dc_gs_final_orbital_tolerance,10d0*dg_dc_gs_final_orbital_tolerance,&
       dg_dc_gs_electron_count_tolerance,1d0/dg_dc_metric_rank_tolerance,dg_ow_symmetry_tolerance],&
       ow_checkpoint,reusable,ok,message)
-    if(ok.and.reusable)then
+    if(ok.and.reusable.and.yn_dg_hybrid_scf/='y')then
       call restore_ow_checkpoint_density(ow_checkpoint,ok,message)
       if(.not.ok)error stop 'overlapping-Wannier checkpoint density restore failed'
       if(rank==0)write(*,'(a)')'[OW-GS] reused accepted route checkpoint'
@@ -2409,35 +2474,101 @@ contains
     if(any(occupations<0d0).or.any(occupations>2d0).or.&
         abs(sum(occupations)-dc%elec_num_tot)>dg_dc_gs_electron_count_tolerance)&
       error stop 'retained LCFO occupation spectrum violates the electron-count gate'
+    allocate(ow_initial_occupied_density(ncore))
+    call redistribute_dg_row_owned_real_field_to_requests(dc%icomm_tot,expected_core_count,&
+      ow_total_density_ids,ow_total_density_values,ow_core_ids,ow_initial_occupied_density,&
+      ow_density_redistribution_workspace,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message)
+      error stop 'converged DC+LCFO density redistribution failed';endif
+    deallocate(ow_total_density_ids,ow_total_density_values)
+    initial_occupied_charge_local=sum(ow_core_weights*ow_initial_occupied_density)
+    call MPI_Allreduce(initial_occupied_charge_local,initial_occupied_charge,1,&
+      MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr)
+    if(rank==0)write(*,'(a,3(a,es24.16))')'[OW-GS-DIAGNOSTIC] converged DC+LCFO initial density',&
+      ' electrons=',initial_occupied_charge,' expected=',dc%elec_num_tot,&
+      ' difference=',initial_occupied_charge-dc%elec_num_tot
+    if(ierr/=MPI_SUCCESS.or..not.all(ieee_is_finite(ow_initial_occupied_density)).or.&
+        abs(initial_occupied_charge-dc%elec_num_tot)>&
+        dg_dc_gs_electron_count_tolerance*max(1d0,dc%elec_num_tot))&
+      error stop 'converged DC+LCFO initial density violates electron-count contract'
+    if(yn_dg_hybrid_scf=='y')then
+      if(rank==0)write(*,'(a)')'[OW-GS] starting distributed fixed-basis complex ScaLAPACK SCF'
+      if(dc%system_tot%nspin/=1)error stop 'distributed hybrid SCF currently requires nspin=1'
+      call ow_fingerprint_distributed_matrix(dc%icomm_tot,ow_row_ids,ow_srows,&
+        ow_hybrid_metric_fingerprint,ok)
+      if(.not.ok)error stop 'distributed hybrid metric fingerprint failed'
+      allocate(ow_hybrid_hrows(size(ow_row_ids),ntarget),ow_hybrid_occupations(nstate),&
+        ow_hybrid_eigenvalues(nstate),ow_hybrid_potential(ncore),ow_hybrid_density(ncore),&
+        ow_hybrid_density_history(ncore,2),ow_hybrid_new_history(ncore,2))
+      ow_hybrid_occupations=occupations;ow_hybrid_eigenvalues=0d0;ow_hybrid_potential=0d0
+      ow_hybrid_density=ow_initial_occupied_density
+      ow_hybrid_density_history(:,1)=ow_hybrid_density
+      ow_hybrid_density_history(:,2)=ow_hybrid_density
+      ow_hybrid_new_history=ow_hybrid_density_history;ow_hybrid_history_count=0
+      ow_hybrid_mixing_rate=dg_dc_gs_density_mix_rate
+      call run_dg_hybrid_self_consistent_ground_state(dc%icomm_tot,int(expected_core_count),ow_core_ids,&
+        ow_hybrid_density,basis_fingerprint,ow_hybrid_metric_fingerprint,ow_hybrid_update_potential,&
+        ow_hybrid_assemble_hamiltonian,ow_hybrid_solve_occupied,ow_hybrid_reconstruct_density,&
+        ow_hybrid_density_mix,dg_dc_gs_maximum_scf_iterations,dg_dc_gs_final_density_tolerance,&
+        dg_dc_gs_final_orbital_tolerance,dg_dc_gs_final_orbital_tolerance,&
+        min(dg_dc_gs_electron_count_tolerance,dg_ow_symmetry_tolerance),hybrid_converged_density,&
+        hybrid_iterations,hybrid_density_residual,hybrid_energy_residual,hybrid_eigensystem_residual,&
+        hybrid_electron_defect,hybrid_symmetry_defect,hybrid_scf_fingerprint,ok,message)
+      if(.not.ok)then;write(0,'(a)')trim(message);error stop 'distributed hybrid SCF failed';endif
+      call validate_dg_hybrid_ground_state(dc%icomm_tot,ntarget,nstate,ow_row_ids,ow_hybrid_coefficients,&
+        occupations,ow_hybrid_eigenvalues,dc%elec_num_tot,basis_fingerprint,ow_hybrid_metric_fingerprint,&
+        ow_hybrid_operator_fingerprint,ow_symmetry_fingerprint,dg_dc_gs_electron_count_tolerance,&
+        ow_hybrid_ground_state,hybrid_state_workspace,hybrid_state_fingerprint,ok,message)
+      if(.not.ok)then;write(0,'(a)')trim(message);error stop 'distributed hybrid state validation failed';endif
+      ow_hybrid_ground_state%converged=.true.
+      hybrid_provenance=[ow_hybrid_metric_fingerprint,spectral_basin_fingerprint,&
+        spectral_action_aggregate_fingerprint,translation_post_gauge_fingerprint,&
+        w90_input_fingerprint,w90_transform_fingerprint]
+      hybrid_scf_receipts=[hybrid_density_residual,hybrid_energy_residual,hybrid_eigensystem_residual,&
+        hybrid_electron_defect,hybrid_symmetry_defect]
+      call write_rt_dg_hybrid_occupied_checkpoint(dc%icomm_tot,'./overlapping_wannier_occupied.chk',&
+        ntarget,ow_row_ids,ow_hybrid_coefficients,occupations,ow_hybrid_eigenvalues,spectral_catalog_fingerprint,&
+        basis_fingerprint,hybrid_provenance,ow_hybrid_operator_fingerprint,hybrid_state_fingerprint,&
+        hybrid_scf_receipts,max(dg_dc_gs_final_density_tolerance,dg_dc_gs_final_orbital_tolerance,&
+        dg_dc_gs_electron_count_tolerance,dg_ow_symmetry_tolerance),hybrid_checkpoint_fingerprint,ok,message)
+      if(.not.ok)then;write(0,'(a)')trim(message);error stop 'distributed hybrid checkpoint failed';endif
+      if(rank==0)write(*,'(a,i0,5(a,es16.8))')'[OW-GS] hybrid SCF converged iterations=',hybrid_iterations,&
+        ' density=',hybrid_density_residual,' band_energy_change=',hybrid_energy_residual,&
+        ' eigensystem=',hybrid_eigensystem_residual,' electrons=',hybrid_electron_defect,&
+        ' symmetry=',hybrid_symmetry_defect
+      return
+    endif
     allocate(ow_state%density(ncore),ow_state%potential(ncore),ow_state%coefficients(ntarget,nstate),&
       ow_state%eigenvalues(nstate),ow_state%density_history(ncore,2))
-    allocate(initial_density_local(int(ow_global_grid_count)),&
-      initial_density_global(int(ow_global_grid_count)))
-    initial_density_local=0d0
-    do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
-    do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
-    do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
-      p=ix+dc%lg_tot%num(1)*(iy-1+dc%lg_tot%num(2)*(iz-1))
-      initial_density_local(p)=dc%rho_tot_s(1)%f(ix,iy,iz)
-    enddo
-    enddo
-    enddo
-    call comm_summation(initial_density_local,initial_density_global,&
-      size(initial_density_local),dc%icomm_tot)
-    do p=1,ncore
-      ow_state%density(p)=initial_density_global(int(ow_core_ids(p)))
-      ow_state%potential(p)=0d0
-    enddo
-    deallocate(initial_density_local,initial_density_global)
     ow_state%coefficients=(0d0,0d0);do io=1,nstate;ow_state%coefficients(io,io)=1d0;enddo
+    allocate(one_shot_density(ncore))
+    one_shot_density=ow_initial_occupied_density
+    ow_state%density=one_shot_density;ow_state%potential=0d0
     ow_state%eigenvalues=0d0;ow_state%density_history(:,1)=ow_state%density
     ow_state%density_history(:,2)=ow_state%density;ow_state%history_count=1
     ow_state%basis_generation=ow_basis%generation;ow_state%geometry_generation=1
     ow_state%basis_fingerprint=basis_fingerprint
     ow_state%operator_fingerprint=operator_fingerprint
-    allocate(one_shot_hrows(size(ow_row_ids),ntarget),one_shot_potential(ncore),one_shot_density(ncore))
-    call ow_build_hamiltonian(dc%icomm_tot,ow_state%density,ow_state%potential,one_shot_hrows,&
+    allocate(one_shot_hrows(size(ow_row_ids),ntarget),one_shot_potential(ncore))
+    ow_scalar_probe(1,:)=cmplx(ow_state%density,0d0,8)
+    call measure_dg_spatial_basis_covariance(dc%icomm_tot,ow_scalar_probe,ow_scalar_probe_weights,&
+      ow_pencil_generator_maps,ow_scalar_representation,ow_scalar_probe_residual,ok,message)
+    if(ok.and.rank==0)write(*,'(a,es16.8,a,i0)')&
+      '[OW-GS-DIAGNOSTIC] core input-density covariance max=',maxval(ow_scalar_probe_residual),&
+      ' operation=',maxloc(ow_scalar_probe_residual,dim=1)
+    if(allocated(ow_scalar_probe_residual))deallocate(ow_scalar_probe_residual)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'one-shot input density covariance failed';endif
+    call ow_build_hamiltonian(dc%icomm_tot,ow_state%density,one_shot_hrows,&
       one_shot_potential,one_shot_operator_fingerprint,ok,message)
+    ow_scalar_probe(1,:)=cmplx(one_shot_potential,0d0,8)
+    call measure_dg_spatial_basis_covariance(dc%icomm_tot,ow_scalar_probe,ow_scalar_probe_weights,&
+      ow_pencil_generator_maps,ow_scalar_representation,ow_scalar_probe_residual,diagnostic_ok,diagnostic_message)
+    if(diagnostic_ok.and.rank==0)write(*,'(a,es16.8,a,i0)')&
+      '[OW-GS-DIAGNOSTIC] core updated-potential covariance max=',maxval(ow_scalar_probe_residual),&
+      ' operation=',maxloc(ow_scalar_probe_residual,dim=1)
+    if(allocated(ow_scalar_probe_residual))deallocate(ow_scalar_probe_residual)
+    deallocate(ow_scalar_probe,ow_vector_probe,ow_scalar_representation,ow_scalar_probe_weights)
+    if(allocated(ow_pencil_generator_maps))deallocate(ow_pencil_generator_maps)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'one-shot stitched Hamiltonian build failed';endif
     if(one_shot_operator_fingerprint/=operator_fingerprint)&
       error stop 'one-shot stitched Hamiltonian operator fingerprint mismatch'
@@ -3260,27 +3391,181 @@ contains
     call dg_dc_update_potential_from_density(density4,ok,message)
   end subroutine
 
-  subroutine ow_build_hamiltonian(comm,density,potential,hrows,new_potential,fingerprint,ok,message)
+  subroutine diagnose_ow_total_nonlocal_projector_range(centers,integer_rotation,cartesian_rotation,&
+      translation,wannier_representation,fragment_shape,ok,message)
+    real(8),intent(in)::centers(:,:),cartesian_rotation(3,3),translation(3)
+    integer,intent(in)::integer_rotation(3,3),fragment_shape(3)
+    complex(8),intent(in)::wannier_representation(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    type(s_dg_nonlocal_range_receipt)::receipt
+    integer::rank,ierr,nx,ny,owned_count,ix,iy,iz,g,p,q,ia,ik,ll,l,l0,m,ilma,lm,radial,&
+      nnz,target_atom,target_channel,source_first,target_first,allocation_status
+    integer,allocatable::offsets(:),projector_atom(:),channel_l(:),channel_m(:),channel_radial(:),atom_map(:)
+    integer(8),allocatable::support_ids(:)
+    complex(8),allocatable::support_values(:),mg_wannier(:,:),projector_representation(:,:)
+    real(8),allocatable::strength(:),fractional_atoms(:,:)
+    real(8)::inverse(3,3),determinant,delta(3),cart_delta(3),distance,best,pblock(3,3),basis(3,3)
+    logical::redistribution_ok
+    character(256)::redistribution_message
+    integer(8)::redistribution_workspace
+
+    ok=.false.;message='';call MPI_Comm_rank(dc%icomm_tot,rank,ierr)
+    if(ierr/=MPI_SUCCESS.or.size(centers,1)/=3.or.size(centers,2)/=size(ow_core_values,1).or.&
+      any(shape(wannier_representation)/=[size(ow_core_values,1),size(ow_core_values,1)]).or.&
+      dc%ppg_tot%Nlma<1.or.any(fragment_shape<1))then
+      message='invalid total nonlocal projector diagnostic contract';return
+    endif
+    call invert_ow_lattice(dc%system_tot%primitive_a,inverse,determinant,redistribution_ok)
+    if(.not.redistribution_ok)return
+    nx=dc%lg_tot%num(1);ny=dc%lg_tot%num(2)
+    owned_count=product(dc%mg_tot%ie-dc%mg_tot%is+1)
+    if(.not.allocated(ow_hpsi_grid_ids))then
+      allocate(ow_hpsi_grid_ids(owned_count),stat=allocation_status)
+      if(allocation_status/=0)then;message='cannot allocate total nonlocal grid IDs';return;endif
+      g=0
+      do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3);do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
+      do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
+        g=g+1;ow_hpsi_grid_ids(g)=int(ix,8)+int(nx,8)*(int(iy-1,8)+int(ny,8)*int(iz-1,8))
+      enddo;enddo;enddo
+    endif
+    if(.not.ow_hpsi_redistribution%initialized)then
+      call initialize_dg_full_cell_redistribution(dc%icomm_tot,int(ow_global_grid_count),ow_core_ids,&
+        ow_hpsi_grid_ids,ow_hpsi_redistribution,redistribution_workspace,redistribution_ok,&
+        redistribution_message)
+      if(.not.redistribution_ok)then;message=trim(redistribution_message);return;endif
+      ow_hpsi_redistribution_workspace=redistribution_workspace
+    endif
+    allocate(mg_wannier(size(ow_core_values,1),owned_count),stat=allocation_status)
+    if(allocation_status/=0)then;message='cannot allocate redistributed diagnostic Wannier tile';return;endif
+    call apply_dg_full_cell_redistribution_forward(ow_hpsi_redistribution,ow_core_values,mg_wannier,&
+      redistribution_ok,redistribution_message)
+    if(.not.redistribution_ok)then;message=trim(redistribution_message);return;endif
+
+    allocate(offsets(dc%ppg_tot%Nlma+1),projector_atom(dc%ppg_tot%Nlma),&
+      channel_l(dc%ppg_tot%Nlma),channel_m(dc%ppg_tot%Nlma),channel_radial(dc%ppg_tot%Nlma),&
+      strength(dc%ppg_tot%Nlma),fractional_atoms(3,dc%system_tot%nion),atom_map(dc%system_tot%nion))
+    channel_l=-1;channel_m=0;channel_radial=0
+    do ia=1,dc%system_tot%nion
+      fractional_atoms(:,ia)=modulo(matmul(inverse,dc%system_tot%Rion(:,ia)),1d0)
+      ik=dc%system_tot%kion(ia);lm=0;l0=0
+      do ll=0,pp%mlps(ik)
+        radial=0
+        do l=l0,l0+pp%nproj(ll,ik)-1
+          if(pp%inorm(l,ik)==0)cycle
+          radial=radial+1
+          do m=-ll,ll
+            lm=lm+1;ilma=dc%ppg_tot%lma_tbl(lm,ia)
+            channel_l(ilma)=ll;channel_m(ilma)=m;channel_radial(ilma)=radial
+          enddo
+        enddo
+        l0=l
+      enddo
+    enddo
+    if(any(channel_l<0).or.any(channel_l>1))then
+      message='total nonlocal diagnostic currently requires complete s/p pseudopotential shells';return
+    endif
+    do ia=1,dc%system_tot%nion
+      best=huge(1d0);target_atom=0
+      do ik=1,dc%system_tot%nion
+        if(dc%system_tot%kion(ik)/=dc%system_tot%kion(ia))cycle
+        delta=matmul(real(integer_rotation,8),fractional_atoms(:,ia))+translation-fractional_atoms(:,ik)
+        delta=delta-anint(delta);cart_delta=matmul(dc%system_tot%primitive_a,delta)
+        distance=sqrt(sum(cart_delta*cart_delta))
+        if(distance<best)then;best=distance;target_atom=ik;endif
+      enddo
+      if(target_atom<1.or.best>max(1d-8,dg_ow_symmetry_tolerance))then
+        message='operation 5 has no exact same-species total-system atom partner';return
+      endif
+      atom_map(ia)=target_atom
+    enddo
+    do ia=1,size(atom_map)-1
+      do q=ia+1,size(atom_map)
+        if(atom_map(ia)==atom_map(q))then
+          message='operation 5 total-system atom map is not one-to-one';return
+        endif
+      enddo
+    enddo
+
+    nnz=0;offsets(1)=1
+    do ilma=1,dc%ppg_tot%Nlma
+      ia=dc%ppg_tot%ia_tbl(ilma)
+      do q=1,dc%ppg_tot%mps(ia)
+        ix=dc%ppg_tot%jxyz(1,q,ia);iy=dc%ppg_tot%jxyz(2,q,ia);iz=dc%ppg_tot%jxyz(3,q,ia)
+        if(ix<dc%mg_tot%is(1).or.ix>dc%mg_tot%ie(1).or.iy<dc%mg_tot%is(2).or.&
+          iy>dc%mg_tot%ie(2).or.iz<dc%mg_tot%is(3).or.iz>dc%mg_tot%ie(3))cycle
+        nnz=nnz+1
+      enddo
+      offsets(ilma+1)=nnz+1
+    enddo
+    allocate(support_ids(nnz),support_values(nnz),projector_representation(dc%ppg_tot%Nlma,dc%ppg_tot%Nlma))
+    nnz=0;projector_representation=0d0
+    do ilma=1,dc%ppg_tot%Nlma
+      ia=dc%ppg_tot%ia_tbl(ilma);projector_atom(ilma)=ia
+      strength(ilma)=system%hvol*dc%ppg_tot%rinv_uvu(ilma)
+      do q=1,dc%ppg_tot%mps(ia)
+        ix=dc%ppg_tot%jxyz(1,q,ia);iy=dc%ppg_tot%jxyz(2,q,ia);iz=dc%ppg_tot%jxyz(3,q,ia)
+        if(ix<dc%mg_tot%is(1).or.ix>dc%mg_tot%ie(1).or.iy<dc%mg_tot%is(2).or.&
+          iy>dc%mg_tot%ie(2).or.iz<dc%mg_tot%is(3).or.iz>dc%mg_tot%ie(3))cycle
+        nnz=nnz+1;support_ids(nnz)=int(ix,8)+int(nx,8)*(int(iy-1,8)+int(ny,8)*int(iz-1,8))
+        support_values(nnz)=dc%ppg_tot%zekr_uV(q,ilma,1)
+      enddo
+    enddo
+    basis=0d0;basis(2,1)=-1d0;basis(3,2)=1d0;basis(1,3)=-1d0
+    pblock=matmul(transpose(basis),matmul(cartesian_rotation,basis))
+    do ilma=1,dc%ppg_tot%Nlma
+      target_atom=atom_map(projector_atom(ilma));target_channel=0
+      do q=1,dc%ppg_tot%Nlma
+        if(dc%ppg_tot%ia_tbl(q)==target_atom.and.channel_l(q)==channel_l(ilma).and.&
+          channel_radial(q)==channel_radial(ilma))then
+          if(channel_l(ilma)==0.and.channel_m(q)==0)target_channel=q
+          if(channel_l(ilma)==1)then
+            projector_representation(q,ilma)=pblock(channel_m(q)+2,channel_m(ilma)+2)
+            target_channel=q
+          endif
+        endif
+      enddo
+      if(channel_l(ilma)==0.and.target_channel>0)projector_representation(target_channel,ilma)=1d0
+      if(target_channel==0)then;message='operation 5 has an unmatched radial projector channel';return;endif
+    enddo
+    call analyze_dg_nonlocal_projector_range(dc%icomm_tot,ow_hpsi_grid_ids,mg_wannier,centers,&
+      dc%system_tot%primitive_a,dc%system_tot%Rion,dc%system_tot%kion,projector_atom,strength,&
+      offsets,support_ids,support_values,integer_rotation,translation,fragment_shape,16,&
+      wannier_representation,projector_representation,receipt,ok,message,ow_row_ids,ow_direct_nonlocal_rows)
+    if(ok.and.rank==0)write(*,'(a,5(a,es16.8),2(a,i0))')&
+      '[OW-GS-DIAGNOSTIC] total_nonlocal_projector_range_operation5',&
+      ' local=',receipt%local_contribution,' adjacent=',receipt%adjacent_contribution,&
+      ' remote=',receipt%remote_contribution,' max_remote_fraction=',receipt%maximum_remote_fraction,&
+      ' covariance=',receipt%symmetry_pair_defect,' unmatched=',receipt%unmatched_channel_count,&
+      ' workspace_peak_bytes=',receipt%workspace_peak_bytes
+  end subroutine diagnose_ow_total_nonlocal_projector_range
+
+  subroutine ow_build_hamiltonian(comm,density,hrows,new_potential,fingerprint,ok,message,update_auxiliary_pencil)
     integer,intent(in)::comm
-    real(8),intent(in)::density(:),potential(:)
+    real(8),intent(in)::density(:)
     complex(8),intent(out)::hrows(:,:)
     real(8),intent(out)::new_potential(:)
     integer(8),intent(out)::fingerprint
     logical,intent(out)::ok
     character(*),intent(out)::message
+    logical,intent(in),optional::update_auxiliary_pencil
     real(8),allocatable::global_density(:),summed_density(:),core_potential(:),box_potential(:)
     complex(8),allocatable::kinetic_rows(:,:),local_rows(:,:),nonlocal_rows(:,:),boundary_rows(:,:),&
+      full_rows(:,:),&
       core_potential_values(:,:),box_potential_values(:,:),sym_h_rows(:,:),sym_s_rows(:,:),sym_rho_rows(:,:)
     complex(8),allocatable::component_rows(:,:,:)
     real(8)::kinetic_scale,local_scale,nonlocal_scale,hamiltonian_scale,&
-      stitched_t_hermiticity,stitched_v_hermiticity,weight_gradient_trace
+      stitched_t_hermiticity,stitched_v_hermiticity,weight_gradient_trace,&
+      local_direct_difference,global_direct_difference,direct_nonlocal_scale
     real(8)::pencil_before(3),pencil_after(3),boundary_artifact_change,boundary_artifact_magnitude
     real(8)::component_covariance(3)
-    logical::finite_t,finite_local,finite_nonlocal,finite_h
+    logical::finite_t,finite_local,finite_nonlocal,finite_h,update_auxiliary
     integer::p,ix,iy,iz,nwann,owned_projectors,rank,ierr
     integer(8)::stitched_operator_peak_elements
+    integer(8)::full_cell_workspace_peak
     integer(8)::pencil_symmetry_workspace_peak
     call MPI_Comm_rank(comm,rank,ierr)
+    update_auxiliary=.true.;if(present(update_auxiliary_pencil))update_auxiliary=update_auxiliary_pencil
     allocate(global_density(int(ow_global_grid_count)),summed_density(int(ow_global_grid_count)))
     global_density=0d0
     do p=1,size(ow_core_ids);global_density(int(ow_core_ids(p)))=density(p);enddo
@@ -3290,41 +3575,82 @@ contains
     ow_work_density(:,:,:,1)=reshape(summed_density,dc%lg_tot%num)
     call dg_dc_update_potential_from_density(ow_work_density,ok,message)
     if(.not.ok)return
-    nwann=size(ow_box_values,1);allocate(core_potential(size(ow_core_ids)))
-    p=0
-    do iz=1,ow_core_size(3);do iy=1,ow_core_size(2);do ix=1,ow_core_size(1)
-      p=p+1;core_potential(p)=v_local(1)%f(ix,iy,iz)
-    enddo;enddo;enddo
-    allocate(core_potential_values(1,size(core_potential)))
-    core_potential_values(1,:)=cmplx(core_potential,0d0,8)
-    call materialize_ow_distributed_core_to_buffer(comm,core_potential_values,ow_core_ids,&
-      ow_box_physical_ids,box_potential_values,ok,message)
+    nwann=size(ow_core_values,1);allocate(core_potential(size(ow_core_ids)))
+    do p=1,size(ow_core_ids)
+      ix=int(modulo(ow_core_ids(p)-1_8,int(dc%lg_tot%num(1),8)))+1
+      iy=int(modulo((ow_core_ids(p)-1_8)/int(dc%lg_tot%num(1),8),&
+        int(dc%lg_tot%num(2),8)))+1
+      iz=int((ow_core_ids(p)-1_8)/(int(dc%lg_tot%num(1),8)*int(dc%lg_tot%num(2),8)))+1
+      core_potential(p)=dc%vloc_tot(1)%f(ix,iy,iz)
+    enddo
+    new_potential=core_potential
+    ow_full_cell_component_mode=0
+    call project_dg_full_cell_hamiltonian_tiles(comm,int(ow_global_grid_count),ow_core_ids,&
+      ow_core_weights,ow_core_values,ow_row_ids,min(16,nwann),apply_ow_full_cell_hpsi_tile,&
+      full_rows,full_cell_workspace_peak,ok,message)
     if(.not.ok)return
-    allocate(box_potential(size(ow_box_physical_ids)));box_potential=real(box_potential_values(1,:))
-    call assemble_dg_stitched_weak_operator_rows(comm,nwann,ow_row_ids,ow_box_physical_ids,&
-      ow_partition_weight,ow_partition_gradient,ow_box_values,ow_box_gradients,box_potential,&
-      system%hvol,kinetic_rows,local_rows,boundary_rows,stitched_t_hermiticity,stitched_v_hermiticity,&
-      weight_gradient_trace,stitched_operator_peak_elements,ok,message)
+    ow_full_cell_component_mode=1
+    call project_dg_full_cell_hamiltonian_tiles(comm,int(ow_global_grid_count),ow_core_ids,&
+      ow_core_weights,ow_core_values,ow_row_ids,min(16,nwann),apply_ow_full_cell_hpsi_tile,&
+      kinetic_rows,stitched_operator_peak_elements,ok,message)
     if(.not.ok)return
-    if(rank==0)write(*,'(a,3(a,es16.8),a,i0)')&
-      '[OW-GS-DIAGNOSTIC] stitched_weak_operator',' weight_gradient_trace=',weight_gradient_trace,&
-      ' t_hermiticity=',stitched_t_hermiticity,' vlocal_hermiticity=',stitched_v_hermiticity,&
-      ' workspace_peak_elements=',stitched_operator_peak_elements
-    call assemble_ow_nonlocal_rows(comm,nonlocal_rows,owned_projectors,ok,message)
+    ow_full_cell_component_mode=2
+    call project_dg_full_cell_hamiltonian_tiles(comm,int(ow_global_grid_count),ow_core_ids,&
+      ow_core_weights,ow_core_values,ow_row_ids,min(16,nwann),apply_ow_full_cell_hpsi_tile,&
+      local_rows,stitched_operator_peak_elements,ok,message)
+    ow_full_cell_component_mode=0
     if(.not.ok)return
-    hrows=kinetic_rows+local_rows+nonlocal_rows
+    allocate(nonlocal_rows(size(ow_row_ids),nwann),boundary_rows(size(ow_row_ids),nwann))
+    nonlocal_rows=full_rows-kinetic_rows-local_rows;boundary_rows=(0d0,0d0)
+    hrows=full_rows
+    if(rank==0)write(*,'(a,i0)')'[OW-GS-DIAGNOSTIC] full_cell_hpsi_workspace_peak_bytes=',&
+      full_cell_workspace_peak
     allocate(component_rows(size(ow_row_ids),nwann,3))
     component_rows(:,:,1)=kinetic_rows;component_rows(:,:,2)=local_rows
     component_rows(:,:,3)=nonlocal_rows
+    ! Measure the raw projected components before the strict covariance gate.
+    ! A covariance rejection must not hide whether the defect was already a
+    ! failure of the underlying Hermitian operator projection.
+    call ow_distributed_hermiticity(comm,ow_row_ids,kinetic_rows,ow_diag_t_hermiticity,&
+      kinetic_scale,finite_t)
+    call ow_distributed_hermiticity(comm,ow_row_ids,local_rows,ow_diag_vlocal_hermiticity,&
+      local_scale,finite_local)
+    call ow_distributed_hermiticity(comm,ow_row_ids,nonlocal_rows,ow_diag_vnl_hermiticity,&
+      nonlocal_scale,finite_nonlocal)
+    if(allocated(ow_direct_nonlocal_rows).and..not.ow_direct_nonlocal_compared)then
+      local_direct_difference=0d0;direct_nonlocal_scale=0d0
+      if(size(nonlocal_rows)>0)then
+        local_direct_difference=maxval(abs(nonlocal_rows-ow_direct_nonlocal_rows))
+        direct_nonlocal_scale=maxval(abs(ow_direct_nonlocal_rows))
+      endif
+      call MPI_Allreduce(local_direct_difference,global_direct_difference,1,&
+        MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      call MPI_Allreduce(MPI_IN_PLACE,direct_nonlocal_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      if(rank==0)write(*,'(a,3(a,es16.8))')&
+        '[OW-GS-DIAGNOSTIC] total_projector_direct/hpsi_nonlocal_difference',&
+        ' difference=',global_direct_difference,' direct_scale=',direct_nonlocal_scale,&
+        ' hpsi_scale=',nonlocal_scale
+      ow_direct_nonlocal_compared=.true.
+    endif
+    if(rank==0)write(*,'(a,6(a,es16.8))')'[OW-GS-DIAGNOSTIC] raw projected component Hermiticity',&
+      ' kinetic_defect=',ow_diag_t_hermiticity,' kinetic_scale=',kinetic_scale,&
+      ' local_defect=',ow_diag_vlocal_hermiticity,' local_scale=',local_scale,&
+      ' nonlocal_defect=',ow_diag_vnl_hermiticity,' nonlocal_scale=',nonlocal_scale
     call symmetrize_dg_distributed_pencil_rows(comm,ow_row_ids,hrows,ow_srows,ow_rhorows,&
       boundary_rows,ow_pencil_generator_representation,ow_pencil_generator_operations,&
       ow_pencil_affine_product,ow_pencil_translation_subgroup,ow_pencil_coset_representatives,&
       dg_ow_symmetry_tolerance,sym_h_rows,sym_s_rows,sym_rho_rows,pencil_before,pencil_after,&
       boundary_artifact_change,boundary_artifact_magnitude,pencil_symmetry_workspace_peak,ok,message,&
-      component_rows,component_covariance,.true.)
+      component_rows,component_covariance,update_auxiliary)
     deallocate(component_rows)
     if(.not.ok)return
-    hrows=sym_h_rows;ow_srows=sym_s_rows;ow_rhorows=sym_rho_rows
+    hrows=sym_h_rows
+    if(update_auxiliary)then
+      ow_srows=sym_s_rows;ow_rhorows=sym_rho_rows
+      ow_hybrid_symmetry_defect=maxval(pencil_after)
+    else
+      ow_hybrid_symmetry_defect=pencil_after(1)
+    endif
     if(rank==0)write(*,'(a,8(a,es16.8),a,i0)')'[OW-GS-DIAGNOSTIC] stitched_pencil_symmetry',&
       ' h_before=',pencil_before(1),' s_before=',pencil_before(2),' rho_before=',pencil_before(3),&
       ' h_after=',pencil_after(1),' s_after=',pencil_after(2),' rho_after=',pencil_after(3),&
@@ -3334,12 +3660,6 @@ contains
       ' kinetic=',component_covariance(1),' local=',component_covariance(2),&
       ' nonlocal=',component_covariance(3)
     ow_diag_h_local_bytes=max(ow_diag_h_local_bytes,int(size(hrows),8)*16_8)
-    call ow_distributed_hermiticity(comm,ow_row_ids,kinetic_rows,ow_diag_t_hermiticity,&
-      kinetic_scale,finite_t)
-    call ow_distributed_hermiticity(comm,ow_row_ids,local_rows,ow_diag_vlocal_hermiticity,&
-      local_scale,finite_local)
-    call ow_distributed_hermiticity(comm,ow_row_ids,nonlocal_rows,ow_diag_vnl_hermiticity,&
-      nonlocal_scale,finite_nonlocal)
     call ow_distributed_hermiticity(comm,ow_row_ids,hrows,ow_diag_h_hermiticity,&
       hamiltonian_scale,finite_h)
     if(.not.finite_t.or..not.finite_local.or..not.finite_nonlocal.or..not.finite_h)then
@@ -3367,6 +3687,267 @@ contains
     fingerprint=ow_collective_operator_fingerprint(comm)
     ok=.true.;message=''
   end subroutine
+
+  ! Apply SALMON's established total-system Hamiltonian to one bounded tile.
+  ! The callback contract supplies values in the current row-owned physical-ID
+  ! order.  We explicitly map those IDs into dc%mg_tot instead of assuming that
+  ! the two local array orders happen to coincide.
+  subroutine apply_ow_full_cell_hpsi_tile(tile_in,tile_out,callback_ok)
+    complex(8),intent(in)::tile_in(:,:)
+    complex(8),intent(out)::tile_out(:,:)
+    logical,intent(out)::callback_ok
+    type(s_parallel_info)::tile_info
+    type(s_orbital)::tile_psi,tile_hpsi
+    type(s_sendrecv_grid)::tile_srg
+    type(s_scalar),allocatable::zero_vlocal(:)
+    complex(8),allocatable::mg_tile_in(:,:),mg_tile_out(:,:),projector_local(:,:),projector_world(:,:),&
+      atom_uVpsi(:,:,:,:,:),atom_uVpsi_reduced(:,:,:,:,:)
+    integer::width,p,ix,iy,iz,io,local_index,nx,ny,ierr,local_bad,global_bad,allocation_status,rank,&
+      full_nonfinite_count,local_only_nonfinite_count,shape_bad,parallel_bad,owned_grid_count,ilma,ia,j
+    integer(8)::physical_id,nxy,redistribution_workspace
+    logical::full_output_finite,local_only_finite,redistribution_ok
+    character(256)::redistribution_message
+    real(8)::tile_input_peak,vlocal_peak,local_projector_difference,global_projector_difference,&
+      local_atom_scale,global_atom_scale,local_world_scale,global_world_scale
+    callback_ok=.false.;tile_out=(0d0,0d0);local_bad=0;full_output_finite=.true.
+    call MPI_Comm_rank(dc%icomm_tot,rank,ierr)
+    width=size(tile_in,1)
+    shape_bad=merge(1,0,size(tile_in,2)/=size(ow_core_ids).or.any(shape(tile_out)/=shape(tile_in)))
+    parallel_bad=merge(1,0,dc%info_tot%isize_o/=1.or.dc%info_tot%isize_k/=1.or.&
+      dc%info_tot%numk/=1.or.dc%info_tot%numm/=1.or.dc%system_tot%nspin/=1)
+    local_bad=max(shape_bad,parallel_bad)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(local_bad/=0)write(0,'(a,i0,2(a,i0),a,2(i0,1x),a,2(i0,1x),6(a,i0))')&
+        '[OW-HPSI-CONTRACT-FAILURE] rank=',rank,' shape_bad=',shape_bad,' parallel_bad=',parallel_bad,&
+        ' tile_shape=',shape(tile_in),' output_shape=',shape(tile_out),&
+        ' core_count=',size(ow_core_ids),' isize_o=',dc%info_tot%isize_o,&
+        ' isize_k=',dc%info_tot%isize_k,' numk=',dc%info_tot%numk,&
+        ' numm=',dc%info_tot%numm,' nspin=',dc%system_tot%nspin
+      return
+    endif
+    nx=dc%lg_tot%num(1);ny=dc%lg_tot%num(2);nxy=int(nx,8)*int(ny,8)
+    owned_grid_count=product(dc%mg_tot%ie-dc%mg_tot%is+1)
+    if(.not.allocated(ow_hpsi_grid_ids))then
+      allocate(ow_hpsi_grid_ids(owned_grid_count),stat=allocation_status)
+      local_bad=merge(0,1,allocation_status==0)
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+      local_index=0
+      do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
+      do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
+      do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
+        local_index=local_index+1
+        ow_hpsi_grid_ids(local_index)=int(ix,8)+int(nx,8)*(int(iy-1,8)+int(ny,8)*int(iz-1,8))
+      enddo
+      enddo
+      enddo
+    endif
+    if(.not.ow_hpsi_redistribution%initialized)then
+      call initialize_dg_full_cell_redistribution(dc%icomm_tot,int(ow_global_grid_count),ow_core_ids,&
+        ow_hpsi_grid_ids,ow_hpsi_redistribution,redistribution_workspace,redistribution_ok,&
+        redistribution_message)
+      if(.not.redistribution_ok)then
+        if(rank==0)write(0,'(2a)')'[OW-HPSI-REDISTRIBUTION-FAILURE] ',trim(redistribution_message)
+        return
+      endif
+      ow_hpsi_redistribution_workspace=redistribution_workspace
+      if(rank==0)write(*,'(a,i0)')'[OW-GS-DIAGNOSTIC] hpsi_redistribution_workspace_bytes=',&
+        ow_hpsi_redistribution_workspace
+    endif
+    allocate(mg_tile_in(width,owned_grid_count),mg_tile_out(width,owned_grid_count),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+    call apply_dg_full_cell_redistribution_forward(ow_hpsi_redistribution,tile_in,mg_tile_in,&
+      redistribution_ok,redistribution_message)
+    if(.not.redistribution_ok)then
+      if(rank==0)write(0,'(2a)')'[OW-HPSI-REDISTRIBUTION-FAILURE] ',trim(redistribution_message)
+      return
+    endif
+    tile_info%im_s=1;tile_info%im_e=1;tile_info%numm=1
+    tile_info%ik_s=1;tile_info%ik_e=1;tile_info%numk=1
+    tile_info%io_s=1;tile_info%io_e=width;tile_info%numo=width
+    tile_info%if_divide_rspace=dc%info_tot%if_divide_rspace
+    tile_info%if_divide_orbit=.false.
+    tile_info%icomm_r=dc%info_tot%icomm_r
+    tile_info%icomm_rko=dc%info_tot%icomm_rko
+    allocate(tile_psi%zwf(dc%mg_tot%is_array(1):dc%mg_tot%ie_array(1),&
+      dc%mg_tot%is_array(2):dc%mg_tot%ie_array(2),dc%mg_tot%is_array(3):dc%mg_tot%ie_array(3),&
+      1,1:width,1:1,1:1),tile_hpsi%zwf(dc%mg_tot%is_array(1):dc%mg_tot%ie_array(1),&
+      dc%mg_tot%is_array(2):dc%mg_tot%ie_array(2),dc%mg_tot%is_array(3):dc%mg_tot%ie_array(3),&
+      1,1:width,1:1,1:1),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(allocated(tile_psi%zwf))deallocate(tile_psi%zwf)
+      if(allocated(tile_hpsi%zwf))deallocate(tile_hpsi%zwf)
+      return
+    endif
+    tile_psi%zwf=(0d0,0d0);tile_hpsi%zwf=(0d0,0d0)
+    call init_sendrecv_grid(tile_srg,dc%mg_tot,width,dc%info_tot%icomm_rko,dc%srg_tot%neig)
+    local_index=0
+    do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
+    do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
+    do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
+      local_index=local_index+1
+      do io=1,width;tile_psi%zwf(ix,iy,iz,1,io,1,1)=mg_tile_in(io,local_index);enddo
+    enddo
+    enddo
+    enddo
+    if(.not.ow_projector_stage_diagnosed)then
+      allocate(projector_local(width,dc%ppg_tot%Nlma),projector_world(width,dc%ppg_tot%Nlma))
+      projector_local=0d0
+      do ilma=1,dc%ppg_tot%Nlma
+        ia=dc%ppg_tot%ia_tbl(ilma)
+        do j=1,dc%ppg_tot%mps(ia)
+          ix=dc%ppg_tot%jxyz(1,j,ia);iy=dc%ppg_tot%jxyz(2,j,ia);iz=dc%ppg_tot%jxyz(3,j,ia)
+          do io=1,width
+            projector_local(io,ilma)=projector_local(io,ilma)+&
+              conjg(dc%ppg_tot%zekr_uV(j,ilma,1))*tile_psi%zwf(ix,iy,iz,1,io,1,1)
+          enddo
+        enddo
+        projector_local(:,ilma)=projector_local(:,ilma)*dc%ppg_tot%rinv_uvu(ilma)
+      enddo
+      call MPI_Allreduce(projector_local,projector_world,size(projector_local),MPI_DOUBLE_COMPLEX,&
+        MPI_SUM,dc%icomm_tot,ierr)
+      call calc_uVpsi_rdivided(1,tile_info,dc%ppg_tot,tile_psi,atom_uVpsi,atom_uVpsi_reduced)
+      local_projector_difference=0d0;local_atom_scale=0d0;local_world_scale=0d0
+      do ilma=1,dc%ppg_tot%Nlma
+        ia=dc%ppg_tot%ia_tbl(ilma)
+        if(.not.dc%ppg_tot%ireferred_atom(ia))cycle
+        local_projector_difference=max(local_projector_difference,&
+          maxval(abs(atom_uVpsi_reduced(1,1:width,1,1,ilma)-projector_world(:,ilma))))
+        local_atom_scale=max(local_atom_scale,maxval(abs(atom_uVpsi_reduced(1,1:width,1,1,ilma))))
+        local_world_scale=max(local_world_scale,maxval(abs(projector_world(:,ilma))) )
+      enddo
+      call MPI_Allreduce(local_projector_difference,global_projector_difference,1,&
+        MPI_DOUBLE_PRECISION,MPI_MAX,dc%icomm_tot,ierr)
+      call MPI_Allreduce(local_atom_scale,global_atom_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,dc%icomm_tot,ierr)
+      call MPI_Allreduce(local_world_scale,global_world_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,dc%icomm_tot,ierr)
+      if(rank==0)write(*,'(a,3(a,es16.8))')&
+        '[OW-GS-DIAGNOSTIC] projector_atom_comm/world_overlap_difference',&
+        ' difference=',global_projector_difference,' atom_comm_scale=',global_atom_scale,&
+        ' world_scale=',global_world_scale
+      deallocate(projector_local,projector_world,atom_uVpsi,atom_uVpsi_reduced)
+      ow_projector_stage_diagnosed=.true.
+    endif
+    if(local_index==owned_grid_count)then
+      select case(ow_full_cell_component_mode)
+      case(1)
+        allocate(zero_vlocal(1));call allocate_scalar(dc%mg_tot,zero_vlocal(1))
+        zero_vlocal(1)%f=0d0
+        call hpsi(tile_psi,tile_hpsi,tile_info,dc%mg_tot,zero_vlocal,dc%system_tot,stencil,&
+          tile_srg,dc%ppg_tot,include_nonlocal=.false.)
+      case(2)
+        do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
+        do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
+        do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
+          do io=1,width
+            tile_hpsi%zwf(ix,iy,iz,1,io,1,1)=&
+              dc%vloc_tot(1)%f(ix,iy,iz)*tile_psi%zwf(ix,iy,iz,1,io,1,1)
+          enddo
+        enddo
+        enddo
+        enddo
+      case default
+        call hpsi(tile_psi,tile_hpsi,tile_info,dc%mg_tot,dc%vloc_tot,dc%system_tot,stencil,&
+          tile_srg,dc%ppg_tot,include_nonlocal=.false.)
+        call apply_ow_world_reduced_nonlocal(tile_psi,tile_hpsi,width,redistribution_ok,&
+          redistribution_message)
+        if(.not.redistribution_ok)then
+          if(rank==0)write(0,'(2a)')'[OW-HPSI-NONLOCAL-FAILURE] ',trim(redistribution_message)
+          return
+        endif
+        full_output_finite=all(ieee_is_finite(real(tile_hpsi%zwf))).and.&
+          all(ieee_is_finite(aimag(tile_hpsi%zwf)))
+        if(.not.full_output_finite)then
+          full_nonfinite_count=count(.not.ieee_is_finite(real(tile_hpsi%zwf)))+&
+            count(.not.ieee_is_finite(aimag(tile_hpsi%zwf)))
+          tile_input_peak=maxval(abs(tile_psi%zwf))
+          vlocal_peak=maxval(abs(dc%vloc_tot(1)%f))
+          tile_hpsi%zwf=(0d0,0d0)
+          call hpsi(tile_psi,tile_hpsi,tile_info,dc%mg_tot,dc%vloc_tot,dc%system_tot,stencil,&
+            tile_srg,dc%ppg_tot,include_nonlocal=.false.)
+          local_only_finite=all(ieee_is_finite(real(tile_hpsi%zwf))).and.&
+            all(ieee_is_finite(aimag(tile_hpsi%zwf)))
+          local_only_nonfinite_count=count(.not.ieee_is_finite(real(tile_hpsi%zwf)))+&
+            count(.not.ieee_is_finite(aimag(tile_hpsi%zwf)))
+          write(0,'(a,i0,2(a,l1),2(a,i0),2(a,es16.8))')'[OW-HPSI-FAILURE] rank=',rank,&
+            ' full_finite=',full_output_finite,' local_only_finite=',local_only_finite,&
+            ' full_nonfinite=',full_nonfinite_count,' local_only_nonfinite=',local_only_nonfinite_count,&
+            ' input_peak=',tile_input_peak,' vlocal_peak=',vlocal_peak
+        endif
+      end select
+      local_index=0
+      do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
+      do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
+      do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
+        local_index=local_index+1
+        do io=1,width;mg_tile_out(io,local_index)=tile_hpsi%zwf(ix,iy,iz,1,io,1,1);enddo
+      enddo
+      enddo
+      enddo
+      call apply_dg_full_cell_redistribution_reverse(ow_hpsi_redistribution,mg_tile_out,tile_out,&
+        redistribution_ok,redistribution_message)
+      callback_ok=redistribution_ok.and.full_output_finite.and.&
+        all(ieee_is_finite(real(tile_out))).and.all(ieee_is_finite(aimag(tile_out)))
+    endif
+    call dealloc_cache(tile_srg)
+    if(allocated(zero_vlocal))then
+      if(allocated(zero_vlocal(1)%f))deallocate(zero_vlocal(1)%f)
+      deallocate(zero_vlocal)
+    endif
+    if(allocated(tile_psi%zwf))deallocate(tile_psi%zwf)
+    if(allocated(tile_hpsi%zwf))deallocate(tile_hpsi%zwf)
+    if(allocated(mg_tile_in))deallocate(mg_tile_in)
+    if(allocated(mg_tile_out))deallocate(mg_tile_out)
+  end subroutine apply_ow_full_cell_hpsi_tile
+
+  subroutine apply_ow_world_reduced_nonlocal(tile_psi,tile_hpsi,width,ok,message)
+    type(s_orbital),intent(in)::tile_psi
+    type(s_orbital),intent(inout)::tile_hpsi
+    integer,intent(in)::width
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(8),allocatable::local_overlap(:,:),global_overlap(:,:)
+    complex(8)::coefficient
+    integer::ilma,ia,j,ix,iy,iz,io,ierr,allocation_status,local_bad,global_bad
+    ok=.false.;message='';local_bad=0
+    allocate(local_overlap(width,dc%ppg_tot%Nlma),global_overlap(width,dc%ppg_tot%Nlma),&
+      stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='cannot allocate world-reduced nonlocal overlap';return
+    endif
+    local_overlap=0d0
+    do ilma=1,dc%ppg_tot%Nlma
+      ia=dc%ppg_tot%ia_tbl(ilma)
+      do j=1,dc%ppg_tot%mps(ia)
+        ix=dc%ppg_tot%jxyz(1,j,ia);iy=dc%ppg_tot%jxyz(2,j,ia);iz=dc%ppg_tot%jxyz(3,j,ia)
+        do io=1,width
+          local_overlap(io,ilma)=local_overlap(io,ilma)+&
+            conjg(dc%ppg_tot%zekr_uV(j,ilma,1))*tile_psi%zwf(ix,iy,iz,1,io,1,1)
+        enddo
+      enddo
+    enddo
+    call MPI_Allreduce(local_overlap,global_overlap,size(local_overlap),MPI_DOUBLE_COMPLEX,&
+      MPI_SUM,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='world-reduced nonlocal overlap failed';return;endif
+    do ilma=1,dc%ppg_tot%Nlma
+      ia=dc%ppg_tot%ia_tbl(ilma)
+      do j=1,dc%ppg_tot%mps(ia)
+        ix=dc%ppg_tot%jxyz(1,j,ia);iy=dc%ppg_tot%jxyz(2,j,ia);iz=dc%ppg_tot%jxyz(3,j,ia)
+        do io=1,width
+          coefficient=dc%ppg_tot%rinv_uvu(ilma)*global_overlap(io,ilma)
+          tile_hpsi%zwf(ix,iy,iz,1,io,1,1)=tile_hpsi%zwf(ix,iy,iz,1,io,1,1)+&
+            coefficient*dc%ppg_tot%zekr_uV(j,ilma,1)
+        enddo
+      enddo
+    enddo
+    ok=.true.
+  end subroutine apply_ow_world_reduced_nonlocal
 
   subroutine ow_distributed_hermiticity(comm,row_ids,rows,defect,scale,finite)
     integer,intent(in)::comm
@@ -3428,6 +4009,35 @@ contains
     call MPI_Allreduce(MPI_IN_PLACE,local_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     finite=global_finite==1.and.local_bad==0.and.ierr==MPI_SUCCESS
   end subroutine
+
+  subroutine ow_fingerprint_distributed_matrix(comm,row_ids,matrix,fingerprint,ok)
+    integer,intent(in)::comm
+    integer(8),intent(in)::row_ids(:)
+    complex(8),intent(in)::matrix(:,:)
+    integer(8),intent(out)::fingerprint
+    logical,intent(out)::ok
+    integer::i,j,ierr,local_bad,global_bad
+    integer(8)::local_hash,real_bits,imaginary_bits,entry_hash
+    local_bad=0
+    if(size(matrix,1)/=size(row_ids))local_bad=1
+    if(.not.all(ieee_is_finite(real(matrix))).or..not.all(ieee_is_finite(aimag(matrix))))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;fingerprint=0_8;ok=.false.;return;endif
+    local_hash=0_8
+    do j=1,size(matrix,2);do i=1,size(row_ids)
+      real_bits=transfer(real(matrix(i,j),8),real_bits)
+      imaginary_bits=transfer(aimag(matrix(i,j)),imaginary_bits)
+      entry_hash=ieor(ishftc(real_bits,modulo(int(row_ids(i)),63)),ishftc(imaginary_bits,modulo(j+11,63)))
+      entry_hash=ieor(entry_hash,ishftc(ieor(row_ids(i),ishft(int(j,8),21)),17))
+      local_hash=ieor(local_hash,entry_hash)
+    enddo;enddo
+    call MPI_Allreduce(local_hash,fingerprint,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;fingerprint=0_8;ok=.false.;return;endif
+    fingerprint=ieor(fingerprint,ishftc(int(size(matrix,2),8),29))
+    fingerprint=ieor(fingerprint,int(z'6A09E667F3BCC909',8))
+    if(fingerprint==0_8)fingerprint=1_8
+    ok=.true.
+  end subroutine ow_fingerprint_distributed_matrix
 
   integer(8) function ow_collective_operator_fingerprint(comm)
     integer,intent(in)::comm
@@ -3650,6 +4260,129 @@ contains
       dc_to_canonical_index=wrapped_index-(core_count+buffer_count)
     endif
   end function
+
+  subroutine ow_hybrid_update_potential(input_density,callback_ok)
+    real(8),intent(in)::input_density(:);logical,intent(out)::callback_ok
+    callback_ok=allocated(ow_hybrid_density)
+    if(callback_ok)callback_ok=size(input_density)==size(ow_hybrid_density)
+    if(callback_ok)ow_hybrid_density=input_density
+  end subroutine ow_hybrid_update_potential
+
+  subroutine ow_hybrid_assemble_hamiltonian(iteration,callback_ok)
+    integer,intent(in)::iteration;logical,intent(out)::callback_ok
+    character(256)::callback_message
+    call ow_build_hamiltonian(dc%icomm_tot,ow_hybrid_density,ow_hybrid_hrows,&
+      ow_hybrid_potential,ow_hybrid_operator_fingerprint,callback_ok,callback_message,&
+      update_auxiliary_pencil=.false.)
+    if(.not.callback_ok.and.nproc_id_global==0)write(0,'(a)')trim(callback_message)
+  end subroutine ow_hybrid_assemble_hamiltonian
+
+  subroutine ow_hybrid_solve_occupied(iteration,total_energy,residual,electron_defect,symmetry_defect,callback_ok)
+    integer,intent(in)::iteration
+    real(8),intent(out)::total_energy,residual,electron_defect,symmetry_defect
+    logical,intent(out)::callback_ok
+    real(8)::projector_defect
+    integer(8)::workspace_peak,fingerprint
+    character(256)::callback_message
+    call solve_dg_hybrid_generalized_scalapack(dc%icomm_tot,size(ow_hybrid_hrows,2),&
+      size(ow_hybrid_occupations),ow_row_ids,ow_hybrid_hrows,ow_srows,dg_dc_gs_final_orbital_tolerance,&
+      ow_hybrid_coefficients,ow_hybrid_eigenvalues,residual,ow_hybrid_orthogonality,projector_defect,&
+      workspace_peak,fingerprint,callback_ok,callback_message)
+    if(callback_ok)then
+      total_energy=sum(ow_hybrid_occupations*ow_hybrid_eigenvalues) ! occupied band-energy indicator, not total DFT energy
+      electron_defect=abs(sum(ow_hybrid_occupations)-dc%elec_num_tot)
+      symmetry_defect=ow_hybrid_symmetry_defect;ow_hybrid_eigensystem_residual=residual
+    else
+      total_energy=huge(1d0);electron_defect=huge(1d0);symmetry_defect=huge(1d0)
+    endif
+    if(.not.callback_ok.and.nproc_id_global==0)write(0,'(a)')trim(callback_message)
+  end subroutine ow_hybrid_solve_occupied
+
+  subroutine ow_hybrid_reconstruct_density(output_density,callback_ok)
+    real(8),intent(out)::output_density(:);logical,intent(out)::callback_ok
+    real(8),allocatable::density(:)
+    real(8)::electron_count
+    integer(8)::workspace_peak,fingerprint
+    character(256)::callback_message
+    call reconstruct_dg_hybrid_density(dc%icomm_tot,int(ow_global_grid_count),ow_core_ids,ow_core_weights,&
+      size(ow_core_values,1),ow_row_ids,ow_hybrid_coefficients,ow_hybrid_occupations,&
+      ow_hybrid_basis_provider,min(16,size(ow_core_values,1)),min(16,size(ow_hybrid_occupations)),&
+      ow_symmetry_fingerprint,dg_dc_gs_final_density_tolerance,density,electron_count,workspace_peak,&
+      fingerprint,callback_ok,callback_message)
+    if(callback_ok)then
+      callback_ok=allocated(density)
+      if(callback_ok)callback_ok=size(output_density)==size(density)
+      if(callback_ok)output_density=density
+      if(callback_ok)then
+        callback_ok=abs(electron_count-dc%elec_num_tot)<=dg_dc_gs_electron_count_tolerance
+        if(.not.callback_ok)callback_message='reconstructed hybrid density violates the electron-count gate'
+      endif
+    endif
+    if(.not.callback_ok.and.nproc_id_global==0)write(0,'(a)')trim(callback_message)
+  end subroutine ow_hybrid_reconstruct_density
+
+  subroutine ow_hybrid_basis_provider(first_column,column_count,tile_values,callback_ok)
+    integer,intent(in)::first_column,column_count
+    complex(8),intent(out)::tile_values(:,:);logical,intent(out)::callback_ok
+    callback_ok=first_column>=1.and.column_count>=1
+    if(callback_ok)callback_ok=first_column<=size(ow_core_values,1)
+    if(callback_ok)callback_ok=column_count<=size(ow_core_values,1)-first_column+1
+    if(callback_ok)callback_ok=all(shape(tile_values)==[column_count,size(ow_core_values,2)])
+    if(callback_ok)tile_values=ow_core_values(first_column:first_column+column_count-1,:)
+  end subroutine ow_hybrid_basis_provider
+
+  subroutine ow_hybrid_density_mix(iteration,input_density,output_density,reset_history,reduce_rate,&
+      mixed_density,callback_ok)
+    integer,intent(in)::iteration
+    real(8),intent(in)::input_density(:),output_density(:)
+    logical,intent(in)::reset_history,reduce_rate
+    real(8),intent(out)::mixed_density(:);logical,intent(out)::callback_ok
+    character(256)::callback_message
+    integer::new_history_count
+    if(reduce_rate)ow_hybrid_mixing_rate=max(1d-3,0.5d0*ow_hybrid_mixing_rate)
+    if(reset_history)then
+      ow_hybrid_density_history(:,1)=input_density
+      ow_hybrid_density_history(:,2)=input_density
+      ow_hybrid_history_count=0
+    endif
+    call mix_dg_overlapping_wannier_density_history(dc%icomm_tot,ow_hybrid_mixing_rate,input_density,&
+      output_density,ow_hybrid_density_history,ow_hybrid_history_count,mixed_density,&
+      ow_hybrid_new_history,new_history_count,callback_ok,callback_message)
+    if(callback_ok)then
+      ow_hybrid_density_history=ow_hybrid_new_history;ow_hybrid_history_count=new_history_count
+    endif
+    if(.not.callback_ok.and.nproc_id_global==0)write(0,'(a)')trim(callback_message)
+  end subroutine ow_hybrid_density_mix
+
+  subroutine ow_hybrid_density_to_dc(values,callback_ok)
+    real(8),intent(in)::values(:);logical,intent(out)::callback_ok
+    integer::p,ix,iy,iz
+    logical::global_ok
+    callback_ok=size(values)==size(ow_core_ids)
+    if(.not.callback_ok)return
+    do p=1,size(ow_core_ids)
+      ix=int(modulo(ow_core_ids(p)-1_8,int(dc%lg_tot%num(1),8)))+1
+      iy=int(modulo((ow_core_ids(p)-1_8)/int(dc%lg_tot%num(1),8),int(dc%lg_tot%num(2),8)))+1
+      iz=int((ow_core_ids(p)-1_8)/(int(dc%lg_tot%num(1),8)*int(dc%lg_tot%num(2),8)))+1
+      if(ix<dc%mg_tot%is(1).or.ix>dc%mg_tot%ie(1).or.iy<dc%mg_tot%is(2).or.iy>dc%mg_tot%ie(2).or.&
+        iz<dc%mg_tot%is(3).or.iz>dc%mg_tot%ie(3))then;callback_ok=.false.;cycle;endif
+      dc%rho_tot_s(1)%f(ix,iy,iz)=values(p)
+    enddo
+    call comm_logical_and(callback_ok,global_ok,dc%icomm_tot);callback_ok=global_ok
+  end subroutine ow_hybrid_density_to_dc
+
+  subroutine ow_hybrid_density_from_dc(values,callback_ok)
+    real(8),intent(out)::values(:);logical,intent(out)::callback_ok
+    integer::p,ix,iy,iz
+    callback_ok=size(values)==size(ow_core_ids)
+    if(.not.callback_ok)return
+    do p=1,size(ow_core_ids)
+      ix=int(modulo(ow_core_ids(p)-1_8,int(dc%lg_tot%num(1),8)))+1
+      iy=int(modulo((ow_core_ids(p)-1_8)/int(dc%lg_tot%num(1),8),int(dc%lg_tot%num(2),8)))+1
+      iz=int((ow_core_ids(p)-1_8)/(int(dc%lg_tot%num(1),8)*int(dc%lg_tot%num(2),8)))+1
+      values(p)=dc%rho_tot_s(1)%f(ix,iy,iz)
+    enddo
+  end subroutine ow_hybrid_density_from_dc
 
   subroutine ow_mix_density(comm,mixing_rate,current_density,raw_density,history,history_count,&
       mixed_density,new_history,new_history_count,ok,message)

@@ -3,7 +3,7 @@ program test_dg_overlapping_wannier_w90_mpi
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   use dg_overlapping_wannier_w90,only:estimate_dg_w90_coordinator_bytes,&
     validate_dg_w90_result,setup_dg_w90_gamma_library,run_dg_w90_gamma_library,&
-    assemble_dg_w90_gamma_matrices,apply_dg_w90_gamma_transform,&
+    assemble_dg_w90_gamma_a_matrix,assemble_dg_w90_gamma_matrices,apply_dg_w90_gamma_transform,&
     validate_dg_w90_convergence_log
   use dg_overlapping_wannier_w90,only:validate_dg_w90_generator_covariance
   use dg_overlapping_wannier_w90,only:align_dg_w90_character_sector_gauge
@@ -30,11 +30,12 @@ program test_dg_overlapping_wannier_w90_mpi
   logical::ok,matrix_matches,win_has_random_projection,replay_exists
   character(256)::message,win_line
   complex(8),allocatable::local_values(:,:),local_anchors(:,:)
-  complex(8),allocatable::assembled_m(:,:,:),assembled_a(:,:)
+  complex(8),allocatable::assembled_m(:,:,:),assembled_a(:,:),precomputed_a(:,:)
   real(8),allocatable::local_weights(:),local_fractional(:,:)
   integer::test_nncell(3,2),global_point
   integer(8)::matrix_peak,matrix_estimate
-  complex(8)::local_m_reference(2,2,2),local_a_reference(2,2),m_reference(2,2,2),a_reference(2,2),phase
+  complex(8)::local_m_reference(2,2,2),local_a_reference(2,2),m_reference(2,2,2),a_reference(2,2),&
+    identity2(2,2),phase
   real(8)::angle
   real(8)::test_atomic_lattice(3,3),test_atomic_reciprocal(3,3),test_atomic_atoms(3,1),&
     library_lattice_units(3,3),library_reciprocal_units(3,3),library_atom_units(3,1)
@@ -197,8 +198,8 @@ program test_dg_overlapping_wannier_w90_mpi
   endif
   call MPI_Bcast(ok,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
   call MPI_Bcast(convergence_iterations,1,MPI_INTEGER,0,MPI_COMM_WORLD,ierr)
-  call require(ok.and.convergence_iterations==200,&
-    'normally completed Wannier90 iteration limit accepted')
+  call require(.not.ok.and.convergence_iterations==200,&
+    'Wannier90 iteration limit without convergence receipt rejected')
   if(rank==0)then
     open(newunit=log_unit,file='w90_truncated_fixture.wout',status='replace')
     write(log_unit,'(a)')'    200  -0.100E-02  0.1  1.0  0.0 <-- CONV'
@@ -218,6 +219,7 @@ program test_dg_overlapping_wannier_w90_mpi
   enddo
   local_weights=0.125d0;test_nncell=reshape([1,0,0,0,1,0],[3,2])
   local_m_reference=(0d0,0d0);local_a_reference=(0d0,0d0)
+  identity2=(0d0,0d0);identity2(1,1)=(1d0,0d0);identity2(2,2)=(1d0,0d0)
   do b=1,2;do p=1,nlocal
     angle=-2d0*acos(-1d0)*dot_product(real(test_nncell(:,b),8),local_fractional(:,p))
     phase=cmplx(cos(angle),sin(angle),8)
@@ -234,15 +236,27 @@ program test_dg_overlapping_wannier_w90_mpi
     MPI_COMM_WORLD,ierr)
   call MPI_Reduce(local_a_reference,a_reference,size(a_reference),MPI_DOUBLE_COMPLEX,MPI_SUM,0,&
     MPI_COMM_WORLD,ierr)
+  call assemble_dg_w90_gamma_a_matrix(MPI_COMM_WORLD,local_values,local_anchors,local_weights,&
+    1d-12,huge(0_8),precomputed_a,matrix_peak,ok,message)
+  call require(ok.and.matrix_peak>0_8,trim(message))
+  if(rank==0)then
+    local_a_reference=matmul(conjg(transpose(precomputed_a)),a_reference)
+    matrix_matches=maxval(abs(matmul(conjg(transpose(precomputed_a)),precomputed_a)-identity2))<1d-12.and.&
+      maxval(abs(local_a_reference-conjg(transpose(local_a_reference))))<1d-12.and.&
+      min(real(local_a_reference(1,1)),real(local_a_reference(2,2)))>0d0
+  else
+    matrix_matches=size(precomputed_a)==0
+  endif
+  call require(matrix_matches,'pre-DMN Wannier90 A is the coordinator-owned unitary polar seed gauge')
   call assemble_dg_w90_gamma_matrices(MPI_COMM_WORLD,local_values,local_anchors,local_weights,&
     local_fractional,test_nncell,huge(0_8),assembled_m,assembled_a,matrix_estimate,&
-    matrix_peak,ok,message)
+    matrix_peak,ok,message,precomputed_a_matrix=precomputed_a)
   call require(ok.and.matrix_estimate>0_8.and.matrix_peak<=matrix_estimate,trim(message))
   if(rank==0)then
     call require(all(shape(assembled_m)==[2,2,2]).and.all(shape(assembled_a)==[2,2]),&
       'coordinator owns complete Wannier90 M/A matrices')
     matrix_matches=maxval(abs(assembled_m-m_reference))<1d-12.and.&
-      maxval(abs(assembled_a-a_reference))<1d-12
+      maxval(abs(assembled_a-precomputed_a))<1d-12
     write(*,'(a,1x,es24.16)')'W90_MATRIX_FINGERPRINT',sum(abs(assembled_m))+sum(abs(assembled_a))
   else
     call require(size(assembled_m)==0.and.size(assembled_a)==0,&
@@ -1072,7 +1086,7 @@ program test_dg_overlapping_wannier_w90_mpi
   endif
   call MPI_Barrier(MPI_COMM_WORLD,ierr)
   call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
-    atom_symbols,atoms_cart,1,1,10,nntot,nncell,ok,message)
+    atom_symbols,atoms_cart,1,1,10,'spectral',nntot,nncell,ok,message)
   call require(.not.ok,'Wannier90 setup rejects missing DMN')
   if(rank==0)then
     open(newunit=log_unit,file='ow_w90_one_band.dmn',status='replace')
@@ -1085,7 +1099,7 @@ program test_dg_overlapping_wannier_w90_mpi
   endif
   call MPI_Barrier(MPI_COMM_WORLD,ierr)
   call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
-    atom_symbols,atoms_cart,1,1,10,nntot,nncell,ok,message)
+    atom_symbols,atoms_cart,1,1,10,'spectral',nntot,nncell,ok,message)
   call require(ok.and.nntot>0,trim(message))
   win_has_random_projection=.false.
   if(rank==0)then
@@ -1104,6 +1118,29 @@ program test_dg_overlapping_wannier_w90_mpi
   call MPI_Bcast(win_has_random_projection,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
   call require(.not.win_has_random_projection,&
     'externally supplied Wannier90 A matrices must not retain random projections')
+  call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
+    atom_symbols,atoms_cart,1,1,10,'random',nntot,nncell,ok,message)
+  call require(ok,trim(message))
+  win_has_random_projection=.false.
+  if(rank==0)then
+    open(newunit=win_unit,file='ow_w90_one_band.win',status='old',action='read',iostat=win_io)
+    if(win_io==0)then
+      do
+        read(win_unit,'(a)',iostat=win_io)win_line
+        if(win_io/=0)exit
+        if(index(adjustl(win_line),'random')==1)win_has_random_projection=.true.
+      enddo
+      close(win_unit)
+    endif
+  endif
+  call MPI_Bcast(win_has_random_projection,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call require(win_has_random_projection,'random Wannier90 initial projection is explicit in .win')
+  call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
+    atom_symbols,atoms_cart,1,1,10,'unknown',nntot,nncell,ok,message)
+  call require(.not.ok,'Wannier90 setup rejects an unknown initial projection mode')
+  call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
+    atom_symbols,atoms_cart,1,1,10,'spectral',nntot,nncell,ok,message)
+  call require(ok,trim(message))
   if(rank==0)then
     allocate(m_matrix(1,1,nntot),a_matrix(1,1));m_matrix=(1d0,0d0);a_matrix=(1d0,0d0)
   else

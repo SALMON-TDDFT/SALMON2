@@ -480,6 +480,7 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_dc_lcfo_wannier_cluster
   character(1)   :: yn_dc_lcfo_block_diag_h
   character(1)   :: yn_dg_dc_overlapping_wannier
+  character(1)   :: yn_dg_hybrid_scf
   integer        :: dg_dc_handoff_min_iter
   real(8)        :: dg_dc_handoff_tolerance
   integer        :: dg_dc_candidate_orbitals_per_atom
@@ -508,6 +509,7 @@ character(256),allocatable :: atom_name(:)
   integer        :: dg_ow_localization_max_iterations
   integer        :: dg_ow_candidate_states_per_fragment
   integer        :: dg_ow_target_wanniers_per_fragment
+  character(16)  :: dg_ow_w90_initial_projection
   real(8)        :: dg_dc_gs_electron_count_tolerance
   real(8)        :: dg_dc_gs_minimum_projector_overlap
   integer        :: dg_dc_gs_maximum_scf_iterations

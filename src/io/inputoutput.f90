@@ -631,6 +631,7 @@ contains
       & yn_dc_lcfo_wannier_cluster, &
       & yn_dc_lcfo_block_diag_h, &
       & yn_dg_dc_overlapping_wannier, &
+      & yn_dg_hybrid_scf, &
       & dg_dc_handoff_min_iter, &
       & dg_dc_handoff_tolerance, &
       & dg_dc_candidate_orbitals_per_atom, &
@@ -659,6 +660,7 @@ contains
       & dg_ow_localization_max_iterations, &
       & dg_ow_candidate_states_per_fragment, &
       & dg_ow_target_wanniers_per_fragment, &
+      & dg_ow_w90_initial_projection, &
       & dg_dc_gs_electron_count_tolerance, &
       & dg_dc_gs_minimum_projector_overlap, &
       & dg_dc_gs_maximum_scf_iterations, &
@@ -1150,6 +1152,7 @@ contains
     yn_dc_lcfo_wannier_cluster = 'n'
     yn_dc_lcfo_block_diag_h = 'n'
     yn_dg_dc_overlapping_wannier = 'n'
+    yn_dg_hybrid_scf = 'n'
     dg_dc_handoff_min_iter = 3
     dg_dc_handoff_tolerance = 1d-3
     dg_dc_candidate_orbitals_per_atom = 40
@@ -1178,6 +1181,7 @@ contains
     dg_ow_localization_max_iterations = 1024
     dg_ow_candidate_states_per_fragment = 0
     dg_ow_target_wanniers_per_fragment = 0
+    dg_ow_w90_initial_projection = 'spectral'
     dg_dc_gs_electron_count_tolerance = 1d-8
     dg_dc_gs_minimum_projector_overlap = 0.9d0
     dg_dc_gs_maximum_scf_iterations = 100
@@ -1876,6 +1880,7 @@ contains
     call comm_bcast(yn_dc_lcfo_wannier_cluster, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_block_diag_h, nproc_group_global)
     call comm_bcast(yn_dg_dc_overlapping_wannier, nproc_group_global)
+    call comm_bcast(yn_dg_hybrid_scf, nproc_group_global)
     call comm_bcast(dg_dc_handoff_min_iter, nproc_group_global)
     call comm_bcast(dg_dc_handoff_tolerance, nproc_group_global)
     call comm_bcast(dg_dc_candidate_orbitals_per_atom, nproc_group_global)
@@ -1904,6 +1909,7 @@ contains
     call comm_bcast(dg_ow_localization_max_iterations, nproc_group_global)
     call comm_bcast(dg_ow_candidate_states_per_fragment, nproc_group_global)
     call comm_bcast(dg_ow_target_wanniers_per_fragment, nproc_group_global)
+    call comm_bcast(dg_ow_w90_initial_projection, nproc_group_global)
     call comm_bcast(dg_dc_gs_electron_count_tolerance, nproc_group_global)
     call comm_bcast(dg_dc_gs_minimum_projector_overlap, nproc_group_global)
     call comm_bcast(dg_dc_gs_maximum_scf_iterations, nproc_group_global)
@@ -2933,6 +2939,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_block_diag_h",yn_dc_lcfo_block_diag_h
       write(fh_variables_log, '("#",4X,A,"=",A)') &
         "yn_dg_dc_overlapping_wannier",yn_dg_dc_overlapping_wannier
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dg_hybrid_scf",yn_dg_hybrid_scf
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        "dg_ow_w90_initial_projection",trim(dg_ow_w90_initial_projection)
       write(fh_variables_log, '("#",4X,A,"=",A)') "wannier90_command",trim(wannier90_command)
       write(fh_variables_log, '("#",4X,A,"=",A)') "wannier_projection",trim(wannier_projection)
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
@@ -3091,6 +3100,11 @@ contains
     call yn_argument_check(yn_dc_lcfo_wannier_cluster)
     call yn_argument_check(yn_dc_lcfo_block_diag_h)
     call yn_argument_check(yn_dg_dc_overlapping_wannier)
+    call yn_argument_check(yn_dg_hybrid_scf)
+    if(yn_dg_hybrid_scf=='y' .and. yn_dg_dc_overlapping_wannier/='y') &
+      call sawf_input_fatal("hybrid SCF requires yn_dg_dc_overlapping_wannier='y'")
+    if(yn_dg_hybrid_scf=='y' .and. yn_scalapack/='y') &
+      call sawf_input_fatal("hybrid SCF reference route requires yn_scalapack='y'")
     if(yn_dg_dc_overlapping_wannier=='y' .and. trim(theory)/='dft') &
       call sawf_input_fatal("overlapping Wannier route is ground-state DFT only")
     if(yn_dg_dc_overlapping_wannier=='y' .and. yn_dc/='y') &

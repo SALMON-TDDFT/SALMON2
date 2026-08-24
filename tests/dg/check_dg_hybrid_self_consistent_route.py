@@ -27,7 +27,7 @@ for token in (
     "assemble_hamiltonian",
     "solve_occupied_states",
     "reconstruct_density",
-    "pulay",
+    "mix_density",
     "density_residual",
     "energy_residual",
     "eigensystem_residual",
@@ -48,9 +48,10 @@ for token in forbidden_inside_loop:
     assert token not in scf, f"hybrid SCF must not reselect its fixed basis: {token}"
 
 main_tokens = (
-    "run_dg_hybrid_self_consistent_ground_state",
-    "hybrid_ground_state%converged",
-    "write_rt_dg_hybrid_checkpoint",
+    "yn_dg_hybrid_scf=='y'",
+    "call run_dg_hybrid_self_consistent_ground_state",
+    "hybrid_ground_state%converged=.true.",
+    "call write_rt_dg_hybrid_occupied_checkpoint",
 )
 positions = [MAIN.find(token) for token in main_tokens]
 assert all(position >= 0 for position in positions), (
@@ -58,7 +59,27 @@ assert all(position >= 0 for position in positions), (
 )
 assert positions == sorted(positions), "hybrid GS/checkpoint production order is invalid"
 
-assert "coefficients_owned(:,:)" in CHECKPOINT.replace(" ", ""), (
+for token in (
+    "ow_hybrid_density=ow_initial_occupied_density",
+    "if(ok.and.reusable.and.yn_dg_hybrid_scf/='y')then",
+    "min(dg_dc_gs_electron_count_tolerance,dg_ow_symmetry_tolerance)",
+    "call mix_dg_overlapping_wannier_density_history",
+    "ow_hybrid_new_history=ow_hybrid_density_history;ow_hybrid_history_count=0",
+    "update_auxiliary_pencil=.false.",
+    "hybrid_metric_fingerprint",
+    "spectral_catalog_fingerprint",
+    "band_energy",
+):
+    assert token in MAIN, f"production hybrid SCF is missing required safety contract: {token}"
+
+assert "if(callback_ok.and.size(output_density)==size(density))" not in MAIN, (
+    "density callback must not rely on Fortran short-circuit evaluation"
+)
+assert "call pulay(dc%mg_tot" not in MAIN, (
+    "hybrid SCF must use the previously validated bounded two-point Anderson mixer, not full Pulay"
+)
+
+assert "write_rt_dg_hybrid_occupied_checkpoint" in CHECKPOINT and "coefficients(:,:)" in CHECKPOINT.replace(" ", ""), (
     "hybrid RT checkpoint must store the occupied coefficient matrix"
 )
 assert "occupations" in CHECKPOINT, "hybrid RT checkpoint must store occupations"

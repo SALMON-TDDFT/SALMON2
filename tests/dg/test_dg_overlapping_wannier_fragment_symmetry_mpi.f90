@@ -39,6 +39,15 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
     pencil_component_rows(:,:,:)
   complex(8) :: inversion_generator(2,2,1)
   integer :: inversion_product(2,2),inversion_generators(1)
+  complex(8) :: inconsistent_c3_generator(2,2,1)
+  integer :: c3_product(3,3),c3_generators(1)
+  integer :: d3_product(6,6),d3_generators(3),d3_translation(3),d3_cosets(2)
+  integer :: left_rotation,left_reflection,right_rotation,right_reflection,source,target
+  complex(8) :: d3_representation(6,6,6),d3_generator_representation(6,6,3)
+  complex(8) :: d3_hamiltonian(6,6),d3_identity(6,6),d3_direct_average(6,6)
+  complex(8),allocatable :: d3_h_rows(:,:),d3_s_rows(:,:),d3_rho_rows(:,:),&
+    d3_artifact_rows(:,:),d3_sym_h_rows(:,:),d3_sym_s_rows(:,:),d3_sym_rho_rows(:,:)
+  integer(int64),allocatable :: d3_row_ids(:)
   real(8) :: pencil_before(3),pencil_after(3),artifact_change,artifact_magnitude
   real(8) :: pencil_component_residual(2)
   real(8) :: pencil_dense_error
@@ -217,6 +226,17 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
     artifact_change,artifact_magnitude,pencil_workspace_peak,ok,message)
   call require(.not.ok,'generator representation inconsistent with the affine product is rejected')
 
+  do i=1,3;do j=1,3;c3_product(i,j)=modulo(i+j-2,3)+1;enddo;enddo
+  c3_generators=2;inconsistent_c3_generator=(0d0,0d0)
+  inconsistent_c3_generator(1,1,1)=(1d0,0d0)
+  inconsistent_c3_generator(2,2,1)=exp(cmplx(0d0,0.7d0,8))
+  call symmetrize_dg_distributed_pencil_rows(MPI_COMM_WORLD,pencil_row_ids,pencil_h_rows,&
+    pencil_s_rows,pencil_rho_rows,pencil_artifact_rows,inconsistent_c3_generator,c3_generators,&
+    c3_product,[1,2,3],[1],1d-12,sym_h_rows,sym_s_rows,sym_rho_rows,pencil_before,pencil_after,&
+    artifact_change,artifact_magnitude,pencil_workspace_peak,ok,message)
+  call require(.not.ok.and.index(message,'group relation')>0,&
+    'unitary generators that violate the affine product are rejected before averaging')
+
   inversion_generator(:,:,1)=reshape([cmplx(1d0/sqrt(2d0),0d0,8),&
     cmplx(0d0,1d0/sqrt(2d0),8),cmplx(0d0,-1d0/sqrt(2d0),8),&
     cmplx(-1d0/sqrt(2d0),0d0,8)],[2,2])
@@ -247,6 +267,60 @@ program test_dg_overlapping_wannier_fragment_symmetry_mpi
     require_input_covariance=.true.)
   call require(.not.ok.and.index(message,'input covariance')>0,&
     'strict pencil publication rejects a grossly noncovariant Hamiltonian')
+
+  ! D3=C3 semidirect C2 is the smallest fixture that distinguishes geometric
+  ! multiplication from the reversed composition of a spatial pullback.  Use
+  ! the right-regular (anti-)representation and compare the factored result to
+  ! a direct sum over every group operation.
+  do left_reflection=0,1;do left_rotation=0,2
+    i=1+left_rotation+3*left_reflection
+    do right_reflection=0,1;do right_rotation=0,2
+      j=1+right_rotation+3*right_reflection
+      d3_product(i,j)=1+modulo(left_rotation+merge(right_rotation,-right_rotation,&
+        left_reflection==0),3)+3*modulo(left_reflection+right_reflection,2)
+    enddo;enddo
+  enddo;enddo
+  d3_representation=(0d0,0d0)
+  do i=1,6
+    do source=1,6
+      target=d3_product(source,i)
+      d3_representation(target,source,i)=(1d0,0d0)
+    enddo
+  enddo
+  d3_generators=[2,4,d3_product(2,4)];d3_translation=[1,2,3];d3_cosets=[1,4]
+  do i=1,size(d3_generators)
+    d3_generator_representation(:,:,i)=d3_representation(:,:,d3_generators(i))
+  enddo
+  d3_hamiltonian=(0d0,0d0);d3_identity=(0d0,0d0)
+  do i=1,6
+    d3_hamiltonian(i,i)=cmplx(real(i,8),0d0,8);d3_identity(i,i)=(1d0,0d0)
+  enddo
+  d3_hamiltonian(1,2)=(0.25d0,0.125d0)
+  d3_hamiltonian(2,1)=conjg(d3_hamiltonian(1,2))
+  d3_direct_average=(0d0,0d0)
+  do i=1,6
+    d3_direct_average=d3_direct_average+matmul(conjg(transpose(d3_representation(:,:,i))),&
+      matmul(d3_hamiltonian,d3_representation(:,:,i)))/6d0
+  enddo
+  allocate(d3_row_ids(count([(mod(i-1,nproc)==rank,i=1,6)])))
+  j=0
+  do i=1,6
+    if(mod(i-1,nproc)/=rank)cycle
+    j=j+1;d3_row_ids(j)=i
+  enddo
+  allocate(d3_h_rows(size(d3_row_ids),6),d3_s_rows(size(d3_row_ids),6),&
+    d3_rho_rows(size(d3_row_ids),6),d3_artifact_rows(size(d3_row_ids),6))
+  d3_h_rows=d3_hamiltonian(int(d3_row_ids),:)
+  d3_s_rows=d3_identity(int(d3_row_ids),:)
+  d3_rho_rows=d3_identity(int(d3_row_ids),:)
+  d3_artifact_rows=(0d0,0d0)
+  call symmetrize_dg_distributed_pencil_rows(MPI_COMM_WORLD,d3_row_ids,d3_h_rows,d3_s_rows,&
+    d3_rho_rows,d3_artifact_rows,d3_generator_representation,d3_generators,d3_product,&
+    d3_translation,d3_cosets,1d-12,d3_sym_h_rows,d3_sym_s_rows,d3_sym_rho_rows,&
+    pencil_before,pencil_after,artifact_change,artifact_magnitude,pencil_workspace_peak,ok,message)
+  call require(ok,trim(message))
+  call require(maxval(abs(d3_sym_h_rows-d3_direct_average(int(d3_row_ids),:)))<1d-12,&
+    'noncommuting factored affine average matches the direct full-group average')
 
   c4_fingerprint=fingerprint_dg_exact_fragment_symmetry(affine_rotation(:,:,1:4),product_table,1d-10)
   c1_fingerprint=fingerprint_dg_exact_fragment_symmetry(affine_rotation(:,:,1:1),reshape([1],[1,1]),1d-10)

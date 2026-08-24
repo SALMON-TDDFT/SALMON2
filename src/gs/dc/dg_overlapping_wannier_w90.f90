@@ -10,7 +10,7 @@ module dg_overlapping_wannier_w90
   private
   public::estimate_dg_w90_coordinator_bytes,validate_dg_w90_result
   public::setup_dg_w90_gamma_library,run_dg_w90_gamma_library
-  public::assemble_dg_w90_gamma_matrices
+  public::assemble_dg_w90_gamma_a_matrix,assemble_dg_w90_gamma_matrices
   public::apply_dg_w90_gamma_transform
   public::inherit_dg_w90_affine_receipts
   public::validate_dg_w90_generator_covariance
@@ -2667,8 +2667,9 @@ contains
     character(*),intent(out)::message
     integer::unit,io,parsed_iteration
     character(1024)::line
-    logical::exists,have_final,have_normal_completion
+    logical::exists,have_final,have_normal_completion,have_convergence
     iterations=-1;ok=.false.;message='';have_final=.false.;have_normal_completion=.false.
+    have_convergence=.false.
     if(len_trim(path)==0.or.maximum_iterations<1)then
       message='invalid Wannier90 convergence-log contract';return
     endif
@@ -2685,11 +2686,13 @@ contains
         io=0
       endif
       if(index(adjustl(line),'Final State')==1)have_final=.true.
+      if(index(line,'Wannierisation convergence criteria satisfied')>0)have_convergence=.true.
       if(index(line,'All done: wannier90 exiting')>0)have_normal_completion=.true.
     enddo
     close(unit)
     if(.not.have_final)then;message='Wannier90 convergence log has no final state';return;endif
     if(.not.have_normal_completion)then;message='Wannier90 did not complete normally';return;endif
+    if(.not.have_convergence)then;message='Wannier90 exhausted its iteration limit before convergence';return;endif
     if(iterations<0)iterations=maximum_iterations
     if(iterations>maximum_iterations)then;message='Wannier90 iteration receipt exceeds its limit';return;endif
     ok=.true.;message=''
@@ -2884,8 +2887,208 @@ contains
 #endif
   end subroutine apply_dg_w90_gamma_transform
 
+  subroutine assemble_dg_w90_gamma_a_matrix(comm,values,anchors,weights,tolerance,coordinator_byte_limit,&
+      a_matrix,workspace_peak_bytes,ok,message)
+    integer,intent(in)::comm
+    complex(real64),intent(in)::values(:,:),anchors(:,:)
+    real(real64),intent(in)::weights(:),tolerance
+    integer(int64),intent(in)::coordinator_byte_limit
+    complex(real64),allocatable,intent(out)::a_matrix(:,:)
+    integer(int64),intent(out)::workspace_peak_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer,parameter::tile_size=32
+    integer::rank,ierr,status,nband,nwann,npoint,m0,m1,n0,n1,m,n,p,count,allocation_status,&
+      svd_info,svd_lwork,i
+    integer::local_dimensions(2),minimum_dimensions(2),maximum_dimensions(2)
+    integer(int64)::minimum_limit,maximum_limit,output_elements,output_bytes,tile_bytes,complex_bytes,&
+      svd_bytes
+    real(real64)::minimum_tolerance,maximum_tolerance,singular_scale,polar_defect
+    complex(real64),allocatable::local_tile(:,:),reduced_tile(:,:)
+    complex(real64),allocatable::svd_input(:,:),svd_u(:,:),svd_vt(:,:),svd_work(:),gram(:,:)
+    real(real64),allocatable::singular_values(:),svd_rwork(:)
+    logical::arithmetic_ok
+    interface
+      subroutine zgesvd(jobu,jobvt,m,n,a,lda,s,u,ldu,vt,ldvt,work,lwork,rwork,info)
+        character,intent(in)::jobu,jobvt
+        integer,intent(in)::m,n,lda,ldu,ldvt,lwork
+        complex(8),intent(inout)::a(lda,*),work(*)
+        real(8),intent(out)::s(*),rwork(*)
+        complex(8),intent(out)::u(ldu,*),vt(ldvt,*)
+        integer,intent(out)::info
+      end subroutine
+    end interface
+    ok=.false.;message='';workspace_peak_bytes=0_int64;status=0
+    call MPI_Comm_rank(comm,rank,ierr)
+    nband=size(values,1);npoint=size(values,2);nwann=size(anchors,1)
+    if(ierr/=MPI_SUCCESS.or.nband<1.or.nband>huge(0)/5.or.nwann/=nband.or.size(anchors,2)/=npoint.or.&
+        size(weights)/=npoint.or.coordinator_byte_limit<0_int64.or.&
+        .not.ieee_is_finite(tolerance).or.tolerance<1d-15.or.tolerance>1d-2.or.&
+        .not.all(ieee_is_finite(real(values))).or..not.all(ieee_is_finite(aimag(values))).or.&
+        .not.all(ieee_is_finite(real(anchors))).or..not.all(ieee_is_finite(aimag(anchors))).or.&
+        .not.all(ieee_is_finite(weights)).or.any(weights<0d0))status=1
+    call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(status/=0.or.ierr/=MPI_SUCCESS)then
+      allocate(a_matrix(0,0));message='invalid distributed Wannier90 A-matrix contract';return
+    endif
+    local_dimensions=[nband,nwann]
+    call MPI_Allreduce(local_dimensions,minimum_dimensions,2,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(local_dimensions,maximum_dimensions,2,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(coordinator_byte_limit,minimum_limit,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(coordinator_byte_limit,maximum_limit,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(tolerance,minimum_tolerance,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(tolerance,maximum_tolerance,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(minimum_dimensions/=maximum_dimensions).or.minimum_limit/=maximum_limit.or.&
+        minimum_tolerance/=maximum_tolerance)status=1
+    complex_bytes=int(storage_size((0d0,0d0))/8,int64)
+    call checked_product([int(nband,int64),int(nwann,int64)],output_elements,arithmetic_ok)
+    if(arithmetic_ok)call checked_product([output_elements,complex_bytes],output_bytes,arithmetic_ok)
+    if(.not.arithmetic_ok.or.output_bytes>coordinator_byte_limit)status=2
+    call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(status/=0.or.ierr/=MPI_SUCCESS)then
+      allocate(a_matrix(0,0));message='Wannier90 A-matrix byte contract rejected';return
+    endif
+    allocation_status=0
+    if(rank==0)then
+      allocate(a_matrix(nband,nwann),stat=allocation_status)
+      if(allocation_status==0)a_matrix=(0d0,0d0)
+    else
+      allocate(a_matrix(0,0),stat=allocation_status)
+    endif
+    call MPI_Allreduce(MPI_IN_PLACE,allocation_status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(allocation_status/=0.or.ierr/=MPI_SUCCESS)then
+      if(.not.allocated(a_matrix))allocate(a_matrix(0,0))
+      message='cannot allocate coordinator Wannier90 A matrix';return
+    endif
+    workspace_peak_bytes=merge(output_bytes,0_int64,rank==0)
+    do n0=1,nwann,tile_size
+      n1=min(n0+tile_size-1,nwann)
+      do m0=1,nband,tile_size
+        m1=min(m0+tile_size-1,nband);allocation_status=0
+        allocate(local_tile(m1-m0+1,n1-n0+1),reduced_tile(m1-m0+1,n1-n0+1),stat=allocation_status)
+        call MPI_Allreduce(MPI_IN_PLACE,allocation_status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+        if(allocation_status/=0.or.ierr/=MPI_SUCCESS)then
+          if(allocated(local_tile))deallocate(local_tile)
+          if(allocated(reduced_tile))deallocate(reduced_tile)
+          status=3;exit
+        endif
+        local_tile=(0d0,0d0)
+        do p=1,npoint;do n=n0,n1;do m=m0,m1
+          local_tile(m-m0+1,n-n0+1)=local_tile(m-m0+1,n-n0+1)+&
+            weights(p)*conjg(values(m,p))*anchors(n,p)
+        enddo;enddo;enddo
+        count=size(local_tile)
+        call MPI_Reduce(local_tile,reduced_tile,count,MPI_DOUBLE_COMPLEX,MPI_SUM,0,comm,ierr)
+        call checked_product([2_int64,int(count,int64),complex_bytes],tile_bytes,arithmetic_ok)
+        if(arithmetic_ok)workspace_peak_bytes=max(workspace_peak_bytes,&
+          merge(output_bytes,0_int64,rank==0)+tile_bytes)
+        if(rank==0.and.ierr==MPI_SUCCESS)a_matrix(m0:m1,n0:n1)=reduced_tile
+        deallocate(local_tile,reduced_tile)
+        if(ierr/=MPI_SUCCESS)then;status=4;exit;endif
+      enddo
+      if(status/=0)exit
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(status/=0.or.ierr/=MPI_SUCCESS)then
+      message='Wannier90 distributed A-matrix reduction failed';return
+    endif
+    ! The raw overlap need not be unitary.  Wannier90's A matrix and the DMN
+    ! representation must use one common orthonormal trial gauge, so replace
+    ! the overlap by its closest unitary polar factor U*V^H.
+    allocation_status=0
+    if(rank==0)then
+      allocate(svd_input(nband,nband),svd_u(nband,nband),svd_vt(nband,nband),&
+        gram(nband,nband),singular_values(nband),svd_rwork(max(1,5*nband)),svd_work(1),&
+        stat=allocation_status)
+    endif
+    call MPI_Bcast(allocation_status,1,MPI_INTEGER,0,comm,ierr)
+    if(allocation_status/=0.or.ierr/=MPI_SUCCESS)then
+      if(rank==0)then
+        if(allocated(svd_input))deallocate(svd_input)
+        if(allocated(svd_u))deallocate(svd_u)
+        if(allocated(svd_vt))deallocate(svd_vt)
+        if(allocated(gram))deallocate(gram)
+        if(allocated(singular_values))deallocate(singular_values)
+        if(allocated(svd_rwork))deallocate(svd_rwork)
+        if(allocated(svd_work))deallocate(svd_work)
+      endif
+      message='cannot allocate Wannier90 seed-gauge polar workspace';return
+    endif
+    svd_info=0;svd_lwork=1
+    if(rank==0)then
+      svd_input=a_matrix;svd_lwork=-1
+      call zgesvd('A','A',nband,nband,svd_input,nband,singular_values,svd_u,nband,svd_vt,nband,&
+        svd_work,svd_lwork,svd_rwork,svd_info)
+      if(svd_info==0.and.ieee_is_finite(real(svd_work(1))).and.&
+          real(svd_work(1),real64)<=real(huge(0),real64))then
+        svd_lwork=max(1,ceiling(real(svd_work(1),real64)))
+      else
+        status=5
+      endif
+    endif
+    call MPI_Bcast(status,1,MPI_INTEGER,0,comm,ierr)
+    if(status/=0.or.ierr/=MPI_SUCCESS)then
+      if(rank==0)deallocate(svd_input,svd_u,svd_vt,gram,singular_values,svd_rwork,svd_work)
+      message='Wannier90 seed-gauge SVD workspace query failed';return
+    endif
+    call MPI_Bcast(svd_lwork,1,MPI_INTEGER,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then
+      if(rank==0)deallocate(svd_input,svd_u,svd_vt,gram,singular_values,svd_rwork,svd_work)
+      message='Wannier90 seed-gauge SVD workspace broadcast failed';return
+    endif
+    if(rank==0)then
+      deallocate(svd_work);allocate(svd_work(svd_lwork),stat=allocation_status)
+    endif
+    call MPI_Bcast(allocation_status,1,MPI_INTEGER,0,comm,ierr)
+    if(allocation_status/=0.or.ierr/=MPI_SUCCESS)then
+      if(rank==0)then
+        if(allocated(svd_work))deallocate(svd_work)
+        deallocate(svd_input,svd_u,svd_vt,gram,singular_values,svd_rwork)
+      endif
+      message='cannot allocate Wannier90 seed-gauge SVD work array';return
+    endif
+    if(rank==0)then
+      svd_input=a_matrix
+      call zgesvd('A','A',nband,nband,svd_input,nband,singular_values,svd_u,nband,svd_vt,nband,&
+        svd_work,svd_lwork,svd_rwork,svd_info)
+      if(svd_info/=0.or..not.all(ieee_is_finite(singular_values)))then
+        status=6
+      else
+        singular_scale=max(1d0,maxval(singular_values))
+        if(minval(singular_values)<=tolerance*singular_scale)status=7
+      endif
+      if(status==0)then
+        a_matrix=matmul(svd_u,svd_vt)
+        gram=matmul(conjg(transpose(a_matrix)),a_matrix)
+        do i=1,nband;gram(i,i)=gram(i,i)-1d0;enddo
+        polar_defect=maxval(abs(gram))
+        if(.not.ieee_is_finite(polar_defect).or.polar_defect>10d0*tolerance)status=8
+      endif
+      call checked_product([4_int64,int(nband,int64),int(nband,int64)],svd_bytes,arithmetic_ok)
+      if(arithmetic_ok)call checked_add(svd_bytes,int(svd_lwork,int64),arithmetic_ok)
+      if(arithmetic_ok)call checked_product([svd_bytes,complex_bytes],svd_bytes,arithmetic_ok)
+      if(arithmetic_ok)then
+        call checked_product([6_int64,int(nband,int64),int(storage_size(0d0)/8,int64)],&
+          tile_bytes,arithmetic_ok)
+      endif
+      if(arithmetic_ok)call checked_add(svd_bytes,tile_bytes,arithmetic_ok)
+      if(.not.arithmetic_ok.or.svd_bytes>coordinator_byte_limit-output_bytes)status=9
+      if(status==0)workspace_peak_bytes=max(workspace_peak_bytes,output_bytes+svd_bytes)
+    endif
+    call MPI_Bcast(status,1,MPI_INTEGER,0,comm,ierr)
+    if(rank==0)deallocate(svd_input,svd_u,svd_vt,gram,singular_values,svd_rwork,svd_work)
+    ok=status==0.and.ierr==MPI_SUCCESS
+    if(.not.ok)message='Wannier90 seed overlap has no safe full-rank unitary polar gauge'
+#else
+    ok=.false.;message='Wannier90 A-matrix assembly requires MPI';workspace_peak_bytes=0_int64
+    allocate(a_matrix(0,0))
+#endif
+  end subroutine assemble_dg_w90_gamma_a_matrix
+
   subroutine assemble_dg_w90_gamma_matrices(comm,values,anchors,weights,fractional,nncell,&
-      coordinator_byte_limit,m_matrix,a_matrix,coordinator_bytes,workspace_peak_bytes,ok,message)
+      coordinator_byte_limit,m_matrix,a_matrix,coordinator_bytes,workspace_peak_bytes,ok,message,&
+      precomputed_a_matrix)
     integer,intent(in)::comm,nncell(:,:)
     complex(real64),intent(in)::values(:,:),anchors(:,:)
     real(real64),intent(in)::weights(:),fractional(:,:)
@@ -2894,10 +3097,12 @@ contains
     integer(int64),intent(out)::coordinator_bytes,workspace_peak_bytes
     logical,intent(out)::ok
     character(*),intent(out)::message
+    complex(real64),intent(in),optional::precomputed_a_matrix(:,:)
 #ifdef USE_MPI
     integer,parameter::tile_size=32
     integer::rank,ierr,status,nband,nwann,npoint,nntot,m0,m1,n0,n1,b,p,m,n,count,allocation_status
-    integer::local_dimensions(3),minimum_dimensions(3),maximum_dimensions(3)
+    integer::local_dimensions(3),minimum_dimensions(3),maximum_dimensions(3),use_precomputed,&
+      minimum_precomputed,maximum_precomputed
     integer(int64)::output_elements,output_bytes,tile_bytes,complex_bytes,peak
     integer(int64)::minimum_limit,maximum_limit
     real(real64)::angle
@@ -2907,6 +3112,7 @@ contains
     ok=.false.;message='';coordinator_bytes=0_int64;workspace_peak_bytes=0_int64;status=0
     call MPI_Comm_rank(comm,rank,ierr)
     nband=size(values,1);npoint=size(values,2);nwann=size(anchors,1);nntot=size(nncell,2)
+    use_precomputed=merge(1,0,present(precomputed_a_matrix))
     if(ierr/=MPI_SUCCESS.or.nband<=0.or.nwann/=nband.or.npoint<0.or.&
         size(anchors,2)/=npoint.or.size(weights)/=npoint.or.&
         any(shape(fractional)/=[3,npoint]).or.size(nncell,1)/=3.or.nntot<=0.or.&
@@ -2914,6 +3120,15 @@ contains
         .not.all(ieee_is_finite(aimag(values))).or..not.all(ieee_is_finite(real(anchors))).or.&
         .not.all(ieee_is_finite(aimag(anchors))).or..not.all(ieee_is_finite(weights)).or.&
         .not.all(ieee_is_finite(fractional)).or.any(weights<0d0))status=1
+    if(use_precomputed==1)then
+      if(rank==0)then
+        if(any(shape(precomputed_a_matrix)/=[nband,nwann]).or.&
+            .not.all(ieee_is_finite(real(precomputed_a_matrix))).or.&
+            .not.all(ieee_is_finite(aimag(precomputed_a_matrix))))status=1
+      elseif(size(precomputed_a_matrix)/=0)then
+        status=1
+      endif
+    endif
     call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(status/=0.or.ierr/=MPI_SUCCESS)then
       allocate(m_matrix(0,0,0),a_matrix(0,0));message='invalid distributed Wannier90 matrix contract';return
@@ -2923,7 +3138,10 @@ contains
     call MPI_Allreduce(local_dimensions,maximum_dimensions,3,MPI_INTEGER,MPI_MAX,comm,ierr)
     call MPI_Allreduce(coordinator_byte_limit,minimum_limit,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
     call MPI_Allreduce(coordinator_byte_limit,maximum_limit,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.any(minimum_dimensions/=maximum_dimensions).or.minimum_limit/=maximum_limit)status=1
+    call MPI_Allreduce(use_precomputed,minimum_precomputed,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(use_precomputed,maximum_precomputed,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(minimum_dimensions/=maximum_dimensions).or.minimum_limit/=maximum_limit.or.&
+        minimum_precomputed/=maximum_precomputed)status=1
     call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(status/=0.or.ierr/=MPI_SUCCESS)then
       allocate(m_matrix(0,0,0),a_matrix(0,0));message='rank-inconsistent Wannier90 matrix contract';return
@@ -2948,7 +3166,10 @@ contains
     allocation_status=0
     if(rank==0)then
       allocate(m_matrix(nband,nband,nntot),a_matrix(nband,nwann),stat=allocation_status)
-      if(allocation_status==0)then;m_matrix=(0d0,0d0);a_matrix=(0d0,0d0);endif
+      if(allocation_status==0)then
+        m_matrix=(0d0,0d0);a_matrix=(0d0,0d0)
+        if(use_precomputed==1)a_matrix=precomputed_a_matrix
+      endif
     else
       allocate(m_matrix(0,0,0),a_matrix(0,0),stat=allocation_status)
     endif
@@ -2981,6 +3202,7 @@ contains
         enddo
       enddo
     enddo
+    if(use_precomputed==0)then
     do n0=1,nwann,tile_size
       n1=min(n0+tile_size-1,nwann)
       do m0=1,nband,tile_size
@@ -2997,6 +3219,7 @@ contains
         deallocate(local_tile,reduced_tile);if(ierr/=MPI_SUCCESS)status=4
       enddo
     enddo
+    endif
     workspace_peak_bytes=peak
     call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     ok=status==0.and.ierr==MPI_SUCCESS
@@ -3008,8 +3231,9 @@ contains
   end subroutine assemble_dg_w90_gamma_matrices
 
   subroutine setup_dg_w90_gamma_library(comm,seed,real_lattice,reciprocal_lattice,atom_symbols,&
-      atoms_cart,nband,nwann,num_iter,nntot,nncell,ok,message)
+      atoms_cart,nband,nwann,num_iter,initial_projection,nntot,nncell,ok,message)
     integer,intent(in)::comm,nband,nwann,num_iter
+    character(*),intent(in)::initial_projection
     character(*),intent(in)::seed
     real(real64),intent(in)::real_lattice(3,3),reciprocal_lattice(3,3),atoms_cart(:,:)
     character(*),intent(in)::atom_symbols(:)
@@ -3055,6 +3279,7 @@ contains
     ok=.false.;message='';nntot=0;status=0
     call MPI_Comm_rank(comm,rank,ierr)
     if(ierr/=MPI_SUCCESS.or.nband<=0.or.nwann/=nband.or.num_iter<=0.or.size(atom_symbols)<=0.or.&
+        (trim(initial_projection)/='spectral'.and.trim(initial_projection)/='random').or.&
         any(shape(atoms_cart)/=[3,size(atom_symbols)]).or..not.all(ieee_is_finite(real_lattice)).or.&
         .not.all(ieee_is_finite(reciprocal_lattice)).or..not.all(ieee_is_finite(atoms_cart)))status=1
     call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -3079,6 +3304,8 @@ contains
         write(unit,'(a,i0)')'num_iter = ',num_iter
         write(unit,'(a)')'conv_tol = 1.d-10'
         write(unit,'(a)')'conv_window = 5'
+        write(unit,'(a)')'trial_step = 2.0d0'
+        write(unit,'(a)')'num_cg_steps = 0'
         write(unit,'(a)')'gamma_only = true'
         write(unit,'(a)')'site_symmetry = .true.'
         write(unit,'(a)')'symmetrize_eps = 1.d-10'
@@ -3090,9 +3317,10 @@ contains
           write(unit,'(a,1x,3(es24.16,1x))')trim(atom_symbols(atom)),atoms_cart(:,atom)
         enddo
         write(unit,'(a)')'end atoms_cart'
-        ! Library mode receives the deterministic spectral trial overlap as A_matrix_loc.
-        ! Omitting the projections block prevents setup from generating an unrelated
-        ! random trial gauge; Wannier90 permits this and initializes num_proj=num_wann.
+        if(trim(initial_projection)=='random')then
+          write(unit,'(a)')'begin projections';write(unit,'(a)')'random'
+          write(unit,'(a)')'end projections'
+        endif
         write(unit,'(a)')'mp_grid = 1 1 1'
         write(unit,'(a)')'begin kpoints';write(unit,'(a)')'0.0 0.0 0.0'
         write(unit,'(a)')'end kpoints';close(unit)

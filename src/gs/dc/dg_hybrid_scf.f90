@@ -15,30 +15,30 @@ module dg_hybrid_scf
     subroutine dg_hybrid_assemble_hamiltonian(iteration,ok)
       integer,intent(in)::iteration;logical,intent(out)::ok
     end subroutine dg_hybrid_assemble_hamiltonian
-    subroutine dg_hybrid_solve_occupied_states(iteration,total_energy,eigensystem_residual,electron_count_defect,&
+    subroutine dg_hybrid_solve_occupied_states(iteration,band_energy_indicator,eigensystem_residual,electron_count_defect,&
         symmetry_defect,ok)
       import real64
       integer,intent(in)::iteration
-      real(real64),intent(out)::total_energy,eigensystem_residual,electron_count_defect,symmetry_defect
+      real(real64),intent(out)::band_energy_indicator,eigensystem_residual,electron_count_defect,symmetry_defect
       logical,intent(out)::ok
     end subroutine dg_hybrid_solve_occupied_states
     subroutine dg_hybrid_reconstruct_density(output_density,ok)
       import real64
       real(real64),intent(out)::output_density(:);logical,intent(out)::ok
     end subroutine dg_hybrid_reconstruct_density
-    subroutine dg_hybrid_pulay_mix(iteration,input_density,output_density,reset_history,reduce_rate,mixed_density,ok)
+    subroutine dg_hybrid_mix_density(iteration,input_density,output_density,reset_history,reduce_rate,mixed_density,ok)
       import real64
       integer,intent(in)::iteration
       real(real64),intent(in)::input_density(:),output_density(:)
       logical,intent(in)::reset_history,reduce_rate
       real(real64),intent(out)::mixed_density(:);logical,intent(out)::ok
-    end subroutine dg_hybrid_pulay_mix
+    end subroutine dg_hybrid_mix_density
   end interface
   public::run_dg_hybrid_self_consistent_ground_state
 contains
   subroutine run_dg_hybrid_self_consistent_ground_state(comm,global_point_count,point_ids,initial_density,&
       hybrid_basis_fingerprint,metric_fingerprint,update_potential,assemble_hamiltonian,solve_occupied_states,&
-      reconstruct_density,pulay_mix,maximum_iterations,density_tolerance,energy_tolerance,eigensystem_tolerance,&
+      reconstruct_density,mix_density,maximum_iterations,density_tolerance,energy_tolerance,eigensystem_tolerance,&
       physical_tolerance,converged_density,iterations,density_residual,energy_residual,eigensystem_residual,&
       electron_count_defect,symmetry_defect,fingerprint,ok,message)
     integer,intent(in)::comm,global_point_count,maximum_iterations
@@ -48,7 +48,7 @@ contains
     procedure(dg_hybrid_assemble_hamiltonian)::assemble_hamiltonian
     procedure(dg_hybrid_solve_occupied_states)::solve_occupied_states
     procedure(dg_hybrid_reconstruct_density)::reconstruct_density
-    procedure(dg_hybrid_pulay_mix)::pulay_mix
+    procedure(dg_hybrid_mix_density)::mix_density
     real(real64),allocatable,intent(out)::converged_density(:)
     integer,intent(out)::iterations
     real(real64),intent(out)::density_residual,energy_residual,eigensystem_residual,electron_count_defect,symmetry_defect
@@ -60,7 +60,7 @@ contains
     integer,allocatable::ownership_count(:)
     integer(int64)::minimum_bits,maximum_bits,bits,local_hash,global_hash,entry_hash,quantized
     real(real64),allocatable::current_density(:),output_density(:),mixed_density(:),delta(:),previous_delta(:)
-    real(real64)::total_energy,previous_energy,previous_density_residual,local_value,global_value,local_dot,global_dot,&
+    real(real64)::band_energy_indicator,previous_band_energy,previous_density_residual,local_value,global_value,local_dot,global_dot,&
       previous_norm,current_norm,quantization_scale,quantization_limit
     logical::callback_ok,reset_history,reduce_rate,converged
     ok=.false.;message='';iterations=0;fingerprint=0_int64;density_residual=huge(1d0);energy_residual=huge(1d0)
@@ -98,15 +98,15 @@ contains
     ownership_count=0;do i=1,nlocal;ownership_count(int(point_ids(i)))=ownership_count(int(point_ids(i)))+1;enddo
     call MPI_Allreduce(MPI_IN_PLACE,ownership_count,global_point_count,MPI_INTEGER,MPI_SUM,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.any(ownership_count/=1))then;call cleanup();message='hybrid SCF points are not owned exactly once';return;endif
-    current_density=initial_density;previous_delta=0d0;previous_energy=huge(1d0)
+    current_density=initial_density;previous_delta=0d0;previous_band_energy=huge(1d0)
     previous_density_residual=huge(1d0);converged=.false.
     do iterations=1,maximum_iterations
       call update_potential(current_density,callback_ok);call callback_consensus(callback_ok,global_bad,ierr)
       if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;call cleanup();message='hybrid SCF potential update failed';return;endif
       call assemble_hamiltonian(iterations,callback_ok);call callback_consensus(callback_ok,global_bad,ierr)
       if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;call cleanup();message='hybrid SCF Hamiltonian assembly failed';return;endif
-      call solve_occupied_states(iterations,total_energy,eigensystem_residual,electron_count_defect,symmetry_defect,callback_ok)
-      local_bad=merge(0,1,callback_ok.and.ieee_is_finite(total_energy).and.ieee_is_finite(eigensystem_residual).and.&
+      call solve_occupied_states(iterations,band_energy_indicator,eigensystem_residual,electron_count_defect,symmetry_defect,callback_ok)
+      local_bad=merge(0,1,callback_ok.and.ieee_is_finite(band_energy_indicator).and.ieee_is_finite(eigensystem_residual).and.&
         ieee_is_finite(electron_count_defect).and.ieee_is_finite(symmetry_defect))
       call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
       if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;call cleanup();message='hybrid occupied solve failed';return;endif
@@ -117,10 +117,19 @@ contains
       delta=output_density-current_density;local_value=sum(delta**2)
       call MPI_Allreduce(local_value,global_value,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
       density_residual=sqrt(global_value/real(global_point_count,real64))
-      if(iterations==1)then;energy_residual=huge(1d0);else;energy_residual=abs(total_energy-previous_energy);endif
+      if(iterations==1)then
+        energy_residual=huge(1d0)
+      else
+        ! This is an occupied band-energy stability indicator, not a total-DFT-energy difference.
+        energy_residual=abs(band_energy_indicator-previous_band_energy)
+      endif
       converged=iterations>1.and.density_residual<=density_tolerance.and.energy_residual<=energy_tolerance.and.&
         eigensystem_residual<=eigensystem_tolerance.and.electron_count_defect<=physical_tolerance.and.&
         symmetry_defect<=physical_tolerance
+      if(rank==0)write(*,'(a,i0,6(a,es16.8))')'[HYBRID-SCF] iteration=',iterations,&
+        ' density=',density_residual,' band_energy_change=',energy_residual,&
+        ' eigensystem=',eigensystem_residual,' electrons=',electron_count_defect,&
+        ' symmetry=',symmetry_defect,' band_energy=',band_energy_indicator
       if(converged)exit
       reset_history=.false.;reduce_rate=.false.
       if(iterations>1)then
@@ -131,11 +140,13 @@ contains
         if(global_dot< -0.25d0*sqrt(max(0d0,previous_norm*current_norm)).or.&
           density_residual>1.2d0*previous_density_residual)then;reset_history=.true.;reduce_rate=.true.;endif
       endif
-      call pulay_mix(iterations,current_density,output_density,reset_history,reduce_rate,mixed_density,callback_ok)
+      if(rank==0.and.reset_history)write(*,'(a,i0)')'[HYBRID-SCF] rejected density history at iteration=',iterations
+      call mix_density(iterations,current_density,output_density,reset_history,reduce_rate,mixed_density,callback_ok)
       local_bad=merge(0,1,callback_ok.and.all(ieee_is_finite(mixed_density)).and.all(mixed_density>=0d0))
       call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;call cleanup();message='hybrid Pulay mixing failed';return;endif
-      previous_delta=delta;previous_density_residual=density_residual;previous_energy=total_energy;current_density=mixed_density
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;call cleanup();message='hybrid density mixing failed';return;endif
+      previous_delta=delta;previous_density_residual=density_residual
+      previous_band_energy=band_energy_indicator;current_density=mixed_density
     enddo
     if(.not.converged)then;call cleanup();message='hybrid self-consistent ground state did not converge';return;endif
     allocate(converged_density(nlocal),stat=allocation_status);local_bad=merge(0,1,allocation_status==0)

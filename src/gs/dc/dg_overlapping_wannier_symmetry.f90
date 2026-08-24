@@ -39,15 +39,18 @@ contains
     complex(8),intent(in),optional::component_rows(:,:,:)
     real(8),intent(out),optional::component_residual(:)
     logical,intent(in),optional::require_input_covariance
-    integer::rank,nproc,ierr,n,noperation,ngenerator,identity,total_rows,r,i,j,operation,component,&
+    integer::rank,nproc,ierr,n,noperation,ngenerator,identity,total_rows,r,i,j,q,nprobe,operation,component,&
       generator,parent_operation,path_length,local_bad,global_bad,strict_local,strict_min,strict_max
     integer,allocatable::row_counts(:),row_displs(:),parent(:),parent_generator(:),queue(:),path(:),&
-      seen(:),group_seen(:)
+      seen(:),group_seen(:),component_worst(:)
     integer(int64),allocatable::all_row_ids(:)
     complex(8),allocatable::representation(:,:),identity_matrix(:,:),transformed(:,:),&
       sym_artifact_rows(:,:),check_rows(:,:),translation_h_rows(:,:),translation_s_rows(:,:),&
-      translation_rho_rows(:,:),translation_artifact_rows(:,:)
-    real(8)::local_change,local_magnitude,scale(3)
+      translation_rho_rows(:,:),translation_artifact_rows(:,:),relation_probe(:,:,:),&
+      relation_transition(:,:)
+    real(8)::local_change,local_magnitude,scale(3),candidate,relation_defect,pi
+    integer::left_operation,relation_left,relation_generator
+    integer::before_worst(3),after_worst(3)
     ok=.false.;message='';before_residual=huge(1d0);after_residual=huge(1d0)
     artifact_change=huge(1d0);artifact_magnitude=huge(1d0);workspace_peak_elements=0_int64
     if(present(component_residual))component_residual=huge(1d0)
@@ -130,7 +133,10 @@ contains
     do while(i<=j)
       parent_operation=queue(i);i=i+1
       do generator=1,ngenerator
-        operation=product_table(parent_operation,generator_operations(generator))
+        ! Grid pullbacks compose in reversed geometric order.  Advancing the
+        ! geometric label on the left makes the stored column action satisfy
+        ! D(g*parent)=D(parent)D(g).
+        operation=product_table(generator_operations(generator),parent_operation)
         if(parent(operation)/=0)cycle
         parent(operation)=parent_operation;parent_generator(operation)=generator
         j=j+1;queue(j)=operation
@@ -147,6 +153,39 @@ contains
         message='pencil symmetry generator representation is not unitary';return
       endif
     enddo
+    ! Validate the group relations on a small set of dense deterministic row
+    ! probes.  This catches path-dependent generator products without retaining
+    ! O(n**2*noperation) full-group matrices or repeating dense matrix products.
+    nprobe=min(8,n);pi=acos(-1d0)
+    allocate(relation_probe(nprobe,n,noperation),relation_transition(nprobe,n))
+    relation_probe=(0d0,0d0)
+    do q=1,nprobe;do i=1,n
+      relation_probe(q,i,identity)=exp(cmplx(0d0,2d0*pi*real(q*i,8)/real(n+q,8),8))/sqrt(real(n,8))
+    enddo;enddo
+    do i=2,noperation
+      operation=queue(i);parent_operation=parent(operation);generator=parent_generator(operation)
+      relation_probe(:,:,operation)=matmul(relation_probe(:,:,parent_operation),&
+        generator_representation(:,:,generator))
+    enddo
+    relation_defect=0d0;relation_left=identity;relation_generator=1
+    do left_operation=1,noperation
+      do generator=1,ngenerator
+        operation=product_table(generator_operations(generator),left_operation)
+        relation_transition=matmul(relation_probe(:,:,left_operation),&
+          generator_representation(:,:,generator))
+        candidate=maxval(abs(relation_transition-relation_probe(:,:,operation)))
+        if(candidate>relation_defect)then
+          relation_defect=candidate;relation_left=left_operation;relation_generator=generator
+        endif
+      enddo
+    enddo
+    if(relation_defect>tolerance)then
+      if(rank==0)write(0,'(a,es16.8,2(a,i0))')&
+        '[OW-GS-DIAGNOSTIC] pencil generator group-relation defect=',relation_defect,&
+        ' left_operation=',relation_left,&
+        ' right_operation=',generator_operations(relation_generator)
+      message='pencil symmetry generator group relation exceeds tolerance';return
+    endif
     allocate(translation_h_rows(size(row_ids),n),translation_s_rows(size(row_ids),n),&
       translation_rho_rows(size(row_ids),n),translation_artifact_rows(size(row_ids),n))
     translation_h_rows=0d0;translation_s_rows=0d0;translation_rho_rows=0d0
@@ -179,30 +218,40 @@ contains
     sym_rho_rows=sym_rho_rows/real(size(coset_representatives),8)
     sym_artifact_rows=sym_artifact_rows/real(size(coset_representatives),8)
     scale=[global_scale(h_rows),global_scale(s_rows),global_scale(rho_rows)]
-    before_residual=0d0;after_residual=0d0
-    if(present(component_residual))component_residual=0d0
+    before_residual=0d0;after_residual=0d0;before_worst=1;after_worst=1
+    if(present(component_residual))then
+      component_residual=0d0;allocate(component_worst(size(component_residual)));component_worst=1
+    endif
     do generator=1,ngenerator
       call transform_rows(h_rows,generator_representation(:,:,generator),check_rows)
-      before_residual(1)=max(before_residual(1),global_difference(check_rows,h_rows)/scale(1))
+      candidate=global_difference(check_rows,h_rows)/scale(1)
+      if(candidate>before_residual(1))then;before_residual(1)=candidate;before_worst(1)=generator;endif
       call transform_rows(s_rows,generator_representation(:,:,generator),check_rows)
-      before_residual(2)=max(before_residual(2),global_difference(check_rows,s_rows)/scale(2))
+      candidate=global_difference(check_rows,s_rows)/scale(2)
+      if(candidate>before_residual(2))then;before_residual(2)=candidate;before_worst(2)=generator;endif
       call transform_rows(rho_rows,generator_representation(:,:,generator),check_rows)
-      before_residual(3)=max(before_residual(3),global_difference(check_rows,rho_rows)/scale(3))
+      candidate=global_difference(check_rows,rho_rows)/scale(3)
+      if(candidate>before_residual(3))then;before_residual(3)=candidate;before_worst(3)=generator;endif
       if(present(component_rows))then
         do component=1,size(component_residual)
           call transform_rows(component_rows(:,:,component),&
             generator_representation(:,:,generator),check_rows)
-          component_residual(component)=max(component_residual(component),&
-            global_difference(check_rows,component_rows(:,:,component))/&
-            global_scale(component_rows(:,:,component)))
+          candidate=global_difference(check_rows,component_rows(:,:,component))/&
+            global_scale(component_rows(:,:,component))
+          if(candidate>component_residual(component))then
+            component_residual(component)=candidate;component_worst(component)=generator
+          endif
         enddo
       endif
       call transform_rows(sym_h_rows,generator_representation(:,:,generator),check_rows)
-      after_residual(1)=max(after_residual(1),global_difference(check_rows,sym_h_rows)/scale(1))
+      candidate=global_difference(check_rows,sym_h_rows)/scale(1)
+      if(candidate>after_residual(1))then;after_residual(1)=candidate;after_worst(1)=generator;endif
       call transform_rows(sym_s_rows,generator_representation(:,:,generator),check_rows)
-      after_residual(2)=max(after_residual(2),global_difference(check_rows,sym_s_rows)/scale(2))
+      candidate=global_difference(check_rows,sym_s_rows)/scale(2)
+      if(candidate>after_residual(2))then;after_residual(2)=candidate;after_worst(2)=generator;endif
       call transform_rows(sym_rho_rows,generator_representation(:,:,generator),check_rows)
-      after_residual(3)=max(after_residual(3),global_difference(check_rows,sym_rho_rows)/scale(3))
+      candidate=global_difference(check_rows,sym_rho_rows)/scale(3)
+      if(candidate>after_residual(3))then;after_residual(3)=candidate;after_worst(3)=generator;endif
     enddo
     local_change=0d0;local_magnitude=0d0
     if(size(artifact_rows)>0)then
@@ -218,10 +267,38 @@ contains
         if(maxval(component_residual)>tolerance)local_bad=1
       endif
       if(local_bad/=0)then
+        if(rank==0)then
+          write(0,'(a,3(a,es16.8))')'[OW-GS-DIAGNOSTIC] rejected stitched pencil covariance',&
+            ' h=',before_residual(1),' s=',before_residual(2),' rho=',before_residual(3)
+          write(0,'(a,3(a,i0))')'[OW-GS-DIAGNOSTIC] rejected stitched pencil worst operations',&
+            ' h=',generator_operations(before_worst(1)),' s=',generator_operations(before_worst(2)),&
+            ' rho=',generator_operations(before_worst(3))
+          if(present(component_residual))then
+            if(size(component_residual)==3)then
+              write(0,'(a,3(a,es16.8))')'[OW-GS-DIAGNOSTIC] rejected stitched component covariance',&
+                ' kinetic=',component_residual(1),' local=',component_residual(2),&
+                ' nonlocal=',component_residual(3)
+              write(0,'(a,3(a,i0))')'[OW-GS-DIAGNOSTIC] rejected stitched component worst operations',&
+                ' kinetic=',generator_operations(component_worst(1)),&
+                ' local=',generator_operations(component_worst(2)),&
+                ' nonlocal=',generator_operations(component_worst(3))
+            else
+              write(*,'(a,es16.8)')'[OW-GS-DIAGNOSTIC] rejected component covariance maximum=',&
+                maxval(component_residual)
+            endif
+          endif
+        endif
         message='input covariance defect exceeds strict pencil publication tolerance';return
       endif
     endif
     if(ierr/=MPI_SUCCESS.or.maxval(after_residual)>tolerance)then
+      if(rank==0)then
+        write(0,'(a,3(a,es16.8))')'[OW-GS-DIAGNOSTIC] rejected averaged pencil covariance',&
+          ' h=',after_residual(1),' s=',after_residual(2),' rho=',after_residual(3)
+        write(0,'(a,3(a,i0))')'[OW-GS-DIAGNOSTIC] rejected averaged pencil worst operations',&
+          ' h=',generator_operations(after_worst(1)),' s=',generator_operations(after_worst(2)),&
+          ' rho=',generator_operations(after_worst(3))
+      endif
       message='full-group pencil average is not generator invariant';return
     endif
     ok=.true.

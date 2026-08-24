@@ -78,6 +78,45 @@ assert "conv_tol = 1.d-10" in w90_source, (
 assert "conv_tol = 1.d-12" not in w90_source, (
     "obsolete over-strict Gamma Wannier90 convergence tolerance must be removed"
 )
+assert "trial_step = 2.0d0" in w90_source, (
+    "Gamma Wannier90 input must use the native large-trial-step parabolic line search"
+)
+assert "fixed_step =" not in w90_source, (
+    "Gamma Wannier90 native line-search route must not also configure a fixed step"
+)
+wannier_patch_source = source("cmakefiles/Builder/patches/apply_wannier90_generator_symmetry.cmake")
+assert "symmetry_backtracking_step" in wannier_patch_source, (
+    "the site-symmetry route must retain its last accepted backtracking step"
+)
+assert "trial_spread%om_tot <= wann_spread%om_tot + symmetry_backtracking_tolerance" in wannier_patch_source, (
+    "site-symmetry backtracking must accept using the actual spread"
+)
+assert "symmetry_backtracking_step = 0.5_dp*symmetry_backtracking_step" in wannier_patch_source, (
+    "a rejected symmetry trial must attenuate its step without an iteration schedule"
+)
+assert "Accepted symmetry step" in wannier_patch_source, (
+    "short validation runs must report the step accepted by symmetry backtracking"
+)
+assert "u_matrix_loc = u0_loc" in wannier_patch_source and "m_matrix_loc = m0_loc" in wannier_patch_source, (
+    "every in-memory backtracking retry must restore the saved Wannier90 state"
+)
+production_projection_patch = re.search(
+    r"set\(new_gradient_projection \[=\[(?P<body>.*?)\n\]=\]\)",
+    wannier_patch_source,
+    re.S,
+)
+assert production_projection_patch and "projected_antihermitian_defect" not in production_projection_patch.group("body"), (
+    "temporary O(N^2) anti-Hermitian diagnostics must not remain in the production projection"
+)
+assert "salmon adaptive fixed-step continuation" not in wannier_patch_source.lower(), (
+    "Gamma Wannier90 must keep fixed_step=0.2 for the complete long convergence run"
+)
+assert "0.5_dp*fixed_step" not in wannier_patch_source and "mod(iter - 1, 500) == 0" not in wannier_patch_source, (
+    "the rejected early 500-iteration step-decay schedule must not be patched into Wannier90"
+)
+assert "num_cg_steps = 0" in w90_source, (
+    "Gamma Wannier90 input must disable CG for the stable fixed-step Si64 route"
+)
 periodic_phase_aligner = re.search(
     r"subroutine\s+align_dg_w90_character_sectors_by_periodic_phase(?P<body>.*?)"
     r"end\s+subroutine\s+align_dg_w90_character_sectors_by_periodic_phase",
@@ -286,7 +325,7 @@ for required_call in (
         f"production must construct the block-monomial trial frame through {required_call}"
     )
 assert "call prepare_dg_direct_retained_wannier_frame" not in ow_ground_state_body, (
-    "production must not pass the delocalized retained identity frame to Wannier90"
+    "production must not introduce a second retained-frame constructor"
 )
 assert "[ow-gs-diagnostic] spectral_wannier_frame" in ow_ground_state_body, (
     "production must report the spectral block-monomial frame receipt"
@@ -295,9 +334,9 @@ assert len(re.findall(r"call\s+run_dg_w90_gamma_library", ow_ground_state_body))
     "direct retained-frame construction must invoke Wannier90 exactly once"
 )
 assert re.search(
-    r"fixed_center_dmn_workspace_peak\s*=\s*spectral_operation_workspace",
+    r"fixed_center_dmn_workspace_peak\s*=\s*0_8",
     ow_ground_state_body,
-), "the DMN workspace receipt must include the initial spectral AMN gather"
+), "the restored fixed-center DMN route must start its own workspace receipt"
 assert re.search(
     r"w90_input_fingerprint\s*=\s*ieor\s*\(\s*w90_input_fingerprint\s*,\s*"
     r"spectral_action_aggregate_fingerprint\s*\)",
@@ -765,12 +804,9 @@ assert "call build_dg_smooth_partition_of_unity(" in adapter_body.lower(), (
 assert "call assemble_dg_stitched_overlap_density_rows(" in adapter_body.lower(), (
     "production must assemble row-owned overlap and density tiles from normalized buffer coverage"
 )
-assert "call assemble_dg_stitched_weak_operator_rows(" in source("src/gs/main_dft.f90").lower(), (
-    "production Hamiltonian must use partition-gradient-corrected row-owned weak operators"
+assert "call project_dg_full_cell_hamiltonian_tiles(" in source("src/gs/main_dft.f90").lower(), (
+    "production Hamiltonian must use bounded full-cell hpsi tiles"
 )
-assert "sqrt(ow_partition_weight(p))*ow_box_values(:,p)" in re.sub(
-    r"\s+", "", source("src/gs/main_dft.f90").lower()
-), "nonlocal projector overlaps must use the same square-root partition weighting"
 assert "call symmetrize_dg_distributed_pencil_rows(" in source("src/gs/main_dft.f90").lower(), (
     "production must symmetrize stitched H/S/rho row tiles under the atomic affine action"
 )
@@ -913,17 +949,29 @@ assert re.search(
     re.I,
 ), "Wannier90 projections must prepare a symmetry-propagated spectral trial frame"
 assert re.search(
-    r"call\s+materialize_dg_row_owned_sector_on_spatial_grid\s*\(.*?spectral_trial_rows.*?"
-    r"spectral_spatial_trials",
+    r"allocate\s*\(\s*w90_anchors\s*\([^)]*\)\s*,\s*source\s*=\s*global_seed_values",
     adapter_body,
     re.I | re.S,
-), "Wannier90 A matrices must materialize the same spectral trial frame written to DMN"
-assert re.search(r"w90_anchors\s*=\s*transpose\s*\(\s*spectral_spatial_trials\s*\)", adapter_body, re.I), (
-    "Wannier90 A matrices and DMN AMN must use the identical spectral gauge"
+), "Wannier90 must retain the previously converged global seed anchors"
+assert re.search(r"call\s+assemble_dg_w90_gamma_a_matrix\b", adapter_body, re.I), (
+    "production must assemble the localized seed A matrix before DMN publication"
 )
-assert "w90_a_matrix-spectral_amn" in re.sub(r"\s+", "", adapter_body), (
-    "production must measure the actual Wannier90 A matrix against the DMN spectral gauge"
+assert not re.search(r"w90_anchors\s*=\s*transpose\s*\(\s*spectral_spatial_trials\s*\)", adapter_body, re.I), (
+    "spectral-basin trial rows must not replace the established Wannier90 initial gauge"
 )
+assert (
+    "w90_seed_representation,fixed_center_representation,fixed_center_eigenvalues,"
+    "w90_seed_a_matrix" in re.sub(r"\s+|&", "", adapter_body)
+), "Wannier90 symmetry input must use the same localized seed gauge as the A matrix"
+assert (
+    "w90_seed_representation=matmul(conjg(transpose(w90_seed_a_matrix)),"
+    "matmul(fixed_center_representation,w90_seed_a_matrix))" in re.sub(r"[\s&]+", "", adapter_body)
+), "DMN target representations must be transformed covariantly into the seed gauge"
+assert re.search(
+    r"assemble_dg_w90_gamma_matrices\s*\([^;]*?precomputed_a_matrix\s*=\s*w90_seed_a_matrix",
+    adapter_body,
+    re.I | re.S,
+), "Wannier90 M assembly must reuse rather than recompute the DMN seed A matrix"
 assert re.search(r"call\s+apply_dg_w90_gamma_transform", adapter_body, re.I), (
     "the MLWF transform must be applied in the global LCFO space"
 )
@@ -1007,17 +1055,56 @@ assert "gaussian" not in re.search(
 assert not re.search(r"modulo\s*\(\s*rank\s*\+\s*isym", adapter_body, re.I), (
     "communicator-rank arithmetic is not a physical fragment symmetry"
 )
-assert "assemble_dg_stitched_weak_operator_rows" in main_source.lower(), (
-    "production Hamiltonian must use the boundary-correct stitched weak assembly"
+assert "assemble_dg_stitched_weak_operator_rows" not in re.search(
+    r"subroutine\s+ow_build_hamiltonian(?P<body>.*?)end\s+subroutine",
+    main_source, re.I | re.S).group("body").lower(), (
+    "the final production Hamiltonian must not use fragment boundary stitching"
 )
 hamiltonian_adapter = re.search(
     r"subroutine\s+ow_build_hamiltonian(?P<body>.*?)end\s+subroutine",
     main_source,
     re.I | re.S,
 )
-assert hamiltonian_adapter and not re.search(
-    r"call\s+hpsi", hamiltonian_adapter.group("body"), re.I
-), "production Hamiltonian must not project the strong fragment stencil"
+assert hamiltonian_adapter and "project_dg_full_cell_hamiltonian_tiles" in hamiltonian_adapter.group("body"), (
+    "production must project the total-system hpsi in bounded tiles"
+)
+assert re.search(r"subroutine\s+apply_ow_full_cell_hpsi_tile.*?call\s+hpsi", main_source, re.I | re.S), (
+    "the full-cell tile callback must delegate to SALMON hpsi"
+)
+assert re.search(
+    r"subroutine\s+apply_ow_full_cell_hpsi_tile.*?"
+    r"if\s*\(\.not\.full_output_finite\).*?"
+    r"include_nonlocal\s*=\s*\.false\..*?"
+    r"OW-HPSI-FAILURE",
+    main_source,
+    re.I | re.S,
+), (
+    "a nonfinite full hpsi tile must be retried without the nonlocal operator and report "
+    "boundary diagnostics before the generic callback failure is returned"
+)
+assert "OW-HPSI-CONTRACT-FAILURE" in main_source, (
+    "the tile callback must identify rank-local shape/parallel-contract rejection before hpsi"
+)
+assert "OW-HPSI-OWNERSHIP-FAILURE" not in main_source, (
+    "cross-rank ow_core_ids ownership is valid after cached redistribution and must not be rejected"
+)
+assert "type(s_dg_full_cell_redistribution_schedule) :: ow_hpsi_redistribution" in main_source, (
+    "production must retain one cached source-to-mg_tot redistribution schedule"
+)
+assert re.search(
+    r"subroutine\s+apply_ow_full_cell_hpsi_tile.*?"
+    r"initialize_dg_full_cell_redistribution.*?"
+    r"apply_dg_full_cell_redistribution_forward.*?"
+    r"call\s+hpsi.*?"
+    r"apply_dg_full_cell_redistribution_reverse",
+    main_source,
+    re.I | re.S,
+), "production hpsi must be bracketed by forward and reverse cached redistributions"
+assert not re.search(
+    r"subroutine\s+apply_ow_full_cell_hpsi_tile.*?outside_count\s*=",
+    main_source,
+    re.I | re.S,
+), "cross-rank ow_core_ids ownership is valid and must not be rejected"
 assert re.search(
     r"if\s*\(\s*yn_dg_dc_overlapping_wannier\s*/=\s*'y'\s*\.and\..*?checkpoint_gs",
     main_source,
@@ -1392,13 +1479,19 @@ assert re.search(
     re.I | re.S,
 ), "one-shot assembly must reject an operator fingerprint mismatch"
 adapter_lower = adapter_body.lower()
+generation_position = adapter_lower.find("ow_basis%generation=1")
+tail_generation_position = adapter_lower.find("allocate(ow_tail_generation")
+assert 0 <= generation_position < tail_generation_position, (
+    "the independently constructed Wannier basis must publish a positive generation before "
+    "density tails, fingerprints, and checkpoints consume it"
+)
 build_position = adapter_lower.find("call ow_build_hamiltonian(")
 solve_position = adapter_lower.find("call solve_dg_overlapping_wannier_generalized_eigenexa(")
-density_position = adapter_lower.find("call reconstruct_dg_overlapping_wannier_density(")
+density_position = adapter_lower.find("one_shot_density=ow_initial_occupied_density")
 checkpoint_position = adapter_lower.find("call write_dg_overlapping_wannier_checkpoint(")
-assert 0 <= build_position < solve_position < density_position < checkpoint_position, (
-    "production order must be build symmetrized H/S/rho, one-shot EigenExa solve, "
-    "density reconstruction, then checkpoint publication"
+assert 0 <= density_position < build_position < solve_position < checkpoint_position, (
+    "production order must restore the preserved occupied-state density, build the full-cell operator, "
+    "solve once with EigenExa, then publish the checkpoint"
 )
 checkpoint_body = re.search(
     r"subroutine\s+populate_ow_checkpoint(?P<body>.*?)end\s+subroutine",
@@ -1421,12 +1514,121 @@ hamiltonian_builder = re.search(
     re.I | re.S,
 )
 assert hamiltonian_builder
+symmetry_source = source("src/gs/dc/dg_overlapping_wannier_symmetry.f90")
+strict_rejection = re.search(
+    r"if\s*\(\s*strict_min\s*==\s*1\s*\)\s*then(?P<body>.*?)"
+    r"message\s*=\s*['\"]input covariance defect exceeds strict pencil publication tolerance",
+    symmetry_source,
+    re.I | re.S,
+)
+assert strict_rejection and strict_rejection.group("body").lower().count("write(0,") >= 4, (
+    "strict covariance rejection receipts must use unbuffered error output so error stop cannot hide them"
+)
+assert "rejected averaged pencil covariance" in symmetry_source.lower(), (
+    "a failed full-group projection must report its post-average H/S/rho residuals"
+)
+assert "rejected averaged pencil worst operations" in symmetry_source.lower(), (
+    "a failed full-group projection must identify the offending generators"
+)
 builder_lower = hamiltonian_builder.group("body").lower()
-assemble_position = builder_lower.find("call assemble_dg_stitched_weak_operator_rows(")
+assert re.search(
+    r"symmetrize_dg_distributed_pencil_rows\s*\([^;]*?update_auxiliary\s*\)",
+    hamiltonian_builder.group("body"),
+    re.I | re.S,
+), "Hybrid iterations must diagnose raw covariance but only strict-gate the published auxiliary pencil"
+assemble_position = builder_lower.find("call project_dg_full_cell_hamiltonian_tiles(")
 symmetrize_position = builder_lower.find("call symmetrize_dg_distributed_pencil_rows(")
 assert 0 <= assemble_position < symmetrize_position, (
-    "the Hamiltonian builder must symmetrize the assembled stitched pencil before returning it"
+    "the Hamiltonian builder must validate/symmetrize full-cell rows before returning them"
 )
+component_hermiticity_positions = [
+    builder_lower.find("call ow_distributed_hermiticity(comm,ow_row_ids,kinetic_rows"),
+    builder_lower.find("call ow_distributed_hermiticity(comm,ow_row_ids,local_rows"),
+    builder_lower.find("call ow_distributed_hermiticity(comm,ow_row_ids,nonlocal_rows"),
+]
+assert all(assemble_position < position < symmetrize_position for position in component_hermiticity_positions), (
+    "projected component Hermiticity must be measured before strict covariance can reject the pencil"
+)
+assert "call assemble_ow_nonlocal_rows(" not in builder_lower, (
+    "the normalization-incompatible fragment reference must not run in every Hamiltonian build"
+)
+assert "full_cell/reference_nonlocal_difference" not in builder_lower, (
+    "the temporary raw nonlocal comparison must be removed after diagnosis"
+)
+assert "total_projector_direct/hpsi_nonlocal_difference" in builder_lower, (
+    "the first Hamiltonian assembly must locate any defect after projector overlap"
+)
+assert "ow_direct_nonlocal_compared" in builder_lower, (
+    "the direct/hpsi nonlocal comparison must be guarded to run only once"
+)
+range_adapter = re.search(
+    r"subroutine\s+diagnose_ow_total_nonlocal_projector_range(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+)
+assert range_adapter
+assert re.search(
+    r"strength\s*\(\s*ilma\s*\)\s*=\s*system%hvol\s*\*\s*dc%ppg_tot%rinv_uvu",
+    range_adapter.group("body"),
+    re.I,
+), "direct C^H D C rows must include the outer real-space integration weight"
+full_cell_callback = re.search(
+    r"subroutine\s+apply_ow_full_cell_hpsi_tile(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+)
+assert full_cell_callback
+assert re.search(
+    r"tile_info%icomm_r\s*=\s*dc%info_tot%icomm_r",
+    full_cell_callback.group("body"),
+    re.I,
+), "the ineffective whole-communicator experiment must be reverted"
+assert "projector_atom_comm/world_overlap_difference" in full_cell_callback.group("body").lower(), (
+    "the first Hybrid tile must compare atom-communicator and world projector overlaps"
+)
+assert re.search(
+    r"call\s+hpsi\s*\(.*?include_nonlocal\s*=\s*\.false\.\s*\).*?"
+    r"call\s+apply_ow_world_reduced_nonlocal",
+    full_cell_callback.group("body"),
+    re.I | re.S,
+), "the Hybrid correctness reference must add world-reduced nonlocal action after local hpsi"
+range_diagnostic_position = ow_ground_state_body.find("call diagnose_ow_total_nonlocal_projector_range(")
+hybrid_scf_position = ow_ground_state_body.find("call run_dg_hybrid_self_consistent_ground_state(")
+assert center_measure_position < range_diagnostic_position < hybrid_scf_position, (
+    "the total-system projector range diagnostic must run once after centers and before Hybrid-SCF"
+)
+hybrid_setup = ow_ground_state_body[range_diagnostic_position:hybrid_scf_position]
+assert "ow_hybrid_density=ow_box_density" not in hybrid_setup.replace(" ", ""), (
+    "Hybrid initial density must not reuse fragment-stitched box density"
+)
+assert "ow_hybrid_density=ow_initial_occupied_density" in hybrid_setup.replace(" ", "").lower(), (
+    "Hybrid initial potential must use the converged LCFO physical density"
+)
+assert "hybrid_initial_coefficients(io,io)=1d0" not in adapter_body.replace(" ", "").lower(), (
+    "final Wannier columns must not be assumed to preserve the pre-localization occupied ordering"
+)
+assert re.search(
+    r"redistribute_dg_row_owned_real_field_to_requests\s*\([^;]*?"
+    r"ow_total_density_ids\s*,\s*ow_total_density_values\s*,\s*ow_core_ids\s*,\s*"
+    r"ow_initial_occupied_density",
+    adapter_body,
+    re.I | re.S,
+), "initial density must be redistributed by physical ID from the preserved converged DC+LCFO density"
+initial_density_redistribution = adapter_body.lower().find(
+    "ow_total_density_ids,ow_total_density_values,ow_core_ids,ow_initial_occupied_density"
+)
+initial_density_deallocation = adapter_body.lower().find(
+    "deallocate(ow_total_density_ids,ow_total_density_values)"
+)
+assert 0 <= initial_density_redistribution < initial_density_deallocation, (
+    "the converged distributed density must remain alive until the final core layout consumes it"
+)
+assert re.search(
+    r"ow_symmetry_fingerprint\s*=\s*0_8\s*.*?do\s+p\s*=\s*1\s*,\s*nproc\s*.*?"
+    r"ow_symmetry_fingerprint\s*=\s*ieor",
+    ow_ground_state_body,
+    re.I | re.S,
+), "the collective symmetry fingerprint accumulator must be initialized before IEOR"
 assert re.search(
     r"inherit_dg_w90_affine_receipts\s*\(.*?w90_closure_defect.*?"
     r"global_retained_group_closure_defect\s*=\s*w90_closure_defect",
@@ -1781,8 +1983,13 @@ assert "site_symmetry = .true." in w90_source.lower(), (
 assert "symmetrize_eps" in w90_source.lower(), (
     "Wannier90 setup must set an explicit strict symmetrize_eps"
 )
-assert not re.search(r"write\s*\([^\n]*\)\s*['\"]random['\"]", w90_source, re.I), (
-    "externally supplied spectral trial A matrices must not be replaced by random Wannier90 projections"
+assert re.search(
+    r"if\s*\(\s*trim\s*\(\s*initial_projection\s*\)\s*==\s*['\"]random['\"]\s*\).*?"
+    r"write\s*\([^\n]*\)\s*['\"]random['\"]",
+    w90_source,
+    re.I | re.S,
+), (
+    "random Wannier90 projections must be selected only by the explicit initial-projection mode"
 )
 assert "inquire(file=trim(seed)//'.dmn'" in w90_source.replace(" ", "").lower(), (
     "Wannier90 setup must reject a missing DMN before library entry"
@@ -1793,8 +2000,8 @@ assert re.search(r"call\s+validate_dg_w90_convergence_log\s*\(", w90_source, re.
 assert "All done: wannier90 exiting" in w90_source, (
     "Wannier90 completion validation must recognize the library's normal-exit banner"
 )
-assert "Wannier90 exhausted its iteration limit" not in w90_source, (
-    "normal Wannier90 completion at num_iter must not be treated as an execution failure"
+assert "Wannier90 exhausted its iteration limit before convergence" in w90_source, (
+    "Wannier90 iteration-limit completion must not bypass its convergence receipt"
 )
 assert "Wannier90 transform violates the Gamma-real gauge" not in w90_source, (
     "a complex unitary Wannier90 gauge must not be rejected for being non-real"
@@ -1819,17 +2026,11 @@ append_pos = adapter_body.lower().find("call append_sawf_dmn_operation(", conver
 assert gather_pos < convert_pos < append_pos, (
     "fixed-center DMN must gather, convert, then append each streamed representation"
 )
-assert re.search(
-    r"call\s+append_sawf_dmn_operation\s*\([^;]*?spectral_wannier_representation\s*,\s*"
-    r"fixed_center_representation\s*,[^;]*?spectral_amn",
-    adapter_body,
-    re.I | re.S,
-), "DMN must publish distinct spectral d_matrix_wann, retained d_matrix_band, and their shared AMN"
 normalized_adapter = re.sub(r"[\s&]+", "", adapter_body.lower())
 assert (
-    "spectral_wannier_representation=matmul(conjg(transpose(spectral_amn)),"
-    "matmul(fixed_center_representation,spectral_amn))" in normalized_adapter
-), "each DMN target action must be transformed into the localized trial basis"
+    "w90_seed_representation,fixed_center_representation,fixed_center_eigenvalues,"
+    "w90_seed_a_matrix" in normalized_adapter
+), "DMN must publish the fixed-center representation in the localized seed gauge"
 assert "require_closed_group=.false." not in dmn_transaction.replace(" ", ""), (
     "fixed-center DMN must retain the writer's closed-group validation"
 )

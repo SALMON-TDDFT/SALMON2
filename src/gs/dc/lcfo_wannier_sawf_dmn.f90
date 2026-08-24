@@ -332,23 +332,28 @@ contains
   end subroutine validate_sawf_dmn_covariances
 
 
-  subroutine finish_sawf_dmn(writer,operations,ok,message)
+  subroutine finish_sawf_dmn(writer,operations,ok,message,require_closed_group)
     type(t_sawf_dmn_writer), intent(inout) :: writer
     type(t_sawf_symop), intent(in) :: operations(:)
     logical, intent(out) :: ok
     character(*), intent(out) :: message
+    logical, intent(in), optional :: require_closed_group
     complex(8), allocatable :: matrix(:,:)
     integer :: iop,io_status,close_status,rename_status,allocation_status
     character(256) :: io_message
 
-    ok=.false.; message=''
+    logical :: validate_group
+    ok=.false.; message='';validate_group=.true.
+    if(present(require_closed_group))validate_group=require_closed_group
     if(.not.writer%active .or. writer%appended/=writer%num_symmetry .or. &
         size(operations)/=writer%num_symmetry) then
       message='SAWF DMN cannot publish before every normalized operation is appended'
       return
     end if
-    call validate_streamed_group(writer,operations,ok,message)
-    if(.not.ok) return
+    if(validate_group)then
+      call validate_streamed_group(writer,operations,ok,message)
+      if(.not.ok) return
+    endif
     rewind(writer%band_unit)
     allocate(matrix(writer%num_bands,writer%num_bands),stat=allocation_status)
     if(allocation_status/=0) then

@@ -1,6 +1,7 @@
 set(SOURCES
     dc_fragment_geometry.f90
     dg_overlapping_wannier_types.f90
+    dg_spatial_mlwf_seed.f90
     dg_hybrid_wannier_selection.f90
     dg_hybrid_full_cell_operator_adapter.f90
     dg_hybrid_ground_state_types.f90
@@ -18,6 +19,7 @@ set(SOURCES
     dg_overlapping_wannier_construction.f90
     dg_overlapping_wannier_operators.f90
     dg_overlapping_wannier_nonlocal.f90
+    dg_nonlocal_projector_range.f90
     dg_overlapping_wannier_observables.f90
     dg_overlapping_wannier_full_cell.f90
     dg_overlapping_wannier_solver.f90
