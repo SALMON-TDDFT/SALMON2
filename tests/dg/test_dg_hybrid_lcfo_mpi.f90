@@ -10,6 +10,7 @@ program test_dg_hybrid_lcfo_mpi
   integer(int64),allocatable::wf_ids(:),pw_ids(:),row_ids(:)
   complex(real64),allocatable::wf_values(:,:),pw_values(:,:),hrows(:,:),srows(:,:)
   complex(real64)::vectors(npoint,nbasis),hop(npoint,npoint),sop(npoint,npoint),href(nbasis,nbasis),sref(nbasis,nbasis)
+  real(real64)::point_weights(npoint),reference_weights(npoint)
   type(s_dg_hybrid_fragment_basis)::basis
   integer(int64)::peak_elements,fingerprint
   logical::ok
@@ -35,8 +36,9 @@ program test_dg_hybrid_lcfo_mpi
   hop(2,5)=cmplx(0.11d0,-0.07d0,real64) ! neighboring-core nonlocal projector
   hop(5,2)=conjg(hop(2,5))
   sop(1,4)=cmplx(0.025d0,0.01d0,real64);sop(4,1)=conjg(sop(1,4))
-  href=matmul(conjg(transpose(vectors)),matmul(hop,vectors))
-  sref=matmul(conjg(transpose(vectors)),matmul(sop,vectors))
+  reference_weights=[0.5d0,0.75d0,1d0,1.25d0,1.5d0,2d0]
+  href=matmul(conjg(transpose(vectors)),spread(reference_weights,2,nbasis)*matmul(hop,vectors))
+  sref=matmul(conjg(transpose(vectors)),spread(reference_weights,2,nbasis)*matmul(sop,vectors))
 
   nowned=count([(mod(j-1,nproc)==rank,j=1,nbasis)])
   allocate(wf_ids(count([(mod(j-1,nproc)==rank.and.j<=4,j=1,nbasis)])),&
@@ -56,12 +58,14 @@ program test_dg_hybrid_lcfo_mpi
   call require(ok,trim(message))
   do i=1,npoint
     basis%buffer_point_ids(i)=int(mod(i+rank-1,npoint)+1,int64)
+    point_weights(i)=reference_weights(int(basis%buffer_point_ids(i)))
     do j=1,nowned
       basis%buffer_values(i,j)=vectors(int(basis%buffer_point_ids(i)),int(basis%global_ids(j)))
     enddo
   enddo
   allocate(row_ids(nowned));row_ids=basis%global_ids
-  call assemble_dg_hybrid_lcfo_rows(comm,basis,row_ids,apply_h,apply_s,hrows,srows,peak_elements,fingerprint,ok,message)
+  call assemble_dg_hybrid_lcfo_rows(comm,basis,row_ids,point_weights,apply_h,apply_s,&
+    hrows,srows,peak_elements,fingerprint,ok,message)
   call require(ok,trim(message))
   call require(size(hrows,1)==nowned.and.size(hrows,2)==nbasis,'LCFO Hamiltonian is not row distributed')
   call require(all(shape(srows)==shape(hrows)),'LCFO metric row shape mismatch')

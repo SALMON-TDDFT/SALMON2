@@ -15,11 +15,12 @@ module dg_hybrid_lcfo
   end interface
   public::assemble_dg_hybrid_lcfo_rows
 contains
-  subroutine assemble_dg_hybrid_lcfo_rows(comm,bases,row_ids,apply_h,apply_s,&
+  subroutine assemble_dg_hybrid_lcfo_rows(comm,bases,row_ids,point_weights,apply_h,apply_s,&
       hrows,srows,peak_elements,operator_fingerprint,ok,message)
     integer,intent(in)::comm
     type(s_dg_hybrid_fragment_basis),intent(in)::bases
     integer(int64),intent(in)::row_ids(:)
+    real(real64),intent(in)::point_weights(:)
     procedure(dg_hybrid_lcfo_apply)::apply_h,apply_s
     complex(real64),allocatable,intent(out)::hrows(:,:),srows(:,:)
     integer(int64),intent(out)::peak_elements,operator_fingerprint
@@ -44,13 +45,15 @@ contains
     endif
     global_count=int(global_count64);local_bad=0
     if(size(bases%buffer_values,1)/=size(bases%buffer_point_ids).or.&
-        size(bases%buffer_values,2)/=nlocal.or.size(row_ids)/=nlocal)then
+        size(bases%buffer_values,2)/=nlocal.or.size(row_ids)/=nlocal.or.&
+        size(point_weights)/=size(bases%buffer_point_ids))then
       local_bad=1
     elseif(any(row_ids/=bases%global_ids))then
       local_bad=1
     endif
     if(any(row_ids<1_int64).or.any(row_ids>global_count64))local_bad=1
     if(any(bases%buffer_point_ids<1_int64))local_bad=1
+    if(any(.not.ieee_is_finite(point_weights)).or.any(point_weights<=0d0))local_bad=1
     if(.not.all(ieee_is_finite(real(bases%buffer_values))).or.&
         .not.all(ieee_is_finite(aimag(bases%buffer_values))))local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -93,8 +96,8 @@ contains
         message='LCFO operator produced non-finite values';return
       endif
       do i=1,nlocal
-        hrows(i,j)=sum(conjg(bases%buffer_values(:,i))*hvector(:,1))
-        srows(i,j)=sum(conjg(bases%buffer_values(:,i))*svector(:,1))
+        hrows(i,j)=sum(point_weights*conjg(bases%buffer_values(:,i))*hvector(:,1))
+        srows(i,j)=sum(point_weights*conjg(bases%buffer_values(:,i))*svector(:,1))
       enddo
     enddo
     peak_elements=int(size(hrows)+size(srows),int64)
