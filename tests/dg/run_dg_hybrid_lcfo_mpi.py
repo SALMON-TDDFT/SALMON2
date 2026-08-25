@@ -7,7 +7,8 @@ with tempfile.TemporaryDirectory(prefix="hybrid-lcfo-") as name:
   build=Path(name);(build/"config.h").write_text("");exe=build/"hybrid_lcfo"
   subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
     "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",
-    str(root/"src/gs/dc/dg_hybrid_fragment_basis.f90"),str(root/"src/gs/dc/dg_hybrid_lcfo.f90"),
+    str(root/"src/gs/dc/dg_hybrid_fragment_basis.f90"),
+    str(root/"src/gs/dc/dg_hybrid_lcfo_support_redistribution.f90"),str(root/"src/gs/dc/dg_hybrid_lcfo.f90"),
     str(root/"tests/dg/test_dg_hybrid_lcfo_mpi.f90"),"-o",str(exe)],check=True)
   env=os.environ.copy();env["OMP_NUM_THREADS"]="1";env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")
   fingerprints=[]

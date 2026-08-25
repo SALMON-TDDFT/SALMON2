@@ -54,6 +54,12 @@ program test_dg_hybrid_lcfo_mpi
   enddo
   call build_dg_hybrid_fragment_basis(comm,1,wf_ids,wf_values,pw_ids,pw_values,2,3,basis,ok,message)
   call require(ok,trim(message))
+  do i=1,npoint
+    basis%buffer_point_ids(i)=int(mod(i+rank-1,npoint)+1,int64)
+    do j=1,nowned
+      basis%buffer_values(i,j)=vectors(int(basis%buffer_point_ids(i)),int(basis%global_ids(j)))
+    enddo
+  enddo
   allocate(row_ids(nowned));row_ids=basis%global_ids
   call assemble_dg_hybrid_lcfo_rows(comm,basis,row_ids,apply_h,apply_s,hrows,srows,peak_elements,fingerprint,ok,message)
   call require(ok,trim(message))
@@ -73,14 +79,26 @@ contains
   subroutine apply_h(input,output,callback_ok)
     complex(real64),intent(in)::input(:,:);complex(real64),intent(out)::output(:,:)
     logical,intent(out)::callback_ok
+    complex(real64)::global_input(npoint,size(input,2)),global_output(npoint,size(input,2))
+    integer::p
     maximum_callback_columns=max(maximum_callback_columns,size(input,2))
-    output=matmul(hop,input);callback_ok=.true.
+    global_input=(0d0,0d0)
+    do p=1,size(input,1);global_input(int(basis%buffer_point_ids(p)),:)=input(p,:);enddo
+    global_output=matmul(hop,global_input)
+    do p=1,size(output,1);output(p,:)=global_output(int(basis%buffer_point_ids(p)),:);enddo
+    callback_ok=.true.
   end subroutine apply_h
   subroutine apply_s(input,output,callback_ok)
     complex(real64),intent(in)::input(:,:);complex(real64),intent(out)::output(:,:)
     logical,intent(out)::callback_ok
+    complex(real64)::global_input(npoint,size(input,2)),global_output(npoint,size(input,2))
+    integer::p
     maximum_callback_columns=max(maximum_callback_columns,size(input,2))
-    output=matmul(sop,input);callback_ok=.true.
+    global_input=(0d0,0d0)
+    do p=1,size(input,1);global_input(int(basis%buffer_point_ids(p)),:)=input(p,:);enddo
+    global_output=matmul(sop,global_input)
+    do p=1,size(output,1);output(p,:)=global_output(int(basis%buffer_point_ids(p)),:);enddo
+    callback_ok=.true.
   end subroutine apply_s
   subroutine require(condition,text)
     logical,intent(in)::condition;character(*),intent(in)::text
