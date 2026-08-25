@@ -75,7 +75,9 @@ for token in (
 assert "if(callback_ok.and.size(output_density)==size(density))" not in MAIN, (
     "density callback must not rely on Fortran short-circuit evaluation"
 )
-assert "call pulay(dc%mg_tot" not in MAIN, (
+hybrid_branch = MAIN[MAIN.index("if(yn_dg_hybrid_scf=='y')then") :]
+hybrid_branch = hybrid_branch.split("return\n    endif", 1)[0]
+assert "call pulay(dc%mg_tot" not in hybrid_branch, (
     "hybrid SCF must use the previously validated bounded two-point Anderson mixer, not full Pulay"
 )
 

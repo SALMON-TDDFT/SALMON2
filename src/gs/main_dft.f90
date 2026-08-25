@@ -44,7 +44,7 @@ use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_hybrid_scf, 
   dg_ow_localization_support_tolerance,dg_ow_localization_spread_tolerance,&
   dg_ow_localization_gradient_tolerance,dg_ow_localization_max_iterations,&
   dg_ow_candidate_states_per_fragment,dg_ow_target_wanniers_per_fragment,wannier_num_iter,&
-  dg_ow_w90_initial_projection,wannier_pw_cutoff
+  dg_ow_w90_initial_projection,wannier_pw_cutoff,nscf,method_mixing
 use dg_overlapping_wannier_construction, only: s_dg_overlapping_wannier_construction, &
   construct_dg_overlapping_wannier_basis,verify_dg_overlapping_wannier_periodic_closure,&
   replicate_dg_fragment_wannier_representative,verify_dg_fragment_wannier_streaming_closure,&
@@ -111,6 +111,7 @@ use dg_hybrid_window_distribution,only:redistribute_dg_hybrid_fragment_windows
 use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
 use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_fragment_basis
 use dg_hybrid_fragment_solver,only:solve_dg_hybrid_fragment_basis
+use dg_hybrid_divided_scf,only:run_dg_hybrid_divided_scf
 use dg_nonlocal_projector_range,only:s_dg_nonlocal_range_receipt,analyze_dg_nonlocal_projector_range
 use dg_hybrid_generalized_eigensystem,only:solve_dg_hybrid_generalized_scalapack
 use dg_hybrid_density,only:reconstruct_dg_hybrid_density
@@ -672,6 +673,7 @@ contains
     real(8),allocatable::projector_buffer_real(:,:)
     real(8),allocatable::one_shot_density(:),one_shot_potential(:)
     real(8),allocatable::hybrid_converged_density(:),ow_initial_occupied_density(:)
+    real(8),allocatable::divided_initial_density(:),divided_converged_density(:)
     real(8),allocatable::spectral_occupied_density(:),spectral_empty_moments(:,:),&
       spectral_shared_density(:,:),spectral_basin_spectra(:,:),spectral_descriptor_eigenvalues(:),&
       spectral_descriptor_occupations(:)
@@ -817,6 +819,8 @@ contains
       hybrid_electron_defect,hybrid_symmetry_defect,hybrid_scf_receipts(5)
     real(8)::initial_occupied_charge_local,initial_occupied_charge
     integer::hybrid_iterations
+    integer::divided_iterations
+    real(8)::divided_convergence_value
     logical::ok,reusable,localization_converged,global_inversion_present,center_diagnostic_ok,diagnostic_ok
     logical::fixed_center_inversion_present,writer_ok
     logical::translation_self_conjugate
@@ -2558,9 +2562,24 @@ contains
       allocate(ow_divided_core_mask,source=core_mask)
       call prepare_dg_hybrid_divided_dc_controls(dc,ow_hybrid_divided_convergence,&
         ow_hybrid_divided_threshold,ow_hybrid_divided_total_density,ok,message)
-      if(.not.ok)then
-        write(0,'(a)')trim(message);error stop 'divided Hybrid DC control preparation failed'
-      endif
+      if(.not.ok)write(0,'(a)')trim(message)
+      if(.not.ok)error stop 'divided Hybrid DC control preparation failed'
+      allocate(divided_initial_density(ncore))
+      do p=1,ncore
+        ix=int(modulo(ow_core_ids(p)-1_8,int(dc%lg_tot%num(1),8)))+1
+        iy=int(modulo((ow_core_ids(p)-1_8)/int(dc%lg_tot%num(1),8),int(dc%lg_tot%num(2),8)))+1
+        iz=int((ow_core_ids(p)-1_8)/nxy8)+1
+        divided_initial_density(p)=ow_hybrid_divided_total_density(ix,iy,iz)
+      enddo
+      call run_dg_hybrid_divided_scf(dc%icomm_tot,int(expected_core_count),ow_core_ids,&
+        divided_initial_density,ow_hybrid_divided_convergence,ow_hybrid_divided_threshold,&
+        update_dg_hybrid_divided_potential,solve_dg_hybrid_divided_fragments,&
+        assemble_dg_hybrid_divided_core_density,mix_dg_hybrid_divided_density,nscf,&
+        divided_converged_density,divided_iterations,divided_convergence_value,ok,message)
+      if(.not.ok)write(0,'(a)')trim(message)
+      if(.not.ok)error stop 'divided Hybrid SCF failed'
+      if(rank==0)write(*,'(a,i0,a,es16.8)')'[OW-GS] divided WF+PW SCF converged iterations=',&
+        divided_iterations,' density=',divided_convergence_value
     endif
     if(yn_dg_hybrid_scf=='y')then
       if(rank==0)write(*,'(a)')'[OW-GS] starting distributed fixed-basis complex ScaLAPACK SCF'
@@ -3832,6 +3851,95 @@ contains
       divided_solver_fingerprint,callback_ok,solver_message)
     if(.not.callback_ok)write(0,'(2a)')'divided fragment eigensolver: ',trim(solver_message)
   end subroutine solve_dg_hybrid_divided_fragments
+
+  subroutine gather_dg_hybrid_divided_core_density(core_density,total_density,callback_ok)
+    real(8),intent(in)::core_density(:)
+    real(8),allocatable,intent(out)::total_density(:,:,:)
+    logical,intent(out)::callback_ok
+    real(8),allocatable::local_density(:),global_density(:)
+    integer::p,ierr_local
+
+    callback_ok=.false.
+    if(size(core_density)/=size(ow_core_ids).or.ow_global_grid_count<1_8)return
+    allocate(local_density(int(ow_global_grid_count)),global_density(int(ow_global_grid_count)))
+    local_density=0d0
+    do p=1,size(ow_core_ids);local_density(int(ow_core_ids(p)))=core_density(p);enddo
+    call MPI_Allreduce(local_density,global_density,size(global_density),MPI_DOUBLE_PRECISION,MPI_SUM,&
+      dc%icomm_tot,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)return
+    allocate(total_density(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3)))
+    total_density=reshape(global_density,dc%lg_tot%num);callback_ok=all(ieee_is_finite(total_density))
+  end subroutine gather_dg_hybrid_divided_core_density
+
+  subroutine update_dg_hybrid_divided_potential(core_density,callback_ok)
+    real(8),intent(in)::core_density(:)
+    logical,intent(out)::callback_ok
+    real(8),allocatable::total_density(:,:,:),density4(:,:,:,:)
+    character(256)::potential_message
+
+    call gather_dg_hybrid_divided_core_density(core_density,total_density,callback_ok)
+    if(.not.callback_ok)return
+    allocate(density4(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),1))
+    density4(:,:,:,1)=total_density
+    call dg_dc_update_potential_from_density(density4,callback_ok,potential_message)
+    if(.not.callback_ok)write(0,'(2a)')'divided potential update: ',trim(potential_message)
+  end subroutine update_dg_hybrid_divided_potential
+
+  subroutine assemble_dg_hybrid_divided_core_density(core_density,electron_count,callback_ok)
+    real(8),intent(out)::core_density(:),electron_count
+    logical,intent(out)::callback_ok
+    integer::p,position,ierr_local
+    real(8)::local_electron_count
+
+    callback_ok=.false.;core_density=0d0;electron_count=0d0
+    if(.not.allocated(divided_fragment_density).or.size(core_density)/=size(ow_core_ids))return
+    do p=1,size(ow_core_ids)
+      position=findloc(divided_fragment_basis%buffer_point_ids,ow_core_ids(p),dim=1)
+      if(position<1)return
+      core_density(p)=divided_fragment_density(position)
+    enddo
+    local_electron_count=sum(ow_core_weights*core_density)
+    call MPI_Allreduce(local_electron_count,electron_count,1,MPI_DOUBLE_PRECISION,MPI_SUM,&
+      dc%icomm_tot,ierr_local)
+    callback_ok=ierr_local==MPI_SUCCESS.and.all(ieee_is_finite(core_density)).and.&
+      ieee_is_finite(electron_count)
+  end subroutine assemble_dg_hybrid_divided_core_density
+
+  subroutine mix_dg_hybrid_divided_density(iteration,input_density,new_density,mixed_density,callback_ok)
+    integer,intent(in)::iteration
+    real(8),intent(in)::input_density(:),new_density(:)
+    real(8),intent(out)::mixed_density(:)
+    logical,intent(out)::callback_ok
+    real(8),allocatable::input_total(:,:,:),new_total(:,:,:)
+    integer::p,ix_local,iy_local,iz_local
+
+    callback_ok=.false.;mixed_density=0d0
+    call gather_dg_hybrid_divided_core_density(input_density,input_total,callback_ok)
+    if(.not.callback_ok)return
+    dc%rho_tot_s(1)%f=input_total
+    call copy_density(iteration,dc%system_tot%nspin,dc%mg_tot,dc%rho_tot_s,mixing)
+    call gather_dg_hybrid_divided_core_density(new_density,new_total,callback_ok)
+    if(.not.callback_ok)return
+    dc%rho_tot_s(1)%f=new_total
+    select case(method_mixing)
+    case('simple')
+      call simple_mixing(dc%mg_tot,dc%system_tot,1d0-mixing%mixrate,mixing%mixrate,dc%rho_tot_s,mixing)
+    case('broyden')
+      call wrapper_broyden(dc%info_tot%icomm_r,dc%mg_tot,dc%system_tot,dc%rho_tot_s,iteration,mixing)
+    case('pulay')
+      call pulay(dc%mg_tot,dc%info_tot,dc%system_tot,dc%rho_tot_s,iteration,mixing)
+    case('simple_potential')
+    case default
+      return
+    end select
+    do p=1,size(ow_core_ids)
+      ix_local=int(modulo(ow_core_ids(p)-1_8,int(dc%lg_tot%num(1),8)))+1
+      iy_local=int(modulo((ow_core_ids(p)-1_8)/int(dc%lg_tot%num(1),8),int(dc%lg_tot%num(2),8)))+1
+      iz_local=int((ow_core_ids(p)-1_8)/(int(dc%lg_tot%num(1),8)*int(dc%lg_tot%num(2),8)))+1
+      mixed_density(p)=dc%rho_tot_s(1)%f(ix_local,iy_local,iz_local)
+    enddo
+    callback_ok=all(ieee_is_finite(mixed_density))
+  end subroutine mix_dg_hybrid_divided_density
 
   ! Apply SALMON's established total-system Hamiltonian to one bounded tile.
   ! The callback contract supplies values in the current row-owned physical-ID

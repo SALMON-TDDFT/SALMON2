@@ -50,6 +50,14 @@ assert solve_start in MAIN, "missing divided fragment eigensolver adapter"
 solve_callback = MAIN[MAIN.index(solve_start) :].split("end subroutine", 1)[0]
 assert "solve_dg_hybrid_fragment_basis(dc%icomm_frag" in solve_callback
 assert "solve_dg_hybrid_fragment_basis(dc%icomm_tot" not in solve_callback
+mix_start = "subroutine mix_dg_hybrid_divided_density"
+assert mix_start in MAIN, "missing divided DC density mixer adapter"
+mix_callback = MAIN[MAIN.index(mix_start) :].split("end subroutine", 1)[0]
+assert "call copy_density" in mix_callback
+assert "select case(method_mixing)" in mix_callback
+assert "mixing%mixrate" in mix_callback
+for token in ("simple_mixing", "wrapper_broyden", "pulay"):
+    assert token in mix_callback, f"divided adapter does not reuse DC mixer: {token}"
 for forbidden in (
     "dg_hybrid_divided_density_tolerance",
     "dg_dc_gs_final_density_tolerance",
