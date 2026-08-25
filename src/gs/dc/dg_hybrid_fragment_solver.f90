@@ -14,12 +14,12 @@ module dg_hybrid_fragment_solver
   end interface
   public::solve_dg_hybrid_fragment_basis
 contains
-  subroutine solve_dg_hybrid_fragment_basis(comm,basis,nstate,occupations,core_mask,apply_h,apply_s,tolerance,&
+  subroutine solve_dg_hybrid_fragment_basis(comm,basis,nstate,occupations,core_mask,point_weights,apply_h,apply_s,tolerance,&
       coefficients,eigenvalues,core_density,core_electron_count,maximum_residual,orthogonality_defect,&
       workspace_peak_bytes,fingerprint,ok,message)
     integer,intent(in)::comm,nstate
     type(s_dg_hybrid_fragment_basis),intent(in)::basis
-    real(real64),intent(in)::occupations(:),tolerance
+    real(real64),intent(in)::occupations(:),point_weights(:),tolerance
     logical,intent(in)::core_mask(:)
     procedure(fragment_apply)::apply_h,apply_s
     complex(real64),allocatable,intent(out)::coefficients(:,:)
@@ -46,7 +46,8 @@ contains
     nowned=size(basis%global_ids);npoint=size(basis%buffer_values,1)
     call MPI_Allreduce(nowned,nbasis,1,MPI_INTEGER,MPI_SUM,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.nbasis<1.or.nstate<1.or.nstate>nbasis.or.size(occupations)/=nstate.or.&
-        size(eigenvalues)/=nstate.or.size(core_mask)/=npoint.or.size(core_density)/=npoint)then
+        size(eigenvalues)/=nstate.or.size(core_mask)/=npoint.or.size(point_weights)/=npoint.or.&
+        size(core_density)/=npoint)then
       message='invalid fragment eigensystem shape';return
     endif
     first_id=huge(0);last_id=-huge(0)
@@ -54,7 +55,8 @@ contains
     call MPI_Allreduce(MPI_IN_PLACE,first_id,1,MPI_INTEGER,MPI_MIN,comm,ierr)
     call MPI_Allreduce(MPI_IN_PLACE,last_id,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     local_bad=0
-    if(last_id-first_id+1/=nbasis.or.any(occupations<0d0).or..not.ieee_is_finite(tolerance).or.&
+    if(last_id-first_id+1/=nbasis.or.any(occupations<0d0).or.any(.not.ieee_is_finite(point_weights)).or.&
+        any(point_weights<=0d0).or..not.ieee_is_finite(tolerance).or.&
         tolerance<1d-15.or.tolerance>1d-2)local_bad=1
     allocate(ownership(nbasis));ownership=0
     do i=1,nowned;position=int(basis%global_ids(i))-first_id+1;if(position<1.or.position>nbasis)then
@@ -72,6 +74,9 @@ contains
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='fragment Hamiltonian application failed';return;endif
     call apply_s(vectors,svectors,callback_ok);call callback_agreement(callback_ok,global_bad,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='fragment metric application failed';return;endif
+    do j=1,nbasis
+      hvectors(:,j)=point_weights*hvectors(:,j);svectors(:,j)=point_weights*svectors(:,j)
+    enddo
     allocate(hmat(nbasis,nbasis),smat(nbasis,nbasis),hcopy(nbasis,nbasis),scopy(nbasis,nbasis))
     hmat=matmul(conjg(transpose(vectors)),hvectors);smat=matmul(conjg(transpose(vectors)),svectors)
     hcopy=hmat;scopy=smat;allocate(all_eigenvalues(nbasis),rwork(max(1,3*nbasis-2)))
@@ -90,7 +95,7 @@ contains
     eigenvalues=all_eigenvalues(1:nstate);wavefunctions=matmul(vectors,hmat(:,1:nstate));core_density=0d0
     do j=1,nstate;core_density=core_density+occupations(j)*abs(wavefunctions(:,j))**2;enddo
     where(.not.core_mask)core_density=0d0
-    core_electron_count=sum(core_density)
+    core_electron_count=sum(point_weights*core_density)
     maximum_residual=0d0;orthogonality_defect=0d0
     do j=1,nstate
       maximum_residual=max(maximum_residual,maxval(abs(matmul(hcopy,hmat(:,j))-&

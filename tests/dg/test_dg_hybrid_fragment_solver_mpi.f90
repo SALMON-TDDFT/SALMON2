@@ -10,7 +10,8 @@ program test_dg_hybrid_fragment_solver_mpi
   integer(int64),allocatable::wf_ids(:),pw_ids(:)
   complex(real64),allocatable::wf_values(:,:),pw_values(:,:),coefficients(:,:)
   complex(real64)::vectors(npoint,nbasis),hop(npoint,npoint),sop(npoint,npoint)
-  real(real64)::occupations(nstate),eigenvalues(nstate),density(npoint),residual,orthogonality,electron_count
+  real(real64)::occupations(nstate),point_weights(npoint),eigenvalues(nstate),density(npoint),residual,orthogonality,&
+    electron_count
   logical::core_mask(npoint),ok
   type(s_dg_hybrid_fragment_basis)::basis
   integer(int64)::workspace,fingerprint
@@ -31,12 +32,13 @@ program test_dg_hybrid_fragment_solver_mpi
     else;k=k+1;pw_ids(k)=100+nstated(nowned);pw_values(:,k)=vectors(:,nowned);endif
   enddo
   call build_dg_hybrid_fragment_basis(comm,1,wf_ids,wf_values,pw_ids,pw_values,0,0,basis,ok,message)
-  call require(ok,trim(message));occupations=[2d0,0d0];core_mask=[.true.,.true.,.false.,.false.]
-  call solve_dg_hybrid_fragment_basis(comm,basis,nstate,occupations,core_mask,apply_h,apply_s,1d-12,&
+  call require(ok,trim(message));occupations=[2d0,0d0];point_weights=[0.5d0,2d0,1d0,1d0]
+  core_mask=[.true.,.true.,.false.,.false.]
+  call solve_dg_hybrid_fragment_basis(comm,basis,nstate,occupations,core_mask,point_weights,apply_h,apply_s,1d-12,&
     coefficients,eigenvalues,density,electron_count,residual,orthogonality,workspace,fingerprint,ok,message)
   call require(ok,trim(message));call require(maxval(abs(eigenvalues-[1d0,2d0]))<1d-12,'fragment eigenvalues mismatch')
   call require(residual<1d-12.and.orthogonality<1d-12,'fragment eigensystem receipts mismatch')
-  call require(abs(electron_count-2d0)<1d-12.and.abs(density(1)-2d0)<1d-12.and.&
+  call require(abs(electron_count-2d0)<1d-12.and.abs(density(1)-4d0)<1d-12.and.&
     maxval(abs(density(2:)))<1d-12,'fragment core density mismatch')
   call require(size(coefficients,1)==size(basis%global_ids).and.size(coefficients,2)==nstate,&
     'fragment coefficients are not basis-row distributed')
