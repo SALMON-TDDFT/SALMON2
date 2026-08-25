@@ -8,8 +8,8 @@ set(SOURCES
     dg_hybrid_generalized_eigensystem.f90
     dg_hybrid_density.f90
     dg_hybrid_scf.f90
-  dg_hybrid_fragment_basis.f90
-  dg_hybrid_fragment_basis_stream.f90
+    dg_hybrid_fragment_basis.f90
+    dg_hybrid_fragment_basis_stream.f90
     dg_hybrid_production_fragment_basis.f90
     dg_hybrid_fragment_solver.f90
     dg_hybrid_divided_scf.f90
