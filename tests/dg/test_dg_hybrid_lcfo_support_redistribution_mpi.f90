@@ -52,8 +52,8 @@ program test_dg_hybrid_lcfo_support_redistribution_mpi
         maxval(abs(tile(:,j)-reference(f:f+size(tile,1)-1,int(spatial_ids(j)))))<1d-14
     enddo
     call require(tile_matches,'LCFO support tile value mismatch')
-    call require(peak_elements<=int(nglobal_point*size(tile,1)+size(tile),int64),&
-      'LCFO support redistribution exceeded tile bound')
+    call require(peak_elements<=int(size(tile)+2*size(tile,1),int64),&
+      'LCFO support redistribution retained a global-point tile')
     call require(fingerprint/=0_int64,'LCFO support tile fingerprint is empty')
   enddo
   if(rank==0)write(*,'(a,i0,a,i0)')'HYBRID_LCFO_SUPPORT ranks=',nproc,' fingerprint=',fingerprint

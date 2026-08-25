@@ -4,7 +4,7 @@ import os,re,shutil,subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
 with tempfile.TemporaryDirectory(prefix="hybrid-lcfo-support-") as name:
   build=Path(name);(build/"config.h").write_text("");exe=build/"hybrid_lcfo_support"
-  subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
+  subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-std=f2008","-I",str(build),"-J",str(build),
     "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",
     str(root/"src/gs/dc/dg_hybrid_fragment_basis.f90"),
     str(root/"src/gs/dc/dg_hybrid_lcfo_support_redistribution.f90"),

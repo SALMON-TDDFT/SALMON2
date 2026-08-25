@@ -16,9 +16,9 @@ contains
     integer(int64),intent(out)::peak_elements,fingerprint
     logical,intent(out)::ok
     character(*),intent(out)::message
-    complex(real64),allocatable::local_tile(:,:),global_tile(:,:)
+    complex(real64),allocatable::local_values(:),global_values(:)
     integer,allocatable::basis_ownership(:),point_ownership(:)
-    integer::b,i,j,column,slot,ierr,local_bad,global_bad
+    integer::b,i,j,column,slot,target,ierr,local_bad,global_bad
     integer(int64)::bits
 
     ok=.false.;message='';peak_elements=0_int64;fingerprint=0_int64;local_bad=0
@@ -48,27 +48,29 @@ contains
     if(ierr/=MPI_SUCCESS.or.any(basis_ownership/=1).or.any(point_ownership/=1))local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid LCFO support redistribution contract';return;endif
-    allocate(local_tile(global_point_count,column_count),global_tile(global_point_count,column_count),source=(0d0,0d0))
-    local_tile=(0d0,0d0)
-    do b=1,size(bases)
-      do i=1,size(bases(b)%global_ids)
+    allocate(local_values(column_count),global_values(column_count),&
+      tile_values(column_count,size(spatial_ids)),source=(0d0,0d0))
+    fingerprint=int(z'6A09E667F3BCC909',int64)
+    do target=1,global_point_count
+      local_values=(0d0,0d0)
+      do b=1,size(bases);do i=1,size(bases(b)%global_ids)
         column=int(bases(b)%global_ids(i));if(column<first_column.or.column>=first_column+column_count)cycle
         slot=column-first_column+1
         do j=1,size(bases(b)%buffer_point_ids)
-          local_tile(int(bases(b)%buffer_point_ids(j)),slot)=bases(b)%buffer_values(j,i)
+          if(bases(b)%buffer_point_ids(j)==int(target,int64))local_values(slot)=bases(b)%buffer_values(j,i)
         enddo
+      enddo;enddo
+      call MPI_Allreduce(local_values,global_values,column_count,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='LCFO support point reduction failed';return;endif
+      do i=1,size(spatial_ids)
+        if(spatial_ids(i)==int(target,int64))tile_values(:,i)=global_values
+      enddo
+      do j=1,column_count
+        bits=transfer(real(global_values(j)),bits);fingerprint=ieor(ishftc(fingerprint,7),bits)
+        bits=transfer(aimag(global_values(j)),bits);fingerprint=ieor(ishftc(fingerprint,11),bits)
       enddo
     enddo
-    call MPI_Allreduce(local_tile,global_tile,size(global_tile),MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='LCFO support tile reduction failed';return;endif
-    allocate(tile_values(column_count,size(spatial_ids)))
-    do i=1,size(spatial_ids);tile_values(:,i)=global_tile(int(spatial_ids(i)),:);enddo
-    peak_elements=int(size(global_tile)+size(tile_values),int64)
-    fingerprint=int(z'6A09E667F3BCC909',int64)
-    do j=1,column_count;do i=1,global_point_count
-      bits=transfer(real(global_tile(i,j)),bits);fingerprint=ieor(ishftc(fingerprint,7),bits)
-      bits=transfer(aimag(global_tile(i,j)),bits);fingerprint=ieor(ishftc(fingerprint,11),bits)
-    enddo;enddo
+    peak_elements=int(size(tile_values)+size(local_values)+size(global_values),int64)
     fingerprint=ieor(fingerprint,int(first_column,int64));if(fingerprint==0_int64)fingerprint=1427_int64
     ok=.true.;message=''
   end subroutine redistribute_dg_hybrid_lcfo_support_tile
