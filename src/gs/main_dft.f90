@@ -2608,6 +2608,22 @@ contains
       if(rank==0)write(*,'(a,3(a,es16.8))')'[OW-GS] divided WF+PW LCFO solved once',&
         ' residual=',divided_final_residual,' orthogonality=',divided_final_orthogonality,&
         ' projector=',divided_final_projector_defect
+      hybrid_provenance=[divided_pw_fingerprint,divided_buffer_window_fingerprint,&
+        divided_fragment_fingerprint,divided_solver_fingerprint,divided_lcfo_operator_fingerprint,&
+        divided_final_solver_fingerprint]
+      hybrid_scf_receipts=[divided_convergence_value,divided_final_residual,divided_final_orthogonality,&
+        divided_final_projector_defect,0d0]
+      call write_rt_dg_hybrid_occupied_checkpoint(dc%icomm_tot,'./overlapping_wannier_occupied.chk',&
+        ow_hybrid_ground_state%global_count,ow_hybrid_ground_state%owned_row_ids,&
+        ow_hybrid_ground_state%coefficients,ow_hybrid_ground_state%occupations,&
+        ow_hybrid_ground_state%eigenvalues,divided_pw_fingerprint,divided_fragment_fingerprint,&
+        hybrid_provenance,divided_lcfo_operator_fingerprint,divided_state_fingerprint,&
+        hybrid_scf_receipts,max(dg_dc_gs_final_orbital_tolerance,dg_dc_gs_electron_count_tolerance,&
+        dg_ow_symmetry_tolerance,maxval(hybrid_scf_receipts)),&
+        hybrid_checkpoint_fingerprint,ok,message)
+      if(.not.ok)write(0,'(a)')trim(message)
+      if(.not.ok)error stop 'divided Hybrid occupied checkpoint failed'
+      return
     endif
     if(yn_dg_hybrid_scf=='y')then
       if(rank==0)write(*,'(a)')'[OW-GS] starting distributed fixed-basis complex ScaLAPACK SCF'

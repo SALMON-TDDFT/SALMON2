@@ -19,6 +19,18 @@ assert lcfo_position > scf_position, "LCFO assembly must follow divided SCF"
 assert branch.count("solve_dg_hybrid_generalized_") == 1, (
     "divided branch must perform exactly one generalized eigensolve"
 )
+checkpoint_position = branch.find("call write_rt_dg_hybrid_occupied_checkpoint")
+assert checkpoint_position > lcfo_position, "occupied checkpoint must follow the one-shot LCFO solve"
+assert branch.count("write_rt_dg_hybrid_occupied_checkpoint") == 1
+for forbidden in (
+    "reconstruct_dg_hybrid_density",
+    "post_lcfo_density",
+    "run_dg_hybrid_divided_scf",  # checked separately below for exactly the pre-LCFO call
+):
+    if forbidden == "run_dg_hybrid_divided_scf":
+        assert branch.count(forbidden) == 1, "divided SCF must not repeat after LCFO"
+    else:
+        assert forbidden not in branch, f"divided route added post-LCFO density work: {forbidden}"
 assert "run_dg_hybrid_self_consistent_ground_state" not in branch, (
     "divided branch must not use the repeated full-cell Hybrid SCF"
 )
