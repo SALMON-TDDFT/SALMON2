@@ -39,8 +39,9 @@ program test_dg_hybrid_lcfo_support_redistribution_mpi
     enddo
     bases(j)%provenance_fingerprint=1000_int64+f
   enddo
-  nlocal=count([(mod(p-1,nproc)==rank,p=1,nglobal_point)]);allocate(spatial_ids(nlocal));j=0
+  nlocal=count([(mod(p-1,nproc)==rank,p=1,nglobal_point)])+1;allocate(spatial_ids(nlocal));j=0
   do p=1,nglobal_point;if(mod(p-1,nproc)==rank)then;j=j+1;spatial_ids(j)=p;endif;enddo
+  spatial_ids(nlocal)=3_int64
   do f=1,nglobal_basis,2
     call redistribute_dg_hybrid_lcfo_support_tile(comm,bases,nglobal_point,nglobal_basis,spatial_ids,f,&
       min(2,nglobal_basis-f+1),tile,peak_elements,fingerprint,ok,message)

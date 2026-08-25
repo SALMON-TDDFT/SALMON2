@@ -17,7 +17,7 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     complex(real64),allocatable::local_values(:),global_values(:)
-    integer,allocatable::basis_ownership(:),point_ownership(:)
+    integer,allocatable::basis_ownership(:)
     integer::b,i,j,column,slot,target,ierr,local_bad,global_bad
     integer(int64)::bits
 
@@ -25,9 +25,8 @@ contains
     if(global_point_count<1.or.global_basis_count<1.or.first_column<1.or.column_count<1.or.&
         first_column+column_count-1>global_basis_count)local_bad=1
     if(any(spatial_ids<1_int64).or.any(spatial_ids>int(max(0,global_point_count),int64)))local_bad=1
-    allocate(basis_ownership(max(1,global_basis_count)),point_ownership(max(1,global_point_count)))
-    basis_ownership=0;point_ownership=0
-    do i=1,size(spatial_ids);point_ownership(int(spatial_ids(i)))=point_ownership(int(spatial_ids(i)))+1;enddo
+    allocate(basis_ownership(max(1,global_basis_count)))
+    basis_ownership=0
     do b=1,size(bases)
       if(.not.allocated(bases(b)%global_ids).or..not.allocated(bases(b)%buffer_point_ids).or.&
           .not.allocated(bases(b)%buffer_values))then;local_bad=1;cycle;endif
@@ -44,8 +43,7 @@ contains
     enddo
     call MPI_Allreduce(MPI_IN_PLACE,basis_ownership,global_basis_count,MPI_INTEGER,MPI_SUM,comm,ierr)
     if(ierr/=MPI_SUCCESS)local_bad=1
-    call MPI_Allreduce(MPI_IN_PLACE,point_ownership,global_point_count,MPI_INTEGER,MPI_SUM,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.any(basis_ownership/=1).or.any(point_ownership/=1))local_bad=1
+    if(ierr/=MPI_SUCCESS.or.any(basis_ownership/=1))local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid LCFO support redistribution contract';return;endif
     allocate(local_values(column_count),global_values(column_count),&
