@@ -6,12 +6,12 @@ program test_dg_hybrid_fragment_solver_mpi
   use dg_hybrid_fragment_solver,only:solve_dg_hybrid_fragment_basis
   implicit none
   integer,parameter::npoint=4,nbasis=4,nstate=2
-  integer::comm,rank,nproc,ierr,nowned,j,k
+  integer::comm,rank,nproc,ierr,nowned,i,j,k
   integer(int64),allocatable::wf_ids(:),pw_ids(:)
   complex(real64),allocatable::wf_values(:,:),pw_values(:,:),coefficients(:,:)
   complex(real64)::vectors(npoint,nbasis),hop(npoint,npoint),sop(npoint,npoint)
-  real(real64)::occupations(nstate),point_weights(npoint),eigenvalues(nstate),density(npoint),residual,orthogonality,&
-    electron_count
+  real(real64)::occupations(nstate),point_weights(npoint),reference_weights(npoint),eigenvalues(nstate),density(npoint),&
+    residual,orthogonality,electron_count
   logical::core_mask(npoint),ok
   type(s_dg_hybrid_fragment_basis)::basis
   integer(int64)::workspace,fingerprint
@@ -32,14 +32,22 @@ program test_dg_hybrid_fragment_solver_mpi
     else;k=k+1;pw_ids(k)=100+nstated(nowned);pw_values(:,k)=vectors(:,nowned);endif
   enddo
   call build_dg_hybrid_fragment_basis(comm,1,wf_ids,wf_values,pw_ids,pw_values,0,0,basis,ok,message)
-  call require(ok,trim(message));occupations=[2d0,0d0];point_weights=[0.5d0,2d0,1d0,1d0]
-  core_mask=[.true.,.true.,.false.,.false.]
+  call require(ok,trim(message));occupations=[2d0,0d0];reference_weights=[0.5d0,2d0,1d0,1d0]
+  do i=1,npoint
+    basis%buffer_point_ids(i)=int(mod(i+rank-1,npoint)+1,int64)
+    point_weights(i)=reference_weights(int(basis%buffer_point_ids(i)))
+    core_mask(i)=basis%buffer_point_ids(i)<=2_int64
+    do j=1,size(basis%global_ids)
+      basis%buffer_values(i,j)=vectors(int(basis%buffer_point_ids(i)),int(basis%global_ids(j))-100)
+    enddo
+  enddo
   call solve_dg_hybrid_fragment_basis(comm,basis,nstate,occupations,core_mask,point_weights,apply_h,apply_s,1d-12,&
     coefficients,eigenvalues,density,electron_count,residual,orthogonality,workspace,fingerprint,ok,message)
   call require(ok,trim(message));call require(maxval(abs(eigenvalues-[1d0,2d0]))<1d-12,'fragment eigenvalues mismatch')
   call require(residual<1d-12.and.orthogonality<1d-12,'fragment eigensystem receipts mismatch')
-  call require(abs(electron_count-2d0)<1d-12.and.abs(density(1)-4d0)<1d-12.and.&
-    maxval(abs(density(2:)))<1d-12,'fragment core density mismatch')
+  call require(abs(electron_count-2d0)<1d-12.and.&
+    abs(density(findloc(basis%buffer_point_ids,1_int64,dim=1))-4d0)<1d-12.and.&
+    count(abs(density)>1d-12)==1,'fragment core density mismatch')
   call require(size(coefficients,1)==size(basis%global_ids).and.size(coefficients,2)==nstate,&
     'fragment coefficients are not basis-row distributed')
   if(rank==0)write(*,'(a,i0,a,i0)')'HYBRID_FRAGMENT_SOLVER ranks=',nproc,' fingerprint=',fingerprint
@@ -51,11 +59,21 @@ contains
   end function nstated
   subroutine apply_h(input,output,callback_ok)
     complex(real64),intent(in)::input(:,:);complex(real64),intent(out)::output(:,:);logical,intent(out)::callback_ok
-    output=matmul(hop,input);callback_ok=.true.
+    complex(real64)::global_input(npoint,size(input,2)),global_output(npoint,size(input,2));integer::p
+    global_input=(0d0,0d0)
+    do p=1,size(input,1);global_input(int(basis%buffer_point_ids(p)),:)=input(p,:);enddo
+    global_output=matmul(hop,global_input)
+    do p=1,size(output,1);output(p,:)=global_output(int(basis%buffer_point_ids(p)),:);enddo
+    callback_ok=.true.
   end subroutine apply_h
   subroutine apply_s(input,output,callback_ok)
     complex(real64),intent(in)::input(:,:);complex(real64),intent(out)::output(:,:);logical,intent(out)::callback_ok
-    output=matmul(sop,input);callback_ok=.true.
+    complex(real64)::global_input(npoint,size(input,2)),global_output(npoint,size(input,2));integer::p
+    global_input=(0d0,0d0)
+    do p=1,size(input,1);global_input(int(basis%buffer_point_ids(p)),:)=input(p,:);enddo
+    global_output=matmul(sop,global_input)
+    do p=1,size(output,1);output(p,:)=global_output(int(basis%buffer_point_ids(p)),:);enddo
+    callback_ok=.true.
   end subroutine apply_s
   subroutine require(condition,text)
     logical,intent(in)::condition;character(*),intent(in)::text;logical::global_condition

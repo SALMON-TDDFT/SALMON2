@@ -27,12 +27,13 @@ contains
     integer(int64),intent(out)::workspace_peak_bytes,fingerprint
     logical,intent(out)::ok
     character(*),intent(out)::message
-    integer::i,j,k,nowned,nbasis,npoint,ierr,local_bad,global_bad,info,lwork,first_id,last_id,position
+    integer::i,j,k,p,target,nowned,nbasis,npoint,global_point_count,ierr,local_bad,global_bad,info,lwork,&
+      first_id,last_id,position
     integer,allocatable::ownership(:)
     complex(real64),allocatable::vectors(:,:),hvectors(:,:),svectors(:,:),hmat(:,:),smat(:,:),hcopy(:,:),scopy(:,:),&
       wavefunctions(:,:),work(:)
     real(real64),allocatable::all_eigenvalues(:),rwork(:)
-    complex(real64)::query(1),value
+    complex(real64)::query(1),value,local_value,global_value
     real(real64)::scale
     integer(int64)::bits
     logical::callback_ok,halt_invalid,halt_zero,halt_overflow,halting_disabled
@@ -40,13 +41,15 @@ contains
 
     ok=.false.;message='';workspace_peak_bytes=0_int64;fingerprint=0_int64;halting_disabled=.false.
     maximum_residual=huge(1d0);orthogonality_defect=huge(1d0);core_electron_count=0d0
-    if(.not.allocated(basis%global_ids).or..not.allocated(basis%buffer_values))then
+    if(.not.allocated(basis%global_ids).or..not.allocated(basis%buffer_point_ids).or.&
+        .not.allocated(basis%buffer_values))then
       message='fragment solver basis is not allocated';return
     endif
     nowned=size(basis%global_ids);npoint=size(basis%buffer_values,1)
     call MPI_Allreduce(nowned,nbasis,1,MPI_INTEGER,MPI_SUM,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.nbasis<1.or.nstate<1.or.nstate>nbasis.or.size(occupations)/=nstate.or.&
-        size(eigenvalues)/=nstate.or.size(core_mask)/=npoint.or.size(point_weights)/=npoint.or.&
+        size(eigenvalues)/=nstate.or.size(basis%buffer_point_ids)/=npoint.or.size(core_mask)/=npoint.or.&
+        size(point_weights)/=npoint.or.&
         size(core_density)/=npoint)then
       message='invalid fragment eigensystem shape';return
     endif
@@ -56,7 +59,7 @@ contains
     call MPI_Allreduce(MPI_IN_PLACE,last_id,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     local_bad=0
     if(last_id-first_id+1/=nbasis.or.any(occupations<0d0).or.any(.not.ieee_is_finite(point_weights)).or.&
-        any(point_weights<=0d0).or..not.ieee_is_finite(tolerance).or.&
+        any(point_weights<=0d0).or.any(basis%buffer_point_ids<1_int64).or..not.ieee_is_finite(tolerance).or.&
         tolerance<1d-15.or.tolerance>1d-2)local_bad=1
     allocate(ownership(nbasis));ownership=0
     do i=1,nowned;position=int(basis%global_ids(i))-first_id+1;if(position<1.or.position>nbasis)then
@@ -65,10 +68,25 @@ contains
     if(ierr/=MPI_SUCCESS.or.any(ownership/=1))local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid fragment basis ownership';return;endif
+    global_point_count=0
+    if(npoint>0)global_point_count=int(maxval(basis%buffer_point_ids))
+    call MPI_Allreduce(MPI_IN_PLACE,global_point_count,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_point_count<1)then;message='invalid fragment physical point extent';return;endif
     allocate(vectors(npoint,nbasis),source=(0d0,0d0))
-    do i=1,nowned;position=int(basis%global_ids(i))-first_id+1;vectors(:,position)=basis%buffer_values(:,i);enddo
-    call MPI_Allreduce(MPI_IN_PLACE,vectors,size(vectors),MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='fragment basis column collection failed';return;endif
+    do j=1,nbasis;do target=1,global_point_count
+      local_value=(0d0,0d0)
+      do i=1,nowned
+        position=int(basis%global_ids(i))-first_id+1;if(position/=j)cycle
+        do p=1,npoint
+          if(basis%buffer_point_ids(p)==int(target,int64))local_value=basis%buffer_values(p,i)
+        enddo
+      enddo
+      call MPI_Allreduce(local_value,global_value,1,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='fragment basis column collection failed';return;endif
+      do p=1,npoint
+        if(basis%buffer_point_ids(p)==int(target,int64))vectors(p,j)=global_value
+      enddo
+    enddo;enddo
     allocate(hvectors(npoint,nbasis),svectors(npoint,nbasis))
     call apply_h(vectors,hvectors,callback_ok);call callback_agreement(callback_ok,global_bad,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='fragment Hamiltonian application failed';return;endif
