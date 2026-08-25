@@ -1,14 +1,15 @@
 #include "config.h"
 program test_dg_hybrid_window_distribution_mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
-  use dg_hybrid_window_distribution,only:prepare_dg_hybrid_window_distribution
+  use dg_hybrid_window_distribution,only:prepare_dg_hybrid_window_distribution,&
+    redistribute_dg_hybrid_fragment_windows
 #ifdef USE_MPI
   use mpi
 #endif
   implicit none
   integer::comm,rank,nproc,ierr,nowned,i,p
   integer,allocatable::fragment_ids(:),core_fragment_ids(:),row_action(:,:),fragment_action(:,:)
-  integer(int64),allocatable::box_ids(:),core_ids(:)
+  integer(int64),allocatable::box_ids(:),core_ids(:),request_ids(:)
   real(real64),allocatable::box_windows(:,:),raw_windows(:,:)
   integer(int64)::fingerprint,workspace
   logical::ok,values_ok
@@ -57,6 +58,16 @@ program test_dg_hybrid_window_distribution_mpi
   call require(all(fragment_action(:,1)==[1,2]),'identity fragment action mismatch')
   call require(all(fragment_action(:,2)==[2,1]),'reversal fragment action mismatch')
   call require(workspace<=80_int64,'window distribution workspace is not bounded')
+  allocate(request_ids(3),source=[4_int64,1_int64,3_int64])
+  call redistribute_dg_hybrid_fragment_windows(comm,4,2,fragment_ids,box_ids,box_windows,request_ids,&
+    raw_windows,workspace,fingerprint,ok,message)
+  call require(ok,'buffer window redistribution failed: '//trim(message))
+  values_ok=.true.
+  do p=1,size(request_ids);do i=1,2
+    values_ok=values_ok.and.abs(raw_windows(i,p)-real(10*i+request_ids(p),real64))<1d-12
+  enddo;enddo
+  call require(values_ok,'buffer request window mismatch')
+  call require(workspace<=48_int64,'buffer window request workspace is not bounded')
   if(rank==0.and.size(fragment_ids)>0)fragment_ids(1)=2
   call prepare_dg_hybrid_window_distribution(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,core_fragment_ids,&
     row_action,raw_windows,fragment_action,workspace,fingerprint,ok,message)

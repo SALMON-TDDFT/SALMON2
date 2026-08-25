@@ -7,8 +7,78 @@ module dg_hybrid_window_distribution
 #endif
   implicit none
   private
-  public::prepare_dg_hybrid_window_distribution
+  public::prepare_dg_hybrid_window_distribution,redistribute_dg_hybrid_fragment_windows
 contains
+  subroutine redistribute_dg_hybrid_fragment_windows(comm,global_point_count,fragment_count,&
+      fragment_ids,box_ids,box_windows,request_ids,requested_windows,workspace_peak_bytes,&
+      fingerprint,ok,message)
+    integer,intent(in)::comm,global_point_count,fragment_count,fragment_ids(:)
+    integer(int64),intent(in)::box_ids(:),request_ids(:)
+    real(real64),intent(in)::box_windows(:,:)
+    real(real64),allocatable,intent(out)::requested_windows(:,:)
+    integer(int64),intent(out)::workspace_peak_bytes,fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::i,j,f,target,ierr,local_bad,global_bad,minimum,maximum,allocation_status
+    integer,allocatable::fragment_presence(:),local_count(:),global_count(:)
+    real(real64),allocatable::local_values(:),global_values(:)
+    integer(int64)::bits
+    ok=.false.;message='';workspace_peak_bytes=0_int64;fingerprint=0_int64
+    call agree_integer(global_point_count,minimum,maximum,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum/=maximum)then;message='inconsistent requested window point count';return;endif
+    call agree_integer(fragment_count,minimum,maximum,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum/=maximum)then;message='inconsistent requested window fragment count';return;endif
+    local_bad=merge(0,1,global_point_count>0.and.fragment_count>0.and.&
+      size(box_windows,1)==size(fragment_ids).and.size(box_windows,2)==size(box_ids).and.&
+      all(fragment_ids>=1).and.all(fragment_ids<=fragment_count).and.&
+      all(box_ids>=1_int64).and.all(box_ids<=int(global_point_count,int64)).and.&
+      all(request_ids>=1_int64).and.all(request_ids<=int(global_point_count,int64)).and.&
+      all(ieee_is_finite(box_windows)))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid requested window input';return;endif
+    allocate(fragment_presence(fragment_count),local_count(fragment_count),global_count(fragment_count),&
+      local_values(fragment_count),global_values(fragment_count),requested_windows(fragment_count,size(request_ids)),&
+      stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='cannot allocate requested window workspace';return;endif
+    fragment_presence=0
+    do i=1,size(fragment_ids);fragment_presence(fragment_ids(i))=fragment_presence(fragment_ids(i))+1;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,fragment_presence,fragment_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(fragment_presence/=1))then
+      message='duplicate or missing requested window fragment owner';return
+    endif
+    requested_windows=0d0;fingerprint=int(z'9B05688C2B3E6C1F',int64)
+    do target=1,global_point_count
+      local_values=0d0;local_count=0
+      do i=1,size(fragment_ids);do j=1,size(box_ids)
+        if(box_ids(j)/=int(target,int64))cycle
+        f=fragment_ids(i);local_values(f)=local_values(f)+box_windows(i,j);local_count(f)=local_count(f)+1
+      enddo;enddo
+      call MPI_Allreduce(local_values,global_values,fragment_count,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+      if(ierr==MPI_SUCCESS)&
+        call MPI_Allreduce(local_count,global_count,fragment_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='requested fragment window reduction failed';return;endif
+      do f=1,fragment_count
+        if(global_count(f)>0)global_values(f)=global_values(f)/real(global_count(f),real64)
+      enddo
+      do i=1,size(request_ids)
+        if(request_ids(i)==int(target,int64))requested_windows(:,i)=global_values
+      enddo
+      do f=1,fragment_count
+        bits=transfer(global_values(f),bits);fingerprint=ieor(ishftc(fingerprint,7),bits)
+      enddo
+    enddo
+    workspace_peak_bytes=24_int64*int(fragment_count,int64)
+    if(fingerprint==0_int64)fingerprint=1_int64
+    deallocate(fragment_presence,local_count,global_count,local_values,global_values);ok=.true.
+#else
+    ok=.false.;message='requested window redistribution requires MPI'
+    workspace_peak_bytes=0_int64;fingerprint=0_int64
+#endif
+  end subroutine redistribute_dg_hybrid_fragment_windows
+
   subroutine prepare_dg_hybrid_window_distribution(comm,global_point_count,fragment_count,&
       fragment_ids,box_ids,box_windows,core_ids,core_fragment_ids,row_action,raw_windows,&
       fragment_action,workspace_peak_bytes,fingerprint,ok,message)
@@ -112,10 +182,12 @@ contains
       call MPI_Allreduce(local_values,global_values,fragment_count,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
       if(ierr==MPI_SUCCESS)&
         call MPI_Allreduce(local_count,global_count,fragment_count,MPI_INTEGER,MPI_SUM,comm,ierr)
-      if(ierr/=MPI_SUCCESS.or.any(global_count<1))then
-        call cleanup();message='window buffer support does not cover every core point';return
+      if(ierr/=MPI_SUCCESS)then
+        call cleanup();message='window core-point reduction failed';return
       endif
-      global_values=global_values/real(global_count,real64)
+      do f=1,fragment_count
+        if(global_count(f)>0)global_values(f)=global_values(f)/real(global_count(f),real64)
+      enddo
       do i=1,size(core_ids)
         if(core_ids(i)==int(target,int64))raw_windows(:,i)=global_values
       enddo
