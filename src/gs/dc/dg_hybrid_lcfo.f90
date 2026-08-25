@@ -28,7 +28,7 @@ contains
     integer::i,j,ierr,nlocal,global_count,local_bad,global_bad
     integer,allocatable::ownership(:)
     integer(int64)::local_count,global_count64,entry_hash,bits
-    complex(real64),allocatable::vectors(:,:),hvectors(:,:),svectors(:,:)
+    complex(real64),allocatable::vector(:,:),hvector(:,:),svector(:,:)
     logical::callback_ok
 
     ok=.false.;message='';peak_elements=0_int64;operator_fingerprint=0_int64
@@ -55,26 +55,29 @@ contains
     do i=1,nlocal;ownership(int(row_ids(i)))=ownership(int(row_ids(i)))+1;enddo
     call MPI_Allreduce(MPI_IN_PLACE,ownership,global_count,MPI_INTEGER,MPI_SUM,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.any(ownership/=1))then;message='LCFO basis rows are not owned exactly once';return;endif
-    allocate(vectors(size(bases%buffer_values,1),global_count),source=(0d0,0d0))
-    do i=1,nlocal;vectors(:,int(row_ids(i)))=bases%buffer_values(:,i);enddo
-    call MPI_Allreduce(MPI_IN_PLACE,vectors,size(vectors),MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='LCFO basis redistribution failed';return;endif
-    allocate(hvectors(size(vectors,1),global_count),svectors(size(vectors,1),global_count))
-    call apply_h(vectors,hvectors,callback_ok)
-    call collective_callback_success(callback_ok,global_bad,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='LCFO Hamiltonian application failed';return;endif
-    call apply_s(vectors,svectors,callback_ok)
-    call collective_callback_success(callback_ok,global_bad,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='LCFO metric application failed';return;endif
-    if(.not.all(ieee_is_finite(real(hvectors))).or..not.all(ieee_is_finite(aimag(hvectors))).or.&
-        .not.all(ieee_is_finite(real(svectors))).or..not.all(ieee_is_finite(aimag(svectors))))then
-      message='LCFO operator produced non-finite values';return
-    endif
-    allocate(hrows(nlocal,global_count),srows(nlocal,global_count))
-    do i=1,nlocal
-      do j=1,global_count
-        hrows(i,j)=sum(conjg(bases%buffer_values(:,i))*hvectors(:,j))
-        srows(i,j)=sum(conjg(bases%buffer_values(:,i))*svectors(:,j))
+    allocate(vector(size(bases%buffer_values,1),1),hvector(size(bases%buffer_values,1),1),&
+      svector(size(bases%buffer_values,1),1),hrows(nlocal,global_count),srows(nlocal,global_count))
+    hrows=(0d0,0d0);srows=(0d0,0d0)
+    do j=1,global_count
+      vector=(0d0,0d0)
+      do i=1,nlocal
+        if(row_ids(i)==int(j,int64))vector(:,1)=bases%buffer_values(:,i)
+      enddo
+      call MPI_Allreduce(MPI_IN_PLACE,vector,size(vector),MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='LCFO basis column redistribution failed';return;endif
+      call apply_h(vector,hvector,callback_ok)
+      call collective_callback_success(callback_ok,global_bad,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='LCFO Hamiltonian application failed';return;endif
+      call apply_s(vector,svector,callback_ok)
+      call collective_callback_success(callback_ok,global_bad,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='LCFO metric application failed';return;endif
+      if(.not.all(ieee_is_finite(real(hvector))).or..not.all(ieee_is_finite(aimag(hvector))).or.&
+          .not.all(ieee_is_finite(real(svector))).or..not.all(ieee_is_finite(aimag(svector))))then
+        message='LCFO operator produced non-finite values';return
+      endif
+      do i=1,nlocal
+        hrows(i,j)=sum(conjg(bases%buffer_values(:,i))*hvector(:,1))
+        srows(i,j)=sum(conjg(bases%buffer_values(:,i))*svector(:,1))
       enddo
     enddo
     peak_elements=int(size(hrows)+size(srows),int64)

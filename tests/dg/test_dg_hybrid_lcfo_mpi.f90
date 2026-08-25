@@ -6,7 +6,7 @@ program test_dg_hybrid_lcfo_mpi
   use dg_hybrid_lcfo,only:assemble_dg_hybrid_lcfo_rows
   implicit none
   integer,parameter::npoint=6,nbasis=8
-  integer::comm,rank,nproc,ierr,i,j,nowned,position
+  integer::comm,rank,nproc,ierr,i,j,nowned,position,maximum_callback_columns
   integer(int64),allocatable::wf_ids(:),pw_ids(:),row_ids(:)
   complex(real64),allocatable::wf_values(:,:),pw_values(:,:),hrows(:,:),srows(:,:)
   complex(real64)::vectors(npoint,nbasis),hop(npoint,npoint),sop(npoint,npoint),href(nbasis,nbasis),sref(nbasis,nbasis)
@@ -17,6 +17,7 @@ program test_dg_hybrid_lcfo_mpi
 
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+  maximum_callback_columns=0
   vectors=(0d0,0d0)
   do j=1,nbasis
     vectors(mod(j-1,npoint)+1,j)=cmplx(1d0+0.03d0*j,0.02d0*j,real64)
@@ -63,6 +64,7 @@ program test_dg_hybrid_lcfo_mpi
     call require(maxval(abs(srows(i,:)-sref(int(row_ids(i)),:)))<2d-13,'LCFO metric contribution mismatch')
   enddo
   call require(peak_elements==int(2*nowned*nbasis,int64),'LCFO persistent matrix receipt is not row local')
+  call require(maximum_callback_columns==1,'LCFO assembly did not stream operator columns')
   call require(fingerprint/=0_int64,'LCFO operator fingerprint is empty')
   if(rank==0)write(*,'(a,i0,a,i0)')'HYBRID_LCFO ranks=',nproc,' fingerprint=',fingerprint
   if(rank==0)write(*,'(a,i0,a)')'PASS hybrid LCFO assembly on ',nproc,' ranks'
@@ -71,11 +73,13 @@ contains
   subroutine apply_h(input,output,callback_ok)
     complex(real64),intent(in)::input(:,:);complex(real64),intent(out)::output(:,:)
     logical,intent(out)::callback_ok
+    maximum_callback_columns=max(maximum_callback_columns,size(input,2))
     output=matmul(hop,input);callback_ok=.true.
   end subroutine apply_h
   subroutine apply_s(input,output,callback_ok)
     complex(real64),intent(in)::input(:,:);complex(real64),intent(out)::output(:,:)
     logical,intent(out)::callback_ok
+    maximum_callback_columns=max(maximum_callback_columns,size(input,2))
     output=matmul(sop,input);callback_ok=.true.
   end subroutine apply_s
   subroutine require(condition,text)
