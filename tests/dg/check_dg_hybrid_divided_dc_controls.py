@@ -45,6 +45,11 @@ for token in ("call hpsi", "mg", "v_local", "system", "ppg"):
     assert token in callback, f"divided Hamiltonian callback is missing fragment object: {token}"
 for forbidden in ("dc%mg_tot", "dc%vloc_tot", "dc%system_tot", "dc%ppg_tot"):
     assert forbidden not in callback, f"divided Hamiltonian callback used total-system operator: {forbidden}"
+solve_start = "subroutine solve_dg_hybrid_divided_fragments"
+assert solve_start in MAIN, "missing divided fragment eigensolver adapter"
+solve_callback = MAIN[MAIN.index(solve_start) :].split("end subroutine", 1)[0]
+assert "solve_dg_hybrid_fragment_basis(dc%icomm_frag" in solve_callback
+assert "solve_dg_hybrid_fragment_basis(dc%icomm_tot" not in solve_callback
 for forbidden in (
     "dg_hybrid_divided_density_tolerance",
     "dg_dc_gs_final_density_tolerance",

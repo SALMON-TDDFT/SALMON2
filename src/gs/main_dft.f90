@@ -110,6 +110,7 @@ use dg_hybrid_production_pw_basis,only:build_dg_hybrid_production_pw_basis
 use dg_hybrid_window_distribution,only:redistribute_dg_hybrid_fragment_windows
 use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
 use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_fragment_basis
+use dg_hybrid_fragment_solver,only:solve_dg_hybrid_fragment_basis
 use dg_nonlocal_projector_range,only:s_dg_nonlocal_range_receipt,analyze_dg_nonlocal_projector_range
 use dg_hybrid_generalized_eigensystem,only:solve_dg_hybrid_generalized_scalapack
 use dg_hybrid_density,only:reconstruct_dg_hybrid_density
@@ -244,13 +245,20 @@ integer(8) :: ow_symmetry_fingerprint
 integer(8) :: ow_potential_epoch_snapshot
 integer(8) :: ow_global_grid_count
 type(s_dg_hybrid_ground_state) :: ow_hybrid_ground_state
+type(s_dg_hybrid_fragment_basis) :: divided_fragment_basis
 complex(8),allocatable :: ow_hybrid_hrows(:,:),ow_hybrid_coefficients(:,:)
+complex(8),allocatable :: divided_fragment_coefficients(:,:)
 real(8),allocatable :: ow_hybrid_occupations(:),ow_hybrid_eigenvalues(:),ow_hybrid_potential(:),ow_hybrid_density(:),&
   ow_hybrid_density_history(:,:),ow_hybrid_new_history(:,:)
 real(8),allocatable :: ow_hybrid_divided_total_density(:,:,:)
+real(8),allocatable :: divided_fragment_eigenvalues(:),divided_fragment_density(:)
+logical,allocatable :: ow_divided_core_mask(:)
 character(16) :: ow_hybrid_divided_convergence
 real(8) :: ow_hybrid_divided_threshold
 integer(8) :: ow_hybrid_operator_fingerprint=0_8,ow_hybrid_metric_fingerprint=0_8
+integer(8) :: divided_solver_workspace=0_8,divided_solver_fingerprint=0_8
+real(8) :: divided_fragment_electron_count=0d0,divided_fragment_residual=huge(1d0),&
+  divided_fragment_orthogonality=huge(1d0)
 integer :: ow_hybrid_history_count=0
 real(8) :: ow_hybrid_mixing_rate=0d0
 real(8) :: ow_hybrid_eigensystem_residual=huge(1d0),ow_hybrid_orthogonality=huge(1d0),&
@@ -687,7 +695,6 @@ contains
     type(t_dg_projection_channel),allocatable::projector_tile_channels(:)
     type(s_dg_overlapping_wannier_construction)::symmetry_basis
     type(s_dg_hybrid_basis_catalog)::divided_pw_catalog
-    type(s_dg_hybrid_fragment_basis)::divided_fragment_basis
     type(s_dg_prepared_translation_action)::translation_prepared_action
     type(s_dg_prepared_spectral_basins)::spectral_prepared_basins
     integer(8),allocatable::physical_ids(:),local_symmetry_map(:,:),ow_pencil_generator_maps(:,:),&
@@ -2547,6 +2554,8 @@ contains
         divided_g_vectors,ow_basis%center_owner_fragment,16,dg_ow_symmetry_tolerance,basis_fingerprint,&
         divided_fragment_basis,divided_fragment_workspace,divided_fragment_fingerprint,ok,message)
       if(.not.ok)error stop 'divided Hybrid projected fragment basis failed'
+      if(allocated(ow_divided_core_mask))deallocate(ow_divided_core_mask)
+      allocate(ow_divided_core_mask,source=core_mask)
       call prepare_dg_hybrid_divided_dc_controls(dc,ow_hybrid_divided_convergence,&
         ow_hybrid_divided_threshold,ow_hybrid_divided_total_density,ok,message)
       if(.not.ok)then
@@ -3786,6 +3795,43 @@ contains
     call dealloc_cache(tile_srg)
     deallocate(tile_psi%zwf,tile_hpsi%zwf)
   end subroutine apply_dg_hybrid_divided_fragment_hpsi
+
+  subroutine apply_dg_hybrid_divided_fragment_metric(tile_in,tile_out,callback_ok)
+    complex(8),intent(in)::tile_in(:,:)
+    complex(8),intent(out)::tile_out(:,:)
+    logical,intent(out)::callback_ok
+    tile_out=tile_in;callback_ok=all(ieee_is_finite(real(tile_in))).and.all(ieee_is_finite(aimag(tile_in)))
+  end subroutine apply_dg_hybrid_divided_fragment_metric
+
+  subroutine solve_dg_hybrid_divided_fragments(iteration,callback_ok)
+    integer,intent(in)::iteration
+    logical,intent(out)::callback_ok
+    integer::fragment_basis_count,fragment_state_count,fragment_point_count,ierr_local
+    real(8),allocatable::fragment_occupations(:),fragment_point_weights(:)
+    character(256)::solver_message
+
+    callback_ok=.false.;fragment_basis_count=size(divided_fragment_basis%global_ids)
+    call MPI_Allreduce(MPI_IN_PLACE,fragment_basis_count,1,MPI_INTEGER,MPI_SUM,dc%icomm_frag,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.iteration<1.or.fragment_basis_count<1)return
+    fragment_state_count=min(system%no,fragment_basis_count)
+    fragment_point_count=size(divided_fragment_basis%buffer_point_ids)
+    if(fragment_state_count<1.or.size(system%rocc,1)<fragment_state_count.or.&
+        .not.allocated(ow_divided_core_mask).or.size(ow_divided_core_mask)/=fragment_point_count)return
+    if(allocated(divided_fragment_coefficients))deallocate(divided_fragment_coefficients)
+    if(allocated(divided_fragment_eigenvalues))deallocate(divided_fragment_eigenvalues)
+    if(allocated(divided_fragment_density))deallocate(divided_fragment_density)
+    allocate(fragment_occupations(fragment_state_count),fragment_point_weights(fragment_point_count),&
+      divided_fragment_eigenvalues(fragment_state_count),divided_fragment_density(fragment_point_count))
+    fragment_occupations=system%rocc(1:fragment_state_count,1,1)
+    fragment_point_weights=system%hvol
+    call solve_dg_hybrid_fragment_basis(dc%icomm_frag,divided_fragment_basis,fragment_state_count,&
+      fragment_occupations,ow_divided_core_mask,fragment_point_weights,apply_dg_hybrid_divided_fragment_hpsi,&
+      apply_dg_hybrid_divided_fragment_metric,1d-12,divided_fragment_coefficients,&
+      divided_fragment_eigenvalues,divided_fragment_density,divided_fragment_electron_count,&
+      divided_fragment_residual,divided_fragment_orthogonality,divided_solver_workspace,&
+      divided_solver_fingerprint,callback_ok,solver_message)
+    if(.not.callback_ok)write(0,'(2a)')'divided fragment eigensolver: ',trim(solver_message)
+  end subroutine solve_dg_hybrid_divided_fragments
 
   ! Apply SALMON's established total-system Hamiltonian to one bounded tile.
   ! The callback contract supplies values in the current row-owned physical-ID
