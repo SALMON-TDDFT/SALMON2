@@ -38,6 +38,13 @@ assert branch.index("build_dg_hybrid_production_pw_basis") < branch.index(
     "build_dg_hybrid_projected_fragment_basis"
 )
 assert "dc%rho_tot" in DCDTF
+callback_start = "subroutine apply_dg_hybrid_divided_fragment_hpsi"
+assert callback_start in MAIN, "missing divided fragment Hamiltonian callback"
+callback = MAIN[MAIN.index(callback_start) :].split("end subroutine", 1)[0]
+for token in ("call hpsi", "mg", "v_local", "system", "ppg"):
+    assert token in callback, f"divided Hamiltonian callback is missing fragment object: {token}"
+for forbidden in ("dc%mg_tot", "dc%vloc_tot", "dc%system_tot", "dc%ppg_tot"):
+    assert forbidden not in callback, f"divided Hamiltonian callback used total-system operator: {forbidden}"
 for forbidden in (
     "dg_hybrid_divided_density_tolerance",
     "dg_dc_gs_final_density_tolerance",

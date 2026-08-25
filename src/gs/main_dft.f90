@@ -3750,6 +3750,43 @@ contains
     ok=.true.;message=''
   end subroutine
 
+  subroutine apply_dg_hybrid_divided_fragment_hpsi(tile_in,tile_out,callback_ok)
+    complex(8),intent(in)::tile_in(:,:)
+    complex(8),intent(out)::tile_out(:,:)
+    logical,intent(out)::callback_ok
+    type(s_parallel_info)::tile_info
+    type(s_orbital)::tile_psi,tile_hpsi
+    type(s_sendrecv_grid)::tile_srg
+    integer::width,p,ix,iy,iz,io,allocation_status
+
+    callback_ok=.false.;tile_out=(0d0,0d0);width=size(tile_in,2)
+    if(size(tile_in,1)/=product(ow_box_size).or.any(shape(tile_out)/=shape(tile_in)).or.width<1)return
+    if(any(mg%is_array>[1,1,1]).or.any(mg%ie_array<ow_box_size).or.system%nspin/=1)return
+    tile_info=info;tile_info%im_s=1;tile_info%im_e=1;tile_info%numm=1
+    tile_info%ik_s=1;tile_info%ik_e=1;tile_info%numk=1
+    tile_info%io_s=1;tile_info%io_e=width;tile_info%numo=width;tile_info%if_divide_orbit=.false.
+    allocate(tile_psi%zwf(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),&
+      mg%is_array(3):mg%ie_array(3),1,1:width,1,1),&
+      tile_hpsi%zwf(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),&
+      mg%is_array(3):mg%ie_array(3),1,1:width,1,1),stat=allocation_status)
+    if(allocation_status/=0)return
+    tile_psi%zwf=(0d0,0d0);tile_hpsi%zwf=(0d0,0d0);p=0
+    do iz=1,ow_box_size(3);do iy=1,ow_box_size(2);do ix=1,ow_box_size(1)
+      p=p+1
+      do io=1,width;tile_psi%zwf(ix,iy,iz,1,io,1,1)=tile_in(p,io);enddo
+    enddo;enddo;enddo
+    call init_sendrecv_grid(tile_srg,mg,width,info%icomm_rko,srg%neig)
+    call hpsi(tile_psi,tile_hpsi,tile_info,mg,v_local,system,stencil,tile_srg,ppg)
+    p=0
+    do iz=1,ow_box_size(3);do iy=1,ow_box_size(2);do ix=1,ow_box_size(1)
+      p=p+1
+      do io=1,width;tile_out(p,io)=tile_hpsi%zwf(ix,iy,iz,1,io,1,1);enddo
+    enddo;enddo;enddo
+    callback_ok=all(ieee_is_finite(real(tile_out))).and.all(ieee_is_finite(aimag(tile_out)))
+    call dealloc_cache(tile_srg)
+    deallocate(tile_psi%zwf,tile_hpsi%zwf)
+  end subroutine apply_dg_hybrid_divided_fragment_hpsi
+
   ! Apply SALMON's established total-system Hamiltonian to one bounded tile.
   ! The callback contract supplies values in the current row-owned physical-ID
   ! order.  We explicitly map those IDs into dc%mg_tot instead of assuming that
