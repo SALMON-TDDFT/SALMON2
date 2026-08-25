@@ -112,8 +112,10 @@ use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
 use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_fragment_basis
 use dg_hybrid_fragment_solver,only:solve_dg_hybrid_fragment_basis
 use dg_hybrid_divided_scf,only:run_dg_hybrid_divided_scf
+use dg_hybrid_lcfo,only:assemble_dg_hybrid_lcfo_rows
 use dg_nonlocal_projector_range,only:s_dg_nonlocal_range_receipt,analyze_dg_nonlocal_projector_range
-use dg_hybrid_generalized_eigensystem,only:solve_dg_hybrid_generalized_scalapack
+use dg_hybrid_generalized_eigensystem,only:solve_dg_hybrid_generalized_scalapack,&
+  solve_dg_hybrid_generalized_once_and_publish
 use dg_hybrid_density,only:reconstruct_dg_hybrid_density
 use dg_hybrid_ground_state_types,only:s_dg_hybrid_ground_state,validate_dg_hybrid_ground_state
 use rt_dg_hybrid_checkpoint,only:write_rt_dg_hybrid_occupied_checkpoint
@@ -667,6 +669,7 @@ contains
       spectral_representative_vectors(:,:),spectral_basin_operator(:,:),spectral_wannier_action_rows(:,:,:),&
       spectral_wannier_representation(:,:),spectral_spatial_trials(:,:),spectral_amn(:,:)
     complex(8),allocatable::one_shot_hrows(:,:)
+    complex(8),allocatable::divided_lcfo_hrows(:,:),divided_lcfo_srows(:,:)
     real(8),allocatable::weights(:),spectrum(:),occupations(:),lcfo_retained_occupations(:),&
       lcfo_retained_eigenvalues(:),local_point_rotations(:,:,:)
     real(8),allocatable::ow_total_density_values(:)
@@ -674,6 +677,7 @@ contains
     real(8),allocatable::one_shot_density(:),one_shot_potential(:)
     real(8),allocatable::hybrid_converged_density(:),ow_initial_occupied_density(:)
     real(8),allocatable::divided_initial_density(:),divided_converged_density(:)
+    real(8),allocatable::divided_lcfo_point_weights(:)
     real(8),allocatable::spectral_occupied_density(:),spectral_empty_moments(:,:),&
       spectral_shared_density(:,:),spectral_basin_spectra(:,:),spectral_descriptor_eigenvalues(:),&
       spectral_descriptor_occupations(:)
@@ -707,6 +711,7 @@ contains
     integer(8),allocatable::fixed_center_symmetry_map(:,:),fixed_center_row_ids(:)
     integer(8),allocatable::reindexed_global_symmetry_map(:,:),reindexed_fixed_center_symmetry_map(:,:)
     integer(8),allocatable::translation_row_ids(:),translation_stream_row_ids(:)
+    integer(8),allocatable::divided_lcfo_row_ids(:)
     integer(8),allocatable::translation_spatial_ids(:),translation_generator_maps(:,:)
     integer(8),allocatable::spectral_row_ids(:),spectral_stream_row_ids(:),spectral_complement_row_ids(:)
     integer,allocatable::local_point_product(:,:),local_point_integer_rotations(:,:,:),&
@@ -796,7 +801,9 @@ contains
       spectral_operation_workspace
     integer(8)::ow_stitched_peak_elements,ow_density_redistribution_workspace
     integer(8)::divided_pw_workspace,divided_pw_fingerprint,divided_buffer_window_workspace,&
-      divided_buffer_window_fingerprint,divided_fragment_workspace,divided_fragment_fingerprint
+      divided_buffer_window_fingerprint,divided_fragment_workspace,divided_fragment_fingerprint,&
+      divided_lcfo_peak_elements,divided_lcfo_operator_fingerprint,divided_state_workspace,&
+      divided_state_fingerprint,divided_final_solver_workspace,divided_final_solver_fingerprint
     real(8)::condition_number,closure_residual,spread_max,gauge_correction
     real(8)::adapted_occupied_trace,adapted_occupied_closure,adapted_occupied_gamma_defect,&
       translation_adapted_trace,translation_adapted_closure,translation_adapted_gamma_defect,&
@@ -821,6 +828,7 @@ contains
     integer::hybrid_iterations
     integer::divided_iterations
     real(8)::divided_convergence_value
+    real(8)::divided_final_residual,divided_final_orthogonality,divided_final_projector_defect
     logical::ok,reusable,localization_converged,global_inversion_present,center_diagnostic_ok,diagnostic_ok
     logical::fixed_center_inversion_present,writer_ok
     logical::translation_self_conjugate
@@ -2580,6 +2588,26 @@ contains
       if(.not.ok)error stop 'divided Hybrid SCF failed'
       if(rank==0)write(*,'(a,i0,a,es16.8)')'[OW-GS] divided WF+PW SCF converged iterations=',&
         divided_iterations,' density=',divided_convergence_value
+      allocate(divided_lcfo_row_ids,source=divided_fragment_basis%global_ids)
+      allocate(divided_lcfo_point_weights(size(divided_fragment_basis%buffer_point_ids)),source=system%hvol)
+      call assemble_dg_hybrid_lcfo_rows(dc%icomm_tot,divided_fragment_basis,divided_lcfo_row_ids,&
+        divided_lcfo_point_weights,apply_dg_hybrid_divided_fragment_hpsi,&
+        apply_dg_hybrid_divided_fragment_metric,divided_lcfo_hrows,divided_lcfo_srows,&
+        divided_lcfo_peak_elements,divided_lcfo_operator_fingerprint,ok,message)
+      if(.not.ok)write(0,'(a)')trim(message)
+      if(.not.ok)error stop 'divided Hybrid LCFO assembly failed'
+      call solve_dg_hybrid_generalized_once_and_publish(dc%icomm_tot,size(divided_lcfo_hrows,2),nstate,&
+        divided_lcfo_row_ids,divided_lcfo_hrows,divided_lcfo_srows,dg_dc_gs_final_orbital_tolerance,&
+        occupations,dc%elec_num_tot,divided_fragment_fingerprint,divided_lcfo_operator_fingerprint,&
+        divided_lcfo_operator_fingerprint,divided_pw_fingerprint,solve_final_dg_hybrid_divided_lcfo,&
+        ow_hybrid_ground_state,divided_state_workspace,divided_state_fingerprint,divided_final_residual,&
+        divided_final_orthogonality,divided_final_projector_defect,divided_final_solver_workspace,&
+        divided_final_solver_fingerprint,ok,message)
+      if(.not.ok)write(0,'(a)')trim(message)
+      if(.not.ok)error stop 'divided Hybrid final LCFO solve failed'
+      if(rank==0)write(*,'(a,3(a,es16.8))')'[OW-GS] divided WF+PW LCFO solved once',&
+        ' residual=',divided_final_residual,' orthogonality=',divided_final_orthogonality,&
+        ' projector=',divided_final_projector_defect
     endif
     if(yn_dg_hybrid_scf=='y')then
       if(rank==0)write(*,'(a)')'[OW-GS] starting distributed fixed-basis complex ScaLAPACK SCF'
@@ -3940,6 +3968,24 @@ contains
     enddo
     callback_ok=all(ieee_is_finite(mixed_density))
   end subroutine mix_dg_hybrid_divided_density
+
+  subroutine solve_final_dg_hybrid_divided_lcfo(comm_arg,global_count_arg,nstate_arg,row_ids_arg,&
+      hrows_arg,srows_arg,tolerance_arg,coefficients_arg,eigenvalues_arg,maximum_residual_arg,&
+      orthogonality_defect_arg,projector_defect_arg,workspace_peak_bytes_arg,fingerprint_arg,&
+      callback_ok,callback_message)
+    integer,intent(in)::comm_arg,global_count_arg,nstate_arg
+    integer(8),intent(in)::row_ids_arg(:)
+    complex(8),intent(in)::hrows_arg(:,:),srows_arg(:,:)
+    real(8),intent(in)::tolerance_arg
+    complex(8),allocatable,intent(out)::coefficients_arg(:,:)
+    real(8),intent(out)::eigenvalues_arg(:),maximum_residual_arg,orthogonality_defect_arg,projector_defect_arg
+    integer(8),intent(out)::workspace_peak_bytes_arg,fingerprint_arg
+    logical,intent(out)::callback_ok
+    character(*),intent(out)::callback_message
+    call solve_dg_hybrid_generalized_scalapack(comm_arg,global_count_arg,nstate_arg,row_ids_arg,hrows_arg,&
+      srows_arg,tolerance_arg,coefficients_arg,eigenvalues_arg,maximum_residual_arg,orthogonality_defect_arg,&
+      projector_defect_arg,workspace_peak_bytes_arg,fingerprint_arg,callback_ok,callback_message)
+  end subroutine solve_final_dg_hybrid_divided_lcfo
 
   ! Apply SALMON's established total-system Hamiltonian to one bounded tile.
   ! The callback contract supplies values in the current row-owned physical-ID
