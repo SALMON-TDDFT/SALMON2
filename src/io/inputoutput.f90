@@ -2830,6 +2830,15 @@ contains
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
 
+#ifndef USE_MPI
+    if(trim(dm_unfold_option)/='no') then
+      stop 'dm_unfold_option requires a build with MPI support.'
+    end if
+    if(yn_out_tm_bin=='y') then
+      stop "yn_out_tm_bin='y' requires a build with MPI support."
+    end if
+#endif
+
     select case(trim(lcfo_eigensolver))
     case('lapack')
       continue

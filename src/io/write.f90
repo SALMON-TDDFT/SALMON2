@@ -14,6 +14,9 @@
 !  limitations under the License.
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+
+#include "config.h"
+
 module write_sub
   use math_constants,only : zi,pi
   implicit none
@@ -110,7 +113,9 @@ contains
     use communication, only: comm_is_root,comm_summation,comm_sync_all
     use filesystem, only: open_filehandle
     use inputoutput, only: t_unit_energy
+#ifdef USE_MPI
     use mpi
+#endif
     implicit none
     type(s_dft_system) ,intent(in) :: system
     type(s_parallel_info),intent(in) :: info
@@ -125,9 +130,11 @@ contains
     integer :: fh_tm, narray
     integer :: i,j,ik,ib,ib1,ib2,ilma,nlma,ia,ix,iy,iz,NB,NK,im,ispin
     integer :: ik_s,ik_e,io_s,io_e,is(3),ie(3)
+#ifdef USE_MPI
     integer :: icomm, iopen_flag, minfo, mfile, ierr, n_count, source_type, file_type
     integer :: gsize(4), lsize(4), lstart(4)
     integer(kind=MPI_OFFSET_KIND) :: disp, block_size, base_vnl
+#endif
     real(8) :: x,y,z
     complex(8),allocatable :: upu(:,:,:,:,:),upu_l(:,:,:,:,:)
     complex(8),allocatable :: upu_all(:,:,:,:,:),upu_all_l(:,:,:,:,:)
@@ -395,6 +402,7 @@ contains
 
     end if  !flag_print_tm
 
+#ifdef USE_MPI
     if(flag_print_tm_bin) then
 
       file_tm_data = trim(base_directory)//'data_for_restart/tm.bin'
@@ -444,6 +452,7 @@ contains
       call MPI_Type_free(file_type, ierr)
 
     end if  !flag_print_tm_bin
+#endif
 
     if (flag_print_eps) then
        ! taken from tm2sigma.f90 in utility directory
