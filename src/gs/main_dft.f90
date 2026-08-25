@@ -44,7 +44,7 @@ use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_hybrid_scf, 
   dg_ow_localization_support_tolerance,dg_ow_localization_spread_tolerance,&
   dg_ow_localization_gradient_tolerance,dg_ow_localization_max_iterations,&
   dg_ow_candidate_states_per_fragment,dg_ow_target_wanniers_per_fragment,wannier_num_iter,&
-  dg_ow_w90_initial_projection
+  dg_ow_w90_initial_projection,wannier_pw_cutoff
 use dg_overlapping_wannier_construction, only: s_dg_overlapping_wannier_construction, &
   construct_dg_overlapping_wannier_basis,verify_dg_overlapping_wannier_periodic_closure,&
   replicate_dg_fragment_wannier_representative,verify_dg_fragment_wannier_streaming_closure,&
@@ -105,6 +105,11 @@ use dg_overlapping_wannier_scf, only: s_dg_overlapping_wannier_scf_state, &
   s_dg_overlapping_wannier_scf_result, &
   compute_dg_overlapping_wannier_scf_fingerprint,mix_dg_overlapping_wannier_density_history
 use dg_hybrid_scf,only:run_dg_hybrid_self_consistent_ground_state
+use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog
+use dg_hybrid_production_pw_basis,only:build_dg_hybrid_production_pw_basis
+use dg_hybrid_window_distribution,only:redistribute_dg_hybrid_fragment_windows
+use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
+use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_fragment_basis
 use dg_nonlocal_projector_range,only:s_dg_nonlocal_range_receipt,analyze_dg_nonlocal_projector_range
 use dg_hybrid_generalized_eigensystem,only:solve_dg_hybrid_generalized_scalapack
 use dg_hybrid_density,only:reconstruct_dg_hybrid_density
@@ -664,6 +669,8 @@ contains
       spectral_descriptor_occupations(:)
     real(8),allocatable::ow_raw_partition_weight(:),ow_raw_partition_gradient(:,:),&
       ow_box_density(:)
+    real(8),allocatable::divided_box_windows(:,:),divided_core_windows(:,:),divided_buffer_windows(:,:),&
+      divided_core_coordinates(:,:),divided_buffer_coordinates(:,:),divided_g_vectors(:,:)
     real(8),allocatable::localized_centers(:,:),localized_center_magnitudes(:,:)
     real(8),allocatable::w90_fractional(:,:),w90_spreads(:),w90_eigenvalues(:),w90_atoms_cart(:,:),&
       fixed_center_eigenvalues(:),adapted_occupied_spectrum(:)
@@ -679,6 +686,8 @@ contains
     type(t_dg_projection_channel),allocatable::manifest_channels(:)
     type(t_dg_projection_channel),allocatable::projector_tile_channels(:)
     type(s_dg_overlapping_wannier_construction)::symmetry_basis
+    type(s_dg_hybrid_basis_catalog)::divided_pw_catalog
+    type(s_dg_hybrid_fragment_basis)::divided_fragment_basis
     type(s_dg_prepared_translation_action)::translation_prepared_action
     type(s_dg_prepared_spectral_basins)::spectral_prepared_basins
     integer(8),allocatable::physical_ids(:),local_symmetry_map(:,:),ow_pencil_generator_maps(:,:),&
@@ -696,6 +705,7 @@ contains
       global_translation_subgroup(:),global_point_representatives(:),global_point_cogroup_product(:,:),&
       global_translation_cocycle(:,:),translation_canonical_product(:,:)
     integer,allocatable::rank_fragments(:)
+    integer,allocatable::divided_fragment_ids(:),divided_core_fragment_ids(:),divided_row_action(:,:)
     integer,allocatable::projector_atom_ids(:)
     integer,allocatable::fixed_center_product(:,:)
     integer,allocatable::global_affine_generators(:)
@@ -776,6 +786,8 @@ contains
       spectral_workspace_peak,&
       spectral_operation_workspace
     integer(8)::ow_stitched_peak_elements,ow_density_redistribution_workspace
+    integer(8)::divided_pw_workspace,divided_pw_fingerprint,divided_buffer_window_workspace,&
+      divided_buffer_window_fingerprint,divided_fragment_workspace,divided_fragment_fingerprint
     real(8)::condition_number,closure_residual,spread_max,gauge_correction
     real(8)::adapted_occupied_trace,adapted_occupied_closure,adapted_occupied_gamma_defect,&
       translation_adapted_trace,translation_adapted_closure,translation_adapted_gamma_defect,&
@@ -2496,6 +2508,45 @@ contains
         dg_dc_gs_electron_count_tolerance*max(1d0,dc%elec_num_tot))&
       error stop 'converged DC+LCFO initial density violates electron-count contract'
     if(yn_dg_hybrid_divided_scf=='y')then
+      allocate(divided_fragment_ids(1),divided_core_fragment_ids(ncore),&
+        divided_row_action(size(ow_pencil_generator_maps,1),size(ow_pencil_generator_maps,2)),&
+        divided_box_windows(1,nbox))
+      allocate(divided_core_coordinates(3,ncore),divided_buffer_coordinates(3,nbox))
+      divided_fragment_ids=dc%i_frag
+      divided_core_fragment_ids=dc%i_frag
+      divided_row_action=int(ow_pencil_generator_maps)
+      divided_box_windows(1,:)=ow_raw_partition_weight
+      do p=1,ncore
+        divided_core_coordinates(1,p)=real(modulo(ow_core_ids(p)-1_8,int(dc%lg_tot%num(1),8)),8)*&
+          dc%system_tot%hgs(1)
+        divided_core_coordinates(2,p)=real(modulo((ow_core_ids(p)-1_8)/int(dc%lg_tot%num(1),8),&
+          int(dc%lg_tot%num(2),8)),8)*dc%system_tot%hgs(2)
+        divided_core_coordinates(3,p)=real((ow_core_ids(p)-1_8)/nxy8,8)*dc%system_tot%hgs(3)
+      enddo
+      do p=1,nbox
+        divided_buffer_coordinates(1,p)=real(modulo(physical_ids(p)-1_8,int(dc%lg_tot%num(1),8)),8)*&
+          dc%system_tot%hgs(1)
+        divided_buffer_coordinates(2,p)=real(modulo((physical_ids(p)-1_8)/int(dc%lg_tot%num(1),8),&
+          int(dc%lg_tot%num(2),8)),8)*dc%system_tot%hgs(2)
+        divided_buffer_coordinates(3,p)=real((physical_ids(p)-1_8)/nxy8,8)*dc%system_tot%hgs(3)
+      enddo
+      call build_dg_hybrid_production_pw_basis(dc%icomm_tot,int(expected_core_count),dc%n_frag,&
+        divided_fragment_ids,physical_ids,divided_box_windows,ow_core_ids,divided_core_fragment_ids,&
+        divided_core_coordinates,divided_row_action,w90_reciprocal_lattice,&
+        global_point_rotations(:,:,global_affine_generators),wannier_pw_cutoff,16,dg_ow_symmetry_tolerance,&
+        divided_core_windows,divided_g_vectors,divided_pw_catalog,divided_pw_workspace,&
+        divided_pw_fingerprint,ok,message)
+      if(.not.ok)error stop 'divided Hybrid production PW catalog failed'
+      call redistribute_dg_hybrid_fragment_windows(dc%icomm_tot,int(expected_core_count),dc%n_frag,&
+        divided_fragment_ids,physical_ids,divided_box_windows,physical_ids,divided_buffer_windows,&
+        divided_buffer_window_workspace,divided_buffer_window_fingerprint,ok,message)
+      if(.not.ok)error stop 'divided Hybrid buffer window redistribution failed'
+      call build_dg_hybrid_projected_fragment_basis(dc%icomm_tot,int(expected_core_count),dc%n_frag,&
+        dc%i_frag,ow_core_ids,ow_core_weights,ow_core_values,divided_core_coordinates,divided_core_windows,&
+        physical_ids,ow_box_values,divided_buffer_coordinates,divided_buffer_windows,divided_pw_catalog,&
+        divided_g_vectors,ow_basis%center_owner_fragment,16,dg_ow_symmetry_tolerance,basis_fingerprint,&
+        divided_fragment_basis,divided_fragment_workspace,divided_fragment_fingerprint,ok,message)
+      if(.not.ok)error stop 'divided Hybrid projected fragment basis failed'
       call prepare_dg_hybrid_divided_dc_controls(dc,ow_hybrid_divided_convergence,&
         ow_hybrid_divided_threshold,ow_hybrid_divided_total_density,ok,message)
       if(.not.ok)then

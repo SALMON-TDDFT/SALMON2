@@ -28,6 +28,15 @@ branch_start = "if(yn_dg_hybrid_divided_scf=='y')then"
 assert branch_start in MAIN, "missing default-off divided DC preparation branch"
 branch = MAIN[MAIN.index(branch_start) :].split("endif", 1)[0]
 assert "prepare_dg_hybrid_divided_dc_controls" in branch
+for token in (
+    "build_dg_hybrid_production_pw_basis",
+    "redistribute_dg_hybrid_fragment_windows",
+    "build_dg_hybrid_projected_fragment_basis",
+):
+    assert token in branch, f"divided route is missing production WF+PW construction: {token}"
+assert branch.index("build_dg_hybrid_production_pw_basis") < branch.index(
+    "build_dg_hybrid_projected_fragment_basis"
+)
 assert "dc%rho_tot" in DCDTF
 for forbidden in (
     "dg_hybrid_divided_density_tolerance",
