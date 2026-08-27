@@ -5,6 +5,7 @@ set(SOURCES
     dg_hybrid_wannier_selection.f90
     dg_hybrid_full_cell_operator_adapter.f90
     dg_hybrid_ground_state_types.f90
+    dg_hybrid_continuation_state.f90
     dg_hybrid_generalized_eigensystem.f90
     dg_hybrid_density.f90
     dg_hybrid_scf.f90
