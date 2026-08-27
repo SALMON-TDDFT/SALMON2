@@ -16,7 +16,8 @@ module dg_hybrid_continuation_residuals
     integer(int64)::fingerprint=0_int64
   end type s_dg_hybrid_metric_receipt
   public::validate_dg_hybrid_occupied_rows,build_dg_hybrid_interface_observables,&
-    evaluate_dg_hybrid_residuals,evaluate_dg_hybrid_projector_change,dg_hybrid_electron_count
+    evaluate_dg_hybrid_residuals,evaluate_dg_hybrid_projector_change,dg_hybrid_electron_count,&
+    validate_cluster_occupations
 contains
   subroutine validate_dg_hybrid_occupied_rows(comm,row_ids,coefficients,s_coefficients,occupations,receipt,ok,message)
     integer,intent(in)::comm
@@ -96,6 +97,24 @@ contains
     else;count=sum(occupations)
     endif
   end function dg_hybrid_electron_count
+
+  subroutine validate_cluster_occupations(occupations,cluster_ids,ok,message)
+    real(real64),intent(in)::occupations(:)
+    integer,intent(in)::cluster_ids(:)
+    logical,intent(out)::ok;character(*),intent(out)::message
+    integer::i,j
+    ok=.false.;message=''
+    if(size(occupations)<1.or.size(cluster_ids)/=size(occupations).or.any(cluster_ids<1).or.&
+        .not.all(ieee_is_finite(occupations)).or.any(occupations<0d0))then
+      message='invalid occupation cluster';return
+    endif
+    do i=1,size(occupations);do j=i+1,size(occupations)
+      if(cluster_ids(i)==cluster_ids(j).and.abs(occupations(i)-occupations(j))>1d-12)then
+        message='symmetry-incompatible occupations in a degenerate cluster';return
+      endif
+    enddo;enddo
+    ok=.true.
+  end subroutine validate_cluster_occupations
 
   subroutine build_dg_hybrid_interface_observables(value_coefficients,normal_coefficients,occupations,&
       value_density,normal_density,cross_density,ok,message)

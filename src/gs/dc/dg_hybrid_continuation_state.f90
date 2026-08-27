@@ -126,6 +126,7 @@ contains
 #ifdef USE_MPI
     integer::local_bad,global_bad,ierr,i
     integer(int64)::minimum_hash,maximum_hash
+    minimum_hash=0_int64;maximum_hash=1_int64
     local_bad=merge(0,1,receipt%valid.and.allocated(receipt%xctype).and.receipt%theory_code==1.and.&
       receipt%periodic.and.receipt%nspin==1.and..not.receipt%spinorbit.and..not.receipt%plus_u.and.&
       .not.receipt%hse.and..not.receipt%fix_func.and..not.receipt%jm)
@@ -139,7 +140,8 @@ contains
     if(ierr==MPI_SUCCESS.and.global_bad==0)then
       call agree_catalog_int64(receipt%fingerprint,comm,minimum_hash,maximum_hash,ierr)
     endif
-    ok=ierr==MPI_SUCCESS.and.global_bad==0.and.minimum_hash==maximum_hash
+    ok=.false.
+    if(ierr==MPI_SUCCESS.and.global_bad==0)ok=minimum_hash==maximum_hash
     if(ok)then;message='';else;message='invalid or rank-disagreeing supported-scope receipt';endif
 #else
     ok=.false.;message='DG hybrid scope validation requires MPI'

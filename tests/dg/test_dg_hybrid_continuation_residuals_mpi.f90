@@ -4,7 +4,8 @@ program test_dg_hybrid_continuation_residuals_mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use dg_hybrid_continuation_residuals,only:s_dg_hybrid_residuals,s_dg_hybrid_metric_receipt,&
     validate_dg_hybrid_occupied_rows,build_dg_hybrid_interface_observables,&
-    evaluate_dg_hybrid_residuals,evaluate_dg_hybrid_projector_change,dg_hybrid_electron_count
+    evaluate_dg_hybrid_residuals,evaluate_dg_hybrid_projector_change,dg_hybrid_electron_count,&
+    validate_cluster_occupations
   implicit none
   integer::comm,rank,nproc,ierr,i,nlocal
   integer(int64),allocatable::row_ids(:)
@@ -39,6 +40,8 @@ program test_dg_hybrid_continuation_residuals_mpi
   call require(ok.and.projector_change<1d-13,'principal-angle occupied-subspace change is gauge dependent')
   electron_count=dg_hybrid_electron_count(occupations)
   call require(abs(electron_count-sum(occupations))<1d-13,'electron count was not computed from occupations')
+  call validate_cluster_occupations([2d0,1d0],[1,1],ok,message)
+  call require(.not.ok,'unequal occupations inside one degenerate cluster were accepted')
   values=reshape([(cmplx(0.1d0*i,0.03d0*i,real64),i=1,4)],[2,2])
   normals=reshape([(cmplx(-0.04d0*i,0.02d0*i,real64),i=1,4)],[2,2])
   call build_dg_hybrid_interface_observables(values,normals,occupations,tv,tn,tc,ok,message)
