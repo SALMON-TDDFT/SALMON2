@@ -4,7 +4,7 @@
 
 **Goal:** Starting from the exact converged DC density, converge the occupied WF+PW subspace, density, and complete SIPG interface observables through an adaptive lambda continuation to the fully self-consistent lambda-one DG ground state, publish one complete atomic checkpoint, and start stationary zero-field hybrid RT from that exact payload.
 
-**Architecture:** Freeze one symmetry-closed WF+PW catalog and one metric for a continuation attempt, preassemble the coefficient-independent complete SIPG interface blocks, and update the density-dependent volume operator from the current occupation density matrix.  Occupied interface traces are fully refreshed after every solve and are independent acceptance diagnostics, not mixed Hamiltonian inputs.  Storage uses one metric CSR graph and one operator-union CSR graph.  A transactional controller first converges lambda zero from the exact DC seed, then advances one uniform adaptive lambda to the fully refreshed lambda-one fixed point.  The complete basis/operator/state payload is consumed by an isolated RT branch that updates Hartree/XC once at the start of every explicit time step.
+**Architecture:** Freeze one WF+PW catalog closed under the actual full-system symmetry group and one metric for a continuation attempt; when no nontrivial symmetry exists, use the identity group rather than a separate or disabled path.  Preassemble the coefficient-independent complete SIPG interface blocks and update the density-dependent volume operator from the current occupation density matrix.  Occupied interface traces are fully refreshed after every solve and are independent acceptance diagnostics, not mixed Hamiltonian inputs.  Storage uses one metric CSR graph and one operator-union CSR graph.  A transactional controller first converges lambda zero from the exact DC seed, then advances one uniform adaptive lambda to the fully refreshed lambda-one fixed point.  The complete basis/operator/state payload is consumed by an isolated RT branch that updates Hartree/XC once at the start of every explicit time step.
 
 **Tech Stack:** Fortran 2008, MPI, SALMON DC/Wannier90/WF+PW infrastructure, SIPG weak form, ScaLAPACK or EigenExa generalized eigensolver, BLAS/LAPACK, standalone Python MPI runners.
 
@@ -78,12 +78,23 @@ before catalog freezing, followed by recomputed ownership, distribution, and
 fingerprints.  Require failure when the supplied action maps cannot produce a
 finite closed selection.
 
+Add an identity-only catalog with inequivalent fragments, unequal local basis
+dimensions, irregular face geometry, and no nonidentity operation.  Require
+normal initialization, no added orbit member, and execution of the same
+closure path rather than a symmetry-check bypass.  Record zero nonidentity
+operations and `identity_only=.true.` in its receipt.
+
 Add a collective closure routine taking the requested WF block IDs and their
 group action, plus requested PW packet IDs and their packet action.  It returns
 the sorted effective IDs, a parent/reason entry for every added member, and a
 fingerprint covering both requested and effective selections.  Pass these
 actions from the already accepted basis symmetry representation; do not infer
 WF multiplets from eigenvalue proximity.
+
+Normalize an accepted representation with no nontrivial operation to one
+explicit identity action before closure.  Do not require equivalent fragments,
+equal fragment basis dimensions, uniform face areas, or a regular neighbor
+graph.
 
 Require collective failure before seed initialization unless
 `theory=='dft'`, `system%Nspin==1`, `yn_spinorbit=='n'`,
@@ -394,6 +405,13 @@ excitation-cutoff convergence.  Add a truncated basis whose coefficient
 residual is zero but whose reconstructed-grid residual under the actual
 discrete DG action is large; require rejection.
 
+Add an identity-only, non-equivalent-fragment fixture.  Require the complete
+candidate-acceptance path to run and pass its identity covariance checks;
+reject implementations that treat zero nonidentity operations as either an
+error or permission to omit the symmetry callback.  Keep the nontrivial-group
+fixtures to prove that identity normalization does not weaken real symmetry
+enforcement.
+
 Run the coupled driver with callbacks that pass coefficient-space gates but
 fail first the symmetry oracle and then the reconstructed-grid oracle.  Require
 the candidate stage to remain unaccepted in both cases; this test fails if the
@@ -424,6 +442,9 @@ separately with the existing face weights; do not invent an additional
 combined DG norm.  Repeat this expensive check after the final lambda-one
 refresh.  Aggregate maxima collectively and fail closed on omitted
 operations, split symmetry blocks, or faces.
+The operation list must contain at least the identity.  Zero nonidentity
+operations is valid and is reported distinctly from a missing or malformed
+operation list.
 
 Wire this oracle into `dg_hybrid_continuation_scf` as a mandatory
 candidate-acceptance callback.  Invoke it only after the inexpensive inner
@@ -541,6 +562,8 @@ continuation receipt, exchange-correlation functional, pseudopotential and
 energy-decomposition provenance, and all fingerprints.  Corrupt one representative value
 from metadata, basis, matrix, and state payloads and require rejection.  Require
 an interrupted write to leave the previous accepted file intact.
+Include the actual-group operation count, nonidentity-operation count, and
+identity-only normalization flag in the hashed catalog metadata.
 
 Run: `python3 tests/dg/run_rt_dg_hybrid_checkpoint_mpi.py`
 
@@ -812,8 +835,10 @@ Require simultaneous evidence for:
 - final refreshed `R_H`, `R_rho`, `R_T`, `R_S`, electron count, symmetry, and
   real-space DG residual;
 - complete checkpoint payload and matching GS/RT fingerprint;
-- symmetry closure of the retained WF+PW space and covariance of the complete
-  occupied ground-state projector, without individual-state symmetry;
+- closure of the retained WF+PW space and covariance of the complete occupied
+  ground-state projector under the actual group, accepting the identity-only
+  group without bypassing the common checks and without individual-state
+  symmetry;
 - zero-field density, energy, projector, electron, and Hamiltonian
   stationarity, without a separate RT-state symmetry gate.
 

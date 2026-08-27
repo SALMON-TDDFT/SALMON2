@@ -36,7 +36,10 @@ fixed point.  The seed gate is
  \leq \tau_{\mathrm{seed}}.
 \]
 
-The first implementation supports only the periodic Si64 acceptance scope.
+The first implementation supports arbitrary periodic cells, atomic
+configurations, fragment topologies, and fragment-local basis dimensions.
+Si64 is the first production acceptance system, not a material-specific
+implementation restriction.
 The GS gate requires `theory='dft'`; the RT gate requires
 `theory` to be `tddft_response` or `tddft_pulse`.  Both require one
 scalar spin channel, `yn_spinorbit='n'`, `.not.PLUS_U_ON`,
@@ -88,11 +91,22 @@ For one complete continuation attempt, the following catalog is immutable:
 - fragment geometry, physical face topology, normals, and quadrature;
 - cutoff, selection, window, packet, and complement definitions;
 - the DG metric and its numerical-rank decision;
-- the symmetry representation and interface orbits;
+- the actual full-system symmetry representation, including at least the
+  identity operation, and interface orbits under that group;
 - the SIPG penalty convention.
 
-The retained WF+PW space is selected in complete symmetry blocks.  If a
-cutoff intersects a degenerate multiplet, reciprocal star, or another
+Absence of a nontrivial full-system symmetry is a supported physical case for
+liquids, amorphous structures, defects, interfaces, and surfaces.  If no
+nontrivial operation is detected or supplied, the catalog is normalized to
+the identity group \(G_{\rm actual}=\{e\}\).  This is not an error and does not
+disable the common closure or covariance path.  The receipt records the
+number of detected nonidentity operations and whether identity-only
+normalization was used.  The algorithm never assumes symmetry-equivalent
+fragments, equal fragment basis dimensions, uniform face geometry, or a
+regular neighbor graph.
+
+The retained WF+PW space is selected in complete blocks of the actual group.
+If a cutoff intersects a degenerate multiplet, reciprocal star, or another
 symmetry orbit, the whole block is retained or the whole block is omitted.
 Before the catalog is frozen, selection expands a partially selected block to
 its complete orbit using the existing reciprocal-star and basis-action maps.
@@ -349,8 +363,11 @@ This avoids an extra material-dependent gap threshold.
 
 ## Ground-state symmetry contract
 
-Before continuation, the basis must be closed under every required full-system
-symmetry operation.  At every accepted stage the code evaluates
+Before continuation, the basis must be closed under every operation of the
+actual full-system symmetry group.  The group always contains the identity.
+If there is no nontrivial symmetry, the identity-only group is a normal
+supported case and all checks below run through the same implementation path;
+they are not skipped.  At every accepted stage the code evaluates
 
 \[
  R_{\mathrm{sym},H}(g)=
@@ -385,8 +402,9 @@ The face topology and interface blocks must map covariantly
 under the same operation.  Diagonalization is not used as a symmetry repair.
 Failure of the basis, retained-space closure, occupied-subspace covariance,
 topology, or zero-field operator covariance closes the hybrid route with an
-error.  No individual occupied or empty eigenvector is required to transform
-as a one-dimensional invariant state.
+error for the actual group.  Absence of a nonidentity operation is not a
+failure.  No individual occupied or empty eigenvector is required to
+transform as a one-dimensional invariant state.
 
 ## Fully refreshed lambda-one state
 
@@ -442,7 +460,9 @@ The ground-state writer publishes one atomic checkpoint containing:
   closure reason/action map, window, packet, and complement metadata;
 - occupied coefficients, occupations, and eigenvalues;
 - final density and interface observables;
-- symmetry and face topology metadata;
+- actual-group symmetry and face-topology metadata, including the identity,
+  the number of nonidentity operations, and the identity-only normalization
+  flag;
 - DC seed-density fingerprint;
 - basis, metric, operator, state, and complete-payload fingerprints;
 - exchange-correlation functional, pseudopotential, and total-energy
@@ -485,7 +505,8 @@ identity.  Any mismatch fails closed.
 
 ## Zero-field real-time acceptance
 
-Total energy is implemented only for the periodic Si64 scope.  The existing
+Total energy is implemented for the supported periodic scope.  Si64 supplies
+the first production end-to-end acceptance case.  The existing
 nonlocal projector action supplies `E_ion_nloc`.  The hybrid kinetic component
 is the broken-volume kinetic energy plus the complete, correctly normalized
 SIPG face energy evaluated from `Gamma_occ`.  These two fields are supplied
