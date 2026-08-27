@@ -24,6 +24,7 @@ set(SOURCES
    dg_hybrid_wannier_complement.f90
    dg_hybrid_sparse_metric.f90
    dg_hybrid_sparse_operators.f90
+   dg_hybrid_continuation_residuals.f90
    )
 
 if (IS_FUJITSU_COMPILER)
