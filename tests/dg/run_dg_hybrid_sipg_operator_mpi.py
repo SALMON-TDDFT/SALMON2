@@ -12,9 +12,12 @@ with tempfile.TemporaryDirectory(prefix="hybrid-sipg-operator-") as name:
     exe = build / "hybrid_sipg_operator"
     subprocess.run([
         shutil.which("mpifort"), "-cpp", "-DUSE_MPI", "-std=f2008",
+        "-ffree-line-length-none",
         "-I", str(build), "-J", str(build), "-fcheck=all",
         "-ffpe-trap=invalid,zero,overflow", "-fbacktrace",
         str(root / "src/common/dg_hybrid_sparse_operators.f90"),
+        str(root / "src/common/dg_nodal_sipg.f90"),
+        str(root / "src/rt/dg/rt_dg_hybrid_sparse_exchange.f90"),
         str(root / "src/gs/dc/dg_hybrid_sipg_operator.f90"),
         str(root / "tests/dg/test_dg_hybrid_sipg_operator_mpi.f90"),
         "-o", str(exe),
