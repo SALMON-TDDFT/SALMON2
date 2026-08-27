@@ -37,7 +37,11 @@ fixed point.  The seed gate is
 \]
 
 The first implementation supports arbitrary periodic cells, atomic
-configurations, fragment topologies, and fragment-local basis dimensions.
+configurations, and fragment-local basis dimensions.  Identity-only systems
+may use irregular, inequivalent fragment topologies.  For a system with a
+nontrivial physical symmetry, the fragment topology and retained basis must
+be covariant under that physical group or the route fails closed; it must not
+silently downgrade the group to identity-only.
 Si64 is the first production acceptance system, not a material-specific
 implementation restriction.
 The GS gate requires `theory='dft'`; the RT gate requires
@@ -96,14 +100,26 @@ For one complete continuation attempt, the following catalog is immutable:
 - the SIPG penalty convention.
 
 Absence of a nontrivial full-system symmetry is a supported physical case for
-liquids, amorphous structures, defects, interfaces, and surfaces.  If no
-nontrivial operation is detected or supplied, the catalog is normalized to
-the identity group \(G_{\rm actual}=\{e\}\).  This is not an error and does not
-disable the common closure or covariance path.  The receipt records the
-number of detected nonidentity operations and whether identity-only
-normalization was used.  The algorithm never assumes symmetry-equivalent
-fragments, equal fragment basis dimensions, uniform face geometry, or a
-regular neighbor graph.
+liquids, amorphous structures, defects, interfaces, and surfaces.  The
+authoritative symmetry analysis must complete successfully and publish its
+provenance before catalog construction.  If that completed analysis finds no
+nontrivial operation, the catalog is normalized to
+\(G_{\rm actual}=\{e\}\).  This is not an error and does not disable the common
+closure or covariance path.  An unexecuted or failed analysis, absent
+provenance, an empty operation list, or a malformed/incomplete group is an
+error and is never converted to identity-only.  The receipt records analysis
+completion and provenance, the number of detected nonidentity operations,
+and whether identity-only normalization was used.  An explicit user request
+for identity-only handling is accepted only when the authoritative analysis
+also finds no nonidentity operation; it cannot suppress a known physical
+symmetry.
+
+An identity-only system does not require symmetry-equivalent fragments, equal
+fragment basis dimensions, uniform face geometry, or a regular neighbor
+graph.  For a nontrivial physical group, fragment geometry, topology, basis
+actions, and all interface orbits must be covariant under that same group.
+Failure of the chosen fragmentation to represent a known physical operation
+rejects the catalog rather than weakening the physical group.
 
 The retained WF+PW space is selected in complete blocks of the actual group.
 If a cutoff intersects a degenerate multiplet, reciprocal star, or another
@@ -461,8 +477,8 @@ The ground-state writer publishes one atomic checkpoint containing:
 - occupied coefficients, occupations, and eigenvalues;
 - final density and interface observables;
 - actual-group symmetry and face-topology metadata, including the identity,
-  the number of nonidentity operations, and the identity-only normalization
-  flag;
+  authoritative-analysis completion and provenance, the number of nonidentity
+  operations, and the identity-only normalization flag;
 - DC seed-density fingerprint;
 - basis, metric, operator, state, and complete-payload fingerprints;
 - exchange-correlation functional, pseudopotential, and total-energy

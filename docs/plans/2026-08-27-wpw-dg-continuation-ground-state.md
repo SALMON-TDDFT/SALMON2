@@ -82,7 +82,10 @@ Add an identity-only catalog with inequivalent fragments, unequal local basis
 dimensions, irregular face geometry, and no nonidentity operation.  Require
 normal initialization, no added orbit member, and execution of the same
 closure path rather than a symmetry-check bypass.  Record zero nonidentity
-operations and `identity_only=.true.` in its receipt.
+operations, successful authoritative symmetry analysis and its provenance,
+and `identity_only=.true.` in its receipt.  Separately provide an unexecuted
+analysis, failed analysis, absent provenance, empty operation list, and
+malformed group; require collective rejection rather than identity fallback.
 
 Add a collective closure routine taking the requested WF block IDs and their
 group action, plus requested PW packet IDs and their packet action.  It returns
@@ -91,10 +94,13 @@ fingerprint covering both requested and effective selections.  Pass these
 actions from the already accepted basis symmetry representation; do not infer
 WF multiplets from eigenvalue proximity.
 
-Normalize an accepted representation with no nontrivial operation to one
-explicit identity action before closure.  Do not require equivalent fragments,
-equal fragment basis dimensions, uniform face areas, or a regular neighbor
-graph.
+Normalize a successfully completed authoritative analysis with no nontrivial
+operation to one explicit identity action before closure.  Do not require
+equivalent fragments, equal fragment basis dimensions, uniform face areas, or
+a regular neighbor graph for that identity-only case.  For a known nontrivial
+physical group, require fragment geometry, topology, basis actions, and face
+orbits to be covariant; reject a fragmentation that loses an operation and do
+not relabel it as identity-only.
 
 Require collective failure before seed initialization unless
 `theory=='dft'`, `system%Nspin==1`, `yn_spinorbit=='n'`,
@@ -444,7 +450,9 @@ refresh.  Aggregate maxima collectively and fail closed on omitted
 operations, split symmetry blocks, or faces.
 The operation list must contain at least the identity.  Zero nonidentity
 operations is valid and is reported distinctly from a missing or malformed
-operation list.
+operation list.  Acceptance also requires successful authoritative symmetry
+analysis and its provenance; callback absence or analysis failure cannot be
+represented as an identity-only result.
 
 Wire this oracle into `dg_hybrid_continuation_scf` as a mandatory
 candidate-acceptance callback.  Invoke it only after the inexpensive inner
@@ -494,7 +502,12 @@ accepted group action plus requested PW packet IDs/action into the closure
 routine before catalog freezing.  Require the returned effective IDs—not the
 requested IDs—to drive basis materialization, ownership, selection
 fingerprints, and continuation initialization.  Reject a production call that
-freezes or materializes the requested selection directly.
+freezes or materializes the requested selection directly.  Require an
+identity-only production case to pass one explicit identity action plus a
+successful authoritative-analysis receipt.  Reject an empty operation list,
+missing/failed analysis provenance, and any attempt to downgrade a known
+nontrivial physical group because the selected fragmentation is not
+covariant.
 
 **Step 2: Run RED**
 
@@ -562,8 +575,9 @@ continuation receipt, exchange-correlation functional, pseudopotential and
 energy-decomposition provenance, and all fingerprints.  Corrupt one representative value
 from metadata, basis, matrix, and state payloads and require rejection.  Require
 an interrupted write to leave the previous accepted file intact.
-Include the actual-group operation count, nonidentity-operation count, and
-identity-only normalization flag in the hashed catalog metadata.
+Include authoritative-analysis completion and provenance, the actual-group
+operation count, nonidentity-operation count, and identity-only normalization
+flag in the hashed catalog metadata.
 
 Run: `python3 tests/dg/run_rt_dg_hybrid_checkpoint_mpi.py`
 
