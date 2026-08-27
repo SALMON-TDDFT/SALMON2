@@ -56,7 +56,10 @@ and occupied-only readers remain unchanged for their current callers.
 - Create: `tests/dg/test_dg_hybrid_continuation_state_mpi.f90`
 - Create: `tests/dg/run_dg_hybrid_continuation_state_mpi.py`
 - Create: `src/gs/dc/dg_hybrid_continuation_state.f90`
+- Modify: `src/common/dg_hybrid_production_pw_basis.f90`
+- Modify: `src/common/dg_hybrid_window_distribution.f90`
 - Modify: `src/gs/dc/CMakeLists.txt`
+- Modify: `src/common/CMakeLists.txt`
 
 **Step 1: Write the failing seed test**
 
@@ -65,6 +68,12 @@ different density reconstructible from a trial coefficient matrix.  Require
 initialization to copy the DC density exactly, preserve its fingerprint, set
 lambda to zero, and reject duplicate core ownership, zero fingerprints, or a
 catalog mutation after initialization.
+
+Give the initial selection a cutoff that splits a reciprocal star and a WF
+symmetry multiplet.  Require deterministic expansion to the complete orbit
+before catalog freezing, followed by recomputed ownership, distribution, and
+fingerprints.  Require failure when the supplied action maps cannot produce a
+finite closed selection.
 
 Require
 
@@ -88,7 +97,9 @@ projector, freshly derived interface observables, lambda controller state,
 epochs, residual receipt, an immutable DC seed snapshot, and a separate
 accepted snapshot.  Initialization takes `dc_density` as an explicit required
 argument, never calls a density reconstruction callback, and marks lambda zero
-as unaccepted until its full fixed-point gates pass.
+as unaccepted until its full fixed-point gates pass.  Reuse the existing
+reciprocal-star and basis-action maps to close the retained selection before
+freezing the catalog.  Do not change the basis during continuation.
 
 **Step 4: Run GREEN**
 
@@ -98,8 +109,9 @@ Expected: PASS at 1, 2, and 4 ranks with identical global fingerprints.
 
 **Step 5: Commit**
 
-Stage the three new files and only the module-list hunk from
-`src/gs/dc/CMakeLists.txt`; inspect the cached diff and commit:
+Stage only the Task 1 files.  The two basis files are already dirty, so use
+`git add -p` for their symmetry-closure hunks; likewise stage only the new
+module-list hunks from both CMake files.  Inspect the cached diff and commit:
 
 `feat(dg): seed continuation from converged DC density`
 
@@ -116,7 +128,9 @@ Stage the three new files and only the module-list hunk from
 
 **Step 1: Write the failing two-fragment test**
 
-Use analytic linear basis functions on two adjacent fragments.  Compare all
+Use analytic complex linear basis functions on two adjacent fragments.  Fix
+one canonical normal from minus to plus, define jumps and averages with that
+same normal on both traces, and compare all
 four minus/minus, minus/plus, plus/minus, and plus/plus blocks against a dense
 reference containing consistency, adjoint-consistency, and penalty terms.
 Require nonzero off-diagonal coupling, Hermiticity, reciprocal-face
@@ -124,8 +138,11 @@ cancellation, exactly one canonical owner, and uniform scaling of every block
 by one scalar lambda.  Include a periodic face and reject face-local lambdas.
 Include an interface Hamiltonian entry for which the metric entry is zero and
 require a metric CSR graph independent of the operator-union CSR graph.  All
-Hamiltonian components and position operators share the operator-union graph,
-using explicit component zeros rather than separate exchange graphs.  Add a crossing nonlocal-projector
+Hamiltonian components and position operators share a coupling-envelope graph
+constructed from basis support, nonlocal support, and face topology, using
+explicit component zeros rather than separate exchange graphs.  Perturb the
+density so an initially zero Hartree/XC edge becomes nonzero and require it to
+use the unchanged graph and exchange schedule.  Add a crossing nonlocal-projector
 fixture and require exactly-once volume accounting, separate from SIPG kinetic
 faces.
 
@@ -137,12 +154,14 @@ Expected: compile failure because the projected SIPG assembler is absent.
 
 **Step 3: Implement the minimum assembler**
 
-Reuse `evaluate_dg_nodal_sipg_face`.  Exchange fixed basis values and outward
-normal derivatives, assemble both row directions for each canonical face, and
+Reuse `evaluate_dg_nodal_sipg_face`.  Convert its two outward-normal traces to
+the documented canonical-normal convention, apply complex conjugation to the
+test-function trace and derivative, assemble both row directions for each
+canonical face, and
 store the result in row-owned sparse form.  Keep consistency, adjoint, and
 penalty diagnostic norms separately.  Do not use current eigenvector
 coefficients while constructing the operator.  Give the metric and operator
-union independent row offsets, columns, structure fingerprints, and
+coupling envelope independent row offsets, columns, structure fingerprints, and
 communication schedules.  Do not require the metric graph to contain every
 SIPG Hamiltonian edge and do not create a separate graph per component.
 
@@ -185,7 +204,9 @@ references and reject nonfinite or rank-deficient inputs.
 Use a nonorthogonal dense representation satisfying `D^dagger S D=S` and
 require `D Q D^-1=Q` for the mixed-index occupied projector.  Separately test
 `D^dagger H D=H` and the selected coefficient convention for the occupation
-kernel.  This pins forward versus pullback transformations.
+kernel.  For `C -> D C`, require explicitly
+`Gamma -> D Gamma D^dagger`; reject use of the projector similarity rule for
+`Gamma`.  This pins forward versus pullback transformations.
 
 **Step 2: Run RED**
 
@@ -234,6 +255,13 @@ density damping `0.5`, minimum projector overlap `0.9`, and eight rollbacks.
 For every residual use the documented linear-in-lambda intermediate tolerance
 clamped below by its final tolerance.  Treat a small gap by cluster-aware
 occupation and projector overlap; do not add a separate gap-cutoff rejection.
+Define each residual-growth ratio against
+`max(last_accepted_channel, numerical_floor)` and use the maximum channel
+ratio for the decision.  An easy stage is one
+that converges within half of the configured iteration limit without rollback
+and passes the projector-overlap gate; only then may the step grow.  Read the
+iteration limit and intermediate/final channel tolerances from `controls` and
+pin these transitions in the fixture rather than adding another controller.
 
 **Step 2: Run RED**
 
@@ -439,7 +467,8 @@ weights, partition data, face values and normals, nonlocal distribution,
 ownership/catalog, cutoff/selection metadata, coefficients, occupations,
 eigenvalues, density, interface observables, separately identified fixed and
 initial Hartree/XC Hamiltonian components, DC seed fingerprint,
-continuation receipt, and all fingerprints.  Corrupt one representative value
+continuation receipt, exchange-correlation functional, pseudopotential and
+energy-decomposition provenance, and all fingerprints.  Corrupt one representative value
 from metadata, basis, matrix, and state payloads and require rejection.  Require
 an interrupted write to leave the previous accepted file intact.
 
@@ -488,8 +517,11 @@ Use partial staging for dirty `main_dft.f90`; commit only task hunks as
 **Step 1: Write the failing GS-to-RT identity test**
 
 Write a complete synthetic GS checkpoint and initialize RT from it.  Require
-bitwise-identical sparse matrix payloads and matching complete-payload
-fingerprint.  At RT startup re-evaluate generalized residual, `S`
+bitwise identity of the canonical serialized global payload and its
+complete-payload fingerprint.  After MPI redistribution, compare rows by
+global row and column IDs and require exact values, without requiring local CSR
+arrays from different rank counts to be bitwise identical.  At RT startup
+re-evaluate generalized residual, `S`
 orthogonality, electron number, Hermiticity, zero-field basis/operator
 covariance, and covariance of the complete occupied projector or occupation
 density matrix.  Do not test individual eigenvector symmetry.  Reject a test
@@ -522,7 +554,9 @@ SALMON time step before calling the existing one-step length-gauge propagator.
 Do not add an inner midpoint or predictor-corrector SCF.  Keep one stable
 operator-union structure fingerprint and a separate value fingerprint for
 each update; key sparse-exchange schedules only by the structure fingerprint
-so a value update does not rebuild communication metadata.
+so a value update does not rebuild communication metadata.  Reject any value
+outside the precomputed coupling envelope.  Exercise an initially zero edge
+that becomes nonzero after a density perturbation.
 
 **Step 4: Run GREEN and legacy RT regression**
 
@@ -545,6 +579,8 @@ Commit only the task files as `feat(rt): load exact hybrid DG ground state`.
 
 **Files:**
 - Create: `src/rt/dg/rt_dg_hybrid_stationarity.f90`
+- Create: `src/common/dg_hybrid_total_energy.f90`
+- Modify: `src/common/CMakeLists.txt`
 - Modify: `src/rt/CMakeLists.txt`
 - Create: `tests/dg/test_rt_dg_hybrid_stationarity_mpi.f90`
 - Create: `tests/dg/run_rt_dg_hybrid_stationarity_mpi.py`
@@ -561,6 +597,12 @@ the Hartree/XC update callback and require exactly one call at the beginning of
 each explicit RT step; a frozen-Hamiltonian propagator and an accidental inner
 SCF loop must both fail the fixture.
 
+Compare the hybrid energy evaluator against SALMON's existing DFT energy
+decomposition for a no-interface fixture, then add an analytic two-fragment
+fixture and require exactly one complete SIPG face-energy contribution.
+Perturb Hartree and XC independently to prove that the evaluator applies the
+existing double-counting corrections and is not `Tr(Gamma H)`.
+
 **Step 2: Run RED**
 
 Run: `python3 tests/dg/run_rt_dg_hybrid_stationarity_mpi.py`
@@ -571,7 +613,12 @@ Expected: compile failure because the stationarity evaluator is absent.
 
 Reuse the common projector/residual algebra.  Record initial invariants from
 the checkpoint payload and compare them at configured RT samples.  Do not use
-raw coefficient differences as an acceptance measure.  Do not add a separate
+raw coefficient differences as an acceptance measure.  Reconstruct the
+production-grid density and potentials, call the existing SALMON DFT energy
+decomposition for electrostatic, XC, ionic, and nonlocal terms, and replace
+its kinetic contribution with broken-volume plus complete SIPG kinetic energy
+from `Gamma_occ`.  Verify functional and pseudopotential provenance.  Do
+not add a separate
 RT symmetry-drift gate: the initial zero-field operator and occupied-space
 symmetry were already accepted, and stationary projector/density checks cover
 the zero-field case.  Driven-state symmetry is outside this plan.
@@ -622,13 +669,19 @@ synthetic complete receipts and rejection of incomplete receipts.
 
 **Step 4: Run protected-route regressions**
 
-Run these existing entry points:
+Run the existing protected entry points and all hybrid RT runners available
+after Tasks 9 and 10:
 
 ```text
 python3 tests/dg/check_dg_hybrid_self_consistent_route.py
 python3 tests/dg/check_dg_overlapping_wannier_route.py
 python3 tests/dg/check_dg_fragment_symmetry_production.py
 python3 tests/dg/test_replay_dg_wannier90_bundle.py
+python3 tests/dg/run_rt_dg_hybrid_checkpoint_mpi.py
+python3 tests/dg/run_rt_dg_hybrid_metric_solver_mpi.py
+python3 tests/dg/run_rt_dg_hybrid_length_gauge_mpi.py
+python3 tests/dg/run_rt_dg_hybrid_initialization_mpi.py
+python3 tests/dg/run_rt_dg_hybrid_stationarity_mpi.py
 ```
 
 Expected: PASS with no changed legacy branch behavior.

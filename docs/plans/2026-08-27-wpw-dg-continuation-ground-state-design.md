@@ -80,6 +80,11 @@ For one complete continuation attempt, the following catalog is immutable:
 The retained WF+PW space is selected in complete symmetry blocks.  If a
 cutoff intersects a degenerate multiplet, reciprocal star, or another
 symmetry orbit, the whole block is retained or the whole block is omitted.
+Before the catalog is frozen, selection expands a partially selected block to
+its complete orbit using the existing reciprocal-star and basis-action maps.
+It then recomputes ownership, distribution, cutoff metadata, and the catalog
+fingerprint.  Failure to construct a finite closed selection aborts before
+continuation; the basis is never expanded inside a lambda stage.
 The retained-space projector must have negligible symmetry leakage,
 
 \[
@@ -108,13 +113,18 @@ For the fixed catalog, the zero-field Hamiltonian is
  \qquad 0\leq\lambda\leq1.
 \]
 
-The interface bilinear form contains every symmetric interior-penalty term:
+For complex WF+PW basis functions, the interface form is sesquilinear.  Choose
+one fixed unit normal \(n_\Gamma\) directed from the canonical minus fragment
+to the plus fragment, define \([u]=u^- -u^+\) and
+\(\{\partial_nu\}=(\nabla u^-\cdot n_\Gamma+
+\nabla u^+\cdot n_\Gamma)/2\), and use that fixed normal for both traces.  The
+interface form contains every symmetric interior-penalty term:
 
 \[
  a_\Gamma(u,v)=
- -\int_\Gamma \{\partial_nu\}[v]\,dS
- -\int_\Gamma [u]\{\partial_nv\}\,dS
- +\int_\Gamma \frac{\eta}{h}[u][v]\,dS.
+ -\int_\Gamma \overline{[v]}\{\partial_nu\}\,dS
+ -\int_\Gamma \overline{\{\partial_nv\}}[u]\,dS
+ +\int_\Gamma \frac{\eta}{h}\overline{[v]}[u]\,dS.
 \]
 
 Thus the projected interface operator contains the numerical/consistency
@@ -333,9 +343,17 @@ covariant occupation kernel use their corresponding bilinear-form
 transformations.  A dense nonorthogonal fixture pins the forward/pullback
 representation convention.
 
-For partial occupations, symmetry is evaluated using
-`Gamma_occ`; symmetry-related degenerate states must receive compatible
-occupations.  The face topology and interface blocks must map covariantly
+For partial occupations, symmetry is evaluated using `Gamma_occ`.  Under the
+coefficient action \(C\mapsto D(g)C\), its explicit transformation is
+
+\[
+ \Gamma_{\mathrm{occ}}\longmapsto
+ D(g)\Gamma_{\mathrm{occ}}D(g)^\dagger.
+\]
+
+This congruence must not be replaced by the mixed-index projector similarity
+rule.  Symmetry-related degenerate states must receive compatible occupations.
+The face topology and interface blocks must map covariantly
 under the same operation.  Diagonalization is not used as a symmetry repair.
 Failure of the basis, retained-space closure, occupied-subspace covariance,
 topology, or zero-field operator covariance closes the hybrid route with an
@@ -348,7 +366,8 @@ After the inner loop first satisfies all lambda-one conditions, the route
 performs a final unmixed refresh:
 
 1. Reconstruct density and all interface observables from the accepted
-   occupied projector without mixing.
+   occupation-weighted `Gamma_occ` without mixing; use `Q_occ` only for
+   occupied-subspace tracking.
 2. Rebuild the complete density-dependent volume operator.
 3. Combine it with the full unscaled interface operator.
 4. Solve or re-evaluate the generalized eigenproblem against this refreshed
@@ -362,9 +381,12 @@ cache may enter the final payload.
 
 ## Atomic GS checkpoint and RT handoff
 
-Storage uses two CSR graphs only.  The metric has its own CSR graph.  All
-coefficient-space operator components use one operator-union CSR graph with
-explicit zeros where a component has no entry.  A complete SIPG Hamiltonian
+Storage uses two CSR graphs only.  The metric has its own CSR graph.  The
+operator-union graph is a structural coupling envelope derived from basis
+support, nonlocal-projector support, and physical face topology, not from
+which values happen to be nonzero at the initial density.  All
+coefficient-space operator components use this graph with explicit zeros where
+a component currently has no value.  A complete SIPG Hamiltonian
 may therefore have an interface entry where the metric entry is absent.  The
 metric and operator-union structures have separate degree limits,
 Hermiticity gates, structure fingerprints, and communication schedules.  This
@@ -393,6 +415,8 @@ The ground-state writer publishes one atomic checkpoint containing:
 - symmetry and face topology metadata;
 - DC seed-density fingerprint;
 - basis, metric, operator, state, and complete-payload fingerprints;
+- exchange-correlation functional, pseudopotential, and total-energy
+  decomposition provenance;
 - lambda history, rollback history, tolerances, and final residual receipt.
 
 The basis bundle, matrix payload, state, and provenance are hashed together.
@@ -428,6 +452,15 @@ zero-field basis/operator/occupied-subspace symmetry, and exact payload
 identity.  Any mismatch fails closed.
 
 ## Zero-field real-time acceptance
+
+Total energy uses SALMON's existing DFT energy decomposition on the
+reconstructed density, Hartree/XC fields, ions, and nonlocal projectors.  Its
+kinetic contribution is the broken-volume kinetic energy plus the complete
+SIPG consistency, adjoint-consistency, and penalty face energy evaluated from
+`Gamma_occ`.  It is not `Tr(Gamma_occ H_DG)`, which would retain Hartree/XC
+double counting.  GS and RT call the same evaluator and verify the functional,
+pseudopotential, quadrature, and energy-component provenance from the
+checkpoint.
 
 An end-to-end test starts RT from the accepted lambda-one checkpoint with no
 external field.  At every sampled time it measures drift in:
@@ -473,7 +506,7 @@ The test layers are:
    independent metric/operator sparsity, uniform lambda, refreshed traces, and
    atomic rollback;
 3. continuation tests for lambda-zero convergence from the exact DC seed,
-   adaptive steps, gap/crossing rejection, density damping, inexact
+   adaptive steps, cluster-aware crossing rejection, density damping, inexact
    tolerances, and lambda-one refresh;
 4. checkpoint corruption, provenance, and exact-payload GS-to-RT tests;
 5. zero-field RT stationarity tests with normal density-dependent Hartree/XC
