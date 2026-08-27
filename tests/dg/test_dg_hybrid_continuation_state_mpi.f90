@@ -11,8 +11,9 @@ program test_dg_hybrid_continuation_state_mpi
   integer(int64)::fingerprint,reference_fingerprint
   integer(int64),allocatable::core_ids(:)
   integer,allocatable::effective(:),added_parent(:),added_operation(:)
-  integer::universe(4),requested(1),group_action(4,2),identity_action(4,1)
+  integer::universe(4),requested(1),duplicate_requested(2),group_action(4,2),identity_action(4,1)
   real(real64)::dc_density(ngrid),trial_density(ngrid)
+  real(real64),allocatable::local_dc_density(:),local_trial_density(:)
   type(s_dg_hybrid_catalog_receipt)::catalog
   type(s_dg_hybrid_scope_receipt)::scope
   type(s_dg_hybrid_continuation_state)::state
@@ -25,17 +26,19 @@ program test_dg_hybrid_continuation_state_mpi
   trial_density=dc_density+0.5d0
   allocate(core_ids(count([(mod(i-1,nproc)==rank,i=1,ngrid)])))
   core_ids=pack([(int(i,int64),i=1,ngrid)],[(mod(i-1,nproc)==rank,i=1,ngrid)])
+  allocate(local_dc_density(size(core_ids)),local_trial_density(size(core_ids)))
+  local_dc_density=dc_density(int(core_ids));local_trial_density=trial_density(int(core_ids))
 
   call valid_identity_catalog(catalog)
   call build_dg_hybrid_scope_receipt(comm,1,.true.,1,.false.,.false.,.false.,.false.,.false.,[1],&
     scope,ok,message)
   call require(ok,trim(message))
-  call initialize_dg_hybrid_continuation(comm,dc_density,trial_density,core_ids,catalog,scope,&
+  call initialize_dg_hybrid_continuation(comm,ngrid,core_ids,local_dc_density,local_trial_density,catalog,scope,&
     state,fingerprint,ok,message)
   call require(ok,trim(message))
-  call require(all(state%seed_density==dc_density),'continuation seed is not the exact DC density')
-  call require(all(state%mixed_density==dc_density),'mixed density did not start from the DC density')
-  call require(any(state%seed_density/=trial_density),'trial coefficient density was used as the seed')
+  call require(all(state%seed_density_ids==core_ids),'distributed density IDs were not preserved')
+  call require(all(state%seed_density==local_dc_density),'continuation seed is not the local DC density')
+  call require(all(state%mixed_density==local_dc_density),'mixed density did not start from the local DC density')
   call require(state%lambda==0d0.and..not.state%lambda_accepted,'lambda zero was accepted before fixed-point gates')
   call require(.not.state%accepted%valid,'accepted snapshot exists before lambda-zero convergence')
   call require(state%seed_fingerprint/=0_int64.and.fingerprint/=0_int64,'missing continuation fingerprints')
@@ -70,29 +73,49 @@ program test_dg_hybrid_continuation_state_mpi
   call close_dg_hybrid_selection(comm,requested,universe,group_action(:,2:2),effective,added_parent,&
     added_operation,fingerprint,ok,message)
   call require(.not.ok,'symmetry action without identity was accepted')
+  duplicate_requested=[30,30]
+  call close_dg_hybrid_selection(comm,duplicate_requested,universe,identity_action,effective,added_parent,&
+    added_operation,fingerprint,ok,message)
+  call require(.not.ok,'duplicate requested selection IDs were accepted')
 
   catalog%analysis_complete=.false.
-  call initialize_dg_hybrid_continuation(comm,dc_density,trial_density,core_ids,catalog,scope,&
+  call initialize_dg_hybrid_continuation(comm,ngrid,core_ids,local_dc_density,local_trial_density,catalog,scope,&
     state,fingerprint,ok,message)
   call require(.not.ok,'unfinished symmetry analysis was accepted')
   call valid_identity_catalog(catalog);catalog%analysis_fingerprint=0_int64
-  call initialize_dg_hybrid_continuation(comm,dc_density,trial_density,core_ids,catalog,scope,&
+  call initialize_dg_hybrid_continuation(comm,ngrid,core_ids,local_dc_density,local_trial_density,catalog,scope,&
     state,fingerprint,ok,message)
   call require(.not.ok,'missing symmetry provenance was accepted')
   call valid_identity_catalog(catalog);catalog%operation_count=0
-  call initialize_dg_hybrid_continuation(comm,dc_density,trial_density,core_ids,catalog,scope,&
+  call initialize_dg_hybrid_continuation(comm,ngrid,core_ids,local_dc_density,local_trial_density,catalog,scope,&
     state,fingerprint,ok,message)
   call require(.not.ok,'empty symmetry operation list was accepted')
   call valid_identity_catalog(catalog);catalog%catalog_fingerprint=0_int64
-  call initialize_dg_hybrid_continuation(comm,dc_density,trial_density,core_ids,catalog,scope,&
+  call initialize_dg_hybrid_continuation(comm,ngrid,core_ids,local_dc_density,local_trial_density,catalog,scope,&
     state,fingerprint,ok,message)
   call require(.not.ok,'zero catalog fingerprint was accepted')
 
   call valid_identity_catalog(catalog)
-  if(rank==0.and.size(core_ids)>0)core_ids=[core_ids,core_ids(1)]
-  call initialize_dg_hybrid_continuation(comm,dc_density,trial_density,core_ids,catalog,scope,&
+  if(rank==0.and.size(core_ids)>0)then
+    core_ids=[core_ids,core_ids(1)];local_dc_density=[local_dc_density,local_dc_density(1)]
+    local_trial_density=[local_trial_density,local_trial_density(1)]
+  endif
+  call initialize_dg_hybrid_continuation(comm,ngrid,core_ids,local_dc_density,local_trial_density,catalog,scope,&
     state,fingerprint,ok,message)
   call require(.not.ok,'duplicate distributed core ownership was accepted')
+
+  if(rank==0.and.size(core_ids)>1)then
+    core_ids=core_ids(:size(core_ids)-1);local_dc_density=local_dc_density(:size(local_dc_density)-1)
+    local_trial_density=local_trial_density(:size(local_trial_density)-1)
+  endif
+  call valid_identity_catalog(catalog)
+  call build_dg_hybrid_scope_receipt(comm,1,.true.,1,.false.,.false.,.false.,.false.,.false.,[1],&
+    scope,ok,message)
+  call require(ok,trim(message))
+  scope%plus_u=.true.
+  call initialize_dg_hybrid_continuation(comm,ngrid,core_ids,local_dc_density,local_trial_density,catalog,scope,&
+    state,fingerprint,ok,message)
+  call require(.not.ok,'mutated supported-scope receipt was accepted')
 
   call build_dg_hybrid_scope_receipt(comm,1,.true.,2,.false.,.false.,.false.,.false.,.false.,[1],&
     scope,ok,message)
@@ -103,6 +126,12 @@ program test_dg_hybrid_continuation_state_mpi
   call build_dg_hybrid_scope_receipt(comm,1,.true.,1,.false.,.false.,.false.,.false.,.false.,[99],&
     scope,ok,message)
   call require(.not.ok,'unsupported XC continuation scope was accepted')
+  call build_dg_hybrid_scope_receipt(comm,1,.true.,1,.false.,.false.,.false.,.false.,.false.,[7],&
+    scope,ok,message)
+  call require(ok,'built-in PW continuation scope was rejected')
+  call build_dg_hybrid_scope_receipt(comm,1,.true.,1,.false.,.false.,.false.,.false.,.false.,[4],&
+    scope,ok,message)
+  call require(.not.ok,'TB-mBJ continuation scope was accepted')
 
   if(rank==0)then
     write(*,'(a,i0,a,i0)')'CONTINUATION_STATE ranks=',nproc,' fingerprint=',reference_fingerprint
