@@ -1,0 +1,141 @@
+#include "config.h"
+program test_dg_hybrid_continuation_controller_mpi
+  use mpi
+  use,intrinsic::iso_fortran_env,only:real64
+  use dg_hybrid_continuation_controller
+  implicit none
+  integer::comm,rank,nproc,ierr,i
+  type(s_dg_hybrid_controller_controls)::controls
+  type(s_dg_hybrid_controller)::controller
+  type(s_dg_hybrid_trial_state)::state,accepted
+  type(s_dg_hybrid_stage_report)::report
+  real(real64)::t0(4),t1(4),lambda_before,step_before
+  logical::ok,accept
+  character(256)::message
+
+  call MPI_Init(ierr);comm=MPI_COMM_WORLD
+  call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+  call default_dg_hybrid_controller_controls(controls)
+  call require(controls%initial_step==0.125d0.and.controls%minimum_step==0.015625d0.and.&
+    controls%maximum_step==0.5d0.and.controls%growth_factor==1.5d0.and.controls%shrink_factor==0.5d0,&
+    'adaptive-step defaults changed')
+  call require(controls%residual_growth_limit==4d0.and.controls%density_damping==0.5d0.and.&
+    controls%minimum_projector_overlap==0.9d0.and.controls%maximum_rollbacks==8,&
+    'continuation safety defaults changed')
+  controls%iteration_limit=8
+  controls%intermediate_tolerance=[1d-4,2d-4,3d-4,4d-4]
+  controls%final_tolerance=[1d-8,2d-8,3d-8,4d-8]
+  call dg_hybrid_stage_tolerances(controls,0d0,t0)
+  call dg_hybrid_stage_tolerances(controls,1d0,t1)
+  call require(all(t0==controls%intermediate_tolerance).and.all(t1==controls%final_tolerance),&
+    'endpoint continuation tolerances are incorrect')
+  call dg_hybrid_stage_tolerances(controls,0.25d0,t0);call dg_hybrid_stage_tolerances(controls,0.75d0,t1)
+  call require(all(t1<=t0).and.all(t1>=controls%final_tolerance),'inexact tolerances are not monotone')
+
+  call fill_state(accepted,10)
+  if(nproc>1)then
+    if(rank==0)controls%growth_factor=1.6d0
+    call initialize_dg_hybrid_controller(comm,controls,0d0,accepted,3,controller,ok,message)
+    call require(.not.ok,'rank-disagreeing controller controls were accepted')
+    controls%growth_factor=1.5d0
+  endif
+  call initialize_dg_hybrid_controller(comm,controls,0d0,accepted,3,controller,ok,message)
+  call require(ok,trim(message))
+  state=accepted
+  call propose_dg_hybrid_trial(comm,controller,state,ok,message)
+  call require(ok.and.controller%trial_lambda==0.125d0,'initial lambda proposal is incorrect')
+  call require(all(controller%face_lambda==controller%trial_lambda),'face-local lambda was proposed')
+  call require(.not.controller%trace_valid,'trace cache survived a lambda state change')
+
+  call passing_report(controller,report);report%residuals(3)=2d0*report%tolerances(3)
+  call decide_dg_hybrid_stage(comm,controller,state,report,accept,ok,message)
+  call require(ok.and..not.accept,'stage passed while one residual channel failed')
+  call passing_report(controller,report);report%residuals=2d0*report%tolerances
+  report%tolerances=100d0*report%tolerances
+  call decide_dg_hybrid_stage(comm,controller,state,report,accept,ok,message)
+  call require(ok.and..not.accept,'caller-supplied loose tolerances bypassed controller controls')
+  call passing_report(controller,report);report%iteration=3
+  step_before=controller%step
+  call decide_dg_hybrid_stage(comm,controller,state,report,accept,ok,message)
+  call require(ok.and.accept,'fully converged easy stage was rejected')
+  call require(controller%step==min(controls%maximum_step,step_before*controls%growth_factor),&
+    'easy accepted stage did not grow the next step')
+
+  accepted=state;call propose_dg_hybrid_trial(comm,controller,state,ok,message);call require(ok,trim(message))
+  call mutate_state(state)
+  step_before=controller%step;lambda_before=controller%accepted_lambda
+  call reject_dg_hybrid_trial(comm,controller,state,'forced rollback',ok,message)
+  call require(ok,'forced rollback failed: '//trim(message))
+  call require(equal_state(state,accepted),'rollback did not restore every accepted payload bit')
+  call require(controller%accepted_lambda==lambda_before.and.controller%step==max(controls%minimum_step,&
+    step_before*controls%shrink_factor),'rollback did not restore lambda and reduce its step')
+  call require(.not.controller%trace_valid,'trace cache survived rollback')
+
+  call propose_dg_hybrid_trial(comm,controller,state,ok,message);call require(ok,trim(message))
+  call observe_dg_hybrid_inner_residuals(comm,controller,[1d-6,1d-6,1d-6,1d-6],accept,ok,message)
+  call require(ok.and..not.accept,'first inner residual sample rejected a trial')
+  call observe_dg_hybrid_inner_residuals(comm,controller,[5d-6,5d-6,5d-6,5d-6],accept,ok,message)
+  call require(ok.and..not.accept,'one residual-growth event rejected a trial')
+  call observe_dg_hybrid_inner_residuals(comm,controller,[3d-5,3d-5,3d-5,3d-5],accept,ok,message)
+  call require(ok.and.accept,'two consecutive excessive growth events did not request rollback')
+
+  call passing_report(controller,report);report%gap_shrinking=.true.;report%iteration=3
+  step_before=controller%step
+  call decide_dg_hybrid_stage(comm,controller,state,report,accept,ok,message)
+  call require(ok.and.accept,'shrinking gap alone rejected an acceptable stage')
+  call require(controller%step==max(controls%minimum_step,step_before*controls%shrink_factor),&
+    'shrinking gap did not conservatively reduce the next step')
+  call propose_dg_hybrid_trial(comm,controller,state,ok,message);call require(ok,trim(message))
+  call passing_report(controller,report);report%occupation_ok=.false.
+  call decide_dg_hybrid_stage(comm,controller,state,report,accept,ok,message)
+  call require(ok.and..not.accept,'failed cluster-aware occupation was accepted')
+  call passing_report(controller,report);report%projector_overlap=0.89d0
+  call decide_dg_hybrid_stage(comm,controller,state,report,accept,ok,message)
+  call require(ok.and..not.accept,'occupied-projector discontinuity was accepted')
+  call passing_report(controller,report);report%symmetry_ok=.false.
+  call decide_dg_hybrid_stage(comm,controller,state,report,accept,ok,message)
+  call require(ok.and..not.accept,'symmetry failure was accepted')
+  if(rank==0)write(*,'(a,i0,a)')'PASS hybrid continuation controller on ',nproc,' ranks'
+  call MPI_Finalize(ierr)
+contains
+  subroutine fill_state(value,seed)
+    type(s_dg_hybrid_trial_state),intent(out)::value;integer,intent(in)::seed
+    allocate(value%density(3),value%potential(3),value%projector(2,2),value%trace(2,2),&
+      value%occupations(2),value%eigenvalues(2),value%mixing_history(4))
+    value%density=[(real(seed+i,real64),i=1,3)];value%potential=value%density+10d0
+    value%projector=cmplx(reshape([(real(seed+i,real64),i=1,4)],[2,2]),0d0,real64)
+    value%trace=2d0*value%projector;value%occupations=[2d0,2d0];value%eigenvalues=[-1d0,-0.5d0]
+    value%mixing_history=[(real(seed+20+i,real64),i=1,4)]
+    value%density_epoch=11;value%operator_epoch=12;value%projector_epoch=13;value%trace_epoch=14
+    value%derived_epoch=15
+  end subroutine fill_state
+  subroutine mutate_state(value)
+    type(s_dg_hybrid_trial_state),intent(inout)::value
+    value%density=value%density+1d0;value%potential=value%potential+2d0
+    value%projector=value%projector+(3d0,1d0);value%trace=value%trace+(4d0,-1d0)
+    value%occupations=value%occupations/2d0;value%eigenvalues=value%eigenvalues+5d0
+    value%mixing_history=-value%mixing_history
+    value%density_epoch=101;value%operator_epoch=102;value%projector_epoch=103;value%trace_epoch=104
+    value%derived_epoch=105
+  end subroutine mutate_state
+  logical function equal_state(a,b)
+    type(s_dg_hybrid_trial_state),intent(in)::a,b
+    equal_state=all(a%density==b%density).and.all(a%potential==b%potential).and.&
+      all(a%projector==b%projector).and.all(a%trace==b%trace).and.all(a%occupations==b%occupations).and.&
+      all(a%eigenvalues==b%eigenvalues).and.all(a%mixing_history==b%mixing_history).and.&
+      a%density_epoch==b%density_epoch.and.a%operator_epoch==b%operator_epoch.and.&
+      a%projector_epoch==b%projector_epoch.and.a%trace_epoch==b%trace_epoch.and.a%derived_epoch==b%derived_epoch
+  end function equal_state
+  subroutine passing_report(ctrl,value)
+    type(s_dg_hybrid_controller),intent(in)::ctrl;type(s_dg_hybrid_stage_report),intent(out)::value
+    call dg_hybrid_stage_tolerances(ctrl%controls,ctrl%trial_lambda,value%tolerances)
+    value%residuals=0.5d0*value%tolerances;value%projector_overlap=0.99d0;value%electron_ok=.true.
+    value%occupation_ok=.true.;value%hermitian_ok=.true.;value%symmetry_ok=.true.;value%real_space_ok=.true.
+    value%finite_ok=.true.;value%gap_shrinking=.false.;value%iteration=ctrl%controls%iteration_limit
+  end subroutine passing_report
+  subroutine require(condition,label)
+    logical,intent(in)::condition;character(*),intent(in)::label;integer::local_bad,global_bad
+    local_bad=merge(0,1,condition);call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;if(rank==0)write(0,'(a)')trim(label);error stop 1;endif
+  end subroutine require
+end program test_dg_hybrid_continuation_controller_mpi
