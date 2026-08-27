@@ -36,15 +36,19 @@ fixed point.  The seed gate is
  \leq \tau_{\mathrm{seed}}.
 \]
 
-The first implementation supports the Si64 acceptance scope: one scalar
-spin channel, no spin-orbit coupling, no DFT+U, no exact-exchange/HSE term, and
-an adiabatic local or semilocal functional whose Hamiltonian is determined by
-the current scalar density and its normal SALMON grid derivatives.  Any mode
-requiring spin-resolved density, orbital/current/history-dependent state,
-noncollinear spinors, or an additional density matrix fails closed before the
-DC seed is copied.  Extending those modes requires extending both the fixed
-point and checkpoint payload; they are not silently approximated by total
-density.
+The first implementation supports only the periodic Si64 acceptance scope.
+The GS gate requires `theory='dft'`; the RT gate requires
+`theory` to be `tddft_response` or `tddft_pulse`.  Both require one
+scalar spin channel, `yn_spinorbit='n'`, `.not.PLUS_U_ON`,
+`yn_hse='n'`, `yn_fix_func='n'`, `yn_jm='n'`, periodic boundary
+conditions, and built-in density-only adiabatic
+`xc_func%xctype` values PZ, PZM, PW, or PBE.  LibXC, TB-mBJ, meta-GGA,
+exact exchange, spin-resolved, orbital/current/history-dependent,
+noncollinear, isolated-boundary, and additional-density-matrix modes fail
+closed before the DC seed is copied or RT payload is accepted.  The receipt
+hashes every selector and `xctype` entry used by this allowlist.  Extending
+these modes requires extending both the fixed point and checkpoint payload;
+they are not silently approximated by total density.
 
 The converged DC occupied space is projected into the symmetry-closed WF+PW
 basis and orthonormalized in the DG metric.  Only its occupied projector is
@@ -143,6 +147,9 @@ The outer factor \(1/2\) is the kinetic prefactor of SALMON's
 penalty terms exactly once.  The input \(\eta\) is the dimensionless penalty
 parameter inside this bracket.  The existing nodal evaluator returns the
 unscaled bracket action; the projected assembler applies the outer factor.
+Its raw diagnostic energies are labeled bracket units.  Physical projected
+operator receipts and checkpoint face energies multiply every diagnostic,
+including the penalty energy, by the same outer factor \(1/2\).
 
 Thus the projected interface operator contains the numerical/consistency
 flux, the adjoint-consistency flux, the penalty term, and both directions of
@@ -478,12 +485,12 @@ identity.  Any mismatch fails closed.
 
 ## Zero-field real-time acceptance
 
-Total energy uses a shared helper extracted from SALMON's existing
-`total_energy.f90` formulas to compute Hartree, XC, local ionic, and
-ion--ion components without assuming an ordinary-grid band energy.  The
-existing nonlocal projector action supplies `E_ion_nloc`.  The hybrid kinetic
-component is the broken-volume kinetic energy plus the complete, correctly
-normalized SIPG face energy evaluated from `Gamma_occ`.  The evaluator forms
+Total energy is implemented only for the periodic Si64 scope.  The existing
+nonlocal projector action supplies `E_ion_nloc`.  The hybrid kinetic component
+is the broken-volume kinetic energy plus the complete, correctly normalized
+SIPG face energy evaluated from `Gamma_occ`.  These two fields are supplied
+to SALMON's unchanged `calc_Total_Energy_periodic`, which computes the
+Hartree, XC, local ionic, and ion--ion components and forms
 
 \[
  E_{\rm tot}^{DG}=E_{\rm kin,volume}+E_{\rm kin,face}^{SIPG}
@@ -491,7 +498,8 @@ normalized SIPG face energy evaluated from `Gamma_occ`.  The evaluator forms
 \]
 
 It is not `Tr(Gamma_occ H_DG)`, which would retain Hartree/XC double
-counting.  GS and RT call the same evaluator and verify the functional,
+counting.  `total_energy.f90` and its existing callers are not modified.
+GS and RT call the same hybrid wrapper and verify the functional,
 pseudopotential, quadrature, and energy-component provenance from the
 checkpoint.
 

@@ -86,9 +86,11 @@ actions from the already accepted basis symmetry representation; do not infer
 WF multiplets from eigenvalue proximity.
 
 Require collective failure before seed initialization unless
-`system%Nspin==1`, `yn_spinorbit=='n'`, `PLUS_U_ON=.false.`,
-`yn_hse=='n'`, and the selected adiabatic functional depends only on the
-current scalar density and its normal grid derivatives.
+`theory=='dft'`, `system%Nspin==1`, `yn_spinorbit=='n'`,
+`.not.PLUS_U_ON`, `yn_hse=='n'`, `yn_fix_func=='n'`,
+`yn_jm=='n'`, the boundary is periodic, and all active
+`xc_func%xctype` entries are the built-in PZ, PZM, PW, or PBE constants.
+Hash every selector and `xctype` entry into the supported-scope receipt.
 
 Require
 
@@ -189,7 +191,10 @@ communication schedules.  Do not require the metric graph to contain every
 SIPG Hamiltonian edge and do not create a separate graph per component.  The
 nodal evaluator returns the unscaled bracket action; multiply both its value
 and normal-action outputs by `0.5d0` exactly once when assembling the SALMON
-kinetic operator.
+kinetic operator.  Keep raw nodal diagnostic energies labeled bracket units;
+multiply consistency, adjoint, and penalty diagnostics by `0.5d0` in the
+physical projected receipt and checkpoint.  Assert both raw and physical
+penalty values in the fixture.
 
 **Step 4: Run GREEN**
 
@@ -396,9 +401,15 @@ production driver can bypass either oracle.
 
 **Step 2: Run RED**
 
-Run: `python3 tests/dg/run_dg_hybrid_continuation_acceptance_mpi.py`
+Run:
 
-Expected: compile failure because the acceptance oracle is absent.
+```text
+python3 tests/dg/run_dg_hybrid_continuation_acceptance_mpi.py
+python3 tests/dg/run_dg_hybrid_continuation_scf_mpi.py
+```
+
+Expected: the acceptance runner fails because the oracle is absent, and the
+SCF runner fails because production candidate acceptance can bypass it.
 
 **Step 3: Implement minimum acceptance oracles**
 
@@ -457,6 +468,12 @@ flag conditions; neither is accepted as the new production result.
 Require the new route to fail before continuation for spin-polarized,
 spin-orbit, DFT+U, HSE/exact-exchange, or other orbital/current/history-dependent
 functionals; protected routes retain their existing support.
+Require `main_dft.f90` to pass the requested WF block IDs and their
+accepted group action plus requested PW packet IDs/action into the closure
+routine before catalog freezing.  Require the returned effective IDs—not the
+requested IDs—to drive basis materialization, ownership, selection
+fingerprints, and continuation initialization.  Reject a production call that
+freezes or materializes the requested selection directly.
 
 **Step 2: Run RED**
 
@@ -475,7 +492,14 @@ Reuse the accepted WF+PW basis, DC potential and density infrastructure, and
 distributed generalized solver.  Assemble complete cross-fragment SIPG rows.
 Keep the catalog frozen for the attempt.  Do not alter DC+LCFO/Wannier90 or
 overlapping-Wannier branches.  Add the explicit supported-scope gate only
-inside the new continuation branch.
+inside the new continuation branch.  Build its allowlist from
+`theory`, boundary condition, `system%Nspin`, `yn_spinorbit`,
+`PLUS_U_ON`, `yn_hse`, `yn_fix_func`, `yn_jm`, and every
+`xc_func%xctype` entry; add one rejection fixture for each selector
+family.  Before `initialize_dg_hybrid_continuation`, close both WF blocks
+and PW packets, materialize only the effective selection, recompute ownership
+and fingerprints, and pass that frozen catalog plus the supported-scope
+receipt to initialization.
 
 **Step 4: Run GREEN and route regressions**
 
@@ -581,7 +605,10 @@ density after initialization and require the RT Hamiltonian to change; this
 must fail for an implementation that freezes `H_DG(0)` throughout RT.
 Require RT initialization to reject a checkpoint whose supported-scope
 receipt is absent or requests spin, spin-orbit, DFT+U, HSE/exact exchange, or
-another state-dependent Hamiltonian channel.
+another state-dependent Hamiltonian channel.  Require local RT selectors to
+match the hashed receipt, with `theory` restricted to `tddft_response` or
+`tddft_pulse`, `yn_fix_func=='n'`, `yn_jm=='n'`, periodic
+boundaries, and the same allowed built-in `xc_func%xctype` entries.
 
 **Step 2: Run RED**
 
@@ -631,7 +658,6 @@ Commit only the task files as `feat(rt): load exact hybrid DG ground state`.
 - Create: `src/rt/dg/rt_dg_hybrid_stationarity.f90`
 - Create: `src/common/dg_hybrid_total_energy.f90`
 - Modify: `src/common/CMakeLists.txt`
-- Modify: `src/common/total_energy.f90`
 - Modify: `src/rt/CMakeLists.txt`
 - Create: `tests/dg/test_rt_dg_hybrid_stationarity_mpi.f90`
 - Create: `tests/dg/run_rt_dg_hybrid_stationarity_mpi.py`
@@ -653,10 +679,11 @@ decomposition for a no-interface fixture, then add an analytic two-fragment
 fixture and require exactly one complete SIPG face-energy contribution.
 Perturb Hartree and XC independently to prove that the evaluator applies the
 existing double-counting corrections and is not `Tr(Gamma H)`.
-Require agreement for both isolated and periodic helper paths.  Obtain
-`E_ion_nloc` from the existing nonlocal projector action while discarding
-the ordinary-grid kinetic value; verify every final `s_dft_energy` component
-against an independently summed fixture.
+Obtain `E_ion_nloc` from the existing nonlocal projector action while
+discarding the ordinary-grid kinetic value.  Set the correctly normalized DG
+kinetic field, call the unchanged `calc_Total_Energy_periodic`, and verify
+every final `s_dft_energy` component against an independently summed
+periodic fixture.  Require isolated boundaries to fail the hybrid scope gate.
 
 **Step 2: Run RED**
 
@@ -666,18 +693,15 @@ Expected: compile failure because the stationarity evaluator is absent.
 
 **Step 3: Implement the minimum evaluator and sampling hook**
 
-Extract from `src/common/total_energy.f90` one public helper for the
-Hartree, XC, local-ionic, and ion--ion components that does not start from
-band energies.  Preserve the old public routines as wrappers using the same
-formulas so protected routes do not change numerically.  Reuse the common projector/residual algebra.  Record initial invariants from
+Leave `src/common/total_energy.f90` and all protected callers unchanged.
+Reuse the common projector/residual algebra.  Record initial invariants from
 the checkpoint payload and compare them at configured RT samples.  Do not use
 raw coefficient differences as an acceptance measure.  Reconstruct the
-production-grid density and potentials, call the extracted helper for
-Hartree, XC, local-ionic, and ion--ion terms, obtain the nonlocal component
-from the existing projector action, and add broken-volume plus correctly
-normalized complete SIPG kinetic energy from `Gamma_occ`.  Fill and sum
-the explicit `s_dft_energy` fields rather than using band-energy correction
-identities.  Verify functional and pseudopotential provenance.  Do
+production-grid density and potentials, obtain the nonlocal component from
+the existing projector action, set broken-volume plus correctly normalized
+complete SIPG kinetic energy from `Gamma_occ`, and call the existing
+`calc_Total_Energy_periodic` to compute and sum Hartree, XC, local-ionic,
+and ion--ion terms.  Verify functional and pseudopotential provenance.  Do
 not add a separate
 RT symmetry-drift gate: the initial zero-field operator and occupied-space
 symmetry were already accepted, and stationary projector/density checks cover
