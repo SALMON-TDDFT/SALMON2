@@ -36,6 +36,16 @@ fixed point.  The seed gate is
  \leq \tau_{\mathrm{seed}}.
 \]
 
+The first implementation supports the Si64 acceptance scope: one scalar
+spin channel, no spin-orbit coupling, no DFT+U, no exact-exchange/HSE term, and
+an adiabatic local or semilocal functional whose Hamiltonian is determined by
+the current scalar density and its normal SALMON grid derivatives.  Any mode
+requiring spin-resolved density, orbital/current/history-dependent state,
+noncollinear spinors, or an additional density matrix fails closed before the
+DC seed is copied.  Extending those modes requires extending both the fixed
+point and checkpoint payload; they are not silently approximated by total
+density.
+
 The converged DC occupied space is projected into the symmetry-closed WF+PW
 basis and orthonormalized in the DG metric.  Only its occupied projector is
 tracked between iterations; raw eigenvector coefficients are not mixed.
@@ -121,11 +131,18 @@ to the plus fragment, define \([u]=u^- -u^+\) and
 interface form contains every symmetric interior-penalty term:
 
 \[
- a_\Gamma(u,v)=
+ a_\Gamma^T(u,v)=\frac12\left[
  -\int_\Gamma \overline{[v]}\{\partial_nu\}\,dS
  -\int_\Gamma \overline{\{\partial_nv\}}[u]\,dS
- +\int_\Gamma \frac{\eta}{h}\overline{[v]}[u]\,dS.
+ +\int_\Gamma \frac{\eta}{h}\overline{[v]}[u]\,dS
+ \right].
 \]
+
+The outer factor \(1/2\) is the kinetic prefactor of SALMON's
+\(-\frac12\nabla^2\) and multiplies consistency, adjoint-consistency, and
+penalty terms exactly once.  The input \(\eta\) is the dimensionless penalty
+parameter inside this bracket.  The existing nodal evaluator returns the
+unscaled bracket action; the projected assembler applies the outer factor.
 
 Thus the projected interface operator contains the numerical/consistency
 flux, the adjoint-consistency flux, the penalty term, and both directions of
@@ -288,7 +305,11 @@ minimum and maximum bounds.  It considers:
 
 Fast convergence with a stable occupied cluster permits a bounded increase in
 the next lambda step.  A shrinking gap reduces the proposed next step but does
-not reject an otherwise valid stage.  Residual growth, failure of
+not reject an otherwise valid stage.  Residual growth is measured only within
+one trial stage, after the first inner iteration, relative to the preceding
+inner iterate with a numerical floor.  The converged residual at the previous
+lambda is used to propose the step, never as the denominator for immediate
+trial rejection.  Sustained within-trial growth, failure of
 cluster-aware occupations to preserve electron number or projector
 continuity, or failure within the iteration limit rejects the complete trial
 stage.  Rejection
@@ -409,7 +430,9 @@ The ground-state writer publishes one atomic checkpoint containing:
   partition data, face values and normal derivatives, and the nonlocal-action
   distribution needed to reconstruct density, energy, and real-space DG
   residuals;
-- cutoff, selection, window, packet, and complement metadata;
+- requested cutoff and selection;
+- effective symmetry-closed retained selection, every added orbit member,
+  closure reason/action map, window, packet, and complement metadata;
 - occupied coefficients, occupations, and eigenvalues;
 - final density and interface observables;
 - symmetry and face topology metadata;
@@ -417,6 +440,8 @@ The ground-state writer publishes one atomic checkpoint containing:
 - basis, metric, operator, state, and complete-payload fingerprints;
 - exchange-correlation functional, pseudopotential, and total-energy
   decomposition provenance;
+- the validated supported-scope receipt covering spin, spin-orbit, DFT+U,
+  exact exchange, and density/state dependence;
 - lambda history, rollback history, tolerances, and final residual receipt.
 
 The basis bundle, matrix payload, state, and provenance are hashed together.
@@ -453,12 +478,20 @@ identity.  Any mismatch fails closed.
 
 ## Zero-field real-time acceptance
 
-Total energy uses SALMON's existing DFT energy decomposition on the
-reconstructed density, Hartree/XC fields, ions, and nonlocal projectors.  Its
-kinetic contribution is the broken-volume kinetic energy plus the complete
-SIPG consistency, adjoint-consistency, and penalty face energy evaluated from
-`Gamma_occ`.  It is not `Tr(Gamma_occ H_DG)`, which would retain Hartree/XC
-double counting.  GS and RT call the same evaluator and verify the functional,
+Total energy uses a shared helper extracted from SALMON's existing
+`total_energy.f90` formulas to compute Hartree, XC, local ionic, and
+ion--ion components without assuming an ordinary-grid band energy.  The
+existing nonlocal projector action supplies `E_ion_nloc`.  The hybrid kinetic
+component is the broken-volume kinetic energy plus the complete, correctly
+normalized SIPG face energy evaluated from `Gamma_occ`.  The evaluator forms
+
+\[
+ E_{\rm tot}^{DG}=E_{\rm kin,volume}+E_{\rm kin,face}^{SIPG}
+ +E_H+E_{xc}+E_{\rm ion,loc}+E_{\rm ion,nloc}+E_{\rm ion,ion}.
+\]
+
+It is not `Tr(Gamma_occ H_DG)`, which would retain Hartree/XC double
+counting.  GS and RT call the same evaluator and verify the functional,
 pseudopotential, quadrature, and energy-component provenance from the
 checkpoint.
 

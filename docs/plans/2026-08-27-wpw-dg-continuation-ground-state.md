@@ -35,7 +35,7 @@ The planned public interfaces are fixed before implementation:
 
 ```fortran
 call initialize_dg_hybrid_continuation(comm, dc_density, dc_density_fingerprint, &
-  catalog, dc_occupied_coefficients, occupations, state, ok, message)
+  catalog, dc_occupied_coefficients, occupations, supported_scope, state, ok, message)
 call assemble_dg_hybrid_sipg_operator(comm, catalog, penalty_factor, &
   interface_operator, diagnostics, ok, message)
 call run_dg_hybrid_continuation_scf(comm, state, controls, callbacks, &
@@ -57,7 +57,10 @@ and occupied-only readers remain unchanged for their current callers.
 - Create: `tests/dg/run_dg_hybrid_continuation_state_mpi.py`
 - Create: `src/gs/dc/dg_hybrid_continuation_state.f90`
 - Modify: `src/common/dg_hybrid_production_pw_basis.f90`
-- Modify: `src/common/dg_hybrid_window_distribution.f90`
+- Modify: `src/common/dg_hybrid_windowed_pw_basis.f90`
+- Modify: `src/common/dg_hybrid_windowed_pw_types.f90`
+- Modify: `src/common/dg_hybrid_reciprocal_catalog.f90`
+- Modify: `tests/dg/test_dg_hybrid_production_pw_basis_mpi.f90`
 - Modify: `src/gs/dc/CMakeLists.txt`
 - Modify: `src/common/CMakeLists.txt`
 
@@ -74,6 +77,18 @@ symmetry multiplet.  Require deterministic expansion to the complete orbit
 before catalog freezing, followed by recomputed ownership, distribution, and
 fingerprints.  Require failure when the supplied action maps cannot produce a
 finite closed selection.
+
+Add a collective closure routine taking the requested WF block IDs and their
+group action, plus requested PW packet IDs and their packet action.  It returns
+the sorted effective IDs, a parent/reason entry for every added member, and a
+fingerprint covering both requested and effective selections.  Pass these
+actions from the already accepted basis symmetry representation; do not infer
+WF multiplets from eigenvalue proximity.
+
+Require collective failure before seed initialization unless
+`system%Nspin==1`, `yn_spinorbit=='n'`, `PLUS_U_ON=.false.`,
+`yn_hse=='n'`, and the selected adiabatic functional depends only on the
+current scalar density and its normal grid derivatives.
 
 Require
 
@@ -96,10 +111,13 @@ Add types for the immutable catalog fingerprint set, mixed density, occupied
 projector, freshly derived interface observables, lambda controller state,
 epochs, residual receipt, an immutable DC seed snapshot, and a separate
 accepted snapshot.  Initialization takes `dc_density` as an explicit required
-argument, never calls a density reconstruction callback, and marks lambda zero
+argument and a collective supported-scope receipt, never calls a density
+reconstruction callback, and marks lambda zero
 as unaccepted until its full fixed-point gates pass.  Reuse the existing
 reciprocal-star and basis-action maps to close the retained selection before
-freezing the catalog.  Do not change the basis during continuation.
+freezing the catalog.  Store requested cutoff/selection separately from the
+effective retained blocks, added orbit members, and their closure action map.
+Do not change the basis during continuation.
 
 **Step 4: Run GREEN**
 
@@ -109,8 +127,8 @@ Expected: PASS at 1, 2, and 4 ranks with identical global fingerprints.
 
 **Step 5: Commit**
 
-Stage only the Task 1 files.  The two basis files are already dirty, so use
-`git add -p` for their symmetry-closure hunks; likewise stage only the new
+Stage only the Task 1 files.  Any already-dirty basis file must use
+`git add -p` for its symmetry-closure hunks; likewise stage only the new
 module-list hunks from both CMake files.  Inspect the cached diff and commit:
 
 `feat(dg): seed continuation from converged DC density`
@@ -133,6 +151,10 @@ one canonical normal from minus to plus, define jumps and averages with that
 same normal on both traces, and compare all
 four minus/minus, minus/plus, plus/minus, and plus/plus blocks against a dense
 reference containing consistency, adjoint-consistency, and penalty terms.
+The reference is derived independently from SALMON's
+`-0.5d0*nabla^2`: require an outer factor `0.5d0` on consistency,
+adjoint-consistency, and penalty contributions exactly once, with
+`penalty_factor` interpreted as the dimensionless eta inside the bracket.
 Require nonzero off-diagonal coupling, Hermiticity, reciprocal-face
 cancellation, exactly one canonical owner, and uniform scaling of every block
 by one scalar lambda.  Include a periodic face and reject face-local lambdas.
@@ -140,9 +162,10 @@ Include an interface Hamiltonian entry for which the metric entry is zero and
 require a metric CSR graph independent of the operator-union CSR graph.  All
 Hamiltonian components and position operators share a coupling-envelope graph
 constructed from basis support, nonlocal support, and face topology, using
-explicit component zeros rather than separate exchange graphs.  Perturb the
-density so an initially zero Hartree/XC edge becomes nonzero and require it to
-use the unchanged graph and exchange schedule.  Add a crossing nonlocal-projector
+explicit component zeros rather than separate exchange graphs.  Change a
+generic component value on an initially zero allowed edge and require it to
+use the unchanged graph and exchange schedule; the physical Hartree/XC
+density-perturbation test belongs to Task 9.  Add a crossing nonlocal-projector
 fixture and require exactly-once volume accounting, separate from SIPG kinetic
 faces.
 
@@ -163,7 +186,10 @@ penalty diagnostic norms separately.  Do not use current eigenvector
 coefficients while constructing the operator.  Give the metric and operator
 coupling envelope independent row offsets, columns, structure fingerprints, and
 communication schedules.  Do not require the metric graph to contain every
-SIPG Hamiltonian edge and do not create a separate graph per component.
+SIPG Hamiltonian edge and do not create a separate graph per component.  The
+nodal evaluator returns the unscaled bracket action; multiply both its value
+and normal-action outputs by `0.5d0` exactly once when assembling the SALMON
+kinetic operator.
 
 **Step 4: Run GREEN**
 
@@ -255,9 +281,11 @@ density damping `0.5`, minimum projector overlap `0.9`, and eight rollbacks.
 For every residual use the documented linear-in-lambda intermediate tolerance
 clamped below by its final tolerance.  Treat a small gap by cluster-aware
 occupation and projector overlap; do not add a separate gap-cutoff rejection.
-Define each residual-growth ratio against
-`max(last_accepted_channel, numerical_floor)` and use the maximum channel
-ratio for the decision.  An easy stage is one
+After the first inner iteration, define each residual-growth ratio within the
+same trial against `max(previous_inner_channel, numerical_floor)` and use
+the maximum channel ratio for the decision.  Require growth above the limit
+for two consecutive inner updates before rejection.  Use the previous
+accepted stage only to propose the initial lambda step.  An easy stage is one
 that converges within half of the configured iteration limit without rollback
 and passes the projector-overlap gate; only then may the step grow.  Read the
 iteration limit and intermediate/final channel tolerances from `controls` and
@@ -342,6 +370,8 @@ Commit only the task files as `feat(dg): converge coupled DG fixed points`.
 - Create: `src/common/dg_hybrid_continuation_acceptance.f90`
 - Create: `tests/dg/test_dg_hybrid_continuation_acceptance_mpi.f90`
 - Create: `tests/dg/run_dg_hybrid_continuation_acceptance_mpi.py`
+- Modify: `src/gs/dc/dg_hybrid_continuation_scf.f90`
+- Modify: `tests/dg/test_dg_hybrid_continuation_scf_mpi.f90`
 - Modify: `src/common/CMakeLists.txt`
 
 **Step 1: Write failing acceptance tests**
@@ -358,6 +388,11 @@ closure test, while being reported separately as not proving observable-level
 excitation-cutoff convergence.  Add a truncated basis whose coefficient
 residual is zero but whose reconstructed-grid residual under the actual
 discrete DG action is large; require rejection.
+
+Run the coupled driver with callbacks that pass coefficient-space gates but
+fail first the symmetry oracle and then the reconstructed-grid oracle.  Require
+the candidate stage to remain unaccepted in both cases; this test fails if the
+production driver can bypass either oracle.
 
 **Step 2: Run RED**
 
@@ -379,12 +414,18 @@ combined DG norm.  Repeat this expensive check after the final lambda-one
 refresh.  Aggregate maxima collectively and fail closed on omitted
 operations, split symmetry blocks, or faces.
 
+Wire this oracle into `dg_hybrid_continuation_scf` as a mandatory
+candidate-acceptance callback.  Invoke it only after the inexpensive inner
+gates pass and again after the final lambda-one refresh.  A missing callback or
+failed oracle rejects the stage collectively.
+
 **Step 4: Run GREEN**
 
 Run:
 
 ```text
 python3 tests/dg/run_dg_hybrid_continuation_acceptance_mpi.py
+python3 tests/dg/run_dg_hybrid_continuation_scf_mpi.py
 python3 tests/dg/check_dg_fragment_symmetry_production.py
 ```
 
@@ -413,6 +454,9 @@ refresh.  Forbid `solve_dg_hybrid_generalized_once_and_publish` and occupied-onl
 checkpoint publication in this branch.  Require the current one-shot divided
 prototype and all protected legacy branches to retain their former calls and
 flag conditions; neither is accepted as the new production result.
+Require the new route to fail before continuation for spin-polarized,
+spin-orbit, DFT+U, HSE/exact-exchange, or other orbital/current/history-dependent
+functionals; protected routes retain their existing support.
 
 **Step 2: Run RED**
 
@@ -430,7 +474,8 @@ Expected: the new contract FAILS on the one-shot branch.
 Reuse the accepted WF+PW basis, DC potential and density infrastructure, and
 distributed generalized solver.  Assemble complete cross-fragment SIPG rows.
 Keep the catalog frozen for the attempt.  Do not alter DC+LCFO/Wannier90 or
-overlapping-Wannier branches.
+overlapping-Wannier branches.  Add the explicit supported-scope gate only
+inside the new continuation branch.
 
 **Step 4: Run GREEN and route regressions**
 
@@ -464,7 +509,8 @@ inspect both cached checks, and commit only new continuation hunks as
 Require one file to round-trip the exact sparse `H_DG(0)`, `S_DG`, the metric
 CSR graph and operator-union CSR graph, actual distributed basis values, grid IDs and
 weights, partition data, face values and normals, nonlocal distribution,
-ownership/catalog, cutoff/selection metadata, coefficients, occupations,
+ownership/catalog, requested cutoff/selection, effective symmetry-closed
+selection, added orbit members and closure action/reason metadata, coefficients, occupations,
 eigenvalues, density, interface observables, separately identified fixed and
 initial Hartree/XC Hamiltonian components, DC seed fingerprint,
 continuation receipt, exchange-correlation functional, pseudopotential and
@@ -483,7 +529,8 @@ temporary file, close and verify it, then atomically rename.  The reader must
 return the serialized matrices and basis payload rather than regenerate them.
 Remove the existing requirement that metric and Hamiltonian share identical
 row degrees and column IDs.  Hash the metric graph, operator-union graph, and
-all basis data.  Keep old occupied checkpoint routines available for protected
+all basis data, including requested-versus-effective selection provenance.
+Keep old occupied checkpoint routines available for protected
 legacy callers.
 
 **Step 3: Wire publication after the final refresh only**
@@ -532,6 +579,9 @@ In the same fixture, rebuild Hartree/XC from the stored initial density and
 require the resulting `H_DG(0)` to match the stored payload.  Perturb the
 density after initialization and require the RT Hamiltonian to change; this
 must fail for an implementation that freezes `H_DG(0)` throughout RT.
+Require RT initialization to reject a checkpoint whose supported-scope
+receipt is absent or requests spin, spin-orbit, DFT+U, HSE/exact exchange, or
+another state-dependent Hamiltonian channel.
 
 **Step 2: Run RED**
 
@@ -581,6 +631,7 @@ Commit only the task files as `feat(rt): load exact hybrid DG ground state`.
 - Create: `src/rt/dg/rt_dg_hybrid_stationarity.f90`
 - Create: `src/common/dg_hybrid_total_energy.f90`
 - Modify: `src/common/CMakeLists.txt`
+- Modify: `src/common/total_energy.f90`
 - Modify: `src/rt/CMakeLists.txt`
 - Create: `tests/dg/test_rt_dg_hybrid_stationarity_mpi.f90`
 - Create: `tests/dg/run_rt_dg_hybrid_stationarity_mpi.py`
@@ -602,6 +653,10 @@ decomposition for a no-interface fixture, then add an analytic two-fragment
 fixture and require exactly one complete SIPG face-energy contribution.
 Perturb Hartree and XC independently to prove that the evaluator applies the
 existing double-counting corrections and is not `Tr(Gamma H)`.
+Require agreement for both isolated and periodic helper paths.  Obtain
+`E_ion_nloc` from the existing nonlocal projector action while discarding
+the ordinary-grid kinetic value; verify every final `s_dft_energy` component
+against an independently summed fixture.
 
 **Step 2: Run RED**
 
@@ -611,13 +666,18 @@ Expected: compile failure because the stationarity evaluator is absent.
 
 **Step 3: Implement the minimum evaluator and sampling hook**
 
-Reuse the common projector/residual algebra.  Record initial invariants from
+Extract from `src/common/total_energy.f90` one public helper for the
+Hartree, XC, local-ionic, and ion--ion components that does not start from
+band energies.  Preserve the old public routines as wrappers using the same
+formulas so protected routes do not change numerically.  Reuse the common projector/residual algebra.  Record initial invariants from
 the checkpoint payload and compare them at configured RT samples.  Do not use
 raw coefficient differences as an acceptance measure.  Reconstruct the
-production-grid density and potentials, call the existing SALMON DFT energy
-decomposition for electrostatic, XC, ionic, and nonlocal terms, and replace
-its kinetic contribution with broken-volume plus complete SIPG kinetic energy
-from `Gamma_occ`.  Verify functional and pseudopotential provenance.  Do
+production-grid density and potentials, call the extracted helper for
+Hartree, XC, local-ionic, and ion--ion terms, obtain the nonlocal component
+from the existing projector action, and add broken-volume plus correctly
+normalized complete SIPG kinetic energy from `Gamma_occ`.  Fill and sum
+the explicit `s_dft_energy` fields rather than using band-energy correction
+identities.  Verify functional and pseudopotential provenance.  Do
 not add a separate
 RT symmetry-drift gate: the initial zero-field operator and occupied-space
 symmetry were already accepted, and stationary projector/density checks cover
@@ -636,7 +696,7 @@ all protected RT runners run together in Task 11 and final verification.
 
 **Step 5: Commit**
 
-Commit only task files as `test(rt): verify zero-field hybrid stationarity`.
+Commit only task files as `feat(rt): verify zero-field hybrid stationarity`.
 
 ### Task 11: Add the Si64 end-to-end runner and protected-route regression
 
