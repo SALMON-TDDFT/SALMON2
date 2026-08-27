@@ -135,10 +135,14 @@ Commit only the task files as `feat(dg): assemble complete hybrid SIPG blocks`.
 
 For a positive-definite complex metric, form an occupied cluster and apply
 independent column phases and a dense unitary rotation inside a degenerate
-cluster.  Require invariant density, occupied `S`-projector, projector-change
-residual, and occupied face density matrices.  Demonstrate that raw coefficient
-differences are nonzero and must not be used.  Compare `R_H`, `R_rho`, `R_T`,
-and `R_S` with dense references and reject nonfinite or rank-deficient inputs.
+cluster.  Require invariant occupied `S`-projector and projector-change
+residual.  Construct the distinct occupation-weighted density matrix
+`Gamma=C f C^dagger` and use it for density, electron number, energy, and
+occupied face density matrices.  Require invariance under rotations within an
+equally occupied degenerate cluster and reject symmetry-incompatible unequal
+occupations.  Demonstrate that raw coefficient differences are nonzero and
+must not be used.  Compare `R_H`, `R_rho`, `R_T`, and `R_S` with dense
+references and reject nonfinite or rank-deficient inputs.
 
 **Step 2: Run RED**
 
@@ -148,10 +152,10 @@ Expected: compile failure because the residual module is absent.
 
 **Step 3: Implement minimum projector/trace operations**
 
-Implement distributed `S`-metric occupied-projector comparison, optional
-Procrustes alignment for deterministic output, gauge-invariant face density
-matrices, and independently normalized residual channels.  Do not implement
-raw eigenvector mixing.
+Implement distributed `S`-metric occupied-projector comparison, the distinct
+occupation-weighted density matrix, optional Procrustes alignment for
+deterministic output, gauge-invariant face density matrices, and independently
+normalized residual channels.  Do not implement raw eigenvector mixing.
 
 **Step 4: Run GREEN**
 
@@ -256,11 +260,18 @@ Commit only the task files as `feat(dg): converge coupled DG fixed points`.
 
 **Step 1: Write failing acceptance tests**
 
-Construct symmetry-related faces and basis blocks.  Require covariance of
-`H_volume`, `H_interface`, `S`, and the occupied projector for every operation.
-Show that a face-local lambda and a basis missing one symmetry partner fail.
-Add a truncated basis whose coefficient residual is zero but whose
-reconstructed real-space complete-DG residual is large; require rejection.
+Construct symmetry-related faces, occupied clusters, and retained basis
+blocks.  Require covariance of `H_volume`, `H_interface`, `S`, and the complete
+occupied projector for every operation, while allowing individual degenerate
+eigenvectors to mix.  Require symmetry-compatible occupations in each
+degenerate occupied block.  Measure retained-space leakage
+`||(1-Q_ret)D(g)Q_ret||`; show that a face-local lambda, a basis missing one
+symmetry partner, and a cutoff splitting a multiplet or reciprocal star fail.
+Also show that a smaller but symmetry-complete excitation space passes the
+closure test, while being reported separately as not proving observable-level
+excitation-cutoff convergence.  Add a truncated basis whose coefficient
+residual is zero but whose reconstructed real-space complete-DG residual is
+large; require rejection.
 
 **Step 2: Run RED**
 
@@ -270,10 +281,13 @@ Expected: compile failure because the acceptance oracle is absent.
 
 **Step 3: Implement minimum acceptance oracles**
 
-Evaluate normalized covariance defects using the verified basis
-representation.  Add a callback that reconstructs selected occupied and
-near-gap states and applies volume plus complete SIPG action in real space.
-Aggregate maxima collectively and fail closed on omitted operations or faces.
+Evaluate normalized covariance defects of the zero-field operators, retained
+space, occupied projector, and occupation density matrix using the verified
+basis representation.  Never require an individual eigenvector to be
+invariant.  Add a callback that reconstructs selected occupied and near-gap
+states and applies volume plus complete SIPG action in real space.  Aggregate
+maxima collectively and fail closed on omitted operations, split symmetry
+blocks, or faces.
 
 **Step 4: Run GREEN**
 
@@ -389,8 +403,11 @@ Use partial staging for dirty `main_dft.f90`; commit only task hunks as
 Write a complete synthetic GS checkpoint and initialize RT from it.  Require
 bitwise-identical sparse matrix payloads and matching complete-payload
 fingerprint.  At RT startup re-evaluate generalized residual, `S`
-orthogonality, electron number, Hermiticity, and symmetry.  Reject a test that
-reconstructs numerically equal matrices under a different payload identity.
+orthogonality, electron number, Hermiticity, zero-field basis/operator
+covariance, and covariance of the complete occupied projector or occupation
+density matrix.  Do not test individual eigenvector symmetry.  Reject a test
+that reconstructs numerically equal matrices under a different payload
+identity.
 
 **Step 2: Run RED**
 
@@ -429,7 +446,7 @@ Commit only the task files as `feat(rt): load exact hybrid DG ground state`.
 
 Propagate a known generalized eigenstate with zero external field.  Require
 bounded drift in density, total energy, occupied `S`-projector, electron
-number, symmetry, and DG Hamiltonian residual.  Apply arbitrary occupied
+number, and DG Hamiltonian residual.  Apply arbitrary occupied
 phases and a degenerate-space rotation between samples; require the projector
 test to pass while a deliberately changed occupied subspace fails.
 
@@ -443,7 +460,10 @@ Expected: compile failure because the stationarity evaluator is absent.
 
 Reuse the projector/residual algebra from GS.  Record initial invariants from
 the checkpoint payload and compare them at configured RT samples.  Do not use
-raw coefficient differences as an acceptance measure.
+raw coefficient differences as an acceptance measure.  Do not add a separate
+RT symmetry-drift gate: the initial zero-field operator and occupied-space
+symmetry were already accepted, and stationary projector/density checks cover
+the zero-field case.  Driven-state symmetry is outside this plan.
 
 **Step 4: Run GREEN**
 
@@ -465,8 +485,10 @@ Commit only task files as `test(rt): verify zero-field hybrid stationarity`.
 **Step 1: Write RED acceptance parsing first**
 
 Make the runner require lambda-one convergence receipts for every GS residual,
-the DC seed-density identity, exact GS-to-RT payload identity, and zero-field
-stationarity receipts for every requested observable.  Feed it the preserved
+the DC seed-density identity, exact GS-to-RT payload identity, zero-field GS
+operator/occupied-space symmetry at handoff, and zero-field stationarity
+receipts for density, total energy, occupied projector, electron number, and
+DG residual.  Do not require a separate RT-state symmetry receipt.  Feed it the preserved
 old one-shot log and confirm rejection because it has no complete DG
 continuation or RT payload evidence.
 
@@ -527,8 +549,10 @@ Require simultaneous evidence for:
 - final refreshed `R_H`, `R_rho`, `R_T`, `R_S`, electron count, symmetry, and
   real-space DG residual;
 - complete checkpoint payload and matching GS/RT fingerprint;
-- zero-field density, energy, projector, electron, symmetry, and Hamiltonian
-  stationarity.
+- symmetry closure of the retained WF+PW space and covariance of the complete
+  occupied ground-state projector, without individual-state symmetry;
+- zero-field density, energy, projector, electron, and Hamiltonian
+  stationarity, without a separate RT-state symmetry gate.
 
 Any missing receipt means the implementation is not complete.
 

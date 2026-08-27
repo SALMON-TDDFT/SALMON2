@@ -41,6 +41,24 @@ tracked between iterations; raw eigenvector coefficients are not mixed.
 Interface traces for the initial state are reconstructed from this occupied
 projector.
 
+Two different gauge-invariant matrices are used.  For an integer-occupied
+subspace,
+
+\[
+ Q_{\mathrm{occ}}=C_{\mathrm{occ}}C_{\mathrm{occ}}^\dagger S^{DG}
+\]
+
+tracks the occupied subspace.  Physical density, electron number, energy, and
+occupied interface density matrices use the occupation-weighted density
+matrix
+
+\[
+ \Gamma_{\mathrm{occ}}=C f C^\dagger.
+\]
+
+States within a degenerate cluster may rotate among themselves.  Symmetry is
+therefore never required of an individual eigenvector.
+
 For one complete continuation attempt, the following catalog is immutable:
 
 - the symmetry-closed WF+PW basis and its distributed row ownership;
@@ -49,6 +67,22 @@ For one complete continuation attempt, the following catalog is immutable:
 - the DG metric and its numerical-rank decision;
 - the symmetry representation and interface orbits;
 - the SIPG penalty convention.
+
+The retained WF+PW space is selected in complete symmetry blocks.  If a
+cutoff intersects a degenerate multiplet, reciprocal star, or another
+symmetry orbit, the whole block is retained or the whole block is omitted.
+The retained-space projector must have negligible symmetry leakage,
+
+\[
+ R_{\mathrm{leak}}(g)=
+ \lVert(1-Q_{\mathrm{ret}})D(g)Q_{\mathrm{ret}}\rVert.
+\]
+
+This closure requirement is distinct from convergence with respect to the
+size of the omitted excited-state space.  A finite excitation cutoff may bias
+a response even when the retained space is exactly symmetry closed; that
+physical, observable-dependent cutoff convergence is outside the present
+ground-state acceptance and must not be mislabeled as a symmetry violation.
 
 If the final real-space DG residual proves that this finite basis is
 insufficient, the route expands or revises the basis outside the continuation
@@ -216,7 +250,7 @@ Lambda is a single scalar for the whole system.  It is applied simultaneously
 to every interface in the same and different symmetry orbits.  Fragment-local
 or face-local continuation parameters are forbidden.
 
-## Symmetry contract
+## Ground-state symmetry contract
 
 Before continuation, the basis must be closed under every required full-system
 symmetry operation.  At every accepted stage the code evaluates
@@ -227,10 +261,21 @@ symmetry operation.  At every accepted stage the code evaluates
       {\max(1,\lVert H_\lambda\rVert)},
 \]
 
-and the analogous metric and occupied-projector covariance residuals.  The
-face topology and interface blocks must map covariantly under the same
-operation.  Diagonalization is not used as a symmetry repair.  Failure of the
-basis, topology, or operator covariance closes the hybrid route with an error.
+and the analogous metric, retained-space, and occupied-subspace residuals.
+For equal integer occupations this means
+
+\[
+ D(g)^\dagger Q_{\mathrm{occ}}D(g)=Q_{\mathrm{occ}}.
+\]
+
+For partial occupations, symmetry is evaluated using
+`Gamma_occ`; symmetry-related degenerate states must receive compatible
+occupations.  The face topology and interface blocks must map covariantly
+under the same operation.  Diagonalization is not used as a symmetry repair.
+Failure of the basis, retained-space closure, occupied-subspace covariance,
+topology, or zero-field operator covariance closes the hybrid route with an
+error.  No individual occupied or empty eigenvector is required to transform
+as a one-dimensional invariant state.
 
 ## Fully refreshed lambda-one state
 
@@ -273,7 +318,8 @@ fingerprint.
 metric, zero-field Hamiltonian, state, and catalog payloads from this file and
 does not rebuild the zero-field operator independently.  Before the first time
 step it rechecks generalized residual, `S` orthogonality, electron number,
-Hermiticity, symmetry, and payload identity.  Any mismatch fails closed.
+Hermiticity, zero-field basis/operator/occupied-subspace symmetry, and payload
+identity.  Any mismatch fails closed.
 
 ## Zero-field real-time acceptance
 
@@ -284,12 +330,17 @@ external field.  At every sampled time it measures drift in:
 - total energy;
 - occupied `S`-projector;
 - electron number;
-- symmetry covariance;
 - the complete DG Hamiltonian residual.
 
 The stationary-state check compares occupied projectors or phase-aligned
-subspaces, never raw coefficient differences.  The Si64 production acceptance
-uses eight MPI ranks, `OMP_NUM_THREADS=1`, and no time-based termination.
+subspaces, never raw coefficient differences.  Because the initial
+occupied projector is a required symmetric ground-state object, its
+stationarity already preserves that symmetry indirectly; a separate symmetry
+drift gate is not required for the zero-field RT acceptance.  Symmetry of an
+externally driven RT state is observable-, polarization-, gauge-, and
+retained-excitation-space dependent and is outside this design.  The Si64
+production acceptance uses eight MPI ranks, `OMP_NUM_THREADS=1`, and no
+time-based termination.
 
 ## Failure handling and diagnostics
 
@@ -317,7 +368,8 @@ The test layers are:
 3. continuation tests for adaptive steps, gap/crossing rejection, independent
    damping, inexact tolerances, and lambda-one refresh;
 4. checkpoint corruption, provenance, and exact-payload GS-to-RT tests;
-5. zero-field RT stationarity tests using projector comparison;
+5. zero-field RT stationarity tests using projector comparison, without an
+   independent driven-state symmetry gate;
 6. unchanged-route regression tests for DC+LCFO/Wannier90 and existing RT;
 7. the final eight-rank Si64 run with no timeout.
 
