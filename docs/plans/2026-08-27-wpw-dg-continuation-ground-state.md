@@ -4,7 +4,7 @@
 
 **Goal:** Starting from the exact converged DC density, converge the occupied WF+PW subspace, density, and complete SIPG interface observables through an adaptive lambda continuation to the fully self-consistent lambda-one DG ground state, publish one complete atomic checkpoint, and start stationary zero-field hybrid RT from that exact payload.
 
-**Architecture:** Freeze one symmetry-closed WF+PW catalog for a continuation attempt, preassemble the coefficient-independent complete SIPG interface blocks, and update the density-dependent volume operator from the current occupation density matrix.  Occupied interface traces are fully refreshed after every solve and are independent acceptance diagnostics, not stale mixed boundary conditions.  A transactional controller first converges lambda zero from the exact DC seed, then advances one uniform adaptive lambda to the fully refreshed lambda-one fixed point.  The complete basis/operator/state payload is consumed by an isolated RT branch that continues normal Hartree/XC density updates.
+**Architecture:** Freeze one symmetry-closed WF+PW catalog and one metric for a continuation attempt, preassemble the coefficient-independent complete SIPG interface blocks, and update the density-dependent volume operator from the current occupation density matrix.  Occupied interface traces are fully refreshed after every solve and are independent acceptance diagnostics, not mixed Hamiltonian inputs.  Storage uses one metric CSR graph and one operator-union CSR graph.  A transactional controller first converges lambda zero from the exact DC seed, then advances one uniform adaptive lambda to the fully refreshed lambda-one fixed point.  The complete basis/operator/state payload is consumed by an isolated RT branch that updates Hartree/XC once at the start of every explicit time step.
 
 **Tech Stack:** Fortran 2008, MPI, SALMON DC/Wannier90/WF+PW infrastructure, SIPG weak form, ScaLAPACK or EigenExa generalized eigensolver, BLAS/LAPACK, standalone Python MPI runners.
 
@@ -13,8 +13,7 @@
 Use the fixed worktree
 `/Users/otobetoshihito/SALMON-dev/SALMON2_RTDG/.worktrees/wpw-s-orthogonal-complement`.
 Do not create another worktree.  Preserve every pre-existing uncommitted change.
-The runners in `tests/dg` are invoked directly; do not register them with
-CTest and do not modify `tests/CMakeLists.txt`.
+Invoke the Python runners in `tests/dg` directly.
 
 For every task, first add a failing test and record its RED result, then add
 only the minimum production implementation and record the GREEN result.  Stage
@@ -124,7 +123,9 @@ Require nonzero off-diagonal coupling, Hermiticity, reciprocal-face
 cancellation, exactly one canonical owner, and uniform scaling of every block
 by one scalar lambda.  Include a periodic face and reject face-local lambdas.
 Include an interface Hamiltonian entry for which the metric entry is zero and
-require independent CSR column patterns.  Add a crossing nonlocal-projector
+require a metric CSR graph independent of the operator-union CSR graph.  All
+Hamiltonian components and position operators share the operator-union graph,
+using explicit component zeros rather than separate exchange graphs.  Add a crossing nonlocal-projector
 fixture and require exactly-once volume accounting, separate from SIPG kinetic
 faces.
 
@@ -140,9 +141,10 @@ Reuse `evaluate_dg_nodal_sipg_face`.  Exchange fixed basis values and outward
 normal derivatives, assemble both row directions for each canonical face, and
 store the result in row-owned sparse form.  Keep consistency, adjoint, and
 penalty diagnostic norms separately.  Do not use current eigenvector
-coefficients while constructing the operator.  Give metric and Hamiltonian
-independent row offsets, columns, values, fingerprints, and communication
-schedules; do not pad them to an artificial common sparsity pattern.
+coefficients while constructing the operator.  Give the metric and operator
+union independent row offsets, columns, structure fingerprints, and
+communication schedules.  Do not require the metric graph to contain every
+SIPG Hamiltonian edge and do not create a separate graph per component.
 
 **Step 4: Run GREEN**
 
@@ -180,6 +182,11 @@ occupations.  Demonstrate that raw coefficient differences are nonzero and
 must not be used.  Compare `R_H`, `R_rho`, `R_T`, and `R_S` with dense
 references and reject nonfinite or rank-deficient inputs.
 
+Use a nonorthogonal dense representation satisfying `D^dagger S D=S` and
+require `D Q D^-1=Q` for the mixed-index occupied projector.  Separately test
+`D^dagger H D=H` and the selected coefficient convention for the occupation
+kernel.  This pins forward versus pullback transformations.
+
 **Step 2: Run RED**
 
 Run: `python3 tests/dg/run_dg_hybrid_continuation_residuals_mpi.py`
@@ -213,11 +220,20 @@ Commit only the task files as `feat(dg): measure projector and interface fixed p
 
 Test monotone inexact tolerances, acceptance only when every residual channel
 passes, bounded step growth after easy stages, and rejection on residual
-growth, gap collapse, crossing, projector discontinuity, or symmetry failure.
+growth, crossing with failed cluster-aware occupation, projector
+discontinuity, or symmetry failure.  A shrinking gap alone reduces the next
+step but does not reject an otherwise acceptable stage.
 Mutate density, potential, projector, derived trace cache, occupation, eigenvalue, mixing
 history, and derived-cache epochs before rejection; require bitwise restoration
 of the accepted snapshot and step reduction.  Require the next trial to apply
 one identical lambda to all faces.
+
+Pin the defaults and exact decisions: initial/minimum/maximum step
+`0.125/0.015625/0.5`, growth/shrink `1.5/0.5`, residual-growth limit `4`,
+density damping `0.5`, minimum projector overlap `0.9`, and eight rollbacks.
+For every residual use the documented linear-in-lambda intermediate tolerance
+clamped below by its final tolerance.  Treat a small gap by cluster-aware
+occupation and projector overlap; do not add a separate gap-cutoff rejection.
 
 **Step 2: Run RED**
 
@@ -231,7 +247,8 @@ Implement propose, accept, reject/restore, tolerance scheduling, rollback
 limits, and collective decision routines.  Density damping is the only
 nonlinear mixing control.  Interface traces are invalidated on every state
 change and rebuilt from the current occupation density matrix; keep `R_T` as
-an independent residual history without an `alpha_trace` control.
+an independent residual history without an `alpha_trace` control.  Document
+this as the explicit global-SIPG-matrix replacement of trace damping.
 
 **Step 4: Run GREEN**
 
@@ -311,8 +328,8 @@ symmetry partner, and a cutoff splitting a multiplet or reciprocal star fail.
 Also show that a smaller but symmetry-complete excitation space passes the
 closure test, while being reported separately as not proving observable-level
 excitation-cutoff convergence.  Add a truncated basis whose coefficient
-residual is zero but whose reconstructed real-space complete-DG residual is
-large; require rejection.
+residual is zero but whose reconstructed-grid residual under the actual
+discrete DG action is large; require rejection.
 
 **Step 2: Run RED**
 
@@ -325,11 +342,14 @@ Expected: compile failure because the acceptance oracle is absent.
 Evaluate normalized covariance defects of the zero-field operators, retained
 space, occupied projector, and occupation density matrix using the verified
 basis representation.  Never require an individual eigenvector to be
-invariant.  Add a callback that reconstructs every occupied state and the
-configured near-gap retained states, applies volume plus complete SIPG action,
-and evaluates the documented volume/face quadrature DG norm.  Aggregate
-maxima collectively and fail closed on omitted operations, split symmetry
-blocks, or faces.
+invariant.  For an otherwise acceptable stage, add a callback that
+reconstructs every occupied state, applies the actual discrete volume and
+complete SIPG action, lifts it to the production grid, and evaluates the
+existing real-space quadrature norm.  Report the three face contributions
+separately with the existing face weights; do not invent an additional
+combined DG norm.  Repeat this expensive check after the final lambda-one
+refresh.  Aggregate maxima collectively and fail closed on omitted
+operations, split symmetry blocks, or faces.
 
 **Step 4: Run GREEN**
 
@@ -338,7 +358,6 @@ Run:
 ```text
 python3 tests/dg/run_dg_hybrid_continuation_acceptance_mpi.py
 python3 tests/dg/check_dg_fragment_symmetry_production.py
-python3 tests/dg/run_dg_overlapping_wannier_fragment_symmetry_mpi.py
 ```
 
 Expected: all PASS.
@@ -393,11 +412,10 @@ the following exact protected-route checks:
 ```text
 python3 tests/dg/check_dg_hybrid_self_consistent_route.py
 python3 tests/dg/check_dg_overlapping_wannier_route.py
-python3 tests/dg/replay_dg_wannier90_bundle.py --help
 ```
 
-Expected: all PASS or, for `--help`, successful argument display without
-executing a production calculation.
+Expected: all PASS.  The executable protected-route regressions are run once
+in Task 11 and in final verification rather than redundantly in this task.
 
 **Step 5: Commit**
 
@@ -415,15 +433,15 @@ inspect both cached checks, and commit only new continuation hunks as
 
 **Step 1: Extend the checkpoint test and observe RED**
 
-Require one file to round-trip the exact sparse `H_DG(0)`, `S_DG`, basis
-independent CSR patterns, actual distributed basis values, grid IDs and
+Require one file to round-trip the exact sparse `H_DG(0)`, `S_DG`, the metric
+CSR graph and operator-union CSR graph, actual distributed basis values, grid IDs and
 weights, partition data, face values and normals, nonlocal distribution,
 ownership/catalog, cutoff/selection metadata, coefficients, occupations,
 eigenvalues, density, interface observables, separately identified fixed and
 initial Hartree/XC Hamiltonian components, DC seed fingerprint,
-continuation receipt, and all fingerprints.  Flip one byte independently in
-each payload class and require rejection.  Require an interrupted write to
-leave the previous accepted file intact.
+continuation receipt, and all fingerprints.  Corrupt one representative value
+from metadata, basis, matrix, and state payloads and require rejection.  Require
+an interrupted write to leave the previous accepted file intact.
 
 Run: `python3 tests/dg/run_rt_dg_hybrid_checkpoint_mpi.py`
 
@@ -435,9 +453,9 @@ Hash metadata and every serialized payload value together.  Write to a unique
 temporary file, close and verify it, then atomically rename.  The reader must
 return the serialized matrices and basis payload rather than regenerate them.
 Remove the existing requirement that metric and Hamiltonian share identical
-row degrees and column IDs.  Hash both independent structures and all basis
-data.  Keep old occupied checkpoint routines available for protected legacy
-callers.
+row degrees and column IDs.  Hash the metric graph, operator-union graph, and
+all basis data.  Keep old occupied checkpoint routines available for protected
+legacy callers.
 
 **Step 3: Wire publication after the final refresh only**
 
@@ -458,11 +476,14 @@ Use partial staging for dirty `main_dft.f90`; commit only task hunks as
 
 **Files:**
 - Modify: `src/rt/main_tddft.f90`
+- Modify: `src/rt/dg/rt_dg_hybrid_length_gauge.f90`
+- Modify: `src/rt/dg/rt_dg_hybrid_sparse_exchange.f90`
 - Create: `src/rt/dg/rt_dg_hybrid_initialization.f90`
 - Create: `src/rt/dg/rt_dg_hybrid_density_update.f90`
 - Modify: `src/rt/CMakeLists.txt`
 - Create: `tests/dg/test_rt_dg_hybrid_initialization_mpi.f90`
 - Create: `tests/dg/run_rt_dg_hybrid_initialization_mpi.py`
+- Modify: `tests/dg/test_rt_dg_hybrid_length_gauge_mpi.f90`
 
 **Step 1: Write the failing GS-to-RT identity test**
 
@@ -496,14 +517,25 @@ hybrid metric solver and propagator with the stored `H_DG(0)` and `S_DG`.
 Separate stored time-independent kinetic/SIPG/ionic/nonlocal components from
 Hartree/XC.  Before time step zero, run the normal density-dependent potential
 update and require reconstruction of the stored complete Hamiltonian.  During
-RT, rebuild Hartree/XC from `rho(t)` before forming each propagated
-Hamiltonian.
+RT, rebuild Hartree/XC from `rho(t)` once at the beginning of each explicit
+SALMON time step before calling the existing one-step length-gauge propagator.
+Do not add an inner midpoint or predictor-corrector SCF.  Keep one stable
+operator-union structure fingerprint and a separate value fingerprint for
+each update; key sparse-exchange schedules only by the structure fingerprint
+so a value update does not rebuild communication metadata.
 
 **Step 4: Run GREEN and legacy RT regression**
 
-Run the new runner, `run_rt_dg_hybrid_checkpoint_mpi.py`,
-`run_rt_dg_hybrid_metric_solver_mpi.py`, and
-`run_rt_dg_hybrid_length_gauge_mpi.py`; expect all PASS.
+Run:
+
+```text
+python3 tests/dg/run_rt_dg_hybrid_initialization_mpi.py
+python3 tests/dg/run_rt_dg_hybrid_checkpoint_mpi.py
+python3 tests/dg/run_rt_dg_hybrid_length_gauge_mpi.py
+```
+
+Expected: all PASS.  The full RT regression set is deferred to Task 11 and
+final verification.
 
 **Step 5: Commit**
 
@@ -525,8 +557,9 @@ bounded drift in density, total energy, occupied `S`-projector, electron
 number, and DG Hamiltonian residual.  Apply arbitrary occupied
 phases and a degenerate-space rotation between samples; require the projector
 test to pass while a deliberately changed occupied subspace fails.  Instrument
-the Hartree/XC update callback and require it to execute at the production RT
-cadence; a frozen-Hamiltonian propagator must fail the fixture.
+the Hartree/XC update callback and require exactly one call at the beginning of
+each explicit RT step; a frozen-Hamiltonian propagator and an accidental inner
+SCF loop must both fail the fixture.
 
 **Step 2: Run RED**
 
@@ -545,8 +578,14 @@ the zero-field case.  Driven-state symmetry is outside this plan.
 
 **Step 4: Run GREEN**
 
-Run the new runner at 1, 2, and 4 ranks and the existing hybrid RT runners;
-expect PASS.
+Run the new runner at 1, 2, and 4 ranks and then:
+
+```text
+python3 tests/dg/run_rt_dg_hybrid_metric_solver_mpi.py
+```
+
+Expected: PASS.  Checkpoint and length-gauge regressions already ran in Task 9;
+all protected RT runners run together in Task 11 and final verification.
 
 **Step 5: Commit**
 
@@ -574,7 +613,7 @@ continuation or RT payload evidence.
 
 Do not modify the already-dirty `input_hybrid_scf.in`.  Set the explicit new
 GS and RT flags, zero external field for RT, and production final tolerances.
-The runner invokes Python/SALMON directly and is not registered with CTest.
+The runner invokes Python/SALMON directly.
 
 **Step 3: Run focused source/input checks GREEN**
 

@@ -138,10 +138,14 @@ exactly once; they are neither approximated by nor double-counted in the SIPG
 kinetic face term.
 
 If the selected discretization requires a nontrivial DG overlap, the same
-catalog constructs `S_DG`.  It remains fixed during the continuation.  A
-lambda-dependent metric is permitted only if derived explicitly from the same
-bilinear discretization; in that case it is scaled uniformly over every
-symmetry-related interface and included in every residual and fingerprint.
+catalog constructs `S_DG`.  The first implementation fixes
+
+\[
+ S_\lambda^{DG}=S^{DG}
+\]
+
+for the complete continuation.  Lambda scales only the SIPG Hamiltonian
+interface term.  A lambda-dependent metric is outside this design.
 
 ## Coupled fixed point at one continuation stage
 
@@ -192,9 +196,9 @@ block matrix, `T` is reconstructed afresh from `Gamma_occ` after every solve;
 it is not an independently mixed Hamiltonian input.  Mixing it would create a
 stale boundary-condition operator different from the generalized eigenproblem
 being accepted.  `R_T` remains an independent convergence and continuation
-diagnostic.  A future matrix-free domain-decomposition preconditioner may damp
-an internal trace iterate, but its accepted residual must still be evaluated
-with refreshed traces and the exact global SIPG operator.
+diagnostic.  This is an explicit replacement of independent trace damping for
+this global-matrix formulation: `alpha_T` is neither an input nor an
+acceptance parameter.
 
 In the expression for `R_T`, the unadorned `T` is the fully refreshed trace
 from the preceding inner iterate or accepted lambda stage, never a separately
@@ -239,24 +243,24 @@ lambda approaches one.  Lambda one always uses the normal final acceptance
 tolerances.
 
 In addition to the coefficient-space residual, the code reconstructs every
-occupied Ritz orbital and configured near-gap retained orbitals in the broken
-real-space space.  The residual has a volume part and SIPG face functionals,
-measured with their physical quadratures:
+occupied Ritz orbital in the broken real-space space.  It applies the actual
+discrete volume action and lifts the consistency, adjoint-consistency, and
+penalty face actions back to the same nodal grid used by production.  It then
+forms
 
 \[
- \lVert r\rVert_{DG}^2=
- \sum_K\lVert r_K\rVert_{L^2(K)}^2+
- \sum_\Gamma\left(
- h_\Gamma\lVert r_{\Gamma,v}\rVert_{L^2(\Gamma)}^2+
- h_\Gamma^{-1}\lVert r_{\Gamma,n}\rVert_{L^2(\Gamma)}^2
- \right).
+ r_{\mathrm{grid}}=H_{\mathrm{DG}}^{\mathrm{real}}\psi
+ -\varepsilon S_{\mathrm{DG}}^{\mathrm{real}}\psi
 \]
 
-The relative residual divides this norm by the maximum of one and the
-correspondingly weighted norms of `H psi` and `epsilon S psi`.  Volume terms
-contain exactly one cell-volume weight and face terms exactly one face weight.
-A small coefficient residual cannot compensate for a failed real-space
-residual.  This is the finite-basis adequacy gate.
+and measures it with the existing real-space quadrature norm, containing
+exactly one cell-volume weight.  Separate face diagnostics report the three
+SIPG contributions with exactly one face weight, but are not combined through
+a newly invented continuum norm.  The relative residual uses the same norm in
+the denominator for `H psi` and `epsilon S psi`.  This expensive residual is
+evaluated only when an iteration is otherwise a candidate for stage
+acceptance, and again in the final lambda-one refresh.  A small coefficient
+residual cannot compensate for its failure.
 
 ## Adaptive continuation and rollback
 
@@ -272,9 +276,12 @@ minimum and maximum bounds.  It considers:
 - iteration count and convergence rate;
 - symmetry and real-space residuals.
 
-Fast, well-separated convergence permits a bounded increase in the next
-lambda step.  Residual growth, gap collapse, subspace discontinuity, or failure
-within the iteration limit rejects the complete trial stage.  Rejection
+Fast convergence with a stable occupied cluster permits a bounded increase in
+the next lambda step.  A shrinking gap reduces the proposed next step but does
+not reject an otherwise valid stage.  Residual growth, failure of
+cluster-aware occupations to preserve electron number or projector
+continuity, or failure within the iteration limit rejects the complete trial
+stage.  Rejection
 atomically restores density, potential, projector, trace state, occupations,
 eigenvalues, mixing histories, operator epochs, and all derived caches from the
 last accepted checkpoint, then reduces the step.  No object with the rejected
@@ -283,6 +290,24 @@ epoch may survive rollback.
 Lambda is a single scalar for the whole system.  It is applied simultaneously
 to every interface in the same and different symmetry orbits.  Fragment-local
 or face-local continuation parameters are forbidden.
+
+The default controller is deterministic and reuses the established DG
+controls: initial/minimum/maximum lambda steps `0.125/0.015625/0.5`, accepted
+step growth `1.5`, rejected step shrink `0.5`, maximum residual growth `4`,
+density damping `0.5`, minimum accepted occupied-projector overlap `0.9`, and
+at most eight rollbacks.  For residual channel `x`, the intermediate tolerance
+is
+
+\[
+ \tau_x(\lambda)=\max\left(\tau_{x,\mathrm{final}},
+ (1-\lambda)\tau_{x,\mathrm{intermediate}}
+ +\lambda\tau_{x,\mathrm{final}}\right).
+\]
+
+The gap is logged and used to form degeneracy clusters.  A small gap alone
+does not reject a stage; rejection occurs only when cluster-aware occupation
+assignment cannot preserve electron number and the minimum projector overlap.
+This avoids an extra material-dependent gap threshold.
 
 ## Ground-state symmetry contract
 
@@ -296,11 +321,17 @@ symmetry operation.  At every accepted stage the code evaluates
 \]
 
 and the analogous metric, retained-space, and occupied-subspace residuals.
-For equal integer occupations this means
+For equal integer occupations, `Q_occ` is a linear map.  With the coefficient
+representation satisfying `D(g)^dagger S D(g)=S`, its covariance test is
 
 \[
- D(g)^\dagger Q_{\mathrm{occ}}D(g)=Q_{\mathrm{occ}}.
+ D(g)Q_{\mathrm{occ}}D(g)^{-1}=Q_{\mathrm{occ}},
 \]
+
+or equivalently the commutator with `D(g)`.  Hamiltonian, metric, and the
+covariant occupation kernel use their corresponding bilinear-form
+transformations.  A dense nonorthogonal fixture pins the forward/pullback
+representation convention.
 
 For partial occupations, symmetry is evaluated using
 `Gamma_occ`; symmetry-related degenerate states must receive compatible
@@ -331,11 +362,19 @@ cache may enter the final payload.
 
 ## Atomic GS checkpoint and RT handoff
 
-The metric and each operator use independent CSR row structures.  A complete
-SIPG Hamiltonian may have an interface entry where the metric entry is zero;
-the format must not require identical metric and Hamiltonian column patterns.
-Each structure has its own degree limits, Hermiticity gate, fingerprint, and
-communication schedule.
+Storage uses two CSR graphs only.  The metric has its own CSR graph.  All
+coefficient-space operator components use one operator-union CSR graph with
+explicit zeros where a component has no entry.  A complete SIPG Hamiltonian
+may therefore have an interface entry where the metric entry is absent.  The
+metric and operator-union structures have separate degree limits,
+Hermiticity gates, structure fingerprints, and communication schedules.  This
+avoids both the invalid identical-graph requirement and unnecessary
+per-component exchange graphs.
+
+The operator-union structure fingerprint is stable while density-dependent
+values change.  Each value update has a separate value fingerprint.  Sparse
+exchange schedules are keyed only by the structure fingerprint and therefore
+are not rebuilt once per RT step.
 
 The ground-state writer publishes one atomic checkpoint containing:
 
@@ -370,7 +409,8 @@ used directly from that provenance.  RT also reads the accepted density and
 initial Hartree/XC components.  At `t=0`, an RT density update must reproduce
 the stored complete `H_DG(0)` within tolerance before propagation.
 
-During propagation RT updates `rho(t)`, Hartree, XC, and every normal
+During propagation, at the beginning of each explicit SALMON time step, RT
+reconstructs `rho(t)` once, updates Hartree, XC, and every normal
 density-dependent potential with the same hybrid basis and discretization,
 then forms
 
@@ -379,8 +419,10 @@ then forms
  +V_H[\rho(t)]+V_{xc}[\rho(t)]+V_{\mathrm{ext}}(t).
 \]
 
-It must not propagate with a frozen stored Hamiltonian merely to make
-zero-field stationarity trivial.  Before the first time step it rechecks the
+The first implementation does not add an inner midpoint or predictor-corrector
+SCF; that is a separate time-integrator decision.  It must not propagate with
+a frozen stored Hamiltonian merely to make zero-field stationarity trivial.
+Before the first time step it rechecks the
 generalized residual, `S` orthogonality, electron number, Hermiticity,
 zero-field basis/operator/occupied-subspace symmetry, and exact payload
 identity.  Any mismatch fails closed.
