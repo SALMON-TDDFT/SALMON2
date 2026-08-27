@@ -25,7 +25,8 @@ calculation:
 
 It is not replaced by a density reconstructed from a preliminary WF+PW
 diagonalization.  The DC density payload and its fingerprint are copied into
-the first continuation checkpoint.  The seed gate is
+an immutable seed snapshot.  This snapshot is not yet an accepted lambda-zero
+fixed point.  The seed gate is
 
 \[
  R_{\rho,\mathrm{seed}}=
@@ -58,6 +59,14 @@ matrix
 
 States within a degenerate cluster may rotate among themselves.  Symmetry is
 therefore never required of an individual eigenvector.
+
+Starting from this exact seed, the hybrid solver first converges the
+lambda-zero projected volume problem.  Only after `R_H`, `R_rho`, `R_T`,
+`R_S`, electron number, retained-space symmetry, and occupied-space symmetry
+all pass may it publish the first accepted continuation checkpoint.  Initial
+equality with the DC density is a seed-provenance condition, not a claim that
+the DC density is already a fixed point of the finite WF+PW lambda-zero
+problem.
 
 For one complete continuation attempt, the following catalog is immutable:
 
@@ -122,6 +131,12 @@ quantities are density, potential, occupied projector, occupied interface
 observables, occupations, eigenvalues, and residuals.  Stale neighboring
 eigenvectors are never inserted as an external boundary condition.
 
+The kinetic SIPG interface operator, local/nonlocal volume operator, and
+metric have separate assembly ledgers.  Nonlocal projectors whose support
+crosses a fragment boundary remain a linear volume contribution counted
+exactly once; they are neither approximated by nor double-counted in the SIPG
+kinetic face term.
+
 If the selected discretization requires a nontrivial DG overlap, the same
 catalog constructs `S_DG`.  It remains fixed during the continuation.  A
 lambda-dependent metric is permitted only if derived explicitly from the same
@@ -145,10 +160,10 @@ this order:
 4. Form the occupied `S`-projector and align the occupied subspace to the
    accepted or preceding projector in the `S` metric.
 5. Reconstruct the output density and gauge-invariant occupied interface
-   observables from that projector.
+   observables from the occupation density matrix belonging to the same solve.
 6. Evaluate all unmixed output-minus-input residuals.
-7. If not converged, update density and interface observables with independent
-   damping and repeat without advancing lambda.
+7. If not converged, update density with bounded damping and repeat without
+   advancing lambda.
 
 The projector is
 
@@ -162,25 +177,29 @@ for deterministic traces and output, and degenerate occupied clusters may be
 diagonalized with symmetry operators, but aligned vectors are not themselves
 mixed.
 
-The independent updates are
+The only nonlinear Hamiltonian input mixed by the first implementation is the
+density:
 
 \[
  \rho^{(m+1)}=\rho^{(m)}+
  \alpha_\rho\bigl(\rho[C^{(m)}_{\rm occ}]-\rho^{(m)}\bigr),
 \]
 
-\[
- T^{(m+1)}=T^{(m)}+
- \alpha_T\bigl(T[C^{(m)}_{\rm occ}]-T^{(m)}\bigr).
-\]
-
 `T` contains gauge-invariant occupied face density matrices and the derived
 wavefunction-value and normal-derivative observables needed to check the DG
-interface fixed point.  Density and trace residual histories remain separate.
-The default trace damping is no larger than density damping.  Anderson, Pulay,
-or Broyden acceleration may be added independently to either channel, but the
-first implementation uses bounded damped updates and does not combine their
-residual vectors.
+interface fixed point.  Because the complete SIPG operator is one fixed linear
+block matrix, `T` is reconstructed afresh from `Gamma_occ` after every solve;
+it is not an independently mixed Hamiltonian input.  Mixing it would create a
+stale boundary-condition operator different from the generalized eigenproblem
+being accepted.  `R_T` remains an independent convergence and continuation
+diagnostic.  A future matrix-free domain-decomposition preconditioner may damp
+an internal trace iterate, but its accepted residual must still be evaluated
+with refreshed traces and the exact global SIPG operator.
+
+In the expression for `R_T`, the unadorned `T` is the fully refreshed trace
+from the preceding inner iterate or accepted lambda stage, never a separately
+mixed boundary field.  Thus `R_T` measures convergence of the physical trace
+sequence while the eigensystem always uses the exact fixed global operator.
 
 ## Residuals and stage acceptance
 
@@ -219,15 +238,30 @@ Intermediate stages may use inexact tolerances that tighten monotonically as
 lambda approaches one.  Lambda one always uses the normal final acceptance
 tolerances.
 
-In addition to the coefficient-space residual, the code reconstructs selected
-occupied and near-gap Ritz orbitals in real space, applies the complete DG
-volume-plus-interface action there, and measures the normalized residual.  A
-small coefficient residual cannot compensate for a failed real-space residual.
-This is the finite-basis adequacy gate.
+In addition to the coefficient-space residual, the code reconstructs every
+occupied Ritz orbital and configured near-gap retained orbitals in the broken
+real-space space.  The residual has a volume part and SIPG face functionals,
+measured with their physical quadratures:
+
+\[
+ \lVert r\rVert_{DG}^2=
+ \sum_K\lVert r_K\rVert_{L^2(K)}^2+
+ \sum_\Gamma\left(
+ h_\Gamma\lVert r_{\Gamma,v}\rVert_{L^2(\Gamma)}^2+
+ h_\Gamma^{-1}\lVert r_{\Gamma,n}\rVert_{L^2(\Gamma)}^2
+ \right).
+\]
+
+The relative residual divides this norm by the maximum of one and the
+correspondingly weighted norms of `H psi` and `epsilon S psi`.  Volume terms
+contain exactly one cell-volume weight and face terms exactly one face weight.
+A small coefficient residual cannot compensate for a failed real-space
+residual.  This is the finite-basis adequacy gate.
 
 ## Adaptive continuation and rollback
 
-The controller starts from the accepted lambda-zero DC-seeded checkpoint.  A
+The controller starts from the accepted, self-consistent lambda-zero
+checkpoint obtained by iterating from the immutable DC seed.  A
 trial step is selected from the previous accepted step and is constrained by
 minimum and maximum bounds.  It considers:
 
@@ -297,11 +331,23 @@ cache may enter the final payload.
 
 ## Atomic GS checkpoint and RT handoff
 
+The metric and each operator use independent CSR row structures.  A complete
+SIPG Hamiltonian may have an interface entry where the metric entry is zero;
+the format must not require identical metric and Hamiltonian column patterns.
+Each structure has its own degree limits, Hermiticity gate, fingerprint, and
+communication schedule.
+
 The ground-state writer publishes one atomic checkpoint containing:
 
 - the complete zero-field `H_DG(0)` payload;
+- separately identified fixed kinetic/SIPG/ionic/nonlocal and initial
+  density-dependent Hartree/XC components whose sum is `H_DG(0)`;
 - the complete `S_DG` payload;
 - the distributed WF+PW basis catalog and ownership;
+- the actual distributed basis values, physical grid IDs and weights,
+  partition data, face values and normal derivatives, and the nonlocal-action
+  distribution needed to reconstruct density, energy, and real-space DG
+  residuals;
 - cutoff, selection, window, packet, and complement metadata;
 - occupied coefficients, occupations, and eigenvalues;
 - final density and interface observables;
@@ -310,15 +356,33 @@ The ground-state writer publishes one atomic checkpoint containing:
 - basis, metric, operator, state, and complete-payload fingerprints;
 - lambda history, rollback history, tolerances, and final residual receipt.
 
-The matrix payload, state, and provenance are hashed together.  It is invalid
+The basis bundle, matrix payload, state, and provenance are hashed together.
+An externally stored immutable basis bundle is permitted only if the
+checkpoint contains its content hash and RT rehashes the actual bundle before
+use.  It is invalid
 to reconstruct another operator independently and assign it the stored
 fingerprint.
 
 `main_tddft.f90` gains a separate hybrid WF+PW RT branch.  It reads the actual
-metric, zero-field Hamiltonian, state, and catalog payloads from this file and
-does not rebuild the zero-field operator independently.  Before the first time
-step it rechecks generalized residual, `S` orthogonality, electron number,
-Hermiticity, zero-field basis/operator/occupied-subspace symmetry, and payload
+metric, zero-field Hamiltonian, state, and basis payloads from this file.  The
+time-independent kinetic, complete SIPG, ionic, and nonlocal components are
+used directly from that provenance.  RT also reads the accepted density and
+initial Hartree/XC components.  At `t=0`, an RT density update must reproduce
+the stored complete `H_DG(0)` within tolerance before propagation.
+
+During propagation RT updates `rho(t)`, Hartree, XC, and every normal
+density-dependent potential with the same hybrid basis and discretization,
+then forms
+
+\[
+ H^{DG}(t)=H_{\mathrm{fixed}}^{DG}
+ +V_H[\rho(t)]+V_{xc}[\rho(t)]+V_{\mathrm{ext}}(t).
+\]
+
+It must not propagate with a frozen stored Hamiltonian merely to make
+zero-field stationarity trivial.  Before the first time step it rechecks the
+generalized residual, `S` orthogonality, electron number, Hermiticity,
+zero-field basis/operator/occupied-subspace symmetry, and exact payload
 identity.  Any mismatch fails closed.
 
 ## Zero-field real-time acceptance
@@ -349,7 +413,7 @@ rank-disagreeing provenance, non-Hermiticity, symmetry loss, electron-number
 failure, insufficient basis residual, or exhausted rollback limits aborts the
 hybrid route without publishing a checkpoint.  Existing accepted checkpoints
 remain intact.  Diagnostic output records every lambda proposal, acceptance or
-rejection reason, residual channel, damping rate, gap, projector change,
+rejection reason, residual channel, density damping rate, gap, projector change,
 symmetry maximum, real-space residual, and restored checkpoint epoch.
 
 ## Test strategy
@@ -364,12 +428,15 @@ The test layers are:
 1. dense algebra tests for SIPG blocks, projector invariance, residuals, and
    symmetry covariance;
 2. MPI tests for canonical face ownership, complete cross-fragment blocks,
-   uniform lambda, trace exchange, and atomic rollback;
-3. continuation tests for adaptive steps, gap/crossing rejection, independent
-   damping, inexact tolerances, and lambda-one refresh;
+   independent metric/operator sparsity, uniform lambda, refreshed traces, and
+   atomic rollback;
+3. continuation tests for lambda-zero convergence from the exact DC seed,
+   adaptive steps, gap/crossing rejection, density damping, inexact
+   tolerances, and lambda-one refresh;
 4. checkpoint corruption, provenance, and exact-payload GS-to-RT tests;
-5. zero-field RT stationarity tests using projector comparison, without an
-   independent driven-state symmetry gate;
+5. zero-field RT stationarity tests with normal density-dependent Hartree/XC
+   updates and projector comparison, without an independent driven-state
+   symmetry gate;
 6. unchanged-route regression tests for DC+LCFO/Wannier90 and existing RT;
 7. the final eight-rank Si64 run with no timeout.
 
