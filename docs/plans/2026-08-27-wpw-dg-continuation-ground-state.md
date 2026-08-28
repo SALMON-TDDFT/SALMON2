@@ -580,6 +580,81 @@ Use `git add -p` for every already-dirty file.  Run
 `git diff --cached --check` and inspect `git diff --cached`.  Commit only this
 task as `feat(dg): expose production symmetry selection boundary`.
 
+### Task 7a.6: Add a stateful production continuation adapter
+
+**Files:**
+- Create: `docs/plans/2026-08-29-dg-production-continuation-adapter-design.md`
+- Modify: `src/gs/dc/dg_hybrid_continuation_scf.f90`
+- Modify: `tests/dg/test_dg_hybrid_continuation_scf_mpi.f90`
+- Create: `src/gs/dc/dg_hybrid_production_continuation_adapter.f90`
+- Create: `tests/dg/test_dg_hybrid_production_continuation_adapter_mpi.f90`
+- Create: `tests/dg/run_dg_hybrid_production_continuation_adapter_mpi.py`
+
+**Step 1: Write a failing backend-context test**
+
+Replace context-free callback pointers with one explicit polymorphic backend
+owned by `s_dg_hybrid_continuation_callbacks`.  Adapt the existing SCF fixture
+to a small concrete backend and require the established callback order,
+rollback, and final-refresh behavior to remain unchanged.
+
+**Step 2: Run RED**
+
+Run `python3 tests/dg/run_dg_hybrid_continuation_scf_mpi.py`.
+
+Expected: compilation fails because the backend abstraction is absent.
+
+**Step 3: Implement the minimal callback-context refactor**
+
+Define an abstract backend type with deferred volume, solve, projector,
+density/trace, residual, mixing, and acceptance procedures.  Store one backend
+pointer in the callback bundle and dispatch the existing controller sequence
+through it.  Do not change continuation or acceptance semantics.
+
+**Step 4: Write a failing production-adapter MPI test**
+
+Use a small distributed WF+PW generalized problem with at least two fragments
+and a nonzero cross-fragment SIPG face.  Require a frozen metric and face
+payload, one uniform lambda, density-dependent volume refresh, full solve,
+S-projector refresh, density/trace refresh from the same occupied subspace,
+independent residual channels, and a fully refreshed lambda-one receipt.
+Test phase/gauge-invariant projector comparison and rollback reproducibility.
+
+**Step 5: Run RED**
+
+Run `python3 tests/dg/run_dg_hybrid_production_continuation_adapter_mpi.py`.
+
+Expected: compilation fails because the production adapter is absent.
+
+**Step 6: Implement the minimal production adapter**
+
+Implement only the supported density-only scope.  Store the immutable metric,
+effective selections/actions, basis ownership, and complete SIPG faces.  At
+each callback cycle rebuild the volume rows from density, add lambda times all
+face rows, solve the complete generalized problem, and refresh projector,
+density, trace, residuals, epochs, and fingerprints in order.  Recompute
+acceptance from the final refreshed payload.  Do not publish a checkpoint.
+
+**Step 7: Run GREEN and regressions**
+
+Run:
+
+```text
+python3 tests/dg/run_dg_hybrid_continuation_scf_mpi.py
+python3 tests/dg/run_dg_hybrid_production_continuation_adapter_mpi.py
+python3 tests/dg/run_dg_hybrid_continuation_acceptance_mpi.py
+python3 tests/dg/run_dg_hybrid_sipg_operator_mpi.py
+python3 tests/dg/run_dg_hybrid_production_face_traces_mpi.py
+python3 tests/dg/check_dg_hybrid_divided_dc_controls.py
+```
+
+Expected: all PASS.
+
+**Step 8: Commit**
+
+Use `git add -p` for dirty files.  Run `git diff --cached --check` and inspect
+`git diff --cached`.  Commit only this task as
+`feat(dg): add production continuation adapter`.
+
 ### Task 7b: Add an isolated production continuation branch
 
 **Files:**
