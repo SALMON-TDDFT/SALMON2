@@ -75,7 +75,7 @@ contains
     integer(int64)::local_hash,minimum_hash,maximum_hash
     real(real64)::minimum_lambda,maximum_lambda
     local_bad=merge(0,1,valid_controls(controls).and.accepted_lambda>=0d0.and.accepted_lambda<=1d0.and.&
-      ieee_is_finite(accepted_lambda).and.face_count>0.and.valid_state(accepted_state).and.&
+      ieee_is_finite(accepted_lambda).and.face_count>=0.and.valid_state(accepted_state).and.&
       accepted_state%trace_cache_valid)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ok=.false.;message='invalid continuation controller initialization';return;endif

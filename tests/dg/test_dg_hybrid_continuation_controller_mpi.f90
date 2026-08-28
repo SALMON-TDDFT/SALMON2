@@ -45,6 +45,10 @@ program test_dg_hybrid_continuation_controller_mpi
     call initialize_dg_hybrid_controller(comm,controls,0d0,accepted,3+rank,controller,ok,message)
     call require(ok.and.size(controller%face_lambda)==3+rank,&
       'rank-local canonical-face ownership was rejected')
+    call initialize_dg_hybrid_controller(comm,controls,0d0,accepted,merge(0,1,rank==0),controller,ok,message)
+    call require(ok,'rank with no locally owned canonical faces was rejected')
+    call require(size(controller%face_lambda)==merge(0,1,rank==0),&
+      'rank-local zero-length face lambda allocation is incorrect')
   endif
   controls%growth_factor=ieee_value(1d0,ieee_positive_inf)
   call initialize_dg_hybrid_controller(comm,controls,0d0,accepted,3,controller,ok,message)
