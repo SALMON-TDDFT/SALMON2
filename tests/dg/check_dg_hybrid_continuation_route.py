@@ -9,8 +9,10 @@ assert flag in source, "missing explicit DG continuation production branch"
 branch = source[source.index(flag):]
 branch = branch[:branch.index("endif")]
 assert "run_dg_hybrid_continuation_ground_state_for_main" in branch
-start = source.index("subroutine run_dg_overlapping_wannier_ground_state_for_main")
-implementation = source[start:source.index("subroutine dg_dc_update_potential_from_density", start)]
+driver_name = "subroutine run_dg_hybrid_concrete_continuation"
+assert driver_name in source, "missing contained concrete continuation driver"
+start = source.index(driver_name)
+implementation = source[start:source.index("end subroutine run_dg_hybrid_concrete_continuation", start)]
 
 required = [
     "dc%rho_tot",
