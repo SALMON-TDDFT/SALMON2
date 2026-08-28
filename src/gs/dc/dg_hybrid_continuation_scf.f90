@@ -182,16 +182,20 @@ contains
 #endif
   end subroutine validate_dg_hybrid_production_catalog
 
-  subroutine run_dg_hybrid_continuation_scf(icomm,state,controls,callbacks,accepted_state,ok,message)
+  subroutine run_dg_hybrid_continuation_scf(icomm,state,catalog,controls,callbacks,accepted_state,ok,message)
     integer,intent(in)::icomm;type(s_dg_hybrid_continuation_state),intent(in)::state
+    type(s_dg_hybrid_production_catalog),intent(in)::catalog
     type(s_dg_hybrid_controller_controls),intent(in)::controls
     type(s_dg_hybrid_continuation_callbacks),intent(inout)::callbacks
     type(s_dg_hybrid_trial_state),intent(out)::accepted_state
     logical,intent(out)::ok;character(*),intent(out)::message
-    logical::callbacks_complete
+    logical::callbacks_complete,catalog_ok
+    character(256)::catalog_message
 #ifdef USE_MPI
     integer::local_bad,global_bad,ierr
 #endif
+    call validate_dg_hybrid_production_catalog(icomm,catalog,catalog_ok,catalog_message)
+    if(.not.catalog_ok)then;ok=.false.;message=trim(catalog_message);return;endif
     callbacks_complete=associated(callbacks%build_volume).and.associated(callbacks%solve_full).and.&
       associated(callbacks%refresh_projector).and.associated(callbacks%refresh_density_trace).and.&
       associated(callbacks%evaluate_residuals).and.associated(callbacks%mix_density).and.&
@@ -207,11 +211,20 @@ contains
       ok=.false.;message='incomplete mandatory continuation callback bundle';return
     endif
 #endif
-    call run_dg_hybrid_coupled_fixed_points(icomm,state,controls,callbacks%seed_state,callbacks%face_count,&
+    if(callbacks%face_count/=catalog%global_face_count.or.&
+        callbacks%global_face_count/=catalog%global_face_count.or.&
+        callbacks%face_topology_fingerprint/=catalog%face_topology_fingerprint)then
+      ok=.false.;message='continuation callback metadata differs from frozen production catalog';return
+    endif
+    call run_dg_hybrid_coupled_fixed_points(icomm,state,controls,callbacks%seed_state,catalog%global_face_count,&
       callbacks%build_volume,callbacks%solve_full,callbacks%refresh_projector,callbacks%refresh_density_trace,&
       callbacks%evaluate_residuals,callbacks%mix_density,callbacks%accept_candidate,&
       callbacks%global_face_count,callbacks%face_topology_fingerprint,callbacks%maximum_inner_iterations,accepted_state,&
       callbacks%final_lambda,callbacks%accepted_stages,callbacks%rollback_count,ok,message)
+    if(ok)then
+      call validate_dg_hybrid_production_catalog(icomm,catalog,catalog_ok,catalog_message)
+      if(.not.catalog_ok)then;ok=.false.;message='production catalog changed during continuation';endif
+    endif
   end subroutine run_dg_hybrid_continuation_scf
 
   subroutine run_dg_hybrid_coupled_fixed_points(icomm,continuation,controls,seed_state,face_count,&

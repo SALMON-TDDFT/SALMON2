@@ -57,12 +57,12 @@ program test_dg_hybrid_continuation_scf_mpi
   endif
   call configure_callbacks()
   callbacks%accept_candidate=>null();solve_count=0
-  call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
+  call run_dg_hybrid_continuation_scf(icomm,continuation,production_catalog,controls,callbacks,final_state,ok,message)
   call require(.not.ok.and.solve_count==0.and.index(message,'collective')>0,&
     'missing acceptance oracle was not rejected collectively before execution')
   callbacks%accept_candidate=>acceptance_oracle
   callbacks%build_volume=>null();solve_count=0
-  call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
+  call run_dg_hybrid_continuation_scf(icomm,continuation,production_catalog,controls,callbacks,final_state,ok,message)
   call require(.not.ok.and.solve_count==0.and.index(message,'collective')>0,&
     'incomplete callback bundle was not rejected collectively before execution')
   callbacks%build_volume=>volume_build
@@ -72,11 +72,11 @@ program test_dg_hybrid_continuation_scf_mpi
     poison_final=.false.;lambda_one_converged=.false.;fatal_positive=.false.;lambda_zero_gate_delayed=.false.
     stale_operator_positive=.false.
     callbacks%maximum_inner_iterations=80+id_rank
-    call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
+    call run_dg_hybrid_continuation_scf(icomm,continuation,production_catalog,controls,callbacks,final_state,ok,message)
     call require(.not.ok.and.solve_count==0,'rank-disagreeing controls reached the lambda-zero callbacks')
     controls%density_damping=0.5d0
     solve_count=0
-    call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
+    call run_dg_hybrid_continuation_scf(icomm,continuation,production_catalog,controls,callbacks,final_state,ok,message)
     call require(.not.ok.and.solve_count==0.and.index(message,'iteration limit')>0,&
       'rank-disagreeing inner iteration limit reached the lambda-zero callbacks')
   endif
@@ -85,7 +85,7 @@ program test_dg_hybrid_continuation_scf_mpi
   poison_final=.false.;lambda_one_converged=.false.;fatal_positive=.false.;lambda_zero_gate_delayed=.false.
   stale_operator_positive=.false.;rank_divergent_operator=.false.
   callbacks%seed_state=seed
-  call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
+  call run_dg_hybrid_continuation_scf(icomm,continuation,production_catalog,controls,callbacks,final_state,ok,message)
   final_lambda=callbacks%final_lambda;accepted_stages=callbacks%accepted_stages;rollbacks=callbacks%rollback_count
   call require(ok,trim(message))
   call require(abs(final_lambda-1d0)<1d-15.and.rollbacks>=1.and.accepted_stages>=2,&
@@ -103,27 +103,27 @@ program test_dg_hybrid_continuation_scf_mpi
   call fill_state(seed);phase=0;solve_count=0;first_volume=.true.;lambda_zero_passed=.false.
   forced_growth_complete=.true.;poison_final=.true.;lambda_one_converged=.false.;lambda_zero_gate_delayed=.false.
   callbacks%seed_state=seed
-  call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
+  call run_dg_hybrid_continuation_scf(icomm,continuation,production_catalog,controls,callbacks,final_state,ok,message)
   call require(.not.ok.and.index(message,'lambda-one fully refreshed residual gate failed')>0,&
     'lambda-one refresh used stale intermediate tolerances')
   call fill_state(seed);phase=0;solve_count=0;first_volume=.true.;lambda_zero_passed=.false.
   forced_growth_complete=.true.;poison_final=.false.;lambda_one_converged=.false.;fatal_positive=.true.
   lambda_zero_gate_delayed=.false.
   callbacks%seed_state=seed
-  call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
+  call run_dg_hybrid_continuation_scf(icomm,continuation,production_catalog,controls,callbacks,final_state,ok,message)
   call require(.not.ok.and.index(message,'coupled continuation callback failed')>0,&
     'fatal positive-lambda callback failure was retried as an iteration rejection')
   call fill_state(seed);callbacks%seed_state=seed;phase=0;solve_count=0;first_volume=.true.;lambda_zero_passed=.false.
   forced_growth_complete=.true.;poison_final=.false.;lambda_one_converged=.false.;fatal_positive=.false.
   lambda_zero_gate_delayed=.false.;stale_operator_positive=.true.
-  call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
+  call run_dg_hybrid_continuation_scf(icomm,continuation,production_catalog,controls,callbacks,final_state,ok,message)
   call require(.not.ok.and.index(message,'operator provenance')>0,&
     'stale density-dependent operator provenance was accepted')
   if(nproc>1)then
     call fill_state(seed);callbacks%seed_state=seed;phase=0;solve_count=0;first_volume=.true.;lambda_zero_passed=.false.
     forced_growth_complete=.true.;poison_final=.false.;lambda_one_converged=.false.;fatal_positive=.false.
     lambda_zero_gate_delayed=.false.;stale_operator_positive=.false.;rank_divergent_operator=.true.
-    call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
+    call run_dg_hybrid_continuation_scf(icomm,continuation,production_catalog,controls,callbacks,final_state,ok,message)
     call require(.not.ok.and.index(message,'operator provenance')>0,&
       'rank-divergent operator provenance was accepted')
   endif
@@ -131,13 +131,13 @@ program test_dg_hybrid_continuation_scf_mpi
   first_volume=.true.;lambda_zero_passed=.false.;forced_growth_complete=.true.;poison_final=.false.
   lambda_one_converged=.false.;fatal_positive=.false.;lambda_zero_gate_delayed=.false.
   stale_operator_positive=.false.;rank_divergent_operator=.false.;fail_symmetry_oracle=.true.;fail_grid_oracle=.false.
-  call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
+  call run_dg_hybrid_continuation_scf(icomm,continuation,production_catalog,controls,callbacks,final_state,ok,message)
   call require(.not.ok.and.acceptance_count>0,'candidate stage bypassed the symmetry acceptance oracle')
   call fill_state(seed);callbacks%seed_state=seed;phase=0;solve_count=0;acceptance_count=0
   first_volume=.true.;lambda_zero_passed=.false.;forced_growth_complete=.true.;poison_final=.false.
   lambda_one_converged=.false.;fatal_positive=.false.;lambda_zero_gate_delayed=.false.
   stale_operator_positive=.false.;rank_divergent_operator=.false.;fail_symmetry_oracle=.false.;fail_grid_oracle=.true.
-  call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
+  call run_dg_hybrid_continuation_scf(icomm,continuation,production_catalog,controls,callbacks,final_state,ok,message)
   call require(.not.ok.and.acceptance_count>0,'candidate stage bypassed the reconstructed-grid acceptance oracle')
   if(id_rank==0)write(*,'(a,i0,a)')'PASS hybrid continuation SCF on ',nproc,' ranks'
   call MPI_Finalize(ierr)
@@ -148,7 +148,7 @@ contains
     catalog%frozen=.true.;catalog%global_basis_count=nglobal;catalog%global_face_count=2
     catalog%analysis_fingerprint=101_int64;catalog%basis_fingerprint=102_int64
     catalog%selection_fingerprint=103_int64;catalog%action_fingerprint=104_int64
-    catalog%metric_fingerprint=0_int64;catalog%face_topology_fingerprint=106_int64
+    catalog%metric_fingerprint=0_int64;catalog%face_topology_fingerprint=96_int64
     allocate(catalog%row_ids(nlocal),source=ids)
     allocate(catalog%effective_wf_ids(1),source=[1])
     allocate(catalog%effective_pw_ids(1),source=[2])
@@ -172,7 +172,7 @@ contains
     callbacks%refresh_projector=>projector_refresh;callbacks%refresh_density_trace=>density_trace_refresh
     callbacks%evaluate_residuals=>residual_evaluation;callbacks%mix_density=>density_mix
     callbacks%accept_candidate=>acceptance_oracle
-    callbacks%seed_state=seed;callbacks%face_count=1;callbacks%global_face_count=1
+    callbacks%seed_state=seed;callbacks%face_count=2;callbacks%global_face_count=2
     callbacks%face_topology_fingerprint=96_int64
     callbacks%maximum_inner_iterations=80
   end subroutine configure_callbacks
@@ -186,7 +186,7 @@ contains
     receipt%valid=lambda>=0d0.and.state%trace_cache_valid
     receipt%symmetry_complete=.not.fail_symmetry_oracle;receipt%grid_complete=.not.fail_grid_oracle
     receipt%face_complete=.true.;receipt%expected_occupied_count=2;receipt%checked_occupied_count=2
-    receipt%checked_face_count=1
+    receipt%checked_face_count=2
     receipt%analysis_fingerprint=11_int64;receipt%basis_fingerprint=12_int64
     receipt%operator_fingerprint=state%operator_value_fingerprint;receipt%state_fingerprint=14_int64
     receipt%action_fingerprint=15_int64
