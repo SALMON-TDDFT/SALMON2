@@ -2,12 +2,14 @@
 program test_dg_hybrid_continuation_controller_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:real64
+  use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_positive_inf
   use dg_hybrid_continuation_controller
   implicit none
   integer::comm,rank,nproc,ierr,i
   type(s_dg_hybrid_controller_controls)::controls
   type(s_dg_hybrid_controller)::controller
-  type(s_dg_hybrid_trial_state)::state,accepted
+  type(s_dg_hybrid_controller)::limit_controller
+  type(s_dg_hybrid_trial_state)::state,accepted,limit_state
   type(s_dg_hybrid_stage_report)::report
   real(real64)::t0(4),t1(4),lambda_before,step_before
   logical::ok,accept
@@ -38,14 +40,26 @@ program test_dg_hybrid_continuation_controller_mpi
     call initialize_dg_hybrid_controller(comm,controls,0d0,accepted,3,controller,ok,message)
     call require(.not.ok,'rank-disagreeing controller controls were accepted')
     controls%growth_factor=1.5d0
+    call initialize_dg_hybrid_controller(comm,controls,0.01d0*rank,accepted,3+rank,controller,ok,message)
+    call require(.not.ok,'rank-disagreeing accepted lambda was accepted')
+    call initialize_dg_hybrid_controller(comm,controls,0d0,accepted,3+rank,controller,ok,message)
+    call require(ok.and.size(controller%face_lambda)==3+rank,&
+      'rank-local canonical-face ownership was rejected')
   endif
+  controls%growth_factor=ieee_value(1d0,ieee_positive_inf)
+  call initialize_dg_hybrid_controller(comm,controls,0d0,accepted,3,controller,ok,message)
+  call require(.not.ok,'nonfinite controller controls were accepted')
+  controls%growth_factor=1.5d0
   call initialize_dg_hybrid_controller(comm,controls,0d0,accepted,3,controller,ok,message)
   call require(ok,trim(message))
+  call require(controller%trace_valid.and.controller%accepted_state%trace_cache_valid,&
+    'valid accepted trace checkpoint was invalidated at initialization')
   state=accepted
   call propose_dg_hybrid_trial(comm,controller,state,ok,message)
   call require(ok.and.controller%trial_lambda==0.125d0,'initial lambda proposal is incorrect')
   call require(all(controller%face_lambda==controller%trial_lambda),'face-local lambda was proposed')
   call require(.not.controller%trace_valid,'trace cache survived a lambda state change')
+  call require(.not.state%trace_cache_valid,'trial-state trace cache remained usable after lambda change')
 
   call passing_report(controller,report);report%residuals(3)=2d0*report%tolerances(3)
   call decide_dg_hybrid_stage(comm,controller,state,report,accept,ok,message)
@@ -54,7 +68,14 @@ program test_dg_hybrid_continuation_controller_mpi
   report%tolerances=100d0*report%tolerances
   call decide_dg_hybrid_stage(comm,controller,state,report,accept,ok,message)
   call require(ok.and..not.accept,'caller-supplied loose tolerances bypassed controller controls')
+  call passing_report(controller,report);report%residuals(1)=-1d0
+  call decide_dg_hybrid_stage(comm,controller,state,report,accept,ok,message)
+  call require(ok.and..not.accept,'negative residual was accepted')
+  call passing_report(controller,report)
+  call decide_dg_hybrid_stage(comm,controller,state,report,accept,ok,message)
+  call require(ok.and..not.accept,'stage accepted a stale interface trace cache')
   call passing_report(controller,report);report%iteration=3
+  state%trace_cache_valid=.true.
   step_before=controller%step
   call decide_dg_hybrid_stage(comm,controller,state,report,accept,ok,message)
   call require(ok.and.accept,'fully converged easy stage was rejected')
@@ -69,17 +90,40 @@ program test_dg_hybrid_continuation_controller_mpi
   call require(equal_state(state,accepted),'rollback did not restore every accepted payload bit')
   call require(controller%accepted_lambda==lambda_before.and.controller%step==max(controls%minimum_step,&
     step_before*controls%shrink_factor),'rollback did not restore lambda and reduce its step')
-  call require(.not.controller%trace_valid,'trace cache survived rollback')
+  call require(controller%trace_valid.and.state%trace_cache_valid,&
+    'rollback did not restore the valid accepted trace checkpoint')
+
+  call propose_dg_hybrid_trial(comm,controller,state,ok,message);call require(ok,trim(message))
+  call passing_report(controller,report);report%iteration=1
+  state%trace_cache_valid=.true.
+  step_before=controller%step
+  call decide_dg_hybrid_stage(comm,controller,state,report,accept,ok,message)
+  call require(ok.and.accept.and.controller%step==step_before,'fast retry grew the step after rollback')
 
   call propose_dg_hybrid_trial(comm,controller,state,ok,message);call require(ok,trim(message))
   call observe_dg_hybrid_inner_residuals(comm,controller,[1d-6,1d-6,1d-6,1d-6],accept,ok,message)
   call require(ok.and..not.accept,'first inner residual sample rejected a trial')
-  call observe_dg_hybrid_inner_residuals(comm,controller,[5d-6,5d-6,5d-6,5d-6],accept,ok,message)
+  if(nproc>1)then
+    if(rank==0)then
+      t0=[5d-6,5d-6,5d-6,5d-6]
+    else;t0=[1d-6,1d-6,1d-6,1d-6]
+    endif
+  else;t0=[5d-6,5d-6,5d-6,5d-6]
+  endif
+  call observe_dg_hybrid_inner_residuals(comm,controller,t0,accept,ok,message)
   call require(ok.and..not.accept,'one residual-growth event rejected a trial')
-  call observe_dg_hybrid_inner_residuals(comm,controller,[3d-5,3d-5,3d-5,3d-5],accept,ok,message)
+  if(nproc>1)then
+    if(rank==1)then
+      t0=[2.5d-5,2.5d-5,2.5d-5,2.5d-5]
+    else;t0=[1d-6,1d-6,1d-6,1d-6]
+    endif
+  else;t0=[3d-5,3d-5,3d-5,3d-5]
+  endif
+  call observe_dg_hybrid_inner_residuals(comm,controller,t0,accept,ok,message)
   call require(ok.and.accept,'two consecutive excessive growth events did not request rollback')
 
-  call passing_report(controller,report);report%gap_shrinking=.true.;report%iteration=3
+  call passing_report(controller,report);report%gap_shrinking=rank==0;report%iteration=min(4,2+rank)
+  state%trace_cache_valid=.true.
   step_before=controller%step
   call decide_dg_hybrid_stage(comm,controller,state,report,accept,ok,message)
   call require(ok.and.accept,'shrinking gap alone rejected an acceptable stage')
@@ -95,6 +139,18 @@ program test_dg_hybrid_continuation_controller_mpi
   call passing_report(controller,report);report%symmetry_ok=.false.
   call decide_dg_hybrid_stage(comm,controller,state,report,accept,ok,message)
   call require(ok.and..not.accept,'symmetry failure was accepted')
+
+  call initialize_dg_hybrid_controller(comm,controls,0d0,accepted,3,limit_controller,ok,message)
+  call require(ok,trim(message));limit_state=accepted
+  do i=1,controls%maximum_rollbacks
+    call propose_dg_hybrid_trial(comm,limit_controller,limit_state,ok,message);call require(ok,trim(message))
+    call reject_dg_hybrid_trial(comm,limit_controller,limit_state,'rollback-limit fixture',ok,message)
+    call require(ok,'rollback was rejected before the configured limit')
+  enddo
+  call require(limit_controller%step==controls%minimum_step,'rollback step fell below or stopped above its minimum')
+  call propose_dg_hybrid_trial(comm,limit_controller,limit_state,ok,message);call require(ok,trim(message))
+  call reject_dg_hybrid_trial(comm,limit_controller,limit_state,'ninth rollback',ok,message)
+  call require(.not.ok,'rollback beyond the configured limit was accepted')
   if(rank==0)write(*,'(a,i0,a)')'PASS hybrid continuation controller on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
@@ -108,6 +164,7 @@ contains
     value%mixing_history=[(real(seed+20+i,real64),i=1,4)]
     value%density_epoch=11;value%operator_epoch=12;value%projector_epoch=13;value%trace_epoch=14
     value%derived_epoch=15
+    value%trace_cache_valid=.true.
   end subroutine fill_state
   subroutine mutate_state(value)
     type(s_dg_hybrid_trial_state),intent(inout)::value
@@ -117,6 +174,7 @@ contains
     value%mixing_history=-value%mixing_history
     value%density_epoch=101;value%operator_epoch=102;value%projector_epoch=103;value%trace_epoch=104
     value%derived_epoch=105
+    value%trace_cache_valid=.true.
   end subroutine mutate_state
   logical function equal_state(a,b)
     type(s_dg_hybrid_trial_state),intent(in)::a,b
@@ -124,7 +182,8 @@ contains
       all(a%projector==b%projector).and.all(a%trace==b%trace).and.all(a%occupations==b%occupations).and.&
       all(a%eigenvalues==b%eigenvalues).and.all(a%mixing_history==b%mixing_history).and.&
       a%density_epoch==b%density_epoch.and.a%operator_epoch==b%operator_epoch.and.&
-      a%projector_epoch==b%projector_epoch.and.a%trace_epoch==b%trace_epoch.and.a%derived_epoch==b%derived_epoch
+      a%projector_epoch==b%projector_epoch.and.a%trace_epoch==b%trace_epoch.and.a%derived_epoch==b%derived_epoch.and.&
+      (a%trace_cache_valid.eqv.b%trace_cache_valid)
   end function equal_state
   subroutine passing_report(ctrl,value)
     type(s_dg_hybrid_controller),intent(in)::ctrl;type(s_dg_hybrid_stage_report),intent(out)::value
