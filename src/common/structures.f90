@@ -417,6 +417,16 @@ module structures
     real(8),allocatable :: Rion_last(:,:), Force_last(:,:)
   end type s_md
 
+  type s_unfold
+    complex(8),allocatable :: psi_pr(:,:,:,:,:,:,:), psi_prG(:,:,:,:,:,:,:)
+    integer :: nhk, nsk, num_hkgrid(3)
+    integer,allocatable :: isk_tbl(:,:)
+    real(8),allocatable :: vec_hk(:,:), wtk_pr(:)
+    complex(8),allocatable :: eihkr_tbl(:,:,:,:)
+    real(8),allocatable :: rocc_pr(:,:,:), nq_gs(:,:,:)
+    complex(8),allocatable :: upu_pr(:,:,:,:), u_rVnl_Vnlr_u_pr(:,:,:,:)
+  end type s_unfold
+
 ! output files
   type s_ofile
     integer :: fh_eigen
@@ -426,6 +436,7 @@ module structures
     integer :: fh_pulse
     integer :: fh_dft_md
     integer :: fh_ovlp,fh_nex
+    integer :: fh_dm_unfold
     integer :: fh_current_decomposed, fh_intra_current
     integer :: fh_rt_spin
     integer :: fh_mag_decomposed_rt,fh_spin_current_decomposed
@@ -437,6 +448,7 @@ module structures
     character(256) :: file_pulse_data
     character(256) :: file_dft_md
     character(256) :: file_ovlp,file_nex
+    character(256) :: file_dm_unfold
     !
     character(256) :: dir_out_restart, dir_out_checkpoint
   end type s_ofile
@@ -529,6 +541,7 @@ module structures
     type(s_orbital) :: tpsi0,ttpsi0,htpsi0
     type(s_cg) :: cg
     real(8) :: E_old
+    logical :: rho0_loaded = .false. ! rho0_s restored from restart data (t=0 GS density)
   end type s_rt
 
 ! single-scale Maxwell-TDDFT method

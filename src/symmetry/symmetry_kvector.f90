@@ -10,7 +10,8 @@ module sym_kvector
 contains
 
   subroutine init_sym_kvector( kvec_io, weight_io, nkvec, blatvec )
-    use salmon_global, only: file_kw
+    use salmon_global, only: file_kw, dm_unfold_option
+    use parallelization, only: end_parallel
     implicit none
     real(8),intent(inout) :: kvec_io(:,:), weight_io(:)
     integer,intent(inout) :: nkvec
@@ -21,6 +22,12 @@ contains
     integer,allocatable :: i_list(:)
 
     if ( .not.use_symmetry ) return
+
+    if( dm_unfold_option == 'super' .or. dm_unfold_option == 'primitive' ) then
+      if ( DISPLAY ) write(*,"(A)") 'symmetry option not supported for dm_unfold calculation'
+      call end_parallel
+      stop
+    end if
 
     if ( DISPLAY ) write(*,'(a60)') repeat("-",36)//" init_sym_kvector(start)"
 

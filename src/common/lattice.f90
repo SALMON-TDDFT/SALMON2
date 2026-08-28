@@ -104,23 +104,25 @@ SUBROUTINE calc_inverse(a,b,detA) ! b = a^{-1}
   return
 end SUBROUTINE calc_inverse
 
-SUBROUTINE init_kvector(num_kgrid,system)
+SUBROUTINE init_kvector(system,unfold)
   use structures
   use sym_kvector, only: init_sym_kvector
   use parallelization, only: nproc_id_global, nproc_group_global
   use communication, only: comm_bcast, comm_sync_all, comm_is_root
-  use salmon_global, only: file_kw, dk_shift
+  use salmon_global, only: num_kgrid, file_kw, dk_shift, dm_unfold_option, num_lkgrid, num_skgrid, yn_gamma_centered
   implicit none
-  integer            :: num_kgrid(3)
   type(s_dft_system) :: system
-  !
-  integer :: ix,iy,iz, i,iu
-  integer :: ik,nk
-  real(8) :: shift_k(3),B(3,3)  !,k(3)
+  type(s_unfold) :: unfold
+  integer :: num_sk(3), num_lk(3), num_hk(3)
+  integer :: eo_kgrid(3), eo_lk(3), eo_hk(3)
+  integer :: i,iu,ik,nk,nsk,nlk,nhk,nk0,nsk0,nlk0
+  integer :: ik1,ik2,ik3,ilk,ilk1,ilk2,ilk3,ihk,ihk1,ihk2,ihk3,isk
+  real(8) :: B(3,3)
+  real(8) :: lkp(3),hkp(3)
   real(8),allocatable :: k(:,:), wtk(:)
+  real(8),allocatable :: hks(:,:)
 
   B = system%primitive_b
-  shift_k(1:3) = 0.5d0
 
   ! Read from file_kw
   if(file_kw /= 'none') then
@@ -145,18 +147,208 @@ SUBROUTINE init_kvector(num_kgrid,system)
      num_kgrid(:) = -1 
 
   else
-     nk = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
-     allocate( k(3,nk), wtk(nk) )
-     do ik=1,nk
-        ix=mod(ik-1,num_kgrid(1))+1
-        iy=mod((ik-1)/num_kgrid(1),num_kgrid(2))+1
-        iz=mod((ik-1)/(num_kgrid(1)*num_kgrid(2)),num_kgrid(3))+1
-        k(1,ik) = (dble(ix)-shift_k(1)+dk_shift(1))/dble(num_kgrid(1))-0.5d0
-        k(2,ik) = (dble(iy)-shift_k(2)+dk_shift(2))/dble(num_kgrid(2))-0.5d0
-        k(3,ik) = (dble(iz)-shift_k(3)+dk_shift(3))/dble(num_kgrid(3))-0.5d0
-     end do
-     wtk(:)  = 1d0/dble(nk)
 
+    select case (dm_unfold_option) ! 'no' is the ordinary case
+
+    case('no')
+!      do ik=1,nk
+!        ix=mod(ik-1,num_kgrid(1))+1
+!        iy=mod((ik-1)/num_kgrid(1),num_kgrid(2))+1
+!        iz=mod((ik-1)/(num_kgrid(1)*num_kgrid(2)),num_kgrid(3))+1
+!        k(1,ik) = (dble(ix)-shift_k(1)+dk_shift(1))/dble(num_kgrid(1))-0.5d0
+!        k(2,ik) = (dble(iy)-shift_k(2)+dk_shift(2))/dble(num_kgrid(2))-0.5d0
+!        k(3,ik) = (dble(iz)-shift_k(3)+dk_shift(3))/dble(num_kgrid(3))-0.5d0
+!      end do
+
+      if( yn_gamma_centered == 'n' ) then
+
+        nk = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
+        allocate( k(3,nk), wtk(nk) )
+        wtk(:) = 1d0/dble(nk)
+
+        ik = 0
+        do ik3 = 1,num_kgrid(3)
+        do ik2 = 1,num_kgrid(2)
+        do ik1 = 1,num_kgrid(1)
+          ik = ik + 1
+          k(1,ik) = (dble(ik1)-0.5d0+dk_shift(1))/dble(num_kgrid(1))-0.5d0
+          k(2,ik) = (dble(ik2)-0.5d0+dk_shift(2))/dble(num_kgrid(2))-0.5d0
+          k(3,ik) = (dble(ik3)-0.5d0+dk_shift(3))/dble(num_kgrid(3))-0.5d0
+        enddo
+        enddo
+        enddo
+
+      else ! yn_gamma_centered = 'y'
+
+        nk0 = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
+        eo_kgrid(:) = mod(num_kgrid(:),2)
+        nk = (num_kgrid(1)+1-eo_kgrid(1))*(num_kgrid(2)+1-eo_kgrid(2))*(num_kgrid(3)+1-eo_kgrid(3))
+!         for even num_kgrid, both ends are included for k-grid
+
+        allocate( k(3,nk), wtk(nk) )
+        wtk(:)  = 1d0/dble(nk0)
+
+        ik = 0
+        do ik3 = eo_kgrid(3),num_kgrid(3)
+        do ik2 = eo_kgrid(2),num_kgrid(2)
+        do ik1 = eo_kgrid(1),num_kgrid(1)
+          ik = ik + 1
+          k(1,ik) = (dble(ik1)-0.5d0*eo_kgrid(1))/dble(num_kgrid(1))-0.5d0
+          k(2,ik) = (dble(ik2)-0.5d0*eo_kgrid(2))/dble(num_kgrid(2))-0.5d0
+          k(3,ik) = (dble(ik3)-0.5d0*eo_kgrid(3))/dble(num_kgrid(3))-0.5d0
+          if(eo_kgrid(1) == 0 .and. (ik1 == 0 .or. ik1 == num_kgrid(1))) wtk(ik) = wtk(ik)/2d0
+          if(eo_kgrid(2) == 0 .and. (ik2 == 0 .or. ik2 == num_kgrid(2))) wtk(ik) = wtk(ik)/2d0
+          if(eo_kgrid(3) == 0 .and. (ik3 == 0 .or. ik3 == num_kgrid(3))) wtk(ik) = wtk(ik)/2d0
+        enddo
+        enddo
+        enddo
+        if (comm_is_root(nproc_id_global)) then
+          write(*,"(A,2x,i8,2x,A,2x,f18.8)") 'k-point gamma-centered, nk=', nk, 'sum(wtk)=', sum(wtk)
+        end if
+
+      end if
+
+    case('primitive') ! preparation for dm_unfold calculation
+
+      num_sk(:) = num_kgrid(:)
+      num_lk(:) = num_lkgrid(:)
+      if( sum(mod(num_sk(:),num_lk(:))) /= 0) stop 'mod(num_sk,num_lk) /= 0 in dm_unfold, primitive'
+      num_hk(:) = num_sk(:)/num_lk(:) 
+      nsk0 = num_sk(1)*num_sk(2)*num_sk(3)
+      eo_lk(:) = mod(num_lk(:),2)
+      eo_hk(:) = mod(num_hk(:),2)
+      nlk = (num_lk(1)+1-eo_lk(1))*(num_lk(2)+1-eo_lk(2))*(num_lk(3)+1-eo_lk(3))
+      nhk = (num_hk(1)+1-eo_hk(1))*(num_hk(2)+1-eo_hk(2))*(num_hk(3)+1-eo_hk(3))
+      nsk = nlk * nhk
+
+      nk = nsk
+      allocate( k(3,nsk), wtk(nsk) )
+      wtk(:) = 1d0/dble(nsk0)
+      isk = 0
+      do ilk3 = eo_lk(3),num_lk(3)
+      do ilk2 = eo_lk(2),num_lk(2)
+      do ilk1 = eo_lk(1),num_lk(1)
+      do ihk3 = eo_hk(3),num_hk(3)
+      do ihk2 = eo_hk(2),num_hk(2)
+      do ihk1 = eo_hk(1),num_hk(1)
+        isk = isk + 1
+        lkp(1) = (dble(ilk1)-0.5d0*eo_lk(1))/dble(num_lk(1))-0.5d0
+        lkp(2) = (dble(ilk2)-0.5d0*eo_lk(2))/dble(num_lk(2))-0.5d0
+        lkp(3) = (dble(ilk3)-0.5d0*eo_lk(3))/dble(num_lk(3))-0.5d0
+        hkp(1) = (dble(ihk1)-0.5d0*eo_hk(1))/dble(num_hk(1))-0.5d0
+        hkp(2) = (dble(ihk2)-0.5d0*eo_hk(2))/dble(num_hk(2))-0.5d0
+        hkp(3) = (dble(ihk3)-0.5d0*eo_hk(3))/dble(num_hk(3))-0.5d0
+        k(1:3,isk) = lkp(1:3)/dble(num_hk(1:3)) + hkp(1:3)
+        do i = 1,3
+          if( k(i,isk) < -0.50001d0 ) k(i,isk) = k(i,isk) + 1d0
+          if( k(i,isk) > +0.50001d0 ) k(i,isk) = k(i,isk) - 1d0
+        end do
+        if(eo_lk(1) == 0 .and. (ilk1 == 0 .or. ilk1 == num_lk(1))) wtk(isk) = wtk(isk)/2d0
+        if(eo_lk(2) == 0 .and. (ilk2 == 0 .or. ilk2 == num_lk(2))) wtk(isk) = wtk(isk)/2d0
+        if(eo_lk(3) == 0 .and. (ilk3 == 0 .or. ilk3 == num_lk(3))) wtk(isk) = wtk(isk)/2d0
+        if(eo_hk(1) == 0 .and. (ihk1 == 0 .or. ihk1 == num_hk(1))) wtk(isk) = wtk(isk)/2d0
+        if(eo_hk(2) == 0 .and. (ihk2 == 0 .or. ihk2 == num_hk(2))) wtk(isk) = wtk(isk)/2d0
+        if(eo_hk(3) == 0 .and. (ihk3 == 0 .or. ihk3 == num_hk(3))) wtk(isk) = wtk(isk)/2d0
+      enddo
+      enddo
+      enddo
+      enddo
+      enddo
+      enddo
+      if (comm_is_root(nproc_id_global)) then
+        write(*,"(A,2x,i8,2x,A,2x,f18.8)") 'dm_unfold_option=primitive, nk=', nk, 'sum(wtk)=', sum(wtk)
+      end if
+
+    case('super') ! dm_unfold calculation
+
+      num_lk(:) = num_kgrid(:)
+      nlk0 = num_lk(1)*num_lk(2)*num_lk(3)
+      eo_lk(:) = mod(num_lk(:),2)
+      nlk = (num_lk(1)+1-eo_lk(1))*(num_lk(2)+1-eo_lk(2))*(num_lk(3)+1-eo_lk(3))
+
+      nk = nlk
+
+      allocate( k(3,nlk), wtk(nlk) )
+      wtk(:)  = 1d0/dble(nlk0)
+
+      ilk = 0
+      do ilk3 = eo_lk(3),num_lk(3)
+      do ilk2 = eo_lk(2),num_lk(2)
+      do ilk1 = eo_lk(1),num_lk(1)
+        ilk = ilk + 1
+        k(1,ilk) = (dble(ilk1)-0.5d0*eo_lk(1))/dble(num_lk(1))-0.5d0
+        k(2,ilk) = (dble(ilk2)-0.5d0*eo_lk(2))/dble(num_lk(2))-0.5d0
+        k(3,ilk) = (dble(ilk3)-0.5d0*eo_lk(3))/dble(num_lk(3))-0.5d0
+        if(eo_lk(1) == 0 .and. (ilk1 == 0 .or. ilk1 == num_lk(1))) wtk(ilk) = wtk(ilk)/2d0
+        if(eo_lk(2) == 0 .and. (ilk2 == 0 .or. ilk2 == num_lk(2))) wtk(ilk) = wtk(ilk)/2d0
+        if(eo_lk(3) == 0 .and. (ilk3 == 0 .or. ilk3 == num_lk(3))) wtk(ilk) = wtk(ilk)/2d0
+      enddo
+      enddo
+      enddo
+      if (comm_is_root(nproc_id_global)) then
+        write(*,"(A,2x,i8,2x,A,2x,f18.8)") 'dm_unfold_option=super, nk=', nk, 'sum(wtk)=', sum(wtk)
+      end if
+
+      num_sk(:) = num_skgrid(:)
+      if( sum(mod(num_sk(:),num_lk(:))) /= 0) stop 'mod(num_sk,num_lk) /= 0 in dm_unfold, super'
+      num_hk(:) = num_sk(:)/num_lk(:)
+      eo_hk(:) = mod(num_hk(:),2)
+      nhk = (num_hk(1)+1-eo_hk(1))*(num_hk(2)+1-eo_hk(2))*(num_hk(3)+1-eo_hk(3))
+      nsk = nlk * nhk
+
+      unfold%nhk = nhk
+      unfold%num_hkgrid(1:3) = num_hk(:)
+      unfold%nsk = nsk
+      allocate( hks(3,nhk) )
+      allocate( unfold%vec_hk(3, nhk), unfold%isk_tbl(nlk, nhk), unfold%wtk_pr(nsk) )
+
+      ihk = 0
+      do ihk3 = eo_hk(3),num_hk(3)
+      do ihk2 = eo_hk(2),num_hk(2)
+      do ihk1 = eo_hk(1),num_hk(1)
+        ihk = ihk + 1
+        hks(1,ihk) = ((dble(ihk1)-0.5d0*eo_hk(1))/dble(num_hk(1))-0.5d0) * dble(num_hk(1))
+        hks(2,ihk) = ((dble(ihk2)-0.5d0*eo_hk(2))/dble(num_hk(2))-0.5d0) * dble(num_hk(2))
+        hks(3,ihk) = ((dble(ihk3)-0.5d0*eo_hk(3))/dble(num_hk(3))-0.5d0) * dble(num_hk(3))
+! since B in supercell is folded, num_hk(:) is multiplied.
+      enddo
+      enddo
+      enddo
+      do ihk = 1,nhk
+        unfold%vec_hk(1,ihk) = hks(1,ihk)*B(1,1) + hks(2,ihk)*B(1,2) + hks(3,ihk)*B(1,3)
+        unfold%vec_hk(2,ihk) = hks(1,ihk)*B(2,1) + hks(2,ihk)*B(2,2) + hks(3,ihk)*B(2,3)
+        unfold%vec_hk(3,ihk) = hks(1,ihk)*B(3,1) + hks(2,ihk)*B(3,2) + hks(3,ihk)*B(3,3)
+      end do
+
+      nsk0 = num_sk(1)*num_sk(2)*num_sk(3)
+      unfold%wtk_pr(:) = 1d0/dble(nsk0)
+      isk = 0
+      ilk=0
+      do ilk3 = eo_lk(3),num_lk(3)
+      do ilk2 = eo_lk(2),num_lk(2)
+      do ilk1 = eo_lk(1),num_lk(1)
+        ilk = ilk + 1
+        ihk = 0
+      do ihk3 = eo_hk(3),num_hk(3)
+      do ihk2 = eo_hk(2),num_hk(2)
+      do ihk1 = eo_hk(1),num_hk(1)
+        isk = isk + 1
+        ihk = ihk + 1
+        unfold%isk_tbl(ilk,ihk) = isk
+        if(eo_lk(1) == 0 .and. (ilk1 == 0 .or. ilk1 == num_lk(1))) unfold%wtk_pr(isk) = unfold%wtk_pr(isk)/2d0
+        if(eo_lk(2) == 0 .and. (ilk2 == 0 .or. ilk2 == num_lk(2))) unfold%wtk_pr(isk) = unfold%wtk_pr(isk)/2d0
+        if(eo_lk(3) == 0 .and. (ilk3 == 0 .or. ilk3 == num_lk(3))) unfold%wtk_pr(isk) = unfold%wtk_pr(isk)/2d0
+        if(eo_hk(1) == 0 .and. (ihk1 == 0 .or. ihk1 == num_hk(1))) unfold%wtk_pr(isk) = unfold%wtk_pr(isk)/2d0
+        if(eo_hk(2) == 0 .and. (ihk2 == 0 .or. ihk2 == num_hk(2))) unfold%wtk_pr(isk) = unfold%wtk_pr(isk)/2d0
+        if(eo_hk(3) == 0 .and. (ihk3 == 0 .or. ihk3 == num_hk(3))) unfold%wtk_pr(isk) = unfold%wtk_pr(isk)/2d0
+      enddo
+      enddo
+      enddo
+      enddo
+      enddo
+      enddo
+
+    end select
   endif
 
   system%nk = nk

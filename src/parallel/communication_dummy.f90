@@ -106,6 +106,9 @@ module communication
   end interface
 
   interface comm_isend
+    ! 2-D array
+    module procedure comm_isend_array2d_double
+
     ! 3-D array
     module procedure comm_isend_array3d_double
     module procedure comm_isend_array3d_dcomplex
@@ -116,6 +119,9 @@ module communication
   end interface
 
   interface comm_irecv
+    ! 2-D array
+    module procedure comm_irecv_array2d_double
+
     ! 3-D array
     module procedure comm_irecv_array3d_double
     module procedure comm_irecv_array3d_dcomplex
@@ -477,6 +483,18 @@ contains
   end subroutine
 
 
+  function comm_isend_array2d_double(invalue, ndest, ntag, ngroup) result(req)
+    implicit none
+    real(8), intent(in) :: invalue(:,:)
+    integer, intent(in) :: ndest, ntag, ngroup
+    integer :: req
+    UNUSED_VARIABLE(invalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(ndest,"comm_isend_array2d_double")
+    req = DEAD_BEEF
+  end function
+
   function comm_isend_array3d_double(invalue, ndest, ntag, ngroup) result(req)
     implicit none
     real(8), intent(in) :: invalue(:,:,:)
@@ -522,6 +540,18 @@ contains
     UNUSED_VARIABLE(ntag)
     UNUSED_VARIABLE(ngroup)
     ABORT_MESSAGE(ndest,"comm_isend_array5d_dcomplex")
+    req = DEAD_BEEF
+  end function
+
+  function comm_irecv_array2d_double(outvalue, nsrc, ntag, ngroup) result(req)
+    implicit none
+    real(8), intent(out) :: outvalue(:,:)
+    integer, intent(in)  :: nsrc, ntag, ngroup
+    integer :: req
+    UNUSED_VARIABLE(outvalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(nsrc,"comm_irecv_array2d_double")
     req = DEAD_BEEF
   end function
 

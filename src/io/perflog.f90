@@ -136,7 +136,8 @@ contains
   subroutine write_performance(fd,mode)
     use parallelization
     use communication
-    use salmon_global, only: theory,method_singlescale,yn_ffte
+    use salmon_global, only: theory,method_singlescale,yn_ffte, &
+    & yn_dc_lcfo_diag,lcfo_eigensolver
     use timer
     implicit none
     integer, intent(in) :: fd, mode
@@ -334,6 +335,29 @@ contains
     call set_sub(4, LOG_UHPSI_OVL_PHASE3,      'unpack halo')
     call set_sub(5, LOG_UHPSI_OVL_PHASE4,      'halo computation')
     call write_loadbalance(fd, 5, tsrc, headers, mode)
+
+    if(yn_dc_lcfo_diag=='y' .and. trim(lcfo_eigensolver)=='chefsi') then
+      call set(0, 0, 'DC-LCFO CheFSI module')
+      call set( 1, LOG_CHEFSI_TOTAL,         'total')
+      call set( 2, LOG_CHEFSI_SETUP,         'setup')
+      call set( 3, LOG_CHEFSI_LANCZOS,       'Lanczos upper bound')
+      call set( 4, LOG_CHEFSI_FILTER,        'Chebyshev filter')
+      call set( 5, LOG_CHEFSI_ORTHO,         'orthonormalization')
+      call set( 6, LOG_CHEFSI_RAYLEIGH_RITZ, 'Rayleigh-Ritz')
+      call set( 7, LOG_CHEFSI_RESIDUAL,      'residual')
+      call set( 8, LOG_CHEFSI_EXPORT,        'export coefficients')
+      call set( 9, LOG_CHEFSI_H_APPLY,       'H apply total')
+      call set(10, LOG_CHEFSI_H_DIAG,        '::diagonal block')
+      call set(11, LOG_CHEFSI_H_COMM_POST,   '::post halo comm.')
+      call set(12, LOG_CHEFSI_H_RECV_WAIT,   '::wait halo receive')
+      call set(13, LOG_CHEFSI_H_HALO,        '::off-diagonal blocks')
+      call set(14, LOG_CHEFSI_H_SEND_WAIT,   '::wait halo send')
+      call set(15, LOG_CHEFSI_REDISTRIBUTE,  'data redistribution')
+      call set(16, LOG_CHEFSI_PROJECT,       'projected matrix')
+      call set(17, LOG_CHEFSI_PROJECT_EIGEN, 'projected eigensolve')
+      call set(18, LOG_CHEFSI_ROTATE,        'Ritz rotation')
+      call write_loadbalance(fd, 18, tsrc, headers, mode)
+    end if
 
     call set(0, 0, 'checkpoint/restart')
     call set(1, LOG_RESTART_SELF,         'restart self')
