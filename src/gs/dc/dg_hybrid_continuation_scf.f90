@@ -10,21 +10,10 @@ module dg_hybrid_continuation_scf
   use dg_hybrid_continuation_residuals,only:s_dg_hybrid_residuals
   use dg_hybrid_continuation_acceptance,only:s_dg_hybrid_acceptance_result,validate_dg_hybrid_acceptance_receipt
 #ifdef USE_MPI
-  use mpi, only: MPI_Allreduce, MPI_BXOR, MPI_IN_PLACE, MPI_INTEGER, MPI_INTEGER8, MPI_MAX, MPI_MIN, MPI_SUCCESS, MPI_SUM
+  use mpi, only: MPI_Allreduce, MPI_INTEGER, MPI_INTEGER8, MPI_MAX, MPI_MIN, MPI_SUCCESS
 #endif
   implicit none
   private
-  type,public::s_dg_hybrid_production_catalog
-    logical::frozen=.false.
-    integer::global_basis_count=0,global_face_count=0
-    integer(int64)::analysis_fingerprint=0_int64,basis_fingerprint=0_int64
-    integer(int64)::selection_fingerprint=0_int64,action_fingerprint=0_int64
-    integer(int64)::metric_fingerprint=0_int64,interface_fingerprint=0_int64,face_topology_fingerprint=0_int64
-    integer(int64),allocatable::row_ids(:)
-    integer,allocatable::effective_wf_ids(:),effective_pw_ids(:)
-    integer,allocatable::wf_action(:,:),pw_action(:,:)
-    complex(real64),allocatable::metric_rows(:,:),interface_rows(:,:)
-  end type s_dg_hybrid_production_catalog
   abstract interface
     subroutine volume_callback(lambda,density,state,ok)
       import real64,s_dg_hybrid_trial_state
@@ -79,163 +68,18 @@ module dg_hybrid_continuation_scf
     integer(int64)::face_topology_fingerprint=0_int64
     real(real64)::final_lambda=0d0
   end type s_dg_hybrid_continuation_callbacks
-  public::build_dg_hybrid_production_catalog,fingerprint_dg_hybrid_catalog_matrix,&
-    validate_dg_hybrid_production_catalog,run_dg_hybrid_continuation_scf
+  public::run_dg_hybrid_continuation_scf
 contains
-  subroutine build_dg_hybrid_production_catalog(icomm,global_basis_count,global_face_count,row_ids,&
-      effective_wf_ids,effective_pw_ids,wf_action,pw_action,metric_rows,interface_rows,analysis_fingerprint,&
-      basis_fingerprint,selection_fingerprint,action_fingerprint,face_topology_fingerprint,catalog,ok,message)
-    integer,intent(in)::icomm,global_basis_count,global_face_count
-    integer(int64),intent(in)::row_ids(:),analysis_fingerprint,basis_fingerprint,selection_fingerprint,&
-      action_fingerprint,face_topology_fingerprint
-    integer,intent(in)::effective_wf_ids(:),effective_pw_ids(:),wf_action(:,:),pw_action(:,:)
-    complex(real64),intent(in)::metric_rows(:,:),interface_rows(:,:)
-    type(s_dg_hybrid_production_catalog),intent(out)::catalog
-    logical,intent(out)::ok
-    character(*),intent(out)::message
-
-    catalog%global_basis_count=global_basis_count;catalog%global_face_count=global_face_count
-    catalog%analysis_fingerprint=analysis_fingerprint;catalog%basis_fingerprint=basis_fingerprint
-    catalog%selection_fingerprint=selection_fingerprint;catalog%action_fingerprint=action_fingerprint
-    catalog%face_topology_fingerprint=face_topology_fingerprint
-    allocate(catalog%row_ids,source=row_ids)
-    allocate(catalog%effective_wf_ids,source=effective_wf_ids)
-    allocate(catalog%effective_pw_ids,source=effective_pw_ids)
-    allocate(catalog%wf_action,source=wf_action);allocate(catalog%pw_action,source=pw_action)
-    allocate(catalog%metric_rows,source=metric_rows);allocate(catalog%interface_rows,source=interface_rows)
-    call fingerprint_dg_hybrid_catalog_matrix(icomm,catalog%row_ids,catalog%metric_rows,&
-      catalog%metric_fingerprint,ok,message)
-    if(.not.ok)return
-    call fingerprint_dg_hybrid_catalog_matrix(icomm,catalog%row_ids,catalog%interface_rows,&
-      catalog%interface_fingerprint,ok,message)
-    if(.not.ok)return
-    catalog%frozen=.true.
-    call validate_dg_hybrid_production_catalog(icomm,catalog,ok,message)
-  end subroutine build_dg_hybrid_production_catalog
-
-  subroutine fingerprint_dg_hybrid_catalog_matrix(icomm,row_ids,rows,fingerprint,ok,message)
-    integer,intent(in)::icomm
-    integer(int64),intent(in)::row_ids(:)
-    complex(real64),intent(in)::rows(:,:)
-    integer(int64),intent(out)::fingerprint
-    logical,intent(out)::ok
-    character(*),intent(out)::message
-#ifdef USE_MPI
-    integer::i,j,ierr,local_bad,global_bad
-    integer(int64)::local_hash,entry_hash,real_bits,imaginary_bits
-    local_bad=merge(0,1,size(rows,1)==size(row_ids).and.size(rows,2)>0.and.&
-      all(row_ids>=1_int64).and.all(row_ids<=int(size(rows,2),int64)).and.&
-      all(ieee_is_finite(real(rows))).and.all(ieee_is_finite(aimag(rows))))
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
-      fingerprint=0_int64;ok=.false.;message='invalid distributed matrix fingerprint payload';return
-    endif
-    local_hash=0_int64
-    do j=1,size(rows,2)
-      do i=1,size(rows,1)
-        real_bits=transfer(real(rows(i,j),real64),real_bits)
-        imaginary_bits=transfer(aimag(rows(i,j)),imaginary_bits)
-        entry_hash=ieor(row_ids(i),ishftc(int(j,int64),11))
-        entry_hash=ieor(entry_hash,ishftc(real_bits,23))
-        entry_hash=ieor(entry_hash,ishftc(imaginary_bits,41))
-        local_hash=ieor(local_hash,entry_hash)
-      enddo
-    enddo
-    call MPI_Allreduce(local_hash,fingerprint,1,MPI_INTEGER8,MPI_BXOR,icomm,ierr)
-    ok=ierr==MPI_SUCCESS
-    if(.not.ok)then;fingerprint=0_int64;message='distributed matrix fingerprint reduction failed';return;endif
-    if(fingerprint==0_int64)fingerprint=1907_int64
-    message=''
-#else
-    fingerprint=0_int64;ok=.false.;message='distributed matrix fingerprint requires MPI'
-#endif
-  end subroutine fingerprint_dg_hybrid_catalog_matrix
-
-  subroutine validate_dg_hybrid_production_catalog(icomm,catalog,ok,message)
-    integer,intent(in)::icomm
-    type(s_dg_hybrid_production_catalog),intent(in)::catalog
-    logical,intent(out)::ok
-    character(*),intent(out)::message
-#ifdef USE_MPI
-    integer::i,local_bad,global_bad,ierr
-    integer,allocatable::ownership_count(:)
-    integer(int64)::local_fingerprint,minimum_fingerprint,maximum_fingerprint,recomputed_metric_fingerprint,&
-      recomputed_interface_fingerprint
-    logical::fingerprint_ok
-    character(256)::fingerprint_message
-
-    local_bad=0
-    if(.not.catalog%frozen.or.catalog%global_basis_count<1.or.catalog%global_face_count<1)then
-      local_bad=1
-    elseif(.not.allocated(catalog%row_ids).or..not.allocated(catalog%effective_wf_ids).or.&
-        .not.allocated(catalog%effective_pw_ids).or..not.allocated(catalog%wf_action).or.&
-        .not.allocated(catalog%pw_action).or..not.allocated(catalog%metric_rows).or.&
-        .not.allocated(catalog%interface_rows))then
-      local_bad=1
-    elseif(any(shape(catalog%metric_rows)/=[size(catalog%row_ids),catalog%global_basis_count]).or.&
-        any(shape(catalog%interface_rows)/=shape(catalog%metric_rows)).or.&
-        any(catalog%row_ids<1_int64).or.any(catalog%row_ids>int(catalog%global_basis_count,int64)).or.&
-        size(catalog%effective_wf_ids)<1.or.size(catalog%effective_pw_ids)<1.or.&
-        size(catalog%wf_action,1)/=size(catalog%effective_wf_ids).or.&
-        size(catalog%pw_action,1)/=size(catalog%effective_pw_ids).or.&
-        size(catalog%wf_action,2)<1.or.size(catalog%pw_action,2)<1.or.&
-        catalog%analysis_fingerprint==0_int64.or.catalog%basis_fingerprint==0_int64.or.&
-        catalog%selection_fingerprint==0_int64.or.catalog%action_fingerprint==0_int64.or.&
-        catalog%metric_fingerprint==0_int64.or.catalog%interface_fingerprint==0_int64.or.&
-        catalog%face_topology_fingerprint==0_int64)then
-      local_bad=1
-    endif
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
-      ok=.false.;message='invalid frozen production continuation catalog';return
-    endif
-    allocate(ownership_count(catalog%global_basis_count));ownership_count=0
-    do i=1,size(catalog%row_ids)
-      ownership_count(int(catalog%row_ids(i)))=ownership_count(int(catalog%row_ids(i)))+1
-    enddo
-    call MPI_Allreduce(MPI_IN_PLACE,ownership_count,catalog%global_basis_count,MPI_INTEGER,MPI_SUM,icomm,ierr)
-    if(ierr/=MPI_SUCCESS.or.any(ownership_count/=1))then
-      ok=.false.;message='production continuation rows are not owned exactly once';return
-    endif
-    call fingerprint_dg_hybrid_catalog_matrix(icomm,catalog%row_ids,catalog%metric_rows,&
-      recomputed_metric_fingerprint,fingerprint_ok,fingerprint_message)
-    if(.not.fingerprint_ok.or.recomputed_metric_fingerprint/=catalog%metric_fingerprint)then
-      ok=.false.;message='production continuation metric fingerprint mismatch';return
-    endif
-    call fingerprint_dg_hybrid_catalog_matrix(icomm,catalog%row_ids,catalog%interface_rows,&
-      recomputed_interface_fingerprint,fingerprint_ok,fingerprint_message)
-    if(.not.fingerprint_ok.or.recomputed_interface_fingerprint/=catalog%interface_fingerprint)then
-      ok=.false.;message='production continuation interface fingerprint mismatch';return
-    endif
-    local_fingerprint=ieor(catalog%analysis_fingerprint,catalog%basis_fingerprint)
-    local_fingerprint=ieor(local_fingerprint,catalog%selection_fingerprint)
-    local_fingerprint=ieor(local_fingerprint,catalog%action_fingerprint)
-    local_fingerprint=ieor(local_fingerprint,catalog%metric_fingerprint)
-    local_fingerprint=ieor(local_fingerprint,catalog%interface_fingerprint)
-    local_fingerprint=ieor(local_fingerprint,catalog%face_topology_fingerprint)
-    call MPI_Allreduce(local_fingerprint,minimum_fingerprint,1,MPI_INTEGER8,MPI_MIN,icomm,ierr)
-    if(ierr==MPI_SUCCESS)call MPI_Allreduce(local_fingerprint,maximum_fingerprint,1,MPI_INTEGER8,MPI_MAX,icomm,ierr)
-    ok=ierr==MPI_SUCCESS.and.minimum_fingerprint==maximum_fingerprint
-    if(ok)then;message='';else;message='rank-disagreeing production continuation catalog';endif
-#else
-    ok=.false.;message='production continuation catalog validation requires MPI'
-#endif
-  end subroutine validate_dg_hybrid_production_catalog
-
-  subroutine run_dg_hybrid_continuation_scf(icomm,state,catalog,controls,callbacks,accepted_state,ok,message)
+  subroutine run_dg_hybrid_continuation_scf(icomm,state,controls,callbacks,accepted_state,ok,message)
     integer,intent(in)::icomm;type(s_dg_hybrid_continuation_state),intent(in)::state
-    type(s_dg_hybrid_production_catalog),intent(in)::catalog
     type(s_dg_hybrid_controller_controls),intent(in)::controls
     type(s_dg_hybrid_continuation_callbacks),intent(inout)::callbacks
     type(s_dg_hybrid_trial_state),intent(out)::accepted_state
     logical,intent(out)::ok;character(*),intent(out)::message
-    logical::callbacks_complete,catalog_ok
-    character(256)::catalog_message
+    logical::callbacks_complete
 #ifdef USE_MPI
     integer::local_bad,global_bad,ierr
 #endif
-    call validate_dg_hybrid_production_catalog(icomm,catalog,catalog_ok,catalog_message)
-    if(.not.catalog_ok)then;ok=.false.;message=trim(catalog_message);return;endif
     callbacks_complete=associated(callbacks%build_volume).and.associated(callbacks%solve_full).and.&
       associated(callbacks%refresh_projector).and.associated(callbacks%refresh_density_trace).and.&
       associated(callbacks%evaluate_residuals).and.associated(callbacks%mix_density).and.&
@@ -251,20 +95,11 @@ contains
       ok=.false.;message='incomplete mandatory continuation callback bundle';return
     endif
 #endif
-    if(callbacks%face_count/=catalog%global_face_count.or.&
-        callbacks%global_face_count/=catalog%global_face_count.or.&
-        callbacks%face_topology_fingerprint/=catalog%face_topology_fingerprint)then
-      ok=.false.;message='continuation callback metadata differs from frozen production catalog';return
-    endif
-    call run_dg_hybrid_coupled_fixed_points(icomm,state,controls,callbacks%seed_state,catalog%global_face_count,&
+    call run_dg_hybrid_coupled_fixed_points(icomm,state,controls,callbacks%seed_state,callbacks%face_count,&
       callbacks%build_volume,callbacks%solve_full,callbacks%refresh_projector,callbacks%refresh_density_trace,&
       callbacks%evaluate_residuals,callbacks%mix_density,callbacks%accept_candidate,&
       callbacks%global_face_count,callbacks%face_topology_fingerprint,callbacks%maximum_inner_iterations,accepted_state,&
       callbacks%final_lambda,callbacks%accepted_stages,callbacks%rollback_count,ok,message)
-    if(ok)then
-      call validate_dg_hybrid_production_catalog(icomm,catalog,catalog_ok,catalog_message)
-      if(.not.catalog_ok)then;ok=.false.;message='production catalog changed during continuation';endif
-    endif
   end subroutine run_dg_hybrid_continuation_scf
 
   subroutine run_dg_hybrid_coupled_fixed_points(icomm,continuation,controls,seed_state,face_count,&

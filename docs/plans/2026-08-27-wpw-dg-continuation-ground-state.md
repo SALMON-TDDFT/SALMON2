@@ -601,8 +601,8 @@ task as `feat(dg): expose production symmetry selection boundary`.
 
 Keep the current test output and review findings in the existing verification
 records.  Do not commit the experimental adapter.  Extend the continuation
-fixture so it invokes the public concrete solver with the same frozen catalog
-type constructed by production, rather than manually calling phases.  Use a
+fixture so it exercises the same state-transition routine used by the
+contained production driver, rather than manually calling phases.  Use a
 nonorthogonal two-fragment problem with nonzero cross-fragment SIPG blocks.
 Require the physical basis-space projector
 `C_occ C_occ^dagger S`, uniform lambda on every canonical face, complete
@@ -616,8 +616,9 @@ Expected: FAIL because the existing callback path does not own a complete
 production state transition and currently forms the wrong projector.
 
 Add a source-contract RED test requiring the explicit continuation branch to
-pass the exact converged DC density and the effective symmetry-closed WF/PW
-catalog to this solver.  Forbid an adapter, callback table, one-shot final
+pass the exact converged DC density and the already assembled fixed `S` and
+complete `H_interface` payload.  Forbid a runtime catalog builder, adapter,
+callback table, one-shot final
 LCFO, and occupied-only checkpoint publication in that branch.
 
 **Step 3: Add rank-local failure, stale-state, and route RED cases**
@@ -635,45 +636,28 @@ route test must fail because production is not connected.
 
 **Step 4: Implement the minimum concrete solver**
 
-Define the immutable production catalog with effective selections/actions,
-distributed basis ownership, fixed metric, canonical face payload, complete
-SIPG rows, scope/symmetry provenance, and canonical fingerprints.  Keep one
-current mutable state and one deep copy of the last accepted state in
-`dg_hybrid_continuation_scf`.  Remove the public
-callback bundle and do not add `class(*)`, an abstract backend, or a procedure
-table.  Connect this catalog directly to the existing SALMON assembly,
-distributed eigensolver, density, trace, and residual routines in one fixed
-order.  Convert every rank-local
+Complete symmetry closure, basis construction, metric assembly, and SIPG
+assembly before entering SCF.  Keep only the completed fixed arrays and their
+fingerprints, one current mutable state, and one deep copy of the last accepted
+state.  Implement one contained production continuation driver where the
+existing SALMON state is already available.  Do not add a runtime catalog
+builder, `class(*)`, abstract backend, or procedure table.  Call the existing
+assembly, distributed eigensolver, density, trace, and residual routines in
+one fixed order.  Convert every rank-local
 failure to collective consensus before entering another collective.  Mix only
 density.  Evaluate acceptance as a pure operation on the current fully
 refreshed state.  Roll back the whole state atomically.
 
 Inside the explicit default-off continuation branch, build the supported-scope
 receipt, close WF blocks and PW packets, materialize only the effective
-selection, recompute ownership and fingerprints, construct the production
-catalog, and invoke the concrete solver from the exact converged `dc%rho_tot`.
+selection, recompute ownership and fingerprints, finish the fixed basis and
+matrix payload, and start the contained driver from the exact converged
+`dc%rho_tot`.
 Do not alter protected routes and do not publish a checkpoint in this task.
 
-Before wiring `main_dft`, implement the production materialization bridge in
-three RED/GREEN subcycles:
-
-1. Extend the production-basis preparation boundary to return the frozen
-   effective WF/PW IDs and their group actions.  Require basis materialization,
-   ownership, and selection fingerprints to use these returned IDs; forbid the
-   requested IDs from bypassing closure.
-2. Refactor production face materialization to accept rank-owned fragment
-   bases.  Exchange only the values and normal derivatives required by
-   adjacent faces.  Do not gather or replicate every fragment's real-space
-   basis.  Require exactly one canonical face owner and both coupling
-   directions.
-3. Assemble the complete SIPG row payload and pass it, the fixed metric, the
-   effective selection/actions, and their provenance to
-   `build_dg_hybrid_production_catalog`.  Only after this bridge is GREEN may
-   the production branch call the concrete continuation solver.
-
-Each subcycle has its own MPI fixture and commit.  Run at 1, 2, 4, and 8 ranks
-where the fixture permits empty local ownership.  Existing selection and face
-trace runners remain mandatory regressions.
+Selection closure and face assembly retain their existing focused tests.  The
+production task only connects their completed outputs; it does not add another
+selection or materialization layer.
 
 **Step 5: Run focused RED then GREEN at all decompositions**
 

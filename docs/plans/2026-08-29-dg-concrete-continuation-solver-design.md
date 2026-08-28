@@ -15,23 +15,26 @@ design evidence but is not an implementation target.
 
 The production route has exactly three conceptual objects.
 
-### Immutable catalog
+### Immutable fixed payload
 
-The catalog is frozen before lambda-zero iteration and contains:
+The payload is completed and frozen before lambda-zero iteration.  It contains
+only quantities used during SCF:
 
-- effective, symmetry-closed WF blocks and PW packets, including the actions
-  and the requested-to-effective selection record;
 - distributed basis row IDs, exactly-one ownership, basis values, and grid
   distribution;
 - the fixed DG metric and its independent sparse graph;
-- the canonical physical-face list, face ownership, quadrature, normals,
-  penalty data, and the complete coefficient-independent SIPG interface
-  blocks;
-- supported-scope, symmetry-analysis, cutoff, selection, and basis provenance;
+- the complete coefficient-independent SIPG interface rows;
+- the unified retained-basis representation `D(g)` needed by optional
+  nontrivial-symmetry checks; identity-only systems store only the identity;
+- fingerprints of the already accepted scope, symmetry closure, cutoff,
+  selection, basis, metric, and interface payloads;
 - decomposition-independent fingerprints computed from canonical global IDs
   and values after duplicate and missing-ID checks.
 
-There is one scalar lambda for the complete catalog.  A face-local or
+Requested/effective WF/PW IDs and their separate construction actions are not
+part of the SCF state.  They are consumed before materialization and retained
+only as checkpoint provenance.  There is one scalar lambda for the complete
+payload.  A face-local or
 fragment-local lambda is not representable by the solver interface.
 
 ### Mutable fixed-point state
@@ -130,9 +133,12 @@ occupied subspace are checked.
 
 ## Production integration boundary
 
-`main_dft` performs only route selection, scope validation, construction of
-the frozen catalog, invocation of the concrete solver, and final checkpoint
-publication.  It does not implement the inner SCF loop.
+The existing overlapping-Wannier production route finishes symmetry closure,
+basis materialization, metric assembly, and complete SIPG assembly first.  A
+single contained concrete driver then performs the continuation where the
+SALMON density, potential, Hamiltonian, and distributed solver state already
+exist.  This avoids a second catalog-builder API and avoids exporting SALMON
+state through callbacks.
 
 The solver may call a small number of existing concrete SALMON routines for
 volume assembly, distributed diagonalization, density reconstruction, and
@@ -144,20 +150,10 @@ solver path rather than manually invoking internal phases.
 Protected DC+LCFO/Wannier90, overlapping-Wannier, ordinary GS, and ordinary RT
 branches are unchanged.
 
-The concrete solver and its production catalog connection are implemented as
-one task.  They must not be separated by a temporary generic backend.  The
-catalog type is defined before the solver test and contains the actual matrix,
-basis, face, selection, and ownership payload needed by the solver.  The
-`main_dft` branch constructs that type through existing SALMON routines; the
-solver never guesses how to rebuild missing production data.
-
-Production materialization is distributed.  Each rank contributes its owned
-fragment-basis rows and exchanges only traces required by neighboring physical
-faces.  The bridge must not collect all fragment real-space basis values on
-every rank.  Selection closure precedes materialization: requested IDs are
-inputs to closure only, while effective IDs and their returned actions are the
-sole inputs to basis ownership, face construction, fingerprints, and the
-continuation catalog.
+No runtime production-catalog builder, WF-action/PW-action adapter, or generic
+materialization bridge is introduced.  Existing construction routines remain
+responsible for producing the final basis and matrices.  The continuation
+driver receives those completed arrays directly.
 
 ## Tests
 
