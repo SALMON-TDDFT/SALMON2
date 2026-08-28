@@ -144,6 +144,13 @@ solver path rather than manually invoking internal phases.
 Protected DC+LCFO/Wannier90, overlapping-Wannier, ordinary GS, and ordinary RT
 branches are unchanged.
 
+The concrete solver and its production catalog connection are implemented as
+one task.  They must not be separated by a temporary generic backend.  The
+catalog type is defined before the solver test and contains the actual matrix,
+basis, face, selection, and ownership payload needed by the solver.  The
+`main_dft` branch constructs that type through existing SALMON routines; the
+solver never guesses how to rebuild missing production data.
+
 ## Tests
 
 The principal MPI fixture runs the complete solver loop on a small

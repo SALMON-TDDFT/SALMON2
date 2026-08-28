@@ -580,13 +580,19 @@ Use `git add -p` for every already-dirty file.  Run
 `git diff --cached --check` and inspect `git diff --cached`.  Commit only this
 task as `feat(dg): expose production symmetry selection boundary`.
 
-### Task 7a.6: Consolidate one concrete production continuation solver
+### Task 7a.6: Build and connect one concrete production continuation solver
 
 **Files:**
 - Create: `docs/plans/2026-08-29-dg-concrete-continuation-solver-design.md`
 - Modify: `src/gs/dc/dg_hybrid_continuation_scf.f90`
 - Modify: `tests/dg/test_dg_hybrid_continuation_scf_mpi.f90`
 - Modify: `tests/dg/run_dg_hybrid_continuation_scf_mpi.py`
+- Modify: `src/gs/main_dft.f90`
+- Modify: `src/gs/dc/dcdft.f90`
+- Modify: `src/io/salmon_global.f90`
+- Modify: `src/io/inputoutput.f90`
+- Modify: `tests/dg/check_dg_hybrid_divided_dc_controls.py`
+- Create: `tests/dg/check_dg_hybrid_continuation_route.py`
 - Delete before commit if still untracked: `src/gs/dc/dg_hybrid_production_continuation_adapter.f90`
 - Delete before commit if still untracked: `tests/dg/test_dg_hybrid_production_continuation_adapter_mpi.f90`
 - Delete before commit if still untracked: `tests/dg/run_dg_hybrid_production_continuation_adapter_mpi.py`
@@ -595,9 +601,10 @@ task as `feat(dg): expose production symmetry selection boundary`.
 
 Keep the current test output and review findings in the existing verification
 records.  Do not commit the experimental adapter.  Extend the continuation
-fixture so it invokes the public concrete solver rather than manually calling
-phases.  Use a nonorthogonal two-fragment problem with nonzero cross-fragment
-SIPG blocks.  Require the physical basis-space projector
+fixture so it invokes the public concrete solver with the same frozen catalog
+type constructed by production, rather than manually calling phases.  Use a
+nonorthogonal two-fragment problem with nonzero cross-fragment SIPG blocks.
+Require the physical basis-space projector
 `C_occ C_occ^dagger S`, uniform lambda on every canonical face, complete
 rollback, and a fully refreshed lambda-one state.
 
@@ -608,7 +615,12 @@ Run `python3 tests/dg/run_dg_hybrid_continuation_scf_mpi.py`.
 Expected: FAIL because the existing callback path does not own a complete
 production state transition and currently forms the wrong projector.
 
-**Step 3: Add rank-local failure and stale-state RED cases**
+Add a source-contract RED test requiring the explicit continuation branch to
+pass the exact converged DC density and the effective symmetry-closed WF/PW
+catalog to this solver.  Forbid an adapter, callback table, one-shot final
+LCFO, and occupied-only checkpoint publication in that branch.
+
+**Step 3: Add rank-local failure, stale-state, and route RED cases**
 
 Inject a volume-kernel failure on one rank and require communicator-wide
 failure without deadlock.  Make Hermiticity, electron number, symmetry, and
@@ -617,16 +629,30 @@ by phases and a degenerate-space unitary and require projector invariance.
 Reject any final state whose density, trace, operator, or epoch predates the
 last solve.
 
+Run both the MPI fixture and `check_dg_hybrid_continuation_route.py`.  The MPI
+fixture must fail on the missing concrete catalog/solver contract and the
+route test must fail because production is not connected.
+
 **Step 4: Implement the minimum concrete solver**
 
-Keep one immutable catalog, one current mutable state, and one deep copy of the
-last accepted state in `dg_hybrid_continuation_scf`.  Remove the public
+Define the immutable production catalog with effective selections/actions,
+distributed basis ownership, fixed metric, canonical face payload, complete
+SIPG rows, scope/symmetry provenance, and canonical fingerprints.  Keep one
+current mutable state and one deep copy of the last accepted state in
+`dg_hybrid_continuation_scf`.  Remove the public
 callback bundle and do not add `class(*)`, an abstract backend, or a procedure
-table.  Call the existing concrete assembly, distributed eigensolver, density,
-trace, and residual routines in one fixed order.  Convert every rank-local
+table.  Connect this catalog directly to the existing SALMON assembly,
+distributed eigensolver, density, trace, and residual routines in one fixed
+order.  Convert every rank-local
 failure to collective consensus before entering another collective.  Mix only
 density.  Evaluate acceptance as a pure operation on the current fully
 refreshed state.  Roll back the whole state atomically.
+
+Inside the explicit default-off continuation branch, build the supported-scope
+receipt, close WF blocks and PW packets, materialize only the effective
+selection, recompute ownership and fingerprints, construct the production
+catalog, and invoke the concrete solver from the exact converged `dc%rho_tot`.
+Do not alter protected routes and do not publish a checkpoint in this task.
 
 **Step 5: Run focused RED then GREEN at all decompositions**
 
@@ -644,6 +670,9 @@ python3 tests/dg/run_dg_hybrid_continuation_acceptance_mpi.py
 python3 tests/dg/run_dg_hybrid_sipg_operator_mpi.py
 python3 tests/dg/run_dg_hybrid_production_face_traces_mpi.py
 python3 tests/dg/check_dg_hybrid_divided_dc_controls.py
+python3 tests/dg/check_dg_hybrid_continuation_route.py
+python3 tests/dg/check_dg_hybrid_self_consistent_route.py
+python3 tests/dg/check_dg_overlapping_wannier_route.py
 ```
 
 Expected: all PASS.
@@ -653,87 +682,6 @@ Expected: all PASS.
 Use `git add -p` for dirty files.  Run `git diff --cached --check` and inspect
 `git diff --cached`.  Commit only this task as
 `feat(dg): consolidate concrete production continuation solver`.
-
-### Task 7b: Add an isolated production continuation branch
-
-**Files:**
-- Modify: `src/gs/main_dft.f90`
-- Modify: `src/gs/dc/dcdft.f90`
-- Modify: `src/io/salmon_global.f90`
-- Modify: `src/io/inputoutput.f90`
-- Modify: `tests/dg/check_dg_hybrid_divided_dc_controls.py`
-- Create: `tests/dg/check_dg_hybrid_continuation_route.py`
-
-**Step 1: Write failing source-contract tests**
-
-Require the new `yn_dg_hybrid_continuation_scf=='y'` branch to pass the converged DC total density and
-its fingerprint into continuation initialization, construct the complete SIPG
-operator, run the coupled continuation, and publish only after the lambda-one
-refresh.  Forbid `solve_dg_hybrid_generalized_once_and_publish` and occupied-only
-checkpoint publication in this branch.  Require the current one-shot divided
-prototype and all protected legacy branches to retain their former calls and
-flag conditions; neither is accepted as the new production result.
-Require the new route to fail before continuation for spin-polarized,
-spin-orbit, DFT+U, HSE/exact-exchange, or other orbital/current/history-dependent
-functionals; protected routes retain their existing support.
-Require `main_dft.f90` to pass the requested WF block IDs and their
-accepted group action plus requested PW packet IDs/action into the closure
-routine before catalog freezing.  Require the returned effective IDs—not the
-requested IDs—to drive basis materialization, ownership, selection
-fingerprints, and continuation initialization.  Reject a production call that
-freezes or materializes the requested selection directly.  Require an
-identity-only production case to pass one explicit identity action plus a
-successful authoritative-analysis receipt.  Reject an empty operation list,
-missing/failed analysis provenance, and any attempt to downgrade a known
-nontrivial physical group because the selected fragmentation is not
-covariant.
-
-**Step 2: Run RED**
-
-Run:
-
-```text
-python3 tests/dg/check_dg_hybrid_continuation_route.py
-python3 tests/dg/check_dg_hybrid_divided_dc_controls.py
-```
-
-Expected: the new contract FAILS on the one-shot branch.
-
-**Step 3: Wire the concrete production solver minimally**
-
-Reuse the accepted WF+PW basis, DC potential and density infrastructure, and
-distributed generalized solver.  Assemble complete cross-fragment SIPG rows.
-Keep the catalog frozen for the attempt.  Do not alter DC+LCFO/Wannier90 or
-overlapping-Wannier branches.  Add the explicit supported-scope gate only
-inside the new continuation branch.  Build its allowlist from
-`theory`, boundary condition, `system%Nspin`, `yn_spinorbit`,
-`PLUS_U_ON`, `yn_hse`, `yn_fix_func`, `yn_jm`, and every
-`xc_func%xctype` entry; add one rejection fixture for each selector
-family.  Before `initialize_dg_hybrid_continuation`, close both WF blocks
-and PW packets, materialize only the effective selection, recompute ownership
-and fingerprints, and pass that frozen catalog plus the supported-scope
-receipt to initialization.  Pass the frozen catalog and exact DC density to
-the concrete solver; do not construct an adapter or callback table in
-`main_dft`.
-
-**Step 4: Run GREEN and route regressions**
-
-Run the two contracts plus
-the following exact protected-route checks:
-
-```text
-python3 tests/dg/check_dg_hybrid_self_consistent_route.py
-python3 tests/dg/check_dg_overlapping_wannier_route.py
-```
-
-Expected: all PASS.  The executable protected-route regressions are run once
-in Task 11 and in final verification rather than redundantly in this task.
-
-**Step 5: Commit**
-
-These files are already dirty.  Use `git add -p` for every modified file,
-inspect both cached checks, and commit only new continuation hunks as
-`feat(dg): run WF+PW DG continuation from DC density`.
 
 ### Task 8: Publish one complete atomic GS checkpoint
 
