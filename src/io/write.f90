@@ -2216,6 +2216,13 @@ contains
     if(abs(dE) < min(threshold_projection,1e-12)) then
       if(comm_is_root(nproc_id_global)) write(*,*) "projection: already converged, E_kin(new)-E_kin(old)=",dE
     else
+      ! Reference the kinetic energy of this step's starting orbitals (energy%E_kin
+      ! computed just above), not rt%E_old carried over from the previous time step.
+      ! Otherwise the first iteration's dE is measured against the previous step and
+      ! the loop can exit after a single CG step without converging the projection
+      ! orbitals (most likely for large systems / small dt, where E_kin changes
+      ! little per step).
+      rt%E_old = energy%E_kin
       do iter_GS=1,niter
         call ssdg(mg,rt%system_proj,rt%info_proj,stencil,rt%tpsi0,rt%htpsi0,ppg,rt%vloc0,rt%srg_proj)
         call gscg_zwf(ncg,mg,rt%system_proj,rt%info_proj,stencil,ppg, &
@@ -2224,9 +2231,9 @@ contains
         call calc_eigen_energy(energy,rt%tpsi0,rt%htpsi0,rt%ttpsi0 &
         & ,rt%system_proj,rt%info_proj,mg,rt%vloc0,stencil,rt%srg_proj,ppg)
         dE = energy%E_kin - rt%E_old
+        rt%E_old = energy%E_kin
         if(comm_is_root(nproc_id_global)) write(*,'(a,i6,e20.10)') "projection: ",iter_GS,dE
         if(abs(dE) < threshold_projection) exit
-        rt%E_old = energy%E_kin
       end do
     end if
     
