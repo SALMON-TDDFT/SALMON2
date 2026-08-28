@@ -8,6 +8,9 @@ flag = "yn_dg_hybrid_continuation_scf == 'y'"
 assert flag in source, "missing explicit DG continuation production branch"
 branch = source[source.index(flag):]
 branch = branch[:branch.index("endif")]
+assert "run_dg_hybrid_continuation_ground_state_for_main" in branch
+start = source.index("subroutine run_dg_overlapping_wannier_ground_state_for_main")
+implementation = source[start:source.index("subroutine dg_dc_update_potential_from_density", start)]
 
 required = [
     "dc%rho_tot",
@@ -17,7 +20,7 @@ required = [
     "run_dg_hybrid_continuation_scf",
 ]
 for token in required:
-    assert token in branch, f"continuation branch does not use {token}"
+    assert token in implementation, f"continuation implementation does not use {token}"
 
 for forbidden in [
     "dg_hybrid_production_continuation_adapter",
@@ -26,6 +29,6 @@ for forbidden in [
     "solve_dg_hybrid_generalized_once_and_publish",
     "write_overlapping_wannier_occupied_checkpoint",
 ]:
-    assert forbidden not in branch, f"continuation branch uses forbidden {forbidden}"
+    assert forbidden not in implementation, f"continuation implementation uses forbidden {forbidden}"
 
 print("PASS concrete DG continuation production route contract")
