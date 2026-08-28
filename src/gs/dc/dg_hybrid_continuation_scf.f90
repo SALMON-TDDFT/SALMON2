@@ -9,7 +9,7 @@ module dg_hybrid_continuation_scf
     dg_hybrid_stage_tolerances,validate_dg_hybrid_controller_contract
   use dg_hybrid_continuation_residuals,only:s_dg_hybrid_residuals
 #ifdef USE_MPI
-  use mpi
+  use mpi, only: MPI_Allreduce, MPI_INTEGER, MPI_INTEGER8, MPI_MAX, MPI_MIN, MPI_SUCCESS
 #endif
   implicit none
   private
@@ -61,8 +61,8 @@ module dg_hybrid_continuation_scf
   end type s_dg_hybrid_continuation_callbacks
   public::run_dg_hybrid_continuation_scf
 contains
-  subroutine run_dg_hybrid_continuation_scf(comm,state,controls,callbacks,accepted_state,ok,message)
-    integer,intent(in)::comm;type(s_dg_hybrid_continuation_state),intent(in)::state
+  subroutine run_dg_hybrid_continuation_scf(icomm,state,controls,callbacks,accepted_state,ok,message)
+    integer,intent(in)::icomm;type(s_dg_hybrid_continuation_state),intent(in)::state
     type(s_dg_hybrid_controller_controls),intent(in)::controls
     type(s_dg_hybrid_continuation_callbacks),intent(inout)::callbacks
     type(s_dg_hybrid_trial_state),intent(out)::accepted_state
@@ -76,7 +76,7 @@ contains
       associated(callbacks%evaluate_residuals).and.associated(callbacks%mix_density)
 #ifdef USE_MPI
     local_bad=merge(0,1,callbacks_complete)
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
       ok=.false.;message='collectively incomplete mandatory continuation callback bundle';return
     endif
@@ -85,16 +85,16 @@ contains
       ok=.false.;message='incomplete mandatory continuation callback bundle';return
     endif
 #endif
-    call run_dg_hybrid_coupled_fixed_points(comm,state,controls,callbacks%seed_state,callbacks%face_count,&
+    call run_dg_hybrid_coupled_fixed_points(icomm,state,controls,callbacks%seed_state,callbacks%face_count,&
       callbacks%build_volume,callbacks%solve_full,callbacks%refresh_projector,callbacks%refresh_density_trace,&
       callbacks%evaluate_residuals,callbacks%mix_density,callbacks%maximum_inner_iterations,accepted_state,&
       callbacks%final_lambda,callbacks%accepted_stages,callbacks%rollback_count,ok,message)
   end subroutine run_dg_hybrid_continuation_scf
 
-  subroutine run_dg_hybrid_coupled_fixed_points(comm,continuation,controls,seed_state,face_count,&
+  subroutine run_dg_hybrid_coupled_fixed_points(icomm,continuation,controls,seed_state,face_count,&
       build_volume,solve_full,refresh_projector,refresh_density_trace,evaluate_residuals,mix_density,&
       maximum_inner_iterations,final_state,final_lambda,accepted_stages,rollback_count,ok,message)
-    integer,intent(in)::comm,face_count,maximum_inner_iterations
+    integer,intent(in)::icomm,face_count,maximum_inner_iterations
     type(s_dg_hybrid_continuation_state),intent(in)::continuation
     type(s_dg_hybrid_controller_controls),intent(in)::controls
     type(s_dg_hybrid_trial_state),intent(in)::seed_state
@@ -125,10 +125,10 @@ contains
     character(256)::controller_message
     ok=.false.;message='';final_lambda=0d0;accepted_stages=0;rollback_count=0
     frozen_operator_structure=0_int64
-    call validate_dg_hybrid_controller_contract(comm,controls,decision_ok,controller_message)
+    call validate_dg_hybrid_controller_contract(icomm,controls,decision_ok,controller_message)
     if(.not.decision_ok)then;message=trim(controller_message);return;endif
-    call MPI_Allreduce(maximum_inner_iterations,minimum_iterations,1,MPI_INTEGER,MPI_MIN,comm,ierr)
-    if(ierr==MPI_SUCCESS)call MPI_Allreduce(maximum_inner_iterations,maximum_iterations,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(maximum_inner_iterations,minimum_iterations,1,MPI_INTEGER,MPI_MIN,icomm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(maximum_inner_iterations,maximum_iterations,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.minimum_iterations/=maximum_iterations)then
       message='rank-disagreeing continuation inner iteration limit';return
     endif
@@ -136,7 +136,7 @@ contains
       allocated(continuation%seed_density).and.allocated(continuation%seed_density_ids).and.&
       continuation%global_density_count>0.and.size(continuation%seed_density)==size(seed_state%density).and.&
       allocated(seed_state%trace).and.seed_state%trace_cache_valid.and.maximum_inner_iterations>0.and.face_count>=0)
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid coupled continuation SCF contract';return;endif
     allocate(input_density(size(continuation%seed_density)),output_density(size(continuation%seed_density)),&
       mixed_density(size(continuation%seed_density)),&
@@ -149,11 +149,11 @@ contains
     if(fatal_error)return
     if(.not.stage_ok)then;message='lambda-zero coupled fixed point did not converge';return;endif
     accepted_stages=1
-    call initialize_dg_hybrid_controller(comm,controls,0d0,state,face_count,controller,decision_ok,controller_message)
+    call initialize_dg_hybrid_controller(icomm,controls,0d0,state,face_count,controller,decision_ok,controller_message)
     if(.not.decision_ok)then;message=trim(controller_message);return;endif
 
     do while(controller%accepted_lambda<1d0)
-      call propose_dg_hybrid_trial(comm,controller,state,decision_ok,controller_message)
+      call propose_dg_hybrid_trial(icomm,controller,state,decision_ok,controller_message)
       if(.not.decision_ok)then;message=trim(controller_message);return;endif
       lambda=controller%trial_lambda;input_density=controller%accepted_state%density
       input_trace=controller%accepted_state%trace;rejected=.false.
@@ -161,7 +161,7 @@ contains
       if(fatal_error)return
       if(rejected)cycle
       if(.not.stage_ok)then
-        call reject_dg_hybrid_trial(comm,controller,state,'inner iteration limit',decision_ok,controller_message)
+        call reject_dg_hybrid_trial(icomm,controller,state,'inner iteration limit',decision_ok,controller_message)
         if(.not.decision_ok)then;message=trim(controller_message);return;endif
         cycle
       endif
@@ -194,14 +194,14 @@ contains
         endif
         call fill_report(iteration)
         if(use_controller)then
-          call observe_dg_hybrid_inner_residuals(comm,controller,report%residuals,reject_requested,decision_ok,controller_message)
+          call observe_dg_hybrid_inner_residuals(icomm,controller,report%residuals,reject_requested,decision_ok,controller_message)
           if(.not.decision_ok)then;message=trim(controller_message);fatal=.true.;return;endif
           if(reject_requested)then
-            call reject_dg_hybrid_trial(comm,controller,state,'sustained residual growth',decision_ok,controller_message)
+            call reject_dg_hybrid_trial(icomm,controller,state,'sustained residual growth',decision_ok,controller_message)
             if(.not.decision_ok)then;message=trim(controller_message);fatal=.true.;return;endif
             rejected_trial=.true.;return
           endif
-          call decide_dg_hybrid_stage(comm,controller,state,report,converged,decision_ok,controller_message)
+          call decide_dg_hybrid_stage(icomm,controller,state,report,converged,decision_ok,controller_message)
           if(.not.decision_ok)then;message=trim(controller_message);fatal=.true.;return;endif
         else
           call dg_hybrid_stage_tolerances(controls,lambda,tolerances)
@@ -221,16 +221,16 @@ contains
       call build_volume(lambda,input_density,state,callback_ok)
       callback_ok=callback_ok.and.state%operator_epoch>previous_operator_epoch.and.&
         state%operator_structure_fingerprint/=0.and.state%operator_value_fingerprint/=0
-      call MPI_Allreduce(state%operator_epoch,minimum_operator_epoch,1,MPI_INTEGER,MPI_MIN,comm,ierr)
-      if(ierr==MPI_SUCCESS)call MPI_Allreduce(state%operator_epoch,maximum_operator_epoch,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      call MPI_Allreduce(state%operator_epoch,minimum_operator_epoch,1,MPI_INTEGER,MPI_MIN,icomm,ierr)
+      if(ierr==MPI_SUCCESS)call MPI_Allreduce(state%operator_epoch,maximum_operator_epoch,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
       if(ierr==MPI_SUCCESS)call MPI_Allreduce(state%operator_structure_fingerprint,minimum_operator_structure,1,&
-        MPI_INTEGER8,MPI_MIN,comm,ierr)
+        MPI_INTEGER8,MPI_MIN,icomm,ierr)
       if(ierr==MPI_SUCCESS)call MPI_Allreduce(state%operator_structure_fingerprint,maximum_operator_structure,1,&
-        MPI_INTEGER8,MPI_MAX,comm,ierr)
+        MPI_INTEGER8,MPI_MAX,icomm,ierr)
       if(ierr==MPI_SUCCESS)call MPI_Allreduce(state%operator_value_fingerprint,minimum_operator_value,1,&
-        MPI_INTEGER8,MPI_MIN,comm,ierr)
+        MPI_INTEGER8,MPI_MIN,icomm,ierr)
       if(ierr==MPI_SUCCESS)call MPI_Allreduce(state%operator_value_fingerprint,maximum_operator_value,1,&
-        MPI_INTEGER8,MPI_MAX,comm,ierr)
+        MPI_INTEGER8,MPI_MAX,icomm,ierr)
       callback_ok=callback_ok.and.ierr==MPI_SUCCESS.and.minimum_operator_epoch==maximum_operator_epoch.and.&
         minimum_operator_structure==maximum_operator_structure.and.minimum_operator_value==maximum_operator_value
       if(frozen_operator_structure==0_int64.and.callback_ok)&
@@ -268,12 +268,12 @@ contains
         candidate%projector_overlap>=controls%minimum_projector_overlap.and.candidate%electron_ok.and.&
         candidate%occupation_ok.and.candidate%hermitian_ok.and.candidate%symmetry_ok.and.&
         candidate%real_space_ok.and.candidate%finite_ok.and.state%trace_cache_valid
-      local=merge(1,0,passes);call MPI_Allreduce(local,global_bad,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+      local=merge(1,0,passes);call MPI_Allreduce(local,global_bad,1,MPI_INTEGER,MPI_MIN,icomm,ierr)
       passes=ierr==MPI_SUCCESS.and.global_bad==1
     end subroutine stage_consensus
     subroutine callback_consensus(callback_result,bad,status)
       logical,intent(in)::callback_result;integer,intent(out)::bad,status;integer::local
-      local=merge(0,1,callback_result);call MPI_Allreduce(local,bad,1,MPI_INTEGER,MPI_MAX,comm,status)
+      local=merge(0,1,callback_result);call MPI_Allreduce(local,bad,1,MPI_INTEGER,MPI_MAX,icomm,status)
     end subroutine callback_consensus
 #else
     ok=.false.;message='MPI is required for coupled DG continuation SCF';final_lambda=0d0

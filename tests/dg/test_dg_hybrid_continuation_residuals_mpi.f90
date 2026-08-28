@@ -1,13 +1,14 @@
 #include "config.h"
 program test_dg_hybrid_continuation_residuals_mpi
-  use mpi
+  use mpi, only: MPI_Allreduce, MPI_Comm_rank, MPI_Comm_size, MPI_COMM_WORLD, MPI_Finalize, MPI_Init, MPI_INTEGER, MPI_MAX, &
+    MPI_SUCCESS
   use,intrinsic::iso_fortran_env,only:int64,real64
   use dg_hybrid_continuation_residuals,only:s_dg_hybrid_residuals,s_dg_hybrid_metric_receipt,&
     validate_dg_hybrid_occupied_rows,build_dg_hybrid_interface_observables,&
     evaluate_dg_hybrid_residuals,evaluate_dg_hybrid_projector_change,dg_hybrid_electron_count,&
     validate_cluster_occupations
   implicit none
-  integer::comm,rank,nproc,ierr,i,nlocal
+  integer::icomm,id_rank,nproc,ierr,i,nlocal
   integer(int64),allocatable::row_ids(:)
   complex(real64)::s(3,3),c(3,2),rotated(3,2),u(2,2),h(3,3),hc_all(3,2),sc_all(3,2),s_c(3,2),rotated_s(3,2)
   complex(real64),allocatable::c_local(:,:),rotated_local(:,:),sc_local(:,:),rotated_sc_local(:,:),hc_local(:,:)
@@ -19,9 +20,9 @@ program test_dg_hybrid_continuation_residuals_mpi
   logical::ok
   character(256)::message
 
-  call MPI_Init(ierr);comm=MPI_COMM_WORLD
-  call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
-  row_ids=pack([1_int64,2_int64,3_int64],[(mod(i-1,nproc)==rank,i=1,3)]);nlocal=size(row_ids)
+  call MPI_Init(ierr);icomm=MPI_COMM_WORLD
+  call MPI_Comm_rank(icomm,id_rank,ierr);call MPI_Comm_size(icomm,nproc,ierr)
+  row_ids=pack([1_int64,2_int64,3_int64],[(mod(i-1,nproc)==id_rank,i=1,3)]);nlocal=size(row_ids)
   s=(0d0,0d0);s(1,1)=2d0;s(2,2)=3d0;s(3,3)=4d0
   c=(0d0,0d0);c(1,1)=1d0/sqrt(2d0);c(2,2)=1d0/sqrt(3d0)
   u=reshape([cmplx(1d0,0d0,real64),cmplx(0d0,1d0,real64),cmplx(0d0,1d0,real64),&
@@ -33,9 +34,9 @@ program test_dg_hybrid_continuation_residuals_mpi
   rotated_s=matmul(s,rotated);rotated_sc_local=rotated_s(int(row_ids),:)
   metric_receipt%valid=.true.;metric_receipt%global_count=3;metric_receipt%numerical_rank=3
   metric_receipt%fingerprint=771_int64
-  call validate_dg_hybrid_occupied_rows(comm,row_ids,c_local,sc_local,occupations,metric_receipt,ok,message)
+  call validate_dg_hybrid_occupied_rows(icomm,row_ids,c_local,sc_local,occupations,metric_receipt,ok,message)
   call require(ok,trim(message))
-  call evaluate_dg_hybrid_projector_change(comm,c_local,rotated_sc_local,metric_receipt,&
+  call evaluate_dg_hybrid_projector_change(icomm,c_local,rotated_sc_local,metric_receipt,&
     projector_change,ok,message)
   call require(ok.and.projector_change<1d-13,'principal-angle occupied-subspace change is gauge dependent')
   electron_count=dg_hybrid_electron_count(occupations)
@@ -55,21 +56,21 @@ program test_dg_hybrid_continuation_residuals_mpi
   allocate(hc_local(nlocal,2),rho_input(nlocal),rho_output(nlocal))
   hc_local=hc_all(int(row_ids),:);sc_local=sc_all(int(row_ids),:)
   rho_input=[(1d0/(real(row_ids(i),real64)),i=1,nlocal)];rho_output=rho_input
-  call evaluate_dg_hybrid_residuals(comm,hc_local,sc_local,c_local,s_c(int(row_ids),:),&
+  call evaluate_dg_hybrid_residuals(icomm,hc_local,sc_local,c_local,s_c(int(row_ids),:),&
     rho_output,rho_input,tv,tv,residuals,ok,message)
   call require(ok.and.residuals%r_h<1d-14.and.residuals%r_rho==0d0.and.residuals%r_t==0d0.and.&
     residuals%r_s<1d-14,'distributed exact continuation residual fixture did not vanish')
   metric_receipt%fingerprint=0_int64
-  call validate_dg_hybrid_occupied_rows(comm,row_ids,c_local,s_c(int(row_ids),:),occupations,&
+  call validate_dg_hybrid_occupied_rows(icomm,row_ids,c_local,s_c(int(row_ids),:),occupations,&
     metric_receipt,ok,message)
   call require(.not.ok,'invalid frozen-metric receipt was accepted')
-  if(rank==0)write(*,'(a,i0,a)')'PASS hybrid continuation residuals on ',nproc,' ranks'
+  if(id_rank==0)write(*,'(a,i0,a)')'PASS hybrid continuation residuals on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
   subroutine require(condition,label)
     logical,intent(in)::condition;character(*),intent(in)::label
     integer::local_bad,global_bad
-    local_bad=merge(0,1,condition);call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;if(rank==0)write(0,'(a)')trim(label);error stop 1;endif
+    local_bad=merge(0,1,condition);call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;if(id_rank==0)write(0,'(a)')trim(label);error stop 1;endif
   end subroutine require
 end program test_dg_hybrid_continuation_residuals_mpi

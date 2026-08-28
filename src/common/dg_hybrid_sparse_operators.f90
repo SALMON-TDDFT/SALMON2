@@ -3,7 +3,7 @@ module dg_hybrid_sparse_operators
   use,intrinsic::iso_fortran_env,only:int64,real64
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
 #ifdef USE_MPI
-  use mpi
+  use mpi, only: MPI_Allreduce, MPI_BXOR, MPI_INTEGER, MPI_INTEGER8, MPI_MAX, MPI_SUCCESS, MPI_SUM
 #endif
   implicit none
   private
@@ -27,9 +27,9 @@ module dg_hybrid_sparse_operators
   end type s_dg_hybrid_coupling_envelope
   public::build_dg_hybrid_operator_envelope,set_dg_hybrid_operator_hermitian_edge
 contains
-  subroutine build_dg_hybrid_operator_envelope(comm,global_count,owned_row_ids,basis_edges,nonlocal_edges,face_edges,&
+  subroutine build_dg_hybrid_operator_envelope(icomm,global_count,owned_row_ids,basis_edges,nonlocal_edges,face_edges,&
       component_count,envelope,ok,message)
-    integer,intent(in)::comm,global_count,basis_edges(:,:),nonlocal_edges(:,:),face_edges(:,:),component_count
+    integer,intent(in)::icomm,global_count,basis_edges(:,:),nonlocal_edges(:,:),face_edges(:,:),component_count
     integer(int64),intent(in)::owned_row_ids(:)
     type(s_dg_hybrid_coupling_envelope),intent(out)::envelope
     logical,intent(out)::ok;character(*),intent(out)::message
@@ -42,7 +42,7 @@ contains
         size(face_edges,1)/=2.or.any(owned_row_ids<1_int64).or.any(owned_row_ids>int(global_count,int64)))local_bad=1
     do i=1,size(owned_row_ids);if(count(owned_row_ids==owned_row_ids(i))/=1)local_bad=1;enddo
     call validate_edges(basis_edges);call validate_edges(nonlocal_edges);call validate_edges(face_edges)
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid row-owned operator coupling envelope';return;endif
     allocate(raw_offsets(size(owned_row_ids)+1),cursor(size(owned_row_ids)),unique_counts(size(owned_row_ids)))
     raw_offsets(1)=1
@@ -79,8 +79,8 @@ contains
         pair_hash=ieor(pair_hash,ishftc(pair_hash,17));local_xor=ieor(local_xor,pair_hash);local_sum=local_sum+pair_hash
       enddo
     enddo
-    call MPI_Allreduce(local_xor,global_xor,1,MPI_INTEGER8,MPI_BXOR,comm,ierr);if(ierr/=MPI_SUCCESS)return
-    call MPI_Allreduce(local_sum,global_sum,1,MPI_INTEGER8,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(local_xor,global_xor,1,MPI_INTEGER8,MPI_BXOR,icomm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(local_sum,global_sum,1,MPI_INTEGER8,MPI_SUM,icomm,ierr);if(ierr/=MPI_SUCCESS)return
     envelope%structure_fingerprint=ieor(ishftc(global_xor,13),global_sum)
     envelope%structure_fingerprint=ieor(envelope%structure_fingerprint,int(global_count,int64))
     if(envelope%structure_fingerprint==0_int64)envelope%structure_fingerprint=1_int64
@@ -102,8 +102,8 @@ contains
 #endif
   end subroutine build_dg_hybrid_operator_envelope
 
-  subroutine set_dg_hybrid_operator_hermitian_edge(comm,envelope,component,row,column,value,ok,message)
-    integer,intent(in)::comm,component,row,column
+  subroutine set_dg_hybrid_operator_hermitian_edge(icomm,envelope,component,row,column,value,ok,message)
+    integer,intent(in)::icomm,component,row,column
     type(s_dg_hybrid_coupling_envelope),intent(inout)::envelope
     complex(real64),intent(in)::value
     logical,intent(out)::ok;character(*),intent(out)::message
@@ -119,7 +119,7 @@ contains
     if(row/=column)then;position=envelope%find_edge(column,row)
       if(position>0)then;envelope%component_values(component,position)=conjg(value);local_updates=local_updates+1;endif
     endif
-    call MPI_Allreduce(local_updates,global_updates,1,MPI_INTEGER,MPI_SUM,comm,ierr)
+    call MPI_Allreduce(local_updates,global_updates,1,MPI_INTEGER,MPI_SUM,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_updates/=merge(1,2,row==column))then
       message='Hermitian operator edge or reverse is outside distributed envelope';return
     endif

@@ -1,6 +1,7 @@
 #include "config.h"
 program test_dg_hybrid_continuation_scf_mpi
-  use mpi
+  use mpi, only: MPI_Allreduce, MPI_Comm_rank, MPI_Comm_size, MPI_COMM_WORLD, MPI_DOUBLE_COMPLEX, MPI_DOUBLE_PRECISION, &
+    MPI_Finalize, MPI_IN_PLACE, MPI_Init, MPI_INTEGER, MPI_MAX, MPI_SUCCESS, MPI_SUM
   use,intrinsic::iso_fortran_env,only:int64,real64
   use dg_hybrid_continuation_state,only:s_dg_hybrid_continuation_state
   use dg_hybrid_continuation_controller,only:s_dg_hybrid_controller_controls,s_dg_hybrid_trial_state,&
@@ -9,7 +10,7 @@ program test_dg_hybrid_continuation_scf_mpi
   use dg_hybrid_continuation_scf,only:s_dg_hybrid_continuation_callbacks,run_dg_hybrid_continuation_scf
   implicit none
   integer,parameter::nglobal=4
-  integer::comm,rank,nproc,ierr,i,nlocal,position,phase,solve_count,accepted_stages,rollbacks
+  integer::icomm,id_rank,nproc,ierr,i,nlocal,position,phase,solve_count,accepted_stages,rollbacks
   integer(int64),allocatable::ids(:)
   real(real64),allocatable::dc_density(:),last_built_density(:)
   real(real64)::final_lambda
@@ -23,12 +24,12 @@ program test_dg_hybrid_continuation_scf_mpi
     lambda_zero_gate_delayed,stale_operator_positive,rank_divergent_operator
   character(256)::message
 
-  call MPI_Init(ierr);comm=MPI_COMM_WORLD
-  call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
-  nlocal=count([(mod(i-1,nproc)==rank,i=1,nglobal)])
+  call MPI_Init(ierr);icomm=MPI_COMM_WORLD
+  call MPI_Comm_rank(icomm,id_rank,ierr);call MPI_Comm_size(icomm,nproc,ierr)
+  nlocal=count([(mod(i-1,nproc)==id_rank,i=1,nglobal)])
   allocate(ids(nlocal),dc_density(nlocal),last_built_density(nlocal));position=0
   do i=1,nglobal
-    if(mod(i-1,nproc)/=rank)cycle
+    if(mod(i-1,nproc)/=id_rank)cycle
     position=position+1;ids(position)=i;dc_density(position)=0.15d0+0.01d0*i
   enddo
   continuation%valid=.true.;continuation%lambda=0d0;continuation%global_density_count=nglobal
@@ -41,21 +42,21 @@ program test_dg_hybrid_continuation_scf_mpi
   controls%iteration_limit=80
   call configure_callbacks()
   callbacks%build_volume=>null();solve_count=0
-  call run_dg_hybrid_continuation_scf(comm,continuation,controls,callbacks,final_state,ok,message)
+  call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
   call require(.not.ok.and.solve_count==0.and.index(message,'collective')>0,&
     'incomplete callback bundle was not rejected collectively before execution')
   callbacks%build_volume=>volume_build
   if(nproc>1)then
-    if(rank==0)controls%density_damping=0.4d0
+    if(id_rank==0)controls%density_damping=0.4d0
     phase=0;solve_count=0;first_volume=.true.;lambda_zero_passed=.false.;forced_growth_complete=.true.
     poison_final=.false.;lambda_one_converged=.false.;fatal_positive=.false.;lambda_zero_gate_delayed=.false.
     stale_operator_positive=.false.
-    callbacks%maximum_inner_iterations=80+rank
-    call run_dg_hybrid_continuation_scf(comm,continuation,controls,callbacks,final_state,ok,message)
+    callbacks%maximum_inner_iterations=80+id_rank
+    call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
     call require(.not.ok.and.solve_count==0,'rank-disagreeing controls reached the lambda-zero callbacks')
     controls%density_damping=0.5d0
     solve_count=0
-    call run_dg_hybrid_continuation_scf(comm,continuation,controls,callbacks,final_state,ok,message)
+    call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
     call require(.not.ok.and.solve_count==0.and.index(message,'iteration limit')>0,&
       'rank-disagreeing inner iteration limit reached the lambda-zero callbacks')
   endif
@@ -64,7 +65,7 @@ program test_dg_hybrid_continuation_scf_mpi
   poison_final=.false.;lambda_one_converged=.false.;fatal_positive=.false.;lambda_zero_gate_delayed=.false.
   stale_operator_positive=.false.;rank_divergent_operator=.false.
   callbacks%seed_state=seed
-  call run_dg_hybrid_continuation_scf(comm,continuation,controls,callbacks,final_state,ok,message)
+  call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
   final_lambda=callbacks%final_lambda;accepted_stages=callbacks%accepted_stages;rollbacks=callbacks%rollback_count
   call require(ok,trim(message))
   call require(abs(final_lambda-1d0)<1d-15.and.rollbacks>=1.and.accepted_stages>=2,&
@@ -80,31 +81,31 @@ program test_dg_hybrid_continuation_scf_mpi
   call fill_state(seed);phase=0;solve_count=0;first_volume=.true.;lambda_zero_passed=.false.
   forced_growth_complete=.true.;poison_final=.true.;lambda_one_converged=.false.;lambda_zero_gate_delayed=.false.
   callbacks%seed_state=seed
-  call run_dg_hybrid_continuation_scf(comm,continuation,controls,callbacks,final_state,ok,message)
+  call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
   call require(.not.ok.and.index(message,'lambda-one fully refreshed residual gate failed')>0,&
     'lambda-one refresh used stale intermediate tolerances')
   call fill_state(seed);phase=0;solve_count=0;first_volume=.true.;lambda_zero_passed=.false.
   forced_growth_complete=.true.;poison_final=.false.;lambda_one_converged=.false.;fatal_positive=.true.
   lambda_zero_gate_delayed=.false.
   callbacks%seed_state=seed
-  call run_dg_hybrid_continuation_scf(comm,continuation,controls,callbacks,final_state,ok,message)
+  call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
   call require(.not.ok.and.index(message,'coupled continuation callback failed')>0,&
     'fatal positive-lambda callback failure was retried as an iteration rejection')
   call fill_state(seed);callbacks%seed_state=seed;phase=0;solve_count=0;first_volume=.true.;lambda_zero_passed=.false.
   forced_growth_complete=.true.;poison_final=.false.;lambda_one_converged=.false.;fatal_positive=.false.
   lambda_zero_gate_delayed=.false.;stale_operator_positive=.true.
-  call run_dg_hybrid_continuation_scf(comm,continuation,controls,callbacks,final_state,ok,message)
+  call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
   call require(.not.ok.and.index(message,'operator provenance')>0,&
     'stale density-dependent operator provenance was accepted')
   if(nproc>1)then
     call fill_state(seed);callbacks%seed_state=seed;phase=0;solve_count=0;first_volume=.true.;lambda_zero_passed=.false.
     forced_growth_complete=.true.;poison_final=.false.;lambda_one_converged=.false.;fatal_positive=.false.
     lambda_zero_gate_delayed=.false.;stale_operator_positive=.false.;rank_divergent_operator=.true.
-    call run_dg_hybrid_continuation_scf(comm,continuation,controls,callbacks,final_state,ok,message)
+    call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
     call require(.not.ok.and.index(message,'operator provenance')>0,&
       'rank-divergent operator provenance was accepted')
   endif
-  if(rank==0)write(*,'(a,i0,a)')'PASS hybrid continuation SCF on ',nproc,' ranks'
+  if(id_rank==0)write(*,'(a,i0,a)')'PASS hybrid continuation SCF on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
   subroutine configure_callbacks()
@@ -138,7 +139,7 @@ contains
       state%operator_epoch=state%operator_epoch+1
       state%operator_structure_fingerprint=991_int64
       state%operator_value_fingerprint=1001_int64
-      if(rank_divergent_operator)state%operator_value_fingerprint=state%operator_value_fingerprint+rank
+      if(rank_divergent_operator)state%operator_value_fingerprint=state%operator_value_fingerprint+id_rank
     endif
     if(first_volume)then
       callback_ok=callback_ok.and.all(input_density==dc_density);first_volume=.false.
@@ -175,7 +176,7 @@ contains
     callback_ok=phase==3;phase=4
     output_density=fixed_density(lambda)+0.25d0*(input_density-fixed_density(lambda))
     state%density=output_density;state%trace(1,1)=cmplx(sum(output_density)/real(nglobal,real64),0d0,real64)
-    call MPI_Allreduce(MPI_IN_PLACE,state%trace,1,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,state%trace,1,MPI_DOUBLE_COMPLEX,MPI_SUM,icomm,ierr)
     state%density_epoch=state%density_epoch+1;state%trace_epoch=state%density_epoch
     state%derived_epoch=state%density_epoch;state%trace_cache_valid=.true.;callback_ok=callback_ok.and.ierr==MPI_SUCCESS
   end subroutine density_trace_refresh
@@ -188,7 +189,8 @@ contains
     logical,intent(out)::electron_ok,occupation_ok,hermitian_ok,symmetry_ok,real_space_ok,gap_shrinking,callback_ok
     real(real64)::local_norm,global_norm
     callback_ok=phase==4.and.state%trace_cache_valid;phase=5
-    local_norm=sum((state%density-input_density)**2);call MPI_Allreduce(local_norm,global_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+    local_norm=sum((state%density-input_density)**2)
+    call MPI_Allreduce(local_norm,global_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,icomm,ierr)
     residuals%r_rho=sqrt(global_norm)/max(1d0,sqrt(sum_global_square(input_density)))
     residuals%r_t=abs(state%trace(1,1)-input_trace(1,1))/max(1d0,abs(input_trace(1,1)))
     residuals%r_h=1d-12;residuals%r_s=1d-12
@@ -221,11 +223,11 @@ contains
   end subroutine density_mix
   real(real64) function sum_global_square(values)
     real(real64),intent(in)::values(:);real(real64)::local_value
-    local_value=sum(values**2);call MPI_Allreduce(local_value,sum_global_square,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+    local_value=sum(values**2);call MPI_Allreduce(local_value,sum_global_square,1,MPI_DOUBLE_PRECISION,MPI_SUM,icomm,ierr)
   end function sum_global_square
   subroutine require(condition,label)
     logical,intent(in)::condition;character(*),intent(in)::label;integer::local_bad,global_bad
-    local_bad=merge(0,1,condition);call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;if(rank==0)write(0,'(a)')trim(label);error stop 1;endif
+    local_bad=merge(0,1,condition);call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;if(id_rank==0)write(0,'(a)')trim(label);error stop 1;endif
   end subroutine require
 end program test_dg_hybrid_continuation_scf_mpi

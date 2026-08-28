@@ -3,7 +3,8 @@ module dg_hybrid_sipg_operator
   use,intrinsic::iso_fortran_env,only:int64,real64
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
 #ifdef USE_MPI
-  use mpi
+  use mpi, only: MPI_Allreduce, MPI_Comm_rank, MPI_Comm_size, MPI_DOUBLE_COMPLEX, MPI_IN_PLACE, MPI_INTEGER, MPI_INTEGER8, &
+    MPI_MAX, MPI_MIN, MPI_SUCCESS, MPI_SUM
 #endif
   implicit none
   private
@@ -22,9 +23,10 @@ module dg_hybrid_sipg_operator
 
   public::assemble_dg_hybrid_sipg_face,scale_dg_hybrid_sipg_faces
 contains
-  subroutine assemble_dg_hybrid_sipg_face(comm,global_face_id,owner_rank,periodic_shift,basis_ids_minus,basis_ids_plus,value_minus,&
+  subroutine assemble_dg_hybrid_sipg_face(icomm,global_face_id,owner_rank,periodic_shift,basis_ids_minus,basis_ids_plus, &
+      value_minus, &
       derivative_minus,value_plus,derivative_plus,h_normal,face_weight,penalty_factor,face,ok,message)
-    integer,intent(in)::comm,global_face_id,owner_rank,periodic_shift(3)
+    integer,intent(in)::icomm,global_face_id,owner_rank,periodic_shift(3)
     integer,intent(in)::basis_ids_minus(:),basis_ids_plus(:)
     complex(real64),intent(in)::value_minus(:),derivative_minus(:),value_plus(:),derivative_plus(:)
     real(real64),intent(in)::h_normal,face_weight,penalty_factor
@@ -32,29 +34,29 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer::rank,nproc,ierr,i,j,n,local_bad,global_bad,min_n,max_n
+    integer::id_rank,nproc,ierr,i,j,n,local_bad,global_bad,min_n,max_n
     integer(int64)::local_hash,min_hash,max_hash
     complex(real64),allocatable::jump(:),average_derivative(:)
 
     ok=.false.;message=''
-    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)then;message='SIPG rank query failed';return;endif
-    call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)then;message='SIPG size query failed';return;endif
+    call MPI_Comm_rank(icomm,id_rank,ierr);if(ierr/=MPI_SUCCESS)then;message='SIPG rank query failed';return;endif
+    call MPI_Comm_size(icomm,nproc,ierr);if(ierr/=MPI_SUCCESS)then;message='SIPG size query failed';return;endif
     local_bad=merge(0,1,global_face_id>0.and.owner_rank>=0.and.owner_rank<nproc.and.&
       size(value_minus)>0.and.size(value_plus)>0.and.size(basis_ids_minus)==size(value_minus).and.&
       size(basis_ids_plus)==size(value_plus).and.size(derivative_minus)==size(value_minus).and.&
       size(derivative_plus)==size(value_plus).and.h_normal>0d0.and.face_weight>=0d0.and.&
       penalty_factor>0d0.and.ieee_is_finite(h_normal).and.ieee_is_finite(face_weight).and.&
       ieee_is_finite(penalty_factor).and.all(basis_ids_minus>0).and.all(basis_ids_plus>0))
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid projected SIPG face';return;endif
     n=size(value_minus)+size(value_plus)
-    call MPI_Allreduce(n,min_n,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
-    call MPI_Allreduce(n,max_n,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(n,min_n,1,MPI_INTEGER,MPI_MIN,icomm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(n,max_n,1,MPI_INTEGER,MPI_MAX,icomm,ierr);if(ierr/=MPI_SUCCESS)return
     if(min_n/=max_n)then;message='rank-disagreeing SIPG trace extent';return;endif
     local_hash=face_input_fingerprint(global_face_id,owner_rank,periodic_shift,basis_ids_minus,basis_ids_plus,value_minus,&
       derivative_minus,value_plus,derivative_plus,h_normal,face_weight,penalty_factor)
-    call MPI_Allreduce(local_hash,min_hash,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
-    call MPI_Allreduce(local_hash,max_hash,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(local_hash,min_hash,1,MPI_INTEGER8,MPI_MIN,icomm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(local_hash,max_hash,1,MPI_INTEGER8,MPI_MAX,icomm,ierr);if(ierr/=MPI_SUCCESS)return
     if(min_hash/=max_hash)then;message='rank-disagreeing SIPG face metadata or traces';return;endif
     face%global_face_id=global_face_id;face%periodic_shift=periodic_shift;face%basis_count=n
     allocate(face%global_basis_ids(n));face%global_basis_ids=[basis_ids_minus,basis_ids_plus]
@@ -67,7 +69,7 @@ contains
     average_derivative=0.5d0*[derivative_minus,derivative_plus]
     face%consistency=(0d0,0d0);face%adjoint_consistency=(0d0,0d0)
     face%raw_penalty=(0d0,0d0);face%physical_penalty=(0d0,0d0);face%total=(0d0,0d0)
-    if(rank==owner_rank)then
+    if(id_rank==owner_rank)then
       do j=1,n;do i=1,n
         face%consistency(i,j)=-0.5d0*face_weight*conjg(jump(i))*average_derivative(j)
         face%adjoint_consistency(i,j)=-0.5d0*face_weight*conjg(average_derivative(i))*jump(j)
@@ -76,19 +78,19 @@ contains
         face%total(i,j)=face%consistency(i,j)+face%adjoint_consistency(i,j)+face%physical_penalty(i,j)
       enddo;enddo
     endif
-    call reduce_matrix(face%consistency,comm,ierr)
+    call reduce_matrix(face%consistency,icomm,ierr)
     if(ierr/=MPI_SUCCESS)then
       message='SIPG consistency reduction failed';return
     endif
-    call reduce_matrix(face%adjoint_consistency,comm,ierr)
+    call reduce_matrix(face%adjoint_consistency,icomm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='SIPG adjoint reduction failed';return;endif
-    call reduce_matrix(face%raw_penalty,comm,ierr)
+    call reduce_matrix(face%raw_penalty,icomm,ierr)
     if(ierr/=MPI_SUCCESS)then
       message='SIPG raw penalty reduction failed';return
     endif
-    call reduce_matrix(face%physical_penalty,comm,ierr)
+    call reduce_matrix(face%physical_penalty,icomm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='SIPG physical penalty reduction failed';return;endif
-    call reduce_matrix(face%total,comm,ierr)
+    call reduce_matrix(face%total,icomm,ierr)
     if(ierr/=MPI_SUCCESS)then
       message='SIPG total reduction failed';return
     endif
@@ -201,11 +203,11 @@ contains
     end subroutine mix_complex
   end function face_input_fingerprint
 
-  subroutine reduce_matrix(matrix,comm,ierr)
+  subroutine reduce_matrix(matrix,icomm,ierr)
     complex(real64),intent(inout)::matrix(:,:)
-    integer,intent(in)::comm
+    integer,intent(in)::icomm
     integer,intent(out)::ierr
-    call MPI_Allreduce(MPI_IN_PLACE,matrix,size(matrix),MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,matrix,size(matrix),MPI_DOUBLE_COMPLEX,MPI_SUM,icomm,ierr)
   end subroutine reduce_matrix
 #endif
 end module dg_hybrid_sipg_operator

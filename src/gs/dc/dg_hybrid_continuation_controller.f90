@@ -3,7 +3,7 @@ module dg_hybrid_continuation_controller
   use,intrinsic::iso_fortran_env,only:int64,real64
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
 #ifdef USE_MPI
-  use mpi
+  use mpi, only: MPI_Allreduce, MPI_DOUBLE_PRECISION, MPI_INTEGER, MPI_INTEGER8, MPI_MAX, MPI_MIN, MPI_SUCCESS
 #endif
   implicit none
   private
@@ -50,18 +50,18 @@ module dg_hybrid_continuation_controller
     initialize_dg_hybrid_controller,propose_dg_hybrid_trial,observe_dg_hybrid_inner_residuals,&
     decide_dg_hybrid_stage,reject_dg_hybrid_trial
 contains
-  subroutine validate_dg_hybrid_controller_contract(comm,controls,ok,message)
-    integer,intent(in)::comm;type(s_dg_hybrid_controller_controls),intent(in)::controls
+  subroutine validate_dg_hybrid_controller_contract(icomm,controls,ok,message)
+    integer,intent(in)::icomm;type(s_dg_hybrid_controller_controls),intent(in)::controls
     logical,intent(out)::ok;character(*),intent(out)::message
 #ifdef USE_MPI
     integer::local_bad,global_bad,ierr
     integer(int64)::local_hash,minimum_hash,maximum_hash
     local_bad=merge(0,1,valid_controls(controls))
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ok=.false.;message='invalid continuation controller controls';return;endif
     local_hash=controller_controls_fingerprint(controls)
-    call MPI_Allreduce(local_hash,minimum_hash,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
-    if(ierr==MPI_SUCCESS)call MPI_Allreduce(local_hash,maximum_hash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_hash,minimum_hash,1,MPI_INTEGER8,MPI_MIN,icomm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(local_hash,maximum_hash,1,MPI_INTEGER8,MPI_MAX,icomm,ierr)
     ok=ierr==MPI_SUCCESS.and.minimum_hash==maximum_hash
     if(ok)then;message='';else;message='rank-disagreeing continuation controller controls';endif
 #else
@@ -84,8 +84,8 @@ contains
       bounded_lambda*controls%final_tolerance)
   end subroutine dg_hybrid_stage_tolerances
 
-  subroutine initialize_dg_hybrid_controller(comm,controls,accepted_lambda,accepted_state,face_count,controller,ok,message)
-    integer,intent(in)::comm,face_count
+  subroutine initialize_dg_hybrid_controller(icomm,controls,accepted_lambda,accepted_state,face_count,controller,ok,message)
+    integer,intent(in)::icomm,face_count
     type(s_dg_hybrid_controller_controls),intent(in)::controls
     real(real64),intent(in)::accepted_lambda
     type(s_dg_hybrid_trial_state),intent(in)::accepted_state
@@ -98,16 +98,16 @@ contains
     local_bad=merge(0,1,valid_controls(controls).and.accepted_lambda>=0d0.and.accepted_lambda<=1d0.and.&
       ieee_is_finite(accepted_lambda).and.face_count>=0.and.valid_state(accepted_state).and.&
       accepted_state%trace_cache_valid)
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ok=.false.;message='invalid continuation controller initialization';return;endif
-    call MPI_Allreduce(accepted_lambda,minimum_lambda,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
-    if(ierr==MPI_SUCCESS)call MPI_Allreduce(accepted_lambda,maximum_lambda,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(accepted_lambda,minimum_lambda,1,MPI_DOUBLE_PRECISION,MPI_MIN,icomm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(accepted_lambda,maximum_lambda,1,MPI_DOUBLE_PRECISION,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.minimum_lambda/=maximum_lambda)then
       ok=.false.;message='rank-disagreeing accepted lambda';return
     endif
     local_hash=controller_controls_fingerprint(controls)
-    call MPI_Allreduce(local_hash,minimum_hash,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
-    if(ierr==MPI_SUCCESS)call MPI_Allreduce(local_hash,maximum_hash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_hash,minimum_hash,1,MPI_INTEGER8,MPI_MIN,icomm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(local_hash,maximum_hash,1,MPI_INTEGER8,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.minimum_hash/=maximum_hash)then
       ok=.false.;message='rank-disagreeing continuation controller controls';return
     endif
@@ -121,15 +121,15 @@ contains
 #endif
   end subroutine initialize_dg_hybrid_controller
 
-  subroutine propose_dg_hybrid_trial(comm,controller,state,ok,message)
-    integer,intent(in)::comm
+  subroutine propose_dg_hybrid_trial(icomm,controller,state,ok,message)
+    integer,intent(in)::icomm
     type(s_dg_hybrid_controller),intent(inout)::controller
     type(s_dg_hybrid_trial_state),intent(inout)::state
     logical,intent(out)::ok;character(*),intent(out)::message
 #ifdef USE_MPI
     integer::local_bad,global_bad,ierr
     local_bad=merge(0,1,controller%valid.and..not.controller%trial_active.and.controller%accepted_lambda<1d0)
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ok=.false.;message='cannot propose continuation trial';return;endif
     state=controller%accepted_state
     state%trace_cache_valid=.false.
@@ -142,8 +142,8 @@ contains
 #endif
   end subroutine propose_dg_hybrid_trial
 
-  subroutine observe_dg_hybrid_inner_residuals(comm,controller,residuals,reject_requested,ok,message)
-    integer,intent(in)::comm
+  subroutine observe_dg_hybrid_inner_residuals(icomm,controller,residuals,reject_requested,ok,message)
+    integer,intent(in)::icomm
     type(s_dg_hybrid_controller),intent(inout)::controller
     real(real64),intent(in)::residuals(residual_channel_count)
     logical,intent(out)::reject_requested,ok;character(*),intent(out)::message
@@ -152,11 +152,11 @@ contains
     real(real64)::growth,numerical_floor,global_residuals(residual_channel_count)
     local_bad=merge(0,1,controller%valid.and.controller%trial_active.and.all(ieee_is_finite(residuals)).and.&
       all(residuals>=0d0))
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
       reject_requested=.false.;ok=.false.;message='invalid inner continuation residual sample';return
     endif
-    call MPI_Allreduce(residuals,global_residuals,residual_channel_count,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(residuals,global_residuals,residual_channel_count,MPI_DOUBLE_PRECISION,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS)then;reject_requested=.false.;ok=.false.;message='inner residual canonicalization failed';return;endif
     numerical_floor=sqrt(tiny(1d0));reject_requested=.false.
     if(controller%inner_sample_count>0)then
@@ -174,8 +174,8 @@ contains
 #endif
   end subroutine observe_dg_hybrid_inner_residuals
 
-  subroutine decide_dg_hybrid_stage(comm,controller,state,report,accept,ok,message)
-    integer,intent(in)::comm
+  subroutine decide_dg_hybrid_stage(icomm,controller,state,report,accept,ok,message)
+    integer,intent(in)::icomm
     type(s_dg_hybrid_controller),intent(inout)::controller
     type(s_dg_hybrid_trial_state),intent(in)::state
     type(s_dg_hybrid_stage_report),intent(in)::report
@@ -192,11 +192,11 @@ contains
       report%projector_overlap>=controller%controls%minimum_projector_overlap.and.report%electron_ok.and.&
       report%occupation_ok.and.report%hermitian_ok.and.report%symmetry_ok.and.report%real_space_ok.and.report%finite_ok
     local_integer=merge(1,0,local_accept)
-    call MPI_Allreduce(local_integer,global_integer,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(local_integer,global_integer,1,MPI_INTEGER,MPI_MIN,icomm,ierr)
     if(ierr/=MPI_SUCCESS)then;accept=.false.;ok=.false.;message='stage decision reduction failed';return;endif
-    call MPI_Allreduce(report%iteration,global_iteration,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(report%iteration,global_iteration,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     gap_integer=merge(1,0,report%gap_shrinking)
-    if(ierr==MPI_SUCCESS)call MPI_Allreduce(gap_integer,global_gap_integer,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(gap_integer,global_gap_integer,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS)then;accept=.false.;ok=.false.;message='adaptive-stage canonicalization failed';return;endif
     accept=global_integer==1;ok=.true.;message=''
     if(.not.accept)return
@@ -215,8 +215,8 @@ contains
 #endif
   end subroutine decide_dg_hybrid_stage
 
-  subroutine reject_dg_hybrid_trial(comm,controller,state,reason,ok,message)
-    integer,intent(in)::comm
+  subroutine reject_dg_hybrid_trial(icomm,controller,state,reason,ok,message)
+    integer,intent(in)::icomm
     type(s_dg_hybrid_controller),intent(inout)::controller
     type(s_dg_hybrid_trial_state),intent(inout)::state
     character(*),intent(in)::reason
@@ -224,7 +224,7 @@ contains
 #ifdef USE_MPI
     integer::local_bad,global_bad,ierr
     local_bad=merge(0,1,controller%valid.and.controller%trial_active.and.len_trim(reason)>0)
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ok=.false.;message='invalid continuation rollback request';return;endif
     if(controller%rollback_count>=controller%controls%maximum_rollbacks)then
       ok=.false.;message='continuation rollback limit exhausted';return

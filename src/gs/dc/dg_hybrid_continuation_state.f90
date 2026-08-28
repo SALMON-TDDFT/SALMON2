@@ -3,7 +3,8 @@ module dg_hybrid_continuation_state
   use,intrinsic::iso_fortran_env,only:int64,real64
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
 #ifdef USE_MPI
-  use mpi
+  use mpi, only: MPI_Allreduce, MPI_Alltoall, MPI_Alltoallv, MPI_BXOR, MPI_Comm_rank, MPI_Comm_size, MPI_INTEGER, &
+    MPI_INTEGER8, MPI_MAX, MPI_MIN, MPI_SUCCESS, MPI_SUM
 #endif
   implicit none
   private
@@ -61,8 +62,8 @@ module dg_hybrid_continuation_state
   public::initialize_dg_hybrid_continuation,close_dg_hybrid_selection,build_dg_hybrid_scope_receipt,&
     validate_dg_hybrid_frozen_catalog,validate_dg_hybrid_scope_receipt
 contains
-  subroutine validate_dg_hybrid_frozen_catalog(comm,state,current,ok,message)
-    integer,intent(in)::comm
+  subroutine validate_dg_hybrid_frozen_catalog(icomm,state,current,ok,message)
+    integer,intent(in)::icomm
     type(s_dg_hybrid_continuation_state),intent(in)::state
     type(s_dg_hybrid_catalog_receipt),intent(in)::current
     logical,intent(out)::ok
@@ -76,7 +77,7 @@ contains
       current%analysis_fingerprint==state%catalog%analysis_fingerprint.and.&
       current%catalog_fingerprint==state%catalog%catalog_fingerprint.and.&
       current%selection_fingerprint==state%catalog%selection_fingerprint)
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     ok=ierr==MPI_SUCCESS.and.global_bad==0
     if(ok)then;message='';else;message='immutable continuation catalog changed';endif
 #else
@@ -84,9 +85,9 @@ contains
 #endif
   end subroutine validate_dg_hybrid_frozen_catalog
 
-  subroutine build_dg_hybrid_scope_receipt(comm,theory_code,periodic,nspin,spinorbit,plus_u,hse,&
+  subroutine build_dg_hybrid_scope_receipt(icomm,theory_code,periodic,nspin,spinorbit,plus_u,hse,&
       fix_func,jm,xctype,receipt,ok,message)
-    integer,intent(in)::comm,theory_code,nspin,xctype(:)
+    integer,intent(in)::icomm,theory_code,nspin,xctype(:)
     logical,intent(in)::periodic,spinorbit,plus_u,hse,fix_func,jm
     type(s_dg_hybrid_scope_receipt),intent(out)::receipt
     logical,intent(out)::ok
@@ -98,7 +99,7 @@ contains
     local_bad=merge(0,1,theory_code==1.and.periodic.and.nspin==1.and..not.spinorbit.and.&
       .not.plus_u.and..not.hse.and..not.fix_func.and..not.jm.and.size(xctype)>0.and.&
       all([(supported_xctype(xctype(i)),i=1,size(xctype))]))
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
       message='unsupported DG hybrid continuation scope';return
     endif
@@ -108,7 +109,7 @@ contains
     allocate(receipt%xctype(size(xctype)));receipt%xctype=xctype
     receipt%fingerprint=scope_fingerprint(receipt)
     if(receipt%fingerprint==0_int64)receipt%fingerprint=1_int64
-    call agree_catalog_int64(receipt%fingerprint,comm,minimum_hash,maximum_hash,ierr)
+    call agree_catalog_int64(receipt%fingerprint,icomm,minimum_hash,maximum_hash,ierr)
     if(ierr/=MPI_SUCCESS.or.minimum_hash/=maximum_hash)then
       message='rank-disagreeing DG hybrid continuation scope';return
     endif
@@ -118,8 +119,8 @@ contains
 #endif
   end subroutine build_dg_hybrid_scope_receipt
 
-  subroutine validate_dg_hybrid_scope_receipt(comm,receipt,ok,message)
-    integer,intent(in)::comm
+  subroutine validate_dg_hybrid_scope_receipt(icomm,receipt,ok,message)
+    integer,intent(in)::icomm
     type(s_dg_hybrid_scope_receipt),intent(in)::receipt
     logical,intent(out)::ok
     character(*),intent(out)::message
@@ -136,9 +137,9 @@ contains
       else if(receipt%fingerprint/=scope_fingerprint(receipt))then;local_bad=1
       endif
     endif
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr==MPI_SUCCESS.and.global_bad==0)then
-      call agree_catalog_int64(receipt%fingerprint,comm,minimum_hash,maximum_hash,ierr)
+      call agree_catalog_int64(receipt%fingerprint,icomm,minimum_hash,maximum_hash,ierr)
     endif
     ok=.false.
     if(ierr==MPI_SUCCESS.and.global_bad==0)ok=minimum_hash==maximum_hash
@@ -148,9 +149,9 @@ contains
 #endif
   end subroutine validate_dg_hybrid_scope_receipt
 
-  subroutine close_dg_hybrid_selection(comm,requested_ids,universe_ids,group_action,effective_ids,&
+  subroutine close_dg_hybrid_selection(icomm,requested_ids,universe_ids,group_action,effective_ids,&
       added_parent,added_operation,fingerprint,ok,message)
-    integer,intent(in)::comm,requested_ids(:),universe_ids(:),group_action(:,:)
+    integer,intent(in)::icomm,requested_ids(:),universe_ids(:),group_action(:,:)
     integer,allocatable,intent(out)::effective_ids(:),added_parent(:),added_operation(:)
     integer(int64),intent(out)::fingerprint
     logical,intent(out)::ok
@@ -202,7 +203,7 @@ contains
         if(count(requested_ids==requested_ids(i))/=1)local_bad=1
       enddo
     endif
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
       message='invalid or incomplete symmetry selection action';return
     endif
@@ -217,7 +218,7 @@ contains
     do i=1,size(requested_ids)
       fingerprint=ieor(ishftc(fingerprint,11),int(requested_ids(i),int64))
     enddo
-    call agree_catalog_int64(fingerprint,comm,minimum_hash,maximum_hash,ierr)
+    call agree_catalog_int64(fingerprint,icomm,minimum_hash,maximum_hash,ierr)
     if(ierr/=MPI_SUCCESS.or.minimum_hash/=maximum_hash)then
       message='rank-disagreeing symmetry selection';return
     endif
@@ -260,9 +261,9 @@ contains
 #endif
   end subroutine close_dg_hybrid_selection
 
-  subroutine initialize_dg_hybrid_continuation(comm,global_density_count,core_ids,dc_density,trial_density,catalog,scope,&
+  subroutine initialize_dg_hybrid_continuation(icomm,global_density_count,core_ids,dc_density,trial_density,catalog,scope,&
       state,fingerprint,ok,message)
-    integer,intent(in)::comm,global_density_count
+    integer,intent(in)::icomm,global_density_count
     real(real64),intent(in)::dc_density(:),trial_density(:)
     integer(int64),intent(in)::core_ids(:)
     type(s_dg_hybrid_catalog_receipt),intent(in)::catalog
@@ -285,33 +286,33 @@ contains
       catalog%operation_count>=1.and.catalog%nonidentity_count>=0.and.&
       catalog%nonidentity_count<catalog%operation_count.and.catalog%analysis_fingerprint/=0_int64.and.&
       catalog%catalog_fingerprint/=0_int64.and.catalog%selection_fingerprint/=0_int64))
-    call validate_dg_hybrid_scope_receipt(comm,scope,scope_ok,scope_message)
+    call validate_dg_hybrid_scope_receipt(icomm,scope,scope_ok,scope_message)
     local_bad=max(local_bad,merge(0,1,scope_ok))
     if(catalog%identity_only)local_bad=max(local_bad,merge(0,1,catalog%operation_count==1.and.&
       catalog%nonidentity_count==0))
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
       message='invalid continuation seed or authoritative catalog receipt';return
     endif
 
-    call agree_catalog_integer(catalog%operation_count,comm,minimum_integer,maximum_integer,ierr)
+    call agree_catalog_integer(catalog%operation_count,icomm,minimum_integer,maximum_integer,ierr)
     if(ierr/=MPI_SUCCESS.or.minimum_integer/=maximum_integer)then
       message='rank-disagreeing symmetry operation count';return
     endif
-    call agree_catalog_int64(catalog%analysis_fingerprint,comm,minimum_hash,maximum_hash,ierr)
+    call agree_catalog_int64(catalog%analysis_fingerprint,icomm,minimum_hash,maximum_hash,ierr)
     if(ierr/=MPI_SUCCESS.or.minimum_hash/=maximum_hash)then
       message='rank-disagreeing symmetry provenance';return
     endif
-    call agree_catalog_int64(catalog%catalog_fingerprint,comm,minimum_hash,maximum_hash,ierr)
+    call agree_catalog_int64(catalog%catalog_fingerprint,icomm,minimum_hash,maximum_hash,ierr)
     if(ierr/=MPI_SUCCESS.or.minimum_hash/=maximum_hash)then
       message='rank-disagreeing catalog fingerprint';return
     endif
-    call agree_catalog_int64(scope%fingerprint,comm,minimum_hash,maximum_hash,ierr)
+    call agree_catalog_int64(scope%fingerprint,icomm,minimum_hash,maximum_hash,ierr)
     if(ierr/=MPI_SUCCESS.or.minimum_hash/=maximum_hash)then
       message='rank-disagreeing supported-scope receipt';return
     endif
 
-    call validate_distributed_ids(comm,global_density_count,core_ids,ownership_ok,ierr)
+    call validate_distributed_ids(icomm,global_density_count,core_ids,ownership_ok,ierr)
     if(ierr/=MPI_SUCCESS.or..not.ownership_ok)then;message='invalid distributed core ownership';return;endif
 
     allocate(state%seed_density_ids(size(core_ids)),state%seed_density(size(dc_density)),state%mixed_density(size(dc_density)))
@@ -331,9 +332,9 @@ contains
       pair_hash=ieor(pair_hash,ishftc(pair_hash,17))
       local_xor=ieor(local_xor,pair_hash);local_sum=local_sum+pair_hash
     enddo
-    call MPI_Allreduce(local_xor,global_xor,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
+    call MPI_Allreduce(local_xor,global_xor,1,MPI_INTEGER8,MPI_BXOR,icomm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='density fingerprint xor reduction failed';return;endif
-    call MPI_Allreduce(local_sum,global_sum,1,MPI_INTEGER8,MPI_SUM,comm,ierr)
+    call MPI_Allreduce(local_sum,global_sum,1,MPI_INTEGER8,MPI_SUM,icomm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='density fingerprint sum reduction failed';return;endif
     fingerprint=ieor(int(z'243F6A8885A308D3',int64),global_xor)
     fingerprint=ieor(ishftc(fingerprint,7),global_sum)
@@ -375,15 +376,15 @@ contains
     if(hash==0_int64)hash=1_int64
   end function scope_fingerprint
 
-  subroutine validate_distributed_ids(comm,global_count,ids,ok,ierr)
-    integer,intent(in)::comm,global_count
+  subroutine validate_distributed_ids(icomm,global_count,ids,ok,ierr)
+    integer,intent(in)::icomm,global_count
     integer(int64),intent(in)::ids(:)
     logical,intent(out)::ok
     integer,intent(out)::ierr
-    integer::rank,nproc,i,target,total_send,total_receive,local_bad,global_bad
+    integer::id_rank,nproc,i,target,total_send,total_receive,local_bad,global_bad
     integer,allocatable::send_counts(:),recv_counts(:),send_disp(:),recv_disp(:),cursor(:),send_ids(:),recv_ids(:),shard_counts(:)
-    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
-    call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Comm_rank(icomm,id_rank,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Comm_size(icomm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
     allocate(send_counts(nproc),recv_counts(nproc),send_disp(nproc),recv_disp(nproc),cursor(nproc))
     send_counts=0;local_bad=0
     do i=1,size(ids)
@@ -398,21 +399,21 @@ contains
       if(ids(i)<1_int64.or.ids(i)>int(global_count,int64))cycle
       target=mod(int(ids(i))-1,nproc)+1;send_ids(cursor(target))=int(ids(i));cursor(target)=cursor(target)+1
     enddo
-    call MPI_Alltoall(send_counts,1,MPI_INTEGER,recv_counts,1,MPI_INTEGER,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Alltoall(send_counts,1,MPI_INTEGER,recv_counts,1,MPI_INTEGER,icomm,ierr);if(ierr/=MPI_SUCCESS)return
     recv_disp(1)=0
     do i=2,nproc;recv_disp(i)=recv_disp(i-1)+recv_counts(i-1);enddo
     total_receive=sum(recv_counts);allocate(recv_ids(total_receive))
-    call MPI_Alltoallv(send_ids,send_counts,send_disp,MPI_INTEGER,recv_ids,recv_counts,recv_disp,MPI_INTEGER,comm,ierr)
+    call MPI_Alltoallv(send_ids,send_counts,send_disp,MPI_INTEGER,recv_ids,recv_counts,recv_disp,MPI_INTEGER,icomm,ierr)
     if(ierr/=MPI_SUCCESS)return
-    if(rank>=global_count)then;i=0;else;i=(global_count-1-rank)/nproc+1;endif
+    if(id_rank>=global_count)then;i=0;else;i=(global_count-1-id_rank)/nproc+1;endif
     allocate(shard_counts(i));shard_counts=0
     do i=1,size(recv_ids)
-      if(mod(recv_ids(i)-1,nproc)/=rank)then;local_bad=1
+      if(mod(recv_ids(i)-1,nproc)/=id_rank)then;local_bad=1
       else;target=(recv_ids(i)-1)/nproc+1;shard_counts(target)=shard_counts(target)+1
       endif
     enddo
     if(any(shard_counts/=1))local_bad=1
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     ok=ierr==MPI_SUCCESS.and.global_bad==0
   end subroutine validate_distributed_ids
 
@@ -425,22 +426,22 @@ contains
     enddo
   end function find_index
 
-  subroutine agree_catalog_integer(value,comm,minimum,maximum,ierr)
-    integer,intent(in)::value,comm
+  subroutine agree_catalog_integer(value,icomm,minimum,maximum,ierr)
+    integer,intent(in)::value,icomm
     integer,intent(out)::minimum,maximum,ierr
-    call MPI_Allreduce(value,minimum,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(value,minimum,1,MPI_INTEGER,MPI_MIN,icomm,ierr)
     if(ierr/=MPI_SUCCESS)return
-    call MPI_Allreduce(value,maximum,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(value,maximum,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
   end subroutine agree_catalog_integer
 
-  subroutine agree_catalog_int64(value,comm,minimum,maximum,ierr)
+  subroutine agree_catalog_int64(value,icomm,minimum,maximum,ierr)
     integer(int64),intent(in)::value
-    integer,intent(in)::comm
+    integer,intent(in)::icomm
     integer(int64),intent(out)::minimum,maximum
     integer,intent(out)::ierr
-    call MPI_Allreduce(value,minimum,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(value,minimum,1,MPI_INTEGER8,MPI_MIN,icomm,ierr)
     if(ierr/=MPI_SUCCESS)return
-    call MPI_Allreduce(value,maximum,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(value,maximum,1,MPI_INTEGER8,MPI_MAX,icomm,ierr)
   end subroutine agree_catalog_int64
 #endif
 end module dg_hybrid_continuation_state

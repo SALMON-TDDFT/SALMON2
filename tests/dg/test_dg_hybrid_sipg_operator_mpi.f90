@@ -1,6 +1,7 @@
 #include "config.h"
 program test_dg_hybrid_sipg_operator_mpi
-  use mpi
+  use mpi, only: MPI_Allreduce, MPI_Comm_rank, MPI_Comm_size, MPI_COMM_WORLD, MPI_Finalize, MPI_Init, MPI_INTEGER, MPI_MAX, &
+    MPI_SUCCESS, MPI_SUM
   use,intrinsic::iso_fortran_env,only:real64
   use dg_hybrid_sipg_operator,only:s_dg_hybrid_sipg_face_operator,assemble_dg_hybrid_sipg_face,&
     scale_dg_hybrid_sipg_faces
@@ -9,7 +10,7 @@ program test_dg_hybrid_sipg_operator_mpi
   use dg_nodal_sipg,only:s_dg_nodal_sipg_action,evaluate_dg_nodal_sipg_face
   use rt_dg_hybrid_sparse_exchange,only:s_rt_dg_sparse_exchange,build_rt_dg_sparse_exchange
   implicit none
-  integer::comm,rank,nproc,ierr,i,j,local_count,global_count
+  integer::icomm,id_rank,nproc,ierr,i,j,local_count,global_count
   complex(real64)::value_minus(2),value_plus(1),derivative_minus(2),derivative_plus(1)
   complex(real64)::jump(3),average_derivative(3),reference(3,3)
   real(real64)::h,weight,eta,lambda
@@ -25,14 +26,14 @@ program test_dg_hybrid_sipg_operator_mpi
   logical::ok,edge_ok
   character(256)::message
 
-  call MPI_Init(ierr);comm=MPI_COMM_WORLD
-  call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+  call MPI_Init(ierr);icomm=MPI_COMM_WORLD
+  call MPI_Comm_rank(icomm,id_rank,ierr);call MPI_Comm_size(icomm,nproc,ierr)
   value_minus=[cmplx(1d0,0.2d0,real64),cmplx(-0.3d0,0.4d0,real64)]
   value_plus=[cmplx(0.7d0,-0.1d0,real64)]
   derivative_minus=[cmplx(0.5d0,-0.2d0,real64),cmplx(-0.1d0,0.3d0,real64)]
   derivative_plus=[cmplx(-0.4d0,0.25d0,real64)]
   h=0.8d0;weight=1.25d0;eta=6d0
-  call assemble_dg_hybrid_sipg_face(comm,17,0,[0,0,0],[1,2],[3],value_minus,derivative_minus,value_plus,&
+  call assemble_dg_hybrid_sipg_face(icomm,17,0,[0,0,0],[1,2],[3],value_minus,derivative_minus,value_plus,&
     derivative_plus,h,weight,eta,face,ok,message)
   call require(ok,trim(message))
   jump=[value_minus,-value_plus]
@@ -61,11 +62,11 @@ program test_dg_hybrid_sipg_operator_mpi
   enddo
   call require(maxval(abs(face%total-reference))<1d-13,'projected SIPG disagrees with nodal SIPG action')
   if(nproc>1)then
-    call assemble_dg_hybrid_sipg_face(comm,17,rank,[0,0,0],[1,2],[3],value_minus,derivative_minus,value_plus,&
+    call assemble_dg_hybrid_sipg_face(icomm,17,id_rank,[0,0,0],[1,2],[3],value_minus,derivative_minus,value_plus,&
       derivative_plus,h,weight,eta,face2,ok,message)
     call require(.not.ok,'rank-disagreeing SIPG owner was accepted')
   endif
-  call assemble_dg_hybrid_sipg_face(comm,18,0,[1,0,0],[4],[5],value_plus,derivative_plus,value_plus,&
+  call assemble_dg_hybrid_sipg_face(icomm,18,0,[1,0,0],[4],[5],value_plus,derivative_plus,value_plus,&
     derivative_plus,h,weight,eta,face2,ok,message)
   call require(ok,trim(message))
   call require(all(face2%periodic_shift==[1,0,0]),'physical periodic face shift was not preserved')
@@ -80,21 +81,21 @@ program test_dg_hybrid_sipg_operator_mpi
 
   basis_edges=reshape([1,1,2,2,3,3],[2,3])
   nonlocal_edges=reshape([2,3,3,2],[2,2]);face_edges=reshape([1,3,3,1],[2,2])
-  owned_rows=pack([1_8,2_8,3_8],[(mod(i-1,nproc)==rank,i=1,3)])
+  owned_rows=pack([1_8,2_8,3_8],[(mod(i-1,nproc)==id_rank,i=1,3)])
   call localize(basis_edges,owned_rows,local_basis);call localize(nonlocal_edges,owned_rows,local_nonlocal)
   call localize(face_edges,owned_rows,local_face)
-  call build_dg_hybrid_operator_envelope(comm,3,owned_rows,local_basis,local_nonlocal,local_face,4,envelope,ok,message)
+  call build_dg_hybrid_operator_envelope(icomm,3,owned_rows,local_basis,local_nonlocal,local_face,4,envelope,ok,message)
   call require(ok,trim(message))
   structure_fingerprint=envelope%structure_fingerprint
   local_count=merge(1,0,envelope%find_edge(2,3)>0)
-  call MPI_Allreduce(local_count,global_count,1,MPI_INTEGER,MPI_SUM,comm,ierr)
+  call MPI_Allreduce(local_count,global_count,1,MPI_INTEGER,MPI_SUM,icomm,ierr)
   call require(global_count==1,'cross-fragment nonlocal projector edge was not assembled exactly once')
-  call build_rt_dg_sparse_exchange(comm,3,structure_fingerprint,owned_rows,envelope%column_ids,&
+  call build_rt_dg_sparse_exchange(icomm,3,structure_fingerprint,owned_rows,envelope%column_ids,&
     exchange_plan,ok,message)
   call require(ok.and.exchange_plan%valid,'real sparse halo schedule was not constructed: '//trim(message))
   position=envelope%find_edge(1,3)
-  call require((position>0).eqv.(mod(0,nproc)==rank),'row-owned face edge distribution is incorrect')
-  call set_dg_hybrid_operator_hermitian_edge(comm,envelope,2,1,3,cmplx(0.2d0,-0.1d0,real64),ok,message)
+  call require((position>0).eqv.(mod(0,nproc)==id_rank),'row-owned face edge distribution is incorrect')
+  call set_dg_hybrid_operator_hermitian_edge(icomm,envelope,2,1,3,cmplx(0.2d0,-0.1d0,real64),ok,message)
   call require(ok,trim(message))
   position=envelope%find_edge(1,3)
   edge_ok=.true.
@@ -105,7 +106,7 @@ program test_dg_hybrid_sipg_operator_mpi
   if(position>0)edge_ok=abs(envelope%component_values(2,position)-cmplx(0.2d0,0.1d0,real64))<1d-14
   call require(edge_ok,'reverse Hermitian edge was not updated')
   call require(envelope%structure_fingerprint==structure_fingerprint,'operator value update rebuilt the graph')
-  if(rank==0)write(*,'(a,i0,a)')'PASS hybrid SIPG operator on ',nproc,' ranks'
+  if(id_rank==0)write(*,'(a,i0,a)')'PASS hybrid SIPG operator on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
   subroutine localize(global_edges,rows,local_edges)
@@ -123,9 +124,9 @@ contains
     character(*),intent(in)::label
     integer::local_bad,global_bad
     local_bad=merge(0,1,condition)
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
-      if(rank==0)write(0,'(a)')trim(label)
+      if(id_rank==0)write(0,'(a)')trim(label)
       error stop 1
     endif
   end subroutine require
