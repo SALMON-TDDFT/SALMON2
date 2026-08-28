@@ -6,6 +6,13 @@ import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[2]
+scf_source = (root / "src/gs/dc/dg_hybrid_continuation_scf.f90").read_text().lower()
+assert "s_dg_hybrid_continuation_callbacks" not in scf_source, (
+    "the rejected public continuation callback bundle is still present"
+)
+assert "subroutine run_dg_hybrid_continuation_scf_fixture" in scf_source, (
+    "the synthetic fixture entry point is missing"
+)
 with tempfile.TemporaryDirectory(prefix="hybrid-continuation-scf-") as name:
     build = Path(name)
     (build / "config.h").write_text("")

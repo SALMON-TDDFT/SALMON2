@@ -55,54 +55,9 @@ module dg_hybrid_continuation_scf
       type(s_dg_hybrid_acceptance_result),intent(out)::receipt
     end subroutine acceptance_callback
   end interface
-  type,public::s_dg_hybrid_continuation_callbacks
-    procedure(volume_callback),pointer,nopass::build_volume=>null()
-    procedure(solve_callback),pointer,nopass::solve_full=>null()
-    procedure(projector_callback),pointer,nopass::refresh_projector=>null()
-    procedure(density_trace_callback),pointer,nopass::refresh_density_trace=>null()
-    procedure(residual_callback),pointer,nopass::evaluate_residuals=>null()
-    procedure(mix_callback),pointer,nopass::mix_density=>null()
-    procedure(acceptance_callback),pointer,nopass::accept_candidate=>null()
-    type(s_dg_hybrid_trial_state)::seed_state
-    integer::face_count=0,global_face_count=-1,maximum_inner_iterations=0,accepted_stages=0,rollback_count=0
-    integer(int64)::face_topology_fingerprint=0_int64
-    real(real64)::final_lambda=0d0
-  end type s_dg_hybrid_continuation_callbacks
-  public::run_dg_hybrid_continuation_scf
+  public::run_dg_hybrid_continuation_scf_fixture
 contains
-  subroutine run_dg_hybrid_continuation_scf(icomm,state,controls,callbacks,accepted_state,ok,message)
-    integer,intent(in)::icomm;type(s_dg_hybrid_continuation_state),intent(in)::state
-    type(s_dg_hybrid_controller_controls),intent(in)::controls
-    type(s_dg_hybrid_continuation_callbacks),intent(inout)::callbacks
-    type(s_dg_hybrid_trial_state),intent(out)::accepted_state
-    logical,intent(out)::ok;character(*),intent(out)::message
-    logical::callbacks_complete
-#ifdef USE_MPI
-    integer::local_bad,global_bad,ierr
-#endif
-    callbacks_complete=associated(callbacks%build_volume).and.associated(callbacks%solve_full).and.&
-      associated(callbacks%refresh_projector).and.associated(callbacks%refresh_density_trace).and.&
-      associated(callbacks%evaluate_residuals).and.associated(callbacks%mix_density).and.&
-      associated(callbacks%accept_candidate)
-#ifdef USE_MPI
-    local_bad=merge(0,1,callbacks_complete)
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
-      ok=.false.;message='collectively incomplete mandatory continuation callback bundle';return
-    endif
-#else
-    if(.not.callbacks_complete)then
-      ok=.false.;message='incomplete mandatory continuation callback bundle';return
-    endif
-#endif
-    call run_dg_hybrid_coupled_fixed_points(icomm,state,controls,callbacks%seed_state,callbacks%face_count,&
-      callbacks%build_volume,callbacks%solve_full,callbacks%refresh_projector,callbacks%refresh_density_trace,&
-      callbacks%evaluate_residuals,callbacks%mix_density,callbacks%accept_candidate,&
-      callbacks%global_face_count,callbacks%face_topology_fingerprint,callbacks%maximum_inner_iterations,accepted_state,&
-      callbacks%final_lambda,callbacks%accepted_stages,callbacks%rollback_count,ok,message)
-  end subroutine run_dg_hybrid_continuation_scf
-
-  subroutine run_dg_hybrid_coupled_fixed_points(icomm,continuation,controls,seed_state,face_count,&
+  subroutine run_dg_hybrid_continuation_scf_fixture(icomm,continuation,controls,seed_state,face_count,&
       build_volume,solve_full,refresh_projector,refresh_density_trace,evaluate_residuals,mix_density,&
       accept_candidate,global_face_count,face_topology_fingerprint,maximum_inner_iterations,final_state,final_lambda,&
       accepted_stages,&
@@ -188,7 +143,7 @@ contains
     ! Rebuild the complete lambda-one operator and observables once more without mixing.
     state=controller%accepted_state;input_gamma_state=state
     lambda=1d0;input_density=state%density;input_trace=state%trace
-    call execute_callbacks(1,callback_ok)
+    call execute_iteration(1,callback_ok)
     if(.not.callback_ok)then;message='lambda-one final refresh callback failed';return;endif
     call fill_report(1)
     call stage_consensus(report,report%tolerances,stage_ok)
@@ -212,7 +167,7 @@ contains
       logical,intent(in)::use_controller;logical,intent(out)::converged,rejected_trial,fatal
       converged=.false.;rejected_trial=.false.;fatal=.false.
       do iteration=1,maximum_inner_iterations
-        call execute_callbacks(iteration,callback_ok)
+        call execute_iteration(iteration,callback_ok)
         if(.not.callback_ok)then
           if(len_trim(message)==0)message='coupled continuation callback failed'
           fatal=.true.;return
@@ -248,9 +203,9 @@ contains
         input_density=mixed_density;input_trace=state%trace;state%density=mixed_density
       enddo
     end subroutine converge_current
-    subroutine execute_callbacks(inner_iteration,callbacks_ok)
-      integer,intent(in)::inner_iteration;logical,intent(out)::callbacks_ok
-      callbacks_ok=.false.;state%density=input_density
+    subroutine execute_iteration(inner_iteration,iteration_ok)
+      integer,intent(in)::inner_iteration;logical,intent(out)::iteration_ok
+      iteration_ok=.false.;state%density=input_density
       previous_operator_epoch=state%operator_epoch
       call build_volume(lambda,input_density,state,callback_ok)
       callback_ok=callback_ok.and.state%operator_epoch>previous_operator_epoch.and.&
@@ -285,8 +240,8 @@ contains
         report%electron_ok,report%occupation_ok,report%hermitian_ok,report%symmetry_ok,report%real_space_ok,&
         report%gap_shrinking,callback_ok)
       call callback_consensus(callback_ok,global_bad,ierr)
-      callbacks_ok=ierr==MPI_SUCCESS.and.global_bad==0
-    end subroutine execute_callbacks
+      iteration_ok=ierr==MPI_SUCCESS.and.global_bad==0
+    end subroutine execute_iteration
     subroutine fill_report(inner_iteration)
       integer,intent(in)::inner_iteration
       report%residuals=[residuals%r_h,residuals%r_rho,residuals%r_t,residuals%r_s]
@@ -313,5 +268,5 @@ contains
     ok=.false.;message='MPI is required for coupled DG continuation SCF';final_lambda=0d0
     accepted_stages=0;rollback_count=0
 #endif
-  end subroutine run_dg_hybrid_coupled_fixed_points
+  end subroutine run_dg_hybrid_continuation_scf_fixture
 end module dg_hybrid_continuation_scf
