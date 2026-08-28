@@ -4,7 +4,7 @@
 
 **Goal:** Starting from the exact converged DC density, converge the occupied WF+PW subspace, density, and complete SIPG interface observables through an adaptive lambda continuation to the fully self-consistent lambda-one DG ground state, publish one complete atomic checkpoint, and start stationary zero-field hybrid RT from that exact payload.
 
-**Architecture:** Freeze one WF+PW catalog closed under the actual full-system symmetry group and one metric for a continuation attempt; when no nontrivial symmetry exists, use the identity group rather than a separate or disabled path.  Preassemble the coefficient-independent complete SIPG interface blocks and update the density-dependent volume operator from the current occupation density matrix.  Occupied interface traces are fully refreshed after every solve and are independent acceptance diagnostics, not mixed Hamiltonian inputs.  Storage uses one metric CSR graph and one operator-union CSR graph.  A transactional controller first converges lambda zero from the exact DC seed, then advances one uniform adaptive lambda to the fully refreshed lambda-one fixed point.  The complete basis/operator/state payload is consumed by an isolated RT branch that updates Hartree/XC once at the start of every explicit time step.
+**Architecture:** Freeze one WF+PW catalog closed under the actual full-system symmetry group and one metric for a continuation attempt; when no nontrivial symmetry exists, use the identity group rather than a separate or disabled path.  One concrete solver owns the mutable fixed-point state, the last accepted state, the MPI collective schedule, rollback, and acceptance.  It preassembles the coefficient-independent complete SIPG interface blocks, updates the density-dependent volume operator, refreshes occupied projector/density/interface traces after every solve, and advances one uniform adaptive lambda to a fully refreshed lambda-one fixed point.  No generic callback controller or production adapter is introduced.  The complete basis/operator/state payload is consumed by an isolated RT branch that updates Hartree/XC once at the start of every explicit time step.
 
 **Tech Stack:** Fortran 2008, MPI, SALMON DC/Wannier90/WF+PW infrastructure, SIPG weak form, ScaLAPACK or EigenExa generalized eigensolver, BLAS/LAPACK, standalone Python MPI runners.
 
@@ -38,7 +38,7 @@ call initialize_dg_hybrid_continuation(comm, dc_density, dc_density_fingerprint,
   catalog, dc_occupied_coefficients, occupations, supported_scope, state, ok, message)
 call assemble_dg_hybrid_sipg_operator(comm, catalog, penalty_factor, &
   interface_operator, diagnostics, ok, message)
-call run_dg_hybrid_continuation_scf(comm, state, controls, callbacks, &
+call run_dg_hybrid_continuation_scf(comm, catalog, state, controls, &
   accepted_state, ok, message)
 call write_rt_dg_hybrid_ground_state_checkpoint(comm, path, payload, &
   payload_fingerprint, ok, message)
@@ -131,7 +131,7 @@ projector, freshly derived interface observables, lambda controller state,
 epochs, residual receipt, an immutable DC seed snapshot, and a separate
 accepted snapshot.  Initialization takes `dc_density` as an explicit required
 argument and a collective supported-scope receipt, never calls a density
-reconstruction callback, and marks lambda zero
+reconstruction helper, and marks lambda zero
 as unaccepted until its full fixed-point gates pass.  Reuse the existing
 reciprocal-star and basis-action maps to close the retained selection before
 freezing the catalog.  Store requested cutoff/selection separately from the
@@ -277,7 +277,7 @@ Run the new runner at 1, 2, and 4 ranks; expect PASS and rank-invariant norms.
 
 Commit only the task files as `feat(dg): measure projector and interface fixed points`.
 
-### Task 4: Implement transactional adaptive lambda control
+### Task 4: Implement the internal adaptive lambda state machine
 
 **Files:**
 - Create: `src/gs/dc/dg_hybrid_continuation_controller.f90`
@@ -351,7 +351,7 @@ and lambda-one fixed points.  Start from a supplied DC density deliberately
 different from the lambda-zero fixed point and an occupied projector.  Require
 the very first Hamiltonian build to see the exact DC density, but forbid a
 lambda increase until lambda zero itself passes every acceptance gate.  Require
-the callback order `volume -> full H/S solve -> projector -> density/trace ->
+the operation order `volume -> full H/S solve -> projector -> density/trace ->
 residuals -> density mixing`, no lambda advance while any gate fails, at
 least one forced rollback, and convergence to the dense reference.  Rotate the
 occupied eigenvectors randomly at every solve to prove gauge stability.
@@ -362,13 +362,14 @@ Run: `python3 tests/dg/run_dg_hybrid_continuation_scf_mpi.py`
 
 Expected: compile failure because the coupled driver is absent.
 
-**Step 3: Implement the callback-driven driver**
+**Step 3: Implement the concrete fixed-point driver**
 
 Compose the state, residual, and controller modules.  Preserve the exact DC
 density before the first volume build.  Mix density only, use the occupied
 projector for tracking, and fully refresh interface traces from `Gamma` after
-each solve.  At lambda one, perform an unmixed full refresh and require every
-final gate to pass again.
+each solve.  Numerical test kernels may be passed privately by the fixture,
+but they are not a production backend API.  At lambda one, perform an unmixed
+full refresh and require every final gate to pass again.
 
 **Step 4: Run GREEN and existing solver regression**
 
@@ -414,11 +415,11 @@ discrete DG action is large; require rejection.
 Add an identity-only, non-equivalent-fragment fixture.  Require the complete
 candidate-acceptance path to run and pass its identity covariance checks;
 reject implementations that treat zero nonidentity operations as either an
-error or permission to omit the symmetry callback.  Keep the nontrivial-group
+error or permission to omit the symmetry check.  Keep the nontrivial-group
 fixtures to prove that identity normalization does not weaken real symmetry
 enforcement.
 
-Run the coupled driver with callbacks that pass coefficient-space gates but
+Run the coupled driver with a fixture that passes coefficient-space gates but
 fail first the symmetry oracle and then the reconstructed-grid oracle.  Require
 the candidate stage to remain unaccepted in both cases; this test fails if the
 production driver can bypass either oracle.
@@ -440,7 +441,7 @@ SCF runner fails because production candidate acceptance can bypass it.
 Evaluate normalized covariance defects of the zero-field operators, retained
 space, occupied projector, and occupation density matrix using the verified
 basis representation.  Never require an individual eigenvector to be
-invariant.  For an otherwise acceptable stage, add a callback that
+invariant.  For an otherwise acceptable stage, use the concrete helper that
 reconstructs every occupied state, applies the actual discrete volume and
 complete SIPG action, lifts it to the production grid, and evaluates the
 existing real-space quadrature norm.  Report the three face contributions
@@ -451,13 +452,12 @@ operations, split symmetry blocks, or faces.
 The operation list must contain at least the identity.  Zero nonidentity
 operations is valid and is reported distinctly from a missing or malformed
 operation list.  Acceptance also requires successful authoritative symmetry
-analysis and its provenance; callback absence or analysis failure cannot be
+analysis and its provenance; missing required data or analysis failure cannot be
 represented as an identity-only result.
 
-Wire this oracle into `dg_hybrid_continuation_scf` as a mandatory
-candidate-acceptance callback.  Invoke it only after the inexpensive inner
-gates pass and again after the final lambda-one refresh.  A missing callback or
-failed oracle rejects the stage collectively.
+Wire this oracle directly into `dg_hybrid_continuation_scf`.  Invoke it only
+after the inexpensive inner gates pass and again after the final lambda-one
+refresh.  Missing payload or a failed oracle rejects the stage collectively.
 
 **Step 4: Run GREEN**
 
@@ -580,67 +580,66 @@ Use `git add -p` for every already-dirty file.  Run
 `git diff --cached --check` and inspect `git diff --cached`.  Commit only this
 task as `feat(dg): expose production symmetry selection boundary`.
 
-### Task 7a.6: Add a stateful production continuation adapter
+### Task 7a.6: Consolidate one concrete production continuation solver
 
 **Files:**
-- Create: `docs/plans/2026-08-29-dg-production-continuation-adapter-design.md`
+- Create: `docs/plans/2026-08-29-dg-concrete-continuation-solver-design.md`
 - Modify: `src/gs/dc/dg_hybrid_continuation_scf.f90`
 - Modify: `tests/dg/test_dg_hybrid_continuation_scf_mpi.f90`
-- Create: `src/gs/dc/dg_hybrid_production_continuation_adapter.f90`
-- Create: `tests/dg/test_dg_hybrid_production_continuation_adapter_mpi.f90`
-- Create: `tests/dg/run_dg_hybrid_production_continuation_adapter_mpi.py`
+- Modify: `tests/dg/run_dg_hybrid_continuation_scf_mpi.py`
+- Delete before commit if still untracked: `src/gs/dc/dg_hybrid_production_continuation_adapter.f90`
+- Delete before commit if still untracked: `tests/dg/test_dg_hybrid_production_continuation_adapter_mpi.f90`
+- Delete before commit if still untracked: `tests/dg/run_dg_hybrid_production_continuation_adapter_mpi.py`
 
-**Step 1: Write a failing backend-context test**
+**Step 1: Preserve the rejected experiment and write the full-path failing test**
 
-Replace context-free callback pointers with one explicit polymorphic backend
-owned by `s_dg_hybrid_continuation_callbacks`.  Adapt the existing SCF fixture
-to a small concrete backend and require the established callback order,
-rollback, and final-refresh behavior to remain unchanged.
+Keep the current test output and review findings in the existing verification
+records.  Do not commit the experimental adapter.  Extend the continuation
+fixture so it invokes the public concrete solver rather than manually calling
+phases.  Use a nonorthogonal two-fragment problem with nonzero cross-fragment
+SIPG blocks.  Require the physical basis-space projector
+`C_occ C_occ^dagger S`, uniform lambda on every canonical face, complete
+rollback, and a fully refreshed lambda-one state.
 
 **Step 2: Run RED**
 
 Run `python3 tests/dg/run_dg_hybrid_continuation_scf_mpi.py`.
 
-Expected: compilation fails because the backend abstraction is absent.
+Expected: FAIL because the existing callback path does not own a complete
+production state transition and currently forms the wrong projector.
 
-**Step 3: Implement the minimal callback-context refactor**
+**Step 3: Add rank-local failure and stale-state RED cases**
 
-Define an abstract backend type with deferred volume, solve, projector,
-density/trace, residual, mixing, and acceptance procedures.  Store one backend
-pointer in the callback bundle and dispatch the existing controller sequence
-through it.  Do not change continuation or acceptance semantics.
+Inject a volume-kernel failure on one rank and require communicator-wide
+failure without deadlock.  Make Hermiticity, electron number, symmetry, and
+each numeric residual fail independently.  Rotate the occupied eigenvectors
+by phases and a degenerate-space unitary and require projector invariance.
+Reject any final state whose density, trace, operator, or epoch predates the
+last solve.
 
-**Step 4: Write a failing production-adapter MPI test**
+**Step 4: Implement the minimum concrete solver**
 
-Use a small distributed WF+PW generalized problem with at least two fragments
-and a nonzero cross-fragment SIPG face.  Require a frozen metric and face
-payload, one uniform lambda, density-dependent volume refresh, full solve,
-S-projector refresh, density/trace refresh from the same occupied subspace,
-independent residual channels, and a fully refreshed lambda-one receipt.
-Test phase/gauge-invariant projector comparison and rollback reproducibility.
+Keep one immutable catalog, one current mutable state, and one deep copy of the
+last accepted state in `dg_hybrid_continuation_scf`.  Remove the public
+callback bundle and do not add `class(*)`, an abstract backend, or a procedure
+table.  Call the existing concrete assembly, distributed eigensolver, density,
+trace, and residual routines in one fixed order.  Convert every rank-local
+failure to collective consensus before entering another collective.  Mix only
+density.  Evaluate acceptance as a pure operation on the current fully
+refreshed state.  Roll back the whole state atomically.
 
-**Step 5: Run RED**
+**Step 5: Run focused RED then GREEN at all decompositions**
 
-Run `python3 tests/dg/run_dg_hybrid_production_continuation_adapter_mpi.py`.
+Run the continuation fixture at 1, 2, 4, and 8 ranks.  Before implementation
+record failure for the new cases; after the minimal implementation require all
+cases to pass.
 
-Expected: compilation fails because the production adapter is absent.
-
-**Step 6: Implement the minimal production adapter**
-
-Implement only the supported density-only scope.  Store the immutable metric,
-effective selections/actions, basis ownership, and complete SIPG faces.  At
-each callback cycle rebuild the volume rows from density, add lambda times all
-face rows, solve the complete generalized problem, and refresh projector,
-density, trace, residuals, epochs, and fingerprints in order.  Recompute
-acceptance from the final refreshed payload.  Do not publish a checkpoint.
-
-**Step 7: Run GREEN and regressions**
+**Step 6: Run focused regressions**
 
 Run:
 
 ```text
 python3 tests/dg/run_dg_hybrid_continuation_scf_mpi.py
-python3 tests/dg/run_dg_hybrid_production_continuation_adapter_mpi.py
 python3 tests/dg/run_dg_hybrid_continuation_acceptance_mpi.py
 python3 tests/dg/run_dg_hybrid_sipg_operator_mpi.py
 python3 tests/dg/run_dg_hybrid_production_face_traces_mpi.py
@@ -649,11 +648,11 @@ python3 tests/dg/check_dg_hybrid_divided_dc_controls.py
 
 Expected: all PASS.
 
-**Step 8: Commit**
+**Step 7: Commit**
 
 Use `git add -p` for dirty files.  Run `git diff --cached --check` and inspect
 `git diff --cached`.  Commit only this task as
-`feat(dg): add production continuation adapter`.
+`feat(dg): consolidate concrete production continuation solver`.
 
 ### Task 7b: Add an isolated production continuation branch
 
@@ -700,7 +699,7 @@ python3 tests/dg/check_dg_hybrid_divided_dc_controls.py
 
 Expected: the new contract FAILS on the one-shot branch.
 
-**Step 3: Wire the production callbacks minimally**
+**Step 3: Wire the concrete production solver minimally**
 
 Reuse the accepted WF+PW basis, DC potential and density infrastructure, and
 distributed generalized solver.  Assemble complete cross-fragment SIPG rows.
@@ -713,7 +712,9 @@ inside the new continuation branch.  Build its allowlist from
 family.  Before `initialize_dg_hybrid_continuation`, close both WF blocks
 and PW packets, materialize only the effective selection, recompute ownership
 and fingerprints, and pass that frozen catalog plus the supported-scope
-receipt to initialization.
+receipt to initialization.  Pass the frozen catalog and exact DC density to
+the concrete solver; do not construct an adapter or callback table in
+`main_dft`.
 
 **Step 4: Run GREEN and route regressions**
 

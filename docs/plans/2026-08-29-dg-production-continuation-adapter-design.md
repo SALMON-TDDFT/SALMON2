@@ -1,5 +1,12 @@
 # DG Production Continuation Adapter Design
 
+> **Superseded:** The callback/backend adapter described here was rejected
+> after implementation review because it split MPI synchronization, mutable
+> state ownership, rollback, and physical acceptance across layers.  The
+> approved replacement is
+> `docs/plans/2026-08-29-dg-concrete-continuation-solver-design.md`.  This file
+> is retained only as design history and is not an implementation target.
+
 ## Purpose
 
 The continuation controller already enforces the lambda transaction and

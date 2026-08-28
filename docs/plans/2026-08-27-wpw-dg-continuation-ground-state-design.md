@@ -14,6 +14,14 @@ This is a new, explicitly selected hybrid WF+PW route.  It does not change the
 existing DC+LCFO, Wannier90, overlapping-Wannier, ordinary ground-state, or
 ordinary real-time routes.
 
+The production implementation is one concrete solver with three explicit
+objects: an immutable catalog, one mutable fixed-point state, and one complete
+copy of the last accepted state.  It does not use a generic callback
+controller, polymorphic backend, or production adapter.  This is an
+implementation-boundary decision, not a change to the equations below.  The
+detailed boundary is specified in
+`docs/plans/2026-08-29-dg-concrete-continuation-solver-design.md`.
+
 ## Initial state and immutable continuation catalog
 
 The initial density is exactly the converged total density produced by the DC
