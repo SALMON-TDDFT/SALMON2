@@ -22,6 +22,7 @@ module dg_hybrid_continuation_controller
     real(real64),allocatable::density(:),potential(:),occupations(:),eigenvalues(:),mixing_history(:)
     complex(real64),allocatable::projector(:,:),trace(:,:)
     integer::density_epoch=-1,operator_epoch=-1,projector_epoch=-1,trace_epoch=-1,derived_epoch=-1
+    integer(int64)::operator_structure_fingerprint=0_int64,operator_value_fingerprint=0_int64
     logical::trace_cache_valid=.false.
   end type s_dg_hybrid_trial_state
 
@@ -45,9 +46,29 @@ module dg_hybrid_continuation_controller
   end type s_dg_hybrid_controller
 
   public::default_dg_hybrid_controller_controls,dg_hybrid_stage_tolerances,&
+    validate_dg_hybrid_controller_contract,&
     initialize_dg_hybrid_controller,propose_dg_hybrid_trial,observe_dg_hybrid_inner_residuals,&
     decide_dg_hybrid_stage,reject_dg_hybrid_trial
 contains
+  subroutine validate_dg_hybrid_controller_contract(comm,controls,ok,message)
+    integer,intent(in)::comm;type(s_dg_hybrid_controller_controls),intent(in)::controls
+    logical,intent(out)::ok;character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::local_bad,global_bad,ierr
+    integer(int64)::local_hash,minimum_hash,maximum_hash
+    local_bad=merge(0,1,valid_controls(controls))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ok=.false.;message='invalid continuation controller controls';return;endif
+    local_hash=controller_controls_fingerprint(controls)
+    call MPI_Allreduce(local_hash,minimum_hash,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(local_hash,maximum_hash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    ok=ierr==MPI_SUCCESS.and.minimum_hash==maximum_hash
+    if(ok)then;message='';else;message='rank-disagreeing continuation controller controls';endif
+#else
+    ok=.false.;message='continuation controller validation requires MPI'
+#endif
+  end subroutine validate_dg_hybrid_controller_contract
+
   subroutine default_dg_hybrid_controller_controls(controls)
     type(s_dg_hybrid_controller_controls),intent(out)::controls
     controls=s_dg_hybrid_controller_controls()
@@ -258,8 +279,8 @@ contains
       allocated(state%trace).and.allocated(state%occupations).and.allocated(state%eigenvalues).and.&
       allocated(state%mixing_history)
     if(.not.valid)return
-    valid=size(state%density)>0.and.size(state%potential)>0.and.size(state%projector)>0.and.size(state%trace)>0.and.&
-      size(state%occupations)>0.and.size(state%eigenvalues)==size(state%occupations).and.size(state%mixing_history)>0.and.&
+    valid=size(state%projector)>0.and.size(state%occupations)>0.and.&
+      size(state%eigenvalues)==size(state%occupations).and.&
       all(ieee_is_finite(state%density)).and.all(ieee_is_finite(state%potential)).and.&
       all(ieee_is_finite(real(state%projector))).and.all(ieee_is_finite(aimag(state%projector))).and.&
       all(ieee_is_finite(real(state%trace))).and.all(ieee_is_finite(aimag(state%trace))).and.&

@@ -1,7 +1,7 @@
 #include "config.h"
 program test_dg_hybrid_continuation_controller_mpi
   use mpi
-  use,intrinsic::iso_fortran_env,only:real64
+  use,intrinsic::iso_fortran_env,only:int64,real64
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_positive_inf
   use dg_hybrid_continuation_controller
   implicit none
@@ -168,6 +168,7 @@ contains
     value%mixing_history=[(real(seed+20+i,real64),i=1,4)]
     value%density_epoch=11;value%operator_epoch=12;value%projector_epoch=13;value%trace_epoch=14
     value%derived_epoch=15
+    value%operator_structure_fingerprint=701_int64;value%operator_value_fingerprint=702_int64
     value%trace_cache_valid=.true.
   end subroutine fill_state
   subroutine mutate_state(value)
@@ -178,6 +179,7 @@ contains
     value%mixing_history=-value%mixing_history
     value%density_epoch=101;value%operator_epoch=102;value%projector_epoch=103;value%trace_epoch=104
     value%derived_epoch=105
+    value%operator_structure_fingerprint=801_int64;value%operator_value_fingerprint=802_int64
     value%trace_cache_valid=.true.
   end subroutine mutate_state
   logical function equal_state(a,b)
@@ -187,6 +189,8 @@ contains
       all(a%eigenvalues==b%eigenvalues).and.all(a%mixing_history==b%mixing_history).and.&
       a%density_epoch==b%density_epoch.and.a%operator_epoch==b%operator_epoch.and.&
       a%projector_epoch==b%projector_epoch.and.a%trace_epoch==b%trace_epoch.and.a%derived_epoch==b%derived_epoch.and.&
+      a%operator_structure_fingerprint==b%operator_structure_fingerprint.and.&
+      a%operator_value_fingerprint==b%operator_value_fingerprint.and.&
       (a%trace_cache_valid.eqv.b%trace_cache_valid)
   end function equal_state
   subroutine passing_report(ctrl,value)

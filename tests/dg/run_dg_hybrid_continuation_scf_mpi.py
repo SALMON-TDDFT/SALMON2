@@ -24,9 +24,9 @@ with tempfile.TemporaryDirectory(prefix="hybrid-continuation-scf-") as name:
     env = os.environ.copy()
     env["OMP_NUM_THREADS"] = "1"
     env.setdefault("OMPI_MCA_rmaps_base_oversubscribe", "1")
-    for nrank in (1, 2, 4):
+    for nrank in (1, 2, 4, 8):
         run = subprocess.run([shutil.which("mpiexec"), "-n", str(nrank), str(exe)],
                              capture_output=True, text=True, env=env)
         assert run.returncode == 0, (nrank, run.stdout, run.stderr)
         assert f"PASS hybrid continuation SCF on {nrank} ranks" in run.stdout
-print("PASS hybrid continuation SCF on 1, 2, and 4 ranks")
+print("PASS hybrid continuation SCF on 1, 2, 4, and 8 ranks")
