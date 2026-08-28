@@ -526,6 +526,60 @@ Expected: PASS at 1, 2, and 4 ranks.
 Stage only these Task 7a files and commit as
 `feat(dg): materialize production SIPG face traces`.
 
+### Task 7a.5: Expose the production symmetry and selection boundary
+
+**Files:**
+- Create: `docs/plans/2026-08-29-dg-production-selection-boundary-design.md`
+- Modify: `src/common/dg_hybrid_windowed_pw_types.f90`
+- Modify: `src/common/dg_hybrid_production_pw_basis.f90`
+- Modify: `tests/dg/test_dg_hybrid_production_pw_basis_mpi.f90`
+- Modify: `tests/dg/run_dg_hybrid_production_pw_basis_mpi.py`
+
+**Step 1: Write failing MPI tests**
+
+Require an authoritative production symmetry receipt and exported fragment,
+spatial, reciprocal, and PW-packet actions.  Test a nontrivial group and an
+explicit identity-only group.  Require a known nonidentity physical operation
+that does not map whole fragments to fail instead of being silently removed.
+Request one member of a multi-packet orbit, close it with
+`close_dg_hybrid_selection`, and require catalog freezing to accept the closed
+effective IDs and reject the original non-closed IDs.
+
+**Step 2: Run RED**
+
+Run `python3 tests/dg/run_dg_hybrid_production_pw_basis_mpi.py`.
+
+Expected: compilation fails because the phased production analysis and
+effective-selection API is absent.
+
+**Step 3: Implement the minimal phased API**
+
+Add a receipt/action type to `dg_hybrid_windowed_pw_types`.  Separate
+fragment-covariance analysis and packet-universe construction from catalog
+freezing.  Stable packet IDs enumerate `(fragment, reciprocal star)` in the
+existing order.  Validate that effective IDs are unique, in the universe, and
+closed under the returned packet action.  Recompute catalog ownership and
+selection fingerprints from effective IDs.  Preserve the existing convenience
+entry point by selecting the complete universe.
+
+**Step 4: Run GREEN and regressions**
+
+Run:
+
+```text
+python3 tests/dg/run_dg_hybrid_production_pw_basis_mpi.py
+python3 tests/dg/check_dg_hybrid_windowed_pw_route.py
+python3 tests/dg/run_dg_hybrid_production_face_traces_mpi.py
+```
+
+Expected: all PASS.
+
+**Step 5: Commit**
+
+Use `git add -p` for every already-dirty file.  Run
+`git diff --cached --check` and inspect `git diff --cached`.  Commit only this
+task as `feat(dg): expose production symmetry selection boundary`.
+
 ### Task 7b: Add an isolated production continuation branch
 
 **Files:**
