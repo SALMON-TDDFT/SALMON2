@@ -39,7 +39,7 @@ program test_dg_hybrid_production_face_traces_mpi
   plus_values(:,1)=[cmplx(0.6d0,-0.1d0,real64),cmplx(0.5d0,0.3d0,real64)]
   minus_outward=0.25d0*minus_values;plus_outward(:,1)=-0.4d0*plus_values(:,1)
 
-  call build_dg_hybrid_production_face_trace(icomm,17,0,1,2,[1,0,0],normal,0.8d0,point_ids,point_ids,&
+  call build_dg_hybrid_production_face_trace(icomm,17,1,2,[1,0,0],normal,0.8d0,point_ids,point_ids,&
     weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,group_action,&
     trace,ok,message)
   call require(ok,trim(message))
@@ -62,32 +62,26 @@ program test_dg_hybrid_production_face_traces_mpi
   call assemble_dg_hybrid_production_face(icomm,bad_trace,6d0,face,ok,message)
   call require(.not.ok,'rank-inconsistent mutable face payload was accepted')
 
-  if(nproc>1)then
-    call build_dg_hybrid_production_face_trace(icomm,18,id_rank,1,2,[0,0,0],normal,0.8d0,point_ids,point_ids,&
-      weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,group_action,&
-      bad_trace,ok,message)
-    call require(.not.ok,'rank-disagreeing canonical owner was accepted')
-  endif
-  call build_dg_hybrid_production_face_trace(icomm,19,0,1,2,[0,0,0],normal,0.8d0,point_ids,[102_int64,110_int64],&
+  call build_dg_hybrid_production_face_trace(icomm,19,1,2,[0,0,0],normal,0.8d0,point_ids,[102_int64,110_int64],&
     weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,group_action,&
     bad_trace,ok,message)
   call require(ok,'paired cell-centered face points were rejected')
-  call build_dg_hybrid_production_face_trace(icomm,21,0,1,2,[0,0,0],normal,0.8d0,point_ids,[101_int64],&
+  call build_dg_hybrid_production_face_trace(icomm,21,1,2,[0,0,0],normal,0.8d0,point_ids,[101_int64],&
     weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,group_action,&
     bad_trace,ok,message)
   call require(.not.ok,'nonconformable face point arrays were accepted')
   bad_action=group_action;bad_action(3,2)=2
-  call build_dg_hybrid_production_face_trace(icomm,20,0,1,2,[0,0,0],normal,0.8d0,point_ids,point_ids,&
+  call build_dg_hybrid_production_face_trace(icomm,20,1,2,[0,0,0],normal,0.8d0,point_ids,point_ids,&
     weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,bad_action,&
     bad_trace,ok,message)
   call require(.not.ok,'nonclosed effective selection action was accepted')
   non_group_action=reshape([1,2,3,2,1,3,1,3,2],[3,3])
-  call build_dg_hybrid_production_face_trace(icomm,22,0,1,2,[0,0,0],normal,0.8d0,point_ids,point_ids,&
+  call build_dg_hybrid_production_face_trace(icomm,22,1,2,[0,0,0],normal,0.8d0,point_ids,point_ids,&
     weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,non_group_action,&
     bad_trace,ok,message)
   call require(.not.ok,'permutations without group closure were accepted')
   allocate(empty_ids(0),empty_values(2,0),empty_derivatives(2,0))
-  call build_dg_hybrid_production_face_trace(icomm,23,0,1,2,[0,0,0],normal,0.8d0,point_ids,point_ids,&
+  call build_dg_hybrid_production_face_trace(icomm,23,1,2,[0,0,0],normal,0.8d0,point_ids,point_ids,&
     weights,empty_ids,[1],empty_values,empty_derivatives,plus_values,plus_outward,[1],reshape([1],[1,1]),&
     bad_trace,ok,message)
   call require(.not.ok,'one-sided production face basis was accepted')

@@ -5,7 +5,7 @@ module dg_hybrid_production_face_traces
   use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
   use dg_hybrid_sipg_operator,only:s_dg_hybrid_sipg_face_operator
 #ifdef USE_MPI
-  use mpi,only:MPI_Allreduce,MPI_Comm_rank,MPI_Comm_size,MPI_DOUBLE_COMPLEX,MPI_IN_PLACE,MPI_INTEGER,MPI_INTEGER8,&
+  use mpi,only:MPI_Allreduce,MPI_Comm_rank,MPI_DOUBLE_COMPLEX,MPI_IN_PLACE,MPI_INTEGER,MPI_INTEGER8,&
     MPI_MAX,MPI_MIN,MPI_SUCCESS,MPI_SUM
 #endif
   implicit none
@@ -13,7 +13,7 @@ module dg_hybrid_production_face_traces
 
   type,public::s_dg_hybrid_production_face_trace
     logical::frozen=.false.
-    integer::global_face_id=0,owner_rank=-1,minus_fragment=0,plus_fragment=0
+    integer::global_face_id=0,minus_fragment=0,plus_fragment=0
     integer::periodic_shift(3)=0
     real(real64)::canonical_normal(3)=0d0,h_normal=0d0
     integer(int64),allocatable::point_ids_minus(:),point_ids_plus(:)
@@ -87,7 +87,7 @@ contains
     complex(real64),allocatable::value_minus(:,:),value_plus(:,:),derivative_minus(:,:),derivative_plus(:,:)
     integer::fragment,axis,tangent(2),t1,t2,position(3),neighbor_position(3),neighbor,face_count,cell_count,&
       minus_fragment,plus_fragment,minus_point(3),plus_point(3),normal_sign,periodic_shift(3),&
-      i,j,g,npoint,column,nproc,ierr,local_bad,global_bad,minimum_integer,maximum_integer
+      i,j,g,npoint,column,ierr,local_bad,global_bad,minimum_integer,maximum_integer
     integer,allocatable::basis_fragment(:),ownership(:),ids_minus(:),ids_plus(:),cell_group(:),&
       cell_axis(:),cell_minus_fragment(:),cell_plus_fragment(:),cell_normal_sign(:),cell_shift(:,:),&
       cell_minus_position(:,:),cell_plus_position(:,:),group_axis(:),group_minus_fragment(:),&
@@ -99,8 +99,6 @@ contains
     character(256)::face_message
 
     ok=.false.;message='';local_bad=0
-    call MPI_Comm_size(icomm,nproc,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='production topology communicator query failed';return;endif
     if(size(origins,1)/=3.or.any(shape(origins)/=shape(sizes)).or.size(origins,2)<2.or.&
         size(bases)/=size(origins,2).or.any(global_size<=0).or.any(sizes<=0).or.any(origins<0).or.&
         any(.not.ieee_is_finite(hgs)).or.any(hgs<=0d0).or.size(coef_nab,1)<1.or.size(coef_nab,2)/=3.or.&
@@ -237,7 +235,7 @@ contains
       call reduce_complex_matrix(value_plus,icomm,ierr);if(ierr/=MPI_SUCCESS)return
       call reduce_complex_matrix(derivative_plus,icomm,ierr);if(ierr/=MPI_SUCCESS)return
       normal=0d0;normal(axis)=real(normal_sign,real64);weight=hgs(tangent(1))*hgs(tangent(2))
-      call build_dg_hybrid_production_face_trace(icomm,g,mod(g-1,nproc),minus_fragment,plus_fragment,&
+      call build_dg_hybrid_production_face_trace(icomm,g,minus_fragment,plus_fragment,&
         periodic_shift,normal,hgs(axis),minus_ids,plus_ids,[(weight,i=1,npoint)],ids_minus,ids_plus,&
         value_minus,derivative_minus,value_plus,-derivative_plus,effective_ids,group_action,candidate(g),&
         face_ok,face_message)
@@ -373,10 +371,10 @@ contains
   end function geometry_fingerprint
 #endif
 
-  subroutine build_dg_hybrid_production_face_trace(icomm,face_id,owner,fragment_minus,fragment_plus,periodic_shift,&
+  subroutine build_dg_hybrid_production_face_trace(icomm,face_id,fragment_minus,fragment_plus,periodic_shift,&
       normal,h_normal,point_ids_minus,point_ids_plus,weights,basis_ids_minus,basis_ids_plus,value_minus,&
       outward_minus,value_plus,outward_plus,effective_ids,group_action,face,ok,message)
-    integer,intent(in)::icomm,face_id,owner,fragment_minus,fragment_plus,periodic_shift(3)
+    integer,intent(in)::icomm,face_id,fragment_minus,fragment_plus,periodic_shift(3)
     integer(int64),intent(in)::point_ids_minus(:),point_ids_plus(:)
     integer,intent(in)::basis_ids_minus(:),basis_ids_plus(:),effective_ids(:),group_action(:,:)
     real(real64),intent(in)::normal(3),h_normal,weights(:)
@@ -385,14 +383,12 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer::i,j,nproc,ierr,local_bad,global_bad
+    integer::i,j,ierr,local_bad,global_bad
     integer(int64)::local_hash,minimum_hash,maximum_hash
 
     ok=.false.;message=''
-    call MPI_Comm_size(icomm,nproc,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='production face communicator query failed';return;endif
     local_bad=0
-    if(face_id<=0.or.owner<0.or.owner>=nproc.or.fragment_minus<=0.or.fragment_plus<=fragment_minus)local_bad=1
+    if(face_id<=0.or.fragment_minus<=0.or.fragment_plus<=fragment_minus)local_bad=1
     if(size(point_ids_minus)<1.or.size(point_ids_minus)/=size(point_ids_plus))local_bad=1
     if(size(weights)/=size(point_ids_minus))local_bad=1
     if(size(value_minus,1)/=size(weights).or.size(value_minus,2)/=size(basis_ids_minus))local_bad=1
@@ -423,7 +419,7 @@ contains
     endif
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid or incomplete production face trace';return;endif
-    local_hash=trace_fingerprint(face_id,owner,fragment_minus,fragment_plus,periodic_shift,normal,h_normal,&
+    local_hash=trace_fingerprint(face_id,fragment_minus,fragment_plus,periodic_shift,normal,h_normal,&
       point_ids_minus,point_ids_plus,weights,basis_ids_minus,basis_ids_plus,value_minus,outward_minus,value_plus,outward_plus,&
       effective_ids,group_action)
     call MPI_Allreduce(local_hash,minimum_hash,1,MPI_INTEGER8,MPI_MIN,icomm,ierr)
@@ -432,7 +428,7 @@ contains
     if(ierr/=MPI_SUCCESS.or.minimum_hash/=maximum_hash)then
       message='rank-disagreeing production face topology or trace';return
     endif
-    face%global_face_id=face_id;face%owner_rank=owner
+    face%global_face_id=face_id
     face%minus_fragment=fragment_minus;face%plus_fragment=fragment_plus
     face%periodic_shift=periodic_shift;face%canonical_normal=normal;face%h_normal=h_normal
     allocate(face%point_ids_minus(size(point_ids_minus)),face%point_ids_plus(size(point_ids_plus)),&
@@ -575,7 +571,7 @@ contains
         any(shape(face%derivative_minus)/=shape(face%value_minus)).or.&
         any(shape(face%value_plus)/=[size(face%weights),size(face%basis_ids_plus)]).or.&
         any(shape(face%derivative_plus)/=shape(face%value_plus)))then;bad=1;return;endif
-    recomputed=trace_fingerprint(face%global_face_id,face%owner_rank,face%minus_fragment,face%plus_fragment,&
+    recomputed=trace_fingerprint(face%global_face_id,face%minus_fragment,face%plus_fragment,&
       face%periodic_shift,face%canonical_normal,face%h_normal,face%point_ids_minus,face%point_ids_plus,&
       face%weights,face%basis_ids_minus,&
       face%basis_ids_plus,face%value_minus,face%derivative_minus,face%value_plus,-face%derivative_plus,&
@@ -608,18 +604,18 @@ contains
     enddo;enddo
   end function valid_closed_action
 
-  integer(int64) function trace_fingerprint(face_id,owner,fragment_minus,fragment_plus,shift,normal,h_normal,&
+  integer(int64) function trace_fingerprint(face_id,fragment_minus,fragment_plus,shift,normal,h_normal,&
       point_ids_minus,point_ids_plus,weights,ids_minus,ids_plus,value_minus,outward_minus,value_plus,outward_plus,&
       effective_ids,action)&
       result(hash)
-    integer,intent(in)::face_id,owner,fragment_minus,fragment_plus,shift(3),ids_minus(:),ids_plus(:),&
+    integer,intent(in)::face_id,fragment_minus,fragment_plus,shift(3),ids_minus(:),ids_plus(:),&
       effective_ids(:),action(:,:)
     integer(int64),intent(in)::point_ids_minus(:),point_ids_plus(:)
     real(real64),intent(in)::normal(3),h_normal,weights(:)
     complex(real64),intent(in)::value_minus(:,:),outward_minus(:,:),value_plus(:,:),outward_plus(:,:)
     integer::i,j
     hash=int(z'510E527FADE682D1',int64)
-    call mix(int(face_id,int64));call mix(int(owner,int64));call mix(int(fragment_minus,int64))
+    call mix(int(face_id,int64));call mix(int(fragment_minus,int64))
     call mix(int(fragment_plus,int64))
     do i=1,3;call mix(int(shift(i),int64));call mix(transfer(normal(i),hash));enddo
     call mix(transfer(h_normal,hash))
