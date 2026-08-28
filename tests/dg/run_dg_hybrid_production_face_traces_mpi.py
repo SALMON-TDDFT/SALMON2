@@ -7,11 +7,26 @@ import tempfile
 
 root = Path(__file__).resolve().parents[2]
 production_source = (root / "src/gs/dc/dg_hybrid_production_face_traces.f90").read_text().lower()
+materialization_body = production_source.split(
+    "subroutine materialize_dg_hybrid_production_face_collection", 1
+)[1].split("end subroutine materialize_dg_hybrid_production_face_collection", 1)[0]
+assert "reduce_complex_matrix" not in materialization_body, (
+    "production face traces are still replicated with a communicator-wide reduction"
+)
 assembly_body = production_source.split("subroutine assemble_dg_hybrid_production_face", 1)[1].split(
     "end subroutine assemble_dg_hybrid_production_face", 1
 )[0]
 assert "call assemble_dg_hybrid_sipg_face" not in assembly_body, (
     "production grouped assembly must not invoke a collective SIPG assembler per quadrature point"
+)
+assert "reduce_complex_matrix" not in assembly_body, (
+    "production SIPG face blocks are still replicated with a communicator-wide reduction"
+)
+row_body = production_source.split(
+    "subroutine assemble_dg_hybrid_production_interface_rows", 1
+)[1].split("end subroutine assemble_dg_hybrid_production_interface_rows", 1)[0]
+assert "mpi_allreduce" not in row_body, (
+    "production SIPG row assembly still performs communicator-wide ownership exchange"
 )
 with tempfile.TemporaryDirectory(prefix="hybrid-production-face-traces-") as name:
     build = Path(name)
