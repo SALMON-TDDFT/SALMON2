@@ -5,16 +5,24 @@ program test_dg_hybrid_production_face_traces_mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use dg_hybrid_production_face_traces,only:s_dg_hybrid_production_face_trace,&
     build_dg_hybrid_production_face_trace,assemble_dg_hybrid_production_face,&
-    validate_dg_hybrid_production_face_collection
+    validate_dg_hybrid_production_face_collection,materialize_dg_hybrid_production_face_collection
+  use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
   use dg_hybrid_sipg_operator,only:s_dg_hybrid_sipg_face_operator
   implicit none
   integer::icomm,id_rank,nproc,ierr
-  integer::effective_ids(3),group_action(3,2),bad_action(3,2)
+  integer::effective_ids(3),group_action(3,2),bad_action(3,2),non_group_action(3,3)
   integer(int64)::point_ids(2)
   real(real64)::weights(2),normal(3)
   complex(real64)::minus_values(2,2),plus_values(2,1),minus_outward(2,2),plus_outward(2,1)
+  complex(real64),allocatable::empty_values(:,:),empty_derivatives(:,:)
+  integer,allocatable::empty_ids(:)
   type(s_dg_hybrid_production_face_trace)::trace,bad_trace
+  type(s_dg_hybrid_production_face_trace),allocatable::production_faces(:)
+  type(s_dg_hybrid_fragment_basis)::fragment_bases(2)
   type(s_dg_hybrid_sipg_face_operator)::face
+  integer::origins(3,2),sizes(3,2),grid_size(3),p,x,y
+  integer(int64)::all_point_ids(8)
+  complex(real64)::analytic_values(8,2)
   logical::ok
   character(256)::message
 
@@ -69,6 +77,56 @@ program test_dg_hybrid_production_face_traces_mpi
     weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,bad_action,&
     bad_trace,ok,message)
   call require(.not.ok,'nonclosed effective selection action was accepted')
+  non_group_action=reshape([1,2,3,2,1,3,1,3,2],[3,3])
+  call build_dg_hybrid_production_face_trace(icomm,22,0,1,2,[0,0,0],normal,0.8d0,point_ids,point_ids,&
+    weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,non_group_action,&
+    bad_trace,ok,message)
+  call require(.not.ok,'permutations without group closure were accepted')
+  allocate(empty_ids(0),empty_values(2,0),empty_derivatives(2,0))
+  call build_dg_hybrid_production_face_trace(icomm,23,0,1,2,[0,0,0],normal,0.8d0,point_ids,point_ids,&
+    weights,empty_ids,[1],empty_values,empty_derivatives,plus_values,plus_outward,[1],reshape([1],[1,1]),&
+    bad_trace,ok,message)
+  call require(.not.ok,'one-sided production face basis was accepted')
+
+  grid_size=[4,2,1];origins=reshape([0,0,0,1,0,0],[3,2]);sizes=reshape([1,2,1,3,2,1],[3,2])
+  p=0
+  do y=0,1;do x=0,3
+    p=p+1;all_point_ids(p)=int(1+x+4*y,int64)
+    analytic_values(p,1)=cmplx(sin(0.5d0*acos(-1d0)*real(x,real64))+0.2d0*y,0.1d0*x,real64)
+    analytic_values(p,2)=cmplx(cos(0.5d0*acos(-1d0)*real(x,real64))-0.1d0*y,-0.2d0*x,real64)
+  enddo;enddo
+  do p=1,2
+    fragment_bases(p)%fragment_id=merge(p,0,mod(p-1,nproc)==id_rank);fragment_bases(p)%generation=1
+    allocate(fragment_bases(p)%global_ids(merge(1,0,mod(p-1,nproc)==id_rank)),&
+      fragment_bases(p)%sector(merge(1,0,mod(p-1,nproc)==id_rank)),&
+      fragment_bases(p)%buffer_point_ids(8),&
+      fragment_bases(p)%buffer_values(8,merge(1,0,mod(p-1,nproc)==id_rank)))
+    if(mod(p-1,nproc)==id_rank)then
+      fragment_bases(p)%global_ids=[int(p,int64)];fragment_bases(p)%sector=[1]
+      fragment_bases(p)%buffer_values(:,1)=analytic_values(:,p)
+    endif
+    fragment_bases(p)%buffer_point_ids=all_point_ids
+    fragment_bases(p)%provenance_fingerprint=int(100+p,int64)
+  enddo
+  call materialize_dg_hybrid_production_face_collection(icomm,origins,sizes,grid_size,[1d0,2d0,3d0],&
+    reshape([0.5d0,0.25d0,0.125d0],[1,3]),fragment_bases,[1,2],reshape([1,2],[2,1]),production_faces,ok,message)
+  call require(ok,trim(message))
+  call require(size(production_faces)==2,'production topology did not group internal and periodic interfaces')
+  call require(all([(size(production_faces(p)%weights)==2,p=1,size(production_faces))]),&
+    'production interface quadrature points were not batched')
+  call require(any([(abs(production_faces(p)%periodic_shift(1))==1,p=1,size(production_faces))]),&
+    'production topology omitted the periodic fragment interface')
+  call require(all([(production_faces(p)%frozen,p=1,size(production_faces))]),&
+    'production topology returned an unfrozen face')
+  call require(abs(production_faces(1)%derivative_minus(1,1)-&
+    0.5d0*(analytic_values(2,1)-analytic_values(4,1)))<1d-13,&
+    'production normal derivative disagrees with the supplied SALMON stencil')
+  call assemble_dg_hybrid_production_face(icomm,production_faces(1),6d0,face,ok,message)
+  call require(ok.and.abs(face%total(1,2))>1d-12,'materialized production face lacks SIPG coupling')
+  origins(1,2)=2;sizes(1,2)=3
+  call materialize_dg_hybrid_production_face_collection(icomm,origins,sizes,grid_size,[1d0,2d0,3d0],&
+    reshape([0.5d0,0.25d0,0.125d0],[1,3]),fragment_bases,[1,2],reshape([1,2],[2,1]),production_faces,ok,message)
+  call require(.not.ok,'fragment box extending outside the basic cell was accepted')
   if(id_rank==0)write(*,'(a,i0,a)')'PASS production face traces on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains

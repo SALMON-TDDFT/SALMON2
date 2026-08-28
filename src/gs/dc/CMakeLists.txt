@@ -9,11 +9,11 @@ set(SOURCES
     dg_hybrid_continuation_controller.f90
     dg_hybrid_continuation_scf.f90
     dg_hybrid_sipg_operator.f90
-    dg_hybrid_production_face_traces.f90
     dg_hybrid_generalized_eigensystem.f90
     dg_hybrid_density.f90
     dg_hybrid_scf.f90
     dg_hybrid_fragment_basis.f90
+    dg_hybrid_production_face_traces.f90
     dg_hybrid_fragment_basis_stream.f90
     dg_hybrid_projected_fragment_pipeline.f90
     dg_hybrid_production_fragment_basis.f90

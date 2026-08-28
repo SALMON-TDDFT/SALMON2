@@ -6,6 +6,13 @@ import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[2]
+production_source = (root / "src/gs/dc/dg_hybrid_production_face_traces.f90").read_text().lower()
+assembly_body = production_source.split("subroutine assemble_dg_hybrid_production_face", 1)[1].split(
+    "end subroutine assemble_dg_hybrid_production_face", 1
+)[0]
+assert "call assemble_dg_hybrid_sipg_face" not in assembly_body, (
+    "production grouped assembly must not invoke a collective SIPG assembler per quadrature point"
+)
 with tempfile.TemporaryDirectory(prefix="hybrid-production-face-traces-") as name:
     build = Path(name)
     (build / "config.h").write_text("")
@@ -14,11 +21,19 @@ with tempfile.TemporaryDirectory(prefix="hybrid-production-face-traces-") as nam
         shutil.which("mpifort"), "-cpp", "-DUSE_MPI", "-std=f2008",
         "-ffree-line-length-none", "-I", str(build), "-J", str(build),
         "-fcheck=all", "-ffpe-trap=invalid,zero,overflow", "-fbacktrace",
+        str(root / "src/gs/dc/dg_hybrid_fragment_basis.f90"),
         str(root / "src/gs/dc/dg_hybrid_sipg_operator.f90"),
         str(root / "src/gs/dc/dg_hybrid_production_face_traces.f90"),
         str(root / "tests/dg/test_dg_hybrid_production_face_traces_mpi.f90"),
         "-o", str(exe),
     ], check=True)
+    subprocess.run([
+        shutil.which("mpifort"), "-cpp", "-std=f2008", "-ffree-line-length-none",
+        "-I", str(build), "-J", str(build), "-fcheck=all", "-c",
+        str(root / "src/gs/dc/dg_hybrid_fragment_basis.f90"),
+        str(root / "src/gs/dc/dg_hybrid_sipg_operator.f90"),
+        str(root / "src/gs/dc/dg_hybrid_production_face_traces.f90"),
+    ], cwd=build, check=True)
     env = os.environ.copy()
     env["OMP_NUM_THREADS"] = "1"
     env.setdefault("OMPI_MCA_rmaps_base_oversubscribe", "1")
