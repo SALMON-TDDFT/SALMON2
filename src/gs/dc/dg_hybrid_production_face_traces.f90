@@ -5,8 +5,8 @@ module dg_hybrid_production_face_traces
   use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
   use dg_hybrid_sipg_operator,only:s_dg_hybrid_sipg_face_operator
 #ifdef USE_MPI
-  use mpi,only:MPI_Allreduce,MPI_Comm_rank,MPI_Comm_size,MPI_DOUBLE_COMPLEX,MPI_INTEGER,MPI_INTEGER8,&
-    MPI_MAX,MPI_MIN,MPI_STATUS_IGNORE,MPI_SUCCESS,MPI_Sendrecv
+  use mpi,only:MPI_Allreduce,MPI_Comm_rank,MPI_Comm_size,MPI_DOUBLE_COMPLEX,MPI_IN_PLACE,MPI_INTEGER,MPI_INTEGER8,&
+    MPI_MAX,MPI_MIN,MPI_STATUS_IGNORE,MPI_SUCCESS,MPI_SUM,MPI_Sendrecv
 #endif
   implicit none
   private
@@ -27,8 +27,46 @@ module dg_hybrid_production_face_traces
 
   public::build_dg_hybrid_production_face_trace,assemble_dg_hybrid_production_face,&
     validate_dg_hybrid_production_face_collection,materialize_dg_hybrid_production_face_collection,&
-    assemble_dg_hybrid_production_interface_rows
+    assemble_dg_hybrid_production_interface_rows,freeze_dg_hybrid_basis_directory
 contains
+  subroutine freeze_dg_hybrid_basis_directory(icomm,bases,effective_ids,basis_owner,basis_fragment,ok,message)
+    integer,intent(in)::icomm,effective_ids(:)
+    type(s_dg_hybrid_fragment_basis),intent(in)::bases(:)
+    integer,allocatable,intent(out)::basis_owner(:),basis_fragment(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer,allocatable::ownership(:)
+    integer::id_rank,fragment,i,position,local_bad,global_bad,ierr
+    ok=.false.;message='';local_bad=0
+    call MPI_Comm_rank(icomm,id_rank,ierr);if(ierr/=MPI_SUCCESS)return
+    if(size(effective_ids)<1.or.size(bases)<1.or.any(effective_ids<=0))local_bad=1
+    allocate(basis_owner(size(effective_ids)),basis_fragment(size(effective_ids)),ownership(size(effective_ids)))
+    basis_owner=-1;basis_fragment=0;ownership=0
+    do fragment=1,size(bases)
+      if(.not.allocated(bases(fragment)%global_ids))then;local_bad=1;cycle;endif
+      do i=1,size(bases(fragment)%global_ids)
+        position=findloc(effective_ids,int(bases(fragment)%global_ids(i)),dim=1)
+        if(position<=0.or.ownership(position)/=0)then;local_bad=1;cycle;endif
+        basis_owner(position)=id_rank;basis_fragment(position)=fragment;ownership(position)=1
+      enddo
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid local fixed-basis directory input';return;endif
+    call MPI_Allreduce(MPI_IN_PLACE,basis_owner,size(basis_owner),MPI_INTEGER,MPI_MAX,icomm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(MPI_IN_PLACE,basis_fragment,size(basis_fragment),MPI_INTEGER,MPI_MAX,icomm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(MPI_IN_PLACE,ownership,size(ownership),MPI_INTEGER,MPI_SUM,icomm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(ownership/=1).or.any(basis_owner<0).or.any(basis_fragment<1))then
+      message='fixed basis rows are not owned exactly once';return
+    endif
+    ok=.true.
+#else
+    ok=.false.;message='fixed-basis directory construction requires MPI'
+#endif
+  end subroutine freeze_dg_hybrid_basis_directory
+
   subroutine assemble_dg_hybrid_production_interface_rows(icomm,global_count,row_ids,traces,penalty_factor,&
       interface_rows,ok,message)
     integer,intent(in)::icomm,global_count

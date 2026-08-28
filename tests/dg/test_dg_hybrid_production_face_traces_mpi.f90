@@ -6,12 +6,13 @@ program test_dg_hybrid_production_face_traces_mpi
   use dg_hybrid_production_face_traces,only:s_dg_hybrid_production_face_trace,&
     build_dg_hybrid_production_face_trace,assemble_dg_hybrid_production_face,&
     validate_dg_hybrid_production_face_collection,materialize_dg_hybrid_production_face_collection,&
-    assemble_dg_hybrid_production_interface_rows
+    assemble_dg_hybrid_production_interface_rows,freeze_dg_hybrid_basis_directory
   use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
   use dg_hybrid_sipg_operator,only:s_dg_hybrid_sipg_face_operator
   implicit none
   integer::icomm,id_rank,nproc,ierr
-  integer::effective_ids(3),group_action(3,2),bad_action(3,2),non_group_action(3,3),basis_owner(2),basis_fragment(2)
+  integer::effective_ids(3),group_action(3,2),bad_action(3,2),non_group_action(3,3)
+  integer,allocatable::basis_owner(:),basis_fragment(:)
   integer(int64)::point_ids(2)
   real(real64)::weights(2),normal(3)
   real(real64)::local_interface_norm,global_interface_norm
@@ -82,7 +83,6 @@ program test_dg_hybrid_production_face_traces_mpi
   call require(.not.ok,'one-sided production face basis was accepted')
 
   grid_size=[4,2,1];origins=reshape([0,0,0,1,0,0],[3,2]);sizes=reshape([1,2,1,3,2,1],[3,2])
-  basis_owner=[mod(0,nproc),mod(1,nproc)];basis_fragment=[1,2]
   p=0
   do y=0,1;do x=0,3
     p=p+1;all_point_ids(p)=int(1+x+4*y,int64)
@@ -102,6 +102,10 @@ program test_dg_hybrid_production_face_traces_mpi
     fragment_bases(p)%buffer_point_ids=all_point_ids
     fragment_bases(p)%provenance_fingerprint=int(100+p,int64)
   enddo
+  call freeze_dg_hybrid_basis_directory(icomm,fragment_bases,[1,2],basis_owner,basis_fragment,ok,message)
+  call require(ok,trim(message))
+  call require(all(basis_owner==[mod(0,nproc),mod(1,nproc)]).and.all(basis_fragment==[1,2]),&
+    'frozen basis owner or fragment directory is incorrect')
   call materialize_dg_hybrid_production_face_collection(icomm,origins,sizes,grid_size,[1d0,2d0,3d0],&
     reshape([0.5d0,0.25d0,0.125d0],[1,3]),fragment_bases,basis_owner,basis_fragment,[1,2],&
     reshape([1,2],[2,1]),production_faces,ok,message)
