@@ -7,6 +7,7 @@ set(SOURCES
     dg_hybrid_ground_state_types.f90
     dg_hybrid_continuation_state.f90
     dg_hybrid_continuation_controller.f90
+    dg_hybrid_continuation_scf.f90
     dg_hybrid_sipg_operator.f90
     dg_hybrid_generalized_eigensystem.f90
     dg_hybrid_density.f90
