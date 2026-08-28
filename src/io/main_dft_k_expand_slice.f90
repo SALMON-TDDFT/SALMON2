@@ -62,6 +62,7 @@ subroutine main_dft_k_expand_slice
   type(s_mixing) :: mixing
   type(s_ofile)  :: ofl
   type(s_k_expand) :: kex
+  type(s_unfold) :: unfold
   
   integer :: i,ix,iy,iz,ndir_r, ndir_w
   integer :: nspin, nblock_orbital
@@ -79,7 +80,7 @@ subroutine main_dft_k_expand_slice
   if(yn_restart /= 'y') stop "error: yn_restart must be y"
   if(method_wf_distributor /= 'slice') stop "error: method_wf_distributor must be slice"
 
-  call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_ng,ofl)
+  call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_ng,ofl,unfold)
   allocate( rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin) )
 
 

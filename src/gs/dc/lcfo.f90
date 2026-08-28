@@ -33,7 +33,7 @@ contains
 
   subroutine dc_lcfo(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
     use communication, only: comm_summation
-    use salmon_global, only: yn_dc_lcfo_diag
+    use salmon_global, only: yn_dc_lcfo_diag, lcfo_eigensolver
     use structures
     implicit none
     type(s_rgrid),        intent(in) :: lg,mg
@@ -77,12 +77,31 @@ contains
     
     if(yn_dc_lcfo_diag=='y') then
       allocate(esp_tot(maxval(n_mat),nspin))
-      if(dc%id_frag==0) allocate(coef_wf(dc%nstate_frag,dc%nstate_tot,nspin))
+      if(dc%id_frag==0) then
+        allocate(coef_wf(dc%nstate_frag,dc%nstate_tot,nspin))
+        coef_wf = 0d0
+      end if
+      if(any(n_mat < dc%nstate_tot)) then
+        stop "DC-LCFO: nstate_tot exceeds the Hamiltonian matrix dimension."
+      end if
+      select case(trim(lcfo_eigensolver))
+      case('lapack')
+        call diag_lapack
+      case('eigenexa')
 #ifdef USE_EIGENEXA
-      call diag_eigenexa
+        call diag_eigenexa
 #else
-      call diag_lapack
+        stop "DC-LCFO: EigenExa support is not enabled."
 #endif
+      case('chefsi')
+#ifdef USE_SCALAPACK
+        call diag_chefsi_driver
+#else
+        stop "DC-LCFO: ScaLAPACK support is not enabled."
+#endif
+      case default
+        stop "DC-LCFO: invalid lcfo_eigensolver."
+      end select
       if(dc%id_tot==0) write(*,*) "diagonalization: done"
 !      call test_write_psi
     end if
@@ -320,6 +339,7 @@ contains
       
     ! diagonal block < lambda_{ifrag,io} | H | lambda_{ifrag,jo} >
       allocate(mat_H_local(dc%nstate_frag,dc%nstate_frag,nspin))
+      mat_H_local = 0d0
       l = dc%nxyz_domain
       do ispin=1,nspin
       do io=1,n_basis(dc%i_frag,ispin)
@@ -429,7 +449,45 @@ contains
       end do ! ispin
       
     end subroutine diag_lapack
-    
+
+#ifdef USE_SCALAPACK
+    subroutine diag_chefsi_driver
+      use lcfo_diag_chefsi, only: diag_chefsi
+      use salmon_global, only: lcfo_diag_chefsi_filter_degree, &
+      & lcfo_diag_chefsi_filter_chunk_size,lcfo_diag_chefsi_max_cycle, &
+      & lcfo_diag_chefsi_residual_tolerance
+      implicit none
+      integer :: h,frag
+      integer, allocatable :: halo_src(:),halo_dst(:)
+      integer, allocatable :: halo_root_src(:),halo_dvec(:,:)
+      real(8), allocatable :: h_halo(:,:,:,:)
+
+      allocate(halo_src(n_halo),halo_dst(n_halo))
+      allocate(halo_root_src(n_halo),halo_dvec(3,n_halo))
+      allocate(h_halo(dc%nstate_frag,dc%nstate_frag,nspin,n_halo))
+      h_halo = 0d0
+      do h=1,n_halo
+        halo_src(h) = halo(h)%ifrag_src
+        halo_root_src(h) = halo(h)%id_src
+        halo_dvec(:,h) = halo(h)%dvec
+        halo_dst(h) = 0
+        do frag=1,dc%n_frag
+          if(id_array(frag)==halo(h)%id_dst) halo_dst(h) = frag
+        end do
+        if(halo_dst(h)==0) stop "DC-LCFO CheFSI: destination fragment not found."
+        if(dc%id_frag==0) h_halo(:,:,:,h) = halo(h)%mat_H_local
+      end do
+
+      call diag_chefsi(dc,nspin,lcfo_diag_chefsi_filter_degree, &
+      & lcfo_diag_chefsi_filter_chunk_size,lcfo_diag_chefsi_max_cycle, &
+      & lcfo_diag_chefsi_residual_tolerance,n_basis,n_mat,n_halo,halo_src, &
+      & halo_dst,halo_root_src,halo_dvec,mat_H_local,h_halo, &
+      & esp_tot,coef_wf)
+
+      deallocate(h_halo,halo_dvec,halo_root_src,halo_dst,halo_src)
+    end subroutine diag_chefsi_driver
+#endif
+
 #ifdef USE_EIGENEXA
     subroutine diag_eigenexa
       use communication, only: comm_bcast
@@ -531,7 +589,7 @@ contains
       deallocate(h,v_tmp1,v_tmp2)
     end subroutine diag_eigenexa
 #endif
-    
+
     subroutine output
       use salmon_global, only: base_directory, sysname, unit_energy
       use filesystem, only: get_filehandle

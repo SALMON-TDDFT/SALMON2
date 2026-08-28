@@ -708,6 +708,12 @@ uVpsibox = dev_uVpsibox
 !$acc end kernels
 #endif
 #else
+#ifdef USE_OPENACC
+!$acc kernels
+uVpsibox2 = dev_uVpsibox2
+uVpsibox = dev_uVpsibox
+!$acc end kernels
+#endif
   call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
 #endif
   call timer_end(LOG_UHPSI_PSEUDO_COMM)

@@ -1,0 +1,95 @@
+&calculation
+  theory='dft'
+  yn_dc='y'
+/
+&dc
+  num_fragment=2,2,1
+  nproc_rgrid_tot=2,2,1
+  nstate_frag=40
+  num_rgrid_buffer=1,1,1
+  lambda_cut=1d-7
+  energy_cut=100d0
+  lcfo_eigensolver='chefsi'
+  lcfo_diag_chefsi_filter_degree=60
+  lcfo_diag_chefsi_filter_chunk_size=17
+  lcfo_diag_chefsi_max_cycle=200
+  lcfo_diag_chefsi_residual_tolerance=1d-7
+/
+&parallel
+  nproc_k=1
+  nproc_ob=1
+  nproc_rgrid=1,1,1
+/
+&control
+  sysname='Si'
+  write_gs_restart_data='no'
+/
+&units
+  unit_system='a.u.'
+/
+&system
+  yn_periodic='y'
+  al=20.52d0,20.52d0,10.26d0
+  nstate=66
+  nelec=128
+  nelem=1
+  natom=32
+  temperature_k=300d0
+/
+&pseudo
+  izatom(1)=14
+  file_pseudo(1)='./Si_rps.dat'
+  lmax_ps(1)=2
+  lloc_ps(1)=2
+/
+&functional
+  xc='PZ'
+/
+&rgrid
+  num_rgrid=24,24,12
+/
+&kgrid
+  num_kgrid=1,1,1
+/
+&scf
+  yn_preconditioning='y'
+  method_mixing='simple'
+  mixrate=0.1d0
+  ncg=4
+  nscf=1
+  threshold=1d0
+/
+&atomic_coor
+  'Si' 0.01026 0.01026 0.01026 1
+  'Si' 0.01026 5.14026 5.14026 1
+  'Si' 5.14026 0.01026 5.14026 1
+  'Si' 5.14026 5.14026 0.01026 1
+  'Si' 2.57526 2.57526 2.57526 1
+  'Si' 2.57526 7.70526 7.70526 1
+  'Si' 7.70526 2.57526 7.70526 1
+  'Si' 7.70526 7.70526 2.57526 1
+  'Si' 0.01026 10.27026 0.01026 1
+  'Si' 0.01026 15.40026 5.14026 1
+  'Si' 5.14026 10.27026 5.14026 1
+  'Si' 5.14026 15.40026 0.01026 1
+  'Si' 2.57526 12.83526 2.57526 1
+  'Si' 2.57526 17.96526 7.70526 1
+  'Si' 7.70526 12.83526 7.70526 1
+  'Si' 7.70526 17.96526 2.57526 1
+  'Si' 10.27026 0.01026 0.01026 1
+  'Si' 10.27026 5.14026 5.14026 1
+  'Si' 15.40026 0.01026 5.14026 1
+  'Si' 15.40026 5.14026 0.01026 1
+  'Si' 12.83526 2.57526 2.57526 1
+  'Si' 12.83526 7.70526 7.70526 1
+  'Si' 17.96526 2.57526 7.70526 1
+  'Si' 17.96526 7.70526 2.57526 1
+  'Si' 10.27026 10.27026 0.01026 1
+  'Si' 10.27026 15.40026 5.14026 1
+  'Si' 15.40026 10.27026 5.14026 1
+  'Si' 15.40026 15.40026 0.01026 1
+  'Si' 12.83526 12.83526 2.57526 1
+  'Si' 12.83526 17.96526 7.70526 1
+  'Si' 17.96526 12.83526 7.70526 1
+  'Si' 17.96526 17.96526 2.57526 1
+/
