@@ -19,7 +19,7 @@ module scf_iteration_sub
 
 contains
 
-subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,srg,cg,ppg,vlocal,  &
+subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vlocal,  &
             &   miter,nscf_init_no_diagonal)
   use salmon_global, only: yn_subspace_diagonalization,ncg,ncg_init
   use structures
@@ -32,7 +32,7 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,srg,cg,ppg,vlocal,  
   type(s_dft_system),     intent(in)    :: system
   type(s_parallel_info),  intent(in)    :: info
   type(s_stencil),        intent(in)    :: stencil
-  type(s_orbital),        intent(inout) :: spsi,shpsi
+  type(s_orbital),        intent(inout) :: spsi,shpsi,sttpsi
   type(s_sendrecv_grid),  intent(inout) :: srg
   type(s_pp_grid),        intent(in)    :: ppg
   type(s_cg),             intent(inout) :: cg
@@ -47,19 +47,7 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,srg,cg,ppg,vlocal,  
   else
     nncg = ncg
   end if
-
-! solve Kohn-Sham equation by minimization techniques
-  call timer_begin(LOG_CALC_MINIMIZATION)
-  if(system%if_real_orbital) then
-    call gscg_rwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
-  else
-    call gscg_zwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
-  end if
-  call timer_end(LOG_CALC_MINIMIZATION)
-
-! Gram Schmidt orghonormalization
-  call gram_schmidt(system, mg, info, spsi)
-
+  
 ! subspace diagonalization
   call timer_begin(LOG_CALC_SUBSPACE_DIAG)
   if(yn_subspace_diagonalization == 'y')then
@@ -69,12 +57,24 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,srg,cg,ppg,vlocal,  
   end if
   call timer_end(LOG_CALC_SUBSPACE_DIAG)
 
+! conjugate gradient method
+  call timer_begin(LOG_CALC_MINIMIZATION)
+  if(system%if_real_orbital) then
+    call gscg_rwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,shpsi,sttpsi,cg)
+  else
+    call gscg_zwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,shpsi,sttpsi,cg)
+  end if
+  call timer_end(LOG_CALC_MINIMIZATION)
+
+! Gram Schmidt orghonormalization
+  call gram_schmidt(system, mg, info, spsi)
+
 end subroutine solve_orbitals
 
 subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn,iter, &
                spsi,srg,srg_scalar,poisson,fg,rho,rho_s,rho_jm,Vpsl,Vh,Vxc,vlocal,mixing,energy )
   use structures
-  use salmon_global, only: method_mixing,yn_jm,yn_spinorbit
+  use salmon_global, only: method_mixing,yn_jm,yn_spinorbit,yn_dc
   use timer
   use mixing_sub
   use hartree_sub, only: hartree
@@ -128,17 +128,20 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
   call timer_begin(LOG_CALC_HARTREE)
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   call timer_end(LOG_CALC_HARTREE)
+  
+  if(yn_dc=='n') then
 
     call timer_begin(LOG_CALC_EXC_COR)
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi,stencil,Vxc,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
 
-
-  if(method_mixing=='simple_potential')then
-    call simple_mixing_potential(mg,system,1.d0-mixing%mixrate,mixing%mixrate,Vh,Vxc,mixing)
+    if(method_mixing=='simple_potential')then
+      call simple_mixing_potential(mg,system,1.d0-mixing%mixrate,mixing%mixrate,Vh,Vxc,mixing)
+    end if
+    
+    call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,Vlocal)
+    
   end if
-  
-  call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,Vlocal)
   
 end subroutine update_density_and_potential
 

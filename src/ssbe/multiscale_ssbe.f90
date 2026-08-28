@@ -25,7 +25,7 @@ subroutine main_multiscale_ssbe(icomm)
     real(8), allocatable :: Ac_ext_t(:, :)
     integer :: it, i
     integer :: nproc, irank, icomm_macro, nproc_macro, irank_macro
-    real(8), allocatable :: Ac_macro(:, :), E_macro(:, :)
+    real(8), allocatable :: Ac_macro(:, :), Ac_macro_old(:, :), E_macro(:, :)
     real(8), allocatable :: Jmat_macro_tmp(:, :), Jmat_macro(:, :)
     integer, allocatable :: itbl_macro_coord(:, :)
     integer, allocatable :: itbl_macro_itype_sbe(:)
@@ -33,6 +33,7 @@ subroutine main_multiscale_ssbe(icomm)
     integer :: imacro_min, imacro_max
     integer :: ix, iy, iz, mt, imacro, iobs, ii, jj
     real(8) :: jmat(3)
+    real(8) :: bj_am(8,8)
 
     type(s_fdtd_system) :: fs
     type(ls_fdtd_weyl) :: fw
@@ -82,7 +83,7 @@ subroutine main_multiscale_ssbe(icomm)
     ! Prepare external pulse
     mt = max(nt, int(abs(nxvac_m(1)) * fs%hgs(1) / cspeed_au / dt))
     allocate(Ac_ext_t(1:3, -1:mt+1))
-    call calc_Ac_ext_t(0.0d0, dt, 0, mt, Ac_ext_t)
+    call calc_Ac_ext_t(0.0d0, dt, -1, mt+1, Ac_ext_t)
     call set_incident_field(mt, Ac_ext_t, fs, fw)
 
     ! Macropoint and media setup
@@ -111,6 +112,7 @@ subroutine main_multiscale_ssbe(icomm)
         icomm_macro = comm_create_group(icomm, imacro_min, 0)
         call comm_get_groupinfo(icomm_macro, irank_macro, nproc_macro)
         allocate(Ac_macro(1:3, nmacro))
+        allocate(Ac_macro_old(1:3, nmacro))
         allocate(E_macro(1:3, nmacro))
         allocate(Jmat_macro_tmp(1:3, nmacro))
         allocate(Jmat_macro(1:3, nmacro))
@@ -121,7 +123,14 @@ subroutine main_multiscale_ssbe(icomm)
             call init_sbe_bloch_solver(sbe(i), gs(itbl_macro_itype_sbe(i)), &
                                        nstate_sbe(itbl_macro_itype_sbe(i)), icomm_macro)
             sbe(i)%flag_vnl_correction = (yn_vnl_correction == 'y')
+            if (trim(gauge_sbe) == "length_gauge") then
+                ! Prepare qnm
+                call prepare_qnm(sbe(i), gs(itbl_macro_itype_sbe(i)), icomm)
+            end if
         end do
+    end if
+    if (trim(gauge_sbe) == "length_gauge") then
+        call adams_moulton_coefs(bj_am)
     end if
 
     call comm_sync_all(icomm)
@@ -188,16 +197,30 @@ subroutine main_multiscale_ssbe(icomm)
                     iy = itbl_macro_coord(2, imacro)
                     iz = itbl_macro_coord(3, imacro)
                     Ac_macro(1:3, imacro) = fw%vec_Ac_new%v(1:3, ix, iy, iz)
+                    Ac_macro_old(1:3, imacro) = fw%vec_Ac%v(1:3, ix, iy, iz)
                     E_macro(1:3, imacro) = fw%vec_E%v(1:3, ix, iy, iz)
                 end do
             end if
             call comm_bcast(Ac_macro, icomm, 0)
+            call comm_bcast(Ac_macro_old, icomm, 0)
             call comm_bcast(E_macro, icomm, 0)
 
             Jmat_macro_tmp = 0.0d0
             do imacro = imacro_min, imacro_max
-                call dt_evolve_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), Ac_macro(1:3, imacro), dt)
-                call calc_current_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), Ac_macro(1:3, imacro), jmat, icomm_macro)
+                if (trim(gauge_sbe) == "velocity_gauge") then
+                    ! At loop entry, vec_Ac and vec_Ac_new hold the two
+                    ! endpoints of the current material-propagation interval.
+                    call dt_evolve_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), &
+                                         0.5d0 * (Ac_macro_old(1:3, imacro) &
+                                                + Ac_macro(1:3, imacro)), dt)
+                    call calc_current_bloch(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), &
+                                            Ac_macro(1:3, imacro), jmat, icomm_macro)
+                else ! trim(gauge_sbe) == "length_gauge"
+                    call dt_evolve_bloch_lg(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), &
+                                            E_macro(1:3, imacro), bj_am, dt, icomm_macro)
+                    call calc_current_bloch_lg(sbe(imacro), gs(itbl_macro_itype_sbe(imacro)), &
+                                               jmat, icomm_macro)
+                end if
                 if (irank_macro == 0) then
                     Jmat_macro_tmp(1:3, imacro) = jmat(1:3)
                 end if

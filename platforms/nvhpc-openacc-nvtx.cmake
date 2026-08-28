@@ -1,12 +1,9 @@
 set(CMAKE_Fortran_COMPILER      "mpif90")
 set(CMAKE_C_COMPILER            "mpicc")
 set(OPENMP_FLAGS                "-Mnoopenmp")
-
 set(General_Fortran_FLAGS       "-Wall -fstrict-aliasing")
 set(General_C_FLAGS             "-Wall -alias=ansi")
-
-set(OpenACC_FLAGS               "-acc=strict -gpu=cc70,cc80,managed,ptxinfo -Minfo=accel -DUSE_OPENACC -DUSE_NVTX -L/usr/local/cuda-11.4/lib64 -lnvToolsExt")
-
+set(OpenACC_FLAGS               "-acc=strict -gpu=cc80,cc90,cc100,cc120,managed,ptxinfo -cudalib=nvtx3,cublas,cusolver -cuda -Minfo=accel -DUSE_OPENACC -DUSE_NVTX")
 set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g -traceback ${General_Fortran_FLAGS} ${OpenACC_FLAGS}")
 set(CMAKE_C_FLAGS_DEBUG         "-O2 -g -traceback ${General_C_FLAGS} ${OpenACC_FLAGS}")
 set(CMAKE_Fortran_FLAGS_RELEASE "-O3 ${General_Fortran_FLAGS} ${OpenACC_FLAGS}")

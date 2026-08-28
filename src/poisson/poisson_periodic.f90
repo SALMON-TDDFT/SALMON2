@@ -24,7 +24,7 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
   use structures
   use communication, only: comm_summation
   use math_constants, only : pi
-  use nvtx
+  use nvtx_wrapper
   implicit none
   type(s_rgrid)          ,intent(in) :: lg
   type(s_rgrid)          ,intent(in) :: mg

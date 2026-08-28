@@ -70,14 +70,14 @@ contains
 
 
 ! wrapper for calc_xc
-  subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc)
+  subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc, eexc)
     use communication, only: comm_summation
     use structures
     use sendrecv_grid, only: update_overlap_real8
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
     use salmon_global, only: yn_spinorbit
     use noncollinear_module, only: rot_vxc_noncollinear
-    use nvtx
+    use nvtx_wrapper
     implicit none
     type(s_dft_system)      ,intent(in) :: system
     type(s_xc_functional)   ,intent(in) :: xc_func
@@ -91,6 +91,7 @@ contains
     type(s_stencil)         ,intent(in) :: stencil
     type(s_scalar)                      :: Vxc(system%nspin)
     real(8)                             :: E_xc
+    type(s_scalar)          ,optional   :: eexc
     !
     integer :: ix,iy,iz,is,nspin,idir
     real(8) :: tot_exc
@@ -437,6 +438,16 @@ contains
     tot_exc = tot_exc*system%hvol
 
     call comm_summation(tot_exc,E_xc,info%icomm_r)
+    
+    if(present(eexc)) then
+      do iz=1,mg%num(3)
+      do iy=1,mg%num(2)
+      do ix=1,mg%num(1)
+        eexc%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1) = eexc_tmp(ix,iy,iz)
+      end do
+      end do
+      end do    
+    end if
     
     if(yn_spinorbit=='y') then
       call rot_vxc_noncollinear( Vxc, system, mg )
@@ -867,7 +878,7 @@ contains
       & nd, ifdx, ifdy, ifdz, nabx, naby, nabz)
 !      & nd, ifdx, ifdy, ifdz, nabx, naby, nabz, Hxyz, aLxyz)
     use structures, only: s_pp_info
-    use nvtx
+    use nvtx_wrapper
     implicit none
     type(s_xc_functional), intent(in) :: xc
     type(s_pp_info),       intent(in) :: pp
@@ -1039,7 +1050,7 @@ contains
     end subroutine exec_builtin_calc_axpy
 
     subroutine exec_builtin_pz()
-      use nvtx
+      use nvtx_wrapper
       implicit none
       call nvtxStartRange('exec_builtin_pz', __LINE__)
 
@@ -1134,7 +1145,7 @@ contains
 
 
     subroutine exec_builtin_pzm()
-      use nvtx
+      use nvtx_wrapper
       implicit none
       real(8) :: rho_s_1d(nl)
       real(8) :: exc_1d(nl)
@@ -1225,7 +1236,7 @@ contains
     
 
     subroutine exec_builtin_tbmbj()
-      use nvtx
+      use nvtx_wrapper
       implicit none
       real(8) :: rho_1d(nl)
       real(8) :: rho_s_1d(nl)
@@ -1277,7 +1288,7 @@ contains
 #if XC_MAJOR_VERSION >= 5
       use, intrinsic :: iso_c_binding
 #endif
-      use nvtx
+      use nvtx_wrapper
       implicit none
       integer, intent(in) :: ii
       integer :: ix,iy,iz,idir

@@ -17,6 +17,7 @@
 #include "config.h"
 
 module nonlocal_potential
+  use nvtx_wrapper
   implicit none
 
 ! WARNING: We must not call these except for hpsi routine.
@@ -177,6 +178,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   use timer
   use iso_c_binding
   implicit none
+  intrinsic :: aimag
   integer,intent(in) :: nspin
   type(s_parallel_info),intent(in) :: info
   type(s_pp_grid),intent(in) :: ppg
@@ -188,6 +190,12 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   complex(8) :: uVpsi,wrk
   complex(8),allocatable :: uVpsibox (:,:,:,:,:)
   complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
+#ifdef USE_OPENACC
+  real(8),allocatable,save :: htpsi_zwf_r(:,:,:,:,:,:,:), htpsi_zwf_i(:,:,:,:,:,:,:)
+  integer :: i1, i2, i3, i4, i5, i6, i7
+  integer :: mps_max
+  real(8) :: wrk_r
+#endif
   complex(8) :: IMAGINARY_UNIT = (0, 1)
 #if defined(USE_OPENACC) && defined(USE_CUDA)
   integer :: n,natom
@@ -229,6 +237,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
 #endif
 
+  call nvtxStartRange('zpseudo', __LINE__)
   call timer_begin(LOG_UHPSI_PSEUDO)
 
   im_s = info%im_s
@@ -248,6 +257,97 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
 
     call timer_begin(LOG_UHPSI_PSEUDO)
 
+#ifdef USE_OPENACC
+! `acc atomic` does not support complex(8). Split it into the real and imag part.
+    if (.not. allocated(htpsi_zwf_r)) then
+      allocate( &
+        htpsi_zwf_r( &
+        lbound(htpsi%zwf,1):ubound(htpsi%zwf,1), &
+        lbound(htpsi%zwf,2):ubound(htpsi%zwf,2), &
+        lbound(htpsi%zwf,3):ubound(htpsi%zwf,3), &
+        lbound(htpsi%zwf,4):ubound(htpsi%zwf,4), &
+        lbound(htpsi%zwf,5):ubound(htpsi%zwf,5), &
+        lbound(htpsi%zwf,6):ubound(htpsi%zwf,6), &
+        lbound(htpsi%zwf,7):ubound(htpsi%zwf,7)  &
+        ) &
+        )
+    end if
+    if (.not. allocated(htpsi_zwf_i)) then
+      allocate( &
+        htpsi_zwf_i( &
+        lbound(htpsi%zwf,1):ubound(htpsi%zwf,1), &
+        lbound(htpsi%zwf,2):ubound(htpsi%zwf,2), &
+        lbound(htpsi%zwf,3):ubound(htpsi%zwf,3), &
+        lbound(htpsi%zwf,4):ubound(htpsi%zwf,4), &
+        lbound(htpsi%zwf,5):ubound(htpsi%zwf,5), &
+        lbound(htpsi%zwf,6):ubound(htpsi%zwf,6), &
+        lbound(htpsi%zwf,7):ubound(htpsi%zwf,7)  &
+        ) &
+        )
+    end if
+    mps_max = size(ppg%jxyz, 2)
+!$acc kernels
+    htpsi_zwf_i = 0d0
+    htpsi_zwf_r = 0d0
+
+!$acc loop collapse(6) independent gang vector private(im,ik,io,ispin,ilocal,ilma,ia,uVpsi,j,ix,iy,iz,wrk,uVpsi)
+    do im=im_s,im_e
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,Nspin
+      do ilocal=1,ppg%ilocal_nlma
+!OCL norecurrence
+        do j=1,mps_max
+          ilma=ppg%ilocal_nlma2ilma(ilocal)
+          ia  =ppg%ilocal_nlma2ia  (ilocal)
+          uVpsi = uVpsibox2(ispin,io,ik,im,ilma)
+          if (j <= ppg%mps(ia)) then
+            ix = ppg%jxyz(1,j,ia)
+            iy = ppg%jxyz(2,j,ia)
+            iz = ppg%jxyz(3,j,ia)
+            wrk = uVpsi * ppg%zekr_uV(j,ilma,ik)
+
+            wrk_r = real(wrk)
+            !$acc atomic update
+            htpsi_zwf_r(ix,iy,iz,ispin,io,ik,im) = htpsi_zwf_r(ix,iy,iz,ispin,io,ik,im) + wrk_r
+            !$acc end atomic
+
+            wrk_r = aimag(wrk)
+            !$acc atomic update
+            htpsi_zwf_i(ix,iy,iz,ispin,io,ik,im) = htpsi_zwf_i(ix,iy,iz,ispin,io,ik,im) + wrk_r
+            !$acc end atomic
+          end if
+        end do
+      end do
+
+    end do
+    end do
+    end do
+    end do
+!$acc loop collapse(7) independent gang vector
+    do i1 = lbound(htpsi%zwf,1), ubound(htpsi%zwf,1)
+    do i2 = lbound(htpsi%zwf,2), ubound(htpsi%zwf,2)
+    do i3 = lbound(htpsi%zwf,3), ubound(htpsi%zwf,3)
+    do i4 = lbound(htpsi%zwf,4), ubound(htpsi%zwf,4)
+    do i5 = lbound(htpsi%zwf,5), ubound(htpsi%zwf,5)
+    do i6 = lbound(htpsi%zwf,6), ubound(htpsi%zwf,6)
+    do i7 = lbound(htpsi%zwf,7), ubound(htpsi%zwf,7)
+
+      htpsi%zwf(i1,i2,i3,i4,i5,i6,i7) = htpsi%zwf(i1,i2,i3,i4,i5,i6,i7) + cmplx( &
+          htpsi_zwf_r(i1,i2,i3,i4,i5,i6,i7), &
+          htpsi_zwf_i(i1,i2,i3,i4,i5,i6,i7), &
+          kind=8 &
+      )
+
+    end do
+    end do
+    end do
+    end do
+    end do
+    end do
+    end do
+!$acc end kernels
+#else
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilocal,ilma,ia,uVpsi,j,ix,iy,iz,wrk)
     do im=im_s,im_e
@@ -265,6 +365,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
           iy = ppg%jxyz(2,j,ia)
           iz = ppg%jxyz(3,j,ia)
           wrk = uVpsi * ppg%zekr_uV(j,ilma,ik)
+
           htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + wrk
         end do
       end do
@@ -274,6 +375,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
     end do
     end do
 !$omp end parallel do
+#endif
 
     deallocate(uVpsibox,uVpsibox2)
 
@@ -302,7 +404,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
         tpsi%zwf)
 #else
 !$acc kernels present(ppg,tpsi,htpsi)
-!$acc loop collapse(5) independent gang private(ilocal,ilma,ia,uvpsi,vi,my_nlma,k,j,ix,iy,iz,wrk)
+!$acc loop collapse(5) independent gang private(ilocal,ilma,ia,uVpsi,vi,my_nlma,k,j,ix,iy,iz,wrk)
     do im=im_s,im_e
     do ik=ik_s,ik_e
     do io=io_s,io_e
@@ -324,7 +426,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
     end do
     end do
     end do
-!$acc loop collapse(5) independent private(ilocal,ilma,ia,uvpsi,vi,my_nlma,k,j,ix,iy,iz,wrk)
+!$acc loop collapse(5) independent private(ilocal,ilma,ia,uVpsi,vi,my_nlma,k,j,ix,iy,iz,wrk)
     do im=im_s,im_e
     do ik=ik_s,ik_e
     do io=io_s,io_e
@@ -390,6 +492,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
 
   end if
 
+  call nvtxEndRange()
   call timer_end(LOG_UHPSI_PSEUDO)
 
   return
@@ -480,6 +583,10 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   type(s_orbital),intent(in) :: tpsi
   complex(8)    ,allocatable :: uVpsibox (:,:,:,:,:)
   complex(8)    ,allocatable :: uVpsibox2(:,:,:,:,:)
+#ifdef USE_OPENACC
+  complex(8)    ,allocatable, save, device :: dev_uVpsibox (:,:,:,:,:)
+  complex(8)    ,allocatable, save, device :: dev_uVpsibox2(:,:,:,:,:)
+#endif
   integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
   integer :: ilma,ia,j,ix,iy,iz,Nlma,ilocal
   complex(8) :: uVpsi
@@ -487,6 +594,7 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   integer :: ireqs(natom),nreq,ierr,is,ie,ns
 #endif
 
+  call nvtxStartRange('calc_uVpsi_rdivided', __LINE__)
   call timer_begin(LOG_UHPSI_PSEUDO)
 
   im_s = info%im_s
@@ -502,14 +610,33 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   allocate(uVpsibox (Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
   allocate(uVpsibox2(Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
 
+#ifdef USE_OPENACC
+  if (.not. allocated(dev_uVpsibox)) then
+    allocate(dev_uVpsibox (Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
+  end if
+
+  if (.not. allocated(dev_uVpsibox2)) then
+    allocate(dev_uVpsibox2(Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
+  end if
+
+!$acc kernels
+  dev_uVpsibox = 0d0
+  dev_uVpsibox2 = 0d0
+!$acc end kernels
+#else
 #ifdef FORTRAN_COMPILER_HAS_MPI_VERSION3
   uVpsibox2 = 0d0
 #else
   uVpsibox  = 0d0
 #endif
+#endif
 
+#ifdef USE_OPENACC
+!$acc kernels
+#else
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilocal,ilma,ia,uVpsi,j,ix,iy,iz)
+#endif
   do im=im_s,im_e
   do ik=ik_s,ik_e
   do io=io_s,io_e
@@ -526,14 +653,22 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
         uVpsi = uVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
       end do
       uVpsi = uVpsi * ppg%rinv_uvu(ilma)
+#ifdef USE_OPENACC
+      dev_uVpsibox(ispin,io,ik,im,ilma) = uVpsi
+#else
       uVpsibox(ispin,io,ik,im,ilma) = uVpsi
+#endif
     end do
 
   end do
   end do
   end do
   end do
+#ifdef USE_OPENACC
+!$acc end kernels
+#else
 !$omp end parallel do
+#endif
 
   call timer_end(LOG_UHPSI_PSEUDO)
 
@@ -548,10 +683,17 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
 
     if (ppg%ireferred_atom(ia)) then
       nreq = nreq + 1
-      call MPI_Iallreduce( uvpsibox (1,io_s,ik_s,im_s,is) &
-                         , uvpsibox2(1,io_s,ik_s,im_s,is) &
+#ifdef USE_OPENACC
+      call MPI_Iallreduce( dev_uVpsibox (1,io_s,ik_s,im_s,is) &
+                         , dev_uVpsibox2(1,io_s,ik_s,im_s,is) &
                          , ns*norb, MPI_DOUBLE_COMPLEX, MPI_SUM, ppg%icomm_atom(ia) &
                          , ireqs(nreq), ierr )
+#else
+      call MPI_Iallreduce( uVpsibox (1,io_s,ik_s,im_s,is) &
+                         , uVpsibox2(1,io_s,ik_s,im_s,is) &
+                         , ns*norb, MPI_DOUBLE_COMPLEX, MPI_SUM, ppg%icomm_atom(ia) &
+                         , ireqs(nreq), ierr )
+#endif
       call comm_show_error(ierr)
     !else
       ! uvpsibox2(:,:,:,:,ppg%irange_ia(1:2,ia)) does not use in this process...
@@ -559,11 +701,24 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
     end if
   end do
   call comm_wait_all(ireqs(1:nreq))
+#ifdef USE_OPENACC
+!$acc kernels
+uVpsibox2 = dev_uVpsibox2
+uVpsibox = dev_uVpsibox
+!$acc end kernels
+#endif
 #else
+#ifdef USE_OPENACC
+!$acc kernels
+uVpsibox2 = dev_uVpsibox2
+uVpsibox = dev_uVpsibox
+!$acc end kernels
+#endif
   call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
 #endif
   call timer_end(LOG_UHPSI_PSEUDO_COMM)
 
+  call nvtxEndRange()
   return
 end subroutine calc_uVpsi_rdivided
 

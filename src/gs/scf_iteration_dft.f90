@@ -106,7 +106,7 @@ if(nscf_init_mix_zero.gt.1)then
    DFT_NoMix_Iteration : do iter=1,nscf_init_mix_zero
 
       if(yn_jm=='n') rion_update = check_rion_update() .or. (iter == 1)
-      call solve_orbitals(mg,system,info,stencil,spsi,shpsi,srg,cg,ppg,v_local,iter,nscf_init_no_diagonal)
+      call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local,iter,nscf_init_no_diagonal)
       call timer_begin(LOG_CALC_TOTAL_ENERGY)
       call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
       select case(iperiodic)
@@ -173,7 +173,7 @@ DFT_Iteration : do iter=Miter+1,nscf
          call ne2mu(energy,system,ilevel_print)
       end if
    end if
-   call solve_orbitals(mg,system,info,stencil,spsi,shpsi,srg,cg,ppg,v_local,miter,nscf_init_no_diagonal)
+   call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local,miter,nscf_init_no_diagonal)
    if(calc_mode/='DFT_BAND' .and. yn_dc=='n') then
      call copy_density(Miter,system%nspin,mg,rho_s,mixing)
      call timer_begin(LOG_CALC_RHO)
@@ -202,8 +202,9 @@ DFT_Iteration : do iter=Miter+1,nscf
      & rho_jm, & ! dummy
      & dc%Vpsl_tot,dc%Vh_tot,dc%Vxc_tot,dc%vloc_tot, &
      mixing,energy)
-     ! dc%vloc_tot (total system) --> v_local (fragment)
-     call calc_vlocal_fragment_dcdft(system%nspin,mg,v_local,dc)
+     ! v_local (fragment) = vh (total) + vpsl (total) + vxc (fragment) + v_boundary (fragment)
+     call calc_vlocal_fragment_dcdft(system,mg,info,stencil,xc_func,srg_scalar,srg,rho_s, &
+  & pp,ppn,spsi,Vxc,energy,dc,v_local)
    end if
    call timer_begin(LOG_CALC_TOTAL_ENERGY)
    if( PLUS_U_ON )then
@@ -299,10 +300,10 @@ DFT_Iteration : do iter=Miter+1,nscf
 
       select case(convergence)
       case('rho_dne' )     ; write(*,200) Miter, sum1
-      case('norm_rho')     ; write(*,201) Miter, sum1/au_length_aa**6
-      case('norm_rho_dng') ; write(*,202) Miter, sum1/au_length_aa**6
-      case('norm_pot')     ; write(*,203) Miter, sum1*(au_energy_ev)**2/au_length_aa**6
-      case('norm_pot_dng') ; write(*,204) Miter, sum1*(au_energy_ev)**2/au_length_aa**6
+      case('norm_rho')     ; write(*,201) Miter, sum1
+      case('norm_rho_dng') ; write(*,202) Miter, sum1
+      case('norm_pot')     ; write(*,203) Miter, sum1
+      case('norm_pot_dng') ; write(*,204) Miter, sum1
       end select
 200   format(1x,"iter and int_x|rho_i(x)-rho_i-1(x)|dx/nelec        = ",i6,e15.8)
 201   format(1x,"iter and ||rho_i(ix)-rho_i-1(ix)||**2              = ",i6,e15.8)

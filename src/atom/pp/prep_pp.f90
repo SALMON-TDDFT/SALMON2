@@ -28,7 +28,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   use prep_pp_so_sub, only: calc_uv_so
   use prep_pp_plusU_sub, only: calc_uv_plusU, PLUS_U_ON
   use timer
-  use nvtx
+  use nvtx_wrapper
   implicit none
   type(s_rgrid)           ,intent(in) :: lg,mg
   type(s_dft_system)      ,intent(in) :: system
@@ -475,7 +475,8 @@ contains
            if(pp%radnl(ir,ik).gt.r) exit
          enddo
          intr=ir-1
-         if(intr.lt.0.or.intr.ge.pp%nrps(ik)) stop 'bad intr at prep_ps'
+         if( intr <= 0 .or. pp%nrps(ik) <= intr ) stop &
+         & 'Invalid r-grid sampling: The atomic positions should be shifted slightly by parallel translation.'
          xx = r - pp%radnl(intr,ik)
 
          l0=0

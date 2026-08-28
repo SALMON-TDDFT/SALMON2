@@ -18,7 +18,7 @@
 
 SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func,srg,srg_scalar, &
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,fg,energy, &
-&   ewald,md,ofl,poisson,singlescale)
+&   ewald,md,ofl,poisson,singlescale,unfold)
   use structures
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use density_matrix, only: calc_density, calc_current, calc_microscopic_current
@@ -41,7 +41,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   use em_field, only: calcVbox, calc_emfields
   use dip, only: subdip
   use gram_schmidt_orth, only: gram_schmidt
-  use nvtx
+  use dm_unfold_sub, only: dm_unfold
+  use nvtx_wrapper
   implicit none
   integer,intent(in)       :: itt
   integer,intent(in)       :: itotNtime
@@ -69,6 +70,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   type(s_ewald_ion_ion) :: ewald
   type(s_md) :: md
   type(s_ofile) :: ofl
+  type(s_unfold) :: unfold
 
   integer :: ix,iy,iz,iatom,is,nspin,Mit
   integer :: idensity, idiffDensity, ielf
@@ -247,6 +249,10 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call projection(itt,ofl,dt,mg,system,info,stencil,V_local,ppg,spsi_out,energy,rt)
   end if
   call timer_end(LOG_CALC_PROJECTION)
+
+  if(dm_unfold_option == 'super' .and. (itt==1.or.itt==itotNtime.or.mod(itt,out_dm_unfold_step)==0)) then
+    call dm_unfold(itt,system,info,lg,ofl,spsi_out,unfold)
+  end if
 
   if(itt==1.or.itt==itotNtime.or.mod(itt,out_rt_energy_step)==0)then
     call timer_begin(LOG_CALC_EIGEN_ENERGY)
@@ -517,7 +523,7 @@ END SUBROUTINE time_evolution_step
 subroutine calc_current_ion(lg,system,pp,curr_i)
   use structures
   use salmon_global, only: natom,Kion
-  use nvtx
+  use nvtx_wrapper
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_dft_system) :: system

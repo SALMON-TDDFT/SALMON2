@@ -2,7 +2,7 @@ module sym_rho_sub
 
   use sym_sub, only: SymMatA, SymMatB, use_symmetry
   use communication
-  use nvtx
+  use nvtx_wrapper
   
   implicit none
 

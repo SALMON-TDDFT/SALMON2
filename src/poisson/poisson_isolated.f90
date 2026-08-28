@@ -65,14 +65,28 @@ subroutine poisson_isolated_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,ste
                 mg%is_array(3):mg%ie_array(3))
 
   integer :: tid
+#ifdef USE_OPENACC
+  real(8) :: reduce_work_scalar
+#endif
   real(8),allocatable :: reduce_work(:)
+
   allocate(reduce_work(0:get_nthreads()-1))
 
   call poisson_boundary(lg,mg,info,system,poisson,trho,pk)
 
 !------------------------- C-G minimization
 
+#ifdef USE_OPENACC
+!$acc data &
+!$acc copyin(mg, mg%is_array(:), mg%ie_array(:)) &
+!$acc copyout(zk(:,:,:))
+
+!$acc parallel default(none) &
+!$acc present(mg, mg%is_array, mg%ie_array, zk)
+!$acc loop gang vector collapse(3)
+#else
 !$omp parallel do private(iz,iy,ix) collapse(2)
+#endif
   do iz=mg%is_array(3),mg%ie_array(3)
   do iy=mg%is_array(2),mg%ie_array(2)
   do ix=mg%is_array(1),mg%ie_array(1)
@@ -80,8 +94,22 @@ subroutine poisson_isolated_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,ste
   end do
   end do
   end do
+#ifdef USE_OPENACC
+!$acc end parallel
+!$acc end data
+#endif
 
+#ifdef USE_OPENACC
+!$acc data &
+!$acc copyin(mg, mg%is(:), mg%ie(:), tVh(:,:,:), trho(:,:,:)) &
+!$acc copyout(pk(:,:,:), zk(:,:,:))
+
+!$acc parallel default(none) &
+!$acc present(mg, mg%is, mg%ie, tVh, trho, pk, zk)
+!$acc loop gang vector collapse(3)
+#else
 !$omp parallel do private(iz,iy,ix) collapse(2)
+#endif
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
@@ -90,10 +118,25 @@ subroutine poisson_isolated_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,ste
   end do
   end do
   end do
+#ifdef USE_OPENACC
+!$acc end parallel
+!$acc end data
+#endif
+
   if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, pk)
   call laplacian_poisson(mg,pk,rlap_wk,stencil%coef_lap0,stencil%coef_lap)
 
+#ifdef USE_OPENACC
+!$acc data &
+!$acc copyin(mg, mg%is_array(:), mg%ie_array(:)) &
+!$acc copyout(pk(:,:,:))
+
+!$acc parallel default(none) &
+!$acc present(mg, mg%is_array, mg%ie_array, pk)
+!$acc loop gang vector collapse(3)
+#else
 !$omp parallel do private(iz,iy,ix) collapse(2)
+#endif
   do iz=mg%is_array(3),mg%ie_array(3)
   do iy=mg%is_array(2),mg%ie_array(2)
   do ix=mg%is_array(1),mg%ie_array(1)
@@ -101,8 +144,23 @@ subroutine poisson_isolated_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,ste
   end do
   end do
   end do
+#ifdef USE_OPENACC
+!$acc end parallel
+!$acc end data
+#endif
 
+#ifdef USE_OPENACC
+!$acc data &
+!$acc copyin(mg, mg%is(:), mg%ie(:), rlap_wk(:,:,:)) &
+!$acc copyout(pk(:,:,:)) &
+!$acc copy(zk(:,:,:))
+
+!$acc parallel default(none) &
+!$acc present(mg, mg%is, mg%ie, rlap_wk, pk, zk)
+!$acc loop gang vector collapse(3)
+#else
 !$omp parallel do private(iz,iy,ix) collapse(2)
+#endif
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
@@ -111,7 +169,30 @@ subroutine poisson_isolated_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,ste
   end do
   end do
   end do
+#ifdef USE_OPENACC
+!$acc end parallel
+!$acc end data
+#endif
 
+#ifdef USE_OPENACC
+  reduce_work_scalar=0d0
+!$acc data &
+!$acc copyin(mg, mg%is(:), mg%ie(:), zk(:,:,:), system)
+
+!$acc parallel default(none) &
+!$acc present(mg, mg%is, mg%ie, zk, system, system%hvol)
+!$acc loop gang vector collapse(3) reduction(+:reduce_work_scalar)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    reduce_work_scalar=reduce_work_scalar+zk(ix,iy,iz)**2*system%hvol
+  end do
+  end do
+  end do
+!$acc end parallel
+!$acc end data
+  sum1=reduce_work_scalar
+#else
   reduce_work=0d0
 !$omp parallel private(iz,iy,ix,tid)
   tid=get_thread_id()
@@ -126,6 +207,7 @@ subroutine poisson_isolated_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,ste
 !$omp end do
 !$omp end parallel
   sum1=sum(reduce_work)
+#endif
 
   if(info%isize_r==1)then
   else
@@ -138,6 +220,25 @@ subroutine poisson_isolated_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,ste
     if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, pk)
     call laplacian_poisson(mg,pk,rlap_wk,stencil%coef_lap0,stencil%coef_lap)
 
+#ifdef USE_OPENACC
+    reduce_work_scalar=0d0
+!$acc data &
+!$acc copyin(mg, mg%is(:), mg%ie(:), zk(:,:,:), rlap_wk(:,:,:))
+
+!$acc parallel default(none) &
+!$acc present(mg, mg%is, mg%ie, zk, rlap_wk)
+!$acc loop gang vector collapse(3) reduction(+:reduce_work_scalar)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      reduce_work_scalar=reduce_work_scalar+(zk(ix,iy,iz)*rlap_wk(ix,iy,iz))
+    end do
+    end do
+    end do
+!$acc end parallel
+!$acc end data
+    totbox=reduce_work_scalar
+#else
     reduce_work=0d0
 !$omp parallel private(iz,iy,ix,tid)
     tid=get_thread_id()
@@ -152,6 +253,7 @@ subroutine poisson_isolated_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,ste
 !$omp end do
 !$omp end parallel
     totbox=sum(reduce_work)
+#endif
 
     if(info%isize_r==1)then
       tottmp=totbox
@@ -161,7 +263,17 @@ subroutine poisson_isolated_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,ste
 
     ak=sum1/tottmp/system%hvol
 
+#ifdef USE_OPENACC
+!$acc data &
+!$acc copyin(mg, mg%is(:), mg%ie(:), pk(:,:,:), rlap_wk(:,:,:)) &
+!$acc copy(tVh(:,:,:), zk(:,:,:))
+
+!$acc parallel default(none) &
+!$acc present(mg, mg%is, mg%ie, pk, rlap_wk, tVh, zk)
+!$acc loop gang vector collapse(3)
+#else
 !$omp parallel do private(iz,iy,ix) firstprivate(ak) collapse(2)
+#endif
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -170,7 +282,30 @@ subroutine poisson_isolated_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,ste
     end do
     end do
     end do
+#ifdef USE_OPENACC
+!$acc end parallel
+!$acc end data
+#endif
 
+#ifdef USE_OPENACC
+    reduce_work_scalar=0d0
+!$acc data &
+!$acc copyin(mg, mg%is(:), mg%ie(:), zk(:,:,:))
+
+!$acc parallel default(none) &
+!$acc present(mg, mg%is, mg%ie, zk)
+!$acc loop gang vector collapse(3) reduction(+:reduce_work_scalar)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      reduce_work_scalar=reduce_work_scalar+zk(ix,iy,iz)**2
+    end do
+    end do
+    end do
+!$acc end parallel
+!$acc end data
+    totbox=reduce_work_scalar
+#else
     reduce_work=0d0
 !$omp parallel private(iz,iy,ix,tid)
     tid=get_thread_id()
@@ -185,6 +320,7 @@ subroutine poisson_isolated_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,ste
 !$omp end do
 !$omp end parallel
     totbox=sum(reduce_work)
+#endif
 
     if(info%isize_r==1)then
       tottmp=totbox
@@ -198,7 +334,17 @@ subroutine poisson_isolated_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,ste
 
     ck=sum2/sum1 ; sum1=sum2
 
+#ifdef USE_OPENACC
+!$acc data &
+!$acc copyin(mg, mg%is(:), mg%ie(:), zk(:,:,:)) &
+!$acc copy(pk(:,:,:))
+
+!$acc parallel default(none) &
+!$acc present(mg, mg%is, mg%ie, zk, pk)
+!$acc loop gang vector collapse(3)
+#else
 !$omp parallel do private(iz,iy,ix) firstprivate(ck) collapse(2)
+#endif
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -206,6 +352,10 @@ subroutine poisson_isolated_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,ste
     end do
     end do
     end do
+#ifdef USE_OPENACC
+!$acc end parallel
+!$acc end data
+#endif
 
   end do iteration
 
@@ -233,7 +383,17 @@ subroutine laplacian_poisson(mg,pk,rlap_wk,lap0,lapt)
   real(8),intent(in)  :: lap0,lapt(4,3)
   integer :: ix,iy,iz
 
+#ifdef USE_OPENACC
+!$acc data &
+!$acc copyin(mg, mg%is(:), mg%ie(:), pk(:,:,:), lapt(:,:)) &
+!$acc copyout(rlap_wk(:,:,:))
+
+!$acc parallel default(none) &
+!$acc present(mg, mg%is, mg%ie, pk, lapt, rlap_wk)
+!$acc loop gang vector collapse(3)
+#else
 !$omp parallel do private(iz,iy,ix) collapse(2)
+#endif
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
@@ -253,6 +413,10 @@ subroutine laplacian_poisson(mg,pk,rlap_wk,lap0,lapt)
   end do
   end do
   end do
+#ifdef USE_OPENACC
+!$acc end parallel
+!$acc end data
+#endif
 
   return
 
@@ -305,8 +469,15 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   integer :: comm_xyz(3),nproc_xyz(3),myrank_xyz(3)
 
   integer :: tid
+#ifdef USE_OPENACC
+  integer :: jj_range
+  real(8) :: reduce_work_scalar
+  real(8) :: reduce_work_scalar4_1, reduce_work_scalar4_2, &
+             reduce_work_scalar4_3, reduce_work_scalar4_4
+#endif
   real(8),allocatable :: reduce_work(:)
   real(8),allocatable :: reduce_work4(:,:)
+
   allocate(reduce_work(0:get_nthreads()-1))
   allocate(reduce_work4(4,0:get_nthreads()-1))
 
@@ -453,7 +624,16 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   allocate(center_trho_nume_deno(4,num_center))
   allocate(center_trho_nume_deno2(4,num_center))
 
+#ifdef USE_OPENACC
+!$acc data &
+!$acc copyout(rholm(:,:), rholm2(:,:), center_trho_nume_deno2(:,:))
+
+!$acc parallel default(none) &
+!$acc present(rholm, rholm2, center_trho_nume_deno2)
+!$acc loop gang vector
+#else
   !$OMP parallel do private(icen, jj, lm)
+#endif
   do icen=1,num_center
     do jj=1,4
       center_trho_nume_deno2(jj,icen)=0.d0
@@ -463,8 +643,42 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
       rholm2(lm,icen)=0.d0
     end do
   end do
+#ifdef USE_OPENACC
+!$acc end parallel
+!$acc end data
+#endif
 
   do ii=1,poisson%npole_partial
+#ifdef USE_OPENACC
+    reduce_work_scalar4_1=0d0
+    reduce_work_scalar4_2=0d0
+    reduce_work_scalar4_3=0d0
+    reduce_work_scalar4_4=0d0
+!$acc data &
+!$acc copyin(ig_num(:), ig(:,:,:), coordinate(:,:), trho(:,:,:))
+
+!$acc parallel default(none) &
+!$acc present(ig_num, ig, coordinate, trho)
+!$acc loop gang vector reduction(+:reduce_work_scalar4_1, reduce_work_scalar4_2, reduce_work_scalar4_3, reduce_work_scalar4_4)
+    do jj=1,ig_num(ii)
+      ixbox=ig(1,jj,ii)
+      iybox=ig(2,jj,ii)
+      izbox=ig(3,jj,ii)
+      xx=coordinate(ixbox,1)
+      yy=coordinate(iybox,2)
+      zz=coordinate(izbox,3)
+      reduce_work_scalar4_1=reduce_work_scalar4_1+trho(ixbox,iybox,izbox)*xx
+      reduce_work_scalar4_2=reduce_work_scalar4_2+trho(ixbox,iybox,izbox)*yy
+      reduce_work_scalar4_3=reduce_work_scalar4_3+trho(ixbox,iybox,izbox)*zz
+      reduce_work_scalar4_4=reduce_work_scalar4_4+trho(ixbox,iybox,izbox)
+    end do
+!$acc end parallel
+!$acc end data
+    center_trho_nume_deno2(1,poisson%ipole_tbl(ii))=reduce_work_scalar4_1
+    center_trho_nume_deno2(2,poisson%ipole_tbl(ii))=reduce_work_scalar4_2
+    center_trho_nume_deno2(3,poisson%ipole_tbl(ii))=reduce_work_scalar4_3
+    center_trho_nume_deno2(4,poisson%ipole_tbl(ii))=reduce_work_scalar4_4
+#else
     reduce_work4=0d0
 !$omp parallel private(jj,ixbox,iybox,izbox,xx,yy,zz,tid)
     tid=get_thread_id()
@@ -488,6 +702,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
     center_trho_nume_deno2(2,poisson%ipole_tbl(ii))=sum(reduce_work4(2,:))
     center_trho_nume_deno2(3,poisson%ipole_tbl(ii))=sum(reduce_work4(3,:))
     center_trho_nume_deno2(4,poisson%ipole_tbl(ii))=sum(reduce_work4(4,:))
+#endif
   end do
 
   call comm_summation(center_trho_nume_deno2,center_trho_nume_deno,4*poisson%npole_total,info%icomm_r)
@@ -560,6 +775,17 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
 !    deallocate(rholm3)
 !  else
     rholm2=0.d0
+#ifdef USE_OPENACC
+!$acc data &
+!$acc copyin(ig_num(:), ig(:,:,:), coordinate(:,:), center_trho(:,:), poisson, poisson%ipole_tbl(:), trho(:,:,:))
+    do ii=1,poisson%npole_partial
+      if(itrho(poisson%ipole_tbl(ii))==1)then
+        rholm=0.d0
+        do ll=0,lmax_multipole
+        do m=-ll,ll
+          lm=ll*ll+ll+1+m
+          reduce_work_scalar=0d0
+#else
     do ii=1,poisson%npole_partial
       if(itrho(poisson%ipole_tbl(ii))==1)then
         rholm=0.d0
@@ -567,6 +793,25 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
         do m=-ll,ll
           lm=ll*ll+ll+1+m
           reduce_work=0d0
+#endif
+
+#ifdef USE_OPENACC
+!$acc parallel default(none) &
+!$acc present(ig_num, ig, coordinate, center_trho, poisson, poisson%ipole_tbl, trho)
+!$acc loop gang vector reduction(+:reduce_work_scalar)
+          do jj=1,ig_num(ii)
+            ixbox=ig(1,jj,ii)
+            iybox=ig(2,jj,ii)
+            izbox=ig(3,jj,ii)
+            xx=coordinate(ixbox,1)-center_trho(1,poisson%ipole_tbl(ii))
+            yy=coordinate(iybox,2)-center_trho(2,poisson%ipole_tbl(ii))
+            zz=coordinate(izbox,3)-center_trho(3,poisson%ipole_tbl(ii))
+            rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d-50 ; xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
+            reduce_work_scalar=reduce_work_scalar+rr**ll*ylm(xxxx,yyyy,zzzz,ll,m)*trho(ixbox,iybox,izbox)*hvol
+          end do
+!$acc end parallel
+          rholm2(lm,poisson%ipole_tbl(ii))=reduce_work_scalar
+#else
 !$omp parallel private(jj,ixbox,iybox,izbox,xx,yy,zz,rr,xxxx,yyyy,zzzz,tid)
           tid=get_thread_id()
 !$omp do
@@ -583,10 +828,14 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
 !$omp end do
 !$omp end parallel
           rholm2(lm,poisson%ipole_tbl(ii))=sum(reduce_work)
+#endif
         end do
         end do
       end if
     end do
+#ifdef USE_OPENACC
+!$acc end data
+#endif
 !  endif
 
   deallocate(center_trho_nume_deno)
@@ -595,15 +844,41 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   end select
 
   if(info%isize_r==1)then
+
+#ifdef USE_OPENACC
+!$acc data &
+!$acc copyin(rholm2(:,:)) &
+!$acc copyout(rholm(:,:))
+
+!$acc parallel default(none) &
+!$acc present(rholm2, rholm)
+!$acc loop gang vector
+#else
   !$OMP parallel do
+#endif
     do icen=1,num_center
       rholm(:,icen)=rholm2(:,icen)
     end do
+#ifdef USE_OPENACC
+!$acc end parallel
+!$acc end data
+#endif
+
   else
     call comm_summation(rholm2,rholm,(lmax_multipole+1)**2*num_center,info%icomm_r)
   end if
 
+#ifdef USE_OPENACC
+!$acc data &
+!$acc copyin(mg, mg%is_array(:), mg%ie_array(:)) &
+!$acc copyout(wk2(:,:,:))
+
+!$acc parallel default(none) &
+!$acc present(mg, mg%is_array, mg%ie_array, wk2)
+!$acc loop gang vector collapse(3)
+#else
   !$OMP parallel do private(iz,iy,ix) collapse(2)
+#endif
   do iz=mg%is_array(3),mg%ie_array(3)
   do iy=mg%is_array(2),mg%ie_array(2)
   do ix=mg%is_array(1),mg%ie_array(1)
@@ -611,24 +886,67 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   end do
   end do
   end do
+#ifdef USE_OPENACC
+!$acc end parallel
+!$acc end data
+#endif
 
   do k=1,3
 
+#ifdef USE_OPENACC
+    jj_range = lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*ndh
+!$acc data &
+!$acc copyout(poisson, poisson%wkbound2(:))
+
+!$acc parallel default(none) &
+!$acc present(poisson, poisson%wkbound2)
+!$acc loop gang vector
+    do jj=1, jj_range
+      poisson%wkbound2(jj)=0.d0
+    end do
+!$acc end parallel
+!$acc end data
+#else
   !$OMP parallel do
     do jj=1,lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*ndh
       poisson%wkbound2(jj)=0.d0
     end do
+#endif
 
     icount=mg%num(1)*mg%num(2)*mg%num(3)/mg%num(k)*2*ndh
 
+#ifdef USE_OPENACC
+!$acc data &
+!$acc copyin(nproc_xyz(:)) &
+!$acc copyout(istart(:), iend(:))
+
+!$acc parallel default(none) &
+!$acc present(nproc_xyz, istart, iend)
+!$acc loop gang vector
+#else
   !$OMP parallel do
+#endif
     do ii=0,nproc_xyz(k)-1
       istart(ii)=ii*icount/nproc_xyz(k)+1
       iend(ii)=(ii+1)*icount/nproc_xyz(k)
     end do
+#ifdef USE_OPENACC
+!$acc end parallel
+!$acc end data
+#endif
 
+#ifdef USE_OPENACC
+!$acc data &
+!$acc copyin(myrank_xyz(:), istart(:), iend(:), itrho(:), coordinate(:,:), poisson, poisson%ig_bound(:,:,:), center_trho(:,:), rholm(:,:)) &
+!$acc copy(poisson%wkbound2(:))
+
+!$acc parallel default(none) &
+!$acc present(myrank_xyz, istart, iend, itrho, coordinate, poisson, poisson%ig_bound, center_trho, rholm, poisson%wkbound2)
+!$acc loop gang vector
+#else
   !$OMP parallel do &
   !$OMP private(jj,icen,xx,yy,zz,rinv,xxxx,yyyy,zzzz,sum1,ll,m,lm)
+#endif
     do jj=istart(myrank_xyz(k)),iend(myrank_xyz(k))
       do icen=1,num_center
         if(itrho(icen)==1)then
@@ -652,12 +970,32 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
         end if
       end do
     end do
+#ifdef USE_OPENACC
+!$acc end parallel
+!$acc end data
+#endif
 
     if(info%isize_r==1)then
+
+#ifdef USE_OPENACC
+!$acc data &
+!$acc copyin(poisson, poisson%wkbound2(:)) &
+!$acc copyout(poisson%wkbound(:))
+
+!$acc parallel default(none) &
+!$acc present(poisson, poisson%wkbound, poisson%wkbound2)
+!$acc loop gang vector
+#else
   !$OMP parallel do
+#endif
       do jj=1,icount
         poisson%wkbound(jj)=poisson%wkbound2(jj)
       end do
+#ifdef USE_OPENACC
+!$acc end parallel
+!$acc end data
+#endif
+
     else
       call comm_summation( &
         poisson%wkbound2,              poisson%wkbound,              icount/2, comm_xyz(k), 0                    )
@@ -666,16 +1004,48 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
     end if
 
     if(myrank_xyz(k)==0) then
+
+#ifdef USE_OPENACC
+!$acc data &
+!$acc copyin(poisson, poisson%ig_bound(:,:,:), poisson%wkbound(:)) &
+!$acc copyout(wk2(:,:,:))
+
+!$acc parallel default(none) &
+!$acc present(poisson, poisson%ig_bound, poisson%wkbound, wk2)
+!$acc loop gang vector
+#else
   !$OMP parallel do
+#endif
       do jj=1,icount/2
         wk2(poisson%ig_bound(1,jj,k),poisson%ig_bound(2,jj,k),poisson%ig_bound(3,jj,k))=poisson%wkbound(jj)
       end do
+#ifdef USE_OPENACC
+!$acc end parallel
+!$acc end data
+#endif
+
     end if
     if(myrank_xyz(k)==nproc_xyz(k)-1) then
+
+#ifdef USE_OPENACC
+!$acc data &
+!$acc copyin(poisson, poisson%ig_bound(:,:,:), poisson%wkbound(:)) &
+!$acc copyout(wk2(:,:,:))
+
+!$acc parallel default(none) &
+!$acc present(poisson, poisson%ig_bound, poisson%wkbound, wk2)
+!$acc loop gang vector
+#else
   !$OMP parallel do
+#endif
       do jj=icount/2+1,icount
         wk2(poisson%ig_bound(1,jj,k),poisson%ig_bound(2,jj,k),poisson%ig_bound(3,jj,k))=poisson%wkbound(jj)
       end do
+#ifdef USE_OPENACC
+!$acc end parallel
+!$acc end data
+#endif
+
     end if
 
   end do

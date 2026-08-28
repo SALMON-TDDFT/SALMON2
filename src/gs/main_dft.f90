@@ -77,6 +77,7 @@ type(s_ofile)  :: ofl
 type(s_band_dft) ::band
 type(s_opt) :: opt
 type(s_dcdft) :: dc
+type(s_unfold) :: unfold
 
 logical :: rion_update
 logical :: flag_opt_conv
@@ -104,7 +105,7 @@ call timer_begin(LOG_INIT_GS)
 
 
 ! please move folloings into initialization_dft
-call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl)
+call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl,unfold)
 allocate( rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin) )
 
 call initialization1_dft( system, energy, stencil, fg, poisson,  &
@@ -211,13 +212,13 @@ if(write_gs_wfn_k == 'y') then !this input keyword is going to be removed....
 end if
 
 ! output transition moment : --> want to put out of the optmization loop in future
-if(yn_out_tm  == 'y'.or.yn_out_gs_sgm_eps=='y') then
+if(yn_out_tm  == 'y'.or. yn_out_tm_bin == 'y'.or.yn_out_gs_sgm_eps=='y') then
    select case(iperiodic)
    case(3)
       call write_k_data(system,stencil)  !need? (probably remove later)
       call write_tm_data(spsi,system,info,mg,stencil,srg,ppg,energy)
    case(0)
-     write(*,*) "error: yn_out_tm='y',yn_out_gs_sgm_eps='y' & iperiodic=0"
+     write(*,*) "error: yn_out_tm='y','yn_out_tm_bin='y',yn_out_gs_sgm_eps='y' & iperiodic=0"
   end select
 end if
 

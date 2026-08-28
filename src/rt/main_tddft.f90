@@ -30,7 +30,7 @@ use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pu
 use initialization_rt_sub
 use checkpoint_restart_sub
 use jellium, only: check_condition_jm
-use nvtx
+use nvtx_wrapper
 use parallelization, only: nproc_id_global
 implicit none
 
@@ -57,6 +57,7 @@ type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
 type(s_singlescale) :: singlescale
+type(s_unfold) :: unfold
 
 integer :: Mit, itt
 logical :: is_checkpoint_iter, is_shutdown_time, is_checkpoint
@@ -75,7 +76,7 @@ call initialization_rt( Mit, system, energy, ewald, rt, md, &
                         srg, srg_scalar,  &
                         spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s,  &
                         V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
-                        pp, ppg, ppn )
+                        pp, ppg, ppn, unfold )
 
 #ifdef __FUJITSU
 call fapp_start('time_evol',1,0) ! performance profiling
@@ -102,11 +103,11 @@ TE : do itt=Mit+1,nt
   if(mod(itt,2)==1)then
     call time_evolution_step(Mit,nt,itt,lg,mg,system,rt,info,stencil,xc_func &
      & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
-     & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale)
+     & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale,unfold)
   else
     call time_evolution_step(Mit,nt,itt,lg,mg,system,rt,info,stencil,xc_func &
      & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
-     & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale)
+     & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale,unfold)
   end if
 
   is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)
@@ -219,4 +220,3 @@ subroutine print_header()
 end subroutine print_header
 
 end subroutine main_tddft
-

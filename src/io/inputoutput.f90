@@ -61,6 +61,7 @@ module inputoutput
   integer :: inml_band
   integer :: inml_sbe
   integer :: inml_dc
+  integer :: inml_unfolding
 
 !Input/Output units
   integer :: iflag_unit_time
@@ -293,7 +294,8 @@ contains
     namelist/kgrid/ &
       & num_kgrid, &
       & file_kw, &
-      & dk_shift
+      & dk_shift, &
+      & yn_gamma_centered
 
     namelist/tgrid/ &
       & nt, &
@@ -500,6 +502,7 @@ contains
       & yn_out_rvf_rt, &
       & out_rvf_rt_step, &
       & yn_out_tm, &
+      & yn_out_tm_bin, &
       & yn_out_gs_sgm_eps, &
       & out_gs_sgm_eps_mu_nu, &
       & out_gs_sgm_eps_width, &
@@ -587,17 +590,39 @@ contains
       & nelec_sbe, &
       & al_sbe, &
       & al_vec1_sbe,al_vec2_sbe,al_vec3_sbe, &
-      & norder_correction
+      & norder_correction, &
+      & gauge_sbe, &
+      & t_2, &
+      & am_s
       
     namelist/dc/ &
       & num_fragment, &
       & num_rgrid_buffer, &
       & nproc_rgrid_tot, &
+      & file_atom_coor_frag, &
+      & xi_dc, &
       & yn_dc_lcfo, &
       & yn_dc_lcfo_diag, &
+      & lcfo_eigensolver, &
+      & lcfo_diag_chefsi_filter_degree, &
+      & lcfo_diag_chefsi_filter_chunk_size, &
+      & lcfo_diag_chefsi_max_cycle, &
+      & lcfo_diag_chefsi_residual_tolerance, &
       & nstate_frag, &
       & energy_cut, &
       & lambda_cut
+
+    namelist/unfolding/ &
+      & dm_unfold_option, &
+      & num_lkgrid, &
+      & num_skgrid, &
+      & no_pr, &
+      & out_dm_unfold_step, &
+      & yn_out_mom_distr_gs, &
+      & yn_out_mom_distr_rt, &
+      & out_mom_distr_rt_step, &
+      & nq_mom, &
+      & dq_mom
 
 !! == default for &unit ==
     unit_system='au'
@@ -714,6 +739,7 @@ contains
     num_kgrid = 1
     file_kw   = 'none'
     dk_shift = 0d0
+    yn_gamma_centered = 'n'
 !! == default for &tgrid
     nt = 0
     dt = 0
@@ -923,6 +949,7 @@ contains
     yn_out_rvf_rt       = 'n'
     out_rvf_rt_step     = 10
     yn_out_tm           = 'n'
+    yn_out_tm_bin       = 'n'
     yn_out_gs_sgm_eps   = 'n'
     out_gs_sgm_eps_mu_nu(1) = 3
     out_gs_sgm_eps_mu_nu(2) = 3
@@ -1008,15 +1035,40 @@ contains
     al_vec2_sbe(:,:) = 0.d0
     al_vec3_sbe(:,:) = 0.d0
     norder_correction = 0
+    gauge_sbe = 'velocity_gauge'
+    t_2 = -1.d0
+    am_s = 4
 !! == default for &dc
     num_fragment = 0
     num_rgrid_buffer = 0
     nproc_rgrid_tot = 1
+    file_atom_coor_frag = 'none'
+    xi_dc = -1d0
     yn_dc_lcfo = 'y'
     yn_dc_lcfo_diag = 'y'
+#ifdef USE_EIGENEXA
+    lcfo_eigensolver = 'eigenexa'
+#else
+    lcfo_eigensolver = 'lapack'
+#endif
+    lcfo_diag_chefsi_filter_degree = 60
+    lcfo_diag_chefsi_filter_chunk_size = 0
+    lcfo_diag_chefsi_max_cycle = 200
+    lcfo_diag_chefsi_residual_tolerance = 1d-7
     nstate_frag = 0
     energy_cut = 0d0
     lambda_cut = 1d-3
+!! == default for &unfolding
+    dm_unfold_option = 'no'
+    num_lkgrid = 1
+    num_skgrid = 1
+    no_pr = 0
+    out_dm_unfold_step = 100
+    yn_out_mom_distr_gs = 'n'
+    yn_out_mom_distr_rt = 'n'
+    out_mom_distr_rt_step = 100
+    nq_mom = 0
+    dq_mom = 0.0d0
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1097,6 +1149,9 @@ contains
       read(fh_namelist, nml=dc, iostat=inml_dc)
       rewind(fh_namelist)
 
+      read(fh_namelist, nml=unfolding, iostat=inml_unfolding)
+      rewind(fh_namelist)
+
       close(fh_namelist)
     end if
 
@@ -1140,6 +1195,8 @@ contains
       end do
     end if
     call string_lowercase(lattice)
+    call string_lowercase(dm_unfold_option)
+    call string_lowercase(lcfo_eigensolver)
 
 ! Broad cast
 !! == bcast for &calculation
@@ -1249,6 +1306,7 @@ contains
     call comm_bcast(num_kgrid,nproc_group_global)
     call comm_bcast(file_kw  ,nproc_group_global)
     call comm_bcast(dk_shift ,nproc_group_global)
+    call comm_bcast(yn_gamma_centered,nproc_group_global)
 !! == bcast for &tgrid
     call comm_bcast(nt,nproc_group_global)
     call comm_bcast(dt,nproc_group_global)
@@ -1535,6 +1593,7 @@ contains
     call comm_bcast(yn_out_rvf_rt       ,nproc_group_global)
     call comm_bcast(out_rvf_rt_step     ,nproc_group_global)
     call comm_bcast(yn_out_tm           ,nproc_group_global)
+    call comm_bcast(yn_out_tm_bin       ,nproc_group_global)
     call comm_bcast(yn_out_gs_sgm_eps   ,nproc_group_global)
     call comm_bcast(out_gs_sgm_eps_mu_nu,nproc_group_global)
     call comm_bcast(out_gs_sgm_eps_width,nproc_group_global)
@@ -1630,16 +1689,38 @@ contains
     al_vec2_sbe = al_vec2_sbe * ulength_to_au
     al_vec3_sbe = al_vec3_sbe * ulength_to_au
     call comm_bcast(norder_correction,nproc_group_global)
+    call comm_bcast(gauge_sbe        ,nproc_group_global)
+    call comm_bcast(t_2              ,nproc_group_global)
+    t_2 = t_2 * utime_to_au
+    call comm_bcast(am_s             ,nproc_group_global)
 !! == bcast for dc
     call comm_bcast(num_fragment ,nproc_group_global)
     call comm_bcast(num_rgrid_buffer, nproc_group_global)
     call comm_bcast(nproc_rgrid_tot, nproc_group_global)
+    call comm_bcast(file_atom_coor_frag, nproc_group_global)
+    call comm_bcast(xi_dc, nproc_group_global)
     call comm_bcast(yn_dc_lcfo, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
+    call comm_bcast(lcfo_eigensolver, nproc_group_global)
+    call comm_bcast(lcfo_diag_chefsi_filter_degree, nproc_group_global)
+    call comm_bcast(lcfo_diag_chefsi_filter_chunk_size, nproc_group_global)
+    call comm_bcast(lcfo_diag_chefsi_max_cycle, nproc_group_global)
+    call comm_bcast(lcfo_diag_chefsi_residual_tolerance, nproc_group_global)
     call comm_bcast(nstate_frag, nproc_group_global)
     call comm_bcast(energy_cut, nproc_group_global)
     energy_cut = energy_cut * uenergy_to_au
     call comm_bcast(lambda_cut, nproc_group_global)
+!! == bcast for unfolding
+    call comm_bcast(dm_unfold_option, nproc_group_global)
+    call comm_bcast(num_lkgrid, nproc_group_global)
+    call comm_bcast(num_skgrid, nproc_group_global)
+    call comm_bcast(no_pr, nproc_group_global)
+    call comm_bcast(out_dm_unfold_step, nproc_group_global)
+    call comm_bcast(yn_out_mom_distr_gs, nproc_group_global)
+    call comm_bcast(yn_out_mom_distr_rt, nproc_group_global)
+    call comm_bcast(out_mom_distr_rt_step, nproc_group_global)
+    call comm_bcast(nq_mom, nproc_group_global)
+    call comm_bcast(dq_mom, nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -1668,7 +1749,7 @@ contains
       if(file_atom_red_coor /= 'none')then
         icount = icount + 1
         if_cartesian = .false.
-        filename_tmp = trim(file_atom_coor)
+        filename_tmp = trim(file_atom_red_coor)
         iflag_atom_coor = ntype_atom_coor_reduced
       end if
 
@@ -1685,6 +1766,9 @@ contains
         filename_tmp = '.atomic_red_coor.tmp'
         iflag_atom_coor = ntype_atom_coor_reduced
       end if
+
+      if_error = yn_restart == 'y' .and. &
+                 (yn_md == 'y' .or. theory == 'dft_md') .and. icount > 0
 
       if(icount==0 .and. (yn_restart == 'y' .or. &
          index(theory,'tddft_')/=0 .or. index(theory,'_tddft')/=0 ) .and. yn_jm == 'n' ) then
@@ -1711,6 +1795,20 @@ contains
     call comm_bcast(icount,nproc_group_global)
     call comm_bcast(if_cartesian,nproc_group_global)
     call comm_bcast(iflag_atom_coor,nproc_group_global)
+    call comm_bcast(if_error,nproc_group_global)
+
+    if(if_error)then
+       if (comm_is_root(nproc_id_global))then
+         write(*,"(A)") 'Error in input: Explicit atomic coordinates cannot be specified when restarting an MD calculation.'
+         write(*,"(A)") 'Remove the following input(s); atomic coordinates are read from the restart data:'
+         if(file_atom_coor /= 'none') write(*,"(A)") '  file_atom_coor'
+         if(file_atom_red_coor /= 'none') write(*,"(A)") '  file_atom_red_coor'
+         if(if_nml_coor) write(*,"(A)") '  &atomic_coor'
+         if(if_nml_red_coor) write(*,"(A)") '  &atomic_red_coor'
+       end if
+       call end_parallel
+       stop
+    end if
 
     if(0 < natom .and. icount/=1 .and. yn_jm == 'n')then
        if (comm_is_root(nproc_id_global))then
@@ -2137,6 +2235,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(1)', dk_shift(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(2)', dk_shift(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(3)', dk_shift(3)
+      write(fh_variables_log, '("#",4x,A,"=",A)') 'yn_gamma_centered', yn_gamma_centered
 
       if(inml_tgrid >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'tgrid', inml_tgrid
@@ -2446,6 +2545,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rvf_rt', yn_out_rvf_rt
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rvf_rt_step', out_rvf_rt_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm_bin', yn_out_tm_bin
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gs_sgm_eps', yn_out_gs_sgm_eps
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(1)', out_gs_sgm_eps_mu_nu(1)
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(2)', out_gs_sgm_eps_mu_nu(2)
@@ -2586,17 +2686,49 @@ contains
         write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec3_sbe(1:3',i,')', al_vec3_sbe(1:3,i)
       end do
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'norder_correction', norder_correction
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'gauge_sbe', gauge_sbe
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't_2', t_2
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'am_s', am_s
       
       if(inml_dc >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', inml_dc
       write(fh_variables_log, '("#",4X,A,"=",3I4)') 'num_fragment',num_fragment(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3I4)') "num_rgrid_buffer", num_rgrid_buffer(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3I4)') "nproc_rgrid_tot",nproc_rgrid_tot(1:3)
+      write(fh_variables_log, '("#",4X,A,"=",A)') "file_atom_coor_frag", file_atom_coor_frag
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'xi_dc', xi_dc
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
+      write(fh_variables_log, '("#",4X,A,"=",A)') "lcfo_eigensolver",trim(lcfo_eigensolver)
+      write(fh_variables_log, '("#",4X,A,"=",I6)') &
+      & "lcfo_diag_chefsi_filter_degree",lcfo_diag_chefsi_filter_degree
+      write(fh_variables_log, '("#",4X,A,"=",I6)') &
+      & "lcfo_diag_chefsi_filter_chunk_size", &
+      & lcfo_diag_chefsi_filter_chunk_size
+      write(fh_variables_log, '("#",4X,A,"=",I6)') &
+      & "lcfo_diag_chefsi_max_cycle",lcfo_diag_chefsi_max_cycle
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+      & "lcfo_diag_chefsi_residual_tolerance", &
+      & lcfo_diag_chefsi_residual_tolerance
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
+
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'unfolding', inml_unfolding
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'dm_unfold_option', dm_unfold_option
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_lkgrid(1)', num_lkgrid(1)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_lkgrid(2)', num_lkgrid(2)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_lkgrid(3)', num_lkgrid(3)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(1)', num_skgrid(1)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(2)', num_skgrid(2)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(3)', num_skgrid(3)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'no_pr', no_pr
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dm_unfold_step', out_dm_unfold_step
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mom_distr_gs', yn_out_mom_distr_gs
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mom_distr_rt', yn_out_mom_distr_rt
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_mom_distr_rt_step', out_mom_distr_rt_step
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'nq_mom', nq_mom
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dq_mom', dq_mom
       
       close(fh_variables_log)
     end if
@@ -2661,6 +2793,7 @@ contains
     call yn_argument_check(yn_out_estatic_rt)
     call yn_argument_check(yn_out_rvf_rt)
     call yn_argument_check(yn_out_tm)
+    call yn_argument_check(yn_out_tm_bin)
     call yn_argument_check(yn_out_intraband_current)
     call yn_argument_check(yn_out_current_decomposed)
     call yn_argument_check(yn_out_spin_current_decomposed)
@@ -2691,9 +2824,51 @@ contains
     call yn_argument_check(yn_symmetrized_stencil)
     call yn_argument_check(yn_put_wall_z_boundary)
     call yn_argument_check(yn_spinorbit)
+    call yn_argument_check(yn_out_mom_distr_gs)
+    call yn_argument_check(yn_out_mom_distr_rt)
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
+
+#ifndef USE_MPI
+    if(trim(dm_unfold_option)/='no') then
+      stop 'dm_unfold_option requires a build with MPI support.'
+    end if
+    if(yn_out_tm_bin=='y') then
+      stop "yn_out_tm_bin='y' requires a build with MPI support."
+    end if
+#endif
+
+    select case(trim(lcfo_eigensolver))
+    case('lapack')
+      continue
+    case('eigenexa')
+#ifdef USE_EIGENEXA
+      continue
+#else
+      stop 'lcfo_eigensolver=eigenexa requires a build with EigenExa support.'
+#endif
+    case('chefsi')
+#ifdef USE_SCALAPACK
+      if(lcfo_diag_chefsi_filter_degree<1) then
+        stop 'lcfo_diag_chefsi_filter_degree must be a positive integer.'
+      end if
+      if(lcfo_diag_chefsi_filter_chunk_size<0) then
+        stop 'lcfo_diag_chefsi_filter_chunk_size must be nonnegative.'
+      end if
+      if(lcfo_diag_chefsi_max_cycle<1) then
+        stop 'lcfo_diag_chefsi_max_cycle must be a positive integer.'
+      end if
+      if(lcfo_diag_chefsi_residual_tolerance<=0d0 .or. &
+      & lcfo_diag_chefsi_residual_tolerance>=1d0) then
+        stop 'lcfo_diag_chefsi_residual_tolerance must be between zero and one.'
+      end if
+#else
+      stop 'lcfo_eigensolver=chefsi requires a build with ScaLAPACK support.'
+#endif
+    case default
+      stop "lcfo_eigensolver must be 'lapack', 'eigenexa', or 'chefsi'."
+    end select
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
       stop "Nk must be 1 when yn_periodic=='n'"
@@ -2913,6 +3088,12 @@ contains
       if(yn_jm=='y') stop "DC method (yn_dc=y): yn_jm=y is not supported."
       if(base_directory /= './') stop "DC method (yn_dc=y): base_directory must be default."
       if(nproc_k/=1) stop "DC method (yn_dc=y): nproc_k must be 1 for both the total system and fragments."
+      if(write_gs_restart_data /= 'no') then
+        if (comm_is_root(nproc_id_global)) then
+          write(*,*) "WARNING(yn_dc=y): write_gs_restart_data is internally set to 'no'"
+        end if
+        write_gs_restart_data = 'no'
+      end if
     end if
 
 #ifdef USE_FFTW

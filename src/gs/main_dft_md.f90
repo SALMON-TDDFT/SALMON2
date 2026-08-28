@@ -68,6 +68,7 @@ type(s_mixing) :: mixing
 type(s_band_dft) :: band
 type(s_ofile) :: ofl
 type(s_md) :: md
+type(s_unfold) :: unfold
 
 logical :: rion_update
 integer :: ix,iy,iz, nspin, it, Miter
@@ -83,7 +84,7 @@ call timer_begin(LOG_INIT_GS)
 it=0
 
 ! please move folloings into initialization_dft 
-call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl)
+call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl,unfold)
 allocate( rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin) )
 
 call initialization1_dft( system, energy, stencil, fg, poisson,  &

@@ -67,6 +67,7 @@
 
 
 #if defined(__AVX512F__) || (__KNC__)
+// These load functions are general enough for both AVX512F and KNC
 inline
 __m512i _mm512_load_prefetch_epi64(void const* c) {
   __m512i a = _mm512_load_epi64(c);
@@ -80,10 +81,50 @@ __m512d _mm512_load_prefetch_pd(void const* c) {
   BUSY_PREFETCH_L1(c);
   return a;
 }
+// NOTE: The original dcomplex_get_index and dcomplex_gather that were here
+// used KNC-specific intrinsics. They are now moved/specialized below.
+#endif
 
-inline
-__m512i dcomplex_get_index(__m512i idx)
-{
+
+#if defined(__AVX512F__)
+
+// AVX-512F specific implementation for gathering complex numbers
+// Helper function dcomplex_get_indices_for_gather_avx512f (as defined before)
+inline __m256i dcomplex_get_indices_for_gather_avx512f(__m128i complex_indices_m128) {
+    // Multiply complex indices by 2 to get base double index for the real part
+    __m128i real_part_base_indices = _mm_slli_epi32(complex_indices_m128, 1);
+
+    // Create indices for imaginary parts (base double index + 1)
+    __m128i ones_m128 = _mm_set1_epi32(1);
+    __m128i imag_part_indices = _mm_add_epi32(real_part_base_indices, ones_m128);
+
+    // Zero-extend the 128-bit index vectors to 256-bit vectors to prepare for interleaving
+    __m256i real_indices_for_interleave = _mm256_zextsi128_si256(real_part_base_indices);
+    __m256i imag_indices_for_interleave = _mm256_zextsi128_si256(imag_part_indices);
+    
+    return _mm256_unpacklo_epi32(real_indices_for_interleave, imag_indices_for_interleave);
+}
+
+// dcomplex_gather for AVX-512F
+inline __m512d dcomplex_gather(void const* base_addr, __m512i complex_indices_in_m512i) {
+    // Assume the input __m512i holds the four 32-bit complex indices in its lowest 128 bits.
+    __m128i complex_indices_m128 = _mm512_castsi512_si128(complex_indices_in_m512i);
+
+    // Generate the 8x32-bit indices for the individual double components.
+    __m256i final_double_indices = dcomplex_get_indices_for_gather_avx512f(complex_indices_m128);
+    
+    // MODIFICATION: Use the integer literal 8 directly for the scale factor.
+    return _mm512_i32gather_pd(final_double_indices, base_addr, 8); 
+}
+
+# include "./imci2avx512f.h" // This file provides other AVX-512F helpers
+
+#elif defined(__KNC__)
+
+/* Knights Corner specific implementations */
+
+// Original dcomplex_get_index, now specific to KNC context
+inline __m512i dcomplex_get_index_knc(__m512i idx) {
   const __m512i perm = _mm512_set_epi32(7, 7, 6, 6, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1, 0, 0);
   const __m512i one  = _mm512_set4_epi32(1, 0, 1, 0);
   __m512i x = _mm512_permutevar_epi32(perm, idx);
@@ -91,18 +132,13 @@ __m512i dcomplex_get_index(__m512i idx)
   return      _mm512_xor_si512(y, one); /* y + 1 or y + 0 */
 }
 
-inline
-__m512d dcomplex_gather(void const* m, __m512i idx)
-{
-  const __m512i gidx = dcomplex_get_index(idx);
+// Original dcomplex_gather, now specific to KNC context
+inline __m512d dcomplex_gather(void const* m, __m512i idx) {
+  const __m512i gidx = dcomplex_get_index_knc(idx); // Uses KNC helper
   return _mm512_i32loextgather_pd(gidx, m, _MM_UPCONV_PD_NONE, 8, _MM_HINT_NONE);
 }
-#endif
 
-#if defined(__AVX512F__)
-# include "./imci2avx512f.h"
-#elif defined(__KNC__)
-/* Knights Corner */
+// KNC specific versions of other functions (originally from this block)
 inline
 __m512i _mm512_loadu_prefetch_epi32(int const* v) {
   __m512i w;
@@ -130,8 +166,10 @@ __m512d dcomplex_mul(__m512d a, __m512d b) {
   __m512d s1 = _mm512_swizzle_pd(b, _MM_SWIZ_REG_CDAB);  /* s1 = [b.i b.r] */
   return       _mm512_fmadd_pd(im, s1, t0);              /* [-a.i*b.i+a.r*b.r a.i*b.r+a.r*b.i] */
 }
+
 #elif defined(__AVX__)
 /* Sandy-Bridge or higher processors */
+// This block was already present and remains unchanged.
 inline
 __m256d dcast_to_dcmplx(double const *v) {
   __m256d a = _mm256_loadu_pd(v);
