@@ -8,6 +8,7 @@ module dg_hybrid_continuation_scf
     propose_dg_hybrid_trial,observe_dg_hybrid_inner_residuals,decide_dg_hybrid_stage,reject_dg_hybrid_trial,&
     dg_hybrid_stage_tolerances,validate_dg_hybrid_controller_contract
   use dg_hybrid_continuation_residuals,only:s_dg_hybrid_residuals
+  use dg_hybrid_continuation_acceptance,only:s_dg_hybrid_acceptance_result,validate_dg_hybrid_acceptance_receipt
 #ifdef USE_MPI
   use mpi, only: MPI_Allreduce, MPI_INTEGER, MPI_INTEGER8, MPI_MAX, MPI_MIN, MPI_SUCCESS
 #endif
@@ -47,6 +48,12 @@ module dg_hybrid_continuation_scf
       integer,intent(in)::iteration;real(real64),intent(in)::input_density(:),output_density(:),damping
       real(real64),intent(out)::mixed_density(:);logical,intent(out)::ok
     end subroutine mix_callback
+    subroutine acceptance_callback(lambda,state,receipt)
+      import real64,s_dg_hybrid_trial_state,s_dg_hybrid_acceptance_result
+      real(real64),intent(in)::lambda
+      type(s_dg_hybrid_trial_state),intent(in)::state
+      type(s_dg_hybrid_acceptance_result),intent(out)::receipt
+    end subroutine acceptance_callback
   end interface
   type,public::s_dg_hybrid_continuation_callbacks
     procedure(volume_callback),pointer,nopass::build_volume=>null()
@@ -55,8 +62,10 @@ module dg_hybrid_continuation_scf
     procedure(density_trace_callback),pointer,nopass::refresh_density_trace=>null()
     procedure(residual_callback),pointer,nopass::evaluate_residuals=>null()
     procedure(mix_callback),pointer,nopass::mix_density=>null()
+    procedure(acceptance_callback),pointer,nopass::accept_candidate=>null()
     type(s_dg_hybrid_trial_state)::seed_state
-    integer::face_count=0,maximum_inner_iterations=0,accepted_stages=0,rollback_count=0
+    integer::face_count=0,global_face_count=-1,maximum_inner_iterations=0,accepted_stages=0,rollback_count=0
+    integer(int64)::face_topology_fingerprint=0_int64
     real(real64)::final_lambda=0d0
   end type s_dg_hybrid_continuation_callbacks
   public::run_dg_hybrid_continuation_scf
@@ -73,7 +82,8 @@ contains
 #endif
     callbacks_complete=associated(callbacks%build_volume).and.associated(callbacks%solve_full).and.&
       associated(callbacks%refresh_projector).and.associated(callbacks%refresh_density_trace).and.&
-      associated(callbacks%evaluate_residuals).and.associated(callbacks%mix_density)
+      associated(callbacks%evaluate_residuals).and.associated(callbacks%mix_density).and.&
+      associated(callbacks%accept_candidate)
 #ifdef USE_MPI
     local_bad=merge(0,1,callbacks_complete)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
@@ -87,14 +97,18 @@ contains
 #endif
     call run_dg_hybrid_coupled_fixed_points(icomm,state,controls,callbacks%seed_state,callbacks%face_count,&
       callbacks%build_volume,callbacks%solve_full,callbacks%refresh_projector,callbacks%refresh_density_trace,&
-      callbacks%evaluate_residuals,callbacks%mix_density,callbacks%maximum_inner_iterations,accepted_state,&
+      callbacks%evaluate_residuals,callbacks%mix_density,callbacks%accept_candidate,&
+      callbacks%global_face_count,callbacks%face_topology_fingerprint,callbacks%maximum_inner_iterations,accepted_state,&
       callbacks%final_lambda,callbacks%accepted_stages,callbacks%rollback_count,ok,message)
   end subroutine run_dg_hybrid_continuation_scf
 
   subroutine run_dg_hybrid_coupled_fixed_points(icomm,continuation,controls,seed_state,face_count,&
       build_volume,solve_full,refresh_projector,refresh_density_trace,evaluate_residuals,mix_density,&
-      maximum_inner_iterations,final_state,final_lambda,accepted_stages,rollback_count,ok,message)
-    integer,intent(in)::icomm,face_count,maximum_inner_iterations
+      accept_candidate,global_face_count,face_topology_fingerprint,maximum_inner_iterations,final_state,final_lambda,&
+      accepted_stages,&
+      rollback_count,ok,message)
+    integer,intent(in)::icomm,face_count,global_face_count,maximum_inner_iterations
+    integer(int64),intent(in)::face_topology_fingerprint
     type(s_dg_hybrid_continuation_state),intent(in)::continuation
     type(s_dg_hybrid_controller_controls),intent(in)::controls
     type(s_dg_hybrid_trial_state),intent(in)::seed_state
@@ -104,6 +118,7 @@ contains
     procedure(density_trace_callback)::refresh_density_trace
     procedure(residual_callback)::evaluate_residuals
     procedure(mix_callback)::mix_density
+    procedure(acceptance_callback)::accept_candidate
     type(s_dg_hybrid_trial_state),intent(out)::final_state
     real(real64),intent(out)::final_lambda
     integer,intent(out)::accepted_stages,rollback_count
@@ -113,6 +128,7 @@ contains
     type(s_dg_hybrid_trial_state)::state
     type(s_dg_hybrid_trial_state)::input_gamma_state
     type(s_dg_hybrid_residuals)::residuals
+    type(s_dg_hybrid_acceptance_result)::acceptance_receipt
     type(s_dg_hybrid_stage_report)::report
     real(real64),allocatable::input_density(:),output_density(:),mixed_density(:)
     complex(real64),allocatable::input_trace(:,:)
@@ -176,10 +192,19 @@ contains
     if(.not.callback_ok)then;message='lambda-one final refresh callback failed';return;endif
     call fill_report(1)
     call stage_consensus(report,report%tolerances,stage_ok)
+    if(stage_ok)then
+      call accept_candidate(lambda,state,acceptance_receipt)
+      call validate_dg_hybrid_acceptance_receipt(icomm,acceptance_receipt,size(state%occupations),global_face_count,&
+        state%operator_value_fingerprint,face_topology_fingerprint,stage_ok,controller_message)
+    endif
     if(.not.stage_ok)then;message='lambda-one fully refreshed residual gate failed';return;endif
     state%density=input_gamma_state%density;state%trace=input_gamma_state%trace
     state%density_epoch=input_gamma_state%density_epoch;state%trace_epoch=input_gamma_state%trace_epoch
     state%derived_epoch=input_gamma_state%derived_epoch;state%trace_cache_valid=.true.
+    call accept_candidate(lambda,state,acceptance_receipt)
+    call validate_dg_hybrid_acceptance_receipt(icomm,acceptance_receipt,size(state%occupations),global_face_count,&
+      state%operator_value_fingerprint,face_topology_fingerprint,stage_ok,controller_message)
+    if(.not.stage_ok)then;message='published lambda-one state failed final acceptance oracle';return;endif
     final_state=state;final_lambda=1d0
     ok=.true.;message=''
   contains
@@ -193,6 +218,12 @@ contains
           fatal=.true.;return
         endif
         call fill_report(iteration)
+        call stage_consensus(report,report%tolerances,stage_ok)
+        if(stage_ok)then
+          call accept_candidate(lambda,state,acceptance_receipt)
+          call validate_dg_hybrid_acceptance_receipt(icomm,acceptance_receipt,size(state%occupations),global_face_count,&
+            state%operator_value_fingerprint,face_topology_fingerprint,stage_ok,controller_message)
+        endif
         if(use_controller)then
           call observe_dg_hybrid_inner_residuals(icomm,controller,report%residuals,reject_requested,decision_ok,controller_message)
           if(.not.decision_ok)then;message=trim(controller_message);fatal=.true.;return;endif
@@ -201,11 +232,14 @@ contains
             if(.not.decision_ok)then;message=trim(controller_message);fatal=.true.;return;endif
             rejected_trial=.true.;return
           endif
-          call decide_dg_hybrid_stage(icomm,controller,state,report,converged,decision_ok,controller_message)
+          if(stage_ok)then
+            call decide_dg_hybrid_stage(icomm,controller,state,report,converged,decision_ok,controller_message)
+          else
+            converged=.false.;decision_ok=.true.;controller_message=''
+          endif
           if(.not.decision_ok)then;message=trim(controller_message);fatal=.true.;return;endif
         else
-          call dg_hybrid_stage_tolerances(controls,lambda,tolerances)
-          call stage_consensus(report,tolerances,converged)
+          converged=stage_ok
         endif
         if(converged)return
         call mix_density(iteration,input_density,output_density,controls%density_damping,mixed_density,callback_ok)

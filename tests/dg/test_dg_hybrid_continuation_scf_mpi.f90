@@ -7,12 +7,13 @@ program test_dg_hybrid_continuation_scf_mpi
   use dg_hybrid_continuation_controller,only:s_dg_hybrid_controller_controls,s_dg_hybrid_trial_state,&
     default_dg_hybrid_controller_controls
   use dg_hybrid_continuation_residuals,only:s_dg_hybrid_residuals
+  use dg_hybrid_continuation_acceptance,only:s_dg_hybrid_acceptance_result
   use dg_hybrid_continuation_scf,only:s_dg_hybrid_continuation_callbacks,run_dg_hybrid_continuation_scf
   implicit none
   integer,parameter::nglobal=4
-  integer::icomm,id_rank,nproc,ierr,i,nlocal,position,phase,solve_count,accepted_stages,rollbacks
+  integer::icomm,id_rank,nproc,ierr,i,nlocal,position,phase,solve_count,accepted_stages,rollbacks,acceptance_count
   integer(int64),allocatable::ids(:)
-  real(real64),allocatable::dc_density(:),last_built_density(:)
+  real(real64),allocatable::dc_density(:),last_built_density(:),last_accepted_density(:)
   real(real64)::final_lambda
   complex(real64)::last_built_trace
   integer::last_built_density_epoch,last_built_trace_epoch
@@ -21,13 +22,13 @@ program test_dg_hybrid_continuation_scf_mpi
   type(s_dg_hybrid_trial_state)::seed,final_state
   type(s_dg_hybrid_continuation_callbacks)::callbacks
   logical::ok,first_volume,lambda_zero_passed,forced_growth_complete,poison_final,lambda_one_converged,fatal_positive,&
-    lambda_zero_gate_delayed,stale_operator_positive,rank_divergent_operator
+    lambda_zero_gate_delayed,stale_operator_positive,rank_divergent_operator,fail_symmetry_oracle,fail_grid_oracle
   character(256)::message
 
   call MPI_Init(ierr);icomm=MPI_COMM_WORLD
   call MPI_Comm_rank(icomm,id_rank,ierr);call MPI_Comm_size(icomm,nproc,ierr)
   nlocal=count([(mod(i-1,nproc)==id_rank,i=1,nglobal)])
-  allocate(ids(nlocal),dc_density(nlocal),last_built_density(nlocal));position=0
+  allocate(ids(nlocal),dc_density(nlocal),last_built_density(nlocal),last_accepted_density(nlocal));position=0
   do i=1,nglobal
     if(mod(i-1,nproc)/=id_rank)cycle
     position=position+1;ids(position)=i;dc_density(position)=0.15d0+0.01d0*i
@@ -40,7 +41,13 @@ program test_dg_hybrid_continuation_scf_mpi
   controls%intermediate_tolerance=[2d-5,2d-5,2d-5,2d-8]
   controls%final_tolerance=[2d-8,2d-8,2d-8,2d-10]
   controls%iteration_limit=80
+  fail_symmetry_oracle=.false.;fail_grid_oracle=.false.;acceptance_count=0
   call configure_callbacks()
+  callbacks%accept_candidate=>null();solve_count=0
+  call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
+  call require(.not.ok.and.solve_count==0.and.index(message,'collective')>0,&
+    'missing acceptance oracle was not rejected collectively before execution')
+  callbacks%accept_candidate=>acceptance_oracle
   callbacks%build_volume=>null();solve_count=0
   call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
   call require(.not.ok.and.solve_count==0.and.index(message,'collective')>0,&
@@ -78,6 +85,8 @@ program test_dg_hybrid_continuation_scf_mpi
   call require(final_state%trace(1,1)==last_built_trace.and.&
     final_state%density_epoch==last_built_density_epoch.and.final_state%trace_epoch==last_built_trace_epoch,&
     'published density and trace do not share the final operator-input Gamma provenance')
+  call require(all(final_state%density==last_accepted_density),&
+    'published final state differs from the state checked by the last acceptance oracle')
   call fill_state(seed);phase=0;solve_count=0;first_volume=.true.;lambda_zero_passed=.false.
   forced_growth_complete=.true.;poison_final=.true.;lambda_one_converged=.false.;lambda_zero_gate_delayed=.false.
   callbacks%seed_state=seed
@@ -105,6 +114,18 @@ program test_dg_hybrid_continuation_scf_mpi
     call require(.not.ok.and.index(message,'operator provenance')>0,&
       'rank-divergent operator provenance was accepted')
   endif
+  call fill_state(seed);callbacks%seed_state=seed;phase=0;solve_count=0;acceptance_count=0
+  first_volume=.true.;lambda_zero_passed=.false.;forced_growth_complete=.true.;poison_final=.false.
+  lambda_one_converged=.false.;fatal_positive=.false.;lambda_zero_gate_delayed=.false.
+  stale_operator_positive=.false.;rank_divergent_operator=.false.;fail_symmetry_oracle=.true.;fail_grid_oracle=.false.
+  call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
+  call require(.not.ok.and.acceptance_count>0,'candidate stage bypassed the symmetry acceptance oracle')
+  call fill_state(seed);callbacks%seed_state=seed;phase=0;solve_count=0;acceptance_count=0
+  first_volume=.true.;lambda_zero_passed=.false.;forced_growth_complete=.true.;poison_final=.false.
+  lambda_one_converged=.false.;fatal_positive=.false.;lambda_zero_gate_delayed=.false.
+  stale_operator_positive=.false.;rank_divergent_operator=.false.;fail_symmetry_oracle=.false.;fail_grid_oracle=.true.
+  call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
+  call require(.not.ok.and.acceptance_count>0,'candidate stage bypassed the reconstructed-grid acceptance oracle')
   if(id_rank==0)write(*,'(a,i0,a)')'PASS hybrid continuation SCF on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
@@ -112,8 +133,28 @@ contains
     callbacks%build_volume=>volume_build;callbacks%solve_full=>full_solve
     callbacks%refresh_projector=>projector_refresh;callbacks%refresh_density_trace=>density_trace_refresh
     callbacks%evaluate_residuals=>residual_evaluation;callbacks%mix_density=>density_mix
-    callbacks%seed_state=seed;callbacks%face_count=1;callbacks%maximum_inner_iterations=80
+    callbacks%accept_candidate=>acceptance_oracle
+    callbacks%seed_state=seed;callbacks%face_count=1;callbacks%global_face_count=1
+    callbacks%face_topology_fingerprint=96_int64
+    callbacks%maximum_inner_iterations=80
   end subroutine configure_callbacks
+  subroutine acceptance_oracle(lambda,state,receipt)
+    real(real64),intent(in)::lambda
+    type(s_dg_hybrid_trial_state),intent(in)::state
+    type(s_dg_hybrid_acceptance_result),intent(out)::receipt
+    acceptance_count=acceptance_count+1
+    last_accepted_density=state%density
+    receipt=s_dg_hybrid_acceptance_result()
+    receipt%valid=lambda>=0d0.and.state%trace_cache_valid
+    receipt%symmetry_complete=.not.fail_symmetry_oracle;receipt%grid_complete=.not.fail_grid_oracle
+    receipt%face_complete=.true.;receipt%expected_occupied_count=2;receipt%checked_occupied_count=2
+    receipt%checked_face_count=1
+    receipt%analysis_fingerprint=11_int64;receipt%basis_fingerprint=12_int64
+    receipt%operator_fingerprint=state%operator_value_fingerprint;receipt%state_fingerprint=14_int64
+    receipt%action_fingerprint=15_int64
+    receipt%action_operator_fingerprint=state%operator_value_fingerprint
+    receipt%face_topology_fingerprint=96_int64
+  end subroutine acceptance_oracle
   subroutine fill_state(state)
     type(s_dg_hybrid_trial_state),intent(out)::state
     allocate(state%density(nlocal),state%potential(nlocal),state%occupations(2),state%eigenvalues(2),&
