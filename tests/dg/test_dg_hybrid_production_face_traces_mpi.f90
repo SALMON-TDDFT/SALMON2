@@ -1,0 +1,74 @@
+#include "config.h"
+program test_dg_hybrid_production_face_traces_mpi
+  use mpi,only:MPI_Allreduce,MPI_Comm_rank,MPI_Comm_size,MPI_COMM_WORLD,MPI_Finalize,MPI_Init,&
+    MPI_INTEGER,MPI_MAX,MPI_SUCCESS
+  use,intrinsic::iso_fortran_env,only:int64,real64
+  use dg_hybrid_production_face_traces,only:s_dg_hybrid_production_face_trace,&
+    build_dg_hybrid_production_face_trace,assemble_dg_hybrid_production_face
+  use dg_hybrid_sipg_operator,only:s_dg_hybrid_sipg_face_operator
+  implicit none
+  integer::icomm,id_rank,nproc,ierr
+  integer::effective_ids(3),group_action(3,2),bad_action(3,2)
+  integer(int64)::point_ids(2)
+  real(real64)::weights(2),normal(3)
+  complex(real64)::minus_values(2,2),plus_values(2,1),minus_outward(2,2),plus_outward(2,1)
+  type(s_dg_hybrid_production_face_trace)::trace,bad_trace
+  type(s_dg_hybrid_sipg_face_operator)::face
+  logical::ok
+  character(256)::message
+
+  call MPI_Init(ierr);icomm=MPI_COMM_WORLD
+  call MPI_Comm_rank(icomm,id_rank,ierr);call MPI_Comm_size(icomm,nproc,ierr)
+  effective_ids=[1,2,3];group_action=reshape([1,2,3,2,1,3],[3,2])
+  point_ids=[101_int64,109_int64];weights=[0.7d0,1.1d0];normal=[1d0,0d0,0d0]
+  minus_values=reshape([cmplx(1d0,0.1d0,real64),cmplx(0.8d0,-0.2d0,real64),&
+    cmplx(-0.3d0,0.2d0,real64),cmplx(0.4d0,0.1d0,real64)],[2,2])
+  plus_values(:,1)=[cmplx(0.6d0,-0.1d0,real64),cmplx(0.5d0,0.3d0,real64)]
+  minus_outward=0.25d0*minus_values;plus_outward(:,1)=-0.4d0*plus_values(:,1)
+
+  call build_dg_hybrid_production_face_trace(icomm,17,0,1,2,[1,0,0],normal,0.8d0,point_ids,point_ids,&
+    weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,group_action,&
+    trace,ok,message)
+  call require(ok,trim(message))
+  call require(trace%frozen.and.trace%fingerprint/=0_int64,'production face was not frozen')
+  call require(trace%minus_fragment==1.and.trace%plus_fragment==2,'canonical fragment orientation changed')
+  call require(all(trace%periodic_shift==[1,0,0]),'periodic image shift was not retained')
+  call require(maxval(abs(trace%derivative_minus-minus_outward))<1d-14,&
+    'minus derivative is not expressed in the canonical normal')
+  call require(maxval(abs(trace%derivative_plus+plus_outward))<1d-14,&
+    'plus outward derivative was not converted to the canonical normal')
+  call assemble_dg_hybrid_production_face(icomm,trace,6d0,face,ok,message)
+  call require(ok,trim(message))
+  call require(maxval(abs(face%total(1:2,3)))>1d-12,'cross-fragment SIPG block is zero')
+  call require(maxval(abs(face%total-conjg(transpose(face%total))))<1d-13,'production SIPG block is not Hermitian')
+
+  if(nproc>1)then
+    call build_dg_hybrid_production_face_trace(icomm,18,id_rank,1,2,[0,0,0],normal,0.8d0,point_ids,point_ids,&
+      weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,group_action,&
+      bad_trace,ok,message)
+    call require(.not.ok,'rank-disagreeing canonical owner was accepted')
+  endif
+  call build_dg_hybrid_production_face_trace(icomm,19,0,1,2,[0,0,0],normal,0.8d0,point_ids,[101_int64,110_int64],&
+    weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,group_action,&
+    bad_trace,ok,message)
+  call require(.not.ok,'incomplete face point correspondence was accepted')
+  bad_action=group_action;bad_action(3,2)=2
+  call build_dg_hybrid_production_face_trace(icomm,20,0,1,2,[0,0,0],normal,0.8d0,point_ids,point_ids,&
+    weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,bad_action,&
+    bad_trace,ok,message)
+  call require(.not.ok,'nonclosed effective selection action was accepted')
+  if(id_rank==0)write(*,'(a,i0,a)')'PASS production face traces on ',nproc,' ranks'
+  call MPI_Finalize(ierr)
+contains
+  subroutine require(condition,label)
+    logical,intent(in)::condition
+    character(*),intent(in)::label
+    integer::local_bad,global_bad
+    local_bad=merge(0,1,condition)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(id_rank==0)write(0,'(a)')trim(label)
+      error stop 1
+    endif
+  end subroutine require
+end program test_dg_hybrid_production_face_traces_mpi
