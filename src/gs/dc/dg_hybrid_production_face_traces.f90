@@ -40,8 +40,7 @@ contains
     character(*),intent(out)::message
 #ifdef USE_MPI
     type(s_dg_hybrid_sipg_face_operator)::face
-    integer,allocatable::ownership(:)
-    integer::i,j,k,row,local_bad,global_bad,ierr
+    integer::i,j,k,row,local_bad
     logical::face_ok
     character(256)::face_message
 
@@ -52,14 +51,7 @@ contains
     do i=1,size(row_ids)
       if(count(row_ids==row_ids(i))/=1)local_bad=1
     enddo
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid production interface row layout';return;endif
-    allocate(ownership(global_count));ownership=0
-    do i=1,size(row_ids);ownership(int(row_ids(i)))=1;enddo
-    call MPI_Allreduce(MPI_IN_PLACE,ownership,global_count,MPI_INTEGER,MPI_SUM,icomm,ierr)
-    if(ierr/=MPI_SUCCESS.or.any(ownership/=1))then
-      message='production interface rows are not owned exactly once';return
-    endif
+    if(local_bad/=0)then;message='invalid production interface row layout';return;endif
     allocate(interface_rows(size(row_ids),global_count));interface_rows=(0d0,0d0)
     do i=1,size(traces)
       call assemble_dg_hybrid_production_face(icomm,traces(i),penalty_factor,face,face_ok,face_message)
@@ -471,7 +463,7 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     complex(real64),allocatable::jump(:),average_derivative(:)
-    integer::point,i,j,n,id_rank,local_bad,global_bad,ierr,local_count,minimum_count,maximum_count
+    integer::point,i,j,n,local_bad,global_bad,ierr,local_count,minimum_count,maximum_count
     integer(int64)::recomputed,minimum_hash,maximum_hash
     ok=.false.;message=''
     call validate_stored_face(trace,local_bad,recomputed)
@@ -494,34 +486,24 @@ contains
     if(local_bad/=0)then;message='invalid mutable production face payload';return;endif
 #endif
 #ifdef USE_MPI
-    call MPI_Comm_rank(icomm,id_rank,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='production grouped face rank query failed';return;endif
     n=size(trace%basis_ids_minus)+size(trace%basis_ids_plus)
     face%global_face_id=trace%global_face_id;face%periodic_shift=trace%periodic_shift;face%basis_count=n
     allocate(face%global_basis_ids(n),face%consistency(n,n),face%adjoint_consistency(n,n),&
       face%raw_penalty(n,n),face%physical_penalty(n,n),face%total(n,n),jump(n),average_derivative(n))
     face%global_basis_ids=[trace%basis_ids_minus,trace%basis_ids_plus]
     face%consistency=(0d0,0d0);face%adjoint_consistency=(0d0,0d0);face%raw_penalty=(0d0,0d0)
-    if(id_rank==trace%owner_rank)then
-      do point=1,size(trace%weights)
-        jump=[trace%value_minus(point,:),-trace%value_plus(point,:)]
-        average_derivative=0.5d0*[trace%derivative_minus(point,:),trace%derivative_plus(point,:)]
-        do j=1,n;do i=1,n
-          face%consistency(i,j)=face%consistency(i,j)-&
-            0.5d0*trace%weights(point)*conjg(jump(i))*average_derivative(j)
-          face%adjoint_consistency(i,j)=face%adjoint_consistency(i,j)-&
-            0.5d0*trace%weights(point)*conjg(average_derivative(i))*jump(j)
-          face%raw_penalty(i,j)=face%raw_penalty(i,j)+trace%weights(point)*(penalty_factor/trace%h_normal)*&
-            conjg(jump(i))*jump(j)
-        enddo;enddo
-      enddo
-    endif
-    call reduce_complex_matrix(face%consistency,icomm,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='production consistency matrix reduction failed';return;endif
-    call reduce_complex_matrix(face%adjoint_consistency,icomm,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='production adjoint matrix reduction failed';return;endif
-    call reduce_complex_matrix(face%raw_penalty,icomm,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='production penalty matrix reduction failed';return;endif
+    do point=1,size(trace%weights)
+      jump=[trace%value_minus(point,:),-trace%value_plus(point,:)]
+      average_derivative=0.5d0*[trace%derivative_minus(point,:),trace%derivative_plus(point,:)]
+      do j=1,n;do i=1,n
+        face%consistency(i,j)=face%consistency(i,j)-&
+          0.5d0*trace%weights(point)*conjg(jump(i))*average_derivative(j)
+        face%adjoint_consistency(i,j)=face%adjoint_consistency(i,j)-&
+          0.5d0*trace%weights(point)*conjg(average_derivative(i))*jump(j)
+        face%raw_penalty(i,j)=face%raw_penalty(i,j)+trace%weights(point)*(penalty_factor/trace%h_normal)*&
+          conjg(jump(i))*jump(j)
+      enddo;enddo
+    enddo
     face%physical_penalty=0.5d0*face%raw_penalty
     face%total=face%consistency+face%adjoint_consistency+face%physical_penalty
     ok=.true.
