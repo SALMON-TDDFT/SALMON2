@@ -32,6 +32,8 @@ subspace = None
 degree = None
 chunk_width = None
 chunk_count = None
+max_cycles = None
+residual_tolerance = None
 locked_counts = []
 pattern = re.compile(r"CheFSI cycle:\s+\d+\s+maximum residual:\s+(\S+)")
 for line in output_file.read_text().splitlines():
@@ -47,6 +49,12 @@ for line in output_file.read_text().splitlines():
     chunk_count_match = re.search(r"CheFSI filter chunk count:\s+(\d+)", line)
     if chunk_count_match:
         chunk_count = int(chunk_count_match.group(1))
+    max_cycles_match = re.search(r"CheFSI maximum cycles:\s+(\d+)", line)
+    if max_cycles_match:
+        max_cycles = int(max_cycles_match.group(1))
+    tolerance_match = re.search(r"CheFSI residual tolerance:\s+(\S+)", line)
+    if tolerance_match:
+        residual_tolerance = float(tolerance_match.group(1))
     locked_match = re.search(r"CheFSI locked eigenpairs:\s+(\d+)", line)
     if locked_match:
         locked_counts.append(int(locked_match.group(1)))
@@ -67,6 +75,10 @@ if degree != 60:
 if chunk_width != 17 or chunk_count != 5:
     print("unexpected CheFSI filter chunks: width=%s count=%s" %
           (chunk_width, chunk_count))
+    sys.exit(1)
+if max_cycles != 200 or residual_tolerance != 1.0e-7:
+    print("unexpected CheFSI convergence controls: cycles=%s tolerance=%s" %
+          (max_cycles, residual_tolerance))
     sys.exit(1)
 if not locked_counts or locked_counts != sorted(set(locked_counts)):
     print("unexpected CheFSI locking sequence: %s" % locked_counts)

@@ -75,6 +75,7 @@ subroutine main_dft_k_expand_single
   type(s_mixing) :: mixing
   type(s_ofile)  :: ofl
   type(s_k_expand) :: kex
+  type(s_unfold) :: unfold
   
   integer :: i,ix,iy,iz,ik
   integer :: Miter,nspin
@@ -92,7 +93,7 @@ subroutine main_dft_k_expand_single
   if(yn_restart /= 'y') stop "error: yn_restart must be y"
   if(process_allocation /= 'orbital_sequential') stop "error: process_allocation must be orbital_sequential"
 
-  call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl)
+  call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl,unfold)
   allocate( rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin) )
 
 

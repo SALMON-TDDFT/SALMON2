@@ -19,11 +19,9 @@ module lcfo_diag_chefsi
   private
 
   integer, parameter :: dense_block_size = 64
-  integer, parameter :: max_filter_cycle = 200
   integer, parameter :: lanczos_max_steps = 30
   integer(8), parameter :: filter_workspace_target_bytes = &
   & 64_8*1024_8*1024_8
-  real(8), parameter :: residual_tolerance = 1d-7
   real(8), parameter :: lock_activation_tolerance = 1d-3
   real(8), parameter :: lock_gap_relative_tolerance = 1d-6
   real(8), parameter :: lanczos_residual_factor = 10d0
@@ -68,8 +66,8 @@ module lcfo_diag_chefsi
 
 contains
 
-  subroutine diag_chefsi(dc,nspin,filter_degree,filter_chunk_size,n_basis, &
-  & n_mat,n_halo,halo_src, &
+  subroutine diag_chefsi(dc,nspin,filter_degree,filter_chunk_size,max_cycle, &
+  & residual_tolerance,n_basis,n_mat,n_halo,halo_src, &
   & halo_dst,halo_root_src,halo_dvec,h_diag,h_halo,esp_tot,coef_wf)
     use communication, only: comm_bcast, comm_create_group, &
     & comm_free_group, comm_get_max, comm_isend, comm_irecv, &
@@ -80,10 +78,11 @@ contains
     & timer_begin,timer_end
     implicit none
     type(s_dcdft), intent(in) :: dc
-    integer, intent(in) :: nspin,filter_degree,filter_chunk_size
+    integer, intent(in) :: nspin,filter_degree,filter_chunk_size,max_cycle
     integer, intent(in) :: n_basis(:,:),n_mat(:),n_halo
     integer, intent(in) :: halo_src(:),halo_dst(:),halo_root_src(:)
     integer, intent(in) :: halo_dvec(:,:)
+    real(8), intent(in) :: residual_tolerance
     real(8), intent(in) :: h_diag(:,:,:),h_halo(:,:,:,:)
     real(8), intent(inout) :: esp_tot(:,:)
     real(8), allocatable, intent(inout) :: coef_wf(:,:,:)
@@ -119,6 +118,8 @@ contains
     if(dc%id_tot==0) then
       write(*,*) "CheFSI subspace:",nsub," target:",dc%nstate_tot
       write(*,*) "CheFSI polynomial degree:",filter_degree
+      write(*,*) "CheFSI maximum cycles:",max_cycle
+      write(*,*) "CheFSI residual tolerance:",residual_tolerance
     end if
 
     do ispin=1,nspin
@@ -236,7 +237,7 @@ contains
         write(*,*) "CheFSI initial maximum residual:",max_residual
       end if
 
-      do cycle=1,max_filter_cycle
+      do cycle=1,max_cycle
         if(max_residual <= residual_tolerance) exit
         if(nsub==n_mat(s)) exit
         lambda_cut = eigenvalue(nsub)
