@@ -45,6 +45,8 @@ subroutine main_multiscale_ssbe(icomm)
     integer :: fh_sbe_wave
     integer, allocatable :: fh_sbe_obs(:)
     integer, allocatable :: fh_sbe_rt(:)
+    integer, allocatable :: fh_sbe_rt_energy(:)
+    real(8), allocatable :: E_tot_tmp(:)
 
     call comm_get_groupinfo(icomm, irank, nproc)
 
@@ -165,12 +167,20 @@ subroutine main_multiscale_ssbe(icomm)
     if (irank_macro == 0) then
         ! _sbe_rt.data
         allocate(fh_sbe_rt(imacro_min:imacro_max))
+        allocate(fh_sbe_rt_energy(imacro_min:imacro_max))
+        allocate(E_tot_tmp(imacro_min:imacro_max)); E_tot_tmp(:) = 0.0d0
         do imacro = imacro_min, imacro_max
             write(tmp, "(a,a,a,i6.6,a,a,a)") trim(base_directory), &
                 & trim(sysname), "_sbe_m/m", imacro, "/", trim(sysname), "_sbe_rt.data"
             fh_sbe_rt(imacro) = get_filehandle()
             open(unit=fh_sbe_rt(imacro), file=trim(tmp), action="write")
             call write_sbe_rt_header(fh_sbe_rt(imacro))
+
+            write(tmp, "(a,a,a,i6.6,a,a,a)") trim(base_directory), &
+                & trim(sysname), "_sbe_m/m", imacro, "/", trim(sysname), "_sbe_rt_energy.data"
+            fh_sbe_rt_energy(imacro) = get_filehandle()
+            open(unit=fh_sbe_rt_energy(imacro), file=trim(tmp), action="write")
+            call write_sbe_rt_energy_header(fh_sbe_rt_energy(imacro))
         end do
     end if
 
@@ -257,10 +267,18 @@ subroutine main_multiscale_ssbe(icomm)
                         & Ac_macro(1:3, imacro), E_macro(1:3, imacro), &
                         & Ac_macro(1:3, imacro), E_macro(1:3, imacro), &
                         & Jmat_macro(1:3, imacro))
+                    E_tot_tmp(imacro) = E_tot_tmp(imacro) &
+                        & + dot_product(E_macro(1:3, imacro), -Jmat_macro(1:3, imacro)) &
+                        & * gs(itbl_macro_itype_sbe(imacro))%volume * dt
+                    if (mod(it, 50) == 0) then
+                        call write_sbe_rt_energy_line(fh_sbe_rt_energy(imacro), t, &
+                            & E_tot_tmp(imacro), E_tot_tmp(imacro))
+                    end if
                 end do
                 if (mod(it, 500) == 0) then
                     do imacro = imacro_min, imacro_max
                         flush(fh_sbe_rt(imacro))
+                        flush(fh_sbe_rt_energy(imacro))
                     end do
                 end if
             end if
@@ -280,6 +298,7 @@ subroutine main_multiscale_ssbe(icomm)
         if (nmacro > 0) then
             do imacro = imacro_min, imacro_max
                 close(fh_sbe_rt(imacro))
+                close(fh_sbe_rt_energy(imacro))
             end do
         end if
     end if
