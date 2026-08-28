@@ -1,11 +1,12 @@
 #include "config.h"
 program test_dg_hybrid_production_face_traces_mpi
   use mpi,only:MPI_Allreduce,MPI_Comm_rank,MPI_Comm_size,MPI_COMM_WORLD,MPI_Finalize,MPI_Init,&
-    MPI_INTEGER,MPI_MAX,MPI_SUCCESS
+    MPI_DOUBLE_PRECISION,MPI_INTEGER,MPI_MAX,MPI_SUCCESS,MPI_SUM
   use,intrinsic::iso_fortran_env,only:int64,real64
   use dg_hybrid_production_face_traces,only:s_dg_hybrid_production_face_trace,&
     build_dg_hybrid_production_face_trace,assemble_dg_hybrid_production_face,&
-    validate_dg_hybrid_production_face_collection,materialize_dg_hybrid_production_face_collection
+    validate_dg_hybrid_production_face_collection,materialize_dg_hybrid_production_face_collection,&
+    assemble_dg_hybrid_production_interface_rows
   use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
   use dg_hybrid_sipg_operator,only:s_dg_hybrid_sipg_face_operator
   implicit none
@@ -13,8 +14,10 @@ program test_dg_hybrid_production_face_traces_mpi
   integer::effective_ids(3),group_action(3,2),bad_action(3,2),non_group_action(3,3)
   integer(int64)::point_ids(2)
   real(real64)::weights(2),normal(3)
+  real(real64)::local_interface_norm,global_interface_norm
   complex(real64)::minus_values(2,2),plus_values(2,1),minus_outward(2,2),plus_outward(2,1)
   complex(real64),allocatable::empty_values(:,:),empty_derivatives(:,:)
+  complex(real64),allocatable::interface_rows(:,:)
   integer,allocatable::empty_ids(:)
   type(s_dg_hybrid_production_face_trace)::trace,bad_trace
   type(s_dg_hybrid_production_face_trace),allocatable::production_faces(:)
@@ -22,6 +25,7 @@ program test_dg_hybrid_production_face_traces_mpi
   type(s_dg_hybrid_sipg_face_operator)::face
   integer::origins(3,2),sizes(3,2),grid_size(3),p,x,y
   integer(int64)::all_point_ids(8)
+  integer(int64),allocatable::owned_row_ids(:)
   complex(real64)::analytic_values(8,2)
   logical::ok
   character(256)::message
@@ -123,6 +127,17 @@ program test_dg_hybrid_production_face_traces_mpi
     'production normal derivative disagrees with the supplied SALMON stencil')
   call assemble_dg_hybrid_production_face(icomm,production_faces(1),6d0,face,ok,message)
   call require(ok.and.abs(face%total(1,2))>1d-12,'materialized production face lacks SIPG coupling')
+  allocate(owned_row_ids(count([(mod(p-1,nproc)==id_rank,p=1,2)])))
+  owned_row_ids=pack([1_int64,2_int64],[(mod(p-1,nproc)==id_rank,p=1,2)])
+  call assemble_dg_hybrid_production_interface_rows(icomm,2,owned_row_ids,production_faces,6d0,&
+    interface_rows,ok,message)
+  call require(ok,trim(message))
+  call require(size(interface_rows,1)==size(owned_row_ids).and.size(interface_rows,2)==2,&
+    'production interface rows have the wrong distributed shape')
+  local_interface_norm=sum(abs(interface_rows)**2)
+  call MPI_Allreduce(local_interface_norm,global_interface_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,icomm,ierr)
+  call require(ierr==MPI_SUCCESS.and.global_interface_norm>1d-24,&
+    'production interface row assembly lost all SIPG coupling')
   origins(1,2)=2;sizes(1,2)=3
   call materialize_dg_hybrid_production_face_collection(icomm,origins,sizes,grid_size,[1d0,2d0,3d0],&
     reshape([0.5d0,0.25d0,0.125d0],[1,3]),fragment_bases,[1,2],reshape([1,2],[2,1]),production_faces,ok,message)

@@ -26,8 +26,62 @@ module dg_hybrid_production_face_traces
   end type s_dg_hybrid_production_face_trace
 
   public::build_dg_hybrid_production_face_trace,assemble_dg_hybrid_production_face,&
-    validate_dg_hybrid_production_face_collection,materialize_dg_hybrid_production_face_collection
+    validate_dg_hybrid_production_face_collection,materialize_dg_hybrid_production_face_collection,&
+    assemble_dg_hybrid_production_interface_rows
 contains
+  subroutine assemble_dg_hybrid_production_interface_rows(icomm,global_count,row_ids,traces,penalty_factor,&
+      interface_rows,ok,message)
+    integer,intent(in)::icomm,global_count
+    integer(int64),intent(in)::row_ids(:)
+    type(s_dg_hybrid_production_face_trace),intent(in)::traces(:)
+    real(real64),intent(in)::penalty_factor
+    complex(real64),allocatable,intent(out)::interface_rows(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    type(s_dg_hybrid_sipg_face_operator)::face
+    integer,allocatable::ownership(:)
+    integer::i,j,k,row,local_bad,global_bad,ierr
+    logical::face_ok
+    character(256)::face_message
+
+    ok=.false.;message='';local_bad=0
+    if(global_count<1.or.size(traces)<1.or..not.ieee_is_finite(penalty_factor).or.penalty_factor<=0d0)&
+      local_bad=1
+    if(any(row_ids<1_int64).or.any(row_ids>int(global_count,int64)))local_bad=1
+    do i=1,size(row_ids)
+      if(count(row_ids==row_ids(i))/=1)local_bad=1
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid production interface row layout';return;endif
+    allocate(ownership(global_count));ownership=0
+    do i=1,size(row_ids);ownership(int(row_ids(i)))=1;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,ownership,global_count,MPI_INTEGER,MPI_SUM,icomm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(ownership/=1))then
+      message='production interface rows are not owned exactly once';return
+    endif
+    allocate(interface_rows(size(row_ids),global_count));interface_rows=(0d0,0d0)
+    do i=1,size(traces)
+      call assemble_dg_hybrid_production_face(icomm,traces(i),penalty_factor,face,face_ok,face_message)
+      if(.not.face_ok)then;message=trim(face_message);return;endif
+      if(any(face%global_basis_ids<1).or.any(face%global_basis_ids>global_count))then
+        message='production face basis ID lies outside the fixed catalog';return
+      endif
+      do j=1,size(face%global_basis_ids)
+        row=findloc(row_ids,int(face%global_basis_ids(j),int64),dim=1)
+        if(row==0)cycle
+        do k=1,size(face%global_basis_ids)
+          interface_rows(row,face%global_basis_ids(k))=&
+            interface_rows(row,face%global_basis_ids(k))+face%total(j,k)
+        enddo
+      enddo
+    enddo
+    ok=.true.
+#else
+    ok=.false.;message='production interface row assembly requires MPI'
+#endif
+  end subroutine assemble_dg_hybrid_production_interface_rows
+
   subroutine materialize_dg_hybrid_production_face_collection(icomm,origins,sizes,global_size,hgs,coef_nab,bases,&
       effective_ids,group_action,faces,ok,message)
     integer,intent(in)::icomm,origins(:,:),sizes(:,:),global_size(3),effective_ids(:),group_action(:,:)
