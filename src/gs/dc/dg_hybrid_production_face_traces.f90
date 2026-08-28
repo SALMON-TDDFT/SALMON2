@@ -5,8 +5,8 @@ module dg_hybrid_production_face_traces
   use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
   use dg_hybrid_sipg_operator,only:s_dg_hybrid_sipg_face_operator
 #ifdef USE_MPI
-  use mpi,only:MPI_Allreduce,MPI_Comm_rank,MPI_DOUBLE_COMPLEX,MPI_IN_PLACE,MPI_INTEGER,MPI_INTEGER8,&
-    MPI_MAX,MPI_MIN,MPI_SUCCESS,MPI_SUM
+  use mpi,only:MPI_Allreduce,MPI_Comm_rank,MPI_Comm_size,MPI_DOUBLE_COMPLEX,MPI_INTEGER,MPI_INTEGER8,&
+    MPI_MAX,MPI_MIN,MPI_STATUS_IGNORE,MPI_SUCCESS,MPI_Sendrecv
 #endif
   implicit none
   private
@@ -43,7 +43,6 @@ contains
     integer::i,j,k,row,local_bad
     logical::face_ok
     character(256)::face_message
-
     ok=.false.;message='';local_bad=0
     if(global_count<1.or.size(traces)<1.or..not.ieee_is_finite(penalty_factor).or.penalty_factor<=0d0)&
       local_bad=1
@@ -54,6 +53,7 @@ contains
     if(local_bad/=0)then;message='invalid production interface row layout';return;endif
     allocate(interface_rows(size(row_ids),global_count));interface_rows=(0d0,0d0)
     do i=1,size(traces)
+      if(.not.traces(i)%frozen)cycle
       call assemble_dg_hybrid_production_face(icomm,traces(i),penalty_factor,face,face_ok,face_message)
       if(.not.face_ok)then;message=trim(face_message);return;endif
       if(any(face%global_basis_ids<1).or.any(face%global_basis_ids>global_count))then
@@ -75,8 +75,9 @@ contains
   end subroutine assemble_dg_hybrid_production_interface_rows
 
   subroutine materialize_dg_hybrid_production_face_collection(icomm,origins,sizes,global_size,hgs,coef_nab,bases,&
-      effective_ids,group_action,faces,ok,message)
-    integer,intent(in)::icomm,origins(:,:),sizes(:,:),global_size(3),effective_ids(:),group_action(:,:)
+      basis_owner,basis_fragment,effective_ids,group_action,faces,ok,message)
+    integer,intent(in)::icomm,origins(:,:),sizes(:,:),global_size(3),basis_owner(:),basis_fragment(:),&
+      effective_ids(:),group_action(:,:)
     real(real64),intent(in)::hgs(3),coef_nab(:,:)
     type(s_dg_hybrid_fragment_basis),intent(in)::bases(:)
     type(s_dg_hybrid_production_face_trace),allocatable,intent(out)::faces(:)
@@ -87,20 +88,21 @@ contains
     complex(real64),allocatable::value_minus(:,:),value_plus(:,:),derivative_minus(:,:),derivative_plus(:,:)
     integer::fragment,axis,tangent(2),t1,t2,position(3),neighbor_position(3),neighbor,face_count,cell_count,&
       minus_fragment,plus_fragment,minus_point(3),plus_point(3),normal_sign,periodic_shift(3),&
-      i,j,g,npoint,column,ierr,local_bad,global_bad,minimum_integer,maximum_integer
-    integer,allocatable::basis_fragment(:),ownership(:),ids_minus(:),ids_plus(:),cell_group(:),&
+      i,j,g,npoint,column,id_rank,nproc,ierr,local_bad,minimum_integer
+    integer,allocatable::ids_minus(:),ids_plus(:),cell_group(:),&
       cell_axis(:),cell_minus_fragment(:),cell_plus_fragment(:),cell_normal_sign(:),cell_shift(:,:),&
       cell_minus_position(:,:),cell_plus_position(:,:),group_axis(:),group_minus_fragment(:),&
       group_plus_fragment(:),group_normal_sign(:),group_shift(:,:)
     integer(int64),allocatable::minus_ids(:),plus_ids(:)
-    integer(int64)::metadata_hash,minimum_hash,maximum_hash
     real(real64)::normal(3),weight
-    logical::face_ok
-    character(256)::face_message
-
+    logical::face_ok,active
     ok=.false.;message='';local_bad=0
+    call MPI_Comm_rank(icomm,id_rank,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Comm_size(icomm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
     if(size(origins,1)/=3.or.any(shape(origins)/=shape(sizes)).or.size(origins,2)<2.or.&
-        size(bases)/=size(origins,2).or.any(global_size<=0).or.any(sizes<=0).or.any(origins<0).or.&
+        size(bases)/=size(origins,2).or.size(basis_owner)/=size(effective_ids).or.&
+        size(basis_fragment)/=size(effective_ids).or.any(basis_owner<0).or.any(basis_owner>=nproc).or.&
+        any(basis_fragment<1).or.any(basis_fragment>size(bases)).or.any(global_size<=0).or.any(sizes<=0).or.any(origins<0).or.&
         any(.not.ieee_is_finite(hgs)).or.any(hgs<=0d0).or.size(coef_nab,1)<1.or.size(coef_nab,2)/=3.or.&
         any(.not.ieee_is_finite(coef_nab)))local_bad=1
     if(local_bad==0)then
@@ -108,37 +110,15 @@ contains
         if(any(origins(:,fragment)+sizes(:,fragment)>global_size))local_bad=1
       enddo
     endif
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid production fragment topology input';return;endif
-    metadata_hash=geometry_fingerprint(origins,sizes,global_size,hgs,coef_nab)
-    call MPI_Allreduce(size(bases),minimum_integer,1,MPI_INTEGER,MPI_MIN,icomm,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='production basis-count minimum reduction failed';return;endif
-    call MPI_Allreduce(size(bases),maximum_integer,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='production basis-count maximum reduction failed';return;endif
-    call MPI_Allreduce(metadata_hash,minimum_hash,1,MPI_INTEGER8,MPI_MIN,icomm,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='production topology fingerprint minimum reduction failed';return;endif
-    call MPI_Allreduce(metadata_hash,maximum_hash,1,MPI_INTEGER8,MPI_MAX,icomm,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='production topology fingerprint maximum reduction failed';return;endif
-    if(minimum_integer/=maximum_integer.or.minimum_hash/=maximum_hash)then
-      message='rank-disagreeing production fragment topology';return
-    endif
+    if(local_bad/=0)then;message='invalid production fragment topology input';return;endif
     call validate_basis_materialization(bases,effective_ids,local_bad)
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid production fragment basis materialization';return;endif
-    allocate(basis_fragment(size(effective_ids)),ownership(size(effective_ids)))
-    basis_fragment=0;ownership=0
+    if(local_bad/=0)then;message='invalid production fragment basis materialization';return;endif
+    local_bad=0
     do fragment=1,size(bases);do i=1,size(bases(fragment)%global_ids)
       minimum_integer=findloc(effective_ids,int(bases(fragment)%global_ids(i)),dim=1)
-      if(minimum_integer>0)then
-        basis_fragment(minimum_integer)=fragment;ownership(minimum_integer)=ownership(minimum_integer)+1
-      endif
+      if(minimum_integer<=0.or.basis_owner(minimum_integer)/=id_rank.or.basis_fragment(minimum_integer)/=fragment)local_bad=1
     enddo;enddo
-    call MPI_Allreduce(MPI_IN_PLACE,basis_fragment,size(basis_fragment),MPI_INTEGER,MPI_MAX,icomm,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='production basis fragment directory failed';return;endif
-    call MPI_Allreduce(MPI_IN_PLACE,ownership,size(ownership),MPI_INTEGER,MPI_SUM,icomm,ierr)
-    if(ierr/=MPI_SUCCESS.or.any(ownership/=1).or.any(basis_fragment<1))then
-      message='production basis columns are not owned exactly once';return
-    endif
+    if(local_bad/=0)then;message='local basis disagrees with the frozen owner directory';return;endif
     if(.not.partition_is_complete(origins,sizes,global_size))then
       message='production fragment geometry is overlapping or incomplete';return
     endif
@@ -228,22 +208,24 @@ contains
           if(.not.face_ok)local_bad=1
         enddo
       enddo
-      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
-      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='production interface lacks stencil support';return;endif
-      call reduce_complex_matrix(value_minus,icomm,ierr);if(ierr/=MPI_SUCCESS)return
-      call reduce_complex_matrix(derivative_minus,icomm,ierr);if(ierr/=MPI_SUCCESS)return
-      call reduce_complex_matrix(value_plus,icomm,ierr);if(ierr/=MPI_SUCCESS)return
-      call reduce_complex_matrix(derivative_plus,icomm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(local_bad/=0)then;message='production interface lacks stencil support';return;endif
+      call exchange_face_columns(value_minus,ids_minus,[ids_minus,ids_plus],effective_ids,basis_owner,icomm,110,ierr)
+      if(ierr/=MPI_SUCCESS)return
+      call exchange_face_columns(derivative_minus,ids_minus,[ids_minus,ids_plus],effective_ids,basis_owner,icomm,111,ierr)
+      if(ierr/=MPI_SUCCESS)return
+      call exchange_face_columns(value_plus,ids_plus,[ids_minus,ids_plus],effective_ids,basis_owner,icomm,112,ierr)
+      if(ierr/=MPI_SUCCESS)return
+      call exchange_face_columns(derivative_plus,ids_plus,[ids_minus,ids_plus],effective_ids,basis_owner,icomm,113,ierr)
+      if(ierr/=MPI_SUCCESS)return
       normal=0d0;normal(axis)=real(normal_sign,real64);weight=hgs(tangent(1))*hgs(tangent(2))
-      call build_dg_hybrid_production_face_trace(icomm,g,minus_fragment,plus_fragment,&
-        periodic_shift,normal,hgs(axis),minus_ids,plus_ids,[(weight,i=1,npoint)],ids_minus,ids_plus,&
-        value_minus,derivative_minus,value_plus,-derivative_plus,effective_ids,group_action,candidate(g),&
-        face_ok,face_message)
-      if(.not.face_ok)then;message=trim(face_message);return;endif
+      active=any([(basis_owner(findloc(effective_ids,ids_minus(i),dim=1))==id_rank,i=1,size(ids_minus))]).or.&
+        any([(basis_owner(findloc(effective_ids,ids_plus(i),dim=1))==id_rank,i=1,size(ids_plus))])
+      if(active)call store_local_face_trace(g,minus_fragment,plus_fragment,periodic_shift,normal,hgs(axis),&
+        minus_ids,plus_ids,[(weight,i=1,npoint)],ids_minus,ids_plus,value_minus,derivative_minus,value_plus,&
+        -derivative_plus,effective_ids,group_action,candidate(g))
       deallocate(minus_ids,plus_ids,ids_minus,ids_plus,value_minus,derivative_minus,value_plus,derivative_plus)
     enddo
-    allocate(faces(face_count));faces=candidate
-    call validate_dg_hybrid_production_face_collection(icomm,faces,ok,message)
+    allocate(faces(face_count));faces=candidate;ok=.true.;message=''
 #else
     ok=.false.;message='production face materialization requires MPI'
 #endif
@@ -347,28 +329,71 @@ contains
     enddo
   end subroutine sample_normal_derivative
 
-  subroutine reduce_complex_matrix(values,icomm,ierr)
+  subroutine exchange_face_columns(values,ids,participant_ids,effective_ids,basis_owner,icomm,tag,ierr)
     complex(real64),intent(inout)::values(:,:)
-    integer,intent(in)::icomm
+    integer,intent(in)::ids(:),participant_ids(:),effective_ids(:),basis_owner(:),icomm,tag
     integer,intent(out)::ierr
-    call MPI_Allreduce(MPI_IN_PLACE,values,size(values),MPI_DOUBLE_COMPLEX,MPI_SUM,icomm,ierr)
-  end subroutine reduce_complex_matrix
+    complex(real64),allocatable::send_buffer(:),receive_buffer(:)
+    integer::id_rank,nproc,peer,i,j,local_count,peer_count,position
 
-  integer(int64) function geometry_fingerprint(origins,sizes,global_size,hgs,coef_nab) result(hash)
-    integer,intent(in)::origins(:,:),sizes(:,:),global_size(3)
-    real(real64),intent(in)::hgs(3),coef_nab(:,:)
-    integer::i,j,k
-    hash=int(z'9B05688C2B3E6C1F',int64)
-    do i=1,3
-      hash=ieor(ishftc(hash,7),int(global_size(i),int64));hash=ieor(ishftc(hash,7),transfer(hgs(i),hash))
+    call MPI_Comm_rank(icomm,id_rank,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Comm_size(icomm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
+    if(.not.any([(basis_owner(findloc(effective_ids,participant_ids(i),dim=1))==id_rank,&
+        i=1,size(participant_ids))]))then;ierr=MPI_SUCCESS;return;endif
+    local_count=count([(basis_owner(findloc(effective_ids,ids(i),dim=1))==id_rank,i=1,size(ids))])
+    do peer=0,nproc-1
+      if(peer==id_rank)cycle
+      if(.not.any([(basis_owner(findloc(effective_ids,participant_ids(i),dim=1))==peer,&
+          i=1,size(participant_ids))]))cycle
+      peer_count=count([(basis_owner(findloc(effective_ids,ids(i),dim=1))==peer,i=1,size(ids))])
+      allocate(send_buffer(size(values,1)*local_count),receive_buffer(size(values,1)*peer_count))
+      position=0
+      do j=1,size(ids)
+        if(basis_owner(findloc(effective_ids,ids(j),dim=1))/=id_rank)cycle
+        do i=1,size(values,1);position=position+1;send_buffer(position)=values(i,j);enddo
+      enddo
+      call MPI_Sendrecv(send_buffer,size(send_buffer),MPI_DOUBLE_COMPLEX,peer,tag,receive_buffer,&
+        size(receive_buffer),MPI_DOUBLE_COMPLEX,peer,tag,icomm,MPI_STATUS_IGNORE,ierr)
+      if(ierr/=MPI_SUCCESS)return
+      position=0
+      do j=1,size(ids)
+        if(basis_owner(findloc(effective_ids,ids(j),dim=1))/=peer)cycle
+        do i=1,size(values,1);position=position+1;values(i,j)=receive_buffer(position);enddo
+      enddo
+      deallocate(send_buffer,receive_buffer)
     enddo
-    do j=1,size(origins,2);do i=1,3
-      hash=ieor(ishftc(hash,7),int(origins(i,j),int64));hash=ieor(ishftc(hash,7),int(sizes(i,j),int64))
-    enddo;enddo
-    do j=1,size(coef_nab,2);do i=1,size(coef_nab,1)
-      hash=ieor(ishftc(hash,7),transfer(coef_nab(i,j),hash))
-    enddo;enddo
-  end function geometry_fingerprint
+  end subroutine exchange_face_columns
+
+  subroutine store_local_face_trace(face_id,fragment_minus,fragment_plus,periodic_shift,normal,h_normal,&
+      point_ids_minus,point_ids_plus,weights,basis_ids_minus,basis_ids_plus,value_minus,outward_minus,&
+      value_plus,outward_plus,effective_ids,group_action,face)
+    integer,intent(in)::face_id,fragment_minus,fragment_plus,periodic_shift(3)
+    integer(int64),intent(in)::point_ids_minus(:),point_ids_plus(:)
+    integer,intent(in)::basis_ids_minus(:),basis_ids_plus(:),effective_ids(:),group_action(:,:)
+    real(real64),intent(in)::normal(3),h_normal,weights(:)
+    complex(real64),intent(in)::value_minus(:,:),outward_minus(:,:),value_plus(:,:),outward_plus(:,:)
+    type(s_dg_hybrid_production_face_trace),intent(out)::face
+    face%global_face_id=face_id;face%minus_fragment=fragment_minus;face%plus_fragment=fragment_plus
+    face%periodic_shift=periodic_shift;face%canonical_normal=normal;face%h_normal=h_normal
+    allocate(face%point_ids_minus(size(point_ids_minus)),face%point_ids_plus(size(point_ids_plus)),&
+      face%weights(size(weights)),face%basis_ids_minus(size(basis_ids_minus)),face%basis_ids_plus(size(basis_ids_plus)),&
+      face%effective_ids(size(effective_ids)),face%group_action(size(group_action,1),size(group_action,2)),&
+      face%value_minus(size(value_minus,1),size(value_minus,2)),&
+      face%derivative_minus(size(outward_minus,1),size(outward_minus,2)),&
+      face%value_plus(size(value_plus,1),size(value_plus,2)),&
+      face%derivative_plus(size(outward_plus,1),size(outward_plus,2)))
+    face%point_ids_minus=point_ids_minus;face%point_ids_plus=point_ids_plus;face%weights=weights
+    face%basis_ids_minus=basis_ids_minus;face%basis_ids_plus=basis_ids_plus
+    face%effective_ids=effective_ids;face%group_action=group_action
+    face%value_minus=value_minus;face%derivative_minus=outward_minus
+    face%value_plus=value_plus;face%derivative_plus=-outward_plus
+    face%fingerprint=trace_fingerprint(face_id,fragment_minus,fragment_plus,periodic_shift,normal,h_normal,&
+      point_ids_minus,point_ids_plus,weights,basis_ids_minus,basis_ids_plus,value_minus,outward_minus,value_plus,&
+      outward_plus,effective_ids,group_action)
+    if(face%fingerprint==0_int64)face%fingerprint=1_int64
+    face%frozen=.true.
+  end subroutine store_local_face_trace
+
 #endif
 
   subroutine build_dg_hybrid_production_face_trace(icomm,face_id,fragment_minus,fragment_plus,periodic_shift,&
@@ -459,28 +484,12 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     complex(real64),allocatable::jump(:),average_derivative(:)
-    integer::point,i,j,n,local_bad,global_bad,ierr,local_count,minimum_count,maximum_count
-    integer(int64)::recomputed,minimum_hash,maximum_hash
+    integer::point,i,j,n,local_bad
+    integer(int64)::recomputed
     ok=.false.;message=''
     call validate_stored_face(trace,local_bad,recomputed)
     if(.not.ieee_is_finite(penalty_factor).or.penalty_factor<=0d0)local_bad=1
-#ifdef USE_MPI
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid mutable production face payload';return;endif
-    local_count=size(trace%weights)
-    call MPI_Allreduce(local_count,minimum_count,1,MPI_INTEGER,MPI_MIN,icomm,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='production face point-count minimum reduction failed';return;endif
-    call MPI_Allreduce(local_count,maximum_count,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='production face point-count maximum reduction failed';return;endif
-    call MPI_Allreduce(recomputed,minimum_hash,1,MPI_INTEGER8,MPI_MIN,icomm,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='production face rehash minimum reduction failed';return;endif
-    call MPI_Allreduce(recomputed,maximum_hash,1,MPI_INTEGER8,MPI_MAX,icomm,ierr)
-    if(ierr/=MPI_SUCCESS.or.minimum_count/=maximum_count.or.minimum_hash/=maximum_hash)then
-      message='rank-disagreeing mutable production face payload';return
-    endif
-#else
     if(local_bad/=0)then;message='invalid mutable production face payload';return;endif
-#endif
 #ifdef USE_MPI
     n=size(trace%basis_ids_minus)+size(trace%basis_ids_plus)
     face%global_face_id=trace%global_face_id;face%periodic_shift=trace%periodic_shift;face%basis_count=n

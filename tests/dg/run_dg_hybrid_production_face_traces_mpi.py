@@ -16,6 +16,9 @@ materialization_body = production_source.split(
 assert "reduce_complex_matrix" not in materialization_body, (
     "production face traces are still replicated with a communicator-wide reduction"
 )
+assert "mpi_allreduce" not in materialization_body, (
+    "production face materialization still contains a communicator-wide synchronization"
+)
 assembly_body = production_source.split("subroutine assemble_dg_hybrid_production_face", 1)[1].split(
     "end subroutine assemble_dg_hybrid_production_face", 1
 )[0]
@@ -55,11 +58,11 @@ with tempfile.TemporaryDirectory(prefix="hybrid-production-face-traces-") as nam
     env = os.environ.copy()
     env["OMP_NUM_THREADS"] = "1"
     env.setdefault("OMPI_MCA_rmaps_base_oversubscribe", "1")
-    for nrank in (1, 2, 4):
+    for nrank in (1, 2, 4, 8):
         run = subprocess.run(
             [shutil.which("mpiexec"), "-n", str(nrank), str(exe)],
             capture_output=True, text=True, env=env,
         )
         assert run.returncode == 0, (nrank, run.stdout, run.stderr)
         assert f"PASS production face traces on {nrank} ranks" in run.stdout
-print("PASS production face traces on 1, 2, and 4 ranks")
+print("PASS production face traces on 1, 2, 4, and 8 ranks")
