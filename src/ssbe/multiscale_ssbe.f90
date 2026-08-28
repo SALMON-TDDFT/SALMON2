@@ -267,9 +267,9 @@ subroutine main_multiscale_ssbe(icomm)
                         & Ac_macro(1:3, imacro), E_macro(1:3, imacro), &
                         & Ac_macro(1:3, imacro), E_macro(1:3, imacro), &
                         & Jmat_macro(1:3, imacro))
-                    E_tot_tmp(imacro) = E_tot_tmp &
-                        & + dot_product(E_macro(1:3, imacro), -Jmat_macro(1:3, imacro))
-                        &  * gs%volume * dt
+                    E_tot_tmp(imacro) = E_tot_tmp(imacro) &
+                        & + dot_product(E_macro(1:3, imacro), -Jmat_macro(1:3, imacro)) &
+                        & * gs(itbl_macro_itype_sbe(imacro))%volume * dt
                     if (mod(it, 50) == 0) then
                         call write_sbe_rt_energy_line(fh_sbe_rt_energy(imacro), t, &
                             & E_tot_tmp(imacro), E_tot_tmp(imacro))
