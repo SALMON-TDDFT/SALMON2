@@ -13,6 +13,16 @@ assert "s_dg_hybrid_continuation_callbacks" not in scf_source, (
 assert "subroutine run_dg_hybrid_continuation_scf_fixture" in scf_source, (
     "the synthetic fixture entry point is missing"
 )
+for stale_restore in (
+    "state%density=input_gamma_state%density",
+    "state%trace=input_gamma_state%trace",
+    "state%density_epoch=input_gamma_state%density_epoch",
+    "state%trace_epoch=input_gamma_state%trace_epoch",
+    "state%derived_epoch=input_gamma_state%derived_epoch",
+):
+    assert stale_restore not in scf_source, (
+        "lambda-one publication restores pre-refresh state: " + stale_restore
+    )
 with tempfile.TemporaryDirectory(prefix="hybrid-continuation-scf-") as name:
     build = Path(name)
     (build / "config.h").write_text("")

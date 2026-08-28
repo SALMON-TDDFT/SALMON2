@@ -81,7 +81,6 @@ contains
 #ifdef USE_MPI
     type(s_dg_hybrid_controller)::controller
     type(s_dg_hybrid_trial_state)::state
-    type(s_dg_hybrid_trial_state)::input_gamma_state
     type(s_dg_hybrid_residuals)::residuals
     type(s_dg_hybrid_acceptance_result)::acceptance_receipt
     type(s_dg_hybrid_stage_report)::report
@@ -141,7 +140,7 @@ contains
     rollback_count=controller%rollback_count
 
     ! Rebuild the complete lambda-one operator and observables once more without mixing.
-    state=controller%accepted_state;input_gamma_state=state
+    state=controller%accepted_state
     lambda=1d0;input_density=state%density;input_trace=state%trace
     call execute_iteration(1,callback_ok)
     if(.not.callback_ok)then;message='lambda-one final refresh callback failed';return;endif
@@ -153,9 +152,6 @@ contains
         state%operator_value_fingerprint,face_topology_fingerprint,stage_ok,controller_message)
     endif
     if(.not.stage_ok)then;message='lambda-one fully refreshed residual gate failed';return;endif
-    state%density=input_gamma_state%density;state%trace=input_gamma_state%trace
-    state%density_epoch=input_gamma_state%density_epoch;state%trace_epoch=input_gamma_state%trace_epoch
-    state%derived_epoch=input_gamma_state%derived_epoch;state%trace_cache_valid=.true.
     call accept_candidate(lambda,state,acceptance_receipt)
     call validate_dg_hybrid_acceptance_receipt(icomm,acceptance_receipt,size(state%occupations),global_face_count,&
       state%operator_value_fingerprint,face_topology_fingerprint,stage_ok,controller_message)

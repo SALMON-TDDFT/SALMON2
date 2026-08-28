@@ -14,7 +14,7 @@ program test_dg_hybrid_continuation_scf_mpi
   integer::icomm,id_rank,nproc,ierr,i,nlocal,position,phase,solve_count,accepted_stages,rollbacks,acceptance_count,&
     maximum_inner_iterations
   integer(int64),allocatable::ids(:)
-  real(real64),allocatable::dc_density(:),last_built_density(:),last_accepted_density(:)
+  real(real64),allocatable::dc_density(:),last_built_density(:),last_refreshed_density(:),last_accepted_density(:)
   real(real64)::final_lambda
   complex(real64)::last_built_trace
   integer::last_built_density_epoch,last_built_trace_epoch
@@ -28,7 +28,8 @@ program test_dg_hybrid_continuation_scf_mpi
   call MPI_Init(ierr);icomm=MPI_COMM_WORLD
   call MPI_Comm_rank(icomm,id_rank,ierr);call MPI_Comm_size(icomm,nproc,ierr)
   nlocal=count([(mod(i-1,nproc)==id_rank,i=1,nglobal)])
-  allocate(ids(nlocal),dc_density(nlocal),last_built_density(nlocal),last_accepted_density(nlocal));position=0
+  allocate(ids(nlocal),dc_density(nlocal),last_built_density(nlocal),last_refreshed_density(nlocal),&
+    last_accepted_density(nlocal));position=0
   do i=1,nglobal
     if(mod(i-1,nproc)/=id_rank)cycle
     position=position+1;ids(position)=i;dc_density(position)=0.15d0+0.01d0*i
@@ -68,11 +69,11 @@ program test_dg_hybrid_continuation_scf_mpi
   call require(maxval(abs(final_state%density-fixed_density(1d0)))<5d-8,&
     'lambda-one density differs from the dense fixed-point reference')
   call require(final_state%trace_cache_valid.and.phase==5,'lambda-one state was not fully refreshed without mixing')
-  call require(all(final_state%density==last_built_density),&
-    'published final density does not match the final Hamiltonian build provenance')
-  call require(final_state%trace(1,1)==last_built_trace.and.&
-    final_state%density_epoch==last_built_density_epoch.and.final_state%trace_epoch==last_built_trace_epoch,&
-    'published density and trace do not share the final operator-input Gamma provenance')
+  call require(all(final_state%density==last_refreshed_density),&
+    'published final density is not the fully refreshed lambda-one density')
+  call require(final_state%trace(1,1)/=last_built_trace.or.&
+    final_state%density_epoch/=last_built_density_epoch.or.final_state%trace_epoch/=last_built_trace_epoch,&
+    'published density and trace were restored to the pre-refresh state')
   call require(all(final_state%density==last_accepted_density),&
     'published final state differs from the state checked by the last acceptance oracle')
   call fill_state(seed);phase=0;solve_count=0;first_volume=.true.;lambda_zero_passed=.false.
@@ -198,6 +199,7 @@ contains
     real(real64),intent(out)::output_density(:);logical,intent(out)::callback_ok
     callback_ok=phase==3;phase=4
     output_density=fixed_density(lambda)+0.25d0*(input_density-fixed_density(lambda))
+    last_refreshed_density=output_density
     state%density=output_density;state%trace(1,1)=cmplx(sum(output_density)/real(nglobal,real64),0d0,real64)
     call MPI_Allreduce(MPI_IN_PLACE,state%trace,1,MPI_DOUBLE_COMPLEX,MPI_SUM,icomm,ierr)
     state%density_epoch=state%density_epoch+1;state%trace_epoch=state%density_epoch
