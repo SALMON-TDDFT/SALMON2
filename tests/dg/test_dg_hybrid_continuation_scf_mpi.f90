@@ -8,7 +8,8 @@ program test_dg_hybrid_continuation_scf_mpi
     default_dg_hybrid_controller_controls
   use dg_hybrid_continuation_residuals,only:s_dg_hybrid_residuals
   use dg_hybrid_continuation_acceptance,only:s_dg_hybrid_acceptance_result
-  use dg_hybrid_continuation_scf,only:s_dg_hybrid_continuation_callbacks,run_dg_hybrid_continuation_scf
+  use dg_hybrid_continuation_scf,only:s_dg_hybrid_production_catalog,s_dg_hybrid_continuation_callbacks,&
+    fingerprint_dg_hybrid_catalog_matrix,validate_dg_hybrid_production_catalog,run_dg_hybrid_continuation_scf
   implicit none
   integer,parameter::nglobal=4
   integer::icomm,id_rank,nproc,ierr,i,nlocal,position,phase,solve_count,accepted_stages,rollbacks,acceptance_count
@@ -21,6 +22,7 @@ program test_dg_hybrid_continuation_scf_mpi
   type(s_dg_hybrid_controller_controls)::controls
   type(s_dg_hybrid_trial_state)::seed,final_state
   type(s_dg_hybrid_continuation_callbacks)::callbacks
+  type(s_dg_hybrid_production_catalog)::production_catalog
   logical::ok,first_volume,lambda_zero_passed,forced_growth_complete,poison_final,lambda_one_converged,fatal_positive,&
     lambda_zero_gate_delayed,stale_operator_positive,rank_divergent_operator,fail_symmetry_oracle,fail_grid_oracle
   character(256)::message
@@ -42,6 +44,17 @@ program test_dg_hybrid_continuation_scf_mpi
   controls%final_tolerance=[2d-8,2d-8,2d-8,2d-10]
   controls%iteration_limit=80
   fail_symmetry_oracle=.false.;fail_grid_oracle=.false.;acceptance_count=0
+  call validate_dg_hybrid_production_catalog(icomm,production_catalog,ok,message)
+  call require(.not.ok,'empty production catalog was accepted')
+  call fill_production_catalog(production_catalog)
+  call validate_dg_hybrid_production_catalog(icomm,production_catalog,ok,message)
+  call require(ok,'valid distributed production catalog was rejected: '//trim(message))
+  if(nproc>1)then
+    if(id_rank==0.and.nlocal>0)production_catalog%metric_rows(1,1)=production_catalog%metric_rows(1,1)+0.01d0
+    call validate_dg_hybrid_production_catalog(icomm,production_catalog,ok,message)
+    call require(.not.ok,'rank-divergent production metric payload was accepted')
+    call fill_production_catalog(production_catalog)
+  endif
   call configure_callbacks()
   callbacks%accept_candidate=>null();solve_count=0
   call run_dg_hybrid_continuation_scf(icomm,continuation,controls,callbacks,final_state,ok,message)
@@ -129,6 +142,31 @@ program test_dg_hybrid_continuation_scf_mpi
   if(id_rank==0)write(*,'(a,i0,a)')'PASS hybrid continuation SCF on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
+  subroutine fill_production_catalog(catalog)
+    type(s_dg_hybrid_production_catalog),intent(out)::catalog
+    integer::local_row,global_row
+    catalog%frozen=.true.;catalog%global_basis_count=nglobal;catalog%global_face_count=2
+    catalog%analysis_fingerprint=101_int64;catalog%basis_fingerprint=102_int64
+    catalog%selection_fingerprint=103_int64;catalog%action_fingerprint=104_int64
+    catalog%metric_fingerprint=0_int64;catalog%face_topology_fingerprint=106_int64
+    allocate(catalog%row_ids(nlocal),source=ids)
+    allocate(catalog%effective_wf_ids(1),source=[1])
+    allocate(catalog%effective_pw_ids(1),source=[2])
+    allocate(catalog%wf_action(1,1),source=reshape([1],[1,1]))
+    allocate(catalog%pw_action(1,1),source=reshape([1],[1,1]))
+    allocate(catalog%metric_rows(nlocal,nglobal),catalog%interface_rows(nlocal,nglobal))
+    catalog%metric_rows=(0d0,0d0);catalog%interface_rows=(0d0,0d0)
+    do local_row=1,nlocal
+      global_row=int(ids(local_row));catalog%metric_rows(local_row,global_row)=(1d0,0d0)
+      catalog%metric_rows(local_row,mod(global_row,nglobal)+1)=cmplx(0.05d0,0d0,real64)
+      catalog%metric_rows(local_row,mod(global_row-2+nglobal,nglobal)+1)=cmplx(0.05d0,0d0,real64)
+      catalog%interface_rows(local_row,mod(global_row+1,nglobal)+1)=cmplx(-0.2d0,0d0,real64)
+    enddo
+    call fingerprint_dg_hybrid_catalog_matrix(icomm,catalog%row_ids,catalog%metric_rows,&
+      catalog%metric_fingerprint,ok,message)
+    call require(ok,'test production metric fingerprint failed: '//trim(message))
+  end subroutine fill_production_catalog
+
   subroutine configure_callbacks()
     callbacks%build_volume=>volume_build;callbacks%solve_full=>full_solve
     callbacks%refresh_projector=>projector_refresh;callbacks%refresh_density_trace=>density_trace_refresh
