@@ -9,7 +9,7 @@ program test_dg_hybrid_continuation_scf_mpi
   use dg_hybrid_continuation_residuals,only:s_dg_hybrid_residuals
   use dg_hybrid_continuation_acceptance,only:s_dg_hybrid_acceptance_result
   use dg_hybrid_continuation_scf,only:s_dg_hybrid_production_catalog,s_dg_hybrid_continuation_callbacks,&
-    fingerprint_dg_hybrid_catalog_matrix,validate_dg_hybrid_production_catalog,run_dg_hybrid_continuation_scf
+    build_dg_hybrid_production_catalog,validate_dg_hybrid_production_catalog,run_dg_hybrid_continuation_scf
   implicit none
   integer,parameter::nglobal=4
   integer::icomm,id_rank,nproc,ierr,i,nlocal,position,phase,solve_count,accepted_stages,rollbacks,acceptance_count
@@ -145,26 +145,19 @@ contains
   subroutine fill_production_catalog(catalog)
     type(s_dg_hybrid_production_catalog),intent(out)::catalog
     integer::local_row,global_row
-    catalog%frozen=.true.;catalog%global_basis_count=nglobal;catalog%global_face_count=2
-    catalog%analysis_fingerprint=101_int64;catalog%basis_fingerprint=102_int64
-    catalog%selection_fingerprint=103_int64;catalog%action_fingerprint=104_int64
-    catalog%metric_fingerprint=0_int64;catalog%face_topology_fingerprint=96_int64
-    allocate(catalog%row_ids(nlocal),source=ids)
-    allocate(catalog%effective_wf_ids(1),source=[1])
-    allocate(catalog%effective_pw_ids(1),source=[2])
-    allocate(catalog%wf_action(1,1),source=reshape([1],[1,1]))
-    allocate(catalog%pw_action(1,1),source=reshape([1],[1,1]))
-    allocate(catalog%metric_rows(nlocal,nglobal),catalog%interface_rows(nlocal,nglobal))
-    catalog%metric_rows=(0d0,0d0);catalog%interface_rows=(0d0,0d0)
+    complex(real64),allocatable::metric_rows(:,:),interface_rows(:,:)
+    allocate(metric_rows(nlocal,nglobal),interface_rows(nlocal,nglobal))
+    metric_rows=(0d0,0d0);interface_rows=(0d0,0d0)
     do local_row=1,nlocal
-      global_row=int(ids(local_row));catalog%metric_rows(local_row,global_row)=(1d0,0d0)
-      catalog%metric_rows(local_row,mod(global_row,nglobal)+1)=cmplx(0.05d0,0d0,real64)
-      catalog%metric_rows(local_row,mod(global_row-2+nglobal,nglobal)+1)=cmplx(0.05d0,0d0,real64)
-      catalog%interface_rows(local_row,mod(global_row+1,nglobal)+1)=cmplx(-0.2d0,0d0,real64)
+      global_row=int(ids(local_row));metric_rows(local_row,global_row)=(1d0,0d0)
+      metric_rows(local_row,mod(global_row,nglobal)+1)=cmplx(0.05d0,0d0,real64)
+      metric_rows(local_row,mod(global_row-2+nglobal,nglobal)+1)=cmplx(0.05d0,0d0,real64)
+      interface_rows(local_row,mod(global_row+1,nglobal)+1)=cmplx(-0.2d0,0d0,real64)
     enddo
-    call fingerprint_dg_hybrid_catalog_matrix(icomm,catalog%row_ids,catalog%metric_rows,&
-      catalog%metric_fingerprint,ok,message)
-    call require(ok,'test production metric fingerprint failed: '//trim(message))
+    call build_dg_hybrid_production_catalog(icomm,nglobal,2,ids,[1],[2],reshape([1],[1,1]),&
+      reshape([1],[1,1]),metric_rows,interface_rows,101_int64,102_int64,103_int64,104_int64,96_int64,&
+      catalog,ok,message)
+    call require(ok,'test production catalog construction failed: '//trim(message))
   end subroutine fill_production_catalog
 
   subroutine configure_callbacks()

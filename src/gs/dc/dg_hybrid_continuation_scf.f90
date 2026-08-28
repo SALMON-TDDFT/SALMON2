@@ -19,7 +19,7 @@ module dg_hybrid_continuation_scf
     integer::global_basis_count=0,global_face_count=0
     integer(int64)::analysis_fingerprint=0_int64,basis_fingerprint=0_int64
     integer(int64)::selection_fingerprint=0_int64,action_fingerprint=0_int64
-    integer(int64)::metric_fingerprint=0_int64,face_topology_fingerprint=0_int64
+    integer(int64)::metric_fingerprint=0_int64,interface_fingerprint=0_int64,face_topology_fingerprint=0_int64
     integer(int64),allocatable::row_ids(:)
     integer,allocatable::effective_wf_ids(:),effective_pw_ids(:)
     integer,allocatable::wf_action(:,:),pw_action(:,:)
@@ -79,8 +79,40 @@ module dg_hybrid_continuation_scf
     integer(int64)::face_topology_fingerprint=0_int64
     real(real64)::final_lambda=0d0
   end type s_dg_hybrid_continuation_callbacks
-  public::fingerprint_dg_hybrid_catalog_matrix,validate_dg_hybrid_production_catalog,run_dg_hybrid_continuation_scf
+  public::build_dg_hybrid_production_catalog,fingerprint_dg_hybrid_catalog_matrix,&
+    validate_dg_hybrid_production_catalog,run_dg_hybrid_continuation_scf
 contains
+  subroutine build_dg_hybrid_production_catalog(icomm,global_basis_count,global_face_count,row_ids,&
+      effective_wf_ids,effective_pw_ids,wf_action,pw_action,metric_rows,interface_rows,analysis_fingerprint,&
+      basis_fingerprint,selection_fingerprint,action_fingerprint,face_topology_fingerprint,catalog,ok,message)
+    integer,intent(in)::icomm,global_basis_count,global_face_count
+    integer(int64),intent(in)::row_ids(:),analysis_fingerprint,basis_fingerprint,selection_fingerprint,&
+      action_fingerprint,face_topology_fingerprint
+    integer,intent(in)::effective_wf_ids(:),effective_pw_ids(:),wf_action(:,:),pw_action(:,:)
+    complex(real64),intent(in)::metric_rows(:,:),interface_rows(:,:)
+    type(s_dg_hybrid_production_catalog),intent(out)::catalog
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+
+    catalog%global_basis_count=global_basis_count;catalog%global_face_count=global_face_count
+    catalog%analysis_fingerprint=analysis_fingerprint;catalog%basis_fingerprint=basis_fingerprint
+    catalog%selection_fingerprint=selection_fingerprint;catalog%action_fingerprint=action_fingerprint
+    catalog%face_topology_fingerprint=face_topology_fingerprint
+    allocate(catalog%row_ids,source=row_ids)
+    allocate(catalog%effective_wf_ids,source=effective_wf_ids)
+    allocate(catalog%effective_pw_ids,source=effective_pw_ids)
+    allocate(catalog%wf_action,source=wf_action);allocate(catalog%pw_action,source=pw_action)
+    allocate(catalog%metric_rows,source=metric_rows);allocate(catalog%interface_rows,source=interface_rows)
+    call fingerprint_dg_hybrid_catalog_matrix(icomm,catalog%row_ids,catalog%metric_rows,&
+      catalog%metric_fingerprint,ok,message)
+    if(.not.ok)return
+    call fingerprint_dg_hybrid_catalog_matrix(icomm,catalog%row_ids,catalog%interface_rows,&
+      catalog%interface_fingerprint,ok,message)
+    if(.not.ok)return
+    catalog%frozen=.true.
+    call validate_dg_hybrid_production_catalog(icomm,catalog,ok,message)
+  end subroutine build_dg_hybrid_production_catalog
+
   subroutine fingerprint_dg_hybrid_catalog_matrix(icomm,row_ids,rows,fingerprint,ok,message)
     integer,intent(in)::icomm
     integer(int64),intent(in)::row_ids(:)
@@ -127,7 +159,8 @@ contains
 #ifdef USE_MPI
     integer::i,local_bad,global_bad,ierr
     integer,allocatable::ownership_count(:)
-    integer(int64)::local_fingerprint,minimum_fingerprint,maximum_fingerprint,recomputed_metric_fingerprint
+    integer(int64)::local_fingerprint,minimum_fingerprint,maximum_fingerprint,recomputed_metric_fingerprint,&
+      recomputed_interface_fingerprint
     logical::fingerprint_ok
     character(256)::fingerprint_message
 
@@ -148,7 +181,8 @@ contains
         size(catalog%wf_action,2)<1.or.size(catalog%pw_action,2)<1.or.&
         catalog%analysis_fingerprint==0_int64.or.catalog%basis_fingerprint==0_int64.or.&
         catalog%selection_fingerprint==0_int64.or.catalog%action_fingerprint==0_int64.or.&
-        catalog%metric_fingerprint==0_int64.or.catalog%face_topology_fingerprint==0_int64)then
+        catalog%metric_fingerprint==0_int64.or.catalog%interface_fingerprint==0_int64.or.&
+        catalog%face_topology_fingerprint==0_int64)then
       local_bad=1
     endif
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
@@ -168,10 +202,16 @@ contains
     if(.not.fingerprint_ok.or.recomputed_metric_fingerprint/=catalog%metric_fingerprint)then
       ok=.false.;message='production continuation metric fingerprint mismatch';return
     endif
+    call fingerprint_dg_hybrid_catalog_matrix(icomm,catalog%row_ids,catalog%interface_rows,&
+      recomputed_interface_fingerprint,fingerprint_ok,fingerprint_message)
+    if(.not.fingerprint_ok.or.recomputed_interface_fingerprint/=catalog%interface_fingerprint)then
+      ok=.false.;message='production continuation interface fingerprint mismatch';return
+    endif
     local_fingerprint=ieor(catalog%analysis_fingerprint,catalog%basis_fingerprint)
     local_fingerprint=ieor(local_fingerprint,catalog%selection_fingerprint)
     local_fingerprint=ieor(local_fingerprint,catalog%action_fingerprint)
     local_fingerprint=ieor(local_fingerprint,catalog%metric_fingerprint)
+    local_fingerprint=ieor(local_fingerprint,catalog%interface_fingerprint)
     local_fingerprint=ieor(local_fingerprint,catalog%face_topology_fingerprint)
     call MPI_Allreduce(local_fingerprint,minimum_fingerprint,1,MPI_INTEGER8,MPI_MIN,icomm,ierr)
     if(ierr==MPI_SUCCESS)call MPI_Allreduce(local_fingerprint,maximum_fingerprint,1,MPI_INTEGER8,MPI_MAX,icomm,ierr)
