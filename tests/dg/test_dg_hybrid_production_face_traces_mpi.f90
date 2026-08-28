@@ -4,7 +4,8 @@ program test_dg_hybrid_production_face_traces_mpi
     MPI_INTEGER,MPI_MAX,MPI_SUCCESS
   use,intrinsic::iso_fortran_env,only:int64,real64
   use dg_hybrid_production_face_traces,only:s_dg_hybrid_production_face_trace,&
-    build_dg_hybrid_production_face_trace,assemble_dg_hybrid_production_face
+    build_dg_hybrid_production_face_trace,assemble_dg_hybrid_production_face,&
+    validate_dg_hybrid_production_face_collection
   use dg_hybrid_sipg_operator,only:s_dg_hybrid_sipg_face_operator
   implicit none
   integer::icomm,id_rank,nproc,ierr
@@ -41,6 +42,13 @@ program test_dg_hybrid_production_face_traces_mpi
   call require(ok,trim(message))
   call require(maxval(abs(face%total(1:2,3)))>1d-12,'cross-fragment SIPG block is zero')
   call require(maxval(abs(face%total-conjg(transpose(face%total))))<1d-13,'production SIPG block is not Hermitian')
+  call validate_dg_hybrid_production_face_collection(icomm,[trace,trace],ok,message)
+  call require(.not.ok,'duplicate physical face was accepted')
+
+  bad_trace=trace
+  if(id_rank==0)deallocate(bad_trace%value_plus)
+  call assemble_dg_hybrid_production_face(icomm,bad_trace,6d0,face,ok,message)
+  call require(.not.ok,'rank-inconsistent mutable face payload was accepted')
 
   if(nproc>1)then
     call build_dg_hybrid_production_face_trace(icomm,18,id_rank,1,2,[0,0,0],normal,0.8d0,point_ids,point_ids,&
@@ -48,10 +56,14 @@ program test_dg_hybrid_production_face_traces_mpi
       bad_trace,ok,message)
     call require(.not.ok,'rank-disagreeing canonical owner was accepted')
   endif
-  call build_dg_hybrid_production_face_trace(icomm,19,0,1,2,[0,0,0],normal,0.8d0,point_ids,[101_int64,110_int64],&
+  call build_dg_hybrid_production_face_trace(icomm,19,0,1,2,[0,0,0],normal,0.8d0,point_ids,[102_int64,110_int64],&
     weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,group_action,&
     bad_trace,ok,message)
-  call require(.not.ok,'incomplete face point correspondence was accepted')
+  call require(ok,'paired cell-centered face points were rejected')
+  call build_dg_hybrid_production_face_trace(icomm,21,0,1,2,[0,0,0],normal,0.8d0,point_ids,[101_int64],&
+    weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,group_action,&
+    bad_trace,ok,message)
+  call require(.not.ok,'nonconformable face point arrays were accepted')
   bad_action=group_action;bad_action(3,2)=2
   call build_dg_hybrid_production_face_trace(icomm,20,0,1,2,[0,0,0],normal,0.8d0,point_ids,point_ids,&
     weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,bad_action,&
