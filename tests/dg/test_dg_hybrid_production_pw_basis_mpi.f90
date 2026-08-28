@@ -1,21 +1,26 @@
 #include "config.h"
 program test_dg_hybrid_production_pw_basis_mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
-  use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog
+  use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog,s_dg_hybrid_production_selection
   use dg_hybrid_windowed_pw_basis,only:materialize_dg_hybrid_windowed_pw_columns
-  use dg_hybrid_production_pw_basis,only:build_dg_hybrid_production_pw_basis
+  use dg_hybrid_production_pw_basis,only:build_dg_hybrid_production_pw_basis,&
+    analyze_dg_hybrid_production_selection,freeze_dg_hybrid_production_selection
+  use dg_hybrid_continuation_state,only:close_dg_hybrid_selection
 #ifdef USE_MPI
   use mpi
 #endif
   implicit none
   integer::comm,rank,nproc,ierr,nowned,i,p
-  integer,allocatable::fragment_ids(:),core_fragment_ids(:),row_action(:,:)
-  integer(int64),allocatable::box_ids(:),core_ids(:)
-  real(real64),allocatable::box_windows(:,:),coordinates(:,:),windows(:,:),g_vectors(:,:)
+  integer,allocatable::fragment_ids(:),core_fragment_ids(:),row_action(:,:),root_row_action(:,:),&
+    root_core_fragment_ids(:)
+  integer(int64),allocatable::box_ids(:),core_ids(:),root_core_ids(:)
+  real(real64),allocatable::box_windows(:,:),coordinates(:,:),windows(:,:),g_vectors(:,:),root_coordinates(:,:)
   real(real64)::reciprocal_lattice(3,3),reciprocal_rotation(3,3,2)
   complex(real64),allocatable::tile(:,:)
   type(s_dg_hybrid_basis_catalog)::catalog
-  integer(int64)::fingerprint,workspace
+  type(s_dg_hybrid_production_selection)::selection
+  integer,allocatable::effective_ids(:),added_parent(:),added_operation(:)
+  integer(int64)::fingerprint,workspace,closure_fingerprint
   logical::ok,values_ok
   character(256)::message
 #ifdef USE_MPI
@@ -69,6 +74,105 @@ program test_dg_hybrid_production_pw_basis_mpi
   enddo
   call require(values_ok,'materialized production PW values mismatch')
   call require(fingerprint/=0_int64.and.workspace>0_int64,'production PW receipts are missing')
+  call analyze_dg_hybrid_production_selection(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
+    core_fragment_ids,coordinates,row_action,reciprocal_lattice,reciprocal_rotation,0d0,2,1d-12,&
+    windows,g_vectors,selection,workspace,fingerprint,ok,message)
+  call require(ok,'authoritative production symmetry analysis rejected: '//trim(message))
+  call require(selection%analysis_complete.and..not.selection%identity_only,&
+    'nontrivial production symmetry receipt is incomplete')
+  call require(selection%operation_count==2.and.selection%analysis_fingerprint/=0_int64,&
+    'production symmetry receipt metadata mismatch')
+  call require(all(shape(selection%packet_action)==[2,2]),'production packet action shape mismatch')
+  call require(all(selection%packet_action(:,1)==[1,2]).and.all(selection%packet_action(:,2)==[2,1]),&
+    'production packet action mismatch')
+  call close_dg_hybrid_selection(comm,[1],selection%packet_ids,selection%packet_action,effective_ids,&
+    added_parent,added_operation,closure_fingerprint,ok,message)
+  call require(ok.and.all(effective_ids==[1,2]),'production packet closure failed: '//trim(message))
+  call freeze_dg_hybrid_production_selection(comm,selection,effective_ids,catalog,fingerprint,ok,message)
+  call require(ok.and.catalog%valid.and.size(catalog%packets)==2,&
+    'closed production packet selection did not freeze: '//trim(message))
+  call freeze_dg_hybrid_production_selection(comm,selection,[1],catalog,fingerprint,ok,message)
+  call require(.not.ok.and.index(message,'closed')>0,'non-closed production packet selection was accepted')
+  call freeze_dg_hybrid_production_selection(comm,selection,[3],catalog,fingerprint,ok,message)
+  call require(.not.ok.and.index(message,'closed')>0,'out-of-universe production packet ID was accepted')
+  selection%packet_action(1,2)=1
+  call freeze_dg_hybrid_production_selection(comm,selection,[1,2],catalog,fingerprint,ok,message)
+  call require(.not.ok.and.index(message,'receipt')>0,'mutated production action receipt was accepted')
+  call analyze_dg_hybrid_production_selection(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
+    core_fragment_ids,coordinates,row_action,reciprocal_lattice,reciprocal_rotation,0d0,2,1d-12,&
+    windows,g_vectors,selection,workspace,fingerprint,ok,message)
+  call require(ok,'production analysis refresh failed: '//trim(message))
+  selection%packets(1)%owner_rank=-99
+  call freeze_dg_hybrid_production_selection(comm,selection,[1,2],catalog,fingerprint,ok,message)
+  call require(ok.and.catalog%packets(1)%owner_rank==0,&
+    'effective production ownership was copied instead of recomputed')
+  if(nproc>1)then
+    if(rank==1)selection%analysis_fingerprint=selection%analysis_fingerprint+1_int64
+    call freeze_dg_hybrid_production_selection(comm,selection,[1,2],catalog,fingerprint,ok,message)
+    call require(.not.ok.and.index(message,'fingerprint')>0,&
+      'rank-local production receipt corruption was not rejected collectively')
+    call analyze_dg_hybrid_production_selection(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
+      core_fragment_ids,coordinates,row_action,reciprocal_lattice,reciprocal_rotation,0d0,2,1d-12,&
+      windows,g_vectors,selection,workspace,fingerprint,ok,message)
+    call require(ok,'production analysis refresh after receipt corruption failed: '//trim(message))
+  endif
+  if(nproc>1)then
+    if(rank==0)then
+      allocate(root_core_ids(4),source=box_ids)
+      allocate(root_core_fragment_ids(4),source=[1,1,2,2])
+    else
+      allocate(root_core_ids(0),root_core_fragment_ids(0))
+    endif
+    allocate(root_coordinates(3,size(root_core_ids)),root_row_action(size(root_core_ids),2))
+    root_coordinates=0d0
+    do p=1,size(root_core_ids)
+      root_coordinates(1,p)=real(root_core_ids(p)-1_int64,real64)
+      root_row_action(p,:)=row_action(int(root_core_ids(p)),:)
+    enddo
+    call analyze_dg_hybrid_production_selection(comm,4,2,fragment_ids,box_ids,box_windows,root_core_ids,&
+      root_core_fragment_ids,root_coordinates,root_row_action,reciprocal_lattice,reciprocal_rotation,&
+      0d0,2,1d-12,windows,g_vectors,selection,workspace,fingerprint,ok,message)
+    call require(ok,'ambiguous root-owned production row layout failed: '//trim(message))
+    deallocate(root_core_ids,root_core_fragment_ids,root_coordinates,root_row_action)
+  endif
+  call analyze_dg_hybrid_production_selection(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
+    core_fragment_ids,coordinates,row_action(:,1:1),reciprocal_lattice,reciprocal_rotation(:,:,1:1),&
+    0d0,2,1d-12,windows,g_vectors,selection,workspace,fingerprint,ok,message)
+  call require(ok.and.selection%analysis_complete.and.selection%identity_only,&
+    'explicit identity-only production analysis failed: '//trim(message))
+  call analyze_dg_hybrid_production_selection(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
+    core_fragment_ids,coordinates,row_action(:,2:2),reciprocal_lattice,reciprocal_rotation(:,:,2:2),&
+    0d0,2,1d-12,windows,g_vectors,selection,workspace,fingerprint,ok,message)
+  call require(.not.ok.and.index(message,'group')>0,&
+    'production analysis accepted an operation list without explicit identity')
+  if(nproc>1)then
+    if(mod(rank,2)==0)then
+      effective_ids=[1,2]
+    else
+      effective_ids=[2,1]
+    endif
+    call analyze_dg_hybrid_production_selection(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
+      core_fragment_ids,coordinates,row_action,reciprocal_lattice,reciprocal_rotation,0d0,2,1d-12,&
+      windows,g_vectors,selection,workspace,fingerprint,ok,message)
+    call require(ok,'production analysis setup for distributed freeze failed: '//trim(message))
+    call freeze_dg_hybrid_production_selection(comm,selection,effective_ids,catalog,fingerprint,ok,message)
+    call require(.not.ok.and.index(message,'rank')>0,&
+      'production freeze accepted rank-dependent effective-ID ordering')
+  endif
+  block
+    integer::bad_row_action(4,3),axis
+    real(real64)::bad_reciprocal_rotation(3,3,3)
+    bad_row_action(:,1:2)=row_action
+    bad_row_action(:,3)=[1,3,2,4]
+    bad_reciprocal_rotation(:,:,1:2)=reciprocal_rotation
+    bad_reciprocal_rotation(:,:,3)=0d0
+    do axis=1,3;bad_reciprocal_rotation(axis,axis,3)=1d0;enddo
+    call analyze_dg_hybrid_production_selection(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
+      core_fragment_ids,coordinates,bad_row_action,reciprocal_lattice,bad_reciprocal_rotation,&
+      0d0,2,1d-12,windows,g_vectors,selection,workspace,fingerprint,ok,message)
+    call require(.not.ok.and.index(message,'whole fragments')>0,&
+      'authoritative production analysis silently downgraded a known physical group')
+  end block
   if(rank==0)write(*,'(a,i0,a,i0)')'PRODUCTION_PW ranks=',nproc,' fingerprint=',fingerprint
   if(rank==0)write(*,'(a,i0,a)')'PASS hybrid production PW basis on ',nproc,' ranks'
 #ifdef USE_MPI
