@@ -475,7 +475,58 @@ Expected: all PASS.
 
 Commit only the task files as `feat(dg): gate symmetry and real-space DG residuals`.
 
-### Task 7: Add an isolated production continuation branch
+### Task 7a: Materialize immutable production face traces
+
+**Files:**
+- Modify: `src/gs/dc/dg_hybrid_fragment_basis.f90`
+- Create: `src/gs/dc/dg_hybrid_production_face_traces.f90`
+- Create: `tests/dg/test_dg_hybrid_production_face_traces_mpi.f90`
+- Create: `tests/dg/run_dg_hybrid_production_face_traces_mpi.py`
+- Modify: `src/gs/dc/CMakeLists.txt`
+
+**Step 1: Write the failing production face test**
+
+Construct two irregular neighboring fragments and one periodic image face.
+Require one canonical owner, one minus-to-plus normal, complete value and
+normal-derivative traces for every retained basis function, and a collective
+fingerprint covering topology, geometry, basis IDs, quadrature, values, and
+derivatives.  Feed the payload to `assemble_dg_hybrid_sipg_face` and require a
+nonzero Hermitian cross-fragment block.  Reject duplicate ownership, missing
+neighbors, inconsistent periodic shifts, incomplete point correspondence,
+nonfinite traces, and an effective selection that is not closed under the
+accepted action.
+
+**Step 2: Run RED**
+
+Run: `python3 tests/dg/run_dg_hybrid_production_face_traces_mpi.py`
+
+Expected: compile failure because `dg_hybrid_production_face_traces` is absent.
+
+**Step 3: Implement the minimum immutable payload**
+
+Add an optional face-trace component to the fragment basis and build it only
+for the explicit continuation route.  Reconstruct gradients with the existing
+SALMON stencil, convert both sides to one canonical normal, validate exactly-once
+face ownership collectively, and freeze the payload and its fingerprint.
+Legacy callers remain valid without the optional component.
+
+**Step 4: Run GREEN**
+
+Run:
+
+```text
+python3 tests/dg/run_dg_hybrid_production_face_traces_mpi.py
+python3 tests/dg/run_dg_hybrid_sipg_operator_mpi.py
+```
+
+Expected: PASS at 1, 2, and 4 ranks.
+
+**Step 5: Commit**
+
+Stage only these Task 7a files and commit as
+`feat(dg): materialize production SIPG face traces`.
+
+### Task 7b: Add an isolated production continuation branch
 
 **Files:**
 - Modify: `src/gs/main_dft.f90`
