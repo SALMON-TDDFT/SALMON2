@@ -654,6 +654,27 @@ selection, recompute ownership and fingerprints, construct the production
 catalog, and invoke the concrete solver from the exact converged `dc%rho_tot`.
 Do not alter protected routes and do not publish a checkpoint in this task.
 
+Before wiring `main_dft`, implement the production materialization bridge in
+three RED/GREEN subcycles:
+
+1. Extend the production-basis preparation boundary to return the frozen
+   effective WF/PW IDs and their group actions.  Require basis materialization,
+   ownership, and selection fingerprints to use these returned IDs; forbid the
+   requested IDs from bypassing closure.
+2. Refactor production face materialization to accept rank-owned fragment
+   bases.  Exchange only the values and normal derivatives required by
+   adjacent faces.  Do not gather or replicate every fragment's real-space
+   basis.  Require exactly one canonical face owner and both coupling
+   directions.
+3. Assemble the complete SIPG row payload and pass it, the fixed metric, the
+   effective selection/actions, and their provenance to
+   `build_dg_hybrid_production_catalog`.  Only after this bridge is GREEN may
+   the production branch call the concrete continuation solver.
+
+Each subcycle has its own MPI fixture and commit.  Run at 1, 2, 4, and 8 ranks
+where the fixture permits empty local ownership.  Existing selection and face
+trace runners remain mandatory regressions.
+
 **Step 5: Run focused RED then GREEN at all decompositions**
 
 Run the continuation fixture at 1, 2, 4, and 8 ranks.  Before implementation

@@ -151,6 +151,14 @@ basis, face, selection, and ownership payload needed by the solver.  The
 `main_dft` branch constructs that type through existing SALMON routines; the
 solver never guesses how to rebuild missing production data.
 
+Production materialization is distributed.  Each rank contributes its owned
+fragment-basis rows and exchanges only traces required by neighboring physical
+faces.  The bridge must not collect all fragment real-space basis values on
+every rank.  Selection closure precedes materialization: requested IDs are
+inputs to closure only, while effective IDs and their returned actions are the
+sole inputs to basis ownership, face construction, fingerprints, and the
+continuation catalog.
+
 ## Tests
 
 The principal MPI fixture runs the complete solver loop on a small
