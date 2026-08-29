@@ -152,10 +152,6 @@ contains
         state%operator_value_fingerprint,face_topology_fingerprint,stage_ok,controller_message)
     endif
     if(.not.stage_ok)then;message='lambda-one fully refreshed residual gate failed';return;endif
-    call accept_candidate(lambda,state,acceptance_receipt)
-    call validate_dg_hybrid_acceptance_receipt(icomm,acceptance_receipt,size(state%occupations),global_face_count,&
-      state%operator_value_fingerprint,face_topology_fingerprint,stage_ok,controller_message)
-    if(.not.stage_ok)then;message='published lambda-one state failed final acceptance oracle';return;endif
     final_state=state;final_lambda=1d0
     ok=.true.;message=''
   contains
@@ -201,10 +197,12 @@ contains
     end subroutine converge_current
     subroutine execute_iteration(inner_iteration,iteration_ok)
       integer,intent(in)::inner_iteration;logical,intent(out)::iteration_ok
-      iteration_ok=.false.;state%density=input_density
+      logical::kernel_ok
+      iteration_ok=.false.;state%density=input_density;state%trace_cache_valid=.false.
+      state%projector_epoch=-1;state%trace_epoch=-1;state%derived_epoch=-1
       previous_operator_epoch=state%operator_epoch
-      call build_volume(lambda,input_density,state,callback_ok)
-      callback_ok=callback_ok.and.state%operator_epoch>previous_operator_epoch.and.&
+      call build_volume(lambda,input_density,state,kernel_ok)
+      kernel_ok=kernel_ok.and.state%operator_epoch>previous_operator_epoch.and.&
         state%operator_structure_fingerprint/=0.and.state%operator_value_fingerprint/=0
       call MPI_Allreduce(state%operator_epoch,minimum_operator_epoch,1,MPI_INTEGER,MPI_MIN,icomm,ierr)
       if(ierr==MPI_SUCCESS)call MPI_Allreduce(state%operator_epoch,maximum_operator_epoch,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
@@ -216,26 +214,29 @@ contains
         MPI_INTEGER8,MPI_MIN,icomm,ierr)
       if(ierr==MPI_SUCCESS)call MPI_Allreduce(state%operator_value_fingerprint,maximum_operator_value,1,&
         MPI_INTEGER8,MPI_MAX,icomm,ierr)
-      callback_ok=callback_ok.and.ierr==MPI_SUCCESS.and.minimum_operator_epoch==maximum_operator_epoch.and.&
+      kernel_ok=kernel_ok.and.ierr==MPI_SUCCESS.and.minimum_operator_epoch==maximum_operator_epoch.and.&
         minimum_operator_structure==maximum_operator_structure.and.minimum_operator_value==maximum_operator_value
-      if(frozen_operator_structure==0_int64.and.callback_ok)&
+      if(frozen_operator_structure==0_int64.and.kernel_ok)&
         frozen_operator_structure=state%operator_structure_fingerprint
-      callback_ok=callback_ok.and.state%operator_structure_fingerprint==frozen_operator_structure
-      if(.not.callback_ok)message='stale or inconsistent operator provenance'
-      call callback_consensus(callback_ok,global_bad,ierr)
+      kernel_ok=kernel_ok.and.state%operator_structure_fingerprint==frozen_operator_structure
+      if(.not.kernel_ok)message='stale or inconsistent operator provenance'
+      call callback_consensus(kernel_ok,global_bad,ierr)
       if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
-      call solve_full(lambda,inner_iteration,state,callback_ok);call callback_consensus(callback_ok,global_bad,ierr)
+      call solve_full(lambda,inner_iteration,state,kernel_ok);call callback_consensus(kernel_ok,global_bad,ierr)
       if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
-      call refresh_projector(lambda,state,projector_overlap,callback_ok)
-      call callback_consensus(callback_ok.and.ieee_is_finite(projector_overlap),global_bad,ierr)
-      if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
-      call refresh_density_trace(lambda,input_density,state,output_density,callback_ok)
-      call callback_consensus(callback_ok.and.all(ieee_is_finite(output_density)).and.state%trace_cache_valid,global_bad,ierr)
-      if(ierr/=MPI_SUCCESS.or.global_bad/=0)return
+      call refresh_projector(lambda,state,projector_overlap,kernel_ok)
+      call callback_consensus(kernel_ok.and.ieee_is_finite(projector_overlap).and.&
+        state%projector_epoch==state%operator_epoch,global_bad,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='stale derived state provenance';return;endif
+      call refresh_density_trace(lambda,input_density,state,output_density,kernel_ok)
+      call callback_consensus(kernel_ok.and.all(ieee_is_finite(output_density)).and.state%trace_cache_valid.and.&
+        state%density_epoch==state%operator_epoch.and.state%trace_epoch==state%operator_epoch.and.&
+        state%derived_epoch==state%operator_epoch,global_bad,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='stale derived state provenance';return;endif
       call evaluate_residuals(lambda,inner_iteration,input_density,input_trace,state,residuals,projector_overlap,&
         report%electron_ok,report%occupation_ok,report%hermitian_ok,report%symmetry_ok,report%real_space_ok,&
-        report%gap_shrinking,callback_ok)
-      call callback_consensus(callback_ok,global_bad,ierr)
+        report%gap_shrinking,kernel_ok)
+      call callback_consensus(kernel_ok,global_bad,ierr)
       iteration_ok=ierr==MPI_SUCCESS.and.global_bad==0
     end subroutine execute_iteration
     subroutine fill_report(inner_iteration)

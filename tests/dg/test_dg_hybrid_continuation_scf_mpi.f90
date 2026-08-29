@@ -12,23 +12,25 @@ program test_dg_hybrid_continuation_scf_mpi
   implicit none
   integer,parameter::nglobal=4
   integer::icomm,id_rank,nproc,ierr,i,nlocal,position,phase,solve_count,accepted_stages,rollbacks,acceptance_count,&
-    maximum_inner_iterations
+    duplicate_acceptance_count,maximum_inner_iterations
   integer(int64),allocatable::ids(:)
-  real(real64),allocatable::dc_density(:),last_built_density(:),last_refreshed_density(:),last_accepted_density(:)
+  real(real64),allocatable::dc_density(:),last_refreshed_density(:),last_accepted_density(:)
   real(real64)::final_lambda
-  complex(real64)::last_built_trace
-  integer::last_built_density_epoch,last_built_trace_epoch
+  complex(real64)::last_refreshed_trace
+  integer::last_refreshed_epoch
   type(s_dg_hybrid_continuation_state)::continuation
   type(s_dg_hybrid_controller_controls)::controls
   type(s_dg_hybrid_trial_state)::seed,final_state
-  logical::ok,first_volume,lambda_zero_passed,forced_growth_complete,poison_final,lambda_one_converged,fatal_positive,&
-    lambda_zero_gate_delayed,stale_operator_positive,rank_divergent_operator,fail_symmetry_oracle,fail_grid_oracle
+  logical::ok,first_volume,have_acceptance,lambda_zero_passed,forced_growth_complete,poison_final,&
+    lambda_one_converged,fatal_positive,&
+    lambda_zero_gate_delayed,stale_operator_positive,stale_projector_positive,stale_trace_positive,rank_divergent_operator,&
+    fail_symmetry_oracle,fail_grid_oracle
   character(256)::message
 
   call MPI_Init(ierr);icomm=MPI_COMM_WORLD
   call MPI_Comm_rank(icomm,id_rank,ierr);call MPI_Comm_size(icomm,nproc,ierr)
   nlocal=count([(mod(i-1,nproc)==id_rank,i=1,nglobal)])
-  allocate(ids(nlocal),dc_density(nlocal),last_built_density(nlocal),last_refreshed_density(nlocal),&
+  allocate(ids(nlocal),dc_density(nlocal),last_refreshed_density(nlocal),&
     last_accepted_density(nlocal));position=0
   do i=1,nglobal
     if(mod(i-1,nproc)/=id_rank)cycle
@@ -42,7 +44,8 @@ program test_dg_hybrid_continuation_scf_mpi
   controls%intermediate_tolerance=[2d-5,2d-5,2d-5,2d-8]
   controls%final_tolerance=[2d-8,2d-8,2d-8,2d-10]
   controls%iteration_limit=80
-  fail_symmetry_oracle=.false.;fail_grid_oracle=.false.;acceptance_count=0
+  fail_symmetry_oracle=.false.;fail_grid_oracle=.false.;stale_projector_positive=.false.;stale_trace_positive=.false.
+  acceptance_count=0;duplicate_acceptance_count=0;have_acceptance=.false.
   maximum_inner_iterations=80
   if(nproc>1)then
     if(id_rank==0)controls%density_damping=0.4d0
@@ -61,7 +64,7 @@ program test_dg_hybrid_continuation_scf_mpi
   maximum_inner_iterations=80
   phase=0;solve_count=0;first_volume=.true.;lambda_zero_passed=.false.;forced_growth_complete=.false.
   poison_final=.false.;lambda_one_converged=.false.;fatal_positive=.false.;lambda_zero_gate_delayed=.false.
-  stale_operator_positive=.false.;rank_divergent_operator=.false.
+  stale_operator_positive=.false.;stale_projector_positive=.false.;rank_divergent_operator=.false.
   call run_fixture()
   call require(ok,trim(message))
   call require(abs(final_lambda-1d0)<1d-15.and.rollbacks>=1.and.accepted_stages>=2,&
@@ -71,11 +74,14 @@ program test_dg_hybrid_continuation_scf_mpi
   call require(final_state%trace_cache_valid.and.phase==5,'lambda-one state was not fully refreshed without mixing')
   call require(all(final_state%density==last_refreshed_density),&
     'published final density is not the fully refreshed lambda-one density')
-  call require(final_state%trace(1,1)/=last_built_trace.or.&
-    final_state%density_epoch/=last_built_density_epoch.or.final_state%trace_epoch/=last_built_trace_epoch,&
-    'published density and trace were restored to the pre-refresh state')
+  call require(final_state%trace(1,1)==last_refreshed_trace.and.&
+    final_state%density_epoch==last_refreshed_epoch.and.final_state%trace_epoch==last_refreshed_epoch.and.&
+    final_state%derived_epoch==last_refreshed_epoch.and.final_state%projector_epoch==last_refreshed_epoch.and.&
+    final_state%operator_epoch==last_refreshed_epoch,&
+    'published final observables do not share the last solve epoch')
   call require(all(final_state%density==last_accepted_density),&
     'published final state differs from the state checked by the last acceptance oracle')
+  call require(duplicate_acceptance_count==0,'final acceptance oracle was evaluated twice for one state')
   call fill_state(seed);phase=0;solve_count=0;first_volume=.true.;lambda_zero_passed=.false.
   forced_growth_complete=.true.;poison_final=.true.;lambda_one_converged=.false.;lambda_zero_gate_delayed=.false.
   call run_fixture()
@@ -93,6 +99,20 @@ program test_dg_hybrid_continuation_scf_mpi
   call run_fixture()
   call require(.not.ok.and.index(message,'operator provenance')>0,&
     'stale density-dependent operator provenance was accepted')
+  call fill_state(seed);phase=0;solve_count=0;first_volume=.true.;lambda_zero_passed=.false.
+  forced_growth_complete=.true.;poison_final=.false.;lambda_one_converged=.false.;fatal_positive=.false.
+  lambda_zero_gate_delayed=.false.;stale_operator_positive=.false.;stale_projector_positive=.true.
+  call run_fixture()
+  call require(.not.ok.and.index(message,'derived state provenance')>0,&
+    'stale occupied projector provenance was accepted: '//trim(message))
+  stale_projector_positive=.false.
+  call fill_state(seed);phase=0;solve_count=0;first_volume=.true.;lambda_zero_passed=.false.
+  forced_growth_complete=.true.;poison_final=.false.;lambda_one_converged=.false.;fatal_positive=.false.
+  lambda_zero_gate_delayed=.false.;stale_operator_positive=.false.;stale_trace_positive=.true.
+  call run_fixture()
+  call require(.not.ok.and.index(message,'derived state provenance')>0,&
+    'stale density/trace provenance was accepted: '//trim(message))
+  stale_trace_positive=.false.
   if(nproc>1)then
     call fill_state(seed);phase=0;solve_count=0;first_volume=.true.;lambda_zero_passed=.false.
     forced_growth_complete=.true.;poison_final=.false.;lambda_one_converged=.false.;fatal_positive=.false.
@@ -126,7 +146,12 @@ contains
     type(s_dg_hybrid_trial_state),intent(in)::state
     type(s_dg_hybrid_acceptance_result),intent(out)::receipt
     acceptance_count=acceptance_count+1
+    if(have_acceptance)then
+      if(sum_global_square(last_accepted_density-state%density)==0d0)&
+        duplicate_acceptance_count=duplicate_acceptance_count+1
+    endif
     last_accepted_density=state%density
+    have_acceptance=.true.
     receipt=s_dg_hybrid_acceptance_result()
     receipt%valid=lambda>=0d0.and.state%trace_cache_valid
     receipt%symmetry_complete=.not.fail_symmetry_oracle;receipt%grid_complete=.not.fail_grid_oracle
@@ -156,9 +181,6 @@ contains
     real(real64),intent(in)::lambda,input_density(:);logical,intent(out)::callback_ok
     type(s_dg_hybrid_trial_state),intent(inout)::state
     callback_ok=phase==0.or.phase==5;phase=1
-    last_built_density=input_density
-    last_built_trace=state%trace(1,1);last_built_density_epoch=state%density_epoch
-    last_built_trace_epoch=state%trace_epoch
     if(.not.(lambda>0d0.and.stale_operator_positive))then
       state%operator_epoch=state%operator_epoch+1
       state%operator_structure_fingerprint=991_int64
@@ -191,7 +213,8 @@ contains
     real(real64),intent(out)::overlap;logical,intent(out)::callback_ok
     callback_ok=phase==2.and.lambda>=0d0;phase=3
     state%projector=(0d0,0d0);state%projector(1,1)=(1d0,0d0);state%projector(2,2)=(1d0,0d0)
-    state%projector_epoch=state%operator_epoch;overlap=1d0
+    if(.not.stale_projector_positive)state%projector_epoch=state%operator_epoch
+    overlap=1d0
   end subroutine projector_refresh
   subroutine density_trace_refresh(lambda,input_density,state,output_density,callback_ok)
     real(real64),intent(in)::lambda,input_density(:)
@@ -202,8 +225,12 @@ contains
     last_refreshed_density=output_density
     state%density=output_density;state%trace(1,1)=cmplx(sum(output_density)/real(nglobal,real64),0d0,real64)
     call MPI_Allreduce(MPI_IN_PLACE,state%trace,1,MPI_DOUBLE_COMPLEX,MPI_SUM,icomm,ierr)
-    state%density_epoch=state%density_epoch+1;state%trace_epoch=state%density_epoch
-    state%derived_epoch=state%density_epoch;state%trace_cache_valid=.true.;callback_ok=callback_ok.and.ierr==MPI_SUCCESS
+    if(.not.stale_trace_positive)then
+      state%density_epoch=state%operator_epoch;state%trace_epoch=state%operator_epoch
+      state%derived_epoch=state%operator_epoch
+    endif
+    state%trace_cache_valid=.true.;callback_ok=callback_ok.and.ierr==MPI_SUCCESS
+    last_refreshed_trace=state%trace(1,1);last_refreshed_epoch=state%operator_epoch
   end subroutine density_trace_refresh
   subroutine residual_evaluation(lambda,iteration,input_density,input_trace,state,residuals,projector_overlap,&
       electron_ok,occupation_ok,hermitian_ok,symmetry_ok,real_space_ok,gap_shrinking,callback_ok)
