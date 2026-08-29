@@ -12,11 +12,12 @@ program test_dg_hybrid_continuation_scf_mpi
   implicit none
   integer,parameter::nglobal=4
   integer::icomm,id_rank,nproc,ierr,i,nlocal,position,phase,solve_count,accepted_stages,rollbacks,acceptance_count,&
-    duplicate_acceptance_count,maximum_inner_iterations
+    duplicate_acceptance_count,maximum_inner_iterations,poison_gate
   integer(int64),allocatable::ids(:)
   real(real64),allocatable::dc_density(:),last_refreshed_density(:),last_accepted_density(:)
   real(real64)::final_lambda
   complex(real64)::last_refreshed_trace
+  complex(real64)::s_metric(3,3),base_coefficients(3,2),occupied_coefficients(3,2),expected_projector(3,3)
   integer::last_refreshed_epoch
   type(s_dg_hybrid_continuation_state)::continuation
   type(s_dg_hybrid_controller_controls)::controls
@@ -24,11 +25,16 @@ program test_dg_hybrid_continuation_scf_mpi
   logical::ok,first_volume,have_acceptance,lambda_zero_passed,forced_growth_complete,poison_final,&
     lambda_one_converged,fatal_positive,&
     lambda_zero_gate_delayed,stale_operator_positive,stale_projector_positive,stale_trace_positive,rank_divergent_operator,&
+    rank_local_solve_failure,&
     fail_symmetry_oracle,fail_grid_oracle
   character(256)::message
 
   call MPI_Init(ierr);icomm=MPI_COMM_WORLD
   call MPI_Comm_rank(icomm,id_rank,ierr);call MPI_Comm_size(icomm,nproc,ierr)
+  s_metric=(0d0,0d0);s_metric(1,1)=1d0;s_metric(2,2)=2d0;s_metric(3,3)=3d0
+  base_coefficients=(0d0,0d0);base_coefficients(1,1)=1d0
+  base_coefficients(2,2)=1d0/sqrt(5d0);base_coefficients(3,2)=1d0/sqrt(5d0)
+  expected_projector=matmul(base_coefficients,matmul(conjg(transpose(base_coefficients)),s_metric))
   nlocal=count([(mod(i-1,nproc)==id_rank,i=1,nglobal)])
   allocate(ids(nlocal),dc_density(nlocal),last_refreshed_density(nlocal),&
     last_accepted_density(nlocal));position=0
@@ -45,7 +51,7 @@ program test_dg_hybrid_continuation_scf_mpi
   controls%final_tolerance=[2d-8,2d-8,2d-8,2d-10]
   controls%iteration_limit=80
   fail_symmetry_oracle=.false.;fail_grid_oracle=.false.;stale_projector_positive=.false.;stale_trace_positive=.false.
-  acceptance_count=0;duplicate_acceptance_count=0;have_acceptance=.false.
+  acceptance_count=0;duplicate_acceptance_count=0;have_acceptance=.false.;rank_local_solve_failure=.false.;poison_gate=0
   maximum_inner_iterations=80
   if(nproc>1)then
     if(id_rank==0)controls%density_damping=0.4d0
@@ -133,6 +139,26 @@ program test_dg_hybrid_continuation_scf_mpi
   stale_operator_positive=.false.;rank_divergent_operator=.false.;fail_symmetry_oracle=.false.;fail_grid_oracle=.true.
   call run_fixture()
   call require(.not.ok.and.acceptance_count>0,'candidate stage bypassed the reconstructed-grid acceptance oracle')
+  if(nproc>1)then
+    call fill_state(seed);phase=0;solve_count=0;first_volume=.true.;lambda_zero_passed=.false.
+    forced_growth_complete=.true.;poison_final=.false.;lambda_one_converged=.false.;fatal_positive=.false.
+    lambda_zero_gate_delayed=.false.;stale_operator_positive=.false.;rank_divergent_operator=.false.
+    fail_symmetry_oracle=.false.;fail_grid_oracle=.false.;rank_local_solve_failure=.true.
+    call run_fixture()
+    call require(.not.ok.and.index(message,'callback failed')>0,&
+      'rank-local solve failure was not reported collectively')
+    rank_local_solve_failure=.false.
+  endif
+  controls%intermediate_tolerance=[1d0,1d0,1d0,1d0];maximum_inner_iterations=3
+  do poison_gate=1,9
+    call fill_state(seed);phase=0;solve_count=0;first_volume=.true.;lambda_zero_passed=.false.
+    forced_growth_complete=.true.;poison_final=.false.;lambda_one_converged=.false.;fatal_positive=.false.
+    lambda_zero_gate_delayed=.true.;stale_operator_positive=.false.;rank_divergent_operator=.false.
+    fail_symmetry_oracle=.false.;fail_grid_oracle=.false.
+    call run_fixture()
+    call require(.not.ok.and.index(message,'lambda-zero')>0,'independent residual or physical gate was bypassed')
+  enddo
+  poison_gate=0
   if(id_rank==0)write(*,'(a,i0,a)')'PASS hybrid continuation SCF on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
@@ -166,9 +192,9 @@ contains
   subroutine fill_state(state)
     type(s_dg_hybrid_trial_state),intent(out)::state
     allocate(state%density(nlocal),state%potential(nlocal),state%occupations(2),state%eigenvalues(2),&
-      state%mixing_history(2),state%projector(2,2),state%trace(1,1))
+      state%mixing_history(2),state%projector(3,3),state%trace(1,1))
     state%density=9d0;state%potential=0d0;state%occupations=[1d0,1d0];state%eigenvalues=[-1d0,-1d0]
-    state%mixing_history=0d0;state%projector=(0d0,0d0);state%projector(1,1)=1d0;state%projector(2,2)=1d0
+    state%mixing_history=0d0;state%projector=expected_projector
     state%trace=(0d0,0d0)
     state%density_epoch=0;state%operator_epoch=0;state%projector_epoch=0;state%trace_epoch=0;state%derived_epoch=0
     state%trace_cache_valid=.true.
@@ -196,15 +222,18 @@ contains
     real(real64),intent(in)::lambda;integer,intent(in)::iteration
     type(s_dg_hybrid_trial_state),intent(inout)::state;logical,intent(out)::callback_ok
     real(real64)::angle
+    complex(real64)::rotation(2,2)
     callback_ok=phase==1.and.iteration>0
     if(solve_count==0)callback_ok=callback_ok.and.all(state%density==dc_density)
+    if(rank_local_solve_failure.and.id_rank==0)callback_ok=.false.
     if(lambda>0d0.and.fatal_positive)callback_ok=.false.
     phase=2;solve_count=solve_count+1
     angle=0.37d0*solve_count
     state%eigenvalues=[-1d0-0.1d0*lambda,-1d0-0.1d0*lambda]
     ! A dense unitary gauge rotation changes every solve; the projector callback must remove it.
-    state%projector(1,1)=cmplx(cos(angle),0d0,real64);state%projector(1,2)=cmplx(-sin(angle),0d0,real64)
-    state%projector(2,1)=cmplx(sin(angle),0d0,real64);state%projector(2,2)=cmplx(cos(angle),0d0,real64)
+    rotation(1,1)=cmplx(cos(angle),0d0,real64);rotation(1,2)=cmplx(-sin(angle),0d0,real64)
+    rotation(2,1)=cmplx(sin(angle),0d0,real64);rotation(2,2)=cmplx(cos(angle),0d0,real64)
+    occupied_coefficients=matmul(base_coefficients,rotation)
     state%operator_epoch=state%operator_epoch+1
   end subroutine full_solve
   subroutine projector_refresh(lambda,state,overlap,callback_ok)
@@ -212,7 +241,7 @@ contains
     type(s_dg_hybrid_trial_state),intent(inout)::state
     real(real64),intent(out)::overlap;logical,intent(out)::callback_ok
     callback_ok=phase==2.and.lambda>=0d0;phase=3
-    state%projector=(0d0,0d0);state%projector(1,1)=(1d0,0d0);state%projector(2,2)=(1d0,0d0)
+    state%projector=matmul(occupied_coefficients,matmul(conjg(transpose(occupied_coefficients)),s_metric))
     if(.not.stale_projector_positive)state%projector_epoch=state%operator_epoch
     overlap=1d0
   end subroutine projector_refresh
@@ -241,6 +270,8 @@ contains
     logical,intent(out)::electron_ok,occupation_ok,hermitian_ok,symmetry_ok,real_space_ok,gap_shrinking,callback_ok
     real(real64)::local_norm,global_norm
     callback_ok=phase==4.and.state%trace_cache_valid;phase=5
+    callback_ok=callback_ok.and.maxval(abs(state%projector-expected_projector))<1d-12.and.&
+      maxval(abs(matmul(state%projector,state%projector)-state%projector))<1d-12
     local_norm=sum((state%density-input_density)**2)
     call MPI_Allreduce(local_norm,global_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,icomm,ierr)
     residuals%r_rho=sqrt(global_norm)/max(1d0,sqrt(sum_global_square(input_density)))
@@ -257,6 +288,17 @@ contains
     if(lambda==1d0.and.lambda_one_converged.and.poison_final)residuals%r_h=1d-6
     projector_overlap=1d0;electron_ok=.true.;occupation_ok=.true.;hermitian_ok=.true.;symmetry_ok=.true.
     real_space_ok=.true.;gap_shrinking=.false.;callback_ok=callback_ok.and.ierr==MPI_SUCCESS
+    select case(poison_gate)
+    case(1);residuals%r_h=2d0
+    case(2);residuals%r_rho=2d0
+    case(3);residuals%r_t=2d0
+    case(4);residuals%r_s=2d0
+    case(5);electron_ok=.false.
+    case(6);occupation_ok=.false.
+    case(7);hermitian_ok=.false.
+    case(8);symmetry_ok=.false.
+    case(9);real_space_ok=.false.
+    end select
     if(lambda==0d0.and.residuals%r_rho<=controls%intermediate_tolerance(2).and.&
         residuals%r_t<=controls%intermediate_tolerance(3))then
       if(.not.lambda_zero_gate_delayed)then
