@@ -23,9 +23,11 @@ is present in full at every stage. When a projector crosses fragment
 boundaries, assign it one canonical owner and accumulate its complete matrix
 contribution exactly once.
 
-Implement one concrete solver with one explicit loop. Do not add a callback
-table, production adapter, runtime catalog, independent trace mixer, or
-another controller layer.
+Implement one explicit physical loop in the guarded production branch, where
+the existing SALMON grid, Poisson, XC, DC, and basis objects are already in
+scope. Keep lambda decisions and numerical kernels in small modules. Do not
+add a callback fixture, production adapter, runtime catalog, independent trace
+mixer, or another controller layer.
 
 ## Fixed variational payload
 
@@ -81,8 +83,8 @@ bitwise fixed throughout one continuation attempt.
 
 ### Concrete density-to-potential path
 
-Do not make the continuation solver depend on a callback into `main_dft`.
-Follow the established DC decomposition explicitly. Each fragment owns its
+Do not wrap the physical updates in callbacks. The guarded production loop
+follows the established DC decomposition explicitly. Each fragment owns its
 current core density. Assemble those exactly-once core values into the total
 real-space density using the DC fragment-to-total map. Compute only the
 Hartree field on the total-system FFT distribution, using the existing total
@@ -266,13 +268,13 @@ Develop every behavior test-first.
 2. A composition test verifies `H_volume + lambda H_SIPG`, uniform lambda,
    zero interface contribution at lambda zero, complete contribution at
    lambda one, and SIPG-only kinetic cross-fragment blocks.
-3. A coupled SCF test starts from an exact supplied DC density, proves gradual
-   density mixing, refreshes `Gamma`, `Q`, density, and traces after every
-   solve, and forbids lambda advance before density convergence.
+3. The production-loop contract test starts from an exact supplied DC density,
+   proves gradual density mixing, requires refresh of `Gamma`, `Q`, density,
+   and traces after every solve, and forbids lambda advance before convergence.
 4. Continuation tests cover adaptive step growth, complete rollback, phase
    and degenerate-space gauge invariance, small-gap handling, and collective
    rank-local failure.
-5. A production-format integration test proves that the concrete solver uses
+5. A production-format integration test proves that the concrete loop uses
    the fixed broken-volume, nonlocal, metric, and SIPG payload and never calls
    the ordinary `hpsi` projection, one-shot solve, or occupied-only checkpoint.
 6. Final acceptance uses Si64 with eight MPI ranks, `OMP_NUM_THREADS=1`, and no

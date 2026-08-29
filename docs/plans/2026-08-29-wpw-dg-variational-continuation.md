@@ -4,7 +4,7 @@
 
 **Goal:** Replace the invalid ordinary-`hpsi` final projection with a self-consistent WF+PW DG continuation built from broken-volume, complete nonlocal, and SIPG variational matrices.
 
-**Architecture:** Freeze one retained WF+PW basis and assemble `S`, broken kinetic, exactly-once nonlocal, and complete SIPG rows before continuation. During SCF update only the density-dependent local-potential rows, mix density only, and advance one adaptive uniform lambda after every fixed point converges. Keep the implementation as one concrete solver and three state objects, with no production callbacks or adapter layer.
+**Architecture:** Freeze one retained WF+PW basis and assemble `S`, broken kinetic, exactly-once nonlocal, and complete SIPG rows before continuation. During SCF update only the density-dependent local-potential rows, mix density only, and advance one adaptive uniform lambda after every fixed point converges. Keep the numerical state and lambda decisions in small modules, but put the one physical SCF loop in the explicit production branch where SALMON's Hartree, XC, density, and basis objects already exist. Do not add a callback fixture or adapter layer.
 
 **Tech Stack:** Fortran 2008, MPI, SALMON density and potential infrastructure, ScaLAPACK, SIPG weak form, standalone Python MPI runners.
 
@@ -228,19 +228,18 @@ Commit only task files as:
 
 `feat(dg): update hybrid potential from divided density`
 
-### Task 5: Implement one concrete density-mixed continuation loop
+### Task 5: Remove the callback SCF layer and test the concrete loop contract
 
 **Files:**
-- Modify: `src/gs/dc/dg_hybrid_continuation_scf.f90`
-- Modify: `tests/dg/test_dg_hybrid_continuation_scf_mpi.f90`
+- Delete: `src/gs/dc/dg_hybrid_continuation_scf.f90`
+- Delete: `tests/dg/test_dg_hybrid_continuation_scf_mpi.f90`
 - Modify: `tests/dg/run_dg_hybrid_continuation_scf_mpi.py`
+- Modify: `src/gs/dc/CMakeLists.txt`
 
 **Step 1: Replace the fixture-only RED contract**
 
-Drive the same concrete array-state transition intended for production with a
-small density-dependent local matrix. Require the first local build to see the
-exact supplied DC density. Record every input density and require gradual
-updates
+Inspect the contained production loop and require the first local build to see
+the exact supplied DC density. Require gradual updates
 
 ```text
 rho_next = rho_in + alpha_rho * (rho_out - rho_in)
@@ -252,38 +251,37 @@ density mix`. Require lambda zero to converge before positive lambda, uniform
 lambda, a forced complete rollback, gauge-invariant projector tracking, and
 one fully refreshed lambda-one final state.
 
-Add a source assertion forbidding public abstract callback interfaces,
-`class(*)`, procedure-pointer tables, and a fixture-only public entry point.
+Require operation order `Hartree -> fragment XC -> local projection -> compose
+-> solve -> Gamma/Q -> density/trace -> residuals -> density mix`. Add a source
+assertion forbidding abstract callback interfaces, `class(*)`, procedure-pointer
+tables, and a fixture-only public entry point.
 
 **Step 2: Run RED**
 
 Run: `python3 tests/dg/run_dg_hybrid_continuation_scf_mpi.py`
 
-Expected: FAIL because the module exports only the callback fixture.
+Expected: FAIL because the production branch does not yet contain the loop and
+the callback fixture still exists.
 
-**Step 3: Implement the minimum concrete loop**
+**Step 3: Remove the obsolete abstraction**
 
-Expose `run_dg_hybrid_continuation_scf` over the fixed payload, DC density,
-occupations, controls, and concrete distributed arrays. Keep one explicit
-loop in this routine. Mix density only. Rebuild `V_local` and the complete
-Hamiltonian every iteration. Refresh `Gamma`, `Q`, output density, and traces
-after every solve. Use the existing compact lambda decisions but keep their
-state inside this solver. A rejected trial restores the complete accepted
-iterate. Remove the public callback fixture after its test uses the concrete
-path.
+Delete the callback-only SCF module and its synthetic callback test. Keep the
+existing controller, residual, acceptance, eigensystem, density, potential,
+and payload modules as independently tested numerical kernels. The following
+task supplies their only physical orchestration loop.
 
 **Step 4: Run GREEN at every focused decomposition**
 
-Run the continuation runner and require PASS at 1, 2, 4, and 8 ranks. Then run
-the residual, controller, acceptance, and generalized-eigensystem runners.
+Run the source-contract runner, then the residual, controller, acceptance,
+potential, density, and generalized-eigensystem runners.
 
 **Step 5: Commit**
 
 Commit only the three task files as:
 
-`feat(dg): converge variational DG continuation`
+`refactor(dg): remove callback continuation fixture`
 
-### Task 6: Connect the production WF+PW basis and remove the invalid branch
+### Task 6: Implement the production WF+PW continuation loop
 
 **Files:**
 - Modify: `src/gs/main_dft.f90`
@@ -298,7 +296,7 @@ Require the explicit continuation branch to:
 - seed from `dc%rho_tot`;
 - materialize the fixed retained basis and interior gradients;
 - assemble broken kinetic, complete nonlocal, metric, and SIPG rows;
-- call `run_dg_hybrid_continuation_scf`;
+- contain the single explicit lambda/SCF loop;
 - exclude ordinary `hpsi` projection, the one-shot generalized solve, and the
   occupied-only checkpoint from the continuation driver.
 
@@ -313,9 +311,13 @@ broken-volume connection are absent.
 **Step 3: Add the contained production driver**
 
 Materialize global basis values and gradients only on each rank's owned
-fragment interior. Assemble all fixed matrices before SCF. During SCF update
-SALMON's total local potential from the mixed density and project only that
-local field. Call the concrete solver with exact `dc%rho_tot`. In the explicit
+fragment interior. Assemble all fixed matrices before SCF. Seed the loop with
+the exact converged DC density. During every inner iteration assemble that
+density for the existing total-system Hartree FFT, redistribute only the
+Hartree field, evaluate local/semi-local XC on fragment buffers, and project
+the combined local field. Compose, solve, rebuild Gamma/Q, density and traces,
+evaluate residuals, then mix density only. Use the compact controller for
+uniform adaptive lambda and complete rollback. In the explicit
 continuation branch, skip `solve_dg_hybrid_generalized_once_and_publish` and
 `write_rt_dg_hybrid_occupied_checkpoint`. Do not change their legacy callers.
 
