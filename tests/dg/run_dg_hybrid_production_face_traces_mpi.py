@@ -22,6 +22,12 @@ assert "reduce_complex_matrix" not in materialization_body, (
 assert "mpi_allreduce" not in materialization_body, (
     "production face materialization still contains a communicator-wide synchronization"
 )
+interior_body = production_source.split(
+    "subroutine materialize_dg_hybrid_production_interior", 1
+)[1].split("end subroutine materialize_dg_hybrid_production_interior", 1)[0]
+assert "mpi_allreduce(values" not in interior_body and "mpi_allreduce(gradients" not in interior_body, (
+    "production interior basis data are replicated by a global reduction"
+)
 assembly_body = production_source.split("subroutine assemble_dg_hybrid_production_face", 1)[1].split(
     "end subroutine assemble_dg_hybrid_production_face", 1
 )[0]
@@ -46,6 +52,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-production-face-traces-") as nam
         "-ffree-line-length-none", "-I", str(build), "-J", str(build),
         "-fcheck=all", "-ffpe-trap=invalid,zero,overflow", "-fbacktrace",
         str(root / "src/gs/dc/dg_hybrid_fragment_basis.f90"),
+        str(root / "src/gs/dc/dg_hybrid_broken_volume.f90"),
         str(root / "src/gs/dc/dg_hybrid_sipg_operator.f90"),
         str(root / "src/gs/dc/dg_hybrid_production_face_traces.f90"),
         str(root / "tests/dg/test_dg_hybrid_production_face_traces_mpi.f90"),
@@ -55,6 +62,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-production-face-traces-") as nam
         shutil.which("mpifort"), "-cpp", "-std=f2008", "-ffree-line-length-none",
         "-I", str(build), "-J", str(build), "-fcheck=all", "-c",
         str(root / "src/gs/dc/dg_hybrid_fragment_basis.f90"),
+        str(root / "src/gs/dc/dg_hybrid_broken_volume.f90"),
         str(root / "src/gs/dc/dg_hybrid_sipg_operator.f90"),
         str(root / "src/gs/dc/dg_hybrid_production_face_traces.f90"),
     ], cwd=build, check=True)
