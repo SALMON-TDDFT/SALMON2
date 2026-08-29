@@ -28,6 +28,7 @@ set(SOURCES
     dg_overlapping_wannier_metric.f90
     dg_overlapping_wannier_w90.f90
     dg_overlapping_wannier_construction.f90
+    dg_hybrid_retained_basis_symmetry.f90
     dg_overlapping_wannier_operators.f90
     dg_overlapping_wannier_nonlocal.f90
     dg_nonlocal_projector_range.f90

@@ -280,6 +280,22 @@ logical :: ow_direct_nonlocal_compared=.false.
 logical :: ow_projector_stage_diagnosed=.false.
 integer :: ilevel_print
 
+interface
+  subroutine build_dg_hybrid_retained_basis_representation(comm_arg,global_count_arg,core_ids_arg,&
+      core_weights_arg,pencil_maps_arg,fragment_basis_arg,row_ids_arg,s_rows_arg,tolerance_arg,&
+      representation_arg,callback_ok,callback_message)
+    import::s_dg_hybrid_fragment_basis
+    integer,intent(in)::comm_arg,global_count_arg
+    integer(8),intent(in)::core_ids_arg(:),pencil_maps_arg(:,:),row_ids_arg(:)
+    real(8),intent(in)::core_weights_arg(:),tolerance_arg
+    complex(8),intent(in)::s_rows_arg(:,:)
+    type(s_dg_hybrid_fragment_basis),intent(in)::fragment_basis_arg
+    complex(8),allocatable,intent(out)::representation_arg(:,:,:)
+    logical,intent(out)::callback_ok
+    character(*),intent(out)::callback_message
+  end subroutine build_dg_hybrid_retained_basis_representation
+end interface
+
 if(theory=='dft_band'.and.iperiodic/=3) return
 
 if(yn_dc=='y') then
@@ -670,6 +686,7 @@ contains
       spectral_wannier_representation(:,:),spectral_spatial_trials(:,:),spectral_amn(:,:)
     complex(8),allocatable::one_shot_hrows(:,:)
     complex(8),allocatable::divided_lcfo_hrows(:,:),divided_lcfo_srows(:,:)
+    complex(8),allocatable::divided_basis_representation(:,:,:)
     real(8),allocatable::weights(:),spectrum(:),occupations(:),lcfo_retained_occupations(:),&
       lcfo_retained_eigenvalues(:),local_point_rotations(:,:,:)
     real(8),allocatable::ow_total_density_values(:)
@@ -2596,6 +2613,12 @@ contains
         divided_lcfo_peak_elements,divided_lcfo_operator_fingerprint,ok,message)
       if(.not.ok)write(0,'(a)')trim(message)
       if(.not.ok)error stop 'divided Hybrid LCFO assembly failed'
+      call build_dg_hybrid_retained_basis_representation(dc%icomm_tot,int(expected_core_count),&
+        ow_core_ids,ow_core_weights,ow_pencil_generator_maps,divided_fragment_basis,&
+        divided_lcfo_row_ids,divided_lcfo_srows,dg_ow_symmetry_tolerance,&
+        divided_basis_representation,ok,message)
+      if(.not.ok)write(0,'(a)')trim(message)
+      if(.not.ok)error stop 'divided Hybrid retained-basis symmetry representation failed'
       call solve_dg_hybrid_generalized_once_and_publish(dc%icomm_tot,size(divided_lcfo_hrows,2),nstate,&
         divided_lcfo_row_ids,divided_lcfo_hrows,divided_lcfo_srows,dg_dc_gs_final_orbital_tolerance,&
         occupations,dc%elec_num_tot,divided_fragment_fingerprint,divided_lcfo_operator_fingerprint,&
