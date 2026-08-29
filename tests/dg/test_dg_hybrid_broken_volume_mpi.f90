@@ -2,7 +2,8 @@
 program test_dg_hybrid_broken_volume_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
-  use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows
+  use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows,&
+    assemble_dg_hybrid_exact_nonlocal_rows
   implicit none
   integer,parameter::nbasis=5,npoint=5
   integer::comm,rank,nproc,ierr,i,j,p,nlocal,nrow,ip,ir
@@ -11,7 +12,12 @@ program test_dg_hybrid_broken_volume_mpi
   integer(int64),allocatable::point_ids(:),row_ids(:)
   real(real64),allocatable::weights(:),potential(:)
   complex(real64),allocatable::values(:,:),gradients(:,:,:),kinetic(:,:),local_rows(:,:)
+  complex(real64),allocatable::nonlocal_rows(:,:)
   complex(real64)::expected_t(nbasis,nbasis),expected_v(nbasis,nbasis),term
+  complex(real64)::projector_overlap(nbasis,2),expected_nl(nbasis,nbasis)
+  integer(int64)::projector_ids(2)
+  integer::projector_owner(2)
+  real(real64)::projector_strength(2),nonlocal_diagnostics(2)
   real(real64)::diagnostics(4)
   logical::ok,checks_ok
   character(256)::message
@@ -72,6 +78,28 @@ program test_dg_hybrid_broken_volume_mpi
   enddo
   call require(checks_ok,'broken-volume rows differ from the analytic fragment reference')
   call require(all(diagnostics>=0d0),'invalid broken-volume diagnostics')
+  projector_ids=[1_int64,2_int64]
+  projector_owner=[0,mod(1,nproc)]
+  projector_strength=[0.7d0,-0.25d0]
+  do i=1,nbasis
+    projector_overlap(i,1)=cmplx(0.11d0*i,-0.03d0*i,real64)
+    projector_overlap(i,2)=cmplx(-0.04d0*i,0.02d0*(i+1),real64)
+  enddo
+  call assemble_dg_hybrid_exact_nonlocal_rows(comm,nbasis,row_ids,projector_ids,projector_owner,&
+    projector_strength,projector_overlap,nonlocal_rows,nonlocal_diagnostics,ok,message)
+  call require(ok,trim(message))
+  expected_nl=(0d0,0d0)
+  do p=1,2;do i=1,nbasis;do j=1,nbasis
+    expected_nl(i,j)=expected_nl(i,j)+projector_strength(p)*&
+      conjg(projector_overlap(i,p))*projector_overlap(j,p)
+  enddo;enddo;enddo
+  checks_ok=.true.
+  do ir=1,nrow
+    checks_ok=checks_ok.and.maxval(abs(nonlocal_rows(ir,:)-expected_nl(int(row_ids(ir)),:)))<2d-13
+  enddo
+  checks_ok=checks_ok.and.abs(expected_nl(1,3))>1d-8
+  call require(checks_ok,'crossing nonlocal projector was not accumulated exactly once')
+  call require(all(nonlocal_diagnostics>=0d0),'invalid nonlocal diagnostics')
   if(rank==0)write(*,'(a,i0,a)')'PASS hybrid broken volume on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
