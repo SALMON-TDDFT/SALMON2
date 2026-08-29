@@ -10,6 +10,7 @@ set(SOURCES
     dg_hybrid_sipg_operator.f90
     dg_hybrid_broken_volume.f90
     dg_hybrid_variational_payload.f90
+    dg_hybrid_real_space_residual.f90
     dg_hybrid_variational_potential.f90
     dg_hybrid_generalized_eigensystem.f90
     dg_hybrid_density.f90
