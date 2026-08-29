@@ -7,8 +7,57 @@ module dg_hybrid_broken_volume
 #endif
   implicit none
   private
-  public::assemble_dg_hybrid_broken_volume_rows,assemble_dg_hybrid_exact_nonlocal_rows
+  public::assemble_dg_hybrid_broken_volume_rows,assemble_dg_hybrid_exact_nonlocal_rows,&
+    collect_dg_hybrid_exact_projector_overlaps
 contains
+  subroutine collect_dg_hybrid_exact_projector_overlaps(comm,global_basis_count,atom_ids,ordinals,strength,&
+      partial_overlap,projector_ids,projector_owner,complete_strength,complete_overlap,ok,message)
+    integer,intent(in)::comm,global_basis_count,atom_ids(:),ordinals(:)
+    real(real64),intent(in)::strength(:)
+    complex(real64),intent(in)::partial_overlap(:,:)
+    integer(int64),allocatable,intent(out)::projector_ids(:)
+    integer,allocatable,intent(out)::projector_owner(:)
+    real(real64),allocatable,intent(out)::complete_strength(:)
+    complex(real64),allocatable,intent(out)::complete_overlap(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nprojector,nproc,ierr,local_bad,global_bad,p,q
+    integer,allocatable::atom_min(:),atom_max(:),ordinal_min(:),ordinal_max(:)
+    real(real64),allocatable::strength_min(:),strength_max(:)
+    ok=.false.;message='';local_bad=0;nprojector=size(atom_ids)
+    call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
+    if(global_basis_count<1.or.nprojector<1.or.size(ordinals)/=nprojector.or.size(strength)/=nprojector.or.&
+        any(shape(partial_overlap)/=[global_basis_count,nprojector]).or.any(atom_ids<1).or.any(ordinals<1).or.&
+        .not.all(ieee_is_finite(strength)).or..not.finite_matrix(partial_overlap))local_bad=1
+    do p=1,nprojector;do q=p+1,nprojector
+      if(atom_ids(p)==atom_ids(q).and.ordinals(p)==ordinals(q))local_bad=1
+    enddo;enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid exact projector overlap catalog';return;endif
+    allocate(atom_min(nprojector),atom_max(nprojector),ordinal_min(nprojector),ordinal_max(nprojector),&
+      strength_min(nprojector),strength_max(nprojector))
+    call MPI_Allreduce(atom_ids,atom_min,nprojector,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(atom_ids,atom_max,nprojector,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(ordinals,ordinal_min,nprojector,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(ordinals,ordinal_max,nprojector,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(strength,strength_min,nprojector,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(strength,strength_max,nprojector,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(atom_min/=atom_max).or.any(ordinal_min/=ordinal_max).or.&
+        any(strength_min/=strength_max))then;message='rank-disagreeing exact projector catalog';return;endif
+    allocate(projector_ids(nprojector),projector_owner(nprojector),complete_strength(nprojector),&
+      complete_overlap(global_basis_count,nprojector))
+    projector_ids=[(int(p,int64),p=1,nprojector)]
+    projector_owner=[(mod(p-1,nproc),p=1,nprojector)]
+    complete_strength=strength
+    call MPI_Allreduce(partial_overlap,complete_overlap,size(partial_overlap),MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    ok=ierr==MPI_SUCCESS.and.finite_matrix(complete_overlap)
+    if(ok)then;message='';else;message='exact projector overlap reduction failed';endif
+#else
+    ok=.false.;message='MPI is required for exact projector overlap collection'
+#endif
+  end subroutine collect_dg_hybrid_exact_projector_overlaps
+
   subroutine assemble_dg_hybrid_exact_nonlocal_rows(comm,global_basis_count,row_ids,projector_ids,&
       projector_owner,strength,overlap,nonlocal_rows,diagnostics,ok,message)
     integer,intent(in)::comm,global_basis_count,projector_owner(:)

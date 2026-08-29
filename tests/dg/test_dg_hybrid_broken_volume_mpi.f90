@@ -3,7 +3,7 @@ program test_dg_hybrid_broken_volume_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows,&
-    assemble_dg_hybrid_exact_nonlocal_rows
+    assemble_dg_hybrid_exact_nonlocal_rows,collect_dg_hybrid_exact_projector_overlaps
   implicit none
   integer,parameter::nbasis=5,npoint=5
   integer::comm,rank,nproc,ierr,i,j,p,nlocal,nrow,ip,ir
@@ -13,6 +13,10 @@ program test_dg_hybrid_broken_volume_mpi
   real(real64),allocatable::weights(:),potential(:)
   complex(real64),allocatable::values(:,:),gradients(:,:,:),kinetic(:,:),local_rows(:,:)
   complex(real64),allocatable::nonlocal_rows(:,:)
+  complex(real64),allocatable::partial_projector_overlap(:,:),collected_projector_overlap(:,:)
+  integer(int64),allocatable::collected_projector_ids(:)
+  integer,allocatable::collected_projector_owner(:)
+  real(real64),allocatable::collected_projector_strength(:)
   complex(real64)::expected_t(nbasis,nbasis),expected_v(nbasis,nbasis),term
   complex(real64)::projector_overlap(nbasis,2),expected_nl(nbasis,nbasis)
   integer(int64)::projector_ids(2)
@@ -78,13 +82,29 @@ program test_dg_hybrid_broken_volume_mpi
   enddo
   call require(checks_ok,'broken-volume rows differ from the analytic fragment reference')
   call require(all(diagnostics>=0d0),'invalid broken-volume diagnostics')
-  projector_ids=[1_int64,2_int64]
-  projector_owner=[0,mod(1,nproc)]
-  projector_strength=[0.7d0,-0.25d0]
-  do i=1,nbasis
-    projector_overlap(i,1)=cmplx(0.11d0*i,-0.03d0*i,real64)
-    projector_overlap(i,2)=cmplx(-0.04d0*i,0.02d0*(i+1),real64)
+  allocate(partial_projector_overlap(nbasis,2));partial_projector_overlap=(0d0,0d0)
+  do ip=1,nlocal
+    p=int(point_ids(ip))
+    do i=1,nbasis
+      partial_projector_overlap(i,1)=partial_projector_overlap(i,1)+weights(ip)*&
+        conjg(cmplx(0.2d0+0.01d0*p,-0.03d0*p,real64))*&
+        cmplx(0.1d0*i+0.03d0*p,-0.02d0*i*p,real64)
+      partial_projector_overlap(i,2)=partial_projector_overlap(i,2)+weights(ip)*&
+        conjg(cmplx(-0.1d0+0.02d0*p,0.04d0*p,real64))*&
+        cmplx(0.1d0*i+0.03d0*p,-0.02d0*i*p,real64)
+    enddo
   enddo
+  call collect_dg_hybrid_exact_projector_overlaps(comm,nbasis,[5,6],[1,2],[0.7d0,-0.25d0],&
+    partial_projector_overlap,collected_projector_ids,collected_projector_owner,&
+    collected_projector_strength,collected_projector_overlap,ok,message)
+  call require(ok,trim(message))
+  call require(size(collected_projector_ids)==2.and.&
+    all(collected_projector_owner==[0,mod(1,nproc)]),&
+    'cross-fragment projectors do not have one canonical owner')
+  projector_overlap=collected_projector_overlap
+  projector_ids=[1_int64,2_int64]
+  projector_owner=collected_projector_owner
+  projector_strength=collected_projector_strength
   call assemble_dg_hybrid_exact_nonlocal_rows(comm,nbasis,row_ids,projector_ids,projector_owner,&
     projector_strength,projector_overlap,nonlocal_rows,nonlocal_diagnostics,ok,message)
   call require(ok,trim(message))
