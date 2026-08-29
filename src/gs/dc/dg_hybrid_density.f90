@@ -15,8 +15,69 @@ module dg_hybrid_density
       logical,intent(out)::ok
     end subroutine dg_hybrid_density_basis_provider
   end interface
-  public::reconstruct_dg_hybrid_density
+  public::reconstruct_dg_hybrid_density,reconstruct_dg_hybrid_occupied_state
 contains
+  subroutine reconstruct_dg_hybrid_occupied_state(comm,global_basis_count,row_ids,metric_rows,basis_values,&
+      weights,coefficients,occupations,density,gamma_rows,projector_rows,s_coefficients,electron_count,ok,message)
+    integer,intent(in)::comm,global_basis_count
+    integer(int64),intent(in)::row_ids(:)
+    complex(real64),intent(in)::metric_rows(:,:),basis_values(:,:),coefficients(:,:)
+    real(real64),intent(in)::weights(:),occupations(:)
+    real(real64),allocatable,intent(out)::density(:)
+    complex(real64),allocatable,intent(out)::gamma_rows(:,:),projector_rows(:,:),s_coefficients(:,:)
+    real(real64),intent(out)::electron_count
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    complex(real64),allocatable::global_coefficients(:,:),global_s_coefficients(:,:),local_coefficients(:,:),&
+      local_s_coefficients(:,:),weighted_coefficients(:,:),spatial_states(:,:)
+    integer,allocatable::ownership(:)
+    integer::i,p,nowned,nocc,npoint,ierr,local_bad,global_bad
+    real(real64)::local_electron_count
+    ok=.false.;message='';electron_count=0d0;nowned=size(row_ids);nocc=size(occupations);npoint=size(weights)
+    local_bad=0
+    if(global_basis_count<1.or.nocc<1.or.any(shape(metric_rows)/=[nowned,global_basis_count]).or.&
+        any(shape(basis_values)/=[global_basis_count,npoint]).or.any(shape(coefficients)/=[nowned,nocc]).or.&
+        any(row_ids<1_int64).or.any(row_ids>int(global_basis_count,int64)).or.any(weights<=0d0).or.&
+        any(occupations<0d0).or..not.all(ieee_is_finite(weights)).or..not.all(ieee_is_finite(occupations)).or.&
+        .not.finite_complex_state(metric_rows).or..not.finite_complex_state(basis_values).or.&
+        .not.finite_complex_state(coefficients))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid concrete occupied-state reconstruction';return;endif
+    allocate(ownership(global_basis_count));ownership=0
+    do i=1,nowned;ownership(int(row_ids(i)))=ownership(int(row_ids(i)))+1;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,ownership,global_basis_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(ownership/=1))then;message='occupied-state rows are not owned exactly once';return;endif
+    allocate(local_coefficients(global_basis_count,nocc),global_coefficients(global_basis_count,nocc),&
+      local_s_coefficients(global_basis_count,nocc),global_s_coefficients(global_basis_count,nocc),&
+      s_coefficients(nowned,nocc),weighted_coefficients(nowned,nocc),spatial_states(nocc,npoint),&
+      density(npoint),gamma_rows(nowned,global_basis_count),projector_rows(nowned,global_basis_count))
+    local_coefficients=(0d0,0d0)
+    do i=1,nowned;local_coefficients(int(row_ids(i)),:)=coefficients(i,:);enddo
+    call MPI_Allreduce(local_coefficients,global_coefficients,size(local_coefficients),MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='occupied coefficient row assembly failed';return;endif
+    s_coefficients=matmul(metric_rows,global_coefficients);local_s_coefficients=(0d0,0d0)
+    do i=1,nowned;local_s_coefficients(int(row_ids(i)),:)=s_coefficients(i,:);enddo
+    call MPI_Allreduce(local_s_coefficients,global_s_coefficients,size(local_s_coefficients),&
+      MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='metric occupied coefficient row assembly failed';return;endif
+    weighted_coefficients=coefficients
+    do i=1,nocc;weighted_coefficients(:,i)=occupations(i)*weighted_coefficients(:,i);enddo
+    gamma_rows=matmul(weighted_coefficients,conjg(transpose(global_coefficients)))
+    projector_rows=matmul(coefficients,conjg(transpose(global_s_coefficients)))
+    spatial_states=matmul(transpose(global_coefficients),basis_values);density=0d0
+    do i=1,nocc;density=density+occupations(i)*abs(spatial_states(i,:))**2;enddo
+    local_electron_count=sum(weights*density)
+    call MPI_Allreduce(local_electron_count,electron_count,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+    ok=ierr==MPI_SUCCESS.and.all(ieee_is_finite(density)).and.ieee_is_finite(electron_count).and.&
+      finite_complex_state(gamma_rows).and.finite_complex_state(projector_rows).and.&
+      finite_complex_state(s_coefficients)
+    if(ok)then;message='';else;message='nonfinite concrete occupied-state reconstruction';endif
+#else
+    ok=.false.;message='MPI is required for concrete occupied-state reconstruction';electron_count=0d0
+#endif
+  end subroutine reconstruct_dg_hybrid_occupied_state
+
   subroutine reconstruct_dg_hybrid_density(comm,global_spatial_count,spatial_ids,weights,global_basis_count,row_ids,&
       coefficients,occupations,materialize_basis,basis_tile_width,occupied_tile_width,basis_fingerprint,tolerance,&
       density,electron_count,workspace_peak_bytes,fingerprint,ok,message)
@@ -206,4 +267,9 @@ contains
     workspace_peak_bytes=0_int64;fingerprint=0_int64
 #endif
   end subroutine reconstruct_dg_hybrid_density
+
+  logical function finite_complex_state(values) result(finite)
+    complex(real64),intent(in)::values(:,:)
+    finite=all(ieee_is_finite(real(values))).and.all(ieee_is_finite(aimag(values)))
+  end function finite_complex_state
 end module dg_hybrid_density

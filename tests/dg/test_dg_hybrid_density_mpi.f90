@@ -3,7 +3,7 @@ program test_dg_hybrid_density_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
-  use dg_hybrid_density,only:reconstruct_dg_hybrid_density
+  use dg_hybrid_density,only:reconstruct_dg_hybrid_density,reconstruct_dg_hybrid_occupied_state
   implicit none
   integer,parameter::ngrid=8,nbasis=4,nocc=2
   integer::comm,rank,nproc,ierr,nlocal,nowned,p,row,i,position
@@ -11,6 +11,8 @@ program test_dg_hybrid_density_mpi
   real(real64),allocatable::weights(:),density(:),rotated_density(:)
   real(real64)::occupations(nocc),electron_count,rotated_electron_count,defect
   complex(real64),allocatable::coefficients(:,:),rotated_coefficients(:,:)
+  complex(real64),allocatable::metric_rows(:,:),basis_values(:,:),gamma_rows(:,:),projector_rows(:,:),&
+    s_coefficients(:,:),rotated_gamma_rows(:,:),rotated_projector_rows(:,:),rotated_s_coefficients(:,:)
   complex(real64)::basis(nbasis,ngrid),full_coefficients(nbasis,nocc),rotation(nocc,nocc),phase
   integer(int64)::workspace,fingerprint,rotated_fingerprint,reference_fingerprint
   logical::ok,provider_finite
@@ -46,6 +48,20 @@ program test_dg_hybrid_density_mpi
   call require(defect<2d-12.and.abs(electron_count-rotated_electron_count)<2d-12,&
     'occupied unitary rotation changed reconstructed density')
   call require(fingerprint==rotated_fingerprint,'density fingerprint changed under occupied rotation')
+  allocate(metric_rows(nowned,nbasis),basis_values(nbasis,nlocal));metric_rows=(0d0,0d0)
+  do i=1,nowned;metric_rows(i,int(row_ids(i)))=1d0;enddo
+  do i=1,nbasis;do p=1,nlocal;basis_values(i,p)=basis(i,int(spatial_ids(p)));enddo;enddo
+  call reconstruct_dg_hybrid_occupied_state(comm,nbasis,row_ids,metric_rows,basis_values,weights,&
+    coefficients,occupations,density,gamma_rows,projector_rows,s_coefficients,electron_count,ok,message)
+  call require(ok,trim(message))
+  call reconstruct_dg_hybrid_occupied_state(comm,nbasis,row_ids,metric_rows,basis_values,weights,&
+    rotated_coefficients,occupations,rotated_density,rotated_gamma_rows,rotated_projector_rows,&
+    rotated_s_coefficients,rotated_electron_count,ok,message)
+  call require(ok,trim(message))
+  defect=max(maxval(abs(density-rotated_density)),maxval(abs(gamma_rows-rotated_gamma_rows)),&
+    maxval(abs(projector_rows-rotated_projector_rows)))
+  call MPI_Allreduce(MPI_IN_PLACE,defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+  call require(defect<2d-12,'occupied gauge rotation changed density, Gamma, or S-projector')
   provider_finite=.false.
   call reconstruct_dg_hybrid_density(comm,ngrid,spatial_ids,weights,nbasis,row_ids,coefficients,occupations,&
     materialize_basis,2,1,7117_int64,1d-12,density,electron_count,workspace,fingerprint,ok,message)
