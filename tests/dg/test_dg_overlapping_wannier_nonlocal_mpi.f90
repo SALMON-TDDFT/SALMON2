@@ -11,7 +11,10 @@ program test_dg_overlapping_wannier_nonlocal_mpi
   complex(8),allocatable::overlap(:,:),matrix(:,:),reference(:,:),rotated(:,:),matrix_rows(:,:)
   complex(8),allocatable::collected_overlap(:,:)
   integer(8),allocatable::collected_ids(:)
+  integer,allocatable::complete_atom_ids(:),complete_ordinals(:)
   real(8),allocatable::collected_strength(:)
+  real(8),allocatable::complete_strength(:)
+  complex(8),allocatable::complete_overlap(:,:)
   complex(8)::direct_local(3,3),direct_global(3,3)
   logical,allocatable::complete(:,:)
   complex(8)::gauge(3,3)
@@ -99,9 +102,16 @@ program test_dg_overlapping_wannier_nonlocal_mpi
     end if
     complete=.false.
     call collect_dg_overlapping_wannier_projector_overlaps(comm,3,[5],[2],strength,overlap,&
-      collected_ids,collected_strength,collected_overlap,expected_projectors,ok,message)
+      collected_ids,collected_strength,collected_overlap,expected_projectors,ok,message,&
+      complete_atom_ids=complete_atom_ids,complete_ordinals=complete_ordinals,&
+      complete_strength=complete_strength,complete_overlap=complete_overlap)
     call require(ok,trim(message));call require(expected_projectors==1,'split projector identity collection')
     call require(size(collected_ids)==merge(1,0,rank==0),'split projector has one deterministic owner')
+    call require(all(complete_atom_ids==[5]).and.all(complete_ordinals==[2]),&
+      'complete split-projector identity is unavailable')
+    call require(abs(complete_strength(1)-0.4d0)<1d-14.and.maxval(abs(complete_overlap(:,1)-&
+      [cmplx(0.2d0,0.3d0,8),cmplx(-0.15d0,0.1d0,8),cmplx(0.3d0,-0.1d0,8)]))<1d-14,&
+      'complete split-projector payload is unavailable')
     split_metadata_ok=.true.;split_overlap_ok=.true.
     if(rank==0)then
       split_metadata_ok=collected_ids(1)==1_8.and.abs(collected_strength(1)-0.4d0)<1d-14

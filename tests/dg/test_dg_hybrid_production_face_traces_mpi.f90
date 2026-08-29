@@ -7,7 +7,8 @@ program test_dg_hybrid_production_face_traces_mpi
     build_dg_hybrid_production_face_trace,assemble_dg_hybrid_production_face,&
     validate_dg_hybrid_production_face_collection,materialize_dg_hybrid_production_face_collection,&
     assemble_dg_hybrid_production_interface_rows,freeze_dg_hybrid_basis_directory,&
-    materialize_dg_hybrid_production_interior,reconstruct_dg_hybrid_production_interface_state
+    materialize_dg_hybrid_production_interior,materialize_dg_hybrid_production_kinetic_action,&
+    reconstruct_dg_hybrid_production_interface_state
   use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
   use dg_hybrid_sipg_operator,only:s_dg_hybrid_sipg_face_operator
   use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows
@@ -22,6 +23,7 @@ program test_dg_hybrid_production_face_traces_mpi
   complex(real64),allocatable::empty_values(:,:),empty_derivatives(:,:)
   complex(real64),allocatable::interface_rows(:,:)
   complex(real64),allocatable::interior_values(:,:),interior_gradients(:,:,:)
+  complex(real64),allocatable::interior_kinetic_action(:,:)
   complex(real64),allocatable::production_kinetic(:,:),production_local(:,:)
   complex(real64),allocatable::occupied_coefficients(:,:),rotated_coefficients(:,:),interface_state(:,:),&
     rotated_interface_state(:,:)
@@ -110,6 +112,10 @@ program test_dg_hybrid_production_face_traces_mpi
     fragment_bases,basis_owner,basis_fragment,[1,2],interior_ids,interior_fragment,&
     interior_values,interior_gradients,ok,message)
   call require(ok,trim(message))
+  call materialize_dg_hybrid_production_kinetic_action(icomm,grid_size,0.75d0,&
+    reshape([0.5d0,0.25d0,0.125d0],[1,3]),fragment_bases,basis_owner,basis_fragment,[1,2],&
+    interior_ids,interior_fragment,interior_kinetic_action,ok,message)
+  call require(ok,trim(message))
   do p=1,size(interior_ids)
     x=modulo(int(interior_ids(p)-1_int64),4);y=int((interior_ids(p)-1_int64)/4_int64)
     call require(abs(interior_values(interior_fragment(p),p)-analytic_values(int(interior_ids(p)),&
@@ -120,6 +126,15 @@ program test_dg_hybrid_production_face_traces_mpi
       analytic_values(1+modulo(x+1,4)+4*y,interior_fragment(p))-&
       analytic_values(1+modulo(x-1,4)+4*y,interior_fragment(p))))<1d-13,&
       'owned interior basis gradient is incorrect')
+    call require(abs(interior_kinetic_action(interior_fragment(p),p)-(&
+      0.75d0*analytic_values(int(interior_ids(p)),interior_fragment(p))-0.5d0*(&
+      0.5d0*(analytic_values(1+modulo(x+1,4)+4*y,interior_fragment(p))+&
+      analytic_values(1+modulo(x-1,4)+4*y,interior_fragment(p)))+&
+      0.5d0*analytic_values(1+x+4*modulo(y+1,2),interior_fragment(p))+&
+      0.25d0*analytic_values(int(interior_ids(p)),interior_fragment(p)))))<1d-13,&
+      'owned interior strong kinetic action is incorrect')
+    call require(abs(interior_kinetic_action(3-interior_fragment(p),p))<1d-14,&
+      'foreign-fragment kinetic action leaked into broken volume')
   enddo
   allocate(interior_weights(size(interior_ids)),interior_potential(size(interior_ids)))
   interior_weights=0.25d0;interior_potential=1d0

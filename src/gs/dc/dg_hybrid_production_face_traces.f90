@@ -27,7 +27,8 @@ module dg_hybrid_production_face_traces
   public::build_dg_hybrid_production_face_trace,assemble_dg_hybrid_production_face,&
     validate_dg_hybrid_production_face_collection,materialize_dg_hybrid_production_face_collection,&
     assemble_dg_hybrid_production_interface_rows,freeze_dg_hybrid_basis_directory,&
-    materialize_dg_hybrid_production_interior,reconstruct_dg_hybrid_production_interface_state
+    materialize_dg_hybrid_production_interior,materialize_dg_hybrid_production_kinetic_action,&
+    reconstruct_dg_hybrid_production_interface_state
 contains
   subroutine freeze_dg_hybrid_basis_directory(icomm,bases,effective_ids,basis_owner,basis_fragment,ok,message)
     integer,intent(in)::icomm,effective_ids(:)
@@ -170,6 +171,100 @@ contains
     ok=.false.;message='production interior materialization requires MPI'
 #endif
   end subroutine materialize_dg_hybrid_production_interior
+
+  subroutine materialize_dg_hybrid_production_kinetic_action(icomm,global_size,coef_lap0,coef_lap,bases,&
+      basis_owner,basis_fragment,effective_ids,interior_ids,interior_fragment,kinetic_action,ok,message)
+    integer,intent(in)::icomm,global_size(3),basis_owner(:),basis_fragment(:),effective_ids(:),interior_fragment(:)
+    real(real64),intent(in)::coef_lap0,coef_lap(:,:)
+    type(s_dg_hybrid_fragment_basis),intent(in)::bases(:)
+    integer(int64),intent(in)::interior_ids(:)
+    complex(real64),allocatable,intent(out)::kinetic_action(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    complex(real64),allocatable::packed(:),received(:)
+    integer(int64),allocatable::requested_ids(:)
+    integer::rank,nproc,ierr,local_bad,global_bad,basis,owner,fragment,peer,nrequest,remote_count,column,p
+    logical::sample_ok
+    ok=.false.;message='';local_bad=0
+    call MPI_Comm_rank(icomm,rank,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Comm_size(icomm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
+    if(any(global_size<=0).or.size(coef_lap,1)<1.or.size(coef_lap,2)/=3.or.size(bases)<1.or.&
+        size(basis_owner)/=size(effective_ids).or.size(basis_fragment)/=size(effective_ids).or.&
+        size(interior_fragment)/=size(interior_ids).or.any(effective_ids<=0).or.any(interior_ids<=0_int64).or.&
+        any(interior_ids>product(int(global_size,int64))).or.any(interior_fragment<1).or.&
+        any(interior_fragment>size(bases)).or.any(basis_owner<0).or.any(basis_owner>=nproc).or.&
+        any(basis_fragment<1).or.any(basis_fragment>size(bases)).or..not.ieee_is_finite(coef_lap0).or.&
+        .not.all(ieee_is_finite(coef_lap)))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid production kinetic-action contract';return;endif
+    allocate(kinetic_action(size(effective_ids),size(interior_ids)));kinetic_action=(0d0,0d0)
+    local_bad=0
+    do basis=1,size(effective_ids)
+      if(rank/=basis_owner(basis))cycle
+      fragment=basis_fragment(basis)
+      if(findloc(bases(fragment)%global_ids,int(effective_ids(basis),int64),dim=1)<=0)local_bad=1
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='basis owner lacks production kinetic-action column';return;endif
+    local_bad=0
+    do basis=1,size(effective_ids)
+      owner=basis_owner(basis);fragment=basis_fragment(basis)
+      if(rank==owner)then
+        column=findloc(bases(fragment)%global_ids,int(effective_ids(basis),int64),dim=1)
+      endif
+      do peer=0,nproc-1
+        if(peer==owner)cycle
+        if(rank==peer)then
+          requested_ids=pack(interior_ids,interior_fragment==fragment);nrequest=size(requested_ids)
+          allocate(packed(0),received(nrequest))
+          call MPI_Sendrecv(nrequest,1,MPI_INTEGER,owner,220,remote_count,1,MPI_INTEGER,owner,220,&
+            icomm,MPI_STATUS_IGNORE,ierr)
+          if(ierr==MPI_SUCCESS)call MPI_Sendrecv(requested_ids,nrequest,MPI_INTEGER8,owner,221,packed,0,&
+            MPI_DOUBLE_COMPLEX,owner,221,icomm,MPI_STATUS_IGNORE,ierr)
+          if(ierr==MPI_SUCCESS)call MPI_Sendrecv(packed,0,MPI_DOUBLE_COMPLEX,owner,222,received,nrequest,&
+            MPI_DOUBLE_COMPLEX,owner,222,icomm,MPI_STATUS_IGNORE,ierr)
+          if(ierr/=MPI_SUCCESS)then;message='production kinetic-action peer receive failed';return;endif
+          p=0
+          do column=1,size(interior_ids)
+            if(interior_fragment(column)/=fragment)cycle
+            p=p+1;kinetic_action(basis,column)=received(p)
+          enddo
+          deallocate(requested_ids,packed,received)
+        else if(rank==owner)then
+          nrequest=0
+          call MPI_Sendrecv(0,1,MPI_INTEGER,peer,220,nrequest,1,MPI_INTEGER,peer,220,&
+            icomm,MPI_STATUS_IGNORE,ierr)
+          allocate(requested_ids(nrequest),packed(0),received(nrequest))
+          if(ierr==MPI_SUCCESS)call MPI_Sendrecv(packed,0,MPI_DOUBLE_COMPLEX,peer,221,requested_ids,nrequest,&
+            MPI_INTEGER8,peer,221,icomm,MPI_STATUS_IGNORE,ierr)
+          do p=1,nrequest
+            call sample_kinetic_action(bases(fragment),requested_ids(p),global_size,coef_lap0,coef_lap,&
+              column,received(p),sample_ok)
+            if(.not.sample_ok)then;local_bad=1;received(p)=(0d0,0d0);endif
+          enddo
+          if(ierr==MPI_SUCCESS)call MPI_Sendrecv(received,nrequest,MPI_DOUBLE_COMPLEX,peer,222,packed,0,&
+            MPI_DOUBLE_COMPLEX,peer,222,icomm,MPI_STATUS_IGNORE,ierr)
+          if(ierr/=MPI_SUCCESS)then;message='production kinetic-action peer send failed';return;endif
+          deallocate(requested_ids,packed,received)
+        endif
+      enddo
+      if(rank==owner)then
+        do p=1,size(interior_ids)
+          if(interior_fragment(p)/=fragment)cycle
+          call sample_kinetic_action(bases(fragment),interior_ids(p),global_size,coef_lap0,coef_lap,&
+            column,kinetic_action(basis,p),sample_ok)
+          if(.not.sample_ok)local_bad=1
+        enddo
+      endif
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
+    ok=ierr==MPI_SUCCESS.and.global_bad==0
+    if(ok)then;message='';else;message='production kinetic action lacks stencil support';endif
+#else
+    ok=.false.;message='production kinetic-action materialization requires MPI'
+#endif
+  end subroutine materialize_dg_hybrid_production_kinetic_action
 
   subroutine reconstruct_dg_hybrid_production_interface_state(icomm,global_count,row_ids,coefficients,&
       occupations,faces,interface_state,ok,message)
@@ -567,6 +662,30 @@ contains
       derivative=derivative+real(normal_sign,real64)*coef_nab(offset)*(plus_value-minus_value)
     enddo
   end subroutine sample_normal_derivative
+
+  subroutine sample_kinetic_action(basis,identifier,global_size,coef_lap0,coef_lap,column,action,ok)
+    type(s_dg_hybrid_fragment_basis),intent(in)::basis
+    integer(int64),intent(in)::identifier
+    integer,intent(in)::global_size(3),column
+    real(real64),intent(in)::coef_lap0,coef_lap(:,:)
+    complex(real64),intent(out)::action
+    logical,intent(out)::ok
+    complex(real64)::center,plus_value,minus_value
+    integer::position(3),plus_position(3),minus_position(3),axis,offset
+    call sample_basis_value(basis,identifier,column,center,ok)
+    if(.not.ok)return
+    action=coef_lap0*center;call grid_position(identifier,global_size,position)
+    do axis=1,3;do offset=1,size(coef_lap,1)
+      plus_position=position;minus_position=position
+      plus_position(axis)=modulo(position(axis)+offset,global_size(axis))
+      minus_position(axis)=modulo(position(axis)-offset,global_size(axis))
+      call sample_basis_value(basis,physical_grid_id(plus_position,global_size),column,plus_value,ok)
+      if(.not.ok)return
+      call sample_basis_value(basis,physical_grid_id(minus_position,global_size),column,minus_value,ok)
+      if(.not.ok)return
+      action=action-0.5d0*coef_lap(offset,axis)*(plus_value+minus_value)
+    enddo;enddo
+  end subroutine sample_kinetic_action
 
   subroutine exchange_face_columns(values,ids,participant_ids,effective_ids,basis_owner,icomm,tag,ierr)
     complex(real64),intent(inout)::values(:,:)

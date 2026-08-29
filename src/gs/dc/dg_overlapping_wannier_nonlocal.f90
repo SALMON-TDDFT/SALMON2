@@ -11,7 +11,8 @@ module dg_overlapping_wannier_nonlocal
   public::collect_dg_overlapping_wannier_projector_overlaps
 contains
   subroutine collect_dg_overlapping_wannier_projector_overlaps(comm,nwann,atom_ids,ordinals,&
-      strength,partial_overlap,projector_ids,owned_strength,owned_overlap,expected_projector_count,ok,message)
+      strength,partial_overlap,projector_ids,owned_strength,owned_overlap,expected_projector_count,ok,message,&
+      complete_atom_ids,complete_ordinals,complete_strength,complete_overlap)
     integer,intent(in)::comm,nwann,atom_ids(:),ordinals(:)
     real(real64),intent(in)::strength(:)
     complex(real64),intent(in)::partial_overlap(:,:)
@@ -21,6 +22,9 @@ contains
     integer,intent(out)::expected_projector_count
     logical,intent(out)::ok
     character(*),intent(out)::message
+    integer,allocatable,optional,intent(out)::complete_atom_ids(:),complete_ordinals(:)
+    real(real64),allocatable,optional,intent(out)::complete_strength(:)
+    complex(real64),allocatable,optional,intent(out)::complete_overlap(:,:)
 #ifdef USE_MPI
     integer::rank,nproc,ierr,r,p,q,total_records,nowned,unique_count,local_bad,global_bad
     integer,allocatable::counts(:),displacements(:),complex_counts(:),complex_displacements(:),&
@@ -77,6 +81,25 @@ contains
       end if
     end do
     expected_projector_count=unique_count;nowned=count(owner_ranks(1:unique_count)==rank)
+    if(present(complete_atom_ids))then
+      allocate(complete_atom_ids(unique_count));complete_atom_ids=0
+    endif
+    if(present(complete_ordinals))then
+      allocate(complete_ordinals(unique_count));complete_ordinals=0
+    endif
+    if(present(complete_strength))then
+      allocate(complete_strength(unique_count));complete_strength=0d0
+    endif
+    if(present(complete_overlap))then
+      allocate(complete_overlap(nwann,unique_count));complete_overlap=(0d0,0d0)
+    endif
+    do p=1,total_records
+      q=unique_ids(p)
+      if(present(complete_atom_ids))complete_atom_ids(q)=all_atom_ids(p)
+      if(present(complete_ordinals))complete_ordinals(q)=all_ordinals(p)
+      if(present(complete_strength))complete_strength(q)=all_strength(p)
+      if(present(complete_overlap))complete_overlap(:,q)=complete_overlap(:,q)+all_overlap(:,p)
+    enddo
     allocate(projector_ids(nowned),owned_strength(nowned),owned_overlap(nwann,nowned))
     owned_overlap=(0d0,0d0);nowned=0
     do q=1,unique_count

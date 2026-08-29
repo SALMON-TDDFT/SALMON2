@@ -29,6 +29,7 @@ use omp_lib, only: omp_get_max_threads
 use structures
 use inputoutput
 use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_hybrid_scf, &
+  yn_dg_hybrid_continuation_scf, &
   yn_dg_hybrid_divided_scf, &
   yn_dg_dc_overlapping_wannier, ncg, base_directory, num_fragment, &
   dg_dc_metric_rank_tolerance, &
@@ -109,6 +110,19 @@ use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog
 use dg_hybrid_production_pw_basis,only:build_dg_hybrid_production_pw_basis
 use dg_hybrid_window_distribution,only:redistribute_dg_hybrid_fragment_windows
 use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
+use dg_hybrid_production_face_traces,only:s_dg_hybrid_production_face_trace,&
+  freeze_dg_hybrid_basis_directory,materialize_dg_hybrid_production_face_collection,&
+  assemble_dg_hybrid_production_interface_rows,materialize_dg_hybrid_production_interior,&
+  materialize_dg_hybrid_production_kinetic_action,reconstruct_dg_hybrid_production_interface_state
+use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows
+use dg_hybrid_variational_payload,only:s_dg_hybrid_fixed_payload,s_dg_hybrid_variational_iterate,&
+  freeze_dg_hybrid_variational_payload,compose_dg_hybrid_variational_hamiltonian
+use dg_hybrid_continuation_residuals,only:s_dg_hybrid_residuals,evaluate_dg_hybrid_residuals
+use dg_hybrid_real_space_residual,only:evaluate_dg_hybrid_real_space_residual
+use dg_hybrid_continuation_controller,only:s_dg_hybrid_controller_controls,s_dg_hybrid_trial_state,&
+  s_dg_hybrid_stage_report,s_dg_hybrid_controller,default_dg_hybrid_controller_controls,&
+  dg_hybrid_stage_tolerances,initialize_dg_hybrid_controller,propose_dg_hybrid_trial,&
+  observe_dg_hybrid_inner_residuals,decide_dg_hybrid_stage,reject_dg_hybrid_trial
 use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_fragment_basis
 use dg_hybrid_fragment_solver,only:solve_dg_hybrid_fragment_basis
 use dg_hybrid_divided_scf,only:run_dg_hybrid_divided_scf
@@ -116,7 +130,7 @@ use dg_hybrid_lcfo,only:assemble_dg_hybrid_lcfo_rows
 use dg_nonlocal_projector_range,only:s_dg_nonlocal_range_receipt,analyze_dg_nonlocal_projector_range
 use dg_hybrid_generalized_eigensystem,only:solve_dg_hybrid_generalized_scalapack,&
   solve_dg_hybrid_generalized_once_and_publish
-use dg_hybrid_density,only:reconstruct_dg_hybrid_density
+use dg_hybrid_density,only:reconstruct_dg_hybrid_density,reconstruct_dg_hybrid_occupied_state
 use dg_hybrid_ground_state_types,only:s_dg_hybrid_ground_state,validate_dg_hybrid_ground_state
 use rt_dg_hybrid_checkpoint,only:write_rt_dg_hybrid_occupied_checkpoint
 use dg_overlapping_wannier_solver, only: solve_dg_overlapping_wannier_coefficients
@@ -538,7 +552,11 @@ if(yn_dc=='y') then
     local_basis_route_active=.true.
     if(.not.(sum1<threshold))&
       error stop 'overlapping-Wannier route requires a converged conventional DC state'
-    call run_dg_overlapping_wannier_ground_state_for_main
+    if(yn_dg_hybrid_continuation_scf == 'y') then
+      call run_dg_hybrid_continuation_ground_state_for_main
+    else
+      call run_dg_overlapping_wannier_ground_state_for_main
+    end if
     return
   else if(yn_dc_lcfo_flux == 'y') then
     if(yn_spinorbit == 'y') then
@@ -639,6 +657,10 @@ call timer_end(LOG_TOTAL)
 
 contains
 
+  subroutine run_dg_hybrid_continuation_ground_state_for_main
+    call run_dg_overlapping_wannier_ground_state_for_main
+  end subroutine run_dg_hybrid_continuation_ground_state_for_main
+
   subroutine checked_ow_extent_product(extent,value,ok)
     integer,intent(in)::extent(3)
     integer(8),intent(out)::value
@@ -686,6 +708,11 @@ contains
       spectral_wannier_representation(:,:),spectral_spatial_trials(:,:),spectral_amn(:,:)
     complex(8),allocatable::one_shot_hrows(:,:)
     complex(8),allocatable::divided_lcfo_hrows(:,:),divided_lcfo_srows(:,:)
+    complex(8),allocatable::dg_hybrid_interface_rows(:,:)
+    complex(8),allocatable::dg_hybrid_final_trace(:,:),dg_hybrid_final_hamiltonian_rows(:,:)
+    complex(8),allocatable::dg_hybrid_interior_values(:,:),dg_hybrid_interior_gradients(:,:,:),&
+      dg_hybrid_interior_kinetic_action(:,:),dg_hybrid_interior_nonlocal_action(:,:),&
+      dg_hybrid_kinetic_rows(:,:),dg_hybrid_zero_local_rows(:,:),dg_hybrid_nonlocal_rows(:,:)
     complex(8),allocatable::divided_basis_representation(:,:,:)
     real(8),allocatable::weights(:),spectrum(:),occupations(:),lcfo_retained_occupations(:),&
       lcfo_retained_eigenvalues(:),local_point_rotations(:,:,:)
@@ -695,13 +722,13 @@ contains
     real(8),allocatable::hybrid_converged_density(:),ow_initial_occupied_density(:)
     real(8),allocatable::divided_initial_density(:),divided_converged_density(:)
     real(8),allocatable::divided_lcfo_point_weights(:)
+    real(8),allocatable::dg_hybrid_interior_weights(:),dg_hybrid_unit_local_potential(:)
+    real(8),allocatable::dg_hybrid_final_density(:)
     real(8),allocatable::spectral_occupied_density(:),spectral_empty_moments(:,:),&
       spectral_shared_density(:,:),spectral_basin_spectra(:,:),spectral_descriptor_eigenvalues(:),&
       spectral_descriptor_occupations(:)
     real(8),allocatable::ow_raw_partition_weight(:),ow_raw_partition_gradient(:,:),&
       ow_box_density(:)
-    real(8),allocatable::divided_box_windows(:,:),divided_core_windows(:,:),divided_buffer_windows(:,:),&
-      divided_core_coordinates(:,:),divided_buffer_coordinates(:,:),divided_g_vectors(:,:)
     real(8),allocatable::localized_centers(:,:),localized_center_magnitudes(:,:)
     real(8),allocatable::w90_fractional(:,:),w90_spreads(:),w90_eigenvalues(:),w90_atoms_cart(:,:),&
       fixed_center_eigenvalues(:),adapted_occupied_spectrum(:)
@@ -717,7 +744,6 @@ contains
     type(t_dg_projection_channel),allocatable::manifest_channels(:)
     type(t_dg_projection_channel),allocatable::projector_tile_channels(:)
     type(s_dg_overlapping_wannier_construction)::symmetry_basis
-    type(s_dg_hybrid_basis_catalog)::divided_pw_catalog
     type(s_dg_prepared_translation_action)::translation_prepared_action
     type(s_dg_prepared_spectral_basins)::spectral_prepared_basins
     integer(8),allocatable::physical_ids(:),local_symmetry_map(:,:),ow_pencil_generator_maps(:,:),&
@@ -729,6 +755,9 @@ contains
     integer(8),allocatable::reindexed_global_symmetry_map(:,:),reindexed_fixed_center_symmetry_map(:,:)
     integer(8),allocatable::translation_row_ids(:),translation_stream_row_ids(:)
     integer(8),allocatable::divided_lcfo_row_ids(:)
+    integer,allocatable::divided_effective_ids(:),divided_basis_owner(:),divided_basis_fragment(:)
+    integer,allocatable::dg_hybrid_interior_fragment(:)
+    real(8)::dg_hybrid_broken_diagnostics(4)
     integer(8),allocatable::translation_spatial_ids(:),translation_generator_maps(:,:)
     integer(8),allocatable::spectral_row_ids(:),spectral_stream_row_ids(:),spectral_complement_row_ids(:)
     integer,allocatable::local_point_product(:,:),local_point_integer_rotations(:,:,:),&
@@ -736,7 +765,6 @@ contains
       global_translation_subgroup(:),global_point_representatives(:),global_point_cogroup_product(:,:),&
       global_translation_cocycle(:,:),translation_canonical_product(:,:)
     integer,allocatable::rank_fragments(:)
-    integer,allocatable::divided_fragment_ids(:),divided_core_fragment_ids(:),divided_row_action(:,:)
     integer,allocatable::projector_atom_ids(:)
     integer,allocatable::fixed_center_product(:,:)
     integer,allocatable::global_affine_generators(:)
@@ -748,6 +776,9 @@ contains
       translation_character_generators(:),translation_element_words(:,:),translation_character_conjugates(:),&
       translation_generator_orders(:)
     type(t_sawf_symop),allocatable::fixed_center_operations(:)
+    type(s_dg_hybrid_fragment_basis),allocatable::divided_fragment_bases(:)
+    type(s_dg_hybrid_production_face_trace),allocatable::divided_production_faces(:)
+    type(s_dg_hybrid_fixed_payload)::dg_hybrid_fixed_payload
     type(t_sawf_dmn_writer)::fixed_center_dmn_writer
     integer,allocatable::center_owner_candidate(:),center_box_candidate(:),center_fragment_candidate(:)
     integer,allocatable::orbital_owned_ids(:),center_local_orbital_ids(:)
@@ -817,8 +848,7 @@ contains
       spectral_workspace_peak,&
       spectral_operation_workspace
     integer(8)::ow_stitched_peak_elements,ow_density_redistribution_workspace
-    integer(8)::divided_pw_workspace,divided_pw_fingerprint,divided_buffer_window_workspace,&
-      divided_buffer_window_fingerprint,divided_fragment_workspace,divided_fragment_fingerprint,&
+    integer(8)::divided_pw_fingerprint,divided_buffer_window_fingerprint,divided_fragment_fingerprint,&
       divided_lcfo_peak_elements,divided_lcfo_operator_fingerprint,divided_state_workspace,&
       divided_state_fingerprint,divided_final_solver_workspace,divided_final_solver_fingerprint
     real(8)::condition_number,closure_residual,spread_max,gauge_correction
@@ -843,7 +873,7 @@ contains
       hybrid_electron_defect,hybrid_symmetry_defect,hybrid_scf_receipts(5)
     real(8)::initial_occupied_charge_local,initial_occupied_charge
     integer::hybrid_iterations
-    integer::divided_iterations
+    integer::divided_iterations,dg_hybrid_nonlocal_ownership_count,divided_global_basis_count
     real(8)::divided_convergence_value
     real(8)::divided_final_residual,divided_final_orthogonality,divided_final_projector_defect
     logical::ok,reusable,localization_converged,global_inversion_present,center_diagnostic_ok,diagnostic_ok
@@ -2508,7 +2538,7 @@ contains
       dg_dc_gs_final_orbital_tolerance,10d0*dg_dc_gs_final_orbital_tolerance,&
       dg_dc_gs_electron_count_tolerance,1d0/dg_dc_metric_rank_tolerance,dg_ow_symmetry_tolerance],&
       ow_checkpoint,reusable,ok,message)
-    if(ok.and.reusable.and.yn_dg_hybrid_scf/='y')then
+    if(ok.and.reusable.and.yn_dg_hybrid_scf/='y'.and.yn_dg_hybrid_continuation_scf/='y')then
       call restore_ow_checkpoint_density(ow_checkpoint,ok,message)
       if(.not.ok)error stop 'overlapping-Wannier checkpoint density restore failed'
       if(rank==0)write(*,'(a)')'[OW-GS] reused accepted route checkpoint'
@@ -2543,46 +2573,18 @@ contains
         abs(initial_occupied_charge-dc%elec_num_tot)>&
         dg_dc_gs_electron_count_tolerance*max(1d0,dc%elec_num_tot))&
       error stop 'converged DC+LCFO initial density violates electron-count contract'
-    if(yn_dg_hybrid_divided_scf=='y')then
-      allocate(divided_fragment_ids(1),divided_core_fragment_ids(ncore),&
-        divided_row_action(size(ow_pencil_generator_maps,1),size(ow_pencil_generator_maps,2)),&
-        divided_box_windows(1,nbox))
-      allocate(divided_core_coordinates(3,ncore),divided_buffer_coordinates(3,nbox))
-      divided_fragment_ids=dc%i_frag
-      divided_core_fragment_ids=dc%i_frag
-      divided_row_action=int(ow_pencil_generator_maps)
-      divided_box_windows(1,:)=ow_raw_partition_weight
-      do p=1,ncore
-        divided_core_coordinates(1,p)=real(modulo(ow_core_ids(p)-1_8,int(dc%lg_tot%num(1),8)),8)*&
-          dc%system_tot%hgs(1)
-        divided_core_coordinates(2,p)=real(modulo((ow_core_ids(p)-1_8)/int(dc%lg_tot%num(1),8),&
-          int(dc%lg_tot%num(2),8)),8)*dc%system_tot%hgs(2)
-        divided_core_coordinates(3,p)=real((ow_core_ids(p)-1_8)/nxy8,8)*dc%system_tot%hgs(3)
-      enddo
-      do p=1,nbox
-        divided_buffer_coordinates(1,p)=real(modulo(physical_ids(p)-1_8,int(dc%lg_tot%num(1),8)),8)*&
-          dc%system_tot%hgs(1)
-        divided_buffer_coordinates(2,p)=real(modulo((physical_ids(p)-1_8)/int(dc%lg_tot%num(1),8),&
-          int(dc%lg_tot%num(2),8)),8)*dc%system_tot%hgs(2)
-        divided_buffer_coordinates(3,p)=real((physical_ids(p)-1_8)/nxy8,8)*dc%system_tot%hgs(3)
-      enddo
-      call build_dg_hybrid_production_pw_basis(dc%icomm_tot,int(expected_core_count),dc%n_frag,&
-        divided_fragment_ids,physical_ids,divided_box_windows,ow_core_ids,divided_core_fragment_ids,&
-        divided_core_coordinates,divided_row_action,w90_reciprocal_lattice,&
-        global_point_rotations(:,:,global_affine_generators),wannier_pw_cutoff,16,dg_ow_symmetry_tolerance,&
-        divided_core_windows,divided_g_vectors,divided_pw_catalog,divided_pw_workspace,&
-        divided_pw_fingerprint,ok,message)
-      if(.not.ok)error stop 'divided Hybrid production PW catalog failed'
-      call redistribute_dg_hybrid_fragment_windows(dc%icomm_tot,int(expected_core_count),dc%n_frag,&
-        divided_fragment_ids,physical_ids,divided_box_windows,physical_ids,divided_buffer_windows,&
-        divided_buffer_window_workspace,divided_buffer_window_fingerprint,ok,message)
-      if(.not.ok)error stop 'divided Hybrid buffer window redistribution failed'
-      call build_dg_hybrid_projected_fragment_basis(dc%icomm_tot,int(expected_core_count),dc%n_frag,&
-        dc%i_frag,ow_core_ids,ow_core_weights,ow_core_values,divided_core_coordinates,divided_core_windows,&
-        physical_ids,ow_box_values,divided_buffer_coordinates,divided_buffer_windows,divided_pw_catalog,&
-        divided_g_vectors,ow_basis%center_owner_fragment,16,dg_ow_symmetry_tolerance,basis_fingerprint,&
-        divided_fragment_basis,divided_fragment_workspace,divided_fragment_fingerprint,ok,message)
-      if(.not.ok)error stop 'divided Hybrid projected fragment basis failed'
+    if(yn_dg_hybrid_divided_scf=='y'.or.yn_dg_hybrid_continuation_scf=='y')then
+      call prepare_dg_hybrid_divided_production_basis(dc%icomm_tot,dc%n_frag,dc%i_frag,dc%lg_tot%num,&
+        dc%ixyz_frag,dc%nxyz_domain_frag,dc%system_tot%hgs,ncore,nbox,nxy8,expected_core_count,&
+        physical_ids,ow_core_ids,ow_core_weights,&
+        ow_core_values,ow_box_values,ow_basis%center_owner_fragment,divided_fragment_basis,&
+        size(ow_basis%center_owner_fragment),size(ow_pencil_generator_maps,2),&
+        ow_pencil_generator_maps,ow_raw_partition_weight,w90_reciprocal_lattice,&
+        global_point_rotations(:,:,global_affine_generators),wannier_pw_cutoff,dg_ow_symmetry_tolerance,&
+        basis_fingerprint,divided_pw_fingerprint,&
+        divided_buffer_window_fingerprint,divided_fragment_fingerprint,ok,message)
+      if(.not.ok)write(0,'(a)')trim(message)
+      if(.not.ok)error stop 'divided Hybrid production basis preparation failed'
       if(allocated(ow_divided_core_mask))deallocate(ow_divided_core_mask)
       allocate(ow_divided_core_mask,source=core_mask)
       call prepare_dg_hybrid_divided_dc_controls(dc,ow_hybrid_divided_convergence,&
@@ -2596,23 +2598,107 @@ contains
         iz=int((ow_core_ids(p)-1_8)/nxy8)+1
         divided_initial_density(p)=ow_hybrid_divided_total_density(ix,iy,iz)
       enddo
-      call run_dg_hybrid_divided_scf(dc%icomm_tot,int(expected_core_count),ow_core_ids,&
-        divided_initial_density,ow_hybrid_divided_convergence,ow_hybrid_divided_threshold,&
-        update_dg_hybrid_divided_potential,solve_dg_hybrid_divided_fragments,&
-        assemble_dg_hybrid_divided_core_density,mix_dg_hybrid_divided_density,nscf,&
-        divided_converged_density,divided_iterations,divided_convergence_value,ok,message)
-      if(.not.ok)write(0,'(a)')trim(message)
-      if(.not.ok)error stop 'divided Hybrid SCF failed'
-      if(rank==0)write(*,'(a,i0,a,es16.8)')'[OW-GS] divided WF+PW SCF converged iterations=',&
-        divided_iterations,' density=',divided_convergence_value
       allocate(divided_lcfo_row_ids,source=divided_fragment_basis%global_ids)
-      allocate(divided_lcfo_point_weights(size(divided_fragment_basis%buffer_point_ids)),source=system%hvol)
-      call assemble_dg_hybrid_lcfo_rows(dc%icomm_tot,divided_fragment_basis,divided_lcfo_row_ids,&
-        divided_lcfo_point_weights,apply_dg_hybrid_divided_fragment_hpsi,&
-        apply_dg_hybrid_divided_fragment_metric,divided_lcfo_hrows,divided_lcfo_srows,&
-        divided_lcfo_peak_elements,divided_lcfo_operator_fingerprint,ok,message)
-      if(.not.ok)write(0,'(a)')trim(message)
-      if(.not.ok)error stop 'divided Hybrid LCFO assembly failed'
+      if(yn_dg_hybrid_continuation_scf=='y')then
+        allocate(divided_fragment_bases(dc%n_frag))
+        do p=1,dc%n_frag
+          allocate(divided_fragment_bases(p)%global_ids(0),divided_fragment_bases(p)%sector(0),&
+            divided_fragment_bases(p)%buffer_point_ids(0),divided_fragment_bases(p)%buffer_values(0,0))
+        enddo
+        divided_fragment_bases(dc%i_frag)=divided_fragment_basis
+        divided_global_basis_count=0
+        if(size(divided_fragment_basis%global_ids)>0)&
+          divided_global_basis_count=int(maxval(divided_fragment_basis%global_ids))
+        call MPI_Allreduce(MPI_IN_PLACE,divided_global_basis_count,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+        if(ierr/=MPI_SUCCESS.or.divided_global_basis_count<1)&
+          error stop 'divided Hybrid global basis count failed'
+        allocate(divided_effective_ids(divided_global_basis_count))
+        divided_effective_ids=[(p,p=1,size(divided_effective_ids))]
+        call freeze_dg_hybrid_basis_directory(dc%icomm_tot,divided_fragment_bases,divided_effective_ids,&
+          divided_basis_owner,divided_basis_fragment,ok,message)
+        if(.not.ok)write(0,'(a)')trim(message)
+        if(.not.ok)error stop 'divided Hybrid fixed-basis directory construction failed'
+        allocate(dg_hybrid_interior_fragment(size(ow_core_ids)),&
+          dg_hybrid_interior_weights(size(ow_core_ids)),dg_hybrid_unit_local_potential(size(ow_core_ids)))
+        dg_hybrid_interior_fragment=dc%i_frag
+        dg_hybrid_interior_weights=system%hvol
+        dg_hybrid_unit_local_potential=1d0
+        call materialize_dg_hybrid_production_interior(dc%icomm_tot,dc%lg_tot%num,stencil%coef_nab,&
+          divided_fragment_bases,divided_basis_owner,divided_basis_fragment,divided_effective_ids,&
+          ow_core_ids,dg_hybrid_interior_fragment,dg_hybrid_interior_values,dg_hybrid_interior_gradients,&
+          ok,message)
+        if(.not.ok)write(0,'(a)')trim(message)
+        if(.not.ok)error stop 'divided Hybrid production interior materialization failed'
+        call materialize_dg_hybrid_production_kinetic_action(dc%icomm_tot,dc%lg_tot%num,&
+          stencil%coef_lap0,stencil%coef_lap,divided_fragment_bases,divided_basis_owner,&
+          divided_basis_fragment,divided_effective_ids,ow_core_ids,dg_hybrid_interior_fragment,&
+          dg_hybrid_interior_kinetic_action,ok,message)
+        if(.not.ok)write(0,'(a)')trim(message)
+        if(.not.ok)error stop 'divided Hybrid strong kinetic-action materialization failed'
+        call assemble_dg_hybrid_broken_volume_rows(dc%icomm_tot,size(divided_effective_ids),&
+          divided_lcfo_row_ids,divided_basis_fragment,ow_core_ids,dg_hybrid_interior_fragment,&
+          dg_hybrid_interior_weights,dg_hybrid_interior_values,dg_hybrid_interior_gradients,&
+          dg_hybrid_unit_local_potential,dg_hybrid_kinetic_rows,divided_lcfo_srows,&
+          dg_hybrid_broken_diagnostics,ok,message)
+        if(.not.ok)write(0,'(a)')trim(message)
+        if(.not.ok)error stop 'divided Hybrid broken-volume kinetic assembly failed'
+        call ow_fingerprint_distributed_matrix(dc%icomm_tot,divided_lcfo_row_ids,&
+          divided_lcfo_srows,divided_lcfo_operator_fingerprint,ok)
+        if(.not.ok)error stop 'divided Hybrid variational metric fingerprint failed'
+        call assemble_dg_hybrid_divided_nonlocal_rows(divided_fragment_basis,divided_lcfo_row_ids,&
+          size(divided_effective_ids),dg_hybrid_nonlocal_rows,dg_hybrid_interior_nonlocal_action,&
+          dg_hybrid_nonlocal_ownership_count,ok,message)
+        if(.not.ok)write(0,'(a)')trim(message)
+        if(.not.ok)error stop 'divided Hybrid complete nonlocal assembly failed'
+        call materialize_dg_hybrid_production_face_collection(dc%icomm_tot,dc%ixyz_frag,&
+          dc%nxyz_domain_frag,dc%lg_tot%num,dc%system_tot%hgs,stencil%coef_nab,&
+          divided_fragment_bases,divided_basis_owner,divided_basis_fragment,divided_effective_ids,&
+          divided_production_faces,ok,message)
+        if(.not.ok)write(0,'(a)')trim(message)
+        if(.not.ok)error stop 'divided Hybrid production face materialization failed'
+        call assemble_dg_hybrid_production_interface_rows(dc%icomm_tot,size(divided_effective_ids),&
+          divided_lcfo_row_ids,divided_production_faces,dg_dc_gs_sipg_penalty_factor,&
+          dg_hybrid_interface_rows,ok,message)
+        if(.not.ok)write(0,'(a)')trim(message)
+        if(.not.ok)error stop 'divided Hybrid SIPG interface assembly failed'
+        call freeze_dg_hybrid_variational_payload(dc%icomm_tot,size(divided_effective_ids),&
+          divided_lcfo_row_ids,divided_lcfo_srows,dg_hybrid_kinetic_rows,dg_hybrid_nonlocal_rows,&
+          dg_hybrid_interface_rows,divided_fragment_fingerprint,divided_lcfo_operator_fingerprint,&
+          divided_buffer_window_fingerprint,dg_hybrid_fixed_payload,ok,message)
+        if(.not.ok)write(0,'(a)')trim(message)
+        if(.not.ok)error stop 'divided Hybrid fixed variational payload freeze failed'
+        call build_dg_hybrid_retained_basis_representation(dc%icomm_tot,int(expected_core_count),&
+          ow_core_ids,ow_core_weights,ow_pencil_generator_maps,divided_fragment_basis,&
+          divided_lcfo_row_ids,divided_lcfo_srows,dg_ow_symmetry_tolerance,&
+          divided_basis_representation,ok,message)
+        if(.not.ok)write(0,'(a)')trim(message)
+        if(.not.ok)error stop 'DG continuation retained-basis symmetry representation failed'
+        call run_dg_hybrid_concrete_continuation(divided_initial_density,divided_effective_ids,&
+          divided_lcfo_row_ids,divided_basis_fragment,dg_hybrid_interior_fragment,&
+          dg_hybrid_interior_weights,dg_hybrid_interior_values,dg_hybrid_interior_gradients,&
+          dg_hybrid_interior_kinetic_action,dg_hybrid_interior_nonlocal_action,dg_hybrid_fixed_payload,&
+          divided_production_faces,occupations,divided_basis_representation,&
+          ow_hybrid_ground_state,dg_hybrid_final_density,dg_hybrid_final_trace,&
+          dg_hybrid_final_hamiltonian_rows)
+        return
+      else
+        call run_dg_hybrid_divided_scf(dc%icomm_tot,int(expected_core_count),ow_core_ids,&
+          divided_initial_density,ow_hybrid_divided_convergence,ow_hybrid_divided_threshold,&
+          update_dg_hybrid_divided_potential,solve_dg_hybrid_divided_fragments,&
+          assemble_dg_hybrid_divided_core_density,mix_dg_hybrid_divided_density,nscf,&
+          divided_converged_density,divided_iterations,divided_convergence_value,ok,message)
+        if(.not.ok)write(0,'(a)')trim(message)
+        if(.not.ok)error stop 'divided Hybrid SCF failed'
+        if(rank==0)write(*,'(a,i0,a,es16.8)')'[OW-GS] divided WF+PW SCF converged iterations=',&
+          divided_iterations,' density=',divided_convergence_value
+        allocate(divided_lcfo_point_weights(size(divided_fragment_basis%buffer_point_ids)),source=system%hvol)
+        call assemble_dg_hybrid_lcfo_rows(dc%icomm_tot,divided_fragment_basis,divided_lcfo_row_ids,&
+          divided_lcfo_point_weights,apply_dg_hybrid_divided_fragment_hpsi,&
+          apply_dg_hybrid_divided_fragment_metric,divided_lcfo_hrows,divided_lcfo_srows,&
+          divided_lcfo_peak_elements,divided_lcfo_operator_fingerprint,ok,message)
+        if(.not.ok)write(0,'(a)')trim(message)
+        if(.not.ok)error stop 'divided Hybrid LCFO assembly failed'
+      endif
       call build_dg_hybrid_retained_basis_representation(dc%icomm_tot,int(expected_core_count),&
         ow_core_ids,ow_core_weights,ow_pencil_generator_maps,divided_fragment_basis,&
         divided_lcfo_row_ids,divided_lcfo_srows,dg_ow_symmetry_tolerance,&
@@ -3952,6 +4038,394 @@ contains
     if(.not.callback_ok)write(0,'(2a)')'divided potential update: ',trim(potential_message)
   end subroutine update_dg_hybrid_divided_potential
 
+  subroutine run_dg_hybrid_concrete_continuation(dc_seed_density,effective_ids,row_ids,basis_fragment,&
+      interior_fragment,interior_weights,interior_values,interior_gradients,interior_kinetic_action,&
+      interior_nonlocal_action,fixed_payload,production_faces,&
+      occupied_occupations,basis_representation,final_ground_state,final_density,final_trace,&
+      final_hamiltonian_rows)
+    real(8),intent(in)::dc_seed_density(:),interior_weights(:),occupied_occupations(:)
+    integer,intent(in)::effective_ids(:),basis_fragment(:),interior_fragment(:)
+    integer(8),intent(in)::row_ids(:)
+    complex(8),intent(in)::interior_values(:,:),interior_gradients(:,:,:),&
+      interior_kinetic_action(:,:),interior_nonlocal_action(:,:)
+    complex(8),intent(in)::basis_representation(:,:,:)
+    type(s_dg_hybrid_fixed_payload),intent(in)::fixed_payload
+    type(s_dg_hybrid_production_face_trace),intent(in)::production_faces(:)
+    type(s_dg_hybrid_ground_state),intent(out)::final_ground_state
+    real(8),allocatable,intent(out)::final_density(:)
+    complex(8),allocatable,intent(out)::final_trace(:,:),final_hamiltonian_rows(:,:)
+    real(8),parameter::density_damping=0.5d0
+    real(8)::accepted_lambda,trial_lambda,electron_count,max_residual,&
+      orthogonality_defect,projector_defect,projector_change,local_norm,global_norm,&
+      local_projector_scale,global_projector_scale,symmetry_residual
+    real(8)::projector_symmetry_residual
+    real(8)::broken_diagnostics(4)
+    real(8),allocatable::rho_in(:),rho_out(:),local_potential(:),density4(:,:,:,:),&
+      eigenvalues(:),solver_eigenvalues(:)
+    complex(8),allocatable::local_rows(:,:),discarded_kinetic(:,:),coefficients(:,:),solver_coefficients(:,:),&
+      gamma_rows(:,:),projector_rows(:,:),s_coefficients(:,:),interface_state(:,:),&
+      previous_interface_state(:,:),hc(:,:),sc_epsilon(:,:),full_action_values(:,:)
+    type(s_dg_hybrid_variational_iterate)::iterate
+    type(s_dg_hybrid_residuals)::residuals
+    type(s_dg_hybrid_controller_controls)::continuation_controls
+    type(s_dg_hybrid_trial_state)::trial_state
+    type(s_dg_hybrid_stage_report)::stage_report
+    type(s_dg_hybrid_controller)::continuation_controller
+    integer(8)::solver_workspace,solver_fingerprint,final_operator_fingerprint,&
+      final_state_workspace,final_state_fingerprint
+    integer::iteration,ierr_local,rank_local,continuation_state_count,p
+    logical::stage_converged,reject_trial,local_ok,accept_stage,final_refresh_performed
+    character(256)::continuation_message
+    real(8)::occupied_unoccupied_gap,accepted_gap
+    real(8)::hamiltonian_hermiticity,hamiltonian_scale
+    real(8)::real_space_residual
+    logical::hamiltonian_finite
+
+    call MPI_Comm_rank(dc%icomm_tot,rank_local,ierr_local)
+    allocate(rho_in,source=dc_seed_density)
+    if(size(effective_ids)<=nstate)error stop 'DG continuation requires at least one unoccupied state'
+    continuation_state_count=nstate+1
+    allocate(local_potential(size(ow_core_ids)),eigenvalues(nstate),solver_eigenvalues(continuation_state_count))
+    allocate(previous_interface_state(0,3))
+    accepted_lambda=0d0;trial_lambda=0d0;accepted_gap=huge(1d0)
+    call default_dg_hybrid_controller_controls(continuation_controls)
+    continuation_controls%iteration_limit=nscf
+    do while(accepted_lambda<1d0.or.trial_lambda==0d0)
+      stage_converged=.false.;reject_trial=.false.;final_refresh_performed=.false.
+      do iteration=1,nscf
+        call gather_dg_hybrid_divided_core_density(rho_in,ow_hybrid_divided_total_density,local_ok)
+        if(.not.local_ok)error stop 'DG continuation density assembly failed'
+        allocate(density4(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),1))
+        density4(:,:,:,1)=ow_hybrid_divided_total_density
+        call dg_dc_update_potential_from_density(density4,local_ok,continuation_message)
+        deallocate(density4)
+        if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation potential update failed';endif
+        call extract_dg_hybrid_core_local_potential(ow_core_ids,local_potential,local_ok)
+        if(.not.local_ok)error stop 'DG continuation local-potential extraction failed'
+        call assemble_dg_hybrid_broken_volume_rows(dc%icomm_tot,size(effective_ids),&
+          row_ids,basis_fragment,ow_core_ids,interior_fragment,interior_weights,interior_values,interior_gradients,&
+          local_potential,discarded_kinetic,local_rows,broken_diagnostics,local_ok,continuation_message)
+        if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation local projection failed';endif
+        call compose_dg_hybrid_variational_hamiltonian(dc%icomm_tot,fixed_payload,&
+          local_rows,trial_lambda,iteration,iterate,local_ok,continuation_message)
+        if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation composition failed';endif
+        call solve_dg_hybrid_generalized_scalapack(dc%icomm_tot,size(effective_ids),continuation_state_count,&
+          row_ids,iterate%hamiltonian_rows,fixed_payload%metric_rows,&
+          dg_dc_gs_final_orbital_tolerance,solver_coefficients,solver_eigenvalues,max_residual,orthogonality_defect,&
+          projector_defect,solver_workspace,solver_fingerprint,local_ok,continuation_message)
+        if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation eigensolve failed';endif
+        if(allocated(coefficients))deallocate(coefficients)
+        allocate(coefficients,source=solver_coefficients(:,1:nstate))
+        eigenvalues=solver_eigenvalues(1:nstate)
+        occupied_unoccupied_gap=solver_eigenvalues(nstate+1)-solver_eigenvalues(nstate)
+        call reconstruct_dg_hybrid_occupied_state(dc%icomm_tot,size(effective_ids),row_ids,fixed_payload%metric_rows,&
+          interior_values,interior_weights,coefficients,occupied_occupations,rho_out,gamma_rows,projector_rows,&
+          s_coefficients,electron_count,local_ok,continuation_message)
+        if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation state reconstruction failed';endif
+        call reconstruct_dg_hybrid_production_interface_state(dc%icomm_tot,size(effective_ids),&
+          row_ids,coefficients,occupied_occupations,production_faces,interface_state,local_ok,continuation_message)
+        if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation trace reconstruction failed';endif
+        if(size(previous_interface_state,1)==0)then
+          deallocate(previous_interface_state);allocate(previous_interface_state,source=interface_state)
+        endif
+        call form_dg_hybrid_coefficient_actions(dc%icomm_tot,row_ids,&
+          iterate%hamiltonian_rows,fixed_payload%metric_rows,coefficients,eigenvalues,hc,sc_epsilon,local_ok)
+        if(.not.local_ok)error stop 'DG continuation coefficient residual action failed'
+        call evaluate_dg_hybrid_residuals(dc%icomm_tot,hc,sc_epsilon,coefficients,s_coefficients,&
+          rho_out,rho_in,interface_state,previous_interface_state,residuals,local_ok,continuation_message)
+        if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation residual evaluation failed';endif
+        if(allocated(full_action_values))deallocate(full_action_values)
+        allocate(full_action_values,source=interior_kinetic_action+interior_nonlocal_action)
+        do p=1,size(ow_core_ids)
+          full_action_values(:,p)=full_action_values(:,p)+local_potential(p)*interior_values(:,p)
+        enddo
+        call evaluate_dg_hybrid_real_space_residual(dc%icomm_tot,int(product(int(dc%lg_tot%num,8))),&
+          ow_core_ids,interior_weights,size(effective_ids),row_ids,interior_values,full_action_values,&
+          coefficients,eigenvalues,real_space_residual,local_ok,continuation_message)
+        if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG strong residual evaluation failed';endif
+        call measure_dg_hybrid_operator_covariance(dc%icomm_tot,row_ids,iterate%hamiltonian_rows,&
+          basis_representation,symmetry_residual,local_ok)
+        if(.not.local_ok)error stop 'DG continuation Hamiltonian covariance measurement failed'
+        call measure_dg_hybrid_projector_covariance(dc%icomm_tot,row_ids,projector_rows,&
+          basis_representation,projector_symmetry_residual,local_ok)
+        if(.not.local_ok)error stop 'DG continuation occupied-projector covariance measurement failed'
+        call ow_distributed_hermiticity(dc%icomm_tot,row_ids,iterate%hamiltonian_rows,&
+          hamiltonian_hermiticity,hamiltonian_scale,hamiltonian_finite)
+        if(continuation_controller%valid)then
+          local_norm=sum(abs(projector_rows-continuation_controller%accepted_state%projector)**2)
+          local_projector_scale=sum(abs(continuation_controller%accepted_state%projector)**2)
+          call MPI_Allreduce(local_norm,global_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr_local)
+          if(ierr_local==MPI_SUCCESS)call MPI_Allreduce(local_projector_scale,global_projector_scale,1,&
+            MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr_local)
+          if(ierr_local/=MPI_SUCCESS)error stop 'DG continuation projector-change reduction failed'
+          projector_change=sqrt(global_norm)/max(1d0,sqrt(global_projector_scale))
+        else
+          projector_change=0d0
+        endif
+        if(continuation_controller%valid.and.continuation_controller%trial_active)then
+          call observe_dg_hybrid_inner_residuals(dc%icomm_tot,continuation_controller,&
+            [residuals%r_h,residuals%r_rho,residuals%r_t,residuals%r_s],reject_trial,local_ok,&
+            continuation_message)
+          if(.not.local_ok)error stop 'DG continuation residual-growth observation failed'
+          if(reject_trial)exit
+          call dg_hybrid_stage_tolerances(continuation_controls,trial_lambda,stage_report%tolerances)
+        else
+          stage_report%tolerances=continuation_controls%intermediate_tolerance
+        endif
+        stage_converged=all([residuals%r_h,residuals%r_rho,residuals%r_t,residuals%r_s]<=&
+          stage_report%tolerances).and.real_space_residual<=stage_report%tolerances(1).and.&
+          abs(electron_count-dc%elec_num_tot)<=dg_dc_gs_electron_count_tolerance.and.projector_change<=0.1d0.and.&
+          symmetry_residual<=dg_ow_symmetry_tolerance.and.projector_symmetry_residual<=dg_ow_symmetry_tolerance.and.&
+          occupied_unoccupied_gap>dg_dc_gs_final_orbital_tolerance.and.hamiltonian_finite.and.&
+          hamiltonian_hermiticity<=dg_dc_gs_hermiticity_tolerance*max(1d0,hamiltonian_scale)
+        if(stage_converged.and.trial_lambda==1d0.and..not.final_refresh_performed)then
+          rho_in=rho_out;previous_interface_state=interface_state
+          final_refresh_performed=.true.;stage_converged=.false.;cycle
+        endif
+        if(stage_converged)exit
+        rho_in=rho_in+density_damping*(rho_out-rho_in)
+        previous_interface_state=interface_state
+      enddo
+      if(.not.stage_converged)reject_trial=.true.
+      if(reject_trial)then
+        call reject_dg_hybrid_trial(dc%icomm_tot,continuation_controller,trial_state,&
+          'inner fixed point did not converge',local_ok,continuation_message)
+        if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation rollback failed';endif
+        rho_in=trial_state%density
+        previous_interface_state=trial_state%trace
+        call propose_dg_hybrid_trial(dc%icomm_tot,continuation_controller,trial_state,local_ok,continuation_message)
+        if(.not.local_ok)error stop 'DG continuation retry proposal failed'
+        trial_lambda=continuation_controller%trial_lambda
+        cycle
+      endif
+      previous_interface_state=interface_state
+      call set_dg_hybrid_trial_state(trial_state,rho_in,local_potential,occupied_occupations,eigenvalues,&
+        projector_rows,interface_state,iteration,fixed_payload%fingerprint,solver_fingerprint)
+      if(.not.continuation_controller%valid)then
+        call initialize_dg_hybrid_controller(dc%icomm_tot,continuation_controls,0d0,trial_state,&
+          size(production_faces),continuation_controller,local_ok,continuation_message)
+        if(.not.local_ok)error stop 'DG continuation controller initialization failed'
+        accepted_lambda=0d0
+      else
+        stage_report%residuals=[residuals%r_h,residuals%r_rho,residuals%r_t,residuals%r_s]
+        stage_report%projector_overlap=max(0d0,1d0-projector_change)
+        stage_report%iteration=iteration
+        stage_report%electron_ok=abs(electron_count-dc%elec_num_tot)<=dg_dc_gs_electron_count_tolerance
+        stage_report%occupation_ok=occupied_unoccupied_gap>dg_dc_gs_final_orbital_tolerance
+        stage_report%hermitian_ok=hamiltonian_finite.and.&
+          hamiltonian_hermiticity<=dg_dc_gs_hermiticity_tolerance*max(1d0,hamiltonian_scale)
+        stage_report%symmetry_ok=max(symmetry_residual,projector_symmetry_residual)<=dg_ow_symmetry_tolerance
+        stage_report%real_space_ok=real_space_residual<=stage_report%tolerances(1).and.&
+          residuals%r_t<=stage_report%tolerances(3)
+        stage_report%finite_ok=hamiltonian_finite.and.all(ieee_is_finite(solver_eigenvalues)).and.&
+          ieee_is_finite(electron_count).and.ieee_is_finite(occupied_unoccupied_gap)
+        stage_report%gap_shrinking=accepted_gap<huge(1d0).and.occupied_unoccupied_gap<accepted_gap
+        call decide_dg_hybrid_stage(dc%icomm_tot,continuation_controller,trial_state,stage_report,&
+          accept_stage,local_ok,continuation_message)
+        if(.not.local_ok.or..not.accept_stage)error stop 'DG continuation converged stage was not accepted'
+        accepted_lambda=continuation_controller%accepted_lambda
+      endif
+      accepted_gap=occupied_unoccupied_gap
+      if(accepted_lambda==1d0)exit
+      call propose_dg_hybrid_trial(dc%icomm_tot,continuation_controller,trial_state,local_ok,continuation_message)
+      if(.not.local_ok)error stop 'DG continuation trial proposal failed'
+      rho_in=trial_state%density;previous_interface_state=trial_state%trace
+      trial_lambda=continuation_controller%trial_lambda
+    enddo
+    if(.not.final_refresh_performed)error stop 'DG continuation lambda-one state was not fully refreshed'
+    call ow_fingerprint_distributed_matrix(dc%icomm_tot,row_ids,iterate%hamiltonian_rows,&
+      final_operator_fingerprint,local_ok)
+    if(.not.local_ok)error stop 'DG continuation final Hamiltonian fingerprint failed'
+    call validate_dg_hybrid_ground_state(dc%icomm_tot,size(effective_ids),size(occupied_occupations),&
+      row_ids,coefficients,occupied_occupations,eigenvalues,dc%elec_num_tot,fixed_payload%basis_fingerprint,&
+      fixed_payload%metric_fingerprint,final_operator_fingerprint,fixed_payload%interface_fingerprint,&
+      dg_dc_gs_final_orbital_tolerance,final_ground_state,final_state_workspace,final_state_fingerprint,&
+      local_ok,continuation_message)
+    if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation final state publication failed';endif
+    final_ground_state%converged=.true.;final_ground_state%final_eigensolve_count=1
+    allocate(final_density,source=rho_in);allocate(final_trace,source=interface_state)
+    allocate(final_hamiltonian_rows,source=iterate%hamiltonian_rows)
+    if(rank_local==0)write(*,'(a,4(a,es16.8))')'[OW-GS] fully refreshed DG continuation converged',&
+      ' lambda=',accepted_lambda,' h_residual=',residuals%r_h,' density_residual=',residuals%r_rho,&
+      ' interface_residual=',residuals%r_t
+  end subroutine run_dg_hybrid_concrete_continuation
+
+  subroutine set_dg_hybrid_trial_state(state,density,potential,occupations_arg,eigenvalues_arg,&
+      projector,trace,epoch,operator_fingerprint,solver_fingerprint)
+    type(s_dg_hybrid_trial_state),intent(out)::state
+    real(8),intent(in)::density(:),potential(:),occupations_arg(:),eigenvalues_arg(:)
+    complex(8),intent(in)::projector(:,:),trace(:,:)
+    integer,intent(in)::epoch
+    integer(8),intent(in)::operator_fingerprint,solver_fingerprint
+    allocate(state%density,source=density);allocate(state%potential,source=potential)
+    allocate(state%occupations,source=occupations_arg);allocate(state%eigenvalues,source=eigenvalues_arg)
+    allocate(state%mixing_history,source=density);allocate(state%projector,source=projector)
+    allocate(state%trace,source=trace)
+    state%density_epoch=epoch;state%operator_epoch=epoch;state%projector_epoch=epoch
+    state%trace_epoch=epoch;state%derived_epoch=epoch
+    state%operator_structure_fingerprint=operator_fingerprint
+    state%operator_value_fingerprint=ieor(operator_fingerprint,solver_fingerprint)
+    if(state%operator_value_fingerprint==0_8)state%operator_value_fingerprint=1_8
+    state%trace_cache_valid=.true.
+  end subroutine set_dg_hybrid_trial_state
+
+  subroutine extract_dg_hybrid_core_local_potential(core_ids,core_potential,callback_ok)
+    integer(8),intent(in)::core_ids(:)
+    real(8),intent(out)::core_potential(:)
+    logical,intent(out)::callback_ok
+    integer::p,gx,gy,gz,ix,iy,iz
+    callback_ok=.false.
+    if(size(core_potential)/=size(core_ids))return
+    do p=1,size(core_ids)
+      gx=int(modulo(core_ids(p)-1_8,int(dc%lg_tot%num(1),8)))+1
+      gy=int(modulo((core_ids(p)-1_8)/int(dc%lg_tot%num(1),8),int(dc%lg_tot%num(2),8)))+1
+      gz=int((core_ids(p)-1_8)/int(dc%lg_tot%num(1)*dc%lg_tot%num(2),8))+1
+      ix=findloc(dc%jxyz_tot(:,1),gx,dim=1);iy=findloc(dc%jxyz_tot(:,2),gy,dim=1)
+      iz=findloc(dc%jxyz_tot(:,3),gz,dim=1)
+      if(ix<1.or.iy<1.or.iz<1)return
+      core_potential(p)=v_local(1)%f(ix,iy,iz)
+    enddo
+    callback_ok=all(ieee_is_finite(core_potential))
+  end subroutine extract_dg_hybrid_core_local_potential
+
+  subroutine form_dg_hybrid_coefficient_actions(comm_arg,row_ids_arg,hrows_arg,srows_arg,&
+      coefficients_arg,eigenvalues_arg,hc_arg,sc_epsilon_arg,callback_ok)
+    integer,intent(in)::comm_arg
+    integer(8),intent(in)::row_ids_arg(:)
+    complex(8),intent(in)::hrows_arg(:,:),srows_arg(:,:),coefficients_arg(:,:)
+    real(8),intent(in)::eigenvalues_arg(:)
+    complex(8),allocatable,intent(out)::hc_arg(:,:),sc_epsilon_arg(:,:)
+    logical,intent(out)::callback_ok
+    complex(8),allocatable::local_coefficients(:,:),global_coefficients(:,:)
+    integer::i,ierr_local,global_count
+    global_count=size(hrows_arg,2);callback_ok=.false.
+    allocate(local_coefficients(global_count,size(coefficients_arg,2)),&
+      global_coefficients(global_count,size(coefficients_arg,2)))
+    local_coefficients=(0d0,0d0)
+    do i=1,size(row_ids_arg);local_coefficients(int(row_ids_arg(i)),:)=coefficients_arg(i,:);enddo
+    call MPI_Allreduce(local_coefficients,global_coefficients,size(global_coefficients),&
+      MPI_DOUBLE_COMPLEX,MPI_SUM,comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)return
+    allocate(hc_arg(size(coefficients_arg,1),size(coefficients_arg,2)),&
+      sc_epsilon_arg(size(coefficients_arg,1),size(coefficients_arg,2)))
+    hc_arg=matmul(hrows_arg,global_coefficients);sc_epsilon_arg=matmul(srows_arg,global_coefficients)
+    do i=1,size(eigenvalues_arg);sc_epsilon_arg(:,i)=eigenvalues_arg(i)*sc_epsilon_arg(:,i);enddo
+    callback_ok=all(ieee_is_finite(real(hc_arg))).and.all(ieee_is_finite(aimag(hc_arg))).and.&
+      all(ieee_is_finite(real(sc_epsilon_arg))).and.all(ieee_is_finite(aimag(sc_epsilon_arg)))
+  end subroutine form_dg_hybrid_coefficient_actions
+
+  subroutine measure_dg_hybrid_operator_covariance(comm_arg,row_ids_arg,hrows_arg,representation_arg,&
+      residual,callback_ok)
+    integer,intent(in)::comm_arg
+    integer(8),intent(in)::row_ids_arg(:)
+    complex(8),intent(in)::hrows_arg(:,:),representation_arg(:,:,:)
+    real(8),intent(out)::residual
+    logical,intent(out)::callback_ok
+    integer::rank_local,nproc_local,ierr_local,nowned,global_count,noperation,r,operation,i,j,k,offset,nrows
+    integer,allocatable::counts(:),displacements(:)
+    integer(8),allocatable::all_rows(:)
+    complex(8),allocatable::h_times_d(:,:),partial(:,:),reduced(:,:)
+    real(8)::local_defect,global_defect,local_scale,global_scale
+    callback_ok=.false.;residual=huge(1d0);nowned=size(row_ids_arg);global_count=size(hrows_arg,2)
+    noperation=size(representation_arg,3)
+    if(any(shape(hrows_arg)/=[nowned,global_count]).or.&
+        any(shape(representation_arg)/=[global_count,global_count,noperation]).or.noperation<1)return
+    call MPI_Comm_rank(comm_arg,rank_local,ierr_local);if(ierr_local/=MPI_SUCCESS)return
+    call MPI_Comm_size(comm_arg,nproc_local,ierr_local);if(ierr_local/=MPI_SUCCESS)return
+    allocate(counts(nproc_local),displacements(nproc_local))
+    call MPI_Allgather(nowned,1,MPI_INTEGER,counts,1,MPI_INTEGER,comm_arg,ierr_local)
+    displacements(1)=0
+    do r=2,nproc_local;displacements(r)=displacements(r-1)+counts(r-1);enddo
+    allocate(all_rows(sum(counts)))
+    call MPI_Allgatherv(row_ids_arg,nowned,MPI_INTEGER8,all_rows,counts,displacements,MPI_INTEGER8,&
+      comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.size(all_rows)/=global_count)return
+    local_defect=0d0;local_scale=max(1d0,maxval(abs(hrows_arg)))
+    do operation=1,noperation
+      allocate(h_times_d(nowned,global_count))
+      h_times_d=matmul(hrows_arg,representation_arg(:,:,operation))
+      do r=0,nproc_local-1
+        nrows=counts(r+1);offset=displacements(r+1)
+        allocate(partial(nrows,global_count),reduced(nrows,global_count));partial=(0d0,0d0)
+        do i=1,nrows
+          do k=1,nowned
+            partial(i,:)=partial(i,:)+conjg(representation_arg(int(row_ids_arg(k)),&
+              int(all_rows(offset+i)),operation))*h_times_d(k,:)
+          enddo
+        enddo
+        call MPI_Reduce(partial,reduced,nrows*global_count,MPI_DOUBLE_COMPLEX,MPI_SUM,r,comm_arg,ierr_local)
+        if(ierr_local/=MPI_SUCCESS)return
+        if(rank_local==r.and.nrows>0)then
+          local_defect=max(local_defect,maxval(abs(reduced-hrows_arg)))
+          local_scale=max(local_scale,maxval(abs(reduced)))
+        endif
+        deallocate(partial,reduced)
+      enddo
+      deallocate(h_times_d)
+    enddo
+    call MPI_Allreduce(local_defect,global_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm_arg,ierr_local)
+    if(ierr_local==MPI_SUCCESS)call MPI_Allreduce(local_scale,global_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,&
+      comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)return
+    residual=global_defect/max(1d0,global_scale);callback_ok=ieee_is_finite(residual)
+  end subroutine measure_dg_hybrid_operator_covariance
+
+  subroutine measure_dg_hybrid_projector_covariance(comm_arg,row_ids_arg,projector_rows_arg,&
+      representation_arg,residual,callback_ok)
+    integer,intent(in)::comm_arg
+    integer(8),intent(in)::row_ids_arg(:)
+    complex(8),intent(in)::projector_rows_arg(:,:),representation_arg(:,:,:)
+    real(8),intent(out)::residual
+    logical,intent(out)::callback_ok
+    integer::rank_local,nproc_local,ierr_local,nowned,global_count,noperation,r,operation,i,k,offset,nrows
+    integer,allocatable::counts(:),displacements(:)
+    integer(8),allocatable::all_rows(:)
+    complex(8),allocatable::q_times_d(:,:),partial(:,:),reduced(:,:)
+    real(8)::local_defect,global_defect,local_scale,global_scale
+    callback_ok=.false.;residual=huge(1d0);nowned=size(row_ids_arg);global_count=size(projector_rows_arg,2)
+    noperation=size(representation_arg,3)
+    if(any(shape(projector_rows_arg)/=[nowned,global_count]).or.&
+        any(shape(representation_arg)/=[global_count,global_count,noperation]).or.noperation<1)return
+    call MPI_Comm_rank(comm_arg,rank_local,ierr_local);if(ierr_local/=MPI_SUCCESS)return
+    call MPI_Comm_size(comm_arg,nproc_local,ierr_local);if(ierr_local/=MPI_SUCCESS)return
+    allocate(counts(nproc_local),displacements(nproc_local))
+    call MPI_Allgather(nowned,1,MPI_INTEGER,counts,1,MPI_INTEGER,comm_arg,ierr_local)
+    displacements(1)=0
+    do r=2,nproc_local;displacements(r)=displacements(r-1)+counts(r-1);enddo
+    allocate(all_rows(sum(counts)))
+    call MPI_Allgatherv(row_ids_arg,nowned,MPI_INTEGER8,all_rows,counts,displacements,MPI_INTEGER8,&
+      comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.size(all_rows)/=global_count)return
+    local_defect=0d0;local_scale=max(1d0,maxval(abs(projector_rows_arg)))
+    do operation=1,noperation
+      allocate(q_times_d(nowned,global_count))
+      q_times_d=matmul(projector_rows_arg,representation_arg(:,:,operation))
+      do r=0,nproc_local-1
+        nrows=counts(r+1);offset=displacements(r+1)
+        allocate(partial(nrows,global_count),reduced(nrows,global_count));partial=(0d0,0d0)
+        do i=1,nrows
+          do k=1,nowned
+            partial(i,:)=partial(i,:)+representation_arg(int(all_rows(offset+i)),&
+              int(row_ids_arg(k)),operation)*projector_rows_arg(k,:)
+          enddo
+        enddo
+        call MPI_Reduce(partial,reduced,nrows*global_count,MPI_DOUBLE_COMPLEX,MPI_SUM,r,comm_arg,ierr_local)
+        if(ierr_local/=MPI_SUCCESS)return
+        if(rank_local==r.and.nrows>0)then
+          local_defect=max(local_defect,maxval(abs(reduced-q_times_d)))
+          local_scale=max(local_scale,maxval(abs(reduced)),maxval(abs(q_times_d)))
+        endif
+        deallocate(partial,reduced)
+      enddo
+      deallocate(q_times_d)
+    enddo
+    call MPI_Allreduce(local_defect,global_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm_arg,ierr_local)
+    if(ierr_local==MPI_SUCCESS)call MPI_Allreduce(local_scale,global_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,&
+      comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)return
+    residual=global_defect/max(1d0,global_scale);callback_ok=ieee_is_finite(residual)
+  end subroutine measure_dg_hybrid_projector_covariance
+
   subroutine assemble_dg_hybrid_divided_core_density(core_density,electron_count,callback_ok)
     real(8),intent(out)::core_density(:),electron_count
     logical,intent(out)::callback_ok
@@ -4564,6 +5038,86 @@ contains
     call assemble_dg_overlapping_wannier_nonlocal_rows(comm,nwann,ow_row_ids,projector_ids,strength,&
       owned_overlap,complete,int(total_projectors,8),matrix_rows,ownership_count,ok,message)
   end subroutine
+
+  subroutine assemble_dg_hybrid_divided_nonlocal_rows(fragment_basis,row_ids,global_count,&
+      matrix_rows,nonlocal_action,ownership_count,ok,message)
+    type(s_dg_hybrid_fragment_basis),intent(in)::fragment_basis
+    integer(8),intent(in)::row_ids(:)
+    integer,intent(in)::global_count
+    complex(8),allocatable,intent(out)::matrix_rows(:,:)
+    complex(8),allocatable,intent(out)::nonlocal_action(:,:)
+    integer,intent(out)::ownership_count
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(8),allocatable::local_overlap(:,:),owned_overlap(:,:),complete_overlap(:,:)
+    integer,allocatable::local_atom_ids(:),local_ordinals(:),complete_atom_ids(:),complete_ordinals(:)
+    integer(8),allocatable::projector_ids(:)
+    real(8),allocatable::local_strength(:),owned_strength(:),complete_strength(:)
+    logical,allocatable::complete(:,:)
+    integer::ilma,ia,j,ix,iy,iz,ix_tot,iy_tot,iz_tot,basis,position,ordinal,total_projectors,q,core_position
+    integer(8)::point_id
+
+    ok=.false.;message='';ownership_count=0
+    if(global_count<1.or..not.allocated(fragment_basis%global_ids).or.&
+        .not.allocated(fragment_basis%buffer_point_ids).or..not.allocated(fragment_basis%buffer_values))then
+      message='invalid divided nonlocal fragment basis';return
+    endif
+    allocate(local_overlap(global_count,ppg%Nlma),local_atom_ids(ppg%Nlma),&
+      local_ordinals(ppg%Nlma),local_strength(ppg%Nlma))
+    local_overlap=(0d0,0d0);local_atom_ids=0;local_ordinals=0;local_strength=0d0
+    do ilma=1,ppg%Nlma
+      ia=ppg%ia_tbl(ilma)
+      call map_dc_atom_to_physical_atom(ia,local_atom_ids(ilma),ok)
+      if(.not.ok)then;message='cannot map divided projector to a physical atom';return;endif
+      ordinal=count(ppg%ia_tbl(1:ilma)==ia);local_ordinals(ilma)=ordinal
+      local_strength(ilma)=system%hvol*ppg%rinv_uvu(ilma)
+      do j=1,ppg%mps(ia)
+        ix=ppg%jxyz(1,j,ia);iy=ppg%jxyz(2,j,ia);iz=ppg%jxyz(3,j,ia)
+        ix_tot=dc%jxyz_tot(ix,1);iy_tot=dc%jxyz_tot(iy,2);iz_tot=dc%jxyz_tot(iz,3)
+        point_id=1_8+int(ix_tot-1,8)+int(dc%lg_tot%num(1),8)*(&
+          int(iy_tot-1,8)+int(dc%lg_tot%num(2),8)*int(iz_tot-1,8))
+        position=findloc(fragment_basis%buffer_point_ids,point_id,dim=1)
+        if(position<=0)then;message='divided basis omits nonlocal projector support';return;endif
+        do basis=1,size(fragment_basis%global_ids)
+          if(fragment_basis%global_ids(basis)<1_8.or.fragment_basis%global_ids(basis)>int(global_count,8))then
+            message='divided nonlocal basis ID is outside the fixed catalog';return
+          endif
+          local_overlap(int(fragment_basis%global_ids(basis)),ilma)=&
+            local_overlap(int(fragment_basis%global_ids(basis)),ilma)+&
+            ppg%uV(j,ilma)*fragment_basis%buffer_values(position,basis)
+        enddo
+      enddo
+    enddo
+    call collect_dg_overlapping_wannier_projector_overlaps(dc%icomm_tot,global_count,local_atom_ids,&
+      local_ordinals,local_strength,local_overlap,projector_ids,owned_strength,owned_overlap,&
+      total_projectors,ok,message,complete_atom_ids,complete_ordinals,complete_strength,complete_overlap)
+    if(.not.ok)return
+    allocate(nonlocal_action(global_count,size(ow_core_ids)));nonlocal_action=(0d0,0d0)
+    do ilma=1,ppg%Nlma
+      q=0
+      do position=1,total_projectors
+        if(complete_atom_ids(position)==local_atom_ids(ilma).and.&
+            complete_ordinals(position)==local_ordinals(ilma))then;q=position;exit;endif
+      enddo
+      if(q==0)then;message='complete nonlocal projector payload lacks local identity';ok=.false.;return;endif
+      ia=ppg%ia_tbl(ilma)
+      do j=1,ppg%mps(ia)
+        ix=ppg%jxyz(1,j,ia);iy=ppg%jxyz(2,j,ia);iz=ppg%jxyz(3,j,ia)
+        ix_tot=dc%jxyz_tot(ix,1);iy_tot=dc%jxyz_tot(iy,2);iz_tot=dc%jxyz_tot(iz,3)
+        point_id=1_8+int(ix_tot-1,8)+int(dc%lg_tot%num(1),8)*(&
+          int(iy_tot-1,8)+int(dc%lg_tot%num(2),8)*int(iz_tot-1,8))
+        core_position=findloc(ow_core_ids,point_id,dim=1)
+        if(core_position<=0)cycle
+        do basis=1,global_count
+          nonlocal_action(basis,core_position)=nonlocal_action(basis,core_position)+&
+            complete_strength(q)*ppg%uV(j,ilma)*complete_overlap(basis,q)
+        enddo
+      enddo
+    enddo
+    allocate(complete(global_count,size(projector_ids)));complete=.true.
+    call assemble_dg_overlapping_wannier_nonlocal_rows(dc%icomm_tot,global_count,row_ids,projector_ids,&
+      owned_strength,owned_overlap,complete,int(total_projectors,8),matrix_rows,ownership_count,ok,message)
+  end subroutine assemble_dg_hybrid_divided_nonlocal_rows
 
   subroutine map_dc_atom_to_physical_atom(local_atom,physical_atom,ok)
     integer,intent(in)::local_atom
@@ -5714,6 +6268,7 @@ contains
     integer :: is,ix,iy,iz,jx,jy,jz
     logical :: rho_finite,hartree_finite,vxc_finite,vlocal_finite,nlcc_finite,global_layout
     real(8) :: density_minimum,density_maximum,nlcc_minimum,nlcc_maximum
+    type(s_scalar),allocatable::fragment_hartree(:)
     global_layout=all(shape(density_arg(:,:,:,1))==dc%lg_tot%num)
     write(*,'(a,l1,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x),a,3(i0,1x),a,3(i0,1x))') &
       '[OW-LAYOUT-DIAGNOSTIC] global=',global_layout,' density_shape=',shape(density_arg(:,:,:,1)), &
@@ -5735,6 +6290,22 @@ contains
       end do
       end do
     end do
+    do is=1,system%nspin
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        if(global_layout)then
+          jx=dc%jxyz_tot(ix,1);jy=dc%jxyz_tot(iy,2);jz=dc%jxyz_tot(iz,3)
+        else
+          jx=ix-lbound(rho_s(is)%f,1)+1
+          jy=iy-lbound(rho_s(is)%f,2)+1
+          jz=iz-lbound(rho_s(is)%f,3)+1
+        endif
+        rho_s(is)%f(ix,iy,iz)=density_arg(jx,jy,jz,is)
+      enddo
+      enddo
+      enddo
+    enddo
     write(*,'(a,2(es16.8,1x))') '[OW-LAYOUT-DIAGNOSTIC] source/owned_min=', &
       minval(density_arg(:,:,:,1)),minval(dc%rho_tot_s(1)%f(dc%mg_tot%is(1):dc%mg_tot%ie(1), &
       dc%mg_tot%is(2):dc%mg_tot%ie(2),dc%mg_tot%is(3):dc%mg_tot%ie(3)))
@@ -5744,10 +6315,15 @@ contains
     end do
     call hartree(dc%lg_tot,dc%mg_tot,dc%info_tot,dc%system_tot,dc%fg_tot,dc%poisson_tot, &
       dc%srg_scalar_tot,stencil,dc%rho_tot,dc%Vh_tot)
-    call exchange_correlation(dc%system_tot,xc_func,dc%mg_tot,srg_scalar,srg,dc%rho_tot_s, &
-      pp,ppn,dc%info_tot,spsi,stencil,dc%Vxc_tot,energy%E_xc)
-    call update_vlocal(dc%mg_tot,dc%system_tot%nspin,dc%Vh_tot,dc%Vpsl_tot,dc%Vxc_tot,dc%vloc_tot)
-    call calc_vlocal_fragment_dcdft(system%nspin,mg,v_local,dc)
+    allocate(fragment_hartree(system%nspin))
+    do is=1,system%nspin
+      call allocate_scalar(mg,fragment_hartree(is))
+      dc%vloc_tot(is)%f=dc%Vh_tot%f
+    enddo
+    call calc_vlocal_fragment_dcdft(system%nspin,mg,fragment_hartree,dc)
+    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,&
+      pp,ppn,info,spsi,stencil,Vxc,energy%E_xc)
+    call update_vlocal(mg,system%nspin,fragment_hartree(1),Vpsl,Vxc,v_local)
     dg_gs_potential_epoch=dg_gs_potential_epoch+1_8
     rho_finite=.true.;hartree_finite=.true.;vxc_finite=.true.;vlocal_finite=.true.
     density_minimum=huge(1d0);density_maximum=-huge(1d0)
@@ -5760,12 +6336,20 @@ contains
     do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
       rho_finite=rho_finite.and.ieee_is_finite(dc%rho_tot%f(ix,iy,iz))
       hartree_finite=hartree_finite.and.ieee_is_finite(dc%Vh_tot%f(ix,iy,iz))
-      vxc_finite=vxc_finite.and.ieee_is_finite(dc%Vxc_tot(is)%f(ix,iy,iz))
-      vlocal_finite=vlocal_finite.and.ieee_is_finite(dc%vloc_tot(is)%f(ix,iy,iz))
       if(ieee_is_finite(dc%rho_tot%f(ix,iy,iz)))then
         density_minimum=min(density_minimum,dc%rho_tot%f(ix,iy,iz))
         density_maximum=max(density_maximum,dc%rho_tot%f(ix,iy,iz))
       endif
+    enddo
+    enddo
+    enddo
+    enddo
+    do is=1,system%nspin
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      vxc_finite=vxc_finite.and.ieee_is_finite(Vxc(is)%f(ix,iy,iz))
+      vlocal_finite=vlocal_finite.and.ieee_is_finite(v_local(is)%f(ix,iy,iz))
     enddo
     enddo
     enddo
@@ -5779,6 +6363,10 @@ contains
         vxc_finite,vlocal_finite,' density_min/max=',density_minimum,density_maximum,&
         ' nlcc_finite=',nlcc_finite,' nlcc_min/max=',nlcc_minimum,nlcc_maximum
     end if
+    do is=1,size(fragment_hartree)
+      if(allocated(fragment_hartree(is)%f))deallocate(fragment_hartree(is)%f)
+    enddo
+    deallocate(fragment_hartree)
   end subroutine dg_dc_update_potential_from_density
 
   integer function canonical_to_dc_index(index,core_count,buffer_count)
@@ -6098,3 +6686,92 @@ contains
   end subroutine hash_byte
 
 end subroutine main_dft
+
+subroutine prepare_dg_hybrid_divided_production_basis(comm_arg,fragment_count_arg,fragment_id_arg,&
+    grid_num_arg,fragment_origin_arg,fragment_size_arg,hgs_arg,ncore_arg,nbox_arg,nxy_arg,&
+    global_count_arg,physical_ids_arg,core_ids_arg,core_weights_arg,core_values_arg,box_values_arg,&
+    wannier_owner_arg,fragment_basis_arg,nwannier_arg,noperation_arg,pencil_maps_arg,raw_partition_arg,&
+    reciprocal_lattice_arg,reciprocal_rotations_arg,pw_cutoff_arg,tolerance_arg,basis_fingerprint_arg,&
+    pw_fingerprint_arg,buffer_fingerprint_arg,fragment_fingerprint_arg,callback_ok,callback_message)
+  use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog
+  use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
+  use dg_hybrid_production_pw_basis,only:build_dg_hybrid_production_pw_basis
+  use dg_hybrid_window_distribution,only:redistribute_dg_hybrid_fragment_windows
+  use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_fragment_basis
+  implicit none
+  integer,intent(in)::comm_arg,fragment_count_arg,fragment_id_arg,grid_num_arg(3),&
+    fragment_origin_arg(3,fragment_count_arg),fragment_size_arg(3,fragment_count_arg),ncore_arg,nbox_arg,&
+    nwannier_arg,noperation_arg
+  integer(8),intent(in)::nxy_arg,global_count_arg,physical_ids_arg(nbox_arg),core_ids_arg(ncore_arg),&
+    pencil_maps_arg(ncore_arg,noperation_arg),basis_fingerprint_arg
+  real(8),intent(in)::hgs_arg(3),core_weights_arg(ncore_arg),raw_partition_arg(nbox_arg),&
+    reciprocal_lattice_arg(3,3),reciprocal_rotations_arg(3,3,noperation_arg),pw_cutoff_arg,tolerance_arg
+  complex(8),intent(in)::core_values_arg(nwannier_arg,ncore_arg),box_values_arg(nwannier_arg,nbox_arg)
+  integer,intent(in)::wannier_owner_arg(nwannier_arg)
+  type(s_dg_hybrid_fragment_basis),intent(out)::fragment_basis_arg
+  integer(8),intent(out)::pw_fingerprint_arg,buffer_fingerprint_arg,fragment_fingerprint_arg
+  logical,intent(out)::callback_ok
+  character(*),intent(out)::callback_message
+  integer,allocatable::fragment_ids(:),core_fragment_ids(:),row_action(:,:)
+  real(8),allocatable::box_windows(:,:),core_windows(:,:),buffer_windows(:,:),&
+    core_coordinates(:,:),buffer_coordinates(:,:),g_vectors(:,:)
+  type(s_dg_hybrid_basis_catalog)::pw_catalog
+  integer::point,fragment,grid_x,grid_y,grid_z
+  integer(8)::pw_workspace,buffer_window_workspace,fragment_workspace
+
+  callback_ok=.false.;callback_message=''
+  allocate(fragment_ids(1),core_fragment_ids(ncore_arg),&
+    row_action(ncore_arg,size(pencil_maps_arg,2)),box_windows(1,nbox_arg))
+  allocate(core_coordinates(3,ncore_arg),buffer_coordinates(3,nbox_arg))
+  fragment_ids(1)=fragment_id_arg
+  do point=1,ncore_arg
+    core_fragment_ids(point)=0
+    grid_x=int(modulo(core_ids_arg(point)-1_8,int(grid_num_arg(1),8)))
+    grid_y=int(modulo((core_ids_arg(point)-1_8)/int(grid_num_arg(1),8),int(grid_num_arg(2),8)))
+    grid_z=int((core_ids_arg(point)-1_8)/nxy_arg)
+    do fragment=1,fragment_count_arg
+      if(grid_x<fragment_origin_arg(1,fragment).or.&
+        grid_x>=fragment_origin_arg(1,fragment)+fragment_size_arg(1,fragment))cycle
+      if(grid_y<fragment_origin_arg(2,fragment).or.&
+        grid_y>=fragment_origin_arg(2,fragment)+fragment_size_arg(2,fragment))cycle
+      if(grid_z<fragment_origin_arg(3,fragment).or.&
+        grid_z>=fragment_origin_arg(3,fragment)+fragment_size_arg(3,fragment))cycle
+      core_fragment_ids(point)=fragment
+      exit
+    enddo
+  enddo
+  if(any(core_fragment_ids==0))then
+    callback_message='divided Hybrid core fragment ownership failed';return
+  endif
+  row_action=int(pencil_maps_arg)
+  if(any(row_action<1).or.any(row_action>int(global_count_arg)))then
+    callback_message='divided Hybrid physical row-action reconstruction failed';return
+  endif
+  box_windows(1,:)=raw_partition_arg
+  do point=1,ncore_arg
+    core_coordinates(1,point)=real(modulo(core_ids_arg(point)-1_8,int(grid_num_arg(1),8)),8)*hgs_arg(1)
+    core_coordinates(2,point)=real(modulo((core_ids_arg(point)-1_8)/int(grid_num_arg(1),8),&
+      int(grid_num_arg(2),8)),8)*hgs_arg(2)
+    core_coordinates(3,point)=real((core_ids_arg(point)-1_8)/nxy_arg,8)*hgs_arg(3)
+  enddo
+  do point=1,nbox_arg
+    buffer_coordinates(1,point)=real(modulo(physical_ids_arg(point)-1_8,int(grid_num_arg(1),8)),8)*hgs_arg(1)
+    buffer_coordinates(2,point)=real(modulo((physical_ids_arg(point)-1_8)/int(grid_num_arg(1),8),&
+      int(grid_num_arg(2),8)),8)*hgs_arg(2)
+    buffer_coordinates(3,point)=real((physical_ids_arg(point)-1_8)/nxy_arg,8)*hgs_arg(3)
+  enddo
+  call build_dg_hybrid_production_pw_basis(comm_arg,int(global_count_arg),fragment_count_arg,&
+    fragment_ids,physical_ids_arg,box_windows,core_ids_arg,core_fragment_ids,core_coordinates,row_action,&
+    reciprocal_lattice_arg,reciprocal_rotations_arg,pw_cutoff_arg,16,tolerance_arg,core_windows,g_vectors,&
+    pw_catalog,pw_workspace,pw_fingerprint_arg,callback_ok,callback_message)
+  if(.not.callback_ok)return
+  call redistribute_dg_hybrid_fragment_windows(comm_arg,int(global_count_arg),fragment_count_arg,&
+    fragment_ids,physical_ids_arg,box_windows,physical_ids_arg,buffer_windows,buffer_window_workspace,&
+    buffer_fingerprint_arg,callback_ok,callback_message)
+  if(.not.callback_ok)return
+  call build_dg_hybrid_projected_fragment_basis(comm_arg,int(global_count_arg),fragment_count_arg,&
+    fragment_id_arg,core_ids_arg,core_weights_arg,core_values_arg,core_coordinates,core_windows,&
+    physical_ids_arg,box_values_arg,buffer_coordinates,buffer_windows,pw_catalog,g_vectors,wannier_owner_arg,&
+    16,tolerance_arg,basis_fingerprint_arg,fragment_basis_arg,fragment_workspace,&
+    fragment_fingerprint_arg,callback_ok,callback_message)
+end subroutine prepare_dg_hybrid_divided_production_basis

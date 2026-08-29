@@ -63,7 +63,7 @@ assert positions == sorted(positions), "hybrid GS/checkpoint production order is
 
 for token in (
     "ow_hybrid_density=ow_initial_occupied_density",
-    "if(ok.and.reusable.and.yn_dg_hybrid_scf/='y')then",
+    "if(ok.and.reusable.and.yn_dg_hybrid_scf/='y'.and.yn_dg_hybrid_continuation_scf/='y')then",
     "min(dg_dc_gs_electron_count_tolerance,dg_ow_symmetry_tolerance)",
     "call mix_dg_overlapping_wannier_density_history",
     "ow_hybrid_new_history=ow_hybrid_density_history;ow_hybrid_history_count=0",
