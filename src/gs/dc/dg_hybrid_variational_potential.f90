@@ -7,7 +7,8 @@ module dg_hybrid_variational_potential
 #endif
   implicit none
   private
-  public::assemble_dg_hybrid_total_density,combine_dg_hybrid_fragment_local_potential
+  public::assemble_dg_hybrid_total_density,combine_dg_hybrid_fragment_local_potential,&
+    project_dg_hybrid_fragment_local_rows
 contains
   subroutine assemble_dg_hybrid_total_density(comm,global_count,core_ids,core_density,total_density,ok,message)
     integer,intent(in)::comm,global_count
@@ -79,4 +80,38 @@ contains
     ok=.false.;message='MPI is required for fragment local-potential assembly'
 #endif
   end subroutine combine_dg_hybrid_fragment_local_potential
+
+  subroutine project_dg_hybrid_fragment_local_rows(comm,weights,basis_values,local_potential,local_rows,ok,message)
+    integer,intent(in)::comm
+    real(real64),intent(in)::weights(:),local_potential(:)
+    complex(real64),intent(in)::basis_values(:,:)
+    complex(real64),intent(out)::local_rows(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::i,j,p,ierr,local_bad,global_bad
+    local_rows=(0d0,0d0);ok=.false.;message='';local_bad=0
+    if(size(weights)/=size(local_potential).or.size(basis_values,2)/=size(weights).or.&
+        any(shape(local_rows)/=[size(basis_values,1),size(basis_values,1)]).or.&
+        .not.all(ieee_is_finite(weights)).or.any(weights<=0d0).or.&
+        .not.all(ieee_is_finite(local_potential)).or.&
+        .not.all(ieee_is_finite(real(basis_values))).or..not.all(ieee_is_finite(aimag(basis_values))))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='invalid fragment local-potential projection contract';return
+    endif
+    do p=1,size(weights)
+      do j=1,size(basis_values,1)
+        do i=1,size(basis_values,1)
+          local_rows(i,j)=local_rows(i,j)+weights(p)*conjg(basis_values(i,p))*&
+            local_potential(p)*basis_values(j,p)
+        enddo
+      enddo
+    enddo
+    ok=all(ieee_is_finite(real(local_rows))).and.all(ieee_is_finite(aimag(local_rows)))
+    if(ok)then;message='';else;message='projected fragment local rows are invalid';endif
+#else
+    ok=.false.;message='MPI is required for fragment local-potential projection'
+#endif
+  end subroutine project_dg_hybrid_fragment_local_rows
 end module dg_hybrid_variational_potential
