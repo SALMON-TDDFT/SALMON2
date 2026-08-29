@@ -18,6 +18,8 @@ program test_dg_hybrid_continuation_scf_mpi
   real(real64)::final_lambda
   complex(real64)::last_refreshed_trace
   complex(real64)::s_metric(3,3),base_coefficients(3,2),occupied_coefficients(3,2),expected_projector(3,3)
+  complex(real64)::volume_operator(3,3),interface_operator(3,3),current_operator(3,3)
+  real(real64)::face_lambda(2)
   integer::last_refreshed_epoch
   type(s_dg_hybrid_continuation_state)::continuation
   type(s_dg_hybrid_controller_controls)::controls
@@ -35,6 +37,10 @@ program test_dg_hybrid_continuation_scf_mpi
   base_coefficients=(0d0,0d0);base_coefficients(1,1)=1d0
   base_coefficients(2,2)=1d0/sqrt(5d0);base_coefficients(3,2)=1d0/sqrt(5d0)
   expected_projector=matmul(base_coefficients,matmul(conjg(transpose(base_coefficients)),s_metric))
+  volume_operator=(0d0,0d0);volume_operator(1,1)=-1d0;volume_operator(2,2)=-0.5d0
+  volume_operator(3,3)=0.25d0
+  interface_operator=(0d0,0d0);interface_operator(1,2)=cmplx(0.125d0,0.05d0,real64)
+  interface_operator(2,1)=conjg(interface_operator(1,2))
   nlocal=count([(mod(i-1,nproc)==id_rank,i=1,nglobal)])
   allocate(ids(nlocal),dc_density(nlocal),last_refreshed_density(nlocal),&
     last_accepted_density(nlocal));position=0
@@ -163,8 +169,8 @@ program test_dg_hybrid_continuation_scf_mpi
   call MPI_Finalize(ierr)
 contains
   subroutine run_fixture()
-    call run_dg_hybrid_continuation_scf_fixture(icomm,continuation,controls,seed,1,volume_build,full_solve,&
-      projector_refresh,density_trace_refresh,residual_evaluation,density_mix,acceptance_oracle,1,96_int64,&
+    call run_dg_hybrid_continuation_scf_fixture(icomm,continuation,controls,seed,2,volume_build,full_solve,&
+      projector_refresh,density_trace_refresh,residual_evaluation,density_mix,acceptance_oracle,2,96_int64,&
       maximum_inner_iterations,final_state,final_lambda,accepted_stages,rollbacks,ok,message)
   end subroutine run_fixture
   subroutine acceptance_oracle(lambda,state,receipt)
@@ -182,7 +188,7 @@ contains
     receipt%valid=lambda>=0d0.and.state%trace_cache_valid
     receipt%symmetry_complete=.not.fail_symmetry_oracle;receipt%grid_complete=.not.fail_grid_oracle
     receipt%face_complete=.true.;receipt%expected_occupied_count=2;receipt%checked_occupied_count=2
-    receipt%checked_face_count=1
+    receipt%checked_face_count=2
     receipt%analysis_fingerprint=11_int64;receipt%basis_fingerprint=12_int64
     receipt%operator_fingerprint=state%operator_value_fingerprint;receipt%state_fingerprint=14_int64
     receipt%action_fingerprint=15_int64
@@ -207,6 +213,8 @@ contains
     real(real64),intent(in)::lambda,input_density(:);logical,intent(out)::callback_ok
     type(s_dg_hybrid_trial_state),intent(inout)::state
     callback_ok=phase==0.or.phase==5;phase=1
+    face_lambda=lambda
+    current_operator=volume_operator+lambda*interface_operator
     if(.not.(lambda>0d0.and.stale_operator_positive))then
       state%operator_epoch=state%operator_epoch+1
       state%operator_structure_fingerprint=991_int64
@@ -272,6 +280,9 @@ contains
     callback_ok=phase==4.and.state%trace_cache_valid;phase=5
     callback_ok=callback_ok.and.maxval(abs(state%projector-expected_projector))<1d-12.and.&
       maxval(abs(matmul(state%projector,state%projector)-state%projector))<1d-12
+    callback_ok=callback_ok.and.maxval(abs(face_lambda-lambda))<1d-15.and.&
+      abs(current_operator(1,2)-lambda*interface_operator(1,2))<1d-15.and.&
+      abs(interface_operator(1,2))>0d0
     local_norm=sum((state%density-input_density)**2)
     call MPI_Allreduce(local_norm,global_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,icomm,ierr)
     residuals%r_rho=sqrt(global_norm)/max(1d0,sqrt(sum_global_square(input_density)))
