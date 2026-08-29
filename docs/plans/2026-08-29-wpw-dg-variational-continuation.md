@@ -181,7 +181,54 @@ Commit only task files as:
 
 `feat(dg): freeze variational continuation payload`
 
-### Task 4: Implement one concrete density-mixed continuation loop
+### Task 4: Implement the concrete DC-style density-to-potential kernel
+
+**Files:**
+- Create: `src/gs/dc/dg_hybrid_variational_potential.f90`
+- Create: `tests/dg/test_dg_hybrid_variational_potential_mpi.f90`
+- Create: `tests/dg/run_dg_hybrid_variational_potential_mpi.py`
+- Modify: `src/gs/dc/CMakeLists.txt`
+- Modify: `src/gs/dc/dcdft.f90` only to expose an existing DC redistribution
+  helper if it cannot be called directly
+
+**Step 1: Write the failing decomposed-potential test**
+
+Use irregular fragments with unequal core sizes. Require exactly-once
+fragment core density assembly into the total grid, a deterministic reference
+Hartree operation on that total density, redistribution of the Hartree field
+to fragment buffers, and independent fragment-local XC evaluation. Verify
+that the combined local field equals `V_H + V_xc + V_ion_local` at every
+fragment point. Include a semilocal fixture whose gradient stencil uses the
+fragment halo. Reject duplicate or missing core ownership and incomplete
+semilocal halos.
+
+**Step 2: Run RED**
+
+Run: `python3 tests/dg/run_dg_hybrid_variational_potential_mpi.py`
+
+Expected: compile failure because the concrete potential kernel is absent.
+
+**Step 3: Implement the minimum DC-style kernel**
+
+Reuse the mappings and communication order of `calc_rho_total_dcdft` and
+`calc_vlocal_fragment_dcdft`. Assemble the total density, call the existing
+total-system Hartree FFT, return Hartree values to fragments, evaluate the
+supported local/semilocal XC on fragment buffers, and combine the fixed local
+ionic field. Expose a concrete routine over SALMON grid, Poisson, XC, and DC
+state types; do not use procedure arguments or a callback table.
+
+**Step 4: Run GREEN and DC regressions**
+
+Run the new runner at 1, 2, and 4 ranks, then the divided-DC control and
+protected DC route checks.
+
+**Step 5: Commit**
+
+Commit only task files as:
+
+`feat(dg): update hybrid potential from divided density`
+
+### Task 5: Implement one concrete density-mixed continuation loop
 
 **Files:**
 - Modify: `src/gs/dc/dg_hybrid_continuation_scf.f90`
@@ -236,7 +283,7 @@ Commit only the three task files as:
 
 `feat(dg): converge variational DG continuation`
 
-### Task 5: Connect the production WF+PW basis and remove the invalid branch
+### Task 6: Connect the production WF+PW basis and remove the invalid branch
 
 **Files:**
 - Modify: `src/gs/main_dft.f90`
@@ -297,7 +344,7 @@ only task hunks as:
 
 `feat(dg): connect variational production continuation`
 
-### Task 6: Resume the checkpoint, RT, and Si64 acceptance tasks
+### Task 7: Resume the checkpoint, RT, and Si64 acceptance tasks
 
 **Files:**
 - Modify the Task 8--12 files already listed in

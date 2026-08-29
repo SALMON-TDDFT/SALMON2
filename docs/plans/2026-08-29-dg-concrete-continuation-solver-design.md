@@ -79,6 +79,39 @@ V^K_{ij}[\rho]=\sum_{\mathbf r\in K}w_{\mathbf r}
 The basis, metric, broken kinetic, nonlocal matrix, and SIPG matrix remain
 bitwise fixed throughout one continuation attempt.
 
+### Concrete density-to-potential path
+
+Do not make the continuation solver depend on a callback into `main_dft`.
+Follow the established DC decomposition explicitly. Each fragment owns its
+current core density. Assemble those exactly-once core values into the total
+real-space density using the DC fragment-to-total map. Compute only the
+Hartree field on the total-system FFT distribution, using the existing total
+Poisson/FFT objects, and redistribute that Hartree field to fragment grids.
+
+Compute exchange-correlation on each fragment from its density buffer. The
+accepted scope contains local or semilocal functionals, so XC needs only the
+fragment values and, for a semilocal functional, its existing halo/gradient
+exchange. XC does not require a second full-system density copy or FFT.
+Combine the redistributed Hartree field, fragment XC field, and fixed local
+ionic potential on the fragment grid, then project that combined local field
+with the broken-volume local-matrix assembler.
+
+Thus one density update is
+
+```text
+fragment core density
+  -> DC core-to-total assembly
+  -> total Hartree FFT
+  -> total-to-fragment Hartree redistribution
+  -> fragment-local/semi-local XC
+  -> Hartree + XC + fixed local ionic potential
+  -> WF+PW local-potential rows
+```
+
+The full-system collective is confined to the density assembly, Hartree FFT,
+and Hartree redistribution. It is not used for XC, basis fields, or SIPG face
+traces.
+
 ## Communication boundary
 
 Materialize a SIPG face with one-to-one exchange between its two neighboring
