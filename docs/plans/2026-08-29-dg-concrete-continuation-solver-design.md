@@ -2,185 +2,246 @@
 
 ## Decision
 
-Implement the production continuation as one concrete solver, not as a generic
-callback controller wrapped by a production adapter.  The solver owns one
-explicit state transition and uses the existing SALMON numerical routines
-directly.  This keeps every MPI synchronization point, physical state update,
-rollback, and acceptance decision in one auditable path.
+The hybrid WF+PW ground state is the self-consistent ground state of the
+complete discontinuous-Galerkin operator. Build that operator from its
+variational pieces; do not project SALMON's ordinary real-space `hpsi` and
+then add DG faces. The ordinary finite-difference action crosses fragment
+boundaries and makes the separation between broken volume and SIPG interface
+terms ambiguous.
 
-The earlier production-adapter design is superseded.  It remains in history as
-design evidence but is not an implementation target.
+For one fixed WF+PW basis, define
 
-## Three data objects
+\[
+H_\lambda[\rho]=T_{\mathrm{broken}}+V_{\mathrm{NL}}
++V_{\mathrm{local}}[\rho]+\lambda H_{\mathrm{SIPG}},
+\qquad 0\leq\lambda\leq1.
+\]
 
-The production route has exactly three conceptual objects.
+Only the complete SIPG kinetic-interface operator is scaled by `lambda`.
+The nonlocal pseudopotential is part of the physical volume Hamiltonian and
+is present in full at every stage. When a projector crosses fragment
+boundaries, assign it one canonical owner and accumulate its complete matrix
+contribution exactly once.
 
-### Immutable fixed payload
+Implement one concrete solver with one explicit loop. Do not add a callback
+table, production adapter, runtime catalog, independent trace mixer, or
+another controller layer.
 
-The payload is completed and frozen before lambda-zero iteration.  It contains
-only quantities used during SCF:
+## Fixed variational payload
 
-- distributed basis row IDs, exactly-one ownership, basis values, and grid
-  distribution;
-- the fixed DG metric and its independent sparse graph;
-- the complete coefficient-independent SIPG interface rows;
-- the unified retained-basis representation `D(g)` needed by optional
-  nontrivial-symmetry checks; identity-only systems store only the identity;
-- fingerprints of the already accepted scope, symmetry closure, cutoff,
-  selection, basis, metric, and interface payloads;
-- decomposition-independent fingerprints computed from canonical global IDs
-  and values after duplicate and missing-ID checks.
+Complete and freeze the retained WF+PW basis before the lambda-zero solve.
+For every fragment, retain basis values and gradients on its owned interior
+grid and values and canonical-normal derivatives on its faces. The fixed
+payload contains:
 
-Requested/effective WF/PW IDs and their separate construction actions are not
-part of the SCF state.  They are consumed before materialization and retained
-only as checkpoint provenance.  There is one scalar lambda for the complete
-payload.  A face-local or
-fragment-local lambda is not representable by the solver interface.
+- global basis IDs and exactly-one row ownership;
+- basis values and gradients on fragment interiors;
+- the DG metric `S` and its distribution;
+- the broken-volume kinetic matrix;
+- the exactly-once nonlocal matrix;
+- the complete coefficient-independent SIPG matrix;
+- the retained-basis representation of the actual symmetry group, with one
+  explicit identity operation for an identity-only system;
+- basis, cutoff, selection, metric, operator, topology, and symmetry
+  fingerprints.
 
-### Mutable fixed-point state
+For fragments `K`, assemble
 
-One state value contains all quantities belonging to the same iterate:
+\[
+T^{K}_{ij}=\frac12\sum_{\mathbf r\in K}w_{\mathbf r}
+\nabla\phi_i^{K*}(\mathbf r)\cdot\nabla\phi_j^K(\mathbf r).
+\]
 
-- input and output density;
-- density-dependent volume operator and complete
-  `H_volume + lambda H_interface`;
-- occupied coefficients, occupations, and eigenvalues;
-- the basis-space occupied map
-  `Q_occ = C_occ C_occ^dagger S` and the occupation density matrix
-  `Gamma_occ = C f C^dagger`;
-- gauge-invariant interface traces reconstructed from `Gamma_occ`;
-- coefficient-space and real-space residuals, electron number, Hermiticity,
-  metric, projector, and optional physical-symmetry residuals;
-- lambda, iteration counters, and consistent epochs/fingerprints.
+The sum contains only points owned by `K` and has no cross-fragment block.
+All cross-fragment kinetic coupling comes from the separately assembled SIPG
+operator, including consistency flux, adjoint-consistency flux, and penalty.
 
-The state never uses `C^dagger S C` as the occupied projector.  Raw
-eigenvectors are not mixed.  Interface traces are refreshed observables, not
-independently mixed Hamiltonian boundary data, because the complete SIPG
-operator is fixed for the catalog.
+Assemble the nonlocal term from projector overlaps,
 
-### Accepted checkpoint in memory
+\[
+V^{\mathrm{NL}}_{ij}=\sum_a\sum_{\mu\nu}
+\langle\phi_i|\beta_{a\mu}\rangle D^a_{\mu\nu}
+\langle\beta_{a\nu}|\phi_j\rangle.
+\]
 
-The solver keeps one deep copy of the last accepted mutable state.  A rejected
-trial restores this complete copy transactionally.  No rejected density,
-trace, operator, occupation, epoch, or mixing history may survive.  This
-in-memory checkpoint is distinct from the final GS-to-RT file.
+A projector may overlap several fragments. Its contribution is neither
+fragment-localized nor lambda-scaled. Canonical ownership prevents duplicate
+accounting without removing cross-fragment matrix elements.
 
-## Concrete solver loop
+At an SCF iteration, only the local-potential matrix changes:
 
-The initial input density is exactly the converged DC total density and is
-fingerprint-checked before any WF+PW density reconstruction.  Lambda zero is
-then converged as a finite-basis projected volume fixed point; equality to the
-DC seed is provenance, not proof of lambda-zero convergence.
+\[
+V^K_{ij}[\rho]=\sum_{\mathbf r\in K}w_{\mathbf r}
+\phi_i^{K*}(\mathbf r)V_{\mathrm{local}}[\rho](\mathbf r)
+\phi_j^K(\mathbf r).
+\]
 
-For each trial lambda and inner iteration, all ranks execute the same ordered
-collective path:
+The basis, metric, broken kinetic, nonlocal matrix, and SIPG matrix remain
+bitwise fixed throughout one continuation attempt.
 
-1. establish collective validity of the input state;
-2. build the volume operator from the current input density;
-3. establish collective success before entering the next collective kernel;
-4. add the same lambda times every frozen SIPG face block;
-5. solve the distributed generalized eigenproblem;
-6. build `Q_occ` and `Gamma_occ` from that solve;
-7. reconstruct output density and every interface trace from `Gamma_occ`;
-8. evaluate the independent residual channels from this one state;
-9. run expensive real-space and symmetry gates only for a candidate that has
-   passed the inexpensive gates;
-10. accept the stage, or mix density only and continue.
+## Communication boundary
 
-Every rank-local numerical failure is converted to a communicator-wide result
-before any later collective is entered.  The concrete solver therefore owns
-the collective schedule; numerical helpers must not hide unmatched
-collectives behind a rank-local early return.
+Materialize a SIPG face with one-to-one exchange between its two neighboring
+fragment owners. Exchange only basis values and normal derivatives needed on
+that face. Do not gather face traces or basis fields over the full
+communicator. Because the basis and SIPG matrix are fixed, no face exchange
+is needed during the SCF loop.
 
-Acceptance is a pure evaluation of the current, fully refreshed state.  It
-does not accept cached booleans and cannot be called after restoring older
-density or trace fields.  Electron number, Hermiticity, symmetry, and every
-numeric residual are recomputed or read from the same state epoch.
+Global communication remains only where the physics or distributed algebra
+requires it:
 
-The adaptive lambda state machine is deliberately small.  Accepted stages may
-increase the bounded step; failed convergence, residual growth, or occupied
-subspace discontinuity restores the accepted state and shrinks it.  Gap size
-informs the proposal and degeneracy clustering but is not by itself a
-material-specific rejection threshold.
+- one-time validation of exactly-one basis and projector ownership;
+- SALMON's total-density Hartree/local-potential update;
+- the distributed generalized eigensolver;
+- scalar electron-count and residual reductions;
+- collective accept or reject decisions;
+- optional physical-symmetry residuals.
+
+The procedure must not assume equivalent fragments, equal local basis sizes,
+a regular neighbor graph, or nontrivial symmetry. Crystals, liquids, defects,
+interfaces, surfaces, and identity-only systems use the same path.
+
+## Three state objects
+
+Use only three conceptual objects.
+
+1. `fixed_payload` stores the immutable basis and matrices described above.
+2. `iterate` stores one consistent SCF iterate: input and output density,
+   local-potential and complete Hamiltonian rows, eigenvalues, occupations,
+   occupied coefficients, `Gamma`, `Q`, interface observables, residuals,
+   epochs, and fingerprints.
+3. `accepted` is a deep copy of the last converged `iterate`, together with
+   its lambda and the next proposed lambda step.
+
+Here
+
+\[
+\Gamma=CfC^\dagger,
+\qquad Q=C_{\mathrm{occ}}C_{\mathrm{occ}}^\dagger S.
+\]
+
+Use `Gamma` for density and physical expectation values and `Q` to track the
+occupied subspace. Never use raw coefficient differences as a subspace
+residual and never mix eigenvector coefficients.
+
+## Density mixing and continuation
+
+The immutable initial density is exactly the converged DC total density. The
+first local-potential construction must read that density before any WF+PW
+density reconstruction. Lambda zero is nevertheless converged as its own
+finite-basis fixed point.
+
+At fixed lambda, all ranks perform this single ordered loop:
+
+1. build the total local potential from the current input density;
+2. project only the density-dependent local potential;
+3. form `T_broken + V_NL + V_local[rho] + lambda * H_SIPG`;
+4. solve `H C = S C epsilon`;
+5. determine cluster-consistent occupations;
+6. construct `Gamma` and the `S`-metric occupied map `Q`;
+7. reconstruct output density and gauge-invariant interface observables;
+8. evaluate residuals belonging to this one epoch;
+9. accept the fixed point, or mix only the density and repeat.
+
+For linear damping,
+
+\[
+\rho_{\mathrm{in}}^{m+1}=\rho_{\mathrm{in}}^m+
+\alpha_\rho(\rho_{\mathrm{out}}^m-\rho_{\mathrm{in}}^m),
+\qquad0<\alpha_\rho\leq1.
+\]
+
+The existing SALMON density mixer may provide simple, Pulay, or Broyden
+updates, but it must consume and produce density only. Recompute the local
+potential from the mixed density. Interface traces are observables rebuilt
+from the current `Gamma`; they are not independently mixed Hamiltonian input.
+
+After a converged stage, propose one uniform next lambda. Stable, inexpensive
+stages may grow the bounded step. Failure, sustained residual growth, or an
+occupied-subspace discontinuity restores the complete accepted state and
+shrinks the step. A small gap alone is not a rejection condition; it informs
+occupation clustering and step reduction.
+
+## Acceptance and rollback
+
+Evaluate inexpensive gates first:
+
+- generalized eigen-residual `R_H`;
+- density residual `R_rho`;
+- interface-observable residual `R_T`;
+- metric orthogonality residual `R_S`;
+- occupied-projector change;
+- electron-number and occupation consistency;
+- Hamiltonian and metric Hermiticity;
+- finite-value and epoch consistency.
+
+Only a candidate passing those gates receives the expensive reconstructed
+real-space DG residual and, for a nontrivial actual group, operator and
+complete occupied-subspace covariance checks. Individual eigenvectors need
+not transform as symmetry eigenstates. Identity-only systems execute the same
+checks with the explicit identity action.
+
+A rejected trial restores density, potential, Hamiltonian, coefficients,
+occupations, eigenvalues, `Gamma`, `Q`, interface observables, mixing history,
+epochs, and fingerprints from `accepted`. No rejected or stale field may
+survive. Convert every rank-local failure to a communicator-wide decision
+before entering the next collective operation.
 
 ## Final lambda-one refresh
 
-After apparent convergence at lambda one, the solver performs one explicit
-unmixed refresh from the converged occupied state:
+After apparent convergence at lambda one, perform exactly one unmixed full
+refresh:
 
-1. reconstruct density and traces;
-2. rebuild the volume operator;
-3. combine it with the full interface operator;
-4. solve the generalized problem;
-5. reconstruct projector, density, and traces again;
-6. evaluate every final residual and provenance gate once on that state.
+1. rebuild density and interface observables from the converged occupied
+   state;
+2. rebuild the local potential and local-potential matrix;
+3. form the full lambda-one Hamiltonian;
+4. solve the generalized eigenproblem;
+5. rebuild `Gamma`, `Q`, density, and interface observables;
+6. evaluate every final residual and provenance gate on that same epoch.
 
-The solver publishes this state directly.  It must not restore pre-refresh
-density or trace values and then repeat acceptance.
+Publish this state only when input and output densities agree at the final
+tolerance and all gates pass. Do not restore pre-refresh values or run
+duplicate acceptance.
 
-## Symmetry and general systems
+## Protected routes and removed mechanisms
 
-The same path supports crystals, liquids, defects, interfaces, and surfaces.
-An authoritative analysis that finds no nonidentity operation produces the
-explicit identity group.  A failed or missing analysis is not converted to
-identity-only.  For a nontrivial actual group, retained-basis closure,
-operator covariance, and covariance of the complete occupied subspace are
-required.  Individual eigenvectors are never required to be symmetric.
+Put every new call behind the explicit hybrid DG-continuation flag. Leave
+ordinary GS and RT, existing DC+LCFO, Wannier90, overlapping-Wannier, and
+their checkpoint formats unchanged.
 
-RT driven-state symmetry is outside this ground-state solver.  At GS-to-RT
-handoff only the accepted zero-field operator, metric, basis, and complete
-occupied subspace are checked.
+The continuation branch must not use:
 
-## Production integration boundary
+- an ordinary `hpsi` projection as its DG volume Hamiltonian;
+- the divided-SCF one-shot final LCFO solve;
+- the occupied-only `overlapping_wannier_occupied.chk` publication;
+- a production adapter, runtime catalog, or callback table;
+- raw eigenvector or independent trace mixing;
+- face-local or fragment-local lambda;
+- basis reselection during continuation.
 
-The existing overlapping-Wannier production route finishes symmetry closure,
-basis materialization, metric assembly, and complete SIPG assembly first.  A
-single contained concrete driver then performs the continuation where the
-SALMON density, potential, Hamiltonian, and distributed solver state already
-exist.  This avoids a second catalog-builder API and avoids exporting SALMON
-state through callbacks.
+The existing LCFO-flux weak-volume code is a numerical reference, not an
+integration dependency and not a protected route to edit.
 
-The solver may call a small number of existing concrete SALMON routines for
-volume assembly, distributed diagonalization, density reconstruction, and
-real-space action.  It does not introduce an abstract backend, `class(*)`
-context, procedure-pointer table, or public callback protocol.  If a test
-needs a small deterministic problem, it supplies concrete arrays to the same
-solver path rather than manually invoking internal phases.
+## Test strategy
 
-Protected DC+LCFO/Wannier90, overlapping-Wannier, ordinary GS, and ordinary RT
-branches are unchanged.
+Develop every behavior test-first.
 
-No runtime production-catalog builder, WF-action/PW-action adapter, or generic
-materialization bridge is introduced.  Existing construction routines remain
-responsible for producing the final basis and matrices.  The continuation
-driver receives those completed arrays directly.
-
-## Tests
-
-The principal MPI fixture runs the complete solver loop on a small
-nonorthogonal two-fragment problem with nonzero cross-fragment SIPG blocks.  It
-must cover:
-
-- 1, 2, 4, and 8 rank decomposition independence;
-- exact DC seed-density provenance;
-- every physical face receiving the same lambda exactly once;
-- a nontrivial metric and the basis-space occupied projector;
-- phase and degenerate occupied-space rotation invariance;
-- independent rejection by each residual and physical gate;
-- rank-local kernel failure without deadlock;
-- complete transactional rollback;
-- final lambda-one refresh with no stale state;
-- identity-only and nontrivial-group cases.
-
-Focused algebra, SIPG, selection, and face-trace tests remain useful, but they
-do not replace this full-path fixture.  Si64 remains the first production
-acceptance calculation with eight MPI ranks, `OMP_NUM_THREADS=1`, and no time
-cutoff; it is not embedded as a solver assumption.
-
-## Deliberately omitted mechanisms
-
-The first production solver does not add independent trace mixing, raw
-eigenvector mixing, a polymorphic backend, plugin callbacks, a second
-acceptance receipt layer, face-local continuation, basis changes inside a
-lambda stage, or RT driven-state symmetry acceptance.  None is required to
-establish the complete self-consistent DG ground state.
+1. A two-fragment analytic broken-volume test verifies fragment-interior
+   kinetic and local terms, exactly-once crossing nonlocal projectors, zero
+   kinetic cross block in the volume matrix, and Hermiticity.
+2. A composition test verifies `H_volume + lambda H_SIPG`, uniform lambda,
+   zero interface contribution at lambda zero, complete contribution at
+   lambda one, and SIPG-only kinetic cross-fragment blocks.
+3. A coupled SCF test starts from an exact supplied DC density, proves gradual
+   density mixing, refreshes `Gamma`, `Q`, density, and traces after every
+   solve, and forbids lambda advance before density convergence.
+4. Continuation tests cover adaptive step growth, complete rollback, phase
+   and degenerate-space gauge invariance, small-gap handling, and collective
+   rank-local failure.
+5. A production-format integration test proves that the concrete solver uses
+   the fixed broken-volume, nonlocal, metric, and SIPG payload and never calls
+   the ordinary `hpsi` projection, one-shot solve, or occupied-only checkpoint.
+6. Final acceptance uses Si64 with eight MPI ranks, `OMP_NUM_THREADS=1`, and no
+   time cutoff, followed by checkpoint-identical zero-field RT stationarity
+   checks. Si64 dimensions or symmetry are not solver assumptions.
