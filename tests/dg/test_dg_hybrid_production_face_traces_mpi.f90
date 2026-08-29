@@ -7,7 +7,7 @@ program test_dg_hybrid_production_face_traces_mpi
     build_dg_hybrid_production_face_trace,assemble_dg_hybrid_production_face,&
     validate_dg_hybrid_production_face_collection,materialize_dg_hybrid_production_face_collection,&
     assemble_dg_hybrid_production_interface_rows,freeze_dg_hybrid_basis_directory,&
-    materialize_dg_hybrid_production_interior
+    materialize_dg_hybrid_production_interior,reconstruct_dg_hybrid_production_interface_state
   use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
   use dg_hybrid_sipg_operator,only:s_dg_hybrid_sipg_face_operator
   use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows
@@ -23,6 +23,8 @@ program test_dg_hybrid_production_face_traces_mpi
   complex(real64),allocatable::interface_rows(:,:)
   complex(real64),allocatable::interior_values(:,:),interior_gradients(:,:,:)
   complex(real64),allocatable::production_kinetic(:,:),production_local(:,:)
+  complex(real64),allocatable::occupied_coefficients(:,:),rotated_coefficients(:,:),interface_state(:,:),&
+    rotated_interface_state(:,:)
   integer,allocatable::empty_ids(:)
   type(s_dg_hybrid_production_face_trace)::trace,bad_trace
   type(s_dg_hybrid_production_face_trace),allocatable::production_faces(:)
@@ -34,7 +36,8 @@ program test_dg_hybrid_production_face_traces_mpi
   integer(int64),allocatable::interior_ids(:)
   integer,allocatable::interior_fragment(:)
   complex(real64)::analytic_values(8,2)
-  logical::ok,participant_checks_ok,volume_blocks_ok
+  logical::ok,participant_checks_ok,volume_blocks_ok,interface_state_ok
+  complex(real64)::occupied_rotation(2,2)
   character(256)::message
 
   call MPI_Init(ierr);icomm=MPI_COMM_WORLD
@@ -148,6 +151,22 @@ program test_dg_hybrid_production_face_traces_mpi
     participant_checks_ok=participant_checks_ok.and.ok.and.abs(face%total(1,2))>1d-12
   endif
   call require(participant_checks_ok,'face participant materialization or SIPG coupling failed')
+  allocate(occupied_coefficients(size(owned_row_ids),2),rotated_coefficients(size(owned_row_ids),2))
+  occupied_coefficients=(0d0,0d0)
+  do p=1,size(owned_row_ids);occupied_coefficients(p,int(owned_row_ids(p)))=1d0;enddo
+  occupied_rotation=reshape([cmplx(1d0,0d0,real64),cmplx(0d0,1d0,real64),&
+    cmplx(0d0,1d0,real64),cmplx(1d0,0d0,real64)],[2,2])/sqrt(2d0)
+  rotated_coefficients=matmul(occupied_coefficients,occupied_rotation)
+  call reconstruct_dg_hybrid_production_interface_state(icomm,2,owned_row_ids,occupied_coefficients,&
+    [1d0,1d0],production_faces,interface_state,ok,message)
+  call require(ok,trim(message))
+  call reconstruct_dg_hybrid_production_interface_state(icomm,2,owned_row_ids,rotated_coefficients,&
+    [1d0,1d0],production_faces,rotated_interface_state,ok,message)
+  call require(ok,trim(message))
+  interface_state_ok=all(shape(interface_state)==shape(rotated_interface_state))
+  if(size(interface_state)>0)interface_state_ok=interface_state_ok.and.&
+    maxval(abs(interface_state-rotated_interface_state))<1d-12
+  call require(interface_state_ok,'occupied gauge rotation changed the production interface state')
   call assemble_dg_hybrid_production_interface_rows(icomm,2,owned_row_ids,production_faces,6d0,&
     interface_rows,ok,message)
   call require(ok,trim(message))

@@ -27,7 +27,7 @@ module dg_hybrid_production_face_traces
   public::build_dg_hybrid_production_face_trace,assemble_dg_hybrid_production_face,&
     validate_dg_hybrid_production_face_collection,materialize_dg_hybrid_production_face_collection,&
     assemble_dg_hybrid_production_interface_rows,freeze_dg_hybrid_basis_directory,&
-    materialize_dg_hybrid_production_interior
+    materialize_dg_hybrid_production_interior,reconstruct_dg_hybrid_production_interface_state
 contains
   subroutine freeze_dg_hybrid_basis_directory(icomm,bases,effective_ids,basis_owner,basis_fragment,ok,message)
     integer,intent(in)::icomm,effective_ids(:)
@@ -170,6 +170,93 @@ contains
     ok=.false.;message='production interior materialization requires MPI'
 #endif
   end subroutine materialize_dg_hybrid_production_interior
+
+  subroutine reconstruct_dg_hybrid_production_interface_state(icomm,global_count,row_ids,coefficients,&
+      occupations,faces,interface_state,ok,message)
+    integer,intent(in)::icomm,global_count
+    integer(int64),intent(in)::row_ids(:)
+    complex(real64),intent(in)::coefficients(:,:)
+    real(real64),intent(in)::occupations(:)
+    type(s_dg_hybrid_production_face_trace),intent(in)::faces(:)
+    complex(real64),allocatable,intent(out)::interface_state(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    complex(real64),allocatable::local_coefficients(:,:),global_coefficients(:,:),face_coefficients(:,:),&
+      face_values(:,:),face_derivatives(:,:),occupied_values(:,:),occupied_derivatives(:,:),&
+      weighted_values(:,:),weighted_derivatives(:,:),value_density(:,:),normal_density(:,:),cross_density(:,:)
+    integer,allocatable::ownership(:)
+    integer::i,j,face,nowned,nocc,nbasis,npoint,total_entries,cursor,ierr,local_bad,global_bad
+    ok=.false.;message='';nowned=size(row_ids);nocc=size(occupations);local_bad=0
+    if(global_count<1.or.nocc<1.or.any(shape(coefficients)/=[nowned,nocc]).or.&
+        any(row_ids<1_int64).or.any(row_ids>int(global_count,int64)).or.any(occupations<0d0).or.&
+        .not.all(ieee_is_finite(occupations)).or..not.finite_trace_matrix(coefficients))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid production interface-state contract';return;endif
+    allocate(ownership(global_count),local_coefficients(global_count,nocc),global_coefficients(global_count,nocc))
+    ownership=0;local_coefficients=(0d0,0d0)
+    do i=1,nowned
+      ownership(int(row_ids(i)))=ownership(int(row_ids(i)))+1
+      local_coefficients(int(row_ids(i)),:)=coefficients(i,:)
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,ownership,global_count,MPI_INTEGER,MPI_SUM,icomm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(local_coefficients,global_coefficients,size(local_coefficients),&
+      MPI_DOUBLE_COMPLEX,MPI_SUM,icomm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(ownership/=1))then;message='interface-state rows are not owned exactly once';return;endif
+    total_entries=0
+    do face=1,size(faces)
+      if(.not.faces(face)%frozen)cycle
+      total_entries=total_entries+size(faces(face)%weights)**2
+    enddo
+    allocate(interface_state(total_entries,3));interface_state=(0d0,0d0);cursor=0
+    do face=1,size(faces)
+      if(.not.faces(face)%frozen)cycle
+      npoint=size(faces(face)%weights)
+      nbasis=size(faces(face)%basis_ids_minus)+size(faces(face)%basis_ids_plus)
+      if(any(faces(face)%basis_ids_minus<1).or.any(faces(face)%basis_ids_minus>global_count).or.&
+          any(faces(face)%basis_ids_plus<1).or.any(faces(face)%basis_ids_plus>global_count))then
+        local_bad=1;cycle
+      endif
+      allocate(face_coefficients(nbasis,nocc),face_values(npoint,nbasis),face_derivatives(npoint,nbasis),&
+        occupied_values(npoint,nocc),occupied_derivatives(npoint,nocc),weighted_values(npoint,nocc),&
+        weighted_derivatives(npoint,nocc),value_density(npoint,npoint),normal_density(npoint,npoint),&
+        cross_density(npoint,npoint))
+      face_values(:,1:size(faces(face)%basis_ids_minus))=faces(face)%value_minus
+      face_values(:,size(faces(face)%basis_ids_minus)+1:)=faces(face)%value_plus
+      face_derivatives(:,1:size(faces(face)%basis_ids_minus))=faces(face)%derivative_minus
+      face_derivatives(:,size(faces(face)%basis_ids_minus)+1:)=faces(face)%derivative_plus
+      do i=1,size(faces(face)%basis_ids_minus)
+        face_coefficients(i,:)=global_coefficients(faces(face)%basis_ids_minus(i),:)
+      enddo
+      do i=1,size(faces(face)%basis_ids_plus)
+        face_coefficients(size(faces(face)%basis_ids_minus)+i,:)=&
+          global_coefficients(faces(face)%basis_ids_plus(i),:)
+      enddo
+      occupied_values=matmul(face_values,face_coefficients)
+      occupied_derivatives=matmul(face_derivatives,face_coefficients)
+      weighted_values=occupied_values;weighted_derivatives=occupied_derivatives
+      do i=1,nocc
+        weighted_values(:,i)=occupations(i)*weighted_values(:,i)
+        weighted_derivatives(:,i)=occupations(i)*weighted_derivatives(:,i)
+      enddo
+      value_density=matmul(weighted_values,conjg(transpose(occupied_values)))
+      normal_density=matmul(weighted_derivatives,conjg(transpose(occupied_derivatives)))
+      cross_density=matmul(weighted_values,conjg(transpose(occupied_derivatives)))
+      interface_state(cursor+1:cursor+npoint*npoint,1)=reshape(value_density,[npoint*npoint])
+      interface_state(cursor+1:cursor+npoint*npoint,2)=reshape(normal_density,[npoint*npoint])
+      interface_state(cursor+1:cursor+npoint*npoint,3)=reshape(cross_density,[npoint*npoint])
+      cursor=cursor+npoint*npoint
+      deallocate(face_coefficients,face_values,face_derivatives,occupied_values,occupied_derivatives,&
+        weighted_values,weighted_derivatives,value_density,normal_density,cross_density)
+    enddo
+    if(.not.finite_trace_matrix(interface_state))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
+    ok=ierr==MPI_SUCCESS.and.global_bad==0
+    if(ok)then;message='';else;message='invalid production interface-state reconstruction';endif
+#else
+    ok=.false.;message='production interface-state reconstruction requires MPI'
+#endif
+  end subroutine reconstruct_dg_hybrid_production_interface_state
 
   subroutine assemble_dg_hybrid_production_interface_rows(icomm,global_count,row_ids,traces,penalty_factor,&
       interface_rows,ok,message)
@@ -766,4 +853,9 @@ contains
       call mix(transfer(real(value,real64),hash));call mix(transfer(aimag(value),hash))
     end subroutine mix_complex
   end function trace_fingerprint
+
+  logical function finite_trace_matrix(values) result(finite)
+    complex(real64),intent(in)::values(:,:)
+    finite=all(ieee_is_finite(real(values))).and.all(ieee_is_finite(aimag(values)))
+  end function finite_trace_matrix
 end module dg_hybrid_production_face_traces

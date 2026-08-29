@@ -28,6 +28,13 @@ interior_body = production_source.split(
 assert "mpi_allreduce(values" not in interior_body and "mpi_allreduce(gradients" not in interior_body, (
     "production interior basis data are replicated by a global reduction"
 )
+state_body = production_source.split(
+    "subroutine reconstruct_dg_hybrid_production_interface_state", 1
+)[1].split("end subroutine reconstruct_dg_hybrid_production_interface_state", 1)[0]
+for token in ("value_density", "normal_density", "cross_density", "derivative_minus", "derivative_plus"):
+    assert token in state_body, "production interface state omits " + token
+for forbidden in ("metric_tensor", "covariant", "contravariant"):
+    assert forbidden not in state_body, "orthogonal-cell interface path contains " + forbidden
 assembly_body = production_source.split("subroutine assemble_dg_hybrid_production_face", 1)[1].split(
     "end subroutine assemble_dg_hybrid_production_face", 1
 )[0]
