@@ -19,7 +19,6 @@ module dg_hybrid_production_face_traces
     integer(int64),allocatable::point_ids_minus(:),point_ids_plus(:)
     real(real64),allocatable::weights(:)
     integer,allocatable::basis_ids_minus(:),basis_ids_plus(:)
-    integer,allocatable::effective_ids(:),group_action(:,:)
     complex(real64),allocatable::value_minus(:,:),value_plus(:,:)
     complex(real64),allocatable::derivative_minus(:,:),derivative_plus(:,:)
     integer(int64)::fingerprint=0_int64
@@ -113,9 +112,9 @@ contains
   end subroutine assemble_dg_hybrid_production_interface_rows
 
   subroutine materialize_dg_hybrid_production_face_collection(icomm,origins,sizes,global_size,hgs,coef_nab,bases,&
-      basis_owner,basis_fragment,effective_ids,group_action,faces,ok,message)
+      basis_owner,basis_fragment,effective_ids,faces,ok,message)
     integer,intent(in)::icomm,origins(:,:),sizes(:,:),global_size(3),basis_owner(:),basis_fragment(:),&
-      effective_ids(:),group_action(:,:)
+      effective_ids(:)
     real(real64),intent(in)::hgs(3),coef_nab(:,:)
     type(s_dg_hybrid_fragment_basis),intent(in)::bases(:)
     type(s_dg_hybrid_production_face_trace),allocatable,intent(out)::faces(:)
@@ -260,7 +259,7 @@ contains
         any([(basis_owner(findloc(effective_ids,ids_plus(i),dim=1))==id_rank,i=1,size(ids_plus))])
       if(active)call store_local_face_trace(g,minus_fragment,plus_fragment,periodic_shift,normal,hgs(axis),&
         minus_ids,plus_ids,[(weight,i=1,npoint)],ids_minus,ids_plus,value_minus,derivative_minus,value_plus,&
-        -derivative_plus,effective_ids,group_action,candidate(g))
+        -derivative_plus,candidate(g))
       deallocate(minus_ids,plus_ids,ids_minus,ids_plus,value_minus,derivative_minus,value_plus,derivative_plus)
     enddo
     allocate(faces(face_count));faces=candidate;ok=.true.;message=''
@@ -404,10 +403,10 @@ contains
 
   subroutine store_local_face_trace(face_id,fragment_minus,fragment_plus,periodic_shift,normal,h_normal,&
       point_ids_minus,point_ids_plus,weights,basis_ids_minus,basis_ids_plus,value_minus,outward_minus,&
-      value_plus,outward_plus,effective_ids,group_action,face)
+      value_plus,outward_plus,face)
     integer,intent(in)::face_id,fragment_minus,fragment_plus,periodic_shift(3)
     integer(int64),intent(in)::point_ids_minus(:),point_ids_plus(:)
-    integer,intent(in)::basis_ids_minus(:),basis_ids_plus(:),effective_ids(:),group_action(:,:)
+    integer,intent(in)::basis_ids_minus(:),basis_ids_plus(:)
     real(real64),intent(in)::normal(3),h_normal,weights(:)
     complex(real64),intent(in)::value_minus(:,:),outward_minus(:,:),value_plus(:,:),outward_plus(:,:)
     type(s_dg_hybrid_production_face_trace),intent(out)::face
@@ -415,19 +414,17 @@ contains
     face%periodic_shift=periodic_shift;face%canonical_normal=normal;face%h_normal=h_normal
     allocate(face%point_ids_minus(size(point_ids_minus)),face%point_ids_plus(size(point_ids_plus)),&
       face%weights(size(weights)),face%basis_ids_minus(size(basis_ids_minus)),face%basis_ids_plus(size(basis_ids_plus)),&
-      face%effective_ids(size(effective_ids)),face%group_action(size(group_action,1),size(group_action,2)),&
       face%value_minus(size(value_minus,1),size(value_minus,2)),&
       face%derivative_minus(size(outward_minus,1),size(outward_minus,2)),&
       face%value_plus(size(value_plus,1),size(value_plus,2)),&
       face%derivative_plus(size(outward_plus,1),size(outward_plus,2)))
     face%point_ids_minus=point_ids_minus;face%point_ids_plus=point_ids_plus;face%weights=weights
     face%basis_ids_minus=basis_ids_minus;face%basis_ids_plus=basis_ids_plus
-    face%effective_ids=effective_ids;face%group_action=group_action
     face%value_minus=value_minus;face%derivative_minus=outward_minus
     face%value_plus=value_plus;face%derivative_plus=-outward_plus
     face%fingerprint=trace_fingerprint(face_id,fragment_minus,fragment_plus,periodic_shift,normal,h_normal,&
       point_ids_minus,point_ids_plus,weights,basis_ids_minus,basis_ids_plus,value_minus,outward_minus,value_plus,&
-      outward_plus,effective_ids,group_action)
+      outward_plus)
     if(face%fingerprint==0_int64)face%fingerprint=1_int64
     face%frozen=.true.
   end subroutine store_local_face_trace
@@ -436,10 +433,10 @@ contains
 
   subroutine build_dg_hybrid_production_face_trace(icomm,face_id,fragment_minus,fragment_plus,periodic_shift,&
       normal,h_normal,point_ids_minus,point_ids_plus,weights,basis_ids_minus,basis_ids_plus,value_minus,&
-      outward_minus,value_plus,outward_plus,effective_ids,group_action,face,ok,message)
+      outward_minus,value_plus,outward_plus,face,ok,message)
     integer,intent(in)::icomm,face_id,fragment_minus,fragment_plus,periodic_shift(3)
     integer(int64),intent(in)::point_ids_minus(:),point_ids_plus(:)
-    integer,intent(in)::basis_ids_minus(:),basis_ids_plus(:),effective_ids(:),group_action(:,:)
+    integer,intent(in)::basis_ids_minus(:),basis_ids_plus(:)
     real(real64),intent(in)::normal(3),h_normal,weights(:)
     complex(real64),intent(in)::value_minus(:,:),outward_minus(:,:),value_plus(:,:),outward_plus(:,:)
     type(s_dg_hybrid_production_face_trace),intent(out)::face
@@ -459,7 +456,6 @@ contains
     if(any(shape(outward_minus)/=shape(value_minus)))local_bad=1
     if(size(value_plus,1)/=size(weights).or.size(value_plus,2)/=size(basis_ids_plus))local_bad=1
     if(any(shape(outward_plus)/=shape(value_plus)))local_bad=1
-    if(.not.valid_closed_action(effective_ids,group_action))local_bad=1
     if(local_bad==0)then
       if(h_normal<=0d0.or.&
           abs(sqrt(sum(normal**2))-1d0)>=1d-12.or..not.all(ieee_is_finite(normal)).or.&
@@ -469,11 +465,10 @@ contains
           .not.all(ieee_is_finite(real(value_plus))).or..not.all(ieee_is_finite(aimag(value_plus))).or.&
           .not.all(ieee_is_finite(real(outward_plus))).or..not.all(ieee_is_finite(aimag(outward_plus))))local_bad=1
       do i=1,size(basis_ids_minus)
-        if(count(effective_ids==basis_ids_minus(i))/=1.or.count(basis_ids_minus==basis_ids_minus(i))/=1.or.&
-            any(basis_ids_plus==basis_ids_minus(i)))local_bad=1
+        if(count(basis_ids_minus==basis_ids_minus(i))/=1.or.any(basis_ids_plus==basis_ids_minus(i)))local_bad=1
       enddo
       do i=1,size(basis_ids_plus)
-        if(count(effective_ids==basis_ids_plus(i))/=1.or.count(basis_ids_plus==basis_ids_plus(i))/=1)local_bad=1
+        if(count(basis_ids_plus==basis_ids_plus(i))/=1)local_bad=1
       enddo
       do i=1,size(point_ids_minus)
         if(point_ids_minus(i)<=0_int64.or.point_ids_plus(i)<=0_int64.or.&
@@ -483,8 +478,7 @@ contains
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid or incomplete production face trace';return;endif
     local_hash=trace_fingerprint(face_id,fragment_minus,fragment_plus,periodic_shift,normal,h_normal,&
-      point_ids_minus,point_ids_plus,weights,basis_ids_minus,basis_ids_plus,value_minus,outward_minus,value_plus,outward_plus,&
-      effective_ids,group_action)
+      point_ids_minus,point_ids_plus,weights,basis_ids_minus,basis_ids_plus,value_minus,outward_minus,value_plus,outward_plus)
     call MPI_Allreduce(local_hash,minimum_hash,1,MPI_INTEGER8,MPI_MIN,icomm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='production face fingerprint minimum reduction failed';return;endif
     call MPI_Allreduce(local_hash,maximum_hash,1,MPI_INTEGER8,MPI_MAX,icomm,ierr)
@@ -497,14 +491,12 @@ contains
     allocate(face%point_ids_minus(size(point_ids_minus)),face%point_ids_plus(size(point_ids_plus)),&
       face%weights(size(weights)),&
       face%basis_ids_minus(size(basis_ids_minus)),face%basis_ids_plus(size(basis_ids_plus)),&
-      face%effective_ids(size(effective_ids)),face%group_action(size(group_action,1),size(group_action,2)),&
       face%value_minus(size(value_minus,1),size(value_minus,2)),&
       face%derivative_minus(size(outward_minus,1),size(outward_minus,2)),&
       face%value_plus(size(value_plus,1),size(value_plus,2)),&
       face%derivative_plus(size(outward_plus,1),size(outward_plus,2)))
     face%point_ids_minus=point_ids_minus;face%point_ids_plus=point_ids_plus;face%weights=weights
     face%basis_ids_minus=basis_ids_minus;face%basis_ids_plus=basis_ids_plus
-    face%effective_ids=effective_ids;face%group_action=group_action
     face%value_minus=value_minus;face%derivative_minus=outward_minus
     face%value_plus=value_plus;face%derivative_plus=-outward_plus
     face%fingerprint=local_hash;if(face%fingerprint==0_int64)face%fingerprint=1_int64
@@ -607,8 +599,7 @@ contains
     bad=0;recomputed=0_int64
     if(.not.face%frozen.or.face%fingerprint==0_int64.or.&
         .not.allocated(face%weights).or..not.allocated(face%basis_ids_minus).or.&
-        .not.allocated(face%basis_ids_plus).or..not.allocated(face%effective_ids).or.&
-        .not.allocated(face%group_action).or..not.allocated(face%point_ids_minus).or.&
+        .not.allocated(face%basis_ids_plus).or..not.allocated(face%point_ids_minus).or.&
         .not.allocated(face%point_ids_plus).or..not.allocated(face%value_minus).or.&
         .not.allocated(face%derivative_minus).or..not.allocated(face%value_plus).or.&
         .not.allocated(face%derivative_plus))then;bad=1;return;endif
@@ -621,42 +612,15 @@ contains
     recomputed=trace_fingerprint(face%global_face_id,face%minus_fragment,face%plus_fragment,&
       face%periodic_shift,face%canonical_normal,face%h_normal,face%point_ids_minus,face%point_ids_plus,&
       face%weights,face%basis_ids_minus,&
-      face%basis_ids_plus,face%value_minus,face%derivative_minus,face%value_plus,-face%derivative_plus,&
-      face%effective_ids,face%group_action)
+      face%basis_ids_plus,face%value_minus,face%derivative_minus,face%value_plus,-face%derivative_plus)
     if(recomputed==0_int64)recomputed=1_int64
     if(recomputed/=face%fingerprint)bad=1
   end subroutine validate_stored_face
 
-  logical function valid_closed_action(ids,action) result(valid)
-    integer,intent(in)::ids(:),action(:,:)
-    integer::i,j,k
-    valid=size(ids)>0.and.size(action,1)==size(ids).and.size(action,2)>0
-    if(.not.valid)return
-    valid=all(ids>0).and.all(action>=1).and.all(action<=size(ids)).and.&
-      all(action(:,1)==[(i,i=1,size(ids))])
-    if(.not.valid)return
-    do i=1,size(ids)
-      if(count(ids==ids(i))/=1)then;valid=.false.;return;endif
-    enddo
-    do j=1,size(action,2)
-      do i=1,size(ids)
-        if(count(action(:,j)==i)/=1)then;valid=.false.;return;endif
-      enddo
-    enddo
-    do i=1,size(action,2);do j=1,size(action,2)
-      do k=1,size(action,2)
-        if(all(action(:,k)==action(action(:,j),i)))exit
-      enddo
-      if(k>size(action,2))then;valid=.false.;return;endif
-    enddo;enddo
-  end function valid_closed_action
-
   integer(int64) function trace_fingerprint(face_id,fragment_minus,fragment_plus,shift,normal,h_normal,&
-      point_ids_minus,point_ids_plus,weights,ids_minus,ids_plus,value_minus,outward_minus,value_plus,outward_plus,&
-      effective_ids,action)&
+      point_ids_minus,point_ids_plus,weights,ids_minus,ids_plus,value_minus,outward_minus,value_plus,outward_plus)&
       result(hash)
-    integer,intent(in)::face_id,fragment_minus,fragment_plus,shift(3),ids_minus(:),ids_plus(:),&
-      effective_ids(:),action(:,:)
+    integer,intent(in)::face_id,fragment_minus,fragment_plus,shift(3),ids_minus(:),ids_plus(:)
     integer(int64),intent(in)::point_ids_minus(:),point_ids_plus(:)
     real(real64),intent(in)::normal(3),h_normal,weights(:)
     complex(real64),intent(in)::value_minus(:,:),outward_minus(:,:),value_plus(:,:),outward_plus(:,:)
@@ -677,8 +641,6 @@ contains
     do j=1,size(value_plus,2);do i=1,size(value_plus,1)
       call mix_complex(value_plus(i,j));call mix_complex(outward_plus(i,j))
     enddo;enddo
-    do i=1,size(effective_ids);call mix(int(effective_ids(i),int64));enddo
-    do j=1,size(action,2);do i=1,size(action,1);call mix(int(action(i,j),int64));enddo;enddo
   contains
     subroutine mix(value)
       integer(int64),intent(in)::value

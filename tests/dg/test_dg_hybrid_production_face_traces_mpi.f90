@@ -11,7 +11,6 @@ program test_dg_hybrid_production_face_traces_mpi
   use dg_hybrid_sipg_operator,only:s_dg_hybrid_sipg_face_operator
   implicit none
   integer::icomm,id_rank,nproc,ierr
-  integer::effective_ids(3),group_action(3,2),bad_action(3,2),non_group_action(3,3)
   integer,allocatable::basis_owner(:),basis_fragment(:)
   integer(int64)::point_ids(2)
   real(real64)::weights(2),normal(3)
@@ -33,7 +32,6 @@ program test_dg_hybrid_production_face_traces_mpi
 
   call MPI_Init(ierr);icomm=MPI_COMM_WORLD
   call MPI_Comm_rank(icomm,id_rank,ierr);call MPI_Comm_size(icomm,nproc,ierr)
-  effective_ids=[1,2,3];group_action=reshape([1,2,3,2,1,3],[3,2])
   point_ids=[101_int64,109_int64];weights=[0.7d0,1.1d0];normal=[1d0,0d0,0d0]
   minus_values=reshape([cmplx(1d0,0.1d0,real64),cmplx(0.8d0,-0.2d0,real64),&
     cmplx(-0.3d0,0.2d0,real64),cmplx(0.4d0,0.1d0,real64)],[2,2])
@@ -41,8 +39,7 @@ program test_dg_hybrid_production_face_traces_mpi
   minus_outward=0.25d0*minus_values;plus_outward(:,1)=-0.4d0*plus_values(:,1)
 
   call build_dg_hybrid_production_face_trace(icomm,17,1,2,[1,0,0],normal,0.8d0,point_ids,point_ids,&
-    weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,group_action,&
-    trace,ok,message)
+    weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,trace,ok,message)
   call require(ok,trim(message))
   call require(trace%frozen.and.trace%fingerprint/=0_int64,'production face was not frozen')
   call require(trace%minus_fragment==1.and.trace%plus_fragment==2,'canonical fragment orientation changed')
@@ -59,27 +56,14 @@ program test_dg_hybrid_production_face_traces_mpi
   call require(.not.ok,'duplicate physical face was accepted')
 
   call build_dg_hybrid_production_face_trace(icomm,19,1,2,[0,0,0],normal,0.8d0,point_ids,[102_int64,110_int64],&
-    weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,group_action,&
-    bad_trace,ok,message)
+    weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,bad_trace,ok,message)
   call require(ok,'paired cell-centered face points were rejected')
   call build_dg_hybrid_production_face_trace(icomm,21,1,2,[0,0,0],normal,0.8d0,point_ids,[101_int64],&
-    weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,group_action,&
-    bad_trace,ok,message)
+    weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,bad_trace,ok,message)
   call require(.not.ok,'nonconformable face point arrays were accepted')
-  bad_action=group_action;bad_action(3,2)=2
-  call build_dg_hybrid_production_face_trace(icomm,20,1,2,[0,0,0],normal,0.8d0,point_ids,point_ids,&
-    weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,bad_action,&
-    bad_trace,ok,message)
-  call require(.not.ok,'nonclosed effective selection action was accepted')
-  non_group_action=reshape([1,2,3,2,1,3,1,3,2],[3,3])
-  call build_dg_hybrid_production_face_trace(icomm,22,1,2,[0,0,0],normal,0.8d0,point_ids,point_ids,&
-    weights,[1,2],[3],minus_values,minus_outward,plus_values,plus_outward,effective_ids,non_group_action,&
-    bad_trace,ok,message)
-  call require(.not.ok,'permutations without group closure were accepted')
   allocate(empty_ids(0),empty_values(2,0),empty_derivatives(2,0))
   call build_dg_hybrid_production_face_trace(icomm,23,1,2,[0,0,0],normal,0.8d0,point_ids,point_ids,&
-    weights,empty_ids,[1],empty_values,empty_derivatives,plus_values,plus_outward,[1],reshape([1],[1,1]),&
-    bad_trace,ok,message)
+    weights,empty_ids,[1],empty_values,empty_derivatives,plus_values,plus_outward,bad_trace,ok,message)
   call require(.not.ok,'one-sided production face basis was accepted')
 
   grid_size=[4,2,1];origins=reshape([0,0,0,1,0,0],[3,2]);sizes=reshape([1,2,1,3,2,1],[3,2])
@@ -108,7 +92,7 @@ program test_dg_hybrid_production_face_traces_mpi
     'frozen basis owner or fragment directory is incorrect')
   call materialize_dg_hybrid_production_face_collection(icomm,origins,sizes,grid_size,[1d0,2d0,3d0],&
     reshape([0.5d0,0.25d0,0.125d0],[1,3]),fragment_bases,basis_owner,basis_fragment,[1,2],&
-    reshape([1,2],[2,1]),production_faces,ok,message)
+    production_faces,ok,message)
   call require(ok,trim(message))
   call require(size(production_faces)==2,'production topology did not group internal and periodic interfaces')
   participant_checks_ok=.true.
@@ -136,7 +120,7 @@ program test_dg_hybrid_production_face_traces_mpi
   origins(1,2)=2;sizes(1,2)=3
   call materialize_dg_hybrid_production_face_collection(icomm,origins,sizes,grid_size,[1d0,2d0,3d0],&
     reshape([0.5d0,0.25d0,0.125d0],[1,3]),fragment_bases,basis_owner,basis_fragment,[1,2],&
-    reshape([1,2],[2,1]),production_faces,ok,message)
+    production_faces,ok,message)
   call require(.not.ok,'fragment box extending outside the basic cell was accepted')
   if(id_rank==0)write(*,'(a,i0,a)')'PASS production face traces on ',nproc,' ranks'
   call MPI_Finalize(ierr)

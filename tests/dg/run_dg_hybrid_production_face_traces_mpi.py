@@ -10,6 +10,9 @@ production_source = (root / "src/gs/dc/dg_hybrid_production_face_traces.f90").re
 assert "owner_rank" not in production_source, (
     "the obsolete central face-owner path is still present"
 )
+assert "group_action" not in production_source, (
+    "SIPG face payload still duplicates retained-basis symmetry closure"
+)
 materialization_body = production_source.split(
     "subroutine materialize_dg_hybrid_production_face_collection", 1
 )[1].split("end subroutine materialize_dg_hybrid_production_face_collection", 1)[0]
