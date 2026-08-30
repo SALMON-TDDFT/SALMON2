@@ -68,7 +68,7 @@
 &unfolding
   dm_unfold_option = 'super'
   num_skgrid = 2, 2, 2
-  no_pr = 16
+  no_pr = 32
   out_dm_unfold_step = 10
 /
 
