@@ -4129,8 +4129,9 @@ contains
     character(256)::continuation_message
     real(8)::occupied_unoccupied_gap,accepted_gap
     real(8)::hamiltonian_hermiticity,hamiltonian_scale
-    real(8)::real_space_residual,interface_action_residuals(3),local_energy_parts(5),global_energy_parts(5),&
+    real(8)::real_space_residual,interface_action_residuals(3),local_energy_parts(3),global_energy_parts(3),&
       final_energy_receipt(7)
+    type(s_dft_energy)::checkpoint_energy
     complex(8),allocatable::energy_local_coefficients(:,:),energy_global_coefficients(:,:)
     integer::energy_row,energy_state,energy_gx,energy_gy,energy_gz,energy_ix,energy_iy,energy_iz
     logical::hamiltonian_finite
@@ -4445,20 +4446,22 @@ stage_pass: do
       energy_iy=findloc(dc%jxyz_tot(:,2),energy_gy,dim=1)
       energy_iz=findloc(dc%jxyz_tot(:,3),energy_gz,dim=1)
       if(energy_ix<1.or.energy_iy<1.or.energy_iz<1)error stop 'DG continuation energy grid mapping failed'
-      local_energy_parts(3)=local_energy_parts(3)+0.5d0*rho_in(p)*dc%Vh_tot%f(energy_ix,energy_iy,energy_iz)*interior_weights(p)
-      local_energy_parts(4)=local_energy_parts(4)+rho_in(p)*dc%Vpsl_tot%f(energy_ix,energy_iy,energy_iz)*interior_weights(p)
+      local_energy_parts(3)=local_energy_parts(3)+eexc_tmp(energy_ix,energy_iy,energy_iz)*interior_weights(p)
     enddo
-    if(dc%id_frag==0)local_energy_parts(5)=energy%E_xc
-    call MPI_Allreduce(local_energy_parts,global_energy_parts,5,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr_local)
+    call MPI_Allreduce(local_energy_parts,global_energy_parts,3,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr_local)
     if(ierr_local/=MPI_SUCCESS.or.any(.not.ieee_is_finite(global_energy_parts)))&
       error stop 'DG continuation energy decomposition failed'
-    final_energy_receipt(2)=global_energy_parts(1)
-    final_energy_receipt(3)=global_energy_parts(3)
-    final_energy_receipt(4)=global_energy_parts(5)
-    final_energy_receipt(5)=energy%E_ion_ion
-    final_energy_receipt(6)=global_energy_parts(4)
-    final_energy_receipt(7)=global_energy_parts(2)
-    final_energy_receipt(1)=sum(final_energy_receipt(2:7))
+    checkpoint_energy%E_kin=global_energy_parts(1)
+    checkpoint_energy%E_ion_nloc=global_energy_parts(2)
+    checkpoint_energy%E_xc=global_energy_parts(3)
+    call calc_Total_Energy_periodic(dc%mg_tot,ewald,dc%system_tot,dc%info_tot,pp,dc%ppg_tot,&
+      dc%fg_tot,dc%poisson_tot,.true.,checkpoint_energy)
+    final_energy_receipt=[checkpoint_energy%E_tot,checkpoint_energy%E_kin,checkpoint_energy%E_h,&
+      checkpoint_energy%E_xc,checkpoint_energy%E_ion_ion,checkpoint_energy%E_ion_loc,checkpoint_energy%E_ion_nloc]
+    if(any(.not.ieee_is_finite(final_energy_receipt)).or.&
+        .not.(abs(final_energy_receipt(1)-sum(final_energy_receipt(2:7)))<=&
+        100d0*epsilon(1d0)*max(1d0,abs(final_energy_receipt(1)))))&
+      error stop 'DG continuation final energy receipt is inconsistent'
     checkpoint_payload%energy_receipt=final_energy_receipt
     checkpoint_payload%energy_fingerprint=checkpoint_real_fingerprint(checkpoint_payload%energy_receipt)
     allocate(checkpoint_payload%nonlocal_ids,source=ow_core_ids)

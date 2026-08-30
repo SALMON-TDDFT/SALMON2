@@ -10,8 +10,6 @@ import tempfile
 
 
 root = Path(__file__).resolve().parents[2]
-salmon = root / "build-hybrid-commit" / "salmon"
-assert salmon.exists(), "build-hybrid-commit/salmon is required"
 
 if os.environ.get("SALMON_LAPACK_LIBS"):
     libs = shlex.split(os.environ["SALMON_LAPACK_LIBS"])
@@ -31,6 +29,23 @@ mpifort = shutil.which("mpifort")
 
 with tempfile.TemporaryDirectory(prefix="hybrid-production-smoke-") as name:
     work = Path(name)
+    salmon_build = work / "salmon-build"
+    subprocess.run(
+        [
+            "cmake", "-S", str(root), "-B", str(salmon_build),
+            "-DUSE_MPI=ON", "-DUSE_SCALAPACK=OFF", "-DUSE_EIGENEXA=OFF", "-DUSE_WANNIER90=OFF",
+            f"-DCMAKE_Fortran_COMPILER={mpifort}", "-DCMAKE_BUILD_TYPE=Debug",
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        ["cmake", "--build", str(salmon_build), "-j2"],
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+    salmon = salmon_build / "salmon"
+    assert salmon.exists(), "current-source SALMON build did not produce the executable"
     (work / "config.h").write_text("")
     writer = work / "write_hybrid_checkpoint"
     sources = [

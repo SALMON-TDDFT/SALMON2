@@ -128,9 +128,9 @@ for token in (
     "energy_global_coefficients",
     "fixed_payload%kinetic_rows",
     "fixed_payload%nonlocal_rows",
-    "dc%Vh_tot%f",
-    "dc%Vpsl_tot%f",
-    "final_energy_receipt(1)=sum(final_energy_receipt(2:7))",
+    "eexc_tmp(energy_ix,energy_iy,energy_iz)",
+    "calc_Total_Energy_periodic(dc%mg_tot,ewald,dc%system_tot",
+    "checkpoint_energy%E_ion_ion",
 ):
     assert token in implementation, f"final DG energy decomposition omits {token}"
 
