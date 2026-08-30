@@ -10,7 +10,7 @@ module rt_dg_hybrid_checkpoint
 #endif
   implicit none
   private
-  integer,parameter::checkpoint_version=1
+  integer,parameter::checkpoint_version=2,legacy_checkpoint_version=1
   character(16),parameter::checkpoint_magic='SALMON_DG_HYB01 '
   character(16),parameter::occupied_magic='SALMON_DG_OCC02 '
   integer,parameter::occupied_version=2
@@ -41,7 +41,7 @@ contains
     integer(int64)::metadata_hash,minimum_metadata_hash,maximum_metadata_hash
     integer,allocatable::ownership(:),owner(:),owner_position(:),metric_degrees(:),operator_degrees(:),&
       metric_columns(:),operator_columns(:)
-    complex(real64),allocatable::metric_values(:),operator_metric(:),operator_hamiltonian(:),operator_position(:,:)
+    complex(real64),allocatable::metric_values(:),operator_hamiltonian(:),operator_position(:,:)
     complex(real64)::coefficient
     logical::file_opened
     character(16)::path_probe
@@ -73,26 +73,18 @@ contains
         any(operators%row_offsets(2:)<operators%row_offsets(:nowned)))local_bad=1
       if(metric%row_offsets(nowned+1)-1/=size(metric%column_ids).or.&
         operators%row_offsets(nowned+1)-1/=size(operators%column_ids))local_bad=1
-      if(size(metric%values)/=size(metric%column_ids).or.size(operators%metric_values)/=size(operators%column_ids).or.&
+      if(size(metric%values)/=size(metric%column_ids).or.&
         size(operators%hamiltonian_values)/=size(operators%column_ids).or.&
         size(operators%position_values,1)/=3.or.size(operators%position_values,2)/=size(operators%column_ids))local_bad=1
       if(any(metric%column_ids<1).or.any(metric%column_ids>n).or.any(operators%column_ids<1).or.&
         any(operators%column_ids>n))local_bad=1
-      if(.not.finite_vector(metric%values).or..not.finite_vector(operators%metric_values).or.&
-        .not.finite_vector(operators%hamiltonian_values).or..not.finite_matrix(operators%position_values))local_bad=1
+      if(.not.finite_vector(metric%values).or..not.finite_vector(operators%hamiltonian_values).or.&
+        .not.finite_matrix(operators%position_values))local_bad=1
       if(metric%numerical_rank/=count(metric%active_rows).or.&
         .not.valid_packet_activity(metric%packet_ids,metric%active_rows))local_bad=1
       do i=1,nowned
         if(.not.strictly_increasing(metric%column_ids(metric%row_offsets(i):metric%row_offsets(i+1)-1)).or.&
           .not.strictly_increasing(operators%column_ids(operators%row_offsets(i):operators%row_offsets(i+1)-1)))local_bad=1
-        if(metric%row_offsets(i+1)-metric%row_offsets(i)/=&
-          operators%row_offsets(i+1)-operators%row_offsets(i))local_bad=1
-        if(local_bad==0)then
-          if(any(metric%column_ids(metric%row_offsets(i):metric%row_offsets(i+1)-1)/=&
-            operators%column_ids(operators%row_offsets(i):operators%row_offsets(i+1)-1)))local_bad=1
-          if(any(metric%values(metric%row_offsets(i):metric%row_offsets(i+1)-1)/=&
-            operators%metric_values(operators%row_offsets(i):operators%row_offsets(i+1)-1)))local_bad=1
-        endif
       enddo
     endif
     if(local_bad==0)then
@@ -140,7 +132,7 @@ contains
     max_metric_degree=maxval(metric_degrees);max_operator_degree=maxval(operator_degrees)
     if(max_operator_degree>huge(0)/3)local_bad=1
     allocate(metric_columns(max(1,max_metric_degree)),metric_values(max(1,max_metric_degree)),&
-      operator_columns(max(1,max_operator_degree)),operator_metric(max(1,max_operator_degree)),&
+      operator_columns(max(1,max_operator_degree)),&
       operator_hamiltonian(max(1,max_operator_degree)),operator_position(3,max(1,max_operator_degree)),stat=allocation_status)
     if(allocation_status/=0)local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -177,7 +169,6 @@ contains
         metric_columns(1:metric_degree)=metric%column_ids(metric%row_offsets(position):metric%row_offsets(position+1)-1)
         metric_values(1:metric_degree)=metric%values(metric%row_offsets(position):metric%row_offsets(position+1)-1)
         operator_columns(1:operator_degree)=operators%column_ids(operators%row_offsets(position):operators%row_offsets(position+1)-1)
-        operator_metric(1:operator_degree)=operators%metric_values(operators%row_offsets(position):operators%row_offsets(position+1)-1)
         operator_hamiltonian(1:operator_degree)=&
           operators%hamiltonian_values(operators%row_offsets(position):operators%row_offsets(position+1)-1)
         operator_position(:,1:operator_degree)=&
@@ -187,14 +178,13 @@ contains
       call MPI_Bcast(metric_columns,metric_degree,MPI_INTEGER,root,comm,ierr);if(ierr/=MPI_SUCCESS)goto 900
       call MPI_Bcast(metric_values,metric_degree,MPI_DOUBLE_COMPLEX,root,comm,ierr);if(ierr/=MPI_SUCCESS)goto 900
       call MPI_Bcast(operator_columns,operator_degree,MPI_INTEGER,root,comm,ierr);if(ierr/=MPI_SUCCESS)goto 900
-      call MPI_Bcast(operator_metric,operator_degree,MPI_DOUBLE_COMPLEX,root,comm,ierr);if(ierr/=MPI_SUCCESS)goto 900
       call MPI_Bcast(operator_hamiltonian,operator_degree,MPI_DOUBLE_COMPLEX,root,comm,ierr);if(ierr/=MPI_SUCCESS)goto 900
       call MPI_Bcast(operator_position,3*operator_degree,MPI_DOUBLE_COMPLEX,root,comm,ierr);if(ierr/=MPI_SUCCESS)goto 900
       call MPI_Bcast(coefficient,1,MPI_DOUBLE_COMPLEX,root,comm,ierr);if(ierr/=MPI_SUCCESS)goto 900
-      call hash_row(row,metric_degree,operator_degree,metric_columns,metric_values,operator_columns,operator_metric,&
+      call hash_row(row,metric_degree,operator_degree,metric_columns,metric_values,operator_columns,&
         operator_hamiltonian,operator_position,coefficient)
       if(rank==0)write(unit,iostat=io_status)metric_columns(1:metric_degree),metric_values(1:metric_degree),&
-        operator_columns(1:operator_degree),operator_metric(1:operator_degree),operator_hamiltonian(1:operator_degree),&
+        operator_columns(1:operator_degree),operator_hamiltonian(1:operator_degree),&
         operator_position(:,1:operator_degree),coefficient
       call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)goto 910
     enddo
@@ -224,13 +214,13 @@ contains
       complex(real64),intent(in)::value;call hash_int(transfer(real(value),payload_fingerprint));&
         call hash_int(transfer(aimag(value),payload_fingerprint))
     end subroutine hash_complex
-    subroutine hash_row(global_row,md,od,mc,mv,oc,om,oh,op,c)
-      integer,intent(in)::global_row,md,od,mc(:),oc(:);complex(real64),intent(in)::mv(:),om(:),oh(:),op(:,:),c
+    subroutine hash_row(global_row,md,od,mc,mv,oc,oh,op,c)
+      integer,intent(in)::global_row,md,od,mc(:),oc(:);complex(real64),intent(in)::mv(:),oh(:),op(:,:),c
       integer::a,b
       call hash_int(int(global_row,int64));call hash_int(int(md,int64));call hash_int(int(od,int64))
       do a=1,md;call hash_int(int(mc(a),int64));call hash_complex(mv(a));enddo
       do a=1,od
-        call hash_int(int(oc(a),int64));call hash_complex(om(a));call hash_complex(oh(a))
+        call hash_int(int(oc(a),int64));call hash_complex(oh(a))
         do b=1,3;call hash_complex(op(b,a));enddo
       enddo
       call hash_complex(c)
@@ -240,7 +230,7 @@ contains
       if(allocated(owner_position))deallocate(owner_position);if(allocated(metric_degrees))deallocate(metric_degrees)
       if(allocated(operator_degrees))deallocate(operator_degrees);if(allocated(metric_columns))deallocate(metric_columns)
       if(allocated(metric_values))deallocate(metric_values);if(allocated(operator_columns))deallocate(operator_columns)
-      if(allocated(operator_metric))deallocate(operator_metric);if(allocated(operator_hamiltonian))deallocate(operator_hamiltonian)
+      if(allocated(operator_hamiltonian))deallocate(operator_hamiltonian)
       if(allocated(operator_position))deallocate(operator_position)
     end subroutine cleanup
 #endif
@@ -314,7 +304,8 @@ contains
     catalog=fingerprint_header(1);state_fp=fingerprint_header(2);metric_fp=fingerprint_header(3)
     selection_fp=operator_header(1);window_fp=operator_header(2);packet_fp=operator_header(3)
     complement_fp=operator_header(4);operator_metric_fp=operator_header(5);position_fp=operator_header(6);operator_fp=operator_header(7)
-    if(magic/=checkpoint_magic.or.version/=checkpoint_version.or.n<1.or.numerical_rank<1.or.numerical_rank>n.or.&
+    if(magic/=checkpoint_magic.or.(version/=checkpoint_version.and.version/=legacy_checkpoint_version).or.&
+      n<1.or.numerical_rank<1.or.numerical_rank>n.or.&
       n>huge(0)/3.or.int(n,int64)>file_size/4_int64)then
       if(rank==0.and.file_opened)then;close(unit);file_opened=.false.;endif;message='incompatible hybrid checkpoint version';return
     endif
@@ -373,27 +364,43 @@ contains
     enddo
     do row=1,n
       metric_degree=metric_degrees(row);operator_degree=operator_degrees(row)
-      if(rank==0)read(unit,iostat=io_status)metric_columns(1:metric_degree),metric_values(1:metric_degree),&
-        operator_columns(1:operator_degree),operator_metric(1:operator_degree),operator_hamiltonian(1:operator_degree),&
-        operator_position(:,1:operator_degree),coefficient
+      if(rank==0)then
+        if(version==legacy_checkpoint_version)then
+          read(unit,iostat=io_status)metric_columns(1:metric_degree),metric_values(1:metric_degree),&
+            operator_columns(1:operator_degree),operator_metric(1:operator_degree),operator_hamiltonian(1:operator_degree),&
+            operator_position(:,1:operator_degree),coefficient
+        else
+          read(unit,iostat=io_status)metric_columns(1:metric_degree),metric_values(1:metric_degree),&
+            operator_columns(1:operator_degree),operator_hamiltonian(1:operator_degree),&
+            operator_position(:,1:operator_degree),coefficient
+        endif
+      endif
       call MPI_Bcast(io_status,1,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)goto 920
       call MPI_Bcast(metric_columns,metric_degree,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 920
       call MPI_Bcast(metric_values,metric_degree,MPI_DOUBLE_COMPLEX,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 920
       call MPI_Bcast(operator_columns,operator_degree,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 920
-      call MPI_Bcast(operator_metric,operator_degree,MPI_DOUBLE_COMPLEX,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 920
+      if(version==legacy_checkpoint_version)then
+        call MPI_Bcast(operator_metric,operator_degree,MPI_DOUBLE_COMPLEX,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 920
+      endif
       call MPI_Bcast(operator_hamiltonian,operator_degree,MPI_DOUBLE_COMPLEX,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 920
       call MPI_Bcast(operator_position,3*operator_degree,MPI_DOUBLE_COMPLEX,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 920
       call MPI_Bcast(coefficient,1,MPI_DOUBLE_COMPLEX,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 920
       if(any(metric_columns(1:metric_degree)<1).or.any(metric_columns(1:metric_degree)>n).or.&
         any(operator_columns(1:operator_degree)<1).or.any(operator_columns(1:operator_degree)>n))goto 920
-      if(metric_degree/=operator_degree.or..not.strictly_increasing(metric_columns(1:metric_degree)).or.&
+      if(.not.strictly_increasing(metric_columns(1:metric_degree)).or.&
         .not.strictly_increasing(operator_columns(1:operator_degree)))goto 920
-      if(any(metric_columns(1:metric_degree)/=operator_columns(1:operator_degree)).or.&
-        any(metric_values(1:metric_degree)/=operator_metric(1:operator_degree)))goto 920
       if(.not.finite_vector(metric_values(1:metric_degree)).or.&
-        .not.finite_vector(operator_metric(1:operator_degree)).or.&
         .not.finite_vector(operator_hamiltonian(1:operator_degree)).or.&
         .not.finite_matrix(operator_position(:,1:operator_degree)).or..not.finite_vector([coefficient]))goto 920
+      if(version==legacy_checkpoint_version)then
+        if(.not.finite_vector(operator_metric(1:operator_degree)))goto 920
+      else
+        operator_metric(1:operator_degree)=(0d0,0d0)
+        do i=1,operator_degree
+          k=findloc(metric_columns(1:metric_degree),operator_columns(i),dim=1)
+          if(k>0)operator_metric(i)=metric_values(k)
+        enddo
+      endif
       call hash_row_read(row,metric_degree,operator_degree,metric_columns,metric_values,operator_columns,operator_metric,&
         operator_hamiltonian,operator_position,coefficient)
       if(mod(row-1,nproc)==rank)then
@@ -440,7 +447,9 @@ contains
       call hash_int_read(int(global_row,int64));call hash_int_read(int(md,int64));call hash_int_read(int(od,int64))
       do a=1,md;call hash_int_read(int(mc(a),int64));call hash_complex_read(mv(a));enddo
       do a=1,od
-        call hash_int_read(int(oc(a),int64));call hash_complex_read(om(a));call hash_complex_read(oh(a))
+        call hash_int_read(int(oc(a),int64))
+        if(version==legacy_checkpoint_version)call hash_complex_read(om(a))
+        call hash_complex_read(oh(a))
         do b=1,3;call hash_complex_read(op(b,a));enddo
       enddo
       call hash_complex_read(c)

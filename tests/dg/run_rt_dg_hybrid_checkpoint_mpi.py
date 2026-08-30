@@ -2,6 +2,12 @@
 from pathlib import Path
 import os,re,shlex,shutil,struct,subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
+checkpoint_source=(root/"src/rt/dg/rt_dg_hybrid_checkpoint.f90").read_text().lower()
+writer=checkpoint_source.split("subroutine write_rt_dg_hybrid_checkpoint",1)[1].split(
+  "end subroutine write_rt_dg_hybrid_checkpoint",1)[0]
+assert "checkpoint_version=2" in checkpoint_source
+assert "operators%metric_values" not in writer
+assert "operator_metric" not in writer
 if os.environ.get("SALMON_LAPACK_LIBS"):
   lapack_libs=shlex.split(os.environ["SALMON_LAPACK_LIBS"])
 elif shutil.which("pkg-config") and subprocess.run(["pkg-config","--exists","openblas"],check=False).returncode==0:

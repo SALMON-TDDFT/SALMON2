@@ -58,6 +58,9 @@ program test_rt_dg_hybrid_checkpoint_mpi
         'restart provenance differs')
       call require(operators%window_fingerprint==102_int64.and.operators%packet_fingerprint==103_int64.and.&
         operators%complement_fingerprint==104_int64,'restart operator provenance was dropped')
+      call require(size(operators%metric_values)==size(operators%column_ids).and.&
+        maxval(abs(operators%metric_values-[((1d0,0d0),i=1,size(operators%metric_values))]))<0.21d0,&
+        'authoritative metric was not projected onto the restored operator graph')
       call restored_observables(metric,operators,coefficients,metric_observable,energy_observable,position_observable)
       call require(abs(metric_observable-1.9524d0)<1d-13.and.abs(energy_observable-0.8d0)<1d-13.and.&
         maxval(abs(position_observable-[0.4d0,-0.2d0,0.12d0]))<1d-13,&
@@ -95,25 +98,27 @@ contains
       distributed_metric%column_ids(nowned*n),distributed_metric%values(nowned*n),&
       distributed_metric%active_rows(n),distributed_metric%packet_ids(n),owned_coefficients(nowned))
     allocate(distributed_operators%owned_row_ids(nowned),distributed_operators%row_offsets(nowned+1),&
-      distributed_operators%column_ids(nowned*n),distributed_operators%metric_values(nowned*n),&
-      distributed_operators%hamiltonian_values(nowned*n),distributed_operators%position_values(3,nowned*n))
+      distributed_operators%column_ids(nowned),&
+      distributed_operators%hamiltonian_values(nowned),distributed_operators%position_values(3,nowned))
     position=0;edge=0;distributed_metric%row_offsets(1)=1
     do row=n,1,-1
       if(mod(row-1,nproc)/=rank)cycle
       position=position+1;distributed_metric%owned_row_ids(position)=row;owned_coefficients(position)=global_coefficients(row)
       do column=1,n
         edge=edge+1;distributed_metric%column_ids(edge)=column;distributed_metric%values(edge)=s(row,column)
-        distributed_operators%column_ids(edge)=column;distributed_operators%metric_values(edge)=s(row,column)
-        distributed_operators%hamiltonian_values(edge)=h(row,column);distributed_operators%position_values(:,edge)=z(:,row,column)
       enddo
       distributed_metric%row_offsets(position+1)=edge+1
+      distributed_operators%row_offsets(position)=position
+      distributed_operators%column_ids(position)=row
+      distributed_operators%hamiltonian_values(position)=h(row,row)
+      distributed_operators%position_values(:,position)=z(:,row,row)
     enddo
+    distributed_operators%row_offsets(nowned+1)=nowned+1
     distributed_metric%valid=.true.;distributed_metric%global_count=n;distributed_metric%numerical_rank=n
     distributed_metric%max_row_nnz=n;distributed_metric%maximum_value=1.2d0;distributed_metric%condition_estimate=2d0
     distributed_metric%fingerprint=9191_int64;distributed_metric%active_rows=.true.;distributed_metric%packet_ids=[1,1,2,2]
     distributed_operators%valid=.true.;distributed_operators%global_count=n
     distributed_operators%owned_row_ids=distributed_metric%owned_row_ids
-    distributed_operators%row_offsets=distributed_metric%row_offsets
     distributed_operators%selection_fingerprint=101_int64;distributed_operators%window_fingerprint=102_int64
     distributed_operators%packet_fingerprint=103_int64;distributed_operators%complement_fingerprint=104_int64
     distributed_operators%metric_fingerprint=9191_int64;distributed_operators%position_convention_fingerprint=105_int64
