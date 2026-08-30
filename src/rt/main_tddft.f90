@@ -21,7 +21,9 @@
 subroutine main_tddft
 use math_constants, only: pi
 #ifdef USE_MPI
-use mpi, only: MPI_Comm_rank,MPI_Bcast,MPI_INTEGER
+use mpi, only: MPI_Comm_rank,MPI_Bcast,MPI_INTEGER,MPI_Allreduce,MPI_IN_PLACE,MPI_DOUBLE_PRECISION,&
+  MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_SUCCESS
+use mpi, only: MPI_MAX
 #endif
 use salmon_global
 use structures
@@ -44,6 +46,14 @@ use rt_dg_overlapping_wannier, only: s_dg_overlapping_wannier_rt_state, &
   evaluate_dg_overlapping_wannier_observables,&
   write_dg_overlapping_wannier_rt_observable_sample
 use em_field, only: calc_Ac_ext_t
+use rt_dg_hybrid_initialization,only:s_rt_dg_hybrid_state,initialize_rt_dg_hybrid_from_checkpoint
+use rt_dg_hybrid_density_update,only:update_rt_dg_hybrid_density,reconstruct_rt_dg_hybrid_density
+use rt_dg_hybrid_length_gauge,only:propagate_rt_dg_hybrid_length_gauge
+use rt_dg_hybrid_sparse_exchange,only:s_rt_dg_sparse_exchange,build_rt_dg_sparse_exchange
+use hartree_sub,only:hartree
+use salmon_xc,only:exchange_correlation
+use hamiltonian,only:update_vlocal
+use plusU_global,only:PLUS_U_ON
 use nvtx
 use parallelization, only: nproc_id_global
 implicit none
@@ -74,6 +84,7 @@ type(s_singlescale) :: singlescale
 
 integer :: Mit, itt
 logical :: is_checkpoint_iter, is_shutdown_time, is_checkpoint
+type(s_rt_dg_hybrid_state) :: hybrid_state
 
 if(yn_dg_overlapping_wannier_rt=='y')then
   call run_dg_overlapping_wannier_coefficient_rt()
@@ -84,6 +95,16 @@ endif
 if(yn_jm=='y') call check_condition_jm
 
 call timer_begin(LOG_TOTAL)
+
+if(yn_rt_dg_hybrid_continuation=='y')then
+  call initialization_rt( Mit, system, energy, ewald, rt, md, &
+                          singlescale, stencil, fg, poisson, lg, mg, info, xc_func, ofl, &
+                          srg, srg_scalar, spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s, &
+                          V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl, pp, ppg, ppn, &
+                          hybrid_basis_only=.true. )
+  call run_dg_hybrid_continuation_rt()
+  return
+endif
 
 call initialization_rt( Mit, system, energy, ewald, rt, md, &
                         singlescale,  &
@@ -245,6 +266,95 @@ end if
 call finalize_xc(xc_func)
 
 contains
+
+subroutine run_dg_hybrid_continuation_rt()
+  type(s_rt_dg_sparse_exchange)::metric_exchange,operator_exchange
+  complex(8),allocatable::next(:),initial_hamiltonian(:)
+  real(8),allocatable::vector_potential_samples(:,:)
+  real(8)::electric_field(3),previous_polarization(3),periods(3),metric_norm,orbital_energy,polarization(3)
+  integer(8)::workspace,fingerprint
+  integer::step,orbital,iterations,ierr,update_count,local_bad,global_bad
+  logical::ok
+  character(256)::message
+  call initialize_rt_dg_hybrid_from_checkpoint(nproc_group_global,'./hybrid_dg_ground_state.chk',theory,&
+    iperiodic==3,system%nspin,yn_spinorbit=='y',PLUS_U_ON,yn_hse=='y',yn_fix_func=='y',yn_jm=='y',&
+    xc_func%xctype,hybrid_state,ok,message)
+  if(.not.ok)then;write(0,'(a)')trim(message);error stop 'hybrid DG RT initialization failed';endif
+  allocate(initial_hamiltonian,source=hybrid_state%operators%hamiltonian_values)
+  update_count=0
+  call update_rt_dg_hybrid_density(nproc_group_global,hybrid_state,hybrid_state%density,project_salmon_local_rows,ok,message)
+  update_count=update_count+1
+  local_bad=merge(0,1,ok.and.all(hybrid_state%operators%hamiltonian_values==initial_hamiltonian))
+  call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,nproc_group_global,ierr)
+  if(ierr/=MPI_SUCCESS.or.global_bad/=0)error stop 'hybrid DG RT initial Hamiltonian reconstruction failed'
+  call build_rt_dg_sparse_exchange(nproc_group_global,hybrid_state%global_count,hybrid_state%metric%fingerprint,&
+    hybrid_state%metric%owned_row_ids,hybrid_state%metric%column_ids,metric_exchange,ok,message)
+  if(.not.ok)error stop 'hybrid DG RT metric exchange setup failed'
+  call build_rt_dg_sparse_exchange(nproc_group_global,hybrid_state%global_count,hybrid_state%operator_structure_fingerprint,&
+    hybrid_state%operators%owned_row_ids,hybrid_state%operators%column_ids,operator_exchange,ok,message)
+  if(.not.ok)error stop 'hybrid DG RT operator exchange setup failed'
+  allocate(vector_potential_samples(3,0:nt+1));call calc_Ac_ext_t(0d0,dt,0,nt+1,vector_potential_samples)
+  previous_polarization=0d0
+  periods=[max(1d0,sqrt(sum(system%primitive_a(:,1)**2))),max(1d0,sqrt(sum(system%primitive_a(:,2)**2))),&
+    max(1d0,sqrt(sum(system%primitive_a(:,3)**2)))]
+  do step=1,nt
+    call reconstruct_rt_dg_hybrid_density(nproc_group_global,hybrid_state,ok,message)
+    if(.not.ok)error stop 'hybrid DG RT density reconstruction failed'
+    call update_rt_dg_hybrid_density(nproc_group_global,hybrid_state,hybrid_state%density,project_salmon_local_rows,ok,message)
+    update_count=update_count+1
+    if(.not.ok)error stop 'hybrid DG RT Hartree/XC update failed'
+    electric_field=-(vector_potential_samples(:,step)-vector_potential_samples(:,step-1))/dt
+    do orbital=1,hybrid_state%noccupied
+      call propagate_rt_dg_hybrid_length_gauge(nproc_group_global,hybrid_state%metric,hybrid_state%operators,&
+        hybrid_state%coefficients(:,orbital),electric_field,dt,1d-12,24,previous_polarization,periods,next,&
+        metric_norm,orbital_energy,polarization,iterations,workspace,fingerprint,ok,message,&
+        metric_exchange,operator_exchange)
+      if(.not.ok)then;write(0,'(a)')trim(message);error stop 'hybrid DG RT propagation failed';endif
+      hybrid_state%coefficients(:,orbital)=next
+    enddo
+    previous_polarization=polarization
+  enddo
+  if(update_count/=nt+1)error stop 'hybrid DG RT density update schedule violated'
+end subroutine run_dg_hybrid_continuation_rt
+
+subroutine project_salmon_local_rows(row_ids,grid_ids,density,local_rows,callback_ok,callback_message)
+    integer(8),intent(in)::row_ids(:),grid_ids(:)
+    real(8),intent(in)::density(:)
+    complex(8),intent(out)::local_rows(:,:)
+    logical,intent(out)::callback_ok
+    character(*),intent(out)::callback_message
+    real(8),allocatable::global_density(:),global_potential(:)
+    complex(8),allocatable::projected(:,:)
+    integer::p,i,j,ix,iy,iz,global_grid_count,ierr
+    global_grid_count=product(lg%num);allocate(global_density(global_grid_count),global_potential(global_grid_count))
+    global_density=0d0;global_potential=0d0
+    do p=1,size(grid_ids);global_density(int(grid_ids(p)))=density(p);enddo
+    call MPI_Allreduce(MPI_IN_PLACE,global_density,global_grid_count,MPI_DOUBLE_PRECISION,MPI_SUM,&
+      nproc_group_global,ierr)
+    if(ierr/=MPI_SUCCESS)then;callback_ok=.false.;callback_message='physical density redistribution failed';return;endif
+    do iz=mg%is(3),mg%ie(3);do iy=mg%is(2),mg%ie(2);do ix=mg%is(1),mg%ie(1)
+      p=ix+lg%num(1)*((iy-1)+lg%num(2)*(iz-1));rho_s(1)%f(ix,iy,iz)=global_density(p)
+    enddo;enddo;enddo
+    rho%f=rho_s(1)%f
+    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_in,stencil,Vxc,energy%E_xc)
+    call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
+    do iz=mg%is(3),mg%ie(3);do iy=mg%is(2),mg%ie(2);do ix=mg%is(1),mg%ie(1)
+      p=ix+lg%num(1)*((iy-1)+lg%num(2)*(iz-1));global_potential(p)=V_local(1)%f(ix,iy,iz)
+    enddo;enddo;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,global_potential,global_grid_count,MPI_DOUBLE_PRECISION,MPI_SUM,&
+      nproc_group_global,ierr)
+    allocate(projected(hybrid_state%global_count,hybrid_state%global_count));projected=(0d0,0d0)
+    do p=1,size(grid_ids);do i=1,hybrid_state%global_count;do j=1,hybrid_state%global_count
+      projected(i,j)=projected(i,j)+hybrid_state%grid_weights(p)*conjg(hybrid_state%basis_values(i,p))*&
+        hybrid_state%basis_values(j,p)*global_potential(int(grid_ids(p)))
+    enddo;enddo;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,projected,hybrid_state%global_count**2,MPI_DOUBLE_COMPLEX,MPI_SUM,&
+      nproc_group_global,ierr)
+    do i=1,size(row_ids);local_rows(i,:)=projected(int(row_ids(i)),:);enddo
+    callback_ok=ierr==MPI_SUCCESS
+    if(callback_ok)then;callback_message='';else;callback_message='local-potential projection failed';endif
+end subroutine project_salmon_local_rows
 
 subroutine run_dg_overlapping_wannier_coefficient_rt()
   type(s_dg_overlapping_wannier_checkpoint)::checkpoint

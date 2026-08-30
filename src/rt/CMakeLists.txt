@@ -9,6 +9,8 @@ set(SOURCES
     dg/rt_dg_hybrid_metric_solver.f90
     dg/rt_dg_hybrid_length_gauge.f90
     dg/rt_dg_hybrid_checkpoint.f90
+    dg/rt_dg_hybrid_initialization.f90
+    dg/rt_dg_hybrid_density_update.f90
     rt_angular_momentum.f90
     rt_local_chern_marker.f90
     rt_local_chern_marker_soi.f90

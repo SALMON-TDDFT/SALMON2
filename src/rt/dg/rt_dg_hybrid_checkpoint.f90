@@ -36,10 +36,12 @@ module rt_dg_hybrid_checkpoint
     complex(real64),allocatable::metric_rows(:,:),kinetic_rows(:,:),nonlocal_rows(:,:),local_rows(:,:),&
       sipg_rows(:,:),hamiltonian_rows(:,:),basis_values(:,:),face_values(:,:),nonlocal_values(:,:),&
       coefficients(:,:),interface_observables(:,:)
+    complex(real64),allocatable::position_rows(:,:,:),symmetry_representation(:,:,:)
   end type s_rt_dg_hybrid_ground_state_payload
   public::write_rt_dg_hybrid_checkpoint,read_rt_dg_hybrid_checkpoint,&
     write_rt_dg_hybrid_occupied_checkpoint,read_rt_dg_hybrid_occupied_checkpoint,&
     write_rt_dg_hybrid_ground_state_checkpoint,read_rt_dg_hybrid_ground_state_checkpoint,&
+    read_rt_dg_hybrid_ground_state_checkpoint_coalesced,&
     fingerprint_rt_dg_hybrid_component
   interface
     function c_rename(old_path,new_path) bind(C,name='rename') result(status)
@@ -742,6 +744,151 @@ contains
 #endif
   end subroutine read_rt_dg_hybrid_ground_state_checkpoint
 
+  subroutine read_rt_dg_hybrid_ground_state_checkpoint_coalesced(comm,path,payload,payload_fingerprint,ok,message)
+    integer,intent(in)::comm
+    character(*),intent(in)::path
+    type(s_rt_dg_hybrid_ground_state_payload),intent(out)::payload
+    integer(int64),intent(out)::payload_fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    type(s_rt_dg_hybrid_ground_state_payload)::shard
+    integer::rank,nproc,ierr,unit,io_status,owner,receiver,file_nproc,version,bad,global_bad,header_i(4)
+    integer(int64)::header_fp(19),shard_hash,local_hash,global_hash,common_hash,min_common,max_common
+    logical::header_l(4),opened,have_common
+    character(16)::magic
+    ok=.false.;message='';payload_fingerprint=0_int64;opened=.false.;io_status=0;local_hash=0_int64;have_common=.false.
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
+    if(rank==0)then
+      open(newunit=unit,file=trim(path),status='old',access='stream',form='unformatted',action='read',iostat=io_status)
+      opened=io_status==0;if(io_status==0)read(unit,iostat=io_status)magic,version,file_nproc
+    endif
+    call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)goto 930
+    call MPI_Bcast(magic,16,MPI_CHARACTER,0,comm,ierr);call MPI_Bcast(version,1,MPI_INTEGER,0,comm,ierr)
+    call MPI_Bcast(file_nproc,1,MPI_INTEGER,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.magic/=ground_state_magic.or.version/=ground_state_version.or.file_nproc<=nproc)goto 930
+    do owner=0,file_nproc-1
+      receiver=mod(owner,nproc)
+      if(rank==0)read(unit,iostat=io_status)header_l,header_i,header_fp
+      call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)goto 930
+      call MPI_Bcast(header_l,4,MPI_LOGICAL,0,comm,ierr);call MPI_Bcast(header_i,4,MPI_INTEGER,0,comm,ierr)
+      call MPI_Bcast(header_fp,19,MPI_INTEGER8,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 930
+      if(rank==receiver)then
+        shard=s_rt_dg_hybrid_ground_state_payload()
+        call set_ground_state_header(shard,header_l,header_i,header_fp)
+      endif
+      call read_ground_state_arrays(comm,receiver,unit,rank,shard,io_status,ierr)
+      if(ierr/=MPI_SUCCESS.or.io_status/=0)goto 930
+      if(rank==receiver)then
+        call validate_ground_state_payload(shard,bad);if(bad/=0)io_status=1
+        call hash_ground_state_payload(shard,shard_hash);local_hash=ieor(local_hash,shard_hash)
+        call hash_ground_state_common(shard,common_hash)
+        if(.not.have_common)then
+          call copy_ground_state_common(shard,payload);have_common=.true.
+        endif
+        call append_initialization_shard(payload,shard)
+      endif
+      call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)goto 930
+    enddo
+    if(rank==0)then;close(unit);opened=.false.;endif
+    call MPI_Allreduce(common_hash,min_common,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(common_hash,max_common,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(local_hash,global_hash,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.min_common/=max_common)goto 930
+    global_hash=mix_hash(common_hash,global_hash);if(global_hash==0_int64)global_hash=1_int64
+    bad=merge(0,1,global_hash==payload%payload_fingerprint)
+    call MPI_Allreduce(bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='corrupt coalesced DG ground-state fingerprint';return;endif
+    payload_fingerprint=global_hash;ok=.true.;return
+930 if(rank==0.and.opened)close(unit);message='complete DG ground-state checkpoint coalescing failed';return
+#else
+    ok=.false.;message='complete DG ground-state checkpoint requires MPI';payload_fingerprint=0_int64
+#endif
+  end subroutine read_rt_dg_hybrid_ground_state_checkpoint_coalesced
+
+#ifdef USE_MPI
+  subroutine set_ground_state_header(p,l,h,f)
+    type(s_rt_dg_hybrid_ground_state_payload),intent(inout)::p
+    logical,intent(in)::l(4);integer,intent(in)::h(4);integer(int64),intent(in)::f(19)
+    p%valid=l(1);p%final_refresh_complete=l(2);p%analysis_complete=l(3);p%identity_only=l(4)
+    p%global_count=h(1);p%noccupied=h(2);p%operation_count=h(3);p%nonidentity_operation_count=h(4)
+    p%catalog_fingerprint=f(1);p%state_fingerprint=f(2);p%metric_fingerprint=f(3)
+    p%operator_structure_fingerprint=f(4);p%operator_value_fingerprint=f(5);p%kinetic_fingerprint=f(6)
+    p%nonlocal_fingerprint=f(7);p%local_fingerprint=f(8);p%sipg_fingerprint=f(9);p%basis_fingerprint=f(10)
+    p%face_fingerprint=f(11);p%dc_seed_fingerprint=f(12);p%continuation_fingerprint=f(13);p%scope_fingerprint=f(14)
+    p%analysis_fingerprint=f(15);p%selection_fingerprint=f(16);p%pseudopotential_fingerprint=f(17)
+    p%energy_fingerprint=f(18);p%payload_fingerprint=f(19)
+  end subroutine set_ground_state_header
+
+  subroutine copy_ground_state_common(source,target)
+    type(s_rt_dg_hybrid_ground_state_payload),intent(in)::source
+    type(s_rt_dg_hybrid_ground_state_payload),intent(inout)::target
+    logical::l(4);integer::h(4);integer(int64)::f(19)
+    l=[source%valid,source%final_refresh_complete,source%analysis_complete,source%identity_only]
+    h=[source%global_count,source%noccupied,source%operation_count,source%nonidentity_operation_count]
+    f=[source%catalog_fingerprint,source%state_fingerprint,source%metric_fingerprint,source%operator_structure_fingerprint,&
+      source%operator_value_fingerprint,source%kinetic_fingerprint,source%nonlocal_fingerprint,source%local_fingerprint,&
+      source%sipg_fingerprint,source%basis_fingerprint,source%face_fingerprint,source%dc_seed_fingerprint,&
+      source%continuation_fingerprint,source%scope_fingerprint,source%analysis_fingerprint,source%selection_fingerprint,&
+      source%pseudopotential_fingerprint,source%energy_fingerprint,source%payload_fingerprint]
+    call set_ground_state_header(target,l,h,f)
+    allocate(target%scope_selectors,source=source%scope_selectors);allocate(target%xc_types,source=source%xc_types)
+    allocate(target%occupations,source=source%occupations);allocate(target%eigenvalues,source=source%eigenvalues)
+    allocate(target%symmetry_representation,source=source%symmetry_representation)
+    allocate(target%row_ids(0),target%grid_ids(0),target%grid_weights(0),target%density(0))
+    allocate(target%metric_rows(0,source%global_count),target%kinetic_rows(0,source%global_count),&
+      target%nonlocal_rows(0,source%global_count),target%local_rows(0,source%global_count),&
+      target%sipg_rows(0,source%global_count),target%hamiltonian_rows(0,source%global_count),&
+      target%coefficients(0,source%noccupied),target%position_rows(3,0,source%global_count),&
+      target%basis_values(source%global_count,0),target%metric_row_offsets(1),target%metric_column_ids(0),&
+      target%operator_row_offsets(1),target%operator_column_ids(0))
+    target%metric_row_offsets=1;target%operator_row_offsets=1
+  end subroutine copy_ground_state_common
+
+  subroutine append_initialization_shard(target,source)
+    type(s_rt_dg_hybrid_ground_state_payload),intent(inout)::target
+    type(s_rt_dg_hybrid_ground_state_payload),intent(in)::source
+    call append_i64(target%row_ids,source%row_ids);call append_i64(target%grid_ids,source%grid_ids)
+    call append_r1(target%grid_weights,source%grid_weights);call append_r1(target%density,source%density)
+    call append_z2_rows(target%metric_rows,source%metric_rows);call append_z2_rows(target%kinetic_rows,source%kinetic_rows)
+    call append_z2_rows(target%nonlocal_rows,source%nonlocal_rows);call append_z2_rows(target%local_rows,source%local_rows)
+    call append_z2_rows(target%sipg_rows,source%sipg_rows);call append_z2_rows(target%hamiltonian_rows,source%hamiltonian_rows)
+    call append_z2_rows(target%coefficients,source%coefficients);call append_z2_columns(target%basis_values,source%basis_values)
+    call append_z3_middle(target%position_rows,source%position_rows)
+    call append_csr(target%metric_row_offsets,target%metric_column_ids,source%metric_row_offsets,source%metric_column_ids)
+    call append_csr(target%operator_row_offsets,target%operator_column_ids,source%operator_row_offsets,source%operator_column_ids)
+  contains
+    subroutine append_i64(a,b)
+      integer(int64),allocatable,intent(inout)::a(:);integer(int64),intent(in)::b(:);integer(int64),allocatable::t(:)
+      allocate(t(size(a)+size(b)));t(:size(a))=a;t(size(a)+1:)=b;call move_alloc(t,a)
+    end subroutine
+    subroutine append_r1(a,b)
+      real(real64),allocatable,intent(inout)::a(:);real(real64),intent(in)::b(:);real(real64),allocatable::t(:)
+      allocate(t(size(a)+size(b)));t(:size(a))=a;t(size(a)+1:)=b;call move_alloc(t,a)
+    end subroutine
+    subroutine append_z2_rows(a,b)
+      complex(real64),allocatable,intent(inout)::a(:,:);complex(real64),intent(in)::b(:,:);complex(real64),allocatable::t(:,:)
+      allocate(t(size(a,1)+size(b,1),size(a,2)));t(:size(a,1),:)=a;t(size(a,1)+1:,:)=b;call move_alloc(t,a)
+    end subroutine
+    subroutine append_z2_columns(a,b)
+      complex(real64),allocatable,intent(inout)::a(:,:);complex(real64),intent(in)::b(:,:);complex(real64),allocatable::t(:,:)
+      allocate(t(size(a,1),size(a,2)+size(b,2)));t(:,:size(a,2))=a;t(:,size(a,2)+1:)=b;call move_alloc(t,a)
+    end subroutine
+    subroutine append_z3_middle(a,b)
+      complex(real64),allocatable,intent(inout)::a(:,:,:);complex(real64),intent(in)::b(:,:,:);complex(real64),allocatable::t(:,:,:)
+      allocate(t(size(a,1),size(a,2)+size(b,2),size(a,3)));t(:,:size(a,2),:)=a;t(:,size(a,2)+1:,:)=b;call move_alloc(t,a)
+    end subroutine
+    subroutine append_csr(offsets,columns,new_offsets,new_columns)
+      integer,allocatable,intent(inout)::offsets(:),columns(:);integer,intent(in)::new_offsets(:),new_columns(:)
+      integer,allocatable::to(:),tc(:);integer::old_rows,old_nnz
+      old_rows=size(offsets)-1;old_nnz=size(columns);allocate(to(old_rows+size(new_offsets)),tc(old_nnz+size(new_columns)))
+      to(:old_rows+1)=offsets;to(old_rows+2:)=new_offsets(2:)+old_nnz
+      tc(:old_nnz)=columns;tc(old_nnz+1:)=new_columns;call move_alloc(to,offsets);call move_alloc(tc,columns)
+    end subroutine
+  end subroutine append_initialization_shard
+#endif
+
 #ifdef USE_MPI
   subroutine write_ground_state_arrays(comm,owner,unit,rank,payload,io_status,ierr)
     integer,intent(in)::comm,owner,unit,rank
@@ -791,6 +938,9 @@ contains
     call stream_write_z2(comm,owner,unit,rank,payload%nonlocal_values,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
     call stream_write_z2(comm,owner,unit,rank,payload%coefficients,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
     call stream_write_z2(comm,owner,unit,rank,payload%interface_observables,io_status,ierr)
+    if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_z3(comm,owner,unit,rank,payload%position_rows,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_z3(comm,owner,unit,rank,payload%symmetry_representation,io_status,ierr)
   end subroutine write_ground_state_arrays
 
   subroutine read_ground_state_arrays(comm,owner,unit,rank,payload,io_status,ierr)
@@ -841,6 +991,9 @@ contains
     call stream_read_z2(comm,owner,unit,rank,payload%nonlocal_values,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
     call stream_read_z2(comm,owner,unit,rank,payload%coefficients,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
     call stream_read_z2(comm,owner,unit,rank,payload%interface_observables,io_status,ierr)
+    if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_z3(comm,owner,unit,rank,payload%position_rows,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_z3(comm,owner,unit,rank,payload%symmetry_representation,io_status,ierr)
   end subroutine read_ground_state_arrays
 #endif
 
@@ -1231,6 +1384,29 @@ contains
     call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
     call MPI_Bcast(buffer,product(dims),MPI_DOUBLE_COMPLEX,0,comm,ierr);if(ierr/=MPI_SUCCESS)return;if(rank==owner)allocate(a,source=buffer)
   end subroutine
+  subroutine stream_write_z3(comm,owner,unit,rank,a,io_status,ierr)
+    integer,intent(in)::comm,owner,unit,rank;complex(real64),allocatable,intent(in)::a(:,:,:)
+    integer,intent(inout)::io_status;integer,intent(out)::ierr;integer::dims(3);complex(real64),allocatable::buffer(:,:,:)
+    dims=0;if(rank==owner.and.allocated(a))dims=shape(a);call MPI_Bcast(dims,3,MPI_INTEGER,owner,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    allocate(buffer(dims(1),dims(2),dims(3)));if(rank==owner.and.product(dims)>0)buffer=a
+    call MPI_Bcast(buffer,product(dims),MPI_DOUBLE_COMPLEX,owner,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(rank==0)then;write(unit,iostat=io_status)dims;if(io_status==0.and.product(dims)>0)write(unit,iostat=io_status)buffer;endif
+    call sync_io(io_status,comm,ierr)
+  end subroutine stream_write_z3
+  subroutine stream_read_z3(comm,owner,unit,rank,a,io_status,ierr)
+    integer,intent(in)::comm,owner,unit,rank;complex(real64),allocatable,intent(inout)::a(:,:,:)
+    integer,intent(inout)::io_status;integer,intent(out)::ierr;integer::dims(3);complex(real64),allocatable::buffer(:,:,:)
+    logical::extent_ok
+    if(rank==0)read(unit,iostat=io_status)dims;call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call MPI_Bcast(dims,3,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call valid_stream_extent(unit,rank,int(dims(1),int64)*int(dims(2),int64)*int(dims(3),int64),16,comm,extent_ok,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    if(.not.extent_ok)then;io_status=1;call sync_io(io_status,comm,ierr);return;endif
+    allocate(buffer(dims(1),dims(2),dims(3)));if(rank==0.and.product(dims)>0)read(unit,iostat=io_status)buffer
+    call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call MPI_Bcast(buffer,product(dims),MPI_DOUBLE_COMPLEX,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(rank==owner)allocate(a,source=buffer)
+  end subroutine stream_read_z3
 #endif
 
   subroutine validate_ground_state_payload(payload,bad)
@@ -1254,7 +1430,8 @@ contains
       .not.allocated(payload%kinetic_rows).or..not.allocated(payload%nonlocal_rows).or.&
       .not.allocated(payload%local_rows).or..not.allocated(payload%sipg_rows).or.&
       .not.allocated(payload%hamiltonian_rows).or..not.allocated(payload%coefficients).or.&
-      .not.allocated(payload%occupations).or..not.allocated(payload%eigenvalues))then;bad=1;return;endif
+      .not.allocated(payload%occupations).or..not.allocated(payload%eigenvalues).or.&
+      .not.allocated(payload%position_rows).or..not.allocated(payload%symmetry_representation))then;bad=1;return;endif
     if(.not.allocated(payload%metric_row_offsets).or..not.allocated(payload%metric_column_ids).or.&
       .not.allocated(payload%operator_row_offsets).or..not.allocated(payload%operator_column_ids))then;bad=1;return;endif
     if(size(payload%metric_row_offsets)/=nrow+1.or.size(payload%operator_row_offsets)/=nrow+1)bad=1
@@ -1271,6 +1448,8 @@ contains
       any(shape(payload%local_rows)/=shape(payload%metric_rows)).or.&
       any(shape(payload%sipg_rows)/=shape(payload%metric_rows)).or.&
       any(shape(payload%hamiltonian_rows)/=shape(payload%metric_rows)).or.&
+      any(shape(payload%position_rows)/=[3,nrow,payload%global_count]).or.&
+      any(shape(payload%symmetry_representation)/=[payload%global_count,payload%global_count,payload%operation_count]).or.&
       any(shape(payload%coefficients)/=[nrow,payload%noccupied]).or.&
       size(payload%occupations)/=payload%noccupied.or.size(payload%eigenvalues)/=payload%noccupied)bad=1
     if(bad==0)then
@@ -1280,6 +1459,9 @@ contains
         .not.finite_matrix(payload%nonlocal_rows).or..not.finite_matrix(payload%local_rows).or.&
         .not.finite_matrix(payload%sipg_rows).or..not.finite_matrix(payload%hamiltonian_rows).or.&
         .not.finite_matrix(payload%coefficients))bad=1
+      if(any(.not.ieee_is_finite(real(payload%position_rows))).or.any(.not.ieee_is_finite(aimag(payload%position_rows))).or.&
+        any(.not.ieee_is_finite(real(payload%symmetry_representation))).or.&
+        any(.not.ieee_is_finite(aimag(payload%symmetry_representation))))bad=1
     endif
     if(.not.allocated(payload%grid_ids).or..not.allocated(payload%grid_weights).or.&
       .not.allocated(payload%partition_ids).or..not.allocated(payload%basis_values).or.&
@@ -1351,7 +1533,18 @@ contains
     call hash_z_matrix(hash,payload%basis_values);call hash_z_matrix(hash,payload%face_values)
     call hash_z_matrix(hash,payload%nonlocal_values);call hash_z_matrix(hash,payload%coefficients)
     call hash_z_matrix(hash,payload%interface_observables)
+    call hash_z_cube(hash,payload%position_rows);call hash_z_cube(hash,payload%symmetry_representation)
   end subroutine hash_ground_state_payload
+
+  subroutine hash_z_cube(hash,a)
+    integer(int64),intent(inout)::hash;complex(real64),intent(in)::a(:,:,:)
+    integer::i,j,k;integer(int64)::bits
+    hash=mix_hash(hash,int(size(a,1),int64));hash=mix_hash(hash,int(size(a,2),int64));hash=mix_hash(hash,int(size(a,3),int64))
+    do k=1,size(a,3);do j=1,size(a,2);do i=1,size(a,1)
+      bits=transfer(real(a(i,j,k)),bits);hash=mix_hash(hash,bits)
+      bits=transfer(aimag(a(i,j,k)),bits);hash=mix_hash(hash,bits)
+    enddo;enddo;enddo
+  end subroutine hash_z_cube
 
   subroutine hash_ground_state_common(payload,hash)
     type(s_rt_dg_hybrid_ground_state_payload),intent(in)::payload

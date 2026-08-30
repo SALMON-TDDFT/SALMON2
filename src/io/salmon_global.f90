@@ -156,6 +156,7 @@ module salmon_global
   character(1)   :: yn_predictor_corrector
   character(1)   :: yn_dg_overlapping_wannier_rt
   character(1)   :: yn_dg_overlapping_wannier_rt_restart
+  character(1)   :: yn_rt_dg_hybrid_continuation
   character(1)   :: yn_dg_length_gauge
   character(32)  :: dg_wannier_symmetry_gauge
   

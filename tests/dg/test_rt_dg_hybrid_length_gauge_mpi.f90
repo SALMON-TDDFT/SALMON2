@@ -7,6 +7,7 @@ program test_rt_dg_hybrid_length_gauge_mpi
   use dg_hybrid_sparse_metric,only:s_dg_hybrid_sparse_metric
   use dg_hybrid_sparse_operators,only:s_dg_hybrid_sparse_operators
   use rt_dg_hybrid_length_gauge,only:propagate_rt_dg_hybrid_length_gauge
+  use rt_dg_hybrid_sparse_exchange,only:s_rt_dg_sparse_exchange,build_rt_dg_sparse_exchange
   implicit none
   integer,parameter::n=3
   integer::comm,rank,nproc,ierr,nowned,i,j,k,step,iterations,permutation(n)
@@ -15,6 +16,7 @@ program test_rt_dg_hybrid_length_gauge_mpi
   complex(real64),allocatable::coeff(:),next(:)
   type(s_dg_hybrid_sparse_metric)::metric
   type(s_dg_hybrid_sparse_operators)::operators
+  type(s_rt_dg_sparse_exchange)::metric_exchange,operator_exchange
   real(real64)::norm_value,energy,polarization(3),previous(3),periods(3),defect,initial_norm,initial_energy,wrapped
   real(real64)::field(3)
   integer(int64)::workspace,global_workspace,fingerprint,reference_fingerprint
@@ -136,6 +138,21 @@ program test_rt_dg_hybrid_length_gauge_mpi
   enddo
   call MPI_Allreduce(MPI_IN_PLACE,defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
   call require(defect<3d-10,'length-gauge propagation is not complex-gauge covariant')
+  call build_rt_dg_sparse_exchange(comm,n,metric%fingerprint,metric%owned_row_ids,metric%column_ids,&
+    metric_exchange,ok,message);call require(ok,trim(message))
+  call build_rt_dg_sparse_exchange(comm,n,operators%fingerprint,operators%owned_row_ids,operators%column_ids,&
+    operator_exchange,ok,message);call require(ok,trim(message))
+  do i=1,nowned
+    do k=operators%row_offsets(i),operators%row_offsets(i+1)-1
+      if(operators%column_ids(k)==int(operators%owned_row_ids(i)))&
+        operators%hamiltonian_values(k)=operators%hamiltonian_values(k)+(0.05d0,0d0)
+    enddo
+  enddo
+  call propagate_rt_dg_hybrid_length_gauge(comm,metric,operators,coeff,field,0.01d0,1d-12,24,previous,periods,&
+    next,norm_value,energy,polarization,iterations,workspace,fingerprint,ok,message,&
+    metric_exchange,operator_exchange)
+  call require(ok,trim(message));call require(operator_exchange%catalog_fingerprint==operators%fingerprint,&
+    'operator value update invalidated the structure-keyed exchange schedule')
   if(rank==0)then
     write(*,'(a,i0,a,i0)')'HYBRID_LENGTH_GAUGE ranks=',nproc,' fingerprint=',reference_fingerprint
     write(*,'(a,i0,a)')'PASS hybrid length gauge on ',nproc,' ranks'

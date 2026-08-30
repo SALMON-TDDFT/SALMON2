@@ -316,6 +316,7 @@ contains
       & yn_predictor_corrector, &
       & yn_dg_overlapping_wannier_rt, &
       & yn_dg_overlapping_wannier_rt_restart, &
+      & yn_rt_dg_hybrid_continuation, &
       & yn_dg_length_gauge, &
       & dg_wannier_symmetry_gauge
 
@@ -837,6 +838,7 @@ contains
     yn_predictor_corrector = 'n'
     yn_dg_overlapping_wannier_rt = 'n'
     yn_dg_overlapping_wannier_rt_restart = 'n'
+    yn_rt_dg_hybrid_continuation = 'n'
     yn_dg_length_gauge = 'n'
     dg_wannier_symmetry_gauge = 'diagnose'
 !! == default for &scf
@@ -1477,6 +1479,7 @@ contains
     call comm_bcast(yn_predictor_corrector,nproc_group_global)
     call comm_bcast(yn_dg_overlapping_wannier_rt,nproc_group_global)
     call comm_bcast(yn_dg_overlapping_wannier_rt_restart,nproc_group_global)
+    call comm_bcast(yn_rt_dg_hybrid_continuation,nproc_group_global)
     call comm_bcast(yn_dg_length_gauge,nproc_group_global)
     call comm_bcast(dg_wannier_symmetry_gauge,nproc_group_global)
 !! == bcast for &scf
@@ -2471,6 +2474,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_overlapping_wannier_rt', yn_dg_overlapping_wannier_rt
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_overlapping_wannier_rt_restart', &
         yn_dg_overlapping_wannier_rt_restart
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_rt_dg_hybrid_continuation',yn_rt_dg_hybrid_continuation
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_length_gauge', yn_dg_length_gauge
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_wannier_symmetry_gauge', &
         trim(dg_wannier_symmetry_gauge)
@@ -3631,12 +3635,19 @@ contains
     endif
     if(yn_dg_overlapping_wannier_rt_restart=='y'.and.yn_dg_overlapping_wannier_rt/='y')&
       stop 'overlapping-Wannier RT restart requires its dedicated coefficient RT route.'
-    if(yn_dg_length_gauge=='y' .and. yn_dg_overlapping_wannier_rt/='y') &
+    if(yn_dg_length_gauge=='y' .and. yn_dg_overlapping_wannier_rt/='y'.and.yn_rt_dg_hybrid_continuation/='y') &
       stop "DG length gauge requires the overlapping-Wannier coefficient RT route."
     if(yn_dg_length_gauge=='y' .and. yn_spinorbit=='y') &
       stop "DG length gauge is not connected to the SOI DG-Fragment RT path yet."
     call yn_argument_check(yn_dg_overlapping_wannier_rt)
     call yn_argument_check(yn_dg_overlapping_wannier_rt_restart)
+    call yn_argument_check(yn_rt_dg_hybrid_continuation)
+    if(yn_rt_dg_hybrid_continuation=='y')then
+      if(yn_dg_length_gauge/='y'.or.iperiodic/=3.or.yn_spinorbit/='n'.or.yn_fix_func/='n'.or.yn_jm/='n')&
+        stop 'hybrid DG continuation RT requires periodic scalar length-gauge scope.'
+      if(theory/='tddft_response'.and.theory/='tddft_pulse')&
+        stop 'hybrid DG continuation RT requires a TDDFT theory.'
+    endif
 
 #ifdef USE_FFTW
 #else

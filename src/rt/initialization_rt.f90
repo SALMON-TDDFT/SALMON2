@@ -29,7 +29,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
                      srg, srg_scalar,  &
                      spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s,  &
                      V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
-                     pp, ppg, ppn  )
+                     pp, ppg, ppn, hybrid_basis_only  )
   use inputoutput
   use math_constants, only: pi, zi
   use structures
@@ -90,6 +90,8 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   type(s_pp_grid) :: ppg
   type(s_pp_nlcc) :: ppn
   type(s_singlescale) :: singlescale
+  logical,optional,intent(in) :: hybrid_basis_only
+  logical :: initialize_conventional_orbitals
   type(s_ofile) :: ofile
   
   integer :: iob, i1,iik,jspin, Mit, m, n
@@ -104,6 +106,8 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   logical :: rion_update
 
   call nvtxStartRange('initialization_rt', __LINE__)
+  initialize_conventional_orbitals=.true.
+  if(present(hybrid_basis_only))initialize_conventional_orbitals=.not.hybrid_basis_only
   curr_e_tmp(:, :) = 0.0d0
   curr_i_tmp(:) = 0.0d0
 
@@ -245,26 +249,33 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   !$acc enter data copyin(spsi_in,spsi_out,tpsi) 
   !$acc enter data copyin(ppg)
   
-  call timer_begin(LOG_RESTART_SYNC)
-  call timer_begin(LOG_RESTART_SELF)
-  if(yn_conventional_from_dcdft=='n') then
-    call restart_rt(lg,mg,system,info,spsi_in,Mit,rt,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2)
-  else
-  ! conventional TDDFT wavefunctions are reconstructed from DC-LCFO data
-    if(yn_spinorbit=='y') then
-      call init_conventional_from_dcdft_soi(lg,mg,system,info,spsi_in)
+  if(initialize_conventional_orbitals)then
+    call timer_begin(LOG_RESTART_SYNC)
+    call timer_begin(LOG_RESTART_SELF)
+    if(yn_conventional_from_dcdft=='n') then
+      call restart_rt(lg,mg,system,info,spsi_in,Mit,rt,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2)
     else
-      call init_conventional_from_dcdft(lg,mg,system,info,spsi_in)
+  ! conventional TDDFT wavefunctions are reconstructed from DC-LCFO data
+      if(yn_spinorbit=='y') then
+        call init_conventional_from_dcdft_soi(lg,mg,system,info,spsi_in)
+      else
+        call init_conventional_from_dcdft(lg,mg,system,info,spsi_in)
+      end if
     end if
-  end if
-  if(yn_reset_step_restart=='y' ) Mit=0
-  call timer_end(LOG_RESTART_SELF)
-  call comm_sync_all
-  call timer_end(LOG_RESTART_SYNC)
-  if(yn_restart=='n') Mit=0
+    if(yn_reset_step_restart=='y' ) Mit=0
+    call timer_end(LOG_RESTART_SELF)
+    call comm_sync_all
+    call timer_end(LOG_RESTART_SYNC)
+    if(yn_restart=='n') Mit=0
 
-  if(gram_schmidt_interval == 0) then
-    call gram_schmidt(system, mg, info, spsi_in)
+    if(gram_schmidt_interval == 0) then
+      call gram_schmidt(system, mg, info, spsi_in)
+    end if
+  else
+    Mit=0
+    spsi_in%zwf=(0d0,0d0)
+    spsi_out%zwf=(0d0,0d0)
+    tpsi%zwf=(0d0,0d0)
   end if
 
   if(yn_jm=='n') then
@@ -275,7 +286,14 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
     end if
   end if
 
-  call calc_density(system,rho_s,spsi_in,info,mg)
+  if(initialize_conventional_orbitals)then
+    call calc_density(system,rho_s,spsi_in,info,mg)
+  else
+    do jspin=1,system%nspin
+      rho_s(jspin)%f=0d0
+      rt%rho0_s(jspin)%f=0d0
+    enddo
+  endif
   rho%f = 0d0
   do jspin=1,system%nspin
      rho%f = rho%f + rho_s(jspin)%f
@@ -297,9 +315,17 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
 
   if(yn_jm=='y') rho%f = rho%f + rho_jm%f
 
-  call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_in,stencil,Vxc,energy%E_xc)
-  call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
+  if(initialize_conventional_orbitals)then
+    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_in,stencil,Vxc,energy%E_xc)
+    call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
+  else
+    Vh%f=0d0
+    do jspin=1,system%nspin
+      Vxc(jspin)%f=0d0
+      V_local(jspin)%f=0d0
+    enddo
+  endif
   if(yn_restart=='y')then
     Vh_stock1%f=Vh%f
   else if(yn_restart=='n')then

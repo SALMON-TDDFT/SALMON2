@@ -136,6 +136,12 @@ contains
     payload%analysis_fingerprint=1117_int64;payload%selection_fingerprint=1118_int64
     nrow=count([(mod(row-1,nproc)==rank,row=1,n)])
     npoint=count([(mod(point-1,nproc)==rank,point=1,n)])
+    allocate(payload%position_rows(3,nrow,n),payload%symmetry_representation(n,n,2))
+    payload%position_rows=(0d0,0d0);payload%symmetry_representation=(0d0,0d0)
+    do i=1,n
+      payload%symmetry_representation(i,i,1)=(1d0,0d0)
+      payload%symmetry_representation(i,i,2)=merge((1d0,0d0),(-1d0,0d0),mod(i,2)==1)
+    enddo
     allocate(payload%row_ids(nrow),payload%metric_rows(nrow,n),payload%kinetic_rows(nrow,n),&
       payload%nonlocal_rows(nrow,n),payload%local_rows(nrow,n),payload%sipg_rows(nrow,n),&
       payload%hamiltonian_rows(nrow,n),payload%coefficients(nrow,2))

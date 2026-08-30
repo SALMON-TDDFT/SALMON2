@@ -4378,6 +4378,9 @@ stage_pass: do
     allocate(checkpoint_payload%sipg_rows,source=fixed_payload%interface_rows)
     allocate(checkpoint_payload%hamiltonian_rows,source=iterate%hamiltonian_rows)
     allocate(checkpoint_payload%coefficients,source=final_ground_state%coefficients)
+    allocate(checkpoint_payload%symmetry_representation,source=basis_representation)
+    call build_checkpoint_position_rows(dc%icomm_tot,ow_core_ids,dc%lg_tot%num,dc%system_tot%hgs,interior_weights,&
+      interior_values,row_ids,checkpoint_payload%position_rows)
     allocate(checkpoint_payload%occupations,source=final_ground_state%occupations)
     allocate(checkpoint_payload%eigenvalues,source=final_ground_state%eigenvalues)
     allocate(checkpoint_payload%grid_ids,source=ow_core_ids)
@@ -4472,6 +4475,42 @@ stage_pass: do
     count=size(face%derivative_plus)
     if(count>0)values(1,position+1:position+count)=reshape(face%derivative_plus,[count]);position=position+count
   end subroutine pack_checkpoint_face_values
+
+  subroutine build_checkpoint_position_rows(comm,grid_ids,grid_num,hgs,weights,basis_values,row_ids,position_rows)
+    integer,intent(in)::comm
+    integer(8),intent(in)::grid_ids(:),row_ids(:)
+    integer,intent(in)::grid_num(3)
+    real(8),intent(in)::hgs(3),weights(:)
+    complex(8),intent(in)::basis_values(:,:)
+    complex(8),allocatable,intent(out)::position_rows(:,:,:)
+    integer::i,j,p,row,gx,gy,gz,ierr,nbasis
+    real(8)::coordinate(3)
+    complex(8),allocatable::local_full(:,:,:),global_full(:,:,:)
+    nbasis=size(basis_values,1)
+    allocate(local_full(3,nbasis,nbasis),global_full(3,nbasis,nbasis));local_full=(0d0,0d0)
+    do i=1,nbasis
+      do p=1,size(grid_ids)
+        gx=int(modulo(grid_ids(p)-1_8,int(grid_num(1),8)))
+        gy=int(modulo((grid_ids(p)-1_8)/int(grid_num(1),8),int(grid_num(2),8)))
+        gz=int((grid_ids(p)-1_8)/int(grid_num(1)*grid_num(2),8))
+        coordinate=[real(gx,8)*hgs(1),real(gy,8)*hgs(2),real(gz,8)*hgs(3)]
+        do j=1,nbasis
+          local_full(:,i,j)=local_full(:,i,j)+weights(p)*conjg(basis_values(i,p))*&
+            basis_values(j,p)*coordinate
+        enddo
+      enddo
+    enddo
+#ifdef USE_MPI
+    call MPI_Allreduce(local_full,global_full,3*nbasis*nbasis,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+#else
+    global_full=local_full
+#endif
+    allocate(position_rows(3,size(row_ids),nbasis));position_rows=(0d0,0d0)
+    do i=1,size(row_ids)
+      row=int(row_ids(i))
+      position_rows(:,i,:)=global_full(:,row,:)
+    enddo
+  end subroutine build_checkpoint_position_rows
 
   subroutine build_checkpoint_topology_graphs(global_ids,row_ids,basis_fragment,faces,&
       metric_offsets,metric_columns,operator_offsets,operator_columns)
