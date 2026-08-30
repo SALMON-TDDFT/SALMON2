@@ -14,6 +14,9 @@
 !  limitations under the License.
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+
+#include "config.h"
+
 module dm_unfold_sub
   implicit none
 
@@ -29,13 +32,16 @@ contains
   use filesystem, only: open_filehandle
   use inputoutput, only: t_unit_time, t_unit_ac, t_unit_current
   use math_constants, only: zI,pi
+#ifdef USE_MPI
   use mpi
+#endif
   implicit none
   type(s_rgrid),           intent(in)    :: lg
   type(s_dft_system),      intent(inout) :: system
   type(s_parallel_info),   intent(in)    :: info
   type(s_ofile),           intent(out)   :: ofl
   type(s_unfold),          intent(inout) :: unfold
+#ifdef USE_MPI
   character(256) :: iofile
   integer :: icomm
   integer :: gsize(7), lsize(7), lstart(7)
@@ -488,6 +494,9 @@ contains
     end if
 
   end if ! yn_out_mom_distr_gs
+#else
+  stop 'dm_unfold_option requires a build with MPI support.'
+#endif
 
   end subroutine init_dm_unfold
 

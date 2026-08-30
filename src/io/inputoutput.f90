@@ -606,6 +606,8 @@ contains
       & lcfo_eigensolver, &
       & lcfo_diag_chefsi_filter_degree, &
       & lcfo_diag_chefsi_filter_chunk_size, &
+      & lcfo_diag_chefsi_max_cycle, &
+      & lcfo_diag_chefsi_residual_tolerance, &
       & nstate_frag, &
       & energy_cut, &
       & lambda_cut
@@ -1051,6 +1053,8 @@ contains
 #endif
     lcfo_diag_chefsi_filter_degree = 60
     lcfo_diag_chefsi_filter_chunk_size = 0
+    lcfo_diag_chefsi_max_cycle = 200
+    lcfo_diag_chefsi_residual_tolerance = 1d-7
     nstate_frag = 0
     energy_cut = 0d0
     lambda_cut = 1d-3
@@ -1700,6 +1704,8 @@ contains
     call comm_bcast(lcfo_eigensolver, nproc_group_global)
     call comm_bcast(lcfo_diag_chefsi_filter_degree, nproc_group_global)
     call comm_bcast(lcfo_diag_chefsi_filter_chunk_size, nproc_group_global)
+    call comm_bcast(lcfo_diag_chefsi_max_cycle, nproc_group_global)
+    call comm_bcast(lcfo_diag_chefsi_residual_tolerance, nproc_group_global)
     call comm_bcast(nstate_frag, nproc_group_global)
     call comm_bcast(energy_cut, nproc_group_global)
     energy_cut = energy_cut * uenergy_to_au
@@ -1761,6 +1767,9 @@ contains
         iflag_atom_coor = ntype_atom_coor_reduced
       end if
 
+      if_error = yn_restart == 'y' .and. &
+                 (yn_md == 'y' .or. theory == 'dft_md') .and. icount > 0
+
       if(icount==0 .and. (yn_restart == 'y' .or. &
          index(theory,'tddft_')/=0 .or. index(theory,'_tddft')/=0 ) .and. yn_jm == 'n' ) then
 
@@ -1786,6 +1795,20 @@ contains
     call comm_bcast(icount,nproc_group_global)
     call comm_bcast(if_cartesian,nproc_group_global)
     call comm_bcast(iflag_atom_coor,nproc_group_global)
+    call comm_bcast(if_error,nproc_group_global)
+
+    if(if_error)then
+       if (comm_is_root(nproc_id_global))then
+         write(*,"(A)") 'Error in input: Explicit atomic coordinates cannot be specified when restarting an MD calculation.'
+         write(*,"(A)") 'Remove the following input(s); atomic coordinates are read from the restart data:'
+         if(file_atom_coor /= 'none') write(*,"(A)") '  file_atom_coor'
+         if(file_atom_red_coor /= 'none') write(*,"(A)") '  file_atom_red_coor'
+         if(if_nml_coor) write(*,"(A)") '  &atomic_coor'
+         if(if_nml_red_coor) write(*,"(A)") '  &atomic_red_coor'
+       end if
+       call end_parallel
+       stop
+    end if
 
     if(0 < natom .and. icount/=1 .and. yn_jm == 'n')then
        if (comm_is_root(nproc_id_global))then
@@ -2682,6 +2705,11 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') &
       & "lcfo_diag_chefsi_filter_chunk_size", &
       & lcfo_diag_chefsi_filter_chunk_size
+      write(fh_variables_log, '("#",4X,A,"=",I6)') &
+      & "lcfo_diag_chefsi_max_cycle",lcfo_diag_chefsi_max_cycle
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+      & "lcfo_diag_chefsi_residual_tolerance", &
+      & lcfo_diag_chefsi_residual_tolerance
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
@@ -2802,6 +2830,15 @@ contains
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
 
+#ifndef USE_MPI
+    if(trim(dm_unfold_option)/='no') then
+      stop 'dm_unfold_option requires a build with MPI support.'
+    end if
+    if(yn_out_tm_bin=='y') then
+      stop "yn_out_tm_bin='y' requires a build with MPI support."
+    end if
+#endif
+
     select case(trim(lcfo_eigensolver))
     case('lapack')
       continue
@@ -2818,6 +2855,13 @@ contains
       end if
       if(lcfo_diag_chefsi_filter_chunk_size<0) then
         stop 'lcfo_diag_chefsi_filter_chunk_size must be nonnegative.'
+      end if
+      if(lcfo_diag_chefsi_max_cycle<1) then
+        stop 'lcfo_diag_chefsi_max_cycle must be a positive integer.'
+      end if
+      if(lcfo_diag_chefsi_residual_tolerance<=0d0 .or. &
+      & lcfo_diag_chefsi_residual_tolerance>=1d0) then
+        stop 'lcfo_diag_chefsi_residual_tolerance must be between zero and one.'
       end if
 #else
       stop 'lcfo_eigensolver=chefsi requires a build with ScaLAPACK support.'

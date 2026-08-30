@@ -14,6 +14,9 @@
 !  limitations under the License.
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+
+#include "config.h"
+
 module write_sub
   use math_constants,only : zi,pi
   implicit none
@@ -110,7 +113,9 @@ contains
     use communication, only: comm_is_root,comm_summation,comm_sync_all
     use filesystem, only: open_filehandle
     use inputoutput, only: t_unit_energy
+#ifdef USE_MPI
     use mpi
+#endif
     implicit none
     type(s_dft_system) ,intent(in) :: system
     type(s_parallel_info),intent(in) :: info
@@ -125,10 +130,12 @@ contains
     integer :: fh_tm, narray
     integer :: i,j,ik,ib,ib1,ib2,ilma,nlma,ia,ix,iy,iz,NB,NK,im,ispin
     integer :: ik_s,ik_e,io_s,io_e,is(3),ie(3)
+#ifdef USE_MPI
     integer :: icomm, iopen_flag, minfo, mfile, ierr, n_count, source_type, file_type
     integer :: gsize(5), lsize(5), lstart(5)
     integer(8) :: n_count8
     integer(kind=MPI_OFFSET_KIND) :: block_size, base_vnl
+#endif
     real(8) :: x,y,z
     complex(8),allocatable :: upu(:,:,:,:,:),upu_l(:,:,:,:,:)
     complex(8),allocatable :: upu_all(:,:,:,:,:),upu_all_l(:,:,:,:,:)
@@ -396,6 +403,7 @@ contains
 
     end if  !flag_print_tm
 
+#ifdef USE_MPI
     if(flag_print_tm_bin) then
 
       file_tm_data = trim(base_directory)//'data_for_restart/tm.bin'
@@ -438,6 +446,7 @@ contains
       call MPI_Type_free(file_type, ierr)
 
     end if  !flag_print_tm_bin
+#endif
 
     if (flag_print_eps) then
        ! taken from tm2sigma.f90 in utility directory
@@ -2201,6 +2210,13 @@ contains
     if(abs(dE) < min(threshold_projection,1e-12)) then
       if(comm_is_root(nproc_id_global)) write(*,*) "projection: already converged, E_kin(new)-E_kin(old)=",dE
     else
+      ! Reference the kinetic energy of this step's starting orbitals (energy%E_kin
+      ! computed just above), not rt%E_old carried over from the previous time step.
+      ! Otherwise the first iteration's dE is measured against the previous step and
+      ! the loop can exit after a single CG step without converging the projection
+      ! orbitals (most likely for large systems / small dt, where E_kin changes
+      ! little per step).
+      rt%E_old = energy%E_kin
       do iter_GS=1,niter
         call ssdg(mg,rt%system_proj,rt%info_proj,stencil,rt%tpsi0,rt%htpsi0,ppg,rt%vloc0,rt%srg_proj)
         call gscg_zwf(ncg,mg,rt%system_proj,rt%info_proj,stencil,ppg, &
@@ -2209,9 +2225,9 @@ contains
         call calc_eigen_energy(energy,rt%tpsi0,rt%htpsi0,rt%ttpsi0 &
         & ,rt%system_proj,rt%info_proj,mg,rt%vloc0,stencil,rt%srg_proj,ppg)
         dE = energy%E_kin - rt%E_old
+        rt%E_old = energy%E_kin
         if(comm_is_root(nproc_id_global)) write(*,'(a,i6,e20.10)') "projection: ",iter_GS,dE
         if(abs(dE) < threshold_projection) exit
-        rt%E_old = energy%E_kin
       end do
     end if
     
