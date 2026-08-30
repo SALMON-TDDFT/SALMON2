@@ -4129,7 +4129,10 @@ contains
     character(256)::continuation_message
     real(8)::occupied_unoccupied_gap,accepted_gap
     real(8)::hamiltonian_hermiticity,hamiltonian_scale
-    real(8)::real_space_residual,interface_action_residuals(3)
+    real(8)::real_space_residual,interface_action_residuals(3),local_energy_parts(5),global_energy_parts(5),&
+      final_energy_receipt(7)
+    complex(8),allocatable::energy_local_coefficients(:,:),energy_global_coefficients(:,:)
+    integer::energy_row,energy_state,energy_gx,energy_gy,energy_gz,energy_ix,energy_iy,energy_iz
     logical::hamiltonian_finite
 
     call MPI_Comm_rank(dc%icomm_tot,rank_local,ierr_local)
@@ -4417,8 +4420,46 @@ stage_pass: do
     allocate(checkpoint_payload%pseudopotential_receipt(6),checkpoint_payload%energy_receipt(7))
     checkpoint_payload%pseudopotential_receipt=[real(dc%system_tot%nion,8),pp%zion,real(pp%lmax,8),&
       real(pp%nrmax,8),real(ppg%Nlma,8),real(size(checkpoint_payload%nonlocal_rows),8)]
-    checkpoint_payload%energy_receipt=[energy%E_tot,energy%E_kin,energy%E_h,energy%E_xc,energy%E_ion_ion,&
-      energy%E_ion_loc,energy%E_ion_nloc]
+    allocate(energy_local_coefficients(size(effective_ids),nstate),energy_global_coefficients(size(effective_ids),nstate))
+    energy_local_coefficients=(0d0,0d0)
+    do energy_row=1,size(row_ids)
+      energy_local_coefficients(int(row_ids(energy_row)),:)=final_ground_state%coefficients(energy_row,:)
+    enddo
+    call MPI_Allreduce(energy_local_coefficients,energy_global_coefficients,size(energy_global_coefficients),&
+      MPI_DOUBLE_COMPLEX,MPI_SUM,dc%icomm_tot,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)error stop 'DG continuation energy coefficient redistribution failed'
+    local_energy_parts=0d0
+    do energy_row=1,size(row_ids);do energy_state=1,nstate
+      local_energy_parts(1)=local_energy_parts(1)+final_ground_state%occupations(energy_state)*real(&
+        conjg(final_ground_state%coefficients(energy_row,energy_state))*&
+        sum(fixed_payload%kinetic_rows(energy_row,:)*energy_global_coefficients(:,energy_state)))
+      local_energy_parts(2)=local_energy_parts(2)+final_ground_state%occupations(energy_state)*real(&
+        conjg(final_ground_state%coefficients(energy_row,energy_state))*&
+        sum(fixed_payload%nonlocal_rows(energy_row,:)*energy_global_coefficients(:,energy_state)))
+    enddo;enddo
+    do p=1,size(ow_core_ids)
+      energy_gx=int(modulo(ow_core_ids(p)-1_8,int(dc%lg_tot%num(1),8)))+1
+      energy_gy=int(modulo((ow_core_ids(p)-1_8)/int(dc%lg_tot%num(1),8),int(dc%lg_tot%num(2),8)))+1
+      energy_gz=int((ow_core_ids(p)-1_8)/int(dc%lg_tot%num(1)*dc%lg_tot%num(2),8))+1
+      energy_ix=findloc(dc%jxyz_tot(:,1),energy_gx,dim=1)
+      energy_iy=findloc(dc%jxyz_tot(:,2),energy_gy,dim=1)
+      energy_iz=findloc(dc%jxyz_tot(:,3),energy_gz,dim=1)
+      if(energy_ix<1.or.energy_iy<1.or.energy_iz<1)error stop 'DG continuation energy grid mapping failed'
+      local_energy_parts(3)=local_energy_parts(3)+0.5d0*rho_in(p)*dc%Vh_tot%f(energy_ix,energy_iy,energy_iz)*interior_weights(p)
+      local_energy_parts(4)=local_energy_parts(4)+rho_in(p)*dc%Vpsl_tot%f(energy_ix,energy_iy,energy_iz)*interior_weights(p)
+    enddo
+    if(dc%id_frag==0)local_energy_parts(5)=energy%E_xc
+    call MPI_Allreduce(local_energy_parts,global_energy_parts,5,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.any(.not.ieee_is_finite(global_energy_parts)))&
+      error stop 'DG continuation energy decomposition failed'
+    final_energy_receipt(2)=global_energy_parts(1)
+    final_energy_receipt(3)=global_energy_parts(3)
+    final_energy_receipt(4)=global_energy_parts(5)
+    final_energy_receipt(5)=energy%E_ion_ion
+    final_energy_receipt(6)=global_energy_parts(4)
+    final_energy_receipt(7)=global_energy_parts(2)
+    final_energy_receipt(1)=sum(final_energy_receipt(2:7))
+    checkpoint_payload%energy_receipt=final_energy_receipt
     checkpoint_payload%energy_fingerprint=checkpoint_real_fingerprint(checkpoint_payload%energy_receipt)
     allocate(checkpoint_payload%nonlocal_ids,source=ow_core_ids)
     allocate(checkpoint_payload%nonlocal_owner(size(ow_core_ids)),source=rank_local)

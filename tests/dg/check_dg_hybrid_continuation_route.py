@@ -121,5 +121,17 @@ assert "continuation_state_count=nstate+1" not in implementation
 assert "occupied_unoccupied_gap>dg_dc_gs_final_orbital_tolerance" not in implementation
 assert "stage_report%occupation_ok=occupation_kernel_ok" in implementation
 assert "hamiltonian_hermiticity<=dg_dc_gs_hermiticity_tolerance" in implementation
+assert "checkpoint_payload%energy_receipt=[energy%E_tot" not in implementation, (
+    "checkpoint energy receipt still serializes the pre-continuation energy"
+)
+for token in (
+    "energy_global_coefficients",
+    "fixed_payload%kinetic_rows",
+    "fixed_payload%nonlocal_rows",
+    "dc%Vh_tot%f",
+    "dc%Vpsl_tot%f",
+    "final_energy_receipt(1)=sum(final_energy_receipt(2:7))",
+):
+    assert token in implementation, f"final DG energy decomposition omits {token}"
 
 print("PASS concrete DG continuation production route contract")
