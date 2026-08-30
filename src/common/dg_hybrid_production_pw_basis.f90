@@ -30,6 +30,7 @@ contains
     type(s_dg_hybrid_basis_catalog)::universe_catalog
     integer,allocatable::normalized_row_action(:,:),fragment_action(:,:),g_integer(:,:),g_action(:,:),&
       g_star(:),g_conjugate(:)
+    logical,allocatable::requested_packet(:)
     real(real64),allocatable::raw_windows(:,:)
     integer(int64)::window_workspace,window_fingerprint,reciprocal_fingerprint,basis_workspace,basis_fingerprint
     integer::i,j,op,packet,target_fragment,target_packet
@@ -87,6 +88,16 @@ contains
         selection%packet_action(packet,op)=target_packet
       enddo
     enddo
+    allocate(requested_packet(size(universe_catalog%packets)));requested_packet=.false.
+    do packet=1,size(universe_catalog%packets)
+      do j=1,size(universe_catalog%packets(packet)%g_indices)
+        i=universe_catalog%packets(packet)%g_indices(j)
+        if(0.5d0*sum(g_vectors(:,i)**2)<=cutoff)requested_packet(packet)=.true.
+      enddo
+    enddo
+    allocate(selection%requested_packet_ids(count(requested_packet)))
+    selection%requested_packet_ids=pack(selection%packet_ids,requested_packet)
+    if(size(selection%requested_packet_ids)<1)then;message='empty requested production packet selection';return;endif
     call move_alloc(universe_catalog%packets,selection%packets)
     selection%window_fingerprint=window_fingerprint
     selection%packet_fingerprint=ieor(reciprocal_fingerprint,basis_fingerprint)
@@ -126,6 +137,7 @@ contains
 #endif
     if(.not.selection%analysis_complete.or.selection%analysis_fingerprint==0_int64.or.&
       size(effective_ids)<1.or..not.allocated(selection%packet_ids).or.&
+      .not.allocated(selection%requested_packet_ids).or.&
       .not.allocated(selection%packet_action).or..not.allocated(selection%packets).or.&
       .not.allocated(selection%fragment_action).or..not.allocated(selection%row_action).or.&
       .not.allocated(selection%reciprocal_action).or..not.allocated(selection%reciprocal_rotation))local_bad=1
@@ -242,6 +254,9 @@ contains
       do j=1,size(selection%packets(i)%g_indices)
         fingerprint=ieor(ishftc(fingerprint,11),int(selection%packets(i)%g_indices(j),int64))
       enddo
+    enddo
+    do i=1,size(selection%requested_packet_ids)
+      fingerprint=ieor(ishftc(fingerprint,11),int(selection%requested_packet_ids(i),int64))
     enddo
     if(fingerprint==0_int64)fingerprint=1_int64
   end function production_selection_fingerprint

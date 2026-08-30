@@ -3,11 +3,21 @@ from pathlib import Path
 import os,re,shlex,shutil,struct,subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
 checkpoint_source=(root/"src/rt/dg/rt_dg_hybrid_checkpoint.f90").read_text().lower()
+main_source=(root/"src/gs/main_dft.f90").read_text().lower()
 writer=checkpoint_source.split("subroutine write_rt_dg_hybrid_checkpoint",1)[1].split(
   "end subroutine write_rt_dg_hybrid_checkpoint",1)[0]
 assert "checkpoint_version=2" in checkpoint_source
 assert "operators%metric_values" not in writer
 assert "operator_metric" not in writer
+assert "write_rt_dg_hybrid_ground_state_checkpoint" in checkpoint_source
+assert "read_rt_dg_hybrid_ground_state_checkpoint" in checkpoint_source
+continuation=main_source.split("subroutine run_dg_hybrid_concrete_continuation",1)[1].split(
+  "end subroutine run_dg_hybrid_concrete_continuation",1)[0]
+assert "write_rt_dg_hybrid_ground_state_checkpoint" in continuation
+assert "hybrid_dg_ground_state.chk" in continuation
+assert continuation.index("if(.not.final_refresh_performed)") < continuation.index(
+  "write_rt_dg_hybrid_ground_state_checkpoint")
+assert "write_rt_dg_hybrid_occupied_checkpoint" not in continuation
 if os.environ.get("SALMON_LAPACK_LIBS"):
   lapack_libs=shlex.split(os.environ["SALMON_LAPACK_LIBS"])
 elif shutil.which("pkg-config") and subprocess.run(["pkg-config","--exists","openblas"],check=False).returncode==0:
@@ -30,6 +40,35 @@ with tempfile.TemporaryDirectory(prefix="hybrid-checkpoint-") as name:
     str(root/"src/rt/dg/rt_dg_hybrid_checkpoint.f90"),str(root/"tests/dg/test_rt_dg_hybrid_occupied_checkpoint_mpi.f90"),
     *lapack_libs,"-o",str(occupied_exe)],check=True)
   env=os.environ.copy();env["OMP_NUM_THREADS"]="1";env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")
+  for nrank in (1,2,4):
+    complete=build/f"complete-{nrank}.chk"
+    complete_write=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe),"write_complete",str(complete)],capture_output=True,text=True,env=env)
+    assert complete_write.returncode==0,(nrank,complete_write.stdout,complete_write.stderr)
+    accepted_bytes=complete.read_bytes()
+    complete_read=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe),"read_complete",str(complete)],capture_output=True,text=True,env=env)
+    assert complete_read.returncode==0,(nrank,complete_read.stdout,complete_read.stderr)
+    assert f"PASS complete hybrid checkpoint on {nrank} ranks" in complete_read.stdout
+    invalid=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe),"write_bad_complete",str(complete)],capture_output=True,text=True,env=env)
+    assert invalid.returncode==0,(nrank,invalid.stdout,invalid.stderr)
+    assert complete.read_bytes()==accepted_bytes,"rejected complete checkpoint replaced the accepted file"
+    incomplete=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe),"write_incomplete_complete",str(complete)],capture_output=True,text=True,env=env)
+    assert incomplete.returncode==0,(nrank,incomplete.stdout,incomplete.stderr)
+    assert complete.read_bytes()==accepted_bytes,"incomplete complete checkpoint replaced the accepted file"
+    interrupted=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe),"write_interrupted_complete",str(complete)],capture_output=True,text=True,env=env)
+    assert interrupted.returncode==0,(nrank,interrupted.stdout,interrupted.stderr)
+    assert complete.read_bytes()==accepted_bytes,"interrupted complete checkpoint replaced the accepted file"
+    for label,fraction in (("metadata",0.08),("basis",0.45),("matrix",0.67),("state",0.90)):
+      corrupt_complete=build/f"complete-{nrank}-{label}-corrupt.chk";corrupt_payload=bytearray(accepted_bytes)
+      corrupt_payload[int(len(corrupt_payload)*fraction)]^=0x31;corrupt_complete.write_bytes(corrupt_payload)
+      corrupt_read=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe),"read_complete_corrupt",str(corrupt_complete)],capture_output=True,text=True,env=env)
+      assert corrupt_read.returncode==0,(nrank,label,corrupt_read.stdout,corrupt_read.stderr)
+    for label,offset,value,kind in (("operation-count",48,3,"i"),("identity-flag",36,1,"i"),
+                                    ("kinetic-fingerprint",96,999999,"q"),
+                                    ("payload-fingerprint",200,999999,"q")):
+      corrupt_complete=build/f"complete-{nrank}-{label}.chk";corrupt_payload=bytearray(accepted_bytes)
+      struct.pack_into(f"={kind}",corrupt_payload,offset,value);corrupt_complete.write_bytes(corrupt_payload)
+      corrupt_read=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe),"read_complete_corrupt",str(corrupt_complete)],capture_output=True,text=True,env=env)
+      assert corrupt_read.returncode==0,(nrank,label,corrupt_read.stdout,corrupt_read.stderr)
   legacy_checkpoint=build/"legacy-v1.chk"
   write_legacy=subprocess.run([shutil.which("mpiexec"),"-n","2",str(exe),"write_legacy",str(legacy_checkpoint)],capture_output=True,text=True,env=env)
   assert write_legacy.returncode==0,(write_legacy.stdout,write_legacy.stderr);legacy_fingerprints=[]

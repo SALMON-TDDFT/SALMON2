@@ -107,7 +107,7 @@ use dg_overlapping_wannier_scf, only: s_dg_overlapping_wannier_scf_state, &
   s_dg_overlapping_wannier_scf_result, &
   compute_dg_overlapping_wannier_scf_fingerprint,mix_dg_overlapping_wannier_density_history
 use dg_hybrid_scf,only:run_dg_hybrid_self_consistent_ground_state
-use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog
+use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog,s_dg_hybrid_production_selection
 use dg_hybrid_production_pw_basis,only:build_dg_hybrid_production_pw_basis
 use dg_hybrid_window_distribution,only:redistribute_dg_hybrid_fragment_windows
 use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
@@ -129,6 +129,9 @@ use dg_hybrid_continuation_controller,only:s_dg_hybrid_controller_controls,s_dg_
   initialize_dg_hybrid_stage_schedule,begin_dg_hybrid_stage_solve,&
   schedule_dg_hybrid_candidate_checks,complete_dg_hybrid_stage_solve,&
   dg_hybrid_continuation_state_count
+use dg_hybrid_continuation_state,only:s_dg_hybrid_scope_receipt,build_dg_hybrid_scope_receipt,&
+  close_dg_hybrid_selection
+use plusU_global,only:PLUS_U_ON
 use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_fragment_basis
 use dg_hybrid_fragment_solver,only:solve_dg_hybrid_fragment_basis
 use dg_hybrid_divided_scf,only:run_dg_hybrid_divided_scf
@@ -138,7 +141,9 @@ use dg_hybrid_generalized_eigensystem,only:solve_dg_hybrid_generalized_scalapack
   solve_dg_hybrid_generalized_once_and_publish
 use dg_hybrid_density,only:reconstruct_dg_hybrid_density,reconstruct_dg_hybrid_occupied_state
 use dg_hybrid_ground_state_types,only:s_dg_hybrid_ground_state,validate_dg_hybrid_ground_state
-use rt_dg_hybrid_checkpoint,only:write_rt_dg_hybrid_occupied_checkpoint
+use rt_dg_hybrid_checkpoint,only:write_rt_dg_hybrid_occupied_checkpoint,&
+  s_rt_dg_hybrid_ground_state_payload,write_rt_dg_hybrid_ground_state_checkpoint,&
+  fingerprint_rt_dg_hybrid_component
 use dg_overlapping_wannier_solver, only: solve_dg_overlapping_wannier_coefficients
 #ifdef USE_EIGENEXA
 use dg_overlapping_wannier_solver, only: solve_dg_overlapping_wannier_generalized_eigenexa
@@ -761,7 +766,13 @@ contains
     integer(8),allocatable::reindexed_global_symmetry_map(:,:),reindexed_fixed_center_symmetry_map(:,:)
     integer(8),allocatable::translation_row_ids(:),translation_stream_row_ids(:)
     integer(8),allocatable::divided_lcfo_row_ids(:)
-    integer,allocatable::divided_effective_ids(:),divided_basis_owner(:),divided_basis_fragment(:)
+    integer,allocatable::divided_effective_ids(:),divided_requested_ids(:),divided_selection_effective_ids(:),&
+      divided_added_ids(:),&
+      divided_closure_parent(:),divided_closure_reason(:),divided_closure_action(:),divided_scope_selectors(:),&
+      divided_basis_owner(:),divided_basis_fragment(:),&
+      divided_metric_offsets(:),divided_metric_columns(:),divided_operator_offsets(:),divided_operator_columns(:)
+    type(s_dg_hybrid_scope_receipt)::divided_scope_receipt
+    type(s_dg_hybrid_production_selection)::divided_production_selection
     integer,allocatable::dg_hybrid_interior_fragment(:)
     real(8)::dg_hybrid_broken_diagnostics(4)
     integer(8),allocatable::translation_spatial_ids(:),translation_generator_maps(:,:)
@@ -856,7 +867,8 @@ contains
     integer(8)::ow_stitched_peak_elements,ow_density_redistribution_workspace
     integer(8)::divided_pw_fingerprint,divided_buffer_window_fingerprint,divided_fragment_fingerprint,&
       divided_lcfo_peak_elements,divided_lcfo_operator_fingerprint,divided_state_workspace,&
-      divided_state_fingerprint,divided_final_solver_workspace,divided_final_solver_fingerprint
+      divided_state_fingerprint,divided_final_solver_workspace,divided_final_solver_fingerprint,&
+      divided_selection_fingerprint
     real(8)::condition_number,closure_residual,spread_max,gauge_correction
     real(8)::adapted_occupied_trace,adapted_occupied_closure,adapted_occupied_gamma_defect,&
       translation_adapted_trace,translation_adapted_closure,translation_adapted_gamma_defect,&
@@ -2588,9 +2600,16 @@ contains
         ow_pencil_generator_maps,ow_raw_partition_weight,w90_reciprocal_lattice,&
         global_point_rotations(:,:,global_affine_generators),wannier_pw_cutoff,dg_ow_symmetry_tolerance,&
         basis_fingerprint,divided_pw_fingerprint,&
-        divided_buffer_window_fingerprint,divided_fragment_fingerprint,ok,message)
+        divided_buffer_window_fingerprint,divided_fragment_fingerprint,divided_production_selection,ok,message)
       if(.not.ok)write(0,'(a)')trim(message)
       if(.not.ok)error stop 'divided Hybrid production basis preparation failed'
+      allocate(divided_requested_ids,source=divided_production_selection%requested_packet_ids)
+      call close_dg_hybrid_selection(dc%icomm_tot,divided_requested_ids,&
+        divided_production_selection%packet_ids,divided_production_selection%packet_action,&
+        divided_selection_effective_ids,divided_closure_parent,divided_closure_action,&
+        divided_selection_fingerprint,ok,message)
+      if(.not.ok)write(0,'(a)')trim(message)
+      if(.not.ok)error stop 'divided Hybrid authoritative selection closure failed'
       if(allocated(ow_divided_core_mask))deallocate(ow_divided_core_mask)
       allocate(ow_divided_core_mask,source=core_mask)
       call prepare_dg_hybrid_divided_dc_controls(dc,ow_hybrid_divided_convergence,&
@@ -2676,11 +2695,31 @@ contains
           divided_basis_representation,ok,message)
         if(.not.ok)write(0,'(a)')trim(message)
         if(.not.ok)error stop 'DG continuation retained-basis symmetry representation failed'
+        call selection_added_members(divided_requested_ids,divided_selection_effective_ids,divided_added_ids)
+        allocate(divided_closure_reason(size(divided_closure_parent)),source=1)
+        call build_dg_hybrid_scope_receipt(dc%icomm_tot,merge(1,0,theory=='dft'),iperiodic==3,&
+          dc%system_tot%nspin,yn_spinorbit=='y',PLUS_U_ON,yn_hse=='y',yn_fix_func=='y',yn_jm=='y',&
+          xc_func%xctype,divided_scope_receipt,ok,message)
+        if(.not.ok)write(0,'(a)')trim(message)
+        if(.not.ok)error stop 'DG continuation supported-scope receipt failed'
+        allocate(divided_scope_selectors(8));divided_scope_selectors=[divided_scope_receipt%theory_code,&
+          merge(1,0,divided_scope_receipt%periodic),divided_scope_receipt%nspin,&
+          merge(1,0,divided_scope_receipt%spinorbit),merge(1,0,divided_scope_receipt%plus_u),&
+          merge(1,0,divided_scope_receipt%hse),merge(1,0,divided_scope_receipt%fix_func),&
+          merge(1,0,divided_scope_receipt%jm)]
+        call build_checkpoint_topology_graphs(divided_effective_ids,divided_lcfo_row_ids,divided_basis_fragment,&
+          divided_production_faces,divided_metric_offsets,divided_metric_columns,&
+          divided_operator_offsets,divided_operator_columns)
         call run_dg_hybrid_concrete_continuation(divided_initial_density,divided_effective_ids,&
           divided_lcfo_row_ids,divided_basis_fragment,dg_hybrid_interior_fragment,&
           dg_hybrid_interior_weights,dg_hybrid_interior_values,&
           dg_hybrid_interior_kinetic_action,dg_hybrid_interior_nonlocal_action,dg_hybrid_fixed_payload,&
           dg_hybrid_interface_component_rows,divided_production_faces,occupations,divided_basis_representation,&
+          divided_requested_ids,divided_selection_effective_ids,divided_added_ids,&
+          divided_closure_parent,divided_closure_reason,&
+          divided_closure_action,divided_scope_selectors,pseudopotential_fingerprint,&
+          divided_scope_receipt%fingerprint,divided_selection_fingerprint,divided_metric_offsets,divided_metric_columns,&
+          divided_operator_offsets,divided_operator_columns,&
           ow_hybrid_ground_state,dg_hybrid_final_density,dg_hybrid_final_trace,&
           dg_hybrid_final_hamiltonian_rows)
         return
@@ -4039,11 +4078,18 @@ contains
   subroutine run_dg_hybrid_concrete_continuation(dc_seed_density,effective_ids,row_ids,basis_fragment,&
       interior_fragment,interior_weights,interior_values,interior_kinetic_action,&
       interior_nonlocal_action,fixed_payload,interface_component_rows,production_faces,&
-      occupied_occupations,basis_representation,final_ground_state,final_density,final_trace,&
-      final_hamiltonian_rows)
+      occupied_occupations,basis_representation,requested_ids_arg,selection_effective_ids_arg,added_ids_arg,closure_parent_arg,&
+      closure_reason_arg,closure_action_arg,scope_selectors_arg,pseudopotential_fingerprint_arg,&
+      scope_fingerprint_arg,selection_fingerprint_arg,metric_offsets_arg,metric_columns_arg,&
+      operator_offsets_arg,operator_columns_arg,&
+      final_ground_state,final_density,final_trace,final_hamiltonian_rows)
     real(8),intent(in)::dc_seed_density(:),interior_weights(:),occupied_occupations(:)
-    integer,intent(in)::effective_ids(:),basis_fragment(:),interior_fragment(:)
+    integer,intent(in)::effective_ids(:),basis_fragment(:),interior_fragment(:),requested_ids_arg(:),&
+      selection_effective_ids_arg(:),added_ids_arg(:),&
+      closure_parent_arg(:),closure_reason_arg(:),closure_action_arg(:),scope_selectors_arg(:)
+    integer,intent(in)::metric_offsets_arg(:),metric_columns_arg(:),operator_offsets_arg(:),operator_columns_arg(:)
     integer(8),intent(in)::row_ids(:)
+    integer(8),intent(in)::pseudopotential_fingerprint_arg,scope_fingerprint_arg,selection_fingerprint_arg
     complex(8),intent(in)::interior_values(:,:),interior_kinetic_action(:,:),interior_nonlocal_action(:,:)
     complex(8),intent(in)::interface_component_rows(:,:,:)
     complex(8),intent(in)::basis_representation(:,:,:)
@@ -4068,10 +4114,15 @@ contains
     type(s_dg_hybrid_trial_state)::trial_state
     type(s_dg_hybrid_stage_report)::stage_report
     type(s_dg_hybrid_controller)::continuation_controller
+    type(s_rt_dg_hybrid_ground_state_payload)::checkpoint_payload
     type(s_dg_hybrid_stage_schedule)::stage_schedule
     integer(8)::solver_workspace,solver_fingerprint,final_operator_fingerprint,&
-      final_state_workspace,final_state_fingerprint
-    integer::iteration,ierr_local,rank_local,continuation_state_count,gap_occupied_index,gap_unoccupied_index,p
+      final_state_workspace,final_state_fingerprint,kinetic_fingerprint,nonlocal_fingerprint,&
+      local_fingerprint,sipg_fingerprint,checkpoint_fingerprint,seed_fingerprint,seed_local_hash,seed_value_bits
+    integer::iteration,ierr_local,rank_local,continuation_state_count,gap_occupied_index,gap_unoccupied_index,p,&
+      face_value_count,face_value_position,face_point_count,face_point_position,face_basis_count,face_basis_position,&
+      face_weight_count,face_weight_position,owned_face_count,face_slot
+    integer,allocatable::checkpoint_face_owner(:)
     logical::stage_converged,reject_trial,local_ok,accept_stage,final_refresh_performed,cheap_candidate,&
       run_solve,run_expensive,refresh_scheduled,meaningful_gap,occupation_kernel_ok
     character(256)::continuation_message
@@ -4274,10 +4325,208 @@ stage_pass: do
     final_ground_state%converged=.true.;final_ground_state%final_eigensolve_count=1
     allocate(final_density,source=rho_in);allocate(final_trace,source=interface_state)
     allocate(final_hamiltonian_rows,source=iterate%hamiltonian_rows)
+    call fingerprint_rt_dg_hybrid_component(dc%icomm_tot,row_ids,fixed_payload%kinetic_rows,kinetic_fingerprint,local_ok)
+    if(.not.local_ok)error stop 'DG continuation kinetic checkpoint fingerprint failed'
+    call fingerprint_rt_dg_hybrid_component(dc%icomm_tot,row_ids,fixed_payload%nonlocal_rows,nonlocal_fingerprint,local_ok)
+    if(.not.local_ok)error stop 'DG continuation nonlocal checkpoint fingerprint failed'
+    call fingerprint_rt_dg_hybrid_component(dc%icomm_tot,row_ids,iterate%local_rows,local_fingerprint,local_ok)
+    if(.not.local_ok)error stop 'DG continuation local checkpoint fingerprint failed'
+    call fingerprint_rt_dg_hybrid_component(dc%icomm_tot,row_ids,fixed_payload%interface_rows,sipg_fingerprint,local_ok)
+    if(.not.local_ok)error stop 'DG continuation SIPG checkpoint fingerprint failed'
+    seed_local_hash=0_8
+    do p=1,size(dc_seed_density)
+      seed_value_bits=transfer(dc_seed_density(p),seed_value_bits)
+      seed_local_hash=ieor(seed_local_hash,ishftc(ieor(ow_core_ids(p),seed_value_bits),mod(11*p,63)))
+    enddo
+    call MPI_Allreduce(seed_local_hash,seed_fingerprint,1,MPI_INTEGER8,MPI_BXOR,dc%icomm_tot,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)error stop 'DG continuation seed checkpoint fingerprint failed'
+    if(seed_fingerprint==0_8)seed_fingerprint=1_8
+    checkpoint_payload%valid=.true.;checkpoint_payload%final_refresh_complete=final_refresh_performed
+    checkpoint_payload%analysis_complete=.true.;checkpoint_payload%identity_only=size(basis_representation,3)==1
+    checkpoint_payload%operation_count=size(basis_representation,3)
+    checkpoint_payload%nonidentity_operation_count=max(0,size(basis_representation,3)-1)
+    checkpoint_payload%global_count=size(effective_ids);checkpoint_payload%noccupied=size(occupied_occupations)
+    checkpoint_payload%catalog_fingerprint=fixed_payload%basis_fingerprint
+    checkpoint_payload%state_fingerprint=final_state_fingerprint
+    checkpoint_payload%metric_fingerprint=fixed_payload%metric_fingerprint
+    checkpoint_payload%operator_structure_fingerprint=fixed_payload%fingerprint
+    checkpoint_payload%operator_value_fingerprint=final_operator_fingerprint
+    checkpoint_payload%kinetic_fingerprint=kinetic_fingerprint
+    checkpoint_payload%nonlocal_fingerprint=nonlocal_fingerprint
+    checkpoint_payload%local_fingerprint=local_fingerprint
+    checkpoint_payload%sipg_fingerprint=sipg_fingerprint
+    checkpoint_payload%basis_fingerprint=fixed_payload%basis_fingerprint
+    checkpoint_payload%face_fingerprint=fixed_payload%interface_fingerprint
+    checkpoint_payload%dc_seed_fingerprint=seed_fingerprint
+    checkpoint_payload%continuation_fingerprint=ieor(final_state_fingerprint,continuation_controller%accepted_state%operator_value_fingerprint)
+    if(checkpoint_payload%continuation_fingerprint==0_8)checkpoint_payload%continuation_fingerprint=1_8
+    checkpoint_payload%scope_fingerprint=scope_fingerprint_arg
+    checkpoint_payload%selection_fingerprint=selection_fingerprint_arg
+    checkpoint_payload%analysis_fingerprint=checkpoint_analysis_fingerprint(basis_representation)
+    checkpoint_payload%pseudopotential_fingerprint=pseudopotential_fingerprint_arg
+    checkpoint_payload%energy_fingerprint=ieor(kinetic_fingerprint,ieor(nonlocal_fingerprint,local_fingerprint))
+    if(checkpoint_payload%energy_fingerprint==0_8)checkpoint_payload%energy_fingerprint=sipg_fingerprint
+    allocate(checkpoint_payload%row_ids,source=row_ids)
+    allocate(checkpoint_payload%metric_row_offsets,source=metric_offsets_arg)
+    allocate(checkpoint_payload%metric_column_ids,source=metric_columns_arg)
+    allocate(checkpoint_payload%operator_row_offsets,source=operator_offsets_arg)
+    allocate(checkpoint_payload%operator_column_ids,source=operator_columns_arg)
+    allocate(checkpoint_payload%metric_rows,source=fixed_payload%metric_rows)
+    allocate(checkpoint_payload%kinetic_rows,source=fixed_payload%kinetic_rows)
+    allocate(checkpoint_payload%nonlocal_rows,source=fixed_payload%nonlocal_rows)
+    allocate(checkpoint_payload%local_rows,source=iterate%local_rows)
+    allocate(checkpoint_payload%sipg_rows,source=fixed_payload%interface_rows)
+    allocate(checkpoint_payload%hamiltonian_rows,source=iterate%hamiltonian_rows)
+    allocate(checkpoint_payload%coefficients,source=final_ground_state%coefficients)
+    allocate(checkpoint_payload%occupations,source=final_ground_state%occupations)
+    allocate(checkpoint_payload%eigenvalues,source=final_ground_state%eigenvalues)
+    allocate(checkpoint_payload%grid_ids,source=ow_core_ids)
+    allocate(checkpoint_payload%grid_weights,source=interior_weights)
+    allocate(checkpoint_payload%partition_ids,source=interior_fragment)
+    allocate(checkpoint_payload%basis_values,source=interior_values)
+    allocate(checkpoint_payload%density,source=rho_in)
+    allocate(checkpoint_payload%requested_ids,source=requested_ids_arg)
+    allocate(checkpoint_payload%effective_ids,source=selection_effective_ids_arg)
+    allocate(checkpoint_payload%added_ids,source=added_ids_arg)
+    allocate(checkpoint_payload%closure_parent,source=closure_parent_arg)
+    allocate(checkpoint_payload%closure_reason,source=closure_reason_arg)
+    allocate(checkpoint_payload%closure_action,source=closure_action_arg)
+    allocate(checkpoint_payload%scope_selectors(size(scope_selectors_arg)),checkpoint_payload%xc_types(size(xc_func%xctype)))
+    checkpoint_payload%scope_selectors=scope_selectors_arg
+    checkpoint_payload%xc_types=xc_func%xctype
+    allocate(checkpoint_payload%continuation_receipt(10))
+    checkpoint_payload%continuation_receipt=[accepted_lambda,residuals%r_h,residuals%r_rho,residuals%r_t,residuals%r_s,&
+      electron_count,symmetry_residual,projector_symmetry_residual,real_space_residual,maxval(interface_action_residuals)]
+    allocate(checkpoint_payload%pseudopotential_receipt(2),checkpoint_payload%energy_receipt(4))
+    checkpoint_payload%pseudopotential_receipt=[real(dc%system_tot%nion,8),real(size(checkpoint_payload%nonlocal_rows),8)]
+    checkpoint_payload%energy_receipt=broken_diagnostics
+    allocate(checkpoint_payload%nonlocal_ids,source=ow_core_ids)
+    allocate(checkpoint_payload%nonlocal_owner(size(ow_core_ids)),source=rank_local)
+    allocate(checkpoint_payload%nonlocal_values,source=interior_nonlocal_action)
+    allocate(checkpoint_face_owner(size(production_faces)))
+    do p=1,size(production_faces)
+      checkpoint_face_owner(p)=merge(rank_local,huge(0),production_faces(p)%frozen)
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,checkpoint_face_owner,size(checkpoint_face_owner),MPI_INTEGER,MPI_MIN,&
+      dc%icomm_tot,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.any(checkpoint_face_owner==huge(0)))&
+      error stop 'DG continuation checkpoint face ownership failed'
+    owned_face_count=count(checkpoint_face_owner==rank_local)
+    face_point_count=0;face_value_count=0;face_basis_count=0;face_weight_count=0
+    do p=1,size(production_faces)
+      if(checkpoint_face_owner(p)/=rank_local)cycle
+      face_point_count=face_point_count+size(production_faces(p)%point_ids_minus)+size(production_faces(p)%point_ids_plus)
+      face_value_count=face_value_count+size(production_faces(p)%value_minus)+size(production_faces(p)%value_plus)+&
+        size(production_faces(p)%derivative_minus)+size(production_faces(p)%derivative_plus)
+      face_basis_count=face_basis_count+size(production_faces(p)%basis_ids_minus)+size(production_faces(p)%basis_ids_plus)
+      face_weight_count=face_weight_count+size(production_faces(p)%weights)
+    enddo
+    allocate(checkpoint_payload%face_ids(owned_face_count),checkpoint_payload%face_metadata(8,owned_face_count),&
+      checkpoint_payload%face_normals(3,owned_face_count),checkpoint_payload%face_offsets(owned_face_count+1),&
+      checkpoint_payload%face_value_offsets(owned_face_count+1),checkpoint_payload%face_basis_ids(face_basis_count),&
+      checkpoint_payload%face_point_ids(face_point_count),checkpoint_payload%face_weights(face_weight_count),&
+      checkpoint_payload%face_values(1,face_value_count))
+    face_point_position=0;face_value_position=0;face_basis_position=0;face_weight_position=0;face_slot=0
+    checkpoint_payload%face_offsets(1)=1;checkpoint_payload%face_value_offsets(1)=1
+    do p=1,size(production_faces)
+      if(checkpoint_face_owner(p)/=rank_local)cycle
+      face_slot=face_slot+1;checkpoint_payload%face_ids(face_slot)=production_faces(p)%global_face_id
+      checkpoint_payload%face_metadata(:,face_slot)=[production_faces(p)%minus_fragment,production_faces(p)%plus_fragment,&
+        production_faces(p)%periodic_shift,size(production_faces(p)%weights),size(production_faces(p)%basis_ids_minus),&
+        size(production_faces(p)%basis_ids_plus)]
+      checkpoint_payload%face_normals(:,face_slot)=production_faces(p)%canonical_normal
+      checkpoint_payload%face_point_ids(face_point_position+1:face_point_position+size(production_faces(p)%point_ids_minus))=&
+        production_faces(p)%point_ids_minus;face_point_position=face_point_position+size(production_faces(p)%point_ids_minus)
+      checkpoint_payload%face_point_ids(face_point_position+1:face_point_position+size(production_faces(p)%point_ids_plus))=&
+        production_faces(p)%point_ids_plus;face_point_position=face_point_position+size(production_faces(p)%point_ids_plus)
+      checkpoint_payload%face_offsets(face_slot+1)=face_point_position+1
+      checkpoint_payload%face_basis_ids(face_basis_position+1:face_basis_position+size(production_faces(p)%basis_ids_minus))=&
+        production_faces(p)%basis_ids_minus;face_basis_position=face_basis_position+size(production_faces(p)%basis_ids_minus)
+      checkpoint_payload%face_basis_ids(face_basis_position+1:face_basis_position+size(production_faces(p)%basis_ids_plus))=&
+        production_faces(p)%basis_ids_plus;face_basis_position=face_basis_position+size(production_faces(p)%basis_ids_plus)
+      checkpoint_payload%face_weights(face_weight_position+1:face_weight_position+size(production_faces(p)%weights))=&
+        production_faces(p)%weights;face_weight_position=face_weight_position+size(production_faces(p)%weights)
+      call pack_checkpoint_face_values(production_faces(p),checkpoint_payload%face_values,face_value_position)
+      checkpoint_payload%face_value_offsets(face_slot+1)=face_value_position+1
+    enddo
+    allocate(checkpoint_payload%interface_observables,source=interface_state)
+    call write_rt_dg_hybrid_ground_state_checkpoint(dc%icomm_tot,'./hybrid_dg_ground_state.chk',checkpoint_payload,&
+      checkpoint_fingerprint,local_ok,continuation_message)
+    if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation complete checkpoint failed';endif
     if(rank_local==0)write(*,'(a,4(a,es16.8))')'[OW-GS] fully refreshed DG continuation converged',&
       ' lambda=',accepted_lambda,' h_residual=',residuals%r_h,' density_residual=',residuals%r_rho,&
       ' interface_residual=',residuals%r_t
   end subroutine run_dg_hybrid_concrete_continuation
+
+  subroutine pack_checkpoint_face_values(face,values,position)
+    type(s_dg_hybrid_production_face_trace),intent(in)::face
+    complex(8),intent(inout)::values(:,:)
+    integer,intent(inout)::position
+    integer::count
+    count=size(face%value_minus)
+    if(count>0)values(1,position+1:position+count)=reshape(face%value_minus,[count]);position=position+count
+    count=size(face%value_plus)
+    if(count>0)values(1,position+1:position+count)=reshape(face%value_plus,[count]);position=position+count
+    count=size(face%derivative_minus)
+    if(count>0)values(1,position+1:position+count)=reshape(face%derivative_minus,[count]);position=position+count
+    count=size(face%derivative_plus)
+    if(count>0)values(1,position+1:position+count)=reshape(face%derivative_plus,[count]);position=position+count
+  end subroutine pack_checkpoint_face_values
+
+  subroutine build_checkpoint_topology_graphs(global_ids,row_ids,basis_fragment,faces,&
+      metric_offsets,metric_columns,operator_offsets,operator_columns)
+    integer,intent(in)::global_ids(:),basis_fragment(:)
+    integer(8),intent(in)::row_ids(:)
+    type(s_dg_hybrid_production_face_trace),intent(in)::faces(:)
+    integer,allocatable,intent(out)::metric_offsets(:),metric_columns(:),operator_offsets(:),operator_columns(:)
+    integer::row,column,metric_count,operator_count,row_position
+    ! The broken-volume metric has support only within a fragment.  The
+    ! nonlocal operator contract permits every retained basis pair, so the
+    ! shared Hamiltonian envelope is deliberately dense and retains explicit
+    ! zero edges from kinetic, local, and SIPG components.
+    metric_count=0
+    do row=1,size(row_ids)
+      row_position=findloc(global_ids,int(row_ids(row)),dim=1)
+      metric_count=metric_count+count(basis_fragment==basis_fragment(row_position))
+    enddo
+    operator_count=size(row_ids)*size(global_ids)
+    allocate(metric_offsets(size(row_ids)+1),metric_columns(metric_count),&
+      operator_offsets(size(row_ids)+1),operator_columns(operator_count))
+    metric_count=0;operator_count=0;metric_offsets(1)=1;operator_offsets(1)=1
+    do row=1,size(row_ids)
+      row_position=findloc(global_ids,int(row_ids(row)),dim=1)
+      do column=1,size(global_ids)
+        if(basis_fragment(column)==basis_fragment(row_position))then
+          metric_count=metric_count+1;metric_columns(metric_count)=global_ids(column)
+        endif
+        operator_count=operator_count+1;operator_columns(operator_count)=global_ids(column)
+      enddo
+      metric_offsets(row+1)=metric_count+1;operator_offsets(row+1)=operator_count+1
+    enddo
+  end subroutine build_checkpoint_topology_graphs
+
+  subroutine selection_added_members(requested,effective,added)
+    integer,intent(in)::requested(:),effective(:)
+    integer,allocatable,intent(out)::added(:)
+    integer::i,position
+    allocate(added(count([(count(requested==effective(i))==0,i=1,size(effective))])))
+    position=0
+    do i=1,size(effective)
+      if(any(requested==effective(i)))cycle
+      position=position+1;added(position)=effective(i)
+    enddo
+  end subroutine selection_added_members
+
+  integer(8) function checkpoint_analysis_fingerprint(representation) result(fingerprint)
+    complex(8),intent(in)::representation(:,:,:)
+    integer::i,j,k;integer(8)::bits
+    fingerprint=int(size(representation,3),8)
+    do k=1,size(representation,3);do j=1,size(representation,2);do i=1,size(representation,1)
+      bits=transfer(real(representation(i,j,k),8),bits);fingerprint=ieor(ishftc(fingerprint,9),bits)
+      bits=transfer(aimag(representation(i,j,k)),bits);fingerprint=ieor(ishftc(fingerprint,9),bits)
+    enddo;enddo;enddo
+    if(fingerprint==0_8)fingerprint=1_8
+  end function checkpoint_analysis_fingerprint
 
   subroutine set_dg_hybrid_trial_state(state,density,potential,occupations_arg,eigenvalues_arg,&
       projector,trace,epoch,operator_fingerprint,solver_fingerprint)
@@ -6750,10 +6999,11 @@ subroutine prepare_dg_hybrid_divided_production_basis(comm_arg,fragment_count_ar
     global_count_arg,physical_ids_arg,core_ids_arg,core_weights_arg,core_values_arg,box_values_arg,&
     wannier_owner_arg,fragment_basis_arg,nwannier_arg,noperation_arg,pencil_maps_arg,raw_partition_arg,&
     reciprocal_lattice_arg,reciprocal_rotations_arg,pw_cutoff_arg,tolerance_arg,basis_fingerprint_arg,&
-    pw_fingerprint_arg,buffer_fingerprint_arg,fragment_fingerprint_arg,callback_ok,callback_message)
-  use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog
+    pw_fingerprint_arg,buffer_fingerprint_arg,fragment_fingerprint_arg,selection_arg,callback_ok,callback_message)
+  use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog,s_dg_hybrid_production_selection
   use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
-  use dg_hybrid_production_pw_basis,only:build_dg_hybrid_production_pw_basis
+  use dg_hybrid_production_pw_basis,only:analyze_dg_hybrid_production_selection,freeze_dg_hybrid_production_selection
+  use dg_hybrid_continuation_state,only:close_dg_hybrid_selection
   use dg_hybrid_window_distribution,only:redistribute_dg_hybrid_fragment_windows
   use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_fragment_basis
   implicit none
@@ -6768,12 +7018,15 @@ subroutine prepare_dg_hybrid_divided_production_basis(comm_arg,fragment_count_ar
   integer,intent(in)::wannier_owner_arg(nwannier_arg)
   type(s_dg_hybrid_fragment_basis),intent(out)::fragment_basis_arg
   integer(8),intent(out)::pw_fingerprint_arg,buffer_fingerprint_arg,fragment_fingerprint_arg
+  type(s_dg_hybrid_production_selection),intent(out)::selection_arg
   logical,intent(out)::callback_ok
   character(*),intent(out)::callback_message
   integer,allocatable::fragment_ids(:),core_fragment_ids(:),row_action(:,:)
   real(8),allocatable::box_windows(:,:),core_windows(:,:),buffer_windows(:,:),&
     core_coordinates(:,:),buffer_coordinates(:,:),g_vectors(:,:)
   type(s_dg_hybrid_basis_catalog)::pw_catalog
+  integer,allocatable::effective_packet_ids(:),closure_parent(:),closure_action(:)
+  integer(8)::selection_fingerprint
   integer::point,fragment,grid_x,grid_y,grid_z
   integer(8)::pw_workspace,buffer_window_workspace,fragment_workspace
 
@@ -6818,10 +7071,17 @@ subroutine prepare_dg_hybrid_divided_production_basis(comm_arg,fragment_count_ar
       int(grid_num_arg(2),8)),8)*hgs_arg(2)
     buffer_coordinates(3,point)=real((physical_ids_arg(point)-1_8)/nxy_arg,8)*hgs_arg(3)
   enddo
-  call build_dg_hybrid_production_pw_basis(comm_arg,int(global_count_arg),fragment_count_arg,&
+  call analyze_dg_hybrid_production_selection(comm_arg,int(global_count_arg),fragment_count_arg,&
     fragment_ids,physical_ids_arg,box_windows,core_ids_arg,core_fragment_ids,core_coordinates,row_action,&
     reciprocal_lattice_arg,reciprocal_rotations_arg,pw_cutoff_arg,16,tolerance_arg,core_windows,g_vectors,&
-    pw_catalog,pw_workspace,pw_fingerprint_arg,callback_ok,callback_message)
+    selection_arg,pw_workspace,pw_fingerprint_arg,callback_ok,callback_message)
+  if(.not.callback_ok)return
+  call close_dg_hybrid_selection(comm_arg,selection_arg%requested_packet_ids,selection_arg%packet_ids,&
+    selection_arg%packet_action,effective_packet_ids,closure_parent,closure_action,selection_fingerprint,&
+    callback_ok,callback_message)
+  if(.not.callback_ok)return
+  call freeze_dg_hybrid_production_selection(comm_arg,selection_arg,effective_packet_ids,pw_catalog,&
+    pw_fingerprint_arg,callback_ok,callback_message)
   if(.not.callback_ok)return
   call redistribute_dg_hybrid_fragment_windows(comm_arg,int(global_count_arg),fragment_count_arg,&
     fragment_ids,physical_ids_arg,box_windows,physical_ids_arg,buffer_windows,buffer_window_workspace,&

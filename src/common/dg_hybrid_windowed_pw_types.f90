@@ -31,6 +31,7 @@ module dg_hybrid_windowed_pw_types
     integer,allocatable::row_action(:,:)
     integer,allocatable::reciprocal_action(:,:)
     integer,allocatable::packet_ids(:)
+    integer,allocatable::requested_packet_ids(:)
     integer,allocatable::packet_action(:,:)
     real(8),allocatable::reciprocal_rotation(:,:,:)
     type(s_dg_hybrid_pw_packet),allocatable::packets(:)

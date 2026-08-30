@@ -4,13 +4,16 @@ program test_rt_dg_hybrid_checkpoint_mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use dg_hybrid_sparse_metric,only:s_dg_hybrid_sparse_metric
   use dg_hybrid_sparse_operators,only:s_dg_hybrid_sparse_operators
-  use rt_dg_hybrid_checkpoint,only:write_rt_dg_hybrid_checkpoint,read_rt_dg_hybrid_checkpoint
+  use rt_dg_hybrid_checkpoint,only:write_rt_dg_hybrid_checkpoint,read_rt_dg_hybrid_checkpoint,&
+    s_rt_dg_hybrid_ground_state_payload,write_rt_dg_hybrid_ground_state_checkpoint,&
+    read_rt_dg_hybrid_ground_state_checkpoint,fingerprint_rt_dg_hybrid_component
   implicit none
   integer,parameter::n=4
   integer::comm,rank,nproc,ierr,i,mode_length
   character(256)::mode,path,message
   type(s_dg_hybrid_sparse_metric)::metric
   type(s_dg_hybrid_sparse_operators)::operators
+  type(s_rt_dg_hybrid_ground_state_payload)::complete_payload,restored_payload
   complex(real64),allocatable::coefficients(:)
   integer(int64)::payload_fingerprint,expected_catalog,expected_state,expected_selection,expected_window,expected_packet,&
     expected_complement,expected_position,expected_operator
@@ -20,7 +23,41 @@ program test_rt_dg_hybrid_checkpoint_mpi
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
   call get_command_argument(1,mode,length=mode_length);call get_command_argument(1,mode)
   call get_command_argument(2,path)
-  if(trim(mode)=='write_legacy')then
+  if(trim(mode)=='write_complete'.or.trim(mode)=='write_bad_complete'.or.trim(mode)=='write_incomplete_complete'.or.&
+      trim(mode)=='write_interrupted_complete')then
+    call construct_complete_payload(complete_payload)
+    if(trim(mode)=='write_bad_complete')complete_payload%hamiltonian_rows(1,1)=&
+      complete_payload%hamiltonian_rows(1,1)+(1d0,0d0)
+    if(trim(mode)=='write_incomplete_complete')deallocate(complete_payload%face_values)
+    call write_rt_dg_hybrid_ground_state_checkpoint(comm,trim(path),complete_payload,payload_fingerprint,ok,message,&
+      interrupt_after_write=trim(mode)=='write_interrupted_complete')
+    if(trim(mode)=='write_complete')then
+      call require(ok,trim(message))
+    else
+      call require(.not.ok,'inconsistent or incomplete complete payload was published')
+    endif
+  else if(trim(mode)=='read_complete'.or.trim(mode)=='read_complete_corrupt')then
+    call read_rt_dg_hybrid_ground_state_checkpoint(comm,trim(path),restored_payload,payload_fingerprint,ok,message)
+    if(trim(mode)=='read_complete')then
+      call require(ok,trim(message))
+      call require(restored_payload%final_refresh_complete.and.restored_payload%analysis_complete,&
+        'complete checkpoint lost final acceptance receipts')
+      call require(all(restored_payload%hamiltonian_rows==restored_payload%kinetic_rows+&
+        restored_payload%nonlocal_rows+restored_payload%local_rows+restored_payload%sipg_rows),&
+        'complete checkpoint changed Hamiltonian component identity')
+      call require(restored_payload%requested_ids(1)==1.and.restored_payload%effective_ids(4)==4.and.&
+        restored_payload%added_ids(1)==4.and.restored_payload%closure_parent(1)==1,&
+        'complete checkpoint lost requested/effective closure provenance')
+      call require(size(restored_payload%basis_values,2)==size(restored_payload%grid_ids).and.&
+        size(restored_payload%face_values,2)==size(restored_payload%face_ids).and.&
+        size(restored_payload%nonlocal_values,2)==size(restored_payload%nonlocal_ids),&
+        'complete checkpoint lost basis, face, or nonlocal payload')
+      call require(size(restored_payload%metric_column_ids)/=size(restored_payload%operator_column_ids),&
+        'complete checkpoint collapsed independent metric and operator graphs')
+    else
+      call require(.not.ok,'corrupt complete DG ground-state checkpoint was accepted')
+    endif
+  else if(trim(mode)=='write_legacy')then
     call write_legacy_checkpoint(trim(path))
   else if(trim(mode)=='write'.or.trim(mode)=='write_incomplete')then
     call construct_state(metric,operators,coefficients)
@@ -78,8 +115,91 @@ program test_rt_dg_hybrid_checkpoint_mpi
     write(*,'(a,i0,a,i0)')'HYBRID_CHECKPOINT ranks=',nproc,' fingerprint=',payload_fingerprint
     write(*,'(a,i0,a)')'PASS hybrid checkpoint on ',nproc,' ranks'
   endif
+  if(rank==0.and.trim(mode)=='read_complete')write(*,'(a,i0,a)')'PASS complete hybrid checkpoint on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
+  subroutine construct_complete_payload(payload)
+    type(s_rt_dg_hybrid_ground_state_payload),intent(out)::payload
+    integer::row,point,local_row,local_point,nrow,npoint
+    logical::fingerprint_ok
+    payload%valid=.true.;payload%final_refresh_complete=.true.;payload%analysis_complete=.true.
+    payload%identity_only=.false.;payload%global_count=n;payload%noccupied=2
+    payload%operation_count=2;payload%nonidentity_operation_count=1
+    payload%catalog_fingerprint=1101_int64;payload%state_fingerprint=1102_int64
+    payload%metric_fingerprint=1103_int64;payload%operator_structure_fingerprint=1104_int64
+    payload%operator_value_fingerprint=1105_int64;payload%kinetic_fingerprint=1106_int64
+    payload%nonlocal_fingerprint=1107_int64;payload%local_fingerprint=1108_int64
+    payload%sipg_fingerprint=1109_int64;payload%basis_fingerprint=1110_int64
+    payload%face_fingerprint=1111_int64;payload%dc_seed_fingerprint=1112_int64
+    payload%continuation_fingerprint=1113_int64;payload%scope_fingerprint=1114_int64
+    payload%pseudopotential_fingerprint=1115_int64;payload%energy_fingerprint=1116_int64
+    payload%analysis_fingerprint=1117_int64;payload%selection_fingerprint=1118_int64
+    nrow=count([(mod(row-1,nproc)==rank,row=1,n)])
+    npoint=count([(mod(point-1,nproc)==rank,point=1,n)])
+    allocate(payload%row_ids(nrow),payload%metric_rows(nrow,n),payload%kinetic_rows(nrow,n),&
+      payload%nonlocal_rows(nrow,n),payload%local_rows(nrow,n),payload%sipg_rows(nrow,n),&
+      payload%hamiltonian_rows(nrow,n),payload%coefficients(nrow,2))
+    allocate(payload%metric_row_offsets(nrow+1),payload%metric_column_ids(nrow*n),&
+      payload%operator_row_offsets(nrow+1),payload%operator_column_ids(nrow))
+    payload%metric_row_offsets=[(1+(row-1)*n,row=1,nrow+1)]
+    do row=1,nrow;payload%metric_column_ids((row-1)*n+1:row*n)=[1,2,3,4];enddo
+    payload%operator_row_offsets=[(row,row=1,nrow+1)]
+    payload%metric_rows=(0d0,0d0);payload%kinetic_rows=(0d0,0d0);payload%nonlocal_rows=(0d0,0d0)
+    payload%local_rows=(0d0,0d0);payload%sipg_rows=(0d0,0d0);payload%coefficients=(0d0,0d0)
+    local_row=0
+    do row=1,n
+      if(mod(row-1,nproc)/=rank)cycle
+      local_row=local_row+1;payload%row_ids(local_row)=row
+      payload%operator_column_ids(local_row)=row
+      payload%metric_rows(local_row,row)=cmplx(1d0+0.1d0*row,0d0,real64)
+      payload%kinetic_rows(local_row,row)=cmplx(0.2d0*row,0d0,real64)
+      payload%nonlocal_rows(local_row,row)=cmplx(-0.03d0*row,0d0,real64)
+      payload%local_rows(local_row,row)=cmplx(0.07d0*row,0d0,real64)
+      payload%sipg_rows(local_row,row)=cmplx(0.01d0*row,0d0,real64)
+      payload%coefficients(local_row,1)=cmplx(0.1d0*row,0.02d0*row,real64)
+      payload%coefficients(local_row,2)=cmplx(-0.03d0*row,0.04d0*row,real64)
+    enddo
+    payload%hamiltonian_rows=payload%kinetic_rows+payload%nonlocal_rows+payload%local_rows+payload%sipg_rows
+    call fingerprint_rt_dg_hybrid_component(comm,payload%row_ids,payload%kinetic_rows,&
+      payload%kinetic_fingerprint,fingerprint_ok);call require(fingerprint_ok,'kinetic fixture fingerprint failed')
+    call fingerprint_rt_dg_hybrid_component(comm,payload%row_ids,payload%nonlocal_rows,&
+      payload%nonlocal_fingerprint,fingerprint_ok);call require(fingerprint_ok,'nonlocal fixture fingerprint failed')
+    call fingerprint_rt_dg_hybrid_component(comm,payload%row_ids,payload%local_rows,&
+      payload%local_fingerprint,fingerprint_ok);call require(fingerprint_ok,'local fixture fingerprint failed')
+    call fingerprint_rt_dg_hybrid_component(comm,payload%row_ids,payload%sipg_rows,&
+      payload%sipg_fingerprint,fingerprint_ok);call require(fingerprint_ok,'SIPG fixture fingerprint failed')
+    allocate(payload%grid_ids(npoint),payload%grid_weights(npoint),payload%partition_ids(npoint),&
+      payload%basis_values(n,npoint),payload%density(npoint))
+    local_point=0
+    do point=1,n
+      if(mod(point-1,nproc)/=rank)cycle
+      local_point=local_point+1;payload%grid_ids(local_point)=100+point;payload%grid_weights(local_point)=0.25d0
+      payload%partition_ids(local_point)=1+mod(point,2);payload%density(local_point)=0.5d0+0.01d0*point
+      do row=1,n;payload%basis_values(row,local_point)=cmplx(0.01d0*row*point,-0.02d0*row,real64);enddo
+    enddo
+    allocate(payload%face_ids(1),payload%face_point_ids(1),payload%face_metadata(4,1),payload%face_offsets(2),&
+      payload%face_value_offsets(2),payload%face_basis_ids(2),&
+      payload%face_normals(3,1),payload%face_weights(1),payload%face_values(4,1),payload%interface_observables(3,1))
+    payload%face_ids=200+rank;payload%face_point_ids=300+rank;payload%face_metadata(:,1)=[1,2,0,rank]
+    payload%face_offsets=[1,2];payload%face_value_offsets=[1,5];payload%face_basis_ids=[1,2]
+    payload%face_normals(:,1)=[1d0,0d0,0d0];payload%face_weights=0.5d0
+    payload%face_values(:,1)=[(0.1d0,0.01d0),(0.2d0,0.02d0),(0.3d0,0.03d0),(0.4d0,0.04d0)]
+    payload%interface_observables(:,1)=[(0.5d0,0d0),(0.6d0,0d0),(0.7d0,0d0)]
+    allocate(payload%nonlocal_ids(1),payload%nonlocal_owner(1),payload%nonlocal_values(2,1))
+    payload%nonlocal_ids=400+rank;payload%nonlocal_owner=rank
+    payload%nonlocal_values(:,1)=[(0.11d0,0.02d0),(0.12d0,0.03d0)]
+    allocate(payload%requested_ids(3),payload%effective_ids(4),payload%added_ids(1),payload%closure_parent(1),&
+      payload%closure_reason(1),payload%closure_action(1),payload%scope_selectors(6),payload%xc_types(1))
+    payload%requested_ids=[1,2,3];payload%effective_ids=[1,2,3,4];payload%added_ids=4
+    payload%closure_parent=1;payload%closure_reason=2;payload%closure_action=2
+    payload%scope_selectors=[1,1,0,0,0,0];payload%xc_types=4
+    allocate(payload%occupations(2),payload%eigenvalues(2),payload%continuation_receipt(8),&
+      payload%pseudopotential_receipt(3),payload%energy_receipt(4))
+    payload%occupations=[2d0,2d0];payload%eigenvalues=[-0.5d0,-0.2d0]
+    payload%continuation_receipt=[1d0,1d-9,2d-9,3d-9,4d-9,0d0,1d0,1d0]
+    payload%pseudopotential_receipt=[1d0,2d0,3d0];payload%energy_receipt=[4d0,5d0,6d0,7d0]
+  end subroutine construct_complete_payload
+
   subroutine write_legacy_checkpoint(checkpoint_path)
     character(*),intent(in)::checkpoint_path
     character(16),parameter::magic='SALMON_DG_HYB01 '

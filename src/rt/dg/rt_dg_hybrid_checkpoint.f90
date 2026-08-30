@@ -14,8 +14,33 @@ module rt_dg_hybrid_checkpoint
   character(16),parameter::checkpoint_magic='SALMON_DG_HYB01 '
   character(16),parameter::occupied_magic='SALMON_DG_OCC02 '
   integer,parameter::occupied_version=2
+  integer,parameter::ground_state_version=1
+  character(16),parameter::ground_state_magic='SALMON_DG_GS001 '
+  type,public::s_rt_dg_hybrid_ground_state_payload
+    logical::valid=.false.,final_refresh_complete=.false.,analysis_complete=.false.,identity_only=.false.
+    integer::global_count=0,noccupied=0,operation_count=0,nonidentity_operation_count=0
+    integer(int64)::catalog_fingerprint=0_int64,state_fingerprint=0_int64,metric_fingerprint=0_int64,&
+      operator_structure_fingerprint=0_int64,operator_value_fingerprint=0_int64,&
+      kinetic_fingerprint=0_int64,nonlocal_fingerprint=0_int64,local_fingerprint=0_int64,&
+      sipg_fingerprint=0_int64,basis_fingerprint=0_int64,face_fingerprint=0_int64,&
+      dc_seed_fingerprint=0_int64,continuation_fingerprint=0_int64,scope_fingerprint=0_int64,&
+      selection_fingerprint=0_int64,&
+      analysis_fingerprint=0_int64,pseudopotential_fingerprint=0_int64,energy_fingerprint=0_int64,payload_fingerprint=0_int64
+    integer(int64),allocatable::row_ids(:),grid_ids(:),face_ids(:),face_point_ids(:),nonlocal_ids(:)
+    integer,allocatable::metric_row_offsets(:),metric_column_ids(:),operator_row_offsets(:),operator_column_ids(:),&
+      partition_ids(:),face_metadata(:,:),face_offsets(:),face_value_offsets(:),face_basis_ids(:),nonlocal_owner(:),&
+      requested_ids(:),effective_ids(:),added_ids(:),closure_parent(:),closure_reason(:),closure_action(:),&
+      scope_selectors(:),xc_types(:)
+    real(real64),allocatable::grid_weights(:),face_normals(:,:),face_weights(:),density(:),occupations(:),&
+      eigenvalues(:),continuation_receipt(:),pseudopotential_receipt(:),energy_receipt(:)
+    complex(real64),allocatable::metric_rows(:,:),kinetic_rows(:,:),nonlocal_rows(:,:),local_rows(:,:),&
+      sipg_rows(:,:),hamiltonian_rows(:,:),basis_values(:,:),face_values(:,:),nonlocal_values(:,:),&
+      coefficients(:,:),interface_observables(:,:)
+  end type s_rt_dg_hybrid_ground_state_payload
   public::write_rt_dg_hybrid_checkpoint,read_rt_dg_hybrid_checkpoint,&
-    write_rt_dg_hybrid_occupied_checkpoint,read_rt_dg_hybrid_occupied_checkpoint
+    write_rt_dg_hybrid_occupied_checkpoint,read_rt_dg_hybrid_occupied_checkpoint,&
+    write_rt_dg_hybrid_ground_state_checkpoint,read_rt_dg_hybrid_ground_state_checkpoint,&
+    fingerprint_rt_dg_hybrid_component
   interface
     function c_rename(old_path,new_path) bind(C,name='rename') result(status)
       import::c_char,c_int
@@ -24,6 +49,30 @@ module rt_dg_hybrid_checkpoint
     end function c_rename
   end interface
 contains
+  subroutine fingerprint_rt_dg_hybrid_component(comm,row_ids,values,fingerprint,ok)
+    integer,intent(in)::comm
+    integer(int64),intent(in)::row_ids(:)
+    complex(real64),intent(in)::values(:,:)
+    integer(int64),intent(out)::fingerprint
+    logical,intent(out)::ok
+#ifdef USE_MPI
+    integer::i,j,ierr;integer(int64)::local_hash,bits
+    local_hash=0_int64
+    if(size(values,1)/=size(row_ids).or..not.finite_matrix(values))then;fingerprint=0_int64;ok=.false.;return;endif
+    do i=1,size(row_ids);do j=1,size(values,2)
+      bits=transfer(real(values(i,j)),bits)
+      local_hash=ieor(local_hash,ishftc(ieor(bits,row_ids(i)),mod(7*j,63)))
+      bits=transfer(aimag(values(i,j)),bits)
+      local_hash=ieor(local_hash,ishftc(ieor(bits,ishftc(row_ids(i),17)),mod(11*j,63)))
+    enddo;enddo
+    call MPI_Allreduce(local_hash,fingerprint,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
+    fingerprint=ieor(fingerprint,ishftc(int(size(values,2),int64),31))
+    if(fingerprint==0_int64)fingerprint=1_int64
+    ok=ierr==MPI_SUCCESS
+#else
+    fingerprint=0_int64;ok=.false.
+#endif
+  end subroutine fingerprint_rt_dg_hybrid_component
   subroutine write_rt_dg_hybrid_checkpoint(comm,path,catalog_fingerprint,metric,operators,coefficients_owned,&
       state_fingerprint,payload_fingerprint,ok,message)
     integer,intent(in)::comm
@@ -481,6 +530,320 @@ contains
 #endif
   end subroutine read_rt_dg_hybrid_checkpoint
 
+  subroutine write_rt_dg_hybrid_ground_state_checkpoint(comm,path,payload,payload_fingerprint,ok,message,interrupt_after_write)
+    integer,intent(in)::comm
+    character(*),intent(in)::path
+    type(s_rt_dg_hybrid_ground_state_payload),intent(in)::payload
+    integer(int64),intent(out)::payload_fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    logical,optional,intent(in)::interrupt_after_write
+#ifdef USE_MPI
+    integer::rank,nproc,ierr,unit,io_status,owner,local_bad,global_bad,header_i(4),i,j,total_faces,attempt
+    integer,allocatable::ownership(:),face_counts(:),face_displacements(:)
+    integer(int64),allocatable::all_face_ids(:)
+    integer(int64)::header_fp(19),local_hash,global_hash,common_hash,minimum_common_hash,maximum_common_hash,nonce,&
+      computed_component_fingerprints(4)
+    logical::header_l(4),opened,verified_ok,fingerprint_ok,created
+    character(256)::verified_message
+    character(:),allocatable::temporary_path
+    type(s_rt_dg_hybrid_ground_state_payload)::verified
+    ok=.false.;message='';payload_fingerprint=0_int64;opened=.false.;io_status=0
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
+    call validate_ground_state_payload(payload,local_bad)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid complete DG ground-state payload';return;endif
+    call fingerprint_rt_dg_hybrid_component(comm,payload%row_ids,payload%kinetic_rows,&
+      computed_component_fingerprints(1),fingerprint_ok);if(.not.fingerprint_ok)return
+    call fingerprint_rt_dg_hybrid_component(comm,payload%row_ids,payload%nonlocal_rows,&
+      computed_component_fingerprints(2),fingerprint_ok);if(.not.fingerprint_ok)return
+    call fingerprint_rt_dg_hybrid_component(comm,payload%row_ids,payload%local_rows,&
+      computed_component_fingerprints(3),fingerprint_ok);if(.not.fingerprint_ok)return
+    call fingerprint_rt_dg_hybrid_component(comm,payload%row_ids,payload%sipg_rows,&
+      computed_component_fingerprints(4),fingerprint_ok);if(.not.fingerprint_ok)return
+    if(any(computed_component_fingerprints/=[payload%kinetic_fingerprint,payload%nonlocal_fingerprint,&
+      payload%local_fingerprint,payload%sipg_fingerprint]))then
+      message='complete DG ground-state component fingerprint mismatch';return
+    endif
+    call hash_ground_state_common(payload,common_hash)
+    call MPI_Allreduce(common_hash,minimum_common_hash,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(common_hash,maximum_common_hash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_common_hash/=maximum_common_hash)then
+      message='rank-disagreeing complete DG ground-state metadata';return
+    endif
+    allocate(ownership(payload%global_count));ownership=0
+    do i=1,size(payload%row_ids)
+      if(payload%row_ids(i)>=1_int64.and.payload%row_ids(i)<=int(payload%global_count,int64))&
+        ownership(int(payload%row_ids(i)))=ownership(int(payload%row_ids(i)))+1
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,ownership,payload%global_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(ownership/=1))then;message='complete DG ground-state rows are not owned exactly once';return;endif
+    allocate(face_counts(nproc),face_displacements(nproc))
+    call MPI_Allgather(size(payload%face_ids),1,MPI_INTEGER,face_counts,1,MPI_INTEGER,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    face_displacements(1)=0
+    do i=2,nproc;face_displacements(i)=face_displacements(i-1)+face_counts(i-1);enddo
+    total_faces=sum(face_counts);allocate(all_face_ids(total_faces))
+    call MPI_Allgatherv(payload%face_ids,size(payload%face_ids),MPI_INTEGER8,all_face_ids,face_counts,&
+      face_displacements,MPI_INTEGER8,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    do i=1,total_faces;do j=i+1,total_faces
+      if(all_face_ids(i)==all_face_ids(j))then;message='complete DG ground-state faces are not owned exactly once';return;endif
+    enddo;enddo
+    call hash_ground_state_payload(payload,local_hash)
+    call MPI_Allreduce(local_hash,global_hash,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='complete DG ground-state fingerprint failed';return;endif
+    global_hash=mix_hash(common_hash,global_hash);if(global_hash==0_int64)global_hash=1_int64
+    payload_fingerprint=global_hash
+    nonce=0_int64;if(rank==0)call system_clock(count=nonce)
+    call MPI_Bcast(nonce,1,MPI_INTEGER8,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='complete DG ground-state temporary-name broadcast failed';return;endif
+    created=.false.
+    do attempt=0,31
+      temporary_path=trim(path)//'.tmp.'//trim(int64_string(payload%catalog_fingerprint))//'.'//&
+        trim(int64_string(payload%state_fingerprint))//'.'//trim(int64_string(nonce+int(attempt,int64)))
+      io_status=0
+      if(rank==0)then
+        open(newunit=unit,file=temporary_path,status='new',access='stream',form='unformatted',action='write',iostat=io_status)
+        opened=io_status==0
+      endif
+      call MPI_Bcast(io_status,1,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(io_status==0)then;created=.true.;exit;endif
+    enddo
+    if(.not.created)then;message='cannot create unique complete DG ground-state temporary file';return;endif
+    if(rank==0)write(unit,iostat=io_status)ground_state_magic,ground_state_version,nproc
+    call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)goto 910
+    do owner=0,nproc-1
+      if(rank==owner)then
+        header_l=[payload%valid,payload%final_refresh_complete,payload%analysis_complete,payload%identity_only]
+        header_i=[payload%global_count,payload%noccupied,payload%operation_count,payload%nonidentity_operation_count]
+        header_fp=[payload%catalog_fingerprint,payload%state_fingerprint,payload%metric_fingerprint,&
+          payload%operator_structure_fingerprint,payload%operator_value_fingerprint,payload%kinetic_fingerprint,&
+          payload%nonlocal_fingerprint,payload%local_fingerprint,payload%sipg_fingerprint,payload%basis_fingerprint,&
+          payload%face_fingerprint,payload%dc_seed_fingerprint,payload%continuation_fingerprint,payload%scope_fingerprint,&
+          payload%analysis_fingerprint,payload%selection_fingerprint,&
+          payload%pseudopotential_fingerprint,payload%energy_fingerprint,payload_fingerprint]
+      endif
+      call MPI_Bcast(header_l,4,MPI_LOGICAL,owner,comm,ierr);if(ierr/=MPI_SUCCESS)goto 900
+      call MPI_Bcast(header_i,4,MPI_INTEGER,owner,comm,ierr);if(ierr/=MPI_SUCCESS)goto 900
+      call MPI_Bcast(header_fp,19,MPI_INTEGER8,owner,comm,ierr);if(ierr/=MPI_SUCCESS)goto 900
+      if(rank==0)write(unit,iostat=io_status)header_l,header_i,header_fp
+      call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)goto 910
+      call write_ground_state_arrays(comm,owner,unit,rank,payload,io_status,ierr)
+      if(ierr/=MPI_SUCCESS.or.io_status/=0)goto 910
+    enddo
+    if(rank==0)then;close(unit,iostat=io_status);opened=.false.;endif
+    call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)goto 910
+    if(present(interrupt_after_write))then
+      if(interrupt_after_write)then;message='injected interruption after complete checkpoint write';return;endif
+    endif
+    call read_rt_dg_hybrid_ground_state_checkpoint(comm,temporary_path,verified,global_hash,verified_ok,verified_message)
+    if(.not.verified_ok.or.global_hash/=payload_fingerprint)then
+      message='complete DG ground-state checkpoint verification failed';return
+    endif
+    if(rank==0)call atomic_rename(temporary_path,trim(path),io_status)
+    call MPI_Bcast(io_status,1,MPI_INTEGER,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.io_status/=0)then;message='complete DG ground-state checkpoint publication failed';return;endif
+    ok=.true.;return
+900 message='complete DG ground-state checkpoint MPI stream failed';if(rank==0.and.opened)close(unit);return
+910 message='complete DG ground-state checkpoint write failed';if(rank==0.and.opened)close(unit);return
+#else
+    ok=.false.;message='complete DG ground-state checkpoint requires MPI';payload_fingerprint=0_int64
+#endif
+  end subroutine write_rt_dg_hybrid_ground_state_checkpoint
+
+  subroutine read_rt_dg_hybrid_ground_state_checkpoint(comm,path,payload,payload_fingerprint,ok,message)
+    integer,intent(in)::comm
+    character(*),intent(in)::path
+    type(s_rt_dg_hybrid_ground_state_payload),intent(out)::payload
+    integer(int64),intent(out)::payload_fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,nproc,ierr,unit,io_status,owner,file_nproc,version,local_bad,global_bad,header_i(4)
+    integer(int64)::header_fp(19),local_hash,global_hash,computed_component_fingerprints(4),common_hash,&
+      minimum_common_hash,maximum_common_hash
+    logical::header_l(4),opened,fingerprint_ok
+    character(16)::magic
+    ok=.false.;message='';payload_fingerprint=0_int64;opened=.false.;io_status=0
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
+    if(rank==0)then
+      open(newunit=unit,file=trim(path),status='old',access='stream',form='unformatted',action='read',iostat=io_status)
+      opened=io_status==0
+      if(io_status==0)read(unit,iostat=io_status)magic,version,file_nproc
+    endif
+    call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)goto 920
+    call MPI_Bcast(magic,16,MPI_CHARACTER,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 920
+    call MPI_Bcast(version,1,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 920
+    call MPI_Bcast(file_nproc,1,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 920
+    if(magic/=ground_state_magic.or.version/=ground_state_version.or.file_nproc/=nproc)then
+      message='incompatible complete DG ground-state checkpoint';goto 920
+    endif
+    do owner=0,nproc-1
+      if(rank==0)read(unit,iostat=io_status)header_l,header_i,header_fp
+      call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)goto 920
+      call MPI_Bcast(header_l,4,MPI_LOGICAL,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 920
+      call MPI_Bcast(header_i,4,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 920
+      call MPI_Bcast(header_fp,19,MPI_INTEGER8,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 920
+      if(rank==owner)then
+        payload%valid=header_l(1);payload%final_refresh_complete=header_l(2)
+        payload%analysis_complete=header_l(3);payload%identity_only=header_l(4)
+        payload%global_count=header_i(1);payload%noccupied=header_i(2)
+        payload%operation_count=header_i(3);payload%nonidentity_operation_count=header_i(4)
+        payload%catalog_fingerprint=header_fp(1);payload%state_fingerprint=header_fp(2)
+        payload%metric_fingerprint=header_fp(3);payload%operator_structure_fingerprint=header_fp(4)
+        payload%operator_value_fingerprint=header_fp(5);payload%kinetic_fingerprint=header_fp(6)
+        payload%nonlocal_fingerprint=header_fp(7);payload%local_fingerprint=header_fp(8)
+        payload%sipg_fingerprint=header_fp(9);payload%basis_fingerprint=header_fp(10)
+        payload%face_fingerprint=header_fp(11);payload%dc_seed_fingerprint=header_fp(12)
+        payload%continuation_fingerprint=header_fp(13);payload%scope_fingerprint=header_fp(14)
+        payload%analysis_fingerprint=header_fp(15);payload%selection_fingerprint=header_fp(16)
+        payload%pseudopotential_fingerprint=header_fp(17);payload%energy_fingerprint=header_fp(18)
+        payload%payload_fingerprint=header_fp(19)
+      endif
+      call read_ground_state_arrays(comm,owner,unit,rank,payload,io_status,ierr)
+      if(ierr/=MPI_SUCCESS.or.io_status/=0)goto 920
+    enddo
+    if(rank==0)then;close(unit);opened=.false.;endif
+    call validate_ground_state_payload(payload,local_bad)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='corrupt complete DG ground-state payload';return;endif
+    call hash_ground_state_common(payload,common_hash)
+    call MPI_Allreduce(common_hash,minimum_common_hash,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(common_hash,maximum_common_hash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_common_hash/=maximum_common_hash)then
+      message='rank-disagreeing complete DG ground-state metadata';return
+    endif
+    call fingerprint_rt_dg_hybrid_component(comm,payload%row_ids,payload%kinetic_rows,&
+      computed_component_fingerprints(1),fingerprint_ok);if(.not.fingerprint_ok)return
+    call fingerprint_rt_dg_hybrid_component(comm,payload%row_ids,payload%nonlocal_rows,&
+      computed_component_fingerprints(2),fingerprint_ok);if(.not.fingerprint_ok)return
+    call fingerprint_rt_dg_hybrid_component(comm,payload%row_ids,payload%local_rows,&
+      computed_component_fingerprints(3),fingerprint_ok);if(.not.fingerprint_ok)return
+    call fingerprint_rt_dg_hybrid_component(comm,payload%row_ids,payload%sipg_rows,&
+      computed_component_fingerprints(4),fingerprint_ok);if(.not.fingerprint_ok)return
+    if(any(computed_component_fingerprints/=[payload%kinetic_fingerprint,payload%nonlocal_fingerprint,&
+      payload%local_fingerprint,payload%sipg_fingerprint]))then
+      message='corrupt complete DG ground-state component fingerprint';return
+    endif
+    call hash_ground_state_payload(payload,local_hash)
+    call MPI_Allreduce(local_hash,global_hash,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    global_hash=mix_hash(common_hash,global_hash);if(global_hash==0_int64)global_hash=1_int64
+    local_bad=merge(0,1,global_hash==payload%payload_fingerprint)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='corrupt complete DG ground-state fingerprint';return;endif
+    payload_fingerprint=global_hash;ok=.true.;return
+920 if(rank==0.and.opened)close(unit);message='complete DG ground-state checkpoint read failed';return
+#else
+    ok=.false.;message='complete DG ground-state checkpoint requires MPI';payload_fingerprint=0_int64
+#endif
+  end subroutine read_rt_dg_hybrid_ground_state_checkpoint
+
+#ifdef USE_MPI
+  subroutine write_ground_state_arrays(comm,owner,unit,rank,payload,io_status,ierr)
+    integer,intent(in)::comm,owner,unit,rank
+    type(s_rt_dg_hybrid_ground_state_payload),intent(in)::payload
+    integer,intent(inout)::io_status
+    integer,intent(out)::ierr
+    call stream_write_i64_1(comm,owner,unit,rank,payload%row_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i64_1(comm,owner,unit,rank,payload%grid_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i64_1(comm,owner,unit,rank,payload%face_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i64_1(comm,owner,unit,rank,payload%face_point_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i64_1(comm,owner,unit,rank,payload%nonlocal_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i1(comm,owner,unit,rank,payload%partition_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i1(comm,owner,unit,rank,payload%metric_row_offsets,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i1(comm,owner,unit,rank,payload%metric_column_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i1(comm,owner,unit,rank,payload%operator_row_offsets,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i1(comm,owner,unit,rank,payload%operator_column_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i2(comm,owner,unit,rank,payload%face_metadata,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i1(comm,owner,unit,rank,payload%face_offsets,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i1(comm,owner,unit,rank,payload%face_value_offsets,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i1(comm,owner,unit,rank,payload%face_basis_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i1(comm,owner,unit,rank,payload%nonlocal_owner,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i1(comm,owner,unit,rank,payload%requested_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i1(comm,owner,unit,rank,payload%effective_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i1(comm,owner,unit,rank,payload%added_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i1(comm,owner,unit,rank,payload%closure_parent,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i1(comm,owner,unit,rank,payload%closure_reason,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i1(comm,owner,unit,rank,payload%closure_action,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i1(comm,owner,unit,rank,payload%scope_selectors,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_i1(comm,owner,unit,rank,payload%xc_types,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_r1(comm,owner,unit,rank,payload%grid_weights,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_r2(comm,owner,unit,rank,payload%face_normals,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_r1(comm,owner,unit,rank,payload%face_weights,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_r1(comm,owner,unit,rank,payload%density,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_r1(comm,owner,unit,rank,payload%occupations,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_r1(comm,owner,unit,rank,payload%eigenvalues,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_r1(comm,owner,unit,rank,payload%continuation_receipt,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_r1(comm,owner,unit,rank,payload%pseudopotential_receipt,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_r1(comm,owner,unit,rank,payload%energy_receipt,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_z2(comm,owner,unit,rank,payload%metric_rows,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_z2(comm,owner,unit,rank,payload%kinetic_rows,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_z2(comm,owner,unit,rank,payload%nonlocal_rows,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_z2(comm,owner,unit,rank,payload%local_rows,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_z2(comm,owner,unit,rank,payload%sipg_rows,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_z2(comm,owner,unit,rank,payload%hamiltonian_rows,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_z2(comm,owner,unit,rank,payload%basis_values,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_z2(comm,owner,unit,rank,payload%face_values,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_z2(comm,owner,unit,rank,payload%nonlocal_values,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_z2(comm,owner,unit,rank,payload%coefficients,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_write_z2(comm,owner,unit,rank,payload%interface_observables,io_status,ierr)
+  end subroutine write_ground_state_arrays
+
+  subroutine read_ground_state_arrays(comm,owner,unit,rank,payload,io_status,ierr)
+    integer,intent(in)::comm,owner,unit,rank
+    type(s_rt_dg_hybrid_ground_state_payload),intent(inout)::payload
+    integer,intent(inout)::io_status
+    integer,intent(out)::ierr
+    call stream_read_i64_1(comm,owner,unit,rank,payload%row_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i64_1(comm,owner,unit,rank,payload%grid_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i64_1(comm,owner,unit,rank,payload%face_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i64_1(comm,owner,unit,rank,payload%face_point_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i64_1(comm,owner,unit,rank,payload%nonlocal_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i1(comm,owner,unit,rank,payload%partition_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i1(comm,owner,unit,rank,payload%metric_row_offsets,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i1(comm,owner,unit,rank,payload%metric_column_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i1(comm,owner,unit,rank,payload%operator_row_offsets,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i1(comm,owner,unit,rank,payload%operator_column_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i2(comm,owner,unit,rank,payload%face_metadata,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i1(comm,owner,unit,rank,payload%face_offsets,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i1(comm,owner,unit,rank,payload%face_value_offsets,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i1(comm,owner,unit,rank,payload%face_basis_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i1(comm,owner,unit,rank,payload%nonlocal_owner,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i1(comm,owner,unit,rank,payload%requested_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i1(comm,owner,unit,rank,payload%effective_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i1(comm,owner,unit,rank,payload%added_ids,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i1(comm,owner,unit,rank,payload%closure_parent,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i1(comm,owner,unit,rank,payload%closure_reason,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i1(comm,owner,unit,rank,payload%closure_action,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i1(comm,owner,unit,rank,payload%scope_selectors,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_i1(comm,owner,unit,rank,payload%xc_types,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_r1(comm,owner,unit,rank,payload%grid_weights,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_r2(comm,owner,unit,rank,payload%face_normals,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_r1(comm,owner,unit,rank,payload%face_weights,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_r1(comm,owner,unit,rank,payload%density,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_r1(comm,owner,unit,rank,payload%occupations,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_r1(comm,owner,unit,rank,payload%eigenvalues,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_r1(comm,owner,unit,rank,payload%continuation_receipt,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_r1(comm,owner,unit,rank,payload%pseudopotential_receipt,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_r1(comm,owner,unit,rank,payload%energy_receipt,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_z2(comm,owner,unit,rank,payload%metric_rows,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_z2(comm,owner,unit,rank,payload%kinetic_rows,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_z2(comm,owner,unit,rank,payload%nonlocal_rows,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_z2(comm,owner,unit,rank,payload%local_rows,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_z2(comm,owner,unit,rank,payload%sipg_rows,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_z2(comm,owner,unit,rank,payload%hamiltonian_rows,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_z2(comm,owner,unit,rank,payload%basis_values,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_z2(comm,owner,unit,rank,payload%face_values,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_z2(comm,owner,unit,rank,payload%nonlocal_values,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_z2(comm,owner,unit,rank,payload%coefficients,io_status,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call stream_read_z2(comm,owner,unit,rank,payload%interface_observables,io_status,ierr)
+  end subroutine read_ground_state_arrays
+#endif
+
   subroutine write_rt_dg_hybrid_occupied_checkpoint(comm,path,global_count,row_ids,coefficients,occupations,eigenvalues,&
       catalog_fingerprint,basis_fingerprint,provenance_fingerprints,operator_fingerprint,state_fingerprint,scf_receipts,&
       maximum_scf_residual,payload_fingerprint,ok,message)
@@ -730,6 +1093,330 @@ contains
     end subroutine
 #endif
   end subroutine read_rt_dg_hybrid_occupied_checkpoint
+
+#ifdef USE_MPI
+  subroutine valid_stream_extent(unit,rank,count,element_bytes,comm,valid,ierr)
+    integer,intent(in)::unit,rank,element_bytes,comm
+    integer(int64),intent(in)::count
+    logical,intent(out)::valid
+    integer,intent(out)::ierr
+    integer(int64)::file_size
+    integer::inquire_status
+    file_size=0_int64;inquire_status=0
+    if(rank==0)inquire(unit=unit,size=file_size,iostat=inquire_status)
+    call MPI_Bcast(inquire_status,1,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Bcast(file_size,1,MPI_INTEGER8,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    valid=inquire_status==0.and.count>=0_int64.and.count<=file_size/max(1_int64,int(element_bytes,int64))
+  end subroutine valid_stream_extent
+
+  subroutine stream_write_i64_1(comm,owner,unit,rank,a,io_status,ierr)
+    integer,intent(in)::comm,owner,unit,rank;integer(int64),allocatable,intent(in)::a(:)
+    integer,intent(inout)::io_status;integer,intent(out)::ierr;integer::n
+    integer(int64),allocatable::buffer(:);logical::extent_ok
+    n=0;if(rank==owner.and.allocated(a))n=size(a);call MPI_Bcast(n,1,MPI_INTEGER,owner,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    allocate(buffer(n));if(rank==owner.and.n>0)buffer=a
+    call MPI_Bcast(buffer,n,MPI_INTEGER8,owner,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(rank==0)then;write(unit,iostat=io_status)n;if(io_status==0.and.n>0)write(unit,iostat=io_status)buffer;endif
+    call sync_io(io_status,comm,ierr)
+  end subroutine
+  subroutine stream_read_i64_1(comm,owner,unit,rank,a,io_status,ierr)
+    integer,intent(in)::comm,owner,unit,rank;integer(int64),allocatable,intent(inout)::a(:)
+    integer,intent(inout)::io_status;integer,intent(out)::ierr;integer::n
+    integer(int64),allocatable::buffer(:);logical::extent_ok
+    if(rank==0)read(unit,iostat=io_status)n;call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call MPI_Bcast(n,1,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call valid_stream_extent(unit,rank,int(n,int64),8,comm,extent_ok,ierr);if(ierr/=MPI_SUCCESS)return
+    if(.not.extent_ok)then;io_status=1;call sync_io(io_status,comm,ierr);return;endif
+    allocate(buffer(n));if(rank==0.and.n>0)read(unit,iostat=io_status)buffer
+    call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call MPI_Bcast(buffer,n,MPI_INTEGER8,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(rank==owner)allocate(a,source=buffer)
+  end subroutine
+  subroutine stream_write_i1(comm,owner,unit,rank,a,io_status,ierr)
+    integer,intent(in)::comm,owner,unit,rank;integer,allocatable,intent(in)::a(:)
+    integer,intent(inout)::io_status;integer,intent(out)::ierr;integer::n;integer,allocatable::buffer(:);logical::extent_ok
+    n=0;if(rank==owner.and.allocated(a))n=size(a);call MPI_Bcast(n,1,MPI_INTEGER,owner,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    allocate(buffer(n));if(rank==owner.and.n>0)buffer=a;call MPI_Bcast(buffer,n,MPI_INTEGER,owner,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(rank==0)then;write(unit,iostat=io_status)n;if(io_status==0.and.n>0)write(unit,iostat=io_status)buffer;endif
+    call sync_io(io_status,comm,ierr)
+  end subroutine
+  subroutine stream_read_i1(comm,owner,unit,rank,a,io_status,ierr)
+    integer,intent(in)::comm,owner,unit,rank;integer,allocatable,intent(inout)::a(:)
+    integer,intent(inout)::io_status;integer,intent(out)::ierr;integer::n;integer,allocatable::buffer(:);logical::extent_ok
+    if(rank==0)read(unit,iostat=io_status)n;call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call MPI_Bcast(n,1,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call valid_stream_extent(unit,rank,int(n,int64),4,comm,extent_ok,ierr);if(ierr/=MPI_SUCCESS)return
+    if(.not.extent_ok)then;io_status=1;call sync_io(io_status,comm,ierr);return;endif
+    allocate(buffer(n));if(rank==0.and.n>0)read(unit,iostat=io_status)buffer
+    call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call MPI_Bcast(buffer,n,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)return;if(rank==owner)allocate(a,source=buffer)
+  end subroutine
+  subroutine stream_write_i2(comm,owner,unit,rank,a,io_status,ierr)
+    integer,intent(in)::comm,owner,unit,rank;integer,allocatable,intent(in)::a(:,:)
+    integer,intent(inout)::io_status;integer,intent(out)::ierr;integer::dims(2);integer,allocatable::buffer(:,:);logical::extent_ok
+    dims=0;if(rank==owner.and.allocated(a))dims=shape(a);call MPI_Bcast(dims,2,MPI_INTEGER,owner,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    allocate(buffer(dims(1),dims(2)));if(rank==owner.and.product(dims)>0)buffer=a
+    call MPI_Bcast(buffer,product(dims),MPI_INTEGER,owner,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(rank==0)then;write(unit,iostat=io_status)dims;if(io_status==0.and.product(dims)>0)write(unit,iostat=io_status)buffer;endif
+    call sync_io(io_status,comm,ierr)
+  end subroutine
+  subroutine stream_read_i2(comm,owner,unit,rank,a,io_status,ierr)
+    integer,intent(in)::comm,owner,unit,rank;integer,allocatable,intent(inout)::a(:,:)
+    integer,intent(inout)::io_status;integer,intent(out)::ierr;integer::dims(2);integer,allocatable::buffer(:,:);logical::extent_ok
+    if(rank==0)read(unit,iostat=io_status)dims;call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call MPI_Bcast(dims,2,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call valid_stream_extent(unit,rank,int(dims(1),int64)*int(dims(2),int64),4,comm,extent_ok,ierr);if(ierr/=MPI_SUCCESS)return
+    if(.not.extent_ok)then;io_status=1;call sync_io(io_status,comm,ierr);return;endif
+    allocate(buffer(dims(1),dims(2)));if(rank==0.and.product(dims)>0)read(unit,iostat=io_status)buffer
+    call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call MPI_Bcast(buffer,product(dims),MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)return;if(rank==owner)allocate(a,source=buffer)
+  end subroutine
+  subroutine stream_write_r1(comm,owner,unit,rank,a,io_status,ierr)
+    integer,intent(in)::comm,owner,unit,rank;real(real64),allocatable,intent(in)::a(:)
+    integer,intent(inout)::io_status;integer,intent(out)::ierr;integer::n;real(real64),allocatable::buffer(:);logical::extent_ok
+    n=0;if(rank==owner.and.allocated(a))n=size(a);call MPI_Bcast(n,1,MPI_INTEGER,owner,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    allocate(buffer(n));if(rank==owner.and.n>0)buffer=a
+    call MPI_Bcast(buffer,n,MPI_DOUBLE_PRECISION,owner,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(rank==0)then;write(unit,iostat=io_status)n;if(io_status==0.and.n>0)write(unit,iostat=io_status)buffer;endif
+    call sync_io(io_status,comm,ierr)
+  end subroutine
+  subroutine stream_read_r1(comm,owner,unit,rank,a,io_status,ierr)
+    integer,intent(in)::comm,owner,unit,rank;real(real64),allocatable,intent(inout)::a(:)
+    integer,intent(inout)::io_status;integer,intent(out)::ierr;integer::n;real(real64),allocatable::buffer(:);logical::extent_ok
+    if(rank==0)read(unit,iostat=io_status)n;call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call MPI_Bcast(n,1,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call valid_stream_extent(unit,rank,int(n,int64),8,comm,extent_ok,ierr);if(ierr/=MPI_SUCCESS)return
+    if(.not.extent_ok)then;io_status=1;call sync_io(io_status,comm,ierr);return;endif
+    allocate(buffer(n));if(rank==0.and.n>0)read(unit,iostat=io_status)buffer
+    call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call MPI_Bcast(buffer,n,MPI_DOUBLE_PRECISION,0,comm,ierr);if(ierr/=MPI_SUCCESS)return;if(rank==owner)allocate(a,source=buffer)
+  end subroutine
+  subroutine stream_write_r2(comm,owner,unit,rank,a,io_status,ierr)
+    integer,intent(in)::comm,owner,unit,rank;real(real64),allocatable,intent(in)::a(:,:)
+    integer,intent(inout)::io_status;integer,intent(out)::ierr;integer::dims(2);real(real64),allocatable::buffer(:,:);logical::extent_ok
+    dims=0;if(rank==owner.and.allocated(a))dims=shape(a);call MPI_Bcast(dims,2,MPI_INTEGER,owner,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    allocate(buffer(dims(1),dims(2)));if(rank==owner.and.product(dims)>0)buffer=a
+    call MPI_Bcast(buffer,product(dims),MPI_DOUBLE_PRECISION,owner,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(rank==0)then;write(unit,iostat=io_status)dims;if(io_status==0.and.product(dims)>0)write(unit,iostat=io_status)buffer;endif
+    call sync_io(io_status,comm,ierr)
+  end subroutine
+  subroutine stream_read_r2(comm,owner,unit,rank,a,io_status,ierr)
+    integer,intent(in)::comm,owner,unit,rank;real(real64),allocatable,intent(inout)::a(:,:)
+    integer,intent(inout)::io_status;integer,intent(out)::ierr;integer::dims(2);real(real64),allocatable::buffer(:,:);logical::extent_ok
+    if(rank==0)read(unit,iostat=io_status)dims;call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call MPI_Bcast(dims,2,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call valid_stream_extent(unit,rank,int(dims(1),int64)*int(dims(2),int64),8,comm,extent_ok,ierr);if(ierr/=MPI_SUCCESS)return
+    if(.not.extent_ok)then;io_status=1;call sync_io(io_status,comm,ierr);return;endif
+    allocate(buffer(dims(1),dims(2)));if(rank==0.and.product(dims)>0)read(unit,iostat=io_status)buffer
+    call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call MPI_Bcast(buffer,product(dims),MPI_DOUBLE_PRECISION,0,comm,ierr);if(ierr/=MPI_SUCCESS)return;if(rank==owner)allocate(a,source=buffer)
+  end subroutine
+  subroutine stream_write_z2(comm,owner,unit,rank,a,io_status,ierr)
+    integer,intent(in)::comm,owner,unit,rank;complex(real64),allocatable,intent(in)::a(:,:)
+    integer,intent(inout)::io_status;integer,intent(out)::ierr;integer::dims(2);complex(real64),allocatable::buffer(:,:);logical::extent_ok
+    dims=0;if(rank==owner.and.allocated(a))dims=shape(a);call MPI_Bcast(dims,2,MPI_INTEGER,owner,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    allocate(buffer(dims(1),dims(2)));if(rank==owner.and.product(dims)>0)buffer=a
+    call MPI_Bcast(buffer,product(dims),MPI_DOUBLE_COMPLEX,owner,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    if(rank==0)then;write(unit,iostat=io_status)dims;if(io_status==0.and.product(dims)>0)write(unit,iostat=io_status)buffer;endif
+    call sync_io(io_status,comm,ierr)
+  end subroutine
+  subroutine stream_read_z2(comm,owner,unit,rank,a,io_status,ierr)
+    integer,intent(in)::comm,owner,unit,rank;complex(real64),allocatable,intent(inout)::a(:,:)
+    integer,intent(inout)::io_status;integer,intent(out)::ierr;integer::dims(2);complex(real64),allocatable::buffer(:,:);logical::extent_ok
+    if(rank==0)read(unit,iostat=io_status)dims;call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call MPI_Bcast(dims,2,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call valid_stream_extent(unit,rank,int(dims(1),int64)*int(dims(2),int64),16,comm,extent_ok,ierr);if(ierr/=MPI_SUCCESS)return
+    if(.not.extent_ok)then;io_status=1;call sync_io(io_status,comm,ierr);return;endif
+    allocate(buffer(dims(1),dims(2)));if(rank==0.and.product(dims)>0)read(unit,iostat=io_status)buffer
+    call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)return
+    call MPI_Bcast(buffer,product(dims),MPI_DOUBLE_COMPLEX,0,comm,ierr);if(ierr/=MPI_SUCCESS)return;if(rank==owner)allocate(a,source=buffer)
+  end subroutine
+#endif
+
+  subroutine validate_ground_state_payload(payload,bad)
+    type(s_rt_dg_hybrid_ground_state_payload),intent(in)::payload
+    integer,intent(out)::bad
+    integer::nrow,npoint
+    bad=0;nrow=0;npoint=0
+    if(allocated(payload%row_ids))nrow=size(payload%row_ids)
+    if(allocated(payload%grid_ids))npoint=size(payload%grid_ids)
+    if(.not.payload%valid.or..not.payload%final_refresh_complete.or..not.payload%analysis_complete.or.&
+      payload%global_count<1.or.payload%noccupied<1.or.payload%noccupied>payload%global_count.or.&
+      payload%operation_count<1.or.payload%nonidentity_operation_count<0.or.&
+      payload%nonidentity_operation_count>=payload%operation_count)bad=1
+    if(any([payload%catalog_fingerprint,payload%state_fingerprint,payload%metric_fingerprint,&
+      payload%operator_structure_fingerprint,payload%operator_value_fingerprint,payload%kinetic_fingerprint,&
+      payload%nonlocal_fingerprint,payload%local_fingerprint,payload%sipg_fingerprint,payload%basis_fingerprint,&
+      payload%face_fingerprint,payload%dc_seed_fingerprint,payload%continuation_fingerprint,payload%scope_fingerprint,&
+      payload%analysis_fingerprint,payload%selection_fingerprint,payload%pseudopotential_fingerprint,&
+      payload%energy_fingerprint]==0_int64))bad=1
+    if(.not.allocated(payload%row_ids).or..not.allocated(payload%metric_rows).or.&
+      .not.allocated(payload%kinetic_rows).or..not.allocated(payload%nonlocal_rows).or.&
+      .not.allocated(payload%local_rows).or..not.allocated(payload%sipg_rows).or.&
+      .not.allocated(payload%hamiltonian_rows).or..not.allocated(payload%coefficients).or.&
+      .not.allocated(payload%occupations).or..not.allocated(payload%eigenvalues))then;bad=1;return;endif
+    if(.not.allocated(payload%metric_row_offsets).or..not.allocated(payload%metric_column_ids).or.&
+      .not.allocated(payload%operator_row_offsets).or..not.allocated(payload%operator_column_ids))then;bad=1;return;endif
+    if(size(payload%metric_row_offsets)/=nrow+1.or.size(payload%operator_row_offsets)/=nrow+1)bad=1
+    if(bad==0.and.nrow>0)then
+      if(payload%metric_row_offsets(1)/=1.or.payload%operator_row_offsets(1)/=1.or.&
+        payload%metric_row_offsets(nrow+1)-1/=size(payload%metric_column_ids).or.&
+        payload%operator_row_offsets(nrow+1)-1/=size(payload%operator_column_ids).or.&
+        any(payload%metric_column_ids<1).or.any(payload%metric_column_ids>payload%global_count).or.&
+        any(payload%operator_column_ids<1).or.any(payload%operator_column_ids>payload%global_count))bad=1
+    endif
+    if(any(shape(payload%metric_rows)/=[nrow,payload%global_count]).or.&
+      any(shape(payload%kinetic_rows)/=shape(payload%metric_rows)).or.&
+      any(shape(payload%nonlocal_rows)/=shape(payload%metric_rows)).or.&
+      any(shape(payload%local_rows)/=shape(payload%metric_rows)).or.&
+      any(shape(payload%sipg_rows)/=shape(payload%metric_rows)).or.&
+      any(shape(payload%hamiltonian_rows)/=shape(payload%metric_rows)).or.&
+      any(shape(payload%coefficients)/=[nrow,payload%noccupied]).or.&
+      size(payload%occupations)/=payload%noccupied.or.size(payload%eigenvalues)/=payload%noccupied)bad=1
+    if(bad==0)then
+      if(any(payload%hamiltonian_rows/=&
+        payload%kinetic_rows+payload%nonlocal_rows+payload%local_rows+payload%sipg_rows))bad=1
+      if(.not.finite_matrix(payload%metric_rows).or..not.finite_matrix(payload%kinetic_rows).or.&
+        .not.finite_matrix(payload%nonlocal_rows).or..not.finite_matrix(payload%local_rows).or.&
+        .not.finite_matrix(payload%sipg_rows).or..not.finite_matrix(payload%hamiltonian_rows).or.&
+        .not.finite_matrix(payload%coefficients))bad=1
+    endif
+    if(.not.allocated(payload%grid_ids).or..not.allocated(payload%grid_weights).or.&
+      .not.allocated(payload%partition_ids).or..not.allocated(payload%basis_values).or.&
+      .not.allocated(payload%density))then;bad=1;return;endif
+    if(size(payload%grid_weights)/=npoint.or.size(payload%partition_ids)/=npoint.or.&
+      any(shape(payload%basis_values)/=[payload%global_count,npoint]).or.size(payload%density)/=npoint)bad=1
+    if(.not.allocated(payload%requested_ids).or..not.allocated(payload%effective_ids).or.&
+      .not.allocated(payload%scope_selectors).or..not.allocated(payload%xc_types).or.&
+      .not.allocated(payload%continuation_receipt).or..not.allocated(payload%pseudopotential_receipt).or.&
+      .not.allocated(payload%energy_receipt))bad=1
+    if(.not.allocated(payload%face_ids).or..not.allocated(payload%face_point_ids).or.&
+      .not.allocated(payload%face_metadata).or..not.allocated(payload%face_offsets).or.&
+      .not.allocated(payload%face_value_offsets).or..not.allocated(payload%face_basis_ids).or.&
+      .not.allocated(payload%face_normals).or..not.allocated(payload%face_weights).or.&
+      .not.allocated(payload%face_values).or..not.allocated(payload%interface_observables).or.&
+      .not.allocated(payload%nonlocal_ids).or..not.allocated(payload%nonlocal_owner).or.&
+      .not.allocated(payload%nonlocal_values))bad=1
+    if(bad==0)then
+      if(size(payload%face_metadata,2)/=size(payload%face_ids).or.&
+        size(payload%face_normals,2)/=size(payload%face_ids).or.size(payload%face_offsets)/=size(payload%face_ids)+1.or.&
+        size(payload%face_value_offsets)/=size(payload%face_ids)+1.or.&
+        size(payload%nonlocal_owner)/=size(payload%nonlocal_ids).or.&
+        size(payload%nonlocal_values,2)/=size(payload%nonlocal_ids).or.&
+        size(payload%added_ids)/=size(payload%closure_parent).or.size(payload%added_ids)/=size(payload%closure_reason).or.&
+        size(payload%added_ids)/=size(payload%closure_action).or.size(payload%effective_ids)/=payload%global_count)bad=1
+      if(.not.finite_matrix(payload%basis_values).or..not.finite_matrix(payload%face_values).or.&
+        .not.finite_matrix(payload%nonlocal_values).or..not.finite_matrix(payload%interface_observables).or.&
+        any(.not.ieee_is_finite(payload%grid_weights)).or.any(.not.ieee_is_finite(payload%density)).or.&
+        any(.not.ieee_is_finite(payload%occupations)).or.any(.not.ieee_is_finite(payload%eigenvalues)).or.&
+        any(.not.ieee_is_finite(payload%continuation_receipt)).or.&
+        any(.not.ieee_is_finite(payload%pseudopotential_receipt)).or.any(.not.ieee_is_finite(payload%energy_receipt)))bad=1
+    endif
+  end subroutine validate_ground_state_payload
+
+  subroutine hash_ground_state_payload(payload,hash)
+    type(s_rt_dg_hybrid_ground_state_payload),intent(in)::payload
+    integer(int64),intent(out)::hash
+    integer::i
+    integer(int64)::fingerprints(18)
+    hash=payload%state_fingerprint
+    fingerprints=[payload%catalog_fingerprint,payload%state_fingerprint,payload%metric_fingerprint,&
+      payload%operator_structure_fingerprint,payload%operator_value_fingerprint,payload%kinetic_fingerprint,&
+      payload%nonlocal_fingerprint,payload%local_fingerprint,payload%sipg_fingerprint,payload%basis_fingerprint,&
+      payload%face_fingerprint,payload%dc_seed_fingerprint,payload%continuation_fingerprint,payload%scope_fingerprint,&
+      payload%analysis_fingerprint,payload%selection_fingerprint,payload%pseudopotential_fingerprint,&
+      payload%energy_fingerprint]
+    do i=1,18
+      hash=mix_hash(hash,fingerprints(i))
+    enddo
+    call hash_i64_array(hash,payload%row_ids);call hash_i64_array(hash,payload%grid_ids)
+    call hash_i64_array(hash,payload%face_ids);call hash_i64_array(hash,payload%face_point_ids)
+    call hash_i64_array(hash,payload%nonlocal_ids);call hash_i_array(hash,payload%partition_ids)
+    call hash_i_array(hash,payload%metric_row_offsets);call hash_i_array(hash,payload%metric_column_ids)
+    call hash_i_array(hash,payload%operator_row_offsets);call hash_i_array(hash,payload%operator_column_ids)
+    call hash_i_matrix(hash,payload%face_metadata);call hash_i_array(hash,payload%face_offsets)
+    call hash_i_array(hash,payload%face_value_offsets);call hash_i_array(hash,payload%face_basis_ids)
+    call hash_i_array(hash,payload%nonlocal_owner);call hash_i_array(hash,payload%requested_ids)
+    call hash_i_array(hash,payload%effective_ids);call hash_i_array(hash,payload%added_ids)
+    call hash_i_array(hash,payload%closure_parent);call hash_i_array(hash,payload%closure_reason)
+    call hash_i_array(hash,payload%closure_action);call hash_i_array(hash,payload%scope_selectors)
+    call hash_i_array(hash,payload%xc_types);call hash_r_array(hash,payload%grid_weights)
+    call hash_r_matrix(hash,payload%face_normals);call hash_r_array(hash,payload%face_weights)
+    call hash_r_array(hash,payload%density);call hash_r_array(hash,payload%occupations)
+    call hash_r_array(hash,payload%eigenvalues);call hash_r_array(hash,payload%continuation_receipt)
+    call hash_r_array(hash,payload%pseudopotential_receipt);call hash_r_array(hash,payload%energy_receipt)
+    call hash_z_matrix(hash,payload%metric_rows);call hash_z_matrix(hash,payload%kinetic_rows)
+    call hash_z_matrix(hash,payload%nonlocal_rows);call hash_z_matrix(hash,payload%local_rows)
+    call hash_z_matrix(hash,payload%sipg_rows);call hash_z_matrix(hash,payload%hamiltonian_rows)
+    call hash_z_matrix(hash,payload%basis_values);call hash_z_matrix(hash,payload%face_values)
+    call hash_z_matrix(hash,payload%nonlocal_values);call hash_z_matrix(hash,payload%coefficients)
+    call hash_z_matrix(hash,payload%interface_observables)
+  end subroutine hash_ground_state_payload
+
+  subroutine hash_ground_state_common(payload,hash)
+    type(s_rt_dg_hybrid_ground_state_payload),intent(in)::payload
+    integer(int64),intent(out)::hash
+    hash=payload%catalog_fingerprint
+    hash=mix_hash(hash,payload%state_fingerprint);hash=mix_hash(hash,payload%metric_fingerprint)
+    hash=mix_hash(hash,payload%operator_structure_fingerprint);hash=mix_hash(hash,payload%operator_value_fingerprint)
+    hash=mix_hash(hash,payload%kinetic_fingerprint);hash=mix_hash(hash,payload%nonlocal_fingerprint)
+    hash=mix_hash(hash,payload%local_fingerprint);hash=mix_hash(hash,payload%sipg_fingerprint)
+    hash=mix_hash(hash,payload%basis_fingerprint);hash=mix_hash(hash,payload%face_fingerprint)
+    hash=mix_hash(hash,payload%dc_seed_fingerprint);hash=mix_hash(hash,payload%continuation_fingerprint)
+    hash=mix_hash(hash,payload%scope_fingerprint);hash=mix_hash(hash,payload%analysis_fingerprint)
+    hash=mix_hash(hash,payload%selection_fingerprint)
+    hash=mix_hash(hash,payload%pseudopotential_fingerprint)
+    hash=mix_hash(hash,payload%energy_fingerprint)
+    hash=mix_hash(hash,int(payload%global_count,int64));hash=mix_hash(hash,int(payload%noccupied,int64))
+    hash=mix_hash(hash,int(payload%operation_count,int64));hash=mix_hash(hash,int(payload%nonidentity_operation_count,int64))
+    hash=mix_hash(hash,merge(1_int64,0_int64,payload%analysis_complete))
+    hash=mix_hash(hash,merge(1_int64,0_int64,payload%identity_only))
+    hash=mix_hash(hash,merge(1_int64,0_int64,payload%valid))
+    hash=mix_hash(hash,merge(1_int64,0_int64,payload%final_refresh_complete))
+    call hash_i_array(hash,payload%requested_ids);call hash_i_array(hash,payload%effective_ids)
+    call hash_i_array(hash,payload%added_ids);call hash_i_array(hash,payload%closure_parent)
+    call hash_i_array(hash,payload%closure_reason);call hash_i_array(hash,payload%closure_action)
+    call hash_i_array(hash,payload%scope_selectors);call hash_i_array(hash,payload%xc_types)
+    call hash_r_array(hash,payload%occupations);call hash_r_array(hash,payload%eigenvalues)
+    call hash_r_array(hash,payload%continuation_receipt);call hash_r_array(hash,payload%pseudopotential_receipt)
+    call hash_r_array(hash,payload%energy_receipt)
+  end subroutine hash_ground_state_common
+
+  subroutine hash_i64_array(hash,a)
+    integer(int64),intent(inout)::hash;integer(int64),allocatable,intent(in)::a(:);integer::i
+    if(.not.allocated(a))then;hash=mix_hash(hash,-1_int64);return;endif
+    hash=mix_hash(hash,int(size(a),int64));do i=1,size(a);hash=mix_hash(hash,a(i));enddo
+  end subroutine
+  subroutine hash_i_array(hash,a)
+    integer(int64),intent(inout)::hash;integer,allocatable,intent(in)::a(:);integer::i
+    if(.not.allocated(a))then;hash=mix_hash(hash,-1_int64);return;endif
+    hash=mix_hash(hash,int(size(a),int64));do i=1,size(a);hash=mix_hash(hash,int(a(i),int64));enddo
+  end subroutine
+  subroutine hash_i_matrix(hash,a)
+    integer(int64),intent(inout)::hash;integer,allocatable,intent(in)::a(:,:);integer::i,j
+    if(.not.allocated(a))then;hash=mix_hash(hash,-1_int64);return;endif
+    hash=mix_hash(hash,int(size(a,1),int64));hash=mix_hash(hash,int(size(a,2),int64))
+    do j=1,size(a,2);do i=1,size(a,1);hash=mix_hash(hash,int(a(i,j),int64));enddo;enddo
+  end subroutine
+  subroutine hash_r_array(hash,a)
+    integer(int64),intent(inout)::hash;real(real64),allocatable,intent(in)::a(:);integer::i;integer(int64)::bits
+    if(.not.allocated(a))then;hash=mix_hash(hash,-1_int64);return;endif
+    hash=mix_hash(hash,int(size(a),int64));do i=1,size(a);bits=transfer(a(i),bits);hash=mix_hash(hash,bits);enddo
+  end subroutine
+  subroutine hash_r_matrix(hash,a)
+    integer(int64),intent(inout)::hash;real(real64),allocatable,intent(in)::a(:,:);integer::i,j;integer(int64)::bits
+    if(.not.allocated(a))then;hash=mix_hash(hash,-1_int64);return;endif
+    hash=mix_hash(hash,int(size(a,1),int64));hash=mix_hash(hash,int(size(a,2),int64))
+    do j=1,size(a,2);do i=1,size(a,1);bits=transfer(a(i,j),bits);hash=mix_hash(hash,bits);enddo;enddo
+  end subroutine
+  subroutine hash_z_matrix(hash,a)
+    integer(int64),intent(inout)::hash;complex(real64),allocatable,intent(in)::a(:,:);integer::i,j;integer(int64)::bits
+    if(.not.allocated(a))then;hash=mix_hash(hash,-1_int64);return;endif
+    hash=mix_hash(hash,int(size(a,1),int64));hash=mix_hash(hash,int(size(a,2),int64))
+    do j=1,size(a,2);do i=1,size(a,1)
+      bits=transfer(real(a(i,j)),bits);hash=mix_hash(hash,bits);bits=transfer(aimag(a(i,j)),bits);hash=mix_hash(hash,bits)
+    enddo;enddo
+  end subroutine
 
   subroutine validate_path(path,probe,comm,ierr)
     character(*),intent(in)::path;character(16),intent(out)::probe;integer,intent(in)::comm;integer,intent(out)::ierr
