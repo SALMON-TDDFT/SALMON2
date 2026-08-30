@@ -16,6 +16,8 @@ collector=nonlocal_source.split("subroutine collect_dg_overlapping_wannier_proje
     "end subroutine collect_dg_overlapping_wannier_projector_overlaps",1)[0]
 assert "mpi_allgatherv(partial_overlap" not in collector
 assert "do q=1,p-1" not in collector
+assert "310+q" not in collector
+assert "nonlocal_overlap_tag" in collector
 with tempfile.TemporaryDirectory(prefix="ow-physical-") as name:
     build=Path(name);(build/"config.h").write_text("")
     env=os.environ.copy();env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")

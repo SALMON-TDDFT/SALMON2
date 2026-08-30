@@ -57,18 +57,33 @@ module dg_hybrid_continuation_controller
     begin_dg_hybrid_stage_solve,schedule_dg_hybrid_candidate_checks,complete_dg_hybrid_stage_solve,&
     dg_hybrid_continuation_state_count
 contains
-  pure subroutine dg_hybrid_continuation_state_count(occupations,basis_count,solve_count,meaningful_gap,ok)
+  pure subroutine dg_hybrid_continuation_state_count(occupations,basis_count,solve_count,meaningful_gap,&
+      gap_occupied_index,gap_unoccupied_index,ok)
     real(real64),intent(in)::occupations(:)
     integer,intent(in)::basis_count
-    integer,intent(out)::solve_count
+    integer,intent(out)::solve_count,gap_occupied_index,gap_unoccupied_index
     logical,intent(out)::meaningful_gap,ok
     real(real64),parameter::occupation_floor=64d0*epsilon(1d0)
+    integer::i
     ok=size(occupations)>0.and.basis_count>=size(occupations).and.&
       all(ieee_is_finite(occupations)).and.all(occupations>=0d0).and.all(occupations<=2d0)
-    solve_count=0;meaningful_gap=.false.
+    solve_count=0;meaningful_gap=.false.;gap_occupied_index=0;gap_unoccupied_index=0
     if(.not.ok)return
-    meaningful_gap=occupations(size(occupations))>occupation_floor.and.basis_count>size(occupations)
-    solve_count=size(occupations)+merge(1,0,meaningful_gap)
+    solve_count=size(occupations)
+    do i=1,size(occupations)
+      if(occupations(i)>occupation_floor)gap_occupied_index=i
+    enddo
+    if(gap_occupied_index==0)return
+    do i=gap_occupied_index+1,size(occupations)
+      if(occupations(i)<=occupation_floor)then
+        gap_unoccupied_index=i;exit
+      endif
+    enddo
+    if(gap_unoccupied_index==0.and.basis_count>size(occupations))then
+      solve_count=size(occupations)+1;gap_unoccupied_index=solve_count
+    endif
+    meaningful_gap=gap_unoccupied_index>gap_occupied_index
+    if(.not.meaningful_gap)gap_occupied_index=0
   end subroutine dg_hybrid_continuation_state_count
 
   pure subroutine initialize_dg_hybrid_stage_schedule(iteration_limit,schedule)

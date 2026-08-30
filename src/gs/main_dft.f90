@@ -4071,7 +4071,7 @@ contains
     type(s_dg_hybrid_stage_schedule)::stage_schedule
     integer(8)::solver_workspace,solver_fingerprint,final_operator_fingerprint,&
       final_state_workspace,final_state_fingerprint
-    integer::iteration,ierr_local,rank_local,continuation_state_count,p
+    integer::iteration,ierr_local,rank_local,continuation_state_count,gap_occupied_index,gap_unoccupied_index,p
     logical::stage_converged,reject_trial,local_ok,accept_stage,final_refresh_performed,cheap_candidate,&
       run_solve,run_expensive,refresh_scheduled,meaningful_gap,occupation_kernel_ok
     character(256)::continuation_message
@@ -4084,7 +4084,7 @@ contains
     allocate(rho_in,source=dc_seed_density)
     if(size(effective_ids)<nstate)error stop 'DG continuation retained basis is smaller than the occupation kernel'
     call dg_hybrid_continuation_state_count(occupied_occupations,size(effective_ids),continuation_state_count,&
-      meaningful_gap,local_ok)
+      meaningful_gap,gap_occupied_index,gap_unoccupied_index,local_ok)
     if(.not.local_ok)error stop 'DG continuation occupation kernel is invalid'
     allocate(local_potential(size(ow_core_ids)),eigenvalues(nstate),solver_eigenvalues(continuation_state_count))
     allocate(previous_interface_state(0,3))
@@ -4119,7 +4119,7 @@ stage_pass: do
         allocate(coefficients,source=solver_coefficients(:,1:nstate))
         eigenvalues=solver_eigenvalues(1:nstate)
         if(meaningful_gap)then
-          occupied_unoccupied_gap=solver_eigenvalues(nstate+1)-solver_eigenvalues(nstate)
+          occupied_unoccupied_gap=solver_eigenvalues(gap_unoccupied_index)-solver_eigenvalues(gap_occupied_index)
         else
           occupied_unoccupied_gap=huge(1d0)
         endif

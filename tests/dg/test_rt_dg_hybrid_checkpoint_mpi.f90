@@ -20,7 +20,9 @@ program test_rt_dg_hybrid_checkpoint_mpi
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
   call get_command_argument(1,mode,length=mode_length);call get_command_argument(1,mode)
   call get_command_argument(2,path)
-  if(trim(mode)=='write'.or.trim(mode)=='write_incomplete')then
+  if(trim(mode)=='write_legacy')then
+    call write_legacy_checkpoint(trim(path))
+  else if(trim(mode)=='write'.or.trim(mode)=='write_incomplete')then
     call construct_state(metric,operators,coefficients)
     if(trim(mode)=='write_incomplete')metric%packet_ids(n)=0
     call write_rt_dg_hybrid_checkpoint(comm,trim(path),6001_int64,metric,operators,coefficients,7001_int64,&
@@ -78,6 +80,87 @@ program test_rt_dg_hybrid_checkpoint_mpi
   endif
   call MPI_Finalize(ierr)
 contains
+  subroutine write_legacy_checkpoint(checkpoint_path)
+    character(*),intent(in)::checkpoint_path
+    character(16),parameter::magic='SALMON_DG_HYB01 '
+    integer,parameter::version=1
+    integer::unit,io_status,row,column,component
+    integer::metric_degrees(n),operator_degrees(n),metric_columns(n),operator_columns(1)
+    integer::packet_ids(n)
+    integer(int64)::fingerprint,bits
+    logical::active_rows(n)
+    complex(real64)::s(n,n),h,z(3),c(n),operator_metric(1)
+    s=reshape([(1d0,0d0),(0.1d0,0d0),(0d0,0d0),(0d0,0d0),&
+      (0.1d0,0d0),(1.1d0,0d0),(0.05d0,0d0),(0d0,0d0),&
+      (0d0,0d0),(0.05d0,0d0),(0.9d0,0d0),(0.08d0,0d0),&
+      (0d0,0d0),(0d0,0d0),(0.08d0,0d0),(1.2d0,0d0)],[n,n])
+    c=[(1d0,0.2d0),(-0.4d0,0.1d0),(0.5d0,-0.3d0),(0.6d0,0.2d0)]
+    active_rows=.true.;packet_ids=[1,1,2,2];metric_degrees=n;operator_degrees=1
+    metric_columns=[(column,column=1,n)]
+    fingerprint=6001_int64
+    call legacy_hash_int(fingerprint,7001_int64);call legacy_hash_int(fingerprint,9191_int64)
+    call legacy_hash_int(fingerprint,8181_int64);call legacy_hash_int(fingerprint,int(n,int64))
+    call legacy_hash_int(fingerprint,int(n,int64))
+    bits=transfer(2d0,bits);call legacy_hash_int(fingerprint,bits)
+    bits=transfer(1.2d0,bits);call legacy_hash_int(fingerprint,bits)
+    call legacy_hash_int(fingerprint,101_int64);call legacy_hash_int(fingerprint,102_int64)
+    call legacy_hash_int(fingerprint,103_int64);call legacy_hash_int(fingerprint,104_int64)
+    call legacy_hash_int(fingerprint,9191_int64);call legacy_hash_int(fingerprint,105_int64)
+    do row=1,n
+      call legacy_hash_int(fingerprint,1_int64);call legacy_hash_int(fingerprint,int(packet_ids(row),int64))
+      call legacy_hash_int(fingerprint,int(n,int64));call legacy_hash_int(fingerprint,1_int64)
+    enddo
+    do row=1,n
+      h=cmplx(0.2d0*row,0d0,real64)
+      z=[cmplx(0.1d0*row,0d0,real64),cmplx(-0.05d0*row,0d0,real64),cmplx(0.03d0*row,0d0,real64)]
+      operator_columns(1)=row;operator_metric(1)=s(row,row)
+      call legacy_hash_int(fingerprint,int(row,int64));call legacy_hash_int(fingerprint,int(n,int64))
+      call legacy_hash_int(fingerprint,1_int64)
+      do column=1,n
+        call legacy_hash_int(fingerprint,int(column,int64));call legacy_hash_complex(fingerprint,s(row,column))
+      enddo
+      call legacy_hash_int(fingerprint,int(row,int64));call legacy_hash_complex(fingerprint,operator_metric(1))
+      call legacy_hash_complex(fingerprint,h)
+      do component=1,3;call legacy_hash_complex(fingerprint,z(component));enddo
+      call legacy_hash_complex(fingerprint,c(row))
+    enddo
+    if(fingerprint==0_int64)fingerprint=1_int64
+    if(rank==0)then
+      open(newunit=unit,file=checkpoint_path,status='replace',access='stream',form='unformatted',action='write',iostat=io_status)
+      if(io_status==0)write(unit,iostat=io_status)magic,version,n,n,6001_int64,7001_int64,9191_int64,2d0,1.2d0,&
+        101_int64,102_int64,103_int64,104_int64,9191_int64,105_int64,8181_int64,&
+        active_rows,packet_ids,metric_degrees,operator_degrees
+      if(io_status==0)then
+        do row=1,n
+          h=cmplx(0.2d0*row,0d0,real64)
+          z=[cmplx(0.1d0*row,0d0,real64),cmplx(-0.05d0*row,0d0,real64),cmplx(0.03d0*row,0d0,real64)]
+          operator_columns(1)=row;operator_metric(1)=s(row,row)
+          write(unit,iostat=io_status)metric_columns,s(row,:),operator_columns,operator_metric,h,z,c(row)
+          if(io_status/=0)exit
+        enddo
+      endif
+      if(io_status==0)write(unit,iostat=io_status)fingerprint
+      close(unit)
+    else
+      io_status=0
+    endif
+    call require(io_status==0,'cannot write legacy checkpoint fixture')
+  end subroutine write_legacy_checkpoint
+
+  subroutine legacy_hash_int(fingerprint,value)
+    integer(int64),intent(inout)::fingerprint
+    integer(int64),intent(in)::value
+    fingerprint=ieor(ishftc(fingerprint,9),value)
+  end subroutine legacy_hash_int
+
+  subroutine legacy_hash_complex(fingerprint,value)
+    integer(int64),intent(inout)::fingerprint
+    complex(real64),intent(in)::value
+    integer(int64)::bits
+    bits=transfer(real(value,real64),bits);call legacy_hash_int(fingerprint,bits)
+    bits=transfer(aimag(value),bits);call legacy_hash_int(fingerprint,bits)
+  end subroutine legacy_hash_complex
+
   subroutine construct_state(distributed_metric,distributed_operators,owned_coefficients)
     type(s_dg_hybrid_sparse_metric),intent(out)::distributed_metric
     type(s_dg_hybrid_sparse_operators),intent(out)::distributed_operators

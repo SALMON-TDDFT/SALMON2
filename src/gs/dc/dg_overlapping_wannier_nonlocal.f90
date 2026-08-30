@@ -68,6 +68,7 @@ contains
 #ifdef USE_MPI
     integer::rank,nproc,ierr,r,p,q,total_records,nowned,unique_count,local_bad,global_bad,&
       target,local_unique_count,slot,key_index
+    integer,parameter::nonlocal_overlap_tag=310
     integer,allocatable::counts(:),displacements(:),all_atom_ids(:),all_ordinals(:),&
       record_order(:),record_key(:),owner_ranks(:),local_keys(:)
     real(real64),allocatable::all_matrix_strength(:),all_action_strength(:)
@@ -187,12 +188,19 @@ contains
       enddo
       call MPI_Reduce(local_key_overlap(:,q),owner_overlap(:,q),nwann,MPI_DOUBLE_COMPLEX,MPI_SUM,&
         owner_ranks(q),comm,ierr)
+      if(ierr/=MPI_SUCCESS)local_bad=1
       do target=0,nproc-1
         target_supports=any(record_key(displacements(target+1)+1:displacements(target+1)+counts(target+1))==q)
         if(.not.target_supports.or.target==owner_ranks(q))cycle
-        if(rank==owner_ranks(q))call MPI_Send(owner_overlap(:,q),nwann,MPI_DOUBLE_COMPLEX,target,310+q,comm,ierr)
-        if(rank==target)call MPI_Recv(owner_overlap(:,q),nwann,MPI_DOUBLE_COMPLEX,owner_ranks(q),310+q,&
-          comm,MPI_STATUS_IGNORE,ierr)
+        if(rank==owner_ranks(q))then
+          call MPI_Send(owner_overlap(:,q),nwann,MPI_DOUBLE_COMPLEX,target,nonlocal_overlap_tag,comm,ierr)
+          if(ierr/=MPI_SUCCESS)local_bad=1
+        endif
+        if(rank==target)then
+          call MPI_Recv(owner_overlap(:,q),nwann,MPI_DOUBLE_COMPLEX,owner_ranks(q),nonlocal_overlap_tag,&
+            comm,MPI_STATUS_IGNORE,ierr)
+          if(ierr/=MPI_SUCCESS)local_bad=1
+        endif
       enddo
       if(owner_ranks(q)/=rank)cycle
       nowned=nowned+1;projector_ids(nowned)=int(q,int64)

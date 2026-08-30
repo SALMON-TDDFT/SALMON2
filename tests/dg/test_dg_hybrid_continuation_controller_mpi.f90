@@ -6,7 +6,7 @@ program test_dg_hybrid_continuation_controller_mpi
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_positive_inf
   use dg_hybrid_continuation_controller
   implicit none
-  integer::icomm,id_rank,nproc,ierr,i,solve_count
+  integer::icomm,id_rank,nproc,ierr,i,solve_count,gap_occupied_index,gap_unoccupied_index
   type(s_dg_hybrid_controller_controls)::controls
   type(s_dg_hybrid_controller)::controller
   type(s_dg_hybrid_controller)::limit_controller
@@ -34,14 +34,17 @@ program test_dg_hybrid_continuation_controller_mpi
     'endpoint continuation tolerances are incorrect')
   call dg_hybrid_stage_tolerances(controls,0.25d0,t0);call dg_hybrid_stage_tolerances(controls,0.75d0,t1)
   call require(all(t1<=t0).and.all(t1>=controls%final_tolerance),'inexact tolerances are not monotone')
-  call dg_hybrid_continuation_state_count([2d0,0d0],2,solve_count,meaningful_gap,ok)
-  call require(ok.and.solve_count==2.and..not.meaningful_gap,&
-    'configured empty state still required an unavailable extra eigenpair')
-  call dg_hybrid_continuation_state_count([2d0,0.5d0],3,solve_count,meaningful_gap,ok)
-  call require(ok.and.solve_count==3.and.meaningful_gap,&
+  call dg_hybrid_continuation_state_count([2d0,0d0],2,solve_count,meaningful_gap,&
+    gap_occupied_index,gap_unoccupied_index,ok)
+  call require(ok.and.solve_count==2.and.meaningful_gap.and.gap_occupied_index==1.and.gap_unoccupied_index==2,&
+    'configured occupied-empty pair did not provide its available gap')
+  call dg_hybrid_continuation_state_count([2d0,0.5d0],3,solve_count,meaningful_gap,&
+    gap_occupied_index,gap_unoccupied_index,ok)
+  call require(ok.and.solve_count==3.and.meaningful_gap.and.gap_occupied_index==2.and.gap_unoccupied_index==3,&
     'fractionally occupied boundary did not retain an available separation diagnostic')
-  call dg_hybrid_continuation_state_count([1d0,1d0],2,solve_count,meaningful_gap,ok)
-  call require(ok.and.solve_count==2.and..not.meaningful_gap,&
+  call dg_hybrid_continuation_state_count([1d0,1d0],2,solve_count,meaningful_gap,&
+    gap_occupied_index,gap_unoccupied_index,ok)
+  call require(ok.and.solve_count==2.and..not.meaningful_gap.and.gap_occupied_index==0.and.gap_unoccupied_index==0,&
     'degenerate fully retained occupied space was rejected without an extra state')
 
   call fill_state(accepted,10)

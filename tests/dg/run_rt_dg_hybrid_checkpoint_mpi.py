@@ -30,6 +30,14 @@ with tempfile.TemporaryDirectory(prefix="hybrid-checkpoint-") as name:
     str(root/"src/rt/dg/rt_dg_hybrid_checkpoint.f90"),str(root/"tests/dg/test_rt_dg_hybrid_occupied_checkpoint_mpi.f90"),
     *lapack_libs,"-o",str(occupied_exe)],check=True)
   env=os.environ.copy();env["OMP_NUM_THREADS"]="1";env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")
+  legacy_checkpoint=build/"legacy-v1.chk"
+  write_legacy=subprocess.run([shutil.which("mpiexec"),"-n","2",str(exe),"write_legacy",str(legacy_checkpoint)],capture_output=True,text=True,env=env)
+  assert write_legacy.returncode==0,(write_legacy.stdout,write_legacy.stderr);legacy_fingerprints=[]
+  for nrank in (1,2,4,8):
+    legacy=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe),"read",str(legacy_checkpoint)],capture_output=True,text=True,env=env)
+    assert legacy.returncode==0,(nrank,legacy.stdout,legacy.stderr);assert f"PASS hybrid checkpoint on {nrank} ranks" in legacy.stdout
+    match=re.search(r"HYBRID_CHECKPOINT ranks=\d+ fingerprint=(-?\d+)",legacy.stdout);assert match,legacy.stdout;legacy_fingerprints.append(int(match.group(1)))
+  assert len(set(legacy_fingerprints))==1,legacy_fingerprints
   write=subprocess.run([shutil.which("mpiexec"),"-n","2",str(exe),"write",str(checkpoint)],capture_output=True,text=True,env=env)
   assert write.returncode==0,(write.stdout,write.stderr);fingerprints=[]
   for nrank in (1,2,4,8):
