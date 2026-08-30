@@ -21,7 +21,7 @@ module initialization_rt_sub
 
 contains
 
-subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
+subroutine initialization_rt_common( Mit, system, energy, ewald, rt, md, &
                      singlescale,  &
                      stencil, fg, poisson,  &
                      lg, mg, info,  &
@@ -29,7 +29,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
                      srg, srg_scalar,  &
                      spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s,  &
                      V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
-                     pp, ppg, ppn, hybrid_basis_only  )
+                     pp, ppg, ppn  )
   use inputoutput
   use math_constants, only: pi, zi
   use structures
@@ -83,14 +83,13 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   type(s_scalar) :: Vpsl
   type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox
   type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
-  type(s_orbital) :: spsi_in,spsi_out
-  type(s_orbital) :: tpsi ! temporary wavefunctions
+  type(s_orbital),optional :: spsi_in,spsi_out
+  type(s_orbital),optional :: tpsi ! temporary wavefunctions
   type(s_sendrecv_grid) :: srg,srg_scalar
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
   type(s_pp_nlcc) :: ppn
   type(s_singlescale) :: singlescale
-  logical,optional,intent(in) :: hybrid_basis_only
   logical :: initialize_conventional_orbitals
   type(s_ofile) :: ofile
   
@@ -106,8 +105,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   logical :: rion_update
 
   call nvtxStartRange('initialization_rt', __LINE__)
-  initialize_conventional_orbitals=.true.
-  if(present(hybrid_basis_only))initialize_conventional_orbitals=.not.hybrid_basis_only
+  initialize_conventional_orbitals=present(spsi_in).and.present(spsi_out).and.present(tpsi)
   curr_e_tmp(:, :) = 0.0d0
   curr_i_tmp(:) = 0.0d0
 
@@ -602,9 +600,9 @@ subroutine init_code_optimization
 end subroutine init_code_optimization
 
 
-end subroutine initialization_rt
+end subroutine initialization_rt_common
 
-subroutine initialization_rt_dg_hybrid( Mit, system, energy, ewald, rt, md, &
+subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
                      singlescale, stencil, fg, poisson, lg, mg, info, xc_func, ofl, &
                      srg, srg_scalar, spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s, &
                      V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl, pp, ppg, ppn )
@@ -631,9 +629,39 @@ subroutine initialization_rt_dg_hybrid( Mit, system, energy, ewald, rt, md, &
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
   type(s_pp_nlcc) :: ppn
-  call initialization_rt(Mit,system,energy,ewald,rt,md,singlescale,stencil,fg,poisson,lg,mg,info,xc_func,ofl,&
-    srg,srg_scalar,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,&
-    pp,ppg,ppn,hybrid_basis_only=.true.)
+  call initialization_rt_common(Mit,system,energy,ewald,rt,md,singlescale,stencil,fg,poisson,lg,mg,info,xc_func,ofl,&
+    srg,srg_scalar,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,pp,ppg,ppn)
+end subroutine initialization_rt
+
+subroutine initialization_rt_dg_hybrid( Mit, system, energy, ewald, rt, md, &
+                     singlescale, stencil, fg, poisson, lg, mg, info, xc_func, ofl, &
+                     srg, srg_scalar, rho, rho_jm, rho_s, &
+                     V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl, pp, ppg, ppn )
+  use structures
+  implicit none
+  integer :: Mit
+  type(s_dft_system) :: system
+  type(s_dft_energy) :: energy
+  type(s_ewald_ion_ion) :: ewald
+  type(s_rt) :: rt
+  type(s_md) :: md
+  type(s_singlescale) :: singlescale
+  type(s_stencil) :: stencil
+  type(s_reciprocal_grid) :: fg
+  type(s_poisson) :: poisson
+  type(s_rgrid) :: lg,mg
+  type(s_parallel_info) :: info
+  type(s_xc_functional) :: xc_func
+  type(s_ofile) :: ofl
+  type(s_sendrecv_grid) :: srg,srg_scalar
+  type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox,Vpsl
+  type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
+  type(s_pp_info) :: pp
+  type(s_pp_grid) :: ppg
+  type(s_pp_nlcc) :: ppn
+  call initialization_rt_common(Mit,system,energy,ewald,rt,md,singlescale,stencil,fg,poisson,lg,mg,info,xc_func,ofl,&
+    srg,srg_scalar,rho=rho,rho_jm=rho_jm,rho_s=rho_s,V_local=V_local,Vbox=Vbox,Vh=Vh,Vh_stock1=Vh_stock1,&
+    Vh_stock2=Vh_stock2,Vxc=Vxc,Vpsl=Vpsl,pp=pp,ppg=ppg,ppn=ppn)
 end subroutine initialization_rt_dg_hybrid
 
 end module initialization_rt_sub

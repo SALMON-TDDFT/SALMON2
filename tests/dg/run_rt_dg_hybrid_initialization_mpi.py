@@ -14,6 +14,11 @@ assert "subroutine initialization_rt_dg_hybrid" in rt_environment_source
 hybrid_branch=main_rt_source.split("if(yn_rt_dg_hybrid_continuation=='y')then",1)[1].split("endif",1)[0]
 assert "call initialization_rt_dg_hybrid" in hybrid_branch
 assert "hybrid_basis_only" not in main_rt_source
+assert "hybrid_basis_only" not in rt_environment_source
+hybrid_initializer=rt_environment_source.split("subroutine initialization_rt_dg_hybrid",1)[1].split(
+  "end subroutine initialization_rt_dg_hybrid",1)[0]
+for forbidden in ("spsi_in","spsi_out","tpsi"):
+  assert forbidden not in hybrid_initializer, f"hybrid initializer still exposes {forbidden}"
 hybrid_return=rt_environment_source.index("if(.not.initialize_conventional_orbitals)then")
 assert hybrid_return < rt_environment_source.index("spsi_in%update_zwf_overlap")
 assert hybrid_return < rt_environment_source.index("call calc_eigen_energy")

@@ -101,7 +101,7 @@ call timer_begin(LOG_TOTAL)
 if(yn_rt_dg_hybrid_continuation=='y')then
   call initialization_rt_dg_hybrid( Mit, system, energy, ewald, rt, md, &
                           singlescale, stencil, fg, poisson, lg, mg, info, xc_func, ofl, &
-                          srg, srg_scalar, spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s, &
+                          srg, srg_scalar, rho, rho_jm, rho_s, &
                           V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl, pp, ppg, ppn )
   call run_dg_hybrid_continuation_rt()
   return
