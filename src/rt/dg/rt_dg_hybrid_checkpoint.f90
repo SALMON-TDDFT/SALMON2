@@ -14,18 +14,19 @@ module rt_dg_hybrid_checkpoint
   character(16),parameter::checkpoint_magic='SALMON_DG_HYB01 '
   character(16),parameter::occupied_magic='SALMON_DG_OCC02 '
   integer,parameter::occupied_version=2
-  integer,parameter::ground_state_version=1
+  integer,parameter::ground_state_version=2
   character(16),parameter::ground_state_magic='SALMON_DG_GS001 '
   type,public::s_rt_dg_hybrid_ground_state_payload
     logical::valid=.false.,final_refresh_complete=.false.,analysis_complete=.false.,identity_only=.false.
-    integer::global_count=0,noccupied=0,operation_count=0,nonidentity_operation_count=0
+    integer::global_count=0,global_grid_count=0,noccupied=0,operation_count=0,nonidentity_operation_count=0
     integer(int64)::catalog_fingerprint=0_int64,state_fingerprint=0_int64,metric_fingerprint=0_int64,&
       operator_structure_fingerprint=0_int64,operator_value_fingerprint=0_int64,&
       kinetic_fingerprint=0_int64,nonlocal_fingerprint=0_int64,local_fingerprint=0_int64,&
       sipg_fingerprint=0_int64,basis_fingerprint=0_int64,face_fingerprint=0_int64,&
       dc_seed_fingerprint=0_int64,continuation_fingerprint=0_int64,scope_fingerprint=0_int64,&
       selection_fingerprint=0_int64,&
-      analysis_fingerprint=0_int64,pseudopotential_fingerprint=0_int64,energy_fingerprint=0_int64,payload_fingerprint=0_int64
+      analysis_fingerprint=0_int64,pseudopotential_fingerprint=0_int64,energy_fingerprint=0_int64,&
+      position_convention_fingerprint=0_int64,payload_fingerprint=0_int64
     integer(int64),allocatable::row_ids(:),grid_ids(:),face_ids(:),face_point_ids(:),nonlocal_ids(:)
     integer,allocatable::metric_row_offsets(:),metric_column_ids(:),operator_row_offsets(:),operator_column_ids(:),&
       partition_ids(:),face_metadata(:,:),face_offsets(:),face_value_offsets(:),face_basis_ids(:),nonlocal_owner(:),&
@@ -541,10 +542,10 @@ contains
     character(*),intent(out)::message
     logical,optional,intent(in)::interrupt_after_write
 #ifdef USE_MPI
-    integer::rank,nproc,ierr,unit,io_status,owner,local_bad,global_bad,header_i(4),i,j,total_faces,attempt
-    integer,allocatable::ownership(:),face_counts(:),face_displacements(:)
+    integer::rank,nproc,ierr,unit,io_status,owner,local_bad,global_bad,header_i(5),i,j,total_faces,attempt
+    integer,allocatable::ownership(:),grid_ownership(:),face_counts(:),face_displacements(:)
     integer(int64),allocatable::all_face_ids(:)
-    integer(int64)::header_fp(19),local_hash,global_hash,common_hash,minimum_common_hash,maximum_common_hash,nonce,&
+    integer(int64)::header_fp(20),local_hash,global_hash,common_hash,minimum_common_hash,maximum_common_hash,nonce,&
       computed_component_fingerprints(4)
     logical::header_l(4),opened,verified_ok,fingerprint_ok,created
     character(256)::verified_message
@@ -581,6 +582,15 @@ contains
     enddo
     call MPI_Allreduce(MPI_IN_PLACE,ownership,payload%global_count,MPI_INTEGER,MPI_SUM,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.any(ownership/=1))then;message='complete DG ground-state rows are not owned exactly once';return;endif
+    allocate(grid_ownership(payload%global_grid_count));grid_ownership=0
+    do i=1,size(payload%grid_ids)
+      if(payload%grid_ids(i)>=1_int64.and.payload%grid_ids(i)<=int(payload%global_grid_count,int64))&
+        grid_ownership(int(payload%grid_ids(i)))=grid_ownership(int(payload%grid_ids(i)))+1
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,grid_ownership,payload%global_grid_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(grid_ownership/=1))then
+      message='complete DG ground-state grid is not owned exactly once';return
+    endif
     allocate(face_counts(nproc),face_displacements(nproc))
     call MPI_Allgather(size(payload%face_ids),1,MPI_INTEGER,face_counts,1,MPI_INTEGER,comm,ierr)
     if(ierr/=MPI_SUCCESS)return
@@ -619,17 +629,19 @@ contains
     do owner=0,nproc-1
       if(rank==owner)then
         header_l=[payload%valid,payload%final_refresh_complete,payload%analysis_complete,payload%identity_only]
-        header_i=[payload%global_count,payload%noccupied,payload%operation_count,payload%nonidentity_operation_count]
+        header_i=[payload%global_count,payload%global_grid_count,payload%noccupied,payload%operation_count,&
+          payload%nonidentity_operation_count]
         header_fp=[payload%catalog_fingerprint,payload%state_fingerprint,payload%metric_fingerprint,&
           payload%operator_structure_fingerprint,payload%operator_value_fingerprint,payload%kinetic_fingerprint,&
           payload%nonlocal_fingerprint,payload%local_fingerprint,payload%sipg_fingerprint,payload%basis_fingerprint,&
           payload%face_fingerprint,payload%dc_seed_fingerprint,payload%continuation_fingerprint,payload%scope_fingerprint,&
           payload%analysis_fingerprint,payload%selection_fingerprint,&
-          payload%pseudopotential_fingerprint,payload%energy_fingerprint,payload_fingerprint]
+          payload%pseudopotential_fingerprint,payload%energy_fingerprint,payload%position_convention_fingerprint,&
+          payload_fingerprint]
       endif
       call MPI_Bcast(header_l,4,MPI_LOGICAL,owner,comm,ierr);if(ierr/=MPI_SUCCESS)goto 900
-      call MPI_Bcast(header_i,4,MPI_INTEGER,owner,comm,ierr);if(ierr/=MPI_SUCCESS)goto 900
-      call MPI_Bcast(header_fp,19,MPI_INTEGER8,owner,comm,ierr);if(ierr/=MPI_SUCCESS)goto 900
+      call MPI_Bcast(header_i,5,MPI_INTEGER,owner,comm,ierr);if(ierr/=MPI_SUCCESS)goto 900
+      call MPI_Bcast(header_fp,20,MPI_INTEGER8,owner,comm,ierr);if(ierr/=MPI_SUCCESS)goto 900
       if(rank==0)write(unit,iostat=io_status)header_l,header_i,header_fp
       call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)goto 910
       call write_ground_state_arrays(comm,owner,unit,rank,payload,io_status,ierr)
@@ -663,8 +675,9 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer::rank,nproc,ierr,unit,io_status,owner,file_nproc,version,local_bad,global_bad,header_i(4)
-    integer(int64)::header_fp(19),local_hash,global_hash,computed_component_fingerprints(4),common_hash,&
+    integer::rank,nproc,ierr,unit,io_status,owner,file_nproc,version,local_bad,global_bad,header_i(5),i
+    integer,allocatable::grid_ownership(:)
+    integer(int64)::header_fp(20),local_hash,global_hash,computed_component_fingerprints(4),common_hash,&
       minimum_common_hash,maximum_common_hash
     logical::header_l(4),opened,fingerprint_ok
     character(16)::magic
@@ -687,13 +700,13 @@ contains
       if(rank==0)read(unit,iostat=io_status)header_l,header_i,header_fp
       call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)goto 920
       call MPI_Bcast(header_l,4,MPI_LOGICAL,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 920
-      call MPI_Bcast(header_i,4,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 920
-      call MPI_Bcast(header_fp,19,MPI_INTEGER8,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 920
+      call MPI_Bcast(header_i,5,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 920
+      call MPI_Bcast(header_fp,20,MPI_INTEGER8,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 920
       if(rank==owner)then
         payload%valid=header_l(1);payload%final_refresh_complete=header_l(2)
         payload%analysis_complete=header_l(3);payload%identity_only=header_l(4)
-        payload%global_count=header_i(1);payload%noccupied=header_i(2)
-        payload%operation_count=header_i(3);payload%nonidentity_operation_count=header_i(4)
+        payload%global_count=header_i(1);payload%global_grid_count=header_i(2);payload%noccupied=header_i(3)
+        payload%operation_count=header_i(4);payload%nonidentity_operation_count=header_i(5)
         payload%catalog_fingerprint=header_fp(1);payload%state_fingerprint=header_fp(2)
         payload%metric_fingerprint=header_fp(3);payload%operator_structure_fingerprint=header_fp(4)
         payload%operator_value_fingerprint=header_fp(5);payload%kinetic_fingerprint=header_fp(6)
@@ -703,7 +716,7 @@ contains
         payload%continuation_fingerprint=header_fp(13);payload%scope_fingerprint=header_fp(14)
         payload%analysis_fingerprint=header_fp(15);payload%selection_fingerprint=header_fp(16)
         payload%pseudopotential_fingerprint=header_fp(17);payload%energy_fingerprint=header_fp(18)
-        payload%payload_fingerprint=header_fp(19)
+        payload%position_convention_fingerprint=header_fp(19);payload%payload_fingerprint=header_fp(20)
       endif
       call read_ground_state_arrays(comm,owner,unit,rank,payload,io_status,ierr)
       if(ierr/=MPI_SUCCESS.or.io_status/=0)goto 920
@@ -712,6 +725,14 @@ contains
     call validate_ground_state_payload(payload,local_bad)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='corrupt complete DG ground-state payload';return;endif
+    allocate(grid_ownership(payload%global_grid_count));grid_ownership=0
+    do i=1,size(payload%grid_ids)
+      grid_ownership(int(payload%grid_ids(i)))=grid_ownership(int(payload%grid_ids(i)))+1
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,grid_ownership,payload%global_grid_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(grid_ownership/=1))then
+      message='corrupt complete DG ground-state grid catalog';return
+    endif
     call hash_ground_state_common(payload,common_hash)
     call MPI_Allreduce(common_hash,minimum_common_hash,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
     if(ierr==MPI_SUCCESS)call MPI_Allreduce(common_hash,maximum_common_hash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
@@ -753,8 +774,8 @@ contains
     character(*),intent(out)::message
 #ifdef USE_MPI
     type(s_rt_dg_hybrid_ground_state_payload)::shard
-    integer::rank,nproc,ierr,unit,io_status,owner,receiver,file_nproc,version,bad,global_bad,header_i(4)
-    integer(int64)::header_fp(19),shard_hash,local_hash,global_hash,common_hash,min_common,max_common
+    integer::rank,nproc,ierr,unit,io_status,owner,receiver,file_nproc,version,bad,global_bad,header_i(5)
+    integer(int64)::header_fp(20),shard_hash,local_hash,global_hash,common_hash,min_common,max_common
     logical::header_l(4),opened,have_common
     character(16)::magic
     ok=.false.;message='';payload_fingerprint=0_int64;opened=.false.;io_status=0;local_hash=0_int64;have_common=.false.
@@ -772,8 +793,8 @@ contains
       receiver=mod(owner,nproc)
       if(rank==0)read(unit,iostat=io_status)header_l,header_i,header_fp
       call sync_io(io_status,comm,ierr);if(ierr/=MPI_SUCCESS.or.io_status/=0)goto 930
-      call MPI_Bcast(header_l,4,MPI_LOGICAL,0,comm,ierr);call MPI_Bcast(header_i,4,MPI_INTEGER,0,comm,ierr)
-      call MPI_Bcast(header_fp,19,MPI_INTEGER8,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 930
+      call MPI_Bcast(header_l,4,MPI_LOGICAL,0,comm,ierr);call MPI_Bcast(header_i,5,MPI_INTEGER,0,comm,ierr)
+      call MPI_Bcast(header_fp,20,MPI_INTEGER8,0,comm,ierr);if(ierr/=MPI_SUCCESS)goto 930
       if(rank==receiver)then
         shard=s_rt_dg_hybrid_ground_state_payload()
         call set_ground_state_header(shard,header_l,header_i,header_fp)
@@ -810,28 +831,29 @@ contains
 #ifdef USE_MPI
   subroutine set_ground_state_header(p,l,h,f)
     type(s_rt_dg_hybrid_ground_state_payload),intent(inout)::p
-    logical,intent(in)::l(4);integer,intent(in)::h(4);integer(int64),intent(in)::f(19)
+    logical,intent(in)::l(4);integer,intent(in)::h(5);integer(int64),intent(in)::f(20)
     p%valid=l(1);p%final_refresh_complete=l(2);p%analysis_complete=l(3);p%identity_only=l(4)
-    p%global_count=h(1);p%noccupied=h(2);p%operation_count=h(3);p%nonidentity_operation_count=h(4)
+    p%global_count=h(1);p%global_grid_count=h(2);p%noccupied=h(3);p%operation_count=h(4);p%nonidentity_operation_count=h(5)
     p%catalog_fingerprint=f(1);p%state_fingerprint=f(2);p%metric_fingerprint=f(3)
     p%operator_structure_fingerprint=f(4);p%operator_value_fingerprint=f(5);p%kinetic_fingerprint=f(6)
     p%nonlocal_fingerprint=f(7);p%local_fingerprint=f(8);p%sipg_fingerprint=f(9);p%basis_fingerprint=f(10)
     p%face_fingerprint=f(11);p%dc_seed_fingerprint=f(12);p%continuation_fingerprint=f(13);p%scope_fingerprint=f(14)
     p%analysis_fingerprint=f(15);p%selection_fingerprint=f(16);p%pseudopotential_fingerprint=f(17)
-    p%energy_fingerprint=f(18);p%payload_fingerprint=f(19)
+    p%energy_fingerprint=f(18);p%position_convention_fingerprint=f(19);p%payload_fingerprint=f(20)
   end subroutine set_ground_state_header
 
   subroutine copy_ground_state_common(source,target)
     type(s_rt_dg_hybrid_ground_state_payload),intent(in)::source
     type(s_rt_dg_hybrid_ground_state_payload),intent(inout)::target
-    logical::l(4);integer::h(4);integer(int64)::f(19)
+    logical::l(4);integer::h(5);integer(int64)::f(20)
     l=[source%valid,source%final_refresh_complete,source%analysis_complete,source%identity_only]
-    h=[source%global_count,source%noccupied,source%operation_count,source%nonidentity_operation_count]
+    h=[source%global_count,source%global_grid_count,source%noccupied,source%operation_count,source%nonidentity_operation_count]
     f=[source%catalog_fingerprint,source%state_fingerprint,source%metric_fingerprint,source%operator_structure_fingerprint,&
       source%operator_value_fingerprint,source%kinetic_fingerprint,source%nonlocal_fingerprint,source%local_fingerprint,&
       source%sipg_fingerprint,source%basis_fingerprint,source%face_fingerprint,source%dc_seed_fingerprint,&
       source%continuation_fingerprint,source%scope_fingerprint,source%analysis_fingerprint,source%selection_fingerprint,&
-      source%pseudopotential_fingerprint,source%energy_fingerprint,source%payload_fingerprint]
+      source%pseudopotential_fingerprint,source%energy_fingerprint,source%position_convention_fingerprint,&
+      source%payload_fingerprint]
     call set_ground_state_header(target,l,h,f)
     allocate(target%scope_selectors,source=source%scope_selectors);allocate(target%xc_types,source=source%xc_types)
     allocate(target%occupations,source=source%occupations);allocate(target%eigenvalues,source=source%eigenvalues)
@@ -1417,7 +1439,8 @@ contains
     if(allocated(payload%row_ids))nrow=size(payload%row_ids)
     if(allocated(payload%grid_ids))npoint=size(payload%grid_ids)
     if(.not.payload%valid.or..not.payload%final_refresh_complete.or..not.payload%analysis_complete.or.&
-      payload%global_count<1.or.payload%noccupied<1.or.payload%noccupied>payload%global_count.or.&
+      payload%global_count<1.or.payload%global_grid_count<1.or.payload%noccupied<1.or.&
+      payload%noccupied>payload%global_count.or.&
       payload%operation_count<1.or.payload%nonidentity_operation_count<0.or.&
       payload%nonidentity_operation_count>=payload%operation_count)bad=1
     if(any([payload%catalog_fingerprint,payload%state_fingerprint,payload%metric_fingerprint,&
@@ -1425,7 +1448,7 @@ contains
       payload%nonlocal_fingerprint,payload%local_fingerprint,payload%sipg_fingerprint,payload%basis_fingerprint,&
       payload%face_fingerprint,payload%dc_seed_fingerprint,payload%continuation_fingerprint,payload%scope_fingerprint,&
       payload%analysis_fingerprint,payload%selection_fingerprint,payload%pseudopotential_fingerprint,&
-      payload%energy_fingerprint]==0_int64))bad=1
+      payload%energy_fingerprint,payload%position_convention_fingerprint]==0_int64))bad=1
     if(.not.allocated(payload%row_ids).or..not.allocated(payload%metric_rows).or.&
       .not.allocated(payload%kinetic_rows).or..not.allocated(payload%nonlocal_rows).or.&
       .not.allocated(payload%local_rows).or..not.allocated(payload%sipg_rows).or.&
@@ -1468,6 +1491,9 @@ contains
       .not.allocated(payload%density))then;bad=1;return;endif
     if(size(payload%grid_weights)/=npoint.or.size(payload%partition_ids)/=npoint.or.&
       any(shape(payload%basis_values)/=[payload%global_count,npoint]).or.size(payload%density)/=npoint)bad=1
+    if(npoint>0)then
+      if(any(payload%grid_ids<1_int64).or.any(payload%grid_ids>int(payload%global_grid_count,int64)))bad=1
+    endif
     if(.not.allocated(payload%requested_ids).or..not.allocated(payload%effective_ids).or.&
       .not.allocated(payload%scope_selectors).or..not.allocated(payload%xc_types).or.&
       .not.allocated(payload%continuation_receipt).or..not.allocated(payload%pseudopotential_receipt).or.&
@@ -1560,7 +1586,9 @@ contains
     hash=mix_hash(hash,payload%selection_fingerprint)
     hash=mix_hash(hash,payload%pseudopotential_fingerprint)
     hash=mix_hash(hash,payload%energy_fingerprint)
-    hash=mix_hash(hash,int(payload%global_count,int64));hash=mix_hash(hash,int(payload%noccupied,int64))
+    hash=mix_hash(hash,payload%position_convention_fingerprint)
+    hash=mix_hash(hash,int(payload%global_count,int64));hash=mix_hash(hash,int(payload%global_grid_count,int64))
+    hash=mix_hash(hash,int(payload%noccupied,int64))
     hash=mix_hash(hash,int(payload%operation_count,int64));hash=mix_hash(hash,int(payload%nonidentity_operation_count,int64))
     hash=mix_hash(hash,merge(1_int64,0_int64,payload%analysis_complete))
     hash=mix_hash(hash,merge(1_int64,0_int64,payload%identity_only))

@@ -152,7 +152,8 @@ use dg_overlapping_wannier_density,only:reconstruct_dg_overlapping_wannier_densi
 use dg_overlapping_wannier_checkpoint, only: s_dg_overlapping_wannier_checkpoint, &
   write_dg_overlapping_wannier_checkpoint,read_dg_overlapping_wannier_checkpoint,&
   compute_dg_overlapping_wannier_matrix_fingerprints
-use dg_overlapping_wannier_observables, only: assemble_dg_overlapping_wannier_observables
+use dg_overlapping_wannier_observables, only: assemble_dg_overlapping_wannier_observables,&
+  assemble_dg_cell_wrapped_position
 use dg_overlapping_wannier_full_cell, only: project_dg_full_cell_hamiltonian_tiles,&
   s_dg_full_cell_redistribution_schedule,initialize_dg_full_cell_redistribution,&
   apply_dg_full_cell_redistribution_forward,apply_dg_full_cell_redistribution_reverse
@@ -4103,9 +4104,9 @@ contains
       local_projector_scale,global_projector_scale,symmetry_residual
     real(8)::projector_symmetry_residual
     real(8)::broken_diagnostics(4)
-    real(8),allocatable::rho_in(:),rho_out(:),local_potential(:),&
+    real(8),allocatable::rho_in(:),rho_out(:),local_potential(:),checkpoint_coordinates(:,:),&
       eigenvalues(:),solver_eigenvalues(:)
-    complex(8),allocatable::local_rows(:,:),coefficients(:,:),solver_coefficients(:,:),&
+    complex(8),allocatable::local_rows(:,:),coefficients(:,:),solver_coefficients(:,:),checkpoint_position(:,:,:),&
       gamma_rows(:,:),projector_rows(:,:),s_coefficients(:,:),interface_state(:,:),&
       previous_interface_state(:,:),hc(:,:),sc_epsilon(:,:),full_action_values(:,:),interface_component_actions(:,:,:)
     type(s_dg_hybrid_variational_iterate)::iterate
@@ -4341,6 +4342,18 @@ stage_pass: do
     call MPI_Allreduce(seed_local_hash,seed_fingerprint,1,MPI_INTEGER8,MPI_BXOR,dc%icomm_tot,ierr_local)
     if(ierr_local/=MPI_SUCCESS)error stop 'DG continuation seed checkpoint fingerprint failed'
     if(seed_fingerprint==0_8)seed_fingerprint=1_8
+    allocate(checkpoint_coordinates(3,size(ow_core_ids)))
+    do p=1,size(ow_core_ids)
+      checkpoint_coordinates(1,p)=real(modulo(ow_core_ids(p)-1_8,int(dc%lg_tot%num(1),8)),8)*dc%system_tot%hgs(1)
+      checkpoint_coordinates(2,p)=real(modulo((ow_core_ids(p)-1_8)/int(dc%lg_tot%num(1),8),&
+        int(dc%lg_tot%num(2),8)),8)*dc%system_tot%hgs(2)
+      checkpoint_coordinates(3,p)=real((ow_core_ids(p)-1_8)/int(dc%lg_tot%num(1)*dc%lg_tot%num(2),8),8)*&
+        dc%system_tot%hgs(3)
+    enddo
+    call assemble_dg_cell_wrapped_position(dc%icomm_tot,ow_core_ids,interior_weights,checkpoint_coordinates,&
+      [0d0,0d0,0d0],real(dc%lg_tot%num,8)*dc%system_tot%hgs,interior_values,checkpoint_position,&
+      checkpoint_payload%position_convention_fingerprint,local_ok,continuation_message)
+    if(.not.local_ok)error stop 'DG continuation periodic position assembly failed'
     checkpoint_payload%valid=.true.;checkpoint_payload%final_refresh_complete=final_refresh_performed
     checkpoint_payload%analysis_complete=.true.;checkpoint_payload%identity_only=size(basis_representation,3)==1
     checkpoint_payload%operation_count=size(basis_representation,3)
@@ -4379,8 +4392,11 @@ stage_pass: do
     allocate(checkpoint_payload%hamiltonian_rows,source=iterate%hamiltonian_rows)
     allocate(checkpoint_payload%coefficients,source=final_ground_state%coefficients)
     allocate(checkpoint_payload%symmetry_representation,source=basis_representation)
-    call build_checkpoint_position_rows(dc%icomm_tot,ow_core_ids,dc%lg_tot%num,dc%system_tot%hgs,interior_weights,&
-      interior_values,row_ids,checkpoint_payload%position_rows)
+    allocate(checkpoint_payload%position_rows(3,size(row_ids),size(checkpoint_position,3)))
+    do i=1,size(row_ids)
+      checkpoint_payload%position_rows(:,i,:)=checkpoint_position(:,int(row_ids(i)),:)
+    enddo
+    checkpoint_payload%global_grid_count=product(dc%lg_tot%num)
     allocate(checkpoint_payload%occupations,source=final_ground_state%occupations)
     allocate(checkpoint_payload%eigenvalues,source=final_ground_state%eigenvalues)
     allocate(checkpoint_payload%grid_ids,source=ow_core_ids)
@@ -4475,42 +4491,6 @@ stage_pass: do
     count=size(face%derivative_plus)
     if(count>0)values(1,position+1:position+count)=reshape(face%derivative_plus,[count]);position=position+count
   end subroutine pack_checkpoint_face_values
-
-  subroutine build_checkpoint_position_rows(comm,grid_ids,grid_num,hgs,weights,basis_values,row_ids,position_rows)
-    integer,intent(in)::comm
-    integer(8),intent(in)::grid_ids(:),row_ids(:)
-    integer,intent(in)::grid_num(3)
-    real(8),intent(in)::hgs(3),weights(:)
-    complex(8),intent(in)::basis_values(:,:)
-    complex(8),allocatable,intent(out)::position_rows(:,:,:)
-    integer::i,j,p,row,gx,gy,gz,ierr,nbasis
-    real(8)::coordinate(3)
-    complex(8),allocatable::local_full(:,:,:),global_full(:,:,:)
-    nbasis=size(basis_values,1)
-    allocate(local_full(3,nbasis,nbasis),global_full(3,nbasis,nbasis));local_full=(0d0,0d0)
-    do i=1,nbasis
-      do p=1,size(grid_ids)
-        gx=int(modulo(grid_ids(p)-1_8,int(grid_num(1),8)))
-        gy=int(modulo((grid_ids(p)-1_8)/int(grid_num(1),8),int(grid_num(2),8)))
-        gz=int((grid_ids(p)-1_8)/int(grid_num(1)*grid_num(2),8))
-        coordinate=[real(gx,8)*hgs(1),real(gy,8)*hgs(2),real(gz,8)*hgs(3)]
-        do j=1,nbasis
-          local_full(:,i,j)=local_full(:,i,j)+weights(p)*conjg(basis_values(i,p))*&
-            basis_values(j,p)*coordinate
-        enddo
-      enddo
-    enddo
-#ifdef USE_MPI
-    call MPI_Allreduce(local_full,global_full,3*nbasis*nbasis,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
-#else
-    global_full=local_full
-#endif
-    allocate(position_rows(3,size(row_ids),nbasis));position_rows=(0d0,0d0)
-    do i=1,size(row_ids)
-      row=int(row_ids(i))
-      position_rows(:,i,:)=global_full(:,row,:)
-    enddo
-  end subroutine build_checkpoint_position_rows
 
   subroutine build_checkpoint_topology_graphs(global_ids,row_ids,basis_fragment,faces,&
       metric_offsets,metric_columns,operator_offsets,operator_columns)

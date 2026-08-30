@@ -24,11 +24,18 @@ program test_rt_dg_hybrid_checkpoint_mpi
   call get_command_argument(1,mode,length=mode_length);call get_command_argument(1,mode)
   call get_command_argument(2,path)
   if(trim(mode)=='write_complete'.or.trim(mode)=='write_bad_complete'.or.trim(mode)=='write_incomplete_complete'.or.&
+      trim(mode)=='write_bad_grid_complete'.or.trim(mode)=='write_out_of_range_grid_complete'.or.&
+      trim(mode)=='write_missing_position_convention_complete'.or.&
       trim(mode)=='write_interrupted_complete')then
     call construct_complete_payload(complete_payload)
     if(trim(mode)=='write_bad_complete')complete_payload%hamiltonian_rows(1,1)=&
       complete_payload%hamiltonian_rows(1,1)+(1d0,0d0)
     if(trim(mode)=='write_incomplete_complete')deallocate(complete_payload%face_values)
+    if(trim(mode)=='write_bad_grid_complete')complete_payload%grid_ids(1)=2_int64
+    if(trim(mode)=='write_out_of_range_grid_complete')complete_payload%grid_ids(1)=n+1_int64
+    if(trim(mode)=='write_missing_position_convention_complete')then
+      complete_payload%position_convention_fingerprint=0_int64
+    endif
     call write_rt_dg_hybrid_ground_state_checkpoint(comm,trim(path),complete_payload,payload_fingerprint,ok,message,&
       interrupt_after_write=trim(mode)=='write_interrupted_complete')
     if(trim(mode)=='write_complete')then
@@ -124,6 +131,7 @@ contains
     logical::fingerprint_ok
     payload%valid=.true.;payload%final_refresh_complete=.true.;payload%analysis_complete=.true.
     payload%identity_only=.false.;payload%global_count=n;payload%noccupied=2
+    payload%global_grid_count=n;payload%position_convention_fingerprint=1199_int64
     payload%operation_count=2;payload%nonidentity_operation_count=1
     payload%catalog_fingerprint=1101_int64;payload%state_fingerprint=1102_int64
     payload%metric_fingerprint=1103_int64;payload%operator_structure_fingerprint=1104_int64
@@ -179,7 +187,7 @@ contains
     local_point=0
     do point=1,n
       if(mod(point-1,nproc)/=rank)cycle
-      local_point=local_point+1;payload%grid_ids(local_point)=100+point;payload%grid_weights(local_point)=0.25d0
+      local_point=local_point+1;payload%grid_ids(local_point)=point;payload%grid_weights(local_point)=0.25d0
       payload%partition_ids(local_point)=1+mod(point,2);payload%density(local_point)=0.5d0+0.01d0*point
       do row=1,n;payload%basis_values(row,local_point)=cmplx(0.01d0*row*point,-0.02d0*row,real64);enddo
     enddo

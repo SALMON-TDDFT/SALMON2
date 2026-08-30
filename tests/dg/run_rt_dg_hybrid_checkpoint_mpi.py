@@ -54,6 +54,10 @@ with tempfile.TemporaryDirectory(prefix="hybrid-checkpoint-") as name:
     incomplete=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe),"write_incomplete_complete",str(complete)],capture_output=True,text=True,env=env)
     assert incomplete.returncode==0,(nrank,incomplete.stdout,incomplete.stderr)
     assert complete.read_bytes()==accepted_bytes,"incomplete complete checkpoint replaced the accepted file"
+    for mode in ("write_bad_grid_complete","write_out_of_range_grid_complete","write_missing_position_convention_complete"):
+      invalid_catalog=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe),mode,str(complete)],capture_output=True,text=True,env=env)
+      assert invalid_catalog.returncode==0,(nrank,mode,invalid_catalog.stdout,invalid_catalog.stderr)
+      assert complete.read_bytes()==accepted_bytes,f"{mode} replaced the accepted file"
     interrupted=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe),"write_interrupted_complete",str(complete)],capture_output=True,text=True,env=env)
     assert interrupted.returncode==0,(nrank,interrupted.stdout,interrupted.stderr)
     assert complete.read_bytes()==accepted_bytes,"interrupted complete checkpoint replaced the accepted file"

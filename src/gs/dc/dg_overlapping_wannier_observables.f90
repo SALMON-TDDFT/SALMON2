@@ -7,8 +7,43 @@ module dg_overlapping_wannier_observables
 #endif
   implicit none
   private
-  public::assemble_dg_overlapping_wannier_observables
+  public::assemble_dg_overlapping_wannier_observables,assemble_dg_cell_wrapped_position
 contains
+  subroutine assemble_dg_cell_wrapped_position(comm,core_ids,weights,coordinates,origin,cell_length,values,&
+      position,convention_fingerprint,ok,message)
+    integer,intent(in)::comm
+    integer(int64),intent(in)::core_ids(:)
+    real(real64),intent(in)::weights(:),coordinates(:,:),origin(3),cell_length(3)
+    complex(real64),intent(in)::values(:,:)
+    complex(real64),allocatable,intent(out)::position(:,:,:)
+    integer(int64),intent(out)::convention_fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    complex(real64),allocatable::local_position(:,:,:)
+    integer::n,i,j,p,axis,ierr,local_bad,global_bad
+    real(real64)::wrapped_coordinate
+    n=size(values,1);local_bad=0;ok=.false.;message='';convention_fingerprint=0_int64
+    if(size(weights)/=size(core_ids).or.size(coordinates,1)/=3.or.size(coordinates,2)/=size(core_ids).or.&
+      size(values,2)/=size(core_ids).or.any(core_ids<1_int64).or.any(weights<=0d0).or.any(cell_length<=0d0))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid cell-wrapped position payload';return;endif
+    allocate(local_position(3,n,n),position(3,n,n));local_position=(0d0,0d0)
+    do p=1,size(core_ids);do j=1,n;do i=1,n;do axis=1,3
+      wrapped_coordinate=origin(axis)+modulo(coordinates(axis,p)-origin(axis),cell_length(axis))
+      local_position(axis,i,j)=local_position(axis,i,j)+weights(p)*wrapped_coordinate*&
+        conjg(values(i,p))*values(j,p)
+    enddo;enddo;enddo;enddo
+    call MPI_Allreduce(local_position,position,3*n*n,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='cell-wrapped position reduction failed';return;endif
+    do axis=1,3;position(axis,:,:)=0.5d0*(position(axis,:,:)+conjg(transpose(position(axis,:,:))));enddo
+    convention_fingerprint=int(z'43454C4C57524150',int64)
+    ok=.true.
+#else
+    ok=.false.;message='cell-wrapped position assembly requires MPI';convention_fingerprint=0_int64
+#endif
+  end subroutine assemble_dg_cell_wrapped_position
+
   subroutine assemble_dg_overlapping_wannier_observables(comm,nwann,core_ids,weights,coordinates,&
       origin,cell_length,position_convention,values,gradients,metric,metric_inverse,local_hamiltonian,&
       nonlocal_hamiltonian,expected_core_count,antihermitian_tolerance,position,derivative,&

@@ -65,7 +65,8 @@ contains
     integer::i,row,nowned
     nowned=count([(mod(row-1,nproc)==rank,row=1,2)])
     p%valid=.true.;p%final_refresh_complete=.true.;p%analysis_complete=.true.;p%identity_only=.true.
-    p%global_count=2;p%noccupied=1;p%operation_count=1;p%nonidentity_operation_count=0
+    p%global_count=2;p%global_grid_count=2;p%noccupied=1;p%operation_count=1;p%nonidentity_operation_count=0
+    p%position_convention_fingerprint=115_int64
     p%catalog_fingerprint=101;p%state_fingerprint=102;p%metric_fingerprint=103
     p%operator_structure_fingerprint=104;p%operator_value_fingerprint=105
     p%kinetic_fingerprint=1;p%nonlocal_fingerprint=1;p%local_fingerprint=1;p%sipg_fingerprint=1

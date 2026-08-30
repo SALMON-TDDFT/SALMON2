@@ -171,7 +171,7 @@ contains
       open(newunit=unit,file=trim(path),status='old',access='stream',form='unformatted',action='read',iostat=status)
       if(status==0)read(unit,iostat=status)magic,version,file_nproc
       if(status==0)close(unit)
-      if(status==0.and.(magic/='SALMON_DG_GS001 '.or.version/=1))status=1
+      if(status==0.and.(magic/='SALMON_DG_GS001 '.or.version/=2))status=1
     endif
     call MPI_Bcast(status,1,MPI_INTEGER,0,comm,ierr);call MPI_Bcast(file_nproc,1,MPI_INTEGER,0,comm,ierr)
     ok=ierr==MPI_SUCCESS.and.status==0.and.file_nproc>0
@@ -183,22 +183,24 @@ contains
     type(s_rt_dg_hybrid_ground_state_payload),intent(inout)::p
     integer(int64),intent(inout)::fp
     integer,intent(out)::ierr
-    integer::header(4);logical::flags(4)
-    integer(int64)::fingerprints(18)
+    integer::header(5);logical::flags(4)
+    integer(int64)::fingerprints(19)
     if(rank==0)then
-      header=[p%global_count,p%noccupied,p%operation_count,p%nonidentity_operation_count]
+      header=[p%global_count,p%global_grid_count,p%noccupied,p%operation_count,p%nonidentity_operation_count]
       flags=[p%valid,p%final_refresh_complete,p%analysis_complete,p%identity_only]
       fingerprints=[p%catalog_fingerprint,p%state_fingerprint,p%metric_fingerprint,p%operator_structure_fingerprint,&
         p%operator_value_fingerprint,p%kinetic_fingerprint,p%nonlocal_fingerprint,p%local_fingerprint,p%sipg_fingerprint,&
         p%basis_fingerprint,p%face_fingerprint,p%dc_seed_fingerprint,p%continuation_fingerprint,p%scope_fingerprint,&
-        p%analysis_fingerprint,p%selection_fingerprint,p%pseudopotential_fingerprint,p%energy_fingerprint]
+        p%analysis_fingerprint,p%selection_fingerprint,p%pseudopotential_fingerprint,p%energy_fingerprint,&
+        p%position_convention_fingerprint]
     endif
-    call MPI_Bcast(header,4,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Bcast(header,5,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
     call MPI_Bcast(flags,4,MPI_LOGICAL,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
-    call MPI_Bcast(fingerprints,18,MPI_INTEGER8,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Bcast(fingerprints,19,MPI_INTEGER8,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
     call MPI_Bcast(fp,1,MPI_INTEGER8,0,comm,ierr);if(ierr/=MPI_SUCCESS)return
     if(rank>=file_nproc)then
-      p%global_count=header(1);p%noccupied=header(2);p%operation_count=header(3);p%nonidentity_operation_count=header(4)
+      p%global_count=header(1);p%global_grid_count=header(2);p%noccupied=header(3)
+      p%operation_count=header(4);p%nonidentity_operation_count=header(5)
       p%valid=flags(1);p%final_refresh_complete=flags(2);p%analysis_complete=flags(3);p%identity_only=flags(4)
       p%catalog_fingerprint=fingerprints(1);p%state_fingerprint=fingerprints(2);p%metric_fingerprint=fingerprints(3)
       p%operator_structure_fingerprint=fingerprints(4);p%operator_value_fingerprint=fingerprints(5)
@@ -207,8 +209,9 @@ contains
       p%dc_seed_fingerprint=fingerprints(12);p%continuation_fingerprint=fingerprints(13);p%scope_fingerprint=fingerprints(14)
       p%analysis_fingerprint=fingerprints(15);p%selection_fingerprint=fingerprints(16)
       p%pseudopotential_fingerprint=fingerprints(17);p%energy_fingerprint=fingerprints(18)
+      p%position_convention_fingerprint=fingerprints(19)
       allocate(p%row_ids(0),p%metric_rows(0,header(1)),p%kinetic_rows(0,header(1)),p%nonlocal_rows(0,header(1)),&
-        p%local_rows(0,header(1)),p%sipg_rows(0,header(1)),p%hamiltonian_rows(0,header(1)),p%coefficients(0,header(2)),&
+        p%local_rows(0,header(1)),p%sipg_rows(0,header(1)),p%hamiltonian_rows(0,header(1)),p%coefficients(0,header(3)),&
         p%position_rows(3,0,header(1)),p%metric_row_offsets(1),p%metric_column_ids(0),p%operator_row_offsets(1),&
         p%operator_column_ids(0),p%grid_ids(0),p%grid_weights(0),p%density(0),p%basis_values(header(1),0))
       p%metric_row_offsets=1;p%operator_row_offsets=1
