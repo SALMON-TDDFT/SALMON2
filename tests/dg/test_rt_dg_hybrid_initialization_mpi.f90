@@ -37,6 +37,8 @@ program test_rt_dg_hybrid_initialization_mpi
   if(trim(mode)/='read_only')call require(state%payload_fingerprint==fingerprint,&
     'RT did not retain exact serialized payload identity')
   call require(state%initial_invariants_valid,'RT startup invariant receipt is absent')
+  if(trim(mode)/='read_only')call require(allocated(state%energy_receipt).and.&
+    all(state%energy_receipt==payload%energy_receipt),'RT lost the serialized physical energy receipt')
   if(trim(mode)/='read_only')call require(state%operator_structure_fingerprint==payload%operator_structure_fingerprint,&
     'RT changed the operator-union identity during redistribution')
   structure_before=state%operator_structure_fingerprint;value_before=state%operator_value_fingerprint

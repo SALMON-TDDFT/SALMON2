@@ -23,7 +23,7 @@ module rt_dg_hybrid_initialization
     integer(int64),allocatable::owned_row_ids(:),grid_ids(:)
     complex(real64),allocatable::coefficients(:,:),kinetic_rows(:,:),nonlocal_rows(:,:),&
       local_rows(:,:),sipg_rows(:,:),basis_values(:,:)
-    real(real64),allocatable::density(:),grid_weights(:),occupations(:),eigenvalues(:)
+    real(real64),allocatable::density(:),grid_weights(:),occupations(:),eigenvalues(:),energy_receipt(:)
   end type s_rt_dg_hybrid_state
   public::initialize_rt_dg_hybrid_from_checkpoint,fingerprint_rt_dg_hybrid_scope
 contains
@@ -101,6 +101,7 @@ contains
     allocate(state%grid_ids,source=payload%grid_ids);allocate(state%density,source=payload%density)
     allocate(state%grid_weights,source=payload%grid_weights);allocate(state%basis_values,source=payload%basis_values)
     allocate(state%occupations,source=payload%occupations);allocate(state%eigenvalues,source=payload%eigenvalues)
+    allocate(state%energy_receipt,source=payload%energy_receipt)
     state%global_count=n;state%noccupied=nocc;state%payload_fingerprint=payload_fingerprint
     state%operator_structure_fingerprint=payload%operator_structure_fingerprint
     state%operator_value_fingerprint=payload%operator_value_fingerprint;state%scope_fingerprint=payload%scope_fingerprint
@@ -178,6 +179,7 @@ contains
       p%metric_row_offsets=1;p%operator_row_offsets=1
     endif
     call bcast_i1(p%scope_selectors);call bcast_i1(p%xc_types);call bcast_r1(p%occupations);call bcast_r1(p%eigenvalues)
+    call bcast_r1(p%continuation_receipt);call bcast_r1(p%pseudopotential_receipt);call bcast_r1(p%energy_receipt)
     call bcast_z3(p%symmetry_representation)
   contains
     subroutine bcast_i1(a)

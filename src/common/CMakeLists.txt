@@ -26,6 +26,7 @@ set(SOURCES
    dg_hybrid_sparse_operators.f90
    dg_hybrid_continuation_residuals.f90
    dg_hybrid_continuation_acceptance.f90
+   dg_hybrid_total_energy.f90
    )
 
 if (IS_FUJITSU_COMPILER)

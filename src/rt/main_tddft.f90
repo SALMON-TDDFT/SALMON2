@@ -49,12 +49,17 @@ use rt_dg_overlapping_wannier, only: s_dg_overlapping_wannier_rt_state, &
 use em_field, only: calc_Ac_ext_t
 use rt_dg_hybrid_initialization,only:s_rt_dg_hybrid_state,initialize_rt_dg_hybrid_from_checkpoint
 use rt_dg_hybrid_density_update,only:update_rt_dg_hybrid_density,reconstruct_rt_dg_hybrid_density
+use rt_dg_hybrid_stationarity,only:s_rt_dg_hybrid_stationarity_reference,&
+  s_rt_dg_hybrid_stationarity_receipt,initialize_rt_dg_hybrid_stationarity,&
+  evaluate_rt_dg_hybrid_stationarity
+use dg_hybrid_total_energy,only:evaluate_dg_hybrid_fixed_energy
 use rt_dg_hybrid_length_gauge,only:propagate_rt_dg_hybrid_length_gauge
 use rt_dg_hybrid_sparse_exchange,only:s_rt_dg_sparse_exchange,build_rt_dg_sparse_exchange
 use dg_overlapping_wannier_construction,only:redistribute_dg_row_owned_real_field_to_requests
 use hartree_sub,only:hartree
 use salmon_xc,only:exchange_correlation_density
 use hamiltonian,only:update_vlocal
+use Total_Energy,only:calc_Total_Energy_periodic
 use plusU_global,only:PLUS_U_ON
 use nvtx
 use parallelization, only: nproc_id_global
@@ -270,13 +275,16 @@ contains
 
 subroutine run_dg_hybrid_continuation_rt()
   type(s_rt_dg_sparse_exchange)::metric_exchange,operator_exchange
+  type(s_rt_dg_hybrid_stationarity_reference)::stationarity_reference
+  type(s_rt_dg_hybrid_stationarity_receipt)::stationarity_receipt
   complex(8),allocatable::next(:),initial_hamiltonian(:)
   real(8),allocatable::vector_potential_samples(:,:)
   real(8)::electric_field(3),previous_polarization(3),periods(3),metric_norm,orbital_energy,polarization(3),&
-    local_defect,global_defect,local_scale,global_scale
+    local_defect,global_defect,local_scale,global_scale,current_total_energy,current_electron_count,&
+    current_hamiltonian_residual,stationarity_tolerances(5)
   integer(8)::workspace,fingerprint
   integer::step,orbital,iterations,ierr,update_count,local_bad,global_bad
-  logical::ok
+  logical::ok,stationarity_enabled
   character(256)::message
   call initialize_rt_dg_hybrid_from_checkpoint(nproc_group_global,'./hybrid_dg_ground_state.chk',theory,&
     iperiodic==3,system%nspin,yn_spinorbit=='y',PLUS_U_ON,yn_hse=='y',yn_fix_func=='y',yn_jm=='y',&
@@ -300,6 +308,23 @@ subroutine run_dg_hybrid_continuation_rt()
   if(ierr/=MPI_SUCCESS.or.global_bad/=0.or..not.ieee_is_finite(global_defect).or.&
       .not.ieee_is_finite(global_scale).or..not.(global_defect<=1d-10*global_scale))&
     error stop 'hybrid DG RT initial Hamiltonian reconstruction failed'
+  call evaluate_hybrid_rt_physical_invariants(current_total_energy,current_electron_count,&
+    current_hamiltonian_residual,ok,message)
+  if(.not.ok)then;write(0,'(a)')trim(message);error stop 'hybrid DG RT initial physical invariants failed';endif
+  if(.not.allocated(hybrid_state%energy_receipt))error stop 'hybrid DG RT physical energy receipt is absent'
+  stationarity_enabled=size(hybrid_state%energy_receipt)==7.and.any(hybrid_state%energy_receipt/=0d0)
+  if(stationarity_enabled)then
+    if(abs(current_total_energy-hybrid_state%energy_receipt(1))>&
+        1d-10*max(1d0,abs(hybrid_state%energy_receipt(1))))&
+      error stop 'hybrid DG RT initial physical energy does not match the checkpoint'
+  endif
+  call initialize_rt_dg_hybrid_stationarity(nproc_group_global,hybrid_state%owned_row_ids,&
+    hybrid_state%density,current_total_energy,hybrid_state%coefficients,&
+    apply_hybrid_metric_to_coefficients(),hybrid_state%occupations,current_electron_count,&
+    current_hamiltonian_residual,stationarity_reference,ok,message)
+  if(.not.ok)error stop 'hybrid DG RT stationarity reference failed'
+  stationarity_tolerances=[dg_dc_gs_final_density_tolerance,dg_dc_gs_final_orbital_tolerance,&
+    dg_dc_gs_final_orbital_tolerance,dg_dc_gs_electron_count_tolerance,dg_dc_gs_final_orbital_tolerance]
   call build_rt_dg_sparse_exchange(nproc_group_global,hybrid_state%global_count,hybrid_state%metric%fingerprint,&
     hybrid_state%metric%owned_row_ids,hybrid_state%metric%column_ids,metric_exchange,ok,message)
   if(.not.ok)error stop 'hybrid DG RT metric exchange setup failed'
@@ -317,6 +342,20 @@ subroutine run_dg_hybrid_continuation_rt()
     update_count=update_count+1
     if(.not.ok)error stop 'hybrid DG RT Hartree/XC update failed'
     electric_field=-(vector_potential_samples(:,step)-vector_potential_samples(:,step-1))/dt
+    if(stationarity_enabled.and.maxval(abs(electric_field))<=10d0*epsilon(1d0))then
+      call evaluate_hybrid_rt_physical_invariants(current_total_energy,current_electron_count,&
+        current_hamiltonian_residual,ok,message)
+      if(.not.ok)error stop 'hybrid DG RT stationarity invariant evaluation failed'
+      call evaluate_rt_dg_hybrid_stationarity(nproc_group_global,stationarity_reference,&
+        hybrid_state%density,current_total_energy,hybrid_state%coefficients,&
+        apply_hybrid_metric_to_coefficients(),current_electron_count,current_hamiltonian_residual,&
+        stationarity_tolerances,stationarity_receipt,ok,message)
+      if(.not.ok)then;write(0,'(a)')trim(message);error stop 'hybrid DG RT zero-field stationarity failed';endif
+      if(nproc_id_global==0)write(*,'(a,i0,5(a,es16.8))')'[HYBRID-RT-STATIONARITY] step=',step,&
+        ' density=',stationarity_receipt%density_drift,' energy=',stationarity_receipt%energy_drift,&
+        ' projector=',stationarity_receipt%projector_drift,' electron=',stationarity_receipt%electron_drift,&
+        ' h_residual=',stationarity_receipt%hamiltonian_residual
+    endif
     do orbital=1,hybrid_state%noccupied
       call propagate_rt_dg_hybrid_length_gauge(nproc_group_global,hybrid_state%metric,hybrid_state%operators,&
         hybrid_state%coefficients(:,orbital),electric_field,dt,1d-12,24,previous_polarization,periods,next,&
@@ -329,6 +368,72 @@ subroutine run_dg_hybrid_continuation_rt()
   enddo
   if(update_count/=nt+1)error stop 'hybrid DG RT density update schedule violated'
 end subroutine run_dg_hybrid_continuation_rt
+
+function apply_hybrid_metric_to_coefficients() result(s_coefficients)
+    complex(8),allocatable::s_coefficients(:,:),global_coefficients(:,:)
+    integer::i,j,edge,ierr_local
+    allocate(global_coefficients(hybrid_state%global_count,hybrid_state%noccupied),&
+      s_coefficients(size(hybrid_state%owned_row_ids),hybrid_state%noccupied))
+    global_coefficients=(0d0,0d0);s_coefficients=(0d0,0d0)
+    do i=1,size(hybrid_state%owned_row_ids)
+      global_coefficients(int(hybrid_state%owned_row_ids(i)),:)=hybrid_state%coefficients(i,:)
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,global_coefficients,size(global_coefficients),MPI_DOUBLE_COMPLEX,MPI_SUM,&
+      nproc_group_global,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)error stop 'hybrid DG RT metric coefficient redistribution failed'
+    do i=1,size(hybrid_state%owned_row_ids)
+      do edge=hybrid_state%metric%row_offsets(i),hybrid_state%metric%row_offsets(i+1)-1
+        j=hybrid_state%metric%column_ids(edge)
+        s_coefficients(i,:)=s_coefficients(i,:)+hybrid_state%metric%values(edge)*global_coefficients(j,:)
+      enddo
+    enddo
+end function apply_hybrid_metric_to_coefficients
+
+subroutine evaluate_hybrid_rt_physical_invariants(total,electron_count,h_residual,evaluate_ok,evaluate_message)
+    real(8),intent(out)::total,electron_count,h_residual
+    logical,intent(out)::evaluate_ok
+    character(*),intent(out)::evaluate_message
+    complex(8),allocatable::global_coefficients(:,:),s_coefficients(:,:),h_coefficients(:,:)
+    real(8)::kinetic_energy,nonlocal_energy,local_norms(2),global_norms(2)
+    integer::i,j,edge,state_index,ierr_local
+    call evaluate_dg_hybrid_fixed_energy(nproc_group_global,hybrid_state%owned_row_ids,&
+      hybrid_state%coefficients,hybrid_state%occupations,hybrid_state%kinetic_rows,&
+      hybrid_state%sipg_rows,hybrid_state%nonlocal_rows,kinetic_energy,nonlocal_energy,evaluate_ok,evaluate_message)
+    if(.not.evaluate_ok)return
+    energy%E_kin=kinetic_energy;energy%E_ion_nloc=nonlocal_energy
+    call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,.false.,energy)
+    total=energy%E_tot;electron_count=sum(hybrid_state%occupations)
+    allocate(global_coefficients(hybrid_state%global_count,hybrid_state%noccupied),&
+      s_coefficients(size(hybrid_state%owned_row_ids),hybrid_state%noccupied),&
+      h_coefficients(size(hybrid_state%owned_row_ids),hybrid_state%noccupied))
+    global_coefficients=(0d0,0d0);s_coefficients=(0d0,0d0);h_coefficients=(0d0,0d0)
+    do i=1,size(hybrid_state%owned_row_ids)
+      global_coefficients(int(hybrid_state%owned_row_ids(i)),:)=hybrid_state%coefficients(i,:)
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,global_coefficients,size(global_coefficients),MPI_DOUBLE_COMPLEX,MPI_SUM,&
+      nproc_group_global,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)then;evaluate_ok=.false.;evaluate_message='hybrid coefficient redistribution failed';return;endif
+    do i=1,size(hybrid_state%owned_row_ids)
+      do edge=hybrid_state%metric%row_offsets(i),hybrid_state%metric%row_offsets(i+1)-1
+        j=hybrid_state%metric%column_ids(edge)
+        s_coefficients(i,:)=s_coefficients(i,:)+hybrid_state%metric%values(edge)*global_coefficients(j,:)
+      enddo
+      do edge=hybrid_state%operators%row_offsets(i),hybrid_state%operators%row_offsets(i+1)-1
+        j=hybrid_state%operators%column_ids(edge)
+        h_coefficients(i,:)=h_coefficients(i,:)+hybrid_state%operators%hamiltonian_values(edge)*global_coefficients(j,:)
+      enddo
+    enddo
+    local_norms=0d0
+    do state_index=1,hybrid_state%noccupied
+      local_norms(1)=local_norms(1)+sum(abs(h_coefficients(:,state_index)-&
+        hybrid_state%eigenvalues(state_index)*s_coefficients(:,state_index))**2)
+      local_norms(2)=local_norms(2)+sum(abs(h_coefficients(:,state_index))**2)
+    enddo
+    call MPI_Allreduce(local_norms,global_norms,2,MPI_DOUBLE_PRECISION,MPI_SUM,nproc_group_global,ierr_local)
+    h_residual=sqrt(global_norms(1))/max(1d0,sqrt(global_norms(2)))
+    evaluate_ok=ierr_local==MPI_SUCCESS.and.ieee_is_finite(total).and.ieee_is_finite(h_residual)
+    if(evaluate_ok)then;evaluate_message='';else;evaluate_message='nonfinite hybrid RT physical invariants';endif
+end subroutine evaluate_hybrid_rt_physical_invariants
 
 subroutine project_salmon_local_rows(row_ids,grid_ids,density,local_rows,callback_ok,callback_message)
     integer(8),intent(in)::row_ids(:),grid_ids(:)
