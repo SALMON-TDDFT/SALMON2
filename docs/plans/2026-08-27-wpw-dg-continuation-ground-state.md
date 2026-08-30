@@ -698,13 +698,15 @@ Use `git add -p` for dirty files.  Run `git diff --cached --check` and inspect
 
 **Step 1: Extend the checkpoint test and observe RED**
 
-Require one file to round-trip the exact sparse `H_DG(0)`, `S_DG`, the metric
+Require one file to round-trip the exact sparse `H_DG(0)`, `S_DG`, and the
+separately fingerprinted components `T_broken`, `V_NL`, final-density
+`V_local[rho*]`, and complete `H_SIPG`, the metric
 CSR graph and operator-union CSR graph, actual distributed basis values, grid IDs and
 weights, partition data, face values and normals, nonlocal distribution,
 ownership/catalog, requested cutoff/selection, effective symmetry-closed
 selection, added orbit members and closure action/reason metadata, coefficients, occupations,
-eigenvalues, density, interface observables, separately identified fixed and
-initial Hartree/XC Hamiltonian components, DC seed fingerprint,
+eigenvalues, density, interface observables, the final Hartree/XC contribution
+contained in `V_local[rho*]`, DC seed fingerprint,
 continuation receipt, exchange-correlation functional, pseudopotential and
 energy-decomposition provenance, and all fingerprints.  Corrupt one representative value
 from metadata, basis, matrix, and state payloads and require rejection.  Require
@@ -718,6 +720,10 @@ Run: `python3 tests/dg/run_rt_dg_hybrid_checkpoint_mpi.py`
 Expected: FAIL because the existing format lacks the full state/catalog.
 
 **Step 2: Extend the versioned atomic format minimally**
+
+Require `H_DG(0)=T_broken+V_NL+V_local[rho*]+H_SIPG` from the serialized
+component values before publication and again after reading.  Do not serialize
+or accept a generic volume-operator substitute.
 
 Hash metadata and every serialized payload value together.  Write to a unique
 temporary file, close and verify it, then atomically rename.  The reader must
@@ -794,8 +800,8 @@ Add an explicit default-off hybrid RT branch before ordinary initialization.
 Read the complete checkpoint once, validate its exact payload, redistribute
 the stored basis/state according to its catalog, and initialize the existing
 hybrid metric solver and propagator with the stored `H_DG(0)` and `S_DG`.
-Separate stored time-independent kinetic/SIPG/ionic/nonlocal components from
-Hartree/XC.  Before time step zero, run the normal density-dependent potential
+Separate stored time-independent `T_broken`, `H_SIPG`, and `V_NL` components
+from the stored final-density `V_local[rho*]`.  Before time step zero, run the normal density-dependent potential
 update and require reconstruction of the stored complete Hamiltonian.  During
 RT, rebuild Hartree/XC from `rho(t)` once at the beginning of each explicit
 SALMON time step before calling the existing one-step length-gauge propagator.
