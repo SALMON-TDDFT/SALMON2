@@ -8,10 +8,10 @@ program test_rt_dg_hybrid_initialization_mpi
     fingerprint_rt_dg_hybrid_scope
   use rt_dg_hybrid_density_update,only:update_rt_dg_hybrid_density
   implicit none
-  integer::comm,rank,nproc,ierr
+  integer::comm,rank,nproc,ierr,smoke_grid_count
   integer(int64)::fingerprint
   logical::ok
-  character(256)::message,path,mode
+  character(256)::message,path,mode,grid_count_argument
   type(s_rt_dg_hybrid_ground_state_payload)::payload
   type(s_rt_dg_hybrid_state)::state
   integer(int64)::structure_before,value_before
@@ -19,11 +19,14 @@ program test_rt_dg_hybrid_initialization_mpi
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
   call get_command_argument(1,path);call get_command_argument(2,mode);if(len_trim(mode)==0)mode='roundtrip'
+  smoke_grid_count=2
+  call get_command_argument(3,grid_count_argument)
+  if(len_trim(grid_count_argument)>0)read(grid_count_argument,*)smoke_grid_count
   if(trim(mode)/='read_only')then
     call build_payload(payload)
     call write_rt_dg_hybrid_ground_state_checkpoint(comm,trim(path),payload,fingerprint,ok,message)
     call require(ok,'fixture write failed: '//trim(message))
-    if(trim(mode)=='write_only')then
+    if(trim(mode)=='write_only'.or.trim(mode)=='write_production')then
       if(rank==0)write(*,'(a,i0)')'HYBRID_RT_INIT_FINGERPRINT=',fingerprint
       call MPI_Finalize(ierr);stop
     endif
@@ -65,7 +68,7 @@ contains
     integer::i,row,nowned
     nowned=count([(mod(row-1,nproc)==rank,row=1,2)])
     p%valid=.true.;p%final_refresh_complete=.true.;p%analysis_complete=.true.;p%identity_only=.true.
-    p%global_count=2;p%global_grid_count=2;p%noccupied=1;p%operation_count=1;p%nonidentity_operation_count=0
+    p%global_count=2;p%global_grid_count=smoke_grid_count;p%noccupied=1;p%operation_count=1;p%nonidentity_operation_count=0
     p%position_convention_fingerprint=115_int64
     p%catalog_fingerprint=101;p%state_fingerprint=102;p%metric_fingerprint=103
     p%operator_structure_fingerprint=104;p%operator_value_fingerprint=105
@@ -88,20 +91,29 @@ contains
       p%hamiltonian_rows(i,:)=p%kinetic_rows(i,:)+p%local_rows(i,:)
       p%coefficients(i,1)=merge((1d0,0d0),(0d0,0d0),row==1)
     enddo
+    if(trim(mode)=='write_production')then
+      p%kinetic_rows=(0d0,0d0);p%local_rows=(0d0,0d0);p%hamiltonian_rows=(0d0,0d0)
+    endif
     call complete_payload(p)
     call component_fingerprints(p)
   end subroutine build_payload
   subroutine complete_payload(p)
     type(s_rt_dg_hybrid_ground_state_payload),intent(inout)::p
-    integer::nrow,i
+    integer::nrow,i,point,npoint
     nrow=size(p%row_ids)
     allocate(p%metric_row_offsets(nrow+1),p%metric_column_ids(2*nrow),p%operator_row_offsets(nrow+1),&
       p%operator_column_ids(2*nrow));p%metric_row_offsets=[(2*i-1,i=1,nrow+1)]
     p%operator_row_offsets=p%metric_row_offsets
     do i=1,nrow;p%metric_column_ids(2*i-1:2*i)=[1,2];p%operator_column_ids(2*i-1:2*i)=[1,2];enddo
-    allocate(p%grid_ids(nrow),p%grid_weights(nrow),p%partition_ids(nrow),p%basis_values(2,nrow),p%density(nrow))
-    p%grid_ids=p%row_ids;p%grid_weights=1d0;p%partition_ids=1;p%basis_values=(0d0,0d0);p%density=0.5d0
-    allocate(p%occupations(1),p%eigenvalues(1));p%occupations=1d0;p%eigenvalues=1d0
+    npoint=count([(mod(point-1,nproc)==rank,point=1,smoke_grid_count)])
+    allocate(p%grid_ids(npoint),p%grid_weights(npoint),p%partition_ids(npoint),p%basis_values(2,npoint),p%density(npoint))
+    i=0
+    do point=1,smoke_grid_count
+      if(mod(point-1,nproc)/=rank)cycle
+      i=i+1;p%grid_ids(i)=point
+    enddo
+    p%grid_weights=1d0;p%partition_ids=1;p%basis_values=(0d0,0d0);p%density=1d0/real(smoke_grid_count,8)
+    allocate(p%occupations(1),p%eigenvalues(1));p%occupations=1d0;p%eigenvalues=merge(0d0,1d0,trim(mode)=='write_production')
     allocate(p%requested_ids(2),p%effective_ids(2),p%added_ids(0),p%closure_parent(0),p%closure_reason(0),p%closure_action(0))
     p%requested_ids=[1,2];p%effective_ids=[1,2]
     allocate(p%scope_selectors(8),p%xc_types(3));p%scope_selectors=[1,1,1,0,0,0,0,0];p%xc_types=[1,0,0]

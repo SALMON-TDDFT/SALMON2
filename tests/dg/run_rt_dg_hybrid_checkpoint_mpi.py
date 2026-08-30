@@ -15,9 +15,11 @@ continuation=main_source.split("subroutine run_dg_hybrid_concrete_continuation",
   "end subroutine run_dg_hybrid_concrete_continuation",1)[0]
 assert "write_rt_dg_hybrid_ground_state_checkpoint" in continuation
 assert "hybrid_dg_ground_state.chk" in continuation
-for component in ("energy%e_tot","energy%e_kin","energy%e_h","energy%e_xc","energy%e_ion_ion",
-                  "energy%e_ion_loc","energy%e_ion_nloc"):
+for component in ("final_energy_receipt(1)=sum(final_energy_receipt(2:7))","fixed_payload%kinetic_rows",
+                  "fixed_payload%nonlocal_rows","dc%vh_tot%f","dc%vpsl_tot%f","energy%e_xc",
+                  "energy%e_ion_ion"):
   assert component in continuation, f"complete checkpoint omits energy provenance: {component}"
+assert "checkpoint_payload%energy_receipt=[energy%e_tot" not in continuation
 for component in ("pp%zion","pp%lmax","pp%nrmax","ppg%nlma"):
   assert component in continuation, f"complete checkpoint omits pseudopotential provenance: {component}"
 assert continuation.index("if(.not.final_refresh_performed)") < continuation.index(
