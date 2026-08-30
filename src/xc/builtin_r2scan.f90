@@ -15,6 +15,7 @@
 !
 !-----------------------------------------------------------------------------------------
 module builtin_r2scan
+  use builtin_pw92, only: pw92_correlation
   implicit none
   private
 
@@ -50,12 +51,6 @@ module builtin_r2scan
   real(8),parameter :: beta_num = 0.1d0
   real(8),parameter :: beta_den = 0.1778d0
   real(8),parameter :: gamma_c = 0.031090690869655d0      ! (1 - ln 2)/pi^2
-  real(8),parameter :: pw_a  = 0.0310907d0
-  real(8),parameter :: pw_a1 = 0.21370d0
-  real(8),parameter :: pw_b1 = 7.59570d0
-  real(8),parameter :: pw_b2 = 3.58760d0
-  real(8),parameter :: pw_b3 = 1.63820d0
-  real(8),parameter :: pw_b4 = 0.49294d0
 
   ! geometry of the reduced variables
   real(8),parameter :: c_rs      = 0.62035049089940001665d0   ! (3/(4 pi))^(1/3)
@@ -72,9 +67,7 @@ module builtin_r2scan
   real(8),parameter :: c_eta   = 20d0 / 27d0 + 5d0 * eta_reg / 3d0
   real(8),parameter :: c_xgrad = c_eta * kappa0 * fx_one
 
-  ! regularizations.  Each one is applied to the value and to the derivatives of the same
-  ! expression, so that a clamped point is evaluated as the constant branch it was clamped
-  ! onto and not as a value whose derivative belongs to a different branch.
+  ! cutoffs; below each one the value and its derivatives take the limiting branch together
   real(8),parameter :: rho_floor = 1d-18   ! below this the functional returns zero
   real(8),parameter :: grad_floor = 1d-18  ! |grad n| below this has no defined direction
   real(8),parameter :: s2_floor = 1d-16    ! g_x(s2) has an essential singularity at s2 = 0
@@ -202,9 +195,7 @@ contains
     dec_iso_drho = (dec_lda0 + dhc0_dwc0 * dwc0_drs) * drs_drho + dhc0_dgc0 * dgc0_ds2 * ds2_drho
     dec_iso_dg2  = dhc0_dgc0 * dgc0_ds2 * ds2_dg2
 
-    ! alpha = 1 branch: PW92 + PBE-like term. w_1 is strictly positive in practice
-    ! (>=2e-5 at rho_floor); the w_floor clamp below is a NaN guard, applied to
-    ! both value and derivative so a clamped point stays self-consistent.
+    ! alpha = 1 branch: PW92 + PBE-like term (w_1 >= 2e-5 down to rho_floor)
     wc1 = exp(-ec_lda / gamma_c) - 1d0
     if (wc1 <= w_floor) then
       wc1      = w_floor
@@ -229,9 +220,7 @@ contains
     dargnum_drho = dargnum_drs * drs_drho + beta * dt2_drho - kgrad * ds2_gauss * ds2_drho
     dargnum_dg2  = beta * dt2_dg2 - kgrad * ds2_gauss * ds2_dg2
 
-    ! A can be negative in the dilute tail (down to -0.0051); do not clamp it to
-    ! zero -- that is genuine functional behaviour, not a singularity to guard.
-    ! Bound holds: 1+4A >= 0.98, S >= 0.9999 always.
+    ! A reaches -0.0051 in the dilute tail, so 1+4A >= 0.98 and S >= 0.9999 everywhere
     hc1_arg   = argnum / (gamma_c * wc1)
     darg_drho = (dargnum_drho - hc1_arg * gamma_c * dwc1_drs * drs_drho) / (gamma_c * wc1)
     darg_dg2  = dargnum_dg2 / (gamma_c * wc1)
@@ -292,35 +281,6 @@ contains
 
     return
   end subroutine interpolate_in_alpha
-
-
-  ! Perdew-Wang 1992 LDA correlation at zeta=0, with the first two derivatives
-  ! w.r.t. r_s -- the second is needed because K carries dD/dr_s and is itself
-  ! differentiated.
-  subroutine pw92_correlation(rs, ec, dec_drs, d2ec_drs2)
-    implicit none
-    real(8),intent(in)  :: rs
-    real(8),intent(out) :: ec, dec_drs, d2ec_drs2
-    real(8) :: sqrt_rs, qden, dqden, d2qden, mden, logs, dlogs, d2logs, apoly
-
-    sqrt_rs = sqrt(rs)
-    qden    = sqrt_rs * (pw_b1 + pw_b3 * rs) + rs * (pw_b2 + pw_b4 * rs)
-    dqden   = 0.5d0 * pw_b1 / sqrt_rs + pw_b2 + 1.5d0 * pw_b3 * sqrt_rs + 2d0 * pw_b4 * rs
-    d2qden  = -0.25d0 * pw_b1 / (rs * sqrt_rs) + 0.75d0 * pw_b3 / sqrt_rs + 2d0 * pw_b4
-
-    ! d/drs of ln(1 + 1/(2 A Q)) is -Q'/M with M = Q (2 A Q + 1)
-    mden   = qden * (2d0 * pw_a * qden + 1d0)
-    logs   = log(1d0 + 1d0 / (2d0 * pw_a * qden))
-    dlogs  = -dqden / mden
-    d2logs = -d2qden / mden + dqden * dqden * (4d0 * pw_a * qden + 1d0) / (mden * mden)
-
-    apoly     = 1d0 + pw_a1 * rs
-    ec        = -2d0 * pw_a * apoly * logs
-    dec_drs   = -2d0 * pw_a * (pw_a1 * logs + apoly * dlogs)
-    d2ec_drs2 = -2d0 * pw_a * (2d0 * pw_a1 * dlogs + apoly * d2logs)
-
-    return
-  end subroutine pw92_correlation
 
 
   ! The single-orbital (alpha = 0) correlation LDA and its first two r_s

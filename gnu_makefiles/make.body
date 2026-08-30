@@ -73,6 +73,7 @@ F90_SRCS = \
 ./xc/builtin_pz.f90 \
 ./xc/builtin_pz_sp.f90 \
 ./xc/builtin_pzm.f90 \
+./xc/builtin_pw92.f90 \
 ./xc/builtin_r2scan.f90 \
 ./xc/builtin_tbmbj.f90 \
 ./xc/salmon_xc.f90 \

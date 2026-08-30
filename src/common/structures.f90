@@ -46,15 +46,9 @@ module structures
     real(8),allocatable :: v(:,:,:,:) ! v(1:3,x,y,z)
   end type s_vector
 
-! Operator-valued part of Vxc: a tau-dependent functional's variation is a
-! differential operator, H_tau psi = -1/2 sum_c nabla_c(vtau*nabla_c psi) with
-! vtau=dE_xc/dtau, not a multiplicative potential.
-!
-! use_tau_operator is .false. for every LDA/GGA. vtau lives on the
-! halo-extended grid (mg%is_array:mg%ie_array); vtau_has_shadow_values marks
-! the halo exchange done.
-!
-! e_tau = Integral vtau*tau (zero for every LDA/GGA).
+! Operator part of Vxc for a tau-dependent functional:
+!   H_tau psi = -1/2 sum_c nabla_c(vtau*nabla_c psi), vtau = dE_xc/dtau, e_tau = Integral vtau*tau.
+! vtau lives on the halo-extended grid (mg%is_array:mg%ie_array); vtau_has_shadow_values marks the halo exchange done.
   type s_xc_operator_payload
     logical :: use_tau_operator = .false.
     logical :: vtau_has_shadow_values = .false.
@@ -84,7 +78,7 @@ module structures
     real(8) :: vec_Ac_ext(3) ! external vector potential for output
     real(8) :: vec_E(3)      ! total electric field for output
     real(8) :: vec_E_ext(3)  ! external electric potential for output
-  ! meta-GGA: kinetic-energy-density derivative of E_xc; inactive for every LDA and GGA.
+  ! meta-GGA: kinetic-energy-density derivative of E_xc
     type(s_xc_operator_payload) :: xc_payload
   end type s_dft_system
 

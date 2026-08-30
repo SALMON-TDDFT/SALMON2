@@ -258,7 +258,7 @@ CONTAINS
     call comm_summation(sum1,sum2,info%icomm_r)
 
     if(yn_fix_func=='n' .or. theory(1:3)=='dft') then
-      ! meta-GGA: e_tau correction to Etot; zero for every LDA/GGA.
+      ! meta-GGA: e_tau correction to Etot
       Etot = Etot - system%xc_payload%e_tau
       Etot = Etot + sum2*system%Hvol + energy%E_xc + energy%E_ion_ion
       select case(method_poisson)
@@ -789,7 +789,7 @@ CONTAINS
     energy%E_ion_nloc = E_sum(2)
     call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
 
-    ! meta-GGA: e_tau correction to E_ion_nloc; no effect on LDA, GGA, or spin-orbit.
+    ! meta-GGA: e_tau correction to E_ion_nloc
     if (system%xc_payload%use_tau_operator .and. yn_spinorbit=='n') then
       energy%E_ion_nloc = energy%E_ion_nloc - system%xc_payload%e_tau
     end if

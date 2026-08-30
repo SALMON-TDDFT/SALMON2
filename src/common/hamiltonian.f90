@@ -129,7 +129,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       call pseudo_plusU(tpsi,htpsi,system,info,ppg)
     end if
 
-    ! meta-GGA: the part of Vxc that is an operator rather than a field
+    ! meta-GGA: tau-operator part of Vxc
     if (system%xc_payload%use_tau_operator) then
       call add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
     end if
@@ -459,7 +459,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     end if
     call nvtxEndRange()
 
-    ! meta-GGA: the part of Vxc that is an operator rather than a field
+    ! meta-GGA: tau-operator part of Vxc
     if (system%xc_payload%use_tau_operator) then
       call add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
     end if
@@ -843,9 +843,8 @@ end subroutine hpsi
 
 !===================================================================================================================================
 
-! Stop on a condition the tau operator cannot run under. All ranks reach this
-! condition identically, so they finalize together instead of aborting
-! mid-collective.
+! Stop on a condition the tau operator cannot run under; every rank reaches it
+! identically, so all finalize together.
 subroutine fail_tau_operator(message)
   use communication, only: comm_is_root
   use parallelization, only: end_parallel, nproc_id_global
@@ -856,8 +855,6 @@ subroutine fail_tau_operator(message)
     write(*,"(A)") 'Error in tau operator: '//trim(message)
   end if
   call end_parallel
-  ! error stop rather than plain stop, so the failure is more likely to reach the
-  ! caller as a nonzero exit status.
   error stop 1
 end subroutine fail_tau_operator
 

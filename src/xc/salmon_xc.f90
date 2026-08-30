@@ -367,8 +367,8 @@ contains
       enddo
     endif
     endif
-    ! vtau is not multiplicative; here it is only promoted to the halo-extended
-    ! grid layout and halo exchanged, not applied.
+    ! vtau is promoted to the halo-extended grid layout and halo exchanged here;
+    ! the tau operator itself is applied in hpsi.
     if (system%xc_payload%use_tau_operator) then
       call promote_vtau_to_halo_layout
     end if
@@ -715,18 +715,15 @@ contains
 
       case ('r2scan')
 
-        ! Built-in meta-GGA: use_gradient also brings in tau; use_kinetic_energy
-        ! records that this functional consumes it. No Laplacian or current dependence.
+        ! Built-in meta-GGA of n, |grad n| and tau.
         xc%xctype(1) = salmon_xctype_r2scan
         xc%use_gradient = .true.
         xc%use_kinetic_energy = .true.
         if (xc%ispin /= 0) stop "Error: xc=r2scan is implemented for spin-unpolarized systems only"
 #ifdef USE_OPENACC
-        ! Refused for OpenACC builds; no effect on other paths.
-        stop "Error: xc=r2scan is not implemented for OpenACC builds"
+        stop "Error: xc=r2scan is unavailable for OpenACC builds"
 #endif
-        ! Refused for divide-and-conquer DFT; no effect on other paths.
-        if (yn_dc == 'y') stop "Error: xc=r2scan is not implemented for divide-and-conquer DFT"
+        if (yn_dc == 'y') stop "Error: xc=r2scan is unavailable for divide-and-conquer DFT"
         return
 
       case ('tpss')
@@ -974,8 +971,7 @@ contains
     real(8), intent(in), optional :: rho_nlcc(:, :, :)
     real(8), intent(out),optional :: rdedd(:, :, :, :) 
     real(8), intent(out),optional :: rdedd_s(:, :, :, :, :)
-    ! The part of the potential that is an operator rather than a field.  Filled
-    ! only by a functional that depends on the kinetic-energy density.
+    ! Operator part of Vxc, filled by a functional that depends on the kinetic-energy density.
     type(s_xc_operator_payload), intent(inout), optional :: payload
 
     !===============================================================
@@ -1359,9 +1355,8 @@ contains
     end subroutine exec_builtin_tbmbj
 
 
-    ! Built-in r2SCAN meta-GGA: evaluated from n, |grad n| and tau, returns
-    ! f=n*eps_xc with df/dn, df/d|grad n| and df/dtau. df/dtau is not a
-    ! potential (it becomes a differential operator, handed off via payload).
+    ! Built-in r2SCAN meta-GGA: from n, |grad n| and tau returns f = n*eps_xc with
+    ! df/dn, df/d|grad n| and df/dtau; df/dtau goes to hpsi through payload as the tau operator.
     subroutine exec_builtin_r2scan()
       use nvtx_wrapper
       implicit none
