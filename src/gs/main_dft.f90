@@ -127,7 +127,8 @@ use dg_hybrid_continuation_controller,only:s_dg_hybrid_controller_controls,s_dg_
   dg_hybrid_stage_tolerances,initialize_dg_hybrid_controller,propose_dg_hybrid_trial,&
   observe_dg_hybrid_inner_residuals,decide_dg_hybrid_stage,reject_dg_hybrid_trial,&
   initialize_dg_hybrid_stage_schedule,begin_dg_hybrid_stage_solve,&
-  schedule_dg_hybrid_candidate_checks,complete_dg_hybrid_stage_solve
+  schedule_dg_hybrid_candidate_checks,complete_dg_hybrid_stage_solve,&
+  dg_hybrid_continuation_state_count
 use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_fragment_basis
 use dg_hybrid_fragment_solver,only:solve_dg_hybrid_fragment_basis
 use dg_hybrid_divided_scf,only:run_dg_hybrid_divided_scf
@@ -4077,7 +4078,7 @@ contains
       final_state_workspace,final_state_fingerprint
     integer::iteration,ierr_local,rank_local,continuation_state_count,p
     logical::stage_converged,reject_trial,local_ok,accept_stage,final_refresh_performed,cheap_candidate,&
-      run_solve,run_expensive,refresh_scheduled
+      run_solve,run_expensive,refresh_scheduled,meaningful_gap,occupation_kernel_ok
     character(256)::continuation_message
     real(8)::occupied_unoccupied_gap,accepted_gap
     real(8)::hamiltonian_hermiticity,hamiltonian_scale
@@ -4086,8 +4087,10 @@ contains
 
     call MPI_Comm_rank(dc%icomm_tot,rank_local,ierr_local)
     allocate(rho_in,source=dc_seed_density)
-    if(size(effective_ids)<=nstate)error stop 'DG continuation requires at least one unoccupied state'
-    continuation_state_count=nstate+1
+    if(size(effective_ids)<nstate)error stop 'DG continuation retained basis is smaller than the occupation kernel'
+    call dg_hybrid_continuation_state_count(occupied_occupations,size(effective_ids),continuation_state_count,&
+      meaningful_gap,local_ok)
+    if(.not.local_ok)error stop 'DG continuation occupation kernel is invalid'
     allocate(local_potential(size(ow_core_ids)),eigenvalues(nstate),solver_eigenvalues(continuation_state_count))
     allocate(previous_interface_state(0,3))
     accepted_lambda=0d0;trial_lambda=0d0;accepted_gap=huge(1d0)
@@ -4124,7 +4127,11 @@ stage_pass: do
         if(allocated(coefficients))deallocate(coefficients)
         allocate(coefficients,source=solver_coefficients(:,1:nstate))
         eigenvalues=solver_eigenvalues(1:nstate)
-        occupied_unoccupied_gap=solver_eigenvalues(nstate+1)-solver_eigenvalues(nstate)
+        if(meaningful_gap)then
+          occupied_unoccupied_gap=solver_eigenvalues(nstate+1)-solver_eigenvalues(nstate)
+        else
+          occupied_unoccupied_gap=huge(1d0)
+        endif
         call reconstruct_dg_hybrid_occupied_state(dc%icomm_tot,size(effective_ids),row_ids,fixed_payload%metric_rows,&
           interior_values,interior_weights,coefficients,occupied_occupations,rho_out,gamma_rows,projector_rows,&
           s_coefficients,electron_count,local_ok,continuation_message)
@@ -4165,6 +4172,10 @@ stage_pass: do
         cheap_candidate=all([residuals%r_h,residuals%r_rho,residuals%r_t,residuals%r_s]<=&
           stage_report%tolerances).and.abs(electron_count-dc%elec_num_tot)<=&
           dg_dc_gs_electron_count_tolerance.and.projector_change<=0.1d0
+        occupation_kernel_ok=all(ieee_is_finite(occupied_occupations)).and.all(occupied_occupations>=0d0).and.&
+          all(occupied_occupations<=2d0).and.abs(sum(occupied_occupations)-dc%elec_num_tot)<=&
+          dg_dc_gs_electron_count_tolerance.and.&
+          1d0-projector_change>=continuation_controls%minimum_projector_overlap
         real_space_residual=huge(1d0);interface_action_residuals=huge(1d0)
         symmetry_residual=huge(1d0);projector_symmetry_residual=huge(1d0)
         hamiltonian_hermiticity=huge(1d0);hamiltonian_scale=1d0;hamiltonian_finite=.false.
@@ -4199,7 +4210,7 @@ stage_pass: do
         stage_converged=cheap_candidate.and.real_space_residual<=stage_report%tolerances(1).and.&
           all(interface_action_residuals<=stage_report%tolerances(1)).and.&
           symmetry_residual<=dg_ow_symmetry_tolerance.and.projector_symmetry_residual<=dg_ow_symmetry_tolerance.and.&
-          occupied_unoccupied_gap>dg_dc_gs_final_orbital_tolerance.and.hamiltonian_finite.and.&
+          occupation_kernel_ok.and.hamiltonian_finite.and.&
           hamiltonian_hermiticity<=dg_dc_gs_hermiticity_tolerance*max(1d0,hamiltonian_scale)
         call complete_dg_hybrid_stage_solve(stage_schedule,stage_converged,trial_lambda,&
           refresh_scheduled,final_refresh_performed)
@@ -4236,7 +4247,7 @@ stage_pass: do
         stage_report%projector_overlap=max(0d0,1d0-projector_change)
         stage_report%iteration=iteration
         stage_report%electron_ok=abs(electron_count-dc%elec_num_tot)<=dg_dc_gs_electron_count_tolerance
-        stage_report%occupation_ok=occupied_unoccupied_gap>dg_dc_gs_final_orbital_tolerance
+        stage_report%occupation_ok=occupation_kernel_ok
         stage_report%hermitian_ok=hamiltonian_finite.and.&
           hamiltonian_hermiticity<=dg_dc_gs_hermiticity_tolerance*max(1d0,hamiltonian_scale)
         stage_report%symmetry_ok=max(symmetry_residual,projector_symmetry_residual)<=dg_ow_symmetry_tolerance
@@ -4244,14 +4255,15 @@ stage_pass: do
           all(interface_action_residuals<=stage_report%tolerances(1)).and.&
           residuals%r_t<=stage_report%tolerances(3)
         stage_report%finite_ok=hamiltonian_finite.and.all(ieee_is_finite(solver_eigenvalues)).and.&
-          ieee_is_finite(electron_count).and.ieee_is_finite(occupied_unoccupied_gap)
-        stage_report%gap_shrinking=accepted_gap<huge(1d0).and.occupied_unoccupied_gap<accepted_gap
+          ieee_is_finite(electron_count).and.(.not.meaningful_gap.or.ieee_is_finite(occupied_unoccupied_gap))
+        stage_report%gap_shrinking=meaningful_gap.and.accepted_gap<huge(1d0).and.&
+          occupied_unoccupied_gap<accepted_gap
         call decide_dg_hybrid_stage(dc%icomm_tot,continuation_controller,trial_state,stage_report,&
           accept_stage,local_ok,continuation_message)
         if(.not.local_ok.or..not.accept_stage)error stop 'DG continuation converged stage was not accepted'
         accepted_lambda=continuation_controller%accepted_lambda
       endif
-      accepted_gap=occupied_unoccupied_gap
+      if(meaningful_gap)accepted_gap=occupied_unoccupied_gap
       if(accepted_lambda==1d0)exit
       call propose_dg_hybrid_trial(dc%icomm_tot,continuation_controller,trial_state,local_ok,continuation_message)
       if(.not.local_ok)error stop 'DG continuation trial proposal failed'

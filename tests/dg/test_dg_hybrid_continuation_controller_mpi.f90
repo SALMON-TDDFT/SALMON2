@@ -6,14 +6,14 @@ program test_dg_hybrid_continuation_controller_mpi
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_positive_inf
   use dg_hybrid_continuation_controller
   implicit none
-  integer::icomm,id_rank,nproc,ierr,i
+  integer::icomm,id_rank,nproc,ierr,i,solve_count
   type(s_dg_hybrid_controller_controls)::controls
   type(s_dg_hybrid_controller)::controller
   type(s_dg_hybrid_controller)::limit_controller
   type(s_dg_hybrid_trial_state)::state,accepted,limit_state
   type(s_dg_hybrid_stage_report)::report
   real(real64)::t0(4),t1(4),lambda_before,step_before
-  logical::ok,accept
+  logical::ok,accept,meaningful_gap
   character(256)::message
 
   call MPI_Init(ierr);icomm=MPI_COMM_WORLD
@@ -34,6 +34,15 @@ program test_dg_hybrid_continuation_controller_mpi
     'endpoint continuation tolerances are incorrect')
   call dg_hybrid_stage_tolerances(controls,0.25d0,t0);call dg_hybrid_stage_tolerances(controls,0.75d0,t1)
   call require(all(t1<=t0).and.all(t1>=controls%final_tolerance),'inexact tolerances are not monotone')
+  call dg_hybrid_continuation_state_count([2d0,0d0],2,solve_count,meaningful_gap,ok)
+  call require(ok.and.solve_count==2.and..not.meaningful_gap,&
+    'configured empty state still required an unavailable extra eigenpair')
+  call dg_hybrid_continuation_state_count([2d0,0.5d0],3,solve_count,meaningful_gap,ok)
+  call require(ok.and.solve_count==3.and.meaningful_gap,&
+    'fractionally occupied boundary did not retain an available separation diagnostic')
+  call dg_hybrid_continuation_state_count([1d0,1d0],2,solve_count,meaningful_gap,ok)
+  call require(ok.and.solve_count==2.and..not.meaningful_gap,&
+    'degenerate fully retained occupied space was rejected without an extra state')
 
   call fill_state(accepted,10)
   if(nproc>1)then
@@ -134,6 +143,11 @@ program test_dg_hybrid_continuation_controller_mpi
   call require(ok.and.accept,'shrinking gap alone rejected an acceptable stage')
   call require(controller%step==max(controls%minimum_step,step_before*controls%shrink_factor),&
     'shrinking gap did not conservatively reduce the next step')
+  call propose_dg_hybrid_trial(icomm,controller,state,ok,message);call require(ok,trim(message))
+  state%occupations=[1.5d0,0.5d0];state%eigenvalues=[-0.25d0,-0.25d0];state%trace_cache_valid=.true.
+  call passing_report(controller,report);report%gap_shrinking=.false.
+  call decide_dg_hybrid_stage(icomm,controller,state,report,accept,ok,message)
+  call require(ok.and.accept,'continuous fractionally occupied zero-gap crossing was rejected')
   call propose_dg_hybrid_trial(icomm,controller,state,ok,message);call require(ok,trim(message))
   call passing_report(controller,report);report%occupation_ok=.false.
   call decide_dg_hybrid_stage(icomm,controller,state,report,accept,ok,message)

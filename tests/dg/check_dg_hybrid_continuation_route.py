@@ -90,7 +90,7 @@ required = [
     "final_trace",
     "final_hamiltonian_rows",
     "measure_dg_hybrid_projector_covariance",
-    "nstate+1",
+    "dg_hybrid_continuation_state_count",
 ]
 for token in required:
     assert token in implementation, f"continuation implementation does not use {token}"
@@ -117,7 +117,9 @@ assert "stage_report%gap_shrinking=.false." not in implementation, (
 )
 assert "stage_report%hermitian_ok=.true." not in implementation
 assert "ow_distributed_hermiticity" in implementation
-assert "occupied_unoccupied_gap>dg_dc_gs_final_orbital_tolerance" in implementation
+assert "continuation_state_count=nstate+1" not in implementation
+assert "occupied_unoccupied_gap>dg_dc_gs_final_orbital_tolerance" not in implementation
+assert "stage_report%occupation_ok=occupation_kernel_ok" in implementation
 assert "hamiltonian_hermiticity<=dg_dc_gs_hermiticity_tolerance" in implementation
 
 print("PASS concrete DG continuation production route contract")

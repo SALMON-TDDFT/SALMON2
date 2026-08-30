@@ -54,8 +54,23 @@ module dg_hybrid_continuation_controller
     validate_dg_hybrid_controller_contract,&
     initialize_dg_hybrid_controller,propose_dg_hybrid_trial,observe_dg_hybrid_inner_residuals,&
     decide_dg_hybrid_stage,reject_dg_hybrid_trial,initialize_dg_hybrid_stage_schedule,&
-    begin_dg_hybrid_stage_solve,schedule_dg_hybrid_candidate_checks,complete_dg_hybrid_stage_solve
+    begin_dg_hybrid_stage_solve,schedule_dg_hybrid_candidate_checks,complete_dg_hybrid_stage_solve,&
+    dg_hybrid_continuation_state_count
 contains
+  pure subroutine dg_hybrid_continuation_state_count(occupations,basis_count,solve_count,meaningful_gap,ok)
+    real(real64),intent(in)::occupations(:)
+    integer,intent(in)::basis_count
+    integer,intent(out)::solve_count
+    logical,intent(out)::meaningful_gap,ok
+    real(real64),parameter::occupation_floor=64d0*epsilon(1d0)
+    ok=size(occupations)>0.and.basis_count>=size(occupations).and.&
+      all(ieee_is_finite(occupations)).and.all(occupations>=0d0).and.all(occupations<=2d0)
+    solve_count=0;meaningful_gap=.false.
+    if(.not.ok)return
+    meaningful_gap=occupations(size(occupations))>occupation_floor.and.basis_count>size(occupations)
+    solve_count=size(occupations)+merge(1,0,meaningful_gap)
+  end subroutine dg_hybrid_continuation_state_count
+
   pure subroutine initialize_dg_hybrid_stage_schedule(iteration_limit,schedule)
     integer,intent(in)::iteration_limit
     type(s_dg_hybrid_stage_schedule),intent(out)::schedule
