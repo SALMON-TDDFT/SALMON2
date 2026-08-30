@@ -4433,7 +4433,8 @@ stage_pass: do
     do energy_row=1,size(row_ids);do energy_state=1,nstate
       local_energy_parts(1)=local_energy_parts(1)+final_ground_state%occupations(energy_state)*real(&
         conjg(final_ground_state%coefficients(energy_row,energy_state))*&
-        sum(fixed_payload%kinetic_rows(energy_row,:)*energy_global_coefficients(:,energy_state)))
+        sum((fixed_payload%kinetic_rows(energy_row,:)+fixed_payload%interface_rows(energy_row,:))*&
+        energy_global_coefficients(:,energy_state)))
       local_energy_parts(2)=local_energy_parts(2)+final_ground_state%occupations(energy_state)*real(&
         conjg(final_ground_state%coefficients(energy_row,energy_state))*&
         sum(fixed_payload%nonlocal_rows(energy_row,:)*energy_global_coefficients(:,energy_state)))

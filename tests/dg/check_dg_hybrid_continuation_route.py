@@ -131,6 +131,7 @@ for token in (
     "eexc_tmp(energy_ix,energy_iy,energy_iz)",
     "calc_Total_Energy_periodic(dc%mg_tot,ewald,dc%system_tot",
     "checkpoint_energy%E_ion_ion",
+    "fixed_payload%kinetic_rows(energy_row,:)+fixed_payload%interface_rows(energy_row,:)",
 ):
     assert token in implementation, f"final DG energy decomposition omits {token}"
 
