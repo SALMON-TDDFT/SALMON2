@@ -9,38 +9,81 @@ module dg_overlapping_wannier_nonlocal
   private
   public::assemble_dg_overlapping_wannier_nonlocal,assemble_dg_overlapping_wannier_nonlocal_rows
   public::collect_dg_overlapping_wannier_projector_overlaps
+  public::apply_dg_overlapping_wannier_nonlocal_action
 contains
+  subroutine apply_dg_overlapping_wannier_nonlocal_action(comm,nglobal,ncore,core_positions,&
+      projector_positions,projector_values,action_strength,overlap,action,ok,message)
+    integer,intent(in)::comm,nglobal,ncore,core_positions(:),projector_positions(:)
+    complex(real64),intent(in)::projector_values(:),overlap(:,:)
+    real(real64),intent(in)::action_strength(:)
+    complex(real64),allocatable,intent(out)::action(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::i,basis,ierr,local_bad,global_bad
+    logical::shape_ok
+    ok=.false.;message='';local_bad=0
+    shape_ok=size(core_positions)==size(projector_positions).and.&
+      size(core_positions)==size(projector_values).and.size(overlap,1)==nglobal.and.&
+      size(overlap,2)==size(action_strength)
+    if(nglobal<1.or.ncore<1.or..not.shape_ok)local_bad=1
+    if(shape_ok)then
+      if(any(core_positions<1).or.any(core_positions>ncore).or.any(projector_positions<1).or.&
+          any(projector_positions>size(action_strength)).or.any(.not.ieee_is_finite(action_strength)).or.&
+          .not.all(ieee_is_finite(real(projector_values))).or.&
+          .not.all(ieee_is_finite(aimag(projector_values))).or.&
+          .not.all(ieee_is_finite(real(overlap))).or..not.all(ieee_is_finite(aimag(overlap))))local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0)then;message='invalid or missing nonlocal projector support';return;endif
+    allocate(action(nglobal,ncore));action=(0d0,0d0)
+    do i=1,size(core_positions)
+      do basis=1,nglobal
+        action(basis,core_positions(i))=action(basis,core_positions(i))+&
+          action_strength(projector_positions(i))*projector_values(i)*overlap(basis,projector_positions(i))
+      enddo
+    enddo
+    ok=.true.
+#else
+    ok=.false.;message='overlapping-Wannier nonlocal action requires MPI'
+#endif
+  end subroutine apply_dg_overlapping_wannier_nonlocal_action
+
   subroutine collect_dg_overlapping_wannier_projector_overlaps(comm,nwann,atom_ids,ordinals,&
-      strength,partial_overlap,projector_ids,owned_strength,owned_overlap,expected_projector_count,ok,message,&
-      complete_atom_ids,complete_ordinals,complete_strength,complete_overlap)
+      matrix_strength,action_strength,partial_overlap,projector_ids,owned_matrix_strength,owned_overlap,&
+      expected_projector_count,ok,message,complete_atom_ids,complete_ordinals,complete_matrix_strength,&
+      complete_action_strength,complete_overlap)
     integer,intent(in)::comm,nwann,atom_ids(:),ordinals(:)
-    real(real64),intent(in)::strength(:)
+    real(real64),intent(in)::matrix_strength(:),action_strength(:)
     complex(real64),intent(in)::partial_overlap(:,:)
     integer(int64),allocatable,intent(out)::projector_ids(:)
-    real(real64),allocatable,intent(out)::owned_strength(:)
+    real(real64),allocatable,intent(out)::owned_matrix_strength(:)
     complex(real64),allocatable,intent(out)::owned_overlap(:,:)
     integer,intent(out)::expected_projector_count
     logical,intent(out)::ok
     character(*),intent(out)::message
     integer,allocatable,optional,intent(out)::complete_atom_ids(:),complete_ordinals(:)
-    real(real64),allocatable,optional,intent(out)::complete_strength(:)
+    real(real64),allocatable,optional,intent(out)::complete_matrix_strength(:),complete_action_strength(:)
     complex(real64),allocatable,optional,intent(out)::complete_overlap(:,:)
 #ifdef USE_MPI
     integer::rank,nproc,ierr,r,p,q,total_records,nowned,unique_count,local_bad,global_bad
     integer,allocatable::counts(:),displacements(:),complex_counts(:),complex_displacements(:),&
       all_atom_ids(:),all_ordinals(:),unique_ids(:),owner_ranks(:)
-    real(real64),allocatable::all_strength(:)
+    real(real64),allocatable::all_matrix_strength(:),all_action_strength(:)
     complex(real64),allocatable::all_overlap(:,:)
     logical::matched
+    real(real64)::reference_action_strength
     ok=.false.;message='';expected_projector_count=0;local_bad=0
     call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)local_bad=1
     call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)local_bad=1
-    if(nwann<1.or.size(atom_ids)/=size(ordinals).or.size(atom_ids)/=size(strength).or.&
+    if(nwann<1.or.size(atom_ids)/=size(ordinals).or.size(atom_ids)/=size(matrix_strength).or.&
+        size(atom_ids)/=size(action_strength).or.&
         size(partial_overlap,1)/=nwann.or.&
         size(partial_overlap,2)/=size(atom_ids))local_bad=1
     if(local_bad==0)then
       if(any(atom_ids<1).or.any(ordinals<1).or.&
-          any(.not.ieee_is_finite(strength)).or..not.all(ieee_is_finite(real(partial_overlap))).or.&
+          any(.not.ieee_is_finite(matrix_strength)).or.any(.not.ieee_is_finite(action_strength)).or.&
+          .not.all(ieee_is_finite(real(partial_overlap))).or.&
           .not.all(ieee_is_finite(aimag(partial_overlap))))local_bad=1
     end if
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -52,13 +95,17 @@ contains
       displacements(r)=total_records;total_records=total_records+counts(r)
       complex_counts(r)=nwann*counts(r);complex_displacements(r)=nwann*displacements(r)
     end do
-    allocate(all_atom_ids(total_records),all_ordinals(total_records),all_strength(total_records),&
+    allocate(all_atom_ids(total_records),all_ordinals(total_records),all_matrix_strength(total_records),&
+      all_action_strength(total_records),&
       all_overlap(nwann,total_records),unique_ids(total_records),owner_ranks(total_records))
     call MPI_Allgatherv(atom_ids,size(atom_ids),MPI_INTEGER,all_atom_ids,counts,displacements,&
       MPI_INTEGER,comm,ierr)
     call MPI_Allgatherv(ordinals,size(ordinals),MPI_INTEGER,all_ordinals,counts,displacements,&
       MPI_INTEGER,comm,ierr)
-    call MPI_Allgatherv(strength,size(strength),MPI_DOUBLE_PRECISION,all_strength,counts,displacements,&
+    call MPI_Allgatherv(matrix_strength,size(matrix_strength),MPI_DOUBLE_PRECISION,all_matrix_strength,&
+      counts,displacements,MPI_DOUBLE_PRECISION,comm,ierr)
+    call MPI_Allgatherv(action_strength,size(action_strength),MPI_DOUBLE_PRECISION,all_action_strength,&
+      counts,displacements,&
       MPI_DOUBLE_PRECISION,comm,ierr)
     call MPI_Allgatherv(partial_overlap,size(partial_overlap),MPI_DOUBLE_COMPLEX,all_overlap,&
       complex_counts,complex_displacements,MPI_DOUBLE_COMPLEX,comm,ierr)
@@ -87,8 +134,11 @@ contains
     if(present(complete_ordinals))then
       allocate(complete_ordinals(unique_count));complete_ordinals=0
     endif
-    if(present(complete_strength))then
-      allocate(complete_strength(unique_count));complete_strength=0d0
+    if(present(complete_matrix_strength))then
+      allocate(complete_matrix_strength(unique_count));complete_matrix_strength=0d0
+    endif
+    if(present(complete_action_strength))then
+      allocate(complete_action_strength(unique_count));complete_action_strength=0d0
     endif
     if(present(complete_overlap))then
       allocate(complete_overlap(nwann,unique_count));complete_overlap=(0d0,0d0)
@@ -97,10 +147,11 @@ contains
       q=unique_ids(p)
       if(present(complete_atom_ids))complete_atom_ids(q)=all_atom_ids(p)
       if(present(complete_ordinals))complete_ordinals(q)=all_ordinals(p)
-      if(present(complete_strength))complete_strength(q)=all_strength(p)
+      if(present(complete_matrix_strength))complete_matrix_strength(q)=all_matrix_strength(p)
+      if(present(complete_action_strength))complete_action_strength(q)=all_action_strength(p)
       if(present(complete_overlap))complete_overlap(:,q)=complete_overlap(:,q)+all_overlap(:,p)
     enddo
-    allocate(projector_ids(nowned),owned_strength(nowned),owned_overlap(nwann,nowned))
+    allocate(projector_ids(nowned),owned_matrix_strength(nowned),owned_overlap(nwann,nowned))
     owned_overlap=(0d0,0d0);nowned=0
     do q=1,unique_count
       if(owner_ranks(q)/=rank)cycle
@@ -108,9 +159,12 @@ contains
       do p=1,total_records
         if(unique_ids(p)/=q)cycle
         if(.not.matched)then
-          owned_strength(nowned)=all_strength(p);matched=.true.
-        else if(abs(all_strength(p)-owned_strength(nowned))>&
-            1024d0*epsilon(1d0)*max(1d0,abs(owned_strength(nowned))))then
+          owned_matrix_strength(nowned)=all_matrix_strength(p)
+          reference_action_strength=all_action_strength(p);matched=.true.
+        else if(abs(all_matrix_strength(p)-owned_matrix_strength(nowned))>&
+            1024d0*epsilon(1d0)*max(1d0,abs(owned_matrix_strength(nowned))).or.&
+            abs(all_action_strength(p)-reference_action_strength)>&
+            1024d0*epsilon(1d0)*max(1d0,abs(reference_action_strength)))then
           local_bad=1
         end if
         owned_overlap(:,nowned)=owned_overlap(:,nowned)+all_overlap(:,p)

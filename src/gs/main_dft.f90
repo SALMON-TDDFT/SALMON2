@@ -101,7 +101,8 @@ use dg_overlapping_wannier_projection, only: t_dg_projection_channel,&
 use dg_overlapping_wannier_metric, only: assemble_dg_stitched_overlap_density_rows
 use dg_overlapping_wannier_operators, only: assemble_dg_stitched_weak_operator_rows
 use dg_overlapping_wannier_nonlocal, only: assemble_dg_overlapping_wannier_nonlocal,&
-  assemble_dg_overlapping_wannier_nonlocal_rows,collect_dg_overlapping_wannier_projector_overlaps
+  assemble_dg_overlapping_wannier_nonlocal_rows,collect_dg_overlapping_wannier_projector_overlaps,&
+  apply_dg_overlapping_wannier_nonlocal_action
 use dg_overlapping_wannier_scf, only: s_dg_overlapping_wannier_scf_state, &
   s_dg_overlapping_wannier_scf_result, &
   compute_dg_overlapping_wannier_scf_fingerprint,mix_dg_overlapping_wannier_density_history
@@ -4998,7 +4999,7 @@ contains
     complex(8),allocatable::local_overlap(:,:),owned_overlap(:,:)
     integer,allocatable::local_atom_ids(:),local_ordinals(:)
     integer(8),allocatable::projector_ids(:)
-    real(8),allocatable::local_strength(:),strength(:)
+    real(8),allocatable::local_matrix_strength(:),local_action_strength(:),matrix_strength(:)
     logical,allocatable::complete(:,:)
     logical::global_ok
     integer::ilma,ia,j,ix,iy,iz,p,nwann,total_projectors,&
@@ -5007,13 +5008,14 @@ contains
     nwann=size(ow_core_values,1)
     ok=.true.
     allocate(local_overlap(nwann,ppg%Nlma),local_atom_ids(ppg%Nlma),local_ordinals(ppg%Nlma),&
-      local_strength(ppg%Nlma))
+      local_matrix_strength(ppg%Nlma),local_action_strength(ppg%Nlma))
     local_overlap=(0d0,0d0);local_atom_ids=0;local_ordinals=0
     do ilma=1,ppg%Nlma
       ia=ppg%ia_tbl(ilma)
       call map_dc_atom_to_physical_atom(ia,local_atom_ids(ilma),ok)
       ordinal=count(ppg%ia_tbl(1:ilma)==ia);local_ordinals(ilma)=ordinal
-      local_strength(ilma)=system%hvol*ppg%rinv_uvu(ilma)
+      local_matrix_strength(ilma)=system%hvol*ppg%rinv_uvu(ilma)
+      local_action_strength(ilma)=ppg%rinv_uvu(ilma)
       do j=1,ppg%mps(ia)
         ix=ppg%jxyz(1,j,ia);iy=ppg%jxyz(2,j,ia);iz=ppg%jxyz(3,j,ia)
         canonical_index=[dc_to_canonical_index(ix,ow_core_size(1),ow_buffer(1)),&
@@ -5031,11 +5033,12 @@ contains
     call comm_logical_and(ok,global_ok,comm);ok=global_ok
     if(.not.ok)then;message='cannot canonicalize complete physical atom/projector support';return;endif
     call collect_dg_overlapping_wannier_projector_overlaps(comm,nwann,local_atom_ids,local_ordinals,&
-      local_strength,local_overlap,projector_ids,strength,owned_overlap,total_projectors,ok,message)
+      local_matrix_strength,local_action_strength,local_overlap,projector_ids,matrix_strength,&
+      owned_overlap,total_projectors,ok,message)
     if(.not.ok)return
     allocate(complete(nwann,size(projector_ids)))
     complete=.true.
-    call assemble_dg_overlapping_wannier_nonlocal_rows(comm,nwann,ow_row_ids,projector_ids,strength,&
+    call assemble_dg_overlapping_wannier_nonlocal_rows(comm,nwann,ow_row_ids,projector_ids,matrix_strength,&
       owned_overlap,complete,int(total_projectors,8),matrix_rows,ownership_count,ok,message)
   end subroutine
 
@@ -5051,36 +5054,44 @@ contains
     character(*),intent(out)::message
     complex(8),allocatable::local_overlap(:,:),owned_overlap(:,:),complete_overlap(:,:)
     integer,allocatable::local_atom_ids(:),local_ordinals(:),complete_atom_ids(:),complete_ordinals(:)
+    integer,allocatable::support_core_positions(:),support_projector_positions(:)
     integer(8),allocatable::projector_ids(:)
-    real(8),allocatable::local_strength(:),owned_strength(:),complete_strength(:)
+    real(8),allocatable::local_matrix_strength(:),local_action_strength(:),owned_matrix_strength(:),&
+      complete_action_strength(:)
     logical,allocatable::complete(:,:)
-    integer::ilma,ia,j,ix,iy,iz,ix_tot,iy_tot,iz_tot,basis,position,ordinal,total_projectors,q,core_position
+    complex(8),allocatable::support_projector_values(:)
+    integer::ilma,ia,j,ix,iy,iz,ix_tot,iy_tot,iz_tot,basis,position,ordinal,total_projectors,q,core_position,&
+      local_bad,global_bad,ierr,support_count
     integer(8)::point_id
 
-    ok=.false.;message='';ownership_count=0
+    ok=.false.;message='';ownership_count=0;local_bad=0
     if(global_count<1.or..not.allocated(fragment_basis%global_ids).or.&
         .not.allocated(fragment_basis%buffer_point_ids).or..not.allocated(fragment_basis%buffer_values))then
-      message='invalid divided nonlocal fragment basis';return
+      local_bad=1
     endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+    if(global_bad/=0)then;message='invalid divided nonlocal fragment basis';return;endif
     allocate(local_overlap(global_count,ppg%Nlma),local_atom_ids(ppg%Nlma),&
-      local_ordinals(ppg%Nlma),local_strength(ppg%Nlma))
-    local_overlap=(0d0,0d0);local_atom_ids=0;local_ordinals=0;local_strength=0d0
+      local_ordinals(ppg%Nlma),local_matrix_strength(ppg%Nlma),local_action_strength(ppg%Nlma))
+    local_overlap=(0d0,0d0);local_atom_ids=0;local_ordinals=0
+    local_matrix_strength=0d0;local_action_strength=0d0
     do ilma=1,ppg%Nlma
       ia=ppg%ia_tbl(ilma)
       call map_dc_atom_to_physical_atom(ia,local_atom_ids(ilma),ok)
-      if(.not.ok)then;message='cannot map divided projector to a physical atom';return;endif
+      if(.not.ok)then;local_bad=1;cycle;endif
       ordinal=count(ppg%ia_tbl(1:ilma)==ia);local_ordinals(ilma)=ordinal
-      local_strength(ilma)=system%hvol*ppg%rinv_uvu(ilma)
+      local_matrix_strength(ilma)=system%hvol*ppg%rinv_uvu(ilma)
+      local_action_strength(ilma)=ppg%rinv_uvu(ilma)
       do j=1,ppg%mps(ia)
         ix=ppg%jxyz(1,j,ia);iy=ppg%jxyz(2,j,ia);iz=ppg%jxyz(3,j,ia)
         ix_tot=dc%jxyz_tot(ix,1);iy_tot=dc%jxyz_tot(iy,2);iz_tot=dc%jxyz_tot(iz,3)
         point_id=1_8+int(ix_tot-1,8)+int(dc%lg_tot%num(1),8)*(&
           int(iy_tot-1,8)+int(dc%lg_tot%num(2),8)*int(iz_tot-1,8))
         position=findloc(fragment_basis%buffer_point_ids,point_id,dim=1)
-        if(position<=0)then;message='divided basis omits nonlocal projector support';return;endif
+        if(position<=0)then;local_bad=1;cycle;endif
         do basis=1,size(fragment_basis%global_ids)
           if(fragment_basis%global_ids(basis)<1_8.or.fragment_basis%global_ids(basis)>int(global_count,8))then
-            message='divided nonlocal basis ID is outside the fixed catalog';return
+            local_bad=1;cycle
           endif
           local_overlap(int(fragment_basis%global_ids(basis)),ilma)=&
             local_overlap(int(fragment_basis%global_ids(basis)),ilma)+&
@@ -5088,18 +5099,24 @@ contains
         enddo
       enddo
     enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+    if(global_bad/=0)then;message='divided basis omits or misidentifies nonlocal projector support';return;endif
     call collect_dg_overlapping_wannier_projector_overlaps(dc%icomm_tot,global_count,local_atom_ids,&
-      local_ordinals,local_strength,local_overlap,projector_ids,owned_strength,owned_overlap,&
-      total_projectors,ok,message,complete_atom_ids,complete_ordinals,complete_strength,complete_overlap)
+      local_ordinals,local_matrix_strength,local_action_strength,local_overlap,projector_ids,&
+      owned_matrix_strength,owned_overlap,total_projectors,ok,message,complete_atom_ids,complete_ordinals,&
+      complete_action_strength=complete_action_strength,complete_overlap=complete_overlap)
     if(.not.ok)return
-    allocate(nonlocal_action(global_count,size(ow_core_ids)));nonlocal_action=(0d0,0d0)
+    allocate(support_core_positions(sum(ppg%mps(ppg%ia_tbl))),&
+      support_projector_positions(sum(ppg%mps(ppg%ia_tbl))),&
+      support_projector_values(sum(ppg%mps(ppg%ia_tbl))))
+    support_count=0
     do ilma=1,ppg%Nlma
       q=0
       do position=1,total_projectors
         if(complete_atom_ids(position)==local_atom_ids(ilma).and.&
             complete_ordinals(position)==local_ordinals(ilma))then;q=position;exit;endif
       enddo
-      if(q==0)then;message='complete nonlocal projector payload lacks local identity';ok=.false.;return;endif
+      if(q==0)then;local_bad=1;cycle;endif
       ia=ppg%ia_tbl(ilma)
       do j=1,ppg%mps(ia)
         ix=ppg%jxyz(1,j,ia);iy=ppg%jxyz(2,j,ia);iz=ppg%jxyz(3,j,ia)
@@ -5108,15 +5125,22 @@ contains
           int(iy_tot-1,8)+int(dc%lg_tot%num(2),8)*int(iz_tot-1,8))
         core_position=findloc(ow_core_ids,point_id,dim=1)
         if(core_position<=0)cycle
-        do basis=1,global_count
-          nonlocal_action(basis,core_position)=nonlocal_action(basis,core_position)+&
-            complete_strength(q)*ppg%uV(j,ilma)*complete_overlap(basis,q)
-        enddo
+        support_count=support_count+1
+        support_core_positions(support_count)=core_position
+        support_projector_positions(support_count)=q
+        support_projector_values(support_count)=ppg%uV(j,ilma)
       enddo
     enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+    if(global_bad/=0)then;message='complete nonlocal projector payload lacks local identity';return;endif
+    call apply_dg_overlapping_wannier_nonlocal_action(dc%icomm_tot,global_count,size(ow_core_ids),&
+      support_core_positions(1:support_count),support_projector_positions(1:support_count),&
+      support_projector_values(1:support_count),complete_action_strength,complete_overlap,&
+      nonlocal_action,ok,message)
+    if(.not.ok)return
     allocate(complete(global_count,size(projector_ids)));complete=.true.
     call assemble_dg_overlapping_wannier_nonlocal_rows(dc%icomm_tot,global_count,row_ids,projector_ids,&
-      owned_strength,owned_overlap,complete,int(total_projectors,8),matrix_rows,ownership_count,ok,message)
+      owned_matrix_strength,owned_overlap,complete,int(total_projectors,8),matrix_rows,ownership_count,ok,message)
   end subroutine assemble_dg_hybrid_divided_nonlocal_rows
 
   subroutine map_dc_atom_to_physical_atom(local_atom,physical_atom,ok)

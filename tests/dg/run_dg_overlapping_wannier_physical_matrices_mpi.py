@@ -2,6 +2,15 @@
 from pathlib import Path
 import os,re,shutil,subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
+main_dft=(root/"src/gs/main_dft.f90").read_text()
+divided_nonlocal=main_dft.split("subroutine assemble_dg_hybrid_divided_nonlocal_rows",1)[1].split(
+    "end subroutine assemble_dg_hybrid_divided_nonlocal_rows",1)[0]
+assert "matrix_strength" in divided_nonlocal
+assert "action_strength" in divided_nonlocal
+assert "apply_dg_overlapping_wannier_nonlocal_action" in divided_nonlocal
+assert "local_strength(ilma)=system%hvol*ppg%rinv_uvu(ilma)" not in divided_nonlocal
+assert "if(position<=0)then;message='divided basis omits nonlocal projector support';return;endif" not in divided_nonlocal
+assert "if(q==0)then;message='complete nonlocal projector payload lacks local identity';ok=.false.;return;endif" not in divided_nonlocal
 with tempfile.TemporaryDirectory(prefix="ow-physical-") as name:
     build=Path(name);(build/"config.h").write_text("")
     env=os.environ.copy();env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")
