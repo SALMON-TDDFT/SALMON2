@@ -4377,8 +4377,6 @@ stage_pass: do
     checkpoint_payload%selection_fingerprint=selection_fingerprint_arg
     checkpoint_payload%analysis_fingerprint=checkpoint_analysis_fingerprint(basis_representation)
     checkpoint_payload%pseudopotential_fingerprint=pseudopotential_fingerprint_arg
-    checkpoint_payload%energy_fingerprint=ieor(kinetic_fingerprint,ieor(nonlocal_fingerprint,local_fingerprint))
-    if(checkpoint_payload%energy_fingerprint==0_8)checkpoint_payload%energy_fingerprint=sipg_fingerprint
     allocate(checkpoint_payload%row_ids,source=row_ids)
     allocate(checkpoint_payload%metric_row_offsets,source=metric_offsets_arg)
     allocate(checkpoint_payload%metric_column_ids,source=metric_columns_arg)
@@ -4416,9 +4414,12 @@ stage_pass: do
     allocate(checkpoint_payload%continuation_receipt(10))
     checkpoint_payload%continuation_receipt=[accepted_lambda,residuals%r_h,residuals%r_rho,residuals%r_t,residuals%r_s,&
       electron_count,symmetry_residual,projector_symmetry_residual,real_space_residual,maxval(interface_action_residuals)]
-    allocate(checkpoint_payload%pseudopotential_receipt(2),checkpoint_payload%energy_receipt(4))
-    checkpoint_payload%pseudopotential_receipt=[real(dc%system_tot%nion,8),real(size(checkpoint_payload%nonlocal_rows),8)]
-    checkpoint_payload%energy_receipt=broken_diagnostics
+    allocate(checkpoint_payload%pseudopotential_receipt(6),checkpoint_payload%energy_receipt(7))
+    checkpoint_payload%pseudopotential_receipt=[real(dc%system_tot%nion,8),pp%zion,real(pp%lmax,8),&
+      real(pp%nrmax,8),real(ppg%Nlma,8),real(size(checkpoint_payload%nonlocal_rows),8)]
+    checkpoint_payload%energy_receipt=[energy%E_tot,energy%E_kin,energy%E_h,energy%E_xc,energy%E_ion_ion,&
+      energy%E_ion_loc,energy%E_ion_nloc]
+    checkpoint_payload%energy_fingerprint=checkpoint_real_fingerprint(checkpoint_payload%energy_receipt)
     allocate(checkpoint_payload%nonlocal_ids,source=ow_core_ids)
     allocate(checkpoint_payload%nonlocal_owner(size(ow_core_ids)),source=rank_local)
     allocate(checkpoint_payload%nonlocal_values,source=interior_nonlocal_action)
@@ -4546,6 +4547,18 @@ stage_pass: do
     enddo;enddo;enddo
     if(fingerprint==0_8)fingerprint=1_8
   end function checkpoint_analysis_fingerprint
+
+  integer(8) function checkpoint_real_fingerprint(values) result(fingerprint)
+    real(8),intent(in)::values(:)
+    integer(8)::bits
+    integer::i
+    fingerprint=int(z'9E3779B97F4A7C15',8)
+    do i=1,size(values)
+      bits=transfer(values(i),bits)
+      fingerprint=ieor(ishftc(fingerprint,11),ieor(bits,int(i,8)))
+    enddo
+    if(fingerprint==0_8)fingerprint=1_8
+  end function checkpoint_real_fingerprint
 
   subroutine set_dg_hybrid_trial_state(state,density,potential,occupations_arg,eigenvalues_arg,&
       projector,trace,epoch,operator_fingerprint,solver_fingerprint)
