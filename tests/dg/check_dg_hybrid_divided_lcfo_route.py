@@ -6,11 +6,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = (ROOT / "src/gs/main_dft.f90").read_text(errors="replace").lower()
-BRANCH_START = "if(yn_dg_hybrid_divided_scf=='y')"
+BRANCH_START = "if(yn_dg_hybrid_divided_scf=='y'.or.yn_dg_hybrid_continuation_scf=='y')then"
 
 assert BRANCH_START in SOURCE, "missing divided WF+PW SCF production branch"
 branch = SOURCE[SOURCE.index(BRANCH_START) :]
-branch = branch.split("endif", 1)[0]
+continuation_branch = "if(yn_dg_hybrid_continuation_scf=='y')then"
+assert continuation_branch in branch, "missing continuation/divided route selection"
+branch = branch[branch.index(continuation_branch) :]
+assert "else" in branch, "missing divided-only route"
+branch = branch.split("else", 1)[1]
+branch = branch.split("if(yn_dg_hybrid_scf=='y')then", 1)[0]
 
 scf_position = branch.find("call run_dg_hybrid_divided_scf")
 lcfo_position = branch.find("call assemble_dg_hybrid_lcfo_rows")
