@@ -7,7 +7,8 @@ program test_dg_hybrid_production_face_traces_mpi
   use dg_hybrid_production_face_traces,only:s_dg_hybrid_production_face_trace,&
     build_dg_hybrid_production_face_trace,assemble_dg_hybrid_production_face,&
     validate_dg_hybrid_production_face_collection,materialize_dg_hybrid_production_face_collection,&
-    assemble_dg_hybrid_production_interface_rows,freeze_dg_hybrid_basis_directory,&
+    assemble_dg_hybrid_production_interface_rows,assemble_dg_hybrid_production_interface_component_rows,&
+    reconstruct_dg_hybrid_production_interface_actions,freeze_dg_hybrid_basis_directory,&
     materialize_dg_hybrid_production_interior,&
     reconstruct_dg_hybrid_production_interface_state
   use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
@@ -23,7 +24,7 @@ program test_dg_hybrid_production_face_traces_mpi
   real(real64),allocatable::interior_weights(:),interior_potential(:)
   complex(real64)::minus_values(2,2),plus_values(2,1),minus_outward(2,2),plus_outward(2,1)
   complex(real64),allocatable::empty_values(:,:),empty_derivatives(:,:)
-  complex(real64),allocatable::interface_rows(:,:)
+  complex(real64),allocatable::interface_rows(:,:),component_rows(:,:,:),component_actions(:,:,:)
   complex(real64),allocatable::interior_values(:,:),interior_gradients(:,:,:)
   complex(real64),allocatable::interior_kinetic_action(:,:)
   complex(real64),allocatable::production_kinetic(:,:),production_local(:,:)
@@ -213,6 +214,18 @@ program test_dg_hybrid_production_face_traces_mpi
   call MPI_Allreduce(local_interface_norm,global_interface_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,icomm,ierr)
   call require(ierr==MPI_SUCCESS.and.global_interface_norm>1d-24,&
     'production interface row assembly lost all SIPG coupling')
+  call assemble_dg_hybrid_production_interface_component_rows(icomm,2,owned_row_ids,production_faces,6d0,&
+    component_rows,ok,message)
+  call require(ok.and.(size(owned_row_ids)==0.or.maxval(abs(interface_rows-sum(component_rows,dim=3)))<1d-13),&
+    'SIPG component rows do not reproduce the frozen total interface action')
+  call reconstruct_dg_hybrid_production_interface_actions(icomm,2,owned_row_ids,occupied_coefficients,&
+    production_faces,6d0,component_actions,ok,message)
+  call require(ok.and.all(shape(component_actions)==[size(owned_row_ids),2,3]),&
+    'reconstructed SIPG component actions have the wrong distributed shape')
+  do p=1,3
+    call require(size(owned_row_ids)==0.or.maxval(abs(component_actions(:,:,p)-component_rows(:,:,p)))<1d-13,&
+      'reconstructed occupied SIPG action disagrees with its frozen component rows')
+  enddo
   origins(1,2)=2;sizes(1,2)=3
   call materialize_dg_hybrid_production_face_collection(icomm,origins,sizes,grid_size,[1d0,2d0,3d0],&
     reshape([0.5d0,0.25d0,0.125d0],[1,3]),fragment_bases,basis_owner,basis_fragment,[1,2],&

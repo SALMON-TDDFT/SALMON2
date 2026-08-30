@@ -19,7 +19,9 @@ for token in [
     "assemble_dg_hybrid_divided_nonlocal_rows",
     "freeze_dg_hybrid_variational_payload",
     "materialize_dg_hybrid_production_face_collection",
-    "assemble_dg_hybrid_production_interface_rows",
+    "assemble_dg_hybrid_production_interface_component_rows",
+    "reconstruct_dg_hybrid_production_interface_actions",
+    "evaluate_dg_hybrid_face_action_residuals",
 ]:
     assert token in source, f"production continuation does not connect {token}"
 

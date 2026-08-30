@@ -113,13 +113,14 @@ use dg_hybrid_window_distribution,only:redistribute_dg_hybrid_fragment_windows
 use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
 use dg_hybrid_production_face_traces,only:s_dg_hybrid_production_face_trace,&
   freeze_dg_hybrid_basis_directory,materialize_dg_hybrid_production_face_collection,&
-  assemble_dg_hybrid_production_interface_rows,materialize_dg_hybrid_production_interior,&
-  reconstruct_dg_hybrid_production_interface_state
+  assemble_dg_hybrid_production_interface_component_rows,materialize_dg_hybrid_production_interior,&
+  reconstruct_dg_hybrid_production_interface_state,reconstruct_dg_hybrid_production_interface_actions
 use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows,assemble_dg_hybrid_local_potential_rows
 use dg_hybrid_variational_payload,only:s_dg_hybrid_fixed_payload,s_dg_hybrid_variational_iterate,&
   freeze_dg_hybrid_variational_payload,compose_dg_hybrid_variational_hamiltonian
 use dg_hybrid_continuation_residuals,only:s_dg_hybrid_residuals,evaluate_dg_hybrid_residuals
-use dg_hybrid_real_space_residual,only:evaluate_dg_hybrid_real_space_residual
+use dg_hybrid_real_space_residual,only:evaluate_dg_hybrid_real_space_residual,&
+  evaluate_dg_hybrid_face_action_residuals
 use dg_hybrid_continuation_controller,only:s_dg_hybrid_controller_controls,s_dg_hybrid_trial_state,&
   s_dg_hybrid_stage_schedule,&
   s_dg_hybrid_stage_report,s_dg_hybrid_controller,default_dg_hybrid_controller_controls,&
@@ -712,7 +713,7 @@ contains
       spectral_wannier_representation(:,:),spectral_spatial_trials(:,:),spectral_amn(:,:)
     complex(8),allocatable::one_shot_hrows(:,:)
     complex(8),allocatable::divided_lcfo_hrows(:,:),divided_lcfo_srows(:,:)
-    complex(8),allocatable::dg_hybrid_interface_rows(:,:)
+    complex(8),allocatable::dg_hybrid_interface_rows(:,:),dg_hybrid_interface_component_rows(:,:,:)
     complex(8),allocatable::dg_hybrid_final_trace(:,:),dg_hybrid_final_hamiltonian_rows(:,:)
     complex(8),allocatable::dg_hybrid_interior_values(:,:),dg_hybrid_interior_gradients(:,:,:),&
       dg_hybrid_interior_kinetic_action(:,:),dg_hybrid_interior_nonlocal_action(:,:),&
@@ -2655,11 +2656,13 @@ contains
           divided_production_faces,ok,message)
         if(.not.ok)write(0,'(a)')trim(message)
         if(.not.ok)error stop 'divided Hybrid production face materialization failed'
-        call assemble_dg_hybrid_production_interface_rows(dc%icomm_tot,size(divided_effective_ids),&
+        call assemble_dg_hybrid_production_interface_component_rows(dc%icomm_tot,size(divided_effective_ids),&
           divided_lcfo_row_ids,divided_production_faces,dg_dc_gs_sipg_penalty_factor,&
-          dg_hybrid_interface_rows,ok,message)
+          dg_hybrid_interface_component_rows,ok,message)
         if(.not.ok)write(0,'(a)')trim(message)
         if(.not.ok)error stop 'divided Hybrid SIPG interface assembly failed'
+        allocate(dg_hybrid_interface_rows(size(divided_lcfo_row_ids),size(divided_effective_ids)))
+        dg_hybrid_interface_rows=sum(dg_hybrid_interface_component_rows,dim=3)
         call freeze_dg_hybrid_variational_payload(dc%icomm_tot,size(divided_effective_ids),&
           divided_lcfo_row_ids,divided_lcfo_srows,dg_hybrid_kinetic_rows,dg_hybrid_nonlocal_rows,&
           dg_hybrid_interface_rows,divided_fragment_fingerprint,divided_lcfo_operator_fingerprint,&
@@ -2676,7 +2679,7 @@ contains
           divided_lcfo_row_ids,divided_basis_fragment,dg_hybrid_interior_fragment,&
           dg_hybrid_interior_weights,dg_hybrid_interior_values,&
           dg_hybrid_interior_kinetic_action,dg_hybrid_interior_nonlocal_action,dg_hybrid_fixed_payload,&
-          divided_production_faces,occupations,divided_basis_representation,&
+          dg_hybrid_interface_component_rows,divided_production_faces,occupations,divided_basis_representation,&
           ow_hybrid_ground_state,dg_hybrid_final_density,dg_hybrid_final_trace,&
           dg_hybrid_final_hamiltonian_rows)
         return
@@ -4039,13 +4042,14 @@ contains
 
   subroutine run_dg_hybrid_concrete_continuation(dc_seed_density,effective_ids,row_ids,basis_fragment,&
       interior_fragment,interior_weights,interior_values,interior_kinetic_action,&
-      interior_nonlocal_action,fixed_payload,production_faces,&
+      interior_nonlocal_action,fixed_payload,interface_component_rows,production_faces,&
       occupied_occupations,basis_representation,final_ground_state,final_density,final_trace,&
       final_hamiltonian_rows)
     real(8),intent(in)::dc_seed_density(:),interior_weights(:),occupied_occupations(:)
     integer,intent(in)::effective_ids(:),basis_fragment(:),interior_fragment(:)
     integer(8),intent(in)::row_ids(:)
     complex(8),intent(in)::interior_values(:,:),interior_kinetic_action(:,:),interior_nonlocal_action(:,:)
+    complex(8),intent(in)::interface_component_rows(:,:,:)
     complex(8),intent(in)::basis_representation(:,:,:)
     type(s_dg_hybrid_fixed_payload),intent(in)::fixed_payload
     type(s_dg_hybrid_production_face_trace),intent(in)::production_faces(:)
@@ -4061,7 +4065,7 @@ contains
       eigenvalues(:),solver_eigenvalues(:)
     complex(8),allocatable::local_rows(:,:),coefficients(:,:),solver_coefficients(:,:),&
       gamma_rows(:,:),projector_rows(:,:),s_coefficients(:,:),interface_state(:,:),&
-      previous_interface_state(:,:),hc(:,:),sc_epsilon(:,:),full_action_values(:,:)
+      previous_interface_state(:,:),hc(:,:),sc_epsilon(:,:),full_action_values(:,:),interface_component_actions(:,:,:)
     type(s_dg_hybrid_variational_iterate)::iterate
     type(s_dg_hybrid_residuals)::residuals
     type(s_dg_hybrid_controller_controls)::continuation_controls
@@ -4077,7 +4081,7 @@ contains
     character(256)::continuation_message
     real(8)::occupied_unoccupied_gap,accepted_gap
     real(8)::hamiltonian_hermiticity,hamiltonian_scale
-    real(8)::real_space_residual
+    real(8)::real_space_residual,interface_action_residuals(3)
     logical::hamiltonian_finite
 
     call MPI_Comm_rank(dc%icomm_tot,rank_local,ierr_local)
@@ -4161,7 +4165,8 @@ stage_pass: do
         cheap_candidate=all([residuals%r_h,residuals%r_rho,residuals%r_t,residuals%r_s]<=&
           stage_report%tolerances).and.abs(electron_count-dc%elec_num_tot)<=&
           dg_dc_gs_electron_count_tolerance.and.projector_change<=0.1d0
-        real_space_residual=huge(1d0);symmetry_residual=huge(1d0);projector_symmetry_residual=huge(1d0)
+        real_space_residual=huge(1d0);interface_action_residuals=huge(1d0)
+        symmetry_residual=huge(1d0);projector_symmetry_residual=huge(1d0)
         hamiltonian_hermiticity=huge(1d0);hamiltonian_scale=1d0;hamiltonian_finite=.false.
         call schedule_dg_hybrid_candidate_checks(stage_schedule,cheap_candidate,run_expensive)
         if(run_expensive)then
@@ -4173,6 +4178,15 @@ stage_pass: do
             ow_core_ids,interior_weights,size(effective_ids),row_ids,interior_values,full_action_values,&
             coefficients,eigenvalues,real_space_residual,local_ok,continuation_message)
           if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG strong residual evaluation failed';endif
+          call reconstruct_dg_hybrid_production_interface_actions(dc%icomm_tot,size(effective_ids),row_ids,&
+            coefficients,production_faces,dg_dc_gs_sipg_penalty_factor,interface_component_actions,&
+            local_ok,continuation_message)
+          if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG SIPG action reconstruction failed';endif
+          call evaluate_dg_hybrid_face_action_residuals(dc%icomm_tot,size(effective_ids),row_ids,&
+            interface_component_rows,iterate%hamiltonian_rows,coefficients,sc_epsilon,trial_lambda,&
+            interface_component_actions,interface_action_residuals,&
+            local_ok,continuation_message)
+          if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG SIPG action residual evaluation failed';endif
           call measure_dg_hybrid_operator_covariance(dc%icomm_tot,row_ids,iterate%hamiltonian_rows,&
             basis_representation,symmetry_residual,local_ok)
           if(.not.local_ok)error stop 'DG continuation Hamiltonian covariance measurement failed'
@@ -4183,6 +4197,7 @@ stage_pass: do
             hamiltonian_hermiticity,hamiltonian_scale,hamiltonian_finite)
         endif
         stage_converged=cheap_candidate.and.real_space_residual<=stage_report%tolerances(1).and.&
+          all(interface_action_residuals<=stage_report%tolerances(1)).and.&
           symmetry_residual<=dg_ow_symmetry_tolerance.and.projector_symmetry_residual<=dg_ow_symmetry_tolerance.and.&
           occupied_unoccupied_gap>dg_dc_gs_final_orbital_tolerance.and.hamiltonian_finite.and.&
           hamiltonian_hermiticity<=dg_dc_gs_hermiticity_tolerance*max(1d0,hamiltonian_scale)
@@ -4226,6 +4241,7 @@ stage_pass: do
           hamiltonian_hermiticity<=dg_dc_gs_hermiticity_tolerance*max(1d0,hamiltonian_scale)
         stage_report%symmetry_ok=max(symmetry_residual,projector_symmetry_residual)<=dg_ow_symmetry_tolerance
         stage_report%real_space_ok=real_space_residual<=stage_report%tolerances(1).and.&
+          all(interface_action_residuals<=stage_report%tolerances(1)).and.&
           residuals%r_t<=stage_report%tolerances(3)
         stage_report%finite_ok=hamiltonian_finite.and.all(ieee_is_finite(solver_eigenvalues)).and.&
           ieee_is_finite(electron_count).and.ieee_is_finite(occupied_unoccupied_gap)
