@@ -2,6 +2,12 @@
 from pathlib import Path
 import os,shlex,shutil,subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
+initialization_source=(root/"src/rt/dg/rt_dg_hybrid_initialization.f90").read_text().lower()
+initializer=initialization_source.split("subroutine initialize_rt_dg_hybrid_from_checkpoint",1)[1].split(
+  "end subroutine initialize_rt_dg_hybrid_from_checkpoint",1)[0]
+for forbidden in ("allocate(metric(n,n)","position_rows(3,n,n)","metric_graph(n,n)","operator_graph(n,n)"):
+  assert forbidden not in initializer, f"RT initialization still replicates a dense global object: {forbidden}"
+assert "redistribute_ground_state_rows" in initializer
 if os.environ.get("SALMON_LAPACK_LIBS"): libs=shlex.split(os.environ["SALMON_LAPACK_LIBS"])
 elif shutil.which("brew") and subprocess.run(["brew","--prefix","openblas"],capture_output=True).returncode==0:
   prefix=subprocess.check_output(["brew","--prefix","openblas"],text=True).strip();libs=[f"-L{prefix}/lib","-lopenblas"]

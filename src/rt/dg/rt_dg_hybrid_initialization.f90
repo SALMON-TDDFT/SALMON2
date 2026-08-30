@@ -37,11 +37,8 @@ contains
     character(*),intent(out)::message
 #ifdef USE_MPI
     type(s_rt_dg_hybrid_ground_state_payload)::payload
-    integer::rank,nproc,ierr,n,nocc,nowned,row,i,j,position,local_bad,global_bad,file_nproc,read_comm,active_xc
+    integer::rank,nproc,ierr,n,nocc,i,local_bad,global_bad,file_nproc,read_comm,active_xc
     integer(int64)::payload_fingerprint
-    complex(real64),allocatable::metric(:,:),kinetic(:,:),nonlocal(:,:),local(:,:),sipg(:,:),hamiltonian(:,:),coeff(:,:),&
-      position_rows(:,:,:)
-    integer,allocatable::metric_graph(:,:),operator_graph(:,:)
     real(real64)::residual,orthogonality,electron_defect,hermiticity,covariance,projector_covariance,scale,&
       density_charge
     ok=.false.;message='';state%valid=.false.
@@ -89,54 +86,18 @@ contains
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ok=.false.;message='checkpoint/local hybrid RT scope mismatch';return;endif
     n=payload%global_count;nocc=payload%noccupied
-    allocate(metric(n,n),kinetic(n,n),nonlocal(n,n),local(n,n),sipg(n,n),hamiltonian(n,n),coeff(n,nocc),&
-      position_rows(3,n,n),metric_graph(n,n),operator_graph(n,n));metric=(0d0,0d0);kinetic=(0d0,0d0)
-    nonlocal=(0d0,0d0);local=(0d0,0d0)
-    sipg=(0d0,0d0);hamiltonian=(0d0,0d0);coeff=(0d0,0d0);position_rows=(0d0,0d0)
-    metric_graph=0;operator_graph=0
-    do i=1,size(payload%row_ids)
-      row=int(payload%row_ids(i));metric(row,:)=payload%metric_rows(i,:);kinetic(row,:)=payload%kinetic_rows(i,:)
-      nonlocal(row,:)=payload%nonlocal_rows(i,:);local(row,:)=payload%local_rows(i,:);sipg(row,:)=payload%sipg_rows(i,:)
-      hamiltonian(row,:)=payload%hamiltonian_rows(i,:);coeff(row,:)=payload%coefficients(i,:)
-      position_rows(:,row,:)=payload%position_rows(:,i,:)
-      do j=payload%metric_row_offsets(i),payload%metric_row_offsets(i+1)-1
-        metric_graph(row,payload%metric_column_ids(j))=1
-      enddo
-      do j=payload%operator_row_offsets(i),payload%operator_row_offsets(i+1)-1
-        operator_graph(row,payload%operator_column_ids(j))=1
-      enddo
-    enddo
-    call MPI_Allreduce(MPI_IN_PLACE,metric,n*n,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
-    call MPI_Allreduce(MPI_IN_PLACE,kinetic,n*n,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
-    call MPI_Allreduce(MPI_IN_PLACE,nonlocal,n*n,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
-    call MPI_Allreduce(MPI_IN_PLACE,local,n*n,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
-    call MPI_Allreduce(MPI_IN_PLACE,sipg,n*n,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
-    call MPI_Allreduce(MPI_IN_PLACE,hamiltonian,n*n,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
-    call MPI_Allreduce(MPI_IN_PLACE,coeff,n*nocc,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
-    call MPI_Allreduce(MPI_IN_PLACE,position_rows,3*n*n,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
-    call MPI_Allreduce(MPI_IN_PLACE,metric_graph,n*n,MPI_INTEGER,MPI_MAX,comm,ierr)
-    call MPI_Allreduce(MPI_IN_PLACE,operator_graph,n*n,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='hybrid RT global payload reconstruction failed';return;endif
+    call redistribute_ground_state_rows(comm,payload,state,ok,message)
+    if(.not.ok)return
     density_charge=sum(payload%density*payload%grid_weights)
     call MPI_Allreduce(MPI_IN_PLACE,density_charge,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
-    call validate_invariants(metric,hamiltonian,coeff,payload%occupations,payload%eigenvalues,density_charge,&
-      payload%symmetry_representation,residual,orthogonality,electron_defect,hermiticity,covariance,projector_covariance)
-    scale=max(1d0,maxval(abs(hamiltonian)))
+    call validate_distributed_invariants(comm,state,payload%occupations,payload%eigenvalues,density_charge,&
+      payload%symmetry_representation,residual,orthogonality,electron_defect,hermiticity,covariance,projector_covariance,&
+      scale,ok,message)
+    if(.not.ok)return
     local_bad=merge(0,1,residual<=1d-11*scale.and.orthogonality<=1d-11.and.electron_defect<=1d-11.and.&
       hermiticity<=1d-11*scale.and.covariance<=1d-11*scale.and.projector_covariance<=1d-11)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ok=.false.;message='invalid hybrid RT startup invariants';return;endif
-    nowned=count([(mod(n-row,nproc)==rank,row=1,n)])
-    allocate(state%owned_row_ids(nowned),state%coefficients(nowned,nocc),state%kinetic_rows(nowned,n),&
-      state%nonlocal_rows(nowned,n),state%local_rows(nowned,n),state%sipg_rows(nowned,n))
-    position=0
-    do row=1,n
-      if(mod(n-row,nproc)/=rank)cycle
-      position=position+1;state%owned_row_ids(position)=row;state%coefficients(position,:)=coeff(row,:)
-      state%kinetic_rows(position,:)=kinetic(row,:);state%nonlocal_rows(position,:)=nonlocal(row,:)
-      state%local_rows(position,:)=local(row,:);state%sipg_rows(position,:)=sipg(row,:)
-    enddo
-    call build_sparse_state(n,state%owned_row_ids,metric,hamiltonian,position_rows,metric_graph,operator_graph,payload,state)
     allocate(state%grid_ids,source=payload%grid_ids);allocate(state%density,source=payload%density)
     allocate(state%grid_weights,source=payload%grid_weights);allocate(state%basis_values,source=payload%basis_values)
     allocate(state%occupations,source=payload%occupations);allocate(state%eigenvalues,source=payload%eigenvalues)
@@ -237,85 +198,187 @@ contains
     end subroutine
   end subroutine broadcast_ground_state_for_expansion
 
-  subroutine validate_invariants(s,h,c,occupations,eigenvalues,density_charge,representation,residual,orthogonality,&
-      electron_defect,hermiticity,covariance,projector_covariance)
-    complex(real64),intent(in)::s(:,:),h(:,:),c(:,:)
-    real(real64),intent(in)::occupations(:),eigenvalues(:)
-    real(real64),intent(in)::density_charge
-    complex(real64),intent(in)::representation(:,:,:)
-    real(real64),intent(out)::residual,orthogonality,electron_defect,hermiticity,covariance,projector_covariance
-    complex(real64),allocatable::r(:,:),gram(:,:),projector(:,:),transformed(:,:)
-    integer::i,op
-    allocate(r(size(c,1),size(c,2)),gram(size(c,2),size(c,2)))
-    r=matmul(h,c)-matmul(s,c)
-    do i=1,size(c,2);r(:,i)=r(:,i)*eigenvalues(i);enddo
-    ! Restore H*C - S*C*epsilon after column scaling above.
-    r=matmul(h,c)
-    do i=1,size(c,2);r(:,i)=r(:,i)-eigenvalues(i)*matmul(s,c(:,i));enddo
-    gram=matmul(conjg(transpose(c)),matmul(s,c))
-    do i=1,size(gram,1);gram(i,i)=gram(i,i)-(1d0,0d0);enddo
-    residual=maxval(abs(r));orthogonality=maxval(abs(gram));electron_defect=abs(sum(occupations)-density_charge)
-    hermiticity=max(maxval(abs(h-conjg(transpose(h)))),maxval(abs(s-conjg(transpose(s)))))
-    allocate(projector(size(c,1),size(c,1)),transformed(size(c,1),size(c,1)))
-    projector=(0d0,0d0)
-    do i=1,size(c,2);projector=projector+occupations(i)*matmul(reshape(c(:,i),[size(c,1),1]),&
-      reshape(conjg(c(:,i)),[1,size(c,1)]));enddo
-    covariance=0d0;projector_covariance=0d0
-    do op=1,size(representation,3)
-      transformed=matmul(conjg(transpose(representation(:,:,op))),matmul(h,representation(:,:,op)))
-      covariance=max(covariance,maxval(abs(transformed-h)))
-      transformed=matmul(conjg(transpose(representation(:,:,op))),matmul(s,representation(:,:,op)))
-      covariance=max(covariance,maxval(abs(transformed-s)))
-      transformed=matmul(representation(:,:,op),matmul(projector,conjg(transpose(representation(:,:,op)))))
-      projector_covariance=max(projector_covariance,maxval(abs(transformed-projector)))
-    enddo
-  end subroutine validate_invariants
-  subroutine build_sparse_state(n,owned,s,h,position,metric_graph,operator_graph,payload,state)
-    integer,intent(in)::n
-    integer(int64),intent(in)::owned(:)
-    complex(real64),intent(in)::s(:,:),h(:,:),position(:,:,:)
-    integer,intent(in)::metric_graph(:,:),operator_graph(:,:)
+  subroutine redistribute_ground_state_rows(comm,payload,state,ok,message)
+    integer,intent(in)::comm
     type(s_rt_dg_hybrid_ground_state_payload),intent(in)::payload
     type(s_rt_dg_hybrid_state),intent(inout)::state
-    integer::i,j,edge,row,nowned,metric_edges,operator_edges
-    nowned=size(owned)
-    metric_edges=0;operator_edges=0
-    do i=1,nowned
-      row=int(owned(i));metric_edges=metric_edges+count(metric_graph(row,:)==1)
-      operator_edges=operator_edges+count(operator_graph(row,:)==1)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::rank,nproc,ierr,n,nocc,nowned,row,source,local_source,p,destination,i,j,edge,metric_edges,operator_edges
+    integer,allocatable::metric_graph(:,:),operator_graph(:,:),metric_mask(:),operator_mask(:)
+    complex(real64),allocatable::srows(:,:),hrows(:,:),position_rows(:,:,:),row_buffer(:),position_buffer(:,:)
+    complex(real64),allocatable::coefficient_buffer(:)
+    n=payload%global_count;nocc=payload%noccupied;ok=.false.;message=''
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    nowned=count([(mod(n-row,nproc)==rank,row=1,n)])
+    allocate(state%owned_row_ids(nowned),state%coefficients(nowned,nocc),state%kinetic_rows(nowned,n),&
+      state%nonlocal_rows(nowned,n),state%local_rows(nowned,n),state%sipg_rows(nowned,n),&
+      srows(nowned,n),hrows(nowned,n),position_rows(3,nowned,n),metric_graph(nowned,n),operator_graph(nowned,n))
+    allocate(row_buffer(n),position_buffer(3,n),coefficient_buffer(nocc),metric_mask(n),operator_mask(n))
+    state%coefficients=(0d0,0d0);srows=(0d0,0d0);hrows=(0d0,0d0);position_rows=(0d0,0d0)
+    metric_graph=0;operator_graph=0;p=0
+    do row=1,n
+      local_source=0
+      do i=1,size(payload%row_ids);if(payload%row_ids(i)==row)local_source=rank+1;enddo
+      call MPI_Allreduce(local_source,source,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.source<1)then;message='hybrid RT row source discovery failed';return;endif
+      source=source-1;row_buffer=(0d0,0d0);position_buffer=(0d0,0d0);coefficient_buffer=(0d0,0d0)
+      metric_mask=0;operator_mask=0
+      if(rank==source)then
+        do i=1,size(payload%row_ids)
+          if(payload%row_ids(i)/=row)cycle
+          row_buffer=payload%metric_rows(i,:);position_buffer=payload%position_rows(:,i,:)
+          coefficient_buffer=payload%coefficients(i,:)
+          do j=payload%metric_row_offsets(i),payload%metric_row_offsets(i+1)-1
+            metric_mask(payload%metric_column_ids(j))=1
+          enddo
+          do j=payload%operator_row_offsets(i),payload%operator_row_offsets(i+1)-1
+            operator_mask(payload%operator_column_ids(j))=1
+          enddo
+        enddo
+      endif
+      call MPI_Bcast(row_buffer,n,MPI_DOUBLE_COMPLEX,source,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Bcast(position_buffer,3*n,MPI_DOUBLE_COMPLEX,source,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Bcast(coefficient_buffer,nocc,MPI_DOUBLE_COMPLEX,source,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Bcast(metric_mask,n,MPI_INTEGER,source,comm,ierr);call MPI_Bcast(operator_mask,n,MPI_INTEGER,source,comm,ierr)
+      destination=mod(n-row,nproc)
+      if(rank==destination)then
+        p=p+1;state%owned_row_ids(p)=row;srows(p,:)=row_buffer;position_rows(:,p,:)=position_buffer
+        state%coefficients(p,:)=coefficient_buffer;metric_graph(p,:)=metric_mask;operator_graph(p,:)=operator_mask
+      endif
+      call distribute_component(payload%kinetic_rows,state%kinetic_rows)
+      call distribute_component(payload%nonlocal_rows,state%nonlocal_rows)
+      call distribute_component(payload%local_rows,state%local_rows)
+      call distribute_component(payload%sipg_rows,state%sipg_rows)
+      call distribute_component(payload%hamiltonian_rows,hrows)
     enddo
+    metric_edges=count(metric_graph==1);operator_edges=count(operator_graph==1)
     allocate(state%metric%owned_row_ids(nowned),state%metric%row_offsets(nowned+1),&
       state%metric%column_ids(metric_edges),state%metric%values(metric_edges),state%metric%active_rows(n),&
-      state%metric%packet_ids(n))
-    allocate(state%operators%owned_row_ids(nowned),state%operators%row_offsets(nowned+1),&
+      state%metric%packet_ids(n),state%operators%owned_row_ids(nowned),state%operators%row_offsets(nowned+1),&
       state%operators%column_ids(operator_edges),state%operators%metric_values(operator_edges),&
       state%operators%hamiltonian_values(operator_edges),state%operators%position_values(3,operator_edges))
     edge=0;state%metric%row_offsets(1)=1
-    do i=1,nowned
-      row=int(owned(i))
-      do j=1,n
-        if(metric_graph(row,j)==0)cycle
-        edge=edge+1;state%metric%column_ids(edge)=j;state%metric%values(edge)=s(row,j)
-      enddo
-      state%metric%row_offsets(i+1)=edge+1
-    enddo
+    do i=1,nowned;do j=1,n
+      if(metric_graph(i,j)==0)cycle
+      edge=edge+1;state%metric%column_ids(edge)=j;state%metric%values(edge)=srows(i,j)
+    enddo;state%metric%row_offsets(i+1)=edge+1;enddo
     edge=0;state%operators%row_offsets(1)=1
-    do i=1,nowned
-      row=int(owned(i))
-      do j=1,n
-        if(operator_graph(row,j)==0)cycle
-        edge=edge+1;state%operators%column_ids(edge)=j;state%operators%metric_values(edge)=s(row,j)
-        state%operators%hamiltonian_values(edge)=h(row,j);state%operators%position_values(:,edge)=position(:,row,j)
-      enddo
-      state%operators%row_offsets(i+1)=edge+1
-    enddo
-    state%metric%owned_row_ids=owned;state%metric%global_count=n;state%metric%numerical_rank=n
+    do i=1,nowned;do j=1,n
+      if(operator_graph(i,j)==0)cycle
+      edge=edge+1;state%operators%column_ids(edge)=j;state%operators%metric_values(edge)=srows(i,j)
+      state%operators%hamiltonian_values(edge)=hrows(i,j);state%operators%position_values(:,edge)=position_rows(:,i,j)
+    enddo;state%operators%row_offsets(i+1)=edge+1;enddo
+    state%metric%owned_row_ids=state%owned_row_ids;state%metric%global_count=n;state%metric%numerical_rank=n
     state%metric%active_rows=.true.;state%metric%packet_ids=1;state%metric%valid=.true.
     state%metric%fingerprint=payload%metric_fingerprint;state%metric%condition_estimate=1d0
-    state%metric%maximum_value=maxval(abs(s));state%metric%max_row_nnz=n
-    state%operators%owned_row_ids=owned;state%operators%global_count=n;state%operators%valid=.true.
+    if(nowned>0)then
+      state%metric%maximum_value=maxval(abs(srows));state%metric%max_row_nnz=maxval(count(metric_graph==1,dim=2))
+    else
+      state%metric%maximum_value=0d0;state%metric%max_row_nnz=0
+    endif
+    state%operators%owned_row_ids=state%owned_row_ids;state%operators%global_count=n;state%operators%valid=.true.
     state%operators%metric_fingerprint=payload%metric_fingerprint
     state%operators%fingerprint=payload%operator_structure_fingerprint
-  end subroutine build_sparse_state
+    state%global_count=n;state%noccupied=nocc;ok=.true.
+  contains
+    subroutine distribute_component(source_rows,target_rows)
+      complex(real64),intent(in)::source_rows(:,:)
+      complex(real64),intent(inout)::target_rows(:,:)
+      row_buffer=(0d0,0d0)
+      if(rank==source)then
+        do i=1,size(payload%row_ids);if(payload%row_ids(i)==row)row_buffer=source_rows(i,:);enddo
+      endif
+      call MPI_Bcast(row_buffer,n,MPI_DOUBLE_COMPLEX,source,comm,ierr)
+      if(rank==destination)target_rows(p,:)=row_buffer
+    end subroutine distribute_component
+  end subroutine redistribute_ground_state_rows
+
+  subroutine validate_distributed_invariants(comm,state,occupations,eigenvalues,density_charge,representation,residual,&
+      orthogonality,electron_defect,hermiticity,covariance,projector_covariance,scale,ok,message)
+    integer,intent(in)::comm
+    type(s_rt_dg_hybrid_state),intent(in)::state
+    real(real64),intent(in)::occupations(:),eigenvalues(:),density_charge
+    complex(real64),intent(in)::representation(:,:,:)
+    real(real64),intent(out)::residual,orthogonality,electron_defect,hermiticity,covariance,projector_covariance,scale
+    logical,intent(out)::ok;character(*),intent(out)::message
+    integer::n,nocc,nowned,i,j,k,op,row,ierr,owner,position
+    complex(real64),allocatable::all_c(:,:),srows(:,:),hrows(:,:),gram(:,:),b(:,:),p_rows(:,:),work_row(:),reference_row(:)
+    real(real64)::local_max,global_max
+    n=state%global_count;nocc=size(occupations);nowned=size(state%owned_row_ids)
+    allocate(all_c(n,nocc),srows(nowned,n),hrows(nowned,n),gram(nocc,nocc),b(nowned,n),p_rows(nowned,n),&
+      work_row(n),reference_row(n));all_c=(0d0,0d0)
+    do i=1,nowned;all_c(int(state%owned_row_ids(i)),:)=state%coefficients(i,:);enddo
+    call MPI_Allreduce(MPI_IN_PLACE,all_c,n*nocc,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    srows=(0d0,0d0);hrows=state%kinetic_rows+state%nonlocal_rows+state%local_rows+state%sipg_rows
+    do i=1,nowned
+      do k=state%metric%row_offsets(i),state%metric%row_offsets(i+1)-1
+        srows(i,state%metric%column_ids(k))=state%metric%values(k)
+      enddo
+    enddo
+    residual=0d0;gram=(0d0,0d0)
+    do i=1,nowned
+      do j=1,nocc
+        residual=max(residual,abs(sum(hrows(i,:)*all_c(:,j))-&
+          eigenvalues(j)*sum(srows(i,:)*all_c(:,j))))
+      enddo
+      do j=1,nocc;do k=1,nocc
+        gram(j,k)=gram(j,k)+conjg(all_c(int(state%owned_row_ids(i)),j))*sum(srows(i,:)*all_c(:,k))
+      enddo;enddo
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,residual,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,gram,nocc*nocc,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    do i=1,nocc;gram(i,i)=gram(i,i)-(1d0,0d0);enddo
+    orthogonality=maxval(abs(gram));electron_defect=abs(sum(occupations)-density_charge)
+    scale=1d0;if(nowned>0)scale=max(scale,maxval(abs(hrows)))
+    call MPI_Allreduce(MPI_IN_PLACE,scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    hermiticity=0d0
+    do row=1,n
+      owner=mod(n-row,0+comm_size(comm));position=owned_position(state%owned_row_ids,row)
+      reference_row=(0d0,0d0);if(position>0)reference_row=hrows(position,:)
+      call MPI_Bcast(reference_row,n,MPI_DOUBLE_COMPLEX,owner,comm,ierr)
+      do i=1,nowned;hermiticity=max(hermiticity,abs(hrows(i,row)-conjg(reference_row(int(state%owned_row_ids(i))))));enddo
+      reference_row=(0d0,0d0);if(position>0)reference_row=srows(position,:)
+      call MPI_Bcast(reference_row,n,MPI_DOUBLE_COMPLEX,owner,comm,ierr)
+      do i=1,nowned;hermiticity=max(hermiticity,abs(srows(i,row)-conjg(reference_row(int(state%owned_row_ids(i))))));enddo
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,hermiticity,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    p_rows=(0d0,0d0)
+    do i=1,nowned;do j=1,nocc
+      p_rows(i,:)=p_rows(i,:)+occupations(j)*all_c(int(state%owned_row_ids(i)),j)*conjg(all_c(:,j))
+    enddo;enddo
+    covariance=0d0;projector_covariance=0d0
+    do op=1,size(representation,3)
+      call covariance_defect(hrows,representation(:,:,op),local_max);covariance=max(covariance,local_max)
+      call covariance_defect(srows,representation(:,:,op),local_max);covariance=max(covariance,local_max)
+      call covariance_defect(p_rows,conjg(transpose(representation(:,:,op))),local_max)
+      projector_covariance=max(projector_covariance,local_max)
+    enddo
+    ok=ierr==MPI_SUCCESS;message='';if(.not.ok)message='distributed startup invariant reduction failed'
+  contains
+    integer function comm_size(current_comm)
+      integer,intent(in)::current_comm;integer::status
+      call MPI_Comm_size(current_comm,comm_size,status)
+    end function comm_size
+    integer function owned_position(ids,target)
+      integer(int64),intent(in)::ids(:);integer,intent(in)::target;integer::q
+      owned_position=0;do q=1,size(ids);if(ids(q)==target)owned_position=q;enddo
+    end function owned_position
+    subroutine covariance_defect(a,r,defect)
+      complex(real64),intent(in)::a(:,:),r(:,:);real(real64),intent(out)::defect
+      integer::q,target_owner,target_position
+      b=matmul(a,r);defect=0d0
+      do q=1,n
+        work_row=(0d0,0d0)
+        do k=1,nowned;work_row=work_row+conjg(r(int(state%owned_row_ids(k)),q))*b(k,:);enddo
+        call MPI_Allreduce(MPI_IN_PLACE,work_row,n,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+        target_owner=mod(n-q,comm_size(comm));target_position=owned_position(state%owned_row_ids,q)
+        reference_row=(0d0,0d0);if(target_position>0)reference_row=a(target_position,:)
+        call MPI_Bcast(reference_row,n,MPI_DOUBLE_COMPLEX,target_owner,comm,ierr)
+        defect=max(defect,maxval(abs(work_row-reference_row)))
+      enddo
+      call MPI_Allreduce(MPI_IN_PLACE,defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    end subroutine covariance_defect
+  end subroutine validate_distributed_invariants
 #endif
 end module rt_dg_hybrid_initialization
