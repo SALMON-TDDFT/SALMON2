@@ -3,11 +3,19 @@ from pathlib import Path
 import os,shlex,shutil,subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
 initialization_source=(root/"src/rt/dg/rt_dg_hybrid_initialization.f90").read_text().lower()
+rt_environment_source=(root/"src/rt/initialization_rt.f90").read_text().lower()
+main_rt_source=(root/"src/rt/main_tddft.f90").read_text().lower()
 initializer=initialization_source.split("subroutine initialize_rt_dg_hybrid_from_checkpoint",1)[1].split(
   "end subroutine initialize_rt_dg_hybrid_from_checkpoint",1)[0]
 for forbidden in ("allocate(metric(n,n)","position_rows(3,n,n)","metric_graph(n,n)","operator_graph(n,n)"):
   assert forbidden not in initializer, f"RT initialization still replicates a dense global object: {forbidden}"
 assert "redistribute_ground_state_rows" in initializer
+assert "subroutine initialization_rt_dg_hybrid" in rt_environment_source
+hybrid_branch=main_rt_source.split("if(yn_rt_dg_hybrid_continuation=='y')then",1)[1].split("endif",1)[0]
+assert "call initialization_rt_dg_hybrid" in hybrid_branch
+assert "hybrid_basis_only" not in main_rt_source
+for forbidden in ("spsi_in%zwf=(0d0,0d0)","spsi_out%zwf=(0d0,0d0)","tpsi%zwf=(0d0,0d0)"):
+  assert forbidden not in rt_environment_source
 if os.environ.get("SALMON_LAPACK_LIBS"): libs=shlex.split(os.environ["SALMON_LAPACK_LIBS"])
 elif shutil.which("brew") and subprocess.run(["brew","--prefix","openblas"],capture_output=True).returncode==0:
   prefix=subprocess.check_output(["brew","--prefix","openblas"],text=True).strip();libs=[f"-L{prefix}/lib","-lopenblas"]

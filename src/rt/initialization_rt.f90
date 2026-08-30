@@ -227,9 +227,11 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
     call make_rho_jm(lg,mg,info,system,rho_jm)
   end if
   
-  call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
-  call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
-  call allocate_orbital_complex(system%nspin,mg,info,tpsi)
+  if(initialize_conventional_orbitals)then
+    call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
+    call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
+    call allocate_orbital_complex(system%nspin,mg,info,tpsi)
+  endif
   
   if(propagator=='aetrs')then
     allocate(rt%vloc_t(system%nspin),rt%vloc_new(system%nspin),rt%vloc_old(system%nspin,2))
@@ -246,7 +248,9 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   !$acc enter data copyin(mg)
   !$acc enter data copyin(stencil)
   !$acc enter data copyin(V_local)
-  !$acc enter data copyin(spsi_in,spsi_out,tpsi) 
+  if(initialize_conventional_orbitals)then
+    !$acc enter data copyin(spsi_in,spsi_out,tpsi)
+  endif
   !$acc enter data copyin(ppg)
   
   if(initialize_conventional_orbitals)then
@@ -273,9 +277,6 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
     end if
   else
     Mit=0
-    spsi_in%zwf=(0d0,0d0)
-    spsi_out%zwf=(0d0,0d0)
-    tpsi%zwf=(0d0,0d0)
   end if
 
   if(yn_jm=='n') then
@@ -588,5 +589,37 @@ end subroutine init_code_optimization
 
 
 end subroutine initialization_rt
+
+subroutine initialization_rt_dg_hybrid( Mit, system, energy, ewald, rt, md, &
+                     singlescale, stencil, fg, poisson, lg, mg, info, xc_func, ofl, &
+                     srg, srg_scalar, spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s, &
+                     V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl, pp, ppg, ppn )
+  use structures
+  implicit none
+  integer :: Mit
+  type(s_dft_system) :: system
+  type(s_dft_energy) :: energy
+  type(s_ewald_ion_ion) :: ewald
+  type(s_rt) :: rt
+  type(s_md) :: md
+  type(s_singlescale) :: singlescale
+  type(s_stencil) :: stencil
+  type(s_reciprocal_grid) :: fg
+  type(s_poisson) :: poisson
+  type(s_rgrid) :: lg,mg
+  type(s_parallel_info) :: info
+  type(s_xc_functional) :: xc_func
+  type(s_ofile) :: ofl
+  type(s_sendrecv_grid) :: srg,srg_scalar
+  type(s_orbital) :: spsi_in,spsi_out,tpsi
+  type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox,Vpsl
+  type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
+  type(s_pp_info) :: pp
+  type(s_pp_grid) :: ppg
+  type(s_pp_nlcc) :: ppn
+  call initialization_rt(Mit,system,energy,ewald,rt,md,singlescale,stencil,fg,poisson,lg,mg,info,xc_func,ofl,&
+    srg,srg_scalar,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,&
+    pp,ppg,ppn,hybrid_basis_only=.true.)
+end subroutine initialization_rt_dg_hybrid
 
 end module initialization_rt_sub
