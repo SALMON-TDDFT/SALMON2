@@ -79,6 +79,24 @@ module salmon_xc
 
 contains
 
+  subroutine exchange_correlation_density(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,stencil,Vxc,E_xc)
+    use structures
+    implicit none
+    type(s_dft_system),intent(in)::system
+    type(s_xc_functional),intent(in)::xc_func
+    type(s_rgrid),intent(in)::mg
+    type(s_sendrecv_grid)::srg_scalar,srg
+    type(s_scalar),intent(in)::rho_s(system%nspin)
+    type(s_pp_info),intent(in)::pp
+    type(s_pp_nlcc),intent(in)::ppn
+    type(s_parallel_info),intent(in)::info
+    type(s_stencil),intent(in)::stencil
+    type(s_scalar)::Vxc(system%nspin)
+    real(8)::E_xc
+    type(s_orbital)::unused_orbitals
+    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,unused_orbitals,stencil,Vxc,E_xc)
+  end subroutine exchange_correlation_density
+
 
 ! wrapper for calc_xc
   subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc)

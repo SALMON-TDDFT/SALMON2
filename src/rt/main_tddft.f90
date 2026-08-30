@@ -52,7 +52,7 @@ use rt_dg_hybrid_length_gauge,only:propagate_rt_dg_hybrid_length_gauge
 use rt_dg_hybrid_sparse_exchange,only:s_rt_dg_sparse_exchange,build_rt_dg_sparse_exchange
 use dg_overlapping_wannier_construction,only:redistribute_dg_row_owned_real_field_to_requests
 use hartree_sub,only:hartree
-use salmon_xc,only:exchange_correlation
+use salmon_xc,only:exchange_correlation_density
 use hamiltonian,only:update_vlocal
 use plusU_global,only:PLUS_U_ON
 use nvtx
@@ -271,7 +271,8 @@ subroutine run_dg_hybrid_continuation_rt()
   type(s_rt_dg_sparse_exchange)::metric_exchange,operator_exchange
   complex(8),allocatable::next(:),initial_hamiltonian(:)
   real(8),allocatable::vector_potential_samples(:,:)
-  real(8)::electric_field(3),previous_polarization(3),periods(3),metric_norm,orbital_energy,polarization(3)
+  real(8)::electric_field(3),previous_polarization(3),periods(3),metric_norm,orbital_energy,polarization(3),&
+    local_defect,global_defect,local_scale,global_scale
   integer(8)::workspace,fingerprint
   integer::step,orbital,iterations,ierr,update_count,local_bad,global_bad
   logical::ok
@@ -284,9 +285,19 @@ subroutine run_dg_hybrid_continuation_rt()
   update_count=0
   call update_rt_dg_hybrid_density(nproc_group_global,hybrid_state,hybrid_state%density,project_salmon_local_rows,ok,message)
   update_count=update_count+1
-  local_bad=merge(0,1,ok.and.all(hybrid_state%operators%hamiltonian_values==initial_hamiltonian))
+  local_bad=merge(0,1,ok);local_defect=huge(1d0);local_scale=1d0
+  global_bad=1;global_defect=huge(1d0);global_scale=1d0
+  if(ok)then
+    local_defect=maxval(abs(hybrid_state%operators%hamiltonian_values-initial_hamiltonian))
+    local_scale=max(1d0,maxval(abs(initial_hamiltonian)))
+  endif
   call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,nproc_group_global,ierr)
-  if(ierr/=MPI_SUCCESS.or.global_bad/=0)error stop 'hybrid DG RT initial Hamiltonian reconstruction failed'
+  if(ierr==MPI_SUCCESS)call MPI_Allreduce(local_defect,global_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,&
+    nproc_group_global,ierr)
+  if(ierr==MPI_SUCCESS)call MPI_Allreduce(local_scale,global_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,&
+    nproc_group_global,ierr)
+  if(ierr/=MPI_SUCCESS.or.global_bad/=0.or.global_defect>1d-10*global_scale)&
+    error stop 'hybrid DG RT initial Hamiltonian reconstruction failed'
   call build_rt_dg_sparse_exchange(nproc_group_global,hybrid_state%global_count,hybrid_state%metric%fingerprint,&
     hybrid_state%metric%owned_row_ids,hybrid_state%metric%column_ids,metric_exchange,ok,message)
   if(.not.ok)error stop 'hybrid DG RT metric exchange setup failed'
@@ -327,7 +338,7 @@ subroutine project_salmon_local_rows(row_ids,grid_ids,density,local_rows,callbac
     complex(8),allocatable::row_contribution(:),reduced_row(:)
     integer(8),allocatable::local_grid_ids(:)
     integer(8)::workspace_peak
-    integer::p,j,ix,iy,iz,local_grid_count,ierr,row,owner,row_position,rank,nproc
+    integer::p,j,ix,iy,iz,local_grid_count,ierr,row,owner,row_position,rank,nproc,row_failed,global_row_failed
     logical::redistribution_ok
     character(256)::redistribution_message
     call MPI_Comm_rank(nproc_group_global,rank,ierr)
@@ -350,7 +361,7 @@ subroutine project_salmon_local_rows(row_ids,grid_ids,density,local_rows,callbac
     enddo;enddo;enddo
     rho%f=rho_s(1)%f
     call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_in,stencil,Vxc,energy%E_xc)
+    call exchange_correlation_density(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,stencil,Vxc,energy%E_xc)
     call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
     p=0
     do iz=mg%is(3),mg%ie(3);do iy=mg%is(2),mg%ie(2);do ix=mg%is(1),mg%ie(1)
@@ -362,6 +373,7 @@ subroutine project_salmon_local_rows(row_ids,grid_ids,density,local_rows,callbac
       callback_ok=.false.;callback_message='physical potential redistribution failed: '//trim(redistribution_message);return
     endif
     allocate(row_contribution(hybrid_state%global_count),reduced_row(hybrid_state%global_count));local_rows=(0d0,0d0)
+    global_row_failed=0
     do row=1,hybrid_state%global_count
       row_contribution=(0d0,0d0)
       do p=1,size(grid_ids);do j=1,hybrid_state%global_count
@@ -371,13 +383,15 @@ subroutine project_salmon_local_rows(row_ids,grid_ids,density,local_rows,callbac
       owner=mod(hybrid_state%global_count-row,nproc);reduced_row=(0d0,0d0)
       call MPI_Reduce(row_contribution,reduced_row,hybrid_state%global_count,MPI_DOUBLE_COMPLEX,MPI_SUM,owner,&
         nproc_group_global,ierr)
-      if(ierr/=MPI_SUCCESS)exit
+      row_failed=merge(0,1,ierr==MPI_SUCCESS)
+      call MPI_Allreduce(row_failed,global_row_failed,1,MPI_INTEGER,MPI_MAX,nproc_group_global,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_row_failed/=0)exit
       if(rank==owner)then
         row_position=findloc(row_ids,int(row,8),dim=1)
         if(row_position>0)local_rows(row_position,:)=reduced_row
       endif
     enddo
-    callback_ok=ierr==MPI_SUCCESS
+    callback_ok=ierr==MPI_SUCCESS.and.global_row_failed==0
     if(callback_ok)then;callback_message='';else;callback_message='local-potential projection failed';endif
 end subroutine project_salmon_local_rows
 

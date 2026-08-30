@@ -287,6 +287,20 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
     end if
   end if
 
+  if(.not.initialize_conventional_orbitals)then
+    do jspin=1,system%nspin
+      rho_s(jspin)%f=0d0
+      rt%rho0_s(jspin)%f=0d0
+      Vxc(jspin)%f=0d0
+      V_local(jspin)%f=0d0
+    enddo
+    rho%f=0d0;Vh%f=0d0;Vh_stock1%f=0d0;Vh_stock2%f=0d0
+    call nvtxEndRange
+    call timer_end(LOG_READ_GS_DATA)
+    call nvtxEndRange
+    return
+  endif
+
   if(initialize_conventional_orbitals)then
     call calc_density(system,rho_s,spsi_in,info,mg)
   else

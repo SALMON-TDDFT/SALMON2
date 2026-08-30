@@ -14,6 +14,9 @@ assert "subroutine initialization_rt_dg_hybrid" in rt_environment_source
 hybrid_branch=main_rt_source.split("if(yn_rt_dg_hybrid_continuation=='y')then",1)[1].split("endif",1)[0]
 assert "call initialization_rt_dg_hybrid" in hybrid_branch
 assert "hybrid_basis_only" not in main_rt_source
+hybrid_return=rt_environment_source.index("if(.not.initialize_conventional_orbitals)then")
+assert hybrid_return < rt_environment_source.index("spsi_in%update_zwf_overlap")
+assert hybrid_return < rt_environment_source.index("call calc_eigen_energy")
 for forbidden in ("spsi_in%zwf=(0d0,0d0)","spsi_out%zwf=(0d0,0d0)","tpsi%zwf=(0d0,0d0)"):
   assert forbidden not in rt_environment_source
 physical_callback=main_rt_source.split("subroutine project_salmon_local_rows",1)[1].split(
@@ -21,6 +24,14 @@ physical_callback=main_rt_source.split("subroutine project_salmon_local_rows",1)
 for forbidden in ("global_density", "global_potential", "projected(hybrid_state%global_count,hybrid_state%global_count)"):
   assert forbidden not in physical_callback, f"hybrid RT callback replicates production data: {forbidden}"
 assert physical_callback.count("redistribute_dg_row_owned_real_field_to_requests")>=2
+assert "call exchange_correlation_density" in physical_callback
+assert "spsi_in" not in physical_callback
+assert "global_row_failed" in physical_callback
+assert "mpi_allreduce(row_failed,global_row_failed" in physical_callback
+initial_update=main_rt_source.split("subroutine run_dg_hybrid_continuation_rt",1)[1].split(
+  "end subroutine run_dg_hybrid_continuation_rt",1)[0]
+assert "hamiltonian_values==initial_hamiltonian" not in initial_update
+assert "global_defect>1d-10*global_scale" in initial_update
 if os.environ.get("SALMON_LAPACK_LIBS"): libs=shlex.split(os.environ["SALMON_LAPACK_LIBS"])
 elif shutil.which("brew") and subprocess.run(["brew","--prefix","openblas"],capture_output=True).returncode==0:
   prefix=subprocess.check_output(["brew","--prefix","openblas"],text=True).strip();libs=[f"-L{prefix}/lib","-lopenblas"]

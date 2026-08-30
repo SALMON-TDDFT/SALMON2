@@ -818,7 +818,8 @@ contains
     call MPI_Allreduce(local_hash,global_hash,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.min_common/=max_common)goto 930
     global_hash=mix_hash(common_hash,global_hash);if(global_hash==0_int64)global_hash=1_int64
-    bad=merge(0,1,global_hash==payload%payload_fingerprint)
+    call validate_ground_state_payload(payload,bad)
+    if(global_hash/=payload%payload_fingerprint)bad=1
     call MPI_Allreduce(bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='corrupt coalesced DG ground-state fingerprint';return;endif
     payload_fingerprint=global_hash;ok=.true.;return
@@ -856,9 +857,23 @@ contains
       source%payload_fingerprint]
     call set_ground_state_header(target,l,h,f)
     allocate(target%scope_selectors,source=source%scope_selectors);allocate(target%xc_types,source=source%xc_types)
+    allocate(target%requested_ids,source=source%requested_ids);allocate(target%effective_ids,source=source%effective_ids)
+    allocate(target%added_ids,source=source%added_ids);allocate(target%closure_parent,source=source%closure_parent)
+    allocate(target%closure_reason,source=source%closure_reason);allocate(target%closure_action,source=source%closure_action)
     allocate(target%occupations,source=source%occupations);allocate(target%eigenvalues,source=source%eigenvalues)
+    allocate(target%continuation_receipt,source=source%continuation_receipt)
+    allocate(target%pseudopotential_receipt,source=source%pseudopotential_receipt)
+    allocate(target%energy_receipt,source=source%energy_receipt)
     allocate(target%symmetry_representation,source=source%symmetry_representation)
     allocate(target%row_ids(0),target%grid_ids(0),target%grid_weights(0),target%density(0))
+    allocate(target%partition_ids(0))
+    allocate(target%face_ids(0),target%face_point_ids(0),target%nonlocal_ids(0),target%nonlocal_owner(0))
+    allocate(target%face_metadata(size(source%face_metadata,1),0),target%face_normals(size(source%face_normals,1),0),&
+      target%face_weights(0),target%face_values(size(source%face_values,1),0),&
+      target%interface_observables(size(source%interface_observables,1),0),&
+      target%nonlocal_values(size(source%nonlocal_values,1),0),target%face_offsets(1),target%face_value_offsets(1),&
+      target%face_basis_ids(0))
+    target%face_offsets=1;target%face_value_offsets=1
     allocate(target%metric_rows(0,source%global_count),target%kinetic_rows(0,source%global_count),&
       target%nonlocal_rows(0,source%global_count),target%local_rows(0,source%global_count),&
       target%sipg_rows(0,source%global_count),target%hamiltonian_rows(0,source%global_count),&
@@ -872,6 +887,16 @@ contains
     type(s_rt_dg_hybrid_ground_state_payload),intent(inout)::target
     type(s_rt_dg_hybrid_ground_state_payload),intent(in)::source
     call append_i64(target%row_ids,source%row_ids);call append_i64(target%grid_ids,source%grid_ids)
+    call append_i1(target%partition_ids,source%partition_ids)
+    call append_i64(target%face_ids,source%face_ids)
+    call append_i64(target%nonlocal_ids,source%nonlocal_ids);call append_i1(target%nonlocal_owner,source%nonlocal_owner)
+    call append_i2_columns(target%face_metadata,source%face_metadata)
+    call append_r2_columns(target%face_normals,source%face_normals);call append_r1(target%face_weights,source%face_weights)
+    call append_z2_columns(target%face_values,source%face_values)
+    call append_z2_columns(target%interface_observables,source%interface_observables)
+    call append_z2_columns(target%nonlocal_values,source%nonlocal_values)
+    call append_csr_i64(target%face_offsets,target%face_point_ids,source%face_offsets,source%face_point_ids)
+    call append_csr(target%face_value_offsets,target%face_basis_ids,source%face_value_offsets,source%face_basis_ids)
     call append_r1(target%grid_weights,source%grid_weights);call append_r1(target%density,source%density)
     call append_z2_rows(target%metric_rows,source%metric_rows);call append_z2_rows(target%kinetic_rows,source%kinetic_rows)
     call append_z2_rows(target%nonlocal_rows,source%nonlocal_rows);call append_z2_rows(target%local_rows,source%local_rows)
@@ -884,6 +909,33 @@ contains
     subroutine append_i64(a,b)
       integer(int64),allocatable,intent(inout)::a(:);integer(int64),intent(in)::b(:);integer(int64),allocatable::t(:)
       allocate(t(size(a)+size(b)));t(:size(a))=a;t(size(a)+1:)=b;call move_alloc(t,a)
+    end subroutine
+    subroutine append_i1(a,b)
+      integer,allocatable,intent(inout)::a(:);integer,intent(in)::b(:);integer,allocatable::t(:)
+      allocate(t(size(a)+size(b)));t(:size(a))=a;t(size(a)+1:)=b;call move_alloc(t,a)
+    end subroutine
+    subroutine append_i2_columns(a,b)
+      integer,allocatable,intent(inout)::a(:,:);integer,intent(in)::b(:,:);integer,allocatable::t(:,:)
+      allocate(t(size(a,1),size(a,2)+size(b,2)));t(:,:size(a,2))=a;t(:,size(a,2)+1:)=b;call move_alloc(t,a)
+    end subroutine
+    subroutine append_r2_columns(a,b)
+      real(real64),allocatable,intent(inout)::a(:,:);real(real64),intent(in)::b(:,:);real(real64),allocatable::t(:,:)
+      allocate(t(size(a,1),size(a,2)+size(b,2)));t(:,:size(a,2))=a;t(:,size(a,2)+1:)=b;call move_alloc(t,a)
+    end subroutine
+    subroutine append_csr_i64(offsets,columns,new_offsets,new_columns)
+      integer,allocatable,intent(inout)::offsets(:)
+      integer(int64),allocatable,intent(inout)::columns(:)
+      integer,intent(in)::new_offsets(:)
+      integer(int64),intent(in)::new_columns(:)
+      integer,allocatable::next_offsets(:)
+      integer(int64),allocatable::next_columns(:)
+      integer::old_rows,old_columns
+      old_rows=size(offsets)-1;old_columns=size(columns)
+      allocate(next_offsets(old_rows+size(new_offsets)),next_columns(old_columns+size(new_columns)))
+      next_offsets(:old_rows+1)=offsets
+      next_offsets(old_rows+2:)=old_columns+new_offsets(2:)
+      next_columns(:old_columns)=columns;next_columns(old_columns+1:)=new_columns
+      call move_alloc(next_offsets,offsets);call move_alloc(next_columns,columns)
     end subroutine
     subroutine append_r1(a,b)
       real(real64),allocatable,intent(inout)::a(:);real(real64),intent(in)::b(:);real(real64),allocatable::t(:)
