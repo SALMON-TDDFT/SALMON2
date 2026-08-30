@@ -23,8 +23,10 @@ module dg_hybrid_windowed_pw_types
   type,public::s_dg_hybrid_production_selection
     logical::analysis_complete=.false.
     logical::identity_only=.false.
+    logical::lcfo_symmetry_deferred=.false.
     integer::operation_count=0
     integer(8)::analysis_fingerprint=0_8
+    integer(8)::wannier_symmetry_fingerprint=0_8
     integer(8)::window_fingerprint=0_8
     integer(8)::packet_fingerprint=0_8
     integer,allocatable::fragment_action(:,:)

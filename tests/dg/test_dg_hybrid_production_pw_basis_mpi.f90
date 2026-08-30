@@ -4,18 +4,20 @@ program test_dg_hybrid_production_pw_basis_mpi
   use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog,s_dg_hybrid_production_selection
   use dg_hybrid_windowed_pw_basis,only:materialize_dg_hybrid_windowed_pw_columns
   use dg_hybrid_production_pw_basis,only:build_dg_hybrid_production_pw_basis,&
-    analyze_dg_hybrid_production_selection,freeze_dg_hybrid_production_selection
+    analyze_dg_hybrid_production_selection,analyze_dg_hybrid_lcfo_selection,&
+    freeze_dg_hybrid_production_selection
   use dg_hybrid_continuation_state,only:close_dg_hybrid_selection
 #ifdef USE_MPI
   use mpi
 #endif
   implicit none
   integer::comm,rank,nproc,ierr,nowned,i,p
-  integer,allocatable::fragment_ids(:),core_fragment_ids(:),row_action(:,:),root_row_action(:,:),&
-    root_core_fragment_ids(:)
+  integer,allocatable::fragment_ids(:),core_fragment_ids(:),row_action(:,:),mixed_row_action(:,:),&
+    root_row_action(:,:),root_core_fragment_ids(:)
   integer(int64),allocatable::box_ids(:),core_ids(:),root_core_ids(:)
   real(real64),allocatable::box_windows(:,:),coordinates(:,:),windows(:,:),g_vectors(:,:),root_coordinates(:,:)
   real(real64)::reciprocal_lattice(3,3),reciprocal_rotation(3,3,2)
+  real(real64)::mixed_reciprocal_rotation(3,3,3)
   complex(real64),allocatable::tile(:,:)
   type(s_dg_hybrid_basis_catalog)::catalog
   type(s_dg_hybrid_production_selection)::selection
@@ -159,20 +161,30 @@ program test_dg_hybrid_production_pw_basis_mpi
     call require(.not.ok.and.index(message,'rank')>0,&
       'production freeze accepted rank-dependent effective-ID ordering')
   endif
-  block
-    integer::bad_row_action(4,3),axis
-    real(real64)::bad_reciprocal_rotation(3,3,3)
-    bad_row_action(:,1:2)=row_action
-    bad_row_action(:,3)=[1,3,2,4]
-    bad_reciprocal_rotation(:,:,1:2)=reciprocal_rotation
-    bad_reciprocal_rotation(:,:,3)=0d0
-    do axis=1,3;bad_reciprocal_rotation(axis,axis,3)=1d0;enddo
-    call analyze_dg_hybrid_production_selection(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
-      core_fragment_ids,coordinates,bad_row_action,reciprocal_lattice,bad_reciprocal_rotation,&
-      0d0,2,1d-12,windows,g_vectors,selection,workspace,fingerprint,ok,message)
-    call require(.not.ok.and.index(message,'whole fragments')>0,&
-      'authoritative production analysis silently downgraded a known physical group')
-  end block
+  allocate(mixed_row_action(4,3));mixed_row_action(:,1:2)=row_action
+  mixed_row_action(:,3)=[1,3,2,4]
+  mixed_reciprocal_rotation(:,:,1:2)=reciprocal_rotation
+  mixed_reciprocal_rotation(:,:,3)=reciprocal_rotation(:,:,1)
+  call analyze_dg_hybrid_production_selection(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
+    core_fragment_ids,coordinates,mixed_row_action,reciprocal_lattice,mixed_reciprocal_rotation,0d0,2,1d-12,&
+    windows,g_vectors,selection,workspace,fingerprint,ok,message)
+  call require(.not.ok.and.index(message,'whole fragments')>0,&
+    'authoritative production analysis silently downgraded a known physical group')
+  call analyze_dg_hybrid_lcfo_selection(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
+    core_fragment_ids,coordinates,mixed_row_action,reciprocal_lattice,mixed_reciprocal_rotation,&
+    701_int64,0d0,2,1d-12,windows,g_vectors,selection,workspace,fingerprint,ok,message)
+  call require(ok,'LCFO-deferred production selection rejected split fragment action: '//trim(message))
+  call require(selection%lcfo_symmetry_deferred,'LCFO deferral provenance is missing')
+  call require(selection%wannier_symmetry_fingerprint==701_int64,'Wannier provenance was not retained')
+  call require(selection%operation_count==1.and.selection%identity_only,&
+    'fragment-local bookkeeping must use one explicit identity action')
+  call require(all(selection%requested_packet_ids==selection%packet_ids),&
+    'LCFO-deferred preparation must retain the complete PW packet catalog')
+  call analyze_dg_hybrid_lcfo_selection(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
+    core_fragment_ids,coordinates,mixed_row_action,reciprocal_lattice,mixed_reciprocal_rotation,&
+    0_int64,0d0,2,1d-12,windows,g_vectors,selection,workspace,fingerprint,ok,message)
+  call require(.not.ok.and.index(message,'Wannier symmetry provenance')>0,&
+    'LCFO-deferred production selection accepted missing Wannier symmetry provenance')
   if(rank==0)write(*,'(a,i0,a,i0)')'PRODUCTION_PW ranks=',nproc,' fingerprint=',fingerprint
   if(rank==0)write(*,'(a,i0,a)')'PASS hybrid production PW basis on ',nproc,' ranks'
 #ifdef USE_MPI

@@ -11,7 +11,7 @@ module dg_hybrid_production_pw_basis
   implicit none
   private
   public::build_dg_hybrid_production_pw_basis,analyze_dg_hybrid_production_selection,&
-    freeze_dg_hybrid_production_selection
+    analyze_dg_hybrid_lcfo_selection,freeze_dg_hybrid_production_selection
 contains
   subroutine analyze_dg_hybrid_production_selection(comm,global_point_count,fragment_count,&
       fragment_ids,box_ids,box_windows,core_ids,core_fragment_ids,coordinates,row_action,&
@@ -108,6 +108,57 @@ contains
     ok=.true.
   end subroutine analyze_dg_hybrid_production_selection
 
+  subroutine analyze_dg_hybrid_lcfo_selection(comm,global_point_count,fragment_count,&
+      fragment_ids,box_ids,box_windows,core_ids,core_fragment_ids,coordinates,row_action,&
+      reciprocal_lattice,reciprocal_rotation,wannier_symmetry_fingerprint,cutoff,tile_width,&
+      tolerance,windows,g_vectors,selection,workspace_peak_bytes,fingerprint,ok,message)
+    integer,intent(in)::comm,global_point_count,fragment_count,fragment_ids(:),core_fragment_ids(:)
+    integer(int64),intent(in)::box_ids(:),core_ids(:),wannier_symmetry_fingerprint
+    real(real64),intent(in)::box_windows(:,:),coordinates(:,:),reciprocal_lattice(3,3),&
+      reciprocal_rotation(:,:,:),cutoff,tolerance
+    integer,intent(in)::row_action(:,:),tile_width
+    real(real64),allocatable,intent(out)::windows(:,:),g_vectors(:,:)
+    type(s_dg_hybrid_production_selection),intent(out)::selection
+    integer(int64),intent(out)::workspace_peak_bytes,fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer,allocatable::identity_row_action(:,:)
+    real(real64)::identity_reciprocal_rotation(3,3,1)
+    integer::i,ierr,local_bad,global_bad
+    integer(int64)::minimum_fingerprint,maximum_fingerprint
+
+    ok=.false.;message='';workspace_peak_bytes=0_int64;fingerprint=0_int64
+    local_bad=merge(0,1,wannier_symmetry_fingerprint/=0_int64)
+#ifdef USE_MPI
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier symmetry provenance validation failed';return;endif
+    call MPI_Allreduce(wannier_symmetry_fingerprint,minimum_fingerprint,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier symmetry provenance rank agreement failed';return;endif
+    call MPI_Allreduce(wannier_symmetry_fingerprint,maximum_fingerprint,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_fingerprint/=maximum_fingerprint)then
+      message='Wannier symmetry provenance rank agreement failed';return
+    endif
+#else
+    global_bad=local_bad
+#endif
+    if(global_bad/=0)then;message='Wannier symmetry provenance is missing';return;endif
+    allocate(identity_row_action(size(core_ids),1))
+    identity_row_action(:,1)=int(core_ids)
+    identity_reciprocal_rotation=0d0
+    do i=1,3;identity_reciprocal_rotation(i,i,1)=1d0;enddo
+    call analyze_dg_hybrid_production_selection(comm,global_point_count,fragment_count,fragment_ids,&
+      box_ids,box_windows,core_ids,core_fragment_ids,coordinates,identity_row_action,reciprocal_lattice,&
+      identity_reciprocal_rotation,cutoff,tile_width,tolerance,windows,g_vectors,selection,&
+      workspace_peak_bytes,fingerprint,ok,message)
+    if(.not.ok)return
+    if(allocated(selection%requested_packet_ids))deallocate(selection%requested_packet_ids)
+    allocate(selection%requested_packet_ids,source=selection%packet_ids)
+    selection%lcfo_symmetry_deferred=.true.
+    selection%wannier_symmetry_fingerprint=wannier_symmetry_fingerprint
+    fingerprint=production_selection_fingerprint(selection)
+    selection%analysis_fingerprint=fingerprint
+  end subroutine analyze_dg_hybrid_lcfo_selection
+
   subroutine freeze_dg_hybrid_production_selection(comm,selection,effective_ids,catalog,fingerprint,ok,message)
     integer,intent(in)::comm,effective_ids(:)
     type(s_dg_hybrid_production_selection),intent(in)::selection
@@ -136,6 +187,7 @@ contains
     enddo
 #endif
     if(.not.selection%analysis_complete.or.selection%analysis_fingerprint==0_int64.or.&
+      (selection%lcfo_symmetry_deferred.and.selection%wannier_symmetry_fingerprint==0_int64).or.&
       size(effective_ids)<1.or..not.allocated(selection%packet_ids).or.&
       .not.allocated(selection%requested_packet_ids).or.&
       .not.allocated(selection%packet_action).or..not.allocated(selection%packets).or.&
@@ -229,6 +281,8 @@ contains
     fingerprint=ieor(ishftc(fingerprint,7),selection%packet_fingerprint)
     fingerprint=ieor(ishftc(fingerprint,7),int(selection%operation_count,int64))
     fingerprint=ieor(ishftc(fingerprint,7),merge(1_int64,0_int64,selection%identity_only))
+    fingerprint=ieor(ishftc(fingerprint,7),merge(1_int64,0_int64,selection%lcfo_symmetry_deferred))
+    fingerprint=ieor(ishftc(fingerprint,7),selection%wannier_symmetry_fingerprint)
     do op=1,selection%operation_count
       do i=1,size(selection%fragment_action,1)
         fingerprint=ieor(ishftc(fingerprint,7),int(selection%fragment_action(i,op),int64))
