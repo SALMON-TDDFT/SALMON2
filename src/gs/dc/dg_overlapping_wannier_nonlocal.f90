@@ -67,10 +67,10 @@ contains
     complex(real64),allocatable,optional,intent(out)::complete_overlap(:,:)
 #ifdef USE_MPI
     integer::rank,nproc,ierr,r,p,q,total_records,nowned,unique_count,local_bad,global_bad,&
-      target,local_unique_count,slot,key_index
+      target,local_unique_count,slot,key_index,request_count
     integer,parameter::nonlocal_overlap_tag=310
     integer,allocatable::counts(:),displacements(:),all_atom_ids(:),all_ordinals(:),&
-      record_order(:),record_key(:),owner_ranks(:),local_keys(:)
+      record_order(:),record_key(:),owner_ranks(:),local_keys(:),requests(:),statuses(:,:)
     real(real64),allocatable::all_matrix_strength(:),all_action_strength(:)
     complex(real64),allocatable::local_key_overlap(:,:),owner_overlap(:,:)
     logical::matched,target_supports
@@ -167,6 +167,7 @@ contains
     endif
     allocate(projector_ids(nowned),owned_matrix_strength(nowned),owned_overlap(nwann,nowned))
     allocate(local_key_overlap(nwann,unique_count),owner_overlap(nwann,unique_count))
+    allocate(requests(max(1,nproc)),statuses(MPI_STATUS_SIZE,max(1,nproc)))
     local_key_overlap=(0d0,0d0);owner_overlap=(0d0,0d0)
     do p=1,size(atom_ids)
       q=record_key(displacements(rank+1)+p);local_key_overlap(:,q)=local_key_overlap(:,q)+partial_overlap(:,p)
@@ -189,19 +190,31 @@ contains
       call MPI_Reduce(local_key_overlap(:,q),owner_overlap(:,q),nwann,MPI_DOUBLE_COMPLEX,MPI_SUM,&
         owner_ranks(q),comm,ierr)
       if(ierr/=MPI_SUCCESS)local_bad=1
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='nonlocal projector reduction failed';return;endif
+      request_count=0
       do target=0,nproc-1
         target_supports=any(record_key(displacements(target+1)+1:displacements(target+1)+counts(target+1))==q)
         if(.not.target_supports.or.target==owner_ranks(q))cycle
-        if(rank==owner_ranks(q))then
-          call MPI_Send(owner_overlap(:,q),nwann,MPI_DOUBLE_COMPLEX,target,nonlocal_overlap_tag,comm,ierr)
+        if(rank==target)then
+          request_count=request_count+1
+          call MPI_Irecv(owner_overlap(:,q),nwann,MPI_DOUBLE_COMPLEX,owner_ranks(q),nonlocal_overlap_tag,&
+            comm,requests(request_count),ierr)
           if(ierr/=MPI_SUCCESS)local_bad=1
         endif
-        if(rank==target)then
-          call MPI_Recv(owner_overlap(:,q),nwann,MPI_DOUBLE_COMPLEX,owner_ranks(q),nonlocal_overlap_tag,&
-            comm,MPI_STATUS_IGNORE,ierr)
+        if(rank==owner_ranks(q))then
+          request_count=request_count+1
+          call MPI_Isend(owner_overlap(:,q),nwann,MPI_DOUBLE_COMPLEX,target,nonlocal_overlap_tag,&
+            comm,requests(request_count),ierr)
           if(ierr/=MPI_SUCCESS)local_bad=1
         endif
       enddo
+      if(request_count>0)then
+        call MPI_Waitall(request_count,requests,statuses,ierr)
+        if(ierr/=MPI_SUCCESS)local_bad=1
+      endif
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='nonlocal projector distribution failed';return;endif
       if(owner_ranks(q)/=rank)cycle
       nowned=nowned+1;projector_ids(nowned)=int(q,int64)
       owned_matrix_strength(nowned)=all_matrix_strength(p);owned_overlap(:,nowned)=owner_overlap(:,q)
@@ -215,7 +228,7 @@ contains
       if(present(complete_overlap))complete_overlap(:,slot)=owner_overlap(:,q)
     enddo
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(global_bad/=0)then;message='fragment copies disagree on nonlocal projector strength';return;end if
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='fragment copies disagree on nonlocal projector strength';return;end if
     ok=.true.;message=''
 #else
     ok=.false.;message='fragment projector overlap collection requires MPI';expected_projector_count=0

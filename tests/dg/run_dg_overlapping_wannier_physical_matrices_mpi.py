@@ -18,6 +18,8 @@ assert "mpi_allgatherv(partial_overlap" not in collector
 assert "do q=1,p-1" not in collector
 assert "310+q" not in collector
 assert "nonlocal_overlap_tag" in collector
+assert "mpi_send(" not in collector and "mpi_recv(" not in collector
+assert "mpi_isend" in collector and "mpi_irecv" in collector and "mpi_waitall" in collector
 with tempfile.TemporaryDirectory(prefix="ow-physical-") as name:
     build=Path(name);(build/"config.h").write_text("")
     env=os.environ.copy();env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")
