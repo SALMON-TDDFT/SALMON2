@@ -25,8 +25,17 @@ assert "mpi_allreduce" not in materialization_body, (
 interior_body = production_source.split(
     "subroutine materialize_dg_hybrid_production_interior", 1
 )[1].split("end subroutine materialize_dg_hybrid_production_interior", 1)[0]
+assert "kinetic_action" in interior_body and "5*nrequest" in interior_body, (
+    "interior response does not pack value, three gradients, and kinetic action together"
+)
+assert "do basis=1,size(effective_ids)" not in interior_body, (
+    "interior communication is still repeated basis by basis"
+)
 assert "mpi_allreduce(values" not in interior_body and "mpi_allreduce(gradients" not in interior_body, (
     "production interior basis data are replicated by a global reduction"
+)
+assert "subroutine materialize_dg_hybrid_production_kinetic_action" not in production_source, (
+    "obsolete separate kinetic materializer was retained"
 )
 state_body = production_source.split(
     "subroutine reconstruct_dg_hybrid_production_interface_state", 1

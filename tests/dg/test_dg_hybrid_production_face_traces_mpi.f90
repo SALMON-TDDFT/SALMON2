@@ -2,18 +2,20 @@
 program test_dg_hybrid_production_face_traces_mpi
   use mpi,only:MPI_Allreduce,MPI_Comm_rank,MPI_Comm_size,MPI_COMM_WORLD,MPI_Finalize,MPI_Init,&
     MPI_DOUBLE_PRECISION,MPI_INTEGER,MPI_MAX,MPI_SUCCESS,MPI_SUM
+  use mpi,only:MPI_IN_PLACE
   use,intrinsic::iso_fortran_env,only:int64,real64
   use dg_hybrid_production_face_traces,only:s_dg_hybrid_production_face_trace,&
     build_dg_hybrid_production_face_trace,assemble_dg_hybrid_production_face,&
     validate_dg_hybrid_production_face_collection,materialize_dg_hybrid_production_face_collection,&
     assemble_dg_hybrid_production_interface_rows,freeze_dg_hybrid_basis_directory,&
-    materialize_dg_hybrid_production_interior,materialize_dg_hybrid_production_kinetic_action,&
+    materialize_dg_hybrid_production_interior,&
     reconstruct_dg_hybrid_production_interface_state
   use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
   use dg_hybrid_sipg_operator,only:s_dg_hybrid_sipg_face_operator
   use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows
   implicit none
-  integer::icomm,id_rank,nproc,ierr
+  integer::icomm,id_rank,nproc,ierr,request_count,response_count,global_request_count,global_response_count,&
+    expected_request_count
   integer,allocatable::basis_owner(:),basis_fragment(:)
   integer(int64)::point_ids(2)
   real(real64)::weights(2),normal(3)
@@ -87,20 +89,26 @@ program test_dg_hybrid_production_face_traces_mpi
   enddo;enddo
   do p=1,2
     fragment_bases(p)%fragment_id=merge(p,0,mod(p-1,nproc)==id_rank);fragment_bases(p)%generation=1
-    allocate(fragment_bases(p)%global_ids(merge(1,0,mod(p-1,nproc)==id_rank)),&
-      fragment_bases(p)%sector(merge(1,0,mod(p-1,nproc)==id_rank)),&
+    allocate(fragment_bases(p)%global_ids(merge(merge(2,1,p==1),0,mod(p-1,nproc)==id_rank)),&
+      fragment_bases(p)%sector(merge(merge(2,1,p==1),0,mod(p-1,nproc)==id_rank)),&
       fragment_bases(p)%buffer_point_ids(8),&
-      fragment_bases(p)%buffer_values(8,merge(1,0,mod(p-1,nproc)==id_rank)))
+      fragment_bases(p)%buffer_values(8,merge(merge(2,1,p==1),0,mod(p-1,nproc)==id_rank)))
     if(mod(p-1,nproc)==id_rank)then
-      fragment_bases(p)%global_ids=[int(p,int64)];fragment_bases(p)%sector=[1]
+      if(p==1)then
+        fragment_bases(p)%global_ids=[1_int64,3_int64];fragment_bases(p)%sector=[1,1]
+        fragment_bases(p)%buffer_values(:,2)=2d0*analytic_values(:,p)
+      else
+        fragment_bases(p)%global_ids=[2_int64];fragment_bases(p)%sector=[1]
+      endif
       fragment_bases(p)%buffer_values(:,1)=analytic_values(:,p)
     endif
     fragment_bases(p)%buffer_point_ids=all_point_ids
     fragment_bases(p)%provenance_fingerprint=int(100+p,int64)
   enddo
-  call freeze_dg_hybrid_basis_directory(icomm,fragment_bases,[1,2],basis_owner,basis_fragment,ok,message)
+  call freeze_dg_hybrid_basis_directory(icomm,fragment_bases,[1,2,3],basis_owner,basis_fragment,ok,message)
   call require(ok,trim(message))
-  call require(all(basis_owner==[mod(0,nproc),mod(1,nproc)]).and.all(basis_fragment==[1,2]),&
+  call require(all(basis_owner==[mod(0,nproc),mod(1,nproc),mod(0,nproc)]).and.&
+    all(basis_fragment==[1,2,1]),&
     'frozen basis owner or fragment directory is incorrect')
   allocate(interior_ids(count([(mod(p-1,nproc)==id_rank,p=1,8)])),&
     interior_fragment(count([(mod(p-1,nproc)==id_rank,p=1,8)])))
@@ -109,13 +117,18 @@ program test_dg_hybrid_production_face_traces_mpi
     interior_fragment(p)=merge(1,2,modulo(int(interior_ids(p)-1_int64),4)==0)
   enddo
   call materialize_dg_hybrid_production_interior(icomm,grid_size,reshape([0.5d0,0.25d0,0.125d0],[1,3]),&
-    fragment_bases,basis_owner,basis_fragment,[1,2],interior_ids,interior_fragment,&
-    interior_values,interior_gradients,ok,message)
+    0.75d0,reshape([0.5d0,0.25d0,0.125d0],[1,3]),fragment_bases,basis_owner,basis_fragment,&
+    [1,2,3],interior_ids,interior_fragment,interior_values,interior_gradients,interior_kinetic_action,&
+    ok,message,request_count,response_count)
   call require(ok,trim(message))
-  call materialize_dg_hybrid_production_kinetic_action(icomm,grid_size,0.75d0,&
-    reshape([0.5d0,0.25d0,0.125d0],[1,3]),fragment_bases,basis_owner,basis_fragment,[1,2],&
-    interior_ids,interior_fragment,interior_kinetic_action,ok,message)
-  call require(ok,trim(message))
+  call MPI_Allreduce(request_count,global_request_count,1,MPI_INTEGER,MPI_SUM,icomm,ierr)
+  call MPI_Allreduce(response_count,global_response_count,1,MPI_INTEGER,MPI_SUM,icomm,ierr)
+  expected_request_count=0
+  if(any(interior_fragment==1).and.id_rank/=basis_owner(1))expected_request_count=expected_request_count+1
+  if(any(interior_fragment==2).and.id_rank/=basis_owner(2))expected_request_count=expected_request_count+1
+  call MPI_Allreduce(MPI_IN_PLACE,expected_request_count,1,MPI_INTEGER,MPI_SUM,icomm,ierr)
+  call require(global_request_count==expected_request_count.and.global_response_count==expected_request_count,&
+    'grouped materialization did not exchange each destination point-ID set exactly once')
   do p=1,size(interior_ids)
     x=modulo(int(interior_ids(p)-1_int64),4);y=int((interior_ids(p)-1_int64)/4_int64)
     call require(abs(interior_values(interior_fragment(p),p)-analytic_values(int(interior_ids(p)),&
@@ -136,12 +149,14 @@ program test_dg_hybrid_production_face_traces_mpi
     call require(abs(interior_kinetic_action(3-interior_fragment(p),p))<1d-14,&
       'foreign-fragment kinetic action leaked into broken volume')
   enddo
+  call require(maxval(abs(interior_values(3,:)-2d0*interior_values(1,:)))<1d-13,&
+    'multiple columns in one fragment were not returned in one grouped response')
   allocate(interior_weights(size(interior_ids)),interior_potential(size(interior_ids)))
   interior_weights=0.25d0;interior_potential=1d0
   allocate(owned_row_ids(count([(mod(p-1,nproc)==id_rank,p=1,2)])))
   owned_row_ids=pack([1_int64,2_int64],[(mod(p-1,nproc)==id_rank,p=1,2)])
-  call assemble_dg_hybrid_broken_volume_rows(icomm,2,owned_row_ids,basis_fragment,interior_ids,&
-    interior_fragment,interior_weights,interior_values,interior_gradients,interior_potential,&
+  call assemble_dg_hybrid_broken_volume_rows(icomm,2,owned_row_ids,basis_fragment(1:2),interior_ids,&
+    interior_fragment,interior_weights,interior_values(1:2,:),interior_gradients(:,1:2,:),interior_potential,&
     production_kinetic,production_local,volume_diagnostics,ok,message)
   call require(ok,trim(message))
   volume_blocks_ok=.true.
@@ -150,6 +165,13 @@ program test_dg_hybrid_production_face_traces_mpi
       abs(production_local(p,3-int(owned_row_ids(p))))<1d-14
   enddo
   call require(volume_blocks_ok,'production interior materialization created a volume cross-fragment block')
+  if(size(fragment_bases(1)%global_ids)>0)then
+    fragment_bases(1)%global_ids=fragment_bases(1)%global_ids(1:1)
+    fragment_bases(1)%sector=fragment_bases(1)%sector(1:1)
+    fragment_bases(1)%buffer_values=fragment_bases(1)%buffer_values(:,1:1)
+  endif
+  call freeze_dg_hybrid_basis_directory(icomm,fragment_bases,[1,2],basis_owner,basis_fragment,ok,message)
+  call require(ok,trim(message))
   call materialize_dg_hybrid_production_face_collection(icomm,origins,sizes,grid_size,[1d0,2d0,3d0],&
     reshape([0.5d0,0.25d0,0.125d0],[1,3]),fragment_bases,basis_owner,basis_fragment,[1,2],&
     production_faces,ok,message)

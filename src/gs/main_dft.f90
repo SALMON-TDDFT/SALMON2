@@ -114,7 +114,7 @@ use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
 use dg_hybrid_production_face_traces,only:s_dg_hybrid_production_face_trace,&
   freeze_dg_hybrid_basis_directory,materialize_dg_hybrid_production_face_collection,&
   assemble_dg_hybrid_production_interface_rows,materialize_dg_hybrid_production_interior,&
-  materialize_dg_hybrid_production_kinetic_action,reconstruct_dg_hybrid_production_interface_state
+  reconstruct_dg_hybrid_production_interface_state
 use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows
 use dg_hybrid_variational_payload,only:s_dg_hybrid_fixed_payload,s_dg_hybrid_variational_iterate,&
   freeze_dg_hybrid_variational_payload,compose_dg_hybrid_variational_hamiltonian
@@ -2625,17 +2625,12 @@ contains
         dg_hybrid_interior_weights=system%hvol
         dg_hybrid_unit_local_potential=1d0
         call materialize_dg_hybrid_production_interior(dc%icomm_tot,dc%lg_tot%num,stencil%coef_nab,&
+          stencil%coef_lap0,stencil%coef_lap,&
           divided_fragment_bases,divided_basis_owner,divided_basis_fragment,divided_effective_ids,&
           ow_core_ids,dg_hybrid_interior_fragment,dg_hybrid_interior_values,dg_hybrid_interior_gradients,&
-          ok,message)
-        if(.not.ok)write(0,'(a)')trim(message)
-        if(.not.ok)error stop 'divided Hybrid production interior materialization failed'
-        call materialize_dg_hybrid_production_kinetic_action(dc%icomm_tot,dc%lg_tot%num,&
-          stencil%coef_lap0,stencil%coef_lap,divided_fragment_bases,divided_basis_owner,&
-          divided_basis_fragment,divided_effective_ids,ow_core_ids,dg_hybrid_interior_fragment,&
           dg_hybrid_interior_kinetic_action,ok,message)
         if(.not.ok)write(0,'(a)')trim(message)
-        if(.not.ok)error stop 'divided Hybrid strong kinetic-action materialization failed'
+        if(.not.ok)error stop 'divided Hybrid production interior materialization failed'
         call assemble_dg_hybrid_broken_volume_rows(dc%icomm_tot,size(divided_effective_ids),&
           divided_lcfo_row_ids,divided_basis_fragment,ow_core_ids,dg_hybrid_interior_fragment,&
           dg_hybrid_interior_weights,dg_hybrid_interior_values,dg_hybrid_interior_gradients,&

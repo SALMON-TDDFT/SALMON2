@@ -27,7 +27,7 @@ module dg_hybrid_production_face_traces
   public::build_dg_hybrid_production_face_trace,assemble_dg_hybrid_production_face,&
     validate_dg_hybrid_production_face_collection,materialize_dg_hybrid_production_face_collection,&
     assemble_dg_hybrid_production_interface_rows,freeze_dg_hybrid_basis_directory,&
-    materialize_dg_hybrid_production_interior,materialize_dg_hybrid_production_kinetic_action,&
+    materialize_dg_hybrid_production_interior,&
     reconstruct_dg_hybrid_production_interface_state
 contains
   subroutine freeze_dg_hybrid_basis_directory(icomm,bases,effective_ids,basis_owner,basis_fragment,ok,message)
@@ -68,203 +68,148 @@ contains
 #endif
   end subroutine freeze_dg_hybrid_basis_directory
 
-  subroutine materialize_dg_hybrid_production_interior(icomm,global_size,coef_nab,bases,basis_owner,&
-      basis_fragment,effective_ids,interior_ids,interior_fragment,values,gradients,ok,message)
+  subroutine materialize_dg_hybrid_production_interior(icomm,global_size,coef_nab,coef_lap0,coef_lap,bases,&
+      basis_owner,basis_fragment,effective_ids,interior_ids,interior_fragment,values,gradients,kinetic_action,&
+      ok,message,request_count,response_count)
     integer,intent(in)::icomm,global_size(3),basis_owner(:),basis_fragment(:),effective_ids(:),interior_fragment(:)
-    real(real64),intent(in)::coef_nab(:,:)
+    real(real64),intent(in)::coef_nab(:,:),coef_lap0,coef_lap(:,:)
     type(s_dg_hybrid_fragment_basis),intent(in)::bases(:)
     integer(int64),intent(in)::interior_ids(:)
-    complex(real64),allocatable,intent(out)::values(:,:),gradients(:,:,:)
+    complex(real64),allocatable,intent(out)::values(:,:),gradients(:,:,:),kinetic_action(:,:)
     logical,intent(out)::ok
     character(*),intent(out)::message
+    integer,optional,intent(out)::request_count,response_count
 #ifdef USE_MPI
     complex(real64),allocatable::packed(:),received(:)
     integer(int64),allocatable::requested_ids(:)
-    integer::rank,nproc,ierr,local_bad,global_bad,basis,owner,fragment,peer,nrequest,remote_count,&
-      column,p,axis,position(3)
+    integer,allocatable::group_indices(:),group_columns(:)
+    integer::rank,nproc,ierr,local_bad,global_bad,owner,fragment,peer,nrequest,remote_count,&
+      column,p,axis,position(3),i,j,group_size,slot,local_requests,local_responses
     logical::sample_ok
-    ok=.false.;message='';local_bad=0
+    ok=.false.;message='';local_bad=0;local_requests=0;local_responses=0
+    if(present(request_count))request_count=0
+    if(present(response_count))response_count=0
     call MPI_Comm_rank(icomm,rank,ierr);if(ierr/=MPI_SUCCESS)return
     call MPI_Comm_size(icomm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
-    if(any(global_size<=0).or.size(coef_nab,1)<1.or.size(coef_nab,2)/=3.or.size(bases)<1.or.&
+    if(any(global_size<=0).or.size(coef_nab,1)<1.or.size(coef_nab,2)/=3.or.&
+        size(coef_lap,1)<1.or.size(coef_lap,2)/=3.or.size(bases)<1.or.&
         size(basis_owner)/=size(effective_ids).or.size(basis_fragment)/=size(effective_ids).or.&
         size(interior_fragment)/=size(interior_ids).or.any(effective_ids<=0).or.any(interior_ids<=0_int64).or.&
         any(interior_ids>product(int(global_size,int64))).or.any(interior_fragment<1).or.&
         any(interior_fragment>size(bases)).or.any(basis_owner<0).or.any(basis_owner>=nproc).or.&
-        any(basis_fragment<1).or.any(basis_fragment>size(bases)).or..not.all(ieee_is_finite(coef_nab)))local_bad=1
+        any(basis_fragment<1).or.any(basis_fragment>size(bases)).or..not.all(ieee_is_finite(coef_nab)).or.&
+        .not.ieee_is_finite(coef_lap0).or..not.all(ieee_is_finite(coef_lap)))local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid production interior materialization contract';return;endif
-    allocate(values(size(effective_ids),size(interior_ids)),gradients(3,size(effective_ids),size(interior_ids)))
-    values=(0d0,0d0);gradients=(0d0,0d0)
+    allocate(values(size(effective_ids),size(interior_ids)),gradients(3,size(effective_ids),size(interior_ids)),&
+      kinetic_action(size(effective_ids),size(interior_ids)))
+    values=(0d0,0d0);gradients=(0d0,0d0);kinetic_action=(0d0,0d0)
     local_bad=0
-    do basis=1,size(effective_ids)
-      if(rank/=basis_owner(basis))cycle
-      fragment=basis_fragment(basis)
-      if(findloc(bases(fragment)%global_ids,int(effective_ids(basis),int64),dim=1)<=0)local_bad=1
+    do i=1,size(effective_ids)
+      if(rank/=basis_owner(i))cycle
+      fragment=basis_fragment(i)
+      if(findloc(bases(fragment)%global_ids,int(effective_ids(i),int64),dim=1)<=0)local_bad=1
     enddo
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='basis owner lacks production interior column';return;endif
     local_bad=0
-    do basis=1,size(effective_ids)
-      owner=basis_owner(basis);fragment=basis_fragment(basis)
+    do i=1,size(effective_ids)
+      owner=basis_owner(i);fragment=basis_fragment(i)
+      if(any([(basis_owner(j)==owner.and.basis_fragment(j)==fragment,j=1,i-1)]))cycle
+      group_size=count(basis_owner==owner.and.basis_fragment==fragment)
+      allocate(group_indices(group_size),group_columns(group_size))
+      group_indices=pack([(j,j=1,size(effective_ids))],basis_owner==owner.and.basis_fragment==fragment)
+      group_columns=0
       if(rank==owner)then
-        column=findloc(bases(fragment)%global_ids,int(effective_ids(basis),int64),dim=1)
+        do j=1,group_size
+          group_columns(j)=findloc(bases(fragment)%global_ids,int(effective_ids(group_indices(j)),int64),dim=1)
+        enddo
       endif
       do peer=0,nproc-1
         if(peer==owner)cycle
         if(rank==peer)then
           requested_ids=pack(interior_ids,interior_fragment==fragment);nrequest=size(requested_ids)
-          allocate(packed(0),received(4*nrequest))
+          if(nrequest>0)local_requests=local_requests+1
+          allocate(packed(0),received(5*nrequest*group_size))
           call MPI_Sendrecv(nrequest,1,MPI_INTEGER,owner,210,remote_count,1,MPI_INTEGER,owner,210,&
             icomm,MPI_STATUS_IGNORE,ierr)
           if(ierr==MPI_SUCCESS)call MPI_Sendrecv(requested_ids,nrequest,MPI_INTEGER8,owner,211,packed,0,&
             MPI_DOUBLE_COMPLEX,owner,211,icomm,MPI_STATUS_IGNORE,ierr)
-          if(ierr==MPI_SUCCESS)call MPI_Sendrecv(packed,0,MPI_DOUBLE_COMPLEX,owner,212,received,4*nrequest,&
+          if(ierr==MPI_SUCCESS)call MPI_Sendrecv(packed,0,MPI_DOUBLE_COMPLEX,owner,212,received,&
+            5*nrequest*group_size,&
             MPI_DOUBLE_COMPLEX,owner,212,icomm,MPI_STATUS_IGNORE,ierr)
           if(ierr/=MPI_SUCCESS)then;message='production interior peer receive failed';return;endif
           p=0
           do column=1,size(interior_ids)
             if(interior_fragment(column)/=fragment)cycle
-            p=p+1;values(basis,column)=received(4*p-3);gradients(:,basis,column)=received(4*p-2:4*p)
+            p=p+1
+            do j=1,group_size
+              slot=5*((j-1)*nrequest+p-1)
+              values(group_indices(j),column)=received(slot+1)
+              gradients(:,group_indices(j),column)=received(slot+2:slot+4)
+              kinetic_action(group_indices(j),column)=received(slot+5)
+            enddo
           enddo
           deallocate(requested_ids,packed,received)
         else if(rank==owner)then
           nrequest=0
           call MPI_Sendrecv(0,1,MPI_INTEGER,peer,210,nrequest,1,MPI_INTEGER,peer,210,&
             icomm,MPI_STATUS_IGNORE,ierr)
-          allocate(requested_ids(nrequest),packed(0),received(4*nrequest))
+          if(nrequest>0)local_responses=local_responses+1
+          allocate(requested_ids(nrequest),packed(0),received(5*nrequest*group_size))
           if(ierr==MPI_SUCCESS)call MPI_Sendrecv(packed,0,MPI_DOUBLE_COMPLEX,peer,211,requested_ids,nrequest,&
             MPI_INTEGER8,peer,211,icomm,MPI_STATUS_IGNORE,ierr)
-          do p=1,nrequest
-            call sample_basis_value(bases(fragment),requested_ids(p),column,received(4*p-3),sample_ok)
-            if(.not.sample_ok)then;local_bad=1;received(4*p-3)=(0d0,0d0);endif
-            call grid_position(requested_ids(p),global_size,position)
-            do axis=1,3
-              if(sample_ok)call sample_normal_derivative(bases(fragment),position,global_size,axis,1,&
-                coef_nab(:,axis),column,received(4*p-3+axis),sample_ok)
-              if(.not.sample_ok)then;local_bad=1;received(4*p-3+axis)=(0d0,0d0);endif
+          do j=1,group_size
+            column=group_columns(j)
+            do p=1,nrequest
+              slot=5*((j-1)*nrequest+p-1)
+              call sample_basis_value(bases(fragment),requested_ids(p),column,received(slot+1),sample_ok)
+              if(.not.sample_ok)then;local_bad=1;received(slot+1)=(0d0,0d0);endif
+              call grid_position(requested_ids(p),global_size,position)
+              do axis=1,3
+                if(sample_ok)call sample_normal_derivative(bases(fragment),position,global_size,axis,1,&
+                  coef_nab(:,axis),column,received(slot+1+axis),sample_ok)
+                if(.not.sample_ok)then;local_bad=1;received(slot+1+axis)=(0d0,0d0);endif
+              enddo
+              if(sample_ok)call sample_kinetic_action(bases(fragment),requested_ids(p),global_size,&
+                coef_lap0,coef_lap,column,received(slot+5),sample_ok)
+              if(.not.sample_ok)then;local_bad=1;received(slot+5)=(0d0,0d0);endif
             enddo
           enddo
-          if(ierr==MPI_SUCCESS)call MPI_Sendrecv(received,4*nrequest,MPI_DOUBLE_COMPLEX,peer,212,packed,0,&
+          if(ierr==MPI_SUCCESS)call MPI_Sendrecv(received,5*nrequest*group_size,MPI_DOUBLE_COMPLEX,peer,212,packed,0,&
             MPI_DOUBLE_COMPLEX,peer,212,icomm,MPI_STATUS_IGNORE,ierr)
           if(ierr/=MPI_SUCCESS)then;message='production interior peer send failed';return;endif
           deallocate(requested_ids,packed,received)
         endif
       enddo
       if(rank==owner)then
-        do p=1,size(interior_ids)
-          if(interior_fragment(p)/=fragment)cycle
-          call sample_basis_value(bases(fragment),interior_ids(p),column,values(basis,p),sample_ok)
-          call grid_position(interior_ids(p),global_size,position)
-          do axis=1,3
-            if(sample_ok)call sample_normal_derivative(bases(fragment),position,global_size,axis,1,&
-              coef_nab(:,axis),column,gradients(axis,basis,p),sample_ok)
+        do j=1,group_size
+          column=group_columns(j)
+          do p=1,size(interior_ids)
+            if(interior_fragment(p)/=fragment)cycle
+            call sample_basis_value(bases(fragment),interior_ids(p),column,values(group_indices(j),p),sample_ok)
+            call grid_position(interior_ids(p),global_size,position)
+            do axis=1,3
+              if(sample_ok)call sample_normal_derivative(bases(fragment),position,global_size,axis,1,&
+                coef_nab(:,axis),column,gradients(axis,group_indices(j),p),sample_ok)
+            enddo
+            if(sample_ok)call sample_kinetic_action(bases(fragment),interior_ids(p),global_size,&
+              coef_lap0,coef_lap,column,kinetic_action(group_indices(j),p),sample_ok)
+            if(.not.sample_ok)local_bad=1
           enddo
-          if(.not.sample_ok)local_bad=1
         enddo
       endif
+      deallocate(group_indices,group_columns)
     enddo
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     ok=ierr==MPI_SUCCESS.and.global_bad==0
-    if(ok)then;message='';else;message='production interior lacks value or gradient stencil support';endif
+    if(present(request_count))request_count=local_requests
+    if(present(response_count))response_count=local_responses
+    if(ok)then;message='';else;message='production interior lacks value, gradient, or kinetic stencil support';endif
 #else
     ok=.false.;message='production interior materialization requires MPI'
 #endif
   end subroutine materialize_dg_hybrid_production_interior
-
-  subroutine materialize_dg_hybrid_production_kinetic_action(icomm,global_size,coef_lap0,coef_lap,bases,&
-      basis_owner,basis_fragment,effective_ids,interior_ids,interior_fragment,kinetic_action,ok,message)
-    integer,intent(in)::icomm,global_size(3),basis_owner(:),basis_fragment(:),effective_ids(:),interior_fragment(:)
-    real(real64),intent(in)::coef_lap0,coef_lap(:,:)
-    type(s_dg_hybrid_fragment_basis),intent(in)::bases(:)
-    integer(int64),intent(in)::interior_ids(:)
-    complex(real64),allocatable,intent(out)::kinetic_action(:,:)
-    logical,intent(out)::ok
-    character(*),intent(out)::message
-#ifdef USE_MPI
-    complex(real64),allocatable::packed(:),received(:)
-    integer(int64),allocatable::requested_ids(:)
-    integer::rank,nproc,ierr,local_bad,global_bad,basis,owner,fragment,peer,nrequest,remote_count,column,p
-    logical::sample_ok
-    ok=.false.;message='';local_bad=0
-    call MPI_Comm_rank(icomm,rank,ierr);if(ierr/=MPI_SUCCESS)return
-    call MPI_Comm_size(icomm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
-    if(any(global_size<=0).or.size(coef_lap,1)<1.or.size(coef_lap,2)/=3.or.size(bases)<1.or.&
-        size(basis_owner)/=size(effective_ids).or.size(basis_fragment)/=size(effective_ids).or.&
-        size(interior_fragment)/=size(interior_ids).or.any(effective_ids<=0).or.any(interior_ids<=0_int64).or.&
-        any(interior_ids>product(int(global_size,int64))).or.any(interior_fragment<1).or.&
-        any(interior_fragment>size(bases)).or.any(basis_owner<0).or.any(basis_owner>=nproc).or.&
-        any(basis_fragment<1).or.any(basis_fragment>size(bases)).or..not.ieee_is_finite(coef_lap0).or.&
-        .not.all(ieee_is_finite(coef_lap)))local_bad=1
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid production kinetic-action contract';return;endif
-    allocate(kinetic_action(size(effective_ids),size(interior_ids)));kinetic_action=(0d0,0d0)
-    local_bad=0
-    do basis=1,size(effective_ids)
-      if(rank/=basis_owner(basis))cycle
-      fragment=basis_fragment(basis)
-      if(findloc(bases(fragment)%global_ids,int(effective_ids(basis),int64),dim=1)<=0)local_bad=1
-    enddo
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='basis owner lacks production kinetic-action column';return;endif
-    local_bad=0
-    do basis=1,size(effective_ids)
-      owner=basis_owner(basis);fragment=basis_fragment(basis)
-      if(rank==owner)then
-        column=findloc(bases(fragment)%global_ids,int(effective_ids(basis),int64),dim=1)
-      endif
-      do peer=0,nproc-1
-        if(peer==owner)cycle
-        if(rank==peer)then
-          requested_ids=pack(interior_ids,interior_fragment==fragment);nrequest=size(requested_ids)
-          allocate(packed(0),received(nrequest))
-          call MPI_Sendrecv(nrequest,1,MPI_INTEGER,owner,220,remote_count,1,MPI_INTEGER,owner,220,&
-            icomm,MPI_STATUS_IGNORE,ierr)
-          if(ierr==MPI_SUCCESS)call MPI_Sendrecv(requested_ids,nrequest,MPI_INTEGER8,owner,221,packed,0,&
-            MPI_DOUBLE_COMPLEX,owner,221,icomm,MPI_STATUS_IGNORE,ierr)
-          if(ierr==MPI_SUCCESS)call MPI_Sendrecv(packed,0,MPI_DOUBLE_COMPLEX,owner,222,received,nrequest,&
-            MPI_DOUBLE_COMPLEX,owner,222,icomm,MPI_STATUS_IGNORE,ierr)
-          if(ierr/=MPI_SUCCESS)then;message='production kinetic-action peer receive failed';return;endif
-          p=0
-          do column=1,size(interior_ids)
-            if(interior_fragment(column)/=fragment)cycle
-            p=p+1;kinetic_action(basis,column)=received(p)
-          enddo
-          deallocate(requested_ids,packed,received)
-        else if(rank==owner)then
-          nrequest=0
-          call MPI_Sendrecv(0,1,MPI_INTEGER,peer,220,nrequest,1,MPI_INTEGER,peer,220,&
-            icomm,MPI_STATUS_IGNORE,ierr)
-          allocate(requested_ids(nrequest),packed(0),received(nrequest))
-          if(ierr==MPI_SUCCESS)call MPI_Sendrecv(packed,0,MPI_DOUBLE_COMPLEX,peer,221,requested_ids,nrequest,&
-            MPI_INTEGER8,peer,221,icomm,MPI_STATUS_IGNORE,ierr)
-          do p=1,nrequest
-            call sample_kinetic_action(bases(fragment),requested_ids(p),global_size,coef_lap0,coef_lap,&
-              column,received(p),sample_ok)
-            if(.not.sample_ok)then;local_bad=1;received(p)=(0d0,0d0);endif
-          enddo
-          if(ierr==MPI_SUCCESS)call MPI_Sendrecv(received,nrequest,MPI_DOUBLE_COMPLEX,peer,222,packed,0,&
-            MPI_DOUBLE_COMPLEX,peer,222,icomm,MPI_STATUS_IGNORE,ierr)
-          if(ierr/=MPI_SUCCESS)then;message='production kinetic-action peer send failed';return;endif
-          deallocate(requested_ids,packed,received)
-        endif
-      enddo
-      if(rank==owner)then
-        do p=1,size(interior_ids)
-          if(interior_fragment(p)/=fragment)cycle
-          call sample_kinetic_action(bases(fragment),interior_ids(p),global_size,coef_lap0,coef_lap,&
-            column,kinetic_action(basis,p),sample_ok)
-          if(.not.sample_ok)local_bad=1
-        enddo
-      endif
-    enddo
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
-    ok=ierr==MPI_SUCCESS.and.global_bad==0
-    if(ok)then;message='';else;message='production kinetic action lacks stencil support';endif
-#else
-    ok=.false.;message='production kinetic-action materialization requires MPI'
-#endif
-  end subroutine materialize_dg_hybrid_production_kinetic_action
 
   subroutine reconstruct_dg_hybrid_production_interface_state(icomm,global_count,row_ids,coefficients,&
       occupations,faces,interface_state,ok,message)
