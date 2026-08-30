@@ -33,7 +33,8 @@ for expensive in (
     "ow_distributed_hermiticity",
 ):
     assert expensive in cheap_gate, expensive + " is not gated by the cheap candidate boundary"
-assert driver.index("allocate(density4") < driver.index("stage_pass: do")
+assert "allocate(density4" not in driver
+assert "dg_dc_update_potential_from_distributed_density" in driver
 assert driver.index("allocate(full_action_values") < driver.index("stage_pass: do")
 assert "final_refresh_performed=.true.;stage_converged=.false.;cycle" not in driver
 for token in ("begin_dg_hybrid_stage_solve", "complete_dg_hybrid_stage_solve", "refresh_scheduled"):

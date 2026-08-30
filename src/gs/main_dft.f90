@@ -4030,14 +4030,9 @@ contains
   subroutine update_dg_hybrid_divided_potential(core_density,callback_ok)
     real(8),intent(in)::core_density(:)
     logical,intent(out)::callback_ok
-    real(8),allocatable::total_density(:,:,:),density4(:,:,:,:)
     character(256)::potential_message
 
-    call gather_dg_hybrid_divided_core_density(core_density,total_density,callback_ok)
-    if(.not.callback_ok)return
-    allocate(density4(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),1))
-    density4(:,:,:,1)=total_density
-    call dg_dc_update_potential_from_density(density4,callback_ok,potential_message)
+    call dg_dc_update_potential_from_distributed_density(ow_core_ids,core_density,callback_ok,potential_message)
     if(.not.callback_ok)write(0,'(2a)')'divided potential update: ',trim(potential_message)
   end subroutine update_dg_hybrid_divided_potential
 
@@ -4062,7 +4057,7 @@ contains
       local_projector_scale,global_projector_scale,symmetry_residual
     real(8)::projector_symmetry_residual
     real(8)::broken_diagnostics(4)
-    real(8),allocatable::rho_in(:),rho_out(:),local_potential(:),density4(:,:,:,:),&
+    real(8),allocatable::rho_in(:),rho_out(:),local_potential(:),&
       eigenvalues(:),solver_eigenvalues(:)
     complex(8),allocatable::local_rows(:,:),coefficients(:,:),solver_coefficients(:,:),&
       gamma_rows(:,:),projector_rows(:,:),s_coefficients(:,:),interface_state(:,:),&
@@ -4097,7 +4092,6 @@ contains
     call default_dg_hybrid_controller_controls(continuation_controls)
     continuation_controls%iteration_limit=nscf
     continuation_controller%controls=continuation_controls
-    allocate(density4(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),1))
     allocate(full_action_values(size(effective_ids),size(ow_core_ids)))
     do while(accepted_lambda<1d0.or.trial_lambda==0d0)
       stage_converged=.false.;reject_trial=.false.;final_refresh_performed=.false.
@@ -4105,10 +4099,7 @@ contains
 stage_pass: do
         call begin_dg_hybrid_stage_solve(stage_schedule,run_solve,iteration)
         if(.not.run_solve)exit stage_pass
-        call gather_dg_hybrid_divided_core_density(rho_in,ow_hybrid_divided_total_density,local_ok)
-        if(.not.local_ok)error stop 'DG continuation density assembly failed'
-        density4(:,:,:,1)=ow_hybrid_divided_total_density
-        call dg_dc_update_potential_from_density(density4,local_ok,continuation_message)
+        call dg_dc_update_potential_from_distributed_density(ow_core_ids,rho_in,local_ok,continuation_message)
         if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation potential update failed';endif
         call extract_dg_hybrid_core_local_potential(ow_core_ids,local_potential,local_ok)
         if(.not.local_ok)error stop 'DG continuation local-potential extraction failed'
@@ -5149,7 +5140,7 @@ stage_pass: do
     support_count=0
     do ilma=1,ppg%Nlma
       q=0
-      do position=1,total_projectors
+      do position=1,size(complete_atom_ids)
         if(complete_atom_ids(position)==local_atom_ids(ilma).and.&
             complete_ordinals(position)==local_ordinals(ilma))then;q=position;exit;endif
       enddo
@@ -6323,57 +6314,63 @@ stage_pass: do
   end subroutine
 
   subroutine dg_dc_update_potential_from_density(density_arg,ok,message)
-    real(8), intent(in) :: density_arg(:,:,:,:)
-    logical, intent(out) :: ok
-    character(*), intent(out) :: message
-    integer :: is,ix,iy,iz,jx,jy,jz
-    logical :: rho_finite,hartree_finite,vxc_finite,vlocal_finite,nlcc_finite,global_layout
-    real(8) :: density_minimum,density_maximum,nlcc_minimum,nlcc_maximum
-    type(s_scalar),allocatable::fragment_hartree(:)
+    real(8),intent(in)::density_arg(:,:,:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::is,ix,iy,iz,jx,jy,jz
+    logical::global_layout
     global_layout=all(shape(density_arg(:,:,:,1))==dc%lg_tot%num)
-    write(*,'(a,l1,a,3(i0,1x),a,3(i0,1x),a,3(i0,1x),a,3(i0,1x),a,3(i0,1x))') &
-      '[OW-LAYOUT-DIAGNOSTIC] global=',global_layout,' density_shape=',shape(density_arg(:,:,:,1)), &
-      ' f_lb=',lbound(dc%rho_tot_s(1)%f),' f_ub=',ubound(dc%rho_tot_s(1)%f), &
-      ' mg_is=',dc%mg_tot%is,' mg_ie=',dc%mg_tot%ie
     do is=1,system%nspin
-      do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
-      do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
-      do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
-        if(global_layout)then
-          jx=ix;jy=iy;jz=iz
+      do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3);do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2);do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
+        if(global_layout)then;jx=ix;jy=iy;jz=iz
         else
-          jx=ix-lbound(dc%rho_tot_s(is)%f,1)+1
-          jy=iy-lbound(dc%rho_tot_s(is)%f,2)+1
+          jx=ix-lbound(dc%rho_tot_s(is)%f,1)+1;jy=iy-lbound(dc%rho_tot_s(is)%f,2)+1
           jz=iz-lbound(dc%rho_tot_s(is)%f,3)+1
         endif
         dc%rho_tot_s(is)%f(ix,iy,iz)=density_arg(jx,jy,jz,is)
-      end do
-      end do
-      end do
-    end do
+      enddo;enddo;enddo
+    enddo
     do is=1,system%nspin
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        if(global_layout)then
-          jx=dc%jxyz_tot(ix,1);jy=dc%jxyz_tot(iy,2);jz=dc%jxyz_tot(iz,3)
+      do iz=mg%is(3),mg%ie(3);do iy=mg%is(2),mg%ie(2);do ix=mg%is(1),mg%ie(1)
+        if(global_layout)then;jx=dc%jxyz_tot(ix,1);jy=dc%jxyz_tot(iy,2);jz=dc%jxyz_tot(iz,3)
         else
-          jx=ix-lbound(rho_s(is)%f,1)+1
-          jy=iy-lbound(rho_s(is)%f,2)+1
-          jz=iz-lbound(rho_s(is)%f,3)+1
+          jx=ix-lbound(rho_s(is)%f,1)+1;jy=iy-lbound(rho_s(is)%f,2)+1;jz=iz-lbound(rho_s(is)%f,3)+1
         endif
         rho_s(is)%f(ix,iy,iz)=density_arg(jx,jy,jz,is)
-      enddo
-      enddo
-      enddo
+      enddo;enddo;enddo
     enddo
-    write(*,'(a,2(es16.8,1x))') '[OW-LAYOUT-DIAGNOSTIC] source/owned_min=', &
-      minval(density_arg(:,:,:,1)),minval(dc%rho_tot_s(1)%f(dc%mg_tot%is(1):dc%mg_tot%ie(1), &
-      dc%mg_tot%is(2):dc%mg_tot%ie(2),dc%mg_tot%is(3):dc%mg_tot%ie(3)))
     dc%rho_tot%f=0d0
-    do is=1,system%nspin
-      dc%rho_tot%f=dc%rho_tot%f+dc%rho_tot_s(is)%f
-    end do
+    do is=1,system%nspin;dc%rho_tot%f=dc%rho_tot%f+dc%rho_tot_s(is)%f;enddo
+    call finish_dg_dc_potential_update(ok,message)
+  end subroutine dg_dc_update_potential_from_density
+
+  subroutine dg_dc_update_potential_from_distributed_density(point_ids_arg,density_arg,ok,message)
+    integer(8),intent(in)::point_ids_arg(:)
+    real(8), intent(in) :: density_arg(:)
+    logical, intent(out) :: ok
+    character(*), intent(out) :: message
+    integer :: is,ix,iy,iz,jx,jy,jz,p
+    call load_dg_hybrid_distributed_dc_density(dc,point_ids_arg,density_arg,ok,message)
+    if(.not.ok)return
+    do is=1,system%nspin;rho_s(is)%f=0d0;enddo
+    do p=1,size(point_ids_arg)
+      jx=int(modulo(point_ids_arg(p)-1_8,int(dc%lg_tot%num(1),8)))+1
+      jy=int(modulo((point_ids_arg(p)-1_8)/int(dc%lg_tot%num(1),8),int(dc%lg_tot%num(2),8)))+1
+      jz=int((point_ids_arg(p)-1_8)/int(dc%lg_tot%num(1)*dc%lg_tot%num(2),8))+1
+      ix=findloc(dc%jxyz_tot(:,1),jx,dim=1);iy=findloc(dc%jxyz_tot(:,2),jy,dim=1)
+      iz=findloc(dc%jxyz_tot(:,3),jz,dim=1)
+      if(ix>0.and.iy>0.and.iz>0)rho_s(1)%f(ix,iy,iz)=density_arg(p)
+    enddo
+    call finish_dg_dc_potential_update(ok,message)
+  end subroutine dg_dc_update_potential_from_distributed_density
+
+  subroutine finish_dg_dc_potential_update(ok,message)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::is,ix,iy,iz
+    logical::rho_finite,hartree_finite,vxc_finite,vlocal_finite,nlcc_finite
+    real(8)::density_minimum,density_maximum,nlcc_minimum,nlcc_maximum
+    type(s_scalar),allocatable::fragment_hartree(:)
     call hartree(dc%lg_tot,dc%mg_tot,dc%info_tot,dc%system_tot,dc%fg_tot,dc%poisson_tot, &
       dc%srg_scalar_tot,stencil,dc%rho_tot,dc%Vh_tot)
     allocate(fragment_hartree(system%nspin))
@@ -6428,7 +6425,7 @@ stage_pass: do
       if(allocated(fragment_hartree(is)%f))deallocate(fragment_hartree(is)%f)
     enddo
     deallocate(fragment_hartree)
-  end subroutine dg_dc_update_potential_from_density
+  end subroutine finish_dg_dc_potential_update
 
   integer function canonical_to_dc_index(index,core_count,buffer_count)
     integer, intent(in) :: index,core_count,buffer_count

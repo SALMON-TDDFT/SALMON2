@@ -66,12 +66,13 @@ contains
     real(real64),allocatable,optional,intent(out)::complete_matrix_strength(:),complete_action_strength(:)
     complex(real64),allocatable,optional,intent(out)::complete_overlap(:,:)
 #ifdef USE_MPI
-    integer::rank,nproc,ierr,r,p,q,total_records,nowned,unique_count,local_bad,global_bad
-    integer,allocatable::counts(:),displacements(:),complex_counts(:),complex_displacements(:),&
-      all_atom_ids(:),all_ordinals(:),unique_ids(:),owner_ranks(:)
+    integer::rank,nproc,ierr,r,p,q,total_records,nowned,unique_count,local_bad,global_bad,&
+      target,local_unique_count,slot,key_index
+    integer,allocatable::counts(:),displacements(:),all_atom_ids(:),all_ordinals(:),&
+      record_order(:),record_key(:),owner_ranks(:),local_keys(:)
     real(real64),allocatable::all_matrix_strength(:),all_action_strength(:)
-    complex(real64),allocatable::all_overlap(:,:)
-    logical::matched
+    complex(real64),allocatable::local_key_overlap(:,:),owner_overlap(:,:)
+    logical::matched,target_supports
     real(real64)::reference_action_strength
     ok=.false.;message='';expected_projector_count=0;local_bad=0
     call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)local_bad=1
@@ -88,16 +89,14 @@ contains
     end if
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(global_bad/=0)then;message='invalid fragment projector overlap payload';return;end if
-    allocate(counts(nproc),displacements(nproc),complex_counts(nproc),complex_displacements(nproc))
+    allocate(counts(nproc),displacements(nproc))
     call MPI_Allgather(size(atom_ids),1,MPI_INTEGER,counts,1,MPI_INTEGER,comm,ierr)
     total_records=0
     do r=1,nproc
       displacements(r)=total_records;total_records=total_records+counts(r)
-      complex_counts(r)=nwann*counts(r);complex_displacements(r)=nwann*displacements(r)
     end do
     allocate(all_atom_ids(total_records),all_ordinals(total_records),all_matrix_strength(total_records),&
-      all_action_strength(total_records),&
-      all_overlap(nwann,total_records),unique_ids(total_records),owner_ranks(total_records))
+      all_action_strength(total_records),record_order(total_records),record_key(total_records),owner_ranks(total_records))
     call MPI_Allgatherv(atom_ids,size(atom_ids),MPI_INTEGER,all_atom_ids,counts,displacements,&
       MPI_INTEGER,comm,ierr)
     call MPI_Allgatherv(ordinals,size(ordinals),MPI_INTEGER,all_ordinals,counts,displacements,&
@@ -107,69 +106,106 @@ contains
     call MPI_Allgatherv(action_strength,size(action_strength),MPI_DOUBLE_PRECISION,all_action_strength,&
       counts,displacements,&
       MPI_DOUBLE_PRECISION,comm,ierr)
-    call MPI_Allgatherv(partial_overlap,size(partial_overlap),MPI_DOUBLE_COMPLEX,all_overlap,&
-      complex_counts,complex_displacements,MPI_DOUBLE_COMPLEX,comm,ierr)
+    record_order=[(p,p=1,total_records)]
+    do p=2,total_records
+      key_index=record_order(p);q=p-1
+      do while(q>=1)
+        if(all_atom_ids(record_order(q))<all_atom_ids(key_index))exit
+        if(all_atom_ids(record_order(q))==all_atom_ids(key_index).and.&
+            all_ordinals(record_order(q))<=all_ordinals(key_index))exit
+        record_order(q+1)=record_order(q);q=q-1
+      enddo
+      record_order(q+1)=key_index
+    enddo
     unique_count=0
-    do p=1,total_records
-      unique_ids(p)=0
-      do q=1,p-1
-        if(all_atom_ids(q)==all_atom_ids(p).and.all_ordinals(q)==all_ordinals(p))then
-          unique_ids(p)=unique_ids(q);exit
-        end if
-      end do
-      if(unique_ids(p)==0)then
-        unique_count=unique_count+1;unique_ids(p)=unique_count
-        owner_ranks(unique_count)=0
-        do r=1,nproc
-          if(p>displacements(r).and.p<=displacements(r)+counts(r))then
-            owner_ranks(unique_count)=r-1;exit
-          end if
-        end do
-      end if
-    end do
+    do slot=1,total_records
+      p=record_order(slot)
+      if(slot==1)then
+        unique_count=unique_count+1;owner_ranks(unique_count)=nproc
+      else if(all_atom_ids(p)/=all_atom_ids(record_order(slot-1)).or.&
+          all_ordinals(p)/=all_ordinals(record_order(slot-1)))then
+        unique_count=unique_count+1;owner_ranks(unique_count)=nproc
+      endif
+      record_key(p)=unique_count
+      do r=1,nproc
+        if(p>displacements(r).and.p<=displacements(r)+counts(r))owner_ranks(unique_count)=min(owner_ranks(unique_count),r-1)
+      enddo
+    enddo
     expected_projector_count=unique_count;nowned=count(owner_ranks(1:unique_count)==rank)
+    allocate(local_keys(size(atom_ids)));local_unique_count=0
+    do p=1,size(atom_ids)
+      key_index=record_key(displacements(rank+1)+p)
+      if(.not.any(local_keys(1:local_unique_count)==key_index))then
+        local_unique_count=local_unique_count+1;local_keys(local_unique_count)=key_index
+      endif
+    enddo
+    if(local_unique_count>1)then
+      do p=2,local_unique_count
+        key_index=local_keys(p);q=p-1
+        do while(q>=1)
+          if(local_keys(q)<=key_index)exit
+          local_keys(q+1)=local_keys(q);q=q-1
+        enddo
+        local_keys(q+1)=key_index
+      enddo
+    endif
     if(present(complete_atom_ids))then
-      allocate(complete_atom_ids(unique_count));complete_atom_ids=0
+      allocate(complete_atom_ids(local_unique_count));complete_atom_ids=0
     endif
     if(present(complete_ordinals))then
-      allocate(complete_ordinals(unique_count));complete_ordinals=0
+      allocate(complete_ordinals(local_unique_count));complete_ordinals=0
     endif
     if(present(complete_matrix_strength))then
-      allocate(complete_matrix_strength(unique_count));complete_matrix_strength=0d0
+      allocate(complete_matrix_strength(local_unique_count));complete_matrix_strength=0d0
     endif
     if(present(complete_action_strength))then
-      allocate(complete_action_strength(unique_count));complete_action_strength=0d0
+      allocate(complete_action_strength(local_unique_count));complete_action_strength=0d0
     endif
     if(present(complete_overlap))then
-      allocate(complete_overlap(nwann,unique_count));complete_overlap=(0d0,0d0)
+      allocate(complete_overlap(nwann,local_unique_count));complete_overlap=(0d0,0d0)
     endif
-    do p=1,total_records
-      q=unique_ids(p)
-      if(present(complete_atom_ids))complete_atom_ids(q)=all_atom_ids(p)
-      if(present(complete_ordinals))complete_ordinals(q)=all_ordinals(p)
-      if(present(complete_matrix_strength))complete_matrix_strength(q)=all_matrix_strength(p)
-      if(present(complete_action_strength))complete_action_strength(q)=all_action_strength(p)
-      if(present(complete_overlap))complete_overlap(:,q)=complete_overlap(:,q)+all_overlap(:,p)
-    enddo
     allocate(projector_ids(nowned),owned_matrix_strength(nowned),owned_overlap(nwann,nowned))
+    allocate(local_key_overlap(nwann,unique_count),owner_overlap(nwann,unique_count))
+    local_key_overlap=(0d0,0d0);owner_overlap=(0d0,0d0)
+    do p=1,size(atom_ids)
+      q=record_key(displacements(rank+1)+p);local_key_overlap(:,q)=local_key_overlap(:,q)+partial_overlap(:,p)
+    enddo
     owned_overlap=(0d0,0d0);nowned=0
     do q=1,unique_count
-      if(owner_ranks(q)/=rank)cycle
-      nowned=nowned+1;projector_ids(nowned)=int(q,int64);matched=.false.
-      do p=1,total_records
-        if(unique_ids(p)/=q)cycle
+      p=record_order(findloc(record_key(record_order),q,dim=1))
+      matched=.false.
+      do slot=1,total_records
+        if(record_key(slot)/=q)cycle
         if(.not.matched)then
-          owned_matrix_strength(nowned)=all_matrix_strength(p)
-          reference_action_strength=all_action_strength(p);matched=.true.
-        else if(abs(all_matrix_strength(p)-owned_matrix_strength(nowned))>&
-            1024d0*epsilon(1d0)*max(1d0,abs(owned_matrix_strength(nowned))).or.&
-            abs(all_action_strength(p)-reference_action_strength)>&
+          reference_action_strength=all_action_strength(slot);matched=.true.
+        else if(abs(all_matrix_strength(slot)-all_matrix_strength(p))>&
+            1024d0*epsilon(1d0)*max(1d0,abs(all_matrix_strength(p))).or.&
+            abs(all_action_strength(slot)-reference_action_strength)>&
             1024d0*epsilon(1d0)*max(1d0,abs(reference_action_strength)))then
           local_bad=1
-        end if
-        owned_overlap(:,nowned)=owned_overlap(:,nowned)+all_overlap(:,p)
-      end do
+        endif
+      enddo
+      call MPI_Reduce(local_key_overlap(:,q),owner_overlap(:,q),nwann,MPI_DOUBLE_COMPLEX,MPI_SUM,&
+        owner_ranks(q),comm,ierr)
+      do target=0,nproc-1
+        target_supports=any(record_key(displacements(target+1)+1:displacements(target+1)+counts(target+1))==q)
+        if(.not.target_supports.or.target==owner_ranks(q))cycle
+        if(rank==owner_ranks(q))call MPI_Send(owner_overlap(:,q),nwann,MPI_DOUBLE_COMPLEX,target,310+q,comm,ierr)
+        if(rank==target)call MPI_Recv(owner_overlap(:,q),nwann,MPI_DOUBLE_COMPLEX,owner_ranks(q),310+q,&
+          comm,MPI_STATUS_IGNORE,ierr)
+      enddo
+      if(owner_ranks(q)/=rank)cycle
+      nowned=nowned+1;projector_ids(nowned)=int(q,int64)
+      owned_matrix_strength(nowned)=all_matrix_strength(p);owned_overlap(:,nowned)=owner_overlap(:,q)
     end do
+    do slot=1,local_unique_count
+      q=local_keys(slot);p=record_order(findloc(record_key(record_order),q,dim=1))
+      if(present(complete_atom_ids))complete_atom_ids(slot)=all_atom_ids(p)
+      if(present(complete_ordinals))complete_ordinals(slot)=all_ordinals(p)
+      if(present(complete_matrix_strength))complete_matrix_strength(slot)=all_matrix_strength(p)
+      if(present(complete_action_strength))complete_action_strength(slot)=all_action_strength(p)
+      if(present(complete_overlap))complete_overlap(:,slot)=owner_overlap(:,q)
+    enddo
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(global_bad/=0)then;message='fragment copies disagree on nonlocal projector strength';return;end if
     ok=.true.;message=''

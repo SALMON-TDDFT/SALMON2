@@ -12,7 +12,7 @@ program test_dg_overlapping_wannier_nonlocal_mpi
   complex(8),allocatable::overlap(:,:),matrix(:,:),reference(:,:),rotated(:,:),matrix_rows(:,:)
   complex(8),allocatable::collected_overlap(:,:)
   integer(8),allocatable::collected_ids(:)
-  integer,allocatable::complete_atom_ids(:),complete_ordinals(:)
+  integer,allocatable::complete_atom_ids(:),complete_ordinals(:),test_atom_ids(:),test_ordinals(:)
   real(8),allocatable::collected_strength(:)
   real(8),allocatable::complete_strength(:),complete_action_strength(:)
   complex(8),allocatable::complete_overlap(:,:)
@@ -126,6 +126,22 @@ program test_dg_overlapping_wannier_nonlocal_mpi
     end if
     call require(split_metadata_ok,'split projector metadata')
     call require(split_overlap_ok,'split projector overlap is coherently summed')
+
+    deallocate(ids,strength,action_strength,overlap,complete)
+    if(rank==0)then
+      allocate(ids(3),strength(3),action_strength(3),overlap(3,3),complete(3,3))
+      allocate(test_atom_ids(3),test_ordinals(3));test_atom_ids=[7,5,7];test_ordinals=[1,2,1]
+    else
+      allocate(ids(2),strength(2),action_strength(2),overlap(3,2),complete(3,2))
+      allocate(test_atom_ids(2),test_ordinals(2));test_atom_ids=[5,7];test_ordinals=[2,1]
+    endif
+    strength=1d0;action_strength=0.4d0;overlap=cmplx(real(rank+1,8),0d0,8);complete=.false.
+    call collect_dg_overlapping_wannier_projector_overlaps(comm,3,test_atom_ids,test_ordinals,&
+      strength,action_strength,overlap,collected_ids,collected_strength,collected_overlap,&
+      expected_projectors,ok,message,complete_atom_ids=complete_atom_ids,complete_ordinals=complete_ordinals)
+    call require(ok.and.expected_projectors==2,'nonsorted repeated projector keys were not canonicalized')
+    call require(all(complete_atom_ids==[5,7]).and.all(complete_ordinals==[2,1]),&
+      'projector keys are not in deterministic canonical order')
 
     call apply_dg_overlapping_wannier_nonlocal_action(comm,3,1,[1],[1],[cmplx(0.6d0,0d0,8)],&
       complete_action_strength,complete_overlap,nonlocal_action,ok,message)

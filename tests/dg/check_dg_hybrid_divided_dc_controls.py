@@ -23,6 +23,8 @@ for token in (
     "do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)",
     "initial_total_density(ix,iy,iz)=dc%rho_tot%f(ix,iy,iz)",
     "call mpi_allreduce(mpi_in_place,initial_total_density,size(initial_total_density)",
+    "subroutine load_dg_hybrid_distributed_dc_density",
+    "call mpi_alltoallv",
 ):
     assert token in DCDTF, f"DC adapter is missing authoritative control: {token}"
 
@@ -106,9 +108,9 @@ for forbidden in (
 ):
     assert forbidden not in branch, f"divided route introduced a new density gate: {forbidden}"
 
-potential_name = "subroutine dg_dc_update_potential_from_density"
+potential_name = "subroutine finish_dg_dc_potential_update"
 potential = MAIN[MAIN.index(potential_name) :].split(
-    "end subroutine dg_dc_update_potential_from_density", 1
+    "end subroutine finish_dg_dc_potential_update", 1
 )[0]
 assert "call hartree(dc%lg_tot" in potential, "hybrid Hartree must use the established total FFT grid"
 assert "call exchange_correlation(system,xc_func,mg" in potential, (
@@ -118,5 +120,12 @@ assert "call exchange_correlation(dc%system_tot" not in potential, (
     "hybrid XC must not create a second full-system evaluation"
 )
 assert "call calc_vlocal_fragment_dcdft" in potential, "total Hartree is not returned to fragments"
+
+continuation = MAIN.split("subroutine run_dg_hybrid_concrete_continuation", 1)[1].split(
+    "end subroutine run_dg_hybrid_concrete_continuation", 1
+)[0]
+assert "dg_dc_update_potential_from_distributed_density" in continuation
+assert "allocate(density4(dc%lg_tot%num" not in continuation
+assert "gather_dg_hybrid_divided_core_density(rho_in" not in continuation
 
 print("divided Hybrid DC controls contract: PASS")

@@ -1000,4 +1000,83 @@ contains
     ok=.true.
   end subroutine prepare_dg_hybrid_divided_dc_controls
 
+  subroutine load_dg_hybrid_distributed_dc_density(dc,point_ids,values,ok,message)
+    use structures,only:s_dcdft
+    use mpi
+    use,intrinsic::iso_fortran_env,only:int64
+    use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+    implicit none
+    type(s_dcdft),intent(inout)::dc
+    integer(int64),intent(in)::point_ids(:)
+    real(8),intent(in)::values(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::rank,nproc,ierr,p,r,owner,local_bad,global_bad,gx,gy,gz
+    integer,allocatable::bounds(:,:),send_counts(:),recv_counts(:),send_displs(:),recv_displs(:),cursor(:)
+    integer(int64),allocatable::send_ids(:),recv_ids(:)
+    real(8),allocatable::send_values(:),recv_values(:)
+
+    ok=.false.;message='';local_bad=0
+    call MPI_Comm_rank(dc%icomm_tot,rank,ierr);if(ierr/=MPI_SUCCESS)local_bad=1
+    call MPI_Comm_size(dc%icomm_tot,nproc,ierr);if(ierr/=MPI_SUCCESS)local_bad=1
+    if(size(point_ids)/=size(values).or.any(point_ids<1_int64).or.&
+        any(point_ids>product(int(dc%lg_tot%num,int64))).or..not.all(ieee_is_finite(values)))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid distributed DC density payload';return;endif
+    allocate(bounds(6,nproc),send_counts(nproc),recv_counts(nproc),send_displs(nproc),recv_displs(nproc),cursor(nproc))
+    call MPI_Allgather([dc%mg_tot%is,dc%mg_tot%ie],6,MPI_INTEGER,bounds,6,MPI_INTEGER,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed DC density layout exchange failed';return;endif
+    send_counts=0
+    do p=1,size(point_ids)
+      call decode_density_point(point_ids(p),dc%lg_tot%num,gx,gy,gz);owner=-1
+      do r=1,nproc
+        if(gx>=bounds(1,r).and.gx<=bounds(4,r).and.gy>=bounds(2,r).and.gy<=bounds(5,r).and.&
+            gz>=bounds(3,r).and.gz<=bounds(6,r))then
+          if(owner/=-1)local_bad=1
+          owner=r-1
+        endif
+      enddo
+      if(owner<0)then;local_bad=1;else;send_counts(owner+1)=send_counts(owner+1)+1;endif
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='distributed DC density point has no unique owner';return;endif
+    call MPI_Alltoall(send_counts,1,MPI_INTEGER,recv_counts,1,MPI_INTEGER,dc%icomm_tot,ierr)
+    send_displs(1)=0;recv_displs(1)=0
+    do r=2,nproc
+      send_displs(r)=send_displs(r-1)+send_counts(r-1);recv_displs(r)=recv_displs(r-1)+recv_counts(r-1)
+    enddo
+    allocate(send_ids(size(point_ids)),send_values(size(values)),recv_ids(sum(recv_counts)),recv_values(sum(recv_counts)))
+    cursor=send_displs
+    do p=1,size(point_ids)
+      call decode_density_point(point_ids(p),dc%lg_tot%num,gx,gy,gz);owner=0
+      do r=1,nproc
+        if(gx>=bounds(1,r).and.gx<=bounds(4,r).and.gy>=bounds(2,r).and.gy<=bounds(5,r).and.&
+            gz>=bounds(3,r).and.gz<=bounds(6,r))owner=r-1
+      enddo
+      cursor(owner+1)=cursor(owner+1)+1
+      send_ids(cursor(owner+1))=point_ids(p);send_values(cursor(owner+1))=values(p)
+    enddo
+    call MPI_Alltoallv(send_ids,send_counts,send_displs,MPI_INTEGER8,recv_ids,recv_counts,recv_displs,&
+      MPI_INTEGER8,dc%icomm_tot,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Alltoallv(send_values,send_counts,send_displs,MPI_DOUBLE_PRECISION,&
+      recv_values,recv_counts,recv_displs,MPI_DOUBLE_PRECISION,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed DC density exchange failed';return;endif
+    dc%rho_tot_s(1)%f=0d0
+    do p=1,size(recv_ids)
+      call decode_density_point(recv_ids(p),dc%lg_tot%num,gx,gy,gz)
+      dc%rho_tot_s(1)%f(gx,gy,gz)=recv_values(p)
+    enddo
+    dc%rho_tot%f=dc%rho_tot_s(1)%f
+    ok=.true.
+  contains
+    pure subroutine decode_density_point(point_id,grid_size,x,y,z)
+      integer(int64),intent(in)::point_id
+      integer,intent(in)::grid_size(3)
+      integer,intent(out)::x,y,z
+      x=int(modulo(point_id-1_int64,int(grid_size(1),int64)))+1
+      y=int(modulo((point_id-1_int64)/int(grid_size(1),int64),int(grid_size(2),int64)))+1
+      z=int((point_id-1_int64)/int(grid_size(1)*grid_size(2),int64))+1
+    end subroutine decode_density_point
+  end subroutine load_dg_hybrid_distributed_dc_density
+
 end module dcdft

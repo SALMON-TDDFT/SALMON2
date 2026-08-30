@@ -78,7 +78,7 @@ required = [
     "dc_seed_density",
     "fixed_payload",
     "production_faces",
-    "dg_dc_update_potential_from_density",
+    "dg_dc_update_potential_from_distributed_density",
     "assemble_dg_hybrid_local_potential_rows",
     "compose_dg_hybrid_variational_hamiltonian",
     "reconstruct_dg_hybrid_occupied_state",

@@ -11,6 +11,11 @@ assert "apply_dg_overlapping_wannier_nonlocal_action" in divided_nonlocal
 assert "local_strength(ilma)=system%hvol*ppg%rinv_uvu(ilma)" not in divided_nonlocal
 assert "if(position<=0)then;message='divided basis omits nonlocal projector support';return;endif" not in divided_nonlocal
 assert "if(q==0)then;message='complete nonlocal projector payload lacks local identity';ok=.false.;return;endif" not in divided_nonlocal
+nonlocal_source=(root/"src/gs/dc/dg_overlapping_wannier_nonlocal.f90").read_text().lower()
+collector=nonlocal_source.split("subroutine collect_dg_overlapping_wannier_projector_overlaps",1)[1].split(
+    "end subroutine collect_dg_overlapping_wannier_projector_overlaps",1)[0]
+assert "mpi_allgatherv(partial_overlap" not in collector
+assert "do q=1,p-1" not in collector
 with tempfile.TemporaryDirectory(prefix="ow-physical-") as name:
     build=Path(name);(build/"config.h").write_text("")
     env=os.environ.copy();env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")
