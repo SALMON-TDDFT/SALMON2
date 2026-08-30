@@ -18,6 +18,7 @@
 module initialization_rt_sub
   use nvtx
   implicit none
+  private::initialization_rt_common
 
 contains
 
@@ -299,14 +300,7 @@ subroutine initialization_rt_common( Mit, system, energy, ewald, rt, md, &
     return
   endif
 
-  if(initialize_conventional_orbitals)then
-    call calc_density(system,rho_s,spsi_in,info,mg)
-  else
-    do jspin=1,system%nspin
-      rho_s(jspin)%f=0d0
-      rt%rho0_s(jspin)%f=0d0
-    enddo
-  endif
+  call calc_density(system,rho_s,spsi_in,info,mg)
   rho%f = 0d0
   do jspin=1,system%nspin
      rho%f = rho%f + rho_s(jspin)%f
@@ -328,17 +322,9 @@ subroutine initialization_rt_common( Mit, system, energy, ewald, rt, md, &
 
   if(yn_jm=='y') rho%f = rho%f + rho_jm%f
 
-  if(initialize_conventional_orbitals)then
-    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_in,stencil,Vxc,energy%E_xc)
-    call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
-  else
-    Vh%f=0d0
-    do jspin=1,system%nspin
-      Vxc(jspin)%f=0d0
-      V_local(jspin)%f=0d0
-    enddo
-  endif
+  call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_in,stencil,Vxc,energy%E_xc)
+  call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
   if(yn_restart=='y')then
     Vh_stock1%f=Vh%f
   else if(yn_restart=='n')then

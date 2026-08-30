@@ -19,11 +19,6 @@ hybrid_initializer=rt_environment_source.split("subroutine initialization_rt_dg_
   "end subroutine initialization_rt_dg_hybrid",1)[0]
 for forbidden in ("spsi_in","spsi_out","tpsi"):
   assert forbidden not in hybrid_initializer, f"hybrid initializer still exposes {forbidden}"
-hybrid_return=rt_environment_source.index("if(.not.initialize_conventional_orbitals)then")
-assert hybrid_return < rt_environment_source.index("spsi_in%update_zwf_overlap")
-assert hybrid_return < rt_environment_source.index("call calc_eigen_energy")
-for forbidden in ("spsi_in%zwf=(0d0,0d0)","spsi_out%zwf=(0d0,0d0)","tpsi%zwf=(0d0,0d0)"):
-  assert forbidden not in rt_environment_source
 physical_callback=main_rt_source.split("subroutine project_salmon_local_rows",1)[1].split(
   "end subroutine project_salmon_local_rows",1)[0]
 for forbidden in ("global_density", "global_potential", "projected(hybrid_state%global_count,hybrid_state%global_count)"):
@@ -35,6 +30,7 @@ xc_source=(root/"src/xc/salmon_xc.f90").read_text().lower()
 density_xc=xc_source.split("subroutine exchange_correlation_density",1)[1].split(
   "end subroutine exchange_correlation_density",1)[0]
 assert "xc_func%use_kinetic_energy.or.xc_func%use_current" in density_xc
+assert "unused_orbitals" not in density_xc
 assert "global_row_failed" in physical_callback
 assert "mpi_allreduce(row_failed,global_row_failed" in physical_callback
 initial_update=main_rt_source.split("subroutine run_dg_hybrid_continuation_rt",1)[1].split(

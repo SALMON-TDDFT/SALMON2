@@ -93,10 +93,10 @@ contains
     type(s_stencil),intent(in)::stencil
     type(s_scalar)::Vxc(system%nspin)
     real(8)::E_xc
-    type(s_orbital)::unused_orbitals
     if(xc_func%use_kinetic_energy.or.xc_func%use_current)&
       error stop 'density-only exchange-correlation does not support orbital-dependent functionals'
-    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,unused_orbitals,stencil,Vxc,E_xc)
+    call exchange_correlation(system=system,xc_func=xc_func,mg=mg,srg_scalar=srg_scalar,srg=srg,rho_s=rho_s,&
+      pp=pp,ppn=ppn,info=info,stencil=stencil,Vxc=Vxc,E_xc=E_xc)
   end subroutine exchange_correlation_density
 
 
@@ -118,7 +118,7 @@ contains
     type(s_pp_info)         ,intent(in) :: pp
     type(s_pp_nlcc)         ,intent(in) :: ppn
     type(s_parallel_info)   ,intent(in) :: info
-    type(s_orbital)                     :: spsi
+    type(s_orbital),optional            :: spsi
     type(s_stencil)         ,intent(in) :: stencil
     type(s_scalar)                      :: Vxc(system%nspin)
     real(8)                             :: E_xc
@@ -278,7 +278,10 @@ contains
       end do
 !$omp end parallel do
 
-      if (xc_func%use_kinetic_energy .or. xc_func%use_current) call calc_tau
+      if (xc_func%use_kinetic_energy .or. xc_func%use_current) then
+        if(.not.present(spsi))error stop 'orbital-dependent exchange-correlation requires orbitals'
+        call calc_tau
+      endif
 
     elseif(nspin==2)then
 !$omp parallel do collapse(2) private(ix,iy,iz)
