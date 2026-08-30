@@ -69,6 +69,37 @@ assert "yn_dg_hybrid_continuation_scf/='y'" in reuse, (
     "an old overlapping-Wannier checkpoint must not bypass continuation"
 )
 
+preparation_name = "subroutine prepare_dg_hybrid_divided_production_basis"
+preparation_start = source.index(preparation_name)
+preparation = source[preparation_start:source.index(
+    "end subroutine prepare_dg_hybrid_divided_production_basis", preparation_start
+)]
+assert "analyze_dg_hybrid_lcfo_selection" in preparation, (
+    "Hybrid production preparation does not defer symmetry recovery to LCFO"
+)
+assert "basis_fingerprint_arg" in preparation[
+    preparation.index("call analyze_dg_hybrid_lcfo_selection"):
+], "LCFO-deferred preparation omits authoritative Wannier provenance"
+assert "call analyze_dg_hybrid_production_selection" not in preparation, (
+    "Hybrid production preparation still invokes strict fragment covariance analysis"
+)
+for token in (
+    "fragment_origin_arg",
+    "fragment_size_arg",
+    "core_ids_arg",
+    "core_fragment_ids(point)=fragment",
+):
+    assert token in preparation, f"Hybrid production preparation omits DC-derived DG input {token}"
+handoff = "[HYBRID-LCFO-SYMMETRY-HANDOFF]"
+assert handoff in source, "Hybrid production preparation omits LCFO symmetry-handoff receipt"
+receipt = source[source.index(handoff):source.index(handoff) + 300]
+assert "wannier_fingerprint=" in receipt and "basis_fingerprint" in receipt, (
+    "LCFO symmetry-handoff receipt omits the nonzero Wannier fingerprint"
+)
+assert "production_fingerprint=" in receipt and "divided_pw_fingerprint" in receipt, (
+    "LCFO symmetry-handoff receipt omits the nonzero production fingerprint"
+)
+
 driver_name = "subroutine run_dg_hybrid_concrete_continuation"
 assert driver_name in source, "missing contained concrete continuation driver"
 start = source.index(driver_name)

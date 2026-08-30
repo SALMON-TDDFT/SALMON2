@@ -2604,6 +2604,11 @@ contains
         divided_buffer_window_fingerprint,divided_fragment_fingerprint,divided_production_selection,ok,message)
       if(.not.ok)write(0,'(a)')trim(message)
       if(.not.ok)error stop 'divided Hybrid production basis preparation failed'
+      if(basis_fingerprint==0_8.or.divided_pw_fingerprint==0_8)&
+        error stop 'divided Hybrid LCFO symmetry handoff fingerprints are missing'
+      if(rank==0)write(*,'(a,i0,a,i0)')&
+        '[HYBRID-LCFO-SYMMETRY-HANDOFF] wannier_fingerprint=',basis_fingerprint,&
+        ' production_fingerprint=',divided_pw_fingerprint
       allocate(divided_requested_ids,source=divided_production_selection%requested_packet_ids)
       call close_dg_hybrid_selection(dc%icomm_tot,divided_requested_ids,&
         divided_production_selection%packet_ids,divided_production_selection%packet_action,&
@@ -7090,7 +7095,7 @@ subroutine prepare_dg_hybrid_divided_production_basis(comm_arg,fragment_count_ar
     pw_fingerprint_arg,buffer_fingerprint_arg,fragment_fingerprint_arg,selection_arg,callback_ok,callback_message)
   use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog,s_dg_hybrid_production_selection
   use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
-  use dg_hybrid_production_pw_basis,only:analyze_dg_hybrid_production_selection,freeze_dg_hybrid_production_selection
+  use dg_hybrid_production_pw_basis,only:analyze_dg_hybrid_lcfo_selection,freeze_dg_hybrid_production_selection
   use dg_hybrid_continuation_state,only:close_dg_hybrid_selection
   use dg_hybrid_window_distribution,only:redistribute_dg_hybrid_fragment_windows
   use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_fragment_basis
@@ -7159,9 +7164,10 @@ subroutine prepare_dg_hybrid_divided_production_basis(comm_arg,fragment_count_ar
       int(grid_num_arg(2),8)),8)*hgs_arg(2)
     buffer_coordinates(3,point)=real((physical_ids_arg(point)-1_8)/nxy_arg,8)*hgs_arg(3)
   enddo
-  call analyze_dg_hybrid_production_selection(comm_arg,int(global_count_arg),fragment_count_arg,&
+  call analyze_dg_hybrid_lcfo_selection(comm_arg,int(global_count_arg),fragment_count_arg,&
     fragment_ids,physical_ids_arg,box_windows,core_ids_arg,core_fragment_ids,core_coordinates,row_action,&
-    reciprocal_lattice_arg,reciprocal_rotations_arg,pw_cutoff_arg,16,tolerance_arg,core_windows,g_vectors,&
+    reciprocal_lattice_arg,reciprocal_rotations_arg,basis_fingerprint_arg,pw_cutoff_arg,16,tolerance_arg,&
+    core_windows,g_vectors,&
     selection_arg,pw_workspace,pw_fingerprint_arg,callback_ok,callback_message)
   if(.not.callback_ok)return
   call close_dg_hybrid_selection(comm_arg,selection_arg%requested_packet_ids,selection_arg%packet_ids,&
