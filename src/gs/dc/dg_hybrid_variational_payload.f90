@@ -42,12 +42,21 @@ contains
     if(global_basis_count<1.or.any(row_ids<1_int64).or.any(row_ids>int(global_basis_count,int64)).or.&
         any(shape(metric_rows)/=[size(row_ids),global_basis_count]).or.&
         any(shape(kinetic_rows)/=shape(metric_rows)).or.any(shape(nonlocal_rows)/=shape(metric_rows)).or.&
-        any(shape(interface_rows)/=shape(metric_rows)).or.basis_fingerprint==0_int64.or.&
-        metric_fingerprint==0_int64.or.interface_fingerprint==0_int64.or.&
-        .not.finite_matrix(metric_rows).or..not.finite_matrix(kinetic_rows).or.&
-        .not.finite_matrix(nonlocal_rows).or..not.finite_matrix(interface_rows))local_bad=1
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid variational fixed payload';return;endif
+        any(shape(interface_rows)/=shape(metric_rows)))local_bad=ibset(local_bad,0)
+    if(basis_fingerprint==0_int64.or.metric_fingerprint==0_int64.or.&
+      interface_fingerprint==0_int64)local_bad=ibset(local_bad,1)
+    if(.not.finite_matrix(metric_rows))local_bad=ibset(local_bad,2)
+    if(.not.finite_matrix(kinetic_rows))local_bad=ibset(local_bad,3)
+    if(.not.finite_matrix(nonlocal_rows))local_bad=ibset(local_bad,4)
+    if(.not.finite_matrix(interface_rows))local_bad=ibset(local_bad,5)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_BOR,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='variational fixed payload validation reduction failed';return;endif
+    if(btest(global_bad,0))then;message='invalid variational fixed payload extent';return;endif
+    if(btest(global_bad,1))then;message='invalid variational fixed payload fingerprint';return;endif
+    if(btest(global_bad,2))then;message='variational metric rows contain nonfinite values';return;endif
+    if(btest(global_bad,3))then;message='variational kinetic rows contain nonfinite values';return;endif
+    if(btest(global_bad,4))then;message='variational nonlocal rows contain nonfinite values';return;endif
+    if(btest(global_bad,5))then;message='variational interface rows contain nonfinite values';return;endif
     call MPI_Allreduce(size(row_ids),total_rows,1,MPI_INTEGER,MPI_SUM,comm,ierr)
     allocate(ownership(global_basis_count));ownership=0
     do i=1,size(row_ids);ownership(int(row_ids(i)))=ownership(int(row_ids(i)))+1;enddo

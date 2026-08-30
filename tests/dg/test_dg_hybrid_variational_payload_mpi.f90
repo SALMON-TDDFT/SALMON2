@@ -2,6 +2,7 @@
 program test_dg_hybrid_variational_payload_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
+  use,intrinsic::ieee_arithmetic,only:ieee_quiet_nan,ieee_value
   use dg_hybrid_variational_payload,only:s_dg_hybrid_fixed_payload,s_dg_hybrid_variational_iterate,&
     freeze_dg_hybrid_variational_payload,compose_dg_hybrid_variational_hamiltonian
   implicit none
@@ -56,6 +57,11 @@ program test_dg_hybrid_variational_payload_mpi
   if(nrow>0)fixed%kinetic_rows(1,1)=fixed%kinetic_rows(1,1)+1d-3
   call compose_dg_hybrid_variational_hamiltonian(comm,fixed,vlocal,0.5d0,3,full,ok,message)
   call require(.not.ok.and.index(message,'fingerprint')>0,'mutated fixed variational payload was accepted')
+  if(rank==0.and.nrow>0)sipg(1,1)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,real64)
+  call freeze_dg_hybrid_variational_payload(comm,n,rows,s,t,vnl,sipg,91_int64,92_int64,93_int64,&
+    fixed,ok,message)
+  call require(.not.ok.and.index(message,'interface rows contain nonfinite')>0,&
+    'nonfinite interface payload did not identify the failing matrix')
   if(rank==0)write(*,'(a,i0,a)')'PASS variational DG payload on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
