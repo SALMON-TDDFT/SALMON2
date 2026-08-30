@@ -15,6 +15,7 @@ module rt_dg_hybrid_initialization
     salmon_xctype_pbe=3,salmon_xctype_pw=7
   type,public::s_rt_dg_hybrid_state
     logical::valid=.false.,initial_invariants_valid=.false.
+    real(real64)::startup_operator_covariance=huge(1d0),startup_projector_covariance=huge(1d0)
     integer::global_count=0,noccupied=0
     integer(int64)::payload_fingerprint=0_int64,operator_structure_fingerprint=0_int64,&
       operator_value_fingerprint=0_int64,scope_fingerprint=0_int64
@@ -105,6 +106,7 @@ contains
     state%global_count=n;state%noccupied=nocc;state%payload_fingerprint=payload_fingerprint
     state%operator_structure_fingerprint=payload%operator_structure_fingerprint
     state%operator_value_fingerprint=payload%operator_value_fingerprint;state%scope_fingerprint=payload%scope_fingerprint
+    state%startup_operator_covariance=covariance;state%startup_projector_covariance=projector_covariance
     state%initial_invariants_valid=.true.;state%valid=.true.;ok=.true.;message=''
 #else
     ok=.false.;message='hybrid RT initialization requires MPI'

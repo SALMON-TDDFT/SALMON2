@@ -4125,7 +4125,8 @@ contains
       face_weight_count,face_weight_position,owned_face_count,face_slot
     integer,allocatable::checkpoint_face_owner(:)
     logical::stage_converged,reject_trial,local_ok,accept_stage,final_refresh_performed,cheap_candidate,&
-      run_solve,run_expensive,refresh_scheduled,meaningful_gap,occupation_kernel_ok
+      run_solve,run_expensive,refresh_scheduled,meaningful_gap,occupation_kernel_ok,&
+      seed_identity_accepted,lambda_zero_accepted
     character(256)::continuation_message
     real(8)::occupied_unoccupied_gap,accepted_gap
     real(8)::hamiltonian_hermiticity,hamiltonian_scale
@@ -4138,6 +4139,7 @@ contains
 
     call MPI_Comm_rank(dc%icomm_tot,rank_local,ierr_local)
     allocate(rho_in,source=dc_seed_density)
+    seed_identity_accepted=all(rho_in==dc_seed_density);lambda_zero_accepted=.false.
     if(size(effective_ids)<nstate)error stop 'DG continuation retained basis is smaller than the occupation kernel'
     call dg_hybrid_continuation_state_count(occupied_occupations,size(effective_ids),continuation_state_count,&
       meaningful_gap,gap_occupied_index,gap_unoccupied_index,local_ok)
@@ -4309,6 +4311,7 @@ stage_pass: do
           accept_stage,local_ok,continuation_message)
         if(.not.local_ok.or..not.accept_stage)error stop 'DG continuation converged stage was not accepted'
         accepted_lambda=continuation_controller%accepted_lambda
+        if(accepted_lambda==0d0)lambda_zero_accepted=.true.
       endif
       if(meaningful_gap)accepted_gap=occupied_unoccupied_gap
       if(accepted_lambda==1d0)exit
@@ -4521,6 +4524,14 @@ stage_pass: do
     if(rank_local==0)write(*,'(a,4(a,es16.8))')'[OW-GS] fully refreshed DG continuation converged',&
       ' lambda=',accepted_lambda,' h_residual=',residuals%r_h,' density_residual=',residuals%r_rho,&
       ' interface_residual=',residuals%r_t
+    if(rank_local==0)write(*,'(a,i0,a,i0,a,i0,a,i0,7(a,es16.8),a,i0)')&
+      '[HYBRID-GS-ACCEPTANCE] seed_identity=',merge(1,0,seed_identity_accepted),&
+      ' lambda_zero=',merge(1,0,lambda_zero_accepted),' lambda_one=',merge(1,0,accepted_lambda==1d0),&
+      ' final_refresh=',merge(1,0,final_refresh_performed),' r_h=',residuals%r_h,&
+      ' r_rho=',residuals%r_rho,' r_t=',residuals%r_t,' r_s=',residuals%r_s,&
+      ' electron=',abs(electron_count-sum(occupied_occupations)),' symmetry=',&
+      max(symmetry_residual,projector_symmetry_residual),' real_space=',&
+      max(real_space_residual,maxval(interface_action_residuals)),' payload_fingerprint=',checkpoint_fingerprint
   end subroutine run_dg_hybrid_concrete_continuation
 
   subroutine pack_checkpoint_face_values(face,values,position)

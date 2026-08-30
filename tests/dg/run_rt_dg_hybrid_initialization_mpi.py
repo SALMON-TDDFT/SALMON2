@@ -38,6 +38,8 @@ initial_update=main_rt_source.split("subroutine run_dg_hybrid_continuation_rt",1
 assert "hamiltonian_values==initial_hamiltonian" not in initial_update
 assert ".not.(global_defect<=1d-10*global_scale)" in initial_update
 assert ".not.ieee_is_finite(global_defect)" in initial_update
+assert "[hybrid-rt-handoff]" in initial_update
+assert "payload_fingerprint=" in initial_update
 if os.environ.get("SALMON_LAPACK_LIBS"): libs=shlex.split(os.environ["SALMON_LAPACK_LIBS"])
 elif shutil.which("brew") and subprocess.run(["brew","--prefix","openblas"],capture_output=True).returncode==0:
   prefix=subprocess.check_output(["brew","--prefix","openblas"],text=True).strip();libs=[f"-L{prefix}/lib","-lopenblas"]

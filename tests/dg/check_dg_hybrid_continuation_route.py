@@ -124,6 +124,13 @@ assert "hamiltonian_hermiticity<=dg_dc_gs_hermiticity_tolerance" in implementati
 assert "checkpoint_payload%energy_receipt=[energy%E_tot" not in implementation, (
     "checkpoint energy receipt still serializes the pre-continuation energy"
 )
+for receipt_token in (
+    "[HYBRID-GS-ACCEPTANCE]",
+    "seed_identity=",
+    "lambda_zero=",
+    "payload_fingerprint=",
+):
+    assert receipt_token in implementation, f"production continuation omits acceptance receipt {receipt_token}"
 for token in (
     "energy_global_coefficients",
     "fixed_payload%kinetic_rows",
@@ -135,4 +142,10 @@ for token in (
 ):
     assert token in implementation, f"final DG energy decomposition omits {token}"
 
+gs_input = (root / "tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_dg_continuation.in").read_text()
+rt_input = (root / "tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_dg_zero_field_rt.in").read_text()
+assert "yn_dg_hybrid_continuation_scf='y'" in gs_input
+assert "yn_dg_hybrid_divided_scf='n'" in gs_input
+assert "yn_rt_dg_hybrid_continuation='y'" in rt_input
+assert "ae_shape1='none'" in rt_input
 print("PASS concrete DG continuation production route contract")

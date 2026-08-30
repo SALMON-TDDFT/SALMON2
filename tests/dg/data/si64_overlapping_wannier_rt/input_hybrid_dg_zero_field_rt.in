@@ -1,0 +1,49 @@
+&calculation
+ theory='tddft_response'
+/
+&control
+ sysname='si64_hybrid_dg_zero_field_rt'
+/
+&units
+ unit_system='a.u.'
+/
+&parallel
+ nproc_k=1
+ nproc_ob=1
+ nproc_rgrid=2,2,2
+ yn_eigenexa='n'
+/
+&system
+ yn_periodic='y'
+ al=20.52d0,20.52d0,20.52d0
+ nelem=1
+ nstate=256
+ nelec=256
+ natom=64
+ file_atom_coor='atom.dat'
+/
+&pseudo
+ izatom(1)=14
+ file_pseudo(1)='Si_rps.dat'
+ lloc_ps(1)=2
+/
+&functional
+ xc='PZ'
+/
+&rgrid
+ num_rgrid=32,32,32
+/
+&kgrid
+ num_kgrid=1,1,1
+/
+&tgrid
+ dt=0.02d0
+ nt=10
+/
+&propagation
+ yn_rt_dg_hybrid_continuation='y'
+ yn_dg_length_gauge='y'
+/
+&emfield
+ ae_shape1='none'
+/

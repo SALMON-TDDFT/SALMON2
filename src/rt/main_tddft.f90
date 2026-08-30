@@ -312,6 +312,9 @@ subroutine run_dg_hybrid_continuation_rt()
     current_hamiltonian_residual,ok,message)
   if(.not.ok)then;write(0,'(a)')trim(message);error stop 'hybrid DG RT initial physical invariants failed';endif
   if(.not.allocated(hybrid_state%energy_receipt))error stop 'hybrid DG RT physical energy receipt is absent'
+  if(nproc_id_global==0)write(*,'(a,i0,2(a,es16.8))')'[HYBRID-RT-HANDOFF] payload_fingerprint=',&
+    hybrid_state%payload_fingerprint,' operator_symmetry=',hybrid_state%startup_operator_covariance,&
+    ' projector_symmetry=',hybrid_state%startup_projector_covariance
   stationarity_enabled=size(hybrid_state%energy_receipt)==7.and.any(hybrid_state%energy_receipt/=0d0)
   if(stationarity_enabled)then
     if(abs(current_total_energy-hybrid_state%energy_receipt(1))>&
