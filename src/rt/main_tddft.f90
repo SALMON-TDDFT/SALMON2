@@ -19,6 +19,7 @@
 #include "config.h"
 
 subroutine main_tddft
+use,intrinsic::ieee_arithmetic,only:ieee_is_finite
 use math_constants, only: pi
 #ifdef USE_MPI
 use mpi, only: MPI_Comm_rank,MPI_Bcast,MPI_INTEGER,MPI_Allreduce,MPI_IN_PLACE,MPI_DOUBLE_PRECISION,&
@@ -296,7 +297,8 @@ subroutine run_dg_hybrid_continuation_rt()
     nproc_group_global,ierr)
   if(ierr==MPI_SUCCESS)call MPI_Allreduce(local_scale,global_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,&
     nproc_group_global,ierr)
-  if(ierr/=MPI_SUCCESS.or.global_bad/=0.or.global_defect>1d-10*global_scale)&
+  if(ierr/=MPI_SUCCESS.or.global_bad/=0.or..not.ieee_is_finite(global_defect).or.&
+      .not.ieee_is_finite(global_scale).or..not.(global_defect<=1d-10*global_scale))&
     error stop 'hybrid DG RT initial Hamiltonian reconstruction failed'
   call build_rt_dg_sparse_exchange(nproc_group_global,hybrid_state%global_count,hybrid_state%metric%fingerprint,&
     hybrid_state%metric%owned_row_ids,hybrid_state%metric%column_ids,metric_exchange,ok,message)

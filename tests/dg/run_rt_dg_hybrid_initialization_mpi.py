@@ -26,12 +26,17 @@ for forbidden in ("global_density", "global_potential", "projected(hybrid_state%
 assert physical_callback.count("redistribute_dg_row_owned_real_field_to_requests")>=2
 assert "call exchange_correlation_density" in physical_callback
 assert "spsi_in" not in physical_callback
+xc_source=(root/"src/xc/salmon_xc.f90").read_text().lower()
+density_xc=xc_source.split("subroutine exchange_correlation_density",1)[1].split(
+  "end subroutine exchange_correlation_density",1)[0]
+assert "xc_func%use_kinetic_energy.or.xc_func%use_current" in density_xc
 assert "global_row_failed" in physical_callback
 assert "mpi_allreduce(row_failed,global_row_failed" in physical_callback
 initial_update=main_rt_source.split("subroutine run_dg_hybrid_continuation_rt",1)[1].split(
   "end subroutine run_dg_hybrid_continuation_rt",1)[0]
 assert "hamiltonian_values==initial_hamiltonian" not in initial_update
-assert "global_defect>1d-10*global_scale" in initial_update
+assert ".not.(global_defect<=1d-10*global_scale)" in initial_update
+assert ".not.ieee_is_finite(global_defect)" in initial_update
 if os.environ.get("SALMON_LAPACK_LIBS"): libs=shlex.split(os.environ["SALMON_LAPACK_LIBS"])
 elif shutil.which("brew") and subprocess.run(["brew","--prefix","openblas"],capture_output=True).returncode==0:
   prefix=subprocess.check_output(["brew","--prefix","openblas"],text=True).strip();libs=[f"-L{prefix}/lib","-lopenblas"]

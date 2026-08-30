@@ -94,6 +94,8 @@ contains
     type(s_scalar)::Vxc(system%nspin)
     real(8)::E_xc
     type(s_orbital)::unused_orbitals
+    if(xc_func%use_kinetic_energy.or.xc_func%use_current)&
+      error stop 'density-only exchange-correlation does not support orbital-dependent functionals'
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,unused_orbitals,stencil,Vxc,E_xc)
   end subroutine exchange_correlation_density
 
