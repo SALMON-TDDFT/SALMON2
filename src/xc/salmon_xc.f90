@@ -106,6 +106,7 @@ contains
     ! real(8) :: vxc_tmp(mg%num(1), mg%num(2), mg%num(3))
     ! real(8) :: vxc_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
     real(8),allocatable :: rhd(:,:,:), delr(:,:,:,:), grho(:,:,:,:), lrho(:,:,:), j(:,:,:,:), tau(:,:,:)
+    real(8),allocatable :: n_orb(:,:,:)
     real(8),allocatable :: rdedd_tmp(:,:,:,:),rdedd(:,:,:),drdedd_tmp(:,:,:,:),drdedd(:,:,:)
     real(8),allocatable :: delr_s(:,:,:,:,:),j_s(:,:,:,:,:),tau_s(:,:,:,:)
     real(8),allocatable :: rdedd_tmp_s(:,:,:,:,:),drdedd_s(:,:,:,:)
@@ -199,6 +200,12 @@ contains
                    tau (mg%num(1), mg%num(2), mg%num(3)) )
          allocate (rdedd_tmp(mg%num(1), mg%num(2), mg%num(3),3), &
                    drdedd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+         ! The gauge-invariant tau needs the density of the very orbitals that give
+         ! j and tau; its presence tells calc_tau to accumulate it.
+         if (xc_func%xctype(1) == salmon_xctype_r2scan) then
+           allocate (n_orb(mg%num(1), mg%num(2), mg%num(3)))
+           n_orb = 0.d0
+         end if
          delr = 0.d0
          j = 0.d0
          tau = 0.d0
@@ -245,6 +252,9 @@ contains
 !$omp end parallel do
 
       call calc_tau
+      ! A functional carrying a tau operator is fed the gauge-invariant tau; the
+      ! others (TB-mBJ) subtract the current themselves and keep the bare tau.
+      if (xc_func%xctype(1) == salmon_xctype_r2scan) call build_gauge_invariant_tau
 
     elseif(nspin==2)then
 !$omp parallel do collapse(2) private(ix,iy,iz)
@@ -472,6 +482,56 @@ contains
     
   contains
 
+    ! The velocity field u = j/n_o and the kinetic-energy density it carries,
+    ! tau_GI = tau - u.j + n_o|u|^2/2 = (1/2) sum f |D psi|^2, from the orbital density
+    ! n_o of the same sweep.  This identity holds for whatever u is frozen in.
+    subroutine build_gauge_invariant_tau
+      implicit none
+      integer :: jx,jy,jz
+      real(8) :: n_pt,j_pt(3),u_pt(3)
+      real(8),parameter :: n_guard = 1d-40   ! j and tau vanish with n_o, so u stays finite
+
+      call claim_payload_field
+!$omp parallel do collapse(2) private(jx,jy,jz,n_pt,j_pt,u_pt)
+      do jz=1,mg%num(3)
+      do jy=1,mg%num(2)
+      do jx=1,mg%num(1)
+        n_pt = n_orb(jx,jy,jz)
+        j_pt(1:3) = j(jx,jy,jz,1:3)
+        u_pt(1:3) = j_pt(1:3) / max(n_pt, n_guard)
+        tau(jx,jy,jz) = tau(jx,jy,jz) - ( u_pt(1)*j_pt(1) + u_pt(2)*j_pt(2) + u_pt(3)*j_pt(3) ) &
+                      + 0.5d0*n_pt*( u_pt(1)**2 + u_pt(2)**2 + u_pt(3)**2 )
+        system%xc_payload%uvel%v(1:3,mg%is(1)+jx-1,mg%is(2)+jy-1,mg%is(3)+jz-1) = u_pt(1:3)
+      end do
+      end do
+      end do
+!$omp end parallel do
+
+      return
+    end subroutine build_gauge_invariant_tau
+
+    ! Gives u the current grid's index range, releasing a field kept from a grid of
+    ! different bounds.
+    subroutine claim_payload_field
+      implicit none
+
+      if (allocated(system%xc_payload%uvel%v)) then
+        if (lbound(system%xc_payload%uvel%v,2) /= mg%is(1) .or. &
+            ubound(system%xc_payload%uvel%v,2) /= mg%ie(1) .or. &
+            lbound(system%xc_payload%uvel%v,3) /= mg%is(2) .or. &
+            ubound(system%xc_payload%uvel%v,3) /= mg%ie(2) .or. &
+            lbound(system%xc_payload%uvel%v,4) /= mg%is(3) .or. &
+            ubound(system%xc_payload%uvel%v,4) /= mg%ie(3)) then
+          deallocate(system%xc_payload%uvel%v)
+        end if
+      end if
+      if (.not. allocated(system%xc_payload%uvel%v)) then
+        allocate(system%xc_payload%uvel%v(3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+      end if
+
+      return
+    end subroutine claim_payload_field
+
     ! Moves vtau from the evaluator's local (1:num) box onto the grid's
     ! halo-extended index range and exchanges the halo; vtau_has_shadow_values
     ! records that this has been done.
@@ -525,6 +585,7 @@ contains
                & j_tmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3), &
                & tau_tmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)), &
                & tau_tmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+      real(8),allocatable :: n_tmp1(:,:,:), n_tmp2(:,:,:)
       complex(8) :: gtpsi(3,mg%is_array(1):mg%ie_array(1) &
                          & ,mg%is_array(2):mg%ie_array(2) &
                          & ,mg%is_array(3):mg%ie_array(3))
@@ -534,6 +595,12 @@ contains
       
       tau_tmp1 = 0d0
       j_tmp1 = 0d0
+      ! The orbital density is swept only for the functional that freezes u on it.
+      if(allocated(n_orb)) then
+        allocate(n_tmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)), &
+               & n_tmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+        n_tmp1 = 0d0
+      end if
 
       if(allocated(spsi%rwf)) then
          if(info%if_divide_rspace) call update_overlap_real8(srg, mg, spsi%rwf)
@@ -569,14 +636,27 @@ contains
         end do
         end do
 !$omp end parallel do
-        
+
+        if(allocated(n_orb)) then
+!$omp parallel do collapse(2) private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            n_tmp1(ix,iy,iz) = n_tmp1(ix,iy,iz) + abs(spsi%zwf(ix,iy,iz,ispin,io,ik,im))**2*occ
+          end do
+          end do
+          end do
+!$omp end parallel do
+        end if
+
       end do
       end do
       end do
       
       call comm_summation(j_tmp1,j_tmp2,mg%num(1)*mg%num(2)*mg%num(3)*3,info%icomm_ko)
       call comm_summation(tau_tmp1,tau_tmp2,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_ko)
-      
+      if(allocated(n_orb)) call comm_summation(n_tmp1,n_tmp2,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_ko)
+
 !$omp parallel do collapse(2) private(iz,iy,ix)
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
@@ -587,6 +667,18 @@ contains
       end do
       end do
 !$omp end parallel do
+
+      if(allocated(n_orb)) then
+!$omp parallel do collapse(2) private(iz,iy,ix)
+        do iz=1,mg%num(3)
+        do iy=1,mg%num(2)
+        do ix=1,mg%num(1)
+          n_orb(ix,iy,iz) = n_tmp2(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
+        end do
+        end do
+        end do
+!$omp end parallel do
+      end if
 
       if(allocated(spsi%rwf)) deallocate(spsi%zwf)
   
@@ -612,7 +704,6 @@ contains
 
 
   subroutine init_xc(xc, spin, cval, xcname, xname, cname)
-    use salmon_global, only: yn_dc
     implicit none
     type(s_xc_functional), intent(inout) :: xc
     character(*), intent(in)           :: spin
@@ -715,15 +806,16 @@ contains
 
       case ('r2scan')
 
-        ! Built-in meta-GGA of n, |grad n| and tau.
+        ! Built-in meta-GGA of n, |grad n| and the gauge-invariant tau, which needs
+        ! the paramagnetic current as well.
         xc%xctype(1) = salmon_xctype_r2scan
         xc%use_gradient = .true.
         xc%use_kinetic_energy = .true.
+        xc%use_current = .true.
         if (xc%ispin /= 0) stop "Error: xc=r2scan is implemented for spin-unpolarized systems only"
 #ifdef USE_OPENACC
         stop "Error: xc=r2scan is unavailable for OpenACC builds"
 #endif
-        if (yn_dc == 'y') stop "Error: xc=r2scan is unavailable for divide-and-conquer DFT"
         return
 
       case ('tpss')
@@ -1355,8 +1447,9 @@ contains
     end subroutine exec_builtin_tbmbj
 
 
-    ! Built-in r2SCAN meta-GGA: from n, |grad n| and tau returns f = n*eps_xc with
-    ! df/dn, df/d|grad n| and df/dtau; df/dtau goes to hpsi through payload as the tau operator.
+    ! Built-in r2SCAN meta-GGA: from n, |grad n| and the gauge-invariant tau returns
+    ! f = n*eps_xc with df/dn, df/d|grad n| and df/dtau; df/dtau goes to hpsi through
+    ! payload as the tau operator.
     subroutine exec_builtin_r2scan()
       use nvtx_wrapper
       implicit none
@@ -1445,9 +1538,9 @@ contains
         if (allocated(payload%vtau%f)) deallocate(payload%vtau%f)
         allocate(payload%vtau%f(nx, ny, nz))
         payload%vtau%f = reshape(vtau_1d, (/nx, ny, nz/))
-        ! Rank-local grid sum of vtau*tau (no volume element/reduction yet --
-        ! both applied by the caller). tau_s_1d is the spin-resolved half, so
-        ! the total is twice it.
+        ! Rank-local grid sum of vtau*tau_GI (no volume element/reduction yet --
+        ! both applied by the caller). tau_s_1d is the spin-resolved half of the
+        ! gauge-invariant tau, so the total is twice it.
         payload%e_tau = sum(vtau_1d * (2d0 * tau_s_1d))
       end if
 

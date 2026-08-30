@@ -701,17 +701,23 @@ contains
   
 !===================================================================================================================================
 
-  subroutine calc_total_energy_dcdft(mg,system,info,v_local,spsi,shpsi,sttpsi,ewald,pp,rion_update,dc,energy)
+  subroutine calc_total_energy_dcdft(mg,system,info,stencil,srg,v_local,spsi,shpsi,sttpsi,ewald,pp,rion_update,dc,energy)
     use structures
     use communication, only: comm_summation
+    use hamiltonian, only: add_xc_tau_operator
+    use sendrecv_grid, only: update_overlap_real8
     use Total_Energy, only: calc_Total_Energy_periodic
     use salmon_global, only: kion !!!!!! future work: remove (kion --> system%kion)
     implicit none
     type(s_rgrid),        intent(in) :: mg
     type(s_dft_system),   intent(in) :: system
     type(s_parallel_info),intent(in) :: info
+    type(s_stencil),      intent(in) :: stencil
+    type(s_sendrecv_grid),intent(inout) :: srg
     type(s_scalar)       ,intent(in) :: v_local(system%nspin)
-    type(s_orbital),      intent(in) :: spsi,shpsi,sttpsi
+    ! intent(inout): the tau operator reads the orbital halo, which is refreshed here.
+    type(s_orbital),      intent(inout) :: spsi
+    type(s_orbital),      intent(in) :: shpsi,sttpsi
     type(s_ewald_ion_ion),intent(in) :: ewald
     type(s_pp_info)      ,intent(in) :: pp
     logical              ,intent(in) :: rion_update
@@ -721,6 +727,7 @@ contains
     integer :: ispin,io
     integer,dimension(3) :: is,ie
     real(8) :: E_tmp,E_local(2),E_sum(2)
+    type(s_orbital) :: staupsi
     
     is(1:3) = mg%is(1:3)
     ie(1:3) = min(mg%ie(1:3),dc%nxyz_domain(1:3)) ! core region only
@@ -752,10 +759,29 @@ contains
     end do
     end do
     E_local(2) = E_tmp
-    
+
+  ! meta-GGA: shpsi carries the tau operator, so the same core-region expectation
+  ! that E_ion_nloc just picked up is formed on its own and taken back out.  The
+  ! stencil crosses the core boundary, which a grid sum of vtau*tau_GI would miss.
+    if (system%xc_payload%use_tau_operator) then
+      if(info%if_divide_rspace) call update_overlap_real8(srg, mg, spsi%rwf)
+      call allocate_orbital_real(system%nspin,mg,info,staupsi)
+      call add_xc_tau_operator(staupsi,spsi,info,mg,system,stencil,srg)
+      E_tmp = 0d0
+      do ispin=1,system%Nspin
+      do io=info%io_s,info%io_e
+        E_tmp = E_tmp + system%rocc(io,1,ispin) &
+                    * sum(    spsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) &
+                        * staupsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,1,1) ) * system%Hvol
+      end do
+      end do
+      E_local(2) = E_local(2) - E_tmp
+      call deallocate_orbital(staupsi)
+    end if
+
   ! summation in each fragment
     call comm_summation(E_local,E_sum,2,info%icomm_rko)
-    
+
   ! summation over the total system
     E_local = 0d0
     if(info%id_rko == 0) E_local = E_sum ! info%id_rko == 0 : representative process of each fragment
