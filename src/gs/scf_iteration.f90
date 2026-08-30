@@ -83,7 +83,9 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
   use hamiltonian, only: update_vlocal
   implicit none
   type(s_rgrid),          intent(in)    :: lg,mg
-  type(s_dft_system),     intent(in)    :: system
+  ! intent(inout): exchange_correlation leaves a meta-GGA's kinetic-energy-density
+  ! derivative on system%xc_payload.  Nothing else here writes to system.
+  type(s_dft_system),     intent(inout) :: system
   type(s_parallel_info),  intent(in)    :: info
   type(s_stencil),        intent(in)    :: stencil
   type(s_xc_functional),  intent(in)    :: xc_func

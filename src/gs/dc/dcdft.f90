@@ -424,7 +424,9 @@ contains
     use communication, only: comm_summation
     use salmon_xc, only: exchange_correlation
     implicit none
-    type(s_dft_system),   intent(in)    :: system
+    ! intent(inout): exchange_correlation leaves a meta-GGA's
+    ! kinetic-energy-density derivative on system%xc_payload.
+    type(s_dft_system),   intent(inout) :: system
     type(s_rgrid),        intent(in)    :: mg
     type(s_parallel_info),intent(in)    :: info
     type(s_stencil),      intent(in)    :: stencil
