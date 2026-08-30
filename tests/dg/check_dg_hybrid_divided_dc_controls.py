@@ -46,14 +46,19 @@ prep = MAIN[MAIN.index("subroutine prepare_dg_hybrid_divided_production_basis") 
     "end subroutine", 1
 )[0]
 for token in (
-    "build_dg_hybrid_production_pw_basis",
+    "analyze_dg_hybrid_production_selection",
+    "freeze_dg_hybrid_production_selection",
     "redistribute_dg_hybrid_fragment_windows",
     "build_dg_hybrid_projected_fragment_basis",
 ):
     assert token in prep, f"divided route is missing production WF+PW construction: {token}"
-assert prep.index("build_dg_hybrid_production_pw_basis") < prep.index(
+assert prep.index("analyze_dg_hybrid_production_selection") < prep.index(
+    "freeze_dg_hybrid_production_selection"
+)
+assert prep.index("freeze_dg_hybrid_production_selection") < prep.index(
     "build_dg_hybrid_projected_fragment_basis"
 )
+assert "build_dg_hybrid_production_pw_basis" not in prep
 assert "core_fragment_ids=dc%i_frag" not in prep, (
     "pencil-owned core points must not inherit one rank-local fragment id"
 )
@@ -81,6 +86,19 @@ assert "core_fragment_ids=0" not in prep
 assert "do point=1,ncore_arg" in prep
 assert "core_fragment_ids(point)=0" in prep
 assert "dc%rho_tot" in DCDTF
+density_loader = DCDTF[DCDTF.index("subroutine load_dg_hybrid_distributed_dc_density") :]
+density_loader = density_loader.split("end subroutine load_dg_hybrid_distributed_dc_density", 1)[0]
+for token in (
+    "point_multiplicity",
+    "any(point_multiplicity/=1)",
+    "distributed dc density catalog is not exactly once",
+    "distributed dc density count exchange failed",
+):
+    assert token in density_loader, f"distributed density loader lacks catalog/error contract: {token}"
+count_exchange = density_loader.index("call mpi_alltoall(send_counts")
+assert count_exchange < density_loader.index("if(ierr/=mpi_success", count_exchange) < density_loader.index(
+    "recv_displs(1)=0", count_exchange
+)
 callback_start = "subroutine apply_dg_hybrid_divided_fragment_hpsi"
 assert callback_start in MAIN, "missing divided fragment Hamiltonian callback"
 callback = MAIN[MAIN.index(callback_start) :].split("end subroutine", 1)[0]

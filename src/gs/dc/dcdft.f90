@@ -1012,7 +1012,8 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     integer::rank,nproc,ierr,p,r,owner,local_bad,global_bad,gx,gy,gz
-    integer,allocatable::bounds(:,:),send_counts(:),recv_counts(:),send_displs(:),recv_displs(:),cursor(:)
+    integer,allocatable::bounds(:,:),send_counts(:),recv_counts(:),send_displs(:),recv_displs(:),cursor(:),&
+      point_multiplicity(:,:,:)
     integer(int64),allocatable::send_ids(:),recv_ids(:)
     real(8),allocatable::send_values(:),recv_values(:)
 
@@ -1041,6 +1042,11 @@ contains
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='distributed DC density point has no unique owner';return;endif
     call MPI_Alltoall(send_counts,1,MPI_INTEGER,recv_counts,1,MPI_INTEGER,dc%icomm_tot,ierr)
+    local_bad=merge(0,1,ierr==MPI_SUCCESS)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='distributed DC density count exchange failed';return
+    endif
     send_displs(1)=0;recv_displs(1)=0
     do r=2,nproc
       send_displs(r)=send_displs(r-1)+send_counts(r-1);recv_displs(r)=recv_displs(r-1)+recv_counts(r-1)
@@ -1058,9 +1064,25 @@ contains
     enddo
     call MPI_Alltoallv(send_ids,send_counts,send_displs,MPI_INTEGER8,recv_ids,recv_counts,recv_displs,&
       MPI_INTEGER8,dc%icomm_tot,ierr)
-    if(ierr==MPI_SUCCESS)call MPI_Alltoallv(send_values,send_counts,send_displs,MPI_DOUBLE_PRECISION,&
+    local_bad=merge(0,1,ierr==MPI_SUCCESS)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='distributed DC density ID exchange failed';return;endif
+    call MPI_Alltoallv(send_values,send_counts,send_displs,MPI_DOUBLE_PRECISION,&
       recv_values,recv_counts,recv_displs,MPI_DOUBLE_PRECISION,dc%icomm_tot,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='distributed DC density exchange failed';return;endif
+    local_bad=merge(0,1,ierr==MPI_SUCCESS)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='distributed DC density value exchange failed';return;endif
+    allocate(point_multiplicity(dc%mg_tot%is(1):dc%mg_tot%ie(1),dc%mg_tot%is(2):dc%mg_tot%ie(2),&
+      dc%mg_tot%is(3):dc%mg_tot%ie(3)));point_multiplicity=0
+    do p=1,size(recv_ids)
+      call decode_density_point(recv_ids(p),dc%lg_tot%num,gx,gy,gz)
+      point_multiplicity(gx,gy,gz)=point_multiplicity(gx,gy,gz)+1
+    enddo
+    local_bad=merge(0,1,.not.any(point_multiplicity/=1))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='distributed DC density catalog is not exactly once';return
+    endif
     dc%rho_tot_s(1)%f=0d0
     do p=1,size(recv_ids)
       call decode_density_point(recv_ids(p),dc%lg_tot%num,gx,gy,gz)
