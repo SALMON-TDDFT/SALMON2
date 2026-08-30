@@ -46,14 +46,18 @@ prep = MAIN[MAIN.index("subroutine prepare_dg_hybrid_divided_production_basis") 
     "end subroutine", 1
 )[0]
 for token in (
-    "analyze_dg_hybrid_production_selection",
+    "analyze_dg_hybrid_lcfo_selection",
     "freeze_dg_hybrid_production_selection",
     "redistribute_dg_hybrid_fragment_windows",
     "build_dg_hybrid_projected_fragment_basis",
 ):
     assert token in prep, f"divided route is missing production WF+PW construction: {token}"
-assert prep.index("analyze_dg_hybrid_production_selection") < prep.index(
+assert prep.index("analyze_dg_hybrid_lcfo_selection") < prep.index(
     "freeze_dg_hybrid_production_selection"
+)
+lcfo_call = prep[prep.index("call analyze_dg_hybrid_lcfo_selection") :]
+assert "basis_fingerprint_arg" in lcfo_call.split("if(.not.callback_ok)return", 1)[0], (
+    "LCFO-deferred production preparation omits authoritative Wannier provenance"
 )
 assert prep.index("freeze_dg_hybrid_production_selection") < prep.index(
     "build_dg_hybrid_projected_fragment_basis"
