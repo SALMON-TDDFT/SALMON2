@@ -8,8 +8,116 @@ module dg_hybrid_broken_volume
   implicit none
   private
   public::assemble_dg_hybrid_broken_volume_rows,assemble_dg_hybrid_exact_nonlocal_rows,&
-    collect_dg_hybrid_exact_projector_overlaps
+    collect_dg_hybrid_exact_projector_overlaps,assemble_dg_hybrid_local_potential_rows
 contains
+  subroutine assemble_dg_hybrid_local_potential_rows(comm,global_basis_count,row_ids,basis_fragment,&
+      interior_ids,interior_fragment,weights,basis_values,local_potential,local_rows,diagnostics,ok,message)
+    integer,intent(in)::comm,global_basis_count,basis_fragment(:),interior_fragment(:)
+    integer(int64),intent(in)::row_ids(:),interior_ids(:)
+    real(real64),intent(in)::weights(:),local_potential(:)
+    complex(real64),intent(in)::basis_values(:,:)
+    complex(real64),allocatable,intent(out)::local_rows(:,:)
+    real(real64),intent(out)::diagnostics(2)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,nproc,ierr,local_bad,global_bad,nlocal,nowned,total_points,max_point
+    integer::i,j,p,r,row,nrows,offset
+    integer,allocatable::row_counts(:),row_displs(:),all_rows(:),row_owner(:),point_ownership(:)
+    integer(int64),allocatable::all_row_ids(:)
+    complex(real64),allocatable::partial(:,:),reduced(:,:),remote(:)
+    real(real64)::local_defect,global_defect,local_scale,global_scale
+
+    ok=.false.;message='';diagnostics=huge(1d0);local_bad=0
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
+    nlocal=size(interior_ids);nowned=size(row_ids)
+    if(global_basis_count<1.or.size(basis_fragment)/=global_basis_count.or.&
+        size(interior_fragment)/=nlocal.or.size(weights)/=nlocal.or.size(local_potential)/=nlocal.or.&
+        any(shape(basis_values)/=[global_basis_count,nlocal]).or.&
+        any(row_ids<1_int64).or.any(row_ids>int(global_basis_count,int64)).or.any(interior_ids<1_int64).or.&
+        any(basis_fragment<1).or.any(interior_fragment<1).or.any(weights<=0d0).or.&
+        .not.all(ieee_is_finite(weights)).or..not.all(ieee_is_finite(local_potential)).or.&
+        .not.finite_matrix(basis_values))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid local-potential projection contract';return;endif
+
+    allocate(row_counts(nproc),row_displs(nproc))
+    call MPI_Allgather(nowned,1,MPI_INTEGER,row_counts,1,MPI_INTEGER,comm,ierr)
+    row_displs(1)=0
+    do r=2,nproc;row_displs(r)=row_displs(r-1)+row_counts(r-1);enddo
+    allocate(all_row_ids(sum(row_counts)),all_rows(sum(row_counts)),row_owner(global_basis_count))
+    call MPI_Allgatherv(row_ids,nowned,MPI_INTEGER8,all_row_ids,row_counts,row_displs,MPI_INTEGER8,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.size(all_row_ids)/=global_basis_count)then
+      message='local-potential basis rows are incomplete';return
+    endif
+    all_rows=int(all_row_ids);row_owner=-1
+    do r=1,nproc;do i=1,row_counts(r)
+      row=all_rows(row_displs(r)+i)
+      if(row<1.or.row>global_basis_count.or.row_owner(row)/=-1)local_bad=1
+      if(row>=1.and.row<=global_basis_count)row_owner(row)=r-1
+    enddo;enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0.or.any(row_owner<0))then
+      message='local-potential basis rows are not owned exactly once';return
+    endif
+
+    call MPI_Allreduce(nlocal,total_points,1,MPI_INTEGER,MPI_SUM,comm,ierr)
+    max_point=0;if(nlocal>0)max_point=int(maxval(interior_ids))
+    call MPI_Allreduce(MPI_IN_PLACE,max_point,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.max_point/=total_points)then
+      message='local-potential interior points are incomplete';return
+    endif
+    allocate(point_ownership(max_point));point_ownership=0
+    do p=1,nlocal;point_ownership(int(interior_ids(p)))=point_ownership(int(interior_ids(p)))+1;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,point_ownership,max_point,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(point_ownership/=1))then
+      message='local-potential interior points are not owned exactly once';return
+    endif
+
+    allocate(local_rows(nowned,global_basis_count));local_rows=(0d0,0d0)
+    do r=0,nproc-1
+      nrows=row_counts(r+1);offset=row_displs(r+1)
+      allocate(partial(nrows,global_basis_count),reduced(nrows,global_basis_count));partial=(0d0,0d0)
+      do i=1,nrows
+        row=all_rows(offset+i)
+        do p=1,nlocal
+          if(basis_fragment(row)/=interior_fragment(p))cycle
+          do j=1,global_basis_count
+            if(basis_fragment(j)/=interior_fragment(p))cycle
+            partial(i,j)=partial(i,j)+weights(p)*local_potential(p)*&
+              conjg(basis_values(row,p))*basis_values(j,p)
+          enddo
+        enddo
+      enddo
+      call MPI_Reduce(partial,reduced,nrows*global_basis_count,MPI_DOUBLE_COMPLEX,MPI_SUM,r,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='local-potential row reduction failed';return;endif
+      if(rank==r)local_rows=reduced
+      deallocate(partial,reduced)
+    enddo
+
+    allocate(remote(global_basis_count));local_defect=0d0;local_scale=1d0
+    if(nowned>0)local_scale=max(local_scale,maxval(abs(local_rows)))
+    do row=1,global_basis_count
+      remote=(0d0,0d0)
+      if(rank==row_owner(row))then;i=findloc(row_ids,int(row,int64),dim=1);remote=local_rows(i,:);endif
+      call MPI_Bcast(remote,global_basis_count,MPI_DOUBLE_COMPLEX,row_owner(row),comm,ierr)
+      do i=1,nowned
+        local_defect=max(local_defect,abs(local_rows(i,row)-conjg(remote(int(row_ids(i))))))
+      enddo
+    enddo
+    call MPI_Allreduce(local_defect,global_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(local_scale,global_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    diagnostics=[global_defect,global_scale]
+    if(ierr/=MPI_SUCCESS.or.global_defect>1d-12*global_scale)then
+      message='local-potential rows are not Hermitian';return
+    endif
+    ok=.true.;message=''
+#else
+    ok=.false.;message='MPI is required for local-potential projection';diagnostics=huge(1d0)
+#endif
+  end subroutine assemble_dg_hybrid_local_potential_rows
+
   subroutine collect_dg_hybrid_exact_projector_overlaps(comm,global_basis_count,atom_ids,ordinals,strength,&
       partial_overlap,projector_ids,projector_owner,complete_strength,complete_overlap,ok,message)
     integer,intent(in)::comm,global_basis_count,atom_ids(:),ordinals(:)

@@ -35,6 +35,11 @@ module dg_hybrid_continuation_controller
     logical::real_space_ok=.false.,finite_ok=.false.,gap_shrinking=.false.
   end type s_dg_hybrid_stage_report
 
+  type,public::s_dg_hybrid_stage_schedule
+    integer::ordinary_limit=0,ordinary_solve_count=0,refresh_solve_count=0
+    logical::refresh_pending=.false.,refresh_active=.false.
+  end type s_dg_hybrid_stage_schedule
+
   type,public::s_dg_hybrid_controller
     logical::valid=.false.,trial_active=.false.,trace_valid=.false.,rollback_since_accept=.false.
     real(real64)::accepted_lambda=0d0,trial_lambda=0d0,step=0d0
@@ -48,8 +53,52 @@ module dg_hybrid_continuation_controller
   public::default_dg_hybrid_controller_controls,dg_hybrid_stage_tolerances,&
     validate_dg_hybrid_controller_contract,&
     initialize_dg_hybrid_controller,propose_dg_hybrid_trial,observe_dg_hybrid_inner_residuals,&
-    decide_dg_hybrid_stage,reject_dg_hybrid_trial
+    decide_dg_hybrid_stage,reject_dg_hybrid_trial,initialize_dg_hybrid_stage_schedule,&
+    begin_dg_hybrid_stage_solve,schedule_dg_hybrid_candidate_checks,complete_dg_hybrid_stage_solve
 contains
+  pure subroutine initialize_dg_hybrid_stage_schedule(iteration_limit,schedule)
+    integer,intent(in)::iteration_limit
+    type(s_dg_hybrid_stage_schedule),intent(out)::schedule
+    schedule=s_dg_hybrid_stage_schedule()
+    schedule%ordinary_limit=max(0,iteration_limit)
+  end subroutine initialize_dg_hybrid_stage_schedule
+
+  pure subroutine begin_dg_hybrid_stage_solve(schedule,run_solve,iteration)
+    type(s_dg_hybrid_stage_schedule),intent(inout)::schedule
+    logical,intent(out)::run_solve
+    integer,intent(out)::iteration
+    run_solve=.false.;iteration=schedule%ordinary_solve_count+schedule%refresh_solve_count
+    if(schedule%refresh_pending)then
+      schedule%refresh_pending=.false.;schedule%refresh_active=.true.
+      schedule%refresh_solve_count=schedule%refresh_solve_count+1
+      iteration=schedule%ordinary_limit+schedule%refresh_solve_count;run_solve=.true.
+    else if(.not.schedule%refresh_active.and.schedule%ordinary_solve_count<schedule%ordinary_limit)then
+      schedule%ordinary_solve_count=schedule%ordinary_solve_count+1
+      iteration=schedule%ordinary_solve_count;run_solve=.true.
+    endif
+  end subroutine begin_dg_hybrid_stage_solve
+
+  pure subroutine schedule_dg_hybrid_candidate_checks(schedule,cheap_candidate,run_expensive)
+    type(s_dg_hybrid_stage_schedule),intent(in)::schedule
+    logical,intent(in)::cheap_candidate
+    logical,intent(out)::run_expensive
+    run_expensive=cheap_candidate
+  end subroutine schedule_dg_hybrid_candidate_checks
+
+  pure subroutine complete_dg_hybrid_stage_solve(schedule,stage_converged,trial_lambda,&
+      refresh_scheduled,final_refresh_performed)
+    type(s_dg_hybrid_stage_schedule),intent(inout)::schedule
+    logical,intent(in)::stage_converged
+    real(real64),intent(in)::trial_lambda
+    logical,intent(out)::refresh_scheduled,final_refresh_performed
+    refresh_scheduled=.false.;final_refresh_performed=.false.
+    if(schedule%refresh_active)then
+      final_refresh_performed=stage_converged;schedule%refresh_active=.false.
+    else if(stage_converged.and.trial_lambda==1d0.and.schedule%refresh_solve_count==0)then
+      schedule%refresh_pending=.true.;refresh_scheduled=.true.
+    endif
+  end subroutine complete_dg_hybrid_stage_solve
+
   subroutine validate_dg_hybrid_controller_contract(icomm,controls,ok,message)
     integer,intent(in)::icomm;type(s_dg_hybrid_controller_controls),intent(in)::controls
     logical,intent(out)::ok;character(*),intent(out)::message

@@ -3,7 +3,8 @@ program test_dg_hybrid_broken_volume_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows,&
-    assemble_dg_hybrid_exact_nonlocal_rows,collect_dg_hybrid_exact_projector_overlaps
+    assemble_dg_hybrid_local_potential_rows,assemble_dg_hybrid_exact_nonlocal_rows,&
+    collect_dg_hybrid_exact_projector_overlaps
   implicit none
   integer,parameter::nbasis=5,npoint=5
   integer::comm,rank,nproc,ierr,i,j,p,nlocal,nrow,ip,ir
@@ -12,6 +13,7 @@ program test_dg_hybrid_broken_volume_mpi
   integer(int64),allocatable::point_ids(:),row_ids(:)
   real(real64),allocatable::weights(:),potential(:)
   complex(real64),allocatable::values(:,:),gradients(:,:,:),kinetic(:,:),local_rows(:,:)
+  complex(real64),allocatable::local_only_rows(:,:)
   complex(real64),allocatable::nonlocal_rows(:,:)
   complex(real64),allocatable::partial_projector_overlap(:,:),collected_projector_overlap(:,:)
   integer(int64),allocatable::collected_projector_ids(:)
@@ -82,6 +84,11 @@ program test_dg_hybrid_broken_volume_mpi
   enddo
   call require(checks_ok,'broken-volume rows differ from the analytic fragment reference')
   call require(all(diagnostics>=0d0),'invalid broken-volume diagnostics')
+  call assemble_dg_hybrid_local_potential_rows(comm,nbasis,row_ids,basis_fragment,point_ids,&
+    local_point_fragment,weights,values,potential,local_only_rows,diagnostics(1:2),ok,message)
+  call require(ok,trim(message))
+  call require(maxval(abs(local_only_rows-local_rows))<2d-13,&
+    'local-potential-only rows differ from the combined assembler')
   allocate(partial_projector_overlap(nbasis,2));partial_projector_overlap=(0d0,0d0)
   do ip=1,nlocal
     p=int(point_ids(ip))

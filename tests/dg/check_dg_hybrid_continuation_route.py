@@ -15,6 +15,7 @@ for token in [
     "freeze_dg_hybrid_basis_directory",
     "materialize_dg_hybrid_production_interior",
     "assemble_dg_hybrid_broken_volume_rows",
+    "assemble_dg_hybrid_local_potential_rows",
     "assemble_dg_hybrid_divided_nonlocal_rows",
     "freeze_dg_hybrid_variational_payload",
     "materialize_dg_hybrid_production_face_collection",
@@ -76,7 +77,7 @@ required = [
     "fixed_payload",
     "production_faces",
     "dg_dc_update_potential_from_density",
-    "assemble_dg_hybrid_broken_volume_rows",
+    "assemble_dg_hybrid_local_potential_rows",
     "compose_dg_hybrid_variational_hamiltonian",
     "reconstruct_dg_hybrid_occupied_state",
     "reconstruct_dg_hybrid_production_interface_state",
@@ -104,6 +105,11 @@ for forbidden in [
 assert implementation.index("accepted_lambda==1d0") < implementation.index(
     "validate_dg_hybrid_ground_state"
 ), "lambda-one state is published before the final refresh gate"
+assert "real(8),parameter::density_damping" not in implementation
+assert "continuation_controller%controls%density_damping" in implementation
+assert "schedule_dg_hybrid_candidate_checks" in implementation
+assert "begin_dg_hybrid_stage_solve" in implementation
+assert "complete_dg_hybrid_stage_solve" in implementation
 assert "stage_report%gap_shrinking=.false." not in implementation, (
     "adaptive lambda must use the measured occupied-unoccupied gap"
 )

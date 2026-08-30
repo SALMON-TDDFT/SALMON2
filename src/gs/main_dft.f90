@@ -115,15 +115,18 @@ use dg_hybrid_production_face_traces,only:s_dg_hybrid_production_face_trace,&
   freeze_dg_hybrid_basis_directory,materialize_dg_hybrid_production_face_collection,&
   assemble_dg_hybrid_production_interface_rows,materialize_dg_hybrid_production_interior,&
   reconstruct_dg_hybrid_production_interface_state
-use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows
+use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows,assemble_dg_hybrid_local_potential_rows
 use dg_hybrid_variational_payload,only:s_dg_hybrid_fixed_payload,s_dg_hybrid_variational_iterate,&
   freeze_dg_hybrid_variational_payload,compose_dg_hybrid_variational_hamiltonian
 use dg_hybrid_continuation_residuals,only:s_dg_hybrid_residuals,evaluate_dg_hybrid_residuals
 use dg_hybrid_real_space_residual,only:evaluate_dg_hybrid_real_space_residual
 use dg_hybrid_continuation_controller,only:s_dg_hybrid_controller_controls,s_dg_hybrid_trial_state,&
+  s_dg_hybrid_stage_schedule,&
   s_dg_hybrid_stage_report,s_dg_hybrid_controller,default_dg_hybrid_controller_controls,&
   dg_hybrid_stage_tolerances,initialize_dg_hybrid_controller,propose_dg_hybrid_trial,&
-  observe_dg_hybrid_inner_residuals,decide_dg_hybrid_stage,reject_dg_hybrid_trial
+  observe_dg_hybrid_inner_residuals,decide_dg_hybrid_stage,reject_dg_hybrid_trial,&
+  initialize_dg_hybrid_stage_schedule,begin_dg_hybrid_stage_solve,&
+  schedule_dg_hybrid_candidate_checks,complete_dg_hybrid_stage_solve
 use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_fragment_basis
 use dg_hybrid_fragment_solver,only:solve_dg_hybrid_fragment_basis
 use dg_hybrid_divided_scf,only:run_dg_hybrid_divided_scf
@@ -2671,7 +2674,7 @@ contains
         if(.not.ok)error stop 'DG continuation retained-basis symmetry representation failed'
         call run_dg_hybrid_concrete_continuation(divided_initial_density,divided_effective_ids,&
           divided_lcfo_row_ids,divided_basis_fragment,dg_hybrid_interior_fragment,&
-          dg_hybrid_interior_weights,dg_hybrid_interior_values,dg_hybrid_interior_gradients,&
+          dg_hybrid_interior_weights,dg_hybrid_interior_values,&
           dg_hybrid_interior_kinetic_action,dg_hybrid_interior_nonlocal_action,dg_hybrid_fixed_payload,&
           divided_production_faces,occupations,divided_basis_representation,&
           ow_hybrid_ground_state,dg_hybrid_final_density,dg_hybrid_final_trace,&
@@ -4035,22 +4038,20 @@ contains
   end subroutine update_dg_hybrid_divided_potential
 
   subroutine run_dg_hybrid_concrete_continuation(dc_seed_density,effective_ids,row_ids,basis_fragment,&
-      interior_fragment,interior_weights,interior_values,interior_gradients,interior_kinetic_action,&
+      interior_fragment,interior_weights,interior_values,interior_kinetic_action,&
       interior_nonlocal_action,fixed_payload,production_faces,&
       occupied_occupations,basis_representation,final_ground_state,final_density,final_trace,&
       final_hamiltonian_rows)
     real(8),intent(in)::dc_seed_density(:),interior_weights(:),occupied_occupations(:)
     integer,intent(in)::effective_ids(:),basis_fragment(:),interior_fragment(:)
     integer(8),intent(in)::row_ids(:)
-    complex(8),intent(in)::interior_values(:,:),interior_gradients(:,:,:),&
-      interior_kinetic_action(:,:),interior_nonlocal_action(:,:)
+    complex(8),intent(in)::interior_values(:,:),interior_kinetic_action(:,:),interior_nonlocal_action(:,:)
     complex(8),intent(in)::basis_representation(:,:,:)
     type(s_dg_hybrid_fixed_payload),intent(in)::fixed_payload
     type(s_dg_hybrid_production_face_trace),intent(in)::production_faces(:)
     type(s_dg_hybrid_ground_state),intent(out)::final_ground_state
     real(8),allocatable,intent(out)::final_density(:)
     complex(8),allocatable,intent(out)::final_trace(:,:),final_hamiltonian_rows(:,:)
-    real(8),parameter::density_damping=0.5d0
     real(8)::accepted_lambda,trial_lambda,electron_count,max_residual,&
       orthogonality_defect,projector_defect,projector_change,local_norm,global_norm,&
       local_projector_scale,global_projector_scale,symmetry_residual
@@ -4058,7 +4059,7 @@ contains
     real(8)::broken_diagnostics(4)
     real(8),allocatable::rho_in(:),rho_out(:),local_potential(:),density4(:,:,:,:),&
       eigenvalues(:),solver_eigenvalues(:)
-    complex(8),allocatable::local_rows(:,:),discarded_kinetic(:,:),coefficients(:,:),solver_coefficients(:,:),&
+    complex(8),allocatable::local_rows(:,:),coefficients(:,:),solver_coefficients(:,:),&
       gamma_rows(:,:),projector_rows(:,:),s_coefficients(:,:),interface_state(:,:),&
       previous_interface_state(:,:),hc(:,:),sc_epsilon(:,:),full_action_values(:,:)
     type(s_dg_hybrid_variational_iterate)::iterate
@@ -4067,10 +4068,12 @@ contains
     type(s_dg_hybrid_trial_state)::trial_state
     type(s_dg_hybrid_stage_report)::stage_report
     type(s_dg_hybrid_controller)::continuation_controller
+    type(s_dg_hybrid_stage_schedule)::stage_schedule
     integer(8)::solver_workspace,solver_fingerprint,final_operator_fingerprint,&
       final_state_workspace,final_state_fingerprint
     integer::iteration,ierr_local,rank_local,continuation_state_count,p
-    logical::stage_converged,reject_trial,local_ok,accept_stage,final_refresh_performed
+    logical::stage_converged,reject_trial,local_ok,accept_stage,final_refresh_performed,cheap_candidate,&
+      run_solve,run_expensive,refresh_scheduled
     character(256)::continuation_message
     real(8)::occupied_unoccupied_gap,accepted_gap
     real(8)::hamiltonian_hermiticity,hamiltonian_scale
@@ -4086,21 +4089,25 @@ contains
     accepted_lambda=0d0;trial_lambda=0d0;accepted_gap=huge(1d0)
     call default_dg_hybrid_controller_controls(continuation_controls)
     continuation_controls%iteration_limit=nscf
+    continuation_controller%controls=continuation_controls
+    allocate(density4(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),1))
+    allocate(full_action_values(size(effective_ids),size(ow_core_ids)))
     do while(accepted_lambda<1d0.or.trial_lambda==0d0)
       stage_converged=.false.;reject_trial=.false.;final_refresh_performed=.false.
-      do iteration=1,nscf
+      call initialize_dg_hybrid_stage_schedule(nscf,stage_schedule)
+stage_pass: do
+        call begin_dg_hybrid_stage_solve(stage_schedule,run_solve,iteration)
+        if(.not.run_solve)exit stage_pass
         call gather_dg_hybrid_divided_core_density(rho_in,ow_hybrid_divided_total_density,local_ok)
         if(.not.local_ok)error stop 'DG continuation density assembly failed'
-        allocate(density4(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3),1))
         density4(:,:,:,1)=ow_hybrid_divided_total_density
         call dg_dc_update_potential_from_density(density4,local_ok,continuation_message)
-        deallocate(density4)
         if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation potential update failed';endif
         call extract_dg_hybrid_core_local_potential(ow_core_ids,local_potential,local_ok)
         if(.not.local_ok)error stop 'DG continuation local-potential extraction failed'
-        call assemble_dg_hybrid_broken_volume_rows(dc%icomm_tot,size(effective_ids),&
-          row_ids,basis_fragment,ow_core_ids,interior_fragment,interior_weights,interior_values,interior_gradients,&
-          local_potential,discarded_kinetic,local_rows,broken_diagnostics,local_ok,continuation_message)
+        call assemble_dg_hybrid_local_potential_rows(dc%icomm_tot,size(effective_ids),&
+          row_ids,basis_fragment,ow_core_ids,interior_fragment,interior_weights,interior_values,&
+          local_potential,local_rows,broken_diagnostics(1:2),local_ok,continuation_message)
         if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation local projection failed';endif
         call compose_dg_hybrid_variational_hamiltonian(dc%icomm_tot,fixed_payload,&
           local_rows,trial_lambda,iteration,iterate,local_ok,continuation_message)
@@ -4130,23 +4137,6 @@ contains
         call evaluate_dg_hybrid_residuals(dc%icomm_tot,hc,sc_epsilon,coefficients,s_coefficients,&
           rho_out,rho_in,interface_state,previous_interface_state,residuals,local_ok,continuation_message)
         if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation residual evaluation failed';endif
-        if(allocated(full_action_values))deallocate(full_action_values)
-        allocate(full_action_values,source=interior_kinetic_action+interior_nonlocal_action)
-        do p=1,size(ow_core_ids)
-          full_action_values(:,p)=full_action_values(:,p)+local_potential(p)*interior_values(:,p)
-        enddo
-        call evaluate_dg_hybrid_real_space_residual(dc%icomm_tot,int(product(int(dc%lg_tot%num,8))),&
-          ow_core_ids,interior_weights,size(effective_ids),row_ids,interior_values,full_action_values,&
-          coefficients,eigenvalues,real_space_residual,local_ok,continuation_message)
-        if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG strong residual evaluation failed';endif
-        call measure_dg_hybrid_operator_covariance(dc%icomm_tot,row_ids,iterate%hamiltonian_rows,&
-          basis_representation,symmetry_residual,local_ok)
-        if(.not.local_ok)error stop 'DG continuation Hamiltonian covariance measurement failed'
-        call measure_dg_hybrid_projector_covariance(dc%icomm_tot,row_ids,projector_rows,&
-          basis_representation,projector_symmetry_residual,local_ok)
-        if(.not.local_ok)error stop 'DG continuation occupied-projector covariance measurement failed'
-        call ow_distributed_hermiticity(dc%icomm_tot,row_ids,iterate%hamiltonian_rows,&
-          hamiltonian_hermiticity,hamiltonian_scale,hamiltonian_finite)
         if(continuation_controller%valid)then
           local_norm=sum(abs(projector_rows-continuation_controller%accepted_state%projector)**2)
           local_projector_scale=sum(abs(continuation_controller%accepted_state%projector)**2)
@@ -4168,20 +4158,44 @@ contains
         else
           stage_report%tolerances=continuation_controls%intermediate_tolerance
         endif
-        stage_converged=all([residuals%r_h,residuals%r_rho,residuals%r_t,residuals%r_s]<=&
-          stage_report%tolerances).and.real_space_residual<=stage_report%tolerances(1).and.&
-          abs(electron_count-dc%elec_num_tot)<=dg_dc_gs_electron_count_tolerance.and.projector_change<=0.1d0.and.&
+        cheap_candidate=all([residuals%r_h,residuals%r_rho,residuals%r_t,residuals%r_s]<=&
+          stage_report%tolerances).and.abs(electron_count-dc%elec_num_tot)<=&
+          dg_dc_gs_electron_count_tolerance.and.projector_change<=0.1d0
+        real_space_residual=huge(1d0);symmetry_residual=huge(1d0);projector_symmetry_residual=huge(1d0)
+        hamiltonian_hermiticity=huge(1d0);hamiltonian_scale=1d0;hamiltonian_finite=.false.
+        call schedule_dg_hybrid_candidate_checks(stage_schedule,cheap_candidate,run_expensive)
+        if(run_expensive)then
+          full_action_values=interior_kinetic_action+interior_nonlocal_action
+          do p=1,size(ow_core_ids)
+            full_action_values(:,p)=full_action_values(:,p)+local_potential(p)*interior_values(:,p)
+          enddo
+          call evaluate_dg_hybrid_real_space_residual(dc%icomm_tot,int(product(int(dc%lg_tot%num,8))),&
+            ow_core_ids,interior_weights,size(effective_ids),row_ids,interior_values,full_action_values,&
+            coefficients,eigenvalues,real_space_residual,local_ok,continuation_message)
+          if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG strong residual evaluation failed';endif
+          call measure_dg_hybrid_operator_covariance(dc%icomm_tot,row_ids,iterate%hamiltonian_rows,&
+            basis_representation,symmetry_residual,local_ok)
+          if(.not.local_ok)error stop 'DG continuation Hamiltonian covariance measurement failed'
+          call measure_dg_hybrid_projector_covariance(dc%icomm_tot,row_ids,projector_rows,&
+            basis_representation,projector_symmetry_residual,local_ok)
+          if(.not.local_ok)error stop 'DG continuation occupied-projector covariance measurement failed'
+          call ow_distributed_hermiticity(dc%icomm_tot,row_ids,iterate%hamiltonian_rows,&
+            hamiltonian_hermiticity,hamiltonian_scale,hamiltonian_finite)
+        endif
+        stage_converged=cheap_candidate.and.real_space_residual<=stage_report%tolerances(1).and.&
           symmetry_residual<=dg_ow_symmetry_tolerance.and.projector_symmetry_residual<=dg_ow_symmetry_tolerance.and.&
           occupied_unoccupied_gap>dg_dc_gs_final_orbital_tolerance.and.hamiltonian_finite.and.&
           hamiltonian_hermiticity<=dg_dc_gs_hermiticity_tolerance*max(1d0,hamiltonian_scale)
-        if(stage_converged.and.trial_lambda==1d0.and..not.final_refresh_performed)then
-          rho_in=rho_out;previous_interface_state=interface_state
-          final_refresh_performed=.true.;stage_converged=.false.;cycle
+        call complete_dg_hybrid_stage_solve(stage_schedule,stage_converged,trial_lambda,&
+          refresh_scheduled,final_refresh_performed)
+        if(refresh_scheduled)then
+          rho_in=rho_out;previous_interface_state=interface_state;stage_converged=.false.
+          cycle stage_pass
         endif
-        if(stage_converged)exit
-        rho_in=rho_in+density_damping*(rho_out-rho_in)
+        if(stage_converged)exit stage_pass
+        rho_in=rho_in+continuation_controller%controls%density_damping*(rho_out-rho_in)
         previous_interface_state=interface_state
-      enddo
+      enddo stage_pass
       if(.not.stage_converged)reject_trial=.true.
       if(reject_trial)then
         call reject_dg_hybrid_trial(dc%icomm_tot,continuation_controller,trial_state,&
