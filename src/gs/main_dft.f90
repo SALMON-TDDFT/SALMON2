@@ -117,7 +117,8 @@ use dg_hybrid_production_face_traces,only:s_dg_hybrid_production_face_trace,&
   reconstruct_dg_hybrid_production_interface_state,reconstruct_dg_hybrid_production_interface_actions
 use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows,assemble_dg_hybrid_local_potential_rows
 use dg_hybrid_variational_payload,only:s_dg_hybrid_fixed_payload,s_dg_hybrid_variational_iterate,&
-  freeze_dg_hybrid_variational_payload,compose_dg_hybrid_variational_hamiltonian
+  freeze_dg_hybrid_variational_payload,compose_dg_hybrid_variational_hamiltonian,&
+  write_dg_hybrid_variational_payload_bundle
 use dg_hybrid_continuation_residuals,only:s_dg_hybrid_residuals,evaluate_dg_hybrid_residuals
 use dg_hybrid_real_space_residual,only:evaluate_dg_hybrid_real_space_residual,&
   evaluate_dg_hybrid_face_action_residuals
@@ -222,6 +223,8 @@ integer :: Miter,iatom,jj,nspin
 integer(8) :: dg_gs_potential_epoch
 real(8) :: sum1
 character(100) :: comment_line
+character(1024) :: variational_payload_capture_prefix
+integer :: variational_payload_capture_length,variational_payload_capture_status
 
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
@@ -2689,6 +2692,21 @@ contains
         if(.not.ok)error stop 'divided Hybrid SIPG interface assembly failed'
         allocate(dg_hybrid_interface_rows(size(divided_lcfo_row_ids),size(divided_effective_ids)))
         dg_hybrid_interface_rows=sum(dg_hybrid_interface_component_rows,dim=3)
+        variational_payload_capture_prefix=''
+        call get_environment_variable('SALMON_DG_VARIATIONAL_PAYLOAD_CAPTURE',&
+          variational_payload_capture_prefix,length=variational_payload_capture_length,&
+          status=variational_payload_capture_status,trim_name=.true.)
+        if(variational_payload_capture_status==0.and.variational_payload_capture_length>0)then
+          call write_dg_hybrid_variational_payload_bundle(dc%icomm_tot,&
+            trim(variational_payload_capture_prefix),size(divided_effective_ids),divided_lcfo_row_ids,&
+            divided_lcfo_srows,dg_hybrid_kinetic_rows,dg_hybrid_nonlocal_rows,dg_hybrid_interface_rows,&
+            divided_fragment_fingerprint,divided_lcfo_operator_fingerprint,&
+            divided_buffer_window_fingerprint,ok,message)
+          if(.not.ok)write(0,'(a)')trim(message)
+          if(.not.ok)error stop 'divided Hybrid variational payload capture failed'
+          if(nproc_id_global==0)write(*,'(a,a)')&
+            '[HYBRID-VARIATIONAL-PAYLOAD-CAPTURE] prefix=',trim(variational_payload_capture_prefix)
+        endif
         call freeze_dg_hybrid_variational_payload(dc%icomm_tot,size(divided_effective_ids),&
           divided_lcfo_row_ids,divided_lcfo_srows,dg_hybrid_kinetic_rows,dg_hybrid_nonlocal_rows,&
           dg_hybrid_interface_rows,divided_fragment_fingerprint,divided_lcfo_operator_fingerprint,&

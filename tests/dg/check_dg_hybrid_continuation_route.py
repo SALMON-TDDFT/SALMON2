@@ -25,6 +25,25 @@ for token in [
 ]:
     assert token in source, f"production continuation does not connect {token}"
 
+capture_variable = "SALMON_DG_VARIATIONAL_PAYLOAD_CAPTURE"
+assert capture_variable in source, "continuation omits opt-in variational payload capture"
+capture_call = "call write_dg_hybrid_variational_payload_bundle"
+assert capture_call in source, "continuation omits variational payload bundle writer"
+capture_position = source.index(capture_call)
+freeze_position = source.index("call freeze_dg_hybrid_variational_payload")
+assert capture_position < freeze_position, "variational payload must be captured before freeze"
+capture_guard = source[:capture_position].rsplit("if(", 1)[-1]
+assert "payload_capture" in capture_guard and ">0" in capture_guard, (
+    "variational payload capture must be disabled for an empty environment value"
+)
+between_capture_and_freeze = source[capture_position:freeze_position]
+assert "error stop 'divided Hybrid variational payload capture failed'" in between_capture_and_freeze, (
+    "capture failure must stop before payload freeze"
+)
+assert "[HYBRID-VARIATIONAL-PAYLOAD-CAPTURE]" in source, (
+    "continuation omits variational payload capture receipt"
+)
+
 nonlocal_name = "subroutine assemble_dg_hybrid_divided_nonlocal_rows"
 nonlocal_body = source[source.index(nonlocal_name):]
 nonlocal_body = nonlocal_body[:nonlocal_body.index("end subroutine assemble_dg_hybrid_divided_nonlocal_rows")]
