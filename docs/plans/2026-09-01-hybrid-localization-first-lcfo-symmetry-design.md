@@ -8,8 +8,10 @@ Construct the Hybrid DG basis for locality first, and require crystallographic
 symmetry only of the physically used full-system LCFO eigenspaces.  The
 localized WF+PW basis may be nonclosed as a whole provided that it reproduces
 a symmetric occupied ground state and a user-selected low-energy excitation
-window.  Reuse a converged conventional DC state while iterating on
-localization, PW, LCFO, and symmetry-window controls.
+window.  Use the smallest certified symmetry-closed extension of that window
+as the real-time propagation space, localized by a unitary transformation
+inside the certified span.  Reuse a converged conventional DC state while
+iterating on localization, PW, LCFO, and symmetry-window controls.
 
 ## Motivation
 
@@ -26,6 +28,10 @@ density, and required low-energy eigenspace.  Plane waves can supply symmetry
 content absent from the localized WFs.  A fixed target such as 384 states is
 also not a physical input: the required rank varies with material spectrum and
 must be derived from an energy window.
+
+Propagating in the complete nonclosed construction basis could reintroduce
+artificial symmetry leakage after the field excites high-energy directions.
+The construction basis and the final RT basis must therefore be distinct.
 
 Repeated conventional DC solves are unnecessary when only downstream
 localization or LCFO controls change.  A dedicated post-DC seed checkpoint is
@@ -49,10 +55,16 @@ The `yn_dg_hybrid_continuation_scf='y'` route uses a localization-first arm:
    symmetry deferral must not discard the physical reciprocal action.
 6. Assemble the spatially divided DG metric and Hamiltonian in the localized
    WF+PW basis.
-7. Solve the full-system LCFO generalized eigensystem and certify the occupied
-   space plus a user-selected excitation-energy window.
-8. Publish the localized basis, operators, occupied coefficients, and physical
-   symmetry receipts for real-time initialization.
+7. Solve the full-system LCFO generalized eigensystem and find the smallest
+   symmetry-closed spectral extension containing the occupied space and the
+   user-selected excitation-energy window.
+8. Apply a second unconstrained unitary localization only inside that certified
+   span.  This changes the gauge but not the certified projector.
+9. Project the RT metric, Hamiltonian components, field-coupling operators, and
+   initial occupied states into the certified localized span.
+10. Publish that final RT basis and its physical symmetry receipts for
+    real-time initialization.  Construction-basis directions outside the
+    certified projector are not propagated.
 
 Other overlapping-Wannier routes retain their existing behavior.  The shared
 Wannier90 helper receives an explicit constrained/unconstrained mode so that an
@@ -109,6 +121,22 @@ localization tolerance keywords must either be wired to a documented
 Wannier90 convergence quantity or explicitly retained as diagnostic-only
 compatibility inputs; they are never silently treated as WF-retention cutoffs.
 
+This first localized WF+PW space is the construction space.  After LCFO
+certification, define the row-owned embedding `C_cert` of the certified
+spectral space and perform a second unconstrained localization with a unitary
+matrix `U_rt` entirely inside that space:
+
+```text
+B_rt = C_cert U_rt
+P_cert = C_cert C_cert^H S = B_rt B_rt^H S
+```
+
+Because `U_rt` is internal and unitary, it cannot alter the certified projector
+or its symmetry closure.  All certified states are retained; there is again no
+per-function pruning.  The second localization publishes its own centers,
+spreads, iterations, unitary defect, and embedding fingerprint, distinct from
+the construction-WF receipts.
+
 ## User-Controlled Cutoffs
 
 Four existing/new controls affect different stages and must not be aliased:
@@ -125,7 +153,9 @@ Four existing/new controls affect different stages and must not be aliased:
   PW shell or a required reciprocal-symmetry orbit.
 - `dg_hybrid_symmetry_energy_window` is a new excitation window measured from
   the HOMO.  It is supplied in the same input energy unit and converted
-  independently.  It does not choose or truncate the RT propagation basis.
+  independently.  It does not choose or truncate the upstream construction
+  basis; after adaptive symmetry extension, it determines the certified RT
+  propagation rank.
 
 The Hybrid continuation route requires finite `energy_cut`, positive finite
 `lambda_cut`, and positive finite `wannier_pw_cutoff`.  In this route a zero PW
@@ -159,10 +189,10 @@ For `dg_hybrid_symmetry_energy_window >= 0`, let
 E_cut = E_HOMO + dg_hybrid_symmetry_energy_window
 ```
 
-The target contains every LCFO state with energy at or below `E_cut`, never
-fewer than the occupied rank, and is extended through the complete numerical
-degeneracy cluster at its upper boundary.  The HOMO is the last state whose
-authoritative occupation exceeds `64*epsilon(1d0)`.
+The requested target contains every LCFO state with energy at or below
+`E_cut`, never fewer than the occupied rank, and is extended through the
+complete numerical degeneracy cluster at its upper boundary.  The HOMO is the
+last state whose authoritative occupation exceeds `64*epsilon(1d0)`.
 
 Energy-degeneracy comparisons use an energy-specific numerical tolerance,
 separate from `dg_ow_symmetry_tolerance`.  For adjacent eigenvalues `E_i` and
@@ -191,15 +221,38 @@ the occupied requirement plus a proof state and grow monotonically:
 k_new = min(N_basis, max(k + 16, ceil(1.5*k)))
 ```
 
-The selected window is certified only after one state above the cutoff and
-boundary cluster has been obtained.  Reaching the full retained basis without
-that proof state is a basis-ceiling failure, not a successful full-basis
-special case.  The message identifies the PW/basis capacity as insufficient;
-the initial implementation never changes the user cutoff automatically.  This
-coverage rule is intentionally stricter than merely enumerating every Ritz
-state available in a finite retained space: a basis whose highest Ritz value
-does not bracket the user-requested energy cannot certify physical coverage of
-that energy window.
+Starting at the requested boundary, inspect complete spectral clusters in
+ascending order.  At each cluster boundary evaluate target-subspace closure
+and target-energy covariance.  Select the first boundary whose two defects are
+within tolerance.  Thus the certified target is the smallest symmetry-closed
+spectral space that contains the requested energy window; it may extend above
+`E_cut` when numerical splitting or missing localized-WF content pushes a
+symmetry partner upward.
+
+The search uses the already computed spectrum and never repeats the
+eigensolve.  A leakage analysis may jump directly to the highest complement
+index with significant mapped weight, but every skipped spectral cluster must
+still be included and the final result must equal the first passing cluster
+boundary.  Adding unrelated high-energy states cannot produce acceptance by
+closure alone because target-energy covariance remains a simultaneous gate.
+
+The selected window is certified only after one proof state above the final
+certified cluster has been obtained.  Reaching the full retained basis without
+that proof state, or without finding a passing cluster, is a basis-ceiling
+failure.  The message identifies the PW/basis capacity as insufficient; the
+implementation never changes the user cutoff automatically.  This coverage
+rule is intentionally stricter than merely enumerating every Ritz state
+available in a finite retained space: a basis whose highest Ritz value does not
+bracket the certified energy cannot establish physical coverage.
+
+Publish both the user request and the adaptive result:
+
+```text
+requested_cutoff requested_rank
+certified_cutoff certified_rank
+symmetry_extension_energy symmetry_extension_states
+proof_energy
+```
 
 A negative energy window retains the previous dynamic-rank behavior with an
 explicit compatibility warning.  Production acceptance inputs, including
@@ -239,6 +292,11 @@ finite defects to remain within `dg_ow_symmetry_tolerance`:
 3. Hamiltonian energy covariance within that target subspace;
 4. input/output real-space density covariance.
 
+Items 2 and 3 are evaluated at successive complete spectral-cluster
+boundaries above the requested cutoff.  Their first simultaneous pass defines
+the certified rank.  Items 1 and 4 are unconditional ground-state gates and
+are never repaired by enlarging the empty-state target.
+
 Individual eigenvectors inside a degenerate space are gauge dependent, so the
 test acts on subspaces and projectors, not state labels.
 
@@ -254,6 +312,13 @@ The code does not explicitly symmetrize the Hamiltonian, coefficients,
 occupations, or density.  A failure therefore demonstrates insufficient
 variational content or another physical inconsistency rather than being hidden
 by projection.
+
+Before RT publication, additionally require the projected fixed operators in
+the certified span to obey their proper transformation laws: scalar
+Hamiltonian components are covariant scalars, while position/velocity or other
+field-coupling components transform with the crystallographic rotation tensor
+and the existing periodic-position convention.  These are certified-space
+gates, not full construction-basis gates.
 
 ## Conventional DC Seed Reuse
 
@@ -309,24 +374,63 @@ threshold, and every immutable fingerprint.
 
 ## GS-to-RT Data Flow
 
-The localized DG basis functions remain the propagation basis.  They are not
-rotated into delocalized full-system eigenstates.  Full-system occupied states
-are represented by row-owned coefficient columns:
+The first localized WF+PW basis is used only to construct and solve the
+full-system problem.  Let its functions be `Phi`, and let `C_cert` contain the
+LCFO eigenvectors through the adaptively certified rank:
 
 ```text
-psi_n(r) = sum_mu phi_mu(r) C(mu,n)
+Psi_cert(r) = Phi(r) C_cert
+C_cert^H S C_cert = I
 ```
+
+The final RT basis is
+
+```text
+B_rt(r) = Phi(r) C_cert U_rt
+```
+
+where `U_rt` is the second unconstrained localization transform.  The initial
+occupied eigenstates are represented in this basis by
+
+```text
+A_occ(0) = U_rt^H(:,1:noccupied)
+```
+
+and the projected operators are
+
+```text
+S_rt = B_rt^H S B_rt = I
+H_rt(0) = U_rt^H diag(epsilon_cert) U_rt
+O_rt = B_rt^H O B_rt
+```
+
+Time-dependent local potentials are projected from the reconstructed density
+using the final localized RT basis values.  Construction-space directions
+orthogonal to `P_cert` are never populated.  The projected evolution is
+
+```text
+i S_rt dA_n(t)/dt = H_rt(t) A_n(t)
+```
+
+The initial implementation stores exact projected rows within the certified
+rank.  It does not drop small matrix elements independently, because arbitrary
+sparsification could break symmetry.  A later optimization may discard only
+complete symmetry-related operator orbits under a separately verified error
+bound.
 
 The GS checkpoint stores:
 
-- the complete retained localized basis description;
-- sparse metric and Hamiltonian components;
-- row ownership and basis ordering;
-- occupied coefficient columns, eigenvalues, occupations, and density;
-- position, nonlocal, face, pseudopotential, and provenance receipts;
+- the construction-basis catalog and provenance needed to authenticate the
+  embedding;
+- row-owned `C_cert`, `U_rt`, and the final localized embedding `B_rt`;
+- certified eigenvalues, occupations, proof-state energy, and initial occupied
+  amplitudes;
+- final RT basis values, ownership, ordering, metric, Hamiltonian components,
+  field-coupling operators, and density;
+- position, nonlocal, face, pseudopotential, and transformation receipts;
 - the energy-window mode, window size, HOMO and cutoff energies, solved rank,
-  selected rank, boundary-cluster rank, proof-state status and energy, and four
-  physical symmetry defects;
+  requested rank, certified rank and energy, extension size, boundary-cluster
+  rank, proof-state status and energy, and physical symmetry defects;
 - canonical basis catalog IDs, generations, ordering, and their fingerprint.
 
 These fields form a named, versioned checkpoint receipt rather than extending
@@ -336,26 +440,28 @@ checkpoint to version 3.  The new Hybrid continuation RT route requires a
 version-3 physical receipt; it never infers one from a version-2 positional
 array.  Any retained legacy reader remains confined to its legacy route.
 
-Nonoccupied eigenvectors used only to certify the GS window are not required
-in the RT checkpoint.  The complete WF+PW basis remains available to each
-occupied state during propagation:
+RT startup revalidates `H*C_cert-S*C_cert*epsilon`, `C_cert^H*S*C_cert-I`,
+the construction-to-certified embedding, second-localization unitarity,
+certified target closure and energy covariance, electron count, reconstructed
+density, occupied projector, projected fixed-operator covariance, and every
+operator/basis fingerprint.  Because the complete certified embedding is
+stored, RT recomputes the target-space gates rather than merely trusting a GS
+scalar receipt.  Full construction-basis covariance remains finite/nonnegative
+diagnostic data only.
 
-```text
-i S dC_n(t)/dt = H(t) C_n(t)
-```
+A symmetry-closed basis does not force the time-dependent state to retain the
+full equilibrium crystal symmetry.  If the applied field preserves an
+operation, the projected evolution preserves it within tolerance.  If the
+field physically lowers the symmetry, the projected vector/tensor operators
+allow that response while maintaining covariance between symmetry-related
+field configurations.  Zero-field RT retains the stationarity gates for
+density, energy, projector, charge, and Hamiltonian residual.
 
-Consequently, the external field can move occupied amplitudes into every
-retained basis direction even though only occupied initial coefficient columns
-are stored.
-
-RT startup revalidates `H*C-S*C*epsilon`, `C^H*S*C-I`, electron count,
-reconstructed density, occupied projector and density symmetry, and operator
-and basis fingerprints.  It authenticates the versioned GS energy-window
-receipt through the payload digest and matching provenance, but does not
-recompute target-subspace closure because nonoccupied target vectors are not
-stored.  Full-operator covariance is finite/nonnegative diagnostic data only.
-Zero-field RT retains the stationarity gates for density, energy, projector,
-charge, and Hamiltonian residual.
+The user-selected energy window therefore also defines the minimum RT response
+bandwidth, after adaptive symmetry extension.  Strong-field or high-harmonic
+calculations require a sufficiently large requested window; the code reports
+the certified upper energy and never silently propagates in uncertified higher
+construction-basis directions.
 
 ## Provenance and Diagnostics
 
@@ -370,13 +476,15 @@ Rank-zero receipts include at least:
 [HYBRID-WF-LOCALIZATION] symmetry_constraint=off ...
 [HYBRID-RETAINED-BASIS-SYMMETRY] closed=... defect=...
 [HYBRID-PW-CUTOFF] requested=... effective=... shell_added=... orbit_added=...
-[HYBRID-LCFO-WINDOW] delta_e=... homo=... cutoff=... solved_rank=... window_rank=... proof=... proof_energy=...
+[HYBRID-LCFO-WINDOW] delta_e=... homo=... requested_cutoff=... requested_rank=... certified_cutoff=... certified_rank=... extension_states=... proof_energy=...
 [HYBRID-LCFO-SYMMETRY] occupied=... target=... energy=... density=... worst_operation=...
+[HYBRID-RT-BASIS] certified_rank=... localization_spread=... embedding_fingerprint=... operator_covariance=...
 [HYBRID-RT-HANDOFF] payload_fingerprint=... projector_symmetry=...
 ```
 
 The receipts must distinguish basis construction rank, full retained rank,
-occupied rank, and energy-selected physical target rank.
+occupied rank, user-requested target rank, adaptively certified target rank,
+and final RT basis rank.
 
 ## Error Classification
 
@@ -393,13 +501,18 @@ Structural corruption remains immediately fatal:
 Physical insufficiency is also an unsuccessful calculation, but it is reported
 as a capacity or symmetry failure rather than an internal structural error:
 
-- no proof state above the requested energy window before the basis ceiling;
-- occupied, target, target-energy, or density symmetry defect above tolerance.
+- no proof state above the final certified cluster before the basis ceiling;
+- no symmetry-closed spectral-cluster boundary above the request before the
+  basis ceiling;
+- occupied, certified-target, target-energy, density, projected-field-operator,
+  or final RT-basis symmetry defect above tolerance;
+- failure to localize the certified space by a finite unitary transform.
 
 These messages report the WF rank, PW rank, full rank, PW cutoff, HOMO, window
-cutoff, solved and selected ranks, proof-state status, worst operation, and all
-four physical defects.  The user can then increase the PW cutoff, enlarge the
-retained basis, or reduce the requested excitation window.
+request, requested and certified cutoffs/ranks, extension size, proof-state
+status, worst operation, and all physical defects.  The user can then increase
+the PW cutoff, enlarge the retained basis, or reduce the requested excitation
+window.
 
 ## Verification Strategy
 
@@ -411,6 +524,10 @@ Focused TDD coverage includes:
 - constrained legacy routes retain their existing behavior;
 - energy-window selection at zero window, between levels, exactly on a level,
   and through split or degenerate multiplets;
+- adaptive upward cluster search returns the first simultaneous closure and
+  energy-covariance pass, never a later passing rank;
+- occupied-projector and density failures cannot be repaired by extending the
+  empty-state target;
 - the same energy window selects different ranks for different spectra;
 - one full solve with prefix-free energy-window analysis for the current
   backend, plus monotone growth tests only for a genuine partial backend;
@@ -422,6 +539,9 @@ Focused TDD coverage includes:
 - checkpoint-v3 receipt authentication, version-2 rejection on the new route,
   canonical basis ordering, and proof-state energy provenance;
 - WF nonclosure with successful low-energy WF+PW symmetry recovery;
+- unitary localization inside the certified span preserves its projector and
+  symmetry defects while improving the RT-basis spread;
+- final projected scalar and vector/tensor operator covariance;
 - removal of a required PW partner causes a clear physical insufficiency;
 - no production dependence on literal Si64 ranks such as 128 or 384;
 - DC seed write/read round trip, strict and auto behavior, corruption,
@@ -432,8 +552,10 @@ Focused TDD coverage includes:
 - a cold Si64 run writes a seed and a subsequent run contains no conventional
   `DC #SCF =` iterations while reproducing downstream results;
 - localization, PW, and symmetry-window changes reuse the same valid DC seed;
-- GS checkpoint to zero-field RT stationarity and finite-field propagation in
-  the complete retained basis;
+- GS checkpoint to zero-field RT stationarity and finite-field propagation only
+  in the certified localized RT basis;
+- field-preserving symmetry retention and physically allowed symmetry lowering
+  for fields outside the equilibrium symmetry subgroup;
 - rank-distribution-invariant occupied-projector and reconstructed-density
   checks across supported GS and RT rank layouts;
 - supported focused MPI tests on 1, 2, 4, and 8 ranks, followed by the full
