@@ -37,6 +37,12 @@ program test_rt_dg_hybrid_initialization_mpi
   if(trim(mode)/='read_only')call require(state%payload_fingerprint==fingerprint,&
     'RT did not retain exact serialized payload identity')
   call require(state%initial_invariants_valid,'RT startup invariant receipt is absent')
+  if(trim(mode)=='full_basis_nonclosed')then
+    call require(state%startup_operator_covariance>1d-3,&
+      'RT nonclosed fixture did not exercise the full-basis covariance diagnostic')
+    call require(state%startup_projector_covariance<=1d-11,&
+      'RT nonclosed fixture lost occupied-projector covariance')
+  endif
   if(trim(mode)/='read_only')call require(allocated(state%energy_receipt).and.&
     all(state%energy_receipt==payload%energy_receipt),'RT lost the serialized physical energy receipt')
   if(trim(mode)/='read_only')call require(state%operator_structure_fingerprint==payload%operator_structure_fingerprint,&
@@ -71,6 +77,9 @@ contains
     nowned=count([(mod(row-1,nproc)==rank,row=1,2)])
     p%valid=.true.;p%final_refresh_complete=.true.;p%analysis_complete=.true.;p%identity_only=.true.
     p%global_count=2;p%global_grid_count=smoke_grid_count;p%noccupied=1;p%operation_count=1;p%nonidentity_operation_count=0
+    if(trim(mode)=='full_basis_nonclosed')then
+      p%identity_only=.false.;p%operation_count=2;p%nonidentity_operation_count=1
+    endif
     p%position_convention_fingerprint=115_int64
     p%catalog_fingerprint=101;p%state_fingerprint=102;p%metric_fingerprint=103
     p%operator_structure_fingerprint=104;p%operator_value_fingerprint=105
@@ -78,9 +87,13 @@ contains
     p%basis_fingerprint=106;p%face_fingerprint=107;p%dc_seed_fingerprint=108
     p%continuation_fingerprint=109;p%analysis_fingerprint=111
     p%selection_fingerprint=112;p%pseudopotential_fingerprint=113;p%energy_fingerprint=114
-    allocate(p%position_rows(3,nowned,2),p%symmetry_representation(2,2,1));p%position_rows=(0d0,0d0)
+    allocate(p%position_rows(3,nowned,2),p%symmetry_representation(2,2,p%operation_count));p%position_rows=(0d0,0d0)
     p%symmetry_representation=(0d0,0d0);p%symmetry_representation(1,1,1)=(1d0,0d0)
     p%symmetry_representation(2,2,1)=(1d0,0d0)
+    if(trim(mode)=='full_basis_nonclosed')then
+      p%symmetry_representation(1,1,2)=(1d0,0d0)
+      p%symmetry_representation(2,2,2)=(0.5d0,0d0)
+    endif
     allocate(p%row_ids(nowned),p%metric_rows(nowned,2),p%kinetic_rows(nowned,2),p%nonlocal_rows(nowned,2),&
       p%local_rows(nowned,2),p%sipg_rows(nowned,2),p%hamiltonian_rows(nowned,2),p%coefficients(nowned,1))
     i=0

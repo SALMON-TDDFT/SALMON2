@@ -9,6 +9,9 @@ main = (root / "src/gs/main_dft.f90").read_text(errors="replace").lower()
 source = (
     root / "src/gs/dc/dg_hybrid_retained_basis_symmetry.f90"
 ).read_text(errors="replace").lower()
+acceptance_runner = (
+    root / "tests/dg/run_dg_hybrid_si64_continuation_rt.py"
+).read_text(errors="replace").lower()
 
 name = "subroutine build_dg_hybrid_retained_basis_representation"
 assert name in source, "missing retained WF+PW symmetry representation builder"
@@ -41,6 +44,12 @@ for token in (
     assert token in main, f"production route omits retained-basis diagnostic {token}"
 assert "if(.not.divided_full_basis_closure_ok)error stop" not in main.replace(" ", ""), (
     "finite full-basis nonclosure still stops LCFO"
+)
+assert "retained_basis_receipt" in acceptance_runner, (
+    "Si64 acceptance does not require the retained-basis diagnostic"
+)
+assert "closed=0" in acceptance_runner, (
+    "Si64 acceptance self-test does not permit finite full-basis nonclosure"
 )
 
 print("retained WF+PW symmetry representation contract: PASS")

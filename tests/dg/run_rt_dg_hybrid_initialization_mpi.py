@@ -10,6 +10,15 @@ initializer=initialization_source.split("subroutine initialize_rt_dg_hybrid_from
 for forbidden in ("allocate(metric(n,n)","position_rows(3,n,n)","metric_graph(n,n)","operator_graph(n,n)"):
   assert forbidden not in initializer, f"RT initialization still replicates a dense global object: {forbidden}"
 assert "redistribute_ground_state_rows" in initializer
+assert "covariance<=1d-11*scale" not in initializer, (
+  "RT startup still rejects finite full-basis nonclosure"
+)
+assert "ieee_is_finite(covariance)" in initializer, (
+  "RT startup does not validate the full-basis diagnostic structurally"
+)
+assert "projector_covariance<=1d-11" in initializer, (
+  "RT startup no longer protects occupied-projector covariance"
+)
 assert "subroutine initialization_rt_dg_hybrid" in rt_environment_source
 hybrid_branch=main_rt_source.split("if(yn_rt_dg_hybrid_continuation=='y')then",1)[1].split("endif",1)[0]
 assert "call initialization_rt_dg_hybrid" in hybrid_branch
@@ -57,6 +66,10 @@ with tempfile.TemporaryDirectory(prefix="hybrid-rt-init-") as name:
     run=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe),str(build/f"state-{nrank}.chk")],capture_output=True,text=True,env=env)
     assert run.returncode==0,(nrank,run.stdout,run.stderr)
     assert f"PASS hybrid RT initialization on {nrank} ranks" in run.stdout
+    nonclosed=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe),
+      str(build/f"nonclosed-{nrank}.chk"),"full_basis_nonclosed"],capture_output=True,text=True,env=env)
+    assert nonclosed.returncode==0,(nrank,nonclosed.stdout,nonclosed.stderr)
+    assert f"PASS hybrid RT initialization on {nrank} ranks" in nonclosed.stdout
   cross=build/"cross-rank.chk"
   write=subprocess.run([shutil.which("mpiexec"),"-n","2",str(exe),str(cross),"write_only"],capture_output=True,text=True,env=env)
   assert write.returncode==0,(write.stdout,write.stderr)

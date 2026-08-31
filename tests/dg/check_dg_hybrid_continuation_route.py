@@ -289,6 +289,15 @@ assert "call measure_dg_spatial_basis_covariance" not in density_helper, (
 
 gs_input = (root / "tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_dg_continuation.in").read_text()
 rt_input = (root / "tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_dg_zero_field_rt.in").read_text()
+acceptance_runner = (root / "tests/dg/run_dg_hybrid_si64_continuation_rt.py").read_text()
+for token in (
+    "requested_target_rank", "extended_target_rank", "occupied_defect", "target_defect",
+    "target_energy_defect", "density_defect", "full_operator_defect",
+):
+    assert token in acceptance_runner, f"Si64 acceptance parser omits {token}"
+assert "physical_symmetry_defects" in acceptance_runner, (
+    "Si64 acceptance parser does not gate the four post-LCFO physical defects"
+)
 assert "yn_dg_hybrid_continuation_scf='y'" in gs_input
 assert "yn_dg_hybrid_divided_scf='n'" in gs_input
 assert "yn_rt_dg_hybrid_continuation='y'" in rt_input

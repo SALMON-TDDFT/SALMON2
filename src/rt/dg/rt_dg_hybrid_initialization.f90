@@ -96,7 +96,8 @@ contains
       scale,ok,message)
     if(.not.ok)return
     local_bad=merge(0,1,residual<=1d-11*scale.and.orthogonality<=1d-11.and.electron_defect<=1d-11.and.&
-      hermiticity<=1d-11*scale.and.covariance<=1d-11*scale.and.projector_covariance<=1d-11)
+      hermiticity<=1d-11*scale.and.ieee_is_finite(covariance).and.covariance>=0d0.and.&
+      projector_covariance<=1d-11)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ok=.false.;message='invalid hybrid RT startup invariants';return;endif
     allocate(state%grid_ids,source=payload%grid_ids);allocate(state%density,source=payload%density)
