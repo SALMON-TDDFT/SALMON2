@@ -1,6 +1,6 @@
 subroutine build_dg_hybrid_retained_basis_representation(comm_arg,global_count_arg,core_ids_arg,&
     core_weights_arg,pencil_maps_arg,fragment_basis_arg,row_ids_arg,s_rows_arg,tolerance_arg,&
-    representation_arg,callback_ok,callback_message)
+    representation_arg,closure_defect_arg,closure_ok_arg,callback_ok,callback_message)
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
@@ -13,14 +13,15 @@ subroutine build_dg_hybrid_retained_basis_representation(comm_arg,global_count_a
   complex(real64),intent(in)::s_rows_arg(:,:)
   type(s_dg_hybrid_fragment_basis),intent(in)::fragment_basis_arg
   complex(real64),allocatable,intent(out)::representation_arg(:,:,:)
-  logical,intent(out)::callback_ok
+  real(real64),intent(out)::closure_defect_arg
+  logical,intent(out)::closure_ok_arg,callback_ok
   character(*),intent(out)::callback_message
   complex(real64),allocatable::local_basis(:,:),overlap(:,:,:),local_metric(:,:),metric(:,:),metric_work(:,:)
   integer,allocatable::ownership(:),pivot(:)
   integer::nbasis,ncore,noperation,i,j,operation,point,position,info,ierr,local_bad,global_bad
   real(real64)::local_defect,global_defect,scale
 
-  callback_ok=.false.;callback_message=''
+  callback_ok=.false.;closure_ok_arg=.false.;closure_defect_arg=huge(1d0);callback_message=''
   nbasis=size(s_rows_arg,2);ncore=size(core_ids_arg);noperation=size(pencil_maps_arg,2)
   local_bad=merge(0,1,global_count_arg>0.and.nbasis>0.and.ncore>0.and.noperation>0.and.&
     size(core_weights_arg)==ncore.and.size(pencil_maps_arg,1)==ncore.and.&
@@ -73,7 +74,10 @@ subroutine build_dg_hybrid_retained_basis_representation(comm_arg,global_count_a
     local_defect=max(local_defect,sqrt(sum(abs(matmul(conjg(transpose(representation_arg(:,:,operation))),&
       matmul(metric,representation_arg(:,:,operation)))-metric)**2))/scale)
   enddo
+  global_defect=huge(1d0)
   call MPI_Allreduce(local_defect,global_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm_arg,ierr)
-  callback_ok=ierr==MPI_SUCCESS.and.ieee_is_finite(global_defect).and.global_defect<=tolerance_arg
-  if(callback_ok)then;callback_message='';else;callback_message='retained WF+PW basis is not symmetry closed';endif
+  callback_ok=ierr==MPI_SUCCESS.and.ieee_is_finite(global_defect)
+  closure_defect_arg=global_defect
+  closure_ok_arg=callback_ok.and.global_defect<=tolerance_arg
+  if(callback_ok)then;callback_message='';else;callback_message='retained-basis closure diagnostic failed';endif
 end subroutine build_dg_hybrid_retained_basis_representation

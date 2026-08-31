@@ -43,6 +43,15 @@ assert "error stop 'divided Hybrid variational payload capture failed'" in betwe
 assert "[HYBRID-VARIATIONAL-PAYLOAD-CAPTURE]" in source, (
     "continuation omits variational payload capture receipt"
 )
+for token in (
+    "divided_full_basis_closure_defect",
+    "divided_full_basis_closure_ok",
+    "[HYBRID-RETAINED-BASIS-SYMMETRY]",
+):
+    assert token.lower() in source.lower(), f"continuation omits full-basis diagnostic {token}"
+assert "if(.not.divided_full_basis_closure_ok)error stop" not in source.replace(" ", "").lower(), (
+    "full retained-basis nonclosure must not stop LCFO"
+)
 
 nonlocal_name = "subroutine assemble_dg_hybrid_divided_nonlocal_rows"
 nonlocal_body = source[source.index(nonlocal_name):]

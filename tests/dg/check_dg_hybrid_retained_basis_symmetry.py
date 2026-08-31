@@ -25,5 +25,22 @@ for token in (
 assert "representation_arg=identity" not in source, (
     "nontrivial retained-basis action must not fall back to the identity"
 )
+for token in ("closure_defect_arg", "closure_ok_arg"):
+    assert token in source, f"retained-basis diagnostic omits {token}"
+assert "callback_ok=ierr==mpi_success.and.ieee_is_finite(global_defect)" in source.replace(" ", ""), (
+    "finite full-basis closure failure must remain structurally usable"
+)
+assert "closure_ok_arg=callback_ok.and.global_defect<=tolerance_arg" in source.replace(" ", ""), (
+    "full-basis closure result is not reported separately"
+)
+for token in (
+    "divided_full_basis_closure_defect",
+    "divided_full_basis_closure_ok",
+    "[hybrid-retained-basis-symmetry]",
+):
+    assert token in main, f"production route omits retained-basis diagnostic {token}"
+assert "if(.not.divided_full_basis_closure_ok)error stop" not in main.replace(" ", ""), (
+    "finite full-basis nonclosure still stops LCFO"
+)
 
 print("retained WF+PW symmetry representation contract: PASS")

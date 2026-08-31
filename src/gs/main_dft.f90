@@ -312,7 +312,7 @@ integer :: ilevel_print
 interface
   subroutine build_dg_hybrid_retained_basis_representation(comm_arg,global_count_arg,core_ids_arg,&
       core_weights_arg,pencil_maps_arg,fragment_basis_arg,row_ids_arg,s_rows_arg,tolerance_arg,&
-      representation_arg,callback_ok,callback_message)
+      representation_arg,closure_defect_arg,closure_ok_arg,callback_ok,callback_message)
     import::s_dg_hybrid_fragment_basis
     integer,intent(in)::comm_arg,global_count_arg
     integer(8),intent(in)::core_ids_arg(:),pencil_maps_arg(:,:),row_ids_arg(:)
@@ -320,7 +320,8 @@ interface
     complex(8),intent(in)::s_rows_arg(:,:)
     type(s_dg_hybrid_fragment_basis),intent(in)::fragment_basis_arg
     complex(8),allocatable,intent(out)::representation_arg(:,:,:)
-    logical,intent(out)::callback_ok
+    real(8),intent(out)::closure_defect_arg
+    logical,intent(out)::closure_ok_arg,callback_ok
     character(*),intent(out)::callback_message
   end subroutine build_dg_hybrid_retained_basis_representation
 end interface
@@ -898,9 +899,11 @@ contains
     integer::divided_iterations,dg_hybrid_nonlocal_ownership_count,divided_global_basis_count
     real(8)::divided_convergence_value
     real(8)::divided_final_residual,divided_final_orthogonality,divided_final_projector_defect
+    real(8)::divided_full_basis_closure_defect
     logical::ok,reusable,localization_converged,global_inversion_present,center_diagnostic_ok,diagnostic_ok
     logical::fixed_center_inversion_present,writer_ok
     logical::translation_self_conjugate
+    logical::divided_full_basis_closure_ok
     real(8)::fixed_center_fractional(3)
     complex(8),allocatable::core_periodic_phase(:,:),localization_transform(:,:),retained_identity(:,:)
     complex(8),allocatable::synchronized_local_representation(:,:,:)
@@ -2717,9 +2720,13 @@ contains
         call build_dg_hybrid_retained_basis_representation(dc%icomm_tot,int(expected_core_count),&
           ow_core_ids,ow_core_weights,ow_pencil_generator_maps,divided_fragment_basis,&
           divided_lcfo_row_ids,divided_lcfo_srows,dg_ow_symmetry_tolerance,&
-          divided_basis_representation,ok,message)
+          divided_basis_representation,divided_full_basis_closure_defect,&
+          divided_full_basis_closure_ok,ok,message)
         if(.not.ok)write(0,'(a)')trim(message)
         if(.not.ok)error stop 'DG continuation retained-basis symmetry representation failed'
+        if(rank==0)write(*,'(a,i0,a,es24.16)')&
+          '[HYBRID-RETAINED-BASIS-SYMMETRY] closed=',merge(1,0,divided_full_basis_closure_ok),&
+          ' defect=',divided_full_basis_closure_defect
         call selection_added_members(divided_requested_ids,divided_selection_effective_ids,divided_added_ids)
         allocate(divided_closure_reason(size(divided_closure_parent)),source=1)
         call build_dg_hybrid_scope_receipt(dc%icomm_tot,merge(1,0,theory=='dft'),iperiodic==3,&
@@ -2769,9 +2776,13 @@ contains
       call build_dg_hybrid_retained_basis_representation(dc%icomm_tot,int(expected_core_count),&
         ow_core_ids,ow_core_weights,ow_pencil_generator_maps,divided_fragment_basis,&
         divided_lcfo_row_ids,divided_lcfo_srows,dg_ow_symmetry_tolerance,&
-        divided_basis_representation,ok,message)
+        divided_basis_representation,divided_full_basis_closure_defect,&
+        divided_full_basis_closure_ok,ok,message)
       if(.not.ok)write(0,'(a)')trim(message)
       if(.not.ok)error stop 'divided Hybrid retained-basis symmetry representation failed'
+      if(rank==0)write(*,'(a,i0,a,es24.16)')&
+        '[HYBRID-RETAINED-BASIS-SYMMETRY] closed=',merge(1,0,divided_full_basis_closure_ok),&
+        ' defect=',divided_full_basis_closure_defect
       call solve_dg_hybrid_generalized_once_and_publish(dc%icomm_tot,size(divided_lcfo_hrows,2),nstate,&
         divided_lcfo_row_ids,divided_lcfo_hrows,divided_lcfo_srows,dg_dc_gs_final_orbital_tolerance,&
         occupations,dc%elec_num_tot,divided_fragment_fingerprint,divided_lcfo_operator_fingerprint,&
