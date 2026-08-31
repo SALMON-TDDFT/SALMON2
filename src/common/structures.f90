@@ -46,6 +46,17 @@ module structures
     real(8),allocatable :: v(:,:,:,:) ! v(1:3,x,y,z)
   end type s_vector
 
+! Operator part of Vxc for a tau-dependent functional, built from the velocity field
+! u = j/n and the kinetic-energy density it carries, tau_GI = (1/2) sum f |D psi|^2:
+!   H_tau psi = -1/2 sum_c D_c(vtau*D_c psi), D_c = nabla_c + i(k_c - u_c), vtau = dE_xc/dtau.
+  type s_xc_operator_payload
+    logical :: use_tau_operator = .false.
+    logical :: vtau_has_shadow_values = .false. ! vtau sits on the halo-extended layout, halo exchanged
+    real(8) :: e_tau = 0d0         ! Integral vtau*tau_GI
+    type(s_scalar) :: vtau         ! halo-extended grid (mg%is_array:mg%ie_array)
+    type(s_vector) :: uvel         ! u, local grid (mg%is:mg%ie)
+  end type s_xc_operator_payload
+
   type s_dft_system
     logical :: if_real_orbital
     integer :: ngrid,nspin,no,nk,nion ! # of r-grid points, spin indices, orbitals, k points, and ions
@@ -68,6 +79,8 @@ module structures
     real(8) :: vec_Ac_ext(3) ! external vector potential for output
     real(8) :: vec_E(3)      ! total electric field for output
     real(8) :: vec_E_ext(3)  ! external electric potential for output
+  ! meta-GGA: kinetic-energy-density derivative of E_xc
+    type(s_xc_operator_payload) :: xc_payload
   end type s_dft_system
 
   type s_dft_energy

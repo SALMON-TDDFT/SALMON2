@@ -129,6 +129,11 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       call pseudo_plusU(tpsi,htpsi,system,info,ppg)
     end if
 
+    ! meta-GGA: tau-operator part of Vxc
+    if (system%xc_payload%use_tau_operator) then
+      call add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
+    end if
+
   else
 
   ! overlap region communication
@@ -453,6 +458,11 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       end if
     end if
     call nvtxEndRange()
+
+    ! meta-GGA: tau-operator part of Vxc
+    if (system%xc_payload%use_tau_operator) then
+      call add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
+    end if
 
   end if
 
@@ -830,6 +840,351 @@ contains
   end subroutine add_imaginary_potential_for_absorbing_boundary_z
 
 end subroutine hpsi
+
+!===================================================================================================================================
+
+! Stop on a condition the tau operator cannot run under; every rank reaches it
+! identically, so all finalize together.
+subroutine fail_tau_operator(message)
+  use communication, only: comm_is_root
+  use parallelization, only: end_parallel, nproc_id_global
+  implicit none
+  character(*), intent(in) :: message
+
+  if(comm_is_root(nproc_id_global)) then
+    write(*,"(A)") 'Error in tau operator: '//trim(message)
+  end if
+  call end_parallel
+  error stop 1
+end subroutine fail_tau_operator
+
+!===================================================================================================================================
+
+! Generalized-Kohn-Sham meta-GGA kinetic-energy-density operator:
+!   H_tau psi = -1/2 sum_c D_c(vtau * D_c psi), vtau = dE_xc/dtau,
+!   D_c psi = (B^T nabla psi)_c + i*(k_c - u_c(r))*psi, u = j/n.
+!
+! tau_GI = 1/2 sum_occ f |D psi|^2 is stationary in u at u = j/n, so this D with u
+! frozen is the exact derivative; D is anti-Hermitian, so the occupied-state sum of
+! <psi|H_tau|psi> equals Integral vtau*tau_GI, which is payload%e_tau.
+!
+! GAUGE: the kinetic stencil carries k+A, and A shifts j/n by exactly A, so k-u and
+! tau_GI keep their A-free values.  Building both from vec_k alone is then exact for a
+! uniform A(t) and for the microscopic A(r,t) of single-scale Maxwell-TDDFT.
+!
+! In a ground state with time-reversal symmetry j = 0, hence u = 0 and every number here
+! is what it was before u entered.
+!
+! Discrete divergence here matches the gradient used elsewhere to build tau; no effect on other paths.
+!
+! Two grid sweeps: pass 1 builds flux w_c = vtau*D_c psi; pass 2 applies the
+! coef_nab divergence to the flux (exact adjoint of pass 1's gradient).
+!
+! Under real-space domain decomposition the divergence reads across the domain
+! boundary, so the flux is halo-exchanged between the two passes, like the
+! wavefunction's halo.
+subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
+  use structures
+  use salmon_global, only: yn_periodic
+  use math_constants, only: zi
+  use stencil_sub, only: calc_gradient_psi, calc_gradient_field
+  use sendrecv_grid, only: update_overlap_real8, update_overlap_complex8
+  implicit none
+  type(s_orbital),            intent(inout) :: htpsi
+  type(s_orbital),            intent(in)    :: tpsi
+  type(s_parallel_info),      intent(in)    :: info
+  type(s_rgrid),              intent(in)    :: mg
+  type(s_dft_system),         intent(in)    :: system
+  type(s_stencil),            intent(in)    :: stencil
+  type(s_sendrecv_grid),      intent(inout) :: srg
+  !
+  integer :: im, ik, io, ispin, ix, iy, iz, c, d, n
+  real(8) :: kvec(3), kvec_u(3), Bmat(3,3), vt, cnab(4,3), rwc(3), rdivg
+  complex(8) :: psi0, wc(3), divg
+  ! gpsi = (B^T nabla psi)_c ; the i*(k_c - u_c)*psi part of D_c psi is added in the
+  ! grid loop below, where kvec_u = k - u(r).
+  complex(8), allocatable :: gpsi(:,:,:,:)         ! (3, grid), one orbital at a time
+  complex(8), allocatable :: uloc(:,:,:,:)         ! (grid, 3)                    no r-space division
+  complex(8), allocatable :: uorb(:,:,:,:,:,:,:,:) ! (grid, nspin,io,ik,im, 3)    r-space division
+  ! real (Gamma-only) path
+  real(8),    allocatable :: rgpsi(:,:,:,:)
+  real(8),    allocatable :: rgw(:,:,:,:)
+  real(8),    allocatable :: rwvec(:,:,:,:)         ! (grid, 3)                    no r-space division
+  real(8),    allocatable :: ruorb(:,:,:,:,:,:,:,:) ! (grid, nspin,io,ik,im, 3)    r-space division
+
+#ifdef USE_OPENACC
+  call fail_tau_operator("support is unavailable for OpenACC builds")
+#endif
+  if (.not. system%xc_payload%use_tau_operator) return
+  if (.not. allocated(system%xc_payload%vtau%f)) then
+    call fail_tau_operator("payload is enabled without a vtau field")
+  end if
+  if (.not. system%xc_payload%vtau_has_shadow_values) then
+    call fail_tau_operator("requires vtau to be promoted to the halo grid layout")
+  end if
+  if (.not. allocated(system%xc_payload%uvel%v)) then
+    call fail_tau_operator("payload is enabled without a velocity field")
+  end if
+  if (lbound(system%xc_payload%vtau%f,1) > mg%is_array(1) .or. &
+      ubound(system%xc_payload%vtau%f,1) < mg%ie_array(1) .or. &
+      lbound(system%xc_payload%vtau%f,2) > mg%is_array(2) .or. &
+      ubound(system%xc_payload%vtau%f,2) < mg%ie_array(2) .or. &
+      lbound(system%xc_payload%vtau%f,3) > mg%is_array(3) .or. &
+      ubound(system%xc_payload%vtau%f,3) < mg%ie_array(3)) then
+    call fail_tau_operator("requires vtau bounds compatible with mg%is_array:mg%ie_array")
+  end if
+  if (lbound(system%xc_payload%uvel%v,2) > mg%is(1) .or. &
+      ubound(system%xc_payload%uvel%v,2) < mg%ie(1) .or. &
+      lbound(system%xc_payload%uvel%v,3) > mg%is(2) .or. &
+      ubound(system%xc_payload%uvel%v,3) < mg%ie(2) .or. &
+      lbound(system%xc_payload%uvel%v,4) > mg%is(3) .or. &
+      ubound(system%xc_payload%uvel%v,4) < mg%ie(3)) then
+    call fail_tau_operator("requires uvel bounds compatible with mg%is:mg%ie")
+  end if
+
+  ! calc_gradient_psi and calc_gradient_field handle orthogonal and non-orthogonal
+  ! lattices alike through rmatrix_B.
+  Bmat = system%rmatrix_B
+  cnab = stencil%coef_nab
+
+  if (allocated(tpsi%rwf) .and. .not. info%if_divide_rspace) then
+    ! Real orbitals: Gamma point only and j = 0 there, so u = 0 and D_c is the real
+    ! Cartesian gradient.  calc_gradient_field carries B on both passes.
+    allocate(rgpsi(3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(rgw  (3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(rwvec(  mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3),3))
+    rwvec = 0d0
+    do im=info%im_s,info%im_e
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+    do ispin=1,system%nspin
+      call calc_gradient_field(mg,stencil%coef_nab,system%rmatrix_B, &
+                               tpsi%rwf(:,:,:,ispin,io,ik,im),rgpsi)
+!$omp parallel do collapse(2) private(ix,iy,iz,c)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        do c=1,3
+          rwvec(ix,iy,iz,c) = system%xc_payload%vtau%f(mg%idx(ix),mg%idy(iy),mg%idz(iz)) * rgpsi(c,ix,iy,iz)
+        end do
+      end do
+      end do
+      end do
+!$omp end parallel do
+      do c=1,3
+        call calc_gradient_field(mg,stencil%coef_nab,system%rmatrix_B,rwvec(:,:,:,c),rgw)
+!$omp parallel do collapse(2) private(ix,iy,iz)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          ! accumulate -1/2 d/dx_c ( vtau d psi / d x_c )
+          htpsi%rwf(ix,iy,iz,ispin,io,ik,im) = htpsi%rwf(ix,iy,iz,ispin,io,ik,im) - 0.5d0 * rgw(c,ix,iy,iz)
+        end do
+        end do
+        end do
+!$omp end parallel do
+      end do
+    end do
+    end do
+    end do
+    end do
+    deallocate(rgpsi,rgw,rwvec)
+    return
+  end if
+
+  if (allocated(tpsi%rwf)) then
+    ! Real orbitals under r-space division: same two passes as the complex branch,
+    ! with u = 0 and the flux held for every local orbital so that one halo exchange
+    ! per component feeds the divergence.
+    allocate(rgpsi(3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(ruorb(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3), &
+                   system%nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e,3))
+    ruorb = 0d0
+    do im=info%im_s,info%im_e
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+    do ispin=1,system%nspin
+      call calc_gradient_field(mg,cnab,Bmat,tpsi%rwf(:,:,:,ispin,io,ik,im),rgpsi)
+!$omp parallel do collapse(2) private(ix,iy,iz,c,d,vt,rwc)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        vt = system%xc_payload%vtau%f(mg%idx(ix),mg%idy(iy),mg%idz(iz))
+        do c=1,3
+          rwc(c) = vt * rgpsi(c,ix,iy,iz)
+        end do
+        do d=1,3
+          ruorb(ix,iy,iz,ispin,io,ik,im,d) = Bmat(d,1)*rwc(1) + Bmat(d,2)*rwc(2) + Bmat(d,3)*rwc(3)
+        end do
+      end do
+      end do
+      end do
+!$omp end parallel do
+    end do
+    end do
+    end do
+    end do
+    do d=1,3
+      call update_overlap_real8(srg, mg, ruorb(:,:,:,:,:,:,:,d))
+    end do
+    do im=info%im_s,info%im_e
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+    do ispin=1,system%nspin
+!$omp parallel do collapse(2) private(ix,iy,iz,n,rdivg)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        rdivg = 0d0
+        do n=1,4
+          rdivg = rdivg + cnab(n,1)*( ruorb(mg%idx(ix+n),iy,iz,ispin,io,ik,im,1) - ruorb(mg%idx(ix-n),iy,iz,ispin,io,ik,im,1) ) &
+                        + cnab(n,2)*( ruorb(ix,mg%idy(iy+n),iz,ispin,io,ik,im,2) - ruorb(ix,mg%idy(iy-n),iz,ispin,io,ik,im,2) ) &
+                        + cnab(n,3)*( ruorb(ix,iy,mg%idz(iz+n),ispin,io,ik,im,3) - ruorb(ix,iy,mg%idz(iz-n),ispin,io,ik,im,3) )
+        end do
+        htpsi%rwf(ix,iy,iz,ispin,io,ik,im) = htpsi%rwf(ix,iy,iz,ispin,io,ik,im) - 0.5d0*rdivg
+      end do
+      end do
+      end do
+!$omp end parallel do
+    end do
+    end do
+    end do
+    end do
+    deallocate(rgpsi,ruorb)
+    return
+  end if
+
+  ! Complex orbitals.
+  if (.not. info%if_divide_rspace) then
+    ! No r-space division: build and consume the flux one orbital at a time,
+    ! with no halo exchange (mg%idx/idy/idz already wrap periodically).
+    allocate(gpsi(3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3)))
+    allocate(uloc(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3),3))
+    ! The halo layer is written by nothing below but IS read by the divergence.
+    ! On a periodic grid mg%idx wraps back into the interior, but on an isolated
+    ! one it addresses these cells for real, and they have to be zero.
+    uloc = (0d0,0d0)
+    do im=info%im_s,info%im_e
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+    do ispin=1,system%nspin
+      ! vec_k alone; see the GAUGE note in this routine's header.
+      kvec = 0d0
+      if (yn_periodic == 'y') kvec(1:3) = system%vec_k(1:3,ik)
+      call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im),gpsi, &
+           mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz, &
+           cnab,Bmat)
+!$omp parallel do collapse(2) private(ix,iy,iz,c,d,psi0,vt,wc,kvec_u)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        psi0 = tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+        vt   = system%xc_payload%vtau%f(mg%idx(ix),mg%idy(iy),mg%idz(iz))
+        kvec_u(1:3) = kvec(1:3) - system%xc_payload%uvel%v(1:3,ix,iy,iz)
+        do c=1,3
+          wc(c) = vt * (gpsi(c,ix,iy,iz) + zi*kvec_u(c)*psi0)
+        end do
+        do d=1,3
+          uloc(ix,iy,iz,d) = Bmat(d,1)*wc(1) + Bmat(d,2)*wc(2) + Bmat(d,3)*wc(3)
+        end do
+        htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) &
+             - 0.5d0*zi*( kvec_u(1)*wc(1) + kvec_u(2)*wc(2) + kvec_u(3)*wc(3) )
+      end do
+      end do
+      end do
+!$omp end parallel do
+!$omp parallel do collapse(2) private(ix,iy,iz,n,divg)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        divg = (0d0,0d0)
+        do n=1,4
+          divg = divg + cnab(n,1)*( uloc(mg%idx(ix+n),iy,iz,1) - uloc(mg%idx(ix-n),iy,iz,1) ) &
+                      + cnab(n,2)*( uloc(ix,mg%idy(iy+n),iz,2) - uloc(ix,mg%idy(iy-n),iz,2) ) &
+                      + cnab(n,3)*( uloc(ix,iy,mg%idz(iz+n),3) - uloc(ix,iy,mg%idz(iz-n),3) )
+        end do
+        htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) - 0.5d0*divg
+      end do
+      end do
+      end do
+!$omp end parallel do
+    end do
+    end do
+    end do
+    end do
+    deallocate(gpsi,uloc)
+    return
+  end if
+
+  ! r-space division: the divergence reads across the domain boundary, so the
+  ! flux has to be halo-exchanged between the two passes.  It is built for every
+  ! local orbital first so that the exchange is one batched call per component.
+  allocate(gpsi(3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3)))
+  allocate(uorb(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3), &
+                system%nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e,3))
+  uorb = (0d0,0d0)
+  do im=info%im_s,info%im_e
+  do ik=info%ik_s,info%ik_e
+  do io=info%io_s,info%io_e
+  do ispin=1,system%nspin
+    ! vec_k alone; see the GAUGE note in this routine's header.
+    kvec = 0d0
+    if (yn_periodic == 'y') kvec(1:3) = system%vec_k(1:3,ik)
+    call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im),gpsi, &
+         mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz, &
+         cnab,Bmat)
+!$omp parallel do collapse(2) private(ix,iy,iz,c,d,psi0,vt,wc,kvec_u)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      psi0 = tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+      vt   = system%xc_payload%vtau%f(mg%idx(ix),mg%idy(iy),mg%idz(iz))
+      kvec_u(1:3) = kvec(1:3) - system%xc_payload%uvel%v(1:3,ix,iy,iz)
+      do c=1,3
+        wc(c) = vt * (gpsi(c,ix,iy,iz) + zi*kvec_u(c)*psi0)
+      end do
+      do d=1,3
+        uorb(ix,iy,iz,ispin,io,ik,im,d) = Bmat(d,1)*wc(1) + Bmat(d,2)*wc(2) + Bmat(d,3)*wc(3)
+      end do
+      htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) &
+           - 0.5d0*zi*( kvec_u(1)*wc(1) + kvec_u(2)*wc(2) + kvec_u(3)*wc(3) )
+    end do
+    end do
+    end do
+!$omp end parallel do
+  end do
+  end do
+  end do
+  end do
+  do d=1,3
+    call update_overlap_complex8(srg, mg, uorb(:,:,:,:,:,:,:,d))
+  end do
+  do im=info%im_s,info%im_e
+  do ik=info%ik_s,info%ik_e
+  do io=info%io_s,info%io_e
+  do ispin=1,system%nspin
+!$omp parallel do collapse(2) private(ix,iy,iz,n,divg)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      divg = (0d0,0d0)
+      do n=1,4
+        divg = divg + cnab(n,1)*( uorb(mg%idx(ix+n),iy,iz,ispin,io,ik,im,1) - uorb(mg%idx(ix-n),iy,iz,ispin,io,ik,im,1) ) &
+                    + cnab(n,2)*( uorb(ix,mg%idy(iy+n),iz,ispin,io,ik,im,2) - uorb(ix,mg%idy(iy-n),iz,ispin,io,ik,im,2) ) &
+                    + cnab(n,3)*( uorb(ix,iy,mg%idz(iz+n),ispin,io,ik,im,3) - uorb(ix,iy,mg%idz(iz-n),ispin,io,ik,im,3) )
+      end do
+      htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) - 0.5d0*divg
+    end do
+    end do
+    end do
+!$omp end parallel do
+  end do
+  end do
+  end do
+  end do
+  deallocate(gpsi,uorb)
+
+end subroutine add_xc_tau_operator
 
 !===================================================================================================================================
 
