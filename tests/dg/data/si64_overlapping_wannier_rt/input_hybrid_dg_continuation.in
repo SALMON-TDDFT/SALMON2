@@ -37,6 +37,7 @@
  wannier_num_iter=10000
  dg_ow_w90_initial_projection='random'
  wannier_pw_cutoff=0.5d0
+ dg_hybrid_symmetry_energy_window=0.2d0
 /
 &parallel
  nproc_k=1

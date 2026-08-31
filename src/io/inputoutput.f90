@@ -633,7 +633,11 @@ contains
       & yn_dc_lcfo_block_diag_h, &
       & yn_dg_dc_overlapping_wannier, &
       & yn_dg_hybrid_scf, &
+      & yn_dg_hybrid_continuation_scf, &
       & yn_dg_hybrid_divided_scf, &
+      & dg_hybrid_symmetry_energy_window, &
+      & dg_dc_seed_mode, &
+      & dg_dc_seed_directory, &
       & dg_dc_handoff_min_iter, &
       & dg_dc_handoff_tolerance, &
       & dg_dc_candidate_orbitals_per_atom, &
@@ -1156,7 +1160,11 @@ contains
     yn_dc_lcfo_block_diag_h = 'n'
     yn_dg_dc_overlapping_wannier = 'n'
     yn_dg_hybrid_scf = 'n'
+    yn_dg_hybrid_continuation_scf = 'n'
     yn_dg_hybrid_divided_scf = 'n'
+    dg_hybrid_symmetry_energy_window = -1d0
+    dg_dc_seed_mode = 'off'
+    dg_dc_seed_directory = ''
     dg_dc_handoff_min_iter = 3
     dg_dc_handoff_tolerance = 1d-3
     dg_dc_candidate_orbitals_per_atom = 40
@@ -1886,7 +1894,13 @@ contains
     call comm_bcast(yn_dc_lcfo_block_diag_h, nproc_group_global)
     call comm_bcast(yn_dg_dc_overlapping_wannier, nproc_group_global)
     call comm_bcast(yn_dg_hybrid_scf, nproc_group_global)
+    call comm_bcast(yn_dg_hybrid_continuation_scf, nproc_group_global)
     call comm_bcast(yn_dg_hybrid_divided_scf, nproc_group_global)
+    call comm_bcast(dg_hybrid_symmetry_energy_window, nproc_group_global)
+    if(dg_hybrid_symmetry_energy_window>=0d0) &
+      dg_hybrid_symmetry_energy_window = dg_hybrid_symmetry_energy_window*uenergy_to_au
+    call comm_bcast(dg_dc_seed_mode, nproc_group_global)
+    call comm_bcast(dg_dc_seed_directory, nproc_group_global)
     call comm_bcast(dg_dc_handoff_min_iter, nproc_group_global)
     call comm_bcast(dg_dc_handoff_tolerance, nproc_group_global)
     call comm_bcast(dg_dc_candidate_orbitals_per_atom, nproc_group_global)
@@ -2948,7 +2962,15 @@ contains
         "yn_dg_dc_overlapping_wannier",yn_dg_dc_overlapping_wannier
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dg_hybrid_scf",yn_dg_hybrid_scf
       write(fh_variables_log, '("#",4X,A,"=",A)') &
+        "yn_dg_hybrid_continuation_scf",yn_dg_hybrid_continuation_scf
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
         "yn_dg_hybrid_divided_scf",yn_dg_hybrid_divided_scf
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_hybrid_symmetry_energy_window',dg_hybrid_symmetry_energy_window
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        'dg_dc_seed_mode',trim(dg_dc_seed_mode)
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        'dg_dc_seed_directory',trim(dg_dc_seed_directory)
       write(fh_variables_log, '("#",4X,A,"=",A)') &
         "dg_ow_w90_initial_projection",trim(dg_ow_w90_initial_projection)
       write(fh_variables_log, '("#",4X,A,"=",A)') "wannier90_command",trim(wannier90_command)
@@ -3110,7 +3132,27 @@ contains
     call yn_argument_check(yn_dc_lcfo_block_diag_h)
     call yn_argument_check(yn_dg_dc_overlapping_wannier)
     call yn_argument_check(yn_dg_hybrid_scf)
+    call yn_argument_check(yn_dg_hybrid_continuation_scf)
     call yn_argument_check(yn_dg_hybrid_divided_scf)
+    if(.not.ieee_is_finite(dg_hybrid_symmetry_energy_window) .or. &
+       (dg_hybrid_symmetry_energy_window<0d0 .and. &
+        dg_hybrid_symmetry_energy_window/=-1d0)) &
+      call sawf_input_fatal("dg_hybrid_symmetry_energy_window must be -1 or nonnegative")
+    select case(trim(dg_dc_seed_mode))
+    case('off','write','read','auto')
+    case default
+      call sawf_input_fatal("dg_dc_seed_mode must be off, write, read, or auto")
+    end select
+    if(trim(dg_dc_seed_mode)/='off' .and. len_trim(dg_dc_seed_directory)==0) &
+      call sawf_input_fatal("dg_dc_seed_directory is required when dg_dc_seed_mode is enabled")
+    if(yn_dg_hybrid_continuation_scf=='y')then
+      if(.not.ieee_is_finite(energy_cut)) &
+        call sawf_input_fatal("DG continuation requires finite energy_cut")
+      if(.not.ieee_is_finite(lambda_cut) .or. lambda_cut<=0d0) &
+        call sawf_input_fatal("DG continuation requires positive finite lambda_cut")
+      if(.not.ieee_is_finite(wannier_pw_cutoff) .or. wannier_pw_cutoff<=0d0) &
+        call sawf_input_fatal("DG continuation requires positive finite wannier_pw_cutoff")
+    endif
     if(yn_dg_hybrid_divided_scf=='y' .and. yn_dg_dc_overlapping_wannier/='y') &
       call sawf_input_fatal("divided hybrid SCF requires yn_dg_dc_overlapping_wannier='y'")
     if(yn_dg_hybrid_divided_scf=='y' .and. yn_scalapack/='y') &
@@ -3119,6 +3161,10 @@ contains
       call sawf_input_fatal("hybrid SCF requires yn_dg_dc_overlapping_wannier='y'")
     if(yn_dg_hybrid_scf=='y' .and. yn_scalapack/='y') &
       call sawf_input_fatal("hybrid SCF reference route requires yn_scalapack='y'")
+    if(yn_dg_hybrid_continuation_scf=='y' .and. yn_dg_dc_overlapping_wannier/='y') &
+      call sawf_input_fatal("DG continuation requires yn_dg_dc_overlapping_wannier='y'")
+    if(yn_dg_hybrid_continuation_scf=='y' .and. yn_scalapack/='y') &
+      call sawf_input_fatal("DG continuation requires yn_scalapack='y'")
     if(yn_dg_dc_overlapping_wannier=='y' .and. trim(theory)/='dft') &
       call sawf_input_fatal("overlapping Wannier route is ground-state DFT only")
     if(yn_dg_dc_overlapping_wannier=='y' .and. yn_dc/='y') &

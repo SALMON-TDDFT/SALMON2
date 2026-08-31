@@ -482,7 +482,11 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_dc_lcfo_block_diag_h
   character(1)   :: yn_dg_dc_overlapping_wannier
   character(1)   :: yn_dg_hybrid_scf
+  character(1)   :: yn_dg_hybrid_continuation_scf
   character(1)   :: yn_dg_hybrid_divided_scf
+  real(8)        :: dg_hybrid_symmetry_energy_window
+  character(16)  :: dg_dc_seed_mode
+  character(256) :: dg_dc_seed_directory
   integer        :: dg_dc_handoff_min_iter
   real(8)        :: dg_dc_handoff_tolerance
   integer        :: dg_dc_candidate_orbitals_per_atom
