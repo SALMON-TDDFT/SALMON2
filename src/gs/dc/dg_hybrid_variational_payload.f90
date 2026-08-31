@@ -2,6 +2,7 @@
 module dg_hybrid_variational_payload
   use,intrinsic::iso_fortran_env,only:int64,real64
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+  use,intrinsic::iso_c_binding,only:c_char,c_int,c_null_char
 #ifdef USE_MPI
   use mpi
 #endif
@@ -26,7 +27,136 @@ module dg_hybrid_variational_payload
     type(s_dg_hybrid_variational_iterate)::iterate
   end type s_dg_hybrid_accepted_variational_state
   public::freeze_dg_hybrid_variational_payload,compose_dg_hybrid_variational_hamiltonian
+  public::write_dg_hybrid_variational_payload_bundle,read_dg_hybrid_variational_payload_bundle
+  integer,parameter::variational_payload_bundle_version=1
+  interface
+    integer(c_int) function c_rename(old_path,new_path) bind(C,name='rename')
+      import::c_char,c_int
+      character(c_char),intent(in)::old_path(*),new_path(*)
+    end function c_rename
+  end interface
 contains
+  subroutine write_dg_hybrid_variational_payload_bundle(comm,prefix,global_basis_count,row_ids,&
+      metric_rows,kinetic_rows,nonlocal_rows,interface_rows,basis_fingerprint,metric_fingerprint,&
+      interface_fingerprint,ok,message)
+    integer,intent(in)::comm,global_basis_count
+    character(*),intent(in)::prefix
+    integer(int64),intent(in)::row_ids(:),basis_fingerprint,metric_fingerprint,interface_fingerprint
+    complex(real64),intent(in)::metric_rows(:,:),kinetic_rows(:,:),nonlocal_rows(:,:),interface_rows(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,nproc,ierr,unit,ios,local_bad,global_bad,dims(2,4)
+    logical::exists
+    character(1024)::shard,temporary,manifest,manifest_temporary
+    ok=.false.;message='';local_bad=0
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
+    write(shard,'(a,".rank",i6.6)')trim(prefix),rank
+    temporary=trim(shard)//'.tmp';manifest=trim(prefix)//'.manifest'
+    manifest_temporary=trim(manifest)//'.tmp'
+    inquire(file=trim(shard),exist=exists);if(exists)local_bad=1
+    if(rank==0)then;inquire(file=trim(manifest),exist=exists);if(exists)local_bad=1;endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='variational payload bundle already exists';return;endif
+    dims(:,1)=shape(metric_rows);dims(:,2)=shape(kinetic_rows)
+    dims(:,3)=shape(nonlocal_rows);dims(:,4)=shape(interface_rows)
+    open(newunit=unit,file=trim(temporary),status='replace',access='stream',form='unformatted',&
+      action='write',iostat=ios)
+    if(ios==0)write(unit,iostat=ios)variational_payload_bundle_version,nproc,rank,global_basis_count,&
+      size(row_ids),dims,basis_fingerprint,metric_fingerprint,interface_fingerprint
+    if(ios==0)write(unit,iostat=ios)row_ids,metric_rows,kinetic_rows,nonlocal_rows,interface_rows
+    if(ios==0)close(unit,iostat=ios)
+    if(ios==0)call atomic_rename(temporary,shard,ios)
+    local_bad=merge(0,1,ios==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='variational payload rank shard publication failed';return;endif
+    call MPI_Barrier(comm,ierr)
+    ios=0
+    if(rank==0)then
+      open(newunit=unit,file=trim(manifest_temporary),status='replace',access='stream',form='unformatted',&
+        action='write',iostat=ios)
+      if(ios==0)write(unit,iostat=ios)variational_payload_bundle_version,nproc
+      if(ios==0)close(unit,iostat=ios)
+      if(ios==0)call atomic_rename(manifest_temporary,manifest,ios)
+    endif
+    call MPI_Bcast(ios,1,MPI_INTEGER,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.ios/=0)then;message='variational payload manifest publication failed';return;endif
+    ok=.true.
+#else
+    ok=.false.;message='MPI is required for variational payload bundle writing'
+#endif
+  end subroutine write_dg_hybrid_variational_payload_bundle
+
+  subroutine read_dg_hybrid_variational_payload_bundle(comm,prefix,global_basis_count,row_ids,&
+      metric_rows,kinetic_rows,nonlocal_rows,interface_rows,basis_fingerprint,metric_fingerprint,&
+      interface_fingerprint,ok,message)
+    integer,intent(in)::comm
+    character(*),intent(in)::prefix
+    integer,intent(out)::global_basis_count
+    integer(int64),allocatable,intent(out)::row_ids(:)
+    complex(real64),allocatable,intent(out)::metric_rows(:,:),kinetic_rows(:,:),nonlocal_rows(:,:),&
+      interface_rows(:,:)
+    integer(int64),intent(out)::basis_fingerprint,metric_fingerprint,interface_fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,nproc,ierr,unit,ios,local_bad,global_bad,version,stored_nproc,stored_rank,nrows,dims(2,4)
+    integer::minimum_integer,maximum_integer
+    integer(int64)::minimum_fingerprint,maximum_fingerprint
+    character(1024)::shard,manifest
+    ok=.false.;message='';global_basis_count=0;basis_fingerprint=0_int64
+    metric_fingerprint=0_int64;interface_fingerprint=0_int64;local_bad=0
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
+    manifest=trim(prefix)//'.manifest'
+    open(newunit=unit,file=trim(manifest),status='old',access='stream',form='unformatted',action='read',iostat=ios)
+    if(ios==0)read(unit,iostat=ios)version,stored_nproc
+    if(ios==0)close(unit,iostat=ios)
+    if(ios/=0.or.version/=variational_payload_bundle_version.or.stored_nproc/=nproc)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid variational payload bundle manifest';return;endif
+    write(shard,'(a,".rank",i6.6)')trim(prefix),rank
+    open(newunit=unit,file=trim(shard),status='old',access='stream',form='unformatted',action='read',iostat=ios)
+    if(ios==0)read(unit,iostat=ios)version,stored_nproc,stored_rank,global_basis_count,nrows,dims,&
+      basis_fingerprint,metric_fingerprint,interface_fingerprint
+    if(ios/=0.or.version/=variational_payload_bundle_version.or.stored_nproc/=nproc.or.&
+      stored_rank/=rank.or.global_basis_count<0.or.nrows<0.or.any(dims<0))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      if(ios==0)close(unit);message='invalid variational payload rank shard header';return
+    endif
+    allocate(row_ids(nrows),metric_rows(dims(1,1),dims(2,1)),kinetic_rows(dims(1,2),dims(2,2)),&
+      nonlocal_rows(dims(1,3),dims(2,3)),interface_rows(dims(1,4),dims(2,4)),stat=ios)
+    if(ios==0)read(unit,iostat=ios)row_ids,metric_rows,kinetic_rows,nonlocal_rows,interface_rows
+    if(ios==0)close(unit,iostat=ios)
+    local_bad=merge(0,1,ios==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='truncated variational payload rank shard';return;endif
+    call MPI_Allreduce(global_basis_count,minimum_integer,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(global_basis_count,maximum_integer,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(basis_fingerprint,minimum_fingerprint,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(basis_fingerprint,maximum_fingerprint,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_integer/=maximum_integer.or.minimum_fingerprint/=maximum_fingerprint)then
+      message='variational payload shard metadata disagree across ranks';return
+    endif
+    ok=.true.
+#else
+    ok=.false.;message='MPI is required for variational payload bundle reading'
+#endif
+  end subroutine read_dg_hybrid_variational_payload_bundle
+
+  subroutine atomic_rename(old_path,new_path,status)
+    character(*),intent(in)::old_path,new_path
+    integer,intent(out)::status
+    character(c_char),allocatable::old_c(:),new_c(:)
+    integer::i
+    allocate(old_c(len_trim(old_path)+1),new_c(len_trim(new_path)+1))
+    do i=1,len_trim(old_path);old_c(i)=old_path(i:i);enddo;old_c(size(old_c))=c_null_char
+    do i=1,len_trim(new_path);new_c(i)=new_path(i:i);enddo;new_c(size(new_c))=c_null_char
+    status=int(c_rename(old_c,new_c))
+  end subroutine atomic_rename
+
   subroutine freeze_dg_hybrid_variational_payload(comm,global_basis_count,row_ids,metric_rows,kinetic_rows,&
       nonlocal_rows,interface_rows,basis_fingerprint,metric_fingerprint,interface_fingerprint,payload,ok,message)
     integer,intent(in)::comm,global_basis_count
