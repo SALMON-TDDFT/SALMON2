@@ -529,6 +529,9 @@ fix(dg): preserve reciprocal symmetry in cutoff-complete PW bases
 
 **Files:**
 
+- Create: `src/gs/occupation_kernel.f90`
+- Modify: `src/gs/occupation.f90`
+- Modify: `src/gs/CMakeLists.txt`
 - Create: `src/gs/dc/dg_hybrid_occupation_policy.f90`
 - Modify: `src/gs/dc/CMakeLists.txt`
 - Modify: `src/gs/dc/dg_hybrid_ground_state_types.f90`
@@ -549,11 +552,14 @@ python3 tests/dg/run_dg_hybrid_occupation_policy_mpi.py
 python3 tests/dg/run_dg_hybrid_ground_state_types_mpi.py
 ```
 
-**Step 2: Implement the final-spectrum kernel**
+**Step 2: Extract and share the final-spectrum kernel**
 
-Factor the existing SALMON occupation/chemical-potential policy through a
-Hybrid-facing wrapper rather than inventing a new Fermi rule.  Apply it to the
-ascending complete LCFO spectrum.  Define:
+Move the spectrum-to-chemical-potential and occupation calculation out of
+`occupation:ne2mu` into `occupation_kernel:solve_spectrum_occupations` without
+changing its zero/finite-temperature, spin, k-weight, or SOI conventions.
+Make both the normal `ne2mu` path and the Hybrid-facing wrapper call this one
+kernel; the Hybrid module must not copy or reimplement the Fermi rule.  Apply
+it to the ascending complete LCFO spectrum and define:
 
 ```fortran
 noccupied = count(occupations > 64d0*epsilon(1d0))
@@ -587,8 +593,10 @@ feat(dg): derive occupations and HOMO from the final LCFO spectrum
 Cover zero window, a cutoff between levels, a cutoff on a level, degenerate and
 numerically split clusters, different spectra selecting different ranks, the
 first passing cluster versus a later passing cluster, no proof state, and no
-passing cluster.  Verify that occupied-projector or density failure cannot be
-repaired by adding empty states.
+passing cluster.  Cover exactly `-1d0` as the pre-existing dynamic-rank
+compatibility path with a warning and prove that it contains no material rank
+literal.  Verify that occupied-projector or density failure cannot be repaired
+by adding empty states.
 
 Run:
 
@@ -621,6 +629,12 @@ basis ceiling or absence of a passing cluster is a capacity failure.
 
 Expose a named result containing requested/certified cutoffs and ranks,
 extension energy/states, proof energy, defects, and worst operation.
+
+When the input is exactly `-1d0`, invoke the existing dynamic requested-rank
+selection path unchanged and emit an explicit compatibility warning.  Do not
+reinterpret the sentinel as an energy, and do not introduce `128`, `384`, or
+any other material-specific target.  Production fixtures use a nonnegative
+energy window.
 
 **Step 4: Run GREEN and commit**
 
@@ -686,7 +700,56 @@ Commit after the MPI runner passes:
 feat(dg): localize the certified RT symmetry space
 ```
 
-### Task 12: Integrate physical LCFO acceptance and RT-basis publication
+### Task 12: Define the Hybrid GS-to-RT checkpoint version 3
+
+**Files:**
+
+- Modify: `src/rt/dg/rt_dg_hybrid_checkpoint.f90`
+- Modify: `tests/dg/test_rt_dg_hybrid_checkpoint_mpi.f90`
+- Modify: `tests/dg/run_rt_dg_hybrid_checkpoint_mpi.py`
+
+**Step 1: Write RED v3 schema and serialization tests**
+
+Require the complete Hybrid ground-state checkpoint version to become 3 while
+generic and occupied legacy checkpoint versions remain 2.  Require round trip
+and digest coverage on 1, 2, 4, and 8 ranks, including a different compatible
+reader rank layout.  Tamper with each named field and require rejection.
+
+The v3 schema contains at least:
+
+- construction catalog IDs, generations, ordering, ownership, and provenance
+  fingerprints;
+- row-owned `C_cert`, `U_rt`, final `B_rt`, and their dimensions/fingerprints;
+- certified eigenvalues, occupations, proof-state energy, initial occupied
+  amplitudes, and electron-count receipt;
+- final RT basis values, metric, Hamiltonian components, scalar and
+  vector/tensor field-coupling operators, density, and ownership;
+- position, nonlocal, face, pseudopotential, and transformation receipts;
+- named energy-window mode/size, HOMO, requested cutoff/rank, certified
+  cutoff/rank, extension size, boundary-cluster rank, proof status/energy, all
+  physical defects, and worst operation.
+
+**Step 2: Implement named v3 payload operations**
+
+Do not extend the old positional real receipt.  Add named derived types and
+update validation, hashing, write/read, copy, coalescing, broadcast, and rank
+redistribution together.  The schema module must be usable before the GS route
+begins publishing it.  This checkpoint may redistribute ranks; the strict
+same-rank/mapping rule applies only to the DC seed.
+
+**Step 3: Run GREEN and commit**
+
+```text
+python3 tests/dg/run_rt_dg_hybrid_checkpoint_mpi.py
+```
+
+Commit as:
+
+```text
+feat(rt): define certified Hybrid checkpoint version 3
+```
+
+### Task 13: Integrate LCFO acceptance and publish the v3 RT basis
 
 **Files:**
 
@@ -699,13 +762,16 @@ feat(dg): localize the certified RT symmetry space
 **Step 1: Write RED route/controller assertions**
 
 Require one full LCFO solve, Task 9 occupations, unconditional occupied and
-density gates, Task 10 first-cluster certification, Task 11 final basis, and no
-propagation publication of construction-only directions.
+density gates, Task 10 first-cluster certification, Task 11 final basis, and a
+Task 12 complete-v3 write.  Construction-only directions must not appear in
+the published RT dimensions.  For exactly `-1d0`, require the explicit legacy
+dynamic-rank warning and receipt.
 
-**Step 2: Implement final candidate acceptance**
+**Step 2: Implement final candidate acceptance and publication**
 
 After each converged continuation candidate, perform the steps in that order.
-Do not symmetrize Hamiltonian, coefficients, occupations, or density.  Emit:
+Do not symmetrize Hamiltonian, coefficients, occupations, or density.  Populate
+every mandatory v3 field and only then publish the checkpoint.  Emit:
 
 ```text
 [HYBRID-LCFO-WINDOW] delta_e=... homo=... requested_cutoff=... requested_rank=... certified_cutoff=... certified_rank=... extension_states=... proof_energy=...
@@ -730,43 +796,6 @@ Commit as:
 feat(dg): hand off only the certified LCFO symmetry space
 ```
 
-### Task 13: Upgrade the Hybrid GS-to-RT checkpoint to version 3
-
-**Files:**
-
-- Modify: `src/rt/dg/rt_dg_hybrid_checkpoint.f90`
-- Modify: `src/gs/main_dft.f90`
-- Modify: `tests/dg/test_rt_dg_hybrid_checkpoint_mpi.f90`
-- Modify: `tests/dg/run_rt_dg_hybrid_checkpoint_mpi.py`
-
-**Step 1: Write RED v3 serialization tests**
-
-Require round trip and digest coverage for construction provenance,
-row-owned `C_cert`, `U_rt`, final `B_rt`, certified eigenvalues, proof energy,
-occupations, initial occupied amplitudes, final RT basis values/operators, and
-all named certification receipts.  Tamper with each field.  Require new-route
-v2 rejection and rank-redistributed v3 equality.
-
-**Step 2: Implement named v3 payloads**
-
-Do not extend the old positional real receipt.  Add named derived types and
-update validation, hashing, write/read, coalescing, and redistribution paths
-together.  The new continuation route requires v3; legacy routes remain
-confined to their existing formats.  This checkpoint may redistribute ranks;
-the strict rank/mapping rule belongs only to the DC seed.
-
-**Step 3: Run GREEN and commit**
-
-```text
-python3 tests/dg/run_rt_dg_hybrid_checkpoint_mpi.py
-```
-
-Commit as:
-
-```text
-feat(rt): checkpoint certified Hybrid RT bases as version 3
-```
-
 ### Task 14: Propagate only inside the certified RT basis
 
 **Files:**
@@ -779,6 +808,7 @@ feat(rt): checkpoint certified Hybrid RT bases as version 3
 - Modify: `tests/dg/test_rt_dg_hybrid_initialization_mpi.f90`
 - Modify: `tests/dg/test_rt_dg_hybrid_length_gauge_mpi.f90`
 - Modify: `tests/dg/test_rt_dg_hybrid_stationarity_mpi.f90`
+- Modify: `tests/dg/run_rt_dg_hybrid_initialization_mpi.py`
 
 **Step 1: Write RED startup and evolution tests**
 
@@ -787,6 +817,11 @@ Require RT startup to recompute `H*C_cert-S*C_cert*epsilon`,
 covariance, electron count, reconstructed density, occupied projector,
 projected fixed-operator covariance, and every fingerprint.  Require all
 coefficient/state/operator extents to equal certified rank.
+
+Update the existing `SALMON_DG_GS001` probe so the new continuation route
+requires complete ground-state version 3, explicitly rejects version 2, and
+rejects receipt/provenance tampering after payload redistribution.  Do not
+infer missing v3 fields from legacy positional arrays.
 
 Test zero-field stationarity, a field preserving a subgroup, and a field that
 physically lowers equilibrium symmetry while maintaining the vector/tensor
