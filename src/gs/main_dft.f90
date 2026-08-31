@@ -2674,6 +2674,7 @@ contains
         call ow_fingerprint_distributed_matrix(dc%icomm_tot,divided_lcfo_row_ids,&
           divided_lcfo_srows,divided_lcfo_operator_fingerprint,ok)
         if(.not.ok)error stop 'divided Hybrid variational metric fingerprint failed'
+        allocate(dg_hybrid_nonlocal_rows(size(divided_lcfo_row_ids),size(divided_effective_ids)))
         call assemble_dg_hybrid_divided_nonlocal_rows(divided_fragment_basis,divided_lcfo_row_ids,&
           size(divided_effective_ids),dg_hybrid_nonlocal_rows,dg_hybrid_interior_nonlocal_action,&
           dg_hybrid_nonlocal_ownership_count,ok,message)
@@ -5435,12 +5436,12 @@ stage_pass: do
     type(s_dg_hybrid_fragment_basis),intent(in)::fragment_basis
     integer(8),intent(in)::row_ids(:)
     integer,intent(in)::global_count
-    complex(8),allocatable,intent(out)::matrix_rows(:,:)
+    complex(8),intent(out)::matrix_rows(:,:)
     complex(8),allocatable,intent(out)::nonlocal_action(:,:)
     integer,intent(out)::ownership_count
     logical,intent(out)::ok
     character(*),intent(out)::message
-    complex(8),allocatable::local_overlap(:,:),owned_overlap(:,:),complete_overlap(:,:)
+    complex(8),allocatable::local_overlap(:,:),owned_overlap(:,:),complete_overlap(:,:),assembled_matrix_rows(:,:)
     integer,allocatable::local_atom_ids(:),local_ordinals(:),complete_atom_ids(:),complete_ordinals(:)
     integer,allocatable::support_core_positions(:),support_projector_positions(:)
     integer(8),allocatable::projector_ids(:)
@@ -5528,7 +5529,20 @@ stage_pass: do
     if(.not.ok)return
     allocate(complete(global_count,size(projector_ids)));complete=.true.
     call assemble_dg_overlapping_wannier_nonlocal_rows(dc%icomm_tot,global_count,row_ids,projector_ids,&
-      owned_matrix_strength,owned_overlap,complete,int(total_projectors,8),matrix_rows,ownership_count,ok,message)
+      owned_matrix_strength,owned_overlap,complete,int(total_projectors,8),assembled_matrix_rows,&
+      ownership_count,ok,message)
+    if(.not.ok)return
+    local_bad=0
+    if(.not.allocated(assembled_matrix_rows))then
+      local_bad=1
+    else if(any(shape(assembled_matrix_rows)/=[size(row_ids),global_count]))then
+      local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      ok=.false.;message='invalid assembled divided nonlocal row extent';return
+    endif
+    matrix_rows=assembled_matrix_rows
   end subroutine assemble_dg_hybrid_divided_nonlocal_rows
 
   subroutine map_dc_atom_to_physical_atom(local_atom,physical_atom,ok)

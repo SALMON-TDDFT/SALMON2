@@ -56,6 +56,23 @@ for token in (
     "assemble_dg_overlapping_wannier_nonlocal_rows",
 ):
     assert token in nonlocal_body.lower(), "production nonlocal path omits " + token
+assert "complex(8),intent(out)::matrix_rows(:,:)" in nonlocal_body, (
+    "production nonlocal output must use a caller-owned fixed-extent matrix"
+)
+assert "assembled_matrix_rows" in nonlocal_body, (
+    "production nonlocal assembly must validate a temporary result before publication"
+)
+assert "shape(assembled_matrix_rows)/=[size(row_ids),global_count]" in nonlocal_body.replace(" ", ""), (
+    "production nonlocal assembly omits exact extent validation"
+)
+assert "matrix_rows=assembled_matrix_rows" in nonlocal_body.replace(" ", ""), (
+    "production nonlocal assembly does not publish the validated temporary"
+)
+nonlocal_call_position = source.index("call assemble_dg_hybrid_divided_nonlocal_rows")
+nonlocal_allocation = "allocate(dg_hybrid_nonlocal_rows(size(divided_lcfo_row_ids),size(divided_effective_ids)))"
+assert nonlocal_allocation in source[:nonlocal_call_position].replace("&\n", ""), (
+    "continuation must allocate the exact nonlocal row extent before assembly"
+)
 
 if "--interface-only" in sys.argv:
     print("PASS production continuation SIPG interface connection")
