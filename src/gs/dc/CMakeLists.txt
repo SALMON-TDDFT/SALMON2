@@ -7,6 +7,7 @@ set(SOURCES
     dg_hybrid_ground_state_types.f90
     dg_hybrid_continuation_state.f90
     dg_hybrid_continuation_controller.f90
+    dg_hybrid_low_energy_symmetry.f90
     dg_hybrid_sipg_operator.f90
     dg_hybrid_broken_volume.f90
     dg_hybrid_variational_payload.f90

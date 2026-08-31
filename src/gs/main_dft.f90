@@ -130,6 +130,8 @@ use dg_hybrid_continuation_controller,only:s_dg_hybrid_controller_controls,s_dg_
   initialize_dg_hybrid_stage_schedule,begin_dg_hybrid_stage_solve,&
   schedule_dg_hybrid_candidate_checks,complete_dg_hybrid_stage_solve,&
   dg_hybrid_continuation_state_count
+use dg_hybrid_low_energy_symmetry,only:select_dg_hybrid_symmetry_target,&
+  evaluate_dg_hybrid_low_energy_symmetry
 use dg_hybrid_continuation_state,only:s_dg_hybrid_scope_receipt,build_dg_hybrid_scope_receipt,&
   close_dg_hybrid_selection
 use plusU_global,only:PLUS_U_ON
@@ -2746,7 +2748,8 @@ contains
           divided_lcfo_row_ids,divided_basis_fragment,dg_hybrid_interior_fragment,&
           dg_hybrid_interior_weights,dg_hybrid_interior_values,&
           dg_hybrid_interior_kinetic_action,dg_hybrid_interior_nonlocal_action,dg_hybrid_fixed_payload,&
-          dg_hybrid_interface_component_rows,divided_production_faces,occupations,divided_basis_representation,&
+          dg_hybrid_interface_component_rows,divided_production_faces,occupations,ntarget,&
+          ow_pencil_generator_maps,divided_basis_representation,&
           divided_requested_ids,divided_selection_effective_ids,divided_added_ids,&
           divided_closure_parent,divided_closure_reason,&
           divided_closure_action,divided_scope_selectors,pseudopotential_fingerprint,&
@@ -4114,17 +4117,19 @@ contains
   subroutine run_dg_hybrid_concrete_continuation(dc_seed_density,effective_ids,row_ids,basis_fragment,&
       interior_fragment,interior_weights,interior_values,interior_kinetic_action,&
       interior_nonlocal_action,fixed_payload,interface_component_rows,production_faces,&
-      occupied_occupations,basis_representation,requested_ids_arg,selection_effective_ids_arg,added_ids_arg,closure_parent_arg,&
+      occupied_occupations,symmetry_target_rank_arg,core_symmetry_maps_arg,basis_representation,&
+      requested_ids_arg,selection_effective_ids_arg,added_ids_arg,closure_parent_arg,&
       closure_reason_arg,closure_action_arg,scope_selectors_arg,pseudopotential_fingerprint_arg,&
       scope_fingerprint_arg,selection_fingerprint_arg,metric_offsets_arg,metric_columns_arg,&
       operator_offsets_arg,operator_columns_arg,&
       final_ground_state,final_density,final_trace,final_hamiltonian_rows)
     real(8),intent(in)::dc_seed_density(:),interior_weights(:),occupied_occupations(:)
-    integer,intent(in)::effective_ids(:),basis_fragment(:),interior_fragment(:),requested_ids_arg(:),&
+    integer,intent(in)::effective_ids(:),basis_fragment(:),interior_fragment(:),symmetry_target_rank_arg,&
+      requested_ids_arg(:),&
       selection_effective_ids_arg(:),added_ids_arg(:),&
       closure_parent_arg(:),closure_reason_arg(:),closure_action_arg(:),scope_selectors_arg(:)
     integer,intent(in)::metric_offsets_arg(:),metric_columns_arg(:),operator_offsets_arg(:),operator_columns_arg(:)
-    integer(8),intent(in)::row_ids(:)
+    integer(8),intent(in)::row_ids(:),core_symmetry_maps_arg(:,:)
     integer(8),intent(in)::pseudopotential_fingerprint_arg,scope_fingerprint_arg,selection_fingerprint_arg
     complex(8),intent(in)::interior_values(:,:),interior_kinetic_action(:,:),interior_nonlocal_action(:,:)
     complex(8),intent(in)::interface_component_rows(:,:,:)
@@ -4137,7 +4142,10 @@ contains
     real(8)::accepted_lambda,trial_lambda,electron_count,max_residual,&
       orthogonality_defect,projector_defect,projector_change,local_norm,global_norm,&
       local_projector_scale,global_projector_scale,symmetry_residual
-    real(8)::projector_symmetry_residual
+    real(8)::projector_symmetry_residual,low_energy_occupied_symmetry_defect,&
+      occupied_symmetry_defect,target_symmetry_defect,target_energy_symmetry_defect,&
+      density_symmetry_defect,input_density_symmetry_defect,output_density_symmetry_defect,&
+      physical_symmetry_defect
     real(8)::broken_diagnostics(4)
     real(8),allocatable::rho_in(:),rho_out(:),local_potential(:),checkpoint_coordinates(:,:),&
       eigenvalues(:),solver_eigenvalues(:)
@@ -4156,12 +4164,13 @@ contains
       final_state_workspace,final_state_fingerprint,kinetic_fingerprint,nonlocal_fingerprint,&
       local_fingerprint,sipg_fingerprint,checkpoint_fingerprint,seed_fingerprint,seed_local_hash,seed_value_bits
     integer::iteration,ierr_local,rank_local,continuation_state_count,gap_occupied_index,gap_unoccupied_index,p,&
+      occupied_symmetry_rank,extended_target_rank,&
       face_value_count,face_value_position,face_point_count,face_point_position,face_basis_count,face_basis_position,&
       face_weight_count,face_weight_position,owned_face_count,face_slot
     integer,allocatable::checkpoint_face_owner(:)
     logical::stage_converged,reject_trial,local_ok,accept_stage,final_refresh_performed,cheap_candidate,&
       run_solve,run_expensive,refresh_scheduled,meaningful_gap,occupation_kernel_ok,&
-      seed_identity_accepted,lambda_zero_accepted
+      seed_identity_accepted,lambda_zero_accepted,target_selection_ok,symmetry_evaluation_ok
     character(256)::continuation_message
     real(8)::occupied_unoccupied_gap,accepted_gap
     real(8)::hamiltonian_hermiticity,hamiltonian_scale
@@ -4175,11 +4184,22 @@ contains
     call MPI_Comm_rank(dc%icomm_tot,rank_local,ierr_local)
     allocate(rho_in,source=dc_seed_density)
     seed_identity_accepted=all(rho_in==dc_seed_density);lambda_zero_accepted=.false.
-    if(size(effective_ids)<nstate)error stop 'DG continuation retained basis is smaller than the occupation kernel'
-    call dg_hybrid_continuation_state_count(occupied_occupations,size(effective_ids),continuation_state_count,&
+    if(size(effective_ids)<size(occupied_occupations))&
+      error stop 'DG continuation retained basis is smaller than the occupation kernel'
+    occupied_symmetry_rank=0
+    do p=1,size(occupied_occupations)
+      if(occupied_occupations(p)>64d0*epsilon(1d0))occupied_symmetry_rank=p
+    enddo
+    if(occupied_symmetry_rank<1)error stop 'DG continuation occupation window is empty'
+    if(size(core_symmetry_maps_arg,1)/=size(dc_seed_density).or.&
+        size(core_symmetry_maps_arg,2)/=size(basis_representation,3))&
+      error stop 'DG continuation core symmetry map shape mismatch'
+    call dg_hybrid_continuation_state_count(occupied_occupations,size(effective_ids),symmetry_target_rank_arg,&
+      continuation_state_count,&
       meaningful_gap,gap_occupied_index,gap_unoccupied_index,local_ok)
     if(.not.local_ok)error stop 'DG continuation occupation kernel is invalid'
-    allocate(local_potential(size(ow_core_ids)),eigenvalues(nstate),solver_eigenvalues(continuation_state_count))
+    allocate(local_potential(size(ow_core_ids)),eigenvalues(size(occupied_occupations)),&
+      solver_eigenvalues(continuation_state_count))
     allocate(previous_interface_state(0,3))
     accepted_lambda=0d0;trial_lambda=0d0;accepted_gap=huge(1d0)
     call default_dg_hybrid_controller_controls(continuation_controls)
@@ -4203,14 +4223,34 @@ stage_pass: do
         call compose_dg_hybrid_variational_hamiltonian(dc%icomm_tot,fixed_payload,&
           local_rows,trial_lambda,iteration,iterate,local_ok,continuation_message)
         if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation composition failed';endif
-        call solve_dg_hybrid_generalized_scalapack(dc%icomm_tot,size(effective_ids),continuation_state_count,&
-          row_ids,iterate%hamiltonian_rows,fixed_payload%metric_rows,&
-          dg_dc_gs_final_orbital_tolerance,solver_coefficients,solver_eigenvalues,max_residual,orthogonality_defect,&
-          projector_defect,solver_workspace,solver_fingerprint,local_ok,continuation_message)
-        if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation eigensolve failed';endif
+target_window_solve: do
+          call solve_dg_hybrid_generalized_scalapack(dc%icomm_tot,size(effective_ids),continuation_state_count,&
+            row_ids,iterate%hamiltonian_rows,fixed_payload%metric_rows,&
+            dg_dc_gs_final_orbital_tolerance,solver_coefficients,solver_eigenvalues,max_residual,orthogonality_defect,&
+            projector_defect,solver_workspace,solver_fingerprint,local_ok,continuation_message)
+          if(.not.local_ok)then
+            write(0,'(a)')trim(continuation_message);error stop 'DG continuation eigensolve failed'
+          endif
+          call select_dg_hybrid_symmetry_target(dc%icomm_tot,solver_eigenvalues,symmetry_target_rank_arg,&
+            dg_ow_symmetry_tolerance,extended_target_rank,target_selection_ok,continuation_message)
+          if(target_selection_ok)exit target_window_solve
+          if(index(continuation_message,'unresolved degenerate cluster')==0)then
+            write(0,'(a)')trim(continuation_message);error stop 'DG continuation target selection failed'
+          endif
+          if(continuation_state_count==size(effective_ids))then
+            call select_dg_hybrid_symmetry_target(dc%icomm_tot,solver_eigenvalues,continuation_state_count,&
+              dg_ow_symmetry_tolerance,extended_target_rank,target_selection_ok,continuation_message)
+            if(.not.target_selection_ok)then
+              write(0,'(a)')trim(continuation_message);error stop 'DG continuation full-basis target selection failed'
+            endif
+            exit target_window_solve
+          endif
+          continuation_state_count=continuation_state_count+1
+          deallocate(solver_eigenvalues);allocate(solver_eigenvalues(continuation_state_count))
+        enddo target_window_solve
         if(allocated(coefficients))deallocate(coefficients)
-        allocate(coefficients,source=solver_coefficients(:,1:nstate))
-        eigenvalues=solver_eigenvalues(1:nstate)
+        allocate(coefficients,source=solver_coefficients(:,1:size(occupied_occupations)))
+        eigenvalues=solver_eigenvalues(1:size(occupied_occupations))
         if(meaningful_gap)then
           occupied_unoccupied_gap=solver_eigenvalues(gap_unoccupied_index)-solver_eigenvalues(gap_occupied_index)
         else
@@ -4262,6 +4302,10 @@ stage_pass: do
           1d0-projector_change>=continuation_controls%minimum_projector_overlap
         real_space_residual=huge(1d0);interface_action_residuals=huge(1d0)
         symmetry_residual=huge(1d0);projector_symmetry_residual=huge(1d0)
+        low_energy_occupied_symmetry_defect=huge(1d0);occupied_symmetry_defect=huge(1d0)
+        target_symmetry_defect=huge(1d0);target_energy_symmetry_defect=huge(1d0)
+        input_density_symmetry_defect=huge(1d0);output_density_symmetry_defect=huge(1d0)
+        density_symmetry_defect=huge(1d0);physical_symmetry_defect=huge(1d0)
         hamiltonian_hermiticity=huge(1d0);hamiltonian_scale=1d0;hamiltonian_finite=.false.
         call schedule_dg_hybrid_candidate_checks(stage_schedule,cheap_candidate,run_expensive)
         if(run_expensive)then
@@ -4288,12 +4332,35 @@ stage_pass: do
           call measure_dg_hybrid_projector_covariance(dc%icomm_tot,row_ids,projector_rows,&
             basis_representation,projector_symmetry_residual,local_ok)
           if(.not.local_ok)error stop 'DG continuation occupied-projector covariance measurement failed'
+          call evaluate_dg_hybrid_distributed_low_energy_symmetry(dc%icomm_tot,row_ids,&
+            fixed_payload%metric_rows,basis_representation,solver_coefficients,solver_eigenvalues,&
+            occupied_symmetry_rank,extended_target_rank,dg_ow_symmetry_tolerance,&
+            low_energy_occupied_symmetry_defect,target_symmetry_defect,target_energy_symmetry_defect,&
+            symmetry_evaluation_ok,continuation_message)
+          if(.not.symmetry_evaluation_ok)then
+            write(0,'(a)')trim(continuation_message)
+            error stop 'DG continuation low-energy symmetry evaluation failed'
+          endif
+          occupied_symmetry_defect=max(low_energy_occupied_symmetry_defect,projector_symmetry_residual)
+          call measure_dg_hybrid_core_density_covariance(dc%icomm_tot,rho_out,core_symmetry_maps_arg,&
+            output_density_symmetry_defect,local_ok,continuation_message)
+          if(.not.local_ok)then
+            write(0,'(a)')trim(continuation_message);error stop 'DG continuation output-density symmetry failed'
+          endif
+          call measure_dg_hybrid_core_density_covariance(dc%icomm_tot,rho_in,core_symmetry_maps_arg,&
+            input_density_symmetry_defect,local_ok,continuation_message)
+          if(.not.local_ok)then
+            write(0,'(a)')trim(continuation_message);error stop 'DG continuation input-density symmetry failed'
+          endif
+          density_symmetry_defect=max(input_density_symmetry_defect,output_density_symmetry_defect)
+          physical_symmetry_defect=max(occupied_symmetry_defect,target_symmetry_defect,&
+            target_energy_symmetry_defect,density_symmetry_defect)
           call ow_distributed_hermiticity(dc%icomm_tot,row_ids,iterate%hamiltonian_rows,&
             hamiltonian_hermiticity,hamiltonian_scale,hamiltonian_finite)
         endif
         stage_converged=cheap_candidate.and.real_space_residual<=stage_report%tolerances(1).and.&
           all(interface_action_residuals<=stage_report%tolerances(1)).and.&
-          symmetry_residual<=dg_ow_symmetry_tolerance.and.projector_symmetry_residual<=dg_ow_symmetry_tolerance.and.&
+          physical_symmetry_defect<=dg_ow_symmetry_tolerance.and.&
           occupation_kernel_ok.and.hamiltonian_finite.and.&
           hamiltonian_hermiticity<=dg_dc_gs_hermiticity_tolerance*max(1d0,hamiltonian_scale)
         call complete_dg_hybrid_stage_solve(stage_schedule,stage_converged,trial_lambda,&
@@ -4334,12 +4401,15 @@ stage_pass: do
         stage_report%occupation_ok=occupation_kernel_ok
         stage_report%hermitian_ok=hamiltonian_finite.and.&
           hamiltonian_hermiticity<=dg_dc_gs_hermiticity_tolerance*max(1d0,hamiltonian_scale)
-        stage_report%symmetry_ok=max(symmetry_residual,projector_symmetry_residual)<=dg_ow_symmetry_tolerance
+        stage_report%symmetry_ok=max(occupied_symmetry_defect,target_symmetry_defect,target_energy_symmetry_defect,&
+          density_symmetry_defect)<=dg_ow_symmetry_tolerance
         stage_report%real_space_ok=real_space_residual<=stage_report%tolerances(1).and.&
           all(interface_action_residuals<=stage_report%tolerances(1)).and.&
           residuals%r_t<=stage_report%tolerances(3)
         stage_report%finite_ok=hamiltonian_finite.and.all(ieee_is_finite(solver_eigenvalues)).and.&
-          ieee_is_finite(electron_count).and.(.not.meaningful_gap.or.ieee_is_finite(occupied_unoccupied_gap))
+          all(ieee_is_finite([occupied_symmetry_defect,target_symmetry_defect,target_energy_symmetry_defect,&
+          density_symmetry_defect])).and.ieee_is_finite(electron_count).and.&
+          (.not.meaningful_gap.or.ieee_is_finite(occupied_unoccupied_gap))
         stage_report%gap_shrinking=meaningful_gap.and.accepted_gap<huge(1d0).and.&
           occupied_unoccupied_gap<accepted_gap
         call decide_dg_hybrid_stage(dc%icomm_tot,continuation_controller,trial_state,stage_report,&
@@ -4453,13 +4523,16 @@ stage_pass: do
     allocate(checkpoint_payload%scope_selectors(size(scope_selectors_arg)),checkpoint_payload%xc_types(size(xc_func%xctype)))
     checkpoint_payload%scope_selectors=scope_selectors_arg
     checkpoint_payload%xc_types=xc_func%xctype
-    allocate(checkpoint_payload%continuation_receipt(10))
+    allocate(checkpoint_payload%continuation_receipt(16))
     checkpoint_payload%continuation_receipt=[accepted_lambda,residuals%r_h,residuals%r_rho,residuals%r_t,residuals%r_s,&
-      electron_count,symmetry_residual,projector_symmetry_residual,real_space_residual,maxval(interface_action_residuals)]
+      electron_count,real(symmetry_target_rank_arg,8),real(extended_target_rank,8),symmetry_residual,&
+      occupied_symmetry_defect,target_symmetry_defect,target_energy_symmetry_defect,density_symmetry_defect,&
+      projector_symmetry_residual,real_space_residual,maxval(interface_action_residuals)]
     allocate(checkpoint_payload%pseudopotential_receipt(6),checkpoint_payload%energy_receipt(7))
     checkpoint_payload%pseudopotential_receipt=[real(dc%system_tot%nion,8),pp%zion,real(pp%lmax,8),&
       real(pp%nrmax,8),real(ppg%Nlma,8),real(size(checkpoint_payload%nonlocal_rows),8)]
-    allocate(energy_local_coefficients(size(effective_ids),nstate),energy_global_coefficients(size(effective_ids),nstate))
+    allocate(energy_local_coefficients(size(effective_ids),size(occupied_occupations)),&
+      energy_global_coefficients(size(effective_ids),size(occupied_occupations)))
     energy_local_coefficients=(0d0,0d0)
     do energy_row=1,size(row_ids)
       energy_local_coefficients(int(row_ids(energy_row)),:)=final_ground_state%coefficients(energy_row,:)
@@ -4468,7 +4541,7 @@ stage_pass: do
       MPI_DOUBLE_COMPLEX,MPI_SUM,dc%icomm_tot,ierr_local)
     if(ierr_local/=MPI_SUCCESS)error stop 'DG continuation energy coefficient redistribution failed'
     local_energy_parts=0d0
-    do energy_row=1,size(row_ids);do energy_state=1,nstate
+    do energy_row=1,size(row_ids);do energy_state=1,size(occupied_occupations)
       local_energy_parts(1)=local_energy_parts(1)+final_ground_state%occupations(energy_state)*real(&
         conjg(final_ground_state%coefficients(energy_row,energy_state))*&
         sum((fixed_payload%kinetic_rows(energy_row,:)+fixed_payload%interface_rows(energy_row,:))*&
@@ -4559,14 +4632,18 @@ stage_pass: do
     if(rank_local==0)write(*,'(a,4(a,es16.8))')'[OW-GS] fully refreshed DG continuation converged',&
       ' lambda=',accepted_lambda,' h_residual=',residuals%r_h,' density_residual=',residuals%r_rho,&
       ' interface_residual=',residuals%r_t
-    if(rank_local==0)write(*,'(a,i0,a,i0,a,i0,a,i0,7(a,es16.8),a,i0)')&
+    if(rank_local==0)write(*,'(a,6(a,i0),12(a,es16.8),a,i0)')&
       '[HYBRID-GS-ACCEPTANCE] seed_identity=',merge(1,0,seed_identity_accepted),&
       ' lambda_zero=',merge(1,0,lambda_zero_accepted),' lambda_one=',merge(1,0,accepted_lambda==1d0),&
-      ' final_refresh=',merge(1,0,final_refresh_performed),' r_h=',residuals%r_h,&
+      ' final_refresh=',merge(1,0,final_refresh_performed),&
+      ' requested_target_rank=',symmetry_target_rank_arg,' extended_target_rank=',extended_target_rank,&
+      ' r_h=',residuals%r_h,&
       ' r_rho=',residuals%r_rho,' r_t=',residuals%r_t,' r_s=',residuals%r_s,&
-      ' electron=',abs(electron_count-sum(occupied_occupations)),' symmetry=',&
-      max(symmetry_residual,projector_symmetry_residual),' real_space=',&
-      max(real_space_residual,maxval(interface_action_residuals)),' payload_fingerprint=',checkpoint_fingerprint
+      ' electron=',abs(electron_count-sum(occupied_occupations)),' symmetry=',physical_symmetry_defect,&
+      ' real_space=',max(real_space_residual,maxval(interface_action_residuals)),&
+      ' occupied_defect=',occupied_symmetry_defect,' target_defect=',target_symmetry_defect,&
+      ' target_energy_defect=',target_energy_symmetry_defect,' density_defect=',density_symmetry_defect,&
+      ' full_operator_defect=',symmetry_residual,' payload_fingerprint=',checkpoint_fingerprint
   end subroutine run_dg_hybrid_concrete_continuation
 
   subroutine pack_checkpoint_face_values(face,values,position)
@@ -4826,6 +4903,139 @@ stage_pass: do
     if(ierr_local/=MPI_SUCCESS)return
     residual=global_defect/max(1d0,global_scale);callback_ok=ieee_is_finite(residual)
   end subroutine measure_dg_hybrid_projector_covariance
+
+  subroutine evaluate_dg_hybrid_distributed_low_energy_symmetry(comm_arg,row_ids_arg,metric_rows_arg,&
+      representation_arg,coefficients_arg,eigenvalues_arg,occupied_rank_arg,target_rank_arg,tolerance_arg,&
+      occupied_defect_arg,target_defect_arg,energy_defect_arg,callback_ok,message_arg)
+    integer,intent(in)::comm_arg,occupied_rank_arg,target_rank_arg
+    integer(8),intent(in)::row_ids_arg(:)
+    complex(8),intent(in)::metric_rows_arg(:,:),representation_arg(:,:,:),coefficients_arg(:,:)
+    real(8),intent(in)::eigenvalues_arg(:),tolerance_arg
+    real(8),intent(out)::occupied_defect_arg,target_defect_arg,energy_defect_arg
+    logical,intent(out)::callback_ok
+    character(*),intent(out)::message_arg
+    integer::global_count,state_count,operation_count,i,row,ierr_local,local_bad,global_bad,allocation_status
+    integer::local_contract(5),minimum_contract(5),maximum_contract(5)
+    integer(8)::tolerance_bits,minimum_tolerance_bits,maximum_tolerance_bits
+    integer,allocatable::ownership_count(:)
+    complex(8),allocatable::global_metric(:,:),global_coefficients(:,:)
+    logical::symmetry_ok
+
+    callback_ok=.false.;message_arg='';occupied_defect_arg=huge(1d0)
+    target_defect_arg=huge(1d0);energy_defect_arg=huge(1d0)
+    global_count=size(metric_rows_arg,2);state_count=size(coefficients_arg,2)
+    operation_count=size(representation_arg,3);local_bad=0
+    local_contract=[global_count,state_count,operation_count,occupied_rank_arg,target_rank_arg]
+    call MPI_Allreduce(local_contract,minimum_contract,5,MPI_INTEGER,MPI_MIN,comm_arg,ierr_local)
+    if(ierr_local==MPI_SUCCESS)call MPI_Allreduce(local_contract,maximum_contract,5,MPI_INTEGER,MPI_MAX,&
+      comm_arg,ierr_local)
+    tolerance_bits=transfer(tolerance_arg,tolerance_bits)
+    if(ierr_local==MPI_SUCCESS)call MPI_Allreduce(tolerance_bits,minimum_tolerance_bits,1,MPI_INTEGER8,MPI_MIN,&
+      comm_arg,ierr_local)
+    if(ierr_local==MPI_SUCCESS)call MPI_Allreduce(tolerance_bits,maximum_tolerance_bits,1,MPI_INTEGER8,MPI_MAX,&
+      comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)then
+      message_arg='distributed low-energy symmetry agreement failed';return
+    endif
+    if(any(minimum_contract/=maximum_contract).or.minimum_tolerance_bits/=maximum_tolerance_bits)then
+      message_arg='rank-disagreeing distributed low-energy symmetry contract';return
+    endif
+    if(global_count<1.or.state_count<1.or.operation_count<1.or.&
+        size(metric_rows_arg,1)/=size(row_ids_arg).or.size(coefficients_arg,1)/=size(row_ids_arg).or.&
+        size(eigenvalues_arg)/=state_count.or.&
+        any(shape(representation_arg)/=[global_count,global_count,operation_count]).or.&
+        occupied_rank_arg<1.or.occupied_rank_arg>target_rank_arg.or.target_rank_arg>state_count.or.&
+        any(row_ids_arg<1_8).or.any(row_ids_arg>int(global_count,8)))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.global_bad/=0)then
+      message_arg='invalid distributed low-energy symmetry contract';return
+    endif
+    allocate(ownership_count(global_count),global_metric(global_count,global_count),&
+      global_coefficients(global_count,state_count),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.global_bad/=0)then
+      message_arg='distributed low-energy symmetry allocation failed';return
+    endif
+    ownership_count=0;global_metric=(0d0,0d0);global_coefficients=(0d0,0d0)
+    do i=1,size(row_ids_arg)
+      row=int(row_ids_arg(i));ownership_count(row)=ownership_count(row)+1
+      global_metric(row,:)=metric_rows_arg(i,:);global_coefficients(row,:)=coefficients_arg(i,:)
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,ownership_count,global_count,MPI_INTEGER,MPI_SUM,comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.any(ownership_count/=1))then
+      message_arg='distributed low-energy symmetry rows are not owned exactly once';return
+    endif
+    call MPI_Allreduce(MPI_IN_PLACE,global_metric,size(global_metric),MPI_DOUBLE_COMPLEX,MPI_SUM,&
+      comm_arg,ierr_local)
+    if(ierr_local==MPI_SUCCESS)call MPI_Allreduce(MPI_IN_PLACE,global_coefficients,size(global_coefficients),&
+      MPI_DOUBLE_COMPLEX,MPI_SUM,comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)then
+      message_arg='distributed low-energy symmetry row collection failed';return
+    endif
+    call evaluate_dg_hybrid_low_energy_symmetry(comm_arg,global_metric,representation_arg,global_coefficients,&
+      eigenvalues_arg,occupied_rank_arg,target_rank_arg,tolerance_arg,occupied_defect_arg,target_defect_arg,&
+      energy_defect_arg,symmetry_ok,message_arg)
+    if(symmetry_ok)then
+      callback_ok=.true.;return
+    endif
+    if(trim(message_arg)=='low-energy LCFO eigenspace is not symmetry closed'.and.&
+        all(ieee_is_finite([occupied_defect_arg,target_defect_arg,energy_defect_arg])))then
+      callback_ok=.true.;return
+    endif
+  end subroutine evaluate_dg_hybrid_distributed_low_energy_symmetry
+
+  subroutine measure_dg_hybrid_core_density_covariance(comm_arg,density_arg,maps_arg,&
+      residual_arg,callback_ok,message_arg)
+    integer,intent(in)::comm_arg
+    real(8),intent(in)::density_arg(:)
+    integer(8),intent(in)::maps_arg(:,:)
+    real(8),intent(out)::residual_arg
+    logical,intent(out)::callback_ok
+    character(*),intent(out)::message_arg
+    complex(8),allocatable::density_probe(:,:),mapped_density(:,:)
+    real(8)::local_values(2),global_values(2)
+    integer::operation_count,minimum_operation_count,maximum_operation_count,operation,&
+      ierr_local,local_bad,global_bad,allocation_status
+
+    callback_ok=.false.;message_arg='';residual_arg=huge(1d0);operation_count=size(maps_arg,2)
+    call MPI_Allreduce(operation_count,minimum_operation_count,1,MPI_INTEGER,MPI_MIN,comm_arg,ierr_local)
+    if(ierr_local==MPI_SUCCESS)call MPI_Allreduce(operation_count,maximum_operation_count,1,MPI_INTEGER,MPI_MAX,&
+      comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)then
+      message_arg='mapped-core density operation agreement failed';return
+    endif
+    if(minimum_operation_count/=maximum_operation_count)then
+      message_arg='rank-disagreeing mapped-core density operation count';return
+    endif
+    local_bad=merge(0,1,size(density_arg)>0.and.size(maps_arg,1)==size(density_arg).and.&
+      operation_count>0.and.all(ieee_is_finite(density_arg)))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.global_bad/=0)then
+      message_arg='invalid mapped-core density covariance contract';return
+    endif
+    allocate(density_probe(1,size(density_arg)),mapped_density(1,size(density_arg)),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.global_bad/=0)then
+      message_arg='mapped-core density covariance allocation failed';return
+    endif
+    density_probe(1,:)=cmplx(density_arg,0d0,8);residual_arg=0d0
+    do operation=1,operation_count
+      call exchange_dg_point_permuted_orbital_rows(comm_arg,density_probe,maps_arg(:,operation),&
+        mapped_density,callback_ok,message_arg)
+      if(.not.callback_ok)return
+      local_values=[maxval(abs(mapped_density-density_probe)),&
+        max(maxval(abs(mapped_density)),maxval(abs(density_probe)))]
+      call MPI_Allreduce(local_values,global_values,2,MPI_DOUBLE_PRECISION,MPI_MAX,comm_arg,ierr_local)
+      if(ierr_local/=MPI_SUCCESS)then
+        callback_ok=.false.;message_arg='mapped-core density covariance reduction failed';return
+      endif
+      residual_arg=max(residual_arg,global_values(1)/max(tiny(1d0),global_values(2)))
+    enddo
+    callback_ok=ieee_is_finite(residual_arg)
+    if(.not.callback_ok)message_arg='mapped-core density covariance defect is not finite'
+  end subroutine measure_dg_hybrid_core_density_covariance
 
   subroutine assemble_dg_hybrid_divided_core_density(core_density,electron_count,callback_ok)
     real(8),intent(out)::core_density(:),electron_count

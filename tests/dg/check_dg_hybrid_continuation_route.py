@@ -149,6 +149,7 @@ driver_name = "subroutine run_dg_hybrid_concrete_continuation"
 assert driver_name in source, "missing contained concrete continuation driver"
 start = source.index(driver_name)
 implementation = source[start:source.index("end subroutine run_dg_hybrid_concrete_continuation", start)]
+assert "384" not in implementation, "production continuation hard-codes the Si64 target state count"
 
 required = [
     "dc_seed_density",
@@ -166,7 +167,12 @@ required = [
     "final_trace",
     "final_hamiltonian_rows",
     "measure_dg_hybrid_projector_covariance",
+    "measure_dg_hybrid_core_density_covariance",
     "dg_hybrid_continuation_state_count",
+    "select_dg_hybrid_symmetry_target",
+    "evaluate_dg_hybrid_distributed_low_energy_symmetry",
+    "symmetry_target_rank_arg",
+    "core_symmetry_maps_arg",
 ]
 for token in required:
     assert token in implementation, f"continuation implementation does not use {token}"
@@ -194,9 +200,34 @@ assert "stage_report%gap_shrinking=.false." not in implementation, (
 assert "stage_report%hermitian_ok=.true." not in implementation
 assert "ow_distributed_hermiticity" in implementation
 assert "continuation_state_count=nstate+1" not in implementation
+state_count_call = implementation[implementation.index("call dg_hybrid_continuation_state_count"):]
+state_count_call = state_count_call[:state_count_call.index("local_ok)")]
+assert "symmetry_target_rank_arg" in state_count_call, (
+    "continuation state-count policy does not receive the material-dependent target rank"
+)
+assert "solver_coefficients,solver_eigenvalues" in implementation.replace("&\n", ""), (
+    "continuation discards the target-window eigensystem before symmetry analysis"
+)
+for token in ("target_window_solve: do", "unresolved degenerate cluster"):
+    assert token in implementation, f"continuation omits adaptive degeneracy-boundary handling {token}"
+assert "continuation_state_count=continuation_state_count+1" in implementation.replace(" ", ""), (
+    "continuation does not enlarge an unresolved target window"
+)
+assert "coefficients,occupied_occupations,rho_out" in implementation.replace("&\n", ""), (
+    "density reconstruction no longer uses only occupied coefficients and physical occupations"
+)
 assert "occupied_unoccupied_gap>dg_dc_gs_final_orbital_tolerance" not in implementation
 assert "stage_report%occupation_ok=occupation_kernel_ok" in implementation
 assert "hamiltonian_hermiticity<=dg_dc_gs_hermiticity_tolerance" in implementation
+assert "max(occupied_symmetry_defect,target_symmetry_defect,target_energy_symmetry_defect," in implementation.replace(
+    "&\n", ""
+), "post-LCFO acceptance does not gate all physical symmetry defects"
+assert "symmetry_residual<=dg_ow_symmetry_tolerance" not in implementation.replace(" ", ""), (
+    "full retained-Hamiltonian covariance still gates post-LCFO acceptance"
+)
+continuation_call = source[source.index("call run_dg_hybrid_concrete_continuation"):start]
+for token in ("ntarget", "ow_pencil_generator_maps"):
+    assert token in continuation_call, f"production route does not pass {token} into concrete continuation"
 assert "checkpoint_payload%energy_receipt=[energy%E_tot" not in implementation, (
     "checkpoint energy receipt still serializes the pre-continuation energy"
 )
@@ -204,6 +235,12 @@ for receipt_token in (
     "[HYBRID-GS-ACCEPTANCE]",
     "seed_identity=",
     "lambda_zero=",
+    "requested_target_rank=",
+    "extended_target_rank=",
+    "occupied_defect=",
+    "target_defect=",
+    "target_energy_defect=",
+    "density_defect=",
     "payload_fingerprint=",
 ):
     assert receipt_token in implementation, f"production continuation omits acceptance receipt {receipt_token}"
@@ -217,6 +254,38 @@ for token in (
     "fixed_payload%kinetic_rows(energy_row,:)+fixed_payload%interface_rows(energy_row,:)",
 ):
     assert token in implementation, f"final DG energy decomposition omits {token}"
+
+distributed_helper_name = "subroutine evaluate_dg_hybrid_distributed_low_energy_symmetry"
+distributed_helper = source[source.index(distributed_helper_name):]
+distributed_helper = distributed_helper[:distributed_helper.index(
+    "end subroutine evaluate_dg_hybrid_distributed_low_energy_symmetry"
+)]
+metric_collective = distributed_helper.index("MPI_IN_PLACE,global_metric")
+for token in ("minimum_contract", "maximum_contract", "minimum_tolerance_bits", "maximum_tolerance_bits"):
+    assert token in distributed_helper[:metric_collective], (
+        f"distributed low-energy symmetry omits pre-collective rank agreement {token}"
+    )
+
+density_helper_name = "subroutine measure_dg_hybrid_core_density_covariance"
+density_helper = source[source.index(density_helper_name):]
+density_helper = density_helper[:density_helper.index(
+    "end subroutine measure_dg_hybrid_core_density_covariance"
+)]
+assert "exchange_dg_point_permuted_orbital_rows" in density_helper, (
+    "mapped-core density symmetry does not apply the authoritative distributed point map directly"
+)
+density_measurement = density_helper.index("call exchange_dg_point_permuted_orbital_rows")
+for token in ("minimum_operation_count", "maximum_operation_count"):
+    assert token in density_helper[:density_measurement], (
+        f"mapped-core density symmetry omits operation-count rank agreement {token}"
+    )
+assert "MPI_MAX" in density_helper, "mapped-core density symmetry does not retain the worst point defect"
+assert "maxval(abs(mapped_density-density_probe))" in density_helper.replace(" ", ""), (
+    "mapped-core density symmetry does not measure the direct worst-point mismatch"
+)
+assert "call measure_dg_spatial_basis_covariance" not in density_helper, (
+    "mapped-core density symmetry still uses a grid-diluted L2 residual"
+)
 
 gs_input = (root / "tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_dg_continuation.in").read_text()
 rt_input = (root / "tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_dg_zero_field_rt.in").read_text()
