@@ -28,7 +28,7 @@ program test_dg_overlapping_wannier_w90_mpi
   complex(8)::transform(2,2)
   real(8)::centers(3,2),spreads(2),spread(3)
   integer(8)::bytes
-  logical::ok,matrix_matches,win_has_random_projection,replay_exists
+  logical::ok,matrix_matches,win_has_random_projection,replay_exists,replay_dmn_exists
   logical::win_has_site_true,win_has_site_false,win_has_symmetrize,dmn_exists
   character(256)::message,win_line
   complex(8),allocatable::local_values(:,:),local_anchors(:,:)
@@ -108,7 +108,7 @@ program test_dg_overlapping_wannier_w90_mpi
   integer(8)::sector_trial_fingerprint,sector_trial_workspace
   complex(8),allocatable::replay_m(:,:,:),replay_a(:,:)
   real(8),allocatable::replay_eigenvalues(:)
-  integer::replay_gvec(3,2),replay_unit,replay_ios
+  integer::replay_gvec(3,2),replay_unit,replay_ios,replay_symmetry_mode
   integer(8),allocatable::sector_reference_keys(:),sector_permuted_keys(:)
 #ifdef USE_WANNIER90
   integer::nntot,symmetry_mode
@@ -172,12 +172,71 @@ program test_dg_overlapping_wannier_w90_mpi
     allocate(replay_m(0,0,0),replay_a(0,0),replay_eigenvalues(0))
   endif
   call export_dg_w90_replay_bundle(MPI_COMM_WORLD,'.','replay_source','.',&
-    'replay_bundle',replay_eigenvalues,replay_a,replay_m,replay_gvec,ok,message)
+    'replay_bundle',DG_W90_CONSTRAINED,replay_eigenvalues,replay_a,replay_m,replay_gvec,ok,message)
   call require(ok,trim(message))
-  replay_exists=.false.
-  if(rank==0)inquire(file='replay_bundle.win',exist=replay_exists)
+  replay_exists=.false.;replay_dmn_exists=.false.
+  if(rank==0)then
+    inquire(file='replay_bundle.win',exist=replay_exists)
+    inquire(file='replay_bundle.dmn',exist=replay_dmn_exists)
+  endif
   call MPI_Bcast(replay_exists,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
-  call require(replay_exists,'replay bundle contains .win')
+  call MPI_Bcast(replay_dmn_exists,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call require(replay_exists.and.replay_dmn_exists,&
+    'constrained replay bundle contains .win and .dmn')
+  call require_file_first_line('replay_bundle.dmn','replay dmn fixture',&
+    'constrained replay bundle copies the source .dmn content')
+  call export_dg_w90_replay_bundle(MPI_COMM_WORLD,'.','replay_source','.',&
+    'replay_invalid_mode_bundle',0,replay_eigenvalues,replay_a,replay_m,replay_gvec,ok,message)
+  call require(.not.ok,'replay export rejects an invalid symmetry mode')
+  replay_exists=.true.
+  if(rank==0)inquire(file='replay_invalid_mode_bundle.eig',exist=replay_exists)
+  call MPI_Bcast(replay_exists,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call require(.not.replay_exists,'invalid replay symmetry mode is rejected before bundle mutation')
+  if(nproc>1)then
+    replay_symmetry_mode=merge(DG_W90_CONSTRAINED,DG_W90_UNCONSTRAINED,rank==0)
+    call export_dg_w90_replay_bundle(MPI_COMM_WORLD,'.','replay_source','.',&
+      'replay_disagreed_mode_bundle',replay_symmetry_mode,replay_eigenvalues,replay_a,replay_m,&
+      replay_gvec,ok,message)
+    call require(.not.ok,'replay export rejects rank-disagreeing symmetry modes')
+    replay_exists=.true.
+    if(rank==0)inquire(file='replay_disagreed_mode_bundle.eig',exist=replay_exists)
+    call MPI_Bcast(replay_exists,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+    call require(.not.replay_exists,&
+      'rank-disagreeing replay symmetry mode is rejected before bundle mutation')
+  endif
+  if(rank==0)then
+    open(newunit=replay_unit,file='replay_unconstrained_source.win',status='replace',iostat=replay_ios)
+    if(replay_ios==0)write(replay_unit,'(a)')'num_wann = 2'
+    if(replay_ios==0)close(replay_unit)
+  endif
+  call export_dg_w90_replay_bundle(MPI_COMM_WORLD,'.','replay_unconstrained_source','.',&
+    'replay_unconstrained_bundle',DG_W90_UNCONSTRAINED,replay_eigenvalues,replay_a,replay_m,&
+    replay_gvec,ok,message)
+  call require(ok,trim(message))
+  replay_exists=.false.;replay_dmn_exists=.true.
+  if(rank==0)then
+    inquire(file='replay_unconstrained_bundle.win',exist=replay_exists)
+    inquire(file='replay_unconstrained_bundle.dmn',exist=replay_dmn_exists)
+  endif
+  call MPI_Bcast(replay_exists,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call MPI_Bcast(replay_dmn_exists,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call require(replay_exists.and..not.replay_dmn_exists,&
+    'unconstrained replay export neither requires nor creates .dmn')
+  if(rank==0)then
+    open(newunit=replay_unit,file='replay_stale_bundle.dmn',status='replace',iostat=replay_ios)
+    if(replay_ios==0)write(replay_unit,'(a)')'stale replay dmn sentinel'
+    if(replay_ios==0)close(replay_unit)
+  endif
+  call export_dg_w90_replay_bundle(MPI_COMM_WORLD,'.','replay_unconstrained_source','.',&
+    'replay_stale_bundle',DG_W90_UNCONSTRAINED,replay_eigenvalues,replay_a,replay_m,&
+    replay_gvec,ok,message)
+  call require(.not.ok,'unconstrained replay export rejects a stale target .dmn')
+  call require_file_first_line('replay_stale_bundle.dmn','stale replay dmn sentinel',&
+    'stale replay target .dmn is unchanged on rejection')
+  replay_exists=.true.
+  if(rank==0)inquire(file='replay_stale_bundle.eig',exist=replay_exists)
+  call MPI_Bcast(replay_exists,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call require(.not.replay_exists,'stale replay target is rejected before bundle mutation')
   if(rank==0)then
     open(newunit=log_unit,file='w90_converged_fixture.wout',status='replace')
     write(log_unit,'(a)')'      7  -0.100E-13  0.0  1.0  0.0 <-- CONV'
@@ -1295,6 +1354,22 @@ contains
     call MPI_Bcast(matches,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
     call require(matches,label)
   end subroutine require_artifact_sentinels
+
+  subroutine require_file_first_line(filename,expected,label)
+    character(*),intent(in)::filename,expected,label
+    integer::unit,io
+    character(256)::line
+    logical::matches
+    matches=.false.;line=''
+    if(rank==0)then
+      open(newunit=unit,file=filename,status='old',action='read',iostat=io)
+      if(io==0)read(unit,'(a)',iostat=io)line
+      if(io==0)close(unit)
+      matches=io==0.and.trim(line)==trim(expected)
+    endif
+    call MPI_Bcast(matches,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+    call require(matches,label)
+  end subroutine require_file_first_line
 
   subroutine require(condition,label)
     logical,intent(in)::condition

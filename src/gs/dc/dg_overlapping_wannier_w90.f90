@@ -61,8 +61,8 @@ contains
   end subroutine convert_dg_w90_library_geometry
 
   subroutine export_dg_w90_replay_bundle(comm,source_directory,source_seed,output_directory,&
-      output_seed,energy_ev,amn,mmn,neighbor_gvec,ok,message)
-    integer,intent(in)::comm
+      output_seed,symmetry_mode,energy_ev,amn,mmn,neighbor_gvec,ok,message)
+    integer,intent(in)::comm,symmetry_mode
     character(*),intent(in)::source_directory,source_seed,output_directory,output_seed
     real(real64),intent(in)::energy_ev(:)
     complex(real64),intent(in)::amn(:,:),mmn(:,:,:)
@@ -70,17 +70,24 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer::rank,ierr,bad,global_bad,nband,nproj,nneighbor
+    integer::rank,ierr,bad,global_bad,nband,nproj,nneighbor,mode_minimum,mode_maximum,probe_ios
     character(len(source_directory))::agreed_source_directory
     character(len(source_seed))::agreed_source_seed
     character(len(output_directory))::agreed_output_directory
     character(len(output_seed))::agreed_output_seed
-    logical::writer_ok
+    logical::writer_ok,target_dmn_exists
     character(len(message))::writer_message
 
     ok=.false.;message='';bad=0
     call MPI_Comm_rank(comm,rank,ierr)
     if(ierr/=MPI_SUCCESS)then;message='Wannier replay communicator query failed';return;endif
+    mode_minimum=0;mode_maximum=0
+    call MPI_Allreduce(symmetry_mode,mode_minimum,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier replay symmetry-mode MIN agreement failed';return;endif
+    call MPI_Allreduce(symmetry_mode,mode_maximum,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier replay symmetry-mode MAX agreement failed';return;endif
+    if((symmetry_mode/=DG_W90_CONSTRAINED.and.symmetry_mode/=DG_W90_UNCONSTRAINED).or.&
+        mode_minimum/=mode_maximum)bad=1
     agreed_source_directory=source_directory;agreed_source_seed=source_seed
     agreed_output_directory=output_directory;agreed_output_seed=output_seed
     call MPI_Bcast(agreed_source_directory,len(agreed_source_directory),MPI_CHARACTER,0,comm,ierr)
@@ -109,14 +116,35 @@ contains
     call MPI_Bcast(nneighbor,1,MPI_INTEGER,0,comm,ierr);if(ierr/=MPI_SUCCESS)bad=1
     call MPI_Allreduce(bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid Wannier replay export contract';return;endif
+    writer_ok=.false.;writer_message='';target_dmn_exists=.false.;probe_ios=0
+    if(rank==0)then
+      call probe_text_file(trim(source_directory)//'/'//trim(source_seed)//'.win',writer_ok,writer_message)
+      if(writer_ok.and.symmetry_mode==DG_W90_CONSTRAINED)&
+        call probe_text_file(trim(source_directory)//'/'//trim(source_seed)//'.dmn',writer_ok,writer_message)
+      if(writer_ok.and.symmetry_mode==DG_W90_UNCONSTRAINED)then
+        inquire(file=trim(output_directory)//'/'//trim(output_seed)//'.dmn',&
+          exist=target_dmn_exists,iostat=probe_ios)
+        if(probe_ios/=0)then
+          writer_ok=.false.;writer_message='Wannier replay target .dmn existence check failed'
+        else if(target_dmn_exists)then
+          writer_ok=.false.;writer_message='unconstrained Wannier replay target contains stale .dmn'
+        endif
+      endif
+    endif
+    call MPI_Bcast(writer_ok,1,MPI_LOGICAL,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier replay preflight status broadcast failed';return;endif
+    call MPI_Bcast(writer_message,len(writer_message),MPI_CHARACTER,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Wannier replay preflight detail broadcast failed';return;endif
+    if(.not.writer_ok)then;message=trim(writer_message);return;endif
     writer_ok=.false.;writer_message=''
     if(rank==0)then
       call write_sawf_local_eig_amn_mmn(trim(output_directory),trim(output_seed),energy_ev,amn,mmn,&
         neighbor_gvec,writer_ok,writer_message)
       if(writer_ok)call copy_text_file(trim(source_directory)//'/'//trim(source_seed)//'.win',&
         trim(output_directory)//'/'//trim(output_seed)//'.win',writer_ok,writer_message)
-      if(writer_ok)call copy_text_file(trim(source_directory)//'/'//trim(source_seed)//'.dmn',&
-        trim(output_directory)//'/'//trim(output_seed)//'.dmn',writer_ok,writer_message)
+      if(writer_ok.and.symmetry_mode==DG_W90_CONSTRAINED)&
+        call copy_text_file(trim(source_directory)//'/'//trim(source_seed)//'.dmn',&
+          trim(output_directory)//'/'//trim(output_seed)//'.dmn',writer_ok,writer_message)
     endif
     call MPI_Bcast(writer_ok,1,MPI_LOGICAL,0,comm,ierr)
     call MPI_Bcast(writer_message,len(writer_message),MPI_CHARACTER,0,comm,ierr)
@@ -129,6 +157,27 @@ contains
     ok=.false.;message='Wannier replay export requires MPI'
 #endif
   contains
+    subroutine probe_text_file(filename,probe_ok,detail)
+      character(*),intent(in)::filename
+      logical,intent(out)::probe_ok
+      character(*),intent(out)::detail
+      integer::unit,ios,close_ios
+      character(4096)::line
+      probe_ok=.false.;detail=''
+      open(newunit=unit,file=filename,status='old',action='read',iostat=ios)
+      if(ios/=0)then;detail='Wannier replay source file is unreadable: '//trim(filename);return;endif
+      do
+        read(unit,'(a)',iostat=ios)line
+        if(ios<0)exit
+        if(ios/=0)then;detail='Wannier replay source file read failed: '//trim(filename);exit;endif
+      enddo
+      close_ios=0;close(unit,iostat=close_ios)
+      if(ios<0.and.close_ios==0)then;probe_ok=.true.;detail=''
+      else if(close_ios/=0.and.len_trim(detail)==0)then
+        detail='Wannier replay source file close failed: '//trim(filename)
+      endif
+    end subroutine probe_text_file
+
     subroutine copy_text_file(source,target,copy_ok,detail)
       character(*),intent(in)::source,target
       logical,intent(out)::copy_ok

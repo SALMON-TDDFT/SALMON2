@@ -2468,8 +2468,8 @@ contains
       error stop 'Wannier90 replay enable state disagrees across ranks'
     if(w90_replay_enabled==1)then
       call export_dg_w90_replay_bundle(dc%icomm_tot,'.','overlapping_wannier_mlwf',&
-        trim(w90_replay_directory),'overlapping_wannier_mlwf',w90_eigenvalues,w90_a_matrix,&
-        w90_m_matrix,w90_nncell,ok,message)
+        trim(w90_replay_directory),'overlapping_wannier_mlwf',DG_W90_CONSTRAINED,&
+        w90_eigenvalues,w90_a_matrix,w90_m_matrix,w90_nncell,ok,message)
       if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 replay export failed';endif
     endif
     deallocate(w90_anchors,w90_fractional)
