@@ -17,6 +17,7 @@
 
 module sendrecv_grid
   use structures, only: s_rgrid, s_pcomm_cache, s_sendrecv_grid
+  use network_address, only: get_neighbour_rank
 #ifdef USE_OPENACC
   use cudafor
 #define comm_send_init comm_send_init_device
@@ -509,7 +510,6 @@ module sendrecv_grid
   end subroutine update_overlap_complex8
 
   subroutine create_sendrecv_neig(neig, info)
-    use network_address, only: get_neighbour_rank
     use structures, only: s_parallel_info
     use communication, only: comm_proc_null
     use salmon_global, only: yn_periodic
@@ -538,5 +538,4 @@ module sendrecv_grid
   end subroutine create_sendrecv_neig
 
 end module sendrecv_grid
-
 
