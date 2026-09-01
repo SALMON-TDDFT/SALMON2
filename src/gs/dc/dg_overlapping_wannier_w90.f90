@@ -10,6 +10,7 @@ module dg_overlapping_wannier_w90
   private
   integer,parameter,public::DG_W90_CONSTRAINED=1
   integer,parameter,public::DG_W90_UNCONSTRAINED=2
+  integer,parameter::DG_W90_REPLAY_TEXT_WIRE_LENGTH=4096
   public::estimate_dg_w90_coordinator_bytes,validate_dg_w90_result
   public::setup_dg_w90_gamma_library,run_dg_w90_gamma_library
   public::assemble_dg_w90_gamma_a_matrix,assemble_dg_w90_gamma_matrices
@@ -71,12 +72,12 @@ contains
     character(*),intent(out)::message
 #ifdef USE_MPI
     integer::rank,ierr,bad,global_bad,nband,nproj,nneighbor,mode_minimum,mode_maximum,probe_ios
-    character(len(source_directory))::agreed_source_directory
-    character(len(source_seed))::agreed_source_seed
-    character(len(output_directory))::agreed_output_directory
-    character(len(output_seed))::agreed_output_seed
+    character(DG_W90_REPLAY_TEXT_WIRE_LENGTH)::agreed_source_directory
+    character(DG_W90_REPLAY_TEXT_WIRE_LENGTH)::agreed_source_seed
+    character(DG_W90_REPLAY_TEXT_WIRE_LENGTH)::agreed_output_directory
+    character(DG_W90_REPLAY_TEXT_WIRE_LENGTH)::agreed_output_seed
     logical::writer_ok,target_dmn_exists
-    character(len(message))::writer_message
+    character(DG_W90_REPLAY_TEXT_WIRE_LENGTH)::writer_message
 
     ok=.false.;message='';bad=0
     call MPI_Comm_rank(comm,rank,ierr)
@@ -90,13 +91,13 @@ contains
         mode_minimum/=mode_maximum)bad=1
     agreed_source_directory=source_directory;agreed_source_seed=source_seed
     agreed_output_directory=output_directory;agreed_output_seed=output_seed
-    call MPI_Bcast(agreed_source_directory,len(agreed_source_directory),MPI_CHARACTER,0,comm,ierr)
+    call MPI_Bcast(agreed_source_directory,DG_W90_REPLAY_TEXT_WIRE_LENGTH,MPI_CHARACTER,0,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='Wannier replay source-directory agreement failed';return;endif
-    call MPI_Bcast(agreed_source_seed,len(agreed_source_seed),MPI_CHARACTER,0,comm,ierr)
+    call MPI_Bcast(agreed_source_seed,DG_W90_REPLAY_TEXT_WIRE_LENGTH,MPI_CHARACTER,0,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='Wannier replay source-seed agreement failed';return;endif
-    call MPI_Bcast(agreed_output_directory,len(agreed_output_directory),MPI_CHARACTER,0,comm,ierr)
+    call MPI_Bcast(agreed_output_directory,DG_W90_REPLAY_TEXT_WIRE_LENGTH,MPI_CHARACTER,0,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='Wannier replay output-directory agreement failed';return;endif
-    call MPI_Bcast(agreed_output_seed,len(agreed_output_seed),MPI_CHARACTER,0,comm,ierr)
+    call MPI_Bcast(agreed_output_seed,DG_W90_REPLAY_TEXT_WIRE_LENGTH,MPI_CHARACTER,0,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='Wannier replay output-seed agreement failed';return;endif
     if(source_directory/=agreed_source_directory.or.source_seed/=agreed_source_seed.or.&
         output_directory/=agreed_output_directory.or.output_seed/=agreed_output_seed.or.&
@@ -133,7 +134,7 @@ contains
     endif
     call MPI_Bcast(writer_ok,1,MPI_LOGICAL,0,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='Wannier replay preflight status broadcast failed';return;endif
-    call MPI_Bcast(writer_message,len(writer_message),MPI_CHARACTER,0,comm,ierr)
+    call MPI_Bcast(writer_message,DG_W90_REPLAY_TEXT_WIRE_LENGTH,MPI_CHARACTER,0,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='Wannier replay preflight detail broadcast failed';return;endif
     if(.not.writer_ok)then;message=trim(writer_message);return;endif
     writer_ok=.false.;writer_message=''
@@ -147,7 +148,7 @@ contains
           trim(output_directory)//'/'//trim(output_seed)//'.dmn',writer_ok,writer_message)
     endif
     call MPI_Bcast(writer_ok,1,MPI_LOGICAL,0,comm,ierr)
-    call MPI_Bcast(writer_message,len(writer_message),MPI_CHARACTER,0,comm,ierr)
+    call MPI_Bcast(writer_message,DG_W90_REPLAY_TEXT_WIRE_LENGTH,MPI_CHARACTER,0,comm,ierr)
     ok=ierr==MPI_SUCCESS.and.writer_ok
     if(.not.ok)then
       if(len_trim(writer_message)>0)then;message=trim(writer_message)

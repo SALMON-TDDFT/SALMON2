@@ -31,6 +31,8 @@ program test_dg_overlapping_wannier_w90_mpi
   logical::ok,matrix_matches,win_has_random_projection,replay_exists,replay_dmn_exists
   logical::win_has_site_true,win_has_site_false,win_has_symmetrize,dmn_exists
   character(256)::message,win_line
+  character(:),allocatable::replay_rank_length_message,replay_source_directory_arg,&
+    replay_source_seed_arg,replay_output_directory_arg,replay_output_seed_arg
   complex(8),allocatable::local_values(:,:),local_anchors(:,:)
   complex(8),allocatable::assembled_m(:,:,:),assembled_a(:,:),precomputed_a(:,:)
   real(8),allocatable::local_weights(:),local_fractional(:,:)
@@ -174,6 +176,71 @@ program test_dg_overlapping_wannier_w90_mpi
   call export_dg_w90_replay_bundle(MPI_COMM_WORLD,'.','replay_source','.',&
     'replay_bundle',DG_W90_CONSTRAINED,replay_eigenvalues,replay_a,replay_m,replay_gvec,ok,message)
   call require(ok,trim(message))
+  if(rank==0)then
+    allocate(character(512)::replay_rank_length_message)
+  else
+    allocate(character(64)::replay_rank_length_message)
+  endif
+  replay_rank_length_message=''
+  call export_dg_w90_replay_bundle(MPI_COMM_WORLD,'.','replay_source','.',&
+    'replay_detail_length_bundle',DG_W90_CONSTRAINED,replay_eigenvalues,replay_a,replay_m,&
+    replay_gvec,ok,replay_rank_length_message)
+  call require(ok,'replay export supports rank-varying output message lengths: '//&
+    trim(replay_rank_length_message))
+  deallocate(replay_rank_length_message)
+  if(rank==0)then
+    allocate(character(512)::replay_rank_length_message)
+  else
+    allocate(character(1)::replay_rank_length_message)
+  endif
+  replay_rank_length_message=''
+  call export_dg_w90_replay_bundle(MPI_COMM_WORLD,'.','replay_missing_source','.',&
+    'replay_missing_source_bundle',DG_W90_CONSTRAINED,replay_eigenvalues,replay_a,replay_m,&
+    replay_gvec,ok,replay_rank_length_message)
+  call require(.not.ok,'replay export propagates failure with rank-varying output message lengths')
+  deallocate(replay_rank_length_message)
+  if(rank==0)then
+    allocate(character(512)::replay_source_directory_arg,replay_source_seed_arg,&
+      replay_output_directory_arg,replay_output_seed_arg)
+  else
+    allocate(character(len('.'))::replay_source_directory_arg)
+    allocate(character(len('replay_source'))::replay_source_seed_arg)
+    allocate(character(len('.'))::replay_output_directory_arg)
+    allocate(character(len('replay_rank_length_input_bundle'))::replay_output_seed_arg)
+  endif
+  replay_source_directory_arg='.';replay_source_seed_arg='replay_source'
+  replay_output_directory_arg='.';replay_output_seed_arg='replay_rank_length_input_bundle'
+  call export_dg_w90_replay_bundle(MPI_COMM_WORLD,replay_source_directory_arg,&
+    replay_source_seed_arg,replay_output_directory_arg,replay_output_seed_arg,&
+    DG_W90_CONSTRAINED,replay_eigenvalues,replay_a,replay_m,replay_gvec,ok,message)
+  call require(ok,'replay export supports equal input strings with rank-varying actual lengths: '//&
+    trim(message))
+  deallocate(replay_source_directory_arg,replay_source_seed_arg,replay_output_directory_arg,&
+    replay_output_seed_arg)
+  if(nproc>1)then
+    if(rank==0)then
+      allocate(character(512)::replay_source_directory_arg,replay_source_seed_arg,&
+        replay_output_directory_arg,replay_output_seed_arg)
+      replay_source_directory_arg='.';replay_source_seed_arg='replay_source'
+      replay_output_directory_arg='.';replay_output_seed_arg='replay_rank_disagreed_text_bundle'
+    else
+      allocate(character(1)::replay_source_directory_arg,replay_output_directory_arg)
+      allocate(character(6)::replay_source_seed_arg,replay_output_seed_arg)
+      replay_source_directory_arg='.';replay_source_seed_arg='replay'
+      replay_output_directory_arg='.';replay_output_seed_arg='replay'
+    endif
+    call export_dg_w90_replay_bundle(MPI_COMM_WORLD,replay_source_directory_arg,&
+      replay_source_seed_arg,replay_output_directory_arg,replay_output_seed_arg,&
+      DG_W90_CONSTRAINED,replay_eigenvalues,replay_a,replay_m,replay_gvec,ok,message)
+    call require(.not.ok,'replay export rejects rank-disagreeing input strings with different actual lengths')
+    replay_exists=.true.
+    if(rank==0)inquire(file='replay_rank_disagreed_text_bundle.eig',exist=replay_exists)
+    call MPI_Bcast(replay_exists,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+    call require(.not.replay_exists,&
+      'rank-disagreeing replay input strings are rejected before bundle mutation')
+    deallocate(replay_source_directory_arg,replay_source_seed_arg,replay_output_directory_arg,&
+      replay_output_seed_arg)
+  endif
   replay_exists=.false.;replay_dmn_exists=.false.
   if(rank==0)then
     inquire(file='replay_bundle.win',exist=replay_exists)
@@ -222,6 +289,34 @@ program test_dg_overlapping_wannier_w90_mpi
   call MPI_Bcast(replay_dmn_exists,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
   call require(replay_exists.and..not.replay_dmn_exists,&
     'unconstrained replay export neither requires nor creates .dmn')
+  if(rank==0)then
+    open(newunit=replay_unit,file='replay_unreadable_dmn_source.win',status='replace',iostat=replay_ios)
+    if(replay_ios==0)write(replay_unit,'(a)')'num_wann = 2'
+    if(replay_ios==0)close(replay_unit)
+    replay_ios=0;dmn_exists=.false.
+    inquire(file='replay_unreadable_dmn_source.dmn',exist=dmn_exists,iostat=replay_ios)
+  endif
+  call MPI_Bcast(replay_ios,1,MPI_INTEGER,0,MPI_COMM_WORLD,ierr)
+  call MPI_Bcast(dmn_exists,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call require(replay_ios==0.and.dmn_exists,'runner supplied an existing unreadable source .dmn fixture')
+  call export_dg_w90_replay_bundle(MPI_COMM_WORLD,'.','replay_unreadable_dmn_source','.',&
+    'replay_unreadable_dmn_constrained_bundle',DG_W90_CONSTRAINED,replay_eigenvalues,replay_a,&
+    replay_m,replay_gvec,ok,message)
+  call require(.not.ok,'constrained replay export proves the source .dmn fixture is unreadable')
+  call export_dg_w90_replay_bundle(MPI_COMM_WORLD,'.','replay_unreadable_dmn_source','.',&
+    'replay_unreadable_dmn_unconstrained_bundle',DG_W90_UNCONSTRAINED,replay_eigenvalues,replay_a,&
+    replay_m,replay_gvec,ok,message)
+  call require(ok,'unconstrained replay export does not open an existing unreadable source .dmn: '//&
+    trim(message))
+  replay_exists=.false.;replay_dmn_exists=.true.
+  if(rank==0)then
+    inquire(file='replay_unreadable_dmn_unconstrained_bundle.win',exist=replay_exists)
+    inquire(file='replay_unreadable_dmn_unconstrained_bundle.dmn',exist=replay_dmn_exists)
+  endif
+  call MPI_Bcast(replay_exists,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call MPI_Bcast(replay_dmn_exists,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call require(replay_exists.and..not.replay_dmn_exists,&
+    'unconstrained replay ignores unreadable source .dmn and omits target .dmn')
   if(rank==0)then
     open(newunit=replay_unit,file='replay_stale_bundle.dmn',status='replace',iostat=replay_ios)
     if(replay_ios==0)write(replay_unit,'(a)')'stale replay dmn sentinel'

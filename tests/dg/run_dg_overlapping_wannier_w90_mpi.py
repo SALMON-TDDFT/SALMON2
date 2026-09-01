@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import shlex
 import shutil
+import socket
 import subprocess
 import tempfile
 
@@ -33,6 +34,8 @@ else:
         lapack_libs = ["-llapack", "-lblas"]
 with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
     build = Path(name)
+    unreadable_dmn_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    unreadable_dmn_socket.bind(str(build / "replay_unreadable_dmn_source.dmn"))
     (build / "config.h").write_text("")
     exe = build / "w90_adapter"
     subprocess.run(
@@ -130,4 +133,5 @@ with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
             line = next(line for line in result.stdout.splitlines() if line.startswith("W90_MATRIX_FINGERPRINT"))
             library_fingerprints.append(float(line.split()[1]))
         assert max(library_fingerprints) - min(library_fingerprints) < 1.0e-12, library_fingerprints
+    unreadable_dmn_socket.close()
 print("PASS Wannier90 MLWF adapter validation on 1, 2, 4, and 8 ranks")
