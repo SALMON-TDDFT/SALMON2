@@ -47,7 +47,7 @@ use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_hybrid_scf, 
   dg_ow_localization_gradient_tolerance,dg_ow_localization_max_iterations,&
   dg_ow_candidate_states_per_fragment,dg_ow_target_wanniers_per_fragment,wannier_num_iter,&
   dg_ow_w90_initial_projection,wannier_pw_cutoff,wannier_pw_max,nscf,method_mixing,&
-  dg_dc_seed_mode,dg_dc_seed_directory
+  dg_dc_seed_mode,dg_dc_seed_directory,dg_hybrid_symmetry_energy_window,temperature
 use dg_dc_seed_checkpoint,only:s_dg_dc_seed_contract,s_dg_dc_seed_payload,&
   DG_DC_SEED_ABSENT,DG_DC_SEED_VALID,build_dg_dc_seed_contract,probe_dg_dc_seed,&
   read_dg_dc_seed,write_dg_dc_seed,restore_dg_dc_seed_payload,resolve_dg_dc_seed_mode
@@ -129,14 +129,18 @@ use dg_hybrid_real_space_residual,only:evaluate_dg_hybrid_real_space_residual,&
   evaluate_dg_hybrid_face_action_residuals
 use dg_hybrid_continuation_controller,only:s_dg_hybrid_controller_controls,s_dg_hybrid_trial_state,&
   s_dg_hybrid_stage_schedule,&
-  s_dg_hybrid_stage_report,s_dg_hybrid_controller,default_dg_hybrid_controller_controls,&
+  s_dg_hybrid_stage_report,s_dg_hybrid_controller,s_dg_hybrid_candidate_acceptance,&
+  default_dg_hybrid_controller_controls,&
   dg_hybrid_stage_tolerances,initialize_dg_hybrid_controller,propose_dg_hybrid_trial,&
   observe_dg_hybrid_inner_residuals,decide_dg_hybrid_stage,reject_dg_hybrid_trial,&
   initialize_dg_hybrid_stage_schedule,begin_dg_hybrid_stage_solve,&
   schedule_dg_hybrid_candidate_checks,complete_dg_hybrid_stage_solve,&
-  dg_hybrid_continuation_state_count
-use dg_hybrid_low_energy_symmetry,only:select_dg_hybrid_symmetry_target,&
-  evaluate_dg_hybrid_low_energy_symmetry
+  initialize_dg_hybrid_candidate_acceptance,&
+  record_dg_hybrid_complete_lcfo_solve,record_dg_hybrid_occupation_policy,&
+  record_dg_hybrid_unconditional_gates,record_dg_hybrid_spectral_certification,&
+  record_dg_hybrid_certified_rt_basis,authorize_dg_hybrid_v3_publication
+use dg_hybrid_low_energy_symmetry,only:evaluate_dg_hybrid_low_energy_symmetry,&
+  certify_dg_hybrid_energy_window
 use dg_hybrid_localization_first,only:s_dg_hybrid_localization_receipt,&
   prepare_dg_hybrid_localization_first_seed,build_dg_hybrid_localization_receipt
 use dg_hybrid_continuation_state,only:s_dg_hybrid_scope_receipt,build_dg_hybrid_scope_receipt,&
@@ -147,13 +151,19 @@ use dg_hybrid_fragment_solver,only:solve_dg_hybrid_fragment_basis
 use dg_hybrid_divided_scf,only:run_dg_hybrid_divided_scf
 use dg_hybrid_lcfo,only:assemble_dg_hybrid_lcfo_rows
 use dg_nonlocal_projector_range,only:s_dg_nonlocal_range_receipt,analyze_dg_nonlocal_projector_range
-use dg_hybrid_generalized_eigensystem,only:solve_dg_hybrid_generalized_scalapack,&
-  solve_dg_hybrid_generalized_once_and_publish
+use dg_hybrid_generalized_eigensystem,only:s_dg_hybrid_complete_eigensystem,&
+  solve_dg_hybrid_generalized_scalapack,solve_dg_hybrid_generalized_once_and_publish,&
+  solve_dg_hybrid_generalized_complete_once
+use dg_hybrid_occupation_policy,only:s_dg_hybrid_occupation_result,derive_dg_hybrid_occupation_policy
 use dg_hybrid_density,only:reconstruct_dg_hybrid_density,reconstruct_dg_hybrid_occupied_state
-use dg_hybrid_ground_state_types,only:s_dg_hybrid_ground_state,validate_dg_hybrid_ground_state
+use dg_hybrid_ground_state_types,only:s_dg_hybrid_ground_state,s_dg_hybrid_spectral_certification,&
+  validate_dg_hybrid_ground_state
+use dg_hybrid_certified_rt_basis,only:s_dg_hybrid_certified_rt_basis,build_dg_hybrid_certified_rt_basis
 use rt_dg_hybrid_checkpoint,only:write_rt_dg_hybrid_occupied_checkpoint,&
   s_rt_dg_hybrid_ground_state_payload,write_rt_dg_hybrid_ground_state_checkpoint,&
-  fingerprint_rt_dg_hybrid_component
+  fingerprint_rt_dg_hybrid_component,fingerprint_rt_dg_hybrid_ground_state_payload,&
+  rt_dg_hybrid_ground_state_checkpoint_version,rt_dg_hybrid_energy_window_explicit,&
+  rt_dg_hybrid_energy_window_legacy_dynamic,rt_dg_hybrid_vector_canonical_momentum
 use dg_overlapping_wannier_solver, only: solve_dg_overlapping_wannier_coefficients
 #ifdef USE_EIGENEXA
 use dg_overlapping_wannier_solver, only: solve_dg_overlapping_wannier_generalized_eigenexa
@@ -288,6 +298,9 @@ integer(8),allocatable :: ow_box_physical_ids(:)
 integer,allocatable :: ow_tail_generation(:,:)
 integer,allocatable :: ow_core_box_positions(:)
 real(8),allocatable :: ow_core_weights(:)
+complex(8),allocatable :: dg_certified_localizer_values(:,:)
+real(8),allocatable :: dg_certified_localizer_weights(:)
+integer(8),allocatable :: dg_certified_localizer_grid_ids(:)
 real(8),allocatable :: ow_partition_weight(:),ow_partition_gradient(:,:)
 complex(8),allocatable :: ow_pencil_generator_representation(:,:,:)
 integer,allocatable :: ow_pencil_generator_operations(:),ow_pencil_affine_product(:,:),&
@@ -1742,12 +1755,18 @@ contains
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global affine generator selection failed';endif
     if(rank==0)write(*,'(a,2(a,i0))')'[OW-GS-DIAGNOSTIC] affine_generator_proof',&
       ' group_order=',size(global_point_product,1),' generator_count=',size(global_affine_generators)
-    call measure_dg_grid_map_stencil_defect(dc%icomm_tot,ow_core_ids,&
-      global_symmetry_map(:,global_affine_generators),dc%lg_tot%num,system%hgs,&
-      global_point_rotations(:,:,global_affine_generators),ow_grid_stencil_defect,ok,message)
-    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'affine grid-stencil diagnostic failed';endif
-    if(rank==0)write(*,'(a,es16.8,a,i0)')'[OW-GS-DIAGNOSTIC] affine grid-stencil defect max=',&
-      maxval(ow_grid_stencil_defect),' operation=',maxloc(ow_grid_stencil_defect,dim=1)
+    if(size(global_affine_generators)>0)then
+      call measure_dg_grid_map_stencil_defect(dc%icomm_tot,ow_core_ids,&
+        global_symmetry_map(:,global_affine_generators),dc%lg_tot%num,system%hgs,&
+        global_point_rotations(:,:,global_affine_generators),ow_grid_stencil_defect,ok,message)
+      if(.not.ok)then;write(0,'(a)')trim(message);error stop 'affine grid-stencil diagnostic failed';endif
+      if(rank==0)write(*,'(a,es16.8,a,i0)')'[OW-GS-DIAGNOSTIC] affine grid-stencil defect max=',&
+        maxval(ow_grid_stencil_defect),' operation=',maxloc(ow_grid_stencil_defect,dim=1)
+    else
+      allocate(ow_grid_stencil_defect(0))
+      if(rank==0)write(*,'(a,es16.8,a,i0)')'[OW-GS-DIAGNOSTIC] affine grid-stencil defect max=',&
+        0d0,' operation=',global_identity_operation
+    endif
     deallocate(ow_grid_stencil_defect)
 
     call prepare_dg_hybrid_localization_first_seed(dc%icomm_tot,ow_core_ids,global_seed_values,&
@@ -1761,22 +1780,30 @@ contains
     allocate(lcfo_total_symmetry_residual(size(global_affine_generators)),&
       lcfo_boundary_symmetry_residual(size(global_affine_generators)),&
       lcfo_interior_symmetry_residual(size(global_affine_generators)))
-    call measure_dg_rank_fixed_symmetry_residuals(dc%icomm_tot,global_closed_core,ow_core_weights,&
-      global_symmetry_map(:,global_affine_generators),lcfo_boundary_mask,&
-      total_residual=lcfo_total_symmetry_residual,boundary_residual=lcfo_boundary_symmetry_residual,&
-      interior_residual=lcfo_interior_symmetry_residual,ok=ok,message=message,&
-      workspace_peak_bytes=lcfo_symmetry_workspace_peak)
-    if(.not.ok)then
-      write(0,'(a)')trim(message);error stop 'Hybrid construction-basis symmetry diagnostic failed'
+    if(size(global_affine_generators)>0)then
+      call measure_dg_rank_fixed_symmetry_residuals(dc%icomm_tot,global_closed_core,ow_core_weights,&
+        global_symmetry_map(:,global_affine_generators),lcfo_boundary_mask,&
+        total_residual=lcfo_total_symmetry_residual,boundary_residual=lcfo_boundary_symmetry_residual,&
+        interior_residual=lcfo_interior_symmetry_residual,ok=ok,message=message,&
+        workspace_peak_bytes=lcfo_symmetry_workspace_peak)
+      if(.not.ok)then
+        write(0,'(a)')trim(message);error stop 'Hybrid construction-basis symmetry diagnostic failed'
+      endif
+      lcfo_symmetry_worst_generator_index=maxloc(lcfo_total_symmetry_residual,dim=1)
+      lcfo_symmetry_worst_operation=global_affine_generators(lcfo_symmetry_worst_generator_index)
+      global_retained_group_closure_defect=maxval(lcfo_total_symmetry_residual)
+      if(rank==0)write(*,'(a,i0,3(a,es16.8))')&
+        '[HYBRID-WF-SYMMETRY-DIAGNOSTIC] complete_basis_worst_operation=',lcfo_symmetry_worst_operation,&
+        ' total=',lcfo_total_symmetry_residual(lcfo_symmetry_worst_generator_index),&
+        ' boundary=',lcfo_boundary_symmetry_residual(lcfo_symmetry_worst_generator_index),&
+        ' interior=',lcfo_interior_symmetry_residual(lcfo_symmetry_worst_generator_index)
+    else
+      lcfo_symmetry_worst_generator_index=0;lcfo_symmetry_worst_operation=global_identity_operation
+      global_retained_group_closure_defect=0d0;lcfo_symmetry_workspace_peak=0_8
+      if(rank==0)write(*,'(a,i0,3(a,es16.8))')&
+        '[HYBRID-WF-SYMMETRY-DIAGNOSTIC] complete_basis_worst_operation=',lcfo_symmetry_worst_operation,&
+        ' total=',0d0,' boundary=',0d0,' interior=',0d0
     endif
-    lcfo_symmetry_worst_generator_index=maxloc(lcfo_total_symmetry_residual,dim=1)
-    lcfo_symmetry_worst_operation=global_affine_generators(lcfo_symmetry_worst_generator_index)
-    global_retained_group_closure_defect=maxval(lcfo_total_symmetry_residual)
-    if(rank==0)write(*,'(a,i0,3(a,es16.8))')&
-      '[HYBRID-WF-SYMMETRY-DIAGNOSTIC] complete_basis_worst_operation=',lcfo_symmetry_worst_operation,&
-      ' total=',lcfo_total_symmetry_residual(lcfo_symmetry_worst_generator_index),&
-      ' boundary=',lcfo_boundary_symmetry_residual(lcfo_symmetry_worst_generator_index),&
-      ' interior=',lcfo_interior_symmetry_residual(lcfo_symmetry_worst_generator_index)
 
     allocate(w90_anchors(ntarget,ncore),source=global_seed_values,stat=allocation_status)
     call MPI_Allreduce(MPI_IN_PLACE,allocation_status,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
@@ -3151,6 +3178,12 @@ contains
     if(rank==0)write(*,'(2(a,es16.8))')'[OW-GS-DIAGNOSTIC] buffer/direct gradient relative defect=',&
       sqrt(max(0d0,ow_gradient_path_global(1))/max(tiny(1d0),ow_gradient_path_global(2))),&
       ' direct gradient norm=',sqrt(max(0d0,ow_gradient_path_global(2)))
+    allocate(ow_scalar_probe(1,ncore),ow_vector_probe(3,1,ncore),&
+      ow_scalar_representation(1,1,size(ow_pencil_generator_maps,2)),ow_scalar_probe_weights(ncore))
+    ow_scalar_representation=(1d0,0d0);ow_scalar_probe_weights=1d0
+    ow_scalar_probe(1,:)=cmplx(ow_partition_weight(ow_core_box_positions),0d0,8)
+    ow_vector_probe(:,1,:)=cmplx(ow_partition_gradient(:,ow_core_box_positions),0d0,8)
+    if(size(ow_pencil_generator_maps,2)>0)then
     call assemble_dg_distributed_basis_symmetry_overlap(dc%icomm_tot,ow_core_values,ow_core_weights,&
       ow_pencil_generator_maps,ow_pencil_generator_representation,ok,message)
     if(ok)call measure_dg_spatial_basis_covariance(dc%icomm_tot,ow_core_values,ow_core_weights,&
@@ -3165,17 +3198,12 @@ contains
       ow_spatial_covariance_absolute=ow_spatial_covariance_relative*sqrt(real(ntarget,8))
     endif
     if(allocated(ow_core_spatial_covariance_residual))deallocate(ow_core_spatial_covariance_residual)
-    allocate(ow_scalar_probe(1,ncore),ow_vector_probe(3,1,ncore),&
-      ow_scalar_representation(1,1,size(ow_pencil_generator_maps,2)),ow_scalar_probe_weights(ncore))
-    ow_scalar_representation=(1d0,0d0);ow_scalar_probe_weights=1d0
-    ow_scalar_probe(1,:)=cmplx(ow_partition_weight(ow_core_box_positions),0d0,8)
     call measure_dg_spatial_basis_covariance(dc%icomm_tot,ow_scalar_probe,ow_scalar_probe_weights,&
       ow_pencil_generator_maps,ow_scalar_representation,ow_scalar_probe_residual,ok,message)
     if(ok.and.rank==0)write(*,'(a,es16.8,a,i0)')&
       '[OW-GS-DIAGNOSTIC] core partition-weight covariance max=',maxval(ow_scalar_probe_residual),&
       ' operation=',maxloc(ow_scalar_probe_residual,dim=1)
     if(allocated(ow_scalar_probe_residual))deallocate(ow_scalar_probe_residual)
-    ow_vector_probe(:,1,:)=cmplx(ow_partition_gradient(:,ow_core_box_positions),0d0,8)
     call measure_dg_spatial_gradient_covariance(dc%icomm_tot,ow_vector_probe,ow_scalar_probe_weights,&
       ow_pencil_generator_maps,ow_scalar_representation,&
       global_point_rotations(:,:,global_affine_generators),&
@@ -3229,6 +3257,22 @@ contains
         maxval(ow_gradient_covariance_candidates(8,:)),' op=',&
         maxloc(ow_gradient_covariance_candidates(8,:),dim=1)
     endif
+    else
+      allocate(ow_pencil_generator_representation(ntarget,ntarget,0))
+      ow_spatial_covariance_relative=0d0;ow_spatial_covariance_absolute=0d0
+      ow_gradient_covariance_absolute=0d0;ow_gradient_stencil_norm_bound=0d0
+      ok=.true.;message=''
+      if(rank==0)then
+        write(*,'(a,es16.8,a,i0)')'[OW-GS-DIAGNOSTIC] core spatial generator covariance max=',&
+          0d0,' operation=',global_identity_operation
+        write(*,'(a,es16.8,a,i0)')'[OW-GS-DIAGNOSTIC] core partition-weight covariance max=',&
+          0d0,' operation=',global_identity_operation
+        write(*,'(2(a,es16.8,a,i0))')'[OW-GS-DIAGNOSTIC] core partition-gradient covariance R max=',&
+          0d0,' operation=',global_identity_operation,' RT max=',0d0,' operation=',global_identity_operation
+        write(*,'(2(a,es16.8,a,i0))')'[OW-GS-DIAGNOSTIC] core gradient covariance R max=',&
+          0d0,' operation=',global_identity_operation,' RT max=',0d0,' operation=',global_identity_operation
+      endif
+    endif
     allocate(ow_gradient_identity_map(ncore,1))
     ow_gradient_identity_map(:,1)=[(int(rank,8)*int(ncore,8)+int(p,8),p=1,ncore)]
     ow_gradient_identity_rotation=0d0
@@ -3250,7 +3294,8 @@ contains
       ow_gradient_map_commutator(1)
     if(allocated(ow_gradient_map_commutator))deallocate(ow_gradient_map_commutator)
     deallocate(ow_gradient_identity_map)
-    if(ok)call measure_ow_discrete_gradient_map_commutator(dc%icomm_tot,ow_core_values,&
+    if(size(ow_pencil_generator_maps,2)>0.and.ok)then
+    call measure_ow_discrete_gradient_map_commutator(dc%icomm_tot,ow_core_values,&
       ow_direct_core_gradients,ow_core_weights,ow_core_ids,ow_pencil_generator_maps,&
       dc%lg_tot%num,stencil%coef_nab,global_point_rotations(:,:,global_affine_generators),&
       ow_gradient_map_commutator,ok,message)
@@ -3270,6 +3315,15 @@ contains
       ' operation=',maxloc(ow_gradient_covariance_left,dim=1),&
       ' RT max=',maxval(ow_gradient_covariance_transpose),&
       ' operation=',maxloc(ow_gradient_covariance_transpose,dim=1)
+    else if(size(ow_pencil_generator_maps,2)==0.and.ok)then
+      if(rank==0)then
+        write(*,'(a,es16.8,a,i0)')'[OW-GS-DIAGNOSTIC] finite-difference/map commutator max=',&
+          0d0,' operation=',global_identity_operation
+        write(*,'(2(a,es16.8,a,i0))')&
+          '[OW-GS-DIAGNOSTIC] direct core gradient covariance R max=',0d0,&
+          ' operation=',global_identity_operation,' RT max=',0d0,' operation=',global_identity_operation
+      endif
+    endif
     if(allocated(ow_gradient_covariance_left))deallocate(ow_gradient_covariance_left)
     if(allocated(ow_gradient_covariance_transpose))deallocate(ow_gradient_covariance_transpose)
     deallocate(ow_direct_core_gradients)
@@ -3551,10 +3605,11 @@ contains
           divided_operator_offsets,divided_operator_columns)
         call run_dg_hybrid_concrete_continuation(divided_initial_density,divided_effective_ids,&
           divided_lcfo_row_ids,divided_basis_fragment,dg_hybrid_interior_fragment,&
-          dg_hybrid_interior_weights,dg_hybrid_interior_values,&
+          dg_hybrid_interior_weights,dg_hybrid_interior_values,dg_hybrid_interior_gradients,&
           dg_hybrid_interior_kinetic_action,dg_hybrid_interior_nonlocal_action,dg_hybrid_fixed_payload,&
-          dg_hybrid_interface_component_rows,divided_production_faces,occupations,ntarget,&
+          dg_hybrid_interface_component_rows,divided_production_faces,ntarget,&
           ow_pencil_generator_maps,divided_basis_representation,&
+          global_point_rotations(:,:,global_affine_generators),&
           divided_requested_ids,divided_selection_effective_ids,divided_added_ids,&
           divided_closure_parent,divided_closure_reason,&
           divided_closure_action,divided_scope_selectors,pseudopotential_fingerprint,&
@@ -4921,15 +4976,16 @@ contains
   end subroutine update_dg_hybrid_divided_potential
 
   subroutine run_dg_hybrid_concrete_continuation(dc_seed_density,effective_ids,row_ids,basis_fragment,&
-      interior_fragment,interior_weights,interior_values,interior_kinetic_action,&
+      interior_fragment,interior_weights,interior_values,interior_gradients,interior_kinetic_action,&
       interior_nonlocal_action,fixed_payload,interface_component_rows,production_faces,&
-      occupied_occupations,symmetry_target_rank_arg,core_symmetry_maps_arg,basis_representation,&
+      symmetry_target_rank_arg,core_symmetry_maps_arg,basis_representation,&
+      cartesian_rotations_arg,&
       requested_ids_arg,selection_effective_ids_arg,added_ids_arg,closure_parent_arg,&
       closure_reason_arg,closure_action_arg,scope_selectors_arg,pseudopotential_fingerprint_arg,&
       scope_fingerprint_arg,selection_fingerprint_arg,metric_offsets_arg,metric_columns_arg,&
       operator_offsets_arg,operator_columns_arg,&
       final_ground_state,final_density,final_trace,final_hamiltonian_rows)
-    real(8),intent(in)::dc_seed_density(:),interior_weights(:),occupied_occupations(:)
+    real(8),intent(in)::dc_seed_density(:),interior_weights(:)
     integer,intent(in)::effective_ids(:),basis_fragment(:),interior_fragment(:),symmetry_target_rank_arg,&
       requested_ids_arg(:),&
       selection_effective_ids_arg(:),added_ids_arg(:),&
@@ -4937,16 +4993,18 @@ contains
     integer,intent(in)::metric_offsets_arg(:),metric_columns_arg(:),operator_offsets_arg(:),operator_columns_arg(:)
     integer(8),intent(in)::row_ids(:),core_symmetry_maps_arg(:,:)
     integer(8),intent(in)::pseudopotential_fingerprint_arg,scope_fingerprint_arg,selection_fingerprint_arg
-    complex(8),intent(in)::interior_values(:,:),interior_kinetic_action(:,:),interior_nonlocal_action(:,:)
+    complex(8),intent(in)::interior_values(:,:),interior_gradients(:,:,:),&
+      interior_kinetic_action(:,:),interior_nonlocal_action(:,:)
     complex(8),intent(in)::interface_component_rows(:,:,:)
     complex(8),intent(in)::basis_representation(:,:,:)
+    real(8),intent(in)::cartesian_rotations_arg(:,:,:)
     type(s_dg_hybrid_fixed_payload),intent(in)::fixed_payload
     type(s_dg_hybrid_production_face_trace),intent(in)::production_faces(:)
     type(s_dg_hybrid_ground_state),intent(out)::final_ground_state
     real(8),allocatable,intent(out)::final_density(:)
     complex(8),allocatable,intent(out)::final_trace(:,:),final_hamiltonian_rows(:,:)
     real(8)::accepted_lambda,trial_lambda,electron_count,max_residual,&
-      orthogonality_defect,projector_defect,projector_change,local_norm,global_norm,&
+      projector_change,local_norm,global_norm,&
       local_projector_scale,global_projector_scale,symmetry_residual
     real(8)::projector_symmetry_residual,low_energy_occupied_symmetry_defect,&
       occupied_symmetry_defect,target_symmetry_defect,target_energy_symmetry_defect,&
@@ -4954,31 +5012,56 @@ contains
       physical_symmetry_defect
     real(8)::broken_diagnostics(4)
     real(8),allocatable::rho_in(:),rho_out(:),local_potential(:),checkpoint_coordinates(:,:),&
-      eigenvalues(:),solver_eigenvalues(:)
+      eigenvalues(:),solver_eigenvalues(:),checkpoint_cartesian_rotations(:,:,:)
     complex(8),allocatable::local_rows(:,:),coefficients(:,:),solver_coefficients(:,:),checkpoint_position(:,:,:),&
       gamma_rows(:,:),projector_rows(:,:),s_coefficients(:,:),interface_state(:,:),&
-      previous_interface_state(:,:),hc(:,:),sc_epsilon(:,:),full_action_values(:,:),interface_component_actions(:,:,:)
+      previous_interface_state(:,:),hc(:,:),sc_epsilon(:,:),full_action_values(:,:),interface_component_actions(:,:,:),&
+      full_metric(:,:),full_coefficients(:,:),full_b_rt(:,:),certified_representation(:,:,:),&
+      checkpoint_basis_representation(:,:,:),checkpoint_momentum(:,:,:),&
+      c_cert_rows(:,:),&
+      certified_scalar_operators(:,:,:),certified_vector_operators(:,:,:,:),certified_tensor_operators(:,:,:,:,:),&
+      rt_metric(:,:),rt_kinetic(:,:),rt_nonlocal(:,:),rt_local(:,:),rt_sipg(:,:),rt_hamiltonian(:,:),&
+      full_component(:,:),rt_basis_values(:,:),projected_position(:,:)
     type(s_dg_hybrid_variational_iterate)::iterate
     type(s_dg_hybrid_residuals)::residuals
     type(s_dg_hybrid_controller_controls)::continuation_controls
     type(s_dg_hybrid_trial_state)::trial_state
     type(s_dg_hybrid_stage_report)::stage_report
     type(s_dg_hybrid_controller)::continuation_controller
+    type(s_dg_hybrid_candidate_acceptance)::candidate_acceptance
+    type(s_dg_hybrid_complete_eigensystem)::complete_eigensystem
+    type(s_dg_hybrid_occupation_result)::occupation_result
+    type(s_dg_hybrid_spectral_certification)::spectral_certification
+    type(s_dg_hybrid_certified_rt_basis)::certified_rt_basis
     type(s_rt_dg_hybrid_ground_state_payload)::checkpoint_payload
     type(s_dg_hybrid_stage_schedule)::stage_schedule
-    integer(8)::solver_workspace,solver_fingerprint,final_operator_fingerprint,&
+    integer(8)::solver_fingerprint,final_operator_fingerprint,&
       final_state_workspace,final_state_fingerprint,kinetic_fingerprint,nonlocal_fingerprint,&
-      local_fingerprint,sipg_fingerprint,checkpoint_fingerprint,seed_fingerprint,seed_local_hash,seed_value_bits
-    integer::iteration,ierr_local,rank_local,continuation_state_count,gap_occupied_index,gap_unoccupied_index,p,&
+      local_fingerprint,sipg_fingerprint,checkpoint_fingerprint,seed_fingerprint,&
+      rt_metric_fingerprint,rt_kinetic_fingerprint,rt_nonlocal_fingerprint,rt_local_fingerprint,&
+      rt_sipg_fingerprint,rt_hamiltonian_fingerprint,rt_basis_fingerprint,rt_density_fingerprint,&
+      rt_ownership_fingerprint,rt_grid_ownership_fingerprint,rt_scalar_fingerprint,&
+      rt_vector_fingerprint,rt_tensor_fingerprint,rt_representation_fingerprint,&
+      rt_rotation_fingerprint,rt_payload_fingerprint,initial_state_fingerprint,&
+      catalog_ids_fingerprint,catalog_generation_fingerprint,catalog_ordering_fingerprint,&
+      catalog_ownership_fingerprint,catalog_provenance_fingerprint,catalog_fingerprint,&
+      symmetry_receipt_fingerprint,handoff_fingerprint
+    integer::iteration,ierr_local,rank_local,gap_occupied_index,gap_unoccupied_index,p,&
       occupied_symmetry_rank,extended_target_rank,&
       face_value_count,face_value_position,face_point_count,face_point_position,face_basis_count,face_basis_position,&
-      face_weight_count,face_weight_position,owned_face_count,face_slot
-    integer,allocatable::checkpoint_face_owner(:)
+      face_weight_count,face_weight_position,face_observable_count,face_observable_position,&
+      interface_cursor,owned_face_count,face_slot,rt_row_count,rt_row_position,nproc_local,certified_rank,&
+      construction_index,dynamic_requested_rank
+    integer,allocatable::checkpoint_face_owner(:),construction_ownership(:),construction_generations(:),&
+      construction_ordering(:),rt_row_owner_keys(:)
+    integer(8),allocatable::construction_ids(:),rt_row_ids(:)
     logical::stage_converged,reject_trial,local_ok,accept_stage,final_refresh_performed,cheap_candidate,&
       run_solve,run_expensive,refresh_scheduled,meaningful_gap,occupation_kernel_ok,&
-      seed_identity_accepted,lambda_zero_accepted,target_selection_ok,symmetry_evaluation_ok
+      seed_identity_accepted,lambda_zero_accepted,symmetry_evaluation_ok,&
+      electron_gate_ok,occupied_gate_ok,density_gate_ok,payload_ready
     character(256)::continuation_message
-    real(8)::occupied_unoccupied_gap,accepted_gap
+    character(16)::window_mode
+    real(8)::occupied_unoccupied_gap,accepted_gap,cluster_tolerance
     real(8)::hamiltonian_hermiticity,hamiltonian_scale
     real(8)::real_space_residual,interface_action_residuals(3),local_energy_parts(3),global_energy_parts(3),&
       final_energy_receipt(7)
@@ -4988,24 +5071,21 @@ contains
     logical::hamiltonian_finite
 
     call MPI_Comm_rank(dc%icomm_tot,rank_local,ierr_local)
+    call MPI_Comm_size(dc%icomm_tot,nproc_local,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)error stop 'DG continuation communicator query failed'
     allocate(rho_in,source=dc_seed_density)
     seed_identity_accepted=all(rho_in==dc_seed_density);lambda_zero_accepted=.false.
-    if(size(effective_ids)<size(occupied_occupations))&
-      error stop 'DG continuation retained basis is smaller than the occupation kernel'
     occupied_symmetry_rank=0
-    do p=1,size(occupied_occupations)
-      if(occupied_occupations(p)>64d0*epsilon(1d0))occupied_symmetry_rank=p
-    enddo
-    if(occupied_symmetry_rank<1)error stop 'DG continuation occupation window is empty'
     if(size(core_symmetry_maps_arg,1)/=size(dc_seed_density).or.&
         size(core_symmetry_maps_arg,2)/=size(basis_representation,3))&
       error stop 'DG continuation core symmetry map shape mismatch'
-    call dg_hybrid_continuation_state_count(occupied_occupations,size(effective_ids),symmetry_target_rank_arg,&
-      continuation_state_count,&
-      meaningful_gap,gap_occupied_index,gap_unoccupied_index,local_ok)
-    if(.not.local_ok)error stop 'DG continuation occupation kernel is invalid'
-    allocate(local_potential(size(ow_core_ids)),eigenvalues(size(occupied_occupations)),&
-      solver_eigenvalues(continuation_state_count))
+    if(any(shape(cartesian_rotations_arg)/=[3,3,size(basis_representation,3)]))&
+      error stop 'DG continuation Cartesian rotation shape mismatch'
+    if(any(shape(interior_gradients)/=[3,size(effective_ids),size(ow_core_ids)]))&
+      error stop 'DG continuation construction-gradient shape mismatch'
+    meaningful_gap=.false.
+    gap_occupied_index=0;gap_unoccupied_index=0
+    allocate(local_potential(size(ow_core_ids)))
     allocate(previous_interface_state(0,3))
     accepted_lambda=0d0;trial_lambda=0d0;accepted_gap=huge(1d0)
     call default_dg_hybrid_controller_controls(continuation_controls)
@@ -5029,45 +5109,68 @@ stage_pass: do
         call compose_dg_hybrid_variational_hamiltonian(dc%icomm_tot,fixed_payload,&
           local_rows,trial_lambda,iteration,iterate,local_ok,continuation_message)
         if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation composition failed';endif
-target_window_solve: do
-          call solve_dg_hybrid_generalized_scalapack(dc%icomm_tot,size(effective_ids),continuation_state_count,&
-            row_ids,iterate%hamiltonian_rows,fixed_payload%metric_rows,&
-            dg_dc_gs_final_orbital_tolerance,solver_coefficients,solver_eigenvalues,max_residual,orthogonality_defect,&
-            projector_defect,solver_workspace,solver_fingerprint,local_ok,continuation_message)
-          if(.not.local_ok)then
-            write(0,'(a)')trim(continuation_message);error stop 'DG continuation eigensolve failed'
-          endif
-          call select_dg_hybrid_symmetry_target(dc%icomm_tot,solver_eigenvalues,symmetry_target_rank_arg,&
-            dg_ow_symmetry_tolerance,extended_target_rank,target_selection_ok,continuation_message)
-          if(target_selection_ok)exit target_window_solve
-          if(index(continuation_message,'unresolved degenerate cluster')==0)then
-            write(0,'(a)')trim(continuation_message);error stop 'DG continuation target selection failed'
-          endif
-          if(continuation_state_count==size(effective_ids))then
-            call select_dg_hybrid_symmetry_target(dc%icomm_tot,solver_eigenvalues,continuation_state_count,&
-              dg_ow_symmetry_tolerance,extended_target_rank,target_selection_ok,continuation_message)
-            if(.not.target_selection_ok)then
-              write(0,'(a)')trim(continuation_message);error stop 'DG continuation full-basis target selection failed'
-            endif
-            exit target_window_solve
-          endif
-          continuation_state_count=continuation_state_count+1
-          deallocate(solver_eigenvalues);allocate(solver_eigenvalues(continuation_state_count))
-        enddo target_window_solve
+        call initialize_dg_hybrid_candidate_acceptance(dc%icomm_tot,size(effective_ids),&
+          dg_hybrid_symmetry_energy_window,candidate_acceptance,local_ok,continuation_message)
+        if(.not.local_ok)error stop 'DG candidate acceptance initialization failed'
+        call solve_dg_hybrid_generalized_complete_once(dc%icomm_tot,size(effective_ids),row_ids,&
+          iterate%hamiltonian_rows,fixed_payload%metric_rows,dg_dc_gs_final_orbital_tolerance,&
+          solve_dg_hybrid_generalized_scalapack,complete_eigensystem,local_ok,continuation_message)
+        if(.not.local_ok)then
+          write(0,'(a)')trim(continuation_message);error stop 'DG continuation eigensolve failed'
+        endif
+        solver_coefficients=complete_eigensystem%coefficients
+        solver_eigenvalues=complete_eigensystem%eigenvalues
+        max_residual=complete_eigensystem%maximum_residual
+        solver_fingerprint=complete_eigensystem%fingerprint
+        call record_dg_hybrid_complete_lcfo_solve(dc%icomm_tot,candidate_acceptance,&
+          complete_eigensystem%global_count,complete_eigensystem%eigensolve_count,&
+          complete_eigensystem%fingerprint,local_ok,continuation_message)
+        if(.not.local_ok)error stop 'DG complete LCFO solve receipt failed'
+        call derive_dg_hybrid_occupation_policy(dc%icomm_tot,complete_eigensystem%eigenvalues,&
+          dc%elec_num_tot,max(0d0,temperature),dg_dc_gs_electron_count_tolerance,&
+          occupation_result,local_ok,continuation_message)
+        if(.not.local_ok)then
+          write(0,'(a)')trim(continuation_message);error stop 'DG continuation occupation policy failed'
+        endif
+        electron_gate_ok=occupation_result%valid.and.&
+          abs(occupation_result%electron_count-dc%elec_num_tot)<=dg_dc_gs_electron_count_tolerance
+        call record_dg_hybrid_occupation_policy(dc%icomm_tot,candidate_acceptance,&
+          occupation_result%noccupied,electron_gate_ok,occupation_result%fingerprint,local_ok,continuation_message)
+        if(.not.local_ok)error stop 'DG candidate occupation receipt failed'
+        occupied_symmetry_rank=occupation_result%noccupied
+        extended_target_rank=occupation_result%noccupied
+        if(dg_hybrid_symmetry_energy_window==-1d0)then
+          extended_target_rank=max(occupation_result%noccupied,&
+            min(symmetry_target_rank_arg,size(effective_ids)))
+          do while(extended_target_rank<size(solver_eigenvalues))
+            cluster_tolerance=max(dg_ow_symmetry_tolerance,64d0*epsilon(1d0))*&
+              max(1d0,abs(solver_eigenvalues(extended_target_rank)),&
+              abs(solver_eigenvalues(extended_target_rank+1)))
+            if(solver_eigenvalues(extended_target_rank+1)-solver_eigenvalues(extended_target_rank)>&
+                cluster_tolerance)exit
+            extended_target_rank=extended_target_rank+1
+          enddo
+        endif
         if(allocated(coefficients))deallocate(coefficients)
-        allocate(coefficients,source=solver_coefficients(:,1:size(occupied_occupations)))
-        eigenvalues=solver_eigenvalues(1:size(occupied_occupations))
+        allocate(coefficients,source=solver_coefficients(:,1:occupation_result%noccupied))
+        if(allocated(eigenvalues))deallocate(eigenvalues)
+        allocate(eigenvalues,source=solver_eigenvalues(1:occupation_result%noccupied))
+        meaningful_gap=occupation_result%noccupied<size(solver_eigenvalues)
         if(meaningful_gap)then
+          gap_occupied_index=occupation_result%noccupied
+          gap_unoccupied_index=occupation_result%noccupied+1
           occupied_unoccupied_gap=solver_eigenvalues(gap_unoccupied_index)-solver_eigenvalues(gap_occupied_index)
         else
           occupied_unoccupied_gap=huge(1d0)
         endif
         call reconstruct_dg_hybrid_occupied_state(dc%icomm_tot,size(effective_ids),row_ids,fixed_payload%metric_rows,&
-          interior_values,interior_weights,coefficients,occupied_occupations,rho_out,gamma_rows,projector_rows,&
+          interior_values,interior_weights,coefficients,&
+          occupation_result%occupations(1:occupation_result%noccupied),rho_out,gamma_rows,projector_rows,&
           s_coefficients,electron_count,local_ok,continuation_message)
         if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation state reconstruction failed';endif
         call reconstruct_dg_hybrid_production_interface_state(dc%icomm_tot,size(effective_ids),&
-          row_ids,coefficients,occupied_occupations,production_faces,interface_state,local_ok,continuation_message)
+          row_ids,coefficients,occupation_result%occupations(1:occupation_result%noccupied),&
+          production_faces,interface_state,local_ok,continuation_message)
         if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation trace reconstruction failed';endif
         if(size(previous_interface_state,1)==0)then
           deallocate(previous_interface_state);allocate(previous_interface_state,source=interface_state)
@@ -5102,8 +5205,10 @@ target_window_solve: do
         cheap_candidate=all([residuals%r_h,residuals%r_rho,residuals%r_t,residuals%r_s]<=&
           stage_report%tolerances).and.abs(electron_count-dc%elec_num_tot)<=&
           dg_dc_gs_electron_count_tolerance.and.projector_change<=0.1d0
-        occupation_kernel_ok=all(ieee_is_finite(occupied_occupations)).and.all(occupied_occupations>=0d0).and.&
-          all(occupied_occupations<=2d0).and.abs(sum(occupied_occupations)-dc%elec_num_tot)<=&
+        occupation_kernel_ok=occupation_result%valid.and.&
+          all(ieee_is_finite(occupation_result%occupations)).and.&
+          all(occupation_result%occupations>=0d0).and.all(occupation_result%occupations<=2d0).and.&
+          abs(occupation_result%electron_count-dc%elec_num_tot)<=&
           dg_dc_gs_electron_count_tolerance.and.&
           1d0-projector_change>=continuation_controls%minimum_projector_overlap
         real_space_residual=huge(1d0);interface_action_residuals=huge(1d0)
@@ -5132,35 +5237,44 @@ target_window_solve: do
             interface_component_actions,interface_action_residuals,&
             local_ok,continuation_message)
           if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG SIPG action residual evaluation failed';endif
-          call measure_dg_hybrid_operator_covariance(dc%icomm_tot,row_ids,iterate%hamiltonian_rows,&
-            basis_representation,symmetry_residual,local_ok)
-          if(.not.local_ok)error stop 'DG continuation Hamiltonian covariance measurement failed'
-          call measure_dg_hybrid_projector_covariance(dc%icomm_tot,row_ids,projector_rows,&
-            basis_representation,projector_symmetry_residual,local_ok)
-          if(.not.local_ok)error stop 'DG continuation occupied-projector covariance measurement failed'
-          call evaluate_dg_hybrid_distributed_low_energy_symmetry(dc%icomm_tot,row_ids,&
-            fixed_payload%metric_rows,basis_representation,solver_coefficients,solver_eigenvalues,&
-            occupied_symmetry_rank,extended_target_rank,dg_ow_symmetry_tolerance,&
-            low_energy_occupied_symmetry_defect,target_symmetry_defect,target_energy_symmetry_defect,&
-            symmetry_evaluation_ok,continuation_message)
-          if(.not.symmetry_evaluation_ok)then
-            write(0,'(a)')trim(continuation_message)
-            error stop 'DG continuation low-energy symmetry evaluation failed'
+          if(size(basis_representation,3)==0)then
+            symmetry_residual=0d0;projector_symmetry_residual=0d0
+            low_energy_occupied_symmetry_defect=0d0;target_symmetry_defect=0d0
+            target_energy_symmetry_defect=0d0;occupied_symmetry_defect=0d0
+            input_density_symmetry_defect=0d0;output_density_symmetry_defect=0d0
+            density_symmetry_defect=0d0;symmetry_evaluation_ok=.true.
+          else
+            call measure_dg_hybrid_operator_covariance(dc%icomm_tot,row_ids,iterate%hamiltonian_rows,&
+              basis_representation,symmetry_residual,local_ok)
+            if(.not.local_ok)error stop 'DG continuation Hamiltonian covariance measurement failed'
+            call measure_dg_hybrid_projector_covariance(dc%icomm_tot,row_ids,projector_rows,&
+              basis_representation,projector_symmetry_residual,local_ok)
+            if(.not.local_ok)error stop 'DG continuation occupied-projector covariance measurement failed'
+            call evaluate_dg_hybrid_distributed_low_energy_symmetry(dc%icomm_tot,row_ids,&
+              fixed_payload%metric_rows,basis_representation,solver_coefficients,solver_eigenvalues,&
+              occupied_symmetry_rank,extended_target_rank,dg_ow_symmetry_tolerance,&
+              low_energy_occupied_symmetry_defect,target_symmetry_defect,target_energy_symmetry_defect,&
+              symmetry_evaluation_ok,continuation_message)
+            if(.not.symmetry_evaluation_ok)then
+              write(0,'(a)')trim(continuation_message)
+              error stop 'DG continuation low-energy symmetry evaluation failed'
+            endif
+            occupied_symmetry_defect=max(low_energy_occupied_symmetry_defect,projector_symmetry_residual)
+            call measure_dg_hybrid_core_density_covariance(dc%icomm_tot,rho_out,core_symmetry_maps_arg,&
+              output_density_symmetry_defect,local_ok,continuation_message)
+            if(.not.local_ok)then
+              write(0,'(a)')trim(continuation_message);error stop 'DG continuation output-density symmetry failed'
+            endif
+            call measure_dg_hybrid_core_density_covariance(dc%icomm_tot,rho_in,core_symmetry_maps_arg,&
+              input_density_symmetry_defect,local_ok,continuation_message)
+            if(.not.local_ok)then
+              write(0,'(a)')trim(continuation_message);error stop 'DG continuation input-density symmetry failed'
+            endif
+            density_symmetry_defect=max(input_density_symmetry_defect,output_density_symmetry_defect)
           endif
-          occupied_symmetry_defect=max(low_energy_occupied_symmetry_defect,projector_symmetry_residual)
-          call measure_dg_hybrid_core_density_covariance(dc%icomm_tot,rho_out,core_symmetry_maps_arg,&
-            output_density_symmetry_defect,local_ok,continuation_message)
-          if(.not.local_ok)then
-            write(0,'(a)')trim(continuation_message);error stop 'DG continuation output-density symmetry failed'
-          endif
-          call measure_dg_hybrid_core_density_covariance(dc%icomm_tot,rho_in,core_symmetry_maps_arg,&
-            input_density_symmetry_defect,local_ok,continuation_message)
-          if(.not.local_ok)then
-            write(0,'(a)')trim(continuation_message);error stop 'DG continuation input-density symmetry failed'
-          endif
-          density_symmetry_defect=max(input_density_symmetry_defect,output_density_symmetry_defect)
-          physical_symmetry_defect=max(occupied_symmetry_defect,target_symmetry_defect,&
-            target_energy_symmetry_defect,density_symmetry_defect)
+          physical_symmetry_defect=max(occupied_symmetry_defect,density_symmetry_defect)
+          if(dg_hybrid_symmetry_energy_window==-1d0)physical_symmetry_defect=&
+            max(physical_symmetry_defect,target_symmetry_defect,target_energy_symmetry_defect)
           call ow_distributed_hermiticity(dc%icomm_tot,row_ids,iterate%hamiltonian_rows,&
             hamiltonian_hermiticity,hamiltonian_scale,hamiltonian_finite)
         endif
@@ -5192,13 +5306,14 @@ target_window_solve: do
         cycle
       endif
       previous_interface_state=interface_state
-      call set_dg_hybrid_trial_state(trial_state,rho_in,local_potential,occupied_occupations,eigenvalues,&
+      call set_dg_hybrid_trial_state(trial_state,rho_in,local_potential,&
+        occupation_result%occupations(1:occupation_result%noccupied),eigenvalues,&
         projector_rows,interface_state,iteration,fixed_payload%fingerprint,solver_fingerprint)
       if(.not.continuation_controller%valid)then
         call initialize_dg_hybrid_controller(dc%icomm_tot,continuation_controls,0d0,trial_state,&
           size(production_faces),continuation_controller,local_ok,continuation_message)
         if(.not.local_ok)error stop 'DG continuation controller initialization failed'
-        accepted_lambda=0d0
+        accepted_lambda=0d0;lambda_zero_accepted=.true.
       else
         stage_report%residuals=[residuals%r_h,residuals%r_rho,residuals%r_t,residuals%r_s]
         stage_report%projector_overlap=max(0d0,1d0-projector_change)
@@ -5207,8 +5322,7 @@ target_window_solve: do
         stage_report%occupation_ok=occupation_kernel_ok
         stage_report%hermitian_ok=hamiltonian_finite.and.&
           hamiltonian_hermiticity<=dg_dc_gs_hermiticity_tolerance*max(1d0,hamiltonian_scale)
-        stage_report%symmetry_ok=max(occupied_symmetry_defect,target_symmetry_defect,target_energy_symmetry_defect,&
-          density_symmetry_defect)<=dg_ow_symmetry_tolerance
+        stage_report%symmetry_ok=physical_symmetry_defect<=dg_ow_symmetry_tolerance
         stage_report%real_space_ok=real_space_residual<=stage_report%tolerances(1).and.&
           all(interface_action_residuals<=stage_report%tolerances(1)).and.&
           residuals%r_t<=stage_report%tolerances(3)
@@ -5235,31 +5349,88 @@ target_window_solve: do
     call ow_fingerprint_distributed_matrix(dc%icomm_tot,row_ids,iterate%hamiltonian_rows,&
       final_operator_fingerprint,local_ok)
     if(.not.local_ok)error stop 'DG continuation final Hamiltonian fingerprint failed'
-    call validate_dg_hybrid_ground_state(dc%icomm_tot,size(effective_ids),size(occupied_occupations),&
-      row_ids,coefficients,occupied_occupations,eigenvalues,dc%elec_num_tot,fixed_payload%basis_fingerprint,&
-      fixed_payload%metric_fingerprint,final_operator_fingerprint,fixed_payload%interface_fingerprint,&
-      dg_dc_gs_final_orbital_tolerance,final_ground_state,final_state_workspace,final_state_fingerprint,&
-      local_ok,continuation_message)
-    if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation final state publication failed';endif
-    final_ground_state%converged=.true.;final_ground_state%final_eigensolve_count=1
-    allocate(final_density,source=rho_in);allocate(final_trace,source=interface_state)
-    allocate(final_hamiltonian_rows,source=iterate%hamiltonian_rows)
-    call fingerprint_rt_dg_hybrid_component(dc%icomm_tot,row_ids,fixed_payload%kinetic_rows,kinetic_fingerprint,local_ok)
-    if(.not.local_ok)error stop 'DG continuation kinetic checkpoint fingerprint failed'
-    call fingerprint_rt_dg_hybrid_component(dc%icomm_tot,row_ids,fixed_payload%nonlocal_rows,nonlocal_fingerprint,local_ok)
-    if(.not.local_ok)error stop 'DG continuation nonlocal checkpoint fingerprint failed'
-    call fingerprint_rt_dg_hybrid_component(dc%icomm_tot,row_ids,iterate%local_rows,local_fingerprint,local_ok)
-    if(.not.local_ok)error stop 'DG continuation local checkpoint fingerprint failed'
-    call fingerprint_rt_dg_hybrid_component(dc%icomm_tot,row_ids,fixed_payload%interface_rows,sipg_fingerprint,local_ok)
-    if(.not.local_ok)error stop 'DG continuation SIPG checkpoint fingerprint failed'
-    seed_local_hash=0_8
-    do p=1,size(dc_seed_density)
-      seed_value_bits=transfer(dc_seed_density(p),seed_value_bits)
-      seed_local_hash=ieor(seed_local_hash,ishftc(ieor(ow_core_ids(p),seed_value_bits),mod(11*p,63)))
+
+    ! These physical gates are unconditional for the final candidate.  The
+    ! density below is the authoritative output reconstructed with Task-9
+    ! occupations, never a symmetrized replacement.
+    rho_in=rho_out
+    if(size(basis_representation,3)==0)then
+      projector_symmetry_residual=0d0;density_symmetry_defect=0d0
+    else
+      call measure_dg_hybrid_projector_covariance(dc%icomm_tot,row_ids,projector_rows,&
+        basis_representation,projector_symmetry_residual,local_ok)
+      if(.not.local_ok)error stop 'DG final occupied-projector covariance measurement failed'
+      call measure_dg_hybrid_core_density_covariance(dc%icomm_tot,rho_in,core_symmetry_maps_arg,&
+        density_symmetry_defect,local_ok,continuation_message)
+      if(.not.local_ok)error stop 'DG final density covariance measurement failed'
+    endif
+    occupied_gate_ok=projector_symmetry_residual-dg_ow_symmetry_tolerance<=0d0
+    density_gate_ok=density_symmetry_defect<=dg_ow_symmetry_tolerance
+    call record_dg_hybrid_unconditional_gates(dc%icomm_tot,candidate_acceptance,&
+      occupied_gate_ok,density_gate_ok,projector_symmetry_residual,density_symmetry_defect,&
+      dg_ow_symmetry_tolerance,local_ok,continuation_message)
+    if(.not.local_ok)then
+      write(0,'(a)')trim(continuation_message)
+      error stop 'DG final occupied-projector or density gate failed'
+    endif
+
+    call collect_dg_hybrid_full_rows(dc%icomm_tot,size(effective_ids),row_ids,&
+      fixed_payload%metric_rows,full_metric,local_ok)
+    if(.not.local_ok)error stop 'DG final metric collection failed'
+    call collect_dg_hybrid_full_rows(dc%icomm_tot,size(effective_ids),row_ids,&
+      complete_eigensystem%coefficients,full_coefficients,local_ok)
+    if(.not.local_ok)error stop 'DG complete eigenvector collection failed'
+    ! The analysis routines use a generator set, but the checkpoint operation
+    ! catalog is a complete advertised set and therefore carries identity
+    ! explicitly as operation one.
+    allocate(checkpoint_basis_representation(size(effective_ids),size(effective_ids),&
+      size(basis_representation,3)+1))
+    checkpoint_basis_representation=(0d0,0d0)
+    do p=1,size(effective_ids)
+      checkpoint_basis_representation(p,p,1)=(1d0,0d0)
     enddo
-    call MPI_Allreduce(seed_local_hash,seed_fingerprint,1,MPI_INTEGER8,MPI_BXOR,dc%icomm_tot,ierr_local)
-    if(ierr_local/=MPI_SUCCESS)error stop 'DG continuation seed checkpoint fingerprint failed'
-    if(seed_fingerprint==0_8)seed_fingerprint=1_8
+    if(size(basis_representation,3)>0)&
+      checkpoint_basis_representation(:,:,2:)=basis_representation
+    allocate(checkpoint_cartesian_rotations(3,3,size(cartesian_rotations_arg,3)+1))
+    checkpoint_cartesian_rotations=0d0
+    do p=1,3
+      checkpoint_cartesian_rotations(p,p,1)=1d0
+    enddo
+    ! The production point action satisfies the covector convention measured
+    ! by measure_dg_spatial_gradient_covariance: R^T grad(g r)=D^T grad(r).
+    ! Task 11 stores the component matrix in D^H X_a D=sum_b Q_ab X_b,
+    ! hence canonical momentum uses Q=R^T.
+    do p=1,size(cartesian_rotations_arg,3)
+      checkpoint_cartesian_rotations(:,:,p+1)=transpose(cartesian_rotations_arg(:,:,p))
+    enddo
+    dynamic_requested_rank=occupation_result%noccupied
+    if(dg_hybrid_symmetry_energy_window==-1d0)dynamic_requested_rank=&
+      max(occupation_result%noccupied,min(symmetry_target_rank_arg,size(effective_ids)))
+    call certify_dg_hybrid_energy_window(dc%icomm_tot,full_metric,checkpoint_basis_representation,&
+      full_coefficients,complete_eigensystem%eigenvalues,occupation_result%noccupied,&
+      occupation_result%e_homo,dg_hybrid_symmetry_energy_window,&
+      dynamic_requested_rank,&
+      dg_dc_gs_final_orbital_tolerance,dg_ow_symmetry_tolerance,projector_symmetry_residual,&
+      density_symmetry_defect,spectral_certification,local_ok,continuation_message)
+    if(.not.local_ok)then
+      write(0,'(a)')trim(continuation_message)
+      error stop 'DG final LCFO energy-window certification failed'
+    endif
+    extended_target_rank=spectral_certification%certified_rank
+    occupied_symmetry_defect=max(spectral_certification%occupied_subspace_defect,&
+      projector_symmetry_residual)
+    target_symmetry_defect=spectral_certification%target_subspace_defect
+    target_energy_symmetry_defect=spectral_certification%target_energy_defect
+    physical_symmetry_defect=max(occupied_symmetry_defect,target_symmetry_defect,&
+      target_energy_symmetry_defect,density_symmetry_defect)
+    call record_dg_hybrid_spectral_certification(dc%icomm_tot,candidate_acceptance,&
+      spectral_certification%requested_rank,spectral_certification%certified_rank,&
+      spectral_certification%boundary_cluster_rank,spectral_certification%proof_state_present,&
+      spectral_certification%compatibility_dynamic_rank,dg_hybrid_symmetry_energy_window==-1d0,&
+      spectral_certification%fingerprint,local_ok,continuation_message)
+    if(.not.local_ok)error stop 'DG spectral certification receipt failed'
+
+    certified_rank=spectral_certification%certified_rank
     allocate(checkpoint_coordinates(3,size(ow_core_ids)))
     do p=1,size(ow_core_ids)
       checkpoint_coordinates(1,p)=real(modulo(ow_core_ids(p)-1_8,int(dc%lg_tot%num(1),8)),8)*dc%system_tot%hgs(1)
@@ -5272,12 +5443,99 @@ target_window_solve: do
       [0d0,0d0,0d0],real(dc%lg_tot%num,8)*dc%system_tot%hgs,interior_values,checkpoint_position,&
       checkpoint_payload%position_convention_fingerprint,local_ok,continuation_message)
     if(.not.local_ok)error stop 'DG continuation periodic position assembly failed'
+    allocate(c_cert_rows,source=complete_eigensystem%coefficients(:,1:certified_rank))
+    call build_dg_hybrid_certified_representation(full_metric,checkpoint_basis_representation,&
+      full_coefficients(:,1:certified_rank),certified_representation)
+    allocate(certified_scalar_operators(certified_rank,certified_rank,5),&
+      certified_vector_operators(certified_rank,certified_rank,3,&
+        rt_dg_hybrid_vector_canonical_momentum),&
+      certified_tensor_operators(certified_rank,certified_rank,3,3,0))
+    call collect_dg_hybrid_full_rows(dc%icomm_tot,size(effective_ids),row_ids,&
+      fixed_payload%kinetic_rows,full_component,local_ok)
+    if(.not.local_ok)error stop 'DG certified kinetic source collection failed'
+    call project_dg_hybrid_operator_to_rt(full_coefficients(:,1:certified_rank),full_component,projected_position)
+    certified_scalar_operators(:,:,1)=projected_position
+    call collect_dg_hybrid_full_rows(dc%icomm_tot,size(effective_ids),row_ids,&
+      fixed_payload%nonlocal_rows,full_component,local_ok)
+    if(.not.local_ok)error stop 'DG certified nonlocal source collection failed'
+    call project_dg_hybrid_operator_to_rt(full_coefficients(:,1:certified_rank),full_component,projected_position)
+    certified_scalar_operators(:,:,2)=projected_position
+    call collect_dg_hybrid_full_rows(dc%icomm_tot,size(effective_ids),row_ids,&
+      iterate%local_rows,full_component,local_ok)
+    if(.not.local_ok)error stop 'DG certified local source collection failed'
+    call project_dg_hybrid_operator_to_rt(full_coefficients(:,1:certified_rank),full_component,projected_position)
+    certified_scalar_operators(:,:,3)=projected_position
+    call collect_dg_hybrid_full_rows(dc%icomm_tot,size(effective_ids),row_ids,&
+      fixed_payload%interface_rows,full_component,local_ok)
+    if(.not.local_ok)error stop 'DG certified SIPG source collection failed'
+    call project_dg_hybrid_operator_to_rt(full_coefficients(:,1:certified_rank),full_component,projected_position)
+    certified_scalar_operators(:,:,4)=projected_position
+    call collect_dg_hybrid_full_rows(dc%icomm_tot,size(effective_ids),row_ids,&
+      iterate%hamiltonian_rows,full_component,local_ok)
+    if(.not.local_ok)error stop 'DG certified Hamiltonian source collection failed'
+    call project_dg_hybrid_operator_to_rt(full_coefficients(:,1:certified_rank),full_component,projected_position)
+    certified_scalar_operators(:,:,5)=projected_position
+    ! Vector item one is the canonical-momentum (velocity-gauge) coupling.
+    ! Unlike cell-wrapped position it obeys a homogeneous crystallographic
+    ! vector law even for operations with an affine translation.
+    call assemble_dg_hybrid_canonical_momentum(dc%icomm_tot,interior_weights,interior_values,&
+      interior_gradients,checkpoint_momentum,local_ok,continuation_message)
+    if(.not.local_ok)error stop 'DG certified canonical-momentum assembly failed'
+    do p=1,3
+      call project_dg_hybrid_operator_to_rt(full_coefficients(:,1:certified_rank),&
+        checkpoint_momentum(p,:,:),projected_position)
+      certified_vector_operators(:,:,p,rt_dg_hybrid_vector_canonical_momentum)=projected_position
+    enddo
+    if(allocated(dg_certified_localizer_values))deallocate(dg_certified_localizer_values)
+    if(allocated(dg_certified_localizer_weights))deallocate(dg_certified_localizer_weights)
+    if(allocated(dg_certified_localizer_grid_ids))deallocate(dg_certified_localizer_grid_ids)
+    allocate(dg_certified_localizer_values,source=interior_values)
+    allocate(dg_certified_localizer_weights,source=interior_weights)
+    allocate(dg_certified_localizer_grid_ids,source=ow_core_ids)
+    call build_dg_hybrid_certified_rt_basis(dc%icomm_tot,size(effective_ids),row_ids,&
+      fixed_payload%metric_rows,c_cert_rows,&
+      complete_eigensystem%eigenvalues(1:certified_rank),occupation_result%noccupied,&
+      certified_representation,checkpoint_cartesian_rotations,certified_scalar_operators,&
+      certified_vector_operators,certified_tensor_operators,dg_ow_symmetry_tolerance,&
+      dg_hybrid_certified_localizer_candidate,certified_rt_basis,local_ok,continuation_message)
+    deallocate(dg_certified_localizer_values,dg_certified_localizer_weights,dg_certified_localizer_grid_ids)
+    if(.not.local_ok)then
+      write(0,'(a)')trim(continuation_message)
+      error stop 'DG certified RT basis construction failed'
+    endif
+    call record_dg_hybrid_certified_rt_basis(dc%icomm_tot,candidate_acceptance,&
+      certified_rt_basis%certified_rank,certified_rt_basis%b_rt_fingerprint,&
+      certified_rt_basis%operator_fingerprint,local_ok,continuation_message)
+    if(.not.local_ok)error stop 'DG certified RT basis receipt failed'
+
+    call validate_dg_hybrid_ground_state(dc%icomm_tot,size(effective_ids),occupation_result%noccupied,&
+      row_ids,coefficients,occupation_result%occupations(1:occupation_result%noccupied),eigenvalues,&
+      dc%elec_num_tot,fixed_payload%basis_fingerprint,&
+      fixed_payload%metric_fingerprint,final_operator_fingerprint,&
+      checkpoint_payload%position_convention_fingerprint,&
+      dg_dc_gs_final_orbital_tolerance,final_ground_state,final_state_workspace,final_state_fingerprint,&
+      local_ok,continuation_message)
+    if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation final state publication failed';endif
+    final_ground_state%converged=.true.;final_ground_state%final_eigensolve_count=1
+    final_ground_state%spectral_certification=spectral_certification
+    allocate(final_density,source=rho_in);allocate(final_trace,source=interface_state)
+    allocate(final_hamiltonian_rows,source=iterate%hamiltonian_rows)
+    call fingerprint_rt_dg_hybrid_component(dc%icomm_tot,row_ids,fixed_payload%kinetic_rows,kinetic_fingerprint,local_ok)
+    if(.not.local_ok)error stop 'DG continuation kinetic checkpoint fingerprint failed'
+    call fingerprint_rt_dg_hybrid_component(dc%icomm_tot,row_ids,fixed_payload%nonlocal_rows,nonlocal_fingerprint,local_ok)
+    if(.not.local_ok)error stop 'DG continuation nonlocal checkpoint fingerprint failed'
+    call fingerprint_rt_dg_hybrid_component(dc%icomm_tot,row_ids,iterate%local_rows,local_fingerprint,local_ok)
+    if(.not.local_ok)error stop 'DG continuation local checkpoint fingerprint failed'
+    call fingerprint_rt_dg_hybrid_component(dc%icomm_tot,row_ids,fixed_payload%interface_rows,sipg_fingerprint,local_ok)
+    if(.not.local_ok)error stop 'DG continuation SIPG checkpoint fingerprint failed'
+    call checkpoint_grid_real_fingerprint(dc%icomm_tot,ow_core_ids,dc_seed_density,&
+      seed_fingerprint,local_ok)
+    if(.not.local_ok)error stop 'DG continuation seed checkpoint fingerprint failed'
     checkpoint_payload%valid=.true.;checkpoint_payload%final_refresh_complete=final_refresh_performed
-    checkpoint_payload%analysis_complete=.true.;checkpoint_payload%identity_only=size(basis_representation,3)==1
-    checkpoint_payload%operation_count=size(basis_representation,3)
-    checkpoint_payload%nonidentity_operation_count=max(0,size(basis_representation,3)-1)
-    checkpoint_payload%global_count=size(effective_ids);checkpoint_payload%noccupied=size(occupied_occupations)
-    checkpoint_payload%catalog_fingerprint=fixed_payload%basis_fingerprint
+    checkpoint_payload%analysis_complete=.true.;checkpoint_payload%identity_only=size(basis_representation,3)==0
+    checkpoint_payload%operation_count=size(checkpoint_basis_representation,3)
+    checkpoint_payload%nonidentity_operation_count=size(basis_representation,3)
+    checkpoint_payload%global_count=size(effective_ids);checkpoint_payload%noccupied=occupation_result%noccupied
     checkpoint_payload%state_fingerprint=final_state_fingerprint
     checkpoint_payload%metric_fingerprint=fixed_payload%metric_fingerprint
     checkpoint_payload%operator_structure_fingerprint=fixed_payload%fingerprint
@@ -5293,7 +5551,7 @@ target_window_solve: do
     if(checkpoint_payload%continuation_fingerprint==0_8)checkpoint_payload%continuation_fingerprint=1_8
     checkpoint_payload%scope_fingerprint=scope_fingerprint_arg
     checkpoint_payload%selection_fingerprint=selection_fingerprint_arg
-    checkpoint_payload%analysis_fingerprint=checkpoint_analysis_fingerprint(basis_representation)
+    checkpoint_payload%analysis_fingerprint=checkpoint_analysis_fingerprint(checkpoint_basis_representation)
     checkpoint_payload%pseudopotential_fingerprint=pseudopotential_fingerprint_arg
     allocate(checkpoint_payload%row_ids,source=row_ids)
     allocate(checkpoint_payload%metric_row_offsets,source=metric_offsets_arg)
@@ -5307,7 +5565,7 @@ target_window_solve: do
     allocate(checkpoint_payload%sipg_rows,source=fixed_payload%interface_rows)
     allocate(checkpoint_payload%hamiltonian_rows,source=iterate%hamiltonian_rows)
     allocate(checkpoint_payload%coefficients,source=final_ground_state%coefficients)
-    allocate(checkpoint_payload%symmetry_representation,source=basis_representation)
+    allocate(checkpoint_payload%symmetry_representation,source=checkpoint_basis_representation)
     allocate(checkpoint_payload%position_rows(3,size(row_ids),size(checkpoint_position,3)))
     do i=1,size(row_ids)
       checkpoint_payload%position_rows(:,i,:)=checkpoint_position(:,int(row_ids(i)),:)
@@ -5336,9 +5594,9 @@ target_window_solve: do
       projector_symmetry_residual,real_space_residual,maxval(interface_action_residuals)]
     allocate(checkpoint_payload%pseudopotential_receipt(6),checkpoint_payload%energy_receipt(7))
     checkpoint_payload%pseudopotential_receipt=[real(dc%system_tot%nion,8),pp%zion,real(pp%lmax,8),&
-      real(pp%nrmax,8),real(ppg%Nlma,8),real(size(checkpoint_payload%nonlocal_rows),8)]
-    allocate(energy_local_coefficients(size(effective_ids),size(occupied_occupations)),&
-      energy_global_coefficients(size(effective_ids),size(occupied_occupations)))
+      real(pp%nrmax,8),real(ppg%Nlma,8),real(size(effective_ids),8)*real(size(effective_ids),8)]
+    allocate(energy_local_coefficients(size(effective_ids),occupation_result%noccupied),&
+      energy_global_coefficients(size(effective_ids),occupation_result%noccupied))
     energy_local_coefficients=(0d0,0d0)
     do energy_row=1,size(row_ids)
       energy_local_coefficients(int(row_ids(energy_row)),:)=final_ground_state%coefficients(energy_row,:)
@@ -5347,7 +5605,7 @@ target_window_solve: do
       MPI_DOUBLE_COMPLEX,MPI_SUM,dc%icomm_tot,ierr_local)
     if(ierr_local/=MPI_SUCCESS)error stop 'DG continuation energy coefficient redistribution failed'
     local_energy_parts=0d0
-    do energy_row=1,size(row_ids);do energy_state=1,size(occupied_occupations)
+    do energy_row=1,size(row_ids);do energy_state=1,occupation_result%noccupied
       local_energy_parts(1)=local_energy_parts(1)+final_ground_state%occupations(energy_state)*real(&
         conjg(final_ground_state%coefficients(energy_row,energy_state))*&
         sum((fixed_payload%kinetic_rows(energy_row,:)+fixed_payload%interface_rows(energy_row,:))*&
@@ -5394,7 +5652,7 @@ target_window_solve: do
     if(ierr_local/=MPI_SUCCESS.or.any(checkpoint_face_owner==huge(0)))&
       error stop 'DG continuation checkpoint face ownership failed'
     owned_face_count=count(checkpoint_face_owner==rank_local)
-    face_point_count=0;face_value_count=0;face_basis_count=0;face_weight_count=0
+    face_point_count=0;face_value_count=0;face_basis_count=0;face_weight_count=0;face_observable_count=0
     do p=1,size(production_faces)
       if(checkpoint_face_owner(p)/=rank_local)cycle
       face_point_count=face_point_count+size(production_faces(p)%point_ids_minus)+size(production_faces(p)%point_ids_plus)
@@ -5402,16 +5660,29 @@ target_window_solve: do
         size(production_faces(p)%derivative_minus)+size(production_faces(p)%derivative_plus)
       face_basis_count=face_basis_count+size(production_faces(p)%basis_ids_minus)+size(production_faces(p)%basis_ids_plus)
       face_weight_count=face_weight_count+size(production_faces(p)%weights)
+      face_observable_count=face_observable_count+size(production_faces(p)%weights)**2
     enddo
     allocate(checkpoint_payload%face_ids(owned_face_count),checkpoint_payload%face_metadata(8,owned_face_count),&
       checkpoint_payload%face_normals(3,owned_face_count),checkpoint_payload%face_offsets(owned_face_count+1),&
-      checkpoint_payload%face_value_offsets(owned_face_count+1),checkpoint_payload%face_basis_ids(face_basis_count),&
+      checkpoint_payload%face_weight_offsets(owned_face_count+1),&
+      checkpoint_payload%face_basis_offsets(owned_face_count+1),&
+      checkpoint_payload%face_value_offsets(owned_face_count+1),&
+      checkpoint_payload%face_observable_offsets(owned_face_count+1),&
+      checkpoint_payload%face_basis_ids(face_basis_count),&
       checkpoint_payload%face_point_ids(face_point_count),checkpoint_payload%face_weights(face_weight_count),&
-      checkpoint_payload%face_values(1,face_value_count))
-    face_point_position=0;face_value_position=0;face_basis_position=0;face_weight_position=0;face_slot=0
-    checkpoint_payload%face_offsets(1)=1;checkpoint_payload%face_value_offsets(1)=1
+      checkpoint_payload%face_values(1,face_value_count),&
+      checkpoint_payload%interface_observables(3,face_observable_count))
+    face_point_position=0;face_value_position=0;face_basis_position=0;face_weight_position=0
+    face_observable_position=0;interface_cursor=0;face_slot=0
+    checkpoint_payload%face_offsets(1)=1;checkpoint_payload%face_weight_offsets(1)=1
+    checkpoint_payload%face_basis_offsets(1)=1;checkpoint_payload%face_value_offsets(1)=1
+    checkpoint_payload%face_observable_offsets(1)=1
     do p=1,size(production_faces)
-      if(checkpoint_face_owner(p)/=rank_local)cycle
+      if(.not.production_faces(p)%frozen)cycle
+      if(checkpoint_face_owner(p)/=rank_local)then
+        interface_cursor=interface_cursor+size(production_faces(p)%weights)**2
+        cycle
+      endif
       face_slot=face_slot+1;checkpoint_payload%face_ids(face_slot)=production_faces(p)%global_face_id
       checkpoint_payload%face_metadata(:,face_slot)=[production_faces(p)%minus_fragment,production_faces(p)%plus_fragment,&
         production_faces(p)%periodic_shift,size(production_faces(p)%weights),size(production_faces(p)%basis_ids_minus),&
@@ -5426,15 +5697,371 @@ target_window_solve: do
         production_faces(p)%basis_ids_minus;face_basis_position=face_basis_position+size(production_faces(p)%basis_ids_minus)
       checkpoint_payload%face_basis_ids(face_basis_position+1:face_basis_position+size(production_faces(p)%basis_ids_plus))=&
         production_faces(p)%basis_ids_plus;face_basis_position=face_basis_position+size(production_faces(p)%basis_ids_plus)
+      checkpoint_payload%face_basis_offsets(face_slot+1)=face_basis_position+1
       checkpoint_payload%face_weights(face_weight_position+1:face_weight_position+size(production_faces(p)%weights))=&
         production_faces(p)%weights;face_weight_position=face_weight_position+size(production_faces(p)%weights)
+      checkpoint_payload%face_weight_offsets(face_slot+1)=face_weight_position+1
       call pack_checkpoint_face_values(production_faces(p),checkpoint_payload%face_values,face_value_position)
       checkpoint_payload%face_value_offsets(face_slot+1)=face_value_position+1
+      face_observable_count=size(production_faces(p)%weights)**2
+      checkpoint_payload%interface_observables(:,face_observable_position+1:&
+        face_observable_position+face_observable_count)=transpose(interface_state(&
+        interface_cursor+1:interface_cursor+face_observable_count,:))
+      interface_cursor=interface_cursor+face_observable_count
+      face_observable_position=face_observable_position+face_observable_count
+      checkpoint_payload%face_observable_offsets(face_slot+1)=face_observable_position+1
     enddo
-    allocate(checkpoint_payload%interface_observables,source=interface_state)
+
+    ! Named checkpoint-v3 construction provenance.
+    allocate(construction_ids(size(effective_ids)),construction_generations(size(effective_ids)),&
+      construction_ordering(size(effective_ids)),construction_ownership(size(effective_ids)))
+    construction_ids=int(effective_ids,8);construction_generations=1
+    do p=1,size(effective_ids)
+      construction_ordering(p)=p
+    enddo
+    construction_ownership=0
+    do p=1,size(row_ids);construction_ownership(int(row_ids(p)))=rank_local+1;enddo
+    call MPI_Allreduce(MPI_IN_PLACE,construction_ownership,size(construction_ownership),MPI_INTEGER,&
+      MPI_SUM,dc%icomm_tot,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.any(construction_ownership<=0))&
+      error stop 'DG construction ownership receipt failed'
+    catalog_ids_fingerprint=checkpoint_integer64_fingerprint(construction_ids)
+    catalog_generation_fingerprint=checkpoint_integer_fingerprint(construction_generations)
+    catalog_ordering_fingerprint=checkpoint_integer_fingerprint(construction_ordering)
+    catalog_ownership_fingerprint=checkpoint_integer_fingerprint(construction_ownership)
+    catalog_provenance_fingerprint=fixed_payload%basis_fingerprint
+    catalog_fingerprint=int(z'6A09E667F3BCC909',8)
+    catalog_fingerprint=ieor(ishftc(catalog_fingerprint,7),catalog_ids_fingerprint)
+    catalog_fingerprint=ieor(ishftc(catalog_fingerprint,7),catalog_generation_fingerprint)
+    catalog_fingerprint=ieor(ishftc(catalog_fingerprint,7),catalog_ordering_fingerprint)
+    catalog_fingerprint=ieor(ishftc(catalog_fingerprint,7),catalog_ownership_fingerprint)
+    catalog_fingerprint=ieor(ishftc(catalog_fingerprint,7),catalog_provenance_fingerprint)
+    if(catalog_fingerprint==0_8)catalog_fingerprint=1_8
+    checkpoint_payload%construction_catalog%valid=.true.
+    checkpoint_payload%construction_catalog%global_count=size(effective_ids)
+    allocate(checkpoint_payload%construction_catalog%ids,source=construction_ids)
+    allocate(checkpoint_payload%construction_catalog%generations,source=construction_generations)
+    allocate(checkpoint_payload%construction_catalog%ordering,source=construction_ordering)
+    allocate(checkpoint_payload%construction_catalog%ownership,source=construction_ownership)
+    checkpoint_payload%construction_catalog%ids_fingerprint=catalog_ids_fingerprint
+    checkpoint_payload%construction_catalog%generation_fingerprint=catalog_generation_fingerprint
+    checkpoint_payload%construction_catalog%ordering_fingerprint=catalog_ordering_fingerprint
+    checkpoint_payload%construction_catalog%ownership_fingerprint=catalog_ownership_fingerprint
+    checkpoint_payload%construction_catalog%provenance_fingerprint=catalog_provenance_fingerprint
+    checkpoint_payload%construction_catalog%catalog_fingerprint=catalog_fingerprint
+    checkpoint_payload%catalog_fingerprint=catalog_fingerprint
+
+    ! The fixed-rank certified embedding remains row-owned in construction
+    ! space.  U and every RT matrix are independently cyclic-sharded.
+    call collect_dg_hybrid_full_rows(dc%icomm_tot,size(effective_ids),row_ids,&
+      certified_rt_basis%b_rt,full_b_rt,local_ok)
+    if(.not.local_ok)error stop 'DG certified RT embedding collection failed'
+    rt_metric=certified_rt_basis%metric_rt
+    rt_kinetic=certified_rt_basis%scalar_operators_rt(:,:,1)
+    rt_nonlocal=certified_rt_basis%scalar_operators_rt(:,:,2)
+    rt_local=certified_rt_basis%scalar_operators_rt(:,:,3)
+    rt_sipg=certified_rt_basis%scalar_operators_rt(:,:,4)
+    rt_hamiltonian=rt_kinetic+rt_nonlocal+rt_local+rt_sipg
+    allocate(rt_basis_values(certified_rank,size(interior_values,2)))
+    rt_basis_values=matmul(transpose(full_b_rt),interior_values)
+    rt_row_count=0
+    do p=1,certified_rank
+      if(mod(p-1,nproc_local)==rank_local)rt_row_count=rt_row_count+1
+    enddo
+    allocate(rt_row_ids(rt_row_count),rt_row_owner_keys(certified_rank))
+    rt_row_position=0
+    do p=1,certified_rank
+      rt_row_owner_keys(p)=mod(p-1,nproc_local)+1
+      if(mod(p-1,nproc_local)/=rank_local)cycle
+      rt_row_position=rt_row_position+1;rt_row_ids(rt_row_position)=int(p,8)
+    enddo
+
+    checkpoint_payload%certified_basis%valid=.true.
+    checkpoint_payload%certified_basis%localization_converged=certified_rt_basis%localization_converged
+    checkpoint_payload%certified_basis%localization_symmetry_constrained=&
+      certified_rt_basis%localization_symmetry_constrained
+    checkpoint_payload%certified_basis%construction_count=size(effective_ids)
+    checkpoint_payload%certified_basis%certified_count=spectral_certification%certified_rank
+    checkpoint_payload%certified_basis%occupied_count=occupation_result%noccupied
+    checkpoint_payload%certified_basis%localization_iterations=certified_rt_basis%localization_iterations
+    allocate(checkpoint_payload%certified_basis%construction_row_ids,source=row_ids)
+    allocate(checkpoint_payload%certified_basis%transformation_row_ids,source=rt_row_ids)
+    allocate(checkpoint_payload%certified_basis%c_cert,source=certified_rt_basis%c_cert)
+    allocate(checkpoint_payload%certified_basis%b_rt,source=certified_rt_basis%b_rt)
+    allocate(checkpoint_payload%certified_basis%u_rt(rt_row_count,certified_rank))
+    do p=1,rt_row_count
+      checkpoint_payload%certified_basis%u_rt(p,:)=certified_rt_basis%u_rt(int(rt_row_ids(p)),:)
+    enddo
+    allocate(checkpoint_payload%certified_basis%initial_occupied_amplitudes,&
+      source=certified_rt_basis%initial_occupied_amplitudes)
+    allocate(checkpoint_payload%certified_basis%certified_eigenvalues,&
+      source=certified_rt_basis%certified_eigenvalues)
+    allocate(checkpoint_payload%certified_basis%occupations,&
+      source=occupation_result%occupations(1:occupation_result%noccupied))
+    allocate(checkpoint_payload%certified_basis%centers,source=certified_rt_basis%centers)
+    allocate(checkpoint_payload%certified_basis%spreads_before,source=certified_rt_basis%spreads_before)
+    allocate(checkpoint_payload%certified_basis%spreads_after,source=certified_rt_basis%spreads_after)
+    checkpoint_payload%certified_basis%spread_before_total=certified_rt_basis%spread_before_total
+    checkpoint_payload%certified_basis%spread_after_total=certified_rt_basis%spread_after_total
+    checkpoint_payload%certified_basis%spread_improvement=certified_rt_basis%spread_improvement
+    checkpoint_payload%certified_basis%transform_unitarity_defect=certified_rt_basis%transform_unitarity_defect
+    checkpoint_payload%certified_basis%certified_metric_defect=certified_rt_basis%certified_metric_defect
+    checkpoint_payload%certified_basis%rt_metric_defect=certified_rt_basis%rt_metric_defect
+    checkpoint_payload%certified_basis%embedding_defect=certified_rt_basis%embedding_defect
+    checkpoint_payload%certified_basis%projector_invariance_defect=certified_rt_basis%projector_invariance_defect
+    checkpoint_payload%certified_basis%target_symmetry_defect_before=&
+      certified_rt_basis%target_symmetry_defect_before
+    checkpoint_payload%certified_basis%target_symmetry_defect_after=&
+      certified_rt_basis%target_symmetry_defect_after
+    checkpoint_payload%certified_basis%energy_symmetry_defect_before=&
+      certified_rt_basis%energy_symmetry_defect_before
+    checkpoint_payload%certified_basis%energy_symmetry_defect_after=&
+      certified_rt_basis%energy_symmetry_defect_after
+    checkpoint_payload%certified_basis%symmetry_defect_invariance=certified_rt_basis%symmetry_defect_invariance
+    checkpoint_payload%certified_basis%scalar_covariance_defect=certified_rt_basis%scalar_covariance_defect
+    checkpoint_payload%certified_basis%vector_covariance_defect=certified_rt_basis%vector_covariance_defect
+    checkpoint_payload%certified_basis%tensor_covariance_defect=certified_rt_basis%tensor_covariance_defect
+    initial_state_fingerprint=checkpoint_complex_matrix_fingerprint(&
+      certified_rt_basis%initial_occupied_amplitudes)
+    checkpoint_payload%certified_basis%c_cert_fingerprint=certified_rt_basis%c_cert_fingerprint
+    checkpoint_payload%certified_basis%u_rt_fingerprint=certified_rt_basis%localization_fingerprint
+    checkpoint_payload%certified_basis%b_rt_fingerprint=certified_rt_basis%b_rt_fingerprint
+    checkpoint_payload%certified_basis%initial_state_fingerprint=initial_state_fingerprint
+    checkpoint_payload%certified_basis%transformation_fingerprint=certified_rt_basis%localization_fingerprint
+    checkpoint_payload%certified_basis%operator_fingerprint=certified_rt_basis%operator_fingerprint
+    checkpoint_payload%certified_basis%fingerprint=certified_rt_basis%fingerprint
+
+    checkpoint_payload%electron_count%valid=.true.
+    checkpoint_payload%electron_count%expected_count=dc%elec_num_tot
+    checkpoint_payload%electron_count%actual_count=occupation_result%electron_count
+    checkpoint_payload%electron_count%tolerance=dg_dc_gs_electron_count_tolerance
+    checkpoint_payload%electron_count%defect=abs(dc%elec_num_tot-occupation_result%electron_count)
+    checkpoint_payload%electron_count%omitted_tail=occupation_result%omitted_occupation_tail
+    checkpoint_payload%electron_count%chemical_potential=occupation_result%chemical_potential
+    checkpoint_payload%electron_count%fingerprint=occupation_result%fingerprint
+
+    checkpoint_payload%rt_space%valid=.true.
+    checkpoint_payload%rt_space%rank=spectral_certification%certified_rank
+    checkpoint_payload%rt_space%operation_count=size(certified_rt_basis%representation_rt,3)
+    checkpoint_payload%rt_space%scalar_count=size(certified_rt_basis%scalar_operators_rt,3)
+    checkpoint_payload%rt_space%vector_count=size(certified_rt_basis%vector_operators_rt,4)
+    checkpoint_payload%rt_space%tensor_count=size(certified_rt_basis%tensor_operators_rt,5)
+    allocate(checkpoint_payload%rt_space%row_ids,source=rt_row_ids)
+    allocate(checkpoint_payload%rt_space%row_owner_keys,source=rt_row_owner_keys)
+    allocate(checkpoint_payload%rt_space%grid_owner_keys(size(ow_core_ids)),source=rank_local+1)
+    allocate(checkpoint_payload%rt_space%metric_rows(rt_row_count,certified_rank),&
+      checkpoint_payload%rt_space%kinetic_rows(rt_row_count,certified_rank),&
+      checkpoint_payload%rt_space%nonlocal_rows(rt_row_count,certified_rank),&
+      checkpoint_payload%rt_space%local_rows(rt_row_count,certified_rank),&
+      checkpoint_payload%rt_space%sipg_rows(rt_row_count,certified_rank),&
+      checkpoint_payload%rt_space%hamiltonian_rows(rt_row_count,certified_rank),&
+      checkpoint_payload%rt_space%scalar_operator_rows(rt_row_count,certified_rank,&
+        size(certified_rt_basis%scalar_operators_rt,3)),&
+      checkpoint_payload%rt_space%vector_operator_rows(rt_row_count,certified_rank,3,&
+        size(certified_rt_basis%vector_operators_rt,4)),&
+      checkpoint_payload%rt_space%tensor_operator_rows(rt_row_count,certified_rank,3,3,&
+        size(certified_rt_basis%tensor_operators_rt,5)))
+    do p=1,rt_row_count
+      construction_index=int(rt_row_ids(p))
+      checkpoint_payload%rt_space%metric_rows(p,:)=rt_metric(construction_index,:)
+      checkpoint_payload%rt_space%kinetic_rows(p,:)=rt_kinetic(construction_index,:)
+      checkpoint_payload%rt_space%nonlocal_rows(p,:)=rt_nonlocal(construction_index,:)
+      checkpoint_payload%rt_space%local_rows(p,:)=rt_local(construction_index,:)
+      checkpoint_payload%rt_space%sipg_rows(p,:)=rt_sipg(construction_index,:)
+      checkpoint_payload%rt_space%hamiltonian_rows(p,:)=rt_hamiltonian(construction_index,:)
+      checkpoint_payload%rt_space%scalar_operator_rows(p,:,:)=&
+        certified_rt_basis%scalar_operators_rt(construction_index,:,:)
+      checkpoint_payload%rt_space%vector_operator_rows(p,:,:,:)=&
+        certified_rt_basis%vector_operators_rt(construction_index,:,:,:)
+      checkpoint_payload%rt_space%tensor_operator_rows(p,:,:,:,:)=&
+        certified_rt_basis%tensor_operators_rt(construction_index,:,:,:,:)
+    enddo
+    allocate(checkpoint_payload%rt_space%representation,source=certified_rt_basis%representation_rt)
+    allocate(checkpoint_payload%rt_space%cartesian_rotations,source=certified_rt_basis%cartesian_rotations)
+    allocate(checkpoint_payload%rt_space%basis_values,source=rt_basis_values)
+    allocate(checkpoint_payload%rt_space%density,source=rho_in)
+    call fingerprint_rt_dg_hybrid_component(dc%icomm_tot,rt_row_ids,&
+      checkpoint_payload%rt_space%metric_rows,rt_metric_fingerprint,local_ok)
+    if(local_ok)call fingerprint_rt_dg_hybrid_component(dc%icomm_tot,rt_row_ids,&
+      checkpoint_payload%rt_space%kinetic_rows,rt_kinetic_fingerprint,local_ok)
+    if(local_ok)call fingerprint_rt_dg_hybrid_component(dc%icomm_tot,rt_row_ids,&
+      checkpoint_payload%rt_space%nonlocal_rows,rt_nonlocal_fingerprint,local_ok)
+    if(local_ok)call fingerprint_rt_dg_hybrid_component(dc%icomm_tot,rt_row_ids,&
+      checkpoint_payload%rt_space%local_rows,rt_local_fingerprint,local_ok)
+    if(local_ok)call fingerprint_rt_dg_hybrid_component(dc%icomm_tot,rt_row_ids,&
+      checkpoint_payload%rt_space%sipg_rows,rt_sipg_fingerprint,local_ok)
+    if(local_ok)call fingerprint_rt_dg_hybrid_component(dc%icomm_tot,rt_row_ids,&
+      checkpoint_payload%rt_space%hamiltonian_rows,rt_hamiltonian_fingerprint,local_ok)
+    if(.not.local_ok)error stop 'DG RT component fingerprint failed'
+    call checkpoint_grid_complex_fingerprint(dc%icomm_tot,ow_core_ids,rt_basis_values,&
+      rt_basis_fingerprint,local_ok)
+    if(local_ok)call checkpoint_grid_real_fingerprint(dc%icomm_tot,ow_core_ids,rho_in,&
+      rt_density_fingerprint,local_ok)
+    if(.not.local_ok)error stop 'DG RT grid fingerprint failed'
+    call checkpoint_grid_integer_fingerprint(dc%icomm_tot,ow_core_ids,&
+      checkpoint_payload%rt_space%grid_owner_keys,rt_grid_ownership_fingerprint,local_ok)
+    if(.not.local_ok)error stop 'DG RT grid-ownership fingerprint failed'
+    rt_ownership_fingerprint=checkpoint_integer_fingerprint(rt_row_owner_keys)
+    rt_ownership_fingerprint=ieor(ishftc(rt_ownership_fingerprint,7),rt_grid_ownership_fingerprint)
+    if(rt_ownership_fingerprint==0_8)rt_ownership_fingerprint=1_8
+    rt_scalar_fingerprint=checkpoint_analysis_fingerprint(certified_rt_basis%scalar_operators_rt)
+    rt_vector_fingerprint=checkpoint_complex_rank4_fingerprint(certified_rt_basis%vector_operators_rt)
+    rt_tensor_fingerprint=checkpoint_complex_rank5_fingerprint(certified_rt_basis%tensor_operators_rt)
+    rt_representation_fingerprint=checkpoint_analysis_fingerprint(certified_rt_basis%representation_rt)
+    rt_rotation_fingerprint=checkpoint_real_rank3_fingerprint(certified_rt_basis%cartesian_rotations)
+    rt_payload_fingerprint=int(z'5BE0CD19137E2179',8)
+    rt_payload_fingerprint=ieor(ishftc(rt_payload_fingerprint,7),rt_metric_fingerprint)
+    rt_payload_fingerprint=ieor(ishftc(rt_payload_fingerprint,7),rt_kinetic_fingerprint)
+    rt_payload_fingerprint=ieor(ishftc(rt_payload_fingerprint,7),rt_nonlocal_fingerprint)
+    rt_payload_fingerprint=ieor(ishftc(rt_payload_fingerprint,7),rt_local_fingerprint)
+    rt_payload_fingerprint=ieor(ishftc(rt_payload_fingerprint,7),rt_sipg_fingerprint)
+    rt_payload_fingerprint=ieor(ishftc(rt_payload_fingerprint,7),rt_hamiltonian_fingerprint)
+    rt_payload_fingerprint=ieor(ishftc(rt_payload_fingerprint,7),rt_basis_fingerprint)
+    rt_payload_fingerprint=ieor(ishftc(rt_payload_fingerprint,7),rt_density_fingerprint)
+    rt_payload_fingerprint=ieor(ishftc(rt_payload_fingerprint,7),rt_ownership_fingerprint)
+    rt_payload_fingerprint=ieor(ishftc(rt_payload_fingerprint,7),rt_scalar_fingerprint)
+    rt_payload_fingerprint=ieor(ishftc(rt_payload_fingerprint,7),rt_vector_fingerprint)
+    rt_payload_fingerprint=ieor(ishftc(rt_payload_fingerprint,7),rt_tensor_fingerprint)
+    rt_payload_fingerprint=ieor(ishftc(rt_payload_fingerprint,7),rt_representation_fingerprint)
+    rt_payload_fingerprint=ieor(ishftc(rt_payload_fingerprint,7),rt_rotation_fingerprint)
+    if(rt_payload_fingerprint==0_8)rt_payload_fingerprint=1_8
+    checkpoint_payload%rt_space%metric_fingerprint=rt_metric_fingerprint
+    checkpoint_payload%rt_space%kinetic_fingerprint=rt_kinetic_fingerprint
+    checkpoint_payload%rt_space%nonlocal_fingerprint=rt_nonlocal_fingerprint
+    checkpoint_payload%rt_space%local_fingerprint=rt_local_fingerprint
+    checkpoint_payload%rt_space%sipg_fingerprint=rt_sipg_fingerprint
+    checkpoint_payload%rt_space%hamiltonian_fingerprint=rt_hamiltonian_fingerprint
+    checkpoint_payload%rt_space%basis_fingerprint=rt_basis_fingerprint
+    checkpoint_payload%rt_space%density_fingerprint=rt_density_fingerprint
+    checkpoint_payload%rt_space%ownership_fingerprint=rt_ownership_fingerprint
+    checkpoint_payload%rt_space%scalar_fingerprint=rt_scalar_fingerprint
+    checkpoint_payload%rt_space%vector_fingerprint=rt_vector_fingerprint
+    checkpoint_payload%rt_space%tensor_fingerprint=rt_tensor_fingerprint
+    checkpoint_payload%rt_space%representation_fingerprint=rt_representation_fingerprint
+    checkpoint_payload%rt_space%fingerprint=rt_payload_fingerprint
+
+    checkpoint_payload%energy_window%valid=.true.
+    checkpoint_payload%energy_window%compatibility_dynamic_rank=&
+      spectral_certification%compatibility_dynamic_rank
+    checkpoint_payload%energy_window%proof_state_present=spectral_certification%proof_state_present
+    checkpoint_payload%energy_window%mode=merge(rt_dg_hybrid_energy_window_legacy_dynamic,&
+      rt_dg_hybrid_energy_window_explicit,spectral_certification%compatibility_dynamic_rank)
+    checkpoint_payload%energy_window%construction_rank=size(effective_ids)
+    checkpoint_payload%energy_window%solved_rank=size(effective_ids)
+    checkpoint_payload%energy_window%occupied_rank=occupation_result%noccupied
+    checkpoint_payload%energy_window%requested_rank=spectral_certification%requested_rank
+    checkpoint_payload%energy_window%certified_rank=spectral_certification%certified_rank
+    checkpoint_payload%energy_window%extension_states=spectral_certification%extension_states
+    checkpoint_payload%energy_window%boundary_cluster_rank=spectral_certification%boundary_cluster_rank
+    checkpoint_payload%energy_window%proof_status=merge(1,0,spectral_certification%proof_state_present)
+    checkpoint_payload%energy_window%window_size=spectral_certification%energy_window
+    checkpoint_payload%energy_window%e_homo=spectral_certification%e_homo
+    checkpoint_payload%energy_window%requested_cutoff=spectral_certification%requested_cutoff
+    checkpoint_payload%energy_window%certified_cutoff=spectral_certification%certified_cutoff
+    checkpoint_payload%energy_window%extension_energy=spectral_certification%extension_energy
+    checkpoint_payload%energy_window%proof_energy=spectral_certification%proof_energy
+    checkpoint_payload%energy_window%fingerprint=spectral_certification%fingerprint
+
+    checkpoint_payload%symmetry_receipt%valid=.true.
+    checkpoint_payload%symmetry_receipt%worst_operation=max(1,spectral_certification%worst_operation)
+    checkpoint_payload%symmetry_receipt%occupied_subspace_defect=spectral_certification%occupied_subspace_defect
+    checkpoint_payload%symmetry_receipt%occupied_projector_defect=projector_symmetry_residual
+    checkpoint_payload%symmetry_receipt%target_subspace_defect=spectral_certification%target_subspace_defect
+    checkpoint_payload%symmetry_receipt%target_energy_defect=spectral_certification%target_energy_defect
+    checkpoint_payload%symmetry_receipt%density_defect=density_symmetry_defect
+    checkpoint_payload%symmetry_receipt%scalar_covariance_defect=certified_rt_basis%scalar_covariance_defect
+    checkpoint_payload%symmetry_receipt%vector_covariance_defect=certified_rt_basis%vector_covariance_defect
+    checkpoint_payload%symmetry_receipt%tensor_covariance_defect=certified_rt_basis%tensor_covariance_defect
+    checkpoint_payload%symmetry_receipt%final_basis_defect=max(certified_rt_basis%rt_metric_defect,&
+      certified_rt_basis%embedding_defect,certified_rt_basis%projector_invariance_defect)
+    checkpoint_payload%symmetry_receipt%worst_operation_defect=spectral_certification%worst_operation_defect
+    checkpoint_payload%symmetry_receipt%maximum_physical_defect=max(&
+      spectral_certification%maximum_physical_defect,certified_rt_basis%scalar_covariance_defect,&
+      certified_rt_basis%vector_covariance_defect,certified_rt_basis%tensor_covariance_defect,&
+      checkpoint_payload%symmetry_receipt%final_basis_defect)
+    symmetry_receipt_fingerprint=checkpoint_real_fingerprint([&
+      checkpoint_payload%symmetry_receipt%occupied_subspace_defect,&
+      checkpoint_payload%symmetry_receipt%occupied_projector_defect,&
+      checkpoint_payload%symmetry_receipt%target_subspace_defect,&
+      checkpoint_payload%symmetry_receipt%target_energy_defect,&
+      checkpoint_payload%symmetry_receipt%density_defect,&
+      checkpoint_payload%symmetry_receipt%scalar_covariance_defect,&
+      checkpoint_payload%symmetry_receipt%vector_covariance_defect,&
+      checkpoint_payload%symmetry_receipt%tensor_covariance_defect,&
+      checkpoint_payload%symmetry_receipt%final_basis_defect,&
+      checkpoint_payload%symmetry_receipt%worst_operation_defect,&
+      checkpoint_payload%symmetry_receipt%maximum_physical_defect])
+    symmetry_receipt_fingerprint=ieor(ishftc(symmetry_receipt_fingerprint,7),&
+      spectral_certification%fingerprint)
+    symmetry_receipt_fingerprint=ieor(ishftc(symmetry_receipt_fingerprint,7),&
+      certified_rt_basis%fingerprint)
+    symmetry_receipt_fingerprint=ieor(ishftc(symmetry_receipt_fingerprint,7),&
+      int(checkpoint_payload%symmetry_receipt%worst_operation,8))
+    if(symmetry_receipt_fingerprint==0_8)symmetry_receipt_fingerprint=1_8
+    checkpoint_payload%symmetry_receipt%fingerprint=symmetry_receipt_fingerprint
+
+    checkpoint_payload%handoff_receipts%valid=.true.
+    checkpoint_payload%handoff_receipts%position_fingerprint=&
+      checkpoint_payload%position_convention_fingerprint
+    checkpoint_payload%handoff_receipts%nonlocal_fingerprint=checkpoint_payload%nonlocal_fingerprint
+    checkpoint_payload%handoff_receipts%face_fingerprint=checkpoint_payload%face_fingerprint
+    checkpoint_payload%handoff_receipts%pseudopotential_fingerprint=&
+      checkpoint_payload%pseudopotential_fingerprint
+    checkpoint_payload%handoff_receipts%transformation_fingerprint=&
+      checkpoint_payload%certified_basis%transformation_fingerprint
+    handoff_fingerprint=ieor(checkpoint_payload%position_convention_fingerprint,&
+      ishftc(checkpoint_payload%nonlocal_fingerprint,7))
+    handoff_fingerprint=ieor(handoff_fingerprint,ishftc(checkpoint_payload%face_fingerprint,13))
+    handoff_fingerprint=ieor(handoff_fingerprint,&
+      ishftc(checkpoint_payload%pseudopotential_fingerprint,17))
+    handoff_fingerprint=ieor(handoff_fingerprint,&
+      ishftc(checkpoint_payload%certified_basis%transformation_fingerprint,19))
+    if(handoff_fingerprint==0_8)handoff_fingerprint=1_8
+    checkpoint_payload%handoff_receipts%fingerprint=handoff_fingerprint
+
+    call fingerprint_rt_dg_hybrid_ground_state_payload(dc%icomm_tot,checkpoint_payload,&
+      checkpoint_fingerprint,payload_ready,continuation_message)
+    call authorize_dg_hybrid_v3_publication(dc%icomm_tot,candidate_acceptance,&
+      rt_dg_hybrid_ground_state_checkpoint_version,checkpoint_payload%rt_space%rank,&
+      payload_ready,local_ok,continuation_message)
+    if(.not.local_ok.or..not.payload_ready)then
+      write(0,'(a)')trim(continuation_message)
+      error stop 'DG checkpoint-v3 publication authorization failed'
+    endif
     call write_rt_dg_hybrid_ground_state_checkpoint(dc%icomm_tot,'./hybrid_dg_ground_state.chk',checkpoint_payload,&
       checkpoint_fingerprint,local_ok,continuation_message)
     if(.not.local_ok)then;write(0,'(a)')trim(continuation_message);error stop 'DG continuation complete checkpoint failed';endif
+    window_mode='explicit'
+    if(spectral_certification%compatibility_dynamic_rank)window_mode='legacy_dynamic'
+    if(rank_local==0)write(*,'(a,2(a,a),2(a,i0),6(a,es24.16),3(a,i0))')&
+      '[HYBRID-LCFO-WINDOW] mode=',trim(window_mode),&
+      ' compatibility=',merge('1','0',spectral_certification%compatibility_dynamic_rank),&
+      ' requested_rank=',spectral_certification%requested_rank,&
+      ' certified_rank=',spectral_certification%certified_rank,&
+      ' delta_e=',spectral_certification%energy_window,&
+      ' homo=',spectral_certification%e_homo,&
+      ' requested_cutoff=',spectral_certification%requested_cutoff,&
+      ' certified_cutoff=',spectral_certification%certified_cutoff,&
+      ' extension_energy=',spectral_certification%extension_energy,&
+      ' proof_energy=',spectral_certification%proof_energy,&
+      ' boundary_rank=',spectral_certification%boundary_cluster_rank,&
+      ' extension_states=',spectral_certification%extension_states,&
+      ' proof_state=',merge(1,0,spectral_certification%proof_state_present)
+    if(rank_local==0)write(*,'(a,5(a,es16.8),a,i0)')&
+      '[HYBRID-LCFO-SYMMETRY] occupied=',occupied_symmetry_defect,&
+      ' target=',target_symmetry_defect,' energy=',target_energy_symmetry_defect,&
+      ' density=',density_symmetry_defect,&
+      ' maximum=',checkpoint_payload%symmetry_receipt%maximum_physical_defect,&
+      ' worst_operation=',checkpoint_payload%symmetry_receipt%worst_operation
+    if(rank_local==0)write(*,'(a,3(a,i0),a,es16.8,a,i0,a,es16.8,a,i0)')&
+      '[HYBRID-RT-BASIS] construction_rank=',size(effective_ids),&
+      ' certified_rank=',spectral_certification%certified_rank,&
+      ' rt_rank=',checkpoint_payload%rt_space%rank,&
+      ' localization_spread=',certified_rt_basis%spread_after_total,&
+      ' embedding_fingerprint=',certified_rt_basis%b_rt_fingerprint,&
+      ' operator_covariance=',max(certified_rt_basis%scalar_covariance_defect,&
+        certified_rt_basis%vector_covariance_defect,certified_rt_basis%tensor_covariance_defect),&
+      ' checkpoint_version=',rt_dg_hybrid_ground_state_checkpoint_version
     if(rank_local==0)write(*,'(a,4(a,es16.8))')'[OW-GS] fully refreshed DG continuation converged',&
       ' lambda=',accepted_lambda,' h_residual=',residuals%r_h,' density_residual=',residuals%r_rho,&
       ' interface_residual=',residuals%r_t
@@ -5442,15 +6069,425 @@ target_window_solve: do
       '[HYBRID-GS-ACCEPTANCE] seed_identity=',merge(1,0,seed_identity_accepted),&
       ' lambda_zero=',merge(1,0,lambda_zero_accepted),' lambda_one=',merge(1,0,accepted_lambda==1d0),&
       ' final_refresh=',merge(1,0,final_refresh_performed),&
-      ' requested_target_rank=',symmetry_target_rank_arg,' extended_target_rank=',extended_target_rank,&
+      ' requested_target_rank=',spectral_certification%requested_rank,&
+      ' extended_target_rank=',spectral_certification%certified_rank,&
       ' r_h=',residuals%r_h,&
       ' r_rho=',residuals%r_rho,' r_t=',residuals%r_t,' r_s=',residuals%r_s,&
-      ' electron=',abs(electron_count-sum(occupied_occupations)),' symmetry=',physical_symmetry_defect,&
+      ' electron=',abs(electron_count-occupation_result%electron_count),' symmetry=',physical_symmetry_defect,&
       ' real_space=',max(real_space_residual,maxval(interface_action_residuals)),&
       ' occupied_defect=',occupied_symmetry_defect,' target_defect=',target_symmetry_defect,&
       ' target_energy_defect=',target_energy_symmetry_defect,' density_defect=',density_symmetry_defect,&
       ' full_operator_defect=',symmetry_residual,' payload_fingerprint=',checkpoint_fingerprint
   end subroutine run_dg_hybrid_concrete_continuation
+
+  subroutine dg_hybrid_certified_localizer_candidate(comm_arg,global_count_arg,certified_rank,&
+      row_ids_arg,c_cert_arg,require_unconstrained,transform,centers,spreads_before,spreads_after,&
+      iterations,symmetry_constrained,converged,callback_ok,callback_message)
+    integer,intent(in)::comm_arg,global_count_arg,certified_rank
+    integer(8),intent(in)::row_ids_arg(:)
+    complex(8),intent(in)::c_cert_arg(:,:)
+    logical,intent(in)::require_unconstrained
+    complex(8),allocatable,intent(out)::transform(:,:)
+    real(8),allocatable,intent(out)::centers(:,:),spreads_before(:),spreads_after(:)
+    integer,intent(out)::iterations
+    logical,intent(out)::symmetry_constrained,converged,callback_ok
+    character(*),intent(out)::callback_message
+    complex(8),allocatable::full_c(:,:),certified_values(:,:),anchors(:,:),m_matrix(:,:,:),a_matrix(:,:)
+    real(8),allocatable::fractional(:,:),eigenvalues_arg(:),atom_positions(:,:)
+    real(8)::lattice_inverse(3,3),reciprocal_lattice(3,3),determinant,spread_receipt(3)
+    integer,allocatable::nncell(:,:)
+    character(8),allocatable::atom_symbols(:)
+    integer::nntot,point,atom,ierr_local,ierr_status,local_bad,global_bad
+    integer(8)::coordinator_bytes,workspace_peak,byte_limit,nxy_local
+    logical::local_ok
+
+    callback_ok=.false.;callback_message='';iterations=0
+    symmetry_constrained=.false.;converged=.false.
+    local_bad=merge(0,1,require_unconstrained)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm_arg,ierr_status)
+    if(ierr_status/=MPI_SUCCESS.or.global_bad/=0)then
+      callback_message='certified RT localizer requires the unconstrained mode';return
+    endif
+    local_bad=merge(0,1,allocated(dg_certified_localizer_values).and.&
+      allocated(dg_certified_localizer_weights).and.allocated(dg_certified_localizer_grid_ids))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm_arg,ierr_status)
+    if(ierr_status/=MPI_SUCCESS.or.global_bad/=0)then
+      callback_message='certified RT localizer context is unavailable';return
+    endif
+    local_bad=merge(0,1,size(dg_certified_localizer_values,1)==global_count_arg.and.&
+      size(dg_certified_localizer_values,2)==size(dg_certified_localizer_grid_ids).and.&
+      size(dg_certified_localizer_weights)==size(dg_certified_localizer_grid_ids).and.&
+      size(c_cert_arg,2)==certified_rank)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm_arg,ierr_status)
+    if(ierr_status/=MPI_SUCCESS.or.global_bad/=0)then
+      callback_message='certified RT localizer context shape mismatch';return
+    endif
+    call collect_dg_hybrid_full_rows(comm_arg,global_count_arg,row_ids_arg,c_cert_arg,full_c,local_ok)
+    if(.not.local_ok)then;callback_message='certified coefficient collection failed';return;endif
+    allocate(certified_values(certified_rank,size(dg_certified_localizer_grid_ids)))
+    certified_values=matmul(transpose(full_c),dg_certified_localizer_values)
+    allocate(anchors,source=certified_values)
+    allocate(fractional(3,size(dg_certified_localizer_grid_ids)))
+    nxy_local=int(dc%lg_tot%num(1),8)*int(dc%lg_tot%num(2),8)
+    do point=1,size(dg_certified_localizer_grid_ids)
+      fractional(1,point)=real(modulo(dg_certified_localizer_grid_ids(point)-1_8,&
+        int(dc%lg_tot%num(1),8)),8)/real(dc%lg_tot%num(1),8)
+      fractional(2,point)=real(modulo((dg_certified_localizer_grid_ids(point)-1_8)/&
+        int(dc%lg_tot%num(1),8),int(dc%lg_tot%num(2),8)),8)/real(dc%lg_tot%num(2),8)
+      fractional(3,point)=real((dg_certified_localizer_grid_ids(point)-1_8)/nxy_local,8)/&
+        real(dc%lg_tot%num(3),8)
+    enddo
+    call measure_dg_hybrid_periodic_spreads(comm_arg,certified_values,&
+      dg_certified_localizer_weights,fractional,dc%system_tot%primitive_a,spreads_before,local_ok)
+    if(.not.local_ok)then;callback_message='certified initial spread measurement failed';return;endif
+    call invert_ow_lattice(dc%system_tot%primitive_a,lattice_inverse,determinant,local_ok)
+    if(.not.local_ok)then;callback_message='certified RT Wannier lattice is singular';return;endif
+    reciprocal_lattice=2d0*pi*transpose(lattice_inverse)
+    allocate(atom_symbols(dc%system_tot%nion),atom_positions(3,dc%system_tot%nion))
+    atom_positions=dc%system_tot%Rion
+    do atom=1,dc%system_tot%nion
+      if(dc%system_tot%kion(atom)<1.or.dc%system_tot%kion(atom)>size(pp%atom_symbol))then
+        callback_message='certified RT atom species is outside the pseudopotential table';return
+      endif
+      atom_symbols(atom)=pp%atom_symbol(dc%system_tot%kion(atom))
+    enddo
+    call setup_dg_w90_gamma_library(comm_arg,'hybrid_certified_rt_mlwf',&
+      dc%system_tot%primitive_a,reciprocal_lattice,atom_symbols,atom_positions,&
+      certified_rank,certified_rank,wannier_num_iter,dg_ow_w90_initial_projection,&
+      DG_W90_UNCONSTRAINED,nntot,nncell,local_ok,callback_message)
+    if(.not.local_ok)return
+    byte_limit=8_8*1024_8*1024_8*1024_8
+    call assemble_dg_w90_gamma_matrices(comm_arg,certified_values,anchors,&
+      dg_certified_localizer_weights,fractional,nncell,byte_limit,m_matrix,a_matrix,&
+      coordinator_bytes,workspace_peak,local_ok,callback_message)
+    if(.not.local_ok)return
+    allocate(eigenvalues_arg(certified_rank));eigenvalues_arg=0d0
+    call run_dg_w90_gamma_library(comm_arg,'hybrid_certified_rt_mlwf',&
+      dc%system_tot%primitive_a,reciprocal_lattice,atom_symbols,atom_positions,&
+      m_matrix,a_matrix,eigenvalues_arg,sum(spreads_before),dg_ow_symmetry_tolerance,&
+      wannier_num_iter,transform,centers,spreads_after,spread_receipt,local_ok,&
+      callback_message,convergence_iterations_out=iterations,require_nonincreasing_spread=.false.)
+    if(.not.local_ok)return
+    centers=matmul(lattice_inverse,centers)
+    call apply_dg_w90_gamma_transform(comm_arg,dg_certified_localizer_grid_ids,&
+      certified_values,transform=transform,centers=centers,tolerance=dg_ow_symmetry_tolerance,&
+      ok=local_ok,message=callback_message,spreads=spreads_after)
+    if(.not.local_ok)return
+    call MPI_Allreduce(merge(0,1,all(ieee_is_finite(spreads_before)).and.&
+      all(ieee_is_finite(spreads_after))),ierr_local,1,MPI_INTEGER,MPI_MAX,comm_arg,ierr_status)
+    if(ierr_status/=MPI_SUCCESS.or.ierr_local/=0)then
+      callback_message='certified RT localization returned a nonfinite spread receipt';return
+    endif
+    symmetry_constrained=.false.;converged=.true.;callback_ok=.true.;callback_message=''
+  end subroutine dg_hybrid_certified_localizer_candidate
+
+  subroutine measure_dg_hybrid_periodic_spreads(comm_arg,values,weights,fractional,lattice,spreads,callback_ok)
+    integer,intent(in)::comm_arg
+    complex(8),intent(in)::values(:,:)
+    real(8),intent(in)::weights(:),fractional(:,:),lattice(3,3)
+    real(8),allocatable,intent(out)::spreads(:)
+    logical,intent(out)::callback_ok
+    complex(8),allocatable::local_phase(:,:),global_phase(:,:)
+    real(8),allocatable::local_norm(:),global_norm(:),local_spread(:),global_spread(:)
+    real(8)::angle,delta_fractional(3),delta_cartesian(3),probability
+    integer::state,point,axis,ierr_local,local_bad,global_bad,local_states,minimum_states,maximum_states
+    callback_ok=.false.
+    local_bad=merge(0,1,size(values,2)==size(weights).and.&
+      all(shape(fractional)==[3,size(weights)]).and.all(weights>=0d0).and.&
+      all(ieee_is_finite(weights)).and.all(ieee_is_finite(fractional)).and.&
+      all(ieee_is_finite(lattice)).and.all(ieee_is_finite(real(values))).and.&
+      all(ieee_is_finite(aimag(values))))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.global_bad/=0)return
+    local_states=size(values,1)
+    call MPI_Allreduce(local_states,minimum_states,1,MPI_INTEGER,MPI_MIN,comm_arg,ierr_local)
+    if(ierr_local==MPI_SUCCESS)call MPI_Allreduce(local_states,maximum_states,1,MPI_INTEGER,MPI_MAX,&
+      comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.minimum_states/=maximum_states.or.minimum_states<1)return
+    allocate(local_phase(3,size(values,1)),global_phase(3,size(values,1)),&
+      local_norm(size(values,1)),global_norm(size(values,1)),local_spread(size(values,1)),&
+      global_spread(size(values,1)),spreads(size(values,1)))
+    local_phase=(0d0,0d0);local_norm=0d0
+    do point=1,size(weights);do state=1,size(values,1)
+      probability=weights(point)*abs(values(state,point))**2
+      local_norm(state)=local_norm(state)+probability
+      do axis=1,3
+        angle=2d0*pi*fractional(axis,point)
+        local_phase(axis,state)=local_phase(axis,state)+probability*cmplx(cos(angle),sin(angle),8)
+      enddo
+    enddo;enddo
+    call MPI_Allreduce(local_phase,global_phase,size(local_phase),MPI_DOUBLE_COMPLEX,MPI_SUM,comm_arg,ierr_local)
+    if(ierr_local==MPI_SUCCESS)call MPI_Allreduce(local_norm,global_norm,size(local_norm),&
+      MPI_DOUBLE_PRECISION,MPI_SUM,comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.any(global_norm<=tiny(1d0)))then;callback_ok=.false.;return;endif
+    local_spread=0d0
+    do point=1,size(weights);do state=1,size(values,1)
+      do axis=1,3
+        angle=atan2(aimag(global_phase(axis,state)),real(global_phase(axis,state)))/(2d0*pi)
+        delta_fractional(axis)=modulo(fractional(axis,point)-angle+0.5d0,1d0)-0.5d0
+      enddo
+      delta_cartesian=matmul(lattice,delta_fractional)
+      probability=weights(point)*abs(values(state,point))**2
+      local_spread(state)=local_spread(state)+probability*sum(delta_cartesian**2)
+    enddo;enddo
+    call MPI_Allreduce(local_spread,global_spread,size(local_spread),MPI_DOUBLE_PRECISION,MPI_SUM,&
+      comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)then;callback_ok=.false.;return;endif
+    spreads=max(0d0,global_spread/global_norm)
+    callback_ok=all(ieee_is_finite(spreads))
+  end subroutine measure_dg_hybrid_periodic_spreads
+
+  subroutine collect_dg_hybrid_full_rows(comm_arg,global_count_arg,row_ids_arg,row_values,full_values,callback_ok)
+    integer,intent(in)::comm_arg,global_count_arg
+    integer(8),intent(in)::row_ids_arg(:)
+    complex(8),intent(in)::row_values(:,:)
+    complex(8),allocatable,intent(out)::full_values(:,:)
+    logical,intent(out)::callback_ok
+    complex(8),allocatable::local_values(:,:)
+    integer::row,ierr_local,local_bad,global_bad,local_shape(2),minimum_shape(2),maximum_shape(2)
+    callback_ok=.false.
+    local_bad=merge(0,1,global_count_arg>0.and.size(row_values,1)==size(row_ids_arg).and.&
+      all(row_ids_arg>=1_8).and.all(row_ids_arg<=int(global_count_arg,8)))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.global_bad/=0)return
+    local_shape=[global_count_arg,size(row_values,2)]
+    call MPI_Allreduce(local_shape,minimum_shape,2,MPI_INTEGER,MPI_MIN,comm_arg,ierr_local)
+    if(ierr_local==MPI_SUCCESS)call MPI_Allreduce(local_shape,maximum_shape,2,MPI_INTEGER,MPI_MAX,&
+      comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.any(minimum_shape/=maximum_shape))return
+    allocate(local_values(global_count_arg,size(row_values,2)),&
+      full_values(global_count_arg,size(row_values,2)))
+    local_values=(0d0,0d0)
+    do row=1,size(row_ids_arg);local_values(int(row_ids_arg(row)),:)=row_values(row,:);enddo
+    call MPI_Allreduce(local_values,full_values,size(full_values),MPI_DOUBLE_COMPLEX,MPI_SUM,&
+      comm_arg,ierr_local)
+    callback_ok=ierr_local==MPI_SUCCESS.and.all(ieee_is_finite(real(full_values))).and.&
+      all(ieee_is_finite(aimag(full_values)))
+  end subroutine collect_dg_hybrid_full_rows
+
+  subroutine build_dg_hybrid_certified_representation(metric,representation,c_cert,certified_representation)
+    complex(8),intent(in)::metric(:,:),representation(:,:,:),c_cert(:,:)
+    complex(8),allocatable,intent(out)::certified_representation(:,:,:)
+    integer::operation
+    allocate(certified_representation(size(c_cert,2),size(c_cert,2),size(representation,3)))
+    do operation=1,size(representation,3)
+      certified_representation(:,:,operation)=matmul(conjg(transpose(c_cert)),&
+        matmul(metric,matmul(representation(:,:,operation),c_cert)))
+    enddo
+  end subroutine build_dg_hybrid_certified_representation
+
+  subroutine assemble_dg_hybrid_canonical_momentum(comm_arg,weights,values,gradients,momentum,&
+      callback_ok,callback_message)
+    integer,intent(in)::comm_arg
+    real(8),intent(in)::weights(:)
+    complex(8),intent(in)::values(:,:),gradients(:,:,:)
+    complex(8),allocatable,intent(out)::momentum(:,:,:)
+    logical,intent(out)::callback_ok
+    character(*),intent(out)::callback_message
+    complex(8),allocatable::local_derivative(:,:,:),derivative(:,:,:)
+    integer::n,point,row,column,axis,ierr_local,local_bad,global_bad,minimum_n,maximum_n
+    callback_ok=.false.;callback_message='';n=size(values,1);local_bad=0
+    if(n<1.or.size(values,2)/=size(weights).or.&
+        any(shape(gradients)/=[3,n,size(weights)]).or.any(weights<=0d0).or.&
+        any(.not.ieee_is_finite(weights)).or.any(.not.ieee_is_finite(real(values))).or.&
+        any(.not.ieee_is_finite(aimag(values))).or.any(.not.ieee_is_finite(real(gradients))).or.&
+        any(.not.ieee_is_finite(aimag(gradients))))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.global_bad/=0)then
+      callback_message='invalid canonical-momentum construction payload';return
+    endif
+    call MPI_Allreduce(n,minimum_n,1,MPI_INTEGER,MPI_MIN,comm_arg,ierr_local)
+    if(ierr_local==MPI_SUCCESS)call MPI_Allreduce(n,maximum_n,1,MPI_INTEGER,MPI_MAX,&
+      comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.minimum_n/=maximum_n)then
+      callback_message='inconsistent canonical-momentum basis rank';return
+    endif
+    allocate(local_derivative(3,n,n),derivative(3,n,n),momentum(3,n,n))
+    local_derivative=(0d0,0d0)
+    do point=1,size(weights);do column=1,n;do row=1,n;do axis=1,3
+      local_derivative(axis,row,column)=local_derivative(axis,row,column)+weights(point)*&
+        conjg(values(row,point))*gradients(axis,column,point)
+    enddo;enddo;enddo;enddo
+    call MPI_Allreduce(local_derivative,derivative,3*n*n,MPI_DOUBLE_COMPLEX,MPI_SUM,&
+      comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)then
+      callback_message='canonical-momentum reduction failed';return
+    endif
+    do axis=1,3
+      momentum(axis,:,:)=-cmplx(0d0,1d0,8)*0.5d0*&
+        (derivative(axis,:,:)-conjg(transpose(derivative(axis,:,:))))
+    enddo
+    if(any(.not.ieee_is_finite(real(momentum))).or.any(.not.ieee_is_finite(aimag(momentum))))then
+      callback_message='canonical-momentum projection is nonfinite';return
+    endif
+    callback_ok=.true.
+  end subroutine assemble_dg_hybrid_canonical_momentum
+
+  subroutine project_dg_hybrid_operator_to_rt(basis,operator,projected)
+    complex(8),intent(in)::basis(:,:),operator(:,:)
+    complex(8),allocatable,intent(out)::projected(:,:)
+    allocate(projected(size(basis,2),size(basis,2)))
+    projected=matmul(conjg(transpose(basis)),matmul(operator,basis))
+  end subroutine project_dg_hybrid_operator_to_rt
+
+  integer(8) function checkpoint_integer64_fingerprint(values) result(hash)
+    integer(8),intent(in)::values(:)
+    integer::p
+    hash=int(z'6A09E667F3BCC909',8)
+    hash=ieor(ishftc(hash,7),int(size(values),8))
+    do p=1,size(values);hash=ieor(ishftc(hash,11),ieor(values(p),int(p,8)));enddo
+    if(hash==0_8)hash=1_8
+  end function checkpoint_integer64_fingerprint
+
+  integer(8) function checkpoint_integer_fingerprint(values) result(hash)
+    integer,intent(in)::values(:)
+    integer::p
+    hash=int(z'BB67AE8584CAA73B',8)
+    hash=ieor(ishftc(hash,7),int(size(values),8))
+    do p=1,size(values);hash=ieor(ishftc(hash,11),ieor(int(values(p),8),int(p,8)));enddo
+    if(hash==0_8)hash=1_8
+  end function checkpoint_integer_fingerprint
+
+  integer(8) function checkpoint_complex_matrix_fingerprint(values) result(hash)
+    complex(8),intent(in)::values(:,:)
+    integer::p,q
+    integer(8)::bits
+    hash=int(z'3C6EF372FE94F82B',8)
+    hash=ieor(ishftc(hash,7),int(size(values,1),8));hash=ieor(ishftc(hash,7),int(size(values,2),8))
+    do q=1,size(values,2);do p=1,size(values,1)
+      bits=transfer(real(values(p,q)),bits);hash=ieor(ishftc(hash,11),bits)
+      bits=transfer(aimag(values(p,q)),bits);hash=ieor(ishftc(hash,13),bits)
+    enddo;enddo
+    if(hash==0_8)hash=1_8
+  end function checkpoint_complex_matrix_fingerprint
+
+  integer(8) function checkpoint_complex_rank4_fingerprint(values) result(hash)
+    complex(8),intent(in)::values(:,:,:,:)
+    integer::p,q,r,s
+    integer(8)::bits
+    hash=int(z'A54FF53A5F1D36F1',8)
+    hash=ieor(hash,int(size(values),8));hash=ieor(hash,ishftc(int(size(values,4),8),17))
+    do s=1,size(values,4);do r=1,size(values,3);do q=1,size(values,2);do p=1,size(values,1)
+      bits=transfer(real(values(p,q,r,s)),bits);hash=ieor(ishftc(hash,7),bits)
+      bits=transfer(aimag(values(p,q,r,s)),bits);hash=ieor(ishftc(hash,11),bits)
+    enddo;enddo;enddo;enddo
+    if(hash==0_8)hash=1_8
+  end function checkpoint_complex_rank4_fingerprint
+
+  integer(8) function checkpoint_complex_rank5_fingerprint(values) result(hash)
+    complex(8),intent(in)::values(:,:,:,:,:)
+    integer::p,q,r,s,t
+    integer(8)::bits
+    hash=int(z'510E527FADE682D1',8)
+    hash=ieor(hash,int(size(values),8));hash=ieor(hash,ishftc(int(size(values,5),8),17))
+    do t=1,size(values,5);do s=1,size(values,4);do r=1,size(values,3)
+      do q=1,size(values,2);do p=1,size(values,1)
+        bits=transfer(real(values(p,q,r,s,t)),bits);hash=ieor(ishftc(hash,7),bits)
+        bits=transfer(aimag(values(p,q,r,s,t)),bits);hash=ieor(ishftc(hash,11),bits)
+      enddo;enddo
+    enddo;enddo;enddo
+    if(hash==0_8)hash=1_8
+  end function checkpoint_complex_rank5_fingerprint
+
+  integer(8) function checkpoint_real_rank3_fingerprint(values) result(hash)
+    real(8),intent(in)::values(:,:,:)
+    integer::p,q,r
+    integer(8)::bits
+    hash=int(z'1F83D9ABFB41BD6B',8)
+    hash=ieor(ishftc(hash,7),int(size(values,1),8))
+    hash=ieor(ishftc(hash,7),int(size(values,2),8))
+    hash=ieor(ishftc(hash,7),int(size(values,3),8))
+    do r=1,size(values,3);do q=1,size(values,2);do p=1,size(values,1)
+      bits=transfer(values(p,q,r),bits);hash=ieor(ishftc(hash,11),bits)
+    enddo;enddo;enddo
+    if(hash==0_8)hash=1_8
+  end function checkpoint_real_rank3_fingerprint
+
+  subroutine checkpoint_grid_complex_fingerprint(comm_arg,grid_ids_arg,values,fingerprint,callback_ok)
+    integer,intent(in)::comm_arg
+    integer(8),intent(in)::grid_ids_arg(:)
+    complex(8),intent(in)::values(:,:)
+    integer(8),intent(out)::fingerprint
+    logical,intent(out)::callback_ok
+    integer::p,q,ierr_local,local_bad,global_bad,local_rows,minimum_rows,maximum_rows
+    integer(8)::local_hash,bits,local_count,global_count
+    callback_ok=.false.;fingerprint=0_8
+    local_bad=merge(0,1,size(values,2)==size(grid_ids_arg))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.global_bad/=0)return
+    local_rows=size(values,1)
+    call MPI_Allreduce(local_rows,minimum_rows,1,MPI_INTEGER,MPI_MIN,comm_arg,ierr_local)
+    if(ierr_local==MPI_SUCCESS)call MPI_Allreduce(local_rows,maximum_rows,1,MPI_INTEGER,MPI_MAX,&
+      comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.minimum_rows/=maximum_rows)return
+    local_hash=0_8
+    do p=1,size(grid_ids_arg);do q=1,size(values,1)
+      bits=transfer(real(values(q,p)),bits)
+      local_hash=ieor(local_hash,ishftc(ieor(bits,grid_ids_arg(p)),mod(7*q,63)))
+      bits=transfer(aimag(values(q,p)),bits)
+      local_hash=ieor(local_hash,ishftc(ieor(bits,ishftc(grid_ids_arg(p),17)),mod(11*q,63)))
+    enddo;enddo
+    call MPI_Allreduce(local_hash,fingerprint,1,MPI_INTEGER8,MPI_BXOR,comm_arg,ierr_local)
+    local_count=int(size(grid_ids_arg),8);global_count=0_8
+    if(ierr_local==MPI_SUCCESS)call MPI_Allreduce(local_count,global_count,1,MPI_INTEGER8,MPI_SUM,&
+      comm_arg,ierr_local)
+    fingerprint=ieor(fingerprint,ishftc(int(size(values,1),8),31))
+    fingerprint=ieor(fingerprint,ishftc(global_count,23))
+    if(fingerprint==0_8)fingerprint=1_8
+    callback_ok=ierr_local==MPI_SUCCESS
+  end subroutine checkpoint_grid_complex_fingerprint
+
+  subroutine checkpoint_grid_real_fingerprint(comm_arg,grid_ids_arg,values,fingerprint,callback_ok)
+    integer,intent(in)::comm_arg
+    integer(8),intent(in)::grid_ids_arg(:)
+    real(8),intent(in)::values(:)
+    integer(8),intent(out)::fingerprint
+    logical,intent(out)::callback_ok
+    integer::p,ierr_local,local_bad,global_bad
+    integer(8)::local_hash,bits,local_count,global_count
+    callback_ok=.false.;fingerprint=0_8
+    local_bad=merge(0,1,size(values)==size(grid_ids_arg))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.global_bad/=0)return
+    local_hash=0_8
+    do p=1,size(values)
+      bits=transfer(values(p),bits)
+      local_hash=ieor(local_hash,ishftc(ieor(bits,ishftc(grid_ids_arg(p),17)),&
+        int(modulo(grid_ids_arg(p),63_8))))
+    enddo
+    call MPI_Allreduce(local_hash,fingerprint,1,MPI_INTEGER8,MPI_BXOR,comm_arg,ierr_local)
+    local_count=int(size(values),8);global_count=0_8
+    if(ierr_local==MPI_SUCCESS)call MPI_Allreduce(local_count,global_count,1,MPI_INTEGER8,MPI_SUM,&
+      comm_arg,ierr_local)
+    fingerprint=ieor(fingerprint,ishftc(global_count,31))
+    if(fingerprint==0_8)fingerprint=1_8
+    callback_ok=ierr_local==MPI_SUCCESS
+  end subroutine checkpoint_grid_real_fingerprint
+
+  subroutine checkpoint_grid_integer_fingerprint(comm_arg,grid_ids_arg,values,fingerprint,callback_ok)
+    integer,intent(in)::comm_arg,values(:)
+    integer(8),intent(in)::grid_ids_arg(:)
+    integer(8),intent(out)::fingerprint
+    logical,intent(out)::callback_ok
+    integer::p,ierr_local,local_bad,global_bad
+    integer(8)::local_hash,entry,local_count,global_count
+    callback_ok=.false.;fingerprint=0_8
+    local_bad=merge(0,1,size(values)==size(grid_ids_arg).and.all(values>0))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm_arg,ierr_local)
+    if(ierr_local/=MPI_SUCCESS.or.global_bad/=0)return
+    local_hash=0_8
+    do p=1,size(values)
+      entry=ieor(grid_ids_arg(p),ishftc(int(values(p),8),17))
+      local_hash=ieor(local_hash,ishftc(entry,int(modulo(grid_ids_arg(p),63_8))))
+    enddo
+    call MPI_Allreduce(local_hash,fingerprint,1,MPI_INTEGER8,MPI_BXOR,comm_arg,ierr_local)
+    local_count=int(size(values),8);global_count=0_8
+    if(ierr_local==MPI_SUCCESS)call MPI_Allreduce(local_count,global_count,1,MPI_INTEGER8,MPI_SUM,&
+      comm_arg,ierr_local)
+    fingerprint=ieor(fingerprint,ishftc(global_count,31))
+    if(fingerprint==0_8)fingerprint=1_8
+    callback_ok=ierr_local==MPI_SUCCESS
+  end subroutine checkpoint_grid_integer_fingerprint
 
   subroutine pack_checkpoint_face_values(face,values,position)
     type(s_dg_hybrid_production_face_trace),intent(in)::face

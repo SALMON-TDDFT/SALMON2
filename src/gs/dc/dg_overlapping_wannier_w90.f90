@@ -3436,7 +3436,7 @@ contains
 
   subroutine run_dg_w90_gamma_library(comm,seed,real_lattice,reciprocal_lattice,atom_symbols,&
       atoms_cart,m_matrix,a_matrix,eigenvalues,initial_gauge_spread,tolerance,num_iter,transform,centers,&
-      spreads,spread,ok,message,convergence_iterations_out)
+      spreads,spread,ok,message,convergence_iterations_out,require_nonincreasing_spread)
     integer,intent(in)::comm,num_iter
     character(*),intent(in)::seed
     real(real64),intent(in)::real_lattice(3,3),reciprocal_lattice(3,3),atoms_cart(:,:),&
@@ -3449,8 +3449,10 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     integer,intent(out),optional::convergence_iterations_out
+    logical,intent(in),optional::require_nonincreasing_spread
 #if defined(USE_MPI) && defined(USE_WANNIER90)
-    integer::rank,ierr,nband,nwann,nntot,status,mp_grid(3),matrix_dimensions(3),convergence_iterations
+    integer::rank,ierr,nband,nwann,nntot,status,mp_grid(3),matrix_dimensions(3),convergence_iterations,&
+      require_flag,minimum_require_flag,maximum_require_flag
     real(real64)::kpoint(3,1)
     real(real64),parameter::bohr_to_angstrom=0.52917721067_real64
     real(real64)::real_lattice_w90(3,3),reciprocal_lattice_w90(3,3),&
@@ -3458,7 +3460,7 @@ contains
     complex(real64),allocatable::u(:,:,:),uopt(:,:,:),m4(:,:,:,:),a3(:,:,:)
     real(real64),allocatable::e2(:,:)
     logical,allocatable::lwindow(:,:)
-    logical::geometry_ok
+    logical::geometry_ok,enforce_nonincreasing_spread
     character(len(message))::geometry_message
     interface
       subroutine wannier_run(seed_name,mp_grid_loc,num_kpts_loc,real_lattice_loc,&
@@ -3483,8 +3485,15 @@ contains
       end subroutine wannier_run
     end interface
     ok=.false.;message='';spread=0d0;status=0;convergence_iterations=-1
+    enforce_nonincreasing_spread=.true.
+    if(present(require_nonincreasing_spread))enforce_nonincreasing_spread=require_nonincreasing_spread
+    require_flag=merge(1,0,enforce_nonincreasing_spread)
+    minimum_require_flag=require_flag;maximum_require_flag=require_flag
     if(present(convergence_iterations_out))convergence_iterations_out=-1
     call MPI_Comm_rank(comm,rank,ierr)
+    call MPI_Allreduce(require_flag,minimum_require_flag,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(require_flag,maximum_require_flag,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_require_flag/=maximum_require_flag)status=1
     matrix_dimensions=0
     if(rank==0)matrix_dimensions=[size(m_matrix,1),size(a_matrix,2),size(m_matrix,3)]
     call MPI_Bcast(matrix_dimensions,3,MPI_INTEGER,0,comm,ierr)
@@ -3524,7 +3533,7 @@ contains
       transform=matmul(uopt(:,:,1),u(:,:,1))
       call validate_dg_w90_convergence_log(trim(seed)//'.wout',num_iter,convergence_iterations,ok,message)
       if(ok)call validate_dg_w90_result(transform,centers,spreads,spread,initial_gauge_spread,&
-        tolerance,ok,message)
+        tolerance,ok,message,require_nonincreasing_spread=enforce_nonincreasing_spread)
       status=merge(0,2,ok)
     endif
     call MPI_Bcast(status,1,MPI_INTEGER,0,comm,ierr)
@@ -3582,15 +3591,18 @@ contains
   end subroutine estimate_dg_w90_coordinator_bytes
 
   subroutine validate_dg_w90_result(transform,centers,spreads,spread,initial_gauge_spread,&
-      tolerance,ok,message)
+      tolerance,ok,message,require_nonincreasing_spread)
     complex(real64),intent(in)::transform(:,:)
     real(real64),intent(in)::centers(:,:),spreads(:),spread(:),initial_gauge_spread,tolerance
     logical,intent(out)::ok
+    logical,intent(in),optional::require_nonincreasing_spread
     character(*),intent(out)::message
     complex(real64),allocatable::gram(:,:)
     real(real64)::scale,defect
     integer::i,nwann
-    ok=.false.;message='';nwann=size(transform,1)
+    logical::enforce_nonincreasing_spread
+    ok=.false.;message='';nwann=size(transform,1);enforce_nonincreasing_spread=.true.
+    if(present(require_nonincreasing_spread))enforce_nonincreasing_spread=require_nonincreasing_spread
     if(nwann<=0.or.size(transform,2)/=nwann.or.any(shape(centers)/=[3,nwann]).or.&
         size(spreads)/=nwann.or.size(spread)/=3.or.tolerance<=0d0.or.&
         .not.ieee_is_finite(tolerance).or..not.ieee_is_finite(initial_gauge_spread).or.&
@@ -3612,7 +3624,8 @@ contains
     if(defect>tolerance*max(1d0,real(nwann,real64)))then
       message='Wannier90 transform is not unitary';return
     endif
-    if(spread(3)>initial_gauge_spread+tolerance*max(1d0,initial_gauge_spread))then
+    if(enforce_nonincreasing_spread.and.&
+        spread(3)>initial_gauge_spread+tolerance*max(1d0,initial_gauge_spread))then
       message='Wannier90 increased the gauge-dependent spread';return
     endif
     ok=.true.

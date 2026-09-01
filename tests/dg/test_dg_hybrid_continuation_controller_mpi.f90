@@ -12,6 +12,7 @@ program test_dg_hybrid_continuation_controller_mpi
   type(s_dg_hybrid_controller)::limit_controller
   type(s_dg_hybrid_trial_state)::state,accepted,limit_state
   type(s_dg_hybrid_stage_report)::report
+  type(s_dg_hybrid_candidate_acceptance)::candidate_acceptance
   real(real64)::t0(4),t1(4),lambda_before,step_before
   logical::ok,accept,meaningful_gap
   character(256)::message
@@ -46,21 +47,99 @@ program test_dg_hybrid_continuation_controller_mpi
     gap_occupied_index,gap_unoccupied_index,ok)
   call require(ok.and.solve_count==2.and..not.meaningful_gap.and.gap_occupied_index==0.and.gap_unoccupied_index==0,&
     'degenerate fully retained occupied space was rejected without an extra state')
-  call dg_hybrid_continuation_state_count([(2d0,i=1,128)],1560,384,solve_count,meaningful_gap,&
+  call dg_hybrid_continuation_state_count([2d0,2d0,0d0],7,4,solve_count,meaningful_gap,&
     gap_occupied_index,gap_unoccupied_index,ok)
-  call require(ok.and.solve_count>=385.and.meaningful_gap.and.gap_occupied_index==128.and.&
-    gap_unoccupied_index==129,'384-state symmetry target lacks its boundary proof eigenvalue')
-  call dg_hybrid_continuation_state_count([(2d0,i=1,128)],384,384,solve_count,meaningful_gap,&
-    gap_occupied_index,gap_unoccupied_index,ok)
-  call require(ok.and.solve_count==384.and.meaningful_gap.and.gap_occupied_index==128.and.&
-    gap_unoccupied_index==129,'full-basis symmetry target was not clipped at the retained extent')
-  call dg_hybrid_continuation_state_count([(2d0,i=1,128)],1560,127,solve_count,meaningful_gap,&
+  call require(ok.and.solve_count==7.and.meaningful_gap.and.gap_occupied_index==2.and.&
+    gap_unoccupied_index==3,'continuation did not request one complete LCFO eigensystem')
+  call dg_hybrid_continuation_state_count([2d0,2d0,2d0],7,2,solve_count,meaningful_gap,&
     gap_occupied_index,gap_unoccupied_index,ok)
   call require(.not.ok,'symmetry target smaller than the occupied window was accepted')
   call dg_hybrid_continuation_state_count([2d0,2d0,2d0],11,7,solve_count,meaningful_gap,&
     gap_occupied_index,gap_unoccupied_index,ok)
-  call require(ok.and.solve_count==8.and.gap_occupied_index==3.and.gap_unoccupied_index==4,&
-    'material-dependent symmetry target was replaced by a fixed state count')
+  call require(ok.and.solve_count==11.and.gap_occupied_index==3.and.gap_unoccupied_index==4,&
+    'complete solve was replaced by a requested-rank prefix')
+
+  call initialize_dg_hybrid_candidate_acceptance(icomm,7,0.4d0,candidate_acceptance,ok,message)
+  call require(ok.and.candidate_acceptance%construction_rank==7.and.&
+    .not.candidate_acceptance%legacy_dynamic_rank,trim(message))
+  if(nproc>1)then
+    call record_dg_hybrid_complete_lcfo_solve(icomm,candidate_acceptance,7,1,&
+      merge(1001_int64,1099_int64,id_rank==0),ok,message)
+    call require(.not.ok.and.candidate_acceptance%phase==1,&
+      'rank-disagreeing complete eigensystem fingerprint was accepted')
+  endif
+  call record_dg_hybrid_occupation_policy(icomm,candidate_acceptance,2,.true.,1002_int64,ok,message)
+  call require(.not.ok,'occupation policy was recorded before the complete LCFO solve')
+  call record_dg_hybrid_complete_lcfo_solve(icomm,candidate_acceptance,6,1,1001_int64,ok,message)
+  call require(.not.ok,'a prefix eigensystem was accepted as the complete LCFO solve')
+  call record_dg_hybrid_complete_lcfo_solve(icomm,candidate_acceptance,7,2,1001_int64,ok,message)
+  call require(.not.ok,'two complete eigensolver calls were accepted for one final candidate')
+  call record_dg_hybrid_complete_lcfo_solve(icomm,candidate_acceptance,7,1,1001_int64,ok,message)
+  call require(ok.and.candidate_acceptance%solved_rank==7,trim(message))
+  call record_dg_hybrid_occupation_policy(icomm,candidate_acceptance,2,.false.,1002_int64,ok,message)
+  call require(.not.ok,'an electron-count failure was accepted as the Task 9 occupation policy')
+  call record_dg_hybrid_occupation_policy(icomm,candidate_acceptance,2,.true.,1002_int64,ok,message)
+  call require(ok.and.candidate_acceptance%occupied_rank==2,trim(message))
+  call record_dg_hybrid_unconditional_gates(icomm,candidate_acceptance,.false.,.true.,1d-2,1d-12,1d-10,ok,message)
+  call require(.not.ok,'occupied-projector failure was accepted before spectral extension')
+  call record_dg_hybrid_spectral_certification(icomm,candidate_acceptance,3,4,4,.true.,.false.,.false.,&
+    1003_int64,ok,message)
+  call require(.not.ok,'empty-state extension repaired a failed occupied-projector gate')
+  call record_dg_hybrid_unconditional_gates(icomm,candidate_acceptance,.true.,.false.,1d-12,1d-2,1d-10,ok,message)
+  call require(.not.ok,'density failure was accepted before spectral extension')
+  if(nproc>1)then
+    call record_dg_hybrid_unconditional_gates(icomm,candidate_acceptance,.true.,.true.,&
+      1d-12+real(id_rank,real64)*epsilon(1d0),2d-12,1d-10,ok,message)
+    call require(.not.ok.and.candidate_acceptance%phase==3,&
+      'rank-disagreeing occupied-projector defect was accepted')
+    call record_dg_hybrid_unconditional_gates(icomm,candidate_acceptance,.true.,.true.,&
+      1d-12,2d-12,1d-10+real(id_rank,real64)*epsilon(1d0),ok,message)
+    call require(.not.ok.and.candidate_acceptance%phase==3,&
+      'rank-disagreeing physical-gate tolerance was accepted')
+  endif
+  call record_dg_hybrid_unconditional_gates(icomm,candidate_acceptance,.true.,.true.,1d-12,2d-12,1d-10,ok,message)
+  call require(ok.and.candidate_acceptance%occupied_gate.and.candidate_acceptance%density_gate,trim(message))
+  call authorize_dg_hybrid_v3_publication(icomm,candidate_acceptance,3,4,.true.,ok,message)
+  call require(.not.ok,'v3 publication was authorized before certification and localization')
+  call record_dg_hybrid_spectral_certification(icomm,candidate_acceptance,3,4,4,.false.,.false.,.false.,&
+    1003_int64,ok,message)
+  call require(.not.ok,'explicit energy window was accepted without a proof state')
+  call record_dg_hybrid_spectral_certification(icomm,candidate_acceptance,3,4,4,.true.,.false.,.false.,&
+    1003_int64,ok,message)
+  call require(ok.and.candidate_acceptance%certified_rank==4,trim(message))
+  call record_dg_hybrid_certified_rt_basis(icomm,candidate_acceptance,7,1004_int64,1005_int64,ok,message)
+  call require(.not.ok,'construction rank was published as the certified RT basis rank')
+  call record_dg_hybrid_certified_rt_basis(icomm,candidate_acceptance,4,1004_int64,1005_int64,ok,message)
+  call require(ok.and.candidate_acceptance%rt_basis_rank==4,trim(message))
+  call authorize_dg_hybrid_v3_publication(icomm,candidate_acceptance,2,4,.true.,ok,message)
+  call require(.not.ok,'legacy checkpoint version 2 was authorized for certified RT publication')
+  call authorize_dg_hybrid_v3_publication(icomm,candidate_acceptance,3,7,.true.,ok,message)
+  call require(.not.ok,'construction-only directions entered the published RT dimensions')
+  call authorize_dg_hybrid_v3_publication(icomm,candidate_acceptance,3,4,.true.,ok,message)
+  call require(ok.and.candidate_acceptance%published_rt_rank==4.and.&
+    candidate_acceptance%published_rt_rank<candidate_acceptance%construction_rank,trim(message))
+
+  call initialize_dg_hybrid_candidate_acceptance(icomm,5,-1d0,candidate_acceptance,ok,message)
+  call require(ok.and.candidate_acceptance%legacy_dynamic_rank.and.&
+    candidate_acceptance%legacy_warning_required,trim(message))
+  call record_dg_hybrid_complete_lcfo_solve(icomm,candidate_acceptance,5,1,2001_int64,ok,message)
+  call require(ok,trim(message))
+  call record_dg_hybrid_occupation_policy(icomm,candidate_acceptance,2,.true.,2002_int64,ok,message)
+  call require(ok,trim(message))
+  call record_dg_hybrid_unconditional_gates(icomm,candidate_acceptance,.true.,.true.,1d-12,2d-12,1d-10,ok,message)
+  call require(ok,trim(message))
+  call record_dg_hybrid_spectral_certification(icomm,candidate_acceptance,3,5,5,.false.,.true.,.false.,&
+    2003_int64,ok,message)
+  call require(.not.ok,'legacy dynamic-rank certification omitted its explicit warning receipt')
+  call record_dg_hybrid_spectral_certification(icomm,candidate_acceptance,3,5,5,.false.,.true.,.true.,&
+    2003_int64,ok,message)
+  call require(ok.and.candidate_acceptance%legacy_warning_observed,trim(message))
+  call record_dg_hybrid_certified_rt_basis(icomm,candidate_acceptance,5,2004_int64,2005_int64,ok,message)
+  call require(ok,trim(message))
+  call authorize_dg_hybrid_v3_publication(icomm,candidate_acceptance,3,5,.true.,ok,message)
+  call require(ok.and.candidate_acceptance%published_rt_rank==5,trim(message))
+  call initialize_dg_hybrid_candidate_acceptance(icomm,5,-1d0-epsilon(1d0),candidate_acceptance,ok,message)
+  call require(.not.ok,'a negative energy window other than exactly -1 was accepted')
 
   call fill_state(accepted,10)
   if(nproc>1)then

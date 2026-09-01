@@ -10,7 +10,7 @@ program test_rt_dg_hybrid_checkpoint_mpi
     authenticate_rt_dg_hybrid_ground_state_payload,fingerprint_rt_dg_hybrid_component,&
     rt_dg_hybrid_checkpoint_version,rt_dg_hybrid_occupied_checkpoint_version,&
     rt_dg_hybrid_ground_state_checkpoint_version,rt_dg_hybrid_energy_window_explicit,&
-    rt_dg_hybrid_energy_window_legacy_dynamic
+    rt_dg_hybrid_energy_window_legacy_dynamic,rt_dg_hybrid_vector_canonical_momentum
   implicit none
   integer,parameter::n=4,nrt=3,nocc=2,nface_global=2
   integer,parameter::face_point_degree(nface_global)=[4,6],&
@@ -29,7 +29,8 @@ program test_rt_dg_hybrid_checkpoint_mpi
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
   call require(rt_dg_hybrid_checkpoint_version==2.and.rt_dg_hybrid_occupied_checkpoint_version==2.and.&
-    rt_dg_hybrid_ground_state_checkpoint_version==3,'checkpoint family versions changed unexpectedly')
+    rt_dg_hybrid_ground_state_checkpoint_version==3.and.rt_dg_hybrid_vector_canonical_momentum==1,&
+    'checkpoint family versions or canonical-momentum vector slot changed unexpectedly')
   call get_command_argument(1,mode,length=mode_length);call get_command_argument(1,mode)
   call get_command_argument(2,path)
   if(trim(mode)=='write_complete_legacy_dynamic')then

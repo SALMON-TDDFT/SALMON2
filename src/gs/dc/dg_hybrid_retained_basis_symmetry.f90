@@ -23,7 +23,7 @@ subroutine build_dg_hybrid_retained_basis_representation(comm_arg,global_count_a
 
   callback_ok=.false.;closure_ok_arg=.false.;closure_defect_arg=huge(1d0);callback_message=''
   nbasis=size(s_rows_arg,2);ncore=size(core_ids_arg);noperation=size(pencil_maps_arg,2)
-  local_bad=merge(0,1,global_count_arg>0.and.nbasis>0.and.ncore>0.and.noperation>0.and.&
+  local_bad=merge(0,1,global_count_arg>0.and.nbasis>0.and.ncore>0.and.noperation>=0.and.&
     size(core_weights_arg)==ncore.and.size(pencil_maps_arg,1)==ncore.and.&
     size(s_rows_arg,1)==size(row_ids_arg).and.tolerance_arg>0d0.and.&
     all(core_ids_arg>0_int64).and.all(core_ids_arg<=int(global_count_arg,int64)).and.&
@@ -32,6 +32,11 @@ subroutine build_dg_hybrid_retained_basis_representation(comm_arg,global_count_a
   call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm_arg,ierr)
   if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
     callback_message='invalid retained-basis symmetry representation contract';return
+  endif
+  if(noperation==0)then
+    allocate(representation_arg(nbasis,nbasis,0))
+    closure_defect_arg=0d0;closure_ok_arg=.true.;callback_ok=.true.;callback_message=''
+    return
   endif
   allocate(local_basis(nbasis,ncore),local_metric(nbasis,nbasis),metric(nbasis,nbasis),&
     metric_work(nbasis,nbasis),ownership(nbasis),pivot(nbasis))

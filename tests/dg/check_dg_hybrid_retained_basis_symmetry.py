@@ -28,6 +28,12 @@ for token in (
 assert "representation_arg=identity" not in source, (
     "nontrivial retained-basis action must not fall back to the identity"
 )
+packed_source = "".join(source.split())
+assert "if(noperation==0)then" in packed_source
+assert "allocate(representation_arg(nbasis,nbasis,0))" in packed_source
+assert "closure_defect_arg=0d0;closure_ok_arg=.true.;callback_ok=.true." in packed_source, (
+    "identity-only systems must expose a vacuous nonidentity-generator action"
+)
 for token in ("closure_defect_arg", "closure_ok_arg"):
     assert token in source, f"retained-basis diagnostic omits {token}"
 assert "callback_ok=ierr==mpi_success.and.ieee_is_finite(global_defect)" in source.replace(" ", ""), (

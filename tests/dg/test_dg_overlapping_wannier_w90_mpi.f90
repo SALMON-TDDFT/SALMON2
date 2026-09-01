@@ -1227,6 +1227,14 @@ program test_dg_overlapping_wannier_w90_mpi
   transform=(0d0,0d0);transform(1,1)=1d0;transform(2,2)=1d0;spread(3)=0.9d0
   call validate_dg_w90_result(transform,centers,spreads,spread,0.8d0,1d-12,ok,message)
   call require(.not.ok,'increased Wannier90 gauge-dependent spread rejection')
+  call validate_dg_w90_result(transform,centers,spreads,spread,0.8d0,1d-12,ok,message,&
+    require_nonincreasing_spread=.false.)
+  call require(ok,'certified fixed-rank localization accepts a signed spread change')
+  spreads(1)=-0.1d0
+  call validate_dg_w90_result(transform,centers,spreads,spread,0.8d0,1d-12,ok,message,&
+    require_nonincreasing_spread=.false.)
+  call require(.not.ok,'signed spread opt-out still rejects a physically negative spread')
+  spreads(1)=0.4d0
   spread(3)=0.7d0;centers(1,1)=ieee_value(0d0,ieee_quiet_nan)
   call validate_dg_w90_result(transform,centers,spreads,spread,0.8d0,1d-12,ok,message)
   call require(.not.ok,'nonfinite Wannier90 center rejection')

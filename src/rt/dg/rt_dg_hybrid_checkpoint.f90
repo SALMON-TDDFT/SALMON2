@@ -20,6 +20,9 @@ module rt_dg_hybrid_checkpoint
   integer,parameter,public::rt_dg_hybrid_ground_state_checkpoint_version=3
   integer,parameter,public::rt_dg_hybrid_energy_window_explicit=1,&
     rt_dg_hybrid_energy_window_legacy_dynamic=2
+  ! Version-3 vector operator item one is the homogeneous velocity-gauge
+  ! coupling.  Cell-wrapped position remains a separately named payload.
+  integer,parameter,public::rt_dg_hybrid_vector_canonical_momentum=1
   character(16),parameter::ground_state_magic='SALMON_DG_GS001 '
   integer,parameter::ground_state_logical_count=15,ground_state_integer_count=25,&
     ground_state_fingerprint_count=56,ground_state_real_count=39
@@ -3585,7 +3588,8 @@ contains
     nrtrow=0;if(allocated(payload%rt_space%row_ids))nrtrow=size(payload%rt_space%row_ids)
     if(.not.payload%rt_space%valid.or.payload%rt_space%rank/=r.or.&
       payload%rt_space%operation_count/=payload%operation_count.or.payload%rt_space%scalar_count<0.or.&
-      payload%rt_space%vector_count<0.or.payload%rt_space%tensor_count<0)bad=1
+      payload%rt_space%vector_count<rt_dg_hybrid_vector_canonical_momentum.or.&
+      payload%rt_space%tensor_count<0)bad=1
     if(bad/=0)return
     if(.not.allocated(payload%rt_space%row_ids).or..not.allocated(payload%rt_space%row_owner_keys).or.&
       .not.allocated(payload%rt_space%grid_owner_keys).or..not.allocated(payload%rt_space%metric_rows).or.&

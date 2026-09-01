@@ -50,12 +50,30 @@ module dg_hybrid_continuation_controller
     real(real64),allocatable::face_lambda(:)
   end type s_dg_hybrid_controller
 
+  type,public::s_dg_hybrid_candidate_acceptance
+    logical::valid=.false.,complete_lcfo=.false.,occupation_policy=.false.
+    logical::occupied_gate=.false.,density_gate=.false.,spectral_certified=.false.
+    logical::certified_basis_ready=.false.,publication_authorized=.false.
+    logical::legacy_dynamic_rank=.false.,legacy_warning_required=.false.,legacy_warning_observed=.false.
+    integer::phase=0,construction_rank=0,solved_rank=0,occupied_rank=0
+    integer::requested_rank=0,certified_rank=0,rt_basis_rank=0,published_rt_rank=0
+    integer::checkpoint_version=0
+    real(real64)::energy_window=0d0,occupied_gate_defect=0d0,density_gate_defect=0d0,&
+      gate_tolerance=0d0
+    integer(int64)::eigensystem_fingerprint=0_int64,occupation_fingerprint=0_int64
+    integer(int64)::certification_fingerprint=0_int64,basis_fingerprint=0_int64
+    integer(int64)::operator_fingerprint=0_int64
+  end type s_dg_hybrid_candidate_acceptance
+
   public::default_dg_hybrid_controller_controls,dg_hybrid_stage_tolerances,&
     validate_dg_hybrid_controller_contract,&
     initialize_dg_hybrid_controller,propose_dg_hybrid_trial,observe_dg_hybrid_inner_residuals,&
     decide_dg_hybrid_stage,reject_dg_hybrid_trial,initialize_dg_hybrid_stage_schedule,&
     begin_dg_hybrid_stage_solve,schedule_dg_hybrid_candidate_checks,complete_dg_hybrid_stage_solve,&
-    dg_hybrid_continuation_state_count
+    dg_hybrid_continuation_state_count,initialize_dg_hybrid_candidate_acceptance,&
+    record_dg_hybrid_complete_lcfo_solve,record_dg_hybrid_occupation_policy,&
+    record_dg_hybrid_unconditional_gates,record_dg_hybrid_spectral_certification,&
+    record_dg_hybrid_certified_rt_basis,authorize_dg_hybrid_v3_publication
 contains
   pure subroutine dg_hybrid_continuation_state_count(occupations,basis_count,symmetry_target_rank,solve_count,&
       meaningful_gap,gap_occupied_index,gap_unoccupied_index,ok)
@@ -70,11 +88,7 @@ contains
       all(ieee_is_finite(occupations)).and.all(occupations>=0d0).and.all(occupations<=2d0)
     solve_count=0;meaningful_gap=.false.;gap_occupied_index=0;gap_unoccupied_index=0
     if(.not.ok)return
-    if(symmetry_target_rank==basis_count)then
-      solve_count=basis_count
-    else
-      solve_count=max(size(occupations),symmetry_target_rank+1)
-    endif
+    solve_count=basis_count
     do i=1,size(occupations)
       if(occupations(i)>occupation_floor)gap_occupied_index=i
     enddo
@@ -93,6 +107,224 @@ contains
     meaningful_gap=gap_unoccupied_index>gap_occupied_index
     if(.not.meaningful_gap)gap_occupied_index=0
   end subroutine dg_hybrid_continuation_state_count
+
+  subroutine initialize_dg_hybrid_candidate_acceptance(icomm,construction_rank,energy_window,receipt,ok,message)
+    integer,intent(in)::icomm,construction_rank
+    real(real64),intent(in)::energy_window
+    type(s_dg_hybrid_candidate_acceptance),intent(out)::receipt
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    type(s_dg_hybrid_candidate_acceptance)::candidate
+    logical::valid
+    receipt=s_dg_hybrid_candidate_acceptance()
+    candidate=receipt
+    valid=construction_rank>0.and.ieee_is_finite(energy_window).and.&
+      (energy_window>=0d0.or.energy_window==-1d0)
+    if(valid)then
+      candidate%valid=.true.;candidate%phase=1
+      candidate%construction_rank=construction_rank;candidate%energy_window=energy_window
+      candidate%legacy_dynamic_rank=energy_window==-1d0
+      candidate%legacy_warning_required=candidate%legacy_dynamic_rank
+    endif
+    call commit_candidate_transition(icomm,valid,candidate,receipt,&
+      'invalid Hybrid final-candidate acceptance initialization',ok,message)
+  end subroutine initialize_dg_hybrid_candidate_acceptance
+
+  subroutine record_dg_hybrid_complete_lcfo_solve(icomm,receipt,solved_rank,eigensolve_count,&
+      fingerprint,ok,message)
+    integer,intent(in)::icomm,solved_rank,eigensolve_count
+    integer(int64),intent(in)::fingerprint
+    type(s_dg_hybrid_candidate_acceptance),intent(inout)::receipt
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    type(s_dg_hybrid_candidate_acceptance)::candidate
+    logical::valid
+    candidate=receipt
+    valid=receipt%valid.and.receipt%phase==1.and.solved_rank==receipt%construction_rank.and.&
+      eigensolve_count==1.and.fingerprint/=0_int64
+    if(valid)then
+      candidate%complete_lcfo=.true.;candidate%solved_rank=solved_rank
+      candidate%eigensystem_fingerprint=fingerprint;candidate%phase=2
+    endif
+    call commit_candidate_transition(icomm,valid,candidate,receipt,&
+      'complete LCFO eigensystem acceptance failed',ok,message)
+  end subroutine record_dg_hybrid_complete_lcfo_solve
+
+  subroutine record_dg_hybrid_occupation_policy(icomm,receipt,noccupied,electron_ok,fingerprint,ok,message)
+    integer,intent(in)::icomm,noccupied
+    logical,intent(in)::electron_ok
+    integer(int64),intent(in)::fingerprint
+    type(s_dg_hybrid_candidate_acceptance),intent(inout)::receipt
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    type(s_dg_hybrid_candidate_acceptance)::candidate
+    logical::valid
+    candidate=receipt
+    valid=receipt%valid.and.receipt%phase==2.and.receipt%complete_lcfo.and.electron_ok.and.&
+      noccupied>=1.and.noccupied<=receipt%solved_rank.and.fingerprint/=0_int64
+    if(valid)then
+      candidate%occupation_policy=.true.;candidate%occupied_rank=noccupied
+      candidate%occupation_fingerprint=fingerprint;candidate%phase=3
+    endif
+    call commit_candidate_transition(icomm,valid,candidate,receipt,&
+      'Hybrid occupation-policy acceptance failed',ok,message)
+  end subroutine record_dg_hybrid_occupation_policy
+
+  subroutine record_dg_hybrid_unconditional_gates(icomm,receipt,occupied_ok,density_ok,&
+      occupied_defect,density_defect,tolerance,ok,message)
+    integer,intent(in)::icomm
+    type(s_dg_hybrid_candidate_acceptance),intent(inout)::receipt
+    logical,intent(in)::occupied_ok,density_ok
+    real(real64),intent(in)::occupied_defect,density_defect,tolerance
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    type(s_dg_hybrid_candidate_acceptance)::candidate
+    logical::valid
+    candidate=receipt
+    valid=receipt%valid.and.receipt%phase==3.and.receipt%occupation_policy.and.&
+      occupied_ok.and.density_ok.and.all(ieee_is_finite([occupied_defect,density_defect,tolerance])).and.&
+      occupied_defect>=0d0.and.density_defect>=0d0.and.tolerance>0d0.and.&
+      occupied_defect<=tolerance.and.density_defect<=tolerance
+    if(valid)then
+      candidate%occupied_gate=.true.;candidate%density_gate=.true.
+      candidate%occupied_gate_defect=occupied_defect
+      candidate%density_gate_defect=density_defect
+      candidate%gate_tolerance=tolerance;candidate%phase=4
+    endif
+    call commit_candidate_transition(icomm,valid,candidate,receipt,&
+      'unconditional occupied-projector or density gate failed',ok,message)
+  end subroutine record_dg_hybrid_unconditional_gates
+
+  subroutine record_dg_hybrid_spectral_certification(icomm,receipt,requested_rank,certified_rank,&
+      boundary_rank,proof_state_present,compatibility_dynamic_rank,compatibility_warning_observed,&
+      fingerprint,ok,message)
+    integer,intent(in)::icomm,requested_rank,certified_rank,boundary_rank
+    type(s_dg_hybrid_candidate_acceptance),intent(inout)::receipt
+    logical,intent(in)::proof_state_present,compatibility_dynamic_rank,compatibility_warning_observed
+    integer(int64),intent(in)::fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    type(s_dg_hybrid_candidate_acceptance)::candidate
+    logical::mode_valid,valid
+    candidate=receipt
+    if(receipt%legacy_dynamic_rank)then
+      mode_valid=compatibility_dynamic_rank.and.compatibility_warning_observed
+    else
+      mode_valid=.not.compatibility_dynamic_rank.and..not.compatibility_warning_observed.and.&
+        proof_state_present.and.certified_rank<receipt%construction_rank
+    endif
+    valid=receipt%valid.and.receipt%phase==4.and.receipt%occupied_gate.and.receipt%density_gate.and.&
+      requested_rank>=receipt%occupied_rank.and.certified_rank>=requested_rank.and.&
+      certified_rank<=receipt%construction_rank.and.boundary_rank==certified_rank.and.&
+      fingerprint/=0_int64.and.mode_valid
+    if(valid)then
+      candidate%spectral_certified=.true.;candidate%requested_rank=requested_rank
+      candidate%certified_rank=certified_rank;candidate%certification_fingerprint=fingerprint
+      candidate%legacy_warning_observed=compatibility_warning_observed;candidate%phase=5
+    endif
+    call commit_candidate_transition(icomm,valid,candidate,receipt,&
+      'Hybrid spectral certification acceptance failed',ok,message)
+  end subroutine record_dg_hybrid_spectral_certification
+
+  subroutine record_dg_hybrid_certified_rt_basis(icomm,receipt,rt_basis_rank,basis_fingerprint,&
+      operator_fingerprint,ok,message)
+    integer,intent(in)::icomm,rt_basis_rank
+    type(s_dg_hybrid_candidate_acceptance),intent(inout)::receipt
+    integer(int64),intent(in)::basis_fingerprint,operator_fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    type(s_dg_hybrid_candidate_acceptance)::candidate
+    logical::valid
+    candidate=receipt
+    valid=receipt%valid.and.receipt%phase==5.and.receipt%spectral_certified.and.&
+      rt_basis_rank==receipt%certified_rank.and.basis_fingerprint/=0_int64.and.operator_fingerprint/=0_int64
+    if(valid)then
+      candidate%certified_basis_ready=.true.;candidate%rt_basis_rank=rt_basis_rank
+      candidate%basis_fingerprint=basis_fingerprint;candidate%operator_fingerprint=operator_fingerprint
+      candidate%phase=6
+    endif
+    call commit_candidate_transition(icomm,valid,candidate,receipt,&
+      'certified Hybrid RT-basis acceptance failed',ok,message)
+  end subroutine record_dg_hybrid_certified_rt_basis
+
+  subroutine authorize_dg_hybrid_v3_publication(icomm,receipt,checkpoint_version,payload_rt_rank,&
+      payload_ready,ok,message)
+    integer,intent(in)::icomm,checkpoint_version,payload_rt_rank
+    type(s_dg_hybrid_candidate_acceptance),intent(inout)::receipt
+    logical,intent(in)::payload_ready
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    type(s_dg_hybrid_candidate_acceptance)::candidate
+    logical::valid
+    candidate=receipt
+    valid=receipt%valid.and.receipt%phase==6.and.receipt%certified_basis_ready.and.payload_ready.and.&
+      checkpoint_version==3.and.payload_rt_rank==receipt%certified_rank.and.&
+      payload_rt_rank==receipt%rt_basis_rank
+    if(valid)then
+      candidate%publication_authorized=.true.;candidate%checkpoint_version=checkpoint_version
+      candidate%published_rt_rank=payload_rt_rank;candidate%phase=7
+    endif
+    call commit_candidate_transition(icomm,valid,candidate,receipt,&
+      'Hybrid checkpoint-v3 publication was not authorized',ok,message)
+  end subroutine authorize_dg_hybrid_v3_publication
+
+  subroutine commit_candidate_transition(icomm,local_valid,candidate,receipt,failure_message,ok,message)
+    integer,intent(in)::icomm
+    logical,intent(in)::local_valid
+    type(s_dg_hybrid_candidate_acceptance),intent(in)::candidate
+    type(s_dg_hybrid_candidate_acceptance),intent(inout)::receipt
+    character(*),intent(in)::failure_message
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::local_bad,global_bad,ierr
+    integer(int64)::local_hash,minimum_hash,maximum_hash
+    local_bad=merge(0,1,local_valid)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      ok=.false.;message=failure_message;return
+    endif
+    local_hash=candidate_acceptance_fingerprint(candidate)
+    call MPI_Allreduce(local_hash,minimum_hash,1,MPI_INTEGER8,MPI_MIN,icomm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(local_hash,maximum_hash,1,MPI_INTEGER8,MPI_MAX,icomm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_hash/=maximum_hash)then
+      ok=.false.;message='rank-disagreeing Hybrid final-candidate acceptance';return
+    endif
+    receipt=candidate;ok=.true.;message=''
+#else
+    ok=.false.;message='Hybrid final-candidate acceptance requires MPI'
+#endif
+  end subroutine commit_candidate_transition
+
+  integer(int64) function candidate_acceptance_fingerprint(receipt) result(hash)
+    type(s_dg_hybrid_candidate_acceptance),intent(in)::receipt
+    hash=int(z'6A09E667F3BCC909',int64)
+    call mix(int(receipt%phase,int64));call mix(int(receipt%construction_rank,int64))
+    call mix(int(receipt%solved_rank,int64));call mix(int(receipt%occupied_rank,int64))
+    call mix(int(receipt%requested_rank,int64));call mix(int(receipt%certified_rank,int64))
+    call mix(int(receipt%rt_basis_rank,int64));call mix(int(receipt%published_rt_rank,int64))
+    call mix(int(receipt%checkpoint_version,int64));call mix(transfer(receipt%energy_window,hash))
+    call mix(transfer(receipt%occupied_gate_defect,hash))
+    call mix(transfer(receipt%density_gate_defect,hash));call mix(transfer(receipt%gate_tolerance,hash))
+    call mix(receipt%eigensystem_fingerprint);call mix(receipt%occupation_fingerprint)
+    call mix(receipt%certification_fingerprint);call mix(receipt%basis_fingerprint)
+    call mix(receipt%operator_fingerprint)
+    call mix(int(merge(1,0,receipt%valid),int64));call mix(int(merge(1,0,receipt%complete_lcfo),int64))
+    call mix(int(merge(1,0,receipt%occupation_policy),int64))
+    call mix(int(merge(1,0,receipt%occupied_gate),int64));call mix(int(merge(1,0,receipt%density_gate),int64))
+    call mix(int(merge(1,0,receipt%spectral_certified),int64))
+    call mix(int(merge(1,0,receipt%certified_basis_ready),int64))
+    call mix(int(merge(1,0,receipt%publication_authorized),int64))
+    call mix(int(merge(1,0,receipt%legacy_dynamic_rank),int64))
+    call mix(int(merge(1,0,receipt%legacy_warning_required),int64))
+    call mix(int(merge(1,0,receipt%legacy_warning_observed),int64))
+  contains
+    subroutine mix(value)
+      integer(int64),intent(in)::value
+      hash=ieor(ishftc(hash,11),value)
+      if(hash==0_int64)hash=int(z'510E527FADE682D1',int64)
+    end subroutine mix
+  end function candidate_acceptance_fingerprint
 
   pure subroutine initialize_dg_hybrid_stage_schedule(iteration_limit,schedule)
     integer,intent(in)::iteration_limit
