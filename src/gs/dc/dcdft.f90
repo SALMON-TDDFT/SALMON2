@@ -630,6 +630,113 @@ contains
     end do
     
   end subroutine calc_vlocal_fragment_dcdft
+
+!===================================================================================================================================
+
+  subroutine capture_dg_dc_seed_payload_dcdft(system,energy,spsi,dc,residual,&
+      iteration,payload,ok,message)
+    use structures,only:s_dft_system,s_dft_energy,s_orbital,s_dcdft
+    use dg_dc_seed_checkpoint,only:s_dg_dc_seed_payload
+    use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+    implicit none
+    type(s_dft_system),intent(in)::system
+    type(s_dft_energy),intent(in)::energy
+    type(s_orbital),intent(in)::spsi
+    type(s_dcdft),intent(in)::dc
+    real(8),intent(in)::residual
+    integer,intent(in)::iteration
+    type(s_dg_dc_seed_payload),intent(out)::payload
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::allocation_status
+
+    ok=.false.;message=''
+    if(system%nspin/=1.or..not.system%if_real_orbital.or..not.allocated(spsi%rwf).or.&
+       .not.allocated(dc%rho_tot_s).or..not.allocated(dc%vloc_tot).or.&
+       .not.allocated(dc%rho_tot_s(1)%f).or..not.allocated(dc%vloc_tot(1)%f).or.&
+       .not.allocated(energy%esp).or..not.allocated(system%rocc))then
+      message='DG DC seed capture requires a complete real single-spin state';return
+    endif
+    if(.not.ieee_is_finite(system%mu).or..not.ieee_is_finite(residual).or.&
+       residual<0d0.or.iteration<0)then
+      message='DG DC seed capture received invalid scalar provenance';return
+    endif
+    allocation_status=0
+    allocate(payload%rwf(lbound(spsi%rwf,1):ubound(spsi%rwf,1),&
+      lbound(spsi%rwf,2):ubound(spsi%rwf,2),lbound(spsi%rwf,3):ubound(spsi%rwf,3),&
+      lbound(spsi%rwf,4):ubound(spsi%rwf,4),lbound(spsi%rwf,5):ubound(spsi%rwf,5),&
+      lbound(spsi%rwf,6):ubound(spsi%rwf,6),lbound(spsi%rwf,7):ubound(spsi%rwf,7)),&
+      payload%rho_tot(lbound(dc%rho_tot_s(1)%f,1):ubound(dc%rho_tot_s(1)%f,1),&
+      lbound(dc%rho_tot_s(1)%f,2):ubound(dc%rho_tot_s(1)%f,2),&
+      lbound(dc%rho_tot_s(1)%f,3):ubound(dc%rho_tot_s(1)%f,3)),&
+      payload%vloc_tot(lbound(dc%vloc_tot(1)%f,1):ubound(dc%vloc_tot(1)%f,1),&
+      lbound(dc%vloc_tot(1)%f,2):ubound(dc%vloc_tot(1)%f,2),&
+      lbound(dc%vloc_tot(1)%f,3):ubound(dc%vloc_tot(1)%f,3)),&
+      payload%esp(lbound(energy%esp,1):ubound(energy%esp,1),&
+      lbound(energy%esp,2):ubound(energy%esp,2),lbound(energy%esp,3):ubound(energy%esp,3)),&
+      payload%rocc(lbound(system%rocc,1):ubound(system%rocc,1),&
+      lbound(system%rocc,2):ubound(system%rocc,2),lbound(system%rocc,3):ubound(system%rocc,3)),&
+      stat=allocation_status)
+    if(allocation_status/=0)then
+      message='cannot allocate DG DC seed capture payload';return
+    endif
+    payload%rwf=spsi%rwf;payload%rho_tot=dc%rho_tot_s(1)%f
+    payload%vloc_tot=dc%vloc_tot(1)%f;payload%esp=energy%esp
+    payload%rocc=system%rocc;payload%mu=system%mu
+    payload%residual=residual;payload%iteration=iteration
+    ok=all(ieee_is_finite(payload%rwf)).and.all(ieee_is_finite(payload%rho_tot)).and.&
+      all(ieee_is_finite(payload%vloc_tot)).and.all(ieee_is_finite(payload%esp)).and.&
+      all(ieee_is_finite(payload%rocc))
+    if(.not.ok)message='DG DC seed capture contains non-finite state'
+  end subroutine capture_dg_dc_seed_payload_dcdft
+
+  subroutine rebuild_dg_dc_seed_derived_state_dcdft(mg,info,system,spsi,rho,&
+      rho_s,vlocal,dc,ok,message)
+    use structures,only:s_rgrid,s_parallel_info,s_dft_system,s_orbital,s_scalar,s_dcdft
+    use density_matrix,only:calc_density
+    use communication,only:comm_summation
+    use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+    implicit none
+    type(s_rgrid),intent(in)::mg
+    type(s_parallel_info),intent(in)::info
+    type(s_dft_system),intent(in)::system
+    type(s_orbital),intent(in)::spsi
+    type(s_scalar),intent(inout)::rho,rho_s(system%nspin),vlocal(system%nspin)
+    type(s_dcdft),intent(inout)::dc
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::ispin,local_bad,global_bad
+
+    ok=.false.;message='';local_bad=0
+    if(system%nspin/=1.or..not.system%if_real_orbital.or..not.allocated(spsi%rwf).or.&
+       .not.allocated(dc%rho_tot_s).or..not.allocated(dc%vloc_tot).or.&
+       .not.allocated(dc%rho_tot_s(1)%f).or..not.allocated(dc%vloc_tot(1)%f).or.&
+       .not.allocated(dc%rho_tot%f).or..not.allocated(rho%f).or.&
+       .not.allocated(rho_s(1)%f).or..not.allocated(vlocal(1)%f))local_bad=1
+    call comm_summation(local_bad,global_bad,dc%icomm_tot)
+    if(global_bad/=0)then
+      message='incomplete arrays for restored DG DC seed state';return
+    endif
+
+    dc%rho_tot%f=0d0
+    do ispin=1,system%nspin
+      dc%rho_tot%f=dc%rho_tot%f+dc%rho_tot_s(ispin)%f
+    enddo
+    call calc_density(system,rho_s,spsi,info,mg)
+    rho%f=0d0
+    do ispin=1,system%nspin
+      rho%f=rho%f+rho_s(ispin)%f
+    enddo
+    call calc_vlocal_fragment_dcdft(system%nspin,mg,vlocal,dc)
+    local_bad=merge(0,1,all(ieee_is_finite(dc%rho_tot%f)).and.&
+      all(ieee_is_finite(rho%f)).and.all(ieee_is_finite(rho_s(1)%f)).and.&
+      all(ieee_is_finite(vlocal(1)%f)))
+    call comm_summation(local_bad,global_bad,dc%icomm_tot)
+    if(global_bad/=0)then
+      message='non-finite restored DG DC derived state';return
+    endif
+    ok=.true.
+  end subroutine rebuild_dg_dc_seed_derived_state_dcdft
   
 !===================================================================================================================================
 

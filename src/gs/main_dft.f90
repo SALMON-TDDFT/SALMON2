@@ -18,6 +18,7 @@
 #include "config.h"
 
 subroutine main_dft
+use iso_fortran_env,only:int64
 use,intrinsic::ieee_arithmetic,only:ieee_is_finite
 use math_constants, only: pi, zi
 #ifdef USE_MPI
@@ -45,7 +46,11 @@ use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_hybrid_scf, 
   dg_ow_localization_support_tolerance,dg_ow_localization_spread_tolerance,&
   dg_ow_localization_gradient_tolerance,dg_ow_localization_max_iterations,&
   dg_ow_candidate_states_per_fragment,dg_ow_target_wanniers_per_fragment,wannier_num_iter,&
-  dg_ow_w90_initial_projection,wannier_pw_cutoff,nscf,method_mixing
+  dg_ow_w90_initial_projection,wannier_pw_cutoff,nscf,method_mixing,&
+  dg_dc_seed_mode,dg_dc_seed_directory
+use dg_dc_seed_checkpoint,only:s_dg_dc_seed_contract,s_dg_dc_seed_payload,&
+  DG_DC_SEED_ABSENT,DG_DC_SEED_VALID,build_dg_dc_seed_contract,probe_dg_dc_seed,&
+  read_dg_dc_seed,write_dg_dc_seed,restore_dg_dc_seed_payload,resolve_dg_dc_seed_mode
 use dg_overlapping_wannier_construction, only: s_dg_overlapping_wannier_construction, &
   construct_dg_overlapping_wannier_basis,verify_dg_overlapping_wannier_periodic_closure,&
   replicate_dg_fragment_wannier_representative,verify_dg_fragment_wannier_streaming_closure,&
@@ -201,6 +206,7 @@ use hartree_sub, only: hartree
 use force_sub
 use write_sub
 use read_gs
+use filesystem,only:atomic_create_directory
 use code_optimization
 use initialization_sub
 use occupation
@@ -251,11 +257,21 @@ type(s_ofile)  :: ofl
 type(s_band_dft) ::band
 type(s_opt) :: opt
 type(s_dcdft) :: dc
+type(s_dg_dc_seed_contract) :: dg_dc_seed_contract
+type(s_dg_dc_seed_payload) :: dg_dc_seed_payload
 
 logical :: rion_update
 logical :: flag_opt_conv
 logical :: local_basis_route_active
+logical :: dg_dc_seed_run_scf,dg_dc_seed_load,dg_dc_seed_publish,dg_dc_seed_fatal
+logical :: dg_dc_seed_scf_skipped,dg_dc_seed_ok,dg_dc_seed_collective_ok
 integer :: Miopt, iopt,nopt_max,i
+integer :: dg_dc_seed_status
+integer :: dg_dc_seed_rwf_bounds(14),dg_dc_seed_rho_bounds(6),dg_dc_seed_vloc_bounds(6)
+integer(int64) :: dg_dc_seed_publication_id
+integer(int64) :: dg_dc_seed_immutable_inputs(6),dg_dc_seed_ownership_map(8)
+real(8) :: dg_dc_seed_electron_tolerance
+character(512) :: dg_dc_seed_message
 integer :: iter_band_kpt, iter_band_kpt_end, iter_band_kpt_stride
 logical :: is_checkpoint_iter, is_shutdown_time
 type(s_dg_overlapping_wannier_construction) :: ow_basis
@@ -328,6 +344,16 @@ interface
   end subroutine build_dg_hybrid_retained_basis_representation
 end interface
 
+dg_dc_seed_ok=.true.;dg_dc_seed_collective_ok=.true.
+if(trim(dg_dc_seed_mode)/='off')then
+  dg_dc_seed_ok=yn_dc=='y'.and.yn_dg_dc_overlapping_wannier=='y'.and.&
+    trim(theory)=='dft'.and.iperiodic==3.and.yn_spinorbit=='n'.and.yn_opt/='y'.and.&
+    .not.PLUS_U_ON.and.yn_hse/='y'.and.yn_fix_func/='y'.and.yn_jm/='y'
+  call comm_logical_and(dg_dc_seed_ok,dg_dc_seed_collective_ok,nproc_group_global)
+  if(.not.dg_dc_seed_collective_ok)&
+    error stop 'DG DC seed mode is enabled outside its supported conventional-DC scope'
+endif
+
 if(theory=='dft_band'.and.iperiodic/=3) return
 
 if(yn_dc=='y') then
@@ -371,6 +397,83 @@ call initialization2_dft( Miter, nspin, rion_update,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,   &
                           xc_func, mixing )
+
+dg_dc_seed_run_scf=.true.;dg_dc_seed_load=.false.;dg_dc_seed_publish=.false.
+dg_dc_seed_fatal=.false.;dg_dc_seed_scf_skipped=.false.;dg_dc_seed_ok=.true.
+dg_dc_seed_collective_ok=.true.
+dg_dc_seed_status=DG_DC_SEED_ABSENT;dg_dc_seed_publication_id=0_int64
+dg_dc_seed_message='';dg_dc_seed_contract=s_dg_dc_seed_contract()
+dg_dc_seed_electron_tolerance=dg_dc_gs_electron_count_tolerance
+if(trim(dg_dc_seed_mode)/='off')then
+  dg_dc_seed_ok=.not.(yn_dc/='y'.or.yn_dg_dc_overlapping_wannier/='y'.or.&
+    yn_spinorbit/='n'.or.system%nspin/=1.or.system%nk/=1.or.&
+    .not.system%if_real_orbital.or..not.allocated(spsi%rwf).or.yn_opt=='y'.or.&
+    theory=='dft_band'.or.PLUS_U_ON.or.yn_hse=='y'.or.yn_fix_func=='y'.or.yn_jm=='y')
+  call comm_logical_and(dg_dc_seed_ok,dg_dc_seed_collective_ok,dc%icomm_tot)
+  if(.not.dg_dc_seed_collective_ok)&
+    error stop 'DG DC seed reuse requires supported one-shot real-Gamma overlapping-Wannier DC'
+  call prepare_dg_dc_seed_contract_inputs(dg_dc_seed_rwf_bounds,dg_dc_seed_rho_bounds,&
+    dg_dc_seed_vloc_bounds,dg_dc_seed_immutable_inputs,dg_dc_seed_ownership_map,&
+    dg_dc_seed_ok,dg_dc_seed_message)
+  call comm_logical_and(dg_dc_seed_ok,dg_dc_seed_collective_ok,dc%icomm_tot)
+  if(.not.dg_dc_seed_collective_ok)error stop 'cannot prepare DG DC seed contract inputs'
+  call build_dg_dc_seed_contract(dc%icomm_tot,dc%i_frag,dg_dc_seed_rwf_bounds,&
+    dg_dc_seed_rho_bounds,dg_dc_seed_vloc_bounds,dg_dc_seed_immutable_inputs,&
+    dg_dc_seed_ownership_map,dg_dc_seed_contract,dg_dc_seed_ok,dg_dc_seed_message)
+  if(.not.dg_dc_seed_ok)error stop 'cannot build DG DC seed contract'
+  dg_dc_seed_ok=dc%id_tot>=0.and.dc%id_tot<dc%isize_tot.and.&
+    dc%id_tot==dg_dc_seed_contract%rank.and.&
+    dc%isize_tot==dg_dc_seed_contract%mpi_size
+  call comm_logical_and(dg_dc_seed_ok,dg_dc_seed_collective_ok,dc%icomm_tot)
+  if(.not.dg_dc_seed_collective_ok)&
+    error stop 'invalid preserved total-system topology for DG DC seed'
+endif
+
+select case(trim(dg_dc_seed_mode))
+case('off')
+  call resolve_dg_dc_seed_mode(dg_dc_seed_mode,DG_DC_SEED_ABSENT,&
+    dg_dc_seed_run_scf,dg_dc_seed_load,dg_dc_seed_publish,dg_dc_seed_fatal,&
+    dg_dc_seed_scf_skipped,dg_dc_seed_ok,dg_dc_seed_message)
+case('write')
+  call atomic_create_directory(trim(dg_dc_seed_directory),dc%icomm_tot,dc%id_tot)
+  call resolve_dg_dc_seed_mode(dg_dc_seed_mode,DG_DC_SEED_ABSENT,&
+    dg_dc_seed_run_scf,dg_dc_seed_load,dg_dc_seed_publish,dg_dc_seed_fatal,&
+    dg_dc_seed_scf_skipped,dg_dc_seed_ok,dg_dc_seed_message)
+case('read')
+  call probe_dg_dc_seed(dc%icomm_tot,trim(dg_dc_seed_directory),dg_dc_seed_contract,&
+    dc%system_tot%hvol,dc%elec_num_tot,dg_dc_seed_electron_tolerance,threshold,&
+    dg_dc_seed_status,dg_dc_seed_publication_id,dg_dc_seed_message)
+  call resolve_dg_dc_seed_mode(dg_dc_seed_mode,dg_dc_seed_status,&
+    dg_dc_seed_run_scf,dg_dc_seed_load,dg_dc_seed_publish,dg_dc_seed_fatal,&
+    dg_dc_seed_scf_skipped,dg_dc_seed_ok,dg_dc_seed_message)
+case('auto')
+  call atomic_create_directory(trim(dg_dc_seed_directory),dc%icomm_tot,dc%id_tot)
+  call probe_dg_dc_seed(dc%icomm_tot,trim(dg_dc_seed_directory),dg_dc_seed_contract,&
+    dc%system_tot%hvol,dc%elec_num_tot,dg_dc_seed_electron_tolerance,threshold,&
+    dg_dc_seed_status,dg_dc_seed_publication_id,dg_dc_seed_message)
+  call resolve_dg_dc_seed_mode(dg_dc_seed_mode,dg_dc_seed_status,&
+    dg_dc_seed_run_scf,dg_dc_seed_load,dg_dc_seed_publish,dg_dc_seed_fatal,&
+    dg_dc_seed_scf_skipped,dg_dc_seed_ok,dg_dc_seed_message)
+case default
+  dg_dc_seed_fatal=.true.;dg_dc_seed_message='unknown DG DC seed mode'
+end select
+if(dg_dc_seed_fatal)error stop 'DG DC seed is absent, invalid, or incompatible'
+if(dg_dc_seed_load)then
+  call read_dg_dc_seed(dc%icomm_tot,trim(dg_dc_seed_directory),dg_dc_seed_contract,&
+    dc%system_tot%hvol,dc%elec_num_tot,dg_dc_seed_electron_tolerance,threshold,&
+    dg_dc_seed_payload,dg_dc_seed_publication_id,dg_dc_seed_ok,dg_dc_seed_message)
+  if(.not.dg_dc_seed_ok)error stop 'failed to read compatible DG DC seed'
+  call restore_dg_dc_seed_payload(dg_dc_seed_payload,spsi%rwf,dc%rho_tot_s(1)%f,&
+    dc%vloc_tot(1)%f,energy%esp,system%rocc,system%mu,sum1,Miter,&
+    dg_dc_seed_ok,dg_dc_seed_message)
+  call comm_logical_and(dg_dc_seed_ok,dg_dc_seed_collective_ok,dc%icomm_tot)
+  if(.not.dg_dc_seed_collective_ok)error stop 'failed to restore compatible DG DC seed'
+  call validate_dg_dc_seed_state(dg_dc_seed_ok,dg_dc_seed_message)
+  if(.not.dg_dc_seed_ok)error stop 'restored DG DC seed state is inconsistent'
+  call rebuild_dg_dc_seed_derived_state_dcdft(mg,info,system,spsi,rho,rho_s,&
+    V_local,dc,dg_dc_seed_ok,dg_dc_seed_message)
+  if(.not.dg_dc_seed_ok)error stop 'failed to rebuild DG DC derived state'
+endif
 
 Miopt = 0
 nopt_max = 1
@@ -434,6 +537,7 @@ call timer_end(LOG_INIT_GS_ITERATION)
 call timer_begin(LOG_GS_ITERATION)
 !------------------------------------ SCF Iteration
 !Iteration loop for SCF (DFT_Iteration)
+if(dg_dc_seed_run_scf) then
 call scf_iteration_dft( Miter,rion_update,sum1,  &
                         system,energy,ewald,  &
                         lg,mg,  &
@@ -447,6 +551,7 @@ call scf_iteration_dft( Miter,rion_update,sum1,  &
                         V_local,Vh,Vxc,Vpsl,xc_func,  &
                         pp,ppg,ppn,  &
                         band, ilevel_print, dc)
+endif
 
 
 if(theory=='dft_band')then
@@ -570,6 +675,25 @@ if(yn_dc=='y') then
     local_basis_route_active=.true.
     if(.not.(sum1<threshold))&
       error stop 'overlapping-Wannier route requires a converged conventional DC state'
+    if(dg_dc_seed_publish)then
+      call validate_dg_dc_seed_state(dg_dc_seed_ok,dg_dc_seed_message)
+      if(.not.dg_dc_seed_ok)error stop 'converged DG DC seed state is inconsistent'
+      call capture_dg_dc_seed_payload_dcdft(system,energy,spsi,dc,sum1,Miter,&
+        dg_dc_seed_payload,dg_dc_seed_ok,dg_dc_seed_message)
+      call comm_logical_and(dg_dc_seed_ok,dg_dc_seed_collective_ok,dc%icomm_tot)
+      if(.not.dg_dc_seed_collective_ok)error stop 'failed to capture converged DG DC seed state'
+      call write_dg_dc_seed(dc%icomm_tot,trim(dg_dc_seed_directory),dg_dc_seed_contract,&
+        dg_dc_seed_payload,dc%system_tot%hvol,dc%elec_num_tot,&
+        dg_dc_seed_electron_tolerance,threshold,dg_dc_seed_publication_id,&
+        dg_dc_seed_ok,dg_dc_seed_message)
+      if(.not.dg_dc_seed_ok)error stop 'failed to publish converged DG DC seed state'
+    endif
+    if(dc%id_tot==0)write(*,'(a,a,a,i0,a,l1,a,i0,a,i0)')&
+      '[DG-DC-SEED] mode=',trim(dg_dc_seed_mode),&
+      ' publication_id=',dg_dc_seed_publication_id,&
+      ' scf_skipped=',dg_dc_seed_scf_skipped,&
+      ' mpi_size=',dc%isize_tot,&
+      ' mapping_fingerprint=',dg_dc_seed_contract%ownership_fingerprint
     if(yn_dg_hybrid_continuation_scf == 'y') then
       call run_dg_hybrid_continuation_ground_state_for_main
     else
@@ -674,6 +798,414 @@ end if
 call timer_end(LOG_TOTAL)
 
 contains
+
+  subroutine prepare_dg_dc_seed_contract_inputs(rwf_bounds,rho_bounds,vloc_bounds,&
+      immutable_inputs,ownership_map,ok,message)
+    integer,intent(out)::rwf_bounds(14),rho_bounds(6),vloc_bounds(6)
+    integer(int64),intent(out)::immutable_inputs(6),ownership_map(8)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+
+    rwf_bounds=0;rho_bounds=0;vloc_bounds=0
+    immutable_inputs=0_int64;ownership_map=0_int64;ok=.false.;message=''
+    if(.not.allocated(spsi%rwf).or..not.allocated(dc%rho_tot_s).or.&
+       .not.allocated(dc%vloc_tot).or..not.allocated(dc%rho_tot_s(1)%f).or.&
+       .not.allocated(dc%vloc_tot(1)%f).or..not.allocated(dc%system_tot%Rion).or.&
+       .not.allocated(dc%system_tot%kion).or..not.allocated(system%Rion).or.&
+       .not.allocated(system%kion).or..not.allocated(dc%nxyz_domain_frag).or.&
+       .not.allocated(dc%ixyz_frag).or..not.allocated(dc%rxyz_frag).or.&
+       .not.allocated(dc%jxyz_tot))then
+      message='DG DC seed contract arrays are not allocated';return
+    endif
+    rwf_bounds=[lbound(spsi%rwf),ubound(spsi%rwf)]
+    rho_bounds=[lbound(dc%rho_tot_s(1)%f),ubound(dc%rho_tot_s(1)%f)]
+    vloc_bounds=[lbound(dc%vloc_tot(1)%f),ubound(dc%vloc_tot(1)%f)]
+    immutable_inputs(1)=int(z'4443445345454431',int64)
+    immutable_inputs(2)=dg_dc_seed_cell_atom_fingerprint()
+    immutable_inputs(3)=dg_dc_seed_fragment_topology_fingerprint()
+    immutable_inputs(4)=dg_dc_seed_physics_fingerprint()
+    immutable_inputs(5)=dg_dc_seed_operator_input_fingerprint()
+    immutable_inputs(6)=dg_dc_seed_convergence_fingerprint()
+    ownership_map(1)=int(z'4F574E4552534831',int64)
+    ownership_map(2)=dg_dc_seed_grid_ownership_fingerprint(dc%mg_tot,dc%info_tot)
+    ownership_map(3)=dg_dc_seed_grid_ownership_fingerprint(mg,info)
+    ownership_map(4)=dg_dc_seed_orbital_ownership_fingerprint(info)
+    ownership_map(5)=dg_dc_seed_fragment_map_fingerprint()
+    ownership_map(6)=dg_dc_seed_ppg_ownership_fingerprint(dc%ppg_tot)
+    ownership_map(7)=dg_dc_seed_ppg_ownership_fingerprint(ppg)
+    ownership_map(8)=int(dc%id_tot+1,int64)
+    if(any(immutable_inputs==0_int64).or.any(ownership_map==0_int64))then
+      message='DG DC seed contract fingerprint is zero';return
+    endif
+    ok=.true.
+  end subroutine prepare_dg_dc_seed_contract_inputs
+
+  subroutine validate_dg_dc_seed_state(ok,message)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::local_bad,global_bad,ierr,iteration_min,iteration_max
+    real(8)::common_values(2),minimum_values(2),maximum_values(2)
+    integer::expected_state_bounds(6)
+
+    ok=.false.;message='';local_bad=0
+    expected_state_bounds=[1,1,1,system%no,system%nk,system%nspin]
+    if(.not.allocated(spsi%rwf).or..not.allocated(dc%rho_tot_s(1)%f).or.&
+       .not.allocated(dc%vloc_tot(1)%f).or..not.allocated(energy%esp).or.&
+       .not.allocated(system%rocc))local_bad=1
+    if(local_bad==0)then
+      if(any([lbound(spsi%rwf),ubound(spsi%rwf)]/=dg_dc_seed_rwf_bounds).or.&
+         any([lbound(dc%rho_tot_s(1)%f),ubound(dc%rho_tot_s(1)%f)]/=&
+           dg_dc_seed_rho_bounds).or.&
+         any([lbound(dc%vloc_tot(1)%f),ubound(dc%vloc_tot(1)%f)]/=&
+           dg_dc_seed_vloc_bounds).or.&
+         any([lbound(energy%esp),ubound(energy%esp)]/=expected_state_bounds).or.&
+         any([lbound(system%rocc),ubound(system%rocc)]/=expected_state_bounds))local_bad=1
+      if(.not.all(ieee_is_finite(energy%esp)).or.&
+         .not.all(ieee_is_finite(system%rocc)).or.any(system%rocc<0d0).or.&
+         any(system%rocc>2d0+100d0*epsilon(1d0)).or.&
+         .not.ieee_is_finite(system%mu).or..not.ieee_is_finite(sum1).or.&
+         sum1<0d0.or..not.(sum1<threshold).or.Miter<0)local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='invalid restored DG DC seed bounds or values';return
+    endif
+    common_values=[system%mu,sum1]
+    call MPI_Allreduce(common_values,minimum_values,2,MPI_DOUBLE_PRECISION,MPI_MIN,&
+      dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='DG DC seed scalar minimum failed';return;endif
+    call MPI_Allreduce(common_values,maximum_values,2,MPI_DOUBLE_PRECISION,MPI_MAX,&
+      dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='DG DC seed scalar maximum failed';return;endif
+    call MPI_Allreduce(Miter,iteration_min,1,MPI_INTEGER,MPI_MIN,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='DG DC seed iteration minimum failed';return;endif
+    call MPI_Allreduce(Miter,iteration_max,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(minimum_values/=maximum_values).or.&
+       iteration_min/=iteration_max)then
+      message='rank-inconsistent DG DC seed scalar provenance';return
+    endif
+    ok=.true.
+#else
+    ok=.false.;message='DG DC seed restore requires MPI'
+#endif
+  end subroutine validate_dg_dc_seed_state
+
+  integer(int64) function dg_dc_seed_cell_atom_fingerprint()result(hash)
+    integer::ii,jj
+    hash=int(z'6A09E667F3BCC909',int64)
+    call hash_integer(hash,dc%lg_tot%num(1));call hash_integer(hash,dc%lg_tot%num(2))
+    call hash_integer(hash,dc%lg_tot%num(3));call hash_real(hash,dc%system_tot%hvol)
+    do jj=1,3
+      call hash_real(hash,dc%system_tot%hgs(jj))
+      do ii=1,3
+        call hash_real(hash,dc%system_tot%primitive_a(ii,jj))
+        call hash_real(hash,dc%system_tot%primitive_b(ii,jj))
+        call hash_real(hash,dc%system_tot%rmatrix_a(ii,jj))
+        call hash_real(hash,dc%system_tot%rmatrix_b(ii,jj))
+      enddo
+    enddo
+    call hash_real(hash,dc%system_tot%det_a)
+    call hash_integer(hash,dc%system_tot%nion)
+    do jj=1,dc%system_tot%nion
+      call hash_integer(hash,dc%system_tot%kion(jj))
+      do ii=1,3;call hash_real(hash,dc%system_tot%Rion(ii,jj));enddo
+    enddo
+    call hash_integer(hash,system%nion)
+    do jj=1,system%nion
+      call hash_integer(hash,system%kion(jj))
+      do ii=1,3;call hash_real(hash,system%Rion(ii,jj));enddo
+    enddo
+    if(hash==0_int64)hash=1_int64
+  end function dg_dc_seed_cell_atom_fingerprint
+
+  integer(int64) function dg_dc_seed_fragment_topology_fingerprint()result(hash)
+    integer::axis,fragment
+    hash=int(z'BB67AE8584CAA73B',int64)
+    call hash_integer(hash,dc%n_frag);call hash_integer(hash,dc%i_frag)
+    call hash_integer(hash,merge(1,0,dc%optimized_fragment_geometry))
+    do axis=1,3
+      call hash_integer(hash,dc%nxyz_domain(axis))
+      call hash_integer(hash,dc%nxyz_buffer(axis))
+    enddo
+    do fragment=1,dc%n_frag;do axis=1,3
+      call hash_integer(hash,dc%nxyz_domain_frag(axis,fragment))
+      call hash_integer(hash,dc%ixyz_frag(axis,fragment))
+      call hash_real(hash,dc%rxyz_frag(axis,fragment))
+    enddo;enddo
+    if(hash==0_int64)hash=1_int64
+  end function dg_dc_seed_fragment_topology_fingerprint
+
+  integer(int64) function dg_dc_seed_physics_fingerprint()result(hash)
+    integer::i,j
+    hash=int(z'3C6EF372FE94F82B',int64)
+    call hash_integer(hash,dc%nstate_tot);call hash_integer(hash,dc%nstate_frag)
+    call hash_real(hash,dc%elec_num_tot)
+    call hash_integer(hash,dc%system_tot%nspin);call hash_integer(hash,dc%system_tot%no)
+    call hash_integer(hash,dc%system_tot%nk)
+    call hash_integer(hash,merge(1,0,dc%system_tot%if_real_orbital))
+    call hash_integer(hash,system%nspin);call hash_integer(hash,system%no)
+    call hash_integer(hash,system%nk);call hash_integer(hash,merge(1,0,system%if_real_orbital))
+    call hash_real(hash,temperature)
+    if(allocated(dc%system_tot%vec_k))then
+      do j=1,size(dc%system_tot%vec_k,2);do i=1,size(dc%system_tot%vec_k,1)
+        call hash_real(hash,dc%system_tot%vec_k(i,j))
+      enddo;enddo
+    endif
+    if(allocated(dc%system_tot%wtk))then
+      do i=1,size(dc%system_tot%wtk);call hash_real(hash,dc%system_tot%wtk(i));enddo
+    endif
+    call hash_character(hash,trim(calc_mode));call hash_character(hash,trim(theory))
+    call hash_character(hash,trim(yn_spinorbit))
+    if(hash==0_int64)hash=1_int64
+  end function dg_dc_seed_physics_fingerprint
+
+  integer(int64) function dg_dc_seed_operator_input_fingerprint()result(hash)
+    integer::i,j
+    hash=int(z'A54FF53A5F1D36F1',int64)
+    call hash_integer(hash,merge(1,0,stencil%if_orthogonal))
+    call hash_real(hash,stencil%coef_lap0);call hash_real(hash,stencil%coef_lap0_nd1)
+    do j=1,3
+      do i=1,4
+        call hash_real(hash,stencil%coef_lap(i,j));call hash_real(hash,stencil%coef_nab(i,j))
+      enddo
+      call hash_real(hash,stencil%coef_lap_nd1(1,j));call hash_real(hash,stencil%coef_nab_nd1(1,j))
+    enddo
+    do i=1,6;call hash_real(hash,stencil%coef_f(i));enddo
+    call hash_character(hash,trim(xc));call hash_character(hash,trim(xname))
+    call hash_character(hash,trim(cname));call hash_character(hash,trim(alibxc))
+    do i=1,3;call hash_integer(hash,xc_func%xctype(i));enddo
+    call hash_integer(hash,xc_func%ispin);call hash_real(hash,xc_func%cval)
+    call hash_integer(hash,merge(1,0,xc_func%use_gradient))
+    call hash_integer(hash,merge(1,0,xc_func%use_laplacian))
+    call hash_integer(hash,merge(1,0,xc_func%use_kinetic_energy))
+    call hash_integer(hash,merge(1,0,xc_func%use_current))
+    call hash_pp_info_for_dg_dc_seed(hash)
+    if(hash==0_int64)hash=1_int64
+  end function dg_dc_seed_operator_input_fingerprint
+
+  integer(int64) function dg_dc_seed_convergence_fingerprint()result(hash)
+    hash=int(z'510E527FADE682D1',int64)
+    call hash_character(hash,trim(convergence));call hash_real(hash,threshold)
+    call hash_character(hash,trim(method_mixing));call hash_real(hash,mixing%mixrate)
+    call hash_real(hash,mixing%alpha_mb);call hash_real(hash,mixing%beta_p)
+    call hash_integer(hash,nscf);call hash_integer(hash,nscf_init_redistribution)
+    call hash_integer(hash,nscf_init_no_diagonal);call hash_integer(hash,nscf_init_mix_zero)
+    if(hash==0_int64)hash=1_int64
+  end function dg_dc_seed_convergence_fingerprint
+
+  integer(int64) function dg_dc_seed_grid_ownership_fingerprint(grid,parallel)result(hash)
+    type(s_rgrid),intent(in)::grid
+    type(s_parallel_info),intent(in)::parallel
+    integer::i
+    hash=int(z'9B05688C2B3E6C1F',int64)
+    do i=1,3
+      call hash_integer(hash,grid%is(i));call hash_integer(hash,grid%ie(i))
+      call hash_integer(hash,grid%num(i));call hash_integer(hash,grid%is_array(i))
+      call hash_integer(hash,grid%ie_array(i));call hash_integer(hash,parallel%nprgrid(i))
+      call hash_integer(hash,parallel%iaddress(i))
+    enddo
+    call hash_alloc_integer_rank2(hash,grid%is_all)
+    call hash_alloc_integer_rank2(hash,grid%ie_all)
+    call hash_alloc_integer_rank1(hash,grid%idx)
+    call hash_alloc_integer_rank1(hash,grid%idy)
+    call hash_alloc_integer_rank1(hash,grid%idz)
+    if(hash==0_int64)hash=1_int64
+  end function dg_dc_seed_grid_ownership_fingerprint
+
+  integer(int64) function dg_dc_seed_orbital_ownership_fingerprint(parallel)result(hash)
+    type(s_parallel_info),intent(in)::parallel
+    integer::i
+    hash=int(z'1F83D9ABFB41BD6B',int64)
+    call hash_integer(hash,parallel%npk);call hash_integer(hash,parallel%nporbital)
+    do i=1,5;call hash_integer(hash,parallel%iaddress(i));enddo
+    call hash_integer(hash,parallel%im_s);call hash_integer(hash,parallel%im_e)
+    call hash_integer(hash,parallel%numm);call hash_integer(hash,parallel%ik_s)
+    call hash_integer(hash,parallel%ik_e);call hash_integer(hash,parallel%numk)
+    call hash_integer(hash,parallel%io_s);call hash_integer(hash,parallel%io_e)
+    call hash_integer(hash,parallel%numo)
+    call hash_alloc_integer_rank5(hash,parallel%imap)
+    call hash_alloc_integer_rank1(hash,parallel%irank_io)
+    call hash_alloc_integer_rank1(hash,parallel%io_s_all)
+    call hash_alloc_integer_rank1(hash,parallel%io_e_all)
+    call hash_alloc_integer_rank1(hash,parallel%numo_all)
+    if(hash==0_int64)hash=1_int64
+  end function dg_dc_seed_orbital_ownership_fingerprint
+
+  integer(int64) function dg_dc_seed_fragment_map_fingerprint()result(hash)
+    hash=int(z'5BE0CD19137E2179',int64)
+    call hash_integer(hash,dc%id_tot);call hash_integer(hash,dc%isize_tot)
+    call hash_integer(hash,dc%i_frag);call hash_integer(hash,dc%id_frag)
+    call hash_integer(hash,dc%isize_frag)
+    call hash_alloc_integer_rank2(hash,dc%jxyz_tot)
+    if(hash==0_int64)hash=1_int64
+  end function dg_dc_seed_fragment_map_fingerprint
+
+  integer(int64) function dg_dc_seed_ppg_ownership_fingerprint(grid)result(hash)
+    type(s_pp_grid),intent(in)::grid
+    hash=int(z'CBBB9D5DC1059ED8',int64)
+    call hash_integer(hash,grid%nps);call hash_integer(hash,grid%nlma)
+    call hash_integer(hash,grid%ilocal_nlma)
+    call hash_alloc_integer_rank1(hash,grid%mps)
+    call hash_alloc_integer_rank3(hash,grid%jxyz)
+    call hash_alloc_integer_rank2(hash,grid%lma_tbl)
+    call hash_alloc_integer_rank1(hash,grid%ia_tbl)
+    call hash_alloc_integer_rank2(hash,grid%irange_atom)
+    call hash_alloc_integer_rank1(hash,grid%ilocal_nlma2ilma)
+    call hash_alloc_integer_rank1(hash,grid%ilocal_nlma2ia)
+    call hash_alloc_integer_rank2(hash,grid%jxyz_min)
+    call hash_alloc_integer_rank2(hash,grid%jxyz_max)
+    if(hash==0_int64)hash=1_int64
+  end function dg_dc_seed_ppg_ownership_fingerprint
+
+  subroutine hash_pp_info_for_dg_dc_seed(hash)
+    integer(int64),intent(inout)::hash
+    call hash_real(hash,pp%zion);call hash_integer(hash,pp%lmax)
+    call hash_integer(hash,pp%lmax0);call hash_integer(hash,pp%nrmax)
+    call hash_integer(hash,pp%nrmax0);call hash_integer(hash,merge(1,0,pp%flag_nlcc))
+    call hash_alloc_character_rank1(hash,pp%atom_symbol)
+    call hash_alloc_real_rank1(hash,pp%rmass)
+    call hash_alloc_integer_rank1(hash,pp%mr)
+    call hash_alloc_integer_rank1(hash,pp%lref)
+    call hash_alloc_integer_rank1(hash,pp%nrps)
+    call hash_alloc_integer_rank1(hash,pp%mlps)
+    call hash_alloc_integer_rank2(hash,pp%nproj)
+    call hash_alloc_integer_rank1(hash,pp%num_orb)
+    call hash_alloc_integer_rank1(hash,pp%zps)
+    call hash_alloc_integer_rank1(hash,pp%nrloc)
+    call hash_alloc_real_rank1(hash,pp%rloc)
+    call hash_alloc_real_rank1(hash,pp%rps)
+    call hash_alloc_real_rank2(hash,pp%anorm)
+    call hash_alloc_integer_rank2(hash,pp%inorm)
+    call hash_alloc_real_rank2(hash,pp%anorm_so)
+    call hash_alloc_integer_rank2(hash,pp%inorm_so)
+    call hash_alloc_real_rank2(hash,pp%rad)
+    call hash_alloc_real_rank2(hash,pp%radnl)
+    call hash_alloc_real_rank2(hash,pp%vloctbl)
+    call hash_alloc_real_rank2(hash,pp%dvloctbl)
+    call hash_alloc_real_rank3(hash,pp%udvtbl)
+    call hash_alloc_real_rank3(hash,pp%dudvtbl)
+    call hash_alloc_real_rank2(hash,pp%rho_pp_tbl)
+    call hash_alloc_real_rank2(hash,pp%rho_nlcc_tbl)
+    call hash_alloc_real_rank2(hash,pp%tau_nlcc_tbl)
+    call hash_alloc_real_rank3(hash,pp%upp_f)
+    call hash_alloc_real_rank3(hash,pp%vpp_f)
+    call hash_alloc_real_rank3(hash,pp%vpp_f_so)
+    call hash_alloc_real_rank2(hash,pp%upp)
+    call hash_alloc_real_rank2(hash,pp%dupp)
+    call hash_alloc_real_rank2(hash,pp%vpp)
+    call hash_alloc_real_rank2(hash,pp%dvpp)
+    call hash_alloc_real_rank2(hash,pp%vpp_so)
+    call hash_alloc_real_rank2(hash,pp%dvpp_so)
+    call hash_alloc_real_rank3(hash,pp%udvtbl_so)
+    call hash_alloc_real_rank3(hash,pp%dudvtbl_so)
+    call hash_alloc_real_rank1(hash,pp%rps_ao)
+    call hash_alloc_integer_rank1(hash,pp%nrps_ao)
+    call hash_alloc_real_rank3(hash,pp%upptbl_ao)
+    call hash_alloc_real_rank3(hash,pp%dupptbl_ao)
+  end subroutine hash_pp_info_for_dg_dc_seed
+
+  subroutine hash_alloc_character_rank1(hash,values)
+    integer(int64),intent(inout)::hash
+    character(2),allocatable,intent(in)::values(:)
+    integer::i
+    call hash_integer(hash,merge(1,0,allocated(values)))
+    if(.not.allocated(values))return
+    call hash_integer(hash,lbound(values,1));call hash_integer(hash,ubound(values,1))
+    do i=lbound(values,1),ubound(values,1);call hash_character(hash,values(i));enddo
+  end subroutine hash_alloc_character_rank1
+
+  subroutine hash_alloc_integer_rank1(hash,values)
+    integer(int64),intent(inout)::hash
+    integer,allocatable,intent(in)::values(:)
+    integer::i
+    call hash_integer(hash,merge(1,0,allocated(values)))
+    if(.not.allocated(values))return
+    call hash_integer(hash,lbound(values,1));call hash_integer(hash,ubound(values,1))
+    do i=lbound(values,1),ubound(values,1);call hash_integer(hash,values(i));enddo
+  end subroutine hash_alloc_integer_rank1
+
+  subroutine hash_alloc_integer_rank2(hash,values)
+    integer(int64),intent(inout)::hash
+    integer,allocatable,intent(in)::values(:,:)
+    integer::i,j
+    call hash_integer(hash,merge(1,0,allocated(values)))
+    if(.not.allocated(values))return
+    do i=1,2
+      call hash_integer(hash,lbound(values,i));call hash_integer(hash,ubound(values,i))
+    enddo
+    do j=lbound(values,2),ubound(values,2);do i=lbound(values,1),ubound(values,1)
+      call hash_integer(hash,values(i,j))
+    enddo;enddo
+  end subroutine hash_alloc_integer_rank2
+
+  subroutine hash_alloc_integer_rank3(hash,values)
+    integer(int64),intent(inout)::hash
+    integer,allocatable,intent(in)::values(:,:,:)
+    integer::i,j,k,axis
+    call hash_integer(hash,merge(1,0,allocated(values)))
+    if(.not.allocated(values))return
+    do axis=1,3
+      call hash_integer(hash,lbound(values,axis));call hash_integer(hash,ubound(values,axis))
+    enddo
+    do k=lbound(values,3),ubound(values,3);do j=lbound(values,2),ubound(values,2)
+      do i=lbound(values,1),ubound(values,1);call hash_integer(hash,values(i,j,k));enddo
+    enddo;enddo
+  end subroutine hash_alloc_integer_rank3
+
+  subroutine hash_alloc_integer_rank5(hash,values)
+    integer(int64),intent(inout)::hash
+    integer,allocatable,intent(in)::values(:,:,:,:,:)
+    integer::i1,i2,i3,i4,i5,axis
+    call hash_integer(hash,merge(1,0,allocated(values)))
+    if(.not.allocated(values))return
+    do axis=1,5
+      call hash_integer(hash,lbound(values,axis));call hash_integer(hash,ubound(values,axis))
+    enddo
+    do i5=lbound(values,5),ubound(values,5);do i4=lbound(values,4),ubound(values,4)
+      do i3=lbound(values,3),ubound(values,3);do i2=lbound(values,2),ubound(values,2)
+        do i1=lbound(values,1),ubound(values,1);call hash_integer(hash,values(i1,i2,i3,i4,i5));enddo
+      enddo;enddo
+    enddo;enddo
+  end subroutine hash_alloc_integer_rank5
+
+  subroutine hash_alloc_real_rank1(hash,values)
+    integer(int64),intent(inout)::hash
+    real(8),allocatable,intent(in)::values(:)
+    integer::i
+    call hash_integer(hash,merge(1,0,allocated(values)))
+    if(.not.allocated(values))return
+    call hash_integer(hash,lbound(values,1));call hash_integer(hash,ubound(values,1))
+    do i=lbound(values,1),ubound(values,1);call hash_real(hash,values(i));enddo
+  end subroutine hash_alloc_real_rank1
+
+  subroutine hash_alloc_real_rank2(hash,values)
+    integer(int64),intent(inout)::hash
+    real(8),allocatable,intent(in)::values(:,:)
+    integer::i,j,axis
+    call hash_integer(hash,merge(1,0,allocated(values)))
+    if(.not.allocated(values))return
+    do axis=1,2
+      call hash_integer(hash,lbound(values,axis));call hash_integer(hash,ubound(values,axis))
+    enddo
+    do j=lbound(values,2),ubound(values,2);do i=lbound(values,1),ubound(values,1)
+      call hash_real(hash,values(i,j))
+    enddo;enddo
+  end subroutine hash_alloc_real_rank2
+
+  subroutine hash_alloc_real_rank3(hash,values)
+    integer(int64),intent(inout)::hash
+    real(8),allocatable,intent(in)::values(:,:,:)
+    integer::i,j,k,axis
+    call hash_integer(hash,merge(1,0,allocated(values)))
+    if(.not.allocated(values))return
+    do axis=1,3
+      call hash_integer(hash,lbound(values,axis));call hash_integer(hash,ubound(values,axis))
+    enddo
+    do k=lbound(values,3),ubound(values,3);do j=lbound(values,2),ubound(values,2)
+      do i=lbound(values,1),ubound(values,1);call hash_real(hash,values(i,j,k));enddo
+    enddo;enddo
+  end subroutine hash_alloc_real_rank3
 
   subroutine run_dg_hybrid_continuation_ground_state_for_main
     call run_dg_overlapping_wannier_ground_state_for_main

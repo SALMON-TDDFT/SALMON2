@@ -47,8 +47,188 @@ module dg_dc_seed_checkpoint
   end type
 
   public::write_dg_dc_seed,read_dg_dc_seed,probe_dg_dc_seed
+  public::resolve_dg_dc_seed_mode
+  public::build_dg_dc_seed_contract
+  public::restore_dg_dc_seed_payload
 
 contains
+
+  subroutine resolve_dg_dc_seed_mode(mode,status,run_scf,load_seed,publish_seed,&
+      fatal,scf_skipped,ok,message)
+    character(*),intent(in)::mode
+    integer,intent(in)::status
+    logical,intent(out)::run_scf,load_seed,publish_seed,fatal,scf_skipped,ok
+    character(*),intent(out)::message
+    character(len(mode))::normalized_mode
+
+    normalized_mode=lower_ascii(trim(adjustl(mode)))
+    run_scf=.false.;load_seed=.false.;publish_seed=.false.;fatal=.false.
+    scf_skipped=.false.;ok=.true.;message=''
+    select case(trim(normalized_mode))
+    case('off')
+      run_scf=.true.
+    case('write')
+      run_scf=.true.;publish_seed=.true.
+    case('read')
+      select case(status)
+      case(DG_DC_SEED_VALID)
+        load_seed=.true.;scf_skipped=.true.
+      case(DG_DC_SEED_ABSENT)
+        fatal=.true.;message='requested DG DC seed is absent'
+      case default
+        fatal=.true.;message='requested DG DC seed is invalid'
+      end select
+    case('auto')
+      select case(status)
+      case(DG_DC_SEED_VALID)
+        load_seed=.true.;scf_skipped=.true.
+      case(DG_DC_SEED_ABSENT)
+        run_scf=.true.;publish_seed=.true.
+      case default
+        fatal=.true.;message='automatic DG DC seed is invalid'
+      end select
+    case default
+      fatal=.true.;message='unknown DG DC seed mode'
+    end select
+    ok=.not.fatal
+  end subroutine resolve_dg_dc_seed_mode
+
+  subroutine build_dg_dc_seed_contract(comm,fragment_id,rwf_bounds,rho_bounds,&
+      vloc_bounds,immutable_inputs,ownership_map,contract,ok,message)
+    integer,intent(in)::comm,fragment_id
+    integer,intent(in)::rwf_bounds(14),rho_bounds(6),vloc_bounds(6)
+    integer(int64),intent(in)::immutable_inputs(:),ownership_map(:)
+    type(s_dg_dc_seed_contract),intent(out)::contract
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,nproc,ierr,local_bad,global_bad,i
+    integer(int64)::local_immutable,local_ownership
+    integer(int64),allocatable::immutable_by_rank(:),ownership_by_rank(:)
+
+    contract=s_dg_dc_seed_contract();ok=.false.;message=''
+    call MPI_Comm_rank(comm,rank,ierr)
+    local_bad=merge(0,1,ierr==MPI_SUCCESS)
+    call MPI_Comm_size(comm,nproc,ierr)
+    if(ierr/=MPI_SUCCESS)local_bad=1
+    if(fragment_id<1.or.size(immutable_inputs)<1.or.size(ownership_map)<1)local_bad=1
+    if(.not.valid_bounds(rwf_bounds,7).or..not.valid_bounds(rho_bounds,3).or.&
+       .not.valid_bounds(vloc_bounds,3))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='invalid distributed DG DC seed contract inputs'
+      return
+    endif
+
+    local_immutable=int(z'510E527FADE682D1',int64)
+    call hash_integer8_vector(local_immutable,immutable_inputs)
+    local_ownership=int(z'9B05688C2B3E6C1F',int64)
+    call hash_integer(local_ownership,rank)
+    call hash_integer(local_ownership,fragment_id)
+    call hash_integer_vector(local_ownership,rwf_bounds)
+    call hash_integer_vector(local_ownership,rho_bounds)
+    call hash_integer_vector(local_ownership,vloc_bounds)
+    call hash_integer8_vector(local_ownership,ownership_map)
+    local_bad=0
+    allocate(immutable_by_rank(nproc),ownership_by_rank(nproc),stat=local_bad)
+    call MPI_Allreduce(MPI_IN_PLACE,local_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(local_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='cannot allocate distributed DG DC seed fingerprints'
+      if(allocated(immutable_by_rank))deallocate(immutable_by_rank)
+      if(allocated(ownership_by_rank))deallocate(ownership_by_rank)
+      return
+    endif
+    call MPI_Allgather(local_immutable,1,MPI_INTEGER8,immutable_by_rank,1,MPI_INTEGER8,comm,ierr)
+    if(ierr/=MPI_SUCCESS)local_bad=1
+    call MPI_Allgather(local_ownership,1,MPI_INTEGER8,ownership_by_rank,1,MPI_INTEGER8,comm,ierr)
+    if(ierr/=MPI_SUCCESS)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
+      message='cannot assemble distributed DG DC seed fingerprints'
+      deallocate(immutable_by_rank,ownership_by_rank)
+      return
+    endif
+
+    contract%version=seed_version;contract%mpi_size=nproc;contract%rank=rank
+    contract%fragment_id=fragment_id
+    contract%rwf_bounds=rwf_bounds;contract%rho_bounds=rho_bounds
+    contract%vloc_bounds=vloc_bounds
+    contract%immutable_fingerprint=int(z'1F83D9ABFB41BD6B',int64)
+    contract%ownership_fingerprint=int(z'5BE0CD19137E2179',int64)
+    call hash_integer(contract%immutable_fingerprint,nproc)
+    call hash_integer(contract%ownership_fingerprint,nproc)
+    do i=1,nproc
+      call hash_integer(contract%immutable_fingerprint,i-1)
+      call hash_integer8(contract%immutable_fingerprint,immutable_by_rank(i))
+      call hash_integer(contract%ownership_fingerprint,i-1)
+      call hash_integer8(contract%ownership_fingerprint,ownership_by_rank(i))
+    enddo
+    deallocate(immutable_by_rank,ownership_by_rank)
+    ok=.true.
+#else
+    contract=s_dg_dc_seed_contract();ok=.false.
+    message='DG DC seed contracts require MPI'
+#endif
+  end subroutine build_dg_dc_seed_contract
+
+  subroutine restore_dg_dc_seed_payload(payload,rwf,rho_owned,vloc_owned,esp,rocc,&
+      mu,residual,iteration,ok,message)
+    type(s_dg_dc_seed_payload),intent(in)::payload
+    real(8),allocatable,intent(inout)::rwf(:,:,:,:,:,:,:)
+    real(8),allocatable,intent(inout)::rho_owned(:,:,:),vloc_owned(:,:,:)
+    real(8),allocatable,intent(inout)::esp(:,:,:),rocc(:,:,:)
+    real(8),intent(out)::mu,residual
+    integer,intent(out)::iteration
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::allocation_status
+
+    ok=.false.;message='';mu=0d0;residual=huge(0d0);iteration=0
+    if(.not.allocated(payload%rwf).or..not.allocated(payload%rho_tot).or.&
+       .not.allocated(payload%vloc_tot).or..not.allocated(payload%esp).or.&
+       .not.allocated(payload%rocc))then
+      message='incomplete DG DC seed payload'
+      return
+    endif
+    if(.not.all(ieee_is_finite(payload%rwf)).or.&
+       .not.all(ieee_is_finite(payload%rho_tot)).or.&
+       .not.all(ieee_is_finite(payload%vloc_tot)).or.&
+       .not.all(ieee_is_finite(payload%esp)).or.&
+       .not.all(ieee_is_finite(payload%rocc)).or.&
+       .not.ieee_is_finite(payload%mu).or..not.ieee_is_finite(payload%residual))then
+      message='non-finite DG DC seed payload'
+      return
+    endif
+    if(allocated(rwf))deallocate(rwf)
+    if(allocated(rho_owned))deallocate(rho_owned)
+    if(allocated(vloc_owned))deallocate(vloc_owned)
+    if(allocated(esp))deallocate(esp)
+    if(allocated(rocc))deallocate(rocc)
+    allocation_status=0
+    allocate(rwf(lbound(payload%rwf,1):ubound(payload%rwf,1),&
+      lbound(payload%rwf,2):ubound(payload%rwf,2),lbound(payload%rwf,3):ubound(payload%rwf,3),&
+      lbound(payload%rwf,4):ubound(payload%rwf,4),lbound(payload%rwf,5):ubound(payload%rwf,5),&
+      lbound(payload%rwf,6):ubound(payload%rwf,6),lbound(payload%rwf,7):ubound(payload%rwf,7)),&
+      rho_owned(lbound(payload%rho_tot,1):ubound(payload%rho_tot,1),&
+      lbound(payload%rho_tot,2):ubound(payload%rho_tot,2),&
+      lbound(payload%rho_tot,3):ubound(payload%rho_tot,3)),&
+      vloc_owned(lbound(payload%vloc_tot,1):ubound(payload%vloc_tot,1),&
+      lbound(payload%vloc_tot,2):ubound(payload%vloc_tot,2),&
+      lbound(payload%vloc_tot,3):ubound(payload%vloc_tot,3)),&
+      esp(lbound(payload%esp,1):ubound(payload%esp,1),lbound(payload%esp,2):ubound(payload%esp,2),&
+      lbound(payload%esp,3):ubound(payload%esp,3)),&
+      rocc(lbound(payload%rocc,1):ubound(payload%rocc,1),&
+      lbound(payload%rocc,2):ubound(payload%rocc,2),&
+      lbound(payload%rocc,3):ubound(payload%rocc,3)),stat=allocation_status)
+    if(allocation_status/=0)then
+      message='cannot allocate restored DG DC seed payload'
+      return
+    endif
+    rwf=payload%rwf;rho_owned=payload%rho_tot;vloc_owned=payload%vloc_tot
+    esp=payload%esp;rocc=payload%rocc
+    mu=payload%mu;residual=payload%residual;iteration=payload%iteration
+    ok=.true.
+  end subroutine restore_dg_dc_seed_payload
 
   subroutine write_dg_dc_seed(comm,directory,contract,payload,density_weight,&
       expected_electrons,electron_tolerance,current_threshold,publication_id,ok,message,&
@@ -66,7 +246,8 @@ contains
     integer::rank,nproc,ierr,local_bad,global_bad,ios,injected
     integer::esp_bounds(6),rocc_bounds(6)
     integer(int64)::shard_size,shard_digest,digest_min,digest_max
-    real(8)::local_density_sum,global_electrons
+    real(8)::local_density_sum,global_electrons,file_mu,file_residual
+    integer::file_iteration
     character(512)::present_path,pending_path,manifest_path,manifest_temporary
     character(512)::shard,shard_temporary,reservation
     type(s_dg_dc_seed_manifest)::manifest
@@ -81,6 +262,8 @@ contains
     call validate_parameters(comm,density_weight,expected_electrons,electron_tolerance,&
       current_threshold,local_bad)
     call validate_payload_local(contract,payload,current_threshold,local_bad,local_density_sum)
+    call validate_collective_provenance(comm,payload%mu,payload%residual,&
+      payload%iteration,local_bad)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     call MPI_Allreduce(local_density_sum,global_electrons,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
     global_electrons=global_electrons*density_weight
@@ -124,10 +307,12 @@ contains
     call write_shard_file(shard_temporary,contract,payload,publication_id,esp_bounds,&
       rocc_bounds,shard_digest,shard_size,file_ok)
     local_density_sum=0d0
+    file_mu=payload%mu;file_residual=payload%residual;file_iteration=payload%iteration
     if(file_ok)call validate_shard_file_stream(shard_temporary,contract,publication_id,&
       esp_bounds,rocc_bounds,shard_size,shard_digest,current_threshold,&
-      local_density_sum,file_ok)
+      local_density_sum,file_mu,file_residual,file_iteration,file_ok)
     local_bad=merge(0,1,file_ok)
+    call validate_collective_provenance(comm,file_mu,file_residual,file_iteration,local_bad)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     call MPI_Allreduce(local_density_sum,global_electrons,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
     global_electrons=global_electrons*density_weight
@@ -253,8 +438,8 @@ contains
     character(*),intent(out)::message
     type(s_dg_dc_seed_payload),intent(out),optional::payload
 #ifdef USE_MPI
-    integer::rank,nproc,ierr,local_bad,global_bad,artifact_state
-    real(8)::local_density_sum,global_electrons
+    integer::rank,nproc,ierr,local_bad,global_bad,artifact_state,file_iteration
+    real(8)::local_density_sum,global_electrons,file_mu,file_residual
     type(s_dg_dc_seed_manifest)::manifest
     logical::file_ok
     character(512)::shard
@@ -301,6 +486,7 @@ contains
     publication_id=manifest%publication_id
     shard=shard_name(directory,publication_id,rank)
     local_density_sum=0d0
+    file_mu=0d0;file_residual=huge(0d0);file_iteration=-1
     if(present(payload))then
       call read_shard_file(shard,contract,publication_id,manifest%esp_bounds(:,rank+1),&
         manifest%rocc_bounds(:,rank+1),manifest%shard_sizes(rank+1),&
@@ -308,13 +494,17 @@ contains
       local_bad=merge(0,1,file_ok)
       if(file_ok)call validate_payload_local(contract,payload,current_threshold,&
         local_bad,local_density_sum)
+      if(file_ok)then
+        file_mu=payload%mu;file_residual=payload%residual;file_iteration=payload%iteration
+      endif
     else
       call validate_shard_file_stream(shard,contract,publication_id,&
         manifest%esp_bounds(:,rank+1),manifest%rocc_bounds(:,rank+1),&
         manifest%shard_sizes(rank+1),manifest%shard_digests(rank+1),current_threshold,&
-        local_density_sum,file_ok)
+        local_density_sum,file_mu,file_residual,file_iteration,file_ok)
       local_bad=merge(0,1,file_ok)
     endif
+    call validate_collective_provenance(comm,file_mu,file_residual,file_iteration,local_bad)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     call MPI_Allreduce(local_density_sum,global_electrons,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
     global_electrons=global_electrons*density_weight
@@ -351,6 +541,34 @@ contains
     call MPI_Allreduce(values,maximum,4,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.any(minimum/=maximum))local_bad=1
   end subroutine validate_parameters
+
+  subroutine validate_collective_provenance(comm,mu,residual,iteration,local_bad)
+    integer,intent(in)::comm,iteration
+    real(8),intent(in)::mu,residual
+    integer,intent(inout)::local_bad
+    real(8)::values(2),minimum(2),maximum(2)
+    integer::iteration_minimum,iteration_maximum,ierr
+
+    values=[mu,residual]
+    call MPI_Allreduce(values,minimum,2,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then
+      local_bad=1
+      return
+    endif
+    call MPI_Allreduce(values,maximum,2,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then
+      local_bad=1
+      return
+    endif
+    call MPI_Allreduce(iteration,iteration_minimum,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then
+      local_bad=1
+      return
+    endif
+    call MPI_Allreduce(iteration,iteration_maximum,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(minimum/=maximum).or.&
+       iteration_minimum/=iteration_maximum)local_bad=1
+  end subroutine validate_collective_provenance
 
   subroutine validate_directory(comm,directory,local_bad)
     integer,intent(in)::comm
@@ -520,13 +738,14 @@ contains
 
   subroutine validate_shard_file_stream(filename,contract,publication_id,&
       expected_esp_bounds,expected_rocc_bounds,expected_size,expected_digest,&
-      current_threshold,local_density_sum,ok)
+      current_threshold,local_density_sum,file_mu,file_residual,file_iteration,ok)
     character(*),intent(in)::filename
     type(s_dg_dc_seed_contract),intent(in)::contract
     integer(int64),intent(in)::publication_id,expected_size,expected_digest
     integer,intent(in)::expected_esp_bounds(6),expected_rocc_bounds(6)
     real(8),intent(in)::current_threshold
-    real(8),intent(out)::local_density_sum
+    real(8),intent(out)::local_density_sum,file_mu,file_residual
+    integer,intent(out)::file_iteration
     logical,intent(out)::ok
     character(32)::magic
     integer::unit,ios,close_ios,file_version,file_nproc,file_rank,file_fragment,iteration
@@ -536,6 +755,7 @@ contains
     real(8)::mu,residual,discarded_sum
 
     ok=.false.;local_density_sum=0d0;discarded_sum=0d0
+    file_mu=0d0;file_residual=huge(0d0);file_iteration=-1
     open(newunit=unit,file=trim(filename),status='old',access='stream',form='unformatted',&
       action='read',iostat=ios)
     if(ios/=0)return
@@ -543,6 +763,7 @@ contains
       immutable_fingerprint,ownership_fingerprint,stored_digest,rwf_bounds,rho_bounds,&
       vloc_bounds,esp_bounds,rocc_bounds,mu,residual,iteration
     if(ios==0)then
+      file_mu=mu;file_residual=residual;file_iteration=iteration
       if(magic/=shard_magic.or.file_version/=contract%version.or.&
          file_nproc/=contract%mpi_size.or.file_rank/=contract%rank.or.&
          file_fragment/=contract%fragment_id.or.file_publication/=publication_id.or.&
@@ -579,7 +800,10 @@ contains
          computed_digest/=stored_digest.or..not.ieee_is_finite(local_density_sum))ios=1
     endif
     ok=ios==0
-    if(.not.ok)local_density_sum=0d0
+    if(.not.ok)then
+      local_density_sum=0d0
+      file_mu=0d0;file_residual=huge(0d0);file_iteration=-1
+    endif
   end subroutine validate_shard_file_stream
 
   subroutine hash_real_stream(unit,hash,bounds,ndim,accumulate,value_sum,ios)
@@ -1082,6 +1306,17 @@ contains
     enddo
   end function element_count
 #endif
+
+  pure function lower_ascii(value)result(lowered)
+    character(*),intent(in)::value
+    character(len(value))::lowered
+    integer::i,code
+    lowered=value
+    do i=1,len(value)
+      code=iachar(value(i:i))
+      if(code>=iachar('A').and.code<=iachar('Z'))lowered(i:i)=achar(code+32)
+    enddo
+  end function lower_ascii
 
   function seed_path(directory,name)result(path)
     character(*),intent(in)::directory,name
