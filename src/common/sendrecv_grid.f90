@@ -22,6 +22,15 @@ module sendrecv_grid
 #define comm_send_init comm_send_init_device
 #define comm_recv_init comm_recv_init_device
 #endif
+! A call whose continuation crosses #ifdef/#else/#endif defeats CMake's
+! Fortran dependency scanner (silently drops later `use` lines). Pick the callee by macro instead.
+#ifdef USE_OPENACC
+#define PACK_COPY_DATA copy_data_m2d
+#define UNPACK_COPY_DATA copy_data_d2m
+#else
+#define PACK_COPY_DATA copy_data
+#define UNPACK_COPY_DATA copy_data
+#endif
 
   implicit none
 
@@ -296,11 +305,7 @@ module sendrecv_grid
       integer :: is_s(1:3), ie_s(1:3) ! src region
       is_s(1:3) = srg%is_block(1:3, itype_send, jside, jdir)
       ie_s(1:3) = srg%ie_block(1:3, itype_send, jside, jdir)
-#ifdef USE_OPENACC
-      call copy_data_m2d( &
-#else
-      call copy_data( &
-#endif
+      call PACK_COPY_DATA( &
         data(is_s(1):ie_s(1), is_s(2):ie_s(2), is_s(3):ie_s(3), 1:srg%nb), &
         srg%cache(itype_send, jside, jdir)%dbuf)
     end subroutine pack_cache
@@ -316,11 +321,7 @@ module sendrecv_grid
       integer :: is_d(1:3), ie_d(1:3) ! dst region
       is_d(1:3) = srg%is_block(1:3, itype_recv, jside, jdir)
       ie_d(1:3) = srg%ie_block(1:3, itype_recv, jside, jdir)
-#ifdef USE_OPENACC
-      call copy_data_d2m( &
-#else
-      call copy_data( &
-#endif
+      call UNPACK_COPY_DATA( &
         srg%cache(itype_recv, jside, jdir)%dbuf, &
         data(is_d(1):ie_d(1), is_d(2):ie_d(2), is_d(3):ie_d(3), 1:srg%nb))
     end subroutine unpack_cache
@@ -463,11 +464,7 @@ module sendrecv_grid
       integer :: is_s(1:3), ie_s(1:3) ! src region
       is_s(1:3) = srg%is_block(1:3, itype_send, jside, jdir)
       ie_s(1:3) = srg%ie_block(1:3, itype_send, jside, jdir)
-#ifdef USE_OPENACC
-      call copy_data_m2d( &
-#else
-      call copy_data( &
-#endif
+      call PACK_COPY_DATA( &
         data(is_s(1):ie_s(1), is_s(2):ie_s(2), is_s(3):ie_s(3), 1:srg%nb), &
         srg%cache(itype_send, jside, jdir)%zbuf)
     end subroutine pack_cache
@@ -483,11 +480,7 @@ module sendrecv_grid
       integer :: is_d(1:3), ie_d(1:3) ! dst region
       is_d(1:3) = srg%is_block(1:3, itype_recv, jside, jdir)
       ie_d(1:3) = srg%ie_block(1:3, itype_recv, jside, jdir)
-#ifdef USE_OPENACC
-      call copy_data_d2m( &
-#else
-      call copy_data( &
-#endif
+      call UNPACK_COPY_DATA( &
         srg%cache(itype_recv, jside, jdir)%zbuf, &
         data(is_d(1):ie_d(1), is_d(2):ie_d(2), is_d(3):ie_d(3), 1:srg%nb))
     end subroutine unpack_cache
