@@ -13,6 +13,7 @@ module dg_hybrid_ground_state_types
     integer(int64)::hybrid_basis_fingerprint=0_int64,metric_fingerprint=0_int64
     integer(int64)::operator_fingerprint=0_int64,position_fingerprint=0_int64
     integer(int64)::fingerprint=0_int64,workspace_peak_bytes=0_int64
+    real(real64)::e_homo=0d0
     integer(int64),allocatable::owned_row_ids(:)
     complex(real64),allocatable::coefficients(:,:)
     real(real64),allocatable::occupations(:),eigenvalues(:)
@@ -67,6 +68,20 @@ contains
     if(finite_real(occupations))then;if(any(occupations<0d0))local_bad=1;endif
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid hybrid occupied-state contract';return;endif
+    local_bad=merge(0,1,all(occupations>64d0*epsilon(1d0)))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='hybrid state occupation threshold excludes a published column';return
+    endif
+    if(noccupied>1)then
+      local_bad=merge(0,1,all(eigenvalues(2:)>=eigenvalues(:noccupied-1)))
+    else
+      local_bad=0
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='hybrid occupied eigenvalues must be ascending';return
+    endif
     do i=1,noccupied
       call agree_real_bits(occupations(i),minimum_receipt,maximum_receipt,ierr)
       if(ierr/=MPI_SUCCESS.or.minimum_receipt/=maximum_receipt)then;message='rank-disagreeing occupations';return;endif
@@ -135,6 +150,7 @@ contains
     state%hybrid_basis_fingerprint=hybrid_basis_fingerprint;state%metric_fingerprint=metric_fingerprint
     state%operator_fingerprint=operator_fingerprint;state%position_fingerprint=position_fingerprint
     state%fingerprint=fingerprint;state%workspace_peak_bytes=workspace_peak_bytes
+    state%e_homo=eigenvalues(noccupied)
     state%owned_row_ids=row_ids;state%coefficients=coefficients
     state%occupations=occupations;state%eigenvalues=eigenvalues
     ok=.true.;message=''
@@ -174,6 +190,7 @@ contains
       if(allocated(state%occupations))deallocate(state%occupations)
       if(allocated(state%eigenvalues))deallocate(state%eigenvalues)
       state%valid=.false.;state%converged=.false.;state%final_eigensolve_count=0
+      state%e_homo=0d0
     end subroutine cleanup
 #else
     ok=.false.;message='MPI is required for hybrid ground-state validation'

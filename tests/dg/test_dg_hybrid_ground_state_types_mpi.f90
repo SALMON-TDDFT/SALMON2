@@ -29,6 +29,8 @@ program test_dg_hybrid_ground_state_types_mpi
   call require(ok,trim(message));reference_fingerprint=fingerprint
   call require(state%valid.and.state%global_count==n.and.state%noccupied==noccupied,&
     'validated hybrid state metadata is invalid')
+  call require(abs(state%e_homo-eigenvalues(noccupied))<1d-14,&
+    'validated hybrid state HOMO is not the final occupied eigenvalue')
   call require(size(state%coefficients,1)==nowned.and.size(state%coefficients,2)==noccupied,&
     'validated hybrid coefficient shape is invalid')
   call require(abs(sum(state%occupations)-4d0)<1d-14.and.workspace>0_int64,&
@@ -47,6 +49,17 @@ program test_dg_hybrid_ground_state_types_mpi
   call validate_dg_hybrid_ground_state(comm,n,noccupied,row_ids,coefficients,occupations,eigenvalues,3d0,&
     1101_int64,2202_int64,3303_int64,4404_int64,1d-12,state,workspace,fingerprint,ok,message)
   call require(.not.ok,'wrong hybrid electron count was accepted')
+  occupations=[2d0,64d0*epsilon(1d0)]
+  call validate_dg_hybrid_ground_state(comm,n,noccupied,row_ids,coefficients,occupations,eigenvalues,sum(occupations),&
+    1101_int64,2202_int64,3303_int64,4404_int64,1d-12,state,workspace,fingerprint,ok,message)
+  call require(.not.ok.and.index(message,'occupation threshold')>0,&
+    'state publication accepted a column outside the occupied prefix')
+  occupations=[2d0,2d0];eigenvalues=[-0.2d0,-0.7d0]
+  call validate_dg_hybrid_ground_state(comm,n,noccupied,row_ids,coefficients,occupations,eigenvalues,4d0,&
+    1101_int64,2202_int64,3303_int64,4404_int64,1d-12,state,workspace,fingerprint,ok,message)
+  call require(.not.ok.and.index(message,'ascending')>0,&
+    'state publication accepted reordered occupied eigenvalues')
+  eigenvalues=[-0.7d0,-0.2d0]
 
   allocate(duplicate_ids(nowned+merge(1,0,rank==0.and.nowned>0)))
   duplicate_ids(1:nowned)=row_ids
