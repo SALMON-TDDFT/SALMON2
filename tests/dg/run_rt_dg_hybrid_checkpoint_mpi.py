@@ -148,6 +148,22 @@ end program nonmpi_checkpoint_probe
       assert corrupt_read.returncode==0,(nrank,label,corrupt_read.stdout,corrupt_read.stderr)
   assert len(set(complete_fingerprints))==1,complete_fingerprints
   complete1=build/"complete-1.chk"
+  between_levels=build/"complete-between-levels.chk"
+  between_levels_write=subprocess.run([shutil.which("mpiexec"),"-n","1",str(exe),
+    "write_complete_between_levels",str(between_levels)],capture_output=True,text=True,env=env)
+  assert between_levels_write.returncode==0,(between_levels_write.stdout,between_levels_write.stderr)
+  signed_spread=build/"complete-signed-spread.chk"
+  signed_spread_write=subprocess.run([shutil.which("mpiexec"),"-n","1",str(exe),
+    "write_complete_signed_spread",str(signed_spread)],capture_output=True,text=True,env=env)
+  assert signed_spread_write.returncode==0,(signed_spread_write.stdout,signed_spread_write.stderr)
+  distinct_selection=build/"complete-distinct-selection.chk"
+  distinct_selection_write=subprocess.run([shutil.which("mpiexec"),"-n","1",str(exe),
+    "write_complete_distinct_selection",str(distinct_selection)],capture_output=True,text=True,env=env)
+  assert distinct_selection_write.returncode==0,(distinct_selection_write.stdout,distinct_selection_write.stderr)
+  bad_proof=build/"complete-bad-proof-below-requested.chk"
+  bad_proof_write=subprocess.run([shutil.which("mpiexec"),"-n","1",str(exe),
+    "write_bad_proof_below_requested_complete",str(bad_proof)],capture_output=True,text=True,env=env)
+  assert bad_proof_write.returncode==0,(bad_proof_write.stdout,bad_proof_write.stderr)
   legacy_dynamic=build/"complete-legacy-dynamic.chk"
   legacy_dynamic_write=subprocess.run([shutil.which("mpiexec"),"-n","1",str(exe),
     "write_complete_legacy_dynamic",str(legacy_dynamic)],capture_output=True,text=True,env=env)

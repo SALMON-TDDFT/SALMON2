@@ -3408,7 +3408,29 @@ contains
         size(payload%nonlocal_owner)/=size(payload%nonlocal_ids).or.&
         size(payload%nonlocal_values,2)/=size(payload%nonlocal_ids).or.&
         size(payload%added_ids)/=size(payload%closure_parent).or.size(payload%added_ids)/=size(payload%closure_reason).or.&
-        size(payload%added_ids)/=size(payload%closure_action).or.size(payload%effective_ids)/=payload%global_count)bad=1
+        size(payload%added_ids)/=size(payload%closure_action).or.size(payload%requested_ids)<1.or.&
+        size(payload%effective_ids)<size(payload%requested_ids).or.&
+        size(payload%added_ids)/=size(payload%effective_ids)-size(payload%requested_ids))bad=1
+      if(bad/=0)return
+      if(any(payload%requested_ids<=0).or.any(payload%effective_ids<=0).or.any(payload%added_ids<=0).or.&
+          any(payload%closure_parent<=0).or.any(payload%closure_reason<=0).or.any(payload%closure_action<=0))then
+        bad=1;return
+      endif
+      do i=1,size(payload%requested_ids)
+        if(count(payload%requested_ids==payload%requested_ids(i))/=1.or.&
+            count(payload%effective_ids==payload%requested_ids(i))/=1)bad=1
+      enddo
+      do i=1,size(payload%effective_ids)
+        if(count(payload%effective_ids==payload%effective_ids(i))/=1.or.&
+            count(payload%requested_ids==payload%effective_ids(i))+&
+              count(payload%added_ids==payload%effective_ids(i))/=1)bad=1
+      enddo
+      do i=1,size(payload%added_ids)
+        if(count(payload%added_ids==payload%added_ids(i))/=1.or.&
+            count(payload%requested_ids==payload%added_ids(i))/=0.or.&
+            count(payload%effective_ids==payload%added_ids(i))/=1.or.&
+            count(payload%effective_ids==payload%closure_parent(i))/=1)bad=1
+      enddo
       if(bad/=0)return
       if(size(payload%face_ids)>0)then
         if(any(payload%face_ids<=0_int64))bad=1
@@ -3536,7 +3558,7 @@ contains
       payload%certified_basis%scalar_covariance_defect,payload%certified_basis%vector_covariance_defect,&
       payload%certified_basis%tensor_covariance_defect])))then;bad=1;return;endif
     if(min(payload%certified_basis%spread_before_total,payload%certified_basis%spread_after_total,&
-      payload%certified_basis%spread_improvement,payload%certified_basis%transform_unitarity_defect,&
+      payload%certified_basis%transform_unitarity_defect,&
       payload%certified_basis%certified_metric_defect,payload%certified_basis%rt_metric_defect,&
       payload%certified_basis%embedding_defect,payload%certified_basis%projector_invariance_defect,&
       payload%certified_basis%target_symmetry_defect_before,payload%certified_basis%target_symmetry_defect_after,&
@@ -3662,8 +3684,7 @@ contains
       if(payload%energy_window%compatibility_dynamic_rank.or.payload%energy_window%window_size<0d0.or.&
         .not.payload%energy_window%proof_state_present.or.&
         payload%energy_window%requested_cutoff/=&
-          payload%energy_window%e_homo+payload%energy_window%window_size.or.&
-        payload%energy_window%certified_cutoff<payload%energy_window%requested_cutoff)then
+          payload%energy_window%e_homo+payload%energy_window%window_size)then
         bad=1;return
       endif
     case(rt_dg_hybrid_energy_window_legacy_dynamic)
@@ -3677,7 +3698,8 @@ contains
     end select
     if(payload%energy_window%proof_state_present)then
       if(payload%energy_window%proof_status<=0.or.&
-        payload%energy_window%proof_energy<=payload%energy_window%certified_cutoff)then;bad=1;return;endif
+        payload%energy_window%proof_energy<=max(payload%energy_window%certified_cutoff,&
+          payload%energy_window%requested_cutoff))then;bad=1;return;endif
     else if(payload%energy_window%proof_status/=0.or.payload%energy_window%proof_energy/=0d0)then
       bad=1
     endif

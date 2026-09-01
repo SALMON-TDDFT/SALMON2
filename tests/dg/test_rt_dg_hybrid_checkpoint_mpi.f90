@@ -45,11 +45,13 @@ program test_rt_dg_hybrid_checkpoint_mpi
     call require(ok,trim(message))
     call verify_legacy_dynamic_full_rank(restored_payload,payload_fingerprint)
     if(rank==0)write(*,'(a,i0)')'HYBRID_GS_LEGACY_DYNAMIC phase=read fingerprint=',payload_fingerprint
-  else if(trim(mode)=='write_complete'.or.trim(mode)=='write_bad_complete'.or.trim(mode)=='write_incomplete_complete'.or.&
+  else if(trim(mode)=='write_complete'.or.trim(mode)=='write_complete_between_levels'.or.&
+      trim(mode)=='write_complete_signed_spread'.or.trim(mode)=='write_complete_distinct_selection'.or.&
+      trim(mode)=='write_bad_complete'.or.trim(mode)=='write_incomplete_complete'.or.&
       trim(mode)=='write_bad_grid_complete'.or.trim(mode)=='write_out_of_range_grid_complete'.or.&
       trim(mode)=='write_missing_position_convention_complete'.or.&
       trim(mode)=='write_bad_explicit_compat_complete'.or.&
-      trim(mode)=='write_bad_explicit_proof_complete'.or.&
+      trim(mode)=='write_bad_explicit_proof_complete'.or.trim(mode)=='write_bad_proof_below_requested_complete'.or.&
       trim(mode)=='write_bad_extension_complete'.or.trim(mode)=='write_bad_boundary_complete'.or.&
       trim(mode)=='write_bad_window_mode_complete'.or.trim(mode)=='write_bad_face_id_complete'.or.&
       trim(mode)=='write_bad_nonlocal_id_complete'.or.trim(mode)=='write_duplicate_face_id_complete'.or.&
@@ -67,6 +69,31 @@ program test_rt_dg_hybrid_checkpoint_mpi
       trim(mode)=='write_bad_face_observable_tail_complete'.or.&
       trim(mode)=='write_interrupted_complete')then
     call construct_complete_payload(complete_payload)
+    if(trim(mode)=='write_complete_between_levels')then
+      complete_payload%energy_window%requested_rank=nrt
+      complete_payload%energy_window%extension_states=0
+      complete_payload%energy_window%window_size=0.7d0
+      complete_payload%energy_window%requested_cutoff=&
+        complete_payload%energy_window%e_homo+complete_payload%energy_window%window_size
+      complete_payload%energy_window%extension_energy=0d0
+    endif
+    if(trim(mode)=='write_complete_signed_spread')then
+      complete_payload%certified_basis%spreads_after=&
+        complete_payload%certified_basis%spreads_before+0.1d0
+      complete_payload%certified_basis%spread_after_total=&
+        sum(complete_payload%certified_basis%spreads_after)
+      complete_payload%certified_basis%spread_improvement=&
+        complete_payload%certified_basis%spread_before_total-&
+        complete_payload%certified_basis%spread_after_total
+    endif
+    if(trim(mode)=='write_complete_distinct_selection')then
+      complete_payload%requested_ids=[11,12]
+      complete_payload%effective_ids=[11,12,13]
+      complete_payload%added_ids=[13]
+      complete_payload%closure_parent=[11]
+      complete_payload%closure_reason=[1]
+      complete_payload%closure_action=[2]
+    endif
     if(trim(mode)=='write_bad_complete'.and.size(complete_payload%hamiltonian_rows,1)>0)&
       complete_payload%hamiltonian_rows(1,1)=complete_payload%hamiltonian_rows(1,1)+(1d0,0d0)
     if(trim(mode)=='write_incomplete_complete')deallocate(complete_payload%face_values)
@@ -82,6 +109,14 @@ program test_rt_dg_hybrid_checkpoint_mpi
     if(trim(mode)=='write_bad_explicit_proof_complete')then
       complete_payload%energy_window%proof_state_present=.false.
       complete_payload%energy_window%proof_status=0
+    endif
+    if(trim(mode)=='write_bad_proof_below_requested_complete')then
+      complete_payload%energy_window%requested_rank=nrt
+      complete_payload%energy_window%extension_states=0
+      complete_payload%energy_window%window_size=1.2d0
+      complete_payload%energy_window%requested_cutoff=&
+        complete_payload%energy_window%e_homo+complete_payload%energy_window%window_size
+      complete_payload%energy_window%extension_energy=0d0
     endif
     if(trim(mode)=='write_bad_extension_complete')then
       complete_payload%energy_window%extension_states=0
@@ -130,7 +165,8 @@ program test_rt_dg_hybrid_checkpoint_mpi
         [(9d0,1d0),(8d0,2d0),(7d0,3d0)])
     call write_rt_dg_hybrid_ground_state_checkpoint(comm,trim(path),complete_payload,payload_fingerprint,ok,message,&
       interrupt_after_write=trim(mode)=='write_interrupted_complete')
-    if(trim(mode)=='write_complete')then
+    if(trim(mode)=='write_complete'.or.trim(mode)=='write_complete_between_levels'.or.&
+        trim(mode)=='write_complete_signed_spread'.or.trim(mode)=='write_complete_distinct_selection')then
       call require(ok,trim(message))
     else
       call require(.not.ok,'inconsistent or incomplete complete payload was published')
