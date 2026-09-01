@@ -7,6 +7,17 @@ module dg_hybrid_ground_state_types
 #endif
   implicit none
   private
+  type,public::s_dg_hybrid_spectral_certification
+    logical::valid=.false.,compatibility_dynamic_rank=.false.,proof_state_present=.false.
+    integer::full_rank=0,occupied_rank=0,requested_rank=0,boundary_cluster_rank=0,certified_rank=0
+    integer::extension_states=0,worst_operation=0
+    real(real64)::energy_window=0d0,e_homo=0d0,requested_cutoff=0d0,certified_cutoff=0d0
+    real(real64)::extension_energy=0d0,proof_energy=0d0
+    real(real64)::occupied_subspace_defect=0d0,occupied_projector_defect=0d0
+    real(real64)::target_subspace_defect=0d0,target_energy_defect=0d0,density_defect=0d0
+    real(real64)::worst_operation_defect=0d0,maximum_physical_defect=0d0
+    integer(int64)::fingerprint=0_int64
+  end type s_dg_hybrid_spectral_certification
   type,public::s_dg_hybrid_ground_state
     logical::valid=.false.,converged=.false.
     integer::global_count=0,noccupied=0,final_eigensolve_count=0
@@ -14,6 +25,7 @@ module dg_hybrid_ground_state_types
     integer(int64)::operator_fingerprint=0_int64,position_fingerprint=0_int64
     integer(int64)::fingerprint=0_int64,workspace_peak_bytes=0_int64
     real(real64)::e_homo=0d0
+    type(s_dg_hybrid_spectral_certification)::spectral_certification
     integer(int64),allocatable::owned_row_ids(:)
     complex(real64),allocatable::coefficients(:,:)
     real(real64),allocatable::occupations(:),eigenvalues(:)
@@ -191,6 +203,7 @@ contains
       if(allocated(state%eigenvalues))deallocate(state%eigenvalues)
       state%valid=.false.;state%converged=.false.;state%final_eigensolve_count=0
       state%e_homo=0d0
+      state%spectral_certification=s_dg_hybrid_spectral_certification()
     end subroutine cleanup
 #else
     ok=.false.;message='MPI is required for hybrid ground-state validation'

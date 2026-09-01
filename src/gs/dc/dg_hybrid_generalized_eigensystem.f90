@@ -9,6 +9,15 @@ module dg_hybrid_generalized_eigensystem
 #endif
   implicit none
   private
+  type,public::s_dg_hybrid_complete_eigensystem
+    logical::valid=.false.
+    integer::global_count=0,eigensolve_count=0
+    integer(int64),allocatable::owned_row_ids(:)
+    complex(real64),allocatable::coefficients(:,:)
+    real(real64),allocatable::eigenvalues(:)
+    real(real64)::maximum_residual=huge(1d0),orthogonality_defect=huge(1d0),projector_defect=huge(1d0)
+    integer(int64)::workspace_peak_bytes=0_int64,fingerprint=0_int64
+  end type s_dg_hybrid_complete_eigensystem
   abstract interface
     subroutine dg_hybrid_final_solver(comm,global_count,nstate,row_ids,hrows,srows,tolerance,&
         coefficients,eigenvalues,maximum_residual,orthogonality_defect,projector_defect,&
@@ -24,7 +33,8 @@ module dg_hybrid_generalized_eigensystem
       logical,intent(out)::ok;character(*),intent(out)::message
     end subroutine dg_hybrid_final_solver
   end interface
-  public::solve_dg_hybrid_generalized_scalapack,solve_dg_hybrid_generalized_once_and_publish
+  public::solve_dg_hybrid_generalized_scalapack,solve_dg_hybrid_generalized_once_and_publish,&
+    solve_dg_hybrid_generalized_complete_once
 contains
   subroutine solve_dg_hybrid_generalized_scalapack(comm,global_count,nstate,row_ids,hrows,srows,tolerance,&
       coefficients,eigenvalues,maximum_residual,orthogonality_defect,projector_defect,workspace_peak_bytes,&
@@ -45,10 +55,11 @@ contains
     integer::group_comm,group_world,minimum_workspace,maximum_workspace,lwork,lrwork,liwork
     integer,allocatable::ownership_count(:),owner(:),position(:),gridmap(:,:),comm_ranks(:),world_ranks(:),iwork(:)
     integer::desca(9),descb(9),descz(9)
-    integer(int64)::bits,minimum_bits,maximum_bits,entry_hash,complex_elements,integer_elements,quantized,extra_bytes
+    integer(int64)::bits,minimum_bits,maximum_bits,entry_hash,local_hash,global_hash,complex_elements,integer_elements,&
+      quantized,extra_bytes
     complex(real64),allocatable::adiv(:,:),bdiv(:,:),zdiv(:,:),work(:),remote_row(:),stream(:),hc(:,:),sc(:,:)
     real(real64),allocatable::rwork(:),all_eigenvalues(:)
-    complex(real64)::local_dot,global_dot
+    complex(real64)::local_dot
     real(real64)::scale,local_value,global_value,quantization_scale,quantization_limit,hermitian_defect,metric_defect,&
       matrix_scale
     logical::halt_invalid,halt_zero,halt_overflow,halting_disabled
@@ -201,16 +212,23 @@ contains
     do row=1,global_count
       stream=(0d0,0d0);if(rank==owner(row))stream=coefficients(position(row),:)
       call MPI_Bcast(stream,nstate,MPI_DOUBLE_COMPLEX,owner(row),comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;call cleanup_grid();message='eigenvector row broadcast failed';return;endif
       do i=1,nowned;hc(i,:)=hc(i,:)+hrows(i,row)*stream;sc(i,:)=sc(i,:)+srows(i,row)*stream;enddo
     enddo
     local_value=0d0
     do j=1,nstate;local_value=max(local_value,maxval(abs(hc(:,j)-eigenvalues(j)*sc(:,j))));enddo
     call MPI_Allreduce(local_value,maximum_residual,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;call cleanup_grid();message='eigensystem residual reduction failed';return;endif
     orthogonality_defect=0d0
-    do j=1,nstate;do k=1,nstate
-      local_dot=sum(conjg(coefficients(:,j))*sc(:,k));call MPI_Allreduce(local_dot,global_dot,1,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
-      if(j==k)global_dot=global_dot-(1d0,0d0);orthogonality_defect=max(orthogonality_defect,abs(global_dot))
-    enddo;enddo
+    do j=1,nstate
+      do k=1,nstate
+        stream(k)=sum(conjg(coefficients(:,j))*sc(:,k))
+      enddo
+      call MPI_Allreduce(MPI_IN_PLACE,stream,nstate,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;call cleanup_grid();message='eigensystem orthogonality reduction failed';return;endif
+      stream(j)=stream(j)-(1d0,0d0)
+      orthogonality_defect=max(orthogonality_defect,maxval(abs(stream)))
+    enddo
     projector_defect=orthogonality_defect
     global_value=max(1d0,maxval(abs(eigenvalues)))
     local_bad=merge(0,1,maximum_residual<=100d0*tolerance*global_value.and.&
@@ -218,26 +236,29 @@ contains
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;call cleanup_grid();message='complex generalized eigensystem residual gate failed';return;endif
     quantization_scale=1000d0*tolerance;quantization_limit=0.25d0*real(huge(0_int64),real64)*quantization_scale
-    fingerprint=1709_int64
+    local_bad=0;local_hash=0_int64
     do i=1,global_count
       stream=(0d0,0d0);if(rank==owner(i))stream=coefficients(position(i),:)
       call MPI_Bcast(stream,nstate,MPI_DOUBLE_COMPLEX,owner(i),comm,ierr)
-      do j=1,global_count
-        remote_row(1:nstate)=(0d0,0d0)
-        if(rank==owner(j))remote_row(1:nstate)=coefficients(position(j),:)
-        call MPI_Bcast(remote_row,nstate,MPI_DOUBLE_COMPLEX,owner(j),comm,ierr)
-        local_dot=sum(stream*conjg(remote_row(1:nstate)))
+      if(ierr/=MPI_SUCCESS)then;call cleanup_grid();message='projector fingerprint row broadcast failed';return;endif
+      do k=1,nowned
+        j=int(row_ids(k))
+        local_dot=sum(stream*conjg(coefficients(k,:)))
         if(abs(real(local_dot))>quantization_limit.or.abs(aimag(local_dot))>quantization_limit)local_bad=1
         if(local_bad==0)then
           quantized=nint(real(local_dot)/quantization_scale,int64)
           entry_hash=ieor(int(i,int64),ishftc(int(j,int64),7));entry_hash=ieor(entry_hash,ishftc(quantized,17))
           quantized=nint(aimag(local_dot)/quantization_scale,int64);entry_hash=ieor(entry_hash,ishftc(quantized,31))
-          fingerprint=ieor(ishftc(fingerprint,1),entry_hash)
+          local_hash=ieor(local_hash,ishftc(entry_hash,&
+            int(mod(13_int64*int(i,int64)+17_int64*int(j,int64),63_int64))))
         endif
       enddo
     enddo
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;call cleanup_grid();message='projector fingerprint range is unsafe';return;endif
+    call MPI_Allreduce(local_hash,global_hash,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;call cleanup_grid();message='projector fingerprint reduction failed';return;endif
+    fingerprint=ieor(1709_int64,global_hash)
     do j=1,nstate
       if(abs(eigenvalues(j))>quantization_limit)then;call cleanup_grid();message='eigenvalue fingerprint range is unsafe';return;endif
       quantized=nint(eigenvalues(j)/quantization_scale,int64)
@@ -301,6 +322,171 @@ contains
     workspace_peak_bytes=0_int64;fingerprint=0_int64;eigenvalues=0d0
 #endif
   end subroutine solve_dg_hybrid_generalized_scalapack
+
+  subroutine solve_dg_hybrid_generalized_complete_once(comm,global_count,row_ids,hrows,srows,tolerance,solver,&
+      result,ok,message)
+    integer,intent(in)::comm,global_count
+    integer(int64),intent(in)::row_ids(:)
+    complex(real64),intent(in)::hrows(:,:),srows(:,:)
+    real(real64),intent(in)::tolerance
+    procedure(dg_hybrid_final_solver)::solver
+    type(s_dg_hybrid_complete_eigensystem),intent(out)::result
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::i,nowned,local_bad,global_bad,ierr,allocation_status,minimum_integer,maximum_integer
+    integer,allocatable::ownership_count(:)
+    integer(int64)::bits,minimum_bits,maximum_bits,solver_workspace_bytes,solver_fingerprint
+    integer(int64),allocatable::published_row_ids(:),eigenvalue_bits(:),minimum_eigenvalue_bits(:),&
+      maximum_eigenvalue_bits(:)
+    complex(real64),allocatable::coefficients(:,:)
+    real(real64),allocatable::eigenvalues(:)
+    real(real64)::maximum_residual,orthogonality_defect,projector_defect
+    logical::solver_ok,collective_ok
+
+    result=s_dg_hybrid_complete_eigensystem();ok=.false.;message='';nowned=size(row_ids)
+    call agree_integer(global_count,minimum_integer,maximum_integer,ierr)
+    if(ierr/=0.or.minimum_integer/=maximum_integer)then
+      message='rank-disagreeing complete generalized extent';return
+    endif
+    bits=transfer(tolerance,bits);call agree_int64(bits,minimum_bits,maximum_bits,ierr)
+    if(ierr/=0.or.minimum_bits/=maximum_bits)then
+      message='rank-disagreeing complete generalized tolerance';return
+    endif
+    local_bad=0
+    if(global_count<1)local_bad=1
+    if(size(hrows,1)/=nowned.or.size(hrows,2)/=global_count.or.any(shape(srows)/=shape(hrows)))local_bad=1
+    if(any(row_ids<1_int64).or.any(row_ids>int(max(0,global_count),int64)))local_bad=1
+    if(.not.ieee_is_finite(tolerance).or.tolerance<1d-15.or.tolerance>1d-2)local_bad=1
+    if(.not.finite_complex_matrix(hrows).or..not.finite_complex_matrix(srows))local_bad=1
+    call agree_bad(local_bad,global_bad,ierr)
+    if(ierr/=0.or.global_bad/=0)then;message='invalid complete generalized eigensystem contract';return;endif
+    allocate(ownership_count(global_count),published_row_ids(nowned),eigenvalues(global_count),&
+      eigenvalue_bits(global_count),minimum_eigenvalue_bits(global_count),maximum_eigenvalue_bits(global_count),&
+      stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0);call agree_bad(local_bad,global_bad,ierr)
+    if(ierr/=0.or.global_bad/=0)then;message='cannot allocate complete generalized eigensystem validation';return;endif
+    ownership_count=0
+    do i=1,nowned;ownership_count(int(row_ids(i)))=ownership_count(int(row_ids(i)))+1;enddo
+    call sum_integer_array(ownership_count,global_count,ierr)
+    if(ierr/=0)then;message='complete generalized ownership reduction failed';return;endif
+    local_bad=merge(0,1,all(ownership_count==1));call agree_bad(local_bad,global_bad,ierr)
+    if(ierr/=0.or.global_bad/=0)then;message='complete generalized rows are not owned exactly once';return;endif
+    published_row_ids=row_ids;eigenvalues=0d0
+    maximum_residual=huge(1d0);orthogonality_defect=huge(1d0);projector_defect=huge(1d0)
+    solver_workspace_bytes=0_int64;solver_fingerprint=0_int64;solver_ok=.false.
+    call solver(comm,global_count,global_count,row_ids,hrows,srows,tolerance,coefficients,eigenvalues,&
+      maximum_residual,orthogonality_defect,projector_defect,solver_workspace_bytes,solver_fingerprint,&
+      solver_ok,message)
+    call agree_logical(solver_ok,collective_ok,ierr)
+    if(ierr/=0.or..not.collective_ok)then
+      message='complete distributed LCFO eigensolve failed collectively';return
+    endif
+    local_bad=0
+    if(.not.allocated(coefficients))then
+      local_bad=1
+    else
+      if(size(coefficients,1)/=nowned.or.size(coefficients,2)/=global_count)local_bad=1
+      if(.not.finite_complex_matrix(coefficients))local_bad=1
+    endif
+    if(.not.finite_real_vector(eigenvalues))local_bad=1
+    if(global_count>1)then;if(any(eigenvalues(2:)<eigenvalues(:global_count-1)))local_bad=1;endif
+    if(.not.ieee_is_finite(maximum_residual).or.maximum_residual<0d0)local_bad=1
+    if(.not.ieee_is_finite(orthogonality_defect).or.orthogonality_defect<0d0)local_bad=1
+    if(.not.ieee_is_finite(projector_defect).or.projector_defect<0d0)local_bad=1
+    if(solver_workspace_bytes<0_int64.or.solver_fingerprint==0_int64)local_bad=1
+    call agree_bad(local_bad,global_bad,ierr)
+    if(ierr/=0.or.global_bad/=0)then;message='invalid complete generalized eigensystem result';return;endif
+    eigenvalue_bits=transfer(eigenvalues,eigenvalue_bits)
+    call agree_int64_array(eigenvalue_bits,minimum_eigenvalue_bits,maximum_eigenvalue_bits,global_count,ierr)
+    if(ierr/=0.or.any(minimum_eigenvalue_bits/=maximum_eigenvalue_bits))then
+      message='rank-disagreeing complete generalized eigenvalues';return
+    endif
+    bits=transfer(maximum_residual,bits);call agree_int64(bits,minimum_bits,maximum_bits,ierr)
+    if(ierr/=0.or.minimum_bits/=maximum_bits)then;message='rank-disagreeing complete residual';return;endif
+    bits=transfer(orthogonality_defect,bits);call agree_int64(bits,minimum_bits,maximum_bits,ierr)
+    if(ierr/=0.or.minimum_bits/=maximum_bits)then;message='rank-disagreeing complete orthogonality defect';return;endif
+    bits=transfer(projector_defect,bits);call agree_int64(bits,minimum_bits,maximum_bits,ierr)
+    if(ierr/=0.or.minimum_bits/=maximum_bits)then;message='rank-disagreeing complete projector defect';return;endif
+    call agree_int64(solver_fingerprint,minimum_bits,maximum_bits,ierr)
+    if(ierr/=0.or.minimum_bits/=maximum_bits)then;message='rank-disagreeing complete eigensystem fingerprint';return;endif
+    call move_alloc(published_row_ids,result%owned_row_ids)
+    call move_alloc(coefficients,result%coefficients);call move_alloc(eigenvalues,result%eigenvalues)
+    result%global_count=global_count;result%eigensolve_count=1
+    result%maximum_residual=maximum_residual;result%orthogonality_defect=orthogonality_defect
+    result%projector_defect=projector_defect;result%workspace_peak_bytes=solver_workspace_bytes
+    result%fingerprint=solver_fingerprint;result%valid=.true.;ok=.true.;message=''
+  contains
+    subroutine agree_integer(value,minimum_value,maximum_value,status)
+      integer,intent(in)::value
+      integer,intent(out)::minimum_value,maximum_value,status
+#ifdef USE_MPI
+      call MPI_Allreduce(value,minimum_value,1,MPI_INTEGER,MPI_MIN,comm,status);if(status/=MPI_SUCCESS)return
+      call MPI_Allreduce(value,maximum_value,1,MPI_INTEGER,MPI_MAX,comm,status)
+#else
+      minimum_value=value;maximum_value=value;status=0
+#endif
+    end subroutine agree_integer
+    subroutine agree_int64(value,minimum_value,maximum_value,status)
+      integer(int64),intent(in)::value
+      integer(int64),intent(out)::minimum_value,maximum_value
+      integer,intent(out)::status
+#ifdef USE_MPI
+      call MPI_Allreduce(value,minimum_value,1,MPI_INTEGER8,MPI_MIN,comm,status);if(status/=MPI_SUCCESS)return
+      call MPI_Allreduce(value,maximum_value,1,MPI_INTEGER8,MPI_MAX,comm,status)
+#else
+      minimum_value=value;maximum_value=value;status=0
+#endif
+    end subroutine agree_int64
+    subroutine agree_int64_array(values,minimum_values,maximum_values,count,status)
+      integer,intent(in)::count
+      integer(int64),intent(in)::values(count)
+      integer(int64),intent(out)::minimum_values(count),maximum_values(count)
+      integer,intent(out)::status
+#ifdef USE_MPI
+      call MPI_Allreduce(values,minimum_values,count,MPI_INTEGER8,MPI_MIN,comm,status);if(status/=MPI_SUCCESS)return
+      call MPI_Allreduce(values,maximum_values,count,MPI_INTEGER8,MPI_MAX,comm,status)
+#else
+      minimum_values=values;maximum_values=values;status=0
+#endif
+    end subroutine agree_int64_array
+    subroutine agree_bad(local_value,global_value,status)
+      integer,intent(in)::local_value
+      integer,intent(out)::global_value,status
+#ifdef USE_MPI
+      call MPI_Allreduce(local_value,global_value,1,MPI_INTEGER,MPI_MAX,comm,status)
+#else
+      global_value=local_value;status=0
+#endif
+    end subroutine agree_bad
+    subroutine agree_logical(local_value,global_value,status)
+      logical,intent(in)::local_value
+      logical,intent(out)::global_value
+      integer,intent(out)::status
+#ifdef USE_MPI
+      call MPI_Allreduce(local_value,global_value,1,MPI_LOGICAL,MPI_LAND,comm,status)
+#else
+      global_value=local_value;status=0
+#endif
+    end subroutine agree_logical
+    subroutine sum_integer_array(values,count,status)
+      integer,intent(in)::count
+      integer,intent(inout)::values(count)
+      integer,intent(out)::status
+#ifdef USE_MPI
+      call MPI_Allreduce(MPI_IN_PLACE,values,count,MPI_INTEGER,MPI_SUM,comm,status)
+#else
+      status=0
+#endif
+    end subroutine sum_integer_array
+    logical function finite_complex_matrix(values)
+      complex(real64),intent(in)::values(:,:)
+      finite_complex_matrix=all(ieee_is_finite(real(values,real64))).and.all(ieee_is_finite(aimag(values)))
+    end function finite_complex_matrix
+    logical function finite_real_vector(values)
+      real(real64),intent(in)::values(:)
+      finite_real_vector=all(ieee_is_finite(values))
+    end function finite_real_vector
+  end subroutine solve_dg_hybrid_generalized_complete_once
 
   subroutine solve_dg_hybrid_generalized_once_and_publish(comm,global_count,nstate,row_ids,hrows,srows,tolerance,&
       occupations,expected_electron_count,hybrid_basis_fingerprint,metric_fingerprint,operator_fingerprint,&

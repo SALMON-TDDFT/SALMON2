@@ -3,6 +3,18 @@ from pathlib import Path
 import os,re,shlex,shutil,subprocess,tempfile
 
 root=Path(__file__).resolve().parents[2]
+source=(root/"src/gs/dc/dg_hybrid_generalized_eigensystem.f90").read_text().lower()
+backend=source[source.index("subroutine solve_dg_hybrid_generalized_scalapack"):]
+backend=backend[:backend.index("end subroutine solve_dg_hybrid_generalized_scalapack")]
+assert "call mpi_allreduce(local_dot,global_dot,1" not in backend,(
+  "complete eigensystem diagnostics retain an n-state squared scalar reduction loop")
+assert "call mpi_bcast(remote_row,nstate" not in backend,(
+  "complete eigensystem fingerprint retains an n-state squared vector broadcast loop")
+complete=source[source.index("subroutine solve_dg_hybrid_generalized_complete_once"):]
+complete=complete[:complete.index("end subroutine solve_dg_hybrid_generalized_complete_once")]
+normalized=re.sub(r"\s+","",complete)
+assert complete.count("call solver(")==1,"complete eigensystem wrapper must invoke its backend exactly once"
+assert "global_count,global_count" in normalized,"complete eigensystem wrapper did not request the full basis"
 if shutil.which("pkg-config"):
   scalapack=shlex.split(subprocess.check_output(["pkg-config","--libs","scalapack"],text=True))
   openblas=shlex.split(subprocess.check_output(["pkg-config","--libs","openblas"],text=True))
