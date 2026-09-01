@@ -182,7 +182,7 @@ use dg_overlapping_wannier_w90,only:setup_dg_w90_gamma_library,&
   project_dg_w90_reference_sector_operators,&
   anchor_dg_w90_reference_character_sector,align_dg_w90_character_sector_gauge,&
   align_dg_w90_character_sectors_by_periodic_phase,sew_dg_w90_periodic_phase_conjugate_sector,&
-  export_dg_w90_replay_bundle
+  export_dg_w90_replay_bundle,DG_W90_CONSTRAINED
 use lcfo_wannier_sawf, only: t_sawf_crystallographic_catalog,t_sawf_symop,&
   load_sawf_crystallographic_catalog_auto
 use lcfo_wannier_sawf_dmn,only:t_sawf_dmn_writer,t_sawf_operation_index,&
@@ -2437,7 +2437,8 @@ contains
     enddo
     call setup_dg_w90_gamma_library(dc%icomm_tot,'overlapping_wannier_mlwf',&
       dc%system_tot%primitive_a,w90_reciprocal_lattice,w90_atom_symbols,w90_atoms_cart,&
-      ntarget,ntarget,wannier_num_iter,dg_ow_w90_initial_projection,w90_nntot,w90_nncell,ok,message)
+      ntarget,ntarget,wannier_num_iter,dg_ow_w90_initial_projection,DG_W90_CONSTRAINED,&
+      w90_nntot,w90_nncell,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 Gamma setup failed';endif
     allocate(w90_fractional(3,ncore),w90_eigenvalues(ntarget))
     do p=1,ncore

@@ -40,6 +40,8 @@ with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
             shutil.which("mpifort"),
             "-cpp",
             "-DUSE_MPI",
+            "-DUSE_WANNIER90",
+            "-DW90_TEST_STUBS",
             "-I",
             str(build),
             "-J",
@@ -54,6 +56,7 @@ with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
             str(exe),
         ],
         check=True,
+        timeout=120,
     )
     env = os.environ.copy()
     env.setdefault("OMPI_MCA_rmaps_base_oversubscribe", "1")
@@ -68,6 +71,7 @@ with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
             capture_output=True,
             text=True,
             env=env,
+            timeout=60,
         )
         assert result.returncode == 0, (ranks, result.stdout, result.stderr)
         assert "PASS Wannier90 MLWF adapter validation" in result.stdout
@@ -109,6 +113,7 @@ with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
                 str(actual),
             ],
             check=True,
+            timeout=120,
         )
         library_fingerprints = []
         for ranks in (1, 2, 4, 8):
@@ -118,6 +123,7 @@ with tempfile.TemporaryDirectory(prefix="ow-w90-") as name:
                 capture_output=True,
                 text=True,
                 env=env,
+                timeout=60,
             )
             assert result.returncode == 0, (ranks, result.stdout, result.stderr)
             assert "PASS Wannier90 MLWF adapter validation" in result.stdout

@@ -21,6 +21,7 @@ program test_dg_overlapping_wannier_w90_mpi
     apply_dg_orbital_rotation_tiled
   use dg_overlapping_wannier_w90,only:export_dg_w90_replay_bundle
   use dg_overlapping_wannier_w90,only:convert_dg_w90_library_geometry
+  use dg_overlapping_wannier_w90,only:DG_W90_CONSTRAINED,DG_W90_UNCONSTRAINED
   implicit none
   integer::ierr,rank,nproc,b,i,m,n,p,nlocal
   integer::convergence_iterations,log_unit,win_unit,win_io
@@ -28,6 +29,7 @@ program test_dg_overlapping_wannier_w90_mpi
   real(8)::centers(3,2),spreads(2),spread(3)
   integer(8)::bytes
   logical::ok,matrix_matches,win_has_random_projection,replay_exists
+  logical::win_has_site_true,win_has_site_false,win_has_symmetrize,dmn_exists
   character(256)::message,win_line
   complex(8),allocatable::local_values(:,:),local_anchors(:,:)
   complex(8),allocatable::assembled_m(:,:,:),assembled_a(:,:),precomputed_a(:,:)
@@ -109,7 +111,7 @@ program test_dg_overlapping_wannier_w90_mpi
   integer::replay_gvec(3,2),replay_unit,replay_ios
   integer(8),allocatable::sector_reference_keys(:),sector_permuted_keys(:)
 #ifdef USE_WANNIER90
-  integer::nntot
+  integer::nntot,symmetry_mode
   integer,allocatable::nncell(:,:)
   complex(8),allocatable::m_matrix(:,:,:),a_matrix(:,:),library_transform(:,:)
   real(8),allocatable::library_centers(:,:),library_spreads(:)
@@ -1075,19 +1077,61 @@ program test_dg_overlapping_wannier_w90_mpi
   call validate_dg_w90_result(transform,centers,spreads,spread,0.8d0,1d-12,ok,message)
   call require(.not.ok,'nonfinite Wannier90 center rejection')
 #ifdef USE_WANNIER90
+  call require(DG_W90_CONSTRAINED==1.and.DG_W90_UNCONSTRAINED==2,&
+    'Wannier90 symmetry modes have stable public values')
   lattice=0d0;reciprocal=0d0
   lattice(1,1)=10d0;lattice(2,2)=10d0;lattice(3,3)=10d0
   reciprocal(1,1)=2d0*acos(-1d0)/10d0
   reciprocal(2,2)=reciprocal(1,1);reciprocal(3,3)=reciprocal(1,1)
   atoms_cart=0d0;atom_symbols(1)='H ';eigenvalues=0d0
+  call write_artifact_sentinels('','blank-seed DMN sentinel','blank-seed WIN sentinel')
+  call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'',lattice,reciprocal,&
+    atom_symbols,atoms_cart,1,1,10,'spectral',DG_W90_UNCONSTRAINED,nntot,nncell,ok,message)
+  call require(.not.ok,'Wannier90 setup rejects a blank seed before artifact mutation')
+  call require_artifact_sentinels('','blank-seed DMN sentinel','blank-seed WIN sentinel',&
+    'blank seed is rejected before DMN/WIN artifact mutation')
+
   if(rank==0)then
     open(newunit=log_unit,file='ow_w90_one_band.dmn',status='old',iostat=p)
     if(p==0)close(log_unit,status='delete')
   endif
   call MPI_Barrier(MPI_COMM_WORLD,ierr)
   call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
-    atom_symbols,atoms_cart,1,1,10,'spectral',nntot,nncell,ok,message)
+    atom_symbols,atoms_cart,1,1,10,'spectral',DG_W90_CONSTRAINED,nntot,nncell,ok,message)
   call require(.not.ok,'Wannier90 setup rejects missing DMN')
+
+  call write_artifact_sentinels('ow_w90_invalid_mode','invalid-mode DMN sentinel',&
+    'invalid-mode WIN sentinel')
+  call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_invalid_mode',lattice,reciprocal,&
+    atom_symbols,atoms_cart,1,1,10,'spectral',0,nntot,nncell,ok,message)
+  call require(.not.ok,'Wannier90 setup collectively rejects an invalid symmetry mode')
+  call require_artifact_sentinels('ow_w90_invalid_mode','invalid-mode DMN sentinel',&
+    'invalid-mode WIN sentinel','invalid symmetry mode is rejected before artifact mutation')
+#ifdef W90_TEST_STUBS
+  dmn_exists=.false.
+  if(rank==0)inquire(file='ow_w90_invalid_mode.stub_called',exist=dmn_exists)
+  call MPI_Bcast(dmn_exists,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call require(.not.dmn_exists,'invalid symmetry mode is rejected before Wannier90 library entry')
+#endif
+
+  if(nproc>1)then
+    call write_artifact_sentinels('ow_w90_disagreed_mode','rank-disagreement DMN sentinel',&
+      'rank-disagreement WIN sentinel')
+    symmetry_mode=merge(DG_W90_CONSTRAINED,DG_W90_UNCONSTRAINED,rank==0)
+    call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_disagreed_mode',lattice,reciprocal,&
+      atom_symbols,atoms_cart,1,1,10,'spectral',symmetry_mode,nntot,nncell,ok,message)
+    call require(.not.ok,'Wannier90 setup collectively rejects rank-disagreeing symmetry modes')
+    call require_artifact_sentinels('ow_w90_disagreed_mode','rank-disagreement DMN sentinel',&
+      'rank-disagreement WIN sentinel',&
+      'rank-disagreeing symmetry mode is rejected before artifact mutation')
+#ifdef W90_TEST_STUBS
+    dmn_exists=.false.
+    if(rank==0)inquire(file='ow_w90_disagreed_mode.stub_called',exist=dmn_exists)
+    call MPI_Bcast(dmn_exists,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+    call require(.not.dmn_exists,'rank-disagreeing symmetry mode is rejected before Wannier90 library entry')
+#endif
+  endif
+
   if(rank==0)then
     open(newunit=log_unit,file='ow_w90_one_band.dmn',status='replace')
     write(log_unit,'(a)')'SALMON SAWF Gamma-only symmetry data'
@@ -1099,9 +1143,10 @@ program test_dg_overlapping_wannier_w90_mpi
   endif
   call MPI_Barrier(MPI_COMM_WORLD,ierr)
   call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
-    atom_symbols,atoms_cart,1,1,10,'spectral',nntot,nncell,ok,message)
+    atom_symbols,atoms_cart,1,1,10,'spectral',DG_W90_CONSTRAINED,nntot,nncell,ok,message)
   call require(ok.and.nntot>0,trim(message))
-  win_has_random_projection=.false.
+  win_has_random_projection=.false.;win_has_site_true=.false.
+  win_has_site_false=.false.;win_has_symmetrize=.false.
   if(rank==0)then
     open(newunit=win_unit,file='ow_w90_one_band.win',status='old',action='read',iostat=win_io)
     if(win_io==0)then
@@ -1109,6 +1154,9 @@ program test_dg_overlapping_wannier_w90_mpi
         read(win_unit,'(a)',iostat=win_io)win_line
         if(win_io/=0)exit
         if(index(adjustl(win_line),'random')==1)win_has_random_projection=.true.
+        if(index(adjustl(win_line),'site_symmetry = .true.')==1)win_has_site_true=.true.
+        if(index(adjustl(win_line),'site_symmetry = .false.')==1)win_has_site_false=.true.
+        if(index(adjustl(win_line),'symmetrize_eps')==1)win_has_symmetrize=.true.
       enddo
       close(win_unit)
     endif
@@ -1116,10 +1164,49 @@ program test_dg_overlapping_wannier_w90_mpi
   call MPI_Bcast(win_io,1,MPI_INTEGER,0,MPI_COMM_WORLD,ierr)
   call require(win_io==0.or.win_io<0,'Wannier90 setup writes its input file')
   call MPI_Bcast(win_has_random_projection,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call MPI_Bcast(win_has_site_true,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call MPI_Bcast(win_has_site_false,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call MPI_Bcast(win_has_symmetrize,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
   call require(.not.win_has_random_projection,&
     'externally supplied Wannier90 A matrices must not retain random projections')
+  call require(win_has_site_true.and..not.win_has_site_false.and.win_has_symmetrize,&
+    'constrained Wannier90 setup writes site symmetry and symmetrization tolerance')
+
+  if(rank==0)then
+    open(newunit=log_unit,file='ow_w90_unconstrained.dmn',status='replace')
+    write(log_unit,'(a)')'intentionally stale and invalid symmetry data'
+    close(log_unit)
+  endif
+  call MPI_Barrier(MPI_COMM_WORLD,ierr)
+  call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_unconstrained',lattice,reciprocal,&
+    atom_symbols,atoms_cart,1,1,10,'spectral',DG_W90_UNCONSTRAINED,nntot,nncell,ok,message)
+  call require(ok.and.nntot>0,trim(message))
+  dmn_exists=.true.;win_has_site_true=.false.;win_has_site_false=.false.;win_has_symmetrize=.false.
+  if(rank==0)then
+    inquire(file='ow_w90_unconstrained.dmn',exist=dmn_exists)
+    open(newunit=win_unit,file='ow_w90_unconstrained.win',status='old',action='read',iostat=win_io)
+    if(win_io==0)then
+      do
+        read(win_unit,'(a)',iostat=win_io)win_line
+        if(win_io/=0)exit
+        if(index(adjustl(win_line),'site_symmetry = .true.')==1)win_has_site_true=.true.
+        if(index(adjustl(win_line),'site_symmetry = .false.')==1)win_has_site_false=.true.
+        if(index(adjustl(win_line),'symmetrize_eps')==1)win_has_symmetrize=.true.
+      enddo
+      close(win_unit)
+    endif
+  endif
+  call MPI_Bcast(dmn_exists,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call MPI_Bcast(win_has_site_true,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call MPI_Bcast(win_has_site_false,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call MPI_Bcast(win_has_symmetrize,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+  call require(.not.dmn_exists,&
+    'unconstrained Wannier90 setup removes stale DMN before entering the library')
+  call require(win_has_site_false.and..not.win_has_site_true.and..not.win_has_symmetrize,&
+    'unconstrained Wannier90 setup disables site symmetry and omits symmetrization tolerance')
+
   call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
-    atom_symbols,atoms_cart,1,1,10,'random',nntot,nncell,ok,message)
+    atom_symbols,atoms_cart,1,1,10,'random',DG_W90_CONSTRAINED,nntot,nncell,ok,message)
   call require(ok,trim(message))
   win_has_random_projection=.false.
   if(rank==0)then
@@ -1136,10 +1223,10 @@ program test_dg_overlapping_wannier_w90_mpi
   call MPI_Bcast(win_has_random_projection,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
   call require(win_has_random_projection,'random Wannier90 initial projection is explicit in .win')
   call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
-    atom_symbols,atoms_cart,1,1,10,'unknown',nntot,nncell,ok,message)
+    atom_symbols,atoms_cart,1,1,10,'unknown',DG_W90_CONSTRAINED,nntot,nncell,ok,message)
   call require(.not.ok,'Wannier90 setup rejects an unknown initial projection mode')
   call setup_dg_w90_gamma_library(MPI_COMM_WORLD,'ow_w90_one_band',lattice,reciprocal,&
-    atom_symbols,atoms_cart,1,1,10,'spectral',nntot,nncell,ok,message)
+    atom_symbols,atoms_cart,1,1,10,'spectral',DG_W90_CONSTRAINED,nntot,nncell,ok,message)
   call require(ok,trim(message))
   if(rank==0)then
     allocate(m_matrix(1,1,nntot),a_matrix(1,1));m_matrix=(1d0,0d0);a_matrix=(1d0,0d0)
@@ -1161,6 +1248,54 @@ program test_dg_overlapping_wannier_w90_mpi
   if(rank==0)write(*,'(a)')'PASS Wannier90 MLWF adapter validation'
   call MPI_Finalize(ierr)
 contains
+  subroutine write_artifact_sentinels(seed_name,dmn_text,win_text)
+    character(*),intent(in)::seed_name,dmn_text,win_text
+    integer::unit,io,close_io
+    logical::writer_ok
+    writer_ok=.true.
+    if(rank==0)then
+      open(newunit=unit,file=trim(seed_name)//'.dmn',status='replace',action='write',iostat=io)
+      if(io==0)then
+        write(unit,'(a)',iostat=io)trim(dmn_text)
+        close_io=0;close(unit,iostat=close_io)
+        if(io==0.and.close_io/=0)io=close_io
+      endif
+      if(io/=0)writer_ok=.false.
+      open(newunit=unit,file=trim(seed_name)//'.win',status='replace',action='write',iostat=io)
+      if(io==0)then
+        write(unit,'(a)',iostat=io)trim(win_text)
+        close_io=0;close(unit,iostat=close_io)
+        if(io==0.and.close_io/=0)io=close_io
+      endif
+      if(io/=0)writer_ok=.false.
+    endif
+    call MPI_Bcast(writer_ok,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+    call require(writer_ok,'cannot create Wannier90 artifact sentinels')
+  end subroutine write_artifact_sentinels
+
+  subroutine require_artifact_sentinels(seed_name,dmn_text,win_text,label)
+    character(*),intent(in)::seed_name,dmn_text,win_text,label
+    integer::unit,io
+    character(256)::line
+    logical::matches
+    matches=.false.;line=''
+    if(rank==0)then
+      open(newunit=unit,file=trim(seed_name)//'.dmn',status='old',action='read',iostat=io)
+      if(io==0)read(unit,'(a)',iostat=io)line
+      if(io==0)close(unit)
+      matches=io==0.and.trim(line)==trim(dmn_text)
+      if(matches)then
+        line=''
+        open(newunit=unit,file=trim(seed_name)//'.win',status='old',action='read',iostat=io)
+        if(io==0)read(unit,'(a)',iostat=io)line
+        if(io==0)close(unit)
+        matches=io==0.and.trim(line)==trim(win_text)
+      endif
+    endif
+    call MPI_Bcast(matches,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierr)
+    call require(matches,label)
+  end subroutine require_artifact_sentinels
+
   subroutine require(condition,label)
     logical,intent(in)::condition
     character(*),intent(in)::label
@@ -1170,3 +1305,90 @@ contains
     if(global_bad/=0)error stop label
   end subroutine
 end program
+
+#ifdef W90_TEST_STUBS
+subroutine wannier_setup(seed_name,mp_grid_loc,num_kpts_loc,real_lattice_loc,&
+    recip_lattice_loc,kpt_latt_loc,num_bands_tot,num_atoms_loc,atom_symbols_loc,&
+    atoms_cart_loc,gamma_only_loc,spinors_loc,nntot_loc,nnlist_loc,nncell_loc,&
+    num_bands_loc,num_wann_loc,proj_site_loc,proj_l_loc,proj_m_loc,proj_radial_loc,&
+    proj_z_loc,proj_x_loc,proj_zona_loc,exclude_bands_loc,proj_s_loc,proj_s_qaxis_loc)
+  implicit none
+  integer,parameter::num_nnmax=12
+  character(*),intent(in)::seed_name
+  integer,intent(in)::mp_grid_loc(3),num_kpts_loc,num_bands_tot,num_atoms_loc
+  real(8),intent(in)::real_lattice_loc(3,3),recip_lattice_loc(3,3),&
+    kpt_latt_loc(3,num_kpts_loc),atoms_cart_loc(3,num_atoms_loc)
+  character(*),intent(in)::atom_symbols_loc(num_atoms_loc)
+  logical,intent(in)::gamma_only_loc,spinors_loc
+  integer,intent(out)::nntot_loc,nnlist_loc(num_kpts_loc,num_nnmax),&
+    nncell_loc(3,num_kpts_loc,num_nnmax),num_bands_loc,num_wann_loc
+  real(8),intent(out)::proj_site_loc(3,num_bands_tot),proj_z_loc(3,num_bands_tot),&
+    proj_x_loc(3,num_bands_tot),proj_zona_loc(num_bands_tot)
+  integer,intent(out)::proj_l_loc(num_bands_tot),proj_m_loc(num_bands_tot),&
+    proj_radial_loc(num_bands_tot),exclude_bands_loc(num_bands_tot),proj_s_loc(num_bands_tot)
+  real(8),intent(out)::proj_s_qaxis_loc(3,num_bands_tot)
+  integer::unit,io
+  character(256)::line
+  logical::dmn_present,site_true,site_false
+  nntot_loc=1;nnlist_loc=1;nncell_loc=0
+  num_bands_loc=num_bands_tot;num_wann_loc=num_bands_tot
+  proj_site_loc=0d0;proj_l_loc=0;proj_m_loc=0;proj_radial_loc=0
+  proj_z_loc=0d0;proj_x_loc=0d0;proj_zona_loc=0d0;exclude_bands_loc=0
+  proj_s_loc=0;proj_s_qaxis_loc=0d0
+  dmn_present=.false.;site_true=.false.;site_false=.false.
+  inquire(file=trim(seed_name)//'.dmn',exist=dmn_present)
+  open(newunit=unit,file=trim(seed_name)//'.win',status='old',action='read',iostat=io)
+  if(io==0)then
+    do
+      read(unit,'(a)',iostat=io)line
+      if(io/=0)exit
+      if(index(adjustl(line),'site_symmetry = .true.')==1)site_true=.true.
+      if(index(adjustl(line),'site_symmetry = .false.')==1)site_false=.true.
+    enddo
+    close(unit)
+  endif
+  if(.not.((site_true.and.dmn_present).or.(site_false.and..not.dmn_present)))then
+    num_bands_loc=0;num_wann_loc=0
+  endif
+  open(newunit=unit,file=trim(seed_name)//'.stub_called',status='replace',iostat=io)
+  if(io==0)close(unit)
+end subroutine wannier_setup
+
+subroutine wannier_run(seed_name,mp_grid_loc,num_kpts_loc,real_lattice_loc,&
+    recip_lattice_loc,kpt_latt_loc,num_bands_loc,num_wann_loc,nntot_loc,num_atoms_loc,&
+    atom_symbols_loc,atoms_cart_loc,gamma_only_loc,m_matrix_loc,a_matrix_loc,&
+    eigenvalues_loc,u_matrix_loc,u_matrix_opt_loc,lwindow_loc,wann_centres_loc,&
+    wann_spreads_loc,spread_loc)
+  implicit none
+  character(*),intent(in)::seed_name
+  integer,intent(in)::mp_grid_loc(3),num_kpts_loc,num_bands_loc,num_wann_loc,nntot_loc,num_atoms_loc
+  real(8),intent(in)::real_lattice_loc(3,3),recip_lattice_loc(3,3),&
+    kpt_latt_loc(3,num_kpts_loc),atoms_cart_loc(3,num_atoms_loc)
+  character(*),intent(in)::atom_symbols_loc(num_atoms_loc)
+  logical,intent(in)::gamma_only_loc
+  complex(8),intent(in)::m_matrix_loc(num_bands_loc,num_bands_loc,nntot_loc,num_kpts_loc),&
+    a_matrix_loc(num_bands_loc,num_wann_loc,num_kpts_loc)
+  real(8),intent(in)::eigenvalues_loc(num_bands_loc,num_kpts_loc)
+  complex(8),intent(out)::u_matrix_loc(num_wann_loc,num_wann_loc,num_kpts_loc),&
+    u_matrix_opt_loc(num_bands_loc,num_wann_loc,num_kpts_loc)
+  logical,intent(out)::lwindow_loc(num_bands_loc,num_kpts_loc)
+  real(8),intent(out)::wann_centres_loc(3,num_wann_loc),wann_spreads_loc(num_wann_loc),spread_loc(3)
+  integer::i,k,unit,io
+  u_matrix_loc=(0d0,0d0);u_matrix_opt_loc=(0d0,0d0)
+  do k=1,num_kpts_loc
+    do i=1,num_wann_loc
+      u_matrix_loc(i,i,k)=(1d0,0d0)
+      u_matrix_opt_loc(i,i,k)=(1d0,0d0)
+    enddo
+  enddo
+  lwindow_loc=.true.;wann_centres_loc=0d0;wann_spreads_loc=0d0;spread_loc=0d0
+  open(newunit=unit,file=trim(seed_name)//'.wout',status='replace',action='write',iostat=io)
+  if(io==0)then
+    write(unit,'(a)')'      1  -0.100E-13  0.0  1.0  0.0 <-- CONV'
+    write(unit,'(a)')'             <<< Wannierisation convergence criteria satisfied >>>'
+    write(unit,'(a)')' Final State'
+    write(unit,'(a)')' All done: wannier90 exiting'
+    close(unit)
+  endif
+end subroutine wannier_run
+#endif

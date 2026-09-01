@@ -8,6 +8,8 @@ module dg_overlapping_wannier_w90
 #endif
   implicit none
   private
+  integer,parameter,public::DG_W90_CONSTRAINED=1
+  integer,parameter,public::DG_W90_UNCONSTRAINED=2
   public::estimate_dg_w90_coordinator_bytes,validate_dg_w90_result
   public::setup_dg_w90_gamma_library,run_dg_w90_gamma_library
   public::assemble_dg_w90_gamma_a_matrix,assemble_dg_w90_gamma_matrices
@@ -3230,9 +3232,30 @@ contains
 #endif
   end subroutine assemble_dg_w90_gamma_matrices
 
+  subroutine remove_dg_w90_stale_dmn(filename,ok)
+    character(*),intent(in)::filename
+    logical,intent(out)::ok
+    integer::unit,io
+    logical::exists
+
+    ok=.false.
+    inquire(file=filename,exist=exists,iostat=io)
+    if(io/=0)return
+    if(.not.exists)then
+      ok=.true.
+      return
+    endif
+    open(newunit=unit,file=filename,status='old',action='read',iostat=io)
+    if(io/=0)return
+    close(unit,status='delete',iostat=io)
+    if(io/=0)return
+    inquire(file=filename,exist=exists,iostat=io)
+    ok=io==0.and..not.exists
+  end subroutine remove_dg_w90_stale_dmn
+
   subroutine setup_dg_w90_gamma_library(comm,seed,real_lattice,reciprocal_lattice,atom_symbols,&
-      atoms_cart,nband,nwann,num_iter,initial_projection,nntot,nncell,ok,message)
-    integer,intent(in)::comm,nband,nwann,num_iter
+      atoms_cart,nband,nwann,num_iter,initial_projection,symmetry_mode,nntot,nncell,ok,message)
+    integer,intent(in)::comm,nband,nwann,num_iter,symmetry_mode
     character(*),intent(in)::initial_projection
     character(*),intent(in)::seed
     real(real64),intent(in)::real_lattice(3,3),reciprocal_lattice(3,3),atoms_cart(:,:)
@@ -3244,6 +3267,7 @@ contains
 #if defined(USE_MPI) && defined(USE_WANNIER90)
     integer,parameter::num_nnmax=12
     integer::rank,ierr,unit,io,axis,atom,num_bands_out,num_wann_out,status
+    integer::mode_minimum,mode_maximum
     logical::dmn_exists
     integer::mp_grid(3),nnlist(1,num_nnmax),nncell_max(3,1,num_nnmax),exclude_bands(max(1,nband))
     integer::proj_l(max(1,nband)),proj_m(max(1,nband)),proj_radial(max(1,nband))
@@ -3252,7 +3276,7 @@ contains
       proj_x(3,max(1,nband)),proj_zona(max(1,nband)),proj_s_qaxis(3,max(1,nband))
     real(real64)::real_lattice_w90(3,3),reciprocal_lattice_w90(3,3),&
       atoms_cart_w90(3,size(atom_symbols))
-    logical::geometry_ok
+    logical::geometry_ok,remove_ok
     character(len(message))::geometry_message
     interface
       subroutine wannier_setup(seed_name,mp_grid_loc,num_kpts_loc,real_lattice_loc,&
@@ -3278,16 +3302,31 @@ contains
     end interface
     ok=.false.;message='';nntot=0;status=0
     call MPI_Comm_rank(comm,rank,ierr)
-    if(ierr/=MPI_SUCCESS.or.nband<=0.or.nwann/=nband.or.num_iter<=0.or.size(atom_symbols)<=0.or.&
+    if(ierr/=MPI_SUCCESS.or.len_trim(seed)==0.or.nband<=0.or.nwann/=nband.or.&
+        num_iter<=0.or.size(atom_symbols)<=0.or.&
         (trim(initial_projection)/='spectral'.and.trim(initial_projection)/='random').or.&
+        (symmetry_mode/=DG_W90_CONSTRAINED.and.symmetry_mode/=DG_W90_UNCONSTRAINED).or.&
         any(shape(atoms_cart)/=[3,size(atom_symbols)]).or..not.all(ieee_is_finite(real_lattice)).or.&
         .not.all(ieee_is_finite(reciprocal_lattice)).or..not.all(ieee_is_finite(atoms_cart)))status=1
+    call MPI_Allreduce(symmetry_mode,mode_minimum,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)status=1
+    call MPI_Allreduce(symmetry_mode,mode_maximum,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.mode_minimum/=mode_maximum)status=1
     call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(status/=0.or.ierr/=MPI_SUCCESS)then;message='invalid Gamma Wannier90 setup contract';return;endif
-    mp_grid=[1,1,1];kpoint=0d0
+    mp_grid=[1,1,1];kpoint=0d0;nnlist=0;nncell_max=0
     if(rank==0)then
-      inquire(file=trim(seed)//'.dmn',exist=dmn_exists)
-      if(.not.dmn_exists)status=4
+      dmn_exists=.false.
+      inquire(file=trim(seed)//'.dmn',exist=dmn_exists,iostat=io)
+      if(io/=0)status=4
+      if(status==0)then
+        if(symmetry_mode==DG_W90_CONSTRAINED)then
+          if(.not.dmn_exists)status=4
+        else if(dmn_exists)then
+          call remove_dg_w90_stale_dmn(trim(seed)//'.dmn',remove_ok)
+          if(.not.remove_ok)status=4
+        endif
+      endif
     endif
     if(rank==0.and.status==0)then
       call convert_dg_w90_library_geometry(real_lattice,reciprocal_lattice,atoms_cart,&
@@ -3307,8 +3346,12 @@ contains
         write(unit,'(a)')'trial_step = 2.0d0'
         write(unit,'(a)')'num_cg_steps = 0'
         write(unit,'(a)')'gamma_only = true'
-        write(unit,'(a)')'site_symmetry = .true.'
-        write(unit,'(a)')'symmetrize_eps = 1.d-10'
+        if(symmetry_mode==DG_W90_CONSTRAINED)then
+          write(unit,'(a)')'site_symmetry = .true.'
+          write(unit,'(a)')'symmetrize_eps = 1.d-10'
+        else
+          write(unit,'(a)')'site_symmetry = .false.'
+        endif
         write(unit,'(a)')'begin unit_cell_cart';write(unit,'(a)')'bohr'
         do axis=1,3;write(unit,'(3(es24.16,1x))')real_lattice(:,axis);enddo
         write(unit,'(a)')'end unit_cell_cart'
