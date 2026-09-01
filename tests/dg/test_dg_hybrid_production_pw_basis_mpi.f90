@@ -13,11 +13,11 @@ program test_dg_hybrid_production_pw_basis_mpi
   implicit none
   integer::comm,rank,nproc,ierr,nowned,i,p
   integer,allocatable::fragment_ids(:),core_fragment_ids(:),row_action(:,:),mixed_row_action(:,:),&
-    root_row_action(:,:),root_core_fragment_ids(:)
+    coset_row_action(:,:),root_row_action(:,:),root_core_fragment_ids(:)
   integer(int64),allocatable::box_ids(:),core_ids(:),root_core_ids(:)
   real(real64),allocatable::box_windows(:,:),coordinates(:,:),windows(:,:),g_vectors(:,:),root_coordinates(:,:)
   real(real64)::reciprocal_lattice(3,3),reciprocal_rotation(3,3,2)
-  real(real64)::mixed_reciprocal_rotation(3,3,3)
+  real(real64)::mixed_reciprocal_rotation(3,3,4)
   complex(real64),allocatable::tile(:,:)
   type(s_dg_hybrid_basis_catalog)::catalog
   type(s_dg_hybrid_production_selection)::selection
@@ -58,8 +58,11 @@ program test_dg_hybrid_production_pw_basis_mpi
   allocate(coordinates(3,size(core_ids)));coordinates=0d0
   do p=1,size(core_ids);coordinates(1,p)=real(core_ids(p)-1_int64,real64);enddo
   reciprocal_lattice=0d0;reciprocal_rotation=0d0
+  reciprocal_lattice(1,1)=1d0
+  reciprocal_lattice(2,2)=1d0+5d-14
+  reciprocal_lattice(3,3)=1d0+2d-14
   do i=1,3
-    reciprocal_lattice(i,i)=1d0;reciprocal_rotation(i,i,1)=1d0;reciprocal_rotation(i,i,2)=-1d0
+    reciprocal_rotation(i,i,1)=1d0;reciprocal_rotation(i,i,2)=-1d0
   enddo
   call build_dg_hybrid_production_pw_basis(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
     core_fragment_ids,coordinates,row_action,reciprocal_lattice,reciprocal_rotation,0d0,2,1d-12,&
@@ -82,7 +85,8 @@ program test_dg_hybrid_production_pw_basis_mpi
   call require(ok,'authoritative production symmetry analysis rejected: '//trim(message))
   call require(selection%analysis_complete.and..not.selection%identity_only,&
     'nontrivial production symmetry receipt is incomplete')
-  call require(selection%operation_count==2.and.selection%analysis_fingerprint/=0_int64,&
+  call require(selection%operation_count==2.and.selection%window_operation_count==2.and.&
+    selection%analysis_fingerprint/=0_int64,&
     'production symmetry receipt metadata mismatch')
   call require(all(shape(selection%packet_action)==[2,2]),'production packet action shape mismatch')
   call require(all(selection%packet_action(:,1)==[1,2]).and.all(selection%packet_action(:,2)==[2,1]),&
@@ -161,10 +165,29 @@ program test_dg_hybrid_production_pw_basis_mpi
     call require(.not.ok.and.index(message,'rank')>0,&
       'production freeze accepted rank-dependent effective-ID ordering')
   endif
-  allocate(mixed_row_action(4,3));mixed_row_action(:,1:2)=row_action
+  call analyze_dg_hybrid_production_selection(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
+    core_fragment_ids,coordinates,row_action,reciprocal_lattice,reciprocal_rotation,0.5d0,2,1d-12,&
+    windows,g_vectors,selection,workspace,fingerprint,ok,message)
+  call require(ok.and.selection%shell_added==2.and.&
+    all(selection%requested_packet_ids==selection%packet_ids),&
+    'strict production selection omitted a cutoff-completion shell: '//trim(message))
+  call freeze_dg_hybrid_production_selection(comm,selection,selection%packet_ids,catalog,fingerprint,ok,message)
+  call require(ok,'strict cutoff-complete production selection did not freeze: '//trim(message))
+  call analyze_dg_hybrid_production_selection(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
+    core_fragment_ids,coordinates,row_action,reciprocal_lattice,reciprocal_rotation,0.6d0,2,1d-12,&
+    windows,g_vectors,selection,workspace,fingerprint,ok,message)
+  call require(ok.and.selection%effective_cutoff<selection%requested_cutoff,&
+    'between-shell effective cutoff receipt was not exposed: '//trim(message))
+  call freeze_dg_hybrid_production_selection(comm,selection,selection%packet_ids,catalog,fingerprint,ok,message)
+  call require(ok,'between-shell production selection did not freeze: '//trim(message))
+  allocate(mixed_row_action(4,4));mixed_row_action(:,1:2)=row_action
   mixed_row_action(:,3)=[1,3,2,4]
+  mixed_row_action(:,4)=[4,2,3,1]
   mixed_reciprocal_rotation(:,:,1:2)=reciprocal_rotation
-  mixed_reciprocal_rotation(:,:,3)=reciprocal_rotation(:,:,1)
+  mixed_reciprocal_rotation(:,:,3)=0d0
+  mixed_reciprocal_rotation(1,2,3)=1d0;mixed_reciprocal_rotation(2,1,3)=1d0
+  mixed_reciprocal_rotation(3,3,3)=1d0
+  mixed_reciprocal_rotation(:,:,4)=-mixed_reciprocal_rotation(:,:,3)
   call analyze_dg_hybrid_production_selection(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
     core_fragment_ids,coordinates,mixed_row_action,reciprocal_lattice,mixed_reciprocal_rotation,0d0,2,1d-12,&
     windows,g_vectors,selection,workspace,fingerprint,ok,message)
@@ -172,17 +195,38 @@ program test_dg_hybrid_production_pw_basis_mpi
     'authoritative production analysis silently downgraded a known physical group')
   call analyze_dg_hybrid_lcfo_selection(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
     core_fragment_ids,coordinates,mixed_row_action,reciprocal_lattice,mixed_reciprocal_rotation,&
-    701_int64,0d0,2,1d-12,windows,g_vectors,selection,workspace,fingerprint,ok,message)
+    701_int64,0.5d0,7,2,1d-12,windows,g_vectors,selection,workspace,fingerprint,ok,message)
   call require(ok,'LCFO-deferred production selection rejected split fragment action: '//trim(message))
   call require(selection%lcfo_symmetry_deferred,'LCFO deferral provenance is missing')
   call require(selection%wannier_symmetry_fingerprint==701_int64,'Wannier provenance was not retained')
-  call require(selection%operation_count==1.and.selection%identity_only,&
-    'fragment-local bookkeeping must use one explicit identity action')
+  call require(selection%operation_count==4.and.selection%window_operation_count==1.and.&
+    selection%identity_only,'fragment-local bookkeeping and physical reciprocal operations were conflated')
+  call require(size(selection%row_action,2)==1.and.size(selection%reciprocal_action,2)==4.and.&
+    size(selection%reciprocal_rotation,3)==4,&
+    'LCFO-deferred selection discarded the authoritative reciprocal operation catalog')
+  call require(selection%pw_mode_count==7.and.selection%shell_added==2.and.selection%orbit_added==2.and.&
+    selection%requested_cutoff==0.5d0.and.selection%effective_cutoff>selection%requested_cutoff,&
+    'LCFO-deferred PW cutoff-completion receipt is incorrect')
   call require(all(selection%requested_packet_ids==selection%packet_ids),&
     'LCFO-deferred preparation must retain the complete PW packet catalog')
+  allocate(coset_row_action(4,4))
+  coset_row_action(:,1)=[1,2,3,4]
+  coset_row_action(:,2)=[4,3,2,1]
+  coset_row_action(:,3)=[2,1,3,4]
+  coset_row_action(:,4)=[1,2,4,3]
+  call analyze_dg_hybrid_lcfo_selection(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
+    core_fragment_ids,coordinates,coset_row_action,reciprocal_lattice,mixed_reciprocal_rotation,&
+    701_int64,0.5d0,7,2,1d-12,windows,g_vectors,selection,workspace,fingerprint,ok,message)
+  call require(ok.and.selection%operation_count==4.and.selection%window_operation_count==1,&
+    'LCFO-deferred selection rejected nonclosed affine coset representatives: '//trim(message))
   call analyze_dg_hybrid_lcfo_selection(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
     core_fragment_ids,coordinates,mixed_row_action,reciprocal_lattice,mixed_reciprocal_rotation,&
-    0_int64,0d0,2,1d-12,windows,g_vectors,selection,workspace,fingerprint,ok,message)
+    701_int64,0.5d0,6,2,1d-12,windows,g_vectors,selection,workspace,fingerprint,ok,message)
+  call require(.not.ok.and.index(message,'capacity')>0,&
+    'wannier_pw_max clipped a completed shell/orbit instead of reporting capacity failure')
+  call analyze_dg_hybrid_lcfo_selection(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
+    core_fragment_ids,coordinates,mixed_row_action,reciprocal_lattice,mixed_reciprocal_rotation,&
+    0_int64,0.5d0,7,2,1d-12,windows,g_vectors,selection,workspace,fingerprint,ok,message)
   call require(.not.ok.and.index(message,'Wannier symmetry provenance')>0,&
     'LCFO-deferred production selection accepted missing Wannier symmetry provenance')
   if(rank==0)write(*,'(a,i0,a,i0)')'PRODUCTION_PW ranks=',nproc,' fingerprint=',fingerprint

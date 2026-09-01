@@ -235,6 +235,9 @@ assert "analyze_dg_hybrid_lcfo_selection" in preparation, (
 assert "basis_fingerprint_arg" in preparation[
     preparation.index("call analyze_dg_hybrid_lcfo_selection"):
 ], "LCFO-deferred preparation omits authoritative Wannier provenance"
+assert "pw_max_arg" in preparation[
+    preparation.index("call analyze_dg_hybrid_lcfo_selection"):
+], "LCFO-deferred preparation omits the post-completion PW capacity guard"
 assert "call analyze_dg_hybrid_production_selection" not in preparation, (
     "Hybrid production preparation still invokes strict fragment covariance analysis"
 )
@@ -253,6 +256,22 @@ assert "wannier_fingerprint=" in receipt and "basis_fingerprint" in receipt, (
 )
 assert "production_fingerprint=" in receipt and "divided_pw_fingerprint" in receipt, (
     "LCFO symmetry-handoff receipt omits the nonzero production fingerprint"
+)
+pw_receipt_marker = "[HYBRID-PW-CUTOFF]"
+assert pw_receipt_marker in source, "Hybrid continuation omits the completed PW cutoff receipt"
+pw_receipt = source[source.index(pw_receipt_marker):source.index(pw_receipt_marker) + 400]
+for token in ("requested=", "effective=", "shell_added=", "orbit_added="):
+    assert token in pw_receipt, f"Hybrid PW cutoff receipt omits {token}"
+assert "wannier_pw_max" in source[:source.index("contains")], (
+    "Hybrid continuation does not import the user PW capacity guard"
+)
+production_call_start = source.index("call prepare_dg_hybrid_divided_production_basis")
+production_call = source[production_call_start:production_call_start + 1800]
+assert "ow_reciprocal_operation_maps" in production_call, (
+    "Hybrid PW preparation still uses only the LCFO diagnostic generator maps"
+)
+assert "global_point_rotations(:,:,global_point_representatives)" in production_call.replace(" ", ""), (
+    "Hybrid PW preparation omits the complete authoritative point-cogroup rotations"
 )
 
 driver_name = "subroutine run_dg_hybrid_concrete_continuation"

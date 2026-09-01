@@ -46,7 +46,7 @@ use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_hybrid_scf, 
   dg_ow_localization_support_tolerance,dg_ow_localization_spread_tolerance,&
   dg_ow_localization_gradient_tolerance,dg_ow_localization_max_iterations,&
   dg_ow_candidate_states_per_fragment,dg_ow_target_wanniers_per_fragment,wannier_num_iter,&
-  dg_ow_w90_initial_projection,wannier_pw_cutoff,nscf,method_mixing,&
+  dg_ow_w90_initial_projection,wannier_pw_cutoff,wannier_pw_max,nscf,method_mixing,&
   dg_dc_seed_mode,dg_dc_seed_directory
 use dg_dc_seed_checkpoint,only:s_dg_dc_seed_contract,s_dg_dc_seed_payload,&
   DG_DC_SEED_ABSENT,DG_DC_SEED_VALID,build_dg_dc_seed_contract,probe_dg_dc_seed,&
@@ -1299,6 +1299,7 @@ contains
     type(s_dg_prepared_translation_action)::translation_prepared_action
     type(s_dg_prepared_spectral_basins)::spectral_prepared_basins
     integer(8),allocatable::physical_ids(:),local_symmetry_map(:,:),ow_pencil_generator_maps(:,:),&
+      ow_reciprocal_operation_maps(:,:),&
       exact_fragment_symmetry_fingerprints(:),global_symmetry_map(:,:)
     integer(8),allocatable::lcfo_core_ids(:),initial_core_ids(:),ow_total_density_ids(:),&
       ow_neighbor_plus_ids(:),ow_neighbor_minus_ids(:),ow_gradient_identity_map(:,:)
@@ -3034,6 +3035,10 @@ contains
       if(rank==0)write(*,'(2a)')&
         '[OW-GS-DIAGNOSTIC] nonmonomial center action retained: ',trim(center_failure_message)
     end if
+    allocate(ow_reciprocal_operation_maps,source=global_symmetry_map(:,global_point_representatives),&
+      stat=allocation_status)
+    call comm_logical_and(allocation_status==0,reusable,dc%icomm_tot)
+    if(.not.reusable)error stop 'physical reciprocal-operation map allocation failed'
     allocate(ow_pencil_generator_maps,source=global_symmetry_map(:,global_affine_generators),&
       stat=allocation_status)
     call comm_logical_and(allocation_status==0,reusable,dc%icomm_tot)
@@ -3092,6 +3097,10 @@ contains
     endif
     ! HYBRID_LOCALIZATION_FIRST_BRANCH_END
     if(.not.allocated(ow_pencil_generator_maps))then
+      allocate(ow_reciprocal_operation_maps,source=global_symmetry_map(:,global_point_representatives),&
+        stat=allocation_status)
+      call comm_logical_and(allocation_status==0,reusable,dc%icomm_tot)
+      if(.not.reusable)error stop 'physical reciprocal-operation map allocation failed'
       allocate(ow_pencil_generator_maps,source=global_symmetry_map(:,global_affine_generators),&
         stat=allocation_status)
       call comm_logical_and(allocation_status==0,reusable,dc%icomm_tot)
@@ -3395,13 +3404,19 @@ contains
         dc%ixyz_frag,dc%nxyz_domain_frag,dc%system_tot%hgs,ncore,nbox,nxy8,expected_core_count,&
         physical_ids,ow_core_ids,ow_core_weights,&
         ow_core_values,ow_box_values,ow_basis%center_owner_fragment,divided_fragment_basis,&
-        size(ow_basis%center_owner_fragment),size(ow_pencil_generator_maps,2),&
-        ow_pencil_generator_maps,ow_raw_partition_weight,w90_reciprocal_lattice,&
-        global_point_rotations(:,:,global_affine_generators),wannier_pw_cutoff,dg_ow_symmetry_tolerance,&
+        size(ow_basis%center_owner_fragment),size(ow_reciprocal_operation_maps,2),&
+        ow_reciprocal_operation_maps,ow_raw_partition_weight,w90_reciprocal_lattice,&
+        global_point_rotations(:,:,global_point_representatives),wannier_pw_cutoff,wannier_pw_max,&
+        dg_ow_symmetry_tolerance,&
         basis_fingerprint,divided_pw_fingerprint,&
         divided_buffer_window_fingerprint,divided_fragment_fingerprint,divided_production_selection,ok,message)
       if(.not.ok)write(0,'(a)')trim(message)
       if(.not.ok)error stop 'divided Hybrid production basis preparation failed'
+      if(rank==0)write(*,'(a,2(a,es24.16),2(a,i0))')'[HYBRID-PW-CUTOFF]',&
+        ' requested=',divided_production_selection%requested_cutoff,&
+        ' effective=',divided_production_selection%effective_cutoff,&
+        ' shell_added=',divided_production_selection%shell_added,&
+        ' orbit_added=',divided_production_selection%orbit_added
       if(basis_fingerprint==0_8.or.divided_pw_fingerprint==0_8)&
         error stop 'divided Hybrid LCFO symmetry handoff fingerprints are missing'
       if(rank==0)write(*,'(a,i0,a,i0)')&
@@ -3683,6 +3698,7 @@ contains
     if(allocated(ow_scalar_probe_residual))deallocate(ow_scalar_probe_residual)
     deallocate(ow_scalar_probe,ow_vector_probe,ow_scalar_representation,ow_scalar_probe_weights)
     if(allocated(ow_pencil_generator_maps))deallocate(ow_pencil_generator_maps)
+    if(allocated(ow_reciprocal_operation_maps))deallocate(ow_reciprocal_operation_maps)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'one-shot stitched Hamiltonian build failed';endif
     if(one_shot_operator_fingerprint/=operator_fingerprint)&
       error stop 'one-shot stitched Hamiltonian operator fingerprint mismatch'
@@ -8134,7 +8150,7 @@ subroutine prepare_dg_hybrid_divided_production_basis(comm_arg,fragment_count_ar
     grid_num_arg,fragment_origin_arg,fragment_size_arg,hgs_arg,ncore_arg,nbox_arg,nxy_arg,&
     global_count_arg,physical_ids_arg,core_ids_arg,core_weights_arg,core_values_arg,box_values_arg,&
     wannier_owner_arg,fragment_basis_arg,nwannier_arg,noperation_arg,pencil_maps_arg,raw_partition_arg,&
-    reciprocal_lattice_arg,reciprocal_rotations_arg,pw_cutoff_arg,tolerance_arg,basis_fingerprint_arg,&
+    reciprocal_lattice_arg,reciprocal_rotations_arg,pw_cutoff_arg,pw_max_arg,tolerance_arg,basis_fingerprint_arg,&
     pw_fingerprint_arg,buffer_fingerprint_arg,fragment_fingerprint_arg,selection_arg,callback_ok,callback_message)
   use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog,s_dg_hybrid_production_selection
   use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
@@ -8145,7 +8161,7 @@ subroutine prepare_dg_hybrid_divided_production_basis(comm_arg,fragment_count_ar
   implicit none
   integer,intent(in)::comm_arg,fragment_count_arg,fragment_id_arg,grid_num_arg(3),&
     fragment_origin_arg(3,fragment_count_arg),fragment_size_arg(3,fragment_count_arg),ncore_arg,nbox_arg,&
-    nwannier_arg,noperation_arg
+    nwannier_arg,noperation_arg,pw_max_arg
   integer(8),intent(in)::nxy_arg,global_count_arg,physical_ids_arg(nbox_arg),core_ids_arg(ncore_arg),&
     pencil_maps_arg(ncore_arg,noperation_arg),basis_fingerprint_arg
   real(8),intent(in)::hgs_arg(3),core_weights_arg(ncore_arg),raw_partition_arg(nbox_arg),&
@@ -8209,7 +8225,7 @@ subroutine prepare_dg_hybrid_divided_production_basis(comm_arg,fragment_count_ar
   enddo
   call analyze_dg_hybrid_lcfo_selection(comm_arg,int(global_count_arg),fragment_count_arg,&
     fragment_ids,physical_ids_arg,box_windows,core_ids_arg,core_fragment_ids,core_coordinates,row_action,&
-    reciprocal_lattice_arg,reciprocal_rotations_arg,basis_fingerprint_arg,pw_cutoff_arg,16,tolerance_arg,&
+    reciprocal_lattice_arg,reciprocal_rotations_arg,basis_fingerprint_arg,pw_cutoff_arg,pw_max_arg,16,tolerance_arg,&
     core_windows,g_vectors,&
     selection_arg,pw_workspace,pw_fingerprint_arg,callback_ok,callback_message)
   if(.not.callback_ok)return

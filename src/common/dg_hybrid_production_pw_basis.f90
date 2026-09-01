@@ -1,6 +1,7 @@
 #include "config.h"
 module dg_hybrid_production_pw_basis
   use,intrinsic::iso_fortran_env,only:int64,real64
+  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
   use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog,s_dg_hybrid_production_selection
   use dg_hybrid_reciprocal_catalog,only:build_dg_hybrid_reciprocal_catalog
   use dg_hybrid_window_distribution,only:prepare_dg_hybrid_window_distribution
@@ -30,10 +31,10 @@ contains
     type(s_dg_hybrid_basis_catalog)::universe_catalog
     integer,allocatable::normalized_row_action(:,:),fragment_action(:,:),g_integer(:,:),g_action(:,:),&
       g_star(:),g_conjugate(:)
-    logical,allocatable::requested_packet(:)
     real(real64),allocatable::raw_windows(:,:)
     integer(int64)::window_workspace,window_fingerprint,reciprocal_fingerprint,basis_workspace,basis_fingerprint
-    integer::i,j,op,packet,target_fragment,target_packet
+    real(real64)::effective_cutoff
+    integer::i,j,op,packet,target_fragment,target_packet,shell_added,orbit_added
     logical::stage_ok
     character(256)::stage_message
 
@@ -50,8 +51,17 @@ contains
       window_workspace,window_fingerprint,stage_ok,stage_message)
     if(.not.stage_ok)then;message=trim(stage_message);return;endif
     call build_dg_hybrid_reciprocal_catalog(comm,reciprocal_lattice,reciprocal_rotation,cutoff,tolerance,&
-      g_integer,g_vectors,g_action,g_star,g_conjugate,reciprocal_fingerprint,stage_ok,stage_message)
-    if(.not.stage_ok)then;message=trim(stage_message);return;endif
+      g_integer,g_vectors,g_action,g_star,g_conjugate,reciprocal_fingerprint,effective_cutoff,&
+      shell_added,orbit_added,stage_ok,stage_message)
+    if(.not.stage_ok)then
+      if(index(stage_message,'identity')>0.or.index(stage_message,'closed')>0.or.&
+          index(stage_message,'duplicate')>0)then
+        message='authoritative production operations do not form an explicit group: '//trim(stage_message)
+      else
+        message=trim(stage_message)
+      endif
+      return
+    endif
     if(.not.valid_authoritative_group(normalized_row_action,fragment_action,g_action,&
       reciprocal_rotation,tolerance))then
       message='authoritative production operations do not form an explicit group';return
@@ -60,8 +70,14 @@ contains
       fragment_action,normalized_row_action,g_vectors,reciprocal_rotation,g_action,g_star,g_conjugate,&
       tile_width,tolerance,windows,universe_catalog,basis_workspace,basis_fingerprint,stage_ok,stage_message)
     if(.not.stage_ok)then;message=trim(stage_message);return;endif
-    selection%operation_count=size(normalized_row_action,2)
-    selection%identity_only=selection%operation_count==1
+    selection%window_operation_count=size(normalized_row_action,2)
+    selection%operation_count=size(g_action,2)
+    selection%pw_mode_count=size(g_vectors,2)
+    selection%requested_cutoff=cutoff
+    selection%effective_cutoff=effective_cutoff
+    selection%shell_added=shell_added
+    selection%orbit_added=orbit_added
+    selection%identity_only=selection%window_operation_count==1.and.selection%operation_count==1
     if(selection%identity_only)then
       selection%identity_only=all(normalized_row_action(:,1)==[(i,i=1,global_point_count)]).and.&
         all(fragment_action(:,1)==[(i,i=1,fragment_count)]).and.&
@@ -88,16 +104,7 @@ contains
         selection%packet_action(packet,op)=target_packet
       enddo
     enddo
-    allocate(requested_packet(size(universe_catalog%packets)));requested_packet=.false.
-    do packet=1,size(universe_catalog%packets)
-      do j=1,size(universe_catalog%packets(packet)%g_indices)
-        i=universe_catalog%packets(packet)%g_indices(j)
-        if(0.5d0*sum(g_vectors(:,i)**2)<=cutoff)requested_packet(packet)=.true.
-      enddo
-    enddo
-    allocate(selection%requested_packet_ids(count(requested_packet)))
-    selection%requested_packet_ids=pack(selection%packet_ids,requested_packet)
-    if(size(selection%requested_packet_ids)<1)then;message='empty requested production packet selection';return;endif
+    allocate(selection%requested_packet_ids,source=selection%packet_ids)
     call move_alloc(universe_catalog%packets,selection%packets)
     selection%window_fingerprint=window_fingerprint
     selection%packet_fingerprint=ieor(reciprocal_fingerprint,basis_fingerprint)
@@ -110,9 +117,9 @@ contains
 
   subroutine analyze_dg_hybrid_lcfo_selection(comm,global_point_count,fragment_count,&
       fragment_ids,box_ids,box_windows,core_ids,core_fragment_ids,coordinates,row_action,&
-      reciprocal_lattice,reciprocal_rotation,wannier_symmetry_fingerprint,cutoff,tile_width,&
+      reciprocal_lattice,reciprocal_rotation,wannier_symmetry_fingerprint,cutoff,maximum_pw_count,tile_width,&
       tolerance,windows,g_vectors,selection,workspace_peak_bytes,fingerprint,ok,message)
-    integer,intent(in)::comm,global_point_count,fragment_count,fragment_ids(:),core_fragment_ids(:)
+    integer,intent(in)::comm,global_point_count,fragment_count,fragment_ids(:),core_fragment_ids(:),maximum_pw_count
     integer(int64),intent(in)::box_ids(:),core_ids(:),wannier_symmetry_fingerprint
     real(real64),intent(in)::box_windows(:,:),coordinates(:,:),reciprocal_lattice(3,3),&
       reciprocal_rotation(:,:,:),cutoff,tolerance
@@ -122,12 +129,19 @@ contains
     integer(int64),intent(out)::workspace_peak_bytes,fingerprint
     logical,intent(out)::ok
     character(*),intent(out)::message
-    integer,allocatable::identity_row_action(:,:)
-    real(real64)::identity_reciprocal_rotation(3,3,1)
-    integer::i,ierr,local_bad,global_bad
-    integer(int64)::minimum_fingerprint,maximum_fingerprint
+    type(s_dg_hybrid_basis_catalog)::universe_catalog
+    integer,allocatable::normalized_physical_row_action(:,:),identity_row_action(:,:),fragment_action(:,:),&
+      g_integer(:,:),g_action(:,:),g_star(:),g_conjugate(:)
+    real(real64),allocatable::raw_windows(:,:)
+    real(real64)::effective_cutoff
+    integer::i,op,packet,ierr,local_bad,global_bad,minimum_integer,maximum_integer,shell_added,orbit_added
+    integer(int64)::minimum_fingerprint,maximum_fingerprint,window_workspace,window_fingerprint,&
+      reciprocal_fingerprint,basis_workspace,basis_fingerprint,physical_row_fingerprint
+    logical::stage_ok
+    character(256)::stage_message
 
     ok=.false.;message='';workspace_peak_bytes=0_int64;fingerprint=0_int64
+    selection%analysis_complete=.false.
     local_bad=merge(0,1,wannier_symmetry_fingerprint/=0_int64)
 #ifdef USE_MPI
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -138,25 +152,80 @@ contains
     if(ierr/=MPI_SUCCESS.or.minimum_fingerprint/=maximum_fingerprint)then
       message='Wannier symmetry provenance rank agreement failed';return
     endif
+    call MPI_Allreduce(maximum_pw_count,minimum_integer,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='PW capacity rank agreement failed';return;endif
+    call MPI_Allreduce(maximum_pw_count,maximum_integer,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_integer/=maximum_integer)then
+      message='PW capacity rank agreement failed';return
+    endif
 #else
     global_bad=local_bad
+    minimum_integer=maximum_pw_count;maximum_integer=maximum_pw_count
 #endif
     if(global_bad/=0)then;message='Wannier symmetry provenance is missing';return;endif
-    allocate(identity_row_action(size(core_ids),1))
-    identity_row_action(:,1)=int(core_ids)
-    identity_reciprocal_rotation=0d0
-    do i=1,3;identity_reciprocal_rotation(i,i,1)=1d0;enddo
-    call analyze_dg_hybrid_production_selection(comm,global_point_count,fragment_count,fragment_ids,&
-      box_ids,box_windows,core_ids,core_fragment_ids,coordinates,identity_row_action,reciprocal_lattice,&
-      identity_reciprocal_rotation,cutoff,tile_width,tolerance,windows,g_vectors,selection,&
-      workspace_peak_bytes,fingerprint,ok,message)
-    if(.not.ok)return
-    if(allocated(selection%requested_packet_ids))deallocate(selection%requested_packet_ids)
+    if(minimum_integer<0)then;message='PW capacity must be nonnegative';return;endif
+    call normalize_dg_hybrid_production_row_action(comm,global_point_count,core_ids,row_action,&
+      normalized_physical_row_action,stage_ok,stage_message)
+    if(.not.stage_ok)then;message=trim(stage_message);return;endif
+    call validate_dg_hybrid_production_rotation_extent(comm,size(normalized_physical_row_action,2),&
+      reciprocal_rotation,stage_ok,stage_message)
+    if(.not.stage_ok)then;message=trim(stage_message);return;endif
+    if(.not.valid_row_action_catalog(normalized_physical_row_action))then
+      message='authoritative physical row operations are not valid permutations';return
+    endif
+    physical_row_fingerprint=int(z'1F83D9ABFB41BD6B',int64)
+    do op=1,size(normalized_physical_row_action,2);do i=1,global_point_count
+      physical_row_fingerprint=ieor(ishftc(physical_row_fingerprint,7),&
+        int(normalized_physical_row_action(i,op),int64))
+    enddo;enddo
+    allocate(identity_row_action(global_point_count,1))
+    identity_row_action(:,1)=[(i,i=1,global_point_count)]
+    call prepare_dg_hybrid_window_distribution(comm,global_point_count,fragment_count,fragment_ids,&
+      box_ids,box_windows,core_ids,core_fragment_ids,identity_row_action,raw_windows,fragment_action,&
+      window_workspace,window_fingerprint,stage_ok,stage_message)
+    if(.not.stage_ok)then;message=trim(stage_message);return;endif
+    call build_dg_hybrid_reciprocal_catalog(comm,reciprocal_lattice,reciprocal_rotation,cutoff,tolerance,&
+      g_integer,g_vectors,g_action,g_star,g_conjugate,reciprocal_fingerprint,effective_cutoff,&
+      shell_added,orbit_added,stage_ok,stage_message)
+    if(.not.stage_ok)then;message=trim(stage_message);return;endif
+    if(maximum_pw_count>0.and.size(g_vectors,2)>maximum_pw_count)then
+      write(message,'(a,i0,a,i0)')'completed reciprocal catalog exceeds PW capacity: required=',&
+        size(g_vectors,2),' capacity=',maximum_pw_count
+      return
+    endif
+    call build_dg_hybrid_windowed_pw_basis(comm,global_point_count,core_ids,coordinates,raw_windows,&
+      fragment_action,identity_row_action,g_vectors,reciprocal_rotation,g_action,g_star,g_conjugate,&
+      tile_width,tolerance,windows,universe_catalog,basis_workspace,basis_fingerprint,stage_ok,stage_message)
+    if(.not.stage_ok)then;message=trim(stage_message);return;endif
+    selection%window_operation_count=1
+    selection%operation_count=size(g_action,2)
+    selection%pw_mode_count=size(g_vectors,2)
+    selection%requested_cutoff=cutoff
+    selection%effective_cutoff=effective_cutoff
+    selection%shell_added=shell_added
+    selection%orbit_added=orbit_added
+    selection%identity_only=.true.
+    allocate(selection%fragment_action,source=fragment_action)
+    allocate(selection%row_action,source=identity_row_action)
+    allocate(selection%reciprocal_action,source=g_action)
+    allocate(selection%reciprocal_rotation,source=reciprocal_rotation)
+    allocate(selection%packet_ids(size(universe_catalog%packets)),&
+      selection%packet_action(size(universe_catalog%packets),selection%operation_count))
+    selection%packet_ids=[(i,i=1,size(selection%packet_ids))]
+    do op=1,selection%operation_count;do packet=1,size(selection%packet_ids)
+      selection%packet_action(packet,op)=packet
+    enddo;enddo
     allocate(selection%requested_packet_ids,source=selection%packet_ids)
+    call move_alloc(universe_catalog%packets,selection%packets)
     selection%lcfo_symmetry_deferred=.true.
     selection%wannier_symmetry_fingerprint=wannier_symmetry_fingerprint
+    selection%window_fingerprint=window_fingerprint
+    selection%packet_fingerprint=ieor(ieor(reciprocal_fingerprint,basis_fingerprint),physical_row_fingerprint)
     fingerprint=production_selection_fingerprint(selection)
     selection%analysis_fingerprint=fingerprint
+    selection%analysis_complete=.true.
+    workspace_peak_bytes=max(window_workspace,basis_workspace)
+    ok=.true.
   end subroutine analyze_dg_hybrid_lcfo_selection
 
   subroutine freeze_dg_hybrid_production_selection(comm,selection,effective_ids,catalog,fingerprint,ok,message)
@@ -194,16 +263,24 @@ contains
       .not.allocated(selection%fragment_action).or..not.allocated(selection%row_action).or.&
       .not.allocated(selection%reciprocal_action).or..not.allocated(selection%reciprocal_rotation))local_bad=1
     if(local_bad==0)then
-      if(selection%operation_count<1.or.size(selection%packets)/=size(selection%packet_ids).or.&
+      if(selection%operation_count<1.or.selection%window_operation_count<1.or.&
+        selection%pw_mode_count<1.or.selection%shell_added<0.or.selection%orbit_added<0.or.&
+        .not.ieee_is_finite(selection%requested_cutoff).or..not.ieee_is_finite(selection%effective_cutoff).or.&
+        selection%requested_cutoff<0d0.or.selection%effective_cutoff<0d0.or.&
+        size(selection%packets)/=size(selection%packet_ids).or.&
         any(shape(selection%packet_action)/=[size(selection%packet_ids),selection%operation_count]).or.&
-        size(selection%fragment_action,2)/=selection%operation_count.or.&
-        size(selection%row_action,2)/=selection%operation_count.or.&
-        size(selection%reciprocal_action,2)/=selection%operation_count.or.&
+        size(selection%fragment_action,2)/=selection%window_operation_count.or.&
+        size(selection%row_action,2)/=selection%window_operation_count.or.&
+        any(shape(selection%reciprocal_action)/=[selection%pw_mode_count,selection%operation_count]).or.&
         any(shape(selection%reciprocal_rotation)/=[3,3,selection%operation_count]))local_bad=1
     endif
     if(local_bad==0)then
       do i=1,size(selection%packets)
         if(.not.allocated(selection%packets(i)%g_indices))local_bad=1
+        if(allocated(selection%packets(i)%g_indices))then
+          if(any(selection%packets(i)%g_indices<1).or.&
+            any(selection%packets(i)%g_indices>selection%pw_mode_count))local_bad=1
+        endif
       enddo
     endif
 #ifdef USE_MPI
@@ -269,6 +346,14 @@ contains
     catalog%packet_fingerprint=fingerprint
     catalog%catalog_fingerprint=ieor(selection%analysis_fingerprint,ishftc(fingerprint,17))
     if(catalog%catalog_fingerprint==0_int64)catalog%catalog_fingerprint=1_int64
+    catalog%operation_count=selection%operation_count
+    catalog%window_operation_count=selection%window_operation_count
+    catalog%pw_mode_count=selection%pw_mode_count
+    catalog%shell_added=selection%shell_added
+    catalog%orbit_added=selection%orbit_added
+    catalog%requested_cutoff=selection%requested_cutoff
+    catalog%effective_cutoff=selection%effective_cutoff
+    catalog%wannier_fingerprint=selection%wannier_symmetry_fingerprint
     catalog%valid=.true.;ok=.true.
   end subroutine freeze_dg_hybrid_production_selection
 
@@ -280,16 +365,26 @@ contains
     fingerprint=ieor(int(z'510E527FADE682D1',int64),selection%window_fingerprint)
     fingerprint=ieor(ishftc(fingerprint,7),selection%packet_fingerprint)
     fingerprint=ieor(ishftc(fingerprint,7),int(selection%operation_count,int64))
+    fingerprint=ieor(ishftc(fingerprint,7),int(selection%window_operation_count,int64))
+    fingerprint=ieor(ishftc(fingerprint,7),int(selection%pw_mode_count,int64))
+    fingerprint=ieor(ishftc(fingerprint,7),int(selection%shell_added,int64))
+    fingerprint=ieor(ishftc(fingerprint,7),int(selection%orbit_added,int64))
+    bits=transfer(selection%requested_cutoff,bits)
+    fingerprint=ieor(ishftc(fingerprint,7),bits)
+    bits=transfer(selection%effective_cutoff,bits)
+    fingerprint=ieor(ishftc(fingerprint,7),bits)
     fingerprint=ieor(ishftc(fingerprint,7),merge(1_int64,0_int64,selection%identity_only))
     fingerprint=ieor(ishftc(fingerprint,7),merge(1_int64,0_int64,selection%lcfo_symmetry_deferred))
     fingerprint=ieor(ishftc(fingerprint,7),selection%wannier_symmetry_fingerprint)
-    do op=1,selection%operation_count
+    do op=1,selection%window_operation_count
       do i=1,size(selection%fragment_action,1)
         fingerprint=ieor(ishftc(fingerprint,7),int(selection%fragment_action(i,op),int64))
       enddo
       do i=1,size(selection%row_action,1)
         fingerprint=ieor(ishftc(fingerprint,7),int(selection%row_action(i,op),int64))
       enddo
+    enddo
+    do op=1,selection%operation_count
       do i=1,size(selection%reciprocal_action,1)
         fingerprint=ieor(ishftc(fingerprint,7),int(selection%reciprocal_action(i,op),int64))
       enddo
@@ -385,6 +480,21 @@ contains
     ok=.true.
   end subroutine validate_dg_hybrid_production_rotation_extent
 
+  logical function valid_row_action_catalog(row_action)
+    integer,intent(in)::row_action(:,:)
+    integer::operation,i
+
+    valid_row_action_catalog=.false.
+    if(size(row_action,1)<1.or.size(row_action,2)<1.or.any(row_action<1).or.&
+      any(row_action>size(row_action,1)))return
+    do operation=1,size(row_action,2)
+      do i=1,size(row_action,1)
+        if(count(row_action(:,operation)==i)/=1)return
+      enddo
+    enddo
+    valid_row_action_catalog=.true.
+  end function valid_row_action_catalog
+
   logical function valid_authoritative_group(row_action,fragment_action,g_action,rotation,tolerance)
     integer,intent(in)::row_action(:,:),fragment_action(:,:),g_action(:,:)
     real(real64),intent(in)::rotation(:,:,:),tolerance
@@ -444,6 +554,8 @@ contains
     integer,allocatable::fragment_action(:,:),g_integer(:,:),g_action(:,:),g_star(:),g_conjugate(:)
     real(real64),allocatable::raw_windows(:,:)
     integer(int64)::window_workspace,window_fingerprint,reciprocal_fingerprint,basis_workspace,basis_fingerprint
+    real(real64)::effective_cutoff
+    integer::shell_added,orbit_added
     logical::stage_ok
     character(256)::stage_message
     ok=.false.;message='';workspace_peak_bytes=0_int64;fingerprint=0_int64
@@ -453,7 +565,8 @@ contains
       window_workspace,window_fingerprint,stage_ok,stage_message)
     if(.not.stage_ok)then;message=trim(stage_message);return;endif
     call build_dg_hybrid_reciprocal_catalog(comm,reciprocal_lattice,reciprocal_rotation,cutoff,tolerance,&
-      g_integer,g_vectors,g_action,g_star,g_conjugate,reciprocal_fingerprint,stage_ok,stage_message)
+      g_integer,g_vectors,g_action,g_star,g_conjugate,reciprocal_fingerprint,effective_cutoff,&
+      shell_added,orbit_added,stage_ok,stage_message)
     if(.not.stage_ok)then;message=trim(stage_message);return;endif
     call build_dg_hybrid_windowed_pw_basis(comm,global_point_count,core_ids,coordinates,raw_windows,&
       fragment_action,row_action,g_vectors,reciprocal_rotation,g_action,g_star,g_conjugate,&
@@ -461,6 +574,10 @@ contains
     if(.not.stage_ok)then;message=trim(stage_message);catalog%valid=.false.;return;endif
     catalog%window_fingerprint=window_fingerprint
     catalog%packet_fingerprint=ieor(reciprocal_fingerprint,basis_fingerprint)
+    catalog%requested_cutoff=cutoff
+    catalog%effective_cutoff=effective_cutoff
+    catalog%shell_added=shell_added
+    catalog%orbit_added=orbit_added
     catalog%catalog_fingerprint=ieor(ieor(ishftc(window_fingerprint,11),&
       ishftc(reciprocal_fingerprint,23)),basis_fingerprint)
     if(catalog%catalog_fingerprint==0_int64)catalog%catalog_fingerprint=1_int64

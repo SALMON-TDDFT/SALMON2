@@ -23,7 +23,7 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer::rank,nproc,ierr,nlocal,nfragment,noperation,ng,nstar,i,j,f,op,target,root,position
+    integer::rank,nproc,ierr,nlocal,nfragment,nwindow_operation,nreciprocal_operation,ng,nstar,i,j,f,op,target,root,position
     integer::minimum_integer,maximum_integer,local_bad,global_bad,allocation_status,packet_index
     integer,allocatable::ownership_count(:),owner(:),owner_position(:),star_count(:)
     integer(int64)::bits,minimum_bits,maximum_bits,real_elements,complex_elements,integer_elements,quantized,&
@@ -33,7 +33,8 @@ contains
     ok=.false.;message='';workspace_peak_bytes=0_int64;fingerprint=0_int64;local_bad=0
     call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
     call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
-    nlocal=size(row_ids);nfragment=size(raw_windows,1);noperation=size(fragment_action,2);ng=size(g_star)
+    nlocal=size(row_ids);nfragment=size(raw_windows,1);nwindow_operation=size(fragment_action,2)
+    nreciprocal_operation=size(g_action,2);ng=size(g_star)
     call agree_integer(global_row_count,minimum_integer,maximum_integer,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.minimum_integer/=maximum_integer)then
       message='inconsistent hybrid spatial row count';return
@@ -42,9 +43,13 @@ contains
     if(ierr/=MPI_SUCCESS.or.minimum_integer/=maximum_integer)then
       message='inconsistent hybrid fragment count';return
     endif
-    call agree_integer(noperation,minimum_integer,maximum_integer,comm,ierr)
+    call agree_integer(nwindow_operation,minimum_integer,maximum_integer,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.minimum_integer/=maximum_integer)then
-      message='inconsistent hybrid symmetry operation count';return
+      message='inconsistent hybrid window operation count';return
+    endif
+    call agree_integer(nreciprocal_operation,minimum_integer,maximum_integer,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_integer/=maximum_integer)then
+      message='inconsistent hybrid reciprocal operation count';return
     endif
     call agree_integer(ng,minimum_integer,maximum_integer,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.minimum_integer/=maximum_integer)then
@@ -58,12 +63,13 @@ contains
     if(ierr/=MPI_SUCCESS.or.minimum_bits/=maximum_bits)then
       message='inconsistent hybrid basis tolerance';return
     endif
-    if(global_row_count<1.or.nfragment<1.or.noperation<1.or.ng<1.or.tile_width<1)local_bad=1
+    if(global_row_count<1.or.nfragment<1.or.nwindow_operation<1.or.nreciprocal_operation<1.or.ng<1.or.tile_width<1)&
+      local_bad=1
     if(size(raw_windows,2)/=nlocal.or.any(shape(coordinates)/=[3,nlocal]))local_bad=1
-    if(any(shape(fragment_action)/=[nfragment,noperation]))local_bad=1
-    if(any(shape(row_action)/=[global_row_count,noperation]))local_bad=1
-    if(any(shape(g_vectors)/=[3,ng]).or.any(shape(reciprocal_rotation)/=[3,3,noperation]).or.&
-      any(shape(g_action)/=[ng,noperation]))local_bad=1
+    if(any(shape(fragment_action)/=[nfragment,nwindow_operation]))local_bad=1
+    if(any(shape(row_action)/=[global_row_count,nwindow_operation]))local_bad=1
+    if(any(shape(g_vectors)/=[3,ng]).or.any(shape(reciprocal_rotation)/=[3,3,nreciprocal_operation]).or.&
+      any(shape(g_action)/=[ng,nreciprocal_operation]))local_bad=1
     if(size(g_conjugate)/=ng)local_bad=1
     if(any(row_ids<1_int64).or.any(row_ids>int(global_row_count,int64)))local_bad=1
     if(.not.ieee_is_finite(tolerance))local_bad=1
@@ -74,7 +80,7 @@ contains
       message='invalid hybrid windowed PW basis shape or finite contract';return
     endif
     if(tolerance<1d-15.or.tolerance>1d-2)local_bad=1
-    do op=1,noperation
+    do op=1,nwindow_operation
       do f=1,nfragment
         call agree_integer(fragment_action(f,op),minimum_integer,maximum_integer,comm,ierr)
         if(ierr/=MPI_SUCCESS.or.minimum_integer/=maximum_integer)then
@@ -87,6 +93,8 @@ contains
           message='inconsistent hybrid spatial action';return
         endif
       enddo
+    enddo
+    do op=1,nreciprocal_operation
       do i=1,ng
         call agree_integer(g_action(i,op),minimum_integer,maximum_integer,comm,ierr)
         if(ierr/=MPI_SUCCESS.or.minimum_integer/=maximum_integer)then
@@ -122,16 +130,18 @@ contains
     if(any(g_action<1).or.any(g_action>ng))local_bad=1
     if(any(g_star<1).or.any(g_conjugate<1).or.any(g_conjugate>ng))local_bad=1
     if(local_bad==0)then
-      do op=1,noperation
+      do op=1,nwindow_operation
         if(.not.is_permutation(fragment_action(:,op),nfragment))local_bad=1
         if(.not.is_permutation(row_action(:,op),global_row_count))local_bad=1
+      enddo
+      do op=1,nreciprocal_operation
         if(.not.is_permutation(g_action(:,op),ng))local_bad=1
       enddo
       do i=1,ng
         if(g_conjugate(g_conjugate(i))/=i)local_bad=1
         if(g_star(g_conjugate(i))/=g_star(i))local_bad=1
         if(maxval(abs(g_vectors(:,g_conjugate(i))+g_vectors(:,i)))>tolerance)local_bad=1
-        do op=1,noperation
+        do op=1,nreciprocal_operation
           if(g_star(g_action(i,op))/=g_star(i))local_bad=1
           if(maxval(abs(g_vectors(:,g_action(i,op))-&
             matmul(reciprocal_rotation(:,:,op),g_vectors(:,i))))>100d0*tolerance)local_bad=1
@@ -221,7 +231,7 @@ contains
       if(rank==root)remote_window=windows(:,owner_position(target))
       call MPI_Bcast(remote_window,nfragment,MPI_DOUBLE_PRECISION,root,comm,ierr)
       if(ierr/=MPI_SUCCESS)then;call cleanup();message='hybrid window row broadcast failed';return;endif
-      do i=1,nlocal;do op=1,noperation
+      do i=1,nlocal;do op=1,nwindow_operation
         if(row_action(int(row_ids(i)),op)/=target)cycle
         do f=1,nfragment
           covariance_defect=max(covariance_defect,&
@@ -251,13 +261,17 @@ contains
       call cleanup();message='cannot allocate hybrid packet membership';return
     endif
     fingerprint=ieor(int(z'BB67AE8584CAA73B',int64),transfer(tolerance,bits))
-    do op=1,noperation
+    fingerprint=ieor(ishftc(fingerprint,7),int(nwindow_operation,int64))
+    fingerprint=ieor(ishftc(fingerprint,7),int(nreciprocal_operation,int64))
+    do op=1,nwindow_operation
       do f=1,nfragment
         fingerprint=ieor(ishftc(fingerprint,7),int(fragment_action(f,op),int64))
       enddo
       do i=1,global_row_count
         fingerprint=ieor(ishftc(fingerprint,7),int(row_action(i,op),int64))
       enddo
+    enddo
+    do op=1,nreciprocal_operation
       do i=1,ng
         fingerprint=ieor(ishftc(fingerprint,7),int(g_action(i,op),int64))
       enddo
@@ -302,6 +316,9 @@ contains
     enddo
     catalog%catalog_fingerprint=ieor(catalog%window_fingerprint,ishftc(catalog%packet_fingerprint,17))
     if(catalog%catalog_fingerprint==0_int64)catalog%catalog_fingerprint=1_int64
+    catalog%window_operation_count=nwindow_operation
+    catalog%operation_count=nreciprocal_operation
+    catalog%pw_mode_count=ng
     catalog%valid=.true.;ok=.true.
 #else
     ok=.false.;message='hybrid windowed PW basis requires MPI';workspace_peak_bytes=0_int64;fingerprint=0_int64

@@ -11,6 +11,13 @@ module dg_hybrid_windowed_pw_types
 
   type,public::s_dg_hybrid_basis_catalog
     logical::valid=.false.
+    integer::operation_count=0
+    integer::window_operation_count=0
+    integer::pw_mode_count=0
+    integer::shell_added=0
+    integer::orbit_added=0
+    real(8)::requested_cutoff=0d0
+    real(8)::effective_cutoff=0d0
     integer(8)::wannier_fingerprint=0_8
     integer(8)::window_fingerprint=0_8
     integer(8)::packet_fingerprint=0_8
@@ -25,6 +32,12 @@ module dg_hybrid_windowed_pw_types
     logical::identity_only=.false.
     logical::lcfo_symmetry_deferred=.false.
     integer::operation_count=0
+    integer::window_operation_count=0
+    integer::pw_mode_count=0
+    integer::shell_added=0
+    integer::orbit_added=0
+    real(8)::requested_cutoff=0d0
+    real(8)::effective_cutoff=0d0
     integer(8)::analysis_fingerprint=0_8
     integer(8)::wannier_symmetry_fingerprint=0_8
     integer(8)::window_fingerprint=0_8
