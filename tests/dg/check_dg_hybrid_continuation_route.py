@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import re
 import sys
 
 root = Path(__file__).resolve().parents[2]
@@ -10,6 +11,115 @@ assert flag in source, "missing explicit DG continuation production branch"
 branch = source[source.index(flag):]
 branch = branch[:branch.index("endif")]
 assert "run_dg_hybrid_continuation_ground_state_for_main" in branch
+
+ground_state_name = "subroutine run_dg_overlapping_wannier_ground_state_for_main"
+ground_state_match = re.search(
+    rf"{ground_state_name}(?P<body>.*?)end\s+subroutine",
+    source,
+    re.I | re.S,
+)
+assert ground_state_match, "missing overlapping-Wannier production body"
+ground_state = ground_state_match.group("body")
+ground_state_lower = ground_state.lower()
+branch_begin = "! hybrid_localization_first_branch_begin"
+arm_begin = "! hybrid_localization_first_arm_begin"
+arm_end = "! hybrid_localization_first_arm_end"
+legacy_begin = "! hybrid_constrained_legacy_arm_begin"
+legacy_end = "! hybrid_constrained_legacy_arm_end"
+branch_end = "! hybrid_localization_first_branch_end"
+for marker in (branch_begin, arm_begin, arm_end, legacy_begin, legacy_end, branch_end):
+    assert ground_state_lower.count(marker) == 1, f"missing unique route marker {marker}"
+
+raw_seed_position = ground_state_lower.index(
+    "global_seed_values(nstate+projector_tile_first:nstate+projector_tile_last,:)="
+)
+crystal_map_position = ground_state_lower.index("call prepare_ow_global_point_action")
+branch_position = ground_state_lower.index(branch_begin)
+assert raw_seed_position < crystal_map_position < branch_position, (
+    "Hybrid localization must branch once after raw occupied+s+p assembly and crystal-map construction"
+)
+
+localization_arm = ground_state_lower[
+    ground_state_lower.index(arm_begin) + len(arm_begin):ground_state_lower.index(arm_end)
+]
+legacy_arm = ground_state_lower[
+    ground_state_lower.index(legacy_begin) + len(legacy_begin):ground_state_lower.index(legacy_end)
+]
+common_tail = ground_state_lower[ground_state_lower.index(branch_end) + len(branch_end):]
+
+for token in (
+    "call find_dg_group_identity",
+    "call select_dg_group_generators",
+    "call measure_dg_grid_map_stencil_defect",
+    "call prepare_dg_hybrid_localization_first_seed",
+    "call materialize_ow_distributed_core_to_buffer",
+    "call reindex_dg_point_maps_between_row_layouts",
+    "ow_core_ids=initial_core_ids",
+    "call setup_dg_w90_gamma_library",
+    "dg_w90_unconstrained",
+    "call assemble_dg_w90_gamma_matrices",
+    "call run_dg_w90_gamma_library",
+    "call apply_dg_w90_gamma_transform",
+    "call build_dg_hybrid_localization_receipt",
+    "[hybrid-wf-localization] symmetry_constraint=off",
+):
+    assert token in localization_arm, f"localization-first arm omits {token}"
+
+localization_order = [
+    localization_arm.index("call prepare_dg_hybrid_localization_first_seed"),
+    localization_arm.index("call materialize_ow_distributed_core_to_buffer"),
+    localization_arm.index("call reindex_dg_point_maps_between_row_layouts"),
+    localization_arm.index("ow_core_ids=initial_core_ids"),
+    localization_arm.index("call setup_dg_w90_gamma_library"),
+    localization_arm.index("call assemble_dg_w90_gamma_matrices"),
+    localization_arm.index("call run_dg_w90_gamma_library"),
+    localization_arm.index("call apply_dg_w90_gamma_transform"),
+    localization_arm.index("call build_dg_hybrid_localization_receipt"),
+]
+assert localization_order == sorted(localization_order), (
+    "localization-first route must prepare, reindex, localize, apply, and certify one fixed-rank gauge in order"
+)
+assert "global_seed_values(1:nstate,:)=adapted" not in localization_arm.replace(" ", ""), (
+    "localization-first route must not replace the raw occupied seed block by a symmetry-adapted block"
+)
+assert "if(.not.center_diagnostic_ok)" not in localization_arm.replace(" ", ""), (
+    "individual-WF and center symmetry diagnostics must not become acceptance gates"
+)
+for forbidden_gate in (
+    "global_retained_group_closure_defect>dg_ow_symmetry_tolerance",
+    "maxval(lcfo_total_symmetry_residual)>dg_ow_symmetry_tolerance",
+):
+    assert forbidden_gate not in localization_arm.replace(" ", ""), (
+        "complete construction-basis symmetry is diagnostic-only before LCFO"
+    )
+
+for forbidden in (
+    "prepare_ow_fixed_center_group",
+    "build_dg_group_averaged_occupied_candidates_eigenexa",
+    "build_dg_cocycle_averaged_occupied_candidates_eigenexa",
+    "build_dg_periodic_spectral_basins",
+    "prepare_dg_spectral_basin_operators",
+    "propagate_dg_spectral_basin_orbit_channels",
+    "build_dg_finite_abelian_character_table",
+    "split_dg_translation_character_sector_eigenexa",
+    "prepare_dg_translation_character_action",
+    "build_dg_translation_character_intertwining_phase_prepared",
+    "begin_sawf_dmn",
+    "append_sawf_dmn_operation",
+    "finish_sawf_dmn",
+    "validate_dg_w90_generator_covariance",
+    "inherit_dg_w90_affine_receipts",
+    "validate_dg_factored_point_cogroup_gauge",
+    "verify_dg_wannier_center_affine_orbits",
+):
+    assert forbidden not in localization_arm, f"localization-first arm still invokes {forbidden}"
+
+assert "dg_w90_constrained" in legacy_arm and "dg_w90_unconstrained" not in legacy_arm, (
+    "legacy overlapping-Wannier arm must remain symmetry constrained"
+)
+assert "ow_pencil_generator_maps,source=global_symmetry_map" in common_tail.replace(" ", ""), (
+    "localization-first route must retain the complete crystal maps for LCFO/operator diagnostics"
+)
 
 for token in [
     "freeze_dg_hybrid_basis_directory",

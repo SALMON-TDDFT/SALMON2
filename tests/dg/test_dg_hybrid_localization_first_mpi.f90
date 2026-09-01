@@ -11,9 +11,11 @@ program test_dg_hybrid_localization_first_mpi
   integer(int64),allocatable::point_ids(:)
   real(real64)::pi,x,closure_residual,nan_value
   real(real64),allocatable::weights(:)
-  complex(real64),allocatable::raw_seed(:,:),basis(:,:),global_basis(:,:)
+  complex(real64),allocatable::raw_seed(:,:),basis(:,:),global_basis(:,:),&
+    localized_basis(:,:),global_localized_basis(:,:)
   complex(real64)::gram(nraw,nraw),identity(nraw,nraw)
-  complex(real64)::projector(npoint,npoint),expected_projector(npoint,npoint)
+  complex(real64)::projector(npoint,npoint),localized_projector(npoint,npoint),&
+    expected_projector(npoint,npoint)
   complex(real64)::reflected(npoint),projected(npoint),phi_i,phi_j
   complex(real64)::transform(nraw,nraw),rank_loss_transform(nraw,nraw-1)
   real(real64)::centers(3,nraw),spreads(nraw)
@@ -87,6 +89,19 @@ program test_dg_hybrid_localization_first_mpi
     'raw occupied+s+p fixture is accidentally closed under reflection')
 
   call set_unitary_transform(transform)
+  allocate(localized_basis(nraw,nlocal),global_localized_basis(nraw,npoint))
+  localized_basis=matmul(transpose(transform),basis)
+  global_localized_basis=cmplx(0d0,0d0,real64)
+  do p=1,nlocal;global_localized_basis(:,int(point_ids(p)))=localized_basis(:,p);enddo
+  call MPI_Allreduce(MPI_IN_PLACE,global_localized_basis,size(global_localized_basis),&
+    MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+  localized_projector=cmplx(0d0,0d0,real64)
+  do i=1,npoint;do j=1,npoint;do k=1,nraw
+    localized_projector(i,j)=localized_projector(i,j)+&
+      global_localized_basis(k,i)*conjg(global_localized_basis(k,j))/real(npoint,real64)
+  enddo;enddo;enddo
+  call require(maxval(abs(localized_projector-projector))<1d-10,&
+    'retaining every localized column changed the construction-space projector')
   centers=reshape([0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,&
     0.7d0,0.8d0,0.9d0],[3,nraw])
   spreads=[1d200,2d200,3d200]

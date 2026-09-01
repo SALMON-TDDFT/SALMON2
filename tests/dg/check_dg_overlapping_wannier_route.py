@@ -187,16 +187,38 @@ ow_ground_state = re.search(
     re.I | re.S,
 )
 assert ow_ground_state
-ow_ground_state_body = ow_ground_state.group("body").lower()
-assemble_position = ow_ground_state_body.find("call assemble_dg_w90_gamma_matrices")
-export_position = ow_ground_state_body.find("call export_dg_w90_replay_bundle")
-library_position = ow_ground_state_body.find("call run_dg_w90_gamma_library")
-assert 0 <= assemble_position < export_position < library_position, (
-    "opt-in replay export must use assembled matrices immediately before the Wannier90 library call"
-)
-assert "salmon_dg_w90_replay_directory" in ow_ground_state_body
-assert "w90_nncell" in ow_ground_state_body[export_position:library_position]
-ow_ground_state_body = ow_ground_state.group("body").lower()
+full_ow_ground_state_body = ow_ground_state.group("body").lower()
+branch_begin = "! hybrid_localization_first_branch_begin"
+arm_begin = "! hybrid_localization_first_arm_begin"
+arm_end = "! hybrid_localization_first_arm_end"
+legacy_begin = "! hybrid_constrained_legacy_arm_begin"
+legacy_end = "! hybrid_constrained_legacy_arm_end"
+branch_end = "! hybrid_localization_first_branch_end"
+for marker in (branch_begin, arm_begin, arm_end, legacy_begin, legacy_end, branch_end):
+    assert full_ow_ground_state_body.count(marker) == 1, f"missing unique route marker {marker}"
+localization_arm = full_ow_ground_state_body[
+    full_ow_ground_state_body.index(arm_begin) + len(arm_begin):full_ow_ground_state_body.index(arm_end)
+]
+legacy_arm = full_ow_ground_state_body[
+    full_ow_ground_state_body.index(legacy_begin) + len(legacy_begin):full_ow_ground_state_body.index(legacy_end)
+]
+common_tail = full_ow_ground_state_body[
+    full_ow_ground_state_body.index(branch_end) + len(branch_end):
+]
+for route_body, mode in ((localization_arm, "dg_w90_unconstrained"), (legacy_arm, "dg_w90_constrained")):
+    assemble_position = route_body.find("call assemble_dg_w90_gamma_matrices")
+    export_position = route_body.find("call export_dg_w90_replay_bundle")
+    library_position = route_body.find("call run_dg_w90_gamma_library")
+    assert 0 <= assemble_position < export_position < library_position, (
+        "each W90 route must export assembled matrices immediately before the library call"
+    )
+    assert mode in route_body[assemble_position:library_position]
+    assert "w90_nncell" in route_body[export_position:library_position]
+assert "salmon_dg_w90_replay_directory" in localization_arm
+assert "salmon_dg_w90_replay_directory" in legacy_arm
+assert "dg_w90_constrained" not in localization_arm
+assert "dg_w90_unconstrained" not in legacy_arm
+ow_ground_state_body = full_ow_ground_state_body
 assert "call redistribute_dg_row_owned_real_field_to_requests(" in ow_ground_state_body, (
     "production must redistribute the conserved row-owned total density directly to fragment buffers"
 )
@@ -206,6 +228,7 @@ assert "ow_box_density(p)=rho_s(1)%f(raw_ix,raw_iy,raw_iz)" not in re.sub(
 assert "ow_box_density(p)=dc%rho_tot_s(1)%f(raw_ix,raw_iy,raw_iz)" not in re.sub(
     r"\s+", "", ow_ground_state_body
 ), "rank-owned total-density slabs must be redistributed by physical ID, not indexed as fragment buffers"
+ow_ground_state_body = legacy_arm + common_tail
 for mlwf_call in (
     "assemble_dg_w90_gamma_matrices",
     "run_dg_w90_gamma_library",
@@ -797,7 +820,16 @@ production_adapter = re.search(
     re.I | re.S,
 )
 assert production_adapter
-adapter_body = production_adapter.group("body")
+full_adapter_body = production_adapter.group("body")
+full_adapter_lower = full_adapter_body.lower()
+adapter_prefix = full_adapter_body[:full_adapter_lower.index(branch_begin)]
+adapter_legacy = full_adapter_body[
+    full_adapter_lower.index(legacy_begin) + len(legacy_begin):full_adapter_lower.index(legacy_end)
+]
+adapter_common = full_adapter_body[
+    full_adapter_lower.index(branch_end) + len(branch_end):
+]
+adapter_body = adapter_prefix + adapter_legacy + adapter_common
 assert "call build_dg_smooth_partition_of_unity(" in adapter_body.lower(), (
     "production must normalize overlapping core-buffer windows before assembling the global pencil"
 )

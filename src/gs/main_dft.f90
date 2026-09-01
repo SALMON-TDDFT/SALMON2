@@ -137,6 +137,8 @@ use dg_hybrid_continuation_controller,only:s_dg_hybrid_controller_controls,s_dg_
   dg_hybrid_continuation_state_count
 use dg_hybrid_low_energy_symmetry,only:select_dg_hybrid_symmetry_target,&
   evaluate_dg_hybrid_low_energy_symmetry
+use dg_hybrid_localization_first,only:s_dg_hybrid_localization_receipt,&
+  prepare_dg_hybrid_localization_first_seed,build_dg_hybrid_localization_receipt
 use dg_hybrid_continuation_state,only:s_dg_hybrid_scope_receipt,build_dg_hybrid_scope_receipt,&
   close_dg_hybrid_selection
 use plusU_global,only:PLUS_U_ON
@@ -182,7 +184,7 @@ use dg_overlapping_wannier_w90,only:setup_dg_w90_gamma_library,&
   project_dg_w90_reference_sector_operators,&
   anchor_dg_w90_reference_character_sector,align_dg_w90_character_sector_gauge,&
   align_dg_w90_character_sectors_by_periodic_phase,sew_dg_w90_periodic_phase_conjugate_sector,&
-  export_dg_w90_replay_bundle,DG_W90_CONSTRAINED
+  export_dg_w90_replay_bundle,DG_W90_CONSTRAINED,DG_W90_UNCONSTRAINED
 use lcfo_wannier_sawf, only: t_sawf_crystallographic_catalog,t_sawf_symop,&
   load_sawf_crystallographic_catalog_auto
 use lcfo_wannier_sawf_dmn,only:t_sawf_dmn_writer,t_sawf_operation_index,&
@@ -1335,6 +1337,7 @@ contains
     type(s_dg_hybrid_fragment_basis),allocatable::divided_fragment_bases(:)
     type(s_dg_hybrid_production_face_trace),allocatable::divided_production_faces(:)
     type(s_dg_hybrid_fixed_payload)::dg_hybrid_fixed_payload
+    type(s_dg_hybrid_localization_receipt)::hybrid_localization_receipt
     type(t_sawf_dmn_writer)::fixed_center_dmn_writer
     integer,allocatable::center_owner_candidate(:),center_box_candidate(:),center_fragment_candidate(:)
     integer,allocatable::orbital_owned_ids(:),center_local_orbital_ids(:)
@@ -1396,7 +1399,7 @@ contains
     integer(8)::center_gauge_workspace_peak
     integer(8)::fixed_center_group_fingerprint,fixed_center_operation_workspace,&
       fixed_center_dmn_workspace_peak
-    integer(8)::w90_input_fingerprint,w90_transform_fingerprint
+    integer(8)::w90_input_fingerprint,w90_transform_fingerprint,hybrid_localization_seed_fingerprint
     integer(8)::spectral_frame_fingerprint,spectral_density_fingerprint,spectral_basin_fingerprint,&
       spectral_operator_fingerprint,spectral_eigensystem_fingerprint,spectral_catalog_fingerprint,&
       spectral_channel_fingerprint,spectral_complement_channel_fingerprint,&
@@ -1726,6 +1729,257 @@ contains
       global_translation_cocycle,&
       global_inversion_present,ok,message)
     if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global point-action construction failed';end if
+    ! HYBRID_LOCALIZATION_FIRST_BRANCH_BEGIN
+    if(yn_dg_hybrid_continuation_scf=='y')then
+    ! HYBRID_LOCALIZATION_FIRST_ARM_BEGIN
+    call find_dg_group_identity(global_point_product,global_identity_operation,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global group identity construction failed';endif
+    call find_dg_group_identity(global_point_cogroup_product,global_point_cogroup_identity_operation,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'point cogroup identity construction failed';endif
+    call select_dg_group_generators(global_point_product,global_identity_operation,&
+      global_affine_generators,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'global affine generator selection failed';endif
+    if(rank==0)write(*,'(a,2(a,i0))')'[OW-GS-DIAGNOSTIC] affine_generator_proof',&
+      ' group_order=',size(global_point_product,1),' generator_count=',size(global_affine_generators)
+    call measure_dg_grid_map_stencil_defect(dc%icomm_tot,ow_core_ids,&
+      global_symmetry_map(:,global_affine_generators),dc%lg_tot%num,system%hgs,&
+      global_point_rotations(:,:,global_affine_generators),ow_grid_stencil_defect,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'affine grid-stencil diagnostic failed';endif
+    if(rank==0)write(*,'(a,es16.8,a,i0)')'[OW-GS-DIAGNOSTIC] affine grid-stencil defect max=',&
+      maxval(ow_grid_stencil_defect),' operation=',maxloc(ow_grid_stencil_defect,dim=1)
+    deallocate(ow_grid_stencil_defect)
+
+    call prepare_dg_hybrid_localization_first_seed(dc%icomm_tot,ow_core_ids,global_seed_values,&
+      ow_core_weights,dg_dc_metric_rank_tolerance,global_closed_core,global_retained_rank,&
+      hybrid_localization_seed_fingerprint,ok,message)
+    if(.not.ok.or.global_retained_rank/=ntarget)then
+      if(.not.ok)write(0,'(a)')trim(message)
+      error stop 'Hybrid localization-first occupied+s+p seed preparation failed'
+    endif
+    global_required_retained_rank=ntarget
+    allocate(lcfo_total_symmetry_residual(size(global_affine_generators)),&
+      lcfo_boundary_symmetry_residual(size(global_affine_generators)),&
+      lcfo_interior_symmetry_residual(size(global_affine_generators)))
+    call measure_dg_rank_fixed_symmetry_residuals(dc%icomm_tot,global_closed_core,ow_core_weights,&
+      global_symmetry_map(:,global_affine_generators),lcfo_boundary_mask,&
+      total_residual=lcfo_total_symmetry_residual,boundary_residual=lcfo_boundary_symmetry_residual,&
+      interior_residual=lcfo_interior_symmetry_residual,ok=ok,message=message,&
+      workspace_peak_bytes=lcfo_symmetry_workspace_peak)
+    if(.not.ok)then
+      write(0,'(a)')trim(message);error stop 'Hybrid construction-basis symmetry diagnostic failed'
+    endif
+    lcfo_symmetry_worst_generator_index=maxloc(lcfo_total_symmetry_residual,dim=1)
+    lcfo_symmetry_worst_operation=global_affine_generators(lcfo_symmetry_worst_generator_index)
+    global_retained_group_closure_defect=maxval(lcfo_total_symmetry_residual)
+    if(rank==0)write(*,'(a,i0,3(a,es16.8))')&
+      '[HYBRID-WF-SYMMETRY-DIAGNOSTIC] complete_basis_worst_operation=',lcfo_symmetry_worst_operation,&
+      ' total=',lcfo_total_symmetry_residual(lcfo_symmetry_worst_generator_index),&
+      ' boundary=',lcfo_boundary_symmetry_residual(lcfo_symmetry_worst_generator_index),&
+      ' interior=',lcfo_interior_symmetry_residual(lcfo_symmetry_worst_generator_index)
+
+    allocate(w90_anchors(ntarget,ncore),source=global_seed_values,stat=allocation_status)
+    call MPI_Allreduce(MPI_IN_PLACE,allocation_status,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.allocation_status/=0)&
+      error stop 'Hybrid localization-first seed-anchor retention failed collectively'
+    w90_byte_limit=8_8*1024_8*1024_8*1024_8
+    call assemble_dg_w90_gamma_a_matrix(dc%icomm_tot,global_closed_core,w90_anchors,&
+      ow_core_weights,dg_ow_symmetry_tolerance,w90_byte_limit,w90_seed_a_matrix,&
+      w90_seed_a_workspace,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Hybrid localization-first A assembly failed';endif
+    deallocate(global_seed_values)
+    if(allocated(lcfo_occupied_core))deallocate(lcfo_occupied_core)
+
+    allocate(initial_core_ids(ncore))
+    core_index=0
+    do p=1,nbox
+      if(.not.core_mask(p))cycle
+      core_index=core_index+1
+      if(core_index>ncore)error stop 'Hybrid localization-first core row extent overflow'
+      initial_core_ids(core_index)=physical_ids(p)
+      ow_core_weights(core_index)=weights(p)
+      ow_core_box_positions(core_index)=p
+      core_periodic_phase(1,core_index)=exp(cmplx(0d0,2d0*pi*real(modulo(physical_ids(p)-1_8,&
+        int(dc%lg_tot%num(1),8)),8)/real(dc%lg_tot%num(1),8),8))
+      core_periodic_phase(2,core_index)=exp(cmplx(0d0,2d0*pi*real(modulo((physical_ids(p)-1_8)/&
+        int(dc%lg_tot%num(1),8),int(dc%lg_tot%num(2),8)),8)/real(dc%lg_tot%num(2),8),8))
+      core_periodic_phase(3,core_index)=exp(cmplx(0d0,2d0*pi*real((physical_ids(p)-1_8)/&
+        nxy8,8)/real(dc%lg_tot%num(3),8),8))
+    enddo
+    if(core_index/=ncore.or.any(ow_core_box_positions<1))&
+      error stop 'Hybrid localization-first core box map is incomplete'
+    call materialize_ow_distributed_core_to_buffer(dc%icomm_tot,global_closed_core,ow_core_ids,&
+      initial_core_ids,ow_core_values,ok,message)
+    if(.not.ok)then
+      write(0,'(a)')trim(message)
+      error stop 'Hybrid localization-first retained core redistribution failed'
+    endif
+    call reindex_dg_point_maps_between_row_layouts(dc%icomm_tot,ow_core_ids,initial_core_ids,&
+      global_symmetry_map,reindexed_global_symmetry_map,ok,message)
+    if(.not.ok)then
+      write(0,'(a)')trim(message)
+      error stop 'Hybrid localization-first symmetry-map row-layout transition failed'
+    endif
+    call move_alloc(reindexed_global_symmetry_map,global_symmetry_map)
+    global_closed_core=ow_core_values
+    ow_core_ids=initial_core_ids
+    deallocate(initial_core_ids)
+    call invert_ow_lattice(dc%system_tot%primitive_a,w90_lattice_inverse,w90_determinant,ok)
+    if(.not.ok)error stop 'Wannier90 lattice is singular'
+    w90_reciprocal_lattice=2d0*pi*transpose(w90_lattice_inverse)
+    allocate(w90_atom_symbols(dc%system_tot%nion),w90_atoms_cart(3,dc%system_tot%nion))
+    w90_atoms_cart=dc%system_tot%Rion
+    do io=1,dc%system_tot%nion
+      if(dc%system_tot%kion(io)<1.or.dc%system_tot%kion(io)>size(pp%atom_symbol))&
+        error stop 'Wannier90 atom species is outside the pseudopotential table'
+      w90_atom_symbols(io)=pp%atom_symbol(dc%system_tot%kion(io))
+    enddo
+    call setup_dg_w90_gamma_library(dc%icomm_tot,'overlapping_wannier_mlwf',&
+      dc%system_tot%primitive_a,w90_reciprocal_lattice,w90_atom_symbols,w90_atoms_cart,&
+      ntarget,ntarget,wannier_num_iter,dg_ow_w90_initial_projection,DG_W90_UNCONSTRAINED,&
+      w90_nntot,w90_nncell,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 Gamma setup failed';endif
+    allocate(w90_fractional(3,ncore),w90_eigenvalues(ntarget))
+    do p=1,ncore
+      w90_fractional(:,p)=[real(modulo(ow_core_ids(p)-1_8,int(dc%lg_tot%num(1),8)),8)/&
+        real(dc%lg_tot%num(1),8),real(modulo((ow_core_ids(p)-1_8)/int(dc%lg_tot%num(1),8),&
+        int(dc%lg_tot%num(2),8)),8)/real(dc%lg_tot%num(2),8),real((ow_core_ids(p)-1_8)/nxy8,8)/&
+        real(dc%lg_tot%num(3),8)]
+    enddo
+    w90_eigenvalues=0d0
+    call assemble_dg_w90_gamma_matrices(dc%icomm_tot,global_closed_core,w90_anchors,&
+      ow_core_weights,w90_fractional,w90_nncell,w90_byte_limit,w90_m_matrix,w90_a_matrix,&
+      w90_coordinator_bytes,w90_workspace_peak,ok,message,precomputed_a_matrix=w90_seed_a_matrix)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 M/A assembly failed';endif
+    deallocate(w90_seed_a_matrix)
+    call fingerprint_ow_w90_matrices(dc%icomm_tot,w90_m_matrix,w90_a_matrix,&
+      w90_input_fingerprint,ok)
+    if(.not.ok)error stop 'Wannier90 M/A fingerprint failed'
+    w90_input_fingerprint=ieor(w90_input_fingerprint,hybrid_localization_seed_fingerprint)
+    if(w90_input_fingerprint==0_8)w90_input_fingerprint=1_8
+    w90_replay_directory=''
+    call get_environment_variable('SALMON_DG_W90_REPLAY_DIRECTORY',w90_replay_directory,&
+      length=w90_replay_environment_length,status=w90_replay_environment_status,trim_name=.true.)
+    w90_replay_enabled=merge(1,0,w90_replay_environment_status==0.and.w90_replay_environment_length>0)
+    call MPI_Allreduce(w90_replay_enabled,w90_replay_enabled_min,1,MPI_INTEGER,MPI_MIN,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS)error stop 'Wannier90 replay enable MIN agreement failed'
+    call MPI_Allreduce(w90_replay_enabled,w90_replay_enabled_max,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.w90_replay_enabled_min/=w90_replay_enabled_max)&
+      error stop 'Wannier90 replay enable state disagrees across ranks'
+    if(w90_replay_enabled==1)then
+      call export_dg_w90_replay_bundle(dc%icomm_tot,'.','overlapping_wannier_mlwf',&
+        trim(w90_replay_directory),'overlapping_wannier_mlwf',DG_W90_UNCONSTRAINED,&
+        w90_eigenvalues,w90_a_matrix,w90_m_matrix,w90_nncell,ok,message)
+      if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 replay export failed';endif
+    endif
+    deallocate(w90_anchors,w90_fractional)
+    call run_dg_w90_gamma_library(dc%icomm_tot,'overlapping_wannier_mlwf',&
+      dc%system_tot%primitive_a,w90_reciprocal_lattice,w90_atom_symbols,w90_atoms_cart,&
+      w90_m_matrix,w90_a_matrix,w90_eigenvalues,huge(1d0)/4d0,dg_ow_symmetry_tolerance,&
+      wannier_num_iter,w90_transform,localized_centers,w90_spreads,w90_spread,ok,message,&
+      localization_iterations)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 MLWF optimization failed';endif
+    deallocate(w90_m_matrix,w90_a_matrix,w90_eigenvalues,w90_atom_symbols,w90_atoms_cart,w90_nncell)
+    localized_centers=matmul(w90_lattice_inverse,localized_centers)
+    call apply_dg_w90_gamma_transform(dc%icomm_tot,ow_core_ids,ow_core_values,&
+      transform=w90_transform,centers=localized_centers,tolerance=dg_ow_symmetry_tolerance,&
+      ok=ok,message=message,spreads=w90_spreads)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Wannier90 MLWF gauge canonicalization failed';endif
+    call fingerprint_ow_w90_transform(dc%icomm_tot,w90_transform,w90_transform_fingerprint,ok)
+    if(.not.ok)error stop 'Wannier90 canonical transform fingerprint failed'
+    call build_dg_hybrid_localization_receipt(dc%icomm_tot,ntarget,global_retained_rank,&
+      hybrid_localization_seed_fingerprint,w90_transform,localized_centers,w90_spreads,.true.,&
+      localization_iterations,dg_ow_symmetry_tolerance,hybrid_localization_receipt,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'Hybrid localization-first receipt failed';endif
+    if(rank==0)write(*,'(a,3(a,i0),5(a,es16.8))')&
+      '[HYBRID-WF-LOCALIZATION] symmetry_constraint=off',&
+      ' raw_rank=',hybrid_localization_receipt%raw_rank,&
+      ' retained_rank=',hybrid_localization_receipt%retained_rank,&
+      ' iterations=',hybrid_localization_receipt%iterations,&
+      ' spread_min=',hybrid_localization_receipt%spread_min,&
+      ' spread_max=',hybrid_localization_receipt%spread_max,&
+      ' spread_mean=',hybrid_localization_receipt%spread_mean,&
+      ' spread_total=',hybrid_localization_receipt%spread_total,&
+      ' unitarity=',hybrid_localization_receipt%transform_unitarity_defect
+    deallocate(w90_spreads)
+    w90_identity_defect=0d0
+    w90_unitarity_defect=hybrid_localization_receipt%transform_unitarity_defect
+    w90_closure_defect=global_retained_group_closure_defect
+    w90_covariance_defect=global_retained_group_closure_defect
+    w90_symmetry_workspace_peak=lcfo_symmetry_workspace_peak;w90_covariance_workspace=0_8
+    localization_initial_spread=w90_spread(1);localization_final_spread=w90_spread(1)
+    localization_maximum_gradient=0d0;localization_spread_evaluations=0;localization_converged=.true.
+    translation_post_gauge_fingerprint=hybrid_localization_receipt%transform_fingerprint
+
+    allocate(localized_center_magnitudes(3,ntarget))
+    call compute_dg_periodic_wannier_centers(dc%icomm_tot,ow_core_values,ow_core_weights,&
+      core_periodic_phase,localized_centers,localized_center_magnitudes,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'localized Wannier center measurement failed';endif
+    call diagnose_dg_point_center_gauge(dc%icomm_tot,ow_core_values,ow_core_weights,&
+      global_symmetry_map(:,lcfo_symmetry_worst_operation),&
+      global_point_integer_rotations(:,:,lcfo_symmetry_worst_operation),&
+      global_point_fractional_translations(:,lcfo_symmetry_worst_operation),localized_centers,&
+      retained_closure_search_tolerance,monomial_defect,center_block_leakage,&
+      center_representation_unitarity_defect,center_gauge_workspace_peak,center_diagnostic_ok,&
+      center_diagnostic_message)
+    if(.not.all(ieee_is_finite([monomial_defect,center_block_leakage,&
+        center_representation_unitarity_defect])))&
+      error stop 'Hybrid WF symmetry diagnostic is nonfinite'
+    if(rank==0)write(*,'(a,i0,3(a,es16.8),a,l1)')&
+      '[HYBRID-WF-SYMMETRY-DIAGNOSTIC] operation=',lcfo_symmetry_worst_operation,&
+      ' individual_wf_monomial=',monomial_defect,' center_block_leakage=',center_block_leakage,&
+      ' projected_action_unitarity=',center_representation_unitarity_defect,&
+      ' projected_action_closed=',center_diagnostic_ok
+
+    call materialize_ow_distributed_core_to_buffer(dc%icomm_tot,ow_core_values,ow_core_ids,&
+      physical_ids,ow_box_values,ok,message)
+    if(.not.ok)then;write(0,'(a)')trim(message);error stop 'localized core-to-buffer streaming failed';endif
+    allocate(ow_direct_core_gradients(3,ntarget,ncore),ow_neighbor_plus_ids(ncore),&
+      ow_neighbor_minus_ids(ncore));ow_direct_core_gradients=(0d0,0d0)
+    do ix=1,3
+      do gradient_distance=1,size(stencil%coef_nab,1)
+        do core_index=1,ncore
+          raw_ix=int(modulo(ow_core_ids(core_index)-1_8,int(dc%lg_tot%num(1),8)))
+          raw_iy=int(modulo((ow_core_ids(core_index)-1_8)/int(dc%lg_tot%num(1),8),&
+            int(dc%lg_tot%num(2),8)))
+          raw_iz=int((ow_core_ids(core_index)-1_8)/nxy8)
+          select case(ix)
+          case(1)
+            ow_neighbor_minus_ids(core_index)=1_8+int(modulo(raw_ix-gradient_distance,&
+              dc%lg_tot%num(1)),8)+int(dc%lg_tot%num(1),8)*(int(raw_iy,8)+int(dc%lg_tot%num(2),8)*int(raw_iz,8))
+            ow_neighbor_plus_ids(core_index)=1_8+int(modulo(raw_ix+gradient_distance,&
+              dc%lg_tot%num(1)),8)+int(dc%lg_tot%num(1),8)*(int(raw_iy,8)+int(dc%lg_tot%num(2),8)*int(raw_iz,8))
+          case(2)
+            ow_neighbor_minus_ids(core_index)=1_8+int(raw_ix,8)+int(dc%lg_tot%num(1),8)*(&
+              int(modulo(raw_iy-gradient_distance,dc%lg_tot%num(2)),8)+&
+              int(dc%lg_tot%num(2),8)*int(raw_iz,8))
+            ow_neighbor_plus_ids(core_index)=1_8+int(raw_ix,8)+int(dc%lg_tot%num(1),8)*(&
+              int(modulo(raw_iy+gradient_distance,dc%lg_tot%num(2)),8)+&
+              int(dc%lg_tot%num(2),8)*int(raw_iz,8))
+          case default
+            ow_neighbor_minus_ids(core_index)=1_8+int(raw_ix,8)+int(dc%lg_tot%num(1),8)*(&
+              int(raw_iy,8)+int(dc%lg_tot%num(2),8)*&
+              int(modulo(raw_iz-gradient_distance,dc%lg_tot%num(3)),8))
+            ow_neighbor_plus_ids(core_index)=1_8+int(raw_ix,8)+int(dc%lg_tot%num(1),8)*(&
+              int(raw_iy,8)+int(dc%lg_tot%num(2),8)*&
+              int(modulo(raw_iz+gradient_distance,dc%lg_tot%num(3)),8))
+          end select
+        enddo
+        call materialize_ow_distributed_core_to_buffer(dc%icomm_tot,ow_core_values,ow_core_ids,&
+          ow_neighbor_plus_ids,ow_neighbor_plus_values,ok,message)
+        if(ok)call materialize_ow_distributed_core_to_buffer(dc%icomm_tot,ow_core_values,ow_core_ids,&
+          ow_neighbor_minus_ids,ow_neighbor_minus_values,ok,message)
+        if(.not.ok)then;write(0,'(a)')trim(message);error stop 'direct core gradient neighbor stream failed';endif
+        ow_direct_core_gradients(ix,:,:)=ow_direct_core_gradients(ix,:,:)+&
+          stencil%coef_nab(gradient_distance,ix)*(ow_neighbor_plus_values-ow_neighbor_minus_values)
+        deallocate(ow_neighbor_plus_values,ow_neighbor_minus_values)
+      enddo
+    enddo
+    deallocate(ow_neighbor_plus_ids,ow_neighbor_minus_ids,ow_core_values)
+    allocate(ow_box_gradients(3,ntarget,nbox));call periodic_box_gradients(ow_box_values,ow_box_size,&
+      stencil%coef_nab,ow_box_gradients)
+    ! HYBRID_LOCALIZATION_FIRST_ARM_END
+    else
+    ! HYBRID_CONSTRAINED_LEGACY_ARM_BEGIN
     call prepare_ow_fixed_center_group(ow_core_ids,fixed_center_operations,&
       fixed_center_symmetry_map,fixed_center_product,fixed_center_fractional,&
       fixed_center_inversion_present,fixed_center_group_fingerprint,ok,message)
@@ -2834,6 +3088,9 @@ contains
     allocate(ow_box_gradients(3,ntarget,nbox));call periodic_box_gradients(ow_box_values,ow_box_size,&
       stencil%coef_nab,ow_box_gradients)
 #endif
+    ! HYBRID_CONSTRAINED_LEGACY_ARM_END
+    endif
+    ! HYBRID_LOCALIZATION_FIRST_BRANCH_END
     if(.not.allocated(ow_pencil_generator_maps))then
       allocate(ow_pencil_generator_maps,source=global_symmetry_map(:,global_affine_generators),&
         stat=allocation_status)
