@@ -7,6 +7,9 @@ set(General_C_FLAGS             "-Wall -alias=ansi")
 
 #set(OpenACC_FLAGS               "-acc=strict -gpu=cc70,cc80,managed,ptxinfo -Minfo=accel -DUSE_OPENACC")
 #set(OpenACC_FLAGS               "-acc=strict -gpu=cc70,cc80,ccn90,managed,ptxinfo -Minfo=accel -DUSE_OPENACC")  # for GH100
+# cuBLAS/cuSOLVER are always linked; toggle the GEMM (pseudo-pt) and NCCL (allreduce)
+# code paths with -DUSE_GEMM=on/-DUSE_NCCL=on at configure time (see CMakeLists.txt's
+# option_set(USE_GEMM ...)/option_set(USE_NCCL ...)) rather than a separate toolchain file.
 set(OpenACC_FLAGS               "-acc=strict -gpu=cc80,cc90,cc100,cc120,managed,ptxinfo -cudalib=cublas,cusolver -cuda -Minfo=accel -DUSE_OPENACC")
 
 set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g -traceback ${General_Fortran_FLAGS} ${OpenACC_FLAGS}")
