@@ -1,6 +1,7 @@
 set(SOURCES
     dc_fragment_geometry.f90
     dc_scf_convergence.f90
+    dc_fragment_occupation.f90
     dg_dc_seed_checkpoint.f90
     dg_overlapping_wannier_types.f90
     dg_spatial_mlwf_seed.f90

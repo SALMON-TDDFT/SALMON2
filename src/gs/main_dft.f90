@@ -147,7 +147,9 @@ use dg_hybrid_continuation_state,only:s_dg_hybrid_scope_receipt,build_dg_hybrid_
   close_dg_hybrid_selection
 use plusU_global,only:PLUS_U_ON
 use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_fragment_basis
-use dg_hybrid_fragment_solver,only:solve_dg_hybrid_fragment_basis
+use dg_hybrid_fragment_solver,only:solve_dg_hybrid_fragment_spectrum,&
+  reconstruct_dg_hybrid_fragment_density
+use dc_fragment_occupation,only:determine_dc_fragment_occupations
 use dg_hybrid_divided_scf,only:run_dg_hybrid_divided_scf
 use dg_hybrid_lcfo,only:assemble_dg_hybrid_lcfo_rows
 use dg_nonlocal_projector_range,only:s_dg_nonlocal_range_receipt,analyze_dg_nonlocal_projector_range
@@ -4924,31 +4926,90 @@ contains
   subroutine solve_dg_hybrid_divided_fragments(iteration,callback_ok)
     integer,intent(in)::iteration
     logical,intent(out)::callback_ok
-    integer::fragment_basis_count,fragment_state_count,fragment_point_count,ierr_local
-    real(8),allocatable::fragment_occupations(:),fragment_point_weights(:)
+    integer::fragment_basis_count,fragment_state_count,maximum_fragment_state_count,&
+      fragment_point_count,ierr_local,&
+      local_bad,global_bad,allocation_status
+    real(8),allocatable::fragment_occupations(:),fragment_point_weights(:),fragment_core_norms(:),&
+      representative_energies(:,:),representative_core_norms(:,:),all_fragment_occupations(:,:)
+    real(8)::chemical_potential,common_electron_count
+    logical,allocatable::representative_mask(:)
     character(256)::solver_message
 
     callback_ok=.false.;fragment_basis_count=size(divided_fragment_basis%global_ids)
     call MPI_Allreduce(MPI_IN_PLACE,fragment_basis_count,1,MPI_INTEGER,MPI_SUM,dc%icomm_frag,ierr_local)
-    if(ierr_local/=MPI_SUCCESS.or.iteration<1.or.fragment_basis_count<1)return
+    if(ierr_local/=MPI_SUCCESS)return
     fragment_state_count=min(system%no,fragment_basis_count)
+    maximum_fragment_state_count=fragment_state_count
+    call MPI_Allreduce(MPI_IN_PLACE,maximum_fragment_state_count,1,MPI_INTEGER,MPI_MAX,&
+      dc%icomm_tot,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)return
     fragment_point_count=size(divided_fragment_basis%buffer_point_ids)
-    if(fragment_state_count<1.or.size(system%rocc,1)<fragment_state_count.or.&
-        .not.allocated(ow_divided_core_mask).or.size(ow_divided_core_mask)/=fragment_point_count)return
+    local_bad=0
+    if(iteration<1.or.fragment_state_count<1.or.size(system%rocc,1)<fragment_state_count)local_bad=1
+    if(.not.allocated(ow_divided_core_mask))then
+      local_bad=1
+    elseif(size(ow_divided_core_mask)/=fragment_point_count)then
+      local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)return
+    if(global_bad/=0)return
     if(allocated(divided_fragment_coefficients))deallocate(divided_fragment_coefficients)
     if(allocated(divided_fragment_eigenvalues))deallocate(divided_fragment_eigenvalues)
     if(allocated(divided_fragment_density))deallocate(divided_fragment_density)
     allocate(fragment_occupations(fragment_state_count),fragment_point_weights(fragment_point_count),&
-      divided_fragment_eigenvalues(fragment_state_count),divided_fragment_density(fragment_point_count))
-    fragment_occupations=system%rocc(1:fragment_state_count,1,1)
+      fragment_core_norms(fragment_state_count),divided_fragment_eigenvalues(fragment_state_count),&
+      divided_fragment_density(fragment_point_count),&
+      representative_energies(maximum_fragment_state_count,dc%n_frag),&
+      representative_core_norms(maximum_fragment_state_count,dc%n_frag),&
+      representative_mask(dc%n_frag),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)return
+    if(global_bad/=0)return
     fragment_point_weights=system%hvol
-    call solve_dg_hybrid_fragment_basis(dc%icomm_frag,divided_fragment_basis,fragment_state_count,&
-      fragment_occupations,ow_divided_core_mask,fragment_point_weights,apply_dg_hybrid_divided_fragment_hpsi,&
+    call solve_dg_hybrid_fragment_spectrum(dc%icomm_frag,divided_fragment_basis,fragment_state_count,&
+      ow_divided_core_mask,fragment_point_weights,apply_dg_hybrid_divided_fragment_hpsi,&
       apply_dg_hybrid_divided_fragment_metric,1d-12,divided_fragment_coefficients,&
-      divided_fragment_eigenvalues,divided_fragment_density,divided_fragment_electron_count,&
-      divided_fragment_residual,divided_fragment_orthogonality,divided_solver_workspace,&
-      divided_solver_fingerprint,callback_ok,solver_message)
-    if(.not.callback_ok)write(0,'(2a)')'divided fragment eigensolver: ',trim(solver_message)
+      divided_fragment_eigenvalues,fragment_core_norms,divided_fragment_residual,&
+      divided_fragment_orthogonality,divided_solver_workspace,divided_solver_fingerprint,&
+      callback_ok,solver_message)
+    if(.not.callback_ok)write(0,'(2a)')'divided fragment spectrum: ',trim(solver_message)
+    local_bad=merge(0,1,callback_ok)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)then;callback_ok=.false.;return;endif
+    if(global_bad/=0)then;callback_ok=.false.;return;endif
+
+    representative_energies=0d0;representative_core_norms=0d0;representative_mask=.false.
+    if(dc%id_frag==0)then
+      representative_mask(dc%i_frag)=.true.
+      representative_energies(:,dc%i_frag)=divided_fragment_eigenvalues(fragment_state_count)
+      representative_energies(1:fragment_state_count,dc%i_frag)=divided_fragment_eigenvalues
+      representative_core_norms(1:fragment_state_count,dc%i_frag)=fragment_core_norms
+    endif
+    call determine_dc_fragment_occupations(dc%icomm_tot,representative_energies,&
+      representative_core_norms,representative_mask,max(0d0,temperature),2d0,&
+      dc%elec_num_tot,dg_dc_gs_electron_count_tolerance,chemical_potential,&
+      all_fragment_occupations,common_electron_count,callback_ok,solver_message)
+    if(.not.callback_ok)then
+      write(0,'(2a)')'divided common occupation: ',trim(solver_message);return
+    endif
+    if(abs(common_electron_count-dc%elec_num_tot)>dg_dc_gs_electron_count_tolerance)then
+      callback_ok=.false.;write(0,'(a)')'divided common occupation electron count mismatch';return
+    endif
+    fragment_occupations=all_fragment_occupations(1:fragment_state_count,dc%i_frag)
+    system%mu=chemical_potential
+    system%rocc(:,1,1)=0d0
+    system%rocc(1:fragment_state_count,1,1)=fragment_occupations
+    call reconstruct_dg_hybrid_fragment_density(dc%icomm_frag,divided_fragment_basis,&
+      divided_fragment_coefficients,fragment_occupations,2d0,ow_divided_core_mask,&
+      fragment_point_weights,divided_fragment_density,divided_fragment_electron_count,&
+      callback_ok,solver_message)
+    if(.not.callback_ok)write(0,'(2a)')'divided fragment density: ',trim(solver_message)
+    local_bad=merge(0,1,callback_ok)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)then;callback_ok=.false.;return;endif
+    callback_ok=global_bad==0
   end subroutine solve_dg_hybrid_divided_fragments
 
   subroutine gather_dg_hybrid_divided_core_density(core_density,total_density,callback_ok)

@@ -2,6 +2,7 @@
 """Contract for reusing authoritative DC controls in divided Hybrid SCF."""
 
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -27,6 +28,27 @@ for token in (
     "call mpi_alltoallv",
 ):
     assert token in DCDTF, f"DC adapter is missing authoritative control: {token}"
+
+dc_occupation = DCDTF[DCDTF.index("subroutine ne2mu_dcdft") :].split(
+    "end subroutine ne2mu_dcdft", 1
+)[0]
+assert "use occupation_kernel, only: solve_weighted_state_occupations" in dc_occupation
+assert "call solve_weighted_state_occupations" in dc_occupation
+assert "state_weights=reshape(ne_frag_orb,[state_count])" in dc_occupation
+assert "state_weights=0.5d0*state_weights" in dc_occupation
+assert "rocc=reshape(solved_occupations,[system%no,system%nspin,dc%n_frag])" in dc_occupation
+assert "system%rocc(1:system%no,1,1:system%nspin)=rocc(:,:,dc%i_frag)" in dc_occupation
+assert dc_occupation.index("call calc_ne_each") < dc_occupation.index(
+    "call comm_summation(wrk1,esp"
+) < dc_occupation.index("state_weights=reshape(ne_frag_orb,[state_count])")
+assert dc_occupation.index("state_weights=reshape(ne_frag_orb,[state_count])") < dc_occupation.index(
+    "call solve_weighted_state_occupations"
+) < dc_occupation.index("rocc=reshape(solved_occupations") < dc_occupation.index(
+    "system%rocc(1:system%no,1,1:system%nspin)=rocc(:,:,dc%i_frag)"
+)
+assert "dc%elec_num_tot,max(0d0,temperature),wspin" in dc_occupation
+assert "subroutine mu2ne" not in dc_occupation
+assert "subroutine ne2mu_core" not in dc_occupation
 
 assert "yn_dg_hybrid_divided_scf" in MAIN
 branch_start = "if(yn_dg_hybrid_divided_scf=='y'.or.yn_dg_hybrid_continuation_scf=='y')then"
@@ -113,8 +135,28 @@ for forbidden in ("dc%mg_tot", "dc%vloc_tot", "dc%system_tot", "dc%ppg_tot"):
 solve_start = "subroutine solve_dg_hybrid_divided_fragments"
 assert solve_start in MAIN, "missing divided fragment eigensolver adapter"
 solve_callback = MAIN[MAIN.index(solve_start) :].split("end subroutine", 1)[0]
-assert "solve_dg_hybrid_fragment_basis(dc%icomm_frag" in solve_callback
-assert "solve_dg_hybrid_fragment_basis(dc%icomm_tot" not in solve_callback
+for token in (
+    "solve_dg_hybrid_fragment_spectrum(dc%icomm_frag",
+    "determine_dc_fragment_occupations(dc%icomm_tot",
+    "reconstruct_dg_hybrid_fragment_density(dc%icomm_frag",
+):
+    assert token in solve_callback, f"divided solve is missing split occupation phase: {token}"
+assert solve_callback.index("solve_dg_hybrid_fragment_spectrum") < solve_callback.index(
+    "determine_dc_fragment_occupations"
+) < solve_callback.index("reconstruct_dg_hybrid_fragment_density")
+assert "mpi_max" in solve_callback
+assert "representative_energies(maximum_fragment_state_count,dc%n_frag)" in solve_callback
+for token in (
+    "representative_energies=0d0;representative_core_norms=0d0",
+    "representative_energies(:,dc%i_frag)=divided_fragment_eigenvalues(fragment_state_count)",
+    "representative_energies(1:fragment_state_count,dc%i_frag)=divided_fragment_eigenvalues",
+    "representative_core_norms(1:fragment_state_count,dc%i_frag)=fragment_core_norms",
+):
+    assert token in solve_callback, f"variable fragment-state packing is missing: {token}"
+assert "fragment_occupations=all_fragment_occupations(1:fragment_state_count,dc%i_frag)" in solve_callback
+assert not re.search(r"fragment_occupations\s*=\s*system%rocc", solve_callback), (
+    "divided density must not reuse stale host occupations"
+)
 mix_start = "subroutine mix_dg_hybrid_divided_density"
 assert mix_start in MAIN, "missing divided DC density mixer adapter"
 mix_callback = MAIN[MAIN.index(mix_start) :].split("end subroutine", 1)[0]
