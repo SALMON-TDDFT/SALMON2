@@ -3620,7 +3620,8 @@ contains
         return
       else
         call run_dg_hybrid_divided_scf(dc%icomm_tot,int(expected_core_count),ow_core_ids,&
-          divided_initial_density,ow_hybrid_divided_convergence,ow_hybrid_divided_threshold,&
+          divided_initial_density,dc%system_tot%hvol,dc%elec_num_tot,&
+          ow_hybrid_divided_convergence,ow_hybrid_divided_threshold,&
           update_dg_hybrid_divided_potential,solve_dg_hybrid_divided_fragments,&
           assemble_dg_hybrid_divided_core_density,mix_dg_hybrid_divided_density,nscf,&
           divided_converged_density,divided_iterations,divided_convergence_value,ok,message)

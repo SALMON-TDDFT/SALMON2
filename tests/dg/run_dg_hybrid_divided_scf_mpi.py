@@ -7,6 +7,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-divided-scf-") as name:
   build=Path(name);(build/"config.h").write_text("");exe=build/"hybrid_divided_scf"
   subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
     "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",
+    str(root/"src/gs/dc/dc_scf_convergence.f90"),
     str(root/"src/gs/dc/dg_hybrid_divided_scf.f90"),
     str(root/"tests/dg/test_dg_hybrid_divided_scf_mpi.f90"),"-o",str(exe)],check=True)
   env=os.environ.copy();env["OMP_NUM_THREADS"]="1";env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")

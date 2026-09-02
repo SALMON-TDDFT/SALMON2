@@ -1,6 +1,8 @@
 module dg_hybrid_divided_scf
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
+  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+  use dc_scf_convergence,only:reduce_dc_density_convergence
   implicit none
   private
   abstract interface
@@ -25,11 +27,12 @@ module dg_hybrid_divided_scf
   public::run_dg_hybrid_divided_scf
 contains
   subroutine run_dg_hybrid_divided_scf(comm,global_point_count,core_ids,initial_density,&
+      cell_volume,electron_count_target,&
       convergence_mode,threshold,update_total_potential,solve_fragments,assemble_core_density,&
       mix_dc_density,maximum_iterations,converged_density,iterations,convergence_value,ok,message)
     integer,intent(in)::comm,global_point_count,maximum_iterations
     integer(int64),intent(in)::core_ids(:)
-    real(real64),intent(in)::initial_density(:),threshold
+    real(real64),intent(in)::initial_density(:),cell_volume,electron_count_target,threshold
     character(*),intent(in)::convergence_mode
     procedure(update_total_potential_interface)::update_total_potential
     procedure(solve_fragments_interface)::solve_fragments
@@ -40,25 +43,47 @@ contains
     real(real64),intent(out)::convergence_value
     logical,intent(out)::ok
     character(*),intent(out)::message
-    integer::i,j,ierr,nproc,nlocal,ntotal
+    integer::i,j,ierr,nproc,nlocal,ntotal,mode_code,local_invalid,global_invalid
+    integer::integer_controls(3),minimum_integers(3),maximum_integers(3)
     integer,allocatable::counts(:),displacements(:)
     integer(int64),allocatable::all_ids(:)
     real(real64),allocatable::density(:),new_density(:),mixed_density(:)
-    real(real64)::electron_count,local_values(3),global_values(3)
+    real(real64)::electron_count,local_absolute_sum,local_square_sum
+    real(real64)::real_controls(3),minimum_reals(3),maximum_reals(3)
     logical::callback_ok
 
     ok=.false.;message='';iterations=0;convergence_value=huge(1d0)
-    if(global_point_count<=0.or.maximum_iterations<=0.or.threshold<=0d0)then
-      message='invalid divided SCF controls';return
-    endif
-    if(size(core_ids)/=size(initial_density))then
-      message='divided SCF core density shape mismatch';return
-    endif
     select case(trim(adjustl(convergence_mode)))
-    case('rho_dne','norm_rho','norm_rho_dng')
-    case default
-      message='unsupported divided SCF convergence quantity';return
+    case('rho_dne');mode_code=1
+    case('norm_rho');mode_code=2
+    case('norm_rho_dng');mode_code=3
+    case default;mode_code=0
     end select
+    local_invalid=0
+    if(global_point_count<=0.or.maximum_iterations<=0.or.&
+      size(core_ids)/=size(initial_density).or.mode_code==0)local_invalid=1
+    if(.not.ieee_is_finite(threshold).or..not.ieee_is_finite(cell_volume).or.&
+      .not.ieee_is_finite(electron_count_target))then
+      local_invalid=1
+    else if(threshold<=0d0.or.cell_volume<=0d0.or.electron_count_target<=0d0)then
+      local_invalid=1
+    endif
+    call MPI_Allreduce(local_invalid,global_invalid,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='divided SCF control validation failed';return;endif
+    if(global_invalid/=0)then;message='invalid divided SCF controls';return;endif
+    integer_controls=[global_point_count,maximum_iterations,mode_code]
+    call MPI_Allreduce(integer_controls,minimum_integers,3,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='divided SCF integer agreement failed';return;endif
+    call MPI_Allreduce(integer_controls,maximum_integers,3,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='divided SCF integer agreement failed';return;endif
+    real_controls=[threshold,cell_volume,electron_count_target]
+    call MPI_Allreduce(real_controls,minimum_reals,3,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='divided SCF real agreement failed';return;endif
+    call MPI_Allreduce(real_controls,maximum_reals,3,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='divided SCF real agreement failed';return;endif
+    if(any(minimum_integers/=maximum_integers).or.any(minimum_reals/=maximum_reals))then
+      message='rank-disagreeing divided SCF controls';return
+    endif
 
     nlocal=size(core_ids);call MPI_Comm_size(comm,nproc,ierr)
     allocate(counts(nproc),displacements(nproc))
@@ -87,15 +112,11 @@ contains
       if(.not.collective_success(callback_ok))then;message='divided SCF fragment solve failed';return;endif
       call assemble_core_density(new_density,electron_count,callback_ok)
       if(.not.collective_success(callback_ok))then;message='divided SCF core density assembly failed';return;endif
-      local_values=[maxval(abs(new_density-density)),sum((new_density-density)**2),sum(new_density**2)]
-      call MPI_Allreduce(local_values,global_values,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
-      call MPI_Allreduce(MPI_IN_PLACE,global_values(2:3),2,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
-      if(ierr/=MPI_SUCCESS)then;message='divided SCF convergence reduction failed';return;endif
-      select case(trim(adjustl(convergence_mode)))
-      case('rho_dne');convergence_value=global_values(1)
-      case('norm_rho');convergence_value=sqrt(global_values(2)/real(global_point_count,real64))
-      case('norm_rho_dng');convergence_value=sqrt(global_values(2)/max(global_values(3),tiny(1d0)))
-      end select
+      local_absolute_sum=sum(abs(new_density-density))
+      local_square_sum=sum((new_density-density)**2)
+      call reduce_dc_density_convergence(comm,convergence_mode,local_absolute_sum,local_square_sum,&
+        cell_volume,electron_count_target,global_point_count,convergence_value,callback_ok,message)
+      if(.not.callback_ok)return
       if(convergence_value<=threshold)then
         allocate(converged_density(nlocal),source=new_density);ok=.true.;message='';return
       endif

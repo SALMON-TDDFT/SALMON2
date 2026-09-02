@@ -23,7 +23,7 @@ program test_dg_hybrid_divided_scf_mpi
   enddo
 
   density=0d0;callback_trace=0;empty_pw_control=.false.
-  call run_dg_hybrid_divided_scf(comm,nglobal,core_ids,density,'norm_rho_dng',1d-11,&
+  call run_dg_hybrid_divided_scf(comm,nglobal,core_ids,density,1d0,3.6d0,'norm_rho_dng',1d-11,&
     update_total_potential,solve_fragments,assemble_core_density,mix_dc_density,80,&
     converged,iterations,convergence_value,ok,message)
   call require(ok,trim(message));call require(maxval(abs(converged-target))<1d-10,'divided density mismatch')
@@ -32,7 +32,7 @@ program test_dg_hybrid_divided_scf_mpi
   reference=converged;reference_iterations=iterations;reference_value=convergence_value;reference_trace=callback_trace
 
   density=0d0;callback_trace=0;empty_pw_control=.true.
-  call run_dg_hybrid_divided_scf(comm,nglobal,core_ids,density,'norm_rho_dng',1d-11,&
+  call run_dg_hybrid_divided_scf(comm,nglobal,core_ids,density,1d0,3.6d0,'norm_rho_dng',1d-11,&
     update_total_potential,solve_fragments,assemble_core_density,mix_dc_density,80,&
     converged,iterations,convergence_value,ok,message)
   call require(ok.and.all(converged==reference),'empty-PW control changed the density path')
@@ -40,13 +40,30 @@ program test_dg_hybrid_divided_scf_mpi
     'empty-PW control changed convergence inputs or iterations')
   call require(callback_trace==reference_trace,'empty-PW control changed callback ordering')
 
+  if(nproc>1)then
+    callback_trace=0
+    call run_dg_hybrid_divided_scf(comm,nglobal,core_ids,density,&
+      merge(1d0,2d0,rank==0),3.6d0,'rho_dne',1d-8,&
+      update_total_potential,solve_fragments,assemble_core_density,mix_dc_density,2,&
+      converged,iterations,convergence_value,ok,message)
+    call require(.not.ok,'rank-disagreeing divided SCF controls were accepted')
+    call require(callback_trace==0,'callbacks ran before divided SCF control agreement')
+
+    callback_trace=0
+    call run_dg_hybrid_divided_scf(comm,nglobal,core_ids,density,1d0,3.6d0,&
+      'rho_dne',1d-8,update_total_potential,solve_fragments,assemble_core_density,&
+      mix_dc_density,merge(0,2,rank==0),converged,iterations,convergence_value,ok,message)
+    call require(.not.ok,'rank-local invalid divided SCF control was accepted')
+    call require(callback_trace==0,'callbacks ran after invalid divided SCF controls')
+  endif
+
   ! Duplicate core ownership must be rejected collectively.
   if(nproc==1)then
     core_ids(2)=1_int64
   elseif(nlocal>0)then
     core_ids(1)=1_int64
   endif
-  call run_dg_hybrid_divided_scf(comm,nglobal,core_ids,density,'rho_dne',1d-8,&
+  call run_dg_hybrid_divided_scf(comm,nglobal,core_ids,density,1d0,3.6d0,'rho_dne',1d-8,&
     update_total_potential,solve_fragments,assemble_core_density,mix_dc_density,2,&
     converged,iterations,convergence_value,ok,message)
   call require(.not.ok,'duplicate core ownership was accepted')

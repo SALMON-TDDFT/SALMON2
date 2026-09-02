@@ -53,6 +53,7 @@ use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_pl
 use noncollinear_module, only: calc_magnetization
 use dcdft
 use dcdft_soi
+use dc_scf_convergence, only: reduce_dc_density_convergence
 implicit none
 integer :: ix,iy,iz,ik,is
 integer :: ilevel_print !=3:print-all
@@ -470,35 +471,27 @@ contains
     type(s_parallel_info),intent(in) :: info
     type(s_scalar)       ,intent(in) :: rho,V_local(system%nspin)
     !
-    real(8) :: sum0
+    real(8) :: sum0,local_absolute_sum,local_square_sum
+    logical :: convergence_ok
+    character(256) :: convergence_message
     
     select case(convergence)
-    case('rho_dne')
-      sum0=0d0
-      !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
+    case('rho_dne','norm_rho','norm_rho_dng')
+      local_absolute_sum=0d0
+      local_square_sum=0d0
+      !$OMP parallel do reduction(+:local_absolute_sum,local_square_sum) private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-      sum0 = sum0 + abs(rho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))
+      local_absolute_sum=local_absolute_sum+abs(rho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))
+      local_square_sum=local_square_sum+(rho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))**2
       end do
       end do
       end do
-      call comm_summation(sum0,sum1,info%icomm_r)
-      sum1 = sum1*system%Hvol/rNe
-    case('norm_rho','norm_rho_dng')
-      sum0=0.d0
-      !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-      sum0 = sum0 + (rho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))**2
-      end do
-      end do
-      end do
-      call comm_summation(sum0,sum1,info%icomm_r)
-      if(convergence=='norm_rho_dng')then
-        sum1 = sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
-      end if
+      call reduce_dc_density_convergence(info%icomm_r,convergence,local_absolute_sum,&
+        local_square_sum,system%Hvol,rNe,lg%num(1)*lg%num(2)*lg%num(3),sum1,&
+        convergence_ok,convergence_message)
+      if(.not.convergence_ok)error stop 'invalid DC density convergence reduction'
     case('norm_pot','norm_pot_dng')
       sum0=0.d0
       !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
