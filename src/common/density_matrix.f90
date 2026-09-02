@@ -291,8 +291,10 @@ contains
 
     call timer_begin(LOG_CURRENT_CALC_UVPSI_RDIVIDED)
     if (info%if_divide_rspace .and. yn_jm=='n' .and. .not. yn_spinorbit=='y') then
+#if !defined(USE_OPENACC)
       call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
       allocate(uVpsi(ppg%Nlma))
+#endif
     end if
     call timer_end(LOG_CURRENT_CALC_UVPSI_RDIVIDED)
 
@@ -467,7 +469,11 @@ contains
     end do
     end do
 
-    if (info%if_divide_rspace .and. yn_jm=='n' .and. .not. yn_spinorbit=='y') deallocate(uVpsibox,uVpsibox2,uVpsi)
+    if (info%if_divide_rspace .and. yn_jm=='n' .and. .not. yn_spinorbit=='y') then
+#if !defined(USE_OPENACC)
+      deallocate(uVpsibox,uVpsibox2,uVpsi)
+#endif
+    end if
 
     call nvtxEndRange
     return
