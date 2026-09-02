@@ -1448,7 +1448,7 @@ contains
     real(8)::initial_occupied_charge_local,initial_occupied_charge
     integer::hybrid_iterations
     integer::divided_iterations,dg_hybrid_nonlocal_ownership_count,divided_global_basis_count
-    real(8)::divided_convergence_value
+    real(8)::divided_convergence_value,divided_electron_defect
     real(8)::divided_final_residual,divided_final_orthogonality,divided_final_projector_defect
     real(8)::divided_full_basis_closure_defect
     logical::ok,reusable,localization_converged,global_inversion_present,center_diagnostic_ok,diagnostic_ok
@@ -3620,15 +3620,18 @@ contains
         return
       else
         call run_dg_hybrid_divided_scf(dc%icomm_tot,int(expected_core_count),ow_core_ids,&
-          divided_initial_density,dc%system_tot%hvol,dc%elec_num_tot,&
+          divided_initial_density,dc%system_tot%hvol,&
           ow_hybrid_divided_convergence,ow_hybrid_divided_threshold,&
           update_dg_hybrid_divided_potential,solve_dg_hybrid_divided_fragments,&
           assemble_dg_hybrid_divided_core_density,mix_dg_hybrid_divided_density,nscf,&
-          divided_converged_density,divided_iterations,divided_convergence_value,ok,message)
+          ow_core_weights,dc%elec_num_tot,dg_dc_gs_electron_count_tolerance,&
+          divided_converged_density,divided_iterations,divided_convergence_value,&
+          divided_electron_defect,ok,message)
         if(.not.ok)write(0,'(a)')trim(message)
         if(.not.ok)error stop 'divided Hybrid SCF failed'
-        if(rank==0)write(*,'(a,i0,a,es16.8)')'[OW-GS] divided WF+PW SCF converged iterations=',&
-          divided_iterations,' density=',divided_convergence_value
+        if(rank==0)write(*,'(a,i0,a,es16.8,a,es16.8)')&
+          '[OW-GS] divided WF+PW SCF converged iterations=',divided_iterations,&
+          ' density=',divided_convergence_value,' electron_defect=',divided_electron_defect
         allocate(divided_lcfo_point_weights(size(divided_fragment_basis%buffer_point_ids)),source=system%hvol)
         call assemble_dg_hybrid_lcfo_rows(dc%icomm_tot,divided_fragment_basis,divided_lcfo_row_ids,&
           divided_lcfo_point_weights,apply_dg_hybrid_divided_fragment_hpsi,&
@@ -3663,7 +3666,7 @@ contains
         divided_fragment_fingerprint,divided_solver_fingerprint,divided_lcfo_operator_fingerprint,&
         divided_final_solver_fingerprint]
       hybrid_scf_receipts=[divided_convergence_value,divided_final_residual,divided_final_orthogonality,&
-        divided_final_projector_defect,0d0]
+        divided_final_projector_defect,divided_electron_defect]
       call write_rt_dg_hybrid_occupied_checkpoint(dc%icomm_tot,'./overlapping_wannier_occupied.chk',&
         ow_hybrid_ground_state%global_count,ow_hybrid_ground_state%owned_row_ids,&
         ow_hybrid_ground_state%coefficients,ow_hybrid_ground_state%occupations,&
@@ -6884,16 +6887,26 @@ stage_pass: do
   subroutine assemble_dg_hybrid_divided_core_density(core_density,electron_count,callback_ok)
     real(8),intent(out)::core_density(:),electron_count
     logical,intent(out)::callback_ok
-    integer::p,position,ierr_local
+    integer::p,position,ierr_local,local_bad,global_bad
     real(8)::local_electron_count
 
     callback_ok=.false.;core_density=0d0;electron_count=0d0
-    if(.not.allocated(divided_fragment_density).or.size(core_density)/=size(ow_core_ids))return
-    do p=1,size(ow_core_ids)
-      position=findloc(divided_fragment_basis%buffer_point_ids,ow_core_ids(p),dim=1)
-      if(position<1)return
-      core_density(p)=divided_fragment_density(position)
-    enddo
+    local_bad=0
+    if(.not.allocated(divided_fragment_density).or.size(core_density)/=size(ow_core_ids))then
+      local_bad=1
+    else
+      do p=1,size(ow_core_ids)
+        position=findloc(divided_fragment_basis%buffer_point_ids,ow_core_ids(p),dim=1)
+        if(position<1)then
+          local_bad=1
+        else
+          core_density(p)=divided_fragment_density(position)
+        endif
+      enddo
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr_local)
+    if(ierr_local/=MPI_SUCCESS)return
+    if(global_bad/=0)return
     local_electron_count=sum(ow_core_weights*core_density)
     call MPI_Allreduce(local_electron_count,electron_count,1,MPI_DOUBLE_PRECISION,MPI_SUM,&
       dc%icomm_tot,ierr_local)
