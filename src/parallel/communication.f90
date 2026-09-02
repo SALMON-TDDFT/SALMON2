@@ -299,9 +299,18 @@ module communication
 contains
   subroutine comm_init
     use mpi, only: MPI_THREAD_FUNNELED
+#ifdef USE_OPENACC
+    use openacc
+#endif
     implicit none
     integer :: ierr
     integer :: iprovided
+#ifdef USE_OPENACC
+    ! Establish the CUDA context before MPI_Init_thread: UCC's team bootstrap
+    ! probes CUDA-aware UCX and caches a broken config if none exists yet,
+    ! which later hangs multi-node collectives.
+    call acc_init(acc_device_nvidia)
+#endif
     MPI_ERROR_CHECK(call MPI_Init_thread(MPI_THREAD_FUNNELED, iprovided, ierr))
   end subroutine
 
