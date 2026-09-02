@@ -2882,8 +2882,8 @@ contains
     endif
 
     select case(method_wf_distributor)
-    case ('single','slice') ; continue
-    case default            ; stop 'method_wf_distributor must be single or slice'
+    case ('single','slice','block') ; continue
+    case default            ; stop 'method_wf_distributor must be single, slice or block'
     end select
 
     select case(method_init_wf)
