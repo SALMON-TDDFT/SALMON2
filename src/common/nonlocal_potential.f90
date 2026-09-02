@@ -177,6 +177,9 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   use structures
   use timer
   use iso_c_binding
+#ifdef USE_NCCL
+  use salmon_global, only: yn_nccl_reduction
+#endif
 #if defined(USE_OPENACC) && defined(USE_GEMM)
   use cublas
   use openacc
@@ -427,21 +430,26 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
     !$acc wait
 
 #ifdef USE_NCCL
-    if (.not. nccl_ready) then
-      call MPI_Comm_rank(info%icomm_r, nccl_rank, mpi_ierr)
-      call MPI_Comm_size(info%icomm_r, nccl_size, mpi_ierr)
-      if (nccl_rank == 0) nccl_stat = ncclGetUniqueId(nccl_uid)
-      call MPI_Bcast(nccl_uid%internal, 128, MPI_CHARACTER, 0, info%icomm_r, mpi_ierr)
-      nccl_stat = ncclCommInitRank(nccl_comm, nccl_size, nccl_uid, nccl_rank)
-      if (nccl_stat /= ncclSuccess) stop 'zpseudo: ncclCommInitRank failed'
-      cuda_stat = cudaStreamCreate(nccl_stream)
-      nccl_ready = .true.
+    if (yn_nccl_reduction == 'y') then
+      if (.not. nccl_ready) then
+        call MPI_Comm_rank(info%icomm_r, nccl_rank, mpi_ierr)
+        call MPI_Comm_size(info%icomm_r, nccl_size, mpi_ierr)
+        if (nccl_rank == 0) nccl_stat = ncclGetUniqueId(nccl_uid)
+        call MPI_Bcast(nccl_uid%internal, 128, MPI_CHARACTER, 0, info%icomm_r, mpi_ierr)
+        nccl_stat = ncclCommInitRank(nccl_comm, nccl_size, nccl_uid, nccl_rank)
+        if (nccl_stat /= ncclSuccess) stop 'zpseudo: ncclCommInitRank failed'
+        cuda_stat = cudaStreamCreate(nccl_stream)
+        nccl_ready = .true.
+      end if
+      ! complex sum == double sum over twice as many elements
+      call c_f_pointer(c_devloc(d_reduce), d_reduce_re, [2*Nlma*norb])
+      nccl_stat = ncclAllReduce(d_reduce_re, d_reduce_re, 2*Nlma*norb, ncclDouble, ncclSum, nccl_comm, nccl_stream)
+      cuda_stat = cudaStreamSynchronize(nccl_stream)
+      if (nccl_stat /= ncclSuccess .or. cuda_stat /= 0) stop 'zpseudo: ncclAllReduce failed'
+    else
+      ! icomm_r may span nodes, where NCCL isn't a reliable win over plain MPI
+      call MPI_Allreduce(MPI_IN_PLACE, d_reduce, int(Nlma*norb), MPI_DOUBLE_COMPLEX, MPI_SUM, info%icomm_r, mpi_ierr)
     end if
-    ! complex sum == double sum over twice as many elements
-    call c_f_pointer(c_devloc(d_reduce), d_reduce_re, [2*Nlma*norb])
-    nccl_stat = ncclAllReduce(d_reduce_re, d_reduce_re, 2*Nlma*norb, ncclDouble, ncclSum, nccl_comm, nccl_stream)
-    cuda_stat = cudaStreamSynchronize(nccl_stream)
-    if (nccl_stat /= ncclSuccess .or. cuda_stat /= 0) stop 'zpseudo: ncclAllReduce failed'
 #else
     call MPI_Allreduce(MPI_IN_PLACE, d_reduce, int(Nlma*norb), MPI_DOUBLE_COMPLEX, MPI_SUM, info%icomm_r, mpi_ierr)
 #endif
