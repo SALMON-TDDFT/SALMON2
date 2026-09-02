@@ -14,12 +14,15 @@ with tempfile.TemporaryDirectory(prefix="hybrid-fragment-solver-") as name:
     str(root/"src/gs/dc/dg_hybrid_fragment_basis.f90"),str(root/"src/gs/dc/dg_hybrid_fragment_solver.f90"),
     str(root/"tests/dg/test_dg_hybrid_fragment_solver_mpi.f90"),*libs,"-o",str(exe)],check=True)
   env=os.environ.copy();env["OMP_NUM_THREADS"]="1";env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")
-  fingerprints=[]
+  fingerprints=[];workspaces=[]
   for nrank in (1,2,4):
-    run=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe)],capture_output=True,text=True,env=env)
+    run=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe)],
+      capture_output=True,text=True,env=env,timeout=30)
     assert run.returncode==0,(nrank,run.stdout,run.stderr)
     assert f"PASS hybrid fragment solver on {nrank} ranks" in run.stdout
-    match=re.search(r"HYBRID_FRAGMENT_SOLVER ranks=\d+ fingerprint=(-?\d+)",run.stdout);assert match
+    match=re.search(r"HYBRID_FRAGMENT_SOLVER ranks=\d+ fingerprint=(-?\d+) workspace=(\d+)",run.stdout);assert match
     fingerprints.append(int(match.group(1)))
+    workspaces.append(int(match.group(2)))
   assert len(set(fingerprints))==1,fingerprints
+  assert len(set(workspaces))==1,workspaces
 print("PASS hybrid fragment solver on 1, 2, and 4 ranks")
