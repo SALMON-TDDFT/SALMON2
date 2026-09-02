@@ -10,15 +10,16 @@ program test_rt_dg_hybrid_length_gauge_mpi
   use rt_dg_hybrid_sparse_exchange,only:s_rt_dg_sparse_exchange,build_rt_dg_sparse_exchange
   implicit none
   integer,parameter::n=3
-  integer::comm,rank,nproc,ierr,nowned,i,j,k,step,iterations,permutation(n)
+  integer::comm,rank,nproc,ierr,nowned,i,j,k,a,b,step,iterations,permutation(n),claimed_rank
   complex(real64)::dense_s(n,n),dense_h(n,n),dense_z(3,n,n),initial(n),reference(n),phase(n),expected
   complex(real64)::original_s(n,n),original_h(n,n),original_z(3,n,n)
-  complex(real64),allocatable::coeff(:),next(:)
-  type(s_dg_hybrid_sparse_metric)::metric
-  type(s_dg_hybrid_sparse_operators)::operators
+  complex(real64),allocatable::coeff(:),next(:),symmetry_next(:),related_next(:),invalid_coeff(:)
+  type(s_dg_hybrid_sparse_metric)::metric,invalid_metric
+  type(s_dg_hybrid_sparse_operators)::operators,invalid_operators
   type(s_rt_dg_sparse_exchange)::metric_exchange,operator_exchange
-  real(real64)::norm_value,energy,polarization(3),previous(3),periods(3),defect,initial_norm,initial_energy,wrapped
-  real(real64)::field(3)
+  real(real64)::norm_value,energy,polarization(3),previous(3),periods(3),defect,initial_norm,initial_energy,wrapped,&
+    odd_amplitude
+  real(real64)::field(3),related_field(3),representation_sign(n),cartesian_rotation(3,3)
   integer(int64)::workspace,global_workspace,fingerprint,reference_fingerprint
   logical::ok
   character(256)::message
@@ -43,12 +44,31 @@ program test_rt_dg_hybrid_length_gauge_mpi
     (0.06d0,0.02d0),(0.07d0,-0.01d0),(0.2d0,0d0)],[n,n])
   original_s=dense_s;original_h=dense_h;original_z=dense_z
   call distribute_system(dense_s,dense_h,dense_z,metric,operators)
+  allocate(invalid_coeff(0))
+  call propagate_rt_dg_hybrid_length_gauge(comm,n,invalid_metric,invalid_operators,invalid_coeff,&
+    [0d0,0d0,0d0],0.01d0,1d-12,24,[0d0,0d0,0d0],[10d0,10d0,10d0],next,&
+    norm_value,energy,polarization,iterations,workspace,fingerprint,ok,message)
+  call require(.not.ok,'partially allocated length-gauge state was not rejected cleanly')
+  invalid_metric=metric;invalid_operators=operators
+  if(rank==0.and.size(invalid_metric%owned_row_ids)>0)then
+    invalid_metric%owned_row_ids(1)=int(n+1,int64)
+    invalid_operators%owned_row_ids(1)=int(n+1,int64)
+  endif
+  call propagate_rt_dg_hybrid_length_gauge(comm,n,invalid_metric,invalid_operators,&
+    [(cmplx(0d0,0d0,real64),i=1,size(invalid_metric%owned_row_ids))],[0d0,0d0,0d0],&
+    0.01d0,1d-12,24,[0d0,0d0,0d0],[10d0,10d0,10d0],next,norm_value,energy,&
+    polarization,iterations,workspace,fingerprint,ok,message)
+  call require(.not.ok,'out-of-range certified row ID was not rejected cleanly')
   nowned=size(metric%owned_row_ids);allocate(coeff(nowned))
   initial=[(0.7d0,0.1d0),(-0.2d0,0.3d0),(0.4d0,-0.1d0)]
   initial=initial/sqrt(real(dot_product(initial,matmul(dense_s,initial))))
   do i=1,nowned;coeff(i)=initial(int(metric%owned_row_ids(i)));enddo
   field=(0d0,0d0);previous=0d0;periods=10d0
-  call propagate_rt_dg_hybrid_length_gauge(comm,metric,operators,coeff,field,0.01d0,1d-12,24,previous,periods,&
+  claimed_rank=n;if(rank==0)claimed_rank=n-1
+  call propagate_rt_dg_hybrid_length_gauge(comm,claimed_rank,metric,operators,coeff,field,0.01d0,1d-12,24,previous,periods,&
+    next,norm_value,energy,polarization,iterations,workspace,fingerprint,ok,message)
+  call require(.not.ok,'rank-disagreeing certified RT extent was accepted')
+  call propagate_rt_dg_hybrid_length_gauge(comm,n,metric,operators,coeff,field,0.01d0,1d-12,24,previous,periods,&
     next,norm_value,energy,polarization,iterations,workspace,fingerprint,ok,message)
   call require(ok,trim(message));reference_fingerprint=fingerprint;initial_norm=norm_value;initial_energy=energy
   call dense_step(initial,field,0.01d0,reference)
@@ -60,7 +80,7 @@ program test_rt_dg_hybrid_length_gauge_mpi
   coeff=next
   do step=2,20
     previous=polarization
-    call propagate_rt_dg_hybrid_length_gauge(comm,metric,operators,coeff,field,0.01d0,1d-12,24,previous,periods,&
+    call propagate_rt_dg_hybrid_length_gauge(comm,n,metric,operators,coeff,field,0.01d0,1d-12,24,previous,periods,&
       next,norm_value,energy,polarization,iterations,workspace,fingerprint,ok,message)
     call require(ok,trim(message));coeff=next
   enddo
@@ -81,7 +101,7 @@ program test_rt_dg_hybrid_length_gauge_mpi
   do i=1,nowned;coeff(i)=initial(int(metric%owned_row_ids(i)));enddo
   do i=1,nowned;if(metric%owned_row_ids(i)==3_int64)coeff(i)=(5d-13,0d0);enddo
   field=[0.1d0,-0.03d0,0.02d0];previous=0d0
-  call propagate_rt_dg_hybrid_length_gauge(comm,metric,operators,coeff,field,0.02d0,1d-12,24,previous,periods,&
+  call propagate_rt_dg_hybrid_length_gauge(comm,n,metric,operators,coeff,field,0.02d0,1d-12,24,previous,periods,&
     next,norm_value,energy,polarization,iterations,workspace,fingerprint,ok,message)
   call require(ok,trim(message));call dense_step(initial,field,0.02d0,reference)
   defect=owned_defect(next,reference)
@@ -98,7 +118,7 @@ program test_rt_dg_hybrid_length_gauge_mpi
 
   do i=1,nowned;coeff(i)=initial(int(metric%owned_row_ids(i)));enddo
   field=[(0.15d0,0d0),(-0.04d0,0d0),(0.02d0,0d0)];previous=[10.1d0,0d0,0d0]
-  call propagate_rt_dg_hybrid_length_gauge(comm,metric,operators,coeff,field,0.03d0,1d-12,24,previous,periods,&
+  call propagate_rt_dg_hybrid_length_gauge(comm,n,metric,operators,coeff,field,0.03d0,1d-12,24,previous,periods,&
     next,norm_value,energy,polarization,iterations,workspace,fingerprint,ok,message)
   call require(ok,trim(message));call dense_step(initial,field,0.03d0,reference)
   defect=owned_defect(next,reference);call require(defect<3d-10,'field-driven generalized propagation differs from dense oracle')
@@ -114,7 +134,7 @@ program test_rt_dg_hybrid_length_gauge_mpi
   call distribute_system(dense_s,dense_h,dense_z,metric,operators)
   do i=1,nowned;coeff(i)=initial(permutation(int(metric%owned_row_ids(i))));enddo
   previous=0d0
-  call propagate_rt_dg_hybrid_length_gauge(comm,metric,operators,coeff,field,0.03d0,1d-12,24,previous,periods,&
+  call propagate_rt_dg_hybrid_length_gauge(comm,n,metric,operators,coeff,field,0.03d0,1d-12,24,previous,periods,&
     next,norm_value,energy,polarization,iterations,workspace,fingerprint,ok,message)
   call require(ok,trim(message));defect=0d0
   do i=1,nowned
@@ -129,7 +149,7 @@ program test_rt_dg_hybrid_length_gauge_mpi
   call distribute_system(dense_s,dense_h,dense_z,metric,operators)
   do i=1,nowned;coeff(i)=conjg(phase(int(metric%owned_row_ids(i))))*initial(int(metric%owned_row_ids(i)));enddo
   previous=0d0
-  call propagate_rt_dg_hybrid_length_gauge(comm,metric,operators,coeff,field,0.03d0,1d-12,24,previous,periods,&
+  call propagate_rt_dg_hybrid_length_gauge(comm,n,metric,operators,coeff,field,0.03d0,1d-12,24,previous,periods,&
     next,norm_value,energy,polarization,iterations,workspace,fingerprint,ok,message)
   call require(ok,trim(message));defect=0d0
   do i=1,nowned
@@ -148,11 +168,75 @@ program test_rt_dg_hybrid_length_gauge_mpi
         operators%hamiltonian_values(k)=operators%hamiltonian_values(k)+(0.05d0,0d0)
     enddo
   enddo
-  call propagate_rt_dg_hybrid_length_gauge(comm,metric,operators,coeff,field,0.01d0,1d-12,24,previous,periods,&
+  call propagate_rt_dg_hybrid_length_gauge(comm,n,metric,operators,coeff,field,0.01d0,1d-12,24,previous,periods,&
     next,norm_value,energy,polarization,iterations,workspace,fingerprint,ok,message,&
     metric_exchange,operator_exchange)
   call require(ok,trim(message));call require(operator_exchange%catalog_fingerprint==operators%fingerprint,&
     'operator value update invalidated the structure-keyed exchange schedule')
+
+  ! A nonidentity reflection has D=diag(1,-1,1) in the certified basis and
+  ! Q=diag(-1,1,1) in Cartesian space.  Z_x is odd while Z_y and Z_z are even,
+  ! so D^H Z_a D = sum_b Q_ab Z_b.
+  dense_s=(0d0,0d0);dense_h=(0d0,0d0);dense_z=(0d0,0d0)
+  do i=1,n;dense_s(i,i)=(1d0,0d0);enddo
+  dense_h(1,1)=(-0.4d0,0d0);dense_h(2,2)=(0.2d0,0d0);dense_h(3,3)=(0.6d0,0d0)
+  dense_z(1,1,2)=(0.3d0,-0.04d0);dense_z(1,2,1)=conjg(dense_z(1,1,2))
+  dense_z(1,2,3)=(-0.11d0,0.02d0);dense_z(1,3,2)=conjg(dense_z(1,2,3))
+  dense_z(2,1,1)=(0.1d0,0d0);dense_z(2,2,2)=(0.25d0,0d0);dense_z(2,3,3)=(-0.2d0,0d0)
+  dense_z(2,1,3)=(0.06d0,0.01d0);dense_z(2,3,1)=conjg(dense_z(2,1,3))
+  dense_z(3,1,1)=(-0.05d0,0d0);dense_z(3,2,2)=(0.08d0,0d0);dense_z(3,3,3)=(0.12d0,0d0)
+  representation_sign=[1d0,-1d0,1d0];cartesian_rotation=0d0
+  cartesian_rotation(1,1)=-1d0;cartesian_rotation(2,2)=1d0;cartesian_rotation(3,3)=1d0
+  defect=0d0
+  do a=1,3;do i=1,n;do j=1,n
+    expected=(0d0,0d0)
+    do b=1,3;expected=expected+cartesian_rotation(a,b)*dense_z(b,i,j);enddo
+    defect=max(defect,abs(representation_sign(i)*representation_sign(j)*dense_z(a,i,j)-expected))
+  enddo;enddo;enddo
+  call require(defect<1d-14.and.maxval(abs(dense_z(1,:,:)))>0.1d0,&
+    'nonidentity vector-covariance fixture is invalid or vacuous')
+  call distribute_system(dense_s,dense_h,dense_z,metric,operators)
+
+  ! A field in the Q-invariant plane must not drive an initially invariant
+  ! coefficient vector out of the D-invariant sector.
+  initial=[(0.8d0,0d0),(0d0,0d0),(0.6d0,0d0)]
+  do i=1,nowned;coeff(i)=initial(int(metric%owned_row_ids(i)));enddo
+  field=[0d0,0.12d0,-0.04d0];previous=0d0
+  call propagate_rt_dg_hybrid_length_gauge(comm,n,metric,operators,coeff,field,0.025d0,1d-12,24,previous,periods,&
+    next,norm_value,energy,polarization,iterations,workspace,fingerprint,ok,message)
+  call require(ok,trim(message));defect=0d0
+  do i=1,nowned
+    j=int(metric%owned_row_ids(i));defect=max(defect,abs((representation_sign(j)-1d0)*next(i)))
+  enddo
+  call MPI_Allreduce(MPI_IN_PLACE,defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+  call require(defect<3d-10,'subgroup-preserving field escaped the invariant certified sector')
+
+  ! A generic field may lower the equilibrium symmetry, but the solutions at
+  ! E and Q^T E must remain D-related when their initial states are D-related.
+  initial=[(0.8d0,0d0),(0d0,0d0),(0.6d0,0d0)]
+  initial=initial/sqrt(real(dot_product(initial,initial)))
+  do i=1,nowned;coeff(i)=initial(int(metric%owned_row_ids(i)));enddo
+  field=[0.17d0,0.08d0,-0.03d0];related_field=matmul(transpose(cartesian_rotation),field);previous=0d0
+  call propagate_rt_dg_hybrid_length_gauge(comm,n,metric,operators,coeff,field,0.025d0,1d-12,24,previous,periods,&
+    next,norm_value,energy,polarization,iterations,workspace,fingerprint,ok,message)
+  call require(ok,trim(message));allocate(symmetry_next,source=next);odd_amplitude=0d0
+  do i=1,nowned
+    j=int(metric%owned_row_ids(i))
+    if(representation_sign(j)<0d0)odd_amplitude=max(odd_amplitude,abs(symmetry_next(i)))
+  enddo
+  call MPI_Allreduce(MPI_IN_PLACE,odd_amplitude,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+  call require(odd_amplitude>1d-6,'symmetry-lowering field did not generate an odd-sector amplitude')
+  do i=1,nowned
+    j=int(metric%owned_row_ids(i));coeff(i)=representation_sign(j)*initial(j)
+  enddo
+  call propagate_rt_dg_hybrid_length_gauge(comm,n,metric,operators,coeff,related_field,0.025d0,1d-12,24,previous,periods,&
+    next,norm_value,energy,polarization,iterations,workspace,fingerprint,ok,message)
+  call require(ok,trim(message));allocate(related_next,source=next);defect=0d0
+  do i=1,nowned
+    j=int(metric%owned_row_ids(i));defect=max(defect,abs(related_next(i)-representation_sign(j)*symmetry_next(i)))
+  enddo
+  call MPI_Allreduce(MPI_IN_PLACE,defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+  call require(defect<3d-10,'symmetry-related fields did not produce D-related certified coefficients')
   if(rank==0)then
     write(*,'(a,i0,a,i0)')'HYBRID_LENGTH_GAUGE ranks=',nproc,' fingerprint=',reference_fingerprint
     write(*,'(a,i0,a)')'PASS hybrid length gauge on ',nproc,' ranks'

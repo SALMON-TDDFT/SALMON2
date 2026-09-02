@@ -14,11 +14,11 @@ module rt_dg_hybrid_length_gauge
   private
   public::propagate_rt_dg_hybrid_length_gauge
 contains
-  subroutine propagate_rt_dg_hybrid_length_gauge(comm,metric,operators,coefficients_owned,electric_field,&
+  subroutine propagate_rt_dg_hybrid_length_gauge(comm,certified_rank,metric,operators,coefficients_owned,electric_field,&
       time_step,tolerance,max_order,previous_polarization,polarization_periods,next_coefficients_owned,&
       metric_norm,energy,polarization,metric_iterations,workspace_peak_bytes,fingerprint,ok,message,&
       cached_metric_exchange,cached_operator_exchange)
-    integer,intent(in)::comm,max_order
+    integer,intent(in)::comm,certified_rank,max_order
     type(s_dg_hybrid_sparse_metric),intent(in)::metric
     type(s_dg_hybrid_sparse_operators),intent(in)::operators
     complex(real64),intent(in)::coefficients_owned(:)
@@ -48,6 +48,21 @@ contains
     metric_iterations=0;workspace_peak_bytes=0_int64;fingerprint=0_int64
     owns_metric_exchange=.not.present(cached_metric_exchange)
     owns_operator_exchange=.not.present(cached_operator_exchange)
+    call agree_integer(certified_rank,minimum_integer,maximum_integer,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum_integer/=maximum_integer)then
+      message='inconsistent certified RT rank';return
+    endif
+    local_bad=0
+    if(.not.allocated(metric%owned_row_ids).or..not.allocated(metric%row_offsets).or.&
+      .not.allocated(metric%column_ids).or..not.allocated(metric%values).or.&
+      .not.allocated(metric%active_rows).or..not.allocated(metric%packet_ids).or.&
+      .not.allocated(operators%owned_row_ids).or..not.allocated(operators%row_offsets).or.&
+      .not.allocated(operators%column_ids).or..not.allocated(operators%metric_values).or.&
+      .not.allocated(operators%hamiltonian_values).or..not.allocated(operators%position_values))local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='incomplete certified length-gauge state';return
+    endif
     n=metric%global_count;nowned=size(metric%owned_row_ids);local_bad=0
     call agree_integer(n,minimum_integer,maximum_integer,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.minimum_integer/=maximum_integer)then;message='inconsistent length-gauge basis extent';return;endif
@@ -73,14 +88,21 @@ contains
       bits=transfer(polarization_periods(i),bits);call agree_int64(bits,minimum_bits,maximum_bits,comm,ierr)
       if(ierr/=MPI_SUCCESS.or.minimum_bits/=maximum_bits)then;message='inconsistent polarization period';return;endif
     enddo
-    if(.not.metric%valid.or..not.operators%valid.or.n<1.or.max_order<2)local_bad=1
-    if(operators%global_count/=n.or.operators%metric_fingerprint/=metric%fingerprint)local_bad=1
+    if(.not.metric%valid.or..not.operators%valid.or.certified_rank<1.or.n/=certified_rank.or.max_order<2)local_bad=1
+    if(operators%global_count/=certified_rank.or.operators%metric_fingerprint/=metric%fingerprint)local_bad=1
     if(size(coefficients_owned)/=nowned.or.size(operators%owned_row_ids)/=nowned)local_bad=1
     if(nowned==huge(0))local_bad=1
     if(local_bad==0)then
-      if(size(metric%row_offsets)/=nowned+1.or.size(operators%row_offsets)/=nowned+1)local_bad=1
+      if(size(metric%row_offsets)/=nowned+1.or.size(operators%row_offsets)/=nowned+1.or.&
+        size(metric%active_rows)/=certified_rank.or.size(metric%packet_ids)/=certified_rank)local_bad=1
     endif
-    if(any(metric%owned_row_ids/=operators%owned_row_ids))local_bad=1
+    if(local_bad==0)then
+      if(any(metric%owned_row_ids/=operators%owned_row_ids))local_bad=1
+    endif
+    if(local_bad==0)then
+      if(any(metric%owned_row_ids<1_int64).or.&
+        any(metric%owned_row_ids>int(certified_rank,int64)))local_bad=1
+    endif
     if(local_bad==0)then
       do i=1,nowned
         row=int(metric%owned_row_ids(i))
@@ -227,7 +249,8 @@ contains
       local_real=0d0;if(nowned>0)local_real=max(maxval(abs(term)),maxval(abs(next_coefficients_owned)))
       if(local_real>sqrt(huge(1d0))/(16d0*sqrt(real(n,real64))))local_bad=1
       local_real=sum(abs(term)**2);call MPI_Allreduce(local_real,term_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
-      local_real=sum(abs(next_coefficients_owned)**2);call MPI_Allreduce(local_real,result_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+      local_real=sum(abs(next_coefficients_owned)**2)
+      call MPI_Allreduce(local_real,result_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
       call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
       if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;call cleanup();message='nonfinite length-gauge exponential term';return;endif
       fingerprint=ieor(ishftc(fingerprint,7),solver_fingerprint)

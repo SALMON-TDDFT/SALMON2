@@ -24,7 +24,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-stationarity-") as name:
     env.setdefault("OMPI_MCA_rmaps_base_oversubscribe", "1")
     for ranks in (1, 2, 4):
         run = subprocess.run([shutil.which("mpiexec"), "-n", str(ranks), str(exe)],
-                             capture_output=True, text=True, env=env)
+                             capture_output=True, text=True, env=env, timeout=90)
         assert run.returncode == 0, (ranks, run.stdout, run.stderr)
         assert f"PASS hybrid RT stationarity on {ranks} ranks" in run.stdout
 print("PASS hybrid RT stationarity on 1, 2, and 4 ranks")

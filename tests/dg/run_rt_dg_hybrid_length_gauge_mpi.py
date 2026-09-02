@@ -16,7 +16,8 @@ with tempfile.TemporaryDirectory(prefix="hybrid-length-gauge-") as name:
     str(root/"tests/dg/test_rt_dg_hybrid_length_gauge_mpi.f90"),*libs,"-o",str(exe)],check=True)
   env=os.environ.copy();env["OMP_NUM_THREADS"]="1";env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1");fps=[]
   for nrank in (1,2,4,8):
-    run=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe)],capture_output=True,text=True,env=env)
+    run=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe)],
+      capture_output=True,text=True,env=env,timeout=90)
     assert run.returncode==0,(nrank,run.stdout,run.stderr)
     assert f"PASS hybrid length gauge on {nrank} ranks" in run.stdout
     match=re.search(r"HYBRID_LENGTH_GAUGE ranks=\d+ fingerprint=(-?\d+)",run.stdout);assert match,run.stdout;fps.append(int(match.group(1)))
