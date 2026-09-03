@@ -984,6 +984,23 @@ weights, padding, degenerate terminal shells, finite temperature, invalid
 representative data and rank-disagreeing policy. The pending construction and
 bounded-update main-loop replacement described above is still required.
 
+**Coordinate handoff checkpoint, 2026-09-04 (Task 8 remains incomplete):**
+`export_dg_hybrid_fragment_coordinates` validates the saved fragment-Wannier
+cache against the expected seed/basis/generation and rank-local grid layout,
+then exports replicated WF-coordinate maps: the actual saved `U^dagger` for
+the fixed reference frame and the saved physical DC seed coefficients.
+It never reruns Wannier90 or changes the cache, and publishes neither output
+on failure. The caller must still append PW identity/zero blocks, distribute
+coefficient rows, and connect these maps to the production divided loop.
+MPI fixtures verify complex frame recovery, DC orbital reconstruction,
+corruption/generation/rank-layout rejection and unchanged W90 call counts.
+This helper does not replace the old main-route construction or complete Task 8.
+Verification: fragment-Wannier MPI fixture passed on 2/4/8 ranks; fixed-frame
+preconditioner and bounded subspace fixtures passed on 1/2/4/8 ranks;
+`cmake --build build-hybrid-release -j 4` completed successfully. Read-only
+review found no Critical/Important issues; its suggested caller-side
+fingerprint/grid-layout mismatch tests were added and passed. No Si64 run.
+
 **Files:**
 
 - Modify: `src/io/salmon_global.f90:480-545`

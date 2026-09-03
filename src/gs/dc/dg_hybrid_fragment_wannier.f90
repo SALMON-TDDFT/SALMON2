@@ -50,8 +50,50 @@ module dg_hybrid_fragment_wannier
   end interface hash_real_array
 
   public::build_dg_hybrid_fragment_wannier
+  public::export_dg_hybrid_fragment_coordinates
 
 contains
+
+  ! Replicated WF-coordinate maps; the caller appends its PW identity/zero blocks
+  ! and selects coefficient rows. Never infer this inverse from WF ordering.
+  subroutine export_dg_hybrid_fragment_coordinates(comm,fragment_id,basis_generation,&
+      seed_fingerprint,basis_fingerprint,grid_ids,local_layout_fingerprint,&
+      cache,fixed_frame_coordinates,seed_coordinates,ok,message)
+    integer,intent(in)::comm,fragment_id,basis_generation
+    integer(int64),intent(in)::seed_fingerprint,basis_fingerprint,grid_ids(:),local_layout_fingerprint
+    type(s_dg_hybrid_fragment_wannier_cache),intent(in)::cache
+    complex(real64),allocatable,intent(out)::fixed_frame_coordinates(:,:),seed_coordinates(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    complex(real64),allocatable::q(:,:),seed(:,:)
+    integer::nseed,retained,status
+    logical::local_ok,build_required
+
+    local_ok=cache%valid.and.allocated(cache%local_grid_ids).and.&
+      allocated(cache%physical_dc_seed_energies).and.allocated(cache%physical_dc_seed_occupations)
+    call canonical_total_status(comm,local_ok,'coordinate export requires a valid allocated Wannier cache',ok,message)
+    if(.not.ok)return
+    nseed=size(cache%physical_dc_seed_energies)
+    call classify_fragment_cache(comm,cache,fragment_id,basis_generation,nseed,&
+      cache%receipt%candidate_rank,grid_ids,seed_fingerprint,basis_fingerprint,&
+      local_layout_fingerprint,cache%physical_dc_seed_energies,cache%physical_dc_seed_occupations,&
+      build_required,ok,message)
+    if(.not.ok)return
+    retained=cache%receipt%retained_rank
+    allocate(q(retained,retained),seed(retained,nseed),stat=status)
+    call collective_allocation_status(comm,status,'fragment coordinate export',ok,message)
+    if(.not.ok)return
+    ! B_WF = B_fixed U, hence F = B_WF U^dagger.
+    q=conjg(transpose(cache%wannier_transform))
+    seed=cache%dc_seed_coefficients_in_wannier
+    call move_alloc(q,fixed_frame_coordinates)
+    call move_alloc(seed,seed_coordinates)
+    ok=.true.;message=''
+#else
+    ok=.false.;message='fragment coordinate export requires MPI'
+#endif
+  end subroutine export_dg_hybrid_fragment_coordinates
 
   subroutine build_dg_hybrid_fragment_wannier(comm_total,comm_fragment,fragment_id,&
       basis_generation,seed_directory,grid_ids,grid_weights,dc_seed_values,&

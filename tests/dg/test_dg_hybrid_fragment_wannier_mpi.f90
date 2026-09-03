@@ -40,7 +40,7 @@ program test_dg_hybrid_fragment_wannier_mpi
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   use dg_overlapping_wannier_w90,only:apply_dg_w90_gamma_transform
   use dg_hybrid_fragment_wannier,only:s_dg_hybrid_fragment_wannier_cache,&
-    build_dg_hybrid_fragment_wannier
+    build_dg_hybrid_fragment_wannier,export_dg_hybrid_fragment_coordinates
   use dg_hybrid_fragment_wannier_test_stubs
   implicit none
   integer,parameter::global_ngrid=8,buffer_global_point=8,projector_global_point=7
@@ -97,6 +97,7 @@ program test_dg_hybrid_fragment_wannier_mpi
   call require_stub_call(1,first_generation)
   call require_two_distinct_fragment_seeds(1)
   first_snapshot=cache
+  call test_coordinate_export
 
   setup_before=setup_calls;run_before=run_calls
   call invoke_builder(first_generation,dc_seed_values,buffer_candidates,cache,ok,message)
@@ -357,6 +358,71 @@ program test_dg_hybrid_fragment_wannier_mpi
   call MPI_Comm_free(comm_fragment,ierr)
   call MPI_Finalize(ierr)
 contains
+
+  subroutine test_coordinate_export
+    complex(real64),allocatable::q(:,:),seed(:,:),raw(:,:),reference(:,:)
+    type(s_dg_hybrid_fragment_wannier_cache)::bad
+    integer::case_id,saved_setup,saved_run
+    integer(int64)::expected_seed,expected_basis,expected_layout
+    integer(int64),allocatable::expected_ids(:)
+    saved_setup=setup_calls;saved_run=run_calls
+    allocate(raw(ncandidate,nlocal))
+    raw(1:nseed,:)=dc_seed_values
+    raw(nseed+1:nseed+1,:)=buffer_candidates
+    raw(nseed+2:nseed+2,:)=projector_candidates
+    reference=matmul(transpose(raw),cache%candidate_compression)
+    call export_dg_hybrid_fragment_coordinates(comm_fragment,fragment_id,first_generation,&
+      cache%receipt%seed_fingerprint,cache%receipt%basis_fingerprint,grid_ids,&
+      cache%local_row_layout_fingerprint,cache,q,seed,ok,message)
+    call require_total(ok,'coordinate export failed: '//trim(message))
+    call require_total(maxval(abs(matmul(transpose(cache%wannier_values),q)-reference))<1d-10,&
+      'exported Q does not restore the pre-Wannier fixed frame')
+    call require_total(maxval(abs(matmul(transpose(cache%wannier_values),seed)-&
+      transpose(dc_seed_values)))<1d-10,'exported seed coefficients do not reconstruct DC orbitals')
+    call require_total(same_cache_payload(cache,first_snapshot),'coordinate export mutated cache')
+    do case_id=1,5
+      bad=cache
+      select case(case_id)
+      case(1)
+        if(fragment_rank==0)bad%wannier_transform(1,1)=bad%wannier_transform(1,1)+0.1d0
+      case(2)
+        bad%receipt%basis_generation=first_generation+1
+      case(3)
+        bad%fragment_comm_size=fragment_size+1
+      case(4)
+        if(fragment_rank==0)deallocate(bad%local_grid_ids)
+      case(5)
+        bad%valid=.false.
+      end select
+      call export_dg_hybrid_fragment_coordinates(comm_fragment,fragment_id,first_generation,&
+        cache%receipt%seed_fingerprint,cache%receipt%basis_fingerprint,grid_ids,&
+        cache%local_row_layout_fingerprint,bad,q,seed,ok,message)
+      call require_total(.not.ok,'coordinate export accepted invalid cache')
+      call require_total(.not.allocated(q).and..not.allocated(seed),&
+        'failed coordinate export published partial coordinates')
+    enddo
+    do case_id=1,4
+      expected_seed=cache%receipt%seed_fingerprint
+      expected_basis=cache%receipt%basis_fingerprint
+      expected_layout=cache%local_row_layout_fingerprint
+      expected_ids=grid_ids
+      if(fragment_rank==0)then
+        select case(case_id)
+        case(1);expected_seed=ieor(expected_seed,1_int64)
+        case(2);expected_basis=ieor(expected_basis,1_int64)
+        case(3);expected_layout=ieor(expected_layout,1_int64)
+        case(4);expected_ids(1)=expected_ids(1)+1_int64
+        end select
+      endif
+      call export_dg_hybrid_fragment_coordinates(comm_fragment,fragment_id,first_generation,&
+        expected_seed,expected_basis,expected_ids,expected_layout,cache,q,seed,ok,message)
+      call require_total(.not.ok,'coordinate export ignored caller provenance/layout mismatch')
+      call require_total(.not.allocated(q).and..not.allocated(seed),&
+        'mismatched coordinate export published outputs')
+    enddo
+    call require_total(setup_calls==saved_setup.and.run_calls==saved_run,&
+      'coordinate export called Wannier90 again')
+  end subroutine test_coordinate_export
   subroutine fill_fixture
     real(real64)::angle
     integer::point,state,position
