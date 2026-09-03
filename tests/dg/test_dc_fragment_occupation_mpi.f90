@@ -2,8 +2,9 @@
 program test_dc_fragment_occupation_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
+  use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   use occupation_kernel,only:solve_weighted_state_occupations
-  use dc_fragment_occupation,only:determine_dc_fragment_occupations
+  use dc_fragment_occupation,only:determine_dc_fragment_occupations,assess_dc_fragment_occupation_capacity
   implicit none
   integer::comm,rank,nproc,ierr,fragment
   integer(int64)::fingerprint,minimum_fingerprint,maximum_fingerprint
@@ -12,7 +13,7 @@ program test_dc_fragment_occupation_mpi
   real(real64),parameter::tolerance=1d-8
   real(real64)::flat_energies(4),flat_weights(4)
   logical,allocatable::representative_mask(:)
-  logical::ok
+  logical::ok,capacity_sufficient,needs_extension(2),can_extend(2)
   character(256)::message
 
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
@@ -74,6 +75,9 @@ program test_dc_fragment_occupation_mpi
     0.1d0,2d0,2d0,tolerance,chemical_potential,occupations,electron_count,ok,message)
   call require(.not.ok.and.index(message,'tail')>0,&
     'finite-temperature solve accepted an occupied spectrum boundary')
+  call determine_dc_fragment_occupations(comm,energies,core_norms,representative_mask,&
+    0.1d0,2d0,2d0,tolerance,chemical_potential,occupations,electron_count,ok,message,needs_extension)
+  call require(ok.and.all(needs_extension),'finite-temperature tail did not request per-fragment extension')
 
   deallocate(energies,core_norms);allocate(energies(3,2),core_norms(3,2))
   call distribute_two_fragment_case(&
@@ -83,6 +87,9 @@ program test_dc_fragment_occupation_mpi
     0.1d0,2d0,2d0,tolerance,chemical_potential,occupations,electron_count,ok,message)
   call require(.not.ok.and.index(message,'tail')>0,&
     'finite-temperature solve ignored a degenerate boundary-tail sum')
+  call determine_dc_fragment_occupations(comm,energies,core_norms,representative_mask,&
+    0.1d0,2d0,2d0,tolerance,chemical_potential,occupations,electron_count,ok,message,needs_extension)
+  call require(ok.and.all(needs_extension),'degenerate terminal shell charge was not summed')
 
   deallocate(energies,core_norms);allocate(energies(2,2),core_norms(2,2))
   call distribute_two_fragment_case(&
@@ -100,6 +107,14 @@ program test_dc_fragment_occupation_mpi
   call require(all(abs(occupations-reshape([2d0,1d0,1d0,0d0],[2,2]))<1d-14).and.&
     chemical_potential==0d0.and.abs(electron_count-2d0)<tolerance,&
     'partial Fermi-degenerate shell was not occupied uniformly')
+  call determine_dc_fragment_occupations(comm,energies,core_norms,representative_mask,&
+    0d0,2d0,2d0,tolerance,chemical_potential,occupations,electron_count,ok,message,needs_extension)
+  call require(ok.and.needs_extension(1).and..not.needs_extension(2),&
+    'zero-temperature incomplete Fermi terminal shell was not extended')
+  call determine_dc_fragment_occupations(comm,energies,core_norms,representative_mask,&
+    0d0,2d0,2d0,tolerance,chemical_potential,occupations,electron_count,ok,message,needs_extension,&
+    terminal_shell_complete=[.true.,.true.])
+  call require(ok.and..not.any(needs_extension),'explicitly complete zero-temperature shell extended unnecessarily')
   flat_energies=[-1d0,-0.5d0,0d0,1d0]
   flat_weights=[0.7d0,0.2d0,0d0,0d0]
   call solve_weighted_state_occupations(flat_energies,flat_weights,1d0,0d0,2d0,&
@@ -134,6 +149,37 @@ program test_dc_fragment_occupation_mpi
     0d0,2d0,2.6d0,tolerance,chemical_potential,occupations,electron_count,ok,message)
   call require(.not.ok.and.index(message,'capacity')>0,&
     'collective fragment solve accepted insufficient spectrum capacity')
+  can_extend=[.true.,.true.]
+  call assess_dc_fragment_occupation_capacity(comm,core_norms,representative_mask,can_extend,&
+    2d0,2.6d0,tolerance,capacity_sufficient,needs_extension,ok,message)
+  call require(ok.and..not.capacity_sufficient.and.all(needs_extension),&
+    'capacity preflight must extend every nonexhausted fragment before occupation solve')
+  can_extend=[.false.,.true.]
+  call assess_dc_fragment_occupation_capacity(comm,core_norms,representative_mask,can_extend,&
+    2d0,2.6d0,tolerance,capacity_sufficient,needs_extension,ok,message)
+  call require(ok.and..not.needs_extension(1).and.needs_extension(2),'exhausted fragment marked for capacity extension')
+  can_extend=.false.
+  call assess_dc_fragment_occupation_capacity(comm,core_norms,representative_mask,can_extend,&
+    2d0,2.6d0,tolerance,capacity_sufficient,needs_extension,ok,message)
+  call require(.not.ok.and.index(message,'insufficient')>0,'exhausted capacity must fail collectively')
+  call assess_dc_fragment_occupation_capacity(comm,core_norms,representative_mask,can_extend,&
+    2d0,2d0,tolerance,capacity_sufficient,needs_extension,ok,message)
+  call require(ok.and.capacity_sufficient.and..not.any(needs_extension),'sufficient capacity triggered growth')
+  if(representative_mask(1))core_norms(1,1)=ieee_value(0d0,ieee_quiet_nan)
+  call assess_dc_fragment_occupation_capacity(comm,core_norms,representative_mask,can_extend,&
+    2d0,2d0,tolerance,capacity_sufficient,needs_extension,ok,message)
+  call require(.not.ok,'nonfinite capacity input accepted')
+  call distribute_two_fragment_case(reshape([-1d0,-0.5d0],[1,2]),reshape([0.75d0,0.5d0],[1,2]))
+  if(representative_mask(1))core_norms(1,1)=-0.75d0
+  call assess_dc_fragment_occupation_capacity(comm,core_norms,representative_mask,can_extend,&
+    2d0,2d0,tolerance,capacity_sufficient,needs_extension,ok,message)
+  call require(.not.ok,'negative capacity input accepted')
+  call distribute_two_fragment_case(reshape([-1d0,-0.5d0],[1,2]),reshape([0.75d0,0.5d0],[1,2]))
+  if(nproc>1)then
+    call assess_dc_fragment_occupation_capacity(comm,core_norms,representative_mask,can_extend,&
+      merge(1d0,2d0,rank==0),2d0,tolerance,capacity_sufficient,needs_extension,ok,message)
+    call require(.not.ok,'rank-disagreeing capacity controls accepted')
+  endif
 
   deallocate(energies,core_norms);allocate(energies(2,2),core_norms(2,2))
   call distribute_two_fragment_case(&
