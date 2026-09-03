@@ -51,6 +51,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-fragment-wannier-") as name:
         ROOT / "src/io/posix.c",
         ROOT / "src/gs/dc/lcfo_wannier_sawf_seed.f90",
         ROOT / "src/gs/dc/dg_overlapping_wannier_w90.f90",
+        ROOT / "src/gs/dc/dg_hybrid_fragment_subspace.f90",
     ]
     # During RED the wished-for module is absent, so compiling the fixture itself
     # gives the useful "cannot open ...mod" diagnostic.  Once implemented, the

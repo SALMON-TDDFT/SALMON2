@@ -42,6 +42,8 @@ program test_dg_hybrid_fragment_wannier_mpi
   use dg_hybrid_fragment_wannier,only:s_dg_hybrid_fragment_wannier_cache,&
     build_dg_hybrid_fragment_wannier,export_dg_hybrid_fragment_coordinates
   use dg_hybrid_fragment_wannier_test_stubs
+  use dg_hybrid_fragment_subspace,only:s_dg_hybrid_fragment_subspace_state,&
+    initialize_dg_hybrid_fragment_subspace
   implicit none
   integer,parameter::global_ngrid=8,buffer_global_point=8,projector_global_point=7
   integer,parameter::first_generation=7
@@ -379,6 +381,7 @@ contains
       'exported Q does not restore the pre-Wannier fixed frame')
     call require_total(maxval(abs(matmul(transpose(cache%wannier_values),seed)-&
       transpose(dc_seed_values)))<1d-10,'exported seed coefficients do not reconstruct DC orbitals')
+    call test_seed_handoff(seed)
     call require_total(same_cache_payload(cache,first_snapshot),'coordinate export mutated cache')
     do case_id=1,5
       bad=cache
@@ -423,6 +426,48 @@ contains
     call require_total(setup_calls==saved_setup.and.run_calls==saved_run,&
       'coordinate export called Wannier90 again')
   end subroutine test_coordinate_export
+
+  subroutine test_seed_handoff(seed)
+    complex(real64),intent(in)::seed(:,:)
+    type(s_dg_hybrid_fragment_subspace_state)::initial
+    complex(real64),allocatable::rows(:,:),gathered(:,:)
+    integer(int64),allocatable::coefficient_ids(:)
+    integer,allocatable::selected(:)
+    real(real64)::occupations(nseed)
+    integer::nwf,ntotal,nrows,a,b,p,code
+    nwf=size(seed,1);ntotal=nwf+2
+    nrows=count([(mod(a-1,min(fragment_size,2))==fragment_rank,a=1,ntotal)])
+    allocate(coefficient_ids(nrows),rows(nrows,nseed));rows=0d0;p=0
+    do a=ntotal,1,-1
+      if(mod(a-1,min(fragment_size,2))/=fragment_rank)cycle
+      p=p+1;coefficient_ids(p)=a
+      if(a<=nwf)rows(p,:)=seed(a,:)
+    enddo
+    occupations=0d0;occupations(1)=2d0
+    call initialize_dg_hybrid_fragment_subspace(comm_fragment,ntotal,coefficient_ids,&
+      fragment_id,first_generation,cache%receipt%basis_fingerprint,901_int64,&
+      rows,physical_energies,occupations,1,1d-8,1d-10,1d-10,fixture_identity_metric,&
+      initial,selected,ok,message)
+    call require_total(ok,'saved Wannier seed to CG handoff failed: '//trim(message))
+    call require_total(initial%state_count==2.and.all(selected==[1,2]),'saved seed handoff selected named WFs')
+    allocate(gathered(ntotal,2));gathered=0d0
+    do a=1,nrows
+      b=int(coefficient_ids(a));gathered(b,:)=initial%vectors(a,:)
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,gathered,ntotal*2,MPI_DOUBLE_COMPLEX,MPI_SUM,comm_fragment,code)
+    call require_total(code==MPI_SUCCESS,'initial CG coefficient gathering failed')
+    call require_total(maxval(abs(matmul(transpose(cache%wannier_values),gathered(:nwf,:))-&
+      transpose(dc_seed_values(selected,:))))<1d-10,'initial CG state changed the physical DC seed orbitals')
+    call require_total(all(gathered(nwf+1:,:)==0d0),'initial DC seeds acquired PW components')
+  end subroutine test_seed_handoff
+
+  subroutine fixture_identity_metric(input,output,valid)
+    complex(real64),intent(in)::input(:,:)
+    complex(real64),intent(out)::output(:,:)
+    logical,intent(out)::valid
+    ! This fixture's constructed WFs and appended independent PW axes are orthonormal.
+    output=input;valid=.true.
+  end subroutine fixture_identity_metric
   subroutine fill_fixture
     real(real64)::angle
     integer::point,state,position

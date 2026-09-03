@@ -45,7 +45,119 @@ module dg_hybrid_fragment_subspace
   public::advance_dg_hybrid_fragment_subspace
   public::measure_dg_hybrid_fragment_subspace
   public::extend_dg_hybrid_fragment_subspace
+  public::initialize_dg_hybrid_fragment_subspace
 contains
+  subroutine initialize_dg_hybrid_fragment_subspace(comm,global_count,row_ids,fragment_id,generation,&
+      basis_fp,metric_fp,seed_coefficients,seed_energies,seed_occupations,guard_count,&
+      occupation_tolerance,energy_tolerance,orthogonality_tolerance,apply_s,state,selected_seeds,ok,message,&
+      energy_cutoff)
+    ! Seed columns are physical DC orbitals in uncompressed WF+PW coordinates,
+    ! with zero PW components. Selection never means taking the first named WFs.
+    ! The returned inventory is only an initial guess, not a tail/symmetry certificate.
+    integer,intent(in)::comm,global_count,fragment_id,generation,guard_count
+    integer(int64),intent(in)::row_ids(:),basis_fp,metric_fp
+    complex(real64),intent(in)::seed_coefficients(:,:)
+    real(real64),intent(in)::seed_energies(:),seed_occupations(:),occupation_tolerance,&
+      energy_tolerance,orthogonality_tolerance
+    real(real64),optional,intent(in)::energy_cutoff
+    procedure(fragment_apply)::apply_s
+    type(s_dg_hybrid_fragment_subspace_state),intent(inout)::state
+    integer,allocatable,intent(out)::selected_seeds(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    type(s_dg_hybrid_fragment_subspace_state)::working
+    integer,allocatable::order(:),chosen(:)
+    integer::nseed,nselected,occupied,j,k,tmp,stat
+    real(real64)::edge,scale
+    logical::valid,halting(3)
+    ok=.false.;message='invalid fragment seed initialization contract'
+    call suspend_traps(halting);call execute();call restore_traps(halting)
+  contains
+    subroutine execute()
+      nseed=size(seed_energies)
+      valid=agree_int(comm,nseed)
+      valid=agree_int(comm,global_count).and.valid
+      valid=agree_int(comm,guard_count).and.valid
+      valid=agree_real(comm,occupation_tolerance).and.valid
+      valid=agree_real(comm,energy_tolerance).and.valid
+      valid=agree_real(comm,orthogonality_tolerance).and.valid
+      valid=agree_int(comm,merge(1,0,present(energy_cutoff))).and.valid
+      if(.not.consensus(comm,valid))return
+      if(present(energy_cutoff))then
+        valid=agree_real(comm,energy_cutoff)
+        if(.not.consensus(comm,valid.and.ieee_is_finite(energy_cutoff)))return
+      endif
+      valid=nseed>0.and.guard_count>=0.and.all(shape(seed_coefficients)==[size(row_ids),nseed]).and.&
+        size(seed_occupations)==nseed
+      valid=valid.and.ieee_is_finite(occupation_tolerance).and.ieee_is_finite(energy_tolerance).and.&
+        ieee_is_finite(orthogonality_tolerance)
+      if(.not.consensus(comm,valid))return
+      if(occupation_tolerance<0d0.or.energy_tolerance<=0d0.or.energy_tolerance>1d-2.or.&
+        orthogonality_tolerance<64d0*epsilon(1d0).or.orthogonality_tolerance>1d-2)return
+      valid=finite(seed_coefficients).and.all(ieee_is_finite(seed_energies)).and.&
+        all(ieee_is_finite(seed_occupations)).and.all(seed_occupations>=0d0)
+      if(.not.consensus(comm,valid))return
+      do j=1,nseed
+        valid=agree_real(comm,seed_energies(j))
+        valid=agree_real(comm,seed_occupations(j)).and.valid
+        if(.not.valid)return
+      enddo
+      allocate(order(nseed),stat=stat)
+      if(.not.consensus(comm,stat==0))then;message='cannot allocate seed selection';return;endif
+      order=[(j,j=1,nseed)]
+      do j=2,nseed
+        tmp=order(j);k=j
+        do while(k>1)
+          if(seed_energies(order(k-1))<=seed_energies(tmp))exit
+          order(k)=order(k-1);k=k-1
+        enddo
+        order(k)=tmp
+      enddo
+      occupied=0
+      do j=1,nseed
+        if(seed_occupations(order(j))>occupation_tolerance)occupied=j
+      enddo
+      ! Saturate without integer overflow; later capacity/tail checks request
+      ! more invariant shells if the saved DC inventory is insufficient.
+      nselected=occupied+min(guard_count,nseed-occupied)
+      if(present(energy_cutoff))then
+        do j=1,nseed
+          if(seed_energies(order(j))<=energy_cutoff)nselected=max(nselected,j)
+        enddo
+      endif
+      if(nselected==0)then;message='initial DC occupied/guard inventory is empty';return;endif
+      edge=seed_energies(order(nselected))
+      do j=nselected+1,nseed
+        scale=max(1d0,abs(edge),abs(seed_energies(order(j))))
+        if(abs(seed_energies(order(j))/scale-edge/scale)>energy_tolerance)exit
+        nselected=j
+      enddo
+      if(nselected>=global_count)then
+        message='initial seed selection exhausts fragment basis; enlarge basis before initialization';return
+      endif
+      valid=int(nselected,int64)**2<=int(huge(0),int64)/100_int64.and.&
+        int(size(row_ids),int64)*int(nselected,int64)<=int(huge(0),int64)/40_int64
+      if(.not.consensus(comm,valid))then;message='initial fragment state exceeds safe workspace bounds';return;endif
+      working%fragment_id=fragment_id;working%basis_generation=generation
+      working%basis_fingerprint=basis_fp;working%metric_fingerprint=metric_fp
+      working%state_count=nselected
+      allocate(working%vectors(size(row_ids),nselected),working%directions(size(row_ids),nselected),&
+        chosen(nselected),stat=stat)
+      if(.not.consensus(comm,stat==0))then;message='cannot allocate initial fragment state';return;endif
+      chosen=order(:nselected);working%vectors=seed_coefficients(:,chosen);working%directions=0d0
+      call validate_cache(comm,global_count,row_ids,fragment_id,generation,basis_fp,metric_fp,working,valid,message)
+      if(.not.valid)return
+      call normalize_entry(comm,apply_s,working%vectors,orthogonality_tolerance,valid)
+      if(.not.valid)then;message='physical DC seed subspace has invalid metric rank';return;endif
+      call move_alloc(working%vectors,state%vectors);call move_alloc(working%directions,state%directions)
+      state%fragment_id=fragment_id;state%basis_generation=generation
+      state%basis_fingerprint=basis_fp;state%metric_fingerprint=metric_fp
+      state%state_count=nselected;state%history_rank_used=0;state%maximum_trial_dimension=0
+      call move_alloc(chosen,selected_seeds)
+      ok=.true.;message=''
+    end subroutine
+  end subroutine initialize_dg_hybrid_fragment_subspace
+
   subroutine measure_dg_hybrid_fragment_subspace(comm,global_count,row_ids,fragment_id,generation,&
       basis_fp,metric_fp,apply_h,apply_s,orthogonality_tolerance,state,eigenvalues,relative_residual,&
       fingerprint,ok,message)

@@ -123,6 +123,7 @@ program test_dg_hybrid_fragment_subspace_mpi
     call require(.not.ok,'rank-disagreeing callback selection accepted')
   endif
   call test_measurement_only()
+  call test_seed_initialization()
   call test_growth_rollback()
   call test_extension()
   call test_metric_publication()
@@ -139,6 +140,82 @@ program test_dg_hybrid_fragment_subspace_mpi
   endif
   call MPI_Finalize(ierr)
 contains
+  subroutine test_seed_initialization()
+    type(s_dg_hybrid_fragment_subspace_state)::initial,snapshot
+    complex(real64)::seeds(nlocal,6)
+    complex(real64)::full_seeds(nlocal,n)
+    real(real64)::energies(6),occupations(6)
+    integer,allocatable::selected(:)
+    integer::a,b
+    energies=[-1d0,-2d0,0d0,0.5d0,0.5d0,2d0]
+    occupations=[2d0,2d0,0d0,0d0,0d0,0d0]
+    seeds=0d0
+    do a=1,nlocal
+      b=int(ids(a))
+      if(b<=6)seeds(a,b)=1d0/sqrt(real(s(b,b),real64))
+    enddo
+    call initialize_dg_hybrid_fragment_subspace(comm,n,ids,7,2,101_int64,203_int64,&
+      seeds,energies,occupations,1,1d-8,1d-10,1d-10,apply_s,initial,selected,ok,message)
+    call require(ok,'DC seed initialization failed: '//trim(message))
+    call require(initial%state_count==3.and.all(selected==[2,1,3]),'occupied-plus-guard selection wrong')
+    call require(maxval(abs(initial%vectors-seeds(:,selected)))<1d-12.and.&
+      all(initial%directions==0d0),'initializer lost seed coefficients or created CG history')
+    call initialize_dg_hybrid_fragment_subspace(comm,n,ids,7,2,101_int64,203_int64,&
+      seeds,energies,occupations,2,1d-8,1d-10,1d-10,apply_s,initial,selected,ok,message)
+    call require(ok.and.initial%state_count==5,'guard boundary split a degenerate shell')
+    call initialize_dg_hybrid_fragment_subspace(comm,n,ids,7,2,101_int64,203_int64,&
+      seeds,energies,occupations,1,1d-8,1d-10,1d-10,apply_s,initial,selected,ok,message,&
+      energy_cutoff=0.5d0)
+    call require(ok.and.initial%state_count==5,'energy window did not retain the whole degenerate shell')
+    snapshot=initial
+    full_seeds=0d0
+    do a=1,nlocal
+      b=int(ids(a));full_seeds(a,b)=1d0/sqrt(real(s(b,b),real64))
+    enddo
+    call initialize_dg_hybrid_fragment_subspace(comm,n,ids,7,2,101_int64,203_int64,&
+      full_seeds,[(real(a,real64),a=1,n)],[(2d0,a=1,n)],1,1d-8,1d-10,1d-10,&
+      apply_s,initial,selected,ok,message)
+    call require(.not.ok.and..not.allocated(selected),'initializer silently started with the full fragment basis')
+    call require(all(initial%vectors==snapshot%vectors),'full-basis rejection changed accepted state')
+    call initialize_dg_hybrid_fragment_subspace(comm,n-1,ids,7,2,101_int64,203_int64,&
+      full_seeds,[(real(a,real64),a=1,n)],[(2d0,a=1,n)],1,1d-8,1d-10,1d-10,&
+      apply_s,initial,selected,ok,message)
+    call require(.not.ok.and..not.allocated(selected),'initializer accepted more states than basis rank')
+    call require(all(initial%vectors==snapshot%vectors),'over-rank rejection changed accepted state')
+    do a=1,3
+      if(rank==0)then
+        select case(a)
+        case(1);energies(1)=ieee_value(0d0,ieee_quiet_nan)
+        case(2);occupations(1)=-1d0
+        case(3);energies(1)=-1.1d0
+        end select
+      endif
+      if(a==3.and.nproc==1)cycle
+      call initialize_dg_hybrid_fragment_subspace(comm,n,ids,7,2,101_int64,203_int64,&
+        seeds,energies,occupations,1,1d-8,1d-10,1d-10,apply_s,initial,selected,ok,message)
+      call require(.not.ok.and..not.allocated(selected),'invalid or rank-disagreeing seed spectrum accepted')
+      call require(all(initial%vectors==snapshot%vectors),'invalid seed spectrum changed accepted state')
+      energies(1)=-1d0;occupations(1)=2d0
+    enddo
+    energies(1)=-1d0
+    if(nproc>1)then
+      if(rank==0)then
+        call initialize_dg_hybrid_fragment_subspace(comm,n,ids,7,2,101_int64,203_int64,&
+          seeds,energies,occupations,1,1d-8,1d-10,1d-10,apply_s,initial,selected,ok,message,energy_cutoff=0d0)
+      else
+        call initialize_dg_hybrid_fragment_subspace(comm,n,ids,7,2,101_int64,203_int64,&
+          seeds,energies,occupations,1,1d-8,1d-10,1d-10,apply_s,initial,selected,ok,message)
+      endif
+      call require(.not.ok.and..not.allocated(selected),'rank-disagreeing optional window accepted')
+    endif
+    seeds(:,2)=seeds(:,1)
+    call initialize_dg_hybrid_fragment_subspace(comm,n,ids,7,2,101_int64,203_int64,&
+      seeds,energies,occupations,1,1d-8,1d-10,1d-10,apply_s,initial,selected,ok,message)
+    call require(.not.ok.and..not.allocated(selected),'rank-deficient seeds were accepted')
+    call require(all(initial%vectors==snapshot%vectors).and.initial%state_count==snapshot%state_count,&
+      'failed initialization destroyed an accepted state')
+  end subroutine
+
   subroutine test_measurement_only()
     type(s_dg_hybrid_fragment_subspace_state)::saved
     real(real64)::old_values(m)

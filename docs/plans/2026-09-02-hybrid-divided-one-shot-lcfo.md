@@ -1001,6 +1001,30 @@ preconditioner and bounded subspace fixtures passed on 1/2/4/8 ranks;
 review found no Critical/Important issues; its suggested caller-side
 fingerprint/grid-layout mismatch tests were added and passed. No Si64 run.
 
+**Seed-to-CG checkpoint, 2026-09-04 (Task 8 remains incomplete):**
+`initialize_dg_hybrid_fragment_subspace` now selects the occupied spectral
+prefix plus a caller-specified guard count and optional physical DC energy
+window, closing the boundary degenerate shell. It selects mapped physical DC
+seed columns, not named WF columns, certifies/normalizes the current S metric,
+and initializes zero search history. It returns original seed column indices
+for the later extension catalog. The optional energy window is not the PW
+kinetic cutoff, nor does this initial selection certify a tail or symmetry.
+Insufficient saved guard inventory saturates at the saved seed count; later
+capacity/tail-driven extension remains mandatory. Initial selection that
+exhausts or exceeds the fragment basis is rejected without truncating a shell
+or changing an accepted state. The global-count limit and workspace bounds
+are checked collectively before publication.
+
+The actual saved complex Wannier map is now exercised through the initializer
+with distributed reversed coefficient rows, zero-row ranks, and zero padded
+PW components; reconstructed initial orbitals match the original DC seeds.
+Subspace MPI tests pass on 1/2/4/8 ranks, the Wannier handoff on 2/4/8,
+preconditioner regression on 1/2/4/8, and the release build succeeds.
+The full-basis rejection regression was observed failing before its fix.
+Main-route construction, PW/catalog assembly, per-epoch budget accounting,
+capacity/tail extension and the production callback replacement are still
+pending. No production SCF or Si64 run was started at this checkpoint.
+
 **Files:**
 
 - Modify: `src/io/salmon_global.f90:480-545`
