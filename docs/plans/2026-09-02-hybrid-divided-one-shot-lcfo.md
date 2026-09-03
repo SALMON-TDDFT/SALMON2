@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Make fragment-local WF+PW density SCF followed by one complete LCFO solve the production Hybrid route, with explicit optional LCFO refinement and complete-v3 RT publication.
+**Goal:** Build construction WFs directly and independently from reusable DC fragment orbitals, converge the WF+PW density with bounded warm-started fragment updates, and perform exactly one complete LCFO solve by default before optional refinement and complete-v3 RT publication.
 
-**Architecture:** Reuse the already implemented divided route, but replace its non-authoritative convergence, stale occupations, unchecked electron count, and ordinary-`hpsi` operator with shared conventional-DC semantics and the fixed broken-volume/SIPG payload.  Keep the repeated complete-Hybrid continuation as an explicit oracle.  Extract its final complete solve, dynamic energy-window certification, localized RT gauge, and version-3 checkpoint publication so the divided route can use them once by default or exactly `N+1` times when the user requests `N` refinements.
+**Architecture:** Tasks 1--4 establish shared conventional-DC convergence, electron-count, fragment spectrum/density, and common-chemical-potential semantics.  The remaining production path consumes the exact-rank-compatible DC `rwf` seed directly, performs one unconstrained Wannier90 rotation per fragment communicator and basis generation, and augments it with the dynamic windowed-PW complement.  Divided SCF retains an uncompressed fragment-owned catalog and advances only occupied-plus-guard states with a default three-step warm-started `[X,R,P]` LOBPCG update in the correct broken-volume/SIPG self block; a separate immutable union map removes only complete-system metric-null directions for terminal LCFO.  No preliminary complete LCFO or complete-cell construction-WF Wannier90 operation is allowed; the complete distributed LCFO eigensolve occurs once after divided density convergence, while dense fragment solves and repeated complete-Hybrid continuation remain explicit reference backends.
 
 **Tech Stack:** Fortran 2008, SALMON DC/LCFO, MPI, ScaLAPACK, Wannier90, CMake, standalone Python source-contract tests, linked Fortran MPI fixtures.
 
@@ -16,10 +16,10 @@ all verification directories.  Never use `git add -A`, `git commit -a`,
 already modified file, inspect `git diff --cached`, and commit only the current
 task's hunks.  Do not create another worktree.
 
-The currently running eight-rank continuation job is a reference calculation.
-Do not start another heavy Si64 calculation concurrently and do not remove or
-overwrite any of its output.  Source-level and small MPI tests may proceed;
-wait for the reference process before the next full Si64 run.
+The earlier eight-rank continuation attempt has ended and its output remains
+reference evidence.  Do not restart a heavy Si64 calculation before Task 11
+and do not remove or overwrite any existing verification output.  Source-level
+and small MPI tests may proceed.
 
 The production scope remains the accepted Gamma, non-SOI, PZ-LDA, gapped
 Hybrid route.  Do not broaden theory scope in this plan.
@@ -352,7 +352,293 @@ git diff --cached
 git commit -m "fix(dc): share fragment occupation policy"
 ```
 
-### Task 5: Build fragment self blocks from the fixed broken-volume/SIPG payload
+### Task 5: Build construction WFs once per fragment and a generalized PW complement
+
+**Files:**
+
+- Create: `src/gs/dc/dg_hybrid_fragment_wannier.f90`
+- Create: `tests/dg/test_dg_hybrid_fragment_wannier_mpi.f90`
+- Create: `tests/dg/run_dg_hybrid_fragment_wannier_mpi.py`
+- Create: `tests/dg/test_dg_hybrid_fragment_wannier_lcfo_mpi.f90`
+- Create: `tests/dg/run_dg_hybrid_fragment_wannier_lcfo_mpi.py`
+- Modify: `src/common/dg_hybrid_wannier_complement.f90`
+- Modify: `tests/dg/test_dg_hybrid_wannier_complement_mpi.f90`
+- Modify: `src/gs/dc/dg_hybrid_projected_fragment_pipeline.f90`
+- Modify: `tests/dg/test_dg_hybrid_projected_fragment_pipeline_mpi.f90`
+- Modify: `src/gs/dc/CMakeLists.txt`
+
+**Step 1: Write a RED communicator/epoch Wannier fixture**
+
+Split 2, 4, and 8 total ranks into deterministic fragment communicators.  Feed
+each fragment a different number of reusable DC `rwf` columns (including 2
+and 3, so no test encodes the Si64 value 384).  Stub the Wannier90 setup and
+run entry points and require:
+
+- exactly one setup and one run on the root of each fragment communicator for
+  one `(fragment_id,basis_generation)` pair;
+- no setup or run on the non-root ranks of that fragment;
+- one bitwise-identical transform broadcast to every rank in the fragment;
+- distinct seed directories of the form
+  `fragment-%06d/generation-%08d`, with the fragment ID and basis generation
+  included in the receipt and fingerprint;
+- every locally generated WF column retained, even when its center lies in an
+  overlapping neighboring buffer;
+- reconstruction of every input DC orbital from the returned seed-to-WF
+  coefficients, with invariant occupied projector and occupation-weighted
+  density before and after the unconstrained rotation;
+- no `.dmn` symmetry constraint or cross-fragment gauge-matching input;
+- a collective total-communicator failure if any fragment setup, run, output
+  parse, or broadcast fails; and
+- reusing a successful receipt for the same immutable seed/basis fingerprint,
+  but a new single invocation after a genuine basis-generation change.
+
+The fixture must call construction localization outside any density-iteration
+callback and assert that callback invocation counts remain zero during a mock
+SCF loop.
+
+**Step 2: Run the fragment-Wannier RED test**
+
+Run: `python3 tests/dg/run_dg_hybrid_fragment_wannier_mpi.py`
+
+Expected: compile failure because `dg_hybrid_fragment_wannier` does not exist.
+
+**Step 3: Implement the fragment construction-WF contract**
+
+Expose SALMON-structure-independent metadata and numerical APIs.  The
+production wrapper may call the existing Wannier90 adapter internally, but
+the fragment module owns validation, namespacing, broadcasts, and receipts:
+
+```fortran
+type s_dg_hybrid_fragment_wannier_receipt
+  integer :: fragment_id
+  integer :: basis_generation
+  integer :: candidate_rank
+  integer :: retained_rank
+  integer :: setup_count
+  integer :: run_count
+  integer(int64) :: seed_fingerprint
+  integer(int64) :: basis_fingerprint
+  integer(int64) :: transform_fingerprint
+  real(real64) :: seed_reconstruction_defect
+end type
+
+type s_dg_hybrid_fragment_wannier_cache
+  logical :: valid
+  type(s_dg_hybrid_fragment_wannier_receipt) :: receipt
+  complex(real64),allocatable :: wannier_values(:,:)
+  complex(real64),allocatable :: candidate_compression(:,:)
+  complex(real64),allocatable :: wannier_transform(:,:)
+  complex(real64),allocatable :: dc_seed_coefficients_in_wannier(:,:)
+  real(real64),allocatable :: physical_dc_seed_energies(:)
+  real(real64),allocatable :: physical_dc_seed_occupations(:)
+end type
+
+subroutine build_dg_hybrid_fragment_wannier(comm_total,comm_fragment,&
+    fragment_id,basis_generation,seed_directory,grid_ids,grid_weights,&
+    dc_seed_values,dc_seed_energies,dc_seed_occupations,&
+    buffer_candidate_values,projector_candidate_values,metric_tolerance,&
+    fragment_real_lattice,fragment_reciprocal_lattice,atom_symbols,&
+    atoms_cart,fractional_coordinates,num_iter,localization_tolerance,&
+    coordinator_byte_limit,&
+    cache,ok,message)
+```
+
+The input columns come directly from the exact-rank-compatible DC seed
+checkpoint; do not call preliminary `dc_lcfo` and do not form complete-cell
+LCFO eigenvectors.  Run unconstrained Wannier90 only on the fragment
+communicator root, then broadcast the accepted transform.  Preserve all input
+DC orbital columns and every independent accepted buffer/projector direction;
+remove only candidate-space metric null modes before localization, then
+preserve every retained column and its span.  Reject unexpected rank loss,
+non-finite output, a transform that is not unitary within tolerance, a changed
+fragment/basis fingerprint, or a seed directory collision.  Do not select WFs
+by post-localization centers and do not compare or align gauges between
+fragments.
+
+Use the accepted fragment lattice, fragment atom list, fractional grid
+coordinates, and retained candidate columns to call the existing
+`setup_dg_w90_gamma_library`, `assemble_dg_w90_gamma_matrices`,
+`run_dg_w90_gamma_library`, and `apply_dg_w90_gamma_transform` in that order on
+`comm_fragment`.  Pass `DG_W90_UNCONSTRAINED`; do not fork Wannier90 numerical
+code into the new orchestrator.
+
+Use square `num_bands=num_wann` localization with no disentanglement.  Supply
+Wannier90's required eigenvalue array as finite zero-valued auxiliary labels
+for every retained candidate, including added buffer/projector directions.
+Keep the physical `dc_seed_energies` separately in the cache and never return
+or consume those auxiliary labels as fragment eigenvalues, occupation input,
+or extension energies.  The MPI fixture must include more retained candidates
+than DC eigenvalues and prove that physical seed energies remain unchanged.
+
+`cache` is `intent(inout)`.  An invalid cache performs setup/run once and then
+stores every returned array and receipt in memory.  A valid cache with the
+same fragment ID, basis generation, seed fingerprint, and basis fingerprint
+returns those stored arrays with zero Wannier90 calls.  A key mismatch within
+the same generation is a hard stale-cache error; a caller starting a new basis
+generation must first create a fresh cache, which writes to the new generation
+namespace rather than overwriting prior artifacts.
+
+Return both the candidate-space metric compression and the square Wannier90
+unitary, plus the coefficients that reconstruct every original DC seed
+orbital in the final fragment-WF basis.  Certify the reconstruction in the
+fragment metric and certify invariance of the DC occupied projector and
+occupation-weighted density.  Task 8 uses this map, padded by zero PW
+coefficients, to initialize the occupied-plus-guard `X`; it must not infer the
+inverse transformation from WF ordering or centers.
+
+Keep `candidate_rank` and `retained_rank` runtime-sized.  Occupied-plus-guard
+selection belongs to the fragment eigensolver state policy in Task 7; this
+routine must not contain a material-specific state count.
+
+**Step 4: Write the RED generalized-complement and gauge-invariance fixture**
+
+Construct two overlapping fragment WF blocks with a nonidentity union Gram
+matrix, raw plane waves, and nonzero cross-fragment `H` and `S` rows.  Require
+the PW complement to satisfy the retained-union condition
+
+```text
+W^dagger S (P - W G^+ W^dagger S P) = 0,
+G = W^dagger S W,
+```
+
+within tolerance.  Apply independent phase, permutation, and full unitary
+rotations inside every complete fragment WF block and require invariant:
+
+- union metric rank and accepted basis span;
+- unchanged fragment ownership and seed coefficients in the uncompressed
+  divided-SCF catalog, plus a separately fingerprinted union-to-complete map;
+- complete generalized eigenvalues;
+- occupied projector and reconstructed density;
+- generalized residual and orthogonality receipts.
+
+Add negative cases for a missing local WF column, duplicate global basis ID,
+an indefinite Gram matrix, metric rank loss beyond the declared tolerance,
+and insufficient PW/projector/tail coverage.  The negative missing-column case
+must fail rather than silently treating individual WF symmetry or centers as
+an acceptance gate.
+
+Include a cross-fragment near-null direction.  Require its removal only from
+the terminal complete catalog, require all local fragment columns to remain,
+and verify seed reconstruction after composing the fragment embedding with the
+union-to-complete map.  Reject compression if a seed projector loses rank.
+
+**Step 5: Run the generalized-complement RED test**
+
+Run:
+
+```text
+python3 tests/dg/run_dg_hybrid_fragment_wannier_lcfo_mpi.py
+python3 tests/dg/run_dg_hybrid_wannier_complement_mpi.py
+```
+
+Expected: compile failure on the new generalized projection entry point or an
+assertion showing that the old orthonormal-WF formula is invalid for the
+fragment-union metric.
+
+**Step 6: Add the generalized fragment-union projection**
+
+Keep the existing exact orthonormal-WF routine for its current callers and add
+a separate API:
+
+```fortran
+subroutine compute_dg_hybrid_generalized_wannier_projection_tile(comm,&
+    global_row_count,row_ids,weights,wannier_values,pw_tile,&
+    wannier_fingerprint,packet_fingerprint,first_column,metric_tolerance,&
+    coefficients,projected_pw,metric_rank,metric_condition,&
+    orthogonality_defect,workspace_peak_bytes,fingerprint,ok,message)
+
+subroutine build_dg_hybrid_complete_union_map(comm,global_row_count,row_ids,&
+    weights,uncompressed_basis_values,metric_tolerance,&
+    complete_basis_transform,complete_basis_values,metric_rank,&
+    metric_condition,projector_fingerprint,ok,message)
+```
+
+Assemble the distributed Hermitian Gram matrix, diagonalize it collectively,
+reject negative modes, and form the Moore--Penrose inverse only over the
+declared retained metric range.  Project with `G^+`; never assume `G=I` for a
+union of independently localized fragment blocks.  This first routine leaves
+the original WFs in their uncompressed fragment catalogs and returns only the
+PW complement and metric receipts.
+
+After every fragment WF+PW catalog is assembled, the second routine checks the
+complete union metric.  If it is full rank, return the identity transform so
+fragment columns remain unchanged.  If it has cross-fragment numerical null
+directions, return a rectangular transform spanning the retained metric
+eigenspace and the corresponding terminal complete-basis values.  This map is
+used only to congruence-transform the final LCFO `H/S`; it is never used as a
+fragment basis.  Near-null removal must be defined by the union metric
+eigenspace, not by fragment order or individual WF labels, so the retained
+projector is invariant under complete within-fragment unitary rotations.
+Certify the retained rank, condition estimate, weighted orthogonality defect,
+and unique global row IDs in these numerical routines.
+
+Compare the retained metric projector, not individual complete-transform
+columns or their raw fingerprints, across exactly degenerate metric clusters.
+Such columns may differ by a harmless unitary gauge while the Hybrid span and
+LCFO observables remain invariant.
+
+Route the projected-fragment pipeline through the generalized entry point when
+its WFs come from independently localized fragment blocks.  Keep the old
+orthonormal fast path only when its caller supplies and fingerprints an
+explicit globally orthonormal frame; never choose it merely because every
+fragment block is internally orthonormal.  The pipeline, which owns fragment
+catalogs, packet-neighbor metadata, buffer rows, and projector graphs, performs
+the separate interface/periodic-wrap/nonlocal-projector/tail coverage gates
+before it publishes two related products: uncompressed, fragment-owned bases
+for divided SCF and the immutable union-to-complete map for terminal LCFO.
+
+```fortran
+type s_dg_hybrid_dual_basis_catalog
+  logical :: valid
+  type(s_dg_hybrid_fragment_basis),allocatable :: fragment_bases(:)
+  complex(real64),allocatable :: union_to_complete(:,:)
+  integer :: uncompressed_rank
+  integer :: complete_rank
+  integer(int64) :: fragment_catalog_fingerprint
+  integer(int64) :: complete_map_fingerprint
+end type
+```
+
+The projected-fragment pipeline finalization returns this catalog
+collectively.  Fragment entries and their coefficient coordinates are never
+rewritten by `union_to_complete`.
+
+Compose each fragment's seed-to-WF map with its embedding into the
+uncompressed union and with the union-to-complete map.  The Task 5 integration
+fixture must reconstruct the same seed orbital, occupied projector, and
+density through both the fragment-local coordinates and the terminal complete
+coordinates.  A rank compression that removes any physical seed direction is
+a collective failure.
+
+**Step 7: Run GREEN and protected basis tests**
+
+Run:
+
+```text
+python3 tests/dg/run_dg_hybrid_fragment_wannier_mpi.py
+python3 tests/dg/run_dg_hybrid_fragment_wannier_lcfo_mpi.py
+python3 tests/dg/run_dg_hybrid_wannier_complement_mpi.py
+python3 tests/dg/run_dg_hybrid_projected_fragment_pipeline_mpi.py
+python3 tests/dg/run_dg_hybrid_production_fragment_basis_mpi.py
+python3 tests/dg/run_dg_overlapping_wannier_w90_mpi.py
+cmake --build build-hybrid-commit -j2
+```
+
+Expected: PASS for every configured decomposition; receipts show one
+construction Wannier90 call per fragment and generation and no fixed global
+state count, and the build completes.
+
+**Step 8: Commit only Task 5**
+
+```text
+git add src/gs/dc/dg_hybrid_fragment_wannier.f90 tests/dg/test_dg_hybrid_fragment_wannier_mpi.f90 tests/dg/run_dg_hybrid_fragment_wannier_mpi.py tests/dg/test_dg_hybrid_fragment_wannier_lcfo_mpi.f90 tests/dg/run_dg_hybrid_fragment_wannier_lcfo_mpi.py
+git add -p src/common/dg_hybrid_wannier_complement.f90 tests/dg/test_dg_hybrid_wannier_complement_mpi.f90 src/gs/dc/dg_hybrid_projected_fragment_pipeline.f90 tests/dg/test_dg_hybrid_projected_fragment_pipeline_mpi.f90 src/gs/dc/CMakeLists.txt
+git diff --cached --check
+git diff --cached
+git commit -m "feat(dg): localize construction WFs per fragment"
+```
+
+### Task 6: Build fragment self blocks from the fixed broken-volume/SIPG payload
 
 **Files:**
 
@@ -361,6 +647,7 @@ git commit -m "fix(dc): share fragment occupation policy"
 - Create: `tests/dg/run_dg_hybrid_divided_operator_mpi.py`
 - Modify: `src/gs/dc/CMakeLists.txt`
 - Modify: `src/gs/main_dft.f90:3440-3612`
+- Modify: `tests/dg/check_dg_hybrid_continuation_route.py`
 
 **Step 1: Write a RED two-fragment operator fixture**
 
@@ -376,14 +663,29 @@ Create a row-distributed synthetic payload with:
 Require `extract_dg_hybrid_fragment_self_block` to return the exact `H_ff` and
 `S_ff`, including all diagonal/self pieces of the SIPG and nonlocal operators.
 Require `compose_dg_hybrid_complete_rows` to reconstruct the direct full
-reference with every cross-fragment contribution exactly once.  Check
-Hermiticity and rank-decomposition invariance.
+reference in the uncompressed union with every cross-fragment contribution
+exactly once, then apply the Task 5 union-to-complete congruence transform to
+both `H` and `S`.  Use a rectangular transform in one case and require that it
+does not alter any extracted local self block.  Check Hermiticity, positive
+retained metric rank, and rank-decomposition invariance.
+
+Extend the continuation route checker to require construction of the basis
+directory, interior rows, projector support, faces, and frozen variational
+payload before the divided/reference branch.  Require both branches to consume
+the same immutable payload fingerprint and forbid a second payload freeze in
+either branch.
 
 **Step 2: Run RED**
 
-Run: `python3 tests/dg/run_dg_hybrid_divided_operator_mpi.py`
+Run:
 
-Expected: compile failure because `dg_hybrid_divided_operator` is absent.
+```text
+python3 tests/dg/run_dg_hybrid_divided_operator_mpi.py
+python3 tests/dg/check_dg_hybrid_continuation_route.py --interface-only
+```
+
+Expected: compile failure because `dg_hybrid_divided_operator` is absent and
+source-contract failure because payload construction is still branch-local.
 
 **Step 3: Implement narrow matrix APIs**
 
@@ -392,12 +694,17 @@ subroutine extract_dg_hybrid_fragment_self_block(comm_fragment,fragment_id,&
     row_ids,basis_fragment,fixed_payload,local_rows,hff,sff,ok,message)
 
 subroutine compose_dg_hybrid_complete_rows(comm,row_ids,fixed_payload,&
-    local_rows,hamiltonian_rows,operator_fingerprint,ok,message)
+    local_rows,union_to_complete,hamiltonian_rows,metric_rows,&
+    operator_fingerprint,ok,message)
 ```
 
 Use the frozen basis directory and row IDs; never infer a fragment from a
-rank-local offset.  The fixed payload contributes kinetic, nonlocal, metric,
-and SIPG rows.  Only `local_rows` changes with density.
+rank-local offset.  Fragment extraction always uses the uncompressed,
+fragment-owned Task 5 catalog.  The fixed payload contributes kinetic,
+nonlocal, metric, and SIPG rows in that uncompressed union.  Only `local_rows`
+changes with density.  Complete composition applies
+`T^H H_union T` and `T^H S_union T` with the immutable
+`union_to_complete=T`; it never rewrites fragment basis IDs or caches.
 
 **Step 4: Share payload construction between divided and reference routes**
 
@@ -416,93 +723,432 @@ python3 tests/dg/run_dg_hybrid_lcfo_mpi.py
 python3 tests/dg/run_dg_hybrid_lcfo_support_redistribution_mpi.py
 python3 tests/dg/run_dg_hybrid_generalized_eigensystem_mpi.py
 python3 tests/dg/check_dg_hybrid_continuation_route.py --interface-only
+cmake --build build-hybrid-commit -j2
 ```
 
-Expected: all PASS.
+Expected: all PASS and the build completes.
 
 **Step 6: Commit**
 
 ```text
 git add src/gs/dc/dg_hybrid_divided_operator.f90 tests/dg/test_dg_hybrid_divided_operator_mpi.f90 tests/dg/run_dg_hybrid_divided_operator_mpi.py
-git add -p src/gs/dc/CMakeLists.txt src/gs/main_dft.f90
+git add -p src/gs/dc/CMakeLists.txt src/gs/main_dft.f90 tests/dg/check_dg_hybrid_continuation_route.py
 git diff --cached --check
 git diff --cached
 git commit -m "feat(dg): project fixed DG fragment self blocks"
 ```
 
-### Task 6: Connect the production divided loop to the fixed DG operator
+### Task 7: Add bounded warm-started fragment subspace updates and dynamic state extension
 
 **Files:**
 
+- Create: `src/gs/dc/dg_hybrid_fragment_subspace.f90`
+- Create: `tests/dg/test_dg_hybrid_fragment_subspace_mpi.f90`
+- Create: `tests/dg/run_dg_hybrid_fragment_subspace_mpi.py`
+- Modify: `src/gs/dc/dc_fragment_occupation.f90`
+- Modify: `tests/dg/test_dc_fragment_occupation_mpi.f90`
+- Modify: `src/gs/dc/CMakeLists.txt`
+
+**Step 1: Write RED tests for a successful bounded update**
+
+Keep the current strict `solve_dg_hybrid_block_cg` contract intact: reaching
+its iteration cap without its eigensolver target must still return failure.
+Add a separate fixture for the density-SCF update API using distributed
+generalized Hermitian problems.  Require:
+
+- `maximum_steps=3` performs at most three `[X,R,P]` Rayleigh--Ritz updates;
+- a finite, metric-orthonormal, improved state is returned with
+  `advanced=.true.` even when `eigensolver_converged=.false.`;
+- the next density epoch reuses both accepted `X` and prior direction `P`;
+- a supplied diagonal/preconditioner callback is applied to `R`; an identity
+  callback is allowed only when explicitly supplied by a fixture;
+- the trial dimension never exceeds `min(global_count,3*nstate)`, and the
+  fixture starts from a genuine occupied-plus-guard subspace rather than
+  setting `nstate=global_count` automatically;
+- the reported residual is the largest statewise distributed two-norm
+  `||H C_j-epsilon_j S C_j||_2 / max(1,|epsilon_j|,||H C_j||_2)`, not a local
+  max norm;
+- residual below `dg_dc_gs_intermediate_orbital_tolerance` reports early
+  eigensolver convergence;
+- a trial exceeding the entry residual by more than
+  `dg_dc_gs_allowed_residual_growth` rolls back to the safe entry state and
+  still reports a valid bounded update; and
+- when every trial is rejected but the entry state remains finite,
+  rank-preserving, metric-orthonormal, and inside the growth bound, return
+  `ok=.true.`, `advanced=.false.`, and
+  `stop_reason='safe_entry_retained'`; and
+- non-finite algebra, an indefinite/rank-deficient metric, failed operator
+  callbacks, or no safe entry state remain collective hard failures.
+
+Compare cold and warm second epochs on the same perturbed operator and require
+the warm path to use its saved direction and achieve no worse certified
+residual.  Also assert that the density outer loop, not this bounded routine,
+owns the final convergence decision.
+
+**Step 2: Run the bounded-update RED test**
+
+Run:
+
+```text
+python3 tests/dg/run_dg_hybrid_block_cg_mpi.py
+python3 tests/dg/run_dg_hybrid_fragment_subspace_mpi.py
+```
+
+Expected: the strict fixture remains PASS and the new fixture fails to compile
+because `dg_hybrid_fragment_subspace` and the bounded API are absent.
+
+**Step 3: Implement the separate `[X,R,P]` update API**
+
+Expose persistent state keyed by fragment and basis generation:
+
+```fortran
+type s_dg_hybrid_fragment_subspace_state
+  integer :: fragment_id
+  integer :: basis_generation
+  integer :: state_count
+  integer(int64) :: basis_fingerprint
+  integer(int64) :: metric_fingerprint
+  complex(real64),allocatable :: vectors(:,:)
+  complex(real64),allocatable :: directions(:,:)
+end type
+
+subroutine advance_dg_hybrid_fragment_subspace(comm,global_count,row_ids,&
+    fragment_id,basis_generation,basis_fingerprint,metric_fingerprint,&
+    apply_h,apply_s,apply_preconditioner,maximum_steps,intermediate_tolerance,&
+    orthogonality_tolerance,allowed_residual_growth,state,eigenvalues,&
+    iterations,relative_residual,eigensolver_converged,advanced,&
+    stop_reason,workspace_peak_bytes,fingerprint,ok,message)
+```
+
+At each step call the explicit preconditioner on the raw residual, then form a
+metric-orthogonalized trial block from accepted `X`, preconditioned `R`, and
+saved direction `P`; solve only that small generalized problem.  Retain no
+more than `nstate` vectors and the new conjugate directions.  Validate row
+ownership, every callback result, all scalar controls, and the nonzero
+basis/metric fingerprints collectively.  Compute the normalized distributed
+two-norm receipt explicitly.
+Return the best safe state at the step cap.  A cap is `stop_reason='step_cap'`,
+not solver failure.  Returning the unchanged safe entry is also a successful
+bounded density step with `advanced=.false.`; only `ok=.false.` prevents
+density reconstruction.
+
+Do not weaken or silently redirect the strict full-convergence entry point.
+Dense fragment diagonalization remains available only when an explicit
+reference fixture or reference backend calls it; it is not automatic recovery
+for a production bounded-update failure.
+
+**Step 4: Write RED tests for runtime-sized occupied-plus-guard extension**
+
+Extend the occupation fixture and the new subspace fixture with unequal
+fragment state counts and a terminal degenerate shell.  Require an extension
+mask per fragment when:
+
+- the total represented maximum occupation capacity is below the requested
+  electron count, before invoking the occupation kernel; in that case mark
+  every non-exhausted fragment to add its next complete shell; or
+- at finite temperature, the charge in the final represented degenerate shell
+  exceeds `electron_tolerance/nfragment`; or
+- at zero temperature, an occupied or Fermi-intersecting terminal shell is not
+  represented completely.
+
+Extension first adds the complete next unused DC-seed eigenspace, ordered by
+the saved seed eigenvalue and mapped through Task 5's seed-to-WF coefficients.
+After those eigenspaces are exhausted, it adds a complete kinetic-energy shell
+from the windowed-PW catalog together with still-unused projector-support
+directions, S-projects the whole candidate pool against `X`, and solves the
+small `H/S` problem only within that pool.  Stable global candidate IDs order
+equal pools but never select a named localized basis column inside a degenerate
+pool.  It must not use per-column `H_ii/S_ii`, add a fixed number such as 384,
+stop at a material-specific energy, or use individual-WF symmetry as the
+state-count gate.  If a requested fragment has no remaining candidate, all
+ranks fail collectively with an insufficient-spectrum diagnostic.
+
+Apply independent phase, permutation, and full unitary rotations to each
+fragment construction-WF block and require the same extension shell, accepted
+state projector, common-mu density, and residual receipts.  This test prevents
+the short density SCF from depending on the arbitrary unconstrained Wannier90
+gauge.
+
+When the state count grows, require the old `X` columns to remain bitwise
+unchanged before reorthogonalization, the new columns to be S-orthogonalized
+against them, old valid `P` history to be retained for old columns, and new
+direction columns to be initialized to zero.  A basis-generation or metric
+fingerprint change must invalidate the whole cache instead of embedding stale
+coefficients.
+
+**Step 5: Run the extension RED tests**
+
+Run:
+
+```text
+python3 tests/dg/run_dc_fragment_occupation_mpi.py
+python3 tests/dg/run_dg_hybrid_fragment_subspace_mpi.py
+```
+
+Expected: compile or assertion failure because capacity preflight, tail masks,
+gauge-invariant whole-shell extension, and cache embedding are absent.
+
+**Step 6: Implement the extension policy and cache transitions**
+
+Add `assess_dc_fragment_occupation_capacity`, which collectively compares
+`sum(wspin*core_norm)` with the target before calling the occupation kernel.
+When capacity is insufficient and any fragment still has unused candidates,
+return `needs_extension=.true.` for every such fragment and no occupations;
+the caller adds one complete next shell per marked fragment and repeats.  If
+all fragments are exhausted, fail collectively.  This prevents the existing
+kernel's correct insufficient-capacity error from preempting a possible
+dynamic extension.
+
+```fortran
+subroutine assess_dc_fragment_occupation_capacity(comm,core_norms,&
+    representative_mask,can_extend,wspin,expected_electrons,tolerance,&
+    capacity_sufficient,needs_extension,ok,message)
+```
+
+After capacity is sufficient, add an optional `needs_extension(:)` tail result
+to `determine_dc_fragment_occupations` without changing existing caller
+semantics when it is absent.  A successful common-mu solve may still request
+the per-fragment finite-temperature or zero-temperature terminal-shell
+extensions above; repeat spectrum/occupation determination until those masks
+clear.
+
+In `dg_hybrid_fragment_subspace`, provide a deterministic extension routine
+that accepts the saved seed-eigenspace catalog and the globally identified
+PW/projector candidate pools, chooses the whole next invariant shell within
+the existing energy comparison tolerance, embeds the accepted cache, and
+records source kind, old/new state counts, and shell bounds in the receipt.
+The production caller will repeat extension until every fragment mask is false
+or candidates are exhausted.
+
+**Step 7: Run GREEN and protected occupation/solver tests**
+
+Run:
+
+```text
+python3 tests/dg/run_dg_hybrid_block_cg_mpi.py
+python3 tests/dg/run_dg_hybrid_fragment_subspace_mpi.py
+python3 tests/dg/run_dc_fragment_occupation_mpi.py
+python3 tests/dg/run_dg_hybrid_fragment_solver_mpi.py
+python3 tests/dg/run_dg_hybrid_occupation_policy_mpi.py
+cmake --build build-hybrid-commit -j2
+```
+
+Expected: PASS for 1/2/4 ranks where configured; the bounded path accepts a
+safe three-step result, all state counts are derived at runtime, and the build
+completes.  The existing strict block-CG source and fixture remain unchanged;
+their fresh PASS protects the converged-or-fail reference contract.
+
+**Step 8: Commit only Task 7**
+
+```text
+git add src/gs/dc/dg_hybrid_fragment_subspace.f90 tests/dg/test_dg_hybrid_fragment_subspace_mpi.f90 tests/dg/run_dg_hybrid_fragment_subspace_mpi.py
+git add -p src/gs/dc/dc_fragment_occupation.f90 tests/dg/test_dc_fragment_occupation_mpi.f90 src/gs/dc/CMakeLists.txt
+git diff --cached --check
+git diff --cached
+git commit -m "feat(dg): add bounded fragment subspace updates"
+```
+
+### Task 8: Connect the production divided loop to fragment-local construction and bounded updates
+
+**Files:**
+
+- Modify: `src/io/salmon_global.f90:480-545`
+- Modify: `src/io/inputoutput.f90:630-700,1155-1220,1885-1960,2955-3000,3130-3170`
 - Modify: `src/gs/main_dft.f90:3613-3668,4867-4995`
+- Create: `tests/dg/check_dg_hybrid_fragment_wannier_route.py`
 - Modify: `tests/dg/check_dg_hybrid_divided_dc_controls.py`
 - Modify: `tests/dg/check_dg_hybrid_divided_lcfo_route.py`
-- Modify: `tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_divided_lcfo.in`
-- Modify: `src/io/inputoutput.f90:3130-3170`
+- Modify: `tests/dg/check_dg_hybrid_localization_first_inputs.py`
+- Modify: `tests/dg/test_dg_hybrid_divided_scf_mpi.f90`
+- Modify existing untracked file: `tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_divided_lcfo.in`
 
 **Step 1: Make the route checks RED**
 
 Require the divided branch to use
-`extract_dg_hybrid_fragment_self_block` and the split spectrum/occupation/
-density phases.  Forbid production calls to
-`apply_dg_hybrid_divided_fragment_hpsi` and the identity metric callback.
+`build_dg_hybrid_fragment_wannier`, the generalized fragment-union PW
+projection, `extract_dg_hybrid_fragment_self_block`, the bounded fragment
+subspace update, and the split spectrum/occupation/density phases.  Forbid:
+
+- preliminary `dc_lcfo` or another complete generalized solve before divided
+  density convergence;
+- construction-WF Wannier90 setup/run on `dc%icomm_tot`;
+- any construction-WF Wannier90 setup/run from inside the density loop;
+- production calls to `apply_dg_hybrid_divided_fragment_hpsi`, the identity
+  metric callback, or dense fragment eigensolving; and
+- a literal or derived material-specific retained-state count such as 384.
+
+Require exactly one construction setup/run per fragment communicator and
+basis generation outside the loop.  The later certified RT localizer remains
+a separate complete-system operation and is required only when an RT
+checkpoint is requested; the source check must not confuse it with the
+construction-WF call.
+
+Require one local-update budget per fragment communicator and outer density
+iteration, shared across that fragment's state-extension passes, and require
+the initial production state count to come from the occupied-plus-guard policy
+rather than the full fragment basis.
+Require local `H_ff/S_ff`, seed coefficients, and density reconstruction to use
+only the uncompressed fragment catalog.  Require the union-to-complete map to
+remain immutable and unused until complete row composition after divided
+convergence.
+
+Require a finite nonidentity production preconditioner constructed from each
+fragment self block; an identity preconditioner remains fixture-only.
+
 Require `yn_dg_hybrid_divided_scf`, `yn_dg_hybrid_continuation_scf`, and
 `yn_dg_hybrid_scf` to be mutually exclusive.
 
-**Step 2: Run RED**
+Extend the divided MPI fixture so 1/2/4-rank layouts reconstruct the same
+unique-core density and electron count from the same fragment projectors.
+Overlapping buffer points must contribute no physical density ownership, and
+duplicated or missing core ownership must fail collectively.
+
+Add `dg_hybrid_fragment_cg_steps` as an integer input with default `3`; require
+collective broadcast, logged value, and rejection outside `[1,256]`.  Preserve
+the existing user-provided positive finite `wannier_pw_cutoff`; do not replace
+it by a hidden fixed cutoff or reinterpret it as a symmetry guarantee.
+
+**Step 2: Run the source/input RED tests**
 
 Run:
 
 ```text
 python3 tests/dg/check_dg_hybrid_divided_dc_controls.py
 python3 tests/dg/check_dg_hybrid_divided_lcfo_route.py
+python3 tests/dg/check_dg_hybrid_fragment_wannier_route.py
+python3 tests/dg/check_dg_hybrid_localization_first_inputs.py
+python3 tests/dg/run_dg_hybrid_divided_scf_mpi.py
 ```
 
 Expected: FAIL because the old divided callback still calls ordinary `hpsi`
-with an identity metric and flag exclusivity is absent.
+with an identity metric, performs complete-cell construction before the loop,
+the bounded-step input is absent, and the current production density fixture
+does not yet enforce decomposition-invariant unique-core ownership.
 
-**Step 3: Wire the divided callbacks**
+**Step 3: Wire construction directly from the reusable DC seed**
+
+After the exact MPI-rank-count and rank--fragment mapping checks accept the DC
+seed checkpoint:
+
+1. take each fragment's saved `rwf`, spectrum, occupation, density, and
+   potential directly from the seed payload;
+2. run the Task 5 unconstrained construction localization once on that
+   fragment communicator and retain every resulting column;
+3. add plane waves selected dynamically by the user input
+   `wannier_pw_cutoff`, project them with the generalized union metric, and
+   certify metric rank plus buffer/projector/tail coverage;
+4. freeze both the uncompressed fragment catalog and the separately
+   fingerprinted union-to-complete transform, then build the common
+   variational payload in uncompressed union coordinates; and
+5. initialize each fragment's occupied-plus-guard `X` from
+   `cache%dc_seed_coefficients_in_wannier`, append zero coefficients for the PW
+   complement, and use the seed spectrum/occupations to choose its runtime
+   columns without a complete-cell eigensolve.
+
+There is no preliminary full LCFO and no complete-cell construction-WF
+Wannier90 operation.  A fragment/basis-generation fingerprint mismatch is a
+hard error and triggers neither silent gauge repair nor global fallback.
+
+**Step 4: Wire the bounded divided-density callbacks**
 
 At each divided iteration:
 
 1. update the total potential from the current unique-core density;
 2. assemble the density-dependent local rows;
-3. extract and solve each fragment `H_ff C_f=S_ff C_f epsilon_f`;
-4. determine current occupations with the common DC chemical potential;
-5. reconstruct unique-core density; and
-6. use the shared DC convergence/mixing routines.
+3. extract each fragment `H_ff` and `S_ff` from the same fixed payload used by
+   final LCFO, always in the uncompressed fragment coordinates;
+4. advance the fragment cache by at most
+   `dg_hybrid_fragment_cg_steps` using the warm `[X,R,P]` state and a
+   regularized diagonal self-block preconditioner derived from
+   `diag(H_ff)-epsilon_j*diag(S_ff)`;
+5. preflight the total represented occupation capacity; when it is
+   insufficient, extend every non-exhausted fragment by its next invariant
+   shell and repeat steps 4--5 without resetting the remaining update budget;
+6. only after capacity is sufficient, determine current occupations with one
+   common DC chemical potential;
+7. extend only fragments whose terminal occupation/tail mask requests the
+   complete next shell, repeating steps 4--6 until every mask clears;
+8. reconstruct the unique-core density from current uncompressed fragment
+   coefficients and
+   occupations; and
+9. use the shared DC convergence, electron-count, potential-refresh, and
+   mixing routines.
 
-The local loop must contain no complete generalized eigensolve.  The old
-ordinary-`hpsi` callbacks may remain only for isolated compatibility fixtures;
-they are not production entry points.
+Initialize
+`remaining_fragment_steps(fragment)=dg_hybrid_fragment_cg_steps` for every
+fragment at the start of each outer density iteration.  Decrement a
+fragment's own counter by every `[X,R,P]` update across that fragment's
+state-extension passes; never reset it at either step 5 or step 7.  Budgets for
+different fragment communicators are independent and may advance
+concurrently.  Appending a
+shell performs deterministic S-orthogonalization plus finite Rayleigh-quotient
+evaluation for the new directions.  If the update budget is exhausted, those
+safe estimates participate in the repeated occupation/tail decision and the
+new directions receive their first LOBPCG update in the next density epoch.
+Thus extension may repeat without permitting more than the user-requested
+number of local updates in one outer iteration.
 
-**Step 4: Run GREEN and build**
+Floor the diagonal-preconditioner denominator with a collective scale derived
+from `H_ff/S_ff` and the existing numerical tolerance, preserve its sign, and
+reject non-finite inputs or outputs.  Log its fingerprint with the local
+operator epoch so a stale preconditioner cannot be reused after the potential
+changes.
+
+The local loop contains no complete generalized eigensolve and no Wannier90
+call.  Reaching the local three-step cap is accepted when the updater returns a
+finite safe state; the outer density criterion decides SCF convergence.  The
+old ordinary-`hpsi`, strict-CG, and dense-solve paths may remain for isolated
+fixtures or an explicitly selected small/reference backend, but are not
+automatic production recovery.
+
+The production initializer must choose `nstate` from the DC occupied count,
+guard/tail policy, requested window, and degenerate-shell closure.  It must not
+initialize `nstate=fragment_basis_count` merely because the basis is
+available.  Equality is permitted only after recorded dynamic shell extension
+has exhausted the fragment metric rank; at that point the tail must clear or
+the calculation fails collectively.
+
+Log per-iteration fragment state counts, extension events, common chemical
+potential, electron defect, local steps, normalized residual, rollback/stop
+reason, and basis/operator fingerprints.  These receipts must be finite and
+decomposition-consistent.
+
+**Step 5: Run GREEN and build**
 
 Run:
 
 ```text
 python3 tests/dg/check_dg_hybrid_divided_dc_controls.py
 python3 tests/dg/check_dg_hybrid_divided_lcfo_route.py
+python3 tests/dg/check_dg_hybrid_fragment_wannier_route.py
+python3 tests/dg/check_dg_hybrid_localization_first_inputs.py
+python3 tests/dg/run_dg_hybrid_fragment_wannier_mpi.py
+python3 tests/dg/run_dg_hybrid_fragment_wannier_lcfo_mpi.py
+python3 tests/dg/run_dg_hybrid_fragment_subspace_mpi.py
 python3 tests/dg/run_dg_hybrid_divided_scf_mpi.py
 python3 tests/dg/run_dg_hybrid_divided_operator_mpi.py
+python3 tests/dg/run_dc_fragment_occupation_mpi.py
 python3 tests/dg/check_dg_hybrid_continuation_route.py
 cmake --build build-hybrid-commit -j2
 ```
 
-Expected: all PASS and no complete eigensolve appears inside the divided SCF
-loop.
+Expected: all PASS; source receipts show no preliminary complete solve, one
+construction localization per fragment/generation, and no complete eigensolve
+or localization call inside the divided SCF loop.
 
-**Step 5: Commit**
+**Step 6: Commit**
 
 ```text
-git add tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_divided_lcfo.in
-git add -p src/gs/main_dft.f90 src/io/inputoutput.f90 tests/dg/check_dg_hybrid_divided_dc_controls.py tests/dg/check_dg_hybrid_divided_lcfo_route.py
+git add -N tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_divided_lcfo.in
+git add -p tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_divided_lcfo.in
+git add tests/dg/check_dg_hybrid_fragment_wannier_route.py
+git add -p src/io/salmon_global.f90 src/io/inputoutput.f90 src/gs/main_dft.f90 tests/dg/check_dg_hybrid_divided_dc_controls.py tests/dg/check_dg_hybrid_divided_lcfo_route.py tests/dg/check_dg_hybrid_localization_first_inputs.py tests/dg/test_dg_hybrid_divided_scf_mpi.f90
 git diff --cached --check
 git diff --cached
-git commit -m "feat(dg): run production fragment DG density SCF"
+git commit -m "feat(dg): run bounded fragment-local density SCF"
 ```
 
-### Task 7: Extract one terminal LCFO certification and complete-v3 publication
+### Task 9: Extract one terminal LCFO certification and complete-v3 publication
 
 **Files:**
 
@@ -519,16 +1165,40 @@ git commit -m "feat(dg): run production fragment DG density SCF"
 Use a small complete eigensystem with an occupied block and a degenerate
 unoccupied boundary cluster.  Require one call to the complete generalized
 solver, current-spectrum occupations, extension from the requested cutoff to
-the first symmetry-closing cluster, physical occupied/window symmetry checks,
-unconstrained construction WFs, and a complete version-3 payload.  Require
-construction-basis nonclosure to remain diagnostic.  Reject missing operator,
-density, selection, pseudopotential, or ownership fingerprints.
+the first complete degenerate cluster that closes the requested physical
+window, physical occupied/window symmetry checks against the symmetry group
+of the actual complete system, the complete fragment-local construction span,
+and a complete version-3 payload.  Individual construction WFs and individual
+fragment blocks need not transform symmetrically; their nonclosure remains a
+diagnostic and never rejects an otherwise complete LCFO subspace.  Reject
+missing operator, density, selection, pseudopotential, ownership, fragment-WF,
+or generalized-metric fingerprints.
+
+Use the terminal complete catalog and the congruence-transformed `H/S` from
+Task 6.  Require a mismatched union-to-complete fingerprint, an uncompressed
+row extent, or accidental fragment-coordinate coefficients to fail before the
+complete solve.  Run `prepare_rt_checkpoint=.false.` and `.true.` cases;
+both solve once, but only the latter invokes the distinct complete-system RT
+localizer and prepares a version-3 payload.
+
+Extend the divided and continuation route checkers at the same time.  Require
+both routes to call the extracted finalizer, require the zero-refinement
+divided branch to reach it exactly once after divided convergence, forbid the
+old version-2 publisher there, and keep the reference continuation scheduler
+outside the extracted terminal routine.
 
 **Step 2: Run RED**
 
-Run: `python3 tests/dg/run_dg_hybrid_lcfo_finalization_mpi.py`
+Run:
 
-Expected: compile failure because the finalization module is absent.
+```text
+python3 tests/dg/run_dg_hybrid_lcfo_finalization_mpi.py
+python3 tests/dg/check_dg_hybrid_divided_lcfo_route.py
+python3 tests/dg/check_dg_hybrid_continuation_route.py
+```
+
+Expected: compile failure because the finalization module is absent and route
+failures because terminal logic is still inline.
 
 **Step 3: Extract the terminal logic**
 
@@ -536,8 +1206,9 @@ Expose a routine that performs no density iteration:
 
 ```fortran
 subroutine finalize_dg_hybrid_lcfo_once(comm,operator_epoch,row_ids,&
-    hamiltonian_rows,fixed_payload,basis_values,grid_ids,grid_weights,&
-    physical_symmetry,selection,provenance,solve_complete,&
+    hamiltonian_rows,metric_rows,fixed_payload,complete_basis_values,&
+    union_to_complete_fingerprint,grid_ids,grid_weights,&
+    physical_symmetry,selection,provenance,prepare_rt_checkpoint,solve_complete,&
     result,lcfo_density,checkpoint_payload,receipt,ok,message)
 ```
 
@@ -548,9 +1219,17 @@ Move, without weakening, the current continuation logic for:
 - occupied density/projector reconstruction;
 - requested/certified/proof energy-window selection;
 - physical occupied/window symmetry certification;
-- certified RT basis localization;
+- certified RT basis localization, only when an RT checkpoint is requested;
 - component and energy receipts; and
 - complete-v3 payload authentication/publication preparation.
+
+The requested energy is a user cutoff, not itself a promise of a closed
+subspace.  Extend above it through the first complete boundary cluster needed
+by the physical LCFO window policy.  This extension uses LCFO eigenvalues and
+the complete-system symmetry action, not WF centers or a fixed orbital count.
+If the input supplies no valid symmetry operations for the actual system,
+retain spectral cluster closure and report symmetry as unavailable rather than
+inventing a higher-symmetry fragment gate.
 
 Do not move the continuation stage scheduler, lambda trials, density mixing, or
 repeated candidate loop.  Publication remains a separate final call so an
@@ -561,7 +1240,13 @@ optional refinement does not write intermediate checkpoints.
 The divided route composes `H[rho_divided]` and calls the routine once.  The
 reference continuation calls it only after its accepted final refresh.  The
 default divided path must not call the old version-2 occupied-checkpoint
-publisher.
+publisher.  It must not rebuild or relocalize the construction WFs.  Without
+an RT checkpoint request, finalization returns the LCFO eigensystem and density
+without invoking the complete-system certified-RT Wannier90 stage.
+
+`prepare_rt_checkpoint` is true only for the final requested LCFO epoch when
+the user requested checkpoint output.  It is false for diagnostic solves and
+every nonterminal refinement epoch.
 
 **Step 5: Run GREEN**
 
@@ -575,10 +1260,11 @@ python3 tests/dg/run_dg_hybrid_certified_rt_basis_mpi.py
 python3 tests/dg/run_rt_dg_hybrid_checkpoint_mpi.py
 python3 tests/dg/check_dg_hybrid_divided_lcfo_route.py
 python3 tests/dg/check_dg_hybrid_continuation_route.py
+cmake --build build-hybrid-commit -j2
 ```
 
 Expected: all PASS; zero-refinement divided fixtures report exactly one
-complete eigensolve and version 3.
+complete eigensolve and version 3, and the build completes.
 
 **Step 6: Commit**
 
@@ -590,7 +1276,7 @@ git diff --cached
 git commit -m "feat(dg): finalize one-shot LCFO into certified RT space"
 ```
 
-### Task 8: Add explicit user-controlled LCFO refinement epochs
+### Task 10: Add explicit user-controlled LCFO refinement epochs
 
 **Files:**
 
@@ -618,13 +1304,27 @@ ranks.  Reject negative values, positive values unless the divided route is
 selected, and simultaneous divided/continuation/full-Hybrid route flags.  A
 callback-counting fixture must require:
 
-- `0` refinements: one complete solve;
-- `2` refinements: three complete solves, two density mixes, and two potential
-  updates;
+- `0` refinements: one complete solve and one `Delta rho` measurement;
+- `2` refinements: three complete solves, three `Delta rho` measurements, two
+  density mixes, and two potential updates;
 - fixed metric/kinetic/nonlocal/SIPG fingerprints at every epoch;
+- fixed fragment-construction-WF and generalized-complement fingerprints at
+  every epoch, with zero additional construction Wannier90 calls;
+- with RT output requested, zero complete-system RT-localizer calls on
+  nonterminal epochs and exactly one on the final epoch, independent of the
+  refinement count;
 - a new local/total operator fingerprint after each density update;
 - no intermediate publication; and
 - final coefficients and eigenpair receipt from the final operator epoch.
+
+In the same RED step, extend the three RT fixtures to distinguish the stored
+potential-generating density from the final orbital density.  Require
+checkpoint authentication to bind both arrays to their epochs, RT startup to
+validate the stored eigenpair before rebuilding the TD Hamiltonian from the
+orbital density, and stationarity to enforce strict drift only for reference
+continuation while measuring finite drift for divided one-shot/refined modes.
+Require non-finite drift and broken density/operator fingerprints to fail in
+every mode.
 
 **Step 2: Run RED**
 
@@ -632,6 +1332,9 @@ Run:
 
 ```text
 python3 tests/dg/run_dg_hybrid_lcfo_refinement_mpi.py
+python3 tests/dg/run_rt_dg_hybrid_checkpoint_mpi.py
+python3 tests/dg/run_rt_dg_hybrid_initialization_mpi.py
+python3 tests/dg/run_rt_dg_hybrid_stationarity_mpi.py
 python3 tests/dg/check_dg_hybrid_divided_lcfo_route.py
 python3 tests/dg/check_dg_hybrid_localization_first_inputs.py
 ```
@@ -642,16 +1345,23 @@ absent.
 **Step 3: Implement the explicit state machine**
 
 ```fortran
-call solve_once(epoch=0)
-do refinement=1,refine_steps
+do epoch=0,refine_steps
+  final_epoch=(epoch==refine_steps)
+  call solve_once(epoch,prepare_rt_checkpoint=&
+    final_epoch.and.rt_checkpoint_requested)
   call measure_shared_dc_density_difference(rho_potential,rho_lcfo,delta_rho)
+  if(final_epoch)exit
   call mix_density(rho_potential,rho_lcfo,rho_next)
   call update_potential(rho_next)
-  call assemble_local_and_complete_rows(rho_next,epoch=refinement)
-  call solve_once(epoch=refinement)
+  call assemble_local_and_complete_rows(rho_next,epoch=epoch+1)
 enddo
 call publish_final_epoch_only()
 ```
+
+Every refinement reuses the already frozen Hybrid basis.  It is a small,
+explicit number of complete LCFO density corrections; it does not rerun the
+fragment density SCF, expand fragment state caches, or invoke either
+construction or certified-RT Wannier90 between epochs.
 
 Record route code, requested/completed refinement count, final `Delta rho`,
 potential-density fingerprint, and final operator epoch in the existing
@@ -710,13 +1420,13 @@ git diff --cached
 git commit -m "feat(dg): add explicit LCFO refinement epochs"
 ```
 
-### Task 9: Validate Si64 one-shot GS and separate-directory zero-field RT
+### Task 11: Validate Si64 one-shot GS and separate-directory zero-field RT
 
 **Files:**
 
 - Modify: `tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_divided_lcfo.in`
 - Modify: `tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_dg_zero_field_rt.in`
-- Modify: `tests/dg/run_dg_hybrid_si64_divided_lcfo.py`
+- Modify existing untracked file: `tests/dg/run_dg_hybrid_si64_divided_lcfo.py`
 - Modify: `tests/dg/run_dg_hybrid_si64_continuation_rt.py` only to share parser helpers when duplication would otherwise occur
 
 **Step 1: Extend parser-only acceptance RED**
@@ -725,7 +1435,13 @@ The runner must require:
 
 - a reused conventional DC seed and no `DC #SCF =` lines in the reused GS;
 - the same eight ranks and exact rank--fragment mapping;
-- unconstrained WF localization and a dynamic, non-hard-coded retained rank;
+- one unconstrained construction-WF localization per fragment communicator and
+  basis generation, no complete-cell construction localization, and no
+  localization call inside divided SCF;
+- a dynamic, non-hard-coded retained rank and fragment state counts, including
+  logged whole-shell extension events;
+- `dg_hybrid_fragment_cg_steps=3` and no fragment iteration receipt above that
+  cap;
 - divided-SCF convergence, common chemical potential, and per-iteration
   electron receipts;
 - complete SIPG/nonlocal final operator receipts;
@@ -738,8 +1454,10 @@ The runner must require:
   without applying the continuation-reference magnitude gate to divided mode.
 
 Add negative parser fixtures for a hidden second solve, stale density/operator
-epoch, basis-closure used as an acceptance gate, rank/mapping mismatch, and an
-old version-2 occupied checkpoint.
+epoch, construction localization on the total communicator, a repeated
+fragment-localization call during SCF, a fixed 384-state assumption,
+basis-closure used as an acceptance gate, rank/mapping mismatch, and an old
+version-2 occupied checkpoint.
 
 **Step 2: Run parser RED**
 
@@ -754,6 +1472,11 @@ conventional DC.  Create separate fresh directories for one-shot GS and RT.
 Hash the seed before and after each run and preserve all logs.  Never overwrite
 the current continuation-oracle directory.
 
+Treat identical total MPI rank count and identical rank--fragment mapping as a
+permanent production compatibility requirement, not a temporary validation
+restriction.  A mismatch must stop before consuming any saved `rwf`, density,
+potential, spectrum, or occupation payload.
+
 Record the one-shot zero-field drift even when it exceeds the strict
 continuation-reference tolerance.  Run a second fresh GS with a small explicit
 refinement count and quantify the improvement.  Non-finite drift remains a
@@ -766,6 +1489,10 @@ Run:
 ```text
 python3 tests/dg/run_dc_scf_convergence_mpi.py
 python3 tests/dg/run_dc_fragment_occupation_mpi.py
+python3 tests/dg/run_dg_hybrid_fragment_wannier_mpi.py
+python3 tests/dg/run_dg_hybrid_fragment_wannier_lcfo_mpi.py
+python3 tests/dg/run_dg_hybrid_wannier_complement_mpi.py
+python3 tests/dg/run_dg_hybrid_fragment_subspace_mpi.py
 python3 tests/dg/run_dg_hybrid_divided_scf_mpi.py
 python3 tests/dg/run_dg_hybrid_divided_operator_mpi.py
 python3 tests/dg/run_dg_hybrid_lcfo_finalization_mpi.py
@@ -782,37 +1509,42 @@ Expected: all PASS.
 
 **Step 5: Run fresh eight-rank one-shot and RT**
 
-Run only after the current heavy reference job has ended:
+Run only after every focused test and the release-style build above pass:
 
 ```text
-OMP_NUM_THREADS=1 python3 tests/dg/run_dg_hybrid_si64_divided_lcfo.py --mpi-ranks 8 --binary build-hybrid-commit/salmon --result-dir verification-si64-divided-one-shot-lcfo-20260902
+OMP_NUM_THREADS=1 python3 tests/dg/run_dg_hybrid_si64_divided_lcfo.py --mpi-ranks 8 --binary build-hybrid-commit/salmon --result-dir verification-si64-divided-one-shot-lcfo-20260903
 ```
 
-Expected: reused DC seed, converged divided SCF, one final LCFO solve, complete
-version-3 checkpoint, and a separate zero-field RT result.  Preserve failure
-evidence if any gate fails.
+Expected: unchanged reused DC seed, one construction Wannier90 operation for
+each of the eight fragments, converged bounded-update divided SCF, one final
+LCFO solve, complete version-3 checkpoint, and a separate zero-field RT
+result.  Preserve failure evidence if any gate fails.
 
 **Step 6: Compare with the reference oracle**
 
 Record energy, band gap, occupied-projector difference, density difference,
-certified rank, symmetry defects, wall time, and peak RSS.  The comparison is
-validation evidence, not a post-LCFO density convergence gate.
+certified rank, per-fragment construction localization count/time, fragment
+state-count history, local-step residuals, symmetry defects, wall time, and
+peak RSS.  Compare construction time with the preserved 384-WF complete-cell
+Wannier90 reference log, but do not encode 384 into production acceptance.
+The comparison is validation evidence, not a post-LCFO density convergence
+gate.
 
 **Step 7: Commit the runner contract**
 
 ```text
-git add tests/dg/run_dg_hybrid_si64_divided_lcfo.py
-git add -p tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_dg_zero_field_rt.in tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_divided_lcfo.in tests/dg/run_dg_hybrid_si64_continuation_rt.py
+git add -N tests/dg/run_dg_hybrid_si64_divided_lcfo.py
+git add -p tests/dg/run_dg_hybrid_si64_divided_lcfo.py tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_dg_zero_field_rt.in tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_divided_lcfo.in tests/dg/run_dg_hybrid_si64_continuation_rt.py
 git diff --cached --check
 git diff --cached
 git commit -m "test(dg): certify divided one-shot LCFO and RT"
 ```
 
-### Task 10: Run protected regressions, review, and finish the branch
+### Task 12: Run protected regressions, review, and finish the branch
 
 **Files:**
 
-- Review all files changed in Tasks 1-9
+- Review all files changed in Tasks 1-11
 - Preserve all untracked verification output
 
 **Step 1: Run all focused and protected verification fresh**
@@ -821,25 +1553,42 @@ Run:
 
 ```text
 git diff --check
+git diff --check 0bc6f9a38a97dc6b8c204079440230f180d5367d..HEAD
 python3 tests/dg/check_dg_hybrid_localization_first_inputs.py
+python3 tests/dg/run_dc_scf_convergence_mpi.py
+python3 tests/dg/run_dc_fragment_occupation_mpi.py
 python3 tests/dg/run_dg_dc_seed_checkpoint_mpi.py
 python3 tests/dg/run_dg_dc_seed_state_mpi.py
+python3 tests/dg/run_dg_overlapping_wannier_w90_mpi.py
+python3 tests/dg/run_dg_hybrid_fragment_wannier_mpi.py
+python3 tests/dg/run_dg_hybrid_fragment_wannier_lcfo_mpi.py
+python3 tests/dg/run_dg_hybrid_wannier_complement_mpi.py
+python3 tests/dg/run_dg_hybrid_projected_fragment_pipeline_mpi.py
+python3 tests/dg/run_dg_hybrid_production_fragment_basis_mpi.py
 python3 tests/dg/run_dg_hybrid_fragment_solver_mpi.py
+python3 tests/dg/run_dg_hybrid_block_cg_mpi.py
+python3 tests/dg/run_dg_hybrid_fragment_subspace_mpi.py
 python3 tests/dg/run_dg_hybrid_divided_scf_mpi.py
+python3 tests/dg/run_dg_hybrid_divided_operator_mpi.py
 python3 tests/dg/run_dg_hybrid_lcfo_mpi.py
+python3 tests/dg/run_dg_hybrid_lcfo_support_redistribution_mpi.py
 python3 tests/dg/run_dg_hybrid_generalized_eigensystem_mpi.py
 python3 tests/dg/run_dg_hybrid_occupation_policy_mpi.py
 python3 tests/dg/run_dg_hybrid_low_energy_symmetry_mpi.py
 python3 tests/dg/run_dg_hybrid_certified_rt_basis_mpi.py
 python3 tests/dg/run_dg_hybrid_continuation_controller_mpi.py
+python3 tests/dg/run_dg_hybrid_lcfo_finalization_mpi.py
+python3 tests/dg/run_dg_hybrid_lcfo_refinement_mpi.py
 python3 tests/dg/run_rt_dg_hybrid_checkpoint_mpi.py
 python3 tests/dg/run_rt_dg_hybrid_initialization_mpi.py
 python3 tests/dg/run_rt_dg_hybrid_stationarity_mpi.py
 python3 tests/dg/run_rt_dg_hybrid_length_gauge_mpi.py
 python3 tests/dg/check_dg_hybrid_divided_dc_controls.py
 python3 tests/dg/check_dg_hybrid_divided_lcfo_route.py
+python3 tests/dg/check_dg_hybrid_fragment_wannier_route.py
 python3 tests/dg/check_dg_hybrid_continuation_route.py
 python3 tests/dg/check_dg_overlapping_wannier_route.py
+python3 tests/dg/run_dg_hybrid_si64_divided_lcfo.py --parser-only
 cmake --build build-hybrid-commit -j2
 ctest --test-dir build-hybrid-commit --output-on-failure
 ```
@@ -853,10 +1602,19 @@ Invoke `@superpowers:requesting-code-review`.  Review especially:
 
 - exact conventional-DC convergence equivalence;
 - common chemical potential and electron count;
+- one unconstrained construction-WF call per fragment/basis generation and no
+  total-communicator construction localization;
+- preservation of every local WF column and gauge invariance of the
+  generalized fragment-union PW projection;
+- dynamic occupied-plus-guard state extension with no fixed 384-state path;
 - SIPG/nonlocal terms exactly once;
-- no complete solve inside fragment SCF;
+- bounded warm-started `[X,R,P]` updates, safe rollback, and no dense or
+  complete solve inside fragment SCF;
+- no preliminary complete LCFO before divided density convergence;
 - zero-refinement solve count exactly one;
 - physical-space rather than individual-WF symmetry acceptance;
+- complete-system certified RT localization only when checkpoint output needs
+  it;
 - version-3 density/operator epoch provenance; and
 - exact rank-count/rank--fragment DC-seed reuse.
 

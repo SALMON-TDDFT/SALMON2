@@ -139,6 +139,13 @@ epochs cannot collide.  Setup and run occur exactly once per fragment and
 basis epoch, outside the SCF loop.  All accepted columns survive the unitary
 transformation.
 
+Wannier90 receives a square `num_bands=num_wann` space with no disentanglement.
+Its required eigenvalue array is therefore an auxiliary finite zero label for
+every retained candidate, including appended buffer/projector directions; it
+is not a fragment spectrum.  The saved physical DC eigenvalues remain in a
+separate payload and only those, followed by later `H/S` Ritz values, may drive
+occupation or state-extension decisions.
+
 Buffers from different fragments may overlap and independent fragment gauges
 may differ by phases, permutations, or general unitary rotations.  The union
 is therefore certified through its complete overlap matrix.  Near-null global
@@ -146,6 +153,25 @@ directions are handled by a gauge-invariant metric eigenspace compression, not
 by deleting named WFs.  Interface tails, periodic-wrap tails, and nonlocal
 projector support must remain present.  Missing support, duplicate ownership,
 or insufficient metric rank is a collective failure.
+
+Maintain two explicitly related catalogs.  The divided-density catalog keeps
+every internally independent fragment WF and its fragment-assigned PW
+complement in the original block layout; local `H_ff/S_ff`, warm-start
+coefficients, and rank--fragment ownership always use this uncompressed
+catalog.  Separately, assemble the complete union metric.  If cross-fragment
+overlap creates numerical null directions, build a rectangular,
+gauge-covariant union transform that removes only that null eigenspace and use
+it for the terminal complete-LCFO catalog.  When the union has full rank this
+transform is the identity and `S` remains a valid nonidentity generalized
+metric.  The complete transform may mix fragment columns and therefore is
+never fed back into fragment ownership or divided SCF.
+
+Store both maps: DC seed to its uncompressed fragment catalog, and the
+uncompressed union to the terminal complete catalog.  Composing them must
+reconstruct every retained seed orbital through the terminal catalog whenever
+null compression is applied.  Projectors, occupied density, and eventual LCFO
+observables must be invariant under independent unitary gauges in every
+fragment block.
 
 ## Divided Density SCF
 
@@ -180,11 +206,19 @@ For fragment `f`, its terminal numerically degenerate shell contributes
 `q_tail(f)=sum(occupation*core_norm)`; it is marked when
 `q_tail(f)>electron_tolerance/n_frag`.  At zero temperature, a terminal shell
 that is occupied or intersects the common chemical potential is also marked.
-Each marked fragment adds at least the complete next shell, ordered by the
-unselected directions' deterministic `H_ii/S_ii` estimates with global basis
-ID as the tie breaker.  Occupations are then solved again.  Expansion repeats
-until the aggregate tail gate passes; exhausting a fragment's metric rank
-before that point is a collective failure.
+Each marked fragment first adds the complete next unused DC-seed eigenspace,
+ordered by the saved seed eigenvalue and closed over numerical degeneracy.  The
+seed-to-WF coefficient map makes this selection invariant under the later
+fragment Wannier90 gauge.  After the seed eigenspaces are exhausted, form the
+next candidate pool from a complete kinetic-energy shell of the windowed PW
+catalog plus any still-unused projector-support directions.  S-project the
+whole pool against the accepted state space and diagonalize `H/S` only inside
+that new pool; never rank individual localized basis columns by their diagonal
+`H_ii/S_ii`.  Stable global candidate IDs break ties between otherwise equal
+shells, but do not select a direction inside a degenerate pool.  Occupations
+are then solved again.  Expansion repeats until the aggregate tail gate
+passes; exhausting a fragment's metric rank before that point is a collective
+failure.
 
 The previous safe coefficients are reused whenever fragment ID, basis
 generation, and metric fingerprint agree.  Equal state counts reuse all
@@ -242,8 +276,10 @@ or RT checkpoint is published from an unconverged divided density.
 The converged divided density defines a frozen potential.  Assemble all
 row-distributed WF+PW matrix elements, including broken-volume kinetic, local,
 nonlocal-projector, and SIPG self/cross-fragment contributions, exactly once
-per potential epoch.  Do not replicate full `H` or `S` on each MPI rank and do
-not materialize full-cell orbitals for all states.
+per potential epoch in the uncompressed union, then congruence-transform them
+with the immutable terminal complete-catalog map before solving.  Do not
+replicate full `H` or `S` on each MPI rank and do not materialize full-cell
+orbitals for all states.
 
 Solve
 
@@ -267,6 +303,9 @@ rows and derived receipts are refreshed.  The implementation records
 
 using the shared DC density norm.  `Delta rho` is a diagnostic in the default
 DC+LCFO accuracy model, not an automatic gate or hidden iteration trigger.
+Intermediate LCFO epochs do not invoke the certified-RT localizer.  When RT
+checkpoint output is requested, that whole-system unitary localization occurs
+exactly once, after the final requested refinement solve.
 
 ## Symmetry and RT Semantics
 
@@ -368,11 +407,11 @@ Implementation follows TDD in this order:
    communicator and basis epoch, variable ranks, unique seed namespaces,
    collective failure, buffer-tail coverage, and independence of the final
    LCFO observables under separate fragment unitary gauges;
-4. bounded LOBPCG tests proving a three-step safe nonconverged update, warm
-   starts, monotone state extension, retained metric rank, and unchanged strict
-   solver semantics;
-5. fragment-operator fixtures comparing volume, nonlocal-projector, SIPG self,
+4. fragment-operator fixtures comparing volume, nonlocal-projector, SIPG self,
    and neighbor-support contributions with a direct small reference;
+5. bounded LOBPCG tests against those fixed fragment self blocks, proving a
+   three-step safe nonconverged update, warm starts, monotone state extension,
+   retained metric rank, and unchanged strict solver semantics;
 6. unique-core density and rank-decomposition invariance tests;
 7. route tests requiring no preliminary complete LCFO solve, no construction
    Wannier90 call inside SCF, exactly one final complete eigensolve for zero
