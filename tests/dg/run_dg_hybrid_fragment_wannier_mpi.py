@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import os
+import shlex
+import shutil
+import subprocess
+import tempfile
+
+
+ROOT = Path(__file__).resolve().parents[2]
+FRAGMENT_SOURCE = ROOT / "src/gs/dc/dg_hybrid_fragment_wannier.f90"
+TEST_SOURCE = ROOT / "tests/dg/test_dg_hybrid_fragment_wannier_mpi.f90"
+
+
+def lapack_libraries():
+    configured = os.environ.get("SALMON_LAPACK_LIBS")
+    if configured:
+        return shlex.split(configured)
+    if shutil.which("pkg-config"):
+        openblas = subprocess.run(
+            ["pkg-config", "--libs", "openblas"], capture_output=True, text=True
+        )
+        if openblas.returncode == 0:
+            return shlex.split(openblas.stdout)
+        lapack = subprocess.run(
+            ["pkg-config", "--libs", "lapack"], capture_output=True, text=True
+        )
+        if lapack.returncode == 0:
+            return shlex.split(lapack.stdout)
+    if shutil.which("brew"):
+        openblas = subprocess.run(
+            ["brew", "--prefix", "openblas"], capture_output=True, text=True
+        )
+        if openblas.returncode == 0:
+            return [f"-L{openblas.stdout.strip()}/lib", "-lopenblas"]
+    return ["-llapack", "-lblas"]
+
+
+with tempfile.TemporaryDirectory(prefix="hybrid-fragment-wannier-") as name:
+    assert TEST_SOURCE.is_file(), f"missing fragment-Wannier fixture: {TEST_SOURCE}"
+    build = Path(name)
+    (build / "config.h").write_text(
+        "#define SYSTEM_HAS_POSIX\n"
+        "#define SYSTEM_HAS_POSIX_STAT\n"
+        "#define SYSTEM_HAS_POSIX_ACCESS\n"
+        "#define SYSTEM_HAS_POSIX_MKDIR\n"
+        "#define SYSTEM_HAS_POSIX_NFTW\n"
+    )
+    executable = build / "hybrid_fragment_wannier"
+    sources = [
+        ROOT / "src/io/posix.c",
+        ROOT / "src/gs/dc/lcfo_wannier_sawf_seed.f90",
+        ROOT / "src/gs/dc/dg_overlapping_wannier_w90.f90",
+    ]
+    # During RED the wished-for module is absent, so compiling the fixture itself
+    # gives the useful "cannot open ...mod" diagnostic.  Once implemented, the
+    # exact same permanent runner compiles the production source before the test.
+    if FRAGMENT_SOURCE.exists():
+        sources.append(FRAGMENT_SOURCE)
+    sources.append(TEST_SOURCE)
+    compiler = shutil.which("mpifort")
+    launcher = shutil.which("mpiexec")
+    assert compiler, "mpifort is required for the fragment-Wannier MPI fixture"
+    assert launcher, "mpiexec is required for the fragment-Wannier MPI fixture"
+    compile_result = subprocess.run(
+        [
+            compiler,
+            "-cpp",
+            "-DUSE_MPI",
+            "-DUSE_WANNIER90",
+            "-DW90_TEST_STUBS",
+            "-std=f2008",
+            "-ffree-line-length-none",
+            "-I",
+            str(build),
+            "-J",
+            str(build),
+            "-fcheck=all",
+            "-ffpe-trap=invalid,zero,overflow",
+            "-fbacktrace",
+            *(str(source) for source in sources),
+            *lapack_libraries(),
+            "-o",
+            str(executable),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if compile_result.returncode != 0:
+        diagnostic = compile_result.stdout + compile_result.stderr
+        if not FRAGMENT_SOURCE.exists():
+            assert "dg_hybrid_fragment_wannier.mod" in diagnostic.lower(), diagnostic
+        raise RuntimeError("fragment-Wannier compile failed:\n" + diagnostic)
+
+    environment = os.environ.copy()
+    environment["OMP_NUM_THREADS"] = "1"
+    environment.setdefault("OMPI_MCA_rmaps_base_oversubscribe", "1")
+    for rank_count in (2, 4, 8):
+        run_directory = build / f"ranks-{rank_count}"
+        run_directory.mkdir()
+        run = subprocess.run(
+            [launcher, "-n", str(rank_count), str(executable)],
+            cwd=run_directory,
+            capture_output=True,
+            text=True,
+            env=environment,
+            timeout=60,
+        )
+        assert run.returncode == 0, (rank_count, run.stdout, run.stderr)
+        assert (
+            f"PASS hybrid fragment Wannier on {rank_count} ranks" in run.stdout
+        ), run.stdout
+        artifact_root = run_directory / "fragment-wannier-artifacts"
+        expected_generations = (7, 8, 9, 11, 12)
+        expected_directories = {
+            artifact_root / f"fragment-{fragment_id:06d}" / f"generation-{generation:08d}"
+            for fragment_id in (1, 2)
+            for generation in expected_generations
+        }
+        actual_directories = set(artifact_root.glob("fragment-*/generation-*"))
+        assert actual_directories == expected_directories, actual_directories
+        assert not list(artifact_root.rglob("*.dmn")), "unconstrained mode emitted .dmn"
+
+print("PASS hybrid fragment Wannier on 2, 4, and 8 ranks")

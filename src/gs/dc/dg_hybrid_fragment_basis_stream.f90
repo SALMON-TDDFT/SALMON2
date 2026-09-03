@@ -25,7 +25,7 @@ contains
     integer(int64),intent(out)::workspace_peak_bytes,fingerprint
     logical,intent(out)::ok
     character(*),intent(out)::message
-    integer::i,j,slot,nlocal,local_bad,global_bad,ierr,minimum,maximum
+    integer::i,j,slot,nlocal,local_bad,global_bad,ierr,minimum,maximum,allocation_status
     integer,allocatable::fragment_presence(:),ownership(:)
     ok=.false.;message='';workspace_peak_bytes=0_int64;fingerprint=0_int64
     call agree_integer(fragment_count,minimum,maximum,comm,ierr)
@@ -50,7 +50,13 @@ contains
     enddo
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid fragment basis stream input';return;endif
-    allocate(fragment_presence(fragment_count));fragment_presence=0
+    allocate(fragment_presence(fragment_count),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0);global_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='cannot allocate stream fragment-presence workspace';return
+    endif
+    fragment_presence=0
     if(fragment_id>0)fragment_presence(fragment_id)=1
     call MPI_Allreduce(MPI_IN_PLACE,fragment_presence,fragment_count,MPI_INTEGER,MPI_SUM,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.any(fragment_presence/=1))then
@@ -59,7 +65,13 @@ contains
     nlocal=count(wannier_owner==fragment_id)+count(pw_owner==fragment_id)
     allocate(basis%global_ids(nlocal),basis%sector(nlocal),basis%buffer_point_ids(size(point_ids)),&
       basis%buffer_values(size(point_ids),nlocal),stream%pw_owner(size(pw_owner)),&
-      stream%pw_slot(size(pw_owner)),stream%pw_filled(size(pw_owner)))
+      stream%pw_slot(size(pw_owner)),stream%pw_filled(size(pw_owner)),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0);global_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      call clear_fragment_basis_stream_outputs(stream,basis)
+      message='cannot allocate fragment basis stream payload';return
+    endif
     basis%fragment_id=fragment_id;basis%generation=1;basis%buffer_point_ids=point_ids
     basis%buffer_values=(0d0,0d0);stream%pw_owner=pw_owner;stream%pw_slot=0;stream%pw_filled=.false.
     slot=0
@@ -73,7 +85,14 @@ contains
       slot=slot+1;basis%global_ids(slot)=int(size(wannier_owner)+i,int64);basis%sector(slot)=2
       stream%pw_slot(i)=slot
     enddo
-    allocate(ownership(size(wannier_owner)+size(pw_owner)));ownership=0
+    allocate(ownership(size(wannier_owner)+size(pw_owner)),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0);global_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      call clear_fragment_basis_stream_outputs(stream,basis)
+      message='cannot allocate stream basis-ownership workspace';return
+    endif
+    ownership=0
     do i=1,nlocal;ownership(int(basis%global_ids(i)))=ownership(int(basis%global_ids(i)))+1;enddo
     call MPI_Allreduce(MPI_IN_PLACE,ownership,size(ownership),MPI_INTEGER,MPI_SUM,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.any(ownership/=1))then;message='stream basis IDs are not owned once';return;endif
@@ -85,6 +104,21 @@ contains
     if(fingerprint==0_int64)fingerprint=1_int64
     deallocate(fragment_presence,ownership);ok=.true.
   end subroutine initialize_dg_hybrid_fragment_basis_stream
+
+  subroutine clear_fragment_basis_stream_outputs(stream,basis)
+    type(s_dg_hybrid_fragment_basis_stream),intent(inout)::stream
+    type(s_dg_hybrid_fragment_basis),intent(inout)::basis
+    if(allocated(stream%pw_owner))deallocate(stream%pw_owner)
+    if(allocated(stream%pw_slot))deallocate(stream%pw_slot)
+    if(allocated(stream%pw_filled))deallocate(stream%pw_filled)
+    if(allocated(basis%global_ids))deallocate(basis%global_ids)
+    if(allocated(basis%buffer_point_ids))deallocate(basis%buffer_point_ids)
+    if(allocated(basis%sector))deallocate(basis%sector)
+    if(allocated(basis%buffer_values))deallocate(basis%buffer_values)
+    stream%initialized=.false.;stream%finalized=.false.;stream%fragment_id=0
+    stream%nwannier=0;stream%npw=0;stream%npoint=0;stream%maximum_tile_elements=0_int64
+    basis%fragment_id=0;basis%generation=0;basis%provenance_fingerprint=0_int64
+  end subroutine clear_fragment_basis_stream_outputs
 
   subroutine append_dg_hybrid_projected_pw_tile(stream,first_column,projected_pw_tile,basis,ok,message)
     type(s_dg_hybrid_fragment_basis_stream),intent(inout)::stream

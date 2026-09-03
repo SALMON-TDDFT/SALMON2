@@ -35,6 +35,7 @@ set(SOURCES
     dg_overlapping_wannier_projection.f90
     dg_overlapping_wannier_metric.f90
     dg_overlapping_wannier_w90.f90
+    dg_hybrid_fragment_wannier.f90
     dg_overlapping_wannier_construction.f90
     dg_hybrid_localization_first.f90
     dg_hybrid_certified_rt_basis.f90
