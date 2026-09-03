@@ -34,6 +34,13 @@ module dg_hybrid_fragment_subspace
       complex(real64),intent(out)::output(:,:)
       logical,intent(out)::ok
     end subroutine
+    subroutine fragment_shifted_apply(input,rayleigh_values,output,ok)
+      import real64
+      complex(real64),intent(in)::input(:,:)
+      real(real64),intent(in)::rayleigh_values(:)
+      complex(real64),intent(out)::output(:,:)
+      logical,intent(out)::ok
+    end subroutine
   end interface
   public::advance_dg_hybrid_fragment_subspace
   public::extend_dg_hybrid_fragment_subspace
@@ -170,15 +177,17 @@ contains
       apply_h,apply_s,apply_preconditioner,maximum_steps,intermediate_tolerance,&
       orthogonality_tolerance,allowed_residual_growth,state,eigenvalues,&
       iterations,relative_residual,eigensolver_converged,advanced,&
-      stop_reason,workspace_peak_bytes,fingerprint,ok,message)
-    ! apply_preconditioner is mandatory. To preserve construction-WF gauge
+      stop_reason,workspace_peak_bytes,fingerprint,ok,message,apply_shifted_preconditioner)
+    ! Exactly one explicit preconditioner is mandatory. To preserve construction-WF gauge
     ! covariance, transform a physical preconditioner with the basis; a fresh
     ! coordinate-diagonal H approximation is not generally covariant. An
     ! identity callback is used only explicitly by reference fixtures.
     ! This routine never decides outer density-SCF convergence.
     integer,intent(in)::comm,global_count,fragment_id,basis_generation,maximum_steps
     integer(int64),intent(in)::row_ids(:),basis_fingerprint,metric_fingerprint
-    procedure(fragment_apply)::apply_h,apply_s,apply_preconditioner
+    procedure(fragment_apply)::apply_h,apply_s
+    procedure(fragment_apply),optional::apply_preconditioner
+    procedure(fragment_shifted_apply),optional::apply_shifted_preconditioner
     real(real64),intent(in)::intermediate_tolerance,orthogonality_tolerance,allowed_residual_growth
     type(s_dg_hybrid_fragment_subspace_state),intent(inout)::state
     real(real64),intent(out)::eigenvalues(:),relative_residual
@@ -191,7 +200,7 @@ contains
     real(real64),allocatable::values(:),bestvalues(:),candidate_values(:)
     logical::halting(3),valid
     real(real64)::entry_residual,best_residual,candidate_residual,history_norm
-    integer::nr,ns,dim,added,step,stat,history_used,trial_peak,j
+    integer::nr,ns,dim,added,step,stat,history_used,trial_peak,j,preconditioner_kind
 
     ok=.false.;message='';stop_reason='invalid_contract';iterations=0
     relative_residual=huge(1d0);eigensolver_converged=.false.;advanced=.false.
@@ -201,6 +210,11 @@ contains
     call restore_traps(halting)
   contains
     subroutine execute()
+      preconditioner_kind=merge(1,0,present(apply_preconditioner))+merge(2,0,present(apply_shifted_preconditioner))
+      valid=agree_int(comm,preconditioner_kind)
+      if(.not.valid.or.(preconditioner_kind/=1.and.preconditioner_kind/=2))then
+        message='exactly one rank-consistent preconditioner callback is required';return
+      endif
       call validate_cache(comm,global_count,row_ids,fragment_id,basis_generation,&
         basis_fingerprint,metric_fingerprint,state,valid,message)
       if(.not.valid)return
@@ -236,7 +250,13 @@ contains
       else
         do step=1,maximum_steps
           iterations=step
-          call checked_apply(comm,apply_preconditioner,r,z,valid)
+          if(present(apply_shifted_preconditioner))then
+            z=0d0
+            call apply_shifted_preconditioner(r,values,z,valid)
+            valid=consensus(comm,valid.and.finite(z))
+          else if(present(apply_preconditioner))then
+            call checked_apply(comm,apply_preconditioner,r,z,valid)
+          endif
           if(.not.valid)then;message='fragment preconditioner callback failed';return;endif
           ! P is retained across potential epochs.  It is projected afresh in the current S metric.
           call matrix_norm(comm,p,history_norm,valid)

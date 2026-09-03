@@ -32,6 +32,7 @@ set(SOURCES
     dg_hybrid_lcfo.f90
     dg_hybrid_block_cg.f90
     dg_hybrid_fragment_subspace.f90
+    dg_hybrid_fragment_preconditioner.f90
     dg_overlapping_wannier_symmetry.f90
     dg_overlapping_wannier_localization.f90
     dg_overlapping_wannier_projection.f90

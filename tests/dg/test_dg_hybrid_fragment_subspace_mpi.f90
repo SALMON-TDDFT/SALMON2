@@ -15,6 +15,10 @@ program test_dg_hybrid_fragment_subspace_mpi
   logical::ok,advanced,converged
   character(64)::reason
   character(256)::message
+  complex(real64)::last_h_vectors(n,m)
+  real(real64)::first_shifts(m)
+  integer::shifted_calls
+  logical::shifts_changed
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
   ! The eight-rank run includes four ranks with no local rows.
@@ -100,6 +104,24 @@ program test_dg_hybrid_fragment_subspace_mpi
   call require(ok.and.abs(relative_residual-cold_residual)<1d-10,&
     'uniform preconditioner scaling changed the accepted trial space')
   mode=0
+  state=warm;shifted_calls=0;shifts_changed=.false.
+  call advance_shifted(1)
+  call require(ok.and.shifted_calls==3.and.shifts_changed,'shifted callback did not receive changing current values')
+  call certify()
+  state=warm;entry=state;mode=10;call advance_shifted(1)
+  call require(.not.ok.and.all(state%vectors==entry%vectors),'failed shifted callback published an update')
+  mode=0;state=warm;call advance_shifted(2)
+  call require(.not.ok,'both preconditioner callbacks were silently accepted')
+  call advance_shifted(3);call require(.not.ok,'missing preconditioner callback was accepted')
+  if(nproc>1)then
+    state=warm
+    if(rank==0)then
+      call advance_shifted(1)
+    else
+      call advance(3,1d-14,2d0)
+    endif
+    call require(.not.ok,'rank-disagreeing callback selection accepted')
+  endif
   call test_growth_rollback()
   call test_extension()
   call test_metric_publication()
@@ -116,6 +138,51 @@ program test_dg_hybrid_fragment_subspace_mpi
   endif
   call MPI_Finalize(ierr)
 contains
+  subroutine advance_shifted(selection)
+    integer,intent(in)::selection
+    if(selection==2)then
+      call advance_dg_hybrid_fragment_subspace(comm,n,ids,7,2,101_int64,203_int64,&
+        apply_h,apply_s,precondition,3,1d-14,1d-10,2d0,state,values,iterations,relative_residual,&
+        converged,advanced,reason,workspace,fingerprint,ok,message,apply_shifted_preconditioner=shifted_precondition)
+    else if(selection==3)then
+      call advance_dg_hybrid_fragment_subspace(comm,n,ids,7,2,101_int64,203_int64,&
+        apply_h,apply_s,maximum_steps=3,intermediate_tolerance=1d-14,orthogonality_tolerance=1d-10,&
+        allowed_residual_growth=2d0,state=state,eigenvalues=values,iterations=iterations,&
+        relative_residual=relative_residual,eigensolver_converged=converged,advanced=advanced,&
+        stop_reason=reason,workspace_peak_bytes=workspace,fingerprint=fingerprint,ok=ok,message=message)
+    else
+      call advance_dg_hybrid_fragment_subspace(comm,n,ids,7,2,101_int64,203_int64,&
+        apply_h,apply_s,maximum_steps=3,intermediate_tolerance=1d-14,orthogonality_tolerance=1d-10,&
+        allowed_residual_growth=2d0,state=state,eigenvalues=values,iterations=iterations,&
+        relative_residual=relative_residual,eigensolver_converged=converged,advanced=advanced,&
+        stop_reason=reason,workspace_peak_bytes=workspace,fingerprint=fingerprint,ok=ok,message=message,&
+        apply_shifted_preconditioner=shifted_precondition)
+    endif
+  end subroutine
+  subroutine shifted_precondition(input,shifts,output,valid)
+    complex(real64),intent(in)::input(:,:)
+    real(real64),intent(in)::shifts(:)
+    complex(real64),intent(out)::output(:,:)
+    logical,intent(out)::valid
+    complex(real64)::hx(n,m),sx(n,m),raw(n,m)
+    real(real64)::expected_shifts(m)
+    integer::b
+    hx=matmul(h,last_h_vectors);sx=matmul(s,last_h_vectors)
+    do b=1,m
+      expected_shifts(b)=real(sum(conjg(last_h_vectors(:,b))*hx(:,b)),real64)
+      raw(:,b)=hx(:,b)-expected_shifts(b)*sx(:,b)
+    enddo
+    call require(maxval(abs(expected_shifts-shifts))<1d-12,'shifted callback received stale Rayleigh values')
+    ! Validate without a rank-local collective inside unequal row loops.
+    valid=.true.
+    if(nlocal>0)valid=maxval(abs(input-raw(int(ids),:)))<1d-12
+    call require(valid,'preconditioner did not receive raw H X - epsilon S X')
+    shifted_calls=shifted_calls+1
+    if(shifted_calls==1)first_shifts=shifts
+    if(shifted_calls>1)shifts_changed=shifts_changed.or.maxval(abs(shifts-first_shifts))>1d-8
+    call precondition(input,output,valid)
+    if(mode==10.and.rank==0)valid=.false.
+  end subroutine
   subroutine test_metric_publication()
     type(s_dg_hybrid_fragment_candidate_catalog)::catalog
     type(s_dg_hybrid_fragment_extension_receipt)::receipt
@@ -372,6 +439,7 @@ contains
     logical,intent(out)::valid
     integer::a
     maximum_trial=max(maximum_trial,size(input,2));call gather(input)
+    if(size(input,2)==m)last_h_vectors=g(:,1:m)
     do a=1,nlocal;output(a,:)=matmul(h(int(ids(a)),:),g(:,1:size(input,2)));enddo
     valid=.true.
     if(mode==4.and.rank==0)valid=.false.
