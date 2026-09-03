@@ -484,6 +484,7 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_dg_hybrid_scf
   character(1)   :: yn_dg_hybrid_continuation_scf
   character(1)   :: yn_dg_hybrid_divided_scf
+  integer        :: dg_hybrid_fragment_cg_steps
   real(8)        :: dg_hybrid_symmetry_energy_window
   character(16)  :: dg_dc_seed_mode
   character(256) :: dg_dc_seed_directory

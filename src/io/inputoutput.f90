@@ -635,6 +635,7 @@ contains
       & yn_dg_hybrid_scf, &
       & yn_dg_hybrid_continuation_scf, &
       & yn_dg_hybrid_divided_scf, &
+      & dg_hybrid_fragment_cg_steps, &
       & dg_hybrid_symmetry_energy_window, &
       & dg_dc_seed_mode, &
       & dg_dc_seed_directory, &
@@ -1162,6 +1163,7 @@ contains
     yn_dg_hybrid_scf = 'n'
     yn_dg_hybrid_continuation_scf = 'n'
     yn_dg_hybrid_divided_scf = 'n'
+    dg_hybrid_fragment_cg_steps = 3
     dg_hybrid_symmetry_energy_window = -1d0
     dg_dc_seed_mode = 'off'
     dg_dc_seed_directory = ''
@@ -1896,6 +1898,7 @@ contains
     call comm_bcast(yn_dg_hybrid_scf, nproc_group_global)
     call comm_bcast(yn_dg_hybrid_continuation_scf, nproc_group_global)
     call comm_bcast(yn_dg_hybrid_divided_scf, nproc_group_global)
+    call comm_bcast(dg_hybrid_fragment_cg_steps, nproc_group_global)
     call comm_bcast(dg_hybrid_symmetry_energy_window, nproc_group_global)
     if(dg_hybrid_symmetry_energy_window>=0d0) &
       dg_hybrid_symmetry_energy_window = dg_hybrid_symmetry_energy_window*uenergy_to_au
@@ -2965,6 +2968,8 @@ contains
         "yn_dg_hybrid_continuation_scf",yn_dg_hybrid_continuation_scf
       write(fh_variables_log, '("#",4X,A,"=",A)') &
         "yn_dg_hybrid_divided_scf",yn_dg_hybrid_divided_scf
+      write(fh_variables_log, '("#",4X,A,"=",I6)') &
+        'dg_hybrid_fragment_cg_steps',dg_hybrid_fragment_cg_steps
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
         'dg_hybrid_symmetry_energy_window',dg_hybrid_symmetry_energy_window
       write(fh_variables_log, '("#",4X,A,"=",A)') &
@@ -3134,6 +3139,10 @@ contains
     call yn_argument_check(yn_dg_hybrid_scf)
     call yn_argument_check(yn_dg_hybrid_continuation_scf)
     call yn_argument_check(yn_dg_hybrid_divided_scf)
+    if(dg_hybrid_fragment_cg_steps<1 .or. dg_hybrid_fragment_cg_steps>256) &
+      call sawf_input_fatal("dg_hybrid_fragment_cg_steps must be in [1,256]")
+    if(count([yn_dg_hybrid_divided_scf=='y',yn_dg_hybrid_continuation_scf=='y',yn_dg_hybrid_scf=='y'])>1) &
+      call sawf_input_fatal("Hybrid SCF routes are mutually exclusive")
     if(.not.ieee_is_finite(dg_hybrid_symmetry_energy_window) .or. &
        (dg_hybrid_symmetry_energy_window<0d0 .and. &
         dg_hybrid_symmetry_energy_window/=-1d0)) &
@@ -3152,6 +3161,10 @@ contains
         call sawf_input_fatal("DG continuation requires positive finite lambda_cut")
       if(.not.ieee_is_finite(wannier_pw_cutoff) .or. wannier_pw_cutoff<=0d0) &
         call sawf_input_fatal("DG continuation requires positive finite wannier_pw_cutoff")
+    endif
+    if(yn_dg_hybrid_divided_scf=='y')then
+      if(.not.ieee_is_finite(wannier_pw_cutoff) .or. wannier_pw_cutoff<=0d0) &
+        call sawf_input_fatal("divided hybrid SCF requires positive finite wannier_pw_cutoff")
     endif
     if(yn_dg_hybrid_divided_scf=='y' .and. yn_dg_dc_overlapping_wannier/='y') &
       call sawf_input_fatal("divided hybrid SCF requires yn_dg_dc_overlapping_wannier='y'")

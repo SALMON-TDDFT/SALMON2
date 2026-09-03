@@ -43,8 +43,57 @@ module dg_hybrid_fragment_subspace
     end subroutine
   end interface
   public::advance_dg_hybrid_fragment_subspace
+  public::measure_dg_hybrid_fragment_subspace
   public::extend_dg_hybrid_fragment_subspace
 contains
+  subroutine measure_dg_hybrid_fragment_subspace(comm,global_count,row_ids,fragment_id,generation,&
+      basis_fp,metric_fp,apply_h,apply_s,orthogonality_tolerance,state,eigenvalues,relative_residual,&
+      fingerprint,ok,message)
+    ! Used after shell extension when this density epoch has no CG budget left.
+    ! No normalization, Ritz rotation, preconditioning, or history update occurs.
+    ! Values retain coefficient-column order; occupation packing must apply the
+    ! same spectral permutation to energies, core norms and returned occupations.
+    integer,intent(in)::comm,global_count,fragment_id,generation
+    integer(int64),intent(in)::row_ids(:),basis_fp,metric_fp
+    procedure(fragment_apply)::apply_h,apply_s
+    real(real64),intent(in)::orthogonality_tolerance
+    type(s_dg_hybrid_fragment_subspace_state),intent(inout)::state
+    real(real64),intent(out)::eigenvalues(:),relative_residual
+    integer(int64),intent(out)::fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(real64),allocatable::hx(:,:),sx(:,:),residual(:,:)
+    real(real64),allocatable::values(:)
+    real(real64)::measured
+    logical::halting(3),valid
+    integer::nr,ns,stat,j
+    ok=.false.;message='';eigenvalues=0d0;relative_residual=huge(1d0);fingerprint=0_int64
+    call suspend_traps(halting);call execute();call restore_traps(halting)
+  contains
+    subroutine execute()
+      call validate_cache(comm,global_count,row_ids,fragment_id,generation,basis_fp,metric_fp,state,valid,message)
+      if(.not.valid)return
+      nr=size(row_ids);ns=state%state_count
+      valid=agree_real(comm,orthogonality_tolerance)
+      valid=consensus(comm,valid.and.size(eigenvalues)==ns.and.ieee_is_finite(orthogonality_tolerance))
+      if(.not.valid)then;message='invalid or rank-disagreeing measurement controls';return;endif
+      if(orthogonality_tolerance<64d0*epsilon(1d0).or.orthogonality_tolerance>1d-2)then
+        message='invalid measurement orthogonality tolerance';return
+      endif
+      call certify_metric(comm,apply_s,state%vectors,orthogonality_tolerance,valid)
+      if(.not.valid)then;message='measurement requires a safe metric-orthonormal state';return;endif
+      allocate(hx(nr,ns),sx(nr,ns),residual(nr,ns),values(ns),stat=stat)
+      if(.not.consensus(comm,stat==0))then;message='cannot allocate measurement workspace';return;endif
+      call evaluate(comm,apply_h,apply_s,state%vectors,hx,sx,values,residual,measured,valid)
+      if(.not.valid)then;message='fragment spectrum measurement failed';return;endif
+      ! Intermediate diagnostic only, not an operator-epoch or final eigenpair certificate.
+      fingerprint=ieor(basis_fp,ishftc(metric_fp,17))
+      do j=1,ns;fingerprint=ieor(ishftc(fingerprint,7),transfer(values(j),0_int64));enddo
+      if(fingerprint==0_int64)fingerprint=1_int64
+      eigenvalues=values;relative_residual=measured;ok=.true.;message=''
+    end subroutine
+  end subroutine measure_dg_hybrid_fragment_subspace
+
   subroutine extend_dg_hybrid_fragment_subspace(comm,global_count,row_ids,fragment_id,generation,basis_fp,metric_fp,&
       apply_h,apply_s,energy_tolerance,orthogonality_tolerance,catalog,state,receipt,ok,message)
     integer,intent(in)::comm,global_count,fragment_id,generation

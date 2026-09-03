@@ -958,6 +958,21 @@ actually connected and all its tests pass.
 
 ### Task 8: Connect the production divided loop to fragment-local construction and bounded updates
 
+**Progress, 2026-09-03 (Task 8 remains incomplete):** Input-side
+`dg_hybrid_fragment_cg_steps` (default 3, range 1--256, broadcast and log),
+mutually exclusive Hybrid route flags, and divided-route positive finite PW
+cutoff validation are implemented. A separate
+`measure_dg_hybrid_fragment_subspace` API now supports the zero-remaining-budget
+case after extension: it validates S orthonormality and computes current
+Rayleigh values/residuals without CG, Ritz rotation or X/P changes. Stale
+basis/metric provenance retains the existing cache-invalidation semantics.
+Values remain in coefficient-column order, so production occupation packing
+must sort energies and core norms together and undo that permutation for the
+returned occupations. The old production main route is not yet replaced;
+construction from DC seeds, remaining-budget accounting, dynamic extension,
+fixed-frame callback wiring, dual-catalog integration and route tests below
+remain required. No Si64 calculation has been started.
+
 **Files:**
 
 - Modify: `src/io/salmon_global.f90:480-545`

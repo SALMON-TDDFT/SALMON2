@@ -122,6 +122,7 @@ program test_dg_hybrid_fragment_subspace_mpi
     endif
     call require(.not.ok,'rank-disagreeing callback selection accepted')
   endif
+  call test_measurement_only()
   call test_growth_rollback()
   call test_extension()
   call test_metric_publication()
@@ -138,6 +139,36 @@ program test_dg_hybrid_fragment_subspace_mpi
   endif
   call MPI_Finalize(ierr)
 contains
+  subroutine test_measurement_only()
+    type(s_dg_hybrid_fragment_subspace_state)::saved
+    real(real64)::old_values(m)
+    integer::failure_mode
+    state=warm;saved=state;precondition_calls=0;maximum_trial=0;mode=0
+    call measure()
+    call require(ok.and.fingerprint/=0_int64,'measurement-only spectrum failed: '//trim(message))
+    call require(all(state%vectors==saved%vectors).and.all(state%directions==saved%directions),&
+      'measurement-only call changed X or P')
+    call require(precondition_calls==0.and.maximum_trial==m,'measurement-only call advanced the trial space')
+    call certify();old_values=values
+    h=h+0.125d0*s
+    call measure()
+    call require(ok.and.maxval(abs(values-old_values-0.125d0))<1d-12,'measurement reused stale energies')
+    call certify();h=h-0.125d0*s
+    do failure_mode=4,7
+      mode=failure_mode;call measure()
+      call require(.not.ok.and.fingerprint==0_int64.and.all(values==0d0),&
+        'failed measurement published a spectrum')
+      call require(all(state%vectors==saved%vectors).and.all(state%directions==saved%directions),&
+        'failed measurement changed the accepted cache')
+    enddo
+    mode=0;state%vectors(:,2)=state%vectors(:,1)
+    call measure();call require(.not.ok,'measurement accepted a rank-deficient state')
+    state=saved
+  end subroutine
+  subroutine measure()
+    call measure_dg_hybrid_fragment_subspace(comm,n,ids,7,2,101_int64,203_int64,&
+      apply_h,apply_s,1d-10,state,values,relative_residual,fingerprint,ok,message)
+  end subroutine
   subroutine advance_shifted(selection)
     integer,intent(in)::selection
     if(selection==2)then
@@ -266,6 +297,7 @@ contains
     complex(real64)::bounded_projector(n,n)
     complex(real64),allocatable::all_vectors(:,:),physical(:,:)
     real(real64)::angle,spectrum(7),reference_spectrum(7),gauge_residual,reference_residual
+    real(real64)::measured_spectrum(7),measured_reference(7),measured_residual,measured_reference_residual
     real(real64)::energy_table(7,2),core_weights(7,2),mu,nelectron,density(n),reference_density(n)
     real(real64),allocatable::occupation(:,:)
     logical::representative(2),tail(2)
@@ -348,6 +380,22 @@ contains
         apply_h,apply_s,1d-10,1d-10,catalog,extended,receipt,ok,message)
       call require(.not.ok.and.index(message,'insufficient-spectrum')>0.and.extended%state_count==old_count,&
         'exhausted candidate pool did not fail collectively')
+      rotated=extended
+      call measure_dg_hybrid_fragment_subspace(comm,n,ids,7,2,101_int64,203_int64,&
+        apply_h,apply_s,1d-10,extended,measured_spectrum,measured_residual,fingerprint,ok,message)
+      call require(ok.and.all(extended%vectors==rotated%vectors).and.&
+        all(extended%directions==rotated%directions),'post-extension measurement changed X/P')
+      call collect_rows(extended%vectors,all_vectors)
+      do a=1,7
+        call require(abs(measured_spectrum(a)-real(sum(conjg(all_vectors(:,a))*&
+          matmul(h,all_vectors(:,a))),real64))<1d-12,'post-extension Rayleigh value mismatch')
+      enddo
+      if(variant==0)then
+        measured_reference=measured_spectrum;measured_reference_residual=measured_residual
+      else
+        call require(maxval(abs(measured_spectrum-measured_reference))<1d-10.and.&
+          abs(measured_residual-measured_reference_residual)<1d-10,'measurement depends on WF gauge')
+      endif
       ! Explicit identity fixture is covariant under a unitary construction-WF gauge.
       call advance_dg_hybrid_fragment_subspace(comm,n,ids,7,2,101_int64,203_int64,&
         apply_h,apply_s,identity_precondition,3,1d-12,1d-10,2d0,extended,spectrum,iterations,&

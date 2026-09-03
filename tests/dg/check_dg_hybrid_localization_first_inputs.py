@@ -23,6 +23,7 @@ def compact(text: str) -> str:
 
 for declaration in (
     r"character\(1\)\s*::\s*yn_dg_hybrid_continuation_scf",
+    r"integer\s*::\s*dg_hybrid_fragment_cg_steps",
     r"real\(8\)\s*::\s*dg_hybrid_symmetry_energy_window",
     r"character\(16\)\s*::\s*dg_dc_seed_mode",
     r"character\(256\)\s*::\s*dg_dc_seed_directory",
@@ -30,6 +31,12 @@ for declaration in (
     assert re.search(declaration, GLOBAL), f"missing global declaration: {declaration}"
 
 dc_namelist = INPUT[INPUT.index("namelist/dc/") : INPUT.index("!! == default for &unit")]
+assert "dg_hybrid_fragment_cg_steps" in dc_namelist
+assert "dg_hybrid_fragment_cg_steps = 3" in INPUT
+assert "call comm_bcast(dg_hybrid_fragment_cg_steps, nproc_group_global)" in INPUT
+assert "'dg_hybrid_fragment_cg_steps',dg_hybrid_fragment_cg_steps" in INPUT
+assert "dg_hybrid_fragment_cg_steps<1" in compact(INPUT)
+assert "dg_hybrid_fragment_cg_steps>256" in compact(INPUT)
 for name in (
     "yn_dg_hybrid_continuation_scf",
     "dg_hybrid_symmetry_energy_window",
@@ -122,6 +129,23 @@ assert float(match.group(1).replace("d", "e")) == 0.2, (
 
 def check_invalid_input_exit(executable: Path) -> None:
     cases = (
+        ("dg_hybrid_fragment_cg_steps=0", "dg_hybrid_fragment_cg_steps must be in [1,256]"),
+        ("dg_hybrid_fragment_cg_steps=-1", "dg_hybrid_fragment_cg_steps must be in [1,256]"),
+        ("dg_hybrid_fragment_cg_steps=257", "dg_hybrid_fragment_cg_steps must be in [1,256]"),
+        ("yn_dg_hybrid_divided_scf='y', yn_dg_hybrid_continuation_scf='y'",
+         "Hybrid SCF routes are mutually exclusive"),
+        ("yn_dg_hybrid_divided_scf='y', yn_dg_hybrid_scf='y'",
+         "Hybrid SCF routes are mutually exclusive"),
+        ("yn_dg_hybrid_continuation_scf='y', yn_dg_hybrid_scf='y'",
+         "Hybrid SCF routes are mutually exclusive"),
+        ("yn_dg_hybrid_divided_scf='y', yn_dg_hybrid_continuation_scf='y', yn_dg_hybrid_scf='y'",
+         "Hybrid SCF routes are mutually exclusive"),
+        ("yn_dg_hybrid_divided_scf='y', wannier_pw_cutoff=NaN",
+         "divided hybrid SCF requires positive finite wannier_pw_cutoff"),
+        ("yn_dg_hybrid_divided_scf='y', wannier_pw_cutoff=0d0",
+         "divided hybrid SCF requires positive finite wannier_pw_cutoff"),
+        ("yn_dg_hybrid_divided_scf='y', wannier_pw_cutoff=-1d0",
+         "divided hybrid SCF requires positive finite wannier_pw_cutoff"),
         (
             "dg_hybrid_symmetry_energy_window=-2d0",
             "dg_hybrid_symmetry_energy_window must be -1 or nonnegative",
@@ -223,6 +247,22 @@ def check_window_unit_conversion(executable: Path) -> None:
             )
 
 
+def check_fragment_step_values(executable: Path) -> None:
+    # Stop at a later, deliberate input error: no DC/SCF calculation is launched.
+    for setting, expected in (("", 3), ("dg_hybrid_fragment_cg_steps=1,", 1),
+                              ("dg_hybrid_fragment_cg_steps=7,", 7),
+                              ("dg_hybrid_fragment_cg_steps=256,", 256)):
+        with tempfile.TemporaryDirectory(prefix="salmon-fragment-steps-") as temp:
+            run = subprocess.run([str(executable)], cwd=temp,
+                                 input=f"&dc\n {setting} dg_dc_seed_mode='invalid'\n/\n",
+                                 text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+            assert run.returncode != 0
+            assert "dg_dc_seed_mode must be off, write, read, or auto" in run.stdout, run.stdout
+            log = (Path(temp) / "variables.log").read_text()
+            match = re.search(r"dg_hybrid_fragment_cg_steps\s*=\s*(\d+)", log)
+            assert match and int(match.group(1)) == expected, log
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--salmon-executable", type=Path)
 args = parser.parse_args()
@@ -230,5 +270,6 @@ if args.salmon_executable:
     executable = args.salmon_executable.resolve()
     check_invalid_input_exit(executable)
     check_window_unit_conversion(executable)
+    check_fragment_step_values(executable)
 
 print("PASS localization-first Hybrid input contracts")
