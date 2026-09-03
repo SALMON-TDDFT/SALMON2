@@ -124,6 +124,7 @@ program test_dg_hybrid_fragment_subspace_mpi
   endif
   call test_measurement_only()
   call test_seed_initialization()
+  call test_epoch_budget()
   call test_growth_rollback()
   call test_extension()
   call test_metric_publication()
@@ -140,6 +141,91 @@ program test_dg_hybrid_fragment_subspace_mpi
   endif
   call MPI_Finalize(ierr)
 contains
+  subroutine test_epoch_budget()
+    type(s_dg_hybrid_fragment_epoch_budget)::budget,failed_budget,early_budget
+    type(s_dg_hybrid_fragment_subspace_state)::saved,extended,extended_saved
+    type(s_dg_hybrid_fragment_candidate_catalog)::catalog
+    type(s_dg_hybrid_fragment_extension_receipt)::receipt
+    real(real64)::extended_values(4)
+    integer::remaining,calls,a,b
+    state=warm;mode=0;shifted_calls=0
+    call epoch_update(budget,1,3,remaining)
+    call require(ok.and.iterations==3.and.remaining==0,'epoch did not consume three-step budget')
+    saved=state;calls=shifted_calls
+    call epoch_update(budget,1,3,remaining)
+    call require(ok.and.iterations==0.and.remaining==0.and.reason=='budget_exhausted',&
+      'repeat pass replenished epoch budget')
+    call require(workspace>0_int64,'measurement-only epoch omitted workspace receipt')
+    call require(shifted_calls==calls.and.all(state%vectors==saved%vectors).and.&
+      all(state%directions==saved%directions),'exhausted budget changed X/P or preconditioned')
+    catalog%fragment_id=7;catalog%basis_generation=2
+    catalog%basis_fingerprint=101_int64;catalog%metric_fingerprint=203_int64
+    allocate(catalog%coefficients(nlocal,2),catalog%energies(2),catalog%ids(2),&
+      catalog%source_kind(2),catalog%used(2))
+    catalog%coefficients=0d0;catalog%energies=0.6d0;catalog%ids=[1_int64,2_int64]
+    catalog%source_kind=fragment_seed;catalog%used=.false.
+    do a=1,nlocal
+      b=int(ids(a))
+      if(b==3.or.b==4)catalog%coefficients(a,b-2)=1d0
+    enddo
+    extended=state
+    call extend_dg_hybrid_fragment_subspace(comm,n,ids,7,2,101_int64,203_int64,&
+      apply_h,apply_s,1d-10,1d-10,catalog,extended,receipt,ok,message)
+    call require(ok.and.extended%state_count==4,'budget fixture shell extension failed')
+    extended_saved=extended
+    call advance_dg_hybrid_fragment_epoch(comm,n,ids,7,2,101_int64,203_int64,1,3,&
+      apply_h,apply_s,shifted_precondition,1d-14,1d-10,2d0,budget,extended,extended_values,iterations,remaining,&
+      relative_residual,converged,advanced,reason,workspace,fingerprint,ok,message)
+    call require(ok.and.iterations==0.and.remaining==0.and.shifted_calls==calls,&
+      'shell extension replenished the spent CG budget')
+    call require(all(extended%vectors==extended_saved%vectors).and.&
+      all(extended%directions==extended_saved%directions),'post-extension measurement changed X/P')
+    call advance_dg_hybrid_fragment_epoch(comm,n,ids,7,2,101_int64,203_int64,1,3,&
+      apply_h,apply_s,fixture_shifted_identity,1d6,1d-10,2d0,early_budget,state,values,iterations,remaining,&
+      relative_residual,converged,advanced,reason,workspace,fingerprint,ok,message)
+    call require(ok.and.iterations==0.and.remaining==3,'early target consumed unused CG steps')
+    precondition_calls=0
+    call advance_dg_hybrid_fragment_epoch(comm,n,ids,7,2,101_int64,203_int64,1,3,&
+      apply_h,apply_s,fixture_shifted_identity,1d-14,1d-10,2d0,early_budget,extended,&
+      extended_values,iterations,remaining,relative_residual,converged,advanced,reason,workspace,&
+      fingerprint,ok,message)
+    call require(ok.and.iterations>0.and.remaining==3-iterations.and.precondition_calls==iterations,&
+      'extended state did not consume the unspent epoch budget')
+    call epoch_update(budget,1,4,remaining)
+    call require(.not.ok,'same epoch changed its step limit')
+    call epoch_update(budget,2,3,remaining)
+    call require(ok.and.iterations==3.and.remaining==0,'next density epoch did not renew budget')
+    call epoch_update(budget,1,3,remaining)
+    call require(.not.ok,'older epoch reused budget')
+    if(nproc>1)then
+      call epoch_update(budget,merge(3,4,rank==0),3,remaining)
+      call require(.not.ok,'rank-disagreeing epoch accepted')
+    endif
+    state=warm;mode=10
+    call epoch_update(failed_budget,1,3,remaining)
+    call require(.not.ok,'failed shifted callback accepted')
+    mode=0;calls=shifted_calls
+    call epoch_update(failed_budget,1,3,remaining)
+    call require(.not.ok.and.shifted_calls==calls,'failed epoch permitted silent retry')
+  end subroutine
+
+  subroutine fixture_shifted_identity(input,shifts,output,valid)
+    complex(real64),intent(in)::input(:,:)
+    real(real64),intent(in)::shifts(:)
+    complex(real64),intent(out)::output(:,:)
+    logical,intent(out)::valid
+    output=input;valid=size(shifts)==size(input,2);precondition_calls=precondition_calls+1
+  end subroutine
+
+  subroutine epoch_update(budget,epoch,limit,remaining)
+    type(s_dg_hybrid_fragment_epoch_budget),intent(inout)::budget
+    integer,intent(in)::epoch,limit
+    integer,intent(out)::remaining
+    call advance_dg_hybrid_fragment_epoch(comm,n,ids,7,2,101_int64,203_int64,epoch,limit,&
+      apply_h,apply_s,shifted_precondition,1d-14,1d-10,2d0,budget,state,values,iterations,remaining,&
+      relative_residual,converged,advanced,reason,workspace,fingerprint,ok,message)
+  end subroutine
+
   subroutine test_seed_initialization()
     type(s_dg_hybrid_fragment_subspace_state)::initial,snapshot
     complex(real64)::seeds(nlocal,6)

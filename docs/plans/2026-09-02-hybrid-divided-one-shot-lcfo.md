@@ -1025,6 +1025,34 @@ Main-route construction, PW/catalog assembly, per-epoch budget accounting,
 capacity/tail extension and the production callback replacement are still
 pending. No production SCF or Si64 run was started at this checkpoint.
 
+**Epoch-budget checkpoint, 2026-09-04 (Task 8 remains incomplete):**
+`advance_dg_hybrid_fragment_epoch` owns a persistent private per-fragment
+budget around the bounded updater and measurement-only path. It replenishes
+the budget only on a newer density epoch; repeated calls, including after
+state-count extension, share the remaining steps. Same-epoch limit changes,
+older/rank-disagreeing epochs and fragment/basis/metric/communicator-layout
+mismatches are rejected. Attempted updates are charged even when the safe
+entry is retained. Once exhausted, calls only measure the current state and
+leave X/P unchanged; a callback/metric failure during execution poisons the
+budget instead of silently retrying. The shifted preconditioner callback is
+mandatory. The caller must keep one budget object per fragment, use the true
+outer-density epoch (not the extension pass index), and pass unchanged H/S
+within that epoch. Operator-provenance checks remain the responsibility of
+the existing fixed-frame preconditioner callback.
+
+MPI tests exercise three consumed steps, repeated measurement, actual whole
+shell extension from two to four states without replenishment, next-epoch
+renewal, invalid epoch/limit agreement and failure without implicit retry.
+This is still a reusable callback component, not replacement of the old
+production main route. That route's construction/catalog/occupation/density
+wiring and invocation of this budgeted updater remain pending.
+Verification: subspace/epoch and preconditioner MPI fixtures passed on
+1/2/4/8 ranks, saved-Wannier handoff passed on 2/4/8, and the release build
+completed successfully. Review found no Critical/Important issues. Both minor
+suggestions were addressed: measurement workspace is recorded, and an early
+target leaving three unused steps followed by an extended-state update is
+covered. The workspace regression failed before its fix. No Si64 run.
+
 **Files:**
 
 - Modify: `src/io/salmon_global.f90:480-545`

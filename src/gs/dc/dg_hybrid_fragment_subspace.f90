@@ -5,6 +5,13 @@ module dg_hybrid_fragment_subspace
     ieee_set_flag,ieee_invalid,ieee_divide_by_zero,ieee_overflow
   implicit none
   private
+  type,public::s_dg_hybrid_fragment_epoch_budget
+    private
+    integer::epoch=0,limit=0,remaining=0,fragment_id=0,generation=0,global_count=0
+    integer::comm_rank=-1,comm_size=0
+    integer(int64)::basis_fp=0_int64,metric_fp=0_int64
+    logical::failed=.false.
+  end type
   type,public::s_dg_hybrid_fragment_subspace_state
     integer::fragment_id=0,basis_generation=0,state_count=0
     integer(int64)::basis_fingerprint=0_int64,metric_fingerprint=0_int64
@@ -46,7 +53,94 @@ module dg_hybrid_fragment_subspace
   public::measure_dg_hybrid_fragment_subspace
   public::extend_dg_hybrid_fragment_subspace
   public::initialize_dg_hybrid_fragment_subspace
+  public::advance_dg_hybrid_fragment_epoch
 contains
+  subroutine advance_dg_hybrid_fragment_epoch(comm,global_count,row_ids,fragment_id,generation,basis_fp,metric_fp,&
+      epoch,maximum_steps,apply_h,apply_s,apply_shifted_preconditioner,intermediate_tolerance,&
+      orthogonality_tolerance,allowed_residual_growth,budget,state,eigenvalues,iterations,remaining_steps,&
+      relative_residual,eigensolver_converged,advanced,stop_reason,workspace_peak_bytes,fingerprint,ok,message)
+    ! One persistent budget per fragment. Repeated capacity/tail passes in the
+    ! same density epoch share it, including after state-count extension.
+    integer,intent(in)::comm,global_count,fragment_id,generation,epoch,maximum_steps
+    integer(int64),intent(in)::row_ids(:),basis_fp,metric_fp
+    procedure(fragment_apply)::apply_h,apply_s
+    procedure(fragment_shifted_apply)::apply_shifted_preconditioner
+    real(real64),intent(in)::intermediate_tolerance,orthogonality_tolerance,allowed_residual_growth
+    type(s_dg_hybrid_fragment_epoch_budget),intent(inout)::budget
+    type(s_dg_hybrid_fragment_subspace_state),intent(inout)::state
+    real(real64),intent(out)::eigenvalues(:),relative_residual
+    integer,intent(out)::iterations,remaining_steps
+    logical,intent(out)::eigensolver_converged,advanced,ok
+    character(*),intent(out)::stop_reason,message
+    integer(int64),intent(out)::workspace_peak_bytes,fingerprint
+    integer::rank,nproc,ierr
+    logical::valid,halting(3)
+    ok=.false.;message='invalid fragment epoch budget';stop_reason='invalid_epoch'
+    eigenvalues=0d0;iterations=0;remaining_steps=0;relative_residual=huge(1d0)
+    eigensolver_converged=.false.;advanced=.false.;workspace_peak_bytes=0_int64;fingerprint=0_int64
+    call suspend_traps(halting);call execute();call restore_traps(halting)
+  contains
+    subroutine execute()
+      valid=agree_int(comm,epoch)
+      valid=agree_int(comm,maximum_steps).and.valid
+      valid=agree_int(comm,budget%epoch).and.valid
+      valid=agree_int(comm,budget%limit).and.valid
+      valid=agree_int(comm,budget%remaining).and.valid
+      valid=agree_int(comm,merge(1,0,budget%failed)).and.valid
+      valid=agree_real(comm,intermediate_tolerance).and.valid
+      valid=agree_real(comm,orthogonality_tolerance).and.valid
+      valid=agree_real(comm,allowed_residual_growth).and.valid
+      if(.not.consensus(comm,valid.and.epoch>0.and.maximum_steps>=1.and.maximum_steps<=256))return
+      valid=ieee_is_finite(intermediate_tolerance).and.ieee_is_finite(orthogonality_tolerance).and.&
+        ieee_is_finite(allowed_residual_growth)
+      if(.not.consensus(comm,valid))return
+      if(intermediate_tolerance<=0d0.or.orthogonality_tolerance<64d0*epsilon(1d0).or.&
+        orthogonality_tolerance>1d-2.or.allowed_residual_growth<1d0)return
+      if(budget%failed)then;message='failed fragment epoch cannot be retried';return;endif
+      if(epoch<budget%epoch)return
+      if(epoch==budget%epoch.and.maximum_steps/=budget%limit)return
+      call validate_cache(comm,global_count,row_ids,fragment_id,generation,basis_fp,metric_fp,state,valid,message)
+      if(.not.valid)return
+      call MPI_Comm_rank(comm,rank,ierr);valid=ierr==MPI_SUCCESS
+      call MPI_Comm_size(comm,nproc,ierr);valid=valid.and.ierr==MPI_SUCCESS
+      if(budget%epoch>0)then
+        valid=valid.and.budget%fragment_id==fragment_id.and.budget%generation==generation.and.&
+          budget%basis_fp==basis_fp.and.budget%metric_fp==metric_fp.and.budget%global_count==global_count.and.&
+          budget%comm_rank==rank.and.budget%comm_size==nproc
+      endif
+      if(.not.consensus(comm,valid))then;message='fragment epoch budget provenance mismatch';return;endif
+      if(epoch>budget%epoch)then
+        budget%epoch=epoch;budget%limit=maximum_steps;budget%remaining=maximum_steps
+        budget%fragment_id=fragment_id;budget%generation=generation
+        budget%basis_fp=basis_fp;budget%metric_fp=metric_fp;budget%global_count=global_count
+        budget%comm_rank=rank;budget%comm_size=nproc
+      endif
+      if(budget%remaining==0)then
+        ! Conservative local bound, including metric certification and row
+        ! ownership workspace; callback-owned H/S storage is not included.
+        workspace_peak_bytes=16_int64*(4_int64*size(row_ids)*state%state_count+&
+          2_int64*state%state_count*state%state_count)+8_int64*state%state_count+4_int64*global_count
+        call measure_dg_hybrid_fragment_subspace(comm,global_count,row_ids,fragment_id,generation,&
+          basis_fp,metric_fp,apply_h,apply_s,orthogonality_tolerance,state,eigenvalues,relative_residual,&
+          fingerprint,ok,message)
+        stop_reason='budget_exhausted'
+        eigensolver_converged=ok.and.relative_residual<=intermediate_tolerance
+      else
+        call advance_dg_hybrid_fragment_subspace(comm,global_count,row_ids,fragment_id,generation,basis_fp,metric_fp,&
+          apply_h,apply_s,maximum_steps=budget%remaining,intermediate_tolerance=intermediate_tolerance,&
+          orthogonality_tolerance=orthogonality_tolerance,allowed_residual_growth=allowed_residual_growth,&
+          state=state,eigenvalues=eigenvalues,iterations=iterations,relative_residual=relative_residual,&
+          eigensolver_converged=eigensolver_converged,advanced=advanced,stop_reason=stop_reason,&
+          workspace_peak_bytes=workspace_peak_bytes,fingerprint=fingerprint,ok=ok,message=message,&
+          apply_shifted_preconditioner=apply_shifted_preconditioner)
+        ! Count attempted updates even when rollback retains the entry state.
+        budget%remaining=budget%remaining-iterations
+      endif
+      remaining_steps=budget%remaining
+      if(.not.ok)budget%failed=.true. ! No implicit recovery after a callback/metric failure.
+    end subroutine
+  end subroutine advance_dg_hybrid_fragment_epoch
+
   subroutine initialize_dg_hybrid_fragment_subspace(comm,global_count,row_ids,fragment_id,generation,&
       basis_fp,metric_fp,seed_coefficients,seed_energies,seed_occupations,guard_count,&
       occupation_tolerance,energy_tolerance,orthogonality_tolerance,apply_s,state,selected_seeds,ok,message,&
