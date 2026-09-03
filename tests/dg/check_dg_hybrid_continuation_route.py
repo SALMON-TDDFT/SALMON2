@@ -157,6 +157,54 @@ for token in [
 ]:
     assert token in source, f"production continuation does not connect {token}"
 
+shared_setup_flag = "if(yn_dg_hybrid_divided_scf=='y'.or.yn_dg_hybrid_continuation_scf=='y')then"
+shared_setup_start = ground_state_lower.index(shared_setup_flag)
+shared_route = ground_state_lower[shared_setup_start:]
+shared_branch_position = shared_route.index("if(yn_dg_hybrid_continuation_scf=='y')then")
+shared_prefix = shared_route[:shared_branch_position]
+shared_payload_steps = [
+    "call freeze_dg_hybrid_basis_directory",
+    "call materialize_dg_hybrid_production_interior",
+    "call assemble_dg_hybrid_broken_volume_rows",
+    "call assemble_dg_hybrid_divided_nonlocal_rows",
+    "call materialize_dg_hybrid_production_face_collection",
+    "call assemble_dg_hybrid_production_interface_component_rows",
+    "call freeze_dg_hybrid_variational_payload",
+]
+for token in shared_payload_steps:
+    assert token in shared_prefix, (
+        f"fixed variational payload step remains branch-local: {token}"
+    )
+shared_positions = [shared_prefix.index(token) for token in shared_payload_steps]
+assert shared_positions == sorted(shared_positions), (
+    "shared basis/interior/projector/face/payload construction is out of order"
+)
+assert shared_route.count("call freeze_dg_hybrid_variational_payload") == 1, (
+    "divided/reference routes must freeze exactly one shared variational payload"
+)
+assert "[hybrid-shared-variational-payload]" in shared_prefix, (
+    "shared immutable variational payload fingerprint receipt is missing"
+)
+assert "dg_hybrid_fixed_payload%fingerprint" in shared_prefix, (
+    "shared variational payload receipt omits its immutable fingerprint"
+)
+continuation_arm = shared_route[shared_branch_position:shared_route.index("else", shared_branch_position)]
+divided_arm = shared_route[shared_route.index("else", shared_branch_position):]
+for arm_name, arm in (("continuation", continuation_arm), ("divided", divided_arm)):
+    assert "divided_fixed_payload_fingerprint" in arm, (
+        f"{arm_name} route does not consume the shared immutable payload fingerprint"
+    )
+    assert "call freeze_dg_hybrid_variational_payload" not in arm, (
+        f"{arm_name} route refreezes its variational payload"
+    )
+shared_reuse_guard = source[source.index("if(ok.and.reusable"):].split("endif", 1)[0]
+assert "yn_dg_hybrid_continuation_scf/='y'" in shared_reuse_guard, (
+    "an old overlapping-Wannier checkpoint must not bypass continuation"
+)
+assert "yn_dg_hybrid_divided_scf/='y'" in shared_reuse_guard, (
+    "an old overlapping-Wannier checkpoint must not bypass divided payload construction"
+)
+
 capture_variable = "SALMON_DG_VARIATIONAL_PAYLOAD_CAPTURE"
 assert capture_variable in source, "continuation omits opt-in variational payload capture"
 capture_call = "call write_dg_hybrid_variational_payload_bundle"
@@ -234,16 +282,11 @@ assert "assemble_dg_hybrid_lcfo_rows" not in continuation_only, (
 assert "apply_dg_hybrid_divided_fragment_hpsi" not in continuation_only, (
     "ordinary real-space hpsi is forbidden in the DG variational continuation"
 )
-assert "dg_hybrid_unit_local_potential" in continuation_only, (
-    "continuation must construct S from the frozen basis volume integral"
+assert "dg_hybrid_unit_local_potential" in shared_prefix, (
+    "shared divided/reference setup must construct S from the frozen basis volume integral"
 )
 assert "size(divided_lcfo_hrows,2)" not in continuation_only, (
     "continuation must not query an unallocated legacy LCFO Hamiltonian"
-)
-
-reuse = source[source.index("if(ok.and.reusable"):].split("endif", 1)[0]
-assert "yn_dg_hybrid_continuation_scf/='y'" in reuse, (
-    "an old overlapping-Wannier checkpoint must not bypass continuation"
 )
 
 preparation_name = "subroutine prepare_dg_hybrid_divided_production_basis"

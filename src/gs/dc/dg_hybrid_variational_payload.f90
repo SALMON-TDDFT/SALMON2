@@ -12,8 +12,11 @@ module dg_hybrid_variational_payload
     logical::frozen=.false.
     integer::global_basis_count=0
     integer(int64),allocatable::row_ids(:)
+    integer(int64),allocatable::row_fingerprints(:)
     complex(real64),allocatable::metric_rows(:,:),kinetic_rows(:,:),nonlocal_rows(:,:),interface_rows(:,:)
     integer(int64)::basis_fingerprint=0_int64,metric_fingerprint=0_int64,interface_fingerprint=0_int64
+    integer(int64)::basis_directory_fingerprint=0_int64
+    integer(int64)::metadata_fingerprint=0_int64
     integer(int64)::fingerprint=0_int64
   end type s_dg_hybrid_fixed_payload
   type,public::s_dg_hybrid_variational_iterate
@@ -27,6 +30,7 @@ module dg_hybrid_variational_payload
     type(s_dg_hybrid_variational_iterate)::iterate
   end type s_dg_hybrid_accepted_variational_state
   public::freeze_dg_hybrid_variational_payload,compose_dg_hybrid_variational_hamiltonian
+  public::verify_dg_hybrid_variational_payload_rows
   public::write_dg_hybrid_variational_payload_bundle,read_dg_hybrid_variational_payload_bundle
   integer,parameter::variational_payload_bundle_version=1
   interface
@@ -158,13 +162,15 @@ contains
   end subroutine atomic_rename
 
   subroutine freeze_dg_hybrid_variational_payload(comm,global_basis_count,row_ids,metric_rows,kinetic_rows,&
-      nonlocal_rows,interface_rows,basis_fingerprint,metric_fingerprint,interface_fingerprint,payload,ok,message)
+      nonlocal_rows,interface_rows,basis_fingerprint,metric_fingerprint,interface_fingerprint,payload,ok,message,&
+      basis_directory_fingerprint)
     integer,intent(in)::comm,global_basis_count
     integer(int64),intent(in)::row_ids(:),basis_fingerprint,metric_fingerprint,interface_fingerprint
     complex(real64),intent(in)::metric_rows(:,:),kinetic_rows(:,:),nonlocal_rows(:,:),interface_rows(:,:)
     type(s_dg_hybrid_fixed_payload),intent(out)::payload
     logical,intent(out)::ok
     character(*),intent(out)::message
+    integer(int64),intent(in),optional::basis_directory_fingerprint
 #ifdef USE_MPI
     integer::i,ierr,local_bad,global_bad,total_rows
     integer,allocatable::ownership(:)
@@ -175,6 +181,9 @@ contains
         any(shape(interface_rows)/=shape(metric_rows)))local_bad=ibset(local_bad,0)
     if(basis_fingerprint==0_int64.or.metric_fingerprint==0_int64.or.&
       interface_fingerprint==0_int64)local_bad=ibset(local_bad,1)
+    if(present(basis_directory_fingerprint))then
+      if(basis_directory_fingerprint==0_int64)local_bad=ibset(local_bad,6)
+    endif
     if(.not.finite_matrix(metric_rows))local_bad=ibset(local_bad,2)
     if(.not.finite_matrix(kinetic_rows))local_bad=ibset(local_bad,3)
     if(.not.finite_matrix(nonlocal_rows))local_bad=ibset(local_bad,4)
@@ -187,6 +196,7 @@ contains
     if(btest(global_bad,3))then;message='variational kinetic rows contain nonfinite values';return;endif
     if(btest(global_bad,4))then;message='variational nonlocal rows contain nonfinite values';return;endif
     if(btest(global_bad,5))then;message='variational interface rows contain nonfinite values';return;endif
+    if(btest(global_bad,6))then;message='invalid variational basis-directory fingerprint';return;endif
     call MPI_Allreduce(size(row_ids),total_rows,1,MPI_INTEGER,MPI_SUM,comm,ierr)
     allocate(ownership(global_basis_count));ownership=0
     do i=1,size(row_ids);ownership(int(row_ids(i)))=ownership(int(row_ids(i)))+1;enddo
@@ -200,6 +210,13 @@ contains
     allocate(payload%interface_rows,source=interface_rows)
     payload%basis_fingerprint=basis_fingerprint;payload%metric_fingerprint=metric_fingerprint
     payload%interface_fingerprint=interface_fingerprint
+    payload%basis_directory_fingerprint=0_int64
+    if(present(basis_directory_fingerprint))payload%basis_directory_fingerprint=basis_directory_fingerprint
+    payload%metadata_fingerprint=compute_payload_metadata_fingerprint(payload)
+    allocate(payload%row_fingerprints(size(payload%row_ids)))
+    do i=1,size(payload%row_ids)
+      payload%row_fingerprints(i)=compute_payload_row_fingerprint(payload,i)
+    enddo
     call compute_payload_fingerprint(comm,payload,payload%fingerprint,ok)
     if(.not.ok.or.payload%fingerprint==0_int64)then;message='variational fixed fingerprint failed';return;endif
     payload%frozen=.true.;message=''
@@ -207,6 +224,60 @@ contains
     ok=.false.;message='MPI is required for variational payload freezing'
 #endif
   end subroutine freeze_dg_hybrid_variational_payload
+
+  subroutine verify_dg_hybrid_variational_payload_rows(comm,payload,ok,message)
+    integer,intent(in)::comm
+    type(s_dg_hybrid_fixed_payload),intent(in)::payload
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::i,ierr,local_bad,global_bad,nrows
+    logical::storage_ready
+    integer(int64)::current_metadata_fingerprint
+    ok=.false.;message='';local_bad=0;nrows=0
+    if(.not.payload%frozen)local_bad=ibset(local_bad,0)
+    if(payload%global_basis_count<1.or.payload%basis_fingerprint==0_int64.or.&
+        payload%metric_fingerprint==0_int64.or.payload%interface_fingerprint==0_int64.or.&
+        payload%metadata_fingerprint==0_int64.or.payload%fingerprint==0_int64)local_bad=ibset(local_bad,1)
+    storage_ready=allocated(payload%row_ids).and.allocated(payload%row_fingerprints).and.&
+      allocated(payload%metric_rows).and.allocated(payload%kinetic_rows).and.&
+      allocated(payload%nonlocal_rows).and.allocated(payload%interface_rows)
+    if(.not.storage_ready)then
+      local_bad=ibset(local_bad,2)
+    else
+      nrows=size(payload%row_ids)
+      if(size(payload%row_fingerprints)/=nrows.or.&
+          any(shape(payload%metric_rows)/=[nrows,payload%global_basis_count]).or.&
+          any(shape(payload%kinetic_rows)/=shape(payload%metric_rows)).or.&
+          any(shape(payload%nonlocal_rows)/=shape(payload%metric_rows)).or.&
+          any(shape(payload%interface_rows)/=shape(payload%metric_rows)))local_bad=ibset(local_bad,2)
+    endif
+    if(storage_ready.and..not.btest(local_bad,2))then
+      if(any(payload%row_ids<1_int64).or.any(payload%row_ids>int(payload%global_basis_count,int64)))&
+        local_bad=ibset(local_bad,1)
+      if(.not.finite_matrix(payload%metric_rows).or..not.finite_matrix(payload%kinetic_rows).or.&
+          .not.finite_matrix(payload%nonlocal_rows).or..not.finite_matrix(payload%interface_rows))&
+        local_bad=ibset(local_bad,3)
+      current_metadata_fingerprint=compute_payload_metadata_fingerprint(payload)
+      if(current_metadata_fingerprint/=payload%metadata_fingerprint)local_bad=ibset(local_bad,4)
+      do i=1,nrows
+        if(compute_payload_row_fingerprint(payload,i)/=payload%row_fingerprints(i))&
+          local_bad=ibset(local_bad,5)
+      enddo
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_BOR,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='fixed variational payload row verification reduction failed';return;endif
+    if(btest(global_bad,0))then;message='fixed variational payload is not frozen';return;endif
+    if(btest(global_bad,1))then;message='invalid fixed variational payload metadata';return;endif
+    if(btest(global_bad,2))then;message='invalid fixed variational payload row storage';return;endif
+    if(btest(global_bad,3))then;message='fixed variational payload rows contain nonfinite values';return;endif
+    if(btest(global_bad,4))then;message='fixed variational payload metadata fingerprint changed';return;endif
+    if(btest(global_bad,5))then;message='fixed variational payload row fingerprint changed';return;endif
+    ok=.true.
+#else
+    ok=.false.;message='MPI is required for variational payload row verification'
+#endif
+  end subroutine verify_dg_hybrid_variational_payload_rows
 
   subroutine compose_dg_hybrid_variational_hamiltonian(comm,payload,local_rows,lambda,epoch,iterate,ok,message)
     integer,intent(in)::comm,epoch
@@ -217,10 +288,14 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer::ierr,local_bad,global_bad
+    integer::ierr,local_bad,global_bad,allocation_status
     integer(int64)::current_fingerprint
+    complex(real64),allocatable::working_local_rows(:,:),working_hamiltonian_rows(:,:)
     ok=.false.;message='';local_bad=0
-    if(.not.payload%frozen.or.epoch<1.or..not.ieee_is_finite(lambda).or.lambda<0d0.or.lambda>1d0.or.&
+    call verify_dg_hybrid_variational_payload_rows(comm,payload,ok,message)
+    if(.not.ok)return
+    ok=.false.
+    if(epoch<1.or..not.ieee_is_finite(lambda).or.lambda<0d0.or.lambda>1d0.or.&
         any(shape(local_rows)/=shape(payload%metric_rows)).or..not.finite_matrix(local_rows))local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid variational Hamiltonian composition';return;endif
@@ -228,9 +303,24 @@ contains
     if(.not.ok.or.current_fingerprint/=payload%fingerprint)then
       ok=.false.;message='fixed variational payload fingerprint changed';return
     endif
-    allocate(iterate%local_rows,source=local_rows)
-    allocate(iterate%hamiltonian_rows(size(local_rows,1),size(local_rows,2)))
-    iterate%hamiltonian_rows=payload%kinetic_rows+payload%nonlocal_rows+local_rows+lambda*payload%interface_rows
+    ok=.false.
+    allocation_status=0
+    allocate(working_local_rows,source=local_rows,stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='variational local-row allocation failed collectively';return
+    endif
+    allocation_status=0
+    allocate(working_hamiltonian_rows(size(local_rows,1),size(local_rows,2)),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='variational Hamiltonian-row allocation failed collectively';return
+    endif
+    working_hamiltonian_rows=payload%kinetic_rows+payload%nonlocal_rows+local_rows+lambda*payload%interface_rows
+    call move_alloc(working_local_rows,iterate%local_rows)
+    call move_alloc(working_hamiltonian_rows,iterate%hamiltonian_rows)
     iterate%lambda=lambda;iterate%epoch=epoch;iterate%fixed_fingerprint=payload%fingerprint
     ok=.true.;message=''
 #else
@@ -244,31 +334,68 @@ contains
     type(s_dg_hybrid_fixed_payload),intent(in)::payload
     integer(int64),intent(out)::fingerprint
     logical,intent(out)::ok
-    integer::i,j,ierr
-    integer(int64)::local_hash,bits
-    local_hash=ieor(payload%basis_fingerprint,ishftc(payload%metric_fingerprint,11))
-    local_hash=ieor(local_hash,ishftc(payload%interface_fingerprint,23))
-    do i=1,size(payload%row_ids);do j=1,payload%global_basis_count
-      call hash_complex(local_hash,payload%row_ids(i),j,payload%metric_rows(i,j))
-      call hash_complex(local_hash,payload%row_ids(i),j+payload%global_basis_count,payload%kinetic_rows(i,j))
-      call hash_complex(local_hash,payload%row_ids(i),j+2*payload%global_basis_count,payload%nonlocal_rows(i,j))
-      call hash_complex(local_hash,payload%row_ids(i),j+3*payload%global_basis_count,payload%interface_rows(i,j))
-    enddo;enddo
+    integer::i,ierr,shift
+    integer(int64)::local_hash,row_hash
+    fingerprint=0_int64;local_hash=0_int64
+    do i=1,size(payload%row_ids)
+      row_hash=compute_payload_row_fingerprint(payload,i)
+      shift=int(modulo(payload%row_ids(i),63_int64))
+      local_hash=ieor(local_hash,ishftc(row_hash,shift))
+    enddo
     call MPI_Allreduce(local_hash,fingerprint,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
-    bits=int(payload%global_basis_count,int64);fingerprint=ieor(fingerprint,ishftc(bits,37))
+    if(ierr==MPI_SUCCESS)call mix_hash_word(fingerprint,compute_payload_metadata_fingerprint(payload),97_int64)
     if(fingerprint==0_int64)fingerprint=1543_int64
     ok=ierr==MPI_SUCCESS
   end subroutine compute_payload_fingerprint
 
-  subroutine hash_complex(hash,row,column,value)
+  pure integer(int64) function compute_payload_metadata_fingerprint(payload) result(fingerprint)
+    type(s_dg_hybrid_fixed_payload),intent(in)::payload
+    fingerprint=int(z'243F6A8885A308D3',int64)
+    call mix_hash_word(fingerprint,int(payload%global_basis_count,int64),1_int64)
+    call mix_hash_word(fingerprint,payload%basis_fingerprint,2_int64)
+    call mix_hash_word(fingerprint,payload%metric_fingerprint,3_int64)
+    call mix_hash_word(fingerprint,payload%interface_fingerprint,4_int64)
+    call mix_hash_word(fingerprint,payload%basis_directory_fingerprint,5_int64)
+    if(fingerprint==0_int64)fingerprint=1543_int64
+  end function compute_payload_metadata_fingerprint
+
+  pure integer(int64) function compute_payload_row_fingerprint(payload,index) result(fingerprint)
+    type(s_dg_hybrid_fixed_payload),intent(in)::payload
+    integer,intent(in)::index
+    integer::column
+    fingerprint=compute_payload_metadata_fingerprint(payload)
+    call mix_hash_word(fingerprint,payload%row_ids(index),11_int64)
+    do column=1,payload%global_basis_count
+      call hash_complex(fingerprint,column,1,payload%metric_rows(index,column))
+      call hash_complex(fingerprint,column,2,payload%kinetic_rows(index,column))
+      call hash_complex(fingerprint,column,3,payload%nonlocal_rows(index,column))
+      call hash_complex(fingerprint,column,4,payload%interface_rows(index,column))
+    enddo
+    if(fingerprint==0_int64)fingerprint=1543_int64
+  end function compute_payload_row_fingerprint
+
+  pure subroutine hash_complex(hash,column,component,value)
     integer(int64),intent(inout)::hash
-    integer(int64),intent(in)::row
-    integer,intent(in)::column
+    integer,intent(in)::column,component
     complex(real64),intent(in)::value
-    integer(int64)::bits
-    bits=transfer(real(value,real64),bits);hash=ieor(hash,ishftc(ieor(bits,row),mod(7*column,63)))
-    bits=transfer(aimag(value),bits);hash=ieor(hash,ishftc(ieor(bits,ishftc(row,9)),mod(13*column,63)))
+    integer(int64)::bits,position
+    position=int(column,int64)
+    call mix_hash_word(hash,position,100_int64+int(component,int64))
+    bits=transfer(real(value,real64),bits)
+    call mix_hash_word(hash,bits,200_int64+int(component,int64))
+    bits=transfer(aimag(value),bits)
+    call mix_hash_word(hash,bits,300_int64+int(component,int64))
   end subroutine hash_complex
+
+  pure subroutine mix_hash_word(hash,word,tag)
+    integer(int64),intent(inout)::hash
+    integer(int64),intent(in)::word,tag
+    integer::shift
+    shift=1+int(modulo(ieor(word,ishftc(tag,7)),63_int64))
+    hash=ieor(ishftc(hash,shift),word)
+    hash=ieor(hash,ishftc(tag,modulo(shift+23,64)))
+    hash=ieor(hash,int(z'13198A2E03707344',int64))
+  end subroutine mix_hash_word
 #endif
 
   logical function finite_matrix(values)

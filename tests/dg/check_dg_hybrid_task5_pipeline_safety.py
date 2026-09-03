@@ -102,9 +102,27 @@ def require(condition: bool, message: str) -> None:
 build = extract_procedure(SOURCE, "build_dg_hybrid_projected_fragment_basis", "subroutine")
 finalize = extract_procedure(SOURCE, "finalize_dg_hybrid_dual_basis_catalog", "subroutine")
 coverage = extract_procedure(SOURCE, "validate_coverage_pairs", "subroutine")
+metric_inverse = extract_procedure(SOURCE, "hermitian_pseudoinverse", "subroutine")
 
 build_compact = compact(build)
 finalize_compact = compact(finalize)
+metric_inverse_compact = compact(metric_inverse)
+
+# The catalog finalizer must classify the metric with the same roundoff-aware
+# cutoff and ambiguity gate as the Task 5 map builder and Task 6 consumer.
+require(
+    "roundoff_floor=64d0*epsilon(1d0)*scale*real(max(1,n),real64)"
+    in metric_inverse_compact,
+    "catalog metric rank omits the shared roundoff floor",
+)
+require(
+    "cutoff=max(tolerance*scale,roundoff_floor)" in metric_inverse_compact,
+    "catalog metric rank does not use the shared effective cutoff",
+)
+require(
+    "abs(eigenvalues-cutoff)<=16d0*roundoff_floor" in metric_inverse_compact,
+    "catalog metric rank accepts an ambiguous cutoff-boundary mode",
+)
 
 # Count and receipt arithmetic must not first overflow a default integer.
 require(

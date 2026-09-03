@@ -6,7 +6,7 @@ module dg_hybrid_projected_fragment_pipeline
   use dg_hybrid_windowed_pw_basis,only:materialize_dg_hybrid_windowed_pw_columns
   use dg_hybrid_wannier_complement,only:s_dg_hybrid_generalized_metric_factor,&
     prepare_dg_hybrid_generalized_wannier_metric,apply_dg_hybrid_generalized_wannier_projection_tile,&
-    materialize_dg_hybrid_projected_pw_tile
+    materialize_dg_hybrid_projected_pw_tile,compute_dg_hybrid_union_to_complete_binding
   use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
   use dg_hybrid_fragment_basis_stream,only:s_dg_hybrid_fragment_basis_stream,&
     initialize_dg_hybrid_fragment_basis_stream,append_dg_hybrid_projected_pw_tile,&
@@ -23,7 +23,8 @@ module dg_hybrid_projected_fragment_pipeline
     type(s_dg_hybrid_fragment_basis),allocatable::fragment_bases(:)
     complex(real64),allocatable::union_to_complete(:,:)
     integer::uncompressed_rank=0,complete_rank=0
-    integer(int64)::fragment_catalog_fingerprint=0_int64,complete_map_fingerprint=0_int64
+    integer(int64)::fragment_catalog_fingerprint=0_int64,complete_map_fingerprint=0_int64,&
+      complete_transform_binding_fingerprint=0_int64
     integer(int64),allocatable::uncompressed_global_basis_ids(:)
     integer,allocatable::uncompressed_owner_ranks(:),uncompressed_fragment_ids(:),&
       uncompressed_local_slots(:),uncompressed_sectors(:),uncompressed_generations(:)
@@ -254,7 +255,7 @@ contains
       local_omitted_by_column(:),global_omitted_by_column(:)
     real(real64)::total_omitted,local_norm,seed_norm,residual_norm,working_seed_defect,column_defect,&
       orthogonality_tolerance,retained_span_defect,amplitude,weight_root,omitted_term
-    integer(int64)::fragment_hash,map_hash,provenance,bits,expected_rank_total,gram_count64,&
+    integer(int64)::fragment_hash,map_hash,transform_binding_hash,provenance,bits,expected_rank_total,gram_count64,&
       publisher_value_count64
     logical::local_ok,stage_ok,identity_map,arithmetic_ok
     character(256)::local_message,stage_message
@@ -766,6 +767,9 @@ contains
       call hash_accumulate(map_hash,global_row_hash(p))
     enddo
     if(map_hash==0_int64)map_hash=1_int64
+    call compute_dg_hybrid_union_to_complete_binding(comm,union_to_complete,map_hash,&
+      metric_tolerance,transform_binding_hash,stage_ok,stage_message)
+    if(.not.stage_ok)then;message=trim(stage_message);return;endif
 
     call copy_fragment_basis_array_collective(comm,fragment_bases,working_catalog%fragment_bases,&
       stage_ok,stage_message)
@@ -794,7 +798,9 @@ contains
     working_catalog%uncompressed_generations=global_generation
     working_catalog%uncompressed_rank=nuncompressed;working_catalog%complete_rank=ncomplete
     working_catalog%fragment_catalog_fingerprint=fragment_hash
-    working_catalog%complete_map_fingerprint=map_hash;working_catalog%valid=.true.
+    working_catalog%complete_map_fingerprint=map_hash
+    working_catalog%complete_transform_binding_fingerprint=transform_binding_hash
+    working_catalog%valid=.true.
     allocate(working_seed_owner,source=seed_fragment_owner,stat=allocation_status)
     local_ok=allocation_status==0;local_message='cannot allocate preserved seed owners'
     call synchronize_status(comm,local_ok,local_message,stage_ok,stage_message)
@@ -1032,7 +1038,7 @@ contains
     character(*),intent(out)::message
     complex(real64),allocatable::vectors(:,:),work(:)
     real(real64),allocatable::rwork(:)
-    real(real64)::scale,cutoff,negative_limit,hermitian_defect
+    real(real64)::scale,cutoff,negative_limit,roundoff_floor,hermitian_defect
     integer::n,i,j,k,info,allocation_status
     ok=.false.;message='';retained_rank=0;n=size(matrix,1)
     if(n<1.or.size(matrix,2)/=n.or..not.finite_complex_matrix(matrix).or.&
@@ -1051,9 +1057,13 @@ contains
     if(info/=0.or..not.all(ieee_is_finite(eigenvalues)))then
       message='Hermitian metric eigensolver failed';return
     endif
-    scale=max(1d0,maxval(abs(eigenvalues)));cutoff=tolerance*scale
-    negative_limit=100d0*epsilon(1d0)*real(n,real64)*scale
+    scale=max(1d0,maxval(abs(eigenvalues)))
+    roundoff_floor=64d0*epsilon(1d0)*scale*real(max(1,n),real64)
+    cutoff=max(tolerance*scale,roundoff_floor);negative_limit=roundoff_floor
     if(minval(eigenvalues)<-negative_limit)then;message='indefinite Hermitian metric';return;endif
+    if(any(abs(eigenvalues-cutoff)<=16d0*roundoff_floor))then
+      message='ambiguous Hermitian metric rank at cutoff';return
+    endif
     retained_rank=count(eigenvalues>cutoff);inverse=(0d0,0d0)
     do k=1,n
       if(eigenvalues(k)<=cutoff)cycle
@@ -1172,6 +1182,7 @@ contains
     if(allocated(catalog%uncompressed_generations))deallocate(catalog%uncompressed_generations)
     catalog%valid=.false.;catalog%uncompressed_rank=0;catalog%complete_rank=0
     catalog%fragment_catalog_fingerprint=0_int64;catalog%complete_map_fingerprint=0_int64
+    catalog%complete_transform_binding_fingerprint=0_int64
   end subroutine clear_dual_catalog
 
   subroutine move_dual_catalog(source,destination)
@@ -1182,6 +1193,7 @@ contains
     destination%complete_rank=source%complete_rank
     destination%fragment_catalog_fingerprint=source%fragment_catalog_fingerprint
     destination%complete_map_fingerprint=source%complete_map_fingerprint
+    destination%complete_transform_binding_fingerprint=source%complete_transform_binding_fingerprint
     call move_alloc(source%fragment_bases,destination%fragment_bases)
     call move_alloc(source%union_to_complete,destination%union_to_complete)
     call move_alloc(source%uncompressed_global_basis_ids,destination%uncompressed_global_basis_ids)
@@ -1192,6 +1204,7 @@ contains
     call move_alloc(source%uncompressed_generations,destination%uncompressed_generations)
     source%valid=.false.;source%uncompressed_rank=0;source%complete_rank=0
     source%fragment_catalog_fingerprint=0_int64;source%complete_map_fingerprint=0_int64
+    source%complete_transform_binding_fingerprint=0_int64
   end subroutine move_dual_catalog
 
   logical function allocated_nonempty_fragment_payload(basis)result(nonempty)

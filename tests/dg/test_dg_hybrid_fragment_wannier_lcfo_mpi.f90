@@ -12,6 +12,7 @@ module dg_hybrid_generalized_red_contracts
     integer::complete_rank=0
     integer(int64)::fragment_catalog_fingerprint=0_int64
     integer(int64)::complete_map_fingerprint=0_int64
+    integer(int64)::complete_transform_binding_fingerprint=0_int64
     integer(int64),allocatable::uncompressed_global_basis_ids(:)
     integer,allocatable::uncompressed_owner_ranks(:),uncompressed_fragment_ids(:),&
       uncompressed_local_slots(:),uncompressed_sectors(:),uncompressed_generations(:)
@@ -297,7 +298,8 @@ contains
     call require(ok,'dual Hybrid catalog finalization failed: '//trim(message))
     call require(catalog%valid.and.catalog%uncompressed_rank==nunion.and.catalog%complete_rank==metric_rank,&
       'dual catalog did not preserve full uncompressed Hybrid rank')
-    call require(catalog%fragment_catalog_fingerprint/=0_int64.and.catalog%complete_map_fingerprint/=0_int64,&
+    call require(catalog%fragment_catalog_fingerprint/=0_int64.and.catalog%complete_map_fingerprint/=0_int64.and.&
+      catalog%complete_transform_binding_fingerprint/=0_int64,&
       'dual catalog did not derive physical fingerprints from content')
     call require(allocated(catalog%union_to_complete).and.&
       maxval(abs(catalog%union_to_complete-complete_transform))<5d-14,&
@@ -466,7 +468,8 @@ contains
     call finalize_with_evidence(changed_bases,union_values,transform,expected_ranks,1,seed_owner,seed_coefficients,0,&
       changed_catalog,preserved_owner,preserved_seed,complete_seed,seed_defect,ok,message)
     call require(ok.and.changed_catalog%fragment_catalog_fingerprint/=baseline%fragment_catalog_fingerprint.and.&
-      changed_catalog%complete_map_fingerprint==baseline%complete_map_fingerprint,&
+      changed_catalog%complete_map_fingerprint==baseline%complete_map_fingerprint.and.&
+      changed_catalog%complete_transform_binding_fingerprint==baseline%complete_transform_binding_fingerprint,&
       'dual fingerprints are insensitive to fragment generation metadata or couple it into the terminal map')
 
     allocate(changed_transform,source=transform);phase=cmplx(0d0,1d0,real64)
@@ -474,7 +477,8 @@ contains
     call finalize_with_evidence(bases,union_values,changed_transform,expected_ranks,1,seed_owner,seed_coefficients,0,&
       changed_catalog,preserved_owner,preserved_seed,complete_seed,seed_defect,ok,message)
     call require(ok.and.changed_catalog%fragment_catalog_fingerprint==baseline%fragment_catalog_fingerprint.and.&
-      changed_catalog%complete_map_fingerprint/=baseline%complete_map_fingerprint,&
+      changed_catalog%complete_map_fingerprint/=baseline%complete_map_fingerprint.and.&
+      changed_catalog%complete_transform_binding_fingerprint/=baseline%complete_transform_binding_fingerprint,&
       'dual fingerprints are insensitive to terminal-map payload or couple it into fragment metadata')
 
     changed_bases=bases;allocate(changed_union,source=union_values);allocate(changed_seed,source=seed_coefficients)
@@ -1701,6 +1705,7 @@ contains
       empty_integer(catalog%uncompressed_sectors).and.empty_integer(catalog%uncompressed_generations)
     call require(.not.catalog%valid.and.catalog%uncompressed_rank==0.and.catalog%complete_rank==0.and.&
       catalog%fragment_catalog_fingerprint==0_int64.and.catalog%complete_map_fingerprint==0_int64.and.&
+      catalog%complete_transform_binding_fingerprint==0_int64.and.&
       empty_fragments.and.empty_map.and.empty_ids.and.empty_tuples.and.&
       empty_integer(preserved_owner).and.&
       empty_complex(preserved_seed_coefficients).and.empty_complex(complete_seed_coefficients).and.seed_defect==0d0,label)
@@ -1723,6 +1728,7 @@ contains
       empty_integer(catalog%uncompressed_sectors).and.empty_integer(catalog%uncompressed_generations)
     unpublished=.not.catalog%valid.and.catalog%uncompressed_rank==0.and.catalog%complete_rank==0.and.&
       catalog%fragment_catalog_fingerprint==0_int64.and.catalog%complete_map_fingerprint==0_int64.and.&
+      catalog%complete_transform_binding_fingerprint==0_int64.and.&
       empty_fragments.and.empty_map.and.empty_ids.and.empty_tuples.and.empty_integer(preserved_owner).and.&
       empty_complex(preserved_seed_coefficients).and.empty_complex(complete_seed_coefficients).and.seed_defect==0d0
   end function catalog_outputs_unpublished

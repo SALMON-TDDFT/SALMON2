@@ -1426,7 +1426,7 @@ contains
     integer(8)::divided_pw_fingerprint,divided_buffer_window_fingerprint,divided_fragment_fingerprint,&
       divided_lcfo_peak_elements,divided_lcfo_operator_fingerprint,divided_state_workspace,&
       divided_state_fingerprint,divided_final_solver_workspace,divided_final_solver_fingerprint,&
-      divided_selection_fingerprint
+      divided_selection_fingerprint,divided_fixed_payload_fingerprint
     real(8)::condition_number,closure_residual,spread_max,gauge_correction
     real(8)::adapted_occupied_trace,adapted_occupied_closure,adapted_occupied_gamma_defect,&
       translation_adapted_trace,translation_adapted_closure,translation_adapted_gamma_defect,&
@@ -3420,7 +3420,8 @@ contains
       dg_dc_gs_final_orbital_tolerance,10d0*dg_dc_gs_final_orbital_tolerance,&
       dg_dc_gs_electron_count_tolerance,1d0/dg_dc_metric_rank_tolerance,dg_ow_symmetry_tolerance],&
       ow_checkpoint,reusable,ok,message)
-    if(ok.and.reusable.and.yn_dg_hybrid_scf/='y'.and.yn_dg_hybrid_continuation_scf/='y')then
+    if(ok.and.reusable.and.yn_dg_hybrid_scf/='y'.and.yn_dg_hybrid_continuation_scf/='y'.and.&
+        yn_dg_hybrid_divided_scf/='y')then
       call restore_ow_checkpoint_density(ow_checkpoint,ok,message)
       if(.not.ok)error stop 'overlapping-Wannier checkpoint density restore failed'
       if(rank==0)write(*,'(a)')'[OW-GS] reused accepted route checkpoint'
@@ -3499,7 +3500,6 @@ contains
         divided_initial_density(p)=ow_hybrid_divided_total_density(ix,iy,iz)
       enddo
       allocate(divided_lcfo_row_ids,source=divided_fragment_basis%global_ids)
-      if(yn_dg_hybrid_continuation_scf=='y')then
         allocate(divided_fragment_bases(dc%n_frag))
         do p=1,dc%n_frag
           allocate(divided_fragment_bases(p)%global_ids(0),divided_fragment_bases(p)%sector(0),&
@@ -3580,6 +3580,15 @@ contains
           divided_buffer_window_fingerprint,dg_hybrid_fixed_payload,ok,message)
         if(.not.ok)write(0,'(a)')trim(message)
         if(.not.ok)error stop 'divided Hybrid fixed variational payload freeze failed'
+        if(.not.dg_hybrid_fixed_payload%frozen.or.dg_hybrid_fixed_payload%fingerprint==0_8)&
+          error stop 'divided Hybrid shared variational payload fingerprint is invalid'
+        divided_fixed_payload_fingerprint=dg_hybrid_fixed_payload%fingerprint
+        if(rank==0)write(*,'(a,i0)')'[HYBRID-SHARED-VARIATIONAL-PAYLOAD] fingerprint=',&
+          divided_fixed_payload_fingerprint
+      if(yn_dg_hybrid_continuation_scf=='y')then
+        if(divided_fixed_payload_fingerprint==0_8.or.&
+          divided_fixed_payload_fingerprint/=dg_hybrid_fixed_payload%fingerprint)&
+          error stop 'DG continuation shared variational payload fingerprint changed'
         call build_dg_hybrid_retained_basis_representation(dc%icomm_tot,int(expected_core_count),&
           ow_core_ids,ow_core_weights,ow_pencil_generator_maps,divided_fragment_basis,&
           divided_lcfo_row_ids,divided_lcfo_srows,dg_ow_symmetry_tolerance,&
@@ -3621,6 +3630,9 @@ contains
           dg_hybrid_final_hamiltonian_rows)
         return
       else
+        if(divided_fixed_payload_fingerprint==0_8.or.&
+          divided_fixed_payload_fingerprint/=dg_hybrid_fixed_payload%fingerprint)&
+          error stop 'divided Hybrid shared variational payload fingerprint changed'
         call run_dg_hybrid_divided_scf(dc%icomm_tot,int(expected_core_count),ow_core_ids,&
           divided_initial_density,dc%system_tot%hvol,&
           ow_hybrid_divided_convergence,ow_hybrid_divided_threshold,&

@@ -27,7 +27,8 @@ module dg_hybrid_wannier_complement
   public::project_dg_hybrid_wannier_complement,compute_dg_hybrid_wannier_projection_tile,&
     materialize_dg_hybrid_projected_pw_tile,prepare_dg_hybrid_generalized_wannier_metric,&
     apply_dg_hybrid_generalized_wannier_projection_tile,&
-    compute_dg_hybrid_generalized_wannier_projection_tile,build_dg_hybrid_complete_union_map
+    compute_dg_hybrid_generalized_wannier_projection_tile,build_dg_hybrid_complete_union_map,&
+    compute_dg_hybrid_union_to_complete_binding
   interface
     subroutine zheev(jobz,uplo,n,a,lda,w,work,lwork,rwork,info)
       import::real64
@@ -41,6 +42,84 @@ module dg_hybrid_wannier_complement
     end subroutine zheev
   end interface
 contains
+  subroutine compute_dg_hybrid_union_to_complete_binding(comm,union_to_complete,&
+      complete_map_fingerprint,metric_tolerance,binding_fingerprint,ok,message)
+    integer,intent(in)::comm
+    complex(real64),intent(in)::union_to_complete(:,:)
+    integer(int64),intent(in)::complete_map_fingerprint
+    real(real64),intent(in)::metric_tolerance
+    integer(int64),intent(out)::binding_fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::i,j,ierr,local_bad,global_bad,matrix_shape(2),minimum_shape(2),maximum_shape(2)
+    integer(int64)::candidate,minimum_candidate,maximum_candidate,minimum_map,maximum_map,bits,position,&
+      tolerance_bits,minimum_tolerance_bits,maximum_tolerance_bits
+
+    ok=.false.;message='';binding_fingerprint=0_int64;local_bad=0
+    matrix_shape=shape(union_to_complete)
+    call MPI_Allreduce(matrix_shape,minimum_shape,2,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(matrix_shape,maximum_shape,2,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='terminal transform binding shape agreement failed';return;endif
+    if(any(minimum_shape/=maximum_shape).or.any(matrix_shape<1))local_bad=1
+    if(.not.finite_complex(union_to_complete))local_bad=1
+    if(complete_map_fingerprint==0_int64.or..not.ieee_is_finite(metric_tolerance).or.&
+        metric_tolerance<=0d0)local_bad=1
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='invalid terminal transform binding inputs';return
+    endif
+    call MPI_Allreduce(complete_map_fingerprint,minimum_map,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(complete_map_fingerprint,maximum_map,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    tolerance_bits=transfer(metric_tolerance,tolerance_bits)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(tolerance_bits,minimum_tolerance_bits,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(tolerance_bits,maximum_tolerance_bits,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='terminal transform binding provenance agreement failed';return;endif
+    if(minimum_map/=maximum_map.or.minimum_tolerance_bits/=maximum_tolerance_bits)then
+      message='terminal transform binding provenance differs between ranks';return
+    endif
+
+    candidate=int(z'D6E8FEB86659FD93',int64)
+    call mix_terminal_binding_word(candidate,int(z'4447485954425431',int64),1_int64)
+    call mix_terminal_binding_word(candidate,complete_map_fingerprint,2_int64)
+    call mix_terminal_binding_word(candidate,int(matrix_shape(1),int64),3_int64)
+    call mix_terminal_binding_word(candidate,int(matrix_shape(2),int64),4_int64)
+    call mix_terminal_binding_word(candidate,tolerance_bits,5_int64)
+    position=0_int64
+    do j=1,matrix_shape(2);do i=1,matrix_shape(1)
+      position=position+1_int64
+      call mix_terminal_binding_word(candidate,position,ieor(ishftc(position,1),6_int64))
+      bits=transfer(real(union_to_complete(i,j),real64),bits)
+      call mix_terminal_binding_word(candidate,bits,ieor(ishftc(position,1),7_int64))
+      bits=transfer(aimag(union_to_complete(i,j)),bits)
+      call mix_terminal_binding_word(candidate,bits,ieor(ishftc(position,1),8_int64))
+    enddo;enddo
+    if(candidate==0_int64)candidate=int(z'243F6A8885A308D3',int64)
+    call MPI_Allreduce(candidate,minimum_candidate,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(candidate,maximum_candidate,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='terminal transform binding agreement failed';return;endif
+    if(minimum_candidate/=maximum_candidate)then
+      message='terminal transform binding payload differs between ranks';return
+    endif
+    binding_fingerprint=minimum_candidate;ok=.true.;message=''
+#else
+    ok=.false.;message='terminal transform binding requires MPI';binding_fingerprint=0_int64
+#endif
+  end subroutine compute_dg_hybrid_union_to_complete_binding
+
+  pure subroutine mix_terminal_binding_word(hash,word,tag)
+    integer(int64),intent(inout)::hash
+    integer(int64),intent(in)::word,tag
+    integer(int64)::mixed,cross_bits
+    integer::shift
+    mixed=ieor(word,ishftc(word,23));mixed=ieor(mixed,ishftc(tag,37))
+    shift=1+int(modulo(ieor(mixed,ishftc(tag,11)),63_int64))
+    hash=ieor(ishftc(hash,shift),mixed)
+    cross_bits=iand(ishftc(hash,17),ishftc(mixed,41));hash=ieor(hash,cross_bits)
+    cross_bits=iand(not(ishftc(hash,7)),ishftc(mixed,29));hash=ieor(hash,cross_bits)
+    hash=ieor(hash,int(z'13198A2E03707344',int64))
+  end subroutine mix_terminal_binding_word
+
   subroutine materialize_dg_hybrid_projected_pw_tile(wannier_buffer,raw_pw_buffer,projection_coefficients,&
       projected_pw_buffer,ok,message)
     complex(real64),intent(in)::wannier_buffer(:,:),raw_pw_buffer(:,:),projection_coefficients(:,:)
