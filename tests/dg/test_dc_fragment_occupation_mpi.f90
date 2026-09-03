@@ -4,9 +4,11 @@ program test_dc_fragment_occupation_mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   use occupation_kernel,only:solve_weighted_state_occupations
-  use dc_fragment_occupation,only:determine_dc_fragment_occupations,assess_dc_fragment_occupation_capacity
+  use dc_fragment_occupation,only:determine_dc_fragment_occupations,assess_dc_fragment_occupation_capacity,&
+    run_dc_fragment_occupation_epoch
   implicit none
   integer::comm,rank,nproc,ierr,fragment
+  integer::epoch_fragment,epoch_fragments,epoch_count,epoch_extensions,epoch_refreshes,epoch_case
   integer(int64)::fingerprint,minimum_fingerprint,maximum_fingerprint
   real(real64),allocatable::energies(:,:),core_norms(:,:),occupations(:,:),flat_occupations(:)
   real(real64)::chemical_potential,electron_count,direct_mu,direct_count
@@ -20,6 +22,7 @@ program test_dc_fragment_occupation_mpi
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
   allocate(energies(2,2),core_norms(2,2),representative_mask(2))
   call test_unordered_spectrum()
+  call test_occupation_epoch()
 
   call distribute_two_fragment_case(&
     reshape([-1d0,0.5d0,-0.5d0,1d0],[2,2]),&
@@ -226,6 +229,71 @@ program test_dc_fragment_occupation_mpi
   endif
   call MPI_Finalize(ierr)
 contains
+  subroutine test_occupation_epoch()
+    real(real64),allocatable::local_occupations(:)
+    real(real64)::mu,ne,target,smearing
+    integer::passes,extensions,c
+    epoch_fragments=min(2,nproc);epoch_fragment=mod(rank,epoch_fragments)+1
+    do c=1,8
+      if(c==6.and.nproc<=epoch_fragments)cycle
+      epoch_case=c;epoch_count=1;epoch_extensions=0;epoch_refreshes=0
+      target=1.5d0*epoch_fragments
+      smearing=0d0;if(c==8)smearing=0.05d0
+      if(c==2)then;epoch_count=2;target=2d0;endif
+      if(c==7)target=0.5d0*epoch_fragments
+      call run_dc_fragment_occupation_epoch(comm,epoch_fragments,epoch_fragment,rank<epoch_fragments,7,6,&
+        smearing,2d0,target,1d-8,refresh_epoch_spectrum,extend_epoch_spectrum,local_occupations,mu,ne,&
+        passes,extensions,ok,message)
+      if(c<=2.or.c==8)then
+        call require(ok,'occupation epoch failed: '//trim(message))
+        call require(abs(ne-target)<1d-8,'occupation epoch electron count mismatch')
+        if(c==1.or.c==8)then
+          call require(passes==3.and.extensions==2.and.epoch_count==5,&
+            'capacity and terminal-tail passes were not both executed')
+          call require(maxval(abs(local_occupations-[2d0,2d0,2d0,0d0,0d0]))<1d-8,&
+            'occupation epoch returned wrong coefficient occupations')
+        else
+          call require(passes==2.and.extensions==merge(1,0,epoch_fragment==1),&
+            'tail-only extension was not restricted to the requested fragment')
+        endif
+      else
+        call require(.not.ok.and..not.allocated(local_occupations),'failed occupation epoch published occupations')
+        if(c==7)call require(index(message,'tail')>0,'occupied terminal exhaustion lacked a tail diagnostic')
+      endif
+    enddo
+  end subroutine
+
+  subroutine refresh_epoch_spectrum(epoch,values,weights,can_grow,valid,diagnostic)
+    integer,intent(in)::epoch
+    real(real64),allocatable,intent(out)::values(:),weights(:)
+    logical,intent(out)::can_grow,valid
+    character(*),intent(out)::diagnostic
+    epoch_refreshes=epoch_refreshes+1;valid=epoch==7;diagnostic='fixture refresh failed'
+    if(epoch_case==4.and.rank==0)valid=.false.
+    if(.not.valid)return
+    allocate(values(epoch_count),weights(epoch_count));weights=0.25d0
+    values=-1d0;values(1)=-2d0
+    if(epoch_count>3)values(4:)=3d0
+    if(epoch_case==2)then
+      weights=0.5d0;values=5d0
+      if(epoch_fragment==1)then;values(:2)=-2d0
+      else;values(1)=-1d0;endif
+    endif
+    if(epoch_case==6.and.rank>=epoch_fragments)values(1)=values(1)+0.1d0
+    can_grow=epoch_count<6.and.epoch_case/=5.and.epoch_case/=7;diagnostic=''
+  end subroutine
+
+  subroutine extend_epoch_spectrum(epoch,old_count,new_count,valid,diagnostic)
+    integer,intent(in)::epoch,old_count
+    integer,intent(out)::new_count
+    logical,intent(out)::valid
+    character(*),intent(out)::diagnostic
+    valid=epoch==7.and.old_count==epoch_count;diagnostic='fixture extension mismatch'
+    new_count=old_count
+    if(.not.valid)return
+    if(epoch_case/=3)epoch_count=epoch_count+2
+    new_count=epoch_count;epoch_extensions=epoch_extensions+1;diagnostic=''
+  end subroutine
   subroutine test_unordered_spectrum()
     real(real64)::e(4,2),w(4,2),saved_e(4,2),saved_w(4,2),expected(4,2)
     real(real64),allocatable::answer(:,:),direct(:)

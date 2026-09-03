@@ -3,7 +3,7 @@ program test_dg_hybrid_fragment_subspace_mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   use dg_hybrid_fragment_subspace
-  use dc_fragment_occupation,only:determine_dc_fragment_occupations
+  use dc_fragment_occupation,only:determine_dc_fragment_occupations,run_dc_fragment_occupation_epoch
   implicit none
   integer,parameter::n=24,m=2
   integer::comm,rank,nproc,ierr,nlocal,i,j,k,row,iterations,precondition_calls,maximum_trial,mode
@@ -19,6 +19,10 @@ program test_dg_hybrid_fragment_subspace_mpi
   real(real64)::first_shifts(m)
   integer::shifted_calls
   logical::shifts_changed
+  type(s_dg_hybrid_fragment_epoch_budget)::occupation_budget
+  type(s_dg_hybrid_fragment_subspace_state)::occupation_state
+  type(s_dg_hybrid_fragment_candidate_catalog)::occupation_catalog
+  integer::occupation_steps
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
   ! The eight-rank run includes four ranks with no local rows.
@@ -125,6 +129,7 @@ program test_dg_hybrid_fragment_subspace_mpi
   call test_measurement_only()
   call test_seed_initialization()
   call test_epoch_budget()
+  call test_budgeted_occupation_loop()
   call test_growth_rollback()
   call test_extension()
   call test_metric_publication()
@@ -141,6 +146,61 @@ program test_dg_hybrid_fragment_subspace_mpi
   endif
   call MPI_Finalize(ierr)
 contains
+  subroutine test_budgeted_occupation_loop()
+    real(real64),allocatable::occ(:)
+    real(real64)::mu,ne
+    integer::a,b,passes,extensions
+    occupation_state=warm;occupation_steps=0;mode=0
+    occupation_catalog%fragment_id=7;occupation_catalog%basis_generation=2
+    occupation_catalog%basis_fingerprint=101_int64;occupation_catalog%metric_fingerprint=203_int64
+    allocate(occupation_catalog%coefficients(nlocal,2),occupation_catalog%energies(2),&
+      occupation_catalog%ids(2),occupation_catalog%source_kind(2),occupation_catalog%used(2))
+    occupation_catalog%coefficients=0d0;occupation_catalog%energies=0.6d0
+    occupation_catalog%ids=[1_int64,2_int64];occupation_catalog%source_kind=fragment_seed
+    occupation_catalog%used=.false.
+    do a=1,nlocal
+      b=int(ids(a))
+      if(b==3.or.b==4)occupation_catalog%coefficients(a,b-2)=1d0
+    enddo
+    call run_dc_fragment_occupation_epoch(comm,1,1,rank==0,11,n,0d0,2d0,1.5d0,1d-8,&
+      refresh_budgeted_occupation,extend_budgeted_occupation,occ,mu,ne,passes,extensions,ok,message)
+    call require(ok,'bounded occupation loop failed: '//trim(message))
+    call require(passes==2.and.extensions==1.and.occupation_state%state_count==4,&
+      'bounded occupation loop did not extend the invariant shell')
+    call require(occupation_steps==3,'occupation extension reset the outer CG budget')
+    call require(abs(ne-1.5d0)<1d-8.and.abs(sum(occ)*0.25d0-ne)<1d-8,&
+      'bounded occupation loop changed represented electron count')
+  end subroutine
+
+  subroutine refresh_budgeted_occupation(epoch,energy,weights,can_grow,valid,diagnostic)
+    integer,intent(in)::epoch
+    real(real64),allocatable,intent(out)::energy(:),weights(:)
+    logical,intent(out)::can_grow,valid
+    character(*),intent(out)::diagnostic
+    integer::remaining,steps
+    allocate(energy(occupation_state%state_count),weights(occupation_state%state_count))
+    call advance_dg_hybrid_fragment_epoch(comm,n,ids,7,2,101_int64,203_int64,epoch,3,&
+      apply_h,apply_s,fixture_shifted_identity,1d-14,1d-10,2d0,occupation_budget,occupation_state,&
+      energy,steps,remaining,relative_residual,converged,advanced,reason,workspace,fingerprint,valid,diagnostic)
+    occupation_steps=occupation_steps+steps
+    ! Fixture core form is S/4, so every S-normalized column has core norm 1/4.
+    weights=0.25d0;can_grow=.not.all(occupation_catalog%used)
+  end subroutine
+
+  subroutine extend_budgeted_occupation(epoch,old_count,new_count,valid,diagnostic)
+    integer,intent(in)::epoch,old_count
+    integer,intent(out)::new_count
+    logical,intent(out)::valid
+    character(*),intent(out)::diagnostic
+    type(s_dg_hybrid_fragment_extension_receipt)::receipt
+    valid=epoch==11.and.old_count==occupation_state%state_count
+    diagnostic='bounded occupation extension contract mismatch';new_count=old_count
+    if(.not.valid)return
+    call extend_dg_hybrid_fragment_subspace(comm,n,ids,7,2,101_int64,203_int64,&
+      apply_h,apply_s,1d-10,1d-10,occupation_catalog,occupation_state,receipt,valid,diagnostic)
+    new_count=occupation_state%state_count
+  end subroutine
+
   subroutine test_epoch_budget()
     type(s_dg_hybrid_fragment_epoch_budget)::budget,failed_budget,early_budget
     type(s_dg_hybrid_fragment_subspace_state)::saved,extended,extended_saved

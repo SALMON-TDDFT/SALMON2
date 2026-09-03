@@ -6,7 +6,184 @@ module dc_fragment_occupation
   implicit none
   private
   public::determine_dc_fragment_occupations,assess_dc_fragment_occupation_capacity
+  public::run_dc_fragment_occupation_epoch
+  abstract interface
+    subroutine refresh_fragment_spectrum(epoch,energies,core_weights,can_extend,ok,message)
+      import real64
+      integer,intent(in)::epoch
+      real(real64),allocatable,intent(out)::energies(:),core_weights(:)
+      logical,intent(out)::can_extend,ok
+      character(*),intent(out)::message
+    end subroutine
+    subroutine extend_fragment_spectrum(epoch,old_count,new_count,ok,message)
+      integer,intent(in)::epoch,old_count
+      integer,intent(out)::new_count
+      logical,intent(out)::ok
+      character(*),intent(out)::message
+    end subroutine
+  end interface
 contains
+  subroutine run_dc_fragment_occupation_epoch(comm,fragment_count,fragment_id,representative,epoch,basis_count,&
+      temperature,wspin,expected_electrons,tolerance,refresh,extend,occupations,chemical_potential,electron_count,&
+      passes,extensions,ok,message)
+    ! One fragment per rank, with arbitrary ranks per fragment. Callbacks use
+    ! their fragment communicator. Every pass retains the same outer epoch;
+    ! refresh must use its persistent bounded-update budget, never reset it.
+    integer,intent(in)::comm,fragment_count,fragment_id,epoch,basis_count
+    logical,intent(in)::representative
+    real(real64),intent(in)::temperature,wspin,expected_electrons,tolerance
+    procedure(refresh_fragment_spectrum)::refresh
+    procedure(extend_fragment_spectrum)::extend
+    real(real64),allocatable,intent(out)::occupations(:)
+    real(real64),intent(out)::chemical_potential,electron_count
+    integer,intent(out)::passes,extensions
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    real(real64),allocatable::values(:),weights(:),energy_table(:,:),weight_table(:,:),all_occupations(:,:)
+    real(real64)::controls(4),lo(4),hi(4),mu,ne,scale
+    integer::ints(2),imin(2),imax(2),ns,nmax,expected_count,new_count,stat,ierr,nproc
+    integer,allocatable::representatives(:),metadata(:,:),metadata_min(:,:),metadata_max(:,:)
+    logical,allocatable::mask(:),can_grow(:),needs_extension(:)
+    logical::valid,extendable,sufficient
+    character(512)::diagnostic
+    ok=.false.;message='';chemical_potential=0d0;electron_count=0d0;passes=0;extensions=0
+    ints=[fragment_count,epoch]
+    call MPI_Allreduce(ints,imin,2,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(ints,imax,2,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    call MPI_Comm_size(comm,nproc,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    valid=all(imin==imax).and.fragment_count>0.and.epoch>0.and.fragment_id>=1.and.&
+      fragment_id<=fragment_count.and.basis_count>0.and.fragment_count<=nproc.and.fragment_count<=huge(0)/3
+    controls=[temperature,wspin,expected_electrons,tolerance]
+    call epoch_status(comm,valid.and.all(ieee_is_finite(controls)),&
+      'invalid occupation epoch controls',ok,message)
+    if(.not.ok)return
+    call MPI_Allreduce(controls,lo,4,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;ok=.false.;return;endif
+    call MPI_Allreduce(controls,hi,4,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    valid=ierr==MPI_SUCCESS.and.all(lo==hi).and.temperature>=0d0.and.wspin>0d0.and.&
+      expected_electrons>=0d0.and.tolerance>0d0
+    call epoch_status(comm,valid,'rank-disagreeing occupation epoch controls',ok,message)
+    if(.not.ok)return
+    allocate(representatives(fragment_count),metadata(3,fragment_count),metadata_min(3,fragment_count),&
+      metadata_max(3,fragment_count),mask(fragment_count),can_grow(fragment_count),&
+      needs_extension(fragment_count),stat=stat)
+    call epoch_status(comm,stat==0,'cannot allocate occupation epoch directory',ok,message)
+    if(.not.ok)return
+    representatives=0;mask=.false.
+    if(representative)then;representatives(fragment_id)=1;mask(fragment_id)=.true.;endif
+    call MPI_Allreduce(MPI_IN_PLACE,representatives,fragment_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    call epoch_status(comm,ierr==MPI_SUCCESS.and.all(representatives==1),&
+      'occupation epoch requires exactly one representative per fragment',ok,message)
+    if(.not.ok)return
+    expected_count=0
+    do
+      call refresh(epoch,values,weights,extendable,valid,diagnostic)
+      call epoch_status(comm,valid,diagnostic,ok,message)
+      if(.not.ok)return
+      call epoch_status(comm,allocated(values).and.allocated(weights),&
+        'fragment refresh did not publish a spectrum',ok,message)
+      if(.not.ok)return
+      ns=size(values)
+      valid=ns>0.and.ns<=basis_count.and.size(weights)==ns
+      if(expected_count>0)valid=valid.and.ns==expected_count
+      call epoch_status(comm,valid,'fragment refresh changed the expected state inventory',ok,message)
+      if(.not.ok)return
+      valid=all(ieee_is_finite(values)).and.all(ieee_is_finite(weights))
+      call epoch_status(comm,valid,'nonfinite refreshed fragment spectrum',ok,message)
+      if(.not.ok)return
+      call epoch_status(comm,all(weights>=0d0),'negative refreshed core weight',ok,message)
+      if(.not.ok)return
+      metadata=huge(0);metadata(:,fragment_id)=[ns,basis_count,merge(1,0,extendable)]
+      call MPI_Allreduce(metadata,metadata_min,3*fragment_count,MPI_INTEGER,MPI_MIN,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;ok=.false.;return;endif
+      metadata=0;metadata(:,fragment_id)=[ns,basis_count,merge(1,0,extendable)]
+      call MPI_Allreduce(metadata,metadata_max,3*fragment_count,MPI_INTEGER,MPI_MAX,comm,ierr)
+      call epoch_status(comm,ierr==MPI_SUCCESS.and.all(metadata_min==metadata_max),&
+        'fragment ranks disagree on refreshed inventory',ok,message)
+      if(.not.ok)return
+      nmax=maxval(metadata_max(1,:));can_grow=metadata_max(3,:)==1
+      can_grow=can_grow.and.metadata_max(1,:)<metadata_max(2,:)
+      call epoch_status(comm,int(nmax,int64)*fragment_count<=int(huge(0),int64),&
+        'occupation epoch table exceeds MPI extent',ok,message)
+      if(.not.ok)return
+      if(allocated(energy_table))deallocate(energy_table,weight_table)
+      allocate(energy_table(nmax,fragment_count),weight_table(nmax,fragment_count),stat=stat)
+      call epoch_status(comm,stat==0,'cannot allocate occupation epoch tables',ok,message)
+      if(.not.ok)return
+      energy_table=0d0;weight_table=0d0
+      if(representative)then
+        energy_table(:,fragment_id)=maxval(values)
+        energy_table(:ns,fragment_id)=values;weight_table(:ns,fragment_id)=weights
+      endif
+      call MPI_Allreduce(MPI_IN_PLACE,energy_table,nmax*fragment_count,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;ok=.false.;return;endif
+      call MPI_Allreduce(MPI_IN_PLACE,weight_table,nmax*fragment_count,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+      scale=max(1d0,maxval(abs(values)),maxval(abs(energy_table(:ns,fragment_id))))
+      valid=ierr==MPI_SUCCESS.and.maxval(abs(values/scale-energy_table(:ns,fragment_id)/scale))<=4096d0*epsilon(1d0)
+      scale=max(1d0,maxval(weights),maxval(weight_table(:ns,fragment_id)))
+      valid=valid.and.maxval(abs(weights/scale-weight_table(:ns,fragment_id)/scale))<=4096d0*epsilon(1d0)
+      call epoch_status(comm,valid,'fragment ranks disagree on spectrum or core weights',ok,message)
+      if(.not.ok)return
+      call assess_dc_fragment_occupation_capacity(comm,weight_table,mask,can_grow,wspin,expected_electrons,&
+        tolerance,sufficient,needs_extension,ok,message)
+      if(.not.ok)return
+      if(passes==huge(passes))then;ok=.false.;message='occupation epoch pass count overflow';return;endif
+      passes=passes+1
+      if(sufficient)then
+        call determine_dc_fragment_occupations(comm,energy_table,weight_table,mask,temperature,wspin,&
+          expected_electrons,tolerance,mu,all_occupations,ne,ok,message,needs_extension,allow_unordered=.true.)
+        if(.not.ok)return
+        if(.not.any(needs_extension))then
+          allocate(occupations(ns),stat=stat)
+          call epoch_status(comm,stat==0,'cannot publish fragment occupations',ok,message)
+          if(.not.ok)then
+            if(allocated(occupations))deallocate(occupations)
+            return
+          endif
+          occupations=all_occupations(:ns,fragment_id);chemical_potential=mu;electron_count=ne
+          return
+        endif
+      endif
+      call epoch_status(comm,.not.any(needs_extension.and..not.can_grow),&
+        'insufficient-spectrum tail: requested fragment is exhausted',ok,message)
+      if(.not.ok)return
+      expected_count=ns;valid=.true.;diagnostic=''
+      if(needs_extension(fragment_id))then
+        call extend(epoch,ns,new_count,valid,diagnostic)
+        if(valid)then
+          valid=new_count>ns.and.new_count<=basis_count
+          if(.not.valid)diagnostic='fragment extension did not grow within its basis rank'
+        endif
+        if(valid)then;expected_count=new_count;extensions=extensions+1;endif
+      endif
+      call epoch_status(comm,valid,diagnostic,ok,message)
+      if(.not.ok)return
+    enddo
+  end subroutine run_dc_fragment_occupation_epoch
+
+  subroutine epoch_status(comm,local_ok,local_message,ok,message)
+    integer,intent(in)::comm
+    logical,intent(in)::local_ok
+    character(*),intent(in)::local_message
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::rank,ierr,failed,first_failed
+    character(512)::diagnostic
+    call MPI_Comm_rank(comm,rank,ierr)
+    failed=huge(0);if(.not.local_ok)failed=rank
+    call MPI_Allreduce(failed,first_failed,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    ok=ierr==MPI_SUCCESS.and.first_failed==huge(0);message=''
+    if(ok)return
+    if(ierr/=MPI_SUCCESS)then;message='occupation epoch status reduction failed';return;endif
+    diagnostic=''
+    if(rank==first_failed)diagnostic=local_message
+    call MPI_Bcast(diagnostic,len(diagnostic),MPI_CHARACTER,first_failed,comm,ierr)
+    message=trim(diagnostic)
+  end subroutine epoch_status
+
   subroutine assess_dc_fragment_occupation_capacity(comm,core_norms,representative_mask,can_extend,&
       wspin,expected_electrons,tolerance,capacity_sufficient,needs_extension,ok,message)
     integer,intent(in)::comm

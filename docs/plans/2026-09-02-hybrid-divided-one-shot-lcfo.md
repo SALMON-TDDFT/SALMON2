@@ -1079,6 +1079,32 @@ controls and LCFO route source checks passed (these do not yet certify the
 new Task 8 production route). The release build completed successfully.
 Read-only review found no Critical/Important issues.
 
+**Occupation-loop checkpoint, 2026-09-04 (Task 8 remains incomplete):**
+`run_dc_fragment_occupation_epoch` connects refresh, represented-capacity
+preflight, common occupations, terminal-tail masks and invariant-shell
+extension. All passes receive the same outer epoch. Capacity shortage extends
+every non-exhausted fragment; otherwise only tail-marked fragments extend.
+Callbacks must grow the state count within the fixed basis rank, and the next
+refresh must match the reported count. A persistent budget remains owned by
+each fragment callback, so the controller cannot replenish it on an extension
+pass. The final occupation vector is published in local coefficient-column
+order only after all tails clear. Exhausted tails, non-progress, callback
+failure and rank-disagreeing fragment inventories/data fail collectively.
+This driver requires one fragment per rank, permits multiple ranks per
+fragment, and requires exactly one representative per fragment.
+
+Tests cover capacity then tail extension, selective fragment extension,
+zero/finite temperature, failure/exhaustion, and representative-data mismatch.
+The real bounded updater plus real two-to-four-state shell extension is
+connected in the subspace fixture: two occupation passes consume exactly
+three CG updates in total. Occupation tests pass on 1/2/4 ranks; bounded
+subspace and core-weight fixtures pass on 1/2/4/8; divided SCF passes on
+1/2/4; the release build passes. Review found no Critical/Important issues;
+its metadata extent-bound suggestion was incorporated.
+Production main still needs the direct seed/Wannier/catalog construction and
+concrete H/S/preconditioner/density callback wiring. This checkpoint does not
+claim that the old main route has been replaced, and does not start Si64.
+
 **Files:**
 
 - Modify: `src/io/salmon_global.f90:480-545`
