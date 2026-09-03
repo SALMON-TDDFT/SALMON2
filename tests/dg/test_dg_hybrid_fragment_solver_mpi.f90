@@ -5,7 +5,8 @@ program test_dg_hybrid_fragment_solver_mpi
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis,build_dg_hybrid_fragment_basis
   use dg_hybrid_fragment_solver,only:solve_dg_hybrid_fragment_basis,&
-    solve_dg_hybrid_fragment_spectrum,reconstruct_dg_hybrid_fragment_density
+    solve_dg_hybrid_fragment_spectrum,reconstruct_dg_hybrid_fragment_density,measure_dg_hybrid_fragment_core_norms
+  use dc_fragment_occupation,only:assess_dc_fragment_occupation_capacity,determine_dc_fragment_occupations
   implicit none
   integer,parameter::npoint=4,nbasis=4,nstate=2
   integer::comm,rank,nproc,ierr,nowned,i,j,k,h_calls,s_calls
@@ -86,6 +87,7 @@ program test_dg_hybrid_fragment_solver_mpi
     wrapper_fingerprint==fingerprint,&
     'fragment compatibility wrapper differs from split phases')
   call require(h_calls==2.and.s_calls==2,'compatibility wrapper did not perform exactly one spectrum solve')
+  call test_coefficient_core_norms()
 
   invalid_occupations=occupations;if(rank==0)invalid_occupations(1)=-1d-3
   call reconstruct_dg_hybrid_fragment_density(comm,basis,coefficients,invalid_occupations,2d0,core_mask,&
@@ -176,6 +178,49 @@ program test_dg_hybrid_fragment_solver_mpi
   if(rank==0)write(*,'(a,i0,a)')'PASS hybrid fragment solver on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
+  subroutine test_coefficient_core_norms()
+    complex(real64)::rotated(size(coefficients,1),nstate),saved(size(coefficients,1),nstate)
+    real(real64),allocatable::measured_norms(:)
+    real(real64),allocatable::current_occupations(:,:)
+    real(real64)::measured_density(npoint),measured_count
+    real(real64)::mu,occupation_count
+    logical::sufficient,needs_extension(1)
+    integer::saved_h,saved_s
+    saved_h=h_calls;saved_s=s_calls
+    rotated(:,1)=0.8d0*coefficients(:,1)+cmplx(0d0,0.6d0,real64)*coefficients(:,2)
+    rotated(:,2)=cmplx(0d0,0.6d0,real64)*coefficients(:,1)+0.8d0*coefficients(:,2)
+    saved=rotated
+    call measure_dg_hybrid_fragment_core_norms(comm,basis,rotated,core_mask,point_weights,measured_norms,ok,message)
+    call require(ok,'current-coefficient core measurement failed: '//trim(message))
+    call require(maxval(abs(measured_norms-[0.57d0,0.43d0]))<1d-12,&
+      'core measurement reused old eigenstates or included buffer weight')
+    call require(all(rotated==saved),'core measurement changed coefficient columns')
+    call reconstruct_dg_hybrid_fragment_density(comm,basis,rotated,occupations,2d0,core_mask,&
+      point_weights,measured_density,measured_count,ok,message)
+    call require(ok.and.abs(measured_count-dot_product(occupations,measured_norms))<1d-12,&
+      'current-coefficient core weights disagree with reconstructed density')
+    call assess_dc_fragment_occupation_capacity(comm,reshape(measured_norms,[nstate,1]),[rank==0],[.false.],&
+      2d0,0.86d0,1d-10,sufficient,needs_extension,ok,message)
+    call require(ok.and.sufficient.and..not.any(needs_extension),'current coefficient capacity check failed')
+    call determine_dc_fragment_occupations(comm,reshape([2d0,1d0],[nstate,1]),&
+      reshape(measured_norms,[nstate,1]),[rank==0],0d0,2d0,0.86d0,1d-10,mu,current_occupations,&
+      occupation_count,ok,message,needs_extension,allow_unordered=.true.)
+    call require(ok.and..not.any(needs_extension),'measured-state common occupation failed: '//trim(message))
+    call require(maxval(abs(current_occupations(:,1)-[0d0,2d0]))<1d-10,&
+      'unsorted energy/core weights lost coefficient association')
+    call reconstruct_dg_hybrid_fragment_density(comm,basis,rotated,current_occupations(:,1),2d0,&
+      core_mask,point_weights,measured_density,measured_count,ok,message)
+    call require(ok.and.abs(measured_count-0.86d0)<1d-10.and.abs(measured_count-occupation_count)<1d-10,&
+      'core-weight to occupation to density handoff changed electron count')
+    call require(h_calls==saved_h.and.s_calls==saved_s,'core measurement reapplied H/S')
+    if(size(rotated,1)>0)rotated(1,1)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,real64)
+    call measure_dg_hybrid_fragment_core_norms(comm,basis,rotated,core_mask,point_weights,measured_norms,ok,message)
+    call require(.not.ok.and..not.allocated(measured_norms),'invalid coefficients published core weights')
+    rotated=saved
+    if(size(rotated,1)>0)rotated(1,1)=cmplx(huge(1d0),huge(1d0),real64)
+    call measure_dg_hybrid_fragment_core_norms(comm,basis,rotated,core_mask,point_weights,measured_norms,ok,message)
+    call require(.not.ok.and..not.allocated(measured_norms),'overflowing coefficients published core weights')
+  end subroutine test_coefficient_core_norms
   integer(int64) function nstated(value)
     integer,intent(in)::value
     integer(int64),parameter::noncontiguous_ids(nbasis)=[1_int64,3_int64,6_int64,10_int64]

@@ -13,7 +13,7 @@ module dg_hybrid_fragment_solver
     end subroutine fragment_apply
   end interface
   public::solve_dg_hybrid_fragment_basis,solve_dg_hybrid_fragment_spectrum,&
-    reconstruct_dg_hybrid_fragment_density
+    reconstruct_dg_hybrid_fragment_density,measure_dg_hybrid_fragment_core_norms
 contains
   subroutine solve_dg_hybrid_fragment_basis(comm,basis,nstate,occupations,core_mask,point_weights,apply_h,apply_s,tolerance,&
       coefficients,eigenvalues,core_density,core_electron_count,maximum_residual,orthogonality_defect,&
@@ -337,8 +337,62 @@ contains
     real(real64),intent(out)::core_density(:),core_electron_count
     logical,intent(out)::ok
     character(*),intent(out)::message
+    call reconstruct_fragment_density_and_norms(comm,basis,coefficients,occupations,maximum_occupation,&
+      core_mask,point_weights,core_density,core_electron_count,ok,message)
+  end subroutine reconstruct_dg_hybrid_fragment_density
+
+  subroutine measure_dg_hybrid_fragment_core_norms(comm,basis,coefficients,core_mask,point_weights,core_norms,ok,message)
+    ! Current coefficient-column order, including non-eigenstates from bounded
+    ! updates. Shares the density reconstruction/ownership checks; no H/S or solve.
+    integer,intent(in)::comm
+    type(s_dg_hybrid_fragment_basis),intent(in)::basis
+    complex(real64),intent(in)::coefficients(:,:)
+    logical,intent(in)::core_mask(:)
+    real(real64),intent(in)::point_weights(:)
+    real(real64),allocatable,intent(out)::core_norms(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    real(real64),allocatable::zero_occupations(:),density(:),working_norms(:)
+    real(real64)::electron_count
+    integer::stat,bad,ierr
+    logical::halt_invalid,halt_zero,halt_overflow
+    ok=.false.;message='cannot allocate fragment core measurement'
+    allocate(zero_occupations(size(coefficients,2)),density(size(core_mask)),&
+      working_norms(size(coefficients,2)),stat=stat)
+    call collective_allocation_status(comm,stat,bad,ierr)
+    if(ierr/=MPI_SUCCESS.or.bad/=0)return
+    zero_occupations=0d0
+    call ieee_get_halting_mode(ieee_invalid,halt_invalid)
+    call ieee_get_halting_mode(ieee_divide_by_zero,halt_zero)
+    call ieee_get_halting_mode(ieee_overflow,halt_overflow)
+    call ieee_set_halting_mode(ieee_invalid,.false.)
+    call ieee_set_halting_mode(ieee_divide_by_zero,.false.)
+    call ieee_set_halting_mode(ieee_overflow,.false.)
+    call reconstruct_fragment_density_and_norms(comm,basis,coefficients,zero_occupations,1d0,&
+      core_mask,point_weights,density,electron_count,ok,message,working_norms)
+    call ieee_set_flag(ieee_invalid,.false.)
+    call ieee_set_flag(ieee_divide_by_zero,.false.)
+    call ieee_set_flag(ieee_overflow,.false.)
+    call ieee_set_halting_mode(ieee_invalid,halt_invalid)
+    call ieee_set_halting_mode(ieee_divide_by_zero,halt_zero)
+    call ieee_set_halting_mode(ieee_overflow,halt_overflow)
+    if(ok)call move_alloc(working_norms,core_norms)
+  end subroutine measure_dg_hybrid_fragment_core_norms
+
+  subroutine reconstruct_fragment_density_and_norms(comm,basis,coefficients,occupations,maximum_occupation,&
+      core_mask,point_weights,core_density,core_electron_count,ok,message,state_core_norms)
+    integer,intent(in)::comm
+    type(s_dg_hybrid_fragment_basis),intent(in)::basis
+    complex(real64),intent(in)::coefficients(:,:)
+    real(real64),intent(in)::occupations(:),maximum_occupation,point_weights(:)
+    logical,intent(in)::core_mask(:)
+    real(real64),intent(out)::core_density(:),core_electron_count
+    real(real64),optional,intent(out)::state_core_norms(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
     integer::i,j,nstate,nstate_min,nstate_max,nowned,nbasis,npoint,position,rank,ierr,local_bad,global_bad,&
       allocation_status,allocation_bad
+    integer::norm_controls(2),norm_min(2),norm_max(2)
     integer,allocatable::point_order(:)
     integer(int64),allocatable::ordered_ids(:)
     integer(int64)::coefficient_element_count
@@ -349,6 +403,16 @@ contains
       agreement_limit,reference_count,expected_count
 
     ok=.false.;message='';core_electron_count=0d0
+    norm_controls=[merge(1,0,present(state_core_norms)),size(coefficients,2)]
+    if(present(state_core_norms))then
+      state_core_norms=0d0;norm_controls(2)=size(state_core_norms)
+    endif
+    call MPI_Allreduce(norm_controls,norm_min,2,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='fragment core measurement agreement failed';return;endif
+    call MPI_Allreduce(norm_controls,norm_max,2,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(norm_min/=norm_max))then
+      message='fragment density/core measurement phase or extent differs between ranks';return
+    endif
     local_bad=0
     if(.not.allocated(basis%global_ids).or..not.allocated(basis%buffer_point_ids).or.&
         .not.allocated(basis%buffer_values))local_bad=1
@@ -362,6 +426,9 @@ contains
     local_bad=0
     if(nstate<1.or.nstate_min/=nstate_max.or.size(coefficients,1)/=nowned.or.&
         size(coefficients,2)/=nstate.or.size(core_density)/=npoint)local_bad=1
+    if(present(state_core_norms))then
+      if(size(state_core_norms)/=nstate)local_bad=1
+    endif
     if(.not.ieee_is_finite(maximum_occupation))then
       local_bad=1
     elseif(maximum_occupation<=0d0)then
@@ -476,8 +543,9 @@ contains
       message='fragment core density receipt differs between ranks';return
     endif
     core_electron_count=reference_count
+    if(present(state_core_norms))state_core_norms=reference_norms
     ok=.true.;message=''
-  end subroutine reconstruct_dg_hybrid_fragment_density
+  end subroutine reconstruct_fragment_density_and_norms
 
   pure logical function fragment_values_are_finite(values)
     complex(real64),intent(in)::values(:,:)

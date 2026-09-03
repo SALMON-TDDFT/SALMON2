@@ -1053,6 +1053,32 @@ suggestions were addressed: measurement workspace is recorded, and an early
 target leaving three unused steps followed by an extended-state update is
 covered. The workspace regression failed before its fix. No Si64 run.
 
+**Current-coefficient core-weight checkpoint, 2026-09-04 (Task 8 remains
+incomplete):** `measure_dg_hybrid_fragment_core_norms` computes each current
+state's weighted norm only on the core, in coefficient-column order, without
+H/S application or diagonalization. It shares the private reconstruction
+worker with the unchanged public density API, using zero occupations to
+obtain the independent state norms. It retains the existing within-fragment
+replicated point layout and distributed coefficient-row ownership contract;
+the resulting norm vector is replicated, not summed again across those ranks.
+Only the fragment representative contributes it to total-communicator capacity
+and occupation decisions. Invalid/nonfinite or overflowing coefficients do not
+publish a norm vector.
+
+The MPI fixture now covers 1/2/4/8 ranks including zero coefficient-row ranks,
+complex mixed non-eigenstates, buffer exclusion and unchanged coefficients.
+It passes current norms through capacity preflight and unordered common
+occupation determination into density reconstruction, recovering the same
+electron count without another operator application. This closes the missing
+coefficient-to-occupation interface, but the production main callback still
+uses the old spectrum route. Direct fragment-Wannier construction, catalog
+assembly and replacement of that callback remain pending; no Si64 run.
+Verification: fragment solver/core-weight fixture and bounded subspace fixture
+passed on 1/2/4/8 ranks; divided SCF passed on 1/2/4. Existing divided DC
+controls and LCFO route source checks passed (these do not yet certify the
+new Task 8 production route). The release build completed successfully.
+Read-only review found no Critical/Important issues.
+
 **Files:**
 
 - Modify: `src/io/salmon_global.f90:480-545`
