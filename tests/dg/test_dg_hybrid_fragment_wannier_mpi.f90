@@ -40,7 +40,7 @@ program test_dg_hybrid_fragment_wannier_mpi
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   use dg_overlapping_wannier_w90,only:apply_dg_w90_gamma_transform
   use dg_hybrid_fragment_wannier,only:s_dg_hybrid_fragment_wannier_cache,&
-    build_dg_hybrid_fragment_wannier,export_dg_hybrid_fragment_coordinates
+    build_dg_hybrid_fragment_wannier,export_dg_hybrid_fragment_coordinates,pack_dg_hybrid_fragment_dc_seed
   use dg_hybrid_fragment_wannier_test_stubs
   use dg_hybrid_fragment_subspace,only:s_dg_hybrid_fragment_subspace_state,&
     initialize_dg_hybrid_fragment_subspace
@@ -89,6 +89,7 @@ program test_dg_hybrid_fragment_wannier_mpi
   allocate(dc_seed_values(nseed,nlocal),buffer_candidates(1,nlocal),&
     projector_candidates(1,nlocal))
   call fill_fixture
+  call test_dc_tensor_packing
   call require_unique_fragment_rows
   call reset_w90_stub_state;expected_fragment_id=fragment_id
   cache%valid=.false.
@@ -360,6 +361,98 @@ program test_dg_hybrid_fragment_wannier_mpi
   call MPI_Comm_free(comm_fragment,ierr)
   call MPI_Finalize(ierr)
 contains
+
+  subroutine test_dc_tensor_packing
+    real(real64),allocatable::tensor(:,:,:,:,:,:,:),esp(:,:,:),occ(:,:,:)
+    real(real64),allocatable::packed_weights(:),packed_energies(:),packed_occupations(:),fractional(:,:)
+    complex(real64),allocatable::packed(:,:)
+    integer(int64),allocatable::packed_ids(:)
+    integer::lo(3),hi(3),a,b,scenario,active_size,c,d,p
+    real(real64)::test_hvol
+    logical::correct
+    active_size=min(fragment_size,2)
+    lo=[1+fragment_rank*8/active_size,1,1];hi=[(fragment_rank+1)*8/active_size,1,1]
+    if(fragment_rank>=active_size)then;lo=[1,1,1];hi=[0,1,1];endif
+    allocate(tensor(-1:10,0:2,0:2,1,1:nseed,1,1),esp(nseed,1,1),occ(nseed,1,1))
+    tensor=ieee_value(0d0,ieee_quiet_nan)
+    do a=lo(1),hi(1)
+      do b=1,nseed;tensor(a,1,1,1,b,1,1)=100d0*b+a;enddo
+    enddo
+    esp(:,1,1)=physical_energies;occ(:,1,1)=physical_occupations
+    call pack_dg_hybrid_fragment_dc_seed(comm_fragment,[8,1,1],lo,hi,tensor,esp,occ,0.25d0,&
+      packed_ids,packed_weights,packed,packed_energies,packed_occupations,fractional,ok,message)
+    call require_total(ok,'DC tensor packing failed: '//trim(message))
+    correct=size(packed_ids)==max(0,hi(1)-lo(1)+1).and.all(packed_weights==0.25d0)
+    do a=1,size(packed_ids)
+      correct=correct.and.packed_ids(a)==lo(1)+a-1
+      do b=1,nseed;correct=correct.and.packed(b,a)==100d0*b+packed_ids(a);enddo
+      correct=correct.and.abs(fractional(1,a)-real(packed_ids(a)-1,real64)/8d0)<1d-14
+    enddo
+    call require_total(correct.and.all(packed_energies==physical_energies).and.&
+      all(packed_occupations==physical_occupations),'DC tensor packing mixed halo/grid/orbital indices')
+    do scenario=1,7
+      test_hvol=0.25d0
+      if(scenario==1.and.fragment_rank==0)hi(1)=hi(1)-1
+      if(scenario==2.and.fragment_rank==0)esp(1,1,1)=ieee_value(0d0,ieee_quiet_nan)
+      if(scenario==3.and.fragment_rank==0)tensor(lo(1),1,1,1,1,1,1)=ieee_value(0d0,ieee_quiet_nan)
+      if(scenario==4.and.fragment_rank==0)lo(1)=0
+      if(scenario==5.and.fragment_rank==0)then
+        deallocate(tensor);allocate(tensor(-1:10,0:2,0:2,1,2:nseed,1,1));tensor=0d0
+      endif
+      if(scenario==6.and.fragment_rank==0)then
+        deallocate(occ)
+      endif
+      if(scenario==7.and.fragment_rank==0)test_hvol=ieee_value(0d0,ieee_quiet_nan)
+      call pack_dg_hybrid_fragment_dc_seed(comm_fragment,[8,1,1],lo,hi,tensor,esp,occ,test_hvol,&
+        packed_ids,packed_weights,packed,packed_energies,packed_occupations,fractional,ok,message)
+      call require_total(.not.ok.and..not.allocated(packed).and..not.allocated(packed_ids),&
+        'invalid/incomplete DC tensor published construction inputs')
+      if(scenario==1.and.fragment_rank==0)hi(1)=hi(1)+1
+      if(scenario==3.and.fragment_rank==0)tensor(lo(1),1,1,1,1,1,1)=101d0
+      if(scenario==4.and.fragment_rank==0)lo(1)=1
+      if(scenario==5.and.fragment_rank==0)then
+        deallocate(tensor);allocate(tensor(-1:10,0:2,0:2,1,1:nseed,1,1));tensor=0d0
+      endif
+      if(scenario==6.and.fragment_rank==0)then
+        allocate(occ(nseed,1,1));occ(:,1,1)=physical_occupations
+      endif
+      esp(:,1,1)=physical_energies
+    enddo
+    if(.not.allocated(occ))allocate(occ(nseed,1,1))
+    occ(:,1,1)=physical_occupations
+    deallocate(tensor);allocate(tensor(0:3,0:3,0:3,1,1:nseed,1,1))
+    lo=[1+fragment_rank*2/active_size,1,1];hi=[(fragment_rank+1)*2/active_size,2,2]
+    if(fragment_rank>=active_size)then;lo=[1,1,1];hi=[0,2,2];endif
+    tensor=ieee_value(0d0,ieee_quiet_nan)
+    do d=1,2;do c=1,2;do a=lo(1),hi(1);do b=1,nseed
+      tensor(a,c,d,1,b,1,1)=1000d0*b+a+10*c+100*d
+    enddo;enddo;enddo;enddo
+    call pack_dg_hybrid_fragment_dc_seed(comm_fragment,[2,2,2],lo,hi,tensor,esp,occ,0.25d0,&
+      packed_ids,packed_weights,packed,packed_energies,packed_occupations,fractional,ok,message)
+    call require_total(ok,'three-dimensional DC tensor packing failed: '//trim(message))
+    p=0;correct=.true.
+    do d=1,2;do c=1,2;do a=lo(1),hi(1)
+      p=p+1;correct=correct.and.packed_ids(p)==a+2*((c-1)+2*(d-1))
+      correct=correct.and.all(fractional(:,p)==real([a-1,c-1,d-1],real64)/2d0)
+      do b=1,nseed
+        correct=correct.and.packed(b,p)==1000d0*b+a+10*c+100*d
+      enddo
+    enddo;enddo;enddo
+    call require_total(correct,'three-dimensional DC tensor axis ordering changed')
+    if(fragment_size>1)then
+      if(fragment_rank==1)esp(1,1,1)=esp(1,1,1)+0.5d0
+      call pack_dg_hybrid_fragment_dc_seed(comm_fragment,[2,2,2],lo,hi,tensor,esp,occ,0.25d0,&
+        packed_ids,packed_weights,packed,packed_energies,packed_occupations,fractional,ok,message)
+      call require_total(.not.ok.and..not.allocated(packed),'rank-disagreeing DC spectra accepted')
+      esp(:,1,1)=physical_energies
+      if(fragment_rank==1)then
+        lo(1)=1;hi(1)=1;tensor=0d0
+      endif
+      call pack_dg_hybrid_fragment_dc_seed(comm_fragment,[2,2,2],lo,hi,tensor,esp,occ,0.25d0,&
+        packed_ids,packed_weights,packed,packed_energies,packed_occupations,fractional,ok,message)
+      call require_total(.not.ok.and..not.allocated(packed),'duplicate owned DC grid accepted')
+    endif
+  end subroutine test_dc_tensor_packing
 
   subroutine test_coordinate_export
     complex(real64),allocatable::q(:,:),seed(:,:),raw(:,:),reference(:,:)

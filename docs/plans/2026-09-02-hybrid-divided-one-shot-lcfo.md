@@ -1105,6 +1105,27 @@ Production main still needs the direct seed/Wannier/catalog construction and
 concrete H/S/preconditioner/density callback wiring. This checkpoint does not
 claim that the old main route has been replaced, and does not start Si64.
 
+**DC tensor packing checkpoint, 2026-09-04 (Task 8 remains incomplete):**
+`pack_dg_hybrid_fragment_dc_seed` converts the saved real Gamma, single-spin
+7D orbital tensor and physical spectra into state-major fragment WF inputs.
+It retains the entire periodic core+buffer cell and excludes communication
+halos only; it applies no taper, truncation, normalization or new boundary
+condition. Cell-local x-fast IDs and fractional coordinates are explicit.
+Unique owned points must cover the complete cell, with finite owned values
+and rank-consistent spectra/volume. Outputs are published only on success.
+The supplied spatial communicator must hold the complete replicated orbital
+inventory: orbital-partitioned tensors are rejected pending explicit
+redistribution, not silently interpreted as a complete fragment seed.
+This helper has not yet been connected to main or the production catalog.
+
+Tests cover 3D indexing, empty owners, NaN communication halos, missing or
+duplicate owned points, malformed/unallocated tensors and rank-disagreeing
+spectra. Review identified a NaN-volume ordered-comparison trap; a regression
+reproduced it, and finite validation is now a separate collective before
+comparisons. The complete fragment Wannier fixture passes on 2/4/8 ranks;
+the release build and diff whitespace check pass after the fix. No material
+calculation or new worktree was started.
+
 **Files:**
 
 - Modify: `src/io/salmon_global.f90:480-545`

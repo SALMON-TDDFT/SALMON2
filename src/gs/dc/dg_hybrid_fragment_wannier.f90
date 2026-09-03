@@ -51,8 +51,117 @@ module dg_hybrid_fragment_wannier
 
   public::build_dg_hybrid_fragment_wannier
   public::export_dg_hybrid_fragment_coordinates
+  public::pack_dg_hybrid_fragment_dc_seed
 
 contains
+
+  ! Pack the entire periodic core+buffer cell, excluding only communication halos.
+  ! Orbitals must be replicated on the spatial communicator supplied here.
+  ! No truncation, taper, normalization, or boundary condition is applied.
+  subroutine pack_dg_hybrid_fragment_dc_seed(comm,grid_shape,owned_lower,owned_upper,&
+      rwf,esp,rocc,hvol,grid_ids,grid_weights,seed_values,seed_energies,seed_occupations,&
+      fractional_coordinates,ok,message)
+    integer,intent(in)::comm,grid_shape(3),owned_lower(3),owned_upper(3)
+    real(real64),allocatable,intent(in)::rwf(:,:,:,:,:,:,:),esp(:,:,:),rocc(:,:,:)
+    real(real64),intent(in)::hvol
+    integer(int64),allocatable,intent(out)::grid_ids(:)
+    real(real64),allocatable,intent(out)::grid_weights(:),seed_energies(:),seed_occupations(:)
+    real(real64),allocatable,intent(out)::fractional_coordinates(:,:)
+    complex(real64),allocatable,intent(out)::seed_values(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::metadata(4),reference(4),nseed,nlocal,status,ierr,ix,iy,iz,p,d
+    integer(int64)::ncell,total_points,local_points
+    integer(int64),allocatable::ids(:)
+    real(real64)::reference_hvol
+    real(real64),allocatable::weights(:),energies(:),occupations(:),fractional(:,:),reference_spectrum(:,:)
+    complex(real64),allocatable::values(:,:)
+    logical::valid,empty
+
+    call canonical_total_status(comm,allocated(rwf).and.allocated(esp).and.allocated(rocc),&
+      'DC seed packing requires allocated orbitals and spectra',ok,message)
+    if(.not.ok)return
+    nseed=size(esp,1);metadata=[grid_shape,nseed];reference=metadata
+    call MPI_Bcast(reference,4,MPI_INTEGER,0,comm,ierr)
+    valid=all(metadata==reference).and.all(grid_shape>0).and.nseed>0
+    valid=valid.and.extent_product_fits(grid_shape)
+    valid=valid.and.all(lbound(esp)==1).and.all(lbound(rocc)==1)
+    valid=valid.and.all(shape(esp)==[nseed,1,1]).and.all(shape(rocc)==[nseed,1,1])
+    do d=4,7
+      valid=valid.and.lbound(rwf,d)==1
+      if(d==5)then
+        valid=valid.and.size(rwf,d)==nseed
+      else
+        valid=valid.and.size(rwf,d)==1
+      endif
+    enddo
+    reference_hvol=hvol
+    call MPI_Bcast(reference_hvol,1,MPI_DOUBLE_PRECISION,0,comm,ierr)
+    ! Fortran logical expressions need not short-circuit: reject NaN before
+    ! ordered comparisons, including when invalid-operation traps are enabled.
+    call canonical_total_status(comm,ieee_is_finite(hvol).and.ieee_is_finite(reference_hvol),&
+      'DC seed packing requires finite grid volume',ok,message)
+    if(.not.ok)return
+    valid=valid.and.hvol>0d0.and.hvol==reference_hvol
+    call canonical_total_status(comm,valid,&
+      'DC seed packing requires consistent cell, Gamma single-spin full orbitals, and positive volume',ok,message)
+    if(.not.ok)return
+    empty=any(owned_upper<owned_lower);nlocal=0
+    valid=.true.
+    if(.not.empty)then
+      do d=1,3
+        valid=valid.and.owned_lower(d)>=1.and.owned_upper(d)<=grid_shape(d)
+        valid=valid.and.owned_lower(d)>=lbound(rwf,d).and.owned_upper(d)<=ubound(rwf,d)
+      enddo
+    endif
+    call canonical_total_status(comm,valid,'DC owned grid lies outside the fragment cell or tensor',ok,message)
+    if(.not.ok)return
+    if(.not.empty)nlocal=product(owned_upper-owned_lower+1)
+    ncell=product(int(grid_shape,int64));local_points=int(nlocal,int64)
+    call MPI_Allreduce(local_points,total_points,1,MPI_INTEGER8,MPI_SUM,comm,ierr)
+    valid=total_points==ncell.and.extent_product_fits([nseed,nlocal]).and.&
+      extent_product_fits([3,nlocal]).and.extent_product_fits([nseed,2])
+    call canonical_total_status(comm,valid,'DC owned grid coverage or packing extent is invalid',ok,message)
+    if(.not.ok)return
+    allocate(ids(nlocal),weights(nlocal),values(nseed,nlocal),fractional(3,nlocal),&
+      energies(nseed),occupations(nseed),reference_spectrum(nseed,2),stat=status)
+    call collective_allocation_status(comm,status,'DC seed packing',ok,message)
+    if(.not.ok)return
+    energies=esp(:,1,1);occupations=rocc(:,1,1)
+    reference_spectrum(:,1)=energies;reference_spectrum(:,2)=occupations
+    call MPI_Bcast(reference_spectrum,2*nseed,MPI_DOUBLE_PRECISION,0,comm,ierr)
+    valid=all(ieee_is_finite(energies)).and.all(ieee_is_finite(occupations))
+    valid=valid.and.bitwise_real_equal(energies,reference_spectrum(:,1)).and.&
+      bitwise_real_equal(occupations,reference_spectrum(:,2))
+    p=0
+    if(.not.empty)then
+      do iz=owned_lower(3),owned_upper(3)
+        do iy=owned_lower(2),owned_upper(2)
+          do ix=owned_lower(1),owned_upper(1)
+            p=p+1
+            ids(p)=int(ix,int64)+int(grid_shape(1),int64)*&
+              (int(iy-1,int64)+int(grid_shape(2),int64)*int(iz-1,int64))
+            fractional(:,p)=real([ix-1,iy-1,iz-1],real64)/real(grid_shape,real64)
+            values(:,p)=cmplx(rwf(ix,iy,iz,1,:,1,1),0d0,real64)
+            valid=valid.and.all(ieee_is_finite(real(values(:,p),real64)))
+          enddo
+        enddo
+      enddo
+    endif
+    call canonical_total_status(comm,valid,'DC seed spectra disagree or owned values are nonfinite',ok,message)
+    if(.not.ok)return
+    call validate_unique_grid_ids(comm,ids,ok,message)
+    if(.not.ok)return
+    weights=hvol
+    call move_alloc(ids,grid_ids);call move_alloc(weights,grid_weights)
+    call move_alloc(values,seed_values);call move_alloc(energies,seed_energies)
+    call move_alloc(occupations,seed_occupations);call move_alloc(fractional,fractional_coordinates)
+    ok=.true.;message=''
+#else
+    ok=.false.;message='DC seed packing requires MPI'
+#endif
+  end subroutine pack_dg_hybrid_fragment_dc_seed
 
   ! Replicated WF-coordinate maps; the caller appends its PW identity/zero blocks
   ! and selects coefficient rows. Never infer this inverse from WF ordering.
