@@ -1126,6 +1126,26 @@ comparisons. The complete fragment Wannier fixture passes on 2/4/8 ranks;
 the release build and diff whitespace check pass after the fix. No material
 calculation or new worktree was started.
 
+**Orbital redistribution checkpoint, 2026-09-04 (Task 8 remains incomplete):**
+The DC seed packer now accepts an explicit `orbital_comm` (the production
+communicator to supply is `info%icomm_o`). Each orbital group must be a
+subgroup of the fragment communicator, share the same owned spatial slab,
+and own every seed orbital exactly once. Only owned spatial values are
+assembled; NaN communication halos are never read. A complete slab tensor
+is temporarily replicated within that orbital group, not across the full
+system. Only the orbital-group root publishes its slab to the fragment WF
+builder, so points are not duplicated. Empty orbital owners are supported;
+without the optional communicator the previous full-orbital contract remains.
+This does not relax checkpoint MPI-size/rank--fragment reuse restrictions.
+
+The new API first failed its compile regression, then passed mixed orbital
+and spatial decompositions on 2/4/8 total ranks. Missing/out-of-range orbitals,
+inconsistent slabs and nonfinite owned values fail collectively. Review found
+the foreign-member communicator hazard: the specific rejection regression
+failed before local group-membership validation was added. All fragment WF
+tests, the release build and diff check pass after that fix. Main-route
+construction/callback wiring is still pending; no Si64 calculation was run.
+
 **Files:**
 
 - Modify: `src/io/salmon_global.f90:480-545`

@@ -90,6 +90,7 @@ program test_dg_hybrid_fragment_wannier_mpi
     projector_candidates(1,nlocal))
   call fill_fixture
   call test_dc_tensor_packing
+  call test_orbital_distributed_packing
   call require_unique_fragment_rows
   call reset_w90_stub_state;expected_fragment_id=fragment_id
   cache%valid=.false.
@@ -361,6 +362,67 @@ program test_dg_hybrid_fragment_wannier_mpi
   call MPI_Comm_free(comm_fragment,ierr)
   call MPI_Finalize(ierr)
 contains
+
+  subroutine test_orbital_distributed_packing
+    real(real64),allocatable::tensor(:,:,:,:,:,:,:),esp(:,:,:),occ(:,:,:)
+    real(real64),allocatable::w(:),e(:),o(:),f(:,:)
+    complex(real64),allocatable::v(:,:)
+    integer(int64),allocatable::ids(:)
+    integer::orbcomm,orb_rank,orb_size,spatial_group,lo(3),hi(3),first,last,a,b,scenario
+    logical::correct
+    ! 8 total ranks: two spatial slabs times two orbital ranks per fragment.
+    ! 4 total ranks: orbital partition only; 2 total ranks: serial degeneration.
+    spatial_group=0
+    if(fragment_size==4)spatial_group=fragment_rank/2
+    call MPI_Comm_split(comm_fragment,spatial_group,fragment_rank,orbcomm,ierr)
+    call MPI_Comm_rank(orbcomm,orb_rank,ierr);call MPI_Comm_size(orbcomm,orb_size,ierr)
+    lo=[1+4*spatial_group,1,1];hi=[8,1,1]
+    if(fragment_size==4)hi(1)=4+4*spatial_group
+    first=1+orb_rank*nseed/orb_size;last=(orb_rank+1)*nseed/orb_size
+    allocate(tensor(-1:10,0:2,0:2,1,first:last,1,1),esp(nseed,1,1),occ(nseed,1,1))
+    tensor=ieee_value(0d0,ieee_quiet_nan)
+    do b=first,last;do a=lo(1),hi(1);tensor(a,1,1,1,b,1,1)=100d0*b+a;enddo;enddo
+    esp(:,1,1)=physical_energies;occ(:,1,1)=physical_occupations
+    call pack_dg_hybrid_fragment_dc_seed(comm_fragment,[8,1,1],lo,hi,tensor,esp,occ,0.25d0,&
+      ids,w,v,e,o,f,ok,message,orbital_comm=orbcomm)
+    call require_total(ok,'orbital-distributed packing failed: '//trim(message))
+    correct=size(ids)==merge(hi(1)-lo(1)+1,0,orb_rank==0)
+    do a=1,size(ids)
+      correct=correct.and.ids(a)==lo(1)+a-1
+      do b=1,nseed;correct=correct.and.v(b,a)==100d0*b+ids(a);enddo
+    enddo
+    call require_total(correct,'orbital-distributed packing lost orbital order or duplicated grid')
+    do scenario=1,4
+      if(scenario==1.and.fragment_rank==0)hi(1)=hi(1)-1
+      if(scenario==2.and.fragment_rank==0)tensor(lo(1),1,1,1,first,1,1)=ieee_value(0d0,ieee_quiet_nan)
+      if(scenario==3.and.fragment_rank==0)then
+        deallocate(tensor);allocate(tensor(-1:10,0:2,0:2,1,1:0,1,1))
+      endif
+      if(scenario==4.and.fragment_rank==0)then
+        deallocate(tensor);allocate(tensor(-1:10,0:2,0:2,1,0:nseed,1,1));tensor=0d0
+      endif
+      call pack_dg_hybrid_fragment_dc_seed(comm_fragment,[8,1,1],lo,hi,tensor,esp,occ,0.25d0,&
+        ids,w,v,e,o,f,ok,message,orbital_comm=orbcomm)
+      call require_total(.not.ok.and..not.allocated(v),'invalid orbital partition accepted')
+      if(scenario==1.and.fragment_rank==0)hi(1)=hi(1)+1
+      if(scenario==2.and.fragment_rank==0)tensor(lo(1),1,1,1,first,1,1)=100d0*first+lo(1)
+    enddo
+    call MPI_Comm_free(orbcomm,ierr)
+    ! A single seed distributed across all fragment ranks leaves empty orbital owners.
+    deallocate(tensor,esp,occ)
+    first=1+fragment_rank/fragment_size;last=(fragment_rank+1)/fragment_size
+    allocate(tensor(1:8,1,1,1,first:last,1,1),esp(1,1,1),occ(1,1,1))
+    tensor=2d0;esp=0d0;occ=1d0
+    call pack_dg_hybrid_fragment_dc_seed(comm_fragment,[8,1,1],[1,1,1],[8,1,1],tensor,esp,occ,0.25d0,&
+      ids,w,v,e,o,f,ok,message,orbital_comm=comm_fragment)
+    call require_total(ok,'empty orbital owner rejected: '//trim(message))
+    call require_total(size(ids)==merge(8,0,fragment_rank==0).and.all(v==2d0),&
+      'empty orbital owner packing changed values or point ownership')
+    call pack_dg_hybrid_fragment_dc_seed(comm_fragment,[8,1,1],[1,1,1],[8,1,1],tensor,esp,occ,0.25d0,&
+      ids,w,v,e,o,f,ok,message,orbital_comm=comm_total)
+    call require_total(.not.ok.and..not.allocated(v).and.index(message,'subgroup')>0,&
+      'cross-fragment orbital communicator not rejected before orbital collectives')
+  end subroutine test_orbital_distributed_packing
 
   subroutine test_dc_tensor_packing
     real(real64),allocatable::tensor(:,:,:,:,:,:,:),esp(:,:,:),occ(:,:,:)

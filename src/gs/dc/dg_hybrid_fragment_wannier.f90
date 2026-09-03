@@ -56,12 +56,14 @@ module dg_hybrid_fragment_wannier
 contains
 
   ! Pack the entire periodic core+buffer cell, excluding only communication halos.
-  ! Orbitals must be replicated on the spatial communicator supplied here.
+  ! Without orbital_comm, orbitals must be replicated on the spatial communicator.
+  ! With orbital_comm, gather stripes on each spatial slab and publish its root only.
   ! No truncation, taper, normalization, or boundary condition is applied.
-  subroutine pack_dg_hybrid_fragment_dc_seed(comm,grid_shape,owned_lower,owned_upper,&
+  recursive subroutine pack_dg_hybrid_fragment_dc_seed(comm,grid_shape,owned_lower,owned_upper,&
       rwf,esp,rocc,hvol,grid_ids,grid_weights,seed_values,seed_energies,seed_occupations,&
-      fractional_coordinates,ok,message)
+      fractional_coordinates,ok,message,orbital_comm)
     integer,intent(in)::comm,grid_shape(3),owned_lower(3),owned_upper(3)
+    integer,optional,intent(in)::orbital_comm
     real(real64),allocatable,intent(in)::rwf(:,:,:,:,:,:,:),esp(:,:,:),rocc(:,:,:)
     real(real64),intent(in)::hvol
     integer(int64),allocatable,intent(out)::grid_ids(:)
@@ -78,6 +80,19 @@ contains
     real(real64),allocatable::weights(:),energies(:),occupations(:),fractional(:,:),reference_spectrum(:,:)
     complex(real64),allocatable::values(:,:)
     logical::valid,empty
+    integer::mode,mode_min,mode_max
+
+    mode=merge(1,0,present(orbital_comm))
+    call MPI_Allreduce(mode,mode_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(mode,mode_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call canonical_total_status(comm,mode_min==mode_max,'DC orbital redistribution mode disagrees',ok,message)
+    if(.not.ok)return
+    if(present(orbital_comm))then
+      call pack_orbital_distributed_seed(comm,orbital_comm,grid_shape,owned_lower,owned_upper,&
+        rwf,esp,rocc,hvol,grid_ids,grid_weights,seed_values,seed_energies,seed_occupations,&
+        fractional_coordinates,ok,message)
+      return
+    endif
 
     call canonical_total_status(comm,allocated(rwf).and.allocated(esp).and.allocated(rocc),&
       'DC seed packing requires allocated orbitals and spectra',ok,message)
@@ -162,6 +177,98 @@ contains
     ok=.false.;message='DC seed packing requires MPI'
 #endif
   end subroutine pack_dg_hybrid_fragment_dc_seed
+
+#ifdef USE_MPI
+  subroutine pack_orbital_distributed_seed(comm,orbcomm,grid_shape,lo,hi,rwf,esp,rocc,hvol,&
+      ids,weights,values,energies,occupations,fractional,ok,message)
+    integer,intent(in)::comm,orbcomm,grid_shape(3),lo(3),hi(3)
+    real(real64),allocatable,intent(in)::rwf(:,:,:,:,:,:,:),esp(:,:,:),rocc(:,:,:)
+    real(real64),intent(in)::hvol
+    integer(int64),allocatable,intent(out)::ids(:)
+    real(real64),allocatable,intent(out)::weights(:),energies(:),occupations(:),fractional(:,:)
+    complex(real64),allocatable,intent(out)::values(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    real(real64),allocatable::full(:,:,:,:,:,:,:)
+    integer,allocatable::owners(:),orb_members(:),fragment_members(:)
+    integer::nseed,reference_nseed,reference_box(6),orb_rank,d,status,ierr,first,last,ix,iy,iz,b
+    integer::out_lo(3),out_hi(3),extent(3)
+    integer::orb_group,fragment_group,orb_size
+    logical::valid,intercomm
+
+    call canonical_total_status(comm,orbcomm/=MPI_COMM_NULL.and.allocated(rwf).and.&
+      allocated(esp).and.allocated(rocc),'orbital packing requires communicator and allocated inputs',ok,message)
+    if(.not.ok)return
+    call MPI_Comm_test_inter(orbcomm,intercomm,ierr)
+    call canonical_total_status(comm,.not.intercomm,'orbital packing requires an intracommunicator',ok,message)
+    if(.not.ok)return
+    ! Group queries are local: reject foreign members before any orbital collective.
+    call MPI_Comm_size(orbcomm,orb_size,ierr)
+    call canonical_total_status(comm,extent_product_fits([2,orb_size]),&
+      'orbital communicator metadata extent is invalid',ok,message)
+    if(.not.ok)return
+    allocate(orb_members(orb_size),fragment_members(orb_size),stat=status)
+    call collective_allocation_status(comm,status,'orbital communicator membership',ok,message)
+    if(.not.ok)return
+    orb_members=[(d-1,d=1,orb_size)]
+    call MPI_Comm_group(orbcomm,orb_group,ierr);call MPI_Comm_group(comm,fragment_group,ierr)
+    call MPI_Group_translate_ranks(orb_group,orb_size,orb_members,fragment_group,fragment_members,ierr)
+    valid=ierr==MPI_SUCCESS.and.all(fragment_members/=MPI_UNDEFINED)
+    call MPI_Group_free(orb_group,ierr);call MPI_Group_free(fragment_group,ierr)
+    call canonical_total_status(comm,valid,'orbital communicator must be a subgroup of the fragment',ok,message)
+    if(.not.ok)return
+    nseed=size(esp,1);reference_nseed=nseed
+    call MPI_Bcast(reference_nseed,1,MPI_INTEGER,0,comm,ierr)
+    valid=nseed>0.and.nseed==reference_nseed.and.all(grid_shape>0).and.extent_product_fits(grid_shape)
+    do d=4,7
+      if(d/=5)valid=valid.and.lbound(rwf,d)==1.and.size(rwf,d)==1
+    enddo
+    first=lbound(rwf,5);last=ubound(rwf,5)
+    if(size(rwf,5)>0)valid=valid.and.first>=1.and.last<=nseed
+    extent=0
+    if(all(hi>=lo))then
+      do d=1,3
+        valid=valid.and.lo(d)>=1.and.hi(d)<=grid_shape(d)
+        valid=valid.and.lo(d)>=lbound(rwf,d).and.hi(d)<=ubound(rwf,d)
+      enddo
+    endif
+    call canonical_total_status(comm,valid,'orbital packing has invalid orbital or grid bounds',ok,message)
+    if(.not.ok)return
+    if(all(hi>=lo))extent=hi-lo+1
+    reference_box=[lo,hi]
+    call MPI_Bcast(reference_box,6,MPI_INTEGER,0,orbcomm,ierr)
+    valid=all(reference_box==[lo,hi]).and.extent_product_fits([extent,nseed])
+    call canonical_total_status(comm,valid,'orbital ranks disagree on owned spatial slab or exceed extent',ok,message)
+    if(.not.ok)return
+    out_lo=lo;out_hi=hi
+    if(any(extent==0))then;out_lo=1;out_hi=0;endif
+    allocate(owners(nseed),full(out_lo(1):out_hi(1),out_lo(2):out_hi(2),&
+      out_lo(3):out_hi(3),1,1:nseed,1,1),stat=status)
+    call collective_allocation_status(comm,status,'owned orbital redistribution',ok,message)
+    if(.not.ok)return
+    owners=0
+    if(size(rwf,5)>0)owners(first:last)=1
+    call MPI_Allreduce(MPI_IN_PLACE,owners,nseed,MPI_INTEGER,MPI_SUM,orbcomm,ierr)
+    call canonical_total_status(comm,all(owners==1),'DC orbitals must be owned exactly once per spatial slab',ok,message)
+    if(.not.ok)return
+    full=0d0;valid=.true.
+    if(all(extent>0))then
+      do b=first,last;do iz=lo(3),hi(3);do iy=lo(2),hi(2);do ix=lo(1),hi(1)
+        full(ix,iy,iz,1,b,1,1)=rwf(ix,iy,iz,1,b,1,1)
+        valid=valid.and.ieee_is_finite(full(ix,iy,iz,1,b,1,1))
+      enddo;enddo;enddo;enddo
+    endif
+    call canonical_total_status(comm,valid,'orbital packing encountered nonfinite owned values',ok,message)
+    if(.not.ok)return
+    ! Only one owner contributes each element; no physical superposition is performed.
+    call MPI_Allreduce(MPI_IN_PLACE,full,size(full),MPI_DOUBLE_PRECISION,MPI_SUM,orbcomm,ierr)
+    call MPI_Comm_rank(orbcomm,orb_rank,ierr)
+    out_lo=lo;out_hi=hi
+    if(orb_rank/=0)then;out_lo=1;out_hi=0;endif
+    call pack_dg_hybrid_fragment_dc_seed(comm,grid_shape,out_lo,out_hi,full,esp,rocc,hvol,&
+      ids,weights,values,energies,occupations,fractional,ok,message)
+  end subroutine pack_orbital_distributed_seed
+#endif
 
   ! Replicated WF-coordinate maps; the caller appends its PW identity/zero blocks
   ! and selects coefficient rows. Never infer this inverse from WF ordering.
