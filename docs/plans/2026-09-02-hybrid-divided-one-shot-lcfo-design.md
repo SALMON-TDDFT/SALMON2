@@ -5,12 +5,16 @@
 Make the scalable Hybrid ground-state route follow the established real-space
 DC+LCFO accuracy model:
 
-1. converge the density with fragment-local WF+PW solves;
-2. include only bounded neighboring interface/projector communication during
+1. construct unconstrained WFs independently from the reusable DC orbitals on
+   each fragment, without a preliminary complete LCFO solve or a complete-cell
+   construction-WF Wannier90 solve;
+2. converge the density with deliberately short, warm-started fragment-local
+   WF+PW subspace updates;
+3. include only bounded neighboring interface/projector communication during
    that local stage;
-3. freeze the converged density and solve the complete distributed LCFO
+4. freeze the converged density and solve the complete distributed LCFO
    generalized eigenproblem once;
-4. optionally perform a small, user-requested number of global LCFO density
+5. optionally perform a small, user-requested number of global LCFO density
    refinements when higher self-consistency is wanted.
 
 The repeated complete-Hybrid continuation remains available as a validation
@@ -54,29 +58,94 @@ eigensolve algorithm as an oracle for accuracy and convergence studies.  It
 must not be entered by the divided route unless explicitly selected by the
 user.
 
+The complete-cell construction-WF Wannier90 path and the dense fragment
+generalized eigensolver remain explicit small-system/reference backends.  They
+are not automatic recovery paths for a failed production fragment update.
+
+### Construction localization and fragment eigensolver budgets
+
+The production construction WFs are generated once per basis epoch on
+`dc%icomm_frag`, not on `dc%icomm_tot`.  Each fragment uses its restored or
+freshly converged DC orbitals, buffer-support candidates, and only those local
+atomic projector directions that add metric rank.  The retained rank is
+dynamic.  Wannier90 performs an unconstrained square unitary rotation of the
+whole accepted fragment subspace.  No column is discarded according to its
+post-localization center, and no gauge matching is imposed between fragments.
+Every fragment uses a fragment-specific seed and artifact directory.
+
+The density loop uses a separate control
+`dg_hybrid_fragment_cg_steps`, defaulting to three.  This is an update budget,
+not an eigenpair-convergence requirement.  A fragment update may finish before
+the budget when its intermediate tolerance is reached; reaching the budget is
+also a successful outcome when the Ritz values and coefficients are finite,
+the metric rank is retained, `C^H S C-I` passes, and the residual has not grown
+beyond `dg_dc_gs_allowed_residual_growth` times the residual of the safe
+entry subspace under the current operator.  Here the reported residual is the
+largest distributed two-norm of `H C_j-epsilon_j S C_j`, divided by
+`max(1,abs(epsilon_j),norm2(H C_j))`.  Early success uses
+`dg_dc_gs_intermediate_orbital_tolerance`, and metric orthogonality uses
+`dg_dc_gs_orthogonality_tolerance`.  A rejected trial restores the best safe
+subspace.  Returning that entry subspace without advancement is successful if
+it still passes the finite/rank/orthogonality gates; failure to improve is then
+handled by the outer density-convergence limit.  The strict block-CG API keeps
+its existing converged-or-fail semantics for reference tests.
+
 ## Complete Production Sequence
 
 1. Load a conventional DC seed only when its MPI rank count and exact
    rank--fragment mapping match the current calculation.  Preserve this rule
    in the production format.  If no compatible seed exists, run conventional
    DC once and publish a new seed.
-2. Run conventional LCFO and unconstrained localization to obtain the WF
-   sector.  Individual WFs are optimized for locality and are not required to
-   transform symmetrically.
+2. On every fragment communicator, form a fragment-local candidate
+   space directly from the DC `rwf` payload plus accepted buffer/projector
+   directions, remove only metric-null directions, and run unconstrained
+   fragment-local Wannier90 once.  There is no preliminary complete LCFO
+   diagonalization.  Individual WFs are optimized for locality and are not
+   required to transform symmetrically.
 3. Build the user-cutoff-controlled windowed-PW complement.  The retained
    basis count is derived from the material, fragment size, requested energy
    window, metric rank, and PW cutoff; no material-specific count such as 384
    is permitted.
 4. Freeze the fragment WF+PW catalogs, ownership, overlap metric, broken-volume
    kinetic/nonlocal data, and DG interface payload.
-5. Run the divided density SCF described below.
+5. Run the divided density SCF described below, retaining each fragment's
+   coefficient cache and applying at most the requested number of warm-started
+   LOBPCG updates per density iteration.
 6. Freeze its converged density and potential, assemble the complete
    distributed LCFO `H/S`, and solve once.
 7. If requested, perform exactly the specified number of LCFO refinement
    steps.
-8. Certify the physical occupied/energy-window eigenspace, localize only the
-   certified RT space by a unitary gauge change, and publish the complete-v3
-   ground-state checkpoint.
+8. Certify the physical occupied/energy-window eigenspace.  When an RT
+   checkpoint is requested, localize the complete certified RT space by a
+   unitary gauge change and publish complete-v3.  This required RT-publication
+   step is a distinct whole-system operation; it is not the construction-WF
+   path.
+
+## Fragment-Local Construction WFs
+
+The conventional DC seed already stores each rank's real fragment orbitals,
+fragment eigenvalues, occupations, density, and potential.  The production
+route consumes those local orbitals directly.  It must not call `dc_lcfo` to
+manufacture complete-system orbitals merely to localize them again.
+
+For fragment `f`, construct a full-rank local candidate matrix on its core plus
+accepted operator buffer.  Candidate directions may include DC occupied and
+guard orbitals and fragment-local atomic projectors, but a fixed material count
+is forbidden.  A distributed metric decomposition removes null directions and
+records the retained rank.  The resulting square subspace is passed to
+Wannier90 on `dc%icomm_frag` with a seed namespace containing the fragment ID.
+The namespace also contains the basis generation so artifacts from different
+epochs cannot collide.  Setup and run occur exactly once per fragment and
+basis epoch, outside the SCF loop.  All accepted columns survive the unitary
+transformation.
+
+Buffers from different fragments may overlap and independent fragment gauges
+may differ by phases, permutations, or general unitary rotations.  The union
+is therefore certified through its complete overlap matrix.  Near-null global
+directions are handled by a gauge-invariant metric eigenspace compression, not
+by deleting named WFs.  Interface tails, periodic-wrap tails, and nonlocal
+projector support must remain present.  Missing support, duplicate ownership,
+or insufficient metric rank is a collective failure.
 
 ## Divided Density SCF
 
@@ -101,6 +170,35 @@ This is the deliberate DC+LCFO approximation.  Turning the local loop into a
 globally coupled occupied-subspace iteration would define a different
 algorithm and is out of scope for this production mode.
 
+The fragment eigensolver advances only the occupied-plus-guard subspace, not
+all local basis vectors.  Its initial state count comes from the DC spectrum,
+occupation tail, requested energy window, and degenerate-shell closure.  If
+the common-chemical-potential calculation reports an insufficient high-energy
+tail, that fragment state inventory grows monotonically; it never shrinks
+during the SCF.  The occupation adapter returns a per-fragment extension mask.
+For fragment `f`, its terminal numerically degenerate shell contributes
+`q_tail(f)=sum(occupation*core_norm)`; it is marked when
+`q_tail(f)>electron_tolerance/n_frag`.  At zero temperature, a terminal shell
+that is occupied or intersects the common chemical potential is also marked.
+Each marked fragment adds at least the complete next shell, ordered by the
+unselected directions' deterministic `H_ii/S_ii` estimates with global basis
+ID as the tie breaker.  Occupations are then solved again.  Expansion repeats
+until the aggregate tail gate passes; exhausting a fragment's metric rank
+before that point is a collective failure.
+
+The previous safe coefficients are reused whenever fragment ID, basis
+generation, and metric fingerprint agree.  Equal state counts reuse all
+columns.  On expansion, the old columns are embedded unchanged and only new
+directions are deterministically S-orthogonalized and appended; the new search
+directions start with zero history.  A changed potential epoch does not
+invalidate the warm start.
+
+The production updater uses an `[X,R,P]` LOBPCG trial space and performs at
+most `dg_hybrid_fragment_cg_steps` updates.  It does not diagonalize the full
+fragment basis as a hidden cold start.  Its residual is an intermediate SCF
+diagnostic, not a published physical eigenpair receipt.  Exact eigenpair and
+symmetry acceptance is deferred to the one complete LCFO solve.
+
 ### Global operations that remain global
 
 The following operations are not made fragment-private:
@@ -109,8 +207,10 @@ The following operations are not made fragment-private:
 - common chemical potential and occupation determination;
 - total electron-count reduction;
 - unique-core density assembly and density mixing;
-- density convergence reduction; and
-- final LCFO solve and physical-space certification.
+- density convergence reduction;
+- final LCFO solve and physical-space certification; and
+- unitary localization of the final certified RT eigenspace when an RT
+  checkpoint is requested.
 
 Each fragment solve publishes its eigenvalues and core weights to the common
 occupation routine.  A separate chemical potential per fragment is forbidden.
@@ -202,6 +302,14 @@ retaining the old eigenpair receipt.
 No checkpoint is published unless all of the following hold collectively:
 
 - fragment catalogs, ownership, and fixed payload are finite and immutable;
+- each construction-WF Wannier90 call occurs exactly once on its fragment
+  communicator with a collision-free seed, and no fragment publishes a
+  partial basis when another fragment fails;
+- fragment buffers cover every accepted face and nonlocal-projector support,
+  and the union metric retains the required rank under independent fragment
+  gauge rotations;
+- every short LOBPCG update is finite, metric-orthonormal, rank preserving, and
+  within the residual-growth safety bound;
 - divided SCF converged under the shared DC criterion;
 - every divided density has the requested electron count;
 - final `H/S` are finite, Hermitian, and have an acceptable metric rank;
@@ -223,6 +331,14 @@ must never be silently migrated.
 - `dcdft.f90` / `scf_iteration_dft.f90`: authoritative occupation, chemical
   potential, density assembly, mixing, and convergence behavior; extract
   narrow shared helpers rather than duplicate their algebra.
+- `dg_dc_seed_checkpoint.f90`: exact rank-count/rank--fragment provenance and
+  the saved fragment `rwf`, eigenvalue, occupation, density, and potential
+  payload used to avoid a preliminary complete LCFO solve.
+- `dg_overlapping_wannier_w90.f90`: communicator-parametric Gamma setup,
+  matrix assembly, run, and transform.  Add a fragment orchestration layer and
+  unique artifact namespaces; do not fork the numerical wrapper.
+- `dg_hybrid_block_cg.f90`: preserve the strict solver and add a separate
+  bounded fragment-subspace advancement API with successful cap semantics.
 - `dg_hybrid_fragment_solver.f90`: fragment generalized solve, after it accepts
   the production DG self block and the occupations obtained for the current
   iteration.
@@ -233,10 +349,12 @@ must never be silently migrated.
   extract a terminal finalization routine shared by one-shot, refined, and
   reference routes.
 
-The current divided implementation cannot be promoted unchanged: it currently
-uses ordinary local `hpsi` with an identity metric, copies stale
-`system%rocc`, ignores the returned divided electron count, and implements
-three convergence labels with formulas different from conventional DC.
+The remaining divided implementation cannot be promoted unchanged: its
+production callback still uses ordinary local `hpsi` with an identity metric,
+the construction path still performs a preliminary complete LCFO/global
+Wannier90 operation, and the fragment spectrum path still diagonalizes the
+whole local basis.  The shared convergence, electron-count, and common-μ
+semantics established in Tasks 1--4 remain authoritative.
 
 ## Test Strategy
 
@@ -246,18 +364,26 @@ Implementation follows TDD in this order:
    metrics for all supported convergence modes;
 2. MPI tests for a common chemical potential, current-iteration occupations,
    finite-temperature tails, and exact electron count;
-3. fragment-operator fixtures comparing volume, nonlocal-projector, SIPG self,
+3. fragment-Wannier MPI fixtures proving exactly one setup/run per fragment
+   communicator and basis epoch, variable ranks, unique seed namespaces,
+   collective failure, buffer-tail coverage, and independence of the final
+   LCFO observables under separate fragment unitary gauges;
+4. bounded LOBPCG tests proving a three-step safe nonconverged update, warm
+   starts, monotone state extension, retained metric rank, and unchanged strict
+   solver semantics;
+5. fragment-operator fixtures comparing volume, nonlocal-projector, SIPG self,
    and neighbor-support contributions with a direct small reference;
-4. unique-core density and rank-decomposition invariance tests;
-5. route tests requiring exactly one complete eigensolve for refinement count
-   zero and exactly `N+1` for count `N`;
-6. final LCFO residual, metric orthogonality, dynamic window/cluster extension,
+6. unique-core density and rank-decomposition invariance tests;
+7. route tests requiring no preliminary complete LCFO solve, no construction
+   Wannier90 call inside SCF, exactly one final complete eigensolve for zero
+   refinement steps, and exactly `N+1` final/refinement solves for count `N`;
+8. final LCFO residual, metric orthogonality, dynamic window/cluster extension,
    physical symmetry, and complete-v3 checkpoint tests;
-7. DC-seed tests retaining the exact rank-count and rank--fragment reuse rule;
-8. Si64 eight-rank validation against the saved repeated-continuation oracle,
-   recording energy, gap, density difference, occupied projector, symmetry,
-   time, and memory; and
-9. separate-directory zero-field RT runs for one-shot and a small refinement
+9. DC-seed tests retaining the exact rank-count and rank--fragment reuse rule;
+10. Si64 eight-rank validation against the saved repeated-continuation oracle,
+   recording construction-WF time, energy, gap, density difference, occupied
+   projector, symmetry, total time, and memory; and
+11. separate-directory zero-field RT runs for one-shot and a small refinement
    count, reporting stationarity rather than silently adding iterations.
 
 All existing dirty changes and verification directories remain untouched.
