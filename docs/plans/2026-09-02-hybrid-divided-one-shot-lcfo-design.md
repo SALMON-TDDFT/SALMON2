@@ -233,6 +233,53 @@ fragment basis as a hidden cold start.  Its residual is an intermediate SCF
 diagnostic, not a published physical eigenpair receipt.  Exact eigenpair and
 symmetry acceptance is deferred to the one complete LCFO solve.
 
+### Fixed-frame fragment preconditioner (2026-09-03 amendment)
+
+The approved short-update gauge-invariance requirement rules out rebuilding a
+coordinate-diagonal preconditioner from the currently localized WF columns.
+Freeze the pre-Wannier90 metric-compressed candidate frame for a basis
+generation, together with the invariant projected-PW catalog. Do not rerun
+metric compression or choose new reference directions after changing the WF
+gauge. This reference choice does not constrain Wannier90 localization.
+
+Write the current uncompressed fragment basis as `B` and the fixed physical
+reference as `F=B Q`. For the stored Wannier90 rotation `U`, use
+`Q=block_diag(U^dagger,I_PW)`, including its stored phase/order corrections.
+The buffer/projector directions already retained before Wannier90 belong to
+that same reference block. Keep Q separate from the union-to-complete map.
+Q is unitary in coefficient coordinates; F need not be orthonormal in the
+current broken-volume fragment metric.
+
+At each local operator epoch compute only
+`h_a=diag(Q^dagger H_ff Q)` and `s_a=diag(Q^dagger S_ff Q)`. On a raw residual
+column r_j apply `z_j=Q D_j^-1 Q^dagger r_j`, where
+`D_j(a)=h_a-epsilon_j*s_a` is regularized at a collective scale using the
+numerical tolerance. Preserve the sign of resolvable nonzero denominators;
+values indistinguishable from zero at roundoff use a deterministic positive
+floor. Reject nonfinite arithmetic and nonpositive reference metric diagonals.
+This is an approximate inverse, not a local eigenproblem or a dense-solve
+fallback. Identity preconditioning is not a production substitute.
+
+For a WF gauge V, `B'=B V`, `Q'=V^dagger Q`, `H'=V^dagger H V`,
+`S'=V^dagger S V`, and `r'=V^dagger r` give `z'=V^dagger z`. A diagonal
+formed directly from H' lacks this property. The production fixed frame must
+be built from the stored pre-localization transform, not replaced by identity
+after a gauge change. A physical reference fingerprint stays fixed while the
+coordinate-map fingerprint can change. No claim is made about rebuilding the
+reference from a different DC seed or a different metric-compression gauge.
+
+The bounded updater passes its current Rayleigh values to an explicit shifted
+preconditioner callback. The original residual-only callback remains available
+for existing fixtures, with exactly one callback selected and no silent
+fallback. Row layout, fragment, generation, basis/metric/reference identity,
+operator fingerprint and potential epoch bind each prepared preconditioner.
+Stale, rank-disagreeing or invalid requests fail collectively and publish no
+partial output. All communication stays inside the fragment communicator.
+
+The input-controlled update budget, dynamically extended state inventory,
+one-time construction-WF localization, final one-shot LCFO, and exact MPI
+rank-count/rank--fragment restart rule remain unchanged.
+
 ### Global operations that remain global
 
 The following operations are not made fragment-private:

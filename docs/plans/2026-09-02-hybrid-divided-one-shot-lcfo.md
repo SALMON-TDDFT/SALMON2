@@ -948,6 +948,14 @@ git diff --cached
 git commit -m "feat(dg): add bounded fragment subspace updates"
 ```
 
+### Task 8a: Certify the fixed-frame preconditioner before production wiring
+
+The user-approved 2026-09-03 amendment replaces the gauge-dependent current-WF
+diagonal preconditioner. Execute
+`docs/plans/2026-09-03-hybrid-fixed-frame-preconditioner.md` first, including its
+checkpoint. Task 8 below remains unfinished until its production route is
+actually connected and all its tests pass.
+
 ### Task 8: Connect the production divided loop to fragment-local construction and bounded updates
 
 **Files:**
@@ -992,8 +1000,13 @@ only the uncompressed fragment catalog.  Require the union-to-complete map to
 remain immutable and unused until complete row composition after divided
 convergence.
 
-Require a finite nonidentity production preconditioner constructed from each
-fragment self block; an identity preconditioner remains fixture-only.
+Require a finite fixed-frame production preconditioner constructed from each
+fragment self block and the saved pre-localization-to-WF map. An identity
+callback remains fixture-only. Test the actual saved Wannier90 transform,
+including complex phases/order, with `F=B Q`; passing identity as Q after
+localization is forbidden. The PW complement uses the unchanged fixed PW
+reference. Check physical preconditioned residuals under independent full WF
+unitary rotations, not only phase/permutation changes.
 
 Require `yn_dg_hybrid_divided_scf`, `yn_dg_hybrid_continuation_scf`, and
 `yn_dg_hybrid_scf` to be mutually exclusive.
@@ -1059,8 +1072,9 @@ At each divided iteration:
    final LCFO, always in the uncompressed fragment coordinates;
 4. advance the fragment cache by at most
    `dg_hybrid_fragment_cg_steps` using the warm `[X,R,P]` state and a
-   regularized diagonal self-block preconditioner derived from
-   `diag(H_ff)-epsilon_j*diag(S_ff)`;
+   Task 8a's shifted callback: `Q D_j^-1 Q^dagger r_j`, with diagonals
+   `diag(Q^dagger H_ff Q)-epsilon_j*diag(Q^dagger S_ff Q)` in the fixed
+   pre-localization reference frame, not the current WF coordinates;
 5. preflight the total represented occupation capacity; when it is
    insufficient, extend every non-exhausted fragment by its next invariant
    shell and repeat steps 4--5 without resetting the remaining update budget;
@@ -1088,11 +1102,12 @@ new directions receive their first LOBPCG update in the next density epoch.
 Thus extension may repeat without permitting more than the user-requested
 number of local updates in one outer iteration.
 
-Floor the diagonal-preconditioner denominator with a collective scale derived
-from `H_ff/S_ff` and the existing numerical tolerance, preserve its sign, and
-reject non-finite inputs or outputs.  Log its fingerprint with the local
-operator epoch so a stale preconditioner cannot be reused after the potential
-changes.
+Use the Task 8a denominator floor with its roundoff-zero convention and reject
+nonfinite inputs/outputs. Log the physical reference, coordinate map and
+preconditioner fingerprints with the local operator epoch. Require the exact
+epoch and H/S provenance on every application so a stale preconditioner cannot
+be reused after a potential change. Pass the current Rayleigh values from the
+bounded updater; do not freeze them at the beginning of the three-step call.
 
 The local loop contains no complete generalized eigensolve and no Wannier90
 call.  Reaching the local three-step cap is accepted when the updater returns a
