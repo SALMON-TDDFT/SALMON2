@@ -154,6 +154,12 @@ for token in (
 ):
     assert token in solve_callback, f"variable fragment-state packing is missing: {token}"
 assert "fragment_occupations=all_fragment_occupations(1:fragment_state_count,dc%i_frag)" in solve_callback
+occupation_call = solve_callback.split("call determine_dc_fragment_occupations", 1)[1].split(
+    "if(.not.callback_ok)", 1
+)[0]
+assert "allow_unordered=.true." in occupation_call, (
+    "divided SCF must preserve coefficient-order occupations after bounded updates"
+)
 assert not re.search(r"fragment_occupations\s*=\s*system%rocc", solve_callback), (
     "divided density must not reuse stale host occupations"
 )

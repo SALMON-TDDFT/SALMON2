@@ -5002,7 +5002,7 @@ contains
     call determine_dc_fragment_occupations(dc%icomm_tot,representative_energies,&
       representative_core_norms,representative_mask,max(0d0,temperature),2d0,&
       dc%elec_num_tot,dg_dc_gs_electron_count_tolerance,chemical_potential,&
-      all_fragment_occupations,common_electron_count,callback_ok,solver_message)
+      all_fragment_occupations,common_electron_count,callback_ok,solver_message,allow_unordered=.true.)
     if(.not.callback_ok)then
       write(0,'(2a)')'divided common occupation: ',trim(solver_message);return
     endif

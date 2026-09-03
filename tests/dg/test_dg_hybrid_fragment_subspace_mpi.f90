@@ -142,6 +142,10 @@ contains
   subroutine test_measurement_only()
     type(s_dg_hybrid_fragment_subspace_state)::saved
     real(real64)::old_values(m)
+    real(real64)::mu,nelectron
+    real(real64),allocatable::occ(:,:)
+    complex(real64)::saved_h(n,n),sx(n,m)
+    logical::tail(1)
     integer::failure_mode
     state=warm;saved=state;precondition_calls=0;maximum_trial=0;mode=0
     call measure()
@@ -154,6 +158,20 @@ contains
     call measure()
     call require(ok.and.maxval(abs(values-old_values-0.125d0))<1d-12,'measurement reused stale energies')
     call certify();h=h-0.125d0*s
+    ! A potential epoch can reverse the Rayleigh order without changing X.
+    ! Measure, determine common occupations, and retain coefficient association.
+    saved_h=h;call gather(state%vectors);sx=matmul(s,g(:,1:m))
+    h=10d0*s-8d0*matmul(sx(:,1:1),conjg(transpose(sx(:,1:1))))-&
+      11d0*matmul(sx(:,2:2),conjg(transpose(sx(:,2:2))))
+    call measure()
+    call require(ok.and.maxval(abs(values-[2d0,-1d0]))<1d-10,'measurement did not retain crossing state order')
+    call determine_dc_fragment_occupations(comm,reshape(values,[m,1]),reshape([0.25d0,0.75d0],[m,1]),&
+      [rank==0],0d0,2d0,1.5d0,1d-8,mu,occ,nelectron,ok,message,tail,allow_unordered=.true.)
+    call require(ok.and.maxval(abs(occ(:,1)-[0d0,2d0]))<1d-10.and..not.any(tail),&
+      'measurement-to-occupation handoff lost coefficient association')
+    call require(abs(nelectron-1.5d0)<1d-8.and.all(state%vectors==saved%vectors).and.&
+      all(state%directions==saved%directions),'occupation handoff changed electron count or X/P')
+    h=saved_h
     do failure_mode=4,7
       mode=failure_mode;call measure()
       call require(.not.ok.and.fingerprint==0_int64.and.all(values==0d0),&

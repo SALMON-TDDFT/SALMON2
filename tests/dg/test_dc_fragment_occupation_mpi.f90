@@ -19,6 +19,7 @@ program test_dc_fragment_occupation_mpi
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
   allocate(energies(2,2),core_norms(2,2),representative_mask(2))
+  call test_unordered_spectrum()
 
   call distribute_two_fragment_case(&
     reshape([-1d0,0.5d0,-0.5d0,1d0],[2,2]),&
@@ -225,6 +226,62 @@ program test_dc_fragment_occupation_mpi
   endif
   call MPI_Finalize(ierr)
 contains
+  subroutine test_unordered_spectrum()
+    real(real64)::e(4,2),w(4,2),saved_e(4,2),saved_w(4,2),expected(4,2)
+    real(real64),allocatable::answer(:,:),direct(:)
+    real(real64)::reference_mu,reference_electrons
+    logical::representatives(2),tail(2)
+    integer::f
+    e=0d0;w=0d0
+    representatives=[rank==0,rank==mod(1,nproc)]
+    do f=1,2
+      if(.not.representatives(f))cycle
+      ! Unequal weights expose energy-only sorting; zero-weight padding is not a state.
+      e(:,f)=[4d0,-1d0,0d0,0d0]
+      w(:,f)=[0.25d0,0.5d0,0.25d0,0d0]
+    enddo
+    saved_e=e;saved_w=w
+    call determine_dc_fragment_occupations(comm,e,w,representatives,0d0,2d0,2d0,tolerance,&
+      chemical_potential,answer,electron_count,ok,message)
+    call require(.not.ok,'default sorted-spectrum contract changed')
+    call determine_dc_fragment_occupations(comm,e,w,representatives,0d0,2d0,2d0,tolerance,&
+      chemical_potential,answer,electron_count,ok,message,tail,allow_unordered=.true.)
+    call require(ok,'unordered measured spectrum rejected: '//trim(message))
+    expected=0d0;expected(2,:)=2d0
+    call require(maxval(abs(answer-expected))<1d-14.and..not.any(tail),&
+      'occupations were not returned in coefficient-column order')
+    call require(all(e==saved_e).and.all(w==saved_w),'occupation packing mutated caller data')
+    call require(abs(electron_count-2d0)<tolerance,'unordered spectrum changed electron count')
+    call determine_dc_fragment_occupations(comm,e,w,representatives,0.1d0,2d0,2d0,tolerance,&
+      chemical_potential,answer,electron_count,ok,message,tail,allow_unordered=.true.)
+    call require(ok.and..not.any(tail),'unordered finite-temperature tail failed: '//trim(message))
+    call solve_weighted_state_occupations([4d0,-1d0,0d0,0d0,4d0,-1d0,0d0,0d0],&
+      [0.25d0,0.5d0,0.25d0,0d0,0.25d0,0.5d0,0.25d0,0d0],2d0,0.1d0,2d0,&
+      direct,reference_mu,reference_electrons,ok,message)
+    call require(ok.and.maxval(abs(answer-reshape(direct,[4,2])))<1d-12.and.&
+      abs(chemical_potential-reference_mu)<1d-12,'unordered adapter changed weighted-kernel physics')
+    do f=1,2
+      if(representatives(f))then
+        e(:,f)=[0d0,-1d0,0d0,0d0]
+        w(:,f)=[0.25d0,0.5d0,0.25d0,0d0]
+      endif
+    enddo
+    call determine_dc_fragment_occupations(comm,e,w,representatives,0d0,2d0,3d0,tolerance,&
+      chemical_potential,answer,electron_count,ok,message,tail,allow_unordered=.true.)
+    ! Zero-weight padding shares the shell's formal occupation but carries no charge.
+    expected=1d0;expected(2,:)=2d0
+    call require(ok.and.maxval(abs(answer-expected))<1d-14.and.all(tail),&
+      'unordered degenerate terminal shell lost its occupations or extension mask')
+    if(nproc>1)then
+      call determine_dc_fragment_occupations(comm,e,w,representatives,0d0,2d0,3d0,tolerance,&
+        chemical_potential,answer,electron_count,ok,message,tail,allow_unordered=rank==0)
+      call require(.not.ok,'rank-disagreeing unordered-spectrum policy accepted')
+    endif
+    if(representatives(1))e(1,1)=ieee_value(0d0,ieee_quiet_nan)
+    call determine_dc_fragment_occupations(comm,e,w,representatives,0d0,2d0,3d0,tolerance,&
+      chemical_potential,answer,electron_count,ok,message,tail,allow_unordered=.true.)
+    call require(.not.ok.and..not.allocated(answer),'unordered option bypassed finite-spectrum validation')
+  end subroutine
   subroutine distribute_two_fragment_case(global_energies,global_core_norms)
     real(real64),intent(in)::global_energies(:,:),global_core_norms(:,:)
     energies=100d0+real(rank,real64)

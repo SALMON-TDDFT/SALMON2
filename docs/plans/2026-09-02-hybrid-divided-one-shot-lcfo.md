@@ -973,6 +973,17 @@ construction from DC seeds, remaining-budget accounting, dynamic extension,
 fixed-frame callback wiring, dual-catalog integration and route tests below
 remain required. No Si64 calculation has been started.
 
+**Progress, 2026-09-04 (Task 8 remains incomplete):** The common occupation
+adapter now accepts explicit `allow_unordered=.true.` for measured/bounded
+states. It collectively agrees this option, stably sorts gathered energy/core
+weight pairs for occupation and terminal-tail decisions, then returns
+occupations in the original coefficient order. The divided production call
+opts in; conventional callers retain the original sorted-spectrum requirement.
+Tests cover crossing measured Rayleigh values with unchanged X/P, unequal core
+weights, padding, degenerate terminal shells, finite temperature, invalid
+representative data and rank-disagreeing policy. The pending construction and
+bounded-update main-loop replacement described above is still required.
+
 **Files:**
 
 - Modify: `src/io/salmon_global.f90:480-545`

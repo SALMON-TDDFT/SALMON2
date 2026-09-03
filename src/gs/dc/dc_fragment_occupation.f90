@@ -78,7 +78,7 @@ contains
 
   subroutine determine_dc_fragment_occupations(comm,energies,core_norms,representative_mask,&
       temperature,wspin,expected_electrons,tolerance,chemical_potential,occupations,&
-      electron_count,ok,message,needs_extension,terminal_shell_complete)
+      electron_count,ok,message,needs_extension,terminal_shell_complete,allow_unordered)
     ! Columns identify ascending fragment spectra.  A zero core norm may pad a
     ! shorter spectrum at its final energy; exactly one rank contributes each
     ! column on the total communicator.
@@ -94,19 +94,25 @@ contains
     ! True only with an external whole-shell completeness receipt.  Without it,
     ! an occupied zero-T boundary is conservatively treated as incomplete.
     logical,optional,intent(in)::terminal_shell_complete(:)
+    ! Bounded updates preserve X/P column order, not spectral order. Opt in to
+    ! sorting energy/weight pairs internally and returning occupations in X order.
+    logical,optional,intent(in)::allow_unordered
     integer::rank,ierr,fragment,state,boundary_state,element_count,allocation_status,local_bad,global_bad
     integer::local_shape(5),minimum_shape(5),maximum_shape(5)
-    integer::optional_shape(4),minimum_optional(4),maximum_optional(4)
+    integer::optional_shape(6),minimum_optional(6),maximum_optional(6),position,original_index
     integer,allocatable::local_representatives(:),global_representatives(:)
+    integer,allocatable::spectral_order(:,:)
     integer(int64)::element_count_64
     real(real64)::controls(4),minimum_controls(4),maximum_controls(4),guard_state_tail,&
-      boundary_tail_charge,boundary_maximum_occupation,energy_scale,fragment_tail,fragment_max
+      boundary_tail_charge,boundary_maximum_occupation,energy_scale,fragment_tail,fragment_max,energy_value,weight_value
     real(real64),allocatable::local_energies(:,:),global_energies(:,:),&
       local_core_norms(:,:),global_core_norms(:,:),flat_occupations(:)
-    logical::kernel_ok
+    logical::kernel_ok,reorder_spectrum
     character(512)::kernel_message
 
     ok=.false.;message='';chemical_potential=0d0;electron_count=0d0
+    reorder_spectrum=.false.
+    if(present(allow_unordered))reorder_spectrum=allow_unordered
     if(present(needs_extension))needs_extension=.false.
     call MPI_Comm_rank(comm,rank,ierr)
     if(ierr/=MPI_SUCCESS)then;message='fragment occupation communicator query failed';return;endif
@@ -124,12 +130,13 @@ contains
       local_shape(4)/=local_shape(2).or.local_shape(5)/=local_shape(2))then
       message='invalid fragment occupation shapes';return
     endif
-    optional_shape=[merge(1,0,present(needs_extension)),0,merge(1,0,present(terminal_shell_complete)),0]
+    optional_shape=[merge(1,0,present(needs_extension)),0,merge(1,0,present(terminal_shell_complete)),0,&
+      merge(1,0,present(allow_unordered)),merge(1,0,reorder_spectrum)]
     if(present(needs_extension))optional_shape(2)=size(needs_extension)
     if(present(terminal_shell_complete))optional_shape(4)=size(terminal_shell_complete)
-    call MPI_Allreduce(optional_shape,minimum_optional,4,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(optional_shape,minimum_optional,6,MPI_INTEGER,MPI_MIN,comm,ierr)
     if(ierr/=MPI_SUCCESS)return
-    call MPI_Allreduce(optional_shape,maximum_optional,4,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(optional_shape,maximum_optional,6,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.any(minimum_optional/=maximum_optional))then
       message='rank-disagreeing fragment tail options';return
     endif
@@ -187,7 +194,7 @@ contains
         local_bad=1
       else if(any(core_norms(:,fragment)<0d0))then
         local_bad=1
-      else if(local_shape(1)>1)then
+      else if(local_shape(1)>1.and..not.reorder_spectrum)then
         if(any(energies(2:,fragment)<energies(:local_shape(1)-1,fragment)))local_bad=1
       endif
     enddo
@@ -210,6 +217,31 @@ contains
     if(.not.all(ieee_is_finite(global_energies)).or.&
       .not.all(ieee_is_finite(global_core_norms)))then
       message='non-finite gathered fragment occupation data';return
+    endif
+
+    if(reorder_spectrum)then
+      allocate(spectral_order(local_shape(1),local_shape(2)),stat=allocation_status)
+      local_bad=merge(0,1,allocation_status==0)
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='cannot allocate spectral permutation';return;endif
+      do fragment=1,local_shape(2)
+        spectral_order(:,fragment)=[(state,state=1,local_shape(1))]
+        ! Stable ordering keeps exactly degenerate coefficient labels together.
+        ! No arithmetic or WF rotation changes energies, weights or coefficients.
+        do state=2,local_shape(1)
+          energy_value=global_energies(state,fragment);weight_value=global_core_norms(state,fragment)
+          original_index=spectral_order(state,fragment);position=state
+          do while(position>1)
+            if(global_energies(position-1,fragment)<=energy_value)exit
+            global_energies(position,fragment)=global_energies(position-1,fragment)
+            global_core_norms(position,fragment)=global_core_norms(position-1,fragment)
+            spectral_order(position,fragment)=spectral_order(position-1,fragment)
+            position=position-1
+          enddo
+          global_energies(position,fragment)=energy_value;global_core_norms(position,fragment)=weight_value
+          spectral_order(position,fragment)=original_index
+        enddo
+      enddo
     endif
 
     kernel_ok=.false.;kernel_message='';chemical_potential=0d0;electron_count=0d0
@@ -298,6 +330,12 @@ contains
           guard_state_tail,' tolerance=',tolerance,''
         return
       endif
+    endif
+    if(reorder_spectrum)then
+      local_energies=occupations
+      do fragment=1,local_shape(2)
+        occupations(spectral_order(:,fragment),fragment)=local_energies(:,fragment)
+      enddo
     endif
     ok=.true.;message=''
   end subroutine determine_dc_fragment_occupations
