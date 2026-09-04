@@ -34,7 +34,10 @@ with tempfile.TemporaryDirectory(prefix="hybrid-selection-") as temporary:
     selection = "src/gs/dc/dg_hybrid_fragment_selection.f90"
     if (ROOT / selection).exists():
         sources.append(selection)
-    sources += ["src/common/dg_hybrid_windowed_pw_types.f90",
+    sources += ["src/math/phys_constants.f90",
+                "src/gs/occupation_kernel.f90",
+                "src/gs/dc/dc_fragment_occupation.f90",
+                "src/common/dg_hybrid_windowed_pw_types.f90",
                 "src/common/dg_hybrid_reciprocal_catalog.f90",
                 "src/common/dg_hybrid_windowed_pw_basis.f90",
                 "src/common/dg_hybrid_wannier_complement.f90",
@@ -70,6 +73,8 @@ with tempfile.TemporaryDirectory(prefix="hybrid-selection-") as temporary:
         assert result.returncode == 0, (count, result.stdout, result.stderr)
         assert f"PASS core-center selection on {count} ranks" in result.stdout, result.stdout
         if count > 1:
+            assert f"PASS thermal DG handoff on {count} ranks" in result.stdout, result.stdout
+            print(next(line for line in result.stdout.splitlines() if line.startswith("PASS thermal DG")))
             assert f"PASS explicit cutoff projection on {count} ranks" in result.stdout, result.stdout
             print(next(line for line in result.stdout.splitlines() if line.startswith("PASS explicit cutoff")))
 print("PASS core-center selection on 1, 2, 4, and 8 ranks")

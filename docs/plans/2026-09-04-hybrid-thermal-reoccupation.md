@@ -155,6 +155,37 @@ was repeated; unrelated dirty files and logs remain preserved.
 
 ### Task O3: Connect bounded current-state updates, reoccupation and density
 
+**First small-operator integration checkpoint:** The half-core-norm raw-cache
+fixture now uses actual volume/SIPG/nonlocal assembly, the verified trial
+adapter and the cached rectangular preconditioner. Its state is refreshed by
+the real bounded updater through `run_dc_fragment_occupation_epoch` at
+`300*kB_au`. Core weights are measured from the current physical states, not
+assigned as identity weights. The target is the sum of the unchanged raw
+reference's core electron counts across fragments.
+
+The initial two-state spectrum needs a guard: the existing projected G=0 PW
+candidate is extended through the real subspace extension routine, producing
+three working states. Refresh calls keep one shared maximum-three-update
+budget. Current-state Fermi–Dirac occupations agree with an independent stable
+formula, core orthogonality is preserved, and independently reconstructed
+density integrates to the target (5/10/20 electrons on 2/4/8 ranks). The new
+density differs from raw DC density as intended. Reconstructing with padded
+old occupations instead fails the electron-number criterion. No saved DC
+occupations are supplied to the new thermal solve, and W90 counts do not grow.
+
+Selection tests pass on 1/2/4/8 ranks (thermal integration on 2/4/8), existing
+subspace and occupation regressions pass on 1/2/4/8, and release builds.
+Independent review found no Critical/Important issue; its callback-collective
+diagnostic suggestion was applied so a local failure returns status to the
+outer occupation collective. No production source was modified in this
+checkpoint; this is test-harness composition of real numerical routines, not
+an installed main-route adapter.
+
+Production transactional rollback/capacity integration, full operator support
+coverage and the remaining C5/C6 gates are still open. Do not claim general
+material acceptance or Task 8 completion. Existing dirty changes and logs
+remain untouched; no material/DC computation was repeated.
+
 Files: selection integration test/runner, `dc_fragment_occupation.f90` only if
 needed for the adapter, then the task-owned main-route hunks in parent C6.
 

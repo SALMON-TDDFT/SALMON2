@@ -1,5 +1,7 @@
 program test_fragment_selection
   use mpi
+  use phys_constants,only:kB_au
+  use dc_fragment_occupation,only:run_dc_fragment_occupation_epoch
   use,intrinsic::iso_fortran_env,only:int64,real64
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   use dg_hybrid_fragment_selection
@@ -19,6 +21,8 @@ program test_fragment_selection
   use dg_hybrid_divided_operator,only:freeze_dg_hybrid_single_owner_payload,extract_dg_hybrid_fragment_self_block
   use dg_hybrid_fragment_subspace,only:s_dg_hybrid_fragment_subspace_state,&
     initialize_dg_hybrid_fragment_density_checked,s_dg_hybrid_fragment_epoch_budget,advance_dg_hybrid_fragment_epoch
+  use dg_hybrid_fragment_subspace,only:s_dg_hybrid_fragment_candidate_catalog,&
+    s_dg_hybrid_fragment_extension_receipt,extend_dg_hybrid_fragment_subspace,fragment_pw
   use dg_hybrid_fragment_solver,only:reconstruct_dg_hybrid_fragment_density,measure_dg_hybrid_fragment_core_norms
   use dg_hybrid_fragment_admission,only:s_dg_hybrid_support_operator,s_dg_hybrid_admission_report,&
     prepare_dg_hybrid_support_operator,admit_dg_hybrid_selected_fragment,export_dg_hybrid_selected_basis_frame
@@ -51,6 +55,13 @@ program test_fragment_selection
   type(s_dg_hybrid_fragment_preconditioner)::operator_preconditioner
   type(s_dg_hybrid_preconditioner_key)::operator_key
   integer(int64)::operator_selection_fp
+  type(s_dg_hybrid_fragment_subspace_state)::thermal_state
+  type(s_dg_hybrid_fragment_epoch_budget)::thermal_budget
+  type(s_dg_hybrid_fragment_candidate_catalog)::thermal_candidates
+  type(s_dg_hybrid_fragment_basis)::thermal_basis
+  logical::thermal_core_mask(8)
+  integer::thermal_steps
+  real(real64),allocatable::thermal_spectrum(:)
   logical::density_callback_failure=.false.
   logical::ok
   character(256)::message
@@ -688,9 +699,11 @@ contains
       basis_generation=4,projection_receipt=basis_receipt)
     call require(passed,'half-norm PW projection: '//trim(why))
     call test_combined_admission(half_raw,chosen,selected_basis,basis_receipt,.true.)
+    call test_selected_operator_assembly(selected_basis,chosen,half_raw,basis_receipt,.true.)
     call require(run_calls==run0.and.setup_calls==setup0,'half-norm admission reran W90')
   end subroutine
-  subroutine test_selected_operator_assembly(basis,selection,raw,receipt)
+  subroutine test_selected_operator_assembly(basis,selection,raw,receipt,thermal)
+    logical,optional,intent(in)::thermal
     type(s_dg_hybrid_fragment_basis),intent(in)::basis
     type(s_dg_hybrid_core_selection),intent(in)::selection
     type(s_dg_hybrid_fragment_wannier_cache),intent(in)::raw
@@ -781,9 +794,10 @@ contains
     call require(maxval(abs(sff-metric(:,own_ids)))<1d-12.and.&
       maxval(abs(hff-kinetic(:,own_ids)-nonlocal(:,own_ids)-interface_matrix(own_ids,own_ids)))<1d-12,&
       'selected self-block lost volume/interface/nonlocal contributions')
-    call test_admitted_operator_updates(basis,selection,raw,receipt,payload%fingerprint,hff,sff)
+    call test_admitted_operator_updates(basis,selection,raw,receipt,payload%fingerprint,hff,sff,thermal)
   end subroutine
-  subroutine test_admitted_operator_updates(basis,selection,raw,receipt,operator_fp,h,s)
+  subroutine test_admitted_operator_updates(basis,selection,raw,receipt,operator_fp,h,s,thermal)
+    logical,optional,intent(in)::thermal
     type(s_dg_hybrid_fragment_basis),intent(in)::basis
     type(s_dg_hybrid_core_selection),intent(in)::selection
     type(s_dg_hybrid_fragment_wannier_cache),intent(in)::raw
@@ -820,6 +834,12 @@ contains
       [1,2,3],core([4,1]),[cmplx(0.6d0,0d0,real64),cmplx(0d0,-0.8d0,real64)],&
       [1d0,1d0],support(3),support_fp(3),passed,why)
     call require(passed,'assembled projector inventory: '//trim(why))
+    if(present(thermal))then
+      if(thermal)then
+        call test_thermal_operator_updates(basis,selection,raw,receipt,support,support_fp,operator_fp,h,s)
+        return
+      endif
+    endif
     call admit_dg_hybrid_selected_fragment(MPI_COMM_WORLD,f,raw,selection,basis,receipt,support,support_fp,&
       [1d0,1d0,1d0,1d0],[1d-12,1d-10,1d-10,1d-10],[1d-10,1d-10,1d-10],0d0,0,&
       1d-8,1d-10,1d-10,state,selected,report,passed,why)
@@ -866,6 +886,130 @@ contains
     call require(maxval(abs(matmul(psi(selection%core_row_slots,:),&
       conjg(transpose(psi(selection%core_row_slots,:))))-initial_projector))>1d-6,&
       'bounded DG update did not change the occupied physical subspace')
+  end subroutine
+  subroutine test_thermal_operator_updates(basis,selection,raw,receipt,support,support_fp,operator_fp,h,s)
+    type(s_dg_hybrid_fragment_basis),intent(in)::basis
+    type(s_dg_hybrid_core_selection),intent(in)::selection
+    type(s_dg_hybrid_fragment_wannier_cache),intent(in)::raw
+    type(s_dg_hybrid_projection_factorization_receipt),intent(in)::receipt
+    type(s_dg_hybrid_support_operator),intent(in)::support(3)
+    integer(int64),intent(in)::support_fp(3),operator_fp
+    complex(real64),intent(in)::h(:,:),s(:,:)
+    type(s_dg_hybrid_admission_report)::report
+    type(s_dg_hybrid_dc_reference)::reference
+    complex(real64),allocatable::frame(:,:),psi(:,:),gram(:,:)
+    real(real64),allocatable::occ(:),stale_occ(:)
+    real(real64)::target,local_target,mu,ne,density(8),oracle(8),old_density(4),electrons,total_electrons,z,fd
+    integer::passes,extensions,a,ns
+    integer,allocatable::selected(:)
+    integer(int64)::frame_fp,fp
+    logical::passed
+    character(256)::why
+    call prepare_dg_hybrid_selected_trial(MPI_COMM_WORLD,f,raw,selection,basis,receipt,support,support_fp,&
+      [1d0,1d0,1d0,1d0],[1d-12,1d-10,1d-10,1d-10],[1d-10,1d-10,1d-10],0d0,2,0,1d-10,1d-10,&
+      thermal_state,selected,report,passed,why)
+    call require(passed.and.report%trial_prepared.and..not.report%valid,'thermal trial: '//trim(why))
+    call export_dg_hybrid_dc_reference(MPI_COMM_WORLD,f,raw,selection,reference,passed,why)
+    call require(passed,'thermal raw density reference: '//trim(why))
+    old_density=0d0
+    do a=1,size(reference%occupations)
+      old_density=old_density+reference%occupations(a)*abs(reference%core_orbitals(:,a))**2
+    enddo
+    local_target=sum(old_density)
+    call MPI_Allreduce(local_target,target,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+    call require(abs(sum(reference%occupations)-local_target)>0.1d0,'thermal fixture does not expose stale occupations')
+    call export_dg_hybrid_selected_basis_frame(MPI_COMM_WORLD,f,raw,selection,basis,receipt,frame,frame_fp,passed,why)
+    call require(passed,'thermal fixed reference export: '//trim(why))
+    operator_h=h;operator_s=s;operator_selection_fp=selection%fingerprint
+    operator_key=s_dg_hybrid_preconditioner_key(f,selection%basis_generation,1,thermal_state%basis_fingerprint,&
+      thermal_state%metric_fingerprint,operator_fp,frame_fp)
+    call prepare_dg_hybrid_frame_preconditioner(MPI_COMM_SELF,4,[1_int64,2_int64,3_int64,4_int64],frame,h,s,&
+      operator_key,operator_selection_fp,1d-10,operator_preconditioner,fp,passed,why)
+    call require(passed,'thermal actual-operator preconditioner: '//trim(why))
+    thermal_basis=basis;thermal_core_mask=.false.;thermal_core_mask(selection%core_row_slots)=.true.
+    thermal_budget=s_dg_hybrid_fragment_epoch_budget();thermal_steps=0
+    thermal_candidates=s_dg_hybrid_fragment_candidate_catalog()
+    thermal_candidates%fragment_id=f;thermal_candidates%basis_generation=selection%basis_generation
+    thermal_candidates%basis_fingerprint=thermal_state%basis_fingerprint
+    thermal_candidates%metric_fingerprint=thermal_state%metric_fingerprint
+    ! The existing G=0 projected PW is a genuine fixed-basis extension candidate.
+    allocate(thermal_candidates%coefficients(4,1));thermal_candidates%coefficients=0d0
+    thermal_candidates%coefficients(4,1)=1d0
+    thermal_candidates%energies=[0d0];thermal_candidates%ids=[basis%global_ids(4)]
+    thermal_candidates%source_kind=[fragment_pw];thermal_candidates%used=[.false.]
+    call run_dc_fragment_occupation_epoch(MPI_COMM_WORLD,np,f,.true.,1,4,300d0*kB_au,2d0,target,1d-8,&
+      refresh_thermal,extend_thermal,occ,mu,ne,passes,extensions,passed,why)
+    call require(passed,'actual-operator 300 K occupation epoch: '//trim(why))
+    call require(passes>=2.and.extensions==1.and.thermal_state%state_count==3,&
+      'thermal occupied boundary did not extend to the available guard state')
+    call require(thermal_steps>0.and.thermal_steps<=3,'thermal extension reset or skipped the local update budget')
+    ns=thermal_state%state_count
+    gram=matmul(conjg(transpose(thermal_state%vectors)),matmul(s,thermal_state%vectors))
+    do a=1,ns;gram(a,a)=gram(a,a)-1d0;enddo
+    call require(maxval(abs(gram))<1d-9,'thermal updated states lost core orthogonality')
+    do a=1,ns
+      z=(thermal_spectrum(a)-mu)/(300d0*kB_au)
+      if(z>=0d0)then;fd=2d0*exp(-z)/(1d0+exp(-z))
+      else;fd=2d0/(1d0+exp(z));endif
+      call require(abs(occ(a)-fd)<1d-9,'thermal occupations do not follow current-state energies')
+    enddo
+    psi=matmul(basis%buffer_values,thermal_state%vectors);oracle=0d0
+    do a=1,ns;oracle=oracle+occ(a)*abs(psi(:,a))**2;enddo
+    where(.not.thermal_core_mask)oracle=0d0
+    call reconstruct_dg_hybrid_fragment_density(MPI_COMM_SELF,basis,thermal_state%vectors,occ,2d0,&
+      thermal_core_mask,[(1d0,a=1,8)],density,electrons,passed,why)
+    call require(passed.and.maxval(abs(density-oracle))<1d-10,'thermal physical density oracle: '//trim(why))
+    call MPI_Allreduce(electrons,total_electrons,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+    call require(abs(total_electrons-target)<1d-8.and.abs(ne-target)<1d-8,'thermal density lost global electrons')
+    call require(maxval(abs(density(selection%core_row_slots)-old_density))>1d-3,&
+      'thermal test did not exercise changed starting density')
+    allocate(stale_occ(ns));stale_occ=0d0;stale_occ(:size(reference%occupations))=reference%occupations
+    call reconstruct_dg_hybrid_fragment_density(MPI_COMM_SELF,basis,thermal_state%vectors,stale_occ,2d0,&
+      thermal_core_mask,[(1d0,a=1,8)],density,electrons,passed,why)
+    call require(passed,'stale-occupation negative reconstruction: '//trim(why))
+    call MPI_Allreduce(electrons,total_electrons,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+    call require(abs(total_electrons-target)>0.1d0*np,'old occupations accidentally passed the thermal electron gate')
+    if(rank==0)write(*,'(a,i0,a,es12.4)')'PASS thermal DG handoff on ',np,' ranks; electrons=',ne
+  end subroutine
+  subroutine refresh_thermal(epoch,energy,weights,can_grow,valid,diagnostic)
+    integer,intent(in)::epoch
+    real(real64),allocatable,intent(out)::energy(:),weights(:)
+    logical,intent(out)::can_grow,valid
+    character(*),intent(out)::diagnostic
+    integer::steps,remaining,ns
+    integer(int64)::workspace,fp
+    real(real64)::residual
+    logical::converged,advanced
+    character(256)::reason
+    ns=thermal_state%state_count;allocate(energy(ns))
+    call advance_dg_hybrid_fragment_epoch(MPI_COMM_SELF,4,[1_int64,2_int64,3_int64,4_int64],f,&
+      thermal_state%basis_generation,thermal_state%basis_fingerprint,thermal_state%metric_fingerprint,epoch,3,&
+      apply_operator_h,apply_operator_s,apply_operator_preconditioner,1d-12,1d-10,2d0,&
+      thermal_budget,thermal_state,energy,steps,remaining,residual,converged,advanced,reason,workspace,fp,valid,diagnostic)
+    if(.not.valid)return
+    thermal_steps=thermal_steps+steps
+    valid=remaining==3-thermal_steps
+    if(.not.valid)then
+      diagnostic='thermal refresh reset the shared budget';return
+    endif
+    thermal_spectrum=energy
+    call measure_dg_hybrid_fragment_core_norms(MPI_COMM_SELF,thermal_basis,thermal_state%vectors,&
+      thermal_core_mask,[(1d0,ns=1,8)],weights,valid,diagnostic)
+    can_grow=.not.all(thermal_candidates%used)
+  end subroutine
+  subroutine extend_thermal(epoch,old_count,new_count,valid,diagnostic)
+    integer,intent(in)::epoch,old_count
+    integer,intent(out)::new_count
+    logical,intent(out)::valid
+    character(*),intent(out)::diagnostic
+    type(s_dg_hybrid_fragment_extension_receipt)::receipt
+    valid=epoch==1.and.old_count==thermal_state%state_count
+    diagnostic='thermal extension context mismatch';new_count=old_count
+    if(.not.valid)return
+    call extend_dg_hybrid_fragment_subspace(MPI_COMM_SELF,4,[1_int64,2_int64,3_int64,4_int64],f,&
+      thermal_state%basis_generation,thermal_state%basis_fingerprint,thermal_state%metric_fingerprint,&
+      apply_operator_h,apply_operator_s,1d-10,1d-10,thermal_candidates,thermal_state,receipt,valid,diagnostic)
+    new_count=thermal_state%state_count
   end subroutine
   subroutine apply_operator_h(input,output,valid)
     complex(real64),intent(in)::input(:,:)
