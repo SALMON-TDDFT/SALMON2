@@ -433,6 +433,7 @@ contains
       & yn_obs_plane_em,          &
       & yn_obs_plane_integral_em, &
       & yn_wf_em,                 &
+      & yn_em_envelope,           &
       & film_thickness,           &
       & media_id_pml,             &
       & media_id_source1,         &
@@ -879,6 +880,7 @@ contains
     yn_obs_plane_em(:)          = 'n'
     yn_obs_plane_integral_em(:) = 'n'
     yn_wf_em                    = 'y'
+    yn_em_envelope              = 'n'
     film_thickness              = 0d0
     media_id_pml(:,:)           = 0
     media_id_source1            = 0
@@ -1189,6 +1191,7 @@ contains
     call string_lowercase(bloch_real_imag_em(1))
     call string_lowercase(bloch_real_imag_em(2))
     call string_lowercase(bloch_real_imag_em(3))
+    call string_lowercase(yn_em_envelope)
     if(n_s>0) then
       do ii = 1,n_s
         call string_lowercase(typ_s(ii))
@@ -1503,6 +1506,7 @@ contains
     call comm_bcast(yn_obs_plane_em          ,nproc_group_global)
     call comm_bcast(yn_obs_plane_integral_em ,nproc_group_global)
     call comm_bcast(yn_wf_em                 ,nproc_group_global)
+    call comm_bcast(yn_em_envelope           ,nproc_group_global)
     call comm_bcast(film_thickness           ,nproc_group_global)
     film_thickness = film_thickness * ulength_to_au
     call comm_bcast(media_id_pml             ,nproc_group_global)
@@ -2448,6 +2452,7 @@ contains
         end do
       end if
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_wf_em', yn_wf_em
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_em_envelope', yn_em_envelope
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'film_thickness', film_thickness
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(1,1)', media_id_pml(1,1)
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(1,2)', media_id_pml(1,2)
@@ -2816,6 +2821,7 @@ contains
       end do
     end if
     call yn_argument_check(yn_wf_em)
+    call yn_argument_check(yn_em_envelope)
     call yn_argument_check(yn_make_shape)
     call yn_argument_check(yn_output_shape)
     call yn_argument_check(yn_copy_x)
@@ -3094,6 +3100,11 @@ contains
         end if
         write_gs_restart_data = 'no'
       end if
+    end if
+
+    if(yn_em_envelope=='y')then
+      if(omega1<=0d0) stop "yn_em_envelope=y requires a single carrier omega1>0"
+      if(omega2/=0d0) stop "yn_em_envelope=y supports a single carrier only (unset omega2)"
     end if
 
 #ifdef USE_FFTW
