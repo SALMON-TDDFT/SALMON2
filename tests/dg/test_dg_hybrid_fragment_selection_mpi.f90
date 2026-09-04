@@ -15,7 +15,9 @@ program test_fragment_selection
   use dg_hybrid_fragment_subspace,only:s_dg_hybrid_fragment_subspace_state,&
     initialize_dg_hybrid_fragment_density_checked
   use dg_hybrid_fragment_admission,only:s_dg_hybrid_support_operator,s_dg_hybrid_admission_report,&
-    prepare_dg_hybrid_support_operator,admit_dg_hybrid_selected_fragment
+    prepare_dg_hybrid_support_operator,admit_dg_hybrid_selected_fragment,export_dg_hybrid_selected_basis_frame
+  use dg_hybrid_fragment_preconditioner,only:s_dg_hybrid_fragment_preconditioner,&
+    s_dg_hybrid_preconditioner_key,prepare_dg_hybrid_frame_preconditioner,apply_dg_hybrid_fragment_preconditioner
   implicit none
   integer::rank,np,ierr,f,j,a,nx,variant,owner,expected(4),nexpected,setup_saved,run_saved
   integer::raw_shape(3),core_shape(3),total_shape(3),mapping(8,3),bad_mapping(8,3)
@@ -25,6 +27,9 @@ program test_fragment_selection
   real(real64)::points(3,8),bad_points(3,8),local_lower(3),local_extent(3),probe(3)
   complex(real64)::seeds(2,8),buffer(1,8),projector(1,8)
   complex(real64),allocatable::selected_values(:,:)
+  complex(real64),allocatable::selected_frame(:,:)
+  complex(real64)::frame_oracle(8,4)
+  integer(int64)::selected_frame_fp
   integer(int64)::ids(8),first_fp
   type(s_dg_hybrid_fragment_wannier_cache)::cache,bad_cache,snapshot,empty_cache
   complex(real64)::values(8,8),rotated(8,8),physical_projector(8,8),rotated_projector(8,8)
@@ -101,6 +106,16 @@ program test_fragment_selection
   call require(all(shape(selected_values)==[nexpected,8]),'selected export dropped buffer rows')
   call require(all(selected_values==cache%wannier_values(expected(:nexpected),:)),&
     'selected export changed raw values/order')
+  call export_dg_hybrid_selected_frame(MPI_COMM_WORLD,f,cache,selection,selected_frame,selected_frame_fp,ok,message)
+  call require(ok,'unequal selected frame export: '//trim(message))
+  call require(all(shape(selected_frame)==[nexpected,4]),'selected frame assumed a fixed state count')
+  frame_oracle=0d0
+  do a=1,4;do j=1,nexpected
+    frame_oracle(:,a)=frame_oracle(:,a)+cache%wannier_values(expected(j),:)*&
+      conjg(cache%wannier_transform(a,expected(j)))
+  enddo;enddo
+  call require(maxval(abs(matmul(transpose(selected_values),selected_frame)-frame_oracle))<1d-12,&
+    'unequal/non-prefix selection changed projected physical reference')
   call export_dg_hybrid_dc_reference(MPI_COMM_WORLD,f,cache,selection,dc_oracle,ok,message)
   call require(ok.and.dc_oracle%valid,'bound raw DC reference export: '//trim(message))
   call require(all(dc_oracle%core_row_slots==[(j,j=1,f)]),'raw core row slots disagree with DC mapping')
@@ -136,6 +151,9 @@ program test_fragment_selection
     call export_dg_hybrid_dc_reference(MPI_COMM_WORLD,f,bad_cache,again,dc_oracle,ok,message)
     call require(.not.ok.and..not.dc_oracle%valid.and..not.allocated(dc_oracle%buffer_orbitals),&
       'corrupt selection published raw DC reference')
+    call export_dg_hybrid_selected_frame(MPI_COMM_WORLD,f,bad_cache,again,selected_frame,selected_frame_fp,ok,message)
+    call require(.not.ok.and..not.allocated(selected_frame).and.selected_frame_fp==0_int64,&
+      'corrupt selection published fixed reference coordinates')
   enddo
   call require(all(cache%wannier_values==snapshot%wannier_values),'export mutated raw cache')
   call require(setup_calls==setup_saved.and.run_calls==run_saved,'export reran W90')
@@ -364,6 +382,7 @@ contains
       active%fingerprint,passed,why)
     call require(passed,'fresh projected basis failed validation: '//trim(why))
     call test_combined_admission(raw,chosen,selected_basis,basis_receipt)
+    call test_cached_frame_connection(raw,chosen,selected_basis,basis_receipt)
     do p=1,5
       changed_basis=selected_basis;changed_receipt=basis_receipt
       if(rank==0)then
@@ -584,6 +603,65 @@ contains
     call require(passed,'half-norm PW projection: '//trim(why))
     call test_combined_admission(half_raw,chosen,selected_basis,basis_receipt,.true.)
     call require(run_calls==run0.and.setup_calls==setup0,'half-norm admission reran W90')
+  end subroutine
+  subroutine test_cached_frame_connection(raw,selection,basis,receipt)
+    type(s_dg_hybrid_fragment_wannier_cache),intent(in)::raw
+    type(s_dg_hybrid_core_selection),intent(in)::selection
+    type(s_dg_hybrid_fragment_basis),intent(in)::basis
+    type(s_dg_hybrid_projection_factorization_receipt),intent(in)::receipt
+    type(s_dg_hybrid_projection_factorization_receipt)::bad_receipt
+    type(s_dg_hybrid_fragment_wannier_cache)::changed_raw
+    type(s_dg_hybrid_fragment_preconditioner)::preconditioner
+    type(s_dg_hybrid_preconditioner_key)::key
+    complex(real64),allocatable::frame(:,:),answer(:,:),wf_frame(:,:)
+    complex(real64)::b(4,4),h(4,4),s(4,4),rhs(4,1),oracle(4),physical_frame(4,5),rphys(4)
+    real(real64)::potential(4),dh,ds
+    integer(int64)::frame_fp,fp,wf_fp
+    integer::a,nrun,nsetup
+    logical::passed
+    character(256)::why
+    nrun=run_calls;nsetup=setup_calls
+    call export_dg_hybrid_selected_frame(MPI_COMM_WORLD,f,raw,selection,wf_frame,wf_fp,passed,why)
+    call require(passed,'selected WF reference export: '//trim(why))
+    call require(all(shape(wf_frame)==[3,4]).and.wf_fp/=0_int64,'wrong WF reference extent/receipt')
+    call require(maxval(abs(wf_frame-conjg(transpose(raw%wannier_transform(:,selection%raw_column_ids)))))<1d-13,&
+      'selected reference did not use retained raw transform columns')
+    call export_dg_hybrid_selected_basis_frame(MPI_COMM_WORLD,f,raw,selection,basis,receipt,&
+      frame,frame_fp,passed,why)
+    call require(passed,'cached WF to rectangular frame: '//trim(why))
+    call require(all(shape(frame)==[4,5]).and.frame_fp/=0_int64,'wrong augmented reference extent/receipt')
+    call require(maxval(abs(frame(:3,:4)-wf_frame))<1d-13.and.&
+      maxval(abs(frame(4,:4)))==0d0.and.maxval(abs(frame(:3,5)))==0d0.and.abs(frame(4,5)-1d0)<1d-13,&
+      'PW reference was not an independent identity block')
+    b=basis%buffer_values(selection%core_row_slots,:);potential=[1d0,2d0,3d0,4d0]
+    s=matmul(conjg(transpose(b)),b);h=matmul(conjg(transpose(b)),b*spread(potential,2,4))
+    rphys=cmplx([1d0,0.5d0,-0.3d0,0.2d0],[0.2d0,-0.1d0,0.4d0,0.1d0],real64)
+    rhs(:,1)=matmul(conjg(transpose(b)),rphys);physical_frame=matmul(b,frame);oracle=0d0
+    do a=1,5
+      ds=sum(abs(physical_frame(:,a))**2);if(ds<1d-20)cycle
+      dh=sum(potential*abs(physical_frame(:,a))**2)
+      oracle=oracle+physical_frame(:,a)*dot_product(physical_frame(:,a),rphys)/(dh+ds)
+    enddo
+    key%fragment_id=f;key%basis_generation=selection%basis_generation;key%operator_epoch=1
+    key%basis_fingerprint=receipt%payload_fingerprint;key%metric_fingerprint=211_int64
+    key%operator_fingerprint=223_int64;key%reference_fingerprint=frame_fp
+    call prepare_dg_hybrid_frame_preconditioner(MPI_COMM_SELF,4,[1_int64,2_int64,3_int64,4_int64],frame,h,s,&
+      key,selection%fingerprint,1d-10,preconditioner,fp,passed,why)
+    call require(passed,'exported reference preconditioner: '//trim(why))
+    call apply_dg_hybrid_fragment_preconditioner(MPI_COMM_SELF,[1_int64,2_int64,3_int64,4_int64],key,preconditioner,&
+      [-1d0],rhs,answer,fp,passed,why,selection_fingerprint=selection%fingerprint)
+    call require(passed,'exported reference action: '//trim(why))
+    call require(maxval(abs(matmul(b,answer(:,1))-oracle))<1d-10,'cached-frame physical action differs from oracle')
+    bad_receipt=receipt
+    if(rank==0)bad_receipt%payload_fingerprint=ieor(bad_receipt%payload_fingerprint,1_int64)
+    call export_dg_hybrid_selected_basis_frame(MPI_COMM_WORLD,f,raw,selection,basis,bad_receipt,&
+      frame,frame_fp,passed,why)
+    call require(.not.passed.and..not.allocated(frame).and.frame_fp==0_int64,'stale basis receipt published a frame')
+    changed_raw=raw
+    if(rank==0)changed_raw%wannier_transform(1,1)=changed_raw%wannier_transform(1,1)+0.1d0
+    call export_dg_hybrid_selected_frame(MPI_COMM_WORLD,f,changed_raw,selection,wf_frame,wf_fp,passed,why)
+    call require(.not.passed.and..not.allocated(wf_frame).and.wf_fp==0_int64,'changed raw transform published a frame')
+    call require(run_calls==nrun.and.setup_calls==nsetup,'reference export reran Wannier90')
   end subroutine
   subroutine test_combined_admission(raw,selection,basis,receipt,expect_density_failure)
     logical,optional,intent(in)::expect_density_failure

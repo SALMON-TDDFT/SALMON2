@@ -11,6 +11,7 @@ module dg_hybrid_fragment_selection
   private
   public::s_dg_hybrid_core_selection,select_dg_hybrid_core_wannier,classify_dg_hybrid_core_centers
   public::export_dg_hybrid_selected_wannier
+  public::export_dg_hybrid_selected_frame
   public::s_dg_hybrid_selected_catalog,prepare_dg_hybrid_selected_catalog
   public::s_dg_hybrid_dc_reference,export_dg_hybrid_dc_reference
   integer,parameter::center_convention=1
@@ -43,6 +44,41 @@ module dg_hybrid_fragment_selection
     complex(real64),allocatable::local_values(:,:)
   end type
 contains
+  ! B_selected=B_raw E, B_raw=F_raw U. The projected fixed reference is
+  ! B_selected Q with Q=E^dagger U^dagger, not the original full F_raw.
+  subroutine export_dg_hybrid_selected_frame(comm,fragment_id,cache,selection,frame,fingerprint,ok,message)
+    integer,intent(in)::comm,fragment_id
+    type(s_dg_hybrid_fragment_wannier_cache),intent(in)::cache
+    type(s_dg_hybrid_core_selection),intent(in)::selection
+    complex(real64),allocatable,intent(out)::frame(:,:)
+    integer(int64),intent(out)::fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    complex(real64),allocatable::values(:,:),work(:,:)
+    integer::status,i,j
+    integer(int64)::hash
+    fingerprint=0_int64
+    call export_dg_hybrid_selected_wannier(comm,fragment_id,cache,selection,values,ok,message)
+    if(.not.ok)return
+    deallocate(values)
+    allocate(work(selection%selected_count,selection%raw_count),stat=status)
+    call gate(comm,status==0,'selected reference allocation failed',ok,message);if(.not.ok)return
+    work=conjg(transpose(cache%wannier_transform(:,selection%raw_column_ids)))
+    hash=mix(1203_int64,selection%fingerprint)
+    hash=mix(hash,cache%receipt%transform_fingerprint)
+    hash=mix(hash,int(selection%selected_count,int64));hash=mix(hash,int(selection%raw_count,int64))
+    do j=1,size(work,2);do i=1,size(work,1)
+      hash=mix(hash,transfer(real(work(i,j),real64),0_int64))
+      hash=mix(hash,transfer(aimag(work(i,j)),0_int64))
+    enddo;enddo
+    if(hash==0_int64)hash=1_int64
+    call move_alloc(work,frame);fingerprint=hash
+#else
+    fingerprint=0_int64;ok=.false.;message='selected reference export requires MPI'
+#endif
+  end subroutine
+
   ! Reference orbitals use EVERY raw WF and the immutable original DC map.
   ! This is not the new selected-space coefficient map and performs no W90 run.
   subroutine export_dg_hybrid_dc_reference(comm,fragment_id,cache,selection,reference,ok,message)

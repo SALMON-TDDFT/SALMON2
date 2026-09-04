@@ -482,6 +482,34 @@ Critical/Important issue. The authoritative raw-U/selection-to-frame exporter
 and its integration with selected admission remain next; C4 and Task 8 are
 not complete. Existing dirty files/logs were retained and no DC run repeated.
 
+**Third C4 checkpoint, 2026-09-04 — cached reference connection:** Added
+`export_dg_hybrid_selected_frame` to revalidate the raw cache and selection,
+then return `E^dagger U^dagger` using stable raw column IDs, not a prefix or a
+new localization. Its reference fingerprint binds selection, transform and
+exported coordinates. `export_dg_hybrid_selected_basis_frame` rebuilds the
+selected catalog, validates the actual projected-basis receipt, and verifies
+WF values, active IDs, sectors, generation and physical row layout before
+appending the independent PW identity block. The augmented reference receipt
+also binds the complete selected-WF/PW payload; failures publish no frame.
+
+The fixture connects the real cached transform, selected catalog and PW
+producer to the real single-owner rectangular preconditioner. A physical-grid
+sum over projected reference functions agrees with its action. Unequal local
+counts and non-prefix selected raw IDs are tested separately. Corrupt selection
+metadata, changed raw transforms and stale projected receipts fail collectively;
+W90 setup/run counts do not increase. The initial missing-exporter RED is now
+GREEN. Selection/preconditioner/subspace tests pass on 1/2/4/8 ranks, raw-Wannier
+on 2/4/8, and release build succeeds. Independent review has no remaining
+Critical/Important issue.
+
+C4's numerical reference construction and application are now connected. This
+does not certify an actual DG operator handoff: the fixture's explicit local
+potential is an arithmetic oracle, not a substitute for C5 SIPG/nonlocal tests.
+Next execute C5 with the separate C3 core/support/state admission gates and
+the bounded local update. Main remains unchanged until C6; Task 8 is not
+complete. All pre-existing dirty changes and verification logs were retained,
+and no material/DC calculation was repeated.
+
 **Files:**
 - Modify: `src/gs/dc/dg_hybrid_fragment_preconditioner.f90`
 - Modify: `tests/dg/test_dg_hybrid_fragment_preconditioner_mpi.f90`

@@ -5,7 +5,8 @@ module dg_hybrid_fragment_admission
     ieee_set_flag,ieee_invalid,ieee_divide_by_zero,ieee_overflow
   use dg_hybrid_fragment_wannier,only:s_dg_hybrid_fragment_wannier_cache
   use dg_hybrid_fragment_selection,only:s_dg_hybrid_core_selection,s_dg_hybrid_selected_catalog,&
-    s_dg_hybrid_dc_reference,prepare_dg_hybrid_selected_catalog,export_dg_hybrid_dc_reference
+    s_dg_hybrid_dc_reference,prepare_dg_hybrid_selected_catalog,export_dg_hybrid_dc_reference,&
+    export_dg_hybrid_selected_frame
   use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
   use dg_hybrid_projected_fragment_pipeline,only:s_dg_hybrid_projection_factorization_receipt,&
     s_dg_hybrid_core_projection_report,s_dg_hybrid_support_samples,validate_dg_hybrid_projected_basis,&
@@ -32,7 +33,55 @@ module dg_hybrid_fragment_admission
     integer(int64)::basis_fingerprint=0_int64,metric_fingerprint=0_int64,selection_fingerprint=0_int64
   end type
   public::prepare_dg_hybrid_support_operator,admit_dg_hybrid_selected_fragment
+  public::export_dg_hybrid_selected_basis_frame
 contains
+  ! Bind the projected reference to the actual selected WF+PW payload. This
+  ! exports coordinates only; C3 metric/support/state admission is still
+  ! required before production CG, and H remains the operator producer's job.
+  subroutine export_dg_hybrid_selected_basis_frame(comm,fragment_id,cache,selection,basis,receipt,&
+      frame,fingerprint,ok,message)
+    integer,intent(in)::comm,fragment_id
+    type(s_dg_hybrid_fragment_wannier_cache),intent(in)::cache
+    type(s_dg_hybrid_core_selection),intent(in)::selection
+    type(s_dg_hybrid_fragment_basis),intent(in)::basis
+    type(s_dg_hybrid_projection_factorization_receipt),intent(in)::receipt
+    complex(real64),allocatable,intent(out)::frame(:,:)
+    integer(int64),intent(out)::fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    type(s_dg_hybrid_selected_catalog)::catalog
+    complex(real64),allocatable::wf_frame(:,:),work(:,:)
+    integer::n,nw,nraw,npw,nref,status,j
+    integer(int64)::wf_fp,hash,nref64
+    logical::valid
+    fingerprint=0_int64
+    call prepare_dg_hybrid_selected_catalog(comm,fragment_id,cache,selection,catalog,ok,message)
+    if(.not.ok)return
+    call validate_dg_hybrid_projected_basis(comm,basis,receipt,catalog%fingerprint,ok,message)
+    if(.not.ok)return
+    n=size(basis%global_ids);nw=selection%selected_count;nraw=selection%raw_count
+    valid=basis%fragment_id==fragment_id.and.basis%generation==selection%basis_generation.and.n>=nw.and.&
+      size(basis%buffer_point_ids)==size(selection%physical_grid_ids)
+    call gate(comm,valid,'selected reference basis extent/generation mismatch',ok,message);if(.not.ok)return
+    valid=all(basis%global_ids(:nw)==catalog%local_active_ids).and.all(basis%sector(:nw)==1).and.&
+      all(basis%sector(nw+1:)==2).and.all(basis%buffer_point_ids==selection%physical_grid_ids).and.&
+      all(basis%buffer_values(:,:nw)==transpose(catalog%local_values))
+    call gate(comm,valid,'selected reference basis payload mismatch',ok,message);if(.not.ok)return
+    call export_dg_hybrid_selected_frame(comm,fragment_id,cache,selection,wf_frame,wf_fp,ok,message)
+    if(.not.ok)return
+    npw=n-nw;nref64=int(nraw,int64)+int(npw,int64)
+    call gate(comm,nref64<=int(huge(0),int64),'selected reference extent overflow',ok,message);if(.not.ok)return
+    nref=int(nref64)
+    allocate(work(n,nref),stat=status)
+    call gate(comm,status==0,'selected WF+PW reference allocation failed',ok,message);if(.not.ok)return
+    work=0d0;work(:nw,:nraw)=wf_frame
+    do j=1,npw;work(nw+j,nraw+j)=1d0;enddo
+    hash=mix(1913_int64,wf_fp);hash=mix(hash,receipt%payload_fingerprint)
+    hash=mix(hash,int(n,int64));hash=mix(hash,int(nref,int64));hash=mix(hash,int(npw,int64))
+    if(hash==0_int64)hash=1_int64
+    call move_alloc(work,frame);fingerprint=hash
+  end subroutine
+
   ! Freeze sparse linear functionals on physical grid IDs. required_ids must
   ! come from the operator's independent required inventory, not from filtering
   ! available samples. C5 connects the actual face/stencil/projector producers.
