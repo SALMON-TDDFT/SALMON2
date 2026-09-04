@@ -35,6 +35,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-selection-") as temporary:
     if (ROOT / selection).exists():
         sources.append(selection)
     sources += ["src/common/dg_hybrid_windowed_pw_types.f90",
+                "src/common/dg_hybrid_reciprocal_catalog.f90",
                 "src/common/dg_hybrid_windowed_pw_basis.f90",
                 "src/common/dg_hybrid_wannier_complement.f90",
                 "src/gs/dc/dg_hybrid_fragment_basis.f90",
@@ -54,7 +55,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-selection-") as temporary:
     executable = build / "selection"
     result = subprocess.run([compiler, "-cpp", "-DUSE_MPI", "-DUSE_WANNIER90",
         "-DW90_TEST_STUBS", "-DDG_W90_STUBS_ONLY", "-ffree-line-length-none",
-        "-fcheck=all", "-ffpe-trap=invalid,zero,overflow", "-fbacktrace",
+        "-g", "-fcheck=all", "-ffpe-trap=invalid,zero,overflow", "-fbacktrace",
         "-I", str(build), "-J", str(build), *(str(ROOT / p) for p in sources),
         *libraries, "-o", str(executable)], capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -68,4 +69,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-selection-") as temporary:
             cwd=run_dir, env=environment, capture_output=True, text=True, timeout=60)
         assert result.returncode == 0, (count, result.stdout, result.stderr)
         assert f"PASS core-center selection on {count} ranks" in result.stdout, result.stdout
+        if count > 1:
+            assert f"PASS explicit cutoff projection on {count} ranks" in result.stdout, result.stdout
+            print(next(line for line in result.stdout.splitlines() if line.startswith("PASS explicit cutoff")))
 print("PASS core-center selection on 1, 2, 4, and 8 ranks")

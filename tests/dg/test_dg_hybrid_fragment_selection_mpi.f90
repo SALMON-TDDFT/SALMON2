@@ -6,6 +6,7 @@ program test_fragment_selection
   use dg_hybrid_fragment_wannier
   use dg_hybrid_fragment_wannier_test_stubs
   use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog
+  use dg_hybrid_reciprocal_catalog,only:build_dg_hybrid_reciprocal_catalog
   use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
   use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_local_fragment_basis,&
     project_dg_hybrid_core_seeds,s_dg_hybrid_core_projection_report,&
@@ -284,10 +285,84 @@ program test_fragment_selection
   call classify_dg_hybrid_core_centers(MPI_COMM_WORLD,total_lattice,origin,lower,extent,&
     total_shape,points,again,ok,message)
   call require(.not.ok.and..not.again%valid,'unresolved finite geometry accepted')
+  if(np>=2)call test_explicit_cutoff_projection()
   if(np>=2)call test_selected_pw_connection()
   if(rank==0)write(*,'(a,i0,a)')'PASS core-center selection on ',np,' ranks'
   call MPI_Finalize(ierr)
 contains
+  subroutine test_explicit_cutoff_projection()
+    ! Analytic projection diagnostic only: not a localized raw-cache/DC admission.
+    ! A retained core delta and a discarded extended function with a sine core tail.
+    type(s_dg_hybrid_basis_catalog)::catalog
+    type(s_dg_hybrid_fragment_basis)::basis
+    type(s_dg_hybrid_core_projection_report)::report
+    integer,allocatable::gi(:,:),action(:,:),star(:),conjugate(:)
+    real(real64),allocatable::gv(:,:)
+    complex(real64),allocatable::coeff(:,:)
+    real(real64)::recip(3,3),rotation(3,3,1),coords(3,16),windows(np,16),weights(8)
+    real(real64)::wave,cutoffs(2),effective,limits(4),saved_norm,low_residual,low_oracle
+    complex(real64)::wf(1,16),tail(16,1),original(16,1)
+    integer(int64)::physical(16),fp,mem,basis_fp
+    integer::p,k,case_id,shell_added,orbit_added,ng,run_before,setup_before
+    logical::passed
+    character(256)::why
+    wave=2d0*acos(-1d0)/real(8*np,real64)
+    recip=0d0;rotation=0d0
+    recip(1,1)=wave;recip(2,2)=2d0;recip(3,3)=2d0
+    do p=1,3;rotation(p,p,1)=1d0;enddo
+    cutoffs=[0d0,0.5d0*wave**2];weights=1d0;coords=0d0;windows=0d0;wf=0d0;tail=0d0
+    do p=1,16
+      physical(p)=int(1+modulo(8*(f-1)+p-1,8*np),int64)
+      coords(1,p)=real(physical(p)-1,real64)
+      windows(1+int((physical(p)-1)/8),p)=1d0
+    enddo
+    wf(1,1)=1d0
+    do p=1,8;tail(p,1)=sin(wave*real(p-1,real64));enddo
+    tail(:8,1)=tail(:8,1)*sqrt(0.5d0/sum(abs(tail(:8,1))**2))
+    tail(13,1)=sqrt(0.5d0);original=tail;saved_norm=sum(abs(tail)**2)
+    ! With e1 plus projected G=0, rows 2:8 fit only their arithmetic mean.
+    low_oracle=sqrt(sum(abs(tail(2:8,1)-sum(tail(2:8,1))/7d0)**2)/0.5d0)
+    limits=[1d-12,1d-10,1d-10,1d-10];run_before=run_calls;setup_before=setup_calls
+    do case_id=1,2
+      call build_dg_hybrid_reciprocal_catalog(MPI_COMM_WORLD,recip,rotation,cutoffs(case_id),1d-12,&
+        gi,gv,action,star,conjugate,fp,effective,shell_added,orbit_added,passed,why)
+      call require(passed,'explicit cutoff catalog: '//trim(why))
+      ng=size(gv,2)
+      call require(ng==2*case_id-1,'explicit cutoff did not select G=0 then the first +/-G shell')
+      call require(abs(effective-cutoffs(case_id))<1d-12,'cutoff diagnostic silently changed requested energy')
+      if(allocated(catalog%packets))deallocate(catalog%packets)
+      allocate(catalog%packets(np));catalog%valid=.true.
+      catalog%requested_cutoff=cutoffs(case_id);catalog%effective_cutoff=effective
+      catalog%packet_fingerprint=fp;catalog%catalog_fingerprint=fp
+      do p=1,np
+        catalog%packets(p)%fragment_id=p;catalog%packets(p)%owner_rank=np-p;catalog%packets(p)%star_id=1
+        allocate(catalog%packets(p)%g_indices(ng),source=[(k,k=1,ng)])
+      enddo
+      call build_dg_hybrid_projected_local_fragment_basis(MPI_COMM_WORLD,8*np,np,f,physical(:8),weights,&
+        coords(:,:8),windows(:,:8),physical,wf,coords,windows,catalog,gv,[(p,p=1,np)],2,1d-12,&
+        1901_int64,basis,mem,basis_fp,passed,why,basis_generation=1)
+      call require(passed,'cutoff selected-WF/PW projection: '//trim(why))
+      call project_dg_hybrid_core_seeds(MPI_COMM_WORLD,basis%buffer_values(:8,:),weights,tail(:8,:),&
+        [1d0],limits,1,cutoffs(case_id),coeff,report,passed,why)
+      call require(report%measured.and.report%metric_rank==1+ng,'cutoff probe lost core metric rank')
+      if(case_id==1)then
+        low_residual=report%orbital_residual
+        call require(.not.passed.and.report%orbital_residual>0.1d0.and.index(why,'cutoff=')>0,&
+          'insufficient explicit cutoff was not diagnosed as a measured projection error')
+        call require(abs(low_residual-low_oracle)<1d-10,'low-cutoff residual differs from analytic mean-fit oracle')
+      else
+        call require(passed,'sufficient explicit cutoff projection: '//trim(why))
+        call require(maxval(abs(matmul(basis%buffer_values(:8,:),coeff)-tail(:8,:)))<1d-10,&
+          'higher cutoff did not recover the unchanged physical core tail')
+        call require(report%density_defect<1d-10.and.report%electron_defect<1d-10,&
+          'sufficient cutoff projection changed density/electrons')
+      endif
+      call require(all(tail==original).and.abs(saved_norm-1d0)<1d-12,'cutoff probe altered its reference')
+    enddo
+    call require(run_calls==run_before.and.setup_calls==setup_before,'cutoff change reran W90')
+    if(rank==0)write(*,'(a,i0,a,2es12.4)')'PASS explicit cutoff projection on ',np,&
+      ' ranks; low/high relative residual=',low_residual,report%orbital_residual
+  end subroutine
   subroutine test_permuted_reference()
     type(s_dg_hybrid_fragment_wannier_cache)::reordered
     type(s_dg_hybrid_core_selection)::receipt

@@ -609,6 +609,37 @@ matching hand-written fixture manifests are not that production certificate.
 The same-state bounded-update connection is now tested, but C5/Task 8 and the
 main/C6 production switch are not complete.
 
+**Cutoff projection diagnostic checkpoint, 2026-09-04:** Added a separate
+analytic tail probe, not a raw-cache localization or combined DC admission
+fixture. It uses eight core points, a retained core delta and an unchanged
+extended reference with a sine core tail (core norm 1/2). The real reciprocal
+catalog selects G=0 at explicit cutoff zero and G=0,+/-G at the explicit first
+shell energy. Those catalogs feed the real selected-WF/PW projection pipeline.
+Both core metrics retain full rank. Low cutoff fails with a measured orbital
+residual matching an independent arithmetic-mean fit; high cutoff recovers
+the core tail and its density/electron count without changing the reference,
+occupations or requesting another W90 run. No initializer is called: this
+half-core-norm reference must not be advertised as an admitted DC state.
+
+The new trap-enabled test exposed an existing overflow in the PW phase safety
+guard itself: `(huge/4)/g_scale` overflows for small nonzero g_scale. It passed
+on two ranks but reproduced SIGILL on four ranks, including after moving the
+test before the old integration fixture. The minimal production fix evaluates
+that quotient only for g_scale>1/4. At or below 1/4 every finite coordinate
+product is already bounded by huge/4, so the three-term phase sum remains safe.
+No tolerance, floating-point trap or unsafe-large-phase rejection was disabled.
+
+The new regression passes on 2/4/8 ranks; the full selection runner passes on
+1/2/4/8. Windowed-PW (including unsafe-large-phase rejection) and reciprocal
+catalog tests pass on 1/2/4/8, projected pipeline tests on 2/4/8, and release
+build succeeds. Independent review found no Critical/Important issue in the
+guard fix or diagnostic scope. Existing dirty changes/logs were preserved.
+
+This completes only the cutoff-to-core-projection diagnostic component.
+C5 still requires cutoff comparison with bound raw DC states and actual
+operator support admission, plus production support-provider completeness.
+The analytic probe does not replace those gates or authorize C6/main changes.
+
 **Files:**
 - Modify: `tests/dg/test_dg_hybrid_fragment_wannier_mpi.f90`
 - Modify: `tests/dg/run_dg_hybrid_fragment_wannier_mpi.py`

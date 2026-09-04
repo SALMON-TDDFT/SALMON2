@@ -374,7 +374,9 @@ contains
       message='nonfinite hybrid PW materialization payload';return
     endif
     coordinate_scale=maxval(abs(coordinates));g_scale=maxval(abs(g_vectors))
-    if(g_scale>0d0)then
+    ! For g_scale <= 1/4 every finite coordinate is below the bound.
+    ! Dividing the bound by such a small wave number can itself overflow.
+    if(g_scale>0.25d0)then
       if(coordinate_scale>(huge(coordinate_scale)/4d0)/g_scale)then
         message='hybrid PW phase magnitude is unsafe';return
       endif
