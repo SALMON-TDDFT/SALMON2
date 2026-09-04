@@ -1,0 +1,122 @@
+# Hybrid Thermal Reoccupation Implementation Plan
+
+> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+
+**Goal:** Initialize divided Hybrid SCF with newly determined 300 K occupations that preserve the total electron number, not the old DC density.
+
+**Architecture:** Keep raw DC projection/support certification separate from the orthonormal local-state initial guess. Determine Fermi–Dirac occupations from current local Hamiltonian states using the existing common chemical potential. Reconstruct and converge the resulting new density using bounded local updates, followed by one terminal LCFO.
+
+**Tech Stack:** Fortran, MPI, existing occupation kernel, Python MPI runners, CMake.
+
+---
+
+## Approved design amendment
+
+The user rejected preserving old occupations after core orthonormalization and
+approved filling low-energy states to the original total electron number, at
+300 K. This supersedes the C3/C5 requirement that the post-initializer density
+and individual orbitals reproduce the old DC state. The saved-DC audit remains
+correct as a diagnosis of the old policy; it no longer mandates occupation-
+matrix transport. No new density-matrix machinery is required.
+
+Use existing `temperature_k=300` and its Kelvin-to-Hartree conversion; do not
+hardcode 300 in the solver or interpret Kelvin as thermal energy. Preserve
+the conventional DC occupation API and old density-preserving initializer for
+their existing callers. The revised Hybrid route must explicitly select the
+new policy; do not silently weaken a legacy check or add a general bypass flag.
+
+Maintain total, not per-fragment, electron count. Equal fragments may receive
+equal populations, but heterostructures must be free to exchange charge using
+one chemical potential. Retain fractional occupation near the Fermi energy,
+complete degenerate shells and guard states. Occupied count and working-space
+count are different: do not truncate all computed states to Ne/2. Existing
+capacity/tail diagnostics must request extension or reject exhausted spectra.
+
+Raw DC energies/occupations remain immutable reference metadata, not current
+Hybrid occupations. They may seed the trial subspace but do not determine the
+final population. Current energies come from the existing bounded local
+Hamiltonian update/Rayleigh–Ritz path, not WF labels or unchanged DC energies.
+No preliminary full-system or convergence-to-exhaustion diagonalization.
+
+Before initial-state construction, preserve exact selection/metric/projection
+receipts and checks for raw DC core and required support reconstruction.
+After orthogonalization or a Hamiltonian rotation, comparing each resulting
+column with its old DC column is no longer the correct support test. Validate
+operator sample completeness and representation in the fixed admitted basis,
+metric orthogonality and independently reconstructed new-density electron
+count instead. Report old/new density differences diagnostically, not as an
+acceptance threshold. Do not remove physical support checks wholesale.
+
+One rank per fragment, exact-rank/mapping checkpoint reuse, immutable W90 cache,
+user-controlled PW cutoff, maximum three local updates per density epoch,
+one-shot terminal LCFO and Exp RT remain unchanged. No new worktree, DC rerun,
+material run or changes to unrelated dirty files. Execute here with checkpoints.
+
+### Task O1: Verify the existing 300 K reoccupation kernel
+
+**Checkpoint:** O1 passes on 1/2/4/8 ranks using the existing production
+occupation adapter. The test imports the same `kB_au` used by input conversion,
+uses one rank per fragment with reversed ownership, and compares against an
+independent mu=0 Fermi–Dirac oracle. Unequal local populations, fractional
+degenerate-edge filling, global electron conservation, column-order retention
+and occupied-terminal-shell extension are checked. Legacy rank-invariant
+fingerprints still agree across all four runs. Release build passes and
+independent review has no Critical/Important finding. This is existing-kernel
+reuse evidence only: no production occupation, initialization or main path
+was changed. O2/O3 remain pending; no DC or W90 run was repeated.
+
+Files: `tests/dg/test_dc_fragment_occupation_mpi.f90`, its MPI runner, and this plan.
+
+1. Add a one-rank-per-fragment 300 K case, reversed rank ownership and deliberately
+   unequal spectra. Unit core norms represent already orthonormal local states.
+2. Compare occupations with an independent Fermi–Dirac formula at the returned
+   common mu; verify total electrons, fractions near mu, charge transfer and
+   original coefficient-column order. Include a degenerate Fermi edge and
+   insufficient thermal-tail rejection. Do not use saved occupations as input.
+3. Run `python3 tests/dg/run_dc_fragment_occupation_mpi.py` on 1/2/4/8 ranks;
+   retain the existing rank-invariant legacy fingerprint checks. Since this
+   tests an existing kernel, success is reuse evidence, not a new feature RED.
+4. If a bug appears, follow test-driven-development before production changes.
+   Run `cmake --build build-hybrid-release -j 4`, review and checkpoint O1.
+
+### Task O2: Separate projection certification from state initialization
+
+Files: `src/gs/dc/dg_hybrid_fragment_admission.f90`,
+`src/gs/dc/dg_hybrid_fragment_subspace.f90`,
+`tests/dg/test_dg_hybrid_fragment_selection_mpi.f90`,
+`tests/dg/test_dg_hybrid_fragment_subspace_mpi.f90` and corresponding runners.
+
+1. RED: introduce an explicit trial-state preparation API which has no density-
+   preservation claim. A half-core-norm seed must retain its pre-initialization
+   projection/support certification but be allowed to form an orthonormal
+   trial state. Keep legacy density-preserving rejection tests unchanged.
+2. Accept an explicit initial inventory/guard policy, independent of final
+   occupations. Validate count, finite data, degeneracy and metric rank;
+   preserve rollback on every rank's failure. Expose trial status, not a
+   thermally accepted density. Do not fabricate occupied masks as physical data.
+3. Factor the existing raw/selected binding and projection/support checks so
+   both entry points reuse them. The new entry must not execute the old
+   post-initializer density or unchanged-column support comparison.
+4. Verify support loss still fails before state construction; rotations within
+   the same admitted span preserve represented operator actions. Run selection
+   and subspace MPI runners, build, review and checkpoint.
+
+### Task O3: Connect bounded current-state updates, reoccupation and density
+
+Files: selection integration test/runner, `dc_fragment_occupation.f90` only if
+needed for the adapter, then the task-owned main-route hunks in parent C6.
+
+1. RED: use the actual volume/SIPG/nonlocal self-block and the new trial state.
+   Invoke current-state refresh through the existing occupation epoch at 300 K.
+   The half-core-norm example must yield the specified total electron count
+   with new occupations, despite a changed density relative to raw DC.
+2. Verify shared three-update budget across spectrum extension, current-energy
+   occupation ordering, guard/tail acceptance, capacity failure, and no W90/DC
+   rerun. Never manually rescale the resulting density or force local Ne.
+3. Independently integrate physical core density and compare with the global
+   target and sum of current occupations times measured core norms. Compare
+   occupations with direct Fermi–Dirac values. A stale old-occupation substitution
+   must fail the electron test. Preserve rollback until the full stage passes.
+4. Resume outstanding C5 operator-support/cutoff gates, then parent C6 route
+   integration. Do not declare Task 8 complete from the occupation tests alone.
+   Material/RT validation remains in its later parent tasks.

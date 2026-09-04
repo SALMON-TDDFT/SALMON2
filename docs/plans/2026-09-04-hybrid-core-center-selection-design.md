@@ -2,6 +2,15 @@
 
 ## Decision and scope
 
+**Later user-approved amendment:** The post-initializer old-DC-density
+preservation policy below is superseded by
+`2026-09-04-hybrid-thermal-reoccupation.md`: use 300 K Fermi–Dirac occupations
+of current local states with a common chemical potential and conserved global
+electron number; let local SCF converge the changed starting density. Keep
+the raw projection/support certification and all other selection constraints.
+Legacy density-preserving APIs remain unchanged for existing callers until
+the explicitly separate trial-state route is implemented and verified.
+
 The user approved selecting construction WFs whose centers R lie inside the
 owning fragment's core, followed by core-metric independence and WF+PW
 reconstruction checks. R means the actual localized WF center, not an atom

@@ -25,6 +25,7 @@ with tempfile.TemporaryDirectory(prefix="dc-fragment-occupation-") as name:
             "-fcheck=all",
             "-ffpe-trap=invalid,zero,overflow",
             "-fbacktrace",
+            str(root / "src/math/phys_constants.f90"),
             str(root / "src/gs/occupation_kernel.f90"),
             str(root / "src/gs/dc/dc_fragment_occupation.f90"),
             str(root / "tests/dg/test_dc_fragment_occupation_mpi.f90"),
@@ -37,7 +38,7 @@ with tempfile.TemporaryDirectory(prefix="dc-fragment-occupation-") as name:
     environment["OMP_NUM_THREADS"] = "1"
     environment.setdefault("OMPI_MCA_rmaps_base_oversubscribe", "1")
     fingerprints = []
-    for rank_count in (1, 2, 4):
+    for rank_count in (1, 2, 4, 8):
         run = subprocess.run(
             [shutil.which("mpiexec"), "-n", str(rank_count), str(executable)],
             capture_output=True,
@@ -47,10 +48,11 @@ with tempfile.TemporaryDirectory(prefix="dc-fragment-occupation-") as name:
         )
         assert run.returncode == 0, (rank_count, run.stdout, run.stderr)
         assert f"PASS DC fragment occupation on {rank_count} ranks" in run.stdout
+        assert f"PASS 300 K reoccupation on {rank_count} ranks" in run.stdout
         match = re.search(
             r"DC_FRAGMENT_OCCUPATION ranks=\d+ fingerprint=(-?\d+)", run.stdout
         )
         assert match, run.stdout
         fingerprints.append(int(match.group(1)))
     assert len(set(fingerprints)) == 1, fingerprints
-print("PASS DC fragment occupation on 1, 2, and 4 ranks")
+print("PASS DC fragment occupation and 300 K reoccupation on 1, 2, 4, and 8 ranks")

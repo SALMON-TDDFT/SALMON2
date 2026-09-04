@@ -545,6 +545,14 @@ physical, not just coefficient-space, covariance after selection.
 
 ### Task C5: Actual small DG handoff and the known counterexample
 
+**User-approved superseding policy:** Continue via
+`2026-09-04-hybrid-thermal-reoccupation.md`. At 300 K, recompute occupations
+from current local states with one chemical potential and the original global
+electron target. Old DC density preservation is no longer required at
+initialization; subsequent local SCF converges the changed density. The audit
+below describes the old-policy failure, not an unresolved requirement to add
+occupation-matrix transport. Keep raw projection and required support checks.
+
 **Design pause, 2026-09-04 — saved representative DC evidence:** A read-only
 audit of the existing eight-rank Si64 conventional DC checkpoint now triggers
 the explicit C3 occupation-design stop condition. Occupied orbitals have unit

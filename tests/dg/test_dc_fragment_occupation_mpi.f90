@@ -4,6 +4,7 @@ program test_dc_fragment_occupation_mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   use occupation_kernel,only:solve_weighted_state_occupations
+  use phys_constants,only:kB_au
   use dc_fragment_occupation,only:determine_dc_fragment_occupations,assess_dc_fragment_occupation_capacity,&
     run_dc_fragment_occupation_epoch
   implicit none
@@ -23,6 +24,7 @@ program test_dc_fragment_occupation_mpi
   allocate(energies(2,2),core_norms(2,2),representative_mask(2))
   call test_unordered_spectrum()
   call test_occupation_epoch()
+  call test_thermal_reoccupation()
 
   call distribute_two_fragment_case(&
     reshape([-1d0,0.5d0,-0.5d0,1d0],[2,2]),&
@@ -229,6 +231,46 @@ program test_dc_fragment_occupation_mpi
   endif
   call MPI_Finalize(ierr)
 contains
+  subroutine test_thermal_reoccupation()
+    real(real64)::e(6,nproc),w(6,nproc),reference(6,nproc),saved(6,nproc),expected(6,nproc)
+    real(real64)::thermal,shift,mu,ne
+    real(real64),allocatable::answer(:,:)
+    logical::representatives(nproc),tail(nproc),passed
+    integer::f,local_fragment
+    character(256)::why
+    thermal=300d0*kB_au
+    call require(thermal>9.50d-4.and.thermal<9.51d-4,'300 K was not converted to Hartree')
+    local_fragment=nproc-rank;representatives=.false.;representatives(local_fragment)=.true.
+    do f=1,nproc
+      shift=0d0
+      if(nproc>1)shift=merge(0.5d0,-0.5d0,mod(f,2)==1)
+      ! Globally paired spectra give mu=0, but local populations need not match.
+      ! Two zero-energy states test equal fractional filling of a degenerate edge.
+      reference(:,f)=thermal*[40d0,-40d0,2d0+shift,-2d0+shift,0d0,0d0]
+    enddo
+    e=0d0;w=0d0;e(:,local_fragment)=reference(:,local_fragment);w(:,local_fragment)=1d0;saved=e
+    call determine_dc_fragment_occupations(comm,e,w,representatives,thermal,2d0,6d0*nproc,tolerance,&
+      mu,answer,ne,passed,why,tail,allow_unordered=.true.)
+    call require(passed,'300 K orthonormal-state reoccupation: '//trim(why))
+    call require(.not.any(tail),'300 K well-resolved guards requested extension')
+    expected=2d0/(1d0+exp(reference/thermal))
+    call require(abs(mu)<thermal*1d-7.and.maxval(abs(answer-expected))<1d-7,&
+      '300 K occupations differ from the independent mu=0 Fermi-Dirac oracle')
+    call require(abs(sum(answer)-6d0*nproc)<tolerance.and.abs(ne-6d0*nproc)<tolerance,&
+      'thermal reoccupation did not preserve the global electron target')
+    call require(maxval(abs(answer(5:6,:)-1d0))<1d-7,'degenerate Fermi edge was not fractionally filled')
+    call require(all(answer(3:4,:)>0d0).and.all(answer(3:4,:)<2d0),&
+      '300 K thermal states were replaced by integer filling')
+    if(nproc>1)call require(abs(sum(answer(:,1))-sum(answer(:,2)))>0.1d0,&
+      'thermal reoccupation incorrectly fixed equal fragment electron counts')
+    call require(all(e==saved),'reoccupation changed the current coefficient-column energy ordering')
+    ! Remove the high guard: fixed electron count alone cannot certify a spectrum.
+    e(1,local_fragment)=0d0
+    call determine_dc_fragment_occupations(comm,e,w,representatives,thermal,2d0,6d0*nproc,tolerance,&
+      mu,answer,ne,passed,why,tail,allow_unordered=.true.)
+    call require(passed.and.all(tail),'300 K occupied terminal states did not request extension')
+    if(rank==0)write(*,'(a,i0,a)')'PASS 300 K reoccupation on ',nproc,' ranks'
+  end subroutine
   subroutine test_occupation_epoch()
     real(real64),allocatable::local_occupations(:)
     real(real64)::mu,ne,target,smearing
